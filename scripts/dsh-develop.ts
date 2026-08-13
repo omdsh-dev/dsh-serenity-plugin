@@ -198,8 +198,7 @@ function cmdSquashHistory(message?: string): void {
   const st = run('git', ['status', '--porcelain'], { cwd: REPO_ROOT, quiet: true })
   if (st.stdout.trim()) {
     fail(`工作树有未提交变更，先 commit 或 stash：\n${st.stdout.slice(0, 600)}`, 1)
-  }
-  const orphan = run('git', ['checkout', '--orphan', 'squash-tmp'], { cwd: REPO_ROOT, quiet: true })
+  }  const orphan = run('git', ['checkout', '--orphan', 'squash-tmp'], { cwd: REPO_ROOT, quiet: true })
   if (orphan.status !== 0) fail(`checkout --orphan 失败: ${orphan.stderr}`, 2)
   const add = run('git', ['add', '-A'], { cwd: REPO_ROOT, quiet: true })
   if (add.status !== 0) fail(`git add 失败: ${add.stderr}`, 2)
@@ -210,6 +209,24 @@ function cmdSquashHistory(message?: string): void {
   if (rename.status !== 0) fail(`分支改名失败: ${rename.stderr}`, 2)
   console.log(`[dsh-develop] ✓ 历史已抹除（单初始 commit: ${msg}）`)
   console.log(`[dsh-develop]   推送公开仓库需 force（如: dsh-develop github-push --force）`)
+}
+
+function cmdPublish(): void {
+  // npm publish @shgroup/dsh-serenity-hooks（cwd=hooks；凭据走 ~/.npmrc；publishConfig.access=public 已声明）
+  // 发布前先构建（lib/ 最新）；npm cache 指向可写临时目录（沙箱 ~/.npm 只读）
+  cmdBuild()
+  const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
+  mkdirSync(cache, { recursive: true })
+  const r = run('npm', ['publish', '--access', 'public'], {
+    cwd: HOOKS_DIR,
+    quiet: true,
+    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+  })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`npm publish 失败 (exit ${r.status})`, 2)
+  }
+  console.log(`[dsh-develop] ✓ published @shgroup/dsh-serenity-hooks@${currentVersion().pkg}（npm registry）`)
 }
 
 function cmdGithubLs(remote?: string): void {
@@ -495,6 +512,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         break
       }
       case 'squash-history': cmdSquashHistory(rest[0]); break
+      case 'publish': cmdPublish(); break
       case 'github-ls': cmdGithubLs(rest[0]); break
       case 'version': cmdVersion(); break
       case 'sys': {
@@ -551,6 +569,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   deploy                load-plugin.sh 全流程（构建+双锚+shim+profile+预检）
   restart-web           kill + setsid 重启 dsh web（健康检查）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
+  publish               npm publish @shgroup/dsh-serenity-hooks（凭据走 ~/.npmrc）
   github-push [--force] push 到 GitHub 公开仓库（tellmewhattodo）`)
         break
       default:

@@ -1,3 +1,15 @@
+## v1.16.1 — 2026-08-13（npm 公开发布 1.16.0 + README 补丁）
+
+**Scope:** 公开发布 @shgroup/dsh-serenity-hooks 到 npm registry（1.16.0 成功），补插件包 README（npm 包页面显示）+ files 字段 + publishConfig access public + repository。
+
+**主要变化：**
+
+- **hooks/README.md**（新增）：插件包 README（安装/工具/系统提示词/配置），随包发布
+- **package.json**：files 加 `README.md`；补 `license` / `repository`（GitHub）/ `publishConfig.access: public`；去 `private`
+- **npm 发布**：`@shgroup/dsh-serenity-hooks@1.16.0`（2026-08-13 23:24 UTC，maintainer shgroup）；1.16.1 补 README
+
+**测试：** 184/184
+
 ## v1.16.0 — 2026-08-13（适配 DSH 公开测试版 deepseek-ai/deepseek-harness 0.1.0-rc + 系统提示词对齐 osp 收紧）
 
 **Scope:** DSH 公开测试版（github.com/deepseek-ai/deepseek-harness，本地运行时 0.1.0-rc.6）发布后全量适配：包/服务/事件改名 + 类型基准切换 + 系统提示词对齐 osp 收紧（去 `---` 分隔线与包裹头，CCE/Constraints/Session 逐字节一致）+ 运行时加载修复。
