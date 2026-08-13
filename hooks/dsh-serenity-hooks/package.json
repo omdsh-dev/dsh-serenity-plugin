@@ -1,0 +1,83 @@
+{
+  "name": "@shgroup/dsh-serenity-hooks",
+  "version": "1.16.0",
+  "private": true,
+  "description": "宁静号 ACC harness — Native Cordis 插件（DSH 运行时）。真实 DSH 工具注册（cc_fs/session）+ 拦截缝机械约束（safe-mode/路径守卫/会话落盘）。适配 DSH 公开版（deepseek-ai/deepseek-harness 0.1.0-rc）：compact→compaction、bash→shell、bash-env→shell-env、httpServer→webServer、bashEnv→shellEnv、compact/*→compaction/* 事件。私有（dsh-external 组织）。",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "import": "./lib/index.js"
+    },
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/client.js",
+    "lib/invariant.js",
+    "lib/types/**/*.d.ts",
+    "cordis.patch.yml",
+    "dsh.plugin.json"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "tsc -p tsconfig.json && tsdown -c tsdown.config.ts",
+    "prepare": "tsdown --config tsdown.prepare.config.ts"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-agent": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-agent-loop": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-compaction": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-llm": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-session": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-shell": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-shell-env": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-skill": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-tools": "^0.1.0-rc.5",
+    "@deepseek-ai/schemastery": "^0.1.0-rc.5",
+    "cordis": "^4.0.0-rc.7"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-shell-env": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-skill": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-loop": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-compaction": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.14",
+    "typescript": "^5.4.0",
+    "unrun": "^0.3.1",
+    "vitest": "^1.6.0"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "description": "dsh-serenity-plugin: MSM registry (plugin-root, CLI 调试 fallback；业务流走 CCC 的 mech-registry.json)",
+  "entries": []
+}

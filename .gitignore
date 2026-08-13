@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+*.tgz
+.DS_Store
+.pnpm-store/
+.npm-cache/
+hooks/dsh-serenity-hooks/lib/
+
+# 公开发布排除（内部运维工具与会话记录；本地保留，不推送公开仓库）
+SESSION.md
+scripts/

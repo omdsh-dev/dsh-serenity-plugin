@@ -1,0 +1,54 @@
+{
+  "name": "@shgroup/dsh-serenity-plugin",
+  "version": "0.2.0",
+  "private": true,
+  "description": "dsh-serenity-plugin — 宁静号 ACC (Abstract Cognitive Container) 的 DSH 运行时实现。为 DeepSeek Harness Agent 提供认知容器基础设施：技能束（acc-serenity/acc-fs/acc-git/acc-msm/acc-session/acc-eap/acc-neat/acc-kit）+ 安装器 CLI + 测试 + 文档。独立实现，不复用 opencode-serenity-plugin 源码。私有不公开（仅 home GitLab）。",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "dsh-serenity-plugin": "./bin/dsh-serenity-plugin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "src/templates",
+    "README.md",
+    "docs"
+  ],
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json && cp -r src/templates dist/templates",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist coverage *.tsbuildinfo"
+  },
+  "keywords": [
+    "dsh",
+    "serenity",
+    "acc",
+    "ccc",
+    "harness"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.0.0",
+  "dependencies": {
+    "zod": "4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}

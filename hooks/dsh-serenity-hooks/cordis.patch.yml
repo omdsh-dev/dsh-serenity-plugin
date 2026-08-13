@@ -1,0 +1,8 @@
+# dsh-serenity-hooks bundle 层（经 package.json `dsh.bundle.patch` 声明）
+# 装入 profile（`dsh plugin --profile <name> add @shgroup/dsh-serenity-hooks`）
+# 后由 profile-boot 组合：行 name 即包名，Loader 从 profile node_modules 解析。
+- insert:
+    - id: serenity-hooks
+      name: '@shgroup/dsh-serenity-hooks'
+      config:
+        serenityConfigPaths: ['.dsh/serenity.json', '.opencode/serenity.json']

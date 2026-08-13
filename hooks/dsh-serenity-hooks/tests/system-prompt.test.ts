@@ -1,0 +1,145 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import {
+  entrySkillSectionText,
+  registerEntrySkillSectionGlobal,
+  serenitySystemPrompt,
+  accBlock,
+  cceBlock,
+  constraintsBlock,
+} from '../src/seams/system-prompt.js'
+import { ACC_VERSION } from '../src/constants.js'
+
+let dir: string
+
+/** 建立 CCC：.serenity 记号 = tg-serenity（仿 tiangong-serenity），含顶层 skill */
+function setupCccWithSkill(skillName = 'tg-serenity', skillBody = '顶层入口原文内容'): void {
+  writeFileSync(join(dir, '.serenity'), skillName)
+  mkdirSync(join(dir, '.opencode', 'skills', skillName), { recursive: true })
+  writeFileSync(join(dir, '.opencode', 'skills', skillName, 'SKILL.md'), `---\nname: ${skillName}\ndescription: 系统入口\n---\n${skillBody}`)
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'sp-'))
+  writeFileSync(join(dir, '.serenity'), 'test')
+})
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true })
+})
+
+describe('system-prompt: 入口 skill 发现（.serenity 记号 = 顶层入口名）', () => {
+  it('无入口返回空', () => {
+    expect(entrySkillSectionText(dir)).toBe('')
+  })
+
+  it('按 .serenity 记号内容发现顶层 skill（tg-serenity）', () => {
+    setupCccWithSkill('tg-serenity')
+    const text = entrySkillSectionText(dir)
+    // 对齐 osp：注入 SKILL.md 原文（含 frontmatter），无包裹头
+    expect(text).toContain('顶层入口原文内容')
+    expect(text).toContain('---\nname: tg-serenity')
+    expect(text).not.toContain('# CCC 入口技能')
+  })
+
+  it('自动扫描 .opencode/skills/*-serenity 兜底（记号无匹配 skill 时）', () => {
+    // .serenity 内容不是合法 skill 名（找不到对应 SKILL.md）→ 走扫描兜底
+    writeFileSync(join(dir, '.serenity'), 'no-such-skill')
+    mkdirSync(join(dir, '.opencode', 'skills', 'home-serenity'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skills', 'home-serenity', 'SKILL.md'), '---\nname: home-serenity\ndescription: 系统入口\n---\n系统入口原文内容')
+    const text = entrySkillSectionText(dir)
+    expect(text).toContain('系统入口原文内容')
+    expect(text).not.toContain('# CCC 入口技能')
+  })
+})
+
+describe('system-prompt: 5 块注入（对齐 opencode-serenity-plugin system.transform）', () => {
+  it('serenitySystemPrompt 含 ACC/CCE/Constraints/SKILL 全文四块', () => {
+    setupCccWithSkill('tg-serenity')
+    const text = serenitySystemPrompt(dir)
+    expect(text).toContain('=== Serenity ACC ===')
+    expect(text).toContain('=== Serenity CCE ===')
+    expect(text).toContain('=== Serenity Constraints ===')
+    expect(text).toContain('顶层入口原文内容')
+  })
+
+  it('ACC 块：CCC 名/Root/版本/工具清单 + 平台工具说明', () => {
+    const block = accBlock(dir)
+    expect(block).toContain(`ACC: dsh-serenity-hooks v${ACC_VERSION}`)
+    expect(block).toContain(`CCC: sp-`)
+    expect(block).toContain(`Root: ${dir}`)
+    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop']) {
+      expect(block).toContain(tool)
+    }
+    // EAP 优化 #2：说明平台工具仍可用（关系方向明确）
+    expect(block).toContain('DSH platform tools remain available')
+    expect(block).toContain('read/write/edit/glob/grep')
+  })
+
+  it('CCE 块：5 行为约束 + H_op（逐字对齐 osp）', () => {
+    const block = cceBlock()
+    expect(block).toContain('FIVE BEHAVIORAL CONSTRAINTS')
+    expect(block).toContain('1. Continuity')
+    expect(block).toContain('2. Bounded Space')
+    expect(block).toContain('3. Entropy is Intrinsic')
+    expect(block).toContain('4. Reconstruction > Preservation')
+    expect(block).toContain('5. Multi-Agent Cognition')
+    expect(block).toContain('OPERATIONAL ENTROPY')
+    expect(block).toContain('H_op')
+    expect(block).toContain('ΔH_org ≥ ΔH_in')
+  })
+
+  it('Constraints 块：Root + 文件/shell/subagent/session-first', () => {
+    const block = constraintsBlock(dir)
+    expect(block).toContain(`Root: ${dir}`)
+    expect(block).toContain('File access')
+    expect(block).toContain('Shell')
+    expect(block).toContain('Subagent')
+    expect(block).toContain('Session-first')
+  })
+})
+
+describe('system-prompt: 全局 section 注册（任何会话自动注入）', () => {
+  it('全局注册：text 回调按 context.agent 的 cwd 解析 CCC → 返回完整注入文本', () => {
+    let captured: { name: string; order: number; text: unknown } | null = null
+    const fakeCtx = {
+      systemPrompt: {
+        section: (section: { name: string; order: number; text: unknown }) => {
+          captured = section
+        },
+      },
+    }
+    registerEntrySkillSectionGlobal(fakeCtx as never)
+
+    expect(captured).not.toBeNull()
+    expect(captured!.name).toBe('serenity-entry')
+    expect(captured!.order).toBe(-50)
+
+    // 非 CCC cwd → 空
+    const ctxNoCcc = { agent: { session: { header: { cwd: '/tmp' } } } }
+    expect((captured!.text as (c: unknown) => string)(ctxNoCcc)).toBe('')
+
+    // CCC cwd → 完整注入（ACC + CCE + Constraints + skill 全文）
+    setupCccWithSkill('tg-serenity')
+    const ctxCcc = { agent: { session: { header: { cwd: join(dir, 'sub') } } } }
+    const text = (captured!.text as (c: unknown) => string)(ctxCcc)
+    expect(text).toContain('=== Serenity ACC ===')
+    expect(text).toContain('顶层入口原文内容')
+
+    // 无 agent → 空
+    expect((captured!.text as (c: unknown) => string)({})).toBe('')
+  })
+
+  it('全局注册失败（重复 section 名）不抛错（try/catch 吞掉）', () => {
+    const fakeCtx = {
+      systemPrompt: {
+        section: () => {
+          throw new Error('duplicate section')
+        },
+      },
+    }
+    expect(() => registerEntrySkillSectionGlobal(fakeCtx as never)).not.toThrow()
+  })
+})
