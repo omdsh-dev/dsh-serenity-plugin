@@ -1,8 +1,15 @@
 {
   "name": "@shgroup/dsh-serenity-hooks",
   "version": "1.16.0",
-  "private": true,
-  "description": "宁静号 ACC harness — Native Cordis 插件（DSH 运行时）。真实 DSH 工具注册（cc_fs/session）+ 拦截缝机械约束（safe-mode/路径守卫/会话落盘）。适配 DSH 公开版（deepseek-ai/deepseek-harness 0.1.0-rc）：compact→compaction、bash→shell、bash-env→shell-env、httpServer→webServer、bashEnv→shellEnv、compact/*→compaction/* 事件。私有（dsh-external 组织）。",
+  "description": "宁静号 ACC harness — Native Cordis 插件（DeepSeek Harness 运行时）。真实 DSH 工具注册（cc_fs/session/acc_msm 等 9 工具）+ 拦截缝机械约束（safe-mode/路径守卫/会话落盘）+ 系统提示词注入（ACC/CCE/Constraints/SKILL/Session 五块）。适配 DSH 公开版（deepseek-ai/deepseek-harness 0.1.0-rc）。",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tellmewhattodo/dsh-serenity-plugin.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./lib/index.js",
   "types": "./lib/index.d.ts",
