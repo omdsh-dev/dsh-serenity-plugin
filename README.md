@@ -44,17 +44,45 @@
 
 ## 快速开始
 
-前置：Node ≥ 20（或 bun）、DSH 0.1.0-rc 及以上。
+前置：Node ≥ 20（或 bun）、DSH 0.1.0-rc 及以上、pnpm。
+
+### 方式一：npm 安装（推荐，已发布到 npm registry）
 
 ```bash
-# 1. 安装 Native 插件到 DSH profile（官方路径）
-dsh plugin --profile web add link:<本仓>/hooks/dsh-serenity-hooks
-#    或开发模式：bash scripts/load-plugin.sh && 重启 dsh web
+# 1. 从 npm registry 安装插件到 DSH profile（自动加入 bundles 层）
+dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
-# 2. 在目标 CCC（带 .serenity 标记的目录）安装知识技能
+# 2. 重启 dsh web（插件与 WebUI client 生效）
+dsh web
+```
+
+安装即用：`dsh plugin` 检测到包的 `dsh.bundle` 声明后自动激活配置层，无需手写任何配置。卸载：
+
+```bash
+dsh plugin --profile web remove @shgroup/dsh-serenity-hooks
+```
+
+### 方式二：从 GitHub 源码安装
+
+```bash
+dsh plugin --profile web add github:tellmewhattodo/dsh-serenity-plugin
+```
+
+> git 安装获取的是源码：作者侧需自包含 `prepare` 构建（本包已提供），用户侧需在 profile 的 `pnpm-workspace.yaml` 中 `allowBuilds` 放行构建脚本，并建议钉住 commit（`github:user/repo#<sha>`）。
+
+### 方式三：本地开发安装
+
+```bash
+dsh plugin --profile web add link:<本仓>/hooks/dsh-serenity-hooks
+```
+
+### 安装后
+
+```bash
+# 在目标 CCC（带 .serenity 标记的目录）安装知识技能
 dsh-serenity-plugin install --scope ccc
 
-# 3. 检查激活状态
+# 检查激活状态
 dsh-serenity-plugin status
 ```
 

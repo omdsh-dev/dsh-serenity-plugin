@@ -33,16 +33,45 @@ Turning safe-mode on makes bash **disappear from the model's tool list** (via DS
 
 ## Quick start
 
-Prereqs: Node ≥ 20 (or bun), DSH 0.1.0-rc+.
+Prereqs: Node ≥ 20 (or bun), DSH 0.1.0-rc+, pnpm.
+
+### Option 1: npm install (recommended, published on the npm registry)
 
 ```bash
-# 1. Install the native plugin into a DSH profile (official path)
-dsh plugin --profile web add link:<this-repo>/hooks/dsh-serenity-hooks
+# 1. Install the plugin from the npm registry into a DSH profile (auto-joins the bundles layer)
+dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
-# 2. Install knowledge skills into the target CCC (directory with a .serenity marker)
+# 2. Restart dsh web (activates the plugin and its WebUI client)
+dsh web
+```
+
+`dsh plugin` detects the package's `dsh.bundle` declaration and activates the config layer automatically — no hand-written configuration. To uninstall:
+
+```bash
+dsh plugin --profile web remove @shgroup/dsh-serenity-hooks
+```
+
+### Option 2: install from GitHub source
+
+```bash
+dsh plugin --profile web add github:tellmewhattodo/dsh-serenity-plugin
+```
+
+> A git install fetches sources: the author ships a self-contained `prepare` build (this package does), and the user must allow the build script under `allowBuilds` in the profile's `pnpm-workspace.yaml`, plus pin a commit (`github:user/repo#<sha>`).
+
+### Option 3: local development install
+
+```bash
+dsh plugin --profile web add link:<this-repo>/hooks/dsh-serenity-hooks
+```
+
+### After install
+
+```bash
+# Install knowledge skills into the target CCC (directory with a .serenity marker)
 dsh-serenity-plugin install --scope ccc
 
-# 3. Check activation
+# Check activation
 dsh-serenity-plugin status
 ```
 
