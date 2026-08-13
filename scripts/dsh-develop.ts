@@ -35,8 +35,9 @@ const HOME_DIR = process.env.HOME ?? ''
 
 const GIT_SSH = process.env.GIT_SSH_COMMAND
   ?? `ssh -F /dev/null -i ${process.env.SERENITY_GITLAB_KEY ?? join(HOME_DIR, '.ssh', 'id_ed25519_gitlab')} -o IdentitiesOnly=yes`
+// GitHub 走 SSH-over-443（ssh.github.com:443）：家庭网络常封 22 端口
 const GIT_SSH_GITHUB = process.env.GIT_SSH_COMMAND_GITHUB
-  ?? `ssh -F /dev/null -i ${process.env.SERENITY_GITHUB_KEY ?? join(HOME_DIR, '.ssh', 'id_rsa_github')} -o IdentitiesOnly=yes`
+  ?? `ssh -F /dev/null -i ${process.env.SERENITY_GITHUB_KEY ?? join(HOME_DIR, '.ssh', 'id_rsa_github')} -o IdentitiesOnly=yes -o HostName=ssh.github.com -o Port=443 -o StrictHostKeyChecking=accept-new`
 
 // ── 工具 ──
 

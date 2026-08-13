@@ -149,6 +149,14 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关文本逐字节对齐 |
 | 工具 | msm_list/exec/cc-fs/session 等 | cc_fs/session/acc_msm/cc_git/eap/neat/cce/loop |
 
+## CCC 运行时可互换（osp / dsh 任意换用）
+
+**同一套 CCC 与运行时插件解耦——任意 CCC 可以随时换用 opencode-serenity-plugin 或 dsh-serenity-plugin 作为其 ACC 运行时：**
+
+- **CCC 文件格式跨运行时一致**：`.serenity` 记号文件（内容 = 顶层入口 skill 名）、`.opencode/skills/`（知识技能）、`.dsh/serenity.json`（配置）、`AGENT_SESSIONS/`（会话追踪）——两个插件读写同一套文件，语义相同
+- **任选其一**：在 OpenCode 宿主中安装 opencode-serenity-plugin，或在 DSH 宿主中安装本插件；同一 CCC 可随时切换运行时，知识技能与既有数据无需任何改动
+- **差异仅在平台层**：工具命名（`msm_exec`/`cc-fs` vs `acc_msm`/`cc_fs`）、系统提示词注入通道（`system.transform` vs `systemPrompt.section`）——平台无关文本逐字节对齐，切换后 Agent 收到的认知约束完全一致
+
 ## 许可
 
 MIT（见 [LICENSE](LICENSE)）

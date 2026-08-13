@@ -71,6 +71,14 @@ Typecheck runs against real DSH type contracts (tsconfig paths point at a local 
 | System prompt | `system.transform` | `systemPrompt.section`, byte-aligned on platform-neutral text |
 | Tools | msm_list/exec/cc-fs/session etc. | cc_fs/session/acc_msm/cc_git/eap/neat/cce/loop |
 
+## Interchangeable CCC runtime (osp or dsh)
+
+**A CCC is decoupled from its runtime plugin — any CCC can switch between opencode-serenity-plugin and dsh-serenity-plugin as its ACC runtime:**
+
+- **CCC file formats are runtime-independent**: the `.serenity` marker (content = top-level entry skill name), `.opencode/skills/` (knowledge skills), `.dsh/serenity.json` (config), `AGENT_SESSIONS/` (session tracking) — both plugins read and write the same files with the same semantics.
+- **Choose either**: install opencode-serenity-plugin on an OpenCode host, or this plugin on a DSH host; the same CCC can switch runtimes at any time without touching skills or existing data.
+- **Differences are platform-only**: tool naming (`msm_exec`/`cc-fs` vs `acc_msm`/`cc_fs`) and the system-prompt injection channel (`system.transform` vs `systemPrompt.section`) — platform-neutral text is byte-aligned, so the agent receives identical cognitive constraints after switching.
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
