@@ -1,3 +1,33 @@
+## v1.16.12 — 2026-08-15（运行时状态动态块：safe-mode 状态告知 + localstore git 策略行为提示——利用系统提示词约束 agent 行为）
+
+**Scope:** 用户要求利用系统上下文注入（系统提示词层）约束 agent 行为：① safe-mode 开启后系统提示词告知已开启（行为约束）；② localstore 是否提交设定（gitTrack）决定敏感行为提示（deny=本地私有 / allow=进 git 但敏感数据只限该文件）。
+
+### safe-mode 状态块（`=== Serenity Safe Mode ===`，英文）
+
+- **ON 时注入**（OFF 不注入；`isSafeModeOn` 动态检测，开关切换每轮即时生效）
+- **文案与实现逐项对应**（用户审核修正：原稿与 guards.ts 不符——safe-mode 实为**只禁用 bash**）：
+  - `bash is disabled (hidden and blocked)` — `restrict({ deny: ['bash'] })` + `decideGuard` bash deny（guards.ts）
+  - `blacklist rules apply to file paths` — `matchBlacklist` 路径拦截
+  - `CCC governance files (.serenity, .serenity-safe-on) protected` — 治理文件写拒绝
+  - `Other read/write tools remain available` — `SAFE_MODE_DENY_TOOLS` 只含 bash（write/edit 保留）
+  - `do not attempt to bypass` — 行为约束
+- **黑名单规则动态列出**（Active blacklist rules）
+- **C5 修订**：safe-mode 状态对 agent 可见（行为约束），但开关权仍归用户（WebUI `x-serenity-ui` 头保护，agent 不可自开关）
+
+### localstore git 策略块（`=== Serenity Localstore ===`，英文，localstore.json 存在时注入）
+
+- **deny（缺省）**：`local private file (gitTrack=deny — not committed to git, .gitignore enforced)`——凭据仅存本机，不写入对话/日志，不尝试提交（cc_git 会拒绝）
+- **allow**：`committed to git (gitTrack=allow — personal private repository)`——敏感数据可进入 git 但 **ONLY in this file**（只限 localstore.json 内，不外泄到其他文件/对话/日志）——用户审核确认语义
+- 文件不存在不注入；`readGitTrack` 缺省 deny
+
+### 结构
+
+- 注入点：#1/#2 系统提示词层——`serenitySystemPrompt` 中 Constraints 块后、EAP 块前插入两个条件动态块（每轮装配按当前状态生成，即时生效）
+- 不影响 osp-alignment 逐字节断言（独立新块）；SKILL 内容 HIDDEN_LINES 过滤保留
+- 机制硬防线不变：guards 拦截 + cc_git 拒绝；提示是行为约束补充
+
+**测试：** 250/250（原 245 + 5：safeMode ON/OFF/黑名单列出 / localstore 无文件/deny/allow / 装配顺序）
+
 ## v1.16.11 — 2026-08-15（上下文注入去重：系统提示词层已注入的完整身份，对话消息/压缩重注入渠道不再重复——只留简短身份锚点）
 
 **Scope:** 用户发现上下文注入浪费——系统提示词层（systemPrompt.section，含 subagent）已成功注入 ACC+CCC 完整内容，对话消息（session-start inject / pre-step 前置）与压缩重注入（compaction/end）再注入同一完整全文 = 每轮 token 双倍浪费。修复：完整身份只走系统提示词层；对话流/压缩渠道只注入简短锚点。

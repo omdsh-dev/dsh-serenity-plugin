@@ -10,6 +10,8 @@ import {
   cceBlock,
   constraintsBlock,
   eapBlock,
+  safeModeBlock,
+  localstoreBlock,
   codeModeAdaptationLine,
 } from '../src/seams/system-prompt.js'
 import { ACC_VERSION } from '../src/constants.js'
@@ -194,5 +196,59 @@ describe('system-prompt: Code Mode 适配行（S131 P0-2）', () => {
 
   it('无 tools 服务 → 空串（try/catch 吞掉）', () => {
     expect(codeModeAdaptationLine({} as never)).toBe('')
+  })
+})
+
+describe('system-prompt: 运行时状态动态块（S134 v1.16.12）', () => {
+  it('safeModeBlock：ON 注入（英文，与实现对应：bash disabled / blacklist / governance files）/ OFF 空', () => {
+    expect(safeModeBlock(dir)).toBe('')
+    writeFileSync(join(dir, '.serenity-safe-on'), 'now')
+    const b = safeModeBlock(dir)
+    expect(b).toContain('=== Serenity Safe Mode ===')
+    expect(b).toContain('bash is disabled')
+    expect(b).toContain('blacklist rules apply')
+    expect(b).toContain('governance files')
+    expect(b).toContain('do not attempt to bypass')
+    // write/edit 保留的表述（与 guards.ts SAFE_MODE_DENY_TOOLS 只含 bash 一致）
+    expect(b).toContain('Other read/write tools')
+    expect(b).toContain('remain available')
+  })
+
+  it('safeModeBlock：黑名单规则动态列出', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'now')
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ safeMode: { blacklist: ['.secrets/'] } }))
+    expect(safeModeBlock(dir)).toContain('.secrets/')
+  })
+
+  it('localstoreBlock：无文件空 / deny 私有提示（缺省）', () => {
+    expect(localstoreBlock(dir)).toBe('')
+    writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
+    const b = localstoreBlock(dir)
+    expect(b).toContain('=== Serenity Localstore ===')
+    expect(b).toContain('local private file')
+    expect(b).toContain('gitTrack=deny')
+    expect(b).toContain('not committed to git')
+    expect(b).toContain('do not write')
+  })
+
+  it('localstoreBlock：allow → 进 git 但敏感数据只限该文件（英文）', () => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
+    const b = localstoreBlock(dir)
+    expect(b).toContain('committed to git')
+    expect(b).toContain('gitTrack=allow')
+    expect(b).toContain('ONLY in this file')
+    expect(b).toContain('never leak them into other files')
+  })
+
+  it('serenitySystemPrompt 装配顺序：Constraints → 状态块 → EAP（ON + localstore 时）', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'now')
+    writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
+    const text = serenitySystemPrompt(dir)
+    expect(text.indexOf('=== Serenity Constraints ===')).toBeLessThan(text.indexOf('=== Serenity Safe Mode ==='))
+    expect(text.indexOf('=== Serenity Safe Mode ===')).toBeLessThan(text.indexOf('=== Serenity Localstore ==='))
+    expect(text.indexOf('=== Serenity Localstore ===')).toBeLessThan(text.indexOf('=== Serenity EAP ==='))
   })
 })

@@ -20,11 +20,13 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from 'cordis'
 // 类型引用：拉入 system-prompt 包的 cordis 声明增强（ctx.systemPrompt）+ agent 对 AssembleContext 的合并
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
+import { existsSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { findSerenityRoot } from '../ccc.js'
+import { findSerenityRoot, isSafeModeOn, readBlacklist } from '../ccc.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
 import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
+import { localstorePath, readGitTrack } from '../localstore-ops.js'
 
 /** 过滤掉对 agent 隐藏的内容（safe-mode 是用户能力，不对 agent 提及） */
 const HIDDEN_LINES = /安全模式|safe-mode|\.serenity-safe-on/g
@@ -155,6 +157,59 @@ export function eapBlock(): string {
   ].join('\n')
 }
 
+/**
+ * 运行时状态块 1) safe-mode（S134 v1.16.12）：ON 时告知 agent（行为约束；机制仍由 guards 强制）。
+ * 文案与实现逐项对应（guards.ts）：bash 禁用（restrict deny + decideGuard）、
+ * 黑名单路径拦截、CCC 治理文件保护；write/edit 等其余工具保留（受路径逃逸/黑名单约束）。
+ */
+export function safeModeBlock(root: string): string {
+  if (!isSafeModeOn(root)) return ''
+  const blacklist = readBlacklist(root)
+  const blacklistNote =
+    blacklist.length > 0 ? `\nActive blacklist rules: ${blacklist.join(', ')}` : ''
+  return [
+    '',
+    '=== Serenity Safe Mode ===',
+    'Safe mode is ON (enabled by the user): bash is disabled (hidden and blocked);',
+    'blacklist rules apply to file paths; CCC governance files (.serenity,',
+    '.serenity-safe-on) are protected from agent writes. Other read/write tools',
+    'remain available, subject to path-escape and blacklist guards.',
+    'Behavior constraints: do not attempt to bypass restrictions; do not write to',
+    'blacklisted paths or governance files.',
+    blacklistNote,
+    '',
+  ].join('\n')
+}
+
+/**
+ * 运行时状态块 2) localstore git 策略（S134 v1.16.12）：localstore.json 存在时按 gitTrack
+ * 提示敏感行为约束。deny（缺省）= 本地私有不提交；allow = 进 git（个人私有仓）但敏感数据
+ * 只限于该文件内（不外泄到其他文件/对话/日志）。
+ */
+export function localstoreBlock(root: string): string {
+  if (!existsSync(localstorePath(root))) return ''
+  const lines =
+    readGitTrack(root) === 'allow'
+      ? [
+          '',
+          '=== Serenity Localstore ===',
+          'localstore.json is committed to git (gitTrack=allow — personal private repository).',
+          'Sensitive data may live in this file, but ONLY in this file: keep credentials and',
+          'secret values confined to localstore.json — never leak them into other files,',
+          'conversation, or logs.',
+          '',
+        ]
+      : [
+          '',
+          '=== Serenity Localstore ===',
+          'localstore.json is a local private file (gitTrack=deny — not committed to git,',
+          '.gitignore enforced). Credentials/config live only on this machine: do not write',
+          'them into conversation or logs; do not attempt to commit this file (cc_git will refuse).',
+          '',
+        ]
+  return lines.join('\n')
+}
+
 /** 4) SKILL.md 全文：该 CCC 顶层入口 skill 原文（对齐 osp：原文直推，无包裹头；仅过滤治理内容） */
 export function entrySkillSectionText(root: string): string {
   const skills = findEntrySkills(root)
@@ -216,8 +271,12 @@ export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSI
     accBlock(root),
     cceBlock(),
     constraintsBlock(root),
-    eapBlock(),
   ]
+  // S134 v1.16.12：运行时状态动态块（safe-mode / localstore）——利用系统提示词约束 agent 行为；
+  // 按当前状态条件生成（开关/策略变更每轮装配即时生效）
+  const state = [safeModeBlock(root), localstoreBlock(root)].filter((b) => b !== '').join('\n')
+  if (state) parts.push(state)
+  parts.push(eapBlock())
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
   const session = sessionBlock(root, scope)
