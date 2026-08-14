@@ -165,6 +165,64 @@
   margin-top: 2px;
 }
 
+/* loop 运行状态区块（WebUI 等待界面；并行任务各自一行） */
+.sp-popSection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+  margin-top: 2px;
+}
+
+.sp-loopItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0 2px 44px;
+  min-width: 0;
+}
+
+.sp-loopHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sp-loopLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.sp-loopRound {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-state-info-primary);
+  font-family: var(--ds-font-family-code, monospace);
+}
+
+.sp-loopTime {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-caption);
+}
+
+.sp-loopResp {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code, monospace);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .sp-toggle,
   .sp-badge {

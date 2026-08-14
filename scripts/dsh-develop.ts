@@ -524,13 +524,18 @@ function cmdDeploy(): void {
   const staging = readlinkSafe(join(dshHome, 'source', 'current'))
   const appNm = join(staging, 'apps', 'cli', 'node_modules')
   const rootNm = join(staging, 'node_modules')
+  // v1.16.9 修复（S134）：CLI（`dsh web`）实际从 **profiles/web/node_modules**（pnpm profile 结构）
+  // 解析 bundle 插件——deploy 原只复制 profiles/node_modules（错误目标，从未被加载，
+  // 导致 deploy 后 web 仍是旧版）。两处都复制：web 为实际加载路径，profiles/node_modules 历史兼容。
   const profilePkg = join(dshHome, 'profiles', 'node_modules', '@shgroup', 'dsh-serenity-hooks')
+  const webProfilePkg = join(dshHome, 'profiles', 'web', 'node_modules', '@shgroup', 'dsh-serenity-hooks')
+  const profileTargets = [profilePkg, webProfilePkg]
   const targets = [rootNm, appNm]
 
   console.log('==> 1/4 构建插件')
   cmdBuild()
 
-  console.log('==> 2/4 复制插件（staging 双锚 + profile 真实目录）')
+  console.log('==> 2/4 复制插件（staging 双锚 + profile 双目标：profiles/node_modules + profiles/web/node_modules）')
   for (const nm of targets) {
     const dst = join(nm, '@shgroup', 'dsh-serenity-hooks')
     rmSync(dst, { recursive: true, force: true })
@@ -545,19 +550,21 @@ function cmdDeploy(): void {
     console.log(`    copied -> ${dst}`)
   }
   // profile 真实目录（公开版运行时目标）：替换任何历史符号链接（旧 staging 时代残留）
-  try {
-    if (lstatSync(profilePkg).isSymbolicLink()) rmSync(profilePkg, { force: true })
-  } catch { /* 不存在或非链接 */ }
-  rmSync(profilePkg, { recursive: true, force: true })
-  mkdirSync(join(dshHome, 'profiles', 'node_modules', '@shgroup'), { recursive: true })
-  cpSync(HOOKS_DIR, profilePkg, {
-    recursive: true,
-    filter: (src) => {
-      const base = src.split('/').pop() ?? ''
-      return !['tests', 'src', '.pnpm-store', 'client', 'node_modules'].includes(base) && !src.endsWith('tsconfig.json') && !src.endsWith('dsh.plugin.json')
-    },
-  })
-  console.log(`    copied -> ${profilePkg}（真实目录，非链接）`)
+  for (const dst of profileTargets) {
+    try {
+      if (lstatSync(dst).isSymbolicLink()) rmSync(dst, { force: true })
+    } catch { /* 不存在或非链接 */ }
+    rmSync(dst, { recursive: true, force: true })
+    mkdirSync(dirname(dst), { recursive: true })
+    cpSync(HOOKS_DIR, dst, {
+      recursive: true,
+      filter: (src) => {
+        const base = src.split('/').pop() ?? ''
+        return !['tests', 'src', '.pnpm-store', 'client', 'node_modules'].includes(base) && !src.endsWith('tsconfig.json') && !src.endsWith('dsh.plugin.json')
+      },
+    })
+    console.log(`    copied -> ${dst}（真实目录，非链接）`)
+  }
 
   console.log('==> 3/4 依赖 shim（仅 staging 锚需要；profile 目标走 rc.6 profile node_modules）')
   const shims: Record<string, string> = {
@@ -615,9 +622,9 @@ function cmdDeploy(): void {
     }
   }
 
-  // 预检：公开版从 profile 真实目录导入（依赖经 profile node_modules 解析到 rc.6）
+  // 预检：公开版从 profile/web/node_modules（CLI 实际加载路径）导入
   const preflight = run('node', ['--input-type=module', '-e',
-    `const m = await import('file://${profilePkg}/lib/index.js'); console.log('[preflight]', m.name, '|', JSON.stringify(m.inject))`],
+    `const m = await import('file://${webProfilePkg}/lib/index.js'); console.log('[preflight]', m.name, '|', JSON.stringify(m.inject))`],
   { cwd: profileDir, quiet: true })
   if (preflight.status === 0 && preflight.stdout.includes('dsh-serenity-hooks')) {
     console.log(preflight.stdout.trim())

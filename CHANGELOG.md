@@ -1,3 +1,28 @@
+## v1.16.9 — 2026-08-15（loop guide 说明命令（eap 设计方案要求/并行策略/提示词规范）+ EAP 化轮次提示词（阅读/文字类加载 eap）+ WebUI loop 等待界面（/serenity/loops + 进度卡））
+
+**Scope:** 用户反馈 goal/workflow 不如 loop 好用 → loop 增强：① guide 说明命令（使用前先加载 eap 设计规模化方案；并行策略；提示词规范；阅读/文字类 loop 内部加载 eap）；② buildRoundPrompt EAP 化（固定详尽结构）；③ WebUI loop 等待界面（类似 workflow 进度展示：/serenity/loops 接口 + 会话头部详情卡轮询显示运行中 loop）。
+
+### loop guide 说明命令
+
+- **`loop guide`**（参数 `guide: boolean`）：不创建 agent，直接输出 `LOOP_GUIDE` 规模化使用指引：
+  - **使用前必须先加载 eap**（acc-eap）设计规模化方案：任务拆解（E↑ 显式：目标/输入/边界/验收标准）、提示词设计（task 详尽固定符合 EAP，含正反例）、并行策略
+  - **并行策略**：无依赖子任务各一个独立 loop（独立 label + task）；执行方式 = 后台 subagent / workflow parallel 阶段；并发安全已保证（sessionId 唯一 + 进度按 label 隔离）；汇总方式
+  - **完成判定**：唯一 = 内部 agent 精确回显验证码；对话轮无上限；非正常停止重启 ≤100
+  - **等待界面**：WebUI 详情卡显示运行中 loop 进度
+- 工具 description 更新（含 guide 用法）
+
+### EAP 化轮次提示词（buildRoundPrompt）
+
+- **固定详尽结构**：工作规范（每轮固定）——自由工作 / **阅读整理或文字编写类工作先加载 eap（acc-eap）按 EAP 标准输出（E↑ 显式 / R↓ 可重建 / S↑ 稳定）** / 汇报具体可核验；每轮汇报固定格式（做了什么/下一步/是否完成→只输出验证码）
+
+### WebUI loop 等待界面（类似 workflow 进度展示）
+
+- **Node half**：`/serenity/loops` GET 接口（registerStatusApi 新增路由）——按 workspace 解析 CCC 根 → `listActiveLoops`（AGENT_SESSIONS/loop-*.json 全部进度，按 updated 倒序，坏文件跳过）；不依赖工具执行上下文（进度文件驱动，并行任务天然多行）
+- **client half**：SafeModePanel 详情卡新增 **loops 区块**——展开时每 3s 轮询 /serenity/loops；显示运行中 loop（label / R轮次 / 更新时间 / 最近响应摘要，最多 5 条，done 显示 ✓）；并行任务各自一行
+- CSS：`.sp-popSection / .sp-loopItem / .sp-loopHead / .sp-loopLabel / .sp-loopRound / .sp-loopTime / .sp-loopResp`（--dsw-alias-* token）
+
+**测试：** 245/245（原 242 + 3：prompt EAP 化 / guide 内容 / listActiveLoops）
+
 ## v1.16.8 — 2026-08-14（serenity.json 规范位置修正：.opencode 优先（历史兼容，不依赖 dsh）+ 系统提示词相对路径提示行）
 
 **Scope:** 用户指出 ACC 依赖的 CCC 文件必须兼容历史（历史在 .opencode）——serenity.json 规范位置应为 `.opencode/serenity.json`（.dsh 仅回退），localstore.gitTrack 等配置随之生效；另修复"注入绝对路径 vs 工具调用相对路径打架"——加一行提示。

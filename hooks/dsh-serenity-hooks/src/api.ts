@@ -15,8 +15,10 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { getStatus, setSafeMode } from './status.js'
 import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { listActiveLoops } from './loop-ops.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
+const LOOPS_PATH = '/serenity/loops'
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -55,6 +57,30 @@ function resolveWorkspace(ctx: Context, params: { sessionId?: string; workspace?
 
 export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}): void {
   const configPaths = opts.configPaths ?? DEFAULT_SERENITY_CONFIG_PATHS
+
+  // /serenity/loops：loop 运行状态（WebUI 等待界面数据源；进度文件摘要，不依赖工具执行上下文）
+  ctx.webServer.register({
+    kind: 'exact',
+    path: LOOPS_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
+        const root = findSerenityRoot(workspace)
+        if (!root) {
+          sendJson(res, 200, { loops: [] })
+          return
+        }
+        sendJson(res, 200, { loops: listActiveLoops(root) })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
 
   ctx.webServer.register({
     kind: 'exact',
