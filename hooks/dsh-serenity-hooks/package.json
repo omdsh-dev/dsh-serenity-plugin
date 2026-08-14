@@ -1,6 +1,6 @@
 {
   "name": "@shgroup/dsh-serenity-hooks",
-  "version": "1.16.2",
+  "version": "1.16.3",
   "description": "宁静号 ACC harness — Native Cordis 插件（DeepSeek Harness 运行时）。真实 DSH 工具注册（cc_fs/session/acc_msm 等 9 工具）+ 拦截缝机械约束（safe-mode/路径守卫/会话落盘）+ 系统提示词注入（ACC/CCE/Constraints/SKILL/Session 五块）。适配 DSH 公开版（deepseek-ai/deepseek-harness 0.1.0-rc）。",
   "license": "MIT",
   "repository": {
@@ -50,6 +50,7 @@
   "peerDependencies": {
     "@deepseek-ai/dsh-agent": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-agent-loop": "^0.1.0-rc.5",
+    "@deepseek-ai/dsh-agent-presets": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-compaction": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-host-webserver": "^0.1.0-rc.5",
     "@deepseek-ai/dsh-llm": "^0.1.0-rc.5",
@@ -73,6 +74,9 @@
       "optional": true
     },
     "@deepseek-ai/dsh-agent-loop": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-presets": {
       "optional": true
     },
     "@deepseek-ai/dsh-compaction": {

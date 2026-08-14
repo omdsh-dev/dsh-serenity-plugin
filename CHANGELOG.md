@@ -1,3 +1,18 @@
+## v1.16.3 — 2026-08-14（loop 牛马 agent 继承父会话 preset，修复 read/write 等 preset 层工具不可用）
+
+**Scope:** loop 工具创建牛马 agent 时未 join 父会话的 agent preset → web profile 下（host 全局层 tool-fs 等被 preset 化禁用）loop agent 落在空工具层，read/write/edit 等 preset 层工具不可用。修复 = 对齐 subagent 先例：创建经 `ctx.agents.create` + setup 钩子 `agentPresets.composeFrom`，继承父 preset standing mount。
+
+**主要变化：**
+
+- **loop agent preset 继承**：`ctx.agentLoop.create(...)`（无 setup 钩子，裸 agent）→ `ctx.agents.create({ sessionId, meta: { cwd, agentPreset }, agentOptions, setup })`；setup 钩子在 agent 未发布前执行 `agentPresets.composeFrom(childCtx, parentCtx)`，使 loop agent 获得父会话 preset 的工具层（read/write/edit 等）
+- **meta.agentPreset 落库**：子 session 记录父 preset id（对齐 subagent childSessionMeta），持久化重建可还原同一组合
+- **可选服务退化**：`agentPresets` 经 `ctx.get` 可选读取——无 roster 部署/父未 join preset 时跳过，loop agent 落全局工具层（历史行为），不报错
+- **owned handle 清理**：`ctx.agents.create` 返回 `AgentHandle`，循环结束 `finally` 中 `handle.dispose()`（停止 loop/注销 agent/移除 session/展开 scope），不再依赖插件 fiber 兜底
+- **新增纯函数模块** `src/loop-preset-inherit.ts`（`loopPresetInheritance`：解析父 preset + 组装 setup 钩子，仅 type-only 依赖 cordis，可单测）+ 测试 `tests/loop-preset.test.ts`（4 例：已 join / 未 join / 无服务 / 无父）
+- **package.json**：peerDependencies 增 `@deepseek-ai/dsh-agent-presets`（optional，类型引用）；tsconfig paths 增对应映射
+
+**测试：** 196/196（原 192 + 4：loop preset 继承四路径）
+
 ## v1.16.2 — 2026-08-14（SESSION use 按 dsh 会话隔离修复 + 发包缺陷修复）
 
 **Scope:** ① 系统提示词 Session 块泄露修复——活跃会话标记从 CCC 级全局单文件改为按 dsh 会话隔离；② 三个发包缺陷（tarball 缺 lib/client.js / schemastery peer 范围不可满足 / README 方式二失效）。

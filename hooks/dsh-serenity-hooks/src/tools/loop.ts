@@ -7,9 +7,13 @@
  *   model（选）provider/model（如 minimax-cn-coding-plan/MiniMax-M3）；缺省读 loop.defaultModel
  *   maxRounds（默认 100）轮次上限；每轮等待 agent **无超时**（loop 可永续，agent 工作多久等多久）
  *
- * 机制：ctx.agentLoop.create({provider, model}) 创建专用 agent（进程内），
+ * 机制：ctx.agents.create()（带 setup 钩子）创建专用 agent（进程内），
  * 每轮 followup → agent/status idle → 读 session.events 响应 → 写进度 → stop token 检查 → 续跑。
  * 工厂模式：apply 时闭包捕获插件 ctx（工具 execute 无 ctx 参数）。
+ *
+ * preset 继承：setup 钩子里对子 agent 执行 agentPresets.composeFrom（对齐 subagent 先例），
+ * 使 loop agent 继承发起方会话的 agent preset 工具（read/write/edit 等 preset 层工具）。
+ * agentPresets 是可选服务——无 preset 装配的环境（无 roster 部署）退化为空工具层（历史行为）。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -17,10 +21,13 @@ import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Context } from 'cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-loop'
+// 类型引用：拉入 agentPresets 的 cordis 声明增强（ctx.get('agentPresets') 类型解析；运行时擦除）
+import type {} from '@deepseek-ai/dsh-agent-presets'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { findSerenityRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { loopPresetInheritance } from '../loop-preset-inherit.js'
 import { buildRoundPrompt, loopProgressPaths, newStopToken, readProgress, splitModel, writeProgress } from '../loop-ops.js'
 
 function agentCwd(exec: ToolRunContext): string {
@@ -68,6 +75,8 @@ function lastAssistantText(agent: Agent): string {
 }
 
 /** 创建 loop 工具（闭包捕获插件 ctx → 可访问 ctx.agentLoop） */
+
+/** 创建 loop 工具（闭包捕获插件 ctx → 可访问 ctx.agentLoop） */
 export function createLoopTool(ctx: Context): ToolDefinition {
   return defineTool({
     name: 'loop',
@@ -104,7 +113,25 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       let progress = readProgress(root, label)
       const startRound = progress ? Math.min(progress.round + 1, maxRounds) : 1
 
-      const loopAgent = ctx.agentLoop.create(`loop-${label}` as SessionId, { provider, model: modelName }, { cwd: root })
+      // 创建 loop agent：经 ctx.agents.create（对齐 subagent 先例）——setup 钩子
+      // 在 agent 未发布前把子 scope 绑定到父 agent 的 preset standing mount
+      // （agentPresets.composeFrom），使 loop agent 继承父会话的 preset 工具层
+      // （read/write/edit 等）。无 agentPresets 服务/父未 join preset 时跳过，
+      // 退化为历史行为（全局工具层）。
+      const parentCtx = exec.agent?.ctx
+      const inherited = loopPresetInheritance(parentCtx)
+      if (!ctx.agents) throw new Error('loop: ctx.agents 不可用')
+      const sessionId = `loop-${label}` as SessionId
+      const handle: AgentHandle = await ctx.agents.create({
+        sessionId,
+        meta: {
+          cwd: root,
+          ...inherited.agentPreset === undefined ? {} : { agentPreset: inherited.agentPreset },
+        },
+        agentOptions: { provider, model: modelName },
+        ...inherited.setup === undefined ? {} : { setup: inherited.setup },
+      })
+      const loopAgent = handle.agent
 
       let done = false
       let lastResponse = progress?.lastResponse ?? ''
@@ -125,7 +152,8 @@ export function createLoopTool(ctx: Context): ToolDefinition {
         }
         writeProgress(root, label, { round: finalRound, done, label, model, updated: new Date().toISOString(), lastResponse })
       } finally {
-        // loop agent 生命周期随插件 fiber 管理；此处不再重复清理
+        // owned handle：dispose 停止 loop、注销 agent、移除 session、展开 scope
+        await handle.dispose().catch(() => { /* loop agent 清理失败不阻断工具返回 */ })
       }
 
       const { json } = loopProgressPaths(root, label)
