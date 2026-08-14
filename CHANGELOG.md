@@ -28,6 +28,10 @@
 - **返回**：新增 `restarts` 字段（本次调用重启次数）；usage.next 文案改"已达内部 100 次重启保险阀"
 - **测试**：loop-ops 用例同步（去 maxRounds）
 
+### 运维修复（deploy 脚本，内部不进公开仓库）
+
+- **deploy 双挂载冲突（duplicate loader entry id: serenity-hooks）**：deploy 步骤 4 原逻辑把插件自带 `cordis.patch.yml` 的 insert 块原样追加进 profile——与 npm-install 写入的 `dsh.profile.bundles`（bundle 层挂载）对同一 loader entry 双挂载 → web 启动报 `duplicate loader entry id: serenity-hooks`。修复：`profileBundleMounted`（读 profile package.json `dsh.profile.bundles`）→ bundle 层存在则**跳过 insert 写入 + 幂等清理历史 insert**（`stripInsertBlock` 按块剥离）；无 bundle 层（纯 deploy 本地开发）才写 insert 作为唯一挂载。profile 的 cordis.patch.yml 保留 `- id: serenity-hooks` 的 config 定向覆盖（v-bundle 语义，不重复加载）——deploy 不再触碰该覆盖行
+
 **测试：** 234/234（原 218 + 16）
 
 ## v1.16.5 — 2026-08-14（loop 修复：sessionId 唯一化 + maxRounds 降级保险阀；新增 localstore ACC 标准凭据/配置存储工具）

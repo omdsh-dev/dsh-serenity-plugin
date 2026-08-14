@@ -451,6 +451,71 @@ function cmdBump(version?: string): void {
   console.log(`[dsh-develop] ✓ version → ${version}（package.json + dsh.plugin.json；CHANGELOG 需手动补条目）`)
 }
 
+/**
+ * 检测 profile 是否已通过 bundle 层挂载插件（npm-install / `dsh plugin add` 写入
+ * package.json `dsh.profile.bundles`）。存在 → deploy 不得再写 cordis.patch.yml insert
+ * （双挂载 → duplicate loader entry id: serenity-hooks）。
+ */
+function profileBundleMounted(dshHome: string, profile: string): boolean {
+  const candidates = [
+    join(dshHome, 'profiles', profile, 'package.json'),
+    join(dshHome, 'profiles', 'package.json'),
+  ]
+  for (const p of candidates) {
+    if (!existsSync(p)) continue
+    try {
+      const j = JSON.parse(readFileSync(p, 'utf-8')) as {
+        dsh?: { profile?: { bundles?: unknown }; bundle?: { patch?: string } }
+      }
+      const dsh = j.dsh
+      if (!dsh || typeof dsh !== 'object') continue
+      const bundles = dsh.profile?.bundles
+      if (Array.isArray(bundles) && bundles.includes('@shgroup/dsh-serenity-hooks')) return true
+      if (typeof dsh.bundle?.patch === 'string' && dsh.bundle.patch.includes('dsh-serenity-hooks')) return true
+    } catch {
+      /* 解析失败忽略 */
+    }
+  }
+  return false
+}
+
+/**
+ * 从 cordis.patch.yml 文本中幂等移除含目标 id 的顶层 `- insert:` 块。
+ * 返回清理后的文本；未找到该块返回 null（调用方无需写回）。
+ */
+function stripInsertBlock(content: string, id: string): string | null {
+  const lines = content.split('\n')
+  const out: string[] = []
+  let removed = false
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]!
+    if (/^-\s*insert:/.test(line)) {
+      // 扫描该 insert 块（到下一个 0 缩进非注释行）是否含目标 id
+      let j = i + 1
+      let hasId = false
+      while (j < lines.length) {
+        const l = lines[j]!
+        if (l.trim() !== '' && !/^\s/.test(l) && !l.startsWith('#')) break
+        if (l.includes(`id: ${id}`)) {
+          hasId = true
+          break
+        }
+        j++
+      }
+      if (hasId) {
+        removed = true
+        i = j // 跳过整个块（j 指向下一块首行或 EOF）
+        continue
+      }
+    }
+    out.push(line)
+    i++
+  }
+  if (!removed) return null
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
+}
+
 function cmdDeploy(): void {
   // 复刻 scripts/load-plugin.sh 全流程（纯 Node 实现，不依赖 bash）
   // 公开版适配（v1.16+）：运行时 = rc.6 CLI + profile（~/.dsh/profiles/node_modules），
@@ -519,17 +584,35 @@ function cmdDeploy(): void {
   console.log('==> 4/4 profile 挂载 + 预检')
   const profileDir = join(dshHome, 'profiles', 'web')
   const patchFile = join(profileDir, 'cordis.patch.yml')
-  // v1.15 合规化：profile patch 内容取自插件自带 bundle 层（B2/B3），不再硬编码
-  const bundlePatch = join(HOOKS_DIR, 'cordis.patch.yml')
-  if (!existsSync(bundlePatch)) fail(`插件自带 cordis.patch.yml 缺失: ${bundlePatch}`, 2)
-  const insertBlock = readFileSync(bundlePatch, 'utf-8')
-  if (existsSync(patchFile) && readFileSync(patchFile, 'utf-8').includes('id: serenity-hooks')) {
-    console.log('    cordis.patch.yml 已包含，跳过（幂等）')
+  // v1.16.6（S134 双挂载修复）：bundle 层（package.json `dsh.profile.bundles`，npm-install
+  // 写入）与 cordis.patch.yml insert **二选一**——同挂载同一 loader entry 会报
+  // `duplicate loader entry id: serenity-hooks`（web 起不来）：
+  //   bundle 层已挂载 → 跳过 insert 写入，并幂等移除历史写入的 insert（bundle 是公开版主路径）
+  //   无 bundle 层（纯 deploy 本地开发）→ 写入 insert（唯一挂载方式）
+  if (profileBundleMounted(dshHome, 'web')) {
+    if (existsSync(patchFile)) {
+      const cleaned = stripInsertBlock(readFileSync(patchFile, 'utf-8'), 'serenity-hooks')
+      if (cleaned !== null) {
+        writeFileSync(patchFile, cleaned, 'utf-8')
+        console.log('    bundle 层已挂载（dsh.profile.bundles）→ 移除 cordis.patch.yml 冗余 insert（防 duplicate loader entry）')
+      } else {
+        console.log('    bundle 层已挂载（dsh.profile.bundles）→ 跳过 insert（cordis.patch.yml 无冗余）')
+      }
+    } else {
+      console.log('    bundle 层已挂载（dsh.profile.bundles）→ 无需 cordis.patch.yml')
+    }
   } else {
-    mkdirSync(profileDir, { recursive: true })
-    const content = existsSync(patchFile) ? readFileSync(patchFile, 'utf-8') + '\n' + insertBlock + '\n' : insertBlock + '\n'
-    writeFileSync(patchFile, content, 'utf-8')
-    console.log(`    ${patchFile} 已写入`)
+    const bundlePatch = join(HOOKS_DIR, 'cordis.patch.yml')
+    if (!existsSync(bundlePatch)) fail(`插件自带 cordis.patch.yml 缺失: ${bundlePatch}`, 2)
+    const insertBlock = readFileSync(bundlePatch, 'utf-8')
+    if (existsSync(patchFile) && readFileSync(patchFile, 'utf-8').includes('id: serenity-hooks')) {
+      console.log('    cordis.patch.yml 已包含，跳过（幂等）')
+    } else {
+      mkdirSync(profileDir, { recursive: true })
+      const content = existsSync(patchFile) ? readFileSync(patchFile, 'utf-8') + '\n' + insertBlock + '\n' : insertBlock + '\n'
+      writeFileSync(patchFile, content, 'utf-8')
+      console.log(`    ${patchFile} 已写入（无 bundle 层，insert 为唯一挂载）`)
+    }
   }
 
   // 预检：公开版从 profile 真实目录导入（依赖经 profile node_modules 解析到 rc.6）
