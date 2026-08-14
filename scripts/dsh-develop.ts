@@ -544,6 +544,32 @@ function cmdDeploy(): void {
   console.log('\n==> 完成。重启 dsh web 使插件生效。')
 }
 
+/**
+ * npm-install — 官方 npm 安装路径：`dsh plugin --profile web add @shgroup/dsh-serenity-hooks`。
+ * 从 npm registry 拉取包（含 lib/client.js）并自动对账 profile bundles 层，取代旧的
+ * deploy（复制本地目录）。安装后需 restart-web 生效。
+ */
+function cmdNpmInstall(profile = 'web'): void {
+  const cliBin = join(process.env.HOME ?? '', '.npm-global', 'bin', 'dsh')
+  const npmDsh = join(process.env.HOME ?? '', '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
+  const bin = existsSync(npmDsh) ? npmDsh : cliBin
+  if (!existsSync(bin)) fail(`dsh CLI 缺失: ${bin}`, 2)
+  const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
+  mkdirSync(cache, { recursive: true })
+  console.log(`[dsh-develop] npm 安装 @shgroup/dsh-serenity-hooks 到 profile '${profile}'（官方 dsh plugin add 路径）`)
+  const r = run(bin, ['plugin', '--profile', profile, 'add', '@shgroup/dsh-serenity-hooks'], {
+    cwd: process.cwd(),
+    quiet: true,
+    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+  })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`dsh plugin add 失败 (exit ${r.status})`, 2)
+  }
+  console.log(r.stdout.trim() || r.stderr.trim())
+  console.log(`[dsh-develop] ✓ 已安装 @shgroup/dsh-serenity-hooks（npm registry）→ 重启 dsh web 生效（restart-web）`)
+}
+
 // ── main 守卫 ──
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -588,13 +614,14 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }
       case 'bump': cmdBump(rest[0]); break
       case 'deploy': cmdDeploy(); break
+      case 'npm-install': cmdNpmInstall(rest[0] ?? 'web'); break
       case 'restart-web': cmdRestartWeb(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
       case '--list':
       case 'list':
-        console.log('typecheck | test [--filter] | build | status | commit <msg> | push | version | bump <ver> | deploy | restart-web | squash-history [<msg>] | github-push [--force] | inspect-dsh <pattern>')
+        console.log('typecheck | test [--filter] | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | inspect-dsh <pattern>')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -623,6 +650,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   version               三处版本一致性
   bump <x.y.z>          package.json + dsh.plugin.json 版本同步
   deploy                load-plugin.sh 全流程（构建+双锚+shim+profile+预检）
+  npm-install [profile] 官方 npm 安装：dsh plugin --profile <p> add（默认 web；从 registry 拉取）
   restart-web           kill + setsid 重启 dsh web（健康检查）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   publish               npm publish @shgroup/dsh-serenity-hooks（凭据走 ~/.npmrc）
