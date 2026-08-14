@@ -1,12 +1,13 @@
 /**
  * compact.ts — 拦截缝：压缩保留（P2，osp session.compacting 的 DSH 等价）
  *
- * 问题：ACC 身份消息（[ACC] 注入）是早期注入的历史消息；上下文压缩（compaction-basic）
- * 会把它们折叠进摘要，模型上下文丢失 ACC 身份 → 后续行为偏离 CCC 约束。
+ * 问题（历史）：ACC 身份消息是早期注入的历史消息；上下文压缩会折叠它们，
+ * 模型上下文丢失 ACC 身份 → 后续行为偏离 CCC 约束。
  *
- * 方案：监听 `compaction/end`（成功，无 error）→ 对 agent 重新注入 ACC 身份消息
- * （agent.inject，追加到下一个模型请求）。与 context.ts 的注入共用同一文本构建，
- * 但**不重复计数**（压缩后的重注入是恢复性注入，不依赖 injected Set）。
+ * 现状（S134 去重）：完整身份由**系统提示词层**（systemPrompt.section）每轮自动注入，
+ * 不在对话历史里、不随压缩折叠 → 压缩无需恢复完整身份。压缩重注入改为
+ * 简短身份锚点（[ACC] 头，与 context.ts 共用 accMessage）——压缩后对话流
+ * 仍保留可追溯的身份标记（R↓），token 开销极小。
  *
  * session → agent 关联：session.id 即 agent id（goal-session 用 ctx.agents.get(session.id)）。
  *
@@ -56,10 +57,10 @@ export function registerCompactRetention(ctx: Context, opts: CompactRegistration
     const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
     const root = findSerenityRoot(cwd)
     if (!root) return
-    const scope = (agent.session as { id?: string } | undefined)?.id ?? 'default'
 
     try {
-      agent.inject(accMessage(root, configPaths, entrySkillMaxChars, scope))
+      // 简短身份锚点（完整身份由系统提示词层持续提供；S134 去重）
+      agent.inject(accMessage(root, configPaths, entrySkillMaxChars))
     } catch {
       /* 重注入失败不阻断（守卫仍兜底） */
     }

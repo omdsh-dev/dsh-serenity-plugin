@@ -1,3 +1,23 @@
+## v1.16.11 — 2026-08-15（上下文注入去重：系统提示词层已注入的完整身份，对话消息/压缩重注入渠道不再重复——只留简短身份锚点）
+
+**Scope:** 用户发现上下文注入浪费——系统提示词层（systemPrompt.section，含 subagent）已成功注入 ACC+CCC 完整内容，对话消息（session-start inject / pre-step 前置）与压缩重注入（compaction/end）再注入同一完整全文 = 每轮 token 双倍浪费。修复：完整身份只走系统提示词层；对话流/压缩渠道只注入简短锚点。
+
+### 注入方案梳理（5 个注入点 → 职责收敛）
+
+| 注入点 | 修复前 | 修复后 |
+|---|---|---|
+| #1 systemPrompt.section 全局（每轮装配自动，含 subagent） | 完整身份（ACC/CCE/Constraints/EAP/SKILL/Session） | **保持（唯一完整身份通道）** |
+| #2 agent 级 scoped section（抗 shadow） | 同上 | 保持（与 #1 shadow 关系） |
+| #3 context.ts session-start `agent.inject` | 简短头 + **完整全文重复** | **只注入简短身份锚点**（[ACC] 已激活 + CCC 根 + 约束 + loop 模型 + Phase 2） |
+| #4 context.ts pre-step 前置消息 | 同上完整全文重复 | 同上只注入锚点 |
+| #5 compact.ts 压缩重注入 | 完整全文恢复 | **只注入锚点**（完整身份在系统提示词层，不随压缩折叠——压缩无需恢复全文；锚点保压缩后可追溯 R↓） |
+
+- **激活 SESSION（Session 块）注入位置澄清**：由 `system-prompt.ts sessionBlock` 构建，经 #1/#2 系统提示词层注入（scope = agent.session.id 按会话隔离）——修复后对话流/压缩渠道不再携带（不再重复）
+- `accMessage` 签名去 scope（简短头无 Session 块）；compact.ts 未用 scope 变量清理
+- **测试**：context.test.ts 更新——accMessage 只含简短头（不含 5 块/SKILL/Session）；Session 块注入由 osp-alignment 的 sessionBlock 测试独立覆盖
+
+**测试：** 245/245（typecheck 验证 accMessage 签名变化）
+
 ## v1.16.10 — 2026-08-15（loop 等待界面修复：loop agent 注册为子代理（origin:'subagent' + parentSession）→ WebUI 子代理活动卡实时可见）
 
 **Scope:** 用户反馈"启动 loop 没有反馈"→ 深入调研（S134）：workflow 等待界面的真实机制 = 子 agent 活动可视化（client runtime 按 `origin:'subagent'` + `parentSessionId` 识别子代理，session 事件驱动实时显示）；而 loop agent 创建时 meta 缺这两个标记 → 不被 UI 识别 → 隐形。修复：loop agent 补标记 → 对齐 workflow 子代理可见性。

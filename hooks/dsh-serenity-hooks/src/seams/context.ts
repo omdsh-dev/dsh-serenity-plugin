@@ -20,7 +20,7 @@ import { resolve } from 'node:path'
 import { findSerenityRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
-import { serenitySystemPrompt, registerEntrySkillSection } from './system-prompt.js'
+import { registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
 import { restoreActiveSession, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 
@@ -60,15 +60,14 @@ export function accIdentityText(
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 /**
- * ACC 注入消息：完整内容 = 简短身份头 + 完整系统提示词（ACC 5 块 + CCC 顶层 skill 原文）。
- * 用户要求：在此处注入完整 ACC 系统提示词内容 + CCC 顶层 skill 原文（对齐 osp system.transform）。
- * scope = dsh 会话 id：Session 块按会话隔离，不跨会话泄露。
+ * ACC 注入消息（S134 去重）：**只含简短身份锚点**（[ACC] 已激活 + CCC 根 + 约束 + loop 模型 + Phase 2）。
+ * 完整身份（ACC 5 块 + CCE + Constraints + EAP + SKILL 全文 + Session 块）由**系统提示词层**
+ * （systemPrompt.section，每轮 prompt 装配自动注入，含 subagent）承担——对话消息流/压缩重注入
+ * 不再重复注入同一内容（token 双倍浪费，见 S134 注入方案梳理）。
  */
-export function accMessage(root: string, configPaths: string[], entrySkillMaxChars: number, scope: string = DEFAULT_SESSION_SCOPE): UserMessage {
+export function accMessage(root: string, configPaths: string[], entrySkillMaxChars: number): UserMessage {
   const header = accIdentityText(root, configPaths, entrySkillMaxChars)
-  const full = serenitySystemPrompt(root, scope)
-  const text = `${header}\n\n${full}`
-  const content: ContentBlock[] = [{ type: 'text', text }]
+  const content: ContentBlock[] = [{ type: 'text', text: header }]
   return createUserMessage({ content, source: PLUGIN_SOURCE })
 }
 
@@ -137,7 +136,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     }
     if (injected.has(key)) return
     injected.add(key)
-    agent.inject(accMessage(root, configPaths, entrySkillMaxChars, agentScope(agent)))
+    agent.inject(accMessage(root, configPaths, entrySkillMaxChars))
     syncSafeModeRestriction(agent, root)
   }
 
@@ -172,7 +171,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       }
       if (!root || injected.has(key) || downstream.kind !== 'enter') return downstream
       injected.add(key)
-      return { kind: 'enter', messages: [accMessage(root, configPaths, entrySkillMaxChars, agentScope(agent)), ...messages, ...downstream.messages] }
+      return { kind: 'enter', messages: [accMessage(root, configPaths, entrySkillMaxChars), ...messages, ...downstream.messages] }
     })
   }
 }
