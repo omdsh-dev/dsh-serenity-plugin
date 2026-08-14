@@ -5,7 +5,7 @@
  * （JSON 格式——方便 MSM 直接 read + JSON.parse 读取，零解析依赖）。
  *
  * git 提交策略（可靠机制 × 用户自由）：
- *   - 配置：.dsh/serenity.json `localstore.gitTrack`: "allow"（可提交）| "deny"（禁提交）
+ *   - 配置：.opencode/serenity.json `localstore.gitTrack`: "allow"（可提交）| "deny"（禁提交）
  *   - **缺省 deny（没配就是不提交）**；且 deny 的保证**不依赖 dsh 运行**——
  *     写入时自动确保 .gitignore 含 localstore.json（物理保证：即使 dsh 不在、
  *     用户手动 git commit 也不会误提交），cc_git 检查为第二道防线（拒绝 + 提示）
@@ -225,7 +225,7 @@ export function docText(root: string): string {
     `存储于 CCC 根根目录 ${path}（JSON 格式，MSM 可直接 read + JSON.parse）。`,
     '',
     '## git 提交策略',
-    '- 配置：.dsh/serenity.json `localstore.gitTrack`：`"allow"`（可提交）| `"deny"`（禁提交）',
+    '- 配置：.opencode/serenity.json `localstore.gitTrack`：`"allow"`（可提交）| `"deny"`（禁提交；.dsh 回退）',
     '- **缺省 deny（没配就是不提交）**；deny 时写入会自动确保 .gitignore 含 localstore.json',
     '  （物理保证，不依赖 dsh 运行）；cc_git commit 会检查拒绝',
     '- 想提交：配置 `"localstore": { "gitTrack": "allow" }`，并从 .gitignore 移除 localstore.json',

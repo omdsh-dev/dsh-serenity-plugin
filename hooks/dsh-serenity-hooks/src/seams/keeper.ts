@@ -6,7 +6,7 @@
  *
  * 计分（对齐 opencode-serenity-plugin session-keeper）：
  *   write/edit=3, task=10, read/grep/glob/msm=1, 经过时间 +1 分/分钟
- * 阈值：.dsh/serenity.json sessionKeeper.threshold（缺省 150）
+ * 阈值：.opencode/serenity.json sessionKeeper.threshold（规范位置，.dsh 回退；缺省 150）
  * 提醒要求模型回应 [SESSION-KEEPER-recorded-{code}] 确认（DCP 模式）。
  */
 

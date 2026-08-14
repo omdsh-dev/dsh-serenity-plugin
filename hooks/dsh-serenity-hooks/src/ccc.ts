@@ -1,7 +1,7 @@
 /**
  * ccc.ts — CCC 纯逻辑层（零 DSH 依赖，可独立单测）
  *
- * 职责：CCC 根检测（P1）、git 检测（P2）、.dsh/serenity.json 配置读取、
+ * 职责：CCC 根检测（P1）、git 检测（P2）、serenity.json 配置读取（.opencode 规范位置，.dsh 回退）、
  * 路径守卫（P3 语义）、安全模式黑名单匹配。
  *
  * 由 tools/ 与 seams/ 复用；逻辑移植自 dsh-serenity-plugin v0.1-v0.2
@@ -74,7 +74,7 @@ export function resolveInside(root: string, p: string): string {
   return abs;
 }
 
-// ── 配置（.dsh/serenity.json / .opencode/serenity.json）──
+// ── 配置（.opencode/serenity.json 规范位置 / .dsh/serenity.json 回退）──
 
 export interface SerenityConfig {
   loop?: { defaultModel?: string };
@@ -93,7 +93,11 @@ export interface SerenityConfig {
   };
 }
 
-export const DEFAULT_SERENITY_CONFIG_PATHS = ['.dsh/serenity.json', '.opencode/serenity.json'];
+/**
+ * ACC 依赖的 CCC 配置路径（S134 修正：兼容历史——历史在 .opencode，规范位置 = .opencode；
+ * .dsh 仅作 dsh 运行时回退，不优先）。
+ */
+export const DEFAULT_SERENITY_CONFIG_PATHS = ['.opencode/serenity.json', '.dsh/serenity.json'];
 
 export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): SerenityConfig {
   for (const candidate of paths) {

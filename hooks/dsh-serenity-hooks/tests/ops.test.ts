@@ -87,8 +87,8 @@ describe('git-ops', () => {
   })
 
   it('localstore git 联动：allow 配置 → 放行（即使未 gitignore）', () => {
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
     writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
     const c = runGit(dir, { action: 'commit', message: 'init' }) as { committed: boolean }
     expect(c.committed).toBe(true)

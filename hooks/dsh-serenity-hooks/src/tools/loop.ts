@@ -89,7 +89,7 @@ export function createLoopTool(ctx: Context): ToolDefinition {
     name: 'loop',
     description:
       '牛马循环（老 loop 等效）：用指定模型创建专用 agent 反复执行任务直到完成。\n' +
-      '用法：loop 接受 task（要完成的目标）或依赖 session 上下文；模型缺省读 .dsh/serenity.json 的 loop.defaultModel（当前 minimax-cn-coding-plan/MiniMax-M3，廉价牛马）。\n' +
+      '用法：loop 接受 task（要完成的目标）或依赖 session 上下文；模型缺省读 .opencode/serenity.json 的 loop.defaultModel（当前 minimax-cn-coding-plan/MiniMax-M3，廉价牛马）。\n' +
       '行为：内部硬性 while 循环驱动 agent 逐轮推进任务，每轮等待无超时（agent 工作多久等多久）。唯一完成条件 = agent 精确回显本轮随机完成码（stop token），防止低智能模型提前结束。轮次不需要调用者指定——对话轮次**无上限**（不完成不返回），agent 非正常停止时自动重启（重启 ≤100 次，防死循环保险阀）。\n' +
       '进度：写入 AGENT_SESSIONS/loop-<label>.md/.json；同 label 再次调用从上次轮次续跑（不重做）。\n' +
       '约束：loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫/session-keeper）。\n' +
@@ -109,7 +109,7 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
       const cfg = loadSerenityConfig(root, DEFAULT_SERENITY_CONFIG_PATHS)
       const model = args.model ?? cfg.loop?.defaultModel
-      if (!model) throw new Error('loop 需要 model：传参或配置 .dsh/serenity.json loop.defaultModel')
+      if (!model) throw new Error('loop 需要 model：传参或配置 .opencode/serenity.json loop.defaultModel')
       const label = args.label
       if (!ctx.agentLoop) throw new Error('loop: ctx.agentLoop 不可用')
 

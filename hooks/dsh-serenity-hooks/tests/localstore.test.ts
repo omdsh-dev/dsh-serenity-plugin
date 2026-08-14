@@ -43,8 +43,8 @@ describe('localstore: 路径与 git 策略', () => {
 
   it('gitTrack 缺省 deny（没配就是不提交）；allow 需显式配置', () => {
     expect(readGitTrack(dir)).toBe('deny')
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
     expect(readGitTrack(dir)).toBe('allow')
   })
 
@@ -62,9 +62,9 @@ describe('localstore: 路径与 git 策略', () => {
     expect(ensureLocalstoreGitignored(dir).status).toBe('ignored') // 幂等
 
     const allowDir = join(dir, 'allow-ccc')
-    mkdirSync(join(allowDir, '.dsh'), { recursive: true })
+    mkdirSync(join(allowDir, '.opencode'), { recursive: true })
     writeFileSync(join(allowDir, '.serenity'), 'test')
-    writeFileSync(join(allowDir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    writeFileSync(join(allowDir, '.opencode', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
     expect(ensureLocalstoreGitignored(allowDir).status).toBe('allow')
     expect(isLocalstoreGitignored(allowDir)).toBe(false)
   })
@@ -81,8 +81,8 @@ describe('localstore: 路径与 git 策略', () => {
     expect(r.reason).toContain('localstore.json')
 
     // allow → 通过
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
     expect(checkLocalstoreGitCompliance(dir).ok).toBe(true)
   })
 })

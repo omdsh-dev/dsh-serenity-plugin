@@ -27,7 +27,7 @@ export const localstoreTool = defineTool({
   description:
     'ACC 标准本地凭据/配置存储：一个工具管理两个命名空间 credential（凭据）与 config（本地偏好）。' +
     '存储于 CCC 根根目录 localstore.json（JSON 格式，MSM 可直接读取）。' +
-    'git 策略：.dsh/serenity.json localstore.gitTrack（allow 可提交 / deny 禁提交，缺省 deny）——deny 时写入自动确保 .gitignore 含该文件（物理保证），cc_git commit 会检查拒绝。' +
+    'git 策略：.opencode/serenity.json localstore.gitTrack（allow 可提交 / deny 禁提交，缺省 deny；.dsh 回退）——deny 时写入自动确保 .gitignore 含该文件（物理保证），cc_git commit 会检查拒绝。' +
     '子命令：list（列 key，凭据不返回值）/ get <name>（读值）/ set <name> <value>（写）/ unset <name>（删）/ show <name>（元数据，凭据不打印值）/ doc（输出存储规范——路径/格式/key 规范/git 策略，agent 可按说明直接用 read/write 操作文件）。' +
     '默认 scope=credential；config 需传 --scope config（路径为 section.key，如 loop.defaultModel）。',
   parameters: {

@@ -79,10 +79,19 @@ describe('ccc: P1/P2/P3', () => {
 })
 
 describe('ccc: 配置', () => {
-  it('loadSerenityConfig 读取 .dsh/serenity.json', () => {
-    mkdirSync(join(dir, '.dsh'))
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ sessionKeeper: { threshold: 100 } }))
+  it('loadSerenityConfig 读取 .opencode/serenity.json（历史兼容，规范位置）', () => {
+    mkdirSync(join(dir, '.opencode'))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ sessionKeeper: { threshold: 100 } }))
     expect(loadSerenityConfig(dir).sessionKeeper?.threshold).toBe(100)
+  })
+
+  it('.dsh/serenity.json 仅作回退（.opencode 优先）', () => {
+    mkdirSync(join(dir, '.opencode'))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ loop: { defaultModel: 'opencode-model' } }))
+    mkdirSync(join(dir, '.dsh'))
+    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ loop: { defaultModel: 'dsh-model' } }))
+    // .opencode 优先
+    expect(loadSerenityConfig(dir).loop?.defaultModel).toBe('opencode-model')
   })
 
   it('无配置返回空对象', () => {
@@ -98,8 +107,8 @@ describe('ccc: 安全模式', () => {
   })
 
   it('readBlacklist + matchBlacklist（前缀/regex）', () => {
-    mkdirSync(join(dir, '.dsh'))
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ safeMode: { blacklist: ['.secrets/', 'regex:\\.env$'] } }))
+    mkdirSync(join(dir, '.opencode'))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ safeMode: { blacklist: ['.secrets/', 'regex:\\.env$'] } }))
     const rules = readBlacklist(dir)
     expect(matchBlacklist('.secrets/x', rules)).toBe('.secrets/')
     expect(matchBlacklist('a/.env', rules)).toBe('regex:\\.env$')

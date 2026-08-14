@@ -10,7 +10,7 @@
  *
  * 加载：~/.dsh/config.yaml 加 insert 行（免改 DSH 源码），插件包装入 DSH node_modules。
  *
- * 配置：进程级 Config（cordis.yml 提供）+ 运行时读取 CCC 的 .dsh/serenity.json。
+ * 配置：进程级 Config（cordis.yml 提供）+ 运行时读取 CCC 的 .opencode/serenity.json（规范位置，.dsh 回退）。
  */
 
 import type { Context } from 'cordis'
@@ -43,7 +43,7 @@ export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', '
 
 /** 插件配置（cordis.yml 提供；进程级） */
 export interface Config {
-  /** CCC 配置相对路径（运行时从根读取）；缺省 .dsh/serenity.json + .opencode/serenity.json */
+  /** CCC 配置相对路径（运行时从根读取）；缺省 .opencode/serenity.json（规范）+ .dsh/serenity.json（回退） */
   serenityConfigPaths?: string[]
   /** 注册真实工具 */
   tools?: boolean

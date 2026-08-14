@@ -30,9 +30,9 @@ describe('status: getStatus', () => {
   })
 
   it('读取黑名单 / 阈值 / loop 模型', () => {
-    mkdirSync(join(dir, '.dsh'))
+    mkdirSync(join(dir, '.opencode'))
     writeFileSync(
-      join(dir, '.dsh', 'serenity.json'),
+      join(dir, '.opencode', 'serenity.json'),
       JSON.stringify({ loop: { defaultModel: 'm3' }, sessionKeeper: { threshold: 100 }, safeMode: { blacklist: ['.secrets/'] } }),
     )
     const s = getStatus(dir)

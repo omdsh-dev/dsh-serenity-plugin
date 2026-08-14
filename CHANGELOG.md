@@ -1,3 +1,23 @@
+## v1.16.8 — 2026-08-14（serenity.json 规范位置修正：.opencode 优先（历史兼容，不依赖 dsh）+ 系统提示词相对路径提示行）
+
+**Scope:** 用户指出 ACC 依赖的 CCC 文件必须兼容历史（历史在 .opencode）——serenity.json 规范位置应为 `.opencode/serenity.json`（.dsh 仅回退），localstore.gitTrack 等配置随之生效；另修复"注入绝对路径 vs 工具调用相对路径打架"——加一行提示。
+
+### serenity.json 位置修正（历史兼容，不依赖 dsh）
+
+- **根因**：`DEFAULT_SERENITY_CONFIG_PATHS` 原为 `['.dsh/serenity.json', '.opencode/serenity.json']`（.dsh 优先）——但 ACC 依赖的 CCC 文件历史在 `.opencode/`，.dsh 是 dsh 运行时特有目录，依赖它违背"不依赖 dsh"（本机配置实际就在 `.opencode/serenity.json`，.dsh 一直靠回退才读到）
+- **修正**：`DEFAULT_SERENITY_CONFIG_PATHS = ['.opencode/serenity.json', '.dsh/serenity.json']`——**`.opencode` 规范位置（历史兼容、跨运行时一致），`.dsh` 仅作 dsh 运行时回退**
+- **联动生效**：localstore.gitTrack（`localstore-ops.ts readGitTrack`）、loop.defaultModel、sessionKeeper.threshold、safeMode.blacklist 全部随路径序修正
+- 全部测试/文案更新：ccc.test.ts（新增 .dsh 回退优先级用例）、context/status/ops/localstore 测试改 .opencode、keeper/loop/localstore/index/ccc 注释与工具描述同步
+
+### 系统提示词相对路径提示（注入路径 vs 工具调用打架）
+
+- **根因**：CCC 注入路径为绝对路径（Root / SESSION.md path），但 DSH 要求 CCC 内 read/write/edit 用相对路径——agent 混合使用易错
+- **修正**：绝对路径注入**保留**（标识用），ACC 块工具清单后新增提示行：
+  `CCC 内文件操作（read/write/edit/glob/grep 等）请使用相对 CCC 根的相对路径；Root / SESSION.md path 等绝对路径仅作标识，不作工具入参`
+- **顺带**：accBlock 的 localstore 行描述从旧 `~/.serenity/` 更新为 `CCC 根 localstore.json + git 策略`
+
+**测试：** 242/242（原 241 + 1：.dsh 回退优先级）
+
 ## v1.16.7 — 2026-08-14（localstore 重设计：CCC 根 localstore.json + git 提交策略 + cc_git 联动）
 
 **Scope:** 用户反馈 localstore 设计不够好（存 ~/.serenity/ 主目录不可靠/不透明）→ 重设计：存储迁到 **CCC 根根目录 `localstore.json`**（JSON 格式，MSM 可直接读取）；新增 **git 提交策略**（可靠机制 × 用户自由）；**联动 cc_git 检查**防误提交。

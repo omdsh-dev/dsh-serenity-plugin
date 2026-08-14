@@ -30,8 +30,8 @@ describe('context: ACC 身份文本', () => {
   })
 
   it('读取 loop 默认模型', () => {
-    mkdirSync(join(dir, '.dsh'))
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ loop: { defaultModel: 'mock-model' } }))
+    mkdirSync(join(dir, '.opencode'))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ loop: { defaultModel: 'mock-model' } }))
     expect(accIdentityText(dir)).toContain('mock-model')
   })
 
@@ -73,7 +73,7 @@ describe('context: ACC 注入消息（完整系统提示词 + CCC 顶层 skill �
     mkdirSync(join(dir, '.opencode', 'skills', 'tg-serenity'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'skills', 'tg-serenity', 'SKILL.md'), '---\nname: tg-serenity\n---\n顶层入口原文内容')
 
-    const msg = accMessage(dir, ['.dsh/serenity.json'], 30000) as { content: Array<{ text: string }> }
+    const msg = accMessage(dir, ['.opencode/serenity.json'], 30000) as { content: Array<{ text: string }> }
     const text = msg.content[0].text
     // 简短头
     expect(text).toContain('[ACC] 宁静号认知容器已激活')
