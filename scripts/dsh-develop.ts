@@ -22,7 +22,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, symlinkSync, statSync, readlinkSync } from 'node:fs'
-import { resolve, dirname, join } from 'node:path'
+import { resolve, dirname, join, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync, execFileSync } from 'node:child_process'
 
@@ -217,6 +217,31 @@ function cmdPublish(): void {
   cmdBuild()
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   mkdirSync(cache, { recursive: true })
+  // 发布前核对 tarball 内容：npm publish 会自动运行 prepare（只构建 Node 半的 prepare
+  // 曾清掉 lib/client.js → 发布包缺 client.js，DSH web 激活抛 MissingClientBundleError）。
+  // 用 npm pack --dry-run --json 机械断言 Node 半 + client 半都在包内。
+  const dry = run('npm', ['pack', '--dry-run', '--json'], {
+    cwd: HOOKS_DIR,
+    quiet: true,
+    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+  })
+  if (dry.status !== 0) {
+    console.error(dry.stdout + dry.stderr)
+    fail(`npm pack --dry-run 失败 (exit ${dry.status})`, 2)
+  }
+  let tarballFiles: string[] = []
+  try {
+    const parsed = JSON.parse(dry.stdout) as Array<{ files: Array<{ path: string }> }>
+    tarballFiles = (parsed[0]?.files ?? []).map((f) => f.path)
+  } catch {
+    fail(`npm pack --dry-run 输出解析失败（非预期 JSON）：\n${dry.stdout.slice(0, 400)}`, 2)
+  }
+  const required = ['lib/index.js', 'lib/client.js', 'lib/invariant.js']
+  const missing = required.filter((f) => !tarballFiles.includes(f))
+  if (missing.length > 0) {
+    fail(`tarball 缺必需文件（${missing.join(', ')}）——检查 tsdown.prepare.config.ts 是否构建完整双 bundle，中止发布`, 2)
+  }
+  console.log(`[dsh-develop] ✓ tarball 核对通过（${tarballFiles.length} 文件，含 lib/index.js + lib/client.js + lib/invariant.js）`)
   const r = run('npm', ['publish', '--access', 'public'], {
     cwd: HOOKS_DIR,
     quiet: true,
@@ -227,6 +252,36 @@ function cmdPublish(): void {
     fail(`npm publish 失败 (exit ${r.status})`, 2)
   }
   console.log(`[dsh-develop] ✓ published @shgroup/dsh-serenity-hooks@${currentVersion().pkg}（npm registry）`)
+}
+
+function cmdGithubPushRepo(dir?: string): void {
+  // 任意仓库发布到 GitHub 公开仓库（tellmewhattodo/<仓库名>）：缺 github remote 自动添加；SSH-443
+  if (!dir) fail('github-push-repo 需要仓库目录（相对 CCC 根，如 AI_LAB/serenity-acc-specs）')
+  const abs = resolve(process.cwd(), dir)
+  if (!existsSync(join(abs, '.git'))) fail(`不是 git 仓库: ${abs}`, 2)
+  const target = 'github'
+  const repoName = basename(abs)
+  const url = `git@github.com:tellmewhattodo/${repoName}.git`
+  const existing = run('git', ['remote', 'get-url', target], { cwd: abs, quiet: true })
+  if (existing.status !== 0) {
+    const add = run('git', ['remote', 'add', target, url], { cwd: abs, quiet: true })
+    if (add.status !== 0) fail(`remote add 失败: ${add.stderr}`, 2)
+    console.log(`[dsh-develop] remote ${target} -> ${url}`)
+  } else if (existing.stdout.trim() !== url) {
+    const set = run('git', ['remote', 'set-url', target, url], { cwd: abs, quiet: true })
+    if (set.status !== 0) fail(`remote set-url 失败: ${set.stderr}`, 2)
+    console.log(`[dsh-develop] remote ${target} 更新为 ${url}`)
+  }
+  const r = run('git', ['push', target, 'HEAD'], {
+    cwd: abs,
+    quiet: true,
+    env: { GIT_SSH_COMMAND: GIT_SSH_GITHUB },
+  })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`git push ${target} 失败 (exit ${r.status})`, 2)
+  }
+  console.log(`[dsh-develop] ✓ pushed ${repoName} -> github (${url})`)
 }
 
 function cmdGithubLs(remote?: string): void {
@@ -513,6 +568,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }
       case 'squash-history': cmdSquashHistory(rest[0]); break
       case 'publish': cmdPublish(); break
+      case 'github-push-repo': cmdGithubPushRepo(rest[0]); break
       case 'github-ls': cmdGithubLs(rest[0]); break
       case 'version': cmdVersion(); break
       case 'sys': {

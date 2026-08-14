@@ -154,16 +154,16 @@ describe('osp 对齐：Constraints 块（唯一例外 = 平台工具名）', () 
 })
 
 describe('osp 对齐：Session 块逐字节一致', () => {
-  it('sessionBlock() 与 osp Session 参照完全相等（相同会话值）', () => {
-    // 建立活跃会话标记：.dsh/active-session 内容 = 相对 CCC 根的 SESSION.md 路径
+  it('sessionBlock() 与 osp Session 参照完全相等（相同会话值 + scope）', () => {
+    // 建立活跃会话标记：.dsh/active-sessions/<scope> 内容 = 相对 CCC 根的 SESSION.md 路径
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
     const mdRel = join('AGENT_SESSIONS', dirName, 'SESSION.md')
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
     mkdirSync(join(dir, 'AGENT_SESSIONS', dirName), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-session'), mdRel)
+    writeFileSync(join(dir, '.dsh', 'active-sessions', 'test-scope'), mdRel)
     writeFileSync(join(dir, mdRel), '# test')
 
-    const block = sessionBlock(dir)
+    const block = sessionBlock(dir, 'test-scope')
     expect(block).not.toBe('')
     expect(block).toBe(OSP_SESSION('S126', dirName, join(dir, mdRel)))
   })
@@ -179,12 +179,12 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
   it('serenitySystemPrompt() 块序 ACC→CCE→Constraints→SKILL→Session，无 --- 分隔线', () => {
     setupCccWithSkill('tg-serenity')
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
     mkdirSync(join(dir, 'AGENT_SESSIONS', dirName), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-session'), join('AGENT_SESSIONS', dirName, 'SESSION.md'))
+    writeFileSync(join(dir, '.dsh', 'active-sessions', 'test-scope'), join('AGENT_SESSIONS', dirName, 'SESSION.md'))
     writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md'), '# test')
 
-    const text = serenitySystemPrompt(dir)
+    const text = serenitySystemPrompt(dir, 'test-scope')
     const accIdx = text.indexOf('=== Serenity ACC ===')
     const cceIdx = text.indexOf('=== Serenity CCE ===')
     const conIdx = text.indexOf('=== Serenity Constraints ===')

@@ -1,3 +1,23 @@
+## v1.16.2 — 2026-08-14（SESSION use 按 dsh 会话隔离修复 + 发包缺陷修复）
+
+**Scope:** ① 系统提示词 Session 块泄露修复——活跃会话标记从 CCC 级全局单文件改为按 dsh 会话隔离；② 三个发包缺陷（tarball 缺 lib/client.js / schemastery peer 范围不可满足 / README 方式二失效）。
+
+**SESSION use 隔离（主 bug）：**
+
+- **泄露根因**：`.dsh/active-session` 是 CCC 级**全局单文件**；系统提示词注入（systemPrompt.section 全局注册，text 回调只按 agent cwd 解析 CCC）让**任何 DSH 会话**（多开 conversation / subagent / 后台 agent / loop 牛马）都注入同一个活跃会话 → A 会话 use 的 Session 块泄漏给 B 会话，B 被引导读写 A 的 SESSION.md
+- **修复**：活跃会话标记改为 `.dsh/active-sessions/<scope>`（scope = dsh 会话 id `agent.session.id`，缺省 `default`）——`useSession/closeSession/readActiveSessionMd` 按 scope 读写；系统提示词/上下文注入/turn-stopping 心跳/压缩重注入全部按当前 agent 的会话 id 取 scope；多会话互不覆盖、互不注入
+- **迁移**：旧全局标记 `.dsh/active-session` 不再读取；use 时删除（迁移清理），close 顺带清理；升级后各会话重新 use 一次即生效
+- **安全**：scope 文件名白名单 `[A-Za-z0-9_-]`（`.` 排除，杜绝 `..` 路径段穿越）
+- **测试**：+8（scope 隔离互不覆盖 / legacy 迁移删除 / close 只清自身 scope / scope 清洗 / 心跳按 scope 隔离 / accMessage 按 scope 注入互不泄露 / osp-alignment Session 块带 scope）
+
+**发包缺陷修复（用户报告）：**
+
+- **tarball 缺 lib/client.js**：根因 = `npm publish` 自动运行 `prepare`，而 `tsdown.prepare.config.ts` 只构建 Node 半且 `clean: true` → **发布时 client.js 被清掉**（files/exports 已声明但包内无文件）→ DSH web 激活抛 MissingClientBundleError。修复：prepare 配置改为**复用完整双 bundle**（`export { default } from './tsdown.config.js'`，单一真相源）；`dsh-develop publish` 新增 **`npm pack --dry-run --json` 机械核对**（缺 index.js/client.js/invariant.js 任一即中止）；compliance 新增 F5（prepare 复用断言）+ E4 端到端断言 client.js 产出
+- **schemastery peer 范围不可满足**：`@deepseek-ai/schemastery: ^0.1.0-rc.5` → **`^3.18.1`**（npm 实际版本 3.18.x 系列；原范围无匹配版本 → `dsh plugin add` 报 ERR_PNPM_NO_MATCHING_VERSION）。cordis 4.0.0-rc.7 在 npm 存在（已核实），无需改
+- **README 方式二已失效**：`dsh plugin add github:tellmewhattodo/dsh-serenity-plugin` 安装的是仓库根包（`@shgroup/dsh-serenity-plugin`，workspace 容器、无 dsh.bundle）不会激活 → README 中英双语方式二改为 **clone + `link:<repo>/hooks/dsh-serenity-hooks`**，并警告不要用 github: 根 URL
+
+**测试：** 192/192（原 184 + 8：session 隔离 5 + context scope 注入 1 + compliance 2）
+
 ## v1.16.1 — 2026-08-13（npm 公开发布 1.16.0 + README 补丁）
 
 **Scope:** 公开发布 @shgroup/dsh-serenity-hooks 到 npm registry（1.16.0 成功），补插件包 README（npm 包页面显示）+ files 字段 + publishConfig access public + repository。

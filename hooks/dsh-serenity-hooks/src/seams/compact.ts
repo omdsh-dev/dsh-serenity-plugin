@@ -56,9 +56,10 @@ export function registerCompactRetention(ctx: Context, opts: CompactRegistration
     const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
     const root = findSerenityRoot(cwd)
     if (!root) return
+    const scope = (agent.session as { id?: string } | undefined)?.id ?? 'default'
 
     try {
-      agent.inject(accMessage(root, configPaths, entrySkillMaxChars))
+      agent.inject(accMessage(root, configPaths, entrySkillMaxChars, scope))
     } catch {
       /* 重注入失败不阻断（守卫仍兜底） */
     }

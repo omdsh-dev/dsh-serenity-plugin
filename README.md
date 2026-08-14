@@ -62,15 +62,23 @@ dsh web
 dsh plugin --profile web remove @shgroup/dsh-serenity-hooks
 ```
 
-### 方式二：从 GitHub 源码安装
+### 方式二：从 GitHub 源码安装（本地 clone + link 到 hooks 子包）
 
 ```bash
-dsh plugin --profile web add github:tellmewhattodo/dsh-serenity-plugin
+# 1. 克隆公开仓库
+git clone https://github.com/tellmewhattodo/dsh-serenity-plugin.git
+cd dsh-serenity-plugin
+
+# 2. link 安装 hooks 子包（npm 发布单元 = hooks/dsh-serenity-hooks；仓库根包非插件）
+dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
+
+# 3. 重启 dsh web
+dsh web
 ```
 
-> git 安装获取的是源码：作者侧需自包含 `prepare` 构建（本包已提供），用户侧需在 profile 的 `pnpm-workspace.yaml` 中 `allowBuilds` 放行构建脚本，并建议钉住 commit（`github:user/repo#<sha>`）。
+> ⚠️ 不要用 `dsh plugin add github:tellmewhattodo/dsh-serenity-plugin`——git URL 只能指向仓库根，而根包（`@shgroup/dsh-serenity-plugin`）是 workspace 容器、非 bundle 层插件，安装了也不会激活。git 安装获取的是源码：作者侧自包含 `prepare` 构建（本包已提供，构建完整 Node + client 双 bundle），用户侧需在 profile 的 `pnpm-workspace.yaml` 中 `allowBuilds` 放行构建脚本。
 
-### 方式三：本地开发安装
+### 方式三：本地开发安装（同仓）
 
 ```bash
 dsh plugin --profile web add link:<本仓>/hooks/dsh-serenity-hooks

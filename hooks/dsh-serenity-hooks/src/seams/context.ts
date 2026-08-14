@@ -22,6 +22,7 @@ import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { serenitySystemPrompt } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
+import { DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 
 // ── 纯文本构建（可单测）──
 
@@ -61,10 +62,11 @@ const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hoo
 /**
  * ACC 注入消息：完整内容 = 简短身份头 + 完整系统提示词（ACC 5 块 + CCC 顶层 skill 原文）。
  * 用户要求：在此处注入完整 ACC 系统提示词内容 + CCC 顶层 skill 原文（对齐 osp system.transform）。
+ * scope = dsh 会话 id：Session 块按会话隔离，不跨会话泄露。
  */
-export function accMessage(root: string, configPaths: string[], entrySkillMaxChars: number): UserMessage {
+export function accMessage(root: string, configPaths: string[], entrySkillMaxChars: number, scope: string = DEFAULT_SESSION_SCOPE): UserMessage {
   const header = accIdentityText(root, configPaths, entrySkillMaxChars)
-  const full = serenitySystemPrompt(root)
+  const full = serenitySystemPrompt(root, scope)
   const text = `${header}\n\n${full}`
   const content: ContentBlock[] = [{ type: 'text', text }]
   return createUserMessage({ content, source: PLUGIN_SOURCE })
@@ -75,6 +77,10 @@ const injected = new Set<string>()
 
 function agentKey(agent: Agent): string {
   return (agent.session as { id?: string }).id ?? 'global'
+}
+
+function agentScope(agent: Agent): string {
+  return (agent.session as { id?: string }).id ?? DEFAULT_SESSION_SCOPE
 }
 
 export interface ContextRegistration {
@@ -98,7 +104,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     const key = agentKey(agent)
     if (injected.has(key)) return
     injected.add(key)
-    agent.inject(accMessage(root, configPaths, entrySkillMaxChars))
+    agent.inject(accMessage(root, configPaths, entrySkillMaxChars, agentScope(agent)))
     syncSafeModeRestriction(agent, root)
   }
 
@@ -131,7 +137,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       }
       if (!root || injected.has(key) || downstream.kind !== 'enter') return downstream
       injected.add(key)
-      return { kind: 'enter', messages: [accMessage(root, configPaths, entrySkillMaxChars), ...messages, ...downstream.messages] }
+      return { kind: 'enter', messages: [accMessage(root, configPaths, entrySkillMaxChars, agentScope(agent)), ...messages, ...downstream.messages] }
     })
   }
 }

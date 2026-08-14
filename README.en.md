@@ -51,15 +51,24 @@ dsh web
 dsh plugin --profile web remove @shgroup/dsh-serenity-hooks
 ```
 
-### Option 2: install from GitHub source
+### Option 2: install from GitHub source (clone + link into the hooks subpackage)
 
 ```bash
-dsh plugin --profile web add github:tellmewhattodo/dsh-serenity-plugin
+# 1. Clone the public repo
+git clone https://github.com/tellmewhattodo/dsh-serenity-plugin.git
+cd dsh-serenity-plugin
+
+# 2. Link-install the hooks subpackage (the npm publish unit is hooks/dsh-serenity-hooks;
+#    the repo-root package is not a plugin)
+dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
+
+# 3. Restart dsh web
+dsh web
 ```
 
-> A git install fetches sources: the author ships a self-contained `prepare` build (this package does), and the user must allow the build script under `allowBuilds` in the profile's `pnpm-workspace.yaml`, plus pin a commit (`github:user/repo#<sha>`).
+> ⚠️ Do **not** use `dsh plugin add github:tellmewhattodo/dsh-serenity-plugin` — a git URL can only point at the repo root, and the root package (`@shgroup/dsh-serenity-plugin`) is a workspace container, not a bundle-layer plugin; installing it activates nothing. A git install fetches sources: the author ships a self-contained `prepare` build (this package does — full Node + client double bundle), and the user must allow the build script under `allowBuilds` in the profile's `pnpm-workspace.yaml`.
 
-### Option 3: local development install
+### Option 3: local development install (same repo)
 
 ```bash
 dsh plugin --profile web add link:<this-repo>/hooks/dsh-serenity-hooks

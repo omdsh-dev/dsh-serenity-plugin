@@ -14,7 +14,11 @@ import {
   summarize,
   qaCheck,
   appendHeartbeat,
-  ACTIVE_SESSION_MARKER,
+  ACTIVE_SESSIONS_DIR,
+  LEGACY_ACTIVE_SESSION_MARKER,
+  activeSessionMarker,
+  readActiveSessionMd,
+  DEFAULT_SESSION_SCOPE,
 } from '../src/session-ops.js'
 import { resolveActiveSession } from '../src/seams/loop.js'
 
@@ -78,34 +82,73 @@ describe('session-ops: 生命周期', () => {
     expect(qa.issues.length).toBeGreaterThan(0)
   })
 
-  it('use 写活动会话标记 → resolveActiveSession 可读（Session 块生效）', () => {
+  it('use 写活动会话标记（默认 scope）→ resolveActiveSession 可读（Session 块生效）', () => {
     const r = createSession(dir, 'active-use', 'active-use')
     const used = useSession(dir, 'S001')
     expect(used.dir).toContain('S001')
-    const marker = join(dir, ACTIVE_SESSION_MARKER)
+    const marker = activeSessionMarker(dir, DEFAULT_SESSION_SCOPE)
     expect(existsSync(marker)).toBe(true)
     expect(resolveActiveSession(dir)).toBe(r.sessionMd)
+    expect(readActiveSessionMd(dir)).toBe(r.sessionMd)
+  })
+
+  it('use 按 scope 隔离：不同 dsh 会话各自活跃，互不覆盖', () => {
+    const a = createSession(dir, 'scope-a', 'scope-a')
+    const b = createSession(dir, 'scope-b', 'scope-b')
+    useSession(dir, 'S001', 'agent-A')
+    useSession(dir, 'S002', 'agent-B')
+    // 各自 scope 读到各自的活跃会话
+    expect(resolveActiveSession(dir, 'agent-A')).toBe(a.sessionMd)
+    expect(resolveActiveSession(dir, 'agent-B')).toBe(b.sessionMd)
+    // 无 scope 回退默认 → null（未在默认 scope use）
+    expect(resolveActiveSession(dir)).toBeNull()
+  })
+
+  it('use 清理旧全局标记（迁移）：legacy active-session 被删除', () => {
+    const r = createSession(dir, 'migrate', 'migrate')
+    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    writeFileSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER), r.sessionMd.replace(dir + '/', ''))
+    useSession(dir, 'S001', 'agent-X')
+    expect(existsSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER))).toBe(false)
   })
 
   it('use 未找到会话抛错', () => {
     expect(() => useSession(dir, 'nope')).toThrow(/未找到会话/)
   })
 
-  it('close 删除活动会话标记', () => {
+  it('close 删除指定 scope 的活动会话标记（不影响其他 scope）', () => {
     createSession(dir, 'c', 'c')
-    useSession(dir, 'S001')
-    expect(resolveActiveSession(dir)).not.toBeNull()
+    createSession(dir, 'd', 'd')
+    useSession(dir, 'S001', 'agent-A')
+    useSession(dir, 'S002', 'agent-B')
+    expect(resolveActiveSession(dir, 'agent-A')).not.toBeNull()
+    closeSession(dir, 'agent-A')
+    expect(resolveActiveSession(dir, 'agent-A')).toBeNull()
+    // 其他 scope 不受影响
+    expect(resolveActiveSession(dir, 'agent-B')).not.toBeNull()
+  })
+
+  it('close 清理旧全局标记', () => {
+    createSession(dir, 'c', 'c')
+    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    writeFileSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER), 'AGENT_SESSIONS/x/SESSION.md')
     closeSession(dir)
-    expect(resolveActiveSession(dir)).toBeNull()
+    expect(existsSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER))).toBe(false)
+  })
+
+  it('ACTIVE_SESSIONS_DIR 为 .dsh/active-sessions；scope 文件名安全清洗', () => {
+    expect(ACTIVE_SESSIONS_DIR).toBe(join('.dsh', 'active-sessions'))
+    expect(activeSessionMarker(dir, 'cm-abc/../../x')).toBe(join(dir, '.dsh', 'active-sessions', 'cm-abc_______x'))
+    expect(activeSessionMarker(dir, '')).toBe(join(dir, '.dsh', 'active-sessions', DEFAULT_SESSION_SCOPE))
   })
 })
 
 describe('loop: 活动会话心跳', () => {
-  it('无标记返回 null；有标记追加心跳', () => {
+  it('无标记返回 null；有标记追加心跳（默认 scope）', () => {
     expect(resolveActiveSession(dir)).toBeNull()
     const r = createSession(dir, 'active', 'active')
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-session'), r.sessionMd.replace(dir + '/', ''))
+    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'active-sessions', 'default'), r.sessionMd.replace(dir + '/', ''))
     expect(resolveActiveSession(dir)).toBe(r.sessionMd)
     expect(appendHeartbeat(r.sessionMd)).toBe(true)
     const content = readFileSync(r.sessionMd, 'utf-8')
@@ -113,8 +156,20 @@ describe('loop: 活动会话心跳', () => {
   })
 
   it('标记越界返回 null', () => {
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-session'), '../escape.md')
+    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'active-sessions', 'default'), '../escape.md')
     expect(resolveActiveSession(dir)).toBeNull()
+  })
+
+  it('按 scope 隔离心跳：只写当前 dsh 会话的活跃会话', () => {
+    const a = createSession(dir, 'h-a', 'h-a')
+    const b = createSession(dir, 'h-b', 'h-b')
+    useSession(dir, 'S001', 'agent-A')
+    useSession(dir, 'S002', 'agent-B')
+    expect(resolveActiveSession(dir, 'agent-A')).toBe(a.sessionMd)
+    expect(resolveActiveSession(dir, 'agent-B')).toBe(b.sessionMd)
+    expect(appendHeartbeat(resolveActiveSession(dir, 'agent-A')!)).toBe(true)
+    expect(readFileSync(a.sessionMd, 'utf-8')).toContain('heartbeat')
+    expect(readFileSync(b.sessionMd, 'utf-8')).not.toContain('heartbeat')
   })
 })

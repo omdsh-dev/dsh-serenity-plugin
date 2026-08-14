@@ -114,27 +114,67 @@ export function showSession(root: string, key: string): DirResult & { content: s
 
 export type DirResult = { dir: string } & Record<string, JsonValue>
 
-/** 活动会话标记文件（sessionBlock 系统提示词注入读取） */
-export const ACTIVE_SESSION_MARKER = join('.dsh', 'active-session')
+/**
+ * 活动会话标记：按 DSH 会话（agent.session.id）隔离，不再使用 CCC 级全局单文件。
+ * 每个 dsh 会话一个标记文件（.dsh/active-sessions/<scope>），系统提示词 Session 块
+ * 只注入当前 dsh 会话 use 的活跃会话 —— 多开 conversation / subagent / loop 牛马互不泄露。
+ *
+ * 旧版全局标记 `.dsh/active-session`（v1.16.1 及以前）：use 时删除（迁移清理），
+ * 读取不再回退（隔离优先；升级后重新 use 一次即可）。
+ */
+export const ACTIVE_SESSIONS_DIR = join('.dsh', 'active-sessions')
 
-/** 激活会话：写 .dsh/active-session 标记（内容 = 相对 CCC 根的 SESSION.md 路径） */
-export function useSession(root: string, key: string): DirResult & { mdPath: string } {
+/** 旧版全局标记路径（v1.16.1 及以前 use 写入；新版本仅清理不再读取） */
+export const LEGACY_ACTIVE_SESSION_MARKER = join('.dsh', 'active-session')
+
+/** 默认 scope（agent.session.id 缺失时） */
+export const DEFAULT_SESSION_SCOPE = 'default'
+
+/** scope 用作文件名：仅保留安全字符（agent.session.id 可能含 / 等；`.` 排除以杜绝 `..` 路径段穿越） */
+export function sanitizeScope(scope: string): string {
+  const s = scope.replace(/[^A-Za-z0-9_-]/g, '_')
+  return s || DEFAULT_SESSION_SCOPE
+}
+
+/** scope 标记文件绝对路径 */
+export function activeSessionMarker(root: string, scope: string): string {
+  return resolve(root, ACTIVE_SESSIONS_DIR, sanitizeScope(scope))
+}
+
+/** 激活会话：写 <scope> 标记（内容 = 相对 CCC 根的 SESSION.md 路径）；顺带清理旧全局标记 */
+export function useSession(root: string, key: string, scope = DEFAULT_SESSION_SCOPE): DirResult & { mdPath: string } {
   const target = findSession(root, key)
   if (!target) throw new Error(`未找到会话: ${key}`)
   const md = join(sessionsRoot(root), target.dir, 'SESSION.md')
   if (!existsSync(md)) throw new Error(`会话 ${target.dir} 缺少 SESSION.md`)
-  const marker = resolve(root, ACTIVE_SESSION_MARKER)
-  mkdirSync(resolve(root, '.dsh'), { recursive: true })
+  const marker = activeSessionMarker(root, scope)
+  mkdirSync(resolve(root, '.dsh', 'active-sessions'), { recursive: true })
   const relMd = relative(root, md)
   writeFileSync(marker, relMd, 'utf-8')
+  // 迁移清理：旧全局标记不再读取，避免其他 dsh 会话回退到本会话 use 的会话
+  const legacy = resolve(root, LEGACY_ACTIVE_SESSION_MARKER)
+  if (existsSync(legacy)) rmSync(legacy, { force: true })
   return { dir: target.dir, mdPath: md }
 }
 
-/** 关闭活动会话：删除 .dsh/active-session 标记 */
-export function closeSession(root: string): DirResult {
-  const marker = resolve(root, ACTIVE_SESSION_MARKER)
+/** 关闭活动会话：删除 <scope> 标记 + 旧全局标记 */
+export function closeSession(root: string, scope = DEFAULT_SESSION_SCOPE): DirResult {
+  const marker = activeSessionMarker(root, scope)
   if (existsSync(marker)) rmSync(marker, { force: true })
+  const legacy = resolve(root, LEGACY_ACTIVE_SESSION_MARKER)
+  if (existsSync(legacy)) rmSync(legacy, { force: true })
   return { dir: 'active-session cleared' }
+}
+
+/** 读取指定 scope 的活跃会话 SESSION.md 绝对路径；无标记/越界返回 null */
+export function readActiveSessionMd(root: string, scope = DEFAULT_SESSION_SCOPE): string | null {
+  const marker = activeSessionMarker(root, scope)
+  if (!existsSync(marker)) return null
+  const rel = readFileSync(marker, 'utf-8').trim()
+  if (!rel) return null
+  const abs = resolve(root, rel)
+  if (!abs.startsWith(resolve(root))) return null
+  return abs
 }
 
 export function archiveSession(root: string, key: string): DirResult {

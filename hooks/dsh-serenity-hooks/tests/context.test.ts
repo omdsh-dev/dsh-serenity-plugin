@@ -62,4 +62,25 @@ describe('context: ACC 注入消息（完整系统提示词 + CCC 顶层 skill �
     expect(text).toContain('顶层入口原文内容')
     expect(text).toContain('---\nname: tg-serenity')
   })
+
+  it('accMessage 按 scope 注入 Session 块：只注入该 dsh 会话 use 的活跃会话', () => {
+    writeFileSync(join(dir, '.serenity'), 'tg-serenity')
+    const dirNameA = '2026-08-14--S127--scope-a'
+    const dirNameB = '2026-08-14--S128--scope-b'
+    for (const d of [dirNameA, dirNameB]) {
+      mkdirSync(join(dir, 'AGENT_SESSIONS', d), { recursive: true })
+      writeFileSync(join(dir, 'AGENT_SESSIONS', d, 'SESSION.md'), '# test')
+    }
+    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'active-sessions', 'agent-A'), join('AGENT_SESSIONS', dirNameA, 'SESSION.md'))
+    writeFileSync(join(dir, '.dsh', 'active-sessions', 'agent-B'), join('AGENT_SESSIONS', dirNameB, 'SESSION.md'))
+
+    const textA = (accMessage(dir, [], 30000, 'agent-A') as { content: Array<{ text: string }> }).content[0].text
+    const textB = (accMessage(dir, [], 30000, 'agent-B') as { content: Array<{ text: string }> }).content[0].text
+    // 各自只含自己的活跃会话，互不泄露
+    expect(textA).toContain('Active session: S127 — ' + dirNameA)
+    expect(textA).not.toContain('S128')
+    expect(textB).toContain('Active session: S128 — ' + dirNameB)
+    expect(textB).not.toContain('S127')
+  })
 })

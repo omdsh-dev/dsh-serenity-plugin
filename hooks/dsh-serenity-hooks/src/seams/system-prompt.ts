@@ -20,11 +20,11 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Context } from 'cordis'
 // 类型引用：拉入 system-prompt 包的 cordis 声明增强（ctx.systemPrompt）+ agent 对 AssembleContext 的合并
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
-import { existsSync, readFileSync } from 'node:fs'
-import { basename, dirname, resolve } from 'node:path'
+import { basename, dirname } from 'node:path'
 import { findSerenityRoot } from '../ccc.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
+import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 
 /** 过滤掉对 agent 隐藏的内容（safe-mode 是用户能力，不对 agent 提及） */
 const HIDDEN_LINES = /安全模式|safe-mode|\.serenity-safe-on/g
@@ -147,15 +147,11 @@ export function entrySkillSectionText(root: string): string {
     .join('\n\n')
 }
 
-/** 活跃会话解析：.dsh/active-session 标记（内容 = 相对 CCC 根的 SESSION.md 路径） */
-function resolveActiveSessionInfo(root: string): { sessionId: string; dirName: string; mdPath: string } | null {
+/** 活跃会话解析：按 dsh 会话 scope 读标记（隔离；不回退旧全局标记） */
+function resolveActiveSessionInfo(root: string, scope: string): { sessionId: string; dirName: string; mdPath: string } | null {
   try {
-    const marker = resolve(root, '.dsh', 'active-session')
-    if (!existsSync(marker)) return null
-    const rel = readFileSync(marker, 'utf-8').trim()
-    if (!rel) return null
-    const abs = resolve(root, rel)
-    if (!abs.startsWith(resolve(root))) return null
+    const abs = readActiveSessionMd(root, scope)
+    if (!abs) return null
     // 标记内容 = SESSION.md 路径 → 会话目录名 = 其父目录 basename
     const dirName = basename(dirname(abs))
     const idMatch = dirName.match(/S(\d{3,})/)
@@ -165,9 +161,9 @@ function resolveActiveSessionInfo(root: string): { sessionId: string; dirName: s
   }
 }
 
-/** 5) Session 块：逐字对齐 osp（活跃会话 + todowrite 首位约定） */
-export function sessionBlock(root: string): string {
-  const active = resolveActiveSessionInfo(root)
+/** 5) Session 块：逐字对齐 osp（活跃会话 + todowrite 首位约定）；scope = dsh 会话维度 */
+export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE): string {
+  const active = resolveActiveSessionInfo(root, scope)
   if (!active) return ''
   return [
     '',
@@ -195,7 +191,7 @@ export function sessionBlock(root: string): string {
 }
 
 /** 完整系统提示词注入文本：ACC + CCE + Constraints + SKILL 全文 + Session（osp 顺序） */
-export function serenitySystemPrompt(root: string): string {
+export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSION_SCOPE): string {
   const parts = [
     accBlock(root),
     cceBlock(),
@@ -203,7 +199,7 @@ export function serenitySystemPrompt(root: string): string {
   ]
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
-  const session = sessionBlock(root)
+  const session = sessionBlock(root, scope)
   if (session) parts.push(session)
   // 对齐 osp：块间以空行分隔（osp 逐项 push output.system，host 以换行拼接；不加 `---` 分隔线）
   return parts.join('\n\n')
@@ -212,6 +208,11 @@ export function serenitySystemPrompt(root: string): string {
 /** 从 assembly context 解析 agent cwd（subagent/后台 agent 同样带 agent） */
 function agentCwd(context: AssembleContext): string | undefined {
   return (context.agent?.session as { header?: { cwd?: string } } | undefined)?.header?.cwd
+}
+
+/** 从 assembly context 解析 dsh 会话 id（Session 块按会话隔离的 scope） */
+function agentScope(context: AssembleContext): string {
+  return (context.agent?.session as { id?: string } | undefined)?.id ?? DEFAULT_SESSION_SCOPE
 }
 
 /**
@@ -229,7 +230,7 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         if (!cwd) return ''
         const root = findSerenityRoot(cwd)
         if (!root) return ''
-        return serenitySystemPrompt(root)
+        return serenitySystemPrompt(root, agentScope(context))
       },
     })
     console.log('[serenity-hooks] ✓ 全局入口 skill section 已注册（systemPrompt 就绪）')
@@ -249,10 +250,11 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
   const key = (agent.session as { id?: string }).id ?? 'global'
   if (sectionedAgents.has(key)) return false
   try {
+    const scope = (agent.session as { id?: string }).id ?? DEFAULT_SESSION_SCOPE
     agent.ctx.systemPrompt.section({
       name: 'serenity-entry',
       order: -50,
-      text: () => serenitySystemPrompt(root),
+      text: () => serenitySystemPrompt(root, scope),
     })
     sectionedAgents.add(key)
     return true

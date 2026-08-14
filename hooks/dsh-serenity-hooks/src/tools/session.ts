@@ -21,10 +21,16 @@ import {
   summarize,
   qaCheck,
   SESSION_ACTIONS,
+  DEFAULT_SESSION_SCOPE,
 } from '../session-ops.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
   return exec.agent?.session?.header?.cwd ?? process.cwd()
+}
+
+/** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
+function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
+  return exec.agent?.session?.id ?? DEFAULT_SESSION_SCOPE
 }
 
 function renderText(value: unknown): ContentBlock[] {
@@ -35,7 +41,7 @@ function renderText(value: unknown): ContentBlock[] {
 export const sessionTool = defineTool({
   name: 'session',
   description:
-    '工作会话全周期管理（AGENT_SESSIONS/，home-session 约定）。list/show/create/use/close/health/qa/archive/summary。多步骤工作必须先 create 会话，use 激活当前会话（写 .dsh/active-session 标记 → 系统提示词 Session 块生效）。',
+    '工作会话全周期管理（AGENT_SESSIONS/，home-session 约定）。list/show/create/use/close/health/qa/archive/summary。多步骤工作必须先 create 会话，use 激活当前 dsh 会话的活跃会话（写 .dsh/active-sessions/<scope> 标记 → 系统提示词 Session 块生效，按 dsh 会话隔离不泄露）。',
   parameters: {
     action: {
       type: 'string',
@@ -84,10 +90,10 @@ export const sessionTool = defineTool({
       }
       case 'use': {
         if (!args.key) throw new Error('use 需要 key')
-        return useSession(root, args.key)
+        return useSession(root, args.key, agentScope(exec))
       }
       case 'close':
-        return closeSession(root)
+        return closeSession(root, agentScope(exec))
       case 'archive': {
         if (!args.key) throw new Error('archive 需要 key')
         return archiveSession(root, args.key)

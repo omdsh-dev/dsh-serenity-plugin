@@ -72,7 +72,10 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     }
   })
 
-  it('E4 端到端: prepare 消费端构建可独立产出 lib/index.js（staging tsdown；缺 staging 自跳过）', () => {
+  it('E4 端到端: prepare 消费端构建可独立产出完整双 bundle（lib/index.js + invariant.js + client.js）', () => {
+    // 回归门禁：v1.16.0/1.16.1 的 prepare 只构建 Node 半（clean:true 清掉 client.js），
+    // 导致 npm publish 的 tarball 缺 lib/client.js → DSH web 激活抛 MissingClientBundleError。
+    // prepare 必须复用完整双 bundle 配置（tsdown.config.ts）。
     const staging = resolve(process.env.HOME ?? '', '.dsh', 'source', 'current')
     const tsdownBin = join(staging, 'node_modules', '.bin', 'tsdown')
     if (!existsSync(tsdownBin)) return // 无 staging checkout（如 CI）→ 自跳过，对齐 G1
@@ -81,5 +84,19 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     execFileSync(tsdownBin, ['-c', 'tsdown.prepare.config.ts'], { cwd: HOOKS_DIR, encoding: 'utf-8' })
     expect(existsSync(join(libDir, 'index.js'))).toBe(true)
     expect(existsSync(join(libDir, 'invariant.js'))).toBe(true)
+    expect(existsSync(join(libDir, 'client.js'))).toBe(true)
+  })
+
+  it('F5: prepare 配置复用完整双 bundle（单一真相源，防 Node-only 漂移）', () => {
+    const prepare = readFileSync(join(HOOKS_DIR, 'tsdown.prepare.config.ts'), 'utf-8')
+    expect(prepare).toMatch(/export\s*\{\s*default\s*\}\s*from\s*'\.\/tsdown\.config\.js'/)
+    expect(prepare).not.toMatch(/entry:\s*\{\s*index/)
+  })
+
+  it('F6: peerDependencies 的 schemastery 范围在 npm 可满足（^3.18.1）', () => {
+    // v1.16.0/1.16.1 曾声明 ^0.1.0-rc.5 → npm 无匹配版本（该包仅 3.18.x 系列，
+    // harness 依赖 ^3.18.1）→ dsh plugin add 报 ERR_PNPM_NO_MATCHING_VERSION
+    const peers = pkg.peerDependencies as Record<string, string>
+    expect(peers['@deepseek-ai/schemastery']).toBe('^3.18.1')
   })
 })
