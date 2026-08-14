@@ -136,6 +136,10 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       const inherited = loopPresetInheritance(parentCtx)
       if (!ctx.agents) throw new Error('loop: ctx.agents 不可用')
 
+      // 父会话 id（loop agent 的 parentSession 标记——WebUI 子代理活动卡可见性的关键：
+      // client runtime 按 origin='subagent' + parentSessionId 识别子代理（S134 调研结论））
+      const parentSession = (exec.agent?.session as { id?: string } | undefined)?.id
+
       // definite-assignment 断言：spawnAgent 在 try 前必被 await 赋值；
       // 循环内异常重启路径也会先 dispose 旧 handle 再重新 spawn
       let handle!: AgentHandle
@@ -146,6 +150,11 @@ export function createLoopTool(ctx: Context): ToolDefinition {
           sessionId,
           meta: {
             cwd: root,
+            // origin + parentSession：loop agent 注册为父会话的子代理 →
+            // WebUI 子代理活动卡实时可见（对齐 workflow 子 agent 机制）；
+            // 副作用正确：shouldAutoRestore 排除 subagent origin（loop 不恢复主会话激活）
+            origin: 'subagent',
+            ...parentSession === undefined ? {} : { parentSession: parentSession as SessionId },
             ...inherited.agentPreset === undefined ? {} : { agentPreset: inherited.agentPreset },
           },
           agentOptions: { provider, model: modelName },

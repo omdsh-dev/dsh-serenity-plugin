@@ -1,3 +1,20 @@
+## v1.16.10 — 2026-08-15（loop 等待界面修复：loop agent 注册为子代理（origin:'subagent' + parentSession）→ WebUI 子代理活动卡实时可见）
+
+**Scope:** 用户反馈"启动 loop 没有反馈"→ 深入调研（S134）：workflow 等待界面的真实机制 = 子 agent 活动可视化（client runtime 按 `origin:'subagent'` + `parentSessionId` 识别子代理，session 事件驱动实时显示）；而 loop agent 创建时 meta 缺这两个标记 → 不被 UI 识别 → 隐形。修复：loop agent 补标记 → 对齐 workflow 子代理可见性。
+
+### 根因（调研结论）
+
+- **workflow 机制**：workflow 子 agent（`agent()`）创建 session 带 `origin:'subagent'` + `parentSession` → client runtime（sessions/manager.ts:774 `frame.origin === 'subagent' && frame.parentSessionId`）归入子代理目录 → WebUI（ui-subagent/workspace 树）**session 事件驱动实时显示活跃子代理卡**
+- **loop 缺陷**：`ctx.agents.create` meta 只有 `cwd` + `agentPreset`——无 `origin` / `parentSession` → client 不识别为子代理 → **UI 零可见**；v1.16.9 的 /serenity/loops 详情卡需手动展开 + 首轮响应才写盘 → 用户感知"启动无反馈"
+
+### 修复
+
+- **loop.ts spawnAgent**：meta 补 `origin: 'subagent'` + `parentSession`（父会话 id，`exec.agent.session.id`）→ loop agent 一创建即出现在父会话的**子代理活动卡**（对齐 workflow 机制，立即有反馈）
+- **副作用正确性**：`shouldAutoRestore` 本就排除 subagent origin（loop 不恢复主会话激活）✓；subagent 路由（agent-lookup）接管普通会话消息——loop 用 `loopAgent.followup` 自主驱动（agent 对象方法，不经普通路由）不受影响
+- 保留 v1.16.9 的 /serenity/loops 详情卡（轮次细节 / 并行任务可视化补充）
+
+**测试：** 245/245（typecheck 验证 meta.origin/parentSession 类型）
+
 ## v1.16.9 — 2026-08-15（loop guide 说明命令（eap 设计方案要求/并行策略/提示词规范）+ EAP 化轮次提示词（阅读/文字类加载 eap）+ WebUI loop 等待界面（/serenity/loops + 进度卡））
 
 **Scope:** 用户反馈 goal/workflow 不如 loop 好用 → loop 增强：① guide 说明命令（使用前先加载 eap 设计规模化方案；并行策略；提示词规范；阅读/文字类 loop 内部加载 eap）；② buildRoundPrompt EAP 化（固定详尽结构）；③ WebUI loop 等待界面（类似 workflow 进度展示：/serenity/loops 接口 + 会话头部详情卡轮询显示运行中 loop）。
