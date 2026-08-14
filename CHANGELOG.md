@@ -1,3 +1,34 @@
+## v1.16.7 — 2026-08-14（localstore 重设计：CCC 根 localstore.json + git 提交策略 + cc_git 联动）
+
+**Scope:** 用户反馈 localstore 设计不够好（存 ~/.serenity/ 主目录不可靠/不透明）→ 重设计：存储迁到 **CCC 根根目录 `localstore.json`**（JSON 格式，MSM 可直接读取）；新增 **git 提交策略**（可靠机制 × 用户自由）；**联动 cc_git 检查**防误提交。
+
+### 存储位置与格式（S134 重设计）
+
+- **位置**：`~/.serenity/credentials.yaml + settings.yaml`（主目录，YAML）→ **CCC 根根目录 `localstore.json`**（单文件，JSON）
+- **格式**：JSON 顶层分节——`credentials` 保留节（凭据，key 大写蛇形）+ 其余节（config，path = section.key）：
+  ```json
+  { "credentials": { "HOME_GITLAB_TOKEN": "xxx" }, "loop": { "defaultModel": "..." } }
+  ```
+- **方便 MSM 读取**：JSON.parse 零解析依赖（弃 YAML 轻量自实现解析器）；doc 子命令更新为 JSON 规范
+- **权限**：CCC 内普通文件（弃 0600/0644 chmod——git 不存权限位，安全由 git 策略承担；Windows 也更干净）
+- 旧 `~/.serenity/` 数据不迁移（用户已确认清理）
+
+### git 提交策略（可靠机制 × 用户自由）
+
+- **配置**：`.dsh/serenity.json` `localstore.gitTrack`: `"allow"`（可提交）| `"deny"`（禁提交）
+- **缺省 deny（没配就是不提交）**；且 deny 的保证**不依赖 dsh 运行**：
+  - **物理保证**：`localstore` 写入时自动确保 `.gitignore` 含 `localstore.json`（`ensureLocalstoreGitignored`，写一次永久生效——即使 dsh 不在/用户手动 git commit 也不会误提交）
+  - **第二道防线**：`cc_git` 联动——`checkLocalstoreGitCompliance`：文件存在 && deny && .gitignore 未覆盖 → **commit 拒绝**（throw 明确提示）+ **status 输出 warning**（不阻断）
+- **allow**：放行（不写 .gitignore；文件可提交，用户自行管理）
+
+### 其他
+
+- `ccc.ts` SerenityConfig 新增 `localstore.gitTrack`
+- `tools/localstore.ts`：execute 解析 CCC 根（findSerenityRoot），set 返回 `gitTrack/gitOk`
+- 测试：`localstore.test.ts` 重写（路径/JSON 格式/双命名空间/gitignore 联动/合规检查）+ `ops.test.ts` +3（cc_git 联动：deny 拒绝 commit+warning / deny+gitignore 放行 / allow 放行）
+
+**测试：** 246/246（原 237 + 9）
+
 ## v1.16.6 — 2026-08-14（Windows 兼容性修复（审计 4 问题 + 2 观察点）· S134 会话重启自动恢复 · loop 语义修正：移除 maxRounds，对话轮无上限，非正常停止重启 ≤100）
 
 **Scope:** ① 落实 Windows 黑盒审计报告（S009，针对 v1.16.3）的 4 个真实问题 + 2 个观察点（跨盘路径逃逸 / reveal / wait sleep / inject 核对 / quotepath / npx.cmd）；② S134 新需求——DSH 会话重启后自动恢复最近激活的宁静号会话；③ loop 语义修正（用户反馈）——轮次不需要调用者指定，对话轮次无上限（不完成不返回），100 为非正常停止时重启 agent 的次数上限，当且仅当 agent 回显验证码才算正常结束。

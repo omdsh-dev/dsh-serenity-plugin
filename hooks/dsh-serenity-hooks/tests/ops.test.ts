@@ -67,6 +67,32 @@ describe('git-ops', () => {
   it('commit 缺消息抛错', () => {
     expect(() => runGit(dir, { action: 'commit' })).toThrow(/message/)
   })
+
+  it('localstore git 联动：deny 且未 gitignore → commit 拒绝 + status warning', () => {
+    // 模拟：localstore.json 已存在，但 .gitignore 未覆盖（用户手删了行）
+    writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
+    writeFileSync(join(dir, '.gitignore'), 'node_modules/\n')
+
+    const s = runGit(dir, { action: 'status' }) as { warning?: string }
+    expect(s.warning).toContain('localstore.json')
+
+    expect(() => runGit(dir, { action: 'commit', message: 'x' })).toThrow(/localstore\.json/)
+  })
+
+  it('localstore git 联动：deny + gitignore 覆盖 → 放行 commit', () => {
+    writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
+    writeFileSync(join(dir, '.gitignore'), 'localstore.json\n')
+    const c = runGit(dir, { action: 'commit', message: 'init' }) as { committed: boolean }
+    expect(c.committed).toBe(true)
+  })
+
+  it('localstore git 联动：allow 配置 → 放行（即使未 gitignore）', () => {
+    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
+    const c = runGit(dir, { action: 'commit', message: 'init' }) as { committed: boolean }
+    expect(c.committed).toBe(true)
+  })
 })
 
 describe('msm-ops', () => {

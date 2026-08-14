@@ -80,6 +80,8 @@ export interface SerenityConfig {
   loop?: { defaultModel?: string };
   sessionKeeper?: { threshold?: number };
   safeMode?: { blacklist?: string[] };
+  /** localstore git 提交策略（S134 重设计）：allow 可提交 / deny 禁提交（缺省 deny） */
+  localstore?: { gitTrack?: 'allow' | 'deny' };
   hooks?: {
     enabled?: boolean;
     injectAccContext?: boolean;

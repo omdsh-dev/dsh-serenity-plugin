@@ -5,6 +5,7 @@
  */
 
 import { execFileSync } from 'node:child_process'
+import { checkLocalstoreGitCompliance } from './localstore-ops.js'
 import type { JsonValue } from './json.js'
 
 export type GitAction = 'status' | 'commit' | 'push' | 'log'
@@ -33,9 +34,20 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       //   agent 拿转义串做后续路径操作会踩坑，见 Windows 兼容审计观察点 B）
       const r = git(root, ['-c', 'core.quotepath=false', 'status', '--porcelain'])
       if (!r.ok) throw new Error(`status 失败：${r.stderr.trim()}`)
-      return { clean: r.stdout.trim() === '', entries: r.stdout.trim() ? r.stdout.trim().split('\n') : [] }
+      const out: Record<string, unknown> = {
+        clean: r.stdout.trim() === '',
+        entries: r.stdout.trim() ? r.stdout.trim().split('\n') : [],
+      }
+      // localstore git 联动（S134）：deny 且 .gitignore 未覆盖 → status 输出 warning（不阻断）
+      const ls = checkLocalstoreGitCompliance(root)
+      if (!ls.ok) out.warning = ls.reason
+      return out as JsonValue
     }
     case 'commit': {
+      // localstore git 联动（S134 第二道防线）：文件存在 && deny && .gitignore 未覆盖
+      // → 拒绝 commit（第一道 = localstore 写入时自动写 .gitignore 物理保证）
+      const ls = checkLocalstoreGitCompliance(root)
+      if (!ls.ok) throw new Error(ls.reason)
       if (!args.message) throw new Error('commit 需要 message')
       const add = git(root, ['add', '-A'])
       if (!add.ok) throw new Error(`git add 失败：${add.stderr.trim()}`)

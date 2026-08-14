@@ -1,14 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync, existsSync, statSync } from 'node:fs'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
-  serenityDir,
-  storeFilePath,
-  parseFlatYaml,
-  renderFlatYaml,
-  parseSectionedYaml,
-  renderSectionedYaml,
+  localstorePath,
+  LOCALSTORE_FILENAME,
+  readGitTrack,
+  isLocalstoreGitignored,
+  ensureLocalstoreGitignored,
+  checkLocalstoreGitCompliance,
   writeEntry,
   unsetEntry,
   getEntry,
@@ -19,145 +19,169 @@ import {
 } from '../src/localstore-ops.js'
 
 /**
- * localstore-ops 单元测试（S133 ACC 标准本地凭据/配置存储）。
- * 核心：双命名空间（credential 0600 / config 0644）+ ~/.serenity/ + doc 规范。
- *
- * homedir 全程 mock 到临时目录——绝不触碰真实 ~/.serenity（凭据是敏感数据）。
+ * localstore-ops 单元测试（S134 重设计：CCC 根 localstore.json + git 策略）。
+ * 核心：JSON 单文件 / 双命名空间（credentials 节 + config 节）/ deny 缺省
+ * gitignore 物理保证 / cc_git 联动检查。
  */
 
-const fakeHomeHolder = vi.hoisted(() => ({ value: '' as string }))
-
-vi.mock('node:os', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:os')>()
-  return { ...actual, homedir: () => fakeHomeHolder.value }
-})
-
-let fakeHome: string
+let dir: string
 
 beforeEach(() => {
-  fakeHome = mkdtempSync(join(tmpdir(), 'localstore-'))
-  fakeHomeHolder.value = fakeHome
+  dir = mkdtempSync(join(tmpdir(), 'localstore-'))
+  writeFileSync(join(dir, '.serenity'), 'test')
 })
 
 afterEach(() => {
-  vi.restoreAllMocks()
-  rmSync(fakeHome, { recursive: true, force: true })
+  rmSync(dir, { recursive: true, force: true })
 })
 
-describe('localstore: 路径与权限', () => {
-  it('serenityDir 指向 ~/.serenity', () => {
-    expect(serenityDir()).toBe(join(fakeHome, '.serenity'))
+describe('localstore: 路径与 git 策略', () => {
+  it('存储路径 = CCC 根根目录 localstore.json', () => {
+    expect(localstorePath(dir)).toBe(join(dir, LOCALSTORE_FILENAME))
+    expect(LOCALSTORE_FILENAME).toBe('localstore.json')
   })
 
-  it('storeFilePath 按命名空间区分文件', () => {
-    expect(storeFilePath('credential')).toBe(join(fakeHome, '.serenity', 'credentials.yaml'))
-    expect(storeFilePath('config')).toBe(join(fakeHome, '.serenity', 'settings.yaml'))
+  it('gitTrack 缺省 deny（没配就是不提交）；allow 需显式配置', () => {
+    expect(readGitTrack(dir)).toBe('deny')
+    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    expect(readGitTrack(dir)).toBe('allow')
   })
 
-  it('writeEntry 建目录 0700 + 凭据文件 0600 + 配置文件 0644', () => {
-    writeEntry('credential', 'TEST_KEY', 'secret')
-    writeEntry('config', 'loop.defaultModel', 'm3')
-    expect(statSync(serenityDir()).mode & 0o777).toBe(0o700)
-    expect(statSync(storeFilePath('credential')).mode & 0o777).toBe(0o600)
-    expect(statSync(storeFilePath('config')).mode & 0o777).toBe(0o644)
+  it('isLocalstoreGitignored 按 .gitignore 内容判断（注释/空行不算）', () => {
+    expect(isLocalstoreGitignored(dir)).toBe(false)
+    writeFileSync(join(dir, '.gitignore'), '# localstore.json\nnode_modules/\n')
+    expect(isLocalstoreGitignored(dir)).toBe(false) // 仅注释行
+    writeFileSync(join(dir, '.gitignore'), 'localstore.json\n')
+    expect(isLocalstoreGitignored(dir)).toBe(true)
+  })
+
+  it('ensureLocalstoreGitignored：deny 缺省自动追加；allow 跳过', () => {
+    expect(ensureLocalstoreGitignored(dir).status).toBe('appended')
+    expect(isLocalstoreGitignored(dir)).toBe(true)
+    expect(ensureLocalstoreGitignored(dir).status).toBe('ignored') // 幂等
+
+    const allowDir = join(dir, 'allow-ccc')
+    mkdirSync(join(allowDir, '.dsh'), { recursive: true })
+    writeFileSync(join(allowDir, '.serenity'), 'test')
+    writeFileSync(join(allowDir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    expect(ensureLocalstoreGitignored(allowDir).status).toBe('allow')
+    expect(isLocalstoreGitignored(allowDir)).toBe(false)
+  })
+
+  it('checkLocalstoreGitCompliance：无文件/allow/gitignore 覆盖 → ok；deny 未覆盖 → 拒绝', () => {
+    expect(checkLocalstoreGitCompliance(dir).ok).toBe(true) // 无文件
+    writeEntry(dir, 'credential', 'TEST_KEY', 'v') // 自动 gitignore
+    expect(checkLocalstoreGitCompliance(dir).ok).toBe(true) // gitignore 已覆盖
+
+    // 用户手删 .gitignore 行 → 不通过
+    writeFileSync(join(dir, '.gitignore'), 'node_modules/\n')
+    const r = checkLocalstoreGitCompliance(dir)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('localstore.json')
+
+    // allow → 通过
+    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
+    expect(checkLocalstoreGitCompliance(dir).ok).toBe(true)
   })
 })
 
-describe('localstore: YAML 轻量解析', () => {
-  it('parseFlatYaml 解析扁平映射（注释/空行忽略；引号去除）', () => {
-    const text = '# comment\nHOME_GITLAB_TOKEN: xxx\nSSH_PW: "a: b"\n\nEMPTY_VAL: ""\n'
-    expect(parseFlatYaml(text)).toEqual({ HOME_GITLAB_TOKEN: 'xxx', SSH_PW: 'a: b', EMPTY_VAL: '' })
+describe('localstore: JSON 格式（顶层分节）', () => {
+  it('writeEntry 产出合法 JSON：credentials 节 + config 节', () => {
+    writeEntry(dir, 'credential', 'HOME_GITLAB_TOKEN', 'tok')
+    writeEntry(dir, 'config', 'loop.defaultModel', 'm3')
+    const raw = readFileSync(localstorePath(dir), 'utf-8')
+    const parsed = JSON.parse(raw) as Record<string, Record<string, string>>
+    expect(parsed.credentials).toEqual({ HOME_GITLAB_TOKEN: 'tok' })
+    expect(parsed.loop).toEqual({ defaultModel: 'm3' })
+    // 无 YAML 痕迹
+    expect(raw).not.toContain('credentials.yaml')
   })
 
-  it('renderFlatYaml 序列化（特殊字符引号包裹）', () => {
-    const yaml = renderFlatYaml({ A: 'plain', B: 'has: colon' })
-    expect(yaml).toContain('A: plain')
-    expect(yaml).toContain('B: "has: colon"')
-  })
-
-  it('parseSectionedYaml 解析分节 + renderSectionedYaml 往返', () => {
-    const sections = { loop: { defaultModel: 'm3' }, ui: { theme: 'dark' } }
-    const yaml = renderSectionedYaml(sections)
-    expect(yaml).toContain('loop:')
-    expect(yaml).toContain('  defaultModel: m3')
-    expect(parseSectionedYaml(yaml)).toEqual(sections)
+  it('坏 JSON 视为空（宽松，不崩）', () => {
+    writeFileSync(localstorePath(dir), '{ broken', 'utf-8')
+    expect(listKeys(dir, 'credential')).toEqual([])
+    writeEntry(dir, 'config', 'a.b', 'v') // 覆盖重写
+    expect(getEntry(dir, 'config', 'a.b')).toBe('v')
   })
 })
 
 describe('localstore: 读写条目', () => {
   it('credential set/get/unset/list 往返', () => {
-    writeEntry('credential', 'HOME_GITLAB_TOKEN', 'tok123')
-    expect(getEntry('credential', 'HOME_GITLAB_TOKEN')).toBe('tok123')
-    expect(listKeys('credential')).toEqual(['HOME_GITLAB_TOKEN'])
-    expect(unsetEntry('credential', 'HOME_GITLAB_TOKEN')).toBe(true)
-    expect(getEntry('credential', 'HOME_GITLAB_TOKEN')).toBeNull()
-    expect(listKeys('credential')).toEqual([])
+    writeEntry(dir, 'credential', 'HOME_GITLAB_TOKEN', 'tok123')
+    expect(getEntry(dir, 'credential', 'HOME_GITLAB_TOKEN')).toBe('tok123')
+    expect(listKeys(dir, 'credential')).toEqual(['HOME_GITLAB_TOKEN'])
+    expect(unsetEntry(dir, 'credential', 'HOME_GITLAB_TOKEN')).toBe(true)
+    expect(getEntry(dir, 'credential', 'HOME_GITLAB_TOKEN')).toBeNull()
+    expect(listKeys(dir, 'credential')).toEqual([])
   })
 
   it('credential 写入保留其他条目', () => {
-    writeEntry('credential', 'A_KEY', 'a')
-    writeEntry('credential', 'B_KEY', 'b')
-    writeEntry('credential', 'A_KEY', 'a2')
-    expect(getEntry('credential', 'A_KEY')).toBe('a2')
-    expect(getEntry('credential', 'B_KEY')).toBe('b')
+    writeEntry(dir, 'credential', 'A_KEY', 'a')
+    writeEntry(dir, 'credential', 'B_KEY', 'b')
+    writeEntry(dir, 'credential', 'A_KEY', 'a2')
+    expect(getEntry(dir, 'credential', 'A_KEY')).toBe('a2')
+    expect(getEntry(dir, 'credential', 'B_KEY')).toBe('b')
   })
 
-  it('config section.key set/get/unset/list 往返', () => {
-    writeEntry('config', 'loop.defaultModel', 'm3')
-    writeEntry('config', 'ui.theme', 'dark')
-    expect(getEntry('config', 'loop.defaultModel')).toBe('m3')
-    expect(listKeys('config')).toEqual(['loop.defaultModel', 'ui.theme'])
-    expect(unsetEntry('config', 'loop.defaultModel')).toBe(true)
-    expect(getEntry('config', 'loop.defaultModel')).toBeNull()
+  it('config section.key set/get/unset/list 往返（与凭据节共存）', () => {
+    writeEntry(dir, 'credential', 'TOKEN', 't')
+    writeEntry(dir, 'config', 'loop.defaultModel', 'm3')
+    writeEntry(dir, 'config', 'ui.theme', 'dark')
+    expect(getEntry(dir, 'config', 'loop.defaultModel')).toBe('m3')
+    expect(listKeys(dir, 'config')).toEqual(['loop.defaultModel', 'ui.theme'])
+    expect(listKeys(dir, 'credential')).toEqual(['TOKEN']) // 互不干扰
+    expect(unsetEntry(dir, 'config', 'loop.defaultModel')).toBe(true)
+    expect(getEntry(dir, 'config', 'loop.defaultModel')).toBeNull()
   })
 
   it('credential key 校验：非大写蛇形拒绝', () => {
     expect(CREDENTIAL_KEY_RE.test('home-gitlab')).toBe(false)
     expect(CREDENTIAL_KEY_RE.test('HOME_GITLAB_TOKEN')).toBe(true)
-    expect(() => writeEntry('credential', 'bad-key', 'x')).toThrow()
+    expect(() => writeEntry(dir, 'credential', 'bad-key', 'x')).toThrow()
   })
 
   it('config path 校验：非 section.key 拒绝', () => {
-    expect(() => writeEntry('config', 'badpath', 'x')).toThrow()
-    expect(() => writeEntry('config', 'loop.BadKey', 'x')).toThrow()
+    expect(() => writeEntry(dir, 'config', 'badpath', 'x')).toThrow()
+    expect(() => writeEntry(dir, 'config', 'loop.BadKey', 'x')).toThrow()
   })
 })
 
 describe('localstore: runLocalStore 入口', () => {
-  it('doc 返回规范文本（含路径/格式/key 规范/权限）', () => {
-    const r = runLocalStore({ action: 'doc' }) as { doc: string }
-    expect(r.doc).toContain('localstore')
-    expect(r.doc).toContain('credentials.yaml')
-    expect(r.doc).toContain('settings.yaml')
-    expect(r.doc).toContain('0600')
+  it('doc 返回规范文本（JSON 路径/格式/git 策略/key 规范）', () => {
+    const r = runLocalStore(dir, { action: 'doc' }) as { doc: string }
+    expect(r.doc).toContain('localstore.json')
+    expect(r.doc).toContain('gitTrack')
     expect(r.doc).toContain('^[A-Z][A-Z0-9_]*$')
+    expect(r.doc).toContain('credentials')
   })
 
   it('list 对 credential 只返回 key 名（不返回值）', () => {
-    writeEntry('credential', 'SECRET_X', 'top-secret')
-    const r = runLocalStore({ action: 'list' }) as { keys: string[] }
+    writeEntry(dir, 'credential', 'SECRET_X', 'top-secret')
+    const r = runLocalStore(dir, { action: 'list' }) as { keys: string[] }
     expect(r.keys).toEqual(['SECRET_X'])
     expect(JSON.stringify(r)).not.toContain('top-secret')
   })
 
   it('get 返回值并标记 source', () => {
-    writeEntry('credential', 'SECRET_X', 'v1')
-    const r = runLocalStore({ action: 'get', name: 'SECRET_X' }) as { value: string; source: string }
+    writeEntry(dir, 'credential', 'SECRET_X', 'v1')
+    const r = runLocalStore(dir, { action: 'get', name: 'SECRET_X' }) as { value: string; source: string }
     expect(r.value).toBe('v1')
     expect(r.source).toBe('credential')
   })
 
-  it('show 对凭据只返回元数据（无值）', () => {
-    writeEntry('credential', 'SECRET_X', 'v1')
-    const r = runLocalStore({ action: 'show', name: 'SECRET_X' }) as { exists: boolean }
-    expect(r.exists).toBe(true)
-    expect(JSON.stringify(r)).not.toContain('v1')
+  it('set 返回 gitTrack/gitOk（deny 缺省时自动 gitignore）', () => {
+    const r = runLocalStore(dir, { action: 'set', name: 'NEW_KEY', value: 'v' }) as { gitTrack: string; gitOk: boolean }
+    expect(r.gitTrack).toBe('deny')
+    expect(r.gitOk).toBe(true)
+    expect(isLocalstoreGitignored(dir)).toBe(true)
   })
 
-  it('docText 直接可读（agent 用 fs 工具按说明操作）', () => {
-    const d = docText()
-    expect(d).toContain(storeFilePath('credential'))
-    expect(d).toContain('read')
-    expect(d).toContain('write')
+  it('show 对凭据只返回元数据（无值）', () => {
+    writeEntry(dir, 'credential', 'SECRET_X', 'v1')
+    const r = runLocalStore(dir, { action: 'show', name: 'SECRET_X' }) as { exists: boolean }
+    expect(r.exists).toBe(true)
+    expect(JSON.stringify(r)).not.toContain('v1')
   })
 })
