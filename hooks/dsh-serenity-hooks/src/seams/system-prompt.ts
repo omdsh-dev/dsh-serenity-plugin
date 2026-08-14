@@ -135,6 +135,23 @@ export function constraintsBlock(root: string): string {
   ].join('\n')
 }
 
+/**
+ * EAP 自检提示块（DSH 扩展，无 osp 对应——osp 无此块）。
+ * 每次输出前的机械自检清单，强化 EAP 表现（E↑ 显式/R↓ 可重建/S↑ 稳定）。
+ * 独立块而非塞进 CCE/Constraints：后两者受 osp-alignment 逐字节断言约束。
+ */
+export function eapBlock(): string {
+  return [
+    '',
+    '=== Serenity EAP ===',
+    '每次输出前自检（显式抽象原则：思维的价值 = 外部可重建性）:',
+    '  • E↑ 显式 — 变量/实体明确定义，关系指明方向/基数，边界划定；不用歧义词（"处理""优化"→具体化）',
+    '  • R↓ 可重建 — 关键决策记录理由与备选，不跳级讨论（先对齐上层再进下层）',
+    '  • S↑ 稳定 — 结构可重复生成，避免依赖隐含上下文',
+    '',
+  ].join('\n')
+}
+
 /** 4) SKILL.md 全文：该 CCC 顶层入口 skill 原文（对齐 osp：原文直推，无包裹头；仅过滤治理内容） */
 export function entrySkillSectionText(root: string): string {
   const skills = findEntrySkills(root)
@@ -190,12 +207,13 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
   ].join('\n')
 }
 
-/** 完整系统提示词注入文本：ACC + CCE + Constraints + SKILL 全文 + Session（osp 顺序） */
+/** 完整系统提示词注入文本：ACC + CCE + Constraints + EAP + SKILL 全文 + Session（osp 顺序 + EAP 扩展） */
 export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSION_SCOPE): string {
   const parts = [
     accBlock(root),
     cceBlock(),
     constraintsBlock(root),
+    eapBlock(),
   ]
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
@@ -203,6 +221,33 @@ export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSI
   if (session) parts.push(session)
   // 对齐 osp：块间以空行分隔（osp 逐项 push output.system，host 以换行拼接；不加 `---` 分隔线）
   return parts.join('\n\n')
+}
+
+/**
+ * Code Mode 适配行：当前 scope 以 Code Mode 呈现工具时（run_code 可见），
+ * ACC 块按 native 语义指引"直接调用工具"会与"只有 run_code 可直接调用"的执行
+ * 塌缩冲突（模型直呼工具名 → UNKNOWN_TOOL，拒绝信息误导）。追加一行说明，
+ * 引导经 run_code 程序内 tools.* 调用。both 模式不塌缩，该行不误导（程序内
+ * 调用同样合法），故按 run_code 可见性（code|both）统一附加。
+ * @param ctx - 插件 ctx（读 tools 注册表）。
+ * @param scope - 装配 scope（agent）；无则按全局视图判断。
+ * @returns 适配行（含换行前缀）；非 code/both 返回空串。
+ */
+export function codeModeAdaptationLine(ctx: Context, scope?: unknown): string {
+  try {
+    const codeVisible = ctx.tools.get('run_code', scope as never) !== undefined
+    if (!codeVisible) return ''
+  } catch {
+    return ''
+  }
+  return [
+    '',
+    '=== Serenity Code Mode ===',
+    '当前会话以 Code Mode 呈现工具：模型直接调用 ACC 工具名（cc_fs/acc_msm 等）会被拒绝（UNKNOWN_TOOL）。',
+    '请在一个 run_code 程序内经生成的 SDK 绑定调用：`await tools.cc_fs(...)`、`await tools.acc_msm(...)` 等。',
+    '程序只返回你 print/return 的内容——务必 curate 输出。',
+    '',
+  ].join('\n')
 }
 
 /** 从 assembly context 解析 agent cwd（subagent/后台 agent 同样带 agent） */
@@ -230,7 +275,9 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         if (!cwd) return ''
         const root = findSerenityRoot(cwd)
         if (!root) return ''
-        return serenitySystemPrompt(root, agentScope(context))
+        const base = serenitySystemPrompt(root, agentScope(context))
+        const codeLine = codeModeAdaptationLine(ctx, context.scope)
+        return codeLine ? `${base}\n${codeLine}` : base
       },
     })
     console.log('[serenity-hooks] ✓ 全局入口 skill section 已注册（systemPrompt 就绪）')
@@ -241,8 +288,16 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
 }
 
 /**
- * 旧接口（agent 级 scoped 注册）：保留导出兼容既有测试/调用方。
- * 新代码应使用 registerEntrySkillSectionGlobal（全局 + agent 判断，官方惯例）。
+ * agent 级 scoped 注册（P0-1：抗 preset/动态插件同名 shadow）。
+ *
+ * 为什么 scoped：DSH 的 systemPrompt section 支持 scoped 层同名 shadow 全局
+ * （agent.ctx.systemPrompt.section），且 scope 链最近层胜出。若 ACC 只注册全局
+ * section，preset 或动态 Cordis 插件可在 scoped 层注册同名 `serenity-entry`
+ * 遮蔽 ACC 身份。scoped 注册在 agent 自身层 = 最近层，任何外部组合无法覆盖。
+ * 全局注册保留为 fallback（未走 session-start 的 agent / 冷恢复路径）。
+ *
+ * text 回调闭包持有 root 与 agent：content 固定（该 agent 的 CCC 身份），
+ * code-mode 适配按装配 context.scope 判断（与全局版一致）。
  */
 const sectionedAgents = new Set<string>()
 
@@ -254,7 +309,11 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
     agent.ctx.systemPrompt.section({
       name: 'serenity-entry',
       order: -50,
-      text: () => serenitySystemPrompt(root, scope),
+      text: (context) => {
+        const base = serenitySystemPrompt(root, scope)
+        const codeLine = codeModeAdaptationLine(agent.ctx, context.scope)
+        return codeLine ? `${base}\n${codeLine}` : base
+      },
     })
     sectionedAgents.add(key)
     return true

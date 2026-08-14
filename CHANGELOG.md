@@ -1,3 +1,21 @@
+## v1.16.4 — 2026-08-14（修复 loop ctx.agents 未 inject 运行时错误 + S131 ACC 增强：scoped 身份 section / Code Mode 适配 / EAP 块 / status 扩展 / 版本自省）
+
+**Scope:** ① bug 修复——loop 工具与 compact 缝访问 `ctx.agents` 但插件 inject 未声明 `agents` → Cordis proxy 运行时抛 "cannot get property agents without inject"；② 实施 S131 CCE×EAP 增强研究中的插件侧可实现项（P0-1 scoped 身份 section / P0-2 Code Mode 适配 / P1-6 EAP 提示块 / P2-7 status 扩展 / P2-9 版本自省）。
+
+**Bug 修复：**
+
+- **inject 缺 `agents`**：`index.ts` inject 列表加 `'agents'`（AgentRegistry 服务）——loop.ts `ctx.agents.create` 与 compact.ts `ctx.agents.get` 均访问；typecheck 通过是因类型层存在，运行时 Cordis proxy 拒绝未 inject 属性
+
+**S131 增强（CCE 存续 × EAP 表现）：**
+
+- **P0-1 scoped 身份 section**：`registerEntrySkillSection` 升级为主动路径——session-start / pre-step 时在 agent.ctx 注册 `serenity-entry`（最近层），抗 preset/动态 Cordis 插件同名 shadow 覆盖 ACC 身份；全局 section 保留为冷恢复/未走 session-start 的 fallback
+- **P0-2 Code Mode 适配**：新增 `codeModeAdaptationLine`——装配时按 `ctx.tools.get('run_code', scope)` 可见性（code|both）追加 `=== Serenity Code Mode ===` 引导块（工具须经 run_code 程序内 `await tools.*` 调用），消除 Code Mode 下按 native 语义直呼工具的 UNKNOWN_TOOL 误导；全局+scoped 两个 section 的 text 回调均接入
+- **P1-6 EAP 提示块**：新增 `eapBlock`（`=== Serenity EAP ===`：E↑ 显式/R↓ 可重建/S↑ 稳定自检清单），独立块插入 Constraints 与 SKILL 之间——CCE/Constraints 受 osp-alignment 逐字节断言约束不可改，EAP 为 DSH 扩展
+- **P2-7 status 扩展**：`getStatus` 增 `dshVersion`（npm 全局 dsh package.json）/`nodeVersion`（process.version）；`/serenity/status` API 增 `codeRuntime` 装配态（language/isolation，PTC/Code Mode 可用性可查）
+- **P2-9 版本自省**：`acc_kit health` 增 `accVersion`/`dshVersion`（升级提示依据）
+
+**测试：** 202/202（原 196 + 6：EAP 块 2 / Code Mode 适配行 3 / status 扩展 1）
+
 ## v1.16.3 — 2026-08-14（loop 牛马 agent 继承父会话 preset，修复 read/write 等 preset 层工具不可用）
 
 **Scope:** loop 工具创建牛马 agent 时未 join 父会话的 agent preset → web profile 下（host 全局层 tool-fs 等被 preset 化禁用）loop agent 落在空工具层，read/write/edit 等 preset 层工具不可用。修复 = 对齐 subagent 先例：创建经 `ctx.agents.create` + setup 钩子 `agentPresets.composeFrom`，继承父 preset standing mount。

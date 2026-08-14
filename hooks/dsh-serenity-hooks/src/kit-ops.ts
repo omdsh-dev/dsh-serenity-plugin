@@ -10,6 +10,8 @@ import { existsSync, statSync, readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { findSerenityRoot, findGitRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { ACC_VERSION } from './constants.js'
+import { readDshVersion } from './status.js'
 import type { JsonValue } from './json.js'
 
 export type KitAction = 'health' | 'time' | 'wait'
@@ -48,6 +50,9 @@ export function runKit(root: string, args: KitArgs): JsonValue {
         p1: findSerenityRoot(root) !== null,
         p2: gitRoot !== null,
         p3: 'enforced-by-dsh-fs-sandbox',
+        // P2-9 版本自省：ACC 版本 + 已安装 DSH CLI 版本（升级提示依据）
+        accVersion: ACC_VERSION,
+        dshVersion: readDshVersion(),
       }
     }
     case 'time':

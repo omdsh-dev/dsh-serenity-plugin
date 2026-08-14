@@ -9,6 +9,8 @@ import {
   accBlock,
   cceBlock,
   constraintsBlock,
+  eapBlock,
+  codeModeAdaptationLine,
 } from '../src/seams/system-prompt.js'
 import { ACC_VERSION } from '../src/constants.js'
 
@@ -141,5 +143,56 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
       },
     }
     expect(() => registerEntrySkillSectionGlobal(fakeCtx as never)).not.toThrow()
+  })
+})
+
+describe('system-prompt: EAP 块（S131 P1-6 扩展）', () => {
+  it('eapBlock 含 E↑/R↓/S↑ 自检三行', () => {
+    const block = eapBlock()
+    expect(block).toContain('=== Serenity EAP ===')
+    expect(block).toContain('E↑ 显式')
+    expect(block).toContain('R↓ 可重建')
+    expect(block).toContain('S↑ 稳定')
+  })
+
+  it('serenitySystemPrompt 块序 ACC→CCE→Constraints→EAP→SKILL→Session', () => {
+    setupCccWithSkill('tg-serenity')
+    const text = serenitySystemPrompt(dir)
+    const acc = text.indexOf('=== Serenity ACC ===')
+    const cce = text.indexOf('=== Serenity CCE ===')
+    const con = text.indexOf('=== Serenity Constraints ===')
+    const eap = text.indexOf('=== Serenity EAP ===')
+    const skill = text.indexOf('顶层入口原文内容')
+    expect(acc).toBeGreaterThanOrEqual(0)
+    expect(acc).toBeLessThan(cce)
+    expect(cce).toBeLessThan(con)
+    expect(con).toBeLessThan(eap)
+    expect(eap).toBeLessThan(skill)
+  })
+})
+
+describe('system-prompt: Code Mode 适配行（S131 P0-2）', () => {
+  it('run_code 可见（code|both）→ 返回引导块', () => {
+    const fakeCtx = {
+      tools: {
+        get: (name: string) => name === 'run_code' ? { name: 'run_code' } : undefined,
+      },
+    }
+    const line = codeModeAdaptationLine(fakeCtx as never)
+    expect(line).toContain('=== Serenity Code Mode ===')
+    expect(line).toContain('await tools.cc_fs')
+  })
+
+  it('native（run_code 不可见）→ 空串', () => {
+    const fakeCtx = {
+      tools: {
+        get: () => undefined,
+      },
+    }
+    expect(codeModeAdaptationLine(fakeCtx as never)).toBe('')
+  })
+
+  it('无 tools 服务 → 空串（try/catch 吞掉）', () => {
+    expect(codeModeAdaptationLine({} as never)).toBe('')
   })
 })

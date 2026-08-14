@@ -20,7 +20,7 @@ import { resolve } from 'node:path'
 import { findSerenityRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
-import { serenitySystemPrompt } from './system-prompt.js'
+import { serenitySystemPrompt, registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
 import { DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 
@@ -102,6 +102,9 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     const root = findSerenityRoot(cwd)
     if (!root) return
     const key = agentKey(agent)
+    // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
+    // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
+    registerEntrySkillSection(agent, root)
     if (injected.has(key)) return
     injected.add(key)
     agent.inject(accMessage(root, configPaths, entrySkillMaxChars, agentScope(agent)))
@@ -134,6 +137,8 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         } catch {
           /* 同步失败不阻断 step（守卫仍兜底拦截） */
         }
+        // P0-1：pre-step 兜底路径也启用 scoped 身份 section（session-start 之外的 agent）
+        registerEntrySkillSection(agent, root)
       }
       if (!root || injected.has(key) || downstream.kind !== 'enter') return downstream
       injected.add(key)

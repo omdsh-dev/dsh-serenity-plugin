@@ -40,6 +40,13 @@ describe('status: getStatus', () => {
     expect(s.loopModel).toBe('m3')
     expect(s.blacklist).toEqual(['.secrets/'])
   })
+
+  it('P2-7 扩展：nodeVersion 恒有；dshVersion 读得到返回字符串、读不到为 null', () => {
+    const s = getStatus(dir)
+    expect(s.nodeVersion).toMatch(/^v\d+\.\d+\.\d+/)
+    // dshVersion 依赖本机 npm 全局安装；两者之一成立即可（CI/无安装场景为 null）
+    expect(s.dshVersion === null || typeof s.dshVersion === 'string').toBe(true)
+  })
 })
 
 describe('status: setSafeMode（WebUI 开关通道）', () => {

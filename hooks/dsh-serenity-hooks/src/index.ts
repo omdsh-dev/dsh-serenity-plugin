@@ -38,7 +38,7 @@ import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 export const name = 'dsh-serenity-hooks'
 
 /** 主动调用的服务；其余（agent 事件）随 harness 装配必然存在 */
-export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', 'agentLoop', 'systemPrompt']
+export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', 'agentLoop', 'agents', 'systemPrompt']
 
 /** 插件配置（cordis.yml 提供；进程级） */
 export interface Config {

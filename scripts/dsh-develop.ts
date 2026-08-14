@@ -11,7 +11,7 @@
  *   dsh-develop build                 tsc + tsdown 双 bundle（产物 lib/）
  *   dsh-develop status                插件仓库 git status + 版本
  *   dsh-develop commit <message>      git add -A + commit（插件仓库）
- *   dsh-develop push                  git push 到 home GitLab（GIT_SSH_COMMAND）
+ *   dsh-develop push                  git push origin（GitHub 公开仓库，SSH-over-443）
  *   dsh-develop deploy                load-plugin.sh 全流程（构建+双锚+shim+profile+预检）
  *   dsh-develop version               package.json / dsh.plugin.json / CHANGELOG 版本
  *   dsh-develop bump <version>        同步 package.json + dsh.plugin.json 版本
@@ -164,16 +164,18 @@ function cmdCommit(message?: string): void {
 }
 
 function cmdPush(): void {
+  // origin 已指向 GitHub 公开仓库（与 github 远程同 URL；v1.16.0 起 GitHub 为主远程）。
+  // 推送走 GIT_SSH_GITHUB（id_rsa_github + SSH-over-443）。
   const r = run('git', ['push', 'origin', 'HEAD'], {
     cwd: REPO_ROOT,
     quiet: true,
-    env: { GIT_SSH_COMMAND: GIT_SSH },
+    env: { GIT_SSH_COMMAND: GIT_SSH_GITHUB },
   })
   if (r.status !== 0) {
     console.error(r.stdout + r.stderr)
     fail(`git push 失败 (exit ${r.status})`, 2)
   }
-  console.log(`[dsh-develop] ✓ pushed to home GitLab`)
+  console.log(`[dsh-develop] ✓ pushed to origin (GitHub)`)
 }
 
 function cmdGithubPush(remote?: string, force = false): void {
@@ -548,16 +550,40 @@ function cmdDeploy(): void {
  * npm-install — 官方 npm 安装路径：`dsh plugin --profile web add @shgroup/dsh-serenity-hooks`。
  * 从 npm registry 拉取包（含 lib/client.js）并自动对账 profile bundles 层，取代旧的
  * deploy（复制本地目录）。安装后需 restart-web 生效。
+ *
+ * 版本解析：缺省或 `latest` → 查 registry 最新版本并显式 add @<latest>（绕过
+ * package.json specifier 惰性——pnpm 对未变化 specifier 报 "Already up to date"，
+ * 升级后 lock 会钉旧版）；显式版本（如 1.16.3）→ 按给定版本安装。
+ * @param profile - profile 名（默认 web）。
+ * @param version - 精确版本或 `latest`；缺省 = latest。
  */
-function cmdNpmInstall(profile = 'web'): void {
+function cmdNpmInstall(profile = 'web', version?: string): void {
   const cliBin = join(process.env.HOME ?? '', '.npm-global', 'bin', 'dsh')
   const npmDsh = join(process.env.HOME ?? '', '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
   const bin = existsSync(npmDsh) ? npmDsh : cliBin
   if (!existsSync(bin)) fail(`dsh CLI 缺失: ${bin}`, 2)
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   mkdirSync(cache, { recursive: true })
-  console.log(`[dsh-develop] npm 安装 @shgroup/dsh-serenity-hooks 到 profile '${profile}'（官方 dsh plugin add 路径）`)
-  const r = run(bin, ['plugin', '--profile', profile, 'add', '@shgroup/dsh-serenity-hooks'], {
+
+  // 解析目标版本：显式版本直接使用；缺省/latest 查 registry 最新版。
+  let target = version
+  if (target === undefined || target === 'latest') {
+    const view = run('npm', ['view', '@shgroup/dsh-serenity-hooks', 'version'], {
+      cwd: process.cwd(),
+      quiet: true,
+      env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+    })
+    if (view.status !== 0) {
+      console.error(view.stdout + view.stderr)
+      fail(`npm view 最新版本失败 (exit ${view.status})`, 2)
+    }
+    target = view.stdout.trim().split('\n').pop() ?? ''
+    if (target === '') fail('npm view 返回空版本', 2)
+    console.log(`[dsh-develop] registry 最新版本: ${target}`)
+  }
+  const pkgSpec = `@shgroup/dsh-serenity-hooks@${target}`
+  console.log(`[dsh-develop] npm 安装 ${pkgSpec} 到 profile '${profile}'（官方 dsh plugin add 路径）`)
+  const r = run(bin, ['plugin', '--profile', profile, 'add', pkgSpec], {
     cwd: process.cwd(),
     quiet: true,
     env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
@@ -567,7 +593,7 @@ function cmdNpmInstall(profile = 'web'): void {
     fail(`dsh plugin add 失败 (exit ${r.status})`, 2)
   }
   console.log(r.stdout.trim() || r.stderr.trim())
-  console.log(`[dsh-develop] ✓ 已安装 @shgroup/dsh-serenity-hooks（npm registry）→ 重启 dsh web 生效（restart-web）`)
+  console.log(`[dsh-develop] ✓ 已安装 ${pkgSpec}（npm registry）→ 重启 dsh web 生效（restart-web）`)
 }
 
 // ── main 守卫 ──
@@ -614,7 +640,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }
       case 'bump': cmdBump(rest[0]); break
       case 'deploy': cmdDeploy(); break
-      case 'npm-install': cmdNpmInstall(rest[0] ?? 'web'); break
+      case 'npm-install': cmdNpmInstall(rest[0] ?? 'web', rest[1]); break
       case 'restart-web': cmdRestartWeb(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
@@ -646,11 +672,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   build                 tsc + tsdown 双 bundle
   status                git status + 版本
   commit <message>      git add -A + commit
-  push                  git push（home GitLab）
+  push                  git push origin（GitHub，SSH-443）
   version               三处版本一致性
   bump <x.y.z>          package.json + dsh.plugin.json 版本同步
   deploy                load-plugin.sh 全流程（构建+双锚+shim+profile+预检）
-  npm-install [profile] 官方 npm 安装：dsh plugin --profile <p> add（默认 web；从 registry 拉取）
+  npm-install [profile] [version] 官方 npm 安装：缺省/latest=registry 最新；可指定精确版本
   restart-web           kill + setsid 重启 dsh web（健康检查）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   publish               npm publish @shgroup/dsh-serenity-hooks（凭据走 ~/.npmrc）

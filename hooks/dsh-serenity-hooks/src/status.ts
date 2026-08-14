@@ -5,8 +5,9 @@
  * setSafeMode 直接读写 .serenity-safe-on 标记（守卫实时读取，写即生效）。
  */
 
-import { existsSync, writeFileSync, rmSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { resolve, join } from 'node:path'
+import { homedir } from 'node:os'
 import {
   findSerenityRoot,
   isSafeModeOn,
@@ -18,9 +19,24 @@ import {
 import { ACC_VERSION } from './constants.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
 
+/** 读取已安装 DSH CLI 版本（npm 全局 @deepseek-ai/dsh）；读不到返回 null */
+export function readDshVersion(): string | null {
+  try {
+    const pkg = JSON.parse(readFileSync(
+      join(homedir(), '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
+      'utf-8',
+    )) as { version?: unknown }
+    return typeof pkg.version === 'string' ? pkg.version : null
+  } catch {
+    return null
+  }
+}
+
 export interface SerenityStatus {
   root: string | null
   accVersion: string
+  dshVersion: string | null
+  nodeVersion: string
   safeModeOn: boolean
   blacklist: string[]
   threshold: number | null
@@ -37,13 +53,18 @@ export interface SerenityStatus {
 export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): SerenityStatus {
   const root = findSerenityRoot(cwd)
   const restrict = getRestrictDiagnostics()
+  const common = {
+    accVersion: ACC_VERSION,
+    dshVersion: readDshVersion(),
+    nodeVersion: process.version,
+  }
   if (!root) {
-    return { root: null, accVersion: ACC_VERSION, safeModeOn: false, blacklist: [], threshold: null, loopModel: null, restrict }
+    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, loopModel: null, restrict }
   }
   const cfg = loadSerenityConfig(root, configPaths)
   return {
     root,
-    accVersion: ACC_VERSION,
+    ...common,
     safeModeOn: isSafeModeOn(root),
     blacklist: readBlacklist(root, configPaths),
     threshold: cfg.sessionKeeper?.threshold ?? null,

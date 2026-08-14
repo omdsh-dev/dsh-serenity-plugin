@@ -64,7 +64,13 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         if (req.method === 'GET') {
           const url = new URL(req.url ?? '/', 'http://127.0.0.1')
           const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
-          sendJson(res, 200, getStatus(workspace, configPaths))
+          const status = getStatus(workspace, configPaths)
+          // P2-7：附加 codeRuntime 装配态（WebUI 停靠栏可显示 PTC/Code Mode 是否可用）
+          const runtime = ctx.get('codeRuntime') as { language?: string; isolation?: string } | undefined
+          sendJson(res, 200, {
+            ...status,
+            ...runtime === undefined ? { codeRuntime: null } : { codeRuntime: { language: runtime.language, isolation: runtime.isolation } },
+          })
           return
         }
         if (req.method === 'POST') {
