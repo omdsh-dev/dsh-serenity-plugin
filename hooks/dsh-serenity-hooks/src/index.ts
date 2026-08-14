@@ -24,6 +24,7 @@ import { eapTool } from './tools/eap.js'
 import { neatTool } from './tools/neat.js'
 import { cceTool } from './tools/cce.js'
 import { createLoopTool } from './tools/loop.js'
+import { localstoreTool } from './tools/localstore.js'
 import { registerGuards } from './seams/guards.js'
 import { registerTurnFlush } from './seams/loop.js'
 import { registerKeeper } from './seams/keeper.js'
@@ -94,6 +95,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(neatTool)
     ctx.tools.register(cceTool)
     ctx.tools.register(createLoopTool(ctx))
+    ctx.tools.register(localstoreTool)
   }
   if (config.guards) {
     registerGuards(ctx, { configPaths: config.serenityConfigPaths })

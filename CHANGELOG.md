@@ -1,3 +1,26 @@
+## v1.16.5 — 2026-08-14（loop 修复：sessionId 唯一化 + maxRounds 降级保险阀；新增 localstore ACC 标准凭据/配置存储工具）
+
+**Scope:** ① loop 工具修复——label 不能重复（sessionId 固定冲突）+ 语义对齐（调用者不关心轮数，硬性 while + stop token 随机码验证防提前结束）；② 新增 `localstore` 工具——ACC 标准本地凭据/配置存储（S133 设计，跨 opencode/dsh × win/mac/linux）。
+
+**loop 修复（S134）：**
+
+- **sessionId 唯一化**：`loop-<label>` → `loop-<label>-<uuid>`——同 label 多次调用不再冲突（session 是每次新建的临时执行载体）；label 仅用于进度文件/续跑（`AGENT_SESSIONS/loop-<label>.json`）
+- **maxRounds 降级保险阀**：调用者不关心轮数——`startRound` 不再 min 截断（续跑从进度 round+1 直接继续）；maxRounds 仅作防死循环绝对上限；工具描述/参数/usage 文案同步
+- **stop token 随机码验证保留（loop 本质）**：`newStopToken()` 每轮 prompt 要求精确回显 → `lastResponse.includes` 判定完成——防低智能 LLM 提前结束，零改动
+
+**localstore 工具（S133，第 10 个工具）：**
+
+- **ACC 标准**：一个工具管理 credential（凭据，0600）+ config（偏好，0644）两命名空间；存储 `~/.serenity/`（平台感知，win `%USERPROFILE%\.serenity\`），目录 0700，不在任何 git 仓库内
+- **子命令**：`list / get / set / unset / show / doc`，`--scope credential|config`（默认 credential）
+- **doc 说明子命令**：输出存储路径/格式/key 规范/权限/读写方法/安全边界——agent 可按说明直接用 fs 工具（read/write）操作
+- **存储格式**：`credentials.yaml`（扁平 REF→value，key 大写蛇形）+ `settings.yaml`（命名空间分节，config path = section.key 小驼峰）
+- **安全边界**：list/show 对凭据只返回 key 名不返回值；get 标记 source；权限不符报错提示 chmod
+- **零依赖**：YAML 轻量自实现子集（扁平映射 + 注释），不引入 yaml 包
+- **注册**：index.ts（10 工具）+ accBlock 工具清单 + dsh.plugin.json contributes.tools
+- **测试**：`tests/localstore.test.ts`（16 例：路径/权限/格式/读写/doc/安全）；homedir 全程 mock 临时目录
+
+**测试：** 218/218（原 202 + 16 localstore；register 断言 9→10）
+
 ## v1.16.4 — 2026-08-14（修复 loop ctx.agents 未 inject 运行时错误 + S131 ACC 增强：scoped 身份 section / Code Mode 适配 / EAP 块 / status 扩展 / 版本自省）
 
 **Scope:** ① bug 修复——loop 工具与 compact 缝访问 `ctx.agents` 但插件 inject 未声明 `agents` → Cordis proxy 运行时抛 "cannot get property agents without inject"；② 实施 S131 CCE×EAP 增强研究中的插件侧可实现项（P0-1 scoped 身份 section / P0-2 Code Mode 适配 / P1-6 EAP 提示块 / P2-7 status 扩展 / P2-9 版本自省）。

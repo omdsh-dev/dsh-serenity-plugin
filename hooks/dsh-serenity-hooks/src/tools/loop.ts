@@ -26,6 +26,7 @@ import type {} from '@deepseek-ai/dsh-agent-loop'
 // 类型引用：拉入 agentPresets 的 cordis 声明增强（ctx.get('agentPresets') 类型解析；运行时擦除）
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { randomUUID } from 'node:crypto'
 import { findSerenityRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { loopPresetInheritance } from '../loop-preset-inherit.js'
 import { buildRoundPrompt, loopProgressPaths, newStopToken, readProgress, splitModel, writeProgress } from '../loop-ops.js'
@@ -81,18 +82,18 @@ export function createLoopTool(ctx: Context): ToolDefinition {
   return defineTool({
     name: 'loop',
     description:
-      '牛马循环（老 loop 等效）：用指定模型创建专用 agent 反复执行任务直到完成或达轮次上限。\n' +
+      '牛马循环（老 loop 等效）：用指定模型创建专用 agent 反复执行任务直到完成。\n' +
       '用法：loop 接受 task（要完成的目标）或依赖 session 上下文；模型缺省读 .dsh/serenity.json 的 loop.defaultModel（当前 minimax-cn-coding-plan/MiniMax-M3，廉价牛马）。\n' +
-      '行为：每轮创建全新 agent 工作（读文件/改代码/执行命令），汇报进度后进入下一轮；完成时输出停止标记即终止。**每轮等待无超时**（loop 永续：agent 工作多久等多久，不被超时打断）。\n' +
+      '行为：内部硬性 while 循环驱动 agent 逐轮推进任务，每轮等待无超时（agent 工作多久等多久）。唯一完成条件 = agent 精确回显本轮随机完成码（stop token），防止低智能模型提前结束。调用者不关心轮数——任务交给 loop，完成即返回。\n' +
       '进度：写入 AGENT_SESSIONS/loop-<label>.md/.json；同 label 再次调用从上次轮次续跑（不重做）。\n' +
       '约束：loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫/session-keeper）。\n' +
-      '示例：loop 执行「扫描 SQC 并修复 DC 问题」，label: sqc-scan，maxRounds: 5',
+      '示例：loop 执行「扫描 SQC 并修复 DC 问题」，label: sqc-scan',
     parameters: {
       task: { type: 'string', description: '要完成的任务目标（必填语义：告诉 loop agent 做什么；缺省则从 session 上下文推断）' },
       label: { type: 'string', required: true, description: '任务标签（进度文件命名 loop-<label>.md/.json）' },
       session: { type: 'string', description: '工作会话 S###（上下文提示，进度记录参考）' },
       model: { type: 'string', description: 'provider/model（如 minimax-cn-coding-plan/MiniMax-M3）；缺省读 loop.defaultModel' },
-      maxRounds: { type: 'integer', description: '轮次上限（默认 100）' },
+      maxRounds: { type: 'integer', description: '保险阀（防死循环，默认 100；调用者通常无需设置——loop 跑到完成或达此上限）' },
     },
     output: {
       schema: { type: 'json' },
@@ -111,17 +112,20 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       const { provider, model: modelName } = splitModel(model)
       const stopToken = newStopToken()
       let progress = readProgress(root, label)
-      const startRound = progress ? Math.min(progress.round + 1, maxRounds) : 1
+      // 续跑：从进度文件的下一轮开始（maxRounds 是保险阀，不截断续跑——调用者不关心轮数）
+      const startRound = progress ? progress.round + 1 : 1
 
       // 创建 loop agent：经 ctx.agents.create（对齐 subagent 先例）——setup 钩子
       // 在 agent 未发布前把子 scope 绑定到父 agent 的 preset standing mount
       // （agentPresets.composeFrom），使 loop agent 继承父会话的 preset 工具层
       // （read/write/edit 等）。无 agentPresets 服务/父未 join preset 时跳过，
       // 退化为历史行为（全局工具层）。
+      // sessionId 带唯一后缀：同 label 多次调用不冲突（session 是每次新建的临时
+      // 执行载体，label 只用于进度文件/续跑）。
       const parentCtx = exec.agent?.ctx
       const inherited = loopPresetInheritance(parentCtx)
       if (!ctx.agents) throw new Error('loop: ctx.agents 不可用')
-      const sessionId = `loop-${label}` as SessionId
+      const sessionId = `loop-${label}-${randomUUID()}` as SessionId
       const handle: AgentHandle = await ctx.agents.create({
         sessionId,
         meta: {
@@ -165,10 +169,10 @@ export function createLoopTool(ctx: Context): ToolDefinition {
         progressFile: json,
         lastResponse: lastResponse.slice(0, 2000),
         usage: {
-          how: 'loop 用指定模型（默认 M3）创建专用 agent 每轮独立执行任务，完成时输出停止标记即终止',
+          how: 'loop 内部硬性 while 驱动 agent 逐轮推进，agent 精确回显随机完成码即终止',
           progress: `进度在 AGENT_SESSIONS/loop-${label}.md 与 .json；同 label 再调 loop 会从下一轮续跑（不重做）`,
           constraints: 'loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫）',
-          next: done ? '任务已完成；可查看进度文件收尾' : `任务未完成（${finalRound}/${maxRounds} 轮）；可同 label 续跑或调整 maxRounds`,
+          next: done ? '任务已完成；可查看进度文件收尾' : `任务未完成（已达保险阀 ${maxRounds} 轮）；可同 label 续跑`,
         },
       }
     },

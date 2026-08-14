@@ -60,6 +60,7 @@ export function accBlock(root: string): string {
     '  neat     — return the full Neat design collaboration protocol',
     '  cce      — return the full Cognitive Continuity Engineering framework',
     '  loop     — 牛马循环：指定模型专用 agent 反复执行',
+    '  localstore — ACC 本地凭据/配置存储（credential 0600 + config 0644，~/.serenity/）；doc 子命令输出规范',
     '',
     'The DSH platform tools remain available too (read/write/edit/glob/grep/web_search/ask_user_question/subagent/workflow/goal and more) — the ACC tools above are the serenity-native layer, not the only tools.',
     '',
