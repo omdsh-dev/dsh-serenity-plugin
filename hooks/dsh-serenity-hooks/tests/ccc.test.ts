@@ -7,6 +7,7 @@ import {
   findGitRoot,
   classifyPath,
   resolveInside,
+  pathInside,
   loadSerenityConfig,
   isSafeModeOn,
   readBlacklist,
@@ -45,8 +46,35 @@ describe('ccc: P1/P2/P3', () => {
     expect(classifyPath(dir, dir)).toBe('same')
   })
 
-  it('resolveInside 阻断逃逸', () => {
+  it('pathInside 前缀判定：兄弟目录不误判', () => {
+    // root = /tmp/x/ccc-root，兄弟 /tmp/x/ccc-root2 必须 outside
+    const rootAbs = join(tmpdir(), 'ccc-root')
+    expect(pathInside(rootAbs, join(rootAbs, 'a', 'b.md'))).toBe(true)
+    expect(pathInside(rootAbs, join(rootAbs, 'a.md'))).toBe(true)
+    expect(pathInside(rootAbs, join(tmpdir(), 'ccc-root2', 'x.md'))).toBe(false)
+    expect(pathInside(rootAbs, join(tmpdir(), 'other', 'x.md'))).toBe(false)
+  })
+
+  it('pathInside 跨盘符绝对路径逃逸被阻断（Windows 兼容审计问题 1）', () => {
+    // 跨盘：root 在 D:\project\home，target 在 C:\Windows —— 前缀天然不匹配 → outside
+    expect(pathInside('D:\\project\\home', 'C:\\Windows', true)).toBe(false)
+    expect(pathInside('D:\\project\\home', 'C:\\Windows', false)).toBe(false)
+    // 同盘正常 inside
+    expect(pathInside('D:\\project\\home', 'D:\\project\\home\\AGENT_SESSIONS', true)).toBe(true)
+  })
+
+  it('pathInside Windows 大小写不敏感（caseInsensitive=true 不误拦）', () => {
+    expect(pathInside('D:\\project\\home', 'D:\\PROJECT\\HOME\\x.md', true)).toBe(true)
+    expect(pathInside('D:\\project\\home', 'D:\\project\\home\\x.md', false)).toBe(true)
+    // 区分大小写模式（linux）下不同大小写算 outside（平台行为差异）
+    expect(pathInside('D:\\project\\home', 'D:\\PROJECT\\HOME\\x.md', false)).toBe(false)
+  })
+
+  it('resolveInside 阻断跨盘绝对路径逃逸（classifyPath 修复联动）', () => {
+    // 真实调用：linux 上 resolve('C:\\Windows') = 工作目录下的字面量，不构成跨盘；
+    // 该用例验证 resolveInside 对"越出根之外"的统一阻断（相对 .. + 绝对路径）
     expect(() => resolveInside(dir, '../x')).toThrow(/Path escape blocked/)
+    expect(() => resolveInside(dir, join(dir, '..', 'outside'))).toThrow(/Path escape blocked/)
   })
 })
 

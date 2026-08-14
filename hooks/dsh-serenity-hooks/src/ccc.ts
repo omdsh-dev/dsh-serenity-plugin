@@ -9,7 +9,7 @@
  */
 
 import { existsSync, statSync, readFileSync } from 'node:fs';
-import { resolve, dirname, relative } from 'node:path';
+import { resolve, dirname } from 'node:path';
 
 // ── P1 有根 ──
 
@@ -40,11 +40,30 @@ export function findGitRoot(cwd: string): string | null {
 
 export type PathClass = 'inside' | 'outside' | 'same';
 
+/**
+ * 前缀判定：abs 是否位于 rootAbs 之内。
+ * caseInsensitive（Windows 盘符/路径大小写不敏感）由调用方按平台传入；
+ * 边界必须是路径分隔符（`\` 或 `/` 任一）——不依赖平台 sep，跨平台语义一致：
+ *   - 跨盘符绝对路径（root 在 D:\、target 在 C:\）前缀不匹配 → outside
+ *   - 兄弟目录前缀陷阱（home vs home2）边界非分隔符 → outside
+ * （旧实现用 path.relative().startsWith('..')——跨盘时 relative 返回绝对路径原文，
+ *   不以 `..` 开头 → 漏判放行，见 Windows 兼容审计问题 1。）
+ */
+export function pathInside(rootAbs: string, abs: string, caseInsensitive = process.platform === 'win32'): boolean {
+  const r = caseInsensitive ? rootAbs.toLowerCase() : rootAbs;
+  const a = caseInsensitive ? abs.toLowerCase() : abs;
+  if (a === r) return true;
+  if (!a.startsWith(r)) return false;
+  const next = a[r.length];
+  return next === '\\' || next === '/';
+}
+
 export function classifyPath(p: string, root: string): PathClass {
-  const rel = relative(resolve(root), resolve(p));
-  if (rel === '') return 'same';
-  if (rel.startsWith('..')) return 'outside';
-  return 'inside';
+  const rootAbs = resolve(root);
+  const abs = resolve(p);
+  const ci = process.platform === 'win32';
+  if (ci ? abs.toLowerCase() === rootAbs.toLowerCase() : abs === rootAbs) return 'same';
+  return pathInside(rootAbs, abs, ci) ? 'inside' : 'outside';
 }
 
 export function resolveInside(root: string, p: string): string {
@@ -67,6 +86,8 @@ export interface SerenityConfig {
     enforceSafeMode?: boolean;
     sessionKeeper?: boolean;
     turnFlush?: boolean;
+    /** 重启自动恢复最近激活的宁静号会话（session-start 时，根会话且无自身标记 → 回退最近 use 的标记） */
+    autoRestoreSession?: boolean;
   };
 }
 

@@ -30,6 +30,6 @@ export const kitTool = defineTool({
   async execute(args, exec) {
     const root = findSerenityRoot(agentCwd(exec))
     if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
-    return runKit(root, args)
+    return await runKit(root, args)
   },
 })

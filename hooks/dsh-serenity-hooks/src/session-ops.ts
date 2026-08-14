@@ -6,7 +6,8 @@
  */
 
 import { existsSync, statSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, rmSync } from 'node:fs'
-import { join, resolve, relative } from 'node:path'
+import { join, resolve, relative, basename, dirname } from 'node:path'
+import { pathInside } from './ccc.js'
 import type { JsonValue } from './json.js'
 
 export type SessionAction = 'list' | 'show' | 'create' | 'use' | 'close' | 'health' | 'qa' | 'archive' | 'summary'
@@ -175,6 +176,61 @@ export function readActiveSessionMd(root: string, scope = DEFAULT_SESSION_SCOPE)
   const abs = resolve(root, rel)
   if (!abs.startsWith(resolve(root))) return null
   return abs
+}
+
+// ── 重启自动恢复（S134 需求）：新 DSH 会话无自身标记时，回退最近激活的宁静号会话 ──
+
+export interface ActiveMarker {
+  /** 标记文件名 = sanitize 后的 scope */
+  scope: string
+  /** 标记内容 = 相对 CCC 根的 SESSION.md 路径 */
+  mdRel: string
+  /** 标记 mtime（ms）——"最近激活"排序依据 */
+  mtime: number
+}
+
+/** 列出全部 scope 的活动标记（含 scope / mdRel / mtime）；目录不存在返回空 */
+export function listActiveMarkers(root: string): ActiveMarker[] {
+  const dir = resolve(root, ACTIVE_SESSIONS_DIR)
+  if (!existsSync(dir)) return []
+  const out: ActiveMarker[] = []
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (!statSync(full).isFile()) continue
+    try {
+      const rel = readFileSync(full, 'utf-8').trim()
+      if (!rel) continue
+      out.push({ scope: entry, mdRel: rel, mtime: statSync(full).mtimeMs })
+    } catch {
+      /* 坏标记跳过（不阻断其余） */
+    }
+  }
+  return out
+}
+
+/**
+ * 重启恢复：当前 scope 无标记时，把"最近激活"（mtime 最新）且根内有效的标记
+ * 复制为当前 scope 标记（激活语义延续：use = 激活，重启自动恢复 = 重新激活）。
+ * 返回恢复的会话信息；已有标记 / 无候选 / 全部越界 → null。
+ * 调用方负责根会话判定（subagent / loop 牛马不恢复——见 context.ts shouldAutoRestore）。
+ */
+export function restoreActiveSession(root: string, scope = DEFAULT_SESSION_SCOPE): (DirResult & { mdPath: string; restored: boolean; from: string }) | null {
+  const marker = activeSessionMarker(root, scope)
+  if (existsSync(marker)) return null // 已有激活，不覆盖
+  const scopeName = sanitizeScope(scope)
+  const candidates = listActiveMarkers(root).filter((m) => m.scope !== scopeName)
+  if (candidates.length === 0) return null
+  const rootAbs = resolve(root)
+  // 有效性过滤：mdRel 必须在根内（防标记内容越界注入；pathInside 平台感知 sep/大小写）
+  const valid = candidates.filter((m) => pathInside(rootAbs, resolve(rootAbs, m.mdRel)))
+  if (valid.length === 0) return null
+  const best = valid.sort((a, b) => b.mtime - a.mtime)[0]!
+  mkdirSync(resolve(rootAbs, ACTIVE_SESSIONS_DIR), { recursive: true })
+  writeFileSync(marker, best.mdRel, 'utf-8')
+  const mdPath = resolve(rootAbs, best.mdRel)
+  const dirName = basename(dirname(mdPath))
+  const idMatch = dirName.match(/S(\d{3,})/)
+  return { dir: dirName, id: idMatch ? `S${idMatch[1]}` : null, mdPath, restored: true, from: best.scope }
 }
 
 export function archiveSession(root: string, key: string): DirResult {

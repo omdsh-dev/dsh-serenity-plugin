@@ -3,11 +3,11 @@
  *
  * health: CCC 三原则检查（P1 .serenity / P2 git / 配置）
  * time: ISO 8601 时间戳
- * wait: 同步等待 N 秒
+ * wait: 等待 N 秒（纯 Node setTimeout——不依赖外部 sleep 可执行文件，
+ *       Windows 无 GNU coreutils sleep，spawn 必 ENOENT，见 Windows 兼容审计问题 3）
  */
 
 import { existsSync, statSync, readFileSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { findSerenityRoot, findGitRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
@@ -23,7 +23,7 @@ export interface KitArgs {
   seconds?: number
 }
 
-export function runKit(root: string, args: KitArgs): JsonValue {
+export async function runKit(root: string, args: KitArgs): Promise<JsonValue> {
   switch (args.action) {
     case 'health': {
       const gitRoot = findGitRoot(root)
@@ -60,7 +60,7 @@ export function runKit(root: string, args: KitArgs): JsonValue {
     case 'wait': {
       const n = args.seconds ?? 0
       if (!Number.isFinite(n) || n < 0) throw new Error('wait 需要非负秒数')
-      execFileSync('sleep', [String(n)], { stdio: 'ignore' })
+      await new Promise((r) => setTimeout(r, Math.round(n * 1000)))
       return { waited: n }
     }
     default:

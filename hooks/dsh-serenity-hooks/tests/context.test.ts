@@ -7,7 +7,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { accIdentityText, accMessage } from '../src/seams/context.js'
+import { accIdentityText, accMessage, shouldAutoRestore } from '../src/seams/context.js'
 import { ACC_VERSION } from '../src/constants.js'
 
 let dir: string
@@ -39,6 +39,30 @@ describe('context: ACC 身份文本', () => {
     mkdirSync(join(dir, '.dsh'))
     writeFileSync(join(dir, '.dsh', 'PHASE2-PROMPT.md'), 'T1')
     expect(accIdentityText(dir)).toContain('Phase 2')
+  })
+})
+
+describe('context: 重启自动恢复的根会话判定（shouldAutoRestore）', () => {
+  const fakeAgent = (session: unknown) => ({ session }) as never
+
+  it('conversation 根会话 → 恢复', () => {
+    expect(shouldAutoRestore(fakeAgent({ id: 'main-session-abc' }))).toBe(true)
+  })
+
+  it('subagent（origin=subagent）→ 不恢复', () => {
+    expect(shouldAutoRestore(fakeAgent({ id: 'child-1', header: { origin: 'subagent' } }))).toBe(false)
+  })
+
+  it('派生会话（parentSession 存在）→ 不恢复', () => {
+    expect(shouldAutoRestore(fakeAgent({ id: 'child-2', header: { parentSession: 'main-session-abc' } }))).toBe(false)
+  })
+
+  it('loop 牛马（id 以 loop- 开头）→ 不恢复', () => {
+    expect(shouldAutoRestore(fakeAgent({ id: 'loop-sqc-scan-1234' }))).toBe(false)
+  })
+
+  it('无 session → 不恢复', () => {
+    expect(shouldAutoRestore(fakeAgent(undefined))).toBe(false)
   })
 })
 

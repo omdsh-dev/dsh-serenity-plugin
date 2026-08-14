@@ -53,7 +53,7 @@ export function accBlock(root: string): string {
     '',
     '  cc_fs    — CCC 内文件系统操作（root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find）',
     '  session  — session lifecycle（list/show/create/health/qa/archive/summary）',
-    '  acc_kit  — ACC utility kit（health: CCC three principles / time: now / wait: sleep N seconds）',
+    '  acc_kit  — ACC utility kit（health: CCC three principles / time: now / wait: wait N seconds）',
     '  cc_git   — git operations（status/commit/push/log）',
     '  acc_msm  — MSM framework（list/exec/register/deregister/check/guide）',
     '  eap      — return the full EAP cognitive quality framework',

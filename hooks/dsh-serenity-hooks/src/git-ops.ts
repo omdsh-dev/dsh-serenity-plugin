@@ -29,7 +29,9 @@ function git(root: string, args: string[]): { ok: boolean; stdout: string; stder
 export function runGit(root: string, args: GitArgs): JsonValue {
   switch (args.action) {
     case 'status': {
-      const r = git(root, ['status', '--porcelain'])
+      // -c core.quotepath=false：中文/空格路径按原文输出（默认 C 风格八进制转义，
+      //   agent 拿转义串做后续路径操作会踩坑，见 Windows 兼容审计观察点 B）
+      const r = git(root, ['-c', 'core.quotepath=false', 'status', '--porcelain'])
       if (!r.ok) throw new Error(`status 失败：${r.stderr.trim()}`)
       return { clean: r.stdout.trim() === '', entries: r.stdout.trim() ? r.stdout.trim().split('\n') : [] }
     }
@@ -61,7 +63,7 @@ export function runGit(root: string, args: GitArgs): JsonValue {
     }
     case 'log': {
       const n = args.count ?? 10
-      const r = git(root, ['log', '--oneline', '-n', String(n)])
+      const r = git(root, ['-c', 'core.quotepath=false', 'log', '--oneline', '-n', String(n)])
       if (!r.ok) throw new Error(`git log 失败：${r.stderr.trim()}`)
       return { entries: r.stdout.trim() ? r.stdout.trim().split('\n') : [] }
     }

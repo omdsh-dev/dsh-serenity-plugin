@@ -22,7 +22,7 @@ import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { serenitySystemPrompt, registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
-import { DEFAULT_SESSION_SCOPE } from '../session-ops.js'
+import { restoreActiveSession, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 
 // ── 纯文本构建（可单测）──
 
@@ -83,6 +83,23 @@ function agentScope(agent: Agent): string {
   return (agent.session as { id?: string }).id ?? DEFAULT_SESSION_SCOPE
 }
 
+/**
+ * 重启恢复的根会话判定（S134 需求）：
+ * 只有"conversation 根会话"才自动恢复最近激活的宁静号会话——
+ * - subagent：session header `origin === 'subagent'`（DSH 路由语义，agent-lookup.ts）
+ * - 派生会话：`parentSession` 存在（任何子会话）
+ * - loop 牛马：sessionId 固定 `loop-` 前缀（tools/loop.ts 生成）
+ * 三者都不恢复（避免把主会话激活注入子上下文，违背 v1.16.2 scope 隔离）。
+ */
+export function shouldAutoRestore(agent: Agent): boolean {
+  const session = agent.session as { id?: string; header?: { origin?: string; parentSession?: string } } | undefined
+  if (!session) return false
+  if (session.header?.origin === 'subagent') return false
+  if (session.header?.parentSession) return false
+  if (session.id?.startsWith('loop-')) return false
+  return true
+}
+
 export interface ContextRegistration {
   configPaths?: string[]
   /** session-start 播种 */
@@ -105,6 +122,19 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
+    // 重启恢复（S134）：根会话且无自身标记时，自动恢复最近激活的宁静号会话
+    // （serenity.json hooks.autoRestoreSession 可关，默认开）。
+    if (shouldAutoRestore(agent)) {
+      try {
+        const cfg = loadSerenityConfig(root, configPaths)
+        if (cfg.hooks?.autoRestoreSession ?? true) {
+          const restored = restoreActiveSession(root, agentScope(agent))
+          if (restored) console.log(`[serenity-hooks] ↻ 自动恢复激活会话: ${restored.dir}（from scope ${restored.from}）`)
+        }
+      } catch {
+        /* 恢复失败不阻断播种（Session 块自然为空，用户可手动 session use） */
+      }
+    }
     if (injected.has(key)) return
     injected.add(key)
     agent.inject(accMessage(root, configPaths, entrySkillMaxChars, agentScope(agent)))

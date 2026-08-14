@@ -5,11 +5,14 @@
  *   label（必）任务标签 → 进度文件 loop-<label>.md/.json
  *   session（选）工作会话 S###（上下文提示）
  *   model（选）provider/model（如 minimax-cn-coding-plan/MiniMax-M3）；缺省读 loop.defaultModel
- *   maxRounds（默认 100）轮次上限；每轮等待 agent **无超时**（loop 可永续，agent 工作多久等多久）
+ *   （S134 修正：轮次不需要调用者指定——内部 while 驱动 agent 逐轮推进，
+ *    对话轮次**无上限**（不完成不返回）；agent 非正常停止时自动重启，
+ *    重启次数上限 LOOP_MAX_RESTARTS=100（防死循环保险阀））
  *
  * 机制：ctx.agents.create()（带 setup 钩子）创建专用 agent（进程内），
- * 每轮 followup → agent/status idle → 读 session.events 响应 → 写进度 → stop token 检查 → 续跑。
- * 工厂模式：apply 时闭包捕获插件 ctx（工具 execute 无 ctx 参数）。
+ * 每轮 followup → agent/status idle → 读 session.events 响应 → 写进度 → stop token 检查 →
+ * 未完成继续下一轮；followup/waitIdle 抛错（非正常停止）→ dispose 并重新 create agent
+ * （重启计数，≤100），同一轮重试。工厂模式：apply 时闭包捕获插件 ctx（工具 execute 无 ctx 参数）。
  *
  * preset 继承：setup 钩子里对子 agent 执行 agentPresets.composeFrom（对齐 subagent 先例），
  * 使 loop agent 继承发起方会话的 agent preset 工具（read/write/edit 等 preset 层工具）。
@@ -75,6 +78,9 @@ function lastAssistantText(agent: Agent): string {
   return ''
 }
 
+/** 非正常停止时重启 agent 的次数上限（防死循环保险阀）：对话轮次无上限，重启有上限 */
+export const LOOP_MAX_RESTARTS = 100
+
 /** 创建 loop 工具（闭包捕获插件 ctx → 可访问 ctx.agentLoop） */
 
 /** 创建 loop 工具（闭包捕获插件 ctx → 可访问 ctx.agentLoop） */
@@ -84,7 +90,7 @@ export function createLoopTool(ctx: Context): ToolDefinition {
     description:
       '牛马循环（老 loop 等效）：用指定模型创建专用 agent 反复执行任务直到完成。\n' +
       '用法：loop 接受 task（要完成的目标）或依赖 session 上下文；模型缺省读 .dsh/serenity.json 的 loop.defaultModel（当前 minimax-cn-coding-plan/MiniMax-M3，廉价牛马）。\n' +
-      '行为：内部硬性 while 循环驱动 agent 逐轮推进任务，每轮等待无超时（agent 工作多久等多久）。唯一完成条件 = agent 精确回显本轮随机完成码（stop token），防止低智能模型提前结束。调用者不关心轮数——任务交给 loop，完成即返回。\n' +
+      '行为：内部硬性 while 循环驱动 agent 逐轮推进任务，每轮等待无超时（agent 工作多久等多久）。唯一完成条件 = agent 精确回显本轮随机完成码（stop token），防止低智能模型提前结束。轮次不需要调用者指定——对话轮次**无上限**（不完成不返回），agent 非正常停止时自动重启（重启 ≤100 次，防死循环保险阀）。\n' +
       '进度：写入 AGENT_SESSIONS/loop-<label>.md/.json；同 label 再次调用从上次轮次续跑（不重做）。\n' +
       '约束：loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫/session-keeper）。\n' +
       '示例：loop 执行「扫描 SQC 并修复 DC 问题」，label: sqc-scan',
@@ -93,7 +99,6 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       label: { type: 'string', required: true, description: '任务标签（进度文件命名 loop-<label>.md/.json）' },
       session: { type: 'string', description: '工作会话 S###（上下文提示，进度记录参考）' },
       model: { type: 'string', description: 'provider/model（如 minimax-cn-coding-plan/MiniMax-M3）；缺省读 loop.defaultModel' },
-      maxRounds: { type: 'integer', description: '保险阀（防死循环，默认 100；调用者通常无需设置——loop 跑到完成或达此上限）' },
     },
     output: {
       schema: { type: 'json' },
@@ -105,14 +110,13 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       const cfg = loadSerenityConfig(root, DEFAULT_SERENITY_CONFIG_PATHS)
       const model = args.model ?? cfg.loop?.defaultModel
       if (!model) throw new Error('loop 需要 model：传参或配置 .dsh/serenity.json loop.defaultModel')
-      const maxRounds = args.maxRounds ?? 100
       const label = args.label
       if (!ctx.agentLoop) throw new Error('loop: ctx.agentLoop 不可用')
 
       const { provider, model: modelName } = splitModel(model)
       const stopToken = newStopToken()
       let progress = readProgress(root, label)
-      // 续跑：从进度文件的下一轮开始（maxRounds 是保险阀，不截断续跑——调用者不关心轮数）
+      // 续跑：从进度文件的下一轮开始（对话轮号仅用于进度记录/续跑）
       const startRound = progress ? progress.round + 1 : 1
 
       // 创建 loop agent：经 ctx.agents.create（对齐 subagent 先例）——setup 钩子
@@ -121,38 +125,62 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       // （read/write/edit 等）。无 agentPresets 服务/父未 join preset 时跳过，
       // 退化为历史行为（全局工具层）。
       // sessionId 带唯一后缀：同 label 多次调用不冲突（session 是每次新建的临时
-      // 执行载体，label 只用于进度文件/续跑）。
+      // 执行载体，label 只用于进度文件/续跑）；重启时重新生成（旧 session 已损坏）。
       const parentCtx = exec.agent?.ctx
       const inherited = loopPresetInheritance(parentCtx)
       if (!ctx.agents) throw new Error('loop: ctx.agents 不可用')
-      const sessionId = `loop-${label}-${randomUUID()}` as SessionId
-      const handle: AgentHandle = await ctx.agents.create({
-        sessionId,
-        meta: {
-          cwd: root,
-          ...inherited.agentPreset === undefined ? {} : { agentPreset: inherited.agentPreset },
-        },
-        agentOptions: { provider, model: modelName },
-        ...inherited.setup === undefined ? {} : { setup: inherited.setup },
-      })
-      const loopAgent = handle.agent
+
+      // definite-assignment 断言：spawnAgent 在 try 前必被 await 赋值；
+      // 循环内异常重启路径也会先 dispose 旧 handle 再重新 spawn
+      let handle!: AgentHandle
+      let loopAgent!: Agent
+      const spawnAgent = async (): Promise<void> => {
+        const sessionId = `loop-${label}-${randomUUID()}` as SessionId
+        handle = await ctx.agents.create({
+          sessionId,
+          meta: {
+            cwd: root,
+            ...inherited.agentPreset === undefined ? {} : { agentPreset: inherited.agentPreset },
+          },
+          agentOptions: { provider, model: modelName },
+          ...inherited.setup === undefined ? {} : { setup: inherited.setup },
+        })
+        loopAgent = handle.agent
+      }
+      await spawnAgent()
 
       let done = false
       let lastResponse = progress?.lastResponse ?? ''
       let finalRound = startRound - 1
+      // 非正常停止（followup/waitIdle 抛错）时重启 agent 的次数；对话轮次本身无上限
+      let restarts = 0
       try {
-        for (let round = startRound; round <= maxRounds; round++) {
+        let round = startRound
+        while (true) {
           finalRound = round
-          const prompt = buildRoundPrompt({ root, session: args.session, label, round, maxRounds, stopToken, progress, task: args.task })
-          loopAgent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-serenity-hooks' } }))
-          await waitIdle(ctx, loopAgent)
-          lastResponse = lastAssistantText(loopAgent)
+          const prompt = buildRoundPrompt({ root, session: args.session, label, round, stopToken, progress, task: args.task })
+          try {
+            loopAgent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-serenity-hooks' } }))
+            await waitIdle(ctx, loopAgent)
+            lastResponse = lastAssistantText(loopAgent)
+          } catch {
+            // 非正常停止：重启 agent（≤ LOOP_MAX_RESTARTS 次）后重试同一轮，不消耗对话轮号
+            restarts++
+            if (restarts > LOOP_MAX_RESTARTS) break
+            await handle.dispose().catch(() => {})
+            await spawnAgent()
+            continue
+          }
           progress = { round, done: false, label, model, updated: new Date().toISOString(), lastResponse }
           writeProgress(root, label, progress)
+          // 唯一正常结束条件（当且仅当）：agent 精确回显本轮随机验证码。
+          // agent 自报"完成"但未回显验证码 → 不算完成，继续下一轮；
+          // 任何异常路径（下方 catch）都不置 done——验证码是唯一正常结束判据。
           if (lastResponse.includes(stopToken)) {
             done = true
             break
           }
+          round++
         }
         writeProgress(root, label, { round: finalRound, done, label, model, updated: new Date().toISOString(), lastResponse })
       } finally {
@@ -164,15 +192,16 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       return {
         done,
         rounds: finalRound,
+        restarts,
         model,
         label,
         progressFile: json,
         lastResponse: lastResponse.slice(0, 2000),
         usage: {
-          how: 'loop 内部硬性 while 驱动 agent 逐轮推进，agent 精确回显随机完成码即终止',
+          how: 'loop 内部硬性 while 驱动 agent 逐轮推进，agent 精确回显随机完成码即终止；对话轮次无上限（不完成不返回），agent 非正常停止时自动重启（≤100 次）',
           progress: `进度在 AGENT_SESSIONS/loop-${label}.md 与 .json；同 label 再调 loop 会从下一轮续跑（不重做）`,
           constraints: 'loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫）',
-          next: done ? '任务已完成；可查看进度文件收尾' : `任务未完成（已达保险阀 ${maxRounds} 轮）；可同 label 续跑`,
+          next: done ? '任务已完成；可查看进度文件收尾' : `任务未完成（已达内部 ${LOOP_MAX_RESTARTS} 次重启保险阀）；可同 label 续跑`,
         },
       }
     },

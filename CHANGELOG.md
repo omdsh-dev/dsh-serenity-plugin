@@ -1,3 +1,35 @@
+## v1.16.6 — 2026-08-14（Windows 兼容性修复（审计 4 问题 + 2 观察点）· S134 会话重启自动恢复 · loop 语义修正：移除 maxRounds，对话轮无上限，非正常停止重启 ≤100）
+
+**Scope:** ① 落实 Windows 黑盒审计报告（S009，针对 v1.16.3）的 4 个真实问题 + 2 个观察点（跨盘路径逃逸 / reveal / wait sleep / inject 核对 / quotepath / npx.cmd）；② S134 新需求——DSH 会话重启后自动恢复最近激活的宁静号会话；③ loop 语义修正（用户反馈）——轮次不需要调用者指定，对话轮次无上限（不完成不返回），100 为非正常停止时重启 agent 的次数上限，当且仅当 agent 回显验证码才算正常结束。
+
+### Windows 兼容性修复（审计报告落实）
+
+- **问题 1 · cc_fs 跨盘符绝对路径逃逸（🔴 安全，P3 失效）**：`ccc.ts classifyPath` 从 `path.relative().startsWith('..')` 改为**前缀判定**（新增 `pathInside`）——跨盘时 relative 返回绝对路径原文不以 `..` 开头导致漏判；前缀 + sep 边界杜绝兄弟目录陷阱（`home` vs `home2`）；Windows 大小写不敏感由调用方按平台传 `caseInsensitive`。`resolveInside` 与 msm-ops 的 path 校验（均复用 classifyPath）一并修复。新增测试：跨盘 / 大小写 / 兄弟目录
+- **问题 2 · cc_fs reveal Windows 不可用（🔴）**：win32 分支改为**目录 → `explorer <dir>`、文件 → `explorer /select,<abs>`**（原对目录用 `/select,` 语义错误）；explorer 是 GUI 子系统进程（成功也常返回非零）→ 弃 `execFileSync` 退出码判定，改 `spawn` 分离 + unref（fire-and-forget）+ error 监听静默。新增测试：win32 目录/文件分支（mock platform + spawn）
+- **问题 3 · acc_kit wait 依赖外部 sleep（🟠）**：`kit-ops.ts` 弃 `execFileSync('sleep')`（Windows 无 GNU coreutils），`runKit` 改 async，wait 用纯 Node `setTimeout`——跨平台统一，无平台分支。`tools/kit.ts` 同步 await；ops 测试补 wait 用例（0 秒立即 / 1 秒耗时 / 负秒拒绝）
+- **问题 4 · loop inject 缺 agents（🔴）**：**核对为已修复**——v1.16.4 已把 `'agents'` 加入 inject 列表（CHANGELOG v1.16.4 有据），本版无需改动，标注复核
+- **观察点 B · cc_git status/log 中文路径转义（🟡）**：status 与 log 均加 `-c core.quotepath=false`——中文/空格路径按原文输出，避免 agent 拿八进制转义串做后续路径操作
+- **观察点 A · acc_msm exec Windows 空输出（🟡）**：`.cmd` 不能被 CreateProcess 直接解析 → `execFile('npx')`/`spawnSync('npx')` 在 Windows 必 ENOENT → 新增 `NPX_BIN`（win32 → `npx.cmd`）用于两处 tsx 回退；bun 优先保留（bun.exe 可被 libuv 按 PATHEXT 解析）
+- **accBlock 文案**：`wait: sleep N seconds` → `wait: wait N seconds`（不再依赖 sleep）
+
+### S134 新需求：会话重启自动恢复
+
+- **根因**：活跃会话标记按 scope（`agent.session.id`）隔离（v1.16.2）；DSH 重启/新开 conversation → 新 session id → 自身 scope 无标记 → Session 块不注入，需手动 `session use`
+- **实现**：`session-ops.ts` 新增 `listActiveMarkers` + `restoreActiveSession`——当前 scope 无标记时，把 **mtime 最新**（最近激活）且根内有效的标记复制为当前 scope 标记（激活语义延续：use = 激活，重启自动恢复 = 重新激活）；`context.ts` session-start 播种时触发，`shouldAutoRestore` 根会话判定（subagent `origin='subagent'` / 派生 `parentSession` / loop 牛马 `loop-` 前缀 → 不恢复，维持 v1.16.2 scope 隔离）；`serenity.json hooks.autoRestoreSession` 可关（默认开）
+- **测试**：+11（pathInside 3 / 恢复 6 / shouldAutoRestore 5 / wait 2 —— 计 16）
+
+### loop 语义修正（用户反馈）
+
+- **移除 `maxRounds` 参数**：轮次不需要调用者指定——参数 schema / description / usage 同步（原可传参导致"12 轮就返回未完成"）
+- **对话轮次无上限（不完成不返回）**：`for (round ≤ roundCap)` 改为 `while(true)`——只有 stop token 命中或达重启保险阀才返回；续跑从进度 round+1 继续，不再有轮号绝对截断
+- **100 = 非正常停止时重启 agent 的次数上限**：`LOOP_MAX_ROUNDS` → `LOOP_MAX_RESTARTS`——followup/waitIdle 抛错 → dispose 旧 agent + 重新 create（新 sessionId）→ 同一轮重试（不消耗对话轮号），重启计数 ≤100 防死循环
+- **当且仅当验证码命中 = 正常结束**：`done` 仅在 `lastResponse.includes(stopToken)` 置 true；agent 自报完成但未回显验证码 → 继续下一轮；异常路径永不置 done
+- **buildRoundPrompt**：移除 maxRounds 字段，标题 `round N/M` → `round N`（续跑时 M 误导）
+- **返回**：新增 `restarts` 字段（本次调用重启次数）；usage.next 文案改"已达内部 100 次重启保险阀"
+- **测试**：loop-ops 用例同步（去 maxRounds）
+
+**测试：** 234/234（原 218 + 16）
+
 ## v1.16.5 — 2026-08-14（loop 修复：sessionId 唯一化 + maxRounds 降级保险阀；新增 localstore ACC 标准凭据/配置存储工具）
 
 **Scope:** ① loop 工具修复——label 不能重复（sessionId 固定冲突）+ 语义对齐（调用者不关心轮数，硬性 while + stop token 随机码验证防提前结束）；② 新增 `localstore` 工具——ACC 标准本地凭据/配置存储（S133 设计，跨 opencode/dsh × win/mac/linux）。

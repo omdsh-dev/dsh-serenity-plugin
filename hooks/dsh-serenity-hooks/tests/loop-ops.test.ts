@@ -48,9 +48,9 @@ describe('loop-ops: 模型解析与 stop token', () => {
 
 describe('loop-ops: 轮次 prompt', () => {
   it('第一轮 vs 续跑轮（不重做）', () => {
-    const base = { root: dir, session: 'S101', label: 'scan', round: 2, maxRounds: 20, stopToken: 'TOK' }
+    const base = { root: dir, session: 'S101', label: 'scan', round: 2, stopToken: 'TOK' }
     const first = buildRoundPrompt({ ...base, progress: null })
-    expect(first).toContain('round 2/20')
+    expect(first).toContain('round 2')
     expect(first).toContain('这是第一轮')
     const resume = buildRoundPrompt({ ...base, progress: { round: 1, done: false, label: 'scan', model: 'm', updated: 't', lastResponse: '已扫描 10 个' } })
     expect(resume).toContain('绝不重做已完成工作')

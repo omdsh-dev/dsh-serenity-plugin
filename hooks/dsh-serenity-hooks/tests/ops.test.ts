@@ -19,15 +19,31 @@ afterEach(() => {
 })
 
 describe('kit-ops', () => {
-  it('health 输出三原则', () => {
-    const h = runKit(dir, { action: 'health' }) as { p1: boolean; p2: boolean }
+  it('health 输出三原则', async () => {
+    const h = (await runKit(dir, { action: 'health' })) as { p1: boolean; p2: boolean }
     expect(h.p1).toBe(true)
     expect(h.p2).toBe(false) // 无 .git
   })
 
-  it('time 输出 ISO', () => {
-    const t = runKit(dir, { action: 'time' }) as string
+  it('time 输出 ISO', async () => {
+    const t = (await runKit(dir, { action: 'time' })) as string
     expect(new Date(t).toString()).not.toBe('Invalid Date')
+  })
+
+  it('wait 纯 Node 实现（不依赖外部 sleep；0 秒立即返回）', async () => {
+    const started = Date.now()
+    const w = (await runKit(dir, { action: 'wait', seconds: 0 })) as { waited: number }
+    expect(w.waited).toBe(0)
+    expect(Date.now() - started).toBeLessThan(500)
+
+    // 负秒数拒绝
+    await expect(runKit(dir, { action: 'wait', seconds: -1 })).rejects.toThrow(/非负秒数/)
+  })
+
+  it('wait 1 秒耗时 ≥ 约 1 秒', async () => {
+    const started = Date.now()
+    await runKit(dir, { action: 'wait', seconds: 1 })
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900)
   })
 })
 

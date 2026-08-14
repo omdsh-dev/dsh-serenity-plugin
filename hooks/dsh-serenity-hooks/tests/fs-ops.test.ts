@@ -1,17 +1,24 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
-import { tmpdir } from 'node:os'
+import { tmpdir, platform } from 'node:os'
 import { runCcFs, type CcFsArgs, CC_FS_ACTIONS } from '../src/fs-ops.js'
 
-// reveal 打开 OS 文件管理器（有 GUI 副作用）——模块级 mock child_process，
+// reveal 打开 OS 文件管理器（有 GUI 副作用）——模块级 mock child_process + os.platform，
 // 使测试断言调用参数而不真实弹出窗口（node: 内置模块命名空间不可 spyOn）。
 vi.mock('node:child_process', () => ({
   execFileSync: vi.fn(() => Buffer.from('')),
+  spawn: vi.fn(() => ({ on: vi.fn(), unref: vi.fn() })),
 }))
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>()
+  return { ...actual, platform: vi.fn(() => 'linux') }
+})
 
 const mockedExec = vi.mocked(execFileSync)
+const mockedSpawn = vi.mocked(spawn)
+const mockedPlatform = vi.mocked(platform)
 
 let dir: string
 
@@ -118,5 +125,26 @@ describe('fs-ops: reveal（OS 文件管理器打开）', () => {
 
   it('reveal 路径逃逸阻断', () => {
     expect(() => run('reveal', { path: '../outside' })).toThrow(/Path escape blocked/)
+  })
+
+  it('reveal Windows 目录 → explorer <dir>（fire-and-forget，不判定退出码）', () => {
+    mockedPlatform.mockReturnValueOnce('win32')
+    mockedSpawn.mockClear()
+    mockedExec.mockClear()
+    const r = run('reveal', { path: 'docs' }) as { ok: boolean; revealed: string }
+    expect(r.ok).toBe(true)
+    expect(mockedSpawn).toHaveBeenCalledWith('explorer', [join(dir, 'docs')], expect.objectContaining({ detached: true }))
+    // GUI 子系统进程：成功也常非零 → 不能经 execFileSync 判定
+    expect(mockedExec).not.toHaveBeenCalled()
+  })
+
+  it('reveal Windows 文件 → explorer /select,<abs>（选中该文件）', () => {
+    mockedPlatform.mockReturnValueOnce('win32')
+    mockedSpawn.mockClear()
+    mockedExec.mockClear()
+    const r = run('reveal', { path: 'docs/nested/a.md' }) as { ok: boolean; revealed: string }
+    expect(r.ok).toBe(true)
+    expect(mockedSpawn).toHaveBeenCalledWith('explorer', ['/select,', join(dir, 'docs/nested/a.md')], expect.objectContaining({ detached: true }))
+    expect(mockedExec).not.toHaveBeenCalled()
   })
 })

@@ -63,19 +63,18 @@ export function buildRoundPrompt(opts: {
   session?: string
   label: string
   round: number
-  maxRounds: number
   stopToken: string
   progress?: LoopProgress | null
   task?: string
 }): string {
-  const { root, session, label, round, maxRounds, stopToken, progress, task } = opts
+  const { root, session, label, round, stopToken, progress, task } = opts
   const resumeNote =
     progress && progress.round > 0
       ? `上一轮（round ${progress.round}）已完成：${progress.lastResponse.slice(0, 300)}\n永远从上次停止处继续，绝不重做已完成工作。`
       : '这是第一轮。'
   const sessionNote = session ? `工作会话：${session}（AGENT_SESSIONS/${session}/SESSION.md 记录进度）` : ''
   const taskNote = task ? `任务：${task}` : `任务：以 label「${label}」对应的工作为准（若存在工作会话，先读 SESSION.md 明确目标）`
-  return `# ${label} — 牛马循环 round ${round}/${maxRounds}
+  return `# ${label} — 牛马循环 round ${round}
 
 CCC 根：${root}
 ${sessionNote}

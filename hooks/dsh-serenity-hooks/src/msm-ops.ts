@@ -23,6 +23,13 @@ const execFileAsync = promisify(execFile)
 
 export const MSM_TIMEOUT_MS = 600_000
 
+/**
+ * Windows 兼容（审计观察点 A）：`.cmd` 不能直接被 CreateProcess 解析——
+ * `execFile('npx')` / `spawnSync('npx')` 在 Windows 必 ENOENT（需 shell 或显式 .cmd）。
+ * bun 无扩展名（bun.exe 可被 libuv 按 PATHEXT 解析），保持 'bun'。
+ */
+const NPX_BIN = process.platform === 'win32' ? 'npx.cmd' : 'npx'
+
 export type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 'guide'
 
 export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'deregister', 'check', 'guide']
@@ -143,7 +150,7 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       // bun 优先（可直跑 TS），npx tsx 回退
       let r = spawnSync('bun', [entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'] })
       if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') {
-        r = spawnSync('npx', ['tsx', entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'] })
+        r = spawnSync(NPX_BIN, ['tsx', entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'] })
       }
       return msmExecResult(entry.name, r.status ?? 2, r.stdout ?? '', r.stderr ?? '', fmtJson)
     }
@@ -312,7 +319,7 @@ export async function runMsmAsync(root: string, args: MsmArgs): Promise<JsonValu
     const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean }
     if (err.code === 'ENOENT') {
       try {
-        const r = await execFileAsync('npx', ['tsx', entry.path, ...businessArgs], {
+        const r = await execFileAsync(NPX_BIN, ['tsx', entry.path, ...businessArgs], {
           cwd: root,
           encoding: 'utf-8',
           timeout: MSM_TIMEOUT_MS,

@@ -16,7 +16,7 @@ import {
   appendFileSync,
   readdirSync,
 } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+import { spawn, execFileSync } from 'node:child_process'
 import { join, relative, dirname } from 'node:path'
 import { platform } from 'node:os'
 import { resolveInside } from './ccc.js'
@@ -163,8 +163,16 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
           const revealPath = statSync(abs).isDirectory() ? abs : dirname(abs)
           execFileSync('xdg-open', [revealPath], { timeout: 10000 })
         } else if (os === 'win32') {
-          // Windows: Explorer 打开并选中该项
-          execFileSync('explorer', ['/select,', abs], { timeout: 10000 })
+          // Windows：目录 → 打开目录本身；文件 → Explorer 选中（explorer /select,<path>）。
+          // explorer.exe 是 GUI 子系统进程——即便成功也常返回非零退出码，
+          // 经 execFileSync 捕获会被误判 failure（Windows 兼容审计问题 2）。
+          // 改为 spawn 分离 + unref（fire-and-forget），忽略退出码。
+          const args = statSync(abs).isDirectory() ? [abs] : ['/select,', abs]
+          const child = spawn('explorer', args, { detached: true, stdio: 'ignore', windowsHide: false })
+          child.on('error', () => {
+            /* explorer 缺失/启动失败：GUI 打开尽力而为，不抛错 */
+          })
+          child.unref()
         } else {
           throw new Error(`unsupported platform: ${os}`)
         }
