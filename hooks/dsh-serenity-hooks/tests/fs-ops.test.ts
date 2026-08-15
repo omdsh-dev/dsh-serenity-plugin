@@ -185,12 +185,12 @@ describe('fs-ops: reveal（OS 文件管理器打开）', () => {
     expect(mockedExec).not.toHaveBeenCalled()
   })
 
-  it('reveal Windows 文件 → explorer /select,<abs>（选中该文件）', () => {
+  it('reveal Windows 文件 → explorer /select,<abs>（选中该文件；合并参数，Windows 审计问题 7）', () => {
     mockedPlatform.mockReturnValueOnce('win32')
     mockedSpawn.mockClear()
     mockedExec.mockClear()
     run('reveal', { path: 'docs/nested/a.md' })
-    expect(mockedSpawn).toHaveBeenCalledWith('explorer', ['/select,', join(dir, 'docs/nested/a.md')], expect.objectContaining({ detached: true }))
+    expect(mockedSpawn).toHaveBeenCalledWith('explorer', [`/select,${join(dir, 'docs/nested/a.md')}`], expect.objectContaining({ detached: true }))
     expect(mockedExec).not.toHaveBeenCalled()
   })
 })

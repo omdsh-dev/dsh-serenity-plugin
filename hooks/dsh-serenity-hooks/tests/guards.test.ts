@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { decideGuard, type GuardInput, syncSafeModeRestriction } from '../src/seams/guards.js'
-import { readBlacklist, matchBlacklist, type BlacklistRule } from '../src/ccc.js'
+import { readBlacklist, matchBlacklist, pathInside, type BlacklistRule } from '../src/ccc.js'
 
 let dir: string
 
@@ -72,6 +72,27 @@ describe('guards: decideGuard 纯决策', () => {
     const d = decideGuard(base({ toolName: 'write', blacklist, pathArg: '.secrets/x' }))
     expect(d.kind).toBe('deny')
     expect(d.deny).toContain('secrets 目录禁止写入')
+  })
+
+  it('反斜杠路径归一化：斜杠结尾黑名单规则命中 Windows 风格路径（审计问题 9）', () => {
+    // pathArg 含反斜杠（Windows 风格相对路径）→ rel 归一化为正斜杠后黑名单前缀匹配
+    const d = decideGuard(base({ toolName: 'write', blacklist: rules('.secrets/'), pathArg: '.secrets\\file.txt' }))
+    expect(d.kind).toBe('deny')
+    expect(d.deny).toContain('blacklist')
+  })
+
+  it('嵌套治理文件保护：反斜杠路径 .serenity\\child 归一化后拦截（审计问题 9）', () => {
+    const d = decideGuard(base({ toolName: 'write', pathArg: '.serenity\\child' }))
+    expect(d.kind).toBe('deny')
+    expect(d.deny).toContain('治理文件')
+  })
+
+  it('pathInside 跨盘语义（Windows，审计问题 6）：跨盘/兄弟目录 false，子路径 true', () => {
+    // decideGuard 用 pathInside 判越界；此处直接验证 pathInside 的 Windows 跨盘语义
+    // （resolve 平台行为差异使 decideGuard 级跨盘测试在 POSIX 无法复现——ccc.test.ts 覆盖守卫集成）
+    expect(pathInside('D:\\project\\home', 'C:\\Windows', true)).toBe(false) // 跨盘符
+    expect(pathInside('D:\\project\\home', 'D:\\project\\home2', true)).toBe(false) // 兄弟目录
+    expect(pathInside('D:\\project\\home', 'D:\\project\\home\\docs', true)).toBe(true) // 子路径
   })
 })
 

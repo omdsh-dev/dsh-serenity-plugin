@@ -1,3 +1,26 @@
+## v1.17.5 — 2026-08-15（Windows 兼容性全面修复：v1.17.x 深审计 17 项——bun EINVAL 回退/跨盘漏判/反斜杠绕过/CRLF/BOM 等）
+
+**Scope:** Windows 用户提交 v1.17.x 深度审计报告（S009 会话，17 问题）。高优先级：问题 5（acc_msm bun 回退死代码）、问题 6（guards 跨盘漏判）、问题 7（reveal /select, 传参）、问题 8（mech-registry 反斜杠绕过）、问题 9（黑名单斜杠结尾+嵌套治理保护失效）；中优先级 10-17。全部修复。
+
+### 高优先级（功能/安全）
+- **问题5**：`msm-ops` bun 回退触发放宽 `ENOENT || EINVAL || EPERM`（新增 `isBunMissing`）——Windows 无 bun 时 execFile('bun') 抛 EINVAL 非 ENOENT → fallback 死代码；async + sync 双路径
+- **问题6（安全）**：`guards.decideGuard` 跨盘漏判改用 `pathInside`（旧 `relative().startsWith('..')` 跨盘返回绝对路径原文漏判）
+- **问题7**：`reveal` Windows 文件 case 合并参数 `/select,<abs>`（分开传 `/select,` + 路径被 explorer 当空路径）
+- **问题8（安全）**：`mech-registry.json` 写保护用 `relative` 归一化反斜杠（Windows 反斜杠路径使正斜杠字面量永不匹配 → 保护失效）
+- **问题9（安全）**：`guards.decideGuard` rel 反斜杠归一化（`.secrets/` 规则匹配 `.secrets\file`；嵌套治理路径 `.serenity\child` 拦截）
+
+### 中优先级
+- **问题10**：session create 目录名脱敏（`sanitizeDirName`：非法字符→'-'、去尾点/空格、保留名 CON/NUL 前缀）
+- **问题11**：session close 读入 CRLF 归一化（`\r\n`→`\n`，防假完成）
+- **问题12**：git 操作加 30s timeout（网络路径 GCM 弹框挂起冻结事件循环；超时显式 stderr 提示）
+- **问题13**：`status.readDshVersion` 跨平台探测（npm_config_prefix / APPDATA\npm / ~/.npm-global）
+- **问题14**：fs-ops `assertNotProtected` win32 大小写不敏感比较
+- **问题15**：fs-ops `validateWritePath` 写路径 realpath symlink/junction 防御
+- **问题16**：BOM 剥离（`ccc.readUtf8` helper + localstore JSON + msm parseRegistry + opencode-scan frontmatter）
+- **问题17**：fs-ops rm 只读文件 win32 先 chmodSync(0o666)；loop label 脱敏（`sanitizeLabel`）
+
+**测试：** 265/265（+5：sanitizeDirName/sanitizeLabel/反斜杠黑名单/嵌套治理/pathInside 跨盘）
+
 ## v1.17.4 — 2026-08-15（黑名单对象条目支持：修复 osp 风格 `{pattern, message}` 条目不生效——dsp 只解析 string 导致对象规则变 "[object Object]" 失效）
 
 **Scope:** 用户报告"写黑名单不生效"；参考 osp 排查。osp 的 readBlacklist 支持两种条目格式（string + object `{pattern, message}`），dsp 的 readBlacklist 只 `rules.map(String)`——对象条目被转成 "[object Object]"，规则完全失效（写操作不被拦截）。实证：string 规则拦截正常（write 到黑名单路径被拒），对象形式是唯一失效场景。

@@ -218,6 +218,17 @@ function sessionMdTemplate(title: string, id: string, goal: string | undefined, 
 }
 
 /** create 子命令（对齐 osp createSession：--desc/--issue 二选一 + dry-run + 长度限制） */
+/** 目录名脱敏（Windows 审计问题 10）：非法字符 → '-', 去尾点/空格, 保留名（CON/NUL 等）加前缀 */
+export function sanitizeDirName(s: string): string {
+  const cleaned = s
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/[ .]+$/g, '')
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(cleaned)) {
+    return `_${cleaned}`
+  }
+  return cleaned
+}
+
 export function createSession(opts: CreateSessionOptions): CreateSessionResult {
   const { root, desc, issue, goal, dryRun } = opts
   const sessionsDir = sessionsRoot(root)
@@ -235,7 +246,7 @@ export function createSession(opts: CreateSessionOptions): CreateSessionResult {
     if (issue.length > 100) {
       throw new Error(`issue too long: ${issue.length} chars (max 100)`)
     }
-    const dirName = `${datePrefix}--${issue}`
+    const dirName = `${datePrefix}--${sanitizeDirName(issue)}`
     const sessionPath = join(sessionsDir, dirName)
     if (!dryRun && existsSync(sessionPath)) {
       throw new Error(`Session directory already exists: "${dirName}"`)
@@ -265,7 +276,7 @@ export function createSession(opts: CreateSessionOptions): CreateSessionResult {
     }
   }
   const nextId = String(maxId + 1).padStart(3, '0')
-  const dirName = `${datePrefix}--S${nextId}--${desc}`
+  const dirName = `${datePrefix}--S${nextId}--${sanitizeDirName(desc)}`
   const sessionPath = join(sessionsDir, dirName)
   if (!dryRun && existsSync(sessionPath)) {
     throw new Error(`Session directory already exists: "${dirName}"`)
@@ -401,6 +412,9 @@ export function closeSession(root: string, key: string, confirm: boolean, scope 
     throw new Error(`Session "${session.dirName}" has no SESSION.md — nothing to close.`)
   }
   let content = readFileSync(mdPath, 'utf-8')
+  // CRLF 归一化（Windows 审计问题 11）：Windows 编辑器/PowerShell 写的 \r\n 会
+  // 使 `## 状态\n` 字面量正则不匹配 → 标记静默失效（假完成）
+  content = content.replace(/\r\n/g, '\n')
   // 兼容有无空行的状态段（模板生成无空行；手工编辑可能带空行）
   content = content.replace(
     /## 状态\n\n?- \[ \] 进行中/,

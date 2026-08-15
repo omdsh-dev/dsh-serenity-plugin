@@ -99,12 +99,20 @@ export interface SerenityConfig {
  */
 export const DEFAULT_SERENITY_CONFIG_PATHS = ['.opencode/serenity.json', '.dsh/serenity.json'];
 
+/**
+ * 读取 UTF-8 文件并剥离 BOM（Windows 审计问题 16）：PowerShell/Windows 编辑器
+ * 写出的 BOM（\uFEFF）会让 JSON.parse 抛错（配置静默变空）或 frontmatter 检测失败（技能被丢弃）。
+ */
+export function readUtf8(path: string): string {
+  return readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
+}
+
 export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): SerenityConfig {
   for (const candidate of paths) {
     const p = resolve(root, candidate);
     if (!existsSync(p)) continue;
     try {
-      return JSON.parse(readFileSync(p, 'utf-8')) as SerenityConfig;
+      return JSON.parse(readUtf8(p)) as SerenityConfig;
     } catch {
       return {};
     }

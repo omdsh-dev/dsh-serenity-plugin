@@ -23,12 +23,14 @@ import {
   unlinkSync,
   rmdirSync,
   utimesSync,
+  realpathSync,
+  chmodSync,
   type Stats,
 } from 'node:fs'
 import { spawn, execFileSync } from 'node:child_process'
 import { join, relative, dirname, resolve } from 'node:path'
 import { platform } from 'node:os'
-import { resolveInside } from './ccc.js'
+import { resolveInside, pathInside } from './ccc.js'
 import type { JsonValue } from './json.js'
 
 export type CcFsAction =
@@ -122,25 +124,42 @@ function safeRel(root: string, abs: string): string {
 
 function validateWritePath(root: string, target: string): string {
   const absPath = target.startsWith('/') ? resolve(target) : resolveInside(root, target)
-  // resolveInside 已保证根内；绝对路径需显式校验
-  if (target.startsWith('/') && !absPath.startsWith(root)) {
+  // resolveInside 已保证根内；绝对路径需显式校验（pathInside 跨盘安全，Windows 审计问题 6）
+  if (!pathInside(resolve(root), absPath)) {
     throw new Error(`cc-fs: path "${target}" resolves to "${absPath}" which is outside serenity root "${root}"`)
   }
-  // 保护 mech-registry.json — 只能通过 acc_msm register/deregister 注册/注销
-  if (absPath.endsWith('/mech-registry.json') && absPath.includes('/.opencode/skills/')) {
+  // 保护 mech-registry.json — 只能通过 acc_msm register/deregister 注册/注销。
+  // relative 归一化反斜杠（Windows：resolveInside 返回反斜杠路径，正斜杠字面量永不匹配 → 保护失效，见问题 8）
+  const rel = relative(root, absPath).split('\\').join('/')
+  if (rel.endsWith('/mech-registry.json') && rel.includes('/.opencode/skills/')) {
     throw new Error(
       `cc-fs: refusing to directly modify mech-registry.json — use acc_msm register/deregister instead`,
     )
+  }
+  // symlink/junction 防御（Windows 审计问题 15）：存在的路径 realpath 后必须仍在根内
+  if (existsSync(absPath)) {
+    try {
+      const real = realpathSync(absPath)
+      if (!pathInside(resolve(root), real)) {
+        throw new Error(`cc-fs: path "${target}" resolves via symlink to "${real}" outside serenity root "${root}"`)
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('symlink')) throw e
+      /* realpath 失败（权限等）放行——后续执行会报错 */
+    }
   }
   return absPath
 }
 
 function assertNotProtected(root: string, absPath: string, targetLabel: string): void {
+  // Windows 文件系统大小写不敏感（审计问题 14）：比较前归一化大小写
+  const ci = process.platform === 'win32'
+  const eq = (a: string, b: string): boolean => (ci ? a.toLowerCase() === b.toLowerCase() : a === b)
   const serenityMarker = resolve(root, '.serenity')
-  if (absPath === serenityMarker) {
+  if (eq(absPath, serenityMarker)) {
     throw new Error(`cc-fs: refusing to delete protected path: ${targetLabel} (.serenity is the CCC marker)`)
   }
-  if (absPath === root) {
+  if (eq(absPath, root)) {
     throw new Error(`cc-fs: refusing to delete the CCC root directory: ${targetLabel}`)
   }
 }
@@ -263,6 +282,14 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
         } else if (isDir) {
           rmSync(absPath, { recursive: true, force: false })
         } else {
+          // Windows：只读属性文件 unlink 抛 EPERM（Unix unlink 不受只读模式阻挡）——先清只读位（审计问题 17）
+          if (process.platform === 'win32') {
+            try {
+              chmodSync(absPath, 0o666)
+            } catch {
+              /* chmod 失败继续尝试删除 */
+            }
+          }
           unlinkSync(absPath)
         }
         results.push(`[OK] deleted: ${relLabel}`)
@@ -331,7 +358,9 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
         } else if (os === 'win32') {
           // explorer.exe 是 GUI 子系统进程——即便成功也常返回非零退出码，
           // 经 execFileSync 捕获会被误判 failure。改为 spawn 分离 + unref（fire-and-forget）。
-          const winArgs = statSync(absPath).isDirectory() ? [absPath] : ['/select,', absPath]
+          // 文件 case：/select 需**单个合并参数** `/select,<abs>`（分开传 `/select,` + 路径会
+          // 把 /select, 当空路径、文件当目录打开——Windows 审计问题 7）
+          const winArgs = statSync(absPath).isDirectory() ? [absPath] : [`/select,${absPath}`]
           const child = spawn('explorer', winArgs, { detached: true, stdio: 'ignore', windowsHide: false })
           child.on('error', () => {
             /* explorer 缺失/启动失败：GUI 打开尽力而为，不抛错 */

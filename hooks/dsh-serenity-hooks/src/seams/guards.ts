@@ -17,6 +17,7 @@ import {
   isSafeModeOn,
   matchBlacklist,
   readBlacklist,
+  pathInside,
   type BlacklistRule,
 } from '../ccc.js'
 
@@ -53,10 +54,16 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
 
   // 2) 携带路径参数：先查越界，再查黑名单
   if (pathArg !== undefined) {
-    const rel = relative(root, resolve(root, pathArg))
-    if (rel.startsWith('..')) {
+    const abs = resolve(root, pathArg)
+    // pathInside 前缀+sep 边界+跨盘安全（Windows 兼容：跨盘 relative 返回绝对路径原文，
+    // 旧 relative().startsWith('..') 漏判，见 Windows 审计问题 6）
+    if (!pathInside(resolve(root), abs)) {
       return { deny: `path escape blocked: "${pathArg}" 越出 CCC 根`, kind: 'deny' }
     }
+    // 归一化反斜杠（Windows）：黑名单前缀匹配与治理文件保护用正斜杠 rel
+    // （relative 在 Windows 产出反斜杠，斜杠结尾规则 `.secrets/` 匹配不到 `.secrets\file`，
+    //   嵌套治理路径 `.serenity\child` 也不匹配，见 Windows 审计问题 9）
+    const rel = relative(root, abs).split('\\').join('/')
     // CCC 治理文件永远拒绝写入（safe-mode 是用户能力，agent 不能自行开关/篡改）
     if (rel === '.serenity-safe-on' || rel === '.serenity' || rel.startsWith('.serenity-safe-on/') || rel.startsWith('.serenity/')) {
       return { deny: `CCC 治理文件 "${rel}" 保留给用户，agent 不可写`, kind: 'deny' }

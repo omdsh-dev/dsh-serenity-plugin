@@ -19,17 +19,29 @@ import {
 import { ACC_VERSION } from './constants.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
 
-/** 读取已安装 DSH CLI 版本（npm 全局 @deepseek-ai/dsh）；读不到返回 null */
+/**
+ * 读取已安装 DSH CLI 版本；读不到返回 null。
+ * 跨平台（Windows 审计问题 13）：Windows npm 全局装在 %APPDATA%\npm（非 ~/.npm-global）——
+ * 依次尝试 npm_config_prefix / APPDATA\npm / ~/.npm-global。
+ */
 export function readDshVersion(): string | null {
-  try {
-    const pkg = JSON.parse(readFileSync(
-      join(homedir(), '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'package.json'),
-      'utf-8',
-    )) as { version?: unknown }
-    return typeof pkg.version === 'string' ? pkg.version : null
-  } catch {
-    return null
+  const candidates: string[] = []
+  if (process.env.npm_config_prefix) {
+    candidates.push(join(process.env.npm_config_prefix, 'lib', 'node_modules', '@deepseek-ai', 'dsh'))
   }
+  if (process.env.APPDATA) {
+    candidates.push(join(process.env.APPDATA, 'npm', 'node_modules', '@deepseek-ai', 'dsh'))
+  }
+  candidates.push(join(homedir(), '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh'))
+  for (const p of candidates) {
+    try {
+      const pkg = JSON.parse(readFileSync(join(p, 'package.json'), 'utf-8')) as { version?: unknown }
+      if (typeof pkg.version === 'string') return pkg.version
+    } catch {
+      /* 下一个候选 */
+    }
+  }
+  return null
 }
 
 export interface SerenityStatus {

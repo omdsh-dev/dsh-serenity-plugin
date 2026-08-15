@@ -211,7 +211,8 @@ export interface MsmArgs {
 }
 
 export function parseRegistry(raw: string): MsmEntry[] {
-  const data = JSON.parse(raw) as unknown
+  // BOM 剥离（Windows 审计问题 16）：带 \uFEFF 的注册表 JSON 解析失败
+  const data = JSON.parse(raw.replace(/^\uFEFF/, '')) as unknown
   if (Array.isArray(data)) return data as MsmEntry[]
   const entries = (data as { entries?: unknown }).entries
   if (!Array.isArray(entries)) throw new Error('invalid registry: missing entries[]')
@@ -302,9 +303,10 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)
       const p = protocolResult(protocol)
       if (p !== undefined) return p
-      // bun 优先（可直跑 TS），npx tsx 回退；注入 SERENITY_* env（对齐 osp）
+      // bun 优先（可直跑 TS），npx tsx 回退；注入 SERENITY_* env（对齐 osp）；
+      // Windows 无 bun 时 spawnSync('bun') 抛 EINVAL 非 ENOENT → isBunMissing 统一处理（Windows 审计问题 5）
       let r = spawnSync('bun', [entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], env: buildMsmEnv(root) })
-      if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') {
+      if (r.error && isBunMissing(r.error as NodeJS.ErrnoException)) {
         r = spawnSync(NPX_BIN, ['tsx', entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], env: buildMsmEnv(root) })
       }
       return msmExecResult(entry.name, r.status ?? 2, r.stdout ?? '', r.stderr ?? '', fmtJson, hasHelp)
@@ -522,6 +524,14 @@ function msmExecResult(name: string, status: number, stdout: string, stderr: str
  * 用 execFile + promisify + timeout（超时自动 kill），**不阻塞 Node 事件循环**。
  * （同步 spawnSync 版会阻塞 web 事件循环 → MSM 脚本自请求 3080 时死锁，见 postmortem。）
  */
+
+/** bun 缺失的错误码集（Windows 兼容：无 bun 时 execFile('bun') 抛 EINVAL 而非 ENOENT，见 Windows 审计问题 5） */
+const BUN_MISSING_CODES = new Set(['ENOENT', 'EINVAL', 'EPERM'])
+
+function isBunMissing(err: NodeJS.ErrnoException): boolean {
+  return typeof err.code === 'string' && BUN_MISSING_CODES.has(err.code)
+}
+
 export async function runMsmAsync(root: string, args: MsmArgs): Promise<JsonValue> {
   if (args.action !== 'exec') return runMsm(root, args)
   const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)
@@ -539,7 +549,7 @@ export async function runMsmAsync(root: string, args: MsmArgs): Promise<JsonValu
     return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson, hasHelp)
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean }
-    if (err.code === 'ENOENT') {
+    if (isBunMissing(err)) {
       try {
         const r = await execFileAsync(NPX_BIN, ['tsx', entry.path, ...businessArgs], {
           cwd: root,

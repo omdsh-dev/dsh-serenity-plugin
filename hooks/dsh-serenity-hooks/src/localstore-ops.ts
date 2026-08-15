@@ -108,7 +108,7 @@ function readAll(root: string): StoreShape {
   const p = localstorePath(root)
   if (!existsSync(p)) return {}
   try {
-    const v = JSON.parse(readFileSync(p, 'utf-8')) as unknown
+    const v = JSON.parse(readFileSync(p, 'utf-8').replace(/^\uFEFF/, '')) as unknown
     if (v && typeof v === 'object' && !Array.isArray(v)) return v as StoreShape
     return {}
   } catch {

@@ -32,6 +32,10 @@ export interface GitArgs {
   path?: string
 }
 
+/** git 操作超时（ms）——网络路径（push/pull/fetch）可能挂起（GCM 弹认证框等），
+ *  无 timeout 会冻结 Node 事件循环 / DSH 3080 server（Windows 审计问题 12） */
+const GIT_TIMEOUT_MS = 30_000
+
 function git(root: string, args: string[]): { stdout: string; stderr: string } {
   try {
     const stdout = execFileSync('git', args, {
@@ -39,12 +43,16 @@ function git(root: string, args: string[]): { stdout: string; stderr: string } {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 1024 * 1024,
+      timeout: GIT_TIMEOUT_MS,
     })
     return { stdout: stdout.trimEnd(), stderr: '' }
   } catch (err: any) {
     return {
       stdout: (err.stdout?.toString() ?? '').trimEnd(),
-      stderr: (err.stderr?.toString() ?? '').trimEnd(),
+      // 超时（err.killed）无 stderr——显式提示（调用方误判成功）
+      stderr: err.killed
+        ? `git 操作超时（${GIT_TIMEOUT_MS / 1000}s）`
+        : (err.stderr?.toString() ?? '').trimEnd(),
     }
   }
 }

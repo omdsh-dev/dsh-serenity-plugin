@@ -22,9 +22,18 @@ export interface LoopProgress {
   errorMessage?: string
 }
 
+/** label 脱敏（Windows 审计问题 17）：非法字符 → '-'，去尾点/空格，限长 */
+export function sanitizeLabel(label: string): string {
+  return label
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/[ .]+$/g, '')
+    .slice(0, 50)
+}
+
 export function loopProgressPaths(root: string, label: string): { md: string; json: string } {
   const dir = join(root, 'AGENT_SESSIONS')
-  return { md: join(dir, `loop-${label}.md`), json: join(dir, `loop-${label}.json`) }
+  const safe = sanitizeLabel(label)
+  return { md: join(dir, `loop-${safe}.md`), json: join(dir, `loop-${safe}.json`) }
 }
 
 /** 读取进度（续跑）；无文件返回 round 0 */

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildRoundPrompt, loopProgressPaths, LOOP_GUIDE, listActiveLoops, newStopToken, readProgress, splitModel, writeProgress } from '../src/loop-ops.js'
+import { buildRoundPrompt, loopProgressPaths, LOOP_GUIDE, listActiveLoops, newStopToken, readProgress, sanitizeLabel, splitModel, writeProgress } from '../src/loop-ops.js'
 
 let dir: string
 
@@ -103,5 +103,16 @@ describe('loop-ops: guide 指引 + 运行状态列表（WebUI 等待界面数据
     expect(loops[1]!.label).toBe('b')
     expect(loops[0]!.done).toBe(true)
     expect(loops[1]!.done).toBe(false)
+  })
+
+  it('sanitizeLabel 脱敏 Windows 非法字符（审计问题 17）', () => {
+    expect(sanitizeLabel('sqc: scan/v2')).toBe('sqc- scan-v2')
+    expect(sanitizeLabel('ok label')).toBe('ok label')
+    expect(sanitizeLabel('a?b*c:d')).toBe('a-b-c-d')
+    expect(sanitizeLabel('a.b.')).toBe('a.b')
+    expect(sanitizeLabel('x'.repeat(80))).toHaveLength(50)
+    // loopProgressPaths 用清洗后的 label
+    const p = loopProgressPaths(dir, 'a:b/c')
+    expect(p.json).toContain('loop-a-b-c.json')
   })
 })

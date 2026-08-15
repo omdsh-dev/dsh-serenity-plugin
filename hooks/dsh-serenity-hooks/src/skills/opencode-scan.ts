@@ -24,10 +24,12 @@ export interface OpencodeSkill {
 
 /** 解析 --- 分隔的 YAML frontmatter（只需 name/description/whenToUse） */
 export function parseFrontmatter(raw: string): { meta: OpencodeSkillMeta; content: string } {
-  const m = /^---\s*\n([\s\S]*?)\n---\s*\n?/.exec(raw)
-  if (!m) return { meta: { name: '', description: '' }, content: raw }
+  // BOM 剥离（Windows 审计问题 16）：带 \uFEFF 的 SKILL.md 会使 /^---/ 检测失败 → 技能被丢弃
+  const text = raw.replace(/^\uFEFF/, '')
+  const m = /^---\s*\n([\s\S]*?)\n---\s*\n?/.exec(text)
+  if (!m) return { meta: { name: '', description: '' }, content: text }
   const fm = m[1]!
-  const body = raw.slice(m[0].length)
+  const body = text.slice(m[0].length)
   const grab = (key: string): string | undefined => {
     const line = fm.split('\n').find((l) => l.startsWith(`${key}:`))
     if (!line) return undefined

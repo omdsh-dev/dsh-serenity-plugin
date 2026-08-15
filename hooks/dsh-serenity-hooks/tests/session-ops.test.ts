@@ -74,6 +74,15 @@ describe('session-ops: 生命周期（对齐 osp spec）', () => {
     expect(existsSync(r.sessionPath)).toBe(false)
   })
 
+  it('create 目录名脱敏（Windows 审计问题 10：非法字符/保留名）', () => {
+    const r = createSession({ root: dir, desc: 'feat: x/y', dryRun: false })
+    expect(r.dirName).not.toContain(':')
+    expect(r.dirName).not.toContain('/')
+    // 保留名 CON → _CON
+    const con = createSession({ root: dir, desc: 'CON', dryRun: false })
+    expect(con.dirName).toContain('_CON')
+  })
+
   it('create goal 写入目标段', () => {
     const r = mk('goal', { goal: '完成对照' })
     expect(readFileSync(join(r.sessionPath, 'SESSION.md'), 'utf-8')).toContain('完成对照')
