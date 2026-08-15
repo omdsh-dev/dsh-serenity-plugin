@@ -1,3 +1,16 @@
+## v1.18.1 — 2026-08-15（bootstrap 直接默认开启：移除全部开关——用户明确"直接开启不能关"）
+
+**Scope:** 用户验证 v1.18.0 bootstrap 无效（轨迹无锚定首轮）。根因：两级开关都没开（插件级 Config.bootstrap 默认 false + CCC serenity.json 无 bootstrap.enabled）。用户指示：**"这东西配什么，直接开启，不能关"**——bootstrap 直接默认生效，不做成可关闭的。
+
+### 修复
+- `index.ts`：移除 `Config.bootstrap` 开关，`registerBootstrap(ctx)` 无条件注册
+- `bootstrap.ts readBootstrapConfig`：移除 `enabled` 门控——总是返回设置（CCC bootstrap 段仅调参数，缺省用默认）
+- `ccc.ts`：`SerenityConfig.bootstrap` 移除 `enabled` 字段（文档注明直接默认开启不能关）
+- 调用点适配（assemble/anchor/pre-step：非 CCC 跳过，CCC 内总是生效）
+- 测试：register.test.ts 全关断言更新（bootstrap 恒注册）；277/277 全过
+
+**用户开启（无需任何配置）：** 重启 dsh web 后新会话即生效——首轮工具目录窄化 + 锚定问题轮（"请介绍当前宁静号…"）
+
 ## v1.18.0 — 2026-08-15（Anchored Standard 整合：两阶段工具目录 bootstrap——移植 xiaobright/dsh-anchored-standard，验证能力提升）
 
 **Scope:** 用户要求严格按 [xiaobright/dsh-anchored-standard](https://github.com/xiaobright/dsh-anchored-standard) 实现移植到 dsp，验证"首轮最小工具目录锚定轨迹 → 晋升开放完整工具"是否有实际能力提升（用户自行验证）。核心机制：V4 Pro 强依赖 API 可见工具目录选轨迹——首请求暴露最小工具集 + 剥离自动注入上下文，首次 tool/call 或 assistant/message 后晋升。

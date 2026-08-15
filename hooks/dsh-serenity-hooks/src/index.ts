@@ -68,9 +68,6 @@ export interface Config {
   env?: boolean
   /** 兼容 opencode skill 标准（provider：.opencode/skills 扫描注册） */
   opencodeSkills?: boolean
-  /** Anchored Standard 两阶段工具目录（S137）：插件级总开关（默认关——零侵入）；
-   *  开启后还需 CCC 的 serenity.json bootstrap.enabled: true 才实际生效 */
-  bootstrap?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -86,7 +83,6 @@ export const Config: z<Config> = z.object({
   entrySkillMaxChars: z.number().default(30000),
   env: z.boolean().default(true),
   opencodeSkills: z.boolean().default(true),
-  bootstrap: z.boolean().default(false),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -129,9 +125,6 @@ export function apply(ctx: Context, config: Config): void {
     registerOpencodeSkills(ctx)
   }
   // Anchored Standard 两阶段工具目录（S137，移植 xiaobright/dsh-anchored-standard）：
-  // 插件级开关（默认关）；开启后 CCC 的 serenity.json bootstrap.enabled 才实际生效；
-  // 验证失败可把 bootstrap 设回 false（或删除本行）摘除
-  if (config.bootstrap) {
-    registerBootstrap(ctx)
-  }
+  // 直接默认开启（用户明确"不能关"）——CCC 的 serenity.json bootstrap 段仅调参数
+  registerBootstrap(ctx)
 }

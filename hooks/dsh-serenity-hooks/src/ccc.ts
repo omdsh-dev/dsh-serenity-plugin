@@ -84,9 +84,8 @@ export interface SerenityConfig {
   localstore?: { gitTrack?: 'allow' | 'deny' };
   /** Anchored Standard bootstrap（S137，移植 xiaobright/dsh-anchored-standard）：
    *  两阶段工具目录——首请求最小工具集锚定轨迹，首次 tool/call 或 assistant/message 后晋升。
-   *  默认 disabled（零侵入，验证失败可一行关闭摘除）。 */
+   *  **直接默认开启（用户明确"不能关"）**——本段仅用于调参数，缺省用默认设置。 */
   bootstrap?: {
-    enabled?: boolean;
     /** 首请求（bootstrap 阶段）暴露的工具集（缺省 dsp 核心：read/write/edit/glob/grep） */
     bootstrapTools?: string[];
     /** 晋升信号：either（默认，tool/call 或 assistant/message 先到者）/ tool-call / assistant-message */

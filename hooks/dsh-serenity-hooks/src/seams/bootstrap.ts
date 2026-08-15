@@ -195,19 +195,19 @@ function agentRoot(agent: unknown): string | null {
   return findSerenityRoot(cwd)
 }
 
-/** 按 agent cwd 解析 bootstrap 配置；未开启返回 null */
-function readBootstrapConfig(agent: unknown): BootstrapSettings | null {
+/** 按 agent cwd 解析 bootstrap 配置（总是生效——无 enabled 开关，用户明确"直接开启不能关"；
+ *  CCC 的 serenity.json bootstrap 段仅用于调参数，缺省用默认设置） */
+function readBootstrapConfig(agent: unknown): BootstrapSettings {
   const root = agentRoot(agent)
-  if (!root) return null
+  if (!root) return resolveBootstrapSettings({})
   const cfg = loadSerenityConfig(root)
   const b = cfg.bootstrap
-  if (!b?.enabled) return null
   return resolveBootstrapSettings({
-    bootstrapTools: b.bootstrapTools,
-    promoteOn: b.promoteOn,
-    suppressedContextSources: b.suppressedContextSources,
-    compactionTools: b.compactionTools,
-    anchorMessage: b.anchorMessage,
+    bootstrapTools: b?.bootstrapTools,
+    promoteOn: b?.promoteOn,
+    suppressedContextSources: b?.suppressedContextSources,
+    compactionTools: b?.compactionTools,
+    anchorMessage: b?.anchorMessage,
   })
 }
 
@@ -233,7 +233,6 @@ export function registerBootstrap(ctx: Context): void {
       const root = agentRoot(agent)
       if (!root) return
       const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
-      if (!settings) return
       // 只锚定 fresh 顶级会话（无历史 user/message；子 agent 不锚定）
       const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; events?: readonly unknown[] } | undefined
       if ((session?.header?.delegationDepth ?? 0) > 0) return
@@ -273,7 +272,6 @@ export function registerBootstrap(ctx: Context): void {
       const root = agentRoot(agent)
       if (!root) return assembled
       const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
-      if (!settings) return assembled
       settingsByRoot.set(root, settings)
       const status = tracker.status(agent as Agent)
       if (status.promoted) {
@@ -308,8 +306,9 @@ export function registerBootstrap(ctx: Context): void {
     const decision = await next()
     if (decision.kind === 'reject') return decision
     try {
+      // 非 CCC 不生效
+      if (!agentRoot(agent)) return decision
       const settings = readBootstrapConfig(agent)
-      if (!settings) return decision
       if (tracker.status(agent).promoted || settings.suppressedSources.size === 0) return decision
       const messages = (decision as { messages?: UserMessage[] }).messages
       if (!Array.isArray(messages)) return decision

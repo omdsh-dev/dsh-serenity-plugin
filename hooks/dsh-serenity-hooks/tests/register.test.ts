@@ -91,6 +91,10 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     apply(ctx, { ...FULL_CONFIG, tools: false, guards: false, turnFlush: false })
     expect(register).not.toHaveBeenCalled()
     expect(guard).not.toHaveBeenCalled()
-    expect(on).not.toHaveBeenCalled()
+    // bootstrap seam 无条件注册（直接默认开启，用户明确"不能关"）——全关时 on 仅含 bootstrap 事件
+    const events = on.mock.calls.map((c) => c[0] as string)
+    expect(events).not.toContain('tools/pre-execute')
+    expect(events).not.toContain('agent/turn-stopping')
+    expect(events).toContain('session/event')
   })
 })
