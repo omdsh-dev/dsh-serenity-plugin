@@ -79,8 +79,10 @@ function lastAssistantText(agent: Agent): string {
   return ''
 }
 
-/** 非正常停止时重启 agent 的次数上限（防死循环保险阀）：对话轮次无上限，重启有上限 */
+/** 非正常停止时重启 agent 的次数上限（防死循环保险阀）：对话轮次有上限，重启有上限 */
 export const LOOP_MAX_RESTARTS = 100
+/** 对话轮次上限（对齐 osp loop-runner 的 round>=100 强制 done 保险阀） */
+export const LOOP_MAX_ROUNDS = 100
 
 /** 创建 loop 工具（闭包捕获插件 ctx → 可访问 ctx.agentLoop） */
 
@@ -172,6 +174,8 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       try {
         let round = startRound
         while (true) {
+          // 轮次上限保险阀（对齐 osp）：round 超上限强制终止（done=false，可续跑）
+          if (round > LOOP_MAX_ROUNDS) break
           finalRound = round
           const prompt = buildRoundPrompt({ root, session: args.session, label, round, stopToken, progress, task: args.task })
           try {
@@ -213,10 +217,10 @@ export function createLoopTool(ctx: Context): ToolDefinition {
         progressFile: json,
         lastResponse: lastResponse.slice(0, 2000),
         usage: {
-          how: 'loop 内部硬性 while 驱动 agent 逐轮推进，agent 精确回显随机完成码即终止；对话轮次无上限（不完成不返回），agent 非正常停止时自动重启（≤100 次）',
+          how: `loop 内部硬性 while 驱动 agent 逐轮推进，agent 精确回显随机完成码即终止；对话轮次上限 ${LOOP_MAX_ROUNDS}（对齐 osp 保险阀），agent 非正常停止时自动重启（≤${LOOP_MAX_RESTARTS} 次）`,
           progress: `进度在 AGENT_SESSIONS/loop-${label}.md 与 .json；同 label 再调 loop 会从下一轮续跑（不重做）`,
           constraints: 'loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫）',
-          next: done ? '任务已完成；可查看进度文件收尾' : `任务未完成（已达内部 ${LOOP_MAX_RESTARTS} 次重启保险阀）；可同 label 续跑`,
+          next: done ? '任务已完成；可查看进度文件收尾' : `任务未完成（已达内部 ${LOOP_MAX_ROUNDS} 轮或 ${LOOP_MAX_RESTARTS} 次重启保险阀）；可同 label 续跑`,
         },
       }
     },

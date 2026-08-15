@@ -1,3 +1,48 @@
+## v1.17.0 — 2026-08-15（工具实现全面对齐 osp spec：dsp/osp 无缝兼容）
+
+**Scope:** 用户要求"dsp 和 osp 的工具实现应当逻辑一致（无缝兼容的强要求），工具设计应属于 specs，全面对照并修正"。以 osp（opencode-serenity-plugin）为 ACC 工具 spec，逐工具对照 dsp 全部 9+ 工具并修正行为差异。触发：session create `--issue` 静默降级建 `S080--untitled`（apaas-26116 事故根因）。
+
+### session（对齐 osp session-tool/lib）
+- **create**：`--desc <desc> [--goal]` 或 `--issue <工单号>` 二选一（缺省/互斥报错，不再静默 untitled）；issue 模式目录 `YYYY-MM-DD--<issue>`（无 S###）；dry-run 预览；长度限制（issue≤100/desc≤200）；goal 写入目标段
+- **close**：需 `--name` + `--confirm`（防误关）；标记 [x] 已完成+已关闭 + 进度"关闭"
+- **archive**：name 缺省批量归档（completed + ≥7 天 → 移动 `_archived/`）；单会话需 completed + grace
+- **list/show/health/summary/qa**：文本输出对齐 osp（health 4 类 stale/stalled/ghost/drift；qa 5 类结构/一致性/新鲜度/决策质量/产出物）
+- **hook-develop-guide** 子命令；extHint（session-tool MSM 注册提示）
+- **CCC 扩展模型**：整命令委派 → osp 钩子后处理（create-transform）
+- S134 内存化活跃会话保留（events 恢复）+ use 输出对齐 osp（todowrite 指令）
+
+### cc-fs（对齐 osp file-system-tool）
+- **rm 需 recursive 才删目录**（非空目录 [SKIP]）；cp 目录需 recursive；**.serenity 保护**
+- mv dst 存在报错+建父目录；touch 更新 mtime+建父目录；append 建父目录+返回字节数
+- list/tree/exists/info/find 输出结构对齐（元数据/嵌套树/glob+fuzzy/absolute/max-depth）
+- 参数集补全：recursive/filesOnly/dirsOnly/absolute/maxDepth
+
+### cc_git（对齐 osp cc-git-tool）
+- **补 pull（--ff-only + [REJECTED] 建议）与 diff（staged/ref/path）**——6 子命令
+- status 输出 {clean, files:[{status,file}], summary}；log 参数 n（默认 10 max 100）
+- commit/push 文本输出对齐；localstore git 合规联动保留（S134）
+
+### acc_kit（对齐 osp acc-kit）
+- health 输出 `{ccc, root, version, status: healthy|degraded, principles: {P1_rooted, P2_git_managed, P3_binary_permissions}}`；CCC 缺失返回 degraded 不抛错
+- time 输出 {now_iso, now_local, epoch_ms}；wait 缺省 1s（正整数），返回 'waited Ns'
+- P3 平台适配：检查配置路径（DSH 无 opencode.json）
+
+### acc_msm（对齐 osp msm 三件套）
+- **path-arg symlink 防御**（realpath 指向根外拒绝）
+- **register**：path 根内 + 脚本存在 + name 全局唯一校验；保留原注册表格式（v1/数组）；精提交（只 add 注册表文件）；flags/usage 入参
+- **exec 注入 env**：SERENITY_ROOT / SERENITY_CCC / SERENITY_VERSION
+- 协议 flag 缩小到参数首位（--list/--schema/--format=json），业务参数无损透传
+- **check 补全 DC-M1~M4**：M1 补 .spec.ts；M2 判定放宽（function main( / isMain / require.main / import.meta.url）；M3 双向（脚本未注册 + 引用缺失）；**M4 新增**（路径型 flag 未标 type:"path"）
+- list 加 header（plugin version + CCC + root）+ flags 展示；guide 补全（flag schema/守卫细化/env）
+
+### loop（对齐 osp loop-runner 保险阀）
+- **补对话轮次上限 LOOP_MAX_ROUNDS=100**（osp round≥100 强制 done）；续跑/重启/guide/model 覆盖保留（dsp 增强）
+
+### 保留的 dsp 增强（不冲突，文档化）
+- cce 工具（osp 无）、eap/neat section 渐进披露（中文内容）、loop 续跑/agent 重启、reveal win32 spawn、localstore 联动、msm --schema 协议
+
+**测试：** 257/257（fs-ops/session-ops/ops 断言重写为 osp spec 行为；osp-alignment 6 项逐字节仍过）
+
 ## v1.16.14 — 2026-08-15（SESSION 跟踪内存化：活跃会话不落盘（对齐 osp active-state），进程重启从当前会话 events 解析 [SESSION CONTEXT] 恢复——根治泄漏与并行串台）
 
 **Scope:** 用户追问泄漏根因（"放内存里了？并行怎么办"）→ 仔细检查确认：落盘标记（`.dsh/active-sessions/<scope>` 文件）**无生命周期累积** + `restoreActiveSession` **全局 mtime 扫描**（无"谁在用"感知）→ 新会话继承旧 SESSION（apaas-26116 场景）+ 并行串台。用户指示：**不能落盘，必须内存，参考 osp 完整方案**。实施：活跃会话改内存 Map，进程重启从当前会话 events 解析 `[SESSION CONTEXT]` 标记恢复（只扫自己会话）。

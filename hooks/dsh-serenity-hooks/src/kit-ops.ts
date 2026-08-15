@@ -1,14 +1,19 @@
 /**
  * kit-ops.ts — acc_kit 纯操作层（零 DSH 依赖）
  *
- * health: CCC 三原则检查（P1 .serenity / P2 git / 配置）
- * time: ISO 8601 时间戳
- * wait: 等待 N 秒（纯 Node setTimeout——不依赖外部 sleep 可执行文件，
- *       Windows 无 GNU coreutils sleep，spawn 必 ENOENT，见 Windows 兼容审计问题 3）
+ * 行为对齐 osp（opencode-serenity-plugin/src/acc-kit.ts）——osp 是 ACC 工具 spec：
+ *   - health：{ccc, root, version, status: healthy|degraded, principles: {P1_rooted, P2_git_managed, P3_binary_permissions}}
+ *   - time：{now_iso, now_local, epoch_ms}
+ *   - wait：缺省 1s（正整数秒），返回 'waited Ns' 文本
+ * 平台适配：P3 在 osp 检查 opencode.json，DSH 无 opencode.json → 检查 DSH/opencode 配置路径
+ * （.opencode/serenity.json / .dsh/serenity.json 等，见 DEFAULT_SERENITY_CONFIG_PATHS）。
+ * CCC 缺失时返回 degraded 报告而非抛错（对齐 osp 未激活语义）。
+ * 保留 dsp 增强：accVersion/dshVersion 版本自省字段。
+ * wait 用纯 Node setTimeout——不依赖外部 sleep 可执行文件（Windows 无 GNU coreutils sleep）。
  */
 
 import { existsSync, statSync, readFileSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve } from 'node:path'
 import { findSerenityRoot, findGitRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
 import { readDshVersion } from './status.js'
@@ -23,45 +28,83 @@ export interface KitArgs {
   seconds?: number
 }
 
-export async function runKit(root: string, args: KitArgs): Promise<JsonValue> {
+/** CCC 名：从 .serenity 首行解析（对齐 osp readSerenityCccName） */
+function readCccName(root: string | null): string | null {
+  if (!root) return null
+  try {
+    const content = readFileSync(resolve(root, '.serenity'), 'utf-8').trim()
+    return content.split('\n')[0]?.trim() || null
+  } catch {
+    return null
+  }
+}
+
+export async function runKit(root: string | null, args: KitArgs): Promise<JsonValue> {
   switch (args.action) {
     case 'health': {
-      const gitRoot = findGitRoot(root)
-      let config: JsonValue = null
-      let configPath: string | null = null
-      for (const candidate of DEFAULT_SERENITY_CONFIG_PATHS) {
-        const p = resolve(root, candidate)
-        if (!existsSync(p)) continue
-        try {
-          config = JSON.parse(readFileSync(p, 'utf-8')) as JsonValue
-          configPath = p
-        } catch {
-          config = { parseError: true }
-          configPath = p
+      const cccName = readCccName(root)
+      // P1: .serenity 存在且非空
+      const serenityPath = root ? resolve(root, '.serenity') : null
+      const p1Pass = serenityPath !== null && existsSync(serenityPath) && statSync(serenityPath).size > 0
+      // P2: git 管理
+      const gitRoot = root ? findGitRoot(root) : null
+      const p2Pass = gitRoot !== null
+      // P3: 配置存在（DSH 无 opencode.json，检查配置路径；对齐 osp 的 P3_binary_permissions 语义）
+      let p3Pass = false
+      let p3Detail = 'config not found at CCC root'
+      if (root) {
+        for (const candidate of DEFAULT_SERENITY_CONFIG_PATHS) {
+          if (existsSync(resolve(root, candidate))) {
+            p3Pass = true
+            p3Detail = `${candidate} found`
+            break
+          }
         }
-        break
       }
+      const allPass = p1Pass && p2Pass && p3Pass
+      const report: Record<string, unknown> = {
+        ccc: cccName,
+        root,
+        version: ACC_VERSION,
+        status: allPass ? 'healthy' : 'degraded',
+        principles: {
+          P1_rooted: {
+            pass: p1Pass,
+            detail: p1Pass ? '.serenity marker found' : '.serenity marker missing',
+          },
+          P2_git_managed: {
+            pass: p2Pass,
+            detail: p2Pass ? 'git repository verified' : 'not in a git repository',
+          },
+          P3_binary_permissions: {
+            pass: p3Pass,
+            detail: p3Detail,
+          },
+        },
+      }
+      // dsp 增强：版本自省（升级提示依据）
+      if (root) {
+        report.config = loadSerenityConfig(root)
+      }
+      report.accVersion = ACC_VERSION
+      report.dshVersion = readDshVersion()
+      return report as JsonValue
+    }
+    case 'time': {
+      const now = new Date()
       return {
-        cwd: root,
-        serenityRoot: findSerenityRoot(root),
-        gitRoot,
-        config,
-        configPath,
-        p1: findSerenityRoot(root) !== null,
-        p2: gitRoot !== null,
-        p3: 'enforced-by-dsh-fs-sandbox',
-        // P2-9 版本自省：ACC 版本 + 已安装 DSH CLI 版本（升级提示依据）
-        accVersion: ACC_VERSION,
-        dshVersion: readDshVersion(),
+        now_iso: now.toISOString(),
+        now_local: now.toString(),
+        epoch_ms: now.getTime(),
       }
     }
-    case 'time':
-      return new Date().toISOString()
     case 'wait': {
-      const n = args.seconds ?? 0
-      if (!Number.isFinite(n) || n < 0) throw new Error('wait 需要非负秒数')
-      await new Promise((r) => setTimeout(r, Math.round(n * 1000)))
-      return { waited: n }
+      const seconds = args.seconds ?? 1
+      if (!Number.isInteger(seconds) || seconds <= 0) {
+        throw new Error('wait 需要正整数秒数（缺省 1）')
+      }
+      await new Promise((r) => setTimeout(r, seconds * 1000))
+      return `waited ${seconds}s`
     }
     default:
       throw new Error(`未知 action: ${args.action as string}`)

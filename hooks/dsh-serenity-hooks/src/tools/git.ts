@@ -19,11 +19,14 @@ function renderText(value: unknown): ContentBlock[] {
 export const gitTool = defineTool({
   name: 'cc_git',
   description:
-    'CCC 内 git 操作（cc-git 语义）。status/commit/push/log；push 非快进时输出操作建议（绝不自动 force）。pull/merge/rebase/冲突解决走 bash。',
+    'CCC 内 git 操作（cc-git 语义，对齐 osp）。status/commit/push/log/pull/diff；push/pull 非快进时输出 [REJECTED] + 操作建议（绝不自动 force）。merge/rebase/冲突解决走 bash。',
   parameters: {
-    action: { type: 'string', enum: [...GIT_ACTIONS], required: true, description: '子命令' },
-    message: { type: 'string', description: 'commit 消息' },
-    count: { type: 'integer', description: 'log 条数（默认 10）' },
+    action: { type: 'string', enum: [...GIT_ACTIONS], required: true, description: '子命令：status/commit/push/log/pull/diff' },
+    message: { type: 'string', description: 'commit 消息（commit 必填）' },
+    count: { type: 'integer', description: 'log 条数（默认 10，max 100）' },
+    staged: { type: 'boolean', description: 'diff: 显示暂存区变更（--cached）' },
+    ref: { type: 'string', description: 'diff: 对比 ref（如 HEAD~1 / main / origin/main）' },
+    path: { type: 'string', description: 'diff: 限定路径（如 src/、package.json）' },
   },
   output: {
     schema: { type: 'json' },

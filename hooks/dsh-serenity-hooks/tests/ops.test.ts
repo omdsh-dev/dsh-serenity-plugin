@@ -19,31 +19,41 @@ afterEach(() => {
 })
 
 describe('kit-ops', () => {
-  it('health 输出三原则', async () => {
-    const h = (await runKit(dir, { action: 'health' })) as { p1: boolean; p2: boolean }
-    expect(h.p1).toBe(true)
-    expect(h.p2).toBe(false) // 无 .git
+  it('health 输出三原则（对齐 osp schema）', async () => {
+    const h = (await runKit(dir, { action: 'health' })) as {
+      status: string
+      principles: { P1_rooted: { pass: boolean }; P2_git_managed: { pass: boolean }; P3_binary_permissions: { pass: boolean } }
+    }
+    expect(h.status).toBe('degraded') // 无 .git → degraded
+    expect(h.principles.P1_rooted.pass).toBe(true)
+    expect(h.principles.P2_git_managed.pass).toBe(false) // 无 .git
+    expect(h.principles.P3_binary_permissions.pass).toBe(false) // 无配置
   })
 
-  it('time 输出 ISO', async () => {
-    const t = (await runKit(dir, { action: 'time' })) as string
-    expect(new Date(t).toString()).not.toBe('Invalid Date')
+  it('CCC 缺失时返回 degraded（不抛错）', async () => {
+    const h = (await runKit(null, { action: 'health' })) as { status: string; root: string | null }
+    expect(h.status).toBe('degraded')
+    expect(h.root).toBeNull()
   })
 
-  it('wait 纯 Node 实现（不依赖外部 sleep；0 秒立即返回）', async () => {
-    const started = Date.now()
-    const w = (await runKit(dir, { action: 'wait', seconds: 0 })) as { waited: number }
-    expect(w.waited).toBe(0)
-    expect(Date.now() - started).toBeLessThan(500)
+  it('time 输出 {now_iso, now_local, epoch_ms}', async () => {
+    const t = (await runKit(dir, { action: 'time' })) as { now_iso: string; now_local: string; epoch_ms: number }
+    expect(new Date(t.now_iso).toString()).not.toBe('Invalid Date')
+    expect(typeof t.epoch_ms).toBe('number')
+  })
 
+  it('wait 需正整数秒数（对齐 osp；缺省 1）', async () => {
+    // 0 秒拒绝（osp spec：positive int）
+    await expect(runKit(dir, { action: 'wait', seconds: 0 })).rejects.toThrow(/正整数/)
     // 负秒数拒绝
-    await expect(runKit(dir, { action: 'wait', seconds: -1 })).rejects.toThrow(/非负秒数/)
+    await expect(runKit(dir, { action: 'wait', seconds: -1 })).rejects.toThrow(/正整数/)
   })
 
   it('wait 1 秒耗时 ≥ 约 1 秒', async () => {
     const started = Date.now()
-    await runKit(dir, { action: 'wait', seconds: 1 })
+    const w = await runKit(dir, { action: 'wait', seconds: 1 })
     expect(Date.now() - started).toBeGreaterThanOrEqual(900)
+    expect(w).toBe('waited 1s') // 对齐 osp 文本输出
   })
 })
 
@@ -55,17 +65,23 @@ describe('git-ops', () => {
     writeFileSync(join(dir, 'a.txt'), 'hi')
   })
 
-  it('commit + status + log', () => {
-    const c = runGit(dir, { action: 'commit', message: 'init' }) as { committed: boolean }
-    expect(c.committed).toBe(true)
-    const s = runGit(dir, { action: 'status' }) as { clean: boolean }
+  it('commit + status + log（对齐 osp 文本/JSON 输出）', () => {
+    const c = runGit(dir, { action: 'commit', message: 'init' }) as string
+    expect(c).toContain('master')
+    const s = runGit(dir, { action: 'status' }) as { clean: boolean; files: { status: string; file: string }[]; summary: string }
     expect(s.clean).toBe(true)
-    const l = runGit(dir, { action: 'log' }) as { entries: string[] }
-    expect(l.entries.some((e) => e.includes('init'))).toBe(true)
+    expect(Array.isArray(s.files)).toBe(true)
+    const l = runGit(dir, { action: 'log' }) as string
+    expect(l).toContain('init')
   })
 
   it('commit 缺消息抛错', () => {
     expect(() => runGit(dir, { action: 'commit' })).toThrow(/message/)
+  })
+
+  it('pull：无远程配置报错；diff：无差异返回 (no diff)', () => {
+    expect(() => runGit(dir, { action: 'pull' })).toThrow(/no remote configured/)
+    expect(runGit(dir, { action: 'diff' })).toBe('(no diff)')
   })
 
   it('localstore git 联动：deny 且未 gitignore → commit 拒绝 + status warning', () => {
@@ -82,16 +98,16 @@ describe('git-ops', () => {
   it('localstore git 联动：deny + gitignore 覆盖 → 放行 commit', () => {
     writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
     writeFileSync(join(dir, '.gitignore'), 'localstore.json\n')
-    const c = runGit(dir, { action: 'commit', message: 'init' }) as { committed: boolean }
-    expect(c.committed).toBe(true)
+    const c = runGit(dir, { action: 'commit', message: 'init' }) as string
+    expect(c).toContain('master')
   })
 
   it('localstore git 联动：allow 配置 → 放行（即使未 gitignore）', () => {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ localstore: { gitTrack: 'allow' } }))
     writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
-    const c = runGit(dir, { action: 'commit', message: 'init' }) as { committed: boolean }
-    expect(c.committed).toBe(true)
+    const c = runGit(dir, { action: 'commit', message: 'init' }) as string
+    expect(c).toContain('master')
   })
 })
 

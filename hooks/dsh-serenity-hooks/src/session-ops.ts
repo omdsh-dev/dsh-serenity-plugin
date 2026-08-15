@@ -1,27 +1,50 @@
 /**
  * session-ops.ts — session 工具纯操作层（零 DSH 依赖，可独立单测）
  *
- * 移植自 dsh-serenity-plugin v0.1 acc-session runner（本项目自有代码）。
- * 操作 CCC 根的 AGENT_SESSIONS/ 目录，返回规范 JSON 值。
+ * 行为对齐 osp（opencode-serenity-plugin/src/session/lib.ts）——osp 是 ACC 工具 spec：
+ *   - create：--desc / --issue 二选一（互斥、缺省报错）；issue 模式目录 YYYY-MM-DD--<issue>
+ *     （无 S###，sessionId=issue）；desc 模式 YYYY-MM-DD--S###--<desc>；goal 写入目标段；dry-run 预览
+ *   - close：需 name + confirm=true；标记 [x] 已完成+已关闭 + 进度记录"关闭"
+ *   - archive：name 缺省 → 批量归档（completed + ≥7 天 → 移动 _archived/）；单会话需 completed + grace
+ *   - list/show/health/qa/summary：文本输出格式与 osp 一致
+ * 保留 dsp S134 活跃会话机制（内存 Map + events 恢复，不落盘）——osp 同为内存 active-state。
  */
 
-import { existsSync, statSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import {
+  existsSync,
+  statSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  renameSync,
+} from 'node:fs'
+import { join, basename } from 'node:path'
 import type { JsonValue } from './json.js'
 
-export type SessionAction = 'list' | 'show' | 'create' | 'use' | 'close' | 'health' | 'qa' | 'archive' | 'summary'
+export type SessionAction =
+  | 'list'
+  | 'show'
+  | 'create'
+  | 'use'
+  | 'close'
+  | 'health'
+  | 'qa'
+  | 'archive'
+  | 'summary'
+  | 'hook-develop-guide'
 
-export const SESSION_ACTIONS: readonly SessionAction[] = ['list', 'show', 'create', 'use', 'close', 'health', 'qa', 'archive', 'summary']
+export const SESSION_ACTIONS: readonly SessionAction[] = [
+  'list', 'show', 'create', 'use', 'close', 'health', 'qa', 'archive', 'summary', 'hook-develop-guide',
+]
 
-export type SessionInfo = {
-  dir: string
-  id: string | null
-  hasSessionMd: boolean
-  mtime: string
-  status: string | null
-} & { [key: string]: JsonValue }
-
-const SESSION_DIR_RE = /^(\d{4}-\d{2}-\d{2})--(S\d{3})--(.+)$/
+const SESSION_MD = 'SESSION.md'
+const ARCHIVE_DIR_NAME = '_archived'
+const HEALTH_STALE_DAYS = 7
+const HEALTH_STALLED_PCT = 30
+const HEALTH_STALLED_DAYS = 3
+const HEALTH_GHOST_DAYS = 2
 const DAY = 86_400_000
 
 function today(): string {
@@ -32,87 +55,235 @@ function sessionsRoot(root: string): string {
   return join(root, 'AGENT_SESSIONS')
 }
 
-export function listSessions(root: string): SessionInfo[] {
-  const sessRoot = sessionsRoot(root)
-  if (!existsSync(sessRoot)) return []
-  const out: SessionInfo[] = []
-  for (const entry of readdirSync(sessRoot)) {
-    const full = join(sessRoot, entry)
-    if (!statSync(full).isDirectory()) continue
-    const md = join(full, 'SESSION.md')
-    const m = SESSION_DIR_RE.exec(entry)
-    let status: string | null = null
-    if (existsSync(md)) {
-      status = /\[x\]|\[X\]/.test(readFileSync(md, 'utf-8')) ? 'done' : 'open'
-    }
-    out.push({
-      dir: entry,
-      id: m?.[2] ?? null,
-      hasSessionMd: existsSync(md),
-      mtime: statSync(full).mtime.toISOString(),
-      status,
-    })
-  }
-  out.sort((a, b) => (a.dir < b.dir ? 1 : -1))
-  return out
+// ── 会话条目与状态（对齐 osp readAllSessions/parseSessionMd）──
+
+interface SessionStatus {
+  hasSessionMd: boolean
+  completed: boolean
+  completedCount: number
+  pendingCount: number
+  unresolvedCount: number
 }
 
-export function nextSessionId(sessions: SessionInfo[]): string {
-  let max = 0
-  for (const s of sessions) {
-    if (s.id) {
-      const n = Number(s.id.slice(1))
-      if (n > max) max = n
-    }
-  }
-  return `S${String(max + 1).padStart(3, '0')}`
+export interface SessionEntry {
+  dirName: string
+  path: string
+  mtime: Date
+  status: SessionStatus
 }
 
-export function findSession(root: string, key: string): SessionInfo | null {
+/** 解析 SESSION.md 状态元数据（对齐 osp parseSessionMd） */
+function parseSessionMd(filePath: string): SessionStatus {
+  try {
+    const content = readFileSync(filePath, 'utf-8')
+    const completed = /\[\s*x\s*\]/i.test(content)
+    const completedCount = (content.match(/\[\s*x\s*\]/gi) ?? []).length
+    const pendingCount = (content.match(/\[\s*[ \t]\s*\]/g) ?? []).length
+    const unresolvedCount = (content.match(/(未解决|open|question|TODO)/gi) ?? []).length
+    return { hasSessionMd: true, completed, completedCount, pendingCount, unresolvedCount }
+  } catch {
+    return { hasSessionMd: false, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 }
+  }
+}
+
+function readSessionEntry(dirPath: string): SessionEntry | null {
+  try {
+    const st = statSync(dirPath)
+    if (!st.isDirectory()) return null
+    const dirName = basename(dirPath)
+    const mdPath = join(dirPath, SESSION_MD)
+    const status = existsSync(mdPath)
+      ? parseSessionMd(mdPath)
+      : { hasSessionMd: false, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 }
+    return { dirName, path: dirPath, mtime: st.mtime, status }
+  } catch {
+    return null
+  }
+}
+
+/** 读取 AGENT_SESSIONS 中所有会话，活跃（未完成）排前（对齐 osp readAllSessions） */
+function readAllSessions(sessionsDir: string): SessionEntry[] {
+  try {
+    return readdirSync(sessionsDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => readSessionEntry(join(sessionsDir, e.name)))
+      .filter((s): s is SessionEntry => s !== null)
+      .sort((a, b) => {
+        if (!a.status.completed && b.status.completed) return -1
+        if (a.status.completed && !b.status.completed) return 1
+        return b.mtime.getTime() - a.mtime.getTime()
+      })
+  } catch {
+    return []
+  }
+}
+
+/** 提取目录名中的会话 ID（S### 或 issue 名）；无匹配返回 '' */
+function extractSessionId(dirName: string): string {
+  const m = dirName.match(/--S(\d{3,})--/)
+  return m ? `S${m[1]}` : ''
+}
+
+/**
+ * 根据 key 查找会话（对齐 osp findSession）：
+ * 精确目录名 → S### ID（允许 S31→031）→ 唯一模糊子串匹配（多个则报错）
+ */
+export function findSession(sessionsDir: string, key: string): SessionEntry | null {
+  const all = readAllSessions(sessionsDir)
+  const byName = all.find((s) => s.dirName === key)
+  if (byName) return byName
+  const searchId = key.replace(/^S/, '').padStart(3, '0')
+  const byId = all.find((s) => {
+    const m = s.dirName.match(/--S(\d{3,})--/)
+    return m && m[1] === searchId
+  })
+  if (byId) return byId
+  const lower = key.toLowerCase()
+  const fuzzy = all.filter((s) => s.dirName.toLowerCase().includes(lower))
+  if (fuzzy.length === 1) return fuzzy[0] ?? null
+  if (fuzzy.length > 1) {
+    throw new Error(
+      `Found ${fuzzy.length} sessions matching "${key}": ` +
+      fuzzy.map((s) => s.dirName).join(', ') +
+      '. Use a more specific query.',
+    )
+  }
+  return null
+}
+
+// ── list ──
+
+/** list 子命令（对齐 osp listSessions 文本格式 + active 标记） */
+export function listSessions(root: string, activeId?: string): string {
+  const sessions = readAllSessions(sessionsRoot(root))
+  if (sessions.length === 0) return '(no sessions in AGENT_SESSIONS/)'
+  const lines = sessions.map((s) => {
+    const age = Math.floor((Date.now() - s.mtime.getTime()) / DAY)
+    const sessionId = extractSessionId(s.dirName)
+    const isActive = activeId !== undefined && sessionId !== '' && sessionId === activeId
+    const status = isActive ? '●' : s.status.completed ? '✓' : '○'
+    return `${status} ${s.dirName} (${age}d ago)`
+  })
+  return `AGENT_SESSIONS/ (${sessions.length} sessions)\n` + lines.join('\n')
+}
+
+// ── show ──
+
+/** show 子命令（对齐 osp showSession：`# dirName\n\n` + SESSION.md 内容） */
+export function showSession(root: string, key: string): string {
+  const sessionsDir = sessionsRoot(root)
+  const session = findSession(sessionsDir, key)
+  if (!session) {
+    throw new Error(`Session not found: "${key}". Use "list" to see available sessions.`)
+  }
+  const mdPath = join(session.path, SESSION_MD)
+  if (!existsSync(mdPath)) {
+    return `Session ${session.dirName} (no SESSION.md — directory exists but is empty)`
+  }
+  const content = readFileSync(mdPath, 'utf-8')
+  return `# ${session.dirName}\n\n${content}`
+}
+
+// ── create ──
+
+export interface CreateSessionOptions {
+  root: string
+  /** --desc 模式的描述（与 issue 互斥） */
+  desc?: string
+  /** --issue 模式的工单号（与 desc 互斥） */
+  issue?: string
+  goal?: string
+  dryRun: boolean
+}
+
+export interface CreateSessionResult {
+  message: string
+  dirName: string
+  sessionPath: string
+  sessionId: string
+}
+
+/** 生成 SESSION.md 模板（对齐 osp：goal 写入目标段，时间戳 YYYY-MM-DD HH:mm） */
+function sessionMdTemplate(title: string, id: string, goal: string | undefined, now: Date): string {
+  const ts = now.toISOString().slice(0, 16).replace('T', ' ')
   return (
-    listSessions(root).find((s) => s.dir.includes(key) || (s.id ?? '') === key.toUpperCase()) ?? null
+    `# SESSION: ${title}\n- ID: ${id}\n\n` +
+    `## 目标\n${goal ?? '（待补充）'}\n\n` +
+    `## 状态\n- [ ] 进行中\n\n` +
+    `## 关键决策\n| # | 决策 | 理由 |\n|---|------|------|\n| 1 | | |\n\n` +
+    `## 进度记录\n- ${ts} — 创建\n\n` +
+    `## 产出物\n- \n\n` +
+    `## 未解决的问题\n- \n`
   )
 }
 
-export interface CreateSessionResult extends Record<string, JsonValue> {
-  dir: string
-  id: string
-  sessionMd: string
-}
+/** create 子命令（对齐 osp createSession：--desc/--issue 二选一 + dry-run + 长度限制） */
+export function createSession(opts: CreateSessionOptions): CreateSessionResult {
+  const { root, desc, issue, goal, dryRun } = opts
+  const sessionsDir = sessionsRoot(root)
+  const now = new Date()
+  const datePrefix = now.toISOString().slice(0, 10)
 
-export function createSession(root: string, name: string, title: string): CreateSessionResult {
-  const sessions = listSessions(root)
-  const id = nextSessionId(sessions)
-  const dirName = `${today()}--${id}--${name}`
-  const dir = join(sessionsRoot(root), dirName)
-  mkdirSync(dir, { recursive: true })
-  const md = join(dir, 'SESSION.md')
-  writeFileSync(
-    md,
-    `# SESSION: ${title}\n- ID: ${id}\n\n## 目标\n<一句话描述本次会话要完成的事情>\n\n## 状态\n- [ ] 进行中\n\n## 关键决策\n| # | 决策 | 理由 |\n|---|------|------|\n| 1 |  |  |\n\n## 进度记录\n- ${today()} — 会话创建\n\n## 产出物\n- \n\n## 未解决的问题\n- \n`,
-    'utf-8',
-  )
-  return { dir: dirName, id, sessionMd: md }
-}
-
-export function showSession(root: string, key: string): DirResult & { content: string } {
-  const target = findSession(root, key)
-  if (!target) {
-    // 关键词回退：内容搜索
-    for (const s of listSessions(root)) {
-      const md = join(sessionsRoot(root), s.dir, 'SESSION.md')
-      if (existsSync(md) && readFileSync(md, 'utf-8').includes(key)) {
-        return { dir: s.dir, content: readFileSync(md, 'utf-8') }
-      }
-    }
-    throw new Error(`未找到会话: ${key}`)
+  if (!desc && !issue) {
+    throw new Error('create requires either --desc or --issue')
   }
-  const md = join(sessionsRoot(root), target.dir, 'SESSION.md')
-  if (!existsSync(md)) throw new Error(`会话 ${target.dir} 缺少 SESSION.md`)
-  return { dir: target.dir, content: readFileSync(md, 'utf-8') }
+  if (desc && issue) {
+    throw new Error('--desc and --issue are mutually exclusive')
+  }
+
+  if (issue) {
+    if (issue.length > 100) {
+      throw new Error(`issue too long: ${issue.length} chars (max 100)`)
+    }
+    const dirName = `${datePrefix}--${issue}`
+    const sessionPath = join(sessionsDir, dirName)
+    if (!dryRun && existsSync(sessionPath)) {
+      throw new Error(`Session directory already exists: "${dirName}"`)
+    }
+    if (dryRun) {
+      return { message: `[dry-run] Would create: ${dirName}/`, dirName, sessionPath, sessionId: issue }
+    }
+    mkdirSync(sessionPath, { recursive: true })
+    writeFileSync(join(sessionPath, SESSION_MD), sessionMdTemplate(issue, issue, goal, now), 'utf-8')
+    return { message: `Created: ${dirName}/`, dirName, sessionPath, sessionId: issue }
+  }
+
+  // --desc 模式
+  if (!desc || desc.length === 0) {
+    throw new Error('description cannot be empty')
+  }
+  if (desc.length > 200) {
+    throw new Error(`description too long: ${desc.length} chars (max 200)`)
+  }
+  const sessions = readAllSessions(sessionsDir)
+  let maxId = 0
+  for (const s of sessions) {
+    const m = s.dirName.match(/--S(\d{3,})--/)
+    if (m) {
+      const num = parseInt(m[1]!, 10)
+      if (num > maxId) maxId = num
+    }
+  }
+  const nextId = String(maxId + 1).padStart(3, '0')
+  const dirName = `${datePrefix}--S${nextId}--${desc}`
+  const sessionPath = join(sessionsDir, dirName)
+  if (!dryRun && existsSync(sessionPath)) {
+    throw new Error(`Session directory already exists: "${dirName}"`)
+  }
+  if (dryRun) {
+    return {
+      message: `[dry-run] Would create: ${dirName}/\n  goal=${goal ?? '(none)'}`,
+      dirName,
+      sessionPath,
+      sessionId: `S${nextId}`,
+    }
+  }
+  mkdirSync(sessionPath, { recursive: true })
+  writeFileSync(join(sessionPath, SESSION_MD), sessionMdTemplate(desc, `S${nextId}`, goal, now), 'utf-8')
+  return { message: `Created: ${dirName}/ (S${nextId})`, dirName, sessionPath, sessionId: `S${nextId}` }
 }
 
-export type DirResult = { dir: string } & Record<string, JsonValue>
+// ── S134 活跃会话（内存 Map + events 恢复；对齐 osp active-state 的内存模型）──
 
 /**
  * 活动会话跟踪（S134 v1.16.14 内存化，对齐 osp active-state）：
@@ -161,32 +332,87 @@ export function resetActiveSessionStore(): void {
   lastActive = null
 }
 
-/**
- * 激活会话：写内存 Map（scope）+ 返回含 `[SESSION CONTEXT]` 标记的 context
- * （标记随工具结果进 events 历史——进程重启后从当前会话 events 解析恢复，对齐 osp）。
- */
-export function useSession(root: string, key: string, scope = DEFAULT_SESSION_SCOPE): DirResult & { mdPath: string; context: string } {
-  const target = findSession(root, key)
-  if (!target) throw new Error(`未找到会话: ${key}`)
-  const md = join(sessionsRoot(root), target.dir, 'SESSION.md')
-  if (!existsSync(md)) throw new Error(`会话 ${target.dir} 缺少 SESSION.md`)
-  const dirName = target.dir
-  const idMatch = dirName.match(/S(\d{3,})/)
-  const sessionId = idMatch ? `S${idMatch[1]}` : dirName
-  setActiveSessionInfo(scope, { sessionId, dirName, mdPath: md })
-  const context = `${SESSION_CONTEXT_MARKER} ${dirName}\nSESSION.md path: ${md}`
-  return { dir: dirName, mdPath: md, context }
-}
-
-/** 关闭活动会话：删除 scope 的内存条目（+ lastActive 修正）——不落盘，无文件残留 */
-export function closeSession(root: string, scope = DEFAULT_SESSION_SCOPE): DirResult {
-  clearActiveSessionInfo(scope)
-  return { dir: 'active-session cleared' }
-}
-
-/** 读取指定 scope 的活跃会话 SESSION.md 绝对路径；无激活返回 null（读内存，不落盘） */
-export function readActiveSessionMd(root: string, scope = DEFAULT_SESSION_SCOPE): string | null {
+/** 当前 scope 的活跃会话 SESSION.md 绝对路径；无激活返回 null（读内存，不落盘） */
+export function readActiveSessionMd(_root: string, scope = DEFAULT_SESSION_SCOPE): string | null {
   return getActiveSessionInfo(scope)?.mdPath ?? null
+}
+
+/**
+ * use 子命令：激活会话（写内存 Map）+ 返回对齐 osp 的输出文本
+ * （含 [SESSION CONTEXT] 标记 + todowrite 指令；标记随工具结果进 events 历史，
+ *  进程重启后从当前会话 events 解析恢复）。
+ */
+export function useSession(root: string, key: string, scope = DEFAULT_SESSION_SCOPE): { dir: string; mdPath: string; context: string } {
+  const sessionsDir = sessionsRoot(root)
+  const session = findSession(sessionsDir, key)
+  if (!session) {
+    throw new Error(`Session not found: "${key}". Use "list" to see available sessions.`)
+  }
+  const mdPath = join(session.path, SESSION_MD)
+  if (!existsSync(mdPath)) {
+    throw new Error(`Session "${session.dirName}" has no SESSION.md — nothing to load.`)
+  }
+  const sessionId = extractSessionId(session.dirName) || basename(session.dirName)
+  const dirName = session.dirName
+  const shortName = dirName.replace(/^\d{4}-\d{2}-\d{2}--/, '')
+  setActiveSessionInfo(scope, { sessionId, dirName, mdPath })
+  const context = [
+    `───────────────────────────────────────────────────────────────`,
+    `${SESSION_CONTEXT_MARKER} ${dirName}`,
+    `───────────────────────────────────────────────────────────────`,
+    `Use "session show ${sessionId}" to view session details.`,
+    `SESSION.md path: ${mdPath}`,
+    ``,
+    `→ All subsequent work should refer back to this session.`,
+    `  Use "session show ${sessionId}" to check current progress.`,
+    `  After advancing work, update the "进度记录" (progress) section in SESSION.md.`,
+    ``,
+    `→ BEFORE responding to the user, you MUST call todowrite immediately`,
+    `  with the session todo list. The first item MUST be:`,
+    `    content: "SESSION: ${sessionId} — ${shortName}"`,
+    `    status: "completed", priority: "low"`,
+    `  Follow with any tasks parsed from SESSION.md.`,
+    `───────────────────────────────────────────────────────────────`,
+  ].join('\n')
+  return { dir: dirName, mdPath, context }
+}
+
+/**
+ * close 子命令（对齐 osp closeSession）：需 name + confirm=true；
+ * 标记 SESSION.md 为 [x] 已完成 + [x] 已关闭 + 进度记录"关闭"；清除该会话的活跃状态。
+ */
+export function closeSession(root: string, key: string, confirm: boolean, scope = DEFAULT_SESSION_SCOPE): string {
+  if (!confirm) {
+    return (
+      `⚠ Close requires explicit confirmation.\n` +
+      `  Re-run with --confirm to confirm closing this session.`
+    )
+  }
+  const sessionsDir = sessionsRoot(root)
+  const session = findSession(sessionsDir, key)
+  if (!session) {
+    throw new Error(`Session not found: "${key}". Use "list" to see available sessions.`)
+  }
+  if (session.status.completed) {
+    return `Session "${session.dirName}" is already completed.`
+  }
+  const mdPath = join(session.path, SESSION_MD)
+  if (!existsSync(mdPath)) {
+    throw new Error(`Session "${session.dirName}" has no SESSION.md — nothing to close.`)
+  }
+  let content = readFileSync(mdPath, 'utf-8')
+  // 兼容有无空行的状态段（模板生成无空行；手工编辑可能带空行）
+  content = content.replace(
+    /## 状态\n\n?- \[ \] 进行中/,
+    '## 状态\n- [x] 已完成\n- [x] 已关闭',
+  )
+  const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
+  if (!content.includes('-- 关闭')) {
+    content = content.replace(/(## 进度记录\n)/, `$1- ${now} — 关闭\n`)
+  }
+  writeFileSync(mdPath, content, 'utf-8')
+  clearActiveSessionInfo(scope)
+  return `Session "${session.dirName}" closed and marked as completed.`
 }
 
 /**
@@ -204,8 +430,12 @@ export function parseSessionContextFromEvents(events: readonly unknown[]): Activ
       const dirName = rest.split('\n')[0]?.trim() ?? ''
       const mdMatch = s.match(/SESSION\.md path:\s*(\S+)/)
       if (/^\d{4}-\d{2}-\d{2}--/.test(dirName) && mdMatch) {
-        const idMatch = dirName.match(/S(\d{3,})/)
-        return { sessionId: idMatch ? `S${idMatch[1]}` : dirName, dirName, mdPath: mdMatch[1]! }
+        const idMatch = dirName.match(/--S(\d{3,})--/)
+        return {
+          sessionId: idMatch ? `S${idMatch[1]}` : basename(dirName),
+          dirName,
+          mdPath: mdMatch[1]!,
+        }
       }
     }
   }
@@ -223,81 +453,269 @@ function collectStrings(v: unknown, out: string[]): void {
   }
 }
 
-export function archiveSession(root: string, key: string): DirResult {
-  const target = findSession(root, key)
-  if (!target) throw new Error(`未找到会话: ${key}`)
-  const md = join(sessionsRoot(root), target.dir, 'SESSION.md')
-  if (!existsSync(md)) throw new Error(`会话 ${target.dir} 缺少 SESSION.md`)
-  let content = readFileSync(md, 'utf-8')
-  content = content
-    .replace(/^-\s*\[ \]\s*进行中$/m, '- [x] 已完成')
-    .replace(/^-\s*\[ \]\s*已关闭（未完成）$/m, '- [x] 已关闭（未完成）')
-  if (!/\[x\]|\[X\]/.test(content)) content = content.replace(/^## 状态$/m, '## 状态\n- [x] 已完成')
-  writeFileSync(md, content, 'utf-8')
-  appendFileSync(md, `\n> 已归档: ${today()}\n`, 'utf-8')
-  return { dir: target.dir }
-}
+// ── health ──
 
-export interface HealthProblem extends Record<string, JsonValue> {
-  dir: string
-  kind: 'missing-md' | 'stale'
-  detail: string
-}
-
-export function healthCheck(root: string): HealthProblem[] {
-  const problems: HealthProblem[] = []
+/** health 子命令（对齐 osp healthCheck：stale/stalled/ghost/drift 四类检查，文本输出） */
+export function healthCheck(root: string): string {
+  const sessions = readAllSessions(sessionsRoot(root))
+  if (sessions.length === 0) return 'No sessions found — nothing to check.'
   const now = Date.now()
-  for (const s of listSessions(root)) {
-    const age = (now - new Date(s.mtime).getTime()) / DAY
-    if (!s.hasSessionMd) {
-      problems.push({ dir: s.dir, kind: 'missing-md', detail: '缺少 SESSION.md' })
-    } else if (age > 14) {
-      problems.push({ dir: s.dir, kind: 'stale', detail: `${Math.round(age)} 天未更新` })
+  interface HealthIssue { dirName: string; issue: string; severity: string }
+  const issues: HealthIssue[] = []
+  for (const s of sessions) {
+    const ageDays = (now - s.mtime.getTime()) / DAY
+    const st = s.status
+    if (ageDays > HEALTH_STALE_DAYS && !st.completed) {
+      issues.push({ dirName: s.dirName, issue: `No activity for ${Math.floor(ageDays)}d`, severity: 'stale' })
+    }
+    const totalTasks = st.completedCount + st.pendingCount
+    if (totalTasks > 0) {
+      const pct = Math.round((st.completedCount / totalTasks) * 100)
+      if (pct < HEALTH_STALLED_PCT && ageDays > HEALTH_STALLED_DAYS && !st.completed) {
+        issues.push({ dirName: s.dirName, issue: `Only ${pct}% done after ${Math.floor(ageDays)}d`, severity: 'stalled' })
+      }
+    }
+    if (!st.hasSessionMd && ageDays > HEALTH_GHOST_DAYS) {
+      issues.push({ dirName: s.dirName, issue: 'No SESSION.md (ghost directory)', severity: 'ghost' })
+    }
+    if (st.unresolvedCount > 3 && !st.completed) {
+      issues.push({ dirName: s.dirName, issue: `${st.unresolvedCount} unresolved items`, severity: 'drift' })
     }
   }
-  return problems
+  if (issues.length === 0) return 'All sessions healthy — no issues found.'
+  const lines = issues.map((i) => `[${i.severity.toUpperCase()}] ${i.dirName}: ${i.issue}`)
+  return `${issues.length} issue(s) found:\n` + lines.join('\n')
 }
 
-export interface SessionSummary extends Record<string, JsonValue> {
-  total: number
-  open: number
-  done: number
-  stale: number
-  recent: SessionInfo[]
-}
+// ── archive ──
 
-export function summarize(root: string): SessionSummary {
-  const sessions = listSessions(root)
-  const done = sessions.filter((s) => s.status === 'done').length
-  const stale = sessions.filter((s) => (Date.now() - new Date(s.mtime).getTime()) / DAY > 14).length
-  return {
-    total: sessions.length,
-    open: sessions.length - done,
-    done,
-    stale,
-    recent: sessions.slice(0, 5),
+/** archive 子命令（对齐 osp archiveSessions：移动 _archived/；name 缺省批量） */
+export function archiveSessions(root: string, opts: { name?: string; dryRun: boolean }): string {
+  const { name, dryRun } = opts
+  const sessionsDir = sessionsRoot(root)
+  const now = Date.now()
+  const archiveDir = join(sessionsDir, ARCHIVE_DIR_NAME)
+
+  if (name) {
+    const session = findSession(sessionsDir, name)
+    if (!session) {
+      throw new Error(`Session not found: "${name}"`)
+    }
+    if (!session.status.completed) {
+      return `Session "${session.dirName}" is not completed — skipping.`
+    }
+    const ageDays = (now - session.mtime.getTime()) / DAY
+    if (ageDays < 7) {
+      return `Session "${session.dirName}" completed ${Math.floor(ageDays)}d ago — needs ${7 - Math.floor(ageDays)} more days before archiving.`
+    }
+    if (dryRun) {
+      return `[dry-run] Would archive: ${session.dirName} → ${ARCHIVE_DIR_NAME}/`
+    }
+    if (!existsSync(archiveDir)) mkdirSync(archiveDir, { recursive: true })
+    renameSync(session.path, join(archiveDir, session.dirName))
+    return `Archived: ${session.dirName} → _archived/`
   }
+
+  const sessions = readAllSessions(sessionsDir)
+  const toArchive = sessions.filter((s) => {
+    if (!s.status.completed) return false
+    return (now - s.mtime.getTime()) / DAY >= 7
+  })
+  if (toArchive.length === 0) return 'No sessions eligible for archiving.'
+  if (dryRun) {
+    return `[dry-run] Would archive ${toArchive.length} session(s):\n` +
+      toArchive.map((s) => `  ${s.dirName}`).join('\n')
+  }
+  if (!existsSync(archiveDir)) mkdirSync(archiveDir, { recursive: true })
+  let count = 0
+  for (const s of toArchive) {
+    renameSync(s.path, join(archiveDir, s.dirName))
+    count++
+  }
+  return `Archived ${count} session(s) → _archived/`
 }
 
-export interface QaIssue extends Record<string, JsonValue> {
-  path: string
-  kind: 'missing'
+// ── summary ──
+
+/** summary 子命令（对齐 osp sessionSummary 文本仪表盘） */
+export function summarize(root: string): string {
+  const sessions = readAllSessions(sessionsRoot(root))
+  if (sessions.length === 0) return 'AGENT_SESSIONS/ is empty.'
+  const now = Date.now()
+  const completed = sessions.filter((s) => s.status.completed).length
+  const active = sessions.length - completed
+  const stale = sessions.filter((s) => !s.status.completed && (now - s.mtime.getTime()) / DAY > HEALTH_STALE_DAYS).length
+  const ghost = sessions.filter((s) => !s.status.hasSessionMd).length
+  const recent = sessions.slice(0, 5)
+  const lines: string[] = [
+    `AGENT_SESSIONS Summary`,
+    `────────────────────────`,
+    `Total:    ${sessions.length}`,
+    `Active:   ${active}`,
+    `Completed: ${completed}`,
+    `Stale:    ${stale}`,
+    `Ghost:    ${ghost}`,
+    ``,
+    `Recent activity (top 5):`,
+    ...recent.map((s) => {
+      const age = Math.floor((now - s.mtime.getTime()) / DAY)
+      return `  ${s.status.completed ? '✓' : '○'} ${s.dirName} (${age}d ago)`
+    }),
+  ]
+  if (stale > 0) {
+    lines.push('', '⚠ Warning: Stale sessions found — run "session health" for details.')
+  }
+  return lines.join('\n')
 }
 
-/** 事实核对：SESSION.md 中记录的产出物路径（- `path` — 说明 行）是否真实存在 */
-export function qaCheck(root: string, key: string): { dir: string; issues: QaIssue[] } {
-  const { dir, content } = showSession(root, key)
+// ── qa（事实核对，对齐 osp qaSession 五类检查）──
+
+interface QaIssue {
+  severity: 'info' | 'warning' | 'error'
+  category: string
+  message: string
+}
+
+/** 事实核对：SESSION.md 声明 vs 实际情况（结构/一致性/新鲜度/决策质量/产出物） */
+export function qaCheck(root: string, key: string): string {
+  const sessionsDir = sessionsRoot(root)
+  const session = findSession(sessionsDir, key)
+  if (!session) {
+    throw new Error(`Session not found: "${key}". Use "list" to see available sessions.`)
+  }
+  const mdPath = join(session.path, SESSION_MD)
+  if (!existsSync(mdPath)) {
+    return `[ERROR] Session "${session.dirName}" has no SESSION.md — nothing to verify.`
+  }
+  const content = readFileSync(mdPath, 'utf-8')
   const issues: QaIssue[] = []
-  for (const line of content.split('\n')) {
-    const m = /^-\s*(`[^`]+`|[^\s|]+)\s*—/.exec(line.trim())
-    if (!m) continue
-    const p = m[1]!.replace(/`/g, '')
-    if (!existsSync(resolve(root, p))) {
-      issues.push({ path: p, kind: 'missing' })
+
+  // 1. 结构性检查：必选章节
+  const requiredSections = [
+    { heading: '目标', label: '目标 (goal)' },
+    { heading: '状态', label: '状态 (status)' },
+    { heading: '关键决策', label: '关键决策 (key decisions)' },
+    { heading: '进度记录', label: '进度记录 (progress)' },
+    { heading: '产出物', label: '产出物 (outputs)' },
+    { heading: '未解决的问题', label: '未解决的问题 (unresolved)' },
+  ]
+  for (const section of requiredSections) {
+    const headingRegex = new RegExp(`^##\\s*${section.heading}[\\s\\S]*?(?=^##|(?![\\s\\S]))`, 'm')
+    const match = content.match(headingRegex)
+    if (!match) {
+      issues.push({ severity: 'warning', category: 'structure', message: `Missing section: ${section.label}` })
+      continue
+    }
+    const headingLineRegex = new RegExp(`^##\\s*${section.heading}\\s*$`, 'm')
+    const body = match[0].replace(headingLineRegex, '').trim()
+    if (!body || /^[-*]\s*$/.test(body)) {
+      issues.push({ severity: 'warning', category: 'structure', message: `Section "${section.label}" is empty (only placeholder)` })
     }
   }
-  return { dir, issues }
+
+  // 2. 完成度矛盾检查
+  const completedTasks = (content.match(/\[\s*x\s*\]/gi) ?? []).length
+  const pendingTasks = (content.match(/\[\s*[ \t]\s*\]/gi) ?? []).length
+  const statusSection = content.match(/^##\s*状态[\s\S]*?(?=^##|(?![^]))/mi)
+  const statusBody = statusSection ? statusSection[0].replace(/^##\s*状态.*$/m, '').trim() : ''
+  const hasCompletionMark = statusBody
+    ? /#+\s*(?:完成|done|completed|closed)\b/i.test(statusBody) ||
+      /(?:全部完成|已全部完成|所有.*任务.*完成|任务.*全部完成|已完成.*所有)/i.test(statusBody)
+    : false
+  const unresolvedSection = content.match(/^##\s*未解决的问题[\s\S]*?(?=^##|(?![^]))/mi)
+  const unresolvedBody = unresolvedSection ? unresolvedSection[0].replace(/^##\s*未解决的问题.*$/m, '').trim() : ''
+  const unresolvedCount = unresolvedBody ? (unresolvedBody.match(/(?:未解决|open|question|TODO)/gi) ?? []).length : 0
+
+  if (hasCompletionMark && pendingTasks > 0) {
+    issues.push({ severity: 'error', category: 'consistency', message: `Session marked as completed but has ${pendingTasks} pending task(s)` })
+  }
+  if (hasCompletionMark && unresolvedCount > 0) {
+    issues.push({ severity: 'warning', category: 'consistency', message: `Session marked as completed but has ${unresolvedCount} unresolved item(s)` })
+  }
+  if (completedTasks > 0 && pendingTasks === 0 && !hasCompletionMark) {
+    issues.push({ severity: 'info', category: 'consistency', message: `All ${completedTasks} task(s) completed but session not marked complete` })
+  }
+
+  // 3. 进度新鲜度检查
+  const progressSection = content.match(/##\s*进度记录[\s\S]*?(?=^##|\z)/m)
+  if (progressSection) {
+    const dateMatches = progressSection[0].match(/\b(\d{4}-\d{2}-\d{2})\b/g)
+    if (dateMatches && dateMatches.length > 0) {
+      const lastDateStr = dateMatches[dateMatches.length - 1]!
+      const lastDate = new Date(lastDateStr)
+      const daysSince = Math.floor((Date.now() - lastDate.getTime()) / DAY)
+      if (daysSince > HEALTH_STALE_DAYS && pendingTasks > 0) {
+        issues.push({ severity: 'warning', category: 'stale', message: `No progress entry for ${daysSince} days (last: ${lastDateStr}), session still has ${pendingTasks} pending task(s)` })
+      }
+    }
+  }
+
+  // 4. 决策质量检查
+  const decisionSection = content.match(/##\s*关键决策[\s\S]*?(?=^##|\z)/m)
+  if (decisionSection) {
+    const decisionLines = decisionSection[0].split('\n').filter((l) => /^\|\s*\d+\s*\|/.test(l))
+    if (decisionLines.length > 0) {
+      const emptyDecisions = decisionLines.filter((l) => {
+        const cells = l.split('|').map((c) => c.trim())
+        return cells.length >= 4 && (!cells[2] || !cells[3] || cells[2] === '-' || cells[3] === '-')
+      })
+      if (emptyDecisions.length > 0) {
+        issues.push({ severity: 'info', category: 'quality', message: `${emptyDecisions.length} decision(s) have empty reason — consider filling gaps` })
+      }
+    } else if (!hasCompletionMark) {
+      issues.push({ severity: 'info', category: 'quality', message: 'No decisions recorded yet — add key decisions as the session progresses' })
+    }
+  }
+
+  // 5. 产出物文件存在性检查（路径相对 CCC 根）
+  const outputSection = content.match(/##\s*产出物[\s\S]*?(?=^##|\z)/m)
+  if (outputSection) {
+    const outputLines = outputSection[0].split('\n').filter((l) => /^\s*[-*]\s/.test(l))
+    const fileRefs: string[] = []
+    for (const line of outputLines) {
+      const refs = line.match(/`[^`]+`/g) ?? []
+      fileRefs.push(...refs.map((r) => r.replace(/`/g, '')))
+      const inlineRefs = line.match(/\b[\w./-]+\.[a-zA-Z]{1,5}\b/g) ?? []
+      fileRefs.push(...inlineRefs.filter((r) => r.includes('/') || r.includes('.')))
+    }
+    if (fileRefs.length > 0) {
+      const missing = fileRefs.filter((ref) => !existsSync(join(root, ref)))
+      if (missing.length > 0 && completedTasks > 0) {
+        issues.push({
+          severity: 'warning',
+          category: 'outputs',
+          message: `${missing.length} referenced file(s) not found: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? `... (+${missing.length - 3} more)` : ''}`,
+        })
+      }
+    }
+  }
+
+  // 报告生成（对齐 osp qaSession）
+  const errorCount = issues.filter((i) => i.severity === 'error').length
+  const warningCount = issues.filter((i) => i.severity === 'warning').length
+  const infoCount = issues.filter((i) => i.severity === 'info').length
+  const verified = errorCount === 0 && warningCount === 0
+  const lines: string[] = [
+    `QA Report: ${session.dirName}`,
+    `────────────────${'─'.repeat(session.dirName.length)}`,
+    `Summary: ${issues.length} issue(s) found (${errorCount} error, ${warningCount} warning, ${infoCount} info)`,
+    `Status: ${verified ? '✓ Verified' : '⚠ Issues found'}`,
+  ]
+  if (issues.length > 0) {
+    lines.push('')
+    for (const issue of issues) {
+      const tag = issue.severity === 'error' ? 'ERR' : issue.severity === 'warning' ? 'WRN' : 'INF'
+      lines.push(`  [${tag}:${issue.category}] ${issue.message}`)
+    }
+  }
+  lines.push('', 'Recommendations:')
+  if (errorCount > 0) lines.push('  • Fix errors before closing the session (status vs content mismatch)')
+  if (warningCount > 0) lines.push('  • Review warnings — they may indicate incomplete or outdated information')
+  if (verified) lines.push('  • Session looks clean — no issues detected')
+  return lines.join('\n')
 }
+
+// ── 其他 ──
 
 /** 追加会话心跳（turn-stopping 机械落盘用） */
 export function appendHeartbeat(sessionMd: string): boolean {
@@ -308,3 +726,7 @@ export function appendHeartbeat(sessionMd: string): boolean {
     return false
   }
 }
+
+// 兼容导出（部分调用方依赖旧签名）
+export type SessionInfo = SessionEntry
+export type { JsonValue }

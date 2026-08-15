@@ -18,18 +18,18 @@ function renderText(value: unknown): ContentBlock[] {
 
 export const kitTool = defineTool({
   name: 'acc_kit',
-  description: 'ACC 通用能力工具包：health（CCC 三原则检查 P1/P2/配置）/ time（ISO 时间戳）/ wait（等待 N 秒）。进入 CCC 工作前的例行自检。',
+  description: 'ACC 通用能力工具包：health（CCC 三原则检查 P1/P2/配置，healthy/degraded 报告）/ time（now_iso/now_local/epoch_ms）/ wait（等待 N 秒，缺省 1）。进入 CCC 工作前的例行自检。',
   parameters: {
     action: { type: 'string', enum: [...KIT_ACTIONS], required: true, description: '子命令' },
-    seconds: { type: 'number', description: 'wait 的秒数' },
+    seconds: { type: 'integer', description: 'wait 的秒数（正整数，缺省 1）' },
   },
   output: {
     schema: { type: 'json' },
     render: (args, value) => renderText(value),
   },
   async execute(args, exec) {
+    // CCC 缺失时不抛错——health 返回 degraded 报告（对齐 osp 未激活语义）
     const root = findSerenityRoot(agentCwd(exec))
-    if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
     return await runKit(root, args)
   },
 })

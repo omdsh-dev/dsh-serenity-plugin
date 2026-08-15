@@ -19,15 +19,17 @@ function renderText(value: unknown): ContentBlock[] {
 export const msmTool = defineTool({
   name: 'acc_msm',
   description:
-    'MSM（Mech & Semi-Mech）框架：list 列出注册 MSM；exec 执行（600s 超时，path 逃逸阻断）；register/deregister 管理注册表（自动 git commit）；check 品质检查 DC-M1~M4。复用 CCC 的 mech-registry.json。',
+    'MSM（Mech & Semi-Mech）框架：list 列出注册 MSM（header+flags 展示）；exec 执行（600s 超时，path 逃逸+symlink 阻断，注入 SERENITY_ROOT/CCC/VERSION env；参数首位 --list/--schema/--format=json 为协议）；register/deregister 管理注册表（path 根内+脚本存在+全局唯一校验，自动 git 精提交）；check 品质检查 DC-M1~M4；guide 开发手册。复用 CCC 的 mech-registry.json。',
   parameters: {
-    action: { type: 'string', enum: [...MSM_ACTIONS], required: true, description: '子命令' },
+    action: { type: 'string', enum: [...MSM_ACTIONS], required: true, description: '子命令：list/exec/register/deregister/check/guide' },
     name: { type: 'string', description: 'MSM 名（exec/register/deregister）' },
-    args: { type: 'array', items: { type: 'string' }, description: 'exec 的业务参数' },
+    args: { type: 'array', items: { type: 'string' }, description: 'exec 的业务参数（参数首位 --list/--schema <n>/--format=json 为协议 flag，其余无损透传）' },
     skill: { type: 'string', description: 'register 的所属 skill' },
-    path: { type: 'string', description: 'register 的脚本相对路径' },
+    path: { type: 'string', description: 'register 的脚本相对路径（必须根内且存在）' },
     category: { type: 'string', description: 'register 的类别（mech/semi-mech）' },
     description: { type: 'string', description: 'register 的描述' },
+    flags: { type: 'string', description: 'register 的 flags JSON 字符串（new-style 对象数组，type:"path" 启用逃逸校验）' },
+    usage: { type: 'string', description: 'register 的自定义 usage（缺省自动生成）' },
   },
   output: {
     schema: { type: 'json' },
