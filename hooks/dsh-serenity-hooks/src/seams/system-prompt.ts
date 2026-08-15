@@ -166,7 +166,9 @@ export function safeModeBlock(root: string): string {
   if (!isSafeModeOn(root)) return ''
   const blacklist = readBlacklist(root)
   const blacklistNote =
-    blacklist.length > 0 ? `\nActive blacklist rules: ${blacklist.join(', ')}` : ''
+    blacklist.length > 0
+      ? `\nActive blacklist rules: ${blacklist.map((b) => b.message ?? b.pattern).join(', ')}`
+      : ''
   return [
     '',
     '=== Serenity Safe Mode ===',

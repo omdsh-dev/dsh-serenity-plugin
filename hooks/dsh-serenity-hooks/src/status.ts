@@ -38,7 +38,8 @@ export interface SerenityStatus {
   dshVersion: string | null
   nodeVersion: string
   safeModeOn: boolean
-  blacklist: string[]
+  /** 黑名单条目（string 或 {pattern, message}，对齐 osp） */
+  blacklist: { pattern: string; message?: string }[]
   threshold: number | null
   loopModel: string | null
   restrict: {

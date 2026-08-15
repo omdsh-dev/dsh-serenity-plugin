@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { decideGuard, type GuardInput, syncSafeModeRestriction } from '../src/seams/guards.js'
+import { readBlacklist, matchBlacklist, type BlacklistRule } from '../src/ccc.js'
 
 let dir: string
 
@@ -17,6 +18,10 @@ afterEach(() => {
 
 function base(over: Partial<GuardInput>): GuardInput {
   return { root: '/ccc', toolName: 'read', safeModeOn: false, blacklist: [], pathArg: undefined, ...over }
+}
+
+function rules(...patterns: string[]): BlacklistRule[] {
+  return patterns.map((p) => ({ pattern: p }))
 }
 
 describe('guards: decideGuard 纯决策', () => {
@@ -37,7 +42,7 @@ describe('guards: decideGuard 纯决策', () => {
   })
 
   it('安全模式 + write + 黑名单路径 → deny（黑名单分支）', () => {
-    const d = decideGuard(base({ safeModeOn: true, toolName: 'write', blacklist: ['.secrets/'], pathArg: '.secrets/x' }))
+    const d = decideGuard(base({ safeModeOn: true, toolName: 'write', blacklist: rules('.secrets/'), pathArg: '.secrets/x' }))
     expect(d.kind).toBe('deny')
     expect(d.deny).toContain('blacklist')
   })
@@ -53,13 +58,55 @@ describe('guards: decideGuard 纯决策', () => {
   })
 
   it('黑名单命中 → deny', () => {
-    const d = decideGuard(base({ toolName: 'write', blacklist: ['.secrets/'], pathArg: '.secrets/x' }))
+    const d = decideGuard(base({ toolName: 'write', blacklist: rules('.secrets/'), pathArg: '.secrets/x' }))
     expect(d.kind).toBe('deny')
     expect(d.deny).toContain('blacklist')
   })
 
   it('路径合法且不命中 → allow', () => {
-    expect(decideGuard(base({ toolName: 'write', blacklist: ['.secrets/'], pathArg: 'docs/a.md' })).kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'write', blacklist: rules('.secrets/'), pathArg: 'docs/a.md' })).kind).toBe('allow')
+  })
+
+  it('黑名单对象条目（{pattern, message}）→ deny 且提示用自定义 message（对齐 osp）', () => {
+    const blacklist: BlacklistRule[] = [{ pattern: '.secrets/', message: 'secrets 目录禁止写入' }]
+    const d = decideGuard(base({ toolName: 'write', blacklist, pathArg: '.secrets/x' }))
+    expect(d.kind).toBe('deny')
+    expect(d.deny).toContain('secrets 目录禁止写入')
+  })
+})
+
+describe('blacklist: 对象条目解析（对齐 osp readBlacklist）', () => {
+  it('string 与 object 条目混合解析', () => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({
+        safeMode: {
+          blacklist: ['.secrets/', { pattern: '/etc/', message: '系统目录' }, 'regex:^\\.tmp-'],
+        },
+      }),
+    )
+    const blacklist = readBlacklist(dir)
+    expect(blacklist).toHaveLength(3)
+    expect(blacklist[0]).toEqual({ pattern: '.secrets/' })
+    expect(blacklist[1]).toEqual({ pattern: '/etc/', message: '系统目录' })
+    // 前缀匹配
+    expect(matchBlacklist('.secrets/x', blacklist)?.pattern).toBe('.secrets/')
+    // 正则匹配
+    expect(matchBlacklist('.tmp-test/y', blacklist)?.pattern).toBe('regex:^\\.tmp-')
+    // 未命中
+    expect(matchBlacklist('docs/a.md', blacklist)).toBeNull()
+  })
+
+  it('非法条目（数字/null/无 pattern 对象）跳过', () => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ safeMode: { blacklist: [42, null, { message: 'no pattern' }, 'ok/'] } }),
+    )
+    const blacklist = readBlacklist(dir)
+    expect(blacklist).toHaveLength(1)
+    expect(blacklist[0]!.pattern).toBe('ok/')
   })
 })
 

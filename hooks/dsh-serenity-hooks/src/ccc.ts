@@ -120,22 +120,46 @@ export function isSafeModeOn(root: string): boolean {
   return existsSync(resolve(root, SAFE_MODE_MARKER));
 }
 
-export function readBlacklist(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
-  const cfg = loadSerenityConfig(root, paths);
-  const rules = cfg.safeMode?.blacklist;
-  return Array.isArray(rules) ? rules.map(String) : [];
+/** 黑名单条目（对齐 osp BlacklistEntry）：pattern + 可选自定义拦截提示 message */
+export interface BlacklistRule {
+  pattern: string;
+  message?: string;
 }
 
-/** 匹配黑名单规则；命中返回规则，未命中返回 null。前缀匹配 / regex: 前缀 */
-export function matchBlacklist(relPath: string, rules: string[]): string | null {
+/**
+ * 读取黑名单（对齐 osp readBlacklist）：支持两种条目格式——
+ *   string：".secrets/" 或 "regex:^..."（前缀 / 正则）
+ *   object：{ "pattern": ".secrets/", "message": "自定义提示" }
+ * dsp v1.17.4 前只支持 string（对象会被 String() 成 "[object Object]" → 规则失效，不拦截）。
+ */
+export function readBlacklist(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): BlacklistRule[] {
+  const cfg = loadSerenityConfig(root, paths);
+  const rules = cfg.safeMode?.blacklist;
+  if (!Array.isArray(rules)) return [];
+  const out: BlacklistRule[] = [];
+  for (const item of rules) {
+    if (typeof item === 'string') {
+      if (item) out.push({ pattern: item });
+    } else if (item && typeof item === 'object' && typeof (item as { pattern?: unknown }).pattern === 'string') {
+      const obj = item as { pattern: string; message?: unknown };
+      const p = obj.pattern;
+      if (p) out.push({ pattern: p, message: typeof obj.message === 'string' ? obj.message : undefined });
+    }
+    /* 非法条目跳过 */
+  }
+  return out;
+}
+
+/** 匹配黑名单规则；命中返回条目，未命中返回 null。前缀匹配 / regex: 前缀（对齐 osp） */
+export function matchBlacklist(relPath: string, rules: BlacklistRule[]): BlacklistRule | null {
   for (const rule of rules) {
-    if (rule.startsWith('regex:')) {
+    if (rule.pattern.startsWith('regex:')) {
       try {
-        if (new RegExp(rule.slice(6)).test(relPath)) return rule;
+        if (new RegExp(rule.pattern.slice(6)).test(relPath)) return rule;
       } catch {
         /* 非法正则跳过 */
       }
-    } else if (relPath.startsWith(rule)) {
+    } else if (relPath.startsWith(rule.pattern)) {
       return rule;
     }
   }

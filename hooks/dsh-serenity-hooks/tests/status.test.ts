@@ -38,7 +38,8 @@ describe('status: getStatus', () => {
     const s = getStatus(dir)
     expect(s.threshold).toBe(100)
     expect(s.loopModel).toBe('m3')
-    expect(s.blacklist).toEqual(['.secrets/'])
+    // 对齐 osp：黑名单条目为 {pattern} 对象
+    expect(s.blacklist).toEqual([{ pattern: '.secrets/' }])
   })
 
   it('P2-7 扩展：nodeVersion 恒有；dshVersion 读得到返回字符串、读不到为 null', () => {

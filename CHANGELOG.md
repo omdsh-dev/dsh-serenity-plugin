@@ -1,3 +1,16 @@
+## v1.17.4 — 2026-08-15（黑名单对象条目支持：修复 osp 风格 `{pattern, message}` 条目不生效——dsp 只解析 string 导致对象规则变 "[object Object]" 失效）
+
+**Scope:** 用户报告"写黑名单不生效"；参考 osp 排查。osp 的 readBlacklist 支持两种条目格式（string + object `{pattern, message}`），dsp 的 readBlacklist 只 `rules.map(String)`——对象条目被转成 "[object Object]"，规则完全失效（写操作不被拦截）。实证：string 规则拦截正常（write 到黑名单路径被拒），对象形式是唯一失效场景。
+
+### 修复（对齐 osp safe-mode.ts）
+- `ccc.ts readBlacklist`：支持 string（`".secrets/"` / `"regex:..."`）与 object（`{pattern, message}`）混合条目；非法条目（数字/null/无 pattern 对象）跳过
+- `ccc.ts matchBlacklist`：返回条目对象 `BlacklistRule {pattern, message?}`（原返回规则字符串）
+- `guards.ts decideGuard`：命中对象条目时 deny 提示用自定义 `message`（缺省回退 `命中规则 "<pattern>"`）
+- `system-prompt.ts safeModeBlock` / `status.ts`：黑名单展示/输出适配条目对象（message ?? pattern）
+- 测试：+3（对象条目 deny 提示 message / string+object 混合解析 / 非法条目跳过）；ccc/status/guards 断言适配条目对象
+
+**测试：** 260/260（原 257 + 3 新增）
+
 ## v1.17.3 — 2026-08-15（MSM 开发指南补充"交互与确认规范"：禁止阻塞性确认，二次确认走两段式返回+重试）
 
 **Scope:** 用户要求补充 MSM 开发规范——MSM 子进程无用户交互通道（spawn/execFile，600s 超时），阻塞性确认（readline/prompt/stdin 等待）会卡死至超时；需要二次确认时应直接返回确认信息，agent 确认后重新调用并带确认参数重试。

@@ -17,6 +17,7 @@ import {
   isSafeModeOn,
   matchBlacklist,
   readBlacklist,
+  type BlacklistRule,
 } from '../ccc.js'
 
 // ── 纯决策（可单测）──
@@ -25,7 +26,7 @@ export interface GuardInput {
   root: string
   toolName: string
   safeModeOn: boolean
-  blacklist: string[]
+  blacklist: BlacklistRule[]
   /** 工具参数中可能携带的路径（write/edit 等）；无则 undefined */
   pathArg?: string
 }
@@ -62,7 +63,8 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     }
     const hit = matchBlacklist(rel, blacklist)
     if (hit) {
-      return { deny: `blacklist blocked: "${pathArg}" 命中规则 "${hit}"`, kind: 'deny' }
+      // 对象条目支持自定义提示（对齐 osp：{ pattern, message } → message ?? 默认）
+      return { deny: hit.message ?? `blacklist blocked: "${pathArg}" 命中规则 "${hit.pattern}"`, kind: 'deny' }
     }
   }
 

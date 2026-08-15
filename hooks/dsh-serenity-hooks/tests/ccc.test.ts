@@ -110,8 +110,9 @@ describe('ccc: 安全模式', () => {
     mkdirSync(join(dir, '.opencode'))
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ safeMode: { blacklist: ['.secrets/', 'regex:\\.env$'] } }))
     const rules = readBlacklist(dir)
-    expect(matchBlacklist('.secrets/x', rules)).toBe('.secrets/')
-    expect(matchBlacklist('a/.env', rules)).toBe('regex:\\.env$')
+    // 对齐 osp：匹配返回条目对象（{pattern} / {pattern, message}）
+    expect(matchBlacklist('.secrets/x', rules)).toEqual({ pattern: '.secrets/' })
+    expect(matchBlacklist('a/.env', rules)).toEqual({ pattern: 'regex:\\.env$' })
     expect(matchBlacklist('docs/a.md', rules)).toBeNull()
   })
 
