@@ -74,9 +74,9 @@ function buildMsmEnv(root: string): NodeJS.ProcessEnv {
  */
 const NPX_BIN = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 
-export type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 'guide'
+export type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 'guide' | 'ccc-config'
 
-export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'deregister', 'check', 'guide']
+export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'deregister', 'check', 'guide', 'ccc-config']
 
 export const MSM_GUIDE = `MSM 开发手册（Mech & Semi-Mech 框架）
 
@@ -116,6 +116,51 @@ DC-M3 双向：脚本未注册 + 注册表引用脚本缺失；DC-M4 路径型 f
 acc_msm exec <name> --list        — 列出全部 MSM
 acc_msm exec <name> --schema <n>   — 查看某 MSM 的参数 schema
 acc_msm exec <name> --format=json  — JSON 输出模式（其余参数无损透传）
+`
+
+/** CCC 配置参考（对齐 osp ccc-config action） */
+export const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═══
+
+CCC-level features are configured in .opencode/serenity.json.
+Below are all available configuration sections.
+
+── 1. loop.defaultModel ──
+loop 工具缺省模型（未配置且未传 model 参数时 loop 报错）。
+
+  Config:
+    { "loop": { "defaultModel": "provider/model-name" } }
+
+  Example:
+    { "loop": { "defaultModel": "minimax-cn-coding-plan/MiniMax-M3" } }
+
+── 2. sessionKeeper.threshold ──
+SESSION-KEEPER 提醒机制的积分阈值（非 headless 主 agent）。
+按工具调用加权 + 耗时计分；达到阈值注入提醒，要求模型回复 ACK 码。
+
+  Config:
+    { "sessionKeeper": { "threshold": 150 } }
+
+  计分：write/edit = 3，task = 10，read/grep/glob/msm 等 = 1，时间 = 1/分钟
+  默认：150
+
+── 3. localstore.gitTrack ──
+localstore.json 的 git 策略：allow 可提交 / deny 禁提交（默认 deny）。
+deny 时写入自动确保 .gitignore 含该文件（物理保证），cc_git commit 会检查拒绝。
+
+  Config:
+    { "localstore": { "gitTrack": "allow" } }
+
+── 4. hooks.autoRestoreSession ──
+会话自动恢复（默认 true；受 events 门控——仅根会话 + 已有对话历史才恢复）。
+
+  Config:
+    { "hooks": { "autoRestoreSession": false } }
+
+── 5. safeMode / blacklist ──
+safe-mode 由 WebUI 开关控制（写 .serenity-safe-on 标记）；黑名单路径受 guards seam 拦截。
+
+  Config:
+    { "safeMode": { "blacklist": [".secrets/"] } }
 `
 
 
@@ -240,7 +285,7 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       return { guide: MSM_GUIDE }
 
     case 'exec': {
-      const { entry, businessArgs, fmtJson, protocol } = prepareExec(root, args)
+      const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)
       const p = protocolResult(protocol)
       if (p !== undefined) return p
       // bun 优先（可直跑 TS），npx tsx 回退；注入 SERENITY_* env（对齐 osp）
@@ -248,7 +293,7 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       if (r.error && (r.error as NodeJS.ErrnoException).code === 'ENOENT') {
         r = spawnSync(NPX_BIN, ['tsx', entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], env: buildMsmEnv(root) })
       }
-      return msmExecResult(entry.name, r.status ?? 2, r.stdout ?? '', r.stderr ?? '', fmtJson)
+      return msmExecResult(entry.name, r.status ?? 2, r.stdout ?? '', r.stderr ?? '', fmtJson, hasHelp)
     }
 
     case 'register': {
@@ -322,6 +367,9 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       throw new Error(`MSM not registered: "${name}"`)
     }
 
+    case 'ccc-config':
+      return CCC_CONFIG_REFERENCE
+
     case 'check': {
       const entries = loadMsmEntries(root)
       const issues: { name: string; check: string; detail: string }[] = []
@@ -373,6 +421,8 @@ export interface PreparedExec {
   entry: MsmEntry
   businessArgs: string[]
   fmtJson: boolean
+  /** 业务参数是否含 --help/-h（exit≠0 时不追加 TIP，对齐 osp） */
+  hasHelp: boolean
   /** 协议结果（--list / --schema）；非协议执行时为 undefined */
   protocol?: { list: { name: string; category: string | null }[] } | { schema: { name: string; path: string; flags: { name: string; type: string | null; description: string | null }[] } }
 }
@@ -390,6 +440,7 @@ export function prepareExec(root: string, args: MsmArgs): PreparedExec {
       entry,
       businessArgs: [],
       fmtJson: false,
+      hasHelp: false,
       protocol: { list: loadMsmEntries(root).map((e) => ({ name: e.name, category: e.category ?? null })) },
     }
   }
@@ -401,11 +452,13 @@ export function prepareExec(root: string, args: MsmArgs): PreparedExec {
       entry,
       businessArgs: [],
       fmtJson: false,
+      hasHelp: false,
       protocol: { schema: { name: found.name, path: found.path, flags: (found.flags ?? []).map((f) => ({ name: f.name, type: f.type ?? null, description: f.description ?? null })) } },
     }
   }
   const fmtJson = business[0] === '--format=json'
   const businessArgs = fmtJson ? business.slice(1) : business
+  const hasHelp = businessArgs.includes('--help') || businessArgs.includes('-h')
 
   // path-arg 逃逸校验（ACC 标准，对齐 osp）：flags 中 type:"path" 的参数值必须根内 + symlink 防御
   for (const flag of entry.flags ?? []) {
@@ -424,7 +477,7 @@ export function prepareExec(root: string, args: MsmArgs): PreparedExec {
   const script = resolve(root, entry.path)
   if (classifyPath(script, root) === 'outside') throw new Error(`MSM script escapes CCC root: "${entry.path}"`)
   if (!existsSync(script)) throw new Error(`MSM script not found: "${entry.path}"`)
-  return { entry: { ...entry, path: script }, businessArgs, fmtJson }
+  return { entry: { ...entry, path: script }, businessArgs, fmtJson, hasHelp }
 }
 
 /** 协议结果扁平化：{list|schema} 包装 → 顶层值（兼容旧契约）；非协议返回 undefined */
@@ -435,13 +488,19 @@ function protocolResult(protocol: PreparedExec['protocol']): JsonValue | undefin
   return undefined
 }
 
-function msmExecResult(name: string, status: number, stdout: string, stderr: string, fmtJson: boolean): JsonValue {
+/** 失败 TIP（对齐 osp：业务 exit≠0 且未传 --help 时追加提示） */
+function helpTip(): string {
+  return '\n[TIP] Pass "--help" as the first arg to see this MSM\'s usage and required flags.'
+}
+
+function msmExecResult(name: string, status: number, stdout: string, stderr: string, fmtJson: boolean, hasHelp = false): JsonValue {
+  const tip = status !== 0 && !hasHelp ? helpTip() : ''
   if (fmtJson) {
     return status === 0
       ? { name, exit: 0, ok: true, data: stdout.trim() }
-      : { name, exit: status, ok: false, error: stderr.trim() || stdout.trim() }
+      : { name, exit: status, ok: false, error: (stderr.trim() || stdout.trim()) + tip }
   }
-  return { name, exit: status, stdout, stderr }
+  return { name, exit: status, stdout, stderr: stderr + tip }
 }
 
 /**
@@ -451,7 +510,7 @@ function msmExecResult(name: string, status: number, stdout: string, stderr: str
  */
 export async function runMsmAsync(root: string, args: MsmArgs): Promise<JsonValue> {
   if (args.action !== 'exec') return runMsm(root, args)
-  const { entry, businessArgs, fmtJson, protocol } = prepareExec(root, args)
+  const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)
   const p = protocolResult(protocol)
   if (p !== undefined) return p
   // bun 优先（可直跑 TS），npx tsx 回退；注入 SERENITY_* env（对齐 osp）
@@ -463,7 +522,7 @@ export async function runMsmAsync(root: string, args: MsmArgs): Promise<JsonValu
       maxBuffer: 64 * 1024 * 1024,
       env: buildMsmEnv(root),
     })
-    return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson)
+    return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson, hasHelp)
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean }
     if (err.code === 'ENOENT') {
@@ -475,18 +534,18 @@ export async function runMsmAsync(root: string, args: MsmArgs): Promise<JsonValu
           maxBuffer: 64 * 1024 * 1024,
           env: buildMsmEnv(root),
         })
-        return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson)
+        return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson, hasHelp)
       } catch (e2) {
         const err2 = e2 as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean }
         const status = err2.killed ? 124 : (typeof err2.code === 'number' ? err2.code : 2)
         const stdout = err2.stdout ?? ''
         const stderr = err2.killed ? `MSM timed out after ${MSM_TIMEOUT_MS}ms` : (err2.stderr ?? err2.message ?? '')
-        return msmExecResult(entry.name, status, stdout, stderr, fmtJson)
+        return msmExecResult(entry.name, status, stdout, stderr, fmtJson, hasHelp)
       }
     }
     const status = err.killed ? 124 : (typeof err.code === 'number' ? err.code : 2)
     const stdout = err.stdout ?? ''
     const stderr = err.killed ? `MSM timed out after ${MSM_TIMEOUT_MS}ms` : (err.stderr ?? err.message ?? '')
-    return msmExecResult(entry.name, status, stdout, stderr, fmtJson)
+    return msmExecResult(entry.name, status, stdout, stderr, fmtJson, hasHelp)
   }
 }

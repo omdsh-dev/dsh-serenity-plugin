@@ -19,9 +19,9 @@ function renderText(value: unknown): ContentBlock[] {
 export const msmTool = defineTool({
   name: 'acc_msm',
   description:
-    'MSM（Mech & Semi-Mech）框架：list 列出注册 MSM（header+flags 展示）；exec 执行（600s 超时，path 逃逸+symlink 阻断，注入 SERENITY_ROOT/CCC/VERSION env；参数首位 --list/--schema/--format=json 为协议）；register/deregister 管理注册表（path 根内+脚本存在+全局唯一校验，自动 git 精提交）；check 品质检查 DC-M1~M4；guide 开发手册。复用 CCC 的 mech-registry.json。',
+    'MSM（Mech & Semi-Mech）框架：list 列出注册 MSM（header+flags 展示）；exec 执行（600s 超时，path 逃逸+symlink 阻断，注入 SERENITY_ROOT/CCC/VERSION env，失败追加 --help TIP；参数首位 --list/--schema/--format=json 为协议）；register/deregister 管理注册表（path 根内+脚本存在+全局唯一校验，自动 git 精提交）；check 品质检查 DC-M1~M4；guide 开发手册；ccc-config CCC 配置参考（loop.defaultModel/sessionKeeper.threshold/localstore.gitTrack/hooks.autoRestoreSession）。复用 CCC 的 mech-registry.json。',
   parameters: {
-    action: { type: 'string', enum: [...MSM_ACTIONS], required: true, description: '子命令：list/exec/register/deregister/check/guide' },
+    action: { type: 'string', enum: [...MSM_ACTIONS], required: true, description: '子命令：list/exec/register/deregister/check/guide/ccc-config' },
     name: { type: 'string', description: 'MSM 名（exec/register/deregister）' },
     args: { type: 'array', items: { type: 'string' }, description: 'exec 的业务参数（参数首位 --list/--schema <n>/--format=json 为协议 flag，其余无损透传）' },
     skill: { type: 'string', description: 'register 的所属 skill' },
