@@ -236,7 +236,12 @@ function resolveActiveSessionInfo(root: string, scope: string): { sessionId: str
   }
 }
 
-/** 5) Session 块：逐字对齐 osp（活跃会话 + todowrite 首位约定）；scope = dsh 会话维度 */
+/**
+ * 5) Session 块：对齐 osp（活跃会话 + todowrite 首位约定）；scope = dsh 会话维度。
+ * **平台适配（v1.17.2）**：osp 的 todowrite 首项含 `priority: "low"`（opencode todo 支持），
+ * 但 DSH 平台 todowrite schema 无 priority（additionalProperties: false 拒绝）→ agent 照做报
+ * `todos[0].priority is not a declared property`。DSH 版去掉 priority 字段（其余逐字对齐 osp）。
+ */
 export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE): string {
   const active = resolveActiveSessionInfo(root, scope)
   if (!active) return ''
@@ -258,7 +263,7 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
     'CRITICAL: When calling todowrite, the first item in the todos array MUST',
     'always be:',
     `  { content: "SESSION: ${active.sessionId} — ${active.dirName.replace(/^\d{4}-\d{2}-\d{2}--/, '')}",`,
-    '    status: "completed", priority: "low" }',
+    '    status: "completed" }',
     'This preserves the session context across todo updates.',
     'Do NOT remove or reorder this item — keep it at position 0.',
     '',

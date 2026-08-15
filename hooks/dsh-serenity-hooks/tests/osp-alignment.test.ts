@@ -107,7 +107,7 @@ const OSP_CONSTRAINTS = (root: string) => [
   '',
 ].join('\n')
 
-/** osp Session 块模板（相同会话值时应与 DSH 逐字节一致） */
+/** osp Session 块模板（DSH 适配版：todowrite 首项无 priority——DSH 平台 schema 不支持，v1.17.2） */
 const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   '',
   '=== Serenity Session ===',
@@ -126,7 +126,7 @@ const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   'CRITICAL: When calling todowrite, the first item in the todos array MUST',
   'always be:',
   `  { content: "SESSION: ${sessionId} — ${dirName.replace(/^\d{4}-\d{2}-\d{2}--/, '')}",`,
-  '    status: "completed", priority: "low" }',
+  '    status: "completed" }',
   'This preserves the session context across todo updates.',
   'Do NOT remove or reorder this item — keep it at position 0.',
   '',
@@ -155,8 +155,8 @@ describe('osp 对齐：Constraints 块（唯一例外 = 平台工具名）', () 
   })
 })
 
-describe('osp 对齐：Session 块逐字节一致', () => {
-  it('sessionBlock() 与 osp Session 参照完全相等（相同会话值 + scope）', () => {
+describe('osp 对齐：Session 块（唯一例外 = DSH todowrite 无 priority 字段）', () => {
+  it('sessionBlock() 与 DSH 适配版参照完全相等', () => {
     // 建立内存活跃会话（S134 v1.16.14 内存化：useSession 写内存 Map，不落盘）
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
     const mdRel = join('AGENT_SESSIONS', dirName, 'SESSION.md')
@@ -167,6 +167,12 @@ describe('osp 对齐：Session 块逐字节一致', () => {
     const block = sessionBlock(dir, 'test-scope')
     expect(block).not.toBe('')
     expect(block).toBe(OSP_SESSION('S126', dirName, join(dir, mdRel)))
+    // 同时证明：除 todowrite priority 字段外与 osp 一致（osp 版含 priority: "low"）
+    const ospOriginal = OSP_SESSION('S126', dirName, join(dir, mdRel)).replace(
+      '    status: "completed" }',
+      '    status: "completed", priority: "low" }',
+    )
+    expect(block.replace('    status: "completed" }', '    status: "completed", priority: "low" }')).toBe(ospOriginal)
   })
 })
 

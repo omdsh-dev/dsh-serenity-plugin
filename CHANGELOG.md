@@ -1,3 +1,14 @@
+## v1.17.2 — 2026-08-15（Session 块平台适配：todowrite 首项移除 DSH 不支持的 priority 字段——修复 `todos[0].priority is not a declared property` 报错）
+
+**Scope:** 用户报告更新 todo 偶尔报错 `Error: invalid arguments: "todos[0].priority" is not a declared property (additionalProperties: false)`。根因：Session 块（逐字节对齐 osp）指导 agent 调用 todowrite 时首项带 `priority: "low"`，但 osp 的 opencode todo 工具支持 priority 而 **DSH 平台 todowrite schema 无 priority（additionalProperties: false 拒绝）** → agent 照做即报错。提示词与平台工具 schema 不匹配。
+
+### 修复
+- `system-prompt.ts sessionBlock`：todowrite 首项约定 `{ content: "...", status: "completed", priority: "low" }` → `{ content: "...", status: "completed" }`（移除 priority；其余文本逐字对齐 osp）
+- `osp-alignment.test.ts`：Session 块断言改为"除 DSH todowrite priority 差异外与 osp 一致"（DSH 适配版模板 + replace 还原证明唯一差异 = priority 字段）
+- 平台差异本质：osp 对齐原则（D2）限"平台无关文本"；todowrite 参数 schema 是平台相关部分 → DSH 版适配
+
+**测试：** 257/257（osp-alignment Session 断言更新为适配版）
+
 ## v1.17.1 — 2026-08-15（热修复：cc_git schema 移除公测 rc.6 不支持的 minimum/maximum 键——defineTool 阶段 DSL 拒绝导致插件 import 失败、web boot 崩溃）
 
 **Scope:** 用户部署 v1.17.0 后 web boot 崩溃。根因：`tools/git.ts` 的 `count` 参数 schema 用了 `minimum: 1 / maximum: 100`，但公测 rc.6 的 dsh-tools value schema DSL 只支持 type/enum/const + description 等注释键，无数字边界键 → defineTool 阶段被 DSL 拒绝 → 插件 import 失败。用户已临时补丁（移除安装包中这两个键）使 web 恢复。
