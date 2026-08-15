@@ -216,6 +216,9 @@ function cmdSquashHistory(message?: string): void {
 function cmdPublish(): void {
   // npm publish @shgroup/dsh-serenity-hooks（cwd=hooks；凭据走 ~/.npmrc；publishConfig.access=public 已声明）
   // 发布前先构建（lib/ 最新）；npm cache 指向可写临时目录（沙箱 ~/.npm 只读）
+  // v1.17.4：显式 --registry https://registry.npmjs.org/ —— ~/.npmrc 默认 registry 可能指向
+  // 内网 nexus（tiangong-npm-group，只读镜像 → npm publish 400 Bad Request）。@shgroup token
+  // 按 registry URL 匹配，官方 registry 发布不受影响。
   cmdBuild()
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   mkdirSync(cache, { recursive: true })
@@ -244,7 +247,7 @@ function cmdPublish(): void {
     fail(`tarball 缺必需文件（${missing.join(', ')}）——检查 tsdown.prepare.config.ts 是否构建完整双 bundle，中止发布`, 2)
   }
   console.log(`[dsh-develop] ✓ tarball 核对通过（${tarballFiles.length} 文件，含 lib/index.js + lib/client.js + lib/invariant.js）`)
-  const r = run('npm', ['publish', '--access', 'public'], {
+  const r = run('npm', ['publish', '--access', 'public', '--registry', 'https://registry.npmjs.org/'], {
     cwd: HOOKS_DIR,
     quiet: true,
     env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
