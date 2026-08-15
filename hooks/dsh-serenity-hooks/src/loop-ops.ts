@@ -16,6 +16,10 @@ export interface LoopProgress {
   model: string
   updated: string
   lastResponse: string
+  /** 对齐 osp writeFailedStatus：failed 时 done=true + status=failed + errorCode */
+  status?: 'running' | 'done' | 'failed'
+  errorCode?: string
+  errorMessage?: string
 }
 
 export function loopProgressPaths(root: string, label: string): { md: string; json: string } {
@@ -39,11 +43,37 @@ export function writeProgress(root: string, label: string, p: LoopProgress): voi
   mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
   writeFileSync(
     json,
-    JSON.stringify({ ...p, updated: new Date().toISOString() }, null, 2) + '\n',
+    JSON.stringify({ ...p, status: p.status ?? 'running', updated: new Date().toISOString() }, null, 2) + '\n',
     'utf-8',
   )
   const lines = [`# loop: ${label}`, `- 模型: ${p.model}`, `- 轮次: ${p.round}`, `- 完成: ${p.done}`, '', `## 最近响应`, '', p.lastResponse, '']
   writeFileSync(md, lines.join('\n'), 'utf-8')
+}
+
+/** 失败状态落盘（对齐 osp writeFailedStatus：done=true / status=failed / errorCode） */
+export function writeFailedStatus(root: string, label: string, info: { errorCode: string; errorMessage?: string }): void {
+  const { json } = loopProgressPaths(root, label)
+  mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
+  const prev = readProgress(root, label)
+  writeFileSync(
+    json,
+    JSON.stringify(
+      {
+        round: prev?.round ?? 0,
+        done: true,
+        label,
+        model: prev?.model ?? '',
+        status: 'failed',
+        errorCode: info.errorCode,
+        errorMessage: info.errorMessage,
+        updated: new Date().toISOString(),
+        lastResponse: prev?.lastResponse ?? '',
+      },
+      null,
+      2,
+    ) + '\n',
+    'utf-8',
+  )
 }
 
 export function newStopToken(): string {
@@ -129,7 +159,7 @@ export const LOOP_GUIDE = `# loop — 规模化使用指引（guide）
 - 汇总：并行 loop 各自产出进度后，主 agent 汇总合并（或再派一个汇总 loop）
 
 ## 完成判定
-- 唯一完成条件 = loop 内部 agent 精确回显本轮随机验证码（stop token）；对话轮次无上限（不完成不返回）
+- 唯一完成条件 = loop 内部 agent 精确回显本轮随机验证码（stop token）；对话轮次上限 100（对齐 osp 保险阀，超限强制结束可续跑）
 - agent 非正常停止时自动重启（≤100 次防死循环）
 
 ## 等待界面
