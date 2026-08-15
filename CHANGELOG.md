@@ -37,6 +37,7 @@
 
 ### loop（对齐 osp loop-runner 保险阀）
 - **补对话轮次上限 LOOP_MAX_ROUNDS=100**（osp round≥100 强制 done）；续跑/重启/guide/model 覆盖保留（dsp 增强）
+- **finishReason**（done/max_rounds/restart_exceeded）+ **writeFailedStatus** 失败状态落盘（status:failed + errorCode，对齐 osp）；task 标 required；label 长度约束；description/guide 措辞与实现一致（轮次上限 100）
 
 ### 保留的 dsp 增强（不冲突，文档化）
 - cce 工具（osp 无）、eap/neat section 渐进披露（中文内容）、loop 续跑/agent 重启、reveal win32 spawn、localstore 联动、msm --schema 协议
