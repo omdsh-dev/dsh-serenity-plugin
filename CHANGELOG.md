@@ -1,3 +1,16 @@
+## v1.18.0 — 2026-08-15（Anchored Standard 整合：两阶段工具目录 bootstrap——移植 xiaobright/dsh-anchored-standard，验证能力提升）
+
+**Scope:** 用户要求严格按 [xiaobright/dsh-anchored-standard](https://github.com/xiaobright/dsh-anchored-standard) 实现移植到 dsp，验证"首轮最小工具目录锚定轨迹 → 晋升开放完整工具"是否有实际能力提升（用户自行验证）。核心机制：V4 Pro 强依赖 API 可见工具目录选轨迹——首请求暴露最小工具集 + 剥离自动注入上下文，首次 tool/call 或 assistant/message 后晋升。
+
+### 实现（独立模块 seams/bootstrap.ts，方便摘除）
+- **阶段机**（移植 compaction-epoch.mjs）：epoch 感知晋升——tool/call + assistant/message 晋升信号（promoteOn: either/tool-call/assistant-message）；compaction/end 后回落受控阶段需新信号；从持久 session events 推导（resume/reload 不丢）；子 agent（delegationDepth>0）恒晋升
+- **目录窄化**（移植 tool-bootstrap.mjs）：system-prompt/assemble 过滤器——bootstrap 阶段只留 bootstrapTools（缺省 read/write/edit/glob/grep，anchored 的 bash/str_replace_editor 适配为 dsp 核心）；compaction 后 + compactionTools；promoted 后开放完整目录；工具缺失降级完整目录 + 一次性告警
+- **上下文剥离**：agent/pre-step 剥离 suppressedContextSources（缺省 skill-catalog + agent-instructions）；过滤器出错绝不吞上下文（降级保留全部）
+- **首轮锚定**（移植 whoami-turn.mjs）：新会话第一条真实消息到达时把锚定问题 prepend 到 next-turn 队列——第一轮模型只回答锚定问题（最小工具），回复即晋升信号，真实消息第二轮处理。默认锚定问题 = **"请介绍当前宁静号，它是什么，为了什么，200字以内回答"**（用户指定，可配置）
+- **配置**：插件级 `bootstrap: true`（Config，默认 false）+ CCC serenity.json `bootstrap.enabled: true` 二级开关（bootstrapTools/promoteOn/suppressedContextSources/compactionTools/anchorMessage 可配置）——零侵入，验证失败一行关摘除
+
+**测试：** 277/277（bootstrap +12：阶段机晋升/epoch/子agent/resume/配置解析）
+
 ## v1.17.5 — 2026-08-15（Windows 兼容性全面修复：v1.17.x 深审计 17 项——bun EINVAL 回退/跨盘漏判/反斜杠绕过/CRLF/BOM 等）
 
 **Scope:** Windows 用户提交 v1.17.x 深度审计报告（S009 会话，17 问题）。高优先级：问题 5（acc_msm bun 回退死代码）、问题 6（guards 跨盘漏判）、问题 7（reveal /select, 传参）、问题 8（mech-registry 反斜杠绕过）、问题 9（黑名单斜杠结尾+嵌套治理保护失效）；中优先级 10-17。全部修复。

@@ -82,6 +82,23 @@ export interface SerenityConfig {
   safeMode?: { blacklist?: string[] };
   /** localstore git 提交策略（S134 重设计）：allow 可提交 / deny 禁提交（缺省 deny） */
   localstore?: { gitTrack?: 'allow' | 'deny' };
+  /** Anchored Standard bootstrap（S137，移植 xiaobright/dsh-anchored-standard）：
+   *  两阶段工具目录——首请求最小工具集锚定轨迹，首次 tool/call 或 assistant/message 后晋升。
+   *  默认 disabled（零侵入，验证失败可一行关闭摘除）。 */
+  bootstrap?: {
+    enabled?: boolean;
+    /** 首请求（bootstrap 阶段）暴露的工具集（缺省 dsp 核心：read/write/edit/glob/grep） */
+    bootstrapTools?: string[];
+    /** 晋升信号：either（默认，tool/call 或 assistant/message 先到者）/ tool-call / assistant-message */
+    promoteOn?: 'either' | 'tool-call' | 'assistant-message';
+    /** bootstrap 阶段剥离的自动注入上下文源（默认 skill-catalog + agent-instructions） */
+    suppressedContextSources?: string[];
+    /** compaction 后（重新晋升前）额外保留的工具集（模型中途任务继续工作） */
+    compactionTools?: string[];
+    /** 首轮锚定问题（对齐 whoami-turn：新会话第一轮先回答此问题——回复即晋升信号，
+     *  真实用户消息推迟到第二轮处理；缺省 = 介绍宁静号） */
+    anchorMessage?: string;
+  };
   hooks?: {
     enabled?: boolean;
     injectAccContext?: boolean;
