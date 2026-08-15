@@ -23,7 +23,9 @@ export const gitTool = defineTool({
   parameters: {
     action: { type: 'string', enum: [...GIT_ACTIONS], required: true, description: '子命令：status/commit/push/log/pull/diff' },
     message: { type: 'string', description: 'commit 消息（commit 必填）' },
-    count: { type: 'integer', minimum: 1, maximum: 100, description: 'log 条数（默认 10，max 100）' },
+    // 注意：公测 rc.6 value schema DSL 不支持 minimum/maximum 数字边界键（defineTool 阶段会拒绝）。
+    // 边界校验（1-100）在 git-ops.ts 运行时 clamp 执行。
+    count: { type: 'integer', description: 'log 条数（默认 10，max 100；运行时 clamp 1-100）' },
     staged: { type: 'boolean', description: 'diff: 显示暂存区变更（--cached）' },
     ref: { type: 'string', description: 'diff: 对比 ref（如 HEAD~1 / main / origin/main）' },
     path: { type: 'string', description: 'diff: 限定路径（如 src/、package.json）' },

@@ -1,3 +1,13 @@
+## v1.17.1 — 2026-08-15（热修复：cc_git schema 移除公测 rc.6 不支持的 minimum/maximum 键——defineTool 阶段 DSL 拒绝导致插件 import 失败、web boot 崩溃）
+
+**Scope:** 用户部署 v1.17.0 后 web boot 崩溃。根因：`tools/git.ts` 的 `count` 参数 schema 用了 `minimum: 1 / maximum: 100`，但公测 rc.6 的 dsh-tools value schema DSL 只支持 type/enum/const + description 等注释键，无数字边界键 → defineTool 阶段被 DSL 拒绝 → 插件 import 失败。用户已临时补丁（移除安装包中这两个键）使 web 恢复。
+
+### 修复
+- `tools/git.ts`：删除 `count` 的 `minimum/maximum` 键（保留 type + description）；边界校验（1-100）已在 `git-ops.ts` 运行时 clamp（`Math.min(Math.max(args.count ?? 10, 1), 100)`）——schema 边界移除后运行时校验完整保留
+- 全包扫描确认：仅此一处违规（其他参数键 type/enum/required/items 均受支持；源码其余 minimum/maximum 出现均为注释/文本）
+
+**测试：** 257/257（git-ops log clamp 运行时行为不变）
+
 ## v1.17.0 — 2026-08-15（工具实现全面对齐 osp spec：dsp/osp 无缝兼容）
 
 **Scope:** 用户要求"dsp 和 osp 的工具实现应当逻辑一致（无缝兼容的强要求），工具设计应属于 specs，全面对照并修正"。以 osp（opencode-serenity-plugin）为 ACC 工具 spec，逐工具对照 dsp 全部 9+ 工具并修正行为差异。触发：session create `--issue` 静默降级建 `S080--untitled`（apaas-26116 事故根因）。
