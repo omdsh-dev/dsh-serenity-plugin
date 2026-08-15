@@ -1,3 +1,11 @@
+## v1.18.3 — 2026-08-15（首轮锚定消息改为 persona + we/us 人称设定）
+
+**Scope:** 用户指定首轮锚定消息改为 "You are a helpful software engineer assistant.The personal pronoun is us/we."——首轮模型以 we/us 人称回答（对齐 anchored 实测的 "we" 轨迹特征）。
+
+### 修复
+- `bootstrap.ts DEFAULT_ANCHOR_MESSAGE`：'请介绍当前宁静号…' → 'You are a helpful software engineer assistant.The personal pronoun is us/we.'
+- 测试：常量引用自动跟随（自定义 anchorMessage 覆盖不受影响）；278/278 全过
+
 ## v1.18.2 — 2026-08-15（Zero-Anchored 变体：0 工具首轮——严格按 zero-anchored-standard 实现）
 
 **Scope:** 用户要求加 Zero-Anchored 变体（首轮 0 工具，纯文字锚定），**必须与 anchored-standard 实现原理一致**。提取 zero-anchored-standard/zero-tool-bootstrap.mjs + anchor-turn.mjs 源码逐行对照移植。

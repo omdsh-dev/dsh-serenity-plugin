@@ -47,8 +47,9 @@ export const DEFAULT_SUPPRESSED_SOURCES = ['skill-catalog', 'agent-instructions'
 /** 默认 compaction 恢复工作集（anchored 默认 read/write/edit/glob/grep/todo_write/ask_user_question） */
 export const DEFAULT_COMPACTION_TOOLS = ['read', 'write', 'edit', 'glob', 'grep', 'todo_write']
 
-/** 默认首轮锚定问题（用户指定：介绍宁静号，200 字以内） */
-export const DEFAULT_ANCHOR_MESSAGE = '请介绍当前宁静号，它是什么，为了什么，200字以内回答'
+/** 默认首轮锚定消息（用户指定：persona 设定 + we/us 人称——首轮模型以 we/us 自称，
+ *  对齐 anchored 实测的 "we" 轨迹特征） */
+export const DEFAULT_ANCHOR_MESSAGE = 'You are a helpful software engineer assistant.The personal pronoun is us/we.'
 
 // ── 阶段机（等价 anchored compaction-epoch.mjs createEpochPromotion）──
 
