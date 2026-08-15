@@ -1,3 +1,14 @@
+## v1.17.3 — 2026-08-15（MSM 开发指南补充"交互与确认规范"：禁止阻塞性确认，二次确认走两段式返回+重试）
+
+**Scope:** 用户要求补充 MSM 开发规范——MSM 子进程无用户交互通道（spawn/execFile，600s 超时），阻塞性确认（readline/prompt/stdin 等待）会卡死至超时；需要二次确认时应直接返回确认信息，agent 确认后重新调用并带确认参数重试。
+
+### 补充内容（acc_msm guide → MSM_GUIDE）
+- **新增「交互与确认规范」节**：禁止 readline/prompt/process.stdin 阻塞等待；两段式确认模式（首次调用不带确认 flag → 输出确认请求 + exit 非 0 + 不执行变更；agent 重新调用带 --confirm/--yes/--force → 执行）
+- 适用场景：删除/覆盖/推送/批量等不可逆或影响面大的操作
+- 测试：acc-extras guide 断言补「交互与确认规范/禁止阻塞性确认/--confirm」
+
+**测试：** 257/257
+
 ## v1.17.2 — 2026-08-15（Session 块平台适配：todowrite 首项移除 DSH 不支持的 priority 字段——修复 `todos[0].priority is not a declared property` 报错）
 
 **Scope:** 用户报告更新 todo 偶尔报错 `Error: invalid arguments: "todos[0].priority" is not a declared property (additionalProperties: false)`。根因：Session 块（逐字节对齐 osp）指导 agent 调用 todowrite 时首项带 `priority: "low"`，但 osp 的 opencode todo 工具支持 priority 而 **DSH 平台 todowrite schema 无 priority（additionalProperties: false 拒绝）** → agent 照做即报错。提示词与平台工具 schema 不匹配。

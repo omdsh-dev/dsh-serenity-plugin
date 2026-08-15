@@ -29,6 +29,10 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     const r = runMsm(dir, { action: 'guide' }) as { guide: string }
     expect(r.guide).toContain('MSM 开发手册')
     expect(r.guide).toContain('main() CLI 守卫')
+    // v1.17.3：交互与确认规范（禁止阻塞性确认）
+    expect(r.guide).toContain('交互与确认规范')
+    expect(r.guide).toContain('禁止阻塞性确认')
+    expect(r.guide).toContain('--confirm')
   })
 
   it('exec --schema 返回条目 schema', () => {

@@ -108,6 +108,20 @@ flags 是 new-style 对象数组，用于参数校验与 path 逃逸守卫：
 - 配对 .test.ts 或 .spec.ts（DC-M1，vitest）
 - 业务子进程环境：注入 SERENITY_ROOT / SERENITY_CCC / SERENITY_VERSION
 
+## 交互与确认规范（禁止阻塞性确认）
+- MSM 运行在**无用户交互的子进程**（spawn/execFile，600s 超时）——**禁止**用
+  readline / prompt / process.stdin 等阻塞等待用户输入（会卡死至超时被 kill）
+- 需要二次确认时：**直接返回确认信息**（输出将执行的操作与影响 + 如何带确认参数重试），
+  以非 0 退出码返回（或明确提示）
+- agent 确认后**重新调用 MSM 并带上确认参数**（如 --confirm / --yes / --force）重试
+- 标准模式（两段式）：
+  1. 首次调用：检测到破坏性/需确认操作且未带确认 flag → 输出确认请求（列出操作/影响/回滚），
+     exit 非 0（如 1 user），**不执行任何变更**
+  2. agent 评估后重新调用：带确认 flag → 执行并输出结果
+- 适用场景：删除/覆盖/推送/批量操作 等不可逆或影响面大的操作
+- 反例（禁止）：readline 等待用户输入、process.stdin.on('data') 阻塞等待
+  （MSM 无 stdin 交互通道——卡死至 600s 超时）
+
 ## 品质检查（acc_msm check，DC-M1~M4）
 DC-M1 有 .test.ts/.spec.ts；DC-M2 有 main() 守卫（function main( / isMain / require.main === / import.meta.url）；
 DC-M3 双向：脚本未注册 + 注册表引用脚本缺失；DC-M4 路径型 flag 标记 type:"path"
