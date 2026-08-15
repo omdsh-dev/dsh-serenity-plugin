@@ -14,15 +14,19 @@ import {
   summarize,
   qaCheck,
   appendHeartbeat,
-  ACTIVE_SESSIONS_DIR,
-  LEGACY_ACTIVE_SESSION_MARKER,
-  activeSessionMarker,
   readActiveSessionMd,
-  listActiveMarkers,
-  restoreActiveSession,
+  getActiveSessionInfo,
+  resetActiveSessionStore,
+  parseSessionContextFromEvents,
+  SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
 } from '../src/session-ops.js'
 import { resolveActiveSession } from '../src/seams/loop.js'
+
+/**
+ * session-ops 单元测试（S134 v1.16.14 内存化）：活跃会话跟踪**不落盘**——
+ * 内存 Map（scope = dsh 会话 id）+ use 时注入 [SESSION CONTEXT] 标记（events 恢复源）。
+ */
 
 let dir: string
 
@@ -30,6 +34,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'hooks-sess-'))
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, 'AGENT_SESSIONS'), { recursive: true })
+  resetActiveSessionStore()
 })
 
 afterEach(() => {
@@ -83,42 +88,44 @@ describe('session-ops: 生命周期', () => {
     const qa = qaCheck(dir, 'S001')
     expect(qa.issues.length).toBeGreaterThan(0)
   })
+})
 
-  it('use 写活动会话标记（默认 scope）→ resolveActiveSession 可读（Session 块生效）', () => {
+describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
+  it('use 写内存 Map（不落盘）：getActiveSessionInfo + readActiveSessionMd + resolveActiveSession 可读', () => {
     const r = createSession(dir, 'active-use', 'active-use')
     const used = useSession(dir, 'S001')
     expect(used.dir).toContain('S001')
-    const marker = activeSessionMarker(dir, DEFAULT_SESSION_SCOPE)
-    expect(existsSync(marker)).toBe(true)
-    expect(resolveActiveSession(dir)).toBe(r.sessionMd)
+    // 不产生任何 .dsh 文件
+    expect(existsSync(join(dir, '.dsh'))).toBe(false)
+    expect(getActiveSessionInfo(DEFAULT_SESSION_SCOPE)).toEqual({
+      sessionId: 'S001', dirName: used.dir, mdPath: r.sessionMd,
+    })
     expect(readActiveSessionMd(dir)).toBe(r.sessionMd)
+    expect(resolveActiveSession(dir)).toBe(r.sessionMd)
   })
 
-  it('use 按 scope 隔离：不同 dsh 会话各自活跃，互不覆盖', () => {
+  it('use 返回 context 含 [SESSION CONTEXT] 标记（events 恢复源）', () => {
+    const r = createSession(dir, 'ctx-marker', 'ctx-marker')
+    const used = useSession(dir, 'S001')
+    expect(used.context).toContain(`${SESSION_CONTEXT_MARKER} ${used.dir}`)
+    expect(used.context).toContain(`SESSION.md path: ${r.sessionMd}`)
+  })
+
+  it('use 按 scope 隔离：并行多会话各自活跃，互不覆盖', () => {
     const a = createSession(dir, 'scope-a', 'scope-a')
     const b = createSession(dir, 'scope-b', 'scope-b')
     useSession(dir, 'S001', 'agent-A')
     useSession(dir, 'S002', 'agent-B')
-    // 各自 scope 读到各自的活跃会话
     expect(resolveActiveSession(dir, 'agent-A')).toBe(a.sessionMd)
     expect(resolveActiveSession(dir, 'agent-B')).toBe(b.sessionMd)
-    // 无 scope 回退默认 → null（未在默认 scope use）
-    expect(resolveActiveSession(dir)).toBeNull()
-  })
-
-  it('use 清理旧全局标记（迁移）：legacy active-session 被删除', () => {
-    const r = createSession(dir, 'migrate', 'migrate')
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
-    writeFileSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER), r.sessionMd.replace(dir + '/', ''))
-    useSession(dir, 'S001', 'agent-X')
-    expect(existsSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER))).toBe(false)
+    expect(resolveActiveSession(dir)).toBeNull() // 默认 scope 未 use
   })
 
   it('use 未找到会话抛错', () => {
     expect(() => useSession(dir, 'nope')).toThrow(/未找到会话/)
   })
 
-  it('close 删除指定 scope 的活动会话标记（不影响其他 scope）', () => {
+  it('close 清指定 scope 的内存条目（不影响其他 scope；不落盘无文件残留）', () => {
     createSession(dir, 'c', 'c')
     createSession(dir, 'd', 'd')
     useSession(dir, 'S001', 'agent-A')
@@ -126,107 +133,47 @@ describe('session-ops: 生命周期', () => {
     expect(resolveActiveSession(dir, 'agent-A')).not.toBeNull()
     closeSession(dir, 'agent-A')
     expect(resolveActiveSession(dir, 'agent-A')).toBeNull()
-    // 其他 scope 不受影响
     expect(resolveActiveSession(dir, 'agent-B')).not.toBeNull()
-  })
-
-  it('close 清理旧全局标记', () => {
-    createSession(dir, 'c', 'c')
-    mkdirSync(join(dir, '.dsh'), { recursive: true })
-    writeFileSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER), 'AGENT_SESSIONS/x/SESSION.md')
-    closeSession(dir)
-    expect(existsSync(join(dir, LEGACY_ACTIVE_SESSION_MARKER))).toBe(false)
-  })
-
-  it('ACTIVE_SESSIONS_DIR 为 .dsh/active-sessions；scope 文件名安全清洗', () => {
-    expect(ACTIVE_SESSIONS_DIR).toBe(join('.dsh', 'active-sessions'))
-    expect(activeSessionMarker(dir, 'cm-abc/../../x')).toBe(join(dir, '.dsh', 'active-sessions', 'cm-abc_______x'))
-    expect(activeSessionMarker(dir, '')).toBe(join(dir, '.dsh', 'active-sessions', DEFAULT_SESSION_SCOPE))
+    expect(existsSync(join(dir, '.dsh'))).toBe(false)
   })
 })
 
-describe('session-ops: 重启自动恢复（restoreActiveSession）', () => {
-  it('listActiveMarkers 列出全部标记（scope/mdRel/mtime）', () => {
-    expect(listActiveMarkers(dir)).toEqual([])
-    const r = createSession(dir, 'mk', 'mk')
-    useSession(dir, 'S001', 'agent-A')
-    useSession(dir, 'S001', 'agent-B')
-    const markers = listActiveMarkers(dir)
-    expect(markers).toHaveLength(2)
-    expect(markers.map((m) => m.scope).sort()).toEqual(['agent-A', 'agent-B'])
-    expect(markers.every((m) => m.mdRel === r.sessionMd.replace(dir + '/', ''))).toBe(true)
+describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只扫自己会话）', () => {
+  it('events 含 [SESSION CONTEXT] 标记 → 解析出活跃会话', () => {
+    const r = createSession(dir, 'recover-me', 'recover-me')
+    const marker = `${SESSION_CONTEXT_MARKER} ${r.dir}\nSESSION.md path: ${r.sessionMd}`
+    const events = [{ type: 'tool/call' }, { type: 'tool/result', data: { output: marker } }]
+    const info = parseSessionContextFromEvents(events)
+    expect(info).toEqual({ sessionId: 'S001', dirName: r.dir, mdPath: r.sessionMd })
   })
 
-  it('新 scope 无标记 → 恢复最近激活的会话（mtime 最新者胜出）', () => {
-    const a = createSession(dir, 'rec-a', 'rec-a')
-    const b = createSession(dir, 'rec-b', 'rec-b')
-    useSession(dir, 'S001', 'old-agent')
-    useSession(dir, 'S002', 'new-agent') // 更新 → mtime 最新
-    const restored = restoreActiveSession(dir, 'restarted-session')
-    expect(restored).not.toBeNull()
-    expect(restored!.dir).toContain('S002')
-    expect(restored!.id).toBe('S002')
-    expect(restored!.restored).toBe(true)
-    // 恢复 = 复制标记 → 新 scope 可读
-    expect(readActiveSessionMd(dir, 'restarted-session')).toBe(b.sessionMd)
+  it('取最后一条标记（最新优先）', () => {
+    const a = createSession(dir, 'first', 'first')
+    const b = createSession(dir, 'second', 'second')
+    const m1 = `${SESSION_CONTEXT_MARKER} ${a.dir}\nSESSION.md path: ${a.sessionMd}`
+    const m2 = `${SESSION_CONTEXT_MARKER} ${b.dir}\nSESSION.md path: ${b.sessionMd}`
+    expect(parseSessionContextFromEvents([{ data: { text: m1 } }, { data: { text: m2 } }])!.dirName).toContain('S002')
   })
 
-  it('当前 scope 已有标记 → 不覆盖（返回 null）', () => {
-    createSession(dir, 'keep', 'keep')
-    useSession(dir, 'S001', 'mine')
-    expect(restoreActiveSession(dir, 'mine')).toBeNull()
+  it('无标记 / 空 events → null（全新会话不恢复）', () => {
+    expect(parseSessionContextFromEvents([])).toBeNull()
+    expect(parseSessionContextFromEvents([{ type: 'user/message', data: { text: 'hello' } }])).toBeNull()
   })
 
-  it('无任何候选标记 → 返回 null', () => {
-    createSession(dir, 'none', 'none')
-    expect(restoreActiveSession(dir, 'fresh')).toBeNull()
-  })
-
-  it('越界标记（内容指向根外）被过滤，不恢复', () => {
-    createSession(dir, 'ok', 'ok')
-    useSession(dir, 'S001', 'good')
-    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-sessions', 'evil'), '../escape.md')
-    const restored = restoreActiveSession(dir, 'fresh')
-    expect(restored).not.toBeNull() // 仅 good 候选
-    expect(readActiveSessionMd(dir, 'fresh')).toBe(join(dir, 'AGENT_SESSIONS', listSessions(dir)[0]!.dir, 'SESSION.md'))
-  })
-
-  it('全部候选越界 → 返回 null（不注入根外内容）', () => {
-    createSession(dir, 'x', 'x')
-    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-sessions', 'evil'), '../escape.md')
-    expect(restoreActiveSession(dir, 'fresh')).toBeNull()
-  })
-
-  it('restore 后再 close：删除当前 scope 标记，恢复状态解除', () => {
-    createSession(dir, 'c', 'c')
-    useSession(dir, 'S001', 'old-agent')
-    restoreActiveSession(dir, 'new-agent')
-    expect(readActiveSessionMd(dir, 'new-agent')).not.toBeNull()
-    closeSession(dir, 'new-agent')
-    expect(readActiveSessionMd(dir, 'new-agent')).toBeNull()
-    // 旧 scope 标记保留（隔离语义：close 只清自身 scope）
-    expect(readActiveSessionMd(dir, 'old-agent')).not.toBeNull()
+  it('标记格式非法（目录名不符合 YYYY-MM-DD-- 前缀）→ 跳过', () => {
+    const events = [{ data: { text: `${SESSION_CONTEXT_MARKER} not-a-session\nSESSION.md path: /tmp/x.md` } }]
+    expect(parseSessionContextFromEvents(events)).toBeNull()
   })
 })
 
-describe('loop: 活动会话心跳', () => {
-  it('无标记返回 null；有标记追加心跳（默认 scope）', () => {
+describe('loop: 活动会话心跳（内存读）', () => {
+  it('无激活返回 null；use 后追加心跳（默认 scope）', () => {
     expect(resolveActiveSession(dir)).toBeNull()
     const r = createSession(dir, 'active', 'active')
-    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-sessions', 'default'), r.sessionMd.replace(dir + '/', ''))
+    useSession(dir, 'S001')
     expect(resolveActiveSession(dir)).toBe(r.sessionMd)
     expect(appendHeartbeat(r.sessionMd)).toBe(true)
-    const content = readFileSync(r.sessionMd, 'utf-8')
-    expect(content).toContain('heartbeat')
-  })
-
-  it('标记越界返回 null', () => {
-    mkdirSync(join(dir, '.dsh', 'active-sessions'), { recursive: true })
-    writeFileSync(join(dir, '.dsh', 'active-sessions', 'default'), '../escape.md')
-    expect(resolveActiveSession(dir)).toBeNull()
+    expect(readFileSync(r.sessionMd, 'utf-8')).toContain('heartbeat')
   })
 
   it('按 scope 隔离心跳：只写当前 dsh 会话的活跃会话', () => {

@@ -5,9 +5,8 @@
  * 操作 CCC 根的 AGENT_SESSIONS/ 目录，返回规范 JSON 值。
  */
 
-import { existsSync, statSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync, rmSync } from 'node:fs'
-import { join, resolve, relative, basename, dirname } from 'node:path'
-import { pathInside } from './ccc.js'
+import { existsSync, statSync, mkdirSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import type { JsonValue } from './json.js'
 
 export type SessionAction = 'list' | 'show' | 'create' | 'use' | 'close' | 'health' | 'qa' | 'archive' | 'summary'
@@ -116,121 +115,112 @@ export function showSession(root: string, key: string): DirResult & { content: s
 export type DirResult = { dir: string } & Record<string, JsonValue>
 
 /**
- * 活动会话标记：按 DSH 会话（agent.session.id）隔离，不再使用 CCC 级全局单文件。
- * 每个 dsh 会话一个标记文件（.dsh/active-sessions/<scope>），系统提示词 Session 块
- * 只注入当前 dsh 会话 use 的活跃会话 —— 多开 conversation / subagent / loop 牛马互不泄露。
- *
- * 旧版全局标记 `.dsh/active-session`（v1.16.1 及以前）：use 时删除（迁移清理），
- * 读取不再回退（隔离优先；升级后重新 use 一次即可）。
+ * 活动会话跟踪（S134 v1.16.14 内存化，对齐 osp active-state）：
+ * **不落盘**——活跃会话状态在内存 Map（key = scope = dsh 会话 id），避免落盘标记
+ * 文件累积与跨会话串台（落盘版 `.dsh/active-sessions/<scope>` 已被此方案取代）。
+ * 进程重启恢复：从**当前会话历史（events）**解析 `[SESSION CONTEXT]` 标记（use 时注入），
+ * 只扫自己会话——无全局扫描、无跨会话污染。
  */
-export const ACTIVE_SESSIONS_DIR = join('.dsh', 'active-sessions')
-
-/** 旧版全局标记路径（v1.16.1 及以前 use 写入；新版本仅清理不再读取） */
-export const LEGACY_ACTIVE_SESSION_MARKER = join('.dsh', 'active-session')
-
-/** 默认 scope（agent.session.id 缺失时） */
 export const DEFAULT_SESSION_SCOPE = 'default'
 
-/** scope 用作文件名：仅保留安全字符（agent.session.id 可能含 / 等；`.` 排除以杜绝 `..` 路径段穿越） */
-export function sanitizeScope(scope: string): string {
-  const s = scope.replace(/[^A-Za-z0-9_-]/g, '_')
-  return s || DEFAULT_SESSION_SCOPE
+/** [SESSION CONTEXT] 恢复标记（use 时注入 events 历史；进程重启后从 events 解析） */
+export const SESSION_CONTEXT_MARKER = '[SESSION CONTEXT] Activated:'
+
+export interface ActiveSessionInfo {
+  sessionId: string
+  dirName: string
+  mdPath: string
 }
 
-/** scope 标记文件绝对路径 */
-export function activeSessionMarker(root: string, scope: string): string {
-  return resolve(root, ACTIVE_SESSIONS_DIR, sanitizeScope(scope))
+/** 内存活跃会话：scope（dsh 会话 id）→ 会话信息（不落盘；并行多会话各自 key 隔离） */
+const activeStore = new Map<string, ActiveSessionInfo>()
+/** 全局最近活跃（对齐 osp lastActive；供无 scope 上下文使用） */
+let lastActive: ActiveSessionInfo | null = null
+
+export function getActiveSessionInfo(scope: string): ActiveSessionInfo | null {
+  return activeStore.get(scope) ?? null
 }
 
-/** 激活会话：写 <scope> 标记（内容 = 相对 CCC 根的 SESSION.md 路径）；顺带清理旧全局标记 */
-export function useSession(root: string, key: string, scope = DEFAULT_SESSION_SCOPE): DirResult & { mdPath: string } {
+export function getLastActiveSessionInfo(): ActiveSessionInfo | null {
+  return lastActive
+}
+
+export function setActiveSessionInfo(scope: string, info: ActiveSessionInfo): void {
+  activeStore.set(scope, info)
+  lastActive = info
+}
+
+export function clearActiveSessionInfo(scope: string): void {
+  activeStore.delete(scope)
+  if (lastActive && ![...activeStore.values()].some((v) => v === lastActive)) lastActive = null
+}
+
+/** 重置内存活跃会话（测试用；进程重启即天然清空） */
+export function resetActiveSessionStore(): void {
+  activeStore.clear()
+  lastActive = null
+}
+
+/**
+ * 激活会话：写内存 Map（scope）+ 返回含 `[SESSION CONTEXT]` 标记的 context
+ * （标记随工具结果进 events 历史——进程重启后从当前会话 events 解析恢复，对齐 osp）。
+ */
+export function useSession(root: string, key: string, scope = DEFAULT_SESSION_SCOPE): DirResult & { mdPath: string; context: string } {
   const target = findSession(root, key)
   if (!target) throw new Error(`未找到会话: ${key}`)
   const md = join(sessionsRoot(root), target.dir, 'SESSION.md')
   if (!existsSync(md)) throw new Error(`会话 ${target.dir} 缺少 SESSION.md`)
-  const marker = activeSessionMarker(root, scope)
-  mkdirSync(resolve(root, '.dsh', 'active-sessions'), { recursive: true })
-  const relMd = relative(root, md)
-  writeFileSync(marker, relMd, 'utf-8')
-  // 迁移清理：旧全局标记不再读取，避免其他 dsh 会话回退到本会话 use 的会话
-  const legacy = resolve(root, LEGACY_ACTIVE_SESSION_MARKER)
-  if (existsSync(legacy)) rmSync(legacy, { force: true })
-  return { dir: target.dir, mdPath: md }
+  const dirName = target.dir
+  const idMatch = dirName.match(/S(\d{3,})/)
+  const sessionId = idMatch ? `S${idMatch[1]}` : dirName
+  setActiveSessionInfo(scope, { sessionId, dirName, mdPath: md })
+  const context = `${SESSION_CONTEXT_MARKER} ${dirName}\nSESSION.md path: ${md}`
+  return { dir: dirName, mdPath: md, context }
 }
 
-/** 关闭活动会话：删除 <scope> 标记 + 旧全局标记 */
+/** 关闭活动会话：删除 scope 的内存条目（+ lastActive 修正）——不落盘，无文件残留 */
 export function closeSession(root: string, scope = DEFAULT_SESSION_SCOPE): DirResult {
-  const marker = activeSessionMarker(root, scope)
-  if (existsSync(marker)) rmSync(marker, { force: true })
-  const legacy = resolve(root, LEGACY_ACTIVE_SESSION_MARKER)
-  if (existsSync(legacy)) rmSync(legacy, { force: true })
+  clearActiveSessionInfo(scope)
   return { dir: 'active-session cleared' }
 }
 
-/** 读取指定 scope 的活跃会话 SESSION.md 绝对路径；无标记/越界返回 null */
+/** 读取指定 scope 的活跃会话 SESSION.md 绝对路径；无激活返回 null（读内存，不落盘） */
 export function readActiveSessionMd(root: string, scope = DEFAULT_SESSION_SCOPE): string | null {
-  const marker = activeSessionMarker(root, scope)
-  if (!existsSync(marker)) return null
-  const rel = readFileSync(marker, 'utf-8').trim()
-  if (!rel) return null
-  const abs = resolve(root, rel)
-  if (!abs.startsWith(resolve(root))) return null
-  return abs
-}
-
-// ── 重启自动恢复（S134 需求）：新 DSH 会话无自身标记时，回退最近激活的宁静号会话 ──
-
-export interface ActiveMarker {
-  /** 标记文件名 = sanitize 后的 scope */
-  scope: string
-  /** 标记内容 = 相对 CCC 根的 SESSION.md 路径 */
-  mdRel: string
-  /** 标记 mtime（ms）——"最近激活"排序依据 */
-  mtime: number
-}
-
-/** 列出全部 scope 的活动标记（含 scope / mdRel / mtime）；目录不存在返回空 */
-export function listActiveMarkers(root: string): ActiveMarker[] {
-  const dir = resolve(root, ACTIVE_SESSIONS_DIR)
-  if (!existsSync(dir)) return []
-  const out: ActiveMarker[] = []
-  for (const entry of readdirSync(dir)) {
-    const full = join(dir, entry)
-    if (!statSync(full).isFile()) continue
-    try {
-      const rel = readFileSync(full, 'utf-8').trim()
-      if (!rel) continue
-      out.push({ scope: entry, mdRel: rel, mtime: statSync(full).mtimeMs })
-    } catch {
-      /* 坏标记跳过（不阻断其余） */
-    }
-  }
-  return out
+  return getActiveSessionInfo(scope)?.mdPath ?? null
 }
 
 /**
- * 重启恢复：当前 scope 无标记时，把"最近激活"（mtime 最新）且根内有效的标记
- * 复制为当前 scope 标记（激活语义延续：use = 激活，重启自动恢复 = 重新激活）。
- * 返回恢复的会话信息；已有标记 / 无候选 / 全部越界 → null。
- * 调用方负责根会话判定（subagent / loop 牛马不恢复——见 context.ts shouldAutoRestore）。
+ * 从会话历史（events）解析最后一条 [SESSION CONTEXT] 标记（进程重启恢复；
+ * 只扫**当前会话**自己的历史——无跨会话串台）。
  */
-export function restoreActiveSession(root: string, scope = DEFAULT_SESSION_SCOPE): (DirResult & { mdPath: string; restored: boolean; from: string }) | null {
-  const marker = activeSessionMarker(root, scope)
-  if (existsSync(marker)) return null // 已有激活，不覆盖
-  const scopeName = sanitizeScope(scope)
-  const candidates = listActiveMarkers(root).filter((m) => m.scope !== scopeName)
-  if (candidates.length === 0) return null
-  const rootAbs = resolve(root)
-  // 有效性过滤：mdRel 必须在根内（防标记内容越界注入；pathInside 平台感知 sep/大小写）
-  const valid = candidates.filter((m) => pathInside(rootAbs, resolve(rootAbs, m.mdRel)))
-  if (valid.length === 0) return null
-  const best = valid.sort((a, b) => b.mtime - a.mtime)[0]!
-  mkdirSync(resolve(rootAbs, ACTIVE_SESSIONS_DIR), { recursive: true })
-  writeFileSync(marker, best.mdRel, 'utf-8')
-  const mdPath = resolve(rootAbs, best.mdRel)
-  const dirName = basename(dirname(mdPath))
-  const idMatch = dirName.match(/S(\d{3,})/)
-  return { dir: dirName, id: idMatch ? `S${idMatch[1]}` : null, mdPath, restored: true, from: best.scope }
+export function parseSessionContextFromEvents(events: readonly unknown[]): ActiveSessionInfo | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const strs: string[] = []
+    collectStrings(events[i], strs)
+    for (const s of strs) {
+      const idx = s.indexOf(SESSION_CONTEXT_MARKER)
+      if (idx < 0) continue
+      const rest = s.slice(idx + SESSION_CONTEXT_MARKER.length).trim()
+      const dirName = rest.split('\n')[0]?.trim() ?? ''
+      const mdMatch = s.match(/SESSION\.md path:\s*(\S+)/)
+      if (/^\d{4}-\d{2}-\d{2}--/.test(dirName) && mdMatch) {
+        const idMatch = dirName.match(/S(\d{3,})/)
+        return { sessionId: idMatch ? `S${idMatch[1]}` : dirName, dirName, mdPath: mdMatch[1]! }
+      }
+    }
+  }
+  return null
+}
+
+/** 递归收集对象/数组/字符串中的全部字符串（保留原文，无 JSON 转义） */
+function collectStrings(v: unknown, out: string[]): void {
+  if (typeof v === 'string') {
+    out.push(v)
+    return
+  }
+  if (v && typeof v === 'object') {
+    for (const val of Object.values(v as Record<string, unknown>)) collectStrings(val, out)
+  }
 }
 
 export function archiveSession(root: string, key: string): DirResult {

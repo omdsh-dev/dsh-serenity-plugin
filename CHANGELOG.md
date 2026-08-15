@@ -1,3 +1,28 @@
+## v1.16.14 — 2026-08-15（SESSION 跟踪内存化：活跃会话不落盘（对齐 osp active-state），进程重启从当前会话 events 解析 [SESSION CONTEXT] 恢复——根治泄漏与并行串台）
+
+**Scope:** 用户追问泄漏根因（"放内存里了？并行怎么办"）→ 仔细检查确认：落盘标记（`.dsh/active-sessions/<scope>` 文件）**无生命周期累积** + `restoreActiveSession` **全局 mtime 扫描**（无"谁在用"感知）→ 新会话继承旧 SESSION（apaas-26116 场景）+ 并行串台。用户指示：**不能落盘，必须内存，参考 osp 完整方案**。实施：活跃会话改内存 Map，进程重启从当前会话 events 解析 `[SESSION CONTEXT]` 标记恢复（只扫自己会话）。
+
+### 泄漏根因链（仔细检查结论）
+
+| 层 | 根因 | 修复 |
+|---|---|---|
+| ① 标记累积 | 落盘标记无生命周期（use 写新 scope；close 只删当前 scope；旧会话标记永久保留） | **不落盘**——内存 Map |
+| ② 恢复全局扫描 | `restoreActiveSession` 扫**所有**标记取 mtime 最新，无活跃感知 → 任何会话捞起任意旧标记 | 恢复源 = **当前会话自己的 events**（`[SESSION CONTEXT]` 标记） |
+| ③ 并行串台 | 恢复的"最近激活"在并行下无唯一性 → B 会话可能捞 A 的标记 | Map keyed by scope（并行隔离）；恢复只扫自己会话 |
+
+### 实施（对齐 osp active-state）
+
+- **session-ops.ts 内存化**：删除 `.dsh/active-sessions` 落盘机制（`ACTIVE_SESSIONS_DIR`/`sanitizeScope`/`activeSessionMarker`/`listActiveMarkers`/`restoreActiveSession`/legacy 清理）；新增内存 `activeStore` Map（scope → {sessionId, dirName, mdPath}）+ `lastActive` + `get/set/clearActiveSessionInfo` + `resetActiveSessionStore`（测试用）
+- **useSession**：写内存 Map + 返回 `context` 含 `[SESSION CONTEXT] Activated: <dir>` + `SESSION.md path: <md>`（标记随工具结果进 events——进程重启恢复源）
+- **closeSession**：删内存条目（+ lastActive 修正）——不落盘无文件残留
+- **readActiveSessionMd**：读内存 Map
+- **恢复**：`parseSessionContextFromEvents(events)`——从**当前会话 events** 递归收集字符串，取最后一条 `[SESSION CONTEXT]` 标记解析（目录名 YYYY-MM-DD-- 校验 + SESSION.md path 提取）；`context.ts seed` 用其替代 `restoreActiveSession`（进程重启 Map 空 + 会话有历史才恢复；`hooks.autoRestoreSession` 配置保留）
+- **并行**：Map keyed by scope（dsh 会话 id）→ 多 conversation/subagent/loop 各自 key，互不干扰；恢复只扫自己会话 → 无跨会话串台
+- **新会话不继承**：无历史 → events 无 `[SESSION CONTEXT]` → 不恢复（v1.16.13 泄漏修复成为内存方案固有属性）
+- **测试**：session-ops.test.ts 重写（内存语义 / context 标记 / scope 隔离 / close / events 恢复解析 4 例 / 心跳内存读）；osp-alignment 两处 Session 测试改用 `useSession`（内存）——共 247 测试
+
+**测试：** 247/247（落盘机制移除 + 内存语义重写）
+
 ## v1.16.13 — 2026-08-15（SESSION 泄漏修复：恢复只对续跑/恢复的会话（有对话历史）触发——全新会话不继承旧 SESSION）
 
 **Scope:** 用户报告 SESSION 泄漏 bug——新建会话（apaas-26116，新任务）却注入了过去 S077 的 Session 上下文。根因：v1.16.6「会话重启恢复」的 `restoreActiveSession` 对**任何主会话**（含全新无历史会话）无条件恢复最近激活 → 新任务会话继承了旧 SESSION（跨任务污染）。

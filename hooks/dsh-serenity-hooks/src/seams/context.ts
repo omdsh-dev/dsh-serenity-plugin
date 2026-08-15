@@ -22,7 +22,7 @@ import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
-import { restoreActiveSession, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
+import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 
 // ── 纯文本构建（可单测）──
 
@@ -132,15 +132,20 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
-    // 重启恢复（S134）：续跑/恢复的根会话（有对话历史）且无自身标记时，
-    // 自动恢复最近激活的宁静号会话（serenity.json hooks.autoRestoreSession 可关，默认开）。
-    // 全新会话（无历史）不恢复——见 shouldRestoreActive（S134 泄漏修复）。
-    if (shouldRestoreActive(agent)) {
+    // 重启恢复（S134 v1.16.14 内存化，对齐 osp）：进程重启内存 Map 空 + 会话有历史 →
+    // 从**当前会话 events** 解析 [SESSION CONTEXT] 标记恢复内存活跃会话（只扫自己会话，
+    // 无跨会话串台）；全新会话（无历史）天然不恢复。autoRestoreSession 可关，默认开。
+    const scope = agentScope(agent)
+    if (shouldRestoreActive(agent) && getActiveSessionInfo(scope) === null) {
       try {
         const cfg = loadSerenityConfig(root, configPaths)
         if (cfg.hooks?.autoRestoreSession ?? true) {
-          const restored = restoreActiveSession(root, agentScope(agent))
-          if (restored) console.log(`[serenity-hooks] ↻ 自动恢复激活会话: ${restored.dir}（from scope ${restored.from}）`)
+          const events = (agent.session as unknown as { events?: readonly unknown[] }).events ?? []
+          const info = parseSessionContextFromEvents(events)
+          if (info) {
+            setActiveSessionInfo(scope, info)
+            console.log(`[serenity-hooks] ↻ 从历史恢复激活会话: ${info.dirName}`)
+          }
         }
       } catch {
         /* 恢复失败不阻断播种（Session 块自然为空，用户可手动 session use） */
