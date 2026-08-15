@@ -97,6 +97,9 @@ export interface SerenityConfig {
     /** 首轮锚定问题（对齐 whoami-turn：新会话第一轮先回答此问题——回复即晋升信号，
      *  真实用户消息推迟到第二轮处理；缺省 = 介绍宁静号） */
     anchorMessage?: string;
+    /** Zero-Anchored 变体（对齐 zero-anchored-standard）：true 时首请求 0 工具
+     *  （纯文字锚定轮，晋升信号仅 assistant/message），锚定回复后开放完整工具 */
+    zeroTools?: boolean;
   };
   hooks?: {
     enabled?: boolean;

@@ -117,4 +117,15 @@ describe('bootstrap: resolveBootstrapSettings 配置解析', () => {
   it('非法工具列表报错', () => {
     expect(() => resolveBootstrapSettings({ bootstrapTools: [] as never })).toThrow(/bootstrapTools/)
   })
+
+  it('zeroTools 变体：晋升信号仅 assistant/message（对齐 zero-anchored-standard）', () => {
+    const s = resolveBootstrapSettings({ zeroTools: true })
+    expect(s.zeroTools).toBe(true)
+    expect(s.promoteEvents.has('assistant/message')).toBe(true)
+    expect(s.promoteEvents.has('tool/call')).toBe(false)
+    // 缺省 false（anchored 变体：either）
+    const normal = resolveBootstrapSettings({})
+    expect(normal.zeroTools).toBe(false)
+    expect(normal.promoteEvents.has('tool/call')).toBe(true)
+  })
 })

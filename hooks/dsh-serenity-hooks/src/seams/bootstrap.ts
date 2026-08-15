@@ -24,7 +24,7 @@ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
 
 export interface BootstrapSettings {
-  /** 首请求（bootstrap 阶段）工具集（缺省 dsp 核心） */
+  /** 首请求（bootstrap 阶段）工具集（缺省 dsp 核心；zeroTools 时忽略——0 工具） */
   bootstrapTools: string[]
   /** 晋升信号类型集合 */
   promoteEvents: Set<'tool/call' | 'assistant/message'>
@@ -34,6 +34,8 @@ export interface BootstrapSettings {
   compactionTools: string[]
   /** 首轮锚定问题（whoami-turn 语义：新会话第一轮先回答；回复即晋升信号） */
   anchorMessage: string
+  /** Zero-Anchored 变体：首请求 0 工具（晋升信号仅 assistant/message，对齐 zero-anchored-standard） */
+  zeroTools: boolean
 }
 
 /** 默认首请求工具集：dsp 平台 Minimal 等价核心（anchored 是 bash+str_replace_editor） */
@@ -135,6 +137,7 @@ export interface BootstrapOptions {
   suppressedContextSources?: string[]
   compactionTools?: string[]
   anchorMessage?: string
+  zeroTools?: boolean
 }
 
 const PROMOTE_EVENTS: Record<'tool-call' | 'assistant-message' | 'either', Set<'tool/call' | 'assistant/message'>> = {
@@ -166,13 +169,15 @@ export function resolveBootstrapSettings(opts: BootstrapOptions): BootstrapSetti
   }
   return {
     bootstrapTools: stringList(opts.bootstrapTools, 'bootstrapTools', DEFAULT_BOOTSTRAP_TOOLS),
-    promoteEvents: PROMOTE_EVENTS[promoteOn],
+    // zeroTools 变体（对齐 zero-anchored-standard）：晋升信号仅 assistant/message
+    promoteEvents: opts.zeroTools ? PROMOTE_EVENTS['assistant-message'] : PROMOTE_EVENTS[promoteOn],
     suppressedSources: sourceList(opts.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES),
     compactionTools: stringList(opts.compactionTools, 'compactionTools', DEFAULT_COMPACTION_TOOLS),
     anchorMessage:
       typeof opts.anchorMessage === 'string' && opts.anchorMessage.length > 0
         ? opts.anchorMessage
         : DEFAULT_ANCHOR_MESSAGE,
+    zeroTools: opts.zeroTools === true,
   }
 }
 
@@ -208,17 +213,34 @@ function readBootstrapConfig(agent: unknown): BootstrapSettings {
     suppressedContextSources: b?.suppressedContextSources,
     compactionTools: b?.compactionTools,
     anchorMessage: b?.anchorMessage,
+    zeroTools: b?.zeroTools,
   })
 }
 
 export function registerBootstrap(ctx: Context): void {
-  // 全局单例 tracker（session id 全局唯一；观察不依赖 CCC 配置——配置只控制目录/剥离）
+  // 每 CCC root 一个 tracker（promoteEvents 按 root 配置：zeroTools 变体仅 assistant/message）
   const settingsByRoot = new Map<string, BootstrapSettings>()
-  const tracker = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
+  const trackers = new Map<string, PromotionTracker>()
 
+  const trackerFor = (root: string, settings: BootstrapSettings): PromotionTracker => {
+    let t = trackers.get(root)
+    if (!t) {
+      t = createEpochPromotion(settings.promoteEvents)
+      trackers.set(root, t)
+    }
+    return t
+  }
+
+  // session/event 观察：按 session 所属 CCC root 路由到对应 tracker（promoteEvents 按 root 配置）
   ctx.on('session/event', (session, event) => {
     try {
-      tracker.observe(session, event)
+      const cwd = (session as { header?: { cwd?: string } } | undefined)?.header?.cwd
+      if (typeof cwd !== 'string') return
+      const root = findSerenityRoot(cwd)
+      if (!root) return
+      const settings = settingsByRoot.get(root) ?? readBootstrapConfig({ session })
+      settingsByRoot.set(root, settings)
+      trackerFor(root, settings).observe(session, event)
     } catch {
       /* 观察失败不阻断 */
     }
@@ -273,18 +295,33 @@ export function registerBootstrap(ctx: Context): void {
       if (!root) return assembled
       const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
       settingsByRoot.set(root, settings)
-      const status = tracker.status(agent as Agent)
+      const status = trackerFor(root, settings).status(agent as Agent)
       if (status.promoted) {
         // promoted：开放完整目录（dsp 无 dev_tool_search 解锁机制——anchored 的
         // resident 集语义由"完整目录"承担；工具缺失不降级）
         return assembled
       }
-      // 受控阶段：bootstrap 集 + compaction 后 compactionTools（中途任务继续）
-      const keep = new Set<string>(settings.bootstrapTools)
-      if (status.boundary >= 0) for (const toolName of settings.compactionTools) keep.add(toolName)
       const tools = (assembled as PromptAssembly).tools
       if (!Array.isArray(tools)) return assembled
       const available = new Set(tools.map((tool) => tool.name).filter((n): n is string => typeof n === 'string'))
+      if (settings.zeroTools) {
+        // Zero-Anchored 变体（对齐 zero-anchored-standard）：首请求 0 工具（boundary < 0）；
+        // 压缩后回落 compactionTools 工作集（默认 [] → 0 工具，模型中途继续）
+        if (status.boundary < 0) return { ...assembled, tools: [] } as PromptAssembly
+        const keep = new Set(settings.compactionTools)
+        const missing = [...keep].filter((name) => !available.has(name))
+        if (missing.length > 0) {
+          warnOnce(`expected compaction tools missing=${JSON.stringify(missing)} — bootstrap disabled, full catalog exposed`)
+          return assembled
+        }
+        return {
+          ...assembled,
+          tools: tools.filter((tool) => typeof tool.name === 'string' && keep.has(tool.name)),
+        } as PromptAssembly
+      }
+      // Anchored 变体：bootstrap 集 + compaction 后 compactionTools（中途任务继续）
+      const keep = new Set<string>(settings.bootstrapTools)
+      if (status.boundary >= 0) for (const toolName of settings.compactionTools) keep.add(toolName)
       const missing = [...keep].filter((name) => !available.has(name))
       if (missing.length > 0) {
         // 工具缺失：降级完整目录 + 一次性告警（组合漂移不锁死会话）
@@ -307,9 +344,11 @@ export function registerBootstrap(ctx: Context): void {
     if (decision.kind === 'reject') return decision
     try {
       // 非 CCC 不生效
-      if (!agentRoot(agent)) return decision
-      const settings = readBootstrapConfig(agent)
-      if (tracker.status(agent).promoted || settings.suppressedSources.size === 0) return decision
+      const root = agentRoot(agent)
+      if (!root) return decision
+      const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
+      settingsByRoot.set(root, settings)
+      if (trackerFor(root, settings).status(agent).promoted || settings.suppressedSources.size === 0) return decision
       const messages = (decision as { messages?: UserMessage[] }).messages
       if (!Array.isArray(messages)) return decision
       const kept = messages.filter((message) => {

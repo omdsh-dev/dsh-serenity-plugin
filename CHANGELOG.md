@@ -1,3 +1,17 @@
+## v1.18.2 — 2026-08-15（Zero-Anchored 变体：0 工具首轮——严格按 zero-anchored-standard 实现）
+
+**Scope:** 用户要求加 Zero-Anchored 变体（首轮 0 工具，纯文字锚定），**必须与 anchored-standard 实现原理一致**。提取 zero-anchored-standard/zero-tool-bootstrap.mjs + anchor-turn.mjs 源码逐行对照移植。
+
+### 实现（对齐 zero-anchored-standard 原理）
+- **晋升信号仅 `assistant/message`**（zero-tool-bootstrap.mjs 的 `createEpochPromotion(['assistant/message'])`——零工具首轮模型无法调工具，锚定回复即唯一晋升信号）
+- **首请求 0 工具**：`system-prompt/assemble` 在 boundary < 0（未压缩过）时返回 `tools: []`
+- **压缩后回落**：compaction/end 后受控阶段 = `compactionTools` 工作集（默认 [] → 0 工具，模型中途继续）
+- **per-root tracker**：promoteEvents 按 CCC 配置（zeroTools → assistant/message only；anchored → either），session/event 按 session 所属 root 路由
+- **锚定注入复用**：anchorMessage（"请介绍当前宁静号…"）prepend 到 next-turn——首轮模型无工具纯文字回答锚定问题，回复即晋升，第二轮完整工具 + 真实消息
+- 配置：`serenity.json bootstrap.zeroTools: true` 切换变体（缺省 false = anchored 5 工具）
+
+**测试：** 278/278（zeroTools 变体晋升信号断言 +1）
+
 ## v1.18.1 — 2026-08-15（bootstrap 直接默认开启：移除全部开关——用户明确"直接开启不能关"）
 
 **Scope:** 用户验证 v1.18.0 bootstrap 无效（轨迹无锚定首轮）。根因：两级开关都没开（插件级 Config.bootstrap 默认 false + CCC serenity.json 无 bootstrap.enabled）。用户指示：**"这东西配什么，直接开启，不能关"**——bootstrap 直接默认生效，不做成可关闭的。
