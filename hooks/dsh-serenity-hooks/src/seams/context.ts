@@ -99,6 +99,17 @@ export function shouldAutoRestore(agent: Agent): boolean {
   return true
 }
 
+/**
+ * 恢复触发判定（S134 泄漏修复 v1.16.13）：根会话 **且已有对话历史**（续跑/恢复的会话）
+ * 才自动恢复上次激活的宁静号会话——全新会话（新任务，如 apaas-26116）无历史 → 不恢复，
+ * 避免把过去的 SESSION 上下文注入新任务（跨任务污染）。
+ */
+export function shouldRestoreActive(agent: Agent): boolean {
+  if (!shouldAutoRestore(agent)) return false
+  const events = (agent.session as unknown as { events?: readonly unknown[] } | undefined)?.events
+  return Array.isArray(events) && events.length > 0
+}
+
 export interface ContextRegistration {
   configPaths?: string[]
   /** session-start 播种 */
@@ -121,9 +132,10 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
-    // 重启恢复（S134）：根会话且无自身标记时，自动恢复最近激活的宁静号会话
-    // （serenity.json hooks.autoRestoreSession 可关，默认开）。
-    if (shouldAutoRestore(agent)) {
+    // 重启恢复（S134）：续跑/恢复的根会话（有对话历史）且无自身标记时，
+    // 自动恢复最近激活的宁静号会话（serenity.json hooks.autoRestoreSession 可关，默认开）。
+    // 全新会话（无历史）不恢复——见 shouldRestoreActive（S134 泄漏修复）。
+    if (shouldRestoreActive(agent)) {
       try {
         const cfg = loadSerenityConfig(root, configPaths)
         if (cfg.hooks?.autoRestoreSession ?? true) {

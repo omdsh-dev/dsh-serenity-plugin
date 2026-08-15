@@ -7,7 +7,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { accIdentityText, accMessage, shouldAutoRestore } from '../src/seams/context.js'
+import { accIdentityText, accMessage, shouldAutoRestore, shouldRestoreActive } from '../src/seams/context.js'
 import { ACC_VERSION } from '../src/constants.js'
 
 let dir: string
@@ -63,6 +63,24 @@ describe('context: 重启自动恢复的根会话判定（shouldAutoRestore）',
 
   it('无 session → 不恢复', () => {
     expect(shouldAutoRestore(fakeAgent(undefined))).toBe(false)
+  })
+})
+
+describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复）', () => {
+  const fakeAgent = (session: unknown) => ({ session }) as never
+
+  it('全新会话（无历史）→ 不恢复（新任务不继承旧 SESSION）', () => {
+    expect(shouldRestoreActive(fakeAgent({ id: 'main-session-new', events: [] }))).toBe(false)
+    expect(shouldRestoreActive(fakeAgent({ id: 'main-session-new' }))).toBe(false) // 无 events 字段
+  })
+
+  it('续跑/恢复的会话（有对话历史）→ 恢复', () => {
+    expect(shouldRestoreActive(fakeAgent({ id: 'main-session-resume', events: [{ type: 'user/message' }] }))).toBe(true)
+  })
+
+  it('subagent / loop（有历史但非根会话）→ 不恢复', () => {
+    expect(shouldRestoreActive(fakeAgent({ id: 'child-1', header: { origin: 'subagent' }, events: [{ type: 'user/message' }] }))).toBe(false)
+    expect(shouldRestoreActive(fakeAgent({ id: 'loop-x-1', events: [{ type: 'user/message' }] }))).toBe(false)
   })
 })
 

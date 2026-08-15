@@ -1,3 +1,18 @@
+## v1.16.13 — 2026-08-15（SESSION 泄漏修复：恢复只对续跑/恢复的会话（有对话历史）触发——全新会话不继承旧 SESSION）
+
+**Scope:** 用户报告 SESSION 泄漏 bug——新建会话（apaas-26116，新任务）却注入了过去 S077 的 Session 上下文。根因：v1.16.6「会话重启恢复」的 `restoreActiveSession` 对**任何主会话**（含全新无历史会话）无条件恢复最近激活 → 新任务会话继承了旧 SESSION（跨任务污染）。
+
+### 根因与修复
+
+- **根因**：`context.ts seed` 里 `shouldAutoRestore(agent)` 只排除 subagent/loop——全新主会话（无对话历史）也触发 `restoreActiveSession`（回退 mtime 最近标记 → 复制为当前 scope 标记 → Session 块注入旧会话）
+- **修复**：新增 `shouldRestoreActive(agent)` ——**根会话 + 已有对话历史**（`agent.session.events` 非空 = 续跑/恢复的会话）才触发恢复；全新会话（events 空）不恢复
+  - 新任务新会话（apaas-26116 场景）→ 无历史 → 不注入旧 SESSION ✓
+  - DSH web 重启后 resume 同一 conversation → 有历史 → 恢复上次激活 ✓（保留原「重启恢复」需求语义）
+  - `hooks.autoRestoreSession` 配置保留（默认 true，受 events 门控）
+- `seed` 改用 `shouldRestoreActive`；测试：+3（新会话不恢复 / 续跑恢复 / subagent+loop 不恢复）
+
+**测试：** 253/253（原 250 + 3）
+
 ## v1.16.12 — 2026-08-15（运行时状态动态块：safe-mode 状态告知 + localstore git 策略行为提示——利用系统提示词约束 agent 行为）
 
 **Scope:** 用户要求利用系统上下文注入（系统提示词层）约束 agent 行为：① safe-mode 开启后系统提示词告知已开启（行为约束）；② localstore 是否提交设定（gitTrack）决定敏感行为提示（deny=本地私有 / allow=进 git 但敏感数据只限该文件）。
