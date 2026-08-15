@@ -23,7 +23,7 @@ export const gitTool = defineTool({
   parameters: {
     action: { type: 'string', enum: [...GIT_ACTIONS], required: true, description: '子命令：status/commit/push/log/pull/diff' },
     message: { type: 'string', description: 'commit 消息（commit 必填）' },
-    count: { type: 'integer', description: 'log 条数（默认 10，max 100）' },
+    count: { type: 'integer', minimum: 1, maximum: 100, description: 'log 条数（默认 10，max 100）' },
     staged: { type: 'boolean', description: 'diff: 显示暂存区变更（--cached）' },
     ref: { type: 'string', description: 'diff: 对比 ref（如 HEAD~1 / main / origin/main）' },
     path: { type: 'string', description: 'diff: 限定路径（如 src/、package.json）' },

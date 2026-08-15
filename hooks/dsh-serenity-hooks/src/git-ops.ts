@@ -158,7 +158,8 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       throw new Error(`cc_git pull failed:\n${mergeResult.stderr}`)
     }
     case 'log': {
-      const n = args.count ?? 10
+      // 对齐 osp：-n 默认 10，max 100（运行时兜底 + schema minimum/maximum 双保险）
+      const n = Math.min(Math.max(args.count ?? 10, 1), 100)
       const r = git(root, ['-c', 'core.quotepath=false', 'log', '--oneline', '-n', String(n)])
       if (r.stderr) throw new Error(`git log 失败：${r.stderr.trim()}`)
       if (!r.stdout) return '(no commits)'
