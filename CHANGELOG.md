@@ -34,6 +34,8 @@
 - 协议 flag 缩小到参数首位（--list/--schema/--format=json），业务参数无损透传
 - **check 补全 DC-M1~M4**：M1 补 .spec.ts；M2 判定放宽（function main( / isMain / require.main / import.meta.url）；M3 双向（脚本未注册 + 引用缺失）；**M4 新增**（路径型 flag 未标 type:"path"）
 - list 加 header（plugin version + CCC + root）+ flags 展示；guide 补全（flag schema/守卫细化/env）
+- **exec 失败追加 --help TIP**（对齐 osp v0.5.38：exit≠0 且未传 --help 时 stderr 追加 TIP）
+- **新增 ccc-config action**（对齐 osp：CCC 配置参考——loop.defaultModel/sessionKeeper.threshold/localstore.gitTrack/hooks.autoRestoreSession/safeMode）
 
 ### loop（对齐 osp loop-runner 保险阀）
 - **补对话轮次上限 LOOP_MAX_ROUNDS=100**（osp round≥100 强制 done）；续跑/重启/guide/model 覆盖保留（dsp 增强）
