@@ -83,20 +83,41 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
     const agent = mkAgent(mkSession('s1', [ev('assistant/message', 3)]))
     expect(p.status(agent as never).promoted).toBe(true)
   })
+
+  it('requiredSignals=2：两轮锚定——第 2 条 assistant/message 才晋升（v4 多轮递进）', () => {
+    const p = createEpochPromotion(new Set(['assistant/message']), 2)
+    // 第一条锚定回复 → 未晋升
+    const session = mkSession('s1', [ev('assistant/message', 1)])
+    expect(p.status(mkAgent(session) as never).promoted).toBe(false)
+    // 第二条锚定回复 → 晋升
+    p.observe(session, ev('assistant/message', 2))
+    expect(p.status(mkAgent(session) as never).promoted).toBe(true)
+  })
+
+  it('requiredSignals=2：压缩后计数重置，需重新累计 2 条', () => {
+    const p = createEpochPromotion(new Set(['assistant/message']), 2)
+    const session = mkSession('s1', [ev('assistant/message', 1), ev('assistant/message', 2), ev('compaction/end', 5)])
+    expect(p.status(mkAgent(session) as never).promoted).toBe(false)
+    p.observe(session, ev('assistant/message', 6))
+    expect(p.status(mkAgent(session) as never).promoted).toBe(false)
+    p.observe(session, ev('assistant/message', 7))
+    expect(p.status(mkAgent(session) as never).promoted).toBe(true)
+  })
 })
 
 describe('bootstrap: resolveBootstrapSettings 配置解析', () => {
-  it('缺省值（含锚定问题）', () => {
+  it('缺省值（含锚定消息序列）', () => {
     const s = resolveBootstrapSettings({})
     expect(s.bootstrapTools).toEqual(DEFAULT_BOOTSTRAP_TOOLS)
     expect(s.promoteEvents.has('tool/call')).toBe(true)
     expect(s.promoteEvents.has('assistant/message')).toBe(true)
     expect([...s.suppressedSources]).toEqual(DEFAULT_SUPPRESSED_SOURCES)
     expect(s.compactionTools).toEqual(DEFAULT_COMPACTION_TOOLS)
-    expect(s.anchorMessage).toBe(DEFAULT_ANCHOR_MESSAGE)
+    expect(s.anchorMessages).toEqual([DEFAULT_ANCHOR_MESSAGE])
+    expect(s.requiredSignals).toBe(1)
   })
 
-  it('自定义值', () => {
+  it('自定义值（anchorMessage 单条兼容）', () => {
     const s = resolveBootstrapSettings({
       bootstrapTools: ['read', 'cc_fs'],
       promoteOn: 'tool-call',
@@ -107,7 +128,17 @@ describe('bootstrap: resolveBootstrapSettings 配置解析', () => {
     expect(s.bootstrapTools).toEqual(['read', 'cc_fs'])
     expect(s.promoteEvents.has('assistant/message')).toBe(false)
     expect(s.suppressedSources.size).toBe(0) // 空数组 = 关闭上下文过滤
-    expect(s.anchorMessage).toBe('自定义锚定问题')
+    expect(s.anchorMessages).toEqual(['自定义锚定问题'])
+  })
+
+  it('多轮递进锚定（anchorMessages 数组）：requiredSignals = 锚定轮数（zeroTools）', () => {
+    const two = ['第一轮：认知框架', '第二轮：工作协议']
+    const s = resolveBootstrapSettings({ zeroTools: true, anchorMessages: two })
+    expect(s.anchorMessages).toEqual(two)
+    expect(s.requiredSignals).toBe(2) // 两轮锚定：每条回复计一次，第 2 条回复后晋升
+    // 非 zeroTools：requiredSignals = 1（anchored 语义）
+    const anchored = resolveBootstrapSettings({ anchorMessages: two })
+    expect(anchored.requiredSignals).toBe(1)
   })
 
   it('非法 promoteOn 报错', () => {
@@ -116,6 +147,10 @@ describe('bootstrap: resolveBootstrapSettings 配置解析', () => {
 
   it('非法工具列表报错', () => {
     expect(() => resolveBootstrapSettings({ bootstrapTools: [] as never })).toThrow(/bootstrapTools/)
+  })
+
+  it('非法 anchorMessages 报错', () => {
+    expect(() => resolveBootstrapSettings({ anchorMessages: [] as never })).toThrow(/anchorMessages/)
   })
 
   it('zeroTools 变体：晋升信号仅 assistant/message（对齐 zero-anchored-standard）', () => {

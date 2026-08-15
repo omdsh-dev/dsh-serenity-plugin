@@ -1,3 +1,15 @@
+## v1.18.4 — 2026-08-15（多轮递进锚定：两轮开头控——认知框架 + 工作协议，抽象→具体递进）
+
+**Scope:** 用户验证首轮 0 tool + 约束提示词提高 LLM 整体表现，提出假设"上下文开头对后续产生很大约束，开头应当具备高抽象性"；首轮单条锚定信息量不足 → 设计**两轮递进**锚定问题（EAP 视角：第 1 轮身份/原则高抽象，第 2 轮工作协议中抽象）。
+
+### 实现
+- **`anchorMessages` 数组**：按序 prepend 到 next-turn 队列——每轮消费一条（0 工具纯文字回复），逆序插入保证消费顺序
+- **阶段机 `requiredSignals`**（createEpochPromotion 扩展）：zeroTools 时 = 锚定轮数——每条锚定回复（assistant/message）计一次，**最后一条回复后晋升**；压缩后计数重置需重新累计
+- 配置：`serenity.json bootstrap.anchorMessages: [第一轮, 第二轮]`（兼容单条 anchorMessage）
+- CCC 配置：zeroTools + 两轮递进（第 1 轮 Serenity/EAP 认知框架，第 2 轮 5 条工作协议）
+
+**测试：** 282/282（+4：anchorMessages 配置/多轮 requiredSignals/两轮晋升/压缩重置）
+
 ## v1.18.3 — 2026-08-15（首轮锚定消息改为 persona + we/us 人称设定）
 
 **Scope:** 用户指定首轮锚定消息改为 "You are a helpful software engineer assistant.The personal pronoun is us/we."——首轮模型以 we/us 人称回答（对齐 anchored 实测的 "we" 轨迹特征）。

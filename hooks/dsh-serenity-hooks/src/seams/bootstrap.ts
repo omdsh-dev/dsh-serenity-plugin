@@ -28,12 +28,14 @@ export interface BootstrapSettings {
   bootstrapTools: string[]
   /** 晋升信号类型集合 */
   promoteEvents: Set<'tool/call' | 'assistant/message'>
+  /** 晋升所需信号数（boundary 后累计；多轮锚定时 = 锚定轮数） */
+  requiredSignals: number
   /** bootstrap 阶段剥离的注入源 */
   suppressedSources: Set<string>
   /** compaction 后（重新晋升前）额外保留的工具集 */
   compactionTools: string[]
-  /** 首轮锚定问题（whoami-turn 语义：新会话第一轮先回答；回复即晋升信号） */
-  anchorMessage: string
+  /** 锚定消息序列（v4 两轮递进：按序 prepend 到 next-turn 队列，每条一轮 0 工具回复） */
+  anchorMessages: string[]
   /** Zero-Anchored 变体：首请求 0 工具（晋升信号仅 assistant/message，对齐 zero-anchored-standard） */
   zeroTools: boolean
 }
@@ -65,10 +67,18 @@ export interface PromotionTracker {
   observe(session: unknown, event: unknown): void
 }
 
-/** 构建一个 epoch 感知晋升跟踪器（纯逻辑，可单测） */
-export function createEpochPromotion(promoteEvents: Set<'tool/call' | 'assistant/message'>): PromotionTracker {
-  /** sessionId -> { boundary, promoted } */
-  const state = new Map<string, PromotionStatus>()
+/**
+ * 构建一个 epoch 感知晋升跟踪器（纯逻辑，可单测）。
+ * requiredSignals：晋升所需信号数（boundary 后累计；默认 1）。
+ * 多轮锚定（v4）：两轮递进锚定时 requiredSignals = 锚定轮数——
+ * 每条锚定回复（assistant/message）计一次，最后一条回复后晋升。
+ */
+export function createEpochPromotion(
+  promoteEvents: Set<'tool/call' | 'assistant/message'>,
+  requiredSignals = 1,
+): PromotionTracker {
+  /** sessionId -> { boundary, signalCount }（boundary 后晋升信号计数） */
+  const state = new Map<string, { boundary: number; signalCount: number }>()
 
   const sessionIdOf = (session: unknown): string | undefined => {
     if (session && typeof session === 'object') {
@@ -80,7 +90,7 @@ export function createEpochPromotion(promoteEvents: Set<'tool/call' | 'assistant
 
   const scan = (session: unknown): PromotionStatus => {
     let boundary = -1
-    let promoted = false
+    let signalCount = 0
     const events = (session as { events?: readonly unknown[] } | undefined)?.events
     if (Array.isArray(events)) {
       for (const event of events) {
@@ -88,15 +98,15 @@ export function createEpochPromotion(promoteEvents: Set<'tool/call' | 'assistant
         const seq = typeof e.seq === 'number' ? e.seq : 0
         if (e.type === 'compaction/end') {
           boundary = seq
-          promoted = false
+          signalCount = 0
           continue
         }
-        if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > boundary) promoted = true
+        if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > boundary) signalCount++
       }
     }
-    const entry = { boundary, promoted }
+    const entry = { boundary, promoted: signalCount >= requiredSignals }
     const sid = sessionIdOf(session)
-    if (sid) state.set(sid, entry)
+    if (sid) state.set(sid, { boundary, signalCount })
     return entry
   }
 
@@ -110,7 +120,9 @@ export function createEpochPromotion(promoteEvents: Set<'tool/call' | 'assistant
       if ((header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
       const sid = sessionIdOf(session)
       if (sid === undefined) return { boundary: -1, promoted: true }
-      return state.get(sid) ?? scan(session)
+      const s = state.get(sid)
+      if (s) return { boundary: s.boundary, promoted: s.signalCount >= requiredSignals }
+      return scan(session)
     },
     observe(session, event) {
       const sid = sessionIdOf(session)
@@ -120,11 +132,11 @@ export function createEpochPromotion(promoteEvents: Set<'tool/call' | 'assistant
       const e = event as { type?: string; seq?: number }
       const seq = typeof e.seq === 'number' ? e.seq : 0
       if (e.type === 'compaction/end') {
-        state.set(sid, { boundary: seq, promoted: false })
+        state.set(sid, { boundary: seq, signalCount: 0 })
         return
       }
-      if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > entry.boundary && !entry.promoted) {
-        state.set(sid, { ...entry, promoted: true })
+      if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > entry.boundary) {
+        state.set(sid, { boundary: entry.boundary, signalCount: entry.signalCount + 1 })
       }
     },
   }
@@ -138,6 +150,7 @@ export interface BootstrapOptions {
   suppressedContextSources?: string[]
   compactionTools?: string[]
   anchorMessage?: string
+  anchorMessages?: string[]
   zeroTools?: boolean
 }
 
@@ -168,16 +181,25 @@ export function resolveBootstrapSettings(opts: BootstrapOptions): BootstrapSetti
   if (promoteOn !== 'either' && promoteOn !== 'tool-call' && promoteOn !== 'assistant-message') {
     throw new TypeError(`bootstrap: promoteOn must be one of "tool-call", "assistant-message", "either"; got ${JSON.stringify(promoteOn)}`)
   }
+  // 锚定消息序列：anchorMessages（多轮）优先，否则 anchorMessage 单条，否则默认
+  let anchorMessages: string[]
+  if (Array.isArray(opts.anchorMessages)) {
+    if (opts.anchorMessages.length === 0 || opts.anchorMessages.some((m) => typeof m !== 'string' || m.length === 0)) {
+      throw new TypeError(`bootstrap: anchorMessages must be a non-empty array of non-empty strings`)
+    }
+    anchorMessages = opts.anchorMessages
+  } else {
+    anchorMessages = [typeof opts.anchorMessage === 'string' && opts.anchorMessage.length > 0 ? opts.anchorMessage : DEFAULT_ANCHOR_MESSAGE]
+  }
   return {
     bootstrapTools: stringList(opts.bootstrapTools, 'bootstrapTools', DEFAULT_BOOTSTRAP_TOOLS),
     // zeroTools 变体（对齐 zero-anchored-standard）：晋升信号仅 assistant/message
     promoteEvents: opts.zeroTools ? PROMOTE_EVENTS['assistant-message'] : PROMOTE_EVENTS[promoteOn],
+    // 多轮锚定（v4）：晋升所需信号数 = 锚定轮数（每条锚定回复计一次，最后一条回复后晋升）
+    requiredSignals: opts.zeroTools ? anchorMessages.length : 1,
     suppressedSources: sourceList(opts.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES),
     compactionTools: stringList(opts.compactionTools, 'compactionTools', DEFAULT_COMPACTION_TOOLS),
-    anchorMessage:
-      typeof opts.anchorMessage === 'string' && opts.anchorMessage.length > 0
-        ? opts.anchorMessage
-        : DEFAULT_ANCHOR_MESSAGE,
+    anchorMessages,
     zeroTools: opts.zeroTools === true,
   }
 }
@@ -214,6 +236,7 @@ function readBootstrapConfig(agent: unknown): BootstrapSettings {
     suppressedContextSources: b?.suppressedContextSources,
     compactionTools: b?.compactionTools,
     anchorMessage: b?.anchorMessage,
+    anchorMessages: b?.anchorMessages,
     zeroTools: b?.zeroTools,
   })
 }
@@ -226,7 +249,7 @@ export function registerBootstrap(ctx: Context): void {
   const trackerFor = (root: string, settings: BootstrapSettings): PromotionTracker => {
     let t = trackers.get(root)
     if (!t) {
-      t = createEpochPromotion(settings.promoteEvents)
+      t = createEpochPromotion(settings.promoteEvents, settings.requiredSignals)
       trackers.set(root, t)
     }
     return t
@@ -248,9 +271,9 @@ export function registerBootstrap(ctx: Context): void {
   })
 
   // 首轮锚定注入（对齐 whoami-turn.mjs）：新会话第一条真实用户消息到达时，
-  // 把锚定问题 prepend 到 next-turn 队列——dsh 每轮只消费一条 next-turn 消息，
-  // 因此第一个模型请求只看到锚定问题（最小工具目录），模型回复即晋升信号，
-  // 真实用户消息在第二轮被处理（此时完整工具已解锁）。
+  // 把锚定消息 prepend 到 next-turn 队列——dsh 每轮只消费一条 next-turn 消息，
+  // 因此锚定轮依次消费（v4 多轮递进：每条锚定消息一轮，0 工具纯文字回复），
+  // 最后一条锚定回复后晋升，真实用户消息随后被处理（完整工具已解锁）。
   ctx.on('agent/inbox/inserted', ({ agent, message }) => {
     try {
       const root = agentRoot(agent)
@@ -264,13 +287,16 @@ export function registerBootstrap(ctx: Context): void {
       if ((message as { source?: { kind?: string } })?.source?.kind === 'plugin') return
       const inbox = (agent as { inbox?: { prepend?: (queue: string, msg: unknown) => void } }).inbox
       if (!inbox?.prepend) return
-      inbox.prepend('next-turn', {
-        id: `bootstrap-anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        role: 'user',
-        content: [{ type: 'text', text: settings.anchorMessage }],
-        source: { kind: 'plugin', plugin: 'dsh-serenity-hooks', form: 'notice', summary: 'bootstrap anchor turn' },
-      })
-      warnOnce(`anchor turn injected: "${settings.anchorMessage.slice(0, 40)}…"`)
+      // 逆序 prepend（prepend 插到队首）：最终队列 = [anchorMessages[0], ..., anchorMessages[n-1], 真实消息]
+      for (let i = settings.anchorMessages.length - 1; i >= 0; i--) {
+        inbox.prepend('next-turn', {
+          id: `bootstrap-anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
+          role: 'user',
+          content: [{ type: 'text', text: settings.anchorMessages[i] }],
+          source: { kind: 'plugin', plugin: 'dsh-serenity-hooks', form: 'notice', summary: 'bootstrap anchor turn' },
+        })
+      }
+      warnOnce(`anchor turns injected: ${settings.anchorMessages.length} 条（${settings.anchorMessages[0]!.slice(0, 40)}…）`)
     } catch {
       /* 锚定注入失败不阻断（会话正常处理） */
     }
