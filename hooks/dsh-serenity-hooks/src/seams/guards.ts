@@ -52,7 +52,7 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     return { deny: `bash: 没有这个工具`, kind: 'deny' }
   }
 
-  // 2) 携带路径参数：先查越界，再查黑名单
+  // 2) 携带路径参数：先查越界（读写都拦——安全），再查治理文件/黑名单（仅写类工具，对齐 osp）
   if (pathArg !== undefined) {
     const abs = resolve(root, pathArg)
     // pathInside 前缀+sep 边界+跨盘安全（Windows 兼容：跨盘 relative 返回绝对路径原文，
@@ -60,18 +60,25 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     if (!pathInside(resolve(root), abs)) {
       return { deny: `path escape blocked: "${pathArg}" 越出 CCC 根`, kind: 'deny' }
     }
-    // 归一化反斜杠（Windows）：黑名单前缀匹配与治理文件保护用正斜杠 rel
-    // （relative 在 Windows 产出反斜杠，斜杠结尾规则 `.secrets/` 匹配不到 `.secrets\file`，
-    //   嵌套治理路径 `.serenity\child` 也不匹配，见 Windows 审计问题 9）
-    const rel = relative(root, abs).split('\\').join('/')
-    // CCC 治理文件永远拒绝写入（safe-mode 是用户能力，agent 不能自行开关/篡改）
-    if (rel === '.serenity-safe-on' || rel === '.serenity' || rel.startsWith('.serenity-safe-on/') || rel.startsWith('.serenity/')) {
-      return { deny: `CCC 治理文件 "${rel}" 保留给用户，agent 不可写`, kind: 'deny' }
-    }
-    const hit = matchBlacklist(rel, blacklist)
-    if (hit) {
-      // 对象条目支持自定义提示（对齐 osp：{ pattern, message } → message ?? 默认）
-      return { deny: hit.message ?? `blacklist blocked: "${pathArg}" 命中规则 "${hit.pattern}"`, kind: 'deny' }
+    // 读操作（read/glob/grep 等）不查黑名单/治理文件——对齐 osp（permission-guards 只在
+    // write/edit 时查黑名单）；否则 REPOSITORIES/ 这类"只读参考源"黑名单会误伤读操作
+    // （用户实测：读 REPOSITORIES/ 下 repo 被拦，见 v1.18.5）
+    const isWriteTool = toolName === 'write' || toolName === 'edit' || toolName === 'str_replace_editor'
+      || toolName === 'cc_fs' || toolName === 'bash' || toolName === 'append' || toolName === 'touch'
+    if (isWriteTool) {
+      // 归一化反斜杠（Windows）：黑名单前缀匹配与治理文件保护用正斜杠 rel
+      // （relative 在 Windows 产出反斜杠，斜杠结尾规则 `.secrets/` 匹配不到 `.secrets\file`，
+      //   嵌套治理路径 `.serenity\child` 也不匹配，见 Windows 审计问题 9）
+      const rel = relative(root, abs).split('\\').join('/')
+      // CCC 治理文件永远拒绝写入（safe-mode 是用户能力，agent 不能自行开关/篡改）
+      if (rel === '.serenity-safe-on' || rel === '.serenity' || rel.startsWith('.serenity-safe-on/') || rel.startsWith('.serenity/')) {
+        return { deny: `CCC 治理文件 "${rel}" 保留给用户，agent 不可写`, kind: 'deny' }
+      }
+      const hit = matchBlacklist(rel, blacklist)
+      if (hit) {
+        // 对象条目支持自定义提示（对齐 osp：{ pattern, message } → message ?? 默认）
+        return { deny: hit.message ?? `blacklist blocked: "${pathArg}" 命中规则 "${hit.pattern}"`, kind: 'deny' }
+      }
     }
   }
 

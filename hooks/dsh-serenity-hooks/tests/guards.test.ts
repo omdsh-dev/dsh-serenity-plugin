@@ -63,6 +63,20 @@ describe('guards: decideGuard 纯决策', () => {
     expect(d.deny).toContain('blacklist')
   })
 
+  it('读工具 + 黑名单路径 → allow（v1.18.5：黑名单只拦写，不误伤读——对齐 osp）', () => {
+    // read 读 REPOSITORIES/ 下 repo（只读参考源黑名单）不应被拦
+    const d = decideGuard(base({ toolName: 'read', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/some-repo/README.md' }))
+    expect(d.kind).toBe('allow')
+    // 写工具仍拦
+    const w = decideGuard(base({ toolName: 'write', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/some-repo/a.ts' }))
+    expect(w.kind).toBe('deny')
+  })
+
+  it('读工具 + 治理文件路径 → allow（治理保护只拦写）', () => {
+    expect(decideGuard(base({ toolName: 'read', pathArg: '.serenity' })).kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'write', pathArg: '.serenity' })).kind).toBe('deny')
+  })
+
   it('路径合法且不命中 → allow', () => {
     expect(decideGuard(base({ toolName: 'write', blacklist: rules('.secrets/'), pathArg: 'docs/a.md' })).kind).toBe('allow')
   })
