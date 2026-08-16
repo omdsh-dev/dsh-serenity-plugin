@@ -69,7 +69,8 @@ export class KeeperTracker {
 }
 
 export function reminderText(code: string, score: number): string {
-  return `[SESSION-KEEPER] 积分已达阈值 (${score})。请回应 [SESSION-KEEPER-recorded-${code}] 确认本轮进度已沉淀到工作会话（acc-session show），随后我清零积分。`
+  // v1.18.7：英文 + 不中断工作语气（用户要求）——无需停下，顺手回应即可
+  return `[SESSION-KEEPER] Score threshold reached (${score}). Please acknowledge with [SESSION-KEEPER-recorded-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
 }
 
 // ── DSH 注册 ──

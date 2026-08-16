@@ -1,3 +1,11 @@
+## v1.18.7 — 2026-08-15（SESSION-KEEPER 提示词：英文 + 不中断工作语气）
+
+**Scope:** 用户要求 SESSION-KEEPER 提醒文案：1) 使用英文；2) 要求"继续工作，无需中断，顺手回应即可"。
+
+### 修复
+- `keeper.ts reminderText`：中文 → 英文；语气改为不中断工作（"No need to interrupt your work — just acknowledge inline and keep going."），确认码 `[SESSION-KEEPER-recorded-{code}]` 保留
+- 测试：keeper 断言依赖确认码（不依赖语言）；284/284 全过
+
 ## v1.18.6 — 2026-08-15（workflow subagent 宁静号上下文注入 + 锚定生效）
 
 **Scope:** 用户报告 workflow 触发的 subagent 没有宁静号系统上下文注入，first anchor 也没生效。
