@@ -1,3 +1,12 @@
+## v1.18.6 — 2026-08-15（workflow subagent 宁静号上下文注入 + 锚定生效）
+
+**Scope:** 用户报告 workflow 触发的 subagent 没有宁静号系统上下文注入，first anchor 也没生效。
+
+### 修复
+- **系统上下文注入**：`system-prompt.ts agentCwd` 加回退——有 agent 但无 `header.cwd`（workflow subagent 等）回退 `process.cwd()`（对齐 context.ts）；无 agent 仍返回 undefined（不注入，保持原语义）
+- **锚定对子 agent 生效**：`bootstrap.ts` 锚定判定重构——根会话（delegationDepth 0）保持 fresh 判定（无历史 user/message，resume 不重锚）；**子 agent（workflow subagent 等）进程内只锚定一次**（`anchoredSessions` Set），不再因 delegationDepth > 0 排除
+- 测试：284/284 全过（system-prompt 无 agent → 空 语义保留）
+
 ## v1.18.5 — 2026-08-15（黑名单/治理文件保护只拦写操作——读操作不误伤，对齐 osp）
 
 **Scope:** 用户报告"读操作也被拦截了"——REPOSITORIES/ 下的 repo（天工开发流程只读参考源黑名单，对象条目自定义 message）连 **read** 都被拦。根因：dsp 的 `decideGuard` 对**所有带路径参数的工具**（含读）都检查黑名单/治理文件；而 osp 的 permission-guards 只在 `write/edit` 时查黑名单（读操作放行）。

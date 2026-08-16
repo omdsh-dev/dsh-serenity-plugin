@@ -245,6 +245,8 @@ export function registerBootstrap(ctx: Context): void {
   // 每 CCC root 一个 tracker（promoteEvents 按 root 配置：zeroTools 变体仅 assistant/message）
   const settingsByRoot = new Map<string, BootstrapSettings>()
   const trackers = new Map<string, PromotionTracker>()
+  /** 已锚定会话（进程内防重：子 agent 每会话只锚定一次） */
+  const anchoredSessions = new Set<string>()
 
   const trackerFor = (root: string, settings: BootstrapSettings): PromotionTracker => {
     let t = trackers.get(root)
@@ -279,10 +281,17 @@ export function registerBootstrap(ctx: Context): void {
       const root = agentRoot(agent)
       if (!root) return
       const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
-      // 只锚定 fresh 顶级会话（无历史 user/message；子 agent 不锚定）
-      const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; events?: readonly unknown[] } | undefined
-      if ((session?.header?.delegationDepth ?? 0) > 0) return
-      if (session?.events?.some((event) => (event as { type?: string }).type === 'user/message')) return
+      // 锚定判定（v1.18.6：workflow subagent 也锚定——用户要求）：
+      //   - 根会话（delegationDepth 0）：无历史 user/message 才锚定（resume 不重锚）
+      //   - 子 agent（workflow subagent 等）：进程内只锚定一次（anchoredSessions Set）
+      const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; events?: readonly unknown[]; id?: string } | undefined
+      const depth = session?.header?.delegationDepth ?? 0
+      const sid = typeof session?.id === 'string' ? session.id : undefined
+      if (depth === 0) {
+        if (session?.events?.some((event) => (event as { type?: string }).type === 'user/message')) return
+      } else {
+        if (sid !== undefined && anchoredSessions.has(sid)) return
+      }
       // 插件来源消息不递归锚定（含我们自己的锚定消息）
       if ((message as { source?: { kind?: string } })?.source?.kind === 'plugin') return
       const inbox = (agent as { inbox?: { prepend?: (queue: string, msg: unknown) => void } }).inbox
@@ -296,6 +305,7 @@ export function registerBootstrap(ctx: Context): void {
           source: { kind: 'plugin', plugin: 'dsh-serenity-hooks', form: 'notice', summary: 'bootstrap anchor turn' },
         })
       }
+      if (sid !== undefined) anchoredSessions.add(sid)
       warnOnce(`anchor turns injected: ${settings.anchorMessages.length} 条（${settings.anchorMessages[0]!.slice(0, 40)}…）`)
     } catch {
       /* 锚定注入失败不阻断（会话正常处理） */

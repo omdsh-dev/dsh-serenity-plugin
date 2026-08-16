@@ -319,9 +319,15 @@ export function codeModeAdaptationLine(ctx: Context, scope?: unknown): string {
   ].join('\n')
 }
 
-/** 从 assembly context 解析 agent cwd（subagent/后台 agent 同样带 agent） */
+/** 从 assembly context 解析 agent cwd（subagent/后台 agent 同样带 agent）；
+ *  无 agent → undefined（不注入）；有 agent 但无 header.cwd（workflow subagent 等）
+ *  回退 process.cwd()——对齐 context.ts，否则这些 agent 系统提示词注入为空
+ *  （v1.18.6：workflow subagent 无宁静号上下文 bug） */
 function agentCwd(context: AssembleContext): string | undefined {
-  return (context.agent?.session as { header?: { cwd?: string } } | undefined)?.header?.cwd
+  const agent = context.agent
+  if (!agent) return undefined
+  const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd
+  return cwd ?? process.cwd()
 }
 
 /** 从 assembly context 解析 dsh 会话 id（Session 块按会话隔离的 scope） */
