@@ -130,11 +130,14 @@ export function runGit(root: string, args: GitArgs): JsonValue {
         // fetch failure is not fatal — proceed with push
       }
       const { stdout, stderr } = git(root, ['push', 'origin', branch])
-      if (!stderr || stderr.includes('->') || stderr === '') {
-        return stdout || `Pushed to origin/${branch}`
-      }
+      // 先检查拒绝（v1.18.8）：git push 拒绝输出 `! [rejected] branch -> branch (non-fast-forward)`
+      // 含 `->`——旧逻辑先判 `stderr.includes('->')` 成功会把拒绝当成功（osp 同病，用户实测
+      // non-fast-forward exit 1 却返回 "Pushed to ..."，提交从未上远程）
       if (stderr.includes('non-fast-forward') || stderr.includes('rejected') || stderr.includes('[rejected]')) {
         return `[REJECTED] Push to origin/${branch} was rejected (non-fast-forward).\n\n远程有新的提交，本地落后。操作建议：\n  1. 先用 bash: git fetch origin ${branch}\n  2. 查看远程变更: git log HEAD..origin/${branch}\n  3. 合并或变基: git merge origin/${branch} 或 git rebase origin/${branch}\n  4. 有冲突则手动解决后: git add ... && git commit\n  5. 再次推送: cc_git push`
+      }
+      if (!stderr || stderr.includes('->') || stderr === '') {
+        return stdout || `Pushed to origin/${branch}`
       }
       throw new Error(`cc_git push failed:\n${stderr}`)
     }

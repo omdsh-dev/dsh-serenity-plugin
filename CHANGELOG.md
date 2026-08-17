@@ -1,3 +1,15 @@
+## v1.18.8 — 2026-08-16（cc_git push 拒绝误报成功修复——non-fast-forward 被当成功）
+
+**Scope:** 用户实测：`git push --dry-run` 真实拒绝（non-fast-forward，exit 1，本地 1 提交 vs 远程 17 提交分叉），但 cc_git push 返回 "Pushed to origin/serenity-18423"（声称成功无 [REJECTED]），提交从未上远程。
+
+### 根因
+`git-ops.ts push` 的成功判断 `stderr.includes('->')` 在拒绝检查**之前**——git push 拒绝输出 `! [rejected]  branch -> branch (non-fast-forward)` **含 `->`** → 拒绝被误判成功。该判断照抄 osp（osp 同病：cc-git-tool.ts 190 行同序）。
+
+### 修复
+- `git-ops.ts push`：**先检查拒绝**（non-fast-forward/rejected/[rejected]）→ 返回 [REJECTED] + 操作建议；再判成功（`->`）；其余抛错
+- 测试 +1：本地模拟远程分叉（bare repo + 双工作树）→ push 拒绝断言 [REJECTED] 且不含 "Pushed to"；285/285 全过
+- 附注：用户此前 cc_git log 看到本地提交是 remote-tracking ref 缓存旧值误导——fetch 前本地 refs/remotes 指向旧状态
+
 ## v1.18.7 — 2026-08-15（SESSION-KEEPER 提示词：英文 + 不中断工作语气）
 
 **Scope:** 用户要求 SESSION-KEEPER 提醒文案：1) 使用英文；2) 要求"继续工作，无需中断，顺手回应即可"。

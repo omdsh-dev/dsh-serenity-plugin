@@ -84,6 +84,44 @@ describe('git-ops', () => {
     expect(runGit(dir, { action: 'diff' })).toBe('(no diff)')
   })
 
+  it('push 拒绝（non-fast-forward）→ [REJECTED] 不误报成功（v1.18.8 回归）', () => {
+    // 远程 bare repo
+    const remote = join(dir, 'remote.git')
+    execFileSync('git', ['init', '-q', '--bare', remote], { cwd: dir })
+    // 工作树 A：commit + push 到远程
+    const workA = join(dir, 'workA')
+    mkdirSync(workA, { recursive: true })
+    for (const w of [workA]) {
+      execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: w })
+      execFileSync('git', ['config', 'user.email', 't@t'], { cwd: w })
+      execFileSync('git', ['config', 'user.name', 't'], { cwd: w })
+    }
+    writeFileSync(join(workA, 'f.txt'), 'a')
+    execFileSync('git', ['add', '-A'], { cwd: workA })
+    execFileSync('git', ['commit', '-m', 'a'], { cwd: workA })
+    execFileSync('git', ['remote', 'add', 'origin', remote], { cwd: workA })
+    execFileSync('git', ['push', '-u', 'origin', 'main'], { cwd: workA })
+    // 工作树 B：clone 远程（落后）
+    const workB = join(dir, 'workB')
+    execFileSync('git', ['clone', '-q', remote, workB], { cwd: dir })
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: workB })
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: workB })
+    // B 检出 main（bare HEAD 未指向 main → clone 后 detached，需显式 checkout）
+    execFileSync('git', ['checkout', '-b', 'main', 'origin/main'], { cwd: workB })
+    // A 再推新 commit（远程领先）
+    writeFileSync(join(workA, 'f.txt'), 'a2')
+    execFileSync('git', ['add', '-A'], { cwd: workA })
+    execFileSync('git', ['commit', '-m', 'a2'], { cwd: workA })
+    execFileSync('git', ['push', 'origin', 'main'], { cwd: workA })
+    // B 落后：新 commit 后 push → non-fast-forward 拒绝（v1.18.8 前误报 "Pushed to"）
+    writeFileSync(join(workB, 'g.txt'), 'b')
+    execFileSync('git', ['add', '-A'], { cwd: workB })
+    execFileSync('git', ['commit', '-m', 'b'], { cwd: workB })
+    const r = runGit(workB, { action: 'push' }) as string
+    expect(r).toContain('[REJECTED]')
+    expect(r).not.toContain('Pushed to')
+  })
+
   it('localstore git 联动：deny 且未 gitignore → commit 拒绝 + status warning', () => {
     // 模拟：localstore.json 已存在，但 .gitignore 未覆盖（用户手删了行）
     writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
