@@ -77,6 +77,34 @@ describe('guards: decideGuard 纯决策', () => {
     expect(decideGuard(base({ toolName: 'write', pathArg: '.serenity' })).kind).toBe('deny')
   })
 
+  it('cc_fs 只读子命令（exists/list/tree）→ 黑名单不拦（对齐 read 语义）', () => {
+    // 用户实测：cc_fs exists REPOSITORIES/arsenal 被误拦（v1.19.0 后修复）
+    const d = decideGuard(base({ toolName: 'cc_fs', action: 'exists', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' }))
+    expect(d.kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'cc_fs', action: 'list', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/' })).kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'cc_fs', action: 'tree', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'cc_fs', action: 'info', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
+  })
+
+  it('cc_fs 写子命令（mkdir/rm/mv/cp/touch/append）→ 黑名单仍拦', () => {
+    for (const action of ['mkdir', 'rm', 'mv', 'cp', 'touch', 'append']) {
+      const d = decideGuard(base({ toolName: 'cc_fs', action, blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal/x' }))
+      expect(d.kind).toBe('deny')
+      expect(d.deny).toContain('blacklist')
+    }
+  })
+
+  it('cc_fs 无 action（参数缺失）→ 不按写类拦截（保守 allow，越界仍拦）', () => {
+    expect(decideGuard(base({ toolName: 'cc_fs', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
+    // 越界检查不受影响
+    expect(decideGuard(base({ toolName: 'cc_fs', pathArg: '../escape' })).kind).toBe('deny')
+  })
+
+  it('cc_fs 治理文件保护：写子命令写 .serenity → deny；只读子命令 → allow', () => {
+    expect(decideGuard(base({ toolName: 'cc_fs', action: 'touch', pathArg: '.serenity' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'cc_fs', action: 'exists', pathArg: '.serenity' })).kind).toBe('allow')
+  })
+
   it('路径合法且不命中 → allow', () => {
     expect(decideGuard(base({ toolName: 'write', blacklist: rules('.secrets/'), pathArg: 'docs/a.md' })).kind).toBe('allow')
   })

@@ -30,6 +30,22 @@ export interface GuardInput {
   blacklist: BlacklistRule[]
   /** 工具参数中可能携带的路径（write/edit 等）；无则 undefined */
   pathArg?: string
+  /** cc_fs 等复合工具的子命令 action（只读子命令不查黑名单） */
+  action?: string
+}
+
+/** 写类工具名（黑名单/治理文件只拦这些；读工具只做路径越界检查——对齐 osp） */
+const WRITE_TOOLS = new Set(['write', 'edit', 'str_replace_editor', 'cc_fs', 'bash', 'append', 'touch'])
+
+/** cc_fs 的写类子命令（mkdir/rm/mv/cp/touch/append）；其余 9 子命令（root/resolve/exists/
+ *  list/tree/relative/reveal/info/find）为只读——只读子命令不查黑名单（同 read 语义） */
+const CC_FS_WRITE_ACTIONS = new Set(['mkdir', 'rm', 'mv', 'cp', 'touch', 'append'])
+
+/** 判定工具是否为写类：普通工具按名；cc_fs 复合工具按子命令 action */
+export function isWriteTool(toolName: string, action?: string): boolean {
+  if (!WRITE_TOOLS.has(toolName)) return false
+  if (toolName === 'cc_fs') return action !== undefined && CC_FS_WRITE_ACTIONS.has(action)
+  return true
 }
 
 export interface GuardDecisionResult {
@@ -44,7 +60,7 @@ export interface GuardDecisionResult {
  * 优先级：safe-mode bash > 路径越界 > 黑名单命中。
  */
 export function decideGuard(input: GuardInput): GuardDecisionResult {
-  const { root, toolName, safeModeOn, blacklist, pathArg } = input
+  const { root, toolName, safeModeOn, blacklist, pathArg, action } = input
 
   // 1) 安全模式：bash 一律禁用（标准语义）
   // 提示不泄露 safe-mode 机制（safe-mode 对 agent 不可见）：模型视角 = bash 工具不存在
@@ -62,10 +78,8 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     }
     // 读操作（read/glob/grep 等）不查黑名单/治理文件——对齐 osp（permission-guards 只在
     // write/edit 时查黑名单）；否则 REPOSITORIES/ 这类"只读参考源"黑名单会误伤读操作
-    // （用户实测：读 REPOSITORIES/ 下 repo 被拦，见 v1.18.5）
-    const isWriteTool = toolName === 'write' || toolName === 'edit' || toolName === 'str_replace_editor'
-      || toolName === 'cc_fs' || toolName === 'bash' || toolName === 'append' || toolName === 'touch'
-    if (isWriteTool) {
+    // （用户实测：读 REPOSITORIES/ 下 repo 被拦，见 v1.18.5；cc_fs 只读子命令同语义）
+    if (isWriteTool(toolName, action)) {
       // 归一化反斜杠（Windows）：黑名单前缀匹配与治理文件保护用正斜杠 rel
       // （relative 在 Windows 产出反斜杠，斜杠结尾规则 `.secrets/` 匹配不到 `.secrets\file`，
       //   嵌套治理路径 `.serenity\child` 也不匹配，见 Windows 审计问题 9）
@@ -170,16 +184,30 @@ export function syncSafeModeRestriction(agent: Agent, root: string): void {
   writeRestrictDiag(root)
 }
 
-/** 从 exec 参数中提取常见路径字段（write/edit 工具）；宽松读取 */
+/**
+ * 从 exec 参数中提取常见路径字段（write/edit 工具）；宽松读取。
+ * cc_fs 复合工具：path（单路径）/ paths（数组）/ src / dst——取第一个命中（越界检查
+ * 逐路径由 decideGuard 单 pathArg 覆盖；多路径字段取首个，避免漏检主体路径）。
+ */
 function extractPathArg(exec: ToolExecution): string | undefined {
   const args = exec.arguments
   if (args === null || typeof args !== 'object') return undefined
   const a = args as Record<string, unknown>
-  for (const key of ['path', 'file_path', 'target', 'dst']) {
+  for (const key of ['path', 'file_path', 'target', 'src', 'dst']) {
     const v = a[key]
     if (typeof v === 'string') return v
   }
+  const paths = a['paths']
+  if (Array.isArray(paths) && paths.length > 0 && typeof paths[0] === 'string') return paths[0]
   return undefined
+}
+
+/** 从 exec 参数提取 cc_fs 子命令 action；无则 undefined */
+function extractAction(exec: ToolExecution): string | undefined {
+  const args = exec.arguments
+  if (args === null || typeof args !== 'object') return undefined
+  const a = args as Record<string, unknown>
+  return typeof a.action === 'string' ? a.action : undefined
 }
 
 export interface GuardRegistration {
@@ -202,7 +230,8 @@ export function registerGuards(ctx: Context, opts: GuardRegistration = {}): void
     const safeModeOn = isSafeModeOn(root)
     const blacklist = readBlacklist(root, configPaths)
     const pathArg = extractPathArg(exec)
-    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg })
+    const action = extractAction(exec)
+    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg, action })
   }
 
   // 瀑布：deny 短路执行

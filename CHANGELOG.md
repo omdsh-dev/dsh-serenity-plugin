@@ -1,3 +1,14 @@
+## v1.19.1 — 2026-08-16（cc_fs 只读子命令误拦黑名单修复——复合工具按 action 判定读写）
+
+**Scope:** 用户实测 `cc_fs exists REPOSITORIES/arsenal`（只读）被 REPOSITORIES 只读参考源黑名单误拦。根因：`decideGuard` 的写类判定用**工具名**（cc_fs 整体 ∈ 写工具），但 cc_fs 是 15 子命令复合工具，只读子命令（root/resolve/exists/list/tree/relative/reveal/info/find）不该查黑名单。
+
+### 修复
+- `guards.ts`：新增 `WRITE_TOOLS` + `CC_FS_WRITE_ACTIONS` + `isWriteTool(toolName, action)`——普通工具按名判定；**cc_fs 按子命令 action**（mkdir/rm/mv/cp/touch/append 为写，其余 9 只读）
+- `GuardInput` 增 `action` 字段；`extractAction` 从 exec.arguments 提取；`evaluate` 透传
+- `extractPathArg` 扩展支持 cc_fs 的 src/dst/paths 数组字段（越界检查不漏主体路径）
+- 语义对齐 v1.18.5：黑名单/治理文件只拦写操作；越界检查读写都拦（安全底线不变）
+- 测试 +4：cc_fs 只读子命令放行 / 写子命令仍拦 / 无 action 保守 allow / 治理文件按 action 分流；287/287 全过
+
 ## v1.19.0 — 2026-08-16（heartbeat 机制彻底移除——无程序价值 + 产生 stray 文件）
 
 **Scope:** 用户发现 turn-heartbeat 机制产生带换行符文件名的 stray 文件（D-1），经评估该机制本身无程序价值，用户决策彻底移除。

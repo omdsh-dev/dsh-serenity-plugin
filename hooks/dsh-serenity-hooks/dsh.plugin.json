@@ -1,6 +1,6 @@
 {
   "id": "dsh-serenity-hooks",
-  "version": "1.19.0",
+  "version": "1.19.1",
   "main": "lib/index.js",
   "description": "宁静号 ACC harness（Native Cordis 插件）：真实 DSH 工具 cc_fs/session/acc_msm/eap/neat/cce/loop + 拦截缝机械约束（safe-mode/路径守卫）。适配 DSH 公开版（0.1.0-rc，deepseek-ai/deepseek-harness）。私有（dsh-external 组织）。",
   "engines": {
