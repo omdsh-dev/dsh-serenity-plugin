@@ -109,7 +109,6 @@ export interface SerenityConfig {
     injectAccContext?: boolean;
     enforceSafeMode?: boolean;
     sessionKeeper?: boolean;
-    turnFlush?: boolean;
     /** 重启自动恢复最近激活的宁静号会话（session-start 时，根会话且无自身标记 → 回退最近 use 的标记） */
     autoRestoreSession?: boolean;
   };

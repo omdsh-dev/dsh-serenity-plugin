@@ -35,7 +35,6 @@
         guards: false     # 关闭机械守卫（安全模式 bash 禁用/黑名单/路径逃逸）
         keeper: false     # 关闭 session-keeper DCP 计分提醒
         context: false    # 关闭 ACC 身份注入（session-start/prompt-submit）
-        turnFlush: false  # 关闭回合自动落盘（agent/turn-stopping）
         keeperThreshold: 150   # keeper 缺省阈值（CCC 的 serenity.json 优先）
 ```
 

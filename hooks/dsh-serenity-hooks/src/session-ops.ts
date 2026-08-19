@@ -17,7 +17,6 @@ import {
   readdirSync,
   readFileSync,
   writeFileSync,
-  appendFileSync,
   renameSync,
 } from 'node:fs'
 import { join, basename } from 'node:path'
@@ -730,16 +729,6 @@ export function qaCheck(root: string, key: string): string {
 }
 
 // ── 其他 ──
-
-/** 追加会话心跳（turn-stopping 机械落盘用） */
-export function appendHeartbeat(sessionMd: string): boolean {
-  try {
-    appendFileSync(sessionMd, `- ${new Date().toISOString()} — [auto] turn heartbeat (dsh-serenity-hooks)\n`, 'utf-8')
-    return true
-  } catch {
-    return false
-  }
-}
 
 // 兼容导出（部分调用方依赖旧签名）
 export type SessionInfo = SessionEntry

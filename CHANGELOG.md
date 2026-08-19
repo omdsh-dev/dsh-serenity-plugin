@@ -1,3 +1,22 @@
+## v1.19.0 — 2026-08-16（heartbeat 机制彻底移除——无程序价值 + 产生 stray 文件）
+
+**Scope:** 用户发现 turn-heartbeat 机制产生带换行符文件名的 stray 文件（D-1），经评估该机制本身无程序价值，用户决策彻底移除。
+
+### 根因（D-1 stray 文件）
+- turn-heartbeat 曾有版本把「路径 + 戳记内容」拼成完整文件路径传给 `writeFile`，文件系统按字面创建名为 `SESSION.md\n\n2026-08-19T…→ heartbeat` 的 stray 文件
+- **机制无价值**：`appendHeartbeat()` 写 SESSION.md 文件，而 health 的 stale/stalled/排序全用**会话目录** mtime（`statSync(dirPath).mtime`）→ append 不刷新目录 mtime → 对活性判定零影响；heartbeat 行无任何代码解析消费 → 纯噪声
+
+### 移除（不留死代码）
+- `src/seams/loop.ts`（registerTurnFlush + resolveActiveSession）**文件删除**
+- `session-ops.ts`：`appendHeartbeat` + `appendFileSync` import 删除
+- `index.ts`：`turnFlush` Config 字段/import/注册/apply 调用删除（**破坏性：Config 移除 turnFlush**，故 minor bump）
+- `ccc.ts`：`hooks.turnFlush` scheme 字段删除
+- 测试：register.test.ts（turnFlush 配置 + turn-stopping 断言）、session-ops.test.ts（心跳块删除；`resolveActiveSession`→`readActiveSessionMd`）
+- 文档：design.md（2.5 段标记已移除/表格/决策类型/里程碑）、PLUGIN-MANAGEMENT.md（turnFlush 行）
+- 保留 `readActiveSessionMd`（system-prompt.ts Session 块仍用）
+
+**测试：** 283/283（原 285，删 2 个心跳测试）→ typecheck ✓ / build ✓（lib 无 heartbeat 残留，seams/loop.js 产物消失）
+
 ## v1.18.8 — 2026-08-16（cc_git push 拒绝误报成功修复——non-fast-forward 被当成功）
 
 **Scope:** 用户实测：`git push --dry-run` 真实拒绝（non-fast-forward，exit 1，本地 1 提交 vs 远程 17 提交分叉），但 cc_git push 返回 "Pushed to origin/serenity-18423"（声称成功无 [REJECTED]），提交从未上远程。

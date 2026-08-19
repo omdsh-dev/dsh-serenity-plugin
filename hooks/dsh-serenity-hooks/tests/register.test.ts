@@ -48,7 +48,6 @@ function mockCtx() {
 const FULL_CONFIG: Config = {
   tools: true,
   guards: true,
-  turnFlush: true,
   serenityConfigPaths: [],
 }
 
@@ -77,24 +76,22 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('localstore')
   })
 
-  it('apply 订阅拦截缝：tools/pre-execute + guard + agent/turn-stopping', () => {
+  it('apply 订阅拦截缝：tools/pre-execute + guard', () => {
     const { ctx, on, guard } = mockCtx()
     apply(ctx, FULL_CONFIG)
     const events = on.mock.calls.map((c) => c[0] as string)
     expect(events).toContain('tools/pre-execute')
-    expect(events).toContain('agent/turn-stopping')
     expect(guard).toHaveBeenCalledTimes(1)
   })
 
   it('config 开关控制注册项', () => {
     const { ctx, register, on, guard } = mockCtx()
-    apply(ctx, { ...FULL_CONFIG, tools: false, guards: false, turnFlush: false })
+    apply(ctx, { ...FULL_CONFIG, tools: false, guards: false })
     expect(register).not.toHaveBeenCalled()
     expect(guard).not.toHaveBeenCalled()
     // bootstrap seam 无条件注册（直接默认开启，用户明确"不能关"）——全关时 on 仅含 bootstrap 事件
     const events = on.mock.calls.map((c) => c[0] as string)
     expect(events).not.toContain('tools/pre-execute')
-    expect(events).not.toContain('agent/turn-stopping')
     expect(events).toContain('session/event')
   })
 })

@@ -9,7 +9,6 @@
 | 缝 | 实现 | 版本 |
 |----|------|------|
 | `tools/pre-execute` + `ctx.tools.guard` | 安全模式/黑名单/路径逃逸（src/seams/guards.ts） | v1.0.0 |
-| `agent/turn-stopping` | 活动会话心跳落盘（src/seams/loop.ts） | v1.0.0 |
 | `tools/post-execute` | session-keeper DCP（src/seams/keeper.ts，observe-and-enrich） | v1.1.0 |
 | `agent/session-start` | ACC 身份播种（src/seams/context.ts） | v1.2.0 |
 | `agent/prompt-submit` | 首次进入 CCC 附加身份（src/seams/context.ts） | v1.2.0 |
@@ -144,13 +143,9 @@ ctx.on('tools/post-execute', async (exec, result): Promise<PostToolDecision> => 
 
 对应 opencode 插件的 session-keeper DCP 注入（tool.execute.after 提醒）。
 
-### 2.5 `agent/turn-stopping`（serial）→ 会话收尾强制落盘
+### 2.5 `agent/turn-stopping`（serial）→ 已移除（v1.19.0）
 
-```ts
-ctx.on('agent/turn-stopping', async (agent) => {
-  // 若当前回合有工作会话：把进度摘要追加到 AGENT_SESSIONS/<id>/SESSION.md（机械，不依赖模型自觉）
-})
-```
+> 原"会话收尾机械落盘 heartbeat"机制经评估无程序价值（写 SESSION.md 不刷新 health 使用的目录 mtime，且无解析消费者）且产生 stray 文件，已整体移除（`seams/loop.ts` 删除、`appendHeartbeat`/`turnFlush` 配置删除）。会话活性改由真实进度记录驱动。
 
 ### 2.6 `agent/session-start`（emit）→ Phase 2 访谈 / 上下文播种
 
@@ -168,7 +163,6 @@ ctx.on('agent/session-start', (agent, source) => {
 | pre-execute | `PreToolDecision` | `allow` / `deny`（跳过执行）/ `ask`（走 approval 缝） |
 | guard | `GuardDecision` | `deny` / `abstain`（**不能 allow**） |
 | post-execute | `PostToolDecision` | `accept` / `block`+feedback / 替换 content / 附加 context |
-| turn-stopping | 无返回（通知） | `agent.steer()` 请求续步 |
 
 **关键语义**：
 - context-only 监听器必须 `next()` 委托，否则短路后续策略（interception-seams 笔记明确警告）
@@ -189,8 +183,7 @@ ctx.on('agent/session-start', (agent, source) => {
     "enabled": true,
     "injectAccContext": true,                  // 2.1
     "enforceSafeMode": true,                   // 2.2/2.3
-    "sessionKeeper": true,                     // 2.1/2.4
-    "turnFlush": true                          // 2.5
+    "sessionKeeper": true                      // 2.1/2.4
   }
 }
 ```
@@ -205,7 +198,7 @@ ctx.on('agent/session-start', (agent, source) => {
 | 系统提示/身份注入 | acc-serenity（advisory） | prompt-submit 机械注入 |
 | 安全模式 | acc-safe-mode 协议 | pre-execute + guard 机械 enforce |
 | session-keeper | acc-session 纪律 | post-execute DCP 提醒 |
-| 会话落盘 | 模型自觉 | turn-stopping 机械 flush |
+| 会话落盘 | 模型自觉 | （真实进度记录；heartbeat 已移除） |
 
 ## 6. 集成路径（首选：免改源码）
 
@@ -229,7 +222,7 @@ ctx.on('agent/session-start', (agent, source) => {
 ## 8. 里程碑
 
 - M1（本次）：设计文档 + 加载可行性验证（config.yaml insert）✅
-- M2：独立包 `@shgroup/dsh-serenity-hooks` 骨架 + 最小实现（cc-fs/session 2 工具 + pre-execute 安全模式 + turn-stopping 落盘），config.yaml insert 加载实测
+- M2：独立包 `@shgroup/dsh-serenity-hooks` 骨架 + 最小实现（cc-fs/session 2 工具 + pre-execute 安全模式 + turn-stopping 落盘〔heartbeat 已于 v1.19.0 移除〕），config.yaml insert 加载实测
 - M3：全量工具（cc-git/msm/acc-kit 转真实工具）+ 全 seams + interception harness 测试
 - M4：技能层瘦身（保留 eap/neat/入口，工具技能模板退役）+ SQC 接入
 

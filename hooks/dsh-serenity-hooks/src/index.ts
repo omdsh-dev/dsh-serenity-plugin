@@ -5,8 +5,7 @@
  *
  * 能力：
  *   1. 真实 DSH 工具注册：cc_fs（文件系统 15 子命令，含 reveal）、session（会话全周期 7 子命令）
- *   2. 拦截缝机械约束：tools/pre-execute + ctx.tools.guard（安全模式/黑名单/路径守卫）、
- *      agent/turn-stopping（活动会话心跳落盘）
+ *   2. 拦截缝机械约束：tools/pre-execute + ctx.tools.guard（安全模式/黑名单/路径守卫）
  *
  * 加载：~/.dsh/config.yaml 加 insert 行（免改 DSH 源码），插件包装入 DSH node_modules。
  *
@@ -27,7 +26,6 @@ import { createLoopTool } from './tools/loop.js'
 import { localstoreTool } from './tools/localstore.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
-import { registerTurnFlush } from './seams/loop.js'
 import { registerKeeper } from './seams/keeper.js'
 import { registerContext } from './seams/context.js'
 import { registerEntrySkillSectionGlobal } from './seams/system-prompt.js'
@@ -50,8 +48,6 @@ export interface Config {
   tools?: boolean
   /** 注册拦截缝守卫 */
   guards?: boolean
-  /** 注册回合落盘 */
-  turnFlush?: boolean
   /** 注册 session-keeper DCP 提醒 */
   keeper?: boolean
   /** keeper 缺省阈值 */
@@ -74,7 +70,6 @@ export const Config: z<Config> = z.object({
   serenityConfigPaths: z.array(z.string()).default([...DEFAULT_SERENITY_CONFIG_PATHS]),
   tools: z.boolean().default(true),
   guards: z.boolean().default(true),
-  turnFlush: z.boolean().default(true),
   keeper: z.boolean().default(true),
   keeperThreshold: z.number().default(150),
   context: z.boolean().default(true),
@@ -100,9 +95,6 @@ export function apply(ctx: Context, config: Config): void {
   }
   if (config.guards) {
     registerGuards(ctx, { configPaths: config.serenityConfigPaths })
-  }
-  if (config.turnFlush) {
-    registerTurnFlush(ctx)
   }
   if (config.keeper) {
     registerKeeper(ctx, { configPaths: config.serenityConfigPaths, defaultThreshold: config.keeperThreshold })

@@ -12,7 +12,6 @@ import {
   healthCheck,
   summarize,
   qaCheck,
-  appendHeartbeat,
   readActiveSessionMd,
   getActiveSessionInfo,
   resetActiveSessionStore,
@@ -20,7 +19,6 @@ import {
   SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
 } from '../src/session-ops.js'
-import { resolveActiveSession } from '../src/seams/loop.js'
 
 /**
  * session-ops 单元测试（S136 对齐 osp spec）：
@@ -137,7 +135,7 @@ describe('session-ops: 生命周期（对齐 osp spec）', () => {
 })
 
 describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
-  it('use 写内存 Map（不落盘）：getActiveSessionInfo + readActiveSessionMd + resolveActiveSession 可读', () => {
+  it('use 写内存 Map（不落盘）：getActiveSessionInfo + readActiveSessionMd 可读', () => {
     const r = mk('active-use')
     const used = useSession(dir, 'S001')
     const md = join(r.sessionPath, 'SESSION.md')
@@ -148,7 +146,7 @@ describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
       sessionId: 'S001', dirName: used.dir, mdPath: md,
     })
     expect(readActiveSessionMd(dir)).toBe(md)
-    expect(resolveActiveSession(dir)).toBe(md)
+    expect(readActiveSessionMd(dir)).toBe(md)
   })
 
   it('use 返回 context 含 [SESSION CONTEXT] 标记 + todowrite 指令（events 恢复源）', () => {
@@ -164,9 +162,9 @@ describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
     const b = mk('scope-b')
     useSession(dir, 'S001', 'agent-A')
     useSession(dir, 'S002', 'agent-B')
-    expect(resolveActiveSession(dir, 'agent-A')).toBe(join(a.sessionPath, 'SESSION.md'))
-    expect(resolveActiveSession(dir, 'agent-B')).toBe(join(b.sessionPath, 'SESSION.md'))
-    expect(resolveActiveSession(dir)).toBeNull() // 默认 scope 未 use
+    expect(readActiveSessionMd(dir, 'agent-A')).toBe(join(a.sessionPath, 'SESSION.md'))
+    expect(readActiveSessionMd(dir, 'agent-B')).toBe(join(b.sessionPath, 'SESSION.md'))
+    expect(readActiveSessionMd(dir)).toBeNull() // 默认 scope 未 use
   })
 
   it('use 未找到会话抛错', () => {
@@ -180,12 +178,12 @@ describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
     useSession(dir, 'S002', 'agent-B')
     // 无 confirm → 拒绝
     expect(closeSession(dir, 'S001', false, 'agent-A')).toContain('requires explicit confirmation')
-    expect(resolveActiveSession(dir, 'agent-A')).not.toBeNull()
+    expect(readActiveSessionMd(dir, 'agent-A')).not.toBeNull()
     // confirm 后：标记完成 + 清 scope
     expect(closeSession(dir, 'S001', true, 'agent-A')).toContain('closed')
     expect(readFileSync(join(c.sessionPath, 'SESSION.md'), 'utf-8')).toContain('[x] 已完成')
-    expect(resolveActiveSession(dir, 'agent-A')).toBeNull()
-    expect(resolveActiveSession(dir, 'agent-B')).not.toBeNull()
+    expect(readActiveSessionMd(dir, 'agent-A')).toBeNull()
+    expect(readActiveSessionMd(dir, 'agent-B')).not.toBeNull()
     expect(existsSync(join(dir, '.dsh'))).toBe(false)
   })
 })
@@ -215,30 +213,5 @@ describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只�
   it('标记格式非法（目录名不符合 YYYY-MM-DD-- 前缀）→ 跳过', () => {
     const events = [{ data: { text: `${SESSION_CONTEXT_MARKER} not-a-session\nSESSION.md path: /tmp/x.md` } }]
     expect(parseSessionContextFromEvents(events)).toBeNull()
-  })
-})
-
-describe('loop: 活动会话心跳（内存读）', () => {
-  it('无激活返回 null；use 后追加心跳（默认 scope）', () => {
-    expect(resolveActiveSession(dir)).toBeNull()
-    const r = mk('active')
-    useSession(dir, 'S001')
-    expect(resolveActiveSession(dir)).toBe(join(r.sessionPath, 'SESSION.md'))
-    expect(appendHeartbeat(join(r.sessionPath, 'SESSION.md'))).toBe(true)
-    expect(readFileSync(join(r.sessionPath, 'SESSION.md'), 'utf-8')).toContain('heartbeat')
-  })
-
-  it('按 scope 隔离心跳：只写当前 dsh 会话的活跃会话', () => {
-    const a = mk('h-a')
-    const b = mk('h-b')
-    useSession(dir, 'S001', 'agent-A')
-    useSession(dir, 'S002', 'agent-B')
-    const mdA = join(a.sessionPath, 'SESSION.md')
-    const mdB = join(b.sessionPath, 'SESSION.md')
-    expect(resolveActiveSession(dir, 'agent-A')).toBe(mdA)
-    expect(resolveActiveSession(dir, 'agent-B')).toBe(mdB)
-    expect(appendHeartbeat(mdA)).toBe(true)
-    expect(readFileSync(mdA, 'utf-8')).toContain('heartbeat')
-    expect(readFileSync(mdB, 'utf-8')).not.toContain('heartbeat')
   })
 })
