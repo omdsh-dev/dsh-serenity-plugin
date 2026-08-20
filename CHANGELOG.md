@@ -1,3 +1,13 @@
+## v1.19.2 — 2026-08-20（loop agent 完整继承 DCP/anchored-standard 层——S140 修复）
+
+**Scope:** 用户实测 loop 子代理缺失 DCP/anchored-standard 层：无法调用 ACC 工具、无法继承循环协议与标准层约束。根因：loop agent 经 `ctx.agents.create` 直接创建（非 DSH delegation 路径），`delegationDepth` 为 0 且 `events` 为空，绕过 anchored 的 `delegationDepth>0 恒 promoted` 分支，落入 bootstrap 收窄路径；当前 CCC 配置 `zeroTools:true` → loop agent 拿到 `tools:[]`（0 工具）+ 2 条 whoami 锚定轮，实质瘫痪。
+
+### 修复
+- `seams/bootstrap.ts` `createEpochPromotion.status()`：新增 `session.id` 以 `loop-` 前缀 → 恒 `{boundary:-1, promoted:true}`（完整工具目录，无 anchor 轮）；沿用 `context.ts` `shouldAutoRestore` 既有的 `loop-` 前缀约定，保持一致性
+- `seams/bootstrap.ts` `agent/inbox/inserted`：对 `loop-` 会话跳过锚定注入（autonomous worker 不需要 whoami 锚定轮，避免浪费 2 轮 + 0 工具轮）；loop agent 已通过全局 `systemPrompt.section` 获得 ACC 5 块
+- 不改 `keeper.ts`：loop agent 工具复原后，`tools/post-execute` 自然按 CCC root 计分/提醒（DCP 生效）
+- 测试 +2（bootstrap.test.ts）：`loop-` 前缀恒 promoted / 含 compaction 事件仍恒 promoted；289/289 全过
+
 ## v1.19.1 — 2026-08-16（cc_fs 只读子命令误拦黑名单修复——复合工具按 action 判定读写）
 
 **Scope:** 用户实测 `cc_fs exists REPOSITORIES/arsenal`（只读）被 REPOSITORIES 只读参考源黑名单误拦。根因：`decideGuard` 的写类判定用**工具名**（cc_fs 整体 ∈ 写工具），但 cc_fs 是 15 子命令复合工具，只读子命令（root/resolve/exists/list/tree/relative/reveal/info/find）不该查黑名单。
