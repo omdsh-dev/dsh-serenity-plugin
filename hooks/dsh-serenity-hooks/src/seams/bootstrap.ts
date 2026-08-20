@@ -72,13 +72,22 @@ export interface PromotionTracker {
  * requiredSignals：晋升所需信号数（boundary 后累计；默认 1）。
  * 多轮锚定（v4）：两轮递进锚定时 requiredSignals = 锚定轮数——
  * 每条锚定回复（assistant/message）计一次，最后一条回复后晋升。
+ *
+ * maxRoundsFallback：**轮次兜底**（v1.19.3 修复 responses API 兼容）。
+ * 某些模型/协议（如 opencode-go-responses）的会话可能不产生标准
+ * `assistant/message` 晋升信号 → 永不晋升 → bootstrap 阶段工具被裁空
+ * （zeroTools 首请求 0 工具，ACC 工具不可见）。兜底：无论晋升信号是否
+ * 到达，观察到的模型回复轮数（assistant/message 事件计数，独立于
+ * promoteEvents）达到 maxRoundsFallback 即强制 promoted（开放完整工具）。
+ * 正常模型锚定轮数（requiredSignals）通常 ≤ 2 < 默认兜底 3，不受影响。
  */
 export function createEpochPromotion(
   promoteEvents: Set<'tool/call' | 'assistant/message'>,
   requiredSignals = 1,
+  maxRoundsFallback = 3,
 ): PromotionTracker {
-  /** sessionId -> { boundary, signalCount }（boundary 后晋升信号计数） */
-  const state = new Map<string, { boundary: number; signalCount: number }>()
+  /** sessionId -> { boundary, signalCount, rounds }（rounds = 兜底用回复轮计数） */
+  const state = new Map<string, { boundary: number; signalCount: number; rounds: number }>()
 
   const sessionIdOf = (session: unknown): string | undefined => {
     if (session && typeof session === 'object') {
@@ -88,9 +97,13 @@ export function createEpochPromotion(
     return undefined
   }
 
+  const promotedBy = (entry: { boundary: number; signalCount: number; rounds: number }): boolean =>
+    entry.signalCount >= requiredSignals || entry.rounds >= maxRoundsFallback
+
   const scan = (session: unknown): PromotionStatus => {
     let boundary = -1
     let signalCount = 0
+    let rounds = 0
     const events = (session as { events?: readonly unknown[] } | undefined)?.events
     if (Array.isArray(events)) {
       for (const event of events) {
@@ -99,15 +112,18 @@ export function createEpochPromotion(
         if (e.type === 'compaction/end') {
           boundary = seq
           signalCount = 0
+          rounds = 0
           continue
         }
         if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > boundary) signalCount++
+        // 兜底轮次计数：任何 assistant/message（含锚定回复）都算一轮（独立于 promoteEvents）
+        if (e.type === 'assistant/message' && seq > boundary) rounds++
       }
     }
-    const entry = { boundary, promoted: signalCount >= requiredSignals }
+    const entry = { boundary, signalCount, rounds }
     const sid = sessionIdOf(session)
-    if (sid) state.set(sid, { boundary, signalCount })
-    return entry
+    if (sid) state.set(sid, entry)
+    return { boundary, promoted: promotedBy(entry) }
   }
 
   return {
@@ -128,7 +144,7 @@ export function createEpochPromotion(
       const sid = sessionIdOf(session)
       if (sid === undefined) return { boundary: -1, promoted: true }
       const s = state.get(sid)
-      if (s) return { boundary: s.boundary, promoted: s.signalCount >= requiredSignals }
+      if (s) return { boundary: s.boundary, promoted: promotedBy(s) }
       return scan(session)
     },
     observe(session, event) {
@@ -139,12 +155,15 @@ export function createEpochPromotion(
       const e = event as { type?: string; seq?: number }
       const seq = typeof e.seq === 'number' ? e.seq : 0
       if (e.type === 'compaction/end') {
-        state.set(sid, { boundary: seq, signalCount: 0 })
+        state.set(sid, { boundary: seq, signalCount: 0, rounds: 0 })
         return
       }
       if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > entry.boundary) {
-        state.set(sid, { boundary: entry.boundary, signalCount: entry.signalCount + 1 })
+        entry.signalCount++
       }
+      // 兜底轮次计数（独立于 promoteEvents：responses API 等模型可能不发晋升信号）
+      if (e.type === 'assistant/message' && seq > entry.boundary) entry.rounds++
+      state.set(sid, entry)
     },
   }
 }

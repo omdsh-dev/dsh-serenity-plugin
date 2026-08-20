@@ -1,3 +1,14 @@
+## v1.19.3 — 2026-08-20（bootstrap 晋升轮次兜底——responses API 模型工具不可用修复）
+
+**Scope:** 用户实测 opencode-go-responses（responses API）模型下整套 ACC 工具不可见（模型工具列表为空）。根因：CCC 配置 `bootstrap.zeroTools:true` + 2 条锚定消息 → `requiredSignals=2` 且晋升信号仅监听 `assistant/message`；responses API 模型的会话不产生标准 `assistant/message` 晋升信号（或信号延迟/缺失）→ 永不晋升 → bootstrap 阶段工具被裁成 `tools:[]`（首请求 0 工具），ACC 工具（cc_fs/acc_msm 等）永不可见。
+
+### 修复
+- `seams/bootstrap.ts` `createEpochPromotion()`：新增第 3 参 `maxRoundsFallback`（默认 3）——**轮次兜底**：无论晋升信号是否到达，观察到的模型回复轮数（`assistant/message` 事件计数，独立于 `promoteEvents`）达阈值即强制 promoted（开放完整工具）
+- 正常模型不受影响：锚定轮数（requiredSignals ≤ 2）< 默认兜底 3，锚定完成后正常晋升
+- 防御性、通用：任何不发晋升信号的模型/协议（responses API 等）3 轮后自动解锁完整工具，不再永久卡 0 工具
+- compaction/end 后回落需重新计数（epoch 感知保持）
+- 测试 +4（bootstrap.test.ts）：兜底强制晋升 / scan 路径生效 / compaction 回落重计数 / resume 场景；292/292 全过
+
 ## v1.19.2 — 2026-08-20（loop agent 完整继承 DCP/anchored-standard 层——S140 修复）
 
 **Scope:** 用户实测 loop 子代理缺失 DCP/anchored-standard 层：无法调用 ACC 工具、无法继承循环协议与标准层约束。根因：loop agent 经 `ctx.agents.create` 直接创建（非 DSH delegation 路径），`delegationDepth` 为 0 且 `events` 为空，绕过 anchored 的 `delegationDepth>0 恒 promoted` 分支，落入 bootstrap 收窄路径；当前 CCC 配置 `zeroTools:true` → loop agent 拿到 `tools:[]`（0 工具）+ 2 条 whoami 锚定轮，实质瘫痪。
