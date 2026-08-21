@@ -109,38 +109,38 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
     expect(p.status(mkAgent(session) as never).promoted).toBe(true)
   })
 
-  it('轮次兜底：晋升信号缺失时，assistant/message 达 maxRoundsFallback（3）强制晋升（responses API 兼容）', () => {
+  it('轮次兜底：晋升信号缺失时，step/start 达 maxRoundsFallback（3）强制晋升（responses API 兼容）', () => {
     // 模拟 responses API 模型：promoteEvents 不含 assistant/message（如 tool-call 模式）
-    // 或信号永不到达——3 轮回复后必须解锁完整工具，不能永久卡 0 工具
+    // 或信号永不到达——3 步后必须解锁完整工具，不能永久卡 0 工具
     const p = createEpochPromotion(new Set(['tool/call']), 1, 3)
     const session = mkSession('s-resp', [])
     expect(p.status(mkAgent(session) as never).promoted).toBe(false)
-    // 第 1、2 轮 assistant/message → 仍未晋升（兜底未到）
-    p.observe(session, ev('assistant/message', 1))
+    // 第 1、2 步 step/start → 仍未晋升（兜底未到）
+    p.observe(session, ev('step/start', 1))
     expect(p.status(mkAgent(session) as never).promoted).toBe(false)
-    p.observe(session, ev('assistant/message', 2))
+    p.observe(session, ev('step/start', 2))
     expect(p.status(mkAgent(session) as never).promoted).toBe(false)
-    // 第 3 轮 assistant/message → 兜底强制晋升
-    p.observe(session, ev('assistant/message', 3))
+    // 第 3 步 step/start → 兜底强制晋升
+    p.observe(session, ev('step/start', 3))
     expect(p.status(mkAgent(session) as never).promoted).toBe(true)
   })
 
-  it('轮次兜底：scan 路径同样生效（resume 会话）', () => {
+  it('轮次兜底：scan 路径同样生效（resume 会话，step/start 计数）', () => {
     const p = createEpochPromotion(new Set(['tool/call']), 1, 3)
-    // 3 条 assistant/message（无 tool/call）→ scan 时即 promoted
-    const session = mkSession('s-resp-resume', [ev('assistant/message', 1), ev('assistant/message', 2), ev('assistant/message', 3)])
+    // 3 条 step/start（无 tool/call）→ scan 时即 promoted
+    const session = mkSession('s-resp-resume', [ev('step/start', 1), ev('step/start', 2), ev('step/start', 3)])
     expect(p.status(mkAgent(session) as never).promoted).toBe(true)
   })
 
   it('轮次兜底：compaction 后回落，需重新计数（epoch 感知）', () => {
     const p = createEpochPromotion(new Set(['tool/call']), 1, 3)
-    const session = mkSession('s-resp-epoch', [ev('assistant/message', 1), ev('assistant/message', 2), ev('assistant/message', 3), ev('compaction/end', 5)])
+    const session = mkSession('s-resp-epoch', [ev('step/start', 1), ev('step/start', 2), ev('step/start', 3), ev('compaction/end', 5)])
     expect(p.status(mkAgent(session) as never).promoted).toBe(false)
-    // 压缩后 3 轮 assistant/message → 重新兜底晋升
-    p.observe(session, ev('assistant/message', 6))
-    p.observe(session, ev('assistant/message', 7))
+    // 压缩后 3 步 step/start → 重新兜底晋升
+    p.observe(session, ev('step/start', 6))
+    p.observe(session, ev('step/start', 7))
     expect(p.status(mkAgent(session) as never).promoted).toBe(false)
-    p.observe(session, ev('assistant/message', 8))
+    p.observe(session, ev('step/start', 8))
     expect(p.status(mkAgent(session) as never).promoted).toBe(true)
   })
 

@@ -1,3 +1,12 @@
+## v1.19.4 — 2026-08-21（bootstrap 轮次兜底改用 step/start——responses API 晋升仍失效修复）
+
+**Scope:** v1.19.3 的轮次兜底数 `assistant/message` 事件，但 responses API（opencode-go-responses/muse-spark）下该事件在 assemble 时可能延迟/缺失 → 兜底计数失效 → 首轮锚定后仍不晋升 → 工具仍被裁空（用户实测 tiangong-serenity 会话 turn 4 仍无 ACC 工具）。
+
+### 修复
+- `seams/bootstrap.ts` `createEpochPromotion` 兜底计数：`assistant/message` → **`step/start`**（平台稳定事件，responses/completions 都触发；JSONL 实证存在）
+- 语义不变：首轮锚定（0 工具）→ 3 步后强制晋升（完整工具），对齐"首轮无工具，后续全面"设计
+- 测试更新 +3（step/start 兜底 / scan 路径 / compaction 回落）；292/292 全过
+
 ## v1.19.3 — 2026-08-20（bootstrap 晋升轮次兜底——responses API 模型工具不可用修复）
 
 **Scope:** 用户实测 opencode-go-responses（responses API）模型下整套 ACC 工具不可见（模型工具列表为空）。根因：CCC 配置 `bootstrap.zeroTools:true` + 2 条锚定消息 → `requiredSignals=2` 且晋升信号仅监听 `assistant/message`；responses API 模型的会话不产生标准 `assistant/message` 晋升信号（或信号延迟/缺失）→ 永不晋升 → bootstrap 阶段工具被裁成 `tools:[]`（首请求 0 工具），ACC 工具（cc_fs/acc_msm 等）永不可见。

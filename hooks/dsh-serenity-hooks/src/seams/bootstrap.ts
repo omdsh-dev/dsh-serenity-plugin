@@ -77,9 +77,10 @@ export interface PromotionTracker {
  * 某些模型/协议（如 opencode-go-responses）的会话可能不产生标准
  * `assistant/message` 晋升信号 → 永不晋升 → bootstrap 阶段工具被裁空
  * （zeroTools 首请求 0 工具，ACC 工具不可见）。兜底：无论晋升信号是否
- * 到达，观察到的模型回复轮数（assistant/message 事件计数，独立于
- * promoteEvents）达到 maxRoundsFallback 即强制 promoted（开放完整工具）。
- * 正常模型锚定轮数（requiredSignals）通常 ≤ 2 < 默认兜底 3，不受影响。
+ * 到达，观察到的模型 step 数（`step/start` 事件计数，平台稳定事件，
+ * responses/completions 都触发，独立于 promoteEvents）达到 maxRoundsFallback
+ * 即强制 promoted（开放完整工具）。正常模型锚定轮数（requiredSignals）
+ * 通常 ≤ 2 < 默认兜底 3，不受影响。
  */
 export function createEpochPromotion(
   promoteEvents: Set<'tool/call' | 'assistant/message'>,
@@ -116,8 +117,9 @@ export function createEpochPromotion(
           continue
         }
         if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > boundary) signalCount++
-        // 兜底轮次计数：任何 assistant/message（含锚定回复）都算一轮（独立于 promoteEvents）
-        if (e.type === 'assistant/message' && seq > boundary) rounds++
+        // 兜底轮次计数：用平台稳定事件 step/start（responses/completions 都触发；
+        // assistant/message 在 responses API 下可能延迟/缺失，导致兜底失效——v1.19.4 修复）
+        if (e.type === 'step/start' && seq > boundary) rounds++
       }
     }
     const entry = { boundary, signalCount, rounds }
@@ -161,8 +163,8 @@ export function createEpochPromotion(
       if (promoteEvents.has(e.type as 'tool/call' | 'assistant/message') && seq > entry.boundary) {
         entry.signalCount++
       }
-      // 兜底轮次计数（独立于 promoteEvents：responses API 等模型可能不发晋升信号）
-      if (e.type === 'assistant/message' && seq > entry.boundary) entry.rounds++
+      // 兜底轮次计数：step/start（平台稳定，responses/completions 都触发）
+      if (e.type === 'step/start' && seq > entry.boundary) entry.rounds++
       state.set(sid, entry)
     },
   }
