@@ -1,3 +1,18 @@
+## v1.19.9 — 2026-08-24（MSM 机制约束——原则 + 隐喻，S142）
+
+**Scope:** 用户要求补充笔墨约束 MSM 机制（存在的原则 + 对应隐喻）。隐喻域 THE SHIP 层 +2 条（The Machinery → MSM 确定性分层 / The Manifest → Single Source of Truth）；Principles 块 +MSM 原则段（确定性优先/单一真相源/注册才能行动）。
+
+### 变更
+- `seams/system-prompt.ts`：
+  - **metaphorBlock +2 条（重编号 10 条）**：`4. The Machinery → MSM (Mech & Semi-Mech)`（机械确定性 vs 舵手判断——Mech 零推理 / Semi-Mech 决策点；Verdict: 手搓已有机械 = 浪费船员）、`5. The Manifest → Single Source of Truth`（工具只有登记在 manifest 上才存在；唯一 manifest；MSM 自描述 --help/--schema；Verdict: 文档重复记载用法 = 两张矛盾海图）
+  - **principlesBlock +MSM 原则段**（Operational boundaries 之前）：Determinism first / Single source of truth / Registered to act
+- `docs/metaphor-domain.md`：隐喻表重编号 1-10 + 两条新映射；M-1 映射对象扩展至机制；变更历史
+- `tests/osp-alignment.test.ts`：metaphor 断言 8→10 条（+Machinery/Manifest +MSM/Single Source of Truth 映射 +Verdict×10）
+- `tests/system-prompt.test.ts`：Principles 断言 +MSM 原则段
+- home-serenity CCC：零变动
+
+**测试：** 全量通过（288 tests）→ typecheck ✓
+
 ## v1.19.8 — 2026-08-24（系统提示词结构精简——重建视角 R↓，S142）
 
 **Scope:** 用户要求层次精简 + 内容归位（重建视角 EAP R↓）：Principles 与 Constraints 合并（同属容器约束体系）、CCE 与 EAP 保持独立（维度不同）、Metaphor 提前（世界模型前置）。新增认知容器本体论（无错误只有认知不足）与 safe-mode 无人值守语义（用户设计思路）。**Constraints 不再作为独立对齐块（spec 修订：同步 osp compacting.ts——内容并入 Principles）**。

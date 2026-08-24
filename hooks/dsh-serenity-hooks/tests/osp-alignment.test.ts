@@ -219,7 +219,7 @@ describe('osp 对齐：ACC 块结构（工具清单平台化，文档化差异�
 })
 
 describe('dsp 扩展：Metaphor 块（v1.19.6 起，宁静号宇宙隐喻域——无 osp 对应）', () => {
-  it('metaphorBlock() 三层结构 + 全英文 8 条隐喻 + 映射标注 + Verdict 判据（v1.19.7 结构化）', () => {
+  it('metaphorBlock() 三层结构 + 全英文 10 条隐喻 + 映射标注 + Verdict 判据（v1.19.9：+MSM 两条）', () => {
     const block = metaphorBlock()
     expect(block).toContain('=== Serenity Metaphor ===')
     // 三层分组（v1.19.7 结构化）
@@ -228,11 +228,13 @@ describe('dsp 扩展：Metaphor 块（v1.19.6 起，宁静号宇宙隐喻域—�
     expect(block).toContain('THE CREW — multi-agent collaboration')
     // World 层呼应句（v1.19.8：认知容器本体论隐喻化）
     expect(block).toContain('The Sea has no mistakes — only waters you have not yet charted.')
-    // 8 条隐喻本体
+    // 10 条隐喻本体
     for (const name of [
       'The Hull',
       'Deck Order',
       'Engineering Drawings',
+      'The Machinery',
+      'The Manifest',
       'Harbor Inspection',
       'The Logbook',
       'The Ship of Theseus',
@@ -242,11 +244,11 @@ describe('dsp 扩展：Metaphor 块（v1.19.6 起，宁静号宇宙隐喻域—�
       expect(block).toContain(name)
     }
     // 每条含 → 约束映射（M-1）+ Verdict 判据（M-2）
-    expect(block.match(/→/g)?.length).toBe(8)
-    for (const constraint of ['Bounded Space', 'Entropy (H_op)', 'EAP', 'First Anchor', 'Session Tracking', 'Continuity', 'Multi-Agent Cognition', 'Reconstruction > Preservation']) {
+    expect(block.match(/→/g)?.length).toBe(10)
+    for (const constraint of ['Bounded Space', 'Entropy (H_op)', 'EAP', 'MSM (Mech & Semi-Mech)', 'Single Source of Truth', 'First Anchor', 'Session Tracking', 'Continuity', 'Multi-Agent Cognition', 'Reconstruction > Preservation']) {
       expect(block).toContain(constraint)
     }
-    expect(block.match(/Verdict:/g)?.length).toBe(8)
+    expect(block.match(/Verdict:/g)?.length).toBe(10)
     // 无中文（全英文）
     expect(block).not.toMatch(/[\u4e00-\u9fff]/)
   })

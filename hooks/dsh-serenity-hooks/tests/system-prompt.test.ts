@@ -99,11 +99,16 @@ describe('system-prompt: 结构注入（v1.19.8：ACC→Metaphor→Principles→
     expect(block).toContain('ΔH_org ≥ ΔH_in')
   })
 
-  it('Principles 块（v1.19.8 合并 Constraints）：本体论 + Root/文件/shell/subagent/session-first', () => {
+  it('Principles 块（v1.19.8 合并 Constraints）：本体论 + MSM 原则 + Root/文件/shell/subagent/session-first', () => {
     const block = principlesBlock(dir)
     // 认知容器本体论
     expect(block).toContain('Why a cognitive container')
     expect(block).toContain('contains no errors')
+    // MSM 原则（v1.19.9）
+    expect(block).toContain('MSM principles')
+    expect(block).toContain('Determinism first')
+    expect(block).toContain('Single source of truth')
+    expect(block).toContain('Registered to act')
     // 操作边界（原 Constraints 内容）
     expect(block).toContain(`Root: ${dir}`)
     expect(block).toContain('File access')
