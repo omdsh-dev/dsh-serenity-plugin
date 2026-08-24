@@ -2,12 +2,15 @@
  * system-prompt.ts — 顶层入口 skill 全文 + ACC/CCE/Constraints/Session 系统提示词注入
  *
  * **完全对齐 opencode-serenity-plugin 的 system.transform 注入内容**（compacting.ts）：
- * 5 块注入，顺序与文本与 osp 一致（仅工具清单换成本插件真实工具、版本号/CCC 名动态）：
- *   1. `=== Serenity ACC ===`        — ACC 身份 + CCC 名/Root + 内置工具清单
- *   2. `=== Serenity CCE ===`        — CCE 5 行为约束 + H_op 操作熵（逐字对齐 osp）
- *   3. `=== Serenity Constraints ===`— Root + 文件边界 + shell + subagent + session-first
- *   4. SKILL.md 全文                 — 该 CCC 顶层入口 skill 全量原文（不截断）
- *   5. `=== Serenity Session ===`    — 活跃会话（id + dirName + mdPath + todowrite 首位约定）
+ * 结构（v1.19.8 精简，S142 重建视角 R↓）：
+ *   1. `=== Serenity ACC ===`        — 身份（ACC/CCC 模型 + 工具清单）
+ *   2. `=== Serenity Metaphor ===`   — 世界模型（三层隐喻域：船/航行/船员）
+ *   3. `=== Serenity Principles ===` — 信念/边界（认知容器本体论 + 操作边界，v1.19.8 合并原 Constraints）
+ *   4. `=== Serenity CCE ===`        — 时间约束（5 行为约束 + H_op，逐字对齐 osp）
+ *   5. `=== Serenity EAP ===`        — 质量（E↑ R↓ S↑ 自检）
+ *   6. 状态块（条件）                — Safe Mode / Localstore
+ *   7. SKILL.md 全文                 — 该 CCC 顶层入口 skill 全量原文（不截断）
+ *   8. `=== Serenity Session ===`    — 活跃会话（id + dirName + mdPath + todowrite 首位约定）
  *
  * 注册：**全局** ctx `systemPrompt.section`（对齐 plan-mode 官方惯例），text 回调按
  * `context.agent` 的 cwd 动态解析 CCC 根 → 返回完整注入文本；非 CCC/无 agent 返回空。
@@ -122,11 +125,24 @@ export function cceBlock(): string {
   ].join('\n')
 }
 
-/** 3) Constraints 块：逐字对齐 osp（Root + 文件边界 + shell + subagent + session-first） */
-export function constraintsBlock(root: string): string {
+/**
+ * Principles 块（v1.19.8 合并，S142）：认知容器本体论（why）+ 操作边界（operational
+ * boundaries）。原独立 Principles 与 Constraints 合并——同属容器约束体系，先原则
+ * 后边界（从抽象到具体，重建视角 R↓）。**注意：Constraints 不再作为独立对齐块存在
+ * （spec 修订：同步 osp compacting.ts——Constraints 内容并入本块，工具名仍为平台真实名）。**
+ */
+export function principlesBlock(root: string): string {
   return [
     '',
-    '=== Serenity Constraints ===',
+    '=== Serenity Principles ===',
+    'Why a cognitive container: all work is cognition — every artifact, decision,',
+    'and line of code is a product of thought; and from cognition, any work can',
+    'be built. In this frame, the world contains no errors — only insufficient',
+    'cognition. A setback is a gap to be filled (read, ask, research), not a',
+    'fault to be hidden. Never disguise or excuse what you do not know;',
+    'not-knowing is a state to be repaired, and reporting it is the first repair.',
+    '',
+    'Operational boundaries:',
     `Root: ${root}`,
     '  • File access — read/edit/write/grep/glob are confined to Root; paths outside Root are rejected (RR5)',
     '  • Shell — use acc_msm by default. Note: bash may be disabled',
@@ -169,7 +185,7 @@ export function metaphorBlock(): string {
     'violation. The universe is structured in three layers — the Ship (the',
     'container itself), the Voyage (the cognitive lifecycle), the Crew',
     '(multi-agent collaboration); every metaphor maps to one protocol',
-    'constraint.',
+    'constraint. The Sea has no mistakes — only waters you have not yet charted.',
     '',
     'THE SHIP — the container itself',
     '',
@@ -219,9 +235,11 @@ export function metaphorBlock(): string {
 }
 
 /**
- * 运行时状态块 1) safe-mode（S134 v1.16.12）：ON 时告知 agent（行为约束；机制仍由 guards 强制）。
- * 文案与实现逐项对应（guards.ts）：bash 禁用（restrict deny + decideGuard）、
- * 黑名单路径拦截、CCC 治理文件保护；write/edit 等其余工具保留（受路径逃逸/黑名单约束）。
+ * 运行时状态块 1) safe-mode（S134 v1.16.12）：ON 时告知 agent。
+ * v1.19.8 结构重排（S142 用户设计思路）：语义（为什么——无人值守自由）→
+ * 机制（什么被禁用）→ 约束（不可做什么）。文案与实现逐项对应（guards.ts）：
+ * bash 禁用（restrict deny + decideGuard）、黑名单路径拦截、CCC 治理文件保护；
+ * write/edit 等其余工具保留（受路径逃逸/黑名单约束）。
  */
 export function safeModeBlock(root: string): string {
   if (!isSafeModeOn(root)) return ''
@@ -233,13 +251,21 @@ export function safeModeBlock(root: string): string {
   return [
     '',
     '=== Serenity Safe Mode ===',
-    'Safe mode is ON (enabled by the user): bash is disabled (hidden and blocked);',
-    'blacklist rules apply to file paths; CCC governance files (.serenity,',
-    '.serenity-safe-on) are protected from agent writes. Other read/write tools',
-    'remain available, subject to path-escape and blacklist guards.',
+    'Safe mode is ON (enabled by the user). It makes the vessel unattended-capable —',
+    'the hull holds its course without a watch on deck: you may work with fuller',
+    'freedom, pushing work forward autonomously without pausing for approval at',
+    'every step. The guards are not chains; they are the ballast that lets you',
+    'sail unaccompanied.',
+    '',
+    'Operational details:',
+    '- bash is disabled (hidden and blocked)',
+    '- blacklist rules apply to file paths',
+    '- CCC governance files (.serenity, .serenity-safe-on) are protected from agent writes',
+    '- other read/write tools remain available, subject to path-escape and blacklist guards',
+    blacklistNote,
+    '',
     'Behavior constraints: do not attempt to bypass restrictions; do not write to',
     'blacklisted paths or governance files.',
-    blacklistNote,
     '',
   ].join('\n')
 }
@@ -333,19 +359,24 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
   ].join('\n')
 }
 
-/** 完整系统提示词注入文本：ACC + CCE + Constraints + EAP + SKILL 全文 + Session（osp 顺序 + EAP 扩展） */
+/**
+ * 完整系统提示词注入文本（v1.19.8 结构精简，S142 重建视角 R↓）：
+ * 身份（ACC）→ 世界模型（Metaphor）→ 信念/边界（Principles）→ 时间约束（CCE）
+ * → 质量（EAP）→ 状态（SafeMode/Localstore）→ CCC 上下文（SKILL）→ 会话（Session）。
+ * 认知展开顺序：我是谁 → 我所在的世界 → 为什么 → 如何一致 → 产物标准 → 当前状态 → 上下文。
+ */
 export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSION_SCOPE): string {
   const parts = [
     accBlock(root),
+    metaphorBlock(),
+    principlesBlock(root),
     cceBlock(),
-    constraintsBlock(root),
+    eapBlock(),
   ]
   // S134 v1.16.12：运行时状态动态块（safe-mode / localstore）——利用系统提示词约束 agent 行为；
   // 按当前状态条件生成（开关/策略变更每轮装配即时生效）
   const state = [safeModeBlock(root), localstoreBlock(root)].filter((b) => b !== '').join('\n')
   if (state) parts.push(state)
-  parts.push(eapBlock())
-  parts.push(metaphorBlock())
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
   const session = sessionBlock(root, scope)

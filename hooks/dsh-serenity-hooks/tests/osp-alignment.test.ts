@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os'
 import {
   accBlock,
   cceBlock,
-  constraintsBlock,
+  principlesBlock,
   sessionBlock,
   entrySkillSectionText,
   metaphorBlock,
@@ -92,18 +92,6 @@ const OSP_CCE = [
   '',
 ].join('\n')
 
-/** osp Constraints 块模板（${root} 占位；工具名为 osp 平台名 msm_exec） */
-const OSP_CONSTRAINTS = (root: string) => [
-  '',
-  '=== Serenity Constraints ===',
-  `Root: ${root}`,
-  '  • File access — read/edit/write/grep/glob are confined to Root; paths outside Root are rejected (RR5)',
-  '  • Shell — use msm_exec by default. Note: bash may be disabled',
-  '  • Subagent — copies ALL parent constraints: file boundary, shell rules, session rules (no bypass)',
-  '  • Session-first — before starting multi-step work, propose an existing or new AGENT_SESSIONS entry; wait for user "use" or "使用" to confirm',
-  '',
-].join('\n')
-
 /** osp Session 块模板（DSH 适配版：todowrite 首项无 priority——DSH 平台 schema 不支持，v1.17.2） */
 const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   '',
@@ -142,13 +130,22 @@ describe('osp 对齐：CCE 块逐字节一致', () => {
   })
 })
 
-describe('osp 对齐：Constraints 块（唯一例外 = 平台工具名）', () => {
-  it('constraintsBlock() 与 osp 参照一致（仅 msm_exec → acc_msm 平台替换）', () => {
-    const dsh = constraintsBlock(dir)
-    const ospExpected = OSP_CONSTRAINTS(dir).replace('use msm_exec', 'use acc_msm')
-    expect(dsh).toBe(ospExpected)
-    // 同时证明：除工具名外无任何其他差异
-    expect(dsh.replace('acc_msm', 'msm_exec')).toBe(OSP_CONSTRAINTS(dir))
+describe('dsp 扩展：Principles 块（v1.19.8 合并原 Constraints——spec 修订：Constraints 不再独立对齐）', () => {
+  it('principlesBlock() 含认知容器本体论 + Operational boundaries（Root/文件/shell/subagent/session-first）', () => {
+    const block = principlesBlock(dir)
+    // 本体论（认知容器：无错误只有认知不足）
+    expect(block).toContain('=== Serenity Principles ===')
+    expect(block).toContain('Why a cognitive container')
+    expect(block).toContain('all work is cognition')
+    expect(block).toContain('contains no errors')
+    expect(block).toContain('not-knowing is a state to be repaired')
+    // 操作边界（原 Constraints 内容，工具名为平台真实名 acc_msm）
+    expect(block).toContain('Operational boundaries:')
+    expect(block).toContain(`Root: ${dir}`)
+    expect(block).toContain('File access')
+    expect(block).toContain('use acc_msm')
+    expect(block).toContain('Subagent')
+    expect(block).toContain('Session-first')
   })
 })
 
@@ -180,7 +177,7 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
     expect(text).toBe('---\nname: tg-serenity\ndescription: 系统入口\n---\n顶层入口原文内容')
   })
 
-  it('serenitySystemPrompt() 块序 ACC→CCE→Constraints→EAP→Metaphor→SKILL→Session，无 --- 分隔线', () => {
+  it('serenitySystemPrompt() 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL→Session，无 --- 分隔线（v1.19.8）', () => {
     setupCccWithSkill('tg-serenity')
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
     mkdirSync(join(dir, 'AGENT_SESSIONS', dirName), { recursive: true })
@@ -189,18 +186,18 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
 
     const text = serenitySystemPrompt(dir, 'test-scope')
     const accIdx = text.indexOf('=== Serenity ACC ===')
-    const cceIdx = text.indexOf('=== Serenity CCE ===')
-    const conIdx = text.indexOf('=== Serenity Constraints ===')
-    const eapIdx = text.indexOf('=== Serenity EAP ===')
     const metaIdx = text.indexOf('=== Serenity Metaphor ===')
+    const priIdx = text.indexOf('=== Serenity Principles ===')
+    const cceIdx = text.indexOf('=== Serenity CCE ===')
+    const eapIdx = text.indexOf('=== Serenity EAP ===')
     const skillIdx = text.indexOf('顶层入口原文内容')
     const sesIdx = text.indexOf('=== Serenity Session ===')
     expect(accIdx).toBeGreaterThanOrEqual(0)
-    expect(cceIdx).toBeGreaterThan(accIdx)
-    expect(conIdx).toBeGreaterThan(cceIdx)
-    expect(eapIdx).toBeGreaterThan(conIdx)
-    expect(metaIdx).toBeGreaterThan(eapIdx)
-    expect(skillIdx).toBeGreaterThan(metaIdx)
+    expect(metaIdx).toBeGreaterThan(accIdx)
+    expect(priIdx).toBeGreaterThan(metaIdx)
+    expect(cceIdx).toBeGreaterThan(priIdx)
+    expect(eapIdx).toBeGreaterThan(cceIdx)
+    expect(skillIdx).toBeGreaterThan(eapIdx)
     expect(sesIdx).toBeGreaterThan(skillIdx)
     expect(text).not.toContain('---\n\n')
     expect(text).not.toContain('# CCC 入口技能')
@@ -229,6 +226,8 @@ describe('dsp 扩展：Metaphor 块（v1.19.6 起，宁静号宇宙隐喻域—�
     expect(block).toContain('THE SHIP — the container itself')
     expect(block).toContain('THE VOYAGE — the cognitive lifecycle')
     expect(block).toContain('THE CREW — multi-agent collaboration')
+    // World 层呼应句（v1.19.8：认知容器本体论隐喻化）
+    expect(block).toContain('The Sea has no mistakes — only waters you have not yet charted.')
     // 8 条隐喻本体
     for (const name of [
       'The Hull',

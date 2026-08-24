@@ -1,3 +1,20 @@
+## v1.19.8 — 2026-08-24（系统提示词结构精简——重建视角 R↓，S142）
+
+**Scope:** 用户要求层次精简 + 内容归位（重建视角 EAP R↓）：Principles 与 Constraints 合并（同属容器约束体系）、CCE 与 EAP 保持独立（维度不同）、Metaphor 提前（世界模型前置）。新增认知容器本体论（无错误只有认知不足）与 safe-mode 无人值守语义（用户设计思路）。**Constraints 不再作为独立对齐块（spec 修订：同步 osp compacting.ts——内容并入 Principles）**。
+
+### 变更
+- `seams/system-prompt.ts`：
+  - **Principles 块（v1.19.8 合并）**：`constraintsBlock()` 删除 → `principlesBlock(root)`（认知容器本体论 "all work is cognition / no errors — only insufficient cognition / not-knowing is a state to be repaired" + Operational boundaries 段 = 原 Constraints 内容）
+  - **装配重排**：ACC → **Metaphor**（提前：世界模型前置）→ Principles → CCE → EAP → 状态块 → SKILL → Session
+  - **Metaphor 块 World 层呼应句**：`The Sea has no mistakes — only waters you have not yet charted.`（本体论隐喻化）
+  - **Safe Mode 块重排**：语义（why——无人值守自由 "the guards are not chains; they are the ballast"）→ 机制（Operational details：bash/blacklist/governance）→ 约束（Behavior constraints）
+  - CCE 与 EAP 保持独立（决策：时间一致性 vs 产物质量维度不同，不合并）
+- `tests/osp-alignment.test.ts`：OSP_CONSTRAINTS 参照删除；Constraints 对齐断言 → Principles 断言（本体论 + 边界）；块序断言重排；metaphor 断言加呼应句
+- `tests/system-prompt.test.ts`：Constraints 断言 → Principles；块序/装配顺序断言重排；safeModeBlock 断言适配新结构
+- home-serenity CCC：零变动
+
+**测试：** 全量通过（288 tests）→ typecheck ✓
+
 ## v1.19.7 — 2026-08-24（Metaphor 块三层结构化——隐喻域构成 EAP 抽象结构，S142）
 
 **Scope:** 用户要求隐喻本身构成 EAP 抽象结构（隐喻之间存在关系），供后续具体 CCC 按顶层隐喻约束做隐喻改造。方案 B：注入文本完整呈现三层骨架（THE SHIP / THE VOYAGE / THE CREW）+ 每条隐喻 `→ 约束名` 映射标注（M-1）+ Verdict 判据（M-2）。结构约束 M-1~M-4 文档化（docs/metaphor-domain.md）。

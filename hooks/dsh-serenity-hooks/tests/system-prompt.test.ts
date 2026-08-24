@@ -8,7 +8,7 @@ import {
   serenitySystemPrompt,
   accBlock,
   cceBlock,
-  constraintsBlock,
+  principlesBlock,
   eapBlock,
   safeModeBlock,
   localstoreBlock,
@@ -59,14 +59,18 @@ describe('system-prompt: 入口 skill 发现（.serenity 记号 = 顶层入口�
   })
 })
 
-describe('system-prompt: 5 块注入（对齐 opencode-serenity-plugin system.transform）', () => {
-  it('serenitySystemPrompt 含 ACC/CCE/Constraints/SKILL 全文四块', () => {
+describe('system-prompt: 结构注入（v1.19.8：ACC→Metaphor→Principles→CCE→EAP→SKILL）', () => {
+  it('serenitySystemPrompt 含 ACC/Metaphor/Principles/CCE/EAP/SKILL 全文', () => {
     setupCccWithSkill('tg-serenity')
     const text = serenitySystemPrompt(dir)
     expect(text).toContain('=== Serenity ACC ===')
+    expect(text).toContain('=== Serenity Metaphor ===')
+    expect(text).toContain('=== Serenity Principles ===')
     expect(text).toContain('=== Serenity CCE ===')
-    expect(text).toContain('=== Serenity Constraints ===')
+    expect(text).toContain('=== Serenity EAP ===')
     expect(text).toContain('顶层入口原文内容')
+    // v1.19.8：独立 Constraints 块已并入 Principles（不再单独存在）
+    expect(text).not.toContain('=== Serenity Constraints ===')
   })
 
   it('ACC 块：CCC 名/版本/工具清单 + 平台工具说明（Root 边界归 Constraints 块，v1.19.6 去重）', () => {
@@ -95,8 +99,12 @@ describe('system-prompt: 5 块注入（对齐 opencode-serenity-plugin system.tr
     expect(block).toContain('ΔH_org ≥ ΔH_in')
   })
 
-  it('Constraints 块：Root + 文件/shell/subagent/session-first', () => {
-    const block = constraintsBlock(dir)
+  it('Principles 块（v1.19.8 合并 Constraints）：本体论 + Root/文件/shell/subagent/session-first', () => {
+    const block = principlesBlock(dir)
+    // 认知容器本体论
+    expect(block).toContain('Why a cognitive container')
+    expect(block).toContain('contains no errors')
+    // 操作边界（原 Constraints 内容）
     expect(block).toContain(`Root: ${dir}`)
     expect(block).toContain('File access')
     expect(block).toContain('Shell')
@@ -157,18 +165,20 @@ describe('system-prompt: EAP 块（S131 P1-6 扩展）', () => {
     expect(block).toContain('S↑ 稳定')
   })
 
-  it('serenitySystemPrompt 块序 ACC→CCE→Constraints→EAP→SKILL→Session', () => {
+  it('serenitySystemPrompt 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL（v1.19.8）', () => {
     setupCccWithSkill('tg-serenity')
     const text = serenitySystemPrompt(dir)
     const acc = text.indexOf('=== Serenity ACC ===')
+    const meta = text.indexOf('=== Serenity Metaphor ===')
+    const pri = text.indexOf('=== Serenity Principles ===')
     const cce = text.indexOf('=== Serenity CCE ===')
-    const con = text.indexOf('=== Serenity Constraints ===')
     const eap = text.indexOf('=== Serenity EAP ===')
     const skill = text.indexOf('顶层入口原文内容')
     expect(acc).toBeGreaterThanOrEqual(0)
-    expect(acc).toBeLessThan(cce)
-    expect(cce).toBeLessThan(con)
-    expect(con).toBeLessThan(eap)
+    expect(acc).toBeLessThan(meta)
+    expect(meta).toBeLessThan(pri)
+    expect(pri).toBeLessThan(cce)
+    expect(cce).toBeLessThan(eap)
     expect(eap).toBeLessThan(skill)
   })
 })
@@ -209,8 +219,8 @@ describe('system-prompt: 运行时状态动态块（S134 v1.16.12）', () => {
     expect(b).toContain('blacklist rules apply')
     expect(b).toContain('governance files')
     expect(b).toContain('do not attempt to bypass')
-    // write/edit 保留的表述（与 guards.ts SAFE_MODE_DENY_TOOLS 只含 bash 一致）
-    expect(b).toContain('Other read/write tools')
+    // write/edit 保留的表述（与 guards.ts SAFE_MODE_DENY_TOOLS 只含 bash 一致；v1.19.8 重排为 Operational details）
+    expect(b).toContain('other read/write tools remain available')
     expect(b).toContain('remain available')
   })
 
@@ -243,12 +253,11 @@ describe('system-prompt: 运行时状态动态块（S134 v1.16.12）', () => {
     expect(b).toContain('never leak them into other files')
   })
 
-  it('serenitySystemPrompt 装配顺序：Constraints → 状态块 → EAP（ON + localstore 时）', () => {
+  it('serenitySystemPrompt 装配顺序：EAP → 状态块（ON + localstore 时）→ SKILL（v1.19.8）', () => {
     writeFileSync(join(dir, '.serenity-safe-on'), 'now')
     writeFileSync(join(dir, 'localstore.json'), '{"credentials":{"K":"v"}}\n')
     const text = serenitySystemPrompt(dir)
-    expect(text.indexOf('=== Serenity Constraints ===')).toBeLessThan(text.indexOf('=== Serenity Safe Mode ==='))
+    expect(text.indexOf('=== Serenity EAP ===')).toBeLessThan(text.indexOf('=== Serenity Safe Mode ==='))
     expect(text.indexOf('=== Serenity Safe Mode ===')).toBeLessThan(text.indexOf('=== Serenity Localstore ==='))
-    expect(text.indexOf('=== Serenity Localstore ===')).toBeLessThan(text.indexOf('=== Serenity EAP ==='))
   })
 })
