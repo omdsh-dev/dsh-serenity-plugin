@@ -1,3 +1,15 @@
+## v1.19.7 — 2026-08-24（Metaphor 块三层结构化——隐喻域构成 EAP 抽象结构，S142）
+
+**Scope:** 用户要求隐喻本身构成 EAP 抽象结构（隐喻之间存在关系），供后续具体 CCC 按顶层隐喻约束做隐喻改造。方案 B：注入文本完整呈现三层骨架（THE SHIP / THE VOYAGE / THE CREW）+ 每条隐喻 `→ 约束名` 映射标注（M-1）+ Verdict 判据（M-2）。结构约束 M-1~M-4 文档化（docs/metaphor-domain.md）。
+
+### 变更
+- `seams/system-prompt.ts`：`metaphorBlock()` 文本重构——头部 3 行说明三层结构；8 条隐喻按 SHIP（Hull/Deck/Drawings）→ VOYAGE（Harbor/Logbook/Theseus）→ CREW（Rotation/Blueprint）分组；每条标题带 `→ 约束映射`（Bounded Space / Entropy (H_op) / EAP / First Anchor / Session Tracking / Continuity / Multi-Agent Cognition / Reconstruction > Preservation）
+- `tests/osp-alignment.test.ts`：metaphor 断言升级——三层分组标题 + 8 条本体 + `→` ×8 + 约束名 ×8 + Verdict ×8 + 无中文
+- 新增 `docs/metaphor-domain.md`：三层骨架 + 三种显式关系（containment/mapping/sequence）+ 结构约束 M-1~M-4（CCC 隐喻改造模板）
+- home-serenity CCC：零变动
+
+**测试：** 全量通过（288 tests）→ typecheck ✓
+
 ## v1.19.6 — 2026-08-24（系统提示词去冗余 + Metaphor 强化块——S142 用户设计）
 
 **Scope:** 用户以 EAP 原则审查系统提示词注入：去除重复真相源（EAP 定义两处、Root 两处），新增"宁静号宇宙"隐喻块（全英文 8 条，隐喻 = 记忆钩子 + 行为判据）增强约束力与表达力。CCC 零变动；破坏 CCE 块与 osp 的逐字节对齐（D2）——**验证顺利后修订 specs（同步 osp compacting.ts）**。

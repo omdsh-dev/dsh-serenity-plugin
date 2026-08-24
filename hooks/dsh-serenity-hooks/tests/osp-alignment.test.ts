@@ -221,23 +221,32 @@ describe('osp 对齐：ACC 块结构（工具清单平台化，文档化差异�
   })
 })
 
-describe('dsp 扩展：Metaphor 块（v1.19.6，宁静号宇宙隐喻域——无 osp 对应）', () => {
-  it('metaphorBlock() 全英文 8 条隐喻 + 判据（Verdict）', () => {
+describe('dsp 扩展：Metaphor 块（v1.19.6 起，宁静号宇宙隐喻域——无 osp 对应）', () => {
+  it('metaphorBlock() 三层结构 + 全英文 8 条隐喻 + 映射标注 + Verdict 判据（v1.19.7 结构化）', () => {
     const block = metaphorBlock()
     expect(block).toContain('=== Serenity Metaphor ===')
-    for (const i of [1, 2, 3, 4, 5, 6, 7, 8]) {
-      expect(block).toContain(`${i}. `)
-    }
+    // 三层分组（v1.19.7 结构化）
+    expect(block).toContain('THE SHIP — the container itself')
+    expect(block).toContain('THE VOYAGE — the cognitive lifecycle')
+    expect(block).toContain('THE CREW — multi-agent collaboration')
     // 8 条隐喻本体
-    expect(block).toContain('The Hull')
-    expect(block).toContain('The Logbook')
-    expect(block).toContain('The Ship of Theseus')
-    expect(block).toContain('Deck Order')
-    expect(block).toContain('Blueprint over Statue')
-    expect(block).toContain('Crew Rotation')
-    expect(block).toContain('Harbor Inspection')
-    expect(block).toContain('Engineering Drawings')
-    // 每条含行为判据
+    for (const name of [
+      'The Hull',
+      'Deck Order',
+      'Engineering Drawings',
+      'Harbor Inspection',
+      'The Logbook',
+      'The Ship of Theseus',
+      'Crew Rotation',
+      'Blueprint over Statue',
+    ]) {
+      expect(block).toContain(name)
+    }
+    // 每条含 → 约束映射（M-1）+ Verdict 判据（M-2）
+    expect(block.match(/→/g)?.length).toBe(8)
+    for (const constraint of ['Bounded Space', 'Entropy (H_op)', 'EAP', 'First Anchor', 'Session Tracking', 'Continuity', 'Multi-Agent Cognition', 'Reconstruction > Preservation']) {
+      expect(block).toContain(constraint)
+    }
     expect(block.match(/Verdict:/g)?.length).toBe(8)
     // 无中文（全英文）
     expect(block).not.toMatch(/[\u4e00-\u9fff]/)
