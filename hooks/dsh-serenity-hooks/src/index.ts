@@ -117,6 +117,7 @@ export function apply(ctx: Context, config: Config): void {
     registerOpencodeSkills(ctx)
   }
   // Anchored Standard 两阶段工具目录（S137，移植 xiaobright/dsh-anchored-standard）：
-  // 直接默认开启（用户明确"不能关"）——CCC 的 serenity.json bootstrap 段仅调参数
+  // 协议固有（S142 用户原则：任何 CCC 抽象层都是宁静号/ACC）——默认开启不可关、
+  // 零配置面，锚定消息与机制参数全部代码固化（旧 serenity.json bootstrap 段 v1.19.5 起忽略）
   registerBootstrap(ctx)
 }

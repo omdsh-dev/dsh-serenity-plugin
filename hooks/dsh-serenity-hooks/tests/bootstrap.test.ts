@@ -5,7 +5,7 @@ import {
   DEFAULT_BOOTSTRAP_TOOLS,
   DEFAULT_SUPPRESSED_SOURCES,
   DEFAULT_COMPACTION_TOOLS,
-  DEFAULT_ANCHOR_MESSAGE,
+  DEFAULT_ANCHOR_MESSAGES,
 } from '../src/seams/bootstrap.js'
 
 /** 构造最小 agent（子 agent 模拟） */
@@ -155,62 +155,29 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
   })
 })
 
-describe('bootstrap: resolveBootstrapSettings 配置解析', () => {
-  it('缺省值（含锚定消息序列）', () => {
-    const s = resolveBootstrapSettings({})
+describe('bootstrap: resolveBootstrapSettings 协议固有默认值（零配置面，S142）', () => {
+  it('无参返回唯一固化设置：zeroTools + 两条协议锚定消息', () => {
+    const s = resolveBootstrapSettings()
     expect(s.bootstrapTools).toEqual(DEFAULT_BOOTSTRAP_TOOLS)
-    expect(s.promoteEvents.has('tool/call')).toBe(true)
     expect(s.promoteEvents.has('assistant/message')).toBe(true)
+    expect(s.promoteEvents.has('tool/call')).toBe(false) // zeroTools 变体：仅 assistant/message
     expect([...s.suppressedSources]).toEqual(DEFAULT_SUPPRESSED_SOURCES)
     expect(s.compactionTools).toEqual(DEFAULT_COMPACTION_TOOLS)
-    expect(s.anchorMessages).toEqual([DEFAULT_ANCHOR_MESSAGE])
-    expect(s.requiredSignals).toBe(1)
-  })
-
-  it('自定义值（anchorMessage 单条兼容）', () => {
-    const s = resolveBootstrapSettings({
-      bootstrapTools: ['read', 'cc_fs'],
-      promoteOn: 'tool-call',
-      suppressedContextSources: [],
-      compactionTools: ['read'],
-      anchorMessage: '自定义锚定问题',
-    })
-    expect(s.bootstrapTools).toEqual(['read', 'cc_fs'])
-    expect(s.promoteEvents.has('assistant/message')).toBe(false)
-    expect(s.suppressedSources.size).toBe(0) // 空数组 = 关闭上下文过滤
-    expect(s.anchorMessages).toEqual(['自定义锚定问题'])
-  })
-
-  it('多轮递进锚定（anchorMessages 数组）：requiredSignals = 锚定轮数（zeroTools）', () => {
-    const two = ['第一轮：认知框架', '第二轮：工作协议']
-    const s = resolveBootstrapSettings({ zeroTools: true, anchorMessages: two })
-    expect(s.anchorMessages).toEqual(two)
+    expect(s.anchorMessages).toEqual(DEFAULT_ANCHOR_MESSAGES)
+    expect(s.anchorMessages).toHaveLength(2)
     expect(s.requiredSignals).toBe(2) // 两轮锚定：每条回复计一次，第 2 条回复后晋升
-    // 非 zeroTools：requiredSignals = 1（anchored 语义）
-    const anchored = resolveBootstrapSettings({ anchorMessages: two })
-    expect(anchored.requiredSignals).toBe(1)
-  })
-
-  it('非法 promoteOn 报错', () => {
-    expect(() => resolveBootstrapSettings({ promoteOn: 'bogus' as never })).toThrow(/promoteOn/)
-  })
-
-  it('非法工具列表报错', () => {
-    expect(() => resolveBootstrapSettings({ bootstrapTools: [] as never })).toThrow(/bootstrapTools/)
-  })
-
-  it('非法 anchorMessages 报错', () => {
-    expect(() => resolveBootstrapSettings({ anchorMessages: [] as never })).toThrow(/anchorMessages/)
-  })
-
-  it('zeroTools 变体：晋升信号仅 assistant/message（对齐 zero-anchored-standard）', () => {
-    const s = resolveBootstrapSettings({ zeroTools: true })
     expect(s.zeroTools).toBe(true)
-    expect(s.promoteEvents.has('assistant/message')).toBe(true)
-    expect(s.promoteEvents.has('tool/call')).toBe(false)
-    // 缺省 false（anchored 变体：either）
-    const normal = resolveBootstrapSettings({})
-    expect(normal.zeroTools).toBe(false)
-    expect(normal.promoteEvents.has('tool/call')).toBe(true)
+  })
+
+  it('协议锚定消息内容不可配置：含 ACC 身份 + acknowledge 要求（S142 用户确认固化）', () => {
+    const [first, second] = DEFAULT_ANCHOR_MESSAGES
+    expect(first).toContain('Abstract Cognitive Container (ACC) protocol')
+    expect(first).toContain('Explicit Abstraction Principle')
+    expect(first).toContain('The personal pronoun is us/we.')
+    expect(first).toContain('We anchor first, then act: the abstract layer precedes the concrete.')
+    expect(first).toContain('Please simply reply "acknowledge" — no action needed.')
+    expect(second).toContain('Before we proceed, align on how we work')
+    expect(second).toContain('SESSION.md')
+    expect(second).toContain('Please simply reply "acknowledge" — no action needed.')
   })
 })

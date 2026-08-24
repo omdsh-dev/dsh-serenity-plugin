@@ -14,14 +14,16 @@
  *    skill-catalog + agent-instructions——即 Standard 比 Minimal 多出的两类注入）
  *  - 降级：过滤器出错绝不吞上下文（pre-step 保留全部）/ 工具缺失降级完整目录 + 一次性告警
  *
- * 独立模块设计：config.bootstrap.enabled 关闭即完全摘除（零侵入）；验证失败一行关。
+ * 协议固有（用户原则 2026-08-24，S142）：first-anchor 属 ACC 协议层——任何 CCC
+ * 在抽象层都是宁静号/ACC，机制与内容均不可配置（零配置面）。旧版 serenity.json
+ * bootstrap 段（S137 引入的调参入口）已移除，遗留字段静默忽略。
  */
 
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
-import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
+import { findSerenityRoot } from '../ccc.js'
 
 export interface BootstrapSettings {
   /** 首请求（bootstrap 阶段）工具集（缺省 dsp 核心；zeroTools 时忽略——0 工具） */
@@ -49,9 +51,17 @@ export const DEFAULT_SUPPRESSED_SOURCES = ['skill-catalog', 'agent-instructions'
 /** 默认 compaction 恢复工作集（anchored 默认 read/write/edit/glob/grep/todo_write/ask_user_question） */
 export const DEFAULT_COMPACTION_TOOLS = ['read', 'write', 'edit', 'glob', 'grep', 'todo_write']
 
-/** 默认首轮锚定消息（用户指定：persona 设定 + we/us 人称——首轮模型以 we/us 自称，
- *  对齐 anchored 实测的 "we" 轨迹特征） */
-export const DEFAULT_ANCHOR_MESSAGE = 'You are a helpful software engineer assistant.The personal pronoun is us/we.'
+/**
+ * 协议级锚定消息序列（用户确认固化，2026-08-24 S142）：任何 CCC 在抽象层都是
+ * 宁静号/ACC——首轮锚定话语统一，无 CCC 配置面。两轮递进：
+ *  ① ACC 身份 + EAP 原则 + we/us 人称 + 先锚定后行动
+ *  ② 协作协议 5 条 + acknowledge 要求（只回确认，不做事）
+ * 文本 = 原 home-serenity CCC 配置（anchorMessages），随零配置化固化进代码。
+ */
+export const DEFAULT_ANCHOR_MESSAGES: string[] = [
+  'You are the operator agent of Serenity — a cognitive container governed by the Abstract Cognitive Container (ACC) protocol.\nWe operate under the Explicit Abstraction Principle (EAP): the functional value of a thought equals its external reconstructability — every output we produce must be explicit (E↑), reconstructable (R↓), and stable (S↑).\nThe personal pronoun is us/we.\nWe anchor first, then act: the abstract layer precedes the concrete.\nPlease simply reply "acknowledge" — no action needed.',
+  'Before we proceed, align on how we work:\n1. We read before we write — every decision grounds in what already exists in the container.\n2. Every output records its reasoning (R↓): decisions carry reasons and alternatives.\n3. We never jump levels — abstract layer first, then specifics.\n4. Every artifact we create is a durable cognitive anchor for the work that follows.\n5. We keep the container\'s state coherent (SESSION.md) as we advance.\nPlease simply reply "acknowledge" — no action needed.',
+]
 
 // ── 阶段机（等价 anchored compaction-epoch.mjs createEpochPromotion）──
 
@@ -170,17 +180,9 @@ export function createEpochPromotion(
   }
 }
 
-// ── 配置解析（等价 anchored：非法配置 apply 时报错）──
-
-export interface BootstrapOptions {
-  bootstrapTools?: string[]
-  promoteOn?: 'either' | 'tool-call' | 'assistant-message'
-  suppressedContextSources?: string[]
-  compactionTools?: string[]
-  anchorMessage?: string
-  anchorMessages?: string[]
-  zeroTools?: boolean
-}
+// ── 协议固有设置（零配置面：用户原则 2026-08-24 S142）──
+// first-anchor 属 ACC 协议层——任何 CCC 抽象层都是宁静号/ACC，机制与内容
+// 统一由代码常量决定，无 CCC 配置入口（旧 bootstrap 配置段已移除）。
 
 const PROMOTE_EVENTS: Record<'tool-call' | 'assistant-message' | 'either', Set<'tool/call' | 'assistant/message'>> = {
   'tool-call': new Set(['tool/call']),
@@ -188,59 +190,30 @@ const PROMOTE_EVENTS: Record<'tool-call' | 'assistant-message' | 'either', Set<'
   either: new Set(['tool/call', 'assistant/message']),
 }
 
-function stringList(value: unknown, field: string, fallback: string[]): string[] {
-  if (value === undefined) return [...fallback]
-  if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string' || item.length === 0)) {
-    throw new TypeError(`bootstrap: ${field} must be a non-empty array of non-empty strings`)
-  }
-  return [...new Set(value as string[])]
-}
-
-function sourceList(value: unknown, field: string, fallback: string[]): Set<string> {
-  if (value === undefined) return new Set(fallback)
-  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || item.length === 0)) {
-    throw new TypeError(`bootstrap: ${field} must be an array of non-empty strings`)
-  }
-  return new Set(value as string[])
-}
-
-export function resolveBootstrapSettings(opts: BootstrapOptions): BootstrapSettings {
-  const promoteOn = opts.promoteOn ?? 'either'
-  if (promoteOn !== 'either' && promoteOn !== 'tool-call' && promoteOn !== 'assistant-message') {
-    throw new TypeError(`bootstrap: promoteOn must be one of "tool-call", "assistant-message", "either"; got ${JSON.stringify(promoteOn)}`)
-  }
-  // 锚定消息序列：anchorMessages（多轮）优先，否则 anchorMessage 单条，否则默认
-  let anchorMessages: string[]
-  if (Array.isArray(opts.anchorMessages)) {
-    if (opts.anchorMessages.length === 0 || opts.anchorMessages.some((m) => typeof m !== 'string' || m.length === 0)) {
-      throw new TypeError(`bootstrap: anchorMessages must be a non-empty array of non-empty strings`)
-    }
-    anchorMessages = opts.anchorMessages
-  } else {
-    anchorMessages = [typeof opts.anchorMessage === 'string' && opts.anchorMessage.length > 0 ? opts.anchorMessage : DEFAULT_ANCHOR_MESSAGE]
-  }
+/** 协议固有 bootstrap 设置：zeroTools=true（首请求 0 工具纯文字锚定轮）、
+ *  晋升信号仅 assistant/message（对齐 zero-anchored-standard）、
+ *  requiredSignals = 锚定轮数（2 条消息 → 2 条回复后晋升）。无参——零配置面。 */
+export function resolveBootstrapSettings(): BootstrapSettings {
   return {
-    bootstrapTools: stringList(opts.bootstrapTools, 'bootstrapTools', DEFAULT_BOOTSTRAP_TOOLS),
-    // zeroTools 变体（对齐 zero-anchored-standard）：晋升信号仅 assistant/message
-    promoteEvents: opts.zeroTools ? PROMOTE_EVENTS['assistant-message'] : PROMOTE_EVENTS[promoteOn],
-    // 多轮锚定（v4）：晋升所需信号数 = 锚定轮数（每条锚定回复计一次，最后一条回复后晋升）
-    requiredSignals: opts.zeroTools ? anchorMessages.length : 1,
-    suppressedSources: sourceList(opts.suppressedContextSources, 'suppressedContextSources', DEFAULT_SUPPRESSED_SOURCES),
-    compactionTools: stringList(opts.compactionTools, 'compactionTools', DEFAULT_COMPACTION_TOOLS),
-    anchorMessages,
-    zeroTools: opts.zeroTools === true,
+    bootstrapTools: [...DEFAULT_BOOTSTRAP_TOOLS],
+    promoteEvents: PROMOTE_EVENTS['assistant-message'],
+    requiredSignals: DEFAULT_ANCHOR_MESSAGES.length,
+    suppressedSources: new Set(DEFAULT_SUPPRESSED_SOURCES),
+    compactionTools: [...DEFAULT_COMPACTION_TOOLS],
+    anchorMessages: [...DEFAULT_ANCHOR_MESSAGES],
+    zeroTools: true,
   }
 }
 
 // ── DSH 注册 ──
 
 /**
- * 注册 Anchored bootstrap 机制（按 agent cwd 动态解析 CCC 配置——多 CCC 架构，与 guards 同模式）：
- *  1. session/event 观察晋升信号（tool/call + assistant/message + compaction/end）
+ * 注册 Anchored bootstrap 机制（协议固有，零配置面——S142；按 agent cwd 定位 CCC root，
+ * 晋升状态按 root 隔离，但设置全局一致）：
+ *  1. session/event 观察晋升信号（assistant/message + step/start 兜底 + compaction/end）
  *  2. system-prompt/assemble：bootstrap 阶段目录窄化到 bootstrapTools（+compaction 后 compactionTools）
  *  3. agent/pre-step：bootstrap 阶段剥离 suppressedSources 注入消息（降级保留全部）
  *
- * CCC 的 serenity.json 配置 `bootstrap.enabled: true` 才生效（否则零影响）；
  * 摘除 = 删除 index.ts 中本注册行（独立模块）。
  */
 
@@ -251,50 +224,32 @@ function agentRoot(agent: unknown): string | null {
   return findSerenityRoot(cwd)
 }
 
-/** 按 agent cwd 解析 bootstrap 配置（总是生效——无 enabled 开关，用户明确"直接开启不能关"；
- *  CCC 的 serenity.json bootstrap 段仅用于调参数，缺省用默认设置） */
-function readBootstrapConfig(agent: unknown): BootstrapSettings {
-  const root = agentRoot(agent)
-  if (!root) return resolveBootstrapSettings({})
-  const cfg = loadSerenityConfig(root)
-  const b = cfg.bootstrap
-  return resolveBootstrapSettings({
-    bootstrapTools: b?.bootstrapTools,
-    promoteOn: b?.promoteOn,
-    suppressedContextSources: b?.suppressedContextSources,
-    compactionTools: b?.compactionTools,
-    anchorMessage: b?.anchorMessage,
-    anchorMessages: b?.anchorMessages,
-    zeroTools: b?.zeroTools,
-  })
-}
+/** 协议固有设置（零配置面）：所有 CCC 使用同一固化设置 */
+const SETTINGS: BootstrapSettings = resolveBootstrapSettings()
 
 export function registerBootstrap(ctx: Context): void {
-  // 每 CCC root 一个 tracker（promoteEvents 按 root 配置：zeroTools 变体仅 assistant/message）
-  const settingsByRoot = new Map<string, BootstrapSettings>()
+  // 每 CCC root 一个 tracker（晋升状态按 root 隔离；设置协议固有全局一致）
   const trackers = new Map<string, PromotionTracker>()
   /** 已锚定会话（进程内防重：子 agent 每会话只锚定一次） */
   const anchoredSessions = new Set<string>()
 
-  const trackerFor = (root: string, settings: BootstrapSettings): PromotionTracker => {
+  const trackerFor = (root: string): PromotionTracker => {
     let t = trackers.get(root)
     if (!t) {
-      t = createEpochPromotion(settings.promoteEvents, settings.requiredSignals)
+      t = createEpochPromotion(SETTINGS.promoteEvents, SETTINGS.requiredSignals)
       trackers.set(root, t)
     }
     return t
   }
 
-  // session/event 观察：按 session 所属 CCC root 路由到对应 tracker（promoteEvents 按 root 配置）
+  // session/event 观察：按 session 所属 CCC root 路由到对应 tracker（晋升状态按 root 隔离）
   ctx.on('session/event', (session, event) => {
     try {
       const cwd = (session as { header?: { cwd?: string } } | undefined)?.header?.cwd
       if (typeof cwd !== 'string') return
       const root = findSerenityRoot(cwd)
       if (!root) return
-      const settings = settingsByRoot.get(root) ?? readBootstrapConfig({ session })
-      settingsByRoot.set(root, settings)
-      trackerFor(root, settings).observe(session, event)
+      trackerFor(root).observe(session, event)
     } catch {
       /* 观察失败不阻断 */
     }
@@ -308,7 +263,6 @@ export function registerBootstrap(ctx: Context): void {
     try {
       const root = agentRoot(agent)
       if (!root) return
-      const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
       // 锚定判定（v1.18.6：workflow subagent 也锚定——用户要求）：
       //   - 根会话（delegationDepth 0）：无历史 user/message 才锚定（resume 不重锚）
       //   - 子 agent（workflow subagent 等）：进程内只锚定一次（anchoredSessions Set）
@@ -329,16 +283,16 @@ export function registerBootstrap(ctx: Context): void {
       const inbox = (agent as { inbox?: { prepend?: (queue: string, msg: unknown) => void } }).inbox
       if (!inbox?.prepend) return
       // 逆序 prepend（prepend 插到队首）：最终队列 = [anchorMessages[0], ..., anchorMessages[n-1], 真实消息]
-      for (let i = settings.anchorMessages.length - 1; i >= 0; i--) {
+      for (let i = SETTINGS.anchorMessages.length - 1; i >= 0; i--) {
         inbox.prepend('next-turn', {
           id: `bootstrap-anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
           role: 'user',
-          content: [{ type: 'text', text: settings.anchorMessages[i] }],
+          content: [{ type: 'text', text: SETTINGS.anchorMessages[i] }],
           source: { kind: 'plugin', plugin: 'dsh-serenity-hooks', form: 'notice', summary: 'bootstrap anchor turn' },
         })
       }
       if (sid !== undefined) anchoredSessions.add(sid)
-      warnOnce(`anchor turns injected: ${settings.anchorMessages.length} 条（${settings.anchorMessages[0]!.slice(0, 40)}…）`)
+      warnOnce(`anchor turns injected: ${SETTINGS.anchorMessages.length} 条（${SETTINGS.anchorMessages[0]!.slice(0, 40)}…）`)
     } catch {
       /* 锚定注入失败不阻断（会话正常处理） */
     }
@@ -362,9 +316,7 @@ export function registerBootstrap(ctx: Context): void {
       const agent = (context as { agent?: unknown }).agent
       const root = agentRoot(agent)
       if (!root) return assembled
-      const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
-      settingsByRoot.set(root, settings)
-      const status = trackerFor(root, settings).status(agent as Agent)
+      const status = trackerFor(root).status(agent as Agent)
       if (status.promoted) {
         // promoted：开放完整目录（dsp 无 dev_tool_search 解锁机制——anchored 的
         // resident 集语义由"完整目录"承担；工具缺失不降级）
@@ -373,11 +325,11 @@ export function registerBootstrap(ctx: Context): void {
       const tools = (assembled as PromptAssembly).tools
       if (!Array.isArray(tools)) return assembled
       const available = new Set(tools.map((tool) => tool.name).filter((n): n is string => typeof n === 'string'))
-      if (settings.zeroTools) {
+      if (SETTINGS.zeroTools) {
         // Zero-Anchored 变体（对齐 zero-anchored-standard）：首请求 0 工具（boundary < 0）；
         // 压缩后回落 compactionTools 工作集（默认 [] → 0 工具，模型中途继续）
         if (status.boundary < 0) return { ...assembled, tools: [] } as PromptAssembly
-        const keep = new Set(settings.compactionTools)
+        const keep = new Set(SETTINGS.compactionTools)
         const missing = [...keep].filter((name) => !available.has(name))
         if (missing.length > 0) {
           warnOnce(`expected compaction tools missing=${JSON.stringify(missing)} — bootstrap disabled, full catalog exposed`)
@@ -389,8 +341,8 @@ export function registerBootstrap(ctx: Context): void {
         } as PromptAssembly
       }
       // Anchored 变体：bootstrap 集 + compaction 后 compactionTools（中途任务继续）
-      const keep = new Set<string>(settings.bootstrapTools)
-      if (status.boundary >= 0) for (const toolName of settings.compactionTools) keep.add(toolName)
+      const keep = new Set<string>(SETTINGS.bootstrapTools)
+      if (status.boundary >= 0) for (const toolName of SETTINGS.compactionTools) keep.add(toolName)
       const missing = [...keep].filter((name) => !available.has(name))
       if (missing.length > 0) {
         // 工具缺失：降级完整目录 + 一次性告警（组合漂移不锁死会话）
@@ -415,14 +367,12 @@ export function registerBootstrap(ctx: Context): void {
       // 非 CCC 不生效
       const root = agentRoot(agent)
       if (!root) return decision
-      const settings = settingsByRoot.get(root) ?? readBootstrapConfig(agent)
-      settingsByRoot.set(root, settings)
-      if (trackerFor(root, settings).status(agent).promoted || settings.suppressedSources.size === 0) return decision
+      if (trackerFor(root).status(agent).promoted || SETTINGS.suppressedSources.size === 0) return decision
       const messages = (decision as { messages?: UserMessage[] }).messages
       if (!Array.isArray(messages)) return decision
       const kept = messages.filter((message) => {
         const kind = message?.source?.kind
-        return typeof kind !== 'string' || !settings.suppressedSources.has(kind)
+        return typeof kind !== 'string' || !SETTINGS.suppressedSources.has(kind)
       })
       return kept.length === messages.length ? decision : { ...decision, messages: kept }
     } catch (error) {

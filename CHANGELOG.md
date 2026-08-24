@@ -1,4 +1,17 @@
-## v1.19.4 — 2026-08-21（bootstrap 轮次兜底改用 step/start——responses API 晋升仍失效修复）
+## v1.19.5 — 2026-08-24（first-anchor 零配置化——协议固有，S142 用户原则）
+
+**Scope:** 用户原则：任何 CCC 在抽象层都是宁静号/ACC，first-anchor 属 ACC 协议层——机制与内容均不可配置（零配置面）。旧 `serenity.json` bootstrap 段（S137 调参入口）移除，锚定消息与机制参数全部代码固化，所有 CCC 行为与首轮话语一致。
+
+### 变更
+- `seams/bootstrap.ts`：`DEFAULT_ANCHOR_MESSAGE`（单条通用人设）→ **`DEFAULT_ANCHOR_MESSAGES`**（两条协议级锚定消息，文本 = 原 home-serenity CCC 配置：ACC 身份+EAP+we/us+先锚定后行动 / 协作协议 5 条+acknowledge 要求，S142 用户确认）
+- `resolveBootstrapSettings()` 无参——返回唯一固化设置：`zeroTools=true`（首请求 0 工具，晋升信号仅 assistant/message）、`requiredSignals=2`（两轮锚定）、bootstrapTools/suppressedSources/compactionTools 用协议常量
+- `readBootstrapConfig` + `settingsByRoot` 缓存删除——不再读取 CCC 配置；`SETTINGS` 单例全局一致
+- `ccc.ts`：SerenityConfig 移除 `bootstrap` 段（配置面收缩；遗留字段静默忽略）
+- `index.ts`：注释更新（协议固有、零配置面）
+- 测试：bootstrap.test.ts 配置解析块重写为协议固有默认值断言（+锚定消息内容断言）；阶段机测试不变
+- home-serenity CCC：`.opencode/serenity.json` 删除 bootstrap 段（行为不变——固化默认 = 原配置）
+
+**测试：** 全量通过（阶段机 + 协议默认值）→ typecheck ✓
 
 **Scope:** v1.19.3 的轮次兜底数 `assistant/message` 事件，但 responses API（opencode-go-responses/muse-spark）下该事件在 assemble 时可能延迟/缺失 → 兜底计数失效 → 首轮锚定后仍不晋升 → 工具仍被裁空（用户实测 tiangong-serenity 会话 turn 4 仍无 ACC 工具）。
 

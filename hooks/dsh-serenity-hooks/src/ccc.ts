@@ -82,28 +82,8 @@ export interface SerenityConfig {
   safeMode?: { blacklist?: string[] };
   /** localstore git 提交策略（S134 重设计）：allow 可提交 / deny 禁提交（缺省 deny） */
   localstore?: { gitTrack?: 'allow' | 'deny' };
-  /** Anchored Standard bootstrap（S137，移植 xiaobright/dsh-anchored-standard）：
-   *  两阶段工具目录——首请求最小工具集锚定轨迹，首次 tool/call 或 assistant/message 后晋升。
-   *  **直接默认开启（用户明确"不能关"）**——本段仅用于调参数，缺省用默认设置。 */
-  bootstrap?: {
-    /** 首请求（bootstrap 阶段）暴露的工具集（缺省 dsp 核心：read/write/edit/glob/grep） */
-    bootstrapTools?: string[];
-    /** 晋升信号：either（默认，tool/call 或 assistant/message 先到者）/ tool-call / assistant-message */
-    promoteOn?: 'either' | 'tool-call' | 'assistant-message';
-    /** bootstrap 阶段剥离的自动注入上下文源（默认 skill-catalog + agent-instructions） */
-    suppressedContextSources?: string[];
-    /** compaction 后（重新晋升前）额外保留的工具集（模型中途任务继续工作） */
-    compactionTools?: string[];
-    /** 首轮锚定问题（对齐 whoami-turn：新会话第一轮先回答此问题——回复即晋升信号，
-     *  真实用户消息推迟到第二轮处理；缺省 = 介绍宁静号） */
-    anchorMessage?: string;
-    /** 多轮递进锚定（v4，用户设计）：按序 prepend 到 next-turn 队列——每轮消费一条
-     *  （0 工具纯文字回复），最后一条回复后晋升；缺省单条 = anchorMessage */
-    anchorMessages?: string[];
-    /** Zero-Anchored 变体（对齐 zero-anchored-standard）：true 时首请求 0 工具
-     *  （纯文字锚定轮，晋升信号仅 assistant/message），锚定回复后开放完整工具 */
-    zeroTools?: boolean;
-  };
+  // 注意：bootstrap 配置段已于 v1.19.5 移除（S142 用户原则——first-anchor 属
+  // ACC 协议层，任何 CCC 抽象层都是宁静号/ACC，机制与内容零配置面，代码固化）。
   hooks?: {
     enabled?: boolean;
     injectAccContext?: boolean;
