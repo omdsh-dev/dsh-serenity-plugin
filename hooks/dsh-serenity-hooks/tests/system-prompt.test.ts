@@ -69,11 +69,11 @@ describe('system-prompt: 5 块注入（对齐 opencode-serenity-plugin system.tr
     expect(text).toContain('顶层入口原文内容')
   })
 
-  it('ACC 块：CCC 名/Root/版本/工具清单 + 平台工具说明', () => {
+  it('ACC 块：CCC 名/版本/工具清单 + 平台工具说明（Root 边界归 Constraints 块，v1.19.6 去重）', () => {
     const block = accBlock(dir)
     expect(block).toContain(`ACC: dsh-serenity-hooks v${ACC_VERSION}`)
     expect(block).toContain(`CCC: sp-`)
-    expect(block).toContain(`Root: ${dir}`)
+    expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop']) {
       expect(block).toContain(tool)
     }

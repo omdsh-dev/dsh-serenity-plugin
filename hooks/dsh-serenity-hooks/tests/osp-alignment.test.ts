@@ -25,6 +25,7 @@ import {
   constraintsBlock,
   sessionBlock,
   entrySkillSectionText,
+  metaphorBlock,
   serenitySystemPrompt,
 } from '../src/seams/system-prompt.js'
 import { useSession, resetActiveSessionStore } from '../src/session-ops.js'
@@ -84,10 +85,6 @@ const OSP_CCE = [
   'The container is healthy when H_op ≤ H_critical (agents can still function). The',
   'continuity condition: organization must at minimum match accumulation (ΔH_org ≥ ΔH_in).',
   'Your actions affect H_op — unorganized output increases it, organization decreases it.',
-  '',
-  'CCE AND EAP: EAP governs artifact quality (how explicit to be). CCE governs temporal',
-  'coherence (how to maintain consistency over time). When structuring a document, apply',
-  'EAP (E↑ R↓ S↑). When maintaining cross-session coherence, apply CCE.',
   '',
   'THIS IS PERSISTENCE ENGINEERING: The goal is not to become greater. The goal is to',
   'remain coherent. CCE has no terminal KPI — continuity is maintained while the entity',
@@ -183,7 +180,7 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
     expect(text).toBe('---\nname: tg-serenity\ndescription: 系统入口\n---\n顶层入口原文内容')
   })
 
-  it('serenitySystemPrompt() 块序 ACC→CCE→Constraints→SKILL→Session，无 --- 分隔线', () => {
+  it('serenitySystemPrompt() 块序 ACC→CCE→Constraints→EAP→Metaphor→SKILL→Session，无 --- 分隔线', () => {
     setupCccWithSkill('tg-serenity')
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
     mkdirSync(join(dir, 'AGENT_SESSIONS', dirName), { recursive: true })
@@ -194,12 +191,16 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
     const accIdx = text.indexOf('=== Serenity ACC ===')
     const cceIdx = text.indexOf('=== Serenity CCE ===')
     const conIdx = text.indexOf('=== Serenity Constraints ===')
+    const eapIdx = text.indexOf('=== Serenity EAP ===')
+    const metaIdx = text.indexOf('=== Serenity Metaphor ===')
     const skillIdx = text.indexOf('顶层入口原文内容')
     const sesIdx = text.indexOf('=== Serenity Session ===')
     expect(accIdx).toBeGreaterThanOrEqual(0)
     expect(cceIdx).toBeGreaterThan(accIdx)
     expect(conIdx).toBeGreaterThan(cceIdx)
-    expect(skillIdx).toBeGreaterThan(conIdx)
+    expect(eapIdx).toBeGreaterThan(conIdx)
+    expect(metaIdx).toBeGreaterThan(eapIdx)
+    expect(skillIdx).toBeGreaterThan(metaIdx)
     expect(sesIdx).toBeGreaterThan(skillIdx)
     expect(text).not.toContain('---\n\n')
     expect(text).not.toContain('# CCC 入口技能')
@@ -207,15 +208,38 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
 })
 
 describe('osp 对齐：ACC 块结构（工具清单平台化，文档化差异）', () => {
-  it('accBlock() 含身份行/CCC/Root/内置工具/MSM 发现行', () => {
+  it('accBlock() 含身份行/CCC/内置工具/MSM 发现行（Root 边界归 Constraints 块，v1.19.6 去重）', () => {
     const block = accBlock(dir)
     expect(block).toContain(`ACC: dsh-serenity-hooks v${ACC_VERSION}`)
     expect(block).toContain(`CCC: ${dir.split('/').pop()}`)
-    expect(block).toContain(`Root: ${dir}`)
+    expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     expect(block).toContain('You are running inside a Concrete Cognitive Container (CCC)')
     for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop']) {
       expect(block).toContain(tool)
     }
     expect(block).toContain('call acc_msm list to discover them')
+  })
+})
+
+describe('dsp 扩展：Metaphor 块（v1.19.6，宁静号宇宙隐喻域——无 osp 对应）', () => {
+  it('metaphorBlock() 全英文 8 条隐喻 + 判据（Verdict）', () => {
+    const block = metaphorBlock()
+    expect(block).toContain('=== Serenity Metaphor ===')
+    for (const i of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      expect(block).toContain(`${i}. `)
+    }
+    // 8 条隐喻本体
+    expect(block).toContain('The Hull')
+    expect(block).toContain('The Logbook')
+    expect(block).toContain('The Ship of Theseus')
+    expect(block).toContain('Deck Order')
+    expect(block).toContain('Blueprint over Statue')
+    expect(block).toContain('Crew Rotation')
+    expect(block).toContain('Harbor Inspection')
+    expect(block).toContain('Engineering Drawings')
+    // 每条含行为判据
+    expect(block.match(/Verdict:/g)?.length).toBe(8)
+    // 无中文（全英文）
+    expect(block).not.toMatch(/[\u4e00-\u9fff]/)
   })
 })

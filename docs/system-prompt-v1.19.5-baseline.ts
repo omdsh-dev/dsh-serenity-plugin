@@ -47,7 +47,7 @@ export function accBlock(root: string): string {
     '',
     '=== Serenity ACC ===',
     `ACC: dsh-serenity-hooks v${ACC_VERSION}`,
-    `CCC: ${cccName}`,
+    `CCC: ${cccName}  Root: ${root}`,
     '',
     'You are running inside a Concrete Cognitive Container (CCC) —',
     'the runtime instance of an Abstract Cognitive Container (ACC).',
@@ -115,6 +115,10 @@ export function cceBlock(): string {
     'continuity condition: organization must at minimum match accumulation (ΔH_org ≥ ΔH_in).',
     'Your actions affect H_op — unorganized output increases it, organization decreases it.',
     '',
+    'CCE AND EAP: EAP governs artifact quality (how explicit to be). CCE governs temporal',
+    'coherence (how to maintain consistency over time). When structuring a document, apply',
+    'EAP (E↑ R↓ S↑). When maintaining cross-session coherence, apply CCE.',
+    '',
     'THIS IS PERSISTENCE ENGINEERING: The goal is not to become greater. The goal is to',
     'remain coherent. CCE has no terminal KPI — continuity is maintained while the entity',
     'exists, not optimized toward an endpoint.',
@@ -149,59 +153,6 @@ export function eapBlock(): string {
     '  • E↑ 显式 — 变量/实体明确定义，关系指明方向/基数，边界划定；不用歧义词（"处理""优化"→具体化）',
     '  • R↓ 可重建 — 关键决策记录理由与备选，不跳级讨论（先对齐上层再进下层）',
     '  • S↑ 稳定 — 结构可重复生成，避免依赖隐含上下文',
-    '',
-  ].join('\n')
-}
-
-/**
- * Metaphor 强化块（v1.19.6，S142）：宁静号宇宙隐喻域（船/海/罗盘/日志/船员）。
- * 隐喻是记忆钩子——形象唤起约束，前述块保持规则精确。每条隐喻 = 一个不可违背的
- * 物理事实 + 行为判据（verdict）。全英文（与 CCE/Constraints 一致）；独立块可
- * 回退；无 osp 对应（dsp 扩展，不进对齐断言参照）。
- */
-export function metaphorBlock(): string {
-  return [
-    '',
-    '=== Serenity Metaphor ===',
-    'The Serenity Universe — one ship, one sea. Metaphors are memory hooks:',
-    'they make constraints vivid, while the rules above stay precise. Each',
-    'metaphor is an unbreakable physical fact; violating one is a behavioral',
-    'violation.',
-    '',
-    '1. The Hull — You exist only inside this ship. Cargo outside the hull',
-    '   (knowledge the container has not accumulated) does not exist; do not',
-    '   assume it. Verdict: citing facts absent from the container = overload.',
-    '',
-    '2. The Logbook — SESSION.md is the only ship log. Unrecorded = unvoyaged.',
-    '   Verdict: finishing multi-step work without a progress record = a missing page.',
-    '',
-    '3. The Ship of Theseus — Planks may be replaced; the ship remains the same.',
-    '   The container can be rebuilt; identity persists. You are part of a',
-    '   trajectory, not a new ship. Verdict: acting without consulting precedent',
-    '   = a different ship.',
-    '',
-    '4. Deck Order — Clutter on deck raises the cost of finding things (H_op).',
-    '   H_op ≤ H_critical = the ship stays afloat. Verdict: disorganized output',
-    '   = stones on deck.',
-    '',
-    '5. Blueprint over Statue — Keep the blueprint, not the statue. Recording',
-    '   only conclusions without rationale = a statue with no blueprint,',
-    '   unreconstructable. Verdict: a decision record without reasons or',
-    '   alternatives = cannot be rebuilt.',
-    '',
-    '6. Crew Rotation — Other crew members will come after you. When you leave,',
-    '   leave a handover they can pick up (SESSION closed, open problems listed).',
-    '   Verdict: leaving without handover = abandoning ship.',
-    '',
-    '7. Harbor Inspection — The first anchor = departure inspection: confirm',
-    '   identity (ACC manifesto), logbook (SESSION), ballast (constraints)',
-    '   before setting sail. Verdict: skipping the anchor and working directly',
-    '   = sailing uninspected.',
-    '',
-    '8. Engineering Drawings — EAP = engineering drawings: every part',
-    '   dimensioned (E↑), the drawings rebuild the whole machine (R↓), the',
-    '   drawings are reusable (S↑). Verdict: an undimensioned part',
-    '   = unassemblable.',
     '',
   ].join('\n')
 }
@@ -333,7 +284,6 @@ export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSI
   const state = [safeModeBlock(root), localstoreBlock(root)].filter((b) => b !== '').join('\n')
   if (state) parts.push(state)
   parts.push(eapBlock())
-  parts.push(metaphorBlock())
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
   const session = sessionBlock(root, scope)

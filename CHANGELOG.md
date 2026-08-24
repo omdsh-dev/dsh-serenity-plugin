@@ -1,3 +1,18 @@
+## v1.19.6 — 2026-08-24（系统提示词去冗余 + Metaphor 强化块——S142 用户设计）
+
+**Scope:** 用户以 EAP 原则审查系统提示词注入：去除重复真相源（EAP 定义两处、Root 两处），新增"宁静号宇宙"隐喻块（全英文 8 条，隐喻 = 记忆钩子 + 行为判据）增强约束力与表达力。CCC 零变动；破坏 CCE 块与 osp 的逐字节对齐（D2）——**验证顺利后修订 specs（同步 osp compacting.ts）**。
+
+### 变更
+- `seams/system-prompt.ts`：
+  - **去冗余 R1**：CCE 块删 `CCE AND EAP` 段（EAP 三变量定义唯一真相源 = EAP 块；CCE 块回归纯 CCE 主题）
+  - **去冗余 R2**：ACC 块删 `Root:`（Root 边界语义唯一真相源 = Constraints 块；ACC 块只做身份标识）
+  - **新增 `metaphorBlock()`**：`=== Serenity Metaphor ===` 全英文 8 条（Hull/Logbook/Ship of Theseus/Deck Order/Blueprint over Statue/Crew Rotation/Harbor Inspection/Engineering Drawings），每条隐喻 + Verdict 行为判据；装配于 EAP 之后、SKILL 之前；独立块可回退
+- `tests/osp-alignment.test.ts`：OSP_CCE 参照同步删段（R1）；ACC 断言改为"不含 Root"（R2）；块序断言加 Metaphor；新增 metaphorBlock 内容断言（8 条 + Verdict×8 + 无中文）
+- 备份：`docs/system-prompt-v1.19.5-baseline.ts`（v1.19.5 注入文本基线，回退参照）
+- home-serenity CCC：零变动
+
+**测试：** 全量通过（对齐断言按新基线修订）→ typecheck ✓
+
 ## v1.19.5 — 2026-08-24（first-anchor 零配置化——协议固有，S142 用户原则）
 
 **Scope:** 用户原则：任何 CCC 在抽象层都是宁静号/ACC，first-anchor 属 ACC 协议层——机制与内容均不可配置（零配置面）。旧 `serenity.json` bootstrap 段（S137 调参入口）移除，锚定消息与机制参数全部代码固化，所有 CCC 行为与首轮话语一致。
