@@ -1,18 +1,25 @@
 /**
- * osp-alignment.test.ts — 系统提示词字节级对齐 opencode-serenity-plugin v0.8.5
+ * osp-alignment.test.ts — 系统提示词结构对齐 spec（v1.19.9 修订，S142）
  *
- * 参照源：opencode-serenity-plugin/src/hooks/compacting.ts `system.transform`
- * （本仓库 AI_LAB/opencode-serenity-plugin，tag v0.8.5）。
+ * 历史：v1.19.5 前逐字节对齐 opencode-serenity-plugin v0.8.5（CCE/Constraints/Session）。
+ * v1.19.6~v1.19.9 用户设计演进（去冗余/隐喻域/结构精简/MSM 约束），dsp 领先于 osp；
+ * 用户验证满意后本 spec 正式化——osp 侧按本 spec 同步（opencode-serenity-plugin
+ * compacting.ts system.transform，S142/S138 协作，osp 待同步）。
  *
- * 对齐契约（"完全一样"的机械定义）：
- *   1. CCE 块        — 与 osp 逐字节一致（无例外）
- *   2. Constraints 块 — 与 osp 逐字节一致，唯一例外 = shell 工具名
- *                      （osp `msm_exec` → DSH `acc_msm`，平台真实工具名，必须替换）
- *   3. Session 块    — 与 osp 逐字节一致（相同会话值时）
- *   4. SKILL 全文    — 原文直推（无包裹头），对齐 osp `output.system.push(state.skillContent)`
- *   5. 块间拼接      — 空行分隔，无 `---` 分隔线（对齐 osp 逐项 push 的拼接方式）
- *   6. ACC 块        — 结构对齐（身份行/CCC/Root/工具清单/MSM 发现行）；
- *                      工具清单为平台真实工具，允许不同（文档化差异）
+ * 对齐契约（v1.19.9 新结构）：
+ *   1. 装配顺序 — ACC → Metaphor → Principles → CCE → EAP → [SafeMode/Localstore] → SKILL → Session
+ *   2. CCE 块    — 与 osp 逐字节一致（无例外）；v1.19.6 删 "CCE AND EAP" 段（EAP 定义唯一
+ *                  真相源 = EAP 块）→ osp 需同步删段
+ *   3. Principles 块 — v1.19.8 合并原 osp Constraints 块（认知容器本体论 + MSM 原则 +
+ *                  Operational boundaries；工具名平台真实名）→ osp 需同步合并
+ *   4. Metaphor 块 — dsp 扩展（osp 无对应）：三层隐喻域（SHIP/VOYAGE/CREW）10 条，
+ *                  提前至 ACC 后（世界模型前置）；M-1~M-4 结构约束见 docs/metaphor-domain.md
+ *   5. EAP 块    — dsp 扩展（osp 无对应）
+ *   6. Session 块 — 与 osp 逐字节一致（相同会话值时；DSH todowrite 无 priority 字段）
+ *   7. SKILL 全文 — 原文直推（无包裹头），对齐 osp `output.system.push(state.skillContent)`
+ *   8. ACC 块    — 结构对齐（身份行/CCC/工具清单/MSM 发现行；v1.19.6 去 Root——唯一真相源
+ *                  = Principles 块边界；工具清单为平台真实工具，允许不同）
+ *   9. 块间拼接  — 空行分隔，无 `---` 分隔线
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
