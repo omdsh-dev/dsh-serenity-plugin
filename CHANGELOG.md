@@ -1,4 +1,19 @@
-## v1.20.6 — 2026-08-26（图片落盘：静默补救（删状态条）+ 对话写名具体图片路径 + 多图支持，S142）
+## v1.21.0 — 2026-08-26（三功能 + 双层配置面板：F1 双端口网关 / F2 session_rebuild / F3 会话命名 / 高级面板，S142）
+
+**Scope:** 用户 S142 需求组（细化+拍板）：零改 DSH 前提下——① F1 dsh web 额外监听一个端口（账号密码登录后即原生 Web UI，适应任何部署）；② F2 上下文超限 LLM 主动触发 `session_rebuild` 清空重建（SESSION.md 实时整理 → 压缩不再需要）；③ F3 dsh 会话命名受宁静号 SESSION 控制（use 激活时重命名为目录名）；④ 配置双层：**简单配置（开关/阈值）→ dsh 原生设置面板**（官方新 RC 已删 WEB_SETTINGS_NAMESPACES 白名单，第三方 ns 零改 DSH 可进），**复杂配置（账号列表）→ 宁静号高级面板**（双 tab 状态/账号）。
+
+### 变更
+- **F1 `src/gateway.ts`（新）**：第二 node:http 监听器（默认 0.0.0.0:3081）→ 内嵌极简登录页 → POST /serenity/login 验证（localstore accounts scrypt hash）→ HttpOnly cookie（重启失效）→ 反代 127.0.0.1:主端口（**Host 头改写**过信任栅栏）→ WS upgrade 转发 pipe；`registerGateway` 按 localstore 配置启停
+- **F2 `src/rebuild.ts`（新）+ `src/tools/rebuild.ts`（新）**：`session_rebuild` tool——① 归档当前会话（SESSION.md 标记 completed + 立即移 _archived/）② createSession 新宁静号会话 + ctx.agents.create 新 dsh agent ③ 锚点注入（SESSION.md 路径 + 摘要 + 重建指令）；`src/seams/keeper.ts` 扩展 **contextPressure 投影检测**（超 rebuildThreshold → 提醒 LLM 主动触发，不自动执行）
+- **F3 `src/tools/session.ts`**：`sessionTool` → **`createSessionTool(ctx)`** 工厂——use 激活宁静号会话后同步 rename 当前 dsh 会话为目录名（`sessionTitle.rename` user source pin 住；naming.enabled 门控；sessionTitle 可选服务守卫）
+- **配置分层**：`src/settings-section.ts`（新）——`installSettingsSection(serenity-hooks, schema)` 注册简单配置（gatewayEnabled/rebuildEnabled/rebuildThreshold/namingEnabled）到 dsh 设置面板 + `readSimpleSettings()` 运行时读取 + **降级守卫**（旧 RC 白名单时 client 显示降级提示）；`src/config-ops.ts`（新）——localstore `serenityAdvanced` 节账号 CRUD + scrypt hash + wire 形态（hash 永不落 wire）
+- **API `src/api.ts`**：+ `/serenity/config`（GET wire 形态 / PUT patch：新账号必带 pass、既有账号 pass 空保留原 hash）
+- **面板 `src/client/SafeModePanel.tsx` 重构**：双 tab 大面板（460px 无滚动条）——状态（CCC/loop/守卫/safe-mode + loops 列表）+ 账号（`src/client/AccountsTab.tsx` 新：host/port + 账号 CRUD）；`src/client/accounts-api.ts`（新）纯转换 + fetch
+- `src/index.ts`：Config 加 gateway/rebuild/naming 段 + apply 注册 settings-section/gateway/rebuild/session_rebuild；`src/session-ops.ts`：`sessionsRoot` 导出
+- `tsconfig.json`/`client/tsconfig.json`：paths + dsh-settings/dsh-session-title/dsh-client-ui-settings
+- 官方源码更新：repo-git 新增 pull 子命令（dsh-harness-public 47f9438→b150a551；5 API 面复核通过）
+
+**测试：** 38 files / 349 tests（+56）→ typecheck ✓（node + client）
 
 **Scope:** 用户两轮反馈迭代：
 ① 状态条（input.dock 常驻"图片已保存"）永久停留碍眼 → **删除 UI，补救静默化**（组件仅保留 effect 逻辑，return null）
