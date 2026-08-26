@@ -2,8 +2,11 @@
  * dsh-serenity-hooks — 浏览器端（client half）
  *
  * 会话头部 Serenity 状态徽章：绿状态点 + 版本 + safe-mode 开关；
- * 点击徽章展开详情卡（CCC/loop/守卫 + 大开关），再点或点外部关闭。
- * 数据经同源 HTTP /serenity/status（插件服务端路由）。
+ * 点击徽章展开**双 tab 大面板**（v1.21 重构）：
+ *  - 状态 tab：CCC/loop/守卫 + safe-mode 大开关 + loops 运行列表 + gateway 服务状态
+ *  - 账号 tab：gateway 监听地址/端口 + 账号列表 CRUD（复杂配置，localstore）
+ * 简单配置（开关/阈值）在 dsh 原生设置面板（SettingsSection）。
+ * 数据经同源 HTTP /serenity/status + /serenity/config（插件服务端路由）。
  * 样式遵循 web-styling.md：--dsw-alias-* 语义 token（明暗自适应）+ 官方图标。
  *
  * 槽：conversation.session.header.actions（官方既有槽，list）
@@ -17,6 +20,7 @@ import {
   IconWarningOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useState, useCallback, useRef } from 'react'
+import { AccountsTab } from './AccountsTab.js'
 import './SafeModePanel.css'
 
 /** 会话头部操作区（list 槽）props */
@@ -49,11 +53,12 @@ function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
 }
 
-/** 会话头部：可点击徽章 + safe-mode 开关；点击徽章展开状态详情卡 */
+/** 会话头部：可点击徽章 + safe-mode 开关；点击徽章展开双 tab 大面板 */
 export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
+  const [tab, setTab] = useState<'status' | 'accounts'>('status')
   const [loops, setLoops] = useState<LoopRunInfo[]>([])
   const rootRef = useRef<HTMLSpanElement>(null)
 
@@ -148,8 +153,26 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
         </button>
       )}
       {open && (
-        <div className={cx('sp-pop')} role="dialog" aria-label="Serenity 状态详情">
-          {inCcc ? (
+        <div className={cx('sp-pop', 'sp-popLg')} role="dialog" aria-label="Serenity 高级设定">
+          <div className={cx('sp-tabs')}>
+            <button
+              type="button"
+              className={cx('sp-tab', tab === 'status' && 'sp-tabOn')}
+              onClick={() => setTab('status')}
+            >
+              状态
+            </button>
+            <button
+              type="button"
+              className={cx('sp-tab', tab === 'accounts' && 'sp-tabOn')}
+              onClick={() => setTab('accounts')}
+            >
+              账号
+            </button>
+          </div>
+          {tab === 'accounts' ? (
+            <AccountsTab sessionId={String(sessionId ?? '')} />
+          ) : inCcc ? (
             <>
               <div className={cx('sp-popRow')}>
                 <span className={cx('sp-popLabel')}>CCC</span>
@@ -187,7 +210,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       : '无运行中 loop'}
                   </span>
                 </div>
-                {loops.slice(0, 5).map((l) => (
+                {loops.slice(0, 4).map((l) => (
                   <div key={l.label} className={cx('sp-loopItem')}>
                     <div className={cx('sp-loopHead')}>
                       <span className={cx('sp-loopLabel')} title={l.label}>{l.label}</span>
@@ -195,7 +218,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       <span className={cx('sp-loopTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
                     </div>
                     <div className={cx('sp-loopResp')} title={l.lastResponse}>
-                      {l.lastResponse.slice(0, 80) || (l.done ? '已完成' : '（等待首轮响应）')}
+                      {l.lastResponse.slice(0, 60) || (l.done ? '已完成' : '（等待首轮响应）')}
                     </div>
                   </div>
                 ))}

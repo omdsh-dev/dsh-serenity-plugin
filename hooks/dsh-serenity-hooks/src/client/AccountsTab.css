@@ -1,0 +1,115 @@
+/* AccountsTab — 高级面板账号 tab（v1.21；--dsw-alias-* 语义 token，明暗自适应） */
+
+.at-root {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 2px;
+  font-size: 13px;
+}
+
+.at-note {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.at-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.at-label {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.at-input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--dsw-alias-border, #333);
+  border-radius: 6px;
+  background: var(--dsw-alias-field, #222);
+  color: var(--dsw-alias-text, #eee);
+  font-size: 13px;
+}
+
+.at-input.at-port {
+  flex: none;
+  width: 72px;
+}
+
+.at-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.at-head {
+  display: flex;
+  gap: 8px;
+  font-size: 12px;
+  opacity: 0.6;
+  padding: 0 2px;
+}
+
+.at-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.at-colUser { flex: 1.2; }
+.at-colPass { flex: 1.6; }
+.at-colOp { flex: none; width: 48px; }
+
+.at-del {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border, #444);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-danger, #f87171);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.at-add {
+  align-self: flex-start;
+  padding: 5px 12px;
+  border: 1px dashed var(--dsw-alias-border, #444);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-text, #ccc);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.at-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--dsw-alias-danger, #f87171);
+}
+
+.at-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.at-save {
+  padding: 6px 22px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--dsw-alias-accent, #3b82f6);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.at-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
