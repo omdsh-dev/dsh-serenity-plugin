@@ -1,43 +1,77 @@
 /* SettingsSection — dsh 原生设置面板 serenity-hooks 简单配置页
-   v1.21.1 UX 重构：分组卡片（标题+说明 左列 / 开关右置）；滑块独立行；
-   该换行就换行（word-break/overflow-wrap）。 */
+   v1.21.1 看齐 dsh 自身：官方 settings 设计语言——
+   section > title + intro + group(groupTitle) + rowCard 行卡；
+   全部 --dsw-alias-* token（与 ui-settings-models 同词汇表）。 */
 
-.ss-root {
+/* 页面容器（官方 .section：flex column gap 12） */
+.ss-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 8px 0;
+  gap: 14px;
+  max-width: 720px;
+  color: var(--dsw-alias-label-primary);
 }
 
-.ss-note {
+/* 页面标题（官方 .title：16px/24 500） */
+.ss-title {
   margin: 0;
-  font-size: 12px;
-  opacity: 0.75;
+  font-size: 16px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+/* 页面说明（官方 .intro：14px/22 tertiary） */
+.ss-intro {
+  margin: 0;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-tertiary);
   word-break: break-word;
   overflow-wrap: anywhere;
-  white-space: normal;
-  line-height: 1.6;
 }
 
-.ss-groups {
+/* 分组（多级标题：分组标题 + 行卡列表） */
+.ss-group {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
-/* 配置组：标题+说明 左列；开关/阈值 右置 */
-.ss-group {
+/* 分组标题（二级：12px/18 500 secondary——官方 fieldLabel 风格） */
+.ss-groupTitle {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 行卡列表（官方 .rows：无 marker，gap 8） */
+.ss-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 行卡（官方 .rowCard：border-l2 r12 padding 12/14） */
+.ss-rowCard {
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  padding: 12px 14px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 12px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 10px;
-  background: var(--dsw-alias-bg-module-platform, rgba(128, 128, 128, 0.06));
 }
 
-.ss-groupText {
+/* 行卡文本（标题 + 说明 左列） */
+.ss-rowText {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -45,22 +79,31 @@
   flex: 1;
 }
 
-.ss-groupTitle {
-  font-size: 13px;
-  font-weight: 600;
+/* 行卡标题（官方 .rowName：14px/22 500） */
+.ss-rowName {
+  font-size: 14px;
+  line-height: 22px;
+  font-weight: 500;
   color: var(--dsw-alias-label-primary);
 }
 
-.ss-groupDesc {
+/* 行卡说明（12px/18 tertiary） */
+.ss-rowDesc {
   font-size: 12px;
-  opacity: 0.7;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
   word-break: break-word;
   overflow-wrap: anywhere;
-  white-space: normal;
-  line-height: 1.5;
 }
 
-/* 开关（右置） */
+/* 行卡控件（右置） */
+.ss-rowControl {
+  flex: none;
+  display: flex;
+  align-items: center;
+}
+
+/* 开关（官方 token 的自绘 toggle：track 22px，thumb 16px） */
 .ss-switch {
   position: relative;
   flex: none;
@@ -111,12 +154,11 @@
   cursor: default;
 }
 
-/* 阈值行（滑块 + 值，右置） */
+/* 阈值行（滑块 + 值） */
 .ss-threshold {
   display: flex;
   align-items: center;
   gap: 12px;
-  flex: none;
 }
 
 .ss-threshold input[type='range'] {
@@ -133,24 +175,21 @@
 }
 
 /* 底部帮助行 */
-.ss-help {
+.ss-hint {
   margin: 0;
   font-size: 12px;
-  opacity: 0.7;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
   word-break: break-word;
   overflow-wrap: anywhere;
-  line-height: 1.6;
 }
 
 /* 降级提示 */
 .ss-degrade {
-  padding: 12px 8px;
-  font-size: 13px;
-}
-
-.ss-degrade p {
   margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-warn-label);
   word-break: break-word;
   overflow-wrap: anywhere;
-  line-height: 1.6;
 }

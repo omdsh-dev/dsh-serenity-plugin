@@ -20,6 +20,14 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import type { Duplex } from 'node:stream'
 import { randomBytes } from 'node:crypto'
 import { verifyPassword, readAdvancedSettings } from './config-ops.js'
+import { findSerenityRoot } from './ccc.js'
+
+// 自定义事件：配置 PUT 后触发 gateway 重建（跨模块松耦合通知）
+declare module 'cordis' {
+  interface Events {
+    'serenity/config-updated'(): void
+  }
+}
 
 // ── 纯逻辑（可单测）──
 
@@ -197,30 +205,46 @@ export function startGateway(
   }
 }
 
-/** 注册 gateway（index.ts apply 调用）：webServer 就绪后按配置启动第二监听器。 */
+/** 注册 gateway（index.ts apply 调用）。
+ * root 发现：dsh web 进程 cwd 是 $HOME（非 CCC）——不能靠 process.cwd()。
+ * 改为：agent/session-start 的 header.cwd 解析 CCC 根（首个会话出现即发现）。
+ * 幂等 sync：仅当 配置/端口/root 变化时重建监听器。
+ * 事件驱动：config-updated（/serenity/config PUT 后 emit）触发重新 sync。
+ */
 export function registerGateway(
   ctx: Context,
-  opts: { getRoot: () => string | null },
+  opts: { resolveRoot?: (cwd: string) => string | null },
 ): void {
   let current: { dispose: () => void } | null = null
+  let discoveredRoot: string | null = null
+  let lastSig: string | null = null
+
+  const resolveRoot = opts.resolveRoot ?? ((cwd: string) => findSerenityRoot(cwd))
 
   const sync = (): void => {
     try {
+      const root = discoveredRoot
+      const webServer = (ctx as unknown as { get?: (name: string) => unknown }).get?.('webServer') as
+        | { port?: number }
+        | undefined
+      if (!root || !webServer?.port) return
+
+      const settings = readAdvancedSettings(root)
+      const enabled = settings.gateway.enabled
+      // 签名：enabled + host + port + 账号数（配置变化才重启）
+      const sig = `${enabled}|${settings.gateway.host}|${settings.gateway.port}|${settings.gateway.accounts.length}|${webServer.port}`
+      if (sig === lastSig) return
+      lastSig = sig
+
       // 停旧
       if (current) {
         current.dispose()
         current = null
       }
-      const root = opts.getRoot()
-      if (!root) return
-      const webServer = (ctx as unknown as { get?: (name: string) => unknown }).get?.('webServer') as
-        | { port?: number }
-        | undefined
-      if (!webServer?.port) return
-      const settings = readAdvancedSettings(root)
-      if (!settings.gateway.enabled) return
-      const accounts = settings.gateway.accounts
-      if (accounts.length === 0) return // 无账号不启动（无从登录）
+      if (!enabled) {
+        console.log('[serenity-hooks] gateway 已停止（enabled=false）')
+        return
+      }
       const started = startGateway(
         {
           host: settings.gateway.host,
@@ -232,19 +256,37 @@ export function registerGateway(
         () => readAdvancedSettings(root).gateway.accounts,
       )
       current = started
-      console.log(`[serenity-hooks] gateway 已启动: http://${settings.gateway.host}:${settings.gateway.port} → 127.0.0.1:${webServer.port}`)
+      const accounts = settings.gateway.accounts.length
+      console.log(
+        `[serenity-hooks] gateway 已启动: http://${settings.gateway.host}:${settings.gateway.port} → 127.0.0.1:${webServer.port}` +
+        (accounts === 0 ? '（⚠️ 未配置账号，登录页将提示）' : `（${accounts} 个账号）`),
+      )
     } catch (err) {
-      console.warn(`[serenity-hooks] gateway 启动失败: ${String((err as Error)?.message ?? err)}`)
+      console.warn(`[serenity-hooks] gateway 同步失败: ${String((err as Error)?.message ?? err)}`)
     }
   }
 
-  // webServer 就绪后启动（第一次 session-start 已晚于 webServer 激活；直接同步一次）
-  // 注：ctx.webServer 是 inject 服务，apply 时可读 port——直接同步
-  sync()
+  // 会话出现 → 从 cwd 解析 CCC 根（首个会话即发现；dsh web cwd 非 CCC）
+  ctx.on('agent/session-start', (payload) => {
+    try {
+      const cwd = (payload as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd
+      if (!cwd) return
+      const root = resolveRoot(cwd)
+      if (!root) return
+      if (discoveredRoot !== root) {
+        discoveredRoot = root
+        lastSig = null // 强制首次 sync
+      }
+      sync()
+    } catch {
+      /* 发现失败不影响会话 */
+    }
+  })
 
-  // 配置变化（/serenity/config PUT 后）→ 重建 gateway
-  ctx.on('session/event', () => {
-    // 简化：每次会话事件后复查（本地读写低频）；真实变化经 config API 手动重启可接受
+  // 配置变化（/serenity/config PUT 后 emit 'serenity/config-updated'）→ 重新 sync
+  ctx.on('serenity/config-updated', () => {
+    lastSig = null
+    sync()
   })
 }
 

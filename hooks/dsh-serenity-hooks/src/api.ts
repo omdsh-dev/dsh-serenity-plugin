@@ -227,6 +227,12 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             return
           }
           const saved = applyWirePatch(root, body.config ?? {})
+          // 通知 gateway 重建（第二监听器配置/账号变化后立即生效）
+          try {
+            (ctx as unknown as { emit?: (name: string, payload?: unknown) => void }).emit?.('serenity/config-updated')
+          } catch {
+            /* 事件通知失败不影响保存结果 */
+          }
           sendJson(res, 200, { config: toWire(saved) })
           return
         }

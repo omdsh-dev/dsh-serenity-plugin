@@ -34,7 +34,7 @@ import { registerCompactRetention } from './seams/compact.js'
 import { registerStatusApi } from './api.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
-import { DEFAULT_SERENITY_CONFIG_PATHS, findSerenityRoot } from './ccc.js'
+import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { registerSettingsSection } from './settings-section.js'
 import { registerGateway } from './gateway.js'
 
@@ -127,8 +127,9 @@ export function apply(ctx: Context, config: Config): void {
   // v1.21 分层：简单配置（开关/阈值）注册到 dsh 原生设置面板（零改 DSH；
   // 旧 RC 白名单存在时 client 侧自动降级，账号复杂配置走宁静号面板不受影响）
   registerSettingsSection(ctx, config)
-  // v1.21 F1：双端口网关（第二监听器 + 登录 + 反代；账号/开关经 localstore + settings）
-  registerGateway(ctx, { getRoot: () => findSerenityRoot(process.cwd()) })
+  // v1.21 F1：双端口网关（第二监听器 + 登录 + 反代；root 从会话 cwd 发现——
+  // dsh web 进程 cwd 是 $HOME 非 CCC，不能依赖 process.cwd()）
+  registerGateway(ctx, {})
   // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createSessionTool 内实现，
   // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {

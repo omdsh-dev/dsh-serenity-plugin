@@ -1,3 +1,17 @@
+## v1.21.1 — 2026-08-26（UX 修复 + F1 gateway 功能修复，S142）
+
+**Scope:** 用户三截图反馈 + 功能实测：
+① UI 看齐 dsh 自身（层级标题/行卡/官方 token）；② F1 3081 端口未监听（功能 bug）修复。
+
+### 变更
+- **F1 gateway 功能修复（3081 未监听根因）**：`registerGateway` 原用 `findSerenityRoot(process.cwd())`——dsh web 进程 cwd 是 $HOME 非 CCC → **永远 null → 永不启动**。改为：**root 从 `agent/session-start` 的 header.cwd 发现**（首个会话出现即启动）；sync **幂等**（配置签名 diff 才重启）；**enabled=true 即监听**（无账号时登录页提示而非端口不通）；`/serenity/config` PUT 后 emit `serenity/config-updated` 事件 → 立即重建
+- **SettingsSection UI 重构**：官方 settings 设计语言——`section/title/intro + rowCard 行卡`（标题+说明 左列 / 开关右置），开关用 `--dsw-alias-*` token 的自绘 toggle；多级标题（页面标题 → 行卡 → 说明）解决"怎么用"困惑；`Toggle`/`RowCard` 纯组件
+- **SafeModePanel 状态卡**：卡片本体加 **safe-mode 徽标**（ON 琥珀 / OFF 灰，--dsw-alias-state-warning-*）——不进模态即可见状态；loop 详情默认折叠（计数 + 展开按钮）
+- **模态内容溢出修复**：`sp-modalBody` 改 `overflow-y: auto`（内容超出滚动，不再截断）；loop 详情展开后最多 3 条 + 其余提示
+- `SettingsSection.css` 重写：官方 token 词汇表（border-l2/r12 行卡、36px 胶囊按钮风格、32px 输入字段高度）
+
+**测试：** 38 files / 348 tests（gateway 修复 + accounts-api 已覆盖）→ typecheck ✓（node + client）
+
 ## v1.21.0 — 2026-08-26（三功能 + 双层配置面板：F1 双端口网关 / F2 session_rebuild / F3 会话命名 / 高级面板，S142）
 
 **Scope:** 用户 S142 需求组（细化+拍板）：零改 DSH 前提下——① F1 dsh web 额外监听一个端口（账号密码登录后即原生 Web UI，适应任何部署）；② F2 上下文超限 LLM 主动触发 `session_rebuild` 清空重建（SESSION.md 实时整理 → 压缩不再需要）；③ F3 dsh 会话命名受宁静号 SESSION 控制（use 激活时重命名为目录名）；④ 配置双层：**简单配置（开关/阈值）→ dsh 原生设置面板**（官方新 RC 已删 WEB_SETTINGS_NAMESPACES 白名单，第三方 ns 零改 DSH 可进），**复杂配置（账号列表）→ 宁静号高级面板**（双 tab 状态/账号）。
