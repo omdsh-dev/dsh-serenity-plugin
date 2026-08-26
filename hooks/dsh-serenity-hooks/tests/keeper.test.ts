@@ -4,6 +4,24 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
+vi.mock('@deepseek-ai/schemastery', () => {
+  const chain: unknown = new Proxy(function () {}, {
+    get: (_t, prop) => {
+      if (prop === Symbol.toPrimitive) return () => ''
+      if (prop === 'valueOf') return () => 0
+      if (prop === 'toString') return () => ''
+      return chain
+    },
+    apply: () => chain,
+  })
+  return { default: { object: (s: unknown) => s, array: () => chain, string: () => chain, boolean: () => chain, number: () => chain } }
+})
+
+vi.mock('@deepseek-ai/dsh-settings', () => ({
+  installSettingsSection: () => {},
+  settingsNamespace: (v: string) => v,
+}))
+
 import { KeeperTracker, scoreTool, reminderText } from '../src/seams/keeper.js'
 
 describe('keeper: 纯跟踪器', () => {

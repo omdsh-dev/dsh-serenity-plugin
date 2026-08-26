@@ -50,7 +50,7 @@ function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-function sessionsRoot(root: string): string {
+export function sessionsRoot(root: string): string {
   return join(root, 'AGENT_SESSIONS')
 }
 

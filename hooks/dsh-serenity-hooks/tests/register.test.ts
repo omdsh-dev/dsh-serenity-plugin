@@ -74,10 +74,10 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(typeof apply).toBe('function')
   })
 
-  it('apply 注册 10 个真实工具', () => {
+  it('apply 注册 11 个真实工具（v1.21 + session_rebuild）', () => {
     const { ctx, register } = mockCtx()
     apply(ctx, FULL_CONFIG)
-    expect(register).toHaveBeenCalledTimes(10)
+    expect(register).toHaveBeenCalledTimes(11)
     const names = register.mock.calls.map((c) => (c[0] as { name: string }).name)
     expect(names).toContain('cc_fs')
     expect(names).toContain('session')
@@ -88,6 +88,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('neat')
     expect(names).toContain('cce')
     expect(names).toContain('loop')
+    expect(names).toContain('session_rebuild')
     expect(names).toContain('localstore')
   })
 

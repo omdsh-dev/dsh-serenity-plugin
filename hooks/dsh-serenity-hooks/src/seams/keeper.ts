@@ -15,6 +15,7 @@ import type { PostToolDecision, ToolExecution, ToolExecutionResult } from '@deep
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
+import { readSimpleSettings } from '../settings-section.js'
 
 // ── 纯跟踪器（可单测）──
 
@@ -73,6 +74,30 @@ export function reminderText(code: string, score: number): string {
   return `[SESSION-KEEPER] Score threshold reached (${score}). Please acknowledge with [SESSION-KEEPER-recorded-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
 }
 
+/** F2 rebuild 提示（v1.21）：上下文接近上限时引导 LLM 主动触发 session_rebuild */
+export function rebuildReminderText(ratio: number): string {
+  return `[SESSION-REBUILD] 上下文占用已达 ${(ratio * 100).toFixed(0)}%（接近上限）。` +
+    `SESSION.md 已实时整理，无需压缩——如需清空重建，可在适当时机调用 session_rebuild` +
+    `（将归档当前会话并开启新会话，身份自动延续）。`
+}
+
+/** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
+export function readContextPressure(
+  ctx: Context,
+  session: unknown,
+): { projectedTokens: number; contextWindow: number | undefined } | null {
+  try {
+    const projections = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionProjections')
+    if (!projections) return null
+    const snap = (projections as { snapshot?: (s: unknown) => { values?: Record<string, unknown> } }).snapshot?.(session)
+    const pressure = snap?.values?.contextPressure as { projectedTokens?: number; contextWindow?: number } | undefined
+    if (!pressure || typeof pressure.projectedTokens !== 'number') return null
+    return { projectedTokens: pressure.projectedTokens, contextWindow: pressure.contextWindow }
+  } catch {
+    return null
+  }
+}
+
 // ── DSH 注册 ──
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
@@ -118,16 +143,34 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const content: ContentBlock[] = [{ type: 'text', text: reminderText(code, tracker.currentScore) }]
     const reminder = createUserMessage({ content, source: PLUGIN_SOURCE })
 
+    // v1.21 F2：上下文压力检测（独立于计分提醒）——超 rebuildThreshold 时追加 rebuild 提示
+    const extra: ContentBlock[] = []
+    if (readSimpleSettings().rebuildEnabled) {
+      const session = (exec as { agent?: { session?: unknown } }).agent?.session
+      if (session) {
+        const pressure = readContextPressure(ctx, session)
+        if (pressure && pressure.contextWindow && pressure.contextWindow > 0) {
+          const ratio = pressure.projectedTokens / pressure.contextWindow
+          const threshold = readSimpleSettings().rebuildThreshold
+          if (ratio >= threshold) {
+            extra.push({ type: 'text', text: rebuildReminderText(ratio) })
+          }
+        }
+      }
+    }
+    const allBlocks = extra.length > 0 ? [...content, ...extra] : content
+    const reminderAll = createUserMessage({ content: allBlocks, source: PLUGIN_SOURCE })
+
     if (downstream.kind === 'block') {
       return {
         kind: 'block',
         feedback: downstream.feedback,
-        additionalContexts: [reminder, ...(downstream.additionalContexts ?? [])],
+        additionalContexts: [reminderAll, ...(downstream.additionalContexts ?? [])],
       }
     }
     return {
       ...downstream,
-      additionalContexts: [reminder, ...(downstream.additionalContexts ?? [])],
+      additionalContexts: [reminderAll, ...(downstream.additionalContexts ?? [])],
     }
   })
 }

@@ -23,6 +23,7 @@ import { neatTool } from './tools/neat.js'
 import { cceTool } from './tools/cce.js'
 import { createLoopTool } from './tools/loop.js'
 import { createSessionTool } from './tools/session.js'
+import { createRebuildTool } from './tools/rebuild.js'
 import { localstoreTool } from './tools/localstore.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
@@ -102,6 +103,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(neatTool)
     ctx.tools.register(cceTool)
     ctx.tools.register(createLoopTool(ctx))
+    ctx.tools.register(createRebuildTool(ctx))
     ctx.tools.register(localstoreTool)
   }
   if (config.guards) {
