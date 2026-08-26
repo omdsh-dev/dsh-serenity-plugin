@@ -1,20 +1,23 @@
 /**
- * config-ops.ts — 高级设定配置读写（结构化，localstore.json `serenityAdvanced` 节）
+ * config-ops.ts — plugin 全局配置读写（结构化，`~/.dsh/serenity-hooks.json`）
  *
- * 与 localstore-ops 的扁平 config 节（section.key → string）不同，高级设定需要
- * 结构化对象（嵌套 boolean/number/数组账号列表），故独立实现：直接读写
- * localstore.json 顶层 `serenityAdvanced` 节，保留其余节（credentials/config）不变。
+ * 归属原则（S142 用户拍板，v1.22）：**plugin 是全局的，CCC 是具体的**——
+ * 账号密码/gateway 监听配置是 plugin 级能力，归 plugin 全局文件；
+ * CCC 的 localstore.json 只管 CCC 自己的凭据/配置。v1.21.x 曾把
+ * `serenityAdvanced` 存进 CCC localstore（归属错误 + 与 DSH settings 开关割裂），
+ * 本版本迁移到 plugin 全局文件（migrateLegacyLocalstore 一次性迁移）。
  *
- * git 策略：沿用 localstore 语义——写入时 ensureLocalstoreGitignored（deny 缺省物理保证）。
+ * 文件：$DSH_HOME/serenity-hooks.json（缺省 ~/.dsh/serenity-hooks.json；
+ * env SERENITY_HOOKS_CONFIG 可覆盖——测试/部署注入）。
+ * 权限：0600（含账号密码 hash，敏感）。
  *
  * 安全：密码仅存 scrypt hash（node:crypto 内置，零依赖）；wire 层永不返回 hash
  * （GET 只回 user/id，设置面板"密码"字段提交空串 = 不修改）。
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { localstorePath, ensureLocalstoreGitignored } from './localstore-ops.js'
 
 // ── 配置模型 ──
 
@@ -37,6 +40,8 @@ export interface GatewaySettings {
   host: string
   port: number
   accounts: GatewayAccount[]
+  /** 外部可访问的工作区路径前缀白名单（v1.22；空数组 = 全部允许） */
+  workspaces: string[]
 }
 
 /** F2 超限重建配置 */
@@ -66,6 +71,7 @@ export function defaultAdvancedSettings(): AdvancedSettings {
       host: '0.0.0.0',
       port: 3081,
       accounts: [],
+      workspaces: [],
     },
     rebuild: {
       enabled: true,
@@ -98,12 +104,19 @@ export function verifyPassword(password: string, stored: string): boolean {
   return expected.length === derived.length && timingSafeEqual(expected, derived)
 }
 
-// ── 读写（localstore.json `serenityAdvanced` 节）──
+// ── 读写（plugin 全局文件 ~/.dsh/serenity-hooks.json）──
+
+/** 全局配置文件路径：env SERENITY_HOOKS_CONFIG 覆盖（测试注入）→ $DSH_HOME → ~/.dsh */
+export function globalConfigPath(): string {
+  const override = process.env.SERENITY_HOOKS_CONFIG
+  if (override && override !== '') return override
+  const dshHome = process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh')
+  return join(dshHome, 'serenity-hooks.json')
+}
 
 type StoreShape = Record<string, unknown>
 
-function readAll(root: string): StoreShape {
-  const p = localstorePath(root)
+function readFileSafe(p: string): StoreShape {
   if (!existsSync(p)) return {}
   try {
     const v = JSON.parse(readFileSync(p, 'utf-8').replace(/^\uFEFF/, '')) as unknown
@@ -114,9 +127,10 @@ function readAll(root: string): StoreShape {
   }
 }
 
-function writeAll(root: string, data: StoreShape): void {
-  writeFileSync(localstorePath(root), JSON.stringify(data, null, 2) + '\n', 'utf-8')
-  ensureLocalstoreGitignored(root)
+function writeFileSafe(p: string, data: StoreShape): void {
+  writeFileSync(p, JSON.stringify(data, null, 2) + '\n', 'utf-8')
+  // 全局文件含账号密码 hash——0600（仅属主可读）
+  try { chmodSync(p, 0o600) } catch { /* 权限设置失败不阻断（如只读挂载） */ }
 }
 
 /** 深合并默认值（缺省字段补齐；accounts 数组整体替换） */
@@ -139,6 +153,9 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
             && typeof (a as GatewayAccount).user === 'string'
             && typeof (a as GatewayAccount).passHash === 'string')
         : def.gateway.accounts,
+      workspaces: Array.isArray(gateway.workspaces)
+        ? gateway.workspaces.filter((w): w is string => typeof w === 'string' && w !== '')
+        : def.gateway.workspaces,
     },
     rebuild: {
       enabled: typeof rebuild.enabled === 'boolean' ? rebuild.enabled : def.rebuild.enabled,
@@ -150,24 +167,22 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
   }
 }
 
-/** 读取高级设定（文件缺失/坏 JSON → 默认值） */
-export function readAdvancedSettings(root: string): AdvancedSettings {
-  return mergeWithDefaults(readAll(root)[ADVANCED_SECTION])
+/** 读取全局配置（文件缺失/坏 JSON → 默认值） */
+export function readAdvancedSettings(): AdvancedSettings {
+  return mergeWithDefaults(readFileSafe(globalConfigPath()))
 }
 
-/** 写入高级设定全量（保留其他节） */
-export function writeAdvancedSettings(root: string, settings: AdvancedSettings): void {
-  const all = readAll(root)
-  all[ADVANCED_SECTION] = settings
-  writeAll(root, all)
+/** 写入全局配置（整体替换） */
+export function writeAdvancedSettings(settings: AdvancedSettings): void {
+  writeFileSafe(globalConfigPath(), settings as unknown as StoreShape)
 }
 
 /**
- * 部分更新（面板 PUT 用）：传入 Partial，深合并到现有值。
+ * 部分更新：传入 Partial，深合并到现有值。
  * accounts 传入数组 → 整体替换；accounts 未传 → 保留现有。
  */
-export function updateAdvancedSettings(root: string, patch: Partial<AdvancedSettings>): AdvancedSettings {
-  const current = readAdvancedSettings(root)
+export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): AdvancedSettings {
+  const current = readAdvancedSettings()
   const gw = patch.gateway
   const rb = patch.rebuild
   const nm = patch.naming
@@ -178,6 +193,9 @@ export function updateAdvancedSettings(root: string, patch: Partial<AdvancedSett
         host: typeof gw.host === 'string' && gw.host !== '' ? gw.host : current.gateway.host,
         port: typeof gw.port === 'number' && Number.isInteger(gw.port) ? gw.port : current.gateway.port,
         accounts: Array.isArray(gw.accounts) ? gw.accounts : current.gateway.accounts,
+        workspaces: Array.isArray(gw.workspaces)
+          ? gw.workspaces.filter((w): w is string => typeof w === 'string' && w !== '')
+          : current.gateway.workspaces,
       }
       : current.gateway,
     rebuild: rb !== undefined
@@ -192,8 +210,24 @@ export function updateAdvancedSettings(root: string, patch: Partial<AdvancedSett
       ? { enabled: typeof nm.enabled === 'boolean' ? nm.enabled : current.naming.enabled }
       : current.naming,
   }
-  writeAdvancedSettings(root, next)
+  writeAdvancedSettings(next)
   return next
+}
+
+/**
+ * 一次性迁移（v1.21.x → v1.22）：旧版把 `serenityAdvanced` 存在 CCC localstore.json；
+ * 新版归 plugin 全局文件。全局文件已存在 → 跳过（幂等）；localstore 无旧节 → 跳过。
+ * @param root - CCC 根（localstore.json 所在目录）
+ * @returns true = 已迁移（旧节保留在 localstore 供回滚，读取方以全局文件为准）
+ */
+export function migrateLegacyLocalstore(root: string | null): boolean {
+  if (!root) return false
+  const gpath = globalConfigPath()
+  if (existsSync(gpath)) return false // 全局文件已存在（已迁移/已配置）
+  const legacy = readFileSafe(join(root, 'localstore.json'))[ADVANCED_SECTION]
+  if (legacy === undefined || legacy === null || typeof legacy !== 'object') return false
+  writeFileSafe(gpath, legacy as StoreShape)
+  return true
 }
 
 // ── wire 形态（面板消费；密码 hash 永不出现）──
@@ -212,6 +246,7 @@ export interface AdvancedSettingsWire {
     host: string
     port: number
     accounts: GatewayAccountWire[]
+    workspaces: string[]
   }
   rebuild: RebuildSettings
   naming: NamingSettings
@@ -229,6 +264,7 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
         user: a.user,
         hasPassword: a.passHash !== '',
       })),
+      workspaces: [...settings.gateway.workspaces],
     },
     rebuild: settings.rebuild,
     naming: settings.naming,
@@ -240,8 +276,8 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
  * accounts 元素可选带 `pass`：非空 → 重新 hash；空/缺省 → 保留现有 hash（按 id 匹配）。
  * 新账号（id 不在现有）必须带非空 pass，否则抛错（无法生成 hash）。
  */
-export function applyWirePatch(root: string, wire: Partial<AdvancedSettingsWire>): AdvancedSettings {
-  const current = readAdvancedSettings(root)
+export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSettings {
+  const current = readAdvancedSettings()
   const patch: Partial<AdvancedSettings> = {}
 
   if (wire.gateway !== undefined) {
@@ -250,6 +286,9 @@ export function applyWirePatch(root: string, wire: Partial<AdvancedSettingsWire>
     if (typeof wire.gateway.enabled === 'boolean') gwPatch.enabled = wire.gateway.enabled
     if (typeof wire.gateway.host === 'string' && wire.gateway.host !== '') gwPatch.host = wire.gateway.host
     if (typeof wire.gateway.port === 'number' && Number.isInteger(wire.gateway.port)) gwPatch.port = wire.gateway.port
+    if (Array.isArray(wire.gateway.workspaces)) {
+      gwPatch.workspaces = wire.gateway.workspaces.filter((w): w is string => typeof w === 'string' && w !== '')
+    }
     if (Array.isArray(wire.gateway.accounts)) {
       const byId = new Map(current.gateway.accounts.map((a) => [a.id, a]))
       const nextAccounts: GatewayAccount[] = wire.gateway.accounts.map((a) => {
@@ -278,5 +317,5 @@ export function applyWirePatch(root: string, wire: Partial<AdvancedSettingsWire>
   if (wire.naming !== undefined && typeof wire.naming.enabled === 'boolean') {
     patch.naming = { enabled: wire.naming.enabled }
   }
-  return updateAdvancedSettings(root, patch)
+  return updateAdvancedSettings(patch)
 }

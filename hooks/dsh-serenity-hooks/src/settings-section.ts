@@ -99,8 +99,15 @@ export function registerSettingsSection(ctx: Context, config: SimpleConfigFragme
         simpleSource = get
       },
       onChange: () => {
-        // 简单配置变化 → 无需额外动作（各功能读取时实时取值）；
-        // 保留钩子供未来需要（如 gateway 监听端口变更时热重启）
+        // 简单配置变化（开关/阈值）→ 通知 gateway 重新 sync。
+        // 走 'serenity/settings-changed'（非强制）：sync 内部 sig 判断，
+        // 无实质 gateway 变化（如仅阈值拖动）不重建，避免无谓断 WS。
+        // 账号/监听/白名单变化（/serenity/config PUT）才走 'serenity/config-updated' 强制重建。
+        try {
+          (ctx as unknown as { emit?: (name: string, payload?: unknown) => void }).emit?.('serenity/settings-changed')
+        } catch {
+          /* 事件通知失败不影响 settings 保存 */
+        }
       },
     },
   )

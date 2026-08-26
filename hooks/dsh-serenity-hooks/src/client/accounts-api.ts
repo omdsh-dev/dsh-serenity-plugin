@@ -1,6 +1,8 @@
 /**
- * accounts-api.ts — 账号配置的浏览器操作面（v1.21 面板账号 tab）
+ * accounts-api.ts — 账号配置的浏览器操作面（v1.22 plugin 全局）
  *
+ * 归属原则（v1.22）：账号密码是 **plugin 全局配置**（~/.dsh/serenity-hooks.json），
+ * 不依赖任何具体 CCC——GET/PUT 不带 sessionId/workspace。
  * 数据通道：同源 HTTP /serenity/config（node half api.ts；x-serenity-ui 头）。
  *  GET → wire 形态（accounts: {id, user, hasPassword}[]；无 hash）
  *  PUT → wire patch（账号数组整体替换；pass 空=保留原 hash；新账号必带 pass）
@@ -22,6 +24,7 @@ export interface WireConfig {
     host: string
     port: number
     accounts: WireAccount[]
+    workspaces: string[]
   }
   rebuild: { enabled: boolean; thresholdRatio: number }
   naming: { enabled: boolean }
@@ -60,14 +63,13 @@ export function validateDraft(d: AccountDraft): string | null {
   return null
 }
 
-// ── HTTP 操作 ──
+// ── HTTP 操作（plugin 全局：不带 sessionId） ──
 
 const CONFIG_PATH = '/serenity/config'
 
 /** GET 配置（含账号列表；无 hash） */
-export async function fetchConfig(sessionId: string): Promise<WireConfig | null> {
-  const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
-  const res = await fetch(`${CONFIG_PATH}${qs}`, {
+export async function fetchConfig(): Promise<WireConfig | null> {
+  const res = await fetch(CONFIG_PATH, {
     headers: { accept: 'application/json', 'x-serenity-ui': '1' },
   })
   if (!res.ok) return null
@@ -75,15 +77,14 @@ export async function fetchConfig(sessionId: string): Promise<WireConfig | null>
   return body.config ?? null
 }
 
-/** PUT 配置（账号 patch）→ 返回保存后的 wire */
+/** PUT 配置（账号 patch + 工作区白名单）→ 返回保存后的 wire */
 export async function saveConfig(
-  sessionId: string,
-  patch: { gateway?: { host?: string; port?: number; accounts?: { id: string; user: string; pass: string }[] } },
+  patch: { gateway?: { host?: string; port?: number; accounts?: { id: string; user: string; pass: string }[]; workspaces?: string[] } },
 ): Promise<WireConfig | null> {
   const res = await fetch(CONFIG_PATH, {
     method: 'PUT',
     headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
-    body: JSON.stringify({ sessionId, config: patch }),
+    body: JSON.stringify({ config: patch }),
   })
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as { error?: string } | null

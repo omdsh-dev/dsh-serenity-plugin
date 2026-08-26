@@ -1,4 +1,24 @@
-## v1.21.1 — 2026-08-26（UX 修复 + F1 gateway 功能修复，S142）
+## v1.22.0 — 2026-08-27（归属重构 + 外部访问稳定性修复，S142）
+
+**Scope:** 用户三轮实测驱动：① 架构原则升级（**plugin 是全局的，CCC 是具体的**——账号密码归 plugin，不挂 CCC localstore）；② 3081 外部访问完整可用（登录/工作区/会话/WS 事件流）；③ 设置面板 UI 专业重构（DSH 设置面板承载全部 plugin 配置，CCC 状态栏面板只展示状态）。
+
+### 变更
+- **归属重构（config-ops 全局化）**：`serenityAdvanced` 从 CCC localstore.json **迁移到 plugin 全局文件 `~/.dsh/serenity-hooks.json`**（env `SERENITY_HOOKS_CONFIG` 覆盖；0600 权限；`migrateLegacyLocalstore` 首次 session-start 一次性迁移）；所有读写函数去 root 参数
+- **gateway 开关打通（3081 未启动根因修复）**：`registerGateway` 的 enabled 改读 **`readSimpleSettings().gatewayEnabled`**（DSH settings 面板开关，plugin 全局）——此前读 localstore `serenityAdvanced.gateway.enabled`（永远 false）与用户设置割裂 → 永不启动；host/port/accounts 读全局文件；**不依赖任何具体 CCC**（apply 即尝试 + session-start 兜底）
+- **信任栅栏修复（HTTP 403 根因）**：DSH `isTrustedApiRequest` 要求 **Origin.host === Host.host**——反代除改写 Host（127.0.0.1:主端口）外 **Origin 同步改写**为 loopback（浏览器 POST/WS 握手必带 Origin，透传外部地址 → 403 → host.pickDirectory 等全挂）；`buildProxyHeaders` 纯函数（可测）
+- **WS 稳定性修复（ERR_INVALID_HTTP_RESPONSE 根因）**：upgrade 转发①**回写 101 状态行+响应头**到客户端 socket（Node http upgrade 不自动回写——只 pipe 数据 → 无头响应 → handshake 失败）②监听 `response` 透传非 101（403/426）③head/uhead 方向修正（客户端数据→上游，上游数据→客户端）
+- **WS 会话保持**：`dispose` **不再清空 token**（token 模块级，进程重启自然清空；热重建清 token → 已登录用户 WS 断 + 重连 cookie 无效）；settings 简单配置变化走 `serenity/settings-changed`（非强制 sync），仅 /serenity/config PUT 走 `serenity/config-updated`（强制重建）——拖动阈值不再打断 WS
+- **gateway listen 防崩溃**：EADDRINUSE（旧进程未释放）→ **不抛 unhandled error 崩溃**，1s 重试 ×10；restart-web 双端口（3080+3081）等待释放 + 强杀覆盖
+- **工作区白名单（用户需求）**：`gateway.workspaces` 路径前缀白名单（空=全部允许，向后兼容）——gateway 拦截 `POST /api/workspace.list` 响应过滤 items + `workspace.create` 校验（不在白名单 → 403 RPC error）；`filterWorkspaceList`/`workspaceAllowed`/`workspaceDenyResponse` 纯函数
+- **crypto.randomUUID polyfill（非安全上下文修复）**：第二端口 http://LAN-IP:3081 是非安全上下文 → 浏览器 Web Crypto `randomUUID` 不可用 → provider 目录加载失败；gateway 反代 HTML 注入 polyfill（getRandomValues 实现，DSH 官方 random-uuid.ts 同算法，幂等 marker）
+- **CCC 状态栏面板（SafeModePanel 重构）**：只展示状态（运行环境/安全模式/Loop 运行 + 配置入口引导提示）——账号等配置移出；分组标题 + 行卡 + 清晰换行 + 底部引导
+- **DSH 设置面板承载全部 plugin 配置（SettingsSection + AccountsEditor）**：简单配置（开关/阈值）+ 「外部访问」区块（监听地址/端口 + 登录账号 CRUD + 工作区白名单 chips）——账号 CRUD 从 CCC 面板移到 plugin 层（用户拍板）
+- **远程状态显示修复**：`resolveWorkspace` 无 sessionId 时**遍历 live sessions 找 CCC 会话**（回退 process.cwd()=$HOME 错误显示"未激活"）；`resolveWorkspaceCore` 纯函数
+- 删除 `AccountsTab.tsx/.css`（被 AccountsEditor 取代）；`client/index.ts`/`SettingsSection.tsx` 同步
+
+**测试：** 39 files / 372 tests（+24：workspaces patch / polyfill / workspace 白名单 / 信任栅栏 / workspace-resolve）→ typecheck ✓（node + client）
+
+
 
 **Scope:** 用户三截图反馈 + 功能实测：
 ① UI 看齐 dsh 自身（层级标题/行卡/官方 token）；② F1 3081 端口未监听（功能 bug）修复。

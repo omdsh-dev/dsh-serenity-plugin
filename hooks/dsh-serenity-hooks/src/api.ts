@@ -82,14 +82,44 @@ export interface StatusApiRegistration {
   configPaths?: string[]
 }
 
-/** 从请求参数解析 workspace：优先 sessionId → 会话 header.cwd；其次 workspace 参数；最后进程 cwd */
+/**
+ * 从请求参数解析 workspace：优先 sessionId → 会话 header.cwd；其次 workspace 参数；
+ * 无参 → 遍历 live sessions 找第一个 CCC 会话的 cwd（远程访问时 sessionId 可能缺失，
+ * 回退 process.cwd()=$HOME 会错误显示"未激活"——v1.22.2 修复）；最后进程 cwd。
+ * 纯逻辑（可单测）：resolveWorkspaceCore(sessionCwd, workspaceParam, listCwds)。
+ */
+export function resolveWorkspaceCore(
+  sessionCwd: string | undefined,
+  workspaceParam: string | undefined,
+  listCwds: () => string[],
+  fallback: string,
+): string {
+  if (sessionCwd) return sessionCwd
+  if (workspaceParam) return workspaceParam
+  for (const cwd of listCwds()) {
+    if (cwd && findSerenityRoot(cwd)) return cwd
+  }
+  return fallback
+}
+
 function resolveWorkspace(ctx: Context, params: { sessionId?: string; workspace?: string }): string {
+  let sessionCwd: string | undefined
   if (params.sessionId) {
     const session = (ctx.sessions as { get?: (id: SessionId) => { header?: { cwd?: string } } | undefined } | undefined)?.get?.(params.sessionId as SessionId)
-    if (session?.header?.cwd) return session.header.cwd
+    sessionCwd = session?.header?.cwd
   }
-  if (typeof params.workspace === 'string' && params.workspace) return params.workspace
-  return process.cwd()
+  let listCwds: () => string[] = () => []
+  try {
+    const sessions = (ctx.sessions as unknown as {
+      list?: () => Array<{ header?: { cwd?: string } }>
+    } | undefined)
+    if (typeof sessions?.list === 'function') {
+      listCwds = () => sessions.list!().map((s) => s.header?.cwd ?? '').filter(Boolean)
+    }
+  } catch {
+    /* 遍历失败 → 空列表 */
+  }
+  return resolveWorkspaceCore(sessionCwd, params.workspace, listCwds, process.cwd())
 }
 
 export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}): void {
@@ -194,7 +224,9 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     },
   })
 
-  // /serenity/config：高级设定读写（v1.21 面板数据源；client 专属头）
+  // /serenity/config：plugin 全局配置读写（v1.21 面板数据源；v1.22 全局化——
+  // 归属原则：账号密码/gateway 监听是 plugin 级能力，存 ~/.dsh/serenity-hooks.json，
+  // 不依赖任何具体 CCC。client 专属头）
   // GET  → wire 形态（密码 hash 永不返回；accounts 只含 id/user/hasPassword）
   // PUT  → wire patch 应用（新账号必须带 pass；既有账号 pass 空=保留原 hash）
   ctx.webServer.register({
@@ -207,26 +239,13 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           return
         }
         if (req.method === 'GET') {
-          const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-          const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
-          const root = findSerenityRoot(workspace)
-          if (!root) {
-            sendJson(res, 200, { config: null, error: `no CCC found from workspace: ${workspace}` })
-            return
-          }
-          sendJson(res, 200, { config: toWire(readAdvancedSettings(root)) })
+          sendJson(res, 200, { config: toWire(readAdvancedSettings()) })
           return
         }
         if (req.method === 'PUT') {
           const raw = await readBody(req, 128 * 1024)
-          const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; config?: Partial<ReturnType<typeof toWire>> }
-          const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
-          const root = findSerenityRoot(workspace)
-          if (!root) {
-            sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
-            return
-          }
-          const saved = applyWirePatch(root, body.config ?? {})
+          const body = JSON.parse(raw) as { config?: Partial<ReturnType<typeof toWire>> }
+          const saved = applyWirePatch(body.config ?? {})
           // 通知 gateway 重建（第二监听器配置/账号变化后立即生效）
           try {
             (ctx as unknown as { emit?: (name: string, payload?: unknown) => void }).emit?.('serenity/config-updated')

@@ -378,11 +378,14 @@ req.end();`
 function cmdRestartWeb(): void {
   // 重启 dsh web：kill 旧进程 → 等待端口释放 → rc.6 CLI 启动新进程（setsid 脱离，nohup 后台）
   // 公开版适配：运行时 = 已安装 CLI（~/.npm-global/bin/dsh），非 staging 源码（旧架构）
+  // v1.22.1 稳定性修复：kill 后同时等待 3080 + 3081 释放（gateway 第二端口常被旧进程占用，
+  // 只等 3080 → 新进程 gateway listen EADDRINUSE → 崩溃，表现为"restart 不成功，需手动启动"）
   const dshHome = process.env.DSH_HOME ?? join(process.env.HOME ?? '', '.dsh')
   const cliBin = join(process.env.HOME ?? '', '.npm-global', 'bin', 'dsh')
   const npmDsh = join(process.env.HOME ?? '', '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
   const bin = existsSync(npmDsh) ? npmDsh : cliBin
   const PORT = 3080
+  const GATEWAY_PORT = 3081
   if (!existsSync(bin)) fail(`dsh CLI 缺失: ${bin}`, 2)
 
   // 1) 找到旧 web 进程并 kill（含残留：匹配 bin.js web / bin/dsh web）
@@ -393,18 +396,18 @@ function cmdRestartWeb(): void {
     console.log(`    kill ${pid}`)
     run('kill', [pid], { cwd: process.cwd(), quiet: true })
   }
-  // 2) 轮询等待端口释放（最多 15s；EADDRINUSE 根因：kill 后旧进程未完全退出）
-  const waitForPortFree = (): boolean => {
+  // 2) 轮询等待端口释放（最多 15s；EADDRINUSE 根因：kill 后旧进程未完全退出 / gateway 端口未释放）
+  const waitForPortsFree = (): boolean => {
     for (let i = 0; i < 15; i++) {
-      const probe = run('bash', ['-c', `ss -ltn 2>/dev/null | grep -q ':${PORT} ' && echo busy || echo free`], { cwd: process.cwd(), quiet: true })
+      const probe = run('bash', ['-c', `ss -ltn 2>/dev/null | grep -qE ':(${PORT}|${GATEWAY_PORT}) ' && echo busy || echo free`], { cwd: process.cwd(), quiet: true })
       if (probe.stdout.trim().includes('free')) return true
       run('sleep', ['1'], { cwd: process.cwd(), quiet: true })
     }
     return false
   }
-  if (!waitForPortFree()) {
-    console.error(`[dsh-develop] ⚠️ 端口 ${PORT} 15s 内未释放，尝试强杀`)
-    const hard = run('bash', ['-c', `ss -ltnp 2>/dev/null | grep ':${PORT} ' | grep -oP 'pid=\\K[0-9]+' | sort -u`], { cwd: process.cwd(), quiet: true })
+  if (!waitForPortsFree()) {
+    console.error(`[dsh-develop] ⚠️ 端口 ${PORT}/${GATEWAY_PORT} 15s 内未释放，尝试强杀`)
+    const hard = run('bash', ['-c', `ss -ltnp 2>/dev/null | grep -E ':(${PORT}|${GATEWAY_PORT}) ' | grep -oP 'pid=\\K[0-9]+' | sort -u`], { cwd: process.cwd(), quiet: true })
     for (const pid of hard.stdout.trim().split('\n').filter(Boolean)) {
       run('kill', ['-9', pid], { cwd: process.cwd(), quiet: true })
     }
@@ -419,11 +422,12 @@ function cmdRestartWeb(): void {
   console.log(`[dsh-develop] ✓ web 已重启（bin: ${bin}，日志: ${log}）`)
   console.log(`[dsh-develop]   等待 18s 后健康检查（curl /serenity/status，端口 ${PORT}）...`)
   run('sleep', ['18'], { cwd: process.cwd(), quiet: true })
-  // 端口确认
+  // 端口确认（主端口 + gateway 第二端口）
   const portCheck = run('bash', ['-c', `ss -ltn 2>/dev/null | grep -q ':${PORT} ' && echo LISTENING || echo DOWN`], { cwd: process.cwd(), quiet: true })
+  const gwCheck = run('bash', ['-c', `ss -ltn 2>/dev/null | grep -q ':${GATEWAY_PORT} ' && echo LISTENING || echo DOWN`], { cwd: process.cwd(), quiet: true })
   const health = run('curl', ['-s', 'http://127.0.0.1:3080/serenity/status?workspace=' + (process.env.SERENITY_CCC_ROOT ?? '')], { cwd: process.cwd(), quiet: true })
   const statusLine = health.status === 0 && health.stdout ? health.stdout.trim().slice(0, 400) : ''
-  console.log(`[dsh-develop] 端口: ${portCheck.stdout.trim()}`)
+  console.log(`[dsh-develop] 端口: 主=${portCheck.stdout.trim()} 网关=${gwCheck.stdout.trim()}`)
   console.log(statusLine ? `[dsh-develop] ✓ 状态: ${statusLine}` : '[dsh-develop] ⚠️ 健康检查未返回（检查日志）')
   if (statusLine) {
     try {

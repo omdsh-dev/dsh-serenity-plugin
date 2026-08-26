@@ -17,16 +17,93 @@
 
 import type { Context } from 'cordis'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import type { Duplex } from 'node:stream'
 import { randomBytes } from 'node:crypto'
-import { verifyPassword, readAdvancedSettings } from './config-ops.js'
+import { verifyPassword, readAdvancedSettings, migrateLegacyLocalstore } from './config-ops.js'
 import { findSerenityRoot } from './ccc.js'
+import { readSimpleSettings } from './settings-section.js'
 
 // 自定义事件：配置 PUT 后触发 gateway 重建（跨模块松耦合通知）
 declare module 'cordis' {
   interface Events {
+    /** /serenity/config PUT（账号/监听/白名单变化）→ 强制重建 gateway（lastSig=null） */
     'serenity/config-updated'(): void
+    /** DSH settings 简单配置变化（开关/阈值）→ 重新 sync（sig 判断，无实质变化不重建） */
+    'serenity/settings-changed'(): void
   }
+}
+
+// ── 外部访问增强（v1.22）──
+
+/**
+ * crypto.randomUUID polyfill（浏览器 Web Crypto 仅安全上下文可用；
+ * 经第二端口 http://LAN-IP:3081 访问 = 非安全上下文 → DSH client 的
+ * `crypto.randomUUID()`（ui-conversation/service.ts 等）抛错，provider 目录加载失败）。
+ * 用 `crypto.getRandomValues` 实现（与 DSH 官方 random-uuid.ts 同算法），
+ * 零改 DSH——gateway 反代 HTML 时注入。
+ */
+export const RANDOM_UUID_POLYFILL = `<script>
+(function () {
+  if (typeof crypto === 'undefined' || typeof crypto.randomUUID === 'function') return
+  try {
+    crypto.randomUUID = function () {
+      var bytes = crypto.getRandomValues(new Uint8Array(16))
+      bytes[6] = (bytes[6] & 0x0f) | 0x40
+      bytes[8] = (bytes[8] & 0x3f) | 0x80
+      var hex = Array.from(bytes, function (b) { return b.toString(16).padStart(2, '0') }).join('')
+      return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20)
+    }
+  } catch (e) { /* getRandomValues 也不可用则放弃 */ }
+})()
+</script>`
+
+/** 注入标记（幂等：已注入的 HTML 不重复注入） */
+const POLYFILL_MARKER = 'data-sp-randomuuid-polyfill'
+
+/**
+ * workspace.list 响应过滤（v1.22 白名单）：
+ * DSH client→server RPC 全部走 HTTP JSON（`POST /api/workspace.list`，WS 仅下行推送）。
+ * 白名单（workspaces 路径前缀）非空 → 只保留匹配前缀的 items；
+ * 空 = 全部允许（默认，向后兼容）。
+ */
+export function filterWorkspaceList(
+  body: string,
+  allowPrefixes: readonly string[],
+): string {
+  if (allowPrefixes.length === 0) return body
+  try {
+    const parsed = JSON.parse(body) as {
+      result?: { ok?: boolean; value?: { items?: Array<{ path?: string }> } }
+    }
+    const value = parsed?.result?.value
+    if (parsed?.result?.ok !== true || !value || !Array.isArray(value.items)) return body
+    const keep = (path: string | undefined): boolean =>
+      typeof path === 'string' && allowPrefixes.some((p) => path.startsWith(p))
+    value.items = value.items.filter((item) => keep(item.path))
+    return JSON.stringify(parsed)
+  } catch {
+    return body // 非 JSON / 解析失败 → 原样透传
+  }
+}
+
+/**
+ * 校验 workspace.create 请求路径是否在白名单内（v1.22）：
+ * 白名单非空且路径不匹配 → 拒绝（由调用方构造 403 RPC 响应）。
+ */
+export function workspaceAllowed(
+  allowPrefixes: readonly string[],
+  path: string | undefined,
+): boolean {
+  if (allowPrefixes.length === 0) return true
+  return typeof path === 'string' && allowPrefixes.some((p) => path.startsWith(p))
+}
+
+/** 构造 workspace.create 拒绝的 JSON RPC 响应体（code=forbidden） */
+export function workspaceDenyResponse(rpcId: string): string {
+  return JSON.stringify({
+    type: 'server-response',
+    rpcId,
+    result: { ok: false, error: { code: 'forbidden', message: 'workspace not in external allowlist', details: {} } },
+  })
 }
 
 // ── 纯逻辑（可单测）──
@@ -98,39 +175,135 @@ export interface GatewayConfig {
   mainPort: number
   /** 登录失败后的重定向延迟（秒） */
   loginDelayMs: number
+  /** 外部可访问的工作区路径前缀白名单（v1.22；空 = 全部允许） */
+  allowWorkspaces?: string[]
+}
+
+/** 读取请求体（≤ maxBytes；超限 reject） */
+function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let data = ''
+    req.on('data', (chunk: Buffer) => {
+      data += chunk.toString('utf-8')
+      if (data.length > maxBytes) {
+        reject(new Error('body too large'))
+        req.destroy()
+      }
+    })
+    req.on('end', () => resolve(data))
+    req.on('error', reject)
+  })
+}
+
+/** 在 HTML 的 </head> 前注入 polyfill（幂等：含 marker 则跳过） */
+export function injectPolyfillHtml(html: string): string {
+  if (html.includes(POLYFILL_MARKER)) return html
+  const head = RANDOM_UUID_POLYFILL.replace('<script>', `<script ${POLYFILL_MARKER}="1">`)
+  if (html.includes('</head>')) return html.replace('</head>', `${head}\n</head>`)
+  return `${head}\n${html}` // 无 head → 前置
+}
+
+/**
+ * 反代请求头构造（v1.22.1 信任栅栏修复，纯逻辑可测）：
+ * DSH isTrustedApiRequest 要求 Origin.host === Host.host——Host 改写为 loopback 后
+ * Origin 必须同步改写（浏览器 POST 必带 Origin，透传外部地址 → 403）。
+ */
+export function buildProxyHeaders(
+  reqHeaders: Record<string, string | string[] | undefined>,
+  mainPort: number,
+  bodyOverride?: string,
+): Record<string, string | number | string[]> {
+  const headers: Record<string, string | number | string[]> = {
+    ...reqHeaders as Record<string, string | string[]>,
+    host: `127.0.0.1:${mainPort}`,
+    origin: `http://127.0.0.1:${mainPort}`,
+  }
+  if (bodyOverride !== undefined) headers['content-length'] = Buffer.byteLength(bodyOverride)
+  return headers
 }
 
 /**
  * 启动第二监听器。返回 { server, dispose }——dispose 关 server + 清 token。
  * @param config - 监听/代理配置。
- * @param getAccounts - 运行时读取账号列表（localstore；gateway.enabled 开关在调用方判）。
+ * @param getAccounts - 运行时读取账号列表（plugin 全局文件；gateway.enabled 开关在调用方判）。
  */
 export function startGateway(
   config: GatewayConfig,
   getAccounts: () => readonly { user: string; passHash: string }[],
 ): { server: Server; dispose: () => void } {
   const { host, port, cookieName, mainPort, loginDelayMs } = config
+  const allowWorkspaces = config.allowWorkspaces ?? []
 
   /** 校验请求 Cookie 是否含有效 token */
   const authed = (req: IncomingMessage): boolean => validateToken(cookieValue(req.headers.cookie, cookieName))
 
-  /** 反向代理：改写 Host 头 → 主端口（loopback 过信任栅栏） */
-  const proxy = (req: IncomingMessage, res: ServerResponse): void => {
+  /**
+   * 反向代理：改写 Host + Origin 头 → 主端口（loopback 过信任栅栏）。
+   * v1.22.1 修复：DSH 信任栅栏（api-request-trust.ts isTrustedApiRequest）要求
+   * **Origin.host === Host.host**——仅改写 Host（127.0.0.1:3080）而 Origin 透传
+   * （http://192.168.x.x:3081）→ 不一致 → 所有 /api RPC 403（host.pickDirectory 首个暴露）。
+   * 增强：
+   *  - HTML 响应 → 注入 crypto.randomUUID polyfill（非安全上下文修复）
+   *  - /api/workspace.list 响应 → 白名单过滤 items
+   * @param bodyOverride - workspace.create 已读 body 时的重放（白名单检查后转发）
+   */
+  const proxy = (req: IncomingMessage, res: ServerResponse, bodyOverride?: string): void => {
+    const url = new URL(req.url ?? '/', `http://${host}:${port}`)
+    const method = req.method === 'POST' && url.pathname.startsWith('/api/')
+      ? url.pathname.slice('/api/'.length)
+      : null
+    const loopbackOrigin = `http://127.0.0.1:${mainPort}`
+    const headers = buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort, bodyOverride)
     const target = httpRequest({
       host: '127.0.0.1',
       port: mainPort,
       path: req.url ?? '/',
       method: req.method,
-      headers: { ...req.headers, host: `127.0.0.1:${mainPort}` },
+      headers,
     }, (upstream) => {
-      res.writeHead(upstream.statusCode ?? 502, upstream.headers)
+      const status = upstream.statusCode ?? 502
+      const ct = String(upstream.headers['content-type'] ?? '')
+
+      // HTML → polyfill 注入（幂等）
+      if (status === 200 && ct.includes('text/html')) {
+        const chunks: Buffer[] = []
+        upstream.on('data', (c: Buffer) => chunks.push(c))
+        upstream.on('end', () => {
+          const transformed = injectPolyfillHtml(Buffer.concat(chunks).toString('utf-8'))
+          const out = { ...upstream.headers, 'content-length': Buffer.byteLength(transformed) }
+          res.writeHead(status, out)
+          res.end(transformed)
+        })
+        upstream.on('error', () => { try { res.destroy() } catch { /* noop */ } })
+        return
+      }
+
+      // workspace.list → 白名单过滤（JSON RPC 响应）
+      if (method === 'workspace.list' && status === 200 && ct.includes('application/json')) {
+        const chunks: Buffer[] = []
+        upstream.on('data', (c: Buffer) => chunks.push(c))
+        upstream.on('end', () => {
+          const transformed = filterWorkspaceList(Buffer.concat(chunks).toString('utf-8'), allowWorkspaces)
+          const out = { ...upstream.headers, 'content-length': Buffer.byteLength(transformed) }
+          res.writeHead(status, out)
+          res.end(transformed)
+        })
+        upstream.on('error', () => { try { res.destroy() } catch { /* noop */ } })
+        return
+      }
+
+      // 其余 → 原样透传
+      res.writeHead(status, upstream.headers)
       upstream.pipe(res)
     })
     target.on('error', () => {
-      res.writeHead(502, { 'content-type': 'text/plain' })
-      res.end('502 Bad Gateway: dsh web 主端口不可达')
+      try {
+        res.writeHead(502, { 'content-type': 'text/plain' })
+        res.end('502 Bad Gateway: dsh web 主端口不可达')
+      } catch { /* res 已关闭 */ }
     })
-    req.pipe(target)
+    if (bodyOverride !== undefined) target.end(bodyOverride)
+    else req.pipe(target)
   }
 
   const server = createServer((req, res) => {
@@ -138,6 +311,28 @@ export function startGateway(
 
     // 已登录 → 全量反代（含 /serenity/* 配置接口——第二端口登录后同样可管理）
     if (authed(req)) {
+      // workspace.create：白名单校验（读 body → 检查路径 → 转发或拒绝）
+      if (req.method === 'POST' && url.pathname === '/api/workspace.create') {
+        void readBody(req, 128 * 1024).then((body) => {
+          let rpcId = 'unknown'
+          let path: string | undefined
+          try {
+            const parsed = JSON.parse(body) as { rpcId?: unknown; payload?: { path?: unknown } }
+            if (typeof parsed.rpcId === 'string') rpcId = parsed.rpcId
+            if (typeof parsed.payload?.path === 'string') path = parsed.payload.path
+          } catch { /* 解析失败 → 放行（主端口会 400） */ }
+          if (!workspaceAllowed(allowWorkspaces, path)) {
+            res.writeHead(403, { 'content-type': 'application/json' })
+            res.end(workspaceDenyResponse(rpcId))
+            return
+          }
+          proxy(req, res, body)
+        }).catch(() => {
+          res.writeHead(400, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ type: 'server-response', rpcId: 'unknown', result: { ok: false, error: { code: 'bad-request', message: 'body too large', details: {} } } }))
+        })
+        return
+      }
       proxy(req, res)
       return
     }
@@ -171,6 +366,13 @@ export function startGateway(
   })
 
   // WS upgrade 转发：主端口握手 + socket pipe
+  // v1.22.1：upgrade 也过 DSH isTrustedApiRequest（Host/Origin 一致）——
+  // 除 Host 外 **Origin 必须同步改写**为 loopback（浏览器 WS 握手带 Origin）。
+  // v1.22.2 决定性修复（ERR_INVALID_HTTP_RESPONSE 根因）：
+  //  - **必须把上游 101 状态行 + 响应头写回客户端 socket**（Node http upgrade
+  //    事件不自动回写；只 pipe 数据 → 浏览器收到无头响应 → handshake 失败）
+  //  - 监听 'response'（DSH 返回 403/404/426 等非 101）→ 透传普通 HTTP 响应
+  //    （此前只监听 upgrade/error，非 101 时连接挂起 → ERR_INVALID_HTTP_RESPONSE）
   server.on('upgrade', (req, socket, head) => {
     if (!authed(req)) {
       socket.destroy()
@@ -181,58 +383,104 @@ export function startGateway(
       port: mainPort,
       path: req.url ?? '/',
       method: req.method,
-      headers: { ...req.headers, host: `127.0.0.1:${mainPort}` },
+      headers: buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort),
     })
-    upstream.on('upgrade', (_ures, usocket, uhead) => {
-      // 双向 pipe：客户端 socket ↔ 上游 socket
+    upstream.on('upgrade', (ures, usocket, uhead) => {
+      // ① 回写 101 状态行 + 响应头（含 Sec-WebSocket-Accept 等握手字段）
+      const statusLine = `HTTP/1.1 ${ures.statusCode ?? 101} ${ures.statusMessage ?? 'Switching Protocols'}\r\n`
+      const headerLines = Object.entries(ures.headers)
+        .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}\r\n`)
+        .join('')
+      try {
+        socket.write(statusLine + headerLines + '\r\n')
+      } catch {
+        usocket.destroy()
+        socket.destroy()
+        return
+      }
+      // ② 双向 pipe：客户端 socket ↔ 上游 socket
       usocket.pipe(socket)
       socket.pipe(usocket)
-      if (uhead.length > 0) usocket.write(uhead)
-      if (head.length > 0) socket.write(head)
+      // ③ 握手后缓冲数据按方向转发：head=客户端已发数据 → 上游；uhead=上游已发数据 → 客户端
+      if (head.length > 0) usocket.write(head)
+      if (uhead.length > 0) socket.write(uhead)
+    })
+    // ③ 非 101 响应（DSH rejectWebSocketUpgrade=403 / 426 / 404）→ 透传普通 HTTP 响应
+    upstream.on('response', (ures) => {
+      const chunks: Buffer[] = []
+      ures.on('data', (c: Buffer) => chunks.push(c))
+      ures.on('end', () => {
+        const body = Buffer.concat(chunks)
+        const statusLine = `HTTP/1.1 ${ures.statusCode ?? 502} ${ures.statusMessage ?? ''}\r\n`
+        const headerLines = Object.entries(ures.headers)
+          .filter(([k]) => !['transfer-encoding', 'connection', 'upgrade'].includes(k.toLowerCase()))
+          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : String(v)}\r\n`)
+          .join('')
+        try {
+          socket.write(statusLine + headerLines + `content-length: ${body.length}\r\n\r\n`)
+          socket.write(body)
+          socket.end()
+        } catch {
+          socket.destroy()
+        }
+      })
+      ures.on('error', () => socket.destroy())
     })
     upstream.on('error', () => socket.destroy())
     upstream.end()
   })
 
-  server.listen(port, host)
+  // v1.22.1 稳定性：listen 加 error 监听——EADDRINUSE（旧进程未释放）时**不崩溃**，
+  // 记录并延迟重试（最多 10 次，间隔 1s）；其余错误记录后放弃。
+  // 根因：restart-web 曾因 3081 被旧进程占用直接抛 unhandled 'error' 导致 Node 进程崩溃。
+  const listenWithRetry = (attempt = 0): void => {
+    const onError = (err: NodeJS.ErrnoException): void => {
+      if (err.code === 'EADDRINUSE' && attempt < 10) {
+        console.warn(`[serenity-hooks] gateway 端口 ${port} 被占用（${err.code}），1s 后重试（${attempt + 1}/10）…`)
+        setTimeout(() => listenWithRetry(attempt + 1), 1000)
+        return
+      }
+      console.warn(`[serenity-hooks] gateway 监听 ${host}:${port} 失败: ${err.message ?? String(err)}`)
+    }
+    server.removeAllListeners('error')
+    server.on('error', onError)
+    server.listen(port, host)
+  }
+  listenWithRetry()
 
   return {
     server,
     dispose: () => {
-      tokens.clear()
+      // v1.22.1 稳定性：**不再清空 token**——token 是模块级集合，进程重启自然清空
+      // （用户决策"重启重新登录"仍满足）；热重建（settings/配置变化 → gateway 重建）
+      // 若清 token 会把所有已登录用户踢下线（WS 断 + 重连 cookie 无效 → ERR_INVALID_HTTP_RESPONSE）。
       server.close()
     },
   }
 }
 
 /** 注册 gateway（index.ts apply 调用）。
- * root 发现：dsh web 进程 cwd 是 $HOME（非 CCC）——不能靠 process.cwd()。
- * 改为：agent/session-start 的 header.cwd 解析 CCC 根（首个会话出现即发现）。
- * 幂等 sync：仅当 配置/端口/root 变化时重建监听器。
- * 事件驱动：config-updated（/serenity/config PUT 后 emit）触发重新 sync。
+ * 归属原则（v1.22）：gateway 是 plugin 全局能力——enabled 开关读 DSH settings
+ * （readSimpleSettings().gatewayEnabled），host/port/accounts 读 plugin 全局文件
+ * （readAdvancedSettings()，~/.dsh/serenity-hooks.json）。**不依赖任何具体 CCC**。
+ * 幂等 sync：仅当 配置/端口/开关 变化时重建监听器。
+ * 事件驱动：config-updated（/serenity/config PUT 后 emit）+ DSH settings 变化（onChange emit）触发重新 sync。
  */
-export function registerGateway(
-  ctx: Context,
-  opts: { resolveRoot?: (cwd: string) => string | null },
-): void {
+export function registerGateway(ctx: Context): void {
   let current: { dispose: () => void } | null = null
-  let discoveredRoot: string | null = null
   let lastSig: string | null = null
-
-  const resolveRoot = opts.resolveRoot ?? ((cwd: string) => findSerenityRoot(cwd))
 
   const sync = (): void => {
     try {
-      const root = discoveredRoot
       const webServer = (ctx as unknown as { get?: (name: string) => unknown }).get?.('webServer') as
         | { port?: number }
         | undefined
-      if (!root || !webServer?.port) return
+      if (!webServer?.port) return
 
-      const settings = readAdvancedSettings(root)
-      const enabled = settings.gateway.enabled
-      // 签名：enabled + host + port + 账号数（配置变化才重启）
-      const sig = `${enabled}|${settings.gateway.host}|${settings.gateway.port}|${settings.gateway.accounts.length}|${webServer.port}`
+      const enabled = readSimpleSettings().gatewayEnabled
+      const settings = readAdvancedSettings()
+      // 签名：enabled + host + port + 账号数 + 白名单（配置变化才重启）
+      const sig = `${enabled}|${settings.gateway.host}|${settings.gateway.port}|${settings.gateway.accounts.length}|${settings.gateway.workspaces.join(',')}|${webServer.port}`
       if (sig === lastSig) return
       lastSig = sig
 
@@ -242,7 +490,7 @@ export function registerGateway(
         current = null
       }
       if (!enabled) {
-        console.log('[serenity-hooks] gateway 已停止（enabled=false）')
+        console.log('[serenity-hooks] gateway 已停止（gatewayEnabled=false，可在 dsh 设置面板开启）')
         return
       }
       const started = startGateway(
@@ -252,40 +500,52 @@ export function registerGateway(
           cookieName: 'serenity_session',
           mainPort: webServer.port,
           loginDelayMs: 0,
+          allowWorkspaces: settings.gateway.workspaces,
         },
-        () => readAdvancedSettings(root).gateway.accounts,
+        () => readAdvancedSettings().gateway.accounts,
       )
       current = started
       const accounts = settings.gateway.accounts.length
+      const wsNote = settings.gateway.workspaces.length === 0
+        ? ''
+        : `；工作区白名单 ${settings.gateway.workspaces.length} 条`
       console.log(
         `[serenity-hooks] gateway 已启动: http://${settings.gateway.host}:${settings.gateway.port} → 127.0.0.1:${webServer.port}` +
-        (accounts === 0 ? '（⚠️ 未配置账号，登录页将提示）' : `（${accounts} 个账号）`),
+        (accounts === 0 ? '（⚠️ 未配置账号，登录页将提示）' : `（${accounts} 个账号）`) + wsNote,
       )
     } catch (err) {
       console.warn(`[serenity-hooks] gateway 同步失败: ${String((err as Error)?.message ?? err)}`)
     }
   }
 
-  // 会话出现 → 从 cwd 解析 CCC 根（首个会话即发现；dsh web cwd 非 CCC）
+  // apply 即尝试（webServer 已 inject；若尚未就绪由事件兜底）
+  sync()
+
+  // 会话出现 → ① 一次性迁移旧 CCC localstore 配置（v1.21.x → v1.22 全局文件）② 兜底重同步
   ctx.on('agent/session-start', (payload) => {
     try {
       const cwd = (payload as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd
-      if (!cwd) return
-      const root = resolveRoot(cwd)
-      if (!root) return
-      if (discoveredRoot !== root) {
-        discoveredRoot = root
-        lastSig = null // 强制首次 sync
+      if (cwd) {
+        const root = findSerenityRoot(cwd)
+        if (root && migrateLegacyLocalstore(root)) {
+          console.log(`[serenity-hooks] ✓ 已迁移 serenityAdvanced（CCC localstore → plugin 全局文件）`)
+        }
       }
-      sync()
     } catch {
-      /* 发现失败不影响会话 */
+      /* 迁移失败不影响会话 */
     }
+    sync()
   })
 
-  // 配置变化（/serenity/config PUT 后 emit 'serenity/config-updated'）→ 重新 sync
+  // 配置变化（/serenity/config PUT 后 emit 'serenity/config-updated'）→ 强制重建
   ctx.on('serenity/config-updated', () => {
     lastSig = null
+    sync()
+  })
+
+  // DSH settings 简单配置变化（开关/阈值；settings-section onChange emit）→ 重新 sync
+  // （不强制 lastSig=null——无实质变化的设置（如阈值拖动）不重建，避免无谓断 WS）
+  ctx.on('serenity/settings-changed', () => {
     sync()
   })
 }

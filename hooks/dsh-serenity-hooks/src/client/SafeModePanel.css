@@ -1,5 +1,6 @@
-/* SafeModePanel — 会话头部 Serenity 状态卡片（v1.21 UX 重构）
+/* SafeModePanel — 会话头部 Serenity 状态卡片（v1.22 UX 重构）
  * 卡片 → 点击 → 官方 Modal（body portal 遮罩 + 居中）
+ * 模态内：tab 栏 + 分组（groupTitle 标题 + rowCard 行卡）——看齐官方 settings 设计语言
  * 遵循 web-styling.md：颜色只用 --dsw-alias-* 语义 token（明暗自适应）；
  * 前缀 sp- 防冲突。 */
 
@@ -89,32 +90,33 @@
   flex: none;
 }
 
-/* ── 官方 Modal 定制（宽度 + 无滚动条） ── */
+/* ── 官方 Modal 定制（宽度 + 内容紧凑） ── */
 
 .sp-modal {
-  width: 480px;
+  width: 520px;
   max-width: calc(100vw - 48px);
-  /* 无滚动条约束：内容在视口内完整容纳（紧凑布局，溢出不滚动） */
 }
 
 /* ── tab 栏 ── */
 
 .sp-tabs {
   display: flex;
-  gap: 4px;
-  padding: 0 2px 10px;
+  gap: 6px;
+  padding: 0 2px 12px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
 .sp-tab {
   flex: 1;
-  padding: 7px 0;
+  padding: 8px 0;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: background var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease);
 }
 
 .sp-tab:hover {
@@ -127,52 +129,91 @@
   font-weight: 600;
 }
 
-/* ── 模态内容（紧凑布局，无滚动条） ── */
+/* ── 模态内容 ── */
 
 .sp-modalBody {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 12px;
+  gap: 16px;
+  padding-top: 14px;
   /* 内容超出视口时 body 区滚动（兜底——不再截断）；整卡不滚动 */
   overflow-y: auto;
   max-height: calc(100vh - 200px);
 }
 
+/* ── 分组（官方 settings 语言：groupTitle + rows） ── */
+
+.sp-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sp-groupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sp-groupTitle {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.sp-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 行卡（rowCard：border + radius + padding；值与 label 分离、长内容可换行） */
 .sp-row {
   display: flex;
   align-items: baseline;
-  gap: 10px;
+  gap: 12px;
   min-width: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module);
 }
 
 .sp-label {
   flex: none;
-  width: 40px;
+  width: 76px;
   font-size: 12px;
-  color: var(--dsw-alias-label-caption);
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
 }
 
 .sp-value {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-size: 12px;
-  color: var(--dsw-alias-label-secondary);
+  line-height: 18px;
+  color: var(--dsw-alias-label-primary);
   font-family: var(--ds-font-family-code, monospace);
   word-break: break-all;
+  overflow-wrap: anywhere;
 }
 
+/* 安全模式动作区 */
 .sp-actions {
   display: flex;
-  justify-content: flex-end;
-  padding-top: 4px;
-  border-top: 1px solid var(--dsw-alias-border-l1);
-  margin-top: 2px;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module);
 }
-
-/* safe-mode 开关（大） */
 
 .sp-toggle {
   display: inline-flex;
@@ -184,6 +225,7 @@
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
+  transition: background var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease);
 }
 
 .sp-toggleLg {
@@ -207,68 +249,20 @@
   flex: none;
 }
 
-/* loop 运行状态区块（并行任务各自一行） */
-
-.sp-section {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding-top: 6px;
-  border-top: 1px solid var(--dsw-alias-border-l1);
-  margin-top: 2px;
-}
-
-.sp-loopItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 2px 0 2px 50px;
-  min-width: 0;
-}
-
-.sp-loopHead {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  min-width: 0;
-}
-
-.sp-loopLabel {
+.sp-toggleDesc {
   flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 12px;
-  color: var(--dsw-alias-label-primary);
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
-.sp-loopRound {
-  flex: none;
-  font-size: 11px;
-  color: var(--dsw-alias-label-dimmed);
-}
+/* loop 运行状态区块 */
 
-.sp-loopTime {
-  flex: none;
-  font-size: 11px;
-  color: var(--dsw-alias-label-dimmed);
-}
-
-.sp-loopResp {
-  font-size: 11px;
-  color: var(--dsw-alias-label-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* loop 详情折叠控件 */
 .sp-loopsToggle {
   flex: none;
-  padding: 2px 8px;
+  padding: 2px 10px;
   border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 5px;
+  border-radius: 6px;
   background: transparent;
   color: var(--dsw-alias-label-secondary);
   font-size: 11px;
@@ -286,9 +280,70 @@
   margin-top: 2px;
 }
 
+.sp-loopItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+.sp-loopHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sp-loopLabel {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.sp-loopRound {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.sp-loopTime {
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.sp-loopResp {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .sp-loopsMore {
   font-size: 11px;
   color: var(--dsw-alias-label-dimmed);
-  padding: 2px 0 2px 50px;
+  padding: 4px 12px;
 }
 
+/* 底部提示（配置入口引导） */
+.sp-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  padding: 8px 12px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 10px;
+}

@@ -12,17 +12,24 @@ import {
   updateAdvancedSettings,
   toWire,
   applyWirePatch,
+  migrateLegacyLocalstore,
+  globalConfigPath,
   ADVANCED_SECTION,
 } from '../src/config-ops.js'
 
 let dir: string
+let oldEnv: string | undefined
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'hooks-config-ops-'))
-  writeFileSync(join(dir, '.serenity'), 'test')
+  // 全局文件路径注入（v1.22 plugin 全局；测试隔离）
+  oldEnv = process.env.SERENITY_HOOKS_CONFIG
+  process.env.SERENITY_HOOKS_CONFIG = join(dir, 'serenity-hooks.json')
 })
 
 afterEach(() => {
+  if (oldEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+  else process.env.SERENITY_HOOKS_CONFIG = oldEnv
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -53,45 +60,81 @@ describe('密码 hash（scrypt）', () => {
   })
 })
 
-describe('读写（localstore serenityAdvanced 节）', () => {
+describe('读写（plugin 全局文件）', () => {
+  it('全局路径 = env 覆盖（缺省 ~/.dsh/serenity-hooks.json）', () => {
+    expect(globalConfigPath()).toBe(join(dir, 'serenity-hooks.json'))
+    delete process.env.SERENITY_HOOKS_CONFIG
+    expect(globalConfigPath()).toContain('serenity-hooks.json')
+  })
+
   it('文件不存在 → 默认值', () => {
-    const s = readAdvancedSettings(dir)
+    const s = readAdvancedSettings()
     expect(s.gateway.enabled).toBe(false)
     expect(s.gateway.host).toBe('0.0.0.0')
     expect(s.gateway.port).toBe(3081)
     expect(s.gateway.accounts).toEqual([])
+    expect(s.gateway.workspaces).toEqual([])
     expect(s.rebuild.enabled).toBe(true)
     expect(s.rebuild.thresholdRatio).toBe(0.9)
     expect(s.naming.enabled).toBe(true)
   })
 
-  it('写 → 读 往返一致；保留其他节', () => {
+  it('写 → 读 往返一致；文件权限 0600', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
-    writeAdvancedSettings(dir, s)
+    writeAdvancedSettings(s)
 
-    const raw = JSON.parse(readFileSync(join(dir, 'localstore.json'), 'utf-8'))
-    expect(raw[ADVANCED_SECTION].gateway.accounts[0].user).toBe('yh')
-    // 其他节不受影响（写前存在 credentials）
-    expect(raw.credentials).toBeUndefined()
+    const raw = JSON.parse(readFileSync(globalConfigPath(), 'utf-8'))
+    expect(raw.gateway.accounts[0].user).toBe('yh')
+    // 全局文件是完整配置对象（无外层节包装）
+    expect(raw[ADVANCED_SECTION]).toBeUndefined()
 
-    const back = readAdvancedSettings(dir)
+    const back = readAdvancedSettings()
     expect(back.gateway.accounts).toHaveLength(1)
     expect(back.gateway.accounts[0]!.user).toBe('yh')
     expect(verifyPassword('pw', back.gateway.accounts[0]!.passHash)).toBe(true)
   })
 
   it('坏 JSON → 默认值（不抛错）', () => {
-    writeFileSync(join(dir, 'localstore.json'), '{broken', 'utf-8')
-    expect(readAdvancedSettings(dir).gateway.accounts).toEqual([])
+    writeFileSync(globalConfigPath(), '{broken', 'utf-8')
+    expect(readAdvancedSettings().gateway.accounts).toEqual([])
   })
 
   it('部分写入（非对象/缺字段）→ merge 默认值', () => {
-    writeFileSync(join(dir, 'localstore.json'), JSON.stringify({ serenityAdvanced: { gateway: { enabled: true } } }), 'utf-8')
-    const s = readAdvancedSettings(dir)
+    writeFileSync(globalConfigPath(), JSON.stringify({ gateway: { enabled: true } }), 'utf-8')
+    const s = readAdvancedSettings()
     expect(s.gateway.enabled).toBe(true)
     expect(s.gateway.port).toBe(3081) // 缺省字段补默认
     expect(s.rebuild.enabled).toBe(true)
+  })
+})
+
+describe('migrateLegacyLocalstore（v1.21.x → v1.22 一次性迁移）', () => {
+  it('CCC localstore 有旧节 → 迁移到全局文件', () => {
+    writeFileSync(join(dir, 'localstore.json'), JSON.stringify({
+      credentials: { K: 'v' }, // 其他节不迁移
+      serenityAdvanced: { gateway: { enabled: true, host: '0.0.0.0', port: 3081, accounts: [{ id: 'a1', user: 'admin', passHash: hashPassword('pw') }] } },
+    }), 'utf-8')
+    expect(migrateLegacyLocalstore(dir)).toBe(true)
+    const migrated = readAdvancedSettings()
+    expect(migrated.gateway.enabled).toBe(true)
+    expect(migrated.gateway.accounts[0]!.user).toBe('admin')
+    expect(verifyPassword('pw', migrated.gateway.accounts[0]!.passHash)).toBe(true)
+  })
+
+  it('全局文件已存在 → 跳过（幂等）', () => {
+    writeAdvancedSettings(defaultAdvancedSettings())
+    writeFileSync(join(dir, 'localstore.json'), JSON.stringify({
+      serenityAdvanced: { gateway: { enabled: true, accounts: [] } },
+    }), 'utf-8')
+    expect(migrateLegacyLocalstore(dir)).toBe(false)
+    expect(readAdvancedSettings().gateway.enabled).toBe(false) // 不被 localstore 覆盖
+  })
+
+  it('localstore 无旧节 / root 为空 → false', () => {
+    expect(migrateLegacyLocalstore(null)).toBe(false)
+    writeFileSync(join(dir, 'localstore.json'), JSON.stringify({ credentials: {} }), 'utf-8')
+    expect(migrateLegacyLocalstore(dir)).toBe(false)
   })
 })
 
@@ -99,15 +142,15 @@ describe('updateAdvancedSettings（部分更新）', () => {
   it('gateway 部分 patch 保留 accounts；accounts 未传不覆盖', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: 'h1' }]
-    writeAdvancedSettings(dir, s)
+    writeAdvancedSettings(s)
 
-    const next = updateAdvancedSettings(dir, { gateway: { enabled: true } })
+    const next = updateAdvancedSettings({ gateway: { enabled: true } })
     expect(next.gateway.enabled).toBe(true)
     expect(next.gateway.accounts).toHaveLength(1) // 保留
   })
 
   it('rebuild/naming 独立 patch', () => {
-    const next = updateAdvancedSettings(dir, { rebuild: { thresholdRatio: 0.85 } })
+    const next = updateAdvancedSettings({ rebuild: { thresholdRatio: 0.85 } })
     expect(next.rebuild.thresholdRatio).toBe(0.85)
     expect(next.rebuild.enabled).toBe(true)
     expect(next.naming.enabled).toBe(true)
@@ -131,7 +174,7 @@ describe('toWire（hash 永不落 wire）', () => {
 
 describe('applyWirePatch（wire → 持久化）', () => {
   it('新账号必带 pass → hash 落库', () => {
-    const next = applyWirePatch(dir, {
+    const next = applyWirePatch({
       gateway: {
         accounts: [{ id: 'a1', user: 'yh', pass: 'newpw' }],
       },
@@ -143,7 +186,7 @@ describe('applyWirePatch（wire → 持久化）', () => {
 
   it('新账号无 pass 且无现有 hash → 抛错', () => {
     expect(() =>
-      applyWirePatch(dir, {
+      applyWirePatch({
         gateway: { accounts: [{ id: 'a1', user: 'yh' }] },
       }),
     ).toThrow(/必须设置密码/)
@@ -152,9 +195,9 @@ describe('applyWirePatch（wire → 持久化）', () => {
   it('既有账号 pass 空 → 保留原 hash', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('orig') }]
-    writeAdvancedSettings(dir, s)
+    writeAdvancedSettings(s)
 
-    const next = applyWirePatch(dir, {
+    const next = applyWirePatch({
       gateway: { accounts: [{ id: 'a1', user: 'yh', pass: '' }] },
     })
     expect(verifyPassword('orig', next.gateway.accounts[0]!.passHash)).toBe(true)
@@ -163,9 +206,9 @@ describe('applyWirePatch（wire → 持久化）', () => {
   it('既有账号带新 pass → 更新 hash（可改名）', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('orig') }]
-    writeAdvancedSettings(dir, s)
+    writeAdvancedSettings(s)
 
-    const next = applyWirePatch(dir, {
+    const next = applyWirePatch({
       gateway: { accounts: [{ id: 'a1', user: 'yh-new', pass: 'newpw' }] },
     })
     expect(next.gateway.accounts[0]!.user).toBe('yh-new')
@@ -176,14 +219,14 @@ describe('applyWirePatch（wire → 持久化）', () => {
   it('删除账号（数组整体替换）', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: 'h1' }]
-    writeAdvancedSettings(dir, s)
+    writeAdvancedSettings(s)
 
-    const next = applyWirePatch(dir, { gateway: { accounts: [] } })
+    const next = applyWirePatch({ gateway: { accounts: [] } })
     expect(next.gateway.accounts).toEqual([])
   })
 
   it('开关/阈值/端口 patch 生效（含边界校验）', () => {
-    const next = applyWirePatch(dir, {
+    const next = applyWirePatch({
       gateway: { enabled: true, host: '127.0.0.1', port: 9999 },
       rebuild: { enabled: false, thresholdRatio: 0.5 },
       naming: { enabled: false },
@@ -196,16 +239,18 @@ describe('applyWirePatch（wire → 持久化）', () => {
     expect(next.naming.enabled).toBe(false)
   })
 
-  it('非法阈值被忽略（>1 或 ≤0）', () => {
-    const next = applyWirePatch(dir, { rebuild: { thresholdRatio: 1.5 } })
-    expect(next.rebuild.thresholdRatio).toBe(0.9)
+  it('工作区白名单 patch：写入/过滤空串/缺省保留', () => {
+    const next = applyWirePatch({
+      gateway: { workspaces: ['/home/yh/home', '', '/data'] },
+    })
+    expect(next.gateway.workspaces).toEqual(['/home/yh/home', '/data']) // 空串过滤
+    // 未传 workspaces → 保留现有
+    const keep = applyWirePatch({ gateway: { port: 9999 } })
+    expect(keep.gateway.workspaces).toEqual(['/home/yh/home', '/data'])
   })
 
-  it('写后 localstore 被 .gitignore 覆盖（deny 缺省物理保证）', () => {
-    const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: 'h' }]
-    writeAdvancedSettings(dir, s)
-    const gi = readFileSync(join(dir, '.gitignore'), 'utf-8')
-    expect(gi).toContain('localstore.json')
+  it('非法阈值被忽略（>1 或 ≤0）', () => {
+    const next = applyWirePatch({ rebuild: { thresholdRatio: 1.5 } })
+    expect(next.rebuild.thresholdRatio).toBe(0.9)
   })
 })

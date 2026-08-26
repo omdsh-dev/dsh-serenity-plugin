@@ -1,15 +1,15 @@
 /**
  * dsh-serenity-hooks — 浏览器端（client half）
  *
- * 会话头部 **Serenity 状态卡片**（v1.21 UX 重构）：
- *  - 卡片形态：绿状态点 + 版本 + chevron；点击弹出
- *  - **官方 Modal**（ui-primitives：body portal 遮罩 + 居中 + Escape/遮罩关闭——
- *    大面板不被 header 容器/视口裁剪）
- * 模态内双 tab：
- *  - 状态 tab：CCC/loop/守卫 + safe-mode 大开关 + loops 运行列表
- *  - 账号 tab：gateway 监听地址/端口 + 账号列表 CRUD（复杂配置，localstore）
- * 简单配置（开关/阈值）在 dsh 原生设置面板（SettingsSection）。
- * 数据经同源 HTTP /serenity/status + /serenity/config（插件服务端路由）。
+ * 会话头部 **CCC 状态栏面板**（v1.22 专业 UX 重构）：
+ *  - 卡片形态：绿状态点 + 版本 + safe 徽标 + chevron；点击弹出
+ *  - **官方 Modal**（ui-primitives：body portal 遮罩 + 居中 + Escape/遮罩关闭）
+ * 面板只承载**状态展示**（v1.22 归属原则：账号密码等 plugin 配置在 DSH 设置面板
+ * 「Serenity」页设定，本面板不再承载配置表单）：
+ *  - 运行环境：CCC / Loop 模型 / 守卫
+ *  - 安全模式：大开关（唯一可操作项，用户能力）
+ *  - Loop 运行：运行列表 + 详情折叠
+ * 数据经同源 HTTP /serenity/status + /serenity/loops（插件服务端路由）。
  *
  * 槽：conversation.session.header.actions（官方既有槽，list）
  */
@@ -22,7 +22,6 @@ import {
   Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useState, useCallback } from 'react'
-import { AccountsTab } from './AccountsTab.js'
 import './SafeModePanel.css'
 
 /** 会话头部操作区（list 槽）props */
@@ -55,12 +54,11 @@ function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
 }
 
-/** 会话头部：Serenity 状态卡片（点击 → 官方 Modal 居中，双 tab） */
+/** 会话头部：CCC 状态栏卡片（点击 → 官方 Modal 居中，纯状态展示） */
 export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
-  const [tab, setTab] = useState<'status' | 'accounts'>('status')
   const [loops, setLoops] = useState<LoopRunInfo[]>([])
   const [loopsOpen, setLoopsOpen] = useState(false)
 
@@ -126,10 +124,11 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   }
 
   const inCcc = status.root !== null
+  const runningLoops = loops.filter((l) => !l.done)
 
   return (
     <>
-      {/* 状态卡片（可点击 → 弹出 Modal）；本体直接显示绿点 + safe-mode 徽标 */}
+      {/* 状态卡片（可点击 → 弹出 Modal） */}
       <button
         type="button"
         className={cx('sp-card')}
@@ -152,71 +151,63 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
         <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
       </button>
 
-      {/* 官方 Modal：body portal 遮罩 + 居中 + Escape/遮罩关闭 */}
+      {/* 官方 Modal：纯状态展示 */}
       <Modal
         open={open}
         onClose={() => setOpen(false)}
-        title="Serenity 高级设定"
+        title="CCC 状态栏"
         closeLabel="关闭"
         className={cx('sp-modal')}
       >
-        <div className={cx('sp-tabs')}>
-          <button
-            type="button"
-            className={cx('sp-tab', tab === 'status' && 'sp-tabOn')}
-            onClick={() => setTab('status')}
-          >
-            状态
-          </button>
-          <button
-            type="button"
-            className={cx('sp-tab', tab === 'accounts' && 'sp-tabOn')}
-            onClick={() => setTab('accounts')}
-          >
-            账号
-          </button>
-        </div>
-
         <div className={cx('sp-modalBody')}>
-          {tab === 'accounts' ? (
-            <AccountsTab sessionId={String(sessionId ?? '')} />
-          ) : inCcc ? (
+          {inCcc ? (
             <>
-              <div className={cx('sp-row')}>
-                <span className={cx('sp-label')}>CCC</span>
-                <span className={cx('sp-value')} title={status.root ?? undefined}>{status.root}</span>
+              {/* ── 分组：运行环境 ── */}
+              <div className={cx('sp-group')}>
+                <h3 className={cx('sp-groupTitle')}>运行环境</h3>
+                <div className={cx('sp-rows')}>
+                  <div className={cx('sp-row')}>
+                    <span className={cx('sp-label')}>CCC</span>
+                    <span className={cx('sp-value')} title={status.root ?? undefined}>{status.root}</span>
+                  </div>
+                  <div className={cx('sp-row')}>
+                    <span className={cx('sp-label')}>Loop 模型</span>
+                    <span className={cx('sp-value')} title={status.loopModel ? `loop.defaultModel: ${status.loopModel}` : undefined}>
+                      {status.loopModel ?? '未配置'}
+                    </span>
+                  </div>
+                  <div className={cx('sp-row')}>
+                    <span className={cx('sp-label')}>守卫</span>
+                    <span className={cx('sp-value')}>
+                      blacklist {status.blacklist.length} 条{status.threshold !== null ? ` · keeper 阈值 ${status.threshold}` : ''}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className={cx('sp-row')}>
-                <span className={cx('sp-label')}>loop</span>
-                <span className={cx('sp-value')} title={status.loopModel ? `loop.defaultModel: ${status.loopModel}` : undefined}>
-                  {status.loopModel ?? '未配置'}
-                </span>
-              </div>
-              <div className={cx('sp-row')}>
-                <span className={cx('sp-label')}>守卫</span>
-                <span className={cx('sp-value')}>
-                  blacklist {status.blacklist.length} 条{status.threshold !== null ? ` · keeper 阈值 ${status.threshold}` : ''}
-                </span>
-              </div>
-              <div className={cx('sp-actions')}>
-                <button
-                  type="button"
-                  className={cx('sp-toggle', status.safeModeOn ? 'sp-toggleOn' : 'sp-toggleOff', 'sp-toggleLg')}
-                  disabled={busy}
-                  onClick={() => void toggle(!status.safeModeOn)}
-                >
-                  {status.safeModeOn && <IconWarningOutline16 size={14} className={cx('sp-toggleIcon')} />}
-                  safe-mode {status.safeModeOn ? 'ON' : 'OFF'}
-                </button>
-              </div>
-              <div className={cx('sp-section')}>
-                <div className={cx('sp-row')}>
-                  <span className={cx('sp-label')}>loops</span>
-                  <span className={cx('sp-value')}>
-                    {loops.filter((l) => !l.done).length > 0
-                      ? `运行中 ${loops.filter((l) => !l.done).length}${loops.length > 0 ? ` / 共 ${loops.length}` : ''}`
-                      : '无运行中 loop'}
+
+              {/* ── 分组：安全模式 ── */}
+              <div className={cx('sp-group')}>
+                <h3 className={cx('sp-groupTitle')}>安全模式</h3>
+                <div className={cx('sp-actions')}>
+                  <button
+                    type="button"
+                    className={cx('sp-toggle', status.safeModeOn ? 'sp-toggleOn' : 'sp-toggleOff', 'sp-toggleLg')}
+                    disabled={busy}
+                    onClick={() => void toggle(!status.safeModeOn)}
+                  >
+                    {status.safeModeOn && <IconWarningOutline16 size={14} className={cx('sp-toggleIcon')} />}
+                    safe-mode {status.safeModeOn ? 'ON' : 'OFF'}
+                  </button>
+                  <span className={cx('sp-toggleDesc')}>
+                    {status.safeModeOn ? '写工具已隐藏，无人值守安全航行' : '写工具可用（点击开启）'}
                   </span>
+                </div>
+              </div>
+
+              {/* ── 分组：Loop 运行 ── */}
+              <div className={cx('sp-group')}>
+                <div className={cx('sp-groupHead')}>
+                  <h3 className={cx('sp-groupTitle')}>Loop 运行</h3>
                   {loops.length > 0 && (
                     <button
                       type="button"
@@ -227,13 +218,23 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                     </button>
                   )}
                 </div>
+                <div className={cx('sp-rows')}>
+                  <div className={cx('sp-row')}>
+                    <span className={cx('sp-label')}>状态</span>
+                    <span className={cx('sp-value')}>
+                      {runningLoops.length > 0
+                        ? `运行中 ${runningLoops.length}${loops.length > 0 ? ` / 共 ${loops.length}` : ''}`
+                        : '无运行中 loop'}
+                    </span>
+                  </div>
+                </div>
                 {loopsOpen && (
                   <div className={cx('sp-loopsList')}>
                     {loops.slice(0, 3).map((l) => (
                       <div key={l.label} className={cx('sp-loopItem')}>
                         <div className={cx('sp-loopHead')}>
                           <span className={cx('sp-loopLabel')} title={l.label}>{l.label}</span>
-                          <span className={cx('sp-loopRound')}>{l.done ? '✓' : `R${l.round}`}</span>
+                          <span className={cx('sp-loopRound')}>{l.done ? '✓ 完成' : `R${l.round}`}</span>
                           <span className={cx('sp-loopTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
                         </div>
                         <div className={cx('sp-loopResp')} title={l.lastResponse}>
@@ -247,11 +248,21 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                   </div>
                 )}
               </div>
+
+              {/* ── 提示：配置在 DSH 设置面板 ── */}
+              <p className={cx('sp-hint')}>
+                💡 开关/阈值/账号/工作区白名单请在 <strong>设置 → Serenity</strong> 中配置。
+              </p>
             </>
           ) : (
-            <div className={cx('sp-row')}>
-              <span className={cx('sp-label')}>状态</span>
-              <span className={cx('sp-value')}>ACC 未激活（工作区不在 CCC 内）</span>
+            <div className={cx('sp-group')}>
+              <h3 className={cx('sp-groupTitle')}>状态</h3>
+              <div className={cx('sp-rows')}>
+                <div className={cx('sp-row')}>
+                  <span className={cx('sp-label')}>ACC</span>
+                  <span className={cx('sp-value')}>未激活（工作区不在 CCC 内）</span>
+                </div>
+              </div>
             </div>
           )}
         </div>

@@ -1,0 +1,238 @@
+/* AccountsEditor — DSH 设置面板「外部访问」区块（v1.22）
+ * 与 SettingsSection ss-* 同设计语言：--dsw-alias-* 语义 token，明暗自适应。 */
+
+.ae-root {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 12px;
+  font-size: 13px;
+}
+
+.ae-warn {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-warning-fg, #f59e0b);
+  word-break: break-word;
+}
+
+.ae-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ae-title {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.ae-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.ae-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ── 监听设置 / 白名单输入行 ── */
+
+.ae-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ae-label {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+.ae-input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.ae-input:focus {
+  border-color: var(--dsw-alias-button-primary-bg, var(--dsw-alias-accent, #3b82f6));
+}
+
+.ae-input::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+.ae-input.ae-port {
+  flex: none;
+  width: 76px;
+}
+
+/* ── 账号列表 ── */
+
+.ae-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ae-head {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-dimmed);
+  padding: 0 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ae-item {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 2px;
+}
+
+.ae-colUser { flex: 1.2; }
+.ae-colPass { flex: 1.6; }
+.ae-colOp { flex: none; width: 48px; }
+
+.ae-del {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-state-danger-fg, #f87171);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ae-del:hover {
+  background: var(--dsw-alias-state-danger-bg, rgba(248, 113, 113, 0.12));
+}
+
+.ae-add {
+  align-self: flex-start;
+  padding: 5px 12px;
+  border: 1px dashed var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ae-add:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.ae-wsAdd {
+  flex: none;
+  align-self: auto;
+}
+
+/* ── 工作区白名单 chips ── */
+
+.ae-wsList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ae-wsChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 8px;
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.14));
+}
+
+.ae-wsPath {
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--ds-font-family-code, monospace);
+  word-break: break-all;
+}
+
+.ae-wsDel {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.ae-wsDel:hover {
+  background: var(--dsw-alias-state-danger-bg, rgba(248, 113, 113, 0.18));
+  color: var(--dsw-alias-state-danger-fg, #f87171);
+}
+
+/* ── 错误 / 操作区 ── */
+
+.ae-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-danger-fg, #f87171);
+  word-break: break-word;
+}
+
+.ae-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
+}
+
+.ae-save {
+  padding: 7px 24px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--dsw-alias-button-primary-bg, var(--dsw-alias-accent, #3b82f6));
+  color: var(--dsw-alias-button-primary-fg, #fff);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.ae-save:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ae-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

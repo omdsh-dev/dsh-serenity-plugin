@@ -1,26 +1,28 @@
 /**
- * SettingsSection.tsx — dsh 原生设置面板的 serenity-hooks 简单配置页（v1.21 分层）
+ * SettingsSection.tsx — dsh 原生设置面板的 serenity-hooks 配置页（v1.22 重构）
  *
- * 分层决策：简单配置（三功能开关 + F2 阈值）→ dsh 原生设置面板；
- * 账号列表（复杂配置）→ 宁静号高级面板（SafeModePanel Modal）。
+ * 归属原则（v1.22 用户拍板）：**plugin 是全局的，CCC 是具体的**——
+ * 账号密码/开关/阈值/工作区白名单都是 **plugin 级配置**，统一在 DSH 设置面板
+ * （plugin 层）设定；CCC 状态栏面板（SafeModePanel）只展示状态。
  *
- * 数据通道：ctx.settingsScope.bind({ namespace: 'serenity-hooks' })——
- * host 侧 registerSettingsSection 注册的 namespace；写经 scope.set(field, value)
- * （settings.yaml 持久化 + revision fencing）。
+ * 页面结构（官方 settings 设计语言：section > title + intro + 分组(groupTitle) + rowCard）：
+ *  - 访问：双端口网关开关
+ *  - 上下文：超限重建开关 + 阈值
+ *  - 会话：会话命名开关
+ *  - 外部访问（复杂配置，经 /serenity/config plugin 全局文件）：账号 CRUD + 工作区白名单
  *
- * UI（v1.21.1 看齐 dsh 自身）：官方 settings 设计语言——
- * `section > title(h2) + intro + 分组(groupTitle) + rowCard 行卡`，
- * 多级标题（页面标题 → 分组标题 → 行卡标题/说明），全部 --dsw-alias-* token，
- * 与 ui-settings-models 等官方页面同视觉词汇。
+ * 数据通道（双层）：
+ *  - 简单配置：ctx.settingsScope.bind({ namespace: 'serenity-hooks' })（settings.yaml）
+ *  - 复杂配置（账号/白名单）：同源 HTTP /serenity/config（accounts-api.ts，服务端 scrypt hash）
  *
- * 降级守卫（版本鲁棒性）：snapshot.status === 'unavailable' 表示本客户端
- * 读不到该 namespace（旧 RC 白名单 / memory 模式）→ 显示降级提示。
+ * 降级守卫：snapshot.status === 'unavailable'（旧 RC 白名单）→ 降级提示。
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-runtime/client'
 import { useEffect, useState } from 'react'
+import { AccountsEditor } from './AccountsEditor.js'
 import './SettingsSection.css'
 
 /** serenity-hooks 简单配置 wire 形态（与 host 侧 schema 对齐） */
@@ -40,7 +42,7 @@ export type SettingsSectionProps = PropsRuntime<'settings.section'> & SettingsSe
 
 /** 降级提示文案（旧 RC 白名单时引导去宁静号面板） */
 const DEGRADE_NOTE =
-  '当前运行版本未暴露 serenity-hooks 配置（旧 RC 白名单）。请在会话头部 Serenity 徽章的「高级设定」面板中管理，或升级 DSH。'
+  '当前运行版本未暴露 serenity-hooks 配置（旧 RC 白名单）。请升级 DSH 或使用会话头部 Serenity 状态栏。'
 
 /** 解码 wire section → 组件状态（缺失字段用默认值） */
 function decodeSection(section: unknown): SerenitySimpleWire | undefined {
@@ -96,7 +98,7 @@ function Group(props: {
   )
 }
 
-/** dsh 原生设置面板：serenity-hooks 简单配置页（官方 settings 设计语言，多级标题） */
+/** dsh 原生设置面板：serenity-hooks 配置页（官方 settings 设计语言，多级标题） */
 export function SettingsSection(props: SettingsSectionProps): React.JSX.Element {
   const { scope } = props
   const [snapshot, setSnapshot] = useState(() => scope.getSnapshot())
@@ -132,7 +134,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
     <div className="ss-section">
       <h2 className="ss-title">Serenity</h2>
       <p className="ss-intro">
-        宁静号的开关与阈值，改动即时保存（DSH settings.yaml）。账号密码等复杂配置请到会话头部「Serenity」卡片 → 高级设定 → 账号。
+        宁静号的 plugin 级配置（全局生效，不依赖具体 CCC）。改动即时保存。
       </p>
 
       <Group title="访问">
@@ -185,7 +187,11 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
       </Group>
 
-      <p className="ss-hint">💡 双端口网关需先在「Serenity 卡片 → 账号」里添加账号并设置监听端口。</p>
+      {/* 复杂配置（账号 + 工作区白名单）：plugin 全局文件 /serenity/config */}
+      <div className="ss-group">
+        <h3 className="ss-groupTitle">外部访问</h3>
+        <AccountsEditor gatewayOn={gatewayOn} />
+      </div>
     </div>
   )
 }
