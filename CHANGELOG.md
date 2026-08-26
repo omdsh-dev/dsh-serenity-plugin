@@ -1,3 +1,16 @@
+## v1.20.6 — 2026-08-26（图片落盘：静默补救（删状态条）+ 对话写名具体图片路径 + 多图支持，S142）
+
+**Scope:** 用户两轮反馈迭代：
+① 状态条（input.dock 常驻"图片已保存"）永久停留碍眼 → **删除 UI，补救静默化**（组件仅保留 effect 逻辑，return null）
+② 对话消息必须写名具体图片路径（目录级提示让 agent 还要猜）→ **恢复路径**：单图「用户提供了一张图片（路径：_tmp/images_from_user/xxx）」；多图「用户提供了 N 张图片：\n- 路径1\n- 路径2…」
+
+### 变更
+- `client/ImageFallbackDock.tsx`：**移除全部状态条渲染**（idle/busy/done/error 均不渲染，return null；CSS 文件删除）——补救逻辑保留（上传 + 清 rail + 重发），失败仅 console.warn
+- `client/image-fallback-api.ts`：`IMAGE_NOTE_TEMPLATE_SINGLE/MULTI` → **`imageNoteTemplate(paths)`**——单图/多图均写名具体路径
+- `client/index.ts`：注册不变（input.dock 条目仍挂载以运行补救 effect）
+
+**测试：** 32 files / 293 tests → typecheck ✓
+
 ## v1.20.5 — 2026-08-26（图片落盘：消息模板友好化——去掉突兀的原始文件路径，S142）
 
 **Scope:** 用户 UI 反馈（截图标注）：对话里显示「用户提供了图片在 _tmp/images_from_user/2026-08-26T00-25-00-741Z-ajlq48.jpg」原始路径很突兀。修正：消息改为目录级自然提示，不展示具体文件名；agent 自行查 _tmp/images_from_user/ 目录找图片 → 调 CCC 的 vlm MSM 识别。

@@ -14,12 +14,15 @@ import type { DraftAttachmentId } from '@deepseek-ai/dsh-client-ui-conversation'
 const UPLOAD_PATH = '/serenity/image-upload'
 
 /**
- * 识别结果消息模板（协议固有，S142 用户迭代：v1.20.5 去掉具体文件路径——UI 突兀，
- * 改为目录级自然提示；agent 自行查 _tmp/images_from_user/ 找图片 → 调 CCC vlm MSM 识别）
+ * 图片提示消息模板（协议固有，S142 用户迭代）：
+ *  - v1.20.5 目录级提示（无文件名）→ 用户反馈 agent 还要猜
+ *  - v1.20.6 恢复具体路径（对话里一定写名图片路径，agent 直接可用，无需猜）
+ * 单图：用户提供了一张图片（路径：...）；多图：每张一行路径
  */
-export const IMAGE_NOTE_TEMPLATE_SINGLE = '用户提供了一张图片（已保存到 _tmp/images_from_user/），请查看该目录下的图片并处理'
-export const IMAGE_NOTE_TEMPLATE_MULTI = (count: number): string =>
-  `用户提供了 ${count} 张图片（已保存到 _tmp/images_from_user/），请查看该目录下的图片并处理`
+export function imageNoteTemplate(paths: string[]): string {
+  if (paths.length === 1) return `用户提供了一张图片（路径：${paths[0]}）`
+  return `用户提供了 ${paths.length} 张图片：\n${paths.map((p) => `- ${p}`).join('\n')}`
+}
 
 /** 浏览器 File → base64（与 ui-conversation serializeImages 等价的最小实现） */
 function fileToBase64(file: File): Promise<string> {
