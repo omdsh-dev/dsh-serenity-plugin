@@ -1,3 +1,20 @@
+## v1.20.0 — 2026-08-24（图片自动落盘兜底——WebUI 图片粘贴 → 模型不支持时自动存 _tmp 供 CCC vlm MSM 处理，S142）
+
+**Scope:** 用户需求：DSH 输入框粘贴图片，当且仅当当前模型不支持图片时，自动把图片存到 CCC 目录 `_tmp/images_from_user/`，并以「用户提供了图片在 {path}」文本消息交给 agent 自主处理（各 CCC 自己的 vlm MSM 识别，ACC 不约束 CCC 实现——职责分离）。零配置、完全自动：host 权威门禁（inputModalities）判定，失败即自动补救。
+
+### 变更
+- **node half**（`src/api.ts`）：
+  - 新增 `POST /serenity/image-upload`（client 专属 x-serenity-ui 头）：类型白名单 png/jpeg/webp/gif + 10MB 上限 → 写 CCC 根 `_tmp/images_from_user/<ts>-<rand>.<ext>` → 返回相对路径
+  - 抽取可测核心 `saveImageToTmp(root, mediaType, data)`（导出）
+- **client half**：
+  - `src/client/ImageFallbackDock.tsx/.css`：`conversation.input.dock` 条目（id serenity-image-fallback）——监听会话 promptError（attachment-error / MODEL_DOES_NOT_SUPPORT_IMAGES）→ 自动补救：rail 图片 File 上传 → 以「用户提供了图片在 {path}」+ 原 draft 纯文本重发（绕过图片门禁）→ 状态条展示已保存路径
+  - `src/client/image-fallback-api.ts`：uploadImage（fetch node half）/ getDraftFiles（conversation.draftImages）/ resendText（session.prompt）——官方 client 服务面，零 core 改动
+  - `src/client/index.ts`：注册 input.dock 条目（inject slots/conversation/sessions）
+- **测试**：`tests/api-upload.test.ts`（+5：类型白名单/缺失数据/超限/目录幂等/路径格式）；全量 293 通过
+- home-serenity CCC：零配置（无开关——完全自动）
+
+**测试：** 32 files / 293 tests → typecheck ✓
+
 ## v1.19.9 — 2026-08-24（MSM 机制约束——原则 + 隐喻，S142）
 
 **Scope:** 用户要求补充笔墨约束 MSM 机制（存在的原则 + 对应隐喻）。隐喻域 THE SHIP 层 +2 条（The Machinery → MSM 确定性分层 / The Manifest → Single Source of Truth）；Principles 块 +MSM 原则段（确定性优先/单一真相源/注册才能行动）。

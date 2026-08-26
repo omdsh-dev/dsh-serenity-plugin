@@ -1,15 +1,19 @@
 /**
- * api.ts — HTTP 状态接口（WebUI 停靠栏数据源/开关通道）
+ * api.ts — HTTP 状态接口（WebUI 停靠栏数据源/开关通道 + 图片落盘）
  *
- * 路由：/serenity/status（非 /api 前缀——/api 由 connection 路由拥有）
- *   GET  ?workspace=<路径>  → 状态（root/accVersion/safeModeOn/blacklist/threshold/loopModel）
- *   POST { workspace, on }  → 切换安全模式（写/删 .serenity-safe-on，实时生效）
+ * 路由：
+ *   GET  /serenity/status            ?workspace=<路径>  → 状态（root/accVersion/safeModeOn/...）
+ *   POST /serenity/status            { workspace, on }  → 切换安全模式（WebUI 专属头）
+ *   GET  /serenity/loops             → loop 运行状态
+ *   POST /serenity/image-upload      { workspace?, mediaType, data(base64) } → 图片写 _tmp/images_from_user/（client 专属）
  *
  * 经 ctx.webServer（webserver 服务，公开版由 httpServer 改名）注册；客户端与服务器同源，调用无信任围栏问题。
  */
 
 import type { Context } from 'cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 // 类型引用：拉入 webserver / session 包的 cordis 声明增强（ctx.webServer / ctx.sessions）；运行时擦除
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -19,13 +23,44 @@ import { listActiveLoops } from './loop-ops.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const LOOPS_PATH = '/serenity/loops'
+const UPLOAD_PATH = '/serenity/image-upload'
 
-function readBody(req: IncomingMessage): Promise<string> {
+/** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
+export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
+export const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const EXT_BY_MEDIA: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 单图 10MB 上限
+
+/**
+ * 图片落盘核心逻辑（可测）：校验 mediaType 白名单 + base64 解码 + 大小上限 →
+ * 写 CCC 根 _tmp/images_from_user/<ts>-<rand>.<ext>，返回相对路径。
+ * 校验失败抛 Error（handler 转 400）。
+ */
+export function saveImageToTmp(root: string, mediaType: string, data: string): string {
+  if (!IMAGE_MEDIA_TYPES.has(mediaType)) {
+    throw new Error(`unsupported media type: ${mediaType}`)
+  }
+  if (typeof data !== 'string' || data.length === 0) {
+    throw new Error('missing image data')
+  }
+  const bytes = Buffer.from(data, 'base64')
+  if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES) {
+    throw new Error(`image size out of range: ${bytes.length} bytes (max ${MAX_IMAGE_BYTES})`)
+  }
+  const dir = join(root, IMAGE_UPLOAD_DIR)
+  mkdirSync(dir, { recursive: true })
+  const ext = EXT_BY_MEDIA[mediaType] ?? 'img'
+  const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  writeFileSync(join(dir, filename), bytes)
+  return `${IMAGE_UPLOAD_DIR}/${filename}`
+}
+
+function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = ''
     req.on('data', (chunk: Buffer) => {
       data += chunk.toString('utf-8')
-      if (data.length > 64 * 1024) {
+      if (data.length > maxBytes) {
         reject(new Error('body too large'))
         req.destroy()
       }
@@ -82,6 +117,38 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     },
   })
 
+  // /serenity/image-upload：图片落盘（S142 图片自动识别基础设施——WebUI 粘贴图片 →
+  // 模型不支持图片时自动存 _tmp/images_from_user/，agent 经 CCC vlm MSM 自主处理）。
+  // client 专属（x-serenity-ui 头）；类型白名单 + 10MB 上限 + CCC 根内写入。
+  ctx.webServer.register({
+    kind: 'exact',
+    path: UPLOAD_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        if (req.headers['x-serenity-ui'] !== '1') {
+          sendJson(res, 403, { error: '图片落盘仅限 WebUI（client 专用）' })
+          return
+        }
+        const raw = await readBody(req, 20 * 1024 * 1024)
+        const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; mediaType?: string; data?: string }
+        const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
+        const root = findSerenityRoot(workspace)
+        if (!root) {
+          sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
+          return
+        }
+        const path = saveImageToTmp(root, body.mediaType ?? '', body.data ?? '')
+        sendJson(res, 200, { path })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+
   ctx.webServer.register({
     kind: 'exact',
     path: ROUTE_PATH,
@@ -105,7 +172,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             sendJson(res, 403, { error: 'safe-mode 切换仅限 WebUI（agent 不可自行开关）' })
             return
           }
-          const raw = await readBody(req)
+          const raw = await readBody(req, 64 * 1024)
           const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; on?: boolean }
           const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
           const root = findSerenityRoot(workspace)
