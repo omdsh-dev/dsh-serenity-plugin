@@ -65,11 +65,15 @@ export async function getDraftFiles(
   return (conversation.draftImages(ids) ?? []).map((a) => a.file)
 }
 
-/** 纯文本重发（绕过图片门禁——不含 image part，模型永不触发 MODEL_DOES_NOT_SUPPORT_IMAGES） */
+/**
+ * 纯文本重发（绕过图片门禁——不含 image part，模型永不触发 MODEL_DOES_NOT_SUPPORT_IMAGES）。
+ * ⚠️ 必须作为方法调用（session.prompt(...)）：解构取出再调会丢失 this
+ * （prompt 内部读 this.promptError → "Cannot set properties of undefined (setting 'promptError')"）。
+ */
 export async function resendText(ctx: ClientContext, sessionId: string, text: string): Promise<void> {
   const binding = ctx.sessions.binding(sessionId as never) as { session?: { prompt?: (content: unknown[], mode: string) => Promise<{ ok: boolean; error?: { code?: string; message?: string } }> } } | undefined
-  const prompt = binding?.session?.prompt
-  if (prompt === undefined) throw new Error('serenity image fallback: session unavailable')
-  const result = await prompt([{ type: 'text', text }], 'queue')
+  const session = binding?.session
+  if (session?.prompt === undefined) throw new Error('serenity image fallback: session unavailable')
+  const result = await session.prompt([{ type: 'text', text }], 'queue')
   if (!result.ok) throw new Error(`serenity image fallback resend failed: ${result.error?.code}: ${result.error?.message}`)
 }

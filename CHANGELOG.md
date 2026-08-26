@@ -1,3 +1,13 @@
+## v1.20.3 — 2026-08-24（图片落盘修复：resendText 同样解构丢 this——改为方法调用，S142）
+
+**Scope:** 用户实测 v1.20.2 仍失败：`Cannot set properties of undefined (setting 'promptError')`。根因与 v1.20.2 同类：`resendText` 把 `binding.session.prompt` **解构取出后调用**——prompt 内部读 `this.promptError`（session.ts:191），解构后 `this` = undefined → 抛错。
+
+### 修复
+- `client/image-fallback-api.ts` `resendText`：**改为方法调用 `session.prompt(...)`**（this = Session 实例）；注释固化约束
+- 全面检查 image-fallback-api：uploadImage（模块函数无 this）/ getDraftFiles（v1.20.2 已修）/ resendText（本次）——**无残留解构调用**
+
+**测试：** 32 files / 293 tests → typecheck ✓
+
 ## v1.20.2 — 2026-08-24（图片落盘修复：draftImages this 丢失——解构调用改为方法调用，S142）
 
 **Scope:** 用户实测 v1.20.1 仍失败：`Cannot read properties of undefined (reading 'draftAttachments')`。根因：`getDraftFiles` 把 `conversation.draftImages` **解构取出后调用**（`const draftImages = conversation.draftImages; draftImages(ids)`）——draftImages 内部读 `this.draftAttachments`，解构后 `this` = undefined → 抛错。
