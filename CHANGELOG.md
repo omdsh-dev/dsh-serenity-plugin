@@ -1,3 +1,16 @@
+## v1.20.1 — 2026-08-24（图片落盘修复：上传带 sessionId 解析 CCC 根 + conversation root get + 错误详情显示，S142）
+
+**Scope:** 用户实测 v1.20.0 图片保存失败。根因排查：① 上传接口 workspace 解析——client 未带 sessionId → node half 回退进程 cwd（不可靠）→ 404；② getDraftFiles 经 scope() 寻址 conversation 存在不确定性；③ 失败原因不可见（状态条无详情）。
+
+### 修复
+- `client/image-fallback-api.ts`：
+  - `uploadImage(file, sessionId)`：**必传 sessionId** → node half 经会话 header.cwd 解析 CCC 根（resolveWorkspace 的 sessionId 分支）
+  - `getDraftFiles`：改为 **`ctx.get('conversation')` root singleton 直接取**（draftImages 读 controller 的 draftAttachments Map，与调用 ctx 作用域无关），避开 scope 寻址不确定性
+- `client/ImageFallbackDock.tsx`：上传传 sessionId；**错误状态条显示具体失败原因**（err.message，诊断友好）
+- `client/index.ts`：inject 签名同步
+
+**测试：** 32 files / 293 tests → typecheck ✓
+
 ## v1.20.0 — 2026-08-24（图片自动落盘兜底——WebUI 图片粘贴 → 模型不支持时自动存 _tmp 供 CCC vlm MSM 处理，S142）
 
 **Scope:** 用户需求：DSH 输入框粘贴图片，当且仅当当前模型不支持图片时，自动把图片存到 CCC 目录 `_tmp/images_from_user/`，并以「用户提供了图片在 {path}」文本消息交给 agent 自主处理（各 CCC 自己的 vlm MSM 识别，ACC 不约束 CCC 实现——职责分离）。零配置、完全自动：host 权威门禁（inputModalities）判定，失败即自动补救。

@@ -38,7 +38,7 @@ export function apply(ctx: ClientContext): void {
             id: 'serenity-image-fallback',
             order: 100,
             inject: (): ImageFallbackInjected => ({
-              uploadImage: (file) => uploadImage(file),
+              uploadImage: (file, sessionId) => uploadImage(file, sessionId),
               getDraftFiles: (sessionId, ids) => getDraftFiles(scope, sessionId, ids),
               resendText: (sessionId, text) => resendText(scope, sessionId, text),
             }),

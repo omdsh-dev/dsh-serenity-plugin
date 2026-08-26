@@ -18,7 +18,7 @@ import './ImageFallbackDock.css'
 
 /** inject 面：apply 闭包提供的图片操作回调 */
 export interface ImageFallbackInjected {
-  uploadImage: (file: File) => Promise<string>
+  uploadImage: (file: File, sessionId: string) => Promise<string>
   getDraftFiles: (sessionId: string, ids: readonly string[]) => Promise<File[]>
   resendText: (sessionId: string, text: string) => Promise<void>
 }
@@ -54,6 +54,7 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Elem
 
   const [state, setState] = useState<FallbackState>('idle')
   const [paths, setPaths] = useState<string[]>([])
+  const [errorText, setErrorText] = useState<string | null>(null)
   const handlingRef = useRef(false)
 
   const promptError = session?.promptError?.error
@@ -71,7 +72,7 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Elem
         if (files.length === 0) throw new Error('no draft image files')
         const saved: string[] = []
         for (const file of files) {
-          saved.push(await uploadImage(file))
+          saved.push(await uploadImage(file, String(sessionId)))
         }
         const note = saved.map((p) => `用户提供了图片在 ${p}`).join('\n')
         const draft = input?.draft ?? ''
@@ -80,7 +81,9 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Elem
         setPaths(saved)
         setState('done')
       } catch (err) {
-        console.warn(`[serenity] image fallback failed: ${String((err as Error)?.message ?? err)}`)
+        const message = String((err as Error)?.message ?? err)
+        console.warn(`[serenity] image fallback failed: ${message}`)
+        setErrorText(message)
         setState('error')
       } finally {
         handlingRef.current = false
@@ -99,5 +102,9 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Elem
       </span>
     )
   }
-  return <span className="serenity-image-fallback" data-state="error">图片保存失败，请重试</span>
+  return (
+    <span className="serenity-image-fallback" data-state="error">
+      图片保存失败：{errorText ?? '未知错误'}
+    </span>
+  )
 }

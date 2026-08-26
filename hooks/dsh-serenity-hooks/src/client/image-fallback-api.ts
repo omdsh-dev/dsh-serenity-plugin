@@ -28,13 +28,16 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
-/** 上传一张图片到 CCC _tmp/images_from_user/，返回相对路径（如 _tmp/images_from_user/xxx.png） */
-export async function uploadImage(file: File): Promise<string> {
+/**
+ * 上传一张图片到 CCC _tmp/images_from_user/，返回相对路径（如 _tmp/images_from_user/xxx.png）。
+ * sessionId 必传：node half 经会话 header.cwd 解析 CCC 根（进程 cwd 不可靠）。
+ */
+export async function uploadImage(file: File, sessionId: string): Promise<string> {
   const data = await fileToBase64(file)
   const res = await fetch(UPLOAD_PATH, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
-    body: JSON.stringify({ mediaType: file.type, name: file.name, data }),
+    body: JSON.stringify({ sessionId, mediaType: file.type, name: file.name, data }),
   })
   const body = (await res.json()) as { path?: string; error?: string }
   if (!res.ok || typeof body.path !== 'string') {
@@ -43,15 +46,20 @@ export async function uploadImage(file: File): Promise<string> {
   return body.path
 }
 
-/** 取 rail 图片的浏览器 File（conversation.draftImages，session-scoped；类型宽松访问——IConversation 类型面未含 draftImages） */
+/**
+ * 取 rail 图片的浏览器 File。
+ * conversation.draftImages 是 root singleton 的公开方法（读 controller 的 draftAttachments Map，
+ * 与调用 ctx 的作用域无关）——直接 ctx.get('conversation')，避开 scope 寻址不确定性。
+ */
 export async function getDraftFiles(
   ctx: ClientContext,
-  sessionId: string,
+  _sessionId: string,
   ids: readonly string[],
 ): Promise<File[]> {
-  const scoped = ctx.sessions.scope(sessionId as never) as { conversation?: unknown } | undefined
-  const conversation = scoped?.conversation
-  const draftImages = (conversation as { draftImages?: (imageIds: readonly unknown[]) => readonly { file: File }[] | undefined } | undefined)?.draftImages
+  const conversation = (ctx as { get?: (name: string) => unknown }).get?.('conversation') as
+    | { draftImages?: (imageIds: readonly unknown[]) => readonly { file: File }[] | undefined }
+    | undefined
+  const draftImages = conversation?.draftImages
   if (draftImages === undefined) return []
   return (draftImages(ids) ?? []).map((a) => a.file)
 }
