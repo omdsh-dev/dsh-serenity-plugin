@@ -1,13 +1,15 @@
 /**
  * dsh-serenity-hooks — 浏览器端（client half）
  *
- * 会话头部 Serenity 状态徽章：绿状态点 + 版本 + safe-mode 开关；
- * 点击徽章展开**双 tab 大面板**（v1.21 重构）：
- *  - 状态 tab：CCC/loop/守卫 + safe-mode 大开关 + loops 运行列表 + gateway 服务状态
+ * 会话头部 **Serenity 状态卡片**（v1.21 UX 重构）：
+ *  - 卡片形态：绿状态点 + 版本 + chevron；点击弹出
+ *  - **官方 Modal**（ui-primitives：body portal 遮罩 + 居中 + Escape/遮罩关闭——
+ *    大面板不被 header 容器/视口裁剪）
+ * 模态内双 tab：
+ *  - 状态 tab：CCC/loop/守卫 + safe-mode 大开关 + loops 运行列表
  *  - 账号 tab：gateway 监听地址/端口 + 账号列表 CRUD（复杂配置，localstore）
  * 简单配置（开关/阈值）在 dsh 原生设置面板（SettingsSection）。
  * 数据经同源 HTTP /serenity/status + /serenity/config（插件服务端路由）。
- * 样式遵循 web-styling.md：--dsw-alias-* 语义 token（明暗自适应）+ 官方图标。
  *
  * 槽：conversation.session.header.actions（官方既有槽，list）
  */
@@ -16,10 +18,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-conversation'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
   IconChevronDownOutline14,
-  IconChevronUpOutline14,
   IconWarningOutline16,
+  Modal,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { AccountsTab } from './AccountsTab.js'
 import './SafeModePanel.css'
 
@@ -53,14 +55,13 @@ function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
 }
 
-/** 会话头部：可点击徽章 + safe-mode 开关；点击徽章展开双 tab 大面板 */
+/** 会话头部：Serenity 状态卡片（点击 → 全屏遮罩居中模态，双 tab） */
 export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<'status' | 'accounts'>('status')
   const [loops, setLoops] = useState<LoopRunInfo[]>([])
-  const rootRef = useRef<HTMLSpanElement>(null)
 
   const sessionId = props.sessionId
 
@@ -78,7 +79,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     void refresh()
   }, [refresh])
 
-  // 展开时轮询 loop 运行状态（约 3s 刷新——类似 workflow 等待界面；进度文件驱动，并行任务各自一行）
+  // 模态打开时轮询 loop 运行状态（约 3s 刷新；进度文件驱动）
   useEffect(() => {
     if (!open) return
     let alive = true
@@ -100,16 +101,6 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     }
   }, [open, sessionId])
 
-  // 展开时点击外部关闭（弹层相对徽章定位，不阻断其他 header 控件）
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent): void => {
-      if (rootRef.current !== null && !rootRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('pointerdown', onDown)
-    return () => document.removeEventListener('pointerdown', onDown)
-  }, [open])
-
   const toggle = async (on: boolean): Promise<void> => {
     setBusy(true)
     try {
@@ -124,73 +115,80 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     }
   }
 
-  if (!status) return <span className={cx('sp-root')}>⏳ Serenity…</span>
+  if (!status) {
+    return (
+      <button type="button" className={cx('sp-card')} disabled>
+        <span className={cx('sp-dot', 'sp-dotOff')} />
+        <span className={cx('sp-brand')}>Serenity…</span>
+      </button>
+    )
+  }
 
   const inCcc = status.root !== null
+
   return (
-    <span ref={rootRef} className={cx('sp-root')} title={status.root ?? undefined}>
+    <>
+      {/* 状态卡片（可点击 → 弹出 Modal） */}
       <button
         type="button"
-        className={cx('sp-badge')}
+        className={cx('sp-card')}
+        aria-haspopup="dialog"
         aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-        title={open ? '收起详情' : '查看 Serenity 状态'}
+        onClick={() => setOpen(true)}
+        title={inCcc ? `Serenity v${status.accVersion} — ${status.root}` : 'Serenity（未激活）'}
       >
         <span className={cx('sp-dot', inCcc ? 'sp-dotOn' : 'sp-dotOff')} />
         <span className={cx('sp-brand')}>Serenity v{status.accVersion}</span>
-        {open ? <IconChevronUpOutline14 size={12} /> : <IconChevronDownOutline14 size={12} />}
+        <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
       </button>
-      {inCcc && (
-        <button
-          type="button"
-          className={cx('sp-toggle', status.safeModeOn ? 'sp-toggleOn' : 'sp-toggleOff')}
-          disabled={busy}
-          onClick={() => void toggle(!status.safeModeOn)}
-          title={status.safeModeOn ? '关闭 safe-mode（解除 bash 限制）' : '开启 safe-mode（隐藏写工具）'}
-        >
-          {status.safeModeOn && <IconWarningOutline16 size={12} className={cx('sp-toggleIcon')} />}
-          safe-mode {status.safeModeOn ? 'ON' : 'OFF'}
-        </button>
-      )}
-      {open && (
-        <div className={cx('sp-pop', 'sp-popLg')} role="dialog" aria-label="Serenity 高级设定">
-          <div className={cx('sp-tabs')}>
-            <button
-              type="button"
-              className={cx('sp-tab', tab === 'status' && 'sp-tabOn')}
-              onClick={() => setTab('status')}
-            >
-              状态
-            </button>
-            <button
-              type="button"
-              className={cx('sp-tab', tab === 'accounts' && 'sp-tabOn')}
-              onClick={() => setTab('accounts')}
-            >
-              账号
-            </button>
-          </div>
+
+      {/* 官方 Modal：body portal 遮罩 + 居中 + Escape/遮罩关闭 */}
+      <Modal
+        open={open}
+        onClose={() => setOpen(false)}
+        title="Serenity 高级设定"
+        closeLabel="关闭"
+        className={cx('sp-modal')}
+      >
+        <div className={cx('sp-tabs')}>
+          <button
+            type="button"
+            className={cx('sp-tab', tab === 'status' && 'sp-tabOn')}
+            onClick={() => setTab('status')}
+          >
+            状态
+          </button>
+          <button
+            type="button"
+            className={cx('sp-tab', tab === 'accounts' && 'sp-tabOn')}
+            onClick={() => setTab('accounts')}
+          >
+            账号
+          </button>
+        </div>
+
+        <div className={cx('sp-modalBody')}>
           {tab === 'accounts' ? (
             <AccountsTab sessionId={String(sessionId ?? '')} />
           ) : inCcc ? (
             <>
-              <div className={cx('sp-popRow')}>
-                <span className={cx('sp-popLabel')}>CCC</span>
-                <span className={cx('sp-popValue')} title={status.root ?? undefined}>{status.root}</span>
+              <div className={cx('sp-row')}>
+                <span className={cx('sp-label')}>CCC</span>
+                <span className={cx('sp-value')} title={status.root ?? undefined}>{status.root}</span>
               </div>
-              <div className={cx('sp-popRow')}>
-                <span className={cx('sp-popLabel')}>loop</span>
-                <span className={cx('sp-popValue')} title={status.loopModel ? `loop.defaultModel: ${status.loopModel}` : undefined}>
+              <div className={cx('sp-row')}>
+                <span className={cx('sp-label')}>loop</span>
+                <span className={cx('sp-value')} title={status.loopModel ? `loop.defaultModel: ${status.loopModel}` : undefined}>
                   {status.loopModel ?? '未配置'}
                 </span>
               </div>
-              <div className={cx('sp-popRow')}>
-                <span className={cx('sp-popLabel')}>守卫</span>
-                <span className={cx('sp-popValue')}>
+              <div className={cx('sp-row')}>
+                <span className={cx('sp-label')}>守卫</span>
+                <span className={cx('sp-value')}>
                   blacklist {status.blacklist.length} 条{status.threshold !== null ? ` · keeper 阈值 ${status.threshold}` : ''}
                 </span>
               </div>
-              <div className={cx('sp-popActions')}>
+              <div className={cx('sp-actions')}>
                 <button
                   type="button"
                   className={cx('sp-toggle', status.safeModeOn ? 'sp-toggleOn' : 'sp-toggleOff', 'sp-toggleLg')}
@@ -201,10 +199,10 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                   safe-mode {status.safeModeOn ? 'ON' : 'OFF'}
                 </button>
               </div>
-              <div className={cx('sp-popSection')}>
-                <div className={cx('sp-popRow')}>
-                  <span className={cx('sp-popLabel')}>loops</span>
-                  <span className={cx('sp-popValue')}>
+              <div className={cx('sp-section')}>
+                <div className={cx('sp-row')}>
+                  <span className={cx('sp-label')}>loops</span>
+                  <span className={cx('sp-value')}>
                     {loops.filter((l) => !l.done).length > 0
                       ? `运行中 ${loops.filter((l) => !l.done).length}${loops.length > 0 ? ` / 共 ${loops.length}` : ''}`
                       : '无运行中 loop'}
@@ -225,13 +223,13 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
               </div>
             </>
           ) : (
-            <div className={cx('sp-popRow')}>
-              <span className={cx('sp-popLabel')}>状态</span>
-              <span className={cx('sp-popValue')}>ACC 未激活（工作区不在 CCC 内）</span>
+            <div className={cx('sp-row')}>
+              <span className={cx('sp-label')}>状态</span>
+              <span className={cx('sp-value')}>ACC 未激活（工作区不在 CCC 内）</span>
             </div>
           )}
         </div>
-      )}
-    </span>
+      </Modal>
+    </>
   )
 }

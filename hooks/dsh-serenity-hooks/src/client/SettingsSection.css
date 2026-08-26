@@ -12,6 +12,11 @@
   margin: 0 0 4px;
   font-size: 12px;
   opacity: 0.7;
+  /* 该换行就换行：长文本/路径完整显示，不截断 */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.5;
 }
 
 .ss-row {
@@ -24,12 +29,20 @@
 .ss-label {
   min-width: 88px;
   font-weight: 600;
+  /* 标签允许换行（窄面板时不被压缩截断） */
+  word-break: break-word;
+  line-height: 1.4;
 }
 
 .ss-desc {
   flex: 1;
   font-size: 12px;
   opacity: 0.65;
+  /* 描述该换行就换行 */
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  line-height: 1.5;
 }
 
 .ss-row input[type='checkbox'] {
@@ -55,4 +68,7 @@
 
 .ss-degrade p {
   margin: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
 }

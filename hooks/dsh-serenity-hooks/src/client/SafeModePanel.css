@@ -1,43 +1,39 @@
-/* SafeModePanel — 会话头部 Serenity 状态徽章（点击展开详情卡）。
+/* SafeModePanel — 会话头部 Serenity 状态卡片（v1.21 UX 重构）
+ * 卡片 → 点击 → 官方 Modal（body portal 遮罩 + 居中）
  * 遵循 web-styling.md：颜色只用 --dsw-alias-* 语义 token（明暗自适应）；
- * 尺寸与官方 header 标签一致；前缀 sp- 防冲突。 */
+ * 前缀 sp- 防冲突。 */
 
-.sp-root {
-  position: relative;
+/* ── 头部状态卡片（可点击） ── */
+
+.sp-card {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 24px;
-  padding: 0 4px 0 4px;
-  border-radius: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
   background: var(--dsw-alias-bg-module-platform);
-  font-size: 12px;
-  line-height: 24px;
-  white-space: nowrap;
-}
-
-.sp-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 22px;
-  padding: 0 6px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
   color: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: background var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease);
+  transition: background var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease),
+    border-color var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease);
 }
 
-.sp-badge:hover {
+.sp-card:hover {
   background: var(--dsw-alias-interactive-bg-hover);
+  border-color: var(--dsw-alias-border-l2);
 }
 
-.sp-badge:focus-visible {
+.sp-card:focus-visible {
   outline: 2px solid var(--dsw-alias-button-ghost-active-border);
   outline-offset: 1px;
+}
+
+.sp-card:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .sp-dot {
@@ -60,95 +56,30 @@
   font-weight: 500;
 }
 
-.sp-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 18px;
-  padding: 0 8px;
-  border: none;
-  border-radius: 5px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
-  cursor: pointer;
-  transition: background var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease);
+.sp-chev {
+  color: var(--dsw-alias-label-dimmed);
 }
 
-.sp-toggle:focus-visible {
-  outline: 2px solid var(--dsw-alias-button-ghost-active-border);
-  outline-offset: 1px;
+/* ── 官方 Modal 定制（宽度 + 无滚动条） ── */
+
+.sp-modal {
+  width: 480px;
+  max-width: calc(100vw - 48px);
+  /* 无滚动条约束：内容在视口内完整容纳（紧凑布局，溢出不滚动） */
 }
 
-.sp-toggle:disabled {
-  opacity: 0.55;
-  cursor: default;
-}
-
-.sp-toggleOn {
-  background: var(--dsw-alias-state-error-primary);
-  color: var(--dsw-alias-label-primary-foreground);
-}
-
-.sp-toggleOn:hover:not(:disabled) {
-  background: var(--dsw-alias-state-error-secondary);
-}
-
-.sp-toggleOff {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-secondary);
-}
-
-.sp-toggleOff:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
-}
-
-.sp-toggleIcon {
-  flex: none;
-}
-
-.sp-toggleLg {
-  height: 26px;
-  padding: 0 14px;
-  font-size: 13px;
-  line-height: 26px;
-  border-radius: 6px;
-}
-
-/* 详情卡：相对徽章绝对定位（右对齐），卡片 token */
-.sp-pop {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 20;
-  width: 300px;
-  box-sizing: border-box;
-  padding: 12px 14px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 12px;
-  background: var(--dsw-specific-tip);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* v1.21 大面板：双 tab（状态/账号），无滚动条约束（内容在视口内完整容纳） */
-.sp-popLg {
-  width: 460px;
-  padding: 10px 14px 14px;
-}
+/* ── tab 栏 ── */
 
 .sp-tabs {
   display: flex;
   gap: 4px;
-  padding-bottom: 8px;
+  padding: 0 2px 10px;
   border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
 
 .sp-tab {
   flex: 1;
-  padding: 6px 0;
+  padding: 7px 0;
   border: none;
   border-radius: 6px;
   background: transparent;
@@ -167,21 +98,31 @@
   font-weight: 600;
 }
 
-.sp-popRow {
+/* ── 模态内容（紧凑布局，无滚动条） ── */
+
+.sp-modalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  overflow: hidden;
+}
+
+.sp-row {
   display: flex;
   align-items: baseline;
   gap: 10px;
   min-width: 0;
 }
 
-.sp-popLabel {
+.sp-label {
   flex: none;
-  width: 34px;
+  width: 40px;
   font-size: 12px;
   color: var(--dsw-alias-label-caption);
 }
 
-.sp-popValue {
+.sp-value {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -189,9 +130,10 @@
   font-size: 12px;
   color: var(--dsw-alias-label-secondary);
   font-family: var(--ds-font-family-code, monospace);
+  word-break: break-all;
 }
 
-.sp-popActions {
+.sp-actions {
   display: flex;
   justify-content: flex-end;
   padding-top: 4px;
@@ -199,8 +141,44 @@
   margin-top: 2px;
 }
 
-/* loop 运行状态区块（WebUI 等待界面；并行任务各自一行） */
-.sp-popSection {
+/* safe-mode 开关（大） */
+
+.sp-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.sp-toggleLg {
+  height: 30px;
+  padding: 0 16px;
+  font-size: 13px;
+}
+
+.sp-toggleOn {
+  background: var(--dsw-alias-state-warning-bg, rgba(245, 158, 11, 0.15));
+  color: var(--dsw-alias-state-warning-fg, #f59e0b);
+  border-color: var(--dsw-alias-state-warning-border, rgba(245, 158, 11, 0.4));
+}
+
+.sp-toggleOff {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-secondary);
+}
+
+.sp-toggleIcon {
+  flex: none;
+}
+
+/* loop 运行状态区块（并行任务各自一行） */
+
+.sp-section {
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -213,14 +191,14 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 2px 0 2px 44px;
+  padding: 2px 0 2px 50px;
   min-width: 0;
 }
 
 .sp-loopHead {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 
@@ -231,35 +209,26 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  font-weight: 600;
   color: var(--dsw-alias-label-primary);
 }
 
 .sp-loopRound {
   flex: none;
   font-size: 11px;
-  color: var(--dsw-alias-state-info-primary);
-  font-family: var(--ds-font-family-code, monospace);
+  color: var(--dsw-alias-label-dimmed);
 }
 
 .sp-loopTime {
   flex: none;
   font-size: 11px;
-  color: var(--dsw-alias-label-caption);
+  color: var(--dsw-alias-label-dimmed);
 }
 
 .sp-loopResp {
+  font-size: 11px;
+  color: var(--dsw-alias-label-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
-  color: var(--dsw-alias-label-secondary);
-  font-family: var(--ds-font-family-code, monospace);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .sp-toggle,
-  .sp-badge {
-    transition: none;
-  }
-}
