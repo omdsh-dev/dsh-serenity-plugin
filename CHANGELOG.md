@@ -1,3 +1,14 @@
+## v1.22.2 — 2026-08-27（轨迹跟踪器 rebuild 语义修正：原地重建，S142）
+
+**Scope:** 用户纠正 F2 rebuild 语义——**归档丢掉的是 dsh 会话（对话历史工作副本），不是宁静号 SESSION.md**；SESSION.md 是持久轨迹永远原位；rebuild = dsh 会话**原地** surface replace 重建（同一会话 id，从 SESSION.md 自动延续身份）。
+
+### 变更
+- **rebuild.ts 重写为原地重建**：`executeRebuild` ① 定位当前 dsh 会话（`ctx.sessions.get`）② `surface.nodes` 全部节点 → `session.append('user/message', anchor, { surfaceOp:{op:'replace', start:nodes[0], end:nodes[last]}, sourceEventSeqs:nodes })` 原地替换整个 surface（同一会话 id 不变）③ SESSION.md **原位不动**（持久轨迹）；**删除** `archiveSessionNow`/建新宁静号会话/`ctx.agents.create` 逻辑
+- **`buildRebuildAnchor` 语义对齐**：`[TRAJECTORY-REBUILD]` 前缀 + "持久轨迹（SESSION.md，未移动）"——不再引用 `_archived/`
+- **`tools/rebuild.ts` 适配**：description 改轨迹跟踪器语义；execute 传 `dshSessionId`（当前会话原地重建）
+- **测试重写**：fakeSession surface replace 断言（start/end/sourceEventSeqs 全覆盖 + 不建新会话/不归档 + 空 surface/会话缺失抛错）——39 files / 376 tests
+- 撤销误操作：S142 目录已从 `_archived/` 恢复原位 + 状态改回进行中；误建的 S144 已删除
+
 ## v1.22.1 — 2026-08-27（移动端登录页 + 轨迹跟踪器 + 上下文回收修复，S142）
 
 **Scope:** 用户三项需求：① 外部（3081）登录页移动端适配；② 上下文阈值回收不生效（修复）；③ 机制正式命名——**轨迹跟踪器（Trajectory Tracker）**：SESSION.md = 持久 agent（轨迹），自身会话 = 临时可重建（工作副本）。

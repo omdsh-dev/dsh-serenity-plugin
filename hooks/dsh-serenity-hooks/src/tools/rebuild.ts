@@ -1,8 +1,10 @@
 /**
- * rebuild.ts — session_rebuild 工具定义（F2，v1.21）
+ * rebuild.ts — session_rebuild 工具定义（轨迹跟踪器，v1.22.1 原地重建语义）
  *
- * LLM 主动触发清空重建（用户决策：keeper 超阈值提示，不自动执行——防误清空）。
- * 执行：归档当前会话 → 创建新会话（宁静号 SESSION 目录 + dsh agent）→ 锚点注入。
+ * LLM 主动触发清空重建（用户决策：keeper 超阈值提示 [TRAJECTORY]，不自动执行——防误清空）。
+ * v1.22.1 语义修正：**归档丢掉的是 dsh 会话历史（surface replace 原地重建），
+ * 不是宁静号 SESSION.md**——SESSION.md 是持久轨迹永远原位；同一 dsh 会话 id
+ * 原地替换 surface 为锚点消息，身份从 SESSION.md 自动延续。
  * 服务端逻辑在 ../rebuild.ts（executeRebuild，可单测）。
  */
 
@@ -12,14 +14,13 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '../json.js'
 import { findSerenityRoot } from '../ccc.js'
 import { executeRebuild } from '../rebuild.js'
-import { getActiveSessionInfo } from '../session-ops.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
   return exec.agent?.session?.header?.cwd ?? process.cwd()
 }
 
-function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
-  return exec.agent?.session?.id ?? 'default'
+function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {
+  return exec.agent?.session?.id ?? ''
 }
 
 function renderText(value: unknown): ContentBlock[] {
@@ -27,17 +28,18 @@ function renderText(value: unknown): ContentBlock[] {
   return [{ type: 'text', text }]
 }
 
-/** 创建 session_rebuild 工具（闭包捕获 ctx → ctx.agents.create 新会话） */
+/** 创建 session_rebuild 工具（闭包捕获 ctx → 当前会话 surface replace 原地重建） */
 export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
     name: 'session_rebuild',
     description:
-      '上下文超限清空重建（Ship of Theseus）：归档当前宁静号会话（SESSION.md 标记 completed + 移 _archived/），' +
-      '创建新会话并注入重建锚点（SESSION.md 路径 + 摘要 + 重建指令）。' +
-      '用途：SESSION-KEEPER 提示上下文接近上限时，在任务自然停顿点主动调用。' +
-      '触发后请先读取旧会话 SESSION.md 从上次进度继续。',
+      '轨迹跟踪器超限重建（Ship of Theseus）：**原地清空当前 dsh 会话的对话历史**（surface replace），' +
+      '注入锚点消息（SESSION.md 路径 + 摘要 + 重建指令）。' +
+      'SESSION.md 是持久轨迹保持原位；本会话是临时可重建的工作副本。' +
+      '用途：收到 [TRAJECTORY] 提示（上下文超阈值）时，在任务自然停顿点主动调用。' +
+      '触发后请先读取 SESSION.md 从上次进度继续。',
     parameters: {
-      note: { type: 'string', description: '可选：给新会话的一句话背景（重建后 LLM 的起始上下文）' },
+      note: { type: 'string', description: '可选：重建背景一句话（给重建后的自己）' },
     },
     output: {
       schema: { type: 'json' },
@@ -46,26 +48,22 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
     async execute(args, exec): Promise<JsonValue> {
       const root = findSerenityRoot(agentCwd(exec))
       if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
-
-      // 当前激活的宁静号会话（use 过的那个）；无则只建新会话
-      const scope = agentScope(exec)
-      const active = getActiveSessionInfo(scope)
-      const parentSessionId = (exec.agent?.session as { id?: string } | undefined)?.id
+      const dshSessionId = agentSessionId(exec)
+      if (!dshSessionId) throw new Error('无法确定当前 dsh 会话 id')
 
       const result = await executeRebuild(ctx, {
         root,
-        activeDirName: active?.dirName ?? null,
         note: args.note as string | undefined,
         agentCwd: agentCwd(exec),
-        parentSessionId,
+        dshSessionId,
       })
 
       return {
         ok: true,
-        oldSession: result.oldSession,
-        newSession: result.newSession,
-        anchor: result.anchor,
-        instruction: '已归档旧会话并创建新会话。新会话将自动获得重建锚点；请在新会话中继续工作（可用 session use 激活它）。',
+        rebuilt: result.rebuilt,
+        replacedNodes: result.replacedNodes,
+        sessionMdPath: result.sessionMdPath,
+        instruction: '工作副本已原地清空重建（同一会话）。请读取 SESSION.md 从上次进度继续。',
       }
     },
   })

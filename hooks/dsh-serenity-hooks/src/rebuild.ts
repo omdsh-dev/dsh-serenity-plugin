@@ -1,172 +1,117 @@
 /**
- * rebuild.ts — F2 超限重建工具（v1.21）：session_rebuild
+ * rebuild.ts — 轨迹跟踪器（Trajectory Tracker）超限重建：session_rebuild
  *
- * 需求（S142 用户拍板）：SESSION.md + SESSION-KEEPER 已是实时上下文整理 →
- * 上下文压缩不再需要，超限时**清空重建**（新会话路线，Ship of Theseus）。
- * 触发：**LLM 主动调用 session_rebuild**（keeper 超阈值后提示，不自动执行——
- * 用户决策，防误清空）。
+ * 概念（S142 用户拍板命名，v1.22.1 语义修正）：
+ *   **SESSION.md = 持久 agent（轨迹）**——身份/决策/进度/未解决问题的本体，
+ *   永远留在 AGENT_SESSIONS/ 原位，**不归档、不移动**。
+ *   **自身 dsh 会话 = 临时可重建（工作副本）**——上下文超阈值时清空重建，
+ *   归档丢掉的是 dsh 会话的对话历史（surface replace），身份从 SESSION.md 自动延续。
  *
- * 执行链：
- *  ① 归档当前会话：SESSION.md 标记 completed + 目录移 AGENT_SESSIONS/_archived/
- *     （立即归档，跳过 7 天 grace——重建是显式决策；旧会话完整留存供后续重建推理）
- *  ② 创建新会话：ctx.agents.create（复用 loop.ts 先例；sessionId 走 F3 命名，
- *     origin:'subagent' + parentSession → WebUI 子代理卡可见）
- *  ③ 注入锚点消息：新会话首条 = SESSION.md 路径 + 简短摘要 + 重建指令
+ * 执行链（v1.22.1 修正为原地重建，不再归档 SESSION/创建新会话）：
+ *   ① 取当前 dsh 会话的 surface 全部节点（模型可见顺序）
+ *   ② `session.append('user/message', anchor, {
+ *        surfaceOp: { op:'replace', start: nodes[0], end: nodes[last] },
+ *        sourceEventSeqs: [...nodes],   // 覆盖全部被 shadow 节点（surface 硬校验）
+ *      })`——同一会话 id 原地替换整个 surface 为锚点消息（Ship of Theseus：
+ *      会话副本重建，轨迹不变）
+ *   ③ 锚点消息 = 当前激活的宁静号 SESSION.md 路径 + 摘要 + 重建指令
  *     （完整身份由 first-anchor + systemPrompt.section 自动恢复）
  *
+ * 触发：LLM 主动调用（keeper 超阈值后提示 [TRAJECTORY]，不自动执行——防误清空）。
  * 门控：仅 CCC 内 + 简单配置 rebuild.enabled。
  */
 
 import type { Context } from 'cordis'
-import type { AgentHandle } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import type { SessionId, Session } from '@deepseek-ai/dsh-session'
 import { join } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
-import { sessionsRoot, createSession, type CreateSessionResult } from './session-ops.js'
-
-/** 归档目录名（与 session-ops ARCHIVE_DIR_NAME 一致） */
-export const ARCHIVE_DIR = '_archived'
+import { getActiveSessionInfo } from './session-ops.js'
 
 /**
- * 归档旧会话：SESSION.md 标记 completed + 目录移 _archived/（立即，跳过 grace）。
- * 纯逻辑（可单测）；找不到会话/无 SESSION.md 抛错。
- * @returns 归档后的新路径（或 null = 会话已归档/不存在）
+ * 构建重建锚点消息（轨迹跟踪器语义）：SESSION.md 路径 + 摘要 + 重建指令。
+ * @param root - CCC 根
+ * @param activeMdPath - 当前激活的宁静号 SESSION.md 绝对路径（持久轨迹本体）
+ * @param note - 可选重建背景
  */
-export function archiveSessionNow(root: string, key: string): string | null {
-  const sessionsDir = sessionsRoot(root)
-  const archiveDir = join(sessionsDir, ARCHIVE_DIR)
-  // 复用 session-ops 的 findSession（按 S###/目录名/模糊匹配）
-  // 直接扫目录找匹配目录（避免依赖未导出的 findSession 内部实现）
-  let target: string | null = null
-  try {
-    const entries = readDirSafe(sessionsDir)
-    for (const name of entries) {
-      if (!name.includes('--S') && name !== key) continue
-      if (name === key || name.endsWith(`--${key}`) || name.includes(`--${key}--`)) {
-        target = join(sessionsDir, name)
-        break
-      }
-    }
-  } catch {
-    return null
-  }
-  if (target === null) {
-    // fallback：S### 精确匹配（key 如 "S001"）
-    for (const name of readDirSafe(sessionsDir)) {
-      const m = name.match(/--S(\d{3,})--/)
-      if (m && `S${m[1]}` === key) {
-        target = join(sessionsDir, name)
-        break
-      }
-    }
-  }
-  if (target === null) return null
-  const mdPath = join(target, 'SESSION.md')
-  if (existsSync(mdPath)) {
-    let content = readFileSync(mdPath, 'utf-8').replace(/\r\n/g, '\n')
-    content = content.replace(
-      /## 状态\n\n?- \[ \] 进行中/,
-      '## 状态\n- [x] 已完成\n- [x] 已关闭（session_rebuild 归档）',
-    )
-    const now = new Date().toISOString().slice(0, 16).replace('T', ' ')
-    if (!content.includes('-- 关闭')) {
-      content = content.replace(/(## 进度记录\n)/, `$1- ${now} — 关闭（session_rebuild 归档）\n`)
-    }
-    writeFileSync(mdPath, content, 'utf-8')
-  }
-  if (!existsSync(archiveDir)) mkdirSync(archiveDir, { recursive: true })
-  const dest = join(archiveDir, target.split(/[\\/]/).pop()!)
-  renameSync(target, dest)
-  return dest
-}
-
-function readDirSafe(dir: string): string[] {
-  try {
-    return readdirSync(dir)
-  } catch {
-    return []
-  }
-}
-
-/** 新会话锚点消息（重建指令 + SESSION.md 路径 + 摘要） */
-export function buildRebuildAnchor(root: string, oldDirName: string, note: string | undefined): string {
-  const mdPath = join(root, 'AGENT_SESSIONS', oldDirName, 'SESSION.md')
+export function buildRebuildAnchor(root: string, activeMdPath: string, note: string | undefined): string {
+  const rel = activeMdPath.startsWith(root) ? activeMdPath.slice(root.length + 1) : activeMdPath
   const lines = [
-    '[SESSION-REBUILD] 上下文已清空重建（Ship of Theseus：会话归档，身份延续）。',
-    `- 旧会话（已归档）：AGENT_SESSIONS/_archived/${oldDirName}`,
-    `- 完整上下文：${mdPath}`,
-    `- 请先读取旧会话的 SESSION.md（目标/决策/进度/未解决问题），从上次进度继续。`,
+    '[TRAJECTORY-REBUILD] 工作副本已清空重建（Ship of Theseus：会话历史归档，轨迹延续）。',
+    `- 持久轨迹（SESSION.md，未移动）：${rel}`,
+    `- 请先读取该 SESSION.md（目标/决策/进度/未解决问题），从上次进度继续。`,
   ]
   if (note) lines.push(`- 重建背景：${note}`)
   return lines.join('\n')
 }
 
 export interface RebuildResult {
-  oldSession: { dirName: string; archivedTo: string | null } | null
-  newSession: { sessionId: string; dirName: string }
+  /** 是否成功原地重建（surface replace） */
+  rebuilt: boolean
+  /** 重建前 surface 节点数（被替换的对话历史长度） */
+  replacedNodes: number
+  /** 锚点消息文本 */
   anchor: string
+  /** 宁静号 SESSION.md（持久轨迹，保持原位） */
+  sessionMdPath: string | null
 }
 
 /**
- * 执行 session_rebuild（服务端逻辑）：
- * ① 归档当前宁静号会话（LLM 经 session use 激活的那个）
- * ② 创建新宁静号 SESSION 目录（createSession）+ dsh agent 会话（ctx.agents.create）
- * ③ 返回锚点文本（调用方负责注入到新 agent）
+ * 执行 session_rebuild（v1.22.1 原地重建语义）：
+ * ① 定位当前 dsh 会话（执行工具的 agent 会话）——**同一会话 id 原地重建**
+ * ② 取 surface 全部节点 → append user/message 锚点（surfaceOp replace 覆盖全部节点）
+ * ③ SESSION.md 保持原位不动（持久轨迹）
  * @returns rebuild 结果；rebuild.enabled=false 或非 CCC 抛错
  */
 export async function executeRebuild(
   ctx: Context,
-  opts: { root: string; activeDirName: string | null; note?: string; agentCwd: string; parentSessionId?: string },
+  opts: { root: string; note?: string; agentCwd: string; dshSessionId: string },
 ): Promise<RebuildResult> {
   if (!readSimpleSettings().rebuildEnabled) {
     throw new Error('session_rebuild 已禁用（rebuild.enabled=false，可在 dsh 设置面板开启）')
   }
-  const { root, activeDirName, note } = opts
+  const { root, note, dshSessionId } = opts
 
-  // ① 归档旧会话（有激活会话时）
-  let old: RebuildResult['oldSession'] = null
-  if (activeDirName) {
-    const archivedTo = archiveSessionNow(root, activeDirName)
-    old = { dirName: activeDirName, archivedTo }
+  // ① 定位 dsh 会话（ctx.sessions.get；同 id 原地重建）
+  const session = (ctx.sessions as { get?: (id: SessionId) => Session | undefined } | undefined)
+    ?.get?.(dshSessionId as SessionId)
+  if (!session) {
+    throw new Error(`无法定位 dsh 会话 ${dshSessionId}（会话可能已关闭）`)
   }
 
-  // ② 创建新宁静号 SESSION 目录（编号递增）
-  const created: CreateSessionResult = createSession({
+  // ② 取 surface 全部节点（模型可见顺序；空 surface = 无历史可清）
+  const nodes = [...session.surface.nodes]
+  if (nodes.length === 0) {
+    throw new Error('会话 surface 为空（无对话历史可清空重建）')
+  }
+
+  // ③ 当前激活的宁静号 SESSION.md（持久轨迹路径；无激活会话则跳过路径引用）
+  const scope = `session:${dshSessionId}`
+  let sessionMdPath: string | null = null
+  try {
+    const active = getActiveSessionInfo(scope)
+    if (active?.mdPath) sessionMdPath = active.mdPath
+  } catch {
+    /* 激活信息缺失 → 仅注入通用锚点 */
+  }
+  const anchorText = buildRebuildAnchor(
     root,
-    desc: 'rebuild',
-    goal: '上下文超限清空重建（session_rebuild）',
-    dryRun: false,
-  })
+    sessionMdPath ?? join(root, 'AGENT_SESSIONS', 'SESSION.md'),
+    note,
+  )
 
-  // ③ 创建 dsh agent 会话（复用 loop.ts 模式：origin subagent + parentSession）
-  const parentSession = opts.parentSessionId
-  const sessionId = `rebuild-${randomUUID()}` as SessionId
-  let newSession: RebuildResult['newSession'] = { sessionId: String(sessionId), dirName: created.dirName }
-  if (ctx.agents) {
-    try {
-      const handle: AgentHandle = await ctx.agents.create({
-        sessionId,
-        meta: {
-          cwd: opts.agentCwd,
-          origin: 'subagent',
-          ...(parentSession ? { parentSession: parentSession as SessionId } : {}),
-        },
-        agentOptions: undefined,
-      })
-      newSession = { sessionId: String(sessionId), dirName: created.dirName }
-      // ③ 注入锚点消息到新 agent（身份由 first-anchor + systemPrompt 自动恢复）
-      const anchor = buildRebuildAnchor(root, created.dirName, note)
-      handle.agent.inject({
-        content: [{ type: 'text', text: anchor }],
-        source: { kind: 'plugin', plugin: 'dsh-serenity-hooks' },
-      } as never)
-    } catch {
-      // agent 创建失败不阻断（新宁静号 SESSION 目录已建；调用方提示用户手动开新会话）
-    }
+  // ④ 原地替换：surfaceOp replace 覆盖全部 surface 节点（sourceEventSeqs 硬校验要求全覆盖）
+  session.append('user/message', {
+    content: [{ type: 'text', text: anchorText }],
+  } as never, {
+    surfaceOp: { op: 'replace', start: nodes[0]!, end: nodes[nodes.length - 1]! },
+    sourceEventSeqs: nodes,
+  } as never)
+
+  return {
+    rebuilt: true,
+    replacedNodes: nodes.length,
+    anchor: anchorText,
+    sessionMdPath,
   }
-
-  return { oldSession: old, newSession, anchor: buildRebuildAnchor(root, created.dirName, note) }
 }

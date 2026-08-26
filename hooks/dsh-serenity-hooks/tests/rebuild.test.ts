@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -26,9 +26,9 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { archiveSessionNow, buildRebuildAnchor, ARCHIVE_DIR } from '../src/rebuild.js'
+import { buildRebuildAnchor, executeRebuild } from '../src/rebuild.js'
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
-import { createSession } from '../src/session-ops.js'
+import { defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string
 
@@ -41,45 +41,82 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe('F2: archiveSessionNow（立即归档，跳过 grace）', () => {
-  it('创建会话 → 立即归档（SESSION.md 标记 completed + 移 _archived/）', () => {
-    const s = createSession({ root: dir, desc: 'old-work', dryRun: false })
-    const dest = archiveSessionNow(dir, s.dirName)
-    expect(dest).not.toBeNull()
-    expect(dest).toContain(ARCHIVE_DIR)
-    // 原目录已移动
-    expect(existsSync(s.sessionPath)).toBe(false)
-    expect(existsSync(join(dir, 'AGENT_SESSIONS', ARCHIVE_DIR, s.dirName, 'SESSION.md'))).toBe(true)
-    // SESSION.md 标记 completed + 关闭记录
-    const md = readFileSync(join(dir, 'AGENT_SESSIONS', ARCHIVE_DIR, s.dirName, 'SESSION.md'), 'utf-8')
-    expect(md).toContain('[x] 已完成')
-    expect(md).toContain('关闭')
-  })
+/** 构造最小可测 dsh 会话（surface nodes 可读 + append 记录调用） */
+function fakeSession(nodes: number[]) {
+  const calls: Array<{ type: string; data: unknown; opts: unknown }> = []
+  return {
+    surface: { nodes, replaceGeneration: 0 },
+    append: (type: string, data: unknown, opts?: unknown) => {
+      calls.push({ type, data, opts })
+      return { type, data, opts }
+    },
+    _calls: calls,
+  }
+}
 
-  it('按 S### 编号归档', () => {
-    const s = createSession({ root: dir, desc: 'old-work', dryRun: false })
-    const dest = archiveSessionNow(dir, s.sessionId)
-    expect(dest).toContain(ARCHIVE_DIR)
-  })
-
-  it('不存在 → null（不抛错）', () => {
-    expect(archiveSessionNow(dir, 'S999')).toBeNull()
-  })
-})
-
-describe('F2: buildRebuildAnchor（锚点消息）', () => {
-  it('含 SESSION.md 路径 + 归档位置 + 重建指令', () => {
-    const anchor = buildRebuildAnchor(dir, '2026-08-26--S001--old-work', '继续 x 任务')
-    expect(anchor).toContain('[SESSION-REBUILD]')
-    expect(anchor).toContain('AGENT_SESSIONS/_archived/2026-08-26--S001--old-work')
-    expect(anchor).toContain('SESSION.md')
+describe('轨迹跟踪器 rebuild（v1.22.1 原地重建语义，用户拍板）', () => {
+  it('buildRebuildAnchor：SESSION.md 持久轨迹原位 + 重建指令（不归档）', () => {
+    const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
+    const anchor = buildRebuildAnchor(dir, mdPath, '继续 x 任务')
+    expect(anchor).toContain('[TRAJECTORY-REBUILD]')
+    expect(anchor).toContain('持久轨迹（SESSION.md，未移动）')
+    expect(anchor).toContain('AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
     expect(anchor).toContain('继续 x 任务')
-    expect(anchor).toContain('读取旧会话的 SESSION.md')
+    expect(anchor).toContain('读取该 SESSION.md')
+    // 不包含"归档/移动"语义
+    expect(anchor).not.toContain('_archived')
   })
 
   it('无 note 时不含背景行', () => {
-    const anchor = buildRebuildAnchor(dir, 'd', undefined)
+    const anchor = buildRebuildAnchor(dir, join(dir, 'AGENT_SESSIONS', 'a', 'SESSION.md'), undefined)
     expect(anchor).not.toContain('重建背景')
+  })
+
+  it('executeRebuild：同一会话 surface replace 覆盖全部节点（不建新会话/不归档 SESSION）', async () => {
+    const session = fakeSession([10, 11, 12, 13])
+    const ctx = { sessions: { get: () => session } } as never
+    const result = await executeRebuild(ctx, {
+      root: dir,
+      note: '上下文超限',
+      agentCwd: dir,
+      dshSessionId: 'session-x',
+    })
+    expect(result.rebuilt).toBe(true)
+    expect(result.replacedNodes).toBe(4)
+    expect(session._calls).toHaveLength(1)
+    const call = session._calls[0]!
+    expect(call.type).toBe('user/message')
+    // surfaceOp replace：start=首个节点 end=末节点
+    const op = (call.opts as { surfaceOp: { op: string; start: number; end: number } }).surfaceOp
+    expect(op.op).toBe('replace')
+    expect(op.start).toBe(10)
+    expect(op.end).toBe(13)
+    // sourceEventSeqs 覆盖全部被 shadow 节点（surface 硬校验）
+    const sourceEventSeqs = (call.opts as { sourceEventSeqs: number[] }).sourceEventSeqs
+    expect(sourceEventSeqs).toEqual([10, 11, 12, 13])
+    // 锚点含 SESSION.md 路径
+    const text = (call.data as { content: Array<{ text: string }> }).content[0]!.text
+    expect(text).toContain('[TRAJECTORY-REBUILD]')
+    expect(result.anchor).toBe(text)
+  })
+
+  it('executeRebuild：会话不存在 → 抛错', async () => {
+    const ctx = { sessions: { get: () => undefined } } as never
+    await expect(executeRebuild(ctx, {
+      root: dir,
+      agentCwd: dir,
+      dshSessionId: 'session-gone',
+    })).rejects.toThrow(/无法定位 dsh 会话/)
+  })
+
+  it('executeRebuild：surface 为空 → 抛错', async () => {
+    const session = fakeSession([])
+    const ctx = { sessions: { get: () => session } } as never
+    await expect(executeRebuild(ctx, {
+      root: dir,
+      agentCwd: dir,
+      dshSessionId: 'session-x',
+    })).rejects.toThrow(/surface 为空/)
   })
 })
 
