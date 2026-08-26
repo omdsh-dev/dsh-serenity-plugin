@@ -9,13 +9,19 @@
  *   - hook-develop-guide 子命令 + CCC session-tool MSM 扩展提示（extHint）
  * CCC 扩展采用 osp 的"钩子后处理"模型（create-transform），而非整命令委派。
  * 活跃会话跟踪：写内存 Map（.dsh/active-sessions/<scope> 语义）+ events 恢复（S134）。
+ *
+ * v1.21 F3（用户逻辑修正）：SESSION 是对话过程中创建的——**use 激活宁静号会话时，
+ * 同步把当前 dsh 会话重命名为该 SESSION 目录名**（sessionTitle.rename，user source
+ * pin 住标题）。非创建时预命名。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { Context } from 'cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '../json.js'
 import { findSerenityRoot } from '../ccc.js'
 import { loadMsmEntries, runMsmAsync, type MsmEntry } from '../msm-ops.js'
+import { readSimpleSettings } from '../settings-section.js'
 import {
   listSessions,
   showSession,
@@ -28,6 +34,8 @@ import {
   qaCheck,
   SESSION_ACTIONS,
   DEFAULT_SESSION_SCOPE,
+  getActiveSessionInfo,
+  type ActiveSessionInfo,
 } from '../session-ops.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
@@ -37,6 +45,32 @@ function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } })
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? DEFAULT_SESSION_SCOPE
+}
+
+// ── v1.21 F3：use 后重命名当前 dsh 会话（纯逻辑，可单测）──
+
+export interface RenameOnUseDeps {
+  /** naming.enabled 简单配置（DSH settings） */
+  namingEnabled: boolean
+  /** sessionTitle 服务可用性 */
+  sessionTitleAvailable: boolean
+}
+
+/**
+ * use 激活宁静号会话后，把当前 dsh 会话重命名为该 SESSION 目录名。
+ * 门控：naming.enabled + sessionTitle 服务存在；失败静默（不阻断 use 主流程）。
+ * @returns 实际执行的 rename（或 null = 未执行）
+ */
+export function renameDshSessionOnUse(
+  deps: RenameOnUseDeps,
+  session: unknown,
+  rename: (session: unknown, title: string) => unknown,
+  active: ActiveSessionInfo,
+): string | null {
+  if (!deps.namingEnabled) return null
+  if (!deps.sessionTitleAvailable) return null
+  rename(session, active.dirName)
+  return active.dirName
 }
 
 function renderText(value: unknown): ContentBlock[] {
@@ -146,7 +180,12 @@ function getHookDevelopGuide(hasSessionTool: boolean): string {
   ].join('\n')
 }
 
-export const sessionTool = defineTool({
+/**
+ * 创建 session 工具（闭包捕获插件 ctx → use 后可调 ctx.sessionTitle.rename）。
+ * v1.21 F3：use 激活宁静号会话 → 当前 dsh 会话重命名为该 SESSION 目录名。
+ */
+export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
+  return defineTool({
   name: 'session',
   description:
     '工作会话全周期管理（AGENT_SESSIONS/，home-session 约定）。list/show/create/use/close/health/qa/archive/summary/hook-develop-guide。' +
@@ -225,7 +264,29 @@ export const sessionTool = defineTool({
       }
       case 'use': {
         if (!args.name) throw new Error('use 需要 name（S### 或目录名）')
-        return useSession(root, args.name, agentScope(exec))
+        const scope = agentScope(exec)
+        const active = useSession(root, args.name, scope)
+        // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为 SESSION 目录名
+        // （SESSION 是对话过程中创建的——use 时同步命名，user source pin 住）
+        try {
+          const info = getActiveSessionInfo(scope)
+          if (info) {
+            const titles = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionTitle')
+            const rename = (titles as { rename?: (session: unknown, title: string) => unknown } | undefined)?.rename
+            const dshSession = (exec as { agent?: { session?: unknown } }).agent?.session
+            if (dshSession && typeof rename === 'function') {
+              renameDshSessionOnUse(
+                { namingEnabled: readSimpleSettings().namingEnabled, sessionTitleAvailable: true },
+                dshSession,
+                rename,
+                info,
+              )
+            }
+          }
+        } catch {
+          /* 重命名失败不阻断 use 主流程（下次 use 或手动重命名兜底） */
+        }
+        return active
       }
       case 'close': {
         if (!args.name) throw new Error('close 需要 name（S### 或目录名）')
@@ -246,4 +307,5 @@ export const sessionTool = defineTool({
         throw new Error(`未知 action: ${args.action as string}`)
     }
   },
-})
+  })
+}

@@ -15,7 +15,6 @@
 import type { Context } from 'cordis'
 import z from '@deepseek-ai/schemastery'
 import { ccFsTool } from './tools/cc-fs.js'
-import { sessionTool } from './tools/session.js'
 import { kitTool } from './tools/kit.js'
 import { gitTool } from './tools/git.js'
 import { msmTool } from './tools/msm.js'
@@ -23,6 +22,7 @@ import { eapTool } from './tools/eap.js'
 import { neatTool } from './tools/neat.js'
 import { cceTool } from './tools/cce.js'
 import { createLoopTool } from './tools/loop.js'
+import { createSessionTool } from './tools/session.js'
 import { localstoreTool } from './tools/localstore.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
@@ -94,7 +94,7 @@ export const Config: z<Config> = z.object({
 export function apply(ctx: Context, config: Config): void {
   if (config.tools) {
     ctx.tools.register(ccFsTool)
-    ctx.tools.register(sessionTool)
+    ctx.tools.register(createSessionTool(ctx))
     ctx.tools.register(kitTool)
     ctx.tools.register(gitTool)
     ctx.tools.register(msmTool)
@@ -124,6 +124,8 @@ export function apply(ctx: Context, config: Config): void {
   // v1.21 分层：简单配置（开关/阈值）注册到 dsh 原生设置面板（零改 DSH；
   // 旧 RC 白名单存在时 client 侧自动降级，账号复杂配置走宁静号面板不受影响）
   registerSettingsSection(ctx, config)
+  // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createSessionTool 内实现，
+  // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {
     registerEnv(ctx)
   }
