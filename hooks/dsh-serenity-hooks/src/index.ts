@@ -34,6 +34,7 @@ import { registerStatusApi } from './api.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { registerSettingsSection } from './settings-section.js'
 
 export const name = 'dsh-serenity-hooks'
 
@@ -64,6 +65,12 @@ export interface Config {
   env?: boolean
   /** 兼容 opencode skill 标准（provider：.opencode/skills 扫描注册） */
   opencodeSkills?: boolean
+  /** F1 双端口网关（简单配置；entry 默认值，运行时经 DSH settings） */
+  gateway?: { enabled?: boolean }
+  /** F2 超限重建（entry 默认值，运行时经 DSH settings） */
+  rebuild?: { enabled?: boolean; thresholdRatio?: number }
+  /** F3 会话命名（entry 默认值，运行时经 DSH settings） */
+  naming?: { enabled?: boolean }
 }
 
 export const Config: z<Config> = z.object({
@@ -78,6 +85,10 @@ export const Config: z<Config> = z.object({
   entrySkillMaxChars: z.number().default(30000),
   env: z.boolean().default(true),
   opencodeSkills: z.boolean().default(true),
+  // v1.21 简单配置 entry 默认（schemastery：字段不 required 即可选）
+  gateway: z.object({ enabled: z.boolean().default(false) }),
+  rebuild: z.object({ enabled: z.boolean().default(true), thresholdRatio: z.number().min(0.01).max(1).default(0.9) }),
+  naming: z.object({ enabled: z.boolean().default(true) }),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -110,6 +121,9 @@ export function apply(ctx: Context, config: Config): void {
   if (config.api) {
     registerStatusApi(ctx, { configPaths: config.serenityConfigPaths })
   }
+  // v1.21 分层：简单配置（开关/阈值）注册到 dsh 原生设置面板（零改 DSH；
+  // 旧 RC 白名单存在时 client 侧自动降级，账号复杂配置走宁静号面板不受影响）
+  registerSettingsSection(ctx, config)
   if (config.env) {
     registerEnv(ctx)
   }

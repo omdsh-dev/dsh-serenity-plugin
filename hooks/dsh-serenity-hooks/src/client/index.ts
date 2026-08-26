@@ -1,25 +1,36 @@
 /**
  * dsh-serenity-hooks — client half 入口（浏览器 bundle）
  *
- * 注册两个 UI 面：
+ * 注册 UI 面：
  *  - conversation.session.header.actions — 头部状态徽章（绿点 + safe-mode 开关），
  *    点击徽章展开详情卡（CCC/loop/守卫 + 大开关）。
  *  - conversation.input.dock — 图片自动落盘兜底（S142）：当前模型不支持图片时，
  *    发送失败（MODEL_DOES_NOT_SUPPORT_IMAGES）自动补救——图片上传 _tmp/images_from_user/、
  *    以「用户提供了图片在 {path}」文本重发，agent 经 CCC 自己的 vlm MSM 自主处理。
+ *  - settings.section — dsh 原生设置面板的 serenity-hooks 简单配置页（v1.21 分层：
+ *    开关/阈值走 DSH settings；账号列表走宁静号高级面板）。
  * Export 纪律：只暴露 cordis apply 面。
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
+import type {} from '@deepseek-ai/dsh-client-ui-settings'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-runtime/client'
 import { SafeModePanel } from './SafeModePanel.js'
 import { ImageFallbackDock, ImageFallbackInjected } from './ImageFallbackDock.js'
 import { uploadImage, getDraftFiles, resendText } from './image-fallback-api.js'
+import { SettingsSection, SettingsSectionInjected, SerenitySimpleWire } from './SettingsSection.js'
 
-export const inject = ['slots', 'conversation', 'sessions']
+export const inject = ['slots', 'conversation', 'sessions', 'settingsScope']
+
+/** serenity-hooks 简单配置 scope spec（与 host 侧 registerSettingsSection 对齐） */
+const SERENITY_SCOPE_SPEC: SettingsScopeSpec<SerenitySimpleWire> = {
+  namespace: 'serenity-hooks',
+  decode: (section) => (section !== null && typeof section === 'object' ? (section as SerenitySimpleWire) : undefined),
+}
 
 export function apply(ctx: ClientContext): void {
-  ctx.inject(['slots', 'conversation', 'sessions'], (scope: ClientContext) => {
+  ctx.inject(['slots', 'conversation', 'sessions', 'settingsScope'], (scope: ClientContext) => {
     scope.effect(
       () =>
         scope.slots.register(
@@ -46,6 +57,26 @@ export function apply(ctx: ClientContext): void {
           ImageFallbackDock,
         ),
       'serenity: image fallback dock',
+    )
+
+    // v1.21 分层：简单配置 → dsh 原生设置面板（settings.section；降级守卫在组件内）
+    const settingsScope = scope.get('settingsScope') as {
+      bind: <T>(spec: SettingsScopeSpec<T>) => SettingsScope<T>
+    }
+    const serenityScope = settingsScope.bind<SerenitySimpleWire>(SERENITY_SCOPE_SPEC)
+    scope.effect(
+      () =>
+        scope.slots.register(
+          {
+            name: 'settings.section',
+            id: 'serenity-hooks',
+            order: 90,
+            label: () => 'Serenity',
+            inject: (): SettingsSectionInjected => ({ scope: serenityScope }),
+          },
+          SettingsSection,
+        ),
+      'serenity: simple settings section',
     )
   })
 }

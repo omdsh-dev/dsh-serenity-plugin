@@ -1,0 +1,58 @@
+/* SettingsSection — dsh 原生设置面板 serenity-hooks 简单配置页
+   沿用 --dsw-alias-* 语义 token（明暗自适应）+ 紧凑布局 */
+
+.ss-root {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.ss-note {
+  margin: 0 0 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.ss-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+
+.ss-label {
+  min-width: 88px;
+  font-weight: 600;
+}
+
+.ss-desc {
+  flex: 1;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.ss-row input[type='checkbox'] {
+  flex: none;
+}
+
+.ss-row input[type='range'] {
+  flex: none;
+  width: 140px;
+}
+
+.ss-value {
+  min-width: 36px;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.ss-degrade {
+  padding: 12px 8px;
+  font-size: 13px;
+}
+
+.ss-degrade p {
+  margin: 0;
+}

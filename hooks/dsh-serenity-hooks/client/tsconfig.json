@@ -17,6 +17,7 @@
       "@deepseek-ai/dsh-client-ui-slots": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-slots"],
       "@deepseek-ai/dsh-client-ui-primitives": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-primitives"],
       "@deepseek-ai/dsh-client-ui-conversation": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-locale": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-locale"],
       "react": ["node_modules/@types/react"],
       "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime"]

@@ -21,19 +21,34 @@ vi.mock('schemastery', () => {
   }
 })
 
-// 公开版：schemastery 由 @deepseek-ai/schemastery 提供（index.ts 直接导入）
+// 公开版：schemastery 由 @deepseek-ai/schemastery 提供（index.ts 直接导入；v1.21 Config 含 .min/.max 链）
 vi.mock('@deepseek-ai/schemastery', () => {
-  const chain = (val: unknown) => Object.assign(() => val, { default: () => val })
+  // 链式 mock：任何属性访问/函数调用返回链自身（.min().max().default() 无限链）
+  const chain: unknown = new Proxy(function () {}, {
+    get: (_t, prop) => {
+      if (prop === Symbol.toPrimitive) return () => ''
+      if (prop === 'valueOf') return () => 0
+      if (prop === 'toString') return () => ''
+      return chain
+    },
+    apply: () => chain,
+  })
   return {
     default: {
       object: (spec: unknown) => spec,
-      array: () => chain([]),
-      string: () => chain(''),
-      boolean: () => chain(true),
-      number: () => chain(0),
+      array: () => chain,
+      string: () => chain,
+      boolean: () => chain,
+      number: () => chain,
     },
   }
 })
+
+// v1.21 settings-section：index.ts 经 registerSettingsSection 引入 dsh-settings
+vi.mock('@deepseek-ai/dsh-settings', () => ({
+  installSettingsSection: () => {},
+  settingsNamespace: (v: string) => v,
+}))
 
 import { name, inject, apply, type Config } from '../src/index.ts'
 
