@@ -49,7 +49,9 @@ export async function uploadImage(file: File, sessionId: string): Promise<string
 /**
  * 取 rail 图片的浏览器 File。
  * conversation.draftImages 是 root singleton 的公开方法（读 controller 的 draftAttachments Map，
- * 与调用 ctx 的作用域无关）——直接 ctx.get('conversation')，避开 scope 寻址不确定性。
+ * 与调用 ctx 的作用域无关）——直接 ctx.get('conversation')。
+ * ⚠️ 必须作为方法调用（conversation.draftImages(ids)）：解构取出再调会丢失 this
+ * （draftImages 内部读 this.draftAttachments → "Cannot read properties of undefined"）。
  */
 export async function getDraftFiles(
   ctx: ClientContext,
@@ -59,9 +61,8 @@ export async function getDraftFiles(
   const conversation = (ctx as { get?: (name: string) => unknown }).get?.('conversation') as
     | { draftImages?: (imageIds: readonly unknown[]) => readonly { file: File }[] | undefined }
     | undefined
-  const draftImages = conversation?.draftImages
-  if (draftImages === undefined) return []
-  return (draftImages(ids) ?? []).map((a) => a.file)
+  if (conversation?.draftImages === undefined) return []
+  return (conversation.draftImages(ids) ?? []).map((a) => a.file)
 }
 
 /** 纯文本重发（绕过图片门禁——不含 image part，模型永不触发 MODEL_DOES_NOT_SUPPORT_IMAGES） */

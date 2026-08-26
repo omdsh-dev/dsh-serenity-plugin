@@ -1,3 +1,12 @@
+## v1.20.2 — 2026-08-24（图片落盘修复：draftImages this 丢失——解构调用改为方法调用，S142）
+
+**Scope:** 用户实测 v1.20.1 仍失败：`Cannot read properties of undefined (reading 'draftAttachments')`。根因：`getDraftFiles` 把 `conversation.draftImages` **解构取出后调用**（`const draftImages = conversation.draftImages; draftImages(ids)`）——draftImages 内部读 `this.draftAttachments`，解构后 `this` = undefined → 抛错。
+
+### 修复
+- `client/image-fallback-api.ts` `getDraftFiles`：**改为方法调用 `conversation.draftImages(ids)`**（this = conversation 实例）；注释固化该约束（防回归）
+
+**测试：** 32 files / 293 tests → typecheck ✓
+
 ## v1.20.1 — 2026-08-24（图片落盘修复：上传带 sessionId 解析 CCC 根 + conversation root get + 错误详情显示，S142）
 
 **Scope:** 用户实测 v1.20.0 图片保存失败。根因排查：① 上传接口 workspace 解析——client 未带 sessionId → node half 回退进程 cwd（不可靠）→ 404；② getDraftFiles 经 scope() 寻址 conversation 存在不确定性；③ 失败原因不可见（状态条无详情）。
