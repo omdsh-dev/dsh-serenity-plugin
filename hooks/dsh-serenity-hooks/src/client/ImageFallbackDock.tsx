@@ -44,13 +44,22 @@ interface InputLike {
   imageIds?: readonly string[]
 }
 
-/** input.dock 条目：图片发送失败自动落盘 + 文本重发 */
+/** session-scope 标准 provide channel 的 inputActions（ui-conversation sessions.provide：setDraft/removeImage/submit） */
+interface InputActionsLike {
+  removeImage: (id: string) => void
+  setDraft: (text: string) => void
+  submit: () => void
+}
+
+/** input.dock 条目：图片发送失败自动落盘 + 文本重发（补救后自动清空输入框 rail 图片） */
 export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Element {
   const zone = props as unknown as { session: SessionLike; input?: InputLike }
   const session = zone.session
   const input = zone.input
   const sessionId = props.sessionId
   const { uploadImage, getDraftFiles, resendText } = props
+  // provide channel：session-scope 组件经 props 拿 inputActions（清 rail/setDraft/submit）
+  const inputActions = (props as unknown as { inputActions?: InputActionsLike }).inputActions
 
   const [state, setState] = useState<FallbackState>('idle')
   const [paths, setPaths] = useState<string[]>([])
@@ -77,7 +86,15 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Elem
         const note = saved.map((p) => `用户提供了图片在 ${p}`).join('\n')
         const draft = input?.draft ?? ''
         const text = draft === '' ? note : `${draft}\n${note}`
-        await resendText(String(sessionId), text)
+        if (inputActions?.removeImage !== undefined && inputActions.setDraft !== undefined && inputActions.submit !== undefined) {
+          // 官方输入机器路径：清 rail 图片 → draft 更新为原文+路径 → 机器发送（draft 自动清空，无残留）
+          for (const id of imageIds) inputActions.removeImage(String(id))
+          inputActions.setDraft(text)
+          inputActions.submit()
+        } else {
+          // fallback：直接 RPC 重发（rail 残留由用户手动移除）
+          await resendText(String(sessionId), text)
+        }
         setPaths(saved)
         setState('done')
       } catch (err) {
@@ -89,7 +106,7 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Elem
         handlingRef.current = false
       }
     })()
-  }, [promptError, imageIds, sessionId, uploadImage, getDraftFiles, resendText, input?.draft])
+  }, [promptError, imageIds, sessionId, uploadImage, getDraftFiles, resendText, input?.draft, inputActions])
 
   if (state === 'idle') return <span className="serenity-image-fallback" data-state="idle" />
   if (state === 'uploading') {

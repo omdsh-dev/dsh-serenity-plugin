@@ -1,3 +1,12 @@
+## v1.20.4 — 2026-08-26（图片落盘：补救后自动清空输入框 rail 图片——用户实测需求，S142）
+
+**Scope:** 用户要求：提供图片后自动删除输入框（rail）里的图片，免手动 ✕。技术：ui-conversation `sessions.provide({ props: ['inputActions'] })` 给所有 session-scope 组件提供 `inputActions`（setDraft/removeImage/submit）——input.dock 组件经 props 直达官方输入机器。
+
+### 变更
+- `client/ImageFallbackDock.tsx`：补救成功路径改为 **官方输入机器操作**——`inputActions.removeImage` 逐个清 rail 图片 → `inputActions.setDraft(原文+路径消息)` → `inputActions.submit()`（机器发送，draft 自动清空，无残留）；inputActions 不可用时 fallback 原 resendText（RPC 直发）
+
+**测试：** 32 files / 293 tests → typecheck ✓
+
 ## v1.20.3 — 2026-08-24（图片落盘修复：resendText 同样解构丢 this——改为方法调用，S142）
 
 **Scope:** 用户实测 v1.20.2 仍失败：`Cannot set properties of undefined (setting 'promptError')`。根因与 v1.20.2 同类：`resendText` 把 `binding.session.prompt` **解构取出后调用**——prompt 内部读 `this.promptError`（session.ts:191），解构后 `this` = undefined → 抛错。
