@@ -1,66 +1,148 @@
 /* SettingsSection — dsh 原生设置面板 serenity-hooks 简单配置页
-   沿用 --dsw-alias-* 语义 token（明暗自适应）+ 紧凑布局 */
+   v1.21.1 UX 重构：分组卡片（标题+说明 左列 / 开关右置）；滑块独立行；
+   该换行就换行（word-break/overflow-wrap）。 */
 
 .ss-root {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   padding: 8px 0;
 }
 
 .ss-note {
-  margin: 0 0 4px;
+  margin: 0;
   font-size: 12px;
-  opacity: 0.7;
-  /* 该换行就换行：长文本/路径完整显示，不截断 */
+  opacity: 0.75;
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: normal;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
-.ss-row {
+.ss-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 配置组：标题+说明 左列；开关/阈值 右置 */
+.ss-group {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 13px;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-module-platform, rgba(128, 128, 128, 0.06));
 }
 
-.ss-label {
-  min-width: 88px;
-  font-weight: 600;
-  /* 标签允许换行（窄面板时不被压缩截断） */
-  word-break: break-word;
-  line-height: 1.4;
-}
-
-.ss-desc {
+.ss-groupText {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
   flex: 1;
+}
+
+.ss-groupTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+}
+
+.ss-groupDesc {
   font-size: 12px;
-  opacity: 0.65;
-  /* 描述该换行就换行 */
+  opacity: 0.7;
   word-break: break-word;
   overflow-wrap: anywhere;
   white-space: normal;
   line-height: 1.5;
 }
 
-.ss-row input[type='checkbox'] {
+/* 开关（右置） */
+.ss-switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 22px;
+  cursor: pointer;
+}
+
+.ss-switch input {
+  position: absolute;
+  opacity: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+.ss-switchTrack {
+  position: absolute;
+  inset: 0;
+  border-radius: 11px;
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.3));
+  transition: background var(--ds-transition-duration-fast, 0.15s) var(--ds-ease-in-out, ease);
+}
+
+.ss-switchTrack::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-primary, #eee);
+  transition: transform var(--ds-transition-duration-fast, 0.15s) var(--ds-ease-in-out, ease);
+}
+
+.ss-switch input:checked + .ss-switchTrack {
+  background: var(--dsw-alias-state-success-primary, #22c55e);
+}
+
+.ss-switch input:checked + .ss-switchTrack::after {
+  transform: translateX(18px);
+}
+
+.ss-switch input:disabled + .ss-switchTrack {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 阈值行（滑块 + 值，右置） */
+.ss-threshold {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   flex: none;
 }
 
-.ss-row input[type='range'] {
-  flex: none;
-  width: 140px;
+.ss-threshold input[type='range'] {
+  width: 160px;
 }
 
 .ss-value {
-  min-width: 36px;
+  min-width: 40px;
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  opacity: 0.8;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-primary);
+  text-align: right;
 }
 
+/* 底部帮助行 */
+.ss-help {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.7;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
+
+/* 降级提示 */
 .ss-degrade {
   padding: 12px 8px;
   font-size: 13px;
@@ -70,5 +152,5 @@
   margin: 0;
   word-break: break-word;
   overflow-wrap: anywhere;
-  line-height: 1.5;
+  line-height: 1.6;
 }

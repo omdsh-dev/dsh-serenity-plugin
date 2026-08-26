@@ -55,13 +55,14 @@ function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
 }
 
-/** 会话头部：Serenity 状态卡片（点击 → 全屏遮罩居中模态，双 tab） */
+/** 会话头部：Serenity 状态卡片（点击 → 官方 Modal 居中，双 tab） */
 export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<'status' | 'accounts'>('status')
   const [loops, setLoops] = useState<LoopRunInfo[]>([])
+  const [loopsOpen, setLoopsOpen] = useState(false)
 
   const sessionId = props.sessionId
 
@@ -128,7 +129,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
 
   return (
     <>
-      {/* 状态卡片（可点击 → 弹出 Modal） */}
+      {/* 状态卡片（可点击 → 弹出 Modal）；本体直接显示绿点 + safe-mode 徽标 */}
       <button
         type="button"
         className={cx('sp-card')}
@@ -139,6 +140,15 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
       >
         <span className={cx('sp-dot', inCcc ? 'sp-dotOn' : 'sp-dotOff')} />
         <span className={cx('sp-brand')}>Serenity v{status.accVersion}</span>
+        {inCcc && (
+          <span
+            className={cx('sp-sm', status.safeModeOn ? 'sp-smOn' : 'sp-smOff')}
+            title={status.safeModeOn ? 'safe-mode 已开启（隐藏写工具）' : 'safe-mode 关闭'}
+          >
+            {status.safeModeOn && <IconWarningOutline16 size={11} className={cx('sp-smIcon')} />}
+            {status.safeModeOn ? 'safe' : 'safe-off'}
+          </span>
+        )}
         <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
       </button>
 
@@ -207,19 +217,35 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       ? `运行中 ${loops.filter((l) => !l.done).length}${loops.length > 0 ? ` / 共 ${loops.length}` : ''}`
                       : '无运行中 loop'}
                   </span>
+                  {loops.length > 0 && (
+                    <button
+                      type="button"
+                      className={cx('sp-loopsToggle')}
+                      onClick={() => setLoopsOpen((v) => !v)}
+                    >
+                      {loopsOpen ? '收起' : '详情'}
+                    </button>
+                  )}
                 </div>
-                {loops.slice(0, 4).map((l) => (
-                  <div key={l.label} className={cx('sp-loopItem')}>
-                    <div className={cx('sp-loopHead')}>
-                      <span className={cx('sp-loopLabel')} title={l.label}>{l.label}</span>
-                      <span className={cx('sp-loopRound')}>{l.done ? '✓' : `R${l.round}`}</span>
-                      <span className={cx('sp-loopTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
-                    </div>
-                    <div className={cx('sp-loopResp')} title={l.lastResponse}>
-                      {l.lastResponse.slice(0, 60) || (l.done ? '已完成' : '（等待首轮响应）')}
-                    </div>
+                {loopsOpen && (
+                  <div className={cx('sp-loopsList')}>
+                    {loops.slice(0, 3).map((l) => (
+                      <div key={l.label} className={cx('sp-loopItem')}>
+                        <div className={cx('sp-loopHead')}>
+                          <span className={cx('sp-loopLabel')} title={l.label}>{l.label}</span>
+                          <span className={cx('sp-loopRound')}>{l.done ? '✓' : `R${l.round}`}</span>
+                          <span className={cx('sp-loopTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
+                        </div>
+                        <div className={cx('sp-loopResp')} title={l.lastResponse}>
+                          {l.lastResponse.slice(0, 80) || (l.done ? '已完成' : '（等待首轮响应）')}
+                        </div>
+                      </div>
+                    ))}
+                    {loops.length > 3 && (
+                      <div className={cx('sp-loopsMore')}>… 共 {loops.length} 个 loop（其余见等待界面）</div>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
             </>
           ) : (

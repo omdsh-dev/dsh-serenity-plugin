@@ -60,6 +60,35 @@
   color: var(--dsw-alias-label-dimmed);
 }
 
+/* safe-mode 徽标（卡片本体直接可见；ON 红 / OFF 灰） */
+.sp-sm {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.sp-smOn {
+  background: var(--dsw-alias-state-warning-bg, rgba(245, 158, 11, 0.18));
+  color: var(--dsw-alias-state-warning-fg, #f59e0b);
+  border: 1px solid var(--dsw-alias-state-warning-border, rgba(245, 158, 11, 0.4));
+}
+
+.sp-smOff {
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.16));
+  color: var(--dsw-alias-label-dimmed);
+  border: 1px solid var(--dsw-alias-border-l1);
+}
+
+.sp-smIcon {
+  flex: none;
+}
+
 /* ── 官方 Modal 定制（宽度 + 无滚动条） ── */
 
 .sp-modal {
@@ -105,7 +134,9 @@
   flex-direction: column;
   gap: 8px;
   padding-top: 12px;
-  overflow: hidden;
+  /* 内容超出视口时 body 区滚动（兜底——不再截断）；整卡不滚动 */
+  overflow-y: auto;
+  max-height: calc(100vh - 200px);
 }
 
 .sp-row {
@@ -230,5 +261,34 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* loop 详情折叠控件 */
+.sp-loopsToggle {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sp-loopsToggle:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.sp-loopsList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.sp-loopsMore {
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+  padding: 2px 0 2px 50px;
 }
 
