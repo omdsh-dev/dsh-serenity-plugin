@@ -108,22 +108,58 @@ export function workspaceDenyResponse(rpcId: string): string {
 
 // ── 纯逻辑（可单测）──
 
-/** 极简登录页（内嵌 HTML，无外部资源——适配任何部署） */
+/**
+ * 登录页（v1.22.1 移动端适配）：内嵌 HTML 无外部资源——适配任何部署。
+ * 移动端关键点：
+ *  - viewport meta（防止移动浏览器按 980px 视口缩放）
+ *  - 触控目标 ≥ 44px（Apple HIG）；输入字号 ≥ 16px（iOS 聚焦不自动放大）
+ *  - env(safe-area-inset-*) 适配刘海屏/底部手势条
+ *  - color-scheme: dark + 明暗自适应
+ */
 export function loginPageHtml(extra: string): string {
-  return `<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>Serenity 登录</title>
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#111114">
+<title>Serenity 登录</title>
 <style>
-body{font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#111;color:#eee}
-.card{background:#1c1c1e;padding:32px 40px;border-radius:12px;width:300px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
-h1{font-size:18px;margin:0 0 20px}input{width:100%;box-sizing:border-box;padding:10px;margin:8px 0;border:1px solid #333;border-radius:6px;background:#222;color:#eee}
-button{width:100%;padding:10px;margin-top:16px;border:0;border-radius:6px;background:#3b82f6;color:#fff;font-size:14px;cursor:pointer}
-.error{color:#f87171;font-size:12px;min-height:16px;margin-top:8px}
-</style></head><body><div class="card"><h1>🔐 Serenity Web UI</h1>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;align-items:center;justify-content:center;margin:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#111114;color:#eee}
+.card{background:#1c1c20;padding:32px 28px;border-radius:16px;width:min(340px,calc(100vw - 48px));box-shadow:0 12px 40px rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.06)}
+h1{font-size:20px;margin:0 0 4px;text-align:center;letter-spacing:.02em}
+.sub{font-size:13px;color:#999;text-align:center;margin:0 0 24px}
+label{display:block;font-size:13px;color:#bbb;margin:14px 0 6px}
+input{width:100%;padding:14px 14px;margin:0;border:1px solid #3a3a40;border-radius:10px;background:#141418;color:#eee;font-size:16px;-webkit-appearance:none;appearance:none}
+input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+input::placeholder{color:#666}
+button{width:100%;padding:15px 14px;margin-top:24px;border:0;border-radius:10px;background:#3b82f6;color:#fff;font-size:16px;font-weight:600;cursor:pointer;min-height:50px;-webkit-appearance:none;appearance:none}
+button:active{background:#2563eb}
+.error{color:#f87171;font-size:13px;min-height:18px;margin-top:12px;text-align:center}
+.foot{margin-top:20px;text-align:center;font-size:12px;color:#666}
+@media (prefers-color-scheme:light){
+  body{background:#f4f4f6;color:#1a1a1e}
+  .card{background:#fff;border-color:rgba(0,0,0,.08);box-shadow:0 12px 40px rgba(0,0,0,.12)}
+  .sub{color:#666}
+  label{color:#444}
+  input{background:#fafafa;border-color:#d0d0d6;color:#1a1a1e}
+  input::placeholder{color:#aaa}
+  .foot{color:#999}
+}
+</style></head><body><div class="card">
+<h1>🔐 Serenity Web UI</h1>
+<p class="sub">宁静号 · 外部访问</p>
 <form method="post" action="/serenity/login">
-<input type="text" name="user" placeholder="用户名" autocomplete="username" required autofocus>
-<input type="password" name="password" placeholder="密码" autocomplete="current-password" required>
+<label for="f-user">用户名</label>
+<input id="f-user" type="text" name="user" placeholder="用户名" autocomplete="username" autocapitalize="none" autocorrect="off" required autofocus enterkeyhint="next">
+<label for="f-pass">密码</label>
+<input id="f-pass" type="password" name="password" placeholder="密码" autocomplete="current-password" required enterkeyhint="go">
 <button type="submit">登录</button>
 <div class="error">${extra}</div>
-</form></div></body></html>`
+</form>
+<p class="foot">Serenity ACC · dsh-serenity-hooks</p>
+</div></body></html>`
 }
 
 /** 账号验证（纯逻辑）：user + password 对 localstore accounts 匹配（scrypt） */

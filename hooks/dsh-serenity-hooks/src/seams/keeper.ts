@@ -74,11 +74,13 @@ export function reminderText(code: string, score: number): string {
   return `[SESSION-KEEPER] Score threshold reached (${score}). Please acknowledge with [SESSION-KEEPER-recorded-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
 }
 
-/** F2 rebuild 提示（v1.21）：上下文接近上限时引导 LLM 主动触发 session_rebuild */
+/** F2 rebuild 提示（v1.21；v1.22.1 对齐"轨迹跟踪器"概念）：
+ * SESSION.md = 持久 agent（轨迹），自身会话 = 临时可重建（工作副本）。
+ * 上下文接近上限时引导 LLM 主动触发 session_rebuild。 */
 export function rebuildReminderText(ratio: number): string {
-  return `[SESSION-REBUILD] 上下文占用已达 ${(ratio * 100).toFixed(0)}%（接近上限）。` +
-    `SESSION.md 已实时整理，无需压缩——如需清空重建，可在适当时机调用 session_rebuild` +
-    `（将归档当前会话并开启新会话，身份自动延续）。`
+  return `[TRAJECTORY] 上下文占用已达 ${(ratio * 100).toFixed(0)}%（轨迹跟踪器阈值）。` +
+    `SESSION.md 是持久轨迹，本会话只是临时可重建的工作副本——无需压缩，` +
+    `可在适当时机调用 session_rebuild 清空重建（归档当前副本，身份从 SESSION.md 自动延续）。`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
@@ -127,7 +129,12 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     return t
   }
 
-  // observe-and-enrich：先 next() 委托，再折叠提醒（block 决策也附加 context）
+  // observe-and-enrich：先 next() 委托，再折叠提醒（block 决策也附加 context）。
+  // v1.22.1 重构：**两个独立机制**——
+  // ① SESSION-KEEPER 计分提醒（DCP 确认码，阈值 150 缺省）
+  // ② 轨迹跟踪器（Trajectory Tracker）上下文压力检测：每次工具调用后独立检查
+  //    contextPressure 投影，超 rebuildThreshold 追加 rebuild 提示——**不依赖计分达标**
+  //    （此前嵌套在 shouldRemind 内 + inject 缺 sessionProjections → 永不触发）。
   ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
     if (!exec.agent) return next()
     // 激活门控：只在 .serenity 存在的 CCC 目录计分/提醒；其他目录零干预
@@ -137,14 +144,16 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const tracker = trackerFor(exec)
     const shouldRemind = tracker.step(exec.name)
     const downstream = await next()
-    if (!shouldRemind) return downstream
 
-    const code = tracker.ack()
-    const content: ContentBlock[] = [{ type: 'text', text: reminderText(code, tracker.currentScore) }]
-    const reminder = createUserMessage({ content, source: PLUGIN_SOURCE })
+    const blocks: ContentBlock[] = []
 
-    // v1.21 F2：上下文压力检测（独立于计分提醒）——超 rebuildThreshold 时追加 rebuild 提示
-    const extra: ContentBlock[] = []
+    // ① 计分达标 → SESSION-KEEPER 确认码提醒
+    if (shouldRemind) {
+      const code = tracker.ack()
+      blocks.push({ type: 'text', text: reminderText(code, tracker.currentScore) })
+    }
+
+    // ② 轨迹跟踪器：上下文压力检测（独立——每次工具调用后都查，不依赖计分）
     if (readSimpleSettings().rebuildEnabled) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
@@ -153,13 +162,14 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
           const ratio = pressure.projectedTokens / pressure.contextWindow
           const threshold = readSimpleSettings().rebuildThreshold
           if (ratio >= threshold) {
-            extra.push({ type: 'text', text: rebuildReminderText(ratio) })
+            blocks.push({ type: 'text', text: rebuildReminderText(ratio) })
           }
         }
       }
     }
-    const allBlocks = extra.length > 0 ? [...content, ...extra] : content
-    const reminderAll = createUserMessage({ content: allBlocks, source: PLUGIN_SOURCE })
+
+    if (blocks.length === 0) return downstream
+    const reminderAll = createUserMessage({ content: blocks, source: PLUGIN_SOURCE })
 
     if (downstream.kind === 'block') {
       return {

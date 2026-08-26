@@ -22,7 +22,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { KeeperTracker, scoreTool, reminderText } from '../src/seams/keeper.js'
+import { KeeperTracker, scoreTool, reminderText, rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
 
 describe('keeper: 纯跟踪器', () => {
   it('计分表：write=3, task=10, read=1', () => {
@@ -57,5 +57,39 @@ describe('keeper: 纯跟踪器', () => {
 
   it('reminderText 含确认码', () => {
     expect(reminderText('K1', 150)).toContain('[SESSION-KEEPER-recorded-K1]')
+  })
+})
+
+describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () => {
+  it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本', () => {
+    const text = rebuildReminderText(0.91)
+    expect(text).toContain('[TRAJECTORY]')
+    expect(text).toContain('91%')
+    expect(text).toContain('SESSION.md 是持久轨迹')
+    expect(text).toContain('临时可重建')
+    expect(text).toContain('session_rebuild')
+  })
+
+  it('readContextPressure：sessionProjections 装配时读取投影', () => {
+    const session = { id: 's1' }
+    const ctx = {
+      get: (name: string) => name === 'sessionProjections'
+        ? { snapshot: () => ({ values: { contextPressure: { projectedTokens: 9000, contextWindow: 10000 } } }) }
+        : undefined,
+    }
+    const pressure = readContextPressure(ctx as never, session)
+    expect(pressure).toEqual({ projectedTokens: 9000, contextWindow: 10000 })
+  })
+
+  it('readContextPressure：未装配 / 无压力值 → null（不抛错）', () => {
+    const session = { id: 's1' }
+    const noService = { get: () => undefined }
+    expect(readContextPressure(noService as never, session)).toBeNull()
+    const noPressure = {
+      get: (name: string) => name === 'sessionProjections'
+        ? { snapshot: () => ({ values: {} }) }
+        : undefined,
+    }
+    expect(readContextPressure(noPressure as never, session)).toBeNull()
   })
 })

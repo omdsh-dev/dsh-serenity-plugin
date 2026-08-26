@@ -118,6 +118,28 @@ describe('F1: loginPageHtml（登录页）', () => {
     const html = loginPageHtml('')
     expect(html).toContain('class="error"></div>')
   })
+
+  it('v1.22.1 移动端适配：viewport + 安全区 + 触控尺寸 + iOS 字号', () => {
+    const html = loginPageHtml('')
+    // viewport meta（移动浏览器不按 980px 缩放）
+    expect(html).toContain('name="viewport"')
+    expect(html).toContain('width=device-width')
+    expect(html).toContain('viewport-fit=cover')
+    // 安全区（刘海屏/手势条）
+    expect(html).toContain('env(safe-area-inset-')
+    // 触控目标 ≥ 44px / min-height 50px
+    expect(html).toContain('min-height:50px')
+    // 输入字号 16px（iOS 聚焦不自动放大）
+    expect(html).toContain('font-size:16px')
+    // 明暗自适应
+    expect(html).toContain('prefers-color-scheme')
+    expect(html).toContain('color-scheme')
+    // 移动输入优化
+    expect(html).toContain('autocapitalize="none"')
+    expect(html).toContain('enterkeyhint="go"')
+    // 响应式卡片宽度
+    expect(html).toContain('min(340px,calc(100vw - 48px))')
+  })
 })
 
 describe('v1.22: crypto.randomUUID polyfill（非安全上下文修复）', () => {

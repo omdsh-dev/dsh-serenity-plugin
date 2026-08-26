@@ -1,3 +1,13 @@
+## v1.22.1 — 2026-08-27（移动端登录页 + 轨迹跟踪器 + 上下文回收修复，S142）
+
+**Scope:** 用户三项需求：① 外部（3081）登录页移动端适配；② 上下文阈值回收不生效（修复）；③ 机制正式命名——**轨迹跟踪器（Trajectory Tracker）**：SESSION.md = 持久 agent（轨迹），自身会话 = 临时可重建（工作副本）。
+
+### 变更
+- **移动端登录页**：viewport meta（防移动浏览器 980px 缩放）+ `env(safe-area-inset-*)` 安全区（刘海屏/手势条）+ 触控目标 ≥50px（Apple HIG）+ 输入字号 16px（iOS 聚焦不自动放大）+ `autocapitalize="none"`/`autocorrect="off"`/`enterkeyhint`（移动输入优化）+ `prefers-color-scheme` 明暗自适应 + 响应式卡片 `min(340px, calc(100vw - 48px))` + `theme-color`
+- **轨迹跟踪器（Trajectory Tracker）概念（用户拍板命名）**：F2 rebuild 机制语义正式化——**SESSION.md 是持久轨迹（agent 身份本体）；当前会话只是临时可重建的工作副本**；`rebuildReminderText` 文案改为 `[TRAJECTORY]` 前缀并显式阐述该语义
+- **上下文阈值回收不生效修复（用户报告）**：两个根因——① `inject` 缺 `sessionProjections`（`ctx.get` 拿不到服务 → `readContextPressure` 恒返回 null → 永不触发）② contextPressure 检测**嵌套在计分提醒内**（KeeperTracker 计分不到阈值永不查上下文，与用户设定的 rebuildThreshold 无关）。修复：`index.ts` inject 补 `sessionProjections`；`keeper.ts` post-execute **重构为两个独立机制**——SESSION-KEEPER 计分提醒（DCP 确认码）+ 轨迹跟踪器压力检测（**每次工具调用后独立检查** contextPressure 投影，超 rebuildThreshold 追加 [TRAJECTORY] 提示）
+- 测试：39 files / 376 tests（+4：登录页移动端断言 / rebuildReminderText 新文案 / readContextPressure 装配+未装配）→ typecheck ✓（node + client）
+
 ## v1.22.0 — 2026-08-27（归属重构 + 外部访问稳定性修复，S142）
 
 **Scope:** 用户三轮实测驱动：① 架构原则升级（**plugin 是全局的，CCC 是具体的**——账号密码归 plugin，不挂 CCC localstore）；② 3081 外部访问完整可用（登录/工作区/会话/WS 事件流）；③ 设置面板 UI 专业重构（DSH 设置面板承载全部 plugin 配置，CCC 状态栏面板只展示状态）。

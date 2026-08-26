@@ -83,11 +83,13 @@ describe('F2: buildRebuildAnchor（锚点消息）', () => {
   })
 })
 
-describe('F2: rebuildReminderText（keeper 提示）', () => {
-  it('含占用比例 + session_rebuild 引导', () => {
+describe('F2: rebuildReminderText（轨迹跟踪器提示，v1.22.1 命名）', () => {
+  it('含占用比例 + 持久轨迹/临时副本语义 + session_rebuild 引导', () => {
     const t = rebuildReminderText(0.93)
-    expect(t).toContain('[SESSION-REBUILD]')
+    expect(t).toContain('[TRAJECTORY]')
     expect(t).toContain('93%')
+    expect(t).toContain('SESSION.md 是持久轨迹')
+    expect(t).toContain('临时可重建')
     expect(t).toContain('session_rebuild')
   })
 })
