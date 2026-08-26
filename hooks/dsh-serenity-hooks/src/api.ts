@@ -20,10 +20,12 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { getStatus, setSafeMode } from './status.js'
 import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { listActiveLoops } from './loop-ops.js'
+import { readAdvancedSettings, toWire, applyWirePatch } from './config-ops.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const LOOPS_PATH = '/serenity/loops'
 const UPLOAD_PATH = '/serenity/image-upload'
+const CONFIG_PATH = '/serenity/config'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
 export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
@@ -183,6 +185,49 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           const on = body.on === true
           const result = setSafeMode(root, on)
           sendJson(res, 200, { ...getStatus(workspace, configPaths), ...result })
+          return
+        }
+        sendJson(res, 405, { error: 'method not allowed' })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+
+  // /serenity/config：高级设定读写（v1.21 面板数据源；client 专属头）
+  // GET  → wire 形态（密码 hash 永不返回；accounts 只含 id/user/hasPassword）
+  // PUT  → wire patch 应用（新账号必须带 pass；既有账号 pass 空=保留原 hash）
+  ctx.webServer.register({
+    kind: 'exact',
+    path: CONFIG_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.headers['x-serenity-ui'] !== '1') {
+          sendJson(res, 403, { error: '高级设定仅限 WebUI（client 专用）' })
+          return
+        }
+        if (req.method === 'GET') {
+          const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+          const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
+          const root = findSerenityRoot(workspace)
+          if (!root) {
+            sendJson(res, 200, { config: null, error: `no CCC found from workspace: ${workspace}` })
+            return
+          }
+          sendJson(res, 200, { config: toWire(readAdvancedSettings(root)) })
+          return
+        }
+        if (req.method === 'PUT') {
+          const raw = await readBody(req, 128 * 1024)
+          const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; config?: Partial<ReturnType<typeof toWire>> }
+          const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
+          const root = findSerenityRoot(workspace)
+          if (!root) {
+            sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
+            return
+          }
+          const saved = applyWirePatch(root, body.config ?? {})
+          sendJson(res, 200, { config: toWire(saved) })
           return
         }
         sendJson(res, 405, { error: 'method not allowed' })
