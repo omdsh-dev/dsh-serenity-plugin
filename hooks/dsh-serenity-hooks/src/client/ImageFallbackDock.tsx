@@ -14,6 +14,7 @@
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useRef, useState } from 'react'
+import { IMAGE_NOTE_TEMPLATE_SINGLE, IMAGE_NOTE_TEMPLATE_MULTI } from './image-fallback-api.js'
 import './ImageFallbackDock.css'
 
 /** inject 面：apply 闭包提供的图片操作回调 */
@@ -83,7 +84,8 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): React.JSX.Elem
         for (const file of files) {
           saved.push(await uploadImage(file, String(sessionId)))
         }
-        const note = saved.map((p) => `用户提供了图片在 ${p}`).join('\n')
+        // 友好提示（v1.20.5：不展示具体文件路径——用户反馈突兀；agent 自行查目录找图片）
+        const note = saved.length === 1 ? IMAGE_NOTE_TEMPLATE_SINGLE : IMAGE_NOTE_TEMPLATE_MULTI(saved.length)
         const draft = input?.draft ?? ''
         const text = draft === '' ? note : `${draft}\n${note}`
         if (inputActions?.removeImage !== undefined && inputActions.setDraft !== undefined && inputActions.submit !== undefined) {

@@ -12,8 +12,14 @@ import type { DraftAttachmentId } from '@deepseek-ai/dsh-client-ui-conversation'
 
 /** 图片落盘接口路径（node half api.ts，client 专属 x-serenity-ui 头） */
 const UPLOAD_PATH = '/serenity/image-upload'
-/** 识别结果消息模板（协议固有，S142 用户定稿：ACC 只提供路径，识别由 CCC vlm MSM 承担） */
-export const IMAGE_NOTE_PREFIX = '用户提供了图片在 '
+
+/**
+ * 识别结果消息模板（协议固有，S142 用户迭代：v1.20.5 去掉具体文件路径——UI 突兀，
+ * 改为目录级自然提示；agent 自行查 _tmp/images_from_user/ 找图片 → 调 CCC vlm MSM 识别）
+ */
+export const IMAGE_NOTE_TEMPLATE_SINGLE = '用户提供了一张图片（已保存到 _tmp/images_from_user/），请查看该目录下的图片并处理'
+export const IMAGE_NOTE_TEMPLATE_MULTI = (count: number): string =>
+  `用户提供了 ${count} 张图片（已保存到 _tmp/images_from_user/），请查看该目录下的图片并处理`
 
 /** 浏览器 File → base64（与 ui-conversation serializeImages 等价的最小实现） */
 function fileToBase64(file: File): Promise<string> {

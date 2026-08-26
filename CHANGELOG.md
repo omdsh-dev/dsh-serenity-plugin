@@ -1,3 +1,13 @@
+## v1.20.5 — 2026-08-26（图片落盘：消息模板友好化——去掉突兀的原始文件路径，S142）
+
+**Scope:** 用户 UI 反馈（截图标注）：对话里显示「用户提供了图片在 _tmp/images_from_user/2026-08-26T00-25-00-741Z-ajlq48.jpg」原始路径很突兀。修正：消息改为目录级自然提示，不展示具体文件名；agent 自行查 _tmp/images_from_user/ 目录找图片 → 调 CCC 的 vlm MSM 识别。
+
+### 变更
+- `client/image-fallback-api.ts`：`IMAGE_NOTE_PREFIX` → **`IMAGE_NOTE_TEMPLATE_SINGLE`**（"用户提供了一张图片（已保存到 _tmp/images_from_user/），请查看该目录下的图片并处理"）+ **`IMAGE_NOTE_TEMPLATE_MULTI(count)`**（多图）
+- `client/ImageFallbackDock.tsx`：消息构造用新模板（不拼接具体路径）；补 import
+
+**测试：** 32 files / 293 tests → typecheck ✓
+
 ## v1.20.4 — 2026-08-26（图片落盘：补救后自动清空输入框 rail 图片——用户实测需求，S142）
 
 **Scope:** 用户要求：提供图片后自动删除输入框（rail）里的图片，免手动 ✕。技术：ui-conversation `sessions.provide({ props: ['inputActions'] })` 给所有 session-scope 组件提供 `inputActions`（setDraft/removeImage/submit）——input.dock 组件经 props 直达官方输入机器。
