@@ -1,3 +1,13 @@
+## v1.22.7 — 2026-08-27（移除工作区手输兜底，S142）
+
+**Scope:** 用户确认 v1.22.6 修复后工作区白名单列表正常加载——删除手输路径兜底 UI（工作正常后不再需要）。
+
+### 变更
+- `src/client/AccountsEditor.tsx`：删除 `wsInput` state / `addWorkspace()` / 手输输入框 + 添加按钮；加载失败文案改为「暂无可选工作区（workspace.list 未返回条目）」（不再引导手输）
+- `src/client/AccountsEditor.css`：删除 `.ae-wsAdd`（不再使用）
+- `src/client/accounts-api.ts`：注释同步（失败返回空数组 → 面板显示"暂无可选工作区"）
+- 测试：40 files / 425 tests（无新增——纯 UI 删减）→ typecheck ✓（node + client）
+
 ## v1.22.6 — 2026-08-27（修复：工作区白名单列表加载失败，S142）
 
 **Scope:** 用户报告设置面板工作区白名单显示"未能加载工作区列表（workspace.list 不可达）"——已有工作区下拉为空。

@@ -231,11 +231,6 @@
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.ae-wsAdd {
-  flex: none;
-  align-self: auto;
-}
-
 .ae-wsSelect {
   margin-top: 8px;
   max-width: 100%;

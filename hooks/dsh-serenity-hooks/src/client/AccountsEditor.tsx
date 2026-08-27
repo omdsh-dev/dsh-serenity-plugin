@@ -42,11 +42,10 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
   const [host, setHost] = useState('0.0.0.0')
   const [port, setPort] = useState(3081)
   const [workspaces, setWorkspaces] = useState<string[]>([])
-  const [wsInput, setWsInput] = useState('')
   const [cookieSecure, setCookieSecure] = useState(false)
   const [allowWorkspaceCreate, setAllowWorkspaceCreate] = useState(true)
   const [totpEnabled, setTotpEnabled] = useState(false)
-  // 需求 1：已有工作区列表（workspace.list 拉取；失败空数组 → 手输兜底）
+  // 需求 1：已有工作区列表（workspace.list 拉取；v1.22.6 修复信封后正常加载，无手输兜底）
   const [knownWorkspaces, setKnownWorkspaces] = useState<{ path: string; title: string }[]>([])
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -101,14 +100,7 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
     updateDraft(d.id, { totpState: 'clear', totpSecret: undefined, totpConfirm: '' })
   }
 
-  // 需求 1：从已有工作区添加（下拉选择）；手输作兜底
-  const addWorkspace = (): void => {
-    const v = wsInput.trim()
-    if (v === '') return
-    if (!workspaces.includes(v)) setWorkspaces((ws) => [...ws, v])
-    setWsInput('')
-  }
-
+  // 需求 1：从已有工作区添加（下拉选择）
   const toggleWorkspace = (path: string): void => {
     setWorkspaces((ws) => (ws.includes(path) ? ws.filter((w) => w !== path) : [...ws, path]))
   }
@@ -277,7 +269,7 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
           )}
         </div>
         {knownWorkspaces.length === 0 ? (
-          <p className="ae-note">未能加载工作区列表（workspace.list 不可达）——可在下方手输路径</p>
+          <p className="ae-note">暂无可选工作区（workspace.list 未返回条目）</p>
         ) : (
           <select
             className="ae-input ae-wsSelect"
@@ -290,16 +282,6 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
             ))}
           </select>
         )}
-        <div className="ae-row">
-          <input
-            className="ae-input"
-            value={wsInput}
-            placeholder="（兜底）手输路径前缀，例如 /home/yh/home/home-serenity"
-            onChange={(e) => setWsInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addWorkspace() } }}
-          />
-          <button type="button" className="ae-add ae-wsAdd" onClick={addWorkspace}>添加</button>
-        </div>
       </div>
 
       {error !== null && <p className="ae-error">{error}</p>}
