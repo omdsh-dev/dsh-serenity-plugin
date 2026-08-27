@@ -52,6 +52,12 @@
   background: var(--dsw-alias-label-dimmed);
 }
 
+/* safe-mode 状态点（safe 分离出卡片：safe on=琥珀警告色，off=绿，非 CCC=灰） */
+.sp-dotWarn {
+  background: var(--dsw-alias-state-warning-fg, #f59e0b);
+  box-shadow: 0 0 0 3px var(--dsw-alias-state-warning-bg, rgba(245, 158, 11, 0.18));
+}
+
 .sp-brand {
   color: var(--dsw-alias-label-primary);
   font-weight: 500;
@@ -59,35 +65,6 @@
 
 .sp-chev {
   color: var(--dsw-alias-label-dimmed);
-}
-
-/* safe-mode 徽标（卡片本体直接可见；ON 红 / OFF 灰） */
-.sp-sm {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  height: 18px;
-  padding: 0 7px;
-  border-radius: 9px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1;
-}
-
-.sp-smOn {
-  background: var(--dsw-alias-state-warning-bg, rgba(245, 158, 11, 0.18));
-  color: var(--dsw-alias-state-warning-fg, #f59e0b);
-  border: 1px solid var(--dsw-alias-state-warning-border, rgba(245, 158, 11, 0.4));
-}
-
-.sp-smOff {
-  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.16));
-  color: var(--dsw-alias-label-dimmed);
-  border: 1px solid var(--dsw-alias-border-l1);
-}
-
-.sp-smIcon {
-  flex: none;
 }
 
 /* ── 官方 Modal 定制（宽度 + 内容紧凑） ── */

@@ -1,3 +1,12 @@
+## v1.23.5 — 2026-08-27（双修复：rebuild shadow-price 协议合规 + 状态卡去嵌套，S142 用户反馈）
+
+**Scope:** 用户两反馈——① 问询 rebuild 后上下文少了但历史保留、担心 dsh 会话爆炸（实测 UI 计量矛盾：总用量 15% 但「对话消息」~1M）；② 头部状态卡「胶囊套胶囊」不好看。双根因均实证修复。
+
+### 变更
+- **rebuild shadow-price 协议合规（根因实证）**：`performRebuild` 此前**裸 surface replace**——DSH token-meter 的 `foldSurfaceProjection` 对 `replace` 要求**紧邻其前的 metering 事件**（`compaction/summary` 或 `compaction/prune`）声明被替换范围 token 价；claim 缺失 → `deltaTokens=0` → `contextBreakdown.messageTokens` **永不扣减** → UI「对话消息」虚高累计（截图实证：总 15% 但对话消息 ~1M——两个计量源矛盾）。**修复**：replace 前先 `session.append('compaction/prune', { shadowedRange, shadowedSeqs, shadowedTokenCount })`——定价 = 逐被替换节点 `ctx.tokenMeter.estimateMessage(deriveEventMessage(event))` 累加（官方先例 `compaction-tool-result-pruner` 同款协议）；tokenMeter 经 `ctx.get('tokenMeter')` 动态取（可选，缺失退化无 claim 仅计量漂移，会话功能不受影响）。测试 +1（带 meter → 先 prune 定价 shadowedRange/Seqs/TokenCount + 后 replace 紧邻）——**40 files / 446 tests 全绿**。设计答复：log append-only 是 DSH 持久性契约（surface=模型投影 / log=不可变审计源，surface.ts:44-47 权威注释），上下文复位与磁盘增长一体两面；修复后 UI 计量正确回落，磁盘增长缓解（chunk 打包 ~56× + zstd），列表不随单会话大小退化
+- **状态卡去嵌套（UI 反馈）**：头部卡片移除内部橙色 `safe` 胶囊（胶囊套胶囊）——safe 状态**分离**为状态点颜色编码：非 CCC=灰 / CCC+safe off=绿 / CCC+safe on=琥珀（`sp-dotWarn` + 光晕）；hover title 含 safe-mode 状态；弹层「安全模式」分组保留（唯一可操作项）。CSS 删 `.sp-sm*`（-2KB bundle）
+- typecheck ✓（node + client）→ build ✓（lib/client.js 72053 B）
+
 ## v1.23.4 — 2026-08-27（TRAJECTORY-REBUILD 锚点 SESSION 定位修复：完整目录名 + 含空格路径解析，S142 用户反馈）
 
 **Scope:** 用户实测反馈——rebuild 锚点"没写 SESSION 完整名称，导致定位困难"。实测锚点显示 `Persistent trajectory: AGENT_SESSIONS/2026-08-24--S142--dsh-serenity-plugin`（截断），而真实目录为 `…--S142--dsh-serenity-plugin 长期维护/`（含空格后缀）。根因 + 双修复。

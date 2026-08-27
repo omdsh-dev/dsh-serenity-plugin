@@ -50,6 +50,11 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
+// v1.23.5 rebuild.ts 运行时引入 dsh-session（shadow-price 定价）
+vi.mock('@deepseek-ai/dsh-session', () => ({
+  deriveEventMessage: (event: unknown) => (event as { data?: { message?: unknown } })?.data?.message ?? null,
+}))
+
 import { name, inject, apply, type Config } from '../src/index.ts'
 
 function mockCtx() {

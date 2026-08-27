@@ -25,6 +25,9 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   installSettingsSection: () => {},
   settingsNamespace: (v: string) => v,
 }))
+vi.mock('@deepseek-ai/dsh-session', () => ({
+  deriveEventMessage: (event: unknown) => (event as { data?: { message?: unknown } })?.data?.message ?? null,
+}))
 
 import {
   buildRebuildAnchor,
@@ -147,6 +150,35 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(op.end).toBe(13)
     const sourceEventSeqs = (call.opts as { sourceEventSeqs: number[] }).sourceEventSeqs
     expect(sourceEventSeqs).toEqual([10, 11, 12, 13])
+  })
+
+  it('performRebuild：带 meter → 先 append compaction/prune 定价（shadow-price 协议，v1.23.5）', () => {
+    const session = fakeSession([10, 11])
+    // events 提供被替换节点（deriveEventMessage 需要 data.message）
+    ;(session as { events?: unknown[] }).events = [
+      undefined, undefined, undefined, undefined, undefined,
+      undefined, undefined, undefined, undefined, undefined,
+      { type: 'user/message', seq: 10, data: { message: { role: 'user', content: [{ type: 'text', text: 'a' }] } } },
+      { type: 'assistant/message', seq: 11, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'b' }] } } },
+    ]
+    const meter = { estimateMessage: vi.fn((m: { role: string }) => (m.role === 'user' ? 3 : 7)) }
+    const pending = { anchor: 'Continue the work of S142.', queuedAt: Date.now() }
+    const done = performRebuild(session as never, pending, meter)
+    expect(done).toBe(true)
+    // 两次 append：compaction/prune + user/message
+    expect(session._calls).toHaveLength(2)
+    const prune = session._calls[0]!
+    expect(prune.type).toBe('compaction/prune')
+    const pd = prune.data as { shadowedRange: { start: number; end: number }; shadowedSeqs: number[]; shadowedTokenCount: number }
+    expect(pd.shadowedRange).toEqual({ start: 10, end: 11 })
+    expect(pd.shadowedSeqs).toEqual([10, 11])
+    expect(pd.shadowedTokenCount).toBe(10) // 3 (user) + 7 (assistant)
+    // meter 对每个被替换节点定价
+    expect(meter.estimateMessage).toHaveBeenCalledTimes(2)
+    // 紧随其后的 replace（锚点消息）
+    const replace = session._calls[1]!
+    expect(replace.type).toBe('user/message')
+    expect((replace.opts as { surfaceOp: { op: string; start: number; end: number } }).surfaceOp).toEqual({ op: 'replace', start: 10, end: 11 })
   })
 
   it('performRebuild：surface 为空 → false（无历史可清）', () => {

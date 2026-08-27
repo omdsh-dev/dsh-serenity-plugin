@@ -38,9 +38,11 @@
 
 import type { Context } from 'cordis'
 import type { SessionId, Session } from '@deepseek-ai/dsh-session'
+import { deriveEventMessage } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource } from '@deepseek-ai/dsh-llm'
+import type { Message, MessageSource } from '@deepseek-ai/dsh-llm'
 import { join, basename, dirname } from 'node:path'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
@@ -168,11 +170,43 @@ export async function queueRebuild(
  * 执行真正的 surface replace（v1.22.4 定稿语义第二步，turn-stopping 时调用）：
  * 当前 turn 已完整结束（所有 tool/result 已 append）→ 全部节点替换为锚点消息。
  * 同一会话 id 原地重建——同工作区天然满足，无新/旧会话之分。
+ *
+ * **shadow-price 协议（v1.23.5 修复，S142 用户问询）**：DSH token-meter 的
+ * `foldSurfaceProjection` 对 surface `replace` 要求**紧邻其前的 metering 事件**
+ * （`compaction/summary` 或 `compaction/prune`）声明被替换范围的启发式 token 价，
+ * 否则 claim 缺失 → `deltaTokens=0` → `contextBreakdown.messageTokens` 永不扣减
+ * → UI「对话消息」虚高累计、往复 rebuild 计量爆炸（用户截图实证：总 15% 但
+ * 对话消息 ~1M）。官方先例 = `compaction-tool-result-pruner`（append
+ * `compaction/prune` → 紧接 replace）。此处同款：先 append `compaction/prune`
+ * （定价全部被替换节点，经 ctx.tokenMeter.estimateMessage 逐节点累加），再
+ * append 锚点 replace——meter 不可用时退化（无 claim，仅计量漂移，会话功能不受影响）。
+ *
  * @returns 是否执行了 replace（false = 无 pending 或 surface 空）
  */
-export function performRebuild(session: Session, pending: PendingRebuild): boolean {
+export function performRebuild(
+  session: Session,
+  pending: PendingRebuild,
+  meter?: { estimateMessage(message: Message): number },
+): boolean {
   const nodes = [...session.surface.nodes]
   if (nodes.length === 0) return false
+
+  // shadow-price 协议：replace 前 append compaction/prune，定价被替换范围
+  if (meter) {
+    let shadowedTokenCount = 0
+    for (const seq of nodes) {
+      const event = (session as { events?: readonly SessionEvent[] }).events?.[seq]
+      if (!event) continue
+      const message = deriveEventMessage(event)
+      if (message) shadowedTokenCount += meter.estimateMessage(message)
+    }
+    session.append('compaction/prune', {
+      shadowedRange: { start: nodes[0]!, end: nodes[nodes.length - 1]! },
+      shadowedSeqs: nodes,
+      shadowedTokenCount,
+    } as never)
+  }
+
   session.append('user/message', {
     content: [{ type: 'text', text: pending.anchor }],
     // source 必填（UserMessage 契约）——缺失会使 session.list sessionListMetadata 抛 TypeError
@@ -205,7 +239,15 @@ export function registerRebuildTurnHook(ctx: Context): void {
     }
     pendingRebuilds.delete(id)
     try {
-      const rebuilt = performRebuild(agent.session, pending)
+      // tokenMeter 可选（DSH 装配通常有；缺失时退化——无 shadow-price 仅计量漂移）
+      const tokenMeter = (ctx as unknown as { get?: (name: string) => unknown }).get?.('tokenMeter') as
+        | { estimateMessage?: (message: Message) => number }
+        | undefined
+      const meter =
+        tokenMeter && typeof tokenMeter.estimateMessage === 'function'
+          ? { estimateMessage: (m: Message) => tokenMeter.estimateMessage!(m) }
+          : undefined
+      const rebuilt = performRebuild(agent.session, pending, meter)
       if (rebuilt) {
         // v1.22.5 自动继续：steer 到 next-step 队列 → turn 循环 nextStep 非空不 break →
         // 模型在同轮内自动消费该指令，读取 SESSION.md 从上次进度继续（无需用户手工输入）
