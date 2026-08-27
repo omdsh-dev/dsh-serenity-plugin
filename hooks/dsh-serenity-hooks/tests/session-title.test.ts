@@ -58,19 +58,42 @@ describe('F3: namingTitleFor（v1.22.9 格式修正：S###-日期，非完整目
   })
 })
 
-describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默）', () => {
+describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默；v1.23.2：服务对象方法调用）', () => {
   const active = { sessionId: 'S001', dirName: '2026-08-26--S001--my-work', mdPath: '/x/SESSION.md' }
+  const okTitles = (log: string[]): { rename: (s: unknown, t: string) => unknown } => ({
+    rename: (session, title) => { log.push(String((session as { id: string }).id) + '=' + title) },
+  })
 
-  it('门控通过 → rename 调用（S###-日期标题）', () => {
+  it('门控通过 → titles.rename 方法调用（S###-日期标题）', () => {
     const renamed: string[] = []
     const result = renameDshSessionOnUse(
       { namingEnabled: true, sessionTitleAvailable: true },
       { id: 'dsh-sess-1' },
-      (session, title) => { renamed.push(String((session as { id: string }).id) + '=' + title) },
+      okTitles(renamed),
       active,
     )
     expect(result).toEqual({ ok: true, title: 'S001-2026-08-26' })
     expect(renamed).toEqual(['dsh-sess-1=S001-2026-08-26'])
+  })
+
+  // v1.23.2 回归：方法调用 this 绑定——模拟 DSH 服务方法内部读 this（assertServiceActive 模式）。
+  // 旧实现传解构裸函数 → this=undefined → 抛错（日志实证 Cannot read properties of undefined）。
+  // 现传服务对象 → renameDshSessionOnUse 内部 titles.rename(...) 方法调用 → this = 服务实例。
+  it('方法内部读 this（服务实例态）→ 成功（this 绑定回归）', () => {
+    const service = {
+      active: true,
+      rename(this: { active: boolean }, _s: unknown, title: string): string {
+        if (!this.active) throw new Error('assertServiceActive failed')
+        return title
+      },
+    }
+    const result = renameDshSessionOnUse(
+      { namingEnabled: true, sessionTitleAvailable: true },
+      { id: 'dsh-sess-1' },
+      service,
+      active,
+    )
+    expect(result).toEqual({ ok: true, title: 'S001-2026-08-26' })
   })
 
   it('naming.enabled=false → 返回失败原因（不静默）', () => {
@@ -78,30 +101,38 @@ describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默�
     const result = renameDshSessionOnUse(
       { namingEnabled: false, sessionTitleAvailable: true },
       {},
-      (_s, t) => { renamed.push(t) },
+      okTitles(renamed),
       active,
     )
     expect(result).toEqual({ ok: false, reason: 'naming.enabled=false' })
     expect(renamed).toEqual([])
   })
 
-  it('sessionTitle 服务缺失 → 返回失败原因', () => {
-    const renamed: string[] = []
+  it('sessionTitle 服务缺失（undefined）→ 返回失败原因', () => {
     const result = renameDshSessionOnUse(
-      { namingEnabled: true, sessionTitleAvailable: false },
+      { namingEnabled: true, sessionTitleAvailable: true },
       {},
-      (_s, t) => { renamed.push(t) },
+      undefined,
       active,
     )
     expect(result).toEqual({ ok: false, reason: 'sessionTitle service unavailable' })
-    expect(renamed).toEqual([])
+  })
+
+  it('sessionTitle 服务无 rename 方法 → 返回失败原因', () => {
+    const result = renameDshSessionOnUse(
+      { namingEnabled: true, sessionTitleAvailable: true },
+      {},
+      {} as never,
+      active,
+    )
+    expect(result).toEqual({ ok: false, reason: 'sessionTitle service unavailable' })
   })
 
   it('rename 抛错 → 返回失败原因（不传播，调用方决定可见性）', () => {
     const result = renameDshSessionOnUse(
       { namingEnabled: true, sessionTitleAvailable: true },
       {},
-      () => { throw new Error('session is not live in this store') },
+      { rename: () => { throw new Error('session is not live in this store') } },
       active,
     )
     expect(result.ok).toBe(false)

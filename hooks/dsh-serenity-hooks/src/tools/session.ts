@@ -75,21 +75,29 @@ export function namingTitleFor(active: ActiveSessionInfo): string {
 
 /**
  * use 激活宁静号会话后，把当前 dsh 会话重命名为命名标题（`S###-日期`）。
- * 门控：naming.enabled + sessionTitle 服务存在；失败不静默——返回 null 且输出
- * 失败原因（调用方 console.warn），保证可观测性（v1.22.9）。
- * @returns { title, ok } 或 { ok:false, reason }（未执行/失败均返回对象，非 null 歧义）
+ * 门控：naming.enabled + sessionTitle 服务存在；失败不静默——返回结果对象
+ * 而非 null（v1.22.9），调用方决定可见性。
+ *
+ * v1.23.2 修复（this 绑定）：第三参从**解构的裸 rename 函数**改为**整个
+ * sessionTitle 服务对象**——内部以 `titles.rename(session, title)` **方法调用**
+ * （this = titles 服务实例）。旧实现调用点 `const rename = titles.rename` 解构
+ * 后传入，方法内部读 `this.assertServiceActive` → this=undefined 抛错
+ * （日志实证：`Cannot read properties of undefined (reading 'assertServiceActive')`；
+ * 与 v1.20.2/1.20.3 图片落盘同款解构丢 this bug）。
+ * @returns { title, ok } 或 { ok:false, reason }（未执行/失败均返回对象）
  */
 export function renameDshSessionOnUse(
   deps: RenameOnUseDeps,
   session: unknown,
-  rename: (session: unknown, title: string) => unknown,
+  titles: { rename: (session: unknown, title: string) => unknown } | undefined,
   active: ActiveSessionInfo,
 ): { ok: true; title: string } | { ok: false; reason: string } {
   if (!deps.namingEnabled) return { ok: false, reason: 'naming.enabled=false' }
   if (!deps.sessionTitleAvailable) return { ok: false, reason: 'sessionTitle service unavailable' }
+  if (!titles || typeof titles.rename !== 'function') return { ok: false, reason: 'sessionTitle service unavailable' }
   const title = namingTitleFor(active)
   try {
-    rename(session, title)
+    titles.rename(session, title)
     return { ok: true, title }
   } catch (error) {
     return { ok: false, reason: `rename threw: ${String((error as Error)?.message ?? error)}` }
@@ -298,14 +306,16 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
         try {
           const info = getActiveSessionInfo(scope)
           if (info) {
+            // v1.23.2：传整个 sessionTitle 服务对象（不解构 rename 函数）——
+            // 旧实现 `titles.rename` 解构后传裸函数，方法内部 this=undefined 抛错
+            // （日志实证 assertServiceActive）；传对象后内部方法调用 this=titles
             const titles = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionTitle')
-            const rename = (titles as { rename?: (session: unknown, title: string) => unknown } | undefined)?.rename
             const dshSession = (exec as { agent?: { session?: unknown } }).agent?.session
-            if (dshSession && typeof rename === 'function') {
+            if (dshSession) {
               const result = renameDshSessionOnUse(
                 { namingEnabled: readSimpleSettings().namingEnabled, sessionTitleAvailable: true },
                 dshSession,
-                rename,
+                titles as { rename: (session: unknown, title: string) => unknown } | undefined,
                 info,
               )
               if (result.ok) {
@@ -314,7 +324,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
                 console.warn(`[serenity-hooks] dsh 会话重命名未执行: ${result.reason}`)
               }
             } else {
-              console.warn(`[serenity-hooks] dsh 会话重命名未执行: sessionTitle 服务不可用或缺少 agent session`)
+              console.warn(`[serenity-hooks] dsh 会话重命名未执行: 缺少 agent session`)
             }
           }
         } catch (err) {

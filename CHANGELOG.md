@@ -1,3 +1,12 @@
+## v1.23.2 — 2026-08-27（双修复：F3 会话命名 this 绑定 + 配置面板 CSS 唯一 marker，S142 用户反馈）
+
+**Scope:** 用户两反馈——① 会话命名"还是不生效"；② 配置面板排版"像网页丢失资源"。双根因均实证修复。
+
+### 变更
+- **F3 会话命名修复（this 绑定，日志实证）**：根因 = 调用点 `const rename = titles.rename` **解构裸函数**后传入，`renameDshSessionOnUse` 内部 `rename(session,title)` 调用时 `this=undefined` → DSH 服务方法内部读 `this.assertServiceActive` 抛错（日志：`Cannot read properties of undefined (reading 'assertServiceActive')`；与 v1.20.2/1.20.3 图片落盘同款"解构丢 this"bug 第三次出现）。修复：第三参从裸函数改为**整个 sessionTitle 服务对象**，内部 `titles.rename(session,title)` **方法调用**（this=titles 服务实例）；调用点同步（传 titles 对象 + 服务缺失/无 rename 方法均有明确 reason）；测试 +2（this 绑定回归：方法内部读 this 服务态成功 / 服务无 rename 方法 reason）
+- **配置面板 CSS 修复（唯一 marker，bundle 实证）**：根因 = tsdown CSS 内联插件所有 CSS 共用**同一幂等 marker** `style[data-sp-css]`——第一个 CSS（SafeModePanel）注入后创建该 style，后续 3 个（SettingsSection/AccountsEditor/PersonaEditor）的幂等判断 querySelector 非 null → **全部跳过注入** → 面板只剩一个 CSS 生效（"网页丢失资源"外观）。修复：按文件名生成**唯一 marker** `style[data-sp-css="<basename>"]`，每个 CSS 独立注入（bundle 验证 4 个 marker 各自存在）
+- 测试：40 files / **440 tests 全绿**（+2）→ typecheck ✓（node + client）→ build ✓（lib/client.js 72871 B，4 独立 CSS marker 验证）
+
 ## v1.23.1 — 2026-08-27（彩蛋功能：persona 模式——替换输出约束/指令遵循约束，S142 用户需求）
 
 **Scope:** 用户需求——用户常想改变 agent 的输出风格和指令遵循风格（如社区流行的「大肥鱼」模式）；为让用户开心且不影响正常工作，做彩蛋功能：在插件设定中可替换 ACC 系统提示词中**输出约束/指令遵循约束**部分（EAP 块 + MSM 原则段），配置后用户文本替代原本；未配置 → 完全默认行为，零影响。

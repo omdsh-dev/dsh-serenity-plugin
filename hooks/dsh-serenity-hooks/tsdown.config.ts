@@ -88,11 +88,17 @@ export default [
           const file = virtualId.slice(CSS_VIRTUAL_PREFIX.length) + '.css'
           this.addWatchFile(file)
           const css = readFileSync(file, 'utf-8')
+          // v1.23.2 修复：每个 CSS 用**文件名唯一 marker**（`data-sp-css="<basename>"`）——
+          // 旧实现所有 CSS 共用 `style[data-sp-css]`：第一个注入后创建该 style，
+          // 后续 CSS 的幂等判断（querySelector 非 null）全部跳过 → 面板只剩第一个 CSS
+          // 生效（"网页丢失资源"外观，S142 用户反馈）。按文件独立 marker 后各自注入。
+          const id = file.split(/[\\/]/).pop()?.replace(/\.css$/, '') ?? 'sp'
+          const marker = `style[data-sp-css="${id}"]`
           return [
             `const css = ${JSON.stringify(css)};`,
-            `if (typeof document !== 'undefined' && document.querySelector('style[data-sp-css]') === null) {`,
+            `if (typeof document !== 'undefined' && document.querySelector(${JSON.stringify(marker)}) === null) {`,
             `  const tag = document.createElement('style');`,
-            `  tag.setAttribute('data-sp-css', '1');`,
+            `  tag.setAttribute('data-sp-css', ${JSON.stringify(id)});`,
             `  tag.textContent = css;`,
             `  document.head.appendChild(tag);`,
             `}`,
