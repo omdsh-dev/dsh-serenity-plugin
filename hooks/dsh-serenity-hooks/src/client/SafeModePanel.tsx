@@ -125,8 +125,6 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
 
   const inCcc = status.root !== null
   const runningLoops = loops.filter((l) => !l.done)
-  // 点颜色编码：非 CCC=灰 / CCC+safe off=绿 / CCC+safe on=琥珀（safe 状态分离出卡片，不再胶囊套胶囊）
-  const dotClass = !inCcc ? 'sp-dotOff' : status.safeModeOn ? 'sp-dotWarn' : 'sp-dotOn'
 
   return (
     <>
@@ -143,8 +141,17 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
             : 'Serenity（未激活）'
         }
       >
-        <span className={cx('sp-dot', dotClass)} />
+        <span className={cx('sp-dot', inCcc ? 'sp-dotOn' : 'sp-dotOff')} />
         <span className={cx('sp-brand')}>Serenity v{status.accVersion}</span>
+        {inCcc && (
+          <span
+            className={cx('sp-tag', status.safeModeOn ? 'sp-tagOn' : 'sp-tagOff')}
+            title={status.safeModeOn ? 'safe-mode 已开启（隐藏写工具）' : 'safe-mode 关闭'}
+          >
+            {status.safeModeOn && <IconWarningOutline16 size={10} className={cx('sp-tagIcon')} />}
+            {status.safeModeOn ? 'safe' : 'off'}
+          </span>
+        )}
         <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
       </button>
 

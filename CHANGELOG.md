@@ -1,3 +1,12 @@
+## v1.23.6 — 2026-08-27（safe 状态 tag 化：从外面一眼可见，非胶囊嵌套，S142 用户反馈）
+
+**Scope:** 用户反馈 v1.23.5 的点颜色编码不够直观——"安全模式做成 tag 吧，从外面看方便知道，不像之前那么丑就行"。
+
+### 变更
+- **SafeModePanel 头部卡片 safe tag**：恢复卡片内 safe 状态标签，但**方形小标签**（border-radius 4px，非胶囊 9px——避免"胶囊套胶囊"）——ON=橙底 `safe`（含警告图标）/ OFF=灰底 `off`；绿点回归纯 CCC 活跃语义（on/off 由 tag 承担）；hover title 保留 safe-mode 说明
+- CSS：`.sp-sm*` 胶囊样式 → `.sp-tag*` 方形标签（`sp-tagOn`/`sp-tagOff`/`sp-tagIcon`）；移除 `.sp-dotWarn`（点不再编码 safe）
+- typecheck ✓（node + client）→ test ✓（40 files / 446 tests 不变）→ build ✓（lib/client.js 73001 B）
+
 ## v1.23.5 — 2026-08-27（双修复：rebuild shadow-price 协议合规 + 状态卡去嵌套，S142 用户反馈）
 
 **Scope:** 用户两反馈——① 问询 rebuild 后上下文少了但历史保留、担心 dsh 会话爆炸（实测 UI 计量矛盾：总用量 15% 但「对话消息」~1M）；② 头部状态卡「胶囊套胶囊」不好看。双根因均实证修复。
