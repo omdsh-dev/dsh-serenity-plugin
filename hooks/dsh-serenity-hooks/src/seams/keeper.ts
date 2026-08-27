@@ -75,11 +75,22 @@ export function reminderText(code: string, score: number): string {
   return `[TRAJECTORY-STEWARD] Score threshold reached (${score}). Please acknowledge with [TRAJECTORY-STEWARD-recorded-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
 }
 
-/** F2 rebuild 提示（v1.21；v1.22.1 对齐"轨迹跟踪器"概念；v1.23.0 英化 + 载体关系）：
- * SESSION.md = trajectory 持久身体，自身会话 = 可重建载体（工作副本）。
- * 上下文接近上限时引导 LLM 主动触发 session_rebuild。 */
-export function rebuildReminderText(ratio: number): string {
-  return `[TRAJECTORY] Context usage at ${(ratio * 100).toFixed(0)}% (trajectory-tracker threshold). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy — no compaction needed. Call session_rebuild at a natural pause to rebuild the carrier (this copy is discarded; identity continues from SESSION.md).`
+/**
+ * F2 rebuild 提示（v1.21；v1.22.1 对齐"轨迹跟踪器"概念；v1.23.0 英化 + 载体关系；
+ * v1.23.3 行动指令化——用户反馈"一直在触发为啥没执行"：旧文案是状态播报式
+ * （"[TRAJECTORY] Context usage at N%..."），模型当成系统状态而非行动请求，可一直忽略。
+ * 新文案 = 明确的行动指令（ACT NOW + 何时执行 + 必须执行），对齐 steward ACK 协议风格。
+ *
+ * escalated=true（v1.23.3）：连续多轮超阈值仍未 rebuild → 升级强制语气
+ * （STOP and rebuild now，持续注入直到调用 session_rebuild）。
+ */
+export function rebuildReminderText(ratio: number, threshold: number, escalated = false): string {
+  const pct = (ratio * 100).toFixed(0)
+  const thr = (threshold * 100).toFixed(0)
+  if (escalated) {
+    return `[TRAJECTORY-ESCALATED] Context usage at ${pct}% (threshold ${thr}%) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step and call the session_rebuild tool immediately. The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
+  }
+  return `[TRAJECTORY] Context usage at ${pct}% (threshold ${thr}%). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool to clear and rebuild this conversation — the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
@@ -112,6 +123,20 @@ export interface KeeperRegistration {
 
 /** 每 agent 一个跟踪器（进程内存态，agent token 维度） */
 const trackers = new Map<string, KeeperTracker>()
+
+/** v1.23.3 重建提醒状态：agentId → 连续超阈值累计轮数（进程内存态） */
+interface RebuildReminderState {
+  /** 连续超阈值未 rebuild 的累计轮数（达阈值 → 升级强制提醒） */
+  consecutive: number
+}
+/** 连续超阈值轮数达此值 → 升级为 [TRAJECTORY-ESCALATED] 强制语气（此后持续升级催，直到 rebuild） */
+const REBUILD_ESCALATE_AFTER = 3
+const rebuildReminderStates = new Map<string, RebuildReminderState>()
+
+/** 测试/调试：查看重建提醒状态 */
+export function rebuildReminderStateSnapshot(): ReadonlyMap<string, RebuildReminderState> {
+  return new Map(rebuildReminderStates)
+}
 
 export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): void {
   const defaultThreshold = opts.defaultThreshold ?? 150
@@ -153,6 +178,9 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     }
 
     // ② 轨迹跟踪器：上下文压力检测（独立——每次工具调用后都查，不依赖计分）
+    // v1.23.3 用户拍板：**不做节流，催就行了**——每次超阈值都注入（每轮都催）；
+    // 连续超阈值 REBUILD_ESCALATE_AFTER 轮仍未 rebuild → 升级 [TRAJECTORY-ESCALATED]
+    // 强制语气，此后持续升级催（不重置，直到 agent 调用 session_rebuild 压力自然回落）。
     if (readSimpleSettings().rebuildEnabled) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
@@ -161,7 +189,12 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
           const ratio = pressure.projectedTokens / pressure.contextWindow
           const threshold = readSimpleSettings().rebuildThreshold
           if (ratio >= threshold) {
-            blocks.push({ type: 'text', text: rebuildReminderText(ratio) })
+            const key = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id ?? 'global'
+            const st = rebuildReminderStates.get(key) ?? { consecutive: 0 }
+            st.consecutive += 1
+            const escalated = st.consecutive >= REBUILD_ESCALATE_AFTER
+            blocks.push({ type: 'text', text: rebuildReminderText(ratio, threshold, escalated) })
+            rebuildReminderStates.set(key, st)
           }
         }
       }

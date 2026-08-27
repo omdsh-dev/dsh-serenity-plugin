@@ -1,3 +1,15 @@
+## v1.23.3 — 2026-08-27（重建提醒修复：行动指令化 + 不做节流 + 升级催促，S142 用户反馈）
+
+**Scope:** 用户反馈"[TRAJECTORY] 一直在触发，为啥没执行 rebuild，这个词是不是有问题"——机制语义澄清 + 三处修正：① 旧文案是**状态播报式**（"[TRAJECTORY] Context usage at N%..."）模型当成系统状态而非行动请求可一直忽略；② 无节流每轮刷屏（用户阈值 0.4，44% 就每轮刷）；③ 用户拍板：**不做节流，催就行了** + **不向 LLM 植入阈值建议**（设定是用户自由）。
+
+### 变更
+- **rebuildReminderText 行动指令化（v1.23.3）**：新签名 `(ratio, threshold, escalated)`——普通语气 = **ACT NOW 行动指令**（"at the next natural pause call session_rebuild... Do not ignore this; rebuild is the expected action, not an option"），对齐 steward ACK 协议风格（模型知道该做什么、何时做、必须做）；**升级语气** `[TRAJECTORY-ESCALATED]`（连续 3 轮超阈值未 rebuild → "STOP and call session_rebuild immediately... persists until you call session_rebuild"）
+- **不做节流（用户拍板）**：删除冷却机制——**每次超阈值都注入**（每轮都催，直到 rebuild 后压力自然回落）；保留**升级状态机**（per-session consecutive 累计，≥3 → 升级强制语气，此后持续升级催不重置）
+- **不向 LLM 植入阈值建议（用户拍板）**：文案不含"0.75~0.9 是好主意"类引导——阈值设定是用户自由，提示只陈述当前占用与阈值
+- **语义澄清（用户疑问）**：`[TRAJECTORY]` 是**提示**不是**执行**（v1.22.1 设计：不自动执行防误清空）——执行需要 agent 收到提示后主动调用 session_rebuild；新文案明确 "rebuild is the expected action" 消除歧义
+- 测试 +3：行动文案断言（ACT NOW/not an option/不含阈值建议）/ 升级文案断言（mandatory/STOP/persists until）/ 升级状态机集成（每次注入 + 第 3 轮升级 + 升级后持续催不重置，rebuildReminderStateSnapshot 可见）——**40 files / 443 tests 全绿**
+- typecheck ✓（node + client）→ build ✓（lib/client.js 72871 B）
+
 ## v1.23.2 — 2026-08-27（双修复：F3 会话命名 this 绑定 + 配置面板 CSS 唯一 marker，S142 用户反馈）
 
 **Scope:** 用户两反馈——① 会话命名"还是不生效"；② 配置面板排版"像网页丢失资源"。双根因均实证修复。

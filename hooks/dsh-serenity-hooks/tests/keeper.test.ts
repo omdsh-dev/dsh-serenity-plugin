@@ -63,13 +63,27 @@ describe('keeper: 纯跟踪器', () => {
 })
 
 describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () => {
-  it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本（v1.23.0 英化）', () => {
-    const text = rebuildReminderText(0.91)
+  it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本（v1.23.0 英化 + v1.23.3 行动指令化）', () => {
+    const text = rebuildReminderText(0.91, 0.9)
     expect(text).toContain('[TRAJECTORY]')
     expect(text).toContain('91%')
+    expect(text).toContain('threshold 90%')
     expect(text).toContain('persistent body')
     expect(text).toContain('rebuildable carrier')
+    expect(text).toContain('ACT NOW')
     expect(text).toContain('session_rebuild')
+    expect(text).toContain('not an option')
+    // v1.23.3：不向 LLM 植入阈值建议（设定是用户自由）
+    expect(text).not.toContain('0.75~0.9')
+  })
+
+  it('rebuildReminderText 升级语气（escalated=true，v1.23.3）', () => {
+    const text = rebuildReminderText(0.93, 0.9, true)
+    expect(text).toContain('[TRAJECTORY-ESCALATED]')
+    expect(text).toContain('mandatory')
+    expect(text).toContain('STOP')
+    expect(text).toContain('session_rebuild')
+    expect(text).toContain('persists until you call session_rebuild')
   })
 
   it('readContextPressure：sessionProjections 装配时读取投影', () => {
