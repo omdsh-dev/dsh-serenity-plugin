@@ -1,3 +1,15 @@
+## v1.22.9 — 2026-08-27（F3 会话命名修复：可观测性 + S###-日期格式 + 测试真实链路，S142）
+
+**Scope:** 用户实测"use 后名字没改" + 确认"use 交给 LLM 是核心设计"。诊断结论：rename 链路被静默吞错（无日志）、测试测假路径（mock sessionTitleAvailable=true）、命名格式不符需求（dirName 超长 + 中文 vs 用户拍板 S###-日期）。
+
+### 变更
+- **可观测性（不再静默）**：`tools/session.ts` use 分支——rename 成功 `console.log`（dsh 会话 id → 标题）、失败 `console.warn`（明确原因：naming 关/服务不可用/rename 抛错）、异常 `console.warn`——下次实测若仍不生效，日志直接定位断点
+- **命名格式修正（S###-日期）**：新增 `namingTitleFor(active)` 纯函数——`S143` → `S143-2026-08-26`（从 sessionId + dirName 日期前缀派生，用户拍板格式）；issue 会话（无 S###）→ 回退目录名；无日期前缀 → 回退 sessionId
+- **renameDshSessionOnUse 返回结果对象**（`{ok:true,title} | {ok:false,reason}` 而非 null 歧义）——门控失败/rename 抛错均有明确 reason，不再"失败=null"无法区分原因
+- **测试真实链路**：session-title.test.ts 重写 +4——namingTitleFor 三种格式断言 / rename 成功断言标题为 S###-日期 / 门控失败断言 reason / rename 抛错断言 reason 捕获（不传播）；**429 tests 全绿**
+- **peerDependencies 补 `@deepseek-ai/dsh-session-title`**（F3 调研"唯一小改动"——tsconfig paths 早有引用，peerDeps 此前缺失）
+- typecheck ✓（node + client）
+
 ## v1.22.8 — 2026-08-27（熵点治理：gateway.ts 拆分三模块，S142）
 
 **Scope:** 代码整体梳理（codebase-overview-v1.22）发现的熵点治理——gateway.ts 894 行单文件混三类职责，拆分为认证域/代理域/装配层三个模块（行为零变更）。

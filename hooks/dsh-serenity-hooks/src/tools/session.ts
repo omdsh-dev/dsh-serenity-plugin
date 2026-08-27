@@ -57,20 +57,43 @@ export interface RenameOnUseDeps {
 }
 
 /**
- * use 激活宁静号会话后，把当前 dsh 会话重命名为该 SESSION 目录名。
- * 门控：naming.enabled + sessionTitle 服务存在；失败静默（不阻断 use 主流程）。
- * @returns 实际执行的 rename（或 null = 未执行）
+ * 从激活会话派生命名标题（v1.22.9 格式修正）：
+ * F3 原始需求是 **`S###-日期`**（如 `S143-2026-08-26`）——从 `sessionId` 派生，
+ * 而非完整目录名（`2026-08-24--S142--...` 超长 + 中文，不符合用户拍板格式）。
+ * 无 S### 编号（issue 会话等）→ 回退目录名。
+ * @returns `S143-2026-08-26` 或原目录名
+ */
+export function namingTitleFor(active: ActiveSessionInfo): string {
+  const sid = active.sessionId
+  if (typeof sid === 'string' && /^S\d+$/.test(sid)) {
+    const date = active.dirName.match(/^(\d{4}-\d{2}-\d{2})--/)?.[1] ?? ''
+    if (date) return `${sid}-${date}`
+    return sid
+  }
+  return active.dirName
+}
+
+/**
+ * use 激活宁静号会话后，把当前 dsh 会话重命名为命名标题（`S###-日期`）。
+ * 门控：naming.enabled + sessionTitle 服务存在；失败不静默——返回 null 且输出
+ * 失败原因（调用方 console.warn），保证可观测性（v1.22.9）。
+ * @returns { title, ok } 或 { ok:false, reason }（未执行/失败均返回对象，非 null 歧义）
  */
 export function renameDshSessionOnUse(
   deps: RenameOnUseDeps,
   session: unknown,
   rename: (session: unknown, title: string) => unknown,
   active: ActiveSessionInfo,
-): string | null {
-  if (!deps.namingEnabled) return null
-  if (!deps.sessionTitleAvailable) return null
-  rename(session, active.dirName)
-  return active.dirName
+): { ok: true; title: string } | { ok: false; reason: string } {
+  if (!deps.namingEnabled) return { ok: false, reason: 'naming.enabled=false' }
+  if (!deps.sessionTitleAvailable) return { ok: false, reason: 'sessionTitle service unavailable' }
+  const title = namingTitleFor(active)
+  try {
+    rename(session, title)
+    return { ok: true, title }
+  } catch (error) {
+    return { ok: false, reason: `rename threw: ${String((error as Error)?.message ?? error)}` }
+  }
 }
 
 function renderText(value: unknown): ContentBlock[] {
@@ -266,8 +289,9 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
         if (!args.name) throw new Error('use 需要 name（S### 或目录名）')
         const scope = agentScope(exec)
         const active = useSession(root, args.name, scope)
-        // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为 SESSION 目录名
+        // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为命名标题（S###-日期）
         // （SESSION 是对话过程中创建的——use 时同步命名，user source pin 住）
+        // v1.22.9：不静默——rename 失败 console.warn 输出原因（可观测性修复）
         try {
           const info = getActiveSessionInfo(scope)
           if (info) {
@@ -275,16 +299,24 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
             const rename = (titles as { rename?: (session: unknown, title: string) => unknown } | undefined)?.rename
             const dshSession = (exec as { agent?: { session?: unknown } }).agent?.session
             if (dshSession && typeof rename === 'function') {
-              renameDshSessionOnUse(
+              const result = renameDshSessionOnUse(
                 { namingEnabled: readSimpleSettings().namingEnabled, sessionTitleAvailable: true },
                 dshSession,
                 rename,
                 info,
               )
+              if (result.ok) {
+                console.log(`[serenity-hooks] dsh 会话已重命名: ${String((dshSession as { id?: string }).id ?? '?')} → ${result.title}`)
+              } else {
+                console.warn(`[serenity-hooks] dsh 会话重命名未执行: ${result.reason}`)
+              }
+            } else {
+              console.warn(`[serenity-hooks] dsh 会话重命名未执行: sessionTitle 服务不可用或缺少 agent session`)
             }
           }
-        } catch {
-          /* 重命名失败不阻断 use 主流程（下次 use 或手动重命名兜底） */
+        } catch (err) {
+          // use 主流程仍完成（激活信息已写入）；仅重命名失败需要可见
+          console.warn(`[serenity-hooks] dsh 会话重命名异常: ${String((err as Error)?.message ?? err)}`)
         }
         return active
       }

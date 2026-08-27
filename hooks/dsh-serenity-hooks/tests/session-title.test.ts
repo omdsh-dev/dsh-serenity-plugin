@@ -26,7 +26,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { renameDshSessionOnUse } from '../src/tools/session.js'
+import { namingTitleFor, renameDshSessionOnUse } from '../src/tools/session.js'
 import { createSession } from '../src/session-ops.js'
 import { defaultSimpleSettings } from '../src/settings-section.js'
 
@@ -41,10 +41,27 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe('F3: use 后重命名当前 dsh 会话（renameDshSessionOnUse）', () => {
+describe('F3: namingTitleFor（v1.22.9 格式修正：S###-日期，非完整目录名）', () => {
+  it('有 S### 编号 → S###-日期（用户拍板格式）', () => {
+    const t = namingTitleFor({ sessionId: 'S143', dirName: '2026-08-26--S143--my-work', mdPath: '/x/SESSION.md' })
+    expect(t).toBe('S143-2026-08-26')
+  })
+
+  it('issue 会话（无 S### 编号）→ 回退目录名', () => {
+    const t = namingTitleFor({ sessionId: 'apaas-26116', dirName: '2026-08-26--apaas-26116', mdPath: '/x/SESSION.md' })
+    expect(t).toBe('2026-08-26--apaas-26116')
+  })
+
+  it('目录名无日期前缀 → 回退 sessionId', () => {
+    const t = namingTitleFor({ sessionId: 'S005', dirName: 'S005', mdPath: '/x/SESSION.md' })
+    expect(t).toBe('S005')
+  })
+})
+
+describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默）', () => {
   const active = { sessionId: 'S001', dirName: '2026-08-26--S001--my-work', mdPath: '/x/SESSION.md' }
 
-  it('门控通过 → rename 调用 + 返回目录名', () => {
+  it('门控通过 → rename 调用（S###-日期标题）', () => {
     const renamed: string[] = []
     const result = renameDshSessionOnUse(
       { namingEnabled: true, sessionTitleAvailable: true },
@@ -52,11 +69,11 @@ describe('F3: use 后重命名当前 dsh 会话（renameDshSessionOnUse）', () 
       (session, title) => { renamed.push(String((session as { id: string }).id) + '=' + title) },
       active,
     )
-    expect(result).toBe(active.dirName)
-    expect(renamed).toEqual(['dsh-sess-1=2026-08-26--S001--my-work'])
+    expect(result).toEqual({ ok: true, title: 'S001-2026-08-26' })
+    expect(renamed).toEqual(['dsh-sess-1=S001-2026-08-26'])
   })
 
-  it('naming.enabled=false → 不 rename', () => {
+  it('naming.enabled=false → 返回失败原因（不静默）', () => {
     const renamed: string[] = []
     const result = renameDshSessionOnUse(
       { namingEnabled: false, sessionTitleAvailable: true },
@@ -64,11 +81,11 @@ describe('F3: use 后重命名当前 dsh 会话（renameDshSessionOnUse）', () 
       (_s, t) => { renamed.push(t) },
       active,
     )
-    expect(result).toBeNull()
+    expect(result).toEqual({ ok: false, reason: 'naming.enabled=false' })
     expect(renamed).toEqual([])
   })
 
-  it('sessionTitle 服务缺失 → 不 rename（旧组合降级）', () => {
+  it('sessionTitle 服务缺失 → 返回失败原因', () => {
     const renamed: string[] = []
     const result = renameDshSessionOnUse(
       { namingEnabled: true, sessionTitleAvailable: false },
@@ -76,8 +93,19 @@ describe('F3: use 后重命名当前 dsh 会话（renameDshSessionOnUse）', () 
       (_s, t) => { renamed.push(t) },
       active,
     )
-    expect(result).toBeNull()
+    expect(result).toEqual({ ok: false, reason: 'sessionTitle service unavailable' })
     expect(renamed).toEqual([])
+  })
+
+  it('rename 抛错 → 返回失败原因（不传播，调用方决定可见性）', () => {
+    const result = renameDshSessionOnUse(
+      { namingEnabled: true, sessionTitleAvailable: true },
+      {},
+      () => { throw new Error('session is not live in this store') },
+      active,
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toContain('not live in this store')
   })
 })
 
