@@ -18,10 +18,10 @@ function renderText(value: unknown): ContentBlock[] {
 
 export const kitTool = defineTool({
   name: 'acc_kit',
-  description: 'ACC 通用能力工具包：health（CCC 三原则检查 P1/P2/配置，healthy/degraded 报告）/ time（now_iso/now_local/epoch_ms）/ wait（等待 N 秒，缺省 1）。进入 CCC 工作前的例行自检。',
+  description: 'ACC general-purpose utility kit: health (CCC three-principle check P1/P2/config, healthy/degraded report) / time (now_iso/now_local/epoch_ms) / wait (wait N seconds, default 1). Routine self-check before entering a CCC.',
   parameters: {
-    action: { type: 'string', enum: [...KIT_ACTIONS], required: true, description: '子命令' },
-    seconds: { type: 'integer', description: 'wait 的秒数（正整数，缺省 1）' },
+    action: { type: 'string', enum: [...KIT_ACTIONS], required: true, description: 'Subcommand' },
+    seconds: { type: 'integer', description: 'Seconds to wait (positive integer, default 1)' },
   },
   output: {
     schema: { type: 'json' },

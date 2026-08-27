@@ -39,14 +39,15 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
     name: 'session_rebuild',
     description:
-      '轨迹跟踪器超限重建（Ship of Theseus）：**完全清空当前 dsh 会话的对话历史**，' +
-      '同一会话原地重来——本轮 turn 结束时 surface 替换为锚点消息「继续 {宁静号 SESSION 名} 的工作」' +
-      '（含 first-anchor 协议正文：ACC 身份/EAP/协作协议），并**自动继续**（无需用户手工输入）。' +
-      'SESSION.md 是持久轨迹保持原位；身份从 SESSION.md 自动延续。' +
-      '用途：收到 [TRAJECTORY] 提示（上下文超阈值）时，在任务自然停顿点主动调用。' +
-      '触发后（本轮 turn 结束后）请从 SESSION.md 读取上次进度继续。',
+      'Trajectory-tracker overflow rebuild (Ship of Theseus): this session is the ' +
+      'rebuildable carrier of a trajectory — the current conversation is discarded and ' +
+      'rebuilt in place at the end of this turn with the anchor "continue the work of ' +
+      '{SESSION name}" (first-anchor protocol body included), then auto-continues. ' +
+      'SESSION.md (the trajectory\'s persistent body) stays in place; identity continues ' +
+      'from it. Use when you receive a [TRAJECTORY] reminder (context above threshold), ' +
+      'at a natural pause point. After triggering, resume from SESSION.md when this turn ends.',
     parameters: {
-      note: { type: 'string', description: '可选：重建背景一句话（给重建后的自己）' },
+      note: { type: 'string', description: 'Optional: one-sentence rebuild background note (for the rebuilt self)' },
     },
     output: {
       schema: { type: 'json' },
@@ -56,7 +57,7 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
       const root = findSerenityRoot(agentCwd(exec))
       if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
       const dshSessionId = agentSessionId(exec)
-      if (!dshSessionId) throw new Error('无法确定当前 dsh 会话 id')
+      if (!dshSessionId) throw new Error('Unable to determine the current dsh session id')
 
       const result = await queueRebuild(ctx, {
         root,
@@ -70,7 +71,7 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
         queued: result.queued,
         anchor: result.anchor,
         sessionMdPath: result.sessionMdPath,
-        instruction: '已排队清空重建：本轮 turn 结束后同一会话将清空并注入「继续工作」指令（含 first-anchor 协议正文），随后自动继续——无需用户手工输入，请届时从 SESSION.md 继续。',
+        instruction: 'Queued clear-and-rebuild: when this turn ends, the same conversation will be cleared and injected with the "continue the work" anchor (first-anchor protocol body included), then auto-continue — no manual input needed; resume from SESSION.md at that point.',
       }
     },
   })

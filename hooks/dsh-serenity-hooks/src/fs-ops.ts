@@ -170,11 +170,11 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
     case 'root':
       return root
     case 'resolve': {
-      if (!args.path) throw new Error('resolve 需要 path')
+      if (!args.path) throw new Error('resolve requires path')
       return resolveInside(root, args.path)
     }
     case 'exists': {
-      if (!args.path) throw new Error('exists 需要 path')
+      if (!args.path) throw new Error('exists requires path')
       const absPath = args.path.startsWith('/') ? resolve(args.path) : resolveInside(root, args.path)
       return existsSync(absPath) ? 'true' : 'false'
     }
@@ -226,7 +226,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return { path: absPath, entries, maxDepth } as unknown as JsonValue
     }
     case 'relative': {
-      if (!args.path) throw new Error('relative 需要 path')
+      if (!args.path) throw new Error('relative requires path')
       const absPath = args.path.startsWith('/') ? resolve(args.path) : resolveInside(root, args.path)
       if (!absPath.startsWith(root)) {
         throw new Error(`relative: path "${args.path}" resolves to "${absPath}" which is outside serenity root "${root}"`)
@@ -234,7 +234,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return safeRel(root, absPath)
     }
     case 'mkdir': {
-      if (!args.path) throw new Error('mkdir 需要 path')
+      if (!args.path) throw new Error('mkdir requires path')
       const absPath = validateWritePath(root, args.path)
       if (existsSync(absPath)) {
         const stat = statSync(absPath)
@@ -248,7 +248,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       // 合并单路径和多路径参数（对齐 osp）
       const targets: string[] = [...(args.paths ?? [])]
       if (args.path) targets.push(args.path)
-      if (targets.length === 0) throw new Error('rm 需要至少一个 path 参数（path 或 paths）')
+      if (targets.length === 0) throw new Error('rm requires at least one path argument (path or paths)')
       const dryRun = args.dryRun ?? false
       const recursive = args.recursive ?? false
       const results: string[] = []
@@ -297,7 +297,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return results.join('\n')
     }
     case 'mv': {
-      if (!args.src || !args.dst) throw new Error('mv 需要 src + dst')
+      if (!args.src || !args.dst) throw new Error('mv requires src + dst')
       const srcAbs = validateWritePath(root, args.src)
       const dstAbs = validateWritePath(root, args.dst)
       if (!existsSync(srcAbs)) throw new Error(`mv: source not found: ${args.src}`)
@@ -308,7 +308,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return `moved: ${args.src} → ${args.dst}`
     }
     case 'cp': {
-      if (!args.src || !args.dst) throw new Error('cp 需要 src + dst')
+      if (!args.src || !args.dst) throw new Error('cp requires src + dst')
       const srcAbs = validateWritePath(root, args.src)
       const dstAbs = validateWritePath(root, args.dst)
       if (!existsSync(srcAbs)) throw new Error(`cp: source not found: ${args.src}`)
@@ -323,7 +323,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return `copied: ${args.src} → ${args.dst}`
     }
     case 'touch': {
-      if (!args.path) throw new Error('touch 需要 path')
+      if (!args.path) throw new Error('touch requires path')
       const absPath = validateWritePath(root, args.path)
       if (existsSync(absPath)) {
         const now = new Date()
@@ -336,7 +336,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return `created empty file: ${args.path}`
     }
     case 'append': {
-      if (!args.path || args.content === undefined) throw new Error('append 需要 path + content')
+      if (!args.path || args.content === undefined) throw new Error('append requires path + content')
       const absPath = validateWritePath(root, args.path)
       const parentDir = dirname(absPath)
       if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
@@ -345,7 +345,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return `appended ${Buffer.byteLength(content, 'utf8')} bytes to ${args.path}`
     }
     case 'reveal': {
-      if (!args.path) throw new Error('reveal 需要 path')
+      if (!args.path) throw new Error('reveal requires path')
       const absPath = resolveInside(root, args.path)
       if (!existsSync(absPath)) throw new Error(`no such path: ${absPath}`)
       const os = platform()
@@ -376,7 +376,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       }
     }
     case 'info': {
-      if (!args.path) throw new Error('info 需要 path')
+      if (!args.path) throw new Error('info requires path')
       const absPath = args.path.startsWith('/') ? resolve(args.path) : resolveInside(root, args.path)
       if (!existsSync(absPath)) throw new Error(`info: path "${absPath}" does not exist`)
       const stat = statSync(absPath)
@@ -393,7 +393,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       ].join('\n')
     }
     case 'find': {
-      if (!args.pattern) throw new Error('find 需要 pattern')
+      if (!args.pattern) throw new Error('find requires pattern')
       const relPath = args.path || '.'
       const absPath = relPath.startsWith('/') ? resolve(relPath) : resolveInside(root, relPath)
       if (!existsSync(absPath)) throw new Error(`find: path "${absPath}" does not exist`)
@@ -443,7 +443,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return { path: absPath, pattern, matches, count: matches.length }
     }
     default:
-      throw new Error(`未知 action: ${a as string}`)
+      throw new Error(`Unknown action: ${a as string}`)
   }
 }
 

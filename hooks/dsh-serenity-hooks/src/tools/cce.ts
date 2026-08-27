@@ -9,52 +9,52 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
-export const CCE_CONTENT = `# CCE — 认知连续性工程（Cognitive Continuity Engineering）
+export const CCE_CONTENT = `# CCE — Cognitive Continuity Engineering
 
-> **认知连续性工程是在有限资源与不可逆不确定性的约束下，维持一个认知实体的身份、可达性与演化能力的工程学科。**
-> CCE 不优化认知。它维护认知得以继续的条件。—— 存续工程（Persistence Engineering），非绩效工程
+> **Cognitive Continuity Engineering is the engineering discipline of maintaining a cognitive entity's identity, accessibility, and capacity to evolve under the constraints of bounded resources and irreversible uncertainty.**
+> CCE does not optimize cognition. It preserves the conditions under which cognition can continue. — Persistence Engineering, not performance engineering
 
-## 核心命题
-- **连续性属于容器，而非任何个体参与者**——智能体来来去去，但 CCC 的认知轨迹持续存在
-- **组织必须至少与积累同步**——否则操作化认知熵（H_op）无界增长，可达性丧失
-- **重建优于保存**——产物的价值由其使未来智能体重建原始推理的能力决定
+## Core Propositions
+- **Continuity belongs to the container, not to any individual participant** — agents come and go, but the CCC's cognitive trajectory persists
+- **Organization must at minimum keep pace with accumulation** — otherwise operational cognitive entropy (H_op) grows unboundedly and accessibility is lost
+- **Reconstruction over preservation** — an artifact's value is determined by its ability to let future agents rebuild the original reasoning
 
-## 认知容器（Cognitive Container）
-一个有界的认知空间，认知可在其中积累、重组和演化。5 个定义属性：
-| 属性 | 功能 |
-|------|------|
-| 身份（Identity） | 区分此认知系统与其他系统 |
-| 边界（Boundaries） | 定义什么在认知空间内/外 |
-| 持久记忆（Persistent Memory） | 跨时间保留积累的认知 |
-| 操作约束（Operational Constraints） | 定义容器内允许哪些操作 |
-| 演化历史（Evolutionary History） | 记录认知变化轨迹，使重建可能 |
+## Cognitive Container
+A bounded cognitive space in which cognition can accumulate, reorganize, and evolve. 5 defining properties:
+| Property | Function |
+|----------|----------|
+| Identity | Distinguishes this cognitive system from others |
+| Boundaries | Define what is inside/outside the cognitive space |
+| Persistent Memory | Retains accumulated cognition across time |
+| Operational Constraints | Define which operations are allowed inside the container |
+| Evolutionary History | Records the trajectory of cognitive change, making reconstruction possible |
 
-## 操作化认知熵（H_op）
-不度量总体熵（不可操作），只度量智能体在容器内完成任务的**多余认知成本**：
+## Operational Cognitive Entropy (H_op)
+Does not measure total entropy (not operational); it measures only the **excess cognitive cost** for agents to complete tasks inside the container:
 > H_op(C, t) = cost(task | C, t) − cost(task | ideal)
-维持条件：**H_op(C, t) ≤ H_critical** —— 智能体仍可在合理成本内完成任务
+Continuity condition: **H_op(C, t) ≤ H_critical** — agents can still complete tasks at reasonable cost
 
-## 连续性维护条件
-> **ΔH_org ≥ ΔH_in** —— 组织必须至少与积累同步
+## Continuity Maintenance Condition
+> **ΔH_org ≥ ΔH_in** — organization must at minimum keep pace with accumulation
 
-## 六阶段生命周期
-Experience → Accumulation → Organization → Abstraction → Reconstruction → Evolution →（循环）
-| 阶段 | 工程关切 |
-|------|---------|
-| Experience | 输入是否携带足够结构 |
-| Accumulation | 信息是否无损存储 |
-| Organization | 熵管理 — ΔH_org 抵消 ΔH_in |
-| Abstraction | 抽象是否显式编码 |
-| Reconstruction | 推理结构能否从产物恢复 |
-| Evolution | 演化保持连贯还是引入漂移 |
+## Six-Phase Lifecycle
+Experience → Accumulation → Organization → Abstraction → Reconstruction → Evolution →（loop）
+| Phase | Engineering Concern |
+|-------|---------------------|
+| Experience | Does input carry enough structure |
+| Accumulation | Is information stored losslessly |
+| Organization | Entropy management — ΔH_org offsets ΔH_in |
+| Abstraction | Is abstraction explicitly encoded |
+| Reconstruction | Can reasoning structure be recovered from artifacts |
+| Evolution | Does evolution stay coherent or introduce drift |
 
-## 与 EAP 的关系
-EAP 回答"一段知识应如何被结构化"（显式度 E↑ / 重建成本 R↓ / 稳定性 S↑）；
-CCE 回答"有结构的知识应如何跨时间持续演化而不丧失连贯性"。两者互补：EAP 是静态质量，CCE 是动态存续。
+## Relationship with EAP
+EAP answers "how a piece of knowledge should be structured" (explicitness E↑ / reconstructability R↓ / stability S↑);
+CCE answers "how structured knowledge should keep evolving across time without losing coherence". They complement each other: EAP is static quality, CCE is dynamic persistence.
 
-## 与 Serenity 的关系
-Serenity 的会话系统、会话追踪、熵管理机制（SQC 品质循环）都是 CCE 的工程实现；
-CCC 系统提示词中嵌入的行为约束即来自 CCE。`
+## Relationship with Serenity
+Serenity's session system, session tracking, and entropy management mechanisms (SQC quality loop) are all engineering implementations of CCE;
+the behavioral constraints embedded in CCC system prompts come from CCE.`
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -64,12 +64,12 @@ function renderText(value: unknown): ContentBlock[] {
 export const cceTool = defineTool({
   name: 'cce',
   description:
-    'CCE 认知连续性工程（渐进式披露）：在有限资源与不可逆不确定性约束下，维持认知实体身份/可达性/演化能力的工程学科。无 section 返回完整框架；指定 section 聚焦对应内容。',
+    'CCE cognitive continuity engineering (progressive disclosure): the engineering discipline of maintaining a cognitive entity\'s identity/accessibility/evolution under bounded resources and irreversible uncertainty. No section returns the full framework; specify a section to focus.',
   parameters: {
     section: {
       type: 'string',
       enum: ['container', 'entropy', 'lifecycle', 'eap'],
-      description: '聚焦片段：container（认知容器 5 属性）/ entropy（操作化认知熵 H_op）/ lifecycle（六阶段）/ eap（与 EAP 关系）',
+      description: 'Focus section: container (5 cognitive-container properties) / entropy (operational entropy H_op) / lifecycle (six phases) / eap (relationship with EAP)',
     },
   },
   output: {
@@ -79,10 +79,10 @@ export const cceTool = defineTool({
   async execute(args) {
     const section = args.section
     const blocks: Record<string, { start: string; end?: string }> = {
-      container: { start: '## 认知容器（Cognitive Container）', end: '## 操作化认知熵' },
-      entropy: { start: '## 操作化认知熵（H_op）', end: '## 连续性维护条件' },
-      lifecycle: { start: '## 六阶段生命周期' },
-      eap: { start: '## 与 EAP 的关系' },
+      container: { start: '## Cognitive Container', end: '## Operational Cognitive Entropy' },
+      entropy: { start: '## Operational Cognitive Entropy (H_op)', end: '## Continuity Maintenance Condition' },
+      lifecycle: { start: '## Six-Phase Lifecycle' },
+      eap: { start: '## Relationship with EAP' },
     }
     if (section) {
       const b = blocks[section]

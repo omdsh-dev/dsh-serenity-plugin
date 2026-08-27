@@ -162,12 +162,13 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
 })
 
 describe('system-prompt: EAP 块（S131 P1-6 扩展）', () => {
-  it('eapBlock 含 E↑/R↓/S↑ 自检三行', () => {
+  it('eapBlock 含 E↑/R↓/S↑ 自检三行（v1.23.0 英化）', () => {
     const block = eapBlock()
     expect(block).toContain('=== Serenity EAP ===')
-    expect(block).toContain('E↑ 显式')
-    expect(block).toContain('R↓ 可重建')
-    expect(block).toContain('S↑ 稳定')
+    expect(block).toContain('E↑ Explicit')
+    expect(block).toContain('R↓ Reconstructable')
+    expect(block).toContain('S↑ Stable')
+    expect(block).toContain('external reconstructability')
   })
 
   it('serenitySystemPrompt 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL（v1.19.8）', () => {

@@ -101,13 +101,13 @@ export async function runKit(root: string | null, args: KitArgs): Promise<JsonVa
     case 'wait': {
       const seconds = args.seconds ?? 1
       if (!Number.isInteger(seconds) || seconds <= 0) {
-        throw new Error('wait 需要正整数秒数（缺省 1）')
+        throw new Error('wait requires a positive integer number of seconds (default 1)')
       }
       await new Promise((r) => setTimeout(r, seconds * 1000))
       return `waited ${seconds}s`
     }
     default:
-      throw new Error(`未知 action: ${args.action as string}`)
+      throw new Error(`Unknown action: ${args.action as string}`)
   }
 }
 

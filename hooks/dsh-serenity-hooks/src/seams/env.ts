@@ -34,9 +34,9 @@ export function registerEnv(ctx: Context): void {
   const contributor: BashEnvContributor = {
     name: 'dsh-serenity-hooks',
     variables: {
-      DSH_SERENITY_ROOT: { description: 'CCC 根目录（宁静号认知容器）' },
-      DSH_SERENITY_CCC: { description: 'CCC 名称（根目录 basename）' },
-      DSH_SERENITY_VERSION: { description: 'ACC 插件版本' },
+      DSH_SERENITY_ROOT: { description: 'CCC root directory (Serenity cognitive container)' },
+      DSH_SERENITY_CCC: { description: 'CCC name (root directory basename)' },
+      DSH_SERENITY_VERSION: { description: 'ACC plugin version' },
     },
     resolve(execution: ToolExecution) {
       const cwd = (execution.agent?.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()

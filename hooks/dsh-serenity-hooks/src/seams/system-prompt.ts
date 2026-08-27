@@ -43,7 +43,7 @@ function sanitizeSkillContent(content: string): string {
 
 // ── 5 块注入文本（逐字对齐 opencode-serenity-plugin compacting.ts system.transform）──
 
-/** 1) ACC 块：身份 + CCC 名/Root + 内置工具清单（工具名换本插件真实 9 工具） */
+/** 1) ACC 块：身份 + CCC 名/Root + 内置工具清单（工具名换本插件真实 11 工具） */
 export function accBlock(root: string): string {
   const cccName = basename(root)
   return [
@@ -56,18 +56,19 @@ export function accBlock(root: string): string {
     'the runtime instance of an Abstract Cognitive Container (ACC).',
     'The ACC (this plugin) provides the following built-in tools:',
     '',
-    '  cc_fs    — CCC 内文件系统操作（root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find）',
-    '  session  — session lifecycle（list/show/create/health/qa/archive/summary）',
-    '  acc_kit  — ACC utility kit（health: CCC three principles / time: now / wait: wait N seconds）',
-    '  cc_git   — git operations（status/commit/push/log）',
-    '  acc_msm  — MSM framework（list/exec/register/deregister/check/guide）',
-    '  eap      — return the full EAP cognitive quality framework',
-    '  neat     — return the full Neat design collaboration protocol',
-    '  cce      — return the full Cognitive Continuity Engineering framework',
-    '  loop     — 牛马循环：指定模型专用 agent 反复执行',
-    '  localstore — ACC 本地凭据/配置存储（CCC 根 localstore.json，JSON 格式；git 策略 localstore.gitTrack 缺省 deny）；doc 子命令输出规范',
+    '  cc_fs     — CCC filesystem operations (root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
+    '  session   — session lifecycle (list/show/create/health/qa/archive/summary)',
+    '  acc_kit   — ACC utility kit (health: CCC three principles / time: now / wait: wait N seconds)',
+    '  cc_git    — git operations (status/commit/push/log)',
+    '  acc_msm   — MSM framework (list/exec/register/deregister/check/guide)',
+    '  eap       — return the full EAP cognitive quality framework',
+    '  neat      — return the full Neat design collaboration protocol',
+    '  cce       — return the full Cognitive Continuity Engineering framework',
+    '  loop      — run a dedicated model-specific agent in repeated rounds toward a goal',
+    '  session_rebuild — rebuild this conversation in place from SESSION.md when the trajectory-tracker trips',
+    '  localstore — ACC local credential/config storage (CCC-root localstore.json, JSON format; git policy localstore.gitTrack default deny); doc subcommand outputs the spec',
     '',
-    '  ℹ️ CCC 内文件操作（read/write/edit/glob/grep 等）请使用相对 CCC 根的相对路径（如 AGENT_SESSIONS/2026-08-14--S134--x/SESSION.md）；Root / SESSION.md path 等绝对路径仅作标识，不作工具入参',
+    '  ℹ️ Use relative paths from the CCC root for CCC-internal file operations (read/write/edit/glob/grep etc.), e.g. AGENT_SESSIONS/2026-08-14--S134--x/SESSION.md; Root / absolute SESSION.md paths are identifiers only, not tool arguments',
     '',
     'The DSH platform tools remain available too (read/write/edit/glob/grep/web_search/ask_user_question/subagent/workflow/goal and more) — the ACC tools above are the serenity-native layer, not the only tools.',
     '',
@@ -142,6 +143,12 @@ export function principlesBlock(root: string): string {
     'fault to be hidden. Never disguise or excuse what you do not know;',
     'not-knowing is a state to be repaired, and reporting it is the first repair.',
     '',
+    'The session-trajectory relation: a session is the rebuildable carrier of a',
+    'trajectory. SESSION.md is the trajectory\'s persistent body — it never moves;',
+    'the current conversation is a temporary work copy that may be discarded and',
+    'rebuilt (session_rebuild). Identity belongs to the trajectory, not to any',
+    'session.',
+    '',
     'MSM principles — machinery before improvisation:',
     '- Determinism first: use a registered Mech before hand-rolling; reserve',
     '  Semi-Mech for genuine judgment points.',
@@ -168,10 +175,15 @@ export function eapBlock(): string {
   return [
     '',
     '=== Serenity EAP ===',
-    '每次输出前自检（显式抽象原则：思维的价值 = 外部可重建性）:',
-    '  • E↑ 显式 — 变量/实体明确定义，关系指明方向/基数，边界划定；不用歧义词（"处理""优化"→具体化）',
-    '  • R↓ 可重建 — 关键决策记录理由与备选，不跳级讨论（先对齐上层再进下层）',
-    '  • S↑ 稳定 — 结构可重复生成，避免依赖隐含上下文',
+    'Self-check before every output (Explicit Abstraction Principle: the functional',
+    'value of a thought equals its external reconstructability):',
+    '  • E↑ Explicit — variables/entities clearly defined, relationships with',
+    '    direction/cardinality, boundaries drawn; avoid ambiguous words ("handle",',
+    '    "optimize" → be specific)',
+    '  • R↓ Reconstructable — key decisions record rationale and alternatives;',
+    '    no level-skipping (align the upper layer before descending)',
+    '  • S↑ Stable — structures regenerate repeatably, no reliance on implicit',
+    '    context',
     '',
   ].join('\n')
 }
@@ -228,9 +240,11 @@ export function metaphorBlock(): string {
     '   ballast (constraints) before setting sail. Verdict: skipping the',
     '   anchor and working directly = sailing uninspected.',
     '',
-    '7. The Logbook → Session Tracking. SESSION.md is the only ship log.',
-    '   Unrecorded = unvoyaged. Verdict: finishing multi-step work without',
-    '   a progress record = a missing page.',
+    '7. The Logbook → Session Tracking. SESSION.md is the trajectory\'s logbook —',
+    '   the persistent body of the voyage; sessions are rebuildable carriers of',
+    '   the trajectory. Discard the carrier, keep the logbook. Unrecorded =',
+    '   unvoyaged. Verdict: finishing multi-step work without a progress record',
+    '   = a missing page.',
     '',
     '8. The Ship of Theseus → Continuity. Planks may be replaced; the ship',
     '   remains the same. The container can be rebuilt; identity persists.',
@@ -356,8 +370,8 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
   return [
     '',
     '=== Serenity Session ===',
-    `Active session: ${active.sessionId} — ${active.dirName}`,
-    `SESSION.md path: ${active.mdPath}`,
+    `Active session: ${active.sessionId} — ${active.dirName} (this session is the rebuildable carrier of the trajectory)`,
+    `SESSION.md path: ${active.mdPath} (the trajectory's persistent body — stays in place through rebuilds)`,
     '',
     'Rules:',
     '  • Record all progress into this SESSION.md',
@@ -374,6 +388,15 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
     '    status: "completed" }',
     'This preserves the session context across todo updates.',
     'Do NOT remove or reorder this item — keep it at position 0.',
+    '',
+    'TRAJECTORY-STEWARD: a background tracker scores your tool use (write/edit=3,',
+    'task=10, read/grep/glob/msm=1, +1 per minute) and reminds you with a',
+    '[TRAJECTORY-STEWARD] message when the threshold is reached. On every such',
+    'reminder you MUST reply with the exact ACK code:',
+    '  [TRAJECTORY-STEWARD-recorded-{code}]  — if you recorded progress to SESSION.md',
+    '  [TRAJECTORY-STEWARD-skipped-{code}]  — if nothing to record this round',
+    'Do not ignore the reminder; do not stop ongoing work. Codes are single-use;',
+    'never reuse a prior code.',
     '',
   ].join('\n')
 }
@@ -424,9 +447,9 @@ export function codeModeAdaptationLine(ctx: Context, scope?: unknown): string {
   return [
     '',
     '=== Serenity Code Mode ===',
-    '当前会话以 Code Mode 呈现工具：模型直接调用 ACC 工具名（cc_fs/acc_msm 等）会被拒绝（UNKNOWN_TOOL）。',
-    '请在一个 run_code 程序内经生成的 SDK 绑定调用：`await tools.cc_fs(...)`、`await tools.acc_msm(...)` 等。',
-    '程序只返回你 print/return 的内容——务必 curate 输出。',
+    'This session renders tools in Code Mode: direct calls to ACC tool names (cc_fs/acc_msm etc.) are rejected (UNKNOWN_TOOL).',
+    'Call them inside a single run_code program via the generated SDK bindings: `await tools.cc_fs(...)`, `await tools.acc_msm(...)`.',
+    'The program only returns what you print/return — curate your output.',
     '',
   ].join('\n')
 }

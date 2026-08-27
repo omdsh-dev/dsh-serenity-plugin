@@ -65,7 +65,7 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
   // 1) 安全模式：bash 一律禁用（标准语义）
   // 提示不泄露 safe-mode 机制（safe-mode 对 agent 不可见）：模型视角 = bash 工具不存在
   if (safeModeOn && toolName === 'bash') {
-    return { deny: `bash: 没有这个工具`, kind: 'deny' }
+    return { deny: `bash: no such tool`, kind: 'deny' }
   }
 
   // 2) 携带路径参数：先查越界（读写都拦——安全），再查治理文件/黑名单（仅写类工具，对齐 osp）
@@ -74,7 +74,7 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     // pathInside 前缀+sep 边界+跨盘安全（Windows 兼容：跨盘 relative 返回绝对路径原文，
     // 旧 relative().startsWith('..') 漏判，见 Windows 审计问题 6）
     if (!pathInside(resolve(root), abs)) {
-      return { deny: `path escape blocked: "${pathArg}" 越出 CCC 根`, kind: 'deny' }
+      return { deny: `path escape blocked: "${pathArg}" escapes the CCC root`, kind: 'deny' }
     }
     // 读操作（read/glob/grep 等）不查黑名单/治理文件——对齐 osp（permission-guards 只在
     // write/edit 时查黑名单）；否则 REPOSITORIES/ 这类"只读参考源"黑名单会误伤读操作
@@ -86,12 +86,12 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
       const rel = relative(root, abs).split('\\').join('/')
       // CCC 治理文件永远拒绝写入（safe-mode 是用户能力，agent 不能自行开关/篡改）
       if (rel === '.serenity-safe-on' || rel === '.serenity' || rel.startsWith('.serenity-safe-on/') || rel.startsWith('.serenity/')) {
-        return { deny: `CCC 治理文件 "${rel}" 保留给用户，agent 不可写`, kind: 'deny' }
+        return { deny: `CCC governance file "${rel}" is reserved for the user — agent must not write`, kind: 'deny' }
       }
       const hit = matchBlacklist(rel, blacklist)
       if (hit) {
         // 对象条目支持自定义提示（对齐 osp：{ pattern, message } → message ?? 默认）
-        return { deny: hit.message ?? `blacklist blocked: "${pathArg}" 命中规则 "${hit.pattern}"`, kind: 'deny' }
+        return { deny: hit.message ?? `blacklist blocked: "${pathArg}" matches rule "${hit.pattern}"`, kind: 'deny' }
       }
     }
   }

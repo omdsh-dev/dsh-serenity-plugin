@@ -20,8 +20,8 @@ const UPLOAD_PATH = '/serenity/image-upload'
  * 单图：用户提供了一张图片（路径：...）；多图：每张一行路径
  */
 export function imageNoteTemplate(paths: string[]): string {
-  if (paths.length === 1) return `用户提供了一张图片（路径：${paths[0]}）`
-  return `用户提供了 ${paths.length} 张图片：\n${paths.map((p) => `- ${p}`).join('\n')}`
+  if (paths.length === 1) return `The user provided an image (path: ${paths[0]})`
+  return `The user provided ${paths.length} images:\n${paths.map((p) => `- ${p}`).join('\n')}`
 }
 
 /** 浏览器 File → base64（与 ui-conversation serializeImages 等价的最小实现） */

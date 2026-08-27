@@ -99,12 +99,12 @@ const OSP_CCE = [
   '',
 ].join('\n')
 
-/** osp Session 块模板（DSH 适配版：todowrite 首项无 priority——DSH 平台 schema 不支持，v1.17.2） */
+/** osp Session 块模板（DSH 适配版：todowrite 首项无 priority——DSH 平台 schema 不支持，v1.17.2；v1.23.0 载体关系行 + steward 预声明——dsp 领先扩展） */
 const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   '',
   '=== Serenity Session ===',
-  `Active session: ${sessionId} — ${dirName}`,
-  `SESSION.md path: ${mdPath}`,
+  `Active session: ${sessionId} — ${dirName} (this session is the rebuildable carrier of the trajectory)`,
+  `SESSION.md path: ${mdPath} (the trajectory's persistent body — stays in place through rebuilds)`,
   '',
   'Rules:',
   '  • Record all progress into this SESSION.md',
@@ -121,6 +121,15 @@ const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   '    status: "completed" }',
   'This preserves the session context across todo updates.',
   'Do NOT remove or reorder this item — keep it at position 0.',
+  '',
+  'TRAJECTORY-STEWARD: a background tracker scores your tool use (write/edit=3,',
+  'task=10, read/grep/glob/msm=1, +1 per minute) and reminds you with a',
+  '[TRAJECTORY-STEWARD] message when the threshold is reached. On every such',
+  'reminder you MUST reply with the exact ACK code:',
+  '  [TRAJECTORY-STEWARD-recorded-{code}]  — if you recorded progress to SESSION.md',
+  '  [TRAJECTORY-STEWARD-skipped-{code}]  — if nothing to record this round',
+  'Do not ignore the reminder; do not stop ongoing work. Codes are single-use;',
+  'never reuse a prior code.',
   '',
 ].join('\n')
 
@@ -146,6 +155,11 @@ describe('dsp 扩展：Principles 块（v1.19.8 合并原 Constraints——spec 
     expect(block).toContain('all work is cognition')
     expect(block).toContain('contains no errors')
     expect(block).toContain('not-knowing is a state to be repaired')
+    // v1.23.0：session-trajectory 关系段（session = trajectory 的可重建载体）
+    expect(block).toContain('The session-trajectory relation')
+    expect(block).toContain('a session is the rebuildable carrier of a')
+    expect(block).toContain("SESSION.md is the trajectory's persistent body")
+    expect(block).toContain('Identity belongs to the trajectory')
     // 操作边界（原 Constraints 内容，工具名为平台真实名 acc_msm）
     expect(block).toContain('Operational boundaries:')
     expect(block).toContain(`Root: ${dir}`)
@@ -156,7 +170,7 @@ describe('dsp 扩展：Principles 块（v1.19.8 合并原 Constraints——spec 
   })
 })
 
-describe('osp 对齐：Session 块（唯一例外 = DSH todowrite 无 priority 字段）', () => {
+describe('dsp 领先：Session 块（v1.23.0 载体关系 + steward 预声明；唯一 osp 例外 = DSH todowrite 无 priority 字段）', () => {
   it('sessionBlock() 与 DSH 适配版参照完全相等', () => {
     // 建立内存活跃会话（S134 v1.16.14 内存化：useSession 写内存 Map，不落盘）
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
@@ -218,7 +232,7 @@ describe('osp 对齐：ACC 块结构（工具清单平台化，文档化差异�
     expect(block).toContain(`CCC: ${dir.split('/').pop()}`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     expect(block).toContain('You are running inside a Concrete Cognitive Container (CCC)')
-    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop']) {
+    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop', 'session_rebuild', 'localstore']) {
       expect(block).toContain(tool)
     }
     expect(block).toContain('call acc_msm list to discover them')

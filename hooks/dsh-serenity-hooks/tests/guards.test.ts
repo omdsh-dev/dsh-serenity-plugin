@@ -126,7 +126,7 @@ describe('guards: decideGuard 纯决策', () => {
   it('嵌套治理文件保护：反斜杠路径 .serenity\\child 归一化后拦截（审计问题 9）', () => {
     const d = decideGuard(base({ toolName: 'write', pathArg: '.serenity\\child' }))
     expect(d.kind).toBe('deny')
-    expect(d.deny).toContain('治理文件')
+    expect(d.deny).toContain('governance file')
   })
 
   it('pathInside 跨盘语义（Windows，审计问题 6）：跨盘/兄弟目录 false，子路径 true', () => {
@@ -207,7 +207,7 @@ describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-s
   it('写 .serenity-safe-on 被拒（无论安全模式）', () => {
     const d = decideGuard(base({ toolName: 'write', pathArg: '.serenity-safe-on' }))
     expect(d.kind).toBe('deny')
-    expect(d.deny).toContain('治理文件')
+    expect(d.deny).toContain('governance file')
   })
 
   it('写 .serenity 被拒', () => {

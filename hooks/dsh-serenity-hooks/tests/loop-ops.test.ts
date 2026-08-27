@@ -51,35 +51,35 @@ describe('loop-ops: 轮次 prompt', () => {
     const base = { root: dir, session: 'S101', label: 'scan', round: 2, stopToken: 'TOK' }
     const first = buildRoundPrompt({ ...base, progress: null })
     expect(first).toContain('round 2')
-    expect(first).toContain('这是第一轮')
+    expect(first).toContain('first round')
     const resume = buildRoundPrompt({ ...base, progress: { round: 1, done: false, label: 'scan', model: 'm', updated: 't', lastResponse: '已扫描 10 个' } })
-    expect(resume).toContain('绝不重做已完成工作')
+    expect(resume).toContain('never redo completed work')
     expect(resume).toContain('TOK')
   })
 
-  it('prompt EAP 化：固定详尽结构 + 阅读/文字编写类加载 eap 指令', () => {
+  it('prompt EAP 化：固定详尽结构 + 阅读/文字编写类加载 eap 指令（v1.23.0 英化）', () => {
     const p = buildRoundPrompt({ root: dir, label: 'docs', round: 1, stopToken: 'TOK', task: '阅读整理文档' })
-    expect(p).toContain('## 工作规范（每轮固定，必须遵守）')
-    expect(p).toContain('阅读整理或文字编写类工作')
-    expect(p).toContain('加载 eap（acc-eap skill）')
-    expect(p).toContain('E↑ 显式')
-    expect(p).toContain('R↓ 可重建')
-    expect(p).toContain('S↑ 稳定')
-    expect(p).toContain('## 每轮汇报（固定格式，逐条回答）')
-    expect(p).toContain('只输出 TOK')
+    expect(p).toContain('## Work rules (fixed every round, must follow)')
+    expect(p).toContain('reading/curating or text-writing work')
+    expect(p).toContain('load eap (acc-eap skill)')
+    expect(p).toContain('E↑ Explicit')
+    expect(p).toContain('R↓ Reconstructable')
+    expect(p).toContain('S↑ Stable')
+    expect(p).toContain('## Per-round report (fixed format, answer each item)')
+    expect(p).toContain('output only TOK')
   })
 })
 
 describe('loop-ops: guide 指引 + 运行状态列表（WebUI 等待界面数据源）', () => {
-  it('LOOP_GUIDE 含 eap 要求 / 并行策略 / 提示词规范 / 阅读类加载 eap', () => {
-    expect(LOOP_GUIDE).toContain('必须先加载 eap 设计方案')
-    expect(LOOP_GUIDE).toContain('任务拆解（E↑ 显式）')
-    expect(LOOP_GUIDE).toContain('并行策略（规模化）')
-    expect(LOOP_GUIDE).toContain('后台 subagent')
+  it('LOOP_GUIDE 含 eap 要求 / 并行策略 / 提示词规范 / 阅读类加载 eap（v1.23.0 英化）', () => {
+    expect(LOOP_GUIDE).toContain('load eap and design the plan')
+    expect(LOOP_GUIDE).toContain('Task decomposition (E↑ Explicit)')
+    expect(LOOP_GUIDE).toContain('Parallel strategy (scale-up)')
+    expect(LOOP_GUIDE).toContain('Background subagents')
     expect(LOOP_GUIDE).toContain('workflow')
-    expect(LOOP_GUIDE).toContain('并发安全已保证')
-    expect(LOOP_GUIDE).toContain('loop 内部 agent 也会被要求加载 eap')
-    expect(LOOP_GUIDE).toContain('唯一完成条件 = loop 内部 agent 精确回显本轮随机验证码')
+    expect(LOOP_GUIDE).toContain('Concurrency safety guaranteed')
+    expect(LOOP_GUIDE).toContain('loop-internal agent is also required to load eap')
+    expect(LOOP_GUIDE).toContain('The only completion condition = the loop-internal agent echoes')
   })
 
   it('listActiveLoops 列出进度文件（按 updated 倒序；坏文件跳过）', () => {

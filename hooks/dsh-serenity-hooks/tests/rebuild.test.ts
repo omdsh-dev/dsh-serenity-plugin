@@ -81,12 +81,13 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(stripAckSuffix('plain text')).toBe('plain text')
   })
 
-  it('buildRebuildAnchor：继续 {SESSION 名} + 持久轨迹路径 + first-anchor 协议正文（去 acknowledge）', () => {
+  it('buildRebuildAnchor：Continue {SESSION name} + persistent trajectory path + first-anchor protocol body（ack 剥离）', () => {
     const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
     const a = buildRebuildAnchor(dir, 'S142', mdPath)
-    expect(a).toContain('继续 S142 的工作')
+    expect(a).toContain('[TRAJECTORY-REBUILD]')
+    expect(a).toContain('Continue the work of S142')
     expect(a).toContain('AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
-    expect(a).toContain('读取该 SESSION.md')
+    expect(a).toContain('Persistent trajectory')
     // v1.22.5：保留 first-anchor 协议正文（ACC 身份/EAP/协作协议）
     expect(a).toContain('Abstract Cognitive Container')
     expect(a).toContain('Explicit Abstraction Principle')
@@ -99,8 +100,8 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
 
   it('无激活会话名 → 通用指令', () => {
     const a = buildRebuildAnchor(dir, '', join(dir, 'AGENT_SESSIONS', 'SESSION.md'))
-    expect(a).toContain('继续当前工作')
-    expect(a).not.toContain('继续 S')
+    expect(a).toContain('Continue the current work')
+    expect(a).not.toContain('Continue the work of S')
   })
 
   it('queueRebuild：排队不立即改 surface（pending 记录 + 返回锚点）', async () => {
@@ -112,7 +113,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
       dshSessionId: 'session-x',
     })
     expect(result.queued).toBe(true)
-    expect(result.anchor).toContain('继续')
+    expect(result.anchor).toContain('Continue')
     // 排队不 append（surface 未动）
     expect(session._calls).toHaveLength(0)
     // pending 队列有记录
@@ -122,14 +123,14 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
 
   it('performRebuild：turn 结束时同一会话 surface replace 覆盖全部节点（含 source）', () => {
     const session = fakeSession([10, 11, 12, 13])
-    const pending = { anchor: '继续 S142 的工作。', queuedAt: Date.now() }
+    const pending = { anchor: 'Continue the work of S142.', queuedAt: Date.now() }
     const done = performRebuild(session as never, pending)
     expect(done).toBe(true)
     expect(session._calls).toHaveLength(1)
     const call = session._calls[0]!
     expect(call.type).toBe('user/message')
     const data = call.data as { content: Array<{ text: string }>; source?: { kind: string } }
-    expect(data.content[0]!.text).toContain('继续 S142 的工作')
+    expect(data.content[0]!.text).toContain('Continue the work of S142')
     expect(data.source).toEqual({ kind: 'user' }) // UserMessage 契约必填
     const op = (call.opts as { surfaceOp: { op: string; start: number; end: number } }).surfaceOp
     expect(op.op).toBe('replace')
@@ -168,7 +169,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(agent._steers).toHaveLength(1)
     const steered = agent._steers[0] as { content?: Array<{ text?: string }>; source?: { kind?: string } }
     expect(steered.content?.[0]?.text).toContain('[TRAJECTORY-REBUILD]')
-    expect(steered.content?.[0]?.text).toContain('自动继续')
+    expect(steered.content?.[0]?.text).toContain('cleared and rebuilt')
     expect(steered.source?.kind).toBe('plugin')
   })
 
@@ -189,12 +190,12 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
 })
 
 describe('F2: rebuildReminderText（轨迹跟踪器提示，v1.22.1 命名）', () => {
-  it('含占用比例 + 持久轨迹/临时副本语义 + session_rebuild 引导', () => {
+  it('含占用比例 + 持久轨迹/临时副本语义 + session_rebuild 引导（v1.23.0 英化）', () => {
     const t = rebuildReminderText(0.93)
     expect(t).toContain('[TRAJECTORY]')
     expect(t).toContain('93%')
-    expect(t).toContain('SESSION.md 是持久轨迹')
-    expect(t).toContain('临时可重建')
+    expect(t).toContain('persistent body')
+    expect(t).toContain('rebuildable carrier')
     expect(t).toContain('session_rebuild')
   })
 })

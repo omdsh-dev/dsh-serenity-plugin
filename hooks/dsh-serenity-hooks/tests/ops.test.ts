@@ -44,9 +44,9 @@ describe('kit-ops', () => {
 
   it('wait 需正整数秒数（对齐 osp；缺省 1）', async () => {
     // 0 秒拒绝（osp spec：positive int）
-    await expect(runKit(dir, { action: 'wait', seconds: 0 })).rejects.toThrow(/正整数/)
+    await expect(runKit(dir, { action: 'wait', seconds: 0 })).rejects.toThrow(/positive integer/)
     // 负秒数拒绝
-    await expect(runKit(dir, { action: 'wait', seconds: -1 })).rejects.toThrow(/正整数/)
+    await expect(runKit(dir, { action: 'wait', seconds: -1 })).rejects.toThrow(/positive integer/)
   })
 
   it('wait 1 秒耗时 ≥ 约 1 秒', async () => {

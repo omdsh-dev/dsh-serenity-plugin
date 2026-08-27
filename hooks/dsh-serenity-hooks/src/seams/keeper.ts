@@ -71,16 +71,15 @@ export class KeeperTracker {
 
 export function reminderText(code: string, score: number): string {
   // v1.18.7：英文 + 不中断工作语气（用户要求）——无需停下，顺手回应即可
-  return `[SESSION-KEEPER] Score threshold reached (${score}). Please acknowledge with [SESSION-KEEPER-recorded-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
+  // v1.23.0：前缀 SESSION-KEEPER → TRAJECTORY-STEWARD（用户定名：trajectory 维护机制）
+  return `[TRAJECTORY-STEWARD] Score threshold reached (${score}). Please acknowledge with [TRAJECTORY-STEWARD-recorded-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
 }
 
-/** F2 rebuild 提示（v1.21；v1.22.1 对齐"轨迹跟踪器"概念）：
- * SESSION.md = 持久 agent（轨迹），自身会话 = 临时可重建（工作副本）。
+/** F2 rebuild 提示（v1.21；v1.22.1 对齐"轨迹跟踪器"概念；v1.23.0 英化 + 载体关系）：
+ * SESSION.md = trajectory 持久身体，自身会话 = 可重建载体（工作副本）。
  * 上下文接近上限时引导 LLM 主动触发 session_rebuild。 */
 export function rebuildReminderText(ratio: number): string {
-  return `[TRAJECTORY] 上下文占用已达 ${(ratio * 100).toFixed(0)}%（轨迹跟踪器阈值）。` +
-    `SESSION.md 是持久轨迹，本会话只是临时可重建的工作副本——无需压缩，` +
-    `可在适当时机调用 session_rebuild 清空重建（归档当前副本，身份从 SESSION.md 自动延续）。`
+  return `[TRAJECTORY] Context usage at ${(ratio * 100).toFixed(0)}% (trajectory-tracker threshold). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy — no compaction needed. Call session_rebuild at a natural pause to rebuild the carrier (this copy is discarded; identity continues from SESSION.md).`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */

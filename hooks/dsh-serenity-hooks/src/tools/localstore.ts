@@ -25,16 +25,16 @@ function renderText(value: unknown): ContentBlock[] {
 export const localstoreTool = defineTool({
   name: 'localstore',
   description:
-    'ACC 标准本地凭据/配置存储：一个工具管理两个命名空间 credential（凭据）与 config（本地偏好）。' +
-    '存储于 CCC 根根目录 localstore.json（JSON 格式，MSM 可直接读取）。' +
-    'git 策略：.opencode/serenity.json localstore.gitTrack（allow 可提交 / deny 禁提交，缺省 deny；.dsh 回退）——deny 时写入自动确保 .gitignore 含该文件（物理保证），cc_git commit 会检查拒绝。' +
-    '子命令：list（列 key，凭据不返回值）/ get <name>（读值）/ set <name> <value>（写）/ unset <name>（删）/ show <name>（元数据，凭据不打印值）/ doc（输出存储规范——路径/格式/key 规范/git 策略，agent 可按说明直接用 read/write 操作文件）。' +
-    '默认 scope=credential；config 需传 --scope config（路径为 section.key，如 loop.defaultModel）。',
+    'ACC standard local credential/config storage: one tool manages two namespaces — credential (credentials) and config (local preferences). ' +
+    'Stored in localstore.json at the CCC root (JSON format, directly readable by MSMs). ' +
+    'Git policy: .opencode/serenity.json localstore.gitTrack (allow commits / deny commits, default deny; .dsh fallback) — when deny, writes ensure .gitignore contains this file (physical guarantee), cc_git commit checks and refuses. ' +
+    'Subcommands: list (list keys, credentials never return values) / get <name> (read value) / set <name> <value> (write) / unset <name> (delete) / show <name> (metadata, credentials never print values) / doc (output the storage spec — path/format/key conventions/git policy; agents may operate the file directly with read/write per the spec). ' +
+    'Default scope=credential; config requires --scope config (path is section.key, e.g. loop.defaultModel).',
   parameters: {
-    action: { type: 'string', enum: [...ACTIONS], required: true, description: '子命令：list/get/set/unset/show/doc' },
-    name: { type: 'string', description: '条目名（credential 用大写蛇形；config 用 section.key）' },
-    value: { type: 'string', description: 'set 的值' },
-    scope: { type: 'string', enum: [...LOCALSTORE_SCOPES], description: '命名空间 credential|config（默认 credential）' },
+    action: { type: 'string', enum: [...ACTIONS], required: true, description: 'Subcommand: list/get/set/unset/show/doc' },
+    name: { type: 'string', description: 'Entry name (credentials: UPPER_SNAKE; config: section.key)' },
+    value: { type: 'string', description: 'set value' },
+    scope: { type: 'string', enum: [...LOCALSTORE_SCOPES], description: 'Namespace credential|config (default credential)' },
   },
   output: {
     schema: { type: 'json' },

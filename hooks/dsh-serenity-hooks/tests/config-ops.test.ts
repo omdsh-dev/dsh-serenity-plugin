@@ -190,7 +190,7 @@ describe('applyWirePatch（wire → 持久化）', () => {
       applyWirePatch({
         gateway: { accounts: [{ id: 'a1', user: 'yh' }] },
       }),
-    ).toThrow(/必须设置密码/)
+    ).toThrow(/must set a password/)
   })
 
   it('既有账号 pass 空 → 保留原 hash', () => {
@@ -255,7 +255,7 @@ describe('applyWirePatch（wire → 持久化）', () => {
       applyWirePatch({
         gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: 'MZXW6YTB', totpConfirm: '000000' }] },
       }),
-    ).toThrow(/确认码无效/)
+    ).toThrow(/confirmation code invalid/)
   })
 
   it('v1.22.4 TOTP：totpReset=true → 清除绑定', () => {

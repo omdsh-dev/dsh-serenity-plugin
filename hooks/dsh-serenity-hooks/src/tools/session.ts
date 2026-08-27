@@ -133,73 +133,76 @@ function discoverCccSubcommands(entries: MsmEntry[]): string[] {
 /** 生成扩展提示（对齐 osp buildExtHint） */
 function buildExtHint(hasSessionTool: boolean, hooks: string[], subcommands: string[]): string {
   if (!hasSessionTool) {
-    return '\n\n[CCC] 如需扩展会话能力，可注册 session-tool MSM (acc_msm register)，详见 session hook-develop-guide'
+    return '\n\n[CCC] To extend session capabilities, register a session-tool MSM (acc_msm register); see session hook-develop-guide'
   }
   const parts: string[] = []
-  if (hooks.length > 0) parts.push(`钩子: ${hooks.join(', ')}`)
-  if (subcommands.length > 0) parts.push(`扩展子命令 (acc_msm exec session-tool): ${subcommands.join(', ')}`)
+  if (hooks.length > 0) parts.push(`hooks: ${hooks.join(', ')}`)
+  if (subcommands.length > 0) parts.push(`custom subcommands (acc_msm exec session-tool): ${subcommands.join(', ')}`)
   const detail = parts.length > 0 ? ` (${parts.join('; ')})` : ''
-  return `\n\n[CCC] session-tool MSM 已注册${detail}`
+  return `\n\n[CCC] session-tool MSM registered${detail}`
 }
 
 /** hook-develop-guide 内容（对齐 osp getHookDevelopGuide） */
 function getHookDevelopGuide(hasSessionTool: boolean): string {
   return [
-    '═══ Session Extension Protocol (SEP) v1 — 开发指南 ═══',
+    '═══ Session Extension Protocol (SEP) v1 — Developer Guide ═══',
     '',
-    'CCC 可以通过注册 session-tool MSM 来扩展 ACC session 工具的能力，',
-    '而无需修改 plugin 代码。ACC 的行为不会缩水——CCC 只在 ACC 完成后做后处理。',
+    'A CCC can extend the ACC session tool by registering a session-tool MSM,',
+    'without modifying plugin code. ACC behavior is never reduced — the CCC only',
+    'does post-processing after ACC completes.',
     '',
-    '── 口子一：后处理钩子 (Hooks) ──',
+    '── Extension point 1: Post-processing hooks ──',
     '',
-    'ACC 的某些子命令执行完成后，会检查 CCC 的 session-tool MSM 是否',
-    '注册了对应的钩子。如果注册了，ACC 会调用 MSM 做后处理。',
+    'After certain ACC subcommands complete, ACC checks whether the CCC\'s',
+    'session-tool MSM has registered a matching hook. If so, ACC invokes the MSM',
+    'for post-processing.',
     '',
-    '可用钩子：',
+    'Available hooks:',
     '',
     '  create-transform',
-    '    触发时机：create 写完默认 SESSION.md 后',
-    '    调用方式：acc_msm exec session-tool --hook=create-transform --session-dir=<path>',
-    '    允许行为：读取 SESSION.md，原地修改内容（追加字段、换模板、调 API 等）',
-    '    注意事项：ACC 已确保目录和 SESSION.md 存在，CCC 只做修改',
+    '    Trigger: after create writes the default SESSION.md',
+    '    Invocation: acc_msm exec session-tool --hook=create-transform --session-dir=<path>',
+    '    Allowed: read SESSION.md and modify it in place (append fields, swap templates, call APIs, etc.)',
+    '    Note: ACC has already ensured the directory and SESSION.md exist; the CCC only modifies',
     '',
-    '── 口子二：新子命令 (Custom Subcommands) ──',
+    '── Extension point 2: Custom subcommands ──',
     '',
-    'LLM 可以直接调用 acc_msm exec session-tool <subcommand> 来执行 CCC 专属的子命令，',
-    '如 reindex、export、batch-create 等。这些子命令不走 ACC session tool 的 enum。',
+    'The LLM can call acc_msm exec session-tool <subcommand> to run CCC-specific',
+    'subcommands such as reindex, export, batch-create. These bypass the ACC session',
+    'tool\'s enum.',
     '',
-    '── 如何注册 session-tool MSM ──',
+    '── How to register a session-tool MSM ──',
     '',
-    '1. 编写脚本，放在 CCC 的 skills 目录下：',
+    '1. Write the script under the CCC skills directory:',
     '     .opencode/skills/<ccc-name>/scripts/session-tool.ts',
     '',
-    '2. 注册到 mech-registry.json：',
+    '2. Register it in mech-registry.json:',
     '     acc_msm register session-tool \\',
     '       --skill <ccc-name> --path .opencode/skills/<ccc-name>/scripts/session-tool.ts \\',
     '       --category semi-mech \\',
-    '       --description "CCC session 扩展: 钩子 + 自定义子命令" \\',
+    '       --description "CCC session extension: hooks + custom subcommands" \\',
     '       --flags \'[',
     '         {"name":"hook","type":"string","description":"create-transform"},',
     '         {"name":"subcommand","type":"string","description":"reindex | export"},',
-    '         {"name":"session-dir","type":"path","description":"session 目录路径"},',
-    '         {"name":"dry-run","type":"boolean","description":"预览模式"}',
+    '         {"name":"session-dir","type":"path","description":"session directory path"},',
+    '         {"name":"dry-run","type":"boolean","description":"preview mode"}',
     '       ]\'',
     '',
-    '3. 钩子声明约定：',
-    '     flags 中的 --hook description 字段按 | 分割枚举支持的钩子名。',
-    '     ACC 发现 create-transform 在列表中时，就会在 create 后调用。',
+    '3. Hook declaration convention:',
+    '     The --hook description field in flags enumerates supported hook names, split by |.',
+    '     When ACC finds create-transform in the list, it invokes it after create.',
     '',
-    '4. 子命令声明约定：',
-    '     flags 中的 --subcommand description 字段按 | 分割枚举支持的子命令名。',
-    '     LLM 看到提示后可调用 acc_msm exec session-tool <subcommand>。',
+    '4. Subcommand declaration convention:',
+    '     The --subcommand description field in flags enumerates supported subcommand names, split by |.',
+    '     The LLM can then call acc_msm exec session-tool <subcommand>.',
     '',
     (hasSessionTool
-      ? '✅ 当前 CCC 已注册 session-tool MSM'
-      : 'ℹ️  当前 CCC 尚未注册 session-tool MSM — 使用 acc_msm register 开始'),
+      ? '✅ This CCC has a session-tool MSM registered'
+      : 'ℹ️  This CCC has no session-tool MSM yet — start with acc_msm register'),
     '',
-    '── 更多信息 ──',
+    '── More information ──',
     '',
-    '参考 ACC 源码: src/tools/session.ts (hook 调用逻辑)',
+    'Reference ACC source: src/tools/session.ts (hook invocation logic)',
   ].join('\n')
 }
 
@@ -211,24 +214,24 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
   name: 'session',
   description:
-    '工作会话全周期管理（AGENT_SESSIONS/，home-session 约定）。list/show/create/use/close/health/qa/archive/summary/hook-develop-guide。' +
-    'create 需 --desc <desc> [--goal] 或 --issue <工单号>（二选一）；close 需 --confirm；use 激活当前 dsh 会话的活跃会话（内存 + events 恢复，按 dsh 会话隔离不泄露）。',
+    'Full work-session lifecycle (AGENT_SESSIONS/, home-session convention). list/show/create/use/close/health/qa/archive/summary/hook-develop-guide. ' +
+    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one); close requires --confirm; use activates the session for the current dsh conversation (in-memory + events restore, isolated per dsh session).',
   parameters: {
     action: {
       type: 'string',
       enum: [...SESSION_ACTIONS],
       required: true,
       description:
-        '子命令：list（状态摘要）/ show（S### 或目录名或模糊关键词）/ create（--desc 或 --issue）/ use（激活上下文，closed 可重开）/ ' +
-        'close（需 --name + --confirm，不可撤销）/ health（stale/stalled/drift/ghost）/ qa（事实核对）/ archive（归档，name 缺省批量）/ ' +
-        'summary（仪表盘）/ hook-develop-guide（CCC 扩展指南）',
+        'Subcommand: list (status summary) / show (S### or dir name or fuzzy keyword) / create (--desc or --issue) / use (activate context, closed can be reopened) / ' +
+        'close (requires --name + --confirm, irreversible) / health (stale/stalled/drift/ghost) / qa (fact check) / archive (archive, name defaults to batch) / ' +
+        'summary (dashboard) / hook-develop-guide (CCC extension guide)',
     },
-    name: { type: 'string', description: 'show/use/close/archive/qa 的会话标识（S### 或目录名或关键词）' },
-    desc: { type: 'string', description: 'create 的短描述（任意语言，≤5 词；与 issue 互斥）' },
-    issue: { type: 'string', description: 'create 的工单号（如 apaas-26116；目录命名 YYYY-MM-DD--<issue>；与 desc 互斥）' },
-    goal: { type: 'string', description: 'create 的一句话目标（可选）' },
-    confirm: { type: 'boolean', description: 'close 必须为 true（防误关）' },
-    dryRun: { type: 'boolean', description: 'create/archive 预览模式（不实际修改）' },
+    name: { type: 'string', description: 'show/use/close/archive/qa session identifier (S### or dir name or keyword)' },
+    desc: { type: 'string', description: 'create short description (any language, ≤5 words; mutually exclusive with issue)' },
+    issue: { type: 'string', description: 'create ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
+    goal: { type: 'string', description: 'create one-sentence goal (optional)' },
+    confirm: { type: 'boolean', description: 'close must be true (prevents accidental close)' },
+    dryRun: { type: 'boolean', description: 'create/archive preview mode (no actual changes)' },
   },
   output: {
     schema: { type: 'json' },
@@ -254,7 +257,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
         return listSessions(root) + extHint
       }
       case 'show': {
-        if (!args.name) throw new Error('show 需要 name（S### 或目录名）')
+        if (!args.name) throw new Error('show requires name (S### or directory name)')
         return showSession(root, args.name) + extHint
       }
       case 'create': {
@@ -286,7 +289,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
         return message + extHint
       }
       case 'use': {
-        if (!args.name) throw new Error('use 需要 name（S### 或目录名）')
+        if (!args.name) throw new Error('use requires name (S### or directory name)')
         const scope = agentScope(exec)
         const active = useSession(root, args.name, scope)
         // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为命名标题（S###-日期）
@@ -321,7 +324,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
         return active
       }
       case 'close': {
-        if (!args.name) throw new Error('close 需要 name（S### 或目录名）')
+        if (!args.name) throw new Error('close requires name (S### or directory name)')
         return closeSession(root, args.name, args.confirm ?? false, agentScope(exec))
       }
       case 'archive': {
@@ -332,11 +335,11 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
       case 'summary':
         return summarize(root) + extHint
       case 'qa': {
-        if (!args.name) throw new Error('qa 需要 name（S### 或目录名）')
+        if (!args.name) throw new Error('qa requires name (S### or directory name)')
         return qaCheck(root, args.name) + extHint
       }
       default:
-        throw new Error(`未知 action: ${args.action as string}`)
+        throw new Error(`Unknown action: ${args.action as string}`)
     }
   },
   })

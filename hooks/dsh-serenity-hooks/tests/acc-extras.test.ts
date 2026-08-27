@@ -27,11 +27,11 @@ describe('msm: guide + 协议 flag + path-arg', () => {
   it('guide 返回开发手册', () => {
     expect(MSM_ACTIONS).toContain('guide')
     const r = runMsm(dir, { action: 'guide' }) as { guide: string }
-    expect(r.guide).toContain('MSM 开发手册')
-    expect(r.guide).toContain('main() CLI 守卫')
+    expect(r.guide).toContain('MSM Development Manual')
+    expect(r.guide).toContain('main() CLI guard')
     // v1.17.3：交互与确认规范（禁止阻塞性确认）
-    expect(r.guide).toContain('交互与确认规范')
-    expect(r.guide).toContain('禁止阻塞性确认')
+    expect(r.guide).toContain('confirmation conventions')
+    expect(r.guide).toContain('no blocking confirmation')
     expect(r.guide).toContain('--confirm')
   })
 
@@ -77,18 +77,18 @@ describe('msm: guide + 协议 flag + path-arg', () => {
 })
 
 describe('eap/neat 工具内容', () => {
-  it('EAP 完整框架含三变量与自检清单', async () => {
-    expect(EAP_CONTENT).toContain('E↑ 显式度')
-    expect(EAP_CONTENT).toContain('输出前自检清单')
+  it('EAP 完整框架含三变量与自检清单（v1.23.0 英化）', async () => {
+    expect(EAP_CONTENT).toContain('E↑ Explicitness')
+    expect(EAP_CONTENT).toContain('Pre-Output Self-Check Checklist')
     const v = await eapTool.execute({ section: 'checklist' }, {} as never)
-    expect(String(v)).toContain('自检清单')
+    expect(String(v)).toContain('Self-Check')
   })
 
-  it('Neat 完整协议含四铁律与五层', async () => {
-    expect(NEAT_CONTENT).toContain('四条铁律')
-    expect(NEAT_CONTENT).toContain('需求层')
+  it('Neat 完整协议含四铁律与五层（v1.23.0 英化）', async () => {
+    expect(NEAT_CONTENT).toContain('Four Iron Rules')
+    expect(NEAT_CONTENT).toContain('Requirements')
     const v = await neatTool.execute({ section: 'layers' }, {} as never)
-    expect(String(v)).toContain('五层推进')
+    expect(String(v)).toContain('Five-Layer Progression')
   })
 })
 
@@ -106,11 +106,11 @@ describe('env: DSH_SERENITY_* 事实', () => {
 })
 
 describe('cce 工具内容', () => {
-  it('CCE 完整框架含核心命题与六阶段', async () => {
+  it('CCE 完整框架含核心命题与六阶段（v1.23.0 英化）', async () => {
     const { cceTool, CCE_CONTENT } = await import('../src/tools/cce.js')
-    expect(CCE_CONTENT).toContain('认知连续性工程')
+    expect(CCE_CONTENT).toContain('Cognitive Continuity Engineering')
     expect(CCE_CONTENT).toContain('H_op')
-    expect(CCE_CONTENT).toContain('六阶段生命周期')
+    expect(CCE_CONTENT).toContain('Six-Phase Lifecycle')
     const v = await cceTool.execute({ section: 'lifecycle' }, {} as never)
     expect(String(v)).toContain('Reconstruction')
   })

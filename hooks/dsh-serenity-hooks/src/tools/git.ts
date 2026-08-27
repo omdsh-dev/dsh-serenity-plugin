@@ -19,16 +19,16 @@ function renderText(value: unknown): ContentBlock[] {
 export const gitTool = defineTool({
   name: 'cc_git',
   description:
-    'CCC 内 git 操作（cc-git 语义，对齐 osp）。status/commit/push/log/pull/diff；push/pull 非快进时输出 [REJECTED] + 操作建议（绝不自动 force）。merge/rebase/冲突解决走 bash。',
+    'CCC git operations (cc-git semantics, aligned with osp). status/commit/push/log/pull/diff; non-fast-forward push/pull outputs [REJECTED] + suggested actions (never auto-force). merge/rebase/conflict resolution go through bash.',
   parameters: {
-    action: { type: 'string', enum: [...GIT_ACTIONS], required: true, description: '子命令：status/commit/push/log/pull/diff' },
-    message: { type: 'string', description: 'commit 消息（commit 必填）' },
+    action: { type: 'string', enum: [...GIT_ACTIONS], required: true, description: 'Subcommand: status/commit/push/log/pull/diff' },
+    message: { type: 'string', description: 'Commit message (required for commit)' },
     // 注意：公测 rc.6 value schema DSL 不支持 minimum/maximum 数字边界键（defineTool 阶段会拒绝）。
     // 边界校验（1-100）在 git-ops.ts 运行时 clamp 执行。
-    count: { type: 'integer', description: 'log 条数（默认 10，max 100；运行时 clamp 1-100）' },
-    staged: { type: 'boolean', description: 'diff: 显示暂存区变更（--cached）' },
-    ref: { type: 'string', description: 'diff: 对比 ref（如 HEAD~1 / main / origin/main）' },
-    path: { type: 'string', description: 'diff: 限定路径（如 src/、package.json）' },
+    count: { type: 'integer', description: 'Log count (default 10, max 100; runtime clamp 1-100)' },
+    staged: { type: 'boolean', description: 'diff: show staged changes (--cached)' },
+    ref: { type: 'string', description: 'diff: compare ref (e.g. HEAD~1 / main / origin/main)' },
+    path: { type: 'string', description: 'diff: restrict to path (e.g. src/, package.json)' },
   },
   output: {
     schema: { type: 'json' },

@@ -5,33 +5,33 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
-export const NEAT_CONTENT = `# Neat 设计协作协议
+export const NEAT_CONTENT = `# Neat Design Collaboration Protocol
 
-> 复杂设计不是一次想出来的，是小步对齐走出来的。
+> Complex design is not thought up at once — it is walked out in small aligned steps.
 
-## 四条铁律
-| 铁律 | 含义 | 反例 |
-|------|------|------|
-| 小步对齐 | 一次只推进一个决策，确认后再走下一步 | 一次抛 10 个方案 |
-| 显式决策 | 每个选择记录理由与备选 | "我觉得这样好"（无理由） |
-| 文档驱动 | 结论沉淀到具名文件（<subject>-<scope>-<type>.md） | 结论只存在于对话里 |
-| 不跳级 | 严格按层级推进 | 需求未对齐就写实现 |
+## Four Iron Rules
+| Rule | Meaning | Anti-example |
+|------|---------|--------------|
+| Small-step alignment | Advance one decision at a time; confirm before the next step | Presenting 10 options at once |
+| Explicit decisions | Every choice records rationale and alternatives | "I feel this is good" (no rationale) |
+| Document-driven | Conclusions land in named files (<subject>-<scope>-<type>.md) | Conclusions exist only in conversation |
+| No level-skipping | Advance strictly through the layers | Writing implementation before requirements are aligned |
 
-## 五层推进顺序（不跳级）
-需求层 → 范围层 → 方案层 → 接口层 → 实现层
-| 层 | 产物 | 问题 |
-|----|------|------|
-| 需求层 | 需求描述 | "要解决什么问题？" |
-| 范围层 | 范围清单（in/out） | "做哪些、明确不做哪些？" |
-| 方案层 | 方案对比 + 选定 | "怎么做？选哪个？为什么？" |
-| 接口层 | 接口/协议定义 | "边界怎么交互？" |
-| 实现层 | 代码/文档 | "逐层落地" |
+## Five-Layer Progression (no skipping)
+Requirements → Scope → Solution → Interface → Implementation
+| Layer | Artifact | Question |
+|-------|----------|----------|
+| Requirements | Requirements description | "What problem are we solving?" |
+| Scope | Scope list (in/out) | "What is in, explicitly what is out?" |
+| Solution | Solution comparison + selection | "How? Which one? Why?" |
+| Interface | Interface/protocol definition | "How do the boundaries interact?" |
+| Implementation | Code/docs | "Land it layer by layer" |
 
-## 协作节奏
-1. 提出当前层一个决策点（带上下文 + 建议 + 理由）
-2. 等待确认或修正（小步）
-3. 确认后记录决策（写入会话 SESSION.md 或设计文档）
-4. 推进到下一决策点`
+## Collaboration Rhythm
+1. Raise one decision point of the current layer (with context + suggestion + rationale)
+2. Wait for confirmation or correction (small step)
+3. After confirmation, record the decision (into session SESSION.md or a design doc)
+4. Move to the next decision point`
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -40,12 +40,12 @@ function renderText(value: unknown): ContentBlock[] {
 
 export const neatTool = defineTool({
   name: 'neat',
-  description: 'Neat 设计协作协议（渐进式披露）：小步对齐 / 显式决策 / 文档驱动 / 不跳级（需求→范围→方案→接口→实现）。无 section 返回完整协议。',
+  description: 'Neat design collaboration protocol (progressive disclosure): small-step alignment / explicit decisions / document-driven / no level-skipping (requirements→scope→solution→interface→implementation). No section returns the full protocol.',
   parameters: {
     section: {
       type: 'string',
       enum: ['rules', 'layers'],
-      description: '聚焦片段：rules（四条铁律）/ layers（五层推进）',
+      description: 'Focus section: rules (four iron rules) / layers (five-layer progression)',
     },
   },
   output: {
@@ -54,11 +54,11 @@ export const neatTool = defineTool({
   },
   async execute(args) {
     if (args.section === 'rules') {
-      const m = NEAT_CONTENT.match(/## 四条铁律[\s\S]*?(?=## )/)
+      const m = NEAT_CONTENT.match(/## Four Iron Rules[\s\S]*?(?=## )/)
       return m?.[0] ?? NEAT_CONTENT
     }
     if (args.section === 'layers') {
-      const m = NEAT_CONTENT.match(/## 五层推进顺序[\s\S]*?(?=## )/)
+      const m = NEAT_CONTENT.match(/## Five-Layer Progression[\s\S]*?(?=## )/)
       return m?.[0] ?? NEAT_CONTENT
     }
     return NEAT_CONTENT

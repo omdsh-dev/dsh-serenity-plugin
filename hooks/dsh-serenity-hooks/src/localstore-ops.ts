@@ -80,7 +80,7 @@ export function ensureLocalstoreGitignored(root: string): { status: 'allow' | 'i
   if (isLocalstoreGitignored(root)) return { status: 'ignored' }
   const gi = join(root, '.gitignore')
   const existing = existsSync(gi) ? readFileSync(gi, 'utf-8') : ''
-  const line = `${LOCALSTORE_FILENAME}  # ACC localstore（localstore.gitTrack 缺省 deny，禁提交）`
+  const line = `${LOCALSTORE_FILENAME}  # ACC localstore (localstore.gitTrack defaults to deny — do not commit)`
   writeFileSync(gi, (existing.endsWith('\n') || existing === '' ? existing : existing + '\n') + line + '\n', 'utf-8')
   return { status: 'appended' }
 }
@@ -95,7 +95,7 @@ export function checkLocalstoreGitCompliance(root: string): { ok: boolean; reaso
   if (isLocalstoreGitignored(root)) return { ok: true }
   return {
     ok: false,
-    reason: `localstore.json 禁止提交（localstore.gitTrack=deny 缺省）但 .gitignore 未包含——请将 ${LOCALSTORE_FILENAME} 加入 .gitignore（或改配置 localstore.gitTrack=allow 显式放行）`,
+    reason: `localstore.json must not be committed (localstore.gitTrack=deny default) but .gitignore does not cover it — add ${LOCALSTORE_FILENAME} to .gitignore (or set localstore.gitTrack=allow to explicitly permit)`,
   }
 }
 
@@ -132,7 +132,7 @@ export function readStore(root: string, scope: LocalStoreScope): Record<string, 
 /** 校验凭据 key 合法（大写蛇形）；不合法抛错 */
 export function assertCredentialKey(key: string): void {
   if (!CREDENTIAL_KEY_RE.test(key)) {
-    throw new Error(`credential key "${key}" 必须匹配大写蛇形 ^[A-Z][A-Z0-9_]*$（如 HOME_GITLAB_TOKEN）`)
+    throw new Error(`credential key "${key}" must match UPPER_SNAKE ^[A-Z][A-Z0-9_]*$ (e.g. HOME_GITLAB_TOKEN)`)
   }
 }
 
@@ -140,15 +140,15 @@ export function assertCredentialKey(key: string): void {
 export function assertConfigPath(path: string): { section: string; key: string } {
   const idx = path.indexOf('.')
   if (idx <= 0 || idx === path.length - 1) {
-    throw new Error(`config path "${path}" 必须为 section.key（如 loop.defaultModel）`)
+    throw new Error(`config path "${path}" must be section.key (e.g. loop.defaultModel)`)
   }
   const section = path.slice(0, idx)
   const key = path.slice(idx + 1)
   if (!CONFIG_SECTION_RE.test(section)) {
-    throw new Error(`config 节 "${section}" 必须匹配 ^[a-z][a-z0-9-]*$`)
+    throw new Error(`config section "${section}" must match ^[a-z][a-z0-9-]*$`)
   }
   if (!CONFIG_KEY_RE.test(key)) {
-    throw new Error(`config key "${key}" 必须匹配小驼峰 ^[a-z][a-zA-Z0-9_]*$（如 defaultModel）`)
+    throw new Error(`config key "${key}" must match lowerCamel ^[a-z][a-zA-Z0-9_]*$ (e.g. defaultModel)`)
   }
   return { section, key }
 }
@@ -219,18 +219,18 @@ export function listKeys(root: string, scope: LocalStoreScope): string[] {
 export function docText(root: string): string {
   const path = localstorePath(root)
   return [
-    '# localstore — ACC 本地凭据/配置存储（标准，S134 重设计）',
+    '# localstore — ACC local credential/config storage (standard, S134 redesign)',
     '',
-    '一个工具管理两个命名空间：credential（凭据）+ config（偏好）。',
-    `存储于 CCC 根根目录 ${path}（JSON 格式，MSM 可直接 read + JSON.parse）。`,
+    'One tool manages two namespaces: credential (credentials) + config (preferences).',
+    `Stored at the CCC root in ${path} (JSON format; MSMs can read + JSON.parse directly).`,
     '',
-    '## git 提交策略',
-    '- 配置：.opencode/serenity.json `localstore.gitTrack`：`"allow"`（可提交）| `"deny"`（禁提交；.dsh 回退）',
-    '- **缺省 deny（没配就是不提交）**；deny 时写入会自动确保 .gitignore 含 localstore.json',
-    '  （物理保证，不依赖 dsh 运行）；cc_git commit 会检查拒绝',
-    '- 想提交：配置 `"localstore": { "gitTrack": "allow" }`，并从 .gitignore 移除 localstore.json',
+    '## Git commit policy',
+    '- Config: .opencode/serenity.json `localstore.gitTrack`: `"allow"` (may commit) | `"deny"` (must not commit; .dsh fallback)',
+    '- **Default deny (unset = not committed)**; when deny, writes automatically ensure .gitignore contains localstore.json',
+    '  (physical guarantee, independent of dsh runtime); cc_git commit checks and refuses',
+    '- To commit: set `"localstore": { "gitTrack": "allow" }` and remove localstore.json from .gitignore',
     '',
-    '## 格式（JSON 顶层分节）',
+    '## Format (JSON top-level sections)',
     '```json',
     '{',
     '  "credentials": {',
@@ -241,24 +241,24 @@ export function docText(root: string): string {
     '  }',
     '}',
     '```',
-    '- credentials 为保留节（凭据，key 大写蛇形）；其余节 = config（path = section.key）',
+    '- credentials is a reserved section (credentials, UPPER_SNAKE keys); other sections = config (path = section.key)',
     '',
-    '## key 规范',
-    '- credential key: ^[A-Z][A-Z0-9_]*$（如 HOME_GITLAB_TOKEN）',
-    '- config path: section.key（节 ^[a-z][a-z0-9-]*$，key 小驼峰 ^[a-z][a-zA-Z0-9_]*$，如 loop.defaultModel）',
+    '## Key conventions',
+    '- credential key: ^[A-Z][A-Z0-9_]*$ (e.g. HOME_GITLAB_TOKEN)',
+    '- config path: section.key (section ^[a-z][a-z0-9-]*$, key lowerCamel ^[a-z][a-zA-Z0-9_]*$, e.g. loop.defaultModel)',
     '',
-    '## 读取方法（agent 可直接用 fs 工具）',
-    `- 用 read 工具读 ${path} → JSON.parse 解析`,
-    '- 或用 localstore get <name> [--scope credential|config]',
+    '## Reading (agents may use fs tools directly)',
+    `- Read ${path} with the read tool → JSON.parse`,
+    '- Or use localstore get <name> [--scope credential|config]',
     '',
-    '## 写入方法',
-    '- 推荐：localstore set <name> <value> [--scope ...]（自动建文件/保留其他条目/联动 .gitignore）',
-    '- 或直接用 write/edit 工具修改文件，保持 JSON 合法',
+    '## Writing',
+    '- Recommended: localstore set <name> <value> [--scope ...] (auto-creates file / preserves other entries / syncs .gitignore)',
+    '- Or modify the file directly with write/edit, keeping the JSON valid',
     '',
-    '## 安全边界',
-    '- list/show 对 credential 只返回 key 名，不返回值',
-    '- 凭据值应在 agent 内部使用，不要写入对话/日志',
-    '- 默认 deny：文件不会提交 git（.gitignore 物理保证 + cc_git 检查兜底）',
+    '## Security boundary',
+    '- list/show return only key names for credentials, never values',
+    '- Credential values should be used internally by the agent; never write them into conversation or logs',
+    '- Default deny: the file is not committed to git (.gitignore physical guarantee + cc_git check fallback)',
     '',
   ].join('\n')
 }
@@ -275,14 +275,14 @@ export function runLocalStore(root: string, args: {
     case 'list':
       return { scope, keys: listKeys(root, scope) }
     case 'get': {
-      if (!args.name) throw new Error('get 需要 name')
+      if (!args.name) throw new Error('get requires name')
       const value = getEntry(root, scope, args.name)
-      if (value === null) throw new Error(`not found: ${args.name}（scope=${scope}）`)
+      if (value === null) throw new Error(`not found: ${args.name} (scope=${scope})`)
       return { scope, name: args.name, value, source: scope }
     }
     case 'set': {
-      if (!args.name) throw new Error('set 需要 name')
-      if (args.value === undefined) throw new Error('set 需要 value')
+      if (!args.name) throw new Error('set requires name')
+      if (args.value === undefined) throw new Error('set requires value')
       writeEntry(root, scope, args.name, args.value)
       const git = checkLocalstoreGitCompliance(root)
       return {
@@ -292,18 +292,18 @@ export function runLocalStore(root: string, args: {
       }
     }
     case 'unset': {
-      if (!args.name) throw new Error('unset 需要 name')
+      if (!args.name) throw new Error('unset requires name')
       const removed = unsetEntry(root, scope, args.name)
       return { scope, name: args.name, removed }
     }
     case 'show': {
-      if (!args.name) throw new Error('show 需要 name')
+      if (!args.name) throw new Error('show requires name')
       const exists = getEntry(root, scope, args.name) !== null
       return { scope, name: args.name, exists, path: localstorePath(root) }
     }
     case 'doc':
       return { doc: docText(root) }
     default:
-      throw new Error(`未知子命令: ${args.action}（可用 list/get/set/unset/show/doc）`)
+      throw new Error(`Unknown subcommand: ${args.action} (available: list/get/set/unset/show/doc)`)
   }
 }

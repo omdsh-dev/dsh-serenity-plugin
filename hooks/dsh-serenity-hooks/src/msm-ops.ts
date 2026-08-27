@@ -42,13 +42,13 @@ export function readCccName(root: string): string | null {
 function assertPathInsideRoot(root: string, value: string, flagName: string): void {
   const abs = resolve(root, value)
   if (classifyPath(abs, root) === 'outside') {
-    throw new Error(`Path escape blocked: --${flagName}=${value} 越出 CCC 根`)
+    throw new Error(`Path escape blocked: --${flagName}=${value} escapes the CCC root`)
   }
   if (existsSync(abs)) {
     try {
       const real = realpathSync(abs)
       if (classifyPath(real, root) === 'outside') {
-        throw new Error(`Path escape blocked: --${flagName}=${value} 经 symlink 指向根外 (${real})`)
+        throw new Error(`Path escape blocked: --${flagName}=${value} resolves via symlink outside the root (${real})`)
       }
     } catch (e) {
       if (e instanceof Error && e.message.includes('symlink')) throw e
@@ -78,58 +78,58 @@ export type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 
 
 export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'deregister', 'check', 'guide', 'ccc-config']
 
-export const MSM_GUIDE = `MSM 开发手册（Mech & Semi-Mech 框架）
+export const MSM_GUIDE = `MSM Development Manual (Mech & Semi-Mech framework)
 
-## 是什么
-MSM = 可执行单元层。Mech 纯 TS 零 LLM 推理；Semi-Mech TS 框架 + LLM 决策点。
-MSM 是 ACC 的确定性可执行单元层——所有 shell/exec 操作走 MSM，不可绕过。
+## What it is
+MSM = the executable-unit layer. Mech is pure TS with zero LLM reasoning; Semi-Mech is a TS framework + LLM decision points.
+MSM is ACC's deterministic executable-unit layer — all shell/exec operations go through MSM and cannot be bypassed.
 
-## 注册新 MSM（acc_msm register）
-1. 在 <skill>/scripts/ 写脚本（tsx 可跑；必须带 main() CLI 守卫 import.meta.url 检查）
-2. acc_msm register <name> --skill <s> --path <脚本相对根路径> --category <mech|semi-mech> --description <desc>
-3. 自动写入 mech-registry.json（保留原格式）+ git commit（只提交注册表文件）
-4. 校验：path 必须根内、脚本必须存在、name 全局唯一
+## Registering a new MSM (acc_msm register)
+1. Write the script under <skill>/scripts/ (runnable via tsx; must include a main() CLI guard with an import.meta.url check)
+2. acc_msm register <name> --skill <s> --path <script path relative to root> --category <mech|semi-mech> --description <desc>
+3. Auto-writes mech-registry.json (preserving the original format) + git commit (commits only the registry file)
+4. Validation: path must be inside root, script must exist, name must be globally unique
 
-## flag schema（v1）
-flags 是 new-style 对象数组，用于参数校验与 path 逃逸守卫：
-  [{"name":"output","type":"string","description":"输出路径"},
-   {"name":"target","type":"path","description":"操作目标（type:path 启用根内校验 + symlink 防御）"},
-   {"name":"force","type":"boolean","description":"强制模式","default":false}]
-- {name, type} 格式 — new style，type:"path" 启用 path-escape 守卫
-- {flag, description} 格式 — old style，CLI flag 描述字符串
-- 注册时 flags 经 acc_msm register --flags '<json>' 传入（工具当前解析 name 风格）
+## flag schema (v1)
+flags is a new-style object array for parameter validation and path-escape guarding:
+  [{"name":"output","type":"string","description":"output path"},
+   {"name":"target","type":"path","description":"operation target (type:path enables in-root validation + symlink defense)"},
+   {"name":"force","type":"boolean","description":"force mode","default":false}]
+- {name, type} format — new style, type:"path" enables the path-escape guard
+- {flag, description} format — old style, CLI flag description string
+- On registration, flags are passed via acc_msm register --flags '<json>' (the tool currently parses the name style)
 
-## 脚本约定
-- 顶部文档：用途/用法/退出码
-- 退出码：0 成功 / 1 user / 2 system / 3 operator（对齐 ACC 协议分类）
-- main() CLI 守卫（DC-M2）：脚本顶部必须有
+## Script conventions
+- Top-of-file documentation: purpose / usage / exit codes
+- Exit codes: 0 success / 1 user / 2 system / 3 operator (per ACC protocol classification)
+- main() CLI guard (DC-M2): the script must start with
     if (import.meta.url === \`file://\${process.argv[1]}\`) { main() }
-  或等价 isMain / require.main === 判断——vitest import 时不触发顶层代码
-- 配对 .test.ts 或 .spec.ts（DC-M1，vitest）
-- 业务子进程环境：注入 SERENITY_ROOT / SERENITY_CCC / SERENITY_VERSION
+  or an equivalent isMain / require.main === check — so vitest imports never trigger top-level code
+- A paired .test.ts or .spec.ts (DC-M1, vitest)
+- Business subprocess environment: SERENITY_ROOT / SERENITY_CCC / SERENITY_VERSION injected
 
-## 交互与确认规范（禁止阻塞性确认）
-- MSM 运行在**无用户交互的子进程**（spawn/execFile，600s 超时）——**禁止**用
-  readline / prompt / process.stdin 等阻塞等待用户输入（会卡死至超时被 kill）
-- 需要二次确认时：**直接返回确认信息**（输出将执行的操作与影响 + 如何带确认参数重试），
-  以非 0 退出码返回（或明确提示）
-- agent 确认后**重新调用 MSM 并带上确认参数**（如 --confirm / --yes / --force）重试
-- 标准模式（两段式）：
-  1. 首次调用：检测到破坏性/需确认操作且未带确认 flag → 输出确认请求（列出操作/影响/回滚），
-     exit 非 0（如 1 user），**不执行任何变更**
-  2. agent 评估后重新调用：带确认 flag → 执行并输出结果
-- 适用场景：删除/覆盖/推送/批量操作 等不可逆或影响面大的操作
-- 反例（禁止）：readline 等待用户输入、process.stdin.on('data') 阻塞等待
-  （MSM 无 stdin 交互通道——卡死至 600s 超时）
+## Interaction & confirmation conventions (no blocking confirmation)
+- MSMs run in **user-less subprocesses** (spawn/execFile, 600s timeout) — **never** use
+  readline / prompt / process.stdin etc. to block waiting for user input (it would hang until killed by the timeout)
+- When a second confirmation is needed: **directly return the confirmation request** (list the operation to perform and its impact + how to retry with the confirmation flag),
+  returning a non-zero exit code (or an explicit hint)
+- After the agent confirms, **re-invoke the MSM with the confirmation flag** (e.g. --confirm / --yes / --force) to retry
+- Standard mode (two-phase):
+  1. First call: destructive/confirmation-requiring operation detected and no confirmation flag present → output the confirmation request (list operation/impact/rollback),
+     exit non-zero (e.g. 1 user), **perform no changes**
+  2. After the agent evaluates, re-invoke: with the confirmation flag → execute and output the result
+- Applies to: delete/overwrite/push/batch operations and other irreversible or wide-impact operations
+- Anti-example (forbidden): readline waiting for user input, process.stdin.on('data') blocking waits
+  (MSMs have no stdin interaction channel — they hang until the 600s timeout)
 
-## 品质检查（acc_msm check，DC-M1~M4）
-DC-M1 有 .test.ts/.spec.ts；DC-M2 有 main() 守卫（function main( / isMain / require.main === / import.meta.url）；
-DC-M3 双向：脚本未注册 + 注册表引用脚本缺失；DC-M4 路径型 flag 标记 type:"path"
+## Quality checks (acc_msm check, DC-M1~M4)
+DC-M1 has .test.ts/.spec.ts; DC-M2 has a main() guard (function main( / isMain / require.main === / import.meta.url);
+DC-M3 bidirectional: scripts unregistered + registry references missing scripts; DC-M4 path-type flags marked type:"path"
 
-## 自描述（协议 flag，仅限参数首位）
-acc_msm exec <name> --list        — 列出全部 MSM
-acc_msm exec <name> --schema <n>   — 查看某 MSM 的参数 schema
-acc_msm exec <name> --format=json  — JSON 输出模式（其余参数无损透传）
+## Self-description (protocol flags, first argument only)
+acc_msm exec <name> --list        — list all MSMs
+acc_msm exec <name> --schema <n>   — view a specific MSM's parameter schema
+acc_msm exec <name> --format=json  — JSON output mode (remaining args passed through losslessly)
 `
 
 /** CCC 配置参考（对齐 osp ccc-config action） */
@@ -315,8 +315,8 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
     case 'register': {
       const name = args.name ?? ''
       const { skill, path, category, description } = args
-      if (!name) throw new Error('register 需要 name')
-      if (!path || !category || !description) throw new Error('register 需要 path/category/description')
+      if (!name) throw new Error('register requires name')
+      if (!path || !category || !description) throw new Error('register requires path/category/description')
       // 对齐 osp：path 必须根内 + 脚本必须存在
       const scriptAbs = resolve(root, path)
       if (classifyPath(scriptAbs, root) === 'outside') {
@@ -341,7 +341,7 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
           if (!Array.isArray(parsed)) throw new Error('flags must be a JSON array')
           flags = parsed as MsmFlag[]
         } catch (e) {
-          throw new Error(`register flags 解析失败：${e instanceof Error ? e.message : String(e)}`)
+          throw new Error(`register flags parse failed: ${e instanceof Error ? e.message : String(e)}`)
         }
       }
       entries.push({
@@ -428,7 +428,7 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
     }
 
     default:
-      throw new Error(`未知 action: ${args.action as string}`)
+      throw new Error(`Unknown action: ${args.action as string}`)
   }
 }
 

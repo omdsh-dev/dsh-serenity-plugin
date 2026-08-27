@@ -345,7 +345,7 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
         const totpConfirm = (a as { totpConfirm?: string }).totpConfirm
         if (typeof totp === 'string' && totp !== '') {
           if (typeof totpConfirm !== 'string' || verifyTotpCode(totp, totpConfirm) === null) {
-            throw new Error(`账号 "${a.user}" TOTP 确认码无效——请输入验证器当前显示的 6 位码`)
+            throw new Error(`Account "${a.user}" TOTP confirmation code invalid — enter the 6-digit code currently shown by the authenticator`)
           }
         }
         const nextTotp: string | undefined = totpReset
@@ -363,7 +363,7 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
         if (existing) {
           return { ...withTotp, passHash: existing.passHash }
         }
-        throw new Error(`账号 "${a.user}"（id=${a.id}）未提供密码且无现有 hash——新账号必须设置密码`)
+        throw new Error(`Account "${a.user}" (id=${a.id}) has no password and no existing hash — new accounts must set a password`)
       })
       gwPatch.accounts = nextAccounts
     }

@@ -48,7 +48,7 @@ describe('skills-discovery: 入口 skill 发现', () => {
 
   it('truncateContent 超限截断', () => {
     expect(truncateContent('abc', 5)).toBe('abc')
-    expect(truncateContent('abcdefgh', 5)).toContain('已截断')
+    expect(truncateContent('abcdefgh', 5)).toContain('truncated')
   })
 })
 

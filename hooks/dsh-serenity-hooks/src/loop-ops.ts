@@ -55,7 +55,7 @@ export function writeProgress(root: string, label: string, p: LoopProgress): voi
     JSON.stringify({ ...p, status: p.status ?? 'running', updated: new Date().toISOString() }, null, 2) + '\n',
     'utf-8',
   )
-  const lines = [`# loop: ${label}`, `- 模型: ${p.model}`, `- 轮次: ${p.round}`, `- 完成: ${p.done}`, '', `## 最近响应`, '', p.lastResponse, '']
+  const lines = [`# loop: ${label}`, `- Model: ${p.model}`, `- Round: ${p.round}`, `- Done: ${p.done}`, '', `## Latest response`, '', p.lastResponse, '']
   writeFileSync(md, lines.join('\n'), 'utf-8')
 }
 
@@ -109,32 +109,32 @@ export function buildRoundPrompt(opts: {
   const { root, session, label, round, stopToken, progress, task } = opts
   const resumeNote =
     progress && progress.round > 0
-      ? `上一轮（round ${progress.round}）已完成：${progress.lastResponse.slice(0, 300)}\n永远从上次停止处继续，绝不重做已完成工作。`
-      : '这是第一轮。'
-  const sessionNote = session ? `工作会话：${session}（AGENT_SESSIONS/${session}/SESSION.md 记录进度）` : ''
-  const taskNote = task ? `任务：${task}` : `任务：以 label「${label}」对应的工作为准（若存在工作会话，先读 SESSION.md 明确目标）`
-  return `# ${label} — 牛马循环 round ${round}
+      ? `Previous round (round ${progress.round}) completed: ${progress.lastResponse.slice(0, 300)}\nAlways continue from where you left off; never redo completed work.`
+      : 'This is the first round.'
+  const sessionNote = session ? `Work session: ${session} (progress recorded in AGENT_SESSIONS/${session}/SESSION.md)` : ''
+  const taskNote = task ? `Task: ${task}` : `Task: follow the work corresponding to label "${label}" (if a work session exists, read SESSION.md first to clarify the goal)`
+  return `# ${label} — workhorse loop round ${round}
 
-CCC 根：${root}
+CCC root: ${root}
 ${sessionNote}
 ${taskNote}
 ${resumeNote}
 
-## 工作规范（每轮固定，必须遵守）
-1. 本轮内自由工作：读文件、改代码、执行命令，尽一切手段推进任务。
-2. 若本任务属于**阅读整理或文字编写类工作**（读文件提炼、总结、撰写文档、生成文本等），
-   请先加载 eap（acc-eap skill）并按 EAP 标准组织输出：
-   - E↑ 显式：实体/变量明确定义，关系指明方向与基数，边界划定，不用歧义词
-   - R↓ 可重建：关键结论记录来源与推理，可被后续 agent 重建
-   - S↑ 稳定：输出结构可重复生成，不依赖隐含上下文
-3. 汇报必须具体可核验，不写空话。
+## Work rules (fixed every round, must follow)
+1. Work freely within this round: read files, modify code, execute commands — use every means to advance the task.
+2. If this task is **reading/curating or text-writing work** (extracting from files, summarizing, writing docs, generating text, etc.),
+   first load eap (acc-eap skill) and organize output per the EAP standard:
+   - E↑ Explicit: entities/variables clearly defined, relationships with direction and cardinality, boundaries drawn, no ambiguous words
+   - R↓ Reconstructable: key conclusions record sources and reasoning, rebuildable by later agents
+   - S↑ Stable: output structure regenerates repeatably, no reliance on implicit context
+3. Reports must be concrete and verifiable — no filler.
 
-## 每轮汇报（固定格式，逐条回答）
-1. 本轮做了什么（具体）
-2. 下一步计划
-3. 是否已完成（若完成，只输出 ${stopToken}）
+## Per-round report (fixed format, answer each item)
+1. What was done this round (concrete)
+2. Next-step plan
+3. Whether the task is complete (if complete, output only ${stopToken})
 
-若已完成任务，只输出 ${stopToken}。`
+If the task is complete, output only ${stopToken}.`
 }
 
 /**
@@ -142,37 +142,37 @@ ${resumeNote}
  * 使用 loop 前必须先加载 eap 设计方案；并行策略；提示词规范（详尽固定 EAP）；
  * 阅读/文字编写类 loop 内部也加载 eap。
  */
-export const LOOP_GUIDE = `# loop — 规模化使用指引（guide）
+export const LOOP_GUIDE = `# loop — Scale-Up Usage Guide (guide)
 
-## ⚠️ 使用前：必须先加载 eap 设计方案
-调用 loop 前，请先加载 eap（acc-eap skill），基于 EAP 框架设计「规模化 loop 方案」。
+## ⚠️ Before using: load eap and design the plan
+Before calling loop, load eap (acc-eap skill) and design the "scale-up loop plan" based on the EAP framework.
 
-### 1. 任务拆解（E↑ 显式）
-- 大任务拆成明确子任务：每个子任务定义 目标 / 输入 / 边界（做什么、不做什么）/ 验收标准
-- 依赖显式化：有依赖的串行，无依赖的可并行
+### 1. Task decomposition (E↑ Explicit)
+- Split large tasks into explicit subtasks: each subtask defines goal / input / boundaries (what to do, what not to do) / acceptance criteria
+- Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel
 
-### 2. 提示词设计（loop 的 task 参数）
-- task 必须详尽、固定、符合 EAP：目标明确、边界划定、验收标准可判定
-- 反例「处理这个文件」——歧义；正例「读取 <路径>，提取「关键决策」表格全部行，
-  输出 JSON 数组（字段 id/结论/证据），不改动原文件」
-- 阅读整理 / 文字编写类工作（读文件提炼、总结、撰写文档、生成文本等）：
-  loop 内部 agent 也会被要求加载 eap，按 EAP 标准组织输出
+### 2. Prompt design (loop's task parameter)
+- task must be detailed, fixed, and EAP-compliant: clear goal, drawn boundaries, decidable acceptance criteria
+- Anti-example "handle this file" — ambiguous; good example "read <path>, extract all rows of the「关键决策」table,
+  output a JSON array (fields id/conclusion/evidence), do not modify the original file"
+- Reading/curating or text-writing work (extracting from files, summarizing, writing docs, generating text, etc.):
+  the loop-internal agent is also required to load eap and organize output per the EAP standard
 
-### 3. 并行策略（规模化）
-- 无依赖的子任务可并行：每个子任务一个独立 loop（独立 label + task）
-- 并行执行方式：
-  a. 后台 subagent：每个 subagent 内调 loop（各自 label），subagent 并行运行
-  b. workflow：parallel 阶段驱动多个 loop 子 agent
-- 并发安全已保证：sessionId 唯一（loop-<label>-<uuid>）、进度文件按 label 隔离
-  （AGENT_SESSIONS/loop-<label>.json）——同 label 续跑、不同 label 互不干扰
-- 汇总：并行 loop 各自产出进度后，主 agent 汇总合并（或再派一个汇总 loop）
+### 3. Parallel strategy (scale-up)
+- Independent subtasks can run in parallel: each subtask gets its own loop (own label + task)
+- Parallel execution:
+  a. Background subagents: each subagent calls loop (own label), subagents run in parallel
+  b. workflow: parallel phase drives multiple loop sub-agents
+- Concurrency safety guaranteed: unique sessionId (loop-<label>-<uuid>), progress files isolated per label
+  (AGENT_SESSIONS/loop-<label>.json) — same label resumes, different labels never interfere
+- Aggregation: after each parallel loop produces progress, the main agent merges (or spawns one aggregation loop)
 
-## 完成判定
-- 唯一完成条件 = loop 内部 agent 精确回显本轮随机验证码（stop token）；对话轮次上限 100（对齐 osp 保险阀，超限强制结束可续跑）
-- agent 非正常停止时自动重启（≤100 次防死循环）
+## Completion criteria
+- The only completion condition = the loop-internal agent echoes this round's random verification code (stop token); dialogue round cap 100 (osp fail-safe, forced stop beyond the cap, resumable)
+- Automatic restart on abnormal agent stop (≤100 restarts, anti-infinite-loop)
 
-## 等待界面
-- WebUI 会话头部 Serenity 详情卡显示运行中 loop 的进度（label / 轮次 / 最近响应），并行任务各自一行，约 3s 刷新
+## Waiting UI
+- The WebUI session-header Serenity detail card shows running loops' progress (label / round / last response), one line per parallel task, ~3s refresh
 `
 
 /** loop 运行状态（进度文件摘要；WebUI 等待界面数据源） */

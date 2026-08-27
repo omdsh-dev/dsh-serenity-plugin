@@ -55,18 +55,20 @@ describe('keeper: 纯跟踪器', () => {
     expect(t.step('read')).toBe(true) // 4+2+1 = 7 ≥ 5
   })
 
-  it('reminderText 含确认码', () => {
-    expect(reminderText('K1', 150)).toContain('[SESSION-KEEPER-recorded-K1]')
+  it('reminderText 含确认码（v1.23.0 steward 前缀）', () => {
+    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-STEWARD-recorded-K1]')
+    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-STEWARD]')
+    expect(reminderText('K1', 150)).not.toContain('SESSION-KEEPER')
   })
 })
 
 describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () => {
-  it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本', () => {
+  it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本（v1.23.0 英化）', () => {
     const text = rebuildReminderText(0.91)
     expect(text).toContain('[TRAJECTORY]')
     expect(text).toContain('91%')
-    expect(text).toContain('SESSION.md 是持久轨迹')
-    expect(text).toContain('临时可重建')
+    expect(text).toContain('persistent body')
+    expect(text).toContain('rebuildable carrier')
     expect(text).toContain('session_rebuild')
   })
 

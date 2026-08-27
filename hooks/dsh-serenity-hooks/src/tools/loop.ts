@@ -91,18 +91,18 @@ export function createLoopTool(ctx: Context): ToolDefinition {
   return defineTool({
     name: 'loop',
     description:
-      '牛马循环（老 loop 等效）：用指定模型创建专用 agent 反复执行任务直到完成。\n' +
-      '用法：loop guide（输出规模化使用指引——使用前先加载 eap 设计规模化方案）；loop 接受 task（要完成的目标）或依赖 session 上下文；模型缺省读 .opencode/serenity.json 的 loop.defaultModel（当前 minimax-cn-coding-plan/MiniMax-M3，廉价牛马）。\n' +
-      '行为：内部硬性 while 循环驱动 agent 逐轮推进任务，每轮等待无超时（agent 工作多久等多久）。唯一完成条件 = agent 精确回显本轮随机完成码（stop token），防止低智能模型提前结束。轮次不需要调用者指定——对话轮次上限 100（对齐 osp 保险阀，超限强制结束可续跑），agent 非正常停止时自动重启（重启 ≤100 次，防死循环保险阀）。\n' +
-      '进度：写入 AGENT_SESSIONS/loop-<label>.md/.json；同 label 再次调用从上次轮次续跑（不重做）。\n' +
-      '约束：loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫/session-keeper）。\n' +
-      '示例：loop 执行「扫描 SQC 并修复 DC 问题」，label: sqc-scan；loop guide',
+      'The workhorse loop (equivalent to the legacy loop): create a dedicated agent with the specified model and run it repeatedly until the task is done.\n' +
+      'Usage: loop guide (print the scale-up usage guide — load eap to design a scale-up plan before using); loop accepts task (the goal to complete) or relies on session context; default model reads loop.defaultModel from .opencode/serenity.json (currently minimax-cn-coding-plan/MiniMax-M3, the cheap workhorse).\n' +
+      'Behavior: an internal hard while-loop drives the agent round by round, each round waits with no timeout (the agent works as long as it needs). The only completion condition = the agent echoes this round\'s random completion code (stop token), preventing low-intelligence models from finishing early. Rounds need no caller input — dialogue round cap 100 (osp fail-safe; forced stop beyond the cap, resumable), automatic restart on abnormal stop (≤100 restarts, anti-infinite-loop fail-safe).\n' +
+      'Progress: written to AGENT_SESSIONS/loop-<label>.md/.json; calling again with the same label resumes from the last round (no redo).\n' +
+      'Constraints: loop agents carry full Serenity constraints (ACC identity / entry-skill system prompt / guards / trajectory-steward).\n' +
+      'Example: loop 执行「扫描 SQC 并修复 DC 问题」 (run SQC scan and fix DC issues), label: sqc-scan; loop guide',
     parameters: {
-      task: { type: 'string', required: true, description: '要完成的任务目标（必填：告诉 loop agent 做什么）' },
-      label: { type: 'string', required: true, description: '任务标签（1-50 字符；进度文件命名 loop-<label>.md/.json）' },
-      session: { type: 'string', description: '工作会话 S###（上下文提示，进度记录参考）' },
-      model: { type: 'string', description: 'provider/model（如 minimax-cn-coding-plan/MiniMax-M3）；缺省读 loop.defaultModel' },
-      guide: { type: 'boolean', description: '输出规模化使用指引（不创建 agent；使用 loop 前先看——含 eap 设计方案要求/并行策略/提示词规范）' },
+      task: { type: 'string', required: true, description: 'The task goal to complete (required: tell the loop agent what to do)' },
+      label: { type: 'string', required: true, description: 'Task label (1-50 chars; progress file named loop-<label>.md/.json)' },
+      session: { type: 'string', description: 'Work session S### (context hint, progress reference)' },
+      model: { type: 'string', description: 'provider/model (e.g. minimax-cn-coding-plan/MiniMax-M3); default reads loop.defaultModel' },
+      guide: { type: 'boolean', description: 'Print the scale-up usage guide (creates no agent; read before using loop — includes eap scale-up design requirements / parallelism strategy / prompt conventions)' },
     },
     output: {
       schema: { type: 'json' },
@@ -117,9 +117,9 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
       const cfg = loadSerenityConfig(root, DEFAULT_SERENITY_CONFIG_PATHS)
       const model = args.model ?? cfg.loop?.defaultModel
-      if (!model) throw new Error('loop 需要 model：传参或配置 .opencode/serenity.json loop.defaultModel')
+      if (!model) throw new Error('loop requires a model: pass --model or configure .opencode/serenity.json loop.defaultModel')
       const label = args.label
-      if (!ctx.agentLoop) throw new Error('loop: ctx.agentLoop 不可用')
+      if (!ctx.agentLoop) throw new Error('loop: ctx.agentLoop unavailable')
 
       const { provider, model: modelName } = splitModel(model)
       const stopToken = newStopToken()
@@ -136,7 +136,7 @@ export function createLoopTool(ctx: Context): ToolDefinition {
       // 执行载体，label 只用于进度文件/续跑）；重启时重新生成（旧 session 已损坏）。
       const parentCtx = exec.agent?.ctx
       const inherited = loopPresetInheritance(parentCtx)
-      if (!ctx.agents) throw new Error('loop: ctx.agents 不可用')
+      if (!ctx.agents) throw new Error('loop: ctx.agents unavailable')
 
       // 父会话 id（loop agent 的 parentSession 标记——WebUI 子代理活动卡可见性的关键：
       // client runtime 按 origin='subagent' + parentSessionId 识别子代理（S134 调研结论））
@@ -236,10 +236,10 @@ export function createLoopTool(ctx: Context): ToolDefinition {
         progressFile: json,
         lastResponse: lastResponse.slice(0, 2000),
         usage: {
-          how: `loop 内部硬性 while 驱动 agent 逐轮推进，agent 精确回显随机完成码即终止；对话轮次上限 ${LOOP_MAX_ROUNDS}（对齐 osp 保险阀），agent 非正常停止时自动重启（≤${LOOP_MAX_RESTARTS} 次）`,
-          progress: `进度在 AGENT_SESSIONS/loop-${label}.md 与 .json；同 label 再调 loop 会从下一轮续跑（不重做）`,
-          constraints: 'loop agent 受完整 Serenity 约束（ACC 身份/入口技能系统提示词/守卫）',
-          next: done ? '任务已完成；可查看进度文件收尾' : `任务未完成（${finishReason}，已达 ${LOOP_MAX_ROUNDS} 轮或 ${LOOP_MAX_RESTARTS} 次重启保险阀）；可同 label 续跑`,
+          how: `loop drives the agent round by round via an internal hard while-loop; the agent terminates by echoing the random completion code; dialogue round cap ${LOOP_MAX_ROUNDS} (osp fail-safe), automatic restart on abnormal stop (≤${LOOP_MAX_RESTARTS} times)`,
+          progress: `Progress in AGENT_SESSIONS/loop-${label}.md and .json; calling loop again with the same label resumes from the next round (no redo)`,
+          constraints: 'loop agents carry full Serenity constraints (ACC identity / entry-skill system prompt / guards / trajectory-steward)',
+          next: done ? 'Task completed; check the progress file to wrap up' : `Task incomplete (${finishReason}, hit ${LOOP_MAX_ROUNDS} rounds or ${LOOP_MAX_RESTARTS} restart fail-safe); resume with the same label`,
         },
       }
     },

@@ -51,7 +51,7 @@ function git(root: string, args: string[]): { stdout: string; stderr: string } {
       stdout: (err.stdout?.toString() ?? '').trimEnd(),
       // 超时（err.killed）无 stderr——显式提示（调用方误判成功）
       stderr: err.killed
-        ? `git 操作超时（${GIT_TIMEOUT_MS / 1000}s）`
+        ? `git operation timed out (${GIT_TIMEOUT_MS / 1000}s)`
         : (err.stderr?.toString() ?? '').trimEnd(),
     }
   }
@@ -78,7 +78,7 @@ export function runGit(root: string, args: GitArgs): JsonValue {
     case 'status': {
       // -c core.quotepath=false：中文/空格路径按原文输出
       const r = git(root, ['-c', 'core.quotepath=false', 'status', '--porcelain'])
-      if (r.stderr) throw new Error(`status 失败：${r.stderr.trim()}`)
+      if (r.stderr) throw new Error(`status failed: ${r.stderr.trim()}`)
       const lines = r.stdout ? r.stdout.split('\n') : []
       const files = lines.map((line) => {
         const status = line.slice(0, 2).trim() || '??'
@@ -134,7 +134,7 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       // 含 `->`——旧逻辑先判 `stderr.includes('->')` 成功会把拒绝当成功（osp 同病，用户实测
       // non-fast-forward exit 1 却返回 "Pushed to ..."，提交从未上远程）
       if (stderr.includes('non-fast-forward') || stderr.includes('rejected') || stderr.includes('[rejected]')) {
-        return `[REJECTED] Push to origin/${branch} was rejected (non-fast-forward).\n\n远程有新的提交，本地落后。操作建议：\n  1. 先用 bash: git fetch origin ${branch}\n  2. 查看远程变更: git log HEAD..origin/${branch}\n  3. 合并或变基: git merge origin/${branch} 或 git rebase origin/${branch}\n  4. 有冲突则手动解决后: git add ... && git commit\n  5. 再次推送: cc_git push`
+        return `[REJECTED] Push to origin/${branch} was rejected (non-fast-forward).\n\nRemote has new commits and your local branch is behind. Suggested actions:\n  1. Use bash: git fetch origin ${branch}\n  2. Inspect remote changes: git log HEAD..origin/${branch}\n  3. Merge or rebase: git merge origin/${branch} or git rebase origin/${branch}\n  4. Resolve conflicts manually if any: git add ... && git commit\n  5. Push again: cc_git push`
       }
       if (!stderr || stderr.includes('->') || stderr === '') {
         return stdout || `Pushed to origin/${branch}`
@@ -164,7 +164,7 @@ export function runGit(root: string, args: GitArgs): JsonValue {
         mergeResult.stderr.includes('rejected') ||
         mergeResult.stderr.includes('could not be applied')
       ) {
-        return `[REJECTED] Pull from origin/${branch} was rejected (non-fast-forward).\n\n远程有新的提交，本地的历史与远程产生了分歧（非快进）。操作建议：\n  1. 查看差异: cc_git log HEAD..origin/${branch}\n  2. 用 bash 手动合并: git merge origin/${branch}\n  3. 或用 rebase: git rebase origin/${branch}\n  4. 有冲突则手动解决后: git add <file> && git commit\n  5. 推送: cc_git push`
+        return `[REJECTED] Pull from origin/${branch} was rejected (non-fast-forward).\n\nRemote has new commits and your local history diverged from remote (non-fast-forward). Suggested actions:\n  1. Inspect differences: cc_git log HEAD..origin/${branch}\n  2. Merge manually with bash: git merge origin/${branch}\n  3. Or rebase: git rebase origin/${branch}\n  4. Resolve conflicts manually if any: git add <file> && git commit\n  5. Push: cc_git push`
       }
       throw new Error(`cc_git pull failed:\n${mergeResult.stderr}`)
     }
@@ -172,7 +172,7 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       // 对齐 osp：-n 默认 10，max 100（运行时兜底 + schema minimum/maximum 双保险）
       const n = Math.min(Math.max(args.count ?? 10, 1), 100)
       const r = git(root, ['-c', 'core.quotepath=false', 'log', '--oneline', '-n', String(n)])
-      if (r.stderr) throw new Error(`git log 失败：${r.stderr.trim()}`)
+      if (r.stderr) throw new Error(`git log failed: ${r.stderr.trim()}`)
       if (!r.stdout) return '(no commits)'
       return r.stdout
     }
@@ -187,6 +187,6 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       return stdout
     }
     default:
-      throw new Error(`未知 action: ${args.action as string}`)
+      throw new Error(`Unknown action: ${args.action as string}`)
   }
 }

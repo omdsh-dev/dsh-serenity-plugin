@@ -1,3 +1,27 @@
+## v1.23.0 — 2026-08-27（提示词全英化 + Trajectory Steward 定名 + Session=载体定义，S142）
+
+**Scope:** specs v1.3.1 定义升级（用户拍板）——**Session = Trajectory 的可重建载体**（同义视角：宁静号 session 与 trajectory 指同一认知存在的两个面；载体视角：SESSION.md 是轨迹持久身体原位不动，工作会话是可丢弃重建的运行副本）。dsp 所有提示词全英化 + 维护机制定名 **Trajectory Steward**（用户从 Keeper/Warden/Curator/Custodian 中选定 Steward）。
+
+### 变更
+- **概念定义（Session = Trajectory 载体）**：
+  - Session 块：`Active session: {id} — {dir} (this session is the rebuildable carrier of the trajectory)` + `SESSION.md path: {path} (the trajectory's persistent body — stays in place through rebuilds)`
+  - Principles 块新增 **The session-trajectory relation** 段（本体论后：identity belongs to the trajectory, not to any session）
+  - Metaphor 第 7 条载体化：`SESSION.md is the trajectory's logbook — the persistent body of the voyage; sessions are rebuildable carriers of the trajectory. Discard the carrier, keep the logbook.`
+  - rebuild 锚点/steer/工具描述：`[TRAJECTORY-REBUILD] ... (Ship of Theseus: the carrier is replaced, the trajectory continues)` / `Continue the work of {SESSION name}` / `Persistent trajectory (SESSION.md, unmoved)`
+  - keeper rebuildReminderText：`This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy`
+- **机制定名 Trajectory Steward（用户拍板）**：计分提醒前缀 `[SESSION-KEEPER]` → **`[TRAJECTORY-STEWARD]`**，ACK 码 `[TRAJECTORY-STEWARD-recorded-{code}]` / `[TRAJECTORY-STEWARD-skipped-{code}]`；内部标识（registerKeeper/KeeperTracker）保留；`[TRAJECTORY]` 重建提示前缀保持（v1.22.1 已拍板）；改名兼容：ACK 码单次使用不跨会话，旧前缀零影响
+- **机制预声明（specs §5.10 要求，用户指出缺口）**：Session 块新增 TRAJECTORY-STEWARD 预声明段——模型预先知道存在计分督促机制 + ACK 码协议（write/edit=3, task=10, read/grep/glob/msm=1, +1/min），机制先于提醒
+- **提示词全英化（模型可见文本，7 处 + 工具面）**：
+  - system-prompt.ts：EAP 块英化（E↑ Explicit / R↓ Reconstructable / S↑ Stable）、ACC 块工具清单行英化（11 工具含 session_rebuild/localstore）、ℹ️ 路径提示行英化、Code Mode 适配行英化
+  - keeper.ts rebuildReminderText 英化；context.ts `[ACC]` 注入英化；env.ts DSH_SERENITY_* description 英化
+  - rebuild.ts / tools/rebuild.ts 锚点/steer/instruction/错误消息英化
+  - 11 工具 description + 参数 description（53 处）英化；eap/neat/cce 工具内容全文英化（EAP_CONTENT/NEAT_CONTENT/CCE_CONTENT + section 切分锚点同步英文）
+  - 错误消息英化：guards deny（bash/path escape/governance/blacklist）、fs-ops/msm-ops/localstore-ops/git-ops/kit-ops/config-ops/session/loop 全部 throw、git REJECTED 建议文本、loop-ops buildRoundPrompt/LOOP_GUIDE、session SEP hook-guide、skills-discovery 截断提示、imageNoteTemplate（对话消息）
+- **保留不动（向前兼容）**：SESSION.md 模板与中文章节名（qa/keeper 按中文章节解析）、mech-registry 描述（CCC 内容）、SKILL.md 全文、人类 UI（登录页/设置面板/状态卡/console 日志）、client 校验消息
+- **测试同步**：osp-alignment（Session 块新结构/Principles 关系段/accBlock 11 工具）、keeper/gate（steward 前缀）、rebuild（英文锚点）、context（[ACC] 英文）、system-prompt（EAP 英文）、acc-extras（EAP/NEAT/CCE 内容）、guards/skills-discovery/loop-ops/config-ops/ops/fs-ops 断言——**40 files / 429 tests 全绿**
+- **specs 同步**：serenity-acc-specs v1.3.1 已先行发布（§0.3.1 Session 载体定义 / §2 术语表 / I6 扩展 / §5.2 Metaphor 第 7 条 / §5.10 trajectory-steward + 预声明要求 / §5.8 Session 块）
+- typecheck ✓（node + client）→ test ✓（429）→ build ✓（lib/index.js + lib/client.js 64053 B）
+
 ## v1.22.9 — 2026-08-27（F3 会话命名修复：可观测性 + S###-日期格式 + 测试真实链路，S142）
 
 **Scope:** 用户实测"use 后名字没改" + 确认"use 交给 LLM 是核心设计"。诊断结论：rename 链路被静默吞错（无日志）、测试测假路径（mock sessionTitleAvailable=true）、命名格式不符需求（dirName 超长 + 中文 vs 用户拍板 S###-日期）。

@@ -75,12 +75,12 @@ export function buildRebuildAnchor(
 ): string {
   const rel = activeMdPath.startsWith(root) ? activeMdPath.slice(root.length + 1) : activeMdPath
   const lines = [
-    '[TRAJECTORY-REBUILD] 会话已清空重建（Ship of Theseus：历史丢弃，身份延续）。',
+    '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the trajectory continues).',
     '',
     ...anchorMessages.flatMap((text) => [stripAckSuffix(text), '']),
-    sessionName !== '' ? `继续 ${sessionName} 的工作。` : '继续当前工作。',
-    `- 持久轨迹（SESSION.md，未移动）：${rel}`,
-    `- 请先读取该 SESSION.md（目标/决策/进度/未解决问题），从上次进度继续。`,
+    sessionName !== '' ? `Continue the work of ${sessionName}.` : 'Continue the current work.',
+    `- Persistent trajectory (SESSION.md, unmoved): ${rel}`,
+    `- Read that SESSION.md first (goal/decisions/progress/unresolved), then continue from the last checkpoint.`,
   ]
   return lines.join('\n')
 }
@@ -124,7 +124,7 @@ export async function queueRebuild(
   opts: { root: string; note?: string; agentCwd: string; dshSessionId: string },
 ): Promise<RebuildResult> {
   if (!readSimpleSettings().rebuildEnabled) {
-    throw new Error('session_rebuild 已禁用（rebuild.enabled=false，可在 dsh 设置面板开启）')
+    throw new Error('session_rebuild is disabled (rebuild.enabled=false — enable it in the dsh settings panel)')
   }
   const { root, note, dshSessionId } = opts
 
@@ -132,7 +132,7 @@ export async function queueRebuild(
   const session = (ctx.sessions as { get?: (id: SessionId) => Session | undefined } | undefined)
     ?.get?.(dshSessionId as SessionId)
   if (!session) {
-    throw new Error(`无法定位 dsh 会话 ${dshSessionId}（会话可能已关闭）`)
+    throw new Error(`Unable to locate dsh session ${dshSessionId} (session may be closed)`)
   }
 
   // ② 当前 use 的宁静号 SESSION（持久轨迹路径；scope 与 session 工具 agentScope 一致=裸 id）
@@ -203,13 +203,13 @@ export function registerRebuildTurnHook(ctx: Context): void {
         // v1.22.5 自动继续：steer 到 next-step 队列 → turn 循环 nextStep 非空不 break →
         // 模型在同轮内自动消费该指令，读取 SESSION.md 从上次进度继续（无需用户手工输入）
         agent.steer(createUserMessage({
-          content: [{ type: 'text', text: '[TRAJECTORY-REBUILD] 会话已清空重建。请立即按上方锚点指令读取持久轨迹（SESSION.md）并从上次进度自动继续工作。' }],
+          content: [{ type: 'text', text: '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt. Follow the anchor instructions above now: read the persistent trajectory (SESSION.md) and continue the work automatically from the last checkpoint.' }],
           source: PLUGIN_SOURCE,
         }))
-        console.log(`[serenity-hooks] session_rebuild 已执行并自动继续（turn ${payload.turn ?? '?'} 结束）：${id}`)
+        console.log(`[serenity-hooks] session_rebuild executed with auto-continue (turn ${payload.turn ?? '?'} ended): ${id}`)
       }
     } catch (error) {
-      console.warn(`[serenity-hooks] session_rebuild 执行失败: ${String((error as Error)?.message ?? error)}`)
+      console.warn(`[serenity-hooks] session_rebuild failed: ${String((error as Error)?.message ?? error)}`)
     }
   })
 }

@@ -26,7 +26,7 @@ describe('context: ACC 身份文本', () => {
     const t = accIdentityText(dir)
     expect(t).toContain(dir)
     expect(t).toContain(ACC_VERSION)
-    expect(t).toContain('宁静号认知容器已激活')
+    expect(t).toContain('[ACC] Serenity cognitive container active')
   })
 
   it('读取 loop 默认模型', () => {
@@ -94,7 +94,7 @@ describe('context: ACC 注入消息（S134 去重：对话流只含简短身份�
     const msg = accMessage(dir, ['.opencode/serenity.json'], 30000) as { content: Array<{ text: string }> }
     const text = msg.content[0].text
     // 简短身份锚点
-    expect(text).toContain('[ACC] 宁静号认知容器已激活')
+    expect(text).toContain('[ACC] Serenity cognitive container active')
     expect(text).toContain(dir)
     // 完整身份不再重复注入（系统提示词层承担）
     expect(text).not.toContain('=== Serenity ACC ===')

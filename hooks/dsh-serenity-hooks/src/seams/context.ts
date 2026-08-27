@@ -37,14 +37,14 @@ export function accIdentityText(
   const loop = cfg.loop?.defaultModel
   const phase2 = existsSync(resolve(root, '.dsh', 'PHASE2-PROMPT.md'))
   const lines = [
-    `[ACC] 宁静号认知容器已激活（dsh-serenity-hooks v${ACC_VERSION}）`,
-    `- CCC 根：${root}`,
-    `- 约束：路径隔离（P3，fs 沙箱）+ 会话追踪（AGENT_SESSIONS/）`,
-    `- 知识：加载 acc-serenity 入口技能；设计协作走 acc-eap / acc-neat`,
+    `[ACC] Serenity cognitive container active (dsh-serenity-hooks v${ACC_VERSION})`,
+    `- CCC root: ${root}`,
+    `- Constraints: path isolation (P3, fs sandbox) + session tracking (AGENT_SESSIONS/)`,
+    `- Knowledge: load the acc-serenity entry skill; use acc-eap / acc-neat for design collaboration`,
   ]
-  if (loop) lines.push(`- loop 默认模型：${loop}`)
+  if (loop) lines.push(`- loop default model: ${loop}`)
   if (phase2) {
-    lines.push('- ⚠️ **Phase 2 认知对齐访谈待完成**：请按下方 5 个 Topic 逐项访谈并沉淀答案到 AGENT_SESSIONS/ 会话')
+    lines.push('- ⚠️ **Phase 2 cognitive alignment interview pending**: work through the 5 Topics below and record answers in an AGENT_SESSIONS/ session')
     try {
       const prompt = readFileSync(resolve(root, '.dsh', 'PHASE2-PROMPT.md'), 'utf-8')
       lines.push(truncateContent(prompt, Math.min(entrySkillMaxChars, 8000)))

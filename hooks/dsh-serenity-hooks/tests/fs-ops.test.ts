@@ -164,7 +164,7 @@ describe('fs-ops: reveal（OS 文件管理器打开）', () => {
   })
 
   it('reveal 缺 path 报错', () => {
-    expect(() => run('reveal')).toThrow(/reveal 需要 path/)
+    expect(() => run('reveal')).toThrow(/reveal requires path/)
   })
 
   it('reveal 不存在路径报错', () => {

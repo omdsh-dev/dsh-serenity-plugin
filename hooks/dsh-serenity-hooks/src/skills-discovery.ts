@@ -99,5 +99,5 @@ export function findEntrySkill(root: string): EntrySkill | null {
 
 export function truncateContent(content: string, maxChars: number): string {
   if (content.length <= maxChars) return content
-  return content.slice(0, maxChars) + `\n...（已截断，原长 ${content.length} 字符）`
+  return content.slice(0, maxChars) + `\n... (truncated, original length ${content.length} chars)`
 }

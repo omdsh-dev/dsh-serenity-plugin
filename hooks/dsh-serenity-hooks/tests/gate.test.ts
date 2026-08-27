@@ -59,7 +59,7 @@ describe('keeper: 激活门控（只在 .serenity 存在的目录生效）', () 
     expect(downstream).toEqual({ kind: 'accept' })
   })
 
-  it('CCC 目录：达阈值注入 [SESSION-KEEPER] 提醒', async () => {
+  it('CCC 目录：达阈值注入 [TRAJECTORY-STEWARD] 提醒', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'keeper-gate-'))
     writeFileSync(join(dir, '.serenity'), 'test')
     try {
@@ -73,7 +73,7 @@ describe('keeper: 激活门控（只在 .serenity 存在的目录生效）', () 
       const texts = (downstream.additionalContexts ?? [])
         .map((c) => c.content?.map((b) => b.text).join(''))
         .join('\n')
-      expect(texts).toContain('[SESSION-KEEPER-recorded-K1]')
+      expect(texts).toContain('[TRAJECTORY-STEWARD-recorded-K1]')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
