@@ -7,6 +7,8 @@
  *  - conversation.input.dock — 图片自动落盘兜底（S142）：当前模型不支持图片时，
  *    发送失败（MODEL_DOES_NOT_SUPPORT_IMAGES）自动补救——图片上传 _tmp/images_from_user/、
  *    以「用户提供了图片在 {path}」文本重发，agent 经 CCC 自己的 vlm MSM 自主处理。
+ *  - conversation.input.dock — 任意文件粘贴自动落盘（v1.24.1）：非图片文件粘贴 →
+ *    _tmp/files_from_user/ + draft 追加路径提示（随发送进消息），agent 经 CCC MSM 处理。
  *  - settings.section — dsh 原生设置面板的 serenity-hooks 简单配置页（v1.21 分层：
  *    开关/阈值走 DSH settings；账号列表走宁静号高级面板）。
  * Export 纪律：只暴露 cordis apply 面。
@@ -19,6 +21,8 @@ import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-r
 import { SafeModePanel } from './SafeModePanel.js'
 import { ImageFallbackDock, ImageFallbackInjected } from './ImageFallbackDock.js'
 import { uploadImage, getDraftFiles, resendText } from './image-fallback-api.js'
+import { FileFallbackDock, FileFallbackInjected } from './FileFallbackDock.js'
+import { uploadFile } from './file-fallback-api.js'
 import { SettingsSection, SettingsSectionInjected, SerenitySimpleWire } from './SettingsSection.js'
 
 export const inject = ['slots', 'conversation', 'sessions', 'settingsScope']
@@ -60,6 +64,24 @@ export function apply(ctx: ClientContext): void {
           ImageFallbackDock,
         ),
       'serenity: image fallback dock',
+    )
+
+    // 任意文件粘贴自动落盘（v1.24.1）：input.dock 条目——非图片文件粘贴 →
+    // _tmp/files_from_user/ + draft 追加路径提示（随发送进消息，不自动发送）；无 UI
+    scope.effect(
+      () =>
+        scope.slots.register(
+          {
+            name: 'conversation.input.dock',
+            id: 'serenity-file-fallback',
+            order: 110,
+            inject: (): FileFallbackInjected => ({
+              uploadFile: (file, sessionId) => uploadFile(file, sessionId),
+            }),
+          },
+          FileFallbackDock,
+        ),
+      'serenity: file fallback dock',
     )
 
     // v1.21 分层：简单配置 → dsh 原生设置面板（settings.section；降级守卫在组件内）

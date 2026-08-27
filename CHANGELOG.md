@@ -1,3 +1,15 @@
+## v1.24.1 — 2026-08-27（任意文件粘贴自动落盘 _tmp/files_from_user/，S142 用户需求）
+
+**Scope:** 用户需求——"粘贴文件（非图片格式）自动也放 _tmp 去"。调研确认 DSH 输入框只认图片（`InputBar.onPaste` 把所有文件交给 `intakeImages` → 非图片被 `addImages` 拒绝 toast+丢弃，无 rail 无发送通道）→ 任意文件必须**主动拦截 paste + 落盘**。用户拍板：① 提示方式 = **draft 追加**（不自动发送，随用户消息进对话）；② 单文件上限 = **10MB**（与图片一致）；③ 版本号放缓（归 v1.24.1，不升 minor）。
+
+### 变更
+- **node half `/serenity/file-upload`**（api.ts）：`saveFileToTmp` 核心（可测）——文件名校验 + **可执行扩展名拒绝**（`BLOCKED_FILE_EXTS`：exe/dll/msi/bat/cmd/ps1/com/scr/lnk/sh/vbs/bin/app/deb/rpm/jar——安全边界，agent 不被诱导执行）+ base64 解码 + **10MB 上限** → 写 `_tmp/files_from_user/<ts>-<rand>-<safeName>`（与 `images_from_user` 并列）；`sanitizeFileName`（路径成分剥离/去前导点/非法字符替换/限长 100）；handler：POST + x-serenity-ui 头 + readBody 20MB + 按会话 cwd 解析 CCC 根
+- **client half `FileFallbackDock`**（input.dock 槽，静默无 UI）：document 级 **capture 阶段 paste 监听**（先于 DSH textarea onPaste）——剪贴板含非图片文件时：① 纯文件粘贴（无图片无文本）→ preventDefault（阻止 DSH toast 拒绝）；混合粘贴（含图片/文本）→ 不拦截（图片正常进 rail / 文本正常插入，文件异步处理）② 逐个上传 ③ 成功 → **draft 末尾追加** `The user provided a file (path: ...)`（多文件每行；draft 快照 ref 防异步期间打字覆盖 + 连续粘贴串行队列）
+- **`file-fallback-api.ts`**（client）：`collectNonImageFiles`（items 注入纯函数，可单测——图片留给 DSH）、`fileNoteTemplate`（单/多文件路径模板，模型可见英文对齐 v1.20.6 图片教训）、`uploadFile`
+- **client/index.ts**：注册 `serenity-file-fallback` dock 条目（order 110，与图片兜底 order 100 并列）
+- **测试 +14**：api-file-upload.test.ts（sanitizeFileName 3 + saveFileToTmp 6：合法 pdf/路径剥离/可执行拒绝/缺失拒绝/超限/唯一性）、file-fallback.test.ts（collectNonImageFiles 3 + fileNoteTemplate 2）——**42 files / 463 tests 全绿**
+- typecheck ✓（node + client）→ build ✓（lib/client.js 78259 B）
+
 ## v1.24.0 — 2026-08-27（loop（牛马）→ handyman（杂工）重构，S142 用户拍板）
 
 **Scope:** 用户对 loop 工具的四点重设计——① jobs 并行上限 10（便宜模型便宜）；② worker 工具面不含 handyman（编排归主 agent，递归只走 subagent）；③ 不兼容旧 loop 进度文件（仅 handyman- 前缀）；④ handyman.models 未配置 → 报错要求配置。语义对齐 osp loop：同步（非异步）+ 指定白名单模型 + 自主循环到完成（stop-token 唯一完成判据）+ 内部递归同样低能 subagent（DSH 原生模型继承）+ workflow jobs 编排能力。方案文档 `docs/handyman-design.md`（用户确认后落盘）。

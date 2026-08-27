@@ -13,7 +13,7 @@
 import type { Context } from 'cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { extname, join } from 'node:path'
 // 类型引用：拉入 webserver / session 包的 cordis 声明增强（ctx.webServer / ctx.sessions）；运行时擦除
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session'
@@ -25,6 +25,7 @@ import { readAdvancedSettings, toWire, applyWirePatch } from './config-ops.js'
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const HANDYMEN_PATH = '/serenity/handymen'
 const UPLOAD_PATH = '/serenity/image-upload'
+const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
@@ -32,6 +33,14 @@ export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
 export const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const EXT_BY_MEDIA: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 单图 10MB 上限
+
+/** 文件落盘目录（CCC 根相对；v1.24.1 粘贴任意文件自动落盘——agent 经 CCC 既有 MSM（pdf-extract/archive-extract 等）自主处理） */
+export const FILE_UPLOAD_DIR = '_tmp/files_from_user'
+/** 拒绝的可执行/危险扩展名（安全边界：不落盘可执行文件，防 agent 被诱导执行） */
+export const BLOCKED_FILE_EXTS = new Set([
+  'exe', 'dll', 'msi', 'bat', 'cmd', 'ps1', 'com', 'scr', 'lnk', 'sh', 'vbs', 'bin', 'app', 'deb', 'rpm', 'jar',
+])
+const MAX_FILE_BYTES = 10 * 1024 * 1024 // 单文件 10MB 上限（用户拍板：与图片一致）
 
 /**
  * 图片落盘核心逻辑（可测）：校验 mediaType 白名单 + base64 解码 + 大小上限 →
@@ -55,6 +64,48 @@ export function saveImageToTmp(root: string, mediaType: string, data: string): s
   const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}-${Math.random().toString(36).slice(2, 8)}.${ext}`
   writeFileSync(join(dir, filename), bytes)
   return `${IMAGE_UPLOAD_DIR}/${filename}`
+}
+
+/**
+ * 文件名脱敏（路径逃逸 + 非法字符）：取 basename（去 / 与 \），剥离前导点/空，
+ * 非法字符 → '-',限长。返回空则 'file'。
+ */
+export function sanitizeFileName(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? ''
+  const cleaned = base
+    .replace(/[<>:"|?*\u0000-\u001f]/g, '-')
+    .replace(/^\.+/, '')
+    .trim()
+  if (cleaned === '') return 'file'
+  return cleaned.slice(0, 100)
+}
+
+/**
+ * 任意文件落盘核心逻辑（可测）：文件名校验 + 可执行扩展名拒绝 + base64 解码 +
+ * 大小上限（10MB）→ 写 CCC 根 _tmp/files_from_user/<ts>-<rand>-<safeName>，返回相对路径。
+ * 校验失败抛 Error（handler 转 400）。
+ */
+export function saveFileToTmp(root: string, fileName: string, data: string): string {
+  if (typeof fileName !== 'string' || fileName.length === 0) {
+    throw new Error('missing file name')
+  }
+  const ext = extname(fileName).slice(1).toLowerCase()
+  if (ext !== '' && BLOCKED_FILE_EXTS.has(ext)) {
+    throw new Error(`blocked executable file type: .${ext}`)
+  }
+  if (typeof data !== 'string' || data.length === 0) {
+    throw new Error('missing file data')
+  }
+  const bytes = Buffer.from(data, 'base64')
+  if (bytes.length === 0 || bytes.length > MAX_FILE_BYTES) {
+    throw new Error(`file size out of range: ${bytes.length} bytes (max ${MAX_FILE_BYTES})`)
+  }
+  const dir = join(root, FILE_UPLOAD_DIR)
+  mkdirSync(dir, { recursive: true })
+  const safeName = sanitizeFileName(fileName)
+  const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}-${Math.random().toString(36).slice(2, 8)}-${safeName}`
+  writeFileSync(join(dir, filename), bytes)
+  return `${FILE_UPLOAD_DIR}/${filename}`
 }
 
 function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
@@ -174,6 +225,38 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           return
         }
         const path = saveImageToTmp(root, body.mediaType ?? '', body.data ?? '')
+        sendJson(res, 200, { path })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+
+  // /serenity/file-upload：任意文件落盘（v1.24.1——粘贴非图片文件自动存
+  // _tmp/files_from_user/，agent 经 CCC 既有 MSM（pdf-extract/archive-extract 等）自主处理）。
+  // client 专属（x-serenity-ui 头）；可执行扩展名拒绝 + 10MB 上限 + CCC 根内写入。
+  ctx.webServer.register({
+    kind: 'exact',
+    path: FILE_UPLOAD_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        if (req.headers['x-serenity-ui'] !== '1') {
+          sendJson(res, 403, { error: '文件落盘仅限 WebUI（client 专用）' })
+          return
+        }
+        const raw = await readBody(req, 20 * 1024 * 1024)
+        const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; name?: string; data?: string }
+        const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
+        const root = findSerenityRoot(workspace)
+        if (!root) {
+          sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
+          return
+        }
+        const path = saveFileToTmp(root, body.name ?? '', body.data ?? '')
         sendJson(res, 200, { path })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
