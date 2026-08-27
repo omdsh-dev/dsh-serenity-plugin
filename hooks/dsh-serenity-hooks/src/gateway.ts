@@ -327,9 +327,10 @@ export function startGateway(
         const cookieCsrf = cookieValue(req.headers.cookie, 'serenity_csrf')
         const formCsrf = csrfFromRequest(req, params)
         if (cookieCsrf === undefined || formCsrf === null || !safeEqual(cookieCsrf, formCsrf)) {
-          console.warn(`[serenity-hooks] 登录拒绝（CSRF 校验失败）：user=${user} ip=${remote}`)
+          // v1.24.8 诊断增强：cookieSecure=true 时明文 HTTP 会丢 CSRF cookie（浏览器 Secure 语义）
+          console.warn(`[serenity-hooks] 登录拒绝（CSRF 校验失败）：user=${user} ip=${remote} cookieSecure=${cookieSecure ? 'on' : 'off'} cookieCsrf=${cookieCsrf === undefined ? 'missing' : 'present'} formCsrf=${formCsrf === null ? 'missing' : 'present'}`)
           res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' })
-          res.end(loginPageHtml('会话校验失败，请刷新页面重试'))
+          res.end(loginPageHtml('会话校验失败，请刷新页面重试' + (cookieSecure ? '（若仍失败：设置面板关闭 Secure Cookie——明文 HTTP 下必须关闭）' : '')))
           return
         }
 
@@ -384,10 +385,14 @@ export function startGateway(
     }
 
     // 其余 → 登录页（v1.22.4：登录页注入 CSRF cookie，供登录表单双提交）
+    // v1.24.8 修复：CSRF cookie **不设 Secure**（独立于 cookieSecure）——明文 HTTP 下
+    // Secure cookie 浏览器规范不发送 → CSRF 校验永远失败（"会话校验失败"，用户实测）。
+    // CSRF token 是短时随机会话防护（HttpOnly + SameSite=Strict + 双提交已足够），
+    // 泄露无认证价值；只有登录成功的会话 token cookie 受 cookieSecure 控制。
     const csrf = newCsrfToken()
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',
-      'set-cookie': `serenity_csrf=${csrf}; HttpOnly; SameSite=Strict; Path=/${cookieSecure ? '; Secure' : ''}`,
+      'set-cookie': `serenity_csrf=${csrf}; HttpOnly; SameSite=Strict; Path=/`,
     })
     res.end(loginPageHtml('', csrf))
   })

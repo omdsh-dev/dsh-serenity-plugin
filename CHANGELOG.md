@@ -1,3 +1,12 @@
+## v1.24.8 — 2026-08-27（登录 CSRF cookie 去 Secure 修复：明文 HTTP 外部访问登录失效，S142 用户实测）
+
+**Scope:** 用户实测外部端口（3081）登录失败——"会话校验失败，请刷新页面重试 校验不通过，我扫的是对的"。定位：登录页注入的 **CSRF cookie 带 Secure 属性**（受 cookieSecure 配置控制）——用户开启 Secure Cookie 后，**明文 HTTP 下浏览器规范不发送 Secure cookie** → `serenity_csrf` cookie 永远缺失 → CSRF 双提交校验在验证码校验**之前**就失败（与验证码对错无关，用户误以为码错了）。
+
+### 变更
+- **CSRF cookie 独立于 cookieSecure**（gateway.ts 登录页注入）：`serenity_csrf` 去掉 Secure——CSRF token 是**短时随机会话防护**（HttpOnly + SameSite=Strict + 双提交已足够，泄露无认证价值），不应受传输加密开关影响；**只有登录成功的会话 token cookie 保留 cookieSecure 控制**（HTTPS 反代时仍 Secure）
+- **诊断增强**：CSRF 失败日志带 `cookieSecure=on/off` + `cookieCsrf/formCsrf=missing|present`；失败页提示补充"若仍失败：设置面板关闭 Secure Cookie——明文 HTTP 下必须关闭"
+- typecheck ✓（node + client）→ test ✓（42 files / 464 tests）→ build ✓（lib/client.js 133133 B）
+
 ## v1.24.7 — 2026-08-27（TOTP 绑定去确认码：生成即绑定，S142 用户反馈）
 
 **Scope:** 用户反馈"绑定 admin 的验证器需输入 6 位确认码 这个是什么意思，讲道理生成密钥固定下来就行了"——确认码是防呆校验（防止保存一个用户没录进去的 secret），但二选一登录下冗余：没录的 secret 登录时 TOTP 方式自然不生效（密码仍可用）。**用户拍板：生成密钥固定下来就行**——去掉确认码。
