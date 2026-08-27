@@ -67,7 +67,7 @@
 }
 
 .sp-ver {
-  color: var(--dsw-alias-label-dimmed);
+  color: var(--dsw-alias-label-secondary);
   font-size: 11px;
   font-family: var(--ds-font-family-code, monospace);
 }
