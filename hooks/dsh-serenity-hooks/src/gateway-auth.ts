@@ -1,0 +1,260 @@
+/**
+ * gateway-auth.ts — F1 双端口网关：认证域纯逻辑（v1.22.4 安全加固）
+ *
+ * 从 gateway.ts 拆分（S142 熵点治理，v1.22.8）：认证纯逻辑独立成模块——
+ * 登录验证（scrypt）/ 会话 token（滑动 TTL + 吊销）/ 失败锁定（账号维度指数退避）/
+ * CSRF（双提交 + Origin 校验）/ cookie 解析 / 登录页 HTML。
+ * gateway.ts 保留 HTTP 装配（startGateway/registerGateway）并从本模块 import。
+ *
+ * 纯函数设计（可单测）：无 socket/无 HTTP 依赖，全部导出可注入测试。
+ */
+
+import { randomBytes, timingSafeEqual } from 'node:crypto'
+import type { IncomingMessage } from 'node:http'
+import { verifyPassword } from './config-ops.js'
+
+// ── 账号验证（纯逻辑）：user + password 对 accounts 匹配（scrypt）──
+
+export function verifyGatewayLogin(
+  accounts: readonly { user: string; passHash: string }[],
+  user: string,
+  password: string,
+): boolean {
+  const account = accounts.find((a) => a.user === user)
+  if (!account) return false
+  return verifyPassword(password, account.passHash)
+}
+
+// ── 会话（token + TTL + 主动登出）──
+
+/** 会话滑动过期时长（毫秒）：24h 无活动 → 失效（用户重新登录） */
+export const SESSION_TTL_MS = 24 * 60 * 60 * 1000
+
+export interface GatewaySession {
+  token: string
+  /** 最后活动时间（滑动续期：每次校验通过刷新） */
+  lastActiveAt: number
+  /** 绑定账号（审计/登出定位） */
+  user: string
+}
+
+/** 内存会话表（重启即清空——用户决策） */
+const sessions = new Map<string, GatewaySession>()
+
+/** 颁发会话 token（Hex 32 字节） */
+export function issueToken(user: string): string {
+  const token = randomBytes(32).toString('hex')
+  sessions.set(token, { token, lastActiveAt: Date.now(), user })
+  return token
+}
+
+/** 主动吊销会话（登出）；返回是否确实存在 */
+export function revokeToken(token: string): boolean {
+  return sessions.delete(token)
+}
+
+/**
+ * 校验 token 有效性（滑动过期：有效则刷新 lastActiveAt）。
+ * @returns 有效会话或 undefined
+ */
+export function validateToken(token: string | undefined): GatewaySession | undefined {
+  if (typeof token !== 'string' || token === '') return undefined
+  const session = sessions.get(token)
+  if (session === undefined) return undefined
+  if (Date.now() - session.lastActiveAt > SESSION_TTL_MS) {
+    sessions.delete(token)
+    return undefined
+  }
+  session.lastActiveAt = Date.now() // 滑动续期
+  return session
+}
+
+// ── 失败锁定（账号维度；不按 IP——用户要求随时随地访问）──
+
+/** 失败锁定阈值：连续失败 N 次进入锁定 */
+export const FAIL_LOCK_THRESHOLD = 5
+/** 首次锁定时长（毫秒） */
+export const FAIL_LOCK_BASE_MS = 15 * 60 * 1000
+/** 锁定时长指数退避上限 */
+export const FAIL_LOCK_MAX_MS = 4 * 60 * 60 * 1000
+
+export interface FailState {
+  /** 连续失败计数（成功登录后清零） */
+  count: number
+  /** 当前锁定截止时间（0 = 未锁定） */
+  lockedUntil: number
+  /** 已连续锁定次数（退避指数） */
+  lockRound: number
+}
+
+/** 账号 → 失败状态（内存；重启清零——攻击者重启服务可绕过，但公网常驻服务下有效） */
+const failStates = new Map<string, FailState>()
+
+/** 获取账号失败状态（纯逻辑，供测试注入） */
+export function getFailState(user: string): FailState {
+  let st = failStates.get(user)
+  if (!st) {
+    st = { count: 0, lockedUntil: 0, lockRound: 0 }
+    failStates.set(user, st)
+  }
+  return st
+}
+
+/** 重置失败状态（登录成功/管理员解封） */
+export function resetFailState(user: string): void {
+  failStates.delete(user)
+}
+
+/** 账号当前是否锁定（含锁定到期自动解锁——到期后读取即解锁） */
+export function isAccountLocked(user: string): boolean {
+  const st = getFailState(user)
+  if (st.lockedUntil === 0) return false
+  if (Date.now() >= st.lockedUntil) {
+    st.lockedUntil = 0
+    st.count = 0
+    return false
+  }
+  return true
+}
+
+/** 记录一次失败；达到阈值 → 锁定（指数退避）。返回锁定剩余毫秒（0 = 未锁定） */
+export function recordLoginFailure(user: string): number {
+  const st = getFailState(user)
+  if (st.lockedUntil > 0 && Date.now() < st.lockedUntil) return st.lockedUntil - Date.now()
+  st.count += 1
+  if (st.count >= FAIL_LOCK_THRESHOLD) {
+    const base = FAIL_LOCK_BASE_MS * (2 ** st.lockRound)
+    st.lockedUntil = Date.now() + Math.min(base, FAIL_LOCK_MAX_MS)
+    st.lockRound += 1
+    st.count = 0
+    return st.lockedUntil - Date.now()
+  }
+  return 0
+}
+
+/** 剩余锁定毫秒（0 = 未锁定） */
+export function accountLockRemaining(user: string): number {
+  const st = getFailState(user)
+  return st.lockedUntil > 0 && Date.now() < st.lockedUntil ? st.lockedUntil - Date.now() : 0
+}
+
+// ── CSRF（双提交 cookie + Origin 校验）──
+
+/** 生成 CSRF cookie 值（随机 32B hex） */
+export function newCsrfToken(): string {
+  return randomBytes(32).toString('hex')
+}
+
+/** 从请求头取 CSRF token（X-CSRF-Token 或表单字段） */
+export function csrfFromRequest(req: IncomingMessage, body: URLSearchParams): string | null {
+  const header = req.headers['x-csrf-token']
+  if (typeof header === 'string' && header !== '') return header
+  const form = body.get('csrf')
+  return form && form !== '' ? form : null
+}
+
+/** 常量时间比较（token 校验用） */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  return ab.length === bb.length && timingSafeEqual(ab, bb)
+}
+
+/**
+ * Origin 校验（S3）：跨站 POST 被浏览器强制带 Origin（同源 GET/导航除外）。
+ * 允许：① 同源（Origin.host === 网关自身 host）② 主端口 loopback（127.0.0.1:mainPort）。
+ * 无 Origin（curl/非浏览器直连）→ 仅当携带有效 CSRF 双提交时放行（脚本无 cookie 无法伪造）。
+ * @returns 是否通过
+ */
+export function originAllowed(
+  originHeader: string | undefined,
+  reqHost: string,
+  mainPort: number,
+): boolean {
+  if (originHeader === undefined || originHeader === 'null') return true // 非浏览器/隐私模式降级由 CSRF 兜底
+  try {
+    const originHost = new URL(originHeader).host
+    return originHost === reqHost || originHost === `127.0.0.1:${mainPort}` || originHost === `localhost:${mainPort}`
+  } catch {
+    return false
+  }
+}
+
+/** 从 Cookie 头解析指定 cookie 值（纯逻辑，可单测） */
+export function cookieValue(header: string | undefined, name: string): string | undefined {
+  if (!header) return undefined
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=')
+    if (idx === -1) continue
+    const key = part.slice(0, idx).trim()
+    if (key === name) return part.slice(idx + 1).trim()
+  }
+  return undefined
+}
+
+// ── 登录页（v1.22.1 移动端适配 + v1.22.4 CSRF/TOTP）──
+
+/**
+ * 登录页：内嵌 HTML 无外部资源——适配任何部署。
+ * 移动端关键点：
+ *  - viewport meta（防止移动浏览器按 980px 视口缩放）
+ *  - 触控目标 ≥ 44px（Apple HIG）；输入字号 ≥ 16px（iOS 聚焦不自动放大）
+ *  - env(safe-area-inset-*) 适配刘海屏/底部手势条
+ *  - color-scheme: dark + 明暗自适应
+ * @param extra - 错误提示文案
+ * @param csrf - CSRF token（隐藏字段随表单双提交；无 = 旧调用方兼容）
+ */
+export function loginPageHtml(extra: string, csrf?: string): string {
+  const csrfField = csrf ? `<input type="hidden" name="csrf" value="${csrf}">` : ''
+  return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#111114">
+<meta name="referrer" content="no-referrer">
+<title>Serenity 登录</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;align-items:center;justify-content:center;margin:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);background:#111114;color:#eee}
+.card{background:#1c1c20;padding:32px 28px;border-radius:16px;width:min(340px,calc(100vw - 48px));box-shadow:0 12px 40px rgba(0,0,0,.55);border:1px solid rgba(255,255,255,.06)}
+h1{font-size:20px;margin:0 0 4px;text-align:center;letter-spacing:.02em}
+.sub{font-size:13px;color:#999;text-align:center;margin:0 0 24px}
+label{display:block;font-size:13px;color:#bbb;margin:14px 0 6px}
+input{width:100%;padding:14px 14px;margin:0;border:1px solid #3a3a40;border-radius:10px;background:#141418;color:#eee;font-size:16px;-webkit-appearance:none;appearance:none}
+input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25)}
+input::placeholder{color:#666}
+#f-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.35em;text-align:center;font-weight:600}
+button{width:100%;padding:15px 14px;margin-top:24px;border:0;border-radius:10px;background:#3b82f6;color:#fff;font-size:16px;font-weight:600;cursor:pointer;min-height:50px;-webkit-appearance:none;appearance:none}
+button:active{background:#2563eb}
+.error{color:#f87171;font-size:13px;min-height:18px;margin-top:12px;text-align:center}
+.hint{color:#777;font-size:12px;margin-top:10px;text-align:center}
+.foot{margin-top:20px;text-align:center;font-size:12px;color:#666}
+@media (prefers-color-scheme:light){
+  body{background:#f4f4f6;color:#1a1a1e}
+  .card{background:#fff;border-color:rgba(0,0,0,.08);box-shadow:0 12px 40px rgba(0,0,0,.12)}
+  .sub{color:#666}
+  label{color:#444}
+  input{background:#fafafa;border-color:#d0d0d6;color:#1a1a1e}
+  input::placeholder{color:#aaa}
+  .hint{color:#999}
+  .foot{color:#999}
+}
+</style></head><body><div class="card">
+<h1>🔐 Serenity Web UI</h1>
+<p class="sub">宁静号 · 外部访问</p>
+<form method="post" action="/serenity/login">
+${csrfField}
+<label for="f-user">用户名</label>
+<input id="f-user" type="text" name="user" placeholder="用户名" autocomplete="username" autocapitalize="none" autocorrect="off" required autofocus enterkeyhint="next">
+<label for="f-pass">密码</label>
+<input id="f-pass" type="password" name="password" placeholder="密码" autocomplete="current-password" required enterkeyhint="next">
+<label for="f-code">验证码（已绑定 Authenticator 时填写）</label>
+<input id="f-code" type="text" name="code" placeholder="6 位验证码" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" enterkeyhint="go">
+<button type="submit">登录</button>
+<div class="error">${extra}</div>
+<p class="hint">未绑定验证器的账号只需用户名 + 密码</p>
+</form>
+<p class="foot">Serenity ACC · dsh-serenity-hooks</p>
+</div></body></html>`
+}

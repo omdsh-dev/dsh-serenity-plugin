@@ -1,3 +1,18 @@
+## v1.22.8 — 2026-08-27（熵点治理：gateway.ts 拆分三模块，S142）
+
+**Scope:** 代码整体梳理（codebase-overview-v1.22）发现的熵点治理——gateway.ts 894 行单文件混三类职责，拆分为认证域/代理域/装配层三个模块（行为零变更）。
+
+### 变更
+- **`src/gateway-auth.ts`（新，认证域纯逻辑）**：`verifyGatewayLogin` / 会话（`SESSION_TTL_MS`/`issueToken`/`revokeToken`/`validateToken`）/ 失败锁定（`FAIL_LOCK_*`/`getFailState`/`resetFailState`/`isAccountLocked`/`recordLoginFailure`/`accountLockRemaining`）/ CSRF（`newCsrfToken`/`csrfFromRequest`/`safeEqual`/`originAllowed`）/ `cookieValue` / `loginPageHtml`
+- **`src/gateway-proxy.ts`（新，代理辅助纯逻辑）**：`RANDOM_UUID_POLYFILL`/`injectPolyfillHtml`/`buildProxyHeaders`/`filterWorkspaceList`/`workspaceAllowed`/`workspaceDenyResponse`
+- **`src/gateway.ts`（装配层，894→~620 行）**：只保留 HTTP 装配（`startGateway`/`registerGateway`/`readBody`）；从两新模块 import 并 **re-export 全部导出**（既有 import 面兼容——`tests/gateway.test.ts` 直接 import gateway.js 的 20+ 导出无需改动）；v1.22.3 回归测试的源码锚点（`const proxy =`/`server.on('upgrade'`/`'/serenity/login'`/`clientError`）全部保留原位
+- 测试：40 files / 425 tests（**零改动全绿**——纯逻辑原样搬移 + re-export 兼容）→ typecheck ✓（node + client）
+
+### 后续熵点（本次不动，理由见 codebase-overview §7）
+- `session-ops.ts`（30KB）/ `msm-ops.ts`（24KB）：单一领域内聚实现，拆分收益低
+- `system-prompt.ts`（26KB）：8 块 spec 文本 + 注册，osp-alignment.test.ts 契约绑定，不宜拆
+- `.restrict-diag.json` 跟踪问题：需 bash `git rm --cached`（safe-mode 无通道）
+
 ## v1.22.7 — 2026-08-27（移除工作区手输兜底，S142）
 
 **Scope:** 用户确认 v1.22.6 修复后工作区白名单列表正常加载——删除手输路径兜底 UI（工作正常后不再需要）。
