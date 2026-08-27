@@ -1,3 +1,32 @@
+## v1.22.4 — 2026-08-27（登录安全审计加固 + session_rebuild 语义根治：完全丢弃+新建，S142）
+
+**Scope:** 两条主线——① 用户：外部监听将放公网，安全性必须可靠（登录机制安全审计 S1-S12）；② 用户实测 S141 崩溃：session_rebuild 原地 replace 方案有致命缺陷，语义再修正为**完全丢弃 + 新建**。
+
+### 变更
+- **登录安全审计（S1-S12）**：基础扎实（scrypt+timing-safe+256-bit token+HttpOnly/SameSite=Strict+0600+token 不落盘），但为内网设计；公网硬门槛 = S1 明文传输 / S2 无爆破防护 / S3 无 CSRF / S6 config 接口透传。**用户原则**：① 不影响体验的直接修正 ② 影响体验的改方案 ③ 不限制 IP
+- **直接修正（不影响体验）**：S3 CSRF（登录双提交 token + config PUT Origin 校验）/ S5 token 滑动 TTL 24h + `POST /serenity/logout` 登出 / S7 `cookieSecure` 配置项 / S9 审计日志（登录成败 console.log/warn）
+- **改方案（影响体验）**：S2 账号维度失败锁定（5 次 → 15min 指数退避，不按 IP）/ S1 TOTP 第二因素（RFC 6238 零依赖，Authenticator 兼容，可选绑定）
+- **`src/totp.ts`（新）**：base32/RFC6238/otpauth URI，零依赖
+- **config-ops 账号扩展**：`totpSecret` + wire `hasTotp` + `cookieSecure` 全链路
+- **gateway 会话升级**：`Map(token→session TTL)` + `revokeToken`、失败锁定状态机、CSRF（`newCsrfToken`/`safeEqual`/`originAllowed`）、登录流 TOTP+锁定+CSRF+登出、cookieSecure 传递、登录页加 TOTP 输入框+CSRF 隐藏字段
+- **session_rebuild 语义根治（v1.22.2 原地 replace 致命缺陷）**：S141 实测崩溃 `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'`——rebuild 在 turn 中途执行 surface replace 把当前 turn 的 assistant tool-call 节点也 shadow 掉 → 孤儿 tool 消息 → LLM API 报错。**新实现**：① `workspaceRegistry.archiveSession(旧 id)` 丢弃（UI 隐藏 log 保留）② `ctx.agents.create({ sessionId: rebuild-<uuid>, meta.cwd=旧会话 header.cwd, agentOptions=当前 provider/model, preset 继承 })` 新建 ③ `handle.agent.followup({source:{kind:'user'}})` 注入「继续 S### 的工作」④ SESSION.md 原位
+- **scope bug 修复**：session 工具 agentScope = 裸 dshSessionId（曾用 `session:${id}` 前缀 → 激活信息读不到）
+- **cwd 继承修复**：新会话 meta.cwd 用旧会话 header.cwd（workspace 按 cwd 分组，保证同工作区）
+- **client 自动切换**：订阅 sessions.list 检测 `rebuild-*` 新会话出现即 `sessions.open(id)`（零改 DSH）
+- **测试重写**：rebuild.test.ts（buildRebuildPrompt / executeRebuild 建新会话+归档 / scope 激活信息 / cwd 继承 / 无 registry 降级）——**40 files / 419 tests** → typecheck ✓（node + client）
+
+**✅ 实测通过**：prompt=「继续 S142 的工作。」、sessionMdPath 正确、oldSessionId 已归档、newSessionId rebuild-* 已创建、无 INVALID_REQUEST
+
+## v1.22.3 — 2026-08-27（gateway 反代链路 error 监听防崩溃，S142）
+
+**Scope:** 用户报告：外部（3081）正常使用中 dsh 崩溃——日志实证 `node:events:497 throw er; // Unhandled 'error' event` + `Error: read ECONNRESET` + `Emitted 'error' event on Socket instance` + `Node.js v22.22.1`。
+
+### 变更
+- **根因**：gateway 反代链路客户端侧 socket/req/res 缺 'error' 监听——外部客户端（经 3081 使用）连接中断（切网络/锁屏/关页/超时）→ socket ECONNRESET → 无监听器 → Node throw → **整个 dsh web 进程崩溃**
+- **`src/gateway.ts` 修复**：① `proxy()`：客户端 req/res 挂 error（销毁对端）+ 透传路径 upstream error；② WS upgrade：客户端 socket + 上游 usock 双向挂 error（pipe 不传播 error）；③ 登录 POST 分支 req/res 挂 error；④ server 级 `clientError` 兜底（静默销毁）
+- **新 MSM `dsh-crash-investigate`**（`scripts/dsh-crash-investigate.ts`，注册 mech）：status（进程/端口/版本/日志清单）/ logs [N] / crash（FATAL/未捕获/OOM/core/信号扫描）/ collect（全量报告落盘 /tmp/）；只读采集零副作用
+- 测试 +4（源文件监听注册回归断言）——**39 files / 380 tests** → typecheck ✓
+
 ## v1.22.2 — 2026-08-27（轨迹跟踪器 rebuild 语义修正：原地重建，S142）
 
 **Scope:** 用户纠正 F2 rebuild 语义——**归档丢掉的是 dsh 会话（对话历史工作副本），不是宁静号 SESSION.md**；SESSION.md 是持久轨迹永远原位；rebuild = dsh 会话**原地** surface replace 重建（同一会话 id，从 SESSION.md 自动延续身份）。

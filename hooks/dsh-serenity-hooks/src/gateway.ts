@@ -1,5 +1,5 @@
 /**
- * gateway.ts — F1 双端口网关（v1.21）
+ * gateway.ts — F1 双端口网关（v1.21）+ 安全加固（v1.22.4）
  *
  * 需求（S142 用户拍板）：dsh web 维持 127.0.0.1 主端口现状不变，**额外监听一个端口**；
  * 额外端口需网页登录（账号+密码），登录后即原生 Web UI 使用；适应任何部署情况。
@@ -12,15 +12,25 @@
  *     （Host 头改写成 127.0.0.1:<主端口> → 过信任栅栏；WS upgrade 转发握手 + pipe socket）
  *   - token 内存表 + HttpOnly cookie（重启即失效——用户决策"重启重新登录"）
  *
- * 纯逻辑（可单测）：verifyGatewayLogin / issueToken / validateToken / 登录页 HTML。
+ * v1.22.4 安全加固（S142 公网审计，用户原则：不体验影响直接修/体验影响改方案/不限制 IP）：
+ *   - S5：token 带过期时间（滑动 24h）+ POST /serenity/logout 主动吊销
+ *   - S3：登录 POST 与配置写操作校验 Origin（同源/loopback 主端口）+ 双提交 CSRF cookie
+ *   - S2：账号维度失败锁定（5 次失败 → 15 分钟，指数退避）——不按 IP（用户要求随时随地访问）
+ *   - S1：可选 TOTP 第二因素（账号绑定后登录需 6 位码；Authenticator 兼容，RFC 6238）
+ *   - S7：cookieSecure 配置项（反代 TLS 时开启；默认关保持明文 HTTP 可用）
+ *   - S9：登录失败审计日志（时间/IP/账号/原因，console.warn）
+ *
+ * 纯逻辑（可单测）：verifyGatewayLogin / issueToken / validateToken / 登录页 HTML /
+ * TOTP 校验 / 失败锁定状态机 / Origin 校验。
  */
 
 import type { Context } from 'cordis'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { verifyPassword, readAdvancedSettings, migrateLegacyLocalstore } from './config-ops.js'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
+import { verifyTotpCode } from './totp.js'
 
 // 自定义事件：配置 PUT 后触发 gateway 重建（跨模块松耦合通知）
 declare module 'cordis' {
@@ -109,18 +119,22 @@ export function workspaceDenyResponse(rpcId: string): string {
 // ── 纯逻辑（可单测）──
 
 /**
- * 登录页（v1.22.1 移动端适配）：内嵌 HTML 无外部资源——适配任何部署。
+ * 登录页（v1.22.1 移动端适配 + v1.22.4 CSRF/TOTP）：内嵌 HTML 无外部资源——适配任何部署。
  * 移动端关键点：
  *  - viewport meta（防止移动浏览器按 980px 视口缩放）
  *  - 触控目标 ≥ 44px（Apple HIG）；输入字号 ≥ 16px（iOS 聚焦不自动放大）
  *  - env(safe-area-inset-*) 适配刘海屏/底部手势条
  *  - color-scheme: dark + 明暗自适应
+ * @param extra - 错误提示文案
+ * @param csrf - CSRF token（隐藏字段随表单双提交；无 = 旧调用方兼容）
  */
-export function loginPageHtml(extra: string): string {
+export function loginPageHtml(extra: string, csrf?: string): string {
+  const csrfField = csrf ? `<input type="hidden" name="csrf" value="${csrf}">` : ''
   return `<!doctype html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#111114">
+<meta name="referrer" content="no-referrer">
 <title>Serenity 登录</title>
 <style>
 :root{color-scheme:dark}
@@ -134,9 +148,11 @@ label{display:block;font-size:13px;color:#bbb;margin:14px 0 6px}
 input{width:100%;padding:14px 14px;margin:0;border:1px solid #3a3a40;border-radius:10px;background:#141418;color:#eee;font-size:16px;-webkit-appearance:none;appearance:none}
 input:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,.25)}
 input::placeholder{color:#666}
+#f-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.35em;text-align:center;font-weight:600}
 button{width:100%;padding:15px 14px;margin-top:24px;border:0;border-radius:10px;background:#3b82f6;color:#fff;font-size:16px;font-weight:600;cursor:pointer;min-height:50px;-webkit-appearance:none;appearance:none}
 button:active{background:#2563eb}
 .error{color:#f87171;font-size:13px;min-height:18px;margin-top:12px;text-align:center}
+.hint{color:#777;font-size:12px;margin-top:10px;text-align:center}
 .foot{margin-top:20px;text-align:center;font-size:12px;color:#666}
 @media (prefers-color-scheme:light){
   body{background:#f4f4f6;color:#1a1a1e}
@@ -145,24 +161,29 @@ button:active{background:#2563eb}
   label{color:#444}
   input{background:#fafafa;border-color:#d0d0d6;color:#1a1a1e}
   input::placeholder{color:#aaa}
+  .hint{color:#999}
   .foot{color:#999}
 }
 </style></head><body><div class="card">
 <h1>🔐 Serenity Web UI</h1>
 <p class="sub">宁静号 · 外部访问</p>
 <form method="post" action="/serenity/login">
+${csrfField}
 <label for="f-user">用户名</label>
 <input id="f-user" type="text" name="user" placeholder="用户名" autocomplete="username" autocapitalize="none" autocorrect="off" required autofocus enterkeyhint="next">
 <label for="f-pass">密码</label>
-<input id="f-pass" type="password" name="password" placeholder="密码" autocomplete="current-password" required enterkeyhint="go">
+<input id="f-pass" type="password" name="password" placeholder="密码" autocomplete="current-password" required enterkeyhint="next">
+<label for="f-code">验证码（已绑定 Authenticator 时填写）</label>
+<input id="f-code" type="text" name="code" placeholder="6 位验证码" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" enterkeyhint="go">
 <button type="submit">登录</button>
 <div class="error">${extra}</div>
+<p class="hint">未绑定验证器的账号只需用户名 + 密码</p>
 </form>
 <p class="foot">Serenity ACC · dsh-serenity-hooks</p>
 </div></body></html>`
 }
 
-/** 账号验证（纯逻辑）：user + password 对 localstore accounts 匹配（scrypt） */
+// ── 账号验证（纯逻辑）：user + password 对 localstore accounts 匹配（scrypt）──
 export function verifyGatewayLogin(
   accounts: readonly { user: string; passHash: string }[],
   user: string,
@@ -173,19 +194,159 @@ export function verifyGatewayLogin(
   return verifyPassword(password, account.passHash)
 }
 
-/** 内存 token 表（重启即清空——用户决策） */
-const tokens = new Set<string>()
+// ── v1.22.4 会话（token + TTL + 主动登出）──
 
-/** 颁发 token（Hex 32 字节） */
-export function issueToken(): string {
+/** 会话滑动过期时长（毫秒）：24h 无活动 → 失效（用户重新登录） */
+export const SESSION_TTL_MS = 24 * 60 * 60 * 1000
+
+interface GatewaySession {
+  token: string
+  /** 最后活动时间（滑动续期：每次校验通过刷新） */
+  lastActiveAt: number
+  /** 绑定账号（审计/登出定位） */
+  user: string
+}
+
+/** 内存会话表（重启即清空——用户决策） */
+const sessions = new Map<string, GatewaySession>()
+
+/** 颁发会话 token（Hex 32 字节） */
+export function issueToken(user: string): string {
   const token = randomBytes(32).toString('hex')
-  tokens.add(token)
+  sessions.set(token, { token, lastActiveAt: Date.now(), user })
   return token
 }
 
-/** 校验 token 是否有效 */
-export function validateToken(token: string | undefined): boolean {
-  return typeof token === 'string' && token !== '' && tokens.has(token)
+/** 主动吊销会话（登出）；返回是否确实存在 */
+export function revokeToken(token: string): boolean {
+  return sessions.delete(token)
+}
+
+/**
+ * 校验 token 有效性（滑动过期：有效则刷新 lastActiveAt）。
+ * @returns 有效会话或 undefined
+ */
+export function validateToken(token: string | undefined): GatewaySession | undefined {
+  if (typeof token !== 'string' || token === '') return undefined
+  const session = sessions.get(token)
+  if (session === undefined) return undefined
+  if (Date.now() - session.lastActiveAt > SESSION_TTL_MS) {
+    sessions.delete(token)
+    return undefined
+  }
+  session.lastActiveAt = Date.now() // 滑动续期
+  return session
+}
+
+// ── v1.22.4 失败锁定（账号维度；不按 IP——用户要求随时随地访问）──
+
+/** 失败锁定阈值：连续失败 N 次进入锁定 */
+export const FAIL_LOCK_THRESHOLD = 5
+/** 首次锁定时长（毫秒） */
+export const FAIL_LOCK_BASE_MS = 15 * 60 * 1000
+/** 锁定时长指数退避上限 */
+export const FAIL_LOCK_MAX_MS = 4 * 60 * 60 * 1000
+
+interface FailState {
+  /** 连续失败计数（成功登录后清零） */
+  count: number
+  /** 当前锁定截止时间（0 = 未锁定） */
+  lockedUntil: number
+  /** 已连续锁定次数（退避指数） */
+  lockRound: number
+}
+
+/** 账号 → 失败状态（内存；重启清零——攻击者重启服务可绕过，但公网常驻服务下有效） */
+const failStates = new Map<string, FailState>()
+
+/** 获取账号失败状态（纯逻辑，供测试注入） */
+export function getFailState(user: string): FailState {
+  let st = failStates.get(user)
+  if (!st) {
+    st = { count: 0, lockedUntil: 0, lockRound: 0 }
+    failStates.set(user, st)
+  }
+  return st
+}
+
+/** 重置失败状态（登录成功/管理员解封） */
+export function resetFailState(user: string): void {
+  failStates.delete(user)
+}
+
+/** 账号当前是否锁定（含锁定到期自动解锁——到期后读取即解锁） */
+export function isAccountLocked(user: string): boolean {
+  const st = getFailState(user)
+  if (st.lockedUntil === 0) return false
+  if (Date.now() >= st.lockedUntil) {
+    st.lockedUntil = 0
+    st.count = 0
+    return false
+  }
+  return true
+}
+
+/** 记录一次失败；达到阈值 → 锁定（指数退避）。返回锁定剩余毫秒（0 = 未锁定） */
+export function recordLoginFailure(user: string): number {
+  const st = getFailState(user)
+  if (st.lockedUntil > 0 && Date.now() < st.lockedUntil) return st.lockedUntil - Date.now()
+  st.count += 1
+  if (st.count >= FAIL_LOCK_THRESHOLD) {
+    const base = FAIL_LOCK_BASE_MS * (2 ** st.lockRound)
+    st.lockedUntil = Date.now() + Math.min(base, FAIL_LOCK_MAX_MS)
+    st.lockRound += 1
+    st.count = 0
+    return st.lockedUntil - Date.now()
+  }
+  return 0
+}
+
+/** 剩余锁定毫秒（0 = 未锁定） */
+export function accountLockRemaining(user: string): number {
+  const st = getFailState(user)
+  return st.lockedUntil > 0 && Date.now() < st.lockedUntil ? st.lockedUntil - Date.now() : 0
+}
+
+// ── v1.22.4 CSRF（双提交 cookie + Origin 校验）──
+
+/** 生成 CSRF cookie 值（随机 32B hex） */
+export function newCsrfToken(): string {
+  return randomBytes(32).toString('hex')
+}
+
+/** 从请求头取 CSRF token（X-CSRF-Token 或表单字段） */
+export function csrfFromRequest(req: IncomingMessage, body: URLSearchParams): string | null {
+  const header = req.headers['x-csrf-token']
+  if (typeof header === 'string' && header !== '') return header
+  const form = body.get('csrf')
+  return form && form !== '' ? form : null
+}
+
+/** 常量时间比较（token 校验用） */
+export function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  return ab.length === bb.length && timingSafeEqual(ab, bb)
+}
+
+/**
+ * Origin 校验（S3）：跨站 POST 被浏览器强制带 Origin（同源 GET/导航除外）。
+ * 允许：① 同源（Origin.host === 网关自身 host）② 主端口 loopback（127.0.0.1:mainPort）。
+ * 无 Origin（curl/非浏览器直连）→ 仅当携带有效 CSRF 双提交时放行（脚本无 cookie 无法伪造）。
+ * @returns 是否通过
+ */
+export function originAllowed(
+  originHeader: string | undefined,
+  reqHost: string,
+  mainPort: number,
+): boolean {
+  if (originHeader === undefined || originHeader === 'null') return true // 非浏览器/隐私模式降级由 CSRF 兜底
+  try {
+    const originHost = new URL(originHeader).host
+    return originHost === reqHost || originHost === `127.0.0.1:${mainPort}` || originHost === `localhost:${mainPort}`
+  } catch {
+    return false
+  }
 }
 
 /** 从 Cookie 头解析指定 cookie 值（纯逻辑，可单测） */
@@ -213,6 +374,12 @@ export interface GatewayConfig {
   loginDelayMs: number
   /** 外部可访问的工作区路径前缀白名单（v1.22；空 = 全部允许） */
   allowWorkspaces?: string[]
+  /** Cookie Secure 属性（v1.22.4；反代 TLS 时开启；明文 HTTP 下必须关，否则 cookie 不落） */
+  cookieSecure?: boolean
+  /** 允许外部新建工作区（v1.22.4；false = workspace.create 一律 403 RPC error） */
+  allowWorkspaceCreate?: boolean
+  /** 启用 Authenticator 第二因素（v1.22.4；false = TOTP 完全禁用） */
+  totpEnabled?: boolean
 }
 
 /** 读取请求体（≤ maxBytes；超限 reject） */
@@ -265,13 +432,17 @@ export function buildProxyHeaders(
  */
 export function startGateway(
   config: GatewayConfig,
-  getAccounts: () => readonly { user: string; passHash: string }[],
+  getAccounts: () => readonly { id: string; user: string; passHash: string; totpSecret?: string }[],
 ): { server: Server; dispose: () => void } {
   const { host, port, cookieName, mainPort, loginDelayMs } = config
   const allowWorkspaces = config.allowWorkspaces ?? []
+  const cookieSecure = config.cookieSecure === true
+  const allowWorkspaceCreate = config.allowWorkspaceCreate !== false
+  const totpEnabled = config.totpEnabled === true
 
-  /** 校验请求 Cookie 是否含有效 token */
-  const authed = (req: IncomingMessage): boolean => validateToken(cookieValue(req.headers.cookie, cookieName))
+  /** 校验请求 Cookie 是否含有效 token（v1.22.4：滑动过期 + 返回会话供审计） */
+  const authed = (req: IncomingMessage): GatewaySession | undefined =>
+    validateToken(cookieValue(req.headers.cookie, cookieName))
 
   /**
    * 反向代理：改写 Host + Origin 头 → 主端口（loopback 过信任栅栏）。
@@ -290,6 +461,11 @@ export function startGateway(
       : null
     const loopbackOrigin = `http://127.0.0.1:${mainPort}`
     const headers = buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort, bodyOverride)
+    // v1.22.3 崩溃修复（S142 实测：外部连接中断 → Unhandled 'error' event → 进程崩溃）：
+    // 反代链路的**客户端侧** req/res 必须挂 error 监听。外部客户端（浏览器/手机）随时会
+    // 中断连接（切网络/关页面/锁屏/超时）→ socket 收到 ECONNRESET/EPIPE → 若无人监听
+    // 'error' 事件，Node 直接 throw → 整个 dsh web 进程崩溃。代理语义下这些错误是
+    // 正常现象：吞掉并销毁对端即可（与上游 target.on('error') 同款处理）。
     const target = httpRequest({
       host: '127.0.0.1',
       port: mainPort,
@@ -331,6 +507,8 @@ export function startGateway(
       // 其余 → 原样透传
       res.writeHead(status, upstream.headers)
       upstream.pipe(res)
+      // 透传路径的 upstream error（对端中断）→ 静默销毁，不成为 unhandled 'error'
+      upstream.on('error', () => { try { res.destroy() } catch { /* noop */ } })
     })
     target.on('error', () => {
       try {
@@ -338,17 +516,56 @@ export function startGateway(
         res.end('502 Bad Gateway: dsh web 主端口不可达')
       } catch { /* res 已关闭 */ }
     })
+    // 客户端侧 req/res error（外部连接中断）→ 静默销毁对端（代理场景正常现象）
+    req.on('error', () => { try { target.destroy() } catch { /* noop */ } })
+    res.on('error', () => { try { target.destroy() } catch { /* noop */ } })
     if (bodyOverride !== undefined) target.end(bodyOverride)
     else req.pipe(target)
   }
 
+  // v1.22.4 S1b：账号 id → 最近成功 TOTP counter（防重放；模块级，重启清空）
+  const lastTotpCounter = new Map<string, number>()
+
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://${host}:${port}`)
 
+    // ── 登出（v1.22.4 S5）：主动吊销会话 → 清除 cookie → 回登录页 ──
+    if (req.method === 'POST' && url.pathname === '/serenity/logout') {
+      const cookie = cookieValue(req.headers.cookie, cookieName)
+      if (cookie !== undefined) revokeToken(cookie)
+      res.writeHead(302, {
+        location: '/',
+        'set-cookie': `${cookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${cookieSecure ? '; Secure' : ''}`,
+      })
+      res.end()
+      return
+    }
+
     // 已登录 → 全量反代（含 /serenity/* 配置接口——第二端口登录后同样可管理）
-    if (authed(req)) {
-      // workspace.create：白名单校验（读 body → 检查路径 → 转发或拒绝）
+    const session = authed(req)
+    if (session !== undefined) {
+      // workspace.create：① 外部新建开关（allowWorkspaceCreate=false → 一律拒绝）
+      // ② 白名单校验（读 body → 检查路径 → 转发或拒绝）
       if (req.method === 'POST' && url.pathname === '/api/workspace.create') {
+        if (!allowWorkspaceCreate) {
+          void readBody(req, 128 * 1024).then((body) => {
+            let rpcId = 'unknown'
+            try {
+              const parsed = JSON.parse(body) as { rpcId?: unknown }
+              if (typeof parsed.rpcId === 'string') rpcId = parsed.rpcId
+            } catch { /* 解析失败 → 用 unknown */ }
+            res.writeHead(403, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({
+              type: 'server-response',
+              rpcId,
+              result: { ok: false, error: { code: 'forbidden', message: 'workspace creation disabled for external access', details: {} } },
+            }))
+          }).catch(() => {
+            res.writeHead(400, { 'content-type': 'application/json' })
+            res.end(JSON.stringify({ type: 'server-response', rpcId: 'unknown', result: { ok: false, error: { code: 'bad-request', message: 'body too large', details: {} } } }))
+          })
+          return
+        }
         void readBody(req, 128 * 1024).then((body) => {
           let rpcId = 'unknown'
           let path: string | undefined
@@ -369,6 +586,16 @@ export function startGateway(
         })
         return
       }
+      // v1.22.4 S3：配置写接口（PUT /serenity/config）需 Origin 校验（防跨站 RPC 改写凭据）。
+      // GET/其余透传不受影响（读操作无状态变更，跨站读取受 SameSite=Strict 保护）。
+      if (req.method === 'PUT' && url.pathname === '/serenity/config') {
+        if (!originAllowed(req.headers.origin, req.headers.host ?? '', mainPort)) {
+          console.warn(`[serenity-hooks] 拒绝跨源配置写（Origin=${String(req.headers.origin)}）：session=${session.user}`)
+          res.writeHead(403, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ error: 'cross-origin config write rejected' }))
+          return
+        }
+      }
       proxy(req, res)
       return
     }
@@ -376,29 +603,85 @@ export function startGateway(
     // 登录 POST
     if (req.method === 'POST' && url.pathname === '/serenity/login') {
       let body = ''
+      // v1.22.3 崩溃修复：登录 POST 的外部连接中断同样会触发 socket 'error' → 挂监听静默吞掉
+      req.on('error', () => { try { res.destroy() } catch { /* noop */ } })
+      res.on('error', () => { try { req.destroy() } catch { /* noop */ } })
       req.on('data', (chunk: Buffer) => { body += chunk.toString('utf-8') })
       req.on('end', () => {
         const params = new URLSearchParams(body)
         const user = params.get('user') ?? ''
         const password = params.get('password') ?? ''
-        if (verifyGatewayLogin(getAccounts(), user, password)) {
-          const token = issueToken()
-          res.writeHead(302, {
-            location: '/',
-            'set-cookie': `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/`,
-          })
-          res.end()
+        const code = params.get('code') ?? ''
+        const remote = req.socket.remoteAddress ?? 'unknown'
+
+        // v1.22.4 S3：CSRF 双提交校验——表单字段 csrf 必须与 cookie serenity_csrf 一致。
+        // 跨站表单无法读取 cookie（SameSite=Strict + HttpOnly），因此攻击者无法提交有效对。
+        const cookieCsrf = cookieValue(req.headers.cookie, 'serenity_csrf')
+        const formCsrf = csrfFromRequest(req, params)
+        if (cookieCsrf === undefined || formCsrf === null || !safeEqual(cookieCsrf, formCsrf)) {
+          console.warn(`[serenity-hooks] 登录拒绝（CSRF 校验失败）：user=${user} ip=${remote}`)
+          res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' })
+          res.end(loginPageHtml('会话校验失败，请刷新页面重试'))
           return
         }
+
+        // v1.22.4 S2：账号维度失败锁定（不按 IP——用户要求随时随地访问）。
+        const lockedRemaining = accountLockRemaining(user)
+        if (lockedRemaining > 0) {
+          console.warn(`[serenity-hooks] 登录拒绝（账号锁定中）：user=${user} ip=${remote} 剩余=${Math.ceil(lockedRemaining / 60000)}min`)
+          res.writeHead(429, { 'content-type': 'text/html; charset=utf-8', 'retry-after': String(Math.ceil(lockedRemaining / 1000)) })
+          res.end(loginPageHtml(`账号已锁定，请 ${Math.ceil(lockedRemaining / 60000)} 分钟后再试`))
+          return
+        }
+
+        const accounts = getAccounts()
+        const account = accounts.find((a) => a.user === user)
+        const passOk = account !== undefined && verifyGatewayLogin(accounts, user, password)
+
+        // v1.22.4 S1：TOTP 第二因素——totpEnabled 开启且账号绑定后必须验证 6 位码。
+        // 禁用时（totpEnabled=false）完全不要求 TOTP（含已绑定账号——安全默认：未配置即不可用）。
+        let totpOk = true
+        if (totpEnabled && passOk && account !== undefined
+          && typeof account.totpSecret === 'string' && account.totpSecret !== '') {
+          const hit = verifyTotpCode(account.totpSecret, code)
+          totpOk = hit !== null
+          // S1b：防重放——同 counter 短期内不重复接受（30s 窗口内同码拒绝）
+          if (totpOk && hit !== null && lastTotpCounter.get(account.id) === hit) totpOk = false
+          if (totpOk && hit !== null) lastTotpCounter.set(account.id, hit)
+        }
+
+        if (passOk && totpOk) {
+          resetFailState(user)
+          const token = issueToken(user)
+          res.writeHead(302, {
+            location: '/',
+            'set-cookie': `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/${cookieSecure ? '; Secure' : ''}`,
+          })
+          res.end()
+          console.log(`[serenity-hooks] 登录成功: user=${user} ip=${remote}`)
+          return
+        }
+
+        // 失败路径：记录计数（仅密码错误计入；TOTP 错误同样计入——防组合爆破）
+        const lockMs = recordLoginFailure(user)
+        const reason = !passOk ? 'bad-password' : 'bad-totp'
+        console.warn(`[serenity-hooks] 登录失败: user=${user} ip=${remote} reason=${reason}${lockMs > 0 ? ` 锁定=${Math.ceil(lockMs / 60000)}min` : ''}`)
+        const msg = lockMs > 0
+          ? `尝试过多，账号已锁定 ${Math.ceil(lockMs / 60000)} 分钟`
+          : (passOk ? '验证码错误' : '用户名或密码错误')
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(loginPageHtml('用户名或密码错误'))
+        res.end(loginPageHtml(msg))
       })
       return
     }
 
-    // 其余 → 登录页
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    res.end(loginPageHtml(''))
+    // 其余 → 登录页（v1.22.4：登录页注入 CSRF cookie，供登录表单双提交）
+    const csrf = newCsrfToken()
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'set-cookie': `serenity_csrf=${csrf}; HttpOnly; SameSite=Strict; Path=/${cookieSecure ? '; Secure' : ''}`,
+    })
+    res.end(loginPageHtml('', csrf))
   })
 
   // WS upgrade 转发：主端口握手 + socket pipe
@@ -414,6 +697,14 @@ export function startGateway(
       socket.destroy()
       return
     }
+    // v1.22.3 崩溃修复（S142 实测）：upgrade 后客户端 socket 脱离 http 生命周期，
+    // pipe 不传播 'error'——外部 WS 连接中断（切网络/锁屏/关页面）→ socket 收到
+    // ECONNRESET/EPIPE → 无人监听 'error' → Node throw → 进程崩溃。必须在 pipe
+    // 前为双向 socket 挂 error 监听（代理语义：对端断开是正常现象，静默销毁即可）。
+    socket.on('error', () => {
+      try { usocket?.destroy() } catch { /* noop */ }
+    })
+    let usocket: import('node:net').Socket | undefined
     const upstream = httpRequest({
       host: '127.0.0.1',
       port: mainPort,
@@ -421,7 +712,12 @@ export function startGateway(
       method: req.method,
       headers: buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort),
     })
-    upstream.on('upgrade', (ures, usocket, uhead) => {
+    upstream.on('upgrade', (ures, usock, uhead) => {
+      usocket = usock
+      // 上游 socket 同样挂 error 监听（主端口侧断开 → 静默销毁客户端侧）
+      usock.on('error', () => {
+        try { socket.destroy() } catch { /* noop */ }
+      })
       // ① 回写 101 状态行 + 响应头（含 Sec-WebSocket-Accept 等握手字段）
       const statusLine = `HTTP/1.1 ${ures.statusCode ?? 101} ${ures.statusMessage ?? 'Switching Protocols'}\r\n`
       const headerLines = Object.entries(ures.headers)
@@ -430,15 +726,15 @@ export function startGateway(
       try {
         socket.write(statusLine + headerLines + '\r\n')
       } catch {
-        usocket.destroy()
+        usock.destroy()
         socket.destroy()
         return
       }
       // ② 双向 pipe：客户端 socket ↔ 上游 socket
-      usocket.pipe(socket)
-      socket.pipe(usocket)
+      usock.pipe(socket)
+      socket.pipe(usock)
       // ③ 握手后缓冲数据按方向转发：head=客户端已发数据 → 上游；uhead=上游已发数据 → 客户端
-      if (head.length > 0) usocket.write(head)
+      if (head.length > 0) usock.write(head)
       if (uhead.length > 0) socket.write(uhead)
     })
     // ③ 非 101 响应（DSH rejectWebSocketUpgrade=403 / 426 / 404）→ 透传普通 HTTP 响应
@@ -480,6 +776,13 @@ export function startGateway(
     }
     server.removeAllListeners('error')
     server.on('error', onError)
+    // v1.22.3 崩溃修复：server 级 clientError 兜底——http server 解析失败/连接异常时
+    // 会 emit 'clientError'（如外部客户端半开连接、畸形请求后断开）。不监听则 Node
+    // 对无 'error' 监听器的 socket 直接 throw → 进程崩溃。这里静默销毁即可。
+    server.removeAllListeners('clientError')
+    server.on('clientError', (_err: Error, socket: import('node:net').Socket) => {
+      try { socket.destroy() } catch { /* noop */ }
+    })
     server.listen(port, host)
   }
   listenWithRetry()
@@ -537,6 +840,9 @@ export function registerGateway(ctx: Context): void {
           mainPort: webServer.port,
           loginDelayMs: 0,
           allowWorkspaces: settings.gateway.workspaces,
+          cookieSecure: settings.gateway.cookieSecure === true,
+          allowWorkspaceCreate: settings.gateway.allowWorkspaceCreate !== false,
+          totpEnabled: settings.gateway.totpEnabled === true,
         },
         () => readAdvancedSettings().gateway.accounts,
       )

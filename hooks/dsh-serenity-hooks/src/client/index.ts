@@ -31,6 +31,9 @@ const SERENITY_SCOPE_SPEC: SettingsScopeSpec<SerenitySimpleWire> = {
 
 export function apply(ctx: ClientContext): void {
   ctx.inject(['slots', 'conversation', 'sessions', 'settingsScope'], (scope: ClientContext) => {
+    // v1.22.4 定稿：session_rebuild 复用旧会话原地清空（turn 结束 surface replace），
+    // 无新会话创建 → 无需 client 自动切换（同会话 id、同工作区天然保持）。
+
     scope.effect(
       () =>
         scope.slots.register(

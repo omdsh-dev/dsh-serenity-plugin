@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
+import { verifyTotpCode } from './totp.js'
 
 // ── 配置模型 ──
 
@@ -32,6 +33,8 @@ export interface GatewayAccount {
   user: string
   /** scrypt hash（salt:hex） */
   passHash: string
+  /** TOTP 第二因素 secret（v1.22.4；可选；base32 无填充。缺省/空 = 该账号仅密码登录） */
+  totpSecret?: string
 }
 
 /** F1 双端口网关配置 */
@@ -42,6 +45,12 @@ export interface GatewaySettings {
   accounts: GatewayAccount[]
   /** 外部可访问的工作区路径前缀白名单（v1.22；空数组 = 全部允许） */
   workspaces: string[]
+  /** Cookie Secure 属性（v1.22.4；反代 TLS 时开启，明文 HTTP 下必须关） */
+  cookieSecure: boolean
+  /** 是否允许外部（gateway）新建工作区（v1.22.4；false = workspace.create 一律 403） */
+  allowWorkspaceCreate: boolean
+  /** 是否启用 Authenticator 第二因素（v1.22.4；false = TOTP 完全禁用——登录不要求、绑定入口隐藏） */
+  totpEnabled: boolean
 }
 
 /** F2 超限重建配置 */
@@ -72,6 +81,9 @@ export function defaultAdvancedSettings(): AdvancedSettings {
       port: 3081,
       accounts: [],
       workspaces: [],
+      cookieSecure: false,
+      allowWorkspaceCreate: true,
+      totpEnabled: false,
     },
     rebuild: {
       enabled: true,
@@ -156,6 +168,15 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
       workspaces: Array.isArray(gateway.workspaces)
         ? gateway.workspaces.filter((w): w is string => typeof w === 'string' && w !== '')
         : def.gateway.workspaces,
+      cookieSecure: typeof gateway.cookieSecure === 'boolean'
+        ? gateway.cookieSecure
+        : def.gateway.cookieSecure,
+      allowWorkspaceCreate: typeof gateway.allowWorkspaceCreate === 'boolean'
+        ? gateway.allowWorkspaceCreate
+        : def.gateway.allowWorkspaceCreate,
+      totpEnabled: typeof gateway.totpEnabled === 'boolean'
+        ? gateway.totpEnabled
+        : def.gateway.totpEnabled,
     },
     rebuild: {
       enabled: typeof rebuild.enabled === 'boolean' ? rebuild.enabled : def.rebuild.enabled,
@@ -196,6 +217,15 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
         workspaces: Array.isArray(gw.workspaces)
           ? gw.workspaces.filter((w): w is string => typeof w === 'string' && w !== '')
           : current.gateway.workspaces,
+        cookieSecure: typeof gw.cookieSecure === 'boolean'
+          ? gw.cookieSecure
+          : current.gateway.cookieSecure,
+        allowWorkspaceCreate: typeof gw.allowWorkspaceCreate === 'boolean'
+          ? gw.allowWorkspaceCreate
+          : current.gateway.allowWorkspaceCreate,
+        totpEnabled: typeof gw.totpEnabled === 'boolean'
+          ? gw.totpEnabled
+          : current.gateway.totpEnabled,
       }
       : current.gateway,
     rebuild: rb !== undefined
@@ -232,11 +262,13 @@ export function migrateLegacyLocalstore(root: string | null): boolean {
 
 // ── wire 形态（面板消费；密码 hash 永不出现）──
 
-/** 账号的 wire 形态：只有 id/user + hasPassword（无 hash） */
+/** 账号的 wire 形态：只有 id/user + hasPassword/hasTotp（无 hash/secret） */
 export interface GatewayAccountWire {
   id: string
   user: string
   hasPassword: boolean
+  /** 该账号是否已绑定 TOTP（v1.22.4） */
+  hasTotp: boolean
 }
 
 /** 设定 wire 形态（GET /serenity/config 返回；rebuild/naming 同持久化，gateway 去 hash） */
@@ -247,12 +279,15 @@ export interface AdvancedSettingsWire {
     port: number
     accounts: GatewayAccountWire[]
     workspaces: string[]
+    cookieSecure: boolean
+    allowWorkspaceCreate: boolean
+    totpEnabled: boolean
   }
   rebuild: RebuildSettings
   naming: NamingSettings
 }
 
-/** 持久化 → wire（剥离 passHash；只留 hasPassword 布尔） */
+/** 持久化 → wire（剥离 passHash/totpSecret；只留布尔） */
 export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
   return {
     gateway: {
@@ -263,8 +298,12 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
         id: a.id,
         user: a.user,
         hasPassword: a.passHash !== '',
+        hasTotp: typeof a.totpSecret === 'string' && a.totpSecret !== '',
       })),
       workspaces: [...settings.gateway.workspaces],
+      cookieSecure: settings.gateway.cookieSecure,
+      allowWorkspaceCreate: settings.gateway.allowWorkspaceCreate,
+      totpEnabled: settings.gateway.totpEnabled,
     },
     rebuild: settings.rebuild,
     naming: settings.naming,
@@ -289,16 +328,40 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
     if (Array.isArray(wire.gateway.workspaces)) {
       gwPatch.workspaces = wire.gateway.workspaces.filter((w): w is string => typeof w === 'string' && w !== '')
     }
+    if (typeof wire.gateway.cookieSecure === 'boolean') gwPatch.cookieSecure = wire.gateway.cookieSecure
+    if (typeof wire.gateway.allowWorkspaceCreate === 'boolean') gwPatch.allowWorkspaceCreate = wire.gateway.allowWorkspaceCreate
+    if (typeof wire.gateway.totpEnabled === 'boolean') gwPatch.totpEnabled = wire.gateway.totpEnabled
     if (Array.isArray(wire.gateway.accounts)) {
       const byId = new Map(current.gateway.accounts.map((a) => [a.id, a]))
       const nextAccounts: GatewayAccount[] = wire.gateway.accounts.map((a) => {
         const existing = byId.get(a.id)
         const pass = (a as { pass?: string }).pass
+        // v1.22.4 TOTP：wire 层 totpSecret（非空 = 设置新 secret；totpReset=true = 清除）。
+        // 仅允许对既有账号操作（新账号必须 pass 非空；secret 不参与账号创建判定）。
+        const totp = (a as { totpSecret?: string; totpReset?: boolean }).totpSecret
+        const totpReset = (a as { totpReset?: boolean }).totpReset === true
+        // 确认码校验：设置新 secret 时必须提供 totpConfirm（当前 6 位码），
+        // 服务端验证通过才落库——防止绑定他人 secret / 无效 secret。
+        const totpConfirm = (a as { totpConfirm?: string }).totpConfirm
+        if (typeof totp === 'string' && totp !== '') {
+          if (typeof totpConfirm !== 'string' || verifyTotpCode(totp, totpConfirm) === null) {
+            throw new Error(`账号 "${a.user}" TOTP 确认码无效——请输入验证器当前显示的 6 位码`)
+          }
+        }
+        const nextTotp: string | undefined = totpReset
+          ? undefined
+          : typeof totp === 'string' && totp !== '' ? totp : existing?.totpSecret
+        // wire 的 user 总是权威（可改名）；existing 只供 passHash/totpSecret 继承
+        const withTotp = {
+          id: a.id,
+          user: a.user,
+          ...(nextTotp === undefined ? {} : { totpSecret: nextTotp }),
+        }
         if (typeof pass === 'string' && pass !== '') {
-          return { id: a.id, user: a.user, passHash: hashPassword(pass) }
+          return { ...withTotp, passHash: hashPassword(pass) }
         }
         if (existing) {
-          return { id: a.id, user: a.user, passHash: existing.passHash }
+          return { ...withTotp, passHash: existing.passHash }
         }
         throw new Error(`账号 "${a.user}"（id=${a.id}）未提供密码且无现有 hash——新账号必须设置密码`)
       })

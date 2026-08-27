@@ -37,6 +37,7 @@ import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { registerSettingsSection } from './settings-section.js'
 import { registerGateway } from './gateway.js'
+import { registerRebuildTurnHook } from './rebuild.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 
 export const name = 'dsh-serenity-hooks'
@@ -132,6 +133,8 @@ export function apply(ctx: Context, config: Config): void {
   // enabled 读 DSH settings 开关，host/port/accounts 读全局文件，不依赖具体 CCC；
   // 旧 CCC localstore 配置在首个 agent/session-start 时一次性迁移）
   registerGateway(ctx)
+  // v1.22.4 定稿：session_rebuild 排队 → agent/turn-stopping 时执行真正清空（复用旧会话原地重来）
+  registerRebuildTurnHook(ctx)
   // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createSessionTool 内实现，
   // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {

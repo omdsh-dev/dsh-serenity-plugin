@@ -10,11 +10,13 @@
  * 纯转换（可单测）：本地编辑状态 ↔ wire patch。
  */
 
-/** wire 账号（服务端 GET 返回；无 hash） */
+/** wire 账号（服务端 GET 返回；无 hash/secret） */
 export interface WireAccount {
   id: string
   user: string
   hasPassword: boolean
+  /** 已绑定 TOTP（v1.22.4） */
+  hasTotp: boolean
 }
 
 /** wire 配置（GET /serenity/config 的 config 字段） */
@@ -25,6 +27,9 @@ export interface WireConfig {
     port: number
     accounts: WireAccount[]
     workspaces: string[]
+    cookieSecure: boolean
+    allowWorkspaceCreate: boolean
+    totpEnabled: boolean
   }
   rebuild: { enabled: boolean; thresholdRatio: number }
   naming: { enabled: boolean }
@@ -39,11 +44,27 @@ export interface AccountDraft {
   isNew: boolean
   /** 原账号是否已有密码（placeholder 显示） */
   hasPassword: boolean
+  /** 原账号是否已绑定 TOTP（v1.22.4） */
+  hasTotp: boolean
+  /** TOTP 绑定状态（v1.22.4）：undefined=无操作；'pending'=已生成 secret 待确认 */
+  totpState: 'none' | 'pending' | 'clear'
+  /** pending 时的新 secret（base32，展示给用户录入 Authenticator） */
+  totpSecret?: string
+  /** pending 时用户输入的确认码 */
+  totpConfirm?: string
 }
 
 /** wire 账号 → 本地编辑行 */
 export function accountDraftFromWire(a: WireAccount): AccountDraft {
-  return { id: a.id, user: a.user, pass: '', isNew: false, hasPassword: a.hasPassword }
+  return {
+    id: a.id,
+    user: a.user,
+    pass: '',
+    isNew: false,
+    hasPassword: a.hasPassword,
+    hasTotp: a.hasTotp,
+    totpState: 'none',
+  }
 }
 
 /** 生成新账号 id（本地编辑用；提交时若为空由服务端拒绝） */
@@ -51,21 +72,102 @@ export function newAccountId(): string {
   return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
 }
 
-/** 本地编辑行 → wire 账号（提交时；pass 字段携带） */
-export function accountToWire(d: AccountDraft): { id: string; user: string; pass: string } {
-  return { id: d.id, user: d.user, pass: d.pass }
+// ── v1.22.4 TOTP（浏览器侧生成 secret；RFC 4648 base32，与 node 端算法一致）──
+
+const B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
+
+/** 字节 → base32（无填充） */
+function bytesToBase32(bytes: Uint8Array): string {
+  let bits = 0
+  let value = 0
+  let out = ''
+  for (const byte of bytes) {
+    value = (value << 8) | byte
+    bits += 8
+    while (bits >= 5) {
+      out += B32_ALPHABET[(value >>> (bits - 5)) & 31]
+      bits -= 5
+    }
+  }
+  if (bits > 0) out += B32_ALPHABET[(value << (5 - bits)) & 31]
+  return out
 }
 
-/** 校验本地编辑行：user 非空；新账号必须设密码 */
+/** 生成 20 字节随机 TOTP secret（Web Crypto getRandomValues） */
+export function newTotpSecret(): string {
+  const bytes = new Uint8Array(20)
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes)
+  } else {
+    // 非安全上下文兜底（不应发生——DSH client 均需 secure context；防御性）
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  return bytesToBase32(bytes)
+}
+
+/** 构造 otpauth URI（Authenticator 扫码/手动录入） */
+export function otpauthUriClient(secret: string, label: string, issuer = 'Serenity Home'): string {
+  const params = new URLSearchParams({ secret, issuer, algorithm: 'SHA1', digits: '6', period: '30' })
+  return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`
+}
+
+/** 本地编辑行 → wire 账号（提交时；pass 字段携带） */
+export function accountToWire(d: AccountDraft): {
+  id: string
+  user: string
+  pass: string
+  totpSecret?: string
+  totpReset?: boolean
+} {
+  return {
+    id: d.id,
+    user: d.user,
+    pass: d.pass,
+    ...(d.totpState === 'pending' && d.totpSecret !== undefined && d.totpSecret !== ''
+      ? { totpSecret: d.totpSecret }
+      : d.totpState === 'clear'
+        ? { totpReset: true }
+        : {}),
+  }
+}
+
+/** 校验本地编辑行：user 非空；新账号必须设密码；pending TOTP 需确认码 */
 export function validateDraft(d: AccountDraft): string | null {
   if (d.user.trim() === '') return '用户名不能为空'
   if (d.isNew && d.pass === '') return '新账号必须设置密码'
+  if (d.totpState === 'pending' && !/^\d{6}$/.test(d.totpConfirm ?? '')) {
+    return `绑定 ${d.user} 的验证器需输入 6 位确认码`
+  }
   return null
 }
 
 // ── HTTP 操作（plugin 全局：不带 sessionId） ──
 
 const CONFIG_PATH = '/serenity/config'
+
+/**
+ * 获取已有工作区列表（需求 1：白名单从已有工作区选择而非手输）。
+ * 走 DSH 原生 RPC `POST /api/workspace.list`（JSON RPC 形态）。
+ * 返回 { path, title }[]；失败返回空数组（面板显示手输兜底）。
+ */
+export async function fetchWorkspaces(): Promise<{ path: string; title: string }[]> {
+  try {
+    const res = await fetch('/api/workspace.list', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ rpcId: `ws-${Date.now().toString(36)}`, payload: {} }),
+    })
+    if (!res.ok) return []
+    const body = (await res.json()) as { result?: { ok?: boolean; value?: { items?: Array<{ path?: string; title?: string }> } } }
+    const items = body?.result?.value?.items
+    if (!Array.isArray(items)) return []
+    return items
+      .filter((i): i is { path: string; title: string } => typeof i.path === 'string' && i.path !== '')
+      .map((i) => ({ path: i.path, title: typeof i.title === 'string' && i.title !== '' ? i.title : i.path }))
+  } catch {
+    return []
+  }
+}
 
 /** GET 配置（含账号列表；无 hash） */
 export async function fetchConfig(): Promise<WireConfig | null> {
@@ -79,7 +181,17 @@ export async function fetchConfig(): Promise<WireConfig | null> {
 
 /** PUT 配置（账号 patch + 工作区白名单）→ 返回保存后的 wire */
 export async function saveConfig(
-  patch: { gateway?: { host?: string; port?: number; accounts?: { id: string; user: string; pass: string }[]; workspaces?: string[] } },
+  patch: {
+    gateway?: {
+      host?: string
+      port?: number
+      accounts?: { id: string; user: string; pass: string; totpSecret?: string; totpReset?: boolean }[]
+      workspaces?: string[]
+      cookieSecure?: boolean
+      allowWorkspaceCreate?: boolean
+      totpEnabled?: boolean
+    }
+  },
 ): Promise<WireConfig | null> {
   const res = await fetch(CONFIG_PATH, {
     method: 'PUT',

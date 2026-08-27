@@ -16,6 +16,7 @@ import {
   globalConfigPath,
   ADVANCED_SECTION,
 } from '../src/config-ops.js'
+import { generateTotpSecret, totpCode, nowEpochSeconds, TOTP_STEP_SECONDS } from '../src/totp.js'
 
 let dir: string
 let oldEnv: string | undefined
@@ -165,8 +166,8 @@ describe('toWire（hash 永不落 wire）', () => {
       { id: 'a2', user: 'd', passHash: '' },
     ]
     const w = toWire(s)
-    expect(w.gateway.accounts[0]).toEqual({ id: 'a1', user: 'yh', hasPassword: true })
-    expect(w.gateway.accounts[1]).toEqual({ id: 'a2', user: 'd', hasPassword: false })
+    expect(w.gateway.accounts[0]).toEqual({ id: 'a1', user: 'yh', hasPassword: true, hasTotp: false })
+    expect(w.gateway.accounts[1]).toEqual({ id: 'a2', user: 'd', hasPassword: false, hasTotp: false })
     expect(JSON.stringify(w)).not.toContain('passHash')
     expect(JSON.stringify(w)).not.toContain('pw')
   })
@@ -223,6 +224,67 @@ describe('applyWirePatch（wire → 持久化）', () => {
 
     const next = applyWirePatch({ gateway: { accounts: [] } })
     expect(next.gateway.accounts).toEqual([])
+  })
+
+  it('v1.22.4 TOTP：totpSecret 非空 + 有效确认码 → 绑定；wire 不回传 secret', () => {
+    const s = defaultAdvancedSettings()
+    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
+    writeAdvancedSettings(s)
+
+    // 生成一个真实 TOTP secret 并计算当前确认码
+    const secret = generateTotpSecret()
+    const confirm = totpCode(secret, Math.floor(nowEpochSeconds() / TOTP_STEP_SECONDS))
+
+    const next = applyWirePatch({
+      gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: secret, totpConfirm: confirm }] },
+    })
+    expect(next.gateway.accounts[0]!.totpSecret).toBe(secret)
+    // wire 形态只有 hasTotp 布尔
+    const w = toWire(next)
+    expect(w.gateway.accounts[0]).toEqual({ id: 'a1', user: 'yh', hasPassword: true, hasTotp: true })
+    expect(JSON.stringify(w)).not.toContain(secret)
+    expect(JSON.stringify(w)).not.toContain('totpSecret')
+  })
+
+  it('v1.22.4 TOTP：确认码无效 → 拒绝绑定', () => {
+    const s = defaultAdvancedSettings()
+    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
+    writeAdvancedSettings(s)
+
+    expect(() =>
+      applyWirePatch({
+        gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: 'MZXW6YTB', totpConfirm: '000000' }] },
+      }),
+    ).toThrow(/确认码无效/)
+  })
+
+  it('v1.22.4 TOTP：totpReset=true → 清除绑定', () => {
+    const s = defaultAdvancedSettings()
+    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw'), totpSecret: 'MZXW6YTB' }]
+    writeAdvancedSettings(s)
+
+    const next = applyWirePatch({
+      gateway: { accounts: [{ id: 'a1', user: 'yh', totpReset: true }] },
+    })
+    expect(next.gateway.accounts[0]!.totpSecret).toBeUndefined()
+    expect(toWire(next).gateway.accounts[0]!.hasTotp).toBe(false)
+  })
+
+  it('v1.22.4 TOTP：未传 totpSecret/totpReset → 保留现有绑定', () => {
+    const s = defaultAdvancedSettings()
+    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw'), totpSecret: 'KEEP' }]
+    writeAdvancedSettings(s)
+
+    const next = applyWirePatch({ gateway: { accounts: [{ id: 'a1', user: 'yh' }] } })
+    expect(next.gateway.accounts[0]!.totpSecret).toBe('KEEP')
+  })
+
+  it('v1.22.4 cookieSecure patch', () => {
+    const next = applyWirePatch({ gateway: { cookieSecure: true } })
+    expect(next.gateway.cookieSecure).toBe(true)
+    // 缺省保留现有
+    const keep = applyWirePatch({ gateway: { port: 9999 } })
+    expect(keep.gateway.cookieSecure).toBe(true)
   })
 
   it('开关/阈值/端口 patch 生效（含边界校验）', () => {

@@ -120,7 +120,86 @@
 
 .ae-colUser { flex: 1.2; }
 .ae-colPass { flex: 1.6; }
+.ae-colTotp { flex: 2.2; min-width: 0; }
 .ae-colOp { flex: none; width: 48px; }
+
+/* ── v1.22.4 TOTP 第二因素 ── */
+
+.ae-totpBtn {
+  flex: none;
+  padding: 4px 10px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ae-totpBtn:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.ae-totpPending {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.ae-totpSecret {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  background: var(--dsw-alias-surface-raised, rgba(0, 0, 0, 0.25));
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 4px;
+  padding: 2px 6px;
+  color: var(--dsw-alias-label-secondary);
+  word-break: break-all;
+}
+
+.ae-totpUri {
+  font-size: 11px;
+  color: var(--dsw-alias-accent, #3b82f6);
+  text-decoration: none;
+}
+
+.ae-totpUri:hover {
+  text-decoration: underline;
+}
+
+.ae-totpConfirm {
+  max-width: 120px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.2em;
+}
+
+.ae-totpBadge {
+  font-size: 12px;
+  color: var(--dsw-alias-state-warning-fg, #f59e0b);
+}
+
+.ae-totpClear {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.ae-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--dsw-alias-label-secondary);
+  margin-top: 10px;
+  cursor: pointer;
+}
+
+.ae-check input {
+  accent-color: var(--dsw-alias-accent, #3b82f6);
+}
 
 .ae-del {
   flex: none;
@@ -155,6 +234,12 @@
 .ae-wsAdd {
   flex: none;
   align-self: auto;
+}
+
+.ae-wsSelect {
+  margin-top: 8px;
+  max-width: 100%;
+  cursor: pointer;
 }
 
 /* ── 工作区白名单 chips ── */
