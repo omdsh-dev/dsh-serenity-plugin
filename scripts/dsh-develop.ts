@@ -178,20 +178,48 @@ function cmdPush(): void {
   console.log(`[dsh-develop] ✓ pushed to origin (GitHub)`)
 }
 
-function cmdGithubPush(remote?: string, force = false): void {
-  const target = remote ?? 'github'
-  const args = ['push', target, 'HEAD']
-  if (force) args.push('--force')
-  const r = run('git', args, {
-    cwd: REPO_ROOT,
-    quiet: true,
-    env: { GIT_SSH_COMMAND: GIT_SSH_GITHUB },
-  })
-  if (r.status !== 0) {
-    console.error(r.stdout + r.stderr)
-    fail(`git push ${target} 失败 (exit ${r.status})`, 2)
+/** omdsh-dev 组织镜像 remote（v1.24.9：dsp 同步到 omdsh-dev 组织增加曝光） */
+const OMD_SH_REMOTE = 'omdsh'
+const OMD_SH_URL = 'git@github.com:omdsh-dev/dsh-serenity-plugin.git'
+
+/** 确保 remote 存在且 URL 正确（缺则 add，变了则 set-url） */
+function ensureRemote(target: string, url: string, cwd = REPO_ROOT): void {
+  const existing = run('git', ['remote', 'get-url', target], { cwd, quiet: true })
+  if (existing.status !== 0) {
+    const add = run('git', ['remote', 'add', target, url], { cwd, quiet: true })
+    if (add.status !== 0) fail(`remote add ${target} 失败: ${add.stderr}`, 2)
+    console.log(`[dsh-develop] remote ${target} -> ${url}`)
+  } else if (existing.stdout.trim() !== url) {
+    const set = run('git', ['remote', 'set-url', target, url], { cwd, quiet: true })
+    if (set.status !== 0) fail(`remote set-url ${target} 失败: ${set.stderr}`, 2)
+    console.log(`[dsh-develop] remote ${target} 更新为 ${url}`)
   }
-  console.log(`[dsh-develop] ✓ pushed to ${target}${force ? '（force）' : ''}`)
+}
+
+function cmdGithubPush(remote?: string, force = false): void {
+  // v1.24.9：默认双推——主仓 github（必达）+ omdsh-dev 组织镜像（失败仅 warn 不阻断发布）；
+  // 显式 remote 参数时只推指定 remote（如 github-push github / github-push omdsh）
+  const targets = remote ? [remote] : ['github', OMD_SH_REMOTE]
+  for (const target of targets) {
+    if (target === OMD_SH_REMOTE) ensureRemote(OMD_SH_REMOTE, OMD_SH_URL)
+    const args = ['push', target, 'HEAD']
+    if (force) args.push('--force')
+    const r = run('git', args, {
+      cwd: REPO_ROOT,
+      quiet: true,
+      env: { GIT_SSH_COMMAND: GIT_SSH_GITHUB },
+    })
+    if (r.status !== 0) {
+      if (target === OMD_SH_REMOTE) {
+        // 组织镜像失败不阻断主发布（网络/权限问题可后续补推）；保留日志便于排查
+        console.warn(`[dsh-develop] ⚠️ omdsh 组织镜像推送失败（不影响主仓，可后续 github-push omdsh 补推）: ${(r.stderr || r.stdout).slice(0, 300)}`)
+        continue
+      }
+      console.error(r.stdout + r.stderr)
+      fail(`git push ${target} 失败 (exit ${r.status})`, 2)
+    }
+    console.log(`[dsh-develop] ✓ pushed to ${target}${force ? '（force）' : ''}`)
+  }
 }
 
 function cmdSquashHistory(message?: string): void {
