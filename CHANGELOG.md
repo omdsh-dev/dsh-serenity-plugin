@@ -1,3 +1,15 @@
+## v1.24.7 — 2026-08-27（TOTP 绑定去确认码：生成即绑定，S142 用户反馈）
+
+**Scope:** 用户反馈"绑定 admin 的验证器需输入 6 位确认码 这个是什么意思，讲道理生成密钥固定下来就行了"——确认码是防呆校验（防止保存一个用户没录进去的 secret），但二选一登录下冗余：没录的 secret 登录时 TOTP 方式自然不生效（密码仍可用）。**用户拍板：生成密钥固定下来就行**——去掉确认码。
+
+### 变更
+- **config-ops.ts**：删除 totpConfirm 校验（line 372-379）——设置新 secret 直接落库；保留 **base32 合法性轻校验**（base32Decode 包裹，非法 secret 拒绝——防粘贴垃圾/无效数据落库，不增加 UX 负担）
+- **accounts-api.ts**：`AccountDraft` 删 `totpConfirm` 字段；`validateDraft` 删 pending 确认码要求（生成即绑定）
+- **AccountsEditor.tsx**：绑定态 UI 删确认码输入框 → 提示"扫码或手动录入后，点「保存」即完成绑定"；startTotpBind/cancelTotpBind/markTotpClear 去 totpConfirm
+- **AccountsEditor.css**：`.ae-totpConfirm` → `.ae-totpHint`（绑定提示样式）
+- **测试更新**：accounts-api（pending 绑定无需确认码断言替换 3 个确认码断言）、config-ops（"totpSecret 非空 → 直接绑定" + "非法 base32 → 拒绝" 替换确认码测试）——**42 files / 464 tests 全绿**
+- typecheck ✓（node + client）→ build ✓（lib/client.js 133133 B）
+
 ## v1.24.6 — 2026-08-27（登录凭据二选一 + TOTP 二维码扫码绑定，S142 用户需求）
 
 **Scope:** 用户两项需求——① "authenticator 安全性很好，能不能和用户账号密码搞成二选一"：登录凭据从双因素（密码 && TOTP）改为**二选一**（密码 或 6 位验证码，任一正确即登录）；② "配置 TOTP 的时候，可以随机生成渲染个二维码来绑定"：绑定流程从手动录入 secret 升级为**扫码绑定**（随机生成 secret → 渲染二维码 → Authenticator 扫码 → 输码确认）。

@@ -226,17 +226,14 @@ describe('applyWirePatch（wire → 持久化）', () => {
     expect(next.gateway.accounts).toEqual([])
   })
 
-  it('v1.22.4 TOTP：totpSecret 非空 + 有效确认码 → 绑定；wire 不回传 secret', () => {
+  it('v1.24.7 TOTP：totpSecret 非空 → 直接绑定（无确认码）；wire 不回传 secret', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
     writeAdvancedSettings(s)
 
-    // 生成一个真实 TOTP secret 并计算当前确认码
     const secret = generateTotpSecret()
-    const confirm = totpCode(secret, Math.floor(nowEpochSeconds() / TOTP_STEP_SECONDS))
-
     const next = applyWirePatch({
-      gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: secret, totpConfirm: confirm }] },
+      gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: secret }] },
     })
     expect(next.gateway.accounts[0]!.totpSecret).toBe(secret)
     // wire 形态只有 hasTotp 布尔
@@ -246,16 +243,16 @@ describe('applyWirePatch（wire → 持久化）', () => {
     expect(JSON.stringify(w)).not.toContain('totpSecret')
   })
 
-  it('v1.22.4 TOTP：确认码无效 → 拒绝绑定', () => {
+  it('v1.24.7 TOTP：非法 base32 secret → 拒绝绑定', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
     writeAdvancedSettings(s)
 
     expect(() =>
       applyWirePatch({
-        gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: 'MZXW6YTB', totpConfirm: '000000' }] },
+        gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: 'NOT-BASE32!!' }] },
       }),
-    ).toThrow(/confirmation code invalid/)
+    ).toThrow(/not valid base32/)
   })
 
   it('v1.22.4 TOTP：totpReset=true → 清除绑定', () => {

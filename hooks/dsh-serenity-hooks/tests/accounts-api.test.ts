@@ -51,11 +51,11 @@ describe('accounts-api: draft 转换（纯逻辑）', () => {
     expect(accountToWire(d)).toEqual({ id: 'a1', user: 'yh', pass: 'newpw' })
   })
 
-  it('draft → wire（pending 绑定 → 带 totpSecret）', () => {
+  it('draft → wire（pending 绑定 → 带 totpSecret；无确认码）', () => {
     const d: AccountDraft = {
       id: 'a1', user: 'yh', pass: '', isNew: false,
       hasPassword: true, hasTotp: false, totpState: 'pending',
-      totpSecret: 'MZXW6YTB', totpConfirm: '123456',
+      totpSecret: 'MZXW6YTB',
     }
     expect(accountToWire(d)).toEqual({ id: 'a1', user: 'yh', pass: '', totpSecret: 'MZXW6YTB' })
   })
@@ -96,16 +96,8 @@ describe('accounts-api: validateDraft（校验）', () => {
     expect(validateDraft(base({}))).toBeNull()
   })
 
-  it('pending 绑定缺确认码 → 报错', () => {
-    expect(validateDraft(base({ totpState: 'pending', totpSecret: 'MZXW6YTB', totpConfirm: '' }))).toContain('6 位确认码')
-  })
-
-  it('pending 绑定确认码非 6 位数字 → 报错', () => {
-    expect(validateDraft(base({ totpState: 'pending', totpSecret: 'MZXW6YTB', totpConfirm: '12ab' }))).toContain('6 位确认码')
-  })
-
-  it('pending 绑定确认码合法 → null', () => {
-    expect(validateDraft(base({ totpState: 'pending', totpSecret: 'MZXW6YTB', totpConfirm: '123456' }))).toBeNull()
+  it('v1.24.7：pending 绑定无需确认码（生成即绑定，保存落盘）', () => {
+    expect(validateDraft(base({ totpState: 'pending', totpSecret: 'MZXW6YTB' }))).toBeNull()
   })
 })
 

@@ -18,7 +18,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { verifyTotpCode } from './totp.js'
+import { base32Decode } from './totp.js'
 
 // ── 配置模型 ──
 
@@ -367,14 +367,15 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
         const pass = (a as { pass?: string }).pass
         // v1.22.4 TOTP：wire 层 totpSecret（非空 = 设置新 secret；totpReset=true = 清除）。
         // 仅允许对既有账号操作（新账号必须 pass 非空；secret 不参与账号创建判定）。
+        // v1.24.7 用户拍板：生成即绑定——去掉 totpConfirm 确认码（没录的 secret 登录时
+        // TOTP 方式自然不生效，二选一里密码仍可用）；保留 base32 合法性轻校验防无效 secret。
         const totp = (a as { totpSecret?: string; totpReset?: boolean }).totpSecret
         const totpReset = (a as { totpReset?: boolean }).totpReset === true
-        // 确认码校验：设置新 secret 时必须提供 totpConfirm（当前 6 位码），
-        // 服务端验证通过才落库——防止绑定他人 secret / 无效 secret。
-        const totpConfirm = (a as { totpConfirm?: string }).totpConfirm
         if (typeof totp === 'string' && totp !== '') {
-          if (typeof totpConfirm !== 'string' || verifyTotpCode(totp, totpConfirm) === null) {
-            throw new Error(`Account "${a.user}" TOTP confirmation code invalid — enter the 6-digit code currently shown by the authenticator`)
+          try {
+            base32Decode(totp)
+          } catch {
+            throw new Error(`Account "${a.user}" TOTP secret is not valid base32`)
           }
         }
         const nextTotp: string | undefined = totpReset

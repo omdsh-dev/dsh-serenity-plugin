@@ -187,10 +187,11 @@
   text-decoration: underline;
 }
 
-.ae-totpConfirm {
-  max-width: 120px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  letter-spacing: 0.2em;
+/* v1.24.7：绑定提示（去确认码后——扫码或手动录入，保存即绑定） */
+.ae-totpHint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--dsw-alias-label-tertiary);
 }
 
 .ae-totpBadge {

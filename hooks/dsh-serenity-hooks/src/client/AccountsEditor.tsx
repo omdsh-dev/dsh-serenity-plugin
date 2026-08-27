@@ -85,20 +85,20 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
     setDrafts((ds) => ds.filter((d) => d.id !== id))
   }
 
-  // v1.22.4 TOTP：生成新 secret 进入待确认态
+  // v1.22.4 TOTP：生成新 secret 进入待保存态（v1.24.7 去确认码——生成即绑定，保存落盘）
   const startTotpBind = (d: AccountDraft): void => {
     const secret = newTotpSecret()
-    updateDraft(d.id, { totpState: 'pending', totpSecret: secret, totpConfirm: '' })
+    updateDraft(d.id, { totpState: 'pending', totpSecret: secret })
   }
 
   // 取消 TOTP 绑定（回到无操作态）
   const cancelTotpBind = (d: AccountDraft): void => {
-    updateDraft(d.id, { totpState: d.hasTotp ? 'none' : 'none', totpSecret: undefined, totpConfirm: '' })
+    updateDraft(d.id, { totpState: d.hasTotp ? 'none' : 'none', totpSecret: undefined })
   }
 
   // 标记解绑（保存时提交 totpReset）
   const markTotpClear = (d: AccountDraft): void => {
-    updateDraft(d.id, { totpState: 'clear', totpSecret: undefined, totpConfirm: '' })
+    updateDraft(d.id, { totpState: 'clear', totpSecret: undefined })
   }
 
   // 需求 1：从已有工作区添加（下拉选择）
@@ -215,7 +215,8 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
                 <span className="ae-col ae-colTotp">
                   {d.totpState === 'pending' ? (
                     <span className="ae-totpPending">
-                      {/* v1.24.6：随机生成的 secret → 二维码扫码绑定（Authenticator 直接扫）；secret 文本兜底手动录入 */}
+                      {/* v1.24.6 二维码扫码绑定（Authenticator 直接扫）；secret 文本兜底手动录入。
+                          v1.24.7：无确认码——保存即绑定（没录的 secret 登录时 TOTP 不生效，密码仍可用） */}
                       {d.totpSecret !== undefined && (
                         <span
                           className="ae-totpQr"
@@ -225,16 +226,7 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
                       )}
                       <code className="ae-totpSecret" title="或手动录入到 Authenticator">{d.totpSecret}</code>
                       <a className="ae-totpUri" href={d.totpSecret ? otpauthUriClient(d.totpSecret, `${d.user.trim() || 'user'}@serenity`) : '#'} target="_blank" rel="noreferrer">otpauth://</a>
-                      <input
-                        className="ae-input ae-totpConfirm"
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]{6}"
-                        maxLength={6}
-                        value={d.totpConfirm ?? ''}
-                        placeholder="输入验证码确认"
-                        onChange={(e) => updateDraft(d.id, { totpConfirm: e.target.value })}
-                      />
+                      <span className="ae-totpHint">扫码或手动录入后，点「保存」即完成绑定</span>
                       <button type="button" className="ae-del" onClick={() => cancelTotpBind(d)}>取消</button>
                     </span>
                   ) : d.totpState === 'clear' ? (

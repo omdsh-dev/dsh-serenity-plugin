@@ -47,12 +47,10 @@ export interface AccountDraft {
   hasPassword: boolean
   /** 原账号是否已绑定 TOTP（v1.22.4） */
   hasTotp: boolean
-  /** TOTP 绑定状态（v1.22.4）：undefined=无操作；'pending'=已生成 secret 待确认 */
+  /** TOTP 绑定状态（v1.22.4）：undefined=无操作；'pending'=已生成 secret 待保存 */
   totpState: 'none' | 'pending' | 'clear'
-  /** pending 时的新 secret（base32，展示给用户录入 Authenticator） */
+  /** pending 时的新 secret（base32，展示二维码 + 文本录入 Authenticator） */
   totpSecret?: string
-  /** pending 时用户输入的确认码 */
-  totpConfirm?: string
 }
 
 /** wire 账号 → 本地编辑行 */
@@ -148,13 +146,10 @@ export function accountToWire(d: AccountDraft): {
   }
 }
 
-/** 校验本地编辑行：user 非空；新账号必须设密码；pending TOTP 需确认码 */
+/** 校验本地编辑行：user 非空；新账号必须设密码（v1.24.7：TOTP 生成即绑定，无确认码要求） */
 export function validateDraft(d: AccountDraft): string | null {
   if (d.user.trim() === '') return '用户名不能为空'
   if (d.isNew && d.pass === '') return '新账号必须设置密码'
-  if (d.totpState === 'pending' && !/^\d{6}$/.test(d.totpConfirm ?? '')) {
-    return `绑定 ${d.user} 的验证器需输入 6 位确认码`
-  }
   return null
 }
 
