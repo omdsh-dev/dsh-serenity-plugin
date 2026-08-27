@@ -49,11 +49,12 @@ LLM / Runtime / Tools (the cognitive medium — replaceable)
 | **Interception-seam guards** | safe-mode (bash disappears from the tool list) / path-escape blocking (P3: full inside Root, zero outside) / blacklist / governance-file protection / Trajectory-Steward DCP reminders — not bypassable by the model |
 | **session_rebuild trajectory tracker** | Context pressure over threshold → LLM-triggered `session_rebuild`: same-session surface wipe (Ship of Theseus), anchor keeps first-anchor protocol text + "continue S###", **auto-resumes** (steer) without user input; SESSION.md persists in place; shadow-price protocol compliant (token-meter accounting resets correctly) |
 | **Trajectory Steward** | A scoring reminder mechanism (`[TRAJECTORY-STEWARD]` + ACK protocol) that urges the agent to record progress back into SESSION.md — the mechanism is pre-declared in the system prompt before any reminder fires |
-| **Dual-port gateway (external access)** | Second node:http listener (default 0.0.0.0:3081) + login page (scrypt password + optional TOTP 2FA + CSRF + failure lockout) + HttpOnly cookie (sliding 24h) + reverse proxy to the main port (Host/Origin rewritten to pass the trust fence) + WS forwarding + workspace allowlist |
+| **Dual-port gateway (external access)** | Second node:http listener (default 0.0.0.0:3081) + login page (scrypt password **OR** TOTP code, either works + QR-code TOTP binding + CSRF token store + exponential lockout) + HttpOnly cookie (sliding 24h) + reverse proxy to the main port (Host/Origin rewritten to pass the trust fence) + WS forwarding + workspace allowlist |
 | **Image auto-fallback** | When the model does not support images: paste → saved to `_tmp/images_from_user/` → resent as text with the path → the agent uses the CCC's own vlm MSM |
+| **Any-file paste auto-save** | Pasting a non-image file → auto-saved to `_tmp/files_from_user/` (executable extensions blocked + 10MB cap + filename sanitized) + the input draft gets a path note (sent with the message) → the agent processes it with CCC MSMs (PDF extraction / archive unpack / spreadsheet parsing) |
 | **persona easter-egg mode** | Plugin settings can replace the output/instruction-following constraints of the ACC system prompt (EAP block + MSM principles) — a configured persona text replaces the defaults; unconfigured, behavior is exactly the default |
 | **Compaction retention** | Re-injects ACC identity after `compaction/end` (compaction never loses CCC constraints) |
-| **WebUI status badge + panels** | Session-header status badge (safe tag visible at a glance: red SAFE / gray OFF) + click to expand the CCC status card; DSH settings panel hosts plugin switches/thresholds/external access |
+| **WebUI status badge + panels** | Session-header status badge (**Scheme-O shield**: green dot = Serenity active, always green + shield = SAFE state amber/green + quick-toggle slider) + click to expand the CCC status card; DSH settings panel hosts plugin switches/thresholds/external access |
 | **Activation gating** | Everything activates only inside a CCC directory marked with `.serenity`; zero effect on DSH behavior elsewhere |
 
 ## Why MSM beats bash — why safe-mode exists
@@ -70,6 +71,72 @@ LLM / Runtime / Tools (the cognitive medium — replaceable)
 | **Reliable execution** | Deadlock/hang needs humans | Async (no event-loop block) + timeout auto-kill |
 
 Turning safe-mode on makes bash **disappear from the model's tool list** (via DSH `tools.restrict`, refreshed each step) — not an error on call, the model simply never sees it. The agent is forced onto the MSM whitelist channel: registered, tested, bounded, deterministic operations. The toggle is a **user capability** (WebUI only; invisible to and not controllable by the agent).
+
+## Best practice: a home cognitive infrastructure
+
+> Modeled on the real "Serenity" deployment (all addresses/accounts/paths/keys in this section are genericized — no private data).
+> A directory marked with `.serenity` is a CCC. This section shows what the system **really does** — each use case includes the concrete tool chain, ready to follow.
+
+### 1. Anatomy of a CCC
+
+```
+home-serenity/                    ← CCC root (marked by the .serenity file)
+├── .serenity                     ← the marker: this directory is a cognitive container
+├── .opencode/
+│   ├── serenity.json             ← CCC-level config: handyman model whitelist / thresholds / blacklist
+│   └── skills/                   ← domain skills (each = an EAP-encapsulated body of knowledge)
+│       ├── home-media/           ←   media: acquisition / subtitles / distribution
+│       ├── home-wealth/          ←   finance: assets / liabilities / income / budget
+│       ├── family-profiles/      ←   member profiles (single source of truth)
+│       └── … (each skill may own MSM scripts)
+├── AGENT_SESSIONS/               ← session repository: one SESSION.md per directory
+│   └── 2026-08-27--S142--xxx/
+│       └── SESSION.md            ← trajectory body: goals / decisions / progress (never moves)
+└── _tmp/                         ← runtime drops (images / user-pasted files)
+    ├── images_from_user/
+    └── files_from_user/
+```
+
+### 2. What you can do day-to-day (real use cases, with operation chains)
+
+| # | Scenario | Operation chain (tool → subcommand → effect) |
+|---|----------|----------------------------------------------|
+| 1 | **Long-running project maintenance** | `session create --desc xxx` → auto-creates `YYYY-MM-DD--S###--xxx/SESSION.md` → record progress step by step → `session use` resumes after interruption → `session_rebuild` auto-continues from the trajectory when context overflows (Ship of Theseus) |
+| 2 | **Batch code sync** | Root repo: `cc_git commit/push`; sub-repos: one-shot `resources-management sync` (auto commit + push all); multi-repo status via `status --all` |
+| 3 | **Media subtitle production** | Find source (BT) → download → Whisper transcription → LLM translation → bilingual SRT → mechanical QC (7 checks: timeline/duration/CPS/alignment) → distribution (RSS/email) |
+| 4 | **Server inspection** | `server-tool health` → one-shot report of CPU/memory/GPU/containers/services; `server-tool container` inspect/restart; `server-tool vllm` query inference service; all through the ssh-connect whitelist channel |
+| 5 | **LAN service discovery** | `landscape-tool` repo panorama (20+ repos classified by domain/stack/relations); `network-tool` device/port scanning — answers "which machine runs service X, on what port" |
+| 6 | **Finance data management** | Locally structured assets/liabilities/income/expenses/budget → query/aggregate; macro-tracking framework (optional external rate data, e.g. mortgage-rate comparison tool) |
+| 7 | **Member profiles** | `profile list/show/create/update` — member data maintained centrally; the CCC is the single source of truth |
+| 8 | **Capture ideas on the fly** | Chat whenever an idea comes → the AI interviews you into clarity → structured archive → periodic review of thinking patterns |
+| 9 | **External access (phone / travel)** | Browser → `http://lan-address:3081` → login page: username + password **OR** an Authenticator 6-digit code (either works) → operate the WebUI from your phone; accounts managed in the settings panel (password + QR-code TOTP binding + 5-failure lockout for 15 min) |
+| 10 | **Pasted material auto-processing** | **Images**: paste → auto-saved to `_tmp/images_from_user/` → vision model recognition (courier slips / screenshots / charts) → usable right in the conversation; **any file**: paste a PDF/archive/document → auto-saved to `_tmp/files_from_user/` → the agent extracts automatically (PDF extraction / archive unpack / spreadsheet parsing — dedicated MSMs for each) |
+
+### 3. What you manage (governance, with mechanism details)
+
+| Governance object | Mechanism details |
+|-------------------|-------------------|
+| **Executable units** | `acc_msm list` full registry; `acc_msm check` quality (4 DC checks: has tests / has main guard / bidirectional references consistent / path-type flags guarded); `register/deregister` management — everything is registered, tested, self-describing |
+| **Cognitive quality** | Periodic SQC scan → every skill stays EAP-compliant (Explicit / Reconstructable / Stable); design collaboration follows the Neat protocol (small steps / explicit decisions / document-driven) |
+| **Safe mode** | One click in the WebUI → bash **disappears** from the model's tool list (not an error) → the agent can only use registered MSMs; the toggle is a user capability — invisible to and not controllable by the agent |
+| **Credentials** | `localstore.json` centralizes credentials/keys (git refuses to commit by default — physical guarantee); `credential list/get` for unified reads |
+| **External-access security** | Login hardening (scrypt + constant-time compare + 256-bit token + sliding 24h); QR-code TOTP binding (rendered QR); failure lockout (5 → 15min exponential backoff); server-side CSRF token store (multi-tab safe); workspace allowlist (only allowed workspaces visible externally) |
+| **Session repository** | Full lifecycle: create / show / health (stale/stalled/drift) / qa (fact check) / archive — every piece of work traceable and rebuildable |
+| **Context hygiene** | Trajectory Steward scoring reminders (over threshold → urged to record progress back into SESSION.md); rebuild hints on context overflow (threshold adjustable in the settings panel) |
+
+### 4. A typical day (scenarios chained)
+
+```
+Morning:  LAN service inspection (server-tool health) → all healthy, no action
+Forenoon: sync yesterday's code (resources-management sync) → all sub-repos pushed
+Noon:     a PDF bill arrives → paste into the conversation → auto-saved + table extracted → recorded into finance data
+Afternoon: produce a video's subtitles (Whisper → translate → bilingual SRT → QC) → push to subscribers
+Evening:  access home services from an external device (login with a TOTP code) → handle an ops issue
+Throughout: every piece of work lands in SESSION.md → the trajectory stays continuous,
+            ready for anyone/model/host to pick up at any time
+```
+
+## Feature details
 
 ## Quick start
 
@@ -180,8 +247,9 @@ Steward post-execute: contextPressure projection ≥ rebuildThreshold → append
 
 ```
 External browser → http://LAN-IP:3081 (second listener, plugin-owned)
-  → not logged in → minimal login page (username+password+[TOTP], mobile-adapted)
-  → POST /serenity/login: scrypt + TOTP (optional) + CSRF double-submit + lockout (5 → 15min exp. backoff)
+  → not logged in → minimal login page (username + password OR 6-digit code, either works; mobile-adapted)
+  → POST /serenity/login: scrypt OR TOTP (independent of password — either passes)
+      + CSRF double-submit (server-side token store, multi-tab safe) + lockout (5 → 15min exp. backoff)
   → HttpOnly cookie (SameSite=Strict, sliding 24h) → 302 reverse proxy
   → logged in → proxy 127.0.0.1:main-port (Host/Origin rewritten to loopback, passes trust fence)
   → /api/workspace.list allowlist filtering + workspace.create validation
@@ -190,7 +258,9 @@ External browser → http://LAN-IP:3081 (second listener, plugin-owned)
 
 - Accounts/passwords/TOTP/allowlist = **plugin-global config** (`~/.dsh/serenity-hooks.json`, 0600) — plugin is global, CCC is concrete
 - Switch (gatewayEnabled) in the DSH settings panel; account CRUD in the panel's "External Access" section
-- Security audit (S1-S12): scrypt + timing-safe + 256-bit token + CSRF + TOTP + lockout + audit logs
+- **Either-or credentials (v1.24.6)**: an account with a bound authenticator logs in with the password OR a 6-digit code (unbound: password only; totpEnabled off: TOTP fully disabled)
+- **QR-code TOTP binding (v1.24.6~7)**: bind an authenticator → random secret + rendered QR → scan with Authenticator → save to bind (no confirmation code)
+- Security audit (S1-S12): scrypt + timing-safe + 256-bit token + CSRF token store + TOTP + lockout + audit logs
 
 ### Activation gating
 
@@ -211,22 +281,23 @@ Eight blocks in the same order (ACC → Metaphor → Principles → CCE → EAP 
 
 ## WebUI
 
-- **Session-header status badge** (`conversation.session.header.actions` slot): status dot (inside/outside CCC) + version + **safe tag** (red SAFE / gray OFF, visible at a glance) + click to expand the CCC status card (root path / handyman model / guard info / runtime state)
-- **DSH settings section** (`settings.section` slot): Serenity page — 3 feature switches + threshold + "External Access" block (listen address/port + account CRUD + TOTP binding + workspace allowlist chips + Secure Cookie)
+- **Session-header status badge** (`conversation.session.header.actions` slot): **Scheme-O shield** (v1.24.2~5) — green dot = Serenity active (always green) + shield = SAFE state (amber hollow = OFF reminder / green = ON reassuring) + **quick-toggle slider** (click to flip safe-mode) + click the card to expand the CCC status card (root path / handyman model / guard info / runtime state)
+- **DSH settings section** (`settings.section` slot): Serenity page — 3 feature switches + threshold + "External Access" block (listen address/port + account CRUD + QR-code TOTP binding + workspace allowlist chips + Secure Cookie)
 - **Image auto-fallback** (`conversation.input.dock` slot): silent recovery when the model rejects images (upload + clear rail + resend as text)
+- **Any-file auto-save** (`conversation.input.dock` slot): pasting a non-image file → auto-saved to `_tmp/files_from_user/` + draft path note (sent with the message)
 - Styling follows [web-styling.md](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/web-styling.md): `--dsw-alias-*` semantic tokens, light/dark adaptive
 
 ## Development
 
 ```bash
 pnpm typecheck   # hooks/dsh-serenity-hooks (node + client)
-pnpm test        # vitest full suite (40 files / 446 tests)
+pnpm test        # vitest full suite (42 files / 465 tests)
 pnpm build       # tsc + tsdown dual bundle (lib/index.js + client.js)
 ```
 
 Typecheck runs against real DSH type contracts (tsconfig paths point at a local DSH install, see `hooks/dsh-serenity-hooks/tsconfig.json`).
 
-- **Dev MSMs**: `scripts/dsh-develop.ts` (typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/github-push) + `scripts/dsh-crash-investigate.ts` (crash investigation, read-only)
+- **Dev MSMs**: `scripts/dsh-develop.ts` (typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/github-push/**npm-install-dev**) + `scripts/dsh-crash-investigate.ts` (crash investigation, read-only)
 - **Code map**: `docs/codebase-overview-v1.22.md` (layers / module map / data flows / config layers / entropy points)
 
 ## Relationship to opencode-serenity-plugin
@@ -250,4 +321,4 @@ Typecheck runs against real DSH type contracts (tsconfig paths point at a local 
 
 MIT — see [LICENSE](LICENSE)
 
-> **Version**: v1.23.8 &nbsp;|&nbsp; **Prereqs**: DSH 0.1.0-rc+ / Node ≥ 20 / bun
+> **Version**: v1.24.9 &nbsp;|&nbsp; **Prereqs**: DSH 0.1.0-rc+ / Node ≥ 20 / bun

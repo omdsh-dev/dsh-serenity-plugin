@@ -49,11 +49,12 @@ LLM / Runtime / Tools（认知介质，可替换）
 | **拦截缝机械约束** | safe-mode（bash 从工具列表消失）/ 路径逃逸阻断（P3 根内完整、根外零权限）/ 黑名单 / 治理文件保护 / Trajectory Steward DCP 提醒——模型不可绕过 |
 | **session_rebuild 轨迹跟踪器** | 上下文超阈值提示 LLM 主动触发 `session_rebuild`：同一会话 surface 完全清空（Ship of Theseus），锚点保留 first-anchor 协议正文 + 「继续 S### 的工作」，**自动继续**（steer）无需用户手工输入；SESSION.md 持久轨迹原位不动；shadow-price 协议合规（token-meter 计量正确回落） |
 | **Trajectory Steward** | 计分提醒机制（`[TRAJECTORY-STEWARD]` + ACK 协议）：督促 agent 把进度落回 SESSION.md——机制先于提醒，预声明在系统提示词中 |
-| **双端口网关（外部访问）** | 插件自起第二 node:http 监听器（默认 0.0.0.0:3081）+ 登录页（scrypt 密码 + 可选 TOTP 第二因素 + CSRF + 失败锁定）+ HttpOnly cookie（滑动 24h）+ 反代主端口（Host/Origin 改写过信任栅栏）+ WS 转发 + 工作区白名单 |
+| **双端口网关（外部访问）** | 插件自起第二 node:http 监听器（默认 0.0.0.0:3081）+ 登录页（scrypt 密码 或 TOTP 验证码**二选一** + 二维码扫码绑定 + CSRF token 集合 + 失败锁定指数退避）+ HttpOnly cookie（滑动 24h）+ 反代主端口（Host/Origin 改写过信任栅栏）+ WS 转发 + 工作区白名单 |
 | **图片自动落盘兜底** | 模型不支持图片时自动补救：粘贴图片 → 落盘 `_tmp/images_from_user/` → 注入「用户提供了一张图片（路径：…）」文本重发 → agent 经 CCC 自有 vlm MSM 识别 |
+| **任意文件粘贴自动落盘** | 非图片文件粘贴 → 自动落盘 `_tmp/files_from_user/`（可执行扩展名拒绝 + 10MB 上限 + 文件名脱敏）+ 输入框 draft 追加路径提示（随消息进对话）→ agent 经 CCC 自有 MSM 处理（PDF 提取 / 压缩包解压 / 表格解析） |
 | **persona 彩蛋模式** | 插件设定中可替换 ACC 系统提示词的输出约束/指令遵循约束部分（EAP 块 + MSM 原则段）——配置后用户文本替代原本；未配置完全默认零影响 |
 | **压缩保留** | `compaction/end` 后重注入 ACC 身份（上下文压缩不丢失 CCC 约束） |
-| **WebUI 状态徽章 + 高级面板** | 会话头部状态徽章（safe tag 一眼可见：红底 SAFE / 灰底 OFF）+ 点击展开 CCC 状态卡；DSH 设置面板承载插件开关/阈值/外部访问 |
+| **WebUI 状态徽章 + 高级面板** | 会话头部状态徽章（**方案 O 盾牌版**：绿点=激活恒绿 + 盾牌=SAFE 状态琥珀/绿 + 滑块快速开关）+ 点击展开 CCC 状态卡；DSH 设置面板承载插件开关/阈值/外部访问 |
 | **激活门控** | 所有能力只在 `.serenity` 标记的 CCC 目录内生效；其他目录对 DSH 原生行为零影响 |
 
 ## 核心哲学：为什么 MSM 比 bash 强，为什么需要安全模式
@@ -125,9 +126,73 @@ dsh-serenity-plugin install --scope ccc
 dsh-serenity-plugin status
 ```
 
-插件加载后，进入 CCC 目录的 DSH 会话自动获得：11 个 ACC 工具 + 机械守卫 + ACC 身份注入 + first-anchor 锚定 + 入口 skill 系统提示 + Trajectory Steward 提醒。WebUI 会话头部出现 Serenity 状态徽章（safe tag 一眼可见 + 点击展开详情）。
+插件加载后，进入 CCC 目录的 DSH 会话自动获得：11 个 ACC 工具 + 机械守卫 + ACC 身份注入 + first-anchor 锚定 + 入口 skill 系统提示 + Trajectory Steward 提醒。WebUI 会话头部出现 Serenity 状态徽章（方案 O 盾牌版：绿点 + 盾牌 + 滑块快速开关 + 点击展开详情）。
 
 **开启安全模式**：点击 WebUI 徽章中的 safe-mode 开关 → bash 从工具列表消失 → agent 走 MSM 白名单通道。
+
+## 最佳实践：一个家庭认知基础设施
+
+> 以真实部署「宁静号」为范例（本文所有地址/账号/路径/密钥均已泛化，不涉及任何隐私）。
+> 一个带 `.serenity` 标记的目录 = 一个 CCC。本节展示这个系统**真实能做什么**——
+> 每个用例给到具体的工具调用链，读者可照做。
+
+### 一、一个 CCC 的目录解剖
+
+```
+home-serenity/                    ← CCC 根（.serenity 记号文件标记）
+├── .serenity                     ← 记号：本目录是一个认知容器
+├── .opencode/
+│   ├── serenity.json             ← CCC 级配置：handyman 模型白名单 / 会话阈值 / 黑名单
+│   └── skills/                   ← 领域技能（每个 = 一个领域知识的 EAP 封装）
+│       ├── home-media/           ←   媒体：获取 / 字幕 / 分发
+│       ├── home-wealth/          ←   财务：资产 / 负债 / 收支 / 预算
+│       ├── family-profiles/      ←   成员档案（唯一真相源）
+│       └── …（每个 skill 可持有 MSM 脚本）
+├── AGENT_SESSIONS/               ← 会话库房：每目录一个 SESSION.md（持久轨迹）
+│   └── 2026-08-27--S142--xxx/
+│       └── SESSION.md            ← 轨迹身体：目标 / 决策 / 进度（永远原位）
+└── _tmp/                         ← 运行时落盘（图片 / 用户粘贴文件）
+    ├── images_from_user/
+    └── files_from_user/
+```
+
+### 二、日常能做什么（真实用例，含操作链）
+
+| # | 场景 | 操作链（工具 → 子命令 → 效果） |
+|---|------|--------------------------------|
+| 1 | **长期项目维护** | `session create --desc xxx` → 自动建 `YYYY-MM-DD--S###--xxx/SESSION.md` → 多步工作逐段落进度 → 中断后 `session use` 恢复 → 上下文超限时 `session_rebuild` 从轨迹自动接续（Ship of Theseus） |
+| 2 | **批量代码同步** | 根仓 `cc_git commit/push`；多个子仓库一键 `resources-management sync`（自动 commit + push 全部）；多仓状态 `status --all` |
+| 3 | **媒体字幕生产** | 搜索片源（BT）→ 下载 → Whisper 转写 → 大模型翻译 → 双语 SRT → 机械 QC（时间轴/时长/CPS/双语对齐 7 项检查）→ 分发（RSS/邮件） |
+| 4 | **服务器巡检** | `server-tool health` → CPU/内存/GPU/容器/服务状态一键报告；`server-tool container` 查看/重启容器；`server-tool vllm` 查询推理服务；全部经 ssh-connect 白名单通道 |
+| 5 | **内网服务定位** | `landscape-tool` 仓库全景（20+ 仓库分类/技术栈/关联）；`network-tool` 设备/端口扫描——回答「XX 服务在哪台机器、什么端口」 |
+| 6 | **财务数据管理** | 本地结构化记录资产/负债/收入/支出/预算 → 查询/汇总；宏观跟踪框架（可选接入外部利率数据，如房贷利率对比工具） |
+| 7 | **成员档案** | `profile list/show/create/update`——成员资料统一维护，CCC 是唯一真相源 |
+| 8 | **想法随手记** | 有想法随时开聊 → AI 访谈式理清 → 结构化归档 → 定期回顾思考模式 |
+| 9 | **外部访问（手机/出差）** | 浏览器开 `http://内网地址:3081` → 登录页：用户名 + 密码 **或** Authenticator 6 位码（二选一）→ 手机直接操作 WebUI；账号在设置面板管理（密码 + TOTP 扫码绑定 + 失败 5 次锁定 15 分钟） |
+| 10 | **粘贴资料自动处理** | **图片**：粘贴 → 自动落盘 `_tmp/images_from_user/` → 视觉模型识别（识别快递单/截图/图表）→ 对话中直接可用；**任意文件**：粘贴 PDF/压缩包/文档 → 自动落盘 `_tmp/files_from_user/` → agent 自动提取（PDF 提取 / 压缩包解压 / 表格解析，均有专用 MSM） |
+
+### 三、管理什么（治理面，含机制细节）
+
+| 治理对象 | 机制细节 |
+|----------|----------|
+| **可执行单元** | `acc_msm list` 看全量注册表；`acc_msm check` 品质检查（4 项 DC：有测试 / 有 main 守卫 / 双向引用一致 / path 参数类型守卫）；`register/deregister` 管理——所有操作是注册的、测试过的、自描述的 |
+| **认知质量** | 定期 SQC 扫描 → 每个技能保持 EAP 合规（显式 / 可重建 / 稳定）；设计协作走 Neat 协议（小步对齐 / 显式决策 / 文档驱动） |
+| **安全模式** | WebUI 一键开启 → bash 从模型工具列表**消失**（非报错）→ agent 只能走注册 MSM；开关是用户能力，agent 不可见不可自开关 |
+| **凭据** | `localstore.json` 集中存凭据/密钥（git 默认拒绝提交，物理保证不外泄）；`credential list/get` 统一读取 |
+| **外部访问安全** | 登录审计（scrypt + 常量时间比较 + 256-bit token + 滑动 24h）；TOTP 扫码绑定（二维码渲染）；失败锁定（5 次 → 15min 指数退避）；CSRF token 服务端集合（多标签不冲突）；工作区白名单（仅允许的外部工作区可见） |
+| **会话库房** | 会话全生命周期：create / show / health（stale/stalled/drift）/ qa（事实核查）/ archive——每段工作的轨迹可追溯可重建 |
+| **上下文卫生** | Trajectory Steward 计分提醒（超阈值督促把进度落回 SESSION.md）；上下文超限时自动提示重建（阈值可在设置面板调节） |
+
+### 四、典型一天（串联用例）
+
+```
+早上：内网服务巡检（server-tool health）→ 一切正常，无需干预
+上午：同步昨日代码（resources-management sync）→ 子仓库全部推送到 GitLab
+午间：收到一份 PDF 账单 → 粘贴到对话 → 自动落盘 + 表格提取 → 记入财务数据
+下午：制作一期视频字幕（Whisper → 翻译 → 双语 SRT → QC）→ 推送到订阅
+晚间：外部设备访问家庭服务（登录页：TOTP 码验证）→ 处理一个运维问题
+全程：每段工作落 SESSION.md → 轨迹连续，随时可换人/换模型/换宿主接续
+```
 
 ## 功能详解
 
@@ -195,8 +260,9 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 
 ```
 外部浏览器 → http://LAN-IP:3081（第二监听器，插件自起）
-  → 未登录 → 极简登录页（用户名+密码+[TOTP]，移动端适配）
-  → POST /serenity/login：scrypt 验证 + TOTP（可选）+ CSRF 双提交 + 失败锁定（5 次→15min 指数退避）
+  → 未登录 → 极简登录页（用户名 + 密码 或 6 位验证码，二选一；移动端适配）
+  → POST /serenity/login：scrypt 验证 / TOTP 校验（独立于密码，任一通过即登录）
+      + CSRF 双提交（服务端 token 集合，多标签不冲突） + 失败锁定（5 次→15min 指数退避）
   → HttpOnly cookie（SameSite=Strict，滑动 24h）→ 302 反代
   → 已登录 → 反代 127.0.0.1:主端口（Host/Origin 改写 loopback 过信任栅栏）
   → /api/workspace.list 白名单过滤 + workspace.create 校验
@@ -205,7 +271,9 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 
 - 账号密码/TOTP/白名单 = **plugin 全局配置**（`~/.dsh/serenity-hooks.json`，0600）——plugin 是全局的，CCC 是具体的
 - 开关（gatewayEnabled）在 DSH 设置面板；登录账号 CRUD 在设置面板「外部访问」区块
-- 安全审计（S1-S12）：scrypt + timing-safe + 256-bit token + CSRF + TOTP + 失败锁定 + 审计日志
+- **登录凭据二选一（v1.24.6）**：绑定验证器的账号可用密码 或 Authenticator 6 位码任一登录（未绑定仅密码；totpEnabled 关闭时 TOTP 完全禁用）
+- **TOTP 二维码扫码绑定（v1.24.6~7）**：绑定验证器 → 随机生成 secret + 渲染二维码 → Authenticator 扫码即录入 → 保存即绑定（无确认码）
+- 安全审计（S1-S12）：scrypt + timing-safe + 256-bit token + CSRF token 集合 + TOTP + 失败锁定 + 审计日志
 
 ### 六、激活门控
 
@@ -226,9 +294,10 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 
 ## WebUI
 
-- **会话头部状态徽章**（`conversation.session.header.actions` 槽）：绿状态点（CCC 内/外）+ 版本 + **safe tag**（红底 SAFE / 灰底 OFF，一眼可见）+ 点击展开 CCC 状态卡（根路径 / handyman 模型 / 守卫信息 / 运行状态）
-- **DSH 设置面板 section**（`settings.section` 槽）：Serenity 页——三功能开关 + 阈值 + 「外部访问」区块（监听地址/端口 + 登录账号 CRUD + TOTP 绑定 + 工作区白名单 chips + Secure Cookie）
+- **会话头部状态徽章**（`conversation.session.header.actions` 槽）：**方案 O 盾牌版**（v1.24.2~5）——绿点 = Serenity 激活（恒绿）+ 盾牌 = SAFE 状态（琥珀空心 = OFF 提醒 / 绿 = ON 安心）+ **滑块快速开关**（点击直切安全模式）+ 点击卡片展开 CCC 状态卡（根路径 / handyman 模型 / 守卫信息 / 运行状态）
+- **DSH 设置面板 section**（`settings.section` 槽）：Serenity 页——三功能开关 + 阈值 + 「外部访问」区块（监听地址/端口 + 登录账号 CRUD + TOTP 二维码绑定 + 工作区白名单 chips + Secure Cookie）
 - **图片自动落盘**（`conversation.input.dock` 槽）：模型不支持图片时静默补救（上传 + 清 rail + 文本重发）
+- **任意文件自动落盘**（`conversation.input.dock` 槽）：非图片文件粘贴 → 自动落盘 `_tmp/files_from_user/` + draft 追加路径提示（随消息进对话）
 - 样式遵循 [web-styling.md](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/web-styling.md)：`--dsw-alias-*` 语义 token，明暗主题自适应
 
 ## 开发
@@ -236,13 +305,13 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 ```bash
 # 完整开发循环（safe-mode 下经 acc_msm exec dsh-develop 亦可）
 pnpm typecheck          # hooks/dsh-serenity-hooks（node + client 双面）
-pnpm test               # vitest 全量（40 files / 446 tests）
+pnpm test               # vitest 全量（42 files / 465 tests）
 pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 ```
 
-- **测试**：40 files / 446 tests，typecheck 通过真实 DSH 类型契约（tsconfig paths 指向本地 DSH 安装，见 `hooks/dsh-serenity-hooks/tsconfig.json`）
-- **构建**：tsc（类型+声明）+ tsdown（Node half + WebUI client bundle + CSS 内联）
-- **开发 MSM**：`scripts/dsh-develop.ts`（typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/github-push）+ `scripts/dsh-crash-investigate.ts`（崩溃调查，只读）
+- **测试**：42 files / 465 tests，typecheck 通过真实 DSH 类型契约（tsconfig paths 指向本地 DSH 安装，见 `hooks/dsh-serenity-hooks/tsconfig.json`）
+- **构建**：tsc（类型+声明）+ tsdown（Node half + WebUI client bundle + CSS 内联；第三方库如 qrcode-generator 经 noExternal 内联，零运行时新依赖）
+- **开发 MSM**：`scripts/dsh-develop.ts`（typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/github-push/**npm-install-dev**）+ `scripts/dsh-crash-investigate.ts`（崩溃调查，只读）
 - **代码地图**：`docs/codebase-overview-v1.22.md`（分层架构/模块职责/数据流/配置分层/熵点）
 
 ## 与 opencode-serenity-plugin 的关系
@@ -266,4 +335,4 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **版本**: v1.23.8 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun
+> **版本**: v1.24.9 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun
