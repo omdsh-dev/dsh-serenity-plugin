@@ -1,15 +1,40 @@
 # dsh-serenity-plugin — Serenity ACC for DeepSeek Harness
 
-> **不是安全沙箱——是认知容器。** DeepSeek Harness（DSH）上的宁静号 ACC（Abstract Cognitive Container）实现：
-> 为 DSH 会话提供认知容器基础设施——真实工具、机械约束、系统提示词注入、会话生命周期与外部访问网关。
+> **不是安全沙箱——是认知容器。**
+> DeepSeek Harness（DSH）上的宁静号 ACC（Abstract Cognitive Container）实现：让 DSH 会话成为**认知发生、存储、再发生的地方**。
 >
 > 面向 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 0.1.0-rc 及以上版本。
 
-## 这是什么
+## 认知容器：这个插件在做什么
+
+> 理论根基见 [serenity-acc-specs](https://github.com/tellmewhattodo/serenity-acc-specs) §0（认知容器标准，v1.3.1）。
+
+**认知容器是认知发生、存储、再发生的地方。** 本插件把任意带 `.serenity` 标记的目录（CCC, Concrete Cognitive Container）变成这样的容器：
+
+| 认知环节 | 机制 |
+|---------|------|
+| **发生** | 认知以 Loop 形式进行——agent 的每一轮 turn 都是认知 Loop 的一次迭代；Loop 中一切外部交互（工具调用、等待用户、系统事件）**都是反馈**，是 Loop 在采样世界以验证内生预测 |
+| **存储** | 轨迹（trajectory）持久化——`SESSION.md` 是轨迹的**持久身体**（永远原位），`AGENT_SESSIONS/` 是轨迹的库房 |
+| **再发生** | 轨迹被新的 agent 重新推动——`session_rebuild`（Ship of Theseus）：载体可重建，本体不变 |
+
+核心认知：
+
+```
+Trajectory（主体，跨越时间的存在）
+    ↑ 由某个 Agent 推动
+Session（载体，可重建——轨迹此刻的承载实例）
+LLM / Runtime / Tools（认知介质，可替换）
+```
+
+- **Agent 是可替换的，Trajectory 才是连续的**——LLM 是认知介质不是大脑；agent 是过程中的角色；`SESSION.md` 是轨迹的持久身体，工作会话（dsh conversation）是轨迹的可重建运行副本
+- **认知闭环**：人类介入 = trajectory 的反馈输入之一（与 tool 调用同质）——在轨迹主体 + 相对时间视角下，宁静号已经实现**人类-LLM 协作闭环**
+- **协作规模不受单个 agent 生命周期限制，而受轨迹连续性限制**——只要轨迹连续，参与的 agent、模型、宿主都可替换
+
+## 本仓库是什么
 
 [opencode-serenity-plugin](https://github.com/tellmewhattodo/opencode-serenity-plugin) 是 OpenCode 运行时的宁静号 ACC；本仓库是 **DSH（DeepSeek Harness）运行时的独立实现**。
 
-- **独立实现**：不复用 opencode-serenity-plugin 源码；语义对齐其 ACC 标准（工具集 + 机械守卫 + 协作纪律），**系统提示词注入逐字节对齐**（见下文）
+- **独立实现**：不复用 opencode-serenity-plugin 源码；语义对齐同一 ACC 标准（工具集 + 机械守卫 + 协作纪律），**系统提示词注入逐字节对齐**（见下文）
 - **主产物 = Native Cordis 插件**（`@shgroup/dsh-serenity-hooks`）：真实 DSH 工具（`ctx.tools.register` 进程内注册）+ 拦截缝机械约束——DSH 官方扩展形态（与 harness 自身 200+ 包同构）
 - **知识层 = 技能**（acc-serenity 等）：只承载知识，约束交给插件机械执行
 - **平台复用**：路径守卫（fs 沙箱）、循环/常驻（goal/subagent）、压缩保留（compaction）等 DSH 原生能力直接复用，不重造
@@ -21,12 +46,14 @@
 | **真实 DSH 工具 ×11** | `cc_fs`（文件系统 15 子命令）/ `session`（会话全周期 9 子命令）/ `acc_kit`（health/time/wait）/ `cc_git` / `acc_msm`（MSM 框架）/ `eap` / `neat` / `cce` / `loop`（牛马循环）/ `session_rebuild`（轨迹跟踪器超限重建）/ `localstore`（凭据/配置存储），全部 `ctx.tools.register` 进程内注册 |
 | **系统提示词注入（8 块）** | `systemPrompt.section`（全局，order -50）：`=== Serenity ACC ===`（身份）/ `=== Serenity Metaphor ===`（世界模型：船/航行/船员三层隐喻）/ `=== Serenity Principles ===`（认知容器本体论 + MSM 原则）/ `=== Serenity CCE ===`（5 行为约束 + H_op）/ `=== Serenity EAP ===`（E↑R↓S↑ 自检）/ 状态块（Safe Mode / Localstore）/ 该 CCC 顶层入口 skill 全文（按 `.serenity` 记号发现）/ `=== Serenity Session ===`（活跃会话 + todowrite 首位约定）——对齐 opencode-serenity-plugin，平台无关文本逐字节一致 |
 | **first-anchor 锚定（零配置）** | 任何 CCC 在抽象层都是宁静号/ACC——新会话首轮注入 2 条协议锚定消息（ACC 身份 + 协作协议），0 工具纯文字确认后晋升完整工具目录；机制与内容代码固化，无 CCC 配置面 |
-| **拦截缝机械约束** | safe-mode（bash 从工具列表消失）/ 路径逃逸阻断（P3 根内完整、根外零权限）/ 黑名单 / 治理文件保护 / session-keeper DCP 提醒——模型不可绕过 |
-| **session_rebuild 轨迹跟踪器** | 上下文超阈值提示 LLM 主动触发 `session_rebuild`：同一会话 surface 完全清空（Ship of Theseus），锚点保留 first-anchor 协议正文 + 「继续 S### 的工作」，**自动继续**（steer）无需用户手工输入；SESSION.md 持久轨迹原位不动 |
+| **拦截缝机械约束** | safe-mode（bash 从工具列表消失）/ 路径逃逸阻断（P3 根内完整、根外零权限）/ 黑名单 / 治理文件保护 / Trajectory Steward DCP 提醒——模型不可绕过 |
+| **session_rebuild 轨迹跟踪器** | 上下文超阈值提示 LLM 主动触发 `session_rebuild`：同一会话 surface 完全清空（Ship of Theseus），锚点保留 first-anchor 协议正文 + 「继续 S### 的工作」，**自动继续**（steer）无需用户手工输入；SESSION.md 持久轨迹原位不动；shadow-price 协议合规（token-meter 计量正确回落） |
+| **Trajectory Steward** | 计分提醒机制（`[TRAJECTORY-STEWARD]` + ACK 协议）：督促 agent 把进度落回 SESSION.md——机制先于提醒，预声明在系统提示词中 |
 | **双端口网关（外部访问）** | 插件自起第二 node:http 监听器（默认 0.0.0.0:3081）+ 登录页（scrypt 密码 + 可选 TOTP 第二因素 + CSRF + 失败锁定）+ HttpOnly cookie（滑动 24h）+ 反代主端口（Host/Origin 改写过信任栅栏）+ WS 转发 + 工作区白名单 |
 | **图片自动落盘兜底** | 模型不支持图片时自动补救：粘贴图片 → 落盘 `_tmp/images_from_user/` → 注入「用户提供了一张图片（路径：…）」文本重发 → agent 经 CCC 自有 vlm MSM 识别 |
+| **persona 彩蛋模式** | 插件设定中可替换 ACC 系统提示词的输出约束/指令遵循约束部分（EAP 块 + MSM 原则段）——配置后用户文本替代原本；未配置完全默认零影响 |
 | **压缩保留** | `compaction/end` 后重注入 ACC 身份（上下文压缩不丢失 CCC 约束） |
-| **WebUI 状态徽章 + 高级面板** | 会话头部绿状态点徽章 + safe-mode 一键开关；DSH 设置面板承载插件开关/阈值；CCC 状态栏面板展示运行状态 |
+| **WebUI 状态徽章 + 高级面板** | 会话头部状态徽章（safe tag 一眼可见：红底 SAFE / 灰底 OFF）+ 点击展开 CCC 状态卡；DSH 设置面板承载插件开关/阈值/外部访问 |
 | **激活门控** | 所有能力只在 `.serenity` 标记的 CCC 目录内生效；其他目录对 DSH 原生行为零影响 |
 
 ## 核心哲学：为什么 MSM 比 bash 强，为什么需要安全模式
@@ -98,7 +125,7 @@ dsh-serenity-plugin install --scope ccc
 dsh-serenity-plugin status
 ```
 
-插件加载后，进入 CCC 目录的 DSH 会话自动获得：11 个 ACC 工具 + 机械守卫 + ACC 身份注入 + first-anchor 锚定 + 入口 skill 系统提示 + session-keeper 提醒。WebUI 会话头部出现 Serenity 状态徽章（safe-mode 一键开关 + 点击展开详情）。
+插件加载后，进入 CCC 目录的 DSH 会话自动获得：11 个 ACC 工具 + 机械守卫 + ACC 身份注入 + first-anchor 锚定 + 入口 skill 系统提示 + Trajectory Steward 提醒。WebUI 会话头部出现 Serenity 状态徽章（safe tag 一眼可见 + 点击展开详情）。
 
 **开启安全模式**：点击 WebUI 徽章中的 safe-mode 开关 → bash 从工具列表消失 → agent 走 MSM 白名单通道。
 
@@ -132,7 +159,7 @@ dsh-serenity-plugin status
 | `agent/inbox/inserted` | first-anchor 锚定注入（新会话首轮 2 条协议消息） |
 | `agent/turn-stopping` | session_rebuild 执行点（turn 结束清空 + steer 自动继续） |
 | `session/event`（compaction/end） | 压缩保留：压缩后重注入 ACC 身份 |
-| `tools/post-execute` | session-keeper DCP（计分提醒）+ 轨迹跟踪器 contextPressure 检测（独立机制） |
+| `tools/post-execute` | Trajectory Steward DCP（计分提醒）+ 轨迹跟踪器 contextPressure 检测（独立机制） |
 
 ### 三、safe-mode 机制
 
@@ -146,10 +173,10 @@ dsh-serenity-plugin status
 - **bash 消失，不是报错**：模型看不到 bash 工具，自然不发起调用
 - **用户能力**：开关仅限 WebUI（POST 需 `x-serenity-ui: 1` 头）；agent 不可见、不可自开关（治理文件保护）
 
-### 四、session_rebuild（F2 轨迹跟踪器）
+### 四、session_rebuild（轨迹跟踪器）+ Trajectory Steward
 
 ```
-keeper post-execute：contextPressure 投影 ≥ rebuildThreshold → 追加 [TRAJECTORY] 提示
+Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold → 追加 [TRAJECTORY] 提示
   → LLM 主动调用 session_rebuild（不自动执行——防误清空）
   → queueRebuild：门控 + 构建锚点 → pending 队列
   → agent/turn-stopping：surface replace 全部节点 → 锚点消息
@@ -157,11 +184,14 @@ keeper post-execute：contextPressure 投影 ≥ rebuildThreshold → 追加 [TR
   → agent.steer(自动继续) → next-step 非空 → turn 不 break → 模型自动读 SESSION.md 继续
 ```
 
-- **SESSION.md = 持久轨迹**（身份/决策/进度本体，永远原位）；**dsh 会话 = 临时可重建工作副本**
+- **SESSION.md = 持久轨迹**（身份/决策/进度本体，永远原位）；**dsh 会话 = 临时可重建工作副本**——载体可重建，轨迹连续（Ship of Theseus）
 - 同一会话 id 原地重建 → 同工作区天然满足、无需销毁/切换/归档
+- **shadow-price 协议合规（v1.23.5）**：replace 前 append `compaction/prune` 定价被替换范围 → token-meter 计量正确回落（UI「对话消息」不再虚高累计）
 - 触发阈值可在 DSH 设置面板调节（rebuildThreshold，默认 0.9）
 
-### 五、双端口网关（F1 外部访问）
+**Trajectory Steward**（v1.23.0 定名）：计分提醒机制——工具使用达阈值时以 `[TRAJECTORY-STEWARD]` 前缀 + ACK 协议督促 agent 把进度落回 SESSION.md；机制预声明在系统提示词 Session 块中（机制先于提醒）。
+
+### 五、双端口网关（外部访问）
 
 ```
 外部浏览器 → http://LAN-IP:3081（第二监听器，插件自起）
@@ -192,11 +222,11 @@ keeper post-execute：contextPressure 投影 ≥ rebuildThreshold → 追加 [TR
 
 ## 系统提示词（对齐 opencode-serenity-plugin）
 
-八块注入与 opencode-serenity-plugin 结构一致（ACC → Metaphor → Principles → CCE → EAP → 状态 → SKILL 全文 → Session），平台无关文本**逐字节一致**（机械断言见 `hooks/dsh-serenity-hooks/tests/osp-alignment.test.ts`）；唯一平台差异为工具名（`acc_msm` 等 DSH 真实工具）与 SKILL 治理内容过滤。
+八块注入与 opencode-serenity-plugin 结构一致（ACC → Metaphor → Principles → CCE → EAP → 状态 → SKILL 全文 → Session），平台无关文本**逐字节一致**（机械断言见 `hooks/dsh-serenity-hooks/tests/osp-alignment.test.ts`）；唯一平台差异为工具名（`acc_msm` 等 DSH 真实工具）与 SKILL 治理内容过滤。v1.23.0 起模型可见文本全英化（Session=载体定义 + Trajectory Steward 预声明随 specs v1.3.1）。
 
 ## WebUI
 
-- **会话头部状态徽章**（`conversation.session.header.actions` 槽）：绿状态点（CCC 内/外）+ 版本 + safe-mode 开关；点击展开 CCC 状态卡（根路径 / loop 模型 / 守卫信息 / 运行状态）
+- **会话头部状态徽章**（`conversation.session.header.actions` 槽）：绿状态点（CCC 内/外）+ 版本 + **safe tag**（红底 SAFE / 灰底 OFF，一眼可见）+ 点击展开 CCC 状态卡（根路径 / loop 模型 / 守卫信息 / 运行状态）
 - **DSH 设置面板 section**（`settings.section` 槽）：Serenity 页——三功能开关 + 阈值 + 「外部访问」区块（监听地址/端口 + 登录账号 CRUD + TOTP 绑定 + 工作区白名单 chips + Secure Cookie）
 - **图片自动落盘**（`conversation.input.dock` 槽）：模型不支持图片时静默补救（上传 + 清 rail + 文本重发）
 - 样式遵循 [web-styling.md](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/web-styling.md)：`--dsw-alias-*` 语义 token，明暗主题自适应
@@ -206,11 +236,11 @@ keeper post-execute：contextPressure 投影 ≥ rebuildThreshold → 追加 [TR
 ```bash
 # 完整开发循环（safe-mode 下经 acc_msm exec dsh-develop 亦可）
 pnpm typecheck          # hooks/dsh-serenity-hooks（node + client 双面）
-pnpm test               # vitest 全量（40 files / 429 tests）
+pnpm test               # vitest 全量（40 files / 446 tests）
 pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 ```
 
-- **测试**：40 files / 429 tests，typecheck 通过真实 DSH 类型契约（tsconfig paths 指向本地 DSH 安装，见 `hooks/dsh-serenity-hooks/tsconfig.json`）
+- **测试**：40 files / 446 tests，typecheck 通过真实 DSH 类型契约（tsconfig paths 指向本地 DSH 安装，见 `hooks/dsh-serenity-hooks/tsconfig.json`）
 - **构建**：tsc（类型+声明）+ tsdown（Node half + WebUI client bundle + CSS 内联）
 - **开发 MSM**：`scripts/dsh-develop.ts`（typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/github-push）+ `scripts/dsh-crash-investigate.ts`（崩溃调查，只读）
 - **代码地图**：`docs/codebase-overview-v1.22.md`（分层架构/模块职责/数据流/配置分层/熵点）
@@ -236,4 +266,4 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **版本**: v1.22.9 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun
+> **版本**: v1.23.8 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun

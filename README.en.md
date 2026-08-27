@@ -1,15 +1,41 @@
 # dsh-serenity-plugin — Serenity ACC for DeepSeek Harness
 
-> **Not a sandbox — a cognitive container.** A Serenity ACC (Abstract Cognitive Container) implementation for the DeepSeek Harness (DSH): real tools, mechanical constraints, system-prompt injection, session lifecycle, and an external-access gateway for DSH sessions.
+> **Not a sandbox — a cognitive container.**
+> A Serenity ACC (Abstract Cognitive Container) implementation for the DeepSeek Harness (DSH): it turns any DSH session into a place where **cognition happens, is stored, and happens again**.
 >
 > Targets [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 0.1.0-rc and later.
 
-## What is this
+## The cognitive container: what this plugin is about
+
+> Theoretical foundation: [serenity-acc-specs](https://github.com/tellmewhattodo/serenity-acc-specs) §0 (the cognitive-container standard, v1.3.1).
+
+**A cognitive container is a place where cognition happens, is stored, and happens again.** This plugin turns any directory marked with `.serenity` (a CCC, Concrete Cognitive Container) into such a container:
+
+| Cognitive stage | Mechanism |
+|-----------------|-----------|
+| **Happens** | Cognition proceeds as a Loop — each agent turn is one iteration; every external interaction in the loop (tool calls, waiting for the user, system events) **is feedback**, the loop sampling the world to verify its endogenous predictions |
+| **Is stored** | The trajectory persists — `SESSION.md` is the trajectory's **persistent body** (never moves), `AGENT_SESSIONS/` is its repository |
+| **Happens again** | The trajectory is pushed forward by new agents — `session_rebuild` (Ship of Theseus): the carrier is rebuildable, the identity never changes |
+
+Core insight:
+
+```
+Trajectory (the subject — an existence across time)
+    ↑ pushed by some Agent
+Session (the carrier — rebuildable; the trajectory's current embodiment)
+LLM / Runtime / Tools (the cognitive medium — replaceable)
+```
+
+- **Agents are replaceable; the trajectory is continuous** — the LLM is a cognitive medium, not a brain; an agent is a role in the process; `SESSION.md` is the trajectory's persistent body, and the working session (the dsh conversation) is its rebuildable running copy
+- **Cognitive closure**: human intervention is just one feedback input to the trajectory (homogeneous with tool calls) — under the trajectory-subject + relative-time view, Serenity already realizes a **human-LLM collaborative loop**
+- **Collaboration scale is bounded by trajectory continuity, not by any single agent's lifetime** — as long as the trajectory is continuous, the agents, models, and hosts involved can all be replaced
+
+## What this repository is
 
 [opencode-serenity-plugin](https://github.com/tellmewhattodo/opencode-serenity-plugin) is the Serenity ACC for OpenCode; this repository is an **independent implementation for DSH**.
 
 - **Independent**: does not reuse opencode-serenity-plugin source; aligns to the same ACC standard (tool set + mechanical guards + collaboration discipline), with the injected system prompt **byte-aligned on platform-neutral text** (see below).
-- **Primary artifact = native Cordis plugin** (`@shgroup/dsh-serenity-hooks`): real DSH tools (registered in-process via `ctx.tools.register`) + interception-seam mechanical constraints.
+- **Primary artifact = native Cordis plugin** (`@shgroup/dsh-serenity-hooks`): real DSH tools (registered in-process via `ctx.tools.register`) + interception-seam mechanical constraints — the official DSH extension form (isomorphic with the harness's own 200+ packages).
 - **Knowledge layer = skills** (acc-serenity etc.): knowledge only; constraints are enforced mechanically by the plugin.
 - **Platform reuse**: path guards (fs sandbox), loops/residents (goal/subagent), compaction retention are native DSH capabilities reused as-is.
 
@@ -20,12 +46,14 @@
 | **11 real DSH tools** | `cc_fs` (15 fs subcommands) / `session` (full session lifecycle) / `acc_kit` / `cc_git` / `acc_msm` (MSM framework) / `eap` / `neat` / `cce` / `loop` / `session_rebuild` (trajectory-tracker reset) / `localstore` — all registered via `ctx.tools.register` |
 | **System-prompt injection (8 blocks)** | `systemPrompt.section` (global, order -50): `=== Serenity ACC ===` / `=== Serenity Metaphor ===` (world model: Ship/Voyage/Crew) / `=== Serenity Principles ===` (cognitive-container ontology + MSM principles) / `=== Serenity CCE ===` / `=== Serenity EAP ===` / state blocks (Safe Mode / Localstore) / top-level entry skill full text (via the `.serenity` marker) / `=== Serenity Session ===` — aligned to opencode-serenity-plugin, byte-identical on platform-neutral text |
 | **first-anchor (zero-config)** | Every CCC is Serenity/ACC at the abstraction layer — new sessions get 2 protocol anchor messages (ACC identity + collaboration protocol), acknowledge with 0 tools, then promote to the full tool catalog; mechanism and content are code-fixed, no CCC config surface |
-| **Interception-seam guards** | safe-mode (bash disappears from the tool list) / path-escape blocking (P3: full inside Root, zero outside) / blacklist / governance-file protection / session-keeper DCP reminders — not bypassable by the model |
-| **session_rebuild trajectory tracker** | Context pressure over threshold → LLM-triggered `session_rebuild`: same-session surface wipe (Ship of Theseus), anchor keeps first-anchor protocol text + "continue S###", **auto-resumes** (steer) without user input; SESSION.md persists in place |
+| **Interception-seam guards** | safe-mode (bash disappears from the tool list) / path-escape blocking (P3: full inside Root, zero outside) / blacklist / governance-file protection / Trajectory-Steward DCP reminders — not bypassable by the model |
+| **session_rebuild trajectory tracker** | Context pressure over threshold → LLM-triggered `session_rebuild`: same-session surface wipe (Ship of Theseus), anchor keeps first-anchor protocol text + "continue S###", **auto-resumes** (steer) without user input; SESSION.md persists in place; shadow-price protocol compliant (token-meter accounting resets correctly) |
+| **Trajectory Steward** | A scoring reminder mechanism (`[TRAJECTORY-STEWARD]` + ACK protocol) that urges the agent to record progress back into SESSION.md — the mechanism is pre-declared in the system prompt before any reminder fires |
 | **Dual-port gateway (external access)** | Second node:http listener (default 0.0.0.0:3081) + login page (scrypt password + optional TOTP 2FA + CSRF + failure lockout) + HttpOnly cookie (sliding 24h) + reverse proxy to the main port (Host/Origin rewritten to pass the trust fence) + WS forwarding + workspace allowlist |
 | **Image auto-fallback** | When the model does not support images: paste → saved to `_tmp/images_from_user/` → resent as text with the path → the agent uses the CCC's own vlm MSM |
+| **persona easter-egg mode** | Plugin settings can replace the output/instruction-following constraints of the ACC system prompt (EAP block + MSM principles) — a configured persona text replaces the defaults; unconfigured, behavior is exactly the default |
 | **Compaction retention** | Re-injects ACC identity after `compaction/end` (compaction never loses CCC constraints) |
-| **WebUI status badge + panels** | Session-header status dot + safe-mode toggle; DSH settings panel hosts plugin switches/thresholds; CCC status panel shows runtime state |
+| **WebUI status badge + panels** | Session-header status badge (safe tag visible at a glance: red SAFE / gray OFF) + click to expand the CCC status card; DSH settings panel hosts plugin switches/thresholds/external access |
 | **Activation gating** | Everything activates only inside a CCC directory marked with `.serenity`; zero effect on DSH behavior elsewhere |
 
 ## Why MSM beats bash — why safe-mode exists
@@ -96,7 +124,7 @@ dsh-serenity-plugin install --scope ccc
 dsh-serenity-plugin status
 ```
 
-Sessions inside a CCC automatically get: the 11 ACC tools, mechanical guards, ACC identity injection, first-anchor anchoring, entry-skill system prompt, session-keeper reminders, and the WebUI status badge.
+Sessions inside a CCC automatically get: the 11 ACC tools, mechanical guards, ACC identity injection, first-anchor anchoring, entry-skill system prompt, Trajectory-Steward reminders, and the WebUI status badge.
 
 ## Feature details
 
@@ -128,12 +156,12 @@ Sessions inside a CCC automatically get: the 11 ACC tools, mechanical guards, AC
 | `agent/inbox/inserted` | first-anchor injection (2 protocol messages on first turn) |
 | `agent/turn-stopping` | session_rebuild execution point (turn-end wipe + steer auto-resume) |
 | `session/event` (compaction/end) | retention: re-inject ACC identity after compaction |
-| `tools/post-execute` | session-keeper DCP (scoring reminder) + trajectory tracker contextPressure check (independent mechanisms) |
+| `tools/post-execute` | Trajectory Steward DCP (scoring reminder) + trajectory tracker contextPressure check (independent mechanisms) |
 
-### session_rebuild (F2 trajectory tracker)
+### session_rebuild (trajectory tracker) + Trajectory Steward
 
 ```
-keeper post-execute: contextPressure projection ≥ rebuildThreshold → append [TRAJECTORY] hint
+Steward post-execute: contextPressure projection ≥ rebuildThreshold → append [TRAJECTORY] hint
   → LLM actively calls session_rebuild (never automatic — prevents accidental wipes)
   → queueRebuild: gate + build anchor → pending queue
   → agent/turn-stopping: surface replace all nodes → anchor message
@@ -141,11 +169,14 @@ keeper post-execute: contextPressure projection ≥ rebuildThreshold → append 
   → agent.steer(auto-resume) → next-step non-empty → turn does not break → model reads SESSION.md
 ```
 
-- **SESSION.md = persistent trajectory** (identity/decisions/progress, always in place); **dsh session = temporary rebuildable working copy**
+- **SESSION.md = persistent trajectory** (identity/decisions/progress, always in place); **dsh session = temporary rebuildable working copy** — the carrier is rebuildable, the trajectory is continuous (Ship of Theseus)
 - Same session id rebuilt in place → same workspace naturally, no destroy/switch/archive
+- **Shadow-price protocol compliant (v1.23.5)**: a `compaction/prune` metering event precedes the replace, pricing the replaced range → token-meter accounting resets correctly (the UI "conversation messages" figure no longer drifts upward)
 - Threshold configurable in the DSH settings panel (rebuildThreshold, default 0.9)
 
-### Dual-port gateway (F1 external access)
+**Trajectory Steward** (named in v1.23.0): a scoring-reminder mechanism — when tool use crosses a threshold it reminds the agent, with a `[TRAJECTORY-STEWARD]` prefix + ACK protocol, to record progress back into SESSION.md; the mechanism is pre-declared in the Session block of the system prompt (mechanism before reminder).
+
+### Dual-port gateway (external access)
 
 ```
 External browser → http://LAN-IP:3081 (second listener, plugin-owned)
@@ -176,11 +207,11 @@ Everything activates only inside a CCC directory marked with `.serenity`; zero e
 
 ## System prompt (aligned with opencode-serenity-plugin)
 
-Eight blocks in the same order (ACC → Metaphor → Principles → CCE → EAP → state → SKILL full text → Session); platform-neutral text is **byte-identical** (mechanically asserted in `hooks/dsh-serenity-hooks/tests/osp-alignment.test.ts`). The only platform differences are tool names (DSH's real tools) and governance-content filtering in the SKILL block.
+Eight blocks in the same order (ACC → Metaphor → Principles → CCE → EAP → state → SKILL full text → Session); platform-neutral text is **byte-identical** (mechanically asserted in `hooks/dsh-serenity-hooks/tests/osp-alignment.test.ts`). The only platform differences are tool names (DSH's real tools) and governance-content filtering in the SKILL block. Since v1.23.0 all model-visible text is English (Session-as-carrier definition + Trajectory Steward pre-declaration follow specs v1.3.1).
 
 ## WebUI
 
-- **Session-header status badge** (`conversation.session.header.actions` slot): status dot (inside/outside CCC) + version + safe-mode toggle; click to expand the CCC status card (root path / loop model / guard info / runtime state)
+- **Session-header status badge** (`conversation.session.header.actions` slot): status dot (inside/outside CCC) + version + **safe tag** (red SAFE / gray OFF, visible at a glance) + click to expand the CCC status card (root path / loop model / guard info / runtime state)
 - **DSH settings section** (`settings.section` slot): Serenity page — 3 feature switches + threshold + "External Access" block (listen address/port + account CRUD + TOTP binding + workspace allowlist chips + Secure Cookie)
 - **Image auto-fallback** (`conversation.input.dock` slot): silent recovery when the model rejects images (upload + clear rail + resend as text)
 - Styling follows [web-styling.md](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/web-styling.md): `--dsw-alias-*` semantic tokens, light/dark adaptive
@@ -189,7 +220,7 @@ Eight blocks in the same order (ACC → Metaphor → Principles → CCE → EAP 
 
 ```bash
 pnpm typecheck   # hooks/dsh-serenity-hooks (node + client)
-pnpm test        # vitest full suite (40 files / 429 tests)
+pnpm test        # vitest full suite (40 files / 446 tests)
 pnpm build       # tsc + tsdown dual bundle (lib/index.js + client.js)
 ```
 
@@ -219,4 +250,4 @@ Typecheck runs against real DSH type contracts (tsconfig paths point at a local 
 
 MIT — see [LICENSE](LICENSE)
 
-> **Version**: v1.22.9 &nbsp;|&nbsp; **Prereqs**: DSH 0.1.0-rc+ / Node ≥ 20 / bun
+> **Version**: v1.23.8 &nbsp;|&nbsp; **Prereqs**: DSH 0.1.0-rc+ / Node ≥ 20 / bun
