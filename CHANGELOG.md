@@ -1,3 +1,12 @@
+## v1.22.6 — 2026-08-27（修复：工作区白名单列表加载失败，S142）
+
+**Scope:** 用户报告设置面板工作区白名单显示"未能加载工作区列表（workspace.list 不可达）"——已有工作区下拉为空。
+
+### 变更
+- **根因**：`fetchWorkspaces` 的 POST body 只发 `{ rpcId, payload }`——DSH RPC 信封要求完整 **ClientRequest** `{ type: 'client-request', rpcId, method, payload }`（api/rpc.ts wire 契约）——缺 `type`/`method` → `clientRequestSchema.safeParse` 校验失败 → bad-request → `result.value.items` 缺失 → 面板回退"手输路径"兜底
+- **修复**：`src/client/accounts-api.ts` `fetchWorkspaces` 补 `type: 'client-request'` + `method: 'workspace.list'`（payload 空对象）——与 DSH 官方 `fetch/client.ts` `callUnary` 信封一致
+- 测试：accounts-api.test.ts +4（信封完整断言 type/method/payload + rpcId 前缀 / 非 200 空数组 / 缺 items 空数组 / 无 path item 过滤 + title 缺省回退）——**40 files / 425 tests** → typecheck ✓（node + client）
+
 ## v1.22.5 — 2026-08-27（session_rebuild 增强：自动继续 + 保留 first-anchor，S142）
 
 **Scope:** 用户实测 rebuild 有效后提出两项改进：① rebuild 完成后自动继续（不让用户手工继续）；② rebuild 后保留 first-anchor 内容（或重新走一轮 first-anchor）。

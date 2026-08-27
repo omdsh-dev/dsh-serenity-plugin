@@ -148,6 +148,8 @@ const CONFIG_PATH = '/serenity/config'
 /**
  * 获取已有工作区列表（需求 1：白名单从已有工作区选择而非手输）。
  * 走 DSH 原生 RPC `POST /api/workspace.list`（JSON RPC 形态）。
+ * 信封必须是完整 ClientRequest：`{ type: 'client-request', rpcId, method, payload }`
+ * （api/rpc.ts wire 契约——缺 type/method → clientRequestSchema 校验失败 → bad-request）。
  * 返回 { path, title }[]；失败返回空数组（面板显示手输兜底）。
  */
 export async function fetchWorkspaces(): Promise<{ path: string; title: string }[]> {
@@ -155,7 +157,12 @@ export async function fetchWorkspaces(): Promise<{ path: string; title: string }
     const res = await fetch('/api/workspace.list', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ rpcId: `ws-${Date.now().toString(36)}`, payload: {} }),
+      body: JSON.stringify({
+        type: 'client-request',
+        rpcId: `ws-${Date.now().toString(36)}`,
+        method: 'workspace.list',
+        payload: {},
+      }),
     })
     if (!res.ok) return []
     const body = (await res.json()) as { result?: { ok?: boolean; value?: { items?: Array<{ path?: string; title?: string }> } } }
