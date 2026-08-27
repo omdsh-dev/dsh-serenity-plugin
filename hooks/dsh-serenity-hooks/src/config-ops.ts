@@ -65,11 +65,22 @@ export interface NamingSettings {
   enabled: boolean
 }
 
+/** 彩蛋功能：persona 模式（v1.23.1，S142 用户需求）
+ * 配置后替换 ACC 系统提示词中"输出约束/指令遵循约束"部分（EAP 块 + MSM 原则段）；
+ * 未配置（mode 空）→ 完全默认行为，零影响。 */
+export interface PersonaSettings {
+  /** 彩蛋模式名（显示用；空 = 彩蛋关闭） */
+  mode: string
+  /** 用户替换文本（替代 EAP 块 + MSM 原则段的原文） */
+  overrideText: string
+}
+
 /** 高级设定全量（localstore.json 持久化形态；passHash 含 hash） */
 export interface AdvancedSettings {
   gateway: GatewaySettings
   rebuild: RebuildSettings
   naming: NamingSettings
+  persona: PersonaSettings
 }
 
 /** 默认值（工厂——每次返回新对象，防止调用方意外共享引用） */
@@ -91,6 +102,10 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     },
     naming: {
       enabled: true,
+    },
+    persona: {
+      mode: '',
+      overrideText: '',
     },
   }
 }
@@ -153,6 +168,7 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
   const gateway = (o.gateway ?? {}) as Partial<GatewaySettings>
   const rebuild = (o.rebuild ?? {}) as Partial<RebuildSettings>
   const naming = (o.naming ?? {}) as Partial<NamingSettings>
+  const persona = (o.persona ?? {}) as Partial<PersonaSettings>
   return {
     gateway: {
       enabled: typeof gateway.enabled === 'boolean' ? gateway.enabled : def.gateway.enabled,
@@ -185,6 +201,10 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
     naming: {
       enabled: typeof naming.enabled === 'boolean' ? naming.enabled : def.naming.enabled,
     },
+    persona: {
+      mode: typeof persona.mode === 'string' ? persona.mode : def.persona.mode,
+      overrideText: typeof persona.overrideText === 'string' ? persona.overrideText : def.persona.overrideText,
+    },
   }
 }
 
@@ -207,6 +227,7 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
   const gw = patch.gateway
   const rb = patch.rebuild
   const nm = patch.naming
+  const ps = patch.persona
   const next: AdvancedSettings = {
     gateway: gw !== undefined
       ? {
@@ -239,6 +260,12 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
     naming: nm !== undefined
       ? { enabled: typeof nm.enabled === 'boolean' ? nm.enabled : current.naming.enabled }
       : current.naming,
+    persona: ps !== undefined
+      ? {
+        mode: typeof ps.mode === 'string' ? ps.mode : current.persona.mode,
+        overrideText: typeof ps.overrideText === 'string' ? ps.overrideText : current.persona.overrideText,
+      }
+      : current.persona,
   }
   writeAdvancedSettings(next)
   return next
@@ -285,6 +312,7 @@ export interface AdvancedSettingsWire {
   }
   rebuild: RebuildSettings
   naming: NamingSettings
+  persona: PersonaSettings
 }
 
 /** 持久化 → wire（剥离 passHash/totpSecret；只留布尔） */
@@ -307,6 +335,7 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
     },
     rebuild: settings.rebuild,
     naming: settings.naming,
+    persona: settings.persona,
   }
 }
 
@@ -379,6 +408,12 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
   }
   if (wire.naming !== undefined && typeof wire.naming.enabled === 'boolean') {
     patch.naming = { enabled: wire.naming.enabled }
+  }
+  if (wire.persona !== undefined) {
+    const psPatch: PersonaSettings = { ...current.persona }
+    if (typeof wire.persona.mode === 'string') psPatch.mode = wire.persona.mode
+    if (typeof wire.persona.overrideText === 'string') psPatch.overrideText = wire.persona.overrideText
+    patch.persona = psPatch
   }
   return updateAdvancedSettings(patch)
 }

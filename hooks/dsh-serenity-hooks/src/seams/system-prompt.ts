@@ -30,6 +30,17 @@ import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
 import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
+import { readAdvancedSettings } from '../config-ops.js'
+
+/** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
+export function readPersonaSettings(): { mode: string; overrideText: string } {
+  try {
+    const s = readAdvancedSettings()
+    return { mode: s.persona.mode ?? '', overrideText: s.persona.overrideText ?? '' }
+  } catch {
+    return { mode: '', overrideText: '' }
+  }
+}
 
 /** 过滤掉对 agent 隐藏的内容（safe-mode 是用户能力，不对 agent 提及） */
 const HIDDEN_LINES = /安全模式|safe-mode|\.serenity-safe-on/g
@@ -131,9 +142,12 @@ export function cceBlock(): string {
  * boundaries）。原独立 Principles 与 Constraints 合并——同属容器约束体系，先原则
  * 后边界（从抽象到具体，重建视角 R↓）。**注意：Constraints 不再作为独立对齐块存在
  * （spec 修订：同步 osp compacting.ts——Constraints 内容并入本块，工具名仍为平台真实名）。**
+ *
+ * v1.23.1 persona：`omitMsmPrinciples=true` 时剥离 MSM 原则段（彩蛋替换面）——
+ * 用户 persona 文本承接"指令遵循风格"，本体论/关系段/操作边界（安全硬约束）永远保留。
  */
-export function principlesBlock(root: string): string {
-  return [
+export function principlesBlock(root: string, omitMsmPrinciples = false): string {
+  const lines = [
     '',
     '=== Serenity Principles ===',
     'Why a cognitive container: all work is cognition — every artifact, decision,',
@@ -149,19 +163,42 @@ export function principlesBlock(root: string): string {
     'rebuilt (session_rebuild). Identity belongs to the trajectory, not to any',
     'session.',
     '',
-    'MSM principles — machinery before improvisation:',
-    '- Determinism first: use a registered Mech before hand-rolling; reserve',
-    '  Semi-Mech for genuine judgment points.',
-    '- Single source of truth: an MSM is the only decoder of its own usage',
-    '  (--help/--schema); documents must not duplicate it.',
-    '- Registered to act: no tool exists unless it is on the manifest.',
-    '',
+  ]
+  if (!omitMsmPrinciples) {
+    lines.push(
+      'MSM principles — machinery before improvisation:',
+      '- Determinism first: use a registered Mech before hand-rolling; reserve',
+      '  Semi-Mech for genuine judgment points.',
+      '- Single source of truth: an MSM is the only decoder of its own usage',
+      '  (--help/--schema); documents must not duplicate it.',
+      '- Registered to act: no tool exists unless it is on the manifest.',
+      '',
+    )
+  }
+  lines.push(
     'Operational boundaries:',
     `Root: ${root}`,
     '  • File access — read/edit/write/grep/glob are confined to Root; paths outside Root are rejected (RR5)',
     '  • Shell — use acc_msm by default. Note: bash may be disabled',
     '  • Subagent — copies ALL parent constraints: file boundary, shell rules, session rules (no bypass)',
     '  • Session-first — before starting multi-step work, propose an existing or new AGENT_SESSIONS entry; wait for user "use" or "使用" to confirm',
+    '',
+  )
+  return lines.join('\n')
+}
+
+/**
+ * 彩蛋 persona 块（v1.23.1，S142 用户需求）：
+ * 用户配置的替换文本替代 EAP 块 + MSM 原则段（输出约束/指令遵循约束）。
+ * 独立标记头 `=== Serenity Persona ===`（幂等检测兼容）；装配位置 = EAP 原位。
+ * mode 空 = 彩蛋关闭 → 返回空串（装配层回退默认 EAP + 完整 Principles）。
+ */
+export function personaBlock(mode: string, overrideText: string): string {
+  if (mode === '' || overrideText.trim() === '') return ''
+  return [
+    '',
+    '=== Serenity Persona ===',
+    overrideText.trimEnd(),
     '',
   ].join('\n')
 }
@@ -406,14 +443,20 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
  * 身份（ACC）→ 世界模型（Metaphor）→ 信念/边界（Principles）→ 时间约束（CCE）
  * → 质量（EAP）→ 状态（SafeMode/Localstore）→ CCC 上下文（SKILL）→ 会话（Session）。
  * 认知展开顺序：我是谁 → 我所在的世界 → 为什么 → 如何一致 → 产物标准 → 当前状态 → 上下文。
+ *
+ * v1.23.1 persona（彩蛋）：persona.mode 配置 → EAP 块替换为 Persona 块（输出约束），
+ * Principles 剥离 MSM 原则段（指令遵循约束）——用户文本承接两处风格；本体论/关系段/
+ * 操作边界（安全硬约束）永远保留。未配置 → 与 v1.23.0 逐字节一致（零影响）。
  */
 export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSION_SCOPE): string {
+  const persona = readPersonaSettings()
+  const personaOn = persona.mode !== '' && persona.overrideText.trim() !== ''
   const parts = [
     accBlock(root),
     metaphorBlock(),
-    principlesBlock(root),
+    principlesBlock(root, personaOn),
     cceBlock(),
-    eapBlock(),
+    personaOn ? personaBlock(persona.mode, persona.overrideText) : eapBlock(),
   ]
   // S134 v1.16.12：运行时状态动态块（safe-mode / localstore）——利用系统提示词约束 agent 行为；
   // 按当前状态条件生成（开关/策略变更每轮装配即时生效）

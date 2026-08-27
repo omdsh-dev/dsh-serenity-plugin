@@ -267,3 +267,71 @@ describe('system-prompt: 运行时状态动态块（S134 v1.16.12）', () => {
     expect(text.indexOf('=== Serenity Safe Mode ===')).toBeLessThan(text.indexOf('=== Serenity Localstore ==='))
   })
 })
+
+describe('v1.23.1 persona 彩蛋（装配替换，SERENITY_HOOKS_CONFIG 注入全局文件）', () => {
+  let cfgPath: string
+  let oldEnv: string | undefined
+
+  beforeEach(() => {
+    cfgPath = join(dir, 'serenity-hooks.json')
+    oldEnv = process.env.SERENITY_HOOKS_CONFIG
+    process.env.SERENITY_HOOKS_CONFIG = cfgPath
+  })
+
+  afterEach(() => {
+    if (oldEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+    else process.env.SERENITY_HOOKS_CONFIG = oldEnv
+  })
+
+  it('personaBlock：mode+文本齐 → Persona 块；mode 空 → 空串', async () => {
+    const { personaBlock } = await import('../src/seams/system-prompt.js')
+    const on = personaBlock('大肥鱼', 'You are a big fat fish.\nLazy but correct.')
+    expect(on).toContain('=== Serenity Persona ===')
+    expect(on).toContain('big fat fish')
+    expect(on).not.toContain('=== Serenity EAP ===')
+    expect(personaBlock('', 'text')).toBe('')
+    expect(personaBlock('mode', '   ')).toBe('')
+  })
+
+  it('未配置 → 与默认逐字节一致（零影响）：含 EAP 块 + MSM 原则段', async () => {
+    const { serenitySystemPrompt } = await import('../src/seams/system-prompt.js')
+    const text = serenitySystemPrompt(dir)
+    expect(text).toContain('=== Serenity EAP ===')
+    expect(text).toContain('E↑ Explicit')
+    expect(text).toContain('MSM principles')
+    expect(text).toContain('Determinism first')
+    expect(text).not.toContain('=== Serenity Persona ===')
+  })
+
+  it('配置 → EAP 块替换为 Persona 块 + MSM 原则段剥离（安全边界保留）', async () => {
+    writeFileSync(cfgPath, JSON.stringify({ persona: { mode: '大肥鱼', overrideText: 'You are a big fat fish.' } }))
+    const { serenitySystemPrompt } = await import('../src/seams/system-prompt.js')
+    const text = serenitySystemPrompt(dir)
+    // Persona 块出现、EAP 块消失
+    expect(text).toContain('=== Serenity Persona ===')
+    expect(text).toContain('big fat fish')
+    expect(text).not.toContain('=== Serenity EAP ===')
+    // MSM 原则段剥离（指令遵循约束被 persona 承接）
+    expect(text).not.toContain('MSM principles')
+    expect(text).not.toContain('Determinism first')
+    // 安全硬约束永远保留：本体论 / 关系段 / 操作边界 / CCE
+    expect(text).toContain('Why a cognitive container')
+    expect(text).toContain('The session-trajectory relation')
+    expect(text).toContain('Operational boundaries:')
+    expect(text).toContain('File access')
+    expect(text).toContain('=== Serenity CCE ===')
+    // 装配位置：Persona 在 CCE 之后（EAP 原位）
+    expect(text.indexOf('=== Serenity CCE ===')).toBeLessThan(text.indexOf('=== Serenity Persona ==='))
+  })
+
+  it('principlesBlock(omitMsmPrinciples) 纯函数：剥离 MSM 段但保留其余', async () => {
+    const { principlesBlock } = await import('../src/seams/system-prompt.js')
+    const full = principlesBlock(dir, false)
+    const omitted = principlesBlock(dir, true)
+    expect(full).toContain('MSM principles')
+    expect(omitted).not.toContain('MSM principles')
+    expect(omitted).toContain('Why a cognitive container')
+    expect(omitted).toContain('Operational boundaries:')
+    expect(omitted).toContain('Session-first')
+  })
+})

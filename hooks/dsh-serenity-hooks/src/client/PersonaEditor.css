@@ -1,0 +1,97 @@
+/* PersonaEditor.css — 彩蛋模式区块（v1.23.1，官方 settings 设计语言：rowCard 内分组） */
+
+.pe-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  padding: 2px 0 6px;
+}
+
+.pe-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pe-label {
+  font-size: 12px;
+  color: var(--dsw-alias-text-secondary, #8a8f98);
+  user-select: none;
+}
+
+.pe-input,
+.pe-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--dsw-alias-bg-secondary, rgba(128, 128, 128, 0.08));
+  color: var(--dsw-alias-text-primary, #e6e6e6);
+  border: 1px solid var(--dsw-alias-border, rgba(128, 128, 128, 0.25));
+  border-radius: 8px;
+  font-size: 13px;
+  padding: 8px 10px;
+  outline: none;
+}
+
+.pe-input:focus,
+.pe-textarea:focus {
+  border-color: var(--dsw-alias-accent, #4f8cff);
+}
+
+.pe-textarea {
+  resize: vertical;
+  min-height: 120px;
+  line-height: 1.5;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 12px;
+}
+
+.pe-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pe-btn {
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--dsw-alias-border, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  color: var(--dsw-alias-text-primary, #e6e6e6);
+  transition: opacity 0.15s;
+}
+
+.pe-btn:hover:not(:disabled) {
+  opacity: 0.85;
+}
+
+.pe-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pe-btnGhost {
+  border-color: var(--dsw-alias-border, rgba(128, 128, 128, 0.25));
+}
+
+.pe-btnPrimary {
+  background: var(--dsw-alias-accent, #4f8cff);
+  border-color: transparent;
+  color: #fff;
+}
+
+.pe-hint {
+  font-size: 12px;
+  margin: 0;
+}
+
+.pe-hintOk {
+  color: var(--dsw-alias-state-success, #4caf50);
+}
+
+.pe-hintErr {
+  color: var(--dsw-alias-state-error, #e5484d);
+}

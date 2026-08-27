@@ -33,6 +33,7 @@ export interface WireConfig {
   }
   rebuild: { enabled: boolean; thresholdRatio: number }
   naming: { enabled: boolean }
+  persona: { mode: string; overrideText: string }
 }
 
 /** 本地编辑行（面板表单状态；pass 仅写方向） */
@@ -186,7 +187,7 @@ export async function fetchConfig(): Promise<WireConfig | null> {
   return body.config ?? null
 }
 
-/** PUT 配置（账号 patch + 工作区白名单）→ 返回保存后的 wire */
+/** PUT 配置（账号 patch + 工作区白名单 + persona 彩蛋）→ 返回保存后的 wire */
 export async function saveConfig(
   patch: {
     gateway?: {
@@ -198,6 +199,7 @@ export async function saveConfig(
       allowWorkspaceCreate?: boolean
       totpEnabled?: boolean
     }
+    persona?: { mode?: string; overrideText?: string }
   },
 ): Promise<WireConfig | null> {
   const res = await fetch(CONFIG_PATH, {

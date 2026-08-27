@@ -316,3 +316,42 @@ describe('applyWirePatch（wire → 持久化）', () => {
     expect(next.rebuild.thresholdRatio).toBe(0.9)
   })
 })
+
+describe('v1.23.1 persona 彩蛋（plugin 全局文件）', () => {
+  it('默认关闭：mode 空 / overrideText 空', () => {
+    const def = defaultAdvancedSettings()
+    expect(def.persona.mode).toBe('')
+    expect(def.persona.overrideText).toBe('')
+    const w = toWire(readAdvancedSettings())
+    expect(w.persona.mode).toBe('')
+  })
+
+  it('applyWirePatch 设置 persona → 持久化 + wire 回读', () => {
+    const next = applyWirePatch({ persona: { mode: '大肥鱼', overrideText: 'You are a big fat fish.\nKeep it lazy but correct.' } })
+    expect(next.persona.mode).toBe('大肥鱼')
+    expect(next.persona.overrideText).toContain('big fat fish')
+    // wire 回读一致
+    expect(toWire(readAdvancedSettings()).persona.mode).toBe('大肥鱼')
+    expect(toWire(readAdvancedSettings()).persona.overrideText).toContain('lazy')
+  })
+
+  it('清空 persona（mode 空串）→ 彩蛋关闭', () => {
+    applyWirePatch({ persona: { mode: '大肥鱼', overrideText: 'text' } })
+    const cleared = applyWirePatch({ persona: { mode: '', overrideText: '' } })
+    expect(cleared.persona.mode).toBe('')
+    expect(cleared.persona.overrideText).toBe('')
+  })
+
+  it('persona 未传 → 保留现有（部分 patch 语义）', () => {
+    applyWirePatch({ persona: { mode: 'm1', overrideText: 't1' } })
+    const keep = applyWirePatch({ gateway: { port: 9999 } })
+    expect(keep.persona.mode).toBe('m1')
+    expect(keep.persona.overrideText).toBe('t1')
+  })
+
+  it('mergeWithDefaults：坏文件/缺字段 → persona 默认关闭', () => {
+    const next = readAdvancedSettings()
+    expect(next.persona.mode).toBe('')
+    expect(next.persona.overrideText).toBe('')
+  })
+})

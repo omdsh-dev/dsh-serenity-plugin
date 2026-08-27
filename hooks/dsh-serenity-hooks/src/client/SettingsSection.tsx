@@ -23,6 +23,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-runtime/client'
 import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
+import { PersonaEditor } from './PersonaEditor.js'
 import './SettingsSection.css'
 
 /** serenity-hooks 简单配置 wire 形态（与 host 侧 schema 对齐） */
@@ -191,6 +192,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       <div className="ss-group">
         <h3 className="ss-groupTitle">外部访问</h3>
         <AccountsEditor gatewayOn={gatewayOn} />
+      </div>
+
+      {/* v1.23.1 彩蛋：persona 模式（替换输出约束/指令遵循约束；plugin 全局文件） */}
+      <div className="ss-group">
+        <h3 className="ss-groupTitle">彩蛋模式</h3>
+        <PersonaEditor />
       </div>
     </div>
   )

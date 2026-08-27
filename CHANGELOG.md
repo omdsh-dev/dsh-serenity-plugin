@@ -1,3 +1,19 @@
+## v1.23.1 — 2026-08-27（彩蛋功能：persona 模式——替换输出约束/指令遵循约束，S142 用户需求）
+
+**Scope:** 用户需求——用户常想改变 agent 的输出风格和指令遵循风格（如社区流行的「大肥鱼」模式）；为让用户开心且不影响正常工作，做彩蛋功能：在插件设定中可替换 ACC 系统提示词中**输出约束/指令遵循约束**部分（EAP 块 + MSM 原则段），配置后用户文本替代原本；未配置 → 完全默认行为，零影响。
+
+### 变更
+- **config-ops.ts**：新增 `PersonaSettings { mode, overrideText }`（plugin 全局文件 `~/.dsh/serenity-hooks.json`，v1.22 归属原则）——默认 mode=''（彩蛋关闭）；mergeWithDefaults/updateAdvancedSettings/toWire/applyWirePatch 全链路支持（部分 patch 语义：persona 未传保留现有）
+- **system-prompt.ts**：
+  - `personaBlock(mode, overrideText)`：mode 空/文本空 → 空串（装配回退默认）；否则 `=== Serenity Persona ===` 块（独立标记头，幂等检测兼容）
+  - `principlesBlock(root, omitMsmPrinciples)`：persona 生效时剥离 MSM 原则段（指令遵循约束被 persona 承接）；本体论/关系段/操作边界（安全硬约束）永远保留
+  - `serenitySystemPrompt` 装配：persona 生效 → EAP 块替换为 Persona 块（原位 CCE 之后）；未配置 → 与 v1.23.0 逐字节一致
+- **api.ts**：/serenity/config 通用 applyWirePatch 自动支持 persona（GET wire 含 persona / PUT patch），零改动
+- **client**：`PersonaEditor.tsx/.css`（新）——DSH 设置面板「彩蛋模式」区块：模式名输入 + 替换文本 textarea + 「填充大肥鱼 demo」/「清空」/「保存」（PUT /serenity/config → 热生效，新会话即时）；`SettingsSection.tsx` 挂载区块；`accounts-api.ts` WireConfig 补 persona + saveConfig 支持 persona patch
+- **demo**：内置 `BIG_FAT_FISH_DEMO`（DeepSeek 社区娘化人格：大肥鱼/鲸鱼娘——输出风格鱼化但保留 EAP 精神 + 指令遵循风格诚实精确、容器规则神圣）
+- **测试 +9**：config-ops persona（默认关闭/设置持久化/清空/部分 patch/merge 默认）+ system-prompt（personaBlock 门控/未配置逐字节一致/配置替换+安全边界保留/装配位置/principlesBlock 剥离纯函数）——**40 files / 438 tests 全绿**
+- typecheck ✓（node + client）→ build ✓（lib/index.js + lib/client.js 72745 B）
+
 ## v1.23.0 — 2026-08-27（提示词全英化 + Trajectory Steward 定名 + Session=载体定义，S142）
 
 **Scope:** specs v1.3.1 定义升级（用户拍板）——**Session = Trajectory 的可重建载体**（同义视角：宁静号 session 与 trajectory 指同一认知存在的两个面；载体视角：SESSION.md 是轨迹持久身体原位不动，工作会话是可丢弃重建的运行副本）。dsp 所有提示词全英化 + 维护机制定名 **Trajectory Steward**（用户从 Keeper/Warden/Curator/Custodian 中选定 Steward）。
