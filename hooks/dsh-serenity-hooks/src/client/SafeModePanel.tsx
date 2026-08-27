@@ -68,6 +68,19 @@ const SHIELD_SVG = (
   </svg>
 )
 
+/** 滑块 thumb 图标（v1.24.4 方案 O 滑块变体：OFF=琥珀 ✗ / ON=绿 ✓，开关隐喻表达开关状态） */
+const SWITCH_OFF_ICON = (
+  <svg viewBox="0 0 12 12" fill="none" width={8} height={8} aria-hidden="true">
+    <path d="M3 3L9 9M9 3L3 9" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" />
+  </svg>
+)
+
+const SWITCH_ON_ICON = (
+  <svg viewBox="0 0 12 12" fill="none" width={8} height={8} aria-hidden="true">
+    <path d="M2 6.2L4.8 9L10 3.4" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 /** 拼接类名（等价 clsx 最小子集，避免额外依赖） */
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
@@ -170,7 +183,22 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
           <>
             <span className={cx('sp-sep')} />
             <span className={cx('sp-shield')}>{SHIELD_SVG}</span>
-            <span className={cx('sp-statusWord')}>{status.safeModeOn ? 'SAFE ON' : 'SAFE OFF'}</span>
+            <span className={cx('sp-statusWord')}>SAFE</span>
+            {/* 滑块快速开关（v1.24.4 方案 O 滑块变体）：stopPropagation 不触发卡片开 Modal；
+                滑块左=OFF（琥珀✗ 写工具全开）/ 右=ON（绿✓ 写工具隐藏） */}
+            <span
+              className={cx('sp-switch', status.safeModeOn ? 'sp-switchOn' : 'sp-switchOff', busy ? 'sp-switchBusy' : undefined)}
+              role="switch"
+              aria-checked={status.safeModeOn}
+              title={status.safeModeOn ? 'safe-mode ON（点击关闭）' : 'safe-mode OFF（点击开启）'}
+              onClick={(e) => {
+                e.stopPropagation()
+                if (busy) return
+                void toggle(!status.safeModeOn)
+              }}
+            >
+              <span className={cx('sp-switchThumb')}>{status.safeModeOn ? SWITCH_ON_ICON : SWITCH_OFF_ICON}</span>
+            </span>
           </>
         )}
         <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />

@@ -120,6 +120,68 @@
   color: var(--dsw-alias-state-success-primary);
 }
 
+/* 滑块快速开关（v1.24.4 方案 O 滑块变体）：SAFE 文字保留 + 滑块——
+ * 滑块左 = OFF（琥珀 ✗，写工具全开）/ 右 = ON（绿 ✓，写工具隐藏），开关隐喻表达开关状态 */
+.sp-switch {
+  display: inline-flex;
+  align-items: center;
+  width: 30px;
+  height: 17px;
+  border-radius: 999px;
+  position: relative;
+  flex: none;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.sp-switchOff {
+  background: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 28%, var(--dsw-alias-border-l2));
+}
+
+.sp-switchOn {
+  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, var(--dsw-alias-border-l2));
+}
+
+.sp-switchThumb {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--dsw-alias-bg-module);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+  position: absolute;
+  top: 2px;
+  transition: left 0.2s;
+}
+
+.sp-switchOff .sp-switchThumb {
+  left: 2px;
+}
+
+.sp-switchOn .sp-switchThumb {
+  left: 15px;
+}
+
+.sp-switchThumb svg {
+  width: 8px;
+  height: 8px;
+}
+
+.sp-switchOff .sp-switchThumb svg {
+  color: var(--dsw-alias-state-warning-primary);
+}
+
+.sp-switchOn .sp-switchThumb svg {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.sp-switchBusy {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .sp-chev {
   color: var(--dsw-alias-label-dimmed);
   flex: none;

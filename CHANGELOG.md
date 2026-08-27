@@ -1,3 +1,14 @@
+## v1.24.4 — 2026-08-27（滑块快速开关：方案 O 滑块变体落地，S142 用户要求"抄到位"）
+
+**Scope:** 用户要求把方案 O 设计稿的**滑块变体**也实现——"滑块快速开关也实现下吧，抄到位！"。设计语义：SAFE 文字保留 + 滑块（无 ON/OFF 文字）——**滑块左 = OFF（琥珀 ✗，写工具全开）/ 右 = ON（绿 ✓，写工具隐藏）**，开关隐喻直接表达开关状态，**头部卡片内快速切换**（不必打开弹层）。
+
+### 变更
+- **头部卡片滑块**（SafeModePanel.tsx）：`[绿点] Serenity [v1.24.x] [分隔线] [盾牌] SAFE [滑块] [chevron]`——status-word 从 "SAFE ON/OFF" 收敛为 **"SAFE"**（滑块表达开/关）；滑块 `role="switch"` + `aria-checked` + 状态类（sp-switchOn/Off）
+- **快速切换交互**：滑块 `onClick` **stopPropagation**（不触发卡片开 Modal）→ 直接调 `toggle(!safeModeOn)`（同弹层大开关的 POST /serenity/status 通道）；busy 期间禁用（sp-switchBusy）；滑块点击后 `refresh()` 状态同步（盾牌/滑块颜色即时翻转）
+- **CSS（设计稿移植）**：`.sp-switch` 30×17 圆角胶囊（OFF = warning 28% + border-l2 混合 / ON = success 40%）；`.sp-switchThumb` 13×13 白底圆（`--dsw-alias-bg-module` 明暗自适应）阴影 + left 过渡 0.2s（2px ↔ 15px）；thumb 内嵌 8×8 ✗/✓ icon（SWITCH_OFF_ICON / SWITCH_ON_ICON，琥珀/绿 currentColor）
+- 交互分工：**滑块 = 快速开关**（高频）；**卡片其余区域点击 = 打开 Modal**（查看 CCC/handyman 详情 + 弹层大开关）
+- typecheck ✓（node + client）→ build ✓（lib/client.js 83098 B）；test 不变（463）
+
 ## v1.24.3 — 2026-08-27（暗色主题版本号对比度修复，S142 用户反馈）
 
 **Scope:** 用户实测反馈——方案 O 盾牌版在黑色背景下"版本号的字看不清"。根因：`.sp-ver` 用 `--dsw-alias-label-dimmed`（暗色 #71717a，on #18181b 对比度不足）。
