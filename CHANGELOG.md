@@ -1,3 +1,11 @@
+## v1.23.7 — 2026-08-27（safe tag 红色化，S142 用户反馈）
+
+**Scope:** 用户反馈 v1.23.6 的橙色 tag 太丑——"safe 标亮起来用红色"。
+
+### 变更
+- **safe 状态语义色 warning（橙）→ error（红）**：`.sp-tagOn`（头部卡片 safe tag）与 `.sp-toggleOn`（弹层安全模式开关）统一改用 `--dsw-alias-state-error-primary`（明暗主题自适应，红 600/400）——背景 16%/14% 透明混合 + 边框 45%——"safe = 警惕/危险"的红色语义，不再橙色
+- typecheck ✓（node + client）→ test ✓（40 files / 446 tests 不变）→ build ✓（lib/client.js 73039 B）
+
 ## v1.23.6 — 2026-08-27（safe 状态 tag 化：从外面一眼可见，非胶囊嵌套，S142 用户反馈）
 
 **Scope:** 用户反馈 v1.23.5 的点颜色编码不够直观——"安全模式做成 tag 吧，从外面看方便知道，不像之前那么丑就行"。

@@ -52,7 +52,7 @@
   background: var(--dsw-alias-label-dimmed);
 }
 
-/* safe-mode tag（方形小标签，非胶囊——从外面一眼可见状态；ON 橙 / OFF 灰） */
+/* safe-mode tag（方形小标签，非胶囊——从外面一眼可见状态；ON 红 / OFF 灰） */
 .sp-tag {
   display: inline-flex;
   align-items: center;
@@ -67,9 +67,9 @@
 }
 
 .sp-tagOn {
-  background: var(--dsw-alias-state-warning-bg, rgba(245, 158, 11, 0.18));
-  color: var(--dsw-alias-state-warning-fg, #f59e0b);
-  border: 1px solid var(--dsw-alias-state-warning-border, rgba(245, 158, 11, 0.4));
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
 }
 
 .sp-tagOff {
@@ -236,9 +236,9 @@
 }
 
 .sp-toggleOn {
-  background: var(--dsw-alias-state-warning-bg, rgba(245, 158, 11, 0.15));
-  color: var(--dsw-alias-state-warning-fg, #f59e0b);
-  border-color: var(--dsw-alias-state-warning-border, rgba(245, 158, 11, 0.4));
+  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 14%, transparent);
+  color: var(--dsw-alias-state-error-primary);
+  border-color: color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
 }
 
 .sp-toggleOff {
