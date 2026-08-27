@@ -49,6 +49,25 @@ export interface HandymanRunInfo {
 const API = '/serenity/status'
 const HANDYMEN_API = '/serenity/handymen'
 
+/** 盾牌 SVG（方案 O 盾牌版 v1.24.2；stroke currentColor——琥珀=OFF 提醒 / 绿=ON 安心由状态类控制） */
+const SHIELD_SVG = (
+  <svg viewBox="0 0 16 16" fill="none" width={16} height={16} aria-hidden="true">
+    <path
+      d="M8 1.5L13.5 3.5V7.2C13.5 10.6 11.2 13.6 8 14.8C4.8 13.6 2.5 10.6 2.5 7.2V3.5L8 1.5Z"
+      stroke="currentColor"
+      strokeWidth={1.3}
+      strokeLinejoin="round"
+    />
+    <path
+      d="M5.8 8L7.3 9.5L10.2 6.6"
+      stroke="currentColor"
+      strokeWidth={1.2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
 /** 拼接类名（等价 clsx 最小子集，避免额外依赖） */
 function cx(...parts: Array<string | false | null | undefined>): string {
   return parts.filter(Boolean).join(' ')
@@ -128,28 +147,31 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
 
   return (
     <>
-      {/* 状态卡片（可点击 → 弹出 Modal） */}
+      {/* 状态卡片（方案 O 盾牌版 v1.24.2：绿点=Serenity 生效恒绿；盾牌=SAFE 状态——琥珀=OFF 提醒 / 绿=ON 安心） */}
       <button
         type="button"
-        className={cx('sp-card')}
+        className={cx(
+          'sp-card',
+          inCcc ? (status.safeModeOn ? 'sp-cardProtected' : 'sp-cardUnprotected') : 'sp-cardInactive',
+        )}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen(true)}
         title={
           inCcc
-            ? `Serenity v${status.accVersion} — ${status.root}${status.safeModeOn ? '（safe-mode ON）' : '（safe-mode OFF）'}`
+            ? `Serenity v${status.accVersion} — ${status.root}（${status.safeModeOn ? 'SAFE ON — 写工具已隐藏' : 'SAFE OFF — 写工具全开，无保护'}）`
             : 'Serenity（未激活）'
         }
       >
-        <span className={cx('sp-dot', inCcc ? 'sp-dotOn' : 'sp-dotOff')} />
-        <span className={cx('sp-brand')}>Serenity v{status.accVersion}</span>
+        <span className={cx('sp-dot', inCcc ? undefined : 'sp-dotOff')} />
+        <span className={cx('sp-brand')}>Serenity</span>
+        <span className={cx('sp-ver')}>v{status.accVersion}</span>
         {inCcc && (
-          <span
-            className={cx('sp-tag', status.safeModeOn ? 'sp-tagOn' : 'sp-tagOff')}
-            title={status.safeModeOn ? 'safe-mode 已开启（隐藏写工具）' : 'safe-mode 关闭'}
-          >
-            {status.safeModeOn ? 'SAFE' : 'OFF'}
-          </span>
+          <>
+            <span className={cx('sp-sep')} />
+            <span className={cx('sp-shield')}>{SHIELD_SVG}</span>
+            <span className={cx('sp-statusWord')}>{status.safeModeOn ? 'SAFE ON' : 'SAFE OFF'}</span>
+          </>
         )}
         <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
       </button>

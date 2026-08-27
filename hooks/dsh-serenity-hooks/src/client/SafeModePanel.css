@@ -9,9 +9,9 @@
 .sp-card {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 14px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 8px;
   background: var(--dsw-alias-bg-module-platform);
@@ -37,14 +37,14 @@
   cursor: default;
 }
 
+/* 方案 O 盾牌版（v1.24.2）：绿点 = Serenity 生效（恒绿）；盾牌 = SAFE 状态
+ * （琥珀空心盾 = SAFE OFF 未保护提醒 / 绿实心盾 = SAFE ON 保护中安心） */
+
 .sp-dot {
   flex: none;
-  width: 7px;
-  height: 7px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-}
-
-.sp-dotOn {
   background: var(--dsw-alias-state-success-primary);
 }
 
@@ -52,40 +52,77 @@
   background: var(--dsw-alias-label-dimmed);
 }
 
-/* safe-mode tag（实心方形标签，无 icon——从外面一眼可见；ON 红底 SAFE / OFF 灰底 OFF） */
-.sp-tag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 16px;
-  padding: 0 7px;
-  border-radius: 4px;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.sp-cardInactive {
+  opacity: 0.85;
 }
 
-.sp-tagOn {
-  background: var(--dsw-alias-state-error-primary);
-  color: var(--dsw-alias-label-primary-foreground);
-  border: 1px solid var(--dsw-alias-state-error-primary);
-}
-
-.sp-tagOff {
-  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.16));
+.sp-cardInactive .sp-brand {
   color: var(--dsw-alias-label-secondary);
-  border: 1px solid var(--dsw-alias-border-l1);
+  font-weight: 500;
 }
 
 .sp-brand {
   color: var(--dsw-alias-label-primary);
-  font-weight: 500;
+  font-weight: 600;
+}
+
+.sp-ver {
+  color: var(--dsw-alias-label-dimmed);
+  font-size: 11px;
+  font-family: var(--ds-font-family-code, monospace);
+}
+
+.sp-sep {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  background: var(--dsw-alias-border-l1);
+}
+
+.sp-shield {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.sp-shield svg {
+  width: 16px;
+  height: 16px;
+}
+
+.sp-statusWord {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* SAFE OFF（未保护）：琥珀——提醒，非错误（用户自己的开关选择） */
+.sp-cardUnprotected .sp-shield {
+  color: var(--dsw-alias-state-warning-primary);
+}
+
+.sp-cardUnprotected .sp-statusWord {
+  color: var(--dsw-alias-state-warning-primary);
+}
+
+/* SAFE ON（保护中）：绿——安心 */
+.sp-cardProtected .sp-shield {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.sp-cardProtected .sp-shield path:first-child {
+  fill: color-mix(in srgb, var(--dsw-alias-state-success-primary) 18%, transparent);
+}
+
+.sp-cardProtected .sp-statusWord {
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .sp-chev {
   color: var(--dsw-alias-label-dimmed);
+  flex: none;
 }
 
 /* ── 官方 Modal 定制（宽度 + 内容紧凑） ── */

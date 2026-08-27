@@ -1,3 +1,15 @@
+## v1.24.2 — 2026-08-27（状态卡片方案 O 盾牌版：绿点=激活恒绿 + 盾牌=SAFE 状态，S142 用户设计）
+
+**Scope:** 用户提供外部设计稿「方案 O 盾牌版」（HTML + 暗色截图，经文件/图片粘贴自动落盘链路传入）——"有人提供了更好的设计，抄走"。设计语义：**前面的绿点 = Serenity 生效（恒绿）**，**后面的盾牌 = SAFE 状态**（琥珀空心盾 = SAFE OFF 未保护提醒 / 绿实心盾 = SAFE ON 保护中安心）。取代 v1.23.6~1.23.8 的 safe tag 方案（tag 的红=错误语义不适合 OFF——OFF 是用户自己的开关选择，琥珀=提醒更准确）。
+
+### 变更
+- **头部卡片重构（方案 O）**：`[绿点] Serenity [v1.24.x（code font）] [竖分隔线] [盾牌] SAFE OFF/ON [chevron]`——布局对齐设计稿（height 30px / padding 0 8px 0 14px / gap 8px）
+- **状态语义分离**：`.sp-dot` 只表激活（绿=在 CCC 内恒绿 / 灰=未激活）；SAFE 状态由 **盾牌 SVG + status-word** 承担——`sp-cardUnprotected`（琥珀 warning：提醒非错误）/ `sp-cardProtected`（绿 success：实心 fill color-mix 18%）/ `sp-cardInactive`（降透明度）
+- **删除 v1.23.8 的 safe tag**（`.sp-tag*` 红底标签 + 实心红底 CSS）；弹层大开关（`.sp-toggle*` 红色 ON）保留
+- 交互不变：卡片点击 → 官方 Modal（弹层安全模式大开关）；title 文案对齐新语义（SAFE ON — 写工具已隐藏 / SAFE OFF — 写工具全开，无保护）
+- 设计稿备份：`docs/status-card-scheme-O-shield.html`（用户原始 HTML 落盘存档，含滑块变体参考）
+- typecheck ✓（node + client）→ test ✓（42 files / 463 tests 不变）→ build ✓（lib/client.js 80176 B）
+
 ## v1.24.1 — 2026-08-27（任意文件粘贴自动落盘 _tmp/files_from_user/，S142 用户需求）
 
 **Scope:** 用户需求——"粘贴文件（非图片格式）自动也放 _tmp 去"。调研确认 DSH 输入框只认图片（`InputBar.onPaste` 把所有文件交给 `intakeImages` → 非图片被 `addImages` 拒绝 toast+丢弃，无 rail 无发送通道）→ 任意文件必须**主动拦截 paste + 落盘**。用户拍板：① 提示方式 = **draft 追加**（不自动发送，随用户消息进对话）；② 单文件上限 = **10MB**（与图片一致）；③ 版本号放缓（归 v1.24.1，不升 minor）。
