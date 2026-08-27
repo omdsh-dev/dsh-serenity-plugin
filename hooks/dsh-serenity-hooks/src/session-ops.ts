@@ -441,13 +441,15 @@ export function parseSessionContextFromEvents(events: readonly unknown[]): Activ
       if (idx < 0) continue
       const rest = s.slice(idx + SESSION_CONTEXT_MARKER.length).trim()
       const dirName = rest.split('\n')[0]?.trim() ?? ''
-      const mdMatch = s.match(/SESSION\.md path:\s*(\S+)/)
+      // 路径可含空格（会话目录名如 "2026-08-24--S142--dsh-serenity-plugin 长期维护"）：
+      // 用 [^\r\n]+ 匹配整行而非 \S+（\S+ 遇空格截断 → mdPath 残缺，锚点/Session 块定位失败）
+      const mdMatch = s.match(/SESSION\.md path:\s*([^\r\n]+)/)
       if (/^\d{4}-\d{2}-\d{2}--/.test(dirName) && mdMatch) {
         const idMatch = dirName.match(/--S(\d{3,})--/)
         return {
           sessionId: idMatch ? `S${idMatch[1]}` : basename(dirName),
           dirName,
-          mdPath: mdMatch[1]!,
+          mdPath: mdMatch[1]!.trim(),
         }
       }
     }

@@ -41,7 +41,7 @@ import type { SessionId, Session } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
-import { join } from 'node:path'
+import { join, basename, dirname } from 'node:path'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
 import { getActiveSessionInfo } from './session-ops.js'
@@ -74,11 +74,18 @@ export function buildRebuildAnchor(
   anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
 ): string {
   const rel = activeMdPath.startsWith(root) ? activeMdPath.slice(root.length + 1) : activeMdPath
+  // 会话目录名 = SESSION.md 的父目录 basename（可含空格，如 "…--S142--dsh-serenity-plugin 长期维护"）
+  const sessionDir = basename(dirname(activeMdPath))
+  const sessionLine =
+    sessionDir !== 'AGENT_SESSIONS'
+      ? `- Serenity session: ${sessionName !== '' ? `${sessionName} (${sessionDir})` : sessionDir}`
+      : null
   const lines = [
     '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the trajectory continues).',
     '',
     ...anchorMessages.flatMap((text) => [stripAckSuffix(text), '']),
     sessionName !== '' ? `Continue the work of ${sessionName}.` : 'Continue the current work.',
+    ...(sessionLine ? [sessionLine] : []),
     `- Persistent trajectory (SESSION.md, unmoved): ${rel}`,
     `- Read that SESSION.md first (goal/decisions/progress/unresolved), then continue from the last checkpoint.`,
   ]

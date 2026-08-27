@@ -98,6 +98,15 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(a).not.toContain('no action needed')
   })
 
+  it('buildRebuildAnchor：会话目录名含空格 → 完整目录名行 + 完整相对路径（S142 v1.23.4 定位回归）', () => {
+    const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsh-serenity-plugin 长期维护', 'SESSION.md')
+    const a = buildRebuildAnchor(dir, 'S142', mdPath)
+    // 完整目录名（含空格）明确写入锚点——重建后直接定位 SESSION
+    expect(a).toContain('Serenity session: S142 (2026-08-24--S142--dsh-serenity-plugin 长期维护)')
+    // 相对路径完整（不再截断在空格处）
+    expect(a).toContain('AGENT_SESSIONS/2026-08-24--S142--dsh-serenity-plugin 长期维护/SESSION.md')
+  })
+
   it('无激活会话名 → 通用指令', () => {
     const a = buildRebuildAnchor(dir, '', join(dir, 'AGENT_SESSIONS', 'SESSION.md'))
     expect(a).toContain('Continue the current work')

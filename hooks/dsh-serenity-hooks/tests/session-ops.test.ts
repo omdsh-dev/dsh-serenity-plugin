@@ -197,6 +197,17 @@ describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只�
     expect(info).toEqual({ sessionId: 'S001', dirName: r.dirName, mdPath: r.sessionPath })
   })
 
+  it('会话目录名含空格 → mdPath 完整解析（\S+ 截断回归，S142 v1.23.4）', () => {
+    const dirName = '2026-08-24--S142--dsh-serenity-plugin 长期维护'
+    const mdPath = join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md')
+    const marker = `${SESSION_CONTEXT_MARKER} ${dirName}\nSESSION.md path: ${mdPath}`
+    const info = parseSessionContextFromEvents([{ data: { output: marker } }])
+    expect(info).not.toBeNull()
+    expect(info!.mdPath).toBe(mdPath)
+    expect(info!.dirName).toBe(dirName)
+    expect(info!.sessionId).toBe('S142')
+  })
+
   it('取最后一条标记（最新优先）', () => {
     const a = mk('first')
     const b = mk('second')

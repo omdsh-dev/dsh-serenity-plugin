@@ -1,3 +1,13 @@
+## v1.23.4 — 2026-08-27（TRAJECTORY-REBUILD 锚点 SESSION 定位修复：完整目录名 + 含空格路径解析，S142 用户反馈）
+
+**Scope:** 用户实测反馈——rebuild 锚点"没写 SESSION 完整名称，导致定位困难"。实测锚点显示 `Persistent trajectory: AGENT_SESSIONS/2026-08-24--S142--dsh-serenity-plugin`（截断），而真实目录为 `…--S142--dsh-serenity-plugin 长期维护/`（含空格后缀）。根因 + 双修复。
+
+### 变更
+- **根因（events 恢复截断）**：`session-ops.ts` `parseSessionContextFromEvents` 用 `/SESSION\.md path:\s*(\S+)/` 提取 mdPath——`\S+` 遇空格即停，会话目录名含空格（如" 长期维护"）时解析出**残缺路径**（丢目录后缀 + 丢 `SESSION.md` 文件名）。修复：正则改为 `/SESSION\.md path:\s*([^\r\n]+)/`（匹配整行，路径可含空格）+ 结果 `.trim()` 防尾部空白；`sessionBlock`/`resolveActiveSessionInfo` 同源自动受益
+- **锚点补完整目录名（用户需求）**：`buildRebuildAnchor` 新增 `- Serenity session: {sessionId} ({完整目录名})` 行（目录名 = SESSION.md 父目录 basename，从 mdPath 推导，可含空格）——重建后 agent 一眼定位 SESSION，不再靠残缺路径猜；无激活会话（fallback `AGENT_SESSIONS/SESSION.md`）时该行省略
+- 测试 +2：session-ops 含空格目录名 mdPath 完整解析回归（`…--S142--dsh-serenity-plugin 长期维护` → mdPath 完整 + dirName 完整 + sessionId=S142）；rebuild 锚点含空格场景（完整目录名行 + 完整相对路径断言）——**40 files / 445 tests 全绿**
+- typecheck ✓（node + client）
+
 ## v1.23.3 — 2026-08-27（重建提醒修复：行动指令化 + 不做节流 + 升级催促，S142 用户反馈）
 
 **Scope:** 用户反馈"[TRAJECTORY] 一直在触发，为啥没执行 rebuild，这个词是不是有问题"——机制语义澄清 + 三处修正：① 旧文案是**状态播报式**（"[TRAJECTORY] Context usage at N%..."）模型当成系统状态而非行动请求可一直忽略；② 无节流每轮刷屏（用户阈值 0.4，44% 就每轮刷）；③ 用户拍板：**不做节流，催就行了** + **不向 LLM 植入阈值建议**（设定是用户自由）。
