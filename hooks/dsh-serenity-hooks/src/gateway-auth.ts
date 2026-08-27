@@ -138,11 +138,53 @@ export function accountLockRemaining(user: string): number {
   return st.lockedUntil > 0 && Date.now() < st.lockedUntil ? st.lockedUntil - Date.now() : 0
 }
 
-// ── CSRF（双提交 cookie + Origin 校验）──
+// ── CSRF（双提交 cookie + Origin 校验 + 服务端 token 集合）──
 
-/** 生成 CSRF cookie 值（随机 32B hex） */
+/** CSRF token 有效期（毫秒）：10 分钟窗口（扫码/多标签场景留足时间） */
+export const CSRF_TTL_MS = 10 * 60 * 1000
+/** CSRF token 集合上限（防内存膨胀；超限清理最旧） */
+export const CSRF_MAX_TOKENS = 50
+
+/**
+ * 服务端 CSRF token 集合（v1.24.9 修复：多标签/刷新竞争导致登录死循环）。
+ * 背景：每次 GET 登录页都生成新 token 覆盖 cookie——多标签页场景下，早先打开的
+ * 标签携带旧 form token 提交时与最新 cookie 不匹配 → "会话校验失败"永远失败
+ * （S142 用户实测：cookieCsrf=present formCsrf=present 但不匹配）。
+ * 修复：每次 GET 生成的 token 存入集合（TTL 10min），提交时 form/cookie token
+ * 只要 ∈ 集合即有效——多标签各自 token 都接受。
+ */
+const csrfTokens = new Map<string, number>() // token → expiry
+
+/** 生成 CSRF token（随机 32B hex）并入集合 */
 export function newCsrfToken(): string {
-  return randomBytes(32).toString('hex')
+  const token = randomBytes(32).toString('hex')
+  csrfTokens.set(token, Date.now() + CSRF_TTL_MS)
+  if (csrfTokens.size > CSRF_MAX_TOKENS) {
+    const now = Date.now()
+    for (const [t, expiry] of csrfTokens) {
+      if (expiry < now) csrfTokens.delete(t)
+    }
+    if (csrfTokens.size > CSRF_MAX_TOKENS) {
+      let oldest: string | null = null
+      let oldestExpiry = Infinity
+      for (const [t, expiry] of csrfTokens) {
+        if (expiry < oldestExpiry) { oldest = t; oldestExpiry = expiry }
+      }
+      if (oldest !== null) csrfTokens.delete(oldest)
+    }
+  }
+  return token
+}
+
+/** token 是否有效（在集合且未过期；过期自动清理） */
+export function isCsrfValid(token: string): boolean {
+  const expiry = csrfTokens.get(token)
+  if (expiry === undefined) return false
+  if (expiry < Date.now()) {
+    csrfTokens.delete(token)
+    return false
+  }
+  return true
 }
 
 /** 从请求头取 CSRF token（X-CSRF-Token 或表单字段） */

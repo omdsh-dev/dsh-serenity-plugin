@@ -50,6 +50,7 @@ import {
   FAIL_LOCK_THRESHOLD,
   FAIL_LOCK_BASE_MS,
   newCsrfToken,
+  isCsrfValid,
   csrfFromRequest,
   safeEqual,
   originAllowed,
@@ -204,6 +205,15 @@ describe('v1.22.4: CSRF（双提交 + Origin）', () => {
   it('newCsrfToken：随机且不同', () => {
     expect(newCsrfToken()).not.toBe(newCsrfToken())
     expect(newCsrfToken().length).toBe(64)
+  })
+
+  it('v1.24.9 isCsrfValid：生成即有效；未知 token 无效；多标签各自 token 都有效（集合语义）', () => {
+    const a = newCsrfToken()
+    const b = newCsrfToken()
+    expect(isCsrfValid(a)).toBe(true)
+    expect(isCsrfValid(b)).toBe(true)
+    expect(isCsrfValid('deadbeef'.repeat(8))).toBe(false)
+    expect(isCsrfValid('')).toBe(false)
   })
 
   it('safeEqual：常量时间比较', () => {

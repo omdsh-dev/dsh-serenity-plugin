@@ -42,8 +42,8 @@ import {
   recordLoginFailure,
   accountLockRemaining,
   newCsrfToken,
+  isCsrfValid,
   csrfFromRequest,
-  safeEqual,
   originAllowed,
   cookieValue,
 } from './gateway-auth.js'
@@ -80,6 +80,7 @@ export {
   recordLoginFailure,
   accountLockRemaining,
   newCsrfToken,
+  isCsrfValid,
   csrfFromRequest,
   safeEqual,
   originAllowed,
@@ -322,15 +323,21 @@ export function startGateway(
         const code = params.get('code') ?? ''
         const remote = req.socket.remoteAddress ?? 'unknown'
 
-        // v1.22.4 S3：CSRF 双提交校验——表单字段 csrf 必须与 cookie serenity_csrf 一致。
-        // 跨站表单无法读取 cookie（SameSite=Strict + HttpOnly），因此攻击者无法提交有效对。
+        // v1.22.4 S3：CSRF 双提交校验——表单字段 csrf 与 cookie serenity_csrf 都必须是
+        // 服务端集合中的有效 token（v1.24.9：token 集合替代相等匹配——多标签/刷新时
+        // 各自 GET 生成的 token 都有效，不再因 cookie 被最新 GET 覆盖而拒绝旧标签提交）。
         const cookieCsrf = cookieValue(req.headers.cookie, 'serenity_csrf')
         const formCsrf = csrfFromRequest(req, params)
-        if (cookieCsrf === undefined || formCsrf === null || !safeEqual(cookieCsrf, formCsrf)) {
+        if (cookieCsrf === undefined || formCsrf === null || !isCsrfValid(formCsrf) || !isCsrfValid(cookieCsrf)) {
           // v1.24.8 诊断增强：cookieSecure=true 时明文 HTTP 会丢 CSRF cookie（浏览器 Secure 语义）
           console.warn(`[serenity-hooks] 登录拒绝（CSRF 校验失败）：user=${user} ip=${remote} cookieSecure=${cookieSecure ? 'on' : 'off'} cookieCsrf=${cookieCsrf === undefined ? 'missing' : 'present'} formCsrf=${formCsrf === null ? 'missing' : 'present'}`)
-          res.writeHead(403, { 'content-type': 'text/html; charset=utf-8' })
-          res.end(loginPageHtml('会话校验失败，请刷新页面重试' + (cookieSecure ? '（若仍失败：设置面板关闭 Secure Cookie——明文 HTTP 下必须关闭）' : '')))
+          // v1.24.9：失败页注入新 csrf（form + cookie 同步）——重试表单带字段，不再 missing
+          const retryCsrf = newCsrfToken()
+          res.writeHead(403, {
+            'content-type': 'text/html; charset=utf-8',
+            'set-cookie': `serenity_csrf=${retryCsrf}; HttpOnly; SameSite=Strict; Path=/`,
+          })
+          res.end(loginPageHtml('会话校验失败，请刷新页面重试' + (cookieSecure ? '（若仍失败：设置面板关闭 Secure Cookie——明文 HTTP 下必须关闭）' : ''), retryCsrf))
           return
         }
 
@@ -338,8 +345,13 @@ export function startGateway(
         const lockedRemaining = accountLockRemaining(user)
         if (lockedRemaining > 0) {
           console.warn(`[serenity-hooks] 登录拒绝（账号锁定中）：user=${user} ip=${remote} 剩余=${Math.ceil(lockedRemaining / 60000)}min`)
-          res.writeHead(429, { 'content-type': 'text/html; charset=utf-8', 'retry-after': String(Math.ceil(lockedRemaining / 1000)) })
-          res.end(loginPageHtml(`账号已锁定，请 ${Math.ceil(lockedRemaining / 60000)} 分钟后再试`))
+          const retryCsrf = newCsrfToken()
+          res.writeHead(429, {
+            'content-type': 'text/html; charset=utf-8',
+            'retry-after': String(Math.ceil(lockedRemaining / 1000)),
+            'set-cookie': `serenity_csrf=${retryCsrf}; HttpOnly; SameSite=Strict; Path=/`,
+          })
+          res.end(loginPageHtml(`账号已锁定，请 ${Math.ceil(lockedRemaining / 60000)} 分钟后再试`, retryCsrf))
           return
         }
 
@@ -378,8 +390,13 @@ export function startGateway(
         const msg = lockMs > 0
           ? `尝试过多，账号已锁定 ${Math.ceil(lockMs / 60000)} 分钟`
           : '用户名、密码或验证码错误'
-        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
-        res.end(loginPageHtml(msg))
+        // v1.24.9：失败页注入新 csrf（form + cookie 同步）——用户重试表单带字段
+        const retryCsrf = newCsrfToken()
+        res.writeHead(401, {
+          'content-type': 'text/html; charset=utf-8',
+          'set-cookie': `serenity_csrf=${retryCsrf}; HttpOnly; SameSite=Strict; Path=/`,
+        })
+        res.end(loginPageHtml(msg, retryCsrf))
       })
       return
     }

@@ -1,3 +1,13 @@
+## v1.24.9 — 2026-08-27（CSRF 登录死循环根治：服务端 token 集合 + 失败页注入，S142 用户实测 debug）
+
+**Scope:** v1.24.8 后仍失败——用户要求 debug。运行日志实证（dsh-crash-investigate logs）：`登录拒绝（CSRF 校验失败）：user=admin ip=192.168.1.232 cookieSecure=off cookieCsrf=present formCsrf=present`（×3）交替 `formCsrf=missing`（×3）。**根因双链闭合**：① 每次 GET 登录页生成新 token **覆盖 cookie**——多标签页/刷新后，早先打开的标签携带旧 form token 提交时与最新 cookie **不匹配**（present/present 死循环）；② 登录失败路径 `loginPageHtml(msg)` **不传 csrf** → 失败页无 csrf 字段 → 重试时 formCsrf=missing（恶性循环）。
+
+### 变更
+- **CSRF token 服务端集合**（gateway-auth.ts）：`newCsrfToken()` 生成的 token 存入内存集合（TTL 10min，上限 50 自动清理）；新增 `isCsrfValid(token)`——提交时 form/cookie token **只要 ∈ 集合即有效**（多标签各自 GET 生成的 token 都接受，不再因 cookie 被最新 GET 覆盖而拒绝旧标签提交）；安全不变（token 随机 256-bit + 集合短期有效，跨站无法猜测/读取）
+- **失败路径注入新 csrf**（gateway.ts）：CSRF 失败（403）/ 锁定（429）/ 凭据失败（401）三处统一——生成新 token + Set-Cookie（form+cookie 同步）+ `loginPageHtml(msg, csrf)`——重试表单始终带 csrf 字段，消除 missing 恶性循环
+- **测试 +1**：isCsrfValid（生成即有效 / 未知 token 无效 / 多标签各自 token 都有效——集合语义）——**42 files / 465 tests 全绿**
+- typecheck ✓（node + client）→ build ✓（lib/client.js 133133 B）
+
 ## v1.24.8 — 2026-08-27（登录 CSRF cookie 去 Secure 修复：明文 HTTP 外部访问登录失效，S142 用户实测）
 
 **Scope:** 用户实测外部端口（3081）登录失败——"会话校验失败，请刷新页面重试 校验不通过，我扫的是对的"。定位：登录页注入的 **CSRF cookie 带 Secure 属性**（受 cookieSecure 配置控制）——用户开启 Secure Cookie 后，**明文 HTTP 下浏览器规范不发送 Secure cookie** → `serenity_csrf` cookie 永远缺失 → CSRF 双提交校验在验证码校验**之前**就失败（与验证码对错无关，用户误以为码错了）。
