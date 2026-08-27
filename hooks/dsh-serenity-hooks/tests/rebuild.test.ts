@@ -32,6 +32,7 @@ import {
   performRebuild,
   registerRebuildTurnHook,
   pendingRebuildSnapshot,
+  stripAckSuffix,
 } from '../src/rebuild.js'
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
 
@@ -59,13 +60,41 @@ function fakeSession(nodes: number[]) {
   }
 }
 
-describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结束清空，用户拍板）', () => {
-  it('buildRebuildAnchor：继续 {SESSION 名} + 持久轨迹路径', () => {
+/** 构造最小可测 agent（session + steer 记录调用） */
+function fakeAgent(id: string, session: unknown) {
+  const steers: unknown[] = []
+  return {
+    id,
+    session,
+    steer: (msg: unknown) => { steers.push(msg) },
+    _steers: steers,
+  }
+}
+
+describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结束清空；v1.22.5：自动继续 + 保留 first-anchor）', () => {
+  it('stripAckSuffix：去掉 acknowledge 尾句（保留协议正文）', () => {
+    const text = 'We anchor first, then act.\nPlease simply reply "acknowledge" — no action needed.'
+    expect(stripAckSuffix(text)).toBe('We anchor first, then act.')
+  })
+
+  it('stripAckSuffix：无尾句 → 原样返回', () => {
+    expect(stripAckSuffix('plain text')).toBe('plain text')
+  })
+
+  it('buildRebuildAnchor：继续 {SESSION 名} + 持久轨迹路径 + first-anchor 协议正文（去 acknowledge）', () => {
     const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
     const a = buildRebuildAnchor(dir, 'S142', mdPath)
     expect(a).toContain('继续 S142 的工作')
     expect(a).toContain('AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
     expect(a).toContain('读取该 SESSION.md')
+    // v1.22.5：保留 first-anchor 协议正文（ACC 身份/EAP/协作协议）
+    expect(a).toContain('Abstract Cognitive Container')
+    expect(a).toContain('Explicit Abstraction Principle')
+    expect(a).toContain('We anchor first, then act')
+    expect(a).toContain('Before we proceed')
+    // 去掉 acknowledge 尾句（重建后不重走确认轮）
+    expect(a).not.toContain('acknowledge')
+    expect(a).not.toContain('no action needed')
   })
 
   it('无激活会话名 → 通用指令', () => {
@@ -117,11 +146,12 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(session._calls).toHaveLength(0)
   })
 
-  it('registerRebuildTurnHook：有 pending → turn 结束时执行 replace 并清队列', async () => {
+  it('registerRebuildTurnHook：有 pending → turn 结束时执行 replace + steer 自动继续并清队列', async () => {
     const session = fakeSession([10, 11])
-    const listeners: Array<(p: { agent?: { id: string; session: unknown } }) => void> = []
+    const agent = fakeAgent('s1', session)
+    const listeners: Array<(p: { agent?: { id: string; session: unknown; steer: (m: unknown) => void }; turn?: number }) => void> = []
     const ctx = {
-      on: (name: string, fn: (p: { agent?: { id: string; session: unknown } }) => void) => {
+      on: (name: string, fn: (p: { agent?: { id: string; session: unknown; steer: (m: unknown) => void }; turn?: number }) => void) => {
         if (name === 'agent/turn-stopping') listeners.push(fn)
       },
     } as never
@@ -131,22 +161,30 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const qctx = { sessions: { get: () => session } } as never
     await queueRebuild(qctx, { root: dir, agentCwd: dir, dshSessionId: 's1' })
     // 触发 turn-stopping
-    listeners[0]!({ agent: { id: 's1', session } })
+    listeners[0]!({ agent, turn: 3 })
     expect(session._calls).toHaveLength(1)
     expect(pendingRebuildSnapshot().has('s1')).toBe(false)
+    // v1.22.5：steer 自动继续（next-step 队列 → turn 不 break → 模型自动读 SESSION.md 继续）
+    expect(agent._steers).toHaveLength(1)
+    const steered = agent._steers[0] as { content?: Array<{ text?: string }>; source?: { kind?: string } }
+    expect(steered.content?.[0]?.text).toContain('[TRAJECTORY-REBUILD]')
+    expect(steered.content?.[0]?.text).toContain('自动继续')
+    expect(steered.source?.kind).toBe('plugin')
   })
 
   it('registerRebuildTurnHook：无 pending → 零开销', () => {
-    const listeners: Array<(p: { agent?: { id: string; session: unknown } }) => void> = []
+    const listeners: Array<(p: { agent?: { id: string; session: unknown; steer: (m: unknown) => void } }) => void> = []
     const ctx = {
-      on: (name: string, fn: (p: { agent?: { id: string; session: unknown } }) => void) => {
+      on: (name: string, fn: (p: { agent?: { id: string; session: unknown; steer: (m: unknown) => void } }) => void) => {
         if (name === 'agent/turn-stopping') listeners.push(fn)
       },
     } as never
     registerRebuildTurnHook(ctx)
     const session = fakeSession([10])
-    listeners[0]!({ agent: { id: 'nobody', session } })
+    const agent = fakeAgent('nobody', session)
+    listeners[0]!({ agent })
     expect(session._calls).toHaveLength(0)
+    expect(agent._steers).toHaveLength(0)
   })
 })
 

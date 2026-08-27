@@ -22,6 +22,16 @@
  *   **延迟到 turn 结束清空**：届时当前 turn 所有 tool/result 已完整 append，replace
  *   一并 shadow，无孤儿。
  *
+ * v1.22.5 增强（S142 用户需求）：
+ *   ① **自动继续**：turn-stopping 执行 replace 后 `agent.steer()` 注入自动继续指令
+ *      （DSH 官方先例：hooks-claude-code Stop hook 在 turn-stopping 里 steer 强制
+ *      再执行一步）——next-step 队列非空 → turn 循环不 break → 模型自动读取
+ *      SESSION.md 继续工作，无需用户手工输入。
+ *   ② **保留 first-anchor**：锚点消息并入 DEFAULT_ANCHOR_MESSAGES 正文（ACC 身份/
+ *      EAP/协作协议），去掉 acknowledge 尾句（重建后直接干活，不重走确认轮）——
+ *      系统提示词层身份未丢（每轮注入），bootstrap 晋升状态不受影响（surface
+ *      replace 不改 events，promoted 保持完整工具目录）。
+ *
  * 触发：LLM 主动调用（keeper 超阈值后提示 [TRAJECTORY]，不自动执行——防误清空）。
  * 门控：仅 CCC 内 + 简单配置 rebuild.enabled。
  */
@@ -29,24 +39,45 @@
 import type { Context } from 'cordis'
 import type { SessionId, Session } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { join } from 'node:path'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
 import { getActiveSessionInfo } from './session-ops.js'
+import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
+
+const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
+
+/** acknowledge 尾句（first-anchor 的确认要求——rebuild 重建后不重走确认轮，直接继续） */
+const ACK_SUFFIX_RE = /Please simply reply "acknowledge" — no action needed\.\s*$/
 
 /**
- * 构建重建锚点消息（v1.22.4 定稿语义）：「继续 {SESSION 名} 的工作」+ 持久轨迹路径。
+ * 剥离 first-anchor 消息的 acknowledge 尾句（rebuild 锚点保留协议正文但不要求确认回复）。
+ */
+export function stripAckSuffix(text: string): string {
+  return text.replace(ACK_SUFFIX_RE, '').trimEnd()
+}
+
+/**
+ * 构建重建锚点消息（v1.22.4 定稿语义 + v1.22.5 保留 first-anchor 正文）：
+ * 「[TRAJECTORY-REBUILD] + first-anchor 协议正文（去 acknowledge 尾句）+ 继续 {SESSION 名} 的工作」。
  * @param root - CCC 根
  * @param sessionName - 当前 use 的宁静号 SESSION 名（如 S142）；无激活则通用指令
  * @param activeMdPath - 持久轨迹 SESSION.md 绝对路径（保持原位）
+ * @param anchorMessages - first-anchor 协议消息序列（缺省 DEFAULT_ANCHOR_MESSAGES；可注入测试）
  */
 export function buildRebuildAnchor(
   root: string,
   sessionName: string,
   activeMdPath: string,
+  anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
 ): string {
   const rel = activeMdPath.startsWith(root) ? activeMdPath.slice(root.length + 1) : activeMdPath
   const lines = [
+    '[TRAJECTORY-REBUILD] 会话已清空重建（Ship of Theseus：历史丢弃，身份延续）。',
+    '',
+    ...anchorMessages.flatMap((text) => [stripAckSuffix(text), '']),
     sessionName !== '' ? `继续 ${sessionName} 的工作。` : '继续当前工作。',
     `- 持久轨迹（SESSION.md，未移动）：${rel}`,
     `- 请先读取该 SESSION.md（目标/决策/进度/未解决问题），从上次进度继续。`,
@@ -148,7 +179,9 @@ export function performRebuild(session: Session, pending: PendingRebuild): boole
 
 /**
  * 注册 turn-stopping 钩子（index.ts apply 调用）：
- * agent 每轮 turn 结束前（serial）检查 pending 队列——有该会话的重建请求 → 执行清空。
+ * agent 每轮 turn 结束前（serial）检查 pending 队列——有该会话的重建请求 → 执行清空
+ * 并 **steer 自动继续**（v1.22.5：next-step 非空 → turn 不 break → 模型自动读取
+ * SESSION.md 继续，无需用户手工输入；DSH 官方先例 hooks-claude-code Stop hook）。
  * 陈旧队列（超 TTL）丢弃防误清空；无 pending 零开销。
  */
 export function registerRebuildTurnHook(ctx: Context): void {
@@ -165,8 +198,16 @@ export function registerRebuildTurnHook(ctx: Context): void {
     }
     pendingRebuilds.delete(id)
     try {
-      performRebuild(agent.session, pending)
-      console.log(`[serenity-hooks] session_rebuild 已执行（turn ${payload.turn ?? '?'} 结束）：${id}`)
+      const rebuilt = performRebuild(agent.session, pending)
+      if (rebuilt) {
+        // v1.22.5 自动继续：steer 到 next-step 队列 → turn 循环 nextStep 非空不 break →
+        // 模型在同轮内自动消费该指令，读取 SESSION.md 从上次进度继续（无需用户手工输入）
+        agent.steer(createUserMessage({
+          content: [{ type: 'text', text: '[TRAJECTORY-REBUILD] 会话已清空重建。请立即按上方锚点指令读取持久轨迹（SESSION.md）并从上次进度自动继续工作。' }],
+          source: PLUGIN_SOURCE,
+        }))
+        console.log(`[serenity-hooks] session_rebuild 已执行并自动继续（turn ${payload.turn ?? '?'} 结束）：${id}`)
+      }
     } catch (error) {
       console.warn(`[serenity-hooks] session_rebuild 执行失败: ${String((error as Error)?.message ?? error)}`)
     }

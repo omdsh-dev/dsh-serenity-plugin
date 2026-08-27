@@ -1,3 +1,16 @@
+## v1.22.5 — 2026-08-27（session_rebuild 增强：自动继续 + 保留 first-anchor，S142）
+
+**Scope:** 用户实测 rebuild 有效后提出两项改进：① rebuild 完成后自动继续（不让用户手工继续）；② rebuild 后保留 first-anchor 内容（或重新走一轮 first-anchor）。
+
+### 变更
+- **自动继续（turn-stopping steer）**：`performRebuild` 执行 surface replace 后 `agent.steer()` 注入 `[TRAJECTORY-REBUILD] 会话已清空重建。请立即按上方锚点指令读取持久轨迹（SESSION.md）并从上次进度自动继续工作。`——DSH 官方先例（hooks-claude-code Stop hook：turn-stopping 里 steer 强制再执行一步）：next-step 队列非空 → turn 循环不 break → 模型同轮自动消费指令读取 SESSION.md 继续，**无需用户手工输入**
+- **保留 first-anchor 协议正文**：`buildRebuildAnchor` 并入 `DEFAULT_ANCHOR_MESSAGES` 两条正文（ACC 身份/EAP/协作协议）——**去掉 acknowledge 尾句**（`stripAckSuffix`：重建后直接干活，不重走确认轮）；系统提示词层身份未丢（每轮注入），bootstrap 晋升状态不受影响（surface replace 不改 events → promoted 保持完整工具目录；events 有历史 user/message → 不重复锚定；steer 消息 source=plugin → 不递归锚定）
+- `src/rebuild.ts`：`buildRebuildAnchor` 增加 anchorMessages 参数（缺省 DEFAULT_ANCHOR_MESSAGES）；`stripAckSuffix` 导出（可测）；`registerRebuildTurnHook` 执行 replace 后 steer
+- `src/tools/rebuild.ts`：description/instruction 同步（自动继续 + first-anchor 保留语义）
+- 测试：rebuild.test.ts +3 断言（stripAckSuffix 去尾句/原样 / buildRebuildAnchor 含协议正文且无 acknowledge / turn-stopping 后 steer 被调用 source=plugin）——**40 files / 421 tests** → typecheck ✓（node + client）
+
+**✅ 预期效果**：模型调用 session_rebuild → turn 结束清空 → 注入「协议正文 + 继续 S### 的工作」锚点 → 自动继续读取 SESSION.md 工作（无需用户再发消息）
+
 ## v1.22.4 — 2026-08-27（登录安全审计加固 + session_rebuild 语义根治：完全丢弃+新建，S142）
 
 **Scope:** 两条主线——① 用户：外部监听将放公网，安全性必须可靠（登录机制安全审计 S1-S12）；② 用户实测 S141 崩溃：session_rebuild 原地 replace 方案有致命缺陷，语义再修正为**完全丢弃 + 新建**。
