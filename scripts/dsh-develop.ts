@@ -693,6 +693,31 @@ function cmdNpmInstall(profile = 'web', version?: string): void {
   console.log(`[dsh-develop] ✓ 已安装 ${pkgSpec}（npm registry）→ 重启 dsh web 生效（restart-web）`)
 }
 
+/**
+ * npm-install-dev — 安装 hooks 开发依赖（v1.24.6：二维码绑定引入 qrcode-generator）。
+ * 在 HOOKS_DIR 执行 `pnpm install --save-dev <pkgs>`（hooks 是 pnpm 项目——
+ * pnpm-lock.yaml + .pnpm-store，npm 与 pnpm node_modules 布局冲突会崩）；
+ * client bundle noExternal 全 true，第三方库内联进 lib/client.js（零运行时新依赖）；
+ * devDependencies 记录可复现。
+ */
+function cmdNpmInstallDev(pkgs: string[]): void {
+  if (pkgs.length === 0) fail('npm-install-dev 需要包名: dsh-develop npm-install-dev <pkg>[@version]...')
+  console.log(`[dsh-develop] pnpm install --save-dev ${pkgs.join(' ')}（hooks）`)
+  // store-dir 必须与既有 node_modules 链接一致（hooks/.pnpm-store/v11）——
+  // pnpm 默认全局 store（~/.local/bin/store）与本地 store 冲突会 ERR_PNPM_UNEXPECTED_STORE
+  const storeDir = join(HOOKS_DIR, '.pnpm-store')
+  const r = run('pnpm', ['install', '--store-dir', storeDir, '--save-dev', ...pkgs], {
+    cwd: HOOKS_DIR,
+    quiet: true,
+  })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`pnpm install --save-dev 失败 (exit ${r.status})`, 2)
+  }
+  console.log(r.stdout.trim() || r.stderr.trim())
+  console.log(`[dsh-develop] ✓ 已安装 devDeps: ${pkgs.join(', ')}（hooks/package.json）`)
+}
+
 // ── main 守卫 ──
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -738,6 +763,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'bump': cmdBump(rest[0]); break
       case 'deploy': cmdDeploy(); break
       case 'npm-install': cmdNpmInstall(rest[0] ?? 'web', rest[1]); break
+      case 'npm-install-dev': cmdNpmInstallDev(rest); break
       case 'restart-web': cmdRestartWeb(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
@@ -774,6 +800,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   bump <x.y.z>          package.json + dsh.plugin.json 版本同步
   deploy                load-plugin.sh 全流程（构建+双锚+shim+profile+预检）
   npm-install [profile] [version] 官方 npm 安装：缺省/latest=registry 最新；可指定精确版本
+  npm-install-dev <pkg...> hooks 开发依赖安装（npm install --save-dev；client bundle 内联）
   restart-web           kill + setsid 重启 dsh web（健康检查）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   publish               npm publish @shgroup/dsh-serenity-hooks（凭据走 ~/.npmrc）

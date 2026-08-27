@@ -26,6 +26,7 @@ import {
   newTotpSecret,
   otpauthUriClient,
   saveConfig,
+  totpQrSvg,
   validateDraft,
 } from './accounts-api.js'
 import './AccountsEditor.css'
@@ -180,7 +181,7 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
         </label>
         <label className="ae-check">
           <input type="checkbox" checked={totpEnabled} onChange={(e) => setTotpEnabled(e.target.checked)} />
-          <span>启用 Authenticator 第二因素（关闭时 TOTP 完全禁用；开启后可对账号绑定验证器，登录需输入 6 位码）</span>
+          <span>启用 Authenticator 登录（v1.24.6 二选一：开启后绑定验证器的账号可用密码 或 6 位验证码任一登录；关闭时 TOTP 完全禁用，仅密码）</span>
         </label>
       </div>
 
@@ -214,7 +215,15 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
                 <span className="ae-col ae-colTotp">
                   {d.totpState === 'pending' ? (
                     <span className="ae-totpPending">
-                      <code className="ae-totpSecret" title="录入到 Authenticator（Google Authenticator / 1Password / Aegis）">{d.totpSecret}</code>
+                      {/* v1.24.6：随机生成的 secret → 二维码扫码绑定（Authenticator 直接扫）；secret 文本兜底手动录入 */}
+                      {d.totpSecret !== undefined && (
+                        <span
+                          className="ae-totpQr"
+                          title="用 Authenticator（Google Authenticator / 1Password / Aegis）扫码绑定"
+                          dangerouslySetInnerHTML={{ __html: totpQrSvg(d.totpSecret, `${d.user.trim() || 'user'}@serenity`) }}
+                        />
+                      )}
+                      <code className="ae-totpSecret" title="或手动录入到 Authenticator">{d.totpSecret}</code>
                       <a className="ae-totpUri" href={d.totpSecret ? otpauthUriClient(d.totpSecret, `${d.user.trim() || 'user'}@serenity`) : '#'} target="_blank" rel="noreferrer">otpauth://</a>
                       <input
                         className="ae-input ae-totpConfirm"

@@ -1,3 +1,16 @@
+## v1.24.6 — 2026-08-27（登录凭据二选一 + TOTP 二维码扫码绑定，S142 用户需求）
+
+**Scope:** 用户两项需求——① "authenticator 安全性很好，能不能和用户账号密码搞成二选一"：登录凭据从双因素（密码 && TOTP）改为**二选一**（密码 或 6 位验证码，任一正确即登录）；② "配置 TOTP 的时候，可以随机生成渲染个二维码来绑定"：绑定流程从手动录入 secret 升级为**扫码绑定**（随机生成 secret → 渲染二维码 → Authenticator 扫码 → 输码确认）。
+
+### 变更
+- **登录二选一（gateway.ts）**：`passOk || totpOk` 替代 `passOk && totpOk`——密码校验不再前置；绑定验证器的账号可用**密码或验证码任一**登录（未绑定仅密码；totpEnabled 关闭时 TOTP 完全禁用）；登录日志记 `via=password|totp`；失败统一计账号锁定（防组合爆破）；防重放 counter 保留（30s 窗口同码拒绝）
+- **登录页（gateway-auth.ts loginPageHtml）**：密码框去掉 `required`（二选一场景可只输验证码）；label "密码（或下方验证码，二选一）"；hint "已绑定验证器的账号：密码 或 6 位验证码任一即可登录"
+- **二维码扫码绑定**：`qrcode-generator`（MIT 零依赖）经 tsdown noExternal **内联进 client bundle**（零运行时新依赖）；`totpQrSvg(secret, label)`（typeNumber 0 自动 + 纠错 M + scalable SVG）→ AccountsEditor 绑定态显示二维码（白底 132px）+ secret 文本兜底手动录入 + otpauth:// 链接 + 确认码（既有 totpConfirm 机制不变）
+- **开发通道扩展**：dsh-develop 新增 `npm-install-dev <pkg...>` 子命令（pnpm install --save-dev + store-dir 对齐既有 .pnpm-store；package.json `pnpm.onlyBuiltDependencies: ["esbuild"]` 解决 pnpm 10 build-script 审批 exit 1）——devDeps 记录 qrcode-generator 2.0.4 可复现
+- **文案同步**：AccountsEditor「启用 Authenticator 登录（二选一：密码 或 6 位验证码任一登录）」
+- **测试 +3**：totpQrSvg（合法 SVG / 同 secret 可复现 / 异 secret 不同）——**42 files / 466 tests 全绿**
+- typecheck ✓（node + client）→ build ✓（lib/client.js 133484 B，+qrcode-generator 内联）
+
 ## v1.24.5 — 2026-08-27（方案 O 细节校准：滑块 thumb 恒白 + 盾牌恢复描边，S142 用户反馈"细微差距"）
 
 **Scope:** 用户实测截图对比设计稿——两处细微差距：① 滑块 thumb 用了 `--dsw-alias-bg-module`（暗色下深色底），设计稿字面是**纯白圆**（`#fff`，暗色下也白，与彩色轨道对比——标准开关视觉）；② ON 盾牌我加了绿色 fill（18%→30%），呈"实心色块与 SAFE 文字融为一体"，而设计稿 SVG 是 `fill="none"` 纯描边盾（琥珀空心/绿描边同构，颜色表达状态）。

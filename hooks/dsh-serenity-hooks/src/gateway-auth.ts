@@ -247,13 +247,13 @@ button:active{background:#2563eb}
 ${csrfField}
 <label for="f-user">用户名</label>
 <input id="f-user" type="text" name="user" placeholder="用户名" autocomplete="username" autocapitalize="none" autocorrect="off" required autofocus enterkeyhint="next">
-<label for="f-pass">密码</label>
-<input id="f-pass" type="password" name="password" placeholder="密码" autocomplete="current-password" required enterkeyhint="next">
+<label for="f-pass">密码（或下方验证码，二选一）</label>
+<input id="f-pass" type="password" name="password" placeholder="密码" autocomplete="current-password" enterkeyhint="next">
 <label for="f-code">验证码（已绑定 Authenticator 时填写）</label>
 <input id="f-code" type="text" name="code" placeholder="6 位验证码" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" enterkeyhint="go">
 <button type="submit">登录</button>
 <div class="error">${extra}</div>
-<p class="hint">未绑定验证器的账号只需用户名 + 密码</p>
+<p class="hint">已绑定验证器的账号：密码 或 6 位验证码任一即可登录（二选一）</p>
 </form>
 <p class="foot">Serenity ACC · dsh-serenity-hooks</p>
 </div></body></html>`

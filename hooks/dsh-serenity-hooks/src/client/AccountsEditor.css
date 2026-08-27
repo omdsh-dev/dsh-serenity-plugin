@@ -149,6 +149,23 @@
   min-width: 0;
 }
 
+/* v1.24.6：TOTP 绑定二维码（扫码即录入；scalable SVG，白底保证扫码识别） */
+.ae-totpQr {
+  flex-basis: 100%;
+  display: inline-flex;
+  justify-content: center;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+}
+
+.ae-totpQr svg {
+  width: 132px;
+  height: 132px;
+  display: block;
+}
+
 .ae-totpSecret {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;

@@ -112,6 +112,22 @@ export function otpauthUriClient(secret: string, label: string, issuer = 'Sereni
   return `otpauth://totp/${encodeURIComponent(label)}?${params.toString()}`
 }
 
+// v1.24.6 二维码绑定：qrcode-generator（MIT，零依赖）经 tsdown noExternal 内联进 client bundle。
+import qrcode from 'qrcode-generator'
+
+/**
+ * 生成 otpauth URI 的二维码 SVG（v1.24.6：配置 TOTP 时**扫码绑定**——
+ * Authenticator 扫二维码即录入 secret，替代手动输入）。
+ * typeNumber 0 = 自动选最小版本；纠错 M（平衡）。scalable SVG → CSS 控制显示尺寸。
+ */
+export function totpQrSvg(secret: string, label: string, issuer = 'Serenity Home'): string {
+  const uri = otpauthUriClient(secret, label, issuer)
+  const qr = qrcode(0, 'M')
+  qr.addData(uri)
+  qr.make()
+  return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })
+}
+
 /** 本地编辑行 → wire 账号（提交时；pass 字段携带） */
 export function accountToWire(d: AccountDraft): {
   id: string

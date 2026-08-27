@@ -28,13 +28,12 @@
 
 import type { Context } from 'cordis'
 import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
-import { readAdvancedSettings, migrateLegacyLocalstore } from './config-ops.js'
+import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from './config-ops.js'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
 import { verifyTotpCode } from './totp.js'
 import {
   loginPageHtml,
-  verifyGatewayLogin,
   issueToken,
   revokeToken,
   validateToken,
@@ -345,21 +344,22 @@ export function startGateway(
 
         const accounts = getAccounts()
         const account = accounts.find((a) => a.user === user)
-        const passOk = account !== undefined && verifyGatewayLogin(accounts, user, password)
+        // v1.24.6 用户拍板：登录凭据**二选一**——密码 或 Authenticator 码，任一正确即登录。
+        // （此前 v1.22.4 为双因素：密码 && TOTP 都必需；二选一后绑定验证器的账号两种方式皆可）
+        const passOk = account !== undefined && password !== '' && verifyPassword(password, account.passHash)
 
-        // v1.22.4 S1：TOTP 第二因素——totpEnabled 开启且账号绑定后必须验证 6 位码。
-        // 禁用时（totpEnabled=false）完全不要求 TOTP（含已绑定账号——安全默认：未配置即不可用）。
-        let totpOk = true
-        if (totpEnabled && passOk && account !== undefined
+        // TOTP 校验独立于密码（不要求 passOk 前置）——totpEnabled 关闭时完全不接受 TOTP
+        // （含已绑定账号；安全默认：未配置即不可用）。防重放：同 counter 30s 窗口内拒绝复用。
+        let totpOk = false
+        if (totpEnabled && account !== undefined
           && typeof account.totpSecret === 'string' && account.totpSecret !== '') {
           const hit = verifyTotpCode(account.totpSecret, code)
           totpOk = hit !== null
-          // S1b：防重放——同 counter 短期内不重复接受（30s 窗口内同码拒绝）
           if (totpOk && hit !== null && lastTotpCounter.get(account.id) === hit) totpOk = false
           if (totpOk && hit !== null) lastTotpCounter.set(account.id, hit)
         }
 
-        if (passOk && totpOk) {
+        if (passOk || totpOk) {
           resetFailState(user)
           const token = issueToken(user)
           res.writeHead(302, {
@@ -367,17 +367,16 @@ export function startGateway(
             'set-cookie': `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/${cookieSecure ? '; Secure' : ''}`,
           })
           res.end()
-          console.log(`[serenity-hooks] 登录成功: user=${user} ip=${remote}`)
+          console.log(`[serenity-hooks] 登录成功: user=${user} ip=${remote} via=${passOk ? 'password' : 'totp'}`)
           return
         }
 
-        // 失败路径：记录计数（仅密码错误计入；TOTP 错误同样计入——防组合爆破）
+        // 失败路径：密码/TOTP 任一失败都计入账号锁定（防组合爆破）
         const lockMs = recordLoginFailure(user)
-        const reason = !passOk ? 'bad-password' : 'bad-totp'
-        console.warn(`[serenity-hooks] 登录失败: user=${user} ip=${remote} reason=${reason}${lockMs > 0 ? ` 锁定=${Math.ceil(lockMs / 60000)}min` : ''}`)
+        console.warn(`[serenity-hooks] 登录失败: user=${user} ip=${remote}${lockMs > 0 ? ` 锁定=${Math.ceil(lockMs / 60000)}min` : ''}`)
         const msg = lockMs > 0
           ? `尝试过多，账号已锁定 ${Math.ceil(lockMs / 60000)} 分钟`
-          : (passOk ? '验证码错误' : '用户名或密码错误')
+          : '用户名、密码或验证码错误'
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
         res.end(loginPageHtml(msg))
       })

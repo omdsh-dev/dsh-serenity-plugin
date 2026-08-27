@@ -6,10 +6,31 @@ import {
   newAccountId,
   newTotpSecret,
   otpauthUriClient,
+  totpQrSvg,
   validateDraft,
   type WireAccount,
   type AccountDraft,
 } from '../src/client/accounts-api.js'
+
+describe('accounts-api: totpQrSvg（v1.24.6 二维码绑定）', () => {
+  it('生成合法 SVG：含 otpauth URI 数据的二维码（xmlns + path 模块）', () => {
+    const svg = totpQrSvg('MZXW6YTB', 'yh@serenity')
+    expect(svg).toContain('<svg')
+    expect(svg).toContain('xmlns=')
+    expect(svg).toContain('path')
+    expect(svg.length).toBeGreaterThan(200)
+  })
+
+  it('同一 secret 输出稳定（二维码可复现）', () => {
+    const a = totpQrSvg('MZXW6YTB', 'yh@serenity')
+    const b = totpQrSvg('MZXW6YTB', 'yh@serenity')
+    expect(a).toBe(b)
+  })
+
+  it('不同 secret 输出不同（二维码随 secret 变化）', () => {
+    expect(totpQrSvg('MZXW6YTB', 'yh@serenity')).not.toBe(totpQrSvg('GEZDGNBV', 'yh@serenity'))
+  })
+})
 
 describe('accounts-api: draft 转换（纯逻辑）', () => {
   const wire: WireAccount = { id: 'a1', user: 'yh', hasPassword: true, hasTotp: true }
