@@ -1,3 +1,11 @@
+## v1.23.8 — 2026-08-27（safe tag 实心化：红底白字大写 SAFE，无 icon，S142 用户反馈）
+
+**Scope:** 用户反馈 v1.23.7 仍不满意——"换成实心 tag，不要 icon 试试看，大写 SAFE"。
+
+### 变更
+- **SafeModePanel 头部 safe tag 实心化**：`.sp-tagOn` 从透明红混底改为**实心红底**（`--dsw-alias-state-error-primary`）+ 反色文字（`--dsw-alias-label-primary-foreground`，实心底先例 ConnectionBanner 同款 token）——大写 **SAFE** / **OFF**（`text-transform: uppercase`，字重 700，letter-spacing 0.04em）；**移除 icon**（`.sp-tagIcon` 删）；OFF 灰底实心化（`--dsw-alias-label-secondary`）
+- typecheck ✓（node + client）→ test ✓（40 files / 446 tests 不变）→ build ✓（lib/client.js 72803 B）
+
 ## v1.23.7 — 2026-08-27（safe tag 红色化，S142 用户反馈）
 
 **Scope:** 用户反馈 v1.23.6 的橙色 tag 太丑——"safe 标亮起来用红色"。

@@ -52,34 +52,31 @@
   background: var(--dsw-alias-label-dimmed);
 }
 
-/* safe-mode tag（方形小标签，非胶囊——从外面一眼可见状态；ON 红 / OFF 灰） */
+/* safe-mode tag（实心方形标签，无 icon——从外面一眼可见；ON 红底 SAFE / OFF 灰底 OFF） */
 .sp-tag {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  justify-content: center;
   height: 16px;
-  padding: 0 6px;
+  padding: 0 7px;
   border-radius: 4px;
   font-size: 10px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .sp-tagOn {
-  background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 16%, transparent);
-  color: var(--dsw-alias-state-error-primary);
-  border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 45%, transparent);
+  background: var(--dsw-alias-state-error-primary);
+  color: var(--dsw-alias-label-primary-foreground);
+  border: 1px solid var(--dsw-alias-state-error-primary);
 }
 
 .sp-tagOff {
   background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.16));
-  color: var(--dsw-alias-label-dimmed);
+  color: var(--dsw-alias-label-secondary);
   border: 1px solid var(--dsw-alias-border-l1);
-}
-
-.sp-tagIcon {
-  flex: none;
 }
 
 .sp-brand {

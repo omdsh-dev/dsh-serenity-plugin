@@ -148,8 +148,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
             className={cx('sp-tag', status.safeModeOn ? 'sp-tagOn' : 'sp-tagOff')}
             title={status.safeModeOn ? 'safe-mode 已开启（隐藏写工具）' : 'safe-mode 关闭'}
           >
-            {status.safeModeOn && <IconWarningOutline16 size={10} className={cx('sp-tagIcon')} />}
-            {status.safeModeOn ? 'safe' : 'off'}
+            {status.safeModeOn ? 'SAFE' : 'OFF'}
           </span>
         )}
         <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
