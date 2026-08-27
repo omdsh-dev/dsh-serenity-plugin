@@ -107,13 +107,9 @@
   color: var(--dsw-alias-state-warning-primary);
 }
 
-/* SAFE ON（保护中）：绿——安心 */
+/* SAFE ON（保护中）：绿——安心（设计稿 SVG fill=none：纯描边盾，与琥珀空心盾同构，颜色表达状态） */
 .sp-cardProtected .sp-shield {
   color: var(--dsw-alias-state-success-primary);
-}
-
-.sp-cardProtected .sp-shield path:first-child {
-  fill: color-mix(in srgb, var(--dsw-alias-state-success-primary) 18%, transparent);
 }
 
 .sp-cardProtected .sp-statusWord {
@@ -149,7 +145,7 @@
   width: 13px;
   height: 13px;
   border-radius: 50%;
-  background: var(--dsw-alias-bg-module);
+  background: #fff; /* 设计稿字面：滑块 thumb 恒白（暗色下也白，与彩色轨道对比——标准开关视觉） */
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   position: absolute;
   top: 2px;
