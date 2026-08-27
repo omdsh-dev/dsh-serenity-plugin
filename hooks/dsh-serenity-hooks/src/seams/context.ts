@@ -17,7 +17,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { findSerenityRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { findSerenityRoot, loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
@@ -34,7 +34,9 @@ export function accIdentityText(
   entrySkillMaxChars: number = DEFAULT_ENTRY_SKILL_MAX_CHARS,
 ): string {
   const cfg = loadSerenityConfig(root, configPaths)
-  const loop = cfg.loop?.defaultModel
+  // v1.24.0：loop.defaultModel → handyman 配置（模型白名单）
+  const hc = readHandymanConfig(root, configPaths)
+  const defaultModel = hc?.defaultModel
   const phase2 = existsSync(resolve(root, '.dsh', 'PHASE2-PROMPT.md'))
   const lines = [
     `[ACC] Serenity cognitive container active (dsh-serenity-hooks v${ACC_VERSION})`,
@@ -42,7 +44,7 @@ export function accIdentityText(
     `- Constraints: path isolation (P3, fs sandbox) + session tracking (AGENT_SESSIONS/)`,
     `- Knowledge: load the acc-serenity entry skill; use acc-eap / acc-neat for design collaboration`,
   ]
-  if (loop) lines.push(`- loop default model: ${loop}`)
+  if (defaultModel) lines.push(`- handyman default model: ${defaultModel}`)
   if (phase2) {
     lines.push('- ⚠️ **Phase 2 cognitive alignment interview pending**: work through the 5 Topics below and record answers in an AGENT_SESSIONS/ session')
     try {
@@ -60,7 +62,7 @@ export function accIdentityText(
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 /**
- * ACC 注入消息（S134 去重）：**只含简短身份锚点**（[ACC] 已激活 + CCC 根 + 约束 + loop 模型 + Phase 2）。
+ * ACC 注入消息（S134 去重）：**只含简短身份锚点**（[ACC] 已激活 + CCC 根 + 约束 + handyman 模型 + Phase 2）。
  * 完整身份（ACC 5 块 + CCE + Constraints + EAP + SKILL 全文 + Session 块）由**系统提示词层**
  * （systemPrompt.section，每轮 prompt 装配自动注入，含 subagent）承担——对话消息流/压缩重注入
  * 不再重复注入同一内容（token 双倍浪费，见 S134 注入方案梳理）。
@@ -87,7 +89,7 @@ function agentScope(agent: Agent): string {
  * 只有"conversation 根会话"才自动恢复最近激活的宁静号会话——
  * - subagent：session header `origin === 'subagent'`（DSH 路由语义，agent-lookup.ts）
  * - 派生会话：`parentSession` 存在（任何子会话）
- * - loop 牛马：sessionId 固定 `loop-` 前缀（tools/loop.ts 生成）
+ * - handyman 杂工：sessionId 固定 `handyman-` 前缀（tools/handyman.ts 生成）
  * 三者都不恢复（避免把主会话激活注入子上下文，违背 v1.16.2 scope 隔离）。
  */
 export function shouldAutoRestore(agent: Agent): boolean {
@@ -95,7 +97,7 @@ export function shouldAutoRestore(agent: Agent): boolean {
   if (!session) return false
   if (session.header?.origin === 'subagent') return false
   if (session.header?.parentSession) return false
-  if (session.id?.startsWith('loop-')) return false
+  if (session.id?.startsWith('handyman-')) return false
   return true
 }
 

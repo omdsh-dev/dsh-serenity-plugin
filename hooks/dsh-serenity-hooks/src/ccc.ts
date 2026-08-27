@@ -77,7 +77,17 @@ export function resolveInside(root: string, p: string): string {
 // ── 配置（.opencode/serenity.json 规范位置 / .dsh/serenity.json 回退）──
 
 export interface SerenityConfig {
-  loop?: { defaultModel?: string };
+  /** handyman（杂工）配置：模型白名单（v1.24.0 取代 loop） */
+  handyman?: {
+    /** 可用模型白名单（provider/model 列表）——handyman 只能使用其中模型（用户拍板：CCC 配置控制） */
+    models?: string[];
+    /** 缺省模型（必须 ∈ models） */
+    defaultModel?: string;
+    /** 对话轮次上限（保险阀，缺省 100） */
+    maxRounds?: number;
+    /** jobs 编排并行上限（缺省 10——便宜模型便宜） */
+    maxParallel?: number;
+  };
   sessionKeeper?: { threshold?: number };
   safeMode?: { blacklist?: string[] };
   /** localstore git 提交策略（S134 重设计）：allow 可提交 / deny 禁提交（缺省 deny） */
@@ -92,6 +102,30 @@ export interface SerenityConfig {
     /** 重启自动恢复最近激活的宁静号会话（session-start 时，根会话且无自身标记 → 回退最近 use 的标记） */
     autoRestoreSession?: boolean;
   };
+}
+
+/**
+ * 解析 handyman 配置（v1.24.0：取代 loop.defaultModel；不兼容旧 loop 配置——用户拍板）。
+ * @returns 白名单 + 缺省模型 + 上限；models 未配置返回 null（工具应报错要求配置）
+ */
+export function readHandymanConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): {
+  models: string[]
+  defaultModel: string
+  maxRounds: number
+  maxParallel: number
+} | null {
+  const cfg = loadSerenityConfig(root, paths)
+  const models = cfg.handyman?.models
+  if (!Array.isArray(models) || models.length === 0) return null
+  const clean = models.map((m) => m.trim()).filter(Boolean)
+  if (clean.length === 0) return null
+  const defaultModel = cfg.handyman?.defaultModel?.trim()
+  return {
+    models: clean,
+    defaultModel: defaultModel !== undefined && clean.includes(defaultModel) ? defaultModel : clean[0]!,
+    maxRounds: cfg.handyman?.maxRounds ?? 100,
+    maxParallel: cfg.handyman?.maxParallel ?? 10,
+  }
 }
 
 /**

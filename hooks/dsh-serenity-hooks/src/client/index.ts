@@ -3,7 +3,7 @@
  *
  * 注册 UI 面：
  *  - conversation.session.header.actions — 头部状态徽章（绿点 + safe-mode 开关），
- *    点击徽章展开详情卡（CCC/loop/守卫 + 大开关）。
+ *    点击徽章展开详情卡（CCC/handyman/守卫 + 大开关）。
  *  - conversation.input.dock — 图片自动落盘兜底（S142）：当前模型不支持图片时，
  *    发送失败（MODEL_DOES_NOT_SUPPORT_IMAGES）自动补救——图片上传 _tmp/images_from_user/、
  *    以「用户提供了图片在 {path}」文本重发，agent 经 CCC 自己的 vlm MSM 自主处理。

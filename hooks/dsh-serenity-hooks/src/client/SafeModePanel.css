@@ -254,9 +254,9 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* loop 运行状态区块 */
+/* handyman 运行状态区块 */
 
-.sp-loopsToggle {
+.sp-handymenToggle {
   flex: none;
   padding: 2px 10px;
   border: 1px solid var(--dsw-alias-border-l1);
@@ -267,18 +267,18 @@
   cursor: pointer;
 }
 
-.sp-loopsToggle:hover {
+.sp-handymenToggle:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.sp-loopsList {
+.sp-handymenList {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-top: 2px;
 }
 
-.sp-loopItem {
+.sp-handymanItem {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -288,14 +288,14 @@
   min-width: 0;
 }
 
-.sp-loopHead {
+.sp-handymanHead {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
 
-.sp-loopLabel {
+.sp-handymanLabel {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -306,19 +306,19 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.sp-loopRound {
+.sp-handymanRound {
   flex: none;
   font-size: 11px;
   color: var(--dsw-alias-label-dimmed);
 }
 
-.sp-loopTime {
+.sp-handymanTime {
   flex: none;
   font-size: 11px;
   color: var(--dsw-alias-label-dimmed);
 }
 
-.sp-loopResp {
+.sp-handymanResp {
   font-size: 11px;
   line-height: 16px;
   color: var(--dsw-alias-label-secondary);
@@ -327,7 +327,7 @@
   white-space: nowrap;
 }
 
-.sp-loopsMore {
+.sp-handymenMore {
   font-size: 11px;
   color: var(--dsw-alias-label-dimmed);
   padding: 4px 12px;

@@ -92,7 +92,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('eap')
     expect(names).toContain('neat')
     expect(names).toContain('cce')
-    expect(names).toContain('loop')
+    expect(names).toContain('handyman')
     expect(names).toContain('session_rebuild')
     expect(names).toContain('localstore')
   })

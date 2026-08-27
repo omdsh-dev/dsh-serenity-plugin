@@ -45,4 +45,4 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
 }
 
 /** 包级不变量：本插件注册的工具集合（与 dsh.plugin.json contributes.tools 一致） */
-export const REGISTERED_TOOLS = ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop'] as const
+export const REGISTERED_TOOLS = ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman'] as const

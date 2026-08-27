@@ -77,18 +77,18 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
     expect(p.status(agent as never)).toEqual({ boundary: -1, promoted: true })
   })
 
-  it('loop agent（sessionId `loop-` 前缀）恒晋升（完整目录，对齐 S140 修复）', () => {
+  it('handyman agent（sessionId `handyman-` 前缀）恒晋升（完整目录，对齐 S140 修复）', () => {
     const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
-    // loop agent 经 ctx.agents.create 直接创建，delegationDepth 为 0（非 delegation 路径），
-    // 但 sessionId 固定 `loop-` 前缀 → 必须恒判 promoted（否则 zeroTools 配置下拿到 0 工具）
-    const agent = mkAgent(mkSession('loop-sqc-scan-9f3a2b', [], { delegationDepth: 0 }))
+    // handyman agent 经 ctx.agents.create 直接创建，delegationDepth 为 0（非 delegation 路径），
+    // 但 sessionId 固定 `handyman-` 前缀 → 必须恒判 promoted（否则 zeroTools 配置下拿到 0 工具）
+    const agent = mkAgent(mkSession('handyman-sqc-scan-9f3a2b', [], { delegationDepth: 0 }))
     expect(p.status(agent as never)).toEqual({ boundary: -1, promoted: true })
   })
 
-  it('loop agent 即使有历史事件也恒晋升（不回落 bootstrap 阶段）', () => {
+  it('handyman agent 即使有历史事件也恒晋升（不回落 bootstrap 阶段）', () => {
     const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
-    // 即便含 compaction/end，loop agent 仍恒 promoted（autonomous worker 不需 epoch 收窄）
-    const session = mkSession('loop-x-1', [ev('compaction/end', 5), ev('tool/call', 6)])
+    // 即便含 compaction/end，handyman agent 仍恒 promoted（autonomous worker 不需 epoch 收窄）
+    const session = mkSession('handyman-x-1', [ev('compaction/end', 5), ev('tool/call', 6)])
     expect(p.status(mkAgent(session) as never)).toEqual({ boundary: -1, promoted: true })
   })
 

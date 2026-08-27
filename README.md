@@ -43,7 +43,7 @@ LLM / Runtime / Tools（认知介质，可替换）
 
 | 能力 | 说明 |
 |------|------|
-| **真实 DSH 工具 ×11** | `cc_fs`（文件系统 15 子命令）/ `session`（会话全周期 9 子命令）/ `acc_kit`（health/time/wait）/ `cc_git` / `acc_msm`（MSM 框架）/ `eap` / `neat` / `cce` / `loop`（牛马循环）/ `session_rebuild`（轨迹跟踪器超限重建）/ `localstore`（凭据/配置存储），全部 `ctx.tools.register` 进程内注册 |
+| **真实 DSH 工具 ×11** | `cc_fs`（文件系统 15 子命令）/ `session`（会话全周期 9 子命令）/ `acc_kit`（health/time/wait）/ `cc_git` / `acc_msm`（MSM 框架）/ `eap` / `neat` / `cce` / `handyman`（杂工循环 + jobs 并行）/ `session_rebuild`（轨迹跟踪器超限重建）/ `localstore`（凭据/配置存储），全部 `ctx.tools.register` 进程内注册 |
 | **系统提示词注入（8 块）** | `systemPrompt.section`（全局，order -50）：`=== Serenity ACC ===`（身份）/ `=== Serenity Metaphor ===`（世界模型：船/航行/船员三层隐喻）/ `=== Serenity Principles ===`（认知容器本体论 + MSM 原则）/ `=== Serenity CCE ===`（5 行为约束 + H_op）/ `=== Serenity EAP ===`（E↑R↓S↑ 自检）/ 状态块（Safe Mode / Localstore）/ 该 CCC 顶层入口 skill 全文（按 `.serenity` 记号发现）/ `=== Serenity Session ===`（活跃会话 + todowrite 首位约定）——对齐 opencode-serenity-plugin，平台无关文本逐字节一致 |
 | **first-anchor 锚定（零配置）** | 任何 CCC 在抽象层都是宁静号/ACC——新会话首轮注入 2 条协议锚定消息（ACC 身份 + 协作协议），0 工具纯文字确认后晋升完整工具目录；机制与内容代码固化，无 CCC 配置面 |
 | **拦截缝机械约束** | safe-mode（bash 从工具列表消失）/ 路径逃逸阻断（P3 根内完整、根外零权限）/ 黑名单 / 治理文件保护 / Trajectory Steward DCP 提醒——模型不可绕过 |
@@ -143,7 +143,7 @@ dsh-serenity-plugin status
 | `eap` | 渐进披露 | EAP 认知质量框架 |
 | `neat` | 渐进披露 | Neat 设计协作协议 |
 | `cce` | 渐进披露 | 认知连续性工程 |
-| `loop` | 牛马循环 | 指定模型专用 agent 反复执行；进度文件续跑；agent 非正常停止自动重启 |
+| `handyman` | 杂工循环 | 指定白名单模型专用 worker agent 同步循环到完成；jobs 并行编排（maxParallel 默认 10）；进度文件续跑；worker 非正常停止自动重启；worker 不含 handyman 自身（递归只走 subagent） |
 | `session_rebuild` | 轨迹跟踪器 | 上下文超阈值时完全清空重建（Ship of Theseus）：surface replace → first-anchor 协议正文 + 继续指令 → 自动继续 |
 | `localstore` | 凭据存储 | 凭据/配置命名空间（credential/config），git 策略可配 |
 
@@ -217,7 +217,7 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 |------|------|------|
 | DSH settings 面板 | settings.yaml（DSH 原生） | gatewayEnabled / rebuildEnabled / rebuildThreshold / namingEnabled |
 | plugin 全局文件 | `~/.dsh/serenity-hooks.json`（0600） | gateway 账号（scrypt + TOTP）/ host / port / workspaces 白名单 / cookieSecure |
-| CCC 配置 | `.opencode/serenity.json` | loop.defaultModel / sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession |
+| CCC 配置 | `.opencode/serenity.json` | handyman.models（白名单+缺省模型）/ sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession |
 | CCC 凭据 | `localstore.json` | 凭据/配置命名空间（git 策略可配） |
 
 ## 系统提示词（对齐 opencode-serenity-plugin）
@@ -226,7 +226,7 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 
 ## WebUI
 
-- **会话头部状态徽章**（`conversation.session.header.actions` 槽）：绿状态点（CCC 内/外）+ 版本 + **safe tag**（红底 SAFE / 灰底 OFF，一眼可见）+ 点击展开 CCC 状态卡（根路径 / loop 模型 / 守卫信息 / 运行状态）
+- **会话头部状态徽章**（`conversation.session.header.actions` 槽）：绿状态点（CCC 内/外）+ 版本 + **safe tag**（红底 SAFE / 灰底 OFF，一眼可见）+ 点击展开 CCC 状态卡（根路径 / handyman 模型 / 守卫信息 / 运行状态）
 - **DSH 设置面板 section**（`settings.section` 槽）：Serenity 页——三功能开关 + 阈值 + 「外部访问」区块（监听地址/端口 + 登录账号 CRUD + TOTP 绑定 + 工作区白名单 chips + Secure Cookie）
 - **图片自动落盘**（`conversation.input.dock` 槽）：模型不支持图片时静默补救（上传 + 清 rail + 文本重发）
 - 样式遵循 [web-styling.md](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/web-styling.md)：`--dsw-alias-*` 语义 token，明暗主题自适应
@@ -252,7 +252,7 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 | 宿主 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关文本逐字节对齐 |
-| 工具 | msm_list/exec/cc-fs/session 等 | cc_fs/session/acc_msm/cc_git/eap/neat/cce/loop/session_rebuild/localstore |
+| 工具 | msm_list/exec/cc-fs/session 等 | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore |
 
 ## CCC 运行时可互换（osp / dsh 任意换用）
 

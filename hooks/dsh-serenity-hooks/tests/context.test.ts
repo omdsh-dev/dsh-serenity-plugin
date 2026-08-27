@@ -29,9 +29,9 @@ describe('context: ACC 身份文本', () => {
     expect(t).toContain('[ACC] Serenity cognitive container active')
   })
 
-  it('读取 loop 默认模型', () => {
+  it('读取 handyman 默认模型', () => {
     mkdirSync(join(dir, '.opencode'))
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ loop: { defaultModel: 'mock-model' } }))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ handyman: { models: ['mock-model'] } }))
     expect(accIdentityText(dir)).toContain('mock-model')
   })
 
@@ -57,8 +57,8 @@ describe('context: 重启自动恢复的根会话判定（shouldAutoRestore）',
     expect(shouldAutoRestore(fakeAgent({ id: 'child-2', header: { parentSession: 'main-session-abc' } }))).toBe(false)
   })
 
-  it('loop 牛马（id 以 loop- 开头）→ 不恢复', () => {
-    expect(shouldAutoRestore(fakeAgent({ id: 'loop-sqc-scan-1234' }))).toBe(false)
+  it('handyman 杂工（id 以 handyman- 开头）→ 不恢复', () => {
+    expect(shouldAutoRestore(fakeAgent({ id: 'handyman-sqc-scan-1234' }))).toBe(false)
   })
 
   it('无 session → 不恢复', () => {
@@ -78,9 +78,9 @@ describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复�
     expect(shouldRestoreActive(fakeAgent({ id: 'main-session-resume', events: [{ type: 'user/message' }] }))).toBe(true)
   })
 
-  it('subagent / loop（有历史但非根会话）→ 不恢复', () => {
+  it('subagent / handyman（有历史但非根会话）→ 不恢复', () => {
     expect(shouldRestoreActive(fakeAgent({ id: 'child-1', header: { origin: 'subagent' }, events: [{ type: 'user/message' }] }))).toBe(false)
-    expect(shouldRestoreActive(fakeAgent({ id: 'loop-x-1', events: [{ type: 'user/message' }] }))).toBe(false)
+    expect(shouldRestoreActive(fakeAgent({ id: 'handyman-x-1', events: [{ type: 'user/message' }] }))).toBe(false)
   })
 })
 

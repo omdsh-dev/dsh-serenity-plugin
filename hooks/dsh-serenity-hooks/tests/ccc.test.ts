@@ -9,6 +9,7 @@ import {
   resolveInside,
   pathInside,
   loadSerenityConfig,
+  readHandymanConfig,
   isSafeModeOn,
   readBlacklist,
   matchBlacklist,
@@ -87,11 +88,32 @@ describe('ccc: 配置', () => {
 
   it('.dsh/serenity.json 仅作回退（.opencode 优先）', () => {
     mkdirSync(join(dir, '.opencode'))
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ loop: { defaultModel: 'opencode-model' } }))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ handyman: { models: ['opencode-model'] } }))
     mkdirSync(join(dir, '.dsh'))
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ loop: { defaultModel: 'dsh-model' } }))
+    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ handyman: { models: ['dsh-model'] } }))
     // .opencode 优先
-    expect(loadSerenityConfig(dir).loop?.defaultModel).toBe('opencode-model')
+    expect(loadSerenityConfig(dir).handyman?.models).toEqual(['opencode-model'])
+  })
+
+  it('readHandymanConfig：models 未配置返回 null（工具应报错要求配置）', () => {
+    expect(readHandymanConfig(dir)).toBeNull()
+    mkdirSync(join(dir, '.opencode'))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ handyman: { defaultModel: 'x' } }))
+    expect(readHandymanConfig(dir)).toBeNull()
+  })
+
+  it('readHandymanConfig：白名单解析 + defaultModel 缺省 models[0] + 上限默认', () => {
+    mkdirSync(join(dir, '.opencode'))
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ handyman: { models: ['a/one', 'b/two'], maxParallel: 4 } }),
+    )
+    expect(readHandymanConfig(dir)).toEqual({
+      models: ['a/one', 'b/two'],
+      defaultModel: 'a/one',
+      maxRounds: 100,
+      maxParallel: 4,
+    })
   })
 
   it('无配置返回空对象', () => {

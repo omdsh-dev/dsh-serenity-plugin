@@ -29,15 +29,15 @@ describe('status: getStatus', () => {
     expect(s.safeModeOn).toBe(false)
   })
 
-  it('读取黑名单 / 阈值 / loop 模型', () => {
+  it('读取黑名单 / 阈值 / handyman 模型', () => {
     mkdirSync(join(dir, '.opencode'))
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ loop: { defaultModel: 'm3' }, sessionKeeper: { threshold: 100 }, safeMode: { blacklist: ['.secrets/'] } }),
+      JSON.stringify({ handyman: { models: ['m3'] }, sessionKeeper: { threshold: 100 }, safeMode: { blacklist: ['.secrets/'] } }),
     )
     const s = getStatus(dir)
     expect(s.threshold).toBe(100)
-    expect(s.loopModel).toBe('m3')
+    expect(s.handymanModel).toBe('m3')
     // 对齐 osp：黑名单条目为 {pattern} 对象
     expect(s.blacklist).toEqual([{ pattern: '.secrets/' }])
   })

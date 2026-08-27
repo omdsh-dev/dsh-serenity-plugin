@@ -75,7 +75,7 @@ export function accBlock(root: string): string {
     '  eap       — return the full EAP cognitive quality framework',
     '  neat      — return the full Neat design collaboration protocol',
     '  cce       — return the full Cognitive Continuity Engineering framework',
-    '  loop      — run a dedicated model-specific agent in repeated rounds toward a goal',
+    '  handyman  — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done, recursing into same-model subagents; jobs=[] orchestrates parallel work',
     '  session_rebuild — rebuild this conversation in place from SESSION.md when the trajectory-tracker trips',
     '  localstore — ACC local credential/config storage (CCC-root localstore.json, JSON format; git policy localstore.gitTrack default deny); doc subcommand outputs the spec',
     '',

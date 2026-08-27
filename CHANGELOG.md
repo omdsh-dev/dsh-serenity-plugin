@@ -1,3 +1,18 @@
+## v1.24.0 — 2026-08-27（loop（牛马）→ handyman（杂工）重构，S142 用户拍板）
+
+**Scope:** 用户对 loop 工具的四点重设计——① jobs 并行上限 10（便宜模型便宜）；② worker 工具面不含 handyman（编排归主 agent，递归只走 subagent）；③ 不兼容旧 loop 进度文件（仅 handyman- 前缀）；④ handyman.models 未配置 → 报错要求配置。语义对齐 osp loop：同步（非异步）+ 指定白名单模型 + 自主循环到完成（stop-token 唯一完成判据）+ 内部递归同样低能 subagent（DSH 原生模型继承）+ workflow jobs 编排能力。方案文档 `docs/handyman-design.md`（用户确认后落盘）。
+
+### 变更
+- **工具改名 `loop` → `handyman`（全新身份，非 alias）**：`src/tools/handyman.ts`（createHandymanTool：task/label/session/model/jobs/guide；白名单校验 `requireWhitelistedModel`；jobs 编排 Promise.all 并行 ≤ maxParallel；同步阻塞；worker session `handyman-<label>-<uuid>`；HANDYMAN_MAX_ROUNDS/RESTARTS=100）；`src/index.ts` `createLoopTool` → `createHandymanTool`；`src/invariant.ts` REGISTERED_TOOLS `loop` → `handyman`；`src/seams/system-prompt.ts` 工具清单行同步
+- **纯逻辑层改名**：`loop-ops.ts` → `handyman-ops.ts`（进度文件 `handyman-<label>.md/.json`；stop token `SERENITY_HANDYMAN_DONE_`；`HANDYMAN_GUIDE` 含白名单/递归/jobs 并行/不兼容说明；`listActiveHandymen()` 扫 handyman-*.json）；`loop-preset-inherit.ts` → `handyman-preset-inherit.ts`（**工具面收窄**：setup 钩子 composeFrom 后 `tools.restrict({ deny: ['handyman'] })`——worker 看不到 handyman，防无限嵌套）
+- **配置不兼容（用户拍板）**：`SerenityConfig.loop.defaultModel` → `handyman.{models, defaultModel, maxRounds, maxParallel}`；`readHandymanConfig()` models 未配返回 null（工具报错要求配置）；defaultModel 缺省 models[0]；maxRounds 缺省 100；maxParallel 缺省 10
+- **拦截缝同步**：`seams/context.ts` shouldAutoRestore `loop-` 前缀 → `handyman-`；ACC 注入 `loop default model` → `handyman default model`（读 readHandymanConfig）；`seams/bootstrap.ts` `loop-` 恒 promoted/免锚定 2 处 → `handyman-`
+- **API/UI 同步**：`/serenity/loops` → `/serenity/handymen`（LOOPS_PATH → HANDYMEN_PATH；`{handymen: listActiveHandymen(root)}`）；status `loopModel` 字段 → `handymanModel`（读 readHandymanConfig 默认值）；SafeModePanel.tsx/.css 全量改名（LoopRunInfo→HandymanRunInfo、runningLoops→runningHandymen、CSS 类 .sp-loops*→.sp-handymen*、「Loop 运行」→「Handyman 运行」）；ccc-config 参考/工具描述/localstore 示例 loop.defaultModel → handyman.models
+- **旧文件删除**：`src/tools/loop.ts` / `src/loop-ops.ts` / `src/loop-preset-inherit.ts`；测试 `loop-ops.test.ts` → `handyman-ops.test.ts`（+白名单 requireWhitelistedModel 测试 + 旧 loop- 进度文件不列入断言）、`loop-preset.test.ts` → `handyman-preset.test.ts`（deny handyman 四路径断言）；context/ccc/status/invariant/register/system-prompt/osp-alignment/bootstrap/localstore 8 文件 loop 断言 → handyman
+- **typecheck 修复**：jobs 参数 schema `required`/`additionalProperties` 与 ObjectValueSchemaSpec 契约对齐（items 内不支持 required → 运行时 `parseJobs` 校验）；args.jobs/args.session 类型收窄；jobs 结果 `as unknown as JsonValue`
+- **README.md/.en.md/CHANGELOG**：工具表 loop → handyman（含 jobs 编排/白名单说明）、配置表 handyman.models、状态卡 handyman 模型；hooks 子包 README 同步
+- typecheck ✓（node + client）→ test ✓（40 files / 449 tests，+3）→ build ✓（lib/client.js 72971 B）
+
 ## v1.23.8 — 2026-08-27（safe tag 实心化：红底白字大写 SAFE，无 icon，S142 用户反馈）
 
 **Scope:** 用户反馈 v1.23.7 仍不满意——"换成实心 tag，不要 icon 试试看，大写 SAFE"。

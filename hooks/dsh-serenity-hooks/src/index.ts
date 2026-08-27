@@ -21,7 +21,7 @@ import { msmTool } from './tools/msm.js'
 import { eapTool } from './tools/eap.js'
 import { neatTool } from './tools/neat.js'
 import { cceTool } from './tools/cce.js'
-import { createLoopTool } from './tools/loop.js'
+import { createHandymanTool } from './tools/handyman.js'
 import { createSessionTool } from './tools/session.js'
 import { createRebuildTool } from './tools/rebuild.js'
 import { localstoreTool } from './tools/localstore.js'
@@ -105,7 +105,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(eapTool)
     ctx.tools.register(neatTool)
     ctx.tools.register(cceTool)
-    ctx.tools.register(createLoopTool(ctx))
+    ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(createRebuildTool(ctx))
     ctx.tools.register(localstoreTool)
   }

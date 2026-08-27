@@ -232,7 +232,7 @@ describe('osp 对齐：ACC 块结构（工具清单平台化，文档化差异�
     expect(block).toContain(`CCC: ${dir.split('/').pop()}`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     expect(block).toContain('You are running inside a Concrete Cognitive Container (CCC)')
-    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop', 'session_rebuild', 'localstore']) {
+    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman', 'session_rebuild', 'localstore']) {
       expect(block).toContain(tool)
     }
     expect(block).toContain('call acc_msm list to discover them')

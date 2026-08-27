@@ -6,10 +6,10 @@
  *  - **官方 Modal**（ui-primitives：body portal 遮罩 + 居中 + Escape/遮罩关闭）
  * 面板只承载**状态展示**（v1.22 归属原则：账号密码等 plugin 配置在 DSH 设置面板
  * 「Serenity」页设定，本面板不再承载配置表单）：
- *  - 运行环境：CCC / Loop 模型 / 守卫
+ *  - 运行环境：CCC / Handyman 模型 / 守卫
  *  - 安全模式：大开关（唯一可操作项，用户能力）
- *  - Loop 运行：运行列表 + 详情折叠
- * 数据经同源 HTTP /serenity/status + /serenity/loops（插件服务端路由）。
+ *  - Handyman 运行：运行列表 + 详情折叠
+ * 数据经同源 HTTP /serenity/status + /serenity/handymen（插件服务端路由）。
  *
  * 槽：conversation.session.header.actions（官方既有槽，list）
  */
@@ -33,11 +33,11 @@ export interface SerenityStatus {
   safeModeOn: boolean
   blacklist: string[]
   threshold: number | null
-  loopModel: string | null
+  handymanModel: string | null
 }
 
-/** loop 运行状态（/serenity/loops 数据源；WebUI 等待界面） */
-export interface LoopRunInfo {
+/** handyman 运行状态（/serenity/handymen 数据源；WebUI 等待界面） */
+export interface HandymanRunInfo {
   label: string
   round: number
   done: boolean
@@ -47,7 +47,7 @@ export interface LoopRunInfo {
 }
 
 const API = '/serenity/status'
-const LOOPS_API = '/serenity/loops'
+const HANDYMEN_API = '/serenity/handymen'
 
 /** 拼接类名（等价 clsx 最小子集，避免额外依赖） */
 function cx(...parts: Array<string | false | null | undefined>): string {
@@ -59,8 +59,8 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
-  const [loops, setLoops] = useState<LoopRunInfo[]>([])
-  const [loopsOpen, setLoopsOpen] = useState(false)
+  const [handymen, setHandymen] = useState<HandymanRunInfo[]>([])
+  const [handymenOpen, setHandymenOpen] = useState(false)
 
   const sessionId = props.sessionId
 
@@ -78,18 +78,18 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     void refresh()
   }, [refresh])
 
-  // 模态打开时轮询 loop 运行状态（约 3s 刷新；进度文件驱动）
+  // 模态打开时轮询 handyman 运行状态（约 3s 刷新；进度文件驱动）
   useEffect(() => {
     if (!open) return
     let alive = true
     const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
     const tick = async (): Promise<void> => {
       try {
-        const r = await fetch(`${LOOPS_API}${qs}`, { headers: { accept: 'application/json' } })
-        const data = (await r.json()) as { loops?: LoopRunInfo[] }
-        if (alive) setLoops(data.loops ?? [])
+        const r = await fetch(`${HANDYMEN_API}${qs}`, { headers: { accept: 'application/json' } })
+        const data = (await r.json()) as { handymen?: HandymanRunInfo[] }
+        if (alive) setHandymen(data.handymen ?? [])
       } catch {
-        if (alive) setLoops([])
+        if (alive) setHandymen([])
       }
     }
     void tick()
@@ -124,7 +124,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   }
 
   const inCcc = status.root !== null
-  const runningLoops = loops.filter((l) => !l.done)
+  const runningHandymen = handymen.filter((l) => !l.done)
 
   return (
     <>
@@ -174,9 +174,9 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                     <span className={cx('sp-value')} title={status.root ?? undefined}>{status.root}</span>
                   </div>
                   <div className={cx('sp-row')}>
-                    <span className={cx('sp-label')}>Loop 模型</span>
-                    <span className={cx('sp-value')} title={status.loopModel ? `loop.defaultModel: ${status.loopModel}` : undefined}>
-                      {status.loopModel ?? '未配置'}
+                    <span className={cx('sp-label')}>Handyman 模型</span>
+                    <span className={cx('sp-value')} title={status.handymanModel ? `handyman.models: ${status.handymanModel}` : undefined}>
+                      {status.handymanModel ?? '未配置'}
                     </span>
                   </div>
                   <div className={cx('sp-row')}>
@@ -207,17 +207,17 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                 </div>
               </div>
 
-              {/* ── 分组：Loop 运行 ── */}
+              {/* ── 分组：Handyman 运行 ── */}
               <div className={cx('sp-group')}>
                 <div className={cx('sp-groupHead')}>
-                  <h3 className={cx('sp-groupTitle')}>Loop 运行</h3>
-                  {loops.length > 0 && (
+                  <h3 className={cx('sp-groupTitle')}>Handyman 运行</h3>
+                  {handymen.length > 0 && (
                     <button
                       type="button"
-                      className={cx('sp-loopsToggle')}
-                      onClick={() => setLoopsOpen((v) => !v)}
+                      className={cx('sp-handymenToggle')}
+                      onClick={() => setHandymenOpen((v) => !v)}
                     >
-                      {loopsOpen ? '收起' : '详情'}
+                      {handymenOpen ? '收起' : '详情'}
                     </button>
                   )}
                 </div>
@@ -225,28 +225,28 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                   <div className={cx('sp-row')}>
                     <span className={cx('sp-label')}>状态</span>
                     <span className={cx('sp-value')}>
-                      {runningLoops.length > 0
-                        ? `运行中 ${runningLoops.length}${loops.length > 0 ? ` / 共 ${loops.length}` : ''}`
-                        : '无运行中 loop'}
+                      {runningHandymen.length > 0
+                        ? `运行中 ${runningHandymen.length}${handymen.length > 0 ? ` / 共 ${handymen.length}` : ''}`
+                        : '无运行中 handyman'}
                     </span>
                   </div>
                 </div>
-                {loopsOpen && (
-                  <div className={cx('sp-loopsList')}>
-                    {loops.slice(0, 3).map((l) => (
-                      <div key={l.label} className={cx('sp-loopItem')}>
-                        <div className={cx('sp-loopHead')}>
-                          <span className={cx('sp-loopLabel')} title={l.label}>{l.label}</span>
-                          <span className={cx('sp-loopRound')}>{l.done ? '✓ 完成' : `R${l.round}`}</span>
-                          <span className={cx('sp-loopTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
+                {handymenOpen && (
+                  <div className={cx('sp-handymenList')}>
+                    {handymen.slice(0, 3).map((l) => (
+                      <div key={l.label} className={cx('sp-handymanItem')}>
+                        <div className={cx('sp-handymanHead')}>
+                          <span className={cx('sp-handymanLabel')} title={l.label}>{l.label}</span>
+                          <span className={cx('sp-handymanRound')}>{l.done ? '✓ 完成' : `R${l.round}`}</span>
+                          <span className={cx('sp-handymanTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
                         </div>
-                        <div className={cx('sp-loopResp')} title={l.lastResponse}>
+                        <div className={cx('sp-handymanResp')} title={l.lastResponse}>
                           {l.lastResponse.slice(0, 80) || (l.done ? '已完成' : '（等待首轮响应）')}
                         </div>
                       </div>
                     ))}
-                    {loops.length > 3 && (
-                      <div className={cx('sp-loopsMore')}>… 共 {loops.length} 个 loop（其余见等待界面）</div>
+                    {handymen.length > 3 && (
+                      <div className={cx('sp-handymenMore')}>… 共 {handymen.length} 个 handyman（其余见等待界面）</div>
                     )}
                   </div>
                 )}

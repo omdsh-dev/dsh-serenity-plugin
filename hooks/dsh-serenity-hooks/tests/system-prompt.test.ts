@@ -78,7 +78,7 @@ describe('system-prompt: 结构注入（v1.19.8：ACC→Metaphor→Principles→
     expect(block).toContain(`ACC: dsh-serenity-hooks v${ACC_VERSION}`)
     expect(block).toContain(`CCC: sp-`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
-    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop']) {
+    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman']) {
       expect(block).toContain(tool)
     }
     // EAP 优化 #2：说明平台工具仍可用（关系方向明确）

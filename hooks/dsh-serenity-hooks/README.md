@@ -14,7 +14,7 @@ dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
 ## 工具
 
-`cc_fs` / `session` / `acc_kit` / `cc_git` / `acc_msm` / `eap` / `neat` / `cce` / `loop`
+`cc_fs` / `session` / `acc_kit` / `cc_git` / `acc_msm` / `eap` / `neat` / `cce` / `handyman`
 
 ## 系统提示词
 
@@ -26,7 +26,7 @@ dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
 ```jsonc
 {
-  "loop": { "defaultModel": "provider/model" },
+  "handyman": { "models": ["provider/model"], "defaultModel": "provider/model" },
   "sessionKeeper": { "threshold": 100 },
   "safeMode": { "blacklist": [".secrets/", "regex:\\.env$"] }
 }

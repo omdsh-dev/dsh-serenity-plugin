@@ -29,7 +29,7 @@ export const localstoreTool = defineTool({
     'Stored in localstore.json at the CCC root (JSON format, directly readable by MSMs). ' +
     'Git policy: .opencode/serenity.json localstore.gitTrack (allow commits / deny commits, default deny; .dsh fallback) — when deny, writes ensure .gitignore contains this file (physical guarantee), cc_git commit checks and refuses. ' +
     'Subcommands: list (list keys, credentials never return values) / get <name> (read value) / set <name> <value> (write) / unset <name> (delete) / show <name> (metadata, credentials never print values) / doc (output the storage spec — path/format/key conventions/git policy; agents may operate the file directly with read/write per the spec). ' +
-    'Default scope=credential; config requires --scope config (path is section.key, e.g. loop.defaultModel).',
+    'Default scope=credential; config requires --scope config (path is section.key, e.g. handyman.models).',
   parameters: {
     action: { type: 'string', enum: [...ACTIONS], required: true, description: 'Subcommand: list/get/set/unset/show/doc' },
     name: { type: 'string', description: 'Entry name (credentials: UPPER_SNAKE; config: section.key)' },

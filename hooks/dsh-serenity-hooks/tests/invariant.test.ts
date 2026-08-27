@@ -8,7 +8,7 @@ describe('invariant: 清单与注册工具一致性', () => {
   it('一致时零问题', () => {
     const dir = mkdtempSync(join(tmpdir(), 'inv-'))
     const manifest = join(dir, 'dsh.plugin.json')
-    writeFileSync(manifest, JSON.stringify({ id: 'x', contributes: { tools: ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'loop'] } }))
+    writeFileSync(manifest, JSON.stringify({ id: 'x', contributes: { tools: ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman'] } }))
     expect(verifyToolConsistency(manifest, REGISTERED_TOOLS)).toEqual([])
     rmSync(dir, { recursive: true, force: true })
   })

@@ -143,13 +143,13 @@ export function createEpochPromotion(
       if (agent === undefined) return { boundary: -1, promoted: true }
       const session = (agent as { session?: unknown }).session
       if (session === undefined) return { boundary: -1, promoted: true }
-      // loop agent（sessionId 固定 `loop-` 前缀，tools/loop.ts 生成）：autonomous 程序化
+      // handyman worker（sessionId 固定 `handyman-` 前缀，tools/handyman.ts 生成）：autonomous 程序化
       // worker，需从第 1 轮起就持有完整工具目录 + 完整 ACC 系统提示词（DCP/标准层）。
       // 它经 ctx.agents.create 直接创建（非 DSH delegation 路径），delegationDepth 为 0，
-      // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故显式按 `loop-` 前缀判 promoted，
-      // 与 context.ts shouldAutoRestore 的 `loop-` 约定保持一致。
+      // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故显式按 `handyman-` 前缀判 promoted，
+      // 与 context.ts shouldAutoRestore 的 `handyman-` 约定保持一致。
       const loopSid = (session as { id?: string }).id
-      if (typeof loopSid === 'string' && loopSid.startsWith('loop-')) return { boundary: -1, promoted: true }
+      if (typeof loopSid === 'string' && loopSid.startsWith('handyman-')) return { boundary: -1, promoted: true }
       // 子 agent（delegationDepth > 0）恒为完整目录（anchored 语义）
       const header = (session as { header?: { delegationDepth?: number } }).header
       if ((header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
@@ -269,10 +269,10 @@ export function registerBootstrap(ctx: Context): void {
       const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; events?: readonly unknown[]; id?: string } | undefined
       const depth = session?.header?.delegationDepth ?? 0
       const sid = typeof session?.id === 'string' ? session.id : undefined
-      // loop agent（sessionId `loop-` 前缀）：autonomous worker，不需要 whoami 锚定轮
-      // （锚定轮消耗 2 轮 + 0 工具，浪费；loop agent 已通过 systemPrompt.section 获得 ACC 5 块）。
-      // 与 createEpochPromotion.status 的 `loop-` 恒 promoted 判定保持一致。
-      if (sid !== undefined && sid.startsWith('loop-')) return
+      // handyman worker（sessionId `handyman-` 前缀）：autonomous worker，不需要 whoami 锚定轮
+      // （锚定轮消耗 2 轮 + 0 工具，浪费；handyman worker 已通过 systemPrompt.section 获得 ACC 5 块）。
+      // 与 createEpochPromotion.status 的 `handyman-` 恒 promoted 判定保持一致。
+      if (sid !== undefined && sid.startsWith('handyman-')) return
       if (depth === 0) {
         if (session?.events?.some((event) => (event as { type?: string }).type === 'user/message')) return
       } else {

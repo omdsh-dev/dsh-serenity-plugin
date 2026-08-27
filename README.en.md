@@ -43,7 +43,7 @@ LLM / Runtime / Tools (the cognitive medium — replaceable)
 
 | Capability | Description |
 |-----------|-------------|
-| **11 real DSH tools** | `cc_fs` (15 fs subcommands) / `session` (full session lifecycle) / `acc_kit` / `cc_git` / `acc_msm` (MSM framework) / `eap` / `neat` / `cce` / `loop` / `session_rebuild` (trajectory-tracker reset) / `localstore` — all registered via `ctx.tools.register` |
+| **11 real DSH tools** | `cc_fs` (15 fs subcommands) / `session` (full session lifecycle) / `acc_kit` / `cc_git` / `acc_msm` (MSM framework) / `eap` / `neat` / `cce` / `handyman` (whitelisted-model worker loop + parallel jobs) / `session_rebuild` (trajectory-tracker reset) / `localstore` — all registered via `ctx.tools.register` |
 | **System-prompt injection (8 blocks)** | `systemPrompt.section` (global, order -50): `=== Serenity ACC ===` / `=== Serenity Metaphor ===` (world model: Ship/Voyage/Crew) / `=== Serenity Principles ===` (cognitive-container ontology + MSM principles) / `=== Serenity CCE ===` / `=== Serenity EAP ===` / state blocks (Safe Mode / Localstore) / top-level entry skill full text (via the `.serenity` marker) / `=== Serenity Session ===` — aligned to opencode-serenity-plugin, byte-identical on platform-neutral text |
 | **first-anchor (zero-config)** | Every CCC is Serenity/ACC at the abstraction layer — new sessions get 2 protocol anchor messages (ACC identity + collaboration protocol), acknowledge with 0 tools, then promote to the full tool catalog; mechanism and content are code-fixed, no CCC config surface |
 | **Interception-seam guards** | safe-mode (bash disappears from the tool list) / path-escape blocking (P3: full inside Root, zero outside) / blacklist / governance-file protection / Trajectory-Steward DCP reminders — not bypassable by the model |
@@ -140,7 +140,7 @@ Sessions inside a CCC automatically get: the 11 ACC tools, mechanical guards, AC
 | `eap` | progressive disclosure | EAP cognitive-quality framework |
 | `neat` | progressive disclosure | Neat design-collaboration protocol |
 | `cce` | progressive disclosure | Cognitive Continuity Engineering |
-| `loop` | worker loop | repeated execution by a dedicated agent with a chosen model; resumable progress files; auto-restart on abnormal stop |
+| `handyman` | worker loop | synchronous round-loop of a dedicated worker agent on a CCC-whitelisted model until done; parallel jobs orchestration (maxParallel, default 10); resumable progress files; auto-restart on abnormal stop; workers include subagent (same-model inheritance) but NOT handyman itself |
 | `session_rebuild` | trajectory tracker | full surface reset on context overrun (Ship of Theseus): replace → first-anchor protocol text + continue instruction → auto-resume |
 | `localstore` | credential store | credential/config namespaces with configurable git policy |
 
@@ -202,7 +202,7 @@ Everything activates only inside a CCC directory marked with `.serenity`; zero e
 |--------|----------|----------|
 | DSH settings panel | settings.yaml (native DSH) | gatewayEnabled / rebuildEnabled / rebuildThreshold / namingEnabled |
 | Plugin-global file | `~/.dsh/serenity-hooks.json` (0600) | gateway accounts (scrypt + TOTP) / host / port / workspaces allowlist / cookieSecure |
-| CCC config | `.opencode/serenity.json` | loop.defaultModel / sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession |
+| CCC config | `.opencode/serenity.json` | handyman.models (whitelist + default model) / sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession |
 | CCC credentials | `localstore.json` | credential/config namespaces (configurable git policy) |
 
 ## System prompt (aligned with opencode-serenity-plugin)
@@ -211,7 +211,7 @@ Eight blocks in the same order (ACC → Metaphor → Principles → CCE → EAP 
 
 ## WebUI
 
-- **Session-header status badge** (`conversation.session.header.actions` slot): status dot (inside/outside CCC) + version + **safe tag** (red SAFE / gray OFF, visible at a glance) + click to expand the CCC status card (root path / loop model / guard info / runtime state)
+- **Session-header status badge** (`conversation.session.header.actions` slot): status dot (inside/outside CCC) + version + **safe tag** (red SAFE / gray OFF, visible at a glance) + click to expand the CCC status card (root path / handyman model / guard info / runtime state)
 - **DSH settings section** (`settings.section` slot): Serenity page — 3 feature switches + threshold + "External Access" block (listen address/port + account CRUD + TOTP binding + workspace allowlist chips + Secure Cookie)
 - **Image auto-fallback** (`conversation.input.dock` slot): silent recovery when the model rejects images (upload + clear rail + resend as text)
 - Styling follows [web-styling.md](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/web-styling.md): `--dsw-alias-*` semantic tokens, light/dark adaptive
@@ -236,7 +236,7 @@ Typecheck runs against real DSH type contracts (tsconfig paths point at a local 
 | Host | OpenCode | DeepSeek Harness |
 | Implementation | independent | **independent** (no source reuse) |
 | System prompt | `system.transform` | `systemPrompt.section`, byte-aligned on platform-neutral text |
-| Tools | msm_list/exec/cc-fs/session etc. | cc_fs/session/acc_msm/cc_git/eap/neat/cce/loop/session_rebuild/localstore |
+| Tools | msm_list/exec/cc-fs/session etc. | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore |
 
 ## Interchangeable CCC runtime (osp or dsh)
 

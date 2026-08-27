@@ -138,14 +138,15 @@ export const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═�
 CCC-level features are configured in .opencode/serenity.json.
 Below are all available configuration sections.
 
-── 1. loop.defaultModel ──
-loop 工具缺省模型（未配置且未传 model 参数时 loop 报错）。
+── 1. handyman.models ──
+handyman（杂工）工具可用模型白名单（provider/model 列表）；未配置时 handyman 报错要求配置。
+缺省模型 = models[0]（可用 handyman.defaultModel 指定，必须 ∈ models）。
 
   Config:
-    { "loop": { "defaultModel": "provider/model-name" } }
+    { "handyman": { "models": ["provider/model-name"] } }
 
   Example:
-    { "loop": { "defaultModel": "minimax-cn-coding-plan/MiniMax-M3" } }
+    { "handyman": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3", "maxRounds": 100, "maxParallel": 10 } }
 
 ── 2. sessionKeeper.threshold ──
 SESSION-KEEPER 提醒机制的积分阈值（非 headless 主 agent）。
