@@ -43,10 +43,16 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message, MessageSource } from '@deepseek-ai/dsh-llm'
-import { join, basename, dirname } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
+import { existsSync } from 'node:fs'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
-import { getActiveSessionInfo } from './session-ops.js'
+import {
+  getActiveSessionInfo,
+  parseSessionContextFromEvents,
+  extractSessionMdPathFromText,
+  findLatestActiveSessionMd,
+} from './session-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
@@ -88,7 +94,10 @@ export function buildRebuildAnchor(
     ...anchorMessages.flatMap((text) => [stripAckSuffix(text), '']),
     sessionName !== '' ? `Continue the work of ${sessionName}.` : 'Continue the current work.',
     ...(sessionLine ? [sessionLine] : []),
-    `- Persistent trajectory (SESSION.md, unmoved): ${rel}`,
+    // v1.24.11 规范行：与 `session use` 上下文同格式（SESSION.md path:）——路径独立成行，
+    // 恢复机制（parseSessionContextFromEvents）从 events 解析路径即可恢复，无需 [SESSION CONTEXT] 标记
+    `- Persistent trajectory — SESSION.md path: ${rel}`,
+    `  (the trajectory's persistent body — stays in place through rebuilds)`,
     `- Read that SESSION.md first (goal/decisions/progress/unresolved), then continue from the last checkpoint.`,
   ]
   return lines.join('\n')
@@ -101,6 +110,57 @@ export interface RebuildResult {
   anchor: string
   /** 宁静号 SESSION.md（持久轨迹，保持原位） */
   sessionMdPath: string | null
+}
+
+// ── v1.24.11 稳固化：SESSION.md 多层定位（S142 用户需求：重建后新会话必须准确知道从哪个 SESSION 恢复）──
+
+/** 从会话 surface 首条 user 消息（重建锚点）解析 SESSION.md 路径（events 异常/缺失时的兜底） */
+function parseAnchorMdPath(session: Session): string | null {
+  try {
+    const nodes = [...session.surface.nodes]
+    if (nodes.length === 0) return null
+    const events = (session as { events?: readonly SessionEvent[] }).events
+    if (!Array.isArray(events)) return null
+    const event = events[nodes[0]!]
+    if (!event) return null
+    const message = deriveEventMessage(event)
+    if (!message) return null
+    const text =
+      message.content
+        ?.map((c) => ((c as { type?: string; text?: string }).type === 'text' ? (c as { text?: string }).text ?? '' : ''))
+        .join('') ?? ''
+    return extractSessionMdPathFromText(text)
+  } catch {
+    return null
+  }
+}
+
+/** 从 SESSION.md 绝对路径派生会话名（S###；issue 目录回退完整目录名） */
+function sessionNameFromMdPath(mdPath: string): string {
+  const dirName = basename(dirname(mdPath))
+  const idMatch = dirName.match(/--S(\d{3,})--/)
+  return idMatch ? `S${idMatch[1]}` : dirName
+}
+
+/**
+ * 稳固的 SESSION.md 定位（多层候选 + 存在性校验，**绝不输出虚假路径**）：
+ * ① 内存活跃会话（本会话显式 use 过）→ ② events 恢复（use 标记 + 重建锚点规范行，进程重启后）
+ * → ③ surface 首条锚点（events 异常时兜底）→ ④ AGENT_SESSIONS 约定回退（最新未完成活动目录）。
+ * 每候选 resolve 后 existsSync 校验（相对路径按 root 解析）；全部失败返回 null → 调用方报错引导。
+ */
+export function resolveSessionMdPath(root: string, scope: string, session: Session): string | null {
+  const candidates: Array<string | null> = []
+  candidates.push(getActiveSessionInfo(scope)?.mdPath ?? null)
+  const events = (session as { events?: readonly unknown[] }).events
+  if (Array.isArray(events)) candidates.push(parseSessionContextFromEvents(events)?.mdPath ?? null)
+  candidates.push(parseAnchorMdPath(session))
+  candidates.push(findLatestActiveSessionMd(root))
+  for (const c of candidates) {
+    if (!c) continue
+    const abs = c.startsWith(root) ? c : resolve(root, c)
+    if (existsSync(abs)) return abs
+  }
+  return null
 }
 
 // ── pending 队列：sessionId → 待重建锚点（turn-stopping 时消费）──
@@ -144,26 +204,21 @@ export async function queueRebuild(
     throw new Error(`Unable to locate dsh session ${dshSessionId} (session may be closed)`)
   }
 
-  // ② 当前 use 的宁静号 SESSION（持久轨迹路径；scope 与 session 工具 agentScope 一致=裸 id）
-  const scope = dshSessionId
-  let sessionMdPath: string | null = null
-  let sessionName = ''
-  try {
-    const active = getActiveSessionInfo(scope)
-    if (active?.mdPath) {
-      sessionMdPath = active.mdPath
-      sessionName = active.sessionId ?? ''
-    }
-  } catch {
-    /* 激活信息缺失 → 仅注入通用锚点 */
+  // ② 稳固定位当前 use 的宁静号 SESSION（持久轨迹路径；多层候选 + 存在性校验 v1.24.11）
+  const mdPath = resolveSessionMdPath(root, dshSessionId, session)
+  if (!mdPath) {
+    throw new Error(
+      'Unable to determine the active SESSION.md — no session context found in this conversation. ' +
+      'Run "session use <S###>" first to activate the trajectory to resume, then retry session_rebuild.',
+    )
   }
-  const mdPath = sessionMdPath ?? join(root, 'AGENT_SESSIONS', 'SESSION.md')
+  const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)
   const anchor = buildRebuildAnchor(root, sessionName, mdPath)
 
   // ③ 排队（覆盖同会话旧队列）
   pendingRebuilds.set(dshSessionId, { anchor, queuedAt: Date.now() })
   void note
-  return { queued: true, anchor, sessionMdPath }
+  return { queued: true, anchor, sessionMdPath: mdPath }
 }
 
 /**

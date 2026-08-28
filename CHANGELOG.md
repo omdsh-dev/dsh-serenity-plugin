@@ -1,3 +1,18 @@
+## v1.24.11 — 2026-08-28（session_rebuild 会话定位稳固化：重建后新会话准确知道从哪个 SESSION 恢复，S142 用户需求）
+
+**Scope:** 用户反馈——session_rebuild 会话清空后继续，SESSION.md 的目录**偶尔拿不准**，要求稳固方案确保「继续的会话在开始准确知道从哪个 SESSION 恢复」。**根因三链**：① `queueRebuild` 的 fallback 是**未校验的虚假路径** `AGENT_SESSIONS/SESSION.md`（内存活跃会话缺失时必现）② 重建锚点的轨迹行 `- Persistent trajectory (SESSION.md, unmoved): <rel>` **不是恢复机制可解析的格式**（`parseSessionContextFromEvents` 只认 `SESSION.md path:`）→ 仅靠锚点的会话（从未显式 `session use`）无法从 events 恢复 ③ 恢复机制要求 `[SESSION CONTEXT]` 标记与路径同串且**无存在性校验** → 无 use 标记的历史无法恢复 + 陈旧标记可能恢复出已归档/错误目录。
+
+### 变更（稳固化 4 件套）
+- **① 锚点规范行**（rebuild.ts `buildRebuildAnchor`）：轨迹行改为 `- Persistent trajectory — SESSION.md path: <rel>`——与 `session use` 上下文**同格式**（`SESSION.md path:` 短语），恢复机制从 events 直接解析；路径独立成行（persistent-body 尾注换行），不污染路径捕获
+- **② queueRebuild 多层解析 + 存在性校验**（rebuild.ts 新增 `resolveSessionMdPath(root, scope, session)`）：候选按序 ① 内存活跃会话（本会话显式 use 过）→ ② events 恢复（use 标记 + 重建锚点规范行，进程重启后）→ ③ surface 首条 user 消息锚点解析（`parseAnchorMdPath`，events 异常兜底）→ ④ AGENT_SESSIONS 约定回退（`findLatestActiveSessionMd`：最新未完成活动目录）；每候选 resolve 后 **existsSync 校验**（相对路径按 root 解析）；全部失败 → **抛错引导「Run session use <S###> first」**——**绝不输出虚假路径**；会话名从路径派生（`sessionNameFromMdPath`：S### 或 issue 目录名，单一真相源）
+- **③ 恢复升级 path-only**（session-ops.ts `parseSessionContextFromEvents`）：从尾到头扫描 events，**最后一条 `SESSION.md path:` 行即可恢复，不再要求 `[SESSION CONTEXT]` 标记**（向后兼容）；目录名/ID 从路径本身派生（`basename(dirname())` + S### 正则，不猜）；兼容目录形态路径（旧写）并归一为文件路径（补 `/SESSION.md`）；新增 `extractSessionMdPathFromText`（剥同行已知尾注，如 Session 块 persistent-body 注释）与 `findLatestActiveSessionMd`（约定回退）
+- **④ seed 处校验**（seams/context.ts）：重启恢复解析后 `resolve(root, rel)` 绝对化 + `existsSync` 验证通过才 `setActiveSessionInfo`——陈旧/已归档/不存在的标记不污染内存
+
+### 测试
+- rebuild.test +8：锚点规范行断言 / queueRebuild 约定回退解析（真实路径）/ 无上下文抛错引导（不写虚假路径）/ resolveSessionMdPath 多层 4 用例（内存优先 / 陈旧候选跳过→锚点命中 / 全缺 null）/ 夹具 mkActiveSession
+- session-ops.test +4：path-only 恢复（锚点格式无标记）/ 旧 use 标记 + 新锚点最后胜出 / findLatestActiveSessionMd 2 用例（最新未完成胜出 / 全完成 null）；旧恢复测试对齐真实文件路径契约（`.../<session-dir>/SESSION.md`）
+- **42 files / 476 tests 全绿**（+8）；typecheck ✓（node + client）→ build ✓（132990 B）
+
 ## v1.24.10 — 2026-08-28（Windows 兼容性补丁 8 文件全量合并 + 状态胶囊改版，S013 实机交付 + S142 用户设计稿）
 
 **Scope:** 两项合并——① S013 会话（Windows 实机）交付的 **Windows 兼容性补丁**（9 源文件 8 类问题，`docs/overlay-on-1249-src.patch`，实机逐项复测验证：spawn EINVAL / 注册表保护绕过 / mv-cp 毁 CCC / 空格路径 / 大小写 / 反斜杠规则 / emoji 截断 / 穿越防御）；② 用户设计稿「胶囊改版」（对齐 OcgoDockEntry pill）——v1.24.x 状态卡片信息密度高、配色刺眼，重做为迷你胶囊。

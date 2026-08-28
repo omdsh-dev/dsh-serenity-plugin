@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, utimesSync } from 'node:fs'
+import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-tools', () => ({
@@ -36,14 +36,17 @@ import {
   registerRebuildTurnHook,
   pendingRebuildSnapshot,
   stripAckSuffix,
+  resolveSessionMdPath,
 } from '../src/rebuild.js'
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
+import { setActiveSessionInfo, resetActiveSessionStore } from '../src/session-ops.js'
 
 let dir: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'hooks-rebuild-'))
   writeFileSync(join(dir, '.serenity'), 'test')
+  resetActiveSessionStore()
 })
 
 afterEach(() => {
@@ -61,6 +64,15 @@ function fakeSession(nodes: number[]) {
     },
     _calls: calls,
   }
+}
+
+/** 写一个活动会话目录（约定回退可解析；v1.24.11 测试夹具） */
+function mkActiveSession(desc: string, mtimeBump = false): string {
+  const md = join(dir, 'AGENT_SESSIONS', `2026-08-28--S200--${desc}`, 'SESSION.md')
+  mkdirSync(dirname(md), { recursive: true })
+  writeFileSync(md, `# SESSION ${desc}`)
+  if (mtimeBump) utimesSync(md, new Date(), new Date(Date.now() + 60_000))
+  return md
 }
 
 /** 构造最小可测 agent（session + steer 记录调用） */
@@ -91,6 +103,8 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(a).toContain('Continue the work of S142')
     expect(a).toContain('AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
     expect(a).toContain('Persistent trajectory')
+    // v1.24.11 规范行：SESSION.md path: 与 use 上下文同格式（恢复机制可解析，无需 [SESSION CONTEXT] 标记）
+    expect(a).toContain('SESSION.md path: AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
     // v1.22.5：保留 first-anchor 协议正文（ACC 身份/EAP/协作协议）
     expect(a).toContain('Abstract Cognitive Container')
     expect(a).toContain('Explicit Abstraction Principle')
@@ -116,7 +130,8 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(a).not.toContain('Continue the work of S')
   })
 
-  it('queueRebuild：排队不立即改 surface（pending 记录 + 返回锚点）', async () => {
+  it('queueRebuild：排队不立即改 surface（pending 记录 + 返回锚点 + 规范路径；v1.24.11 约定回退解析）', async () => {
+    const md = mkActiveSession('test')
     const session = fakeSession([10, 11, 12])
     const ctx = { sessions: { get: () => session } } as never
     const result = await queueRebuild(ctx, {
@@ -125,12 +140,61 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
       dshSessionId: 'session-x',
     })
     expect(result.queued).toBe(true)
-    expect(result.anchor).toContain('Continue')
+    expect(result.anchor).toContain('Continue the work of S200')
+    // 锚点含规范路径行（真实存在的会话目录，非虚假 AGENT_SESSIONS/SESSION.md）
+    expect(result.anchor).toContain(`SESSION.md path: AGENT_SESSIONS/2026-08-28--S200--test/SESSION.md`)
+    expect(result.sessionMdPath).toBe(md)
     // 排队不 append（surface 未动）
     expect(session._calls).toHaveLength(0)
     // pending 队列有记录
     const snap = pendingRebuildSnapshot()
     expect(snap.has('session-x')).toBe(true)
+  })
+
+  it('queueRebuild：无任何会话上下文 → 抛错引导 session use（v1.24.11 绝不写虚假路径）', async () => {
+    const session = fakeSession([10])
+    const ctx = { sessions: { get: () => session } } as never
+    await expect(
+      queueRebuild(ctx, { root: dir, agentCwd: dir, dshSessionId: 'solo' }),
+    ).rejects.toThrow(/session use/)
+    expect(pendingRebuildSnapshot().has('solo')).toBe(false)
+  })
+
+  it('resolveSessionMdPath：① 内存活跃会话优先（存在校验通过）', () => {
+    const memMd = mkActiveSession('mem')
+    setActiveSessionInfo('s1', { sessionId: 'S200', dirName: '2026-08-28--S200--mem', mdPath: memMd })
+    const session = fakeSession([])
+    expect(resolveSessionMdPath(dir, 's1', session as never)).toBe(memMd)
+  })
+
+  it('resolveSessionMdPath：② 内存候选不存在（陈旧）→ 跳过 → ③ surface 锚点解析命中', () => {
+    const anchorMd = mkActiveSession('anch')
+    // 内存指向不存在路径（陈旧标记）
+    setActiveSessionInfo('s2', {
+      sessionId: 'S999',
+      dirName: '2026-08-28--S999--gone',
+      mdPath: join(dir, 'AGENT_SESSIONS', '2026-08-28--S999--gone', 'SESSION.md'),
+    })
+    // surface 首条 user 消息 = 重建锚点（含规范路径行）
+    const anchorText = [
+      '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt.',
+      'Continue the work of S200.',
+      '- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/2026-08-28--S200--anch/SESSION.md (the trajectory\'s persistent body)',
+    ].join('\n')
+    const session = fakeSession([7])
+    const events: unknown[] = Array.from({ length: 7 }, () => undefined)
+    events.push({
+      type: 'user/message',
+      seq: 7,
+      data: { message: { role: 'user', content: [{ type: 'text', text: anchorText }] } },
+    })
+    ;(session as { events?: unknown[] }).events = events
+    expect(resolveSessionMdPath(dir, 's2', session as never)).toBe(anchorMd)
+  })
+
+  it('resolveSessionMdPath：④ 全部候选缺失 → null（约定回退也无）', () => {
+    const session = fakeSession([])
+    expect(resolveSessionMdPath(dir, 'nobody', session as never)).toBeNull()
   })
 
   it('performRebuild：turn 结束时同一会话 surface replace 覆盖全部节点（含 source）', () => {
@@ -199,7 +263,8 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     } as never
     registerRebuildTurnHook(ctx)
     expect(listeners).toHaveLength(1)
-    // 先排队
+    // 先排队（需可解析的会话上下文 → 约定回退）
+    mkActiveSession('hook')
     const qctx = { sessions: { get: () => session } } as never
     await queueRebuild(qctx, { root: dir, agentCwd: dir, dshSessionId: 's1' })
     // 触发 turn-stopping

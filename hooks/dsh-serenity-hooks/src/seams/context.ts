@@ -145,8 +145,13 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
           const events = (agent.session as unknown as { events?: readonly unknown[] }).events ?? []
           const info = parseSessionContextFromEvents(events)
           if (info) {
-            setActiveSessionInfo(scope, info)
-            console.log(`[serenity-hooks] ↻ 从历史恢复激活会话: ${info.dirName}`)
+            // v1.24.11 校验：路径可为相对（重建锚点 rel）——按 root 绝对化 + existsSync 验证，
+            // 陈旧/不存在（已归档/删除）的标记不污染内存（S142 需求：恢复必须准确指向真实 SESSION）
+            const abs = info.mdPath.startsWith(root) ? info.mdPath : resolve(root, info.mdPath)
+            if (existsSync(abs)) {
+              setActiveSessionInfo(scope, { ...info, mdPath: abs })
+              console.log(`[serenity-hooks] ↻ 从历史恢复激活会话: ${info.dirName}`)
+            }
           }
         }
       } catch {

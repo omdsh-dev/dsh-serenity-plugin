@@ -19,7 +19,7 @@ import {
   writeFileSync,
   renameSync,
 } from 'node:fs'
-import { join, basename } from 'node:path'
+import { join, basename, dirname } from 'node:path'
 import type { JsonValue } from './json.js'
 
 export type SessionAction =
@@ -429,28 +429,41 @@ export function closeSession(root: string, key: string, confirm: boolean, scope 
 }
 
 /**
- * 从会话历史（events）解析最后一条 [SESSION CONTEXT] 标记（进程重启恢复；
- * 只扫**当前会话**自己的历史——无跨会话串台）。
+ * 从会话历史（events）解析会话身份（进程重启恢复；只扫**当前会话**自己的历史——无跨会话串台）。
+ *
+ * v1.24.11 稳固化（S142 用户需求：重建后新会话必须准确知道从哪个 SESSION 恢复）：
+ * **路径规范行即可，不再要求 [SESSION CONTEXT] 标记**——`session use` 上下文与重建锚点
+ * （buildRebuildAnchor 的 `- Persistent trajectory — SESSION.md path: <rel>` 行）同格式，
+ * 因此**仅靠重建锚点的会话（从未显式 use）同样可恢复**。从**尾到头**扫描，最后一条
+ * 合法路径胜出（时间序最新）；会话目录名/ID 从路径本身派生（单一真相源，不猜）。
+ * 路径可为相对（重建锚点存 rel）——绝对化与存在性校验在调用方（知道 root）执行。
  */
 export function parseSessionContextFromEvents(events: readonly unknown[]): ActiveSessionInfo | null {
   for (let i = events.length - 1; i >= 0; i--) {
     const strs: string[] = []
     collectStrings(events[i], strs)
     for (const s of strs) {
-      const idx = s.indexOf(SESSION_CONTEXT_MARKER)
-      if (idx < 0) continue
-      const rest = s.slice(idx + SESSION_CONTEXT_MARKER.length).trim()
-      const dirName = rest.split('\n')[0]?.trim() ?? ''
-      // 路径可含空格（会话目录名如 "2026-08-24--S142--dsh-serenity-plugin 长期维护"）：
-      // 用 [^\r\n]+ 匹配整行而非 \S+（\S+ 遇空格截断 → mdPath 残缺，锚点/Session 块定位失败）
-      const mdMatch = s.match(/SESSION\.md path:\s*([^\r\n]+)/)
-      if (/^\d{4}-\d{2}-\d{2}--/.test(dirName) && mdMatch) {
-        const idMatch = dirName.match(/--S(\d{3,})--/)
-        return {
-          sessionId: idMatch ? `S${idMatch[1]}` : basename(dirName),
-          dirName,
-          mdPath: mdMatch[1]!.trim(),
-        }
+      const md = extractSessionMdPathFromText(s)
+      if (!md) continue
+      // 兼容两种路径形态并归一为文件路径：`.../<session-dir>/SESSION.md`（真实契约）
+      // 或 `.../<session-dir>`（旧写，目录形态）→ 补 /SESSION.md
+      let dirName: string
+      let filePath: string
+      if (basename(md) === SESSION_MD) {
+        dirName = basename(dirname(md))
+        filePath = md
+      } else if (isSessionDirName(basename(md))) {
+        dirName = basename(md)
+        filePath = join(md, SESSION_MD)
+      } else {
+        continue
+      }
+      if (!isSessionDirName(dirName)) continue
+      const idMatch = dirName.match(/--S(\d{3,})--/)
+      return {
+        sessionId: idMatch ? `S${idMatch[1]}` : dirName,
+        dirName,
+        mdPath: filePath,
       }
     }
   }
@@ -466,6 +479,41 @@ function collectStrings(v: unknown, out: string[]): void {
   if (v && typeof v === 'object') {
     for (const val of Object.values(v as Record<string, unknown>)) collectStrings(val, out)
   }
+}
+
+// ── v1.24.11 稳固化：SESSION.md 路径规范行（use 上下文与重建锚点同格式）──
+
+/** 规范行正则：`SESSION.md path: <路径>`（路径可含空格 → [^\r\n]+ 整行匹配） */
+const SESSION_MD_PATH_RE = /SESSION\.md path:\s*([^\r\n]+)/
+
+/** 从文本提取 SESSION.md 路径（use 上下文 / 重建锚点规范行通用；无匹配返回 null）。
+ *  同行已知尾注（如系统提示词 Session 块的 persistent-body 注释）剥除——规范行只取路径本体。 */
+export function extractSessionMdPathFromText(text: string): string | null {
+  const m = text.match(SESSION_MD_PATH_RE)
+  if (!m) return null
+  let p = m[1]!.trim()
+  const suffix = p.search(/ \(the trajectory's persistent body/)
+  if (suffix > 0) p = p.slice(0, suffix).trim()
+  return p
+}
+
+/** 会话目录名形态校验（createSession 恒带日期前缀 `YYYY-MM-DD--`） */
+function isSessionDirName(dirName: string): boolean {
+  return /^\d{4}-\d{2}-\d{2}--/.test(dirName) && dirName.length > 11
+}
+
+/**
+ * 约定回退（v1.24.11）：AGENT_SESSIONS 下最新修改的**未完成**会话的 SESSION.md。
+ * readAllSessions 已按「未完成优先 + mtime 降序」排序 → 首个未完成且含 SESSION.md 即最新活动。
+ * 只作最后手段（内存/events/锚点全缺时），保证重建锚点至少指向一个真实存在的轨迹。
+ */
+export function findLatestActiveSessionMd(root: string): string | null {
+  for (const s of readAllSessions(sessionsRoot(root))) {
+    if (s.status.completed) continue
+    const md = join(s.path, SESSION_MD)
+    if (existsSync(md)) return md
+  }
+  return null
 }
 
 // ── health ──

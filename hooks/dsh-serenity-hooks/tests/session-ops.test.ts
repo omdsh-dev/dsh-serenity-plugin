@@ -16,6 +16,7 @@ import {
   getActiveSessionInfo,
   resetActiveSessionStore,
   parseSessionContextFromEvents,
+  findLatestActiveSessionMd,
   SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
 } from '../src/session-ops.js'
@@ -191,10 +192,11 @@ describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
 describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只扫自己会话）', () => {
   it('events 含 [SESSION CONTEXT] 标记 → 解析出活跃会话', () => {
     const r = mk('recover-me')
-    const marker = `${SESSION_CONTEXT_MARKER} ${r.dirName}\nSESSION.md path: ${r.sessionPath}`
+    const mdPath = join(r.sessionPath, 'SESSION.md')
+    const marker = `${SESSION_CONTEXT_MARKER} ${r.dirName}\nSESSION.md path: ${mdPath}`
     const events = [{ type: 'tool/call' }, { type: 'tool/result', data: { output: marker } }]
     const info = parseSessionContextFromEvents(events)
-    expect(info).toEqual({ sessionId: 'S001', dirName: r.dirName, mdPath: r.sessionPath })
+    expect(info).toEqual({ sessionId: 'S001', dirName: r.dirName, mdPath })
   })
 
   it('会话目录名含空格 → mdPath 完整解析（\S+ 截断回归，S142 v1.23.4）', () => {
@@ -211,8 +213,8 @@ describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只�
   it('取最后一条标记（最新优先）', () => {
     const a = mk('first')
     const b = mk('second')
-    const m1 = `${SESSION_CONTEXT_MARKER} ${a.dirName}\nSESSION.md path: ${a.sessionPath}`
-    const m2 = `${SESSION_CONTEXT_MARKER} ${b.dirName}\nSESSION.md path: ${b.sessionPath}`
+    const m1 = `${SESSION_CONTEXT_MARKER} ${a.dirName}\nSESSION.md path: ${join(a.sessionPath, 'SESSION.md')}`
+    const m2 = `${SESSION_CONTEXT_MARKER} ${b.dirName}\nSESSION.md path: ${join(b.sessionPath, 'SESSION.md')}`
     expect(parseSessionContextFromEvents([{ data: { text: m1 } }, { data: { text: m2 } }])!.dirName).toContain('S002')
   })
 
@@ -224,5 +226,47 @@ describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只�
   it('标记格式非法（目录名不符合 YYYY-MM-DD-- 前缀）→ 跳过', () => {
     const events = [{ data: { text: `${SESSION_CONTEXT_MARKER} not-a-session\nSESSION.md path: /tmp/x.md` } }]
     expect(parseSessionContextFromEvents(events)).toBeNull()
+  })
+})
+
+describe('session-ops: v1.24.11 恢复稳固化（路径规范行即可，无需 [SESSION CONTEXT] 标记）', () => {
+  it('重建锚点格式（无标记）→ 从路径行恢复（仅靠锚点的会话可恢复）', () => {
+    const dirName = '2026-08-24--S142--dsh-serenity-plugin 长期维护'
+    const anchor = [
+      '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt.',
+      'Continue the work of S142.',
+      `- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/${dirName}/SESSION.md (the trajectory's persistent body)`,
+    ].join('\n')
+    const info = parseSessionContextFromEvents([
+      { type: 'user/message', data: { content: [{ type: 'text', text: anchor }] } },
+    ])
+    expect(info).not.toBeNull()
+    expect(info!.sessionId).toBe('S142')
+    expect(info!.dirName).toBe(dirName)
+    expect(info!.mdPath).toBe(`AGENT_SESSIONS/${dirName}/SESSION.md`)
+  })
+
+  it('旧 use 标记 + 新重建锚点 → 最后一条路径胜出（时间序最新）', () => {
+    const a = mk('old-active')
+    const b = mk('newer')
+    const m1 = `${SESSION_CONTEXT_MARKER} ${a.dirName}\nSESSION.md path: ${join(a.sessionPath, 'SESSION.md')}`
+    const m2 = `- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/${b.dirName}/SESSION.md`
+    const info = parseSessionContextFromEvents([{ data: { text: m1 } }, { data: { text: m2 } }])
+    expect(info!.sessionId).toBe('S002')
+    expect(info!.dirName).toBe(b.dirName)
+  })
+
+  it('findLatestActiveSessionMd：最新未完成会话胜出；已完成跳过（约定回退）', () => {
+    const old = mk('old-done')
+    const active = mk('active')
+    // 关闭 old（标记完成）→ 只返回 active（SESSION.md 文件路径）
+    closeSession(dir, old.sessionId, true)
+    expect(findLatestActiveSessionMd(dir)).toBe(join(active.sessionPath, 'SESSION.md'))
+  })
+
+  it('findLatestActiveSessionMd：全部完成 → null', () => {
+    const a = mk('only-done')
+    closeSession(dir, a.sessionId, true)
+    expect(findLatestActiveSessionMd(dir)).toBeNull()
   })
 })
