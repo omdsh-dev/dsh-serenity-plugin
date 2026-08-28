@@ -1,6 +1,6 @@
 # dsh 0.1.2-alpha.1 对 dsp（dsh-serenity-plugin）的影响调研
 
-> 状态：主线程核查完成；2 个子代理深度核查（node 服务面 / client+事件契约面）结果待合并
+> 状态：**已完成**（主线程 19 面 + 2 子代理深度核查合并）
 > 日期：2026-08-27（S142）
 > 背景：用户预告 dsh 0.1.2-alpha.1 已 push GitHub（alpha 不发布 npm，面向插件作者参考；破坏性变更密集，为后续减少破坏）
 
@@ -61,19 +61,18 @@
 
 ## 4. 确定影响点（需 dsp 适配）
 
-### ⚠️ 影响点 A：workspace RPC 信封变化（gateway 工作区白名单）
+### ⚠️ 影响点 A：workspace RPC 信封变化（gateway 工作区白名单）— 需适配
 
 - **旧（rc.8/api-proxy）**：client 发 `{type:'client-request', rpcId, method:'workspace.list', payload}` → dsp gateway 拦截响应过滤 items（v1.22.6 修复）
-- **新（0.1.2/Typert Remote）**：method 变为 Typert namespace/method 形状（`workspace/*`，如 `workspace/create`、`workspace/rename`、`workspace/delete`、`workspace/list` 对应方法经 `remote.workspace.*`）；client-request 信封类型保留但方法域重构
-- **dsp 影响**：`gateway-proxy.ts` 的 `filterWorkspaceList`（v1.22.6 按 `method==='workspace.list'` 拦截）+ `workspaceDenyResponse` 需适配新 method 名与响应结构；**workspace.create 校验**（不在白名单 → 403）同理
+- **新（0.1.2/Typert Remote）**：method 变为 Typert namespace/method 形状（`workspace/*`）；client-request 信封类型保留但方法域重构
+- **dsp 精确改动点**：`gateway.ts:169-170`（`url.pathname.slice('/api/'.length)` 解析 method）/203（`method === 'workspace.list'` 过滤）/258（`/api/workspace.create` 校验）+ `gateway-proxy.ts` `filterWorkspaceList`（解析 `result.value.items` 结构）——需按新 method 名与 Typert Remote 结果形态适配
 - **验证方式**：升级后实测外部端口 3081 工作区列表加载 + 创建拦截
 
-### ⚠️ 影响点 B：session surfaceOp 强制校验
+### ✅ 影响点 B：session surfaceOp 强制校验 — 已排除（dsp 合规）
 
 - **新语义**：surface-eligible 事件（user/message、assistant/message 等）append 时**必须带 surfaceOp marker**，否则运行时抛错（`"surface-eligible and requires a surfaceOp marker"`）
-- **dsp 现状**：rebuild.ts 的 user/message replace **已带** surfaceOp + sourceEventSeqs ✓；compaction/prune（log-only 非 surface-eligible）无 surfaceOp ✓
-- **需全量复查**：context.ts / keeper.ts 的 ACC 注入 append（user/message）是否带 surfaceOp（v1.23.0 后注入面）——若缺需补
-- **验证方式**：升级后 typecheck + 全测试 + 实测 ACC 注入/rebuild
+- **dsp 现状（双子代理 + 主线程交叉确认）**：全部 append 仅 rebuild.ts 两处——user/message replace **已带** surfaceOp + sourceEventSeqs ✓；compaction/prune（log-only 非 surface-eligible）无 surfaceOp ✓；context.ts/keeper.ts 的 ACC 注入走 createUserMessage + followup/steer（**不经 session.append**，不受影响）
+- **结论**：完全合规，零改动
 
 ### ⚠️ 影响点 C：tools.restrict run_code 保留名
 
@@ -85,6 +84,7 @@
 
 - dsp 的 /serenity/* 路由经 webServer.register 注册（不受影响）；但 dsp client 若直接调 DSH RPC（如 fetchWorkspaces 的 workspace.list 信封）需按新方法域改
 - dsp 自身 RPC（/serenity/config 等）走自有 HTTP 通道，**不依赖 api-proxy 白名单**（v1.22 架构已免疫）
+- 子代理确认：dsp client 用的 `session.prompt`/`conversation.draftImages` 都在 Remote 之上，签名未变（运行时兼容，类型建议收紧为 `ClientResult`）
 
 ## 5. 新能力（与 dsp 需求相关）
 
@@ -97,20 +97,48 @@
 
 ## 6. 结论与建议
 
-**整体判断：dsp v1.24.9 在 0.1.2-alpha.1 下的大部分依赖面存续**（19 面中 16 面兼容确认），核心架构（工具/事件/settings/client slots）稳定。**确定性需适配点集中在 4 处**：
+**整体判断：dsp v1.24.9 在 0.1.2-alpha.1 下兼容性良好**——**node half 零改动**（10 个服务面 + 全部事件契约签名兼容），**client half 1 处编译级破坏**（`dsh-client-runtime` 包删除）。确定性需适配点 3 处 + 建议项 4 条：
 
-1. **workspace RPC 方法域**（gateway 工作区白名单）——功能性影响，外部访问场景
-2. **session surfaceOp 强制校验**——需全量复查 dsp 的 append 调用点（rebuild 已合规，context/keeper 待核）
-3. **tools.restrict run_code 保留名**——当前安全，未来扩展需避开
-4. **api 层 Typert Remote 化**——dsp 自有 RPC 免疫，但 client 直调 DSH RPC 处需按新方法域
+### 需适配（3 处）
+
+1. **🔴 client half import 面（编译级，3 文件）**：`@deepseek-ai/dsh-client-runtime` 包在 0.1.2 **删除**——
+   - `ClientContext` → 改从 `@deepseek-ai/cordis` 导入（`import type { Context as ClientContext }`，官方所有 client 插件同款）
+   - `SettingsScope`/`SettingsScopeSpec` → 改从 `@deepseek-ai/dsh-client-ui-settings/client` 导入（服务名 `settingsScope` + 方法签名 bind/getSnapshot/subscribe/set/unset 不变）
+   - 涉及文件：`src/client/index.ts`、`src/client/image-fallback-api.ts`、`src/client/SettingsSection.tsx`（+ `file-fallback-api.ts`）
+2. **⚠️ workspace RPC 方法域（gateway 工作区白名单）**：api-proxy `workspace.list` → Typert Remote `workspace/*` 命名空间——`gateway.ts:169-170`（method 解析）/203（list 过滤）/258（create 校验）+ `filterWorkspaceList` 响应结构需按新 method 名与 Typert Remote 结果形态适配；client-request 信封类型保留但方法域重构
+3. **⚠️ api 层 Typert Remote 化（间接）**：dsp 自有 /serenity/* 走 webServer.register 免疫；client 直调 DSH RPC（fetchWorkspaces 信封）需按新方法域核对
+
+### 建议项（非阻塞，4 条）
+
+4. **slot 注册包 `ctx.slots.inject`**：官方新惯用法 `ctx.slots.inject(name, () => ctx.slots.register(...))`（等待声明、防 HMR 声明消失）；dsp 当前直接 register 能工作（三个目标槽 header.actions/input.dock/settings.section 在 0.1.2 全部保留，kind/scope 不变）
+5. **`dsh.plugin.json` 非 harness 识别格式**：全仓 grep 零命中——harness 只消费 package.json `dsh.bundle.patch`/`dsh.profile.bundles` + `cordis.patch.yml`；`contributes.tools` 概念不存在（工具走 ctx.tools.register）。应标注为自维护元数据或并入 package.json `dsh` 段（不影响装配）
+6. **peerDependencies 版本范围**：0.1.0-rc.5 → 0.1.2-alpha.1（正式发布时）
+7. **locale-owned UI copy**（可选）：官方 `verify-client-ui-i18n` 拒绝硬编码文案；dsp client 有中文字面量，第三方插件不强制，若未来进官方装配面需迁移
+
+### 已排除风险（3 处，零改动）
+
+- **session surfaceOp 强制校验**：dsp 全部 append 仅 rebuild.ts 两处（compaction/prune log-only 正确无 marker + user/message 带 surfaceOp+sourceEventSeqs 全覆盖）——**完全合规**（子代理双确认）
+- **tools.restrict run_code 保留名**：dsp SAFE_MODE_DENY_TOOLS 只 deny bash——不触发
+- **skill list Observation 新形态**：纯数组仍合法（联合类型）
 
 **建议**：
 - 0.1.2-alpha.1 是**源码形态（未发布 npm）**，本地 rc.8 不受影响，**dsp v1.24.9 保持正常运行**——无需立即升级
-- 待官方正式发布（rc.9+/0.1.x）后，按上述 4 点做一次适配轮（预估小工作量：gateway method 名 + append 复查）
-- **dsp 的 client 依赖漂移防护**（未解决 #3）：升级时需复查 `dsh-client-ui-slots/primitives` 依赖（0.1.2 已确认 ui-slots 存续）
+- 待官方正式发布（rc.9+/0.1.x）后做一次适配轮：**client half 3 文件 import 面 + gateway workspace method 适配**——预估小工作量（编译面改动为主）
+- **dsp 的 client 依赖漂移防护**（未解决 #3）：升级时需复查 client 依赖（0.1.2 已确认 ui-slots/ui-primitives/ui-conversation/ui-settings 全部存续；**dsh-client-runtime 删除**是唯一消失包）
 - **知识 CCC ACP 需求**：0.1.2 官方 `--profile acp` 是新底座选项，纳入方案讨论（docs/knowledge-ccc-release-research.md）
 
-## 7. 待子代理合并
+## 7. 子代理结论（已合并）
 
-- 子代理 1（node 服务面）：10 个 API 面深度签名比对（已由主线程覆盖大部分，子代理补充细节）
-- 子代理 2（client+事件契约）：client 包 + session 事件契约 + agent 事件 + preset 装配（主线程已覆盖，子代理补充）
+### 子代理 1（node 服务面，10 面）— 全部兼容，零改动
+
+webServer（register/port）/ sessions（get/list/header.cwd）/ agents.create（CreateAgentOptions 完全匹配 handyman.ts）/ sessionTitle.rename / settings（installSettingsSection 签名一致 + describe 全量暴露）/ shellEnv（BashEnvContributor + DshEnvironmentKey）/ skills.registerProvider（SkillCandidate 字段全匹配 opencode-skills.ts）/ systemPrompt.section（scoped 同名 shadow 保留）/ tools（register/guard/restrict/get/defineTool 签名不变）/ ctx.get 四服务（tokenMeter.estimateMessage / sessionProjections.contextPressure / codeRuntime / agentPresets.composedPreset+composeFrom）——**全部签名兼容**。
+
+### 子代理 2（client + 事件契约）— 1 编译级破坏 + 其余兼容
+
+- **破坏**：`@deepseek-ai/dsh-client-runtime` 包删除（ClientContext → cordis Context；SettingsScope → ui-settings/client）
+- **兼容**：session.append surfaceOp 强制（dsp 已达标）、createUserMessage/deriveEventMessage、compaction 事件链、全部 agent 事件（session-start/pre-step/tools×2/request-error/turn-stopping/status）、AgentHandle.followup/steer、决策类型、tools.guard/restrict、agentPresets.composeFrom、profile/bundle/patch 装配、`__ModuleLoader__` client 加载、`dsh.client` manifest、ui-primitives/ui-conversation/ui-settings 导出
+- **新能力**：webhook 包（ctx.webhookRuntime + webhook-github 签名适配器——可与 F1 网关互补的无人值守外部入口）、code-runtime PTC 模式、Remote BFF 迁移产物（dsp 用的 session.prompt/conversation.draftImages 都在 Remote 之上，签名未变）
+
+### 事件契约面（双子代理交叉确认）— 全部兼容
+
+`agent/status`（fused dispatcher 注入 agent，dsp 的 payload.agent===agent 仍成立）/ `agent/turn-stopping` / `agent/session-start` / `agent/pre-step` / `tools/post-execute` / `session/event(session,event)` / `compaction/prune`+surfaceOp replace 的 shadow-price 协议——**完整保留**。
