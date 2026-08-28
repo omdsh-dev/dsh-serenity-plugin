@@ -54,7 +54,7 @@ LLM / Runtime / Tools (the cognitive medium — replaceable)
 | **Any-file paste auto-save** | Pasting a non-image file → auto-saved to `_tmp/files_from_user/` (executable extensions blocked + 10MB cap + filename sanitized) + the input draft gets a path note (sent with the message) → the agent processes it with CCC MSMs (PDF extraction / archive unpack / spreadsheet parsing) |
 | **persona easter-egg mode** | Plugin settings can replace the output/instruction-following constraints of the ACC system prompt (EAP block + MSM principles) — a configured persona text replaces the defaults; unconfigured, behavior is exactly the default |
 | **Compaction retention** | Re-injects ACC identity after `compaction/end` (compaction never loses CCC constraints) |
-| **WebUI status badge + panels** | Session-header status badge (**Scheme-O shield**: green dot = Serenity active, always green + shield = SAFE state amber/green + quick-toggle slider) + click to expand the CCC status card; DSH settings panel hosts plugin switches/thresholds/external access |
+| **WebUI status badge + panels** | Session-header status badge (**capsule v1.24.10**: 999px full-round pill + always-green dot + SAFE shield slider with emerald gradient + Mac-style quick toggle) + click to open a self-drawn popover (CCC status card); DSH settings panel hosts plugin switches/thresholds/external access |
 | **Activation gating** | Everything activates only inside a CCC directory marked with `.serenity`; zero effect on DSH behavior elsewhere |
 
 ## Why MSM beats bash — why safe-mode exists
@@ -281,7 +281,7 @@ Eight blocks in the same order (ACC → Metaphor → Principles → CCE → EAP 
 
 ## WebUI
 
-- **Session-header status badge** (`conversation.session.header.actions` slot): **Scheme-O shield** (v1.24.2~5) — green dot = Serenity active (always green) + shield = SAFE state (amber hollow = OFF reminder / green = ON reassuring) + **quick-toggle slider** (click to flip safe-mode) + click the card to expand the CCC status card (root path / handyman model / guard info / runtime state)
+- **Session-header status capsule** (`conversation.session.header.actions` slot): **capsule** (v1.24.10, aligned with the OcgoDockEntry pill) — 999px full-round + translucent bg-layer-2 background; 7px always-green dot (= Serenity online, independent of SAFE) + `Serenity vX.Y.Z` (monospace, sink-aligned) + 1px divider + shield SAFE (ON = emerald gradient `#0ba875→#059669` / OFF = gray) + **Mac-style quick-toggle slider** (24×13 track + 11px gray-white icon-less thumb + cubic-bezier easing); clicking the card opens a **self-drawn popover** (340px top-right card, outside-click/Escape closes: root path / handyman model / guard info / safe-mode big toggle / runtime state); ships with the Windows compatibility patch set (v1.24.10: bun detection / registry protection / path-traversal defense, 8 files)
 - **DSH settings section** (`settings.section` slot): Serenity page — 3 feature switches + threshold + "External Access" block (listen address/port + account CRUD + QR-code TOTP binding + workspace allowlist chips + Secure Cookie)
 - **Image auto-fallback** (`conversation.input.dock` slot): silent recovery when the model rejects images (upload + clear rail + resend as text)
 - **Any-file auto-save** (`conversation.input.dock` slot): pasting a non-image file → auto-saved to `_tmp/files_from_user/` + draft path note (sent with the message)

@@ -54,7 +54,7 @@ LLM / Runtime / Tools（认知介质，可替换）
 | **任意文件粘贴自动落盘** | 非图片文件粘贴 → 自动落盘 `_tmp/files_from_user/`（可执行扩展名拒绝 + 10MB 上限 + 文件名脱敏）+ 输入框 draft 追加路径提示（随消息进对话）→ agent 经 CCC 自有 MSM 处理（PDF 提取 / 压缩包解压 / 表格解析） |
 | **persona 彩蛋模式** | 插件设定中可替换 ACC 系统提示词的输出约束/指令遵循约束部分（EAP 块 + MSM 原则段）——配置后用户文本替代原本；未配置完全默认零影响 |
 | **压缩保留** | `compaction/end` 后重注入 ACC 身份（上下文压缩不丢失 CCC 约束） |
-| **WebUI 状态徽章 + 高级面板** | 会话头部状态徽章（**方案 O 盾牌版**：绿点=激活恒绿 + 盾牌=SAFE 状态琥珀/绿 + 滑块快速开关）+ 点击展开 CCC 状态卡；DSH 设置面板承载插件开关/阈值/外部访问 |
+| **WebUI 状态徽章 + 高级面板** | 会话头部状态徽章（**胶囊版** v1.24.10：999px 全圆胶囊 + 绿点恒亮 + SAFE 盾牌滑块 emerald 渐变 + Mac 风格快速开关）+ 点击展开自绘 popover（CCC 状态卡）；DSH 设置面板承载插件开关/阈值/外部访问 |
 | **激活门控** | 所有能力只在 `.serenity` 标记的 CCC 目录内生效；其他目录对 DSH 原生行为零影响 |
 
 ## 核心哲学：为什么 MSM 比 bash 强，为什么需要安全模式
@@ -126,7 +126,7 @@ dsh-serenity-plugin install --scope ccc
 dsh-serenity-plugin status
 ```
 
-插件加载后，进入 CCC 目录的 DSH 会话自动获得：11 个 ACC 工具 + 机械守卫 + ACC 身份注入 + first-anchor 锚定 + 入口 skill 系统提示 + Trajectory Steward 提醒。WebUI 会话头部出现 Serenity 状态徽章（方案 O 盾牌版：绿点 + 盾牌 + 滑块快速开关 + 点击展开详情）。
+插件加载后，进入 CCC 目录的 DSH 会话自动获得：11 个 ACC 工具 + 机械守卫 + ACC 身份注入 + first-anchor 锚定 + 入口 skill 系统提示 + Trajectory Steward 提醒。WebUI 会话头部出现 Serenity 状态胶囊（v1.24.10：绿点恒亮 + SAFE 盾牌滑块 + 点击展开自绘 popover 详情）。
 
 **开启安全模式**：点击 WebUI 徽章中的 safe-mode 开关 → bash 从工具列表消失 → agent 走 MSM 白名单通道。
 
@@ -294,7 +294,7 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 
 ## WebUI
 
-- **会话头部状态徽章**（`conversation.session.header.actions` 槽）：**方案 O 盾牌版**（v1.24.2~5）——绿点 = Serenity 激活（恒绿）+ 盾牌 = SAFE 状态（琥珀空心 = OFF 提醒 / 绿 = ON 安心）+ **滑块快速开关**（点击直切安全模式）+ 点击卡片展开 CCC 状态卡（根路径 / handyman 模型 / 守卫信息 / 运行状态）
+- **会话头部状态胶囊**（`conversation.session.header.actions` 槽）：**胶囊版**（v1.24.10，对齐 OcgoDockEntry pill）——999px 全圆 + 半透明 bg-layer-2 背景；绿点 7px 恒亮（= Serenity 在线，不随 SAFE 变）+ `Serenity vX.Y.Z`（版本 monospace 下沉对齐）+ 1px 分隔线 + 盾牌 SAFE（ON = emerald 渐变 `#0ba875→#059669` / OFF = 灰）+ **Mac 风格滑块快速开关**（24×13 轨道 + 11px 灰白 thumb 无图标 + cubic-bezier 平滑）；点击卡片展开**自绘 popover**（340px 右上角卡片，外点/Escape 关闭：根路径 / handyman 模型 / 守卫信息 / 安全模式大开关 / 运行状态）；配套 Windows 兼容性补丁（v1.24.10：bun 探测 / 注册表保护 / 路径穿越防御等 8 文件）
 - **DSH 设置面板 section**（`settings.section` 槽）：Serenity 页——三功能开关 + 阈值 + 「外部访问」区块（监听地址/端口 + 登录账号 CRUD + TOTP 二维码绑定 + 工作区白名单 chips + Secure Cookie）
 - **图片自动落盘**（`conversation.input.dock` 槽）：模型不支持图片时静默补救（上传 + 清 rail + 文本重发）
 - **任意文件自动落盘**（`conversation.input.dock` 槽）：非图片文件粘贴 → 自动落盘 `_tmp/files_from_user/` + draft 追加路径提示（随消息进对话）
