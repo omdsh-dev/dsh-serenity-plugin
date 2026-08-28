@@ -1,3 +1,16 @@
+## v1.24.12 — 2026-08-28（session_rebuild 认知沉淀协议：rebuild 前修订 skill / 新建 skill 写 SESSION 提案，S142 用户需求）
+
+**Scope:** 用户需求——在提示词中告知 LLM：rebuild 前若掌握了重要、值得沉淀的认知，需修订宁静号 CCC 的现有 skill（eap 结构化）；若需新建 skill，则写入 SESSION 中供用户参考。**用户审核裁决**：只在 [TRAJECTORY] 提醒中写（不加 Session 块预声明/锚点/工具描述）；简短留自由度（不提"加载 eap 工具"——模型自知；只说修订 skill + 新建 skill 落 SESSION）；**新建 skill 一律不自行创建**（用户裁决）。
+
+### 变更
+- **keeper.ts `rebuildReminderText`**（仅此一处，普通 + 升级两版）：
+  - **[TRAJECTORY] 普通版**：ACT NOW 前插入——`Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself.`
+  - **[TRAJECTORY-ESCALATED] 升级版**：STOP 后插入紧凑句——`preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call the session_rebuild tool immediately.`（不拖慢强制 rebuild）
+- **不引入新机制**：沉淀/提案均为 LLM 既有工具面（eap 工具 + read/write/edit + session 工具）——纯提示词引导，零代码面扩大
+
+### 测试
+- keeper.test +2 断言组：普通版（`revise the relevant existing skill of this CCC` / `write a short proposal into SESSION.md` / `do not create it yourself`）、升级版（`preserve valuable cognition` / `new-skill proposal into SESSION.md`）；rebuild.test F2 断言 +2（`revise the relevant existing skill` / `SESSION.md`）——**42 files / 476 tests 全绿**；typecheck ✓（node + client）→ build ✓（132990 B）
+
 ## v1.24.11 — 2026-08-28（session_rebuild 会话定位稳固化：重建后新会话准确知道从哪个 SESSION 恢复，S142 用户需求）
 
 **Scope:** 用户反馈——session_rebuild 会话清空后继续，SESSION.md 的目录**偶尔拿不准**，要求稳固方案确保「继续的会话在开始准确知道从哪个 SESSION 恢复」。**根因三链**：① `queueRebuild` 的 fallback 是**未校验的虚假路径** `AGENT_SESSIONS/SESSION.md`（内存活跃会话缺失时必现）② 重建锚点的轨迹行 `- Persistent trajectory (SESSION.md, unmoved): <rel>` **不是恢复机制可解析的格式**（`parseSessionContextFromEvents` 只认 `SESSION.md path:`）→ 仅靠锚点的会话（从未显式 `session use`）无法从 events 恢复 ③ 恢复机制要求 `[SESSION CONTEXT]` 标记与路径同串且**无存在性校验** → 无 use 标记的历史无法恢复 + 陈旧标记可能恢复出已归档/错误目录。

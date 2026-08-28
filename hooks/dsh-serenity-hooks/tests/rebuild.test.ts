@@ -303,6 +303,9 @@ describe('F2: rebuildReminderText（轨迹跟踪器提示，v1.22.1 命名）', 
     expect(t).toContain('persistent body')
     expect(t).toContain('rebuildable carrier')
     expect(t).toContain('session_rebuild')
+    // v1.24.12 沉淀协议（S142 用户需求）：rebuild 前修订 skill / 新建 skill 写 SESSION 提案
+    expect(t).toContain('revise the relevant existing skill')
+    expect(t).toContain('SESSION.md')
   })
 })
 

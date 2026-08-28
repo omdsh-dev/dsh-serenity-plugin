@@ -81,6 +81,10 @@ export function reminderText(code: string, score: number): string {
  * （"[TRAJECTORY] Context usage at N%..."），模型当成系统状态而非行动请求，可一直忽略。
  * 新文案 = 明确的行动指令（ACT NOW + 何时执行 + 必须执行），对齐 steward ACK 协议风格。
  *
+ * v1.24.12 沉淀协议（S142 用户需求）：rebuild 前若掌握值得沉淀的认知——修订 CCC 现有
+ * skill（eap 结构化）；若需新建 skill——**不自行创建**，写提案进 SESSION.md 供用户参考。
+ * 简短留自由度（不提"加载 eap 工具"，模型自知；只说修订 skill + 新建 skill 落 SESSION）。
+ *
  * escalated=true（v1.23.3）：连续多轮超阈值仍未 rebuild → 升级强制语气
  * （STOP and rebuild now，持续注入直到调用 session_rebuild）。
  */
@@ -88,9 +92,9 @@ export function rebuildReminderText(ratio: number, threshold: number, escalated 
   const pct = (ratio * 100).toFixed(0)
   const thr = (threshold * 100).toFixed(0)
   if (escalated) {
-    return `[TRAJECTORY-ESCALATED] Context usage at ${pct}% (threshold ${thr}%) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step and call the session_rebuild tool immediately. The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
+    return `[TRAJECTORY-ESCALATED] Context usage at ${pct}% (threshold ${thr}%) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call the session_rebuild tool immediately. The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
   }
-  return `[TRAJECTORY] Context usage at ${pct}% (threshold ${thr}%). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool to clear and rebuild this conversation — the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
+  return `[TRAJECTORY] Context usage at ${pct}% (threshold ${thr}%). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool to clear and rebuild this conversation — the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */

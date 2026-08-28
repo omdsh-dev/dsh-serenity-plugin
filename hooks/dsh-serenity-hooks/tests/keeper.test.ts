@@ -73,6 +73,10 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('ACT NOW')
     expect(text).toContain('session_rebuild')
     expect(text).toContain('not an option')
+    // v1.24.12 沉淀协议：rebuild 前修订现有 skill（eap 结构化）；新建 skill 写 SESSION 提案不自行创建
+    expect(text).toContain('revise the relevant existing skill of this CCC')
+    expect(text).toContain('write a short proposal into SESSION.md')
+    expect(text).toContain('do not create it yourself')
     // v1.23.3：不向 LLM 植入阈值建议（设定是用户自由）
     expect(text).not.toContain('0.75~0.9')
   })
@@ -84,6 +88,9 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('STOP')
     expect(text).toContain('session_rebuild')
     expect(text).toContain('persists until you call session_rebuild')
+    // v1.24.12：升级版同样带紧凑沉淀指令（修订 skill / 新建 skill 提案进 SESSION）
+    expect(text).toContain('preserve valuable cognition')
+    expect(text).toContain('new-skill proposal into SESSION.md')
   })
 
   it('readContextPressure：sessionProjections 装配时读取投影', () => {
