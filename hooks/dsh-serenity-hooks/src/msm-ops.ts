@@ -17,6 +17,7 @@ import {
 import { execFileSync, spawnSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join, dirname, relative, resolve } from 'node:path'
+import { platform } from 'node:process'
 import { classifyPath } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
 import type { JsonValue } from './json.js'
@@ -24,6 +25,28 @@ import type { JsonValue } from './json.js'
 const execFileAsync = promisify(execFile)
 
 export const MSM_TIMEOUT_MS = 600_000
+
+// ── Windows bun 真路径探测：裸 'bun'/'.cmd' 在 CreateProcess 下不可 spawn（EINVAL/ENOENT）──
+// 优先定位真 bun.exe（PE）绝对路径 → 零 shell、argv 保真；命中失败返回 null → 走 npx shell 兜底。
+const BUN_EXE_CANDIDATES: ReadonlyArray<() => string> = [
+  // 官方安装器：~\.bun\bin\bun.exe
+  () => join(process.env['USERPROFILE'] ?? process.env['HOME'] ?? '', '.bun', 'bin', 'bun.exe'),
+  // npm 包装包：%APPDATA% 或 %LOCALAPPDATA% 下 node_modules\bun\bin\bun.exe
+  () => join(process.env['APPDATA'] ?? '', 'npm', 'node_modules', 'bun', 'bin', 'bun.exe'),
+  () => join(process.env['LOCALAPPDATA'] ?? '', 'npm', 'node_modules', 'bun', 'bin', 'bun.exe'),
+]
+let bunExeCache: string | null | undefined
+function bunExecutablePath(): string | null {
+  if (bunExeCache !== undefined) return bunExeCache
+  if (platform !== 'win32') { bunExeCache = 'bun'; return bunExeCache }
+  for (const cand of BUN_EXE_CANDIDATES) {
+    try {
+      if (existsSync(cand())) { bunExeCache = cand(); return bunExeCache }
+    } catch { /* 单个候选失败继续 */ }
+  }
+  bunExeCache = null
+  return null
+}
 
 /** CCC 名：从 .serenity 首行解析（对齐 osp readSerenityCccName） */
 export function readCccName(root: string): string | null {
@@ -304,11 +327,16 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)
       const p = protocolResult(protocol)
       if (p !== undefined) return p
-      // bun 优先（可直跑 TS），npx tsx 回退；注入 SERENITY_* env（对齐 osp）；
-      // Windows 无 bun 时 spawnSync('bun') 抛 EINVAL 非 ENOENT → isBunMissing 统一处理（Windows 审计问题 5）
-      let r = spawnSync('bun', [entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], env: buildMsmEnv(root) })
+      // bun 优先（可直跑 TS），npx shell 兜底；注入 SERENITY_* env（对齐 osp）。
+      // Windows 修复：裸 'bun'/npx.cmd 不可被 CreateProcess spawn（ENOENT/EINVAL）——
+      // 先探测真 bun.exe 绝对路径（零 shell、argv 保真），命中失败才走 npx via shell。
+      const baseOpts: import('node:child_process').SpawnSyncOptionsWithStringEncoding = { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], env: buildMsmEnv(root) }
+      const bunBin = bunExecutablePath()
+      let r = bunBin
+        ? spawnSync(bunBin, [entry.path, ...businessArgs], baseOpts)
+        : { error: { code: 'ENOENT' } as NodeJS.ErrnoException, status: null, stdout: '', stderr: '', pid: 0, signal: null }
       if (r.error && isBunMissing(r.error as NodeJS.ErrnoException)) {
-        r = spawnSync(NPX_BIN, ['tsx', entry.path, ...businessArgs], { cwd: root, encoding: 'utf-8', timeout: MSM_TIMEOUT_MS, stdio: ['pipe', 'pipe', 'pipe'], env: buildMsmEnv(root) })
+        r = spawnSync(NPX_BIN, ['tsx', entry.path, ...businessArgs], { ...baseOpts, shell: platform === 'win32' })
       }
       return msmExecResult(entry.name, r.status ?? 2, r.stdout ?? '', r.stderr ?? '', fmtJson, hasHelp)
     }
@@ -331,8 +359,9 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
         throw new Error(`MSM already registered: "${name}"`)
       }
       const regPath = registryPathFor(root, skill)
-      // 对齐 osp：保留原注册表格式（数组 vs v1 wrapper）
-      const isV1Wrapped = existsSync(regPath) && !Array.isArray(JSON.parse(readFileSync(regPath, 'utf-8')))
+      // 对齐 osp：保留原注册表格式（数组 vs v1 wrapper）；剥 BOM 防 Windows 编辑器 \uFEFF（审计#13）
+      const raw = existsSync(regPath) ? readFileSync(regPath, 'utf-8').replace(/^\uFEFF/, '') : ''
+      const isV1Wrapped = raw !== '' && !Array.isArray(JSON.parse(raw))
       const entries = existsSync(regPath) ? parseRegistry(readFileSync(regPath, 'utf-8')) : []
       // flags/usage 入参（对齐 osp：可选，缺省空数组 / 自描述 usage）
       let flags: MsmFlag[] | undefined
@@ -365,7 +394,9 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
     case 'deregister': {
       const name = args.name ?? ''
       for (const regPath of findRegistries(root)) {
-        const isV1Wrapped = !Array.isArray(JSON.parse(readFileSync(regPath, 'utf-8')))
+        // 剥 BOM 防 Windows 编辑器 \uFEFF（审计#13，与 parseRegistry 一致）
+        const dRaw = readFileSync(regPath, 'utf-8').replace(/^\uFEFF/, '')
+        const isV1Wrapped = !Array.isArray(JSON.parse(dRaw))
         const entries = parseRegistry(readFileSync(regPath, 'utf-8'))
         const idx = entries.findIndex((e) => e.name === name)
         if (idx >= 0) {
@@ -391,9 +422,11 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       const entries = loadMsmEntries(root)
       const issues: { name: string; check: string; detail: string }[] = []
       // DC-M3 正向：扫描 skills scripts/ 下未注册的脚本（对齐 osp 脚本驱动）
-      const registeredPaths = new Set(entries.map((e) => e.path))
+      // win32 路径形式统一（正斜杠 + 大小写）避免误报（审计问题 15）
+      const norm = (p: string): string => p.split('\\').join('/').toLowerCase()
+      const registeredPaths = new Set(entries.map((e) => norm(e.path)))
       for (const scriptPath of scanSkillScripts(root)) {
-        if (!registeredPaths.has(scriptPath)) {
+        if (!registeredPaths.has(norm(scriptPath))) {
           issues.push({ name: scriptPath, check: 'M3', detail: 'script not registered in mech-registry' })
         }
       }
@@ -538,27 +571,28 @@ export async function runMsmAsync(root: string, args: MsmArgs): Promise<JsonValu
   const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)
   const p = protocolResult(protocol)
   if (p !== undefined) return p
-  // bun 优先（可直跑 TS），npx tsx 回退；注入 SERENITY_* env（对齐 osp）
+  // bun 优先（可直跑 TS），npx shell 兜底；注入 SERENITY_* env（对齐 osp）。
+  // Windows 修复（审计问题 5）：探测真 bun.exe 绝对路径（零 shell），避免裸 'bun' ENOENT 与 npx.cmd EINVAL。
+  const bunBin = bunExecutablePath()
+  const baseOpts = {
+    cwd: root,
+    encoding: 'utf-8' as const,
+    timeout: MSM_TIMEOUT_MS,
+    maxBuffer: 64 * 1024 * 1024,
+    env: buildMsmEnv(root),
+  }
   try {
-    const r = await execFileAsync('bun', [entry.path, ...businessArgs], {
-      cwd: root,
-      encoding: 'utf-8',
-      timeout: MSM_TIMEOUT_MS,
-      maxBuffer: 64 * 1024 * 1024,
-      env: buildMsmEnv(root),
-    })
-    return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson, hasHelp)
+    if (bunBin) {
+      const r = await execFileAsync(bunBin, [entry.path, ...businessArgs], baseOpts)
+      return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson, hasHelp)
+    }
+    // 无 bun：直接走 npx shell 兜底
+    throw { code: 'ENOENT' } as NodeJS.ErrnoException
   } catch (e) {
     const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean }
     if (isBunMissing(err)) {
       try {
-        const r = await execFileAsync(NPX_BIN, ['tsx', entry.path, ...businessArgs], {
-          cwd: root,
-          encoding: 'utf-8',
-          timeout: MSM_TIMEOUT_MS,
-          maxBuffer: 64 * 1024 * 1024,
-          env: buildMsmEnv(root),
-        })
+        const r = await execFileAsync(NPX_BIN, ['tsx', entry.path, ...businessArgs], { ...baseOpts, shell: platform === 'win32' })
         return msmExecResult(entry.name, 0, r.stdout, r.stderr, fmtJson, hasHelp)
       } catch (e2) {
         const err2 = e2 as NodeJS.ErrnoException & { stdout?: string; stderr?: string; killed?: boolean }

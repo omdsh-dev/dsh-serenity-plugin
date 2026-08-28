@@ -131,7 +131,15 @@ function validateWritePath(root: string, target: string): string {
   // 保护 mech-registry.json — 只能通过 acc_msm register/deregister 注册/注销。
   // relative 归一化反斜杠（Windows：resolveInside 返回反斜杠路径，正斜杠字面量永不匹配 → 保护失效，见问题 8）
   const rel = relative(root, absPath).split('\\').join('/')
-  if (rel.endsWith('/mech-registry.json') && rel.includes('/.opencode/skills/')) {
+  const relCi = process.platform === 'win32' ? rel.toLowerCase() : rel
+  // 修复：相对 root 的 rel 通常为 `opencode/skills/...`（无前导点），
+  // 原 `includes('/.opencode/skills/')` 要求前导 `/` 导致相对路径永不匹配 → 保护对
+  // touch/append 等相对路径写无效。改为匹配 `.../skills/.../mech-registry.json` 形态
+  // （含 references 目录），兼容带点/不带点 + win32 大小写不敏感。
+  if (
+    relCi.endsWith('/mech-registry.json') &&
+    /(^|\/)(opencode|\.opencode)\/skills\//.test(relCi)
+  ) {
     throw new Error(
       `cc-fs: refusing to directly modify mech-registry.json — use acc_msm register/deregister instead`,
     )
@@ -300,6 +308,8 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       if (!args.src || !args.dst) throw new Error('mv requires src + dst')
       const srcAbs = validateWritePath(root, args.src)
       const dstAbs = validateWritePath(root, args.dst)
+      assertNotProtected(root, srcAbs, `mv src ${args.src}`)
+      assertNotProtected(root, dstAbs, `mv dst ${args.dst}`)
       if (!existsSync(srcAbs)) throw new Error(`mv: source not found: ${args.src}`)
       if (existsSync(dstAbs)) throw new Error(`mv: destination already exists: ${args.dst}`)
       const parentDir = dirname(dstAbs)
@@ -311,6 +321,8 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       if (!args.src || !args.dst) throw new Error('cp requires src + dst')
       const srcAbs = validateWritePath(root, args.src)
       const dstAbs = validateWritePath(root, args.dst)
+      assertNotProtected(root, srcAbs, `cp src ${args.src}`)
+      assertNotProtected(root, dstAbs, `cp dst ${args.dst}`)
       if (!existsSync(srcAbs)) throw new Error(`cp: source not found: ${args.src}`)
       if (existsSync(dstAbs)) throw new Error(`cp: destination already exists: ${args.dst}`)
       const stat = statSync(srcAbs)
@@ -359,9 +371,16 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
           // explorer.exe 是 GUI 子系统进程——即便成功也常返回非零退出码，
           // 经 execFileSync 捕获会被误判 failure。改为 spawn 分离 + unref（fire-and-forget）。
           // 文件 case：/select 需**单个合并参数** `/select,<abs>`（分开传 `/select,` + 路径会
-          // 把 /select, 当空路径、文件当目录打开——Windows 审计问题 7）
-          const winArgs = statSync(absPath).isDirectory() ? [absPath] : [`/select,${absPath}`]
-          const child = spawn('explorer', winArgs, { detached: true, stdio: 'ignore', windowsHide: false })
+          // 把 /select, 当空路径、文件当目录打开——Windows 审计问题 7）。
+          // explorer `/select,` 对含空格/逗号路径按词拆分（Win10/11 长期缺陷，引号也无效）——
+          // 含空格/逗号路径退化到打开所在目录（对齐 linux 分支，审计问题 7 补充）。
+          const stat = statSync(absPath)
+          const winPath = stat.isDirectory()
+            ? absPath
+            : /[\s,]/.test(absPath)
+              ? dirname(absPath)
+              : `/select,${absPath}`
+          const child = spawn('explorer', [winPath], { detached: true, stdio: 'ignore', windowsHide: false })
           child.on('error', () => {
             /* explorer 缺失/启动失败：GUI 打开尽力而为，不抛错 */
           })
@@ -408,7 +427,8 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
             .replace(/\*/g, '.*')
             .replace(/\?/g, '.') + '$'
           try {
-            return new RegExp(regexStr).test(name)
+            // win32 大小写不敏感 glob：`*.PNG` 应匹配 assistant.png
+            return new RegExp(regexStr, platform() === 'win32' ? 'i' : undefined).test(name)
           } catch {
             return name.includes(pattern)
           }

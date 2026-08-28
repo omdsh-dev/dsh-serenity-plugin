@@ -41,8 +41,16 @@ function scanSerenityDirs(skillsRoot: string): string[] {
     .sort()
 }
 
+/** 防穿越：skill 名必须是简单目录名（拒绝分隔符与 `..`/`.` 路径段） */
+function isSafeSkillName(name: string): boolean {
+  if (name.length === 0) return false
+  if (name.includes('/') || name.includes('\\')) return false
+  return !name.split(/[/\\]/).some((seg) => seg === '..' || seg === '.')
+}
+
 /** 按名在两个 skills 根下定位 SKILL.md（.dsh/skills 优先，其次 .opencode/skills） */
 function findSkillMd(root: string, name: string): string | null {
+  if (!isSafeSkillName(name)) return null
   for (const base of ['.dsh', '.opencode']) {
     const p = resolve(root, base, 'skills', name, 'SKILL.md')
     if (existsSync(p)) return p

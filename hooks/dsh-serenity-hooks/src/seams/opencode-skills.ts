@@ -28,7 +28,7 @@ export function registerOpencodeSkills(ctx: Context): void {
       const candidates: SkillCandidate[] = []
       for (const dir of listOpencodeSkillDirs(root)) {
         const skill = loadOpencodeSkill(dir)
-        if (!skill.meta.name) continue
+        if (!skill || !skill.meta.name) continue
         candidates.push({
           name: skill.meta.name,
           description: skill.meta.description || '(opencode skill)',
@@ -47,6 +47,7 @@ export function registerOpencodeSkills(ctx: Context): void {
     async get(candidate: SkillCandidate): Promise<SkillDefinition | undefined> {
       const dir = candidate.locator as string
       const skill = loadOpencodeSkill(dir)
+      if (!skill) return undefined
       return {
         name: skill.meta.name,
         description: skill.meta.description || candidate.description,

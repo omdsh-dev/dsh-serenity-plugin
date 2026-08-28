@@ -193,7 +193,7 @@ export function readBlacklist(root: string, paths: string[] = DEFAULT_SERENITY_C
   return out;
 }
 
-/** 匹配黑名单规则；命中返回条目，未命中返回 null。前缀匹配 / regex: 前缀（对齐 osp） */
+/** 匹配黑名单规则；命中返回条目，未命中返回 null。前缀匹配 / regex: 前缀（对齐 osp）。Windows：规则反斜杠归一化为正斜杠与 rel 对齐 */
 export function matchBlacklist(relPath: string, rules: BlacklistRule[]): BlacklistRule | null {
   for (const rule of rules) {
     if (rule.pattern.startsWith('regex:')) {
@@ -202,8 +202,9 @@ export function matchBlacklist(relPath: string, rules: BlacklistRule[]): Blackli
       } catch {
         /* 非法正则跳过 */
       }
-    } else if (relPath.startsWith(rule.pattern)) {
-      return rule;
+    } else {
+      const pat = rule.pattern.split('\\').join('/')
+      if (relPath.startsWith(pat)) return rule;
     }
   }
   return null;

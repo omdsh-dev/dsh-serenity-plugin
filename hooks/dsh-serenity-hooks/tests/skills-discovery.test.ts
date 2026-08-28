@@ -50,6 +50,19 @@ describe('skills-discovery: 入口 skill 发现', () => {
     expect(truncateContent('abc', 5)).toBe('abc')
     expect(truncateContent('abcdefgh', 5)).toContain('truncated')
   })
+
+  it('恶意 marker 名（路径穿越 ../）被拒 → 回退空', () => {
+    writeFileSync(join(dir, '.serenity'), '../evil')
+    const s = findEntrySkill(dir)
+    expect(s).toBeNull()
+  })
+
+  it('恶意指针名（含 \\ 分隔符）被拒', () => {
+    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'entry-skill'), '..\\..\\evil')
+    const s = findEntrySkill(dir)
+    expect(s).toBeNull()
+  })
 })
 
 describe('skills-discovery: 全量入口发现（加强版）', () => {

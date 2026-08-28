@@ -23,12 +23,13 @@ export interface HandymanProgress {
   errorMessage?: string
 }
 
-/** label 脱敏（Windows 审计问题 17）：非法字符 → '-'，去尾点/空格，限长 */
+/** label 脱敏（Windows 审计问题 17）：非法字符 → '-'，去尾点/空格，限长（按码点截断，修复代理对切散 U+FFFD） */
 export function sanitizeLabel(label: string): string {
-  return label
+  return [...label
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
-    .replace(/[ .]+$/g, '')
+    .replace(/[ .]+$/g, '')]
     .slice(0, 50)
+    .join('')
 }
 
 export function handymanProgressPaths(root: string, label: string): { md: string; json: string } {

@@ -122,6 +122,10 @@ describe('handyman-ops: guide 指引 + 运行状态列表（WebUI 等待界面�
     expect(sanitizeLabel('a?b*c:d')).toBe('a-b-c-d')
     expect(sanitizeLabel('a.b.')).toBe('a.b')
     expect(sanitizeLabel('x'.repeat(80))).toHaveLength(50)
+    // 按码点截断（审计问题 24）：代理对不切散，无 U+FFFD（toHaveLength 按 UTF-16 单位，emoji 双单位 → 用 [...str] 数码点）
+    expect(sanitizeLabel('a'.repeat(49) + '🎉' + 'b')).toBe('a'.repeat(49) + '🎉')
+    expect([...sanitizeLabel('🎉'.repeat(60))]).toHaveLength(50)
+    expect(sanitizeLabel('🎉'.repeat(60))).not.toContain('\uFFFD')
     // handymanProgressPaths 用清洗后的 label
     const p = handymanProgressPaths(dir, 'a:b/c')
     expect(p.json).toContain('handyman-a-b-c.json')

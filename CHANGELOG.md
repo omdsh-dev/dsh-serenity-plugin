@@ -1,3 +1,30 @@
+## v1.24.10 — 2026-08-28（Windows 兼容性补丁 8 文件全量合并 + 状态胶囊改版，S013 实机交付 + S142 用户设计稿）
+
+**Scope:** 两项合并——① S013 会话（Windows 实机）交付的 **Windows 兼容性补丁**（9 源文件 8 类问题，`docs/overlay-on-1249-src.patch`，实机逐项复测验证：spawn EINVAL / 注册表保护绕过 / mv-cp 毁 CCC / 空格路径 / 大小写 / 反斜杠规则 / emoji 截断 / 穿越防御）；② 用户设计稿「胶囊改版」（对齐 OcgoDockEntry pill）——v1.24.x 状态卡片信息密度高、配色刺眼，重做为迷你胶囊。
+
+### 变更（Windows 兼容性，8 文件）
+- **msm-ops.ts**（🔴 核心：acc_msm Windows spawn EINVAL）——新增 `bunExecutablePath()`：win32 下探测真 bun.exe 绝对路径（`~\.bun\bin` / `%APPDATA%\npm\node_modules\bun\bin` / `%LOCALAPPDATA%\npm\...` 三候选带缓存）→ **零 shell 直跑真 bun（argv 保真）**；`runMsm` 同步分支 + `runMsmAsync` 异步分支统一 `baseOpts`，无 bun 回退走 `npx` **`shell: platform === 'win32'`**（`.cmd` 直 spawn 抛 EINVAL）；register/deregister `isV1Wrapped` **剥 BOM**（`\uFEFF` 防 Windows 编辑器，与 parseRegistry 一致）；check DC-M3 `registeredPaths` **norm 归一**（正斜杠 + 小写，win32 路径形式统一避免误报）
+- **fs-ops.ts**（🔴 安全）——mech-registry 写保护修相对路径失效：`relCi`（win32 小写）+ `/(^|\/)(opencode|\.opencode)\/skills\//`（兼容带点/不带点 + 大小写变体，原 `includes('/.opencode/skills/')` 要求前导斜杠 → 相对路径永不命中）；**mv/cp 分支补 `assertNotProtected`**（原仅 rm 有——`cc_fs mv .serenity x` 单命令毁 CCC）；reveal 含 `[\s,]` 路径退化 `dirname`（explorer /select 按词拆分 Win 长期缺陷）；find glob win32 加 `'i'` flag（`*.PNG` 匹配 `assistant.png`）
+- **ccc.ts**——matchBlacklist 反斜杠规则归一：`rule.pattern.split('\\').join('/')` 后再 startsWith（`\.secrets\` 死规则修复）
+- **handyman-ops.ts**——sanitizeLabel **码点截断**（`[...str].slice(0,50).join('')`；原 slice(0,50) 切散 emoji 代理对 → 文件名 U+FFFD）
+- **skills-discovery.ts**——新增 `isSafeSkillName()`（拒绝 `/`、`\`、`..`、`.` 路径段），findSkillMd 入口守卫（.serenity marker / entry-skill 指针名穿越）
+- **seams/opencode-skills.ts**——`loadOpencodeSkill` 返回 null 空判 2 处（list `!skill ||` + get `if (!skill) return undefined`）
+- **skills/opencode-scan.ts**——`loadOpencodeSkill` try/catch 读失败（EPERM/占用）返回 null，单目录容错
+- **seams/system-prompt.ts**——`HIDDEN_LINES` **去 `g` flag**（`.test()` lastIndex 游移偶发漏滤）
+
+### 变更（胶囊改版，SafeModePanel.tsx/.css）
+- **胶囊形态**：全圆 `border-radius: 999px` + `padding 4px 9px`（无固定 height，内容撑高）+ 半透明 `--dsw-alias-bg-layer-2` 背景（对齐 Ocgo pill）
+- **绿点**：7px 恒亮绿 `state-success-primary`（语义 = Serenity 在线，不随 SAFE 变）；未激活灰
+- **信息层次**：`Serenity`（font-weight 500）+ `v1.24.10`（monospace，`translateY(1px)` 下沉对齐）+ 1px 分隔线（`--dsw-alias-label-tertiary`，两侧紧凑 margin 0 2px）
+- **SAFE 状态**：盾牌 + SAFE 文字（11px，字距 0）用 **`--sp-safe-green` 统一绿家族**（`#0ba875` emerald-550 / deep `#059669`，`:root` 一处改全改）；ON = 盾牌 emerald + SAFE 文字 **emerald 渐变**（`background-clip: text` 质感）；OFF = 灰 `label-secondary`（低姿态提醒）
+- **Mac 风格滑块**：轨道 24×13（ON 绿 / OFF 灰 `border-l2`）、thumb 11px 灰白 `#f2f4f6` **无图标**、`cubic-bezier(0.4,0,0.2,1)` 平滑位移（left 1px ↔ 12px）；**`.sp-switchOn:hover` 同特异性后定义补回**（S013 踩坑：hover (0,2,0) 覆盖 On (0,1,0) → 绿底消失）
+- **官方 Modal → 自绘 popover**：340px 右上角卡片（`z-index: 2000`、深阴影 `0 12px 40px`、bg-module）、**外点 mousedown / Escape 关闭**、内部滚动（max-height calc(100vh-140px)）；同步移除 Modal import（防 ReferenceError）；弹层内容保留（运行环境 / 安全模式大开关 / Handyman 运行 / 配置提示）
+- **import 清理**：移除 `Modal`（IconChevronDownOutline14 / IconWarningOutline16 保留仍用）；CSS 删除死代码 `.sp-modal`/`.sp-tabs*`
+
+### 测试
+- **+3**：opencode-scan（读失败返回 null）、handyman-ops（sanitizeLabel 码点截断：代理对不切散无 U+FFFD，`[...str]` 数码点断言）、skills-discovery（恶意 marker `../evil` + 反斜杠指针穿越被拒）——**42 files / 468 tests 全绿**
+- typecheck ✓（node + client）→ build ✓（lib/client.js 132990 B）
+
 ## v1.24.9 — 2026-08-27（CSRF 登录死循环根治：服务端 token 集合 + 失败页注入，S142 用户实测 debug）
 
 **Scope:** v1.24.8 后仍失败——用户要求 debug。运行日志实证（dsh-crash-investigate logs）：`登录拒绝（CSRF 校验失败）：user=admin ip=192.168.1.232 cookieSecure=off cookieCsrf=present formCsrf=present`（×3）交替 `formCsrf=missing`（×3）。**根因双链闭合**：① 每次 GET 登录页生成新 token **覆盖 cookie**——多标签页/刷新后，早先打开的标签携带旧 form token 提交时与最新 cookie **不匹配**（present/present 死循环）；② 登录失败路径 `loginPageHtml(msg)` **不传 csrf** → 失败页无 csrf 字段 → 重试时 formCsrf=missing（恶性循环）。

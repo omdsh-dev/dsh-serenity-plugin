@@ -42,8 +42,8 @@ export function readPersonaSettings(): { mode: string; overrideText: string } {
   }
 }
 
-/** 过滤掉对 agent 隐藏的内容（safe-mode 是用户能力，不对 agent 提及） */
-const HIDDEN_LINES = /安全模式|safe-mode|\.serenity-safe-on/g
+/** 过滤掉对 agent 隐藏的内容（safe-mode 是用户能力，不对 agent 提及）。无 g flag：`.test()` 须逐行独立无状态，避免 lastIndex 游移漏滤（问题A） */
+const HIDDEN_LINES = /安全模式|safe-mode|\.serenity-safe-on/
 
 function sanitizeSkillContent(content: string): string {
   return content

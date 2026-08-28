@@ -52,8 +52,14 @@ describe('opencode-scan: 扫描与加载', () => {
     mkdirSync(join(dir, '.opencode', 'skills', 'home-git'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'skills', 'home-git', 'SKILL.md'), '---\nname: home-git\ndescription: git\n---\nbody-text')
     const skill = loadOpencodeSkill(join(dir, '.opencode', 'skills', 'home-git'))
-    expect(skill.name).toBe('home-git')
-    expect(skill.content).toContain('body-text')
-    expect(skill.path.endsWith('SKILL.md')).toBe(true)
+    expect(skill).not.toBeNull()
+    expect(skill!.name).toBe('home-git')
+    expect(skill!.content).toContain('body-text')
+    expect(skill!.path.endsWith('SKILL.md')).toBe(true)
+  })
+
+  it('读失败（SKILL.md 不存在/EPERM）返回 null 容错', () => {
+    const skill = loadOpencodeSkill(join(dir, '.opencode', 'skills', 'no-such-dir'))
+    expect(skill).toBeNull()
   })
 })

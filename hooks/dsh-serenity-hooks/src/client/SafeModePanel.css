@@ -1,22 +1,29 @@
-/* SafeModePanel — 会话头部 Serenity 状态卡片（v1.22 UX 重构）
- * 卡片 → 点击 → 官方 Modal（body portal 遮罩 + 居中）
- * 模态内：tab 栏 + 分组（groupTitle 标题 + rowCard 行卡）——看齐官方 settings 设计语言
- * 遵循 web-styling.md：颜色只用 --dsw-alias-* 语义 token（明暗自适应）；
+/* SafeModePanel — 会话头部 Serenity 状态胶囊（v1.24.10 胶囊改版，对齐 OcgoDockEntry pill）
+ * 胶囊 999px 全圆 → 点击 → 自绘 popover（340px 右上角卡片，外点/Escape 关闭）
+ * popover 内：分组（groupTitle 标题 + rowCard 行卡）——看齐官方 settings 设计语言
+ * 遵循 web-styling.md：颜色只用 --dsw-alias-* 语义 token（明暗自适应）+ --sp-safe-green 统一绿家族；
  * 前缀 sp- 防冲突。 */
 
-/* ── 头部状态卡片（可点击） ── */
+/* ── 统一绿色变量家族（一处改全改；emerald 500~600 区间保证深色对比度） ── */
+
+.sp-root {
+  --sp-safe-green: #0ba875;      /* emerald-550：SAFE ON 主色 */
+  --sp-safe-green-deep: #059669; /* emerald-600：渐变深端 */
+}
+
+/* ── 头部状态胶囊（可点击） ── */
 
 .sp-card {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 8px 0 14px;
+  gap: 6px;
+  padding: 4px 9px;              /* 无固定 height：由内容撑高（胶囊） */
   border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 8px;
-  background: var(--dsw-alias-bg-module-platform);
+  border-radius: 999px;
+  background: var(--dsw-alias-bg-layer-2, color-mix(in srgb, var(--dsw-alias-bg-module) 70%, transparent));
   color: inherit;
   font-size: 12px;
+  line-height: 1;
   cursor: pointer;
   transition: background var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease),
     border-color var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease);
@@ -37,13 +44,11 @@
   cursor: default;
 }
 
-/* 方案 O 盾牌版（v1.24.2）：绿点 = Serenity 生效（恒绿）；盾牌 = SAFE 状态
- * （琥珀空心盾 = SAFE OFF 未保护提醒 / 绿实心盾 = SAFE ON 保护中安心） */
-
+/* 绿点 = Serenity 在线（恒亮绿，不随 SAFE 变）；离线/未激活 → 灰 */
 .sp-dot {
   flex: none;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--dsw-alias-state-success-primary);
 }
@@ -63,119 +68,121 @@
 
 .sp-brand {
   color: var(--dsw-alias-label-primary);
-  font-weight: 600;
+  font-weight: 500;
 }
 
+/* 版本号：monospace + translateY(1px) 下沉对齐（与文字基线齐平） */
 .sp-ver {
   color: var(--dsw-alias-label-secondary);
   font-size: 11px;
   font-family: var(--ds-font-family-code, monospace);
+  transform: translateY(1px);
 }
 
+/* 1px 深灰分隔线（两侧紧凑） */
 .sp-sep {
   flex: none;
   width: 1px;
-  height: 14px;
-  background: var(--dsw-alias-border-l1);
+  height: 12px;
+  margin: 0 2px;
+  background: var(--dsw-alias-label-tertiary);
 }
 
 .sp-shield {
   display: inline-flex;
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   flex: none;
 }
 
 .sp-shield svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
 }
 
 .sp-statusWord {
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0;
   white-space: nowrap;
 }
 
-/* SAFE OFF（未保护）：琥珀——提醒，非错误（用户自己的开关选择） */
+/* SAFE OFF（未保护）：灰——低姿态提醒，非错误（用户自己的开关选择） */
 .sp-cardUnprotected .sp-shield {
-  color: var(--dsw-alias-state-warning-primary);
+  color: var(--dsw-alias-label-secondary);
 }
 
 .sp-cardUnprotected .sp-statusWord {
-  color: var(--dsw-alias-state-warning-primary);
+  color: var(--dsw-alias-label-secondary);
 }
 
-/* SAFE ON（保护中）：绿——安心（设计稿 SVG fill=none：纯描边盾，与琥珀空心盾同构，颜色表达状态） */
+/* SAFE ON（保护中）：emerald 绿——安心（盾牌实色 + SAFE 文字渐变质感） */
 .sp-cardProtected .sp-shield {
-  color: var(--dsw-alias-state-success-primary);
+  color: var(--sp-safe-green);
 }
 
 .sp-cardProtected .sp-statusWord {
-  color: var(--dsw-alias-state-success-primary);
+  color: var(--sp-safe-green);
+  background: linear-gradient(135deg, var(--sp-safe-green) 0%, var(--sp-safe-green-deep) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
-/* 滑块快速开关（v1.24.4 方案 O 滑块变体）：SAFE 文字保留 + 滑块——
- * 滑块左 = OFF（琥珀 ✗，写工具全开）/ 右 = ON（绿 ✓，写工具隐藏），开关隐喻表达开关状态 */
+/* ── Mac 风格滑块（v1.24.10：轨道 24×13 / thumb 11px 灰白 #f2f4f6 无图标 / cubic-bezier 平滑） ── */
+
 .sp-switch {
-  display: inline-flex;
-  align-items: center;
-  width: 30px;
-  height: 17px;
+  display: inline-block;
+  width: 24px;
+  height: 13px;
   border-radius: 999px;
   position: relative;
   flex: none;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sp-switchOff {
-  background: color-mix(in srgb, var(--dsw-alias-state-warning-primary) 28%, var(--dsw-alias-border-l2));
+  background: var(--dsw-alias-border-l2);
 }
 
 .sp-switchOn {
-  background: color-mix(in srgb, var(--dsw-alias-state-success-primary) 40%, var(--dsw-alias-border-l2));
+  background: var(--sp-safe-green);
 }
 
 .sp-switchThumb {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #fff; /* 设计稿字面：滑块 thumb 恒白（暗色下也白，与彩色轨道对比——标准开关视觉） */
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
   position: absolute;
-  top: 2px;
-  transition: left 0.2s;
+  top: 1px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #f2f4f6; /* Mac 灰白 thumb（明暗通用） */
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .sp-switchOff .sp-switchThumb {
-  left: 2px;
+  left: 1px;
 }
 
 .sp-switchOn .sp-switchThumb {
-  left: 15px;
+  left: 12px; /* 24 - 11 - 1 */
 }
 
-.sp-switchThumb svg {
-  width: 8px;
-  height: 8px;
+/* CSS 特异性坑（S013 指南）：.sp-switch:hover (0,2,0) 会覆盖 .sp-switchOn (0,1,0)
+ * → ON 态 hover 绿底消失。必须同特异性且后定义补回。 */
+.sp-switch:hover {
+  filter: brightness(1.08);
 }
 
-.sp-switchOff .sp-switchThumb svg {
-  color: var(--dsw-alias-state-warning-primary);
-}
-
-.sp-switchOn .sp-switchThumb svg {
-  color: var(--dsw-alias-state-success-primary);
+.sp-switchOn:hover {
+  background: var(--sp-safe-green);
 }
 
 .sp-switchBusy {
   opacity: 0.6;
   cursor: default;
+  pointer-events: none;
 }
 
 .sp-chev {
@@ -183,55 +190,34 @@
   flex: none;
 }
 
-/* ── 官方 Modal 定制（宽度 + 内容紧凑） ── */
+/* ── 自绘 popover（340px 右上角小卡片，替代官方 Modal） ── */
 
-.sp-modal {
-  width: 520px;
-  max-width: calc(100vw - 48px);
+.sp-root {
+  position: relative;
+  display: inline-flex;
 }
 
-/* ── tab 栏 ── */
-
-.sp-tabs {
-  display: flex;
-  gap: 6px;
-  padding: 0 2px 12px;
-  border-bottom: 1px solid var(--dsw-alias-border-l1);
+.sp-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  z-index: 2000;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 14px;
+  background: var(--dsw-alias-bg-module, #1e1e1e);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
-.sp-tab {
-  flex: 1;
-  padding: 8px 0;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background var(--ds-transition-duration-fast, 0.1s) var(--ds-ease-in-out, ease);
-}
-
-.sp-tab:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.sp-tabOn {
-  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.2));
-  color: var(--dsw-alias-label-primary);
-  font-weight: 600;
-}
-
-/* ── 模态内容 ── */
-
-.sp-modalBody {
+.sp-popBody {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding-top: 14px;
-  /* 内容超出视口时 body 区滚动（兜底——不再截断）；整卡不滚动 */
+  gap: 14px;
+  max-height: calc(100vh - 140px);
   overflow-y: auto;
-  max-height: calc(100vh - 200px);
 }
 
 /* ── 分组（官方 settings 语言：groupTitle + rows） ── */
@@ -274,7 +260,7 @@
   padding: 8px 12px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 10px;
-  background: var(--dsw-alias-bg-module);
+  background: var(--dsw-alias-bg-layer-2, color-mix(in srgb, var(--dsw-alias-bg-module) 60%, transparent));
 }
 
 .sp-label {
@@ -305,7 +291,7 @@
   padding: 8px 12px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 10px;
-  background: var(--dsw-alias-bg-module);
+  background: var(--dsw-alias-bg-layer-2, color-mix(in srgb, var(--dsw-alias-bg-module) 60%, transparent));
 }
 
 .sp-toggle {

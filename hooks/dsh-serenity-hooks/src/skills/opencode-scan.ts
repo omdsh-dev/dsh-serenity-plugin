@@ -54,9 +54,14 @@ export function listOpencodeSkillDirs(root: string): string[] {
     .filter((d) => existsSync(join(d, 'SKILL.md')))
 }
 
-/** 加载一个 opencode skill（frontmatter 解析 + 正文） */
-export function loadOpencodeSkill(skillDir: string): OpencodeSkill {
-  const raw = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8')
+/** 加载一个 opencode skill（frontmatter 解析 + 正文）；读失败（EPERM/占用等）返回 null，单目录容错 */
+export function loadOpencodeSkill(skillDir: string): OpencodeSkill | null {
+  let raw: string
+  try {
+    raw = readFileSync(join(skillDir, 'SKILL.md'), 'utf-8')
+  } catch {
+    return null
+  }
   const { meta, content } = parseFrontmatter(raw)
   return { name: meta.name, dir: skillDir, meta, content, path: join(skillDir, 'SKILL.md') }
 }
