@@ -43,7 +43,7 @@ LLM / Runtime / Tools（认知介质，可替换）
 
 | 能力 | 说明 |
 |------|------|
-| **真实 DSH 工具 ×11** | `cc_fs`（文件系统 15 子命令）/ `session`（会话全周期 9 子命令）/ `acc_kit`（health/time/wait）/ `cc_git` / `acc_msm`（MSM 框架）/ `eap` / `neat` / `cce` / `handyman`（杂工循环 + jobs 并行）/ `session_rebuild`（轨迹跟踪器超限重建）/ `localstore`（凭据/配置存储），全部 `ctx.tools.register` 进程内注册 |
+| **真实 DSH 工具 ×12** | `cc_fs`（文件系统 15 子命令）/ `session`（会话全周期 9 子命令）/ `acc_kit`（health/time/wait）/ `cc_git` / `acc_msm`（MSM 框架）/ `eap` / `neat` / `cce` / `handyman`（杂工循环 + jobs 并行）/ `session_rebuild`（轨迹跟踪器超限重建）/ `localstore`（凭据/配置存储）/ `skiff_admin`（Skiff 角色定义教程/校验/应用），全部 `ctx.tools.register` 进程内注册 |
 | **系统提示词注入（8 块）** | `systemPrompt.section`（全局，order -50）：`=== Serenity ACC ===`（身份）/ `=== Serenity Metaphor ===`（世界模型：船/航行/船员三层隐喻）/ `=== Serenity Principles ===`（认知容器本体论 + MSM 原则）/ `=== Serenity CCE ===`（5 行为约束 + H_op）/ `=== Serenity EAP ===`（E↑R↓S↑ 自检）/ 状态块（Safe Mode / Localstore）/ 该 CCC 顶层入口 skill 全文（按 `.serenity` 记号发现）/ `=== Serenity Session ===`（活跃会话 + todowrite 首位约定）——对齐 opencode-serenity-plugin，平台无关文本逐字节一致 |
 | **first-anchor 锚定（零配置）** | 任何 CCC 在抽象层都是宁静号/ACC——新会话首轮注入 2 条协议锚定消息（ACC 身份 + 协作协议），0 工具纯文字确认后晋升完整工具目录；机制与内容代码固化，无 CCC 配置面 |
 | **拦截缝机械约束** | safe-mode（bash 从工具列表消失）/ 路径逃逸阻断（P3 根内完整、根外零权限）/ 黑名单 / 治理文件保护 / Trajectory Steward DCP 提醒——模型不可绕过 |
@@ -53,6 +53,7 @@ LLM / Runtime / Tools（认知介质，可替换）
 | **图片自动落盘兜底** | 模型不支持图片时自动补救：粘贴图片 → 落盘 `_tmp/images_from_user/` → 注入「用户提供了一张图片（路径：…）」文本重发 → agent 经 CCC 自有 vlm MSM 识别 |
 | **任意文件粘贴自动落盘** | 非图片文件粘贴 → 自动落盘 `_tmp/files_from_user/`（可执行扩展名拒绝 + 10MB 上限 + 文件名脱敏）+ 输入框 draft 追加路径提示（随消息进对话）→ agent 经 CCC 自有 MSM 处理（PDF 提取 / 压缩包解压 / 表格解析） |
 | **persona 彩蛋模式** | 插件设定中可替换 ACC 系统提示词的输出约束/指令遵循约束部分（EAP 块 + MSM 原则段）——配置后用户文本替代原本；未配置完全默认零影响 |
+| **Skiff 认知子集角色（F4，实验性）** | CCC 从全知全能 trajectory 切出任意子集角色（`.opencode/serenity.json skiff.roles`）：**双白名单**（MSM 独立 + 非 MSM 工具独立，白名单外全隐藏）+ 轨迹纪律子集 + CCC 完整系统提示词（dsp 只给基础清单）；调试问答页（`skiff.debugPort`，默认 3099，**多 CCC 手工切换**——拉 dsh 工作区注册表/sessionPersistence）→ 问答走 DSH agent-loop 会话核心（standard preset 平台工具面），回答 **marked 服务端渲染 + `<think>` 折叠**；skill 加载恒可用（不设白名单）；`skiff_admin apply` 显式生效机制 |
 | **压缩保留** | `compaction/end` 后重注入 ACC 身份（上下文压缩不丢失 CCC 约束） |
 | **WebUI 状态徽章 + 高级面板** | 会话头部状态徽章（**胶囊版** v1.24.10：999px 全圆胶囊 + 绿点恒亮 + SAFE 盾牌滑块 emerald 渐变 + Mac 风格快速开关）+ 点击展开自绘 popover（CCC 状态卡）；DSH 设置面板承载插件开关/阈值/外部访问 |
 | **激活门控** | 所有能力只在 `.serenity` 标记的 CCC 目录内生效；其他目录对 DSH 原生行为零影响 |
@@ -211,6 +212,7 @@ home-serenity/                    ← CCC 根（.serenity 记号文件标记）
 | `handyman` | 杂工循环 | 指定白名单模型专用 worker agent 同步循环到完成；jobs 并行编排（maxParallel 默认 10）；进度文件续跑；worker 非正常停止自动重启；worker 不含 handyman 自身（递归只走 subagent） |
 | `session_rebuild` | 轨迹跟踪器 | 上下文超阈值时完全清空重建（Ship of Theseus）：surface replace → first-anchor 协议正文 + 继续指令 → 自动继续 |
 | `localstore` | 凭据存储 | 凭据/配置命名空间（credential/config），git 策略可配 |
+| `skiff_admin` | 4 子命令 | guide（Skiff 角色定义教程）/ validate（配置校验：msms 注册/model 白名单/systemPrompt 非空）/ **apply**（校验 + 显式生效确认：绑定 CCC + 角色清单）/ list（角色摘要） |
 
 ### 二、拦截缝机械约束
 
@@ -283,9 +285,9 @@ Trajectory Steward post-execute：contextPressure 投影 ≥ rebuildThreshold �
 
 | 配置 | 位置 | 内容 |
 |------|------|------|
-| DSH settings 面板 | settings.yaml（DSH 原生） | gatewayEnabled / rebuildEnabled / rebuildThreshold / namingEnabled |
+| DSH settings 面板 | settings.yaml（DSH 原生） | gatewayEnabled / rebuildEnabled / rebuildThreshold / namingEnabled / **skiffEnabled / skiffDebugPort** |
 | plugin 全局文件 | `~/.dsh/serenity-hooks.json`（0600） | gateway 账号（scrypt + TOTP）/ host / port / workspaces 白名单 / cookieSecure |
-| CCC 配置 | `.opencode/serenity.json` | handyman.models（白名单+缺省模型）/ sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession |
+| CCC 配置 | `.opencode/serenity.json` | handyman.models（白名单+缺省模型）/ sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession / **skiff.roles**（角色：model / msms+tools 双白名单 / trajectory 子集 / systemPrompt） |
 | CCC 凭据 | `localstore.json` | 凭据/配置命名空间（git 策略可配） |
 
 ## 系统提示词（对齐 opencode-serenity-plugin）

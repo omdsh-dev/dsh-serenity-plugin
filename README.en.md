@@ -43,7 +43,7 @@ LLM / Runtime / Tools (the cognitive medium — replaceable)
 
 | Capability | Description |
 |-----------|-------------|
-| **11 real DSH tools** | `cc_fs` (15 fs subcommands) / `session` (full session lifecycle) / `acc_kit` / `cc_git` / `acc_msm` (MSM framework) / `eap` / `neat` / `cce` / `handyman` (whitelisted-model worker loop + parallel jobs) / `session_rebuild` (trajectory-tracker reset) / `localstore` — all registered via `ctx.tools.register` |
+| **12 real DSH tools** | `cc_fs` (15 fs subcommands) / `session` (full session lifecycle) / `acc_kit` / `cc_git` / `acc_msm` (MSM framework) / `eap` / `neat` / `cce` / `handyman` (whitelisted-model worker loop + parallel jobs) / `session_rebuild` (trajectory-tracker reset) / `localstore` / `skiff_admin` (Skiff role tutorial/validate/apply) — all registered via `ctx.tools.register` |
 | **System-prompt injection (8 blocks)** | `systemPrompt.section` (global, order -50): `=== Serenity ACC ===` / `=== Serenity Metaphor ===` (world model: Ship/Voyage/Crew) / `=== Serenity Principles ===` (cognitive-container ontology + MSM principles) / `=== Serenity CCE ===` / `=== Serenity EAP ===` / state blocks (Safe Mode / Localstore) / top-level entry skill full text (via the `.serenity` marker) / `=== Serenity Session ===` — aligned to opencode-serenity-plugin, byte-identical on platform-neutral text |
 | **first-anchor (zero-config)** | Every CCC is Serenity/ACC at the abstraction layer — new sessions get 2 protocol anchor messages (ACC identity + collaboration protocol), acknowledge with 0 tools, then promote to the full tool catalog; mechanism and content are code-fixed, no CCC config surface |
 | **Interception-seam guards** | safe-mode (bash disappears from the tool list) / path-escape blocking (P3: full inside Root, zero outside) / blacklist / governance-file protection / Trajectory-Steward DCP reminders — not bypassable by the model |
@@ -53,6 +53,7 @@ LLM / Runtime / Tools (the cognitive medium — replaceable)
 | **Image auto-fallback** | When the model does not support images: paste → saved to `_tmp/images_from_user/` → resent as text with the path → the agent uses the CCC's own vlm MSM |
 | **Any-file paste auto-save** | Pasting a non-image file → auto-saved to `_tmp/files_from_user/` (executable extensions blocked + 10MB cap + filename sanitized) + the input draft gets a path note (sent with the message) → the agent processes it with CCC MSMs (PDF extraction / archive unpack / spreadsheet parsing) |
 | **persona easter-egg mode** | Plugin settings can replace the output/instruction-following constraints of the ACC system prompt (EAP block + MSM principles) — a configured persona text replaces the defaults; unconfigured, behavior is exactly the default |
+| **Skiff cognitive subset roles (F4, experimental)** | A CCC cuts any subset of the omniscient trajectory into roles (`.opencode/serenity.json skiff.roles`): **dual allowlists** (MSM allowlist + non-MSM tool allowlist, everything else hidden) + trajectory-discipline subset + CCC-defined system prompt (dsp provides only the base surface list); a debug Q&A page (`skiff.debugPort`, default 3099, **manual CCC switching** — pulls the dsh workspace registry / sessionPersistence) drives questions through the DSH agent-loop core (standard preset platform tools), with answers **rendered server-side via marked + `<think>` collapsible**; skill loading is always available to skiff sessions (not allowlisted); `skiff_admin apply` is the explicit activation step |
 | **Compaction retention** | Re-injects ACC identity after `compaction/end` (compaction never loses CCC constraints) |
 | **WebUI status badge + panels** | Session-header status badge (**capsule v1.24.10**: 999px full-round pill + always-green dot + SAFE shield slider with emerald gradient + Mac-style quick toggle) + click to open a self-drawn popover (CCC status card); DSH settings panel hosts plugin switches/thresholds/external access |
 | **Activation gating** | Everything activates only inside a CCC directory marked with `.serenity`; zero effect on DSH behavior elsewhere |
@@ -210,6 +211,7 @@ Sessions inside a CCC automatically get: the 11 ACC tools, mechanical guards, AC
 | `handyman` | worker loop | synchronous round-loop of a dedicated worker agent on a CCC-whitelisted model until done; parallel jobs orchestration (maxParallel, default 10); resumable progress files; auto-restart on abnormal stop; workers include subagent (same-model inheritance) but NOT handyman itself |
 | `session_rebuild` | trajectory tracker | full surface reset on context overrun (Ship of Theseus): replace → first-anchor protocol text + continue instruction → auto-resume |
 | `localstore` | credential store | credential/config namespaces with configurable git policy |
+| `skiff_admin` | 4 subcommands | guide (Skiff role definition tutorial) / validate (config check: msms registered / model allowlist / systemPrompt non-empty) / **apply** (validate + explicit activation: bound CCC + role list) / list (role summary) |
 
 ### Interception seams
 
@@ -270,9 +272,9 @@ Everything activates only inside a CCC directory marked with `.serenity`; zero e
 
 | Config | Location | Contents |
 |--------|----------|----------|
-| DSH settings panel | settings.yaml (native DSH) | gatewayEnabled / rebuildEnabled / rebuildThreshold / namingEnabled |
+| DSH settings panel | settings.yaml (native DSH) | gatewayEnabled / rebuildEnabled / rebuildThreshold / namingEnabled / **skiffEnabled / skiffDebugPort** |
 | Plugin-global file | `~/.dsh/serenity-hooks.json` (0600) | gateway accounts (scrypt + TOTP) / host / port / workspaces allowlist / cookieSecure |
-| CCC config | `.opencode/serenity.json` | handyman.models (whitelist + default model) / sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession |
+| CCC config | `.opencode/serenity.json` | handyman.models (whitelist + default model) / sessionKeeper.threshold / safeMode.blacklist / hooks.autoRestoreSession / **skiff.roles** (per-role: model / msms+tools dual allowlists / trajectory subset / systemPrompt) |
 | CCC credentials | `localstore.json` | credential/config namespaces (configurable git policy) |
 
 ## System prompt (aligned with opencode-serenity-plugin)
