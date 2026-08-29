@@ -162,16 +162,19 @@ export class AcpServer {
     return { sessions }
   }
 
-  /** session/prompt：{ sessionId, question } → 答案 + 全量轨迹 */
-  private async prompt(params: Record<string, unknown> | undefined): Promise<{ answer: string; sessionId: string; trajectory: unknown[] }> {
+  /**
+   * session/prompt：{ sessionId, question } → 答案（**v1.26.10：不返回 trajectory**——
+   * 3100 对外只提供问答，轨迹含工具结果等内部信息；3099 调试页另走 /ask 保留）
+   */
+  private async prompt(params: Record<string, unknown> | undefined): Promise<{ answer: string; sessionId: string }> {
     const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : undefined
     const question = typeof params?.question === 'string' ? params.question : undefined
     if (!sessionId) throw new RpcInvalidParams('session/prompt requires sessionId')
     if (!question?.trim()) throw new RpcInvalidParams('session/prompt requires question')
     const agent = getSkiffAgent(sessionId)
     if (!agent) throw new RpcInvalidParams(`unknown session: ${sessionId} (not recoverable — process restarted?)`)
-    const result = await askSkiff(this.ctx, agent, question, 0)
-    return { answer: result.answer, sessionId: result.sessionId, trajectory: result.trajectory }
+    const result = await askSkiff(this.ctx, agent, question, undefined, { includeTrajectory: false })
+    return { answer: result.answer, sessionId: result.sessionId }
   }
 
   /** session/cancel：{ sessionId } → 中断当前 prompt（DSH interrupt） */

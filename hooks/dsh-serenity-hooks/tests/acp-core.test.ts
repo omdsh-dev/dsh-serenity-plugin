@@ -167,13 +167,13 @@ describe('acp-core: session/new（ccc+role+sessionId，v1.26.0）', () => {
 })
 
 describe('acp-core: session/prompt / cancel / close / list', () => {
-  it('prompt → 答案 + 全量轨迹', async () => {
+  it('prompt → 答案（v1.26.10：不返回 trajectory——3100 对外只问答）', async () => {
     const events: unknown[] = []
     const server = new AcpServer(fakeCtx(events) as never)
     const created = await server.handle('session/new', { ccc: dir, role: 'qa' }) as { sessionId: string }
-    const r = await server.handle('session/prompt', { sessionId: created.sessionId, question: 'hi' }) as { answer: string; trajectory: unknown[] }
+    const r = await server.handle('session/prompt', { sessionId: created.sessionId, question: 'hi' }) as { answer: string }
     expect(r.answer).toBe('a')
-    expect(r.trajectory.length).toBeGreaterThan(0)
+    expect(r).not.toHaveProperty('trajectory')
     expect(events.length).toBeGreaterThan(0)
   })
 

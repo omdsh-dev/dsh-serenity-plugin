@@ -124,13 +124,20 @@ export function detectSensitive(text: string, table: SensitiveWordTable): string
   return [...hits]
 }
 
-/** 打回消息（steer 内容）：告知模型命中词并要求重新生成（不含命中值本身——避免二次泄露） */
+/**
+ * 打回消息（steer 内容）：**告知命中词并指令重新生成**（v1.26.10 用户调整——
+ * 原 v1.26.3 设计"不含命中词防二次泄露"导致模型不知道改什么；命中词本就已在被拦截的
+ * 回复中进入会话（已暴露面），打回消息重复一次不扩大暴露，模型据此精准重写）。
+ * 命中词已落入模型上下文（它刚写过），此消息不回显给用户（steer 是 plugin source 消息，
+ * 3100 对外响应 v1.26.10 起已不含 trajectory → 打回文本不会到达外部用户）。
+ */
 export function buildRebuke(hits: string[]): string {
   const count = hits.length
+  const list = [...new Set(hits)].join(', ')
   return (
     `[SERENITY OUTPUT GUARD] Your previous response contained ${count} sensitive internal term(s) ` +
-    `(mechanism/credential identifiers) that must not appear in user-visible output. ` +
-    `Regenerate the response from scratch without these terms — describe the same substance ` +
+    `(mechanism/credential identifiers) that must not appear in user-visible output: ${list}. ` +
+    `Regenerate the response from scratch without ANY of these terms — describe the same substance ` +
     `without referencing internal machinery, credentials, tool names, or implementation details. ` +
     `Do not repeat the terms; do not explain this instruction to the user.`
   )

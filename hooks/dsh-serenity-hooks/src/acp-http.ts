@@ -301,14 +301,15 @@ async function handleAskParsed(
     const ref = await createSkiffAgent(ctx, root, effectiveRole, effectiveCfg, hc?.defaultModel)
     agent = ref.agent
   }
-  const result = await askSkiff(ctx, agent, question, 0)
+  const result = await askSkiff(ctx, agent, question, undefined, { includeTrajectory: false })
   sendJson(res, 200, {
     answer: result.answer,
     // v1.26.4：public 口不渲染 <think>（思考过程对普通用户不展示；skiff 调试页保持折叠卡）
     answer_html: renderSkiffMarkdown(result.answer, true),
     sessionId: result.sessionId,
     continued,
-    trajectory: result.trajectory,
+    // v1.26.10：**3100 对外只提供问答，不返回 trajectory**（轨迹含工具结果等内部信息；
+    //  用户拍板：对外仅 answer/answer_html/sessionId/continued；3099 调试页保留）
   })
 }
 

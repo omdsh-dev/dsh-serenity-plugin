@@ -1,3 +1,17 @@
+## v1.26.10 — 2026-08-29（两项用户调整：打回告知命中词 + 3100 对外去 trajectory）
+
+**Scope:** ① 输出守卫打回消息不告知命中词 → 模型不知道怎么改（用户："这里不告诉人家敏感词是什么，人家怎么改，要告知"）；② asktest 公网问答响应含 trajectory（含工具结果等内部信息）→ 3100 对外只提供问答（用户："3100是对外的，只提供问答，不提供trajectory"）。
+
+### 变更
+- **`output-guard.ts` `buildRebuke` 告知命中词（v1.26.10）**：打回消息列出全部命中词（去重 `, ` 分隔）——模型据此精准重写；R↓ 安全性：命中词本就已在被拦截回复中进入会话（已暴露面），打回重复一次不扩大暴露；steer 是 plugin source 消息不回显给用户（配合本版 3100 去 trajectory，打回文本不达外部用户）
+- **`skiff-core.ts` `askSkiff` +`options.includeTrajectory`（v1.26.10）**：默认 true（3099 调试页保留轨迹）；false 跳过 `eventsToTrajectory` 计算（3100 长会话不再每轮 O(n) 算全量轨迹）
+- **`acp-http.ts` 公开问答响应去 trajectory（v1.26.10）**：200 响应仅 `{answer, answer_html, sessionId, continued}` + `askSkiff(..., { includeTrajectory: false })`
+- **`acp-core.ts` `session/prompt` 结果去 trajectory（v1.26.10）**：返回 `{answer, sessionId}`（3100 JSON-RPC 同为对外面）
+
+### 测试
+- **output-guard.test 更新**：buildRebuke 含命中词断言（单/多词）+ seam steer 含命中词（原"不含"断言反转）；**acp-core.test 更新**：prompt 返回不含 trajectory（`not.toHaveProperty`）；**jsc-json-safe.test 更新**：3100 ask 响应形态对齐新结构（无 trajectory）
+- **50 files / 646 tests 全绿**；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.9 — 2026-08-29（3100 iOS Safari 错误根治：JSC JSON.parse 快速路径正则兼容层，S142 调研定稿）
 
 **Scope:** 用户实测：3100 问答页在 iPhone/iPad（WebKit/JSC）上报 `The string did not match the expected pattern`，仅"内容极其复杂"的回答触发，v1.26.8 服务端 think 状态机重写无效。调研定稿：**错误不在插件代码的正则**，而在 **Safari/JSC 的 `JSON.parse` 内部正则快速路径**——WebKit bug 200190「JavaScriptCore's Regex can't match the content」：JSC 对 JSON 做正则预校验，内容含**原始** `\u2028`（行分隔符）/`\u2029`（段分隔符）时对**合法 JSON** 也抛此 SyntaxError（sentry-javascript #2487 同源）；`JSON.stringify` **不转义**这三个字符（合法 JSON 字符串字符）→ 复杂回答的 JSON 以原始形态含它们 → 3100 页面 `await res.json()` 触发。修复 = **方案 A（用户拍板）：服务端 JSON 文本层等价转义**。

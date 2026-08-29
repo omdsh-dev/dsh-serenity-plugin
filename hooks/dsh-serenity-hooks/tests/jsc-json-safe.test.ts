@@ -90,17 +90,13 @@ describe('jscSafeJsonText：JSC JSON.parse 兼容层（v1.26.9）', () => {
     expect(JSON.parse(safe)).toEqual(payload)
   })
 
-  it('3100 ask 响应完整形态：含触发字符的 payload → 安全文本 parse 等价', () => {
-    // 模拟 handleAskParsed 的 200 响应（answer/answer_html/trajectory 复杂内容）
+  it('3100 ask 响应完整形态（v1.26.10：不含 trajectory）：含触发字符的 payload → 安全文本 parse 等价', () => {
+    // 模拟 handleAskParsed 的 200 响应（v1.26.10 起对外仅 answer/answer_html/sessionId/continued）
     const response = {
       answer: '### 标题\u2028\n复杂内容\u2029与\uFEFF混合',
       answer_html: '<h3>标题</h3>\n<p>复杂内容\u2028与\uFEFF混合</p>',
       sessionId: 'skiff-qa-abc',
       continued: true,
-      trajectory: [
-        { role: 'user', text: 'q' },
-        { role: 'tool', text: '网页提取：\u2028多行内容\u2029', tool: 'web_search' },
-      ],
     }
     const body = jscSafeJsonText(JSON.stringify(response))
     // 浏览器 res.json() 视角：JSC 正则将看到转义序列而非原始行终止符

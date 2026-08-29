@@ -109,16 +109,17 @@ describe('output-guard: 检测（detectSensitive）', () => {
 })
 
 describe('output-guard: 打回消息（buildRebuke）', () => {
-  it('不含命中词本身（防二次泄露）', () => {
+  it('含命中词本身（v1.26.10 用户调整：告知模型具体敏感词才能精准重写）', () => {
     const msg = buildRebuke(['hunter2-secret'])
     expect(msg).toContain('sensitive internal term')
-    expect(msg).not.toContain('hunter2-secret')
+    expect(msg).toContain('hunter2-secret')
   })
 
   it('提及重新生成且不要求向用户解释', () => {
     const msg = buildRebuke(['a', 'b'])
     expect(msg).toMatch(/Regenerate the response/)
     expect(msg).toMatch(/without referencing internal machinery/)
+    expect(msg).toContain('a, b') // 多命中词全列出
   })
 })
 
@@ -155,14 +156,14 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
     expect(f.steers).toEqual([])
   })
 
-  it('外部面命中敏感词 → steer 打回（turn 不关闭语义由 DSH 保证）', () => {
+  it('外部面命中敏感词 → steer 打回（v1.26.10：打回文本含命中词，模型据此重写）', () => {
     const f = fakeCtx()
     registerOutputGuardHook(f.ctx as never)
     f.agent.session.events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '密码是 hunter2-secret' }] } } })
     f.fire(1)
     expect(f.steers.length).toBe(1)
     expect(f.steers[0]).toContain('SERENITY OUTPUT GUARD')
-    expect(f.steers[0]).not.toContain('hunter2-secret')
+    expect(f.steers[0]).toContain('hunter2-secret')
   })
 
   it('连续命中达上限 → 放弃打回（不再 steer）+ 状态清理', () => {

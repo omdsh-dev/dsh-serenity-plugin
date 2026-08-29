@@ -215,13 +215,22 @@ function truncate(s: string, n: number): string {
  * 提问一轮：followup → 等 idle → 读答案 + 轨迹。
  * @param eventsStart 轨迹起点：显式传 0 = 全量轨迹（会话追问时页面重绘完整时间线，
  *   v1.25.10 用户拍板）；不传（undefined）= 本轮增量（followup 前 events 之后）
+ * @param options.includeTrajectory 是否计算轨迹（v1.26.10：**3100 对外只提供问答**——
+ *   公开问答页 / ACP JSON-RPC 不返回 trajectory，传 false 跳过计算；3099 调试页默认 true 保留）
  */
-export async function askSkiff(ctx: Context, agent: Agent, question: string, eventsStart?: number): Promise<SkiffAskResult> {
+export async function askSkiff(
+  ctx: Context,
+  agent: Agent,
+  question: string,
+  eventsStart?: number,
+  options?: { includeTrajectory?: boolean },
+): Promise<SkiffAskResult> {
   const before = eventsStart === undefined ? agent.session.events.length : eventsStart
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
   await waitIdle(ctx, agent)
   const answer = lastAssistantText(agent)
-  const trajectory = eventsToTrajectory(agent.session.events.slice(before))
+  const trajectory =
+    options?.includeTrajectory === false ? [] : eventsToTrajectory(agent.session.events.slice(before))
   return { answer, sessionId: String((agent.session as { id?: unknown }).id ?? ''), trajectory }
 }
 
