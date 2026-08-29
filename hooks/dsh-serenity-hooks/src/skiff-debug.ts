@@ -147,8 +147,23 @@ export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPo
   textarea { min-height: 72px; resize: vertical; }
   button { margin-top: 12px; padding: 9px 18px; border-radius: 8px; border: 0; background: #0ba875; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
   button:disabled { opacity: .55; cursor: wait; }
-  #answer { white-space: pre-wrap; background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-top: 16px; font-size: 14px; line-height: 1.55; min-height: 48px; }
+  #answer { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-top: 16px; font-size: 14px; line-height: 1.6; min-height: 48px; word-break: break-word; }
   @media (prefers-color-scheme: dark) { #answer { background: #26282c; border-color: #3a3d42; } }
+  /* Markdown 渲染（v1.25.8）：代码/标题/列表/引用/think 折叠 */
+  #answer p { margin: 6px 0; }
+  #answer h1, #answer h2, #answer h3 { margin: 12px 0 6px; font-size: 15px; line-height: 1.4; }
+  #answer h1 { font-size: 17px; }
+  #answer code { background: rgba(127,127,127,.14); border-radius: 4px; padding: 1px 5px; font-size: 13px; font-family: ui-monospace, SFMono-Regular, monospace; }
+  #answer pre { background: rgba(127,127,127,.1); border-radius: 8px; padding: 10px 12px; overflow-x: auto; margin: 8px 0; }
+  #answer pre code { background: none; padding: 0; font-size: 13px; line-height: 1.5; }
+  #answer ul, #answer ol { margin: 6px 0; padding-left: 22px; }
+  #answer li { margin: 2px 0; }
+  #answer blockquote { margin: 6px 0; padding: 2px 12px; border-left: 3px solid rgba(127,127,127,.35); opacity: .88; }
+  #answer a { color: #0ba875; text-decoration: underline; }
+  details.think { margin: 8px 0; border: 1px solid rgba(210,153,34,.4); border-radius: 8px; background: rgba(210,153,34,.06); }
+  details.think summary { cursor: pointer; padding: 6px 10px; font-size: 12px; color: #d29922; font-weight: 600; user-select: none; list-style-position: inside; }
+  details.think summary:hover { opacity: .8; }
+  details.think .think-body { padding: 2px 12px 10px; font-size: 13px; opacity: .78; white-space: normal; }
   #trajectory { margin-top: 12px; font-size: 13px; }
   .t-entry { border-left: 2px solid #d0d7de; padding: 6px 10px; margin: 6px 0; border-radius: 0 6px 6px 0; background: rgba(127,127,127,.06); white-space: pre-wrap; word-break: break-word; }
   .t-user { border-left-color: #0ba875; }
@@ -220,7 +235,7 @@ btn.addEventListener('click', async () => {
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status))
     answer.className = ''
-    answer.textContent = data.answer || '（空回答）'
+    answer.innerHTML = data.answer ? renderMd(data.answer) : '（空回答）'
     renderTrajectory(data.trajectory || [], data.sessionId || '')
   } catch (err) {
     answer.className = 'err'
@@ -236,6 +251,58 @@ function renderTrajectory(entries, sessionId) {
     const role = e.role === 'tool' ? 'tool' + (e.tool ? ' · ' + esc(e.tool) : '') : e.role
     return '<div class="t-entry ' + cls + '"><div class="t-role">' + role + '</div>' + esc(e.text) + '</div>'
   }).join('')
+}
+/* v1.25.8 Markdown 渲染（零依赖轻量）——标题/粗斜体/行内代码/代码块/列表/引用/链接；
+   <think>…</think> 块提取为 <details> 折叠（🧠 思考过程，默认收起） */
+function renderMd(src) {
+  const thinks = []
+  let body = String(src || '')
+  body = body.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inner) => {
+    const idx = thinks.length
+    thinks.push(esc(String(inner || '').trim()))
+    return '\u0000T' + idx + '\u0000'
+  })
+  const lines = body.split('\n')
+  let html = ''
+  let inCode = false
+  let codeBuf = []
+  let inList = false
+  for (const line of lines) {
+    // 代码围栏检测：反引号用 \u0060 转义（页面 JS 内嵌于 TS 模板字符串，裸反引号会提前终止模板）
+    const codeMatch = line.match(/^\u0060\u0060\u0060(\w*)\s*$/)
+    if (codeMatch) {
+      if (inCode) { html += '<pre><code>' + esc(codeBuf.join('\n')) + '</code></pre>'; codeBuf = []; inCode = false }
+      else inCode = true
+      continue
+    }
+    if (inCode) { codeBuf.push(line); continue }
+    const t = line.trim()
+    if (t === '') { inList = false; continue }
+    if (line.indexOf('\u0000T') >= 0) { html += line.replace(/\u0000T(\d+)\u0000/g, (_m2, i) => thinkHtml(thinks[Number(i)])); inList = false; continue }
+    const h = t.match(/^(#{1,3})\s+(.*)$/)
+    if (h) { const lvl = h[1].length; html += '<h' + lvl + '>' + inlineMd(h[2]) + '</h' + lvl + '>'; inList = false; continue }
+    const li = t.match(/^(?:[-*]|\d+[.)])\s+(.*)$/)
+    if (li) { if (!inList) { html += '<ul>'; inList = true } html += '<li>' + inlineMd(li[1]) + '</li>'; continue }
+    if (inList) { html += '</ul>'; inList = false }
+    const qt = t.match(/^>\s?(.*)$/)
+    if (qt) { html += '<blockquote>' + inlineMd(qt[1]) + '</blockquote>'; continue }
+    html += '<p>' + inlineMd(line) + '</p>'
+  }
+  if (inCode) html += '<pre><code>' + esc(codeBuf.join('\n')) + '</code></pre>'
+  if (inList) html += '</ul>'
+  return html
+}
+function inlineMd(s) {
+  let t = esc(s)
+  // 行内代码：反引号 \u0060 转义（页面 JS 内嵌于 TS 模板字符串，裸反引号提前终止模板）
+  t = t.replace(/[\u0060]([^\u0060]+)[\u0060]/g, '<code>$1</code>')
+  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+  t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+  return t
+}
+function thinkHtml(inner) {
+  return '<details class="think"><summary>🧠 思考过程</summary><div class="think-body">' + (inner ? inner.replace(/\n/g, '<br>') : '（空）') + '</div></details>'
 }
 </script>
 </body>

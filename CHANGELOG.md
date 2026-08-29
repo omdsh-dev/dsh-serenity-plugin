@@ -1,3 +1,16 @@
+## v1.25.8 — 2026-08-29（Skiff 回答 Markdown 渲染 + `<think>` 折叠，S142 用户需求）
+
+**Scope:** 用户：「很好玩能跑了——回答的渲染上 markdown 渲染器，其中对于 `<think>` 部分支持折叠」。调试页回答区从纯文本升级为**零依赖轻量 Markdown 渲染**（不引 CDN——本地 127.0.0.1 页面，外网不可靠），`<think>…</think>` 思考块提取为 **`<details>` 原生折叠**（默认收起）。
+
+### 变更（skiff-debug.ts `skiffDebugPage` 内联 JS/CSS）
+- **`renderMd(src)`**：零依赖 markdown——标题（#~###）/粗体/斜体/行内代码/代码块（``` 围栏）/无序列表/引用/链接；`<think>…</think>` 非贪婪提取（`\u0000T<idx>\u0000` 占位符 → 还原为 `<details class="think"><summary>🧠 思考过程</summary>…`，默认折叠，点击展开）
+- **回答区渲染**：`answer.innerHTML = renderMd(data.answer)`（替换 textContent）；错误/提示仍 textContent（不渲染）
+- **CSS**：#answer 去 `white-space: pre-wrap`（markdown 结构自行控制）；新增 p/h1-3/code/pre/ul/blockquote/a 样式；`details.think` 琥珀描边折叠卡（summary 可点 + hover）
+- **模板字符串转义陷阱**（typecheck 定位）：页面 JS 内嵌于 TS 模板字符串——**裸反引号会提前终止模板**——代码围栏正则 `/^```/` 与行内代码正则 `/`([^`]+)`/g` 的 6 处反引号全部改 `\u0060` 转义（页面 JS 运行时解析为反引号）
+
+### 测试
+- 无新测试（页面内联 JS 无单测覆盖面；typecheck client ✓ 验证模板字符串完整）——**46 files / 543 tests 全绿**；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.7 — 2026-08-29（Skiff 调试页 JSON.parse 崩溃修复：内嵌数据 escapeHtml 破坏 JSON，用户 console 报错定位）
 
 **Scope:** 用户实测——下拉仍空，**console 报错**：`Uncaught SyntaxError: Expected property name or '}' in JSON at position 2 (at (index):52:19)`（页面脚本 `JSON.parse(document.getElementById('skiff-data').textContent)`）。**根因**：v1.25.4 起内嵌候选数据经 `escapeHtml` 整体转义——`"` → `&quot;`，而 `textContent` 返回**原始文本**（浏览器不反转义），`JSON.parse` 遇到 `{&quot;root&quot;...` 的 `&`（position 2）即抛错 → CCCS 未定义 → 下拉空。
