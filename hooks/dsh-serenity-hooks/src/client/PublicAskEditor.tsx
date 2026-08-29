@@ -38,6 +38,30 @@ export function PublicAskEditor(props: { publicAskOn: boolean }): React.JSX.Elem
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
+  const [rotating, setRotating] = useState(false)
+
+  // v1.26.5 轮换 key（用户：不好说要换 key 呢——生成新 key，旧 key 立即失效）
+  const rotateKey = async (): Promise<void> => {
+    if (!window.confirm('重新生成访问 Key？旧 Key 将立即失效，需要重新分享给使用者。')) return
+    setRotating(true)
+    setError(null)
+    try {
+      const res = await fetch('/serenity/public-ask', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
+        body: JSON.stringify({ action: 'rotate' }),
+      })
+      if (!res.ok) throw new Error(`轮换失败（${res.status}）`)
+      const body = (await res.json()) as { key: string }
+      setInfo((cur) => (cur ? { ...cur, key: body.key } : cur))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRotating(false)
+    }
+  }
 
   useEffect(() => {
     let alive = true
@@ -175,6 +199,9 @@ export function PublicAskEditor(props: { publicAskOn: boolean }): React.JSX.Elem
                   onClick={() => { void navigator.clipboard?.writeText(info.key) }}
                 >
                   复制
+                </button>
+                <button type="button" className="ae-copy ae-rotate" disabled={rotating} onClick={() => void rotateKey()}>
+                  {rotating ? '生成中…' : '重新生成'}
                 </button>
               </div>
               <div className="ae-row">

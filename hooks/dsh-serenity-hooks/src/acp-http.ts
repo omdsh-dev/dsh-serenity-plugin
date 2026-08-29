@@ -20,7 +20,14 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import { AcpServer, dispatchRpc } from './acp-core.js'
-import { verifyPublicAskKey, ensurePublicAskKey, readAdvancedSettings } from './config-ops.js'
+import {
+  verifyPublicAskKey,
+  ensurePublicAskKey,
+  readAdvancedSettings,
+  isPublicAskIpLocked,
+  recordPublicAskFail,
+  resetPublicAskIpFail,
+} from './config-ops.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { discoverCccs, renderSkiffMarkdown, type SkiffCccEntry } from './skiff-debug.js'
 import { readSimpleSettings } from './settings-section.js'
@@ -95,6 +102,8 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
   try {
     const url = (req.url ?? '/').split('?')[0] ?? '/'
     const s = readSimpleSettings()
+    // v1.26.5 请求来源 IP（公网 key 失败锁定）：X-Forwarded-For 优先（反代/tunnel），回退 socket 地址
+    const ip = (req.headers['x-forwarded-for'] as string | undefined)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
 
     // ── ACP JSON-RPC（acpEnabled 门控）──
     if (req.method === 'POST' && url === '/') {
@@ -181,7 +190,7 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
         sendJson(res, 400, { error: 'invalid JSON body' })
         return
       }
-      await handleAskParsed(ctx, ccc, body, res)
+      await handleAskParsed(ctx, ccc, body, res, ip)
       return
     }
 
@@ -216,7 +225,7 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
         sendJson(res, 403, { error: 'container is not open for public ask' })
         return
       }
-      await handleAskParsed(ctx, ccc, body, res)
+      await handleAskParsed(ctx, ccc, body, res, ip)
       return
     }
     sendJson(res, 404, { error: 'not found' })
@@ -227,21 +236,35 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
 
 /**
  * 单容器问答核心（/c/<name>/ask 与 /ask 共用）：
- * body { key, role?, question, sessionId? } → key 校验（401）→ 角色缺省取 CCC 第一个
+ * body { key, role?, question, sessionId? } → key 校验（401 + IP 失败锁定）→ 角色缺省取 CCC 第一个
  * → 会话延续（v1.25.10 语义，静默新建）→ askSkiff(0 全量轨迹) → { answer, answer_html, sessionId, continued, trajectory }
+ * @param ip 请求来源 IP（v1.26.5 公网 key 失败锁定：X-Forwarded-For 优先——公网反代，回退 remoteAddress）
  */
 async function handleAskParsed(
   ctx: Context,
   ccc: SkiffCccEntry,
   body: Record<string, unknown>,
   res: ServerResponse,
+  ip: string,
 ): Promise<void> {
   const key = typeof body.key === 'string' ? body.key : undefined
-  // key 认证（S142 用户：没有 key 不工作；timing-safe）
-  if (!verifyPublicAskKey(key)) {
-    sendJson(res, 401, { error: 'invalid or missing key' })
+  // v1.26.5 公网 key 失败锁定（先查锁定——锁定期间直接 429，不浪费校验）
+  if (isPublicAskIpLocked(ip)) {
+    sendJson(res, 429, { error: 'too many failed attempts — temporarily locked (retry later)' })
     return
   }
+  // key 认证（S142 用户：没有 key 不工作；timing-safe）
+  if (!verifyPublicAskKey(key)) {
+    const remaining = recordPublicAskFail(ip)
+    sendJson(res, remaining > 0 ? 429 : 401, {
+      error: remaining > 0
+        ? `too many failed attempts — locked for ${Math.ceil(remaining / 60000)} min`
+        : 'invalid or missing key',
+    })
+    return
+  }
+  // 成功 → 重置该 IP 失败计数（v1.26.5：防止历史失败累计误锁）
+  resetPublicAskIpFail(ip)
   const root = ccc.root
   const roleName = typeof body.role === 'string' && body.role !== '' ? body.role : undefined
   const question = typeof body.question === 'string' ? body.question : ''
@@ -467,8 +490,11 @@ let busy = false
 
 // 角色下拉
 roleSel.innerHTML = (CCC.roles || []).map((r) => '<option value="' + r + '">' + r + '</option>').join('') || '<option value="">(无角色)</option>'
-// key 自动从 localStorage 恢复
-try { const saved = localStorage.getItem(KEY_STORE); if (saved) { keyInput.value = saved; keyRow.style.display = 'none' } } catch {}
+// key 自动从 localStorage 恢复（v1.26.5：**常驻可见**——只预填不隐藏，
+// 用户随时可查看/修改 key；saved 时 placeholder 提示已记忆）
+let hasSavedKey = false
+try { const saved = localStorage.getItem(KEY_STORE); if (saved) { keyInput.value = saved; hasSavedKey = true } } catch {}
+if (hasSavedKey) keyInput.placeholder = '访问 Key（已记忆，可修改）'
 
 /** 追加一条消息气泡（role: user|assistant） */
 function addMsg(role, htmlOrText, isHtml) {
@@ -512,8 +538,8 @@ async function ask() {
   if (!q) return
   if (!key) { keyInput.focus(); return }
   if (busy) return
-  // 保存 key（下次自动记忆 + 隐藏 key 行）
-  try { localStorage.setItem(KEY_STORE, key); keyRow.style.display = 'none' } catch {}
+  // 保存 key（下次自动记忆；v1.26.5：不隐藏 key 行——常驻可见可修改）
+  try { localStorage.setItem(KEY_STORE, key) } catch {}
   // 追加用户消息 + 打字指示
   addMsg('user', q, false)
   qInput.value = ''

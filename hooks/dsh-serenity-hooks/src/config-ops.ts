@@ -326,6 +326,73 @@ export function verifyPublicAskKey(provided: string | undefined): boolean {
 }
 
 /**
+ * 轮换问答页访问 key（v1.26.5，S142 用户：公网开放 + 不好说要换 key 呢）：
+ * 生成新 32 字节随机 hex（64 字符）→ 覆盖写回（**强制替换**——旧 key 立即失效）。
+ * @returns 新 key（面板展示给管理员，重新分享给使用者）
+ */
+export function rotatePublicAskKey(): string {
+  const current = readAdvancedSettings()
+  const key = randomBytes(32).toString('hex')
+  updateAdvancedSettings({ publicAsk: { key, allowed: current.publicAsk.allowed } })
+  return key
+}
+
+// ── 公网 key 失败锁定（v1.26.5，S142 用户：key 校验必须可靠 + 开放公网）──
+// 按 **IP** 记录失败（key 是全局单值，按 IP 锁定不误伤其他用户；攻击者换 IP 需换出口）。
+// 复用 gateway-auth 的指数退避模式（5 次失败 → 15min → 30min → … 上限 4h）。
+
+/** 失败锁定阈值（连续失败次数） */
+export const PUBLIC_ASK_FAIL_THRESHOLD = 5
+/** 首次锁定基础时长（指数退避底数） */
+export const PUBLIC_ASK_LOCK_BASE_MS = 15 * 60 * 1000
+/** 锁定上限 */
+export const PUBLIC_ASK_LOCK_MAX_MS = 4 * 60 * 60 * 1000
+
+interface IpFailState {
+  count: number
+  lockedUntil: number
+  lockRound: number
+}
+
+const ipFailStates = new Map<string, IpFailState>()
+
+/** 重置 IP 失败状态（测试/管理员解封） */
+export function resetPublicAskIpFail(ip: string): void {
+  ipFailStates.delete(ip)
+}
+
+/** IP 当前是否锁定（到期自动解锁） */
+export function isPublicAskIpLocked(ip: string): boolean {
+  const st = ipFailStates.get(ip)
+  if (!st || st.lockedUntil === 0) return false
+  if (Date.now() >= st.lockedUntil) {
+    st.lockedUntil = 0
+    st.count = 0
+    return false
+  }
+  return true
+}
+
+/** 记录一次 key 校验失败；达到阈值 → 锁定（指数退避）。返回锁定剩余毫秒（0 = 未锁定） */
+export function recordPublicAskFail(ip: string): number {
+  let st = ipFailStates.get(ip)
+  if (!st) {
+    st = { count: 0, lockedUntil: 0, lockRound: 0 }
+    ipFailStates.set(ip, st)
+  }
+  if (st.lockedUntil > 0 && Date.now() < st.lockedUntil) return st.lockedUntil - Date.now()
+  st.count += 1
+  if (st.count >= PUBLIC_ASK_FAIL_THRESHOLD) {
+    const base = PUBLIC_ASK_LOCK_BASE_MS * (2 ** st.lockRound)
+    st.lockedUntil = Date.now() + Math.min(base, PUBLIC_ASK_LOCK_MAX_MS)
+    st.lockRound += 1
+    st.count = 0
+    return st.lockedUntil - Date.now()
+  }
+  return 0
+}
+
+/**
  * 一次性迁移（v1.21.x → v1.22）：旧版把 `serenityAdvanced` 存在 CCC localstore.json；
  * 新版归 plugin 全局文件。全局文件已存在 → 跳过（幂等）；localstore 无旧节 → 跳过。
  * @param root - CCC 根（localstore.json 所在目录）

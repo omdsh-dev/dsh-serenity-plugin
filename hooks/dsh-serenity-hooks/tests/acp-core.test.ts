@@ -41,7 +41,7 @@ import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive, acpHttpPort } fro
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX } from '../src/skiff-role.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
-import { ensurePublicAskKey, verifyPublicAskKey, updateAdvancedSettings } from '../src/config-ops.js'
+import { ensurePublicAskKey, verifyPublicAskKey, rotatePublicAskKey, resetPublicAskIpFail, updateAdvancedSettings } from '../src/config-ops.js'
 
 let dir: string
 let oldConfigEnv: string | undefined
@@ -66,6 +66,10 @@ afterEach(() => {
   for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
   __setSimpleSourceForTest(null)
   stopAcpHttpServer()
+  // v1.26.5：清理 IP 失败锁定状态（模块级 Map，跨测试残留会误锁）
+  resetPublicAskIpFail('1.2.3.4')
+  resetPublicAskIpFail('5.6.7.8')
+  resetPublicAskIpFail('127.0.0.1')
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
   rmSync(dir, { recursive: true, force: true })
@@ -499,6 +503,62 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
       // 未知角色 → 200（角色缺省回退 CCC 第一个——问答页对普通用户友好，v1.26.2 设计）
       const badRole = await httpPost(port, { key, role: 'nope', question: 'hi' }, `/c/${encodeURIComponent(name)}/ask`)
       expect(badRole.status).toBe(200)
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  // ── v1.26.5 公网可靠校验：key 轮换 + IP 失败锁定（用户：key 校验必须可靠 + 开放公网 + 能换 key）──
+
+  it('rotatePublicAskKey 生成新 key 并覆盖写回（旧 key 立即失效）', () => {
+    const k1 = ensurePublicAskKey()
+    const k2 = rotatePublicAskKey()
+    expect(k2).toMatch(/^[0-9a-f]{64}$/)
+    expect(k2).not.toBe(k1)
+    expect(verifyPublicAskKey(k1)).toBe(false) // 旧 key 失效
+    expect(verifyPublicAskKey(k2)).toBe(true) // 新 key 生效
+  })
+
+  it('IP 失败锁定：连续失败达阈值 → 锁定（429）；其它 IP 不受影响；成功重置', async () => {
+    const port = 6300 + Math.floor(Math.random() * 100)
+    const key = ensurePublicAskKey()
+    const name = dir.split('/').filter(Boolean).pop() ?? ''
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const path = `/c/${encodeURIComponent(name)}/ask`
+    try {
+      // 模拟同一 IP（X-Forwarded-For）连续失败
+      const post = (xip: string, body: unknown): Promise<{ status: number; body: string }> => {
+        return new Promise((resolve, reject) => {
+          const data = JSON.stringify(body)
+          const req = request({
+            host: '127.0.0.1', port, path, method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data), 'X-Forwarded-For': xip },
+          }, (r) => {
+            const chunks: Buffer[] = []
+            r.on('data', (c: Buffer) => chunks.push(c))
+            r.on('end', () => resolve({ status: r.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }))
+          })
+          req.on('error', reject)
+          req.end(data)
+        })
+      }
+      // 前 4 次失败 → 401；第 5 次 → 429（触发锁定）
+      for (let i = 0; i < 4; i++) {
+        expect((await post('1.2.3.4', { key: 'wrong', question: 'hi' })).status).toBe(401)
+      }
+      const fifth = await post('1.2.3.4', { key: 'wrong', question: 'hi' })
+      expect(fifth.status).toBe(429)
+      // 锁定期间正确 key 也 429（该 IP）
+      const locked = await post('1.2.3.4', { key, question: 'hi' })
+      expect(locked.status).toBe(429)
+      // 其它 IP 不受影响 → 200
+      const other = await post('5.6.7.8', { key, question: 'hi' })
+      expect(other.status).toBe(200)
+      // 解锁后该 IP 恢复正常（直接重置状态）
+      resetPublicAskIpFail('1.2.3.4')
+      const afterReset = await post('1.2.3.4', { key, question: 'hi' })
+      expect(afterReset.status).toBe(200)
     } finally {
       stopAcpHttpServer()
     }

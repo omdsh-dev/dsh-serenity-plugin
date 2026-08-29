@@ -1,3 +1,19 @@
+## v1.26.5 — 2026-08-29（public 口公网可靠校验：key 常驻可见 + 失败锁定 + 轮换，S142 用户需求）
+
+**Scope:** 用户反馈：① key 输入框不见了（v1.26.4 隐藏逻辑）——"不能搞隐藏哈，不好说要换 key 呢"；② "key 的校验必须是可靠的；我要开放到公网"——公网暴露需防暴力破解 + 可轮换 key。
+
+### 变更
+- **`acp-http.ts` 聊天页 key 行常驻可见（v1.26.5 修复）**：localStorage 只做**预填**不再隐藏（`keyRow.style.display = 'none'` 移除）；已记忆时 placeholder 提示「访问 Key（已记忆，可修改）」——用户随时可查看/修改 key
+- **`config-ops.ts` 公网 key 失败锁定（v1.26.5）**：复用 gateway-auth 指数退避模式（按 **IP**——key 是全局单值，按 IP 锁定不误伤其他用户；攻击者换 IP 需换出口）：`PUBLIC_ASK_FAIL_THRESHOLD=5` / 首次锁定 15min / 指数退避上限 4h；`isPublicAskIpLocked` / `recordPublicAskFail` / `resetPublicAskIpFail`；成功校验自动重置该 IP 计数（防历史失败累计误锁）
+- **`acp-http.ts` handleAskParsed 接入锁定**：请求 IP 取 `X-Forwarded-For` 首个（公网反代/tunnel）→ 回退 `remoteAddress`；锁定期间直接 429；失败计数达到阈值 → 429（含剩余锁定分钟）
+- **`config-ops.ts` `rotatePublicAskKey()`（key 轮换）**：生成新 32 字节 hex → 覆盖写回（**强制替换**，旧 key 立即失效）
+- **`api.ts` /serenity/public-ask 支持 PUT {action:'rotate'}** → 返回新 key（x-serenity-ui 头限定）
+- **client PublicAskEditor**：key 行加「重新生成」按钮（confirm 确认 + 警示色 `.ae-rotate`；成功后本地刷新显示新 key）
+
+### 测试
+- **acp-core.test +2**：rotatePublicAskKey（新 key 非旧 key / 旧 key 立即失效 / 新 key 生效）/ IP 失败锁定（4 次 401 → 第 5 次 429 / 锁定期间正确 key 也 429 / 其它 IP 不受影响 200 / reset 后恢复）
+- **48 files / 625 tests 全绿**（+2）；typecheck ✓（node + client）→ build ✓（149316 B）
+
 ## v1.26.4 — 2026-08-29（public 口聊天体验升级：完整对话 UI + think 不渲染 + 连续对话，S142 用户需求）
 
 **Scope:** 用户：public 口的会话体验要更好，目前很简陋，**参考好的案例强化**；回答中 **markdown 渲染器对 `<think>` 标签不渲染**；**要有对话记录**（不需要存储，就是用于连续对话用户看看用的）；**最终这个渠道是用于对接各类 IM 的**，只不过先做个好的体验让用户感受。

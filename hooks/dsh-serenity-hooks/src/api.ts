@@ -20,7 +20,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { getStatus, setSafeMode } from './status.js'
 import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { listActiveHandymen } from './handyman-ops.js'
-import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey } from './config-ops.js'
+import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey, rotatePublicAskKey } from './config-ops.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const HANDYMEN_PATH = '/serenity/handymen'
@@ -374,17 +374,29 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
 
   // /serenity/public-ask：建议问答页配置信息（v1.26.2 用户：配置处需能获取 key 和地址）
   // GET → { enabled, port, key, allowed, urls }（x-serenity-ui 头限定 WebUI；key 仅管理员可见）
+  // PUT { action: 'rotate' } → 轮换 key（v1.26.5 用户：不好说要换 key 呢——生成新 key 旧 key 立即失效）
   ctx.webServer.register({
     kind: 'exact',
     path: PUBLIC_ASK_PATH,
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { error: 'method not allowed' })
-          return
-        }
         if (req.headers['x-serenity-ui'] !== '1') {
           sendJson(res, 403, { error: '仅限 WebUI（key 属敏感凭据）' })
+          return
+        }
+        if (req.method === 'PUT') {
+          const raw = await readBody(req, 16 * 1024)
+          const body = JSON.parse(raw) as { action?: string }
+          if (body.action !== 'rotate') {
+            sendJson(res, 400, { error: 'unsupported action (expected "rotate")' })
+            return
+          }
+          const newKey = rotatePublicAskKey()
+          sendJson(res, 200, { key: newKey })
+          return
+        }
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
           return
         }
         const settings = readAdvancedSettings()
