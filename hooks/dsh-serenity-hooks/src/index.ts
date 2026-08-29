@@ -36,6 +36,7 @@ import { registerStatusApi } from './api.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS, findSerenityRoot } from './ccc.js'
+import { readSkiffRoles } from './skiff-role.js'
 import { registerSettingsSection, readSimpleSettings } from './settings-section.js'
 import { registerGateway } from './gateway.js'
 import { registerRebuildTurnHook } from './rebuild.js'
@@ -195,23 +196,35 @@ function registerSkiff(ctx: Context): void {
   sync()
 }
 
-/** 解析当前 CCC 根：进程 cwd 上溯 .serenity 优先，live 会话 cwd 兜底 */
+/**
+ * 解析 Skiff 调试服务绑定的 CCC 根（v1.25.2 用户指出：skiff 必须绑定 CCC）：
+ * ① live 会话中**配置了 skiff.roles 的 CCC 优先**（用户认知中的绑定目标）
+ * ② 回退进程 cwd 上溯 .serenity
+ * ③ 再回退任一 live 会话的 CCC
+ */
 function resolveSkiffRoot(ctx: Context): string | null {
-  const fromCwd = findSerenityRoot(process.cwd())
-  if (fromCwd) return fromCwd
+  const liveRoots: string[] = []
   try {
     const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
     for (const s of sessions?.list?.() ?? []) {
       const cwd = s?.header?.cwd
       if (typeof cwd === 'string') {
         const r = findSerenityRoot(cwd)
-        if (r) return r
+        if (r && !liveRoots.includes(r)) liveRoots.push(r)
       }
     }
   } catch {
     /* 遍历失败忽略 */
   }
-  return null
+  // ① 含 skiff.roles 的 live CCC 优先（绑定用户配置了角色的 CCC）
+  for (const r of liveRoots) {
+    if (readSkiffRoles(r).size > 0) return r
+  }
+  // ② 进程 cwd（服务器启动目录通常即 CCC）
+  const fromCwd = findSerenityRoot(process.cwd())
+  if (fromCwd) return fromCwd
+  // ③ 任一 live CCC
+  return liveRoots[0] ?? null
 }
 
 /** 主 WebUI 端口（WebUI 链接；webServer 未装配回退 3080） */

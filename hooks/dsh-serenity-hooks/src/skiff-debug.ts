@@ -51,8 +51,8 @@ function sendHtml(res: ServerResponse, html: string): void {
   res.end(html)
 }
 
-/** 问答页 HTML：角色下拉 + 输入 + 答案区 + 轨迹区（JS 渲染）+ WebUI 链接 */
-export function skiffDebugPage(roles: Map<string, { model?: string }>, webPort: number): string {
+/** 问答页 HTML：角色下拉 + 输入 + 答案区 + 轨迹区（JS 渲染）+ 绑定的 CCC + WebUI 链接 */
+export function skiffDebugPage(roles: Map<string, { model?: string }>, cccRoot: string, webPort: number): string {
   const roleOptions = [...roles.entries()]
     .map(([name, r]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}${r.model ? ` (${escapeHtml(r.model)})` : ''}</option>`)
     .join('\n')
@@ -70,6 +70,8 @@ export function skiffDebugPage(roles: Map<string, { model?: string }>, webPort: 
   main { max-width: 720px; margin: 0 auto; }
   h1 { font-size: 18px; margin: 0 0 4px; }
   .sub { opacity: .65; font-size: 13px; margin-bottom: 16px; }
+  .ccc { display: inline-block; padding: 3px 10px; border-radius: 999px; background: rgba(11,168,117,.12); color: #0ba875; font-size: 12px; font-weight: 600; margin-bottom: 12px; word-break: break-all; }
+  @media (prefers-color-scheme: dark) { .ccc { color: #3ddc9a; } }
   label { font-size: 13px; font-weight: 600; display: block; margin: 12px 0 4px; }
   select, textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid #d0d7de; background: #fff; color: inherit; font-size: 14px; }
   @media (prefers-color-scheme: dark) { select, textarea { background: #26282c; border-color: #3a3d42; } }
@@ -91,7 +93,8 @@ export function skiffDebugPage(roles: Map<string, { model?: string }>, webPort: 
 <body>
 <main>
   <h1>Skiff Debug</h1>
-  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.0 实验性）— 走 DSH agent-loop 会话核心，轨迹与 WebUI 同源</div>
+  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.2 实验性）— 走 DSH agent-loop 会话核心，轨迹与 WebUI 同源</div>
+  <div class="ccc">CCC: ${escapeHtml(cccRoot)}</div>
   <label for="role">角色</label>
   <select id="role">${roleOptions || '<option value="">(未配置角色)</option>'}</select>
   <label for="q">问题</label>
@@ -147,22 +150,27 @@ function escapeHtml(s: string): string {
 
 /**
  * 启动调试问答服务（单实例；重复启动幂等返回既有实例）。
- * @param root 当前 CCC 根（角色配置读取 + skiff agent cwd）
+ *
+ * **CCC 绑定（v1.25.2 用户指出）**：服务绑定一个 CCC root（调用方 resolveSkiffRoot
+ * 解析：live 会话中**含 skiff.roles 的 CCC 优先**）；角色配置**每次请求实时读取**
+ * （不缓存快照）——改 .opencode/serenity.json 后刷新页面即生效，无需重启服务。
+ * 页面顶部显示绑定的 CCC root，绑定可核对。
+ *
+ * @param root 绑定的 CCC 根（角色配置读取 + skiff agent cwd）
  * @param port 调试端口（仅 127.0.0.1）
  * @param webPort 主 WebUI 端口（WebUI 链接）
  */
 export async function startSkiffDebugServer(ctx: Context, root: string, port: number, webPort: number): Promise<void> {
   if (active) return
-  const roles = readSkiffRoles(root)
   const server = createServer((req, res) => {
-    void handle(ctx, root, roles, webPort, req, res)
+    void handle(ctx, root, webPort, req, res)
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(port, '127.0.0.1', () => resolve())
   })
   active = { server, port }
-  console.log(`[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:${port}（角色: ${roles.size}，WebUI: ${webPort}）`)
+  console.log(`[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:${port}（CCC: ${root}，WebUI: ${webPort}）`)
 }
 
 export function stopSkiffDebugServer(): void {
@@ -178,7 +186,6 @@ export function stopSkiffDebugServer(): void {
 async function handle(
   ctx: Context,
   root: string,
-  roles: Map<string, { model?: string }>,
   webPort: number,
   req: IncomingMessage,
   res: ServerResponse,
@@ -186,7 +193,9 @@ async function handle(
   try {
     const url = (req.url ?? '/').split('?')[0] ?? '/'
     if (req.method === 'GET' && url === '/') {
-      sendHtml(res, skiffDebugPage(roles, webPort))
+      // 实时读取角色（v1.25.2：不缓存快照——改配置刷新页面即生效）
+      const roles = readSkiffRoles(root)
+      sendHtml(res, skiffDebugPage(roles, root, webPort))
       return
     }
     if (req.method === 'POST' && url === '/ask') {
@@ -201,6 +210,7 @@ async function handle(
       }
       const roleName = typeof body.role === 'string' ? body.role : ''
       const question = typeof body.question === 'string' ? body.question : ''
+      const roles = readSkiffRoles(root)
       const role = roles.get(roleName)
       if (!roleName || !role) {
         sendJson(res, 400, { error: `unknown role: ${roleName}` })

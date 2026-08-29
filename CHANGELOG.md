@@ -1,3 +1,14 @@
+## v1.25.2 — 2026-08-29（Skiff 绑定 CCC 修复：实时读取角色 + 页面显示绑定 CCC，用户设计批评）
+
+**Scope:** 用户实测——3099 调试页**看不到角色**，并指出设计缺失：**「skiff 应该绑定 CCC，这个玩法没绑定 CCC」**。根因双链：① 服务启动时 `resolveSkiffRoot` 按「进程 cwd 优先」猜 root（多 CCC 时可能绑定错目标，且绑定不可见）；② 启动时 `readSkiffRoles(root)` **快照角色**——配置写入/修改后服务已 active（幂等 return），角色永不刷新（除非重启服务）。
+
+### 变更（CCC 绑定根治）
+- **skiff-debug.ts**：角色配置**每次请求实时读取**（GET / 与 POST /ask 均 `readSkiffRoles(root)`，删除启动时快照）——改 `.opencode/serenity.json` 后**刷新页面即生效，无需重启服务**；问答页新增 **CCC 徽标**（`CCC: <root>` 顶部显示，绑定目标可核对）；v1.25.2 版本号
+- **index.ts `resolveSkiffRoot`**：绑定优先级重排——① live 会话中**配置了 skiff.roles 的 CCC 优先**（用户认知中的绑定目标）② 回退进程 cwd ③ 任一 live CCC
+
+### 测试
+- skiff-debug.test：页面渲染断言 +CCC 徽标（含路径）；新增「角色配置实时读取」用例（空配置 → 写 skiff.roles → 刷新页面立即可见，不重启服务）——**46 files / 532 tests 全绿**（+1）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.1 — 2026-08-29（Skiff 区块 UI 补全：设置面板「Serenity」页缺 Skiff 开关，用户实测反馈）
 
 **Scope:** 用户实测——v1.25.0 发布后设置面板「Serenity」页**看不到 Skiff 区块**。根因：简单配置层分 host/client 两半——v1.25.0 只更新了 host 侧 schema（settings-section.ts `skiffEnabled/skiffDebugPort`），client half 的 `SettingsSection.tsx` 是**自绘表单**（不自动跟随 schema），未渲染 Skiff 组。
