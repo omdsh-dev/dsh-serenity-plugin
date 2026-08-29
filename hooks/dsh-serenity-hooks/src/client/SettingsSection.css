@@ -165,6 +165,24 @@
   width: 160px;
 }
 
+/* Skiff 调试端口输入（number；关闭时跟随 disabled 半透明） */
+.ss-portInput {
+  width: 96px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-fill-l1, rgba(128, 128, 128, 0.08));
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ss-portInput:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .ss-value {
   min-width: 40px;
   font-variant-numeric: tabular-nums;

@@ -32,6 +32,9 @@ export interface SerenitySimpleWire {
   rebuildEnabled?: boolean
   rebuildThreshold?: number
   namingEnabled?: boolean
+  /** F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务启停 + 端口 */
+  skiffEnabled?: boolean
+  skiffDebugPort?: number
 }
 
 /** 本 section 的注入面（apply 闭包提供 settingsScope） */
@@ -117,6 +120,9 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const setThreshold = (v: number): void => {
     void scope.set('rebuildThreshold', Math.min(1, Math.max(0.01, v)))
   }
+  const setSkiffPort = (v: number): void => {
+    void scope.set('skiffDebugPort', Math.min(65535, Math.max(1024, Math.round(v))))
+  }
 
   if (!ready) {
     return (
@@ -130,6 +136,8 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const rebuildOn = value?.rebuildEnabled ?? true
   const threshold = value?.rebuildThreshold ?? 0.9
   const namingOn = value?.namingEnabled ?? true
+  const skiffOn = value?.skiffEnabled ?? false
+  const skiffPort = value?.skiffDebugPort ?? 3099
 
   return (
     <div className="ss-section">
@@ -184,6 +192,36 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             title="会话命名"
             desc="使用宁静号会话时，把当前会话命名为 SESSION 目录名"
             control={<Toggle checked={namingOn} onChange={(on) => toggle('namingEnabled', on)} />}
+          />
+        </li>
+      </Group>
+
+      {/* F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务（人工启停） */}
+      <Group title="Skiff">
+        <li>
+          <RowCard
+            title="认知子集调试服务"
+            desc="Skiff 角色问答页（实验性；启停人工控制，仅监听 127.0.0.1）"
+            control={<Toggle checked={skiffOn} onChange={(on) => toggle('skiffEnabled', on)} />}
+          />
+        </li>
+        <li>
+          <RowCard
+            title="调试端口"
+            desc="Skiff 问答页端口（1024 ~ 65535，默认 3099）"
+            control={
+              <div className="ss-threshold">
+                <input
+                  className="ss-portInput"
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={skiffPort}
+                  disabled={!skiffOn}
+                  onChange={(e) => setSkiffPort(Number(e.target.value))}
+                />
+              </div>
+            }
           />
         </li>
       </Group>

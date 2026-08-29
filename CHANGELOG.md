@@ -1,3 +1,15 @@
+## v1.25.1 — 2026-08-29（Skiff 区块 UI 补全：设置面板「Serenity」页缺 Skiff 开关，用户实测反馈）
+
+**Scope:** 用户实测——v1.25.0 发布后设置面板「Serenity」页**看不到 Skiff 区块**。根因：简单配置层分 host/client 两半——v1.25.0 只更新了 host 侧 schema（settings-section.ts `skiffEnabled/skiffDebugPort`），client half 的 `SettingsSection.tsx` 是**自绘表单**（不自动跟随 schema），未渲染 Skiff 组。
+
+### 变更
+- **src/client/SettingsSection.tsx**：`SerenitySimpleWire` + `skiffEnabled/skiffDebugPort`；新增 **Skiff 分组**——① 认知子集调试服务开关（`skiffEnabled`）② 调试端口 number 输入（1024~65535 clamp，默认 3099，`disabled` 跟随开关）；`setSkiffPort` 经 `scope.set` 写回 settings.yaml
+- **src/client/SettingsSection.css**：新增 `.ss-portInput`（number 输入，--dsw-alias token，关闭时半透明）
+- host 侧无需改动（v1.25.0 已注册 schema + entryDefaults）
+
+### 测试
+- 无新测试（UI 组件无单测覆盖面；typecheck client ✓ 验证 wire 类型一致）——**46 files / 531 tests 全绿**；typecheck ✓（node + client）→ build ✓（134857 B，client +1867 B 含 Skiff 区块）
+
 ## v1.25.0 — 2026-08-29（F4 Skiff 认知子集角色：会话核心 + 调试问答页 + skiff_admin 工具 + 双白名单强制 + 拦截缝旁路，S142 用户设计驱动）
 
 **Scope:** 知识型 CCC 价值释放（F4）首版——Skiff（舢板）= 宁静号放出的独立小艇：完整 trajectory（全知全能）的**任意子集角色**，由 CCC 定义（`.opencode/serenity.json skiff.roles`）。用户拍板（2026-08-28 累计）：① 首版只提供**调试页**（ACP stdio 协议 F4c 后续，复用同一会话核心）② 双白名单（MSM 独立 + 非 MSM 工具独立，白名单外全隐藏，默认全隐藏）③ dsp 只给基础提示词，角色人格 CCC 完全定义（全替换 ACC 默认注入）④ Skiff 默认不使用 trajectory 机制（不建 SESSION.md / 无 keeper / 无 rebuild），轨迹纪律按角色子集选择性开启 ⑤ 新增第 12 个 ACC 工具 `skiff_admin`（guide/validate/list）⑥ 启停 = 人工（设置面板开关，不随插件加载自动启动）⑦ per-role 模型 CCC 直接指定（无白名单校验）⑧ 实验性质：默认全关、guard/旁路只对 skiff 会话生效、未配置角色零影响。
