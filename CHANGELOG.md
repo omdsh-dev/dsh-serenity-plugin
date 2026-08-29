@@ -1,3 +1,14 @@
+## v1.26.7 — 2026-08-29（public 口 key 即存修复，S142 用户实测）
+
+**Scope:** 用户实测：key 填写了没存 localStorage——对话页提示无 key。
+
+### 变更
+- **`acp-http.ts` 列表页 key 即存（v1.26.7 修复）**：`gateKey` input 事件补 `localStorage.setItem(KEY_STORE, value)`——v1.26.6 重构漏掉保存（只做卡片门控 applyGate，v1.26.5 对话页保存点又被删），导致对话页 `getStoredKey()` 恒空。现在填 key 即记忆（用户"填一次就记录"语义），无需保存按钮
+
+### 测试
+- **acp-core.test 更新**：列表页断言含 `localStorage.setItem(KEY_STORE`（即存逻辑回归）
+- **48 files / 625 tests 全绿**；typecheck ✓（node + client）→ build ✓（149316 B）
+
 ## v1.26.6 — 2026-08-29（public 口 key 门前置 + 移动端适配，S142 用户需求）
 
 **Scope:** 用户：① key 应该在选择容器前填写，不填不让选容器（对话页没必要填，填一次就记录）；② 3100 暴露的页面适配移动端。

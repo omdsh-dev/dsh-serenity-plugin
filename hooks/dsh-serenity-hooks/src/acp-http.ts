@@ -481,7 +481,11 @@ function applyGate() {
     else { card.setAttribute('href', '/c/' + encodeURIComponent(card.dataset.name)); card.style.pointerEvents = ''; card.style.opacity = '' }
   }
 }
-gateKey.addEventListener('input', applyGate)
+gateKey.addEventListener('input', () => {
+  // 即存 localStorage（v1.26.7 修复：v1.26.6 漏掉保存——填一次就记录，对话页读取）
+  try { localStorage.setItem(KEY_STORE, gateKey.value.trim()) } catch {}
+  applyGate()
+})
 // key 自动从 localStorage 恢复
 let hasSavedKey = false
 try { const saved = localStorage.getItem(KEY_STORE); if (saved) { gateKey.value = saved; hasSavedKey = true } } catch {}

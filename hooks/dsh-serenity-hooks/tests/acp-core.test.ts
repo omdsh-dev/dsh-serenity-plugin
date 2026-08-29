@@ -388,6 +388,7 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
       expect(res.body).toContain('先填写访问 key')
       expect(res.body).toContain('gateKey') // key 输入门
       expect(res.body).toContain('serenity-public-ask-key') // localStorage key 记忆
+      expect(res.body).toContain('localStorage.setItem(KEY_STORE') // 即存（v1.26.7 修复：填 key 即记忆）
       expect(res.body).toContain('viewport-fit=cover') // 移动端 safe-area（v1.26.6）
       expect(res.body).toContain('100dvh') // iOS 地址栏适配
       expect(res.body).toContain('font-size: 16px') // iOS 防聚焦放大
