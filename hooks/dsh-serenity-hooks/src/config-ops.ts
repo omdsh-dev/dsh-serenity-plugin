@@ -76,10 +76,13 @@ export interface PersonaSettings {
 }
 
 /** F4d 建议问答页（v1.26.1，S142 用户：按认知容器暴露问答页供他人验证）：
- * 与 ACP HTTP 共用 3100 端口；key 首次启用自动生成（plugin 全局文件固定），无 key 不工作 */
+ * 与 ACP HTTP 共用 3100 端口；key 首次启用自动生成（plugin 全局文件固定），无 key 不工作。
+ * v1.26.2：按容器权限控制——allowed 白名单（容器名）；空 = 全部开放（向后兼容 v1.26.1 全局开放） */
 export interface PublicAskSettings {
   /** 访问 key（空 = 未生成；首次启用时 ensurePublicAskKey 自动生成随机 key 写回固定） */
   key: string
+  /** 开放容器白名单（CCC 目录名，如 home-serenity）；空数组 = 全部容器开放 */
+  allowed: string[]
 }
 
 /** 高级设定全量（localstore.json 持久化形态；passHash 含 hash） */
@@ -117,6 +120,7 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     },
     publicAsk: {
       key: '',
+      allowed: [],
     },
   }
 }
@@ -219,6 +223,9 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
     },
     publicAsk: {
       key: typeof publicAsk.key === 'string' ? publicAsk.key : def.publicAsk.key,
+      allowed: Array.isArray(publicAsk.allowed)
+        ? publicAsk.allowed.filter((n): n is string => typeof n === 'string' && n !== '')
+        : def.publicAsk.allowed,
     },
   }
 }
@@ -284,6 +291,9 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
     publicAsk: patch.publicAsk !== undefined
       ? {
         key: typeof patch.publicAsk.key === 'string' ? patch.publicAsk.key : current.publicAsk.key,
+        allowed: Array.isArray(patch.publicAsk.allowed)
+          ? patch.publicAsk.allowed.filter((n): n is string => typeof n === 'string' && n !== '')
+          : current.publicAsk.allowed,
       }
       : current.publicAsk,
   }
@@ -302,7 +312,7 @@ export function ensurePublicAskKey(): string {
   const current = readAdvancedSettings()
   if (current.publicAsk.key !== '') return current.publicAsk.key
   const key = randomBytes(32).toString('hex')
-  updateAdvancedSettings({ publicAsk: { key } })
+  updateAdvancedSettings({ publicAsk: { key, allowed: current.publicAsk.allowed } })
   return key
 }
 
@@ -357,6 +367,10 @@ export interface AdvancedSettingsWire {
   rebuild: RebuildSettings
   naming: NamingSettings
   persona: PersonaSettings
+  publicAsk: {
+    /** 开放容器白名单（v1.26.2：容器名数组；空 = 全部开放） */
+    allowed: string[]
+  }
 }
 
 /** 持久化 → wire（剥离 passHash/totpSecret；只留布尔） */
@@ -380,6 +394,9 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
     rebuild: settings.rebuild,
     naming: settings.naming,
     persona: settings.persona,
+    publicAsk: {
+      allowed: [...settings.publicAsk.allowed],
+    },
   }
 }
 
@@ -459,6 +476,11 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
     if (typeof wire.persona.mode === 'string') psPatch.mode = wire.persona.mode
     if (typeof wire.persona.overrideText === 'string') psPatch.overrideText = wire.persona.overrideText
     patch.persona = psPatch
+  }
+  if (wire.publicAsk !== undefined && Array.isArray(wire.publicAsk.allowed)) {
+    const paPatch: PublicAskSettings = { ...current.publicAsk }
+    paPatch.allowed = wire.publicAsk.allowed.filter((n): n is string => typeof n === 'string' && n !== '')
+    patch.publicAsk = paPatch
   }
   return updateAdvancedSettings(patch)
 }

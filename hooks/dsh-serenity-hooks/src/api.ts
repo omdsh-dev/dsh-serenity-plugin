@@ -20,13 +20,15 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { getStatus, setSafeMode } from './status.js'
 import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { listActiveHandymen } from './handyman-ops.js'
-import { readAdvancedSettings, toWire, applyWirePatch } from './config-ops.js'
+import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey } from './config-ops.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const HANDYMEN_PATH = '/serenity/handymen'
 const UPLOAD_PATH = '/serenity/image-upload'
 const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
+const CCCS_PATH = '/serenity/cccs'
+const PUBLIC_ASK_PATH = '/serenity/public-ask'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
 export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
@@ -339,6 +341,70 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           return
         }
         sendJson(res, 405, { error: 'method not allowed' })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+
+  // /serenity/cccs：候选认知容器列表（v1.26.2 设置面板「开放容器」白名单选择的数据源；
+  // 只读；与 skiff 调试页同一 discoverCccs——工作区注册表 + 持久化会话 + live 兜底）
+  ctx.webServer.register({
+    kind: 'exact',
+    path: CCCS_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
+        const root = findSerenityRoot(workspace) ?? ''
+        // 动态 import：discoverCccs 依赖 skiff 核心（dsh-llm 运行时 import）——
+        // 保持 api.ts 静态链纯净（仅本端点触发时加载，api 纯函数测试不受影响）
+        const { discoverCccs } = await import('./skiff-debug.js')
+        const cccs = await discoverCccs(ctx, root)
+        sendJson(res, 200, { cccs })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+
+  // /serenity/public-ask：建议问答页配置信息（v1.26.2 用户：配置处需能获取 key 和地址）
+  // GET → { enabled, port, key, allowed, urls }（x-serenity-ui 头限定 WebUI；key 仅管理员可见）
+  ctx.webServer.register({
+    kind: 'exact',
+    path: PUBLIC_ASK_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        if (req.headers['x-serenity-ui'] !== '1') {
+          sendJson(res, 403, { error: '仅限 WebUI（key 属敏感凭据）' })
+          return
+        }
+        const settings = readAdvancedSettings()
+        // 动态 import：readSimpleSettings 依赖 settings-section（schemastery peerDep）——
+        // 保持 api.ts 静态链纯净（仅本端点触发时加载）
+        const { readSimpleSettings } = await import('./settings-section.js')
+        const simple = readSimpleSettings()
+        const allowed = settings.publicAsk.allowed
+        // 地址：单容器页 /c/<name>（开放容器）+ 列表页 /
+        const port = simple.acpHttpPort ?? 3100
+        const base = `http://127.0.0.1:${port}`
+        const containerUrls = allowed.map((name) => ({ name, url: `${base}/c/${encodeURIComponent(name)}` }))
+        sendJson(res, 200, {
+          enabled: simple.publicAskEnabled ?? false,
+          port,
+          key: ensurePublicAskKey(),
+          allowed,
+          urls: containerUrls,
+          listUrl: `${base}/`,
+        })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
       }

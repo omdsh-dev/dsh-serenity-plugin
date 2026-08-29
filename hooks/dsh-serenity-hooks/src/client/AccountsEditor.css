@@ -334,3 +334,85 @@
   opacity: 0.6;
   cursor: default;
 }
+
+/* ── v1.26.2 建议问答页配置（PublicAskEditor：开放容器白名单 chips + key/地址展示）── */
+
+.ae-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0 4px;
+}
+
+.ae-chip {
+  padding: 4px 12px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.ae-chip:hover {
+  border-color: var(--dsw-alias-accent, #0ba875);
+}
+
+.ae-chipOn {
+  background: var(--dsw-alias-accent, #0ba875);
+  border-color: var(--dsw-alias-accent, #0ba875);
+  color: #fff;
+}
+
+.ae-saved {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-state-success-fg, #4ade80);
+}
+
+.ae-err {
+  margin-left: 10px;
+  font-size: 12px;
+  color: var(--dsw-alias-state-danger-fg, #f87171);
+}
+
+.ae-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-l2);
+  color: var(--dsw-alias-text-primary);
+  word-break: break-all;
+  user-select: all;
+}
+
+.ae-copy {
+  flex: none;
+  margin-left: 8px;
+  padding: 3px 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ae-copy:hover {
+  border-color: var(--dsw-alias-accent, #0ba875);
+  color: var(--dsw-alias-accent, #0ba875);
+}
+
+.ae-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.ae-labelDim {
+  opacity: 0.65;
+  min-width: 96px;
+}

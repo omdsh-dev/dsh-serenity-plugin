@@ -41,12 +41,16 @@ import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive, acpHttpPort } fro
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX } from '../src/skiff-role.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
-import { ensurePublicAskKey, verifyPublicAskKey } from '../src/config-ops.js'
+import { ensurePublicAskKey, verifyPublicAskKey, updateAdvancedSettings } from '../src/config-ops.js'
 
 let dir: string
+let oldConfigEnv: string | undefined
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'acp-core-'))
+  // plugin 全局配置隔离（防 ensurePublicAskKey/updateAdvancedSettings 污染真实 ~/.dsh）
+  oldConfigEnv = process.env.SERENITY_HOOKS_CONFIG
+  process.env.SERENITY_HOOKS_CONFIG = join(dir, 'serenity-hooks.json')
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
   writeFileSync(
@@ -62,6 +66,8 @@ afterEach(() => {
   for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
   __setSimpleSourceForTest(null)
   stopAcpHttpServer()
+  if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+  else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -356,7 +362,7 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
     }
   })
 
-  it('GET / 问答页开启 → 渲染页面（含 key 输入框 + CCC 列表）', async () => {
+  it('GET / 问答页开启 → 渲染容器列表页（含开放容器链接）', async () => {
     const port = 5600 + Math.floor(Math.random() * 100)
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
     await startAcpHttpServer(fakeCtx() as never, port, dir)
@@ -372,8 +378,123 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
       })
       expect(res.status).toBe(200)
       expect(res.body).toContain('Serenity Public Ask')
+      // v1.26.2：列表页（容器卡片链接 /c/<name>；不再内嵌 key 输入/CCC 下拉）
+      const name = dir.split('/').filter(Boolean).pop() ?? ''
+      expect(res.body).toContain(`/c/${encodeURIComponent(name)}`)
+      expect(res.body).toContain('选择认知容器开始提问')
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('GET /c/<name> → 单容器问答页（含角色下拉 + localStorage key 恢复）', async () => {
+    const port = 5800 + Math.floor(Math.random() * 100)
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    try {
+      const name = dir.split('/').filter(Boolean).pop() ?? ''
+      const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: `/c/${encodeURIComponent(name)}`, method: 'GET' }, (r) => {
+          const chunks: Buffer[] = []
+          r.on('data', (c: Buffer) => chunks.push(c))
+          r.on('end', () => resolve({ status: r.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }))
+        })
+        req.on('error', reject)
+        req.end()
+      })
+      expect(res.status).toBe(200)
       expect(res.body).toContain('访问 Key')
-      expect(res.body).toContain('认知容器')
+      expect(res.body).toContain('问答角色')
+      expect(res.body).toContain('qa') // 角色下拉选项
+      expect(res.body).toContain('serenity-public-ask-key') // localStorage key
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('GET /c/<unknown> → 容器不存在提示页', async () => {
+    const port = 5900 + Math.floor(Math.random() * 100)
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    try {
+      const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: '/c/does-not-exist', method: 'GET' }, (r) => {
+          const chunks: Buffer[] = []
+          r.on('data', (c: Buffer) => chunks.push(c))
+          r.on('end', () => resolve({ status: r.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }))
+        })
+        req.on('error', reject)
+        req.end()
+      })
+      expect(res.status).toBe(200)
+      expect(res.body).toContain('不存在')
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('allowed 白名单：开放容器可问，未开放容器 403/关闭提示页', async () => {
+    const port = 6000 + Math.floor(Math.random() * 100)
+    const key = ensurePublicAskKey()
+    const name = dir.split('/').filter(Boolean).pop() ?? ''
+    // 白名单不含当前容器（dir 名）→ 它被"已发现但未开放"；"other" 未发现
+    updateAdvancedSettings({ publicAsk: { key, allowed: ['some-other-ccc'] } })
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    try {
+      // 未开放容器 POST /c/<name>/ask → 403
+      const denied = await httpPost(port, { key, question: 'hi' }, `/c/${encodeURIComponent(name)}/ask`)
+      expect(denied.status).toBe(403)
+      // 未开放容器 GET /c/<name> → 关闭提示页（已发现但白名单外）
+      const page = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: `/c/${encodeURIComponent(name)}`, method: 'GET' }, (r) => {
+          const chunks: Buffer[] = []
+          r.on('data', (c: Buffer) => chunks.push(c))
+          r.on('end', () => resolve({ status: r.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }))
+        })
+        req.on('error', reject)
+        req.end()
+      })
+      expect(page.status).toBe(200)
+      expect(page.body).toContain('未开放问答')
+      // 列表页不含未开放容器（dir 名不在列表）
+      const list = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = request({ host: '127.0.0.1', port, path: '/', method: 'GET' }, (r) => {
+          const chunks: Buffer[] = []
+          r.on('data', (c: Buffer) => chunks.push(c))
+          r.on('end', () => resolve({ status: r.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }))
+        })
+        req.on('error', reject)
+        req.end()
+      })
+      expect(list.body).not.toContain(`/c/${encodeURIComponent(name)}`)
+      // 白名单空 = 全部开放（向后兼容 v1.26.1）：重新放行
+      updateAdvancedSettings({ publicAsk: { key, allowed: [] } })
+      const ok = await httpPost(port, { key, question: 'hi' }, `/c/${encodeURIComponent(name)}/ask`)
+      expect(ok.status).toBe(200)
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('POST /c/<name>/ask 会话延续 + 角色参数（v1.26.2 用户：应能选择角色）', async () => {
+    const port = 6100 + Math.floor(Math.random() * 100)
+    const key = ensurePublicAskKey()
+    const name = dir.split('/').filter(Boolean).pop() ?? ''
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    try {
+      const first = await httpPost(port, { key, role: 'qa', question: 'hi' }, `/c/${encodeURIComponent(name)}/ask`)
+      expect(first.status).toBe(200)
+      const firstData = JSON.parse(first.body) as { sessionId: string; continued: boolean }
+      expect(firstData.continued).toBe(false)
+      const follow = await httpPost(port, { key, role: 'qa', question: 'again', sessionId: firstData.sessionId }, `/c/${encodeURIComponent(name)}/ask`)
+      expect(follow.status).toBe(200)
+      const followData = JSON.parse(follow.body) as { continued: boolean }
+      expect(followData.continued).toBe(true)
+      // 未知角色 → 200（角色缺省回退 CCC 第一个——问答页对普通用户友好，v1.26.2 设计）
+      const badRole = await httpPost(port, { key, role: 'nope', question: 'hi' }, `/c/${encodeURIComponent(name)}/ask`)
+      expect(badRole.status).toBe(200)
     } finally {
       stopAcpHttpServer()
     }

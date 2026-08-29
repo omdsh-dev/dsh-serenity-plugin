@@ -24,6 +24,7 @@ import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-r
 import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
+import { PublicAskEditor } from './PublicAskEditor.js'
 import './SettingsSection.css'
 
 /** serenity-hooks 简单配置 wire 形态（与 host 侧 schema 对齐） */
@@ -273,6 +274,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
           />
         </li>
       </Group>
+
+      {/* v1.26.2：建议问答页配置（开放容器白名单 + key/地址展示；plugin 全局 /serenity/config + /serenity/cccs） */}
+      <div className="ss-group">
+        <h3 className="ss-groupTitle">建议问答</h3>
+        <PublicAskEditor publicAskOn={publicAskOn} />
+      </div>
 
       {/* 复杂配置（账号 + 工作区白名单）：plugin 全局文件 /serenity/config */}
       <div className="ss-group">

@@ -1,3 +1,24 @@
+## v1.26.2 — 2026-08-29（F4d 建议问答页：按容器权限控制 + URL 容器名 + localStorage key + 角色选择 + 配置处取 key/地址，S142 用户需求）
+
+**Scope:** 用户对 v1.26.1 问答页的演进要求：① **按容器进行权限控制**——配置开放哪个容器（不再是全局开放所有 CCC）；② **容器名体现在 URL 上**——`/c/<容器名>` 单容器页；③ **用户只需要输入 key 即可使用**（URL 已锁定容器，页面不再选 CCC）；④ **key 自动存储在 localStorage**（输入一次浏览器记住）；⑤ 3100 应能**选择角色**（初版漏了）；⑥ **配置处需能获取 key 和地址**（管理员分享给使用者）。
+
+### 变更
+- **`config-ops.ts`**：`PublicAskSettings` +`allowed: string[]`（开放容器白名单，容器名；**空 = 全部开放**——向后兼容 v1.26.1 全局开放语义）；merge/update/applyWirePatch/toWire 全链路（数组过滤非空字符串）；`AdvancedSettingsWire.publicAsk.allowed` wire 暴露（面板读写）
+- **`acp-http.ts`**（路由重构）：
+  - **GET /** → 容器列表页（只列已开放容器，卡片链接 `/c/<name>`；空白名单 = 全部）
+  - **GET /c/<name>** → 单容器问答页（URL 锁定容器；**key 输入 + 角色下拉** + 问题；**key 自动存 localStorage**（`serenity-public-ask-key`，加载恢复/提交保存）；含 容器不存在 / 未开放 提示页）
+  - **POST /c/<name>/ask** → 该容器问答（白名单 403 + key 401 + 角色参数 + 会话延续 v1.25.10 语义）
+  - **POST /ask** 兼容旧形态（`{key, ccc|name, ...}`）→ 同样做白名单校验（`handleAskParsed` 公共核心抽出，两路由共用）
+  - `containerAllowed(name)`：allowed 空 = 全放行；非空 = 容器名 ∈ 白名单
+- **`api.ts`**：新增 **GET /serenity/cccs**（候选容器列表，`discoverCccs` 动态 import 保持 api.ts 静态链纯净）+ **GET /serenity/public-ask**（x-serenity-ui 头限定：`{enabled, port, key, allowed, urls: [{name,url}], listUrl}`——配置处获取 key 与地址）
+- **client**：`accounts-api.ts` WireConfig +`publicAsk.allowed` + saveConfig patch；**`PublicAskEditor.tsx`（新）**——开放容器白名单 chips（候选 /serenity/cccs）+ 保存（/serenity/config）+ **key/地址展示区**（复制按钮；开关打开时拉取 /serenity/public-ask）；SettingsSection「ACP / 建议问答」组下方新增「建议问答」配置组；AccountsEditor.css +chips/key/copy 样式
+- **测试隔离修正**：acp-core.test.ts 补 `SERENITY_HOOKS_CONFIG` 临时文件隔离（防 ensurePublicAskKey 污染真实 ~/.dsh）+ schemastery/dsh-settings mock
+
+### 测试
+- **acp-core.test +4**：GET /c/<name> 单容器页（角色下拉 qa + localStorage key）/ GET /c/unknown 不存在页 / allowed 白名单（未开放 POST 403 + GET 关闭页 + 列表不含 + 空白名单恢复全开）/ POST /c/<name>/ask 会话延续 + 角色参数（未知角色回退第一个 200）
+- 原 F4d 测试适配：GET / 断言改列表页（/c/<name> 链接）
+- **47 files / 599 tests 全绿**（+4）；typecheck ✓（node + client）→ build ✓（147762 B，含 PublicAskEditor 区块）
+
 ## v1.26.1 — 2026-08-29（F4d 建议问答页：3100 复用 ACP 端口，key 认证，S142 用户需求）
 
 **Scope:** 用户：「建议问答页面——新开 3100 接口，按认知容器暴露一个建议问答页面供他人验证：① 页面可配置开关（按认知容器开关）② 基本 key 认证——没有 key 不工作；key 随机生成后固定（配置时生成）」。用户拍板：**复用 ACP 的 3100 端口**（GET / 渲染问答页，POST / 处理 JSON-RPC + /ask 处理问答，一个服务两个面）/ **全局开关**（settings 面板 `publicAskEnabled`，非按 CCC 单独开关）/ **key 首次启用自动生成写回**（`~/.dsh/serenity-hooks.json publicAsk.key`，crypto.randomBytes(32) hex 64 字符，幂等不覆盖手改）。
