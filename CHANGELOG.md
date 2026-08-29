@@ -1,3 +1,16 @@
+## v1.26.6 — 2026-08-29（public 口 key 门前置 + 移动端适配，S142 用户需求）
+
+**Scope:** 用户：① key 应该在选择容器前填写，不填不让选容器（对话页没必要填，填一次就记录）；② 3100 暴露的页面适配移动端。
+
+### 变更
+- **`acp-http.ts` 列表页 key 门（v1.26.6）**：`publicAskListPage` 顶部新增 key 输入框（keyGate）——**key 在选容器前填写**（用户拍板）；未填 key 时容器卡片禁用（pointer-events:none + 半透明 + aria-disabled），填写后恢复可点击；key 自动从 localStorage 恢复（`serenity-public-ask-key`，填一次就记录）
+- **`acp-http.ts` 对话页去 key 输入（v1.26.6）**：`publicAskContainerPage` 移除 keyRow 输入行——key 从 localStorage 读取（`getStoredKey()`）；无 key 时发送提示「请先回到容器列表页填写 key」；keyRow CSS 删除
+- **`acp-http.ts` 移动端适配（v1.26.6，参考 v1.22.1 登录页标准）**：两页面 viewport 加 `viewport-fit=cover`（safe-area 生效）；`@media (max-width:640px)` 块——**输入控件 16px 防 iOS 聚焦放大**（key/textarea/select）、**触控目标 ≥44px**（back/select/newBtn/sendBtn/keyGate input）、`100dvh` 防 iOS 地址栏跳动、safe-area-inset-top/bottom 全适配、消息气泡/卡片/间距移动端舒适化；key 输入 `autocapitalize="none" enterkeyhint="done"`、textarea `enterkeyhint="send" autocapitalize="sentences"`
+
+### 测试
+- **acp-core.test 更新**：列表页断言 key 门（gateKey/先填写访问 key/localStorage）；对话页断言无 keyRow + getStoredKey；移动端标记断言（viewport-fit=cover / 100dvh / font-size:16px）
+- **48 files / 625 tests 全绿**；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.5 — 2026-08-29（public 口公网可靠校验：key 常驻可见 + 失败锁定 + 轮换，S142 用户需求）
 
 **Scope:** 用户反馈：① key 输入框不见了（v1.26.4 隐藏逻辑）——"不能搞隐藏哈，不好说要换 key 呢"；② "key 的校验必须是可靠的；我要开放到公网"——公网暴露需防暴力破解 + 可轮换 key。

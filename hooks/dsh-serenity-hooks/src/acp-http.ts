@@ -359,6 +359,11 @@ const ASK_CSS = `
   .card .cmeta { opacity: .6; font-size: 12px; margin-top: 2px; }
   .empty { text-align: center; opacity: .7; padding: 24px 0; }
   .ccname { font-weight: 600; color: var(--sp-green); }
+  /* key 门（v1.26.6：选容器前必填） */
+  .keyGate { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; background: rgba(127,127,127,.06); border: 1px solid rgba(127,127,127,.18); border-radius: 10px; padding: 10px 14px; }
+  .keyGate label { font-size: 12px; opacity: .7; white-space: nowrap; }
+  .keyGate input { flex: 1; border: 1px solid rgba(127,127,127,.25); border-radius: 8px; background: transparent; color: inherit; padding: 8px 12px; font-size: 14px; }
+  .keyGate input:focus { outline: none; border-color: var(--sp-green); }
 
   /* ── 聊天布局（v1.26.4 体验升级：参考 ChatGPT/Claude 会话形态）── */
   .chat { display: flex; flex-direction: column; height: 100vh; max-width: 720px; margin: 0 auto; }
@@ -402,9 +407,6 @@ const ASK_CSS = `
   .msg .err { padding: 0 4px; }
   /* 输入区 */
   .chatInput { border-top: 1px solid rgba(127,127,127,.18); padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); background: rgba(127,127,127,.04); }
-  .chatInput .keyRow { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .chatInput .keyRow label { font-size: 12px; opacity: .7; white-space: nowrap; }
-  .chatInput .keyRow input { flex: 1; border: 1px solid rgba(127,127,127,.25); border-radius: 8px; background: transparent; color: inherit; padding: 6px 10px; font-size: 13px; }
   .inputRow { display: flex; align-items: flex-end; gap: 8px; }
   .inputRow textarea { flex: 1; border: 1px solid rgba(127,127,127,.25); border-radius: 12px; background: #fff; color: inherit; padding: 10px 12px; font-size: 14px; resize: none; min-height: 44px; max-height: 140px; line-height: 1.5; }
   @media (prefers-color-scheme: dark) { .inputRow textarea { background: #26282c; border-color: #3a3d42; } }
@@ -413,13 +415,37 @@ const ASK_CSS = `
   .inputRow .sendBtn:disabled { opacity: .5; cursor: wait; }
   .inputRow .sendBtn:hover:not(:disabled) { background: var(--sp-green-dim); }
   .hint { text-align: center; font-size: 12px; opacity: .55; padding: 20px 0; }
+
+  /* ── 移动端适配（v1.26.6：手机/平板——iOS 防放大 16px / 触控 ≥44px / 100dvh / safe-area）── */
+  @media (max-width: 640px) {
+    main { padding: 20px 16px calc(28px + env(safe-area-inset-bottom)); }
+    .sub { font-size: 14px; margin-bottom: 14px; }
+    .keyGate { flex-wrap: wrap; gap: 6px; }
+    .keyGate input { flex: 1 1 100%; font-size: 16px; padding: 12px 14px; min-height: 48px; } /* 16px 防 iOS 聚焦放大 + 触控 ≥44px */
+    .card { padding: 16px; border-radius: 12px; }
+    .card .cname { font-size: 16px; }
+    .card .cmeta { font-size: 13px; }
+    .chat { height: 100vh; height: 100dvh; } /* dvh：iOS 地址栏收起/展开不跳动 */
+    .chatHead { gap: 8px; padding: 8px 12px calc(8px + env(safe-area-inset-top)); }
+    .chatHead .back { font-size: 14px; padding: 10px 4px; } /* 触控目标 ≥44px */
+    .chatHead .title { font-size: 14px; }
+    .chatHead select { font-size: 16px; padding: 8px 6px; min-height: 44px; } /* 16px 防放大 + 触控 */
+    .chatHead .newBtn { font-size: 14px; padding: 10px 12px; min-height: 44px; }
+    .msgList { padding: 14px 12px calc(20px + env(safe-area-inset-bottom)); gap: 14px; }
+    .msg { max-width: 94%; }
+    .msg .bubble { font-size: 15px; padding: 12px 14px; }
+    .msg .who { font-size: 12px; }
+    .chatInput { padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }
+    .inputRow textarea { font-size: 16px; padding: 12px 14px; min-height: 48px; } /* 16px 防放大 + 触控 */
+    .inputRow .sendBtn { font-size: 16px; padding: 12px 20px; min-height: 48px; }
+  }
 `
 
 
-/** 容器列表页（v1.26.2）：只列已开放容器，点击进入 /c/<name> */
+/** 容器列表页（v1.26.2 → v1.26.6）：key 在选容器前填写（v1.26.6 用户拍板：不填 key 不让选容器） */
 function publicAskListPage(cccs: Array<{ root: string; name: string; roles: string[] }>): string {
   const cards = cccs.map((c) => `
-    <a class="card" href="/c/${encodeURIComponent(c.name)}">
+    <a class="card" data-name="${c.name}" href="/c/${encodeURIComponent(c.name)}">
       <div class="cname">${c.name}</div>
       <div class="cmeta">${c.roles.length} 个问答角色 · 点击进入</div>
     </a>`).join('') || '<div class="empty">暂无可问答的认知容器（管理员尚未开放）</div>'
@@ -427,28 +453,54 @@ function publicAskListPage(cccs: Array<{ root: string; name: string; roles: stri
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Serenity Public Ask</title>
 <style>${ASK_CSS}</style>
 </head>
 <body>
 <main>
   <h1>Serenity Public Ask</h1>
-  <div class="sub">选择认知容器开始提问（访问需 key，key 由管理员提供）</div>
-  ${cards}
+  <div class="sub">先填写访问 key，再选择认知容器开始提问</div>
+  <div class="keyGate">
+    <label for="gateKey">访问 Key</label>
+    <input id="gateKey" type="password" placeholder="请输入访问 key（仅本次浏览器记忆）" autocomplete="off" autocapitalize="none" enterkeyhint="done">
+  </div>
+  <div id="cards">${cards}</div>
 </main>
+<script>
+const KEY_STORE = 'serenity-public-ask-key'
+const gateKey = document.getElementById('gateKey')
+const cardList = document.getElementById('cards')
+// 容器卡片（key 未填时禁用——v1.26.6 用户拍板：key 在选容器前填写）
+function applyGate() {
+  const ok = gateKey.value.trim().length > 0
+  for (const card of cardList.querySelectorAll('a.card')) {
+    card.classList.toggle('locked', !ok)
+    card.setAttribute('aria-disabled', ok ? 'false' : 'true')
+    if (!ok) { card.removeAttribute('href'); card.style.pointerEvents = 'none'; card.style.opacity = '.4' }
+    else { card.setAttribute('href', '/c/' + encodeURIComponent(card.dataset.name)); card.style.pointerEvents = ''; card.style.opacity = '' }
+  }
+}
+gateKey.addEventListener('input', applyGate)
+// key 自动从 localStorage 恢复
+let hasSavedKey = false
+try { const saved = localStorage.getItem(KEY_STORE); if (saved) { gateKey.value = saved; hasSavedKey = true } } catch {}
+if (hasSavedKey) gateKey.placeholder = '访问 Key（已记忆，可修改）'
+applyGate()
+gateKey.focus()
+</script>
 </body>
 </html>`
 }
 
-/** 单容器问答页（v1.26.2→v1.26.4）：URL 锁定容器；聊天 UI——消息流 + 连续对话 + key 自动记忆 */
+/** 单容器问答页（v1.26.2→v1.26.6）：URL 锁定容器；聊天 UI——消息流 + 连续对话 + key 从列表页记忆（v1.26.6 用户拍板：对话页不再填 key） */
 function publicAskContainerPage(ccc: { root: string; name: string; roles: string[] }): string {
   const data = JSON.stringify({ name: ccc.name, root: ccc.root, roles: ccc.roles }).replace(/</g, '\\u003c')
   return `<!DOCTYPE html>
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Serenity · ${ccc.name}</title>
 <style>${ASK_CSS}</style>
 </head>
@@ -465,12 +517,8 @@ function publicAskContainerPage(ccc: { root: string; name: string; roles: string
   <div id="msgs" class="msgList"></div>
 
   <div class="chatInput">
-    <div class="keyRow" id="keyRow">
-      <label for="key">访问 Key</label>
-      <input id="key" type="password" placeholder="请输入访问 key（自动记忆）" autocomplete="off">
-    </div>
     <div class="inputRow">
-      <textarea id="q" placeholder="向 ${ccc.name} 提问…（Enter 发送，Shift+Enter 换行）" rows="1"></textarea>
+      <textarea id="q" placeholder="向 ${ccc.name} 提问…（Enter 发送，Shift+Enter 换行）" rows="1" enterkeyhint="send" autocapitalize="sentences"></textarea>
       <button id="ask" class="sendBtn">发送</button>
     </div>
   </div>
@@ -479,22 +527,19 @@ function publicAskContainerPage(ccc: { root: string; name: string; roles: string
 <script>
 const CCC = JSON.parse(document.getElementById('ask-data').textContent)
 const KEY_STORE = 'serenity-public-ask-key'
-const keyInput = document.getElementById('key')
 const roleSel = document.getElementById('role')
 const btn = document.getElementById('ask')
 const msgs = document.getElementById('msgs')
 const qInput = document.getElementById('q')
-const keyRow = document.getElementById('keyRow')
 let sessionId = ''
 let busy = false
 
 // 角色下拉
 roleSel.innerHTML = (CCC.roles || []).map((r) => '<option value="' + r + '">' + r + '</option>').join('') || '<option value="">(无角色)</option>'
-// key 自动从 localStorage 恢复（v1.26.5：**常驻可见**——只预填不隐藏，
-// 用户随时可查看/修改 key；saved 时 placeholder 提示已记忆）
-let hasSavedKey = false
-try { const saved = localStorage.getItem(KEY_STORE); if (saved) { keyInput.value = saved; hasSavedKey = true } } catch {}
-if (hasSavedKey) keyInput.placeholder = '访问 Key（已记忆，可修改）'
+// key 从 localStorage 读取（列表页填写时记忆；对话页不填——v1.26.6 用户拍板）
+function getStoredKey() {
+  try { return (localStorage.getItem(KEY_STORE) || '').trim() } catch { return '' }
+}
 
 /** 追加一条消息气泡（role: user|assistant） */
 function addMsg(role, htmlOrText, isHtml) {
@@ -533,13 +578,11 @@ function addTyping() {
 
 async function ask() {
   const q = qInput.value.trim()
-  const key = keyInput.value.trim()
+  const key = getStoredKey()
   const role = roleSel.value || undefined
   if (!q) return
-  if (!key) { keyInput.focus(); return }
+  if (!key) { addMsg('assistant', '⚠️ 未找到访问 key，请先回到 <a href="/">容器列表页</a> 填写 key。', true); return }
   if (busy) return
-  // 保存 key（下次自动记忆；v1.26.5：不隐藏 key 行——常驻可见可修改）
-  try { localStorage.setItem(KEY_STORE, key) } catch {}
   // 追加用户消息 + 打字指示
   addMsg('user', q, false)
   qInput.value = ''

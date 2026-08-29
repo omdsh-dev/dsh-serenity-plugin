@@ -382,10 +382,15 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
       })
       expect(res.status).toBe(200)
       expect(res.body).toContain('Serenity Public Ask')
-      // v1.26.2：列表页（容器卡片链接 /c/<name>；不再内嵌 key 输入/CCC 下拉）
+      // v1.26.6：列表页 key 门（选容器前必填，不填禁用卡片）+ 容器卡片链接
       const name = dir.split('/').filter(Boolean).pop() ?? ''
       expect(res.body).toContain(`/c/${encodeURIComponent(name)}`)
-      expect(res.body).toContain('选择认知容器开始提问')
+      expect(res.body).toContain('先填写访问 key')
+      expect(res.body).toContain('gateKey') // key 输入门
+      expect(res.body).toContain('serenity-public-ask-key') // localStorage key 记忆
+      expect(res.body).toContain('viewport-fit=cover') // 移动端 safe-area（v1.26.6）
+      expect(res.body).toContain('100dvh') // iOS 地址栏适配
+      expect(res.body).toContain('font-size: 16px') // iOS 防聚焦放大
     } finally {
       stopAcpHttpServer()
     }
@@ -407,13 +412,14 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
         req.end()
       })
       expect(res.status).toBe(200)
-      // v1.26.4 聊天 UI：消息流 + 输入区 + 新对话按钮（key 输入仍在）
-      expect(res.body).toContain('访问 Key')
+      // v1.26.6 聊天 UI：消息流 + 输入区 + 新对话按钮；key 已移到列表页（对话页不再填）
       expect(res.body).toContain('msgList')
       expect(res.body).toContain('chatInput')
       expect(res.body).toContain('新对话')
       expect(res.body).toContain('qa') // 角色下拉选项
-      expect(res.body).toContain('serenity-public-ask-key') // localStorage key
+      expect(res.body).toContain('serenity-public-ask-key') // localStorage key（列表页记忆，对话页读取）
+      expect(res.body).not.toContain('keyRow') // 对话页无 key 输入行（v1.26.6 用户拍板）
+      expect(res.body).toContain('getStoredKey') // key 从 localStorage 读取
       // public 口 think 不渲染：POST /ask 返回 answer_html 不含 think 折叠
     } finally {
       stopAcpHttpServer()
