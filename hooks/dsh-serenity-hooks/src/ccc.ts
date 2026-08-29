@@ -102,6 +102,34 @@ export interface SerenityConfig {
     /** 重启自动恢复最近激活的宁静号会话（session-start 时，根会话且无自身标记 → 回退最近 use 的标记） */
     autoRestoreSession?: boolean;
   };
+  /** Skiff（F4，v1.25.0 实验性）认知子集角色配置——角色归 CCC 定义（S142 用户拍板） */
+  skiff?: {
+    /** 角色定义（名 → 角色配置）；缺省/空 = Skiff 未启用（零影响） */
+    roles?: Record<string, SkiffRoleConfig>;
+  };
+}
+
+/**
+ * Skiff 角色配置（CCC 定义：全知全能轨迹的一个子集）：
+ * 能力面 = tools（非 MSM 工具白名单）+ msms（MSM 白名单）双白名单，白名单外全隐藏；
+ * 轨迹纪律面 = trajectory 子集（session/keeper/rebuild 参与项，默认全关）。
+ * 实验性质：未配置任何角色时 Skiff 完全零影响（无监听、无 agent 创建）。
+ */
+export interface SkiffRoleConfig {
+  /** 角色模型（provider/model；CCC 直接指定，无白名单校验——用户拍板） */
+  model?: string;
+  /** MSM 白名单（独立）：该角色可 exec 的 MSM 名列表；缺省空 = 无 MSM 通道 */
+  msms?: string[];
+  /** 非 MSM 工具白名单（独立）：平台/ACC 工具名列表；缺省空 = 仅 MSM 通道 */
+  tools?: string[];
+  /** 轨迹纪律子集（缺省全 false = 完全独立，不参与 keeper/session/rebuild） */
+  trajectory?: {
+    session?: boolean;
+    keeper?: boolean;
+    rebuild?: boolean;
+  };
+  /** 角色系统提示词（CCC 完整定义：人格/认知边界/回答风格） */
+  systemPrompt?: string;
 }
 
 /**

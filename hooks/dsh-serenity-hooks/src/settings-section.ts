@@ -24,13 +24,15 @@ export interface SimpleConfigFragment {
   gateway?: { enabled?: boolean }
   rebuild?: { enabled?: boolean; thresholdRatio?: number }
   naming?: { enabled?: boolean }
+  /** F4 Skiff（实验性）：调试服务启停（人工） */
+  skiff?: { enabled?: boolean; debugPort?: number }
 }
 
 /** 简单配置命名空间（dsh 设置面板的 section id / settings.yaml section） */
 export const SERENITY_SETTINGS_NS = 'serenity-hooks'
 
 /**
- * 简单配置 schema（schemastery）：三功能总开关 + F2 阈值。
+ * 简单配置 schema（schemastery）：三功能总开关 + F2 阈值 + F4 Skiff 启停。
  * 与 DSH settings 的 schema 语义一致（z.object 布尔/数字）。
  */
 export interface SerenitySimpleSettings {
@@ -42,6 +44,10 @@ export interface SerenitySimpleSettings {
   rebuildThreshold: number
   /** F3 会话命名总开关 */
   namingEnabled: boolean
+  /** F4 Skiff 调试服务总开关（实验性；默认关——不随插件加载自动启动，人工开启） */
+  skiffEnabled: boolean
+  /** F4 Skiff 调试端口（默认 3099，仅 127.0.0.1） */
+  skiffDebugPort: number
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -50,6 +56,8 @@ export const simpleSettingsSchema = z.object({
   rebuildEnabled: z.boolean().default(true),
   rebuildThreshold: z.number().min(0.01).max(1).default(0.9),
   namingEnabled: z.boolean().default(true),
+  skiffEnabled: z.boolean().default(false),
+  skiffDebugPort: z.number().min(1024).max(65535).default(3099),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -59,6 +67,8 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     rebuildEnabled: config.rebuild?.enabled ?? true,
     rebuildThreshold: config.rebuild?.thresholdRatio ?? 0.9,
     namingEnabled: config.naming?.enabled ?? true,
+    skiffEnabled: config.skiff?.enabled ?? false,
+    skiffDebugPort: config.skiff?.debugPort ?? 3099,
   }
 }
 
@@ -72,6 +82,8 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     rebuildEnabled: true,
     rebuildThreshold: 0.9,
     namingEnabled: true,
+    skiffEnabled: false,
+    skiffDebugPort: 3099,
   }
 }
 
