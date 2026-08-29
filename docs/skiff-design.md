@@ -46,9 +46,9 @@
 4. **全按白名单暴露**（用户拍板）：MSM 独立白名单 + 非 MSM 工具独立白名单；白名单外一律隐藏（全量隐藏为默认）
 5. 系统提示词：dsp 只给**基础部分**（可用 MSM/工具清单 + 调用协议），**CCC 完整定义**角色人格/边界/风格
 6. Skiff 默认不使用 trajectory 机制（不建 SESSION.md、无 keeper、无 rebuild）——**相当独立**；轨迹纪律按角色配置选择性开启（子集边界 CCC 定）
-7. 记录（tracking）由 CCC 决定：不记录 / 会话记录 / 访问日志
-8. 模型按角色配置（不同 Skiff 可不同模型）
-9. 调试便利：暴露**调试端口渲染问答页面**（测试用，走同一 ACP 逻辑）
+7. 记录/跟踪机制 **ACC 不提供**（丢给 CCC 自行研究实现）——dsp 只保证 dsh 会话 JSONL 技术审计
+8. 模型 **CCC 直接指定**（无白名单校验），不同 Skiff 可不同
+9. 调试便利：暴露**调试端口渲染问答页面**（测试用，走同一会话核心）
 
 ---
 
@@ -138,7 +138,7 @@
     "debugPort": 3099,                     // 调试问答页端口（v1.25.0 唯一客户端面；默认关，仅 127.0.0.1）
     "roles": {
       "code-review": {
-        "model": "minimax-cn-coding-plan/MiniMax-M3",   // 角色模型（G6）
+        "model": "minimax-cn-coding-plan/MiniMax-M3",   // 角色模型（CCC 直接指定，无白名单校验）
         "msms": ["review-scan", "review-fix"],          // MSM 白名单（独立）
         "tools": ["read", "grep", "glob", "write", "edit"], // 非 MSM 工具白名单（独立；缺省空=仅 MSM）
         "trajectory": {                                  // 轨迹纪律子集（G4，CCC 定）
@@ -146,7 +146,6 @@
           "keeper": false,
           "rebuild": false
         },
-        "tracking": "none",                // G3：none | session | log（CCC 定）
         "systemPrompt": "…CCC 完整定义…"   // 角色人格/边界/风格
       }
     }
@@ -209,10 +208,10 @@ No other tools are available. Your capability boundary is this surface.
 
 - 实现：`isSkiffSession(sessionId)` 共享判定（仿 `handyman-` 前缀排除模式）+ 角色轨迹配置查询；seams 各自检查
 
-### 4.6 角色模型（G6）
+### 4.6 角色模型（用户拍板 2026-08-28：无白名单，CCC 直接指定）
 
-- per-role `model`（provider/model）；缺省回退 CCC handyman.defaultModel
-- 白名单校验：复用 `handyman.models` 白名单（模型归属 CCC 配置，与 handyman 一致）——CCC 一处配模型白名单，Skiff 从中选
+- per-role `model`（provider/model）——**CCC 直接指定**，不做白名单校验（模型不需要白名单）
+- 缺省（未配 model）回退 CCC 配置默认（handyman.defaultModel 或配置项）
 
 ### 4.7 skiff_admin 工具（教 CCC 如何定义 skiff，用户拍板 2026-08-28）
 
@@ -235,13 +234,10 @@ No other tools are available. Your capability boundary is this surface.
 
 ---
 
-## 5. 记录（G3，CCC 决定）
+## 5. 记录与跟踪（用户拍板 2026-08-28：ACC 不管，丢给 CCC 研究）
 
-| tracking | 行为 |
-|----------|------|
-| `none` | 不额外留痕（dsh ACP 会话 JSONL 为技术审计，天然存在） |
-| `session` | ACP session/new 时自动 `session create --desc "skiff-<role>"` → SESSION.md 建立（轨迹纪律子集含 session 时的默认） |
-| `log` | append 访问日志（时间/role/问题摘要/答案摘要 → `AGENT_SESSIONS/skiff-access.log` 或配置路径） |
+- ACC **不提供** tracking 机制（none/session/log 方案移除）——dsp 只保证 dsh 会话 JSONL（append-only 技术审计，天然存在）
+- 任何进一步留痕（访问日志 / 会话归档 / 摘要）由 **CCC 自行研究实现**（如 CCC 自写记录 MSM、角色系统提示词约定、或 ACP 客户端侧记录）——自由度归 CCC
 
 ---
 
@@ -259,7 +255,7 @@ No other tools are available. Your capability boundary is this surface.
 | 阶段 | 版本 | 内容 | 估量 |
 |------|------|------|------|
 | F4a' | v1.25.0 | 会话核心 + 调试页：agents.create/followup/events 答案读取 + 调试端口问答页（轨迹复用原生 WebUI 会话视图）+ **skiff_admin 工具**（guide/validate/list）+ **设置面板 Skiff 区块**（人工启停）+ 测试 | 中（~600 行 + 测试） |
-| F4b | v1.25.0 | Skiff 机制：角色配置 schema（config-ops）+ 双白名单强制（guard 角色规则 + acc_msm/msm_list 白名单）+ 拦截缝旁路 + 基础提示词拼接 + per-role model + tracking + 测试 | 中（~500 行 + 测试） |
+| F4b | v1.25.0 | Skiff 机制：角色配置 schema（config-ops）+ 双白名单强制（guard 角色规则 + acc_msm/msm_list 白名单）+ 拦截缝旁路 + 基础提示词拼接 + per-role model + 测试 | 中（~500 行 + 测试） |
 | F4c | 后续 | ACP v1 server（stdio 7 方法，复用会话核心）+ OpenClaw B2 实测 + README/skill 文档 | 中 |
 
 ## 8. 测试计划
@@ -271,7 +267,6 @@ No other tools are available. Your capability boundary is this surface.
 - 双白名单：tools 白名单外工具 deny（guard）/ msms 白名单外 MSM exec 拒绝 / msm_list 过滤 / register-deregister 必拒 / 拒绝信息不泄漏名单
 - 拦截缝旁路：keeper 不提醒 / bootstrap 不锚定 / session-start 不注入 ACC 身份
 - 基础提示词：动态清单正确 / CCC 段拼接
-- tracking：none/session/log 三态
 
 ## 9. 开放问题（已收敛）
 
