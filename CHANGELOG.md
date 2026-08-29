@@ -1,3 +1,16 @@
+## v1.26.9 — 2026-08-29（3100 iOS Safari 错误根治：JSC JSON.parse 快速路径正则兼容层，S142 调研定稿）
+
+**Scope:** 用户实测：3100 问答页在 iPhone/iPad（WebKit/JSC）上报 `The string did not match the expected pattern`，仅"内容极其复杂"的回答触发，v1.26.8 服务端 think 状态机重写无效。调研定稿：**错误不在插件代码的正则**，而在 **Safari/JSC 的 `JSON.parse` 内部正则快速路径**——WebKit bug 200190「JavaScriptCore's Regex can't match the content」：JSC 对 JSON 做正则预校验，内容含**原始** `\u2028`（行分隔符）/`\u2029`（段分隔符）时对**合法 JSON** 也抛此 SyntaxError（sentry-javascript #2487 同源）；`JSON.stringify` **不转义**这三个字符（合法 JSON 字符串字符）→ 复杂回答的 JSON 以原始形态含它们 → 3100 页面 `await res.json()` 触发。修复 = **方案 A（用户拍板）：服务端 JSON 文本层等价转义**。
+
+### 变更
+- **`skiff-debug.ts` 新增 `jscSafeJsonText`（v1.26.9）**：JSON 文本层把原始 `\u2028`/`\u2029`/`\uFEFF` 替换为字面 `\uXXXX` 转义序列——**JSON.parse 后语义完全一致**（还原原字符），JSC 正则看到常规 ASCII 转义（与 JSON.stringify 对控制字符的输出同形态，安全）；已是 `\uXXXX` 形态的内容不二次转义
+- **`acp-http.ts` `sendJson` 全量应用（v1.26.9）**：所有 3100 JSON 响应（/ask 问答 + JSON-RPC 面）经 `jscSafeJsonText`——覆盖 answer/answer_html/trajectory 复杂内容的响应
+- **两处页面内嵌 JSON 同步应用**：`acp-http.ts` ask-data 嵌入 + `skiff-debug.ts` cccs 嵌入（同为 JSC JSON.parse 风险面，页面加载即解析）
+
+### 测试
+- **`tests/jsc-json-safe.test.ts` 新建 5 用例**：文本层替换断言（三个原始字符消失、转义序列出现）/ round-trip 深比较（值/嵌套/键位全覆盖）/ 常规 JSON 逐字节不变 / 已转义形态不二次转义 / 3100 ask 响应完整形态 parse 等价 + 无原始触发字符
+- **50 files / 646 tests 全绿**（+5）；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.8 — 2026-08-29（think 提取状态机重写，弃正则——用户批评"老用正则不是个办法"）
 
 **Scope:** 3100 公网问答页输出报错 "The string did not match the expected pattern"——旧实现用 `<think>([\s\S]*?)<\/think>` 正则提取（V8 g-flag lastIndex 抛错 + 未闭合泄漏 + 嵌套错位 + 代码块误判 + 占位符冲突，纯函数 74 用例未复现、真实输出含特殊形态）。用户裁决：**弃正则，重写为状态机扫描**。

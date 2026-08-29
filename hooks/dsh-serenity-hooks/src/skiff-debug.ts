@@ -126,7 +126,8 @@ export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPo
   // v1.25.7 修复：内嵌 JSON **不能整体 escapeHtml**（&quot; 会让 JSON.parse 失败——用户实测
   // console 报错 position 2）。只转义 `<` → `\u003c`（JSON 合法转义，JSON.parse 还原；
   // 防 `</script>` 注入）。data-default 属性值仍走 escapeHtml（HTML 属性语境）。
-  const data = JSON.stringify(cccs).replace(/</g, '\\u003c')
+  // v1.26.9：jscSafeJsonText 消除 JSC JSON.parse 快速路径正则对 \u2028/\u2029/\uFEFF 的误抛
+  const data = jscSafeJsonText(JSON.stringify(cccs).replace(/</g, '\\u003c'))
   const webUrl = `http://127.0.0.1:${webPort}`
   return `<!DOCTYPE html>
 <html lang="zh">
@@ -298,6 +299,30 @@ function renderTrajectory(entries, sessionId) {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
+}
+
+/**
+ * JSC (Safari/iOS) JSON.parse 快速路径正则兼容化（v1.26.9，S142 调研定稿）。
+ *
+ * 背景：WebKit bug 200190「JavaScriptCore's Regex can't match the content」——JSC 的
+ * JSON.parse 用**内部正则**预校验字符串；内容含**原始** `\u2028`（行分隔符）/`\u2029`
+ * （段分隔符）时正则无法匹配 → 对**合法 JSON** 也抛
+ * `SyntaxError: The string did not match the expected pattern`（sentry-javascript #2487 同源）。
+ * JSON.stringify **不转义** `\u2028`/`\u2029`/`\uFEFF`（它们都是合法 JSON 字符串字符）→
+ * 在 JSON **文本层**把它们替换为 `\uXXXX` 转义序列：JSON.parse 后语义完全一致（还原原字符），
+ * 且 JSC 正则看到的是常规 ASCII 转义（与 JSON.stringify 对控制字符的输出同形态，安全）。
+ *
+ * 3100 问答页客户端 `await res.json()`（acp-http.ts）与页面内嵌 JSON（skiff-debug/acp-http）
+ * 均需此兼容层——iOS Safari 用户实测"复杂回答"触发。
+ *
+ * @param jsonText JSON.stringify 的输出文本；原地等价替换，返回 JSC 安全文本
+ */
+export function jscSafeJsonText(jsonText: string): string {
+  // 全局替换原始字符为字面转义序列（字符集不相交，顺序无关）；已存在的 \\uXXXX 不误伤
+  return jsonText
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+    .replace(/\uFEFF/g, '\\uFEFF')
 }
 
 /**

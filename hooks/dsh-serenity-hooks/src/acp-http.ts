@@ -29,7 +29,7 @@ import {
   resetPublicAskIpFail,
 } from './config-ops.js'
 import { readSkiffRoles } from './skiff-role.js'
-import { discoverCccs, renderSkiffMarkdown, type SkiffCccEntry } from './skiff-debug.js'
+import { discoverCccs, renderSkiffMarkdown, jscSafeJsonText, type SkiffCccEntry } from './skiff-debug.js'
 import { readSimpleSettings } from './settings-section.js'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo } from './skiff-core.js'
 import { readHandymanConfig, findSerenityRoot } from './ccc.js'
@@ -55,7 +55,9 @@ function readBody(req: IncomingMessage): Promise<string> {
 }
 
 function sendJson(res: ServerResponse, status: number, payload: unknown): void {
-  const body = JSON.stringify(payload)
+  // v1.26.9：jscSafeJsonText 消除 Safari/JSC JSON.parse 快速路径正则对原始
+  // \u2028/\u2029/\uFEFF 的误抛（WebKit bug 200190）——文本层等价转义，parse 后语义不变
+  const body = jscSafeJsonText(JSON.stringify(payload))
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
   res.end(body)
 }
@@ -499,7 +501,7 @@ gateKey.focus()
 
 /** 单容器问答页（v1.26.2→v1.26.6）：URL 锁定容器；聊天 UI——消息流 + 连续对话 + key 从列表页记忆（v1.26.6 用户拍板：对话页不再填 key） */
 function publicAskContainerPage(ccc: { root: string; name: string; roles: string[] }): string {
-  const data = JSON.stringify({ name: ccc.name, root: ccc.root, roles: ccc.roles }).replace(/</g, '\\u003c')
+  const data = jscSafeJsonText(JSON.stringify({ name: ccc.name, root: ccc.root, roles: ccc.roles }).replace(/</g, '\\u003c'))
   return `<!DOCTYPE html>
 <html lang="zh">
 <head>
