@@ -26,7 +26,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { namingTitleFor, renameDshSessionOnUse } from '../src/tools/session.js'
+import { namingTitleFor, renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive } from '../src/tools/session.js'
 import { createSession } from '../src/session-ops.js'
 import { defaultSimpleSettings } from '../src/settings-section.js'
 
@@ -152,6 +152,55 @@ describe('F3: createSession 目录名（use 的目标名称 = 目录名）', () 
     const b = createSession({ root: dir, desc: 'second', dryRun: false })
     expect(a.dirName).toContain('--S001--')
     expect(b.dirName).toContain('--S002--')
+  })
+})
+
+describe('F3: activeInfoFromCreate（v1.25.11 create 命名——无需 use 激活即可驱动重命名）', () => {
+  it('desc 模式 → sessionId=S### + dirName + mdPath=sessionPath/SESSION.md', () => {
+    const r = createSession({ root: dir, desc: 'my-work', dryRun: false })
+    const info = activeInfoFromCreate(r)
+    expect(info.sessionId).toMatch(/^S\d{3}$/)
+    expect(info.dirName).toBe(r.dirName)
+    expect(info.mdPath).toBe(join(r.sessionPath, 'SESSION.md'))
+    // 命名标题 = S###-日期（与 use 后命名一致）
+    expect(namingTitleFor(info)).toMatch(/^S\d{3}-\d{4}-\d{2}-\d{2}$/)
+  })
+
+  it('issue 模式 → sessionId=issue + 标题回退目录名', () => {
+    const r = createSession({ root: dir, issue: 'apaas-26116', dryRun: false })
+    const info = activeInfoFromCreate(r)
+    expect(info.sessionId).toBe('apaas-26116')
+    expect(namingTitleFor(info)).toBe(r.dirName)
+  })
+})
+
+describe('F3: renameDshSessionForActive（v1.25.11 use/create 共用封装）', () => {
+  const info = { sessionId: 'S010', dirName: '2026-08-29--S010--my-work', mdPath: '/x/SESSION.md' }
+
+  it('门控通过 → titles.rename 方法调用（S###-日期标题）', () => {
+    const renamed: string[] = []
+    const ctx = { get: () => ({ rename: (s: unknown, t: string) => { renamed.push(`${String((s as { id: string }).id)}=${t}`) } }) }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    renameDshSessionForActive(ctx as never, { agent: { session: { id: 'dsh-1' } } }, info)
+    expect(renamed).toEqual(['dsh-1=S010-2026-08-29'])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
+  })
+
+  it('缺 agent session → warn 不抛错（create 主流程不阻断）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    renameDshSessionForActive({ get: () => undefined } as never, { agent: {} }, info)
+    expect(warn).toHaveBeenCalled()
+    expect(String(warn.mock.calls[0]?.[0])).toContain('缺少 agent session')
+    warn.mockRestore()
+  })
+
+  it('sessionTitle 服务缺失 → warn（不静默；create 仍成功返回）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    renameDshSessionForActive({ get: () => undefined } as never, { agent: { session: { id: 'dsh-1' } } }, info)
+    expect(warn).toHaveBeenCalled()
+    expect(String(warn.mock.calls[0]?.[0])).toContain('sessionTitle service unavailable')
+    warn.mockRestore()
   })
 })
 

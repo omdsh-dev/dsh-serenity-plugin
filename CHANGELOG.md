@@ -1,3 +1,15 @@
+## v1.25.11 — 2026-08-29（F3 会话命名：create 后也重命名 dsh 会话，S142 用户反馈）
+
+**Scope:** 用户：「修个小问题，会话命名的，use session 正常，但 create session 也要进行命名」。现状：F3 命名仅在 **use** 分支触发（激活后 `renameDshSessionOnUse` 把当前 dsh 会话重命名为 `S###-日期`），create 分支创建 SESSION 后 dsh 会话保持默认标题。**修复**：create 后立即重命名（不再等 use）。
+
+### 变更
+- **session.ts**：新增导出 `activeInfoFromCreate(result: CreateSessionResult): ActiveSessionInfo`——createSession 结果已含 sessionId（S###/issue）与 dirName，无需等待 use 激活即可构造命名信息（mdPath = sessionPath/SESSION.md，与 use 一致）
+- **session.ts**：新增导出 `renameDshSessionForActive(ctx, exec, info)`——use 分支内联重命名逻辑提取为共用封装（门控/失败可见性与原一致：成功 log / 失败 warn，主流程不阻断）；use 分支改调此封装（行为不变）
+- **create 分支**：createSession 成功后（非 dry-run）→ `renameDshSessionForActive(ctx, exec, activeInfoFromCreate(result))`——dsh 会话立即重命名为 `S###-日期`（issue 会话回退目录名）；dry-run 不命名（未真实创建）
+
+### 测试
+- session-title.test +5：activeInfoFromCreate（desc 模式 S###/mdPath/命名标题 S###-日期；issue 模式回退目录名）/ renameDshSessionForActive（门控通过 rename 调用 / 缺 agent session warn 不抛 / sessionTitle 缺失 warn 不静默）——**46 files / 567 tests 全绿**（+5）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.10 — 2026-08-29（Skiff 两项增强：md 提示词引用 + 会话追问延续，S142 用户需求）
 
 **Scope:** 用户两项新需求：① CCC 倾向定义超长提示词，JSON 内嵌不可读——**支持引用 md 文件作为角色系统提示词**（推荐配置方法）；② **dsh 会话概念在 skiff 绑定**——允许使用同一个 qa 会话追问（多轮对话上下文延续），而非每次提问新建会话。用户拍板：页面级会话 + 新对话按钮 / **仅进程内延续**（首版不做跨进程 resume，官方 `ctx.agents.resume` 路径已调研确认可行留待后续）/ 全量轨迹重绘 / v1.25.10 patch 级。

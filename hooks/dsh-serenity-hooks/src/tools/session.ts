@@ -19,6 +19,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from 'cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '../json.js'
+import { join } from 'node:path'
 import { findSerenityRoot } from '../ccc.js'
 import { loadMsmEntries, runMsmAsync, type MsmEntry } from '../msm-ops.js'
 import { readSimpleSettings } from '../settings-section.js'
@@ -36,6 +37,7 @@ import {
   DEFAULT_SESSION_SCOPE,
   getActiveSessionInfo,
   type ActiveSessionInfo,
+  type CreateSessionResult,
 } from '../session-ops.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
@@ -101,6 +103,57 @@ export function renameDshSessionOnUse(
     return { ok: true, title }
   } catch (error) {
     return { ok: false, reason: `rename threw: ${String((error as Error)?.message ?? error)}` }
+  }
+}
+
+/**
+ * 从 create 结果构造命名用 ActiveSessionInfo（v1.25.11，S142 用户：create 也要命名）：
+ * createSession 返回的 result 已含 sessionId（S###/issue）与 dirName——无需等待 use 激活，
+ * 直接构造（mdPath = sessionPath/SESSION.md，与 use 时一致）即可驱动 renameDshSessionOnUse。
+ */
+export function activeInfoFromCreate(result: CreateSessionResult): ActiveSessionInfo {
+  return {
+    sessionId: result.sessionId,
+    dirName: result.dirName,
+    mdPath: join(result.sessionPath, 'SESSION.md'),
+  }
+}
+
+/**
+ * 把当前 dsh 会话重命名为指定 SESSION 的命名标题（use/create 共用；v1.25.11）。
+ * 门控/失败可见性与 renameDshSessionOnUse 一致（不静默：成功 log / 失败 warn）。
+ * 调用点（use 分支原内联逻辑提取，create 分支复用）：
+ *   - use：激活后从 activeStore 取 info
+ *   - create：createSession 结果经 activeInfoFromCreate 构造 info
+ */
+export function renameDshSessionForActive(
+  ctx: Context,
+  exec: { agent?: { session?: unknown } },
+  info: ActiveSessionInfo,
+): void {
+  try {
+    // v1.23.2：传整个 sessionTitle 服务对象（不解构 rename 函数）——
+    // 旧实现 `titles.rename` 解构后传裸函数，方法内部 this=undefined 抛错
+    const titles = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionTitle')
+    const dshSession = exec.agent?.session
+    if (!dshSession) {
+      console.warn(`[serenity-hooks] dsh 会话重命名未执行: 缺少 agent session（info: ${info.sessionId}）`)
+      return
+    }
+    const result = renameDshSessionOnUse(
+      { namingEnabled: readSimpleSettings().namingEnabled, sessionTitleAvailable: true },
+      dshSession,
+      titles as { rename: (session: unknown, title: string) => unknown } | undefined,
+      info,
+    )
+    if (result.ok) {
+      console.log(`[serenity-hooks] dsh 会话已重命名: ${String((dshSession as { id?: string }).id ?? '?')} → ${result.title}`)
+    } else {
+      console.warn(`[serenity-hooks] dsh 会话重命名未执行: ${result.reason}`)
+    }
+  } catch (err) {
+    // 主流程仍完成（create/use 已执行）；仅重命名失败需要可见
+    console.warn(`[serenity-hooks] dsh 会话重命名异常: ${String((err as Error)?.message ?? err)}`)
   }
 }
 
@@ -278,6 +331,13 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
           dryRun: args.dryRun ?? false,
         })
         let message = result.message
+        // v1.25.11（S142 用户：create 也要命名）：创建成功后立即重命名当前 dsh 会话
+        // 为 S###-日期（不再等 use）——createSession result 已含 sessionId/dirName，
+        // activeInfoFromCreate 构造命名信息（use/create 共用 renameDshSessionForActive）。
+        // dry-run 不命名（未真实创建）。
+        if (!(args.dryRun ?? false)) {
+          renameDshSessionForActive(ctx, exec, activeInfoFromCreate(result))
+        }
         // ---- 钩子：create-transform（对齐 osp；仅非 dry-run 且 CCC 声明了该钩子时执行）----
         if (!(args.dryRun ?? false) && cccHooks.includes('create-transform')) {
           try {
@@ -301,36 +361,9 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
         const scope = agentScope(exec)
         const active = useSession(root, args.name, scope)
         // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为命名标题（S###-日期）
-        // （SESSION 是对话过程中创建的——use 时同步命名，user source pin 住）
-        // v1.22.9：不静默——rename 失败 console.warn 输出原因（可观测性修复）
-        try {
-          const info = getActiveSessionInfo(scope)
-          if (info) {
-            // v1.23.2：传整个 sessionTitle 服务对象（不解构 rename 函数）——
-            // 旧实现 `titles.rename` 解构后传裸函数，方法内部 this=undefined 抛错
-            // （日志实证 assertServiceActive）；传对象后内部方法调用 this=titles
-            const titles = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionTitle')
-            const dshSession = (exec as { agent?: { session?: unknown } }).agent?.session
-            if (dshSession) {
-              const result = renameDshSessionOnUse(
-                { namingEnabled: readSimpleSettings().namingEnabled, sessionTitleAvailable: true },
-                dshSession,
-                titles as { rename: (session: unknown, title: string) => unknown } | undefined,
-                info,
-              )
-              if (result.ok) {
-                console.log(`[serenity-hooks] dsh 会话已重命名: ${String((dshSession as { id?: string }).id ?? '?')} → ${result.title}`)
-              } else {
-                console.warn(`[serenity-hooks] dsh 会话重命名未执行: ${result.reason}`)
-              }
-            } else {
-              console.warn(`[serenity-hooks] dsh 会话重命名未执行: 缺少 agent session`)
-            }
-          }
-        } catch (err) {
-          // use 主流程仍完成（激活信息已写入）；仅重命名失败需要可见
-          console.warn(`[serenity-hooks] dsh 会话重命名异常: ${String((err as Error)?.message ?? err)}`)
-        }
+        // v1.25.11：内联逻辑提取为 renameDshSessionForActive（use/create 共用）
+        const info = getActiveSessionInfo(scope)
+        if (info) renameDshSessionForActive(ctx, exec, info)
         return active
       }
       case 'close': {
