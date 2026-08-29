@@ -1,6 +1,6 @@
 # ACP 能力 + 企业微信机器人对接 — 初版方案（F4c，S142）
 
-> 状态：初版方案（2026-08-29，待用户审核）
+> 状态：**方案定稿（2026-08-29，S142 用户拍板）**
 > 性质：dsh-serenity-plugin Skiff（F4）第三期——ACP 协议层 + IM 对接
 > 前置调研：`docs/knowledge-ccc-release-research.md`（ACP 生态/IM 桥/OpenClaw 资产）、`docs/skiff-design.md`（F4 总设计，F4c 规划）
 > 关联：`docs/skiff-followup-design.md`（会话追问延续，v1.25.10）
@@ -11,6 +11,12 @@
 
 1. **提供 ACP 能力**：指定 **认知容器 + 角色 + 会话（可选）** 进行对话——程序化/机器人调用，非 Web UI
 2. **以企业微信机器人为对接例子**：先出初版方案审核；用户提示「企业微信机器人是回调设计」
+
+## 0.1 用户拍板（2026-08-29）
+
+1. **机器人范围：先支持个人（私聊），先不支持群聊**——会话映射仅 FromUserName，ChatId 群聊留待后续
+2. **测试条件具备**：用户有企业微信管理员权限可测试
+3. **公网暴露先不关心**：到时走 **cloudflare tunnel**（home-tunnel 既有资产）——本机实现先监听本地，联调时隧道暴露
 
 ---
 
@@ -145,30 +151,36 @@ POST 回调（加密 XML）
 
 | 企业微信侧 | skiff 侧 | 说明 |
 |-----------|---------|------|
-| FromUserName（个人） | `skiff-<role>-<userid>`（进程内） | 每人一个会话，追问延续 |
-| ChatId（群聊） | `skiff-<role>-<chatid>` | 每群一个会话 |
+| FromUserName（个人） | `skiff-<role>-<userid>`（进程内） | **首版支持**——每人一个会话，追问延续 |
+| ChatId（群聊） | `skiff-<role>-<chatid>` | **留待后续**（用户拍板：先不支持群聊） |
 | 可选：用户显式指令 | 新会话（如「新对话」命令） | 复用调试页「新对话」语义 |
 
-### 4.5 配置（plugin 级，dsp 全局文件）
+### 4.5 配置（plugin 级，dsp 全局文件；凭据归 localstore）
 
 ```jsonc
 // ~/.dsh/serenity-hooks.json 新增 wecom 段（plugin 级配置，归 plugin——用户既定原则）
 {
   "wecom": {
     "enabled": false,                  // 默认关（实验性，人工开启）
-    "corpid": "...",                   // 企业 ID
-    "secret": "...",                   // 应用 secret（→ localstore 或 .env 更安全，见 §5）
+    "corpidRef": "WECOM_CORPID",       // localstore 凭据引用（corpid 不入配置）
+    "secretRef": "WECOM_SECRET",       // localstore 凭据引用（应用 secret）
     "agentid": 1000002,
-    "token": "...",                    // 回调 token（验签）
-    "encodingAESKey": "...",           // 回调加解密密钥（43 字符）
-    "route": {                         // 发送者/群 → (ccc, role) 映射
-      "user:zhangsan": { "ccc": "/home/yh/home/home-serenity", "role": "qa" },
-      "chat:GROUPID1": { "ccc": "...", "role": "qa" }
+    "tokenRef": "WECOM_TOKEN",         // localstore 凭据引用（回调 token 验签）
+    "aesKeyRef": "WECOM_AES_KEY",      // localstore 凭据引用（43 字符 EncodingAESKey）
+    "route": {                         // 发送者 → (ccc, role) 映射（首版仅个人）
+      "user:zhangsan": { "ccc": "/home/yh/home/home-serenity", "role": "qa" }
+      // "chat:GROUPID1": ...  ← 群聊留待后续（用户拍板：先不支持群聊）
     },
-    "callbackPath": "/wecom/callback"  // 回调路径（经 F1 网关/Tunnel 暴露公网）
+    "callbackPath": "/wecom/callback"  // 回调路径（联调时经 home-tunnel / Cloudflare Tunnel 暴露）
   }
 }
 ```
+
+### 4.6 部署面（联调时）
+
+- 企业微信后台：创建自建应用 → 配置**可信域名/回调 URL**（`https://<tunnel-domain>/wecom/callback`）→ 获取 corpid/secret/agentid/token/EncodingAESKey
+- 本机：`home-tunnel`（Cloudflare Tunnel MSM）暴露回调 URL（用户拍板：到时走 cloudflare tunnel）
+- 测试：企业微信后台「接收消息」测试工具（模拟消息 → 回调验证）
 
 ---
 
@@ -190,20 +202,25 @@ POST 回调（加密 XML）
 | 阶段 | 版本 | 内容 | 估量 |
 |------|------|------|------|
 | **F4c-1** | v1.26.0 | **ACP server**（stdio JSON-RPC：initialize/session/new(ccc+role+sessionId)/prompt/cancel/list/close/request_permission；复用 skiff 核心 + 会话延续）+ 测试 + skiff_admin guide 增 ACP 节 | 中（~500 行 + 测试） |
-| **F4c-2** | v1.26.1 | **企业微信桥**（回调端点 GET 验 URL + POST 解密 + 主动推送 message/send + 会话映射 + 配置段）+ 测试 | 中（~600 行 + 测试） |
-| **F4c-3** | 实测 | 企业微信真实应用联调（配应用 → 回调 URL → 群/个人发消息 → 机器人回复） | 联调轮 |
+| **F4c-2** | v1.26.1 | **企业微信桥**（回调端点 GET 验 URL + POST 解密 + 主动推送 message/send + **个人会话映射**（群聊留待后续）+ 配置段 + localstore 凭据引用）+ 测试 | 中（~600 行 + 测试） |
+| **F4c-3** | 实测 | 企业微信真实应用联调（配应用 → 回调 URL 经 home-tunnel → 私聊消息 → 机器人回复） | 联调轮 |
 
 ---
 
-## 7. 开放问题（待用户拍板）
+## 7. 决策记录（2026-08-29 用户拍板，R↓）
 
-1. **ACP server 传输**：stdio 单形态（推荐，对齐 ACP 生态）？还是同时提供 HTTP JSON-RPC（企业微信桥同进程内直调即可，未必需要）
-2. **session/update 流式**：首版 prompt 返回 committed answer + trajectory 结构化（推荐，简化）？还是对齐官方做 update 流式语义？
-3. **会话映射粒度**：按发送者/群自动绑定（推荐）？还是企业微信侧显式指令控制（如「新对话」「切换到 X 角色」）？
-4. **企业微信机器人形态确认**：自建应用（推荐，回调设计）——用户是否已有企业微信应用/企业主体可配置？
-5. **回调公网暴露路径**：F1 网关（已有登录面）vs home-tunnel（Cloudflare，无登录但隧道本身加密）？
-6. **resume 纳入**：首版仍仅进程内延续（推荐，与 v1.25.10 一致）？还是趁 ACP 上齐 resume（官方路径已调研）？
-7. **凭据存放**：corpid/secret 放 localstore（家庭惯例）还是 ~/.dsh/.env（DSH credentials 包）？
+| # | 决策 | 裁决 |
+|---|------|------|
+| 1 | 机器人范围 | **先支持个人（私聊），先不支持群聊**——ChatId 映射留待后续 |
+| 2 | 测试条件 | 用户有企业微信管理员权限，可真实测试 |
+| 3 | 公网暴露 | 先不关心；到时走 **cloudflare tunnel**（home-tunnel 既有资产） |
+| 4 | ACP 传输 | **stdio 单形态**（推荐默认采纳）——对齐 ACP 生态（OpenClaw/桥）；企业微信桥同进程内直调 ACP 函数（不经 stdio） |
+| 5 | session/update | **首版 committed answer + trajectory 结构化**（推荐默认采纳）——update 流式留待后续 |
+| 6 | 会话映射粒度 | **按发送者自动绑定**（推荐默认采纳）——个人 `skiff-<role>-<userid>`；显式「新对话」指令 |
+| 7 | resume 纳入 | **首版仅进程内延续**（推荐默认采纳，与 v1.25.10 一致）——跨进程 resume 留待后续 |
+| 8 | 凭据存放 | **localstore（家庭惯例）**（推荐默认采纳）——corpid/secret/encodingAESKey 归 localstore，配置只存引用 |
+
+> 未单独拍板的项按方案推荐值默认采纳（标注"推荐默认采纳"）；如后续有异议可随时调整。
 
 ---
 
