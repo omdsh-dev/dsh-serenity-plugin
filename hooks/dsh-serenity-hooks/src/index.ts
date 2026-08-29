@@ -42,6 +42,7 @@ import { registerGateway } from './gateway.js'
 import { registerRebuildTurnHook } from './rebuild.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
+import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
 
 export const name = 'dsh-serenity-hooks'
 
@@ -80,6 +81,8 @@ export interface Config {
   naming?: { enabled?: boolean }
   /** F4 Skiff（实验性）：调试服务启停（entry 默认值，运行时经 DSH settings） */
   skiff?: { enabled?: boolean; debugPort?: number }
+  /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（entry 默认值，运行时经 DSH settings） */
+  acp?: { enabled?: boolean; httpPort?: number }
 }
 
 export const Config: z<Config> = z.object({
@@ -99,6 +102,7 @@ export const Config: z<Config> = z.object({
   rebuild: z.object({ enabled: z.boolean().default(true), thresholdRatio: z.number().min(0.01).max(1).default(0.9) }),
   naming: z.object({ enabled: z.boolean().default(true) }),
   skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(3099) }),
+  acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(3100) }),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -157,6 +161,9 @@ export function apply(ctx: Context, config: Config): void {
   // F4 Skiff（v1.25.0 实验性）：调试问答页装配——人工开关（settings skiffEnabled）→
   // 启动/停止 node:http 调试服务；角色定义归 CCC（skiff.roles）；未开启零资源占用
   registerSkiff(ctx)
+  // F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点装配——人工开关（settings acpEnabled）→
+  // 启动/停止；session/new 支持 {ccc, role, sessionId?}（复用 skiff 核心 + 会话延续）
+  registerAcp(ctx)
 }
 
 /**
@@ -235,4 +242,35 @@ function readWebPort(ctx: Context): number {
   } catch {
     return 3080
   }
+}
+
+/**
+ * F4c ACP HTTP JSON-RPC 端点装配（v1.26.0 实验性）：启停 = 人工（设置面板
+ * 「Serenity」页 ACP 区块开关，settings 持久化）。会话创建/延续走 acp-core →
+ * skiff-core（与调试页同核心）；仅监听 127.0.0.1；未开启零资源占用。
+ */
+function registerAcp(ctx: Context): void {
+  let started = false
+  const sync = (): void => {
+    const s = readSimpleSettings()
+    if (s.acpEnabled && !started) {
+      startAcpHttpServer(ctx, s.acpHttpPort)
+        .then(() => {
+          started = true
+        })
+        .catch((err) => {
+          console.error(`[serenity-hooks] ✗ ACP HTTP 端点启动失败: ${String((err as Error)?.message ?? err)}`)
+        })
+    } else if (!s.acpEnabled && started) {
+      stopAcpHttpServer()
+      started = false
+    }
+  }
+  try {
+    ctx.on('serenity/settings-changed', sync)
+  } catch {
+    /* 事件通道缺失不阻断（启动时 sync 仍执行） */
+  }
+  // 启动时同步一次（settings.yaml 持久化 acpEnabled=true → 重启后自动恢复）
+  sync()
 }

@@ -66,7 +66,11 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
 
 ── 运行 ──
   调试：设置面板「Serenity」页 Skiff 区块开启 → http://127.0.0.1:<debugPort> 问答页实测
-  （v1.25.0 唯一客户端面；ACP stdio 协议 F4c 后续，与调试页共用同一会话核心）
+  ACP 程序化面（v1.26.0）：设置面板「ACP」区块开启 → HTTP JSON-RPC 端点（默认 3100）——
+    POST /  {jsonrpc, id, method, params}
+    session/new {ccc, role, sessionId?}  → 创建/延续会话（sessionId 可选=进程内追问）
+    session/prompt {sessionId, question} → {answer, trajectory}
+    session/cancel / session/close / session/list / request_permission（恒 allow）
   启停 = 人工（设置面板开关，不随插件加载自动启动）；未开启零资源占用
   生效机制：角色配置**实时读取**（改 .opencode/serenity.json → 刷新调试页即生效）；
   改配置后用 skiff_admin apply 做显式校验 + 应用确认（绑定 CCC + 角色清单）

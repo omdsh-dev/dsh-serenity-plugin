@@ -37,7 +37,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部默认（gateway off / rebuild on 0.9 / naming on / skiff off 3099）', () => {
+  it('空 Config → 全部默认（gateway off / rebuild on 0.9 / naming on / skiff off 3099 / acp off 3100）', () => {
     const d = entryDefaults({})
     expect(d).toEqual({
       gatewayEnabled: false,
@@ -46,6 +46,8 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       namingEnabled: true,
       skiffEnabled: false,
       skiffDebugPort: 3099,
+      acpEnabled: false,
+      acpHttpPort: 3100,
     })
   })
 
@@ -55,6 +57,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       rebuild: { enabled: false, thresholdRatio: 0.5 },
       naming: { enabled: false },
       skiff: { enabled: true, debugPort: 4000 },
+      acp: { enabled: true, httpPort: 4100 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
@@ -63,6 +66,8 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       namingEnabled: false,
       skiffEnabled: true,
       skiffDebugPort: 4000,
+      acpEnabled: true,
+      acpHttpPort: 4100,
     })
   })
 

@@ -35,6 +35,9 @@ export interface SerenitySimpleWire {
   /** F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务启停 + 端口 */
   skiffEnabled?: boolean
   skiffDebugPort?: number
+  /** F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点启停 + 端口 */
+  acpEnabled?: boolean
+  acpHttpPort?: number
 }
 
 /** 本 section 的注入面（apply 闭包提供 settingsScope） */
@@ -123,6 +126,9 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const setSkiffPort = (v: number): void => {
     void scope.set('skiffDebugPort', Math.min(65535, Math.max(1024, Math.round(v))))
   }
+  const setAcpPort = (v: number): void => {
+    void scope.set('acpHttpPort', Math.min(65535, Math.max(1024, Math.round(v))))
+  }
 
   if (!ready) {
     return (
@@ -138,6 +144,8 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const namingOn = value?.namingEnabled ?? true
   const skiffOn = value?.skiffEnabled ?? false
   const skiffPort = value?.skiffDebugPort ?? 3099
+  const acpOn = value?.acpEnabled ?? false
+  const acpPort = value?.acpHttpPort ?? 3100
 
   return (
     <div className="ss-section">
@@ -219,6 +227,36 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                   value={skiffPort}
                   disabled={!skiffOn}
                   onChange={(e) => setSkiffPort(Number(e.target.value))}
+                />
+              </div>
+            }
+          />
+        </li>
+      </Group>
+
+      {/* F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点（人工启停） */}
+      <Group title="ACP">
+        <li>
+          <RowCard
+            title="ACP JSON-RPC 端点"
+            desc="程序化调用 Skiff 角色（指定 CCC+角色+会话；实验性，仅监听 127.0.0.1）"
+            control={<Toggle checked={acpOn} onChange={(on) => toggle('acpEnabled', on)} />}
+          />
+        </li>
+        <li>
+          <RowCard
+            title="HTTP 端口"
+            desc="ACP JSON-RPC 端口（1024 ~ 65535，默认 3100）"
+            control={
+              <div className="ss-threshold">
+                <input
+                  className="ss-portInput"
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={acpPort}
+                  disabled={!acpOn}
+                  onChange={(e) => setAcpPort(Number(e.target.value))}
                 />
               </div>
             }

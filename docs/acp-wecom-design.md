@@ -107,10 +107,12 @@
 | `session/update` | committed 消息/thoughts/tool 生命周期（官方演进） | 首版简化：prompt 返回 answer + trajectory（结构化），update 流式留待后续 |
 | `session/request_permission` | 一次性 allow/reject（G9：白名单即授权 → 恒 allow） | 恒 allow（复用既有决策） |
 
-### 3.3 传输
+### 3.3 传输（实现修正，R↓）
 
-- **stdio（主）**：JSON-RPC over stdio（对齐官方 acp 与 ACP 生态）——OpenClaw ACP client / 企业微信桥（spawn 模式）
-- **调试页 /ask 既有**：HTTP 面保留（人工测试），ACP 为程序化面（同会话核心，双面不返工）
+- **协议处理器与传输解耦**：`acp-core`（会话管理层 + 方法处理器，传输无关）——企业微信桥同进程**直调处理器函数**（不经网络）；`acp-http`（HTTP JSON-RPC 端点）作为可测/外部程序化面
+- **首版 = HTTP JSON-RPC**（插件自有端口，settings acpEnabled+acpPort 默认关，仿 skiff 调试服务）——技术约束：dsp 是 dsh web 进程内插件，**stdio server 需独占进程 stdout**（污染 dsh 主进程日志）→ stdio 形态需独立进程装配（官方 `--profile acp` 模式），留待后续
+- **stdio（后续）**：独立进程部署时复用同一 acp-core 处理器（官方 NDJSON JSON-RPC over stdio 帧格式已确认：每行一帧 JSON，stdout 只承载协议帧）
+- **调试页 /ask 既有**：HTTP 面保留（人工测试）；ACP 为程序化面（同会话核心，双面不返工）
 
 ### 3.4 会话延续
 
@@ -201,8 +203,8 @@ POST 回调（加密 XML）
 
 | 阶段 | 版本 | 内容 | 估量 |
 |------|------|------|------|
-| **F4c-1** | v1.26.0 | **ACP server**（stdio JSON-RPC：initialize/session/new(ccc+role+sessionId)/prompt/cancel/list/close/request_permission；复用 skiff 核心 + 会话延续）+ 测试 + skiff_admin guide 增 ACP 节 | 中（~500 行 + 测试） |
-| **F4c-2** | v1.26.1 | **企业微信桥**（回调端点 GET 验 URL + POST 解密 + 主动推送 message/send + **个人会话映射**（群聊留待后续）+ 配置段 + localstore 凭据引用）+ 测试 | 中（~600 行 + 测试） |
+| **F4c-1** | v1.26.0 | **ACP server**（`acp-core` 会话管理层 + 方法处理器传输无关 + `acp-http` HTTP JSON-RPC 端点（settings acpEnabled/acpPort 默认关）：initialize/session/new(ccc+role+sessionId)/prompt/cancel/list/close/request_permission；复用 skiff 核心 + 会话延续）+ 测试 + skiff_admin guide 增 ACP 节 | 中（~500 行 + 测试） |
+| **F4c-2** | v1.26.1 | **企业微信桥**（回调端点 GET 验 URL + POST 解密 + 主动推送 message/send + **个人会话映射**（群聊留待后续）+ 配置段 + localstore 凭据引用；同进程直调 acp-core 处理器）+ 测试 | 中（~600 行 + 测试） |
 | **F4c-3** | 实测 | 企业微信真实应用联调（配应用 → 回调 URL 经 home-tunnel → 私聊消息 → 机器人回复） | 联调轮 |
 
 ---

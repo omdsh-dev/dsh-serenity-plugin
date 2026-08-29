@@ -1,3 +1,21 @@
+## v1.26.0 — 2026-08-29（F4c ACP server：指定 CCC+角色+会话 程序化对话，S142 用户需求）
+
+**Scope:** 用户：Skiff 提供 **ACP 能力**——指定 **认知容器 + 角色 + 会话（可选）** 进行对话（程序化/机器人调用），以企业微信机器人为对接例子（初版方案 `docs/acp-wecom-design.md` 用户审核定稿：先支持个人后群聊 / 管理员可测 / 公网走 cloudflare tunnel）。**实现修正（R↓）**：官方 dsh-acp（--profile acp）不绑定 skiff 角色机制 → **自研进 dsp 复用 skiff 核心**；dsp 是 dsh web 进程内插件，**stdio server 需独占进程 stdout（污染主进程日志）→ 首版 HTTP JSON-RPC 端点**（协议处理器传输无关，企业微信桥同进程直调；stdio 独立进程部署留待后续，复用同一 acp-core）。
+
+### 变更
+- **`src/acp-core.ts`（新）**：ACP 会话管理层（**传输无关**）——`AcpServer` 类 + `dispatchRpc`（JSON-RPC 2.0 单帧批处理）+ `RpcMethodError/RpcInvalidParams` + 标准错误码；方法面（对齐 ACP v1 + 官方演进）：
+  - `initialize`（协议 v1 + skiff 扩展能力声明：ccc/role/sessionId）/ `authenticate` no-op / `request_permission` 恒 allow（G9 白名单即授权）
+  - **`session/new {ccc, role, sessionId?}`**（skiff 扩展）——无 sessionId → createSkiffAgent（新会话 continued:false）；有 → 进程内延续（getSkiffAgent 命中 + role/ccc 绑定校验；未命中 → 「not recoverable」；绑定不匹配 → 「belongs to role」）
+  - `session/prompt {sessionId, question}` → askSkiff(agent, q, 0)（答案 + 全量轨迹）/ `session/cancel`（agent.interrupt）/ `session/close`（unregisterSkiffSession）/ `session/list`（注册表快照 role+ccc）
+- **`src/acp-http.ts`（新）**：HTTP JSON-RPC 端点（node:http，默认关仅 127.0.0.1；仿 skiff 调试服务单实例幂等）——POST / 单帧 → 响应数组；parse error → -32700 帧；404 兜底
+- **装配（index.ts + settings-section.ts）**：Config/schema/defaultSimpleSettings/entryDefaults +`acp.{enabled,httpPort}`（默认关 / 3100）；`registerAcp`（settings acpEnabled 启停，settings-changed 同步，启动时恢复）
+- **client SettingsSection.tsx**：新增 **ACP 区块**（开关 + HTTP 端口输入，仿 Skiff 区块）
+- **skiff_admin guide**：运行节增 ACP 程序化面说明（session/new/prompt/cancel/close/list）
+
+### 测试
+- **acp-core.test（新，23 tests）**：initialize/authenticate/未知方法；session/new（新建/延续/缺参/未知角色/未恢复/绑定不匹配）；prompt（答案+全量轨迹/未知会话/缺参）；cancel/close/list/request_permission；dispatchRpc（请求响应/通知无响应/方法错误 -32601/参数错误 -32602/非法帧 -32600）；acp-http（start→POST initialize/非法 JSON 帧/GET 404/重复 start 幂等）
+- settings-section.test 适配 acp 默认 +2——**47 files / 590 tests 全绿**（+23）；typecheck ✓（node + client）→ build ✓（136232 B，含 ACP 客户端区块）
+
 ## v1.25.11 — 2026-08-29（F3 会话命名：create 后也重命名 dsh 会话，S142 用户反馈）
 
 **Scope:** 用户：「修个小问题，会话命名的，use session 正常，但 create session 也要进行命名」。现状：F3 命名仅在 **use** 分支触发（激活后 `renameDshSessionOnUse` 把当前 dsh 会话重命名为 `S###-日期`），create 分支创建 SESSION 后 dsh 会话保持默认标题。**修复**：create 后立即重命名（不再等 use）。

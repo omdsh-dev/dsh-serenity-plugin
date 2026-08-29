@@ -26,6 +26,8 @@ export interface SimpleConfigFragment {
   naming?: { enabled?: boolean }
   /** F4 Skiff（实验性）：调试服务启停（人工） */
   skiff?: { enabled?: boolean; debugPort?: number }
+  /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
+  acp?: { enabled?: boolean; httpPort?: number }
 }
 
 /** 简单配置命名空间（dsh 设置面板的 section id / settings.yaml section） */
@@ -48,6 +50,10 @@ export interface SerenitySimpleSettings {
   skiffEnabled: boolean
   /** F4 Skiff 调试端口（默认 3099，仅 127.0.0.1） */
   skiffDebugPort: number
+  /** F4c ACP HTTP JSON-RPC 端点总开关（实验性；默认关——人工开启） */
+  acpEnabled: boolean
+  /** F4c ACP HTTP 端口（默认 3100，仅 127.0.0.1） */
+  acpHttpPort: number
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -58,6 +64,8 @@ export const simpleSettingsSchema = z.object({
   namingEnabled: z.boolean().default(true),
   skiffEnabled: z.boolean().default(false),
   skiffDebugPort: z.number().min(1024).max(65535).default(3099),
+  acpEnabled: z.boolean().default(false),
+  acpHttpPort: z.number().min(1024).max(65535).default(3100),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -69,6 +77,8 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     namingEnabled: config.naming?.enabled ?? true,
     skiffEnabled: config.skiff?.enabled ?? false,
     skiffDebugPort: config.skiff?.debugPort ?? 3099,
+    acpEnabled: config.acp?.enabled ?? false,
+    acpHttpPort: config.acp?.httpPort ?? 3100,
   }
 }
 
@@ -84,6 +94,8 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     namingEnabled: true,
     skiffEnabled: false,
     skiffDebugPort: 3099,
+    acpEnabled: false,
+    acpHttpPort: 3100,
   }
 }
 
