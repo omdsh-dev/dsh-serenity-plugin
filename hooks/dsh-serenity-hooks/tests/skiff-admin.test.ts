@@ -8,7 +8,7 @@ vi.mock('@deepseek-ai/dsh-tools', () => ({
   defineTool: (opts: unknown) => opts,
 }))
 
-import { SKIFF_GUIDE, validateSkiffConfig, listSkiffRoles } from '../src/tools/skiff-admin.js'
+import { SKIFF_GUIDE, validateSkiffConfig, listSkiffRoles, applySkiffConfig } from '../src/tools/skiff-admin.js'
 
 let dir: string
 
@@ -134,5 +134,39 @@ describe('skiff_admin: listSkiffRoles 角色摘要', () => {
     expect(review.tools).toEqual(['read', 'grep'])
     expect((review.trajectory as Record<string, boolean>).keeper).toBe(true)
     expect(review.hasSystemPrompt).toBe(true)
+  })
+})
+
+describe('skiff_admin: applySkiffConfig 显式生效机制（v1.25.3）', () => {
+  it('合法配置 → applied true + 绑定 CCC + 角色清单', () => {
+    writeConfig({
+      handyman: { models: ['m/M3'] },
+      skiff: { roles: { qa: { msms: ['x'], tools: ['read'], systemPrompt: 'p' } } },
+    })
+    writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
+    const r = applySkiffConfig(dir) as { applied: boolean; cccRoot: string; roleCount: number; roles: string[]; note: string }
+    expect(r.applied).toBe(true)
+    expect(r.cccRoot).toBe(dir)
+    expect(r.roleCount).toBe(1)
+    expect(r.roles).toEqual(['qa'])
+    expect(r.note).toContain('read live')
+  })
+
+  it('非法配置 → applied false + 问题清单 + 修复提示（不应用）', () => {
+    writeConfig({ skiff: { roles: { qa: { msms: ['ghost-msm'] } } } })
+    writeRegistry([])
+    const r = applySkiffConfig(dir) as { applied: boolean; issues: string[]; hint: string; roleCount: number }
+    expect(r.applied).toBe(false)
+    expect(r.roleCount).toBe(1)
+    expect(r.issues.some((i: string) => i.includes('ghost-msm'))).toBe(true)
+    expect(r.issues.some((i: string) => i.includes('systemPrompt is empty'))).toBe(true)
+    expect(r.hint).toContain('fix the issues')
+  })
+
+  it('无角色 → applied true（skiff disabled 零影响）', () => {
+    writeConfig({})
+    const r = applySkiffConfig(dir) as { applied: boolean; roleCount: number }
+    expect(r.applied).toBe(true)
+    expect(r.roleCount).toBe(0)
   })
 })

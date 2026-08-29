@@ -69,7 +69,9 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
   // 0) Skiff 角色白名单（F4b ⑧）：skiff 会话工具必须 ∈ 角色白名单（tools ∪ acc_msm），
   // 白名单外一律 deny（拒绝信息泛化——不泄漏白名单外工具名；完备性：不枚举工具名）。
   // 由调用方（evaluate）传入 sessionId 判定；纯函数内通过 GuardInput.skiffSessionId 支持单测。
+  // v1.25.3：skill 加载对 skiff 恒可用（S142 用户——skill 不设白名单；读知识面，无写能力）
   if (input.skiffSessionId !== undefined && isSkiffSessionId(input.skiffSessionId)) {
+    if (toolName === 'skill') return { kind: 'allow' }
     const roleName = input.skiffSessionId ? skiffRoleFor(input.skiffSessionId) : null
     const role = roleName ? readSkiffRoles(root).get(roleName) : undefined
     const whitelist = roleToolWhitelist(role)

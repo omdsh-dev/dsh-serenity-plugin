@@ -1,3 +1,19 @@
+## v1.25.3 — 2026-08-29（Skiff 三合一：平台工具面修复（read/glob 不生效根因）+ skill 恒可用 + skiff_admin apply 生效机制，S142 用户需求/实测）
+
+**Scope:** 三项——① 用户实测：qa 角色白名单加了 read/glob 但**不生效**——根因：**skiff agent 未挂 agent preset → 平台工具（read/grep/glob/web_search）不在工具面**（handyman 经 `agentPresets.composeFrom` 继承父 ctx、skiff 无父上下文直接创建；插件工具 acc_msm 全局注册不受影响 → MSM 通道可用但 read/glob 不可见）② 用户：**skill 加载也要让 skiff 支持（不设白名单）** ③ 用户：改了 json 应该有个生效机制——**skiff_admin 新增 apply**。
+
+### 变更
+- **skiff-core.ts `createSkiffAgent`**：`agents.create` 增加 `setup` 钩子——`agentPresets.mount(agentCtx, 'standard')`（DSH 默认 preset → 平台工具面）；`meta.agentPreset: 'standard'`（持久化重建恢复工具面）；agentPresets 可选服务缺失 → 跳过不阻断创建；guard 角色白名单仍按角色过滤（白名单外工具 deny）
+- **seams/guards.ts**：skiff 白名单分支 **`skill` 恒放行**（豁免在角色查询之前——未注册会话也放行；读知识面无写能力）
+- **tools/skiff-admin.ts**：新增 **`apply` 子命令**（`applySkiffConfig`）——① 校验（复用 validate：msms 注册 / model 白名单 / systemPrompt 非空）② 非法 → `applied:false` + 问题清单 + 修复提示（不应用）③ 合法 → `applied:true` + 绑定 CCC + 角色清单 + 说明（角色实时读取，调试页刷新即生效）；SKIFF_GUIDE 补 apply + skill 恒可用说明；description/enum 更新
+
+### 测试
+- skiff-core.test +2：createSkiffAgent 挂载 standard preset（meta + mount 调用 + scoped 提示词 + 注册表）/ agentPresets 缺失不阻断创建
+- guards.test +1：skill 恒可用（tools 空角色 + 未注册会话均 allow；非 skill 仍白名单约束）
+- skiff-admin.test +3：apply 合法（applied + cccRoot + roles）/ 非法（applied false + issues + hint）/ 无角色（applied true 零影响）
+- 修复：SKIFF_GUIDE 模板字符串内嵌反引号提前终止（语法错误）；applySkiffConfig validate 返回值类型收窄
+- **46 files / 538 tests 全绿**（+6）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.2 — 2026-08-29（Skiff 绑定 CCC 修复：实时读取角色 + 页面显示绑定 CCC，用户设计批评）
 
 **Scope:** 用户实测——3099 调试页**看不到角色**，并指出设计缺失：**「skiff 应该绑定 CCC，这个玩法没绑定 CCC」**。根因双链：① 服务启动时 `resolveSkiffRoot` 按「进程 cwd 优先」猜 root（多 CCC 时可能绑定错目标，且绑定不可见）；② 启动时 `readSkiffRoles(root)` **快照角色**——配置写入/修改后服务已 active（幂等 return），角色永不刷新（除非重启服务）。

@@ -56,9 +56,14 @@ export interface SkiffAgentRef {
   sessionId: string
 }
 
+/** Skiff agent 挂载的 DSH preset（v1.25.3 修复：read/grep/glob 等平台工具由 preset 决定工具面；
+ *  handyman 经 composeFrom 继承父、skiff 无父上下文——直接挂 DSH 默认 standard preset；
+ *  guard 角色白名单再按角色过滤可见/可用面——白名单外工具仍 deny） */
+const SKIFF_PRESET = 'standard'
+
 /**
  * 创建 Skiff agent：标准 DSH agent + cwd=CCC root + 角色模型 +
- * scoped 系统提示词（基础提示词 + CCC 定义段，全替换 ACC 默认注入）。
+ * standard preset（平台工具面）+ scoped 系统提示词（基础提示词 + CCC 定义段，全替换 ACC 默认注入）。
  */
 export async function createSkiffAgent(
   ctx: Context,
@@ -72,7 +77,17 @@ export async function createSkiffAgent(
   const sessionId = `${SKIFF_SESSION_PREFIX}${roleName}-${randomUUID()}` as SessionId
   const handle = await ctx.agents.create({
     sessionId,
-    meta: { cwd: root },
+    meta: { cwd: root, agentPreset: SKIFF_PRESET },
+    setup: async (agentCtx: Context) => {
+      try {
+        // 挂载 standard preset → agent 工具面含 read/grep/glob/web_search 等平台工具；
+        // agentPresets 可选服务缺失（未装配）→ 跳过（回退全局工具层，不阻断创建）
+        const presets = agentCtx.get('agentPresets') as { mount?: (c: Context, id: string) => Promise<unknown> } | undefined
+        await presets?.mount?.(agentCtx, SKIFF_PRESET)
+      } catch {
+        /* preset 挂载失败不影响 agent 创建（guard 白名单仍兜底约束） */
+      }
+    },
     ...(model ? { agentOptions: splitModel(model) } : {}),
   })
   const agent = handle.agent

@@ -65,7 +65,10 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
 ── 运行 ──
   调试：设置面板「Serenity」页 Skiff 区块开启 → http://127.0.0.1:<debugPort> 问答页实测
   （v1.25.0 唯一客户端面；ACP stdio 协议 F4c 后续，与调试页共用同一会话核心）
-  启停 = 人工（设置面板开关，不随插件加载自动启动）；未开启零资源占用`
+  启停 = 人工（设置面板开关，不随插件加载自动启动）；未开启零资源占用
+  生效机制：角色配置**实时读取**（改 .opencode/serenity.json → 刷新调试页即生效）；
+  改配置后用 skiff_admin apply 做显式校验 + 应用确认（绑定 CCC + 角色清单）
+  注意：skill 加载对 skiff **恒可用**（不设白名单——读知识面，无写能力）`
 
 /** 校验当前 CCC 的 skiff 配置：roles schema 合法 / msms 均已注册 / model ∈ handyman.models / systemPrompt 非空 */
 export function validateSkiffConfig(root: string): JsonValue {
@@ -112,16 +115,45 @@ export function listSkiffRoles(root: string): JsonValue {
   return { roles: items, count: items.length }
 }
 
+/**
+ * 应用当前 skiff 配置（v1.25.3，S142 用户：改了 json 应该有个生效机制）。
+ *
+ * 语义：配置是**每次请求实时读取**的（v1.25.2）——apply 不是"推送"，而是**显式校验 + 应用确认**：
+ * ① 校验配置合法（复用 validate：msms 注册 / model 白名单 / systemPrompt 非空）
+ * ② 非法 → 报告问题清单，不应用（提示修复后重跑 apply）
+ * ③ 合法 → 应用确认：绑定 CCC + 角色清单 + 说明（调试页刷新即生效）
+ */
+export function applySkiffConfig(root: string): JsonValue {
+  const validation = validateSkiffConfig(root) as { ok: boolean; issues: string[]; roleCount: number }
+  const roles = readSkiffRoles(root)
+  if (!validation.ok) {
+    return {
+      applied: false,
+      cccRoot: root,
+      roleCount: roles.size,
+      issues: validation.issues,
+      hint: 'fix the issues above, then run skiff_admin apply again',
+    }
+  }
+  return {
+    applied: true,
+    cccRoot: root,
+    roleCount: roles.size,
+    roles: [...roles.keys()],
+    note: 'roles are read live from .opencode/serenity.json — the skiff debug page reflects changes on refresh; skill loading is always available to skiff sessions (not whitelisted)',
+  }
+}
+
 export const skiffAdminTool = defineTool({
   name: 'skiff_admin',
   description:
-    'Skiff (F4, experimental): CCC cognitive-subset roles (subsets of the full serenity trajectory). guide: definition tutorial (concept/role schema/cognitive MSM writing/dual whitelist/trajectory subset/examples); validate: check the CCC skiff config (roles schema legal / msms registered / model in handyman.models / systemPrompt non-empty); list: role summary (name/model/msms/tools/trajectory). Roles are defined by the CCC in .opencode/serenity.json skiff.roles.',
+    'Skiff (F4, experimental): CCC cognitive-subset roles (subsets of the full serenity trajectory). guide: definition tutorial (concept/role schema/cognitive MSM writing/dual whitelist/trajectory subset/examples); validate: check the CCC skiff config (roles schema legal / msms registered / model in handyman.models / systemPrompt non-empty); apply: validate then confirm the config is live (bound CCC + role list; roles are read live on every request); list: role summary (name/model/msms/tools/trajectory). Roles are defined by the CCC in .opencode/serenity.json skiff.roles; skill loading is always available to skiff sessions (not whitelisted).',
   parameters: {
     action: {
       type: 'string',
-      enum: ['guide', 'validate', 'list'],
+      enum: ['guide', 'validate', 'apply', 'list'],
       required: true,
-      description: 'Subcommand: guide (definition tutorial) / validate (config check) / list (role summary)',
+      description: 'Subcommand: guide (definition tutorial) / validate (config check) / apply (validate + confirm live) / list (role summary)',
     },
   },
   output: {
@@ -131,16 +163,18 @@ export const skiffAdminTool = defineTool({
   async execute(args, exec): Promise<JsonValue> {
     const root = findSerenityRoot(agentCwd(exec))
     if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
-    const action = args.action as 'guide' | 'validate' | 'list' | undefined
+    const action = args.action as 'guide' | 'validate' | 'apply' | 'list' | undefined
     switch (action) {
       case 'guide':
         return { guide: SKIFF_GUIDE }
       case 'validate':
         return validateSkiffConfig(root)
+      case 'apply':
+        return applySkiffConfig(root)
       case 'list':
         return listSkiffRoles(root)
       default:
-        throw new Error('skiff_admin requires action: guide | validate | list')
+        throw new Error('skiff_admin requires action: guide | validate | apply | list')
     }
   },
 })

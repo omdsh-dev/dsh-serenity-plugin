@@ -15,6 +15,7 @@ import {
   skiffTrajectoryEnabled,
   skiffMsmGate,
   askSkiff,
+  createSkiffAgent,
 } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX } from '../src/skiff-role.js'
 
@@ -80,6 +81,71 @@ describe('skiff-core: 会话注册表', () => {
   it('未注册会话 → null', () => {
     expect(skiffRoleFor('skiff-unknown-1')).toBeNull()
     expect(skiffRoleFor('normal')).toBeNull()
+  })
+})
+
+describe('skiff-core: createSkiffAgent（v1.25.3：preset 挂载修复平台工具面）', () => {
+  it('挂载 standard preset + 角色模型 + scoped 提示词 + 注册表', async () => {
+    const mounted: Array<{ id: string }> = []
+    const sections: Array<{ name: string; order: number; text: () => string }> = []
+    const created: Array<Record<string, unknown>> = []
+    const fakeCtx = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown }) => {
+          created.push(opts)
+          const agentCtx = {
+            get: (name: string) =>
+              name === 'agentPresets' ? { mount: async (_c: unknown, id: string) => { mounted.push({ id }) } } : undefined,
+            systemPrompt: {
+              section: (s: { name: string; order: number; text: () => string }) => sections.push(s),
+            },
+          }
+          await opts.setup?.(agentCtx)
+          return {
+            agent: {
+              ctx: agentCtx,
+              session: { id: opts.sessionId, events: [] },
+              followup: () => {},
+            },
+          }
+        },
+      },
+    }
+    const ref = await createSkiffAgent(fakeCtx as never, dir, 'qa', {
+      model: 'p/m',
+      msms: ['x'],
+      tools: ['read'],
+      systemPrompt: '角色定义',
+    })
+    // preset 挂载（平台工具面——read/grep/glob/web_search 可用的关键）
+    expect(mounted).toEqual([{ id: 'standard' }])
+    // meta 记录 agentPreset（重建恢复工具面）
+    expect(created[0]?.meta).toEqual({ cwd: dir, agentPreset: 'standard' })
+    // 角色模型
+    expect(created[0]?.agentOptions).toEqual({ provider: 'p', model: 'm' })
+    // scoped 系统提示词（基础段 + CCC 定义段）
+    expect(sections[0]?.name).toBe('serenity-skiff')
+    expect(sections[0]?.order).toBe(-60)
+    expect(sections[0]?.text()).toContain('=== Serenity Skiff ===')
+    expect(sections[0]?.text()).toContain('角色定义')
+    // 注册表
+    expect(skiffRoleFor(ref.sessionId)).toBe('qa')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('agentPresets 服务缺失 → 不阻断创建（回退全局工具层）', async () => {
+    const fakeCtx = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+          const agentCtx = { get: () => undefined, systemPrompt: { section: () => {} } }
+          await opts.setup?.(agentCtx)
+          return { agent: { ctx: agentCtx, session: { id: opts.sessionId, events: [] }, followup: () => {} } }
+        },
+      },
+    }
+    const ref = await createSkiffAgent(fakeCtx as never, dir, 'qa', { msms: ['x'] })
+    expect(ref.sessionId.startsWith(SKIFF_SESSION_PREFIX)).toBe(true)
+    unregisterSkiffSession(ref.sessionId)
   })
 })
 

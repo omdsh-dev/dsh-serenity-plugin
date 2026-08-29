@@ -288,4 +288,23 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
       unregisterSkiffSession('skiff-pure-1')
     }
   })
+
+  it('skill 加载恒可用（不设白名单，v1.25.3）：白名单不含 skill 也 allow', () => {
+    // 纯 MSM 角色（tools 空）→ 其余工具全 deny，但 skill 恒 allow
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ skiff: { roles: { pure: { msms: ['cognitive-qa'], tools: [] } } } }),
+    )
+    registerSkiffSession('skiff-pure-2', 'pure')
+    try {
+      expect(decideGuard(base({ root: dir, toolName: 'skill', skiffSessionId: 'skiff-pure-2' })).kind).toBe('allow')
+      // 对照：未注册会话 + skill 也放行（豁免在角色查询之前）
+      expect(decideGuard(base({ root: dir, toolName: 'skill', skiffSessionId: 'skiff-ghost-9' })).kind).toBe('allow')
+      // 非 skill 工具仍被白名单约束
+      expect(decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-pure-2' })).kind).toBe('deny')
+    } finally {
+      unregisterSkiffSession('skiff-pure-2')
+    }
+  })
 })
