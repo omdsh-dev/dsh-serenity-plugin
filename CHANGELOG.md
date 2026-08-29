@@ -1,3 +1,17 @@
+## v1.25.6 — 2026-08-29（Skiff 候选 CCC 加 sessionPersistence 兜底，用户实测仍空）
+
+**Scope:** 用户实测——v1.25.5（workspaceRegistry）后「认知容器」下拉**仍空**。根因排查：workspaceRegistry 是可选装配服务（依赖 storageDomain + sessionPersistence），web 环境可能未装配或注册表无记录 → list() 空 → 兜底 live 会话仍空（其它 CCC 无 live 会话）。**加固：加 sessionPersistence 兜底**——必装配的持久化会话服务，`list()` 返回**全部历史会话 headers**（含 cwd），覆盖所有曾工作目录的 CCC，即使无 live 会话。
+
+### 变更（skiff-debug.ts `discoverCccs` → async 三层）
+- ① **workspaceRegistry**（持久化工作区注册表，同步）
+- ② **sessionPersistence**（持久化会话 headers，async `list()` → `SessionHeader[]`）——workspace 缺失/为空时兜底，覆盖所有历史会话工作目录
+- ③ **live 会话**（`ctx.sessions.list()`）——持久化均缺失时兜底
+- ④ 默认绑定 root 兜底（不在列表时放首位）；`pushRoot` 统一上溯 `.serenity` 去重（只收具体 CCC）
+- handle GET / 改 `await discoverCccs(...)`
+
+### 测试
+- skiff-debug.test 更新：discoverCccs 用例全部 await；新增 sessionPersistence 兜底用例（持久化会话 headers 列出 + 空 cwd/缺 cwd 跳过）；live 会话用例改为「持久化缺失兜底路径」——**46 files / 543 tests 全绿**（+1）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.5 — 2026-08-29（Skiff 候选 CCC 改为拉 dsh 工作区注册表，用户实测反馈）
 
 **Scope:** 用户实测——v1.25.4 调试页「认知容器」下拉**拉不出来**（只有默认 CCC），指出：「应该直接拉 dsh 工作区，且是具体的 CCC 的」。根因：v1.25.4 用 live 会话（`ctx.sessions.list()`）发现候选——其它 CCC 无 live 会话时列表为空；用户要的是 **dsh 持久化工作区注册表**（workspaceRegistry.list()，所有工作目录即使无 live 会话）。
