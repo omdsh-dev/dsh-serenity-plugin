@@ -1,6 +1,6 @@
 # ACP 能力 + 企业微信机器人对接 — 初版方案（F4c，S142）
 
-> 状态：**方案定稿（2026-08-29，S142 用户拍板）**
+> 状态：**方案修订中（2026-08-29，S142 用户碰壁——自建应用需可信域名核对 IP；转向智能机器人长连接调研）**
 > 性质：dsh-serenity-plugin Skiff（F4）第三期——ACP 协议层 + IM 对接
 > 前置调研：`docs/knowledge-ccc-release-research.md`（ACP 生态/IM 桥/OpenClaw 资产）、`docs/skiff-design.md`（F4 总设计，F4c 规划）
 > 关联：`docs/skiff-followup-design.md`（会话追问延续，v1.25.10）
@@ -12,11 +12,24 @@
 1. **提供 ACP 能力**：指定 **认知容器 + 角色 + 会话（可选）** 进行对话——程序化/机器人调用，非 Web UI
 2. **以企业微信机器人为对接例子**：先出初版方案审核；用户提示「企业微信机器人是回调设计」
 
-## 0.1 用户拍板（2026-08-29）
+## 0.1 用户拍板（2026-08-29 第一轮）
 
 1. **机器人范围：先支持个人（私聊），先不支持群聊**——会话映射仅 FromUserName，ChatId 群聊留待后续
 2. **测试条件具备**：用户有企业微信管理员权限可测试
 3. **公网暴露先不关心**：到时走 **cloudflare tunnel**（home-tunnel 既有资产）——本机实现先监听本地，联调时隧道暴露
+
+## 0.2 方案转向（2026-08-29 第二轮，用户碰壁）
+
+**用户碰壁**：自建应用需要**可信域名核对 IP**（回调域名验证），暂时搞不定（未来可）；**群机器人可以建** → 要求调研群机器人/智能机器人路线。
+
+**调研结论（转向）**：自建应用回调路线搁置；**智能机器人长连接模式**是答案——
+- **智能机器人长连接 = WebSocket 主动连接**（我们的服务器连企微，非企微回调我们）→ **无需公网域名/可信 IP**（社区实证「无域名版」全配置：[华为云博客](https://bbs.huaweicloud.com/blogs/476466)）
+- **企微官方 SDK**：`WecomTeam/wecom-aibot-python-sdk`（[GitHub](https://github.com/WecomTeam/wecom-aibot-python-sdk)，WebSocket 长连接：消息收发/流式回复/模板卡片/事件回调/文件下载解密）
+- **OpenClaw 官方帮助**：「[OpenClaw接入企业微信智能机器人](https://open.work.weixin.qq.com/help2/pc/cat?doc_id=21657)」+ 社区插件 `@dingxiang-me/openclaw-wechat`（「启用企业微信智能机器人长连接」）——**成熟先例**
+- **用户可建**：群机器人/智能机器人创建无需可信域名（与自建应用门槛不同）
+- **注意限制**：智能机器人社区反馈「URL 回调模式只能收到创建人消息」「@机器人才回调」（[1](https://developer.work.weixin.qq.com/community/question/detail?content_id=16844395806067284329)、[2](https://developer.work.weixin.qq.com/community/question/detail?content_id=16848595695307557830)）——**长连接模式是否同限需实测确认**
+
+**待用户确认**：智能机器人长连接模式的个人/群聊支持范围 + 创建人限制（实测轮确认）；dsp 侧接入用 **WebSocket 客户端**（node:ws，零依赖可选）连接企微长连接通道。
 
 ---
 
@@ -184,6 +197,17 @@ POST 回调（加密 XML）
 - 本机：`home-tunnel`（Cloudflare Tunnel MSM）暴露回调 URL（用户拍板：到时走 cloudflare tunnel）
 - 测试：企业微信后台「接收消息」测试工具（模拟消息 → 回调验证）
 
+### 4.7 企微配置踩坑（社区高频，调研实证 2026-08-29）
+
+| # | 坑 | 解法 |
+|---|----|------|
+| 1 | **「用户发送的普通消息」选项灰色无法勾选**（社区大量提问） | **先配置好回调 URL 并验证通过**后选项才解锁；仍灰色检查应用状态/类型 |
+| 2 | **可见范围**：成员打开应用发消息的前提 | 应用设置「可见范围」包含测试成员；管理员把自己加进范围即可 |
+| 3 | **智能机器人形态 ≠ 自建应用**：智能机器人（URL 回调）只能收到创建人消息、可见范围外成员无法聊天 | **用自建应用**（本方案已选），不受此限制 |
+| 4 | **主动推送可信 IP**：message/send 若企业配了可信 IP 白名单，服务器出口 IP 需在名单内 | 走 cloudflare tunnel 时确认出站 IP（隧道节点）；或企业侧不配可信 IP |
+| 5 | **回调 URL 需公网可达**：后台保存回调地址时 GET 验证 URL | tunnel 暴露 `/wecom/callback` 后配置 |
+| 6 | 被动回复 5s 窗口对 agent 不适用 | 一律主动推送（message/send），回调先回 200 占位（§4.3 已定） |
+
 ---
 
 ## 5. 安全面（复用 F1 网关经验 + 用户原则）
@@ -201,11 +225,13 @@ POST 回调（加密 XML）
 
 ## 6. 分期（F4c）
 
+> 注：F4c-2 原「自建应用回调」路线因**可信域名核对 IP** 碰壁（用户暂时搞不定）→ **转向智能机器人长连接**（WebSocket 主动连接，无需公网域名）。F4c-2 修订为长连接客户端；自建应用回调留待未来（用户：未来可以）。
+
 | 阶段 | 版本 | 内容 | 估量 |
 |------|------|------|------|
 | **F4c-1** | v1.26.0 | **ACP server**（`acp-core` 会话管理层 + 方法处理器传输无关 + `acp-http` HTTP JSON-RPC 端点（settings acpEnabled/acpPort 默认关）：initialize/session/new(ccc+role+sessionId)/prompt/cancel/list/close/request_permission；复用 skiff 核心 + 会话延续）+ 测试 + skiff_admin guide 增 ACP 节 | 中（~500 行 + 测试） |
-| **F4c-2** | v1.26.1 | **企业微信桥**（回调端点 GET 验 URL + POST 解密 + 主动推送 message/send + **个人会话映射**（群聊留待后续）+ 配置段 + localstore 凭据引用；同进程直调 acp-core 处理器）+ 测试 | 中（~600 行 + 测试） |
-| **F4c-3** | 实测 | 企业微信真实应用联调（配应用 → 回调 URL 经 home-tunnel → 私聊消息 → 机器人回复） | 联调轮 |
+| **F4c-2** | v1.26.1 | **企业微信智能机器人长连接桥**（WebSocket 客户端连接企微长连接通道：收发消息/流式回复/事件；个人会话映射；配置段 + localstore 凭据引用；同进程直调 acp-core 处理器）+ 测试 | 中（~600 行 + 测试） |
+| **F4c-3** | 实测 | 企业微信智能机器人真实联调（建机器人 → 长连接 → 私聊消息 → 机器人回复；实测创建人限制） | 联调轮 |
 
 ---
 
@@ -221,6 +247,7 @@ POST 回调（加密 XML）
 | 6 | 会话映射粒度 | **按发送者自动绑定**（推荐默认采纳）——个人 `skiff-<role>-<userid>`；显式「新对话」指令 |
 | 7 | resume 纳入 | **首版仅进程内延续**（推荐默认采纳，与 v1.25.10 一致）——跨进程 resume 留待后续 |
 | 8 | 凭据存放 | **localstore（家庭惯例）**（推荐默认采纳）——corpid/secret/encodingAESKey 归 localstore，配置只存引用 |
+| 9 | **企微形态（第二轮碰壁转向）** | 自建应用（回调）需**可信域名核对 IP**，用户暂时搞不定 → **转向智能机器人长连接**（WebSocket 主动连接，无需公网域名/可信 IP）；自建应用路线留待未来 |
 
 > 未单独拍板的项按方案推荐值默认采纳（标注"推荐默认采纳"）；如后续有异议可随时调整。
 
@@ -230,6 +257,7 @@ POST 回调（加密 XML）
 
 - [ACP 协议官方](https://agentclientprotocol.com)（v1 标准 + v2 draft）
 - DSH 官方 `@deepseek-ai/dsh-acp`（packages/acp + examples/acp-agent，dsh-harness-public @ cd5ef81481）——协议面参考
-- 企业微信官方文档：[接收消息](https://developer.work.weixin.qq.com/document/path/100719)、[回调和回复的加解密方案](https://developer.work.weixin.qq.com/document/path/101033)、[被动回复消息](https://developer.work.weixin.qq.com/document/path/101031)、[发送应用消息](https://developer.work.weixin.qq.com/document/path/90236)、[企业微信的群聊机器人支持消息回调吗（社区确认不支持）](https://developer.work.weixin.qq.com/community/question/detail?content_id=16709787612948516025)
+- 企业微信官方文档：[接收消息](https://developer.work.weixin.qq.com/document/path/100719)、[回调和回复的加解密方案](https://developer.work.weixin.qq.com/document/path/101033)、[被动回复消息](https://developer.work.weixin.qq.com/document/path/101031)、[发送应用消息](https://developer.work.weixin.qq.com/document/path/90236)、[智能机器人长连接（官方文档 path/101463）](https://developer.work.weixin.qq.com/document/path/101463)、[OpenClaw接入企业微信智能机器人（企微官方帮助）](https://open.work.weixin.qq.com/help2/pc/cat?doc_id=21657)、[群聊机器人不支持消息回调（社区确认）](https://developer.work.weixin.qq.com/community/question/detail?content_id=16709787612948516025)
+- **智能机器人长连接资产**：[企微官方智能机器人 Python SDK（WecomTeam/wecom-aibot-python-sdk）](https://github.com/WecomTeam/wecom-aibot-python-sdk)、[企业微信长连接+LangBot+Dify 全配置（无域名版，华为云博客）](https://bbs.huaweicloud.com/blogs/476466)、[@dingxiang-me/openclaw-wechat（企业微信智能机器人长连接）](https://www.npmjs.com/package/@dingxiang-me/openclaw-wechat)、[openclaw-wecom-websocket](https://www.npmjs.com/package/openclaw-wecom-websocket)、[LangBot 企业微信智能机器人接入](https://docs.langbot.app/zh/usage/platforms/wecom/wecombot)
 - 社区参考：[picoclaw wecom-app-configuration](https://github.com/sipeed/picoclaw/blob/c57a9c14e7ae6e1119c6b35a5a8e639be08ffbb4/docs/wecom-app-configuration.md)、[@sunnoy/wecom](https://socket.dev/npm/package/%40sunnoy%2Fwecom)、[花骨朵：企业微信外部群机器人接入 AI 实战](https://cloud.tencent.cn/developer/article/2706699)
 - 既有资产：`docs/knowledge-ccc-release-research.md`（ACP 生态/OpenClaw 微信通道/openclaw-acp 网关）、F1 网关（双端口+登录+CSRF 加固）、home-tunnel（Cloudflare Tunnel MSM）
