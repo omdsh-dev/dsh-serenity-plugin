@@ -80,26 +80,30 @@ describe('output-guard: 检测（detectSensitive）', () => {
     expect(hits).toEqual([])
   })
 
-  it('回答含凭据值 → 命中（精确匹配）', () => {
+  it('回答含凭据值 → 命中（精确匹配，分类 credential）', () => {
     const t = buildSensitiveTable(dir)
-    expect(detectSensitive('服务器密码是 hunter2-secret', t)).toContain('hunter2-secret')
+    expect(detectSensitive('服务器密码是 hunter2-secret', t)).toContainEqual({ word: 'hunter2-secret', category: 'credential' })
   })
 
-  it('回答含凭据条目名 → 命中', () => {
+  it('回答含凭据条目名 → 命中（分类 credential）', () => {
     const t = buildSensitiveTable(dir)
-    expect(detectSensitive('我读取了 SSH_UBUNTU_PASSWORD 配置', t)).toContain('SSH_UBUNTU_PASSWORD')
+    expect(detectSensitive('我读取了 SSH_UBUNTU_PASSWORD 配置', t)).toContainEqual({ word: 'SSH_UBUNTU_PASSWORD', category: 'credential' })
   })
 
-  it('回答含 MSM 工具名 → 命中', () => {
+  it('回答含 MSM 工具名 → 命中（分类 msm）', () => {
     const t = buildSensitiveTable(dir)
-    expect(detectSensitive('我调用 web-search 搜索了资料', t)).toContain('web-search')
+    expect(detectSensitive('我调用 web-search 搜索了资料', t)).toContainEqual({ word: 'web-search', category: 'msm' })
   })
 
-  it('回答含机制词（插件名/端口/内部路径）→ 命中', () => {
+  it('回答含机制词（插件名/内部路径）→ 命中（分类 mechanism）', () => {
     const t = buildSensitiveTable(dir)
-    expect(detectSensitive('这是 dsh-serenity-hooks 的实现', t)).toContain('dsh-serenity-hooks')
-    expect(detectSensitive('端口 3100 提供服务', t)).toContain('3100')
-    expect(detectSensitive('配置在 .opencode/serenity.json', t)).toContain('.opencode/serenity.json')
+    expect(detectSensitive('这是 dsh-serenity-hooks 的实现', t)).toContainEqual({ word: 'dsh-serenity-hooks', category: 'mechanism' })
+    expect(detectSensitive('配置在 .opencode/serenity.json', t)).toContainEqual({ word: '.opencode/serenity.json', category: 'mechanism' })
+  })
+
+  it('回答含内部端口 → 命中（分类 port，v1.26.11）', () => {
+    const t = buildSensitiveTable(dir)
+    expect(detectSensitive('端口 3100 提供服务', t)).toContainEqual({ word: '3100', category: 'port' })
   })
 
   it('空文本 → 无命中', () => {
@@ -108,18 +112,36 @@ describe('output-guard: 检测（detectSensitive）', () => {
   })
 })
 
-describe('output-guard: 打回消息（buildRebuke）', () => {
-  it('含命中词本身（v1.26.10 用户调整：告知模型具体敏感词才能精准重写）', () => {
-    const msg = buildRebuke(['hunter2-secret'])
+describe('output-guard: 打回消息（buildRebuke，v1.26.11 分类指引）', () => {
+  it('逐词列出命中词 + 分类规避指引（端口类：告知是内部端口）', () => {
+    const msg = buildRebuke([{ word: '3080', category: 'port' }])
     expect(msg).toContain('sensitive internal term')
-    expect(msg).toContain('hunter2-secret')
+    expect(msg).toContain('"3080"')
+    expect(msg).toMatch(/internal service port or address/)
+    expect(msg).toMatch(/never mention internal ports, addresses, or service endpoints/)
   })
 
-  it('提及重新生成且不要求向用户解释', () => {
-    const msg = buildRebuke(['a', 'b'])
+  it('凭据/机制/工具名分类各给对应指引 + 多命中全列出', () => {
+    const msg = buildRebuke([
+      { word: 'hunter2-secret', category: 'credential' },
+      { word: 'dsh-serenity-hooks', category: 'mechanism' },
+      { word: 'web-search', category: 'msm' },
+    ])
+    expect(msg).toContain('3 sensitive internal terms')
+    expect(msg).toContain('"hunter2-secret"')
+    expect(msg).toContain('"dsh-serenity-hooks"')
+    expect(msg).toContain('"web-search"')
+    expect(msg).toMatch(/credential identifier/)
+    expect(msg).toMatch(/internal mechanism term/)
+    expect(msg).toMatch(/internal tool name/)
     expect(msg).toMatch(/Regenerate the response/)
     expect(msg).toMatch(/without referencing internal machinery/)
-    expect(msg).toContain('a, b') // 多命中词全列出
+  })
+
+  it('单数名词（1 term）', () => {
+    const msg = buildRebuke([{ word: '3100', category: 'port' }])
+    expect(msg).toContain('1 sensitive internal term')
+    expect(msg).not.toContain('term(s)')
   })
 })
 

@@ -1,3 +1,16 @@
+## v1.26.11 — 2026-08-29（打回消息语义化：命中词分类 + 规避指引，S142 用户实测）
+
+**Scope:** 用户实测 v1.26.10 打回消息（"contained 1 sensitive internal term(s)...: 3080"）仍不满意——**裸词 "3080" 是端口号，模型不知道它是什么、为什么敏感、怎么规避**（用户："还是没告诉LLM 具体哪个词应该规避啊"）。改方案：**命中词分类 + 按类给规避指引**——模型不仅看到词，还知道"这是内部服务端口，不要提及内部端口/地址/端点"。
+
+### 变更
+- **`output-guard.ts` 命中结构化（v1.26.11）**：`SensitiveCategory`（credential/mechanism/port/msm）+ `SensitiveHit {word, category}`；`SensitiveWordTable` 增分类词表（credentialWords/mechanismWords/portWords/msmWords，exact/substring 聚合视图保留）；`detectSensitive` 返回带分类命中
+- **`buildRebuke` 语义化打回（v1.26.11）**：逐词 `- "3080" — internal service port or address — never mention internal ports, addresses, or service endpoints`；四类指引（凭据=name/key/token/password、机制=内部实现名/配置路径、端口=端口/地址/端点、工具名）；单复数修正（`1 sensitive internal term` 不再 `term(s)`）；多命中全列出
+- **`output-guard-seam.ts`**：无改动（detectSensitive→buildRebuke 透传兼容）
+
+### 测试
+- **output-guard.test 重构**：detectSensitive 断言改 `toContainEqual({word, category})`（凭据值/条目名/msm/机制词/端口 5 类全覆盖）；buildRebuke 新增分类指引断言（端口/凭据/机制/工具名 4 类 + 单复数 + 多命中）；seam 测试透传兼容
+- **50 files / 648 tests 全绿**（+2）；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.10 — 2026-08-29（两项用户调整：打回告知命中词 + 3100 对外去 trajectory）
 
 **Scope:** ① 输出守卫打回消息不告知命中词 → 模型不知道怎么改（用户："这里不告诉人家敏感词是什么，人家怎么改，要告知"）；② asktest 公网问答响应含 trajectory（含工具结果等内部信息）→ 3100 对外只提供问答（用户："3100是对外的，只提供问答，不提供trajectory"）。
