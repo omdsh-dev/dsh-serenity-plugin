@@ -24,6 +24,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { findSerenityRoot } from '../ccc.js'
+import { isSkiffSessionId } from '../skiff-role.js'
 
 export interface BootstrapSettings {
   /** 首请求（bootstrap 阶段）工具集（缺省 dsp 核心；zeroTools 时忽略——0 工具） */
@@ -148,8 +149,9 @@ export function createEpochPromotion(
       // 它经 ctx.agents.create 直接创建（非 DSH delegation 路径），delegationDepth 为 0，
       // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故显式按 `handyman-` 前缀判 promoted，
       // 与 context.ts shouldAutoRestore 的 `handyman-` 约定保持一致。
+      // F4 Skiff（`skiff-` 前缀）：角色 CCC 提示词全替换，无需 whoami 锚定轮——恒 promoted（同 handyman）。
       const loopSid = (session as { id?: string }).id
-      if (typeof loopSid === 'string' && loopSid.startsWith('handyman-')) return { boundary: -1, promoted: true }
+      if (typeof loopSid === 'string' && (loopSid.startsWith('handyman-') || isSkiffSessionId(loopSid))) return { boundary: -1, promoted: true }
       // 子 agent（delegationDepth > 0）恒为完整目录（anchored 语义）
       const header = (session as { header?: { delegationDepth?: number } }).header
       if ((header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
@@ -271,8 +273,9 @@ export function registerBootstrap(ctx: Context): void {
       const sid = typeof session?.id === 'string' ? session.id : undefined
       // handyman worker（sessionId `handyman-` 前缀）：autonomous worker，不需要 whoami 锚定轮
       // （锚定轮消耗 2 轮 + 0 工具，浪费；handyman worker 已通过 systemPrompt.section 获得 ACC 5 块）。
+      // F4 Skiff（`skiff-` 前缀）：角色 CCC 提示词全替换，同样不需要锚定轮（旁路）。
       // 与 createEpochPromotion.status 的 `handyman-` 恒 promoted 判定保持一致。
-      if (sid !== undefined && sid.startsWith('handyman-')) return
+      if (sid !== undefined && (sid.startsWith('handyman-') || isSkiffSessionId(sid))) return
       if (depth === 0) {
         if (session?.events?.some((event) => (event as { type?: string }).type === 'user/message')) return
       } else {

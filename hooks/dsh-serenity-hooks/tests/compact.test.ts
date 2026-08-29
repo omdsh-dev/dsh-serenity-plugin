@@ -84,4 +84,10 @@ describe('compact: 压缩保留（P2）', () => {
     emit({ id: 'sess-1' }, { type: 'compaction/end', data: { compactionId: 'c5', turn: 2 } })
     expect(injected.length).toBe(2)
   })
+
+  it('Skiff 会话（id `skiff-` 前缀）→ 不重注入 ACC 身份（F4b 旁路：角色 CCC 提示词全替换）', () => {
+    const { emit, injected } = captureListener()
+    emit({ id: 'skiff-qa-readonly-uuid' }, { type: 'compaction/end', data: { compactionId: 'c6', turn: 1 } })
+    expect(injected.length).toBe(0)
+  })
 })

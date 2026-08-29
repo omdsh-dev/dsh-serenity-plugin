@@ -92,6 +92,15 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
     expect(p.status(mkAgent(session) as never)).toEqual({ boundary: -1, promoted: true })
   })
 
+  it('Skiff agent（sessionId `skiff-` 前缀）恒晋升（角色 CCC 提示词全替换，无锚定轮，F4b 旁路）', () => {
+    const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
+    const agent = mkAgent(mkSession('skiff-qa-readonly-uuid', [], { delegationDepth: 0 }))
+    expect(p.status(agent as never)).toEqual({ boundary: -1, promoted: true })
+    // 有历史事件也恒晋升
+    const session = mkSession('skiff-review-1', [ev('compaction/end', 5), ev('tool/call', 6)])
+    expect(p.status(mkAgent(session) as never)).toEqual({ boundary: -1, promoted: true })
+  })
+
   it('resume：从持久 events 重建阶段（不依赖进程内存）', () => {
     const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
     // 模拟重启：新 tracker + 有历史的 session

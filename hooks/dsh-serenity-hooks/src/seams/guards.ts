@@ -20,6 +20,8 @@ import {
   pathInside,
   type BlacklistRule,
 } from '../ccc.js'
+import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
+import { skiffRoleFor } from '../skiff-registry.js'
 
 // ── 纯决策（可单测）──
 
@@ -32,6 +34,8 @@ export interface GuardInput {
   pathArg?: string
   /** cc_fs 等复合工具的子命令 action（只读子命令不查黑名单） */
   action?: string
+  /** 当前 agent 的 dsh 会话 id（Skiff 角色白名单判定；非 skiff 会话不判定） */
+  skiffSessionId?: string
 }
 
 /** 写类工具名（黑名单/治理文件只拦这些；读工具只做路径越界检查——对齐 osp） */
@@ -61,6 +65,18 @@ export interface GuardDecisionResult {
  */
 export function decideGuard(input: GuardInput): GuardDecisionResult {
   const { root, toolName, safeModeOn, blacklist, pathArg, action } = input
+
+  // 0) Skiff 角色白名单（F4b ⑧）：skiff 会话工具必须 ∈ 角色白名单（tools ∪ acc_msm），
+  // 白名单外一律 deny（拒绝信息泛化——不泄漏白名单外工具名；完备性：不枚举工具名）。
+  // 由调用方（evaluate）传入 sessionId 判定；纯函数内通过 GuardInput.skiffSessionId 支持单测。
+  if (input.skiffSessionId !== undefined && isSkiffSessionId(input.skiffSessionId)) {
+    const roleName = input.skiffSessionId ? skiffRoleFor(input.skiffSessionId) : null
+    const role = roleName ? readSkiffRoles(root).get(roleName) : undefined
+    const whitelist = roleToolWhitelist(role)
+    if (!whitelist.has(toolName)) {
+      return { deny: 'tool not allowed in this skiff role', kind: 'deny' }
+    }
+  }
 
   // 1) 安全模式：bash 一律禁用（标准语义）
   // 提示不泄露 safe-mode 机制（safe-mode 对 agent 不可见）：模型视角 = bash 工具不存在
@@ -231,7 +247,8 @@ export function registerGuards(ctx: Context, opts: GuardRegistration = {}): void
     const blacklist = readBlacklist(root, configPaths)
     const pathArg = extractPathArg(exec)
     const action = extractAction(exec)
-    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg, action })
+    const sessionId = (exec as { agent?: { session?: { id?: string } } } | undefined)?.agent?.session?.id
+    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg, action, skiffSessionId: sessionId })
   }
 
   // 瀑布：deny 短路执行

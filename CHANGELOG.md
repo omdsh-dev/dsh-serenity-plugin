@@ -1,4 +1,27 @@
-## v1.24.12 — 2026-08-28（session_rebuild 认知沉淀协议：rebuild 前修订 skill / 新建 skill 写 SESSION 提案，S142 用户需求）
+## v1.25.0 — 2026-08-29（F4 Skiff 认知子集角色：会话核心 + 调试问答页 + skiff_admin 工具 + 双白名单强制 + 拦截缝旁路，S142 用户设计驱动）
+
+**Scope:** 知识型 CCC 价值释放（F4）首版——Skiff（舢板）= 宁静号放出的独立小艇：完整 trajectory（全知全能）的**任意子集角色**，由 CCC 定义（`.opencode/serenity.json skiff.roles`）。用户拍板（2026-08-28 累计）：① 首版只提供**调试页**（ACP stdio 协议 F4c 后续，复用同一会话核心）② 双白名单（MSM 独立 + 非 MSM 工具独立，白名单外全隐藏，默认全隐藏）③ dsp 只给基础提示词，角色人格 CCC 完全定义（全替换 ACC 默认注入）④ Skiff 默认不使用 trajectory 机制（不建 SESSION.md / 无 keeper / 无 rebuild），轨迹纪律按角色子集选择性开启 ⑤ 新增第 12 个 ACC 工具 `skiff_admin`（guide/validate/list）⑥ 启停 = 人工（设置面板开关，不随插件加载自动启动）⑦ per-role 模型 CCC 直接指定（无白名单校验）⑧ 实验性质：默认全关、guard/旁路只对 skiff 会话生效、未配置角色零影响。
+
+### 变更（F4a' 会话核心 + 调试页 + 工具）
+- **`src/skiff-core.ts`**（新）：Skiff agent = 标准 DSH agent（`ctx.agents.create({ sessionId: 'skiff-<role>-<uuid>' })`，cwd=CCC root，per-role model）→ `createSkiffAgent`（scoped 系统提示词 `serenity-skiff` order -60：`buildSkiffBasePrompt` 动态白名单清单 + CCC systemPrompt 全替换）→ `askSkiff`（followup → waitIdle → 读 session.events 答案 + `eventsToTrajectory` 增量轨迹）；`skiffTrajectoryEnabled`（seams 旁路判定：非 skiff 恒 true，skiff 按角色 trajectory 子集，注册表缺失保守 false）；`skiffMsmGate`（acc_msm 白名单门控：exec 校验 / register-deregister 必拒 / list 白名单 / check-guide-ccc-config 只读放行）
+- **`src/skiff-role.ts`**（新，纯逻辑）：`readSkiffRoles`（serenity.json skiff.roles → Map，非法跳过）、`roleToolWhitelist`（tools ∪ acc_msm）、`roleMsmWhitelist`、`trajectorySubset`（缺省全关）、`buildSkiffBasePrompt`（身份 + 可用 MSM/工具清单 + 调用协议 + 边界声明）
+- **`src/skiff-registry.ts`**（新，零依赖）：会话注册表（sessionId → role）独立成模块——guards/seams 安全查询，不引入 skiff-core 的 dsh-llm 运行时依赖（测试/装配级联成本）
+- **`src/skiff-debug.ts`**（新）：node:http 调试端口（默认关，仅 127.0.0.1；启停 = 人工）——GET / 问答 HTML 页（角色下拉 + 输入 + 答案区 + 轨迹区 JS 渲染 + WebUI 链接）；POST /ask `{role, question}` → 会话核心 → `{answer, sessionId, trajectory}`；单实例幂等
+- **`src/tools/skiff-admin.ts`**（新，第 12 工具）：`skiff_admin` guide（定义教程：概念/schema/认知 MSM 写法/双白名单/轨迹纪律/示例角色 qa-readonly+code-review）/ validate（roles schema / msms 已注册 / model ∈ handyman.models / systemPrompt 非空）/ list（角色摘要）
+
+### 变更（F4b 机制 4 件套）
+- **⑧ guard 角色白名单**（seams/guards.ts）：`decideGuard` 新增 skiff 分支（skiffSessionId 判定）——工具 ∈ `roleToolWhitelist(role)` 否则 deny（拒绝信息泛化不泄漏白名单外工具名；完备性：按角色判定不枚举工具名）
+- **⑨ acc_msm 白名单**（tools/msm.ts + skiff-core `skiffMsmGate`）：exec 非白名单 MSM 拒绝（不列名单）/ register-deregister 必拒 / list 过滤显示 / check-guide-ccc-config 放行
+- **⑩ 拦截缝旁路**（只对 skiff 会话生效）：context.ts（session-start 播种 + pre-step 注入 + shouldAutoRestore 跳过 skiff——完全独立不恢复宁静号会话）/ keeper.ts（计分按 trajectory.keeper、重建压力按 trajectory.rebuild）/ bootstrap.ts（锚定跳过 + `skiff-` 恒 promoted）/ compact.ts（compaction/end 不重注入）/ system-prompt.ts（全局 + scoped section 对 skiff 返回空——角色 CCC 提示词全替换）
+- **装配**（index.ts）：`registerSkiff`（settings-changed 监听 + 启动时 sync：skiffEnabled → `startSkiffDebugServer`（root 解析：进程 cwd 优先 live 会话兜底，webPort 读 ctx.webServer）/ 关 → stop）；Config + skiff entry（enabled false / debugPort 3099）；invariant REGISTERED_TOOLS 11→12（补 session_rebuild/localstore 历史欠账 + skiff_admin）；system-prompt accBlock 工具清单 +1 行；dsh.plugin.json contributes.tools +skiff_admin + description
+
+### 测试
+- 新增 4 文件：skiff-role（12：判定/解析/子集/白名单/基础提示词）、skiff-core（13：注册表/轨迹子集/MSM 门控/askSkiff 往返）、skiff-admin（8：guide/validate 各路径/list）、skiff-debug（7：页面渲染/GET/POST 错误路径/404/幂等）
+- 追加：guards +9（skiff 白名单 allow/deny/不泄漏/未注册保守 deny/非 skiff 不受影响/纯 MSM 角色）、context +2（shouldAutoRestore/Active skiff 不恢复）、bootstrap +2（skiff 恒 promoted 含历史事件）、compact +1（skiff 不重注入）、keeper +3（keeper 子集关旁路/开生效/非 skiff 正常）、invariant +1（12 工具断言）
+- 修复：waitIdle dispose TDZ（ctx.on 同步触发场景）、guards skiff 测试 root 用真实 fixture、settings-section entry 期望 +skiff 字段、register 12 工具断言
+- **46 files / 531 tests 全绿**（+55）；typecheck ✓（node + client）→ build ✓（132990 B）
+
+
 
 **Scope:** 用户需求——在提示词中告知 LLM：rebuild 前若掌握了重要、值得沉淀的认知，需修订宁静号 CCC 的现有 skill（eap 结构化）；若需新建 skill，则写入 SESSION 中供用户参考。**用户审核裁决**：只在 [TRAJECTORY] 提醒中写（不加 Session 块预声明/锚点/工具描述）；简短留自由度（不提"加载 eap 工具"——模型自知；只说修订 skill + 新建 skill 落 SESSION）；**新建 skill 一律不自行创建**（用户裁决）。
 

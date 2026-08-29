@@ -15,31 +15,37 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
-import { SKIFF_SESSION_PREFIX, buildSkiffBasePrompt, type SkiffRoleConfig } from './skiff-role.js'
+import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, type SkiffRoleConfig } from './skiff-role.js'
 import { splitModel } from './handyman-ops.js'
+import { skiffRoleFor as registryRoleFor, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
-// ── 会话注册表（sessionId → 角色；ACP/调试页会话映射，页面/连接关闭时清理）──
+// ── 会话注册表（sessionId → role + agent；ACP/调试页会话映射，页面/连接关闭时清理）──
+// 角色名存 skiff-registry（零依赖，guards 等 seams 可安全查询）；agent 句柄存本模块
 
-const skiffSessions = new Map<string, { role: string; agent: Agent }>()
+const skiffAgents = new Map<string, Agent>()
 
 /** 查 sessionId 的 Skiff 角色名（无 → null） */
 export function skiffRoleFor(sessionId: string): string | null {
-  return skiffSessions.get(sessionId)?.role ?? null
+  return registryRoleFor(sessionId)
 }
 
 export function registerSkiffSession(sessionId: string, role: string, agent: Agent): void {
-  skiffSessions.set(sessionId, { role, agent })
+  skiffAgents.set(sessionId, agent)
+  registryRegister(sessionId, role)
 }
 
 export function unregisterSkiffSession(sessionId: string): void {
-  skiffSessions.delete(sessionId)
+  skiffAgents.delete(sessionId)
+  registryUnregister(sessionId)
 }
 
 /** 测试/调试：注册表快照 */
 export function skiffSessionSnapshot(): ReadonlyMap<string, { role: string }> {
-  return new Map([...skiffSessions].map(([id, v]) => [id, { role: v.role }]))
+  const out = new Map<string, { role: string }>()
+  for (const [id, role] of registrySnapshot()) out.set(id, { role })
+  return out
 }
 
 // ── agent 生命周期 ──
@@ -103,13 +109,15 @@ export interface SkiffAskResult {
 function waitIdle(ctx: Context, agent: Agent): Promise<void> {
   return new Promise((resolve) => {
     let settled = false
+    // dispose 先声明后赋值：ctx.on 可能同步触发回调（测试 fake），TDZ 会导致 finish 访问未初始化
+    let dispose: () => void = () => {}
     const finish = (): void => {
       if (settled) return
       settled = true
       dispose()
       resolve()
     }
-    const dispose = ctx.on('agent/status', (payload: { agent: Agent; status: string }) => {
+    dispose = ctx.on('agent/status', (payload: { agent: Agent; status: string }) => {
       if (payload.agent === agent && payload.status === 'idle') finish()
     })
   })
@@ -180,4 +188,53 @@ export async function askSkiff(ctx: Context, agent: Agent, question: string, eve
   const answer = lastAssistantText(agent)
   const trajectory = eventsToTrajectory(agent.session.events.slice(before))
   return { answer, sessionId: String((agent.session as { id?: unknown }).id ?? ''), trajectory }
+}
+
+// ── 轨迹纪律子集参与判定（seams 旁路用，F4b）──
+
+/**
+ * Skiff 会话的轨迹纪律参与判定：非 skiff 会话恒 true（正常参与）；
+ * skiff 会话按角色 trajectory 子集（session/keeper/rebuild）决定；
+ * 注册表缺失（进程重启遗留等）→ 保守旁路（false，完全独立）。
+ */
+export function skiffTrajectoryEnabled(
+  root: string,
+  sessionId: string | undefined,
+  key: 'session' | 'keeper' | 'rebuild',
+): boolean {
+  if (!isSkiffSessionId(sessionId)) return true
+  const roleName = sessionId ? skiffRoleFor(sessionId) : null
+  if (!roleName) return false
+  const role = readSkiffRoles(root).get(roleName)
+  return trajectorySubset(role)[key]
+}
+
+// ── acc_msm 白名单门控（F4b ⑨）──
+
+export interface SkiffMsmGate {
+  /** 拒绝原因（有则拒绝执行） */
+  reject?: string
+  /** list 显示白名单（msms）；仅 action==='list' 时有值 */
+  whitelist?: Set<string>
+}
+
+/**
+ * acc_msm 的 Skiff 门控：非 skiff 会话恒放行；skiff 会话——
+ * exec 非白名单 MSM 拒绝（不列名单）、register/deregister 必拒、
+ * list 白名单过滤、check/guide/ccc-config 只读放行。
+ */
+export function skiffMsmGate(root: string, sessionId: string | undefined, action: string, name?: string): SkiffMsmGate {
+  if (!isSkiffSessionId(sessionId)) return {}
+  const roleName = sessionId ? skiffRoleFor(sessionId) : null
+  const role = roleName ? readSkiffRoles(root).get(roleName) : undefined
+  if (!roleName || !role) return { reject: 'MSM not allowed in this skiff session' }
+  if (action === 'register' || action === 'deregister') {
+    return { reject: 'register/deregister is not allowed in skiff sessions' }
+  }
+  if (action === 'exec') {
+    if (!name || !(role.msms ?? []).includes(name)) return { reject: 'MSM not allowed' }
+    return {}
+  }
+  if (action === 'list') return { whitelist: roleMsmWhitelist(role) }
+  return {} // check / guide / ccc-config：只读放行
 }

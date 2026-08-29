@@ -61,6 +61,11 @@ describe('context: 重启自动恢复的根会话判定（shouldAutoRestore）',
     expect(shouldAutoRestore(fakeAgent({ id: 'handyman-sqc-scan-1234' }))).toBe(false)
   })
 
+  it('Skiff 会话（id 以 skiff- 开头）→ 不恢复（完全独立，F4b 旁路）', () => {
+    expect(shouldAutoRestore(fakeAgent({ id: 'skiff-qa-readonly-uuid' }))).toBe(false)
+    expect(shouldAutoRestore(fakeAgent({ id: 'skiff-review-1' }))).toBe(false)
+  })
+
   it('无 session → 不恢复', () => {
     expect(shouldAutoRestore(fakeAgent(undefined))).toBe(false)
   })
@@ -81,6 +86,10 @@ describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复�
   it('subagent / handyman（有历史但非根会话）→ 不恢复', () => {
     expect(shouldRestoreActive(fakeAgent({ id: 'child-1', header: { origin: 'subagent' }, events: [{ type: 'user/message' }] }))).toBe(false)
     expect(shouldRestoreActive(fakeAgent({ id: 'handyman-x-1', events: [{ type: 'user/message' }] }))).toBe(false)
+  })
+
+  it('Skiff 会话（有历史但独立）→ 不恢复（F4b 旁路）', () => {
+    expect(shouldRestoreActive(fakeAgent({ id: 'skiff-qa-1', events: [{ type: 'user/message' }] }))).toBe(false)
   })
 })
 

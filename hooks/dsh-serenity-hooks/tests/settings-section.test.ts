@@ -37,13 +37,15 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部默认（gateway off / rebuild on 0.9 / naming on）', () => {
+  it('空 Config → 全部默认（gateway off / rebuild on 0.9 / naming on / skiff off 3099）', () => {
     const d = entryDefaults({})
     expect(d).toEqual({
       gatewayEnabled: false,
       rebuildEnabled: true,
       rebuildThreshold: 0.9,
       namingEnabled: true,
+      skiffEnabled: false,
+      skiffDebugPort: 3099,
     })
   })
 
@@ -52,12 +54,15 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       gateway: { enabled: true },
       rebuild: { enabled: false, thresholdRatio: 0.5 },
       naming: { enabled: false },
+      skiff: { enabled: true, debugPort: 4000 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
       rebuildEnabled: false,
       rebuildThreshold: 0.5,
       namingEnabled: false,
+      skiffEnabled: true,
+      skiffDebugPort: 4000,
     })
   })
 

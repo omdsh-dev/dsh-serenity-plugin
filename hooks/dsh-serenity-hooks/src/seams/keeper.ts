@@ -16,6 +16,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
 import { readSimpleSettings } from '../settings-section.js'
+import { skiffTrajectoryEnabled } from '../skiff-core.js'
 
 // ── 纯跟踪器（可单测）──
 
@@ -169,8 +170,13 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const cwd = (exec as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd ?? process.cwd()
     const root = findSerenityRoot(cwd)
     if (!root) return next()
+    // F4 Skiff 旁路（F4b ⑩）：计分提醒按角色 trajectory.keeper、重建压力检测按
+    // trajectory.rebuild 决定参与（默认全关 = Skiff 完全独立）；非 skiff 恒参与。
+    const sessionId = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id
+    const skiffKeeper = skiffTrajectoryEnabled(root, sessionId, 'keeper')
+    const skiffRebuild = skiffTrajectoryEnabled(root, sessionId, 'rebuild')
     const tracker = trackerFor(exec)
-    const shouldRemind = tracker.step(exec.name)
+    const shouldRemind = skiffKeeper ? tracker.step(exec.name) : false
     const downstream = await next()
 
     const blocks: ContentBlock[] = []
@@ -185,7 +191,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // v1.23.3 用户拍板：**不做节流，催就行了**——每次超阈值都注入（每轮都催）；
     // 连续超阈值 REBUILD_ESCALATE_AFTER 轮仍未 rebuild → 升级 [TRAJECTORY-ESCALATED]
     // 强制语气，此后持续升级催（不重置，直到 agent 调用 session_rebuild 压力自然回落）。
-    if (readSimpleSettings().rebuildEnabled) {
+    if (skiffRebuild && readSimpleSettings().rebuildEnabled) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
         const pressure = readContextPressure(ctx, session)

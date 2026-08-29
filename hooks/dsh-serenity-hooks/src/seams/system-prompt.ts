@@ -31,6 +31,7 @@ import { findEntrySkills } from '../skills-discovery.js'
 import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
 import { readAdvancedSettings } from '../config-ops.js'
+import { isSkiffSessionId } from '../skiff-role.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
 export function readPersonaSettings(): { mode: string; overrideText: string } {
@@ -78,6 +79,7 @@ export function accBlock(root: string): string {
     '  handyman  — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done, recursing into same-model subagents; jobs=[] orchestrates parallel work',
     '  session_rebuild — rebuild this conversation in place from SESSION.md when the trajectory-tracker trips',
     '  localstore — ACC local credential/config storage (CCC-root localstore.json, JSON format; git policy localstore.gitTrack default deny); doc subcommand outputs the spec',
+    '  skiff_admin — Skiff (F4, experimental): CCC cognitive-subset roles — guide (definition tutorial) / validate (config check) / list (role summary)',
     '',
     '  ℹ️ Use relative paths from the CCC root for CCC-internal file operations (read/write/edit/glob/grep etc.), e.g. AGENT_SESSIONS/2026-08-14--S134--x/SESSION.md; Root / absolute SESSION.md paths are identifiers only, not tool arguments',
     '',
@@ -528,7 +530,11 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         if (!cwd) return ''
         const root = findSerenityRoot(cwd)
         if (!root) return ''
-        const base = serenitySystemPrompt(root, agentScope(context))
+        const scope = agentScope(context)
+        // F4 Skiff：会话 id `skiff-` 前缀 → 不注入 ACC 默认系统提示词
+        // （Skiff 用 CCC 定义段全替换，scoped 'serenity-skiff' section 由 skiff-core 注册）
+        if (isSkiffSessionId(scope)) return ''
+        const base = serenitySystemPrompt(root, scope)
         const codeLine = codeModeAdaptationLine(ctx, context.scope)
         return codeLine ? `${base}\n${codeLine}` : base
       },
@@ -563,6 +569,9 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
       name: 'serenity-entry',
       order: -50,
       text: (context) => {
+        // F4 Skiff：防御性跳过（scoped 注册由 context.ts 调用，skiff 已提前 return；
+        // 此处兜底确保任何路径下 skiff 会话都不注入 ACC 默认提示词）
+        if (isSkiffSessionId(scope)) return ''
         const base = serenitySystemPrompt(root, scope)
         const codeLine = codeModeAdaptationLine(agent.ctx, context.scope)
         return codeLine ? `${base}\n${codeLine}` : base

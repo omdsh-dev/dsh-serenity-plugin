@@ -5,10 +5,15 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { findSerenityRoot } from '../ccc.js'
-import { runMsmAsync, MSM_ACTIONS } from '../msm-ops.js'
+import { runMsmAsync, runMsm, MSM_ACTIONS } from '../msm-ops.js'
+import { skiffMsmGate } from '../skiff-core.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
   return exec.agent?.session?.header?.cwd ?? process.cwd()
+}
+
+function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {
+  return exec.agent?.session?.id ?? ''
 }
 
 function renderText(value: unknown): ContentBlock[] {
@@ -38,6 +43,23 @@ export const msmTool = defineTool({
   async execute(args, exec) {
     const root = findSerenityRoot(agentCwd(exec))
     if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
+    // F4b ⑨：Skiff 会话 MSM 白名单门控（exec 校验 / register-deregister 必拒 / list 过滤）
+    const sessionId = agentSessionId(exec)
+    const gate = skiffMsmGate(root, sessionId, args.action as string, args.name as string | undefined)
+    if (gate.reject) throw new Error(gate.reject)
+    if (args.action === 'list' && gate.whitelist) {
+      const out = runMsm(root, args)
+      const text = typeof out === 'string' ? out : JSON.stringify(out)
+      const header = text.split('\n')[0] ?? ''
+      const lines = text
+        .split('\n')
+        .slice(1)
+        .filter((line) => {
+          const name = line.split(' | ')[0]?.trim()
+          return name !== undefined && name !== '' && gate.whitelist!.has(name)
+        })
+      return `${header}\n${lines.length > 0 ? lines.join('\n') : '(no MSM allowed in this role)'}`
+    }
     // runMsmAsync：exec 用异步 execFile（不阻塞 web 事件循环，避免 MSM 自请求 3080 死锁）
     return runMsmAsync(root, args)
   },

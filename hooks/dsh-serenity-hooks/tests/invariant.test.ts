@@ -5,12 +5,27 @@ import { tmpdir } from 'node:os'
 import { verifyToolConsistency, REGISTERED_TOOLS } from '../src/invariant.js'
 
 describe('invariant: 清单与注册工具一致性', () => {
-  it('一致时零问题', () => {
+  it('一致时零问题（12 工具，与 dsh.plugin.json contributes.tools 一致）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'inv-'))
     const manifest = join(dir, 'dsh.plugin.json')
-    writeFileSync(manifest, JSON.stringify({ id: 'x', contributes: { tools: ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman'] } }))
+    writeFileSync(
+      manifest,
+      JSON.stringify({
+        id: 'x',
+        contributes: {
+          tools: ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman', 'session_rebuild', 'localstore', 'skiff_admin'],
+        },
+      }),
+    )
     expect(verifyToolConsistency(manifest, REGISTERED_TOOLS)).toEqual([])
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('REGISTERED_TOOLS 含 12 工具（含 v1.25.0 skiff_admin）', () => {
+    expect(REGISTERED_TOOLS).toHaveLength(12)
+    expect(REGISTERED_TOOLS).toContain('skiff_admin')
+    expect(REGISTERED_TOOLS).toContain('session_rebuild')
+    expect(REGISTERED_TOOLS).toContain('localstore')
   })
 
   it('声明了未注册的工具 → 报告', () => {

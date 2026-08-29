@@ -27,6 +27,7 @@ import type {} from '@deepseek-ai/dsh-compaction'
 import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 // 复用 context.ts 的完整 ACC 注入消息（简短头 + ACC 5 块 + CCC 顶层 skill 原文）
 import { accMessage } from './context.js'
+import { isSkiffSessionId } from '../skiff-role.js'
 
 export interface CompactRegistration {
   /** CCC 配置相对路径；缺省用 DEFAULT_SERENITY_CONFIG_PATHS */
@@ -50,6 +51,8 @@ export function registerCompactRetention(ctx: Context, opts: CompactRegistration
     if (event.type !== 'compaction/end') return
     // 失败不重注入（上下文未被折叠；下次成功再补）
     if (event.data.error) return
+    // F4 Skiff：会话 id `skiff-` 前缀 → 不重注入 ACC 身份（角色 CCC 提示词全替换，旁路）
+    if (isSkiffSessionId(String((session as { id?: unknown }).id ?? ''))) return
 
     const agent = ctx.agents.get(session.id) as Agent | undefined
     if (!agent) return

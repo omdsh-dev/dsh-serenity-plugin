@@ -149,6 +149,24 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     expect((captured!.text as (c: unknown) => string)({})).toBe('')
   })
 
+  it('全局注册：Skiff 会话（session id `skiff-` 前缀）→ 空（角色 CCC 提示词全替换，F4b 旁路）', () => {
+    let captured: { name: string; order: number; text: unknown } | null = null
+    const fakeCtx = {
+      systemPrompt: {
+        section: (section: { name: string; order: number; text: unknown }) => {
+          captured = section
+        },
+      },
+    }
+    registerEntrySkillSectionGlobal(fakeCtx as never)
+    setupCccWithSkill('tg-serenity')
+    const ctxSkiff = { agent: { session: { id: 'skiff-qa-readonly-uuid', header: { cwd: dir } } } }
+    expect((captured!.text as (c: unknown) => string)(ctxSkiff)).toBe('')
+    // 对照：普通会话仍注入
+    const ctxNormal = { agent: { session: { id: 'main-1', header: { cwd: dir } } } }
+    expect((captured!.text as (c: unknown) => string)(ctxNormal)).toContain('=== Serenity ACC ===')
+  })
+
   it('全局注册失败（重复 section 名）不抛错（try/catch 吞掉）', () => {
     const fakeCtx = {
       systemPrompt: {

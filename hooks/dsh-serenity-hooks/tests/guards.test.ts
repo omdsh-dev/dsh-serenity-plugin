@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { decideGuard, type GuardInput, syncSafeModeRestriction } from '../src/seams/guards.js'
 import { readBlacklist, matchBlacklist, pathInside, type BlacklistRule } from '../src/ccc.js'
+import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
 
 let dir: string
 
@@ -217,5 +218,74 @@ describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-s
 
   it('普通文件不受影响', () => {
     expect(decideGuard(base({ toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
+  })
+})
+
+describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
+  const QA_ID = 'skiff-qa-1'
+
+  beforeEach(() => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({
+        skiff: {
+          roles: {
+            qa: { msms: ['cognitive-qa'], tools: ['read', 'grep', 'glob'], systemPrompt: 'p' },
+          },
+        },
+      }),
+    )
+    registerSkiffSession(QA_ID, 'qa')
+  })
+
+  afterEach(() => {
+    unregisterSkiffSession(QA_ID)
+  })
+
+  it('白名单内工具 → allow（read/grep/glob）', () => {
+    for (const tool of ['read', 'grep', 'glob']) {
+      expect(decideGuard(base({ root: dir, toolName: tool, skiffSessionId: QA_ID })).kind).toBe('allow')
+    }
+  })
+
+  it('msms 非空 → acc_msm 通道自动可用', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'acc_msm', skiffSessionId: QA_ID })).kind).toBe('allow')
+  })
+
+  it('白名单外工具 → deny（拒绝信息不泄漏白名单外工具名）', () => {
+    for (const tool of ['write', 'edit', 'bash', 'web_search', 'cc_fs']) {
+      const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: QA_ID }))
+      expect(d.kind).toBe('deny')
+      expect(d.deny).toContain('skiff role')
+      expect(d.deny).not.toContain(tool) // 不泄漏被拒工具名
+      expect(d.deny).not.toContain('read') // 不泄漏白名单内容
+    }
+  })
+
+  it('skiff 会话未注册（注册表缺失）→ 保守 deny（白名单外全隐藏）', () => {
+    const d = decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-ghost-1' }))
+    expect(d.kind).toBe('deny')
+  })
+
+  it('非 skiff 会话（无 skiffSessionId / 普通 id）→ 不受白名单影响', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'write', skiffSessionId: 'normal-session', pathArg: 'docs/a.md' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'handyman', skiffSessionId: 'handyman-x' })).kind).toBe('allow')
+  })
+
+  it('角色 tools 空（纯 MSM 角色）→ 仅 acc_msm 可用', () => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ skiff: { roles: { pure: { msms: ['cognitive-qa'], tools: [] } } } }),
+    )
+    registerSkiffSession('skiff-pure-1', 'pure')
+    try {
+      expect(decideGuard(base({ root: dir, toolName: 'acc_msm', skiffSessionId: 'skiff-pure-1' })).kind).toBe('allow')
+      expect(decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-pure-1' })).kind).toBe('deny')
+    } finally {
+      unregisterSkiffSession('skiff-pure-1')
+    }
   })
 })

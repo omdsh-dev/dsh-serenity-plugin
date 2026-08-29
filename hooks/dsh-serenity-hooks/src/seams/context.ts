@@ -23,6 +23,7 @@ import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
+import { isSkiffSessionId } from '../skiff-role.js'
 
 // ── 纯文本构建（可单测）──
 
@@ -98,6 +99,8 @@ export function shouldAutoRestore(agent: Agent): boolean {
   if (session.header?.origin === 'subagent') return false
   if (session.header?.parentSession) return false
   if (session.id?.startsWith('handyman-')) return false
+  // F4 Skiff：完全独立会话（角色 CCC 提示词全替换），不自动恢复宁静号会话激活信息
+  if (isSkiffSessionId(session.id)) return false
   return true
 }
 
@@ -131,6 +134,8 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     const root = findSerenityRoot(cwd)
     if (!root) return
     const key = agentKey(agent)
+    // F4 Skiff：会话 id `skiff-` 前缀 → 完全旁路（不注入 ACC 身份；角色 CCC 提示词全替换）
+    if (isSkiffSessionId(key)) return
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
@@ -183,6 +188,8 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       const root = findSerenityRoot(cwd)
       const key = agentKey(agent)
       const downstream = await next()
+      // F4 Skiff：完全旁路（不注入 ACC 身份 + 不注册 scoped section；guard 白名单仍兜底约束）
+      if (isSkiffSessionId(key)) return downstream
       // 每步无条件同步 safe-mode 工具隐藏（restrict 实时跟随标记文件；必须在 early-return 之前）
       if (root) {
         try {

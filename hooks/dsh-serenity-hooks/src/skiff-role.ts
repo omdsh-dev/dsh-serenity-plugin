@@ -11,6 +11,8 @@
 
 import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type SkiffRoleConfig } from './ccc.js'
 
+export type { SkiffRoleConfig }
+
 /** Skiff agent 会话 id 前缀（agents.create 生成；seams 旁路/白名单判定用） */
 export const SKIFF_SESSION_PREFIX = 'skiff-'
 
@@ -71,6 +73,11 @@ export function roleToolWhitelist(role: SkiffRoleConfig | undefined): Set<string
   for (const t of role?.tools ?? []) out.add(t)
   if ((role?.msms?.length ?? 0) > 0) out.add('acc_msm')
   return out
+}
+
+/** 角色允许的 MSM 白名单（acc_msm exec 校验 / msm_list 过滤用；独立于 tools 白名单） */
+export function roleMsmWhitelist(role: SkiffRoleConfig | undefined): Set<string> {
+  return new Set(role?.msms ?? [])
 }
 
 /**

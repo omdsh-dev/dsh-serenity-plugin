@@ -1,4 +1,7 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
@@ -22,7 +25,8 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { KeeperTracker, scoreTool, reminderText, rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
+import { KeeperTracker, scoreTool, reminderText, rebuildReminderText, readContextPressure, registerKeeper } from '../src/seams/keeper.js'
+import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-core.js'
 
 describe('keeper: 纯跟踪器', () => {
   it('计分表：write=3, task=10, read=1', () => {
@@ -114,5 +118,53 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
         : undefined,
     }
     expect(readContextPressure(noPressure as never, session)).toBeNull()
+  })
+})
+
+describe('keeper: Skiff 轨迹纪律子集旁路（F4b ⑩）', () => {
+  let dir: string
+  let handler: ((exec: unknown, result: unknown, next: () => Promise<unknown>) => Promise<unknown>) | null = null
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'keeper-skiff-'))
+    writeFileSync(join(dir, '.serenity'), 'test')
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ sessionKeeper: { threshold: 1 }, skiff: { roles: { qa: { msms: ['x'] }, tracked: { msms: ['y'], trajectory: { keeper: true } } } } }),
+    )
+    handler = null
+    const fakeCtx = {
+      on: (name: string, fn: unknown) => {
+        if (name === 'tools/post-execute') handler = fn as typeof handler
+      },
+    }
+    registerKeeper(fakeCtx as never, { defaultThreshold: 1 })
+  })
+
+  afterEach(() => {
+    unregisterSkiffSession('skiff-qa-1')
+    unregisterSkiffSession('skiff-tracked-1')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('Skiff 会话（keeper 子集关）→ 计分不触发提醒（完全独立）', async () => {
+    registerSkiffSession('skiff-qa-1', 'qa', { session: { id: 'skiff-qa-1' } } as never)
+    const exec = { name: 'read', agent: { session: { id: 'skiff-qa-1', header: { cwd: dir } } } }
+    const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
+    expect(result.additionalContexts ?? []).toHaveLength(0)
+  })
+
+  it('Skiff 会话（keeper 子集开）→ 计分提醒生效（按角色配置）', async () => {
+    registerSkiffSession('skiff-tracked-1', 'tracked', { session: { id: 'skiff-tracked-1' } } as never)
+    const exec = { name: 'read', agent: { session: { id: 'skiff-tracked-1', header: { cwd: dir } } } }
+    const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
+    expect(result.additionalContexts ?? []).toHaveLength(1)
+  })
+
+  it('非 skiff 会话 → 计分提醒正常（不受影响）', async () => {
+    const exec = { name: 'read', agent: { session: { id: 'normal-1', header: { cwd: dir } } } }
+    const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
+    expect(result.additionalContexts ?? []).toHaveLength(1)
   })
 })

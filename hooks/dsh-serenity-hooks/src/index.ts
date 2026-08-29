@@ -25,6 +25,7 @@ import { createHandymanTool } from './tools/handyman.js'
 import { createSessionTool } from './tools/session.js'
 import { createRebuildTool } from './tools/rebuild.js'
 import { localstoreTool } from './tools/localstore.js'
+import { skiffAdminTool } from './tools/skiff-admin.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
 import { registerKeeper } from './seams/keeper.js'
@@ -34,11 +35,12 @@ import { registerCompactRetention } from './seams/compact.js'
 import { registerStatusApi } from './api.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
-import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
-import { registerSettingsSection } from './settings-section.js'
+import { DEFAULT_SERENITY_CONFIG_PATHS, findSerenityRoot } from './ccc.js'
+import { registerSettingsSection, readSimpleSettings } from './settings-section.js'
 import { registerGateway } from './gateway.js'
 import { registerRebuildTurnHook } from './rebuild.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
+import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 
 export const name = 'dsh-serenity-hooks'
 
@@ -75,6 +77,8 @@ export interface Config {
   rebuild?: { enabled?: boolean; thresholdRatio?: number }
   /** F3 会话命名（entry 默认值，运行时经 DSH settings） */
   naming?: { enabled?: boolean }
+  /** F4 Skiff（实验性）：调试服务启停（entry 默认值，运行时经 DSH settings） */
+  skiff?: { enabled?: boolean; debugPort?: number }
 }
 
 export const Config: z<Config> = z.object({
@@ -93,6 +97,7 @@ export const Config: z<Config> = z.object({
   gateway: z.object({ enabled: z.boolean().default(false) }),
   rebuild: z.object({ enabled: z.boolean().default(true), thresholdRatio: z.number().min(0.01).max(1).default(0.9) }),
   naming: z.object({ enabled: z.boolean().default(true) }),
+  skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(3099) }),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -108,6 +113,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(createRebuildTool(ctx))
     ctx.tools.register(localstoreTool)
+    ctx.tools.register(skiffAdminTool)
   }
   if (config.guards) {
     registerGuards(ctx, { configPaths: config.serenityConfigPaths })
@@ -147,4 +153,73 @@ export function apply(ctx: Context, config: Config): void {
   // 协议固有（S142 用户原则：任何 CCC 抽象层都是宁静号/ACC）——默认开启不可关、
   // 零配置面，锚定消息与机制参数全部代码固化（旧 serenity.json bootstrap 段 v1.19.5 起忽略）
   registerBootstrap(ctx)
+  // F4 Skiff（v1.25.0 实验性）：调试问答页装配——人工开关（settings skiffEnabled）→
+  // 启动/停止 node:http 调试服务；角色定义归 CCC（skiff.roles）；未开启零资源占用
+  registerSkiff(ctx)
+}
+
+/**
+ * F4 Skiff 调试服务装配：启停 = 人工（设置面板 Skiff 区块开关，settings 持久化）。
+ * settings-changed 事件触发同步（skiffEnabled 开 → 启动调试服务；关 → 停止）。
+ * 角色配置（skiff.roles）从当前 CCC 根读取（进程 cwd 优先，live 会话兜底）。
+ */
+function registerSkiff(ctx: Context): void {
+  let started = false
+  const sync = (): void => {
+    const s = readSimpleSettings()
+    if (s.skiffEnabled && !started) {
+      const root = resolveSkiffRoot(ctx)
+      if (!root) {
+        console.warn('[serenity-hooks] ✗ Skiff 调试服务未启动：无法定位 CCC root（进程 cwd 与 live 会话均无 .serenity）')
+        return
+      }
+      const webPort = readWebPort(ctx)
+      startSkiffDebugServer(ctx, root, s.skiffDebugPort, webPort)
+        .then(() => {
+          started = true
+        })
+        .catch((err) => {
+          console.error(`[serenity-hooks] ✗ Skiff 调试服务启动失败: ${String((err as Error)?.message ?? err)}`)
+        })
+    } else if (!s.skiffEnabled && started) {
+      stopSkiffDebugServer()
+      started = false
+    }
+  }
+  try {
+    ctx.on('serenity/settings-changed', sync)
+  } catch {
+    /* 事件通道缺失不阻断（启动时 sync 仍执行） */
+  }
+  // 启动时同步一次（settings.yaml 持久化 skiffEnabled=true → 重启后自动恢复调试服务）
+  sync()
+}
+
+/** 解析当前 CCC 根：进程 cwd 上溯 .serenity 优先，live 会话 cwd 兜底 */
+function resolveSkiffRoot(ctx: Context): string | null {
+  const fromCwd = findSerenityRoot(process.cwd())
+  if (fromCwd) return fromCwd
+  try {
+    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
+    for (const s of sessions?.list?.() ?? []) {
+      const cwd = s?.header?.cwd
+      if (typeof cwd === 'string') {
+        const r = findSerenityRoot(cwd)
+        if (r) return r
+      }
+    }
+  } catch {
+    /* 遍历失败忽略 */
+  }
+  return null
+}
+
+/** 主 WebUI 端口（WebUI 链接；webServer 未装配回退 3080） */
+function readWebPort(ctx: Context): number {
+  try {
+    const ws = (ctx as unknown as { webServer?: { port?: number } }).webServer
+    return typeof ws?.port === 'number' ? ws.port : 3080
+  } catch {
+    return 3080
+  }
 }
