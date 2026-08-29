@@ -1,3 +1,15 @@
+## v1.26.8 — 2026-08-29（think 提取状态机重写，弃正则——用户批评"老用正则不是个办法"）
+
+**Scope:** 3100 公网问答页输出报错 "The string did not match the expected pattern"——旧实现用 `<think>([\s\S]*?)<\/think>` 正则提取（V8 g-flag lastIndex 抛错 + 未闭合泄漏 + 嵌套错位 + 代码块误判 + 占位符冲突，纯函数 74 用例未复现、真实输出含特殊形态）。用户裁决：**弃正则，重写为状态机扫描**。
+
+### 变更
+- **`skiff-debug.ts` `extractThinkBlocks` 状态机重写（v1.26.8）**：逐字符扫描识别开/闭标签（`matchOpenThink`/`matchCloseThink`）——**大小写不敏感**（`<think>`/`<THINK>`）、**属性变体**（`<think lang="...">` 跳 `>` 后取内容）、**尾随空格**（`</think >` 允许）、**未闭合优雅截断**（剩余全部作为 think 内容，不泄漏标记）、**嵌套按内容处理**（内层不递归，DeepSeek think 不嵌套）、**占位符改 `\u0001T<idx>\u0001`**（ASCII 控制字符——正文几乎不可能出现，消除旧 `@@T<idx>@@` 占位符与正文冲突）；`renderSkiffMarkdown` 改调新提取
+- **Bug 修复（R↓）**：`matchOpenThink` 标签名切片错位——`<think` 的 t 在 i+1，正确 `slice(i+1,i+6)` + `after=s[i+6]` + `contentStart=i+7`（旧实现首轮 5 用例失败根因）；`matchCloseThink` 的 `</think` t 在 i+2 本就正确
+
+### 测试
+- **`tests/think-render.test.ts` 新建 16 用例**：基础折叠 / hideThink 移除 / 未闭合截断（hideThink 两态）/ 嵌套按内容 / 属性变体 / 大小写 / 尾随空格 / 多块保序 / 占位符不冲突 / markdown 渲染完整性 / XSS 注入防护 / 空 think / 长文本 / CRLF 换行
+- **49 files / 641 tests 全绿**（+16）；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.7 — 2026-08-29（public 口 key 即存修复，S142 用户实测）
 
 **Scope:** 用户实测：key 填写了没存 localStorage——对话页提示无 key。
