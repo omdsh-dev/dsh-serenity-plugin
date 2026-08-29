@@ -1,3 +1,22 @@
+## v1.26.3 — 2026-08-29（敏感数据保护：localstore 数据面守卫 + 最终输出守卫打回重生成，S142 用户需求）
+
+**Scope:** 用户关切：认知容器对外提供认知结果时，**支撑宁静号的凭据与机制不应透露**（提示词纪律是软约束，仍有意外可能）。调研（`docs/sensitive-data-protection-research.md`：wardn "structural guarantee, not policy" / Docker redact_secrets / dsh-guardian / liteLLM+Presidio / redteams.ai 共识——没有万无一失的提示词防线，重心 = 最小化敏感信息进上下文 + 机械后处理兜底）。**用户拍板方案**：不做工具结果 redaction（代价高 + 面向错——工具结果是模型工作内存），**改卡最终输出——敏感词表检测 + 打回重生成**；词表 = 凭据词 + 机制词 + **msm_list 工具名**（"这样比较全面了"）。
+
+### 变更
+- **`guards.ts` 数据面守卫（localstore.json read 黑名单）**：新增 `SENSITIVE_CREDENTIAL_FILES` 硬名单 + `decideGuard` 新分支——**任何工具**（read/grep/glob/cc_fs 只读子命令与写工具一视同仁）命中 `localstore.json` → deny（`access blocked: ... sensitive credential file`）。**不依赖 safe-mode 开关**（结构性边界，对齐 wardn "structural guarantee"）；与 v1.18.5 写黑名单语义独立（写黑名单只拦写、REPOSITORIES/ 只读参考源不误伤读；凭据文件是数据面硬边界——值进不了上下文）。用户指令："localstore.json 需要在 read 工具的黑名单里"
+- **`src/output-guard.ts`（新，纯逻辑）**：
+  - `buildSensitiveTable(root)`：敏感词表 = ① 凭据词（localstore.json credentials **条目名 + 值**精确匹配，运行时读）② 机制词（静态内置：`dsh-serenity-hooks`/`serenity-hooks.json`/`mech-registry.json`/`localstore.json`/`.opencode/serenity.json`/`AGENT_SESSIONS`/事件名/端口 3080-3100/内部实现词）③ **MSM 词**（`loadMsmEntries` 读 mech-registry 注册工具名——用户补充"msm_list 列表里的工具名也包含进去"）；**不含公开概念词**（宁静号/Serenity/认知容器/EAP/CCE/Neat——正常交流词，误伤灾难）
+  - `detectSensitive(text, table)`：精确匹配（条目名/值/工具名）+ 子串匹配（机制词），返回命中列表
+  - `buildRebuke(hits)`：steer 打回消息——**不含命中词本身**（防二次泄露）；要求重新生成、不向用户解释
+  - `REBUKE_MAX_ROUNDS = 3`（防死循环；达上限放弃打回 + 审计）
+- **`src/output-guard-seam.ts`（新，拦截缝）**：`registerOutputGuardHook` 接 `agent/turn-stopping`（serial）——取 turn 最后 assistant 文本 → 检测 → 命中 → `agent.steer()` 打回。**机制依据（DSH 官方注释）**："a listener that objects steers and the machine re-reads its inbox: fresh steering runs another step, none closes the turn"——steer 是官方重生成通道（v1.22.5 rebuild 自动继续同款先例），零改 DSH。**作用范围（用户拍板）：仅外部面**——`isExternalFaceSession`（skiff-/acp-/rebuild- 前缀）；本地维护会话豁免（必然提及机制词，打回会瘫痪自身工作）
+- **index.ts**：装配 `registerOutputGuardHook(ctx)`
+
+### 测试
+- **guards.test +4**：read localstore.json deny（含 safe-mode 开）/ grep/glob/cc_fs 只读 deny / 写工具 deny / 嵌套同名不误伤（docs/localstore.json allow）/ 先于黑名单
+- **output-guard.test（新，19 tests）**：词表构建（凭据条目名+值 / MSM 名 / 机制词 / 凭据缺失不抛错）/ detectSensitive（正常认知零命中（公开概念词不敏感）/ 凭据值/条目名/MSM 名/机制词命中 / 空文本）/ buildRebuke（不含命中词 / 重新生成指令）/ seam 接线（外部面合规不打回 / 命中 steer 打回 / 连续 3 次放弃 / 合规重置计数 / **本地维护会话豁免** / ACP 会话检测 / 非 CCC 零干预）
+- **48 files / 622 tests 全绿**（+23）；typecheck ✓（node + client）→ build ✓（147762 B）
+
 ## v1.26.2 — 2026-08-29（F4d 建议问答页：按容器权限控制 + URL 容器名 + localStorage key + 角色选择 + 配置处取 key/地址，S142 用户需求）
 
 **Scope:** 用户对 v1.26.1 问答页的演进要求：① **按容器进行权限控制**——配置开放哪个容器（不再是全局开放所有 CCC）；② **容器名体现在 URL 上**——`/c/<容器名>` 单容器页；③ **用户只需要输入 key 即可使用**（URL 已锁定容器，页面不再选 CCC）；④ **key 自动存储在 localStorage**（输入一次浏览器记住）；⑤ 3100 应能**选择角色**（初版漏了）；⑥ **配置处需能获取 key 和地址**（管理员分享给使用者）。

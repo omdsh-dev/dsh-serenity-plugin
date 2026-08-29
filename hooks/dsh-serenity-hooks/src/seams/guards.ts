@@ -45,6 +45,25 @@ const WRITE_TOOLS = new Set(['write', 'edit', 'str_replace_editor', 'cc_fs', 'ba
  *  list/tree/relative/reveal/info/find）为只读——只读子命令不查黑名单（同 read 语义） */
 const CC_FS_WRITE_ACTIONS = new Set(['mkdir', 'rm', 'mv', 'cp', 'touch', 'append'])
 
+/**
+ * 凭据文件硬名单（数据面守卫，v1.26.3，S142 用户：localstore.json 需要在 read 工具的黑名单里）：
+ * **任何工具**（含 read/grep/glob/cc_fs 只读子命令）命中这些相对 CCC 根的路径 → deny。
+ *
+ * 与 safeMode.blacklist（写黑名单，v1.18.5 决策只拦写）语义独立：
+ * - 黑名单 = 用户可配置的写保护（REPOSITORIES/ 等只读参考源不误伤读）
+ * - 凭据硬名单 = **结构性数据面边界**（不依赖 safe-mode 开关，凭据文件任何时候不可读）——
+ *   对齐 CCE Bounded Space + wardn "structural guarantee, not policy"：localstore.json
+ *   含 API keys/tokens/SSH 密码，即使 prompt 纪律失败也无值可吐（机械保证）。
+ */
+export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
+
+/** 判定工具是否为读类（read/grep/glob + cc_fs 只读子命令）：凭据文件对读工具同样 deny */
+export function isReadTool(toolName: string, action?: string): boolean {
+  if (toolName === 'read' || toolName === 'grep' || toolName === 'glob') return true
+  if (toolName === 'cc_fs') return action !== undefined && !CC_FS_WRITE_ACTIONS.has(action)
+  return false
+}
+
 /** 判定工具是否为写类：普通工具按名；cc_fs 复合工具按子命令 action */
 export function isWriteTool(toolName: string, action?: string): boolean {
   if (!WRITE_TOOLS.has(toolName)) return false
@@ -94,14 +113,18 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     if (!pathInside(resolve(root), abs)) {
       return { deny: `path escape blocked: "${pathArg}" escapes the CCC root`, kind: 'deny' }
     }
+    // 归一化反斜杠（Windows）：凭据文件硬名单与黑名单前缀匹配用正斜杠 rel
+    const rel = relative(root, abs).split('\\').join('/')
+    // 2a) 凭据文件硬名单（数据面守卫，v1.26.3）：**任何工具**命中 localstore.json →
+    //     deny（不依赖 safe-mode 开关、不看工具读写性——凭据文件不可读是结构边界；
+    //     read/grep/glob/cc_fs 只读子命令与写工具一视同仁，防凭据值进上下文）
+    if (SENSITIVE_CREDENTIAL_FILES.has(rel)) {
+      return { deny: `access blocked: "${pathArg}" is a sensitive credential file (${rel})`, kind: 'deny' }
+    }
     // 读操作（read/glob/grep 等）不查黑名单/治理文件——对齐 osp（permission-guards 只在
     // write/edit 时查黑名单）；否则 REPOSITORIES/ 这类"只读参考源"黑名单会误伤读操作
     // （用户实测：读 REPOSITORIES/ 下 repo 被拦，见 v1.18.5；cc_fs 只读子命令同语义）
     if (isWriteTool(toolName, action)) {
-      // 归一化反斜杠（Windows）：黑名单前缀匹配与治理文件保护用正斜杠 rel
-      // （relative 在 Windows 产出反斜杠，斜杠结尾规则 `.secrets/` 匹配不到 `.secrets\file`，
-      //   嵌套治理路径 `.serenity\child` 也不匹配，见 Windows 审计问题 9）
-      const rel = relative(root, abs).split('\\').join('/')
       // CCC 治理文件永远拒绝写入（safe-mode 是用户能力，agent 不能自行开关/篡改）
       if (rel === '.serenity-safe-on' || rel === '.serenity' || rel.startsWith('.serenity-safe-on/') || rel.startsWith('.serenity/')) {
         return { deny: `CCC governance file "${rel}" is reserved for the user — agent must not write`, kind: 'deny' }

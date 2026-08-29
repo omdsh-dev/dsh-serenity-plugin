@@ -106,6 +106,35 @@ describe('guards: decideGuard 纯决策', () => {
     expect(decideGuard(base({ toolName: 'cc_fs', action: 'exists', pathArg: '.serenity' })).kind).toBe('allow')
   })
 
+  // ── v1.26.3 数据面守卫：localstore.json 凭据文件任何工具不可读（S142 用户指令）──
+
+  it('read localstore.json → deny（用户：localstore.json 需要在 read 工具的黑名单里）', () => {
+    const d = decideGuard(base({ toolName: 'read', pathArg: 'localstore.json' }))
+    expect(d.kind).toBe('deny')
+    expect(d.deny).toContain('sensitive credential file')
+    // 不依赖 safe-mode 开关（结构性边界）
+    expect(decideGuard(base({ toolName: 'read', safeModeOn: true, pathArg: 'localstore.json' })).kind).toBe('deny')
+  })
+
+  it('grep/glob/cc_fs 只读子命令 localstore.json → deny（数据面不看工具读写性）', () => {
+    expect(decideGuard(base({ toolName: 'grep', pathArg: 'localstore.json' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'glob', pathArg: 'localstore.json' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'cc_fs', action: 'info', pathArg: 'localstore.json' })).kind).toBe('deny')
+    // 嵌套目录同名文件不误伤（凭据文件只在根）
+    expect(decideGuard(base({ toolName: 'read', pathArg: 'docs/localstore.json' })).kind).toBe('allow')
+  })
+
+  it('写工具 localstore.json → deny（写入同样阻断——凭据文件不可由 agent 改写）', () => {
+    expect(decideGuard(base({ toolName: 'write', pathArg: 'localstore.json' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'cc_fs', action: 'touch', pathArg: 'localstore.json' })).kind).toBe('deny')
+  })
+
+  it('凭据文件守卫先于黑名单/读保护（localstore.json 恒 deny 无论 blacklist）', () => {
+    const d = decideGuard(base({ toolName: 'read', blacklist: rules('.secrets/'), pathArg: 'localstore.json' }))
+    expect(d.kind).toBe('deny')
+    expect(d.deny).toContain('sensitive credential file')
+  })
+
   it('路径合法且不命中 → allow', () => {
     expect(decideGuard(base({ toolName: 'write', blacklist: rules('.secrets/'), pathArg: 'docs/a.md' })).kind).toBe('allow')
   })

@@ -40,6 +40,7 @@ import { readSkiffRoles } from './skiff-role.js'
 import { registerSettingsSection, readSimpleSettings } from './settings-section.js'
 import { registerGateway } from './gateway.js'
 import { registerRebuildTurnHook } from './rebuild.js'
+import { registerOutputGuardHook } from './output-guard-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
@@ -146,6 +147,8 @@ export function apply(ctx: Context, config: Config): void {
   registerGateway(ctx)
   // v1.22.4 定稿：session_rebuild 排队 → agent/turn-stopping 时执行真正清空（复用旧会话原地重来）
   registerRebuildTurnHook(ctx)
+  // v1.26.3 输出守卫：最终输出敏感词检测 + steer 打回重生成（凭据/机制/MSM 名不泄露给用户）
+  registerOutputGuardHook(ctx)
   // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createSessionTool 内实现，
   // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {
