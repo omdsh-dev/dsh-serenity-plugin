@@ -1,3 +1,16 @@
+## v1.25.4 — 2026-08-29（Skiff 调试页多 CCC 手工切换，S142 用户需求）
+
+**Scope:** 用户：「当 dsh 管理多个 CCC 时，debug 页可以手工切换就比较方便，加强下，我要去测测别的 CCC 了」。调试页从「绑定单个 CCC」升级为「候选 CCC 列表 + 手工切换」。
+
+### 变更（skiff-debug.ts）
+- **`discoverCccs(ctx, defaultRoot)`**（新）：候选 CCC 发现——live 会话 cwd 上溯 `.serenity` 去重 + 默认绑定 root 兜底（不在列表时放首位）；每个 CCC 实时读取 `skiff.roles` 角色名列表
+- **`skiffDebugPage(cccs, defaultRoot, webPort)`**：页面新增 **「认知容器」下拉**（列出全部候选 CCC：目录名 + 角色数；默认选中绑定 root）+ 角色下拉联动（切换 CCC → 角色列表更新）+ CCC 徽标实时显示当前 root；候选数据内嵌 `script[type=application/json]`（escapeHtml 转义，JS `JSON.parse(textContent)` 消费）
+- **POST /ask 增加 `ccc` 字段**：按所选 CCC 读角色 + 创建 agent（缺省回退默认绑定 root）；角色校验按目标 CCC
+
+### 测试
+- skiff-debug.test 更新 +3：discoverCccs（live 会话去重 + 默认兜底放首位 / 无 live 会话仅默认）、POST /ask 切换 CCC（目标 CCC 无该角色 → 400）；页面渲染断言适配新签名（内嵌数据转义形式 `&quot;`）+ CCC 切换器/默认选中
+- **46 files / 541 tests 全绿**（+3）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.3 — 2026-08-29（Skiff 三合一：平台工具面修复（read/glob 不生效根因）+ skill 恒可用 + skiff_admin apply 生效机制，S142 用户需求/实测）
 
 **Scope:** 三项——① 用户实测：qa 角色白名单加了 read/glob 但**不生效**——根因：**skiff agent 未挂 agent preset → 平台工具（read/grep/glob/web_search）不在工具面**（handyman 经 `agentPresets.composeFrom` 继承父 ctx、skiff 无父上下文直接创建；插件工具 acc_msm 全局注册不受影响 → MSM 通道可用但 read/glob 不可见）② 用户：**skill 加载也要让 skiff 支持（不设白名单）** ③ 用户：改了 json 应该有个生效机制——**skiff_admin 新增 apply**。

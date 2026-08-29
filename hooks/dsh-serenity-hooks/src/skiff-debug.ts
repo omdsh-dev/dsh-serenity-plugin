@@ -1,11 +1,15 @@
 /**
- * skiff-debug.ts — Skiff 调试问答页（F4a'，v1.25.0 实验性）
+ * skiff-debug.ts — Skiff 调试问答页（F4a'，v1.25.x 实验性）
  *
  * node:http 调试端口（默认关，仅监听 127.0.0.1；启停 = 人工——设置面板「Serenity」
  * 页 Skiff 区块开关，不随插件加载自动启动）。
  *
- * - GET  /        → 问答 HTML 页（角色下拉 + 输入框 + 答案区 + 轨迹区 + WebUI 链接）
- * - POST /ask     → {role, question} → 走会话核心（skiff-core）→ {answer, sessionId, trajectory}
+ * - GET  /        → 问答 HTML 页（**CCC 选择器** + 角色下拉 + 输入框 + 答案区 + 轨迹区 + WebUI 链接）
+ * - POST /ask     → {ccc?, role, question} → 走会话核心（skiff-core）→ {answer, sessionId, trajectory}
+ *
+ * **多 CCC 手工切换（v1.25.4，S142 用户）**：dsh 管理多个 CCC 时，调试页顶部 CCC
+ * 下拉列出全部候选（live 会话 cwd 上溯 .serenity 去重 + 默认绑定 root 兜底），
+ * 切换后角色下拉联动（各 CCC 的 skiff.roles 实时读取），提问按所选 CCC 创建 agent。
  *
  * 与 ACP stdio 协议（F4c 后续）共用同一会话核心（createSkiffAgent + askSkiff），
  * 协议层后加不返工。轨迹 = session.events 结构化返回（与 dsh WebUI 同源数据），
@@ -15,10 +19,11 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { basename } from 'node:path'
 import type { Context } from 'cordis'
 import { readSkiffRoles } from './skiff-role.js'
 import { createSkiffAgent, askSkiff, type SkiffTrajectoryEntry } from './skiff-core.js'
-import { readHandymanConfig } from './ccc.js'
+import { readHandymanConfig, findSerenityRoot } from './ccc.js'
 
 /** 运行中的调试服务（单实例；进程级） */
 let active: { server: ReturnType<typeof createServer>; port: number } | null = null
@@ -51,11 +56,45 @@ function sendHtml(res: ServerResponse, html: string): void {
   res.end(html)
 }
 
-/** 问答页 HTML：角色下拉 + 输入 + 答案区 + 轨迹区（JS 渲染）+ 绑定的 CCC + WebUI 链接 */
-export function skiffDebugPage(roles: Map<string, { model?: string }>, cccRoot: string, webPort: number): string {
-  const roleOptions = [...roles.entries()]
-    .map(([name, r]) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}${r.model ? ` (${escapeHtml(r.model)})` : ''}</option>`)
-    .join('\n')
+/** 候选 CCC 条目（调试页 CCC 切换器数据） */
+export interface SkiffCccEntry {
+  /** CCC 根（绝对路径） */
+  root: string
+  /** 目录名（展示用） */
+  name: string
+  /** 该 CCC 的 skiff 角色名列表（实时读取） */
+  roles: string[]
+}
+
+/**
+ * 发现候选 CCC 列表（多 CCC 手工切换，v1.25.4）：
+ * live 会话 cwd 上溯 .serenity 去重 + 默认绑定 root 兜底（不在列表时放首位）。
+ */
+export function discoverCccs(ctx: Context, defaultRoot: string): SkiffCccEntry[] {
+  const roots: string[] = []
+  try {
+    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
+    for (const s of sessions?.list?.() ?? []) {
+      const cwd = s?.header?.cwd
+      if (typeof cwd === 'string') {
+        const r = findSerenityRoot(cwd)
+        if (r && !roots.includes(r)) roots.push(r)
+      }
+    }
+  } catch {
+    /* 遍历失败忽略 */
+  }
+  if (!roots.includes(defaultRoot)) roots.unshift(defaultRoot)
+  return roots.map((root) => ({
+    root,
+    name: basename(root) || root,
+    roles: [...readSkiffRoles(root).keys()],
+  }))
+}
+
+/** 问答页 HTML：CCC 切换器 + 角色下拉 + 输入 + 答案区 + 轨迹区（JS 渲染）+ WebUI 链接 */
+export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPort: number): string {
+  const data = JSON.stringify(cccs)
   const webUrl = `http://127.0.0.1:${webPort}`
   return `<!DOCTYPE html>
 <html lang="zh">
@@ -93,10 +132,12 @@ export function skiffDebugPage(roles: Map<string, { model?: string }>, cccRoot: 
 <body>
 <main>
   <h1>Skiff Debug</h1>
-  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.2 实验性）— 走 DSH agent-loop 会话核心，轨迹与 WebUI 同源</div>
-  <div class="ccc">CCC: ${escapeHtml(cccRoot)}</div>
+  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.4 实验性）— 多 CCC 可切换，走 DSH agent-loop 会话核心，轨迹与 WebUI 同源</div>
+  <div class="ccc" id="cccBadge"></div>
+  <label for="ccc">认知容器</label>
+  <select id="ccc"></select>
   <label for="role">角色</label>
-  <select id="role">${roleOptions || '<option value="">(未配置角色)</option>'}</select>
+  <select id="role"></select>
   <label for="q">问题</label>
   <textarea id="q" placeholder="向该角色提问…"></textarea>
   <button id="ask">提问</button>
@@ -104,21 +145,48 @@ export function skiffDebugPage(roles: Map<string, { model?: string }>, cccRoot: 
   <div id="trajectory"></div>
   <p class="muted"><a href="${webUrl}" target="_blank" rel="noopener">在 dsh WebUI 查看完整会话</a>（会话列表搜索 sessionId；WebUI 有完整交互）</p>
 </main>
+<script id="skiff-data" type="application/json" data-default="${escapeHtml(defaultRoot)}">${escapeHtml(data)}</script>
 <script>
+const CCCS = JSON.parse(document.getElementById('skiff-data').textContent)
+const defaultRoot = document.getElementById('skiff-data').dataset.default
+const cccSel = document.getElementById('ccc')
+const roleSel = document.getElementById('role')
+const badge = document.getElementById('cccBadge')
 const btn = document.getElementById('ask')
 const answer = document.getElementById('answer')
 const traj = document.getElementById('trajectory')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+function currentCcc() {
+  return CCCS.find((c) => c.root === cccSel.value) || (CCCS[0] || { root: '', name: '', roles: [] })
+}
+function fillCccs() {
+  cccSel.innerHTML = CCCS.map((c) => {
+    const n = c.roles.length
+    return '<option value="' + esc(c.root) + '">' + esc(c.name) + (n ? ' (' + n + ' 角色)' : ' (无角色)') + '</option>'
+  }).join('') || '<option value="">(未发现 CCC)</option>'
+  if (defaultRoot) cccSel.value = CCCS.some((c) => c.root === defaultRoot) ? defaultRoot : (CCCS[0] && CCCS[0].root)
+  fillRoles()
+}
+function fillRoles() {
+  const c = currentCcc()
+  badge.textContent = 'CCC: ' + c.root
+  roleSel.innerHTML = (c.roles && c.roles.length)
+    ? c.roles.map((r) => '<option value="' + esc(r) + '">' + esc(r) + '</option>').join('')
+    : '<option value="">(未配置角色)</option>'
+}
+cccSel.addEventListener('change', fillRoles)
+fillCccs()
 btn.addEventListener('click', async () => {
-  const role = document.getElementById('role').value
+  const c = currentCcc()
+  const role = roleSel.value
   const q = document.getElementById('q').value.trim()
-  if (!role || !q) { answer.className = 'err'; answer.textContent = '请选择角色并输入问题'; return }
+  if (!c.root || !role || !q) { answer.className = 'err'; answer.textContent = '请选择认知容器与角色并输入问题'; return }
   btn.disabled = true
   answer.className = 'muted'
   answer.textContent = '运行中…'
   traj.innerHTML = ''
   try {
-    const res = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role, question: q }) })
+    const res = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ccc: c.root, role, question: q }) })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status))
     answer.className = ''
@@ -151,12 +219,11 @@ function escapeHtml(s: string): string {
 /**
  * 启动调试问答服务（单实例；重复启动幂等返回既有实例）。
  *
- * **CCC 绑定（v1.25.2 用户指出）**：服务绑定一个 CCC root（调用方 resolveSkiffRoot
- * 解析：live 会话中**含 skiff.roles 的 CCC 优先**）；角色配置**每次请求实时读取**
- * （不缓存快照）——改 .opencode/serenity.json 后刷新页面即生效，无需重启服务。
- * 页面顶部显示绑定的 CCC root，绑定可核对。
+ * **CCC 绑定（v1.25.2 用户指出）**：服务绑定一个默认 CCC root（调用方 resolveSkiffRoot
+ * 解析：live 会话中**含 skiff.roles 的 CCC 优先**）；v1.25.4 起页面可**手工切换**到
+ * 其它候选 CCC（live 会话发现的全部 CCC）；角色配置**每次请求实时读取**（不缓存快照）。
  *
- * @param root 绑定的 CCC 根（角色配置读取 + skiff agent cwd）
+ * @param root 默认绑定的 CCC 根（首次加载选中；角色配置读取 + skiff agent cwd）
  * @param port 调试端口（仅 127.0.0.1）
  * @param webPort 主 WebUI 端口（WebUI 链接）
  */
@@ -170,7 +237,7 @@ export async function startSkiffDebugServer(ctx: Context, root: string, port: nu
     server.listen(port, '127.0.0.1', () => resolve())
   })
   active = { server, port }
-  console.log(`[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:${port}（CCC: ${root}，WebUI: ${webPort}）`)
+  console.log(`[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:${port}（默认 CCC: ${root}，WebUI: ${webPort}）`)
 }
 
 export function stopSkiffDebugServer(): void {
@@ -185,7 +252,7 @@ export function stopSkiffDebugServer(): void {
 
 async function handle(
   ctx: Context,
-  root: string,
+  defaultRoot: string,
   webPort: number,
   req: IncomingMessage,
   res: ServerResponse,
@@ -193,35 +260,37 @@ async function handle(
   try {
     const url = (req.url ?? '/').split('?')[0] ?? '/'
     if (req.method === 'GET' && url === '/') {
-      // 实时读取角色（v1.25.2：不缓存快照——改配置刷新页面即生效）
-      const roles = readSkiffRoles(root)
-      sendHtml(res, skiffDebugPage(roles, root, webPort))
+      // 实时发现候选 CCC（v1.25.4：live 会话 + 默认绑定）+ 实时角色
+      const cccs = discoverCccs(ctx, defaultRoot)
+      sendHtml(res, skiffDebugPage(cccs, defaultRoot, webPort))
       return
     }
     if (req.method === 'POST' && url === '/ask') {
-      let body: { role?: unknown; question?: unknown }
+      let body: { ccc?: unknown; role?: unknown; question?: unknown }
       try {
         const parsed = JSON.parse(await readBody(req)) as unknown
         if (parsed === null || typeof parsed !== 'object') throw new Error('not an object')
-        body = parsed as { role?: unknown; question?: unknown }
+        body = parsed as { ccc?: unknown; role?: unknown; question?: unknown }
       } catch {
         sendJson(res, 400, { error: 'invalid JSON body' })
         return
       }
+      // 手工切换的 CCC（v1.25.4）；缺省回退默认绑定 root
+      const ccc = typeof body.ccc === 'string' && body.ccc !== '' ? body.ccc : defaultRoot
       const roleName = typeof body.role === 'string' ? body.role : ''
       const question = typeof body.question === 'string' ? body.question : ''
-      const roles = readSkiffRoles(root)
+      const roles = readSkiffRoles(ccc)
       const role = roles.get(roleName)
       if (!roleName || !role) {
-        sendJson(res, 400, { error: `unknown role: ${roleName}` })
+        sendJson(res, 400, { error: `unknown role: ${roleName} (ccc: ${ccc})` })
         return
       }
       if (!question.trim()) {
         sendJson(res, 400, { error: 'empty question' })
         return
       }
-      const hc = readHandymanConfig(root)
-      const ref = await createSkiffAgent(ctx, root, roleName, role, hc?.defaultModel)
+      const hc = readHandymanConfig(ccc)
+      const ref = await createSkiffAgent(ctx, ccc, roleName, role, hc?.defaultModel)
       const result = await askSkiff(ctx, ref.agent, question)
       sendJson(res, 200, { answer: result.answer, sessionId: result.sessionId, trajectory: result.trajectory })
       return
