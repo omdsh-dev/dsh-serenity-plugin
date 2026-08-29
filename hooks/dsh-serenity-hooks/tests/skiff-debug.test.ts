@@ -81,7 +81,34 @@ describe('skiff-debug: 问答页渲染（纯函数，v1.25.4 多 CCC 切换）',
 })
 
 describe('skiff-debug: discoverCccs 候选发现（v1.25.4）', () => {
-  it('live 会话 cwd 去重发现 CCC + 默认 root 兜底', () => {
+  it('workspaceRegistry 持久化工作区优先（无 live 会话也能列出，v1.25.5）', () => {
+    const cccA = mkdtempSync(join(tmpdir(), 'skiff-ccc-a-'))
+    writeFileSync(join(cccA, '.serenity'), 'test')
+    const cccB = mkdtempSync(join(tmpdir(), 'skiff-ccc-b-'))
+    writeFileSync(join(cccB, '.serenity'), 'test')
+    mkdirSync(join(cccA, '.opencode'), { recursive: true })
+    writeFileSync(join(cccA, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'] } } } }))
+    // 非 CCC 工作区（无 .serenity）应被跳过
+    const plain = mkdtempSync(join(tmpdir(), 'plain-ws-'))
+    const fakeCtx = {
+      get: (name: string) =>
+        name === 'workspaceRegistry'
+          ? { list: () => [{ path: cccA }, { path: plain }, { path: join(cccB, 'sub') }] }
+          : undefined,
+      sessions: { list: () => [] },
+    }
+    const cccs = discoverCccs(fakeCtx as never, cccA)
+    expect(cccs).toHaveLength(2)
+    expect(cccs[0]!.root).toBe(cccA)
+    expect(cccs[0]!.roles).toEqual(['qa'])
+    expect(cccs[1]!.root).toBe(cccB)
+    expect(cccs[1]!.roles).toEqual([])
+    rmSync(cccA, { recursive: true, force: true })
+    rmSync(cccB, { recursive: true, force: true })
+    rmSync(plain, { recursive: true, force: true })
+  })
+
+  it('live 会话 cwd 去重发现 CCC + 默认 root 兜底（workspace 缺失兜底路径）', () => {
     const cccA = mkdtempSync(join(tmpdir(), 'skiff-ccc-a-'))
     writeFileSync(join(cccA, '.serenity'), 'test')
     const cccB = mkdtempSync(join(tmpdir(), 'skiff-ccc-b-'))
@@ -90,6 +117,7 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.4）', () => {
     mkdirSync(join(cccA, '.opencode'), { recursive: true })
     writeFileSync(join(cccA, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'] } } } }))
     const fakeCtx = {
+      get: () => undefined, // 无 workspaceRegistry
       sessions: {
         list: () => [
           { header: { cwd: join(cccA, 'sub') } },
@@ -110,8 +138,8 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.4）', () => {
     rmSync(cccB, { recursive: true, force: true })
   })
 
-  it('默认 root 不在 live 会话 → 放首位兜底', () => {
-    const fakeCtx = { sessions: { list: () => [] } }
+  it('默认 root 不在工作区/会话 → 放首位兜底', () => {
+    const fakeCtx = { get: () => ({ list: () => [] }), sessions: { list: () => [] } }
     const cccs = discoverCccs(fakeCtx as never, dir)
     expect(cccs).toHaveLength(1)
     expect(cccs[0]!.root).toBe(dir)

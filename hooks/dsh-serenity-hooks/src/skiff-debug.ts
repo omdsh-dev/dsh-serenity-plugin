@@ -67,22 +67,42 @@ export interface SkiffCccEntry {
 }
 
 /**
- * 发现候选 CCC 列表（多 CCC 手工切换，v1.25.4）：
- * live 会话 cwd 上溯 .serenity 去重 + 默认绑定 root 兜底（不在列表时放首位）。
+ * 发现候选 CCC 列表（多 CCC 手工切换，v1.25.4+）：
+ * ① **dsh 工作区注册表**（workspaceRegistry.list，持久化——所有工作目录即使无 live 会话；
+ *    S142 用户 2026-08-29：应直接拉 dsh 工作区，且只列具体 CCC）
+ * ② live 会话兜底（无 workspace 服务 / 注册表为空）
+ * ③ 默认绑定 root 兜底（不在列表时放首位）
  */
 export function discoverCccs(ctx: Context, defaultRoot: string): SkiffCccEntry[] {
   const roots: string[] = []
+  // ① workspaceRegistry（DSH 持久化工作区注册表；list() 同步返回 Workspace[]，含 path）
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
-    for (const s of sessions?.list?.() ?? []) {
-      const cwd = s?.header?.cwd
-      if (typeof cwd === 'string') {
-        const r = findSerenityRoot(cwd)
+    const registry = (ctx as unknown as { get?: (name: string) => unknown }).get?.('workspaceRegistry') as
+      | { list?: () => Array<{ path?: string }> }
+      | undefined
+    for (const ws of registry?.list?.() ?? []) {
+      if (typeof ws.path === 'string' && ws.path !== '') {
+        const r = findSerenityRoot(ws.path)
         if (r && !roots.includes(r)) roots.push(r)
       }
     }
   } catch {
-    /* 遍历失败忽略 */
+    /* workspace 服务不可用忽略 */
+  }
+  // ② live 会话兜底（工作区注册表为空/未装配时）
+  if (roots.length === 0) {
+    try {
+      const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
+      for (const s of sessions?.list?.() ?? []) {
+        const cwd = s?.header?.cwd
+        if (typeof cwd === 'string') {
+          const r = findSerenityRoot(cwd)
+          if (r && !roots.includes(r)) roots.push(r)
+        }
+      }
+    } catch {
+      /* 遍历失败忽略 */
+    }
   }
   if (!roots.includes(defaultRoot)) roots.unshift(defaultRoot)
   return roots.map((root) => ({

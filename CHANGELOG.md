@@ -1,3 +1,15 @@
+## v1.25.5 — 2026-08-29（Skiff 候选 CCC 改为拉 dsh 工作区注册表，用户实测反馈）
+
+**Scope:** 用户实测——v1.25.4 调试页「认知容器」下拉**拉不出来**（只有默认 CCC），指出：「应该直接拉 dsh 工作区，且是具体的 CCC 的」。根因：v1.25.4 用 live 会话（`ctx.sessions.list()`）发现候选——其它 CCC 无 live 会话时列表为空；用户要的是 **dsh 持久化工作区注册表**（workspaceRegistry.list()，所有工作目录即使无 live 会话）。
+
+### 变更（skiff-debug.ts `discoverCccs`）
+- **① workspaceRegistry 优先**：`ctx.get('workspaceRegistry').list()`（DSH `WorkspaceRegistry` 服务，持久化注册表，`Workspace.path` 字段）→ 逐工作区 `findSerenityRoot(path)` 上溯 `.serenity` → **只收具体 CCC**（无 .serenity 的工作区跳过）
+- **② live 会话兜底**（workspace 服务缺失 / 注册表为空时）
+- **③ 默认绑定 root 兜底**（不在列表时放首位）
+
+### 测试
+- skiff-debug.test 更新：新增 workspaceRegistry 优先用例（持久化工作区列出 + 非 CCC 工作区跳过 + 子路径上溯）；live 会话用例改为「workspace 缺失兜底路径」；默认 root 兜底适配（fake ctx 含 get）——**46 files / 542 tests 全绿**（+1）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.4 — 2026-08-29（Skiff 调试页多 CCC 手工切换，S142 用户需求）
 
 **Scope:** 用户：「当 dsh 管理多个 CCC 时，debug 页可以手工切换就比较方便，加强下，我要去测测别的 CCC 了」。调试页从「绑定单个 CCC」升级为「候选 CCC 列表 + 手工切换」。
