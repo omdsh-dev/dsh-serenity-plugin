@@ -45,6 +45,9 @@ export default [
     fixedExtension: false,
     dts: false,
     clean: true,
+    // v1.25.9：marked（Skiff 调试页 markdown 渲染）打包进 lib/index.js——
+    // 非 DSH 生态依赖（peerDeps 不覆盖），插件运行时无 node_modules 解析面
+    noExternal: ['marked'],
   },
   {
     // Browser bundle: lib/client.js, served by the harness at /plugins/<id>/client.js

@@ -1,3 +1,16 @@
+## v1.25.9 — 2026-08-29（Skiff 回答改 marked 正经渲染器（服务端），用户批评手写正则渲染器）
+
+**Scope:** 用户：「用个正经 markdown 渲染器不要乱来啊」+ console 报错 `Invalid regular expression flags`。**采纳**：放弃 v1.25.8 的手写正则渲染器（脆弱 + 模板字符串内嵌反引号陷阱），改用 **marked**（成熟 markdown 库，GFM）——**服务端渲染**：node half 内联打包（tsdown noExternal），POST /ask 返回 `answer_html`，页面只插 HTML；`<think>` 折叠由服务端生成。
+
+### 变更
+- **依赖**：`marked@18`（hooks devDependencies，自带类型；纯 JS 零传递依赖）；tsdown Node half `noExternal: ['marked']` → marked 打包进 lib/index.js（非 DSH 生态依赖，插件运行时无 node_modules 解析面）
+- **skiff-debug.ts**：新增 `renderSkiffMarkdown(raw)`（导出可测）——① 提取 `<think>…</think>`（`\u0000T<idx>\u0000` 占位符）② 正文与 think 内容**先 `escapeHtml` 再 `marked.parse({breaks,gfm})`**（markdown 语法不受转义影响，原始 HTML 注入被消除——安全）③ think 占位符还原为 `<details class="think"><summary>🧠 思考过程</summary>`（默认折叠）；POST /ask 响应加 `answer_html`
+- **页面 JS**：删除手写 `renderMd/inlineMd/thinkHtml`（v1.25.8 反引号转义陷阱随之消失）；`answer.innerHTML = data.answer_html || esc(answer)`；CSS 保留（markdown 元素 + details.think 样式）
+- 页面版本号 v1.25.9
+
+### 测试
+- skiff-debug.test +3：markdown 语法渲染（标题/粗体/行内码/列表/代码块 `language-js` class）/ `<think>` 提取折叠（🧠 summary + 内容 + 正文前后段 + 无裸 think 标记）/ 原始 HTML 注入转义（`<script>` → `&lt;script&gt;`）——**46 files / 546 tests 全绿**（+3）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.8 — 2026-08-29（Skiff 回答 Markdown 渲染 + `<think>` 折叠，S142 用户需求）
 
 **Scope:** 用户：「很好玩能跑了——回答的渲染上 markdown 渲染器，其中对于 `<think>` 部分支持折叠」。调试页回答区从纯文本升级为**零依赖轻量 Markdown 渲染**（不引 CDN——本地 127.0.0.1 页面，外网不可靠），`<think>…</think>` 思考块提取为 **`<details>` 原生折叠**（默认收起）。

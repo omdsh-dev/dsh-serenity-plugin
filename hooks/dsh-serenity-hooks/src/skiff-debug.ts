@@ -21,6 +21,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { basename } from 'node:path'
 import type { Context } from 'cordis'
+import { marked } from 'marked'
 import { readSkiffRoles } from './skiff-role.js'
 import { createSkiffAgent, askSkiff, type SkiffTrajectoryEntry } from './skiff-core.js'
 import { readHandymanConfig, findSerenityRoot } from './ccc.js'
@@ -177,7 +178,7 @@ export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPo
 <body>
 <main>
   <h1>Skiff Debug</h1>
-  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.4 实验性）— 多 CCC 可切换，走 DSH agent-loop 会话核心，轨迹与 WebUI 同源</div>
+  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.9 实验性）— 多 CCC 可切换，走 DSH agent-loop 会话核心，回答 marked 服务端渲染 + think 折叠</div>
   <div class="ccc" id="cccBadge"></div>
   <label for="ccc">认知容器</label>
   <select id="ccc"></select>
@@ -235,7 +236,7 @@ btn.addEventListener('click', async () => {
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status))
     answer.className = ''
-    answer.innerHTML = data.answer ? renderMd(data.answer) : '（空回答）'
+    answer.innerHTML = data.answer_html || esc(data.answer || '') || '（空回答）'
     renderTrajectory(data.trajectory || [], data.sessionId || '')
   } catch (err) {
     answer.className = 'err'
@@ -252,58 +253,6 @@ function renderTrajectory(entries, sessionId) {
     return '<div class="t-entry ' + cls + '"><div class="t-role">' + role + '</div>' + esc(e.text) + '</div>'
   }).join('')
 }
-/* v1.25.8 Markdown 渲染（零依赖轻量）——标题/粗斜体/行内代码/代码块/列表/引用/链接；
-   <think>…</think> 块提取为 <details> 折叠（🧠 思考过程，默认收起） */
-function renderMd(src) {
-  const thinks = []
-  let body = String(src || '')
-  body = body.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inner) => {
-    const idx = thinks.length
-    thinks.push(esc(String(inner || '').trim()))
-    return '\u0000T' + idx + '\u0000'
-  })
-  const lines = body.split('\n')
-  let html = ''
-  let inCode = false
-  let codeBuf = []
-  let inList = false
-  for (const line of lines) {
-    // 代码围栏检测：反引号用 \u0060 转义（页面 JS 内嵌于 TS 模板字符串，裸反引号会提前终止模板）
-    const codeMatch = line.match(/^\u0060\u0060\u0060(\w*)\s*$/)
-    if (codeMatch) {
-      if (inCode) { html += '<pre><code>' + esc(codeBuf.join('\n')) + '</code></pre>'; codeBuf = []; inCode = false }
-      else inCode = true
-      continue
-    }
-    if (inCode) { codeBuf.push(line); continue }
-    const t = line.trim()
-    if (t === '') { inList = false; continue }
-    if (line.indexOf('\u0000T') >= 0) { html += line.replace(/\u0000T(\d+)\u0000/g, (_m2, i) => thinkHtml(thinks[Number(i)])); inList = false; continue }
-    const h = t.match(/^(#{1,3})\s+(.*)$/)
-    if (h) { const lvl = h[1].length; html += '<h' + lvl + '>' + inlineMd(h[2]) + '</h' + lvl + '>'; inList = false; continue }
-    const li = t.match(/^(?:[-*]|\d+[.)])\s+(.*)$/)
-    if (li) { if (!inList) { html += '<ul>'; inList = true } html += '<li>' + inlineMd(li[1]) + '</li>'; continue }
-    if (inList) { html += '</ul>'; inList = false }
-    const qt = t.match(/^>\s?(.*)$/)
-    if (qt) { html += '<blockquote>' + inlineMd(qt[1]) + '</blockquote>'; continue }
-    html += '<p>' + inlineMd(line) + '</p>'
-  }
-  if (inCode) html += '<pre><code>' + esc(codeBuf.join('\n')) + '</code></pre>'
-  if (inList) html += '</ul>'
-  return html
-}
-function inlineMd(s) {
-  let t = esc(s)
-  // 行内代码：反引号 \u0060 转义（页面 JS 内嵌于 TS 模板字符串，裸反引号提前终止模板）
-  t = t.replace(/[\u0060]([^\u0060]+)[\u0060]/g, '<code>$1</code>')
-  t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  t = t.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
-  t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-  return t
-}
-function thinkHtml(inner) {
-  return '<details class="think"><summary>🧠 思考过程</summary><div class="think-body">' + (inner ? inner.replace(/\n/g, '<br>') : '（空）') + '</div></details>'
-}
 </script>
 </body>
 </html>`
@@ -311,6 +260,29 @@ function thinkHtml(inner) {
 
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c)
+}
+
+/**
+ * Markdown 渲染（v1.25.9，正经库 marked 服务端渲染——替代手写正则渲染器，S142 用户要求）：
+ * ① 提取 `<think>…</think>` 块（占位符 \u0000T<idx>\u0000）
+ * ② 正文与 think 内容**先 escapeHtml 再 marked.parse**（GFM + breaks）——markdown 语法不受
+ *    转义影响，原始 HTML 注入被消除（安全）；代码块内 `<` 显示为实体（可接受）
+ * ③ think 占位符还原为 `<details class="think">` 折叠卡（🧠 思考过程，默认收起）
+ */
+export function renderSkiffMarkdown(raw: string): string {
+  const thinks: string[] = []
+  const body = raw.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inner: string) => {
+    const idx = thinks.length
+    thinks.push(String(inner ?? '').trim())
+    return `\u0000T${idx}\u0000`
+  })
+  const parsed = marked.parse(escapeHtml(body), { breaks: true, gfm: true })
+  const html = typeof parsed === 'string' ? parsed : ''
+  return html.replace(/\u0000T(\d+)\u0000/g, (_m, idx: string) => {
+    const inner = thinks[Number(idx)] ?? ''
+    const innerHtml = inner === '' ? '' : marked.parse(escapeHtml(inner), { breaks: true, gfm: true })
+    return `<details class="think"><summary>🧠 思考过程</summary><div class="think-body">${typeof innerHtml === 'string' ? innerHtml : ''}</div></details>`
+  })
 }
 
 /**
@@ -389,7 +361,13 @@ async function handle(
       const hc = readHandymanConfig(ccc)
       const ref = await createSkiffAgent(ctx, ccc, roleName, role, hc?.defaultModel)
       const result = await askSkiff(ctx, ref.agent, question)
-      sendJson(res, 200, { answer: result.answer, sessionId: result.sessionId, trajectory: result.trajectory })
+      // v1.25.9：answer_html = marked 服务端渲染（页面直接 innerHTML；answer 保留原文兜底）
+      sendJson(res, 200, {
+        answer: result.answer,
+        answer_html: renderSkiffMarkdown(result.answer),
+        sessionId: result.sessionId,
+        trajectory: result.trajectory,
+      })
       return
     }
     sendJson(res, 404, { error: 'not found' })

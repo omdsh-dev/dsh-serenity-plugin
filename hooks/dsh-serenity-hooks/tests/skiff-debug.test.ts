@@ -8,7 +8,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, discoverCccs, type SkiffCccEntry } from '../src/skiff-debug.js'
+import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, discoverCccs, renderSkiffMarkdown, type SkiffCccEntry } from '../src/skiff-debug.js'
 
 let dir: string
 
@@ -248,5 +248,34 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     await startSkiffDebugServer({} as never, dir, port, 3080)
     await startSkiffDebugServer({} as never, dir, port, 3080)
     expect(skiffDebugActive()).toBe(true)
+  })
+})
+
+describe('skiff-debug: renderSkiffMarkdown 服务端渲染（v1.25.9 marked）', () => {
+  it('markdown 语法渲染（标题/粗体/代码块/列表/链接）', () => {
+    const html = renderSkiffMarkdown('# 标题\n\n**加粗** 与 `代码`\n\n- 甲\n- 乙\n\n```js\nconst a = 1\n```')
+    expect(html).toContain('<h1>标题</h1>')
+    expect(html).toContain('<strong>加粗</strong>')
+    expect(html).toContain('<code>代码</code>')
+    expect(html).toContain('<ul>')
+    expect(html).toContain('<pre><code class="language-js">')
+    expect(html).toContain('const a = 1')
+  })
+
+  it('<think> 块提取为折叠卡（🧠 思考过程，默认收起）', () => {
+    const html = renderSkiffMarkdown('答案正文\n\n<think>我先分析再回答</think>\n\n后续内容')
+    expect(html).toContain('<details class="think">')
+    expect(html).toContain('<summary>🧠 思考过程</summary>')
+    expect(html).toContain('我先分析再回答')
+    expect(html).toContain('答案正文')
+    expect(html).toContain('后续内容')
+    // 折叠卡不直接裸露 think 标记
+    expect(html).not.toContain('<think>')
+  })
+
+  it('原始 HTML 注入被转义（escapeHtml 前置，安全）', () => {
+    const html = renderSkiffMarkdown('正常内容 <script>alert(1)</script>')
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;')
   })
 })
