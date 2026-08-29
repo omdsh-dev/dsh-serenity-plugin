@@ -130,6 +130,9 @@ export interface SkiffRoleConfig {
   };
   /** 角色系统提示词（CCC 完整定义：人格/认知边界/回答风格） */
   systemPrompt?: string;
+  /** 角色系统提示词文件（推荐：相对 CCC 根引用 md 文件——超长提示词在 JSON 内嵌不可读；
+   *  优先于 systemPrompt；文件缺失/逃逸 → resolveRoleSystemPrompt 抛错） */
+  systemPromptFile?: string;
 }
 
 /**

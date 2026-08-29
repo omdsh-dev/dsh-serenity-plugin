@@ -149,14 +149,14 @@ describe('keeper: Skiff 轨迹纪律子集旁路（F4b ⑩）', () => {
   })
 
   it('Skiff 会话（keeper 子集关）→ 计分不触发提醒（完全独立）', async () => {
-    registerSkiffSession('skiff-qa-1', 'qa', { session: { id: 'skiff-qa-1' } } as never)
+    registerSkiffSession('skiff-qa-1', 'qa', dir, { session: { id: 'skiff-qa-1' } } as never)
     const exec = { name: 'read', agent: { session: { id: 'skiff-qa-1', header: { cwd: dir } } } }
     const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
     expect(result.additionalContexts ?? []).toHaveLength(0)
   })
 
   it('Skiff 会话（keeper 子集开）→ 计分提醒生效（按角色配置）', async () => {
-    registerSkiffSession('skiff-tracked-1', 'tracked', { session: { id: 'skiff-tracked-1' } } as never)
+    registerSkiffSession('skiff-tracked-1', 'tracked', dir, { session: { id: 'skiff-tracked-1' } } as never)
     const exec = { name: 'read', agent: { session: { id: 'skiff-tracked-1', header: { cwd: dir } } } }
     const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
     expect(result.additionalContexts ?? []).toHaveLength(1)

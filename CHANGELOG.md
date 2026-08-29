@@ -1,3 +1,27 @@
+## v1.25.10 — 2026-08-29（Skiff 两项增强：md 提示词引用 + 会话追问延续，S142 用户需求）
+
+**Scope:** 用户两项新需求：① CCC 倾向定义超长提示词，JSON 内嵌不可读——**支持引用 md 文件作为角色系统提示词**（推荐配置方法）；② **dsh 会话概念在 skiff 绑定**——允许使用同一个 qa 会话追问（多轮对话上下文延续），而非每次提问新建会话。用户拍板：页面级会话 + 新对话按钮 / **仅进程内延续**（首版不做跨进程 resume，官方 `ctx.agents.resume` 路径已调研确认可行留待后续）/ 全量轨迹重绘 / v1.25.10 patch 级。
+
+### 变更
+- **R1 md 提示词引用（`systemPromptFile`）**：
+  - `ccc.ts`：`SkiffRoleConfig` 新增 `systemPromptFile?: string`（相对 CCC 根）
+  - `skiff-role.ts`：`readSkiffRoles` 只透传字段不读文件（guards/seams 每次工具调用查询的热路径零 IO）；新增 **`resolveRoleSystemPrompt(root, role)`**——file 优先（`resolveInside` 路径逃逸守卫 + `existsSync` + `readUtf8` 去 BOM），否则回退内嵌 `systemPrompt`（兼容旧配置），都无 → 空；文件缺失/逃逸 → 抛错（装配 catch 降级 + validate 报 issue）；新增 `systemPromptSource`（file/inline/none）
+  - `skiff-core.ts`：`createSkiffAgent` CCC 段改 `resolveRoleSystemPrompt`——缺失 → console.warn 降级仅基础段（不阻断创建）
+  - `skiff-admin.ts`：validate 改 resolve 后校验（file 缺失/逃逸 → issue；两者都无 → 「system prompt is empty」）；list 显示 `promptSource` + `systemPromptFile`；SKIFF_GUIDE schema 示例改 `systemPromptFile` 首选（内嵌标注兼容）
+- **R2 会话追问延续（同会话多轮）**：
+  - `skiff-registry.ts`：注册表值 `string`（role）→ `{ role, ccc }`（**SkiffSessionBinding**）；`skiffRoleFor` 返回 role 不变（guards/seams 向后兼容）；新增 `skiffSessionInfo`（role + ccc 完整绑定）
+  - `skiff-core.ts`：`registerSkiffSession` 三参→四参（+ccc）；新增 **`getSkiffAgent(sessionId)`**（进程内活体查询）；`askSkiff` eventsStart 语义修正——**显式传 0 = 全量轨迹**（页面重绘完整时间线），不传（undefined）= 本轮增量（原实现 0 被当作当前长度，与注释矛盾——v1.25.10 修复）
+  - `skiff-debug.ts` /ask：无 sessionId → 新建（`continued:false`）；有 sessionId → 进程内命中（校验 role+ccc 绑定一致 → 复用 `continued:true`）/ 未命中（重启后/不存在）→ 400「session is not recoverable」/ 绑定不匹配 → 400「belongs to role」；返回 `continued` 标记 + **全量轨迹**（`askSkiff(..., 0)`）
+  - **调试页 UI**：会话徽标（短显 `skiff-qa-…` + 「追问续接」样式）+ **「新对话」按钮**（清 sessionId + 区清空）；追问直接继续输入；角色/CCC 下拉切换自动视为新对话；服务端 400 时前端清 sessionId 重建
+  - `skiff_admin` description 同步（system prompt resolvable）
+
+### 测试
+- skiff-role +6：resolveRoleSystemPrompt（file 优先 / 内嵌回退 / 都无空 / 文件缺失抛错 / 路径逃逸拒绝 / BOM 剥除）+ systemPromptSource
+- skiff-core +4：skiffSessionInfo 绑定 / getSkiffAgent 查询 / createSkiffAgent systemPromptFile 优先 / 缺失降级不阻断
+- skiff-debug +3：会话延续全链路（新建 continued:false → 同会话追问 continued:true + created 不增 + 全量轨迹增长）/ 未注册 sessionId 400 不可恢复 / 绑定角色 CCC 不匹配 400
+- skiff-admin +2：systemPromptFile 缺失 → issue / 合法 file → ok；list promptSource=file + 路径展示
+- 签名适配：guards/keeper/skiff-core 测试 registerSkiffSession 新签名——**46 files / 562 tests 全绿**（+16）；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.9 — 2026-08-29（Skiff 回答改 marked 正经渲染器（服务端），用户批评手写正则渲染器）
 
 **Scope:** 用户：「用个正经 markdown 渲染器不要乱来啊」+ console 报错 `Invalid regular expression flags`。**采纳**：放弃 v1.25.8 的手写正则渲染器（脆弱 + 模板字符串内嵌反引号陷阱），改用 **marked**（成熟 markdown 库，GFM）——**服务端渲染**：node half 内联打包（tsdown noExternal），POST /ask 返回 `answer_html`，页面只插 HTML；`<think>` 折叠由服务端生成。

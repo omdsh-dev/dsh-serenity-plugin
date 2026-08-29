@@ -236,7 +236,7 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
         },
       }),
     )
-    registerSkiffSession(QA_ID, 'qa')
+    registerSkiffSession(QA_ID, 'qa', dir)
   })
 
   afterEach(() => {
@@ -280,7 +280,7 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
       join(dir, '.opencode', 'serenity.json'),
       JSON.stringify({ skiff: { roles: { pure: { msms: ['cognitive-qa'], tools: [] } } } }),
     )
-    registerSkiffSession('skiff-pure-1', 'pure')
+    registerSkiffSession('skiff-pure-1', 'pure', dir)
     try {
       expect(decideGuard(base({ root: dir, toolName: 'acc_msm', skiffSessionId: 'skiff-pure-1' })).kind).toBe('allow')
       expect(decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-pure-1' })).kind).toBe('deny')
@@ -296,7 +296,7 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
       join(dir, '.opencode', 'serenity.json'),
       JSON.stringify({ skiff: { roles: { pure: { msms: ['cognitive-qa'], tools: [] } } } }),
     )
-    registerSkiffSession('skiff-pure-2', 'pure')
+    registerSkiffSession('skiff-pure-2', 'pure', dir)
     try {
       expect(decideGuard(base({ root: dir, toolName: 'skill', skiffSessionId: 'skiff-pure-2' })).kind).toBe('allow')
       // 对照：未注册会话 + skill 也放行（豁免在角色查询之前）

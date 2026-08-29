@@ -11,7 +11,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '../json.js'
 import { findSerenityRoot, readHandymanConfig } from '../ccc.js'
-import { readSkiffRoles } from '../skiff-role.js'
+import { readSkiffRoles, resolveRoleSystemPrompt, systemPromptSource } from '../skiff-role.js'
 import { loadMsmEntries } from '../msm-ops.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
@@ -37,7 +37,9 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
         "msms": ["msm-a", "msm-b"],            // MSM 白名单（独立）：acc_msm exec 只能跑这些；register/deregister 必拒；list 只显示这些
         "tools": ["read","grep","glob",...],   // 非 MSM 工具白名单（独立）：白名单外工具一律不可用（guard 强制）
         "trajectory": { "session": false, "keeper": false, "rebuild": false },  // 轨迹纪律子集（缺省全关 = 完全独立）
-        "systemPrompt": "..."                  // 角色人格/认知边界/风格（CCC 完整定义；dsp 只给基础提示词）
+        // 角色人格/认知边界/风格（CCC 完整定义；dsp 只给基础提示词）
+        "systemPromptFile": ".opencode/skiff/<role>.md"   // ★ 推荐：引用 md 文件（相对 CCC 根；超长提示词在 JSON 内嵌不可读）
+        // "systemPrompt": "..."                          // 兼容：内嵌字符串仍可用；两者都设时 systemPromptFile 优先
       }
   } } }
 
@@ -68,6 +70,8 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
   启停 = 人工（设置面板开关，不随插件加载自动启动）；未开启零资源占用
   生效机制：角色配置**实时读取**（改 .opencode/serenity.json → 刷新调试页即生效）；
   改配置后用 skiff_admin apply 做显式校验 + 应用确认（绑定 CCC + 角色清单）
+  会话追问（v1.25.10）：调试页持有当前会话，追问自动续接（同会话上下文延续）；
+  「新对话」按钮开新会话；进程重启后旧会话不可续（WebUI 仍可见历史）
   注意：skill 加载对 skiff **恒可用**（不设白名单——读知识面，无写能力）`
 
 /** 校验当前 CCC 的 skiff 配置：roles schema 合法 / msms 均已注册 / model ∈ handyman.models / systemPrompt 非空 */
@@ -81,8 +85,14 @@ export function validateSkiffConfig(root: string): JsonValue {
   const hc = readHandymanConfig(root)
   const allowedModels = hc ? new Set(hc.models) : null
   for (const [name, role] of roles) {
-    if (!role.systemPrompt?.trim()) {
-      issues.push(`role "${name}": systemPrompt is empty (CCC should fully define the role persona)`)
+    // v1.25.10：systemPrompt 来源解析——systemPromptFile（推荐）缺失/逃逸 → issue；
+    // 两者都无 → issue（CCC 应完整定义角色人格）
+    try {
+      if (!resolveRoleSystemPrompt(root, role).trim()) {
+        issues.push(`role "${name}": system prompt is empty (define systemPromptFile (recommended) or systemPrompt)`)
+      }
+    } catch (err) {
+      issues.push(`role "${name}": ${String((err as Error)?.message ?? err)}`)
     }
     for (const m of role.msms ?? []) {
       if (!registered.has(m)) issues.push(`role "${name}": msms "${m}" is not registered in mech-registry.json`)
@@ -110,7 +120,8 @@ export function listSkiffRoles(root: string): JsonValue {
       keeper: role.trajectory?.keeper === true,
       rebuild: role.trajectory?.rebuild === true,
     } satisfies Record<string, boolean>,
-    hasSystemPrompt: Boolean(role.systemPrompt?.trim()),
+    promptSource: systemPromptSource(role),
+    ...(role.systemPromptFile ? { systemPromptFile: role.systemPromptFile } : {}),
   }))
   return { roles: items, count: items.length }
 }
@@ -147,7 +158,7 @@ export function applySkiffConfig(root: string): JsonValue {
 export const skiffAdminTool = defineTool({
   name: 'skiff_admin',
   description:
-    'Skiff (F4, experimental): CCC cognitive-subset roles (subsets of the full serenity trajectory). guide: definition tutorial (concept/role schema/cognitive MSM writing/dual whitelist/trajectory subset/examples); validate: check the CCC skiff config (roles schema legal / msms registered / model in handyman.models / systemPrompt non-empty); apply: validate then confirm the config is live (bound CCC + role list; roles are read live on every request); list: role summary (name/model/msms/tools/trajectory). Roles are defined by the CCC in .opencode/serenity.json skiff.roles; skill loading is always available to skiff sessions (not whitelisted).',
+    'Skiff (F4, experimental): CCC cognitive-subset roles (subsets of the full serenity trajectory). guide: definition tutorial (concept/role schema/cognitive MSM writing/dual whitelist/trajectory subset/examples); validate: check the CCC skiff config (roles schema legal / msms registered / model in handyman.models / system prompt resolvable — systemPromptFile (recommended) or systemPrompt non-empty); apply: validate then confirm the config is live (bound CCC + role list; roles are read live on every request); list: role summary (name/model/msms/tools/trajectory/prompt source). Roles are defined by the CCC in .opencode/serenity.json skiff.roles; skill loading is always available to skiff sessions (not whitelisted).',
   parameters: {
     action: {
       type: 'string',

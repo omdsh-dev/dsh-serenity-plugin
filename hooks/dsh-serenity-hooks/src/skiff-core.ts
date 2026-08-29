@@ -15,14 +15,15 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
-import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, type SkiffRoleConfig } from './skiff-role.js'
+import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, type SkiffRoleConfig } from './skiff-role.js'
 import { splitModel } from './handyman-ops.js'
-import { skiffRoleFor as registryRoleFor, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
+import { skiffRoleFor as registryRoleFor, skiffSessionInfo as registrySessionInfo, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 // ── 会话注册表（sessionId → role + agent；ACP/调试页会话映射，页面/连接关闭时清理）──
-// 角色名存 skiff-registry（零依赖，guards 等 seams 可安全查询）；agent 句柄存本模块
+// 角色名 + CCC 根存 skiff-registry（零依赖，guards 等 seams 可安全查询；v1.25.10 起
+// 值含 ccc——追问延续时校验 (role, ccc) 绑定）；agent 句柄存本模块
 
 const skiffAgents = new Map<string, Agent>()
 
@@ -31,9 +32,19 @@ export function skiffRoleFor(sessionId: string): string | null {
   return registryRoleFor(sessionId)
 }
 
-export function registerSkiffSession(sessionId: string, role: string, agent: Agent): void {
+/** 查 sessionId 的会话绑定（role + ccc；无 → null）——v1.25.10 追问校验 */
+export function skiffSessionInfo(sessionId: string): { role: string; ccc: string } | null {
+  return registrySessionInfo(sessionId)
+}
+
+/** 查 sessionId 的活体 agent（进程内会话延续用；未注册/已清理 → undefined） */
+export function getSkiffAgent(sessionId: string): Agent | undefined {
+  return skiffAgents.get(sessionId)
+}
+
+export function registerSkiffSession(sessionId: string, role: string, ccc: string, agent: Agent): void {
   skiffAgents.set(sessionId, agent)
-  registryRegister(sessionId, role)
+  registryRegister(sessionId, role, ccc)
 }
 
 export function unregisterSkiffSession(sessionId: string): void {
@@ -41,10 +52,10 @@ export function unregisterSkiffSession(sessionId: string): void {
   registryUnregister(sessionId)
 }
 
-/** 测试/调试：注册表快照 */
-export function skiffSessionSnapshot(): ReadonlyMap<string, { role: string }> {
-  const out = new Map<string, { role: string }>()
-  for (const [id, role] of registrySnapshot()) out.set(id, { role })
+/** 测试/调试：注册表快照（sessionId → {role} 兼容展示） */
+export function skiffSessionSnapshot(): ReadonlyMap<string, { role: string; ccc: string }> {
+  const out = new Map<string, { role: string; ccc: string }>()
+  for (const [id, b] of registrySnapshot()) out.set(id, { role: b.role, ccc: b.ccc })
   return out
 }
 
@@ -92,16 +103,24 @@ export async function createSkiffAgent(
   })
   const agent = handle.agent
   // scoped 系统提示词：基础段（动态白名单清单）+ CCC 完整定义段
+  // v1.25.10：CCC 段经 resolveRoleSystemPrompt——systemPromptFile 优先（md 文件，推荐），
+  // 文件缺失/逃逸 → catch 降级（console.warn + 仅基础段），不阻断 agent 创建
+  let cccPrompt = ''
+  try {
+    cccPrompt = resolveRoleSystemPrompt(root, role)
+  } catch (err) {
+    console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 系统提示词解析失败（回退仅基础段）: ${String((err as Error)?.message ?? err)}`)
+  }
   try {
     agent.ctx.systemPrompt.section({
       name: 'serenity-skiff',
       order: -60,
-      text: () => [buildSkiffBasePrompt(roleName, role), role.systemPrompt ?? ''].filter(Boolean).join('\n'),
+      text: () => [buildSkiffBasePrompt(roleName, role), cccPrompt].filter(Boolean).join('\n'),
     })
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
   }
-  registerSkiffSession(sessionId, roleName, agent)
+  registerSkiffSession(sessionId, roleName, root, agent)
   return { handle, agent, sessionId }
 }
 
@@ -193,11 +212,12 @@ function truncate(s: string, n: number): string {
 }
 
 /**
- * 提问一轮：followup → 等 idle → 读答案 + 本 turn 轨迹（增量 = followup 前 events 之后）。
- * @param eventsStart 本轮开始前的 events 长度（0 = 全量轨迹）
+ * 提问一轮：followup → 等 idle → 读答案 + 轨迹。
+ * @param eventsStart 轨迹起点：显式传 0 = 全量轨迹（会话追问时页面重绘完整时间线，
+ *   v1.25.10 用户拍板）；不传（undefined）= 本轮增量（followup 前 events 之后）
  */
-export async function askSkiff(ctx: Context, agent: Agent, question: string, eventsStart = 0): Promise<SkiffAskResult> {
-  const before = eventsStart > 0 ? eventsStart : agent.session.events.length
+export async function askSkiff(ctx: Context, agent: Agent, question: string, eventsStart?: number): Promise<SkiffAskResult> {
+  const before = eventsStart === undefined ? agent.session.events.length : eventsStart
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
   await waitIdle(ctx, agent)
   const answer = lastAssistantText(agent)

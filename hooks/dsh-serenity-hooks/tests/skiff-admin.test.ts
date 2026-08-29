@@ -101,7 +101,25 @@ describe('skiff_admin: validateSkiffConfig 配置校验', () => {
     writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
     const r = validateSkiffConfig(dir)
     expect(r.ok).toBe(false)
-    expect(r.issues.some((i: string) => i.includes('systemPrompt is empty'))).toBe(true)
+    expect(r.issues.some((i: string) => i.includes('system prompt is empty'))).toBe(true)
+  })
+
+  it('systemPromptFile 缺失 → 问题清单（v1.25.10 md 文件引用）', () => {
+    writeConfig({ skiff: { roles: { qa: { msms: ['x'], systemPromptFile: '.opencode/skiff/missing.md' } } } })
+    writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
+    const r = validateSkiffConfig(dir)
+    expect(r.ok).toBe(false)
+    expect(r.issues.some((i: string) => i.includes('not found'))).toBe(true)
+  })
+
+  it('systemPromptFile 合法（存在 + 非空）→ ok（推荐配置方法）', () => {
+    mkdirSync(join(dir, '.opencode', 'skiff'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skiff', 'qa.md'), '文件版完整提示词')
+    writeConfig({ skiff: { roles: { qa: { msms: ['x'], systemPromptFile: '.opencode/skiff/qa.md' } } } })
+    writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
+    const r = validateSkiffConfig(dir)
+    expect(r.ok).toBe(true)
+    expect(r.issues).toEqual([])
   })
 })
 
@@ -130,10 +148,24 @@ describe('skiff_admin: listSkiffRoles 角色摘要', () => {
     expect(qa.msms).toEqual(['cognitive-qa'])
     expect(qa.tools).toEqual([])
     expect((qa.trajectory as Record<string, boolean>).keeper).toBe(false)
+    expect(qa.promptSource).toBe('none')
     const review = r.roles.find((x) => x.name === 'review')!
     expect(review.tools).toEqual(['read', 'grep'])
     expect((review.trajectory as Record<string, boolean>).keeper).toBe(true)
-    expect(review.hasSystemPrompt).toBe(true)
+    expect(review.promptSource).toBe('inline')
+  })
+
+  it('有角色（systemPromptFile）→ promptSource=file + 文件路径展示（v1.25.10）', () => {
+    mkdirSync(join(dir, '.opencode', 'skiff'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skiff', 'qa.md'), '提示词')
+    writeConfig({
+      skiff: { roles: { qa: { msms: ['x'], systemPromptFile: '.opencode/skiff/qa.md' } } },
+    })
+    const r = listSkiffRoles(dir) as { roles: Array<Record<string, unknown>>; count: number }
+    expect(r.count).toBe(1)
+    const qa = r.roles[0]!
+    expect(qa.promptSource).toBe('file')
+    expect(qa.systemPromptFile).toBe('.opencode/skiff/qa.md')
   })
 })
 
@@ -159,7 +191,7 @@ describe('skiff_admin: applySkiffConfig 显式生效机制（v1.25.3）', () => 
     expect(r.applied).toBe(false)
     expect(r.roleCount).toBe(1)
     expect(r.issues.some((i: string) => i.includes('ghost-msm'))).toBe(true)
-    expect(r.issues.some((i: string) => i.includes('systemPrompt is empty'))).toBe(true)
+    expect(r.issues.some((i: string) => i.includes('system prompt is empty'))).toBe(true)
     expect(r.hint).toContain('fix the issues')
   })
 

@@ -10,6 +10,8 @@ import {
   roleToolWhitelist,
   roleMsmWhitelist,
   buildSkiffBasePrompt,
+  resolveRoleSystemPrompt,
+  systemPromptSource,
 } from '../src/skiff-role.js'
 import type { SkiffRoleConfig } from '../src/ccc.js'
 
@@ -98,6 +100,45 @@ describe('skiff-role: readSkiffRoles 配置解析', () => {
   it('配置读取失败 → 空 Map（零影响）', () => {
     // 无 .opencode/serenity.json：loadSerenityConfig 返回 {} → 空
     expect(readSkiffRoles(dir).size).toBe(0)
+  })
+})
+
+describe('skiff-role: resolveRoleSystemPrompt（v1.25.10 md 文件引用）', () => {
+  it('systemPromptFile 优先（推荐）：读取 md 文件内容', () => {
+    mkdirSync(join(dir, '.opencode', 'skiff'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skiff', 'qa.md'), '你是宁静号的认知问答助手。\n\n专注、准确。')
+    const role: SkiffRoleConfig = { systemPromptFile: '.opencode/skiff/qa.md', systemPrompt: '旧内嵌' }
+    expect(resolveRoleSystemPrompt(dir, role)).toBe('你是宁静号的认知问答助手。\n\n专注、准确。')
+    expect(systemPromptSource(role)).toBe('file')
+  })
+
+  it('无 systemPromptFile → 回退内嵌 systemPrompt（兼容旧配置）', () => {
+    const role: SkiffRoleConfig = { systemPrompt: '内嵌提示词' }
+    expect(resolveRoleSystemPrompt(dir, role)).toBe('内嵌提示词')
+    expect(systemPromptSource(role)).toBe('inline')
+  })
+
+  it('两者都无 → 空字符串（source=none）', () => {
+    expect(resolveRoleSystemPrompt(dir, undefined)).toBe('')
+    expect(resolveRoleSystemPrompt(dir, {})).toBe('')
+    expect(systemPromptSource({})).toBe('none')
+  })
+
+  it('文件缺失 → 抛错（validate 报 issue；装配 catch 降级）', () => {
+    const role: SkiffRoleConfig = { systemPromptFile: '.opencode/skiff/missing.md' }
+    expect(() => resolveRoleSystemPrompt(dir, role)).toThrow(/not found/)
+  })
+
+  it('路径逃逸 → 抛错（resolveInside 拒绝）', () => {
+    const role: SkiffRoleConfig = { systemPromptFile: '../outside.md' }
+    expect(() => resolveRoleSystemPrompt(dir, role)).toThrow(/escape/i)
+  })
+
+  it('BOM 剥除（Windows 编辑器写出的 \uFEFF 前缀）', () => {
+    mkdirSync(join(dir, '.opencode', 'skiff'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skiff', 'qa.md'), '\uFEFF带 BOM 的内容')
+    const role: SkiffRoleConfig = { systemPromptFile: '.opencode/skiff/qa.md' }
+    expect(resolveRoleSystemPrompt(dir, role)).toBe('带 BOM 的内容')
   })
 })
 

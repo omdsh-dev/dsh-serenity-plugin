@@ -236,6 +236,102 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     expect(res.body).toContain('invalid JSON')
   })
 
+  it('POST /ask 会话延续：新建（continued:false）→ 同会话追问（continued:true）→ 全量轨迹（v1.25.10）', async () => {
+    const port = freePort()
+    // 角色配置（handyman.defaultModel 供 createSkiffAgent）
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ handyman: { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
+    )
+    // fake ctx：agents.create 产生带 followup 的 fake agent（events 可累积）；
+    // on 注册时立即触发 idle（waitIdle 同步 resolve，skiff-core 测试同款）
+    const created: Array<{ sessionId: string; session: { id: string; events: unknown[] } }> = []
+    let currentAgent: unknown = null
+    const fakeCtx = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+          const agentCtx = { get: () => undefined, systemPrompt: { section: () => {} } }
+          const agent = {
+            ctx: agentCtx,
+            session: { id: opts.sessionId, events: [] as unknown[] },
+            followup: () => {
+              agent.session.events.push(
+                { type: 'user/message', data: { content: [{ type: 'text', text: 'q' }] } },
+                { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'a' }] } } },
+              )
+            },
+          }
+          await opts.setup?.(agentCtx)
+          currentAgent = agent
+          created.push(agent as never)
+          return { agent }
+        },
+      },
+      on: (_ev: string, cb: (p: { agent: unknown; status: string }) => void) => {
+        cb({ agent: currentAgent, status: 'idle' })
+        return () => {}
+      },
+    }
+    await startSkiffDebugServer(fakeCtx as never, dir, port, 3080)
+    // 首次提问 → 新建会话
+    const first = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hello' })
+    expect(first.status).toBe(200)
+    const firstData = JSON.parse(first.body) as { sessionId: string; continued: boolean; trajectory: unknown[] }
+    expect(firstData.continued).toBe(false)
+    expect(firstData.sessionId.startsWith('skiff-qa-')).toBe(true)
+    expect(created).toHaveLength(1)
+    expect(firstData.trajectory.length).toBeGreaterThan(0)
+    // 追问（带 sessionId）→ 复用同一 agent（created 不增加）+ continued:true + 全量轨迹
+    const second = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'follow up', sessionId: firstData.sessionId })
+    expect(second.status).toBe(200)
+    const secondData = JSON.parse(second.body) as { sessionId: string; continued: boolean; trajectory: unknown[] }
+    expect(secondData.continued).toBe(true)
+    expect(secondData.sessionId).toBe(firstData.sessionId)
+    expect(created).toHaveLength(1)
+    // 全量轨迹：两轮 events（每轮 user+assistant = 4 条）
+    expect(secondData.trajectory.length).toBeGreaterThan(firstData.trajectory.length)
+    stopSkiffDebugServer()
+  })
+
+  it('POST /ask 会话延续：未注册 sessionId → 400 不可恢复（重启后/不存在）', async () => {
+    const port = freePort()
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }))
+    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const res = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hi', sessionId: 'skiff-qa-ghost' })
+    expect(res.status).toBe(400)
+    expect(res.body).toContain('not recoverable')
+  })
+
+  it('POST /ask 会话延续：sessionId 绑定角色/CCC 不匹配 → 400（切换残留）', async () => {
+    const port = freePort()
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }))
+    // 直接注册一个绑定 role=qa 的会话（fake agent）
+    const { registerSkiffSession, unregisterSkiffSession } = await import('../src/skiff-core.js')
+    const sid = 'skiff-qa-bound'
+    const fake = { session: { id: sid, events: [] }, followup: () => {} }
+    registerSkiffSession(sid, 'qa', dir, fake as never)
+    await startSkiffDebugServer({} as never, dir, port, 3080)
+    try {
+      // 角色不匹配（请求 review——CCC 无该角色会先 400 unknown role？不：readSkiffRoles 无 review → 400 unknown role）
+      // 所以用真实存在的第二个角色验证 role 不匹配
+      const other = mkdtempSync(join(tmpdir(), 'skiff-other-ccc-'))
+      writeFileSync(join(other, '.serenity'), 'test')
+      mkdirSync(join(other, '.opencode'), { recursive: true })
+      writeFileSync(join(other, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['y'], systemPrompt: 'p' } } } }))
+      // CCC 不匹配：请求 other（qa 角色存在，但 session 绑定 dir）→ 400 belongs to role
+      const resCcc = await httpPost(port, '/ask', { ccc: other, role: 'qa', question: 'hi', sessionId: sid })
+      expect(resCcc.status).toBe(400)
+      expect(resCcc.body).toContain('belongs to role')
+      rmSync(other, { recursive: true, force: true })
+    } finally {
+      unregisterSkiffSession(sid)
+      stopSkiffDebugServer()
+    }
+  })
+
   it('未知路径 → 404', async () => {
     const port = freePort()
     await startSkiffDebugServer({} as never, dir, port, 3080)

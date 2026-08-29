@@ -21,9 +21,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { basename } from 'node:path'
 import type { Context } from 'cordis'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { marked } from 'marked'
 import { readSkiffRoles } from './skiff-role.js'
-import { createSkiffAgent, askSkiff, type SkiffTrajectoryEntry } from './skiff-core.js'
+import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffTrajectoryEntry } from './skiff-core.js'
 import { readHandymanConfig, findSerenityRoot } from './ccc.js'
 
 /** 运行中的调试服务（单实例；进程级） */
@@ -142,6 +143,13 @@ export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPo
   .sub { opacity: .65; font-size: 13px; margin-bottom: 16px; }
   .ccc { display: inline-block; padding: 3px 10px; border-radius: 999px; background: rgba(11,168,117,.12); color: #0ba875; font-size: 12px; font-weight: 600; margin-bottom: 12px; word-break: break-all; }
   @media (prefers-color-scheme: dark) { .ccc { color: #3ddc9a; } }
+  .sessionbar { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .session-badge { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; padding: 3px 10px; border-radius: 999px; background: rgba(127,127,127,.12); word-break: break-all; }
+  .session-badge.continued { background: rgba(11,168,117,.12); color: #0ba875; }
+  @media (prefers-color-scheme: dark) { .session-badge.continued { color: #3ddc9a; } }
+  button.ghost { background: transparent; color: #57606a; border: 1px solid #d0d7de; padding: 4px 12px; font-size: 12px; border-radius: 8px; cursor: pointer; margin-top: 0; }
+  @media (prefers-color-scheme: dark) { button.ghost { color: #8b949e; border-color: #3a3d42; } }
+  button.ghost:hover { background: rgba(127,127,127,.1); }
   label { font-size: 13px; font-weight: 600; display: block; margin: 12px 0 4px; }
   select, textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid #d0d7de; background: #fff; color: inherit; font-size: 14px; }
   @media (prefers-color-scheme: dark) { select, textarea { background: #26282c; border-color: #3a3d42; } }
@@ -178,14 +186,18 @@ export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPo
 <body>
 <main>
   <h1>Skiff Debug</h1>
-  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.9 实验性）— 多 CCC 可切换，走 DSH agent-loop 会话核心，回答 marked 服务端渲染 + think 折叠</div>
+  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.10 实验性）— 多 CCC 可切换，同会话可追问（新对话按钮开新会话），回答 marked 服务端渲染 + think 折叠</div>
   <div class="ccc" id="cccBadge"></div>
+  <div class="sessionbar">
+    <span id="sessionBadge" class="session-badge muted">（新会话）</span>
+    <button id="newChat" type="button" class="ghost">新对话</button>
+  </div>
   <label for="ccc">认知容器</label>
   <select id="ccc"></select>
   <label for="role">角色</label>
   <select id="role"></select>
   <label for="q">问题</label>
-  <textarea id="q" placeholder="向该角色提问…"></textarea>
+  <textarea id="q" placeholder="向该角色提问…（追问直接继续输入）"></textarea>
   <button id="ask">提问</button>
   <div id="answer" class="muted">等待提问…</div>
   <div id="trajectory"></div>
@@ -198,10 +210,26 @@ const defaultRoot = document.getElementById('skiff-data').dataset.default
 const cccSel = document.getElementById('ccc')
 const roleSel = document.getElementById('role')
 const badge = document.getElementById('cccBadge')
+const sessionBadge = document.getElementById('sessionBadge')
+const newChatBtn = document.getElementById('newChat')
 const btn = document.getElementById('ask')
 const answer = document.getElementById('answer')
 const traj = document.getElementById('trajectory')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
+let sessionId = ''
+function shortId(id) { return id.length > 24 ? id.slice(0, 18) + '…' + id.slice(-6) : id }
+function renderSessionBadge() {
+  sessionBadge.textContent = sessionId ? '会话 ' + shortId(sessionId) + '（追问续接）' : '（新会话）'
+  sessionBadge.className = 'session-badge' + (sessionId ? ' continued' : '')
+}
+function newConversation() {
+  sessionId = ''
+  renderSessionBadge()
+  answer.className = 'muted'
+  answer.textContent = '已开启新对话'
+  traj.innerHTML = ''
+  document.getElementById('q').value = ''
+}
 function currentCcc() {
   return CCCS.find((c) => c.root === cccSel.value) || (CCCS[0] || { root: '', name: '', roles: [] })
 }
@@ -220,8 +248,11 @@ function fillRoles() {
     ? c.roles.map((r) => '<option value="' + esc(r) + '">' + esc(r) + '</option>').join('')
     : '<option value="">(未配置角色)</option>'
 }
-cccSel.addEventListener('change', fillRoles)
+cccSel.addEventListener('change', () => { fillRoles(); newConversation() })
+roleSel.addEventListener('change', () => newConversation())
+newChatBtn.addEventListener('click', newConversation)
 fillCccs()
+renderSessionBadge()
 btn.addEventListener('click', async () => {
   const c = currentCcc()
   const role = roleSel.value
@@ -232,11 +263,18 @@ btn.addEventListener('click', async () => {
   answer.textContent = '运行中…'
   traj.innerHTML = ''
   try {
-    const res = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ccc: c.root, role, question: q }) })
+    const res = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ccc: c.root, role, question: q, sessionId: sessionId || undefined }) })
     const data = await res.json()
-    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status))
+    if (!res.ok) {
+      // 会话不可恢复/绑定不匹配 → 前端清空 sessionId 重建（用户拍板：切换即新对话）
+      sessionId = ''
+      renderSessionBadge()
+      throw new Error(data.error || ('HTTP ' + res.status))
+    }
     answer.className = ''
     answer.innerHTML = data.answer_html || esc(data.answer || '') || '（空回答）'
+    sessionId = data.sessionId || sessionId
+    renderSessionBadge()
     renderTrajectory(data.trajectory || [], data.sessionId || '')
   } catch (err) {
     answer.className = 'err'
@@ -335,11 +373,11 @@ async function handle(
       return
     }
     if (req.method === 'POST' && url === '/ask') {
-      let body: { ccc?: unknown; role?: unknown; question?: unknown }
+      let body: { ccc?: unknown; role?: unknown; question?: unknown; sessionId?: unknown }
       try {
         const parsed = JSON.parse(await readBody(req)) as unknown
         if (parsed === null || typeof parsed !== 'object') throw new Error('not an object')
-        body = parsed as { ccc?: unknown; role?: unknown; question?: unknown }
+        body = parsed as { ccc?: unknown; role?: unknown; question?: unknown; sessionId?: unknown }
       } catch {
         sendJson(res, 400, { error: 'invalid JSON body' })
         return
@@ -348,6 +386,7 @@ async function handle(
       const ccc = typeof body.ccc === 'string' && body.ccc !== '' ? body.ccc : defaultRoot
       const roleName = typeof body.role === 'string' ? body.role : ''
       const question = typeof body.question === 'string' ? body.question : ''
+      const sessionId = typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : undefined
       const roles = readSkiffRoles(ccc)
       const role = roles.get(roleName)
       if (!roleName || !role) {
@@ -358,14 +397,41 @@ async function handle(
         sendJson(res, 400, { error: 'empty question' })
         return
       }
+      // 会话延续（v1.25.10，S142 用户：同一 qa 会话追问）：
+      // ① 无 sessionId → 新建（continued:false）
+      // ② 有 sessionId：
+      //    a. 进程内命中（skiffAgents）→ 校验 (role, ccc) 绑定一致 → 复用（continued:true）
+      //    b. 未命中（重启后/不存在）→ 400「会话不可恢复，请新对话」（首版仅进程内延续）
+      //    c. 绑定不匹配（角色/容器切换残留）→ 400 提示（前端清 sessionId 重建）
+      let agent: Agent | undefined
+      let continued = false
+      if (sessionId) {
+        const info = skiffSessionInfo(sessionId)
+        const live = getSkiffAgent(sessionId)
+        if (!info || !live) {
+          sendJson(res, 400, { error: 'session is not recoverable (process restarted or session unknown) — start a new conversation' })
+          return
+        }
+        if (info.role !== roleName || info.ccc !== ccc) {
+          sendJson(res, 400, { error: `session "${sessionId}" belongs to role "${info.role}" in another CCC — start a new conversation` })
+          return
+        }
+        agent = live
+        continued = true
+      }
       const hc = readHandymanConfig(ccc)
-      const ref = await createSkiffAgent(ctx, ccc, roleName, role, hc?.defaultModel)
-      const result = await askSkiff(ctx, ref.agent, question)
+      if (!agent) {
+        const ref = await createSkiffAgent(ctx, ccc, roleName, role, hc?.defaultModel)
+        agent = ref.agent
+      }
+      const result = await askSkiff(ctx, agent, question, 0)
       // v1.25.9：answer_html = marked 服务端渲染（页面直接 innerHTML；answer 保留原文兜底）
+      // v1.25.10：continued 标记 + 全量轨迹（eventsStart=0 默认，页面重绘完整时间线）
       sendJson(res, 200, {
         answer: result.answer,
         answer_html: renderSkiffMarkdown(result.answer),
         sessionId: result.sessionId,
+        continued,
         trajectory: result.trajectory,
       })
       return

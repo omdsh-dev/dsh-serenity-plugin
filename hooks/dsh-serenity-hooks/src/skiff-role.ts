@@ -9,7 +9,8 @@
  * 实验性质：未配置任何角色 → Skiff 完全零影响（无监听、无 agent 创建、guard 无规则）。
  */
 
-import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type SkiffRoleConfig } from './ccc.js'
+import { loadSerenityConfig, resolveInside, readUtf8, DEFAULT_SERENITY_CONFIG_PATHS, type SkiffRoleConfig } from './ccc.js'
+import { existsSync } from 'node:fs'
 
 export type { SkiffRoleConfig }
 
@@ -44,6 +45,7 @@ export function readSkiffRoles(root: string, paths: string[] = DEFAULT_SERENITY_
           rebuild: role.trajectory.rebuild === true,
         } : undefined,
         systemPrompt: typeof role.systemPrompt === 'string' ? role.systemPrompt : undefined,
+        systemPromptFile: typeof role.systemPromptFile === 'string' ? role.systemPromptFile : undefined,
       })
     }
   } catch {
@@ -78,6 +80,36 @@ export function roleToolWhitelist(role: SkiffRoleConfig | undefined): Set<string
 /** 角色允许的 MSM 白名单（acc_msm exec 校验 / msm_list 过滤用；独立于 tools 白名单） */
 export function roleMsmWhitelist(role: SkiffRoleConfig | undefined): Set<string> {
   return new Set(role?.msms ?? [])
+}
+
+/**
+ * 解析角色的系统提示词全文（v1.25.10，S142 用户：超长提示词 JSON 内嵌不可读）：
+ * ① `systemPromptFile` 存在 → 读取文件内容（**推荐配置方法**；相对 CCC 根，
+ *    路径逃逸拒绝（resolveInside）+ BOM 剥除（readUtf8）+ 存在性校验）
+ * ② 否则 → 内嵌 `systemPrompt`（兼容旧配置）
+ * ③ 都无 → 空字符串
+ * 文件缺失/逃逸 → 抛错（调用方 catch 降级 + validate 报 issue）。
+ * 懒读取：readSkiffRoles 不读文件（guards/seams 每次工具调用查询的热路径零 IO），
+ * 仅在本函数（创建 agent / validate / list 时）读取。
+ */
+export function resolveRoleSystemPrompt(root: string, role: SkiffRoleConfig | undefined): string {
+  if (!role) return ''
+  const file = role.systemPromptFile?.trim()
+  if (file) {
+    const abs = resolveInside(root, file) // 逃逸 → throw
+    if (!existsSync(abs)) {
+      throw new Error(`skiff role "${role.systemPrompt ?? '(unnamed)'}": systemPromptFile "${file}" not found (resolved: ${abs})`)
+    }
+    return readUtf8(abs).trim()
+  }
+  return role.systemPrompt ?? ''
+}
+
+/** 角色系统提示词来源（validate/list 展示用） */
+export function systemPromptSource(role: SkiffRoleConfig | undefined): 'file' | 'inline' | 'none' {
+  if (role?.systemPromptFile?.trim()) return 'file'
+  if (role?.systemPrompt?.trim()) return 'inline'
+  return 'none'
 }
 
 /**

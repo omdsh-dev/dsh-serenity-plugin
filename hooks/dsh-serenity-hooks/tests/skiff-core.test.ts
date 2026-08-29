@@ -11,6 +11,8 @@ import {
   registerSkiffSession,
   unregisterSkiffSession,
   skiffRoleFor,
+  skiffSessionInfo,
+  getSkiffAgent,
   skiffSessionSnapshot,
   skiffTrajectoryEnabled,
   skiffMsmGate,
@@ -70,12 +72,30 @@ function fakeCtx(agent: unknown): { on: () => () => void } {
 describe('skiff-core: 会话注册表', () => {
   it('register → roleFor 命中 + snapshot；unregister → 清空', () => {
     const agent = fakeAgent()
-    registerSkiffSession(agent.session.id, 'qa-readonly', agent as never)
+    registerSkiffSession(agent.session.id, 'qa-readonly', dir, agent as never)
     expect(skiffRoleFor(agent.session.id)).toBe('qa-readonly')
-    expect([...skiffSessionSnapshot().entries()]).toEqual([[agent.session.id, { role: 'qa-readonly' }]])
+    expect([...skiffSessionSnapshot().entries()]).toEqual([[agent.session.id, { role: 'qa-readonly', ccc: dir }]])
     unregisterSkiffSession(agent.session.id)
     expect(skiffRoleFor(agent.session.id)).toBeNull()
     expect(skiffSessionSnapshot().size).toBe(0)
+  })
+
+  it('skiffSessionInfo 返回 role + ccc 绑定（v1.25.10 追问校验）', () => {
+    const agent = fakeAgent()
+    registerSkiffSession(agent.session.id, 'qa', dir, agent as never)
+    expect(skiffSessionInfo(agent.session.id)).toEqual({ role: 'qa', ccc: dir })
+    expect(skiffSessionInfo('skiff-ghost-1')).toBeNull()
+    unregisterSkiffSession(agent.session.id)
+    expect(skiffSessionInfo(agent.session.id)).toBeNull()
+  })
+
+  it('getSkiffAgent 进程内会话查询（追问复用；未注册 → undefined）', () => {
+    const agent = fakeAgent()
+    registerSkiffSession(agent.session.id, 'qa', dir, agent as never)
+    expect(getSkiffAgent(agent.session.id)).toBe(agent)
+    expect(getSkiffAgent('skiff-ghost-2')).toBeUndefined()
+    unregisterSkiffSession(agent.session.id)
+    expect(getSkiffAgent(agent.session.id)).toBeUndefined()
   })
 
   it('未注册会话 → null', () => {
@@ -133,6 +153,54 @@ describe('skiff-core: createSkiffAgent（v1.25.3：preset 挂载修复平台工�
     unregisterSkiffSession(ref.sessionId)
   })
 
+  it('systemPromptFile 优先：CCC 段取 md 文件内容（v1.25.10）', async () => {
+    mkdirSync(join(dir, '.opencode', 'skiff'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skiff', 'qa.md'), '文件版提示词')
+    const sections: Array<{ name: string; text: () => string }> = []
+    const fakeCtx = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+          const agentCtx = {
+            get: () => undefined,
+            systemPrompt: { section: (s: { name: string; text: () => string }) => sections.push(s) },
+          }
+          await opts.setup?.(agentCtx)
+          return { agent: { ctx: agentCtx, session: { id: opts.sessionId, events: [] }, followup: () => {} } }
+        },
+      },
+    }
+    const ref = await createSkiffAgent(fakeCtx as never, dir, 'qa', {
+      systemPromptFile: '.opencode/skiff/qa.md',
+      systemPrompt: '旧内嵌（不应出现）',
+    })
+    expect(sections[0]?.text()).toContain('文件版提示词')
+    expect(sections[0]?.text()).not.toContain('旧内嵌')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('systemPromptFile 缺失 → 降级仅基础段 + 不阻断创建（console.warn）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const sections: Array<{ name: string; text: () => string }> = []
+    const fakeCtx = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+          const agentCtx = {
+            get: () => undefined,
+            systemPrompt: { section: (s: { name: string; text: () => string }) => sections.push(s) },
+          }
+          await opts.setup?.(agentCtx)
+          return { agent: { ctx: agentCtx, session: { id: opts.sessionId, events: [] }, followup: () => {} } }
+        },
+      },
+    }
+    const ref = await createSkiffAgent(fakeCtx as never, dir, 'qa', { systemPromptFile: '.opencode/skiff/missing.md' })
+    expect(sections[0]?.text()).toContain('=== Serenity Skiff ===')
+    expect(sections[0]?.text()).not.toContain('CCC 完整定义')
+    expect(warn).toHaveBeenCalled()
+    warn.mockRestore()
+    unregisterSkiffSession(ref.sessionId)
+  })
+
   it('agentPresets 服务缺失 → 不阻断创建（回退全局工具层）', async () => {
     const fakeCtx = {
       agents: {
@@ -171,13 +239,13 @@ describe('skiff-core: skiffTrajectoryEnabled 轨迹纪律子集', () => {
       },
     })
     const qa = fakeAgent()
-    registerSkiffSession(qa.session.id, 'qa', qa as never)
+    registerSkiffSession(qa.session.id, 'qa', dir, qa as never)
     expect(skiffTrajectoryEnabled(dir, qa.session.id, 'keeper')).toBe(false)
     expect(skiffTrajectoryEnabled(dir, qa.session.id, 'rebuild')).toBe(false)
     expect(skiffTrajectoryEnabled(dir, qa.session.id, 'session')).toBe(false)
 
     const review = { session: { id: `${SKIFF_SESSION_PREFIX}review-1`, events: [] }, followup: () => {} }
-    registerSkiffSession(review.session.id, 'review', review as never)
+    registerSkiffSession(review.session.id, 'review', dir, review as never)
     expect(skiffTrajectoryEnabled(dir, review.session.id, 'keeper')).toBe(true)
     expect(skiffTrajectoryEnabled(dir, review.session.id, 'rebuild')).toBe(false)
   })
@@ -188,7 +256,7 @@ describe('skiff-core: skiffMsmGate acc_msm 白名单门控', () => {
 
   beforeEach(() => {
     writeConfig({ skiff: { roles: { qa: { msms: ['cognitive-qa', 'meta-x'], tools: [] } } } })
-    registerSkiffSession(qaId, 'qa', { session: { id: qaId, events: [] } } as never)
+    registerSkiffSession(qaId, 'qa', dir, { session: { id: qaId, events: [] } } as never)
   })
 
   it('非 skiff 会话恒放行（无 reject 无 whitelist）', () => {
