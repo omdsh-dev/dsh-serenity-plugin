@@ -64,9 +64,13 @@ describe('skiff-debug: 问答页渲染（纯函数，v1.25.4 多 CCC 切换）',
     expect(html).toContain('qa-readonly')
     expect(html).toContain('home-serenity')
     expect(html).toContain('other-ccc')
-    // 内嵌候选数据（CCC 切换器数据源；JSON 经 escapeHtml 转义为 &quot;）
-    expect(html).toContain('&quot;root&quot;:&quot;/ccc/home-serenity&quot;')
-    expect(html).toContain('&quot;roles&quot;:[&quot;qa-readonly&quot;,&quot;review&quot;]')
+    // 内嵌候选数据（JSON 合法转义：仅 `<` → `\u003c`，引号保留——v1.25.7 修复 escapeHtml 破坏 JSON.parse）
+    expect(html).toContain('"root":"/ccc/home-serenity"')
+    expect(html).toContain('"roles":["qa-readonly","review"]')
+    // 防 `</script>` 注入：数据内 `<` 转义为 \u003c
+    const evil = skiffDebugPage([{ root: '/a<b', name: 'x', roles: ['r'] }], '/a<b', 3080)
+    expect(evil).toContain('\\u003c')
+    expect(evil).not.toContain('</script>{"')
     // 默认选中
     expect(html).toContain('data-default="/ccc/home-serenity"')
     expect(html).toContain('http://127.0.0.1:3080')
@@ -195,7 +199,7 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
       JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
     )
     const after = await httpGet(port, '/')
-    expect(after.body).toContain('&quot;roles&quot;:[&quot;qa&quot;]')
+    expect(after.body).toContain('"roles":["qa"]')
   })
 
   it('POST /ask unknown role → 400（错误路径；不创建 agent）', async () => {

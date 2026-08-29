@@ -1,3 +1,14 @@
+## v1.25.7 — 2026-08-29（Skiff 调试页 JSON.parse 崩溃修复：内嵌数据 escapeHtml 破坏 JSON，用户 console 报错定位）
+
+**Scope:** 用户实测——下拉仍空，**console 报错**：`Uncaught SyntaxError: Expected property name or '}' in JSON at position 2 (at (index):52:19)`（页面脚本 `JSON.parse(document.getElementById('skiff-data').textContent)`）。**根因**：v1.25.4 起内嵌候选数据经 `escapeHtml` 整体转义——`"` → `&quot;`，而 `textContent` 返回**原始文本**（浏览器不反转义），`JSON.parse` 遇到 `{&quot;root&quot;...` 的 `&`（position 2）即抛错 → CCCS 未定义 → 下拉空。
+
+### 变更（skiff-debug.ts `skiffDebugPage`）
+- 内嵌 JSON **只转义 `<` → `\u003c`**（JSON 合法转义，`JSON.parse` 还原；防 `</script>` 注入）——引号等原样保留，`JSON.parse(textContent)` 正常工作
+- `data-default` 属性值仍走 `escapeHtml`（HTML 属性语境，语义正确）
+
+### 测试
+- skiff-debug.test：页面渲染断言改回原始 JSON 形式（`"root":"..."` / `"roles":[...]`）；新增防注入断言（含 `<` 路径 → `\u003c` 转义 + 无裸 `</script>{` 序列）；实时读取用例断言同步——**46 files / 543 tests 全绿**；typecheck ✓（node + client）→ build ✓（134857 B）
+
 ## v1.25.6 — 2026-08-29（Skiff 候选 CCC 加 sessionPersistence 兜底，用户实测仍空）
 
 **Scope:** 用户实测——v1.25.5（workspaceRegistry）后「认知容器」下拉**仍空**。根因排查：workspaceRegistry 是可选装配服务（依赖 storageDomain + sessionPersistence），web 环境可能未装配或注册表无记录 → list() 空 → 兜底 live 会话仍空（其它 CCC 无 live 会话）。**加固：加 sessionPersistence 兜底**——必装配的持久化会话服务，`list()` 返回**全部历史会话 headers**（含 cwd），覆盖所有曾工作目录的 CCC，即使无 live 会话。

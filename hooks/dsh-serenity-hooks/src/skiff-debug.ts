@@ -121,7 +121,10 @@ export async function discoverCccs(ctx: Context, defaultRoot: string): Promise<S
 
 /** 问答页 HTML：CCC 切换器 + 角色下拉 + 输入 + 答案区 + 轨迹区（JS 渲染）+ WebUI 链接 */
 export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPort: number): string {
-  const data = JSON.stringify(cccs)
+  // v1.25.7 修复：内嵌 JSON **不能整体 escapeHtml**（&quot; 会让 JSON.parse 失败——用户实测
+  // console 报错 position 2）。只转义 `<` → `\u003c`（JSON 合法转义，JSON.parse 还原；
+  // 防 `</script>` 注入）。data-default 属性值仍走 escapeHtml（HTML 属性语境）。
+  const data = JSON.stringify(cccs).replace(/</g, '\\u003c')
   const webUrl = `http://127.0.0.1:${webPort}`
   return `<!DOCTYPE html>
 <html lang="zh">
@@ -172,7 +175,7 @@ export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPo
   <div id="trajectory"></div>
   <p class="muted"><a href="${webUrl}" target="_blank" rel="noopener">在 dsh WebUI 查看完整会话</a>（会话列表搜索 sessionId；WebUI 有完整交互）</p>
 </main>
-<script id="skiff-data" type="application/json" data-default="${escapeHtml(defaultRoot)}">${escapeHtml(data)}</script>
+<script id="skiff-data" type="application/json" data-default="${escapeHtml(defaultRoot)}">${data}</script>
 <script>
 const CCCS = JSON.parse(document.getElementById('skiff-data').textContent)
 const defaultRoot = document.getElementById('skiff-data').dataset.default
