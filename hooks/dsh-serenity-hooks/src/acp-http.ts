@@ -1,10 +1,14 @@
 /**
- * acp-http.ts — ACP HTTP JSON-RPC 端点（F4c，v1.26.0 实验性）
+ * acp-http.ts — ACP HTTP JSON-RPC + 建议问答页（F4c/F4d，v1.26.x 实验性）
  *
  * node:http 服务（默认关，仅监听 127.0.0.1；启停 = 人工——设置面板「Serenity」
- * 页 ACP 区块开关，不随插件加载自动启动；仿 skiff 调试服务模式）。
+ * 页 ACP 区块开关 / 问答页开关，不随插件加载自动启动；仿 skiff 调试服务模式）。
  *
- * - POST / → JSON-RPC 2.0 单帧/批处理（body 为 JSON）→ JSON-RPC 响应数组
+ * - POST /     → JSON-RPC 2.0 单帧/批处理（acpEnabled 门控；ACP 程序化面）
+ * - GET  /     → 建议问答页 HTML（publicAskEnabled 门控；F4d，S142 用户：
+ *                按认知容器暴露问答页供他人验证——key 认证，无 key 不工作）
+ * - POST /ask  → { key, ccc, role?, question, sessionId? } → key 校验（timing-safe）
+ *                → acp-core 会话 → { answer, answer_html, sessionId, trajectory }
  *
  * 与 skiff 调试页（人工测试面）共享同一会话核心（acp-core → skiff-core）；
  * 企业微信桥（F4c-2）同进程直调 acp-core 处理器函数，不经本端点。
@@ -16,6 +20,12 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import { AcpServer, dispatchRpc } from './acp-core.js'
+import { verifyPublicAskKey, ensurePublicAskKey } from './config-ops.js'
+import { readSkiffRoles } from './skiff-role.js'
+import { discoverCccs, renderSkiffMarkdown } from './skiff-debug.js'
+import { readSimpleSettings } from './settings-section.js'
+import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo } from './skiff-core.js'
+import { readHandymanConfig, findSerenityRoot } from './ccc.js'
 
 /** 运行中的 ACP HTTP 服务（单实例；进程级） */
 let active: { server: ReturnType<typeof createServer>; port: number } | null = null
@@ -43,22 +53,32 @@ function sendJson(res: ServerResponse, status: number, payload: unknown): void {
   res.end(body)
 }
 
+function sendHtml(res: ServerResponse, html: string): void {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+  res.end(html)
+}
+
 /**
- * 启动 ACP HTTP JSON-RPC 端点（单实例；重复启动幂等返回既有实例）。
+ * 启动 ACP HTTP JSON-RPC + 建议问答页服务（单实例；重复启动幂等返回既有实例）。
  * @param ctx 插件上下文（AcpServer 内部经 skiff-core 创建 agent）
  * @param port 监听端口（仅 127.0.0.1）
+ * @param defaultRoot 默认 CCC 根（问答页候选发现兜底；resolveSkiffRoot 传入）
  */
-export async function startAcpHttpServer(ctx: Context, port: number): Promise<void> {
+export async function startAcpHttpServer(ctx: Context, port: number, defaultRoot?: string): Promise<void> {
   if (active) return
   const server = createServer((req, res) => {
-    void handle(ctx, req, res)
+    void handle(ctx, defaultRoot ?? '', req, res)
   })
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject)
     server.listen(port, '127.0.0.1', () => resolve())
   })
   active = { server, port }
-  console.log(`[serenity-hooks] ✓ ACP HTTP JSON-RPC: http://127.0.0.1:${port}（session/new 支持 {ccc, role, sessionId?}）`)
+  const s = readSimpleSettings()
+  const faces: string[] = []
+  if (s.acpEnabled) faces.push('JSON-RPC')
+  if (s.publicAskEnabled) faces.push('问答页(key 认证)')
+  console.log(`[serenity-hooks] ✓ ACP HTTP: http://127.0.0.1:${port}（${faces.join(' + ') || '未开启任何面'}；session/new 支持 {ccc, role, sessionId?}）`)
 }
 
 export function stopAcpHttpServer(): void {
@@ -71,10 +91,17 @@ export function stopAcpHttpServer(): void {
   active = null
 }
 
-async function handle(ctx: Context, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
   try {
     const url = (req.url ?? '/').split('?')[0] ?? '/'
+    const s = readSimpleSettings()
+
+    // ── ACP JSON-RPC（acpEnabled 门控）──
     if (req.method === 'POST' && url === '/') {
+      if (!s.acpEnabled) {
+        sendJson(res, 403, { error: 'ACP JSON-RPC disabled (enable in Serenity settings)' })
+        return
+      }
       let body: unknown
       try {
         body = JSON.parse(await readBody(req)) as unknown
@@ -87,8 +114,190 @@ async function handle(ctx: Context, req: IncomingMessage, res: ServerResponse): 
       sendJson(res, 200, responses)
       return
     }
+
+    // ── 建议问答页（F4d，publicAskEnabled 门控）──
+    if (req.method === 'GET' && url === '/') {
+      if (!s.publicAskEnabled) {
+        sendHtml(res, publicAskDisabledHtml())
+        return
+      }
+      const cccs = await discoverCccs(ctx, defaultRoot || (findSerenityRoot(process.cwd()) ?? ''))
+      const hasKey = readSimpleSettings() && hasPublicAskKey()
+      sendHtml(res, publicAskPage(cccs, hasKey))
+      return
+    }
+    if (req.method === 'POST' && url === '/ask') {
+      if (!s.publicAskEnabled) {
+        sendJson(res, 403, { error: 'public ask disabled (enable in Serenity settings)' })
+        return
+      }
+      let body: { key?: unknown; ccc?: unknown; role?: unknown; question?: unknown; sessionId?: unknown }
+      try {
+        const parsed = JSON.parse(await readBody(req)) as unknown
+        if (parsed === null || typeof parsed !== 'object') throw new Error('not an object')
+        body = parsed as typeof body
+      } catch {
+        sendJson(res, 400, { error: 'invalid JSON body' })
+        return
+      }
+      // key 认证（S142 用户：没有 key 不工作；timing-safe）
+      if (!verifyPublicAskKey(typeof body.key === 'string' ? body.key : undefined)) {
+        sendJson(res, 401, { error: 'invalid or missing key' })
+        return
+      }
+      const ccc = typeof body.ccc === 'string' && body.ccc !== '' ? body.ccc : (defaultRoot || '')
+      const roleName = typeof body.role === 'string' && body.role !== '' ? body.role : undefined
+      const question = typeof body.question === 'string' ? body.question : ''
+      const sessionId = typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : undefined
+      if (!ccc) {
+        sendJson(res, 400, { error: 'ccc required' })
+        return
+      }
+      if (!question.trim()) {
+        sendJson(res, 400, { error: 'empty question' })
+        return
+      }
+      const roles = readSkiffRoles(ccc)
+      // 角色缺省 → 该 CCC 第一个角色（简单问答页不要求用户懂角色）
+      const explicit = roleName ? roles.get(roleName) : undefined
+      const effectiveRole = (roleName && explicit ? roleName : roles.keys().next().value) as string | undefined
+      const effectiveCfg = (roleName && explicit ? explicit : (effectiveRole ? roles.get(effectiveRole) : undefined)) ?? undefined
+      if (!effectiveRole || !effectiveCfg) {
+        sendJson(res, 400, { error: `no skiff role available in ccc: ${ccc}` })
+        return
+      }
+      // 会话延续（复用 v1.25.10 语义）：sessionId 命中 + 绑定校验；缺省新建
+      let agent: Awaited<ReturnType<typeof createSkiffAgent>>['agent'] | undefined
+      let continued = false
+      if (sessionId) {
+        const info = skiffSessionInfo(sessionId)
+        const live = getSkiffAgent(sessionId)
+        if (info && live && info.role === effectiveRole && info.ccc === ccc) {
+          agent = live
+          continued = true
+        }
+        // 不匹配/不可恢复 → 静默新建（问答页对普通用户友好，不暴露 400 细节）
+      }
+      if (!agent) {
+        const hc = readHandymanConfig(ccc)
+        const ref = await createSkiffAgent(ctx, ccc, effectiveRole, effectiveCfg, hc?.defaultModel)
+        agent = ref.agent
+      }
+      const result = await askSkiff(ctx, agent, question, 0)
+      sendJson(res, 200, {
+        answer: result.answer,
+        answer_html: renderSkiffMarkdown(result.answer),
+        sessionId: result.sessionId,
+        continued,
+        trajectory: result.trajectory,
+      })
+      return
+    }
     sendJson(res, 404, { error: 'not found' })
   } catch (err) {
     sendJson(res, 500, { error: (err as Error)?.message ?? String(err) })
   }
+}
+
+function hasPublicAskKey(): boolean {
+  try {
+    return ensurePublicAskKey() !== ''
+  } catch {
+    return false
+  }
+}
+
+/** 问答页未启用提示页 */
+function publicAskDisabledHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>Serenity Public Ask</title></head>
+<body style="font-family:system-ui;padding:48px;text-align:center;color:#57606a">
+<h2>Serenity Public Ask</h2>
+<p>问答页未启用（请在 dsh 设置面板「Serenity」页开启「建议问答」）。</p>
+</body></html>`
+}
+
+/** 建议问答页（F4d）：key 输入 + CCC 选择 + 问题 + 答案（marked 服务端渲染） */
+function publicAskPage(cccs: Array<{ root: string; name: string; roles: string[] }>, _hasKey: boolean): string {
+  const data = JSON.stringify(cccs).replace(/</g, '\\u003c')
+  return `<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Serenity Public Ask</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 24px; background: #f6f7f9; color: #1f2328; }
+  @media (prefers-color-scheme: dark) { body { background: #1a1b1e; color: #e6e6e6; } }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { opacity: .65; font-size: 13px; margin-bottom: 16px; }
+  label { font-size: 13px; font-weight: 600; display: block; margin: 12px 0 4px; }
+  input, select, textarea { width: 100%; box-sizing: border-box; padding: 8px 10px; border-radius: 8px; border: 1px solid #d0d7de; background: #fff; color: inherit; font-size: 14px; }
+  @media (prefers-color-scheme: dark) { input, select, textarea { background: #26282c; border-color: #3a3d42; } }
+  textarea { min-height: 72px; resize: vertical; }
+  button { margin-top: 12px; padding: 9px 18px; border-radius: 8px; border: 0; background: #0ba875; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .55; cursor: wait; }
+  #answer { background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 12px; margin-top: 16px; font-size: 14px; line-height: 1.6; min-height: 48px; word-break: break-word; }
+  @media (prefers-color-scheme: dark) { #answer { background: #26282c; border-color: #3a3d42; } }
+  #answer p { margin: 6px 0; }
+  #answer h1, #answer h2, #answer h3 { margin: 12px 0 6px; font-size: 15px; }
+  #answer code { background: rgba(127,127,127,.14); border-radius: 4px; padding: 1px 5px; font-size: 13px; font-family: ui-monospace, monospace; }
+  #answer pre { background: rgba(127,127,127,.1); border-radius: 8px; padding: 10px 12px; overflow-x: auto; }
+  #answer ul, #answer ol { margin: 6px 0; padding-left: 22px; }
+  .err { color: #cf222e; white-space: pre-wrap; }
+  .muted { opacity: .6; font-size: 13px; }
+  details.think { margin: 8px 0; border: 1px solid rgba(210,153,34,.4); border-radius: 8px; background: rgba(210,153,34,.06); }
+  details.think summary { cursor: pointer; padding: 6px 10px; font-size: 12px; color: #d29922; font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Serenity Public Ask</h1>
+  <div class="sub">认知容器问答验证页 — 选择认知容器后提问（访问需 key）</div>
+  <label for="key">访问 Key</label>
+  <input id="key" type="password" placeholder="请输入访问 key" autocomplete="off">
+  <label for="ccc">认知容器</label>
+  <select id="ccc"></select>
+  <label for="q">问题</label>
+  <textarea id="q" placeholder="向该认知容器提问…"></textarea>
+  <button id="ask">提问</button>
+  <div id="answer" class="muted">等待提问…</div>
+</main>
+<script id="ask-data" type="application/json">${data}</script>
+<script>
+const CCCS = JSON.parse(document.getElementById('ask-data').textContent)
+const keyInput = document.getElementById('key')
+const cccSel = document.getElementById('ccc')
+const btn = document.getElementById('ask')
+const answer = document.getElementById('answer')
+let sessionId = ''
+cccSel.innerHTML = CCCS.map((c) => '<option value="' + c.root + '">' + c.name + (c.roles.length ? ' (' + c.roles.length + ' 角色)' : '') + '</option>').join('') || '<option value="">(未发现认知容器)</option>'
+btn.addEventListener('click', async () => {
+  const ccc = cccSel.value
+  const q = document.getElementById('q').value.trim()
+  const key = keyInput.value.trim()
+  if (!ccc || !q) { answer.className = 'err'; answer.textContent = '请选择认知容器并输入问题'; return }
+  if (!key) { answer.className = 'err'; answer.textContent = '请输入访问 key（没有 key 无法使用）'; return }
+  btn.disabled = true
+  answer.className = 'muted'
+  answer.textContent = '运行中…'
+  try {
+    const res = await fetch('/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key, ccc, question: q, sessionId: sessionId || undefined }) })
+    const data = await res.json()
+    if (!res.ok) { sessionId = ''; throw new Error(data.error || ('HTTP ' + res.status)) }
+    answer.className = ''
+    answer.innerHTML = data.answer_html || data.answer || '（空回答）'
+    sessionId = data.sessionId || ''
+  } catch (err) {
+    answer.className = 'err'
+    answer.textContent = String(err.message || err)
+  } finally {
+    btn.disabled = false
+  }
+})
+</script>
+</body>
+</html>`
 }

@@ -48,6 +48,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       skiffDebugPort: 3099,
       acpEnabled: false,
       acpHttpPort: 3100,
+      publicAskEnabled: false,
     })
   })
 
@@ -68,6 +69,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       skiffDebugPort: 4000,
       acpEnabled: true,
       acpHttpPort: 4100,
+      publicAskEnabled: false,
     })
   })
 

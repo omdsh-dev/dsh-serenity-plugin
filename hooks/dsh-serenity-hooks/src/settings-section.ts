@@ -28,6 +28,8 @@ export interface SimpleConfigFragment {
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
   acp?: { enabled?: boolean; httpPort?: number }
+  /** F4d 建议问答页（实验性）：按认知容器暴露问答页供他人验证（全局开关；与 ACP 共用端口） */
+  publicAsk?: { enabled?: boolean }
 }
 
 /** 简单配置命名空间（dsh 设置面板的 section id / settings.yaml section） */
@@ -54,6 +56,8 @@ export interface SerenitySimpleSettings {
   acpEnabled: boolean
   /** F4c ACP HTTP 端口（默认 3100，仅 127.0.0.1） */
   acpHttpPort: number
+  /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
+  publicAskEnabled: boolean
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -66,6 +70,7 @@ export const simpleSettingsSchema = z.object({
   skiffDebugPort: z.number().min(1024).max(65535).default(3099),
   acpEnabled: z.boolean().default(false),
   acpHttpPort: z.number().min(1024).max(65535).default(3100),
+  publicAskEnabled: z.boolean().default(false),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -79,6 +84,7 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     skiffDebugPort: config.skiff?.debugPort ?? 3099,
     acpEnabled: config.acp?.enabled ?? false,
     acpHttpPort: config.acp?.httpPort ?? 3100,
+    publicAskEnabled: config.publicAsk?.enabled ?? false,
   }
 }
 
@@ -96,6 +102,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     skiffDebugPort: 3099,
     acpEnabled: false,
     acpHttpPort: 3100,
+    publicAskEnabled: false,
   }
 }
 
@@ -105,6 +112,14 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
  */
 export function readSimpleSettings(): SerenitySimpleSettings {
   return simpleSource ? simpleSource() : defaultSimpleSettings()
+}
+
+/**
+ * 测试注入钩子（生产零调用）：替换/恢复运行时源，便于单测各功能门控
+ * （registerSettingsSection 的 setSource 回调在 mock dsh-settings 时不会触发）。
+ */
+export function __setSimpleSourceForTest(source: (() => SerenitySimpleSettings) | null): void {
+  simpleSource = source
 }
 
 /**

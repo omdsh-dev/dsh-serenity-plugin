@@ -75,12 +75,20 @@ export interface PersonaSettings {
   overrideText: string
 }
 
+/** F4d 建议问答页（v1.26.1，S142 用户：按认知容器暴露问答页供他人验证）：
+ * 与 ACP HTTP 共用 3100 端口；key 首次启用自动生成（plugin 全局文件固定），无 key 不工作 */
+export interface PublicAskSettings {
+  /** 访问 key（空 = 未生成；首次启用时 ensurePublicAskKey 自动生成随机 key 写回固定） */
+  key: string
+}
+
 /** 高级设定全量（localstore.json 持久化形态；passHash 含 hash） */
 export interface AdvancedSettings {
   gateway: GatewaySettings
   rebuild: RebuildSettings
   naming: NamingSettings
   persona: PersonaSettings
+  publicAsk: PublicAskSettings
 }
 
 /** 默认值（工厂——每次返回新对象，防止调用方意外共享引用） */
@@ -106,6 +114,9 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     persona: {
       mode: '',
       overrideText: '',
+    },
+    publicAsk: {
+      key: '',
     },
   }
 }
@@ -169,6 +180,7 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
   const rebuild = (o.rebuild ?? {}) as Partial<RebuildSettings>
   const naming = (o.naming ?? {}) as Partial<NamingSettings>
   const persona = (o.persona ?? {}) as Partial<PersonaSettings>
+  const publicAsk = (o.publicAsk ?? {}) as Partial<PublicAskSettings>
   return {
     gateway: {
       enabled: typeof gateway.enabled === 'boolean' ? gateway.enabled : def.gateway.enabled,
@@ -204,6 +216,9 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
     persona: {
       mode: typeof persona.mode === 'string' ? persona.mode : def.persona.mode,
       overrideText: typeof persona.overrideText === 'string' ? persona.overrideText : def.persona.overrideText,
+    },
+    publicAsk: {
+      key: typeof publicAsk.key === 'string' ? publicAsk.key : def.publicAsk.key,
     },
   }
 }
@@ -266,9 +281,38 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
         overrideText: typeof ps.overrideText === 'string' ? ps.overrideText : current.persona.overrideText,
       }
       : current.persona,
+    publicAsk: patch.publicAsk !== undefined
+      ? {
+        key: typeof patch.publicAsk.key === 'string' ? patch.publicAsk.key : current.publicAsk.key,
+      }
+      : current.publicAsk,
   }
   writeAdvancedSettings(next)
   return next
+}
+
+// ── F4d 建议问答页访问 key（v1.26.1，S142 用户：key 随机生成后固定，配置时生成）──
+
+/**
+ * 确保问答页访问 key 存在（首次启用自动生成 + 写回固定，用户拍板"配置时生成"）：
+ * 读取全局配置 publicAsk.key；为空 → 生成 32 字节随机 hex（64 字符）→ 写回持久化。
+ * @returns 当前固定 key（已生成则返回既有值——**幂等**，不会覆盖用户手改的 key）
+ */
+export function ensurePublicAskKey(): string {
+  const current = readAdvancedSettings()
+  if (current.publicAsk.key !== '') return current.publicAsk.key
+  const key = randomBytes(32).toString('hex')
+  updateAdvancedSettings({ publicAsk: { key } })
+  return key
+}
+
+/** 校验问答页访问 key（timing-safe；key 未生成 → 恒 false——没有 key 不工作） */
+export function verifyPublicAskKey(provided: string | undefined): boolean {
+  const expected = readAdvancedSettings().publicAsk.key
+  if (!expected || typeof provided !== 'string' || provided === '') return false
+  const a = Buffer.from(provided)
+  const b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
 }
 
 /**

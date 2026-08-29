@@ -1,3 +1,19 @@
+## v1.26.1 — 2026-08-29（F4d 建议问答页：3100 复用 ACP 端口，key 认证，S142 用户需求）
+
+**Scope:** 用户：「建议问答页面——新开 3100 接口，按认知容器暴露一个建议问答页面供他人验证：① 页面可配置开关（按认知容器开关）② 基本 key 认证——没有 key 不工作；key 随机生成后固定（配置时生成）」。用户拍板：**复用 ACP 的 3100 端口**（GET / 渲染问答页，POST / 处理 JSON-RPC + /ask 处理问答，一个服务两个面）/ **全局开关**（settings 面板 `publicAskEnabled`，非按 CCC 单独开关）/ **key 首次启用自动生成写回**（`~/.dsh/serenity-hooks.json publicAsk.key`，crypto.randomBytes(32) hex 64 字符，幂等不覆盖手改）。
+
+### 变更
+- **`config-ops.ts`**：`AdvancedSettings` +`publicAsk: PublicAskSettings{key}`（merge/update 同步）；**`ensurePublicAskKey()`**（首次生成写回，幂等——二次调用返回同一 key，不覆盖手改）；**`verifyPublicAskKey()`**（timing-safe 比对；key 未生成恒 false）
+- **`settings-section.ts`**：`SerenitySimpleSettings` +`publicAskEnabled`（默认 false）+ schema/entryDefaults/defaultSimpleSettings 同步 + `__setSimpleSourceForTest`（测试注入钩子）
+- **`acp-http.ts`**：`startAcpHttpServer(ctx, port, defaultRoot?)` 三参（默认 CCC 根注入）；handle 路由重构——POST /（JSON-RPC，需 acpEnabled 否则 403）、**GET /（问答页，publicAskEnabled 门控，关闭渲染未启用提示页）**、**POST /ask**（key 校验 timing-safe → 401「invalid or missing key」；ccc 缺省 defaultRoot；角色缺省取该 CCC 第一个；会话延续复用 v1.25.10 语义——sessionId 命中 + role/ccc 绑定校验 → continued:true，不匹配/不可恢复 → 静默新建；返回 answer + answer_html（marked）+ sessionId + continued + trajectory）；`publicAskPage(cccs)`（key 输入 + CCC 下拉 + 问题框 + 答案区，`\u003c` JSON 注入防护）
+- **`index.ts`** `registerAcp`：`anyFace = acpEnabled || publicAskEnabled`——任一面开启即启动服务（传 resolveSkiffRoot(ctx) 为 defaultRoot）
+- **client SettingsSection.tsx**：wire 类型 +`publicAskEnabled`；ACP 组改名「ACP / 建议问答」+ 开关行 + 端口行 disabled 条件放宽
+
+### 测试
+- **acp-core.test +5（F4d describe）**：ensurePublicAskKey 幂等（64 hex + 二次同值）/ verifyPublicAskKey 四态（正确/错误/空/未生成）/ POST /ask 无 key 与错误 key → 401 + 正确 key → 200 答案 + 追问延续 continued:true / 问答页关 → POST /ask 403 / GET / 开启渲染页面
+- **测试修复（首跑 3 处）**：① acp-core.test 补 `vi.mock('@deepseek-ai/schemastery')` + `vi.mock('@deepseek-ai/dsh-settings')`（F4d 使 acp-http.ts → settings-section.ts 进依赖链，settings-section.test.ts 同款模式）② settings-section.test 两处 toEqual 补 `publicAskEnabled: false`（entryDefaults 新增字段断言未同步）③ acp-core.test `httpPost(port, '/ask', {...})` 参数顺序颠倒（path 当 body → ERR_UNESCAPED_CHARACTERS）5 处修正 + **fakeCtx sessionId 真实化**（硬编码 `skiff-qa-uuid` → 尊重传入 opts.sessionId；注册表 key 与 askSkiff 返回值不一致 → 追问延续查不到 → continued:false 根因修复）
+- **47 files / 595 tests 全绿**（+5）；typecheck ✓（node + client）→ build ✓（136867 B，含问答页区块）
+
 ## v1.26.0 — 2026-08-29（F4c ACP server：指定 CCC+角色+会话 程序化对话，S142 用户需求）
 
 **Scope:** 用户：Skiff 提供 **ACP 能力**——指定 **认知容器 + 角色 + 会话（可选）** 进行对话（程序化/机器人调用），以企业微信机器人为对接例子（初版方案 `docs/acp-wecom-design.md` 用户审核定稿：先支持个人后群聊 / 管理员可测 / 公网走 cloudflare tunnel）。**实现修正（R↓）**：官方 dsh-acp（--profile acp）不绑定 skiff 角色机制 → **自研进 dsp 复用 skiff 核心**；dsp 是 dsh web 进程内插件，**stdio server 需独占进程 stdout（污染主进程日志）→ 首版 HTTP JSON-RPC 端点**（协议处理器传输无关，企业微信桥同进程直调；stdio 独立进程部署留待后续，复用同一 acp-core）。

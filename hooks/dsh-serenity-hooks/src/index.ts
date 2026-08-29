@@ -245,23 +245,26 @@ function readWebPort(ctx: Context): number {
 }
 
 /**
- * F4c ACP HTTP JSON-RPC 端点装配（v1.26.0 实验性）：启停 = 人工（设置面板
- * 「Serenity」页 ACP 区块开关，settings 持久化）。会话创建/延续走 acp-core →
- * skiff-core（与调试页同核心）；仅监听 127.0.0.1；未开启零资源占用。
+ * F4c ACP HTTP + F4d 建议问答页装配（v1.26.x 实验性）：启停 = 人工（设置面板
+ * 「Serenity」页 ACP / 问答页开关，settings 持久化）。任一面开启即启动服务
+ * （同一端口：POST / = JSON-RPC 需 acpEnabled；GET / + /ask = 问答页需 publicAskEnabled）。
+ * 会话创建/延续走 acp-core → skiff-core；仅监听 127.0.0.1；未开启零资源占用。
  */
 function registerAcp(ctx: Context): void {
   let started = false
   const sync = (): void => {
     const s = readSimpleSettings()
-    if (s.acpEnabled && !started) {
-      startAcpHttpServer(ctx, s.acpHttpPort)
+    const anyFace = s.acpEnabled || s.publicAskEnabled
+    if (anyFace && !started) {
+      const root = resolveSkiffRoot(ctx)
+      startAcpHttpServer(ctx, s.acpHttpPort, root ?? undefined)
         .then(() => {
           started = true
         })
         .catch((err) => {
-          console.error(`[serenity-hooks] ✗ ACP HTTP 端点启动失败: ${String((err as Error)?.message ?? err)}`)
+          console.error(`[serenity-hooks] ✗ ACP HTTP 服务启动失败: ${String((err as Error)?.message ?? err)}`)
         })
-    } else if (!s.acpEnabled && started) {
+    } else if (!anyFace && started) {
       stopAcpHttpServer()
       started = false
     }
@@ -271,6 +274,6 @@ function registerAcp(ctx: Context): void {
   } catch {
     /* 事件通道缺失不阻断（启动时 sync 仍执行） */
   }
-  // 启动时同步一次（settings.yaml 持久化 acpEnabled=true → 重启后自动恢复）
+  // 启动时同步一次（settings.yaml 持久化 acpEnabled/publicAskEnabled=true → 重启后自动恢复）
   sync()
 }

@@ -38,6 +38,8 @@ export interface SerenitySimpleWire {
   /** F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点启停 + 端口 */
   acpEnabled?: boolean
   acpHttpPort?: number
+  /** F4d 建议问答页（v1.26.1 实验性）：按认知容器暴露问答页供他人验证（key 认证） */
+  publicAskEnabled?: boolean
 }
 
 /** 本 section 的注入面（apply 闭包提供 settingsScope） */
@@ -146,6 +148,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const skiffPort = value?.skiffDebugPort ?? 3099
   const acpOn = value?.acpEnabled ?? false
   const acpPort = value?.acpHttpPort ?? 3100
+  const publicAskOn = value?.publicAskEnabled ?? false
 
   return (
     <div className="ss-section">
@@ -234,8 +237,8 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
       </Group>
 
-      {/* F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点（人工启停） */}
-      <Group title="ACP">
+      {/* F4c ACP + F4d 建议问答页（v1.26.x 实验性）：HTTP JSON-RPC + 问答页（人工启停） */}
+      <Group title="ACP / 建议问答">
         <li>
           <RowCard
             title="ACP JSON-RPC 端点"
@@ -245,8 +248,15 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
         <li>
           <RowCard
+            title="建议问答页"
+            desc="按认知容器暴露问答页供他人验证（需 key；首次开启自动生成固定 key，见 ~/.dsh/serenity-hooks.json）"
+            control={<Toggle checked={publicAskOn} onChange={(on) => toggle('publicAskEnabled', on)} />}
+          />
+        </li>
+        <li>
+          <RowCard
             title="HTTP 端口"
-            desc="ACP JSON-RPC 端口（1024 ~ 65535，默认 3100）"
+            desc="ACP JSON-RPC + 问答页共用端口（1024 ~ 65535，默认 3100）"
             control={
               <div className="ss-threshold">
                 <input
@@ -255,7 +265,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                   min={1024}
                   max={65535}
                   value={acpPort}
-                  disabled={!acpOn}
+                  disabled={!acpOn && !publicAskOn}
                   onChange={(e) => setAcpPort(Number(e.target.value))}
                 />
               </div>
