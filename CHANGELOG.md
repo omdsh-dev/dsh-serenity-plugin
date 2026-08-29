@@ -1,3 +1,22 @@
+## v1.26.4 — 2026-08-29（public 口聊天体验升级：完整对话 UI + think 不渲染 + 连续对话，S142 用户需求）
+
+**Scope:** 用户：public 口的会话体验要更好，目前很简陋，**参考好的案例强化**；回答中 **markdown 渲染器对 `<think>` 标签不渲染**；**要有对话记录**（不需要存储，就是用于连续对话用户看看用的）；**最终这个渠道是用于对接各类 IM 的**，只不过先做个好的体验让用户感受。
+
+### 变更
+- **`skiff-debug.ts` `renderSkiffMarkdown(raw, hideThink = false)`**：新增可选参数——`hideThink=true` 时 `<think>` 内容**直接移除不渲染**（public 口：思考过程对普通用户不展示）；默认 false（skiff 调试页保持 🧠 折叠卡）
+- **`acp-http.ts` `publicAskContainerPage` 重写为聊天 UI（v1.26.4 体验升级，参考 ChatGPT/Claude 会话形态）**：
+  - **顶部 header**：返回容器链接 + 容器名 + 角色下拉（保持 v1.26.2 角色选择）+ **「新对话」按钮**（清空当前会话）
+  - **消息流**（msgList）：用户/助手气泡（用户右侧绿色、助手左侧白底），markdown 渲染（answer_html），**打字指示器**（三点 blink），错误气泡（⚠️ 前缀）
+  - **连续对话记录**：前端内存数组（不存储，刷新即失——用户明确"不需要存储，就是用于连续对话用户看看用的"）；sessionId 延续服务端会话（追问上下文保留）
+  - **底部输入区**：key 输入（localStorage 自动记忆 + 记住后隐藏 key 行）+ 自适应 textarea（**Enter 发送 / Shift+Enter 换行**）+ 发送按钮
+  - **初始欢迎消息**（textContent 防注入）
+- **`acp-http.ts` `handleAskParsed`**：`renderSkiffMarkdown(result.answer, true)`——public 口 answer_html 不含 think
+
+### 测试
+- **skiff-debug.test +1**：hideThink=true → `<think>` 内容完全不渲染（无 details.think/无思考文本），正文保留
+- **acp-core.test 适配**：GET /c/<name> 断言聊天 UI 新结构（msgList/chatInput/新对话按钮）
+- **48 files / 623 tests 全绿**（+1）；typecheck ✓（node + client）→ build ✓（147762 B）
+
 ## v1.26.3 — 2026-08-29（敏感数据保护：localstore 数据面守卫 + 最终输出守卫打回重生成，S142 用户需求）
 
 **Scope:** 用户关切：认知容器对外提供认知结果时，**支撑宁静号的凭据与机制不应透露**（提示词纪律是软约束，仍有意外可能）。调研（`docs/sensitive-data-protection-research.md`：wardn "structural guarantee, not policy" / Docker redact_secrets / dsh-guardian / liteLLM+Presidio / redteams.ai 共识——没有万无一失的提示词防线，重心 = 最小化敏感信息进上下文 + 机械后处理兜底）。**用户拍板方案**：不做工具结果 redaction（代价高 + 面向错——工具结果是模型工作内存），**改卡最终输出——敏感词表检测 + 打回重生成**；词表 = 凭据词 + 机制词 + **msm_list 工具名**（"这样比较全面了"）。

@@ -403,10 +403,14 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
         req.end()
       })
       expect(res.status).toBe(200)
+      // v1.26.4 聊天 UI：消息流 + 输入区 + 新对话按钮（key 输入仍在）
       expect(res.body).toContain('访问 Key')
-      expect(res.body).toContain('问答角色')
+      expect(res.body).toContain('msgList')
+      expect(res.body).toContain('chatInput')
+      expect(res.body).toContain('新对话')
       expect(res.body).toContain('qa') // 角色下拉选项
       expect(res.body).toContain('serenity-public-ask-key') // localStorage key
+      // public 口 think 不渲染：POST /ask 返回 answer_html 不含 think 折叠
     } finally {
       stopAcpHttpServer()
     }

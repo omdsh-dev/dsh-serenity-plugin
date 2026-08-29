@@ -305,9 +305,11 @@ function escapeHtml(s: string): string {
  * ① 提取 `<think>…</think>` 块（占位符 \u0000T<idx>\u0000）
  * ② 正文与 think 内容**先 escapeHtml 再 marked.parse**（GFM + breaks）——markdown 语法不受
  *    转义影响，原始 HTML 注入被消除（安全）；代码块内 `<` 显示为实体（可接受）
- * ③ think 占位符还原为 `<details class="think">` 折叠卡（🧠 思考过程，默认收起）
+ * ③ think 占位符：默认还原为 `<details class="think">` 折叠卡（🧠 思考过程，默认收起）；
+ *    **hideThink=true（v1.26.4，public 口）→ 直接移除**（思考过程对普通用户不展示）
+ * @param hideThink 为 true 时 `<think>` 内容完全不渲染（public 问答页体验）
  */
-export function renderSkiffMarkdown(raw: string): string {
+export function renderSkiffMarkdown(raw: string, hideThink = false): string {
   const thinks: string[] = []
   const body = raw.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, inner: string) => {
     const idx = thinks.length
@@ -317,6 +319,7 @@ export function renderSkiffMarkdown(raw: string): string {
   const parsed = marked.parse(escapeHtml(body), { breaks: true, gfm: true })
   const html = typeof parsed === 'string' ? parsed : ''
   return html.replace(/\u0000T(\d+)\u0000/g, (_m, idx: string) => {
+    if (hideThink) return '' // v1.26.4：public 口不渲染思考过程
     const inner = thinks[Number(idx)] ?? ''
     const innerHtml = inner === '' ? '' : marked.parse(escapeHtml(inner), { breaks: true, gfm: true })
     return `<details class="think"><summary>🧠 思考过程</summary><div class="think-body">${typeof innerHtml === 'string' ? innerHtml : ''}</div></details>`

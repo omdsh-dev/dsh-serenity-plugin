@@ -369,6 +369,15 @@ describe('skiff-debug: renderSkiffMarkdown 服务端渲染（v1.25.9 marked）',
     expect(html).not.toContain('<think>')
   })
 
+  it('hideThink=true（v1.26.4 public 口）→ <think> 内容完全不渲染，正文保留', () => {
+    const html = renderSkiffMarkdown('答案正文\n\n<think>我先分析再回答</think>\n\n后续内容', true)
+    expect(html).not.toContain('<details class="think">')
+    expect(html).not.toContain('我先分析再回答') // 思考过程对普通用户不展示
+    expect(html).toContain('答案正文')
+    expect(html).toContain('后续内容')
+    expect(html).not.toContain('<think>')
+  })
+
   it('原始 HTML 注入被转义（escapeHtml 前置，安全）', () => {
     const html = renderSkiffMarkdown('正常内容 <script>alert(1)</script>')
     expect(html).not.toContain('<script>')
