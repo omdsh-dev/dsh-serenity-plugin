@@ -12,6 +12,9 @@ import { join } from 'node:path'
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
+vi.mock('@deepseek-ai/dsh-tools', () => ({
+  defineTool: (o: unknown) => o,
+}))
 vi.mock('../src/session-ops.js', () => ({
   sessionsRoot: (root: string) => join(root, 'AGENT_SESSIONS'),
   findSession: vi.fn(),
@@ -19,6 +22,7 @@ vi.mock('../src/session-ops.js', () => ({
 }))
 
 import { findSession, findLatestActiveSessionMd } from '../src/session-ops.js'
+import { findExpScript } from '../src/tools/autotrajectory-exp.js'
 import {
   DEFAULT_BIAS_PROVIDER,
   AUTO_DIR_SUFFIX,
@@ -39,6 +43,38 @@ const mockFindLatest = vi.mocked(findLatestActiveSessionMd)
 function beijingUtcMs(hour: number, minute = 0): number {
   return Date.UTC(2026, 7, 30, hour - 8, minute, 0)
 }
+
+describe('findExpScript（包内实验脚本定位——bundle lib/ 与源码 src/ 两种布局）', () => {
+  let tmp: string
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'at-exp-'))
+  })
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('从 lib/index.js 一层上溯（bundle 布局）→ 找到包根 experiments', () => {
+    const pkg = join(tmp, 'pkg')
+    mkdirSync(join(pkg, 'lib'), { recursive: true })
+    const script = join(pkg, 'experiments', 'autotrajectory', 'scripts', 'autotrajectory-exp.ts')
+    mkdirSync(join(pkg, 'experiments', 'autotrajectory', 'scripts'), { recursive: true })
+    writeFileSync(script, '// exp\n')
+    expect(findExpScript(join(pkg, 'lib'))).toBe(script)
+  })
+
+  it('从 src/tools 两层上溯（源码/测试布局）→ 找到包根 experiments', () => {
+    const pkg = join(tmp, 'pkg2')
+    mkdirSync(join(pkg, 'src', 'tools'), { recursive: true })
+    const script = join(pkg, 'experiments', 'autotrajectory', 'scripts', 'autotrajectory-exp.ts')
+    mkdirSync(join(pkg, 'experiments', 'autotrajectory', 'scripts'), { recursive: true })
+    writeFileSync(script, '// exp\n')
+    expect(findExpScript(join(pkg, 'src', 'tools'))).toBe(script)
+  })
+
+  it('找不到 → null', () => {
+    expect(findExpScript(tmp)).toBeNull()
+  })
+})
 
 describe('beijingHour / inAllowedWakeWindow（用量峰谷省钱）', () => {
   it('北京时间 = UTC+8（服务器时区无关）', () => {

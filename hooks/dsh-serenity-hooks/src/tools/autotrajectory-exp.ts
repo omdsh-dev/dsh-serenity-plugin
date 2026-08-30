@@ -12,21 +12,30 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { spawnSync } from 'node:child_process'
-import { dirname, resolve } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 
-/** 包内实验脚本（lib/tools/ → ../../experiments/...；npm files 分发） */
-const EXP_SCRIPT = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  '..',
-  '..',
-  'experiments',
-  'autotrajectory',
-  'scripts',
-  'autotrajectory-exp.ts',
-)
+/**
+ * 定位包内实验脚本（npm files 分发 experiments/autotrajectory/）。
+ * 布局差异：tsdown bundle 后 import.meta.url 指向 lib/index.js（lib → 包根 1 层）；
+ * vitest 源码直跑时指向 src/tools/x.ts（src/tools → 包根 2 层）——逐级上溯查找，
+ * 两种布局都稳（找到 experiments/autotrajectory/scripts/autotrajectory-exp.ts 即止）。
+ */
+export function findExpScript(startDir: string): string | null {
+  let cur = startDir
+  while (true) {
+    const cand = join(cur, 'experiments', 'autotrajectory', 'scripts', 'autotrajectory-exp.ts')
+    if (existsSync(cand)) return cand
+    const parent = dirname(cur)
+    if (parent === cur) return null
+    cur = parent
+  }
+}
+
+/** 包内实验脚本（上溯查找；找不到 → execute 报错提示包完整性） */
+const EXP_SCRIPT = findExpScript(dirname(fileURLToPath(import.meta.url)))
 
 export const AUTO_TRAJECTORY_EXP_ACTIONS = ['all', 'init', 'random', 'doc', 'check', 'status', 'guide'] as const
 
@@ -53,13 +62,18 @@ export const autoTrajectoryExpTool = defineTool({
   async execute(args, exec) {
     const root = findSerenityRoot(agentCwd(exec))
     const result: Record<string, string> = {}
-    if (!existsSync(EXP_SCRIPT)) {
-      result.error = `autotrajectory-exp 脚本缺失（${EXP_SCRIPT}）——实验包未随安装分发，请检查 npm 包完整性`
+    if (!EXP_SCRIPT) {
+      result.error = 'autotrajectory-exp 实验脚本未随安装分发（npm 包缺 experiments/autotrajectory/）——请检查包完整性'
+      return result
+    }
+    const script = EXP_SCRIPT
+    if (!existsSync(script)) {
+      result.error = `autotrajectory-exp 脚本缺失（${script}）——实验包未随安装分发，请检查 npm 包完整性`
       return result
     }
     const env: NodeJS.ProcessEnv = { ...process.env }
     if (root) env.SERENITY_ROOT = root
-    const r = spawnSync('bun', [EXP_SCRIPT, args.action ?? 'all'], {
+    const r = spawnSync('bun', [script, args.action ?? 'all'], {
       encoding: 'utf-8',
       timeout: 600_000,
       env,

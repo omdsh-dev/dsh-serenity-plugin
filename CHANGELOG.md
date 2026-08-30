@@ -1,3 +1,15 @@
+## v1.26.13 — 2026-08-30（autotrajectory-exp 实验脚本定位修复，本机安装实测）
+
+**Scope:** 本机安装 v1.26.12 后调用 `autotrajectory-exp` 报"脚本缺失（.../@shgroup/experiments/...）"——**根因：tsdown bundle 后 `import.meta.url` 指向 `lib/index.js`，工具里 `'..','..'` 越过包根**（resolve 到 `@shgroup/` 而非 `@shgroup/dsh-serenity-hooks`），实验脚本路径算错。
+
+### 变更
+- **`src/tools/autotrajectory-exp.ts` 路径解析修复（v1.26.13）**：弃固定 `'..','..'` 相对解析，改 **`findExpScript` 逐级上溯查找**（从 `import.meta.url` 目录向上直到找到 `experiments/autotrajectory/scripts/autotrajectory-exp.ts`）——bundle 布局（lib/index.js → 包根 1 层）与源码/测试布局（src/tools → 包根 2 层）都稳；找不到 → 明确报错提示包完整性
+- execute 增加 EXP_SCRIPT 空值/缺失双重校验（`!EXP_SCRIPT` / `!existsSync` 分别提示）
+
+### 测试
+- **autotrajectory.test +3**：findExpScript——bundle 布局（lib 一层上溯）/ 源码布局（src/tools 两层上溯）/ 找不到 null
+- **51 files / 669 tests 全绿**；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.12 — 2026-08-30（自主轨迹实验机制：autotrajectory，S142 用户猜想落地）
 
 **Scope:** 用户提出 AGI 猜想（serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`）：Trajectory 是主体，人类 waiting 拖慢轨迹——设计"无人等待的 trajectory"（时钟自动唤起 + 先验偏见 + 人类=反馈源）加速运转。本版在 dsp 实现实验机制（默认关）+ 一站式实验管理工具（第 13 工具）。**实验是 CCC 的自选动作——dsp 只提供工具与知识，不向 CCC 自动安装任何东西**（实验可能失败，不污染 CCC）。
