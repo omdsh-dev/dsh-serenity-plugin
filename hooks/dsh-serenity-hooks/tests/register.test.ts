@@ -79,10 +79,10 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(typeof apply).toBe('function')
   })
 
-  it('apply 注册 12 个真实工具（v1.25.0 + skiff_admin）', () => {
+  it('apply 注册 13 个真实工具（v1.25.0 + skiff_admin + autotrajectory-exp）', () => {
     const { ctx, register } = mockCtx()
     apply(ctx, FULL_CONFIG)
-    expect(register).toHaveBeenCalledTimes(12)
+    expect(register).toHaveBeenCalledTimes(13)
     const names = register.mock.calls.map((c) => (c[0] as { name: string }).name)
     expect(names).toContain('cc_fs')
     expect(names).toContain('session')
@@ -96,6 +96,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('session_rebuild')
     expect(names).toContain('localstore')
     expect(names).toContain('skiff_admin')
+    expect(names).toContain('autotrajectory-exp')
   })
 
   it('apply 订阅拦截缝：tools/pre-execute + guard', () => {

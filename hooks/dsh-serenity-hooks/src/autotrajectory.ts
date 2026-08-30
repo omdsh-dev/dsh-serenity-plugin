@@ -27,7 +27,7 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutoTrajectorySettings } from './ccc.js'
-import { findSession, findLatestActiveSessionMd, sessionsRoot } from './session-ops.js'
+import { findSession, sessionsRoot } from './session-ops.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -70,16 +70,17 @@ export function isAutoTrajectorySession(mdPath: string): boolean {
   return basename(dirname(mdPath)).endsWith(AUTO_DIR_SUFFIX)
 }
 
-/** 目标会话定位：cfg.session（S###/目录名）优先，缺省最近活跃；无 → null */
+/**
+ * 目标会话定位：**必须配置 cfg.session**（S###/目录名）——CCC 日常有多条 trajectory 在跑，
+ * 绝不默认唤起（缺省最近活跃会误伤其他正在运行的轨迹；用户拍板：必须配置才生效）。
+ * 未配置 session 或未命中 → null（不唤起）。
+ */
 export function resolveTargetMd(root: string, cfg: AutoTrajectorySettings): string | null {
-  if (cfg?.session) {
-    const found = findSession(sessionsRoot(root), cfg.session)
-    if (found) {
-      const md = join(found.path, 'SESSION.md')
-      if (existsSync(md)) return md
-    }
-  }
-  return findLatestActiveSessionMd(root)
+  if (!cfg?.session) return null
+  const found = findSession(sessionsRoot(root), cfg.session)
+  if (!found) return null
+  const md = join(found.path, 'SESSION.md')
+  return existsSync(md) ? md : null
 }
 
 /**

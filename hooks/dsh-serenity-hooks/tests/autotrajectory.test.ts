@@ -75,13 +75,13 @@ describe('isAutoTrajectorySession（目录后缀标志）', () => {
   })
 })
 
-describe('resolveTargetMd（目标定位）', () => {
+describe('resolveTargetMd（目标定位——session 必填，不默认任何会话）', () => {
   beforeEach(() => {
     mockFindSession.mockReset()
     mockFindLatest.mockReset()
   })
 
-  it('cfg.session 优先（findSession 命中）', () => {
+  it('配置 session 命中 → 返回该 SESSION.md', () => {
     const realDir = mkdtempSync(join(tmpdir(), 'at-find-'))
     const realMd = join(realDir, 'SESSION.md')
     writeFileSync(realMd, '# SESSION: exp\n')
@@ -92,15 +92,15 @@ describe('resolveTargetMd（目标定位）', () => {
     rmSync(realDir, { recursive: true, force: true })
   })
 
-  it('cfg.session 未命中 → 回退最近活跃', () => {
-    mockFindSession.mockReturnValue(null)
-    mockFindLatest.mockReturnValue('/root/AGENT_SESSIONS/2026-08-30--S143--exp--auto/SESSION.md')
-    expect(resolveTargetMd('/root', { session: 'S143' })).toBe('/root/AGENT_SESSIONS/2026-08-30--S143--exp--auto/SESSION.md')
+  it('未配置 session → null（绝不默认最近活跃——CCC 日常多轨迹并行）', () => {
+    expect(resolveTargetMd('/root', {})).toBeNull()
+    expect(resolveTargetMd('/root', { enabled: true })).toBeNull()
+    expect(mockFindLatest).not.toHaveBeenCalled()
   })
 
-  it('无 session 配置 → 直接最近活跃', () => {
-    mockFindLatest.mockReturnValue('/root/AGENT_SESSIONS/2026-08-30--S143--exp--auto/SESSION.md')
-    expect(resolveTargetMd('/root', {})).toBe('/root/AGENT_SESSIONS/2026-08-30--S143--exp--auto/SESSION.md')
+  it('配置 session 未命中 → null（不唤起）', () => {
+    mockFindSession.mockReturnValue(null)
+    expect(resolveTargetMd('/root', { session: 'S999' })).toBeNull()
   })
 })
 

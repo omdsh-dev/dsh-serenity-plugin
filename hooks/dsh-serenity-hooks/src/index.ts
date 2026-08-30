@@ -26,6 +26,7 @@ import { createSessionTool } from './tools/session.js'
 import { createRebuildTool } from './tools/rebuild.js'
 import { localstoreTool } from './tools/localstore.js'
 import { skiffAdminTool } from './tools/skiff-admin.js'
+import { autoTrajectoryExpTool } from './tools/autotrajectory-exp.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
 import { registerKeeper } from './seams/keeper.js'
@@ -121,6 +122,8 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(createRebuildTool(ctx))
     ctx.tools.register(localstoreTool)
     ctx.tools.register(skiffAdminTool)
+    // 自主轨迹实验一站式管理（v1.26.12 实验提案，默认关；只提供工具与知识，不自动安装任何东西）
+    ctx.tools.register(autoTrajectoryExpTool)
   }
   if (config.guards) {
     registerGuards(ctx, { configPaths: config.serenityConfigPaths })

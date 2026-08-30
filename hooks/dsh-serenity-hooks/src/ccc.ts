@@ -120,7 +120,8 @@ export interface SerenityConfig {
  * - 偏见内容提供者 = CCC 根目录下脚本（biasProvider，缺省 autotrajectory-bias.ts）——
  *   tool 直接运行取 stdout 作为偏见内容；脚本缺失 → 报错要求实现（不再经 mech-registry 注册 MSM）
  * - 会话标志 = 目录名后缀 `--auto`（验证用方便）：AGENT_SESSIONS/<date>--<desc>--auto/
- * - 唤起窗口避开北京时间 8~18 点（用量峰谷省钱——用户拍板）
+ * - **session 必填**（用户拍板：自动唤起不默认任何会话——CCC 日常有多条 trajectory 在跑，
+ *   未配置明确目标绝不唤起）；唤起窗口避开北京时间 8~18 点（用量峰谷省钱——用户拍板）
  */
 export interface AutoTrajectorySettings {
   /** 总开关（缺省 false——默认关，未开零资源占用） */
@@ -129,7 +130,7 @@ export interface AutoTrajectorySettings {
   intervalHours?: number;
   /** 偏见内容提供者脚本（相对 CCC 根；缺省 autotrajectory-bias.ts——缺失报错要求实现） */
   biasProvider?: string;
-  /** 可选：固定目标会话（S### / 目录名）；缺省 = 最近活跃会话 */
+  /** **必填**：目标会话（S### / 目录名）——未配置绝不唤起（CCC 日常多轨迹并行，不默认） */
   session?: string;
   /** 避开唤起的高峰时段（北京时间，[start, end) 内不唤起；缺省 {8, 18}——用量峰谷省钱） */
   avoidWakeHours?: { start?: number; end?: number };

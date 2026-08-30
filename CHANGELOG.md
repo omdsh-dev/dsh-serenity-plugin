@@ -1,3 +1,19 @@
+## v1.26.12 — 2026-08-30（自主轨迹实验机制：autotrajectory，S142 用户猜想落地）
+
+**Scope:** 用户提出 AGI 猜想（serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`）：Trajectory 是主体，人类 waiting 拖慢轨迹——设计"无人等待的 trajectory"（时钟自动唤起 + 先验偏见 + 人类=反馈源）加速运转。本版在 dsp 实现实验机制（默认关）+ 一站式实验管理工具（第 13 工具）。**实验是 CCC 的自选动作——dsp 只提供工具与知识，不向 CCC 自动安装任何东西**（实验可能失败，不污染 CCC）。
+
+### 变更
+- **`src/autotrajectory.ts`（新，机制）**：CCC 配置驱动（`.opencode/serenity.json autotrajectory` 段，默认关零资源占用）——时钟驱动自动唤起（每 10min tick）+ **前台运行**（`ctx.agents.get` + `agent.steer` 注入活跃会话，复用 v1.22.5 自动继续通道；用户全程可见、随时可介入）+ 先验偏见注入（自生=SESSION.md「下一轮动机」段 / 偏见内容=biasProvider 脚本 stdout）+ 会话标志=目录名后缀 `--auto`（`AGENT_SESSIONS/<date>--<desc>--auto/`）+ **session 必填**（用户拍板：自动唤起不默认任何会话——CCC 日常多轨迹并行，未配置明确目标绝不唤起）+ **唤起窗口避开北京时间 8~18 点**（用户拍板：用量峰谷省钱；avoidWakeHours 可覆盖）+ 防重入
+- **偏见内容提供者（biasProvider）**：用户拍板命名（"它就是偏见内容提供者"）——CCC 根目录下脚本（缺省 `autotrajectory-bias.ts`），tool 直接运行取 stdout；**脚本缺失 → 唤起中止 + 报错要求实现**（不再经 mech-registry 注册 MSM）
+- **`src/tools/autotrajectory-exp.ts`（新，第 13 工具）**：一站式实验管理——无参/action=all 全报告（背景摘要 + 就绪检查 + 状态 + 下一步）/ init 初始化辅助（写配置 + 生成偏见脚本模板）/ random 验证偏见内容 / doc / check / status / guide；exec 包内静态脚本（npm files 含 `experiments/autotrajectory/`），注入 SERENITY_ROOT
+- **实验包随 npm 分发**：`experiments/autotrajectory/SKILL.md`（参与 skill，CCC 加载即懂实验）+ `scripts/autotrajectory-exp.ts`（工具执行脚本；specs 仓同源）——装新版 dsp 即就绪，CCC 自己决定是否参与
+- **`ccc.ts`**：`SerenityConfig.autotrajectory?`（AutoTrajectorySettings：enabled/intervalHours/biasProvider/session/avoidWakeHours，纯类型扩展）
+- **`index.ts`**：工具注册 +1（13 工具）；**零影响**：不修改任何现有工具/seams/外部面
+
+### 测试
+- **autotrajectory.test.ts（新，18 tests）**：北京时间/唤起窗口（用量峰谷）/ `--auto` 后缀标志 / session 必填定位 / 唤起条件全链（mtime 边界/窗口/防重入）/ 自生动机读取 / biasProvider 脚本运行（缺失报错/路径逃逸/执行失败）/ 唤起消息三段式
+- register.test 工具数 12→13；**51 files / 666 tests 全绿**；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.11 — 2026-08-29（打回消息语义化：命中词分类 + 规避指引，S142 用户实测）
 
 **Scope:** 用户实测 v1.26.10 打回消息（"contained 1 sensitive internal term(s)...: 3080"）仍不满意——**裸词 "3080" 是端口号，模型不知道它是什么、为什么敏感、怎么规避**（用户："还是没告诉LLM 具体哪个词应该规避啊"）。改方案：**命中词分类 + 按类给规避指引**——模型不仅看到词，还知道"这是内部服务端口，不要提及内部端口/地址/端点"。

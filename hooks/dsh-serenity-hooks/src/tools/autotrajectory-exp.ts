@@ -1,0 +1,79 @@
+/**
+ * autotrajectory-exp.ts — 自主轨迹实验一站式管理工具（v1.26.12 实验提案，默认关）
+ *
+ * 定位：dsp **只提供工具与知识**，不向 CCC 自动安装任何东西（实验可能失败，不污染 CCC）——
+ * 实验是 CCC 的自选动作：agent 调本工具（doc/全报告）即懂实验，init/random/check 辅助，
+ * 实际执行（写配置/写偏见脚本/标记会话）由 CCC 自己决定、自己用现有工具完成。
+ *
+ * 实现：薄封装——exec 包内静态脚本（npm files 含 experiments/），脚本是单一真相源。
+ * 环境注入 SERENITY_ROOT（当前 CCC 根）供脚本定位；bun 优先（可直跑 TS）。
+ */
+
+import { defineTool } from '@deepseek-ai/dsh-tools'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { spawnSync } from 'node:child_process'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { existsSync } from 'node:fs'
+import { findSerenityRoot } from '../ccc.js'
+
+/** 包内实验脚本（lib/tools/ → ../../experiments/...；npm files 分发） */
+const EXP_SCRIPT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'experiments',
+  'autotrajectory',
+  'scripts',
+  'autotrajectory-exp.ts',
+)
+
+export const AUTO_TRAJECTORY_EXP_ACTIONS = ['all', 'init', 'random', 'doc', 'check', 'status', 'guide'] as const
+
+function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
+  return exec.agent?.session?.header?.cwd ?? process.cwd()
+}
+
+function renderText(value: unknown): ContentBlock[] {
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
+  return [{ type: 'text', text }]
+}
+
+export const autoTrajectoryExpTool = defineTool({
+  name: 'autotrajectory-exp',
+  description:
+    '自主轨迹实验（Self-Sustaining Trajectory）一站式管理——实验提案 v1.26.12，默认关。无参/action=all：全报告（背景摘要 + 就绪检查 + 状态 + 下一步）——CCC agent 看一次即完整理解实验并知道怎么开始；init：初始化辅助（写配置 + 生成偏见提供者脚本模板）；random：运行偏见提供者脚本输出当前偏见内容；doc：实验定义全文；check/status/guide：单项。实验是 CCC 的自选动作——dsp 只提供工具与知识，不自动安装任何东西。',
+  parameters: {
+    action: { type: 'string', enum: [...AUTO_TRAJECTORY_EXP_ACTIONS], required: true, description: 'Subcommand' },
+  },
+  output: {
+    schema: { type: 'json' },
+    render: (_args, value) => renderText(value),
+  },
+  async execute(args, exec) {
+    const root = findSerenityRoot(agentCwd(exec))
+    const result: Record<string, string> = {}
+    if (!existsSync(EXP_SCRIPT)) {
+      result.error = `autotrajectory-exp 脚本缺失（${EXP_SCRIPT}）——实验包未随安装分发，请检查 npm 包完整性`
+      return result
+    }
+    const env: NodeJS.ProcessEnv = { ...process.env }
+    if (root) env.SERENITY_ROOT = root
+    const r = spawnSync('bun', [EXP_SCRIPT, args.action ?? 'all'], {
+      encoding: 'utf-8',
+      timeout: 600_000,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    if (r.status === 0) {
+      result.output = r.stdout?.trim() || '(empty)'
+      return result
+    }
+    if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
+      result.error = 'autotrajectory-exp 需要 bun 运行时（bun not found in PATH）'
+      return result
+    }
+    result.error = r.stderr?.trim() || r.stdout?.trim() || `exit ${r.status ?? '?'}`
+    return result
+  },
+})
