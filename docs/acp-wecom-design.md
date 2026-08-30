@@ -16,7 +16,7 @@
 
 1. **机器人范围：先支持个人（私聊），先不支持群聊**——会话映射仅 FromUserName，ChatId 群聊留待后续
 2. **测试条件具备**：用户有企业微信管理员权限可测试
-3. **公网暴露先不关心**：到时走 **cloudflare tunnel**（home-tunnel 既有资产）——本机实现先监听本地，联调时隧道暴露
+3. **公网暴露先不关心**：到时走隧道暴露（暴露方案部署方自选）——本机实现先监听本地，联调时隧道暴露
 
 ## 0.2 方案转向（2026-08-29 第二轮，用户碰壁）
 
@@ -58,7 +58,7 @@
 
 ### 1.3 关键事实
 
-- 回调 URL 需**公网可达**（或经 F1 网关/Tunnel 暴露）——家庭已有 home-tunnel / Cloudflare Tunnel 资产
+- 回调 URL 需**公网可达**（或经 F1 网关/隧道暴露）——暴露方案由部署方自选（隧道/反向代理等），需有现成通道
 - 消息加解密：企业微信专用方案（AES + 签名），有官方 SDK 与社区实现（如 `@sunnoy/wecom`、picoclaw wecom-app-configuration 文档）
 - 官方文档：[接收消息](https://developer.work.weixin.qq.com/document/path/100719)、[回调和回复的加解密方案](https://developer.work.weixin.qq.com/document/path/101033)、[被动回复消息](https://developer.work.weixin.qq.com/document/path/101031)、[发送应用消息](https://developer.work.weixin.qq.com/document/path/90236)
 
@@ -186,7 +186,7 @@ POST 回调（加密 XML）
       "user:zhangsan": { "ccc": "/home/yh/home/home-serenity", "role": "qa" }
       // "chat:GROUPID1": ...  ← 群聊留待后续（用户拍板：先不支持群聊）
     },
-    "callbackPath": "/wecom/callback"  // 回调路径（联调时经 home-tunnel / Cloudflare Tunnel 暴露）
+    "callbackPath": "/wecom/callback"  // 回调路径（联调时经隧道/反向代理暴露）
   }
 }
 ```
@@ -194,7 +194,7 @@ POST 回调（加密 XML）
 ### 4.6 部署面（联调时）
 
 - 企业微信后台：创建自建应用 → 配置**可信域名/回调 URL**（`https://<tunnel-domain>/wecom/callback`）→ 获取 corpid/secret/agentid/token/EncodingAESKey
-- 本机：`home-tunnel`（Cloudflare Tunnel MSM）暴露回调 URL（用户拍板：到时走 cloudflare tunnel）
+- 本机：经隧道/反向代理暴露回调 URL（暴露方案自选；用户拍板：到时走隧道）
 - 测试：企业微信后台「接收消息」测试工具（模拟消息 → 回调验证）
 
 ### 4.7 企微配置踩坑（社区高频，调研实证 2026-08-29）
@@ -217,7 +217,7 @@ POST 回调（加密 XML）
 | 回调鉴权 | 企业微信签名验证（token+timestamp+nonce+密文 SHA1）——企业微信自身机制，天然防伪造 |
 | 加解密 | AES-256-CBC（EncodingAESKey）——企业微信标准方案 |
 | 凭据存储 | corpid/secret/encodingAESKey **不入配置文件**（用户既定原则：plugin 配置归 plugin，但**密钥归 localstore/.env**——参考 F1 账号密码审计经验） |
-| 公网暴露 | 经 F1 双端口网关（已有登录）或 home-tunnel（Cloudflare Tunnel）暴露回调 URL——**不裸开端口** |
+| 公网暴露 | 经 F1 双端口网关（已有登录）或隧道/反向代理暴露回调 URL——**不裸开端口** |
 | 权限 | G9 白名单即授权（恒 allow）；企业微信侧可限制「谁可@机器人」（可见范围/群成员） |
 | 审计 | 回调消息日志（登录成败日志模式复用） |
 
@@ -241,7 +241,7 @@ POST 回调（加密 XML）
 |---|------|------|
 | 1 | 机器人范围 | **先支持个人（私聊），先不支持群聊**——ChatId 映射留待后续 |
 | 2 | 测试条件 | 用户有企业微信管理员权限，可真实测试 |
-| 3 | 公网暴露 | 先不关心；到时走 **cloudflare tunnel**（home-tunnel 既有资产） |
+| 3 | 公网暴露 | 先不关心；到时走隧道暴露（暴露方案部署方自选） |
 | 4 | ACP 传输 | **stdio 单形态**（推荐默认采纳）——对齐 ACP 生态（OpenClaw/桥）；企业微信桥同进程内直调 ACP 函数（不经 stdio） |
 | 5 | session/update | **首版 committed answer + trajectory 结构化**（推荐默认采纳）——update 流式留待后续 |
 | 6 | 会话映射粒度 | **按发送者自动绑定**（推荐默认采纳）——个人 `skiff-<role>-<userid>`；显式「新对话」指令 |
@@ -260,4 +260,4 @@ POST 回调（加密 XML）
 - 企业微信官方文档：[接收消息](https://developer.work.weixin.qq.com/document/path/100719)、[回调和回复的加解密方案](https://developer.work.weixin.qq.com/document/path/101033)、[被动回复消息](https://developer.work.weixin.qq.com/document/path/101031)、[发送应用消息](https://developer.work.weixin.qq.com/document/path/90236)、[智能机器人长连接（官方文档 path/101463）](https://developer.work.weixin.qq.com/document/path/101463)、[OpenClaw接入企业微信智能机器人（企微官方帮助）](https://open.work.weixin.qq.com/help2/pc/cat?doc_id=21657)、[群聊机器人不支持消息回调（社区确认）](https://developer.work.weixin.qq.com/community/question/detail?content_id=16709787612948516025)
 - **智能机器人长连接资产**：[企微官方智能机器人 Python SDK（WecomTeam/wecom-aibot-python-sdk）](https://github.com/WecomTeam/wecom-aibot-python-sdk)、[企业微信长连接+LangBot+Dify 全配置（无域名版，华为云博客）](https://bbs.huaweicloud.com/blogs/476466)、[@dingxiang-me/openclaw-wechat（企业微信智能机器人长连接）](https://www.npmjs.com/package/@dingxiang-me/openclaw-wechat)、[openclaw-wecom-websocket](https://www.npmjs.com/package/openclaw-wecom-websocket)、[LangBot 企业微信智能机器人接入](https://docs.langbot.app/zh/usage/platforms/wecom/wecombot)
 - 社区参考：[picoclaw wecom-app-configuration](https://github.com/sipeed/picoclaw/blob/c57a9c14e7ae6e1119c6b35a5a8e639be08ffbb4/docs/wecom-app-configuration.md)、[@sunnoy/wecom](https://socket.dev/npm/package/%40sunnoy%2Fwecom)、[花骨朵：企业微信外部群机器人接入 AI 实战](https://cloud.tencent.cn/developer/article/2706699)
-- 既有资产：`docs/knowledge-ccc-release-research.md`（ACP 生态/OpenClaw 微信通道/openclaw-acp 网关）、F1 网关（双端口+登录+CSRF 加固）、home-tunnel（Cloudflare Tunnel MSM）
+- 既有资产：`docs/knowledge-ccc-release-research.md`（ACP 生态/OpenClaw 微信通道/openclaw-acp 网关）、F1 网关（双端口+登录+CSRF 加固）、隧道暴露通道
