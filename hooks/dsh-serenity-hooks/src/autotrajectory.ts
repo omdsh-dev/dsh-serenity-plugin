@@ -442,3 +442,102 @@ export function getAutoTrajectoryStatus(root: string): AutoTrajectoryStatus {
     },
   }
 }
+
+/** live 会话条目（诊断/面板解析用；标题从 events 读） */
+export interface LiveSessionEntry {
+  id: string
+  cwd: string | null
+  cccRoot: string | null
+  title: string | null
+}
+
+/** 遍历 live 会话（sessions.list()）+ 补标题（events session/title latest-wins）+ ccc 归属 */
+export function listLiveSessions(ctx: Context): LiveSessionEntry[] {
+  const out: LiveSessionEntry[] = []
+  try {
+    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ id?: string; header?: { cwd?: string } }> } }).sessions
+    for (const s of sessions?.list?.() ?? []) {
+      const cwd = s?.header?.cwd ?? null
+      out.push({
+        id: s?.id ?? '',
+        cwd,
+        cccRoot: cwd ? findSerenityRoot(cwd) : null,
+        title: readSessionTitle(s),
+      })
+    }
+  } catch {
+    /* 遍历失败忽略 */
+  }
+  return out
+}
+
+/**
+ * 面板解析：GET /serenity/autotrajectory 无 workspace 参数时——
+ * **优先「配置了 autotrajectory 的 live CCC」**（用户实验状态所在；v1.26.14 修复：
+ * 原 resolveWorkspace 解析到第一个 live 会话（如 home-serenity）→ 面板显示"未配置"，
+ * 用户实验 CCC（pangu）检测不到）。优先级：已启用 → 已配置（未启用）→ null。
+ */
+export function resolveAutoTrajectoryCcc(ctx: Context): string | null {
+  const enabled: string[] = []
+  const configured: string[] = []
+  for (const s of listLiveSessions(ctx)) {
+    if (!s.cccRoot) continue
+    const cfg = readAutoTrajectorySettings(s.cccRoot)
+    if (!cfg) continue
+    if (cfg.enabled) {
+      if (!enabled.includes(s.cccRoot)) enabled.push(s.cccRoot)
+    } else if (!configured.includes(s.cccRoot)) {
+      configured.push(s.cccRoot)
+    }
+  }
+  return enabled[0] ?? configured[0] ?? null
+}
+
+/**
+ * 进程内诊断（autotrajectory-exp diag-live 数据源；用户"排查访问不到 pangu 写个 msm"）——
+ * 输出当前实例 live 会话清单（id/cwd/ccc/标题）+ 每个配置了 autotrajectory 的 CCC
+ * 状态（配置摘要/目标命中/可唤起）+ 目标 agent 定位结果。脚本 diag 看不到运行时，
+ * 本函数在插件进程内运行（能读 sessions/agents）。
+ */
+export interface DiagLiveReport {
+  processCwd: string
+  processCcc: string | null
+  liveSessions: LiveSessionEntry[]
+  autotrajectoryCccs: Array<{
+    root: string
+    enabled: boolean
+    session: string | null
+    target: AutoTrajectoryStatus['target']
+    agentResolved: boolean
+    agentDiagnosis: string | null
+  }>
+  panelResolved: string | null
+}
+
+export function diagLive(ctx: Context): DiagLiveReport {
+  const liveSessions = listLiveSessions(ctx)
+  const processCwd = process.cwd()
+  const processCcc = findSerenityRoot(processCwd)
+  const panelResolved = resolveAutoTrajectoryCcc(ctx)
+  const autotrajectoryCccs: DiagLiveReport['autotrajectoryCccs'] = []
+  const seen = new Set<string>()
+  for (const s of liveSessions) {
+    if (!s.cccRoot || seen.has(s.cccRoot)) continue
+    const cfg = readAutoTrajectorySettings(s.cccRoot)
+    if (!cfg) continue
+    seen.add(s.cccRoot)
+    const status = getAutoTrajectoryStatus(s.cccRoot)
+    const mdPath = resolveTargetMd(s.cccRoot, cfg)
+    const agentResolved = mdPath ? resolveTargetAgent(ctx, mdPath) !== null : false
+    const agentDiagnosis = mdPath && !agentResolved ? diagnoseTargetUnavailable(ctx, mdPath) : null
+    autotrajectoryCccs.push({
+      root: s.cccRoot,
+      enabled: status.enabled,
+      session: status.session,
+      target: status.target,
+      agentResolved,
+      agentDiagnosis,
+    })
+  }
+  return { processCwd, processCcc, liveSessions, autotrajectoryCccs, panelResolved }
+}

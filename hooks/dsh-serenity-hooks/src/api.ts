@@ -447,17 +447,21 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           }
           const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
           const root = findSerenityRoot(workspace)
-          if (!root) {
+          // v1.26.14：无参（面板点击）→ 优先实验 CCC（与 GET 一致——面板显示的即唤起目标）
+          const effectiveRoot = (!body.workspace && !body.sessionId)
+            ? (await import('./autotrajectory.js')).resolveAutoTrajectoryCcc(ctx) ?? root
+            : root
+          if (!effectiveRoot) {
             sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
             return
           }
           const { performAutoTrajectoryWake, readAutoTrajectorySettings } = await import('./autotrajectory.js')
-          const settings = readAutoTrajectorySettings(root)
+          const settings = readAutoTrajectorySettings(effectiveRoot)
           if (!settings) {
             sendJson(res, 400, { error: 'autotrajectory 未配置（.opencode/serenity.json 缺段）' })
             return
           }
-          const result = await performAutoTrajectoryWake(ctx, root, settings, { force: true })
+          const result = await performAutoTrajectoryWake(ctx, effectiveRoot, settings, { force: true })
           sendJson(res, result.ok ? 200 : 400, result)
           return
         }
@@ -468,14 +472,19 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
         const root = findSerenityRoot(workspace)
-        if (!root) {
+        // 动态 import：autotrajectory 模块依赖 dsh-agent/dsh-llm 运行时——保持 api.ts 静态链纯净
+        // （仅本端点触发时加载，api 纯函数测试不受影响）
+        const { getAutoTrajectoryStatus, resolveAutoTrajectoryCcc } = await import('./autotrajectory.js')
+        // v1.26.14：无 workspace/sessionId 参数时优先「配置了 autotrajectory 的 live CCC」——
+        // 面板默认展示实验状态（用户实验 CCC，而非当前维护会话的 CCC）；有显式参数则精确解析
+        const effectiveRoot = (!url.searchParams.get('workspace') && !url.searchParams.get('sessionId'))
+          ? (resolveAutoTrajectoryCcc(ctx) ?? root)
+          : root
+        if (!effectiveRoot) {
           sendJson(res, 200, { status: null })
           return
         }
-        // 动态 import：autotrajectory 模块依赖 dsh-agent/dsh-llm 运行时——保持 api.ts 静态链纯净
-        // （仅本端点触发时加载，api 纯函数测试不受影响）
-        const { getAutoTrajectoryStatus } = await import('./autotrajectory.js')
-        sendJson(res, 200, { status: getAutoTrajectoryStatus(root) })
+        sendJson(res, 200, { status: getAutoTrajectoryStatus(effectiveRoot) })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
       }

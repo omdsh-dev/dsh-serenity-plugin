@@ -36,6 +36,9 @@ import {
   buildWakeMessage,
   getAutoTrajectoryStatus,
   performAutoTrajectoryWake,
+  listLiveSessions,
+  resolveAutoTrajectoryCcc,
+  diagLive,
 } from '../src/autotrajectory.js'
 
 const mockFindSession = vi.mocked(findSession)
@@ -530,5 +533,87 @@ describe('performAutoTrajectoryWake（时钟与「立即唤起」共用执行体
     }
     const r3 = await performAutoTrajectoryWake(noAgent as never, tmp, cfg, { force: true })
     expect(r3.detail).toContain('已打开但 agent 未加载')
+  })
+})
+
+describe('listLiveSessions / resolveAutoTrajectoryCcc / diagLive（进程内诊断——v1.26.14 面板检测不到实验 CCC 排查）', () => {
+  let tmp: string
+  let tmp2: string
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'at-diag-'))
+    tmp2 = mkdtempSync(join(tmpdir(), 'at-diag2-'))
+    mockFindSession.mockReset()
+    // findSerenityRoot 依赖 .serenity 标记（ccc.ts）
+    writeFileSync(join(tmp, '.serenity'), '')
+    writeFileSync(join(tmp2, '.serenity'), '')
+  })
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+    rmSync(tmp2, { recursive: true, force: true })
+  })
+
+  function sessionCtx(sessions: Array<{ id: string; cwd?: string; events?: unknown[] }>): unknown {
+    return {
+      sessions: {
+        list: () => sessions.map((s) => ({ id: s.id, header: s.cwd ? { cwd: s.cwd } : {}, events: s.events ?? [] })),
+      },
+      agents: { get: () => undefined },
+    }
+  }
+
+  function writeCfgAt(root: string, cfg: unknown): void {
+    const dir = join(root, '.opencode')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'serenity.json'), JSON.stringify({ autotrajectory: cfg }))
+  }
+
+  it('listLiveSessions：读 id/cwd/标题（events session/title latest-wins）/ccc 归属', () => {
+    const ctx = sessionCtx([
+      {
+        id: 's-1',
+        cwd: tmp,
+        events: [
+          { type: 'session/title', data: { title: '旧' } },
+          { type: 'session/title', data: { title: 'S143-2026-08-30' } },
+        ],
+      },
+      { id: 's-2', cwd: '/plain/dir' }, // 无 .serenity → cccRoot null
+      { id: 's-3' }, // 无 cwd
+    ])
+    const list = listLiveSessions(ctx as never)
+    expect(list).toHaveLength(3)
+    expect(list[0]).toMatchObject({ id: 's-1', cwd: tmp, cccRoot: tmp, title: 'S143-2026-08-30' })
+    expect(list[1]).toMatchObject({ id: 's-2', cccRoot: null, title: null })
+    expect(list[2]).toMatchObject({ id: 's-3', cwd: null, title: null })
+  })
+
+  it('resolveAutoTrajectoryCcc：优先 enabled 的 live CCC，其次 configured，无则 null', () => {
+    // 两 CCC 都配置：pangu enabled=true，其他 enabled=false → 返回 pangu
+    writeCfgAt(tmp, { enabled: true, session: 'S143' })
+    writeCfgAt(tmp2, { enabled: false, session: 'S999' })
+    const ctx = sessionCtx([
+      { id: 'a', cwd: tmp2 }, // 先列出未启用的（顺序无关——按 enabled 优先排序）
+      { id: 'b', cwd: tmp },
+    ])
+    expect(resolveAutoTrajectoryCcc(ctx as never)).toBe(tmp)
+  })
+
+  it('resolveAutoTrajectoryCcc：无配置 → null', () => {
+    const ctx = sessionCtx([{ id: 'a', cwd: tmp }])
+    expect(resolveAutoTrajectoryCcc(ctx as never)).toBeNull()
+  })
+
+  it('diagLive：报告完整（live 会话 + autotrajectory CCC + agent 定位 + 面板解析目标）', () => {
+    writeCfgAt(tmp, { enabled: true, session: 'S143' })
+    const ctx = sessionCtx([
+      { id: 'a', cwd: tmp, events: [{ type: 'session/title', data: { title: 'S143-2026-08-30' } }] },
+    ])
+    const r = diagLive(ctx as never)
+    expect(r.processCwd).toBe(process.cwd())
+    expect(r.liveSessions).toHaveLength(1)
+    expect(r.panelResolved).toBe(tmp)
+    expect(r.autotrajectoryCccs).toHaveLength(1)
+    expect(r.autotrajectoryCccs[0]!.enabled).toBe(true)
+    expect(r.autotrajectoryCccs[0]!.session).toBe('S143')
   })
 })
