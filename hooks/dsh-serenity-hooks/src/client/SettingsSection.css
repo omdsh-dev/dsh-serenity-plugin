@@ -192,6 +192,31 @@
   text-align: right;
 }
 
+/* 自主轨迹「立即唤起」按钮（v1.26.14 调试语义；官方 button 语言：primary 弱化） */
+.ss-wakeBtn {
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.12));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--ds-transition-duration-fast, 0.15s) ease;
+}
+
+.ss-wakeBtn:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-success-primary, #22c55e);
+  color: var(--dsw-alias-state-success-primary, #22c55e);
+}
+
+.ss-wakeBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 /* 底部帮助行 */
 .ss-hint {
   margin: 0;

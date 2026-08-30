@@ -34,6 +34,8 @@ import {
   readSelfGeneratedMotivation,
   fetchBiasContent,
   buildWakeMessage,
+  getAutoTrajectoryStatus,
+  performAutoTrajectoryWake,
 } from '../src/autotrajectory.js'
 
 const mockFindSession = vi.mocked(findSession)
@@ -279,5 +281,166 @@ describe('buildWakeMessage（唤起消息三段式）', () => {
   it('都无 → 标注纯自主探索', () => {
     const msg = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 12, motivation: null, biasContent: null })
     expect(msg).toContain('（无——本轮纯自主探索）')
+  })
+})
+
+describe('getAutoTrajectoryStatus（面板状态——GET /serenity/autotrajectory 数据源）', () => {
+  let tmp: string
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'at-status-'))
+    mockFindSession.mockReset()
+  })
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  function writeCfg(cfg: unknown): void {
+    const dir = join(tmp, '.opencode')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'serenity.json'), JSON.stringify({ autotrajectory: cfg }))
+  }
+
+  it('未配置 → configured=false，target=null', () => {
+    const s = getAutoTrajectoryStatus(tmp)
+    expect(s.configured).toBe(false)
+    expect(s.enabled).toBe(false)
+    expect(s.target).toBeNull()
+    expect(s.biasProvider).toBe(DEFAULT_BIAS_PROVIDER)
+    expect(s.beijingHour).toBeGreaterThanOrEqual(0)
+    expect(s.beijingHour).toBeLessThan(24)
+  })
+
+  it('已配置未启用 → enabled=false，配置摘要展示', () => {
+    writeCfg({ enabled: false, intervalHours: 6, biasProvider: 'bias.ts', session: 'S143' })
+    const s = getAutoTrajectoryStatus(tmp)
+    expect(s.configured).toBe(true)
+    expect(s.enabled).toBe(false)
+    expect(s.intervalHours).toBe(6)
+    expect(s.biasProvider).toBe('bias.ts')
+    expect(s.session).toBe('S143')
+    // 未启用：仍尝试解析目标（展示用）——未命中 → null
+    expect(s.target).toBeNull()
+  })
+
+  it('启用 + 会话命中（--auto）→ target 完整：标志/空闲/可唤起', () => {
+    const dir = join(tmp, 'AGENT_SESSIONS', `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`)
+    mkdirSync(dir, { recursive: true })
+    const md = join(dir, 'SESSION.md')
+    writeFileSync(md, '# SESSION: exp\n')
+    const t = new Date(Date.now() - 99 * 3600_000) // 99h 前（超阈值）
+    utimesSync(md, t, t)
+    const realDir = join(tmp, 'AGENT_SESSIONS', `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`)
+    mockFindSession.mockReturnValue({ dirName: `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`, path: realDir, mtime: new Date(), status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } })
+    writeCfg({ enabled: true, intervalHours: 12, session: 'S143' })
+    const s = getAutoTrajectoryStatus(tmp)
+    expect(s.enabled).toBe(true)
+    expect(s.target).not.toBeNull()
+    expect(s.target!.dirName.endsWith(AUTO_DIR_SUFFIX)).toBe(true)
+    expect(s.target!.autoFlag).toBe(true)
+    expect(s.target!.idleHours).toBeGreaterThan(98)
+    // 可唤起判定：窗口允许 + 间隔到 → wakeable=true（用当前时刻；若恰在北京 8~18 点则 windowAllowed=false）
+    if (s.windowAllowed) {
+      expect(s.target!.wakeable).toBe(true)
+    }
+  })
+
+  it('启用 + 会话未命中 → target=null（展示「未命中」）', () => {
+    mockFindSession.mockReturnValue(null)
+    writeCfg({ enabled: true, session: 'S999' })
+    const s = getAutoTrajectoryStatus(tmp)
+    expect(s.enabled).toBe(true)
+    expect(s.target).toBeNull()
+  })
+})
+
+describe('performAutoTrajectoryWake（时钟与「立即唤起」共用执行体）', () => {
+  let tmp: string
+  let steer: ReturnType<typeof vi.fn>
+
+  function makeCtx(): unknown {
+    return {
+      sessions: { list: () => [{ id: 'sess-1', title: 'S143-2026-08-30' }] },
+      agents: { get: (id: string) => (id === 'sess-1' ? { steer } : undefined) },
+    }
+  }
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'at-wake-'))
+    mockFindSession.mockReset()
+    steer = vi.fn()
+  })
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  function setupTarget(intervalHoursAgo: number): string {
+    const dir = join(tmp, 'AGENT_SESSIONS', `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`)
+    mkdirSync(dir, { recursive: true })
+    const md = join(dir, 'SESSION.md')
+    writeFileSync(md, '# SESSION: exp\n')
+    const t = new Date(Date.now() - intervalHoursAgo * 3600_000)
+    utimesSync(md, t, t)
+    mockFindSession.mockReturnValue({ dirName: `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`, path: dir, mtime: t, status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } })
+    return md
+  }
+
+  const cfg = { enabled: true, intervalHours: 12, session: 'S143', biasProvider: 'bias.js' }
+
+  it('force=true（立即唤起）：跳过窗口/间隔，偏见脚本就绪 → steer 注入 + ok', async () => {
+    setupTarget(0) // 刚刚活动（间隔不满足——force 跳过）
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("反事实：换做法会怎样")')
+    const res = await performAutoTrajectoryWake(makeCtx() as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(true)
+    expect(res.detail).toContain('已唤起')
+    expect(steer).toHaveBeenCalledTimes(1)
+    const msg = steer.mock.calls[0]![0] as { content: { text: string }[] }
+    expect(msg.content[0]!.text).toContain('[自主轨迹唤起]')
+    expect(msg.content[0]!.text).toContain('反事实：换做法会怎样')
+  })
+
+  it('force=false（时钟）：间隔不足 → 拒绝，不注入', async () => {
+    setupTarget(1) // 1h 前（不足 12h）
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    const res = await performAutoTrajectoryWake(makeCtx() as never, tmp, cfg, { force: false })
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('不足')
+    expect(steer).not.toHaveBeenCalled()
+  })
+
+  it('未启用 → 拒绝', async () => {
+    const res = await performAutoTrajectoryWake(makeCtx() as never, tmp, { ...cfg, enabled: false }, { force: true })
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('未启用')
+  })
+
+  it('会话目录无 --auto 标志 → 拒绝（force 也校验）', async () => {
+    const dir = join(tmp, 'AGENT_SESSIONS', '2026-08-30--S143--normal')
+    mkdirSync(dir, { recursive: true })
+    const md = join(dir, 'SESSION.md')
+    writeFileSync(md, '# SESSION: exp\n')
+    mockFindSession.mockReturnValue({ dirName: '2026-08-30--S143--normal', path: dir, mtime: new Date(), status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } })
+    const res = await performAutoTrajectoryWake(makeCtx() as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('--auto')
+    expect(steer).not.toHaveBeenCalled()
+  })
+
+  it('偏见脚本缺失 → 拒绝（force 也校验），提示实现', async () => {
+    setupTarget(0)
+    const res = await performAutoTrajectoryWake(makeCtx() as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('偏见内容缺失')
+    expect(res.detail).toContain('bias.js')
+    expect(steer).not.toHaveBeenCalled()
+  })
+
+  it('agent 不可得 → 拒绝', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    const ctx = { sessions: { list: () => [] }, agents: { get: () => undefined } }
+    const res = await performAutoTrajectoryWake(ctx as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('agent 不可得')
+    expect(steer).not.toHaveBeenCalled()
   })
 })

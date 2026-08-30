@@ -181,6 +181,57 @@ export function buildWakeMessage(opts: {
 }
 
 /**
+ * 执行一次唤起（时钟 tick 与面板「立即唤起」共用）：
+ * - force=false（时钟）：完整校验——enabled / 目标命中 / --auto 标志 / 窗口 / 间隔 / 偏见脚本
+ * - force=true（手动调试，用户在场）：跳过窗口与间隔，仍校验 enabled / 目标命中 / --auto / 偏见脚本
+ * 成功 → 注入前台会话（agent.steer，用户可见）；返回结果供调用方（tick 打日志 / 面板显示）。
+ */
+export interface WakeResult {
+  ok: boolean
+  detail: string
+}
+
+export async function performAutoTrajectoryWake(
+  ctx: Context,
+  root: string,
+  settings: AutoTrajectorySettings,
+  opts: { force?: boolean } = {},
+): Promise<WakeResult> {
+  if (!settings?.enabled) return { ok: false, detail: 'autotrajectory 未启用（enabled=false）' }
+  const mdPath = resolveTargetMd(root, settings)
+  if (!mdPath) return { ok: false, detail: '目标会话未命中（session 未配置或 AGENT_SESSIONS 无匹配）' }
+  if (!isAutoTrajectorySession(mdPath)) return { ok: false, detail: '目标会话目录无 --auto 标志（AGENT_SESSIONS/<date>--<desc>--auto/）' }
+  if (!opts.force) {
+    const now = Date.now()
+    if (!inAllowedWakeWindow(now, settings.avoidWakeHours)) return { ok: false, detail: '当前在北京高峰避开窗口内（不唤起）' }
+    try {
+      const mtime = statSync(mdPath).mtimeMs
+      const hours = Math.max(1, settings.intervalHours ?? 12)
+      if (now - mtime < hours * 3600_000) return { ok: false, detail: `距上次轨迹活动不足 ${hours}h（等待中）` }
+    } catch {
+      return { ok: false, detail: 'SESSION.md 读取失败（statSync）' }
+    }
+  }
+  const agent = resolveTargetAgent(ctx, mdPath)
+  if (!agent) {
+    return { ok: false, detail: '目标会话 agent 不可得（先在会话列表激活目标会话后重试）' }
+  }
+  const provider = settings.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER
+  const biasRes = await fetchBiasContent(root, provider)
+  if (biasRes.error) return { ok: false, detail: `偏见内容缺失：${biasRes.error}` }
+  const motivation = readSelfGeneratedMotivation(mdPath)
+  const message = buildWakeMessage({
+    sessionName: basename(dirname(mdPath)),
+    mdPath,
+    intervalHours: Math.max(1, settings.intervalHours ?? 12),
+    motivation,
+    biasContent: biasRes.text,
+  })
+  agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: PLUGIN_SOURCE }))
+  return { ok: true, detail: `已唤起 ${basename(dirname(mdPath))}（偏见提供者 ${provider}）` }
+}
+
+/**
  * 装配（index.ts apply 调用）：仅当 CCC 配置 autotrajectory.enabled=true 时启动定时器；
  * 否则零资源占用。定时器 tick 检查唤起条件 → 注入活跃会话（agent.steer，前台可见）。
  */
@@ -194,31 +245,12 @@ export function registerAutoTrajectory(ctx: Context): void {
     if (running) return // 防重入（一轮唤起进行中不重复触发）
     const mdPath = resolveTargetMd(root!, settings!)
     if (!shouldWake(settings!, mdPath, Date.now(), running)) return
-    const agent = resolveTargetAgent(ctx, mdPath!)
-    if (!agent) {
-      console.warn('[serenity-hooks] ✗ 自主轨迹唤起跳过：目标会话 agent 不可得（session use 激活后重试）')
-      return
-    }
     running = true
     void (async () => {
       try {
-        // 偏见内容 = 运行 CCC 根目录下偏见提供者脚本（缺失 → 报错中止本轮唤起，要求 CCC 实现）
-        const provider = settings!.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER
-        const biasRes = await fetchBiasContent(root!, provider)
-        if (biasRes.error) {
-          console.error(`[serenity-hooks] ✗ 自主轨迹唤起中止（偏见内容缺失）: ${biasRes.error}`)
-          return
-        }
-        const motivation = readSelfGeneratedMotivation(mdPath!)
-        const message = buildWakeMessage({
-          sessionName: basename(dirname(mdPath!)),
-          mdPath: mdPath!,
-          intervalHours: settings!.intervalHours ?? 12,
-          motivation,
-          biasContent: biasRes.text,
-        })
-        agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: PLUGIN_SOURCE }))
-        console.log(`[serenity-hooks] ✓ 自主轨迹唤起（${basename(dirname(mdPath!))}，偏见提供者 ${provider}）`)
+        const res = await performAutoTrajectoryWake(ctx, root!, settings!, { force: false })
+        if (res.ok) console.log(`[serenity-hooks] ✓ 自主轨迹唤起（${res.detail}）`)
+        else console.warn(`[serenity-hooks] ✗ 自主轨迹唤起跳过：${res.detail}`)
       } catch (err) {
         console.warn(`[serenity-hooks] ✗ 自主轨迹唤起失败: ${String((err as Error)?.message ?? err)}`)
       } finally {
@@ -267,4 +299,76 @@ function resolveAutoTrajectoryRoot(ctx: Context): string | null {
     /* 遍历失败忽略 */
   }
   return null
+}
+
+/**
+ * 面板状态（GET /serenity/autotrajectory 数据源；纯逻辑，可单测）——
+ * WebUI 设置面板「自主轨迹」只读区块展示的完整状态：配置摘要 + 目标会话
+ * 命中/标志/空闲时长 + 当前窗口/可唤起判定（唤起逻辑同 registerAutoTrajectory）。
+ * 不运行偏见脚本（只报脚本是否就绪——运行验证走 autotrajectory-exp random）。
+ */
+export interface AutoTrajectoryStatus {
+  /** 是否配置了 autotrajectory 段（.opencode/serenity.json） */
+  configured: boolean
+  /** 总开关（缺省 false——未开零资源占用） */
+  enabled: boolean
+  /** 无人类活动 N 小时后自动唤起（缺省 12） */
+  intervalHours: number
+  /** 偏见内容提供者脚本（相对 CCC 根；缺省 autotrajectory-bias.ts） */
+  biasProvider: string
+  /** 目标会话（S###/目录名；未配置 = 不唤起） */
+  session: string | null
+  /** 避开唤起的高峰时段（北京时间） */
+  avoidWakeHours: { start: number; end: number }
+  /** 目标会话状态（未配置/未命中 → null） */
+  target: {
+    /** 目录名（含 --auto 后缀时为自主形态） */
+    dirName: string
+    /** 目录名是否带 --auto 标志 */
+    autoFlag: boolean
+    /** 距上次轨迹活动（小时） */
+    idleHours: number
+    /** 当前时刻是否满足唤起条件（标志+间隔+窗口，未运行中） */
+    wakeable: boolean
+  } | null
+  /** 当前北京时间小时 */
+  beijingHour: number
+  /** 当前是否在唤起窗口内（避开高峰之外） */
+  windowAllowed: boolean
+}
+
+export function getAutoTrajectoryStatus(root: string): AutoTrajectoryStatus {
+  const cfg = readAutoTrajectorySettings(root)
+  const now = Date.now()
+  const base = {
+    configured: cfg !== null,
+    enabled: cfg?.enabled ?? false,
+    intervalHours: Math.max(1, cfg?.intervalHours ?? 12),
+    biasProvider: cfg?.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER,
+    session: cfg?.session ?? null,
+    avoidWakeHours: {
+      start: cfg?.avoidWakeHours?.start ?? DEFAULT_AVOID_HOURS.start,
+      end: cfg?.avoidWakeHours?.end ?? DEFAULT_AVOID_HOURS.end,
+    },
+    beijingHour: beijingHour(now),
+    windowAllowed: inAllowedWakeWindow(now, cfg?.avoidWakeHours),
+  }
+  if (!cfg) return { ...base, target: null }
+  const mdPath = resolveTargetMd(root, cfg)
+  if (!mdPath) return { ...base, target: null }
+  let idleHours = 0
+  try {
+    idleHours = (now - statSync(mdPath).mtimeMs) / 3600_000
+  } catch {
+    /* 文件消失 → 保持 0 */
+  }
+  return {
+    ...base,
+    target: {
+      dirName: basename(dirname(mdPath)),
+      autoFlag: isAutoTrajectorySession(mdPath),
+      idleHours: Math.max(0, idleHours),
+      wakeable: shouldWake(cfg, mdPath, now, false),
+    },
+  }
 }

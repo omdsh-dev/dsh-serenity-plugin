@@ -29,6 +29,7 @@ const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
 const CCCS_PATH = '/serenity/cccs'
 const PUBLIC_ASK_PATH = '/serenity/public-ask'
+const AUTOTRAJECTORY_PATH = '/serenity/autotrajectory'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
 export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
@@ -417,6 +418,64 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           urls: containerUrls,
           listUrl: `${base}/`,
         })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+
+  // /serenity/autotrajectory：自主轨迹实验状态（v1.26.14 用户"给CCC的面板加个状态来看情况"——
+  // 设置面板「自主轨迹」只读区块的数据源）。只读；按 workspace 解析当前 CCC。
+  // 纯状态（配置摘要 + 目标会话 + 窗口/可唤起判定），不运行偏见脚本（运行验证走 autotrajectory-exp random）。
+  // POST { action: 'wake' }：手动立即唤起（调试用，跳过窗口/间隔；x-serenity-ui 头——
+  // agent 不可自行唤起自己）。force=true 仍校验 enabled / 目标命中 / --auto / 偏见脚本。
+  ctx.webServer.register({
+    kind: 'exact',
+    path: AUTOTRAJECTORY_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.method === 'POST') {
+          if (req.headers['x-serenity-ui'] !== '1') {
+            sendJson(res, 403, { error: '立即唤起仅限 WebUI（agent 不可自行唤起）' })
+            return
+          }
+          const raw = await readBody(req, 16 * 1024)
+          const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; action?: string }
+          if (body.action !== 'wake') {
+            sendJson(res, 400, { error: 'unsupported action (expected "wake")' })
+            return
+          }
+          const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
+          const root = findSerenityRoot(workspace)
+          if (!root) {
+            sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
+            return
+          }
+          const { performAutoTrajectoryWake, readAutoTrajectorySettings } = await import('./autotrajectory.js')
+          const settings = readAutoTrajectorySettings(root)
+          if (!settings) {
+            sendJson(res, 400, { error: 'autotrajectory 未配置（.opencode/serenity.json 缺段）' })
+            return
+          }
+          const result = await performAutoTrajectoryWake(ctx, root, settings, { force: true })
+          sendJson(res, result.ok ? 200 : 400, result)
+          return
+        }
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
+        const root = findSerenityRoot(workspace)
+        if (!root) {
+          sendJson(res, 200, { status: null })
+          return
+        }
+        // 动态 import：autotrajectory 模块依赖 dsh-agent/dsh-llm 运行时——保持 api.ts 静态链纯净
+        // （仅本端点触发时加载，api 纯函数测试不受影响）
+        const { getAutoTrajectoryStatus } = await import('./autotrajectory.js')
+        sendJson(res, 200, { status: getAutoTrajectoryStatus(root) })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
       }

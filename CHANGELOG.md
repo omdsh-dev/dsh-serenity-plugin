@@ -1,3 +1,22 @@
+## v1.26.14 — 2026-08-30（自主轨迹面板状态 + 立即唤起按钮 + diag 扫描扩大，S142 调试闭环）
+
+**Scope:** 用户两连发：① "给CCC的面板加个状态来看情况"（自主轨迹实验状态可视化）；② 状态通过后 "加个立即唤起按钮，方便调试"（手动触发一轮唤起）。另：diag 无参扫描此前只覆盖 `/home/yh/home` + `/home/yh/our-home`，用户实验 CCC（pangu-serenity，`/home/yh/zy/`）扫不到——扩大为递归扫描 `/home/yh` 两层。
+
+### 变更
+- **`src/autotrajectory.ts` `getAutoTrajectoryStatus(root)`（新，面板数据源）**：纯逻辑状态函数（可单测）——configured/enabled/intervalHours/biasProvider/session/avoidWakeHours + 目标会话（dirName/--auto 标志/空闲小时/当前可唤起判定）+ 当前北京小时/窗口允许；不运行偏见脚本（运行验证走 autotrajectory-exp random）
+- **`src/autotrajectory.ts` `performAutoTrajectoryWake(ctx, root, settings, {force})`（新，唤起执行体提取）**：时钟 tick 与「立即唤起」共用——force=false（时钟）完整校验（enabled/目标/--auto/窗口/间隔/偏见脚本）；force=true（手动调试，用户在场）**跳过窗口与间隔**，仍校验 enabled/目标/--auto/偏见脚本；成功 → `agent.steer` 注入前台会话；返回 `{ok, detail}` 供 tick 打日志 / 面板显示
+- **`src/autotrajectory.ts` `registerAutoTrajectory` 重构**：tick 改调 `performAutoTrajectoryWake(force:false)`（行为等价，日志语义化：✓ 唤起 / ✗ 跳过原因）
+- **`src/api.ts` `GET /serenity/autotrajectory`（新端点）**：按 workspace 解析当前 CCC → 返回 `getAutoTrajectoryStatus` 状态（未在 CCC 内 → `{status:null}`）；动态 import autotrajectory（保持 api.ts 静态链纯净，纯函数测试不受影响）
+- **`src/api.ts` `POST /serenity/autotrajectory {action:'wake'}`（新端点）**：手动立即唤起（`performAutoTrajectoryWake(force:true)`）；**x-serenity-ui 头限定**（agent 不可自行唤起自己——防实验循环自激）；未配置 → 400
+- **`src/client/SettingsSection.tsx` 「自主轨迹」只读区块（新）**：实验状态/目标会话（含 --auto 标志与空闲时长）/唤起窗口（北京小时 + 高峰避开）/偏见提供者名 + **「立即唤起」按钮**（enabled + 目标就绪时可用；点击 POST wake，显示执行结果 detail；完成后刷新状态）
+- **`src/client/SettingsSection.css`**：`ss-wakeBtn` 按钮样式（官方 button 语言，hover 绿色提示）
+- **`src/tools/autotrajectory-exp.ts`**：描述版本号 v1.26.13→v1.26.14 + diag 扫描说明更新（递归扫描 /home/yh 两层）
+- **`experiments/autotrajectory/scripts/autotrajectory-exp.ts` diag 扫描扩大（dsp + specs 同源）**：弃固定双 base 一层扫描，改 **`collectCccs` 递归收集 .serenity 目录**（跳过隐藏目录，maxDepth 2 层，base `/home/yh`）——覆盖 `/home/yh/home/*`、`/home/yh/our-home/*` 及任意实验 CCC 位置（pangu-serenity/tiangong-serenity/sh-serenity 等）；脚本头注释补 diag + 面板说明
+
+### 测试
+- **autotrajectory.test +11**：getAutoTrajectoryStatus——未配置/已配置未启用/启用+会话命中(--auto/空闲/可唤起)/启用+未命中；performAutoTrajectoryWake——force=true 跳过窗口间隔注入成功 / force=false 间隔不足拒绝 / 未启用拒绝 / 无 --auto 标志拒绝 / 偏见脚本缺失拒绝 / agent 不可得拒绝
+- **51 files / 679 tests 全绿**（+13）；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.13 — 2026-08-30（autotrajectory-exp 实验脚本定位修复，本机安装实测）
 
 **Scope:** 本机安装 v1.26.12 后调用 `autotrajectory-exp` 报"脚本缺失（.../@shgroup/experiments/...）"——**根因：tsdown bundle 后 `import.meta.url` 指向 `lib/index.js`，工具里 `'..','..'` 越过包根**（resolve 到 `@shgroup/` 而非 `@shgroup/dsh-serenity-hooks`），实验脚本路径算错。

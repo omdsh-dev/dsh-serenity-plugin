@@ -21,7 +21,7 @@
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-runtime/client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
 import { PublicAskEditor } from './PublicAskEditor.js'
@@ -292,6 +292,169 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <h3 className="ss-groupTitle">彩蛋模式</h3>
         <PersonaEditor />
       </div>
+
+      {/* v1.26.14 自主轨迹实验状态（只读区块——用户"给CCC的面板加个状态来看情况"；
+          数据源 GET /serenity/autotrajectory：配置摘要 + 目标会话 + 窗口/可唤起判定） */}
+      <div className="ss-group">
+        <h3 className="ss-groupTitle">自主轨迹</h3>
+        <AutoTrajectoryStatusBlock />
+      </div>
     </div>
+  )
+}
+
+/** /serenity/autotrajectory 状态 wire（与 src/autotrajectory.ts getAutoTrajectoryStatus 对齐） */
+interface AutoTrajectoryStatus {
+  configured: boolean
+  enabled: boolean
+  intervalHours: number
+  biasProvider: string
+  session: string | null
+  avoidWakeHours: { start: number; end: number }
+  target: {
+    dirName: string
+    autoFlag: boolean
+    idleHours: number
+    wakeable: boolean
+  } | null
+  beijingHour: number
+  windowAllowed: boolean
+}
+
+/** 「自主轨迹」只读状态区块（v1.26.14）：展示当前工作区 CCC 的实验状态；实验配置改走 CCC 配置文件 */
+function AutoTrajectoryStatusBlock(): React.JSX.Element {
+  const [status, setStatus] = useState<AutoTrajectoryStatus | null>(null)
+  const [unavailable, setUnavailable] = useState(false)
+  const [waking, setWaking] = useState(false)
+  const [wakeResult, setWakeResult] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/serenity/autotrajectory', { headers: { accept: 'application/json' } })
+      if (!res.ok) return
+      const body = (await res.json()) as { status?: AutoTrajectoryStatus | null }
+      if (body.status) {
+        setStatus(body.status)
+        setUnavailable(false)
+      } else {
+        setStatus(null)
+        setUnavailable(true) // 未在 CCC 内（工作区无 .serenity）→ 显示提示
+      }
+    } catch {
+      /* 拉取失败静默（面板非关键路径） */
+    }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    void refresh()
+    return () => { alive = false }
+  }, [refresh])
+
+  // 立即唤起（调试用，跳过窗口/间隔；服务端 force=true 仍校验 enabled/目标/--auto/偏见脚本）
+  const wakeNow = async (): Promise<void> => {
+    if (waking) return
+    setWaking(true)
+    setWakeResult(null)
+    try {
+      const res = await fetch('/serenity/autotrajectory', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
+        body: JSON.stringify({ action: 'wake' }),
+      })
+      const body = (await res.json()) as { ok?: boolean; detail?: string; error?: string }
+      setWakeResult(body.detail ?? body.error ?? `HTTP ${res.status}`)
+      void refresh()
+    } catch (err) {
+      setWakeResult(err instanceof Error ? err.message : String(err))
+    } finally {
+      setWaking(false)
+    }
+  }
+
+  if (unavailable) {
+    return (
+      <ul className="ss-rows">
+        <li>
+          <RowCard
+            title="未激活"
+            desc="当前工作区不在 CCC 内（无 .serenity）——先在工作区打开一个 CCC 会话"
+            control={null}
+          />
+        </li>
+      </ul>
+    )
+  }
+  if (!status) {
+    return (
+      <ul className="ss-rows">
+        <li>
+          <RowCard title="加载中…" desc="读取自主轨迹实验状态" control={null} />
+        </li>
+      </ul>
+    )
+  }
+
+  const target = status.target
+  const stateText = !status.configured
+    ? '未配置（实验未开始）'
+    : !status.enabled
+      ? '已配置，未启用（enabled=false，零资源占用）'
+      : '已启用 — 时钟唤起等待中'
+  const targetText = target
+    ? `${target.dirName}${target.autoFlag ? '（--auto ✓）' : '（无 --auto 标志）'} · 空闲 ${target.idleHours.toFixed(1)}h / 阈值 ${status.intervalHours}h`
+    : status.session
+      ? `会话 ${status.session} 未命中（AGENT_SESSIONS 无匹配）`
+      : '未配置目标会话（不唤起）'
+  // 调试按钮可用条件：已启用 + 目标会话就绪（配置命中且带 --auto）；偏见脚本校验由服务端 force 兜底
+  const wakeReady = status.enabled && !!target && target.autoFlag
+
+  return (
+    <ul className="ss-rows">
+      <li>
+        <RowCard
+          title="实验状态"
+          desc={stateText}
+          control={<span className="ss-value">{status.enabled ? '● 运行中' : status.configured ? '○ 待启' : '—'}</span>}
+        />
+      </li>
+      <li>
+        <RowCard
+          title="目标会话"
+          desc={targetText}
+          control={target?.wakeable ? <span className="ss-value">可唤起</span> : null}
+        />
+      </li>
+      <li>
+        <RowCard
+          title="唤起窗口"
+          desc={`当前北京 ${status.beijingHour} 点 — ${status.windowAllowed ? '允许唤起' : `高峰避开中（${status.avoidWakeHours.start}~${status.avoidWakeHours.end}）`}`}
+          control={null}
+        />
+      </li>
+      <li>
+        <RowCard
+          title="偏见提供者"
+          desc={status.biasProvider}
+          control={null}
+        />
+      </li>
+      <li>
+        <RowCard
+          title="立即唤起"
+          desc={wakeResult ?? '调试：手动触发一次唤起（跳过窗口/间隔，仍校验配置与偏见脚本）'}
+          control={
+            <button
+              type="button"
+              className="ss-wakeBtn"
+              disabled={!wakeReady || waking}
+              onClick={() => void wakeNow()}
+            >
+              {waking ? '唤起中…' : '立即唤起'}
+            </button>
+          }
+        />
+      </li>
+    </ul>
   )
 }
