@@ -1,3 +1,24 @@
+## v1.26.15 — 2026-08-31（自主轨迹三连修复：立即唤起 / 面板解析 / 时钟定时器，S142 实测驱动）
+
+**Scope:** 用户在 pangu-serenity 实测 v1.26.14 后三轮反馈：① "点唤起也没用，未唤起，排查"；② "实验状态检测不到pangu了，排查访问不到写个msm来排查"；③ "手动唤起执行正常，时钟唤起不工作，排查原因"。三个根因全部实证定位 + 修复 + 进程内诊断工具。**本机 deploy 已生效；npm 1.26.14 未含本版（发布补全）**。
+
+### 修复 1：立即唤起不生效——resolveTargetAgent 匹配不存在的 `s.title`
+- **根因**：`resolveTargetAgent` 遍历 `ctx.sessions.list()` 匹配 `s.title`——但 dsh `session.list` wire schema（及 Session 对象）**均无 title 字段**（只有 sessionId/cwd/agentPreset），匹配永远失败 → "目标会话 agent 不可得"
+- **修复（`src/autotrajectory.ts`）**：标题实际存在 session log 的 `session/title` 事件（latest-wins）——新增 `readSessionTitle(session)` 从 `session.events` 提取标题（rebuild 同款 events 读取模式）+ **cwd 归属校验**（同实例多 CCC 时只匹配目标 SESSION 所在 CCC 的会话；targetRoot 可解析→CCC 根比较，不可解析→路径祖先兜底）+ `diagnoseTargetUnavailable` 区分失败原因（"目标 CCC 内无 live 会话 / 标题均不匹配 / agent 未加载"——面板/日志可直接行动）
+
+### 修复 2：面板检测不到实验 CCC——无参 GET 解析到当前维护会话 CCC
+- **根因**：面板 fetch 无 workspace 参数 → `resolveWorkspace` 解析到第一个 live 会话（home-serenity，configured:false）→ 显示"未配置"，用户实验 CCC（pangu）检测不到
+- **修复（`src/autotrajectory.ts` + `src/api.ts`）**：新增 `resolveAutoTrajectoryCcc(ctx)`（**优先「配置了 autotrajectory 的 live CCC」**：enabled 优先，其次 configured）；api GET/POST 无 workspace/sessionId 参数时用它（面板显示与唤起目标一致——显示什么就唤起什么）
+- **新增 `diag-live` 进程内诊断（`src/tools/autotrajectory-exp.ts` 改造）**：工具改闭包捕获 ctx（`createAutoTrajectoryExpTool(ctx)`，rebuild 同款）——`diagLive(ctx)` 输出 live 会话清单（id/cwd/ccc/标题）+ 各实验 CCC 状态（配置/目标/agent 定位/诊断）+ 面板解析目标；**脚本 diag 是独立进程看不到运行时，diag-live 在插件进程内能看到 sessions/agents**
+
+### 修复 3：时钟唤起不工作——启动时 live 会话为空，定时器永不启动
+- **根因**：旧 `registerAutoTrajectory` 在 apply（web 启动）时一次性 `resolveAutoTrajectoryRoot(ctx)`——启动时 live 会话为空（用户尚未打开实验 CCC 会话）→ root=null → settings=null → **定时器根本不启动**；手动唤起走 HTTP（点击时重新解析）→ 正常
+- **修复（`src/autotrajectory.ts`）**：① **动态解析**——每次 tick 重新 resolveRoot/settings（不绑定启动时值，live 会话变化即跟上）；② **事件驱动启动**——监听 `session/created` → 启动定时器（用户打开实验 CCC 会话即启动；启动时已有则立即启动）；③ **优先实验 CCC**——`resolveAutoTrajectoryCcc` 优先于进程 cwd/任一 live（多 CCC 同实例时绑定实验 CCC）；零资源占用语义保留（未配置/未启用 → tick 内直接 return）
+
+### 测试
+- **autotrajectory.test +11**：resolveTargetAgent——events 标题 latest-wins / cwd 归属（其他 CCC 不匹配）/ 诊断信息三态（无 live 会话/标题不匹配/agent 未加载）；diagLive/resolveAutoTrajectoryCcc/listLiveSessions；registerAutoTrajectory——启动时有会话立即启动 / 无会话 → session/created 后启动（修复核心）/ enabled=false 不启动 / 零资源占用
+- **51 files / 690 tests 全绿**；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.14 — 2026-08-30（自主轨迹面板状态 + 立即唤起按钮 + diag 扫描扩大，S142 调试闭环）
 
 **Scope:** 用户两连发：① "给CCC的面板加个状态来看情况"（自主轨迹实验状态可视化）；② 状态通过后 "加个立即唤起按钮，方便调试"（手动触发一轮唤起）。另：diag 无参扫描此前只覆盖 `/home/yh/home` + `/home/yh/our-home`，用户实验 CCC（pangu-serenity，`/home/yh/zy/`）扫不到——扩大为递归扫描 `/home/yh` 两层。
