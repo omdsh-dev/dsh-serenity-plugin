@@ -116,9 +116,9 @@ export interface SerenityConfig {
 }
 
 /**
- * 自主轨迹配置（CCC 定义；S142 用户拍板 v0.4）：
- * - 随机方向 = CCC 自定义 MSM（randomMsm，缺省 auto_trajectory_random_basis_provider）
- *   ——随机性归 CCC（它有具体反馈信息来源），dsp 只机械 exec 取 stdout
+ * 自主轨迹配置（CCC 定义；S142 用户拍板 v0.5）：
+ * - 偏见内容提供者 = CCC 根目录下脚本（biasProvider，缺省 autotrajectory-bias.ts）——
+ *   tool 直接运行取 stdout 作为偏见内容；脚本缺失 → 报错要求实现（不再经 mech-registry 注册 MSM）
  * - 会话标志 = 目录名后缀 `--auto`（验证用方便）：AGENT_SESSIONS/<date>--<desc>--auto/
  * - 唤起窗口避开北京时间 8~18 点（用量峰谷省钱——用户拍板）
  */
@@ -127,8 +127,8 @@ export interface AutoTrajectorySettings {
   enabled?: boolean;
   /** 无人类活动 N 小时后自动唤起（缺省 12） */
   intervalHours?: number;
-  /** 随机方向 MSM 名（缺省 auto_trajectory_random_basis_provider） */
-  randomMsm?: string;
+  /** 偏见内容提供者脚本（相对 CCC 根；缺省 autotrajectory-bias.ts——缺失报错要求实现） */
+  biasProvider?: string;
   /** 可选：固定目标会话（S### / 目录名）；缺省 = 最近活跃会话 */
   session?: string;
   /** 避开唤起的高峰时段（北京时间，[start, end) 内不唤起；缺省 {8, 18}——用量峰谷省钱） */

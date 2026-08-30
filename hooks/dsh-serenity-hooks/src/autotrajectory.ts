@@ -5,12 +5,13 @@
  * S142 2026-08-30 用户提出猜想 + 三项裁决：① 时钟驱动 ② 先验偏见自生+随机（随机充分引入）
  * ③ 人类=反馈来源（不直接参与））。
  *
- * 形态（用户审核定稿 v0.4）：
+ * 形态（用户审核定稿 v0.5）：
  *   · **前台运行**：时钟唤起 = 向活跃会话注入唤起消息（agent.steer，v1.22.5 自动继续同款
  *     通道）→ 模型自动继续 → 用户全程可见、随时可介入（人类反馈天然并入——同会话）。
- *   · **随机方向 = CCC 自定义 MSM**（用户拍板命名 auto_trajectory_random_basis_provider）：
- *     随机性归 CCC（它有具体反馈信息来源，自己写 MSM 保证"足够随机"），dsp 只机械
- *     exec 该 MSM 取 stdout 作为随机方向注入。未配置/未注册 → 本轮跳过（warn）。
+ *   · **偏见内容提供者 = CCC 根目录下脚本**（用户拍板：不再让 CCC 注册 MSM；tool 直接运行脚本；
+ *     命名修正：它不是"随机脚本"，本质是**偏见内容提供者**——biasProvider）：
+ *     配置 biasProvider（相对 CCC 根，缺省 autotrajectory-bias.ts）——tool 直接运行取
+ *     stdout 作为偏见内容；脚本缺失 → **报错要求实现**（偏见内容归 CCC，实现 = 根目录放脚本）。
  *   · **会话标志 = 目录名后缀 --auto**（用户拍板：后缀，验证用方便）：
  *     AGENT_SESSIONS/<date>--<desc>--auto/ → 该轨迹为自主形态；无标志会话不受影响。
  *   · **唤起窗口避开北京时间 8~18 点**（用户拍板：用量峰谷省钱）——avoidWakeHours 可覆盖。
@@ -22,16 +23,16 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
+import { spawnSync } from 'node:child_process'
 import { basename, dirname, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { findSerenityRoot, loadSerenityConfig, type AutoTrajectorySettings } from './ccc.js'
-import { runMsmAsync } from './msm-ops.js'
+import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutoTrajectorySettings } from './ccc.js'
 import { findSession, findLatestActiveSessionMd, sessionsRoot } from './session-ops.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
-/** 随机方向 MSM 缺省名（用户拍板命名；CCC 注册同名 MSM 即开箱即用，randomMsm 可覆盖） */
-export const DEFAULT_RANDOM_MSM = 'auto_trajectory_random_basis_provider'
+/** 偏见内容提供者脚本缺省名（CCC 根目录下；用户拍板：tool 直接运行，缺失报错要求实现） */
+export const DEFAULT_BIAS_PROVIDER = 'autotrajectory-bias.ts'
 /** 自主轨迹会话目录后缀标志（用户拍板：后缀） */
 export const AUTO_DIR_SUFFIX = '--auto'
 /** 调度 tick 周期（10min——验证形态"一个就够"） */
@@ -117,28 +118,49 @@ export function readSelfGeneratedMotivation(mdPath: string): string | null {
   }
 }
 
-/** 随机方向：exec CCC 自定义 MSM（randomMsm，缺省名）→ stdout；失败/非零 → null */
-export async function fetchRandomBasis(root: string, msmName: string): Promise<string | null> {
+/**
+ * 偏见内容：直接运行 CCC 根目录下偏见提供者脚本（biasProvider，缺省 autotrajectory-bias.ts）→ stdout。
+ * 脚本缺失 → 返回 { text: null, error: 提示实现 }（唤起侧报错要求实现，不静默跳过）。
+ * 路径逃逸校验（resolveInside）；bun 优先，node 兜底；600s 超时。
+ */
+export async function fetchBiasContent(root: string, providerRel: string): Promise<{ text: string | null; error: string | null }> {
+  let scriptAbs: string
   try {
-    const res = (await runMsmAsync(root, { action: 'exec', name: msmName, args: [] })) as {
-      exit?: number
-      stdout?: string
-      stderr?: string
-    }
-    if (res.exit !== 0) return null
-    return res.stdout?.trim() || null
+    scriptAbs = resolveInside(root, providerRel)
   } catch {
-    return null
+    return { text: null, error: `biasProvider 路径逃逸（须在 CCC 根内）: ${providerRel}` }
   }
+  if (!existsSync(scriptAbs)) {
+    return { text: null, error: `请在 CCC 根目录实现偏见内容提供者脚本: ${providerRel}（stdout 输出偏见内容一行；acc_msm exec autotrajectory-exp init 可生成模板）` }
+  }
+  const runs: Array<[string, string[]]> = [
+    ['bun', [scriptAbs]],
+    [process.execPath, [scriptAbs]],
+  ]
+  for (const [cmd, args] of runs) {
+    try {
+      const r = spawnSync(cmd, args, { encoding: 'utf-8', timeout: 600_000, stdio: ['ignore', 'pipe', 'pipe'] })
+      if (r.status === 0) {
+        const text = (r.stdout ?? '').trim()
+        return { text: text || null, error: null }
+      }
+      // bun 缺失（ENOENT）→ 试 node；否则视为脚本失败
+      if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') continue
+      return { text: null, error: `偏见内容提供者脚本执行失败（exit ${r.status ?? '?'}）: ${r.stderr?.trim() || r.stdout?.trim() || ''}` }
+    } catch {
+      continue
+    }
+  }
+  return { text: null, error: '偏见内容提供者脚本无法运行（bun 与 node 均不可用）' }
 }
 
-/** 唤起消息（三段式：身份锚定 / 先验偏见[自生+随机] / 任务）——注入前台会话，用户可见 */
+/** 唤起消息（三段式：身份锚定 / 先验偏见[自生动机+偏见内容] / 任务）——注入前台会话，用户可见 */
 export function buildWakeMessage(opts: {
   sessionName: string
   mdPath: string
   intervalHours: number
   motivation: string | null
-  randomBasis: string | null
+  biasContent: string | null
 }): string {
   const lines: string[] = [
     `[自主轨迹唤起] — 距上次轨迹活动已满 ${opts.intervalHours} 小时，自动继续。`,
@@ -147,8 +169,8 @@ export function buildWakeMessage(opts: {
     '先验偏见：',
   ]
   if (opts.motivation) lines.push(`  · 自生动机：${opts.motivation}`)
-  if (opts.randomBasis) lines.push(`  · 随机方向：${opts.randomBasis}`)
-  if (!opts.motivation && !opts.randomBasis) lines.push('  · （无——本轮纯自主探索）')
+  if (opts.biasContent) lines.push(`  · 偏见内容：${opts.biasContent}`)
+  if (!opts.motivation && !opts.biasContent) lines.push('  · （无——本轮纯自主探索）')
   lines.push(
     '',
     '任务：执行一轮自主认知（探索/反事实检验），把产出写入 SESSION.md',
@@ -179,20 +201,23 @@ export function registerAutoTrajectory(ctx: Context): void {
     running = true
     void (async () => {
       try {
-        const msm = settings!.randomMsm?.trim() || DEFAULT_RANDOM_MSM
-        const [randomBasis, motivation] = await Promise.all([
-          fetchRandomBasis(root!, msm),
-          Promise.resolve(readSelfGeneratedMotivation(mdPath!)),
-        ])
+        // 偏见内容 = 运行 CCC 根目录下偏见提供者脚本（缺失 → 报错中止本轮唤起，要求 CCC 实现）
+        const provider = settings!.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER
+        const biasRes = await fetchBiasContent(root!, provider)
+        if (biasRes.error) {
+          console.error(`[serenity-hooks] ✗ 自主轨迹唤起中止（偏见内容缺失）: ${biasRes.error}`)
+          return
+        }
+        const motivation = readSelfGeneratedMotivation(mdPath!)
         const message = buildWakeMessage({
           sessionName: basename(dirname(mdPath!)),
           mdPath: mdPath!,
           intervalHours: settings!.intervalHours ?? 12,
           motivation,
-          randomBasis,
+          biasContent: biasRes.text,
         })
         agent.steer(createUserMessage({ content: [{ type: 'text', text: message }], source: PLUGIN_SOURCE }))
-        console.log(`[serenity-hooks] ✓ 自主轨迹唤起（${basename(dirname(mdPath!))}，随机源 ${msm}${randomBasis ? '' : '（随机源无输出）'}）`)
+        console.log(`[serenity-hooks] ✓ 自主轨迹唤起（${basename(dirname(mdPath!))}，偏见提供者 ${provider}）`)
       } catch (err) {
         console.warn(`[serenity-hooks] ✗ 自主轨迹唤起失败: ${String((err as Error)?.message ?? err)}`)
       } finally {

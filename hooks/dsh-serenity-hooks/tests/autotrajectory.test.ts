@@ -12,19 +12,15 @@ import { join } from 'node:path'
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
-vi.mock('../src/msm-ops.js', () => ({
-  runMsmAsync: vi.fn(),
-}))
 vi.mock('../src/session-ops.js', () => ({
   sessionsRoot: (root: string) => join(root, 'AGENT_SESSIONS'),
   findSession: vi.fn(),
   findLatestActiveSessionMd: vi.fn(),
 }))
 
-import { runMsmAsync } from '../src/msm-ops.js'
 import { findSession, findLatestActiveSessionMd } from '../src/session-ops.js'
 import {
-  DEFAULT_RANDOM_MSM,
+  DEFAULT_BIAS_PROVIDER,
   AUTO_DIR_SUFFIX,
   beijingHour,
   inAllowedWakeWindow,
@@ -32,11 +28,10 @@ import {
   resolveTargetMd,
   shouldWake,
   readSelfGeneratedMotivation,
-  fetchRandomBasis,
+  fetchBiasContent,
   buildWakeMessage,
 } from '../src/autotrajectory.js'
 
-const mockRunMsm = vi.mocked(runMsmAsync)
 const mockFindSession = vi.mocked(findSession)
 const mockFindLatest = vi.mocked(findLatestActiveSessionMd)
 
@@ -191,44 +186,62 @@ describe('readSelfGeneratedMotivation（自生动机）', () => {
   })
 })
 
-describe('fetchRandomBasis（随机方向 = CCC 自定义 MSM）', () => {
+describe('fetchBiasContent（偏见内容 = CCC 根目录偏见提供者脚本）', () => {
+  let tmp: string
   beforeEach(() => {
-    mockRunMsm.mockReset()
+    tmp = mkdtempSync(join(tmpdir(), 'at-bias-'))
+  })
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
   })
 
-  it('MSM exit 0 → stdout 为随机方向', async () => {
-    mockRunMsm.mockResolvedValue({ name: 'x', exit: 0, stdout: '反事实：如果改用离线索引会怎样', stderr: '' })
-    expect(await fetchRandomBasis('/root', DEFAULT_RANDOM_MSM)).toBe('反事实：如果改用离线索引会怎样')
-    expect(mockRunMsm).toHaveBeenCalledWith('/root', { action: 'exec', name: DEFAULT_RANDOM_MSM, args: [] })
+  it('脚本存在且 exit 0 → stdout 为偏见内容', async () => {
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("反事实：如果改用离线索引会怎样")')
+    const res = await fetchBiasContent(tmp, 'bias.js')
+    expect(res.error).toBeNull()
+    expect(res.text).toBe('反事实：如果改用离线索引会怎样')
   })
 
-  it('exit 非 0 / 抛错 → null（本轮跳过随机方向，不阻断唤起）', async () => {
-    mockRunMsm.mockResolvedValue({ name: 'x', exit: 1, stdout: '', stderr: 'boom' })
-    expect(await fetchRandomBasis('/root', 'x')).toBeNull()
-    mockRunMsm.mockRejectedValue(new Error('ENOENT'))
-    expect(await fetchRandomBasis('/root', 'x')).toBeNull()
+  it('脚本缺失 → error 提示实现（不静默）', async () => {
+    const res = await fetchBiasContent(tmp, DEFAULT_BIAS_PROVIDER)
+    expect(res.text).toBeNull()
+    expect(res.error).toContain('请在 CCC 根目录实现偏见内容提供者脚本')
+    expect(res.error).toContain(DEFAULT_BIAS_PROVIDER)
+  })
+
+  it('路径逃逸（根外）→ error 拒绝', async () => {
+    const res = await fetchBiasContent(tmp, '../outside.js')
+    expect(res.text).toBeNull()
+    expect(res.error).toContain('路径逃逸')
+  })
+
+  it('脚本 exit 非 0 → error 执行失败', async () => {
+    writeFileSync(join(tmp, 'fail.js'), 'process.exit(3)')
+    const res = await fetchBiasContent(tmp, 'fail.js')
+    expect(res.text).toBeNull()
+    expect(res.error).toContain('执行失败')
   })
 })
 
 describe('buildWakeMessage（唤起消息三段式）', () => {
-  it('含自生动机 + 随机方向', () => {
+  it('含自生动机 + 偏见内容', () => {
     const msg = buildWakeMessage({
       sessionName: '2026-08-30--S143--exp--auto',
       mdPath: '/x/SESSION.md',
       intervalHours: 12,
       motivation: '探索 B 方案',
-      randomBasis: '反事实：步骤 3 换做法',
+      biasContent: '反事实：步骤 3 换做法',
     })
     expect(msg).toContain('[自主轨迹唤起] — 距上次轨迹活动已满 12 小时')
     expect(msg).toContain('身份锚定：继续 2026-08-30--S143--exp--auto 的 trajectory')
     expect(msg).toContain('· 自生动机：探索 B 方案')
-    expect(msg).toContain('· 随机方向：反事实：步骤 3 换做法')
+    expect(msg).toContain('· 偏见内容：反事实：步骤 3 换做法')
     expect(msg).toContain('「自主探索日志」段')
     expect(msg).toContain('预写「下一轮动机」段')
   })
 
   it('都无 → 标注纯自主探索', () => {
-    const msg = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 12, motivation: null, randomBasis: null })
+    const msg = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 12, motivation: null, biasContent: null })
     expect(msg).toContain('（无——本轮纯自主探索）')
   })
 })

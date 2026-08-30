@@ -46,27 +46,21 @@
   "autotrajectory": {
     "enabled": true,                 // 总开关（缺省 false——默认关，未开零资源占用）
     "intervalHours": 12,             // 无人类活动 N 小时后自动唤起（缺省 12）
-    "randomMsm": "auto_trajectory_random_basis_provider", // 随机方向 MSM（缺省同名）
+    "biasProvider": "autotrajectory-bias.ts", // 偏见内容提供者脚本（相对 CCC 根，缺省同名）
     "session": "S143",               // 可选：固定目标会话（S###/目录名）；缺省 = 最近活跃
     "avoidWakeHours": { "start": 8, "end": 18 }  // 可选：避开北京高峰（缺省 8~18，用量峰谷省钱）
   }
 }
 ```
 
-### 3.2 注册随机方向 MSM（CCC 自己写——随机性归 CCC）
+> 实验包提供一键初始化：`acc_msm exec autotrajectory-exp init`（写配置 + 生成偏见提供者脚本模板）。
 
-dsp 唤起时机械执行该 MSM 取 stdout 作为随机方向。**随机性由 CCC 保证**（CCC 有具体的反馈信息来源：历史事件、外部信息、真随机源等——用自己认为"足够随机"的方式）。
+### 3.2 实现偏见内容提供者（CCC 根目录脚本——偏见内容归 CCC）
 
-```bash
-acc_msm register auto_trajectory_random_basis_provider \
-  --skill <你的skill> --path <脚本路径> --category mech \
-  --description "自主轨迹随机方向提供者（CCC 自定义随机源）"
-```
-
-MSM 脚本要求：输出一行/一段文本 = 本轮随机方向（反事实问题 / 探索方向 / 任何让轨迹偏离既有路径的输入）。示例骨架：
+CCC 根目录下一个脚本（缺省 `autotrajectory-bias.ts`），dsp 唤起时**直接运行**取 stdout 作为偏见内容。**偏见内容由 CCC 保证**（CCC 有具体的反馈信息来源：历史事件、外部信息、真随机源等——用自己认为"足够随机"的方式）。**脚本缺失 → 唤起中止并报错要求实现**（不再经 mech-registry 注册 MSM）。`acc_msm exec autotrajectory-exp random` 可验证输出。
 
 ```ts
-// scripts/auto-random.ts
+// autotrajectory-bias.ts（CCC 根）
 // 示例：随机取历史 SESSION 的一个话题 → 生成反事实方向（CCC 可换任何随机源）
 const sources = ['离线索引', '会话命名', '守卫语义', '轨迹落盘'] // ← CCC 自己的信息来源
 const pick = sources[Math.floor(Math.random() * sources.length)]
@@ -101,7 +95,7 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 
 ```
 定时器 tick（每 10min）→ 条件满足 →
-  ① exec <randomMsm> → stdout = 随机方向（CCC 自定）
+  ① 运行 <biasProvider> 脚本 → stdout = 偏见内容（CCC 自定）
   ② 读 SESSION.md「下一轮动机」段 → 自生动机
   ③ 定位活跃会话 agent（ctx.agents.get）→ agent.steer 注入唤起消息
      → 模型在当前前台会话自动继续运行
@@ -115,7 +109,7 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 身份锚定：继续 <S###> 的 trajectory（SESSION.md: <path>）。
 先验偏见：
   · 自生动机：<「下一轮动机」段，无则省略>
-  · 随机方向：<randomMsm 输出>
+  · 偏见内容：<biasProvider 输出>
 任务：执行一轮自主认知（探索/反事实检验），把产出写入 SESSION.md
 「自主探索日志」段，并预写「下一轮动机」段。完成后自然结束。
 ```
@@ -137,7 +131,7 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 | 层 | 职责 |
 |----|------|
 | **dsp（机制）** | 定时器、唤起条件判定、偏见注入、前台 steer、落盘引导——全部机械，零 LLM 决策 |
-| **CCC（定义）** | 随机性（randomMsm 的内容与随机源）、目标会话（--auto 标志）、唤起窗口（avoidWakeHours）、自生动机（下一轮动机段）——实验的"内容"完全由 CCC 掌控 |
+| **CCC（定义）** | 偏见内容（biasProvider 脚本的内容与随机源）、目标会话（--auto 标志）、唤起窗口（avoidWakeHours）、自生动机（下一轮动机段）——实验的"内容"完全由 CCC 掌控 |
 
 > 设计意图：dsp 只提供"轨迹自己跑起来"的骨架，**往哪个方向跑、跑得多随机**是 CCC 的实验变量。
 
