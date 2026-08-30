@@ -68,7 +68,6 @@ Uninstall: `dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 | **Dual-port gateway** | 3081 (default 0.0.0.0) | Full WebUI after login (password OR TOTP + workspace whitelist) |
 | **Skiff debug Q&A page** | 3099 (default 127.0.0.1) | Cognitive-subset role debugging (multi-CCC switching + trajectory rendering) |
 | **ACP + public ask page** | 3100 (default 127.0.0.1) | ACP JSON-RPC programmatic access + public Q&A page (key auth + container whitelist; Q&A only — no internal trajectory) |
-| **Public access** | Cloudflare Tunnel | Expose to the internet via tunnel (dsh / asktest entries) |
 
 ---
 
@@ -165,7 +164,7 @@ A CCC carves out **any subset of its full-knowledge trajectory** (`.opencode/ser
 
 - **Key auth** (timing-safe + per-IP fail-lock + rotatable key) + container whitelist (empty = all open)
 - **Q&A only**: response contains answer/answer_html/sessionId — **no internal trajectory**
-- Expose to the internet via Cloudflare Tunnel (no DSH config change)
+- **Internet exposure is a deployment-side choice** (tunnel / reverse proxy / port mapping) — the plugin does not mandate any specific exposure; default listens on 127.0.0.1 only, exposure is a deployment decision
 
 ### Security model
 
