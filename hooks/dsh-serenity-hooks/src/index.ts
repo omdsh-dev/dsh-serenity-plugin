@@ -44,6 +44,7 @@ import { registerOutputGuardHook } from './output-guard-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
+import { registerAutoTrajectory } from './autotrajectory.js'
 
 export const name = 'dsh-serenity-hooks'
 
@@ -167,6 +168,9 @@ export function apply(ctx: Context, config: Config): void {
   // F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点装配——人工开关（settings acpEnabled）→
   // 启动/停止；session/new 支持 {ccc, role, sessionId?}（复用 skiff 核心 + 会话延续）
   registerAcp(ctx)
+  // 自主轨迹（v1.26.12 实验提案）：CCC 定义（serenity.json autotrajectory）→ 时钟唤起 +
+  // 先验偏见注入（前台运行）。enabled=false 未配置 → 零资源占用；不触碰任何现有机制。
+  registerAutoTrajectory(ctx)
 }
 
 /**
