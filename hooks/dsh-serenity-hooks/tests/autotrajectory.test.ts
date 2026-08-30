@@ -39,6 +39,7 @@ import {
   listLiveSessions,
   resolveAutoTrajectoryCcc,
   diagLive,
+  registerAutoTrajectory,
 } from '../src/autotrajectory.js'
 
 const mockFindSession = vi.mocked(findSession)
@@ -615,5 +616,84 @@ describe('listLiveSessions / resolveAutoTrajectoryCcc / diagLive（进程内诊�
     expect(r.autotrajectoryCccs).toHaveLength(1)
     expect(r.autotrajectoryCccs[0]!.enabled).toBe(true)
     expect(r.autotrajectoryCccs[0]!.session).toBe('S143')
+  })
+})
+
+describe('registerAutoTrajectory（时钟定时器——v1.26.14 修复：启动时 live 会话为空导致定时器永不启动）', () => {
+  let tmp: string
+  let listeners: Record<string, Array<(payload?: unknown) => void>>
+  let timer: ReturnType<typeof setInterval> | null
+  let liveSessions: unknown[]
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'at-reg-'))
+    writeFileSync(join(tmp, '.serenity'), '')
+    mockFindSession.mockReset()
+    listeners = {}
+    timer = null
+    liveSessions = []
+    // mock setInterval/unref：记录定时器并阻止真实计时
+    vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void, ms: number) => {
+      timer = { fn, ms, unref: () => undefined } as unknown as ReturnType<typeof setInterval>
+      return timer
+    }) as typeof setInterval)
+    vi.spyOn(global, 'clearInterval').mockImplementation(() => { timer = null })
+  })
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+    vi.restoreAllMocks()
+  })
+
+  function makeCtx(): { ctx: unknown; emit: (name: string) => void; setSessions: (s: unknown[]) => void } {
+    const ctx = {
+      sessions: { list: () => liveSessions },
+      agents: { get: () => undefined },
+      on: (name: string, fn: (payload?: unknown) => void) => { (listeners[name] ??= []).push(fn) },
+    }
+    return {
+      ctx,
+      emit: (name) => { for (const fn of listeners[name] ?? []) fn() },
+      setSessions: (s) => { liveSessions = s },
+    }
+  }
+
+  function writeCfg(cfg: unknown): void {
+    const dir = join(tmp, '.opencode')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'serenity.json'), JSON.stringify({ autotrajectory: cfg }))
+  }
+
+  it('启动时无 live 会话（或未配置）→ 不启动定时器（零资源占用）', () => {
+    const { ctx } = makeCtx()
+    registerAutoTrajectory(ctx as never)
+    expect(timer).toBeNull()
+  })
+
+  it('启动时已有实验 CCC live 会话 → 立即启动定时器（v1.26.14 主路径）', () => {
+    writeCfg({ enabled: true, session: 'S143' })
+    const { ctx, setSessions } = makeCtx()
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    registerAutoTrajectory(ctx as never)
+    expect(timer).not.toBeNull()
+  })
+
+  it('启动时无会话 → 会话出现（session/created）后启动定时器（修复核心）', () => {
+    writeCfg({ enabled: true, session: 'S143' })
+    const { ctx, emit, setSessions } = makeCtx() // 启动时无 live 会话
+    registerAutoTrajectory(ctx as never)
+    expect(timer).toBeNull() // 未启动
+    // 用户打开实验 CCC 会话 → session/created 触发
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    emit('session/created')
+    expect(timer).not.toBeNull() // 定时器启动
+  })
+
+  it('配置关闭（enabled=false）→ 即使会话出现也不启动', () => {
+    writeCfg({ enabled: false })
+    const { ctx, emit, setSessions } = makeCtx()
+    registerAutoTrajectory(ctx as never)
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    emit('session/created')
+    expect(timer).toBeNull()
   })
 })

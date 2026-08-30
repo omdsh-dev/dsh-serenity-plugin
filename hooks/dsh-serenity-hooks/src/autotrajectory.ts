@@ -233,19 +233,36 @@ export async function performAutoTrajectoryWake(
 }
 
 /**
- * 装配（index.ts apply 调用）：仅当 CCC 配置 autotrajectory.enabled=true 时启动定时器；
- * 否则零资源占用。定时器 tick 检查唤起条件 → 注入活跃会话（agent.steer，前台可见）。
+ * 装配（index.ts apply 调用）。时钟唤起（v1.26.14 修复——用户"手动唤起正常，时钟唤起不工作"）：
+ *
+ * 根因：旧实现启动时一次性 `resolveAutoTrajectoryRoot(ctx)`——web 进程启动时 live 会话
+ * 往往为空（用户尚未打开实验 CCC 会话）→ root=null → settings=null → **定时器根本不启动**；
+ * 手动唤起走 HTTP 端点（点击时重新解析 root）→ 正常。
+ *
+ * 修复：
+ * ① **动态解析**：每次 tick 重新解析 root + settings（不绑定启动时值）——live 会话变化即跟上；
+ * ② **事件驱动启动**：监听 `session/created`（live 会话出现）→ 启动定时器（进程启动时若
+ *    已有实验 CCC 会话则立即启动）；
+ * ③ **优先实验 CCC**：resolveAutoTrajectoryCcc（配置了 autotrajectory 的 live CCC）优先于
+ *    进程 cwd/任一 live（多 CCC 同实例时时钟唤起绑定实验 CCC，而非当前维护会话 CCC）。
+ *
+ * 零资源占用语义保留：未配置/未启用 → tick 内直接 return（定时器存在但每 10min 一次空检查，
+ * unref 不阻塞进程退出）。
  */
 export function registerAutoTrajectory(ctx: Context): void {
-  const root = resolveAutoTrajectoryRoot(ctx)
-  const settings = root ? readAutoTrajectorySettings(root) : null
-  if (!settings?.enabled) return // 默认关
+  let timer: NodeJS.Timeout | null = null
   let running = false
+
+  /** 解析当前应绑定的实验 CCC：配置了 autotrajectory 的 live CCC 优先，回退进程 cwd/任一 live */
+  const resolveRoot = (): string | null => resolveAutoTrajectoryCcc(ctx) ?? resolveAutoTrajectoryRoot(ctx)
 
   const tick = (): void => {
     if (running) return // 防重入（一轮唤起进行中不重复触发）
-    const mdPath = resolveTargetMd(root!, settings!)
-    if (!shouldWake(settings!, mdPath, Date.now(), running)) return
+    const root = resolveRoot()
+    const settings = root ? readAutoTrajectorySettings(root) : null
+    if (!settings?.enabled) return // 未配置/未启用 → 不唤起（定时器保留，等待配置/会话出现）
+    const mdPath = resolveTargetMd(root!, settings)
+    if (!shouldWake(settings, mdPath, Date.now(), running)) return
     running = true
     void (async () => {
       try {
@@ -260,11 +277,28 @@ export function registerAutoTrajectory(ctx: Context): void {
     })()
   }
 
-  const timer = setInterval(tick, TICK_MS)
-  // unref：进程存活时定时器照常触发；进程退出（插件卸载/服务器停止）不阻塞退出——无需 dispose 事件
-  timer.unref()
-  // 启动时立即检查一次（插件重启后恢复节律，无需等首个 10min）
-  tick()
+  const startTimer = (): void => {
+    if (timer) return
+    const root = resolveRoot()
+    const settings = root ? readAutoTrajectorySettings(root) : null
+    if (!settings?.enabled) return // 默认关（未配置/未启用 → 不启动定时器，零资源占用）
+    timer = setInterval(tick, TICK_MS)
+    // unref：进程存活时定时器照常触发；进程退出（插件卸载/服务器停止）不阻塞退出
+    timer.unref()
+    console.log(`[serenity-hooks] ✓ 自主轨迹定时器启动（${root}，intervalHours=${settings.intervalHours ?? 12}）`)
+    // 启动时立即检查一次（插件重启后恢复节律，无需等首个 10min）
+    tick()
+  }
+
+  // ① 进程启动时：若已有实验 CCC 会话 → 立即启动
+  startTimer()
+  // ② 会话出现（用户打开实验 CCC）→ 启动定时器（v1.26.14 修复：启动时 live 会话为空
+  //    导致旧实现定时器永不启动——时钟唤起依赖 live 会话 cwd 解析 root）
+  try {
+    ctx.on('session/created', () => startTimer())
+  } catch {
+    /* 事件通道缺失不阻断（启动时 startTimer 已尝试一次） */
+  }
 }
 
 /** 目标 agent：从 SESSION.md 反向定位 dsh 会话（标题 F3 命名 S###-日期 匹配 + cwd 归属校验）；不可得 → null */
