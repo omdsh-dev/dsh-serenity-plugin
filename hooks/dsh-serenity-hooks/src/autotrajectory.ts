@@ -214,7 +214,8 @@ export async function performAutoTrajectoryWake(
   }
   const agent = resolveTargetAgent(ctx, mdPath)
   if (!agent) {
-    return { ok: false, detail: '目标会话 agent 不可得（先在会话列表激活目标会话后重试）' }
+    const diag = diagnoseTargetUnavailable(ctx, mdPath)
+    return { ok: false, detail: `目标会话 agent 不可得——${diag ?? '目标会话未打开或命名未生效'}` }
   }
   const provider = settings.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER
   const biasRes = await fetchBiasContent(root, provider)
@@ -266,15 +267,26 @@ export function registerAutoTrajectory(ctx: Context): void {
   tick()
 }
 
-/** 目标 agent：从 SESSION.md 反向定位 dsh 会话（标题 F3 命名 S###-日期 匹配）；不可得 → null */
+/** 目标 agent：从 SESSION.md 反向定位 dsh 会话（标题 F3 命名 S###-日期 匹配 + cwd 归属校验）；不可得 → null */
 function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
   const dirName = basename(dirname(mdPath))
   const idMatch = dirName.match(/--S(\d{3,})--/)
   const sid = idMatch ? `S${idMatch[1]}` : null
+  const targetRoot = findSerenityRoot(mdPath)
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ id?: string; title?: string }> } }).sessions
+    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ id?: string; header?: { cwd?: string } }> } }).sessions
     for (const s of sessions?.list?.() ?? []) {
-      if (sid && (s.title === sid || s.title?.startsWith(`${sid}-`))) {
+      // cwd 归属校验：同实例多 CCC 时不误匹配（只找目标 SESSION 所在 CCC 的会话）。
+      // targetRoot 可解析（CCC 环境）→ 会话 CCC 根必须一致；不可解析（非 CCC/测试）→
+      // 会话 cwd 必须是 mdPath 的祖先路径（覆盖 AGENT_SESSIONS 挂载场景）。
+      const cwd = s?.header?.cwd ?? ''
+      if (targetRoot) {
+        if (findSerenityRoot(cwd) !== targetRoot) continue
+      } else if (cwd !== '' && !mdPath.startsWith(cwd.endsWith('/') ? cwd : cwd + '/')) {
+        continue
+      }
+      const title = readSessionTitle(s)
+      if (sid && title && (title === sid || title.startsWith(`${sid}-`))) {
         const agent = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(s.id ?? '')
         if (agent) return agent
       }
@@ -283,6 +295,64 @@ function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
     /* 遍历失败忽略 */
   }
   return null
+}
+
+/**
+ * 从 dsh 会话 log 读取标题（latest-wins `session/title` 事件）——
+ * **标题不在 sessions.list() 条目上**（wire/对象均无 title 字段；F3 命名经
+ * sessionTitle.rename 写进 session log），必须从 events 提取（rebuild 同款读取模式）。
+ */
+function readSessionTitle(session: unknown): string | null {
+  try {
+    const events = (session as { events?: readonly { type?: string; data?: { title?: unknown } }[] } | undefined)?.events
+    if (!Array.isArray(events)) return null
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]
+      if (e?.type === 'session/title' && typeof e.data?.title === 'string' && e.data.title.trim() !== '') {
+        return e.data.title.trim()
+      }
+    }
+  } catch {
+    /* events 访问失败忽略 */
+  }
+  return null
+}
+
+/**
+ * 诊断：目标会话 agent 为何不可得（供 performAutoTrajectoryWake 失败信息——
+ * 区分"live 会话里无匹配" vs "匹配但 agent 未加载"）。返回诊断文本（无则 null）。
+ */
+function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null {
+  const dirName = basename(dirname(mdPath))
+  const idMatch = dirName.match(/--S(\d{3,})--/)
+  const sid = idMatch ? `S${idMatch[1]}` : null
+  const targetRoot = findSerenityRoot(mdPath)
+  const sameCccTitles: string[] = []
+  const agentMissing = { sid: false }
+  try {
+    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ id?: string; header?: { cwd?: string } }> } }).sessions
+    for (const s of sessions?.list?.() ?? []) {
+      const cwd = s?.header?.cwd ?? ''
+      if (targetRoot) {
+        if (findSerenityRoot(cwd) !== targetRoot) continue
+      } else if (cwd !== '' && !mdPath.startsWith(cwd.endsWith('/') ? cwd : cwd + '/')) {
+        continue
+      }
+      const title = readSessionTitle(s)
+      if (title) sameCccTitles.push(title)
+      if (sid && title && (title === sid || title.startsWith(`${sid}-`))) {
+        const agent = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(s.id ?? '')
+        if (!agent) agentMissing.sid = true
+      }
+    }
+  } catch {
+    /* 遍历失败忽略 */
+  }
+  if (agentMissing.sid) return `会话 ${sid} 已打开但 agent 未加载（会话可能刚创建/正在恢复——稍后重试）`
+  if (sameCccTitles.length > 0) {
+    return `目标 CCC 内 live 会话标题: [${sameCccTitles.join(', ')}]——均不匹配 ${sid}（目标会话未在 WebUI 打开，或命名未生效）`
+  }
+  return `目标 CCC 内无 live 会话（先在 WebUI 打开 ${sid} 会话后重试）`
 }
 
 /** 自主轨迹绑定的 CCC 根：进程 cwd 上溯 .serenity 优先，回退任一 live 会话 root */

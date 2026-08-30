@@ -358,8 +358,18 @@ describe('performAutoTrajectoryWake（时钟与「立即唤起」共用执行体
   let steer: ReturnType<typeof vi.fn>
 
   function makeCtx(): unknown {
+    // 真实 dsh 形态：sessions.list() 条目无 title 字段——标题在 events 的 session/title 事件里；
+    // header.cwd 决定 CCC 归属（performAutoTrajectoryWake 的 tmp 即根，这里 cwd=tmp 命中归属校验）
     return {
-      sessions: { list: () => [{ id: 'sess-1', title: 'S143-2026-08-30' }] },
+      sessions: {
+        list: () => [
+          {
+            id: 'sess-1',
+            header: { cwd: tmp },
+            events: [{ type: 'session/title', data: { title: 'S143-2026-08-30', messageSeqs: [], source: { kind: 'user' } } }],
+          },
+        ],
+      },
       agents: { get: (id: string) => (id === 'sess-1' ? { steer } : undefined) },
     }
   }
@@ -442,5 +452,83 @@ describe('performAutoTrajectoryWake（时钟与「立即唤起」共用执行体
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('agent 不可得')
     expect(steer).not.toHaveBeenCalled()
+  })
+
+  it('标题从 events 的 session/title 事件读取（latest-wins）', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    // 旧标题在前、新标题在后 → 取最后一条（latest-wins 语义）
+    const ctx = {
+      sessions: {
+        list: () => [
+          {
+            id: 'sess-2',
+            header: { cwd: tmp },
+            events: [
+              { type: 'session/title', data: { title: '旧标题' } },
+              { type: 'session/title', data: { title: 'S143-2026-08-30' } },
+            ],
+          },
+        ],
+      },
+      agents: { get: (id: string) => (id === 'sess-2' ? { steer } : undefined) },
+    }
+    const res = await performAutoTrajectoryWake(ctx as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(true)
+    expect(steer).toHaveBeenCalledTimes(1)
+  })
+
+  it('cwd 归属校验：其他 CCC 的会话（header.cwd 非目标根）不匹配', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    // 标题匹配但 cwd 归属其他 CCC → 拒绝（不误唤起别的 CCC 会话）
+    const ctx = {
+      sessions: {
+        list: () => [
+          {
+            id: 'sess-other',
+            header: { cwd: '/other/ccc' },
+            events: [{ type: 'session/title', data: { title: 'S143-2026-08-30' } }],
+          },
+        ],
+      },
+      agents: { get: () => ({ steer }) },
+    }
+    const res = await performAutoTrajectoryWake(ctx as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('agent 不可得')
+    expect(steer).not.toHaveBeenCalled()
+  })
+
+  it('agent 不可得时诊断信息：区分「无 live 会话」/「标题不匹配」/「agent 未加载」', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    // ① 目标 CCC 内无 live 会话 → 提示先打开
+    const empty = { sessions: { list: () => [] }, agents: { get: () => undefined } }
+    const r1 = await performAutoTrajectoryWake(empty as never, tmp, cfg, { force: true })
+    expect(r1.detail).toContain('无 live 会话')
+    // ② 目标 CCC 内有会话但标题不匹配 → 列出标题
+    const mismatch = {
+      sessions: {
+        list: () => [
+          { id: 'a', header: { cwd: tmp }, events: [{ type: 'session/title', data: { title: 'S999-其他' } }] },
+        ],
+      },
+      agents: { get: () => ({ steer }) },
+    }
+    const r2 = await performAutoTrajectoryWake(mismatch as never, tmp, cfg, { force: true })
+    expect(r2.detail).toContain('S999-其他')
+    expect(r2.detail).toContain('均不匹配')
+    // ③ 标题匹配但 agent 未加载 → 明确提示
+    const noAgent = {
+      sessions: {
+        list: () => [
+          { id: 'a', header: { cwd: tmp }, events: [{ type: 'session/title', data: { title: 'S143-2026-08-30' } }] },
+        ],
+      },
+      agents: { get: () => undefined },
+    }
+    const r3 = await performAutoTrajectoryWake(noAgent as never, tmp, cfg, { force: true })
+    expect(r3.detail).toContain('已打开但 agent 未加载')
   })
 })
