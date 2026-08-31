@@ -265,15 +265,19 @@ describe('fetchBiasContent（偏见内容 = CCC 根目录偏见提供者脚本�
   })
 })
 
-describe('buildWakeMessage（唤起消息三段式）', () => {
-  it('含自生动机 + 偏见内容', () => {
+describe('buildWakeMessage（唤起消息四段式：轨迹焦点 / 身份锚定 / 先验偏见 / 任务）', () => {
+  it('轨迹焦点（CCC 定义）最先注入——稳定锚定防漂移', () => {
     const msg = buildWakeMessage({
       sessionName: '2026-08-30--S143--exp--auto',
       mdPath: '/x/SESSION.md',
       intervalHours: 12,
+      topPrompt: '持续深化某领域认知，产出可重建的结论',
       motivation: '探索 B 方案',
       biasContent: '反事实：步骤 3 换做法',
     })
+    // 轨迹焦点必须出现在消息第一行（影响力最大）
+    expect(msg.startsWith('[轨迹焦点] 持续深化某领域认知，产出可重建的结论')).toBe(true)
+    expect(msg.indexOf('[轨迹焦点]')).toBeLessThan(msg.indexOf('[自主轨迹唤起]'))
     expect(msg).toContain('[自主轨迹唤起] — 距上次轨迹活动已满 12 小时')
     expect(msg).toContain('身份锚定：继续 2026-08-30--S143--exp--auto 的 trajectory')
     expect(msg).toContain('· 自生动机：探索 B 方案')
@@ -282,8 +286,9 @@ describe('buildWakeMessage（唤起消息三段式）', () => {
     expect(msg).toContain('预写「下一轮动机」段')
   })
 
-  it('都无 → 标注纯自主探索', () => {
-    const msg = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 12, motivation: null, biasContent: null })
+  it('无轨迹焦点 → 消息不含该段（存量实验兼容：唤起仍可进行）', () => {
+    const msg = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 12, topPrompt: null, motivation: null, biasContent: null })
+    expect(msg.startsWith('[轨迹焦点]')).toBe(false)
     expect(msg).toContain('（无——本轮纯自主探索）')
   })
 })
@@ -310,20 +315,28 @@ describe('getAutoTrajectoryStatus（面板状态——GET /serenity/autotrajecto
     expect(s.enabled).toBe(false)
     expect(s.target).toBeNull()
     expect(s.biasProvider).toBe(DEFAULT_BIAS_PROVIDER)
+    expect(s.topPrompt).toBeNull()
     expect(s.beijingHour).toBeGreaterThanOrEqual(0)
     expect(s.beijingHour).toBeLessThan(24)
   })
 
   it('已配置未启用 → enabled=false，配置摘要展示', () => {
-    writeCfg({ enabled: false, intervalHours: 6, biasProvider: 'bias.ts', session: 'S143' })
+    writeCfg({ enabled: false, intervalHours: 6, biasProvider: 'bias.ts', topPrompt: 'EAP 质量', session: 'S143' })
     const s = getAutoTrajectoryStatus(tmp)
     expect(s.configured).toBe(true)
     expect(s.enabled).toBe(false)
     expect(s.intervalHours).toBe(6)
     expect(s.biasProvider).toBe('bias.ts')
+    expect(s.topPrompt).toBe('EAP 质量')
     expect(s.session).toBe('S143')
     // 未启用：仍尝试解析目标（展示用）——未命中 → null
     expect(s.target).toBeNull()
+  })
+
+  it('已配置 topPrompt 空白 → 归一为 null（面板显示未配置）', () => {
+    writeCfg({ enabled: true, topPrompt: '   ' })
+    const s = getAutoTrajectoryStatus(tmp)
+    expect(s.topPrompt).toBeNull()
   })
 
   it('启用 + 会话命中（--auto）→ target 完整：标志/空闲/可唤起', () => {

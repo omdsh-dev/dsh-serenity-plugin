@@ -130,6 +130,14 @@ export interface AutoTrajectorySettings {
   intervalHours?: number;
   /** 偏见内容提供者脚本（相对 CCC 根；缺省 autotrajectory-bias.ts——缺失报错要求实现） */
   biasProvider?: string;
+  /**
+   * 轨迹焦点（topPrompt，v1.26.17，用户"确保自动轨迹质量"）：**CCC 定义 autotrajectory 时
+   * 自己填写**的顶层提示词——本轨迹的核心目标/纪律/质量要求。**每次唤起最先注入**（位于
+   * 身份锚定之前，影响力最大），作为稳定焦点锚定 trajectory，防止多轮自主唤起中焦点丢失
+   * （腐化）。区别于偏见内容（每轮随机探索方向）：焦点=稳定锚，偏见=随机探索，两者互补。
+   * 实验经验：trajectory 在多轮中腐化严重（焦点丢失）——topPrompt 即为此而设。
+   */
+  topPrompt?: string;
   /** **必填**：目标会话（S### / 目录名）——未配置绝不唤起（CCC 日常多轨迹并行，不默认） */
   session?: string;
   /** 避开唤起的高峰时段（北京时间，[start, end) 内不唤起；缺省 {8, 18}——用量峰谷省钱） */

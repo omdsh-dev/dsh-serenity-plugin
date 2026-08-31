@@ -84,7 +84,7 @@ export function createAutoTrajectoryExpTool(ctx: Context): ReturnType<typeof def
   return defineTool({
     name: 'autotrajectory-exp',
     description:
-      '自主轨迹实验（Self-Sustaining Trajectory）一站式管理——实验提案 v1.26.14，默认关。无参/action=all：全报告（背景摘要 + 就绪检查 + 状态 + 下一步）——CCC agent 看一次即完整理解实验并知道怎么开始；init：初始化辅助（写配置 + 生成偏见提供者脚本模板）；random：运行偏见提供者脚本输出当前偏见内容；diag：唤起条件链诊断（--ccc <path> 指定 CCC，无参递归扫描 /home/yh 两层——覆盖任意实验 CCC 位置；逐条件输出 + 阻断点 + 修复建议）；diag-live：**进程内诊断**（v1.26.14——live 会话清单/标题/agent 定位/面板解析目标；排查"面板检测不到实验 CCC"）；doc：实验定义全文；check/status/guide：单项。实验是 CCC 的自选动作——dsp 只提供工具与知识，不自动安装任何东西。',
+      '自主轨迹实验（Self-Sustaining Trajectory）一站式管理——实验提案 v1.26.14，默认关。无参/action=all：全报告（背景摘要 + 就绪检查 + 状态 + 下一步）——CCC agent 看一次即完整理解实验并知道怎么开始；init：初始化辅助（写配置 + 生成偏见提供者脚本模板）；random：运行偏见提供者脚本输出当前偏见内容；diag：唤起条件链诊断（--ccc <path> 指定 CCC，无参递归扫描 /home/yh 两层——覆盖任意实验 CCC 位置；逐条件输出 + 阻断点 + 修复建议）；diag-live：**进程内诊断**（v1.26.14——live 会话清单/标题/agent 定位/面板解析目标；排查"面板检测不到实验 CCC"）；doc：实验定义全文；check/status/guide：单项。**topPrompt（v1.26.17，轨迹焦点）**：CCC 定义 autotrajectory 时自己填写本轨迹核心焦点（顶层提示词），每次唤起最先注入——稳定焦点锚定防漂移（实验观察：无焦点多轮唤起轨迹腐化），与偏见内容（每轮随机探索）互补。实验是 CCC 的自选动作——dsp 只提供工具与知识，不自动安装任何东西。',
     parameters: {
       action: { type: 'string', enum: [...AUTO_TRAJECTORY_EXP_ACTIONS], required: true, description: 'Subcommand' },
     },

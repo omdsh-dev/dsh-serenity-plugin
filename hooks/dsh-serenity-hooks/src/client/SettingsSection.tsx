@@ -309,6 +309,7 @@ interface AutoTrajectoryStatus {
   enabled: boolean
   intervalHours: number
   biasProvider: string
+  topPrompt: string | null
   session: string | null
   avoidWakeHours: { start: number; end: number }
   target: {
@@ -436,6 +437,13 @@ function AutoTrajectoryStatusBlock(): React.JSX.Element {
         <RowCard
           title="偏见提供者"
           desc={status.biasProvider}
+          control={null}
+        />
+      </li>
+      <li>
+        <RowCard
+          title="轨迹焦点 (topPrompt)"
+          desc={status.topPrompt ? status.topPrompt : '未定义——CCC 定义 autotrajectory 时应填写本轨迹核心焦点（防多轮唤起焦点丢失）'}
           control={null}
         />
       </li>

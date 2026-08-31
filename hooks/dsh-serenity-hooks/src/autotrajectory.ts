@@ -14,6 +14,10 @@
  *     stdout 作为偏见内容；脚本缺失 → **报错要求实现**（偏见内容归 CCC，实现 = 根目录放脚本）。
  *   · **会话标志 = 目录名后缀 --auto**（用户拍板：后缀，验证用方便）：
  *     AGENT_SESSIONS/<date>--<desc>--auto/ → 该轨迹为自主形态；无标志会话不受影响。
+ *   · **轨迹焦点 topPrompt = CCC 定义**（v1.26.17，用户"确保自动轨迹质量"）：CCC 在定义
+ *     autotrajectory 时自己填写本轨迹的顶层提示词（核心目标/纪律/质量要求），**每次唤起最先
+ *     注入**——稳定焦点锚定 trajectory，防止多轮自主唤起中焦点丢失（实验观察：轨迹腐化严重）。
+ *     与偏见内容分工：焦点=稳定锚（每轮不变），偏见=随机探索方向（每轮不同），互补。
  *   · **唤起窗口避开北京时间 8~18 点**（用户拍板：用量峰谷省钱）——avoidWakeHours 可覆盖。
  *   · **默认关**：serenity.json autotrajectory.enabled=false → 定时器不启动，零资源占用。
  *   · **零影响**：不修改任何现有工具 / seams / 外部面；新增独立模块 + ccc.ts 纯类型扩展。
@@ -155,20 +159,27 @@ export async function fetchBiasContent(root: string, providerRel: string): Promi
   return { text: null, error: '偏见内容提供者脚本无法运行（bun 与 node 均不可用）' }
 }
 
-/** 唤起消息（三段式：身份锚定 / 先验偏见[自生动机+偏见内容] / 任务）——注入前台会话，用户可见 */
+/** 唤起消息（四段式：轨迹焦点[CCC 定义，稳定] / 身份锚定 / 先验偏见[自生动机+偏见内容] / 任务）——注入前台会话，用户可见 */
 export function buildWakeMessage(opts: {
   sessionName: string
   mdPath: string
   intervalHours: number
+  topPrompt: string | null
   motivation: string | null
   biasContent: string | null
 }): string {
-  const lines: string[] = [
+  const lines: string[] = []
+  // 轨迹焦点最先注入（影响力最大——CCC 定义的本轨迹核心目标/纪律，每轮不变，锚定防漂移）
+  if (opts.topPrompt) {
+    lines.push(`[轨迹焦点] ${opts.topPrompt}`)
+    lines.push('')
+  }
+  lines.push(
     `[自主轨迹唤起] — 距上次轨迹活动已满 ${opts.intervalHours} 小时，自动继续。`,
     '',
     `身份锚定：继续 ${opts.sessionName} 的 trajectory（SESSION.md: ${opts.mdPath}）。`,
     '先验偏见：',
-  ]
+  )
   if (opts.motivation) lines.push(`  · 自生动机：${opts.motivation}`)
   if (opts.biasContent) lines.push(`  · 偏见内容：${opts.biasContent}`)
   if (!opts.motivation && !opts.biasContent) lines.push('  · （无——本轮纯自主探索）')
@@ -225,6 +236,7 @@ export async function performAutoTrajectoryWake(
     sessionName: basename(dirname(mdPath)),
     mdPath,
     intervalHours: Math.max(1, settings.intervalHours ?? 12),
+    topPrompt: settings.topPrompt?.trim() || null,
     motivation,
     biasContent: biasRes.text,
   })
@@ -420,6 +432,8 @@ export interface AutoTrajectoryStatus {
   intervalHours: number
   /** 偏见内容提供者脚本（相对 CCC 根；缺省 autotrajectory-bias.ts） */
   biasProvider: string
+  /** 顶层提示词（v1.26.17：每次唤起最先注入的稳定指令；未配置 → null） */
+  topPrompt: string | null
   /** 目标会话（S###/目录名；未配置 = 不唤起） */
   session: string | null
   /** 避开唤起的高峰时段（北京时间） */
@@ -449,6 +463,7 @@ export function getAutoTrajectoryStatus(root: string): AutoTrajectoryStatus {
     enabled: cfg?.enabled ?? false,
     intervalHours: Math.max(1, cfg?.intervalHours ?? 12),
     biasProvider: cfg?.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER,
+    topPrompt: cfg?.topPrompt?.trim() || null,
     session: cfg?.session ?? null,
     avoidWakeHours: {
       start: cfg?.avoidWakeHours?.start ?? DEFAULT_AVOID_HOURS.start,
