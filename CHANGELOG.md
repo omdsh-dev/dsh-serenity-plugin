@@ -1,3 +1,20 @@
+## v1.26.16 — 2026-08-31（npm 包 tarball 完整性修复：缺 chunk 加载即崩 + 类型全缺，S142 用户报告）
+
+**Scope:** 用户反馈 "npm我们发的dsp不完整，少东西了，检查下"。unpkg 实证 v1.26.15 tarball 仅 9 文件——缺 tsdown chunk（`lib/ccc-CfDrlfA7.js`），`lib/index.js` 第 1 行 import 解析失败 → **插件安装后加载即崩**；`.d.ts` 类型全缺（`package.json types` 悬空）。发布链修复 + 常驻校验工具。
+
+### 根因
+- **根因 1（files 白名单）**：`package.json files` 写死 3 个 JS（index/client/invariant），tsdown 把共享依赖抽成 chunk（`lib/ccc-*.js`，内容哈希名）不在白名单 → `npm publish` 只发白名单内文件 → chunk 丢失
+- **根因 2（prepare 链）**：npm publish 跑 `prepare`（tsdown.prepare.config.ts）只构建 JS；`build` 的 `tsc && tsdown` 顺序中 tsdown `clean:true` 清空 lib/ → tsc 产出的 `.d.ts` 全部丢失
+
+### 修复
+- **`package.json files`**：加 `lib/*.js`（覆盖 chunk）+ `lib/*.d.ts` + `lib/**/*.d.ts`（覆盖类型）
+- **`package.json build` / `prepare`**：改 `tsdown ... && tsc -p tsconfig.json --emitDeclarationOnly`——tsdown 先跑（clean 归它），tsc 后跑只补类型（不 clean 不覆盖 js）→ .d.ts 产出并进包
+- **`scripts/dsh-develop.ts` 新增 `pack-check` 子命令**：`npm pack --dry-run --json` 机械核对——固定必需 3 文件 + **动态核对 lib/ 全部 JS 产物**（tsdown chunk 名会变，写死必漏）+ 打印 lib/ 完整清单（js/d.ts 分列）——发布前强制校验（verifyTarball 抽函数，cmdPublish 复用）
+
+### 验证
+- `dsh-develop pack-check`：**64 文件全绿**（lib/ 58 项 = js 4 + d.ts 54；含 `lib/ccc-CfDrlfA7.js` + `lib/index.d.ts`）；typecheck ✓ → build ✓
+- unpkg 复核（发布后）：tarball 应含 chunk + 54 个 .d.ts
+
 ## v1.26.15 — 2026-08-31（自主轨迹三连修复：立即唤起 / 面板解析 / 时钟定时器，S142 实测驱动）
 
 **Scope:** 用户在 pangu-serenity 实测 v1.26.14 后三轮反馈：① "点唤起也没用，未唤起，排查"；② "实验状态检测不到pangu了，排查访问不到写个msm来排查"；③ "手动唤起执行正常，时钟唤起不工作，排查原因"。三个根因全部实证定位 + 修复 + 进程内诊断工具。**本机 deploy 已生效；npm 1.26.14 未含本版（发布补全）**。
