@@ -236,3 +236,100 @@
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
+/* ── 微信桥（F4c-3，v1.27.0 实验性）── */
+
+/* CCC 选择器（下拉） */
+.ss-select {
+  max-width: 280px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-fill-l1, rgba(128, 128, 128, 0.08));
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+/* 扫码绑定按钮（复用 wakeBtn 语言） */
+.ss-loginBtn {
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.12));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--ds-transition-duration-fast, 0.15s) ease;
+}
+
+.ss-loginBtn:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-success-primary, #22c55e);
+  color: var(--dsw-alias-state-success-primary, #22c55e);
+}
+
+.ss-loginBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 移除账号按钮（危险语义：红边框） */
+.ss-removeBtn {
+  flex: none;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.12));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--ds-transition-duration-fast, 0.15s) ease;
+}
+
+.ss-removeBtn:hover:not(:disabled) {
+  border-color: var(--dsw-alias-state-error-primary, #ef4444);
+  color: var(--dsw-alias-state-error-primary, #ef4444);
+}
+
+/* 二维码展示行 */
+.ss-qrRow {
+  align-items: flex-start;
+}
+
+.ss-qrSvg {
+  flex: none;
+  width: 160px;
+  height: 160px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: #fff; /* 二维码需要白底才能被微信扫出 */
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ss-qrSvg svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* 路由表 JSON 编辑框 */
+.ss-routesEditor {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-fill-l1, rgba(128, 128, 128, 0.08));
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+  font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  resize: vertical;
+}

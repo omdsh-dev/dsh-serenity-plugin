@@ -1,6 +1,6 @@
 # dsp 微信桥（weixin-bridge）— 方案设计（F4c-3，S142）
 
-> 状态：**方案草案 v0.1（2026-08-31，待用户审核）** — Neat 协议：需求层 → 范围层 → 方案层 → 接口层 → 实现层，未对齐不进实现。
+> 状态：**方案 v0.2（2026-08-31，用户六项裁决已收）** — Neat 协议：需求层 → 范围层 → 方案层 → 接口层 → 实现层，未对齐不进实现。
 > 前置：`docs/weixin-bot-api.md`（iLink 协议全解 + 裸调实证）、`docs/acp-wecom-design.md`（F4c 企微路线）。
 > 需求来源：用户 "dsp 能否接入微信的扫码协议，考虑多用户接入招财 role"——skiff 强化后支持微信扫码接入 → **代替 openclaw（招财平台）**。
 
@@ -12,29 +12,62 @@
 |---|------|--------------|------|
 | R1 | dsp 支持微信扫码接入（个人微信 iLink Bot API） | "dsp 能否接入微信的扫码协议" | 协议已验证可行 |
 | R2 | 多用户支持（多个微信用户与 bot 对话，各自独立会话） | "考虑多用户接入招财 role" | 协议天然支持（from_user_id 区分） |
-| R3 | 接入 skiff 角色体系（zhaocai role 已配置） | S149 决策：Skiff 替代 OpenClaw | zhaocai role 已生效 |
+| R3 | 接入 skiff 角色体系（不绑定具体 role，用户可配） | 用户裁决 3："ACC 层开发不能绑定具体 role，允许用户选择" | 路由可配置 |
 | R4 | 远期：代替 openclaw 平台 | S149 战略目标 | 本方案是其中一块 |
 
 **边界（不在本方案）**：
 - 不做群聊（首版仅私聊；群聊 context/语义另议）
 - 不做媒体收发首版（文本优先，图片/语音/文件后置——见 §5 分期）
 - 不做企微智能机器人（F4c-2 调研记录保留，合并评估见 §8）
+- **不做 weixin-admin 工具**（用户裁决：管理面收敛到 CCC 面板）
 
 ## 2. 范围层
 
-**做**：dsp 新增 `weixin-bridge` 服务——多账号 iLink 轮询 + 消息路由到 acp-core 直调 → skiff role 会话。
-**不做**：不新增 HTTP 端点（微信是出站长轮询，不需要公网入口——相对企微回调路线的关键优势）；不新建协议。
+**做**：dsp 新增 `weixin-bridge` 能力——**CCC 级**配置 + 多账号 iLink 轮询 + 消息路由到 acp-core 直调 → skiff role 会话。
+**不做**：不新增 HTTP 端点（微信是出站长轮询，不需要公网入口）；不新建协议；不做 agent 侧管理工具。
+
+**架构决策（用户拍板 2026-08-31）**：dsh 一个进程含多个 CCC，**每个 CCC 独立对接微信桥**——
+- **配置归属 CCC**（不是 plugin 全局）：结构/路由/开关进 `.opencode/serenity.json`（git 管可重建）；**token 凭据进 CCC localstore**（安全纪律，扫码后自动写入，面板只显示"已绑定"）
+- **每 CCC 独立桥实例**：账号 + 路由表 + 轮询循环都是 CCC 级，互不干扰
+- **手工配置**：面板扫码绑定 + 账号/路由编辑，无自动发现
+- **管理面 = 面板「微信桥」区块，显式 CCC 选择器**（S142 用户修正 2026-08-31：WebUI 是顶层全局单例，不能隐式依赖"当前活跃会话"的 workspace——微信桥是配置写入，必须显式回答"配的是哪个 CCC"）：
+  - 区块顶部 = **CCC 选择器**（数据源 = 现成 `discoverCccs`，复用 skiff 调试页切换器/开放容器白名单同款；零新机制）
+  - 选中 CCC → 显示/编辑该 CCC 的微信桥配置；切换 → 整块切换
+  - **API 全部显式带 `ccc` 参数**：`GET/POST /serenity/weixin?ccc=<root>`——无参返回 400「请选择 CCC」，不做隐式解析
 
 **组件划分**（对齐现有 services 模块风格）：
 
 | 模块 | 职责 | 类比 |
 |------|------|------|
-| `src/weixin-api.ts` | iLink 纯 fetch 客户端（qrcode/status/getupdates/sendmessage/sendtyping/getconfig/getuploadurl/CDN） | 传输层，零 LLM |
-| `src/weixin-bridge.ts` | 多账号轮询循环 + 消息分发（from_user_id → sessionId 映射）+ 回复回写 | 类比 gateway 装配 |
-| `src/weixin-route.ts` | 会话映射（微信用户 ↔ skiff 会话）+ 配置读取（plugin 全局） | 类比 skiff-registry |
-| `src/tools/weixin-admin.ts` | 管理工具（第 14 工具？）：login（出码+轮询状态）/ accounts / send（测试）/ status | 类比 skiff-admin |
+| `src/weixin-api.ts` | iLink 纯 fetch 客户端（qrcode/status/getupdates/sendmessage/sendtyping/getconfig） | 传输层，零 LLM |
+| `src/weixin-bridge.ts` | CCC 级多账号轮询循环 + 消息分发（from_user_id → sessionId 映射）+ 回复回写 | 类比 gateway 装配 |
+| `src/weixin-route.ts` | 会话映射（微信用户 ↔ skiff 会话）+ CCC 配置读取（serenity.json + localstore） | 类比 skiff-registry |
+| `src/api.ts` 扩展 | `/serenity/weixin` 端点：GET 状态 / POST 扫码登录（出码+轮询）/ POST 移除账号 | 类比 autotrajectory 端点 |
+| `src/client/SettingsSection.tsx` | 「微信桥」区块（扫码绑定 + 账号列表 + 路由编辑 + 开关） | 类比「自主轨迹」区块 |
 
-**配置归属（D5 归属二分）**：账号/token/baseUrl/userId = **plugin 全局** `~/.dsh/serenity-hooks.json`（`weixin.accounts[]`，0600）；路由映射（微信用户 → (ccc, role)）= **CCC 侧** `.opencode/serenity.json`（`weixin.routes`）。与 skiff 角色配置分层一致。
+**配置 schema（CCC 级）**：
+
+```jsonc
+// .opencode/serenity.json（git 管，可重建）
+{
+  "weixin": {
+    "enabled": false,
+    "accounts": [
+      { "accountId": "wechat-1", "name": "家庭招财", "enabled": true }
+      // token/baseUrl/userId 不在 git 文件——扫码后写 localstore
+    ],
+    "routes": [
+      { "user": "userA@im.wechat", "role": "zhaocai" },
+      { "user": "*", "role": "zhaocai" }        // 通配兜底
+    ]
+  }
+}
+
+// localstore.json（凭据——扫码后自动写入，面板只显示"已绑定"；credential scope UPPER_SNAKE）
+// WEIXIN_WECHAT_1_TOKEN   = "<bot_token>"
+// WEIXIN_WECHAT_1_BASEURL = "https://ilinkai.weixin.qq.com"
+// WEIXIN_WECHAT_1_USERID  = "<ilink_user_id>"
+```
 
 ## 3. 方案层
 
@@ -45,41 +78,44 @@
                               ▲                    │
                    getupdates │ (35s 长轮询)       │ sendmessage (回带 context_token)
                               │                    ▼
-                        dsp weixin-bridge (插件进程内)
+                    CCC 级 weixin-bridge（插件进程内，每 CCC 独立实例）
                               │  多账号循环（每账号独立轮询 + 独立游标）
                               ▼
-                    from_user_id → sessionId 映射（weixin-route）
+                    from_user_id → sessionId 映射（weixin-route：CCC 配置 + localstore 凭据）
                               │
                               ▼
               AcpServer.handle('session/new' + 'session/prompt')  ← 同进程直调
                               │
                               ▼
-                    skiff-core → zhaocai role agent
+                    skiff-core → CCC 配置的 role agent（用户自选，不绑定）
 ```
 
-**关键设计决策（候选，待用户拍板）**：
+**关键设计决策（用户裁决后定稿）**：
 
-| # | 决策 | 方案 | 备选 |
-|---|------|------|------|
-| W1 | 传输形态 | **出站长轮询**（bot 主动 GET getupdates，35s hold）——无需公网入口/域名/回调 | 企微回调（需公网 + 可信域名，用户已碰壁） |
-| W2 | 会话延续 | 微信用户 → 固定 sessionId `skiff-weixin-<md5(userid)>`——同一用户长期同一会话（记忆延续），多用户天然隔离 | 每消息新会话（无记忆，否决） |
-| W3 | 对话状态 | message_state: NEW → 收到 → prompt → GENERATING（正在输入）→ FINISH 回写 | 直接 FINISH（无打字提示，体验差） |
-| W4 | 路由目标 | 微信用户 → (ccc, role) 映射；默认 `zhaocai` role（用户已配） | 每用户可配不同 role |
-| W5 | 启停 | 设置面板开关（默认关，零资源占用——实验功能默认关原则）+ 扫码登录动作 | 随插件自动启动（否决） |
-| W6 | 回复格式 | markdown → 纯文本转换（微信不支持 md） | 直接发 md（微信端乱码，否决） |
+| # | 决策 | 方案 | 用户裁决 |
+|---|------|------|---------|
+| W1 | 传输形态 | **出站长轮询**（bot 主动 GET getupdates，35s hold）——无需公网入口/域名/回调 | ✅ 同意 |
+| W2 | 会话延续 | 微信用户 → 固定 sessionId `skiff-weixin-<sha256(userid)>`——同一用户长期同一会话（记忆延续），多用户天然隔离 | ✅ 同意 |
+| W3 | 对话状态 | message_state: NEW → 收到 → prompt → GENERATING（正在输入）→ FINISH 回写 | 待 P1 简化（文本直发） |
+| W4 | 路由目标 | **不绑定 role**——CCC 配置 user → role 映射 + 通配兜底 | ✅ 用户裁决 3 |
+| W5 | 配置归属 | **CCC 级**：serenity.json（结构/路由/开关）+ localstore（token 凭据） | ✅ 用户裁决（架构修正） |
+| W6 | 管理面 | **CCC 面板**「微信桥」区块（扫码 + 账号 + 路由 + 开关），手工配置 | ✅ 用户裁决 |
+| W7 | 回复格式 | markdown → 纯文本转换（微信不支持 md） | ✅ 默认 |
+| W8 | 工具面 | **不做 weixin-admin 工具**（管理收敛面板） | ✅ 用户裁决 |
 
-### 3.2 多账号模型
+### 3.2 多账号模型（CCC 级）
 
-- 账号 id 自增：`wechat-1, wechat-2, ...`（对齐 openclaw-weixin auth.ts `generateAccountId`）
-- 每账号：`{ token, baseUrl, userId, enabled, name? }` + 独立轮询循环 + 独立 `get_updates_buf` 游标
-- 登录流：`weixin-admin login --account wechat-2` → 输出二维码（URL/ASCII/图片落盘）→ 轮询 status → confirmed 后 token 存 plugin 全局 → 启动该账号轮询
+- 每个 CCC 自己的账号表：`wechat-1, wechat-2, ...`（对齐 openclaw-weixin auth.ts `generateAccountId`）
+- 每账号：`{ accountId, name, enabled }`（serenity.json）+ `{ token, baseUrl, userId }`（localstore）
+- 登录流（面板）：点「扫码登录」→ 插件进程内 fetchQRCode → 面板显示二维码 → 轮询 status → confirmed → **token 写 localstore + 账号元信息写 serenity.json** → 启动该 CCC 该账号轮询
 
 ### 3.3 会话映射（多用户核心）
 
 ```
-微信消息 { from_user_id: "userA@im.wechat", context_token } 
+微信消息 { from_user_id: "userA@im.wechat", context_token }
   → sessionId = "skiff-weixin-" + sha256(from_user_id).slice(0,16)   // 固定、可重建
-  → AcpServer.handle('session/new', { ccc, role, sessionId })        // 首次创建 / 进程内延续
+  → 路由：routes 匹配（exact user → 通配 *）→ (role)
+  → AcpServer.handle('session/new', { ccc: <本 CCC 根>, role, sessionId })   // 首次创建 / 进程内延续
   → AcpServer.handle('session/prompt', { sessionId, question: text })
   → sendmessage(to_user_id: from_user_id, context_token, answer)
 ```
@@ -91,7 +127,7 @@
 
 - weixin 桥会话 = 外部面（非维护会话）——**输出守卫生效**（敏感词打回）
 - `session/prompt` 走 `includeTrajectory: false`（3100 同款，对外不返回轨迹）
-- skiff 角色白名单即授权（G9 恒 allow）——zhaocai role 已配置 MSM/tools 白名单
+- skiff 角色白名单即授权（G9 恒 allow）——CCC 自选 role 的白名单生效
 
 ## 4. 接口层
 
@@ -108,64 +144,61 @@ export async function sendTextMessage(baseUrl, token, {to, text, contextToken}):
 export async function sendTyping(baseUrl, token, {ilinkUserId, typingTicket, status}): Promise<void>
 ```
 
-### 4.2 weixin-bridge.ts（装配）
+### 4.2 weixin-bridge.ts（CCC 级装配）
 
 ```ts
 export function registerWeixinBridge(ctx: Context): void
-// 读取 plugin 全局 weixin.accounts[]（enabled）→ 每账号启动轮询循环
-// 消息回调: handleIncoming(accountId, msg) → route → AcpServer.handle
-// settings 开关 weixinEnabled=false 时零副作用（不启动任何轮询）
+// 扫描 live CCC（resolveAutoTrajectoryCcc 同款）→ 每 CCC 读 weixin 配置（enabled + accounts）
+// → 启动该 CCC 该账号轮询循环；消息回调 → weixin-route 路由 → AcpServer.handle
+// 配置变化（面板 PUT）→ 热重建受影响 CCC 的桥（对齐 gateway 热重建模式）
 export function stopWeixinBridge(): void
 ```
 
-### 4.3 配置 schema
+### 4.3 CCC 配置 schema（上文 §2）
 
-```jsonc
-// plugin 全局 ~/.dsh/serenity-hooks.json（v1.27.0 migrate 扩展）
-{
-  "weixin": {
-    "enabled": false,
-    "accounts": [
-      { "accountId": "wechat-1", "token": "…", "baseUrl": "https://ilinkai.weixin.qq.com", "userId": "…", "enabled": true }
-    ]
-  }
-}
-
-// CCC 侧 .opencode/serenity.json
-{
-  "weixin": {
-    "routes": [
-      { "user": "userA@im.wechat", "ccc": "/home/yh/home/home-serenity", "role": "zhaocai" },
-      { "user": "*", "ccc": "/home/yh/home/home-serenity", "role": "zhaocai" }   // 通配兜底
-    ]
-  }
-}
-```
-
-### 4.4 weixin-admin 工具（第 14 工具，可选）
+### 4.4 API 端点（扩展 api.ts；**全部显式 ccc 参数，无参 400**）
 
 ```
-weixin-admin login [--account wechat-N]     # 出码 → 轮询 → 存 token（--json 输出 qrcode_img_content）
-weixin-admin accounts                        # 列表（token 脱敏）
-weixin-admin status                          # 每账号轮询健康/最近消息/游标
-weixin-admin send --account wechat-1 --to <userid> --text "…"   # 测试发送
-weixin-admin test --account wechat-1 --to <userid>              # 自测（发一条回显消息）
+GET  /serenity/weixin?ccc=<CCC根> → { enabled, accounts[]（脱敏）, routes[], bridgeStatus[] }
+POST /serenity/weixin { action: 'login-start', ccc }   → { qrcode, qrcode_img_content, loginKey }   // x-serenity-ui 头
+GET  /serenity/weixin/login?key=<loginKey>             → { status, accountId?, tokenSaved? }           // 扫码轮询
+POST /serenity/weixin { action: 'remove-account', ccc, accountId } → 移除账号（serenity.json + localstore + 停轮询）
+POST /serenity/weixin { action: 'save-routes', ccc, routes }      → 保存路由表
+GET  /serenity/weixin/cccs → 候选 CCC 列表（discoverCccs 复用——选择器数据源）
 ```
+
+### 4.5 扫码 UX（用户视角；复用 v1.24.6 TOTP 绑定同款机制 + 显式 CCC 选择器）
+
+```
+WebUI 设置面板 → 微信桥区块：
+0. 顶部「目标 CCC」选择器（discoverCccs 数据源）——选中要配置的 CCC（默认当前活跃会话对应 CCC 作初值）
+1. 点 [+ 扫码绑定微信] → 插件进程内调 get_bot_qrcode → 返回 qrcode_img_content
+2. 面板用 qrcode-generator 把 qrcode_img_content（https://liteapp.weixin.qq.com/q/...?bot_type=3）
+   编码成二维码 SVG 展示（复用 totpQrSvg 同款；零新依赖）
+3. 用户手机微信「扫一扫」扫面板二维码 → 微信打开 liteapp 确认页 → 手机上确认绑定
+4. 面板轮询 get_qrcode_status（1s 间隔，5min 有效）→ confirmed
+   → 插件写 bot_token 进 **所选 CCC 的** localstore（凭据）+ 账号元信息进该 CCC 的 serenity.json（结构）
+   → 区块变「已绑定」→ 该 CCC 的桥启动轮询
+```
+
+- 扫码人 = 管理员（yh），动作 = 面板出码 + 微信扫 + 手机确认——与 TOTP 绑定（Authenticator 扫面板二维码）完全同构，用户已熟悉
+- 家人使用 = 直接私聊已绑定 bot（无需扫码流程，from_user_id 天然区分多用户）
+- 多账号 = 反复「+ 扫码绑定」，每账号独立二维码轮询 + 独立 localstore 凭据键
 
 ## 5. 实现分期
 
 | 期 | 内容 | 规模估计 | 依赖 |
 |----|------|---------|------|
-| **P1（首版）** | weixin-api（qrcode/status/getupdates/sendmessage/sendtyping）+ bridge 单账号轮询 + 会话映射 + 设置开关 + weixin-admin login/status + 文本收发 | ~700 行 + 测试 | 无（crypto/fetch 内置） |
-| P2 | 多账号 + accounts/send 子命令 + 路由表（CCC 侧配置） | ~300 行 | P1 |
+| **P1（首版，v1.27.0）** | weixin-api（qrcode/status/getupdates/sendmessage/sendtyping）+ CCC 级配置（serenity.json + localstore）+ bridge 轮询 + 会话映射 + 面板「微信桥」区块（扫码/账号/路由/开关）+ /serenity/weixin 端点 + 文本收发 | ~900 行 + 测试 | 无（crypto/fetch 内置） |
+| P2 | 多 CCC 热重建 + sendtyping（正在输入）+ 断线重连退避 | ~300 行 | P1 |
 | P3 | 媒体（图片/文件接收→落盘 + vlm 识别；发送） | ~400 行（AES/CDN） | P1 |
 | P4 | 语音（SILK 转写）| ~300 行 | P3 |
 
-**首版 P1 交付验证**：真实扫码（用户手机）→ 微信发 "你好" → zhaocai role 回复。
+**首版 P1 交付验证**：真实扫码（用户手机）→ 微信发 "你好" → CCC 配置的 role 回复。
 
 ## 6. 测试策略
 
-- **单元**：weixin-api 各函数（mock fetch）；route 映射（user→sessionId 确定性/隔离）；md→plain 转换（7 类）
+- **单元**：weixin-api 各函数（mock fetch）；route 映射（user→sessionId 确定性/隔离）；md→plain 转换（7 类）；CCC 配置读取（serenity.json + localstore 分离）
 - **集成**：fake iLink server（node:http mock getupdates/sendmessage）→ bridge 轮询 → 断言 skiff agent 收到 question / 回复回写（对齐 acp-http 测试模式）
 - **联调**：真实账号扫码轮（用户动作）——不进 CI
 
@@ -175,7 +208,7 @@ weixin-admin test --account wechat-1 --to <userid>              # 自测（发�
 |------|------|------|
 | 腾讯条款（仅管道，可随时限速/终止） | 接入可能失效 | 协议封装在 weixin-api 单模块，失效时替换通道（企微/飞书）成本低 |
 | bot_type=3 语义未文档化 | 未知行为 | 实证可用；留配置项 botType 可调 |
-| token 泄露 | 账号被接管 | plugin 全局 0600 + 输出守卫不泄露 + 不打印 |
+| token 泄露 | 账号被接管 | token 只在 CCC localstore（凭据纪律）+ 输出守卫不泄露 + 不打印 |
 | 长轮询断线 | 消息丢失/延迟 | 游标续传（get_updates_buf）+ 断线重连指数退避（对齐 orbit/ws 模式） |
 | skiff 会话内存态 | 重启丢会话 | 自动重建 + "新对话开始"通知（对齐 3100） |
 
@@ -192,11 +225,26 @@ weixin-admin test --account wechat-1 --to <userid>              # 自测（发�
 
 **决策建议**：个人微信 iLink 为家庭实际通道（招财替代 openclaw 的微信接入面）；企微路线冻结（调研文档保留，触发条件 = iLink 被腾讯终止且家庭转向企微）。
 
-## 9. 待用户拍板项
+## 9. 用户裁决记录（2026-08-31）
 
-1. W1 出站长轮询形态确认（无公网入口）✓ 预计通过（F4c 企微碰壁前鉴）
-2. W2 固定 sessionId 会话延续（用户 ↔ 长期会话）
-3. W4 默认路由 zhaocai role + 通配兜底
-4. 第 14 工具命名（weixin-admin）与工具数量（D12 曾讨论精简，但这是新能力面）
-5. P1 范围（文本首版）确认
-6. 版本号：v1.27.0（新能力面）或 v1.26.18（patch 级迭代——D14 版本放缓策略）
+| # | 裁决 | 内容 |
+|---|------|------|
+| 1 | ✅ | 出站长轮询形态同意 |
+| 2 | ✅ | 固定 sessionId 会话延续同意 |
+| 3 | ✅ | **ACC 不绑定 role**——路由 user → (ccc, role) 由 CCC 配置，用户自选 |
+| 4 | ✅ | **不做 weixin-admin 工具**；管理面收敛到 CCC 面板 |
+| 5 | ✅ | 先做文本（媒体后置） |
+| 6 | ✅ | 版本 v1.27.0 |
+| 7 | ✅ | **配置归属 CCC**（架构修正）：dsh 多 CCC 各自独立对接微信桥；serenity.json 结构/路由 + localstore 凭据；手工配置；CCC 面板管理面 |
+
+## 10. 实现清单（P1，v1.27.0）
+
+- [ ] `src/weixin-api.ts` — iLink 客户端（纯 fetch，零依赖）✅ 已建
+- [ ] `src/weixin-route.ts` — CCC 配置读取（serenity.json weixin 段 + localstore 凭据）+ 会话映射 ✅ 已建
+- [ ] `src/weixin-bridge.ts` — CCC 级轮询循环 + 消息分发 + AcpServer 直调 + 回复回写
+- [ ] `src/api.ts` — /serenity/weixin 端点（**显式 ccc 参数**：状态/扫码/移除/路由保存/ccc 列表）
+- [ ] `src/settings-section.ts` — 无新增开关（weixin.enabled 在 CCC 配置，非 plugin 级）——确认
+- [ ] `src/client/SettingsSection.tsx` — 「微信桥」区块（**CCC 选择器** + 扫码绑定/账号/路由/开关）
+- [ ] `src/index.ts` — registerWeixinBridge 装配
+- [ ] tests：weixin-api（mock fetch）/ weixin-route / weixin-bridge 集成 / config 分离
+- [ ] bump v1.27.0 + CHANGELOG + publish + 双推 + deploy + restart

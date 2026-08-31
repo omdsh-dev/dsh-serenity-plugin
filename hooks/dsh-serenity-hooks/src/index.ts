@@ -46,6 +46,7 @@ import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
 import { registerAutoTrajectory } from './autotrajectory.js'
+import { registerWeixinBridge } from './weixin-bridge.js'
 
 export const name = 'dsh-serenity-hooks'
 
@@ -175,6 +176,9 @@ export function apply(ctx: Context, config: Config): void {
   // 自主轨迹（v1.26.12 实验提案）：CCC 定义（serenity.json autotrajectory）→ 时钟唤起 +
   // 先验偏见注入（前台运行）。enabled=false 未配置 → 零资源占用；不触碰任何现有机制。
   registerAutoTrajectory(ctx)
+  // F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置（serenity.json weixin + localstore 凭据）→
+  // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。
+  registerWeixinBridge(ctx)
 }
 
 /**

@@ -113,6 +113,14 @@ export interface SerenityConfig {
    * 未配置或 enabled=false → 机制完全不启动（零资源占用，零影响现有功能）。
    */
   autotrajectory?: AutoTrajectorySettings;
+  /**
+   * 微信桥（F4c-3，v1.27.0 实验性）：**CCC 级**配置——dsh 一个进程含多个 CCC，
+   * 每个 CCC 独立对接微信桥（S142 用户拍板：ACC 不绑定 role，配置归 CCC，手工）。
+   * 结构/路由/开关在此文件（git 管可重建）；**bot_token 凭据在 CCC localstore**
+   * （weixin.accounts.<accountId>.token/.baseUrl/.userId——扫码后自动写入，安全纪律）。
+   * 未配置或 enabled=false → 该 CCC 桥完全不启动（零资源占用）。
+   */
+  weixin?: WeixinSettings;
 }
 
 /**
@@ -142,6 +150,43 @@ export interface AutoTrajectorySettings {
   session?: string;
   /** 避开唤起的高峰时段（北京时间，[start, end) 内不唤起；缺省 {8, 18}——用量峰谷省钱） */
   avoidWakeHours?: { start?: number; end?: number };
+}
+
+/**
+ * 微信桥配置（CCC 级；S142 用户拍板）：
+ * - 结构/路由/开关在 .opencode/serenity.json（git 管可重建）
+ * - **bot_token 凭据在 CCC localstore**（weixin.accounts.<accountId>.token/.baseUrl/.userId）——
+ *   扫码登录后插件自动写入（面板只显示"已绑定"），永不进 git 明文面
+ * - 路由 user → role：exact 匹配优先，通配 `*` 兜底；role 必须是该 CCC skiff.roles 之一
+ * - 多账号：accounts[] 每项 { accountId, name?, enabled }（本地唯一键，如 wechat-1）
+ */
+export interface WeixinSettings {
+  /** 总开关（缺省 false——默认关，未开零资源占用） */
+  enabled?: boolean;
+  /** bot_type（iLink 取码参数；实证 3 可用，留配置项应对未来语义变化） */
+  botType?: string;
+  /** 账号表（本地键 accountId；凭据在 localstore） */
+  accounts?: WeixinAccountConfig[];
+  /** 消息路由：微信用户 → 该 CCC 的 skiff role（不绑定具体 role——用户自选） */
+  routes?: WeixinRouteConfig[];
+}
+
+/** 微信桥账号配置（serenity.json 内；凭据部分在 localstore） */
+export interface WeixinAccountConfig {
+  /** 本地唯一键（如 wechat-1；localstore 凭据键 weixin.accounts.<accountId>.*） */
+  accountId: string;
+  /** 展示名（可选；如"家庭招财"） */
+  name?: string;
+  /** 该账号轮询开关（缺省 true） */
+  enabled?: boolean;
+}
+
+/** 微信桥路由配置：微信用户 → CCC 的 skiff role */
+export interface WeixinRouteConfig {
+  /** 微信用户标识（from_user_id，形如 userA@im.wechat）；`*` = 通配兜底 */
+  user: string;
+  /** 目标 skiff role 名（必须 ∈ 该 CCC skiff.roles；ACC 不绑定——用户自选） */
+  role: string;
 }
 
 /**

@@ -1,3 +1,22 @@
+## v1.27.0 — 2026-08-31（微信桥 F4c-3：CCC 级 iLink 接入，S142 用户拍板）
+
+**Scope:** 用户 "dsp 能否接入微信的扫码协议，考虑多用户接入招财 role"——skiff 强化后支持微信扫码接入 → 代替 openclaw（招财平台）的微信接入面。协议实证（裸调 get_bot_qrcode 无需 OpenClaw）+ 用户七项裁决后实现。**架构决策**：配置归 **CCC**（dsh 一进程多 CCC，每个 CCC 独立对接微信桥）——结构/路由/开关进 `.opencode/serenity.json`，**bot_token 凭据进 CCC localstore**（credential scope）；ACC 不绑定具体 role（路由 user → role 用户自选）；管理面 = **CCC 面板**（显式 CCC 选择器——WebUI 顶层全局，配置写入必须显式）；不做 agent 侧管理工具。
+
+### 变更
+- **`src/weixin-api.ts`（新）**：iLink Bot API 纯 fetch 客户端（零依赖）——fetchQRCode（裸调无凭据可取码）/ pollQRStatus（wait/scaned/confirmed/expired + bot_token）/ getUpdates（35s 长轮询 + get_updates_buf 游标）/ sendTextMessage（BOT/FINISH + context_token 回带 + **md→plain 内置**）/ markdownToPlainText（代码块/图片/链接/表格/标题/粗斜体/删除线 7 类）；`__setWeixinFetchForTest` 测试注入
+- **`src/weixin-route.ts`（新）**：CCC 配置层——readWeixinSettings（serenity.json weixin 段归一）/ 凭据读写（**credential scope** `WEIXIN_<ACCOUNT_ID>_TOKEN/_BASEURL/_USERID`）/ `weixinSessionIdFor`（固定可重建 `skiff-weixin-<sha256(userid).slice(16)>`——同用户长期会话）/ `matchWeixinRoute`（exact → 通配 `*` 兜底）/ `extractWeixinText`（P1 文本）/ upsert/remove/saveRoutes/setEnabled（写回 serenity.json，保留既有字段）
+- **`src/weixin-bridge.ts`（新）**：CCC 级装配——syncCccBridge（每 CCC enabled + 有凭据账号启动轮询循环）/ runAccountLoop（getupdates 长轮询 → 逐消息分发 → 失败 3s 重试）/ handleIncoming（路由命中 → **createSkiffAgent 固定 sessionId 创建/延续** → askSkiff includeTrajectory:false → 回复回写；重启后自动重建 + "新的对话已开始"通知）/ weixinBridgeStatus（面板数据源）/ registerWeixinBridge（live 会话扫描 + session/created 事件驱动）
+- **`src/skiff-core.ts`**：`createSkiffAgent` 增加可选 `sessionId` 参数（外部面固定 id 映射；不传保持随机——ACP/调试页默认路径兼容）
+- **`src/ccc.ts`**：`SerenityConfig.weixin`（WeixinSettings：enabled/botType/accounts/routes）+ 类型定义
+- **`src/api.ts`**：`/serenity/weixin` 端点（**全部显式 ccc 参数，无参 400**，x-serenity-ui 头限定）——GET 状态（账号脱敏：只回元信息 + bound）/ POST login-start（出码存 loginKey）/ GET /serenity/weixin/login（扫码轮询 → confirmed 自动写凭据 + 账号元信息 + syncCccBridge）/ remove-account / save-routes（role 合法性校验 ∈ skiff.roles）/ set-enabled（启用前要求已绑定账号）
+- **`src/client/WeixinBridgeEditor.tsx`（新）**：「微信桥」区块——**CCC 选择器**（/serenity/cccs discoverCccs 数据源，显式配置目标）/ 总开关 / 账号列表（含桥运行状态）/ **扫码绑定**（qrcode-generator 生成二维码 SVG——复用 v1.24.6 TOTP 同款机制，手机微信扫 liteapp 确认页 → 1s 轮询 → confirmed 显示绑定成功）/ 移除账号 / 路由表 JSON 编辑（保存校验）
+- **`src/client/SettingsSection.tsx/.css`**：微信桥分组 + 样式（select/扫码按钮/二维码白底展示/路由编辑框）
+- **`src/index.ts`**：registerWeixinBridge 装配
+
+### 测试
+- **weixin.test.ts（新，18 用例）**：weixin-api（buildClientVersion/fetchQRCode 裸调/pollQRStatus wait→confirmed/网络错误→wait/getUpdates 游标/sendTextMessage body 结构 + md→plain/7 类转换）；weixin-route（会话 id 固定可重建/配置归一 + 清洗/**凭据读写分离** token 只进 localstore credentials/路由匹配 exact→通配/extractWeixinText/写回操作）；weixin-bridge 集成（fake ctx 对齐 acp-core 模式——首条消息 → 通知+答案回写 context_token/重启自动重建/无路由不创建/非文本忽略）
+- **52 files / 709 tests 全绿**（691 + 18）；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.17 — 2026-08-31（轨迹焦点 topPrompt：CCC 定义，每次唤起最先注入，锚定防漂移，S142 用户需求）
 
 **Scope:** 用户 "为了确保自动轨迹的质量，我们需要改进下，支持让ACC定义一段顶层提示词，这个提示词会在每次唤起注入，确保顶层提示词的影响力"。**设计定位（用户两次纠正定稿）**：topPrompt = **CCC 定义 autotrajectory 时自己填写**的本轨迹顶层提示词（核心目标/纪律/质量要求）——**不是用户配置、不是 ACC 硬编码**，是 CCC 的实验定义项。动机：autotrajectory 实验在具体 CCC 中运行时 trajectory 多轮腐化严重（焦点丢失）→ 稳定焦点锚定。

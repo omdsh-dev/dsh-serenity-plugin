@@ -75,6 +75,8 @@ const SKIFF_PRESET = 'standard'
 /**
  * 创建 Skiff agent：标准 DSH agent + cwd=CCC root + 角色模型 +
  * standard preset（平台工具面）+ scoped 系统提示词（基础提示词 + CCC 定义段，全替换 ACC 默认注入）。
+ * @param sessionId 指定会话 id（可选；微信桥等外部面用固定 id 实现用户↔会话长期映射——
+ *   不传则随机生成 skiff-<role>-<uuid>，ACP/调试页默认路径）
  */
 export async function createSkiffAgent(
   ctx: Context,
@@ -82,12 +84,13 @@ export async function createSkiffAgent(
   roleName: string,
   role: SkiffRoleConfig,
   defaultModel?: string,
+  sessionId?: string,
 ): Promise<SkiffAgentRef> {
   if (!ctx.agents) throw new Error('skiff: ctx.agents unavailable')
   const model = role.model?.trim() || defaultModel || ''
-  const sessionId = `${SKIFF_SESSION_PREFIX}${roleName}-${randomUUID()}` as SessionId
+  const id = (sessionId ?? `${SKIFF_SESSION_PREFIX}${roleName}-${randomUUID()}`) as SessionId
   const handle = await ctx.agents.create({
-    sessionId,
+    sessionId: id,
     meta: { cwd: root, agentPreset: SKIFF_PRESET },
     setup: async (agentCtx: Context) => {
       try {
@@ -120,8 +123,8 @@ export async function createSkiffAgent(
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
   }
-  registerSkiffSession(sessionId, roleName, root, agent)
-  return { handle, agent, sessionId }
+  registerSkiffSession(id, roleName, root, agent)
+  return { handle, agent, sessionId: id }
 }
 
 // ── 提问（followup → idle → 答案 + 轨迹）──

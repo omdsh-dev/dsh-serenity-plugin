@@ -30,6 +30,7 @@ const CONFIG_PATH = '/serenity/config'
 const CCCS_PATH = '/serenity/cccs'
 const PUBLIC_ASK_PATH = '/serenity/public-ask'
 const AUTOTRAJECTORY_PATH = '/serenity/autotrajectory'
+const WEIXIN_PATH = '/serenity/weixin'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
 export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
@@ -490,4 +491,237 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
       }
     },
   })
+
+  // /serenity/weixin：微信桥 CCC 级配置（F4c-3，v1.27.0 实验性；S142 用户拍板——
+  // 配置归 CCC + 显式 ccc 参数 + 面板扫码）。全部 x-serenity-ui 头限定（client 专属）。
+  // GET ?ccc=<root> → { enabled, accounts[]（脱敏）, routes[], bridgeStatus[] }
+  // POST { action: 'login-start', ccc } → { qrcode, qrcode_img_content, loginKey }
+  // GET /serenity/weixin/login?key=<loginKey> → { status, accountId?, tokenSaved?, error? }
+  // POST { action: 'remove-account', ccc, accountId } → 移除（serenity.json + localstore + 停桥）
+  // POST { action: 'save-routes', ccc, routes } / { action: 'set-enabled', ccc, enabled }
+  ctx.webServer.register({
+    kind: 'exact',
+    path: WEIXIN_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.headers['x-serenity-ui'] !== '1') {
+          sendJson(res, 403, { error: '微信桥配置仅限 WebUI（client 专用）' })
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+
+        if (req.method === 'GET') {
+          const rootParam = url.searchParams.get('ccc') ?? undefined
+          const chk = requireCcc(rootParam)
+          if (!chk.ok) {
+            sendJson(res, 400, { error: chk.error })
+            return
+          }
+          const { readWeixinSettings } = await import('./weixin-route.js')
+          const { weixinBridgeStatus } = await import('./weixin-bridge.js')
+          const settings = readWeixinSettings(chk.root)
+          const bridge = weixinBridgeStatus().find((b) => b.ccc === chk.root)
+          // accounts 脱敏：只回元信息 + 是否已绑定（token 永不落 wire）
+          const { readWeixinCredential } = await import('./weixin-route.js')
+          const accounts = (settings.accounts ?? []).map((a) => ({
+            accountId: a.accountId,
+            name: a.name ?? undefined,
+            enabled: a.enabled !== false,
+            bound: readWeixinCredential(chk.root, a.accountId) !== null,
+          }))
+          sendJson(res, 200, {
+            enabled: settings.enabled === true,
+            botType: settings.botType ?? undefined,
+            accounts,
+            routes: settings.routes ?? [],
+            bridge: bridge?.accounts ?? [],
+          })
+          return
+        }
+
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+
+        const raw = await readBody(req, 128 * 1024)
+        const body = JSON.parse(raw) as {
+          action?: string
+          ccc?: string
+          accountId?: string
+          routes?: Array<{ user: string; role: string }>
+          enabled?: boolean
+        }
+        const chk = requireCcc(body.ccc)
+        if (!chk.ok) {
+          sendJson(res, 400, { error: chk.error })
+          return
+        }
+        const root = chk.root
+
+        // login-start：出码（进程内调 iLink get_bot_qrcode；无需凭据）→ 存 loginKey 供轮询
+        if (body.action === 'login-start') {
+          const { fetchQRCode } = await import('./weixin-api.js')
+          const { randomUUID } = await import('node:crypto')
+          // 清理过期登录
+          for (const [key, v] of weixinLogins) {
+            if (Date.now() - v.startedAt > WEIXIN_LOGIN_TTL_MS) weixinLogins.delete(key)
+          }
+          const { readWeixinSettings } = await import('./weixin-route.js')
+          const settings = readWeixinSettings(root)
+          const qr = await fetchQRCode({ botType: settings.botType ?? undefined })
+          const loginKey = randomUUID()
+          weixinLogins.set(loginKey, { root, qrcode: qr.qrcode, startedAt: Date.now(), polling: false })
+          sendJson(res, 200, { qrcode: qr.qrcode, qrcode_img_content: qr.qrcode_img_content, loginKey })
+          return
+        }
+
+        // remove-account：移除账号（serenity.json 结构 + localstore 凭据 + 停桥重建）
+        if (body.action === 'remove-account') {
+          if (!body.accountId) {
+            sendJson(res, 400, { error: 'missing accountId' })
+            return
+          }
+          const { removeWeixinAccount } = await import('./weixin-route.js')
+          const { syncCccBridge } = await import('./weixin-bridge.js')
+          removeWeixinAccount(root, body.accountId)
+          syncCccBridge(ctx, root)
+          sendJson(res, 200, { removed: body.accountId })
+          return
+        }
+
+        // save-routes：保存路由表（整体替换；校验 role 合法性——必须 ∈ 该 CCC skiff.roles）
+        if (body.action === 'save-routes') {
+          const routes = body.routes ?? []
+          if (!Array.isArray(routes) || routes.some((r) => typeof r?.user !== 'string' || typeof r?.role !== 'string' || r.user === '' || r.role === '')) {
+            sendJson(res, 400, { error: 'invalid routes (expected [{user, role}, ...])' })
+            return
+          }
+          const { saveWeixinRoutes } = await import('./weixin-route.js')
+          const { readSkiffRoles } = await import('./skiff-role.js')
+          const roles = readSkiffRoles(root)
+          for (const r of routes) {
+            if (!roles.has(r.role)) {
+              sendJson(res, 400, { error: `unknown role: ${r.role} (not in ${root} skiff.roles)` })
+              return
+            }
+          }
+          saveWeixinRoutes(root, routes)
+          sendJson(res, 200, { saved: routes.length })
+          return
+        }
+
+        // set-enabled：切换总开关（启用时无账号/无路由 → 400 提示先绑定）
+        if (body.action === 'set-enabled') {
+          const enabled = body.enabled === true
+          const { readWeixinSettings, setWeixinEnabled } = await import('./weixin-route.js')
+          const { syncCccBridge } = await import('./weixin-bridge.js')
+          const settings = readWeixinSettings(root)
+          if (enabled && (settings.accounts ?? []).length === 0) {
+            sendJson(res, 400, { error: '启用前请先扫码绑定至少一个账号' })
+            return
+          }
+          setWeixinEnabled(root, enabled)
+          if (enabled) syncCccBridge(ctx, root)
+          else {
+            const { stopCccBridge } = await import('./weixin-bridge.js')
+            stopCccBridge(root)
+          }
+          sendJson(res, 200, { enabled })
+          return
+        }
+
+        sendJson(res, 400, { error: `unsupported action: ${body.action ?? ''}` })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+
+  // GET /serenity/weixin/login?key=<loginKey>：扫码状态轮询（面板 1s 间隔）
+  ctx.webServer.register({
+    kind: 'exact',
+    path: `${WEIXIN_PATH}/login`,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        if (req.headers['x-serenity-ui'] !== '1') {
+          sendJson(res, 403, { error: '微信桥配置仅限 WebUI（client 专用）' })
+          return
+        }
+        if (req.method !== 'GET') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const key = url.searchParams.get('key') ?? ''
+        const login = weixinLogins.get(key)
+        if (!login) {
+          sendJson(res, 404, { error: 'login not found or expired' })
+          return
+        }
+        if (Date.now() - login.startedAt > WEIXIN_LOGIN_TTL_MS) {
+          weixinLogins.delete(key)
+          sendJson(res, 200, { status: 'expired' })
+          return
+        }
+
+        const { pollQRStatus } = await import('./weixin-api.js')
+        const { readWeixinSettings } = await import('./weixin-route.js')
+        const settings = readWeixinSettings(login.root)
+        const status = await pollQRStatus({ baseUrl: undefined, qrcode: login.qrcode })
+
+        switch (status.status) {
+          case 'confirmed': {
+            // confirmed → 写凭据（localstore）+ 账号元信息（serenity.json）→ 停桥重建
+            if (!status.bot_token) {
+              sendJson(res, 200, { status: 'error', error: 'confirmed but no bot_token' })
+              return
+            }
+            const { upsertWeixinAccount, writeWeixinCredential } = await import('./weixin-route.js')
+            const { syncCccBridge } = await import('./weixin-bridge.js')
+            const accountId = `wechat-${(settings.accounts?.length ?? 0) + 1}`
+            upsertWeixinAccount(login.root, { accountId, name: `微信 ${accountId}`, enabled: true })
+            writeWeixinCredential(login.root, accountId, {
+              token: status.bot_token,
+              baseUrl: status.baseurl ?? '',
+              userId: status.ilink_user_id,
+            })
+            syncCccBridge(ctx, login.root)
+            weixinLogins.delete(key)
+            sendJson(res, 200, { status: 'confirmed', accountId, tokenSaved: true })
+            return
+          }
+          case 'expired':
+            weixinLogins.delete(key)
+            sendJson(res, 200, { status: 'expired' })
+            return
+          default:
+            sendJson(res, 200, { status: status.status ?? 'wait' })
+            return
+        }
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
+}
+
+// ── 微信桥（F4c-3，v1.27.0 实验性；CCC 级配置——显式 ccc 参数）──
+
+/** 进行中的扫码登录（loginKey → 状态；进程内，5min 有效） */
+const weixinLogins = new Map<string, {
+  root: string
+  qrcode: string
+  startedAt: number
+  polling: boolean
+}>()
+
+const WEIXIN_LOGIN_TTL_MS = 5 * 60_000
+
+/** 校验微信桥面板操作的头/参数（x-serenity-ui + ccc 必填） */
+function requireCcc(root: string | undefined): { ok: true; root: string } | { ok: false; error: string } {
+  if (!root || root.trim() === '') return { ok: false, error: 'missing ccc param' }
+  const serenityRoot = findSerenityRoot(root)
+  if (!serenityRoot) return { ok: false, error: `no CCC found from: ${root}` }
+  return { ok: true, root: serenityRoot }
 }

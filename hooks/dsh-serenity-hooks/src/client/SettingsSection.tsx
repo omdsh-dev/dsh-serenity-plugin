@@ -25,6 +25,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
 import { PublicAskEditor } from './PublicAskEditor.js'
+import { WeixinBridgeEditor } from './WeixinBridgeEditor.js'
 import './SettingsSection.css'
 
 /** serenity-hooks 简单配置 wire 形态（与 host 侧 schema 对齐） */
@@ -298,6 +299,13 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       <div className="ss-group">
         <h3 className="ss-groupTitle">自主轨迹</h3>
         <AutoTrajectoryStatusBlock />
+      </div>
+
+      {/* F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置——显式 CCC 选择器 + 扫码绑定 +
+          账号/路由/开关（S142 用户拍板：配置归 CCC，管理面收敛到 CCC 面板） */}
+      <div className="ss-group">
+        <h3 className="ss-groupTitle">微信桥</h3>
+        <WeixinBridgeEditor />
       </div>
     </div>
   )
