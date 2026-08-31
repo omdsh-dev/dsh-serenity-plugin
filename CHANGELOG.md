@@ -1,3 +1,20 @@
+## v1.26.17 — 2026-08-31（轨迹焦点 topPrompt：CCC 定义，每次唤起最先注入，锚定防漂移，S142 用户需求）
+
+**Scope:** 用户 "为了确保自动轨迹的质量，我们需要改进下，支持让ACC定义一段顶层提示词，这个提示词会在每次唤起注入，确保顶层提示词的影响力"。**设计定位（用户两次纠正定稿）**：topPrompt = **CCC 定义 autotrajectory 时自己填写**的本轨迹顶层提示词（核心目标/纪律/质量要求）——**不是用户配置、不是 ACC 硬编码**，是 CCC 的实验定义项。动机：autotrajectory 实验在具体 CCC 中运行时 trajectory 多轮腐化严重（焦点丢失）→ 稳定焦点锚定。
+
+### 变更
+- **`src/ccc.ts` `AutoTrajectorySettings.topPrompt?`（新）**：注释定位 = CCC 定义的轨迹焦点（防漂移），与偏见内容分工（焦点=稳定锚每轮不变，偏见=随机探索每轮不同，互补）
+- **`src/autotrajectory.ts` `buildWakeMessage` 四段式**（轨迹焦点 / 身份锚定 / 先验偏见 / 任务）：`[轨迹焦点]` 段**最先注入**（位于身份锚定之前，影响力最大）；`performAutoTrajectoryWake` 传递 `settings.topPrompt?.trim() || null`；`getAutoTrajectoryStatus` 返回 topPrompt（空白归一 null）
+- **`src/client/SettingsSection.tsx`**：「轨迹焦点 (topPrompt)」卡片（未定义 → 提示 CCC 应填写防漂移）
+- **`src/tools/autotrajectory-exp.ts` description**：补 topPrompt 语义
+- **`experiments/autotrajectory/scripts/autotrajectory-exp.ts`**：guide 六步（②定义轨迹焦点）+ init 配置模板生成 topPrompt 占位 + 输出 ⚠ 提示编辑 + check 未定义时 ⚠ 提示（非阻断，兼容存量）+ status 显示 topPrompt ✓
+- **`experiments/autotrajectory/SKILL.md`（doc 入口）**：三步→四步（新增②轨迹焦点章节）+ 配置示例 + 机制运行①焦点注入
+- **`docs/autotrajectory-experiment.md`**：三步→四步 + 配置示例 + 唤起消息示例 + 分工表（焦点/偏见都由 CCC 定义）
+
+### 测试
+- **autotrajectory.test +2**：buildWakeMessage 轨迹焦点最先注入（startsWith [轨迹焦点] + 位置 < [自主轨迹唤起]）/ 无焦点兼容（存量行为一致）；getAutoTrajectoryStatus topPrompt 归一（空白→null）
+- **51 files / 691 tests 全绿**；typecheck ✓（node + client）→ build ✓
+
 ## v1.26.16 — 2026-08-31（npm 包 tarball 完整性修复：缺 chunk 加载即崩 + 类型全缺，S142 用户报告）
 
 **Scope:** 用户反馈 "npm我们发的dsp不完整，少东西了，检查下"。unpkg 实证 v1.26.15 tarball 仅 9 文件——缺 tsdown chunk（`lib/ccc-CfDrlfA7.js`），`lib/index.js` 第 1 行 import 解析失败 → **插件安装后加载即崩**；`.d.ts` 类型全缺（`package.json types` 悬空）。发布链修复 + 常驻校验工具。
