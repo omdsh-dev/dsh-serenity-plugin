@@ -217,24 +217,30 @@ describe('skiff-core: createSkiffAgent（v1.25.3：preset 挂载修复平台工�
   })
 })
 
-describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id collision 修复）', () => {
-  /** fake ctx：agents.create + agents.resume 双路；resume 按模式（成功 / not-found / 缺方法） */
-  function fakeResumeCtx(mode: 'success' | 'not-found' | 'absent'): {
+describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id collision 修复 + v1.27.3 live 复用）', () => {
+  /** fake ctx：agents.create + agents.resume 双路；resume 按模式（成功 / not-found / 缺方法 / live 恢复） */
+  function fakeResumeCtx(mode: 'success' | 'not-found' | 'absent' | 'live'): {
     agents: {
       create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown; meta?: unknown }) => Promise<unknown>
       resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown }) => Promise<unknown>
+      get?: (id: string) => unknown
     }
+    calls: Array<{ kind: string; id: string }>
   } {
     const calls: Array<{ kind: string; id: string }> = []
+    const makeAgent = (id: string): unknown => {
+      const agentCtx = { get: () => undefined, systemPrompt: { section: () => {} } }
+      return { ctx: agentCtx, session: { id, events: [] }, followup: () => {} }
+    }
     const makeHandle = async (kind: 'create' | 'resume', id: string, opts: { setup?: (c: unknown) => Promise<void> }): Promise<unknown> => {
       calls.push({ kind, id })
-      const agentCtx = { get: () => undefined, systemPrompt: { section: () => {} } }
-      await opts.setup?.(agentCtx as never)
-      return { agent: { ctx: agentCtx, session: { id, events: [] }, followup: () => {} } }
+      await opts.setup?.(makeAgent(id) as never)
+      return { agent: makeAgent(id) }
     }
     const agents: {
       create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown; meta?: unknown }) => Promise<unknown>
       resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown }) => Promise<unknown>
+      get?: (id: string) => unknown
     } = {
       create: (opts) => makeHandle('create', opts.sessionId, opts),
     }
@@ -247,8 +253,21 @@ describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id c
         err.name = 'SessionPersistenceNotFoundError'
         throw err
       }
+    } else if (mode === 'live') {
+      // 重启后 DSH 恢复的 live 会话：resume 报 "while it is live"、create 报 "already exists"、
+      // get 返回 live agent（v1.27.3 修复的根因场景）
+      const liveAgent = makeAgent('skiff-weixin-live-1')
+      agents.get = (id) => (id === 'skiff-weixin-live-1' ? liveAgent : undefined)
+      agents.resume = async (opts) => {
+        calls.push({ kind: 'resume', id: opts.resumeSessionId })
+        throw new Error(`cannot prepare session "${opts.resumeSessionId}" while it is live`)
+      }
+      agents.create = async (opts) => {
+        calls.push({ kind: 'create', id: opts.sessionId })
+        throw new Error(`session "${opts.sessionId}" already exists`)
+      }
     }
-    return { agents }
+    return { agents, calls }
   }
 
   it('固定 id + 磁盘已有持久化 log → resume（resumed=true，历史延续）', async () => {
@@ -266,6 +285,17 @@ describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id c
     expect(ref.resumed).toBe(false)
     expect(ref.sessionId).toBe('skiff-weixin-fixed-2')
     expect(skiffRoleFor(ref.sessionId)).toBe('qa')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('固定 id + 会话已 live（重启后 DSH 恢复）→ live 复用，resume/create 均不调用（v1.27.3 修复）', async () => {
+    const ctx = fakeResumeCtx('live')
+    const ref = await createSkiffAgent(ctx as never, dir, 'qa', { msms: ['x'] }, undefined, 'skiff-weixin-live-1')
+    expect(ref.resumed).toBe(true) // 历史延续语义（非新对话）
+    expect(ref.sessionId).toBe('skiff-weixin-live-1')
+    expect(skiffRoleFor(ref.sessionId)).toBe('qa') // 内存注册表已登记
+    // 不经过 resume/create（二者在此场景必抛错——live 会话唯一可行路径 = get 复用）
+    expect(ctx.calls).toEqual([])
     unregisterSkiffSession(ref.sessionId)
   })
 

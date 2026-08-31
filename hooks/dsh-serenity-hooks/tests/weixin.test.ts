@@ -313,11 +313,13 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
 describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () => {
   /** fake ctx（对齐 acp-core.test fakeCtx）：agents.create/resume 产生带 followup 的 fake agent；
    *  on 立即触发 idle（waitIdle 立即返回）；followup 推入 user + assistant 答案事件。
-   *  resumeMode: 'create'（resume 缺失→恒 create 路径）/ 'resume'（resume 命中历史恢复）/ 'not-found'（首次） */
-  function fakeCtx(resumeMode: 'create' | 'resume' | 'not-found' = 'create'): {
+   *  resumeMode: 'create'（resume 缺失→恒 create 路径）/ 'resume'（resume 命中历史恢复）/ 'not-found'（首次）
+   *  / 'live'（v1.27.3：重启后 DSH 恢复 live——resume/create 均抛错，get 返回 live agent） */
+  function fakeCtx(resumeMode: 'create' | 'resume' | 'not-found' | 'live' = 'create', liveId?: string): {
     agents: {
       create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
       resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
+      get?: (id: string) => unknown
     }
     on: () => () => void
   } {
@@ -342,6 +344,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     const agents: {
       create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
       resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
+      get?: (id: string) => unknown
     } = {
       create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
         agent = makeAgent(opts.sessionId, opts)
@@ -360,6 +363,18 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
         const err = new Error(`session "${opts.resumeSessionId}" not found`)
         err.name = 'SessionPersistenceNotFoundError'
         throw err
+      }
+    } else if (resumeMode === 'live') {
+      // 重启后 DSH 恢复的 live 会话（v1.27.3 根因场景）：resume 报 "while it is live"、
+      // create 报 "already exists"、get 返回 live agent——唯一可行路径 = get 复用
+      const live = makeAgent(liveId ?? 'skiff-weixin-live', {})
+      agent = live
+      agents.get = (id: string) => (id === live.session.id ? live : undefined)
+      agents.resume = async () => {
+        throw new Error('cannot prepare session while it is live')
+      }
+      agents.create = async () => {
+        throw new Error('session already exists')
       }
     }
     return {
@@ -434,6 +449,36 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     // 历史延续：无"新的对话"通知，只有答案
     expect(sent.some((s) => s.text.includes('新的对话'))).toBe(false)
     expect(sent.some((s) => s.text === '答案')).toBe(true)
+  })
+
+  it('重启后会话已 live（DSH 恢复）→ live 复用直接回答，无"新对话"通知（v1.27.3 修复）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+    }))
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    // 重启后：resume 报 "while it is live"、create 报 "already exists"、get 命中 live agent
+    const fromId = 'live@im.wechat'
+    const ctx = fakeCtx('live', weixinSessionIdFor(fromId))
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: fromId,
+      item_list: [{ type: 1, text_item: { text: 'hi' } }],
+    })
+    // 历史延续（live 复用 resumed=true）：只有答案，无"新的对话已开始"通知
+    expect(sent.some((s) => s.text.includes('新的对话'))).toBe(false)
+    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 内存注册表已登记（后续消息走进程内延续）
+    expect([...skiffSessionSnapshot().keys()].some((id) => id === weixinSessionIdFor(fromId))).toBe(true)
   })
 
   it('无路由 → 不创建会话不回复', async () => {

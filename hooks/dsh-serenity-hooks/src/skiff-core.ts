@@ -143,9 +143,32 @@ export async function createSkiffAgent(
   return { handle, agent, sessionId: id, resumed: handle.resumed }
 }
 
+/** 取 live agent（DSH 文档：`ctx.agents.get(id)` 返回 bare Agent；会话 live 时 resume/create 均不可用） */
+function getLiveAgent(ctx: Context, id: string): Agent | undefined {
+  try {
+    return (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(id)
+  } catch {
+    return undefined
+  }
+}
+
+/** live 复用返回（resumed:true 历史延续；dispose 空操作——live agent 不归本模块所有，不能拆） */
+function liveReuseRef(live: Agent, setup: (agentCtx: Context) => Promise<void>): Promise<AgentHandle & { resumed: boolean }> {
+  // 重挂 standard preset：恢复后 agent 上下文重建，平台工具面（read/grep/glob 等）可能缺失；
+  // setup 内部已吞错——已挂载则无害，服务缺失则跳过
+  return setup(live.ctx).catch(() => {}).then(() => ({ agent: live, dispose: async () => {}, resumed: true }))
+}
+
 /**
  * resume-or-create 分派：固定 id → 优先 resume（持久化历史延续），失败降级 create；
  * 随机 id（无固定 sessionId）→ 恒 create。返回 handle + resumed 标志。
+ *
+ * **v1.27.3 修复（微信桥"重启后不响应"根因）：live 会话优先复用**——重启后 DSH 把
+ * 关闭时仍 live 的持久化会话恢复为 live（crash/restart 恢复语义）。此时 resume 报
+ * "cannot prepare session X while it is live"（session-persistence coordinator 显式
+ * 拒绝 live 会话）、create 报 "session X already exists"（磁盘有持久化 log 必拒）→
+ * 微信桥 catch 吞错 → 用户消息无回复。唯一可行路径 = `ctx.agents.get(id)` 取 live
+ * agent 直接续用（resumed:true；角色提示词重挂与内存注册表登记由 createSkiffAgent 统一做）。
  */
 async function createOrResumeAgent(
   ctx: Context,
@@ -166,8 +189,13 @@ async function createOrResumeAgent(
       resumed: false,
     }
   }
+  // live 会话优先复用（见函数头注释——v1.27.3 修复）
+  const liveAgent = getLiveAgent(ctx, id)
+  if (liveAgent) {
+    return liveReuseRef(liveAgent, setup)
+  }
   // resume 可用性守卫：旧版 dsh / 测试环境无 resume 方法 → 直接 create（原 v1.27.0 行为）。
-  // **v1.27.3 this 绑定修复**：不得解构 `ctx.agents.resume` 到局部变量再裸调用——
+  // **v1.27.2 this 绑定修复**：不得解构 `ctx.agents.resume` 到局部变量再裸调用——
   // DSH 的 resume 内部用 `this.ctx`（AgentRegistry），解构后 this 丢失 →
   // "Cannot read properties of undefined (reading 'ctx')"（v1.23.2 同病第三次）。
   // 通过类型断言访问 `ctx.agents.resume` 并**直接以方法调用形式执行**（this 保持绑定）。
@@ -194,6 +222,11 @@ async function createOrResumeAgent(
       resumed: true,
     }
   } catch (err) {
+    // 竞态兜底：live 检查与 resume 之间会话可能变 live（多消息并发）→ 复用 live agent
+    const liveNow = getLiveAgent(ctx, id)
+    if (liveNow) {
+      return liveReuseRef(liveNow, setup)
+    }
     // v1.27.2 用户拍板：**resume 失败一律降级新建**（不再透传——透传会让微信桥静默"不唤醒"）+ 打印堆栈定位
     const msg = err instanceof Error ? err.message : String(err)
     const stack = err instanceof Error ? (err.stack ?? '') : ''
