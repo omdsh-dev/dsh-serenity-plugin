@@ -23,7 +23,6 @@ import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-sett
 export interface SimpleConfigFragment {
   gateway?: { enabled?: boolean }
   rebuild?: { enabled?: boolean; thresholdRatio?: number }
-  naming?: { enabled?: boolean }
   /** F4 Skiff（实验性）：调试服务启停（人工） */
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
@@ -46,8 +45,6 @@ export interface SerenitySimpleSettings {
   rebuildEnabled: boolean
   /** F2 contextPressure 触发比例（0~1） */
   rebuildThreshold: number
-  /** F3 会话命名总开关 */
-  namingEnabled: boolean
   /** F4 Skiff 调试服务总开关（实验性；默认关——不随插件加载自动启动，人工开启） */
   skiffEnabled: boolean
   /** F4 Skiff 调试端口（默认 3099，仅 127.0.0.1） */
@@ -65,7 +62,6 @@ export const simpleSettingsSchema = z.object({
   gatewayEnabled: z.boolean().default(false),
   rebuildEnabled: z.boolean().default(true),
   rebuildThreshold: z.number().min(0.01).max(1).default(0.9),
-  namingEnabled: z.boolean().default(true),
   skiffEnabled: z.boolean().default(false),
   skiffDebugPort: z.number().min(1024).max(65535).default(3099),
   acpEnabled: z.boolean().default(false),
@@ -79,7 +75,6 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     gatewayEnabled: config.gateway?.enabled ?? false,
     rebuildEnabled: config.rebuild?.enabled ?? true,
     rebuildThreshold: config.rebuild?.thresholdRatio ?? 0.9,
-    namingEnabled: config.naming?.enabled ?? true,
     skiffEnabled: config.skiff?.enabled ?? false,
     skiffDebugPort: config.skiff?.debugPort ?? 3099,
     acpEnabled: config.acp?.enabled ?? false,
@@ -97,7 +92,6 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     gatewayEnabled: false,
     rebuildEnabled: true,
     rebuildThreshold: 0.9,
-    namingEnabled: true,
     skiffEnabled: false,
     skiffDebugPort: 3099,
     acpEnabled: false,

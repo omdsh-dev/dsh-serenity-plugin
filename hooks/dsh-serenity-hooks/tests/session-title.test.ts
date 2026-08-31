@@ -67,7 +67,7 @@ describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默�
   it('门控通过 → titles.rename 方法调用（S###-日期标题）', () => {
     const renamed: string[] = []
     const result = renameDshSessionOnUse(
-      { namingEnabled: true, sessionTitleAvailable: true },
+      { sessionTitleAvailable: true },
       { id: 'dsh-sess-1' },
       okTitles(renamed),
       active,
@@ -88,7 +88,7 @@ describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默�
       },
     }
     const result = renameDshSessionOnUse(
-      { namingEnabled: true, sessionTitleAvailable: true },
+      { sessionTitleAvailable: true },
       { id: 'dsh-sess-1' },
       service,
       active,
@@ -96,21 +96,9 @@ describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默�
     expect(result).toEqual({ ok: true, title: 'S001-2026-08-26' })
   })
 
-  it('naming.enabled=false → 返回失败原因（不静默）', () => {
-    const renamed: string[] = []
-    const result = renameDshSessionOnUse(
-      { namingEnabled: false, sessionTitleAvailable: true },
-      {},
-      okTitles(renamed),
-      active,
-    )
-    expect(result).toEqual({ ok: false, reason: 'naming.enabled=false' })
-    expect(renamed).toEqual([])
-  })
-
   it('sessionTitle 服务缺失（undefined）→ 返回失败原因', () => {
     const result = renameDshSessionOnUse(
-      { namingEnabled: true, sessionTitleAvailable: true },
+      { sessionTitleAvailable: true },
       {},
       undefined,
       active,
@@ -120,7 +108,7 @@ describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默�
 
   it('sessionTitle 服务无 rename 方法 → 返回失败原因', () => {
     const result = renameDshSessionOnUse(
-      { namingEnabled: true, sessionTitleAvailable: true },
+      { sessionTitleAvailable: true },
       {},
       {} as never,
       active,
@@ -130,7 +118,7 @@ describe('F3: renameDshSessionOnUse（v1.22.9：返回结果对象，不静默�
 
   it('rename 抛错 → 返回失败原因（不传播，调用方决定可见性）', () => {
     const result = renameDshSessionOnUse(
-      { namingEnabled: true, sessionTitleAvailable: true },
+      { sessionTitleAvailable: true },
       {},
       { rename: () => { throw new Error('session is not live in this store') } },
       active,
@@ -204,8 +192,9 @@ describe('F3: renameDshSessionForActive（v1.25.11 use/create 共用封装）', 
   })
 })
 
-describe('F3: 简单配置门控默认（namingEnabled 默认开）', () => {
-  it('defaultSimpleSettings.namingEnabled = true', () => {
-    expect(defaultSimpleSettings().namingEnabled).toBe(true)
+describe('F3: 会话命名永远开启（v1.27.1 用户拍板"开关下掉，永远开启"）', () => {
+  it('defaultSimpleSettings 不含 namingEnabled（开关已移除）', () => {
+    const s = defaultSimpleSettings()
+    expect('namingEnabled' in s).toBe(false)
   })
 })

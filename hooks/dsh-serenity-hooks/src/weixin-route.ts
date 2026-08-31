@@ -200,6 +200,18 @@ export function saveWeixinRoutes(root: string, routes: WeixinRouteConfig[]): Wei
   return next
 }
 
+/**
+ * 生成下一个可用账号 id（`wechat-N`，N 自增取**最小未占用**）：
+ * 多账号支持（S142 用户反馈 ①"要支持添加多个账号，每个都是扫码"）——
+ * 移除中间账号后不冲突（wechat-2 被删 → 新账号复用 wechat-2 而非跳到 4）。
+ */
+export function nextWeixinAccountId(settings: WeixinSettings): string {
+  const used = new Set((settings.accounts ?? []).map((a) => a.accountId))
+  let n = 1
+  while (used.has(`wechat-${n}`)) n++
+  return `wechat-${n}`
+}
+
 /** 切换总开关 */
 export function setWeixinEnabled(root: string, enabled: boolean): WeixinSettings {
   const settings = readWeixinSettings(root)

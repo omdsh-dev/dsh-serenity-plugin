@@ -1,3 +1,23 @@
+## v1.27.1 — 2026-08-31（微信桥反馈三修：多账号 / 回复去 think / 会话命名恒开，S142 用户反馈）
+
+**Scope:** 用户 v1.27.0 微信桥两条反馈 + 一条配置原则——① "要支持添加多个账号，每个都是扫码"；② 微信桥回复用户的消息**去掉 think 标签**（用户不应看到思考过程）；③ "会话命名开关下掉，永远开启"。均为反馈修复（用户"修好先别发布"→ 测试全绿后本版发布）。
+
+### 变更
+- **多账号支持（反馈 ①）**
+  - `src/weixin-route.ts` `nextWeixinAccountId`（新）：最小未占用自增（wechat-N，删中间账号后复用缺口号而非跳到最大+1）
+  - `src/api.ts` login-start 用 nextWeixinAccountId 生成账号 id（每账号独立扫码绑定）
+  - `src/client/WeixinBridgeEditor.tsx`：**每账号独立移除按钮**（removal 按 accountId 精确移除）+ 扫码按钮**可反复使用**（修复原 bug：`!status.enabled === false` 优先级错误导致桥启用时按钮被错误禁用）
+- **回复去 think（反馈 ②）**
+  - `src/skiff-debug.ts` `stripThink`（新导出）：复用 v1.26.8 `extractThinkBlocks` 状态机（弃正则）剥离 `<think>` 块——**只保留正文**（占位符替换为空，think 内容丢弃）；未闭合 think 优雅截断（开标签前正文保留）
+  - `src/weixin-bridge.ts`：`handleIncoming` 回写前 `stripThink(answer)`——微信纯文本通道不渲染思考过程
+- **会话命名永远开启（反馈 ③）**
+  - `src/settings-section.ts`：删 namingEnabled 开关项；`src/tools/session.ts`：删门控恒执行命名；`src/client/SettingsSection.tsx`：删「会话」开关组
+  - `src/index.ts`：删 naming Config 装配；`src/config-ops.ts`：删 NamingSettings 死配置（wire/merge/update 全清）
+- **测试同步**：settings-section / config-ops / session-title 用例更新（命名恒执行 + 无 naming 配置）+ weixin.test 补 nextWeixinAccountId 复用断言
+
+### 测试
+- **52 files / 710 tests 全绿**（709 + 1，stripThink 未闭合断言修正：开标签前正文保留，仅截断 think 内容）；typecheck ✓（node + client）→ build ✓
+
 ## v1.27.0 — 2026-08-31（微信桥 F4c-3：CCC 级 iLink 接入，S142 用户拍板）
 
 **Scope:** 用户 "dsp 能否接入微信的扫码协议，考虑多用户接入招财 role"——skiff 强化后支持微信扫码接入 → 代替 openclaw（招财平台）的微信接入面。协议实证（裸调 get_bot_qrcode 无需 OpenClaw）+ 用户七项裁决后实现。**架构决策**：配置归 **CCC**（dsh 一进程多 CCC，每个 CCC 独立对接微信桥）——结构/路由/开关进 `.opencode/serenity.json`，**bot_token 凭据进 CCC localstore**（credential scope）；ACC 不绑定具体 role（路由 user → role 用户自选）；管理面 = **CCC 面板**（显式 CCC 选择器——WebUI 顶层全局，配置写入必须显式）；不做 agent 侧管理工具。

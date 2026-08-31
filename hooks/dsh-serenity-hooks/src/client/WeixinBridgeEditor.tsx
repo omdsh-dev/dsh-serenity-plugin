@@ -87,7 +87,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
     setLoginPhase('idle')
     void (async () => {
       try {
-        const res = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
+        const res = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null
           if (alive) setLoadError(body?.error ?? `HTTP ${res.status}`)
@@ -111,7 +111,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
     let timer: ReturnType<typeof setTimeout> | undefined
     const poll = async (): Promise<void> => {
       try {
-        const res = await fetch(`/serenity/weixin/login?key=${encodeURIComponent(loginKey)}`, { headers: { accept: 'application/json' } })
+        const res = await fetch(`/serenity/weixin/login?key=${encodeURIComponent(loginKey)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
         if (!alive) return
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { error?: string } | null
@@ -125,7 +125,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
           setLoginNotice(`账号 ${body.accountId} 已绑定 ✓（token 已写入 CCC localstore）`)
           // 刷新状态显示新账号
           if (selectedRoot) {
-            const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
+            const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
             const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
             if (alive && sbody) setStatus(sbody)
           }
@@ -181,7 +181,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
       })
       if (!res.ok) return
       // 刷新状态
-      const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
+      const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
       const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
       if (sbody) setStatus(sbody)
     } catch {
@@ -212,7 +212,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
       }
       setLoadError(null)
       // 刷新
-      const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
+      const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
       const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
       if (sbody) setStatus(sbody)
     } catch {
@@ -234,7 +234,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
         return
       }
       setLoadError(null)
-      const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
+      const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
       const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
       if (sbody) setStatus(sbody)
     } catch {
@@ -308,38 +308,49 @@ export function WeixinBridgeEditor(): React.JSX.Element {
             </div>
           </li>
 
-          {/* 账号列表 */}
+          {/* 账号列表（多账号：每账号一行，独立移除按钮） */}
           <li>
             <div className="ss-rowCard">
               <div className="ss-rowText">
-                <span className="ss-rowName">账号</span>
+                <span className="ss-rowName">账号（{status.accounts.length}）</span>
                 <span className="ss-rowDesc">
                   {status.accounts.length === 0
-                    ? '未绑定任何微信账号——点击右侧「扫码绑定」'
-                    : status.accounts.map((a) => `${a.accountId}${a.name ? ` · ${a.name}` : ''}${a.bound ? ' · 已绑定' : ' · 未绑定凭据'}（${bridgeStateText(a.accountId)}）`).join('；')}
+                    ? '未绑定任何微信账号——点击下方「扫码绑定微信」逐个添加'
+                    : '每个账号独立轮询；可继续扫码添加更多'}
                 </span>
               </div>
-              <div className="ss-rowControl">
-                {status.accounts.length > 0 && (
+              <div className="ss-rowControl" />
+            </div>
+          </li>
+          {status.accounts.map((a) => (
+            <li key={a.accountId}>
+              <div className="ss-rowCard">
+                <div className="ss-rowText">
+                  <span className="ss-rowName">{a.accountId}{a.name ? ` · ${a.name}` : ''}</span>
+                  <span className="ss-rowDesc">
+                    {a.bound ? '已绑定凭据' : '未绑定凭据'}（{bridgeStateText(a.accountId)}）
+                  </span>
+                </div>
+                <div className="ss-rowControl">
                   <button
                     type="button"
                     className="ss-removeBtn"
-                    onClick={() => void removeAccount(status.accounts[0]!.accountId)}
+                    onClick={() => void removeAccount(a.accountId)}
                   >
-                    移除首个
+                    移除
                   </button>
-                )}
+                </div>
               </div>
-            </div>
-          </li>
+            </li>
+          ))}
 
-          {/* 扫码绑定 */}
+          {/* 扫码绑定（可反复使用——每绑定一个即新增账号） */}
           <li>
             <div className="ss-rowCard">
               <div className="ss-rowText">
                 <span className="ss-rowName">扫码绑定微信</span>
                 <span className="ss-rowDesc">
-                  {loginPhase === 'idle' && '用手机微信「扫一扫」扫描二维码并确认，即绑定该 CCC 的微信桥账号'}
+                  {loginPhase === 'idle' && '用手机微信「扫一扫」扫描二维码并确认——每扫一次绑定一个新账号'}
                   {loginPhase === 'waiting' && '二维码已生成（5 分钟内有效）——微信扫一扫 → 手机上确认绑定'}
                   {loginPhase === 'confirmed' && (loginNotice ?? '绑定成功')}
                   {loginPhase === 'error' && (loginError ?? '绑定失败')}
@@ -350,7 +361,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
                 <button
                   type="button"
                   className="ss-loginBtn"
-                  disabled={loginPhase === 'waiting' || !status.enabled === false}
+                  disabled={loginPhase === 'waiting'}
                   onClick={() => void startLogin()}
                 >
                   {loginPhase === 'waiting' ? '等待扫码…' : '扫码绑定'}

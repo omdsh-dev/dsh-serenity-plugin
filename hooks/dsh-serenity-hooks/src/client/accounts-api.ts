@@ -32,7 +32,6 @@ export interface WireConfig {
     totpEnabled: boolean
   }
   rebuild: { enabled: boolean; thresholdRatio: number }
-  naming: { enabled: boolean }
   persona: { mode: string; overrideText: string }
   publicAsk: {
     /** 开放容器白名单（v1.26.2：容器名数组；空 = 全部开放） */

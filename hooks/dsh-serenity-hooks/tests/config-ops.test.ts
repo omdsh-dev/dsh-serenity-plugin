@@ -77,7 +77,6 @@ describe('读写（plugin 全局文件）', () => {
     expect(s.gateway.workspaces).toEqual([])
     expect(s.rebuild.enabled).toBe(true)
     expect(s.rebuild.thresholdRatio).toBe(0.9)
-    expect(s.naming.enabled).toBe(true)
   })
 
   it('写 → 读 往返一致；文件权限 0600', () => {
@@ -150,11 +149,10 @@ describe('updateAdvancedSettings（部分更新）', () => {
     expect(next.gateway.accounts).toHaveLength(1) // 保留
   })
 
-  it('rebuild/naming 独立 patch', () => {
+  it('rebuild 独立 patch', () => {
     const next = updateAdvancedSettings({ rebuild: { thresholdRatio: 0.85 } })
     expect(next.rebuild.thresholdRatio).toBe(0.85)
     expect(next.rebuild.enabled).toBe(true)
-    expect(next.naming.enabled).toBe(true)
   })
 })
 
@@ -288,14 +286,12 @@ describe('applyWirePatch（wire → 持久化）', () => {
     const next = applyWirePatch({
       gateway: { enabled: true, host: '127.0.0.1', port: 9999 },
       rebuild: { enabled: false, thresholdRatio: 0.5 },
-      naming: { enabled: false },
     })
     expect(next.gateway.enabled).toBe(true)
     expect(next.gateway.host).toBe('127.0.0.1')
     expect(next.gateway.port).toBe(9999)
     expect(next.rebuild.enabled).toBe(false)
     expect(next.rebuild.thresholdRatio).toBe(0.5)
-    expect(next.naming.enabled).toBe(false)
   })
 
   it('工作区白名单 patch：写入/过滤空串/缺省保留', () => {

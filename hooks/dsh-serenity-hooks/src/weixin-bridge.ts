@@ -18,6 +18,7 @@ import { findSerenityRoot, readHandymanConfig } from './ccc.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, type WeixinAccountCredential } from './weixin-route.js'
 import { getUpdates, sendTextMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
+import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff } from './skiff-core.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
@@ -129,12 +130,13 @@ export async function handleIncoming(
     const answer = result.answer ?? ''
     if (answer === '') return
 
-    // 回复回写（必须回带 context_token 关联对话；md→plain 由 sendTextMessage 内置）
+    // 回复回写（必须回带 context_token 关联对话；md→plain 由 sendTextMessage 内置；
+    // **stripThink 先剥离 <think> 块**——微信桥用户反馈：用户不应看到思考过程）
     await sendTextMessage({
       baseUrl: cred.baseUrl,
       token: cred.token,
       toUserId: fromUserId,
-      text: answer,
+      text: stripThink(answer),
       contextToken: msg.context_token,
     })
   } catch (err) {

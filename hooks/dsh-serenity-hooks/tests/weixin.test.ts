@@ -58,6 +58,7 @@ import {
   removeWeixinAccount,
   saveWeixinRoutes,
   setWeixinEnabled,
+  nextWeixinAccountId,
 } from '../src/weixin-route.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
 
@@ -164,6 +165,15 @@ describe('weixin-api: 协议客户端（mock fetch）', () => {
     expect(markdownToPlainText('```ts\nconst a = 1\n```')).toBe('const a = 1')
     expect(markdownToPlainText('| a | b |\n|---|---|')).toBe('')
   })
+
+  it('stripThink 剥离 <think> 块（微信桥用户反馈：用户不应看到思考过程）', async () => {
+    const { stripThink } = await import('../src/skiff-debug.js')
+    expect(stripThink('答案<think>内部推理</think>正文')).toBe('答案正文')
+    expect(stripThink('<think>只有思考</think>')).toBe('')
+    expect(stripThink('无 think 的正常回复')).toBe('无 think 的正常回复')
+    // 未闭合：think 内容截断，开标签前正文保留
+    expect(stripThink('前置<think>剩余全部作为思考')).toBe('前置')
+  })
 })
 
 describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
@@ -242,6 +252,18 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     expect(readWeixinSettings(dir).enabled).toBe(true)
     removeWeixinAccount(dir, 'wechat-1')
     expect(readWeixinSettings(dir).accounts).toHaveLength(0)
+  })
+
+  it('nextWeixinAccountId：自增 + 移除中间账号后复用（多账号）', () => {
+    upsertWeixinAccount(dir, { accountId: 'wechat-1' })
+    upsertWeixinAccount(dir, { accountId: 'wechat-2' })
+    upsertWeixinAccount(dir, { accountId: 'wechat-3' })
+    expect(nextWeixinAccountId(readWeixinSettings(dir))).toBe('wechat-4')
+    // 移除 wechat-2 → 最小未占用 = wechat-2（复用，不跳到 4）
+    removeWeixinAccount(dir, 'wechat-2')
+    expect(nextWeixinAccountId(readWeixinSettings(dir))).toBe('wechat-2')
+    // 空账号表 → wechat-1
+    expect(nextWeixinAccountId({ enabled: false, accounts: [], routes: [] })).toBe('wechat-1')
   })
 })
 

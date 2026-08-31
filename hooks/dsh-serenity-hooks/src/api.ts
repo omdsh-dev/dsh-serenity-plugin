@@ -677,9 +677,10 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
               sendJson(res, 200, { status: 'error', error: 'confirmed but no bot_token' })
               return
             }
-            const { upsertWeixinAccount, writeWeixinCredential } = await import('./weixin-route.js')
+            const { upsertWeixinAccount, writeWeixinCredential, nextWeixinAccountId } = await import('./weixin-route.js')
             const { syncCccBridge } = await import('./weixin-bridge.js')
-            const accountId = `wechat-${(settings.accounts?.length ?? 0) + 1}`
+            // 多账号：每次扫码生成最小未占用 id（移除中间账号后复用，不冲突）
+            const accountId = nextWeixinAccountId(settings)
             upsertWeixinAccount(login.root, { accountId, name: `微信 ${accountId}`, enabled: true })
             writeWeixinCredential(login.root, accountId, {
               token: status.bot_token,

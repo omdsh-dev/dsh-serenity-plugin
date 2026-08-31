@@ -421,6 +421,17 @@ export function renderSkiffMarkdown(raw: string, hideThink = false): string {
 }
 
 /**
+ * 剥离 `<think>…</think>` 块（v1.27.1，微信桥用户反馈："过微信桥回复给用户的消息，
+ * 要去掉 think 标签，用户不应看到"）。复用 extractThinkBlocks 状态机（v1.26.8，
+ * 弃正则）——提取后**只保留正文**（占位符替换为空，think 内容丢弃），
+ * 未闭合 think 优雅截断。适用于纯文本输出面（微信等不支持 think 折叠的通道）。
+ */
+export function stripThink(raw: string): string {
+  const { body } = extractThinkBlocks(raw)
+  return body.replace(/\u0001T(\d+)\u0001/g, '')
+}
+
+/**
  * 启动调试问答服务（单实例；重复启动幂等返回既有实例）。
  *
  * **CCC 绑定（v1.25.2 用户指出）**：服务绑定一个默认 CCC root（调用方 resolveSkiffRoot

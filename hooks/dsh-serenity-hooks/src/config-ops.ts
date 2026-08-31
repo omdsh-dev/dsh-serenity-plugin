@@ -60,11 +60,6 @@ export interface RebuildSettings {
   thresholdRatio: number
 }
 
-/** F3 会话命名配置 */
-export interface NamingSettings {
-  enabled: boolean
-}
-
 /** 彩蛋功能：persona 模式（v1.23.1，S142 用户需求）
  * 配置后替换 ACC 系统提示词中"输出约束/指令遵循约束"部分（EAP 块 + MSM 原则段）；
  * 未配置（mode 空）→ 完全默认行为，零影响。 */
@@ -89,7 +84,6 @@ export interface PublicAskSettings {
 export interface AdvancedSettings {
   gateway: GatewaySettings
   rebuild: RebuildSettings
-  naming: NamingSettings
   persona: PersonaSettings
   publicAsk: PublicAskSettings
 }
@@ -110,9 +104,6 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     rebuild: {
       enabled: true,
       thresholdRatio: 0.9,
-    },
-    naming: {
-      enabled: true,
     },
     persona: {
       mode: '',
@@ -182,7 +173,6 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
   const o = raw as Partial<AdvancedSettings>
   const gateway = (o.gateway ?? {}) as Partial<GatewaySettings>
   const rebuild = (o.rebuild ?? {}) as Partial<RebuildSettings>
-  const naming = (o.naming ?? {}) as Partial<NamingSettings>
   const persona = (o.persona ?? {}) as Partial<PersonaSettings>
   const publicAsk = (o.publicAsk ?? {}) as Partial<PublicAskSettings>
   return {
@@ -213,9 +203,6 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
     rebuild: {
       enabled: typeof rebuild.enabled === 'boolean' ? rebuild.enabled : def.rebuild.enabled,
       thresholdRatio: typeof rebuild.thresholdRatio === 'number' ? rebuild.thresholdRatio : def.rebuild.thresholdRatio,
-    },
-    naming: {
-      enabled: typeof naming.enabled === 'boolean' ? naming.enabled : def.naming.enabled,
     },
     persona: {
       mode: typeof persona.mode === 'string' ? persona.mode : def.persona.mode,
@@ -248,7 +235,6 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
   const current = readAdvancedSettings()
   const gw = patch.gateway
   const rb = patch.rebuild
-  const nm = patch.naming
   const ps = patch.persona
   const next: AdvancedSettings = {
     gateway: gw !== undefined
@@ -279,9 +265,6 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
           : current.rebuild.thresholdRatio,
       }
       : current.rebuild,
-    naming: nm !== undefined
-      ? { enabled: typeof nm.enabled === 'boolean' ? nm.enabled : current.naming.enabled }
-      : current.naming,
     persona: ps !== undefined
       ? {
         mode: typeof ps.mode === 'string' ? ps.mode : current.persona.mode,
@@ -419,7 +402,7 @@ export interface GatewayAccountWire {
   hasTotp: boolean
 }
 
-/** 设定 wire 形态（GET /serenity/config 返回；rebuild/naming 同持久化，gateway 去 hash） */
+/** 设定 wire 形态（GET /serenity/config 返回；rebuild 同持久化，gateway 去 hash） */
 export interface AdvancedSettingsWire {
   gateway: {
     enabled: boolean
@@ -432,7 +415,6 @@ export interface AdvancedSettingsWire {
     totpEnabled: boolean
   }
   rebuild: RebuildSettings
-  naming: NamingSettings
   persona: PersonaSettings
   publicAsk: {
     /** 开放容器白名单（v1.26.2：容器名数组；空 = 全部开放） */
@@ -459,7 +441,6 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
       totpEnabled: settings.gateway.totpEnabled,
     },
     rebuild: settings.rebuild,
-    naming: settings.naming,
     persona: settings.persona,
     publicAsk: {
       allowed: [...settings.publicAsk.allowed],
@@ -534,9 +515,6 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
       rbPatch.thresholdRatio = wire.rebuild.thresholdRatio
     }
     patch.rebuild = rbPatch
-  }
-  if (wire.naming !== undefined && typeof wire.naming.enabled === 'boolean') {
-    patch.naming = { enabled: wire.naming.enabled }
   }
   if (wire.persona !== undefined) {
     const psPatch: PersonaSettings = { ...current.persona }

@@ -22,7 +22,6 @@ import type { JsonValue } from '../json.js'
 import { join } from 'node:path'
 import { findSerenityRoot } from '../ccc.js'
 import { loadMsmEntries, runMsmAsync, type MsmEntry } from '../msm-ops.js'
-import { readSimpleSettings } from '../settings-section.js'
 import {
   listSessions,
   showSession,
@@ -50,10 +49,10 @@ function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
 }
 
 // ── v1.21 F3：use 后重命名当前 dsh 会话（纯逻辑，可单测）──
+// v1.27.1：**永远开启**（S142 用户拍板"开关下掉，永远开启"）——命名是固定行为，
+// 移除 naming.enabled 简单配置开关；仅剩 sessionTitle 服务可用性守卫。
 
 export interface RenameOnUseDeps {
-  /** naming.enabled 简单配置（DSH settings） */
-  namingEnabled: boolean
   /** sessionTitle 服务可用性 */
   sessionTitleAvailable: boolean
 }
@@ -77,8 +76,8 @@ export function namingTitleFor(active: ActiveSessionInfo): string {
 
 /**
  * use 激活宁静号会话后，把当前 dsh 会话重命名为命名标题（`S###-日期`）。
- * 门控：naming.enabled + sessionTitle 服务存在；失败不静默——返回结果对象
- * 而非 null（v1.22.9），调用方决定可见性。
+ * v1.27.1：**永远开启**（不再有 naming.enabled 门控）——仅 sessionTitle 服务
+ * 存在性守卫；失败不静默——返回结果对象而非 null（v1.22.9），调用方决定可见性。
  *
  * v1.23.2 修复（this 绑定）：第三参从**解构的裸 rename 函数**改为**整个
  * sessionTitle 服务对象**——内部以 `titles.rename(session, title)` **方法调用**
@@ -94,7 +93,6 @@ export function renameDshSessionOnUse(
   titles: { rename: (session: unknown, title: string) => unknown } | undefined,
   active: ActiveSessionInfo,
 ): { ok: true; title: string } | { ok: false; reason: string } {
-  if (!deps.namingEnabled) return { ok: false, reason: 'naming.enabled=false' }
   if (!deps.sessionTitleAvailable) return { ok: false, reason: 'sessionTitle service unavailable' }
   if (!titles || typeof titles.rename !== 'function') return { ok: false, reason: 'sessionTitle service unavailable' }
   const title = namingTitleFor(active)
@@ -141,7 +139,7 @@ export function renameDshSessionForActive(
       return
     }
     const result = renameDshSessionOnUse(
-      { namingEnabled: readSimpleSettings().namingEnabled, sessionTitleAvailable: true },
+      { sessionTitleAvailable: true },
       dshSession,
       titles as { rename: (session: unknown, title: string) => unknown } | undefined,
       info,
