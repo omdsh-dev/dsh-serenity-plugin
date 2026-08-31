@@ -274,6 +274,13 @@ function cmdPublish(): void {
   if (missing.length > 0) {
     fail(`tarball 缺必需文件（${missing.join(', ')}）——检查 tsdown.prepare.config.ts 是否构建完整双 bundle，中止发布`, 2)
   }
+  // v1.26.16：动态核对 lib/ 全部 JS 产物（含 tsdown chunk 如 lib/ccc-*.js）——
+  // files 白名单漏 chunk 曾致 npm 包 index.js import "./ccc-xxx.js" 失败（加载即崩）。
+  const libJs = readdirSync(join(HOOKS_DIR, 'lib')).filter((f) => f.endsWith('.js'))
+  const missingLibJs = libJs.filter((f) => !tarballFiles.includes(`lib/${f}`))
+  if (missingLibJs.length > 0) {
+    fail(`tarball 缺 lib/ 产物（${missingLibJs.join(', ')}）——package.json files 白名单未覆盖 tsdown 全部输出，中止发布`, 2)
+  }
   console.log(`[dsh-develop] ✓ tarball 核对通过（${tarballFiles.length} 文件，含 lib/index.js + lib/client.js + lib/invariant.js）`)
   const r = run('npm', ['publish', '--access', 'public', '--registry', 'https://registry.npmjs.org/'], {
     cwd: HOOKS_DIR,
