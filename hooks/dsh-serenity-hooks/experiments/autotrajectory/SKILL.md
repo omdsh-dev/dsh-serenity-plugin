@@ -1,6 +1,6 @@
 ---
 name: autotrajectory-experiment
-description: 自主轨迹实验（Self-Sustaining Trajectory Experiment）参与 skill。本 skill 让 CCC 完整理解实验的背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 前台运行），并提供一站式实验管理 MSM（autotrajectory-exp：无参全报告 / init 初始化 / random 验证偏见内容）。任何希望参与实验的 CCC 复制本目录到 .opencode/skills/ 即可开始。
+description: 自主轨迹实验（Self-Sustaining Trajectory Experiment）参与 skill。本 skill 让 CCC 完整理解实验的背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 轨迹焦点 + 前台运行），并提供一站式实验管理 MSM（autotrajectory-exp：无参全报告 / init 初始化 / random 验证偏见内容）。任何希望参与实验的 CCC 复制本目录到 .opencode/skills/ 即可开始。
 ---
 
 # Skill: autotrajectory-experiment
@@ -35,7 +35,7 @@ description: 自主轨迹实验（Self-Sustaining Trajectory Experiment）参与
 | P5 | 轨迹运转速度提升 → 更快产生让人类满意的效果 |
 | 反证 | 熵增失控 / 自我确认循环 / 随机噪音化 / 资源无界 / 反馈脱节——任一显著 → 猜想不成立 |
 
-## 3. 参与方式（CCC 侧三步——第一步可一键 init）
+## 3. 参与方式（CCC 侧四步——第一步可一键 init）
 
 ### ① 初始化（一键）：`acc_msm exec autotrajectory-exp init`
 
@@ -48,16 +48,21 @@ description: 自主轨迹实验（Self-Sustaining Trajectory Experiment）参与
     "enabled": true,                  // 总开关（缺省 false，默认关零资源占用）
     "intervalHours": 12,              // 无人类活动 N 小时后唤起（缺省 12）
     "biasProvider": "autotrajectory-bias.ts", // 偏见内容提供者脚本（CCC 根下）
+    "topPrompt": "本轨迹的核心焦点：<CCC 填写>", // 轨迹焦点（v1.26.17）：CCC 定义，每次唤起最先注入
     "avoidWakeHours": { "start": 8, "end": 18 }  // 可选：避开北京高峰（缺省 8~18 省钱）
   }
 }
 ```
 
-### ② 实现偏见内容提供者（`autotrajectory-bias.ts`）
+### ② 定义轨迹焦点（topPrompt——CCC 自己填写）
+
+**CCC 定义 autotrajectory 时同时定义本轨迹的顶层提示词**（`topPrompt`）：核心目标/纪律/质量要求（示例："持续深化某领域认知，产出可重建的结论与决策记录"）。它会在**每次唤起时最先注入**（`[轨迹焦点]` 段，位于身份锚定之前，影响力最大），作为**稳定焦点锚定 trajectory**——**实验观察：无焦点锚定时，多轮自主唤起中轨迹腐化严重（焦点丢失）**。与偏见内容的分工：**焦点=稳定锚（每轮不变），偏见=随机探索方向（每轮不同），互补**。init 生成占位，CCC 按自己轨迹目标改写（勿留空——留空 = 唤起无焦点锚定，轨迹易漂移）。
+
+### ③ 实现偏见内容提供者（`autotrajectory-bias.ts`）
 
 CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容**（反事实问题/探索方向/任何让轨迹偏离既有路径的输入）。**偏见内容归 CCC**——用本 CCC 自己的反馈信息来源保证"足够随机"。`acc_msm exec autotrajectory-exp random` 可验证输出。
 
-### ③ 标记目标会话（可选自生动机段）
+### ④ 标记目标会话（可选自生动机段）
 
 - 目标会话目录名加 `--auto` 后缀：`AGENT_SESSIONS/<date>--<desc>--auto/`——**只有带标志的轨迹走自主形态**，同 CCC 其他会话不受影响
 - 可选：该 SESSION.md 写「下一轮动机」段（上一轮预写 → 下一轮唤起的自生偏见）
@@ -66,9 +71,10 @@ CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容*
 
 ```
 定时器（每 10min）→ 唤起条件全满足 →
-  ① 运行 <biasProvider> 脚本 → stdout = 偏见内容（CCC 自定）
-  ② 读 SESSION.md「下一轮动机」段 → 自生动机
-  ③ 定位活跃会话 agent → 注入唤起消息（前台运行——用户全程可见、随时可介入）
+  ① 读 topPrompt（CCC 定义的轨迹焦点）→ 唤起消息首段注入
+  ② 运行 <biasProvider> 脚本 → stdout = 偏见内容（CCC 自定）
+  ③ 读 SESSION.md「下一轮动机」段 → 自生动机
+  ④ 定位活跃会话 agent → 注入唤起消息（前台运行——用户全程可见、随时可介入）
 → 模型自动继续：探索/反事实检验 → 产出落 SESSION.md「自主探索日志」+ 预写「下一轮动机」
 ```
 
@@ -84,7 +90,7 @@ CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容*
 | `acc_msm exec autotrajectory-exp init` | **一键初始化**：写配置 + 生成偏见提供者脚本模板（CCC 根 autotrajectory-bias.ts） |
 | `acc_msm exec autotrajectory-exp random` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
 | `acc_msm exec autotrajectory-exp doc` | 实验定义说明全文（本 SKILL.md） |
-| `acc_msm exec autotrajectory-exp check` | 仅就绪度检查（配置/偏见提供者/--auto 标志/动机段） |
+| `acc_msm exec autotrajectory-exp check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
 | `acc_msm exec autotrajectory-exp status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
 | `acc_msm exec autotrajectory-exp guide` | 仅步骤指引 |
 
