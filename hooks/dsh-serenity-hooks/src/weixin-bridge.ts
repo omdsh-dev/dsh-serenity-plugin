@@ -15,8 +15,8 @@
 
 import type { Context } from 'cordis'
 import { findSerenityRoot, readHandymanConfig } from './ccc.js'
-import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, type WeixinAccountCredential } from './weixin-route.js'
-import { getUpdates, sendTextMessage } from './weixin-api.js'
+import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, type WeixinAccountCredential } from './weixin-route.js'
+import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff } from './skiff-core.js'
@@ -41,6 +41,52 @@ const bridges = new Map<string, CccBridge>()
 
 /** 轮询间隔（getupdates 失败后重试延迟；成功 = 立即续轮询） */
 const POLL_RETRY_MS = 3_000
+
+/** typing_ticket 缓存（每 (accountId, fromUserId)；getconfig 一次后续复用——对齐参考实现 typingTicketCache） */
+const typingTicketByUser = new Map<string, string>()
+
+function typingCacheKey(accountId: string, fromUserId: string): string {
+  return `${accountId}|${fromUserId}`
+}
+
+/** 处理开始：getconfig（无缓存时）→ sendtyping status=1（微信侧显示"正在输入..."）。
+ *  任何失败静默（typing 不影响主流程——对齐参考实现 typingCallbacks try/catch 吞错）。 */
+async function sendTypingStart(cred: WeixinAccountCredential, accountId: string, fromUserId: string, contextToken?: string): Promise<void> {
+  try {
+    const key = typingCacheKey(accountId, fromUserId)
+    let ticket = typingTicketByUser.get(key)
+    if (!ticket) {
+      const configResp = await getConfig({
+        baseUrl: cred.baseUrl,
+        token: cred.token,
+        ilinkUserId: fromUserId,
+        contextToken: contextToken ?? '',
+      })
+      ticket = configResp.typing_ticket
+      if (ticket) typingTicketByUser.set(key, ticket)
+    }
+    if (!ticket) return
+    await sendTyping({ baseUrl: cred.baseUrl, token: cred.token, ilinkUserId: fromUserId, typingTicket: ticket, status: TypingStatus.TYPING })
+  } catch (err) {
+    console.log(`[serenity-hooks] weixin-bridge typing start skipped: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/** 处理结束（含异常路径 finally）：sendtyping status=0；缓存保留（ticket 可复用）。 */
+async function sendTypingStop(cred: WeixinAccountCredential, accountId: string, fromUserId: string): Promise<void> {
+  try {
+    const ticket = typingTicketByUser.get(typingCacheKey(accountId, fromUserId))
+    if (!ticket) return
+    await sendTyping({ baseUrl: cred.baseUrl, token: cred.token, ilinkUserId: fromUserId, typingTicket: ticket, status: TypingStatus.CANCEL })
+  } catch (err) {
+    console.log(`[serenity-hooks] weixin-bridge typing stop skipped: ${err instanceof Error ? err.message : String(err)}`)
+  }
+}
+
+/** 测试辅助：清空 typing_ticket 缓存（生产零调用） */
+export function resetWeixinTypingCache(): void {
+  typingTicketByUser.clear()
+}
 
 /** 单账号轮询循环：getupdates 长轮询 → 逐消息分发 → 回复回写 */
 async function runAccountLoop(
@@ -84,24 +130,41 @@ async function runAccountLoop(
  * 固定 id resume-or-create（v1.27.2）：磁盘已有持久化 log → resume（历史延续，
  * 重启后记忆保留——真正的"同用户长期延续"）；无 log（首次）→ create。
  * "新的对话已开始"通知仅真正首次（create）时发送；resume/进程内延续不发。
+ *
+ * 完善（v1.27.3）：
+ * - **语音支持**：`voice_item.text` = 微信服务端自带语音转写 → 与文本同路径进对话
+ *   （无需下载/ASR）；语音无转写 → 降级提示"暂时无法解析"
+ * - **正在输入**：处理前 sendtyping 1（微信显示"正在输入..."），处理后（含异常）0
  */
 export async function handleIncoming(
   ctx: Context,
   root: string,
-  _accountId: string,
+  accountId: string,
   cred: WeixinAccountCredential,
-  msg: { from_user_id?: string; context_token?: string; item_list?: Array<{ type?: number; text_item?: { text?: string } }> },
+  msg: Pick<WeixinMessage, 'from_user_id' | 'context_token' | 'item_list'>,
 ): Promise<void> {
   const fromUserId = msg.from_user_id
   if (!fromUserId) return
-  // P1 只处理文本（媒体消息 → 忽略；P3 扩展）
   const text = extractWeixinText(msg)
-  if (!text) return
 
   const settings = readWeixinSettings(root)
   if (!settings.enabled) return
   const roleName = matchWeixinRoute(settings.routes ?? [], fromUserId)
   if (!roleName) return // 无路由 → 不回复（未配置该用户）
+
+  // 语音但无服务端转写 → 降级提示（不静默；转发不进对话）
+  if (!text) {
+    if (hasVoiceItem(msg)) {
+      await sendTextMessage({
+        baseUrl: cred.baseUrl,
+        token: cred.token,
+        toUserId: fromUserId,
+        text: '（抱歉，暂时无法解析这条语音消息，请尝试发送文字）',
+        contextToken: msg.context_token,
+      }).catch(() => { /* 提示失败不影响 */ })
+    }
+    return
+  }
 
   try {
     const role = readSkiffRoles(root).get(roleName)
@@ -128,19 +191,25 @@ export async function handleIncoming(
       }).catch(() => { /* 通知失败不影响主流程 */ })
     }
 
-    const result = await askSkiff(ctx, ref.agent, text, undefined, { includeTrajectory: false })
-    const answer = result.answer ?? ''
-    if (answer === '') return
+    // 正在输入：处理前开始（微信侧显示"正在输入..."），处理完（含异常路径）结束
+    await sendTypingStart(cred, accountId, fromUserId, msg.context_token)
+    try {
+      const result = await askSkiff(ctx, ref.agent, text, undefined, { includeTrajectory: false })
+      const answer = result.answer ?? ''
+      if (answer === '') return
 
-    // 回复回写（必须回带 context_token 关联对话；md→plain 由 sendTextMessage 内置；
-    // **stripThink 先剥离 <think> 块**——微信桥用户反馈：用户不应看到思考过程）
-    await sendTextMessage({
-      baseUrl: cred.baseUrl,
-      token: cred.token,
-      toUserId: fromUserId,
-      text: stripThink(answer),
-      contextToken: msg.context_token,
-    })
+      // 回复回写（必须回带 context_token 关联对话；md→plain 由 sendTextMessage 内置；
+      // **stripThink 先剥离 <think> 块**——微信桥用户反馈：用户不应看到思考过程）
+      await sendTextMessage({
+        baseUrl: cred.baseUrl,
+        token: cred.token,
+        toUserId: fromUserId,
+        text: stripThink(answer),
+        contextToken: msg.context_token,
+      })
+    } finally {
+      await sendTypingStop(cred, accountId, fromUserId)
+    }
   } catch (err) {
     // 桥错误静默（日志可见；不中断轮询循环）——含堆栈（v1.27.2 诊断 resume 失败路径）
     const msg = err instanceof Error ? err.message : String(err)

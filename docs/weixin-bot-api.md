@@ -78,9 +78,11 @@ body: { "msg": {
 
 ### 正在输入 / 配置
 ```
-POST /ilink/bot/sendtyping   body: { ilink_user_id, typing_ticket, status }   # 1=TYPING 2=CANCEL
+POST /ilink/bot/sendtyping   body: { ilink_user_id, typing_ticket, status }   # 1=TYPING 0=CANCEL（对齐官方参考实现 onCleanup status=0；早期注释"2=CANCEL"为误记）
 POST /ilink/bot/getconfig    body: { ilink_user_id, context_token } → { typing_ticket }
 ```
+- 流程：收消息 → `getconfig` 拿 `typing_ticket`（每用户缓存复用）→ 处理前 `sendtyping status=1`（微信侧显示"正在输入..."）→ 处理后 `sendtyping status=0`
+- 参考实现（openclaw-weixin index.ts `typingCallbacks`）：onReplyStart → status 1 / onCleanup → status 0；失败吞错不阻断主流程
 
 ## 5. 消息类型（item_list type）
 
@@ -88,7 +90,7 @@ POST /ilink/bot/getconfig    body: { ilink_user_id, context_token } → { typing
 |------|------|------|
 | 1 | TEXT | `text_item.text` |
 | 2 | IMAGE | `image_item.media`（CDN 加密媒体） |
-| 3 | VOICE | `voice_item.media`（SILK） |
+| 3 | VOICE | `voice_item.media`（SILK）——**`voice_item.text` = 微信服务端自带语音转写**（官方插件直接读该字段，无需下载/ASR；v1.27.3 语音支持主路径） |
 | 4 | FILE | `file_item.media` + `file_name` |
 | 5 | VIDEO | `video_item.media` |
 

@@ -190,9 +190,13 @@ WebUI 设置面板 → 微信桥区块：
 | 期 | 内容 | 规模估计 | 依赖 |
 |----|------|---------|------|
 | **P1（首版，v1.27.0）** | weixin-api（qrcode/status/getupdates/sendmessage/sendtyping）+ CCC 级配置（serenity.json + localstore）+ bridge 轮询 + 会话映射 + 面板「微信桥」区块（扫码/账号/路由/开关）+ /serenity/weixin 端点 + 文本收发 | ~900 行 + 测试 | 无（crypto/fetch 内置） |
-| P2 | 多 CCC 热重建 + sendtyping（正在输入）+ 断线重连退避 | ~300 行 | P1 |
+| P2 | 多 CCC 热重建 + ~~sendtyping（正在输入）~~ + 断线重连退避 | ~300 行 | P1 |
 | P3 | 媒体（图片/文件接收→落盘 + vlm 识别；发送） | ~400 行（AES/CDN） | P1 |
-| P4 | 语音（SILK 转写）| ~300 行 | P3 |
+| P4 | ~~语音（SILK 转写）~~ → **语音支持（v1.27.3 已做）** | ~300 行 | P3 |
+
+**分期状态更新（2026-09-01 完善轮）**：
+- **sendtyping（正在输入）已完成**（P2 项提前）：`getconfig` 取 typing_ticket（每用户缓存）→ 处理前 `sendtyping 1` → 处理后 `0`（对齐参考实现 typingCallbacks）；typing 失败静默不阻断
+- **语音支持已完成（P4 简化为服务端转写路线）**：微信语音消息自带 `voice_item.text`（服务端 ASR 转写，官方插件直接读）→ 与文本同路径进 skiff 对话，**无需 SILK 解码/下载/本地 ASR**；语音无转写 → 降级提示"暂时无法解析"。原 P4 的 SILK 下载+ASR 链路仅当腾讯停止转写时作为备选
 
 **首版 P1 交付验证**：真实扫码（用户手机）→ 微信发 "你好" → CCC 配置的 role 回复。
 

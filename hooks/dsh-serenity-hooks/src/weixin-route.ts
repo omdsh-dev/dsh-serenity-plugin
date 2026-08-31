@@ -36,7 +36,7 @@ export function isWeixinSessionId(sessionId: string | undefined): boolean {
 }
 
 /** 微信用户 → 固定会话 id（同用户长期同一会话，记忆延续；多用户天然隔离）。
- *  **v1.27.3 错位一位（用户拍板）**：`.slice(0, 16)` → `.slice(1, 17)`——旧规则生成的
+ *  **v1.27.2 错位一位（用户拍板）**：`.slice(0, 16)` → `.slice(1, 17)`——旧规则生成的
  *  固定 id 已与磁盘损坏的持久化 log 绑定（dsh 不可硬删，create 同 id 必撞）→
  *  新规则下同用户生成**全新 id**，避开损坏 log；固定可重建语义不变（同用户恒同 id）。 */
 export function weixinSessionIdFor(fromUserId: string): string {
@@ -124,19 +124,31 @@ export function matchWeixinRoute(routes: WeixinRouteConfig[], fromUserId: string
 }
 
 /**
- * 提取消息文本（item_list 首条 text_item；非文本消息 → null——P1 只处理文本）。
+ * 提取消息文本（文本项 + **语音项的服务端转写**）：
+ * - type 1 TEXT → `text_item.text`
+ * - type 3 VOICE → `voice_item.text`——**微信服务端自带语音转写**（官方 openclaw-weixin
+ *   直接读该字段并入对话文本，无需下载/ASR；对齐参考实现 index.ts voiceTexts）。
  * @returns 纯文本；无文本 → null
  */
-export function extractWeixinText(msg: { item_list?: Array<{ type?: number; text_item?: { text?: string } }> }): string | null {
+export function extractWeixinText(msg: { item_list?: Array<{ type?: number; text_item?: { text?: string }; voice_item?: { text?: string } }> }): string | null {
   const items = msg.item_list
   if (!Array.isArray(items) || items.length === 0) return null
   for (const item of items) {
     if (item.type === 1 && typeof item.text_item?.text === 'string') {
       const text = item.text_item.text.trim()
-      return text === '' ? null : text
+      if (text !== '') return text
+    }
+    if (item.type === 3 && typeof item.voice_item?.text === 'string') {
+      const text = item.voice_item.text.trim()
+      if (text !== '') return text
     }
   }
   return null
+}
+
+/** 是否包含语音项（无转写文本时的降级提示判定——bridge 用） */
+export function hasVoiceItem(msg: { item_list?: Array<{ type?: number; voice_item?: unknown }> }): boolean {
+  return (msg.item_list ?? []).some((item) => item.type === 3 && item.voice_item != null)
 }
 
 // ── CCC 配置写入（面板保存；serenity.json 结构部分）──

@@ -169,7 +169,8 @@ export interface WeixinMessageItem {
   msg_id?: string
   text_item?: { text?: string }
   image_item?: Record<string, unknown>
-  voice_item?: Record<string, unknown>
+  /** 语音项：**text = 微信服务端自带语音转写**（官方 openclaw-weixin 直接读该字段，无需下载/ASR） */
+  voice_item?: { text?: string; media?: Record<string, unknown>; playtime?: number }
   file_item?: Record<string, unknown>
   video_item?: Record<string, unknown>
 }
@@ -256,6 +257,55 @@ export async function sendTextMessage(params: {
     }),
     token: params.token,
     timeoutMs: params.timeoutMs ?? 15_000,
+  })
+}
+
+// ── 正在输入 / 对话配置 ──
+
+/** sendtyping status：1=TYPING（开始）0=CANCEL（结束）。
+ *  ⚠️ 对齐**官方 openclaw-weixin 参考实现**（index.ts onReplyStart → status 1 /
+ *  onCleanup → status 0）——早期协议注释"2=CANCEL"为误记，以参考实现为准。 */
+export const TypingStatus = { TYPING: 1, CANCEL: 0 } as const
+
+export interface GetConfigResp {
+  ret?: number
+  errmsg?: string
+  typing_ticket?: string
+}
+
+/** 取对话配置（typing_ticket：sendtyping 的前置——先 getconfig 拿 ticket 再发状态） */
+export async function getConfig(params: {
+  baseUrl: string
+  token: string
+  ilinkUserId: string
+  contextToken: string
+  timeoutMs?: number
+}): Promise<GetConfigResp> {
+  const rawText = await apiPost({
+    baseUrl: params.baseUrl,
+    endpoint: 'ilink/bot/getconfig',
+    body: JSON.stringify({ ilink_user_id: params.ilinkUserId, context_token: params.contextToken }),
+    token: params.token,
+    timeoutMs: params.timeoutMs ?? 10_000,
+  })
+  return JSON.parse(rawText) as GetConfigResp
+}
+
+/** 发送"正在输入"状态（status: 1=开始 0=结束；ticket 来自 getConfig） */
+export async function sendTyping(params: {
+  baseUrl: string
+  token: string
+  ilinkUserId: string
+  typingTicket: string
+  status: number
+  timeoutMs?: number
+}): Promise<void> {
+  await apiPost({
+    baseUrl: params.baseUrl,
+    endpoint: 'ilink/bot/sendtyping',
+    body: JSON.stringify({ ilink_user_id: params.ilinkUserId, typing_ticket: params.typingTicket, status: params.status }),
+    token: params.token,
+    timeoutMs: params.timeoutMs ?? 10_000,
   })
 }
 
