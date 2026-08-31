@@ -248,6 +248,26 @@ function cmdPublish(): void {
   // 内网 nexus（tiangong-npm-group，只读镜像 → npm publish 400 Bad Request）。@shgroup token
   // 按 registry URL 匹配，官方 registry 发布不受影响。
   cmdBuild()
+  verifyTarball()
+  const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
+  const r = run('npm', ['publish', '--access', 'public', '--registry', 'https://registry.npmjs.org/'], {
+    cwd: HOOKS_DIR,
+    quiet: true,
+    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+  })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`npm publish 失败 (exit ${r.status})`, 2)
+  }
+  console.log(`[dsh-develop] ✓ published @shgroup/dsh-serenity-hooks@${currentVersion().pkg}（npm registry）`)
+}
+
+/**
+ * verifyTarball — npm pack --dry-run 机械核对 tarball 完整性（发布前强制；pack-check 可独立调用）
+ * 核对范围：lib/ 全部 JS 产物（含 tsdown chunk）+ 双 bundle 必需文件。
+ * 历史教训：files 白名单漏 chunk（lib/ccc-*.js）→ npm 包 index.js import 失败（加载即崩，v1.26.15 事故）。
+ */
+function verifyTarball(): void {
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   mkdirSync(cache, { recursive: true })
   // 发布前核对 tarball 内容：npm publish 会自动运行 prepare（只构建 Node 半的 prepare
@@ -282,16 +302,12 @@ function cmdPublish(): void {
     fail(`tarball 缺 lib/ 产物（${missingLibJs.join(', ')}）——package.json files 白名单未覆盖 tsdown 全部输出，中止发布`, 2)
   }
   console.log(`[dsh-develop] ✓ tarball 核对通过（${tarballFiles.length} 文件，含 lib/index.js + lib/client.js + lib/invariant.js）`)
-  const r = run('npm', ['publish', '--access', 'public', '--registry', 'https://registry.npmjs.org/'], {
-    cwd: HOOKS_DIR,
-    quiet: true,
-    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
-  })
-  if (r.status !== 0) {
-    console.error(r.stdout + r.stderr)
-    fail(`npm publish 失败 (exit ${r.status})`, 2)
-  }
-  console.log(`[dsh-develop] ✓ published @shgroup/dsh-serenity-hooks@${currentVersion().pkg}（npm registry）`)
+  // lib/ 产物清单（验证 chunk 与 .d.ts 齐全——v1.26.15 事故后常驻可见性）
+  const libEntries = tarballFiles.filter((f) => f.startsWith('lib/'))
+  const dtsCount = tarballFiles.filter((f) => f.endsWith('.d.ts')).length
+  console.log(`[dsh-develop]   lib/ 共 ${libEntries.length} 项（js ${libEntries.filter((f) => f.endsWith('.js')).length} / d.ts ${libEntries.filter((f) => f.endsWith('.d.ts')).length}）`)
+  for (const f of libEntries) console.log(`    ${f}`)
+  console.log(`[dsh-develop]   包内 .d.ts 类型文件总计 ${dtsCount} 个`)
 }
 
 function cmdGithubPushRepo(dir?: string): void {
@@ -777,6 +793,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }
       case 'squash-history': cmdSquashHistory(rest[0]); break
       case 'publish': cmdPublish(); break
+      case 'pack-check': verifyTarball(); break
       case 'github-push-repo': cmdGithubPushRepo(rest[0]); break
       case 'github-ls': cmdGithubLs(rest[0]); break
       case 'version': cmdVersion(); break
@@ -805,7 +822,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
       case '--list':
       case 'list':
-        console.log('typecheck | test [--filter] | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | inspect-dsh <pattern>')
+        console.log('typecheck | test [--filter] | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | publish | inspect-dsh <pattern>')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
