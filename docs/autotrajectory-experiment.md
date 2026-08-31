@@ -37,7 +37,7 @@
 
 ---
 
-## 3. CCC 参与方式（三步）
+## 3. CCC 参与方式（四步）
 
 ### 3.1 配置（CCC 根 `.opencode/serenity.json`）
 
@@ -47,6 +47,7 @@
     "enabled": true,                 // 总开关（缺省 false——默认关，未开零资源占用）
     "intervalHours": 12,             // 无人类活动 N 小时后自动唤起（缺省 12）
     "biasProvider": "autotrajectory-bias.ts", // 偏见内容提供者脚本（相对 CCC 根，缺省同名）
+    "topPrompt": "本轨迹的核心焦点：<CCC 填写>",  // 轨迹焦点（v1.26.17）：CCC 定义，每次唤起最先注入
     "session": "S143",               // 可选：固定目标会话（S###/目录名）；缺省 = 最近活跃
     "avoidWakeHours": { "start": 8, "end": 18 }  // 可选：避开北京高峰（缺省 8~18，用量峰谷省钱）
   }
@@ -55,7 +56,11 @@
 
 > 实验包提供一键初始化：`acc_msm exec autotrajectory-exp init`（写配置 + 生成偏见提供者脚本模板）。
 
-### 3.2 实现偏见内容提供者（CCC 根目录脚本——偏见内容归 CCC）
+### 3.2 定义轨迹焦点（topPrompt——CCC 自己填写）
+
+**CCC 定义 autotrajectory 时同时定义本轨迹的顶层提示词**（`topPrompt`）：核心目标/纪律/质量要求。它会在**每次唤起时最先注入**（`[轨迹焦点]` 段，位于身份锚定之前，影响力最大），作为**稳定焦点锚定 trajectory**——**实验观察：无焦点锚定时，多轮自主唤起中轨迹腐化严重（焦点丢失）**。与偏见内容的分工：**焦点=稳定锚（每轮不变），偏见=随机探索方向（每轮不同），互补**。init 会生成占位，CCC 按自己轨迹目标改写（勿留空——留空 = 唤起无焦点锚定，轨迹易漂移）。
+
+### 3.3 实现偏见内容提供者（CCC 根目录脚本——偏见内容归 CCC）
 
 CCC 根目录下一个脚本（缺省 `autotrajectory-bias.ts`），dsp 唤起时**直接运行**取 stdout 作为偏见内容。**偏见内容由 CCC 保证**（CCC 有具体的反馈信息来源：历史事件、外部信息、真随机源等——用自己认为"足够随机"的方式）。**脚本缺失 → 唤起中止并报错要求实现**（不再经 mech-registry 注册 MSM）。`acc_msm exec autotrajectory-exp random` 可验证输出。
 
@@ -67,7 +72,7 @@ const pick = sources[Math.floor(Math.random() * sources.length)]
 console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 ```
 
-### 3.3 标记目标会话 + 可选自生动机段
+### 3.4 标记目标会话 + 可选自生动机段
 
 - **会话标志（必须）**：目标会话目录名加 `--auto` 后缀——`AGENT_SESSIONS/<date>--<desc>--auto/`。**只有带该标志的轨迹走自主形态；同一 CCC 其他会话完全不受影响。**
 - **自生动机（可选）**：该 SESSION.md 内可写「下一轮动机」段——上一轮结束时预写，作为下一轮唤起的自生偏见（轨迹预设自己的未来）：
@@ -95,15 +100,18 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 
 ```
 定时器 tick（每 10min）→ 条件满足 →
-  ① 运行 <biasProvider> 脚本 → stdout = 偏见内容（CCC 自定）
-  ② 读 SESSION.md「下一轮动机」段 → 自生动机
-  ③ 定位活跃会话 agent（ctx.agents.get）→ agent.steer 注入唤起消息
+  ① 读 topPrompt（CCC 定义的轨迹焦点）→ 唤起消息首段注入
+  ② 运行 <biasProvider> 脚本 → stdout = 偏见内容（CCC 自定）
+  ③ 读 SESSION.md「下一轮动机」段 → 自生动机
+  ④ 定位活跃会话 agent（ctx.agents.get）→ agent.steer 注入唤起消息
      → 模型在当前前台会话自动继续运行
 ```
 
 唤起消息（注入文本，用户可见）：
 
 ```
+[轨迹焦点] <topPrompt——CCC 定义，最先注入，稳定锚定防漂移>
+
 [自主轨迹唤起] — 距上次轨迹活动已满 <N> 小时，自动继续。
 
 身份锚定：继续 <S###> 的 trajectory（SESSION.md: <path>）。
@@ -130,10 +138,10 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 
 | 层 | 职责 |
 |----|------|
-| **dsp（机制）** | 定时器、唤起条件判定、偏见注入、前台 steer、落盘引导——全部机械，零 LLM 决策 |
-| **CCC（定义）** | 偏见内容（biasProvider 脚本的内容与随机源）、目标会话（--auto 标志）、唤起窗口（avoidWakeHours）、自生动机（下一轮动机段）——实验的"内容"完全由 CCC 掌控 |
+| **dsp（机制）** | 定时器、唤起条件判定、焦点/偏见注入、前台 steer、落盘引导——全部机械，零 LLM 决策 |
+| **CCC（定义）** | **轨迹焦点（topPrompt）**、偏见内容（biasProvider 脚本的内容与随机源）、目标会话（--auto 标志）、唤起窗口（avoidWakeHours）、自生动机（下一轮动机段）——实验的"内容"完全由 CCC 掌控 |
 
-> 设计意图：dsp 只提供"轨迹自己跑起来"的骨架，**往哪个方向跑、跑得多随机**是 CCC 的实验变量。
+> 设计意图：dsp 只提供"轨迹自己跑起来"的骨架，**往哪个方向跑、跑得多随机、焦点是什么**是 CCC 的实验变量——**焦点（topPrompt）锚定轨迹不漂移，偏见驱动探索不僵化**，两者都由 CCC 定义。
 
 ---
 
