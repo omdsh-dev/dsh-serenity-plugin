@@ -268,26 +268,59 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
 })
 
 describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () => {
-  /** fake ctx（对齐 acp-core.test fakeCtx）：agents.create 产生带 followup 的 fake agent；
-   *  on 立即触发 idle（waitIdle 立即返回）；followup 推入 user + assistant 答案事件 */
-  function fakeCtx(): { agents: { create: (opts: { sessionId: string }) => Promise<unknown> }; on: () => () => void } {
+  /** fake ctx（对齐 acp-core.test fakeCtx）：agents.create/resume 产生带 followup 的 fake agent；
+   *  on 立即触发 idle（waitIdle 立即返回）；followup 推入 user + assistant 答案事件。
+   *  resumeMode: 'create'（resume 缺失→恒 create 路径）/ 'resume'（resume 命中历史恢复）/ 'not-found'（首次） */
+  function fakeCtx(resumeMode: 'create' | 'resume' | 'not-found' = 'create'): {
+    agents: {
+      create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
+      resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
+    }
+    on: () => () => void
+  } {
     let agent: { session: { id: string; events: unknown[] }; followup: () => void; interrupt?: () => void } | undefined
-    return {
-      agents: {
-        create: async (opts: { sessionId: string }) => {
-          agent = {
-            session: { id: opts.sessionId, events: [] },
-            followup: () => {
-              agent!.session.events.push(
-                { type: 'user/message', data: { content: [{ type: 'text', text: 'q' }] } },
-                { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '**答**案' }] } } },
-              )
-            },
-            interrupt: () => {},
-          }
-          return { agent }
+    const makeAgent = (id: string, opts: { setup?: (c: unknown) => Promise<void> }) => {
+      const built = {
+        session: { id, events: [] as unknown[] },
+        followup: () => {
+          built.session.events.push(
+            { type: 'user/message', data: { content: [{ type: 'text', text: 'q' }] } },
+            { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '**答**案' }] } } },
+          )
         },
+        interrupt: () => {},
+      }
+      // 历史恢复场景：resume 的 session 已含旧事件（同用户之前对话过）
+      if (resumeMode === 'resume') {
+        built.session.events.push({ type: 'user/message', data: { content: [{ type: 'text', text: '旧问题' }] } })
+      }
+      return built
+    }
+    const agents: {
+      create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
+      resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
+    } = {
+      create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+        agent = makeAgent(opts.sessionId, opts)
+        await opts.setup?.(agent as never)
+        return { agent }
       },
+    }
+    if (resumeMode === 'resume') {
+      agents.resume = async (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+        agent = makeAgent(opts.resumeSessionId, opts)
+        await opts.setup?.(agent as never)
+        return { agent }
+      }
+    } else if (resumeMode === 'not-found') {
+      agents.resume = async (opts: { resumeSessionId: string }) => {
+        const err = new Error(`session "${opts.resumeSessionId}" not found`)
+        err.name = 'SessionPersistenceNotFoundError'
+        throw err
+      }
+    }
+    return {
+      agents,
       on: (_ev: string, cb: (p: { agent: unknown; status: string }) => void) => {
         cb({ agent, status: 'idle' })
         return () => {}
@@ -317,7 +350,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
 
     const { handleIncoming } = await import('../src/weixin-bridge.js')
-    const ctx = fakeCtx()
+    const ctx = fakeCtx('not-found') // 首次：resume not-found → 降级 create → 新会话
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://ilinkai.weixin.qq.com' }, {
       from_user_id: 'u1@im.wechat',
       context_token: 'ct1',
@@ -334,7 +367,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent[1]!.contextToken).toBe('ct1') // context_token 回带
   })
 
-  it('进程重启后会话不可恢复 → 自动新建 + 通知"新对话开始"', async () => {
+  it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
@@ -350,15 +383,13 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       return jsonResponse(200, { ret: 0 })
     })
     const { handleIncoming } = await import('../src/weixin-bridge.js')
-    const ctx = fakeCtx()
-    // 首次：固定 sessionId 已注册（模拟旧会话存在但 agent 不可恢复——直接不注册，session/new 抛错 → 重建）
-    // 直接第二次调用（无注册）→ 重建路径
+    const ctx = fakeCtx('resume') // 重启后：resume 命中历史 → 恢复，非新对话
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'u2@im.wechat',
       item_list: [{ type: 1, text_item: { text: 'hi' } }],
     })
-    // 通知消息（新的对话已开始）+ 答案
-    expect(sent.some((s) => s.text.includes('新的对话'))).toBe(true)
+    // 历史延续：无"新的对话"通知，只有答案
+    expect(sent.some((s) => s.text.includes('新的对话'))).toBe(false)
     expect(sent.some((s) => s.text === '答案')).toBe(true)
   })
 

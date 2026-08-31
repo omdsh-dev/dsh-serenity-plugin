@@ -65,6 +65,19 @@ export interface SkiffAgentRef {
   handle: AgentHandle
   agent: Agent
   sessionId: string
+  /** true = 从持久化恢复既有会话（历史延续，非新对话）；false = 新建（首次/无持久化） */
+  resumed: boolean
+}
+
+/**
+ * resume 失败是否应降级 create：仅当会话无持久化 log（首次）或持久化未配置时。
+ * 其他错误（损坏/版本不符/live 占用）→ 透传（真问题不掩盖）。
+ */
+function isResumeFallbackError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  if (err.name === 'SessionPersistenceNotFoundError') return true
+  if (/session persistence is not configured/.test(err.message)) return true
+  return false
 }
 
 /** Skiff agent 挂载的 DSH preset（v1.25.3 修复：read/grep/glob 等平台工具由 preset 决定工具面；
@@ -75,6 +88,13 @@ const SKIFF_PRESET = 'standard'
 /**
  * 创建 Skiff agent：标准 DSH agent + cwd=CCC root + 角色模型 +
  * standard preset（平台工具面）+ scoped 系统提示词（基础提示词 + CCC 定义段，全替换 ACC 默认注入）。
+ *
+ * **固定 sessionId 的 resume-or-create（v1.27.2，微信桥 id collision 修复）**：
+ * 指定 sessionId 且磁盘已有持久化 log → `ctx.agents.resume`（DSH 持久化语义：
+ * sessionId 即身份，已持久化会话必须 resume——历史 + turn 续号延续，同用户长期记忆保留）；
+ * 无 log（首次）/持久化未配置 → `ctx.agents.create`（新建）。不指定 sessionId →
+ * 随机 id 恒 create（ACP/调试页默认路径）。
+ *
  * @param sessionId 指定会话 id（可选；微信桥等外部面用固定 id 实现用户↔会话长期映射——
  *   不传则随机生成 skiff-<role>-<uuid>，ACP/调试页默认路径）
  */
@@ -89,21 +109,17 @@ export async function createSkiffAgent(
   if (!ctx.agents) throw new Error('skiff: ctx.agents unavailable')
   const model = role.model?.trim() || defaultModel || ''
   const id = (sessionId ?? `${SKIFF_SESSION_PREFIX}${roleName}-${randomUUID()}`) as SessionId
-  const handle = await ctx.agents.create({
-    sessionId: id,
-    meta: { cwd: root, agentPreset: SKIFF_PRESET },
-    setup: async (agentCtx: Context) => {
-      try {
-        // 挂载 standard preset → agent 工具面含 read/grep/glob/web_search 等平台工具；
-        // agentPresets 可选服务缺失（未装配）→ 跳过（回退全局工具层，不阻断创建）
-        const presets = agentCtx.get('agentPresets') as { mount?: (c: Context, id: string) => Promise<unknown> } | undefined
-        await presets?.mount?.(agentCtx, SKIFF_PRESET)
-      } catch {
-        /* preset 挂载失败不影响 agent 创建（guard 白名单仍兜底约束） */
-      }
-    },
-    ...(model ? { agentOptions: splitModel(model) } : {}),
-  })
+  const setup = async (agentCtx: Context) => {
+    try {
+      // 挂载 standard preset → agent 工具面含 read/grep/glob/web_search 等平台工具；
+      // agentPresets 可选服务缺失（未装配）→ 跳过（回退全局工具层，不阻断创建）
+      const presets = agentCtx.get('agentPresets') as { mount?: (c: Context, id: string) => Promise<unknown> } | undefined
+      await presets?.mount?.(agentCtx, SKIFF_PRESET)
+    } catch {
+      /* preset 挂载失败不影响 agent 创建（guard 白名单仍兜底约束） */
+    }
+  }
+  const handle = await createOrResumeAgent(ctx, id, root, model, setup, sessionId !== undefined)
   const agent = handle.agent
   // scoped 系统提示词：基础段（动态白名单清单）+ CCC 完整定义段
   // v1.25.10：CCC 段经 resolveRoleSystemPrompt——systemPromptFile 优先（md 文件，推荐），
@@ -124,7 +140,75 @@ export async function createSkiffAgent(
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
   }
   registerSkiffSession(id, roleName, root, agent)
-  return { handle, agent, sessionId: id }
+  return { handle, agent, sessionId: id, resumed: handle.resumed }
+}
+
+/**
+ * resume-or-create 分派：固定 id → 优先 resume（持久化历史延续），失败降级 create；
+ * 随机 id（无固定 sessionId）→ 恒 create。返回 handle + resumed 标志。
+ */
+async function createOrResumeAgent(
+  ctx: Context,
+  id: SessionId,
+  root: string,
+  model: string,
+  setup: (agentCtx: Context) => Promise<void>,
+  fixedId: boolean,
+): Promise<AgentHandle & { resumed: boolean }> {
+  if (!fixedId) {
+    return {
+      ...await ctx.agents.create({
+        sessionId: id,
+        meta: { cwd: root, agentPreset: SKIFF_PRESET },
+        setup,
+        ...(model ? { agentOptions: splitModel(model) } : {}),
+      }),
+      resumed: false,
+    }
+  }
+  // resume 可用性守卫：旧版 dsh / 测试环境无 resume 方法 → 直接 create（原 v1.27.0 行为）。
+  // **v1.27.3 this 绑定修复**：不得解构 `ctx.agents.resume` 到局部变量再裸调用——
+  // DSH 的 resume 内部用 `this.ctx`（AgentRegistry），解构后 this 丢失 →
+  // "Cannot read properties of undefined (reading 'ctx')"（v1.23.2 同病第三次）。
+  // 通过类型断言访问 `ctx.agents.resume` 并**直接以方法调用形式执行**（this 保持绑定）。
+  const agentsWithResume = ctx.agents as { resume?: (o: { resumeSessionId: SessionId; setup?: (c: Context) => Promise<void>; agentOptions?: unknown }) => Promise<AgentHandle> }
+  if (typeof agentsWithResume.resume !== 'function') {
+    return {
+      ...await ctx.agents.create({
+        sessionId: id,
+        meta: { cwd: root, agentPreset: SKIFF_PRESET },
+        setup,
+        ...(model ? { agentOptions: splitModel(model) } : {}),
+      }),
+      resumed: false,
+    }
+  }
+  try {
+    // 方法调用（this = ctx.agents）——不要解构！
+    return {
+      ...await agentsWithResume.resume({
+        resumeSessionId: id,
+        setup,
+        ...(model ? { agentOptions: splitModel(model) } : {}),
+      }),
+      resumed: true,
+    }
+  } catch (err) {
+    // v1.27.2 用户拍板：**resume 失败一律降级新建**（不再透传——透传会让微信桥静默"不唤醒"）+ 打印堆栈定位
+    const msg = err instanceof Error ? err.message : String(err)
+    const stack = err instanceof Error ? (err.stack ?? '') : ''
+    console.log(`[serenity-hooks] skiff resume 失败降级 create (id=${id}): ${msg}`)
+    if (stack) console.log(`[serenity-hooks] skiff resume stack:\n${stack.slice(0, 1200)}`)
+    return {
+      ...await ctx.agents.create({
+        sessionId: id,
+        meta: { cwd: root, agentPreset: SKIFF_PRESET },
+        setup,
+        ...(model ? { agentOptions: splitModel(model) } : {}),
+      }),
+      resumed: false,
+    }
+  }
 }
 
 // ── 提问（followup → idle → 答案 + 轨迹）──

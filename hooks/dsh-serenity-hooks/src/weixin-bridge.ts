@@ -81,7 +81,9 @@ async function runAccountLoop(
  *
  * 会话语义：`weixinSessionIdFor(fromUserId)` 固定可重建——同用户长期同一会话；
  * 进程内已有（getSkiffAgent 命中）→ 延续；无（首次/进程重启）→ createSkiffAgent
- * 以固定 id 新建（角色不变，记忆从新开始——重启后自动重建，与 3100 问答页同语义）。
+ * 固定 id resume-or-create（v1.27.2）：磁盘已有持久化 log → resume（历史延续，
+ * 重启后记忆保留——真正的"同用户长期延续"）；无 log（首次）→ create。
+ * "新的对话已开始"通知仅真正首次（create）时发送；resume/进程内延续不发。
  */
 export async function handleIncoming(
   ctx: Context,
@@ -109,14 +111,14 @@ export async function handleIncoming(
     }
     const sessionId = weixinSessionIdFor(fromUserId)
     const existing = getSkiffAgent(sessionId)
-    const recreated = !existing
     const hc = readHandymanConfig(root)
     const ref = existing
-      ? { agent: existing, sessionId }
+      ? { agent: existing, sessionId, resumed: true }
       : await createSkiffAgent(ctx, root, roleName, role, hc?.defaultModel, sessionId)
 
-    if (recreated) {
-      // 首次/重启后新会话 → 通知用户"新对话开始"（对齐 3100 问答页行为）
+    if (!ref.resumed) {
+      // 真正首次（无持久化历史）→ 通知用户"新对话开始"（对齐 3100 问答页行为）；
+      // resume（历史延续）不发——用户记得之前的对话
       await sendTextMessage({
         baseUrl: cred.baseUrl,
         token: cred.token,
@@ -140,8 +142,11 @@ export async function handleIncoming(
       contextToken: msg.context_token,
     })
   } catch (err) {
-    // 桥错误静默（日志可见；不中断轮询循环）
-    console.log(`[serenity-hooks] weixin-bridge error (ccc=${root}): ${err instanceof Error ? err.message : String(err)}`)
+    // 桥错误静默（日志可见；不中断轮询循环）——含堆栈（v1.27.2 诊断 resume 失败路径）
+    const msg = err instanceof Error ? err.message : String(err)
+    console.log(`[serenity-hooks] weixin-bridge error (ccc=${root}): ${msg}`)
+    const stack = err instanceof Error ? err.stack : undefined
+    if (stack) console.log(`[serenity-hooks] weixin-bridge stack:\n${stack.slice(0, 1500)}`)
   }
 }
 

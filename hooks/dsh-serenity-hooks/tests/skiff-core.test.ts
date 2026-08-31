@@ -217,6 +217,84 @@ describe('skiff-core: createSkiffAgent（v1.25.3：preset 挂载修复平台工�
   })
 })
 
+describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id collision 修复）', () => {
+  /** fake ctx：agents.create + agents.resume 双路；resume 按模式（成功 / not-found / 缺方法） */
+  function fakeResumeCtx(mode: 'success' | 'not-found' | 'absent'): {
+    agents: {
+      create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown; meta?: unknown }) => Promise<unknown>
+      resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown }) => Promise<unknown>
+    }
+  } {
+    const calls: Array<{ kind: string; id: string }> = []
+    const makeHandle = async (kind: 'create' | 'resume', id: string, opts: { setup?: (c: unknown) => Promise<void> }): Promise<unknown> => {
+      calls.push({ kind, id })
+      const agentCtx = { get: () => undefined, systemPrompt: { section: () => {} } }
+      await opts.setup?.(agentCtx as never)
+      return { agent: { ctx: agentCtx, session: { id, events: [] }, followup: () => {} } }
+    }
+    const agents: {
+      create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown; meta?: unknown }) => Promise<unknown>
+      resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void>; agentOptions?: unknown }) => Promise<unknown>
+    } = {
+      create: (opts) => makeHandle('create', opts.sessionId, opts),
+    }
+    if (mode === 'success') {
+      agents.resume = (opts) => makeHandle('resume', opts.resumeSessionId, opts)
+    } else if (mode === 'not-found') {
+      agents.resume = async (opts) => {
+        calls.push({ kind: 'resume', id: opts.resumeSessionId })
+        const err = new Error(`session "${opts.resumeSessionId}" not found`)
+        err.name = 'SessionPersistenceNotFoundError'
+        throw err
+      }
+    }
+    return { agents }
+  }
+
+  it('固定 id + 磁盘已有持久化 log → resume（resumed=true，历史延续）', async () => {
+    const ctx = fakeResumeCtx('success')
+    const ref = await createSkiffAgent(ctx as never, dir, 'qa', { msms: ['x'] }, undefined, 'skiff-weixin-fixed-1')
+    expect(ref.resumed).toBe(true)
+    expect(ref.sessionId).toBe('skiff-weixin-fixed-1')
+    expect(skiffRoleFor(ref.sessionId)).toBe('qa')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('固定 id + resume not-found（首次无持久化）→ 降级 create（resumed=false + 新对话语义）', async () => {
+    const ctx = fakeResumeCtx('not-found')
+    const ref = await createSkiffAgent(ctx as never, dir, 'qa', { msms: ['x'] }, undefined, 'skiff-weixin-fixed-2')
+    expect(ref.resumed).toBe(false)
+    expect(ref.sessionId).toBe('skiff-weixin-fixed-2')
+    expect(skiffRoleFor(ref.sessionId)).toBe('qa')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('无固定 id（随机）→ 恒 create，resume 不参与', async () => {
+    const ctx = fakeResumeCtx('absent') // 无 resume 方法——随机路径根本不该调
+    const ref = await createSkiffAgent(ctx as never, dir, 'qa', { msms: ['x'] })
+    expect(ref.resumed).toBe(false)
+    expect(ref.sessionId.startsWith(SKIFF_SESSION_PREFIX)).toBe(true)
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('resume 其他错误（非 not-found）→ 也降级 create + 打堆栈（用户拍板：不静默不唤醒）', async () => {
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const ctx = fakeResumeCtx('not-found')
+    // 覆盖 resume 抛任意错误（如 DSH 内部 "Cannot read properties of undefined (reading 'ctx')"）→ 一律降级
+    ;(ctx.agents as { resume: (o: { resumeSessionId: string }) => Promise<unknown> }).resume = async () => {
+      throw new Error("Cannot read properties of undefined (reading 'ctx')")
+    }
+    const ref = await createSkiffAgent(ctx as never, dir, 'qa', { msms: ['x'] }, undefined, 'skiff-weixin-fixed-3')
+    expect(ref.resumed).toBe(false)
+    expect(ref.sessionId).toBe('skiff-weixin-fixed-3')
+    // 堆栈已打印（诊断定位）
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('skiff resume 失败降级 create'))
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining('skiff resume stack'))
+    spy.mockRestore()
+    unregisterSkiffSession(ref.sessionId)
+  })
+})
+
 describe('skiff-core: skiffTrajectoryEnabled 轨迹纪律子集', () => {
   it('非 skiff 会话恒 true（正常参与所有轨迹机制）', () => {
     expect(skiffTrajectoryEnabled(dir, 'normal-session', 'keeper')).toBe(true)

@@ -1,3 +1,25 @@
+## v1.27.2 — 2026-08-31（微信桥固定会话 id collision 根治：resume-or-create，S142 用户报告）
+
+**Scope:** 用户 "同一个用户的会话绑定有问题，会话报错：session skiff-weixin-... already has a persisted log on disk that does not match this live session (id collision)"。根因 = 微信桥每次进程重启后用**固定 sessionId**（`weixinSessionIdFor`，同用户长期映射）调 `ctx.agents.create`——DSH 持久化语义 **sessionId 即身份**：磁盘已有该 id 的持久化 log 时必须 `load/resume`（coordinator `adoptLivePrefix` 校验 seed 覆盖旧事件，不匹配抛 id collision）。修复 = **resume-or-create**：有持久化 log → resume（历史延续，重启后记忆保留——真正的"同用户长期延续"）；无（首次）→ create。
+
+### 变更
+- **`src/skiff-core.ts` `createSkiffAgent` resume-or-create（核心修复）**：
+  - 新增 `createOrResumeAgent` 分派：固定 id → 优先 `ctx.agents.resume({ resumeSessionId, setup, agentOptions })`（DSH AgentRegistry public API，恢复历史 + turn 续号）
+  - **v1.27.2 this 绑定根因修复（微信桥"重启后不唤醒"真因）**：resume 调用曾**解构方法**（`const resumeFn = ctx.agents.resume` 后裸调用）→ 丢失 `this` → DSH `resume` 内部 `this.ctx` 抛 "Cannot read properties of undefined (reading 'ctx')"（v1.23.2 同病第三次）→ 改经类型断言 `agentsWithResume.resume({...})` **方法调用**（this 保持绑定）
+  - **resume 失败一律降级 create + 打印完整堆栈（用户拍板）**：不再区分错误类型透传——任何 resume 错误都降级新建，保证微信桥**不静默不唤醒**；堆栈落日志供定位
+  - `SkiffAgentRef` 新增 `resumed: boolean`（true=历史恢复，false=新建）——调用方据此区分"新对话"与"延续"
+  - resume 可用性守卫：旧版 dsh / 测试环境无 `agents.resume` 方法 → 直接 create（v1.27.0 行为兼容）
+  - setup 提取复用（preset 挂载回调 create/resume 共用）
+- **`src/weixin-route.ts` `weixinSessionIdFor` 会话 id 错位一位（用户拍板）**：`.slice(0, 16)` → `.slice(1, 17)`——旧规则生成的固定 id 已绑定**磁盘损坏的持久化 log**（dsh 不可硬删，create 同 id 必撞）→ 新规则下同用户生成**全新 id** 避开损坏 log；固定可重建语义不变（同用户恒同 id）
+- **`src/weixin-bridge.ts` `handleIncoming` 通知语义修正**："新的对话已开始"通知**仅真正首次（create）发送**；resume（历史延续）/ 进程内延续不发——用户记得之前的对话，重启后不再被告知"新对话"；catch 打印完整堆栈（诊断面）
+- **`tsconfig.json` + `client/tsconfig.json` client 类型源修复（SESSION #3 漂移）**：npm 全局 dsh 升级 0.1.1-rc.2 后 ui-slots/ui-primitives（private workspace 包，不随 CLI 发布）paths 悬空 → 改指 staging 源码 `~/.dsh/source/current/packages/client/.../lib/types/index.d.ts`（与运行时同源）；**运行时不受影响**（dsh-client-web 官方依赖自带这两个包）
+- **语义升级**：v1.27.0"重启后自动重建，记忆从新开始"是次优设计（固定 id 本意 = 同用户长期延续）——DSH resume 原生支持历史恢复，重启后**记忆保留**，与 weixin-bridge-design.md §9 待拍板②"固定 sessionId 会话延续"完全对齐
+
+### 测试
+- **skiff-core.test.ts +4**：固定 id + resume 成功 → resumed=true（历史延续）/ resume not-found（首次）→ 降级 create resumed=false / 无固定 id 恒 create（resume 不参与）/ **resume 任意错误 → 降级 create + 堆栈已打印**
+- **weixin.test.ts 语义更新**：首条消息（not-found → create）→ 通知+答案；**重启后 resume 恢复 → 无"新对话"通知只有答案**（原"重建+通知"用例改写）
+- **52 files / 714 tests 全绿**（710 + 4）；typecheck ✓（node + client，含 client 类型源修复）
+
 ## v1.27.1 — 2026-08-31（微信桥反馈三修：多账号 / 回复去 think / 会话命名恒开，S142 用户反馈）
 
 **Scope:** 用户 v1.27.0 微信桥两条反馈 + 一条配置原则——① "要支持添加多个账号，每个都是扫码"；② 微信桥回复用户的消息**去掉 think 标签**（用户不应看到思考过程）；③ "会话命名开关下掉，永远开启"。均为反馈修复（用户"修好先别发布"→ 测试全绿后本版发布）。

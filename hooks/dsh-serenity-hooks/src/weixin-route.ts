@@ -4,7 +4,8 @@
  * 职责（零 DSH 依赖，可独立单测）：
  * - 读取 CCC 的 weixin 配置（.opencode/serenity.json weixin 段——结构/路由/开关）
  * - 读取/写入 CCC localstore 的账号凭据（weixin.accounts.<accountId>.token/.baseUrl/.userId）
- * - 微信用户 → skiff 会话 id 映射（固定可重建：skiff-weixin-<sha256(userid)>.slice(16)）
+ * - 微信用户 → skiff 会话 id 映射（固定可重建：skiff-weixin-<sha256(userid)>.slice(1, 17)；
+ *   v1.27.3 错位一位避开损坏 log）
  * - 路由匹配（exact user → 通配 * 兜底）
  *
  * 配置归属（S142 用户拍板）：**CCC 级**——serenity.json 结构 + localstore 凭据分离；
@@ -34,9 +35,12 @@ export function isWeixinSessionId(sessionId: string | undefined): boolean {
   return typeof sessionId === 'string' && sessionId.startsWith(WEIXIN_SESSION_PREFIX)
 }
 
-/** 微信用户 → 固定会话 id（同用户长期同一会话，记忆延续；多用户天然隔离） */
+/** 微信用户 → 固定会话 id（同用户长期同一会话，记忆延续；多用户天然隔离）。
+ *  **v1.27.3 错位一位（用户拍板）**：`.slice(0, 16)` → `.slice(1, 17)`——旧规则生成的
+ *  固定 id 已与磁盘损坏的持久化 log 绑定（dsh 不可硬删，create 同 id 必撞）→
+ *  新规则下同用户生成**全新 id**，避开损坏 log；固定可重建语义不变（同用户恒同 id）。 */
 export function weixinSessionIdFor(fromUserId: string): string {
-  const digest = createHash('sha256').update(fromUserId).digest('hex').slice(0, 16)
+  const digest = createHash('sha256').update(fromUserId).digest('hex').slice(1, 17)
   return `${WEIXIN_SESSION_PREFIX}${digest}`
 }
 
