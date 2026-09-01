@@ -344,6 +344,76 @@
   gap: 8px;
 }
 
+/* ── v1.27.6 「?」帮助浮层（hover/焦点显示三行以上严谨说明）── */
+.ss-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  margin-top: 2px;
+}
+
+.ss-helpMark {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 50%;
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.12));
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 600;
+  cursor: help;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+
+.ss-helpMark:hover,
+.ss-helpMark:focus-visible {
+  border-color: var(--dsw-alias-state-success-primary, #22c55e);
+  color: var(--dsw-alias-state-success-primary, #22c55e);
+  outline: none;
+}
+
+.ss-helpTip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  width: 300px;
+  max-width: 60vw;
+  padding: 10px 12px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 10px;
+  background: var(--dsw-alias-surface-raised, #1e1e1e);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
+  font-size: 12px;
+  line-height: 19px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-primary);
+  white-space: pre-line;
+  word-break: break-word;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.ss-help:hover .ss-helpTip,
+.ss-helpMark:focus-visible + .ss-helpTip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+/* 折叠组内帮助浮层定位修正（左侧行卡不会溢出面板） */
+.ss-rowCard .ss-helpTip {
+  left: 0;
+}
+
 /* ── 微信桥（F4c-3，v1.27.0 实验性）── */
 
 /* CCC 选择器（下拉） */

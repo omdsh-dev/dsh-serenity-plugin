@@ -76,18 +76,26 @@ function Toggle(props: { checked: boolean; disabled?: boolean; onChange: (on: bo
   )
 }
 
-/** 一个配置行卡（官方 rowCard：标题+说明 左列 / 控件右置） */
+/** 一个配置行卡（官方 rowCard：标题+说明 左列 / 控件右置）
+ *  help：可选——desc 下方渲染「?」帮助浮层（hover/焦点显示三行以上严谨说明） */
 function RowCard(props: {
   title: string
   desc: string
   control: React.ReactNode
+  help?: string
 }): React.JSX.Element {
-  const { title, desc, control } = props
+  const { title, desc, control, help } = props
   return (
     <div className="ss-rowCard">
       <div className="ss-rowText">
         <span className="ss-rowName">{title}</span>
         <span className="ss-rowDesc">{desc}</span>
+        {help && (
+          <span className="ss-help">
+            <button type="button" className="ss-helpMark" aria-label={`${title} 帮助`}>?</button>
+            <span className="ss-helpTip">{help}</span>
+          </span>
+        )}
       </div>
       <div className="ss-rowControl">{control}</div>
     </div>
@@ -195,7 +203,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="双端口网关"
-            desc="额外监听一个端口，登录后可从外部访问 Web UI"
+            desc="额外监听端口 3081，登录后可从外部访问 Web UI"
+            help={'双端口网关（端口 3081）让外网/局域网用户经登录页访问本 DSH Web UI：\n' +
+              '· 适用范围：跨网络访问（本机默认端口 3080 仅监听本机）\n' +
+              '· 安全：登录账号 + 可选 TOTP 第二因素（见「外部访问」）\n' +
+              '· 工作区白名单：登录后仅白名单内工作区可见（可留空=全部）\n' +
+              '· 变更立即生效（热重建，无需重启）'}
             control={<Toggle checked={gatewayOn} onChange={(on) => toggle('gatewayEnabled', on)} />}
           />
         </li>
@@ -206,6 +219,11 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
           <RowCard
             title="超限重建"
             desc="上下文接近上限时提示调用 session_rebuild 清空重建"
+            help={'上下文超限自动重建（session_rebuild）：\n' +
+              '· 机制：agent 上下文占用达到阈值时，由 LLM 主动调用重建工具\n' +
+              '· 语义：完全丢弃当前 dsh 会话 + 自动新建 + 注入「继续原 SESSION 的工作」\n' +
+              '· 效果：SESSION.md 原位不动，认知轨迹延续，上下文归零\n' +
+              '· 关闭后：上下文超限时不再提示，可能导致会话卡顿或丢失'}
             control={<Toggle checked={rebuildOn} onChange={(on) => toggle('rebuildEnabled', on)} />}
           />
         </li>
@@ -213,6 +231,11 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
           <RowCard
             title="重建阈值"
             desc="上下文占用达到该比例时提示（0.10 ~ 1.00）"
+            help={'重建触发阈值（0.10~1.00，默认 0.90）：\n' +
+              '· 含义：上下文占用达到该比例时，轨迹跟踪器开始提醒重建\n' +
+              '· 调低：更早触发（适合长任务，避免上下文耗尽前措手不及）\n' +
+              '· 调高：更晚触发（适合短对话，减少不必要的重建提示）\n' +
+              '· 仅「超限重建」开启时有意义'}
             control={
               <div className="ss-threshold">
                 <input
@@ -236,7 +259,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="Skiff 调试"
-            desc="Skiff 认知子集问答页（实验性，127.0.0.1）"
+            desc="Skiff 认知子集问答页（端口 3099，实验性，127.0.0.1）"
+            help={'Skiff 认知子集角色调试服务（端口 3099）：\n' +
+              '· 概念：Skiff = 完整宁静号 trajectory 的任意子集（认知子集角色）\n' +
+              '· 服务：角色问答页（调试用），仅监听 127.0.0.1（本地）\n' +
+              '· 使用：配置 CCC 的 skiff.roles 角色后，可经此页以角色身份问答\n' +
+              '· 实验性：人工启停，默认关闭；对外问答请用「Skiff 问答页」'}
             control={
               <span className="ss-switchRow">
                 <Toggle checked={skiffOn} onChange={(on) => toggle('skiffEnabled', on)} />
@@ -257,7 +285,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="ACP JSON-RPC"
-            desc="程序化调用 Skiff 角色（实验性，127.0.0.1）"
+            desc="程序化调用 Skiff 角色（端口 3100，实验性，127.0.0.1）"
+            help={'ACP（Agent Client Protocol）HTTP JSON-RPC 端点（端口 3100）：\n' +
+              '· 作用：程序化调用 Skiff 角色（指定 CCC + 角色 + 会话）\n' +
+              '· 形态：HTTP JSON-RPC 服务，仅监听 127.0.0.1（本地）\n' +
+              '· 场景：IM 桥（如微信桥）、脚本、自动化接线\n' +
+              '· 实验性：人工启停，默认关闭；与「Skiff 问答页」共用端口'}
             control={
               <span className="ss-switchRow">
                 <Toggle checked={acpOn} onChange={(on) => toggle('acpEnabled', on)} />
@@ -278,7 +311,13 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="Skiff 问答页"
-            desc="按认知容器暴露问答页（需 key；首次开启自动生成，见 ~/.dsh/serenity-hooks.json）"
+            desc="按认知容器暴露问答页（端口 3100，需 key）"
+            help={'Skiff 问答页（对外问答，端口 3100，key 认证）：\n' +
+              '· 作用：让外部用户在浏览器中与指定 CCC 的 Skiff 角色对话\n' +
+              '· 认证：访问 key（首次开启自动生成，见 ~/.dsh/serenity-hooks.json）\n' +
+              '· 授权：开放容器白名单（未选 = 全部开放；见「Skiff 问答页配置」）\n' +
+              '· 外部接入：需经部署方自选方案暴露（隧道/反代/端口映射）\n' +
+              '· 安全：key 可轮换（旧 key 立即失效）'}
             control={<Toggle checked={publicAskOn} onChange={(on) => toggle('publicAskEnabled', on)} />}
           />
         </li>
@@ -290,7 +329,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       </Collapse>
 
       {/* 复杂配置（账号 + 工作区白名单）：plugin 全局文件 /serenity/config；v1.27.5 折叠 */}
-      <Collapse title="外部访问" desc="监听 · 登录账号 · 工作区白名单（plugin 全局）">
+      <Collapse title="外部访问" desc="网关监听（端口 3081）· 登录账号 · 工作区白名单（plugin 全局）">
         <AccountsEditor gatewayOn={gatewayOn} />
       </Collapse>
 
@@ -464,6 +503,11 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
         <RowCard
           title="目标 CCC"
           desc="多 CCC 各自独立——选中哪个就查看/唤起哪个"
+          help={'Autopilot Trajectory 目标认知容器：\n' +
+            '· 机制：dsh 一个进程可挂载多个 CCC，每个 CCC 的 autopilot 独立配置\n' +
+            '· 选择：下拉切换要查看/唤起的目标 CCC（各 CCC 时钟独立）\n' +
+            '· 配置：各 CCC 在自身 .opencode/serenity.json 定义 autopilotTrajectory\n' +
+            '· 唤起：仅对选中 CCC 生效，互不干扰'}
           control={
             <select
               className="ss-select"
@@ -485,6 +529,11 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
         <RowCard
           title="运行状态"
           desc={stateText}
+          help={'Autopilot Trajectory 运行状态含义：\n' +
+            '· 未配置：该 CCC 未定义 autopilotTrajectory（机制不开始）\n' +
+            '· 已配置未启用：enabled=false，零资源占用（不唤起不消耗）\n' +
+            '· 已启用：时钟驱动周期性自动唤起——无人类活动满间隔小时数后\n' +
+            '  启动一次前台 agent 轮（用户全程可见可介入）'}
           control={<span className="ss-value">{status.enabled ? '● 运行中' : status.configured ? '○ 待启' : '—'}</span>}
         />
       </li>
@@ -507,6 +556,11 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
         <RowCard
           title="立即唤起"
           desc={wakeResult ?? '调试：手动触发一次（跳过窗口/间隔/预算，仍校验配置与偏见脚本）'}
+          help={'立即唤起（调试语义）：\n' +
+            '· 用途：手动触发一次该 CCC 的自动唤起（不等时钟）\n' +
+            '· 跳过：唤起窗口（北京 8~18 点避开）/ 间隔 / 每日预算\n' +
+            '· 保留校验：enabled、目标会话（--auto）、偏见脚本可运行\n' +
+            '· 场景：验证配置/偏见脚本是否就绪，或想立刻跑一轮'}
           control={
             <button
               type="button"
