@@ -1,3 +1,18 @@
+## v1.27.7 — 2026-09-02（输出守卫不检查 think 内容，S142 用户反馈）
+
+**Scope:** 用户 "敏感词防护是做在哪一层的；要求不检查think内容（因为不输出）"——① 明确防护层级（turn-stopping 拦截缝 + 词表 + steer 打回，仅外部面）；② **think 块不再参与敏感词检测**——` thinking…` 是模型思考过程，不进入用户可见输出；原实现取全部 text（含 think 块），think 内推演内部机制词会被误打回。
+
+### 变更
+- **`src/output-guard-seam.ts` `lastAssistantText` 先 stripThink 再返回**：
+  - 取 turn 最后 assistant text 后调用 `stripThink()`（复用 v1.26.8 状态机，v1.27.1 微信桥回复链路同款）——剥离 ` thinking…` 块，只保留最终呈现文本
+  - 效果：think 内提及凭据词/机制词/端口/MSM 名（思考过程必然推演内部机制）**不再触发打回**；最终输出正文仍严格检测
+  - 作用范围不变：仅外部面（skiff-/acp-/rebuild- 前缀）；本地维护会话豁免
+- **防护层级答案（S142 记录）**：拦截缝 `agent/turn-stopping`（serial）+ 词表 `buildSensitiveTable`（凭据 localstore 名/值 + 机制词静态表 + 端口 + MSM 工具名）+ 动作 `agent.steer(buildRebuke())` 打回重生成（≤3 次，超限保留审计）
+
+### 测试
+- **output-guard.test.ts +1**：`v1.27.7 think 块内敏感词 → 不检测不打回`——` thinking` 内含 SSH_UBUNTU_PASSWORD + dsh-serenity-hooks，断言无 steer
+- **52 files / 750 tests 全绿**（749 + 1）；typecheck ✓（node + client）
+
 ## v1.27.6 — 2026-09-02（配置面板「?」帮助说明 + 端口文案审计，S142 用户需求）
 
 **Scope:** 用户 "还是面板小问题，双端口网关 额外端口是3081，没写明，整体检查下是否有类似的不明确问题；每个功能最好设计个问号说明，说明其用途（三行以上严谨说明）"——① 全局端口文案审计（3081/3099/3100 写明）；② 每个配置功能加「?」帮助浮层（hover 显示三行以上严谨说明）。

@@ -15,6 +15,7 @@ import {
   rebukeStates,
 } from '../src/output-guard.js'
 import { registerOutputGuardHook } from '../src/output-guard-seam.js'
+import { stripThink } from '../src/skiff-debug.js'
 
 let dir: string
 
@@ -236,5 +237,19 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
     f.fire(1)
     expect(f.steers).toEqual([])
     rmSync(outside, { recursive: true, force: true })
+  })
+
+  it('v1.27.7 think 块内敏感词 → 不检测不打回（think 不输出给用户）', () => {
+    const f = fakeCtx()
+    registerOutputGuardHook(f.ctx as never)
+    // think 内含凭据词 + 机制词（思考过程推演内部机制是正常的）——检测只针对最终呈现文本
+    // 真实标签 = <think>（5 字母）——matchOpenThink 只匹配 `<think` 后跟 `>`/空白
+    const raw = '<think>\n这里需要检查 SSH_UBUNTU_PASSWORD 与 dsh-serenity-hooks 的配置\n</think>\n这是正常的回答内容'
+    f.agent.session.events.push({
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: raw }] } },
+    })
+    f.fire(1)
+    expect(f.steers).toEqual([])
   })
 })

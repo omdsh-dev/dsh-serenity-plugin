@@ -17,6 +17,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { findSerenityRoot } from './ccc.js'
 import { isSkiffSessionId } from './skiff-role.js'
+import { stripThink } from './skiff-debug.js'
 import { buildSensitiveTable, detectSensitive, buildRebuke, rebukeStates, REBUKE_MAX_ROUNDS } from './output-guard.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
@@ -28,7 +29,11 @@ export function isExternalFaceSession(sessionId: string | undefined): boolean {
   return isSkiffSessionId(sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
 }
 
-/** 读会话最后一个 assistant/message 文本（skiff-core 同款；仅用于守卫检测，不导出） */
+/** 读会话最后一个 assistant/message 文本（skiff-core 同款；仅用于守卫检测，不导出）
+ *  **v1.27.7：剥离 think 块再检测**（用户："不检查think内容（因为不输出）"）——
+ *  ` think…` 是模型思考过程，不进入用户可见输出；敏感词检测只针对**最终呈现文本**，
+ *  否则 think 内提及内部机制词（思考过程必然推演机制）会误打回。复用 stripThink
+ *  （v1.26.8 状态机，弃正则——同 v1.27.1 微信桥回复链路）。 */
 function lastAssistantText(agent: Agent): string {
   const events = (agent.session as { events?: readonly unknown[] }).events ?? []
   for (let i = events.length - 1; i >= 0; i--) {
@@ -36,7 +41,7 @@ function lastAssistantText(agent: Agent): string {
     if (e && e.type === 'assistant/message') {
       const blocks = (e.data?.message?.content ?? e.data?.content ?? []) as Array<{ type?: string; text?: string }>
       const text = blocks.filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
-      if (text) return text
+      if (text) return stripThink(text)
     }
   }
   return ''
