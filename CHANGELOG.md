@@ -1,3 +1,44 @@
+## v1.27.4 — 2026-09-02（Autopilot Trajectory 正式化 + 配置面板紧凑化，S142 用户需求）
+
+**Scope:** 用户 "微信桥是做好了，测试很好，autopilot也很好，改进下配置面板，目前内容太多了，太长，很多功能没几个配置项占用好几行"——① Autopilot Trajectory 改名迁移（autotrajectory → autopilot-trajectory，S151 自主管家轨迹沿用）+ 多 CCC 独立；② 配置面板紧凑化（折叠次要块 + 只读状态定义列表 + 开关端口内联）。
+
+### 变更
+- **Autopilot Trajectory 正式化（v1.27.4 改名迁移）**：
+  - `autotrajectory` → `autopilot-trajectory` 全库机械改名（工具名/配置键/偏见脚本名/目录/测试）
+  - **多 CCC 独立**：`collectAutopilotCccs`（所有 live+enabled CCC）替代 enabled[0]——每 CCC 各自 shouldWake+唤起，per-CCC running 守卫，全局串行化
+  - **可靠性**：唤起失败指数退避重试 / 审计日志 / 轮次预算（interval 下限 + maxDailyWakes 每日上限）/ 偏见脚本沙箱（超时 + 8KB 输出截断）
+  - **面板 CCC 选择器**：Autopilot 区块加 CCC 选择器（/serenity/cccs 数据源）+ GET/POST 显式 ccc 参数——修复"两个 CCC 都设定但手工唤起只能唤起一个"（根因：client 无参 fetch → collectAutopilotCccs[0] 只取第一个）
+- **微信桥完善（v1.27.3 批并入）**：
+  - **语音支持**：`voice_item.text` = 微信服务端自带语音转写（无需下载/ASR）；无转写 → 降级提示"暂时无法解析"
+  - **正在输入**：处理前 `sendtyping 1`（微信显示"正在输入..."），处理后（含异常 finally）`0`；typing_ticket 按 (accountId,user) 缓存复用；typing 失败静默不阻断
+  - **媒体接收 P1**：图片/文件 CDN 下载 + AES-128-ECB 解密 → 落盘 `_tmp/weixin-inbound/<userhash>/` → 存在性注入（ACC 层可达，处理归角色）；降级不静默（下载失败/超 20MB → 注入说明）
+  - **live 会话优先复用**（`ctx.agents.get` 命中直接续用）——修复重启后微信桥不响应（resume-while-live + create-already-exists 双拒）
+- **配置面板紧凑化（v1.27.5 语义并入本版）**：
+  - `SettingsSection.tsx`：新增 `Collapse`（details/summary 折叠组）+ `DefList`（只读定义列表）组件；Skiff/ACP/建议问答合并「外部能力」一组（开关+端口内联一行）；建议问答配置/外部访问/彩蛋模式折叠默认收起
+  - `AccountsEditor.tsx`：监听设置/外部能力/工作区白名单折叠，登录账号表保留展开
+  - `AutopilotTrajectoryStatusBlock`：9 行卡 → 3 行卡（选择器 + 运行状态 + 只读定义列表 2 列网格 + 立即唤起）
+  - `WeixinBridgeEditor.tsx`：总开关+账号列表合并一行；desc 精简；路由 textarea 5→3 行；二维码 160→120px
+  - `PersonaEditor.css`：textarea 默认 120px→72px（4 行，可拖拽）
+  - CSS：折叠组/定义列表/开关行样式 + desc 2 行截断（hover title 看全文）
+
+### 测试
+- **52 files / 749 tests 全绿**（微信三批 +12 → 734 → autopilot 改名重写 58 用例 → 749）；typecheck ✓（node + client）
+
+## v1.27.3 — 2026-09-01（微信桥完善：语音支持 + 正在输入 + 媒体接收，S142 用户需求）
+
+> 本批实现随 v1.27.4 一起发布（用户拍板"全部一起发"）；此段保留为 CHANGELOG 版本线完整记录。
+
+**Scope:** 用户 "很好效果很不错，现在做完善"——微信桥 ① 语音消息支持 ② 正在输入状态 ③ 媒体（图片/文件）接收落盘。三者均为微信桥能力完善，非用户反馈 bug。
+
+### 变更
+- **语音支持（D-voice-1 服务端转写路线）**：`voice_item.text` = 微信服务端自带语音转写（官方 openclaw-weixin 直接读该字段，无需下载/ASR）→ `extractWeixinText` 扩展读取 type 3 voice_item.text，与文本同路径进 skiff 对话；语音无转写 → `hasVoiceItem` 判定 + 降级提示"（抱歉，暂时无法解析这条语音消息，请尝试发送文字）"；原 P4 的 SILK 解码+ASR 链路仅当腾讯停止转写时作为备选（设计文档 §5 已更新）
+- **正在输入状态（D-typing-1：sendtyping 协议）**：`getConfig` 取 typing_ticket（每 (accountId,user) 缓存复用，对齐参考实现 typingTicketCache）→ 处理前 `sendTyping status=1`（微信侧显示"正在输入..."）→ 处理完（含异常 finally）`status=0`；typing 失败静默不阻断主流程；**协议文档注释"2=CANCEL"为误记，修正为 0（对齐官方参考实现 onCleanup）**
+- **媒体接收 P1（用户拍板 v0.2：ACC 层最小闭环）**：`image_item.media` / `file_item.media`（CDNMedia）下载 = CDN GET → **AES-128-ECB 解密**（key 兼容 hex/base64，`item.aeskey || media.aes_key`），零鉴权头 → 落盘 `_tmp/weixin-inbound/<userhash>/`（净化文件名 + 魔数嗅探扩展名）→ 存在性注入对话；降级不静默（下载失败/超 20MB → 注入说明）；**可执行文件不做防护**（用户拍板）
+- **文档**：weixin-bot-api.md（sendtyping 状态修正 + voice_item.text 转写发现）+ weixin-bridge-design.md（§5 分期状态更新）+ docs/weixin-media-design.md（方案 v0.2）
+
+### 测试
+- **52 files / 734 tests 全绿**（+12：单元 URL/key 三型/解密向量/魔数嗅探/文件名净化/落盘路径/媒体提取 + 集成 图片下载解密落盘注入/文件净化落盘/下载失败降级/超限降级）；typecheck ✓；顺带修复 autotrajectory 时间 flake（avoidWakeHours {0,0} 时间无关化）
+
 ## v1.27.2 — 2026-08-31（微信桥固定会话 id collision 根治：resume-or-create，S142 用户报告）
 
 **Scope:** 用户 "同一个用户的会话绑定有问题，会话报错：session skiff-weixin-... already has a persisted log on disk that does not match this live session (id collision)"。根因 = 微信桥每次进程重启后用**固定 sessionId**（`weixinSessionIdFor`，同用户长期映射）调 `ctx.agents.create`——DSH 持久化语义 **sessionId 即身份**：磁盘已有该 id 的持久化 log 时必须 `load/resume`（coordinator `adoptLivePrefix` 校验 seed 覆盖旧事件，不匹配抛 id collision）。修复 = **resume-or-create**：有持久化 log → resume（历史延续，重启后记忆保留——真正的"同用户长期延续"）；无（首次）→ create。

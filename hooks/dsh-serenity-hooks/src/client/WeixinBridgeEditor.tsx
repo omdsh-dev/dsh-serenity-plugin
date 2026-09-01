@@ -257,7 +257,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
         <div className="ss-rowCard">
           <div className="ss-rowText">
             <span className="ss-rowName">目标 CCC</span>
-            <span className="ss-rowDesc">选择要配置微信桥的认知容器（显式，非当前活跃会话）</span>
+            <span className="ss-rowDesc">选择要配置微信桥的认知容器</span>
           </div>
           <div className="ss-rowControl">
             <select
@@ -288,12 +288,14 @@ export function WeixinBridgeEditor(): React.JSX.Element {
 
       {status && (
         <>
-          {/* 总开关 */}
+          {/* 总开关 + 账号列表（v1.27.5 紧凑化：并成一行） */}
           <li>
             <div className="ss-rowCard">
               <div className="ss-rowText">
-                <span className="ss-rowName">总开关</span>
-                <span className="ss-rowDesc">启用后该 CCC 的微信桥开始轮询（需先扫码绑定至少一个账号）</span>
+                <span className="ss-rowName">总开关 · 账号（{status.accounts.length}）</span>
+                <span className="ss-rowDesc">
+                  {status.accounts.length === 0 ? '未绑定账号——下方扫码绑定' : status.accounts.map((a) => `${a.accountId}${a.name ? `·${a.name}` : ''}${a.bound ? '✓' : '✗'}`).join('  ')}
+                </span>
               </div>
               <div className="ss-rowControl">
                 <label className="ss-switch">
@@ -307,29 +309,12 @@ export function WeixinBridgeEditor(): React.JSX.Element {
               </div>
             </div>
           </li>
-
-          {/* 账号列表（多账号：每账号一行，独立移除按钮） */}
-          <li>
-            <div className="ss-rowCard">
-              <div className="ss-rowText">
-                <span className="ss-rowName">账号（{status.accounts.length}）</span>
-                <span className="ss-rowDesc">
-                  {status.accounts.length === 0
-                    ? '未绑定任何微信账号——点击下方「扫码绑定微信」逐个添加'
-                    : '每个账号独立轮询；可继续扫码添加更多'}
-                </span>
-              </div>
-              <div className="ss-rowControl" />
-            </div>
-          </li>
           {status.accounts.map((a) => (
             <li key={a.accountId}>
               <div className="ss-rowCard">
                 <div className="ss-rowText">
                   <span className="ss-rowName">{a.accountId}{a.name ? ` · ${a.name}` : ''}</span>
-                  <span className="ss-rowDesc">
-                    {a.bound ? '已绑定凭据' : '未绑定凭据'}（{bridgeStateText(a.accountId)}）
-                  </span>
+                  <span className="ss-rowDesc">{a.bound ? '已绑定凭据' : '未绑定凭据'}（{bridgeStateText(a.accountId)}）</span>
                 </div>
                 <div className="ss-rowControl">
                   <button
@@ -350,8 +335,8 @@ export function WeixinBridgeEditor(): React.JSX.Element {
               <div className="ss-rowText">
                 <span className="ss-rowName">扫码绑定微信</span>
                 <span className="ss-rowDesc">
-                  {loginPhase === 'idle' && '用手机微信「扫一扫」扫描二维码并确认——每扫一次绑定一个新账号'}
-                  {loginPhase === 'waiting' && '二维码已生成（5 分钟内有效）——微信扫一扫 → 手机上确认绑定'}
+                  {loginPhase === 'idle' && '微信「扫一扫」确认——每扫一次绑定一个新账号'}
+                  {loginPhase === 'waiting' && '二维码已生成（5 分钟有效）——微信扫一扫 → 手机确认'}
                   {loginPhase === 'confirmed' && (loginNotice ?? '绑定成功')}
                   {loginPhase === 'error' && (loginError ?? '绑定失败')}
                   {loginPhase === 'expired' && '二维码已过期，请重新获取'}
@@ -370,7 +355,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
             </div>
           </li>
 
-          {/* 二维码展示（等待扫码时） */}
+          {/* 二维码展示（等待扫码时；v1.27.5 紧凑化：更小 + 步骤横排） */}
           {loginPhase === 'waiting' && loginQrSvg !== '' && (
             <li>
               <div className="ss-rowCard ss-qrRow">
@@ -380,18 +365,18 @@ export function WeixinBridgeEditor(): React.JSX.Element {
                   dangerouslySetInnerHTML={{ __html: loginQrSvg }}
                 />
                 <div className="ss-rowText">
-                  <span className="ss-rowDesc">1. 打开手机微信 → 扫一扫 2. 扫描此二维码 3. 在手机上确认绑定</span>
+                  <span className="ss-rowDesc">微信扫一扫 → 手机上确认绑定</span>
                 </div>
               </div>
             </li>
           )}
 
-          {/* 路由表（JSON 编辑） */}
+          {/* 路由表（JSON 编辑；v1.27.5 紧凑化：textarea 默认 3 行） */}
           <li>
             <div className="ss-rowCard">
               <div className="ss-rowText">
                 <span className="ss-rowName">路由表</span>
-                <span className="ss-rowDesc">微信用户 → 该 CCC 的 skiff 角色（`*` = 通配兜底；role 必须已定义）</span>
+                <span className="ss-rowDesc">微信用户 → skiff 角色（`*` 通配兜底）</span>
               </div>
               <div className="ss-rowControl">
                 <button type="button" className="ss-loginBtn" onClick={() => void saveRoutes()}>保存路由</button>
@@ -399,7 +384,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
             </div>
             <textarea
               className="ss-routesEditor"
-              rows={5}
+              rows={3}
               value={routesDraft}
               onChange={(e) => setRoutesDraft(e.target.value)}
             />

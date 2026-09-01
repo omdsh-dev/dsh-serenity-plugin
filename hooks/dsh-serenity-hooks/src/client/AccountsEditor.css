@@ -4,11 +4,65 @@
 .ae-root {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   padding: 12px 14px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 12px;
   font-size: 13px;
+}
+
+/* ── v1.27.5 紧凑化：折叠块（details/summary）── */
+.ae-collapse {
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ae-collapseHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.ae-collapseHead::-webkit-details-marker {
+  display: none;
+}
+
+.ae-collapseHead::before {
+  content: '▸';
+  flex: none;
+  font-size: 11px;
+  color: var(--dsw-alias-label-dimmed);
+  transition: transform 0.15s ease;
+}
+
+.ae-collapse[open] > .ae-collapseHead::before {
+  transform: rotate(90deg);
+}
+
+.ae-collapseHead:hover {
+  background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.06));
+}
+
+.ae-collapseDesc {
+  font-size: 12px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.ae-collapseBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
 .ae-warn {

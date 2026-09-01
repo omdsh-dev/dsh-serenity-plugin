@@ -40,7 +40,7 @@
 
 .pe-textarea {
   resize: vertical;
-  min-height: 120px;
+  min-height: 72px; /* v1.27.5 紧凑化：默认 4 行（原 120px 过高），可拖拽扩大 */
   line-height: 1.5;
   font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 12px;

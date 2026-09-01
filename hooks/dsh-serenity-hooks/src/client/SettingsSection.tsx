@@ -108,6 +108,40 @@ function Group(props: {
   )
 }
 
+/** 折叠组（details/summary：默认收起，点开展开——v1.27.5 紧凑化） */
+function Collapse(props: {
+  title: string
+  desc?: string
+  open?: boolean
+  children: React.ReactNode
+}): React.JSX.Element {
+  const { title, desc, open, children } = props
+  return (
+    <details className="ss-collapse" open={open}>
+      <summary className="ss-collapseHead">
+        <span className="ss-collapseTitle">{title}</span>
+        {desc && <span className="ss-collapseDesc">{desc}</span>}
+      </summary>
+      <div className="ss-collapseBody">{children}</div>
+    </details>
+  )
+}
+
+/** 只读定义列表（dl/dt/dd 网格——v1.27.5 紧凑化：只读状态不再各占一行卡） */
+function DefList(props: { items: Array<{ term: string; value: React.ReactNode }> }): React.JSX.Element {
+  const { items } = props
+  return (
+    <dl className="ss-defList">
+      {items.map((it) => (
+        <div className="ss-defItem" key={it.term}>
+          <dt className="ss-defTerm">{it.term}</dt>
+          <dd className="ss-defValue">{it.value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
 /** dsh 原生设置面板：serenity-hooks 配置页（官方 settings 设计语言，多级标题） */
 export function SettingsSection(props: SettingsSectionProps): React.JSX.Element {
   const { scope } = props
@@ -197,21 +231,15 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
       </Group>
 
-      {/* F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务（人工启停） */}
-      <Group title="Skiff">
+      {/* 外部能力开关组（v1.27.5 紧凑化：Skiff/ACP/建议问答合并为一行一个开关，端口内联） */}
+      <Group title="外部能力">
         <li>
           <RowCard
-            title="认知子集调试服务"
-            desc="Skiff 角色问答页（实验性；启停人工控制，仅监听 127.0.0.1）"
-            control={<Toggle checked={skiffOn} onChange={(on) => toggle('skiffEnabled', on)} />}
-          />
-        </li>
-        <li>
-          <RowCard
-            title="调试端口"
-            desc="Skiff 问答页端口（1024 ~ 65535，默认 3099）"
+            title="Skiff 调试"
+            desc="Skiff 认知子集问答页（实验性，127.0.0.1）"
             control={
-              <div className="ss-threshold">
+              <span className="ss-switchRow">
+                <Toggle checked={skiffOn} onChange={(on) => toggle('skiffEnabled', on)} />
                 <input
                   className="ss-portInput"
                   type="number"
@@ -219,36 +247,20 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                   max={65535}
                   value={skiffPort}
                   disabled={!skiffOn}
+                  title="Skiff 调试端口（默认 3099）"
                   onChange={(e) => setSkiffPort(Number(e.target.value))}
                 />
-              </div>
+              </span>
             }
           />
         </li>
-      </Group>
-
-      {/* F4c ACP + F4d 建议问答页（v1.26.x 实验性）：HTTP JSON-RPC + 问答页（人工启停） */}
-      <Group title="ACP / 建议问答">
         <li>
           <RowCard
-            title="ACP JSON-RPC 端点"
-            desc="程序化调用 Skiff 角色（指定 CCC+角色+会话；实验性，仅监听 127.0.0.1）"
-            control={<Toggle checked={acpOn} onChange={(on) => toggle('acpEnabled', on)} />}
-          />
-        </li>
-        <li>
-          <RowCard
-            title="建议问答页"
-            desc="按认知容器暴露问答页供他人验证（需 key；首次开启自动生成固定 key，见 ~/.dsh/serenity-hooks.json）"
-            control={<Toggle checked={publicAskOn} onChange={(on) => toggle('publicAskEnabled', on)} />}
-          />
-        </li>
-        <li>
-          <RowCard
-            title="HTTP 端口"
-            desc="ACP JSON-RPC + 问答页共用端口（1024 ~ 65535，默认 3100）"
+            title="ACP JSON-RPC"
+            desc="程序化调用 Skiff 角色（实验性，127.0.0.1）"
             control={
-              <div className="ss-threshold">
+              <span className="ss-switchRow">
+                <Toggle checked={acpOn} onChange={(on) => toggle('acpEnabled', on)} />
                 <input
                   className="ss-portInput"
                   type="number"
@@ -256,31 +268,36 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                   max={65535}
                   value={acpPort}
                   disabled={!acpOn && !publicAskOn}
+                  title="ACP + 建议问答共用端口（默认 3100）"
                   onChange={(e) => setAcpPort(Number(e.target.value))}
                 />
-              </div>
+              </span>
             }
+          />
+        </li>
+        <li>
+          <RowCard
+            title="建议问答页"
+            desc="按认知容器暴露问答页（需 key；首次开启自动生成，见 ~/.dsh/serenity-hooks.json）"
+            control={<Toggle checked={publicAskOn} onChange={(on) => toggle('publicAskEnabled', on)} />}
           />
         </li>
       </Group>
 
-      {/* v1.26.2：建议问答页配置（开放容器白名单 + key/地址展示；plugin 全局 /serenity/config + /serenity/cccs） */}
-      <div className="ss-group">
-        <h3 className="ss-groupTitle">建议问答</h3>
+      {/* 建议问答（v1.26.2 配置：开放容器白名单 + key/地址展示；v1.27.5 折叠默认收起） */}
+      <Collapse title="建议问答配置" desc="开放容器白名单 · 访问 key 与地址">
         <PublicAskEditor publicAskOn={publicAskOn} />
-      </div>
+      </Collapse>
 
-      {/* 复杂配置（账号 + 工作区白名单）：plugin 全局文件 /serenity/config */}
-      <div className="ss-group">
-        <h3 className="ss-groupTitle">外部访问</h3>
+      {/* 复杂配置（账号 + 工作区白名单）：plugin 全局文件 /serenity/config；v1.27.5 折叠 */}
+      <Collapse title="外部访问" desc="监听 · 登录账号 · 工作区白名单（plugin 全局）">
         <AccountsEditor gatewayOn={gatewayOn} />
-      </div>
+      </Collapse>
 
-      {/* v1.23.1 彩蛋：persona 模式（替换输出约束/指令遵循约束；plugin 全局文件） */}
-      <div className="ss-group">
-        <h3 className="ss-groupTitle">彩蛋模式</h3>
+      {/* v1.23.1 彩蛋：persona 模式（替换输出约束/指令遵循约束；plugin 全局文件）；v1.27.5 折叠 */}
+      <Collapse title="彩蛋模式" desc="persona 输出风格（默认关闭）">
         <PersonaEditor />
-      </div>
+      </Collapse>
 
       {/* Autopilot Trajectory（v1.27.4 正式版；v1.26.14 起面板状态——用户"给CCC的面板加个状态来看情况"；
           数据源 GET /serenity/autopilot-trajectory：配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计） */}
@@ -472,51 +489,24 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
         />
       </li>
       <li>
-        <RowCard
-          title="目标会话"
-          desc={targetText}
-          control={target?.wakeable ? <span className="ss-value">可唤起</span> : null}
-        />
-      </li>
-      <li>
-        <RowCard
-          title="唤起窗口"
-          desc={`当前北京 ${status.beijingHour} 点 — ${status.windowAllowed ? '允许唤起' : `高峰避开中（${status.avoidWakeHours.start}~${status.avoidWakeHours.end}）`}`}
-          control={null}
-        />
-      </li>
-      <li>
-        <RowCard
-          title="每日预算"
-          desc={`${status.maxDailyWakes} 次/日上限（防失控 + 控成本）`}
-          control={null}
-        />
-      </li>
-      <li>
-        <RowCard
-          title="偏见提供者"
-          desc={status.biasProvider}
-          control={null}
-        />
-      </li>
-      <li>
-        <RowCard
-          title="轨迹焦点 (topPrompt)"
-          desc={status.topPrompt ? status.topPrompt : '未定义——CCC 定义 autopilotTrajectory 时应填写本轨迹核心焦点（防多轮唤起焦点丢失）'}
-          control={null}
-        />
-      </li>
-      <li>
-        <RowCard
-          title="最近唤起（审计）"
-          desc={lastWake ? `${new Date(lastWake.time).toLocaleString()} — ${lastWake.ok ? '✓' : '✗'} ${lastWake.detail}` : '尚无唤起记录'}
-          control={null}
-        />
+        <div className="ss-rowCard">
+          {/* v1.27.5 紧凑化：只读状态并入一个定义列表（2 列网格），不再各占一行卡 */}
+          <DefList
+            items={[
+              { term: '目标会话', value: targetText },
+              { term: '唤起窗口', value: `北京 ${status.beijingHour} 点 — ${status.windowAllowed ? '允许' : `避开 ${status.avoidWakeHours.start}~${status.avoidWakeHours.end}`}` },
+              { term: '每日预算', value: `${status.maxDailyWakes} 次/日` },
+              { term: '偏见提供者', value: status.biasProvider },
+              { term: '轨迹焦点', value: status.topPrompt ?? '未定义（CCC 应填写，防焦点丢失）' },
+              { term: '最近唤起', value: lastWake ? `${new Date(lastWake.time).toLocaleString()} — ${lastWake.ok ? '✓' : '✗'} ${lastWake.detail}` : '尚无' },
+            ]}
+          />
+        </div>
       </li>
       <li>
         <RowCard
           title="立即唤起"
-          desc={wakeResult ?? '调试：手动触发一次唤起（跳过窗口/间隔/预算，仍校验配置与偏见脚本）'}
+          desc={wakeResult ?? '调试：手动触发一次（跳过窗口/间隔/预算，仍校验配置与偏见脚本）'}
           control={
             <button
               type="button"

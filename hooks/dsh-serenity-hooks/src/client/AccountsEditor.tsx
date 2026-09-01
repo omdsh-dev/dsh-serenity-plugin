@@ -156,36 +156,46 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
         <p className="ae-warn">⚠️ 双端口网关当前关闭——先开启上方「双端口网关」开关，外部访问才生效。</p>
       )}
 
-      {/* ── 监听设置 ── */}
-      <div className="ae-block">
-        <h4 className="ae-title">监听设置</h4>
-        <div className="ae-row">
-          <span className="ae-label">监听地址</span>
-          <input className="ae-input" value={host} onChange={(e) => setHost(e.target.value)} placeholder="0.0.0.0" />
-          <span className="ae-label">端口</span>
-          <input className="ae-input ae-port" type="number" value={port} min={1} max={65535} onChange={(e) => setPort(Number(e.target.value) || 0)} />
+      {/* ── 监听设置（v1.27.5 紧凑化：折叠，默认收起）── */}
+      <details className="ae-collapse">
+        <summary className="ae-collapseHead">
+          <span className="ae-title">监听设置</span>
+          <span className="ae-collapseDesc">地址 · 端口 · Secure Cookie</span>
+        </summary>
+        <div className="ae-collapseBody">
+          <div className="ae-row">
+            <span className="ae-label">监听地址</span>
+            <input className="ae-input" value={host} onChange={(e) => setHost(e.target.value)} placeholder="0.0.0.0" />
+            <span className="ae-label">端口</span>
+            <input className="ae-input ae-port" type="number" value={port} min={1} max={65535} onChange={(e) => setPort(Number(e.target.value) || 0)} />
+          </div>
+          {/* v1.22.4 S7：cookieSecure——反代 TLS（HTTPS）时开启；明文 HTTP 下必须关闭 */}
+          <label className="ae-check">
+            <input type="checkbox" checked={cookieSecure} onChange={(e) => setCookieSecure(e.target.checked)} />
+            <span>Secure Cookie（仅 HTTPS 反代时开启；明文 HTTP 下关闭，否则登录态不生效）</span>
+          </label>
         </div>
-        {/* v1.22.4 S7：cookieSecure——反代 TLS（HTTPS）时开启；明文 HTTP 下必须关闭 */}
-        <label className="ae-check">
-          <input type="checkbox" checked={cookieSecure} onChange={(e) => setCookieSecure(e.target.checked)} />
-          <span>Secure Cookie（仅 HTTPS 反代时开启；明文 HTTP 下关闭，否则登录态不生效）</span>
-        </label>
-      </div>
+      </details>
 
-      {/* ── 外部能力（v1.22.4 完善需求）── */}
-      <div className="ae-block">
-        <h4 className="ae-title">外部能力</h4>
-        <label className="ae-check">
-          <input type="checkbox" checked={allowWorkspaceCreate} onChange={(e) => setAllowWorkspaceCreate(e.target.checked)} />
-          <span>允许外部新建工作区（关闭后经外部网关的 workspace.create 一律拒绝；仅使用已有工作区）</span>
-        </label>
-        <label className="ae-check">
-          <input type="checkbox" checked={totpEnabled} onChange={(e) => setTotpEnabled(e.target.checked)} />
-          <span>启用 Authenticator 登录（v1.24.6 二选一：开启后绑定验证器的账号可用密码 或 6 位验证码任一登录；关闭时 TOTP 完全禁用，仅密码）</span>
-        </label>
-      </div>
+      {/* ── 外部能力（v1.22.4 完善需求；v1.27.5 折叠）── */}
+      <details className="ae-collapse">
+        <summary className="ae-collapseHead">
+          <span className="ae-title">外部能力</span>
+          <span className="ae-collapseDesc">允许新建工作区 · Authenticator 登录</span>
+        </summary>
+        <div className="ae-collapseBody">
+          <label className="ae-check">
+            <input type="checkbox" checked={allowWorkspaceCreate} onChange={(e) => setAllowWorkspaceCreate(e.target.checked)} />
+            <span>允许外部新建工作区（关闭后经外部网关的 workspace.create 一律拒绝；仅使用已有工作区）</span>
+          </label>
+          <label className="ae-check">
+            <input type="checkbox" checked={totpEnabled} onChange={(e) => setTotpEnabled(e.target.checked)} />
+            <span>启用 Authenticator 登录（v1.24.6 二选一：开启后绑定验证器的账号可用密码 或 6 位验证码任一登录；关闭时 TOTP 完全禁用，仅密码）</span>
+          </label>
+        </div>
+      </details>
 
-      {/* ── 登录账号 ── */}
+      {/* ── 登录账号（主配置，默认展开）── */}
       <div className="ae-block">
         <h4 className="ae-title">登录账号</h4>
         <div className="ae-list">
@@ -253,37 +263,42 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
         </div>
       </div>
 
-      {/* ── 工作区白名单（需求 1：从已有工作区选择）── */}
-      <div className="ae-block">
-        <h4 className="ae-title">工作区白名单</h4>
-        <p className="ae-desc">允许外部访问的已有工作区；未选择 = 全部允许。登录后仅白名单内的工作区可见/可用。</p>
-        <div className="ae-wsList">
-          {workspaces.length === 0 ? (
-            <p className="ae-note">（全部允许）</p>
+      {/* ── 工作区白名单（需求 1：从已有工作区选择；v1.27.5 折叠）── */}
+      <details className="ae-collapse">
+        <summary className="ae-collapseHead">
+          <span className="ae-title">工作区白名单</span>
+          <span className="ae-collapseDesc">未选择 = 全部允许</span>
+        </summary>
+        <div className="ae-collapseBody">
+          <p className="ae-desc">允许外部访问的已有工作区；未选择 = 全部允许。登录后仅白名单内的工作区可见/可用。</p>
+          <div className="ae-wsList">
+            {workspaces.length === 0 ? (
+              <p className="ae-note">（全部允许）</p>
+            ) : (
+              workspaces.map((w) => (
+                <span key={w} className="ae-wsChip">
+                  <code className="ae-wsPath">{w}</code>
+                  <button type="button" className="ae-wsDel" onClick={() => removeWorkspace(w)} aria-label={`移除 ${w}`}>×</button>
+                </span>
+              ))
+            )}
+          </div>
+          {knownWorkspaces.length === 0 ? (
+            <p className="ae-note">暂无可选工作区（workspace.list 未返回条目）</p>
           ) : (
-            workspaces.map((w) => (
-              <span key={w} className="ae-wsChip">
-                <code className="ae-wsPath">{w}</code>
-                <button type="button" className="ae-wsDel" onClick={() => removeWorkspace(w)} aria-label={`移除 ${w}`}>×</button>
-              </span>
-            ))
+            <select
+              className="ae-input ae-wsSelect"
+              value=""
+              onChange={(e) => { if (e.target.value !== '') toggleWorkspace(e.target.value) }}
+            >
+              <option value="" disabled>选择已有工作区…</option>
+              {knownWorkspaces.map((w) => (
+                <option key={w.path} value={w.path}>{w.title}</option>
+              ))}
+            </select>
           )}
         </div>
-        {knownWorkspaces.length === 0 ? (
-          <p className="ae-note">暂无可选工作区（workspace.list 未返回条目）</p>
-        ) : (
-          <select
-            className="ae-input ae-wsSelect"
-            value=""
-            onChange={(e) => { if (e.target.value !== '') toggleWorkspace(e.target.value) }}
-          >
-            <option value="" disabled>选择已有工作区…</option>
-            {knownWorkspaces.map((w) => (
-              <option key={w.path} value={w.path}>{w.title}</option>
-            ))}
-          </select>
-        )}
-      </div>
+      </details>
 
       {error !== null && <p className="ae-error">{error}</p>}
 
