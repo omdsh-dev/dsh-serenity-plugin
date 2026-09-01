@@ -282,11 +282,11 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <PersonaEditor />
       </div>
 
-      {/* v1.26.14 自主轨迹实验状态（只读区块——用户"给CCC的面板加个状态来看情况"；
-          数据源 GET /serenity/autotrajectory：配置摘要 + 目标会话 + 窗口/可唤起判定） */}
+      {/* Autopilot Trajectory（v1.27.4 正式版；v1.26.14 起面板状态——用户"给CCC的面板加个状态来看情况"；
+          数据源 GET /serenity/autopilot-trajectory：配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计） */}
       <div className="ss-group">
-        <h3 className="ss-groupTitle">自主轨迹</h3>
-        <AutoTrajectoryStatusBlock />
+        <h3 className="ss-groupTitle">Autopilot Trajectory</h3>
+        <AutopilotTrajectoryStatusBlock />
       </div>
 
       {/* F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置——显式 CCC 选择器 + 扫码绑定 +
@@ -299,11 +299,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   )
 }
 
-/** /serenity/autotrajectory 状态 wire（与 src/autotrajectory.ts getAutoTrajectoryStatus 对齐） */
-interface AutoTrajectoryStatus {
+/** /serenity/autopilot-trajectory 状态 wire（与 src/autopilot-trajectory.ts getAutopilotStatus 对齐） */
+interface AutopilotTrajectoryStatus {
   configured: boolean
   enabled: boolean
   intervalHours: number
+  maxDailyWakes: number
   biasProvider: string
   topPrompt: string | null
   session: string | null
@@ -316,20 +317,21 @@ interface AutoTrajectoryStatus {
   } | null
   beijingHour: number
   windowAllowed: boolean
+  recentWakes: Array<{ time: number; ok: boolean; detail: string }>
 }
 
-/** 「自主轨迹」只读状态区块（v1.26.14）：展示当前工作区 CCC 的实验状态；实验配置改走 CCC 配置文件 */
-function AutoTrajectoryStatusBlock(): React.JSX.Element {
-  const [status, setStatus] = useState<AutoTrajectoryStatus | null>(null)
+/** 「Autopilot Trajectory」只读状态区块（v1.26.14）：展示当前工作区 CCC 的状态；配置改走 CCC 配置文件 */
+function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
+  const [status, setStatus] = useState<AutopilotTrajectoryStatus | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const [waking, setWaking] = useState(false)
   const [wakeResult, setWakeResult] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
-      const res = await fetch('/serenity/autotrajectory', { headers: { accept: 'application/json' } })
+      const res = await fetch('/serenity/autopilot-trajectory', { headers: { accept: 'application/json' } })
       if (!res.ok) return
-      const body = (await res.json()) as { status?: AutoTrajectoryStatus | null }
+      const body = (await res.json()) as { status?: AutopilotTrajectoryStatus | null }
       if (body.status) {
         setStatus(body.status)
         setUnavailable(false)
@@ -354,7 +356,7 @@ function AutoTrajectoryStatusBlock(): React.JSX.Element {
     setWaking(true)
     setWakeResult(null)
     try {
-      const res = await fetch('/serenity/autotrajectory', {
+      const res = await fetch('/serenity/autopilot-trajectory', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
         body: JSON.stringify({ action: 'wake' }),
@@ -386,7 +388,7 @@ function AutoTrajectoryStatusBlock(): React.JSX.Element {
     return (
       <ul className="ss-rows">
         <li>
-          <RowCard title="加载中…" desc="读取自主轨迹实验状态" control={null} />
+          <RowCard title="加载中…" desc="读取 Autopilot Trajectory 状态" control={null} />
         </li>
       </ul>
     )
@@ -394,7 +396,7 @@ function AutoTrajectoryStatusBlock(): React.JSX.Element {
 
   const target = status.target
   const stateText = !status.configured
-    ? '未配置（实验未开始）'
+    ? '未配置（机制未开始）'
     : !status.enabled
       ? '已配置，未启用（enabled=false，零资源占用）'
       : '已启用 — 时钟唤起等待中'
@@ -405,12 +407,13 @@ function AutoTrajectoryStatusBlock(): React.JSX.Element {
       : '未配置目标会话（不唤起）'
   // 调试按钮可用条件：已启用 + 目标会话就绪（配置命中且带 --auto）；偏见脚本校验由服务端 force 兜底
   const wakeReady = status.enabled && !!target && target.autoFlag
+  const lastWake = status.recentWakes[0]
 
   return (
     <ul className="ss-rows">
       <li>
         <RowCard
-          title="实验状态"
+          title="运行状态"
           desc={stateText}
           control={<span className="ss-value">{status.enabled ? '● 运行中' : status.configured ? '○ 待启' : '—'}</span>}
         />
@@ -431,6 +434,13 @@ function AutoTrajectoryStatusBlock(): React.JSX.Element {
       </li>
       <li>
         <RowCard
+          title="每日预算"
+          desc={`${status.maxDailyWakes} 次/日上限（防失控 + 控成本）`}
+          control={null}
+        />
+      </li>
+      <li>
+        <RowCard
           title="偏见提供者"
           desc={status.biasProvider}
           control={null}
@@ -439,14 +449,21 @@ function AutoTrajectoryStatusBlock(): React.JSX.Element {
       <li>
         <RowCard
           title="轨迹焦点 (topPrompt)"
-          desc={status.topPrompt ? status.topPrompt : '未定义——CCC 定义 autotrajectory 时应填写本轨迹核心焦点（防多轮唤起焦点丢失）'}
+          desc={status.topPrompt ? status.topPrompt : '未定义——CCC 定义 autopilotTrajectory 时应填写本轨迹核心焦点（防多轮唤起焦点丢失）'}
+          control={null}
+        />
+      </li>
+      <li>
+        <RowCard
+          title="最近唤起（审计）"
+          desc={lastWake ? `${new Date(lastWake.time).toLocaleString()} — ${lastWake.ok ? '✓' : '✗'} ${lastWake.detail}` : '尚无唤起记录'}
           control={null}
         />
       </li>
       <li>
         <RowCard
           title="立即唤起"
-          desc={wakeResult ?? '调试：手动触发一次唤起（跳过窗口/间隔，仍校验配置与偏见脚本）'}
+          desc={wakeResult ?? '调试：手动触发一次唤起（跳过窗口/间隔/预算，仍校验配置与偏见脚本）'}
           control={
             <button
               type="button"

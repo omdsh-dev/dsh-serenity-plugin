@@ -26,7 +26,7 @@ import { createSessionTool } from './tools/session.js'
 import { createRebuildTool } from './tools/rebuild.js'
 import { localstoreTool } from './tools/localstore.js'
 import { skiffAdminTool } from './tools/skiff-admin.js'
-import { createAutoTrajectoryExpTool } from './tools/autotrajectory-exp.js'
+import { createAutopilotTool } from './tools/autopilot-trajectory.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
 import { registerKeeper } from './seams/keeper.js'
@@ -45,7 +45,7 @@ import { registerOutputGuardHook } from './output-guard-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
-import { registerAutoTrajectory } from './autotrajectory.js'
+import { registerAutopilot } from './autopilot-trajectory.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
 
 export const name = 'dsh-serenity-hooks'
@@ -120,9 +120,9 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(createRebuildTool(ctx))
     ctx.tools.register(localstoreTool)
     ctx.tools.register(skiffAdminTool)
-    // 自主轨迹实验一站式管理（v1.26.12 实验提案，默认关；只提供工具与知识，不自动安装任何东西）
+    // Autopilot Trajectory 一站式管理（v1.26.12 实验 → v1.27.4 正式化；默认关；只提供工具与知识，不自动安装任何东西）
     // v1.26.14：闭包捕获 ctx → diag-live 进程内诊断（live 会话/标题/agent 定位）
-    ctx.tools.register(createAutoTrajectoryExpTool(ctx))
+    ctx.tools.register(createAutopilotTool(ctx))
   }
   if (config.guards) {
     registerGuards(ctx, { configPaths: config.serenityConfigPaths })
@@ -170,9 +170,10 @@ export function apply(ctx: Context, config: Config): void {
   // F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点装配——人工开关（settings acpEnabled）→
   // 启动/停止；session/new 支持 {ccc, role, sessionId?}（复用 skiff 核心 + 会话延续）
   registerAcp(ctx)
-  // 自主轨迹（v1.26.12 实验提案）：CCC 定义（serenity.json autotrajectory）→ 时钟唤起 +
+  // Autopilot Trajectory（v1.26.12 实验 → v1.27.4 正式化）：CCC 定义（serenity.json
+  // autopilotTrajectory，旧键 autotrajectory 兼容）→ 时钟遍历多 CCC 各自唤起 +
   // 先验偏见注入（前台运行）。enabled=false 未配置 → 零资源占用；不触碰任何现有机制。
-  registerAutoTrajectory(ctx)
+  registerAutopilot(ctx)
   // F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置（serenity.json weixin + localstore 凭据）→
   // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。
   registerWeixinBridge(ctx)

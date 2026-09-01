@@ -31,8 +31,8 @@
     "cordis.patch.yml",
     "dsh.plugin.json",
     "README.md",
-    "experiments/autotrajectory/SKILL.md",
-    "experiments/autotrajectory/scripts/autotrajectory-exp.ts"
+    "experiments/autopilot-trajectory/SKILL.md",
+    "experiments/autopilot-trajectory/scripts/autopilot-trajectory.ts"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",

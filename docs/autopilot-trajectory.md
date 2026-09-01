@@ -1,9 +1,9 @@
-# 自主轨迹实验（Autonomous Trajectory Experiment）— CCC 参与定义说明
+# Autopilot Trajectory（自动巡航轨迹，正式版）— CCC 参与定义说明
 
-> **版本**：v1.26.12 pre-release（实验功能，**默认关闭**；未配置 = 零资源占用）
+> **版本**：v1.27.4 正式版（前身 autopilotTrajectory 实验 v1.26.12~17；**默认关闭**；未配置 = 零资源占用）
 > **依据**：serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`（v0.1 猜想，S142 2026-08-30 用户提出）
-> **机制实现**：`src/autotrajectory.ts`（本插件，dsh-serenity-hooks）
-> **阅读对象**：任何希望参与本实验的 CCC（认知容器）——本文档让 CCC 完整理解实验的**方式、目的与背景**。
+> **机制实现**：`src/autopilot-trajectory.ts`（本插件，dsh-serenity-hooks）
+> **阅读对象**：任何希望参与本机制的 CCC（认知容器）——本文档让 CCC 完整理解其**方式、目的与背景**。
 
 ---
 
@@ -43,29 +43,29 @@
 
 ```jsonc
 {
-  "autotrajectory": {
+  "autopilotTrajectory": {
     "enabled": true,                 // 总开关（缺省 false——默认关，未开零资源占用）
     "intervalHours": 12,             // 无人类活动 N 小时后自动唤起（缺省 12）
-    "biasProvider": "autotrajectory-bias.ts", // 偏见内容提供者脚本（相对 CCC 根，缺省同名）
+    "biasProvider": "autopilot-bias.ts", // 偏见内容提供者脚本（相对 CCC 根，缺省同名）
     "topPrompt": "本轨迹的核心焦点：<CCC 填写>",  // 轨迹焦点（v1.26.17）：CCC 定义，每次唤起最先注入
-    "session": "S143",               // 可选：固定目标会话（S###/目录名）；缺省 = 最近活跃
+    "session": "S143",               // 必填：目标会话（S###/目录名）——不配置绝不唤起（不默认最近活跃）
     "avoidWakeHours": { "start": 8, "end": 18 }  // 可选：避开北京高峰（缺省 8~18，用量峰谷省钱）
   }
 }
 ```
 
-> 实验包提供一键初始化：`acc_msm exec autotrajectory-exp init`（写配置 + 生成偏见提供者脚本模板）。
+> 实验包提供一键初始化：`acc_msm exec autopilot-trajectory init`（写配置 + 生成偏见提供者脚本模板）。
 
 ### 3.2 定义轨迹焦点（topPrompt——CCC 自己填写）
 
-**CCC 定义 autotrajectory 时同时定义本轨迹的顶层提示词**（`topPrompt`）：核心目标/纪律/质量要求。它会在**每次唤起时最先注入**（`[轨迹焦点]` 段，位于身份锚定之前，影响力最大），作为**稳定焦点锚定 trajectory**——**实验观察：无焦点锚定时，多轮自主唤起中轨迹腐化严重（焦点丢失）**。与偏见内容的分工：**焦点=稳定锚（每轮不变），偏见=随机探索方向（每轮不同），互补**。init 会生成占位，CCC 按自己轨迹目标改写（勿留空——留空 = 唤起无焦点锚定，轨迹易漂移）。
+**CCC 定义 autopilotTrajectory 时同时定义本轨迹的顶层提示词**（`topPrompt`）：核心目标/纪律/质量要求。它会在**每次唤起时最先注入**（`[轨迹焦点]` 段，位于身份锚定之前，影响力最大），作为**稳定焦点锚定 trajectory**——**实验观察：无焦点锚定时，多轮自主唤起中轨迹腐化严重（焦点丢失）**。与偏见内容的分工：**焦点=稳定锚（每轮不变），偏见=随机探索方向（每轮不同），互补**。init 会生成占位，CCC 按自己轨迹目标改写（勿留空——留空 = 唤起无焦点锚定，轨迹易漂移）。
 
 ### 3.3 实现偏见内容提供者（CCC 根目录脚本——偏见内容归 CCC）
 
-CCC 根目录下一个脚本（缺省 `autotrajectory-bias.ts`），dsp 唤起时**直接运行**取 stdout 作为偏见内容。**偏见内容由 CCC 保证**（CCC 有具体的反馈信息来源：历史事件、外部信息、真随机源等——用自己认为"足够随机"的方式）。**脚本缺失 → 唤起中止并报错要求实现**（不再经 mech-registry 注册 MSM）。`acc_msm exec autotrajectory-exp random` 可验证输出。
+CCC 根目录下一个脚本（缺省 `autopilot-bias.ts`），dsp 唤起时**直接运行**取 stdout 作为偏见内容。**偏见内容由 CCC 保证**（CCC 有具体的反馈信息来源：历史事件、外部信息、真随机源等——用自己认为"足够随机"的方式）。**脚本缺失 → 唤起中止并报错要求实现**（不再经 mech-registry 注册 MSM）。`acc_msm exec autopilot-trajectory random` 可验证输出。
 
 ```ts
-// autotrajectory-bias.ts（CCC 根）
+// autopilot-bias.ts（CCC 根）
 // 示例：随机取历史 SESSION 的一个话题 → 生成反事实方向（CCC 可换任何随机源）
 const sources = ['离线索引', '会话命名', '守卫语义', '轨迹落盘'] // ← CCC 自己的信息来源
 const pick = sources[Math.floor(Math.random() * sources.length)]
@@ -90,7 +90,7 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 
 | # | 条件 | 说明 |
 |---|------|------|
-| 1 | `autotrajectory.enabled = true` | 配置总开关 |
+| 1 | `autopilotTrajectory.enabled = true` | 配置总开关 |
 | 2 | 目标会话目录带 `--auto` 后缀 | 会话标志 |
 | 3 | 目标 SESSION.md mtime 距今 > `intervalHours` | 无人类活动判定（轨迹身体未更新） |
 | 4 | 北京时间不在 `avoidWakeHours` 内 | 缺省避开 8~18 点（用量峰谷省钱） |
@@ -112,7 +112,7 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 ```
 [轨迹焦点] <topPrompt——CCC 定义，最先注入，稳定锚定防漂移>
 
-[自主轨迹唤起] — 距上次轨迹活动已满 <N> 小时，自动继续。
+[Autopilot Trajectory 唤起] — 距上次轨迹活动已满 <N> 小时，自动继续。
 
 身份锚定：继续 <S###> 的 trajectory（SESSION.md: <path>）。
 先验偏见：
@@ -170,4 +170,4 @@ console.log(`反事实：如果「${pick}」换个做法会怎样？`)
 
 - 猜想全文：serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`
 - 标准理论根基：serenity-acc-specs README §0（trajectory 主体 / 动作=反馈 / §0.7 展望）
-- 机制源码：本插件 `src/autotrajectory.ts` + `tests/autotrajectory.test.ts`
+- 机制源码：本插件 `src/autopilot-trajectory.ts` + `tests/autopilot-trajectory.test.ts`

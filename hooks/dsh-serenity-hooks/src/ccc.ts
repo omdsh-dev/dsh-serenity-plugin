@@ -108,11 +108,14 @@ export interface SerenityConfig {
     roles?: Record<string, SkiffRoleConfig>;
   };
   /**
-   * 自主轨迹（v1.26.12 实验提案，specs self-sustaining-trajectory-hypothesis）：
+   * Autopilot Trajectory（自动巡航轨迹，正式版 v1.27.4；前身 autotrajectory 实验 v1.26.12~17）：
    * CCC 定义的一条自主 trajectory——时钟唤起 + 先验偏见（自生+随机）+ 前台运行。
    * 未配置或 enabled=false → 机制完全不启动（零资源占用，零影响现有功能）。
+   * 多 CCC 独立（v1.27.4）：每 CCC 自己的配置，时钟遍历所有 live+enabled CCC 各自唤起。
    */
-  autotrajectory?: AutoTrajectorySettings;
+  autopilotTrajectory?: AutopilotTrajectorySettings;
+  /** 旧键兼容（正式化前存量 CCC，如 pangu——新键 autopilotTrajectory 优先，旧键回退） */
+  autotrajectory?: AutopilotTrajectorySettings;
   /**
    * 微信桥（F4c-3，v1.27.0 实验性）：**CCC 级**配置——dsh 一个进程含多个 CCC，
    * 每个 CCC 独立对接微信桥（S142 用户拍板：ACC 不绑定 role，配置归 CCC，手工）。
@@ -124,22 +127,24 @@ export interface SerenityConfig {
 }
 
 /**
- * 自主轨迹配置（CCC 定义；S142 用户拍板 v0.5）：
- * - 偏见内容提供者 = CCC 根目录下脚本（biasProvider，缺省 autotrajectory-bias.ts）——
- *   tool 直接运行取 stdout 作为偏见内容；脚本缺失 → 报错要求实现（不再经 mech-registry 注册 MSM）
- * - 会话标志 = 目录名后缀 `--auto`（验证用方便）：AGENT_SESSIONS/<date>--<desc>--auto/
+ * Autopilot Trajectory 配置（CCC 定义；S142 用户拍板 v0.5 + 正式化 v1.27.4）：
+ * - 偏见内容提供者 = CCC 根目录下脚本（biasProvider，缺省 autopilot-bias.ts；旧默认
+ *   autotrajectory-bias.ts 回退——存量 CCC 零迁移）——tool 直接运行取 stdout 作为偏见内容
+ * - 会话标志 = 目录名后缀 `--auto`：AGENT_SESSIONS/<date>--<desc>--auto/
  * - **session 必填**（用户拍板：自动唤起不默认任何会话——CCC 日常有多条 trajectory 在跑，
  *   未配置明确目标绝不唤起）；唤起窗口避开北京时间 8~18 点（用量峰谷省钱——用户拍板）
  */
-export interface AutoTrajectorySettings {
+export interface AutopilotTrajectorySettings {
   /** 总开关（缺省 false——默认关，未开零资源占用） */
   enabled?: boolean;
-  /** 无人类活动 N 小时后自动唤起（缺省 12） */
+  /** 无人类活动 N 小时后自动唤起（缺省 12；下限 1h） */
   intervalHours?: number;
-  /** 偏见内容提供者脚本（相对 CCC 根；缺省 autotrajectory-bias.ts——缺失报错要求实现） */
+  /** 每日唤起预算上限（缺省 24——正式版 v1.27.4 轮次预算：防失控 + 控成本） */
+  maxDailyWakes?: number;
+  /** 偏见内容提供者脚本（相对 CCC 根；缺省 autopilot-bias.ts——缺失报错要求实现） */
   biasProvider?: string;
   /**
-   * 轨迹焦点（topPrompt，v1.26.17，用户"确保自动轨迹质量"）：**CCC 定义 autotrajectory 时
+   * 轨迹焦点（topPrompt，v1.26.17，用户"确保自动轨迹质量"）：**CCC 定义 Autopilot 时
    * 自己填写**的顶层提示词——本轨迹的核心目标/纪律/质量要求。**每次唤起最先注入**（位于
    * 身份锚定之前，影响力最大），作为稳定焦点锚定 trajectory，防止多轮自主唤起中焦点丢失
    * （腐化）。区别于偏见内容（每轮随机探索方向）：焦点=稳定锚，偏见=随机探索，两者互补。

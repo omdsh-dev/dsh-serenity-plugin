@@ -1,7 +1,7 @@
 # Autopilot Trajectory（自动巡航轨迹）— 正式版设计 v0.1
 
 > 状态：**设计 v0.1（2026-09-01，用户拍板记录；晚上开工实现）** — 由实验功能 autotrajectory 晋升为正式能力。
-> 前置：`docs/self-sustaining-trajectory-hypothesis.md`（specs 仓 v0.1 猜想）、`docs/autotrajectory-experiment.md`（实验参与定义）。
+> 前置：`docs/self-sustaining-trajectory-hypothesis.md`（specs 仓 v0.1 猜想）、`docs/autopilot-trajectory.md`（机制参与定义）。
 > 需求来源：用户 "auto-trajectory被证明很有价值，要推开；autotrajectory这个命名不行；重新讨论下设计和优化方向"。
 
 ---
