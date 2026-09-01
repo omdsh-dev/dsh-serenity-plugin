@@ -320,16 +320,48 @@ interface AutopilotTrajectoryStatus {
   recentWakes: Array<{ time: number; ok: boolean; detail: string }>
 }
 
-/** 「Autopilot Trajectory」只读状态区块（v1.26.14）：展示当前工作区 CCC 的状态；配置改走 CCC 配置文件 */
+/** CCC 选择器条目（/serenity/cccs wire：SkiffCccEntry 同款——微信桥同源复用） */
+interface AutopilotCccEntry {
+  root: string
+  name: string
+  roles: string[]
+}
+
+/** 「Autopilot Trajectory」只读状态区块（v1.26.14；v1.27.4 多 CCC：显式 CCC 选择器——
+ *   GET/POST 带 ?ccc=/body.ccc——用户"两个 CCC 都设定了，但手工唤起只能唤起一个"修复）：
+ *   展示所选 CCC 的状态（配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计）；配置改走 CCC 配置文件 */
 function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
+  const [cccs, setCccs] = useState<AutopilotCccEntry[]>([])
+  const [selectedRoot, setSelectedRoot] = useState<string>('')
   const [status, setStatus] = useState<AutopilotTrajectoryStatus | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const [waking, setWaking] = useState(false)
   const [wakeResult, setWakeResult] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
+  // 加载 CCC 列表（选择器数据源——同微信桥 /serenity/cccs discoverCccs）
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      try {
+        const res = await fetch('/serenity/cccs', { headers: { accept: 'application/json' } })
+        if (!res.ok) return
+        const body = (await res.json()) as { cccs?: AutopilotCccEntry[] }
+        if (!alive || !Array.isArray(body.cccs)) return
+        setCccs(body.cccs)
+        if (body.cccs.length > 0) setSelectedRoot((prev) => prev || body.cccs![0]!.root)
+        else setUnavailable(true) // 无候选 CCC → 提示
+      } catch {
+        /* 拉取失败静默（面板非关键路径） */
+      }
+    })()
+    return () => { alive = false }
+  }, [])
+
+  // 选中 CCC 变化 → 拉取该 CCC 状态（显式 ?ccc=——多 CCC 各自独立）
+  const refresh = useCallback(async (): Promise<void> => {
+    if (!selectedRoot) return
     try {
-      const res = await fetch('/serenity/autopilot-trajectory', { headers: { accept: 'application/json' } })
+      const res = await fetch(`/serenity/autopilot-trajectory?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
       if (!res.ok) return
       const body = (await res.json()) as { status?: AutopilotTrajectoryStatus | null }
       if (body.status) {
@@ -337,12 +369,12 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
         setUnavailable(false)
       } else {
         setStatus(null)
-        setUnavailable(true) // 未在 CCC 内（工作区无 .serenity）→ 显示提示
+        setUnavailable(true) // 选中 CCC 无配置（未启用）→ 显示提示
       }
     } catch {
       /* 拉取失败静默（面板非关键路径） */
     }
-  }, [])
+  }, [selectedRoot])
 
   useEffect(() => {
     let alive = true
@@ -350,16 +382,16 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
     return () => { alive = false }
   }, [refresh])
 
-  // 立即唤起（调试用，跳过窗口/间隔；服务端 force=true 仍校验 enabled/目标/--auto/偏见脚本）
+  // 立即唤起（调试用，跳过窗口/间隔/预算；服务端 force=true 仍校验 enabled/目标/--auto/偏见脚本）
   const wakeNow = async (): Promise<void> => {
-    if (waking) return
+    if (waking || !selectedRoot) return
     setWaking(true)
     setWakeResult(null)
     try {
       const res = await fetch('/serenity/autopilot-trajectory', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
-        body: JSON.stringify({ action: 'wake' }),
+        body: JSON.stringify({ action: 'wake', ccc: selectedRoot }),
       })
       const body = (await res.json()) as { ok?: boolean; detail?: string; error?: string }
       setWakeResult(body.detail ?? body.error ?? `HTTP ${res.status}`)
@@ -371,13 +403,13 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
     }
   }
 
-  if (unavailable) {
+  if (unavailable && cccs.length === 0) {
     return (
       <ul className="ss-rows">
         <li>
           <RowCard
             title="未激活"
-            desc="当前工作区不在 CCC 内（无 .serenity）——先在工作区打开一个 CCC 会话"
+            desc="未发现候选 CCC（/serenity/cccs 为空）——先在工作区打开一个 CCC 会话"
             control={null}
           />
         </li>
@@ -411,6 +443,27 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
 
   return (
     <ul className="ss-rows">
+      <li>
+        <RowCard
+          title="目标 CCC"
+          desc="多 CCC 各自独立——选中哪个就查看/唤起哪个"
+          control={
+            <select
+              className="ss-select"
+              value={selectedRoot}
+              onChange={(e) => {
+                setSelectedRoot(e.target.value)
+                setStatus(null) // 切换 CCC → 回到加载态（refresh 随 selectedRoot 触发）
+              }}
+            >
+              {cccs.length === 0 && <option value="">加载中…</option>}
+              {cccs.map((c) => (
+                <option key={c.root} value={c.root}>{c.name || c.root}</option>
+              ))}
+            </select>
+          }
+        />
+      </li>
       <li>
         <RowCard
           title="运行状态"
