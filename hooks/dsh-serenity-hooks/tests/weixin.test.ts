@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createCipheriv } from 'node:crypto'
 
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
@@ -44,6 +45,11 @@ import {
   getConfig,
   sendTyping,
   TypingStatus,
+  buildMediaDownloadUrl,
+  parseMediaAesKey,
+  aes128EcbDecrypt,
+  sniffImageExt,
+  downloadMedia,
   markdownToPlainText,
   buildClientVersion,
   __setWeixinFetchForTest,
@@ -58,6 +64,9 @@ import {
   matchWeixinRoute,
   extractWeixinText,
   hasVoiceItem,
+  extractWeixinMedia,
+  sanitizeFileName,
+  weixinInboundDir,
   upsertWeixinAccount,
   removeWeixinAccount,
   saveWeixinRoutes,
@@ -188,6 +197,70 @@ describe('weixin-api: 协议客户端（mock fetch）', () => {
     expect(JSON.parse(calls[2]!.body!).status).toBe(0)
   })
 
+  it('buildMediaDownloadUrl：full_url 优先 + encrypted_query_param 构造 + 无 → null', () => {
+    expect(buildMediaDownloadUrl({ full_url: 'https://cdn.example.com/f' })).toBe('https://cdn.example.com/f')
+    expect(buildMediaDownloadUrl({ encrypt_query_param: 'eq 1' })).toContain('/download?encrypted_query_param=eq%201')
+    expect(buildMediaDownloadUrl({})).toBeNull()
+  })
+
+  it('parseMediaAesKey：hex / base64-16 / base64-32-ascii-hex 三型 + 无效 → null', () => {
+    const hexKey = '0123456789abcdef0123456789abcdef'
+    // ① 32 hex 字符 → hex Buffer(16)
+    expect(parseMediaAesKey(hexKey)?.toString('hex')).toBe(hexKey)
+    // ② base64 解码 16 字节
+    const b64 = Buffer.from(hexKey, 'hex').toString('base64')
+    expect(parseMediaAesKey(b64)?.toString('hex')).toBe(hexKey)
+    // ③ base64 解码 32 字节 → ascii 是 hex 串 → 再 hex
+    const b64ascii = Buffer.from(hexKey, 'ascii').toString('base64')
+    expect(parseMediaAesKey(b64ascii)?.toString('hex')).toBe(hexKey)
+    // 无效
+    expect(parseMediaAesKey(undefined)).toBeNull()
+    expect(parseMediaAesKey('')).toBeNull()
+    expect(parseMediaAesKey('abc')).toBeNull()
+  })
+
+  it('aes128EcbDecrypt 已知向量（AES-128-ECB 解密，无 IV）', () => {
+    const key = Buffer.from('0123456789abcdef0123456789abcdef', 'hex')
+    const plain = Buffer.from('hello weixin media!')
+    const cipher = createCipheriv('aes-128-ecb', key, null)
+    const encrypted = Buffer.concat([cipher.update(plain), cipher.final()])
+    expect(aes128EcbDecrypt(encrypted, key).toString()).toBe('hello weixin media!')
+  })
+
+  it('sniffImageExt 魔数嗅探（jpg/png/gif/webp/bmp/bin）', () => {
+    expect(sniffImageExt(Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]))).toBe('jpg')
+    expect(sniffImageExt(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))).toBe('png')
+    expect(sniffImageExt(Buffer.from('GIF89a'))).toBe('gif')
+    expect(sniffImageExt(Buffer.from('RIFFxxxxWEBP'))).toBe('webp')
+    expect(sniffImageExt(Buffer.from('BMxxxx'))).toBe('bmp')
+    expect(sniffImageExt(Buffer.from('not an image'))).toBe('bin')
+  })
+
+  it('downloadMedia：CDN GET + AES 解密（image）；非 200 / 无 URL → null', async () => {
+    const key = Buffer.from('0123456789abcdef0123456789abcdef', 'hex')
+    const plain = Buffer.from('fake jpeg bytes')
+    const cipher = createCipheriv('aes-128-ecb', key, null)
+    const encrypted = Buffer.concat([cipher.update(plain), cipher.final()])
+    let calledUrl = ''
+    __setWeixinFetchForTest(async (input) => {
+      calledUrl = typeof input === 'string' ? input : String(input)
+      return new Response(encrypted, { status: 200 })
+    })
+    const r = await downloadMedia({
+      item: { image_item: { media: { encrypt_query_param: 'eq-1' }, aeskey: key.toString('hex') } },
+      mediaType: 'image_item',
+    })
+    expect(r?.data.equals(plain)).toBe(true)
+    expect(calledUrl).toContain('/download?encrypted_query_param=eq-1')
+    // 非 200 → null
+    __setWeixinFetchForTest(async () => new Response('err', { status: 500 }))
+    expect(await downloadMedia({ item: { image_item: { media: { encrypt_query_param: 'eq-1' }, aeskey: 'x' } }, mediaType: 'image_item' })).toBeNull()
+    // 无 URL（无 encrypt_query_param / full_url）→ null（不调 fetch）
+    expect(await downloadMedia({ item: { image_item: { media: {} } }, mediaType: 'image_item' })).toBeNull()
+    // 无 media 项 → null
+    expect(await downloadMedia({ item: {}, mediaType: 'image_item' })).toBeNull()
+  })
+
   it('markdownToPlainText 7 类转换', () => {
     expect(markdownToPlainText('# 标题\n**粗** *斜* `code` ~~删~~ [文](http://x) ![图](http://i)')).toBe('标题\n粗 斜 code 删 文')
     expect(markdownToPlainText('```ts\nconst a = 1\n```')).toBe('const a = 1')
@@ -280,6 +353,38 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     expect(hasVoiceItem({})).toBe(false)
   })
 
+  it('extractWeixinMedia：type 2 图 / type 4 文件（需 media 元数据）；无 media/非媒体 → 过滤', () => {
+    const refs = extractWeixinMedia({
+      item_list: [
+        { type: 2, image_item: { media: { encrypt_query_param: 'e1' }, aeskey: 'k1' } },
+        { type: 4, file_item: { media: { full_url: 'https://f' }, file_name: '../evil.pdf' } },
+        { type: 1, text_item: { text: 'hi' } },
+        { type: 2, image_item: {} }, // 无 media → 过滤
+      ],
+    })
+    expect(refs).toHaveLength(2)
+    expect(refs[0]!.kind).toBe('image')
+    expect(refs[1]!.kind).toBe('file')
+    expect(refs[1]!.fileName).toBe('../evil.pdf')
+    expect(extractWeixinMedia({})).toEqual([])
+  })
+
+  it('sanitizeFileName：basename + 去控制字符 + 截断 128（防路径穿越）', () => {
+    expect(sanitizeFileName('../evil/name.pdf')).toBe('name.pdf')
+    expect(sanitizeFileName('a\u0000b.txt')).toBe('ab.txt')
+    expect(sanitizeFileName('x'.repeat(200) + '.txt').length).toBeLessThanOrEqual(128)
+  })
+
+  it('weixinInboundDir：确定性 + 按用户分目录 + _tmp/weixin-inbound 格式', () => {
+    const a = weixinInboundDir(dir, 'u1@im.wechat')
+    const b = weixinInboundDir(dir, 'u1@im.wechat')
+    const c = weixinInboundDir(dir, 'u2@im.wechat')
+    expect(a).toBe(b)
+    expect(a).not.toBe(c)
+    expect(a.startsWith(dir)).toBe(true)
+    expect(a).toContain('_tmp/weixin-inbound/')
+  })
+
   it('upsert/remove/save/setEnabled 写回 serenity.json', () => {
     upsertWeixinAccount(dir, { accountId: 'wechat-1', name: 'n1', enabled: true })
     let s = readWeixinSettings(dir)
@@ -322,12 +427,18 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       get?: (id: string) => unknown
     }
     on: () => () => void
+    /** askSkiff 注入的 question 文本（媒体存在性/降级断言用） */
+    questions: string[]
   } {
-    let agent: { session: { id: string; events: unknown[] }; followup: () => void; interrupt?: () => void } | undefined
+    let agent: { session: { id: string; events: unknown[] }; followup: (msg?: unknown) => void; interrupt?: () => void } | undefined
+    const questions: string[] = []
     const makeAgent = (id: string, opts: { setup?: (c: unknown) => Promise<void> }) => {
       const built = {
         session: { id, events: [] as unknown[] },
-        followup: () => {
+        followup: (msg?: { content?: Array<{ type?: string; text?: string }> }) => {
+          // 捕获 askSkiff 注入的 question（含媒体存在性/降级说明）
+          const q = (msg?.content ?? []).filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
+          if (q) questions.push(q)
           built.session.events.push(
             { type: 'user/message', data: { content: [{ type: 'text', text: 'q' }] } },
             { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '**答**案' }] } } },
@@ -383,6 +494,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
         cb({ agent, status: 'idle' })
         return () => {}
       },
+      questions,
     }
   }
 
@@ -479,6 +591,135 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent.some((s) => s.text === '答案')).toBe(true)
     // 内存注册表已登记（后续消息走进程内延续）
     expect([...skiffSessionSnapshot().keys()].some((id) => id === weixinSessionIdFor(fromId))).toBe(true)
+  })
+
+  it('图片消息 → CDN 下载解密 → 落盘 _tmp/weixin-inbound → question 注入路径 → 回复（媒体接收）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+    }))
+    const key = Buffer.from('0123456789abcdef0123456789abcdef', 'hex')
+    const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])
+    const cipher = createCipheriv('aes-128-ecb', key, null)
+    const encrypted = Buffer.concat([cipher.update(jpg), cipher.final()])
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      if (url.includes('download')) return new Response(encrypted, { status: 200 })
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'img@im.wechat',
+      item_list: [{ type: 2, image_item: { media: { encrypt_query_param: 'eq-img' }, aeskey: key.toString('hex') } }],
+    })
+    // question 注入：存在性 + 路径（不做内容转述/工具引导——M3）
+    expect(ctx.questions.some((q) => q.includes('一张图片') && q.includes('已保存到'))).toBe(true)
+    expect(ctx.questions.some((q) => q.includes('_tmp/weixin-inbound/'))).toBe(true)
+    expect(ctx.questions.some((q) => q.includes('vlm-describe'))).toBe(false) // 不教工具用法
+    // 落盘：文件存在 + 内容 = 解密后明文 + magic-byte 嗅探 .jpg
+    const inboundDir = weixinInboundDir(dir, 'img@im.wechat')
+    const files = readdirSync(inboundDir)
+    expect(files).toHaveLength(1)
+    expect(files[0]!.endsWith('.jpg')).toBe(true)
+    expect(readFileSync(join(inboundDir, files[0]!)).equals(jpg)).toBe(true)
+    // 回复回写（通知 + 答案）
+    expect(sent.some((s) => s.text === '答案')).toBe(true)
+  })
+
+  it('文件消息 → 落盘（净化文件名）+ 注入存在性（无加密原样保存）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+    }))
+    const plain = Buffer.from('hello file content')
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      if (url.includes('download') || url.includes('cdn/f')) return new Response(plain, { status: 200 })
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'file@im.wechat',
+      item_list: [{ type: 4, file_item: { media: { full_url: 'https://cdn/f' }, file_name: '../报告.txt' } }],
+    })
+    // 落盘：净化文件名（去路径穿越）+ 内容原样
+    const inboundDir = weixinInboundDir(dir, 'file@im.wechat')
+    expect(readdirSync(inboundDir)).toEqual(['报告.txt'])
+    expect(readFileSync(join(inboundDir, '报告.txt')).toString()).toBe('hello file content')
+    // 注入存在性 + 文件名
+    expect(ctx.questions.some((q) => q.includes('文件 报告.txt') && q.includes('已保存到'))).toBe(true)
+    expect(sent.some((s) => s.text === '答案')).toBe(true)
+  })
+
+  it('媒体下载失败 → 降级注入"下载失败"进对话（不静默）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+    }))
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      if (url.includes('download')) return new Response('err', { status: 500 })
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'fail@im.wechat',
+      item_list: [{ type: 2, image_item: { media: { encrypt_query_param: 'eq' }, aeskey: 'k' } }],
+    })
+    expect(ctx.questions.some((q) => q.includes('下载失败'))).toBe(true)
+    // 未落盘
+    expect(existsSync(weixinInboundDir(dir, 'fail@im.wechat'))).toBe(false)
+    // agent 处理后回复（降级说明进对话 → 回复告知用户）
+    expect(sent.some((s) => s.text === '答案')).toBe(true)
+  })
+
+  it('媒体超 20MB → 降级注入"大小限制"进对话（不落盘）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+    }))
+    const big = Buffer.alloc(20 * 1024 * 1024 + 1, 1)
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      if (url.includes('download')) return new Response(big, { status: 200 })
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'big@im.wechat',
+      item_list: [{ type: 2, image_item: { media: { encrypt_query_param: 'eq' } } }],
+    })
+    expect(ctx.questions.some((q) => q.includes('20MB'))).toBe(true)
+    expect(existsSync(weixinInboundDir(dir, 'big@im.wechat'))).toBe(false)
+    expect(sent.some((s) => s.text === '答案')).toBe(true)
   })
 
   it('无路由 → 不创建会话不回复', async () => {

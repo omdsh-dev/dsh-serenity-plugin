@@ -14,9 +14,10 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, join } from 'node:path'
 import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type WeixinSettings, type WeixinRouteConfig, type WeixinAccountConfig } from './ccc.js'
 import { writeEntry, getEntry, unsetEntry } from './localstore-ops.js'
+import type { WeixinMediaRef, WeixinMessageItem } from './weixin-api.js'
 
 /** localstore 凭据键前缀（**credential scope**——token 是凭据，走 UPPER_SNAKE 键；
  *  格式 WEIXIN_<ACCOUNT_ID>_TOKEN / _BASEURL / _USERID（accountId 归一为大写蛇形）） */
@@ -149,6 +150,36 @@ export function extractWeixinText(msg: { item_list?: Array<{ type?: number; text
 /** 是否包含语音项（无转写文本时的降级提示判定——bridge 用） */
 export function hasVoiceItem(msg: { item_list?: Array<{ type?: number; voice_item?: unknown }> }): boolean {
   return (msg.item_list ?? []).some((item) => item.type === 3 && item.voice_item != null)
+}
+
+/**
+ * 提取消息媒体项（图片 type 2 / 文件 type 4）：
+ * 只收集**带 media 元数据**的项（下载前置条件）；返回 kind + **完整消息项**（downloadMedia 用
+ * `item[mediaType]` 取 image_item/file_item）。纯 ACC 层可达性——不做内容处理（v0.2 用户拍板）。
+ */
+export function extractWeixinMedia(msg: { item_list?: WeixinMessageItem[] }): WeixinMediaRef[] {
+  const out: WeixinMediaRef[] = []
+  for (const item of msg.item_list ?? []) {
+    if (item.type === 2 && item.image_item?.media) {
+      out.push({ kind: 'image', fileName: undefined, item })
+    } else if (item.type === 4 && item.file_item?.media) {
+      out.push({ kind: 'file', fileName: item.file_item.file_name, item })
+    }
+  }
+  return out
+}
+
+/** 文件名净化：basename + 去控制字符 + 截断 128（防路径穿越——落盘安全） */
+export function sanitizeFileName(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? ''
+  const cleaned = base.replace(/[\x00-\x1f\x7f]/g, '').trim()
+  return cleaned.slice(0, 128)
+}
+
+/** 落盘目录：`<CCC 根>/_tmp/weixin-inbound/<userhash>/`（gitignored ✓；agent read 边界内 ✓；按用户分目录） */
+export function weixinInboundDir(root: string, fromUserId: string): string {
+  const userHash = createHash('sha256').update(fromUserId).digest('hex').slice(0, 12)
+  return join(root, '_tmp', 'weixin-inbound', userHash)
 }
 
 // ── CCC 配置写入（面板保存；serenity.json 结构部分）──

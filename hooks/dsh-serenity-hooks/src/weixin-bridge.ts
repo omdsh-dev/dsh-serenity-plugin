@@ -14,9 +14,12 @@
  */
 
 import type { Context } from 'cordis'
+import { randomBytes } from 'node:crypto'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { findSerenityRoot, readHandymanConfig } from './ccc.js'
-import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, type WeixinAccountCredential } from './weixin-route.js'
-import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, type WeixinMessage } from './weixin-api.js'
+import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './weixin-route.js'
+import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff } from './skiff-core.js'
@@ -41,6 +44,9 @@ const bridges = new Map<string, CccBridge>()
 
 /** 轮询间隔（getupdates 失败后重试延迟；成功 = 立即续轮询） */
 const POLL_RETRY_MS = 3_000
+
+/** 媒体大小上限（M6：20MB，对齐 vlm-describe；超限降级告知不落盘） */
+const MEDIA_MAX_BYTES = 20 * 1024 * 1024
 
 /** typing_ticket 缓存（每 (accountId, fromUserId)；getconfig 一次后续复用——对齐参考实现 typingTicketCache） */
 const typingTicketByUser = new Map<string, string>()
@@ -135,6 +141,10 @@ async function runAccountLoop(
  * - **语音支持**：`voice_item.text` = 微信服务端自带语音转写 → 与文本同路径进对话
  *   （无需下载/ASR）；语音无转写 → 降级提示"暂时无法解析"
  * - **正在输入**：处理前 sendtyping 1（微信显示"正在输入..."），处理后（含异常）0
+ * - **媒体接收（图片/文件）**：桥侧 CDN 下载 + AES 解密 → 落盘 CCC 根
+ *   `_tmp/weixin-inbound/<userhash>/` → question 注入「存在性 + 路径」（ACC 层只保证
+ *   可达性——"让会话知道文件的存在并可以拿到"；识别/解析归角色 LLM 决策，不编排）。
+ *   降级不静默：下载失败 / 超 20MB → 注入说明进对话；typing 窗口覆盖下载（M7）。
  */
 export async function handleIncoming(
   ctx: Context,
@@ -146,14 +156,15 @@ export async function handleIncoming(
   const fromUserId = msg.from_user_id
   if (!fromUserId) return
   const text = extractWeixinText(msg)
+  const mediaRefs = extractWeixinMedia(msg)
 
   const settings = readWeixinSettings(root)
   if (!settings.enabled) return
   const roleName = matchWeixinRoute(settings.routes ?? [], fromUserId)
   if (!roleName) return // 无路由 → 不回复（未配置该用户）
 
-  // 语音但无服务端转写 → 降级提示（不静默；转发不进对话）
-  if (!text) {
+  // 纯语音无转写（无文本无媒体）→ 降级提示（不静默；不创建会话）
+  if (!text && mediaRefs.length === 0) {
     if (hasVoiceItem(msg)) {
       await sendTextMessage({
         baseUrl: cred.baseUrl,
@@ -191,10 +202,47 @@ export async function handleIncoming(
       }).catch(() => { /* 通知失败不影响主流程 */ })
     }
 
-    // 正在输入：处理前开始（微信侧显示"正在输入..."），处理完（含异常路径）结束
+    // 正在输入：处理前开始（**含媒体下载**——M7 用户等待时显示状态），处理完（含异常路径）结束
     await sendTypingStart(cred, accountId, fromUserId, msg.context_token)
     try {
-      const result = await askSkiff(ctx, ref.agent, text, undefined, { includeTrajectory: false })
+      // 媒体：下载 → 落盘 → 存在性+路径注入（ACC 层最小闭环；M1/M2/M3/M4/M6）
+      const mediaNotes: string[] = []
+      const degradedNotes: string[] = []
+      for (const mediaRef of mediaRefs) {
+        const mediaType = mediaRef.kind === 'image' ? 'image_item' : 'file_item'
+        const label = mediaRef.kind === 'image' ? '一张图片' : `文件 ${mediaRef.fileName ?? '(未命名)'}`
+        const result = await downloadMedia({ item: mediaRef.item, mediaType })
+        if (!result) {
+          degradedNotes.push(`（用户发送了${label}，但下载失败——可请用户重发）`)
+          continue
+        }
+        if (result.data.length > MEDIA_MAX_BYTES) {
+          degradedNotes.push(`（用户发送了${label}，但超过 20MB 大小限制）`)
+          continue
+        }
+        try {
+          const inboundDir = weixinInboundDir(root, fromUserId)
+          mkdirSync(inboundDir, { recursive: true })
+          const fname = mediaRef.kind === 'image'
+            ? `img_${Date.now()}_${randomBytes(4).toString('hex')}.${sniffImageExt(result.data)}`
+            : (sanitizeFileName(result.fileName ?? '') || `file_${Date.now()}_${randomBytes(4).toString('hex')}`)
+          const abs = join(inboundDir, fname)
+          writeFileSync(abs, result.data)
+          const rel = relative(root, abs)
+          // 注引用**实际保存的文件名**（fname = 净化后）——agent 按 rel 路径找文件，名字须一致
+          mediaNotes.push(`（用户发送了${mediaRef.kind === 'image' ? '一张图片' : `文件 ${fname}`}，已保存到 ${rel}）`)
+        } catch {
+          degradedNotes.push(`（媒体保存失败，请重试）`)
+        }
+      }
+
+      // question = 原文 + 媒体存在性注入 + 降级说明（不做内容转述/工具引导——M3）
+      const parts: string[] = []
+      if (text) parts.push(text)
+      parts.push(...mediaNotes, ...degradedNotes)
+      const question = parts.join('\n')
+
+      const result = await askSkiff(ctx, ref.agent, question, undefined, { includeTrajectory: false })
       const answer = result.answer ?? ''
       if (answer === '') return
 

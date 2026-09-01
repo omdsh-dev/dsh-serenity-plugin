@@ -428,7 +428,9 @@ describe('performAutoTrajectoryWake（时钟与「立即唤起」共用执行体
   it('force=false（时钟）：间隔不足 → 拒绝，不注入', async () => {
     setupTarget(1) // 1h 前（不足 12h）
     writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
-    const res = await performAutoTrajectoryWake(makeCtx() as never, tmp, cfg, { force: false })
+    // avoidWakeHours {0,0} 恒在窗口外：时间无关——默认北京 8-18 窗口会让本测试
+    // 在窗口期先命中"避开窗口"而非"间隔不足"（08:08 实测 flake）
+    const res = await performAutoTrajectoryWake(makeCtx() as never, tmp, { ...cfg, avoidWakeHours: { start: 0, end: 0 } }, { force: false })
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('不足')
     expect(steer).not.toHaveBeenCalled()

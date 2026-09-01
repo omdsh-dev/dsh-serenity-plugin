@@ -15,7 +15,7 @@
  * - sendmessage 必须回带 context_token 关联对话
  */
 
-import { randomBytes } from 'node:crypto'
+import { randomBytes, createDecipheriv } from 'node:crypto'
 
 /** iLink API Base URL（腾讯官方） */
 export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com'
@@ -164,15 +164,30 @@ export async function pollQRStatus(params: {
 
 // ── 消息收发 ──
 
+/** CDN 媒体元数据（下载侧；协议见 docs/weixin-bot-api.md §6） */
+export interface CDNMedia {
+  encrypt_query_param?: string
+  aes_key?: string
+  encrypt_type?: number
+  full_url?: string
+}
+
+/** 媒体项引用（extractWeixinMedia 产物：kind + **完整消息项**——downloadMedia 用 item[mediaType] 提取） */
+export interface WeixinMediaRef {
+  kind: 'image' | 'file'
+  fileName?: string
+  item: WeixinMessageItem
+}
+
 export interface WeixinMessageItem {
   type?: number
   msg_id?: string
   text_item?: { text?: string }
-  image_item?: Record<string, unknown>
+  image_item?: { media?: CDNMedia; thumb_media?: CDNMedia; aeskey?: string; url?: string; mid_size?: number; thumb_size?: number }
   /** 语音项：**text = 微信服务端自带语音转写**（官方 openclaw-weixin 直接读该字段，无需下载/ASR） */
-  voice_item?: { text?: string; media?: Record<string, unknown>; playtime?: number }
-  file_item?: Record<string, unknown>
-  video_item?: Record<string, unknown>
+  voice_item?: { text?: string; media?: CDNMedia; playtime?: number }
+  file_item?: { media?: CDNMedia; file_name?: string; md5?: string; len?: string }
+  video_item?: { media?: CDNMedia; video_size?: number; thumb_media?: CDNMedia }
 }
 
 export interface WeixinMessage {
@@ -307,6 +322,100 @@ export async function sendTyping(params: {
     token: params.token,
     timeoutMs: params.timeoutMs ?? 10_000,
   })
+}
+
+// ── 媒体接收（CDN 下载 + AES-128-ECB 解密；v1.27.3 图片/文件）──
+// 协议（对齐参考实现 downloadAndDecryptMedia + docs/weixin-bot-api.md §6）：
+// 收消息 item_list 携带 image_item/file_item.media（CDNMedia）→ CDN GET
+// （full_url 或 /download?encrypted_query_param=）→ AES-128-ECB 解密。
+// 零鉴权头（encrypt_query_param 自带能力）；失败一律返回 null（不抛）。
+
+/** 构造 CDN 下载 URL（full_url 优先；否则 encrypted_query_param 拼 download 端点；都无 → null） */
+export function buildMediaDownloadUrl(media: CDNMedia): string | null {
+  if (media.full_url) return media.full_url
+  if (media.encrypt_query_param) {
+    return `${ILINK_CDN_BASE_URL}/download?encrypted_query_param=${encodeURIComponent(media.encrypt_query_param)}`
+  }
+  return null
+}
+
+/**
+ * 解析媒体 AES key（兼容三种编码，对齐参考实现）：
+ * ① 32+ hex 字符 → hex Buffer(16)  ② base64 解码 = 16 字节直接用
+ * ③ base64 解码 = 32 字节 → ascii 是 hex 串 → 再 hex → Buffer(16)；其他 → null
+ */
+export function parseMediaAesKey(keyText?: string): Buffer | null {
+  if (!keyText) return null
+  if (/^[0-9a-fA-F]{32,}$/.test(keyText)) {
+    const buf = Buffer.from(keyText, 'hex')
+    return buf.length === 16 ? buf : null
+  }
+  try {
+    const decoded = Buffer.from(keyText, 'base64')
+    if (decoded.length === 16) return decoded
+    if (decoded.length === 32) {
+      const hexStr = decoded.toString('ascii')
+      if (/^[0-9a-fA-F]{32}$/.test(hexStr)) return Buffer.from(hexStr, 'hex')
+    }
+  } catch {
+    /* 无效 base64 */
+  }
+  return null
+}
+
+/** AES-128-ECB 解密（无 IV；node:crypto 内置） */
+export function aes128EcbDecrypt(data: Buffer, key: Buffer): Buffer {
+  const decipher = createDecipheriv('aes-128-ecb', key, null)
+  return Buffer.concat([decipher.update(data), decipher.final()])
+}
+
+/** 图片 magic-byte 嗅探（vlm-describe 支持 jpg/png/gif/webp/bmp——比固定 .jpg 可靠） */
+export function sniffImageExt(data: Buffer): 'jpg' | 'png' | 'gif' | 'webp' | 'bmp' | 'bin' {
+  if (data.length >= 3 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff) return 'jpg'
+  if (data.length >= 8 && data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47) return 'png'
+  if (data.length >= 3 && data[0] === 0x47 && data[1] === 0x49 && data[2] === 0x46) return 'gif'
+  if (data.length >= 12 && data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP') return 'webp'
+  if (data.length >= 2 && data[0] === 0x42 && data[1] === 0x4d) return 'bmp'
+  return 'bin'
+}
+
+/**
+ * 下载 + 解密一条媒体（图片/文件）。失败/超时/无 URL → null（不抛——调用方降级）。
+ * key 提取：item.aeskey || item.media.aes_key（对齐参考实现）。
+ */
+export async function downloadMedia(params: {
+  item: WeixinMessageItem
+  mediaType: 'image_item' | 'file_item'
+  timeoutMs?: number
+}): Promise<{ data: Buffer; fileName?: string } | null> {
+  const mediaItem = params.item[params.mediaType]
+  if (!mediaItem) return null
+  const media = mediaItem.media
+  const url = buildMediaDownloadUrl(media ?? {})
+  if (!url) return null
+  // aeskey 仅 image_item、file_name 仅 file_item——联合类型窄化（传输层定向读取）
+  const itemKey = (mediaItem as { aeskey?: string }).aeskey
+  const fileName = (mediaItem as { file_name?: string }).file_name
+  const key = parseMediaAesKey(itemKey ?? media?.aes_key)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), params.timeoutMs ?? 30_000)
+  try {
+    const res = await currentFetch(url, { signal: controller.signal })
+    if (!res.ok) return null
+    const buf = Buffer.from(await res.arrayBuffer())
+    if (key) {
+      try {
+        return { data: aes128EcbDecrypt(buf, key), fileName }
+      } catch {
+        return null // 解密失败（key 错误/密文损坏）
+      }
+    }
+    return { data: buf, fileName }
+  } catch {
+    return null
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 // ── Markdown → 纯文本（微信不支持 Markdown；对齐 openclaw-weixin messenger.ts）──
