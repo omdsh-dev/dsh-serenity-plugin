@@ -268,7 +268,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                   max={65535}
                   value={acpPort}
                   disabled={!acpOn && !publicAskOn}
-                  title="ACP + 建议问答共用端口（默认 3100）"
+                  title="ACP + Skiff 问答共用端口（默认 3100）"
                   onChange={(e) => setAcpPort(Number(e.target.value))}
                 />
               </span>
@@ -277,7 +277,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
         <li>
           <RowCard
-            title="建议问答页"
+            title="Skiff 问答页"
             desc="按认知容器暴露问答页（需 key；首次开启自动生成，见 ~/.dsh/serenity-hooks.json）"
             control={<Toggle checked={publicAskOn} onChange={(on) => toggle('publicAskEnabled', on)} />}
           />
@@ -285,7 +285,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       </Group>
 
       {/* 建议问答（v1.26.2 配置：开放容器白名单 + key/地址展示；v1.27.5 折叠默认收起） */}
-      <Collapse title="建议问答配置" desc="开放容器白名单 · 访问 key 与地址">
+      <Collapse title="Skiff 问答页配置" desc="开放容器白名单 · 访问 key 与地址">
         <PublicAskEditor publicAskOn={publicAskOn} />
       </Collapse>
 
@@ -300,18 +300,18 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       </Collapse>
 
       {/* Autopilot Trajectory（v1.27.4 正式版；v1.26.14 起面板状态——用户"给CCC的面板加个状态来看情况"；
-          数据源 GET /serenity/autopilot-trajectory：配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计） */}
-      <div className="ss-group">
-        <h3 className="ss-groupTitle">Autopilot Trajectory</h3>
+          数据源 GET /serenity/autopilot-trajectory：配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计；
+          v1.27.5 语义：折叠默认收起——用户"微信桥和 Autopilot trajectory 能否也收起来"） */}
+      <Collapse title="Autopilot Trajectory" desc="多 CCC 自动巡航轨迹 · 状态与立即唤起">
         <AutopilotTrajectoryStatusBlock />
-      </div>
+      </Collapse>
 
       {/* F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置——显式 CCC 选择器 + 扫码绑定 +
-          账号/路由/开关（S142 用户拍板：配置归 CCC，管理面收敛到 CCC 面板） */}
-      <div className="ss-group">
-        <h3 className="ss-groupTitle">微信桥</h3>
+          账号/路由/开关（S142 用户拍板：配置归 CCC，管理面收敛到 CCC 面板）；
+          v1.27.5 语义：折叠默认收起 */}
+      <Collapse title="微信桥" desc="扫码绑定微信账号 · 路由到 skiff 角色">
         <WeixinBridgeEditor />
-      </div>
+      </Collapse>
     </div>
   )
 }

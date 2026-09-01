@@ -141,7 +141,7 @@ export function PublicAskEditor(props: { publicAskOn: boolean }): React.JSX.Elem
   return (
     <div className="ae-root">
       {!publicAskOn && (
-        <p className="ae-warn">⚠️ 建议问答页当前关闭——先开启上方「建议问答页」开关，外部访问才生效。</p>
+        <p className="ae-warn">⚠️ Skiff 问答页当前关闭——先开启上方「Skiff 问答页」开关，外部访问才生效。</p>
       )}
 
       {/* ── 开放容器白名单（v1.26.2 用户：按容器权限控制）── */}

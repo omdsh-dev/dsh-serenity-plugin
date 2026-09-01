@@ -1,3 +1,19 @@
+## v1.27.5 — 2026-09-02（配置面板折叠收尾：微信桥/Autopilot 收起 + Skiff 问答页更名，S142 用户反馈）
+
+**Scope:** 用户 v1.27.4 发布后验收："收起的配置很棒，微信桥和Autopilot trajectory能否也收起来；建议问答页 更名为Skiff问答页"——① Autopilot Trajectory + 微信桥两个区块改折叠（默认收起）；② 用户可见文案"建议问答页"统一更名为"Skiff 问答页"。
+
+### 变更
+- **`src/client/SettingsSection.tsx` 微信桥 + Autopilot Trajectory 折叠**：两个区块由 `ss-group` div 改为 `Collapse`（details/summary，默认收起）——折叠标题带摘要 desc（微信桥："扫码绑定微信账号 · 路由到 skiff 角色"；Autopilot："多 CCC 自动巡航轨迹 · 状态与立即唤起"）
+- **"建议问答页" → "Skiff 问答页" 更名（用户可见面）**：
+  - 外部能力组开关标题：`建议问答页` → `Skiff 问答页`
+  - 折叠标题：`建议问答配置` → `Skiff 问答页配置`
+  - ACP 端口 title：`ACP + 建议问答共用端口` → `ACP + Skiff 问答共用端口`
+  - `PublicAskEditor.tsx` warn 文案：`开启上方「建议问答页」开关` → `开启上方「Skiff 问答页」开关`
+  - 内部术语（publicAsk/F4d/PublicAskEditor/服务端注释）保持"建议问答"为内部名，不随 UI 更名
+
+### 测试
+- **52 files / 749 tests 全绿**；typecheck ✓（node + client）
+
 ## v1.27.4 — 2026-09-02（Autopilot Trajectory 正式化 + 配置面板紧凑化，S142 用户需求）
 
 **Scope:** 用户 "微信桥是做好了，测试很好，autopilot也很好，改进下配置面板，目前内容太多了，太长，很多功能没几个配置项占用好几行"——① Autopilot Trajectory 改名迁移（autotrajectory → autopilot-trajectory，S151 自主管家轨迹沿用）+ 多 CCC 独立；② 配置面板紧凑化（折叠次要块 + 只读状态定义列表 + 开关端口内联）。
