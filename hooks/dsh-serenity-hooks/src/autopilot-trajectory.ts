@@ -395,6 +395,13 @@ export function registerAutopilot(ctx: Context): void {
   } catch {
     /* 事件通道缺失不阻断（启动时 startTimer 已尝试一次） */
   }
+  // ③ settings 变化（v1.27.10 修复：面板打开全局开关 autopilotEnabled → settings-changed
+  //    → 热启动定时器——否则"开了但不唤起"：开关只在 apply 时读一次，面板开启不生效）
+  try {
+    ctx.on('serenity/settings-changed', () => startTimer())
+  } catch {
+    /* 事件通道缺失不阻断（用户可重启 web 生效） */
+  }
 }
 
 /** 目标 agent：从 SESSION.md 反向定位 dsh 会话（标题 F3 命名 S###-日期 匹配 + cwd 归属校验）；不可得 → null */

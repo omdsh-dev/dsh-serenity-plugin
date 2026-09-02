@@ -1,3 +1,17 @@
+## v1.27.10 — 2026-09-02（修复：面板打开 autopilot 全局开关不热启动定时器——"开了但不唤起"，S142 用户报告）
+
+**Scope:** 用户 v1.27.9 发布后实测："唤起有问题，我开了但是不唤起，bug？读不到某个CCC的配置"。diag-live 排查确认：home-serenity 配置健全（enabled ✓ / session S151 ✓ / --auto ✓ / 偏见脚本 ✓ / agent 可注入 ✓；空闲 1.7h < interval 2h 是等待中非 bug）——**真 bug = 面板打开全局开关不热启动定时器**。
+
+### 根因
+v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/created 时**读一次启动定时器；**面板打开开关 → settings.yaml 变化 → 只 emit `serenity/settings-changed`（gateway 在听）→ 没有监听者启动 autopilot 定时器** → 全局开了但定时器不启动 → 永不唤起。
+
+### 变更
+- **`src/autopilot-trajectory.ts` `registerAutopilot` 增加第三事件监听**：`serenity/settings-changed` → `startTimer()`——面板打开/关闭全局开关即时热启动/生效（startTimer 内部 `if (timer) return` + `globalOn()` 幂等守卫）；settings 服务缺失时降级（用户可重启 web 生效）
+
+### 测试
+- **autopilot-trajectory.test.ts +1**：全局关启动 → 面板开（source 切 true）→ emit settings-changed → 定时器热启动
+- **52 files / 755 tests 全绿**（754 + 1）；typecheck ✓（node + client）
+
 ## v1.27.9 — 2026-09-02（Autopilot Trajectory 全局开关，默认关，S142 用户需求）
 
 **Scope:** 用户 "考虑给autopilot-trajectory做全局开关，默认关闭；这样可以只在指定的电脑进行autopilot-trajectory"——plugin 全局总开关（settings autopilotEnabled，默认 false）：多台电脑装 dsp 时只有开启的那台跑 autopilot，其余默认零资源占用。

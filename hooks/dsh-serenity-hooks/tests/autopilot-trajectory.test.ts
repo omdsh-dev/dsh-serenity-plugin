@@ -978,6 +978,20 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     expect(timer).not.toBeNull() // 定时器启动
   })
 
+  it('v1.27.10 面板打开全局开关（autopilotEnabled false→true）→ settings-changed 热启动定时器', () => {
+    writeCfg(tmp, { enabled: true, session: 'S143' })
+    const { ctx, emit, setSessions } = makeCtx()
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    // 启动时全局关 → 不启动
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: false }))
+    registerAutopilot(ctx as never)
+    expect(timer).toBeNull()
+    // 用户在面板打开全局开关 → settings.yaml 变化 → settings-changed 事件
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
+    emit('serenity/settings-changed')
+    expect(timer).not.toBeNull() // 热启动
+  })
+
   it('配置关闭（enabled=false）→ 即使会话出现也不启动', () => {
     writeCfg(tmp, { enabled: false })
     const { ctx, emit, setSessions } = makeCtx()
