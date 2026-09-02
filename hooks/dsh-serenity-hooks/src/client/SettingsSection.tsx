@@ -355,7 +355,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       </Collapse>
 
       {/* Autopilot Trajectory（v1.27.4 正式版；v1.26.14 起面板状态——用户"给CCC的面板加个状态来看情况"；
-          数据源 GET /serenity/autopilot-trajectory：配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计；
+          数据源 GET /serenity/autopilot-trajectory：配置摘要 + 目标会话 + 窗口/可唤起判定 + 审计；
           v1.27.5 语义：折叠默认收起——用户"微信桥和 Autopilot trajectory 能否也收起来"；
           v1.27.9 全局开关 autopilotEnabled 在「外部能力」组——此处 desc 显示全局门控状态） */}
       <Collapse title="Autopilot Trajectory" desc={autopilotOn ? '全局已开启' : '全局关闭（外部能力组开启）'} >
@@ -377,7 +377,6 @@ interface AutopilotTrajectoryStatus {
   configured: boolean
   enabled: boolean
   intervalHours: number
-  maxDailyWakes: number
   biasProvider: string
   topPrompt: string | null
   session: string | null
@@ -402,7 +401,7 @@ interface AutopilotCccEntry {
 
 /** 「Autopilot Trajectory」只读状态区块（v1.26.14；v1.27.4 多 CCC：显式 CCC 选择器——
  *   GET/POST 带 ?ccc=/body.ccc——用户"两个 CCC 都设定了，但手工唤起只能唤起一个"修复）：
- *   展示所选 CCC 的状态（配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计）；配置改走 CCC 配置文件 */
+ *   展示所选 CCC 的状态（配置摘要 + 目标会话 + 窗口/可唤起判定 + 审计）；配置改走 CCC 配置文件 */
 function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
   const [cccs, setCccs] = useState<AutopilotCccEntry[]>([])
   const [selectedRoot, setSelectedRoot] = useState<string>('')
@@ -455,7 +454,7 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
     return () => { alive = false }
   }, [refresh])
 
-  // 立即唤起（调试用，跳过窗口/间隔/预算；服务端 force=true 仍校验 enabled/目标/--auto/偏见脚本）
+  // 立即唤起（调试用，跳过窗口/间隔；服务端 force=true 仍校验 enabled/目标/--auto/偏见脚本）
   const wakeNow = async (): Promise<void> => {
     if (waking || !selectedRoot) return
     setWaking(true)
@@ -561,7 +560,6 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
             items={[
               { term: '目标会话', value: targetText },
               { term: '唤起窗口', value: `北京 ${status.beijingHour} 点 — ${status.windowAllowed ? '允许' : `避开 ${status.avoidWakeHours.start}~${status.avoidWakeHours.end}`}` },
-              { term: '每日预算', value: `${status.maxDailyWakes} 次/日` },
               { term: '偏见提供者', value: status.biasProvider },
               { term: '轨迹焦点', value: status.topPrompt ?? '未定义（CCC 应填写，防焦点丢失）' },
               { term: '最近唤起', value: lastWake ? `${new Date(lastWake.time).toLocaleString()} — ${lastWake.ok ? '✓' : '✗'} ${lastWake.detail}` : '尚无' },
@@ -572,10 +570,10 @@ function AutopilotTrajectoryStatusBlock(): React.JSX.Element {
       <li>
         <RowCard
           title="立即唤起"
-          desc={wakeResult ?? '调试：手动触发一次（跳过窗口/间隔/预算，仍校验配置与偏见脚本）'}
+          desc={wakeResult ?? '调试：手动触发一次（跳过窗口/间隔，仍校验配置与偏见脚本）'}
           help={'立即唤起（调试语义）：\n' +
             '· 用途：手动触发一次该 CCC 的自动唤起（不等时钟）\n' +
-            '· 跳过：唤起窗口（北京 8~18 点避开）/ 间隔 / 每日预算\n' +
+            '· 跳过：唤起窗口（北京 8~18 点避开）/ 间隔\n' +
             '· 保留校验：enabled、目标会话（--auto）、偏见脚本可运行\n' +
             '· 场景：验证配置/偏见脚本是否就绪，或想立刻跑一轮'}
           control={

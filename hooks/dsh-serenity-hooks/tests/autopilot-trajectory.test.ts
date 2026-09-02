@@ -2,9 +2,9 @@
  * autopilot-trajectory.test.ts — Autopilot Trajectory（自动巡航轨迹，正式版 v1.27.4）测试
  *
  * 前身 autotrajectory.test.ts（v1.26.12 实验提案）——v1.27.4 正式化改名 + 多 CCC 独立 +
- * 可靠性（轮次预算/审计/偏见脚本沙箱）。
+ * 可靠性（审计/偏见脚本沙箱；v1.27.12 移除每日唤起预算）。
  *
- * 覆盖：北京时间/唤起窗口（用量峰谷省钱）/ 目录后缀标志 / 目标定位 / 唤起条件（含预算）/
+ * 覆盖：北京时间/唤起窗口（用量峰谷省钱）/ 目录后缀标志 / 目标定位 / 唤起条件/
  * 自生动机读取 / 偏见内容（含旧默认回退 + 沙箱）/ 唤起消息四段式 / 面板状态（含审计）/
  * 立即唤起 / 多 CCC 独立收集与时钟 / 进程内诊断 / 审计 ring。
  */
@@ -56,11 +56,9 @@ import { findExpScript } from '../src/tools/autopilot-trajectory.js'
 import {
   DEFAULT_BIAS_PROVIDER,
   LEGACY_BIAS_PROVIDER,
-  DEFAULT_MAX_DAILY_WAKES,
   AUDIT_HISTORY_MAX,
   AUTO_DIR_SUFFIX,
   beijingHour,
-  dailyWakeCount,
   inAllowedWakeWindow,
   isAutopilotSession,
   resolveTargetMd,
@@ -217,52 +215,6 @@ describe('readAutopilotSettings（配置键：新键 autopilotTrajectory 优先�
   it('两键皆无 → null（未配置）', () => {
     writeCfg({ other: 1 })
     expect(readAutopilotSettings(tmp)).toBeNull()
-  })
-})
-
-describe('dailyWakeCount / shouldWake 轮次预算（v1.27.4 可靠性——防失控 + 控成本）', () => {
-  let tmp: string
-  let md: string
-
-  beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'ap-budget-'))
-    const dir = join(tmp, 'AGENT_SESSIONS', '2026-08-30--S143--exp--auto')
-    mkdirSync(dir, { recursive: true })
-    md = join(dir, 'SESSION.md')
-    writeFileSync(md, '# SESSION: exp\n')
-    resetWakeHistory()
-  })
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true })
-    resetWakeHistory()
-  })
-
-  function setMtimeHoursAgo(hoursAgo: number): void {
-    const t = new Date(Date.now() - hoursAgo * 3600_000)
-    utimesSync(md, t, t)
-  }
-
-  it('dailyWakeCount：只计北京时间当日（跨日不计）', () => {
-    const now = Date.now()
-    const today = { time: now, ok: true, detail: 'x' }
-    const yesterday = { time: now - 24 * 3600_000, ok: true, detail: 'x' }
-    expect(dailyWakeCount([today, yesterday, today], now)).toBe(2)
-  })
-
-  it('shouldWake：history 达当日上限 → 不唤起（预算）', () => {
-    setMtimeHoursAgo(99)
-    const now = beijingUtcMs(20) // 窗口外
-    const fullHistory = Array.from({ length: DEFAULT_MAX_DAILY_WAKES }, () => ({ time: now, ok: true, detail: 'x' }))
-    expect(shouldWake({ enabled: true }, md, now, false, fullHistory)).toBe(false)
-    expect(shouldWake({ enabled: true }, md, now, false, fullHistory.slice(0, -1))).toBe(true)
-  })
-
-  it('shouldWake：自定义 maxDailyWakes 生效', () => {
-    setMtimeHoursAgo(99)
-    const now = beijingUtcMs(20)
-    const history = Array.from({ length: 3 }, () => ({ time: now, ok: true, detail: 'x' }))
-    expect(shouldWake({ enabled: true, maxDailyWakes: 3 }, md, now, false, history)).toBe(false)
-    expect(shouldWake({ enabled: true, maxDailyWakes: 4 }, md, now, false, history)).toBe(true)
   })
 })
 
@@ -505,14 +457,13 @@ describe('getAutopilotStatus（面板状态——GET /serenity/autopilot-traject
     expect(s.target).toBeNull()
     expect(s.biasProvider).toBe(DEFAULT_BIAS_PROVIDER)
     expect(s.topPrompt).toBeNull()
-    expect(s.maxDailyWakes).toBe(DEFAULT_MAX_DAILY_WAKES)
     expect(s.recentWakes).toEqual([])
     expect(s.beijingHour).toBeGreaterThanOrEqual(0)
     expect(s.beijingHour).toBeLessThan(24)
   })
 
   it('已配置未启用 → enabled=false，配置摘要展示', () => {
-    writeCfg({ enabled: false, intervalHours: 6, biasProvider: 'bias.ts', topPrompt: 'EAP 质量', session: 'S143', maxDailyWakes: 4 })
+    writeCfg({ enabled: false, intervalHours: 6, biasProvider: 'bias.ts', topPrompt: 'EAP 质量', session: 'S143' })
     const s = getAutopilotStatus(tmp)
     expect(s.configured).toBe(true)
     expect(s.enabled).toBe(false)
@@ -520,7 +471,6 @@ describe('getAutopilotStatus（面板状态——GET /serenity/autopilot-traject
     expect(s.biasProvider).toBe('bias.ts')
     expect(s.topPrompt).toBe('EAP 质量')
     expect(s.session).toBe('S143')
-    expect(s.maxDailyWakes).toBe(4)
     // 未启用：仍尝试解析目标（展示用）——未命中 → null
     expect(s.target).toBeNull()
   })
@@ -616,7 +566,7 @@ describe('performAutopilotWake（时钟与「立即唤起」共用执行体）',
 
   const cfg = { enabled: true, intervalHours: 12, session: 'S143', biasProvider: 'bias.js' }
 
-  it('force=true（立即唤起）：跳过窗口/间隔/预算，偏见脚本就绪 → steer 注入 + ok', async () => {
+  it('force=true（立即唤起）：跳过窗口/间隔，偏见脚本就绪 → steer 注入 + ok', async () => {
     setupTarget(0) // 刚刚活动（间隔不满足——force 跳过）
     writeFileSync(join(tmp, 'bias.js'), 'console.log("反事实：换做法会怎样")')
     const res = await performAutopilotWake(makeCtx() as never, tmp, cfg, { force: true })
@@ -628,10 +578,10 @@ describe('performAutopilotWake（时钟与「立即唤起」共用执行体）',
     expect(msg.content[0]!.text).toContain('反事实：换做法会怎样')
   })
 
-  it('force=true（立即唤起）：当日预算已满也跳过（force 语义=调试，用户在场）', async () => {
+  it('force=true（立即唤起）：已有唤醒历史也跳过（v1.27.12 历史仅审计不限制）', async () => {
     setupTarget(0)
     writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
-    const fullHistory = Array.from({ length: DEFAULT_MAX_DAILY_WAKES }, () => ({ time: Date.now(), ok: true, detail: 'x' }))
+    const fullHistory = Array.from({ length: 5 }, () => ({ time: Date.now(), ok: true, detail: 'x' }))
     for (const rec of fullHistory) recordWake(tmp, rec)
     const res = await performAutopilotWake(makeCtx() as never, tmp, cfg, { force: true })
     expect(res.ok).toBe(true)

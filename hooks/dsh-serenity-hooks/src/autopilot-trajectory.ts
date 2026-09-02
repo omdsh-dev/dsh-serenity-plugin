@@ -57,8 +57,6 @@ export const DEFAULT_AVOID_HOURS = { start: 8, end: 18 }
 export const BIAS_OUTPUT_MAX = 8 * 1024
 /** 偏见脚本执行超时（正式版沙箱；原 600s 过长阻塞 tick） */
 export const BIAS_RUN_TIMEOUT_MS = 60_000
-/** 每日唤起预算缺省上限（轮次预算——正式版 v1.27.4；防失控 + 控成本） */
-export const DEFAULT_MAX_DAILY_WAKES = 24
 /** 审计历史 ring 上限（每 CCC 保留最近 N 条唤起记录） */
 export const AUDIT_HISTORY_MAX = 50
 
@@ -73,12 +71,6 @@ export function readAutopilotSettings(root: string): AutopilotTrajectorySettings
  */
 export function beijingHour(nowMs: number): number {
   return Math.floor(((nowMs + 8 * 3600_000) % 86400_000) / 3600_000)
-}
-
-/** 当日已用唤起次数（按北京时间日；轮次预算 maxDailyWakes 判定） */
-export function dailyWakeCount(history: readonly WakeRecord[], nowMs: number): number {
-  const day = Math.floor((nowMs + 8 * 3600_000) / 86400_000)
-  return history.filter((r) => Math.floor((r.time + 8 * 3600_000) / 86400_000) === day).length
 }
 
 /**
@@ -112,21 +104,19 @@ export function resolveTargetMd(root: string, cfg: AutopilotTrajectorySettings):
 }
 
 /**
- * 唤起条件（纯逻辑，可测）：enabled + 未在运行 + 目录标志 + mtime 超间隔 + 窗口允许 + 预算未超。
+ * 唤起条件（纯逻辑，可测）：enabled + 未在运行 + 目录标志 + mtime 超间隔 + 窗口允许。
+ * v1.27.12：移除每日唤起预算上限（用户"把这个上限删了吧，没意义"——高频实验不受限）。
  */
 export function shouldWake(
   settings: AutopilotTrajectorySettings,
   mdPath: string | null,
   nowMs: number,
   running: boolean,
-  history: readonly WakeRecord[] = [],
+  _history: readonly WakeRecord[] = [],
 ): boolean {
   if (!settings?.enabled || running) return false
   if (!mdPath || !isAutopilotSession(mdPath)) return false
   if (!inAllowedWakeWindow(nowMs, settings.avoidWakeHours)) return false
-  // 轮次预算：当日唤起次数达上限 → 跳过（正式版 v1.27.4）
-  const maxDaily = Math.max(1, settings.maxDailyWakes ?? DEFAULT_MAX_DAILY_WAKES)
-  if (dailyWakeCount(history, nowMs) >= maxDaily) return false
   try {
     const mtime = statSync(mdPath).mtimeMs
     // v1.27.8：支持小数小时（用户配 0.01 ≈ 36s 高频实验）——下限 MIN_INTERVAL_HOURS
@@ -266,8 +256,9 @@ export function resetWakeHistory(): void {
 
 /**
  * 执行一次唤起（时钟 tick 与面板「立即唤起」共用）：
- * - force=false（时钟）：完整校验——enabled / 目标命中 / --auto 标志 / 窗口 / 间隔 / 预算 / 偏见脚本
- * - force=true（手动调试，用户在场）：跳过窗口/间隔/预算，仍校验 enabled / 目标命中 / --auto / 偏见脚本
+ * - force=false（时钟）：完整校验——enabled / 目标命中 / --auto 标志 / 窗口 / 间隔 / 偏见脚本
+ * - force=true（手动调试，用户在场）：跳过窗口/间隔，仍校验 enabled / 目标命中 / --auto / 偏见脚本
+ *   （v1.27.12 移除每日唤起预算——force 无预算可跳，时钟也不受限）
  * 成功 → 注入前台会话（agent.steer，用户可见）；返回结果供调用方（tick 打日志 / 面板显示 / 审计）。
  */
 export async function performAutopilotWake(
@@ -521,8 +512,6 @@ export interface AutopilotTrajectoryStatus {
   enabled: boolean
   /** 无人类活动 N 小时后自动唤起（缺省 12） */
   intervalHours: number
-  /** 每日唤起预算上限（缺省 24） */
-  maxDailyWakes: number
   /** 偏见内容提供者脚本（相对 CCC 根；缺省 autopilot-bias.ts） */
   biasProvider: string
   /** 顶层提示词（每次唤起最先注入的稳定指令；未配置 → null） */
@@ -539,7 +528,7 @@ export interface AutopilotTrajectoryStatus {
     autoFlag: boolean
     /** 距上次轨迹活动（小时） */
     idleHours: number
-    /** 当前时刻是否满足唤起条件（标志+间隔+窗口+预算，未运行中） */
+    /** 当前时刻是否满足唤起条件（标志+间隔+窗口，未运行中；v1.27.12 移除每日预算） */
     wakeable: boolean
   } | null
   /** 当前北京时间小时 */
@@ -557,7 +546,6 @@ export function getAutopilotStatus(root: string): AutopilotTrajectoryStatus {
     configured: cfg !== null,
     enabled: cfg?.enabled ?? false,
     intervalHours: Math.max(MIN_INTERVAL_HOURS, cfg?.intervalHours ?? 12),
-    maxDailyWakes: Math.max(1, cfg?.maxDailyWakes ?? DEFAULT_MAX_DAILY_WAKES),
     biasProvider: cfg?.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER,
     topPrompt: cfg?.topPrompt?.trim() || null,
     session: cfg?.session ?? null,

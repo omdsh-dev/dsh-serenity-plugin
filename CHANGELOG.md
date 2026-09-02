@@ -1,3 +1,21 @@
+## v1.27.12 — 2026-09-02（移除每日唤起预算上限——"把这个上限删了吧，没意义"，S142 用户拍板）
+
+**Scope:** 用户 "把这个上限删了吧，没意义"——Autopilot Trajectory 的每日唤起预算（`maxDailyWakes`，默认 8）对高频实验构成人为限制：intervalHours 已支持小数（v1.27.8，0.01h≈36s）但每日上限仍卡总次数。彻底移除：**唤起频率只受 intervalHours 与避开窗口约束**（实验想多快就多快），审计日志保留（recentWakes 仍记录每次唤起，仅不再参与判定）。
+
+> 注：v1.27.11 草案（maxDailyWakes=0 表示无限制）被本版本取代——用户裁定直接删除配置项，不做特殊值语义。
+
+### 变更
+- **`src/autopilot-trajectory.ts` 彻底移除预算**：
+  - 删 `DEFAULT_MAX_DAILY_WAKES` 常量 + `dailyWakeCount`（当日计数）+ shouldWake 预算检查（今天已唤起 N 次 → false）
+  - `performAutopilotWake` 不再读预算；`shouldWake` 条件收敛为 enabled / 未运行 / --auto 标志 / 窗口 / 间隔 / 偏见脚本（出参 `_history` 保留仅审计）
+  - 阈值注释/行为注释同步清理（预算字样归零）
+- **`src/ccc.ts` 删 `maxDailyWakes` 配置字段**（AutopilotTrajectorySettings / 默认值 / 校验）
+- **`src/client/SettingsSection.tsx` 删面板「每日预算」项**（AutopilotTrajectoryStatus wire 去 maxDailyWakes；状态区块注释同步）
+- **`tests/autopilot-trajectory.test.ts` 删 3 预算用例**（当日计数归零/预算满拒绝/预算恢复）+ 改名 1 处（"当日预算已满也跳过" → "已有唤醒历史也跳过（历史仅审计不限制）"）+ 头部注释更新
+
+### 测试
+- **52 files / 752 tests 全绿**（755 − 3 删除）；typecheck ✓（node + client）
+
 ## v1.27.10 — 2026-09-02（修复：面板打开 autopilot 全局开关不热启动定时器——"开了但不唤起"，S142 用户报告）
 
 **Scope:** 用户 v1.27.9 发布后实测："唤起有问题，我开了但是不唤起，bug？读不到某个CCC的配置"。diag-live 排查确认：home-serenity 配置健全（enabled ✓ / session S151 ✓ / --auto ✓ / 偏见脚本 ✓ / agent 可注入 ✓；空闲 1.7h < interval 2h 是等待中非 bug）——**真 bug = 面板打开全局开关不热启动定时器**。

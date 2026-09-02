@@ -137,10 +137,8 @@ export interface SerenityConfig {
 export interface AutopilotTrajectorySettings {
   /** 总开关（缺省 false——默认关，未开零资源占用） */
   enabled?: boolean;
-  /** 无人类活动 N 小时后自动唤起（缺省 12；下限 1h） */
+  /** 无人类活动 N 小时后自动唤起（缺省 12；下限 0.01h——v1.27.8 支持小数高频实验） */
   intervalHours?: number;
-  /** 每日唤起预算上限（缺省 24——正式版 v1.27.4 轮次预算：防失控 + 控成本） */
-  maxDailyWakes?: number;
   /** 偏见内容提供者脚本（相对 CCC 根；缺省 autopilot-bias.ts——缺失报错要求实现） */
   biasProvider?: string;
   /**
