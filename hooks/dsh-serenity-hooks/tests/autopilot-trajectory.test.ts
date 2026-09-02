@@ -290,6 +290,22 @@ describe('shouldWake（唤起条件全链）', () => {
     utimesSync(md, t12, t12)
     expect(shouldWake({ enabled: true, intervalHours: 12 }, md, NOW, false)).toBe(true)
   })
+
+  it('v1.27.8 小数间隔：0.01h（≈36s）→ 满 36s 即唤起（支持高频实验）', () => {
+    const NOW = beijingUtcMs(20) // 北京 20:00（窗口外）
+    // 0.01h = 36s；37s 前活动 → 已满间隔 → 唤起
+    const tOver = new Date(NOW - 37_000)
+    utimesSync(md, tOver, tOver)
+    expect(shouldWake({ enabled: true, intervalHours: 0.01 }, md, NOW, false)).toBe(true)
+    // 30s 前活动 → 不足 36s → 不唤起
+    const tUnder = new Date(NOW - 30_000)
+    utimesSync(md, tUnder, tUnder)
+    expect(shouldWake({ enabled: true, intervalHours: 0.01 }, md, NOW, false)).toBe(false)
+    // 合法小数：0.5h = 30min
+    const tHalf = new Date(NOW - 31 * 60_000)
+    utimesSync(md, tHalf, tHalf)
+    expect(shouldWake({ enabled: true, intervalHours: 0.5 }, md, NOW, false)).toBe(true)
+  })
 })
 
 describe('readSelfGeneratedMotivation（自生动机）', () => {
@@ -399,6 +415,15 @@ describe('buildWakeMessage（唤起消息四段式：轨迹焦点 / 身份锚定
     const msg = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 12, topPrompt: null, motivation: null, biasContent: null })
     expect(msg.startsWith('[轨迹焦点]')).toBe(false)
     expect(msg).toContain('（无——本轮纯自主探索）')
+  })
+
+  it('v1.27.8 小数间隔唤起消息 → 显示分钟（0.01h → "约 1 分钟"）', () => {
+    const msg = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 0.01, topPrompt: null, motivation: null, biasContent: 'x' })
+    expect(msg).toContain('约 1 分钟')
+    expect(msg).not.toContain('0.01 小时')
+    // 整小时仍显示小时
+    const msgH = buildWakeMessage({ sessionName: 'S143', mdPath: '/x', intervalHours: 2, topPrompt: null, motivation: null, biasContent: 'x' })
+    expect(msgH).toContain('2 小时')
   })
 })
 

@@ -44,8 +44,10 @@ export const DEFAULT_BIAS_PROVIDER = 'autopilot-bias.ts'
 export const LEGACY_BIAS_PROVIDER = 'autotrajectory-bias.ts'
 /** 自主轨迹会话目录后缀标志（--auto 保留——简短且历史会话 S060--auto 已存在） */
 export const AUTO_DIR_SUFFIX = '--auto'
-/** 调度 tick 周期（10min——验证形态"一个就够"） */
-export const TICK_MS = 10 * 60 * 1000
+/** 调度 tick 周期（5min——用户"tick改为5分钟吧"；0.01h 间隔下每 5min 评估一次） */
+export const TICK_MS = 5 * 60 * 1000
+/** 间隔下限（支持小数——用户"让它支持小数行吗，这样可以配0.01"；0.01h ≈ 36s） */
+export const MIN_INTERVAL_HOURS = 0.01
 /** SESSION.md 内「下一轮动机」段标记（自生偏见载体——轨迹预设自己的未来） */
 export const MOTIVATION_MARKER = '下一轮动机'
 /** 缺省避开的高峰时段（北京时间 [start, end) 不唤起——用量峰谷省钱） */
@@ -126,7 +128,8 @@ export function shouldWake(
   if (dailyWakeCount(history, nowMs) >= maxDaily) return false
   try {
     const mtime = statSync(mdPath).mtimeMs
-    const hours = Math.max(1, settings.intervalHours ?? 12)
+    // v1.27.8：支持小数小时（用户配 0.01 ≈ 36s 高频实验）——下限 MIN_INTERVAL_HOURS
+    const hours = Math.max(MIN_INTERVAL_HOURS, settings.intervalHours ?? 12)
     return nowMs - mtime >= hours * 3600_000
   } catch {
     return false
@@ -199,6 +202,10 @@ export function buildWakeMessage(opts: {
   motivation: string | null
   biasContent: string | null
 }): string {
+  // 间隔人性化显示：>=1h 显示小时数；<1h 显示分钟（v1.27.8 小数配置）
+  const intervalLabel = opts.intervalHours >= 1
+    ? `${opts.intervalHours} 小时`
+    : `约 ${Math.round(opts.intervalHours * 60)} 分钟`
   const lines: string[] = []
   // 轨迹焦点最先注入（影响力最大——CCC 定义的本轨迹核心目标/纪律，每轮不变，锚定防漂移）
   if (opts.topPrompt) {
@@ -206,7 +213,7 @@ export function buildWakeMessage(opts: {
     lines.push('')
   }
   lines.push(
-    `[Autopilot Trajectory 唤起] — 距上次轨迹活动已满 ${opts.intervalHours} 小时，自动继续。`,
+    `[Autopilot Trajectory 唤起] — 距上次轨迹活动已满 ${intervalLabel}，自动继续。`,
     '',
     `身份锚定：继续 ${opts.sessionName} 的 trajectory（SESSION.md: ${opts.mdPath}）。`,
     '先验偏见：',
@@ -277,7 +284,7 @@ export async function performAutopilotWake(
     if (!inAllowedWakeWindow(now, settings.avoidWakeHours)) return { ok: false, detail: '当前在北京高峰避开窗口内（不唤起）' }
     try {
       const mtime = statSync(mdPath).mtimeMs
-      const hours = Math.max(1, settings.intervalHours ?? 12)
+      const hours = Math.max(MIN_INTERVAL_HOURS, settings.intervalHours ?? 12)
       if (now - mtime < hours * 3600_000) return { ok: false, detail: `距上次轨迹活动不足 ${hours}h（等待中）` }
     } catch {
       return { ok: false, detail: 'SESSION.md 读取失败（statSync）' }
@@ -295,7 +302,7 @@ export async function performAutopilotWake(
   const message = buildWakeMessage({
     sessionName: basename(dirname(mdPath)),
     mdPath,
-    intervalHours: Math.max(1, settings.intervalHours ?? 12),
+    intervalHours: Math.max(MIN_INTERVAL_HOURS, settings.intervalHours ?? 12),
     topPrompt: settings.topPrompt?.trim() || null,
     motivation,
     biasContent: biasRes.text,
@@ -526,7 +533,7 @@ export function getAutopilotStatus(root: string): AutopilotTrajectoryStatus {
   const base = {
     configured: cfg !== null,
     enabled: cfg?.enabled ?? false,
-    intervalHours: Math.max(1, cfg?.intervalHours ?? 12),
+    intervalHours: Math.max(MIN_INTERVAL_HOURS, cfg?.intervalHours ?? 12),
     maxDailyWakes: Math.max(1, cfg?.maxDailyWakes ?? DEFAULT_MAX_DAILY_WAKES),
     biasProvider: cfg?.biasProvider?.trim() || DEFAULT_BIAS_PROVIDER,
     topPrompt: cfg?.topPrompt?.trim() || null,

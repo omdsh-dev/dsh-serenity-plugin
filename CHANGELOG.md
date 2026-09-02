@@ -1,3 +1,19 @@
+## v1.27.8 — 2026-09-02（Autopilot Trajectory 间隔支持小数 + tick 5min，S142 用户实验需求）
+
+**Scope:** 用户在做 autopilot-trajectory 实验，想把某 CCC 频率设到很快（1 分钟就重新走随机脚本）——"让它支持小数行吗，这样可以配0.01"；随后"tick改为5分钟吧"。① intervalHours 支持小数（0.01h ≈ 36s，高频实验）② tick 10min → 5min。
+
+### 变更
+- **`src/autopilot-trajectory.ts` 间隔支持小数（v1.27.8 核心）**：
+  - 新增 `MIN_INTERVAL_HOURS = 0.01`（≈36s）——`shouldWake` / `performAutopilotWake` / `getAutopilotStatus` 的 `Math.max(1, ...)` 全部改为 `Math.max(MIN_INTERVAL_HOURS, ...)`
+  - 语义说明：配置 `intervalHours: 0.01` → 距上次活动满 36s 即满足间隔；真实唤起频率受 tick 限制（0.01h 等价于每个 tick 都唤起）
+  - 每轮仍重跑随机偏见脚本（`fetchBiasContent` 每次唤起执行——"1 分钟后重新走随机脚本"成立）
+- **tick 10min → 5min（用户追加）**：`TICK_MS = 5 * 60 * 1000`——更快响应间隔评估，高频实验更近实时
+- **buildWakeMessage 间隔人性化显示**：`<1h` → `约 N 分钟`（0.01h → "约 1 分钟"）；`>=1h` 仍显小时
+
+### 测试
+- **autopilot-trajectory.test.ts +2**：小数间隔判定（0.01h 满 36s 唤起 / 30s 不足不唤起 / 0.5h 生效）+ 唤起消息分钟显示（0.01h → "约 1 分钟"；2h → "2 小时"）
+- **52 files / 752 tests 全绿**（750 + 2）；typecheck ✓（node + client）
+
 ## v1.27.7 — 2026-09-02（输出守卫不检查 think 内容，S142 用户反馈）
 
 **Scope:** 用户 "敏感词防护是做在哪一层的；要求不检查think内容（因为不输出）"——① 明确防护层级（turn-stopping 拦截缝 + 词表 + steer 打回，仅外部面）；② **think 块不再参与敏感词检测**——` thinking…` 是模型思考过程，不进入用户可见输出；原实现取全部 text（含 think 块），think 内推演内部机制词会被误打回。
