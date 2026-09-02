@@ -55,6 +55,9 @@ export interface SerenitySimpleSettings {
   acpHttpPort: number
   /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
   publicAskEnabled: boolean
+  /** Autopilot Trajectory 全局总开关（v1.27.9，默认关——只在指定电脑开启；
+   *  关了即使 CCC 配置 enabled=true 也不启动定时器；CCC 级 enabled 仍为必要条件） */
+  autopilotEnabled: boolean
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -67,6 +70,7 @@ export const simpleSettingsSchema = z.object({
   acpEnabled: z.boolean().default(false),
   acpHttpPort: z.number().min(1024).max(65535).default(3100),
   publicAskEnabled: z.boolean().default(false),
+  autopilotEnabled: z.boolean().default(false),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -80,6 +84,7 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     acpEnabled: config.acp?.enabled ?? false,
     acpHttpPort: config.acp?.httpPort ?? 3100,
     publicAskEnabled: config.publicAsk?.enabled ?? false,
+    autopilotEnabled: false,
   }
 }
 
@@ -97,6 +102,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     acpEnabled: false,
     acpHttpPort: 3100,
     publicAskEnabled: false,
+    autopilotEnabled: false,
   }
 }
 

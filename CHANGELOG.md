@@ -1,3 +1,20 @@
+## v1.27.9 — 2026-09-02（Autopilot Trajectory 全局开关，默认关，S142 用户需求）
+
+**Scope:** 用户 "考虑给autopilot-trajectory做全局开关，默认关闭；这样可以只在指定的电脑进行autopilot-trajectory"——plugin 全局总开关（settings autopilotEnabled，默认 false）：多台电脑装 dsp 时只有开启的那台跑 autopilot，其余默认零资源占用。
+
+### 变更
+- **`src/settings-section.ts` 全局开关 wire**：`SerenitySimpleSettings` / `simpleSettingsSchema` / `entryDefaults` / `defaultSimpleSettings` 加 `autopilotEnabled`（**默认 false**）——settings.yaml 持久化（`serenity-hooks.autopilotEnabled`），面板 Toggle 即时保存
+- **`src/autopilot-trajectory.ts` 双重门控**：`registerAutopilot` 内 `globalOn()` 读 `readSimpleSettings().autopilotEnabled`——
+  - 全局关 → **定时器不启动**（零资源占用，插件加载即无）
+  - tick 内也检查 → **中途关闭全局即停**（不再唤起）
+  - 双重门控：`全局开关 AND CCC 级 enabled（serenity.json）` 都满足才运行；CCC 级配置（interval/session/bias/topPrompt）不动
+- **`src/client/SettingsSection.tsx` 面板**：「外部能力」组加 **Autopilot Trajectory 开关**（带 help——全局/默认关/双重门控/指定电脑语义）；Autopilot 折叠 desc 动态显示「全局已开启 / 全局关闭（外部能力组开启）」
+
+### 测试
+- **autopilot-trajectory.test.ts +2**：全局关（即使 CCC 启用也不启动定时器——零资源）+ 全局开（双重门控启动）；register describe 默认注入全局开（验证 CCC 级语义）
+- **settings-section.test.ts 断言补 autopilotEnabled: false**（entry 默认 + Config 覆盖）
+- **52 files / 754 tests 全绿**（752 + 2）；typecheck ✓（node + client）
+
 ## v1.27.8 — 2026-09-02（Autopilot Trajectory 间隔支持小数 + tick 5min，S142 用户实验需求）
 
 **Scope:** 用户在做 autopilot-trajectory 实验，想把某 CCC 频率设到很快（1 分钟就重新走随机脚本）——"让它支持小数行吗，这样可以配0.01"；随后"tick改为5分钟吧"。① intervalHours 支持小数（0.01h ≈ 36s，高频实验）② tick 10min → 5min。

@@ -41,6 +41,8 @@ export interface SerenitySimpleWire {
   acpHttpPort?: number
   /** F4d 建议问答页（v1.26.1 实验性）：按认知容器暴露问答页供他人验证（key 认证） */
   publicAskEnabled?: boolean
+  /** Autopilot Trajectory 全局总开关（v1.27.9，默认关——只在指定电脑开启） */
+  autopilotEnabled?: boolean
 }
 
 /** 本 section 的注入面（apply 闭包提供 settingsScope） */
@@ -191,6 +193,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const acpOn = value?.acpEnabled ?? false
   const acpPort = value?.acpHttpPort ?? 3100
   const publicAskOn = value?.publicAskEnabled ?? false
+  const autopilotOn = value?.autopilotEnabled ?? false
 
   return (
     <div className="ss-section">
@@ -321,6 +324,19 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             control={<Toggle checked={publicAskOn} onChange={(on) => toggle('publicAskEnabled', on)} />}
           />
         </li>
+        <li>
+          <RowCard
+            title="Autopilot Trajectory"
+            desc="自动巡航轨迹（全局开关，默认关——只在指定电脑开启）"
+            help={'Autopilot Trajectory 全局总开关（v1.27.9）：\n' +
+              '· 作用：控制本机（本 dsh 实例）是否运行自动巡航轨迹\n' +
+              '· 默认关：未开启即使 CCC 配置 enabled=true 也不启动定时器\n' +
+              '· 定位：多台电脑装 dsp 时，只在指定电脑开启（其余默认关）\n' +
+              '· 双重门控：全局开关 AND CCC 级 enabled 都满足才运行\n' +
+              '· CCC 级配置（interval/session/偏见脚本/焦点）不受影响'}
+            control={<Toggle checked={autopilotOn} onChange={(on) => toggle('autopilotEnabled', on)} />}
+          />
+        </li>
       </Group>
 
       {/* 建议问答（v1.26.2 配置：开放容器白名单 + key/地址展示；v1.27.5 折叠默认收起） */}
@@ -340,8 +356,9 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
 
       {/* Autopilot Trajectory（v1.27.4 正式版；v1.26.14 起面板状态——用户"给CCC的面板加个状态来看情况"；
           数据源 GET /serenity/autopilot-trajectory：配置摘要 + 目标会话 + 窗口/预算/可唤起判定 + 审计；
-          v1.27.5 语义：折叠默认收起——用户"微信桥和 Autopilot trajectory 能否也收起来"） */}
-      <Collapse title="Autopilot Trajectory" desc="多 CCC 自动巡航轨迹 · 状态与立即唤起">
+          v1.27.5 语义：折叠默认收起——用户"微信桥和 Autopilot trajectory 能否也收起来"；
+          v1.27.9 全局开关 autopilotEnabled 在「外部能力」组——此处 desc 显示全局门控状态） */}
+      <Collapse title="Autopilot Trajectory" desc={autopilotOn ? '全局已开启' : '全局关闭（外部能力组开启）'} >
         <AutopilotTrajectoryStatusBlock />
       </Collapse>
 

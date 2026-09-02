@@ -35,6 +35,7 @@ import { basename, dirname, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutopilotTrajectorySettings } from './ccc.js'
 import { findSession, sessionsRoot } from './session-ops.js'
+import { readSimpleSettings } from './settings-section.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -332,7 +333,20 @@ export function registerAutopilot(ctx: Context): void {
   const runningByRoot = new Map<string, boolean>()
   let wakeChain: Promise<void> = Promise.resolve()
 
+  // 全局总开关（v1.27.9，用户"做全局开关，默认关闭；只在指定电脑进行"）：
+  // settings autopilotEnabled（plugin 全局，默认关）——关 = 定时器不启动 + tick 不唤起
+  // **双重门控**：全局开关 AND CCC 级 enabled（serenity.json）都满足才运行。
+  // CCC 级配置（interval/session/bias/topPrompt）不动——只加一层全局闸。
+  const globalOn = (): boolean => {
+    try {
+      return readSimpleSettings().autopilotEnabled === true
+    } catch {
+      return false // settings 服务不可用 → 默认关（保守：未明确开启不自动跑）
+    }
+  }
+
   const tick = (): void => {
+    if (!globalOn()) return // 全局关 → 本 tick 不唤起（中途关闭即停）
     // 遍历所有 live+enabled CCC（v1.27.4：多 CCC 各自独立唤起）
     const roots = collectAutopilotCccs(ctx)
     if (roots.length === 0) return
@@ -362,18 +376,20 @@ export function registerAutopilot(ctx: Context): void {
 
   const startTimer = (): void => {
     if (timer) return
-    if (collectAutopilotCccs(ctx).length === 0) return // 默认关（无 enabled CCC → 不启动定时器，零资源占用）
+    if (!globalOn()) return // 全局关 → 不启动定时器（零资源占用，v1.27.9）
+    if (collectAutopilotCccs(ctx).length === 0) return // 无启用 CCC → 不启动
     timer = setInterval(tick, TICK_MS)
     // unref：进程存活时定时器照常触发；进程退出（插件卸载/服务器停止）不阻塞退出
     timer.unref()
     console.log(`[serenity-hooks] ✓ Autopilot Trajectory 定时器启动（${collectAutopilotCccs(ctx).length} 个 CCC 启用）`)
-    // 启动时立即检查一次（插件重启后恢复节律，无需等首个 10min）
+    // 启动时立即检查一次（插件重启后恢复节律，无需等首个 5min）
     tick()
   }
 
-  // ① 进程启动时：若已有启用 CCC → 立即启动
+  // ① 进程启动时：若全局开且已有启用 CCC → 立即启动
   startTimer()
-  // ② 会话出现（用户打开实验 CCC）→ 启动定时器（live 会话变化即跟上）
+  // ② 会话出现（用户打开实验 CCC）→ 启动定时器（live 会话变化即跟上；
+  //    全局未开时 startTimer 直接 return——开全局后需重启生效）
   try {
     ctx.on('session/created', () => startTimer())
   } catch {

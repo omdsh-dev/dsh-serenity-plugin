@@ -37,7 +37,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部默认（gateway off / rebuild on 0.9 / skiff off 3099 / acp off 3100）', () => {
+  it('空 Config → 全部默认（gateway off / rebuild on 0.9 / skiff off 3099 / acp off 3100 / autopilot off）', () => {
     const d = entryDefaults({})
     expect(d).toEqual({
       gatewayEnabled: false,
@@ -48,6 +48,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       acpEnabled: false,
       acpHttpPort: 3100,
       publicAskEnabled: false,
+      autopilotEnabled: false,
     })
   })
 
@@ -67,6 +68,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       acpEnabled: true,
       acpHttpPort: 4100,
       publicAskEnabled: false,
+      autopilotEnabled: false,
     })
   })
 

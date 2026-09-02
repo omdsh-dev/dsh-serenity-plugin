@@ -19,6 +19,32 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 vi.mock('@deepseek-ai/dsh-tools', () => ({
   defineTool: (o: unknown) => o,
 }))
+// schemastery 运行时不可解析（peerDep 全局提供）——settings-section import 链需要
+vi.mock('@deepseek-ai/schemastery', () => {
+  const chain: unknown = new Proxy(function () {}, {
+    get: (_t, prop) => {
+      if (prop === Symbol.toPrimitive) return () => ''
+      if (prop === 'valueOf') return () => 0
+      if (prop === 'toString') return () => ''
+      return chain
+    },
+    apply: () => chain,
+  })
+  return {
+    default: {
+      object: (spec: unknown) => spec,
+      array: () => chain,
+      string: () => chain,
+      boolean: () => chain,
+      number: () => chain,
+    },
+  }
+})
+// dsh-settings peerDep 同样不可解析——mock（settings-section import 链）
+vi.mock('@deepseek-ai/dsh-settings', () => ({
+  installSettingsSection: () => {},
+  settingsNamespace: (v: string) => v,
+}))
 vi.mock('../src/session-ops.js', () => ({
   sessionsRoot: (root: string) => join(root, 'AGENT_SESSIONS'),
   findSession: vi.fn(),
@@ -53,6 +79,7 @@ import {
   diagLive,
   registerAutopilot,
 } from '../src/autopilot-trajectory.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 const mockFindSession = vi.mocked(findSession)
 const mockFindLatest = vi.mocked(findLatestActiveSessionMd)
@@ -862,6 +889,8 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     timer = null
     liveSessions = []
     resetWakeHistory()
+    // v1.27.9 全局开关：register 测试默认全局已开（验证 CCC 级逻辑）；全局关门控有专门用例
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
     // mock setInterval/unref：记录定时器并阻止真实计时
     vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void, ms: number) => {
       timer = { fn, ms, unref: () => undefined } as unknown as ReturnType<typeof setInterval>
@@ -873,6 +902,7 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     rmSync(tmp, { recursive: true, force: true })
     rmSync(tmp2, { recursive: true, force: true })
     resetWakeHistory()
+    __setSimpleSourceForTest(null)
     vi.restoreAllMocks()
   })
 
@@ -904,6 +934,24 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     const t = new Date(Date.now() - hoursAgo * 3600_000)
     utimesSync(md, t, t)
   }
+
+  it('v1.27.9 全局开关默认关（autopilotEnabled=false）→ 即使 CCC 启用也不启动定时器', () => {
+    writeCfg(tmp, { enabled: true, session: 'S143' })
+    const { ctx, setSessions } = makeCtx()
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: false }))
+    registerAutopilot(ctx as never)
+    expect(timer).toBeNull() // 全局关 → 零资源占用
+  })
+
+  it('v1.27.9 全局开关开启 + CCC 启用 → 启动定时器（双重门控都满足）', () => {
+    writeCfg(tmp, { enabled: true, session: 'S143' })
+    const { ctx, setSessions } = makeCtx()
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
+    registerAutopilot(ctx as never)
+    expect(timer).not.toBeNull()
+  })
 
   it('启动时无 live 会话（或未配置）→ 不启动定时器（零资源占用）', () => {
     const { ctx } = makeCtx()
