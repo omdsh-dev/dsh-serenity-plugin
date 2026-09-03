@@ -19,10 +19,11 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { findSerenityRoot, readHandymanConfig } from './ccc.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './weixin-route.js'
-import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, type WeixinMessage } from './weixin-api.js'
+import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff } from './skiff-core.js'
+import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
 interface AccountLoop {
@@ -208,15 +209,19 @@ export async function handleIncoming(
       // 媒体：下载 → 落盘 → 存在性+路径注入（ACC 层最小闭环；M1/M2/M3/M4/M6）
       const mediaNotes: string[] = []
       const degradedNotes: string[] = []
+      // hook 事件媒体列表（v1.27.13：成功带 relPath，失败 null——CCC 记录侧可完整审计）
+      const hookMedia: WeixinHookMediaRef[] = []
       for (const mediaRef of mediaRefs) {
         const mediaType = mediaRef.kind === 'image' ? 'image_item' : 'file_item'
         const label = mediaRef.kind === 'image' ? '一张图片' : `文件 ${mediaRef.fileName ?? '(未命名)'}`
         const result = await downloadMedia({ item: mediaRef.item, mediaType })
         if (!result) {
+          hookMedia.push({ kind: mediaRef.kind, relPath: null })
           degradedNotes.push(`（用户发送了${label}，但下载失败——可请用户重发）`)
           continue
         }
         if (result.data.length > MEDIA_MAX_BYTES) {
+          hookMedia.push({ kind: mediaRef.kind, relPath: null })
           degradedNotes.push(`（用户发送了${label}，但超过 20MB 大小限制）`)
           continue
         }
@@ -229,9 +234,11 @@ export async function handleIncoming(
           const abs = join(inboundDir, fname)
           writeFileSync(abs, result.data)
           const rel = relative(root, abs)
+          hookMedia.push({ kind: mediaRef.kind, relPath: rel })
           // 注引用**实际保存的文件名**（fname = 净化后）——agent 按 rel 路径找文件，名字须一致
           mediaNotes.push(`（用户发送了${mediaRef.kind === 'image' ? '一张图片' : `文件 ${fname}`}，已保存到 ${rel}）`)
         } catch {
+          hookMedia.push({ kind: mediaRef.kind, relPath: null })
           degradedNotes.push(`（媒体保存失败，请重试）`)
         }
       }
@@ -242,19 +249,51 @@ export async function handleIncoming(
       parts.push(...mediaNotes, ...degradedNotes)
       const question = parts.join('\n')
 
+      // hook：incoming 事件（用户 → bot）——媒体落盘后、askSkiff 前 fire。
+      // 旁路容忍（H3）：异步 fire-and-forget，失败仅日志——不阻塞对话处理。
+      const hookRel = settings.hook
+      if (hookRel) {
+        void invokeWeixinHook(root, hookRel, buildIncomingHookEvent({
+          cccRoot: root,
+          accountId,
+          userId: fromUserId,
+          sessionId,
+          role: roleName,
+          text,
+          media: hookMedia,
+        })).catch((err) => {
+          console.log(`[serenity-hooks] weixin hook incoming error: ${err instanceof Error ? err.message : String(err)}`)
+        })
+      }
+
       const result = await askSkiff(ctx, ref.agent, question, undefined, { includeTrajectory: false })
       const answer = result.answer ?? ''
       if (answer === '') return
 
-      // 回复回写（必须回带 context_token 关联对话；md→plain 由 sendTextMessage 内置；
-      // **stripThink 先剥离 <think> 块**——微信桥用户反馈：用户不应看到思考过程）
+      // 回复文本：stripThink 剥离 <think> 块（微信桥用户反馈：用户不应看到思考过程）→
+      // md→plain 转微信可见纯文本（sendTextMessage 内置同款转换——hook 记录与用户实际收到一致）
+      const reply = markdownToPlainText(stripThink(answer))
       await sendTextMessage({
         baseUrl: cred.baseUrl,
         token: cred.token,
         toUserId: fromUserId,
-        text: stripThink(answer),
+        text: reply,
         contextToken: msg.context_token,
       })
+
+      // hook：outgoing 事件（bot → 用户）——发送成功后 fire（发送失败不记录——从未送达的回复无记录价值）
+      if (hookRel) {
+        void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
+          cccRoot: root,
+          accountId,
+          userId: fromUserId,
+          sessionId,
+          role: roleName,
+          reply,
+        })).catch((err) => {
+          console.log(`[serenity-hooks] weixin hook outgoing error: ${err instanceof Error ? err.message : String(err)}`)
+        })
+      }
     } finally {
       await sendTypingStop(cred, accountId, fromUserId)
     }

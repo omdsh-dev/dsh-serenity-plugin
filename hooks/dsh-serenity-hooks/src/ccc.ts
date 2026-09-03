@@ -172,6 +172,13 @@ export interface WeixinSettings {
   accounts?: WeixinAccountConfig[];
   /** 消息路由：微信用户 → 该 CCC 的 skiff role（不绑定具体 role——用户自选） */
   routes?: WeixinRouteConfig[];
+  /**
+   * 消息记录 hook（v1.27.13，用户"微信桥所有消息记录，支持 hook，CCC 自写持久性保存"）：
+   * 相对 CCC 根的脚本路径——微信桥每收/发一条消息触发一次（事件 JSON 经 stdin 传入，
+   * 脚本自行持久化：写文件/入库/推远端全归 CCC）。未配置 → 零变化（不触发）。
+   * 执行语义：旁路 fire-and-forget + 超时 + 失败仅日志（微信桥可靠性不受 hook 影响）。
+   */
+  hook?: string;
 }
 
 /** 微信桥账号配置（serenity.json 内；凭据部分在 localstore） */

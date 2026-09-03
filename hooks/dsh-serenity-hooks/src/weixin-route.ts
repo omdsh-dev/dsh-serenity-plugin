@@ -57,6 +57,7 @@ export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SEREN
     return {
       enabled: w.enabled === true,
       botType: typeof w.botType === 'string' && w.botType !== '' ? w.botType : undefined,
+      hook: typeof w.hook === 'string' && w.hook.trim() !== '' ? w.hook.trim() : undefined,
       accounts: Array.isArray(w.accounts)
         ? w.accounts
             .filter((a): a is { accountId: string; name?: string; enabled?: boolean } =>

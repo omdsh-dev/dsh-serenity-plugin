@@ -827,4 +827,81 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     // ticket 缓存：getconfig 只调一次
     expect(calls.filter((c) => c.url.includes('getconfig'))).toHaveLength(1)
   })
+
+  it('v1.27.13 消息 hook：incoming + outgoing 双向触发（runner 捕获事件，不含凭据）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+    }))
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    // hook runner 注入捕获（真实 spawn 由 weixin-hook.test 覆盖——此处断言 bridge 触发时机与载荷）
+    const hookEvents: unknown[] = []
+    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    setWeixinHookRunnerForTest(async (_root, _hookRel, ev) => {
+      hookEvents.push(ev)
+      return { ok: true }
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'hook@im.wechat',
+      context_token: 'ct',
+      item_list: [{ type: 1, text_item: { text: '记录我' } }],
+    })
+
+    // 双向：incoming（用户消息）+ outgoing（bot 回复）各一次，顺序入→出
+    expect(hookEvents).toHaveLength(2)
+    const incoming = hookEvents[0] as { event: string; userId: string; role: string; message: { text: string | null; media: unknown[] } }
+    const outgoing = hookEvents[1] as { event: string; reply: string }
+    expect(incoming.event).toBe('incoming')
+    expect(incoming.userId).toBe('hook@im.wechat')
+    expect(incoming.role).toBe('qa')
+    expect(incoming.message.text).toBe('记录我')
+    expect(incoming.message.media).toEqual([])
+    expect(outgoing.event).toBe('outgoing')
+    expect(outgoing.reply).toBe('答案') // stripThink 后的回复文本
+    // 载荷无凭据（context_token 不随事件）
+    const json = JSON.stringify(hookEvents)
+    expect(json).not.toContain('context_token')
+    expect(json).not.toContain('"token"')
+    expect(sent.some((s) => s.text === '答案')).toBe(true) // 回复仍正常送达（hook 旁路）
+  })
+
+  it('v1.27.13 消息 hook：hook 失败不阻断微信桥（旁路容忍 H3）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+    }))
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    setWeixinHookRunnerForTest(async () => {
+      throw new Error('hook boom') // 注入 runner 抛错（真实执行已吞错——此处验证 fire-and-forget 不阻断）
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await expect(handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'fail@im.wechat',
+      context_token: 'ct',
+      item_list: [{ type: 1, text_item: { text: 'hi' } }],
+    })).resolves.toBeUndefined()
+    expect(sent.some((s) => s.text === '答案')).toBe(true) // 回复送达（hook 失败被吞）
+  })
 })

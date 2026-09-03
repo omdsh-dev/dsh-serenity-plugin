@@ -235,8 +235,8 @@ describe('shouldWake（唤起条件全链）', () => {
     resetWakeHistory()
   })
 
-  function setMtimeHoursAgo(hoursAgo: number): void {
-    const t = new Date(Date.now() - hoursAgo * 3600_000)
+  function setMtimeHoursAgo(hoursAgo: number, baseMs: number = Date.now()): void {
+    const t = new Date(baseMs - hoursAgo * 3600_000)
     utimesSync(md, t, t)
   }
 
@@ -253,8 +253,8 @@ describe('shouldWake（唤起条件全链）', () => {
   })
 
   it('全条件满足（标志+间隔+窗口+空闲）→ 唤起', () => {
-    setMtimeHoursAgo(99)
-    const now = beijingUtcMs(20) // 北京时间 20:00（窗口外）
+    const now = beijingUtcMs(20) // 北京时间 20:00（窗口外）——固定基准，跨日无关
+    setMtimeHoursAgo(99, now) // mtime 相对 now 设置（99h 前）——防跨日 flake（真实 Date.now() 会漂移）
     expect(shouldWake({ enabled: true }, md, now, false)).toBe(true)
     // 自定义间隔：99h 前 > 12h
     expect(shouldWake({ enabled: true, intervalHours: 12 }, md, now, false)).toBe(true)
