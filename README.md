@@ -1,6 +1,6 @@
 # dsh-serenity-plugin — Serenity ACC for DeepSeek Harness
 
-> **给 DeepSeek Harness（DSH）装上认知容器基础设施。** 任意带 `.serenity` 标记的目录（CCC, Concrete Cognitive Container）自动获得：12 个 ACC 工具、机械安全约束、会话轨迹追踪、外部访问与问答能力——**一个插件，一套认知工作区**。
+> **给 DeepSeek Harness（DSH）装上认知容器基础设施。** 任意带 `.serenity` 标记的目录（CCC, Concrete Cognitive Container）自动获得：13 个 ACC 工具、机械安全约束、会话轨迹追踪、外部访问与问答能力、微信接入与自主巡航——**一个插件，一套认知工作区**。
 >
 > 面向 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 0.1.0-rc 及以上。
 > 理论叙述（什么是认知容器）见 [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md)——本文只讲能力与使用。
@@ -35,7 +35,7 @@ dsh web
 
 ## 安装后你得到什么（能力地图）
 
-### 12 个 ACC 工具
+### 13 个 ACC 工具
 
 | 工具 | 能力 | 典型用法 |
 |------|------|---------|
@@ -49,6 +49,7 @@ dsh web
 | `session_rebuild` | 上下文超限时轨迹重建（Ship of Theseus） | 超阈值后自动提示，LLM 触发重建接续 |
 | `localstore` | 凭据/配置存储（credential/config 两命名空间） | API keys/密码集中管理，git 策略可配 |
 | `skiff_admin` | Skiff 角色管理（guide/validate/apply/list） | 定义/校验/应用认知子集角色 |
+| `autopilot-trajectory` | 自动巡航轨迹一站式管理（无参=全报告 / init / random / diag / diag-live / check / status / guide） | 时钟驱动自主唤起 + 先验偏见注入 + 多 CCC 独立（S151 自主管家） |
 
 ### 机械约束（模型不可绕过）
 
@@ -67,7 +68,8 @@ dsh web
 |----|------|------|
 | **双端口网关** | 3081（默认 0.0.0.0） | 登录后访问完整 WebUI（密码 或 TOTP 二选一 + 工作区白名单） |
 | **Skiff 调试问答页** | 3099（默认 127.0.0.1） | 认知子集角色调试（多 CCC 切换 + 轨迹渲染） |
-| **ACP + 建议问答页** | 3100（默认 127.0.0.1） | ACP JSON-RPC 程序化接入 + 对外问答页（key 认证 + 容器白名单，只问答不返回内部轨迹） |
+| **ACP + Skiff 问答页** | 3100（默认 127.0.0.1） | ACP JSON-RPC 程序化接入 + 对外问答页（key 认证 + 容器白名单，只问答不返回内部轨迹） |
+| **微信桥（F4c-3）** | iLink 长轮询（出站） | 微信扫码接入 → skiff 角色对话（文本/语音/图片/文件），多账号，会话延续 |
 
 ---
 
@@ -109,6 +111,8 @@ home-serenity/                    ← CCC 根（.serenity 记号文件标记）
 | 8 | **想法随手记** | 有想法随时开聊 → AI 访谈式理清 → 结构化归档 → 定期回顾思考模式 |
 | 9 | **外部访问（手机/出差）** | 浏览器开 `http://内网地址:3081` → 登录页：用户名 + 密码 **或** Authenticator 6 位码 → 手机直接操作 WebUI |
 | 10 | **粘贴资料自动处理** | **图片**：粘贴 → 自动落盘 → 视觉模型识别（快递单/截图/图表）；**任意文件**：粘贴 PDF/压缩包 → 自动落盘 → agent 提取（PDF/解压/表格，均有专用 MSM） |
+| 11 | **微信接入（角色对话）** | 面板微信桥扫二维码绑定 → 微信发消息（文本/语音/图片/文件）→ 路由到 skiff 角色（如招财）回复回微信 → 多账号并行 + 同用户会话延续 |
+| 12 | **自主巡航（Autopilot）** | CCC 配置 autopilotTrajectory（interval/session/偏见脚本/topPrompt）→ 时钟到点自动唤起注入前台 → 全局开关 + 多 CCC 各自独立巡航（S151 自主管家） |
 
 ### 典型一天
 
@@ -160,11 +164,34 @@ CCC 从全知全能 trajectory 切出**任意子集角色**（`.opencode/serenit
 - 调试问答页（3099）多 CCC 手工切换，回答 marked 渲染 + think 折叠
 - `skiff_admin validate` 校验配置 → `apply` 显式生效（绑定 CCC + 角色清单）
 
-### 建议问答页（3100 + 公网）
+### Skiff 问答页（3100 + 公网）
 
 - **key 认证**（timing-safe + 失败 IP 锁定 + 可轮换）+ 容器白名单（空 = 全部开放）
 - **对外只问答**：响应仅 answer/answer_html/sessionId——**不返回内部轨迹**
 - **公网暴露由部署方自选方案**（隧道 / 反向代理 / 端口映射等）——插件不绑定任何特定暴露方式；默认仅监听 127.0.0.1，暴露属部署决策
+
+### 微信桥（F4c-3：iLink 接入）
+
+CCC 级配置（`.opencode/serenity.json weixin`），凭据归 CCC localstore（credential scope）——**dsh 一进程多 CCC，每个 CCC 独立对接微信桥**：
+
+- **扫码绑定**：面板「微信桥」→ 选 CCC → 扫码（手机微信确认 liteapp）→ bot_token 自动写凭据
+- **多账号**：每账号独立扫码绑定 + 独立移除；`nextWeixinAccountId` 最小未占用自增
+- **消息能力**：文本 / 语音（服务端自带转写 `voice_item.text`）/ 图片 / 文件（CDN 下载 + AES-128-ECB 解密 → 落盘 `_tmp/weixin-inbound/` → 注入对话）
+- **正在输入**：处理前 sendtyping 1 → 处理后 0（微信侧显示"正在输入..."，失败静默）
+- **回复纯净**：`stripThink` 剥离思考块，微信只收到最终正文
+- **会话延续**：固定可重建 sessionId（`skiff-weixin-<sha256(userid)>`）+ **resume-or-create**——重启后历史恢复，不丢记忆；live 会话优先复用
+- **路由**：用户 → 角色（exact → 通配 `*` 兜底）；ACC 不绑定具体 role（如招财 zhaocai）
+- **诊断**：`weixin-doctor` MSM（status/diag/verify 五链）
+
+### Autopilot Trajectory（自动巡航轨迹）
+
+时钟驱动的**自主认知巡航**——CCC 定义轨迹焦点与偏见，插件负责到点唤起（前台注入，用户全程可见可介入）：
+
+- **唤起条件**：enabled + 全局开关（settings `autopilotEnabled`，默认关——只在指定机器跑）+ 目标会话（`--auto` 后缀）+ 间隔（支持小数，最密 0.01h≈36s）+ 避开高峰窗口（默认北京 8~18 点）+ 偏见脚本就绪
+- **焦点锚定**：`topPrompt`（CCC 定义、每次唤起最先注入）+ 偏见内容（CCC 自定义脚本，随机探索）——稳定锚 + 随机方向互补
+- **多 CCC 独立**：每 CCC 各自 interval/session/bias/topPrompt/窗口；per-CCC running 守卫 + 全局串行化；面板 CCC 选择器 + 立即唤起
+- **审计**：每次唤起记录（recentWakes ring，面板展示）；唤起失败指数退避重试
+- **v1.27.12 移除每日预算**：唤起频率只受 interval + 窗口约束（高频实验不受限）
 
 ### 安全模型
 
@@ -183,10 +210,10 @@ CCC 从全知全能 trajectory 切出**任意子集角色**（`.opencode/serenit
 
 | 层 | 位置 | 内容 |
 |----|------|------|
-| DSH 设置面板 | settings.yaml（DSH 原生） | 三功能开关（gateway/rebuild/naming）+ rebuild 阈值 + skiffEnabled/skiffDebugPort + acpEnabled/acpHttpPort + publicAskEnabled |
+| DSH 设置面板 | settings.yaml（DSH 原生） | 三功能开关（gateway/rebuild/naming）+ rebuild 阈值 + skiffEnabled/skiffDebugPort + acpEnabled/acpHttpPort + publicAskEnabled + **autopilotEnabled（全局开关，默认关）** |
 | plugin 全局文件 | `~/.dsh/serenity-hooks.json`（0600） | 网关账号（scrypt + TOTP）/ host / port / 工作区白名单 / cookieSecure / publicAsk key |
-| CCC 配置 | `.opencode/serenity.json` | handyman.models（白名单+缺省模型）/ sessionKeeper.threshold / safeMode.blacklist / skiff.roles |
-| CCC 凭据 | `localstore.json` | 凭据/配置命名空间（git 策略可配） |
+| CCC 配置 | `.opencode/serenity.json` | handyman.models（白名单+缺省模型）/ sessionKeeper.threshold / safeMode.blacklist / skiff.roles / **autopilotTrajectory（interval/session/bias/topPrompt/窗口）** / **weixin（账号/路由/开关）** |
+| CCC 凭据 | `localstore.json` | 凭据/配置命名空间（git 策略可配）；微信 bot_token 存 credential scope |
 
 > 原则：**plugin 是全局的，CCC 是具体的**——账号密码/开关/阈值归 plugin 层；角色/凭据/本地偏好归 CCC。
 
@@ -215,11 +242,11 @@ CCC 从全知全能 trajectory 切出**任意子集角色**（`.opencode/serenit
 ```bash
 # 完整开发循环（safe-mode 下经 acc_msm exec dsh-develop 亦可）
 pnpm typecheck          # hooks/dsh-serenity-hooks（node + client 双面）
-pnpm test               # vitest 全量（50 files / 648 tests）
+pnpm test               # vitest 全量（52 files / 752 tests）
 pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 ```
 
-- **开发 MSM**：`scripts/dsh-develop.ts`（typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/github-push/npm-install-dev）+ `scripts/dsh-crash-investigate.ts`（崩溃调查，只读）
+- **开发 MSM**：`scripts/dsh-develop.ts`（typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/**pack-check**/github-push/npm-install-dev）+ `scripts/dsh-crash-investigate.ts`（崩溃调查，只读）——`pack-check` 发布前校验 tarball 完整性（动态核对 lib/ 全部 JS 产物 + .d.ts，防 chunk 漏发）
 - **架构**：Native Cordis 插件（真实 DSH 工具 `ctx.tools.register` + 拦截缝 `systemPrompt.section`/`tools/pre-execute`/`agent/turn-stopping`…）；**零改 DSH harness**——所有能力走插件 seam/事件/注入服务
 - **代码地图**：`docs/codebase-overview-v1.22.md`（分层架构/模块职责/数据流/配置分层）
 - **设计决策**：D1~D30+ 见 CHANGELOG.md 与维护 skill（`dsh-serenity-plugin-development`）
@@ -232,7 +259,7 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 | 宿主 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，同一 ACC 标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关文本逐字节对齐 |
-| 工具 | msm_list/exec/cc-fs/session 等 | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore/skiff_admin |
+| 工具 | msm_list/exec/cc-fs/session 等 | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore/skiff_admin/autopilot-trajectory |
 
 **同一 CCC 可任意换用 osp / dsh 运行时**：`.serenity` 记号、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 跨运行时文件格式一致；差异仅在平台层（工具命名/注入通道），切换后 Agent 收到的认知约束完全一致。
 
@@ -252,4 +279,4 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **版本**: v1.26.11 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **测试**: 50 files / 648 tests
+> **版本**: v1.27.12 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **测试**: 52 files / 752 tests

@@ -1,8 +1,8 @@
 # @shgroup/dsh-serenity-hooks
 
-宁静号 ACC（Abstract Cognitive Container）harness — **DeepSeek Harness 原生 Cordis 插件**（npm 发布单元，v1.26.11）。
+宁静号 ACC（Abstract Cognitive Container）harness — **DeepSeek Harness 原生 Cordis 插件**（npm 发布单元，v1.27.12）。
 
-为 DSH 会话提供认知容器基础设施：真实 DSH 工具（12 个）+ 拦截缝机械约束（safe-mode / 路径守卫 / 凭据守卫 / 输出守卫）+ 系统提示词注入（8 块，对齐 opencode-serenity-plugin）+ WebUI 状态胶囊 + 外部访问（双端口网关 / Skiff 问答 / ACP+建议问答页）。
+为 DSH 会话提供认知容器基础设施：真实 DSH 工具（13 个）+ 拦截缝机械约束（safe-mode / 路径守卫 / 凭据守卫 / 输出守卫）+ 系统提示词注入（8 块，对齐 opencode-serenity-plugin）+ WebUI 状态胶囊 + 外部访问（双端口网关 / Skiff 问答 / ACP+Skiff 问答页）+ 微信桥（F4c-3 iLink 接入）+ Autopilot Trajectory（时钟驱动自主巡航）。
 
 ## 安装
 
@@ -12,9 +12,9 @@ dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
 安装后重启 dsh web。在带 `.serenity` 标记的 CCC 目录中的会话自动获得全部能力。
 
-## 工具（12）
+## 工具（13）
 
-`cc_fs` / `session` / `acc_kit` / `cc_git` / `acc_msm` / `eap` / `neat` / `cce` / `handyman` / `session_rebuild` / `localstore` / `skiff_admin`
+`cc_fs` / `session` / `acc_kit` / `cc_git` / `acc_msm` / `eap` / `neat` / `cce` / `handyman` / `session_rebuild` / `localstore` / `skiff_admin` / `autopilot-trajectory`
 
 ## 系统提示词（8 块）
 
@@ -29,7 +29,9 @@ dsh plugin --profile web add @shgroup/dsh-serenity-hooks
   "handyman": { "models": ["provider/model"], "defaultModel": "provider/model" },
   "sessionKeeper": { "threshold": 100 },
   "safeMode": { "blacklist": [".secrets/", "regex:\\.env$"] },
-  "skiff": { "roles": { "qa": { "msms": [], "tools": [], "systemPrompt": "" } } }
+  "skiff": { "roles": { "qa": { "msms": [], "tools": [], "systemPrompt": "" } } },
+  "autopilotTrajectory": { "enabled": true, "intervalHours": 2, "session": "S###", "biasProvider": "autopilot-bias.ts", "topPrompt": "…" },
+  "weixin": { "enabled": true, "accounts": [{ "accountId": "wechat-1", "name": "微信1", "enabled": true }], "routes": [{ "user": "*", "role": "zhaocai" }] }
 }
 ```
 

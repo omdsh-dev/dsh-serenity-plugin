@@ -1,6 +1,6 @@
 # dsh-serenity-plugin — Serenity ACC for DeepSeek Harness
 
-> **Cognitive-container infrastructure for DeepSeek Harness (DSH).** Any directory marked with `.serenity` (a CCC, Concrete Cognitive Container) automatically gains: 12 ACC tools, mechanical safety constraints, session-trajectory tracking, and external access & Q&A capabilities — **one plugin, one cognitive workspace**.
+> **Cognitive-container infrastructure for DeepSeek Harness (DSH).** Any directory marked with `.serenity` (a CCC, Concrete Cognitive Container) automatically gains: 13 ACC tools, mechanical safety constraints, session-trajectory tracking, external access & Q&A capabilities, WeChat bridging and autonomous cruising — **one plugin, one cognitive workspace**.
 >
 > Targets [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 0.1.0-rc and later.
 > Theory (what a cognitive container is): [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md) — this README covers capabilities and usage.
@@ -35,7 +35,7 @@ Uninstall: `dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 
 ## What you get after install (capability map)
 
-### 12 ACC tools
+### 13 ACC tools
 
 | Tool | Capability | Typical use |
 |------|-----------|-------------|
@@ -49,6 +49,7 @@ Uninstall: `dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 | `session_rebuild` | Trajectory rebuild on context overflow (Ship of Theseus) | Prompted past threshold; LLM triggers rebuild to continue |
 | `localstore` | Credential/config storage (credential + config namespaces) | Central API-key/password management; git policy configurable |
 | `skiff_admin` | Skiff role management (guide/validate/apply/list) | Define/validate/apply cognitive-subset roles |
+| `autopilot-trajectory` | One-stop AutoPilot management (no-arg=full report / init / random / diag / diag-live / check / status / guide) | Clock-driven autonomous wake + prior-bias injection + per-CCC independence (S151 housekeeper) |
 
 ### Mechanical constraints (not bypassable by the model)
 
@@ -67,7 +68,8 @@ Uninstall: `dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 |------|------|---------|
 | **Dual-port gateway** | 3081 (default 0.0.0.0) | Full WebUI after login (password OR TOTP + workspace whitelist) |
 | **Skiff debug Q&A page** | 3099 (default 127.0.0.1) | Cognitive-subset role debugging (multi-CCC switching + trajectory rendering) |
-| **ACP + public ask page** | 3100 (default 127.0.0.1) | ACP JSON-RPC programmatic access + public Q&A page (key auth + container whitelist; Q&A only — no internal trajectory) |
+| **ACP + Skiff Q&A page** | 3100 (default 127.0.0.1) | ACP JSON-RPC programmatic access + public Q&A page (key auth + container whitelist; Q&A only — no internal trajectory) |
+| **WeChat bridge (F4c-3)** | iLink long-polling (outbound) | WeChat QR-code access → skiff-role conversation (text/voice/image/file), multi-account, session continuity |
 
 ---
 
@@ -109,6 +111,8 @@ home-serenity/                    ← CCC root (marked by the .serenity file)
 | 8 | **Thought capture** | Chat whenever an idea arises → AI interview-style clarification → structured archive → periodic pattern review |
 | 9 | **External access (phone/travel)** | Browser → `http://LAN-IP:3081` → login (username + password OR 6-digit Authenticator code) → operate the WebUI from a phone |
 | 10 | **Pasted-content auto-processing** | **Images**: paste → auto drop → vision-model recognition (receipts/screenshots/charts); **any file**: paste PDF/archive → auto drop → agent extraction (PDF/unzip/spreadsheet, dedicated MSMs) |
+| 11 | **WeChat access (role chat)** | Bind via panel WeChat-bridge QR scan → send messages (text/voice/image/file) → routed to a skiff role (e.g. Zhaocai) whose reply returns to WeChat → multi-account + per-user session continuity |
+| 12 | **Autonomous cruising (Autopilot)** | CCC configures autopilotTrajectory (interval/session/bias-script/topPrompt) → clock wakes the front session automatically → global switch + per-CCC independent cruising (S151 housekeeper) |
 
 ### A typical day
 
@@ -160,11 +164,34 @@ A CCC carves out **any subset of its full-knowledge trajectory** (`.opencode/ser
 - Debug Q&A page (3099) with multi-CCC switching; answers rendered with marked + think folding
 - `skiff_admin validate` checks config → `apply` activates explicitly (binds CCC + role list)
 
-### Public ask page (3100 + internet)
+### Skiff Q&A page (3100 + internet)
 
 - **Key auth** (timing-safe + per-IP fail-lock + rotatable key) + container whitelist (empty = all open)
 - **Q&A only**: response contains answer/answer_html/sessionId — **no internal trajectory**
 - **Internet exposure is a deployment-side choice** (tunnel / reverse proxy / port mapping) — the plugin does not mandate any specific exposure; default listens on 127.0.0.1 only, exposure is a deployment decision
+
+### WeChat bridge (F4c-3: iLink access)
+
+CCC-level config (`.opencode/serenity.json weixin`), credentials in the CCC's localstore (credential scope) — **one dsh process hosts multiple CCCs; each CCC runs its own bridge independently**:
+
+- **QR-code binding**: panel "WeChat Bridge" → pick CCC → scan (confirm via liteapp) → bot_token written as credential automatically
+- **Multi-account**: per-account QR binding + independent removal; `nextWeixinAccountId` reuses the smallest free id
+- **Message capabilities**: text / voice (server-side transcription `voice_item.text`) / image / file (CDN download + AES-128-ECB decrypt → drop to `_tmp/weixin-inbound/` → injected into the chat)
+- **Typing indicator**: `sendtyping 1` before handling → `0` after (WeChat shows "typing…"; failure is silent)
+- **Clean replies**: `stripThink` removes reasoning blocks; WeChat receives only the final text
+- **Session continuity**: fixed rebuildable sessionId (`skiff-weixin-<sha256(userid)>`) + **resume-or-create** — history survives restarts; live sessions are reused first
+- **Routing**: user → role (exact match → `*` fallback); the ACC is not bound to any concrete role (e.g. Zhaocai)
+- **Diagnostics**: `weixin-doctor` MSM (status/diag/verify, five links)
+
+### Autopilot Trajectory (autonomous cruising)
+
+Clock-driven **autonomous cognitive cruising** — the CCC defines the trajectory focus and biases; the plugin wakes on schedule (foreground injection, fully visible and interruptible):
+
+- **Wake conditions**: enabled + global switch (settings `autopilotEnabled`, default off — run only on designated machines) + target session (`--auto` suffix) + interval (decimal hours supported, min 0.01h ≈ 36s) + avoid-peak window (default Beijing 8–18) + bias script ready
+- **Focus anchoring**: `topPrompt` (CCC-defined, injected first on every wake) + bias content (CCC custom script, random exploration) — stable anchor + random direction complement each other
+- **Per-CCC independence**: each CCC has its own interval/session/bias/topPrompt/window; per-CCC running guards + global serialization; panel CCC selector + wake-now button
+- **Audit**: every wake recorded (recentWakes ring, shown in the panel); exponential-backoff retry on failure
+- **v1.27.12 removed the daily budget**: wake frequency is bounded only by interval + window (unbounded high-frequency experiments)
 
 ### Security model
 
@@ -183,10 +210,10 @@ A CCC carves out **any subset of its full-knowledge trajectory** (`.opencode/ser
 
 | Layer | Location | Contents |
 |-------|----------|----------|
-| DSH settings panel | settings.yaml (DSH native) | Feature toggles (gateway/rebuild/naming) + rebuild threshold + skiffEnabled/skiffDebugPort + acpEnabled/acpHttpPort + publicAskEnabled |
+| DSH settings panel | settings.yaml (DSH native) | Feature toggles (gateway/rebuild/naming) + rebuild threshold + skiffEnabled/skiffDebugPort + acpEnabled/acpHttpPort + publicAskEnabled + **autopilotEnabled (global switch, default off)** |
 | Plugin global file | `~/.dsh/serenity-hooks.json` (0600) | Gateway accounts (scrypt + TOTP) / host / port / workspace whitelist / cookieSecure / publicAsk key |
-| CCC config | `.opencode/serenity.json` | handyman.models (whitelist + default model) / sessionKeeper.threshold / safeMode.blacklist / skiff.roles |
-| CCC credentials | `localstore.json` | Credential/config namespaces (git policy configurable) |
+| CCC config | `.opencode/serenity.json` | handyman.models (whitelist + default model) / sessionKeeper.threshold / safeMode.blacklist / skiff.roles / **autopilotTrajectory (interval/session/bias/topPrompt/window)** / **weixin (accounts/routes/switch)** |
+| CCC credentials | `localstore.json` | Credential/config namespaces (git policy configurable); WeChat bot_token lives in credential scope |
 
 > Principle: **the plugin is global, the CCC is concrete** — accounts/toggles/thresholds belong to the plugin layer; roles/credentials/local preferences belong to the CCC.
 
@@ -215,11 +242,11 @@ A CCC carves out **any subset of its full-knowledge trajectory** (`.opencode/ser
 ```bash
 # Full dev loop (also via acc_msm exec dsh-develop under safe mode)
 pnpm typecheck          # hooks/dsh-serenity-hooks (node + client)
-pnpm test               # vitest full (50 files / 648 tests)
+pnpm test               # vitest full (52 files / 752 tests)
 pnpm build              # tsc + tsdown dual bundle (lib/index.js + client.js)
 ```
 
-- **Dev MSMs**: `scripts/dsh-develop.ts` (typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/github-push/npm-install-dev) + `scripts/dsh-crash-investigate.ts` (crash investigation, read-only)
+- **Dev MSMs**: `scripts/dsh-develop.ts` (typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/**pack-check**/github-push/npm-install-dev) + `scripts/dsh-crash-investigate.ts` (crash investigation, read-only) — `pack-check` validates tarball completeness before publishing (dynamically checks all lib/ JS artifacts + .d.ts, prevents missing chunks)
 - **Architecture**: Native Cordis plugin (real DSH tools via `ctx.tools.register` + interception seams `systemPrompt.section`/`tools/pre-execute`/`agent/turn-stopping`…); **zero DSH harness changes** — everything uses plugin seams/events/injected services
 - **Code map**: `docs/codebase-overview-v1.22.md` (layered architecture / module responsibilities / data flows / config layers)
 - **Design decisions**: D1–D30+ in CHANGELOG.md and the maintenance skill (`dsh-serenity-plugin-development`)
@@ -232,7 +259,7 @@ pnpm build              # tsc + tsdown dual bundle (lib/index.js + client.js)
 | Host | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no source reuse; same ACC standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, byte-aligned on platform-neutral text |
-| Tools | msm_list/exec/cc-fs/session etc. | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore/skiff_admin |
+| Tools | msm_list/exec/cc-fs/session etc. | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore/skiff_admin/autopilot-trajectory |
 
 **The same CCC can switch between osp / dsh runtimes freely**: `.serenity` marker, `.opencode/skills/`, config, and `AGENT_SESSIONS/` share cross-runtime file formats; only the platform layer differs (tool names/injection channel); the cognitive constraints the agent receives are identical after switching.
 
@@ -252,4 +279,4 @@ pnpm build              # tsc + tsdown dual bundle (lib/index.js + client.js)
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.26.11 &nbsp;|&nbsp; **Prereq**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **Tests**: 50 files / 648 tests
+> **Version**: v1.27.12 &nbsp;|&nbsp; **Prereq**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **Tests**: 52 files / 752 tests
