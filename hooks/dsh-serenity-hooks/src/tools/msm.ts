@@ -24,7 +24,7 @@ function renderText(value: unknown): ContentBlock[] {
 export const msmTool = defineTool({
   name: 'acc_msm',
   description:
-    'MSM (Mech & Semi-Mech) framework: list lists registered MSMs (header+flags display); exec executes (600s timeout, path-escape + symlink blocking, injects SERENITY_ROOT/CCC/VERSION env, appends --help TIP on failure; first arg --list/--schema/--format=json is protocol); register/deregister manage the registry (path inside root + script exists + globally unique validation, auto git precision commit); check quality checks DC-M1~M4; guide development manual; ccc-config CCC config reference (handyman.models/sessionKeeper.threshold/localstore.gitTrack/hooks.autoRestoreSession). Reuses the CCC mech-registry.json.',
+    'MSM (Mech & Semi-Mech) framework: list lists registered MSMs (header+flags display); exec executes (600s timeout, path-escape + symlink blocking, injects SERENITY_ROOT/CCC/VERSION env, appends --help TIP on failure; first arg --list/--schema/--format=json is protocol); register/deregister manage the registry (path inside root + script exists + globally unique validation, auto git precision commit); check quality checks DC-M1~M4; guide development manual; ccc-config CCC config reference (all sections: handyman.models / sessionKeeper.threshold / localstore.gitTrack / hooks.autoRestoreSession / safeMode.blacklist / skiff.roles / autopilotTrajectory / weixin incl. message hook full guide). Reuses the CCC mech-registry.json.',
   parameters: {
     action: { type: 'string', enum: [...MSM_ACTIONS], required: true, description: 'Subcommand: list/exec/register/deregister/check/guide/ccc-config' },
     name: { type: 'string', description: 'MSM name (exec/register/deregister)' },

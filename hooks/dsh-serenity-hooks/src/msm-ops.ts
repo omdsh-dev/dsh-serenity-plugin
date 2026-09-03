@@ -199,6 +199,85 @@ safe-mode 由 WebUI 开关控制（写 .serenity-safe-on 标记）；黑名单�
 
   Config:
     { "safeMode": { "blacklist": [".secrets/"] } }
+
+── 6. skiff.roles（F4 认知子集角色）──
+Skiff 角色 = 全知全能 trajectory 的任意子集（CCC 定义）。每角色独立模型 + 双白名单
+（MSM 白名单 msms[] 与非 MSM 工具白名单 tools[]，白名单外全隐藏；skill 加载恒可用）。
+trajectory 纪律子集（session/keeper/rebuild 参与项）默认全关 = 完全独立。
+systemPrompt 内联 或 systemPromptFile（.md 引用，推荐）——角色会话的完整人格/边界提示词。
+validate 校验 / apply 生效 / list 查看：acc_msm exec skiff_admin <guide|validate|apply|list>。
+
+  Config:
+    { "skiff": { "roles": {
+        "qa": {
+          "model": "provider/model",
+          "msms": ["web-search", "vlm-describe"],
+          "tools": ["read", "grep", "glob"],
+          "systemPromptFile": ".opencode/skiff/qa.md"
+        } } } }
+
+── 7. autopilotTrajectory（自动巡航轨迹）──
+CCC 定义的一条自主 trajectory——时钟到点自动唤起（前台注入，用户可见可介入）。
+未配置或 enabled=false → 完全不启动（零资源占用）。多 CCC 独立：每 CCC 自己的配置。
+唤起消息四段式：轨迹焦点 topPrompt（最先注入，稳定锚）→ 身份锚定 → 先验偏见
+（CCC 根脚本 biasProvider 输出）→ 任务。目标会话 session 必填（目录须带 --auto 后缀）。
+诊断/状态/立即唤起：acc_msm exec autopilot-trajectory <all|check|status|diag>。
+
+  Config:
+    { "autopilotTrajectory": {
+        "enabled": true,
+        "intervalHours": 2,
+        "session": "S151",
+        "biasProvider": "autopilot-bias.ts",
+        "topPrompt": "本轨迹核心目标/纪律/质量要求（CCC 自填，防漂移）",
+        "avoidWakeHours": { "start": 8, "end": 18 }
+      } }
+
+── 8. weixin（微信桥 F4c-3，含消息记录 hook）──
+CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 独立对接微信桥。
+账号/路由/开关在此文件；**bot_token 凭据在 CCC localstore credential scope**
+（扫码绑定后自动写入，永不进 git 明文面）。
+路由 user → role：exact 优先，* 通配兜底；role 必须 ∈ 该 CCC skiff.roles。
+面板（WebUI 设置 → 微信桥）可扫码绑定/移除账号/编辑路由；acc_msm exec weixin-doctor
+<status|diag|verify> 排查。凭据主动查看：localstore get WEIXIN_<ACCOUNT>_TOKEN。
+
+  Config:
+    { "weixin": {
+        "enabled": true,
+        "hook": "scripts/weixin-message-hook.ts",
+        "accounts": [{ "accountId": "wechat-1", "name": "家庭助手", "enabled": true }],
+        "routes": [{ "user": "*", "role": "zhaocai" }]
+      } }
+
+  ▸ weixin.hook（消息记录 hook，v1.27.13）：
+  微信桥每收/发一条消息触发一次 CCC 自写脚本，由 CCC 自行持久化保存（存哪/存成什么
+  /是否入库全归 CCC——ACC 不绑定存储）。未配置 hook → 零变化（不触发）。
+
+  触发（双向）：
+    incoming  = 用户 → bot：路由命中后、媒体落盘后触发（文本含语音转写；媒体带落盘 relPath）
+    outgoing  = bot → 用户：回复发送成功后触发（reply = 用户实际收到的纯文本，已剥离 think）
+
+  脚本约定（事件 JSON 单行经 stdin 传入；bun 优先 node 兜底）：
+    #!/usr/bin/env bun  或  node script.js —— 读 process.stdin 整段 JSON.parse
+    const ev = JSON.parse(await new Response(process.stdin).text())
+    ev.event === 'incoming' | 'outgoing'
+
+  事件 schema（**不含任何会话凭据**——context_token/bot_token/token/aes_key 均不出现）：
+    { "event": "incoming", "ts": 1788359941488, "cccRoot": "/path/ccc",
+      "accountId": "wechat-1", "userId": "u1@im.wechat",
+      "sessionId": "skiff-weixin-xxx", "role": "zhaocai",
+      "message": { "text": "你好", "media": [{ "kind": "image", "relPath": "_tmp/weixin-inbound/<hash>/img_x.jpg" }] } }
+    { "event": "outgoing", "ts": ..., "cccRoot": ..., "accountId": ...,
+      "userId": ..., "sessionId": ..., "role": ...,
+      "reply": "已记录（纯文本）" }
+
+  示例脚本（追加到按日文件——持久化归 CCC 自选：文件/DB/远端均可）：
+    const fs = require('node:fs'); const p = '/path/ccc/AGENT_SESSIONS/_weixin-log.jsonl';
+    fs.appendFileSync(p, JSON.stringify(ev) + '\\n');
+
+  执行语义（旁路容忍）：异步 fire-and-forget + 15s 超时 kill + 失败仅日志——
+  微信桥消息处理/回复不受 hook 影响；脚本须在 CCC 根内（路径逃逸拒绝）。
+  媒体 relPath 指向 _tmp/weixin-inbound/（临时目录）——需持久保存媒体文件请自行 copy。
 `
 
 
