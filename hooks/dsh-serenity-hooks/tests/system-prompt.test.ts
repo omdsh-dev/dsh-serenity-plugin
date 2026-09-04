@@ -6,7 +6,8 @@ import {
   entrySkillSectionText,
   registerEntrySkillSectionGlobal,
   serenitySystemPrompt,
-  accBlock,
+  identityBlock,
+  toolsBlock,
   cceBlock,
   principlesBlock,
   eapBlock,
@@ -59,7 +60,7 @@ describe('system-prompt: 入口 skill 发现（.serenity 记号 = 顶层入口�
   })
 })
 
-describe('system-prompt: 结构注入（v1.19.8：ACC→Metaphor→Principles→CCE→EAP→SKILL）', () => {
+describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Principles→CCE→EAP→SKILL→Tools→Session）', () => {
   it('serenitySystemPrompt 含 ACC/Metaphor/Principles/CCE/EAP/SKILL 全文', () => {
     setupCccWithSkill('tg-serenity')
     const text = serenitySystemPrompt(dir)
@@ -73,17 +74,34 @@ describe('system-prompt: 结构注入（v1.19.8：ACC→Metaphor→Principles→
     expect(text).not.toContain('=== Serenity Constraints ===')
   })
 
-  it('ACC 块：CCC 名/版本/工具清单 + 平台工具说明（Root 边界归 Constraints 块，v1.19.6 去重）', () => {
-    const block = accBlock(dir)
+  it('身份块：CCC 名/版本 + 平台工具说明，不含工具清单（需求③：工具清单移出 toolsBlock）', () => {
+    const block = identityBlock(dir)
     expect(block).toContain(`ACC: dsh-serenity-hooks v${ACC_VERSION}`)
     expect(block).toContain(`CCC: sp-`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
+    // 需求③：身份块不再内嵌工具清单
     for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman']) {
-      expect(block).toContain(tool)
+      expect(block).not.toMatch(new RegExp(`^  ${tool} `, 'm'))
     }
     // EAP 优化 #2：说明平台工具仍可用（关系方向明确）
     expect(block).toContain('DSH platform tools remain available')
     expect(block).toContain('read/write/edit/glob/grep')
+    // 指引指向文末 Tools 块（heading 短语，非完整头——避免干扰块序 indexOf 定位）
+    expect(block).toContain('"Serenity Tools" heading')
+  })
+
+  it('toolsBlock：13 工具清单 + MSM 调用示例（需求③：独立块放 SKILL 后 Session 前）', () => {
+    const block = toolsBlock()
+    expect(block).toContain('=== Serenity Tools ===')
+    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman', 'session_rebuild', 'localstore', 'skiff_admin', 'autopilot-trajectory']) {
+      expect(block).toContain(tool)
+    }
+    // MSM 调用协议示例（3 步：list 发现 / --schema 1 查用法 / exec 执行）
+    expect(block).toContain('MSM call protocol')
+    expect(block).toContain('acc_msm list')
+    expect(block).toContain('--schema 1')
+    expect(block).toContain('acc_msm exec <name> <args...>')
+    expect(block).toContain('never edit mech-registry.json directly')
   })
 
   it('CCE 块：5 行为约束 + H_op（逐字对齐 osp）', () => {
@@ -189,7 +207,7 @@ describe('system-prompt: EAP 块（S131 P1-6 扩展）', () => {
     expect(block).toContain('external reconstructability')
   })
 
-  it('serenitySystemPrompt 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL（v1.19.8）', () => {
+  it('serenitySystemPrompt 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL→Tools→Session（需求③）', () => {
     setupCccWithSkill('tg-serenity')
     const text = serenitySystemPrompt(dir)
     const acc = text.indexOf('=== Serenity ACC ===')
@@ -198,12 +216,15 @@ describe('system-prompt: EAP 块（S131 P1-6 扩展）', () => {
     const cce = text.indexOf('=== Serenity CCE ===')
     const eap = text.indexOf('=== Serenity EAP ===')
     const skill = text.indexOf('顶层入口原文内容')
+    const tools = text.indexOf('=== Serenity Tools ===')
     expect(acc).toBeGreaterThanOrEqual(0)
     expect(acc).toBeLessThan(meta)
     expect(meta).toBeLessThan(pri)
     expect(pri).toBeLessThan(cce)
     expect(cce).toBeLessThan(eap)
     expect(eap).toBeLessThan(skill)
+    // 需求③：Tools 块在 SKILL 后（无 Session 时它接近文末）
+    expect(tools).toBeGreaterThan(skill)
   })
 })
 

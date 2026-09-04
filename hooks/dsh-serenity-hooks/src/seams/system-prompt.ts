@@ -55,8 +55,8 @@ function sanitizeSkillContent(content: string): string {
 
 // ── 5 块注入文本（逐字对齐 opencode-serenity-plugin compacting.ts system.transform）──
 
-/** 1) ACC 块：身份 + CCC 名/Root + 内置工具清单（工具名换本插件真实 11 工具） */
-export function accBlock(root: string): string {
+/** 1) 身份块：ACC 身份 + CCC 名 + 平台工具说明（需求③ S142：工具清单移出为独立 toolsBlock 放装配末尾——身份先行、工具参考殿后） */
+export function identityBlock(root: string): string {
   const cccName = basename(root)
   return [
     '',
@@ -66,26 +66,52 @@ export function accBlock(root: string): string {
     '',
     'You are running inside a Concrete Cognitive Container (CCC) —',
     'the runtime instance of an Abstract Cognitive Container (ACC).',
-    'The ACC (this plugin) provides the following built-in tools:',
-    '',
-    '  cc_fs     — CCC filesystem operations (root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
-    '  session   — session lifecycle (list/show/create/health/qa/archive/summary)',
-    '  acc_kit   — ACC utility kit (health: CCC three principles / time: now / wait: wait N seconds)',
-    '  cc_git    — git operations (status/commit/push/log)',
-    '  acc_msm   — MSM framework (list/exec/register/deregister/check/guide)',
-    '  eap       — return the full EAP cognitive quality framework',
-    '  neat      — return the full Neat design collaboration protocol',
-    '  cce       — return the full Cognitive Continuity Engineering framework',
-    '  handyman  — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done, recursing into same-model subagents; jobs=[] orchestrates parallel work',
-    '  session_rebuild — rebuild this conversation in place from SESSION.md when the trajectory-tracker trips',
-    '  localstore — ACC local credential/config storage (CCC-root localstore.json, JSON format; git policy localstore.gitTrack default deny); doc subcommand outputs the spec',
-    '  skiff_admin — Skiff (F4, experimental): CCC cognitive-subset roles — guide (definition tutorial) / validate (config check) / list (role summary)',
+    'The ACC (this plugin) is a cognitive container harness: it provides',
+    'deterministic tools, mechanical constraints, and session continuity.',
+    'The complete built-in tool list is at the end of this prompt under the',
+    '"Serenity Tools" heading — read it before using any ACC tool.',
     '',
     '  ℹ️ Use relative paths from the CCC root for CCC-internal file operations (read/write/edit/glob/grep etc.), e.g. AGENT_SESSIONS/2026-08-14--S134--x/SESSION.md; Root / absolute SESSION.md paths are identifiers only, not tool arguments',
     '',
-    'The DSH platform tools remain available too (read/write/edit/glob/grep/web_search/ask_user_question/subagent/workflow/goal and more) — the ACC tools above are the serenity-native layer, not the only tools.',
+    'The DSH platform tools remain available too (read/write/edit/glob/grep/web_search/ask_user_question/subagent/workflow/goal and more) — the ACC tools are the serenity-native layer, not the only tools.',
     '',
     'Additional MSMs registered by this CCC are available — call acc_msm list to discover them.',
+    '',
+  ].join('\n')
+}
+
+/**
+ * 工具清单块（需求③ S142 用户拍板：工具列表移装配末尾 + MSM 调用示例）：
+ * 原 accBlock 内嵌 13 行工具清单 → 独立成块放装配末尾（SKILL 后、Session 前）。
+ * 身份先行（认知轨迹开头不被 13 行清单干扰）、工具参考殿后（需要时再看）。
+ * 附带 MSM 调用示例（用户拍板：顶层提示词加调用方式说明，避免偶发调用错误——
+ * 模型对 acc_msm 参数面/协议 flag 理解不稳）。
+ */
+export function toolsBlock(): string {
+  return [
+    '',
+    '=== Serenity Tools ===',
+    'The ACC (this plugin) provides the following built-in tools:',
+    '',
+    '  cc_fs     — CCC filesystem operations (root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
+    '  session   — session lifecycle (list/show/create/use/close/health/qa/archive/summary/hook-develop-guide)',
+    '  acc_kit   — ACC utility kit (health: CCC three principles / time: now / wait: wait N seconds)',
+    '  cc_git    — git operations (status/commit/push/log)',
+    '  acc_msm   — MSM framework (list/exec/register/deregister/check/guide/ccc-config)',
+    '  eap       — return the full EAP cognitive quality framework',
+    '  neat      — return the full Neat design collaboration protocol',
+    '  cce       — return the full Cognitive Continuity Engineering framework',
+    '  handyman  — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done; jobs=[] orchestrates parallel work',
+    '  session_rebuild — rebuild this conversation in place from SESSION.md when the trajectory-tracker trips',
+    '  localstore — ACC local credential/config storage (CCC-root localstore.json, JSON format; git policy localstore.gitTrack default deny); doc subcommand outputs the spec',
+    '  skiff_admin — Skiff (F4, experimental): CCC cognitive-subset roles — guide (definition tutorial) / validate (config check) / list (role summary)',
+    '  autopilot-trajectory — Autopilot Trajectory one-stop management (all/init/random/diag/doc/check/status/guide)',
+    '',
+    'MSM call protocol (registered CCC MSMs, deterministic Mech & Semi-Mech):',
+    '  1. Discover:       acc_msm list                    — list all registered MSMs',
+    '  2. Inspect usage:  acc_msm exec <name> --schema 1  — print one MSM\'s usage/flags (protocol flag, no execution)',
+    '  3. Execute:        acc_msm exec <name> <args...>   — run the MSM with business args (first arg may be --list/--schema/--format=json)',
+    '  Register new MSMs with acc_msm register; deregister with acc_msm deregister (registry is ACC-managed — never edit mech-registry.json directly).',
     '',
   ].join('\n')
 }
@@ -443,8 +469,11 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
 /**
  * 完整系统提示词注入文本（v1.19.8 结构精简，S142 重建视角 R↓）：
  * 身份（ACC）→ 世界模型（Metaphor）→ 信念/边界（Principles）→ 时间约束（CCE）
- * → 质量（EAP）→ 状态（SafeMode/Localstore）→ CCC 上下文（SKILL）→ 会话（Session）。
- * 认知展开顺序：我是谁 → 我所在的世界 → 为什么 → 如何一致 → 产物标准 → 当前状态 → 上下文。
+ * → 质量（EAP）→ 状态（SafeMode/Localstore）→ CCC 上下文（SKILL）→ 工具参考（Tools）→ 会话（Session）。
+ * 认知展开顺序：我是谁 → 我所在的世界 → 为什么 → 如何一致 → 产物标准 → 当前状态 → 上下文 → 工具参考 → 会话。
+ *
+ * 需求③（S142 用户拍板）：工具清单从 accBlock 移出为独立 toolsBlock，
+ * 放 SKILL 后 Session 前（工具参考殿后，身份先行不被 13 行清单干扰）。
  *
  * v1.23.1 persona（彩蛋）：persona.mode 配置 → EAP 块替换为 Persona 块（输出约束），
  * Principles 剥离 MSM 原则段（指令遵循约束）——用户文本承接两处风格；本体论/关系段/
@@ -454,7 +483,7 @@ export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSI
   const persona = readPersonaSettings()
   const personaOn = persona.mode !== '' && persona.overrideText.trim() !== ''
   const parts = [
-    accBlock(root),
+    identityBlock(root),
     metaphorBlock(),
     principlesBlock(root, personaOn),
     cceBlock(),
@@ -466,6 +495,8 @@ export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSI
   if (state) parts.push(state)
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
+  // 需求③：工具参考块殿后（SKILL 后、Session 前）——身份先行、工具清单独立成块
+  parts.push(toolsBlock())
   const session = sessionBlock(root, scope)
   if (session) parts.push(session)
   // 对齐 osp：块间以空行分隔（osp 逐项 push output.system，host 以换行拼接；不加 `---` 分隔线）

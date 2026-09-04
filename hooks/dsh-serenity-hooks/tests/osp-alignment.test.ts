@@ -6,8 +6,9 @@
  * 用户验证满意后本 spec 正式化——osp 侧按本 spec 同步（opencode-serenity-plugin
  * compacting.ts system.transform，S142/S138 协作，osp 待同步）。
  *
- * 对齐契约（v1.19.9 新结构）：
- *   1. 装配顺序 — ACC → Metaphor → Principles → CCE → EAP → [SafeMode/Localstore] → SKILL → Session
+ * 对齐契约（v1.19.9 新结构 + 需求③ Tools 块）：
+ *   1. 装配顺序 — ACC(身份) → Metaphor → Principles → CCE → EAP → [SafeMode/Localstore]
+ *                → SKILL → Tools → Session（需求③：工具清单独立成块放 SKILL 后 Session 前）
  *   2. CCE 块    — 与 osp 逐字节一致（无例外）；v1.19.6 删 "CCE AND EAP" 段（EAP 定义唯一
  *                  真相源 = EAP 块）→ osp 需同步删段
  *   3. Principles 块 — v1.19.8 合并原 osp Constraints 块（认知容器本体论 + MSM 原则 +
@@ -17,8 +18,9 @@
  *   5. EAP 块    — dsp 扩展（osp 无对应）
  *   6. Session 块 — 与 osp 逐字节一致（相同会话值时；DSH todowrite 无 priority 字段）
  *   7. SKILL 全文 — 原文直推（无包裹头），对齐 osp `output.system.push(state.skillContent)`
- *   8. ACC 块    — 结构对齐（身份行/CCC/工具清单/MSM 发现行；v1.19.6 去 Root——唯一真相源
- *                  = Principles 块边界；工具清单为平台真实工具，允许不同）
+ *   8. 身份块 + Tools 块 — 结构对齐（身份行/CCC；工具清单 + MSM 调用示例独立成块——
+ *                  v1.19.6 去 Root（唯一真相源 = Principles 块边界）；工具清单为平台真实工具，
+ *                  允许不同；需求③ 工具参考殿后）
  *   9. 块间拼接  — 空行分隔，无 `---` 分隔线
  */
 
@@ -27,7 +29,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
-  accBlock,
+  identityBlock,
+  toolsBlock,
   cceBlock,
   principlesBlock,
   sessionBlock,
@@ -198,7 +201,7 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
     expect(text).toBe('---\nname: tg-serenity\ndescription: 系统入口\n---\n顶层入口原文内容')
   })
 
-  it('serenitySystemPrompt() 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL→Session，无 --- 分隔线（v1.19.8）', () => {
+  it('serenitySystemPrompt() 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL→Tools→Session，无 --- 分隔线（需求③ Tools 放 SKILL 后 Session 前）', () => {
     setupCccWithSkill('tg-serenity')
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
     mkdirSync(join(dir, 'AGENT_SESSIONS', dirName), { recursive: true })
@@ -212,6 +215,7 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
     const cceIdx = text.indexOf('=== Serenity CCE ===')
     const eapIdx = text.indexOf('=== Serenity EAP ===')
     const skillIdx = text.indexOf('顶层入口原文内容')
+    const toolsIdx = text.indexOf('=== Serenity Tools ===')
     const sesIdx = text.indexOf('=== Serenity Session ===')
     expect(accIdx).toBeGreaterThanOrEqual(0)
     expect(metaIdx).toBeGreaterThan(accIdx)
@@ -219,23 +223,41 @@ describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
     expect(cceIdx).toBeGreaterThan(priIdx)
     expect(eapIdx).toBeGreaterThan(cceIdx)
     expect(skillIdx).toBeGreaterThan(eapIdx)
-    expect(sesIdx).toBeGreaterThan(skillIdx)
+    // 需求③：Tools 块在 SKILL 后、Session 前
+    expect(toolsIdx).toBeGreaterThan(skillIdx)
+    expect(sesIdx).toBeGreaterThan(toolsIdx)
     expect(text).not.toContain('---\n\n')
     expect(text).not.toContain('# CCC 入口技能')
   })
 })
 
-describe('osp 对齐：ACC 块结构（工具清单平台化，文档化差异）', () => {
-  it('accBlock() 含身份行/CCC/内置工具/MSM 发现行（Root 边界归 Constraints 块，v1.19.6 去重）', () => {
-    const block = accBlock(dir)
+describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，需求③）', () => {
+  it('identityBlock() 含身份行/CCC/MSM 发现行，不含工具清单（Root 边界归 Constraints 块，v1.19.6 去重）', () => {
+    const block = identityBlock(dir)
     expect(block).toContain(`ACC: dsh-serenity-hooks v${ACC_VERSION}`)
     expect(block).toContain(`CCC: ${dir.split('/').pop()}`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     expect(block).toContain('You are running inside a Concrete Cognitive Container (CCC)')
-    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman', 'session_rebuild', 'localstore']) {
+    // 身份块不再内嵌工具清单（需求③移出 toolsBlock）
+    expect(block).not.toContain('cc_fs     —')
+    expect(block).not.toContain('handyman  —')
+    expect(block).toContain('call acc_msm list to discover them')
+    // 指引指向文末 Tools 块（heading 短语，非完整头——避免干扰块序 indexOf 定位）
+    expect(block).toContain('"Serenity Tools" heading')
+  })
+
+  it('toolsBlock() 含 13 工具清单 + MSM 调用示例（需求③）', () => {
+    const block = toolsBlock()
+    expect(block).toContain('=== Serenity Tools ===')
+    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman', 'session_rebuild', 'localstore', 'skiff_admin', 'autopilot-trajectory']) {
       expect(block).toContain(tool)
     }
-    expect(block).toContain('call acc_msm list to discover them')
+    // MSM 调用示例（3 步协议：发现/查用法/执行）
+    expect(block).toContain('MSM call protocol')
+    expect(block).toContain('acc_msm list')
+    expect(block).toContain('--schema 1')
+    expect(block).toContain('acc_msm exec <name> <args...>')
+    expect(block).toContain('mech-registry.json')
   })
 })
 
