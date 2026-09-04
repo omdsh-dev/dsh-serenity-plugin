@@ -1,8 +1,9 @@
-# 四项需求调研 v0.1（2026-09-02，S142）— 等用户回家拍板后实现
+# 五项需求调研 v0.2（2026-09-02 首版 / 2026-09-04 加第⑤项，S142）— 等用户回家拍板后实现
 
-> 状态: **调研完成，未实现**（用户"先调研方案，等我回家再动手" / "调研好了回家一并决定"）
+> 状态: **调研完成，未实现**（用户"先调研方案，等我回家再动手" / "调研好了回家一并决定" / 2026-09-04 追加第⑤项"还是先调研"）
 > 范围: ① rebuild 阈值百分比→K 数值 ② 会话命名加 20 字内容概括（use/rebuild summary 参数）
 > ③ 系统提示词：MSM 调用示例 + 工具列表移末尾 ④ 目录式 ACC 使用指南（整合分散 guide）
+> ⑤ **MSM 注册表（mech-registry.json）写保护 + ACC 层完整性检查**（用户："msm注册的文件需要写保护起来，避免CCC意外写坏搞崩自己，同时要有ACC层检查方法检查注册表没坏，这东西太核心了"）
 
 ---
 
@@ -189,17 +190,89 @@
 
 ---
 
+## 需求 ⑤：MSM 注册表写保护 + ACC 层完整性检查（2026-09-04，用户追加）
+
+**用户意图**："msm注册的文件需要写保护起来，避免CCC意外写坏搞崩自己，同时要有ACC层检查方法检查注册表没坏，这东西太核心了"——mech-registry.json（MSM 注册表）是 CCC 执行层的地基：写坏 → `loadMsmEntries` JSON.parse 抛错 → acc_msm 全崩 + register 也无法修复（自锁）→ CCC 工具面瘫痪。需要 ① **结构性写保护**（只有 acc_msm register/deregister 可写）② **ACC 层检查方法**（注册表完整性/健康诊断）。
+
+### 现状（源码实证，2026-09-04）
+
+**注册表形态**：v1 wrapper `{version:1, description, entries:[...]}` 或裸数组（writeRegistry 保留原格式）。位置两类：
+- **root 级**：`<CCC根>/mech-registry.json`（`registryPathFor(root, undefined)`——register 无 --skill 时）
+- **skill 级**：`.opencode/skills/<skill>/references/mech-registry.json`（`findRegistries` 扫 skillsDir 收集 + root 级）
+- 消费方：`loadMsmEntries`（聚合去重 byName）被 acc_msm list/exec/register/deregister/check + `skiff-admin` validate（registered.has）+ `output-guard`（MSM 工具名词表）+ `session`（hook 开发指南）共用——**注册表坏 = 大面积崩**。
+
+**现有保护（dsp 侧，逐通道核对）**：
+
+| 通道 | 现有保护 | 缺口 |
+|------|---------|------|
+| `cc_fs` 写子命令（fs-ops.ts `validateWritePath` L131-146） | **skill 级 ✓**：`relCi.endsWith('/mech-registry.json') && /(^|\/)(opencode|\.opencode)\/skills\//` → throw "refusing to directly modify mech-registry.json — use acc_msm register/deregister" | **root 级 ✗**：root rel = `mech-registry.json` 不以 `/` 结尾 → `endsWith('/mech-registry.json')` false → **cc_fs 可直接写坏 root 级注册表** |
+| `write`/`edit`/`append`/`touch` 原生工具（guards.ts `decideGuard`） | 无注册表保护——凭据硬名单仅 `localstore.json`（v1.26.3），治理文件仅 `.serenity*`，黑名单用户可配 | **✗ 完全无保护**：write/edit 直接覆盖任意 mech-registry.json（skill 级+root 级）——模型误操作/坏 JSON/截断写 → 注册表坏 |
+| `acc_msm register/deregister`（msm-ops.ts `writeRegistry`） | 合法通道 ✓：写前 parseRegistry 校验现存 + 路径根内校验 + name 全局唯一 + 精 git commit（只 add 注册表文件） | 非原子写（直接 writeFileSync）；写中断（进程 kill）→ 半写 JSON？罕见（写前有 parse 无写后校验） |
+| `bash` | safe-mode 禁 bash；非 safe-mode bash 可绕过一切路径守卫（用户全权面，含 localstore 同理） | 结构性边界不依赖 safe-mode（wardn）；与 localstore.json 同级别考虑——但 localstore 走"读 deny"，注册表走"写 deny"（注册表需可读——output-guard/skiff-admin 读它建表） |
+
+**osp 对照**：osp `file-system-tool.ts` L96 有同句 cc_fs 保护（聚合单注册表模式，ccc_admin 管理）；osp 无注册表完整性检查（check 只 DC-M1~M4）。**本需求 dsp/osp 双实现**（D11 同一 spec——保护语义 + 检查方法两仓同做）。
+
+### 方案要点
+
+**① 结构性写保护（guards.ts 扩展——仿 localstore 数据面守卫先例，语义 = 写 deny 读 allow）**
+
+- `SENSITIVE_CREDENTIAL_FILES`（读 deny 集合）旁新增 **`PROTECTED_REGISTRY_FILES`（写 deny 集合）**：匹配 `mech-registry.json`（root 级 `rel === 'mech-registry.json'`）+ skill 级（`rel.endsWith('/references/mech-registry.json')` 或 `/(^|\/)(opencode|\.opencode)\/skills\/.*\/mech-registry\.json$/`）
+- `decideGuard` 2a 段扩展：写工具（isWriteTool 含 cc_fs 写子命令）命中 → deny `"mech-registry.json is ACC-managed — use acc_msm register/deregister"`；读工具放行（注册表必须可读——output-guard/skiff-admin/模型自查）
+- **豁免面**：`acc_msm register/deregister` 自身走 `writeRegistry`（工具内部实现非 pre-execute 工具调用）→ 天然豁免 ✓；外部面 skiff 角色白名单不含 write/edit → 无冲突
+- **fs-ops 补漏**：`validateWritePath` root 级匹配补 `relCi === 'mech-registry.json'`（修 endsWith 前导斜杠盲区）——或统一收口到 guards（cc_fs 也过 pre-execute，guards deny 已覆盖；fs-ops 内层校验保留作纵深）
+- **原子写增强（可选）**：writeRegistry 改 tmp + rename（同目录原子替换）——写中断不留半文件
+
+**② ACC 层检查方法（新增 `acc_msm check-registry` 或并入 check？）**
+
+- 现状：`acc_msm check`（DC-M1~M4）检查**脚本质量**（.test/main guard/双向注册/type:path）——**注册表结构健康不在内**；且 check 首行 `loadMsmEntries` 在注册表坏时直接 throw → 连诊断都出不来
+- 目标检查项（纯函数可单测）：
+  - **格式**：每个注册表文件 JSON.parse 合法（剥 BOM）+ v1 wrapper 或数组结构
+  - **结构**：entries[] 存在、每 entry 字段（name/path/skill/category/description）类型合法
+  - **唯一性**：name 全局唯一（loadMsmEntries byName 聚合语义——重复即歧义）
+  - **引用完整**：path 根内 + 脚本 existsSync（DC-M3 反向已有，并入汇总）
+  - **flags 合法**：数组 + name/type/description 形态（新旧 style 兼容）
+  - **可执行性**：`prepareExec` 级 dry 验证（--schema 面）？
+- **输出**：每文件状态（ok/损坏）+ 损坏定位（哪文件哪条）+ 修复指引（git 恢复：register/deregister 精提交 = 每次变更都有 git 历史 → `git checkout -- <registry>` 或 cc_git 无 checkout 子命令？——bash 可用时 git restore；safe-mode 下建议手动恢复/用户介入）
+- **落点候选**：A 并入 `acc_msm check`（加 DC-M5 "registry health"——check 语义扩为"MSM 全链健康"；坏时不 throw 先报）/ B 新 action `check-registry`（独立可脚本化，autopilot 例行可跑）/ C `acc_kit health` 加一段（健康检查聚合入口）
+- **损坏自愈（可选延伸）**：check-registry 检测坏 + 注册表有 git 历史 → 提供 `--restore` 从 git 恢复（需 cc_git checkout 能力或 execFileSync git——msm-ops 已用 execFileSync git commit，可加 restore 子命令）
+
+### 影响面清单
+
+| 文件 | 改动 |
+|------|------|
+| `src/seams/guards.ts` | PROTECTED_REGISTRY_FILES 写 deny 集合 + decideGuard 2a 扩展 + deny 文案 |
+| `src/fs-ops.ts` | validateWritePath root 级匹配补漏（纵深保留） |
+| `src/msm-ops.ts` | check-registry 纯逻辑（或 check 扩展）+ 可选 writeRegistry 原子写 + 可选 git restore |
+| `src/tools/msm.ts` | action enum + description（+check-registry） |
+| `src/skiff-core.ts` | skiff MSM 白名单：check-registry 是否放行（读全零写——倾向放行） |
+| tests | guards.test（write/edit/cc_fs 写 root+skill 级 deny、读放行、register 豁免语义）+ msm.test（check-registry 各损坏形态）+ fs-ops.test（root 级补漏） |
+| osp 同步 | 同 spec 双实现（file-system-tool/guards/msm check） |
+| README/ccc-config | 工具面说明 + 恢复指引 |
+
+### 建议拍板
+
+1. 保护范围：仅注册表文件自身（mech-registry.json 两形态）vs 含 `.opencode/serenity.json`（CCC 配置同为核心——用户说"这东西太核心了"指注册表；serenity.json 是否一并纳入？）
+2. 检查方法落点：A 并入 acc_msm check（DC-M5）/ B 新 action check-registry / C acc_kit health 段
+3. 恢复能力：只输出修复指引（git restore 由用户/cc_git 执行）vs check-registry 内置 `--restore`（git 历史恢复）
+4. 写保护豁免确认：register/deregister 走内部 writeRegistry 天然豁免 ✓（无需白名单）；bash 非 safe-mode 不拦（与 localstore 同语义——结构性边界依赖 safe-mode 禁 bash）
+5. 是否顺带原子写（tmp+rename）防半写
+6. 与需求④（目录式 acc_guide）关系：check-registry 的恢复指引是否入 acc_guide
+
+---
+
 ## 执行顺序建议（等用户回家拍板后）
 
-1. **需求 ③**（纯文本结构，改动集中、测试面清晰）→ 2. **需求 ②**（命名链路 + rebuild 透传）→ 3. **需求 ①**（配置语义变更 + 面板）→ 4. **需求 ④**（新工具，独立增量，可随时插入）
+1. **需求 ③**（纯文本结构，改动集中、测试面清晰）→ 2. **需求 ②**（命名链路 + rebuild 透传）→ 3. **需求 ①**（配置语义变更 + 面板）→ 4. **需求 ④**（新工具，独立增量）→ 5. **需求 ⑤**（保护 + 检查，核心加固——可与 ④ 并行或按其紧急性提前；**倾向：⑤ 先于 ④**——注册表保护是地基，acc_guide 是便利层）
 2. 每项：实现 → test 全绿 → deploy 本机 → 用户验证 → 合并 bump 1.27.13/1.27.14（等用户显式要求发版，D14）
 
 ## 决策记录（R↓）
 
 | # | 决策 | 理由 |
 |---|------|------|
-| R1 | 四项均为用户回家后拍板项（本调研不改代码） | 用户"调研好了回家一并决定" |
+| R1 | 五项均为用户回家后拍板项（本调研不改代码） | 用户"调研好了回家一并决定" / "还是先调研" |
 | R2 | 需求①语义 = 绝对 token K（非比例） | 用户明确"从百分比改为具体数值，单位 K" |
 | R3 | 需求②编号日期固定派生、概括来自 summary 参数 | 用户"做成必填，但只影响那个概括，编号和日期还是固定的" |
 | R4 | 需求③工具清单独立成块移末尾 | 用户"把工具列表放到最后，减少对整个认知轨迹的负面影响" |
 | R5 | 需求④目录式指南：目录在前、详情各归各（单一真相源） | 用户"各自做 guide…要整合起来做个目录式的"——目录不复制详情，只索引 |
+| R6 | 需求⑤保护语义 = **写 deny 读 allow**（vs localstore 读 deny） | 注册表需被读（output-guard/skiff-admin/模型自查建 MSM 词表）；敏感值才读 deny——注册表是结构核心不是秘密 |
+| R7 | 需求⑤损坏后果 = 自锁（register 也崩无法自救）→ 恢复依赖 git 历史（register/deregister 精提交） | 实证：check 首行 loadMsmEntries throw → 无诊断输出；register 判重也 loadMsmEntries → 坏表无法 register 覆盖 |
