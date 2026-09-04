@@ -97,9 +97,35 @@ function buildMsmEnv(root: string): NodeJS.ProcessEnv {
  */
 const NPX_BIN = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 
-export type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 'guide' | 'ccc-config'
+export type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 'guide' | 'ccc-config' | 'catalog'
 
-export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'deregister', 'check', 'guide', 'ccc-config']
+export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'deregister', 'check', 'guide', 'ccc-config', 'catalog']
+
+/**
+ * ACC 能力目录（需求④ S142 用户拍板："acc 配置各自做 guide 越来越多，整合成目录式使用指南"）。
+ * 目录在前、详情各归各——**单一真相源**：本目录只索引"去哪个工具/子命令看详情"，不复制详情
+ * （避免 skiff_admin/weixin-doctor 等 guide 全文重复 → 多真相源 → 失同步）。
+ * 后续新增功能只需在此加一行（低熵可演进）。
+ */
+export const ACC_CATALOG = `═══ ACC Usage Catalog ═══
+Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
+
+  ① 会话与轨迹        → session tool（list/show/create/use/close/health/qa/archive/summary/hook-develop-guide）
+                         session_rebuild（超限重建；阈值 K 见 ccc-config / 设置面板重建阈值K）
+  ② 认知质量框架      → eap（E↑/R↓/S↑）/ neat（Neat 协议）/ cce（认知连续性工程）——渐进披露，无参即全文
+  ③ 工具与执行        → cc_fs（文件系统 15 子命令）/ cc_git（git）/ acc_kit（health 含注册表检查/time/wait）
+                         acc_msm（MSM 框架：本工具 list/exec/register/deregister/check/guide/ccc-config/catalog）
+                         handyman（杂工 agent 编排——guide 子命令：acc_msm exec handyman guide）
+  ④ 角色与对外面      → skiff_admin（Skiff 认知子集角色：guide/validate/apply/list——acc_msm exec skiff_admin guide）
+                         ACP（程序化 JSON-RPC 3100）/ Skiff 问答页（公网 ask）——面板「外部能力」组
+  ⑤ 自主与接入        → autopilot-trajectory（Autopilot 一站式：all/init/random/diag/doc/check/status/guide）
+                         weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：acc_msm exec weixin-doctor guide）
+  ⑥ CCC 配置总览      → acc_msm ccc-config（8 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/autopilotTrajectory/weixin）
+  ⑦ 注册表与安全      → mech-registry.json 由 acc_msm register/deregister 管理（写保护——不可直接编辑）
+                         acc_kit health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
+
+每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
+`
 
 export const MSM_GUIDE = `MSM Development Manual (Mech & Semi-Mech framework)
 
@@ -404,6 +430,9 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
 
     case 'guide':
       return { guide: MSM_GUIDE }
+
+    case 'catalog':
+      return { catalog: ACC_CATALOG }
 
     case 'exec': {
       const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)

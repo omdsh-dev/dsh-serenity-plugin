@@ -36,6 +36,24 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     expect(r.guide).toContain('--confirm')
   })
 
+  it('catalog 返回 ACC 使用目录（需求④：7 分区 + 只索引不复制详情——单一真相源）', () => {
+    expect(MSM_ACTIONS).toContain('catalog')
+    const r = runMsm(dir, { action: 'catalog' }) as { catalog: string }
+    expect(r.catalog).toContain('ACC Usage Catalog')
+    // 7 个能力分区
+    for (const area of ['会话与轨迹', '认知质量框架', '工具与执行', '角色与对外面', '自主与接入', 'CCC 配置总览', '注册表与安全']) {
+      expect(r.catalog).toContain(area)
+    }
+    // 各详细入口指引（目录指向 guide，不复制全文）
+    expect(r.catalog).toContain('ccc-config')
+    expect(r.catalog).toContain('skiff_admin')
+    expect(r.catalog).toContain('weixin-doctor guide')
+    expect(r.catalog).toContain('handyman')
+    // 单一真相源声明
+    expect(r.catalog).toContain('guides live with their feature')
+    expect(r.catalog).toContain('only points')
+  })
+
   it('exec --schema 返回条目 schema', () => {
     const scriptsDir = join(dir, '.opencode', 'skills', 't', 'scripts')
     mkdirSync(scriptsDir, { recursive: true })
