@@ -21,7 +21,8 @@ let dir: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'output-guard-'))
-  writeFileSync(join(dir, '.serenity'), 'test')
+  // 需求⑤a：注册表单级化——cccName = demo → 聚合档 .opencode/skills/demo/references/mech-registry.json
+  writeFileSync(join(dir, '.serenity'), 'demo')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
   mkdirSync(join(dir, '.opencode', 'skills', 'demo', 'references'), { recursive: true })
   // 凭据文件（测试敏感词源）

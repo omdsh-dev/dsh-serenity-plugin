@@ -12,6 +12,7 @@
 
 import {
   existsSync,
+  readFileSync,
   statSync,
   mkdirSync,
   rmSync,
@@ -122,6 +123,19 @@ function safeRel(root: string, abs: string): string {
 
 // ── 写操作路径校验（对齐 osp validateWritePath/assertNotProtected）──
 
+/** CCC 名：从 .serenity 首行解析（对齐 msm-ops readCccName——注册表 cccName 语义） */
+function readCccNameFromMarker(root: string): string | null {
+  try {
+    const marker = resolve(root, '.serenity')
+    if (!existsSync(marker)) return null
+    const content = readFileSync(marker, 'utf-8')
+    const line = content.split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'))
+    return line && line !== '' ? line : null
+  } catch {
+    return null
+  }
+}
+
 function validateWritePath(root: string, target: string): string {
   const absPath = target.startsWith('/') ? resolve(target) : resolveInside(root, target)
   // resolveInside 已保证根内；绝对路径需显式校验（pathInside 跨盘安全，Windows 审计问题 6）
@@ -129,17 +143,20 @@ function validateWritePath(root: string, target: string): string {
     throw new Error(`cc-fs: path "${target}" resolves to "${absPath}" which is outside serenity root "${root}"`)
   }
   // 保护 mech-registry.json — 只能通过 acc_msm register/deregister 注册/注销。
+  // 需求⑤a（S142 用户拍板：注册表单级化）：只保护 cccName 聚合档
+  // （.opencode/skills/<cccName>/references/mech-registry.json——cccName = .serenity 首行）
+  // 与 root 级（历史兜底形态）。历史分散 skill 注册表（其他 skill 目录的
+  // references/mech-registry.json）已废弃——不再保护，允许删除迁移。
   // relative 归一化反斜杠（Windows：resolveInside 返回反斜杠路径，正斜杠字面量永不匹配 → 保护失效，见问题 8）
   const rel = relative(root, absPath).split('\\').join('/')
   const relCi = process.platform === 'win32' ? rel.toLowerCase() : rel
-  // 修复：相对 root 的 rel 通常为 `opencode/skills/...`（无前导点），
-  // 原 `includes('/.opencode/skills/')` 要求前导 `/` 导致相对路径永不匹配 → 保护对
-  // touch/append 等相对路径写无效。改为匹配 `.../skills/.../mech-registry.json` 形态
-  // （含 references 目录），兼容带点/不带点 + win32 大小写不敏感。
-  if (
-    relCi.endsWith('/mech-registry.json') &&
-    /(^|\/)(opencode|\.opencode)\/skills\//.test(relCi)
-  ) {
+  const cccName = readCccNameFromMarker(root)
+  const aggregateRel = cccName
+    ? `.opencode/skills/${cccName}/references/mech-registry.json`.toLowerCase()
+    : null
+  const isAggregate = aggregateRel !== null && relCi === aggregateRel
+  const isRootLevel = relCi === 'mech-registry.json'
+  if (isAggregate || isRootLevel) {
     throw new Error(
       `cc-fs: refusing to directly modify mech-registry.json — use acc_msm register/deregister instead`,
     )

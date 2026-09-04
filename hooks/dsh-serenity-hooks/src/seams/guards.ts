@@ -8,7 +8,7 @@
  */
 
 import { resolve, relative } from 'node:path'
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
 import type { Context } from 'cordis'
 import type { ToolExecution, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -56,6 +56,38 @@ const CC_FS_WRITE_ACTIONS = new Set(['mkdir', 'rm', 'mv', 'cp', 'touch', 'append
  *   含 API keys/tokens/SSH 密码，即使 prompt 纪律失败也无值可吐（机械保证）。
  */
 export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
+
+/**
+ * MSM 注册表写保护（需求⑤b S142 用户拍板："msm注册的文件需要写保护起来，避免CCC意外写坏搞崩自己"）：
+ * mech-registry.json 是 CCC 执行层地基（坏 → loadMsmEntries 抛 → acc_msm/skiff/output-guard 全崩，
+ * register 也崩 → 自锁）。**写 deny、读 allow**（与 localstore 读 deny 语义区分 R6——注册表是
+ * 结构核心不是秘密，需被 output-guard/skiff-admin 读取建 MSM 词表）。
+ *
+ * 单级化（需求⑤a）后合法注册表 = cccName 聚合档 `.opencode/skills/<cccName>/references/mech-registry.json`
+ * （cccName = .serenity 首行）+ root 级 `mech-registry.json`（历史兜底形态）。
+ * 写工具命中 → deny（唯一合法写通道 = acc_msm register/deregister 内部 writeRegistry，
+ * 走工具实现不经 pre-execute → 天然豁免）；读工具放行。
+ */
+export function isProtectedRegistryRel(root: string, rel: string): boolean {
+  const relCi = process.platform === 'win32' ? rel.toLowerCase() : rel
+  if (relCi === 'mech-registry.json') return true
+  if (!relCi.endsWith('/mech-registry.json')) return false
+  // cccName 聚合档：.opencode/skills/<cccName>/references/mech-registry.json
+  try {
+    const marker = resolve(root, '.serenity')
+    if (existsSync(marker)) {
+      const line = readFileSync(marker, 'utf-8').split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'))
+      if (line) {
+        const aggregate = `.opencode/skills/${line}/references/mech-registry.json`.toLowerCase()
+        if (relCi === aggregate) return true
+      }
+    }
+  } catch {
+    /* 读标记失败 → 仅 root 级保护 */
+  }
+  // 其他 skill 目录的分散注册表已废弃（需求⑤a 单级化）——不再保护，允许删除迁移
+  return false
+}
 
 /** 判定工具是否为读类（read/grep/glob + cc_fs 只读子命令）：凭据文件对读工具同样 deny */
 export function isReadTool(toolName: string, action?: string): boolean {
@@ -128,6 +160,10 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
       // CCC 治理文件永远拒绝写入（safe-mode 是用户能力，agent 不能自行开关/篡改）
       if (rel === '.serenity-safe-on' || rel === '.serenity' || rel.startsWith('.serenity-safe-on/') || rel.startsWith('.serenity/')) {
         return { deny: `CCC governance file "${rel}" is reserved for the user — agent must not write`, kind: 'deny' }
+      }
+      // 需求⑤b：MSM 注册表写保护（写 deny 读 allow）——acc_msm register/deregister 是唯一合法写通道
+      if (isProtectedRegistryRel(root, rel)) {
+        return { deny: `mech-registry.json is ACC-managed (${rel}) — use acc_msm register/deregister instead of writing it directly`, kind: 'deny' }
       }
       const hit = matchBlacklist(rel, blacklist)
       if (hit) {

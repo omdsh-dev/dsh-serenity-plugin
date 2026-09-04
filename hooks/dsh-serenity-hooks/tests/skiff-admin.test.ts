@@ -14,6 +14,7 @@ let dir: string
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'skiff-admin-'))
+  // 需求⑤a：注册表单级化——cccName（.serenity 首行）= test → 聚合档 .opencode/skills/test/references/mech-registry.json
   writeFileSync(join(dir, '.serenity'), 'test')
 })
 
@@ -27,8 +28,11 @@ function writeConfig(cfg: unknown): void {
 }
 
 function writeRegistry(entries: Array<{ name: string; path: string }>): void {
+  // 需求⑤a：写入 cccName 聚合档（原 root 级 mech-registry.json 已废弃）
+  const refs = join(dir, '.opencode', 'skills', 'test', 'references')
+  mkdirSync(refs, { recursive: true })
   writeFileSync(
-    join(dir, 'mech-registry.json'),
+    join(refs, 'mech-registry.json'),
     JSON.stringify({ version: 1, description: 'test', entries: entries.map((e) => ({ ...e, skill: 'x', category: 'mech', description: 'd', usage: 'u', flags: [] })) }, null, 2),
   )
 }

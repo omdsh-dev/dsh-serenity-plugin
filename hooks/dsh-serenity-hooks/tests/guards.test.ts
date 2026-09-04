@@ -337,3 +337,48 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
     }
   })
 })
+
+describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，防 CCC 意外写坏搞崩自己）', () => {
+  // dir 的 .serenity=test → cccName=test → 聚合档 .opencode/skills/test/references/mech-registry.json
+  const aggRel = '.opencode/skills/test/references/mech-registry.json'
+
+  it('write/edit 直写 cccName 聚合档 → deny（ACC-managed）', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: aggRel })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'edit', pathArg: aggRel })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'touch', pathArg: aggRel })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'append', pathArg: aggRel })).kind).toBe('deny')
+  })
+
+  it('root 级 mech-registry.json 写 → deny（历史兜底形态仍保护）', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'mech-registry.json' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: 'mech-registry.json' })).kind).toBe('deny')
+  })
+
+  it('读工具读注册表 → allow（注册表需被读——output-guard/skiff-admin 建 MSM 词表；读 deny 只用于凭据）', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'read', pathArg: aggRel })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'info', pathArg: aggRel })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'grep', pathArg: aggRel })).kind).toBe('allow')
+  })
+
+  it('非 cccName skill 目录的 mech-registry.json（历史分散残留）→ 不再保护（单级化后废弃，允许删除迁移）', () => {
+    const legacy = '.opencode/skills/home-media/references/mech-registry.json'
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: legacy })).kind).toBe('allow')
+  })
+
+  it('其他普通文件写 → 不受注册表保护影响（allow）', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
+  })
+
+  it('cccName 非 test 的 CCC（.serenity=other）→ 只保护自己的聚合档，test 聚合档对其不保护', () => {
+    const otherDir = mkdtempSync(join(tmpdir(), 'guards-other-'))
+    try {
+      writeFileSync(join(otherDir, '.serenity'), 'other')
+      // other 的聚合档被保护
+      expect(decideGuard(base({ root: otherDir, toolName: 'write', pathArg: '.opencode/skills/other/references/mech-registry.json' })).kind).toBe('deny')
+      // test 的聚合档对 other CCC 不特殊保护（root 级除外）
+      expect(decideGuard(base({ root: otherDir, toolName: 'write', pathArg: aggRel })).kind).toBe('allow')
+    } finally {
+      rmSync(otherDir, { recursive: true, force: true })
+    }
+  })
+})

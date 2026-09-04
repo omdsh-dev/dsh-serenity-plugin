@@ -322,18 +322,18 @@ export function parseRegistry(raw: string): MsmEntry[] {
   return entries as MsmEntry[]
 }
 
+/**
+ * 注册表单级化（需求⑤a S142 用户拍板：注册表只有一级——对齐 osp cccName 单聚合档）：
+ * 所有 entry 集中写入 `.opencode/skills/<cccName>/references/mech-registry.json`
+ * （cccName = .serenity 首行，即顶层入口 skill 目录），skill 只作 entry 字段。
+ * 不再扫描/写入各 skill 目录的分散注册表（历史形态 v1.14~v1.27，register --skill
+ * 曾写入各自 skill 目录 —— 多真相源，废弃）。
+ */
 export function findRegistries(root: string): string[] {
-  const out: string[] = []
-  const skillsDir = join(root, '.opencode', 'skills')
-  if (existsSync(skillsDir)) {
-    for (const skill of readdirSync(skillsDir)) {
-      const p = join(skillsDir, skill, 'references', 'mech-registry.json')
-      if (existsSync(p)) out.push(p)
-    }
-  }
-  const rootRegistry = join(root, 'mech-registry.json')
-  if (existsSync(rootRegistry)) out.push(rootRegistry)
-  return out
+  const cccName = readCccName(root)
+  if (!cccName) return []
+  const aggregate = join(root, '.opencode', 'skills', cccName, 'references', 'mech-registry.json')
+  return existsSync(aggregate) ? [aggregate] : []
 }
 
 export function loadMsmEntries(root: string): MsmEntry[] {
@@ -367,10 +367,13 @@ export function scanSkillScripts(root: string): string[] {
   return out.sort()
 }
 
-function registryPathFor(root: string, skill?: string): string {
-  return skill
-    ? join(root, '.opencode', 'skills', skill, 'references', 'mech-registry.json')
-    : join(root, 'mech-registry.json')
+/**
+ * 注册表写入路径（需求⑤a 单级化）：永远返回 cccName 聚合档。
+ * skill 参数保留签名（兼容调用方）但只进 entry 字段，不决定写入位置。
+ */
+function registryPathFor(root: string, _skill?: string): string {
+  const cccName = readCccName(root) ?? 'unknown'
+  return join(root, '.opencode', 'skills', cccName, 'references', 'mech-registry.json')
 }
 
 function writeRegistry(path: string, entries: MsmEntry[], isV1Wrapped = true): void {
