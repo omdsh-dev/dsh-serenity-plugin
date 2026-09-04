@@ -129,7 +129,7 @@
   position: absolute;
   inset: 0;
   border-radius: 11px;
-  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.3));
+  background: var(--dsw-alias-border-l3);
   transition: background var(--ds-transition-duration-fast, 0.15s) var(--ds-ease-in-out, ease);
 }
 
@@ -141,12 +141,12 @@
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: var(--dsw-alias-label-primary, #eee);
+  background: var(--dsw-alias-label-primary-foreground);
   transition: transform var(--ds-transition-duration-fast, 0.15s) var(--ds-ease-in-out, ease);
 }
 
 .ss-switch input:checked + .ss-switchTrack {
-  background: var(--dsw-alias-state-success-primary, #22c55e);
+  background: var(--dsw-alias-brand-primary);
 }
 
 .ss-switch input:checked + .ss-switchTrack::after {
@@ -175,7 +175,7 @@
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-fill-l1, rgba(128, 128, 128, 0.08));
+  background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-primary);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
@@ -388,7 +388,7 @@
   padding: 10px 12px;
   border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 10px;
-  background: var(--dsw-alias-surface-raised, #1e1e1e);
+  background: var(--dsw-alias-bg-overlay);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28);
   font-size: 12px;
   line-height: 19px;
@@ -422,7 +422,7 @@
   padding: 6px 8px;
   border-radius: 8px;
   border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-fill-l1, rgba(128, 128, 128, 0.08));
+  background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-primary);
   font-size: 13px;
 }
@@ -503,10 +503,10 @@
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-fill-l1, rgba(128, 128, 128, 0.08));
+  background: var(--dsw-alias-bg-layer-2);
   color: var(--dsw-alias-label-primary);
   font-size: 12px;
   line-height: 18px;
-  font-family: var(--ds-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--ds-font-family-code);
   resize: vertical;
 }

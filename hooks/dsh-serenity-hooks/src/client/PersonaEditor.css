@@ -1,4 +1,7 @@
-/* PersonaEditor.css — 彩蛋模式区块（v1.23.1，官方 settings 设计语言：rowCard 内分组） */
+/* PersonaEditor.css — 彩蛋模式区块（v1.23.1，官方 settings 设计语言：rowCard 内分组）
+ * token 合规（v1.27.14 修复）：全部使用 design-platform.css 官方 --dsw-alias-* 词汇；
+ * 弃用自造名（text-primary/accent/border/state-success 等）——未定义时深色 fallback
+ * 在浅色主题下显示为黑框黑字（用户反馈白色主题通性问题）。 */
 
 .pe-wrap {
   display: flex;
@@ -16,7 +19,7 @@
 
 .pe-label {
   font-size: 12px;
-  color: var(--dsw-alias-text-secondary, #8a8f98);
+  color: var(--dsw-alias-label-secondary);
   user-select: none;
 }
 
@@ -24,9 +27,9 @@
 .pe-textarea {
   width: 100%;
   box-sizing: border-box;
-  background: var(--dsw-alias-bg-secondary, rgba(128, 128, 128, 0.08));
-  color: var(--dsw-alias-text-primary, #e6e6e6);
-  border: 1px solid var(--dsw-alias-border, rgba(128, 128, 128, 0.25));
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  border: 1px solid var(--dsw-alias-border-l2);
   border-radius: 8px;
   font-size: 13px;
   padding: 8px 10px;
@@ -35,14 +38,14 @@
 
 .pe-input:focus,
 .pe-textarea:focus {
-  border-color: var(--dsw-alias-accent, #4f8cff);
+  border-color: var(--dsw-alias-button-ghost-active-border);
 }
 
 .pe-textarea {
   resize: vertical;
   min-height: 72px; /* v1.27.5 紧凑化：默认 4 行（原 120px 过高），可拖拽扩大 */
   line-height: 1.5;
-  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--ds-font-family-code);
   font-size: 12px;
 }
 
@@ -58,9 +61,9 @@
   padding: 5px 12px;
   font-size: 12px;
   cursor: pointer;
-  border: 1px solid var(--dsw-alias-border, rgba(128, 128, 128, 0.25));
+  border: 1px solid var(--dsw-alias-border-l2);
   background: transparent;
-  color: var(--dsw-alias-text-primary, #e6e6e6);
+  color: var(--dsw-alias-label-primary);
   transition: opacity 0.15s;
 }
 
@@ -74,13 +77,13 @@
 }
 
 .pe-btnGhost {
-  border-color: var(--dsw-alias-border, rgba(128, 128, 128, 0.25));
+  border-color: var(--dsw-alias-border-l2);
 }
 
 .pe-btnPrimary {
-  background: var(--dsw-alias-accent, #4f8cff);
+  background: var(--dsw-alias-button-primary-fill);
   border-color: transparent;
-  color: #fff;
+  color: var(--dsw-alias-label-primary-foreground);
 }
 
 .pe-hint {
@@ -89,9 +92,9 @@
 }
 
 .pe-hintOk {
-  color: var(--dsw-alias-state-success, #4caf50);
+  color: var(--dsw-alias-state-success-primary);
 }
 
 .pe-hintErr {
-  color: var(--dsw-alias-state-error, #e5484d);
+  color: var(--dsw-alias-state-error-primary);
 }

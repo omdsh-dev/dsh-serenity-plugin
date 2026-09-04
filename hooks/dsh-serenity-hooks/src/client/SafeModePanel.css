@@ -20,7 +20,7 @@
   padding: 4px 9px;              /* 无固定 height：由内容撑高（胶囊） */
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 999px;
-  background: var(--dsw-alias-bg-layer-2, color-mix(in srgb, var(--dsw-alias-bg-module) 70%, transparent));
+  background: var(--dsw-alias-bg-layer-2);
   color: inherit;
   font-size: 12px;
   line-height: 1;
@@ -208,7 +208,7 @@
   padding: 14px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 14px;
-  background: var(--dsw-alias-bg-module, #1e1e1e);
+  background: var(--dsw-alias-bg-overlay);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
@@ -260,7 +260,7 @@
   padding: 8px 12px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 10px;
-  background: var(--dsw-alias-bg-layer-2, color-mix(in srgb, var(--dsw-alias-bg-module) 60%, transparent));
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .sp-label {
@@ -291,7 +291,7 @@
   padding: 8px 12px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: 10px;
-  background: var(--dsw-alias-bg-layer-2, color-mix(in srgb, var(--dsw-alias-bg-module) 60%, transparent));
+  background: var(--dsw-alias-bg-layer-2);
 }
 
 .sp-toggle {
