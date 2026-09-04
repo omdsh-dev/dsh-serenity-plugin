@@ -39,6 +39,103 @@ function readCccName(root: string | null): string | null {
   }
 }
 
+/**
+ * MSM 注册表完整性检查（需求⑤c S142 用户："要有ACC层检查方法检查注册表没坏，这东西太核心了"）。
+ * 注册表坏 → loadMsmEntries JSON.parse 抛 → acc_msm/skiff-admin/output-guard/session 全崩 +
+ * register 判重也 loadMsmEntries → **自锁无法自救**（R7）——health 必须**不因坏表抛错**，
+ * 独立解析（不依赖 loadMsmEntries）逐项检查，坏 = ok:false + issues + 修复指引。
+ *
+ * 检查项（单级化后唯一聚合档 + root 级遗留）：
+ *  - 文件存在（无注册表 = 空 ok——CCC 尚未注册 MSM 不视为坏）
+ *  - JSON.parse 合法（剥 BOM；坏 JSON = 结构损坏）
+ *  - 顶层 v1 wrapper（entries[]）或裸数组
+ *  - 每 entry 字段类型（name/path/skill/category/description）
+ *  - name 全局唯一（loadMsmEntries byName 去重语义——重复歧义）
+ *  - path 根内 + 脚本存在（引用完整）
+ *
+ * 修复指引：register/deregister 每次变更精提交（只 add 注册表文件）→ 坏表可
+ * `git checkout -- <registry>` 恢复（bash 可用时 / 用户手动 / cc_git 无 checkout 子命令——
+ * 走 bash git restore，safe-mode 下建议用户介入）。工具只输出指引不代劳（用户拍板）。
+ */
+export interface RegistryHealthReport {
+  /** 聚合档路径（相对 CCC 根）；无 cccName → null */
+  path: string | null
+  ok: boolean
+  /** 该注册表文件是否存在（不存在 = 未注册任何 MSM，非坏） */
+  present: boolean
+  issues: string[]
+}
+
+export function checkRegistryHealth(root: string): RegistryHealthReport {
+  const cccName = readCccName(root)
+  if (!cccName) {
+    return { path: null, ok: true, present: false, issues: ['no cccName (.serenity first line) — cannot locate the registry'] }
+  }
+  const rel = `.opencode/skills/${cccName}/references/mech-registry.json`
+  const abs = resolve(root, rel)
+  if (!existsSync(abs)) {
+    // 无注册表文件 = 空 CCC（未注册 MSM）——ok（不是坏）
+    return { path: rel, ok: true, present: false, issues: [] }
+  }
+  const issues: string[] = []
+  let raw = ''
+  try {
+    raw = readFileSync(abs, 'utf-8')
+  } catch (err) {
+    return { path: rel, ok: false, present: true, issues: [`registry unreadable: ${String((err as Error)?.message ?? err)}`] }
+  }
+  // 剥 BOM（Windows 编辑器 \uFEFF）
+  let data: unknown
+  try {
+    data = JSON.parse(raw.replace(/^\uFEFF/, ''))
+  } catch (err) {
+    return {
+      path: rel, ok: false, present: true,
+      issues: [
+        `registry JSON is broken: ${String((err as Error)?.message ?? err)}`,
+        `Fix: restore from git — register/deregister auto-commits the registry (git checkout -- ${rel}; or git restore ${rel})`,
+      ],
+    }
+  }
+  const entries = Array.isArray(data) ? data : (data as { entries?: unknown })?.entries
+  if (!Array.isArray(entries)) {
+    return {
+      path: rel, ok: false, present: true,
+      issues: [
+        'registry top-level is neither an array nor a v1 wrapper with entries[]',
+        `Fix: restore from git (git checkout -- ${rel}; or git restore ${rel})`,
+      ],
+    }
+  }
+  const names = new Set<string>()
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i] as { name?: unknown; path?: unknown; skill?: unknown; category?: unknown }
+    if (typeof e !== 'object' || e === null) {
+      issues.push(`entry[${i}] is not an object`)
+      continue
+    }
+    if (typeof e.name !== 'string' || e.name === '') issues.push(`entry[${i}]: name missing or not a string`)
+    if (typeof e.path !== 'string' || e.path === '') issues.push(`entry[${i}] (${String(e.name ?? '?')}): path missing or not a string`)
+    if (e.skill !== undefined && typeof e.skill !== 'string') issues.push(`entry[${i}] (${String(e.name ?? '?')}): skill not a string`)
+    if (e.category !== undefined && typeof e.category !== 'string') issues.push(`entry[${i}] (${String(e.name ?? '?')}): category not a string`)
+    if (typeof e.name === 'string' && e.name !== '') {
+      if (names.has(e.name)) issues.push(`duplicate MSM name: "${e.name}" (entry[${i}]) — loadMsmEntries dedups by name, ambiguity`)
+      names.add(e.name)
+    }
+    // path 引用完整（根内 + 脚本存在）——坏路径 = exec 会失败但注册表结构没坏；归为 issue
+    if (typeof e.path === 'string' && e.path !== '') {
+      const scriptAbs = resolve(root, e.path)
+      const relPath = scriptAbs.startsWith(`${root}/`) || scriptAbs === root ? e.path : null
+      if (!relPath) {
+        issues.push(`entry[${i}] (${String(e.name ?? '?')}): path "${e.path}" escapes CCC root`)
+      } else if (!existsSync(scriptAbs)) {
+        issues.push(`entry[${i}] (${String(e.name ?? '?')}): script not found at "${e.path}"`)
+      }
+    }
+  }
+  return { path: rel, ok: issues.length === 0, present: true, issues }
+}
+
 export async function runKit(root: string | null, args: KitArgs): Promise<JsonValue> {
   switch (args.action) {
     case 'health': {
@@ -81,6 +178,10 @@ export async function runKit(root: string | null, args: KitArgs): Promise<JsonVa
             detail: p3Detail,
           },
         },
+      }
+      // 需求⑤c：MSM 注册表完整性检查段（用户：注册表太核心，要有 ACC 层检查方法检查没坏）
+      if (root) {
+        report.registry = checkRegistryHealth(root)
       }
       // dsp 增强：版本自省（升级提示依据）
       if (root) {

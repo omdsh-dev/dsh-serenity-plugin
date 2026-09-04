@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runKit } from '../src/kit-ops.js'
+import { runKit, checkRegistryHealth } from '../src/kit-ops.js'
 import { runGit } from '../src/git-ops.js'
 import { runMsm, findEntry } from '../src/msm-ops.js'
 
@@ -186,5 +186,78 @@ describe('msm-ops', () => {
     expect(r.registered).toBe('tool')
     const check = runMsm(dir, { action: 'check' }) as { issues: { name: string; check: string }[] }
     expect(check.issues.some((i) => i.name === 'tool' && i.check === 'M1')).toBe(true)
+  })
+})
+
+describe('kit-ops: 注册表完整性检查（需求⑤c——acc_kit health registry 段）', () => {
+  function writeRegistryFile(rel: string, content: unknown): void {
+    const abs = join(dir, rel)
+    mkdirSync(join(abs, '..'), { recursive: true })
+    writeFileSync(abs, typeof content === 'string' ? content : JSON.stringify(content, null, 2))
+  }
+  const aggRel = '.opencode/skills/t/references/mech-registry.json'
+
+  it('无注册表文件（空 CCC）→ ok:true present:false（未注册非坏）', () => {
+    const h = checkRegistryHealth(dir)
+    expect(h.present).toBe(false)
+    expect(h.ok).toBe(true)
+  })
+
+  it('合法 v1 wrapper → ok', () => {
+    mkdirSync(join(dir, '.opencode', 'skills', 't', 'scripts'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skills', 't', 'scripts', 'a.ts'), 'console.log(1)\n')
+    writeRegistryFile(aggRel, {
+      version: 1,
+      entries: [{ name: 'a', path: '.opencode/skills/t/scripts/a.ts', skill: 't', category: 'mech', description: 'd', usage: 'u', flags: [] }],
+    })
+    const h = checkRegistryHealth(dir)
+    expect(h.present).toBe(true)
+    expect(h.ok).toBe(true)
+    expect(h.issues).toEqual([])
+  })
+
+  it('坏 JSON → ok:false + git 恢复指引（不抛错——health 不能因坏表崩）', () => {
+    writeRegistryFile(aggRel, '{broken')
+    const h = checkRegistryHealth(dir)
+    expect(h.present).toBe(true)
+    expect(h.ok).toBe(false)
+    expect(h.issues[0]).toContain('JSON is broken')
+    expect(h.issues.join('\n')).toContain('git checkout --')
+  })
+
+  it('顶层非 wrapper/数组 → ok:false（结构损坏）', () => {
+    writeRegistryFile(aggRel, { foo: 1 })
+    const h = checkRegistryHealth(dir)
+    expect(h.ok).toBe(false)
+    expect(h.issues[0]).toContain('neither an array nor a v1 wrapper')
+  })
+
+  it('重复 name → issue（loadMsmEntries 去重歧义）', () => {
+    writeRegistryFile(aggRel, { version: 1, entries: [{ name: 'dup', path: 'x.ts' }, { name: 'dup', path: 'y.ts' }] })
+    const h = checkRegistryHealth(dir)
+    expect(h.ok).toBe(false)
+    expect(h.issues.some((i) => i.includes('duplicate MSM name'))).toBe(true)
+  })
+
+  it('path 根外 / 脚本不存在 → issue（引用完整）', () => {
+    writeRegistryFile(aggRel, { version: 1, entries: [
+      { name: 'out', path: '../escape.ts' },
+      { name: 'missing', path: '.opencode/skills/t/scripts/ghost.ts' },
+    ] })
+    const h = checkRegistryHealth(dir)
+    expect(h.ok).toBe(false)
+    expect(h.issues.some((i) => i.includes('escapes CCC root'))).toBe(true)
+    expect(h.issues.some((i) => i.includes('script not found'))).toBe(true)
+  })
+
+  it('cccName 缺失（无 .serenity）→ path:null（不抛错）', () => {
+    const bare = mkdtempSync(join(tmpdir(), 'hooks-ops-bare-'))
+    try {
+      const h = checkRegistryHealth(bare)
+      expect(h.path).toBeNull()
+      expect(h.ok).toBe(true)
+    } finally {
+      rmSync(bare, { recursive: true, force: true })
+    }
   })
 })

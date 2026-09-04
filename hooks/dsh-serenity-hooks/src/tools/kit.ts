@@ -18,7 +18,7 @@ function renderText(value: unknown): ContentBlock[] {
 
 export const kitTool = defineTool({
   name: 'acc_kit',
-  description: 'ACC general-purpose utility kit: health (CCC three-principle check P1/P2/config, healthy/degraded report) / time (now_iso/now_local/epoch_ms) / wait (wait N seconds, default 1). Routine self-check before entering a CCC.',
+  description: 'ACC general-purpose utility kit: health (CCC three-principle check P1/P2/config + MSM registry integrity report, healthy/degraded) / time (now_iso/now_local/epoch_ms) / wait (wait N seconds, default 1). Routine self-check before entering a CCC.',
   parameters: {
     action: { type: 'string', enum: [...KIT_ACTIONS], required: true, description: 'Subcommand' },
     seconds: { type: 'integer', description: 'Seconds to wait (positive integer, default 1)' },
