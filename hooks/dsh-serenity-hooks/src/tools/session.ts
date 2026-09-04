@@ -58,26 +58,51 @@ export interface RenameOnUseDeps {
 }
 
 /**
- * 从激活会话派生命名标题（v1.22.9 格式修正）：
+ * 清洗 + 截断会话概括（需求② S142 用户拍板：编号日期后加 ≤20 字内容概括）。
+ * 规则（服务端统一，不信任 LLM 输入）：
+ *   - 去控制字符/换行/回车/制表（防标题注入/多行污染）
+ *   - trim（去首尾空白）
+ *   - 截断 ≤20 字符（按 Unicode 码点——中英混排统一；emoji 等代理对按码点保留）
+ *   - 去 `/`（防标题被误读为路径分隔）
+ * @returns 清洗后的概括（空输入 → 空串；调用方决定是否允许空）
+ */
+export function sanitizeSessionSummary(summary: string): string {
+  const cleaned = summary
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\//g, '')
+    .trim()
+  return [...cleaned].slice(0, 20).join('')
+}
+
+/**
+ * 从激活会话派生命名标题（v1.22.9 格式修正 + 需求② 概括）：
  * F3 原始需求是 **`S###-日期`**（如 `S143-2026-08-26`）——从 `sessionId` 派生，
  * 而非完整目录名（`2026-08-24--S142--...` 超长 + 中文，不符合用户拍板格式）。
+ * 需求②（S142 用户拍板）：编号日期后加 ≤20 字内容概括 → `S###-YYYY-MM-DD-<概括>`
+ * ——概括来自显式 summary 参数（服务端截断/清洗，可靠不靠猜）；编号日期仍固定派生。
  * 无 S### 编号（issue 会话等）→ 回退目录名。
- * @returns `S143-2026-08-26` 或原目录名
+ * @param active 激活会话信息（sessionId + dirName）
+ * @param summary 内容概括（≤20 字，服务端清洗截断；空 → 不带概括的 `S###-日期`）
+ * @returns `S143-2026-08-26-概括` / `S143-2026-08-26` / 原目录名
  */
-export function namingTitleFor(active: ActiveSessionInfo): string {
+export function namingTitleFor(active: ActiveSessionInfo, summary?: string): string {
   const sid = active.sessionId
   if (typeof sid === 'string' && /^S\d+$/.test(sid)) {
     const date = active.dirName.match(/^(\d{4}-\d{2}-\d{2})--/)?.[1] ?? ''
-    if (date) return `${sid}-${date}`
-    return sid
+    const cleaned = summary ? sanitizeSessionSummary(summary) : ''
+    const base = date ? `${sid}-${date}` : sid
+    return cleaned ? `${base}-${cleaned}` : base
   }
   return active.dirName
 }
 
 /**
- * use 激活宁静号会话后，把当前 dsh 会话重命名为命名标题（`S###-日期`）。
+ * use 激活宁静号会话后，把当前 dsh 会话重命名为命名标题（`S###-日期[-概括]`）。
  * v1.27.1：**永远开启**（不再有 naming.enabled 门控）——仅 sessionTitle 服务
  * 存在性守卫；失败不静默——返回结果对象而非 null（v1.22.9），调用方决定可见性。
+ *
+ * 需求②（S142 用户拍板）：summary 参数（≤20 字概括）→ 标题带概括；编号日期固定派生。
  *
  * v1.23.2 修复（this 绑定）：第三参从**解构的裸 rename 函数**改为**整个
  * sessionTitle 服务对象**——内部以 `titles.rename(session, title)` **方法调用**
@@ -92,10 +117,11 @@ export function renameDshSessionOnUse(
   session: unknown,
   titles: { rename: (session: unknown, title: string) => unknown } | undefined,
   active: ActiveSessionInfo,
+  summary?: string,
 ): { ok: true; title: string } | { ok: false; reason: string } {
   if (!deps.sessionTitleAvailable) return { ok: false, reason: 'sessionTitle service unavailable' }
   if (!titles || typeof titles.rename !== 'function') return { ok: false, reason: 'sessionTitle service unavailable' }
-  const title = namingTitleFor(active)
+  const title = namingTitleFor(active, summary)
   try {
     titles.rename(session, title)
     return { ok: true, title }
@@ -119,6 +145,7 @@ export function activeInfoFromCreate(result: CreateSessionResult): ActiveSession
 
 /**
  * 把当前 dsh 会话重命名为指定 SESSION 的命名标题（use/create 共用；v1.25.11）。
+ * 需求②：summary 参数（≤20 字概括）透传——标题带概括（编号日期固定派生）。
  * 门控/失败可见性与 renameDshSessionOnUse 一致（不静默：成功 log / 失败 warn）。
  * 调用点（use 分支原内联逻辑提取，create 分支复用）：
  *   - use：激活后从 activeStore 取 info
@@ -128,6 +155,7 @@ export function renameDshSessionForActive(
   ctx: Context,
   exec: { agent?: { session?: unknown } },
   info: ActiveSessionInfo,
+  summary?: string,
 ): void {
   try {
     // v1.23.2：传整个 sessionTitle 服务对象（不解构 rename 函数）——
@@ -143,6 +171,7 @@ export function renameDshSessionForActive(
       dshSession,
       titles as { rename: (session: unknown, title: string) => unknown } | undefined,
       info,
+      summary,
     )
     if (result.ok) {
       console.log(`[serenity-hooks] dsh 会话已重命名: ${String((dshSession as { id?: string }).id ?? '?')} → ${result.title}`)
@@ -274,7 +303,9 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
   name: 'session',
   description:
     'Full work-session lifecycle (AGENT_SESSIONS/, home-session convention). list/show/create/use/close/health/qa/archive/summary/hook-develop-guide. ' +
-    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one); close requires --confirm; use activates the session for the current dsh conversation (in-memory + events restore, isolated per dsh session).',
+    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars, content summary); close requires --confirm; ' +
+    'use activates the session for the current dsh conversation (in-memory + events restore, isolated per dsh session) and requires --summary (≤20 chars). ' +
+    'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
   parameters: {
     action: {
       type: 'string',
@@ -289,6 +320,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
     desc: { type: 'string', description: 'create short description (any language, ≤5 words; mutually exclusive with issue)' },
     issue: { type: 'string', description: 'create ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
     goal: { type: 'string', description: 'create one-sentence goal (optional)' },
+    summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
     confirm: { type: 'boolean', description: 'close must be true (prevents accidental close)' },
     dryRun: { type: 'boolean', description: 'create/archive preview mode (no actual changes)' },
   },
@@ -320,6 +352,10 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
         return showSession(root, args.name) + extHint
       }
       case 'create': {
+        // 需求②：create 也加 summary（用户拍板"create 也带概括"）——必填（编号日期固定派生，概括由调用方显式给）
+        if (!args.summary || args.summary.trim() === '') {
+          throw new Error('create requires --summary <content summary ≤20 chars> (appended to the dsh session title; the S### id and date stay server-derived)')
+        }
         // 对齐 osp：desc/issue 二选一（缺省/互斥均在 createSession 内报错）
         const result = createSession({
           root,
@@ -329,12 +365,12 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
           dryRun: args.dryRun ?? false,
         })
         let message = result.message
-        // v1.25.11（S142 用户：create 也要命名）：创建成功后立即重命名当前 dsh 会话
-        // 为 S###-日期（不再等 use）——createSession result 已含 sessionId/dirName，
-        // activeInfoFromCreate 构造命名信息（use/create 共用 renameDshSessionForActive）。
-        // dry-run 不命名（未真实创建）。
+        // v1.25.11（S142 用户：create 也要命名）+ 需求②（带概括）：创建成功后立即重命名
+        // 当前 dsh 会话为 S###-日期-概括（不再等 use）——createSession result 已含
+        // sessionId/dirName，activeInfoFromCreate 构造命名信息（use/create 共用
+        // renameDshSessionForActive）。dry-run 不命名（未真实创建）。
         if (!(args.dryRun ?? false)) {
-          renameDshSessionForActive(ctx, exec, activeInfoFromCreate(result))
+          renameDshSessionForActive(ctx, exec, activeInfoFromCreate(result), args.summary)
         }
         // ---- 钩子：create-transform（对齐 osp；仅非 dry-run 且 CCC 声明了该钩子时执行）----
         if (!(args.dryRun ?? false) && cccHooks.includes('create-transform')) {
@@ -356,12 +392,16 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
       }
       case 'use': {
         if (!args.name) throw new Error('use requires name (S### or directory name)')
+        // 需求②：use 加 summary 必填（用户拍板"做成必填，但只影响那个概括，编号和日期还是固定的"）
+        if (!args.summary || args.summary.trim() === '') {
+          throw new Error('use requires --summary <content summary ≤20 chars> (appended to the dsh session title as S###-YYYY-MM-DD-<summary>; id and date stay server-derived)')
+        }
         const scope = agentScope(exec)
         const active = useSession(root, args.name, scope)
-        // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为命名标题（S###-日期）
+        // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为命名标题（S###-日期-概括）
         // v1.25.11：内联逻辑提取为 renameDshSessionForActive（use/create 共用）
         const info = getActiveSessionInfo(scope)
-        if (info) renameDshSessionForActive(ctx, exec, info)
+        if (info) renameDshSessionForActive(ctx, exec, info, args.summary)
         return active
       }
       case 'close': {

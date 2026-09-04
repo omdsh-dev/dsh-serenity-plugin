@@ -54,6 +54,7 @@ import {
   findLatestActiveSessionMd,
 } from './session-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
+import { namingTitleFor } from './tools/session.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -168,6 +169,10 @@ export function resolveSessionMdPath(root: string, scope: string, session: Sessi
 interface PendingRebuild {
   /** 锚点消息文本 */
   anchor: string
+  /** 需求②：重建后重命名标题用的内容概括（≤20 字；服务端清洗/截断） */
+  summary: string
+  /** 持久轨迹 SESSION.md（重建后重命名标题的编号/日期来源） */
+  mdPath: string
   /** 排队时间（防陈旧队列误清空——超时丢弃） */
   queuedAt: number
 }
@@ -190,12 +195,12 @@ export function pendingRebuildSnapshot(): ReadonlyMap<string, PendingRebuild> {
  */
 export async function queueRebuild(
   ctx: Context,
-  opts: { root: string; note?: string; agentCwd: string; dshSessionId: string },
+  opts: { root: string; note?: string; summary: string; agentCwd: string; dshSessionId: string },
 ): Promise<RebuildResult> {
   if (!readSimpleSettings().rebuildEnabled) {
     throw new Error('session_rebuild is disabled (rebuild.enabled=false — enable it in the dsh settings panel)')
   }
-  const { root, note, dshSessionId } = opts
+  const { root, note, summary, dshSessionId } = opts
 
   // ① 定位 dsh 会话（turn-stopping 时按 agent 匹配；此处先验证存在）
   const session = (ctx.sessions as { get?: (id: SessionId) => Session | undefined } | undefined)
@@ -215,8 +220,8 @@ export async function queueRebuild(
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)
   const anchor = buildRebuildAnchor(root, sessionName, mdPath)
 
-  // ③ 排队（覆盖同会话旧队列）
-  pendingRebuilds.set(dshSessionId, { anchor, queuedAt: Date.now() })
+  // ③ 排队（覆盖同会话旧队列）——需求②：存 summary + mdPath（turn-stopping 重建后重命名标题）
+  pendingRebuilds.set(dshSessionId, { anchor, summary, mdPath, queuedAt: Date.now() })
   void note
   return { queued: true, anchor, sessionMdPath: mdPath }
 }
@@ -274,6 +279,35 @@ export function performRebuild(
 }
 
 /**
+ * 重建后重命名 dsh 会话标题（需求② S142 用户拍板：rebuild 后标题带新阶段概括）。
+ * 标题 = S###-YYYY-MM-DD-<summary>——S### 与日期从持久轨迹目录名派生（不信任 LLM），
+ * 概括来自 queueRebuild 的 summary 参数（服务端清洗截断）。
+ * 失败仅 warn 不阻断重建主流程（标题美观非关键路径）。
+ */
+function renameAfterRebuild(ctx: Context, agent: Agent, pending: PendingRebuild): void {
+  try {
+    const mdPath = pending.mdPath
+    const dirName = basename(dirname(mdPath))
+    const idMatch = dirName.match(/--S(\d{3,})--/)
+    const sessionId = idMatch ? `S${idMatch[1]}` : dirName.replace(/^\d{4}-\d{2}-\d{2}--/, '')
+    const info = { sessionId, dirName, mdPath }
+    const title = namingTitleFor(info, pending.summary)
+    const titles = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionTitle') as
+      | { rename?: (session: unknown, title: string) => unknown }
+      | undefined
+    if (!titles || typeof titles.rename !== 'function') {
+      console.warn('[serenity-hooks] rebuild 后重命名跳过: sessionTitle 服务不可用')
+      return
+    }
+    // 方法调用保 this 绑定（v1.23.2 教训：不解构 rename 后裸调用）
+    titles.rename(agent.session, title)
+    console.log(`[serenity-hooks] rebuild 后会话重命名: ${agent.id} → ${title}`)
+  } catch (error) {
+    console.warn(`[serenity-hooks] rebuild 后重命名失败（不阻断）: ${String((error as Error)?.message ?? error)}`)
+  }
+}
+
+/**
  * 注册 turn-stopping 钩子（index.ts apply 调用）：
  * agent 每轮 turn 结束前（serial）检查 pending 队列——有该会话的重建请求 → 执行清空
  * 并 **steer 自动继续**（v1.22.5：next-step 非空 → turn 不 break → 模型自动读取
@@ -304,6 +338,9 @@ export function registerRebuildTurnHook(ctx: Context): void {
           : undefined
       const rebuilt = performRebuild(agent.session, pending, meter)
       if (rebuilt) {
+        // 需求②：重建后重命名 dsh 会话标题为 S###-日期-概括（重建代表新工作阶段；
+        // 编号日期从持久轨迹目录派生，概括来自 summary 参数——与 use/create 命名一致）
+        renameAfterRebuild(ctx, agent, pending)
         // v1.22.5 自动继续：steer 到 next-step 队列 → turn 循环 nextStep 非空不 break →
         // 模型在同轮内自动消费该指令，读取 SESSION.md 从上次进度继续（无需用户手工输入）
         agent.steer(createUserMessage({

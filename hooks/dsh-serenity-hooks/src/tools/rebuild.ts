@@ -48,6 +48,7 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
       'at a natural pause point. After triggering, resume from SESSION.md when this turn ends.',
     parameters: {
       note: { type: 'string', description: 'Optional: one-sentence rebuild background note (for the rebuilt self)' },
+      summary: { type: 'string', description: 'REQUIRED: content summary ≤20 chars of the next work phase — the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after the rebuild (the rebuilt phase gets a fresh summary); sanitized/truncated server-side' },
     },
     output: {
       schema: { type: 'json' },
@@ -58,10 +59,15 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
       if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
       const dshSessionId = agentSessionId(exec)
       if (!dshSessionId) throw new Error('Unable to determine the current dsh session id')
+      // 需求②：rebuild summary 必填（重建代表新工作阶段，标题概括应更新）
+      if (!args.summary || (args.summary as string).trim() === '') {
+        throw new Error('session_rebuild requires --summary <content summary ≤20 chars> (the dsh session title is renamed after rebuild to S###-YYYY-MM-DD-<summary>)')
+      }
 
       const result = await queueRebuild(ctx, {
         root,
         note: args.note as string | undefined,
+        summary: args.summary as string,
         agentCwd: agentCwd(exec),
         dshSessionId,
       })

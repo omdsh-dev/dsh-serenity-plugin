@@ -26,7 +26,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { namingTitleFor, renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive } from '../src/tools/session.js'
+import { namingTitleFor, renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive, sanitizeSessionSummary } from '../src/tools/session.js'
 import { createSession } from '../src/session-ops.js'
 import { defaultSimpleSettings } from '../src/settings-section.js'
 
@@ -196,5 +196,58 @@ describe('F3: 会话命名永远开启（v1.27.1 用户拍板"开关下掉，永
   it('defaultSimpleSettings 不含 namingEnabled（开关已移除）', () => {
     const s = defaultSimpleSettings()
     expect('namingEnabled' in s).toBe(false)
+  })
+})
+
+describe('需求②: 会话命名加 ≤20 字概括（S142 用户拍板：编号日期固定派生，概括来自 summary 参数）', () => {
+  it('namingTitleFor(active, summary) → S###-日期-概括', () => {
+    const t = namingTitleFor({ sessionId: 'S143', dirName: '2026-08-26--S143--my-work', mdPath: '/x/SESSION.md' }, '微信桥完善')
+    expect(t).toBe('S143-2026-08-26-微信桥完善')
+  })
+
+  it('概括超 20 字符 → 服务端截断（按码点）', () => {
+    const long = '这是一个非常长的会话内容概括用来测试截断逻辑是否正常工作'
+    const t = namingTitleFor({ sessionId: 'S143', dirName: '2026-08-26--S143--my-work', mdPath: '/x/SESSION.md' }, long)
+    expect(t.length).toBeLessThanOrEqual('S143-2026-08-26-'.length + 20)
+    // 概括部分 = 20 字符
+    expect(t.slice('S143-2026-08-26-'.length).length).toBe(20)
+  })
+
+  it('概括清洗：去换行/控制字符/斜杠 + trim', () => {
+    const dirty = '  abc/def\u0000ghi\njkl  '
+    expect(sanitizeSessionSummary(dirty)).toBe('abcdefghijkl')
+  })
+
+  it('无 summary → 回退 S###-日期（向后兼容，不给概括不破坏旧行为）', () => {
+    const t = namingTitleFor({ sessionId: 'S143', dirName: '2026-08-26--S143--my-work', mdPath: '/x/SESSION.md' })
+    expect(t).toBe('S143-2026-08-26')
+  })
+
+  it('renameDshSessionOnUse 带 summary → 标题 S###-日期-概括', () => {
+    const renamed: string[] = []
+    const result = renameDshSessionOnUse(
+      { sessionTitleAvailable: true },
+      { id: 'dsh-sess-1' },
+      { rename: (s, t) => { renamed.push(`${String((s as { id: string }).id)}=${t}`) } },
+      { sessionId: 'S001', dirName: '2026-08-26--S001--my-work', mdPath: '/x/SESSION.md' },
+      '微信桥完善',
+    )
+    expect(result).toEqual({ ok: true, title: 'S001-2026-08-26-微信桥完善' })
+    expect(renamed).toEqual(['dsh-sess-1=S001-2026-08-26-微信桥完善'])
+  })
+
+  it('renameDshSessionForActive 带 summary → titles.rename 收到 S###-日期-概括', () => {
+    const renamed: string[] = []
+    const ctx = { get: () => ({ rename: (s: unknown, t: string) => { renamed.push(`${String((s as { id: string }).id)}=${t}`) } }) }
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    renameDshSessionForActive(
+      ctx as never,
+      { agent: { session: { id: 'dsh-1' } } },
+      { sessionId: 'S010', dirName: '2026-08-29--S010--my-work', mdPath: '/x/SESSION.md' },
+      '会话整理',
+    )
+    expect(renamed).toEqual(['dsh-1=S010-2026-08-29-会话整理'])
+    expect(warn).not.toHaveBeenCalled()
+    warn.mockRestore()
   })
 })

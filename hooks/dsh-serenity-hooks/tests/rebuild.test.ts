@@ -136,6 +136,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const ctx = { sessions: { get: () => session } } as never
     const result = await queueRebuild(ctx, {
       root: dir,
+      summary: '排队测试',
       agentCwd: dir,
       dshSessionId: 'session-x',
     })
@@ -155,7 +156,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const session = fakeSession([10])
     const ctx = { sessions: { get: () => session } } as never
     await expect(
-      queueRebuild(ctx, { root: dir, agentCwd: dir, dshSessionId: 'solo' }),
+      queueRebuild(ctx, { root: dir, summary: '无上下文', agentCwd: dir, dshSessionId: 'solo' }),
     ).rejects.toThrow(/session use/)
     expect(pendingRebuildSnapshot().has('solo')).toBe(false)
   })
@@ -266,7 +267,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     // 先排队（需可解析的会话上下文 → 约定回退）
     mkActiveSession('hook')
     const qctx = { sessions: { get: () => session } } as never
-    await queueRebuild(qctx, { root: dir, agentCwd: dir, dshSessionId: 's1' })
+    await queueRebuild(qctx, { root: dir, summary: 'hook 重建', agentCwd: dir, dshSessionId: 's1' })
     // 触发 turn-stopping
     listeners[0]!({ agent, turn: 3 })
     expect(session._calls).toHaveLength(1)
