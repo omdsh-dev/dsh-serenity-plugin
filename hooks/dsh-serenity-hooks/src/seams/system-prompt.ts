@@ -104,7 +104,7 @@ export function toolsBlock(): string {
     '  handyman  — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done; jobs=[] orchestrates parallel work',
     '  session_rebuild — rebuild this conversation in place from SESSION.md when the trajectory-tracker trips',
     '  localstore — ACC local credential/config storage (CCC-root localstore.json, JSON format; git policy localstore.gitTrack default deny); doc subcommand outputs the spec',
-    '  skiff_admin — Skiff (F4, experimental): CCC cognitive-subset roles — guide (definition tutorial) / validate (config check) / list (role summary)',
+    '  skiff_admin — Skiff (F4, experimental): CCC cognitive-subset roles — guide (definition tutorial) / validate (config check) / apply (validate + confirm live) / list (role summary)',
     '  autopilot-trajectory — Autopilot Trajectory one-stop management (all/init/random/diag/doc/check/status/guide)',
     '',
     'First-time in a CCC? Run acc_msm catalog — ACC usage directory (capability areas + where each guide lives).',
