@@ -1,4 +1,28 @@
-## v1.27.12 — 2026-09-02（移除每日唤起预算上限——"把这个上限删了吧，没意义"，S142 用户拍板）
+## v1.27.14 — 2026-09-04（白色主题通性修复：CSS 自造 token → 官方词汇；含 v1.27.13 hook 并入，S142 用户反馈 + 拍板）
+
+**Scope:** 用户转述反馈："插件好像还有个白色主题通性问题，就是他喜欢用纯黑框，然后有的字体也是纯黑色"——client CSS 使用了 design-platform.css 官方 alias 词汇表中**不存在的自造 token**（bg-module / surface-raised / fill-l1 / text-primary / text-secondary / bg-secondary / accent / border / state-success / state-error / state-warning-fg / state-danger-* / state-success-fg / button-primary-bg/fg / bg-l2 / font-mono 等）→ `var()` 永不解析 → 永远走深色 fallback（`#1e1e1e` 等）→ **浅色主题下弹层/输入框/浮层呈黑色块（"纯黑框"）+ 深色底上文字解析为近黑（"纯黑字体"）不可读**；深色主题下 fallback 恰似深色观感而未暴露（白主题用户 wanglingqing 实测报告）。
+
+> 注：v1.27.13（微信桥消息记录 hook，CCC 自写持久性保存）并入本版发布——hook 代码 2026-09-02 完成、S154 于 2026-09-04 E2E 测通（运行时 v1.27.12 已含 hook 支持，文档标注仅为发布补全）。
+
+### 变更
+- **token 合规修复（全部对齐官方 design-platform.css 词汇 + 官方组件用法实证）**：
+  - `SafeModePanel.css`：`.sp-pop` 弹层背景 `bg-module`→`bg-overlay`（light=浅灰/dark=中灰，两端自适应）；`.sp-card`/`.sp-row`/`.sp-actions` 删 `color-mix(... bg-module ...)` 嵌套 fallback → 直接 `bg-layer-2`
+  - `SettingsSection.css`：`.ss-helpTip` 帮助浮层 `surface-raised, #1e1e1e`→`bg-overlay`（**白主题"大黑块"直接根因**）；`.ss-portInput`/`.ss-select`/`.ss-routesEditor` `fill-l1`→`bg-layer-2`；`.ss-switch` 轨道/thumb 对齐官方（OFF=border-l3、ON=brand-primary、thumb=label-primary-foreground——官方 SubagentModelSelectionCard 同款）；`--ds-font-mono`→`--ds-font-family-code`（官方 base.css 变量）
+  - `PersonaEditor.css`：整文件重映射——`text-primary/text-secondary`→`label-primary/label-secondary`、`bg-secondary`→`bg-layer-2`、`border`→`border-l2`、`accent`→`button-ghost-active-border`（focus）/`button-primary-fill`+`label-primary-foreground`（主按钮，官方 Button.module.css 同款）、`state-success/state-error`→`state-success-primary/state-error-primary`、`font-mono`→`--ds-font-family-code`
+  - `AccountsEditor.css`：`.ae-input` `bg-module`→`bg-layer-2`、focus `button-primary-bg/accent`→`button-ghost-active-border`；`.ae-totpSecret` `surface-raised`→`bg-layer-2` + `--ds-font-family-code`；`.ae-totpUri`/`.ae-check` accent→`button-info-fill`；`.ae-totpBadge`/`.ae-warn` `state-warning-fg`→`state-warn-label`；`.ae-del`/`.ae-error`/`.ae-err`/`.ae-rotate`/`.ae-wsDel` `state-danger-*`→`state-error-primary` + `interactive-bg-hover-danger`（官方 danger hover token）；`.ae-save`/`.ae-chipOn` `button-primary-bg/fg`→`button-primary-fill`+`label-primary-foreground`；`.ae-chip`/`.ae-copy` `text-primary`→`label-primary`、hover accent→`button-ghost-active-border`；`.ae-saved` `state-success-fg`→`state-success-primary`；`.ae-key` `bg-l2`→`bg-layer-2`
+  - 保留：`.ss-qrSvg`/`.ae-totpQr` 白底（二维码扫码物理需求，注释在案）；`.sp-switchThumb` 灰白 thumb（明暗通用中性色，Mac 滑块设计）
+- **新增 `tests/client-css-tokens.test.ts`（4 用例）**：机械守卫 client CSS 引用的 `var(--dsw-alias-*)`/`var(--ds-*)` ∈ 官方词汇表（内嵌 design-platform.css + base.css 清单）——**防自造 token 再犯**（本次 bug 根因即自造名；放行 `--sp-*`/`--dsl-*` 自有前缀）
+
+### v1.27.13 并入（微信桥消息记录 hook——2026-09-02 代码，2026-09-04 S154 E2E 测通后并入发布）
+- **微信桥双向消息记录 hook**：`src/weixin-hook.ts`（新：buildIncoming/OutgoingHookEvent 纯函数 + runWeixinHook spawn 执行器——CCC 根脚本 stdin 单行 JSON 事件，bun 优先 node 兜底，15s 超时 kill + fire-and-forget 旁路容忍）+ `ccc.ts` WeixinSettings.hook 字段 + `weixin-route.ts` readWeixinSettings 透传 + `weixin-bridge.ts` handleIncoming 双向触发（incoming 在媒体落盘后 askSkiff 前 / outgoing 在 sendTextMessage 成功后；reply = markdownToPlainText(stripThink(answer))——hook 记录与微信实际收到一致）；**事件不含会话凭据**（无 context_token/bot_token/token——最小暴露面）；媒体带 relPath 或 null
+- **CCC 指南双通道**：插件侧 `msm-ops.ts CCC_CONFIG_REFERENCE` 大而全扩展（5 段 → 8 段：skiff.roles / autopilotTrajectory / weixin 含 hook 完整用法）+ CCC 侧 `weixin-doctor` guide 子命令（微信桥大而全指南含 hook 事件格式 + 示例脚本）
+- 测试 +12 → 53 files / 764 tests；顺带修复 autopilot 测试跨日 flake（setMtimeHoursAgo baseMs 基准参数）
+- 📄 docs/weixin-message-hook-design.md（设计 v0.1）
+- **CCC 落地实证（S154，非本仓代码）**：home-serenity `scripts/weixin-message-hook.ts` + serenity.json weixin.hook 接线 → `AGENT_SESSIONS/_weixin-logs/YYYY-MM-DD.jsonl` 双向事件 + media/ 媒体拷贝落盘 E2E 测通
+
+### 测试
+- **54 files / 768 tests 全绿**（764 + 4 新 token 合规）；typecheck ✓（node + client）；build ✓
+
 
 **Scope:** 用户 "把这个上限删了吧，没意义"——Autopilot Trajectory 的每日唤起预算（`maxDailyWakes`，默认 8）对高频实验构成人为限制：intervalHours 已支持小数（v1.27.8，0.01h≈36s）但每日上限仍卡总次数。彻底移除：**唤起频率只受 intervalHours 与避开窗口约束**（实验想多快就多快），审计日志保留（recentWakes 仍记录每次唤起，仅不再参与判定）。
 
