@@ -37,12 +37,12 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部默认（gateway off / rebuild on 0.9 / skiff off 3099 / acp off 3100 / autopilot off）', () => {
+  it('空 Config → 全部默认（gateway off / rebuild on 400K / skiff off 3099 / acp off 3100 / autopilot off）', () => {
     const d = entryDefaults({})
     expect(d).toEqual({
       gatewayEnabled: false,
       rebuildEnabled: true,
-      rebuildThreshold: 0.9,
+      rebuildThresholdK: 400,
       skiffEnabled: false,
       skiffDebugPort: 3099,
       acpEnabled: false,
@@ -55,14 +55,14 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
   it('Config 覆盖生效', () => {
     const d = entryDefaults({
       gateway: { enabled: true },
-      rebuild: { enabled: false, thresholdRatio: 0.5 },
+      rebuild: { enabled: false, thresholdK: 500 },
       skiff: { enabled: true, debugPort: 4000 },
       acp: { enabled: true, httpPort: 4100 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
       rebuildEnabled: false,
-      rebuildThreshold: 0.5,
+      rebuildThresholdK: 500,
       skiffEnabled: true,
       skiffDebugPort: 4000,
       acpEnabled: true,
@@ -73,8 +73,8 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
   })
 
   it('部分覆盖保留其余默认', () => {
-    const d = entryDefaults({ rebuild: { thresholdRatio: 0.7 } })
-    expect(d.rebuildThreshold).toBe(0.7)
+    const d = entryDefaults({ rebuild: { thresholdK: 700 } })
+    expect(d.rebuildThresholdK).toBe(700)
     expect(d.rebuildEnabled).toBe(true)
     expect(d.gatewayEnabled).toBe(false)
   })

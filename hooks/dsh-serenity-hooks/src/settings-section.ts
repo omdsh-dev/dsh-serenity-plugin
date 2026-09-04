@@ -22,7 +22,7 @@ import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-sett
 /** 插件 Config 的简单配置片段（index.ts Config 组合；settings entry base） */
 export interface SimpleConfigFragment {
   gateway?: { enabled?: boolean }
-  rebuild?: { enabled?: boolean; thresholdRatio?: number }
+  rebuild?: { enabled?: boolean; thresholdK?: number }
   /** F4 Skiff（实验性）：调试服务启停（人工） */
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
@@ -43,8 +43,8 @@ export interface SerenitySimpleSettings {
   gatewayEnabled: boolean
   /** F2 超限重建总开关 */
   rebuildEnabled: boolean
-  /** F2 contextPressure 触发比例（0~1） */
-  rebuildThreshold: number
+  /** F2 触发阈值（需求① S142 用户拍板：百分比比例 → K 数值；projectedTokens ≥ thresholdK*1000 触发，纯绝对无窗口比例保护） */
+  rebuildThresholdK: number
   /** F4 Skiff 调试服务总开关（实验性；默认关——不随插件加载自动启动，人工开启） */
   skiffEnabled: boolean
   /** F4 Skiff 调试端口（默认 3099，仅 127.0.0.1） */
@@ -64,7 +64,7 @@ export interface SerenitySimpleSettings {
 export const simpleSettingsSchema = z.object({
   gatewayEnabled: z.boolean().default(false),
   rebuildEnabled: z.boolean().default(true),
-  rebuildThreshold: z.number().min(0.01).max(1).default(0.9),
+  rebuildThresholdK: z.number().min(50).max(4000).default(400),
   skiffEnabled: z.boolean().default(false),
   skiffDebugPort: z.number().min(1024).max(65535).default(3099),
   acpEnabled: z.boolean().default(false),
@@ -78,7 +78,7 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
   return {
     gatewayEnabled: config.gateway?.enabled ?? false,
     rebuildEnabled: config.rebuild?.enabled ?? true,
-    rebuildThreshold: config.rebuild?.thresholdRatio ?? 0.9,
+    rebuildThresholdK: config.rebuild?.thresholdK ?? 400,
     skiffEnabled: config.skiff?.enabled ?? false,
     skiffDebugPort: config.skiff?.debugPort ?? 3099,
     acpEnabled: config.acp?.enabled ?? false,
@@ -96,7 +96,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
   return {
     gatewayEnabled: false,
     rebuildEnabled: true,
-    rebuildThreshold: 0.9,
+    rebuildThresholdK: 400,
     skiffEnabled: false,
     skiffDebugPort: 3099,
     acpEnabled: false,

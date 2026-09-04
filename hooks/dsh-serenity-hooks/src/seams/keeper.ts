@@ -88,14 +88,15 @@ export function reminderText(code: string, score: number): string {
  *
  * escalated=true（v1.23.3）：连续多轮超阈值仍未 rebuild → 升级强制语气
  * （STOP and rebuild now，持续注入直到调用 session_rebuild）。
+ *
+ * 需求①（S142 用户拍板）：百分比比例 → K 数值——tokensK = 实际占用（千 token），
+ * thresholdK = 配置阈值（千 token）；文案 `Context usage at NNNK (threshold NNNK)`。
  */
-export function rebuildReminderText(ratio: number, threshold: number, escalated = false): string {
-  const pct = (ratio * 100).toFixed(0)
-  const thr = (threshold * 100).toFixed(0)
+export function rebuildReminderText(tokensK: number, thresholdK: number, escalated = false): string {
   if (escalated) {
-    return `[TRAJECTORY-ESCALATED] Context usage at ${pct}% (threshold ${thr}%) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call the session_rebuild tool immediately. The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
+    return `[TRAJECTORY-ESCALATED] Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call the session_rebuild tool immediately. The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
   }
-  return `[TRAJECTORY] Context usage at ${pct}% (threshold ${thr}%). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool to clear and rebuild this conversation — the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
+  return `[TRAJECTORY] Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool to clear and rebuild this conversation — the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
@@ -162,7 +163,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
   // v1.22.1 重构：**两个独立机制**——
   // ① SESSION-KEEPER 计分提醒（DCP 确认码，阈值 150 缺省）
   // ② 轨迹跟踪器（Trajectory Tracker）上下文压力检测：每次工具调用后独立检查
-  //    contextPressure 投影，超 rebuildThreshold 追加 rebuild 提示——**不依赖计分达标**
+  //    contextPressure 投影，超 rebuildThresholdK（K 数值）追加 rebuild 提示——**不依赖计分达标**
   //    （此前嵌套在 shouldRemind 内 + inject 缺 sessionProjections → 永不触发）。
   ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
     if (!exec.agent) return next()
@@ -191,19 +192,21 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // v1.23.3 用户拍板：**不做节流，催就行了**——每次超阈值都注入（每轮都催）；
     // 连续超阈值 REBUILD_ESCALATE_AFTER 轮仍未 rebuild → 升级 [TRAJECTORY-ESCALATED]
     // 强制语气，此后持续升级催（不重置，直到 agent 调用 session_rebuild 压力自然回落）。
+    // 需求①（S142 用户拍板）：判定从窗口比例改为绝对 K——projectedTokens ≥ thresholdK*1000
+    // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
     if (skiffRebuild && readSimpleSettings().rebuildEnabled) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
         const pressure = readContextPressure(ctx, session)
-        if (pressure && pressure.contextWindow && pressure.contextWindow > 0) {
-          const ratio = pressure.projectedTokens / pressure.contextWindow
-          const threshold = readSimpleSettings().rebuildThreshold
-          if (ratio >= threshold) {
+        if (pressure && pressure.projectedTokens > 0) {
+          const tokensK = pressure.projectedTokens / 1000
+          const thresholdK = readSimpleSettings().rebuildThresholdK
+          if (pressure.projectedTokens >= thresholdK * 1000) {
             const key = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id ?? 'global'
             const st = rebuildReminderStates.get(key) ?? { consecutive: 0 }
             st.consecutive += 1
             const escalated = st.consecutive >= REBUILD_ESCALATE_AFTER
-            blocks.push({ type: 'text', text: rebuildReminderText(ratio, threshold, escalated) })
+            blocks.push({ type: 'text', text: rebuildReminderText(tokensK, thresholdK, escalated) })
             rebuildReminderStates.set(key, st)
           }
         }

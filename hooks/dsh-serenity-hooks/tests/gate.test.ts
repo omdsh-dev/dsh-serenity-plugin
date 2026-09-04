@@ -26,6 +26,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 }))
 
 import { registerKeeper, rebuildReminderStateSnapshot } from '../src/seams/keeper.js'
+import { __setSimpleSourceForTest } from '../src/settings-section.js'
 
 type PostExecuteListener = (
   exec: unknown,
@@ -81,13 +82,16 @@ describe('keeper: 激活门控（只在 .serenity 存在的目录生效）', () 
 })
 
 describe('v1.23.3 重建提醒：不做节流（每轮都催）+ 连续 3 轮升级强制语气（用户拍板）', () => {
-  // 完整装配：sessionProjections 返回固定高压力（9000/10000 = 0.9 ≥ 阈值 0.9 缺省）
+  afterEach(() => {
+    // 重置注入的简单配置源（防跨用例污染）
+    __setSimpleSourceForTest(null)
+  })
+
+  // 完整装配：sessionProjections 返回固定高压力（9000 tokens ≥ 阈值 8K*1000 缺省触发——需求① K 数值判定）
   function captureWithPressure(sessionId = 's1'): {
     listener: PostExecuteListener
-    settings: { rebuildEnabled: boolean; rebuildThreshold: number }
   } {
     let captured: PostExecuteListener = async () => undefined
-    const settings = { rebuildEnabled: true, rebuildThreshold: 0.9 }
     const ctx = {
       on: (event: string, listener: PostExecuteListener) => {
         if (event === 'tools/post-execute') captured = listener
@@ -99,8 +103,9 @@ describe('v1.23.3 重建提醒：不做节流（每轮都催）+ 连续 3 轮升
           : undefined,
     } as any
     registerKeeper(ctx, { defaultThreshold: 200 })
-    // 替换 settings 读取（readSimpleSettings 读的是模块内部 —— 通过低阈值 + 高压力恒触发即可）
-    return { listener: captured, settings }
+    // 需求①：注入简单配置源（rebuildEnabled + 低 K 阈值 8 → 9000 ≥ 8000 恒触发）
+    __setSimpleSourceForTest(() => ({ gatewayEnabled: false, rebuildEnabled: true, rebuildThresholdK: 8, skiffEnabled: false, skiffDebugPort: 3099, acpEnabled: false, acpHttpPort: 3100, publicAskEnabled: false, autopilotEnabled: false }))
+    return { listener: captured }
   }
 
   async function runOnce(listener: PostExecuteListener, sessionId: string, cwd: string): Promise<string> {

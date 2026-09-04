@@ -56,8 +56,8 @@ export interface GatewaySettings {
 /** F2 超限重建配置 */
 export interface RebuildSettings {
   enabled: boolean
-  /** contextPressure 触发比例（0~1） */
-  thresholdRatio: number
+  /** 触发阈值（需求① S142 用户拍板：K 数值——projectedTokens ≥ thresholdK*1000 触发） */
+  thresholdK: number
 }
 
 /** 彩蛋功能：persona 模式（v1.23.1，S142 用户需求）
@@ -103,7 +103,7 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     },
     rebuild: {
       enabled: true,
-      thresholdRatio: 0.9,
+      thresholdK: 400,
     },
     persona: {
       mode: '',
@@ -202,7 +202,9 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
     },
     rebuild: {
       enabled: typeof rebuild.enabled === 'boolean' ? rebuild.enabled : def.rebuild.enabled,
-      thresholdRatio: typeof rebuild.thresholdRatio === 'number' ? rebuild.thresholdRatio : def.rebuild.thresholdRatio,
+      thresholdK: typeof rebuild.thresholdK === 'number' && rebuild.thresholdK >= 50 && rebuild.thresholdK <= 4000
+        ? rebuild.thresholdK
+        : def.rebuild.thresholdK,
     },
     persona: {
       mode: typeof persona.mode === 'string' ? persona.mode : def.persona.mode,
@@ -260,9 +262,9 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
     rebuild: rb !== undefined
       ? {
         enabled: typeof rb.enabled === 'boolean' ? rb.enabled : current.rebuild.enabled,
-        thresholdRatio: typeof rb.thresholdRatio === 'number' && rb.thresholdRatio > 0 && rb.thresholdRatio <= 1
-          ? rb.thresholdRatio
-          : current.rebuild.thresholdRatio,
+        thresholdK: typeof rb.thresholdK === 'number' && rb.thresholdK >= 50 && rb.thresholdK <= 4000
+          ? rb.thresholdK
+          : current.rebuild.thresholdK,
       }
       : current.rebuild,
     persona: ps !== undefined
@@ -511,8 +513,8 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
   if (wire.rebuild !== undefined) {
     const rbPatch: RebuildSettings = { ...current.rebuild }
     if (typeof wire.rebuild.enabled === 'boolean') rbPatch.enabled = wire.rebuild.enabled
-    if (typeof wire.rebuild.thresholdRatio === 'number' && wire.rebuild.thresholdRatio > 0 && wire.rebuild.thresholdRatio <= 1) {
-      rbPatch.thresholdRatio = wire.rebuild.thresholdRatio
+    if (typeof wire.rebuild.thresholdK === 'number' && wire.rebuild.thresholdK >= 50 && wire.rebuild.thresholdK <= 4000) {
+      rbPatch.thresholdK = wire.rebuild.thresholdK
     }
     patch.rebuild = rbPatch
   }

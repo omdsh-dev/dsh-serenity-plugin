@@ -76,7 +76,7 @@ describe('读写（plugin 全局文件）', () => {
     expect(s.gateway.accounts).toEqual([])
     expect(s.gateway.workspaces).toEqual([])
     expect(s.rebuild.enabled).toBe(true)
-    expect(s.rebuild.thresholdRatio).toBe(0.9)
+    expect(s.rebuild.thresholdK).toBe(400)
   })
 
   it('写 → 读 往返一致；文件权限 0600', () => {
@@ -150,8 +150,8 @@ describe('updateAdvancedSettings（部分更新）', () => {
   })
 
   it('rebuild 独立 patch', () => {
-    const next = updateAdvancedSettings({ rebuild: { thresholdRatio: 0.85 } })
-    expect(next.rebuild.thresholdRatio).toBe(0.85)
+    const next = updateAdvancedSettings({ rebuild: { thresholdK: 850 } })
+    expect(next.rebuild.thresholdK).toBe(850)
     expect(next.rebuild.enabled).toBe(true)
   })
 })
@@ -285,13 +285,13 @@ describe('applyWirePatch（wire → 持久化）', () => {
   it('开关/阈值/端口 patch 生效（含边界校验）', () => {
     const next = applyWirePatch({
       gateway: { enabled: true, host: '127.0.0.1', port: 9999 },
-      rebuild: { enabled: false, thresholdRatio: 0.5 },
+      rebuild: { enabled: false, thresholdK: 500 },
     })
     expect(next.gateway.enabled).toBe(true)
     expect(next.gateway.host).toBe('127.0.0.1')
     expect(next.gateway.port).toBe(9999)
     expect(next.rebuild.enabled).toBe(false)
-    expect(next.rebuild.thresholdRatio).toBe(0.5)
+    expect(next.rebuild.thresholdK).toBe(500)
   })
 
   it('工作区白名单 patch：写入/过滤空串/缺省保留', () => {
@@ -304,9 +304,9 @@ describe('applyWirePatch（wire → 持久化）', () => {
     expect(keep.gateway.workspaces).toEqual(['/home/yh/home', '/data'])
   })
 
-  it('非法阈值被忽略（>1 或 ≤0）', () => {
-    const next = applyWirePatch({ rebuild: { thresholdRatio: 1.5 } })
-    expect(next.rebuild.thresholdRatio).toBe(0.9)
+  it('非法阈值被忽略（越界 <50 或 >4000）', () => {
+    const next = applyWirePatch({ rebuild: { thresholdK: 5000 } })
+    expect(next.rebuild.thresholdK).toBe(400)
   })
 })
 

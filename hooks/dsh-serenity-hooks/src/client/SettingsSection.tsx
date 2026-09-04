@@ -32,7 +32,7 @@ import './SettingsSection.css'
 export interface SerenitySimpleWire {
   gatewayEnabled?: boolean
   rebuildEnabled?: boolean
-  rebuildThreshold?: number
+  rebuildThresholdK?: number
   /** F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务启停 + 端口 */
   skiffEnabled?: boolean
   skiffDebugPort?: number
@@ -168,7 +168,8 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
     void scope.set(field, on)
   }
   const setThreshold = (v: number): void => {
-    void scope.set('rebuildThreshold', Math.min(1, Math.max(0.01, v)))
+    // 需求①：K 数值（默认 400K；范围 50~4000，纯绝对无窗口比例保护）
+    void scope.set('rebuildThresholdK', Math.min(4000, Math.max(50, Math.round(v))))
   }
   const setSkiffPort = (v: number): void => {
     void scope.set('skiffDebugPort', Math.min(65535, Math.max(1024, Math.round(v))))
@@ -187,7 +188,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
 
   const gatewayOn = value?.gatewayEnabled ?? false
   const rebuildOn = value?.rebuildEnabled ?? true
-  const threshold = value?.rebuildThreshold ?? 0.9
+  const thresholdK = value?.rebuildThresholdK ?? 400
   const skiffOn = value?.skiffEnabled ?? false
   const skiffPort = value?.skiffDebugPort ?? 3099
   const acpOn = value?.acpEnabled ?? false
@@ -233,25 +234,25 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="重建阈值"
-            desc="上下文占用达到该比例时提示（0.10 ~ 1.00）"
-            help={'重建触发阈值（0.10~1.00，默认 0.90）：\n' +
-              '· 含义：上下文占用达到该比例时，轨迹跟踪器开始提醒重建\n' +
+            desc="上下文占用达到该 K 数值时提示（单位 K token，默认 400）"
+            help={'重建触发阈值（需求①：K 数值，默认 400K，范围 50~4000K）：\n' +
+              '· 含义：上下文 projected tokens 达到 thresholdK × 1000 时，轨迹跟踪器开始提醒重建\n' +
+              '· 纯绝对数值（不再依赖窗口比例）——配多大就多大，无窗口上限保护\n' +
               '· 调低：更早触发（适合长任务，避免上下文耗尽前措手不及）\n' +
               '· 调高：更晚触发（适合短对话，减少不必要的重建提示）\n' +
               '· 仅「超限重建」开启时有意义'}
             control={
-              <div className="ss-threshold">
-                <input
-                  type="range"
-                  min={0.1}
-                  max={1}
-                  step={0.05}
-                  value={threshold}
-                  disabled={!rebuildOn}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
-                />
-                <span className="ss-value">{threshold.toFixed(2)}</span>
-              </div>
+              <input
+                className="ss-portInput"
+                type="number"
+                min={50}
+                max={4000}
+                step={50}
+                value={thresholdK}
+                disabled={!rebuildOn}
+                title="重建阈值（K token，默认 400）"
+                onChange={(e) => setThreshold(Number(e.target.value))}
+              />
             }
           />
         </li>

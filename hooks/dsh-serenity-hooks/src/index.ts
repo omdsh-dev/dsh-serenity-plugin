@@ -80,7 +80,7 @@ export interface Config {
   /** F1 双端口网关（简单配置；entry 默认值，运行时经 DSH settings） */
   gateway?: { enabled?: boolean }
   /** F2 超限重建（entry 默认值，运行时经 DSH settings） */
-  rebuild?: { enabled?: boolean; thresholdRatio?: number }
+  rebuild?: { enabled?: boolean; thresholdK?: number }
   /** F4 Skiff（实验性）：调试服务启停（entry 默认值，运行时经 DSH settings） */
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（entry 默认值，运行时经 DSH settings） */
@@ -101,7 +101,7 @@ export const Config: z<Config> = z.object({
   opencodeSkills: z.boolean().default(true),
   // v1.21 简单配置 entry 默认（schemastery：字段不 required 即可选）
   gateway: z.object({ enabled: z.boolean().default(false) }),
-  rebuild: z.object({ enabled: z.boolean().default(true), thresholdRatio: z.number().min(0.01).max(1).default(0.9) }),
+  rebuild: z.object({ enabled: z.boolean().default(true), thresholdK: z.number().min(50).max(4000).default(400) }),
   skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(3099) }),
   acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(3100) }),
 })
