@@ -537,19 +537,44 @@ export function startGateway(
  * 构造 dsh browser cookie 提供者（v1.28.2 0.1.2-rc.1 BrowserAuth 适配）：
  * 经 ctx.connection（HostConnectionHandle）官方通道在内存换取 authority=127.0.0.1:<mainPort>
  * 的 cookie 并缓存（createDshCookieProvider 惰性换取）。connection 缺失（旧 dsh/非 web 装配）
- * → undefined → 反代不注入（旧形态无 BrowserAuth，天然兼容）。
+ * → provider 返回 undefined → 反代不注入（旧形态无 BrowserAuth，天然兼容）。
+ *
+ * v1.28.2 修复：**connection 每次调用现取**（不绑定 sync 时点）——gateway sync 在 apply
+ * 早期跑，此时 connection 服务可能尚未装配（web-app 的 URL 打印在其后）；首次反代请求
+ * 到达时 connection 必已就绪。cachedProvider 缓存换取结果（同一 connection 实例）。
  */
-function buildDshCookieProvider(ctx: Context, mainPort: number): DshCookieProvider | undefined {
-  const connection = (ctx as unknown as { get?: (name: string) => unknown }).get?.('connection') as
-    | { authenticatedUrl?: (baseUrl: string) => string; authorizeIndex?: (req: unknown, res: unknown) => boolean }
-    | undefined
-  if (!connection || typeof connection.authenticatedUrl !== 'function' || typeof connection.authorizeIndex !== 'function') {
-    return undefined
+function buildDshCookieProvider(ctx: Context, mainPort: number): DshCookieProvider {
+  const authority = `127.0.0.1:${mainPort}`
+  let cachedProvider: DshCookieProvider | undefined
+  let diagnosed = false
+  return () => {
+    try {
+      const connection = (ctx as unknown as { get?: (name: string) => unknown }).get?.('connection') as
+        | { authenticatedUrl?: (baseUrl: string) => string; authorizeIndex?: (req: unknown, res: unknown) => boolean }
+        | undefined
+      if (!connection || typeof connection.authenticatedUrl !== 'function' || typeof connection.authorizeIndex !== 'function') {
+        if (!diagnosed) {
+          diagnosed = true
+          console.log('[serenity-hooks] dsh browser-auth 适配: connection ✗ 不可取（不注入 dsh cookie——旧 dsh/非 web 装配兼容）')
+        }
+        return undefined
+      }
+      if (cachedProvider === undefined) {
+        cachedProvider = createDshCookieProvider(
+          connection as Parameters<typeof createDshCookieProvider>[0],
+          authority,
+        )
+      }
+      const cookie = cachedProvider()
+      if (!diagnosed) {
+        diagnosed = true
+        console.log(`[serenity-hooks] dsh browser-auth 适配: connection ✓ 可取 + cookie ${cookie === undefined ? '✗ 换取失败（上游 401 时检查）' : '✓ 已内存换取（注入反代）'}`)
+      }
+      return cookie
+    } catch {
+      return undefined
+    }
   }
-  return createDshCookieProvider(
-    connection as Parameters<typeof createDshCookieProvider>[0],
-    `127.0.0.1:${mainPort}`,
-  )
 }
 
 /** 注册 gateway（index.ts apply 调用）。
@@ -605,11 +630,6 @@ export function registerGateway(ctx: Context): void {
         buildDshCookieProvider(ctx, webServer.port),
       )
       current = started
-      // 诊断（v1.28.2 BrowserAuth 适配）：connection 服务是否可取 + provider 是否就绪
-      try {
-        const conn = (ctx as unknown as { get?: (name: string) => unknown }).get?.('connection')
-        console.log(`[serenity-hooks] dsh browser-auth 适配: connection=${conn === undefined ? '✗ 不可取（不注入 dsh cookie，旧 dsh 兼容）' : '✓ 可取（内存换取 cookie 注入反代）'}`)
-      } catch { /* 诊断失败忽略 */ }
       const accounts = settings.gateway.accounts.length
       const wsNote = settings.gateway.workspaces.length === 0
         ? ''
