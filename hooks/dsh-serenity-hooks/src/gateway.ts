@@ -53,6 +53,7 @@ import {
   workspaceAllowed,
   workspaceDenyResponse,
   buildProxyHeaders,
+  transformHtmlForProxy,
 } from './gateway-proxy.js'
 import { createDshCookieProvider, mergeCookieHeader, type DshCookieProvider } from './gateway-dsh-auth.js'
 
@@ -64,6 +65,7 @@ export {
   workspaceAllowed,
   workspaceDenyResponse,
   buildProxyHeaders,
+  transformHtmlForProxy,
 } from './gateway-proxy.js'
 export {
   loginPageHtml,
@@ -205,10 +207,22 @@ export function startGateway(
         const chunks: Buffer[] = []
         upstream.on('data', (c: Buffer) => chunks.push(c))
         upstream.on('end', () => {
-          const transformed = injectPolyfillHtml(Buffer.concat(chunks).toString('utf-8'))
-          const out = { ...upstream.headers, 'content-length': Buffer.byteLength(transformed) }
-          res.writeHead(status, out)
-          res.end(transformed)
+          // v1.28.2 修复（S142 白屏根因）：上游可能按 Accept-Encoding 返回 gzip/br 压缩 HTML。
+          // 注入必须先在**明文**上进行——把压缩字节 toString 当文本注入会破坏压缩流
+          // （找不到 </head> → polyfill 前置 → 整个 HTML 损坏 → 浏览器白屏）。
+          // 处理：content-encoding 存在 → 解压为明文 → 注入 → 去掉 encoding 头 + 重算长度
+          // （输出明文，浏览器接受；仅 HTML 注入路径受影响，其余透传不动）。
+          let raw = Buffer.concat(chunks)
+          // v1.28.2：HTML 注入统一走 transformHtmlForProxy（处理 content-encoding 解压，
+          // 防 gzip 字节被当文本注入破坏——S142 白屏根因）。失败返回 null → 原样透传。
+          const transformedRes = transformHtmlForProxy(raw, upstream.headers)
+          if (transformedRes === null) {
+            res.writeHead(status, upstream.headers)
+            res.end(raw)
+            return
+          }
+          res.writeHead(status, transformedRes.headers)
+          res.end(transformedRes.body)
         })
         upstream.on('error', () => { try { res.destroy() } catch { /* noop */ } })
         return

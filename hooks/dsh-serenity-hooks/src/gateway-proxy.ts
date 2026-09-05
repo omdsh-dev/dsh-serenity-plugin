@@ -82,12 +82,52 @@ export function workspaceDenyResponse(rpcId: string): string {
   })
 }
 
-/** 在 HTML 的 </head> 前注入 polyfill（幂等：含 marker 则跳过） */
+import * as zlib from 'node:zlib'
+
+/**
+ * 在 HTML 的 </head> 前注入 polyfill（幂等：含 marker 则跳过）
+ */
 export function injectPolyfillHtml(html: string): string {
   if (html.includes(POLYFILL_MARKER)) return html
   const head = RANDOM_UUID_POLYFILL.replace('<script>', `<script ${POLYFILL_MARKER}="1">`)
   if (html.includes('</head>')) return html.replace('</head>', `${head}\n</head>`)
   return `${head}\n${html}` // 无 head → 前置
+}
+
+/**
+ * 反代 HTML 响应注入变换（v1.28.2 修复，S142 白屏根因）：
+ * 上游按 Accept-Encoding 可能返回 gzip/br/deflate 压缩的 HTML——注入必须在**明文**上进行，
+ * 把压缩字节 toString 当文本注入会破坏压缩流（找不到 </head> → polyfill 前置 → HTML 损坏
+ * → 浏览器白屏，用户实测 https://dsh.notfoundhome.cc 登录后白屏）。
+ *
+ * @param raw - 上游响应完整 body（可能压缩）
+ * @param upstreamHeaders - 上游响应头（node IncomingHttpHeaders 形态）
+ * @returns { body, headers } 注入后的明文 body + 修正后的响应头（去 content-encoding/transfer-encoding、
+ *          重算 content-length）；解压失败返回 null（调用方应原样透传避免破坏）
+ */
+export function transformHtmlForProxy(
+  raw: Buffer,
+  upstreamHeaders: Record<string, unknown>,
+): { body: string; headers: Record<string, string | number | string[]> } | null {
+  let body = raw
+  const enc = String(upstreamHeaders['content-encoding'] ?? '').toLowerCase().trim()
+  const outHeaders: Record<string, unknown> = { ...upstreamHeaders }
+  if (enc === 'gzip' || enc === 'x-gzip' || enc === 'deflate' || enc === 'br') {
+    try {
+      if (enc === 'br') body = zlib.brotliDecompressSync(body)
+      else if (enc === 'deflate') body = zlib.inflateSync(body)
+      else body = zlib.gunzipSync(body)
+      delete outHeaders['content-encoding']
+    } catch {
+      // 解压失败 → 调用方原样透传（带原 encoding 头），不做注入——避免破坏
+      return null
+    }
+  }
+  const transformed = injectPolyfillHtml(body.toString('utf-8'))
+  outHeaders['content-length'] = Buffer.byteLength(transformed)
+  // 注入后按 content-length 发送（消除 chunked 与 content-length 并存歧义）
+  delete outHeaders['transfer-encoding']
+  return { body: transformed, headers: outHeaders as Record<string, string | number | string[]> }
 }
 
 /**

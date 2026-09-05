@@ -43,6 +43,7 @@ import {
   workspaceAllowed,
   workspaceDenyResponse,
   buildProxyHeaders,
+  transformHtmlForProxy,
   resetFailState,
   recordLoginFailure,
   accountLockRemaining,
@@ -448,5 +449,74 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
   it('server 级 clientError 兜底监听存在', () => {
     const src = readFileSync(join(__dirname, '..', 'src', 'gateway.ts'), 'utf-8')
     expect(src).toMatch(/server\.on\('clientError'/)
+  })
+})
+
+describe('v1.28.2: transformHtmlForProxy（HTML 注入 + content-encoding 解压——S142 白屏根因修复）', () => {
+  const gzip = (s: string): Buffer => {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const zlib = require('node:zlib') as typeof import('node:zlib')
+    return zlib.gzipSync(Buffer.from(s, 'utf-8'))
+  }
+  const sample = (): string => '<!doctype html><html><head><title>t</title></head><body>x</body></html>'
+
+  it('明文 HTML → 注入 polyfill + 重算 content-length（去 transfer-encoding）', () => {
+    const res = transformHtmlForProxy(Buffer.from(sample(), 'utf-8'), {
+      'content-type': 'text/html; charset=utf-8',
+      'transfer-encoding': 'chunked',
+    })
+    expect(res).not.toBeNull()
+    expect(res!.body).toContain('randomUUID')
+    expect(res!.body).toContain('</head>')
+    expect(res!.headers['content-length']).toBe(Buffer.byteLength(res!.body))
+    expect(res!.headers['transfer-encoding']).toBeUndefined()
+    expect(res!.headers['content-encoding']).toBeUndefined()
+  })
+
+  it('gzip HTML → 解压后注入（不破坏压缩流——白屏根因回归）', () => {
+    const compressed = gzip(sample())
+    const res = transformHtmlForProxy(compressed, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-encoding': 'gzip',
+    })
+    expect(res).not.toBeNull()
+    // 注入后是明文完整 HTML（含 </head> 插入的 polyfill），非乱码
+    expect(res!.body).toContain('randomUUID')
+    expect(res!.body).toContain('</head>')
+    expect(res!.body).toContain('<body>x</body>')
+    expect(res!.headers['content-encoding']).toBeUndefined()
+    expect(res!.headers['content-length']).toBe(Buffer.byteLength(res!.body))
+  })
+
+  it('br HTML → 解压后注入', () => {
+    const zlib = require('node:zlib') as typeof import('node:zlib')
+    const compressed = zlib.brotliCompressSync(Buffer.from(sample(), 'utf-8'))
+    const res = transformHtmlForProxy(compressed, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-encoding': 'br',
+    })
+    expect(res).not.toBeNull()
+    expect(res!.body).toContain('randomUUID')
+    expect(res!.headers['content-encoding']).toBeUndefined()
+  })
+
+  it('非压缩 HTML（无 content-encoding）→ 直接注入', () => {
+    const res = transformHtmlForProxy(Buffer.from(sample(), 'utf-8'), { 'content-type': 'text/html' })
+    expect(res).not.toBeNull()
+    expect(res!.body).toContain('randomUUID')
+  })
+
+  it('gzip 解压失败（损坏数据）→ null（调用方原样透传避免破坏）', () => {
+    const res = transformHtmlForProxy(Buffer.from('not-gzip-data', 'utf-8'), {
+      'content-type': 'text/html',
+      'content-encoding': 'gzip',
+    })
+    expect(res).toBeNull()
+  })
+
+  it('幂等：已注入的 HTML 不重复注入', () => {
+    const once = transformHtmlForProxy(Buffer.from(sample(), 'utf-8'), {})
+    const twice = transformHtmlForProxy(Buffer.from(once!.body, 'utf-8'), {})
+    expect(twice!.body).toBe(once!.body)
   })
 })
