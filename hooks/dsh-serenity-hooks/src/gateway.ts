@@ -165,10 +165,8 @@ export function startGateway(
    * @param bodyOverride - workspace.create 已读 body 时的重放（白名单检查后转发）
    */
   const proxy = (req: IncomingMessage, res: ServerResponse, bodyOverride?: string): void => {
-    const url = new URL(req.url ?? '/', `http://${host}:${port}`)
-    const method = req.method === 'POST' && url.pathname.startsWith('/api/')
-      ? url.pathname.slice('/api/'.length)
-      : null
+    // v1.28.0 适配 0.1.2-rc.1 A2 方案 B：method/url 派生已删（原 workspace.list 过滤分支移除——
+    // rc.1 无 list unary，无 HTTP 层方法可判；create 校验在装配层直接判 pathname）
     const headers = buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort, bodyOverride)
     // v1.22.3 崩溃修复（S142 实测：外部连接中断 → Unhandled 'error' event → 进程崩溃）：
     // 反代链路的**客户端侧** req/res 必须挂 error 监听。外部客户端（浏览器/手机）随时会
@@ -199,19 +197,9 @@ export function startGateway(
         return
       }
 
-      // workspace.list → 白名单过滤（JSON RPC 响应）
-      if (method === 'workspace.list' && status === 200 && ct.includes('application/json')) {
-        const chunks: Buffer[] = []
-        upstream.on('data', (c: Buffer) => chunks.push(c))
-        upstream.on('end', () => {
-          const transformed = filterWorkspaceList(Buffer.concat(chunks).toString('utf-8'), allowWorkspaces)
-          const out = { ...upstream.headers, 'content-length': Buffer.byteLength(transformed) }
-          res.writeHead(status, out)
-          res.end(transformed)
-        })
-        upstream.on('error', () => { try { res.destroy() } catch { /* noop */ } })
-        return
-      }
+      // workspace.list 过滤分支已删（v1.28.0 适配 0.1.2-rc.1 A2 方案 B）：
+      // rc.1 workspace.list unary 整个删除（改 follow 流）——HTTP 响应层无 list 可过滤；
+      // 白名单语义降为「create 校验 + 已知工作区投影（/serenity/config knownWorkspaces）」。
 
       // 其余 → 原样透传
       res.writeHead(status, upstream.headers)

@@ -3,6 +3,7 @@ import {
   accountDraftFromWire,
   accountToWire,
   fetchWorkspaces,
+  fetchConfig,
   newAccountId,
   newTotpSecret,
   otpauthUriClient,
@@ -10,6 +11,7 @@ import {
   validateDraft,
   type WireAccount,
   type AccountDraft,
+  type ConfigResponse,
 } from '../src/client/accounts-api.js'
 
 describe('accounts-api: totpQrSvg（v1.24.6 二维码绑定）', () => {
@@ -117,56 +119,59 @@ describe('accounts-api: TOTP secret / otpauth URI（v1.22.4）', () => {
   })
 })
 
-describe('accounts-api: fetchWorkspaces（v1.22 workspace.list 信封）', () => {
+describe('accounts-api: fetchWorkspaces / fetchConfig（v1.28.0 适配 0.1.2-rc.1 A2 A′：读 /serenity/config knownWorkspaces）', () => {
   const originalFetch = globalThis.fetch
 
   afterEach(() => {
     globalThis.fetch = originalFetch
   })
 
-  it('请求信封完整 ClientRequest（type/rpcId/method/payload——缺 type/method 会 bad-request）', async () => {
-    let sent: unknown = null
-    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      sent = init?.body ? JSON.parse(String(init.body)) : null
-      return new Response(JSON.stringify({
-        type: 'server-response',
-        rpcId: 'ws-1',
-        result: { ok: true, value: { items: [{ path: '/home/yh/home/home-serenity', title: 'home-serenity' }], archivedSessionIds: [] } },
-      }), { status: 200, headers: { 'content-type': 'application/json' } })
+  const cfgResponse = (knownWorkspaces: Array<{ path: string; title: string }> | undefined): ConfigResponse => ({
+    config: {
+      gateway: {
+        enabled: true, host: '0.0.0.0', port: 3081, accounts: [], workspaces: [],
+        cookieSecure: false, allowWorkspaceCreate: true, totpEnabled: false,
+      },
+      persona: { mode: '', overrideText: '' },
+      publicAsk: { allowed: [] },
+    },
+    knownWorkspaces,
+  })
+
+  it('fetchWorkspaces 读 GET /serenity/config 的 knownWorkspaces（rc.1 替代 workspace.list）', async () => {
+    let calledPath: string | null = null
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      calledPath = typeof input === 'string' ? input : input instanceof URL ? input.pathname : (input as Request).url
+      return new Response(JSON.stringify(cfgResponse([
+        { path: '/home/yh/home/home-serenity', title: 'home-serenity' },
+      ])), { status: 200, headers: { 'content-type': 'application/json' } })
     }) as typeof fetch
 
     const workspaces = await fetchWorkspaces()
     expect(workspaces).toEqual([{ path: '/home/yh/home/home-serenity', title: 'home-serenity' }])
-    // 信封完整：type + rpcId + method + payload（DSH clientRequestSchema 校验）
-    expect(sent).toMatchObject({
-      type: 'client-request',
-      method: 'workspace.list',
-      payload: {},
-    })
-    expect((sent as { rpcId: string }).rpcId).toMatch(/^ws-/)
+    // 走 gateway 自有配置接口（非 DSH RPC workspace.list）
+    expect(calledPath).toContain('/serenity/config')
   })
 
-  it('响应 ok=false / 非 200 → 空数组（面板手输兜底）', async () => {
+  it('fetchConfig 返回 {config, knownWorkspaces}；knownWorkspaces 缺省 → 空数组', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify(cfgResponse(undefined)), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    })) as typeof fetch
+    const resp = await fetchConfig()
+    expect(resp?.config?.gateway.port).toBe(3081)
+    expect(resp?.knownWorkspaces).toEqual([])
+  })
+
+  it('fetchWorkspaces：非 200 → 空数组（面板显示暂无可选）', async () => {
     globalThis.fetch = (async () => new Response('nope', { status: 500 })) as typeof fetch
     expect(await fetchWorkspaces()).toEqual([])
   })
 
-  it('响应缺 items → 空数组', async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify({
-      type: 'server-response', rpcId: 'ws-2', result: { ok: true, value: {} },
-    }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch
-    expect(await fetchWorkspaces()).toEqual([])
-  })
-
-  it('item 无 path → 过滤（title 缺省回退 path）', async () => {
-    globalThis.fetch = (async () => new Response(JSON.stringify({
-      type: 'server-response', rpcId: 'ws-3',
-      result: { ok: true, value: { items: [
-        { path: '/a', title: '' },
-        { path: '/b', title: 'B' },
-        { title: 'no-path' },
-      ], archivedSessionIds: [] } },
-    }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch
+  it('fetchWorkspaces：knownWorkspaces 带过滤语义由服务端完成（client 透传）', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify(cfgResponse([
+      { path: '/a', title: '/a' },
+      { path: '/b', title: 'B' },
+    ])), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch
     expect(await fetchWorkspaces()).toEqual([
       { path: '/a', title: '/a' },
       { path: '/b', title: 'B' },

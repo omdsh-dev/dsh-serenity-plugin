@@ -20,7 +20,7 @@ import type { SessionId } from '@deepseek-ai/dsh-session'
 import { getStatus, setSafeMode } from './status.js'
 import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { listActiveHandymen } from './handyman-ops.js'
-import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey, rotatePublicAskKey } from './config-ops.js'
+import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey, rotatePublicAskKey, projectKnownWorkspaces } from './config-ops.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const HANDYMEN_PATH = '/serenity/handymen'
@@ -326,7 +326,20 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           return
         }
         if (req.method === 'GET') {
-          sendJson(res, 200, { config: toWire(readAdvancedSettings()) })
+          // v1.28.0 适配 0.1.2-rc.1 A2 方案 A′：响应附 knownWorkspaces（host workspaceRegistry
+          // 投影 + 白名单过滤）——rc.1 workspace.list unary 删除，AccountsEditor 白名单下拉
+          // 数据源改走 gateway 自有配置接口，零 WS 介入。
+          const settings = readAdvancedSettings()
+          let known: Array<{ path: string; title: string }> = []
+          try {
+            const registry = (ctx as unknown as { get?: (name: string) => unknown }).get?.('workspaceRegistry') as
+              | { list?: () => Array<{ path?: string; title?: string }> }
+              | undefined
+            known = projectKnownWorkspaces(registry?.list?.() ?? [], settings.gateway.workspaces)
+          } catch {
+            /* workspace 服务不可用 → 空列表（面板显示"暂无可选工作区"） */
+          }
+          sendJson(res, 200, { config: toWire(settings), knownWorkspaces: known })
           return
         }
         if (req.method === 'PUT') {

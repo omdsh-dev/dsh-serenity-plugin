@@ -21,7 +21,6 @@ import {
   accountDraftFromWire,
   accountToWire,
   fetchConfig,
-  fetchWorkspaces,
   newAccountId,
   newTotpSecret,
   otpauthUriClient,
@@ -55,9 +54,12 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
 
   useEffect(() => {
     let alive = true
-    void Promise.all([fetchConfig(), fetchWorkspaces()]).then(([cfg, wss]) => {
+    // v1.28.0 适配 0.1.2-rc.1 A2 A′：fetchConfig 一次返回 {config, knownWorkspaces}
+    // （rc.1 workspace.list 删除后白名单下拉数据源改走 /serenity/config 投影）
+    void fetchConfig().then((resp) => {
       if (!alive) return
-      setKnownWorkspaces(wss)
+      const cfg = resp?.config ?? null
+      setKnownWorkspaces(resp?.knownWorkspaces ?? [])
       if (cfg) {
         setConfig(cfg)
         setHost(cfg.gateway.host)

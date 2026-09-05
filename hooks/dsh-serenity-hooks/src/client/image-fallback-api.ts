@@ -7,7 +7,9 @@
  *  - resendText(...)      → session.prompt（纯文本重发，绕过图片门禁）
  */
 
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+// v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 → ClientContext 用官方同款
+// `Context as ClientContext` from '@deepseek-ai/cordis'（:70/:83 的 ctx.get/sessions 运行时面签名未变）
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { DraftAttachmentId } from '@deepseek-ai/dsh-client-ui-conversation'
 
 /** 图片落盘接口路径（node half api.ts，client 专属 x-serenity-ui 头） */

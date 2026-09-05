@@ -20,7 +20,10 @@
 
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-runtime/client'
+// v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 → SettingsScope/SettingsScopeSpec
+// 改从 '@deepseek-ai/dsh-client-ui-settings/client'（官方再导出实证；dsp 用法 getSnapshot/
+// subscribe/set 与 rc.1 SettingsScope 接口 getSnapshot/subscribe/mutate/set/unset 完全一致）
+import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { useCallback, useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'

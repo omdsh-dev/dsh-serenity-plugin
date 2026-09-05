@@ -21,8 +21,8 @@ const PLATFORM_MODULES = [
   'react-dom',
   'react-dom/client',
   'cordis',
-  '@deepseek-ai/dsh-client-runtime',
-  '@deepseek-ai/dsh-client-runtime/client',
+  // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 → 从 PLATFORM_MODULES 移除
+  // （client 现全部 import type → 编译期擦除，不涉 bundle）
   '@deepseek-ai/dsh-client-ui-slots',
   '@deepseek-ai/dsh-client-web-react',
   '@deepseek-ai/dsh-client-ui-primitives',

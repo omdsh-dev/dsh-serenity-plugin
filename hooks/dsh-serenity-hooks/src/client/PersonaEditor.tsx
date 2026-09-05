@@ -51,8 +51,8 @@ export function PersonaEditor(): React.JSX.Element {
     let alive = true
     void fetchConfig().then((cfg) => {
       if (!alive || !cfg) return
-      setMode(cfg.persona?.mode ?? '')
-      setOverrideText(cfg.persona?.overrideText ?? '')
+      setMode(cfg.config?.persona?.mode ?? '')
+      setOverrideText(cfg.config?.persona?.overrideText ?? '')
       setLoaded(true)
     })
     return () => { alive = false }

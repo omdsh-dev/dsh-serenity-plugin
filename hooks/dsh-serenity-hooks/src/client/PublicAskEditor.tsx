@@ -69,7 +69,7 @@ export function PublicAskEditor(props: { publicAskOn: boolean }): React.JSX.Elem
       try {
         const cfg = await fetchConfig()
         if (!alive) return
-        setAllowed(cfg?.publicAsk?.allowed ?? [])
+        setAllowed(cfg?.config?.publicAsk?.allowed ?? [])
       } catch {
         /* 配置加载失败保持 null */
       }

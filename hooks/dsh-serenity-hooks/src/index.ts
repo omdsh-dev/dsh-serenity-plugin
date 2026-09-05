@@ -50,8 +50,9 @@ import { registerWeixinBridge } from './weixin-bridge.js'
 
 export const name = 'dsh-serenity-hooks'
 
-/** 主动调用的服务；其余（agent 事件）随 harness 装配必然存在 */
-export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', 'agentLoop', 'agents', 'systemPrompt', 'sessionProjections']
+/** 主动调用的服务；其余（agent 事件）随 harness 装配必然存在
+ *  （v1.28.0 适配 0.1.2-rc.1：+ 'settings'——B4 settings 服务由 provider 插件加载后才有） */
+export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', 'agentLoop', 'agents', 'systemPrompt', 'sessionProjections', 'settings']
 
 /** 插件配置（cordis.yml 提供；进程级） */
 export interface Config {

@@ -12,12 +12,18 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@deepseek-ai/dsh-client-runtime": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-runtime"],
-      "@deepseek-ai/dsh-client-runtime/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-runtime/lib/types/client/index.d.ts"],
+      // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 →
+      // ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'
+      //（cordis 双映射已存在 node half tsconfig；client 侧补路径）；
+      // SettingsScope/SettingsScopeSpec 从 '@deepseek-ai/dsh-client-ui-settings/client'
+      //（官方再导出；指向安装包 lib/types/client/index.d.ts——rc.2 已有该类型面）
+      "@deepseek-ai/cordis": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis"],
+      "cordis": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis"],
+      "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-slots": ["../../../../../../../.dsh/source/current/packages/client/ui-slots/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-primitives": ["../../../../../../../.dsh/source/current/packages/client/ui-primitives/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-conversation": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-locale": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-locale"],
       "react": ["node_modules/@types/react"],
       "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime"]

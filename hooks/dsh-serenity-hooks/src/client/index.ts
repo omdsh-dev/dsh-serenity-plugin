@@ -16,8 +16,11 @@
 
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-runtime/client'
+// v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 →
+// ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'；
+// SettingsScope/SettingsScopeSpec 改从 '@deepseek-ai/dsh-client-ui-settings/client'（官方再导出实证）。
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SafeModePanel } from './SafeModePanel.js'
 import { ImageFallbackDock, ImageFallbackInjected } from './ImageFallbackDock.js'
 import { uploadImage, getDraftFiles, resendText } from './image-fallback-api.js'

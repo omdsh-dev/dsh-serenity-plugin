@@ -38,6 +38,16 @@ export interface WireConfig {
   }
 }
 
+/**
+ * GET /serenity/config 响应（v1.28.0 适配 0.1.2-rc.1 A2 方案 A′）：
+ * knownWorkspaces = host workspaceRegistry.list() 投影（白名单过滤）——
+ * rc.1 workspace.list unary 删除后 AccountsEditor 白名单下拉的数据源。
+ */
+export interface ConfigResponse {
+  config: WireConfig | null
+  knownWorkspaces?: Array<{ path: string; title: string }>
+}
+
 /** 本地编辑行（面板表单状态；pass 仅写方向） */
 export interface AccountDraft {
   id: string
@@ -161,43 +171,28 @@ const CONFIG_PATH = '/serenity/config'
 
 /**
  * 获取已有工作区列表（需求 1：白名单从已有工作区选择而非手输）。
- * 走 DSH 原生 RPC `POST /api/workspace.list`（JSON RPC 形态）。
- * 信封必须是完整 ClientRequest：`{ type: 'client-request', rpcId, method, payload }`
- * （api/rpc.ts wire 契约——缺 type/method → clientRequestSchema 校验失败 → bad-request）。
+ * v1.28.0 适配 0.1.2-rc.1 A2 方案 A′：DSH rc.1 删除 workspace.list unary（改 follow 流），
+ * 白名单下拉数据源改走 gateway 自有 /serenity/config 的 knownWorkspaces（host
+ * workspaceRegistry.list() 投影 + 白名单过滤，服务端已按白名单前缀过滤）。
  * 返回 { path, title }[]；失败返回空数组（面板显示"暂无可选工作区"）。
  */
 export async function fetchWorkspaces(): Promise<{ path: string; title: string }[]> {
   try {
-    const res = await fetch('/api/workspace.list', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        type: 'client-request',
-        rpcId: `ws-${Date.now().toString(36)}`,
-        method: 'workspace.list',
-        payload: {},
-      }),
-    })
-    if (!res.ok) return []
-    const body = (await res.json()) as { result?: { ok?: boolean; value?: { items?: Array<{ path?: string; title?: string }> } } }
-    const items = body?.result?.value?.items
-    if (!Array.isArray(items)) return []
-    return items
-      .filter((i): i is { path: string; title: string } => typeof i.path === 'string' && i.path !== '')
-      .map((i) => ({ path: i.path, title: typeof i.title === 'string' && i.title !== '' ? i.title : i.path }))
+    const cfg = await fetchConfig()
+    return cfg?.knownWorkspaces ?? []
   } catch {
     return []
   }
 }
 
-/** GET 配置（含账号列表；无 hash） */
-export async function fetchConfig(): Promise<WireConfig | null> {
+/** GET 配置（含账号列表 + knownWorkspaces；无 hash） */
+export async function fetchConfig(): Promise<ConfigResponse | null> {
   const res = await fetch(CONFIG_PATH, {
     headers: { accept: 'application/json', 'x-serenity-ui': '1' },
   })
   if (!res.ok) return null
-  const body = (await res.json()) as { config?: WireConfig | null }
-  return body.config ?? null
+  const body = (await res.json()) as ConfigResponse
+  return { config: body.config ?? null, knownWorkspaces: body.knownWorkspaces ?? [] }
 }
 
 /** PUT 配置（账号 patch + 工作区白名单 + persona 彩蛋 + 开放容器白名单）→ 返回保存后的 wire */

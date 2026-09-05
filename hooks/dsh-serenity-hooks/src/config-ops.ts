@@ -427,6 +427,22 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
 }
 
 /**
+ * 已知工作区投影（v1.28.0 适配 0.1.2-rc.1 A2 方案 A′）：
+ * rc.1 workspace.list unary 删除 → AccountsEditor 白名单下拉的数据源改走 gateway 自有
+ * /serenity/config 的 knownWorkspaces（host workspaceRegistry.list() 投影，白名单过滤）。
+ * 纯函数可单测。allowPrefixes 空 = 全部放行（向后兼容默认）。
+ */
+export function projectKnownWorkspaces(
+  workspaces: Array<{ path?: string; title?: string }>,
+  allowPrefixes: readonly string[],
+): Array<{ path: string; title: string }> {
+  return workspaces
+    .filter((w) => typeof w.path === 'string' && w.path !== '')
+    .filter((w) => allowPrefixes.length === 0 || allowPrefixes.some((p) => w.path!.startsWith(p)))
+    .map((w) => ({ path: w.path!, title: typeof w.title === 'string' && w.title !== '' ? w.title : w.path! }))
+}
+
+/**
  * wire → 持久化（面板 PUT 用）：
  * accounts 元素可选带 `pass`：非空 → 重新 hash；空/缺省 → 保留现有 hash（按 id 匹配）。
  * 新账号（id 不在现有）必须带非空 pass，否则抛错（无法生成 hash）。

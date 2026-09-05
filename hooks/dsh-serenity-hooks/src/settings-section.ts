@@ -4,8 +4,9 @@
  * 分层决策（S142）：**简单配置（开关/阈值）→ dsh 原生设置面板**；
  * **复杂配置（账号列表）→ 宁静号高级面板**（localstore + /serenity/config）。
  *
- * 本模块承载简单配置层：`installSettingsSection(ctx, settingsNamespace('serenity-hooks'), schema, entry)`
+ * 本模块承载简单配置层：`SettingsProvider.installSection(ctx, 'serenity-hooks', schema, entry)`
  * 注册 `serenity-hooks` namespace——三功能总开关 + F2 阈值。
+ * （v1.28.0 适配 0.1.2-rc.1：installSettingsSection/settingsNamespace 便捷函数消失 → 方法调用）
  *
  * 运行时降级守卫（版本鲁棒性）：旧 RC（staging 架构）api-proxy 有
  * `WEB_SETTINGS_NAMESPACES` 静态白名单，第三方 ns 会收到 settings-not-exposed
@@ -17,7 +18,11 @@
 
 import type { Context } from 'cordis'
 import z from '@deepseek-ai/schemastery'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+// v1.28.0 适配 0.1.2-rc.1（B4）：installSettingsSection/settingsNamespace 便捷函数在 rc.1 消失 →
+// 改 SettingsProvider.installSection。本机运行时仍 rc.2（类型无 installSection），
+// 故经类型断言访问——升级 0.1.2-rc.1 后类型原生匹配（见 registerSettingsSection 实现注释）。
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 
 /** 插件 Config 的简单配置片段（index.ts Config 组合；settings entry base） */
 export interface SimpleConfigFragment {
@@ -126,16 +131,48 @@ export function __setSimpleSourceForTest(source: (() => SerenitySimpleSettings) 
  * 注册简单配置到 DSH settings（零改 DSH；settings.yaml 持久化 + 原生面板渲染）。
  * 注：插件 Config（cordis.yml 组合层）作为 base；用户文档层叠加其上。
  * 运行时读取简单配置统一经 `readSimpleSettings()`。
+ * v1.28.0 适配 0.1.2-rc.1（B4）：`installSettingsSection`/`settingsNamespace` 便捷函数在
+ * rc.1 消失 → 改 `SettingsProvider.installSection(owner, ns, schema, entry, hooks)`
+ * （owner = consumer 插件 ctx；ns 直接字符串）。
  */
 export function registerSettingsSection(ctx: Context, config: SimpleConfigFragment): void {
-  installSettingsSection(
+  // v1.28.0 适配 0.1.2-rc.1（B4）：rc.1 SettingsProvider.installSection(owner, ns, schema, entry, hooks)
+  // （owner = consumer 插件 ctx；ns 直接字符串——不再 settingsNamespace() 包装）。
+  // 本机类型 rc.2 无 installSection → InstallSectionFn 类型断言（rc.2 的 installSettingsSection
+  // 便捷函数在运行时即转发 installSection，语义等价；升级 0.1.2-rc.1 后断言可安全移除）。
+  interface InstallSectionHooks<T> {
+    setSource: (get: () => T) => void
+    onChange: () => void
+    validate?: (value: T) => void
+  }
+  type InstallSectionFn = (
+    owner: Context,
+    ns: string,
+    schema: unknown,
+    entry: unknown,
+    hooks: InstallSectionHooks<unknown>,
+  ) => void
+  const settingsAny = (ctx as unknown as { settings?: unknown }).settings as
+    | {
+        installSection?: InstallSectionFn
+        installSettingsSection?: InstallSectionFn
+      }
+    | undefined
+  const install = settingsAny?.installSection
+    ?? settingsAny?.installSettingsSection
+    ?? ((_owner: Context, _ns: string, _schema: unknown, _entry: unknown, hooks: InstallSectionHooks<unknown>): void => {
+      // 无 settings provider → 降级：entry 为源（readSimpleSettings 兜底 defaultSimpleSettings）
+      hooks.setSource(() => ({}) as unknown)
+      hooks.onChange()
+    })
+  install(
     ctx,
-    settingsNamespace(SERENITY_SETTINGS_NS),
+    SERENITY_SETTINGS_NS,
     simpleSettingsSchema,
     entryDefaults(config),
     {
       setSource: (get) => {
-        simpleSource = get
+        simpleSource = get as unknown as () => SerenitySimpleSettings
       },
       onChange: () => {
         // 简单配置变化（开关/阈值）→ 通知 gateway 重新 sync。
