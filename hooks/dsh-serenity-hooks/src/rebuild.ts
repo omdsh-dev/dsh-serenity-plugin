@@ -43,8 +43,8 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message, MessageSource } from '@deepseek-ai/dsh-llm'
-import { basename, dirname, resolve } from 'node:path'
-import { existsSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
 import {
@@ -181,6 +181,42 @@ const pendingRebuilds = new Map<string, PendingRebuild>()
 /** 陈旧队列存活时长（毫秒）：超过则丢弃（turn 异常结束/agent 崩溃时防残留误清空） */
 const PENDING_TTL_MS = 10 * 60 * 1000
 
+// ── rebuild 诊断（2026-09-05 用户 bug：调用成功但会话没重建——错误被 console.warn 吞掉不可见）──
+// 每次排队/消费路径都落盘 AGENT_SESSIONS/.rebuild-diag.json（CCC 内可读诊断通道，
+// 复用 .restrict-diag.json 先例——单文件覆盖保留最近状态）——复现后 agent/用户直接读文件定位断点。
+interface RebuildDiagState {
+  lastTs: string
+  lastSessionId: string
+  lastEvent: string
+  detail?: string
+  queueCount: number
+  rebuiltCount: number
+  droppedCount: number
+  failedCount: number
+}
+
+let diagState: RebuildDiagState = { lastTs: '', lastSessionId: '', lastEvent: '', queueCount: 0, rebuiltCount: 0, droppedCount: 0, failedCount: 0 }
+
+function writeRebuildDiag(root: string, entry: { sessionId: string; event: string; detail?: string }): void {
+  try {
+    const dir = join(root, 'AGENT_SESSIONS')
+    mkdirSync(dir, { recursive: true })
+    const file = join(dir, '.rebuild-diag.json')
+    const s = diagState
+    if (entry.event === 'queued') s.queueCount += 1
+    if (entry.event === 'rebuilt') s.rebuiltCount += 1
+    if (entry.event === 'ttl-dropped') s.droppedCount += 1
+    if (entry.event === 'failed') s.failedCount += 1
+    s.lastTs = new Date().toISOString()
+    s.lastSessionId = entry.sessionId
+    s.lastEvent = entry.event
+    s.detail = entry.detail
+    writeFileSync(file, JSON.stringify(s, null, 2) + '\n', 'utf-8')
+  } catch {
+    /* 诊断写盘失败忽略（不影响 rebuild 主流程） */
+  }
+}
+
 /** 测试/调试：查看 pending 队列内容 */
 export function pendingRebuildSnapshot(): ReadonlyMap<string, PendingRebuild> {
   return new Map(pendingRebuilds)
@@ -222,6 +258,7 @@ export async function queueRebuild(
 
   // ③ 排队（覆盖同会话旧队列）——需求②：存 summary + mdPath（turn-stopping 重建后重命名标题）
   pendingRebuilds.set(dshSessionId, { anchor, summary, mdPath, queuedAt: Date.now() })
+  writeRebuildDiag(root, { sessionId: dshSessionId, event: 'queued' })
   void note
   return { queued: true, anchor, sessionMdPath: mdPath }
 }
@@ -324,6 +361,11 @@ export function registerRebuildTurnHook(ctx: Context): void {
     // 陈旧队列丢弃（turn 异常结束/agent 崩溃后残留不应误清空）
     if (Date.now() - pending.queuedAt > PENDING_TTL_MS) {
       pendingRebuilds.delete(id)
+      writeRebuildDiag(resolveSerenityRootFor(agent), {
+        sessionId: id,
+        event: 'ttl-dropped',
+        detail: `queuedAt=${new Date(pending.queuedAt).toISOString()} older than ${PENDING_TTL_MS / 60000}min TTL — turn did not end in time`,
+      })
       return
     }
     pendingRebuilds.delete(id)
@@ -347,10 +389,24 @@ export function registerRebuildTurnHook(ctx: Context): void {
           content: [{ type: 'text', text: '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt. Follow the anchor instructions above now: read the persistent trajectory (SESSION.md) and continue the work automatically from the last checkpoint.' }],
           source: PLUGIN_SOURCE,
         }))
+        writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'rebuilt' })
         console.log(`[serenity-hooks] session_rebuild executed with auto-continue (turn ${payload.turn ?? '?'} ended): ${id}`)
+      } else {
+        // surface 空（无节点可清）——极罕见；记录诊断
+        writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'empty-surface' })
       }
     } catch (error) {
-      console.warn(`[serenity-hooks] session_rebuild failed: ${String((error as Error)?.message ?? error)}`)
+      // 2026-09-05 用户 bug（调用成功但没重建）：错误曾只 console.warn 不可见 →
+      // 落盘诊断 + 保留 warn。诊断文件让 agent/用户可直接定位断点。
+      const msg = String((error as Error)?.message ?? error)
+      writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'failed', detail: msg })
+      console.warn(`[serenity-hooks] session_rebuild failed: ${msg}`)
     }
   })
+}
+
+/** 从 agent 会话 cwd 解析 CCC 根（诊断落盘用）；无则回退进程 cwd */
+function resolveSerenityRootFor(agent: Agent): string {
+  const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd
+  return findSerenityRoot(cwd ?? process.cwd()) ?? process.cwd()
 }

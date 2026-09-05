@@ -33,3 +33,15 @@
 
 ### 测试
 - **54 files / 790 tests 全绿**（768 + 22 净增：③+2 / ②+6 / ⑤b guards+6 / ⑤c checkRegistryHealth+7 / ④ catalog+1）；typecheck ✓（node + client）；build ✓
+
+### review 修复批（P1 已修 + P2-2~P2-5 + P3 五项，独立 review 复验通过后并入）
+- **P2-2 祖先目录写保护**：受保护范围从"聚合档精确文件"扩为 **references/ 目录级**——`cc_fs rm -r references/` / `mv references/` 不再能绕过文件级保护删掉注册表（guards.ts isProtectedRegistryRel + fs-ops.ts protectedRegistryTargets 双实现一致；共享父目录 .opencode/skills/<cccName> 不纳入防误伤其他 skill 子目录）
+- **P2-3 高级 rebuild 死双胞胎删除**：config-ops AdvancedSettings.rebuild / RebuildSettings / wire.rebuild / applyWirePatch rebuild 段全删——rebuild 归简单配置（settings.yaml）单源，/serenity/config 不再回显死配置；旧文件残留 rebuild 键被 mergeWithDefaults 幂等忽略；accounts-api WireConfig 同步
+- **P2-4 迁移提示**：重建阈值面板 help 注明"旧版 0~1 比例（settings.yaml rebuildThreshold）已废弃被忽略——按 K 数值重设"
+- **P2-5 跨平台路径判定**：checkRegistryHealth 脚本路径 escape 判断改 `pathInside`（替代 startsWith(root+'/')——Windows 全量误报）
+- **P3-①**：session create **dry-run / issue 会话豁免 summary 必填**（未真实创建/无概括语义）；issue rename 以 issue 号作概括回退
+- **P3-②**：queueRebuild 报错文案提示 `session use <S###> --summary <概括>`
+- **P3-③**：register **首建统一 v1 wrapper**（旧裸数组与 v1 wrapper 并存分裂消除；既有裸数组保留格式承诺不破坏）
+- **P3-④**：checkRegistryHealth 无 cccName 时 **issues 空 + ok:true**（path:null 已表达无注册表可查，不再 ok:true 与 issues 并存矛盾）
+- **P3-⑤**：toolsBlock acc_kit 行补 "+ MSM registry integrity report"
+- **测试同步 + 新增**：guards root 级改 allow（P1 语义）+ references deny ×3 / fs-ops rm -r references [SKIP] + mv 拒 + 普通目录不误伤 / config-ops legacy rebuild 忽略 —— **54 files / 792 tests 全绿 + typecheck/build 双面 ✓**
