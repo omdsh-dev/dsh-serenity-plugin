@@ -19,7 +19,8 @@
       "handyman",
       "session_rebuild",
       "localstore",
-      "skiff_admin"
+      "skiff_admin",
+      "autopilot-trajectory"
     ],
     "skills": []
   }
