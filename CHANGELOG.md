@@ -1,4 +1,26 @@
-## v1.28.2 — 2026-09-05（0.1.2-rc.1 BrowserAuth 适配 + 3081 登录后白屏根治，S142 用户 bug 双报）
+## v1.29.0 — 2026-09-05（三项完善 + trajectory-assistant 关卡化注入统一命名，S142 用户拍板两批合并发布）
+
+**Scope:** 两批已实现未发布的代码合并为一个版本——① **三项完善**（用户拍板：星舰意象 / 配置合一 / DSH 平台会话物理删除）② **trajectory-assistant**（用户拍板：过程中提示注入统一命名 + 关卡化设计，含 D8 词法原则）。原计划 v1.29（三项完善）+ v1.29.x（trajectory-assistant）分开，用户 D14 显式要求"发新的小版本，然后本地安装"→ 合并 v1.29.0。
+
+### ① 三项完善（three-improvements-design.md v0.1→定稿）
+- **metaphor 星舰意象升级（①）**：metaphorBlock() 海船→星舰（one starship, one voyage / deep space has no mistakes—only stars you have not yet mapped / Departure Inspection→First Anchor / debris in the hold / star charts / flight-worthy / launching）；SHIP/VOYAGE/CREW 三层 + M-1~M-4 映射不变；osp-alignment 断言同步（Deep space 句 + Departure Inspection）；docs/metaphor-domain.md 同步（v1.29 变更历史）
+- **配置合一 UI（②）**：RowCard 可展开（整行点击 + expandable/open/onToggle/detail）；双端口网关行内联 AccountsEditor（删独立「外部访问」Collapse）；超限重建行内联阈值+说明；Skiff/ACP/问答页/Autopilot 行内联 detail（问答页挂 PublicAskEditor、Autopilot 挂状态块+autopilotOn prop）；彩蛋/微信桥保留独立折叠；CSS 新增 .ss-expandable/.ss-expanded/.ss-expandMark/.ss-rowDetail/.ss-detailStack/.ss-detailIntro/.ss-error
+- **DSH 会话物理删除（③）**：新 `src/session-cleanup.ts`（sessionsRootDir `$DSH_HOME/sessions` / findSessionLog / collectEligibleSessions **lastActive 基准** + live 会话保护跳过 / performCleanup dryRun + 物理删 / cutoffDaysAgo——纯逻辑零 ctx 可单测）；api.ts `GET/POST /serenity/session-cleanup`（GET 预览 / POST 执行，x-serenity-ui 头，live ids 从 ctx.get('sessions')）；SettingsSection 新增 SessionCleanupBlock（天数输入 + 预览 + 双击确认执行）——**不过滤不归档直接物理删**，仅保留 live 会话保护底线（用户拍板 ③ 决策）
+
+### ② trajectory-assistant：关卡化注入统一命名（v0.3，D1-D8 用户裁决）
+- **概念（用户拍板）**：dsp 全部"过程中动态提示注入"统一命名为 trajectory-assistant（轨迹助航员）；关卡设计思想塑造结构与时机，**不用于提示词用词**（D8——游戏黑话 BOSS/XP 禁，CHECKPOINT/LIMIT 等自然词可）
+- **新 `src/trajectory-assistant.ts`**：token 常量单一真相源（ASSISTANT_PREFIX/EVENT_LABEL/eventToken/ACK 前缀）+ style facade（plain 默认 / metaphor 变体，**无 game 档**——D8）+ onSettlement seam（OP-1 预留——结算触发"工作完成且用户认可"难自动检测，留挂点）
+- **全动态层 token 接线**：keeper.ts reminderText→`[TRAJECTORY-ASSISTANT · CHECKPOINT]` + rebuildReminderText→`· LIMIT`/`· LIMIT · MANDATORY`；rebuild.ts 锚点头→`· REBUILD`（2 处）；tools/rebuild.ts 描述引用；output-guard.ts→`· BOUNDARY GUARD`（+ 敏感词表补 TRAJECTORY-STEWARD/ASSISTANT 旧新名）；autopilot-trajectory.ts 头→`[Autopilot Trajectory · 唤起]`（正文 D8 不动）；system-prompt.ts sessionBlock 协议说明同步；msm-ops.ts 注释
+- **协议正文保持纯净（D8）**：first-anchor 两轮 + autopilot 四段正文逐字节未动；[ACC] 身份信标保留
+- 设计文档：`docs/trajectory-assistant-design.md`（v0.1 概念 + §0 D8）+ `docs/trajectory-assistant-plan.md`（v0.3 英文完整方案，APPROVED）
+
+### 测试
+- **59 files / 862 tests 全绿**（858 + 新增 8 用例 trajectory-assistant 模块 + 镜像门禁补覆盖；三完善 58/856 → 合并 59/862）；typecheck ✓（node + client）；build ✓
+
+### 发布链
+- bump v1.29.0（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推（origin + github + omdsh）→ deploy → restart-web → 本地安装（npm-install / deploy profile web）
+
+
 
 **Scope:** 用户报告两个 3081 外部访问 bug——① 被 DSH 0.1.2-rc.1 新增 BrowserAuth 拦截（"dsh web authentication required"）② 登录后白屏（https://dsh.notfoundhome.cc）。排查实证两条独立根因链，分两个修复模块 + 一个诊断 MSM（gateway-diag，home-serenity 侧）。
 
