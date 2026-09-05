@@ -1,7 +1,7 @@
 # trajectory-assistant: Complete Modification Plan (v0.3)
 
 > SESSION: S142 (2026-09-05)
-> Status: **Draft for user review — no implementation until approved**
+> Status: **APPROVED 2026-09-05 — implemented (commit `feat(trajectory-assistant)`), deploy/release pending D14**
 > Language: English (as required)
 > Companion design: `docs/trajectory-assistant-design.md` (v0.1 conceptual)
 > v0.3 change: D8 vocabulary principle added — level-design thinking shapes structure & timing only;
