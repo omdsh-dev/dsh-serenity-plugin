@@ -303,7 +303,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
   name: 'session',
   description:
     'Full work-session lifecycle (AGENT_SESSIONS/, home-session convention). list/show/create/use/close/health/qa/archive/summary/hook-develop-guide. ' +
-    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars, content summary); close requires --confirm; ' +
+    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars, content summary — required, except --dry-run preview and --issue sessions which are exempt); close requires --confirm; ' +
     'use activates the session for the current dsh conversation (in-memory + events restore, isolated per dsh session) and requires --summary (≤20 chars). ' +
     'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
   parameters: {
@@ -320,7 +320,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
     desc: { type: 'string', description: 'create short description (any language, ≤5 words; mutually exclusive with issue)' },
     issue: { type: 'string', description: 'create ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
     goal: { type: 'string', description: 'create one-sentence goal (optional)' },
-    summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
+    summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
     confirm: { type: 'boolean', description: 'close must be true (prevents accidental close)' },
     dryRun: { type: 'boolean', description: 'create/archive preview mode (no actual changes)' },
   },

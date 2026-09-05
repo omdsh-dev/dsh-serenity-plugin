@@ -18,7 +18,7 @@ import { execFileSync, spawnSync, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join, dirname, relative, resolve } from 'node:path'
 import { platform } from 'node:process'
-import { classifyPath } from './ccc.js'
+import { classifyPath, readCccName as readCccNameFromCcc } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
 import type { JsonValue } from './json.js'
 
@@ -48,14 +48,9 @@ function bunExecutablePath(): string | null {
   return null
 }
 
-/** CCC 名：从 .serenity 首行解析（对齐 osp readSerenityCccName） */
+/** CCC 名：从 .serenity 解析（review P2-2 统一收口到 ccc.ts readCccName——跳 # 注释/空行首非空行；此处保留导出名兼容内部调用） */
 export function readCccName(root: string): string | null {
-  try {
-    const content = readFileSync(resolve(root, '.serenity'), 'utf-8').trim()
-    return content.split('\n')[0]?.trim() || null
-  } catch {
-    return null
-  }
+  return readCccNameFromCcc(root)
 }
 
 /**

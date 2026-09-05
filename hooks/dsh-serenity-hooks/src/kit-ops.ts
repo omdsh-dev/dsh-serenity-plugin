@@ -14,7 +14,7 @@
 
 import { existsSync, statSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { findSerenityRoot, findGitRoot, loadSerenityConfig, pathInside, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { findSerenityRoot, findGitRoot, loadSerenityConfig, pathInside, readCccName as readCccNameFromCcc, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
 import { readDshVersion } from './status.js'
 import type { JsonValue } from './json.js'
@@ -28,15 +28,9 @@ export interface KitArgs {
   seconds?: number
 }
 
-/** CCC 名：从 .serenity 首行解析（对齐 osp readSerenityCccName） */
+/** CCC 名（review P2-2：统一收口到 ccc.ts readCccName——跳 # 注释/空行首非空行；此处保留 null 容错） */
 function readCccName(root: string | null): string | null {
-  if (!root) return null
-  try {
-    const content = readFileSync(resolve(root, '.serenity'), 'utf-8').trim()
-    return content.split('\n')[0]?.trim() || null
-  } catch {
-    return null
-  }
+  return root ? readCccNameFromCcc(root) : null
 }
 
 /**

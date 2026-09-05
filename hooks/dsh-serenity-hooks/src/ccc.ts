@@ -74,6 +74,28 @@ export function resolveInside(root: string, p: string): string {
   return abs;
 }
 
+// ── CCC 名（.serenity 标记内容）──
+
+/**
+ * CCC 名：从 .serenity 标记解析——**跳过 # 注释与空行的首个非空行**。
+ * 注册表聚合档路径（.opencode/skills/<cccName>/references/mech-registry.json）以此为准，
+ * 是 guards/fs-ops/msm-ops/kit-ops 四处解析的唯一真相源（review P2-2 收口，09-05：
+ * 原四处分叉——msm-ops/kit-ops 取严格首行、guards/fs-ops 跳注释——首行为注释/空行时
+ * register 目标路径与保护路径分叉，潜在隐患）。
+ * @returns CCC 名；无标记/读失败/全注释空行 → null
+ */
+export function readCccName(root: string): string | null {
+  try {
+    const marker = resolve(root, '.serenity');
+    if (!existsSync(marker)) return null;
+    const content = readFileSync(marker, 'utf-8');
+    const line = content.split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'));
+    return line && line !== '' ? line : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── 配置（.opencode/serenity.json 规范位置 / .dsh/serenity.json 回退）──
 
 export interface SerenityConfig {

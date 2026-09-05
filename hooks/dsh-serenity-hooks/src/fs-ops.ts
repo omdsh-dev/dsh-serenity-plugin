@@ -12,7 +12,6 @@
 
 import {
   existsSync,
-  readFileSync,
   statSync,
   mkdirSync,
   rmSync,
@@ -31,7 +30,7 @@ import {
 import { spawn, execFileSync } from 'node:child_process'
 import { join, relative, dirname, resolve } from 'node:path'
 import { platform } from 'node:os'
-import { resolveInside, pathInside } from './ccc.js'
+import { resolveInside, pathInside, readCccName } from './ccc.js'
 import type { JsonValue } from './json.js'
 
 export type CcFsAction =
@@ -123,26 +122,13 @@ function safeRel(root: string, abs: string): string {
 
 // ── 写操作路径校验（对齐 osp validateWritePath/assertNotProtected）──
 
-/** CCC 名：从 .serenity 首行解析（对齐 msm-ops readCccName——注册表 cccName 语义） */
-function readCccNameFromMarker(root: string): string | null {
-  try {
-    const marker = resolve(root, '.serenity')
-    if (!existsSync(marker)) return null
-    const content = readFileSync(marker, 'utf-8')
-    const line = content.split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'))
-    return line && line !== '' ? line : null
-  } catch {
-    return null
-  }
-}
-
 /**
  * 受保护注册表聚合档的路径集合（review P2-2：精确文件保护可被 `rm -r 父目录` / `mv 父目录`
  * 绕过——删掉 references/ 目录等于删掉注册表。保护对象 = 聚合档文件 + 其全部祖先目录）。
  * @returns null = 无 cccName（无法定位 → 不保护）；否则 { fileRel, ancestorDirs } 相对根的正斜杠 rel
  */
 function protectedRegistryTargets(root: string): { fileRel: string; ancestorDirs: string[] } | null {
-  const cccName = readCccNameFromMarker(root)
+  const cccName = readCccName(root) // review P2-2：统一 ccc.ts readCccName（跳 # 注释/空行首非空行）
   if (!cccName) return null
   const fileRel = `.opencode/skills/${cccName}/references/mech-registry.json`
   const segs = fileRel.split('/') // ['.opencode','skills',cccName,'references','mech-registry.json']
@@ -164,8 +150,11 @@ function isProtectedRegistryTarget(root: string, relCi: string): { hit: 'file' |
   if (relCi === fileRelCi) return { hit: 'file' }
   for (const ancestor of protectedTargets.ancestorDirs) {
     const aCi = lower(ancestor)
-    // 目录命中 = 等于祖先目录，或在其下（删 references/ 整树 / mv references/ 到别处 / 删整个 skills/<cccName>）
-    if (relCi === aCi || relCi.startsWith(`${aCi}/`)) return { hit: 'ancestor' }
+    // 目录命中 = **目录节点本身**（rm -r references/ / mv references/ 即毁注册表）。
+    // review P1-1（复验收窄）：**不含子树前缀**——references/ 内与注册表并置的
+    // 合法知识文档（msm-writing-standards.md 等）必须可正常写/编辑/删（防绕过语义
+    // = 删目录，目录节点相等已足够；前缀放大成子树任何写 = 过保护）。
+    if (relCi === aCi) return { hit: 'ancestor' }
   }
   return null
 }

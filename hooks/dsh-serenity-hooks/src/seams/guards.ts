@@ -8,7 +8,7 @@
  */
 
 import { resolve, relative } from 'node:path'
-import { writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs'
+import { writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import type { Context } from 'cordis'
 import type { ToolExecution, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
@@ -18,6 +18,7 @@ import {
   matchBlacklist,
   readBlacklist,
   pathInside,
+  readCccName,
   type BlacklistRule,
 } from '../ccc.js'
 import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
@@ -75,21 +76,24 @@ export function isProtectedRegistryRel(root: string, rel: string): boolean {
   const relCi = lower(rel)
   // cccName 聚合档：.opencode/skills/<cccName>/references/mech-registry.json
   // 注：大小写比较按平台（win32 不敏感 / posix 敏感）——review P2-1：Linux 大写 CCC 名不得误放行
+  // cccName 解析统一走 ccc.ts readCccName（review P2-2：跳过 # 注释/空行首非空行，四处单源）
   try {
     const marker = resolve(root, '.serenity')
     if (existsSync(marker)) {
-      const line = readFileSync(marker, 'utf-8').split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'))
+      const line = readCccName(root)
       if (line) {
         const aggregate = `.opencode/skills/${line}/references/mech-registry.json`
         const aggregateCi = lower(aggregate)
         if (relCi === aggregateCi) return true
         // review P2-2：精确文件保护可被 `rm -r references/`（删父目录）绕过——
         // **references/ 目录本身**纳入保护（rm -r references/ 即毁注册表）。
-        // 仅保护 references/ 级（不向上含 .opencode/skills/<cccName>——那是共享父目录，
-        // 保护会误伤同 CCC 下其他 skill 子目录删除；skills/<cccName> 整删场景罕见 + git 可恢复，接受）。
+        // review P1-1（复验收窄）：只保护 references/ **目录节点本身**（rm -r / mv 目录 deny），
+        // **不含子树前缀**——references/ 内与 mech-registry.json 并置的合法知识文档
+        // （msm-writing-standards.md 等，home-serenity 实测 8 个）必须可正常维护。
+        // 防绕过语义 = 目录节点相等已足够（删目录 rm -r/mv 目标恰是 references/ 自身）；
+        // 前缀会把"删目录"放大成"子树内任何写"= 过保护（复验 P1-1，09-05）。
         const refsDir = `.opencode/skills/${line}/references`
-        const refsDirCi = lower(refsDir)
-        if (relCi === refsDirCi || relCi.startsWith(`${refsDirCi}/`)) return true
+        if (relCi === lower(refsDir)) return true
       }
     }
   } catch {

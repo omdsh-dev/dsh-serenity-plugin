@@ -380,6 +380,23 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
   })
 
+  it('references/ 内非注册表兄弟文档写 → allow（review P1-1：只保护注册表文件与 references/ 目录节点本身，不误伤并置知识文档）', () => {
+    // home-serenity 实测：msm-writing-standards.md 等 8 个知识文档与 mech-registry.json 并置——必须可正常维护
+    const sibling = '.opencode/skills/test/references/msm-writing-standards.md'
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: sibling })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'edit', pathArg: sibling })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'touch', pathArg: sibling })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'append', pathArg: sibling })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: sibling })).kind).toBe('allow')
+    // 子树深层（references/sub/x.md）同样放行——只目录节点本身受保护
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: '.opencode/skills/test/references/sub/x.md' })).kind).toBe('allow')
+  })
+
+  it('references/ 目录节点本身 rm -r/mv → deny（review P1-1 收窄后仍防删目录绕过）', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'mv', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+  })
+
   it('cccName 非 test 的 CCC（.serenity=other）→ 只保护自己的聚合档，test 聚合档对其不保护', () => {
     const otherDir = mkdtempSync(join(tmpdir(), 'guards-other-'))
     try {

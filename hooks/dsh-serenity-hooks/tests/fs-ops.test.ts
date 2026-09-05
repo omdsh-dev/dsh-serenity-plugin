@@ -144,6 +144,13 @@ describe('fs-ops: 写操作与守卫（对齐 osp spec）', () => {
     // mv references/ 到别处 → 拒绝（祖先目录 mv 保护）
     expect(() => run('mv', { src: '.opencode/skills/test/references', dst: '.opencode/skills/test/references-moved' })).toThrow(/ancestor of the ACC-managed/)
     expect(existsSync(join(aggDir, 'mech-registry.json'))).toBe(true)
+    // review P1-1（复验收窄）：references/ 内并置知识文档可正常写/删（只保护注册表文件 + 目录节点本身）
+    const sibling = join(aggDir, 'msm-writing-standards.md')
+    writeFileSync(sibling, 'doc')
+    expect(run('append', { path: '.opencode/skills/test/references/msm-writing-standards.md', content: ' more' })).toContain('appended')
+    expect(existsSync(sibling)).toBe(true)
+    expect(run('rm', { path: '.opencode/skills/test/references/msm-writing-standards.md' })).toContain('[OK] deleted:')
+    expect(existsSync(sibling)).toBe(false)
     // 非聚合档的普通目录仍可正常删（不误伤）
     mkdirSync(join(dir, '.opencode/skills/test/docs'), { recursive: true })
     writeFileSync(join(dir, '.opencode/skills/test/docs/x.txt'), 'x')

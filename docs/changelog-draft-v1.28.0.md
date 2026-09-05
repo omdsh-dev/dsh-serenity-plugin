@@ -1,8 +1,8 @@
 # CHANGELOG v1.28.0 草稿（五项需求，待 review 确认后并入 CHANGELOG.md）
 
-## v1.28.0 — 2026-09-04（五项需求实现：系统提示词工具块移尾 + 会话命名概括 + rebuild 阈值 K 数值 + MSM 注册表单级化与写保护 + acc_msm catalog 目录，S142 用户回家拍板）
+## v1.28.0 — 2026-09-05（五项需求实现 + review 双轮修复批：系统提示词工具块移尾 + 会话命名概括 + rebuild 阈值 K 数值 + MSM 注册表单级化与写保护 + acc_msm catalog 目录 + rebuild 诊断通道，S142 用户拍板）
 
-**Scope:** 用户 09-04 晚回家对五项调研需求（`docs/three-feature-requests-research.md` v0.2）逐项拍板后开工实现——① rebuild 阈值百分比→K 数值 ② 会话命名加 ≤20 字概括 ③ 系统提示词 MSM 调用示例 + 工具列表独立块移末尾 ④ 目录式 ACC 使用指南（并入 acc_msm）⑤ MSM 注册表单级化 + 写保护 + ACC 层完整性检查。5 个 commit + review + 发布。
+**Scope:** 用户 09-04 晚回家对五项调研需求（`docs/three-feature-requests-research.md` v0.2）逐项拍板后开工实现——① rebuild 阈值百分比→K 数值 ② 会话命名加 ≤20 字概括 ③ 系统提示词 MSM 调用示例 + 工具列表独立块移末尾 ④ 目录式 ACC 使用指南（并入 acc_msm）⑤ MSM 注册表单级化 + 写保护 + ACC 层完整性检查。5 个 commit + 两轮独立 review + 发布。
 
 ### ① rebuild 阈值：百分比 → K 数值（用户拍板：新键 rebuildThresholdK 默认 400K，纯绝对无窗口比例保护）
 - `settings-section.ts`：`rebuildThreshold`（0~1 比例默认 0.9）→ **`rebuildThresholdK`**（z.number min 50 max 4000 默认 400）；SimpleConfigFragment.rebuild.thresholdRatio → thresholdK；entryDefaults/defaultSimpleSettings 同步
@@ -31,10 +31,8 @@
 - **⑤c 健康检查**：`kit-ops.ts` `checkRegistryHealth` 入 **acc_kit health 的 registry 段**——parse（剥 BOM）/顶层 wrapper 结构/每 entry 字段类型/name 唯一/path 根内+脚本存在；**坏不抛错**（坏表 → ok:false + issues + git 恢复指引——register/deregister 精提交历史可 `git checkout -- <registry>` 恢复）；用户拍板：只输出指引不内置 --restore
 - CCC 数据：home-serenity 聚合档并入 6 分散 entry（mail-tool/memory-tool/movie-search/home-diag/session-log-tool/h3-pipeline → 67 entries 总）；分散文件保留（用户拍板——新代码不读，无害残留）；其他 CCC（pangu/tiangong/sh）单级化后各自需手工并入自身 cccName 聚合档（待办）
 
-### 测试
-- **54 files / 790 tests 全绿**（768 + 22 净增：③+2 / ②+6 / ⑤b guards+6 / ⑤c checkRegistryHealth+7 / ④ catalog+1）；typecheck ✓（node + client）；build ✓
-
-### review 修复批（P1 已修 + P2-2~P2-5 + P3 五项，独立 review 复验通过后并入）
+### review 修复批（第一轮：P1 + P2-2~P2-5 + P3 五项，独立 review 后修复）
+- **P1 单级化死锁**：root 级注册表解除写保护（废弃形态死锁——不被读又不可删/迁移）；**P2-1 平台大小写统一**（win32 不敏感/posix 敏感——Linux 大写 CCC 名不得误放行）
 - **P2-2 祖先目录写保护**：受保护范围从"聚合档精确文件"扩为 **references/ 目录级**——`cc_fs rm -r references/` / `mv references/` 不再能绕过文件级保护删掉注册表（guards.ts isProtectedRegistryRel + fs-ops.ts protectedRegistryTargets 双实现一致；共享父目录 .opencode/skills/<cccName> 不纳入防误伤其他 skill 子目录）
 - **P2-3 高级 rebuild 死双胞胎删除**：config-ops AdvancedSettings.rebuild / RebuildSettings / wire.rebuild / applyWirePatch rebuild 段全删——rebuild 归简单配置（settings.yaml）单源，/serenity/config 不再回显死配置；旧文件残留 rebuild 键被 mergeWithDefaults 幂等忽略；accounts-api WireConfig 同步
 - **P2-4 迁移提示**：重建阈值面板 help 注明"旧版 0~1 比例（settings.yaml rebuildThreshold）已废弃被忽略——按 K 数值重设"
@@ -45,3 +43,18 @@
 - **P3-④**：checkRegistryHealth 无 cccName 时 **issues 空 + ok:true**（path:null 已表达无注册表可查，不再 ok:true 与 issues 并存矛盾）
 - **P3-⑤**：toolsBlock acc_kit 行补 "+ MSM registry integrity report"
 - **测试同步 + 新增**：guards root 级改 allow（P1 语义）+ references deny ×3 / fs-ops rm -r references [SKIP] + mv 拒 + 普通目录不误伤 / config-ops legacy rebuild 忽略 —— **54 files / 792 tests 全绿 + typecheck/build 双面 ✓**
+
+### rebuild 用户 bug 诊断通道（2026-09-05，用户："调用成功但会话没重建"）
+- **症状**：用户 [TRAJECTORY] 触发后调 session_rebuild "调用无效/返回成功但会话没重建"——事实澄清（时间线实证）：v1.27.14 npm 发布物不含五项需求（bump 先于五项 commit）→ 本机 deploy = 未发布代码 → 用户感知 "27.14 改坏" 实为**未发布代码行为变化**（② summary 必填新语义）
+- **诊断落盘 `src/rebuild.ts`**：`AGENT_SESSIONS/.rebuild-diag.json`（CCC 内可读）——每次 queued / ttl-dropped / rebuilt / failed / empty-surface 路径记录 + 计数；错误不再只 console.warn（此前 performRebuild 抛错仅 warn → 用户无感知 = "无反应"）
+- **keeper 文案补 summary 指引（嫌疑①根治）**：`rebuildReminderText`（普通 + escalated）补 "passing --summary '<content summary ≤20 chars>' (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild)"——需求② summary 必填后，旧文案只叫 "call the session_rebuild tool" 未指导带 summary → 模型裸调必被拒（"调用无效"）；新文案让 [TRAJECTORY] 触发链一次成功
+- **实证**：本会话自身 rebuild 全链路成功（diag: queue 1 / rebuilt 1 / dropped 0 / failed 0，[TRAJECTORY-REBUILD] 开头）
+
+### 复验修复批（第二轮，独立复验 subagent 裁决"需修改后再发布"，09-05 修复后发布）
+- **P1-1 references/ 目录保护收窄**（复验 P1，应修）：原 review P2-2 的 references/ 保护用**子树前缀**（startsWith refsDir/）→ 把 `.opencode/skills/<cccName>/references/` **整棵子树**（含与 mech-registry.json 并置的合法知识文档——home-serenity 实测 msm-writing-standards.md 等 8 个）都纳入写保护 → 上线后 agent 无法维护这些文档。**收窄 = 保护 ① 聚合档文件精确路径 + ② references/ 目录节点本身**（rm -r / mv 目录 deny）——防绕过语义 = 删目录，目录节点相等已足够；子树内兄弟文档写/编辑/删放行（guards.ts isProtectedRegistryRel + fs-ops.ts isProtectedRegistryTarget 双实现一致）
+- **P2-1 session 工具描述同步豁免**（复验 P2）：描述仍写 create 一律要求 --summary，代码已对 dry-run/issue 豁免（P3-①）——LLM 契约漂移，描述补 "except --dry-run preview and --issue sessions which are exempt"
+- **P2-2 cccName 解析收口**（复验 P2）：四处解析规则不一致（msm-ops/kit-ops 严格首行 vs guards/fs-ops 跳 # 注释空行）→ **统一收口 ccc.ts `readCccName`**（跳过 # 注释与空行的首非空行，null-safe），msm-ops 导出名转发 / kit-ops null 容错转发 / guards + fs-ops 删本地实现改用规范——.serenity 首行为注释时 register 目标路径与保护路径不再分叉
+- **测试同步 + 新增**：guards references 兄弟文档写 allow ×2（文件级 + 子树深层）/ 目录节点 rm/mv deny 保留 / fs-ops 兄弟文档 append + rm 放行 —— **54 files / 794 tests 全绿 + typecheck/build 双面 ✓**
+
+### 测试
+- **54 files / 794 tests 全绿**（768 + 26 净增：③+2 / ②+6 / ⑤b guards+6 / ⑤c checkRegistryHealth+7 / ④ catalog+1 / 复验修复批 +4）；typecheck ✓（node + client）；build ✓
