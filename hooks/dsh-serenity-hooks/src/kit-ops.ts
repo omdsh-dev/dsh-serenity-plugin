@@ -14,7 +14,7 @@
 
 import { existsSync, statSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { findSerenityRoot, findGitRoot, loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { findSerenityRoot, findGitRoot, loadSerenityConfig, pathInside, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
 import { readDshVersion } from './status.js'
 import type { JsonValue } from './json.js'
@@ -69,7 +69,10 @@ export interface RegistryHealthReport {
 export function checkRegistryHealth(root: string): RegistryHealthReport {
   const cccName = readCccName(root)
   if (!cccName) {
-    return { path: null, ok: true, present: false, issues: ['no cccName (.serenity first line) — cannot locate the registry'] }
+    // 无 cccName → 无法定位注册表：**既不算健康也不算坏**（无可检查对象）。
+    // P3-④ review：旧实现 ok:true + issues 非空自相矛盾——统一为 issues 空 + ok:true
+    // （path:null 本身已表达"无注册表可查"，不产生错误 issue）。
+    return { path: null, ok: true, present: false, issues: [] }
   }
   const rel = `.opencode/skills/${cccName}/references/mech-registry.json`
   const abs = resolve(root, rel)
@@ -125,8 +128,9 @@ export function checkRegistryHealth(root: string): RegistryHealthReport {
     // path 引用完整（根内 + 脚本存在）——坏路径 = exec 会失败但注册表结构没坏；归为 issue
     if (typeof e.path === 'string' && e.path !== '') {
       const scriptAbs = resolve(root, e.path)
-      const relPath = scriptAbs.startsWith(`${root}/`) || scriptAbs === root ? e.path : null
-      if (!relPath) {
+      // review P2-5：路径判断从 startsWith(root+'/') 改 pathInside（跨盘/平台安全——
+      // Windows 全量误报 escape；pathInside 处理大小写 + 分隔符边界 + 跨盘）
+      if (!pathInside(resolve(root), scriptAbs)) {
         issues.push(`entry[${i}] (${String(e.name ?? '?')}): path "${e.path}" escapes CCC root`)
       } else if (!existsSync(scriptAbs)) {
         issues.push(`entry[${i}] (${String(e.name ?? '?')}): script not found at "${e.path}"`)

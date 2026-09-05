@@ -127,6 +127,31 @@ describe('fs-ops: 写操作与守卫（对齐 osp spec）', () => {
     expect(existsSync(join(dir, '.serenity'))).toBe(true)
   })
 
+  it('rm -r 受保护注册表祖先目录 → [SKIP]（review P2-2：文件级保护不可被删父目录绕过）', () => {
+    // 建聚合档目录树（.serenity=test → cccName=test）
+    const aggDir = join(dir, '.opencode/skills/test/references')
+    mkdirSync(aggDir, { recursive: true })
+    writeFileSync(join(aggDir, 'mech-registry.json'), JSON.stringify({ version: 1, entries: [] }), 'utf-8')
+    // 直接删注册表文件 → [SKIP]
+    const rFile = run('rm', { path: '.opencode/skills/test/references/mech-registry.json' }) as string
+    expect(rFile).toContain('[SKIP]')
+    expect(existsSync(join(aggDir, 'mech-registry.json'))).toBe(true)
+    // rm -r references/ 目录（递归）→ [SKIP]（祖先目录保护）
+    const rDir = run('rm', { path: '.opencode/skills/test/references', recursive: true }) as string
+    expect(rDir).toContain('[SKIP]')
+    expect(rDir).toContain('ancestor of the ACC-managed mech-registry.json')
+    expect(existsSync(join(aggDir, 'mech-registry.json'))).toBe(true)
+    // mv references/ 到别处 → 拒绝（祖先目录 mv 保护）
+    expect(() => run('mv', { src: '.opencode/skills/test/references', dst: '.opencode/skills/test/references-moved' })).toThrow(/ancestor of the ACC-managed/)
+    expect(existsSync(join(aggDir, 'mech-registry.json'))).toBe(true)
+    // 非聚合档的普通目录仍可正常删（不误伤）
+    mkdirSync(join(dir, '.opencode/skills/test/docs'), { recursive: true })
+    writeFileSync(join(dir, '.opencode/skills/test/docs/x.txt'), 'x')
+    const rOk = run('rm', { path: '.opencode/skills/test/docs', recursive: true }) as string
+    expect(rOk).toContain('[OK] deleted:')
+    expect(existsSync(join(dir, '.opencode/skills/test/docs'))).toBe(false)
+  })
+
   it('cp 目录需 recursive（对齐 osp）', () => {
     expect(() => run('cp', { src: 'docs', dst: 'docs-copy' })).toThrow(/use recursive/)
     run('cp', { src: 'docs', dst: 'docs-copy', recursive: true })

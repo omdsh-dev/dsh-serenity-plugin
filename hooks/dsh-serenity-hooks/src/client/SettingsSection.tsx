@@ -238,6 +238,8 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             help={'重建触发阈值（需求①：K 数值，默认 400K，范围 50~4000K）：\n' +
               '· 含义：上下文 projected tokens 达到 thresholdK × 1000 时，轨迹跟踪器开始提醒重建\n' +
               '· 纯绝对数值（不再依赖窗口比例）——配多大就多大，无窗口上限保护\n' +
+              '· 迁移：旧版 0~1 比例（settings.yaml rebuildThreshold，如 0.9）已废弃并被忽略——\n' +
+              '  请按 K 数值在此重设（如 0.9 → 900）；若从未设置则默认 400K 生效\n' +
               '· 调低：更早触发（适合长任务，避免上下文耗尽前措手不及）\n' +
               '· 调高：更晚触发（适合短对话，减少不必要的重建提示）\n' +
               '· 仅「超限重建」开启时有意义'}

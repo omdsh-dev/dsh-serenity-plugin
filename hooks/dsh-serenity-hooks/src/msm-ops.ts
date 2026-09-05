@@ -471,8 +471,10 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       }
       const regPath = registryPathFor(root, skill)
       // 对齐 osp：保留原注册表格式（数组 vs v1 wrapper）；剥 BOM 防 Windows 编辑器 \uFEFF（审计#13）
+      // P3-③ review：**首建统一 v1 wrapper**——文件不存在（raw===''）时旧逻辑 isV1Wrapped=false
+      // → 裸数组，与 writeRegistry 默认 v1 wrapper 并存（格式分裂）。首建一律 v1 wrapper。
       const raw = existsSync(regPath) ? readFileSync(regPath, 'utf-8').replace(/^\uFEFF/, '') : ''
-      const isV1Wrapped = raw !== '' && !Array.isArray(JSON.parse(raw))
+      const isV1Wrapped = raw === '' ? true : !Array.isArray(JSON.parse(raw))
       const entries = existsSync(regPath) ? parseRegistry(readFileSync(regPath, 'utf-8')) : []
       // flags/usage 入参（对齐 osp：可选，缺省空数组 / 自描述 usage）
       let flags: MsmFlag[] | undefined

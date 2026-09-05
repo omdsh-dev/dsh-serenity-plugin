@@ -75,8 +75,10 @@ describe('读写（plugin 全局文件）', () => {
     expect(s.gateway.port).toBe(3081)
     expect(s.gateway.accounts).toEqual([])
     expect(s.gateway.workspaces).toEqual([])
-    expect(s.rebuild.enabled).toBe(true)
-    expect(s.rebuild.thresholdK).toBe(400)
+    expect(s.persona.mode).toBe('')
+    expect(s.publicAsk.allowed).toEqual([])
+    // review P2-3：高级配置已无 rebuild（rebuild 归简单配置 settings.yaml）——死双胞胎删除
+    expect((s as unknown as Record<string, unknown>).rebuild).toBeUndefined()
   })
 
   it('写 → 读 往返一致；文件权限 0600', () => {
@@ -105,7 +107,7 @@ describe('读写（plugin 全局文件）', () => {
     const s = readAdvancedSettings()
     expect(s.gateway.enabled).toBe(true)
     expect(s.gateway.port).toBe(3081) // 缺省字段补默认
-    expect(s.rebuild.enabled).toBe(true)
+    expect(s.persona.mode).toBe('') // 缺省补默认
   })
 })
 
@@ -149,10 +151,18 @@ describe('updateAdvancedSettings（部分更新）', () => {
     expect(next.gateway.accounts).toHaveLength(1) // 保留
   })
 
-  it('rebuild 独立 patch', () => {
-    const next = updateAdvancedSettings({ rebuild: { thresholdK: 850 } })
-    expect(next.rebuild.thresholdK).toBe(850)
-    expect(next.rebuild.enabled).toBe(true)
+  it('review P2-3：legacy rebuild 残留键被忽略（读出不回显——死双胞胎删除）', () => {
+    // 模拟 v1.27 前全局文件残留 rebuild 节（历史高级配置曾含它）
+    writeFileSync(globalConfigPath(), JSON.stringify({
+      gateway: { enabled: true },
+      rebuild: { enabled: false, thresholdK: 500 },
+    }), 'utf-8')
+    const s = readAdvancedSettings()
+    expect(s.gateway.enabled).toBe(true) // 其他字段正常
+    expect((s as unknown as Record<string, unknown>).rebuild).toBeUndefined() // rebuild 被忽略
+    // 文件持久化形态也不回写 rebuild（update 时整写覆盖）
+    const next = updateAdvancedSettings({ gateway: { port: 9999 } })
+    expect((next as unknown as Record<string, unknown>).rebuild).toBeUndefined()
   })
 })
 
@@ -282,16 +292,13 @@ describe('applyWirePatch（wire → 持久化）', () => {
     expect(keep.gateway.cookieSecure).toBe(true)
   })
 
-  it('开关/阈值/端口 patch 生效（含边界校验）', () => {
+  it('开关/端口 patch 生效（含边界校验）', () => {
     const next = applyWirePatch({
       gateway: { enabled: true, host: '127.0.0.1', port: 9999 },
-      rebuild: { enabled: false, thresholdK: 500 },
     })
     expect(next.gateway.enabled).toBe(true)
     expect(next.gateway.host).toBe('127.0.0.1')
     expect(next.gateway.port).toBe(9999)
-    expect(next.rebuild.enabled).toBe(false)
-    expect(next.rebuild.thresholdK).toBe(500)
   })
 
   it('工作区白名单 patch：写入/过滤空串/缺省保留', () => {
@@ -304,9 +311,11 @@ describe('applyWirePatch（wire → 持久化）', () => {
     expect(keep.gateway.workspaces).toEqual(['/home/yh/home', '/data'])
   })
 
-  it('非法阈值被忽略（越界 <50 或 >4000）', () => {
-    const next = applyWirePatch({ rebuild: { thresholdK: 5000 } })
-    expect(next.rebuild.thresholdK).toBe(400)
+  it('review P2-3：wire rebuild patch 被忽略（简单配置单源——不再经高级 wire 改 rebuild）', () => {
+    // 旧版面板曾 PUT wire.rebuild；新版 wire 类型已删 rebuild → 传入被忽略（不抛错不生效）
+    const next = applyWirePatch({ gateway: { port: 9999 }, rebuild: { enabled: false, thresholdK: 5000 } } as never)
+    expect(next.gateway.port).toBe(9999)
+    expect((next as unknown as Record<string, unknown>).rebuild).toBeUndefined()
   })
 })
 

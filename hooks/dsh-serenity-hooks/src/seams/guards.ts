@@ -73,7 +73,6 @@ export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
 export function isProtectedRegistryRel(root: string, rel: string): boolean {
   const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
   const relCi = lower(rel)
-  if (!relCi.endsWith('/mech-registry.json')) return false
   // cccName 聚合档：.opencode/skills/<cccName>/references/mech-registry.json
   // 注：大小写比较按平台（win32 不敏感 / posix 敏感）——review P2-1：Linux 大写 CCC 名不得误放行
   try {
@@ -82,7 +81,15 @@ export function isProtectedRegistryRel(root: string, rel: string): boolean {
       const line = readFileSync(marker, 'utf-8').split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'))
       if (line) {
         const aggregate = `.opencode/skills/${line}/references/mech-registry.json`
-        if (relCi === lower(aggregate)) return true
+        const aggregateCi = lower(aggregate)
+        if (relCi === aggregateCi) return true
+        // review P2-2：精确文件保护可被 `rm -r references/`（删父目录）绕过——
+        // **references/ 目录本身**纳入保护（rm -r references/ 即毁注册表）。
+        // 仅保护 references/ 级（不向上含 .opencode/skills/<cccName>——那是共享父目录，
+        // 保护会误伤同 CCC 下其他 skill 子目录删除；skills/<cccName> 整删场景罕见 + git 可恢复，接受）。
+        const refsDir = `.opencode/skills/${line}/references`
+        const refsDirCi = lower(refsDir)
+        if (relCi === refsDirCi || relCi.startsWith(`${refsDirCi}/`)) return true
       }
     }
   } catch {
@@ -165,8 +172,15 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
         return { deny: `CCC governance file "${rel}" is reserved for the user — agent must not write`, kind: 'deny' }
       }
       // 需求⑤b：MSM 注册表写保护（写 deny 读 allow）——acc_msm register/deregister 是唯一合法写通道
+      // review P2-2：保护范围含聚合档祖先目录（rm -r references/ / mv references/ 同拦）
       if (isProtectedRegistryRel(root, rel)) {
-        return { deny: `mech-registry.json is ACC-managed (${rel}) — use acc_msm register/deregister instead of writing it directly`, kind: 'deny' }
+        const isFile = rel.endsWith('/mech-registry.json')
+        return {
+          deny: isFile
+            ? `mech-registry.json is ACC-managed (${rel}) — use acc_msm register/deregister instead of writing it directly`
+            : `"${rel}" is an ancestor of the ACC-managed mech-registry.json — removing/moving it would destroy the registry; the registry is managed by acc_msm register/deregister`,
+          kind: 'deny',
+        }
       }
       const hit = matchBlacklist(rel, blacklist)
       if (hit) {

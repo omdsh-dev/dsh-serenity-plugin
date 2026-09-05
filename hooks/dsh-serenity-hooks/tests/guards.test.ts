@@ -349,9 +349,20 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
     expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'append', pathArg: aggRel })).kind).toBe('deny')
   })
 
-  it('root 级 mech-registry.json 写 → deny（历史兜底形态仍保护）', () => {
-    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'mech-registry.json' })).kind).toBe('deny')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: 'mech-registry.json' })).kind).toBe('deny')
+  it('root 级 mech-registry.json 写 → allow（review P1：废弃形态不再保护——永不被读的文件保护=死锁，可删可迁移）', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'mech-registry.json' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: 'mech-registry.json' })).kind).toBe('allow')
+  })
+
+  it('聚合档 references/ 祖先目录写 → deny（review P2-2：rm -r references/ 会绕过文件级保护删掉注册表）', () => {
+    // references/ 目录本身
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test/references/' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'mv', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+    // 共享父目录不误伤（.opencode/skills 属所有 skill——删它不属于本 CCC 专属保护）
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode' })).kind).toBe('allow')
   })
 
   it('读工具读注册表 → allow（注册表需被读——output-guard/skiff-admin 建 MSM 词表；读 deny 只用于凭据）', () => {

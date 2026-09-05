@@ -353,7 +353,10 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
       }
       case 'create': {
         // 需求②：create 也加 summary（用户拍板"create 也带概括"）——必填（编号日期固定派生，概括由调用方显式给）
-        if (!args.summary || args.summary.trim() === '') {
+        // P3-① review：dry-run 豁免（未真实创建无命名对象）+ issue 会话豁免（issue 无概括语义，标题回退目录名）
+        const isDryRun = args.dryRun ?? false
+        const isIssueSession = typeof args.issue === 'string' && args.issue !== ''
+        if (!isDryRun && !isIssueSession && (!args.summary || args.summary.trim() === '')) {
           throw new Error('create requires --summary <content summary ≤20 chars> (appended to the dsh session title; the S### id and date stay server-derived)')
         }
         // 对齐 osp：desc/issue 二选一（缺省/互斥均在 createSession 内报错）
@@ -362,18 +365,18 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
           desc: args.desc,
           issue: args.issue,
           goal: args.goal,
-          dryRun: args.dryRun ?? false,
+          dryRun: isDryRun,
         })
         let message = result.message
         // v1.25.11（S142 用户：create 也要命名）+ 需求②（带概括）：创建成功后立即重命名
         // 当前 dsh 会话为 S###-日期-概括（不再等 use）——createSession result 已含
         // sessionId/dirName，activeInfoFromCreate 构造命名信息（use/create 共用
-        // renameDshSessionForActive）。dry-run 不命名（未真实创建）。
-        if (!(args.dryRun ?? false)) {
-          renameDshSessionForActive(ctx, exec, activeInfoFromCreate(result), args.summary)
+        // renameDshSessionForActive）。dry-run 不命名（未真实创建）；issue 会话带 issue 概括（无则回退）。
+        if (!isDryRun) {
+          renameDshSessionForActive(ctx, exec, activeInfoFromCreate(result), args.summary ?? args.issue)
         }
         // ---- 钩子：create-transform（对齐 osp；仅非 dry-run 且 CCC 声明了该钩子时执行）----
-        if (!(args.dryRun ?? false) && cccHooks.includes('create-transform')) {
+        if (!isDryRun && cccHooks.includes('create-transform')) {
           try {
             const hookResult = (await runMsmAsync(root, {
               action: 'exec',

@@ -31,7 +31,6 @@ export interface WireConfig {
     allowWorkspaceCreate: boolean
     totpEnabled: boolean
   }
-  rebuild: { enabled: boolean; thresholdK: number }
   persona: { mode: string; overrideText: string }
   publicAsk: {
     /** 开放容器白名单（v1.26.2：容器名数组；空 = 全部开放） */

@@ -214,7 +214,7 @@ export async function queueRebuild(
   if (!mdPath) {
     throw new Error(
       'Unable to determine the active SESSION.md — no session context found in this conversation. ' +
-      'Run "session use <S###>" first to activate the trajectory to resume, then retry session_rebuild.',
+      'Run "session use <S###> --summary <内容概括 ≤20 字>" first to activate the trajectory to resume, then retry session_rebuild.',
     )
   }
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)

@@ -53,13 +53,6 @@ export interface GatewaySettings {
   totpEnabled: boolean
 }
 
-/** F2 超限重建配置 */
-export interface RebuildSettings {
-  enabled: boolean
-  /** 触发阈值（需求① S142 用户拍板：K 数值——projectedTokens ≥ thresholdK*1000 触发） */
-  thresholdK: number
-}
-
 /** 彩蛋功能：persona 模式（v1.23.1，S142 用户需求）
  * 配置后替换 ACC 系统提示词中"输出约束/指令遵循约束"部分（EAP 块 + MSM 原则段）；
  * 未配置（mode 空）→ 完全默认行为，零影响。 */
@@ -80,10 +73,15 @@ export interface PublicAskSettings {
   allowed: string[]
 }
 
-/** 高级设定全量（localstore.json 持久化形态；passHash 含 hash） */
+/**
+ * 高级设定全量（~/.dsh/serenity-hooks.json 持久化形态；passHash 含 hash）。
+ * review P2-3：**rebuild 已从高级配置删除**——rebuild 开关/阈值归"简单配置"
+ * （settings.yaml 原生面板，见 settings-section.ts），运行时只读 readSimpleSettings()；
+ * 旧高级 rebuild 字段是死双胞胎（/serenity/config PUT 回显但运行时从不读它）——
+ * 删除防误导（用户在高级面板改了却无效）。历史残留字段被 mergeWithDefaults 忽略（幂等安全）。
+ */
 export interface AdvancedSettings {
   gateway: GatewaySettings
-  rebuild: RebuildSettings
   persona: PersonaSettings
   publicAsk: PublicAskSettings
 }
@@ -100,10 +98,6 @@ export function defaultAdvancedSettings(): AdvancedSettings {
       cookieSecure: false,
       allowWorkspaceCreate: true,
       totpEnabled: false,
-    },
-    rebuild: {
-      enabled: true,
-      thresholdK: 400,
     },
     persona: {
       mode: '',
@@ -172,7 +166,6 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
   if (raw === null || typeof raw !== 'object') return def
   const o = raw as Partial<AdvancedSettings>
   const gateway = (o.gateway ?? {}) as Partial<GatewaySettings>
-  const rebuild = (o.rebuild ?? {}) as Partial<RebuildSettings>
   const persona = (o.persona ?? {}) as Partial<PersonaSettings>
   const publicAsk = (o.publicAsk ?? {}) as Partial<PublicAskSettings>
   return {
@@ -199,12 +192,6 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
       totpEnabled: typeof gateway.totpEnabled === 'boolean'
         ? gateway.totpEnabled
         : def.gateway.totpEnabled,
-    },
-    rebuild: {
-      enabled: typeof rebuild.enabled === 'boolean' ? rebuild.enabled : def.rebuild.enabled,
-      thresholdK: typeof rebuild.thresholdK === 'number' && rebuild.thresholdK >= 50 && rebuild.thresholdK <= 4000
-        ? rebuild.thresholdK
-        : def.rebuild.thresholdK,
     },
     persona: {
       mode: typeof persona.mode === 'string' ? persona.mode : def.persona.mode,
@@ -236,7 +223,6 @@ export function writeAdvancedSettings(settings: AdvancedSettings): void {
 export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): AdvancedSettings {
   const current = readAdvancedSettings()
   const gw = patch.gateway
-  const rb = patch.rebuild
   const ps = patch.persona
   const next: AdvancedSettings = {
     gateway: gw !== undefined
@@ -259,14 +245,6 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
           : current.gateway.totpEnabled,
       }
       : current.gateway,
-    rebuild: rb !== undefined
-      ? {
-        enabled: typeof rb.enabled === 'boolean' ? rb.enabled : current.rebuild.enabled,
-        thresholdK: typeof rb.thresholdK === 'number' && rb.thresholdK >= 50 && rb.thresholdK <= 4000
-          ? rb.thresholdK
-          : current.rebuild.thresholdK,
-      }
-      : current.rebuild,
     persona: ps !== undefined
       ? {
         mode: typeof ps.mode === 'string' ? ps.mode : current.persona.mode,
@@ -404,7 +382,7 @@ export interface GatewayAccountWire {
   hasTotp: boolean
 }
 
-/** 设定 wire 形态（GET /serenity/config 返回；rebuild 同持久化，gateway 去 hash） */
+/** 设定 wire 形态（GET /serenity/config 返回；gateway 去 hash） */
 export interface AdvancedSettingsWire {
   gateway: {
     enabled: boolean
@@ -416,7 +394,6 @@ export interface AdvancedSettingsWire {
     allowWorkspaceCreate: boolean
     totpEnabled: boolean
   }
-  rebuild: RebuildSettings
   persona: PersonaSettings
   publicAsk: {
     /** 开放容器白名单（v1.26.2：容器名数组；空 = 全部开放） */
@@ -442,7 +419,6 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
       allowWorkspaceCreate: settings.gateway.allowWorkspaceCreate,
       totpEnabled: settings.gateway.totpEnabled,
     },
-    rebuild: settings.rebuild,
     persona: settings.persona,
     publicAsk: {
       allowed: [...settings.publicAsk.allowed],
@@ -509,14 +485,6 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
       gwPatch.accounts = nextAccounts
     }
     patch.gateway = gwPatch
-  }
-  if (wire.rebuild !== undefined) {
-    const rbPatch: RebuildSettings = { ...current.rebuild }
-    if (typeof wire.rebuild.enabled === 'boolean') rbPatch.enabled = wire.rebuild.enabled
-    if (typeof wire.rebuild.thresholdK === 'number' && wire.rebuild.thresholdK >= 50 && wire.rebuild.thresholdK <= 4000) {
-      rbPatch.thresholdK = wire.rebuild.thresholdK
-    }
-    patch.rebuild = rbPatch
   }
   if (wire.persona !== undefined) {
     const psPatch: PersonaSettings = { ...current.persona }

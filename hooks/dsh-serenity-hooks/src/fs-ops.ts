@@ -136,6 +136,55 @@ function readCccNameFromMarker(root: string): string | null {
   }
 }
 
+/**
+ * 受保护注册表聚合档的路径集合（review P2-2：精确文件保护可被 `rm -r 父目录` / `mv 父目录`
+ * 绕过——删掉 references/ 目录等于删掉注册表。保护对象 = 聚合档文件 + 其全部祖先目录）。
+ * @returns null = 无 cccName（无法定位 → 不保护）；否则 { fileRel, ancestorDirs } 相对根的正斜杠 rel
+ */
+function protectedRegistryTargets(root: string): { fileRel: string; ancestorDirs: string[] } | null {
+  const cccName = readCccNameFromMarker(root)
+  if (!cccName) return null
+  const fileRel = `.opencode/skills/${cccName}/references/mech-registry.json`
+  const segs = fileRel.split('/') // ['.opencode','skills',cccName,'references','mech-registry.json']
+  const ancestorDirs: string[] = []
+  // 只含 references/ 目录本身（segs 末位是文件名，倒数第二位是 references）——
+  // rm -r references/ / mv references/ 即毁注册表，必须拦。
+  // 不含 .opencode/skills/<cccName>（共享父目录，误伤同 CCC 其他 skill 子目录删除；整删场景罕见 + git 可恢复）
+  if (segs.length >= 3) {
+    ancestorDirs.push(segs.slice(0, segs.length - 1).join('/')) // …/references
+  }
+  return { fileRel, ancestorDirs }
+}
+
+function isProtectedRegistryTarget(root: string, relCi: string): { hit: 'file' | 'ancestor' } | null {
+  const protectedTargets = protectedRegistryTargets(root)
+  if (!protectedTargets) return null
+  const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
+  const fileRelCi = lower(protectedTargets.fileRel)
+  if (relCi === fileRelCi) return { hit: 'file' }
+  for (const ancestor of protectedTargets.ancestorDirs) {
+    const aCi = lower(ancestor)
+    // 目录命中 = 等于祖先目录，或在其下（删 references/ 整树 / mv references/ 到别处 / 删整个 skills/<cccName>）
+    if (relCi === aCi || relCi.startsWith(`${aCi}/`)) return { hit: 'ancestor' }
+  }
+  return null
+}
+
+function assertNotProtectedRegistry(root: string, absPath: string, targetLabel: string): void {
+  const rel = relative(root, absPath).split('\\').join('/')
+  const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
+  const hit = isProtectedRegistryTarget(root, lower(rel))
+  if (hit === null) return
+  if (hit.hit === 'file') {
+    throw new Error(
+      `cc-fs: refusing to directly modify mech-registry.json — use acc_msm register/deregister instead`,
+    )
+  }
+  throw new Error(
+    `cc-fs: refusing to ${/rm|delete|remove/i.test(targetLabel) ? 'remove' : 'move'} "${rel}" — it is an ancestor of the ACC-managed mech-registry.json (${protectedRegistryTargets(root)?.fileRel}); the registry is managed by acc_msm register/deregister`,
+  )
+}
+
 function validateWritePath(root: string, target: string): string {
   const absPath = target.startsWith('/') ? resolve(target) : resolveInside(root, target)
   // resolveInside 已保证根内；绝对路径需显式校验（pathInside 跨盘安全，Windows 审计问题 6）
@@ -147,18 +196,9 @@ function validateWritePath(root: string, target: string): string {
   // （.opencode/skills/<cccName>/references/mech-registry.json——cccName = .serenity 首行）。
   // 历史 root 级 + 各 skill 分散注册表已废弃：不再保护（review P1——保护永不被读的文件 = 死锁，
   // MSM 既不可见又不可删/迁移；废弃形态必须可删以迁移到聚合档）。
+  // review P2-2：保护范围 = 聚合档文件 + 祖先目录（rm -r references/ / mv references/ 同样 deny）。
   // relative 归一化反斜杠（Windows：resolveInside 返回反斜杠路径，正斜杠字面量永不匹配 → 保护失效，见问题 8）
-  const rel = relative(root, absPath).split('\\').join('/')
-  const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
-  const relCi = lower(rel)
-  const cccName = readCccNameFromMarker(root)
-  const aggregateRel = cccName ? `.opencode/skills/${cccName}/references/mech-registry.json` : null
-  const isAggregate = aggregateRel !== null && relCi === lower(aggregateRel)
-  if (isAggregate) {
-    throw new Error(
-      `cc-fs: refusing to directly modify mech-registry.json — use acc_msm register/deregister instead`,
-    )
-  }
+  assertNotProtectedRegistry(root, absPath, `modify ${target}`)
   // symlink/junction 防御（Windows 审计问题 15）：存在的路径 realpath 后必须仍在根内
   if (existsSync(absPath)) {
     try {
@@ -276,7 +316,14 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       const recursive = args.recursive ?? false
       const results: string[] = []
       for (const target of targets) {
-        const absPath = validateWritePath(root, target)
+        let absPath: string
+        try {
+          // validateWritePath 内含注册表保护（文件 + 祖先目录）——受保护目标 rm 报 [SKIP] 不中断整批
+          absPath = validateWritePath(root, target)
+        } catch (e) {
+          results.push(`[SKIP] ${(e as Error).message}`)
+          continue
+        }
         if (!existsSync(absPath)) {
           results.push(`[SKIP] not found: ${target}`)
           continue

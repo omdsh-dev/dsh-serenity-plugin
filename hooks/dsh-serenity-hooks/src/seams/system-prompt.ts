@@ -95,7 +95,7 @@ export function toolsBlock(): string {
     '',
     '  cc_fs     — CCC filesystem operations (root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
     '  session   — session lifecycle (list/show/create/use/close/health/qa/archive/summary/hook-develop-guide)',
-    '  acc_kit   — ACC utility kit (health: CCC three principles / time: now / wait: wait N seconds)',
+    '  acc_kit   — ACC utility kit (health: CCC three principles + MSM registry integrity report / time: now / wait: wait N seconds)',
     '  cc_git    — git operations (status/commit/push/log)',
     '  acc_msm   — MSM framework (list/exec/register/deregister/check/guide/catalog/ccc-config)',
     '  eap       — return the full EAP cognitive quality framework',
