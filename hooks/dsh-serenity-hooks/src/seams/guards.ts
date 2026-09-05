@@ -63,29 +63,32 @@ export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
  * register 也崩 → 自锁）。**写 deny、读 allow**（与 localstore 读 deny 语义区分 R6——注册表是
  * 结构核心不是秘密，需被 output-guard/skiff-admin 读取建 MSM 词表）。
  *
- * 单级化（需求⑤a）后合法注册表 = cccName 聚合档 `.opencode/skills/<cccName>/references/mech-registry.json`
- * （cccName = .serenity 首行）+ root 级 `mech-registry.json`（历史兜底形态）。
- * 写工具命中 → deny（唯一合法写通道 = acc_msm register/deregister 内部 writeRegistry，
+ * 单级化（需求⑤a）后**唯一合法注册表 = cccName 聚合档**
+ * `.opencode/skills/<cccName>/references/mech-registry.json`（cccName = .serenity 首行）。
+ * 历史 root 级 `mech-registry.json` 与各 skill 分散注册表已废弃：**不再保护**
+ * （review P1：保护一个永不被读的文件 = 死锁——MSM 既不可见又不可删/迁移）。
+ * 写工具命中聚合档 → deny（唯一合法写通道 = acc_msm register/deregister 内部 writeRegistry，
  * 走工具实现不经 pre-execute → 天然豁免）；读工具放行。
  */
 export function isProtectedRegistryRel(root: string, rel: string): boolean {
-  const relCi = process.platform === 'win32' ? rel.toLowerCase() : rel
-  if (relCi === 'mech-registry.json') return true
+  const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
+  const relCi = lower(rel)
   if (!relCi.endsWith('/mech-registry.json')) return false
   // cccName 聚合档：.opencode/skills/<cccName>/references/mech-registry.json
+  // 注：大小写比较按平台（win32 不敏感 / posix 敏感）——review P2-1：Linux 大写 CCC 名不得误放行
   try {
     const marker = resolve(root, '.serenity')
     if (existsSync(marker)) {
       const line = readFileSync(marker, 'utf-8').split('\n').map((l) => l.trim()).find((l) => l !== '' && !l.startsWith('#'))
       if (line) {
-        const aggregate = `.opencode/skills/${line}/references/mech-registry.json`.toLowerCase()
-        if (relCi === aggregate) return true
+        const aggregate = `.opencode/skills/${line}/references/mech-registry.json`
+        if (relCi === lower(aggregate)) return true
       }
     }
   } catch {
-    /* 读标记失败 → 仅 root 级保护 */
+    /* 读标记失败 → 无法定位聚合档 → 不保护（保守放行删除，避免死锁） */
   }
-  // 其他 skill 目录的分散注册表已废弃（需求⑤a 单级化）——不再保护，允许删除迁移
+  // root 级 + 其他 skill 目录分散注册表 = 废弃形态：不保护（允许删除/迁移）
   return false
 }
 

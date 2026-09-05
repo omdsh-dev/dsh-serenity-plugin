@@ -143,20 +143,18 @@ function validateWritePath(root: string, target: string): string {
     throw new Error(`cc-fs: path "${target}" resolves to "${absPath}" which is outside serenity root "${root}"`)
   }
   // 保护 mech-registry.json — 只能通过 acc_msm register/deregister 注册/注销。
-  // 需求⑤a（S142 用户拍板：注册表单级化）：只保护 cccName 聚合档
-  // （.opencode/skills/<cccName>/references/mech-registry.json——cccName = .serenity 首行）
-  // 与 root 级（历史兜底形态）。历史分散 skill 注册表（其他 skill 目录的
-  // references/mech-registry.json）已废弃——不再保护，允许删除迁移。
+  // 需求⑤a（S142 用户拍板：注册表单级化）：**唯一合法注册表 = cccName 聚合档**
+  // （.opencode/skills/<cccName>/references/mech-registry.json——cccName = .serenity 首行）。
+  // 历史 root 级 + 各 skill 分散注册表已废弃：不再保护（review P1——保护永不被读的文件 = 死锁，
+  // MSM 既不可见又不可删/迁移；废弃形态必须可删以迁移到聚合档）。
   // relative 归一化反斜杠（Windows：resolveInside 返回反斜杠路径，正斜杠字面量永不匹配 → 保护失效，见问题 8）
   const rel = relative(root, absPath).split('\\').join('/')
-  const relCi = process.platform === 'win32' ? rel.toLowerCase() : rel
+  const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
+  const relCi = lower(rel)
   const cccName = readCccNameFromMarker(root)
-  const aggregateRel = cccName
-    ? `.opencode/skills/${cccName}/references/mech-registry.json`.toLowerCase()
-    : null
-  const isAggregate = aggregateRel !== null && relCi === aggregateRel
-  const isRootLevel = relCi === 'mech-registry.json'
-  if (isAggregate || isRootLevel) {
+  const aggregateRel = cccName ? `.opencode/skills/${cccName}/references/mech-registry.json` : null
+  const isAggregate = aggregateRel !== null && relCi === lower(aggregateRel)
+  if (isAggregate) {
     throw new Error(
       `cc-fs: refusing to directly modify mech-registry.json — use acc_msm register/deregister instead`,
     )
