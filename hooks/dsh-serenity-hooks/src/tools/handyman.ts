@@ -72,10 +72,13 @@ function waitIdle(ctx: Context, agent: Agent): Promise<void> {
 
 /** 读取会话最后一个 assistant/message 文本 */
 function lastAssistantText(agent: Agent): string {
-  const events = agent.session.events
+  // v1.28.0 适配 0.1.2-rc.1：Session.snapshotEvents() 方法（rc.1 移除 .events 属性）；
+  // 兼容测试替身 events 形态
+  const s = agent.session as { snapshotEvents?: () => readonly unknown[]; events?: readonly unknown[] }
+  const events: readonly unknown[] = typeof s.snapshotEvents === 'function' ? s.snapshotEvents() : s.events ?? []
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i]
-    if (e && e.type === 'assistant/message') {
+    if (e && (e as { type?: string }).type === 'assistant/message') {
       const data = (e as { data?: { message?: { content?: { type?: string; text?: string }[] }; content?: { type?: string; text?: string }[] } }).data
       // 真实结构：data.message.content（v 升级后）；兼容旧 data.content
       const blocks = data?.message?.content ?? data?.content ?? []

@@ -21,6 +21,8 @@
       "cordis": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis"],
       "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-settings/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-renderer": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-renderer/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-slots": ["../../../../../../../.dsh/source/current/packages/client/ui-slots/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-primitives": ["../../../../../../../.dsh/source/current/packages/client/ui-primitives/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-conversation": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],

@@ -277,9 +277,19 @@ function waitIdle(ctx: Context, agent: Agent): Promise<void> {
   })
 }
 
+/**
+ * 会话事件读取（v1.28.0 适配 0.1.2-rc.1）：rc.1 Session 移除 `.events` 属性 → `snapshotEvents()` 方法。
+ * 兼容双形态（运行时 rc.1 snapshotEvents；测试替身 events）——同一函数两处语义，测试注入零侵入。
+ */
+function sessionEvents(session: unknown): readonly unknown[] {
+  const s = session as { snapshotEvents?: () => readonly unknown[]; events?: readonly unknown[] }
+  if (typeof s.snapshotEvents === 'function') return s.snapshotEvents()
+  return s.events ?? []
+}
+
 /** 读会话最后一个 assistant/message 文本（handyman 同款） */
 function lastAssistantText(agent: Agent): string {
-  const events = agent.session.events
+  const events = sessionEvents(agent.session)
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i] as { type?: string; data?: { message?: { content?: unknown }; content?: unknown } } | undefined
     if (e && e.type === 'assistant/message') {
@@ -345,12 +355,12 @@ export async function askSkiff(
   eventsStart?: number,
   options?: { includeTrajectory?: boolean },
 ): Promise<SkiffAskResult> {
-  const before = eventsStart === undefined ? agent.session.events.length : eventsStart
+  const before = eventsStart === undefined ? sessionEvents(agent.session).length : eventsStart
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
   await waitIdle(ctx, agent)
   const answer = lastAssistantText(agent)
   const trajectory =
-    options?.includeTrajectory === false ? [] : eventsToTrajectory(agent.session.events.slice(before))
+    options?.includeTrajectory === false ? [] : eventsToTrajectory(sessionEvents(agent.session).slice(before))
   return { answer, sessionId: String((agent.session as { id?: unknown }).id ?? ''), trajectory }
 }
 

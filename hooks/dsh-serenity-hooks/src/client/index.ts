@@ -16,6 +16,9 @@
 
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
+// v1.28.0 适配 0.1.2-rc.1（A1 补充）：官方 feature 插件经 ui-renderer/client 类型 import
+// 获得 Context.slots 等 client 面声明合并（原 dsh-client-runtime 包提供；rc.1 已删）。
+import type {} from '@deepseek-ai/dsh-client-ui-renderer'
 // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 →
 // ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'；
 // SettingsScope/SettingsScopeSpec 改从 '@deepseek-ai/dsh-client-ui-settings/client'（官方再导出实证）。
