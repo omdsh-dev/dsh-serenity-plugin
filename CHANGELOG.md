@@ -1,3 +1,25 @@
+## v1.28.1 — 2026-09-05（0.1.2-rc.1 适配补齐：Session.events 移除 → snapshotEvents()，7 处裸读收敛——first-anchor 重插 + SESSION 激活恢复失效根治，S142 用户 bug 双报）
+
+**Scope:** 用户报告两 bug——① SESSION 激活 rebuild 后会乱掉（anchor 曾指向 S151 而非 S142）② 任何情况发消息都插入 first-anchor（resume/续跑也重锚）。排查实证：**0.1.2-rc.1 官方移除 `Session.events` 属性 → `snapshotEvents()` 方法**，但适配轮只修了 typecheck 直接报错的 2 处（handyman.ts / skiff-core.ts），其余 7 处裸读 `.events` 经 `as unknown as { events? }` 断言绕过 typecheck → 运行时静默 undefined → 判定链全断（测试替身仍用 `.events` 属性 → 815 全绿假象）。
+
+### 变更
+- **`session-ops.ts` 新增共享 `sessionEvents<T>()` helper**（snapshotEvents() 优先 + .events 兜底 + try/catch + 泛型，零 DSH 依赖）——**单一真相源**，所有消费方经此读取，禁止裸读 `.events`
+- **7 处裸读全替换**（按 bug 影响排序）：
+  - `seams/bootstrap.ts` L280 重锚判定（**bug ② 病根**：`session?.events?.some(user/message)` 恒 undefined → `!undefined`=true → 有历史也永不跳过 → 每条消息都重插锚定）→ `hasUserMessageHistory` 导出纯函数（可单测）；L119 scan 晋升状态同步修
+  - `seams/context.ts` L114 shouldRestoreActive + L150 重启恢复解析（**bug ① 病根**：有历史才恢复 SESSION 激活判定失效 → rebuild 后恢复不到正确 SESSION）
+  - `rebuild.ts` L123 parseAnchorMdPath + L155 resolveSessionMdPath 候选② events 恢复 + L295 performRebuild meter 定价（rebuild 定位错乱 + 计量漂移）
+  - `output-guard-seam.ts` L38 守卫读最后 assistant 文本（外部面守卫失效——同根因连带）
+  - `autopilot-trajectory.ts` L435 readSessionTitle（读 session/title 失效——面板标题 null）
+- **skiff-core.ts**：本地 sessionEvents 副本保留（独立 import 面）但注释注明收敛基准指向共享 helper
+- **测试补 16 用例（snapshotEvents 形态回归）**：session-ops 5（helper 双形态/抛错/空值）+ bootstrap 4（hasUserMessageHistory 含 snapshotEvents 形态）+ context 3（shouldRestoreActive snapshotEvents）+ rebuild 2（resolveSessionMdPath/queueRebuild snapshotEvents 定位 S142）+ autopilot-trajectory.test mock 补 sessionEvents 实现（mock 模块缺导出导致 readSessionTitle 全 null——首轮 test 6 失败即此，补后全绿）
+
+### 测试
+- **56 files / 828 tests 全绿**（812 + 16 净增）；typecheck ✓（node + client）；build ✓
+
+### 发布链
+- bump v1.28.1（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推（origin + github + omdsh）→ 本地安装
+
+
 ## v1.28.0 — 2026-09-05（五项需求实现 + review 双轮修复批 + rebuild 诊断通道：系统提示词工具块移尾 + 会话命名概括 + rebuild 阈值 K 数值 + MSM 注册表单级化与写保护 + acc_msm catalog 目录，S142 用户拍板）
 
 **Scope:** 用户 09-04 晚回家对五项调研需求（`docs/three-feature-requests-research.md` v0.2）逐项拍板后开工实现——① rebuild 阈值百分比→K 数值 ② 会话命名加 ≤20 字概括 ③ 系统提示词 MSM 调用示例 + 工具列表独立块移末尾 ④ 目录式 ACC 使用指南（并入 acc_msm）⑤ MSM 注册表单级化 + 写保护 + ACC 层完整性检查。5 个 commit + 两轮独立 review + 发布。
