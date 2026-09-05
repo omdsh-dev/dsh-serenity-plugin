@@ -719,6 +719,68 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
       }
     },
   })
+
+  // ── 旧会话清理（v1.29 需求③，S142 用户拍板：lastActive 基准 + 手动按钮 + 直接物理删）──
+  // GET  → 预览（dryRun：列出将删会话，不删）
+  // POST { action:'cleanup', olderThanDays } → 执行物理删（x-serenity-ui 头限定——WebUI 按钮）
+  const SESSION_CLEANUP_PATH = '/serenity/session-cleanup'
+  ctx.webServer.register({
+    kind: 'exact',
+    path: SESSION_CLEANUP_PATH,
+    handler: async (req: IncomingMessage, res: ServerResponse) => {
+      try {
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const daysParam = Number(url.searchParams.get('olderThanDays') ?? '30')
+        const days = Number.isFinite(daysParam) && daysParam >= 1 ? daysParam : 30
+        // live 会话保护：删除前取当前 live id 集合（安全底线——绝不动正在跑的会话）
+        const sessions = ctx.get('sessions') as { list?: () => Array<{ header?: { id?: string }; id?: string }> } | undefined
+        const liveIds = new Set<string>()
+        if (sessions?.list) {
+          for (const s of sessions.list()) {
+            const id = s.id ?? s.header?.id
+            if (id) liveIds.add(id)
+          }
+        }
+        const { sessionsRootDir, collectEligibleSessions, performCleanup, cutoffDaysAgo } = await import('./session-cleanup.js')
+        const root = sessionsRootDir()
+
+        if (req.method === 'GET') {
+          const { candidates } = performCleanup(root, cutoffDaysAgo(days), liveIds, { dryRun: true })
+          sendJson(res, 200, {
+            root,
+            olderThanDays: days,
+            dryRun: true,
+            count: candidates.length,
+            candidates: candidates.map((c) => ({
+              id: c.id,
+              project: c.project,
+              lastActive: new Date(c.lastActiveMs).toISOString(),
+            })),
+          })
+          return
+        }
+
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { error: 'method not allowed' })
+          return
+        }
+        if (req.headers['x-serenity-ui'] !== '1') {
+          sendJson(res, 403, { error: '会话清理仅限 WebUI（client 专用）' })
+          return
+        }
+        const { result } = performCleanup(root, cutoffDaysAgo(days), liveIds)
+        sendJson(res, 200, {
+          root,
+          olderThanDays: days,
+          dryRun: false,
+          deleted: result!.deleted,
+          errors: result!.errors,
+        })
+      } catch (err: any) {
+        sendJson(res, 400, { error: err.message ?? String(err) })
+      }
+    },
+  })
 }
 
 // ── 微信桥（F4c-3，v1.27.0 实验性；CCC 级配置——显式 ccc 参数）──

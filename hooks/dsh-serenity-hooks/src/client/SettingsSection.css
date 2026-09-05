@@ -70,6 +70,59 @@
   gap: 16px;
 }
 
+/* ── v1.29 需求②：可展开行（整行点击 → 行内详设）── */
+.ss-expandable {
+  flex-wrap: wrap; /* detail 换行占满整行 */
+  cursor: default;
+}
+.ss-expandable .ss-rowText {
+  cursor: pointer;
+}
+.ss-expandable .ss-rowText:hover .ss-rowName {
+  color: var(--dsw-alias-state-success-primary, #22c55e);
+}
+.ss-expanded {
+  border-color: var(--dsw-alias-state-success-primary, #22c55e);
+}
+.ss-expandMark {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10px;
+  color: var(--dsw-alias-label-tertiary);
+  transition: transform 0.15s ease;
+}
+.ss-expanded .ss-expandMark {
+  transform: rotate(90deg);
+}
+.ss-rowDetail {
+  flex-basis: 100%;
+  width: 100%;
+  border-top: 1px solid var(--dsw-alias-border-l2);
+  margin-top: 10px;
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.ss-detailStack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ss-detailIntro {
+  margin: 0;
+  font-size: 12px;
+  line-height: 19px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-line;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.06));
+}
+
 /* 行卡文本（标题 + 说明 左列） */
 .ss-rowText {
   display: flex;
@@ -239,6 +292,19 @@
   color: var(--dsw-alias-state-warn-label);
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+
+/* 错误提示（v1.29 会话清理等） */
+.ss-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary, #ef4444);
+  background: rgba(239, 68, 68, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  white-space: pre-line;
+  word-break: break-word;
 }
 
 /* ── v1.27.5 紧凑化：折叠组（details/summary）── */

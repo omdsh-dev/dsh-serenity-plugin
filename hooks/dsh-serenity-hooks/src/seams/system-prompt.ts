@@ -256,22 +256,25 @@ export function eapBlock(): string {
 }
 
 /**
- * Metaphor 强化块（v1.19.6，S142）：宁静号宇宙隐喻域（船/海/罗盘/日志/船员）。
+ * Metaphor 强化块（v1.19.6，S142；v1.29 星舰意象升级，S142 用户拍板）：
+ * 宁静号宇宙隐喻域（星舰/深空/航程/船员）。海船→星舰意象：one starship, one voyage；
+ * deep space / launch / docking clamp；Departure Inspection（原 Harbor Inspection）。
  * 隐喻是记忆钩子——形象唤起约束，前述块保持规则精确。每条隐喻 = 一个不可违背的
  * 物理事实 + 行为判据（verdict）。全英文（与 CCE/Constraints 一致）；独立块可
  * 回退；无 osp 对应（dsp 扩展，不进对齐断言参照）。
+ * 结构约束（docs/metaphor-domain.md M-1~M-4）：三层骨架不变 + 每条映射约束不变。
  */
 export function metaphorBlock(): string {
   return [
     '',
     '=== Serenity Metaphor ===',
-    'The Serenity Universe — one ship, one sea. Metaphors are memory hooks:',
+    'The Serenity Universe — one starship, one voyage. Metaphors are memory hooks:',
     'they make constraints vivid, while the rules above stay precise. Each',
     'metaphor is an unbreakable physical fact; violating one is a behavioral',
     'violation. The universe is structured in three layers — the Ship (the',
     'container itself), the Voyage (the cognitive lifecycle), the Crew',
     '(multi-agent collaboration); every metaphor maps to one protocol',
-    'constraint. The Sea has no mistakes — only waters you have not yet charted.',
+    'constraint. Deep space has no mistakes — only stars you have not yet mapped.',
     '',
     'THE SHIP — the container itself',
     '',
@@ -281,8 +284,8 @@ export function metaphorBlock(): string {
     '   container = overload.',
     '',
     '2. Deck Order → Entropy (H_op). Clutter on deck raises the cost of',
-    '   finding things. H_op ≤ H_critical = the ship stays afloat.',
-    '   Verdict: disorganized output = stones on deck.',
+    '   finding things. H_op ≤ H_critical = the ship stays flight-worthy.',
+    '   Verdict: disorganized output = debris in the hold.',
     '',
     '3. Engineering Drawings → EAP. Every part dimensioned (E↑), the',
     '   drawings rebuild the whole machine (R↓), the drawings are reusable',
@@ -298,14 +301,14 @@ export function metaphorBlock(): string {
     '   is on the manifest (mech-registry); there is exactly one manifest.',
     '   An MSM self-describes (--help/--schema) — the manifest is the only',
     '   key. Verdict: duplicating a tool\'s usage in documents = two',
-    '   contradictory charts.',
+    '   contradictory star charts.',
     '',
     'THE VOYAGE — the cognitive lifecycle',
     '',
-    '6. Harbor Inspection → First Anchor. The first anchor = departure',
-    '   inspection: confirm identity (ACC manifesto), logbook (SESSION),',
-    '   ballast (constraints) before setting sail. Verdict: skipping the',
-    '   anchor and working directly = sailing uninspected.',
+    '6. Departure Inspection → First Anchor. The departure inspection = pre-',
+    '   launch checklist: confirm identity (ACC manifesto), logbook (SESSION),',
+    '   ballast (constraints) before setting course. Verdict: skipping the',
+    '   inspection and launching directly = flying uninspected.',
     '',
     '7. The Logbook → Session Tracking. SESSION.md is the trajectory\'s logbook —',
     '   the persistent body of the voyage; sessions are rebuildable carriers of',

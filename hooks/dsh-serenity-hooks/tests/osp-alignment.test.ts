@@ -269,16 +269,16 @@ describe('dsp 扩展：Metaphor 块（v1.19.6 起，宁静号宇宙隐喻域—�
     expect(block).toContain('THE SHIP — the container itself')
     expect(block).toContain('THE VOYAGE — the cognitive lifecycle')
     expect(block).toContain('THE CREW — multi-agent collaboration')
-    // World 层呼应句（v1.19.8：认知容器本体论隐喻化）
-    expect(block).toContain('The Sea has no mistakes — only waters you have not yet charted.')
-    // 10 条隐喻本体
+    // World 层呼应句（v1.19.8：认知容器本体论隐喻化；v1.29 星舰意象：sea→deep space）
+    expect(block).toContain('Deep space has no mistakes — only stars you have not yet mapped.')
+    // 10 条隐喻本体（v1.29：Harbor Inspection → Departure Inspection——星舰意象升级）
     for (const name of [
       'The Hull',
       'Deck Order',
       'Engineering Drawings',
       'The Machinery',
       'The Manifest',
-      'Harbor Inspection',
+      'Departure Inspection',
       'The Logbook',
       'The Ship of Theseus',
       'Crew Rotation',
