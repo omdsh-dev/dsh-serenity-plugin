@@ -56,6 +56,7 @@ import {
 } from './session-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
 import { namingTitleFor } from './tools/session.js'
+import { eventToken } from './trajectory-assistant.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -91,7 +92,7 @@ export function buildRebuildAnchor(
       ? `- Serenity session: ${sessionName !== '' ? `${sessionName} (${sessionDir})` : sessionDir}`
       : null
   const lines = [
-    '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the trajectory continues).',
+    `${eventToken('rebuild')} The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the trajectory continues).`,
     '',
     ...anchorMessages.flatMap((text) => [stripAckSuffix(text), '']),
     sessionName !== '' ? `Continue the work of ${sessionName}.` : 'Continue the current work.',
@@ -388,7 +389,7 @@ export function registerRebuildTurnHook(ctx: Context): void {
         // v1.22.5 自动继续：steer 到 next-step 队列 → turn 循环 nextStep 非空不 break →
         // 模型在同轮内自动消费该指令，读取 SESSION.md 从上次进度继续（无需用户手工输入）
         agent.steer(createUserMessage({
-          content: [{ type: 'text', text: '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt. Follow the anchor instructions above now: read the persistent trajectory (SESSION.md) and continue the work automatically from the last checkpoint.' }],
+          content: [{ type: 'text', text: `${eventToken('rebuild')} The conversation has been cleared and rebuilt. Follow the anchor instructions above now: read the persistent trajectory (SESSION.md) and continue the work automatically from the last checkpoint.` }],
           source: PLUGIN_SOURCE,
         }))
         writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'rebuilt' })

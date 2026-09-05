@@ -234,7 +234,7 @@ describe('session-ops: v1.24.11 恢复稳固化（路径规范行即可，无需
   it('重建锚点格式（无标记）→ 从路径行恢复（仅靠锚点的会话可恢复）', () => {
     const dirName = '2026-08-24--S142--dsh-serenity-plugin 长期维护'
     const anchor = [
-      '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt.',
+      '[TRAJECTORY-ASSISTANT · REBUILD] The conversation has been cleared and rebuilt.',
       'Continue the work of S142.',
       `- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/${dirName}/SESSION.md (the trajectory's persistent body)`,
     ].join('\n')

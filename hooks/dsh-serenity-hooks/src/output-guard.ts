@@ -20,6 +20,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadMsmEntries } from './msm-ops.js'
+import { eventToken } from './trajectory-assistant.js'
 
 // ── 静态机制词（内部结构词汇；公开称呼词不入表）──
 
@@ -39,6 +40,8 @@ const MECHANISM_WORDS: string[] = [
   'tools/post-execute',
   'session_rebuild',
   'Trajectory Steward',
+  'TRAJECTORY-STEWARD',
+  'TRAJECTORY-ASSISTANT',
   'first-anchor',
   '拦截缝',
   '装配层',
@@ -175,7 +178,7 @@ export function buildRebuke(hits: SensitiveHit[]): string {
   const noun = count === 1 ? 'term' : 'terms'
   const lines = hits.map((h) => `- "${h.word}" — ${CATEGORY_GUIDE[h.category]}`).join('\n')
   return (
-    `[SERENITY OUTPUT GUARD] Your previous response contained ${count} sensitive internal ${noun} that must not appear in user-visible output:\n` +
+    `${eventToken('guard')} Your previous response contained ${count} sensitive internal ${noun} that must not appear in user-visible output:\n` +
     `${lines}\n` +
     `Regenerate the response from scratch without ANY of these — describe the same substance without ` +
     `referencing internal machinery, credentials, ports, tool names, or implementation details. ` +

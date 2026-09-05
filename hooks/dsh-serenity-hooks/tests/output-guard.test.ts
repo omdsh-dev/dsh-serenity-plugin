@@ -186,7 +186,7 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
     f.agent.session.events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '密码是 hunter2-secret' }] } } })
     f.fire(1)
     expect(f.steers.length).toBe(1)
-    expect(f.steers[0]).toContain('SERENITY OUTPUT GUARD')
+    expect(f.steers[0]).toContain('[TRAJECTORY-ASSISTANT · BOUNDARY GUARD]')
     expect(f.steers[0]).toContain('hunter2-secret')
   })
 

@@ -387,8 +387,8 @@ describe('buildWakeMessage（唤起消息四段式：轨迹焦点 / 身份锚定
     })
     // 轨迹焦点必须出现在消息第一行（影响力最大）
     expect(msg.startsWith('[轨迹焦点] 持续深化某领域认知，产出可重建的结论')).toBe(true)
-    expect(msg.indexOf('[轨迹焦点]')).toBeLessThan(msg.indexOf('[Autopilot Trajectory 唤起]'))
-    expect(msg).toContain('[Autopilot Trajectory 唤起] — 距上次轨迹活动已满 12 小时')
+    expect(msg.indexOf('[轨迹焦点]')).toBeLessThan(msg.indexOf('[Autopilot Trajectory · 唤起]'))
+    expect(msg).toContain('[Autopilot Trajectory · 唤起] — 距上次轨迹活动已满 12 小时')
     expect(msg).toContain('身份锚定：继续 2026-08-30--S143--exp--auto 的 trajectory')
     expect(msg).toContain('· 自生动机：探索 B 方案')
     expect(msg).toContain('· 偏见内容：反事实：步骤 3 换做法')
@@ -580,7 +580,7 @@ describe('performAutopilotWake（时钟与「立即唤起」共用执行体）',
     expect(res.detail).toContain('已唤起')
     expect(steer).toHaveBeenCalledTimes(1)
     const msg = steer.mock.calls[0]![0] as { content: { text: string }[] }
-    expect(msg.content[0]!.text).toContain('[Autopilot Trajectory 唤起]')
+    expect(msg.content[0]!.text).toContain('[Autopilot Trajectory · 唤起]')
     expect(msg.content[0]!.text).toContain('反事实：换做法会怎样')
   })
 

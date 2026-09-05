@@ -60,7 +60,7 @@ describe('keeper: 激活门控（只在 .serenity 存在的目录生效）', () 
     expect(downstream).toEqual({ kind: 'accept' })
   })
 
-  it('CCC 目录：达阈值注入 [TRAJECTORY-STEWARD] 提醒', async () => {
+  it('CCC 目录：达阈值注入 [TRAJECTORY-ASSISTANT · CHECKPOINT] 提醒', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'keeper-gate-'))
     writeFileSync(join(dir, '.serenity'), 'test')
     try {
@@ -74,7 +74,7 @@ describe('keeper: 激活门控（只在 .serenity 存在的目录生效）', () 
       const texts = (downstream.additionalContexts ?? [])
         .map((c) => c.content?.map((b) => b.text).join(''))
         .join('\n')
-      expect(texts).toContain('[TRAJECTORY-STEWARD-recorded-K1]')
+      expect(texts).toContain('[TRAJECTORY-ASSISTANT-recorded-K1]')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
@@ -125,18 +125,18 @@ describe('v1.23.3 重建提醒：不做节流（每轮都催）+ 连续 3 轮升
     writeFileSync(join(dir, '.serenity'), 'test')
     try {
       const { listener } = captureWithPressure()
-      // 连续两次工具调用 → 每次都注入 [TRAJECTORY] 提醒（无冷却跳过）
+      // 连续两次工具调用 → 每次都注入 [TRAJECTORY-ASSISTANT · LIMIT] 提醒（无冷却跳过）
       const t1 = await runOnce(listener, 's1', dir)
       const t2 = await runOnce(listener, 's1', dir)
-      expect(t1).toContain('[TRAJECTORY]')
-      expect(t2).toContain('[TRAJECTORY]')
-      expect(t2).not.toContain('[TRAJECTORY-ESCALATED]') // 第 2 轮仍未升级
+      expect(t1).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
+      expect(t2).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
+      expect(t2).not.toContain('[TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]') // 第 2 轮仍未升级
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
   })
 
-  it('连续 3 轮超阈值未 rebuild → 升级 [TRAJECTORY-ESCALATED] 强制语气（持续催）', async () => {
+  it('连续 3 轮超阈值未 rebuild → 升级 [TRAJECTORY-ASSISTANT · LIMIT · MANDATORY] 强制语气（持续催）', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'keeper-rebuild-'))
     writeFileSync(join(dir, '.serenity'), 'test')
     try {
@@ -145,11 +145,11 @@ describe('v1.23.3 重建提醒：不做节流（每轮都催）+ 连续 3 轮升
       const t2 = await runOnce(listener, 's2', dir)
       const t3 = await runOnce(listener, 's2', dir)
       const t4 = await runOnce(listener, 's2', dir)
-      expect(t1).toContain('[TRAJECTORY]')
-      expect(t2).toContain('[TRAJECTORY]')
-      expect(t3).toContain('[TRAJECTORY-ESCALATED]') // 第 3 轮升级
+      expect(t1).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
+      expect(t2).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
+      expect(t3).toContain('[TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]') // 第 3 轮升级
       expect(t3).toContain('mandatory')
-      expect(t4).toContain('[TRAJECTORY-ESCALATED]') // 升级后持续催（不重置）
+      expect(t4).toContain('[TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]') // 升级后持续催（不重置）
       // 状态累计可见
       expect(rebuildReminderStateSnapshot().get('s2')?.consecutive).toBeGreaterThanOrEqual(4)
     } finally {

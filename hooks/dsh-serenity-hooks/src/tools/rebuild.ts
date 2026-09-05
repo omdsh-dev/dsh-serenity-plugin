@@ -20,6 +20,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '../json.js'
 import { findSerenityRoot } from '../ccc.js'
 import { queueRebuild } from '../rebuild.js'
+import { eventToken } from '../trajectory-assistant.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
   return exec.agent?.session?.header?.cwd ?? process.cwd()
@@ -44,7 +45,7 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
       'rebuilt in place at the end of this turn with the anchor "continue the work of ' +
       '{SESSION name}" (first-anchor protocol body included), then auto-continues. ' +
       'SESSION.md (the trajectory\'s persistent body) stays in place; identity continues ' +
-      'from it. Use when you receive a [TRAJECTORY] reminder (context above threshold), ' +
+      'from it. Use when you receive a ' + eventToken('limit') + ' reminder (context above threshold), ' +
       'at a natural pause point. After triggering, resume from SESSION.md when this turn ends.',
     parameters: {
       note: { type: 'string', description: 'Optional: one-sentence rebuild background note (for the rebuilt self)' },

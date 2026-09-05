@@ -100,7 +100,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
   it('buildRebuildAnchor：Continue {SESSION name} + persistent trajectory path + first-anchor protocol body（ack 剥离）', () => {
     const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
     const a = buildRebuildAnchor(dir, 'S142', mdPath)
-    expect(a).toContain('[TRAJECTORY-REBUILD]')
+    expect(a).toContain('[TRAJECTORY-ASSISTANT · REBUILD]')
     expect(a).toContain('Continue the work of S142')
     expect(a).toContain('AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
     expect(a).toContain('Persistent trajectory')
@@ -215,7 +215,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     })
     // surface 首条 user 消息 = 重建锚点（含规范路径行）
     const anchorText = [
-      '[TRAJECTORY-REBUILD] The conversation has been cleared and rebuilt.',
+      '[TRAJECTORY-ASSISTANT · REBUILD] The conversation has been cleared and rebuilt.',
       'Continue the work of S200.',
       '- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/2026-08-28--S200--anch/SESSION.md (the trajectory\'s persistent body)',
     ].join('\n')
@@ -331,7 +331,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     // v1.22.5：steer 自动继续（next-step 队列 → turn 不 break → 模型自动读 SESSION.md 继续）
     expect(agent._steers).toHaveLength(1)
     const steered = agent._steers[0] as { content?: Array<{ text?: string }>; source?: { kind?: string } }
-    expect(steered.content?.[0]?.text).toContain('[TRAJECTORY-REBUILD]')
+    expect(steered.content?.[0]?.text).toContain('[TRAJECTORY-ASSISTANT · REBUILD]')
     expect(steered.content?.[0]?.text).toContain('cleared and rebuilt')
     expect(steered.source?.kind).toBe('plugin')
   })
@@ -355,7 +355,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
 describe('F2: rebuildReminderText（轨迹跟踪器提示，需求① K 数值化）', () => {
   it('含 K 占用 + 持久轨迹/临时副本语义 + session_rebuild 引导', () => {
     const t = rebuildReminderText(930, 900)
-    expect(t).toContain('[TRAJECTORY]')
+    expect(t).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
     expect(t).toContain('930K')
     expect(t).toContain('threshold 900K')
     expect(t).toContain('persistent body')

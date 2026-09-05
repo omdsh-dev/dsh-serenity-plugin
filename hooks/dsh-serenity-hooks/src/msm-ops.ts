@@ -193,7 +193,7 @@ handyman（杂工）工具可用模型白名单（provider/model 列表）；未
     { "handyman": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3", "maxRounds": 100, "maxParallel": 10 } }
 
 ── 2. sessionKeeper.threshold ──
-SESSION-KEEPER 提醒机制的积分阈值（非 headless 主 agent）。
+trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积分阈值（非 headless 主 agent）。
 按工具调用加权 + 耗时计分；达到阈值注入提醒，要求模型回复 ACK 码。
 
   Config:

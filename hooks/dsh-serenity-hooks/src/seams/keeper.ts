@@ -7,7 +7,7 @@
  * 计分（对齐 opencode-serenity-plugin session-keeper）：
  *   write/edit=3, task=10, read/grep/glob/msm=1, 经过时间 +1 分/分钟
  * 阈值：.opencode/serenity.json sessionKeeper.threshold（规范位置，.dsh 回退；缺省 150）
- * 提醒要求模型回应 [SESSION-KEEPER-recorded-{code}] 确认（DCP 模式）。
+ * 提醒要求模型回应 [TRAJECTORY-ASSISTANT-recorded-{code}] 确认（DCP 模式）。
  */
 
 import type { Context } from 'cordis'
@@ -17,6 +17,7 @@ import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
 import { readSimpleSettings } from '../settings-section.js'
 import { skiffTrajectoryEnabled } from '../skiff-core.js'
+import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX } from '../trajectory-assistant.js'
 
 // ── 纯跟踪器（可单测）──
 
@@ -73,7 +74,8 @@ export class KeeperTracker {
 export function reminderText(code: string, score: number): string {
   // v1.18.7：英文 + 不中断工作语气（用户要求）——无需停下，顺手回应即可
   // v1.23.0：前缀 SESSION-KEEPER → TRAJECTORY-STEWARD（用户定名：trajectory 维护机制）
-  return `[TRAJECTORY-STEWARD] Score threshold reached (${score}). Please acknowledge with [TRAJECTORY-STEWARD-recorded-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
+  // v0.3/v1.29：统一进 trajectory-assistant（TRAJECTORY-STEWARD → TRAJECTORY-ASSISTANT · CHECKPOINT）
+  return `${eventToken('checkpoint')} Score threshold reached (${score}). Please acknowledge with [${ACK_PREFIX}-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
 }
 
 /**
@@ -94,9 +96,9 @@ export function reminderText(code: string, score: number): string {
  */
 export function rebuildReminderText(tokensK: number, thresholdK: number, escalated = false): string {
   if (escalated) {
-    return `[TRAJECTORY-ESCALATED] Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call the session_rebuild tool immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild). The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
+    return `${eventToken('limitMandatory')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call the session_rebuild tool immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild). The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
   }
-  return `[TRAJECTORY] Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
+  return `${eventToken('limit')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */

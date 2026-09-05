@@ -59,10 +59,11 @@ describe('keeper: 纯跟踪器', () => {
     expect(t.step('read')).toBe(true) // 4+2+1 = 7 ≥ 5
   })
 
-  it('reminderText 含确认码（v1.23.0 steward 前缀）', () => {
-    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-STEWARD-recorded-K1]')
-    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-STEWARD]')
+  it('reminderText 含确认码（trajectory-assistant checkpoint 前缀）', () => {
+    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-ASSISTANT-recorded-K1]')
+    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
     expect(reminderText('K1', 150)).not.toContain('SESSION-KEEPER')
+    expect(reminderText('K1', 150)).not.toContain('[TRAJECTORY-STEWARD]')
   })
 })
 
@@ -70,7 +71,7 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
   it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本（需求① K 数值化）', () => {
     // 需求①：参数从 (ratio, threshold 比例) 改为 (tokensK, thresholdK 千 token)
     const text = rebuildReminderText(412, 400)
-    expect(text).toContain('[TRAJECTORY]')
+    expect(text).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
     expect(text).toContain('412K')
     expect(text).toContain('threshold 400K')
     expect(text).toContain('persistent body')
@@ -93,7 +94,7 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
 
   it('rebuildReminderText 升级语气（escalated=true，需求① K 数值化）', () => {
     const text = rebuildReminderText(460, 400, true)
-    expect(text).toContain('[TRAJECTORY-ESCALATED]')
+    expect(text).toContain('[TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]')
     expect(text).toContain('460K')
     expect(text).toContain('threshold 400K')
     expect(text).toContain('mandatory')

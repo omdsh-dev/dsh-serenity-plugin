@@ -204,7 +204,7 @@ export function buildWakeMessage(opts: {
     lines.push('')
   }
   lines.push(
-    `[Autopilot Trajectory 唤起] — 距上次轨迹活动已满 ${intervalLabel}，自动继续。`,
+    `[Autopilot Trajectory · 唤起] — 距上次轨迹活动已满 ${intervalLabel}，自动继续。`,
     '',
     `身份锚定：继续 ${opts.sessionName} 的 trajectory（SESSION.md: ${opts.mdPath}）。`,
     '先验偏见：',
