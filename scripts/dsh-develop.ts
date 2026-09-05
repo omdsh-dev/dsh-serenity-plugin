@@ -816,9 +816,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'github-ls': cmdGithubLs(rest[0]); break
       case 'version': cmdVersion(); break
       case 'sys': {
-        // 诊断：执行白名单系统命令（ps/ss/curl/lsof/xdg-open/zstd 等只读诊断）
+        // 诊断：执行白名单系统命令（ps/ss/curl/lsof/xdg-open/zstd/git 等只读诊断）
         const [cmd, ...args] = rest
-        if (!['ps', 'ss', 'curl', 'lsof', 'pgrep', 'pkill', 'kill', 'sleep', 'ss', 'date', 'ls', 'xdg-open', 'zstd'].includes(cmd ?? '')) {
+        if (!['ps', 'ss', 'curl', 'lsof', 'pgrep', 'pkill', 'kill', 'sleep', 'ss', 'date', 'ls', 'xdg-open', 'zstd', 'git'].includes(cmd ?? '')) {
           fail(`sys 仅允许白名单命令: ${cmd}`)
         }
         // curl 强制 --max-time（防无超时请求维持死锁；postmortem 2026-08-08）
