@@ -1,3 +1,25 @@
+## v1.28.2 — 2026-09-05（0.1.2-rc.1 BrowserAuth 适配 + 3081 登录后白屏根治，S142 用户 bug 双报）
+
+**Scope:** 用户报告两个 3081 外部访问 bug——① 被 DSH 0.1.2-rc.1 新增 BrowserAuth 拦截（"dsh web authentication required"）② 登录后白屏（https://dsh.notfoundhome.cc）。排查实证两条独立根因链，分两个修复模块 + 一个诊断 MSM（gateway-diag，home-serenity 侧）。
+
+### ① BrowserAuth 401（gateway-dsh-auth.ts 新模块）
+- **机制实证**：0.1.2-rc.1 主端口所有 /api + index 需 authority 绑定的签名 cookie（`dsh-auth-<sha256(Host)>`，browser-auth.ts）；3081 网关反代 Host 已改写 loopback 过信任栅栏，但**无 dsh cookie** → 上游 401
+- **方案（用户拍板：不 cookie 落盘绕，直接解决；用户 3081 无感）**：dsp 与 DSH 同进程 → 经 `ctx.connection`（HostConnectionHandle）官方通道（authenticatedUrl + authorizeIndex——web-app openBrowser 同款）**内存换取** authority=127.0.0.1:主端口 的 dsh cookie + 缓存（`createDshCookieProvider` 惰性换取，失败不缓存可重试）→ 注入所有反代上游请求头（upstreamHeaders/mergeCookieHeader 保留外部 cookie）
+- **零落盘、无 HTTP 往返、不复制官方 HMAC**（版本漂移风险为零）；connection 服务缺失（旧 dsh/非 web 装配）→ 不注入天然兼容
+- **时序坑**：`ctx.get('connection')` 在 gateway sync（apply 早期）时不可取（connection 晚装配）→ 改每次调用现取的**惰性 provider** → 日志实证 "connection ✓ 可取 + cookie ✓ 已内存换取" → 401 消除
+
+### ② 登录后白屏（gateway-proxy.ts transformHtmlForProxy）
+- **根因（gateway-diag gzip-test 复现 + cookie-test 决定性证据）**：浏览器带 `Accept-Encoding: gzip` → gateway 透传 → 主端口返回 **gzip 压缩 HTML** → 注入分支把**压缩字节** toString 当文本注入 → 找不到 `</head>` → polyfill 前置 → HTML 损坏 → 白屏
+- **修复**：gateway-proxy.ts 新 `transformHtmlForProxy` 纯函数——content-encoding 存在则 gunzip/brotli/inflate 解压 → 明文注入 → 去 encoding 头 + 重算 content-length + 去 transfer-encoding；**解压失败返回 null → 调用方原样透传**（不破坏）。gateway.ts HTML 注入分支统一改用
+- **gateway-diag 诊断 MSM**（home-serenity 侧，常驻）：status/proxy/index/main-index/login/cookie-test/gzip-test 七子命令纯 curl HTTP 定位——cookie-test 区分失效层（本机/Host/公网三路）、gzip-test 复现压缩破坏
+
+### 测试
+- **57 files / 848 tests 全绿**（848 = 828 + gateway-dsh-auth + transformHtmlForProxy +6）；typecheck ✓（node + client）；build ✓
+
+### 发布链
+- bump v1.28.2（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推（origin + github + omdsh）→ deploy → restart-web
+
+
 ## v1.28.1 — 2026-09-05（0.1.2-rc.1 适配补齐：Session.events 移除 → snapshotEvents()，7 处裸读收敛——first-anchor 重插 + SESSION 激活恢复失效根治，S142 用户 bug 双报）
 
 **Scope:** 用户报告两 bug——① SESSION 激活 rebuild 后会乱掉（anchor 曾指向 S151 而非 S142）② 任何情况发消息都插入 first-anchor（resume/续跑也重锚）。排查实证：**0.1.2-rc.1 官方移除 `Session.events` 属性 → `snapshotEvents()` 方法**，但适配轮只修了 typecheck 直接报错的 2 处（handyman.ts / skiff-core.ts），其余 7 处裸读 `.events` 经 `as unknown as { events? }` 断言绕过 typecheck → 运行时静默 undefined → 判定链全断（测试替身仍用 `.events` 属性 → 815 全绿假象）。
