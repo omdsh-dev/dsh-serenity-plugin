@@ -83,6 +83,16 @@ describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复�
     expect(shouldRestoreActive(fakeAgent({ id: 'main-session-resume', events: [{ type: 'user/message' }] }))).toBe(true)
   })
 
+  it('续跑会话以 snapshotEvents() 形态提供历史 → 恢复（v1.28.1 rc.1 适配回归：裸读 .events 恒 undefined 会漏恢复）', () => {
+    const session = { id: 'main-session-resume-snap', snapshotEvents: () => [{ type: 'user/message' }] }
+    expect(shouldRestoreActive(fakeAgent(session))).toBe(true)
+  })
+
+  it('snapshotEvents() 为空 → 不恢复（全新会话语义）', () => {
+    const session = { id: 'main-session-new-snap', snapshotEvents: () => [] }
+    expect(shouldRestoreActive(fakeAgent(session))).toBe(false)
+  })
+
   it('subagent / handyman（有历史但非根会话）→ 不恢复', () => {
     expect(shouldRestoreActive(fakeAgent({ id: 'child-1', header: { origin: 'subagent' }, events: [{ type: 'user/message' }] }))).toBe(false)
     expect(shouldRestoreActive(fakeAgent({ id: 'handyman-x-1', events: [{ type: 'user/message' }] }))).toBe(false)

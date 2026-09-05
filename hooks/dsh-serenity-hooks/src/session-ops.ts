@@ -38,6 +38,30 @@ export const SESSION_ACTIONS: readonly SessionAction[] = [
   'list', 'show', 'create', 'use', 'close', 'health', 'qa', 'archive', 'summary', 'hook-develop-guide',
 ]
 
+/**
+ * 读取 Session 事件序列（v1.28.1 适配 0.1.2-rc.1 补齐）：rc.1 起官方 Session 类
+ * 移除 `.events` 属性 → `snapshotEvents()` 方法（dsh-session/src/session.ts：
+ * `snapshotEvents(fromSeq, toSeqExclusive)`）。插件早期代码多处裸读 `.events`
+ * （经 `as unknown as { events? }` 断言绕过 typecheck），运行时静默 undefined——
+ * 造成 first-anchor 每轮重插 / SESSION 激活恢复失效 / rebuild 定位错乱。
+ * 统一收敛到本 helper：snapshotEvents() 优先（rc.1 真实形态），`.events` 兜底
+ * （测试替身/旧运行时）。所有消费方一律经此读取，禁止再裸读 `.events`。
+ * 泛型 T：调用方按需声明事件形状（如 `SessionEvent`），unknown 默认。
+ */
+export function sessionEvents<T = unknown>(session: unknown): readonly T[] {
+  const s = session as { snapshotEvents?: () => readonly T[] | readonly unknown[]; events?: readonly T[] } | null | undefined
+  if (!s) return []
+  if (typeof s.snapshotEvents === 'function') {
+    try {
+      const snap = s.snapshotEvents()
+      return (snap ?? []) as readonly T[]
+    } catch {
+      /* snapshot 失败退 events 兜底 */
+    }
+  }
+  return (s.events ?? []) as readonly T[]
+}
+
 const SESSION_MD = 'SESSION.md'
 const ARCHIVE_DIR_NAME = '_archived'
 const HEALTH_STALE_DAYS = 7

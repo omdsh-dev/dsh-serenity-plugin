@@ -17,6 +17,7 @@ import {
   resetActiveSessionStore,
   parseSessionContextFromEvents,
   findLatestActiveSessionMd,
+  sessionEvents,
   SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
 } from '../src/session-ops.js'
@@ -268,5 +269,38 @@ describe('session-ops: v1.24.11 恢复稳固化（路径规范行即可，无需
     const a = mk('only-done')
     closeSession(dir, a.sessionId, true)
     expect(findLatestActiveSessionMd(dir)).toBeNull()
+  })
+})
+
+describe('session-ops: sessionEvents（v1.28.1 适配 0.1.2-rc.1——rc.1 起 Session 无 .events 属性，snapshotEvents() 方法）', () => {
+  it('snapshotEvents() 优先（真实 rc.1 Session 形态）', () => {
+    const events = [{ type: 'user/message', seq: 1 }]
+    const session = { snapshotEvents: () => events, events: [{ type: 'old' }] }
+    expect(sessionEvents(session)).toEqual(events)
+  })
+
+  it('.events 兜底（测试替身/旧运行时形态）', () => {
+    const events = [{ type: 'user/message', seq: 1 }]
+    expect(sessionEvents({ events })).toEqual(events)
+  })
+
+  it('snapshotEvents 抛错 → events 兜底', () => {
+    const events = [{ type: 'user/message' }]
+    const session = {
+      snapshotEvents: () => { throw new Error('boom') },
+      events,
+    }
+    expect(sessionEvents(session)).toEqual(events)
+  })
+
+  it('两者皆无 / null / undefined → []（绝不抛错）', () => {
+    expect(sessionEvents({})).toEqual([])
+    expect(sessionEvents(null)).toEqual([])
+    expect(sessionEvents(undefined)).toEqual([])
+    expect(sessionEvents('string')).toEqual([])
+  })
+
+  it('snapshotEvents 返回 null → []', () => {
+    expect(sessionEvents({ snapshotEvents: () => null })).toEqual([])
   })
 })

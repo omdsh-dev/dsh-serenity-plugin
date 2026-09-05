@@ -52,6 +52,7 @@ import {
   parseSessionContextFromEvents,
   extractSessionMdPathFromText,
   findLatestActiveSessionMd,
+  sessionEvents,
 } from './session-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
 import { namingTitleFor } from './tools/session.js'
@@ -120,8 +121,8 @@ function parseAnchorMdPath(session: Session): string | null {
   try {
     const nodes = [...session.surface.nodes]
     if (nodes.length === 0) return null
-    const events = (session as { events?: readonly SessionEvent[] }).events
-    if (!Array.isArray(events)) return null
+    const events = sessionEvents<SessionEvent>(session)
+    if (events.length === 0) return null
     const event = events[nodes[0]!]
     if (!event) return null
     const message = deriveEventMessage(event)
@@ -152,8 +153,8 @@ function sessionNameFromMdPath(mdPath: string): string {
 export function resolveSessionMdPath(root: string, scope: string, session: Session): string | null {
   const candidates: Array<string | null> = []
   candidates.push(getActiveSessionInfo(scope)?.mdPath ?? null)
-  const events = (session as { events?: readonly unknown[] }).events
-  if (Array.isArray(events)) candidates.push(parseSessionContextFromEvents(events)?.mdPath ?? null)
+  const events = sessionEvents<unknown>(session)
+  if (events.length > 0) candidates.push(parseSessionContextFromEvents(events)?.mdPath ?? null)
   candidates.push(parseAnchorMdPath(session))
   candidates.push(findLatestActiveSessionMd(root))
   for (const c of candidates) {
@@ -291,8 +292,9 @@ export function performRebuild(
   // shadow-price 协议：replace 前 append compaction/prune，定价被替换范围
   if (meter) {
     let shadowedTokenCount = 0
+    const events = sessionEvents<SessionEvent>(session)
     for (const seq of nodes) {
-      const event = (session as { events?: readonly SessionEvent[] }).events?.[seq]
+      const event = events[seq]
       if (!event) continue
       const message = deriveEventMessage(event)
       if (message) shadowedTokenCount += meter.estimateMessage(message)

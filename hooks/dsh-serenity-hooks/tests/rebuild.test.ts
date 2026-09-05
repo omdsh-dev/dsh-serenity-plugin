@@ -40,6 +40,7 @@ import {
 } from '../src/rebuild.js'
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
 import { setActiveSessionInfo, resetActiveSessionStore } from '../src/session-ops.js'
+import { SESSION_CONTEXT_MARKER } from '../src/session-ops.js'
 
 let dir: string
 
@@ -152,6 +153,42 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(snap.has('session-x')).toBe(true)
   })
 
+  it('queueRebuild：会话经 snapshotEvents() 提供 use 上下文 → 正确定位 SESSION（v1.28.1 rc.1 形态回归）', async () => {
+    // 模拟真实 rc.1：进程重启后内存活跃会话空，会话历史（snapshotEvents）含 [SESSION CONTEXT]。
+    // 旧实现 resolveSessionMdPath 候选②裸读 .events = undefined → 只能靠约定回退；
+    // 多活跃会话时可能指向**错误** SESSION（rebuild 后激活乱掉的根因路径之一）。
+    const dirName = '2026-08-24--S142--dsp 长期维护'
+    const md = join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md')
+    mkdirSync(dirname(md), { recursive: true })
+    writeFileSync(md, '# SESSION S142')
+    const useCtx = [
+      '───',
+      `${SESSION_CONTEXT_MARKER} ${dirName}`,
+      '───',
+      `SESSION.md path: ${md}`,
+    ].join('\n')
+    const session = {
+      surface: { nodes: [], replaceGeneration: 0 },
+      append: () => {},
+      snapshotEvents: () => [
+        { type: 'tool/result', data: { output: useCtx } },
+        { type: 'user/message', data: { content: [{ type: 'text', text: 'continue' }] } },
+      ],
+    }
+    const ctx = { sessions: { get: () => session } } as never
+    const result = await queueRebuild(ctx, {
+      root: dir,
+      summary: 'rc1形态',
+      agentCwd: dir,
+      dshSessionId: 'session-rc1',
+    })
+    expect(result.queued).toBe(true)
+    expect(result.sessionMdPath).toBe(md) // 精确定位 S142（非约定回退的其他会话）
+    expect(result.anchor).toContain('Continue the work of S142')
+    // 锚点指向 S142 的 SESSION.md
+    expect(result.anchor).toContain(`SESSION.md path: AGENT_SESSIONS/${dirName}/SESSION.md`)
+  })
+
   it('queueRebuild：无任何会话上下文 → 抛错引导 session use（v1.24.11 绝不写虚假路径）', async () => {
     const session = fakeSession([10])
     const ctx = { sessions: { get: () => session } } as never
@@ -191,6 +228,25 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     })
     ;(session as { events?: unknown[] }).events = events
     expect(resolveSessionMdPath(dir, 's2', session as never)).toBe(anchorMd)
+  })
+
+  it('resolveSessionMdPath：② 候选从 events 恢复（真实 rc.1 snapshotEvents() 形态，v1.28.1 回归）', () => {
+    // 真实 rc.1 Session：无 .events 属性，snapshotEvents() 提供事件。
+    // 旧实现裸读 .events → undefined → 候选②失效 → rebuild 后定位不到正确的 SESSION（bug 1）。
+    const dirName = '2026-08-28--S200--mem'
+    const md = mkActiveSession('mem')
+    const useCtx = [
+      '───',
+      `${SESSION_CONTEXT_MARKER} ${dirName}`,
+      '───',
+      `SESSION.md path: ${md}`,
+    ].join('\n')
+    const session = {
+      surface: { nodes: [], replaceGeneration: 0 },
+      append: () => {},
+      snapshotEvents: () => [{ type: 'user/message', data: { content: [{ type: 'text', text: useCtx }] } }],
+    }
+    expect(resolveSessionMdPath(dir, 's-snap', session as never)).toBe(md)
   })
 
   it('resolveSessionMdPath：④ 全部候选缺失 → null（约定回退也无）', () => {

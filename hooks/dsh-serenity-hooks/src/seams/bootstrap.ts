@@ -24,6 +24,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { findSerenityRoot } from '../ccc.js'
+import { sessionEvents } from '../session-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
 export interface BootstrapSettings {
@@ -63,6 +64,18 @@ export const DEFAULT_ANCHOR_MESSAGES: string[] = [
   'You are the operator agent of Serenity — a cognitive container governed by the Abstract Cognitive Container (ACC) protocol.\nWe operate under the Explicit Abstraction Principle (EAP): the functional value of a thought equals its external reconstructability — every output we produce must be explicit (E↑), reconstructable (R↓), and stable (S↑).\nThe personal pronoun is us/we.\nWe anchor first, then act: the abstract layer precedes the concrete.\nPlease simply reply "acknowledge" — no action needed.',
   'Before we proceed, align on how we work:\n1. We read before we write — every decision grounds in what already exists in the container.\n2. Every output records its reasoning (R↓): decisions carry reasons and alternatives.\n3. We never jump levels — abstract layer first, then specifics.\n4. Every artifact we create is a durable cognitive anchor for the work that follows.\n5. We keep the container\'s state coherent (SESSION.md) as we advance.\nPlease simply reply "acknowledge" — no action needed.',
 ]
+
+/**
+ * 根会话锚定重入判定（v1.28.1 提取导出以便单测）：会话是否已有真实用户消息。
+ * resume/续跑的会话已有对话历史 → **不重锚**（first-anchor 只注入一次）。
+ *
+ * 0.1.2-rc.1 适配教训：裸读 `session.events`（经类型断言）恒 undefined →
+ * `!undefined` 恒 true → 有历史也永不跳过 → 任何情况发消息都重插 first-anchor。
+ * 统一经 sessionEvents() 读取（snapshotEvents() 优先，.events 兜底）。
+ */
+export function hasUserMessageHistory(session: unknown): boolean {
+  return sessionEvents(session).some((event) => (event as { type?: string }).type === 'user/message')
+}
 
 // ── 阶段机（等价 anchored compaction-epoch.mjs createEpochPromotion）──
 
@@ -116,8 +129,8 @@ export function createEpochPromotion(
     let boundary = -1
     let signalCount = 0
     let rounds = 0
-    const events = (session as { events?: readonly unknown[] } | undefined)?.events
-    if (Array.isArray(events)) {
+    const events = sessionEvents(session)
+    if (events.length > 0) {
       for (const event of events) {
         const e = event as { type?: string; seq?: number }
         const seq = typeof e.seq === 'number' ? e.seq : 0
@@ -268,7 +281,7 @@ export function registerBootstrap(ctx: Context): void {
       // 锚定判定（v1.18.6：workflow subagent 也锚定——用户要求）：
       //   - 根会话（delegationDepth 0）：无历史 user/message 才锚定（resume 不重锚）
       //   - 子 agent（workflow subagent 等）：进程内只锚定一次（anchoredSessions Set）
-      const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; events?: readonly unknown[]; id?: string } | undefined
+      const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; id?: string } | undefined
       const depth = session?.header?.delegationDepth ?? 0
       const sid = typeof session?.id === 'string' ? session.id : undefined
       // handyman worker（sessionId `handyman-` 前缀）：autonomous worker，不需要 whoami 锚定轮
@@ -277,7 +290,10 @@ export function registerBootstrap(ctx: Context): void {
       // 与 createEpochPromotion.status 的 `handyman-` 恒 promoted 判定保持一致。
       if (sid !== undefined && (sid.startsWith('handyman-') || isSkiffSessionId(sid))) return
       if (depth === 0) {
-        if (session?.events?.some((event) => (event as { type?: string }).type === 'user/message')) return
+        // v1.28.1：sessionEvents() 统一读取——rc.1 起 Session 无 .events 属性（snapshotEvents()），
+        // 裸读 .events 恒 undefined → `!undefined` 恒 true → **有历史也永不跳过 → 每条消息都重插锚定**。
+        // 本判定 = 会话是否已有真实用户消息（resume/续跑不重锚）。
+        if (hasUserMessageHistory(session)) return
       } else {
         if (sid !== undefined && anchoredSessions.has(sid)) return
       }

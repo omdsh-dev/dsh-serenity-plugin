@@ -280,6 +280,8 @@ function waitIdle(ctx: Context, agent: Agent): Promise<void> {
 /**
  * 会话事件读取（v1.28.0 适配 0.1.2-rc.1）：rc.1 Session 移除 `.events` 属性 → `snapshotEvents()` 方法。
  * 兼容双形态（运行时 rc.1 snapshotEvents；测试替身 events）——同一函数两处语义，测试注入零侵入。
+ * 注：与 session-ops.ts 导出的共享 `sessionEvents` 同构（v1.28.1 收敛基准）。本模块保留本地副本
+ * 以维持独立 import 面（零 DSH 依赖测试替身形态一致）；若未来重构可统一 import 共享版。
  */
 function sessionEvents(session: unknown): readonly unknown[] {
   const s = session as { snapshotEvents?: () => readonly unknown[]; events?: readonly unknown[] }

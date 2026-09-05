@@ -22,7 +22,7 @@ import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
-import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
+import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents } from '../session-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
 // ── 纯文本构建（可单测）──
@@ -111,8 +111,8 @@ export function shouldAutoRestore(agent: Agent): boolean {
  */
 export function shouldRestoreActive(agent: Agent): boolean {
   if (!shouldAutoRestore(agent)) return false
-  const events = (agent.session as unknown as { events?: readonly unknown[] } | undefined)?.events
-  return Array.isArray(events) && events.length > 0
+  const events = sessionEvents(agent.session)
+  return events.length > 0
 }
 
 export interface ContextRegistration {
@@ -147,7 +147,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       try {
         const cfg = loadSerenityConfig(root, configPaths)
         if (cfg.hooks?.autoRestoreSession ?? true) {
-          const events = (agent.session as unknown as { events?: readonly unknown[] }).events ?? []
+          const events = sessionEvents(agent.session)
           const info = parseSessionContextFromEvents(events)
           if (info) {
             // v1.24.11 校验：路径可为相对（重建锚点 rel）——按 root 绝对化 + existsSync 验证，

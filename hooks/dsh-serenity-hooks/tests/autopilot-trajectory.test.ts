@@ -49,6 +49,12 @@ vi.mock('../src/session-ops.js', () => ({
   sessionsRoot: (root: string) => join(root, 'AGENT_SESSIONS'),
   findSession: vi.fn(),
   findLatestActiveSessionMd: vi.fn(),
+  sessionEvents: (session: unknown) => {
+    const s = session as { snapshotEvents?: () => unknown[]; events?: unknown[] } | null | undefined
+    if (!s) return []
+    if (typeof s.snapshotEvents === 'function') return s.snapshotEvents() ?? []
+    return s.events ?? []
+  },
 }))
 
 import { findSession, findLatestActiveSessionMd } from '../src/session-ops.js'

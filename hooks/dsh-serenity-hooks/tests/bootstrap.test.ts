@@ -6,6 +6,7 @@ import {
   DEFAULT_SUPPRESSED_SOURCES,
   DEFAULT_COMPACTION_TOOLS,
   DEFAULT_ANCHOR_MESSAGES,
+  hasUserMessageHistory,
 } from '../src/seams/bootstrap.js'
 
 /** 构造最小 agent（子 agent 模拟） */
@@ -161,6 +162,31 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
     expect(p.status(mkAgent(session) as never).promoted).toBe(false)
     p.observe(session, ev('assistant/message', 7))
     expect(p.status(mkAgent(session) as never).promoted).toBe(true)
+  })
+})
+
+describe('bootstrap: hasUserMessageHistory（v1.28.1 根会话重锚判定——0.1.2-rc.1 适配回归）', () => {
+  it('有 user/message 事件 → true（resume/续跑不重锚）', () => {
+    const session = mkSession('resume', [ev('user/message', 1), ev('assistant/message', 2)])
+    expect(hasUserMessageHistory(session)).toBe(true)
+  })
+
+  it('snapshotEvents() 形态同样生效（rc.1 Session 无 .events 属性——bug 2 根因回归）', () => {
+    const events = [{ type: 'user/message', seq: 1 }]
+    const session = { id: 'resume-snap', header: {}, snapshotEvents: () => events }
+    // 旧实现裸读 .events → undefined → 误判"无历史"→ 每条消息都重插锚定（bug 2）
+    expect(hasUserMessageHistory(session)).toBe(true)
+  })
+
+  it('无 user/message（仅 assistant/工具事件）→ false（仍首轮锚定）', () => {
+    const session = mkSession('first', [ev('assistant/message', 1)])
+    expect(hasUserMessageHistory(session)).toBe(false)
+  })
+
+  it('无事件 / 空会话 → false', () => {
+    expect(hasUserMessageHistory(mkSession('empty'))).toBe(false)
+    expect(hasUserMessageHistory(null)).toBe(false)
+    expect(hasUserMessageHistory(undefined)).toBe(false)
   })
 })
 

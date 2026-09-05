@@ -19,6 +19,7 @@ import { findSerenityRoot } from './ccc.js'
 import { isSkiffSessionId } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { buildSensitiveTable, detectSensitive, buildRebuke, rebukeStates, REBUKE_MAX_ROUNDS } from './output-guard.js'
+import { sessionEvents } from './session-ops.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -35,7 +36,7 @@ export function isExternalFaceSession(sessionId: string | undefined): boolean {
  *  否则 think 内提及内部机制词（思考过程必然推演机制）会误打回。复用 stripThink
  *  （v1.26.8 状态机，弃正则——同 v1.27.1 微信桥回复链路）。 */
 function lastAssistantText(agent: Agent): string {
-  const events = (agent.session as { events?: readonly unknown[] }).events ?? []
+  const events = sessionEvents(agent.session)
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i] as { type?: string; data?: { message?: { content?: unknown }; content?: unknown } } | undefined
     if (e && e.type === 'assistant/message') {

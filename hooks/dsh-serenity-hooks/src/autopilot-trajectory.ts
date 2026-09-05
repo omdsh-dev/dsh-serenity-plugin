@@ -34,7 +34,7 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutopilotTrajectorySettings } from './ccc.js'
-import { findSession, sessionsRoot } from './session-ops.js'
+import { findSession, sessionsRoot, sessionEvents } from './session-ops.js'
 import { readSimpleSettings } from './settings-section.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
@@ -432,8 +432,7 @@ function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
  */
 function readSessionTitle(session: unknown): string | null {
   try {
-    const events = (session as { events?: readonly { type?: string; data?: { title?: unknown } }[] } | undefined)?.events
-    if (!Array.isArray(events)) return null
+    const events = sessionEvents<{ type?: string; data?: { title?: unknown } }>(session)
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i]
       if (e?.type === 'session/title' && typeof e.data?.title === 'string' && e.data.title.trim() !== '') {
