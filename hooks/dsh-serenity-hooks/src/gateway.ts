@@ -54,6 +54,7 @@ import {
   workspaceDenyResponse,
   buildProxyHeaders,
 } from './gateway-proxy.js'
+import { createDshCookieProvider, mergeCookieHeader, type DshCookieProvider } from './gateway-dsh-auth.js'
 
 // re-export 认证域 + 代理域（兼容既有 import 面；gateway-auth/gateway-proxy 为权威定义）
 export {
@@ -143,6 +144,7 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
 export function startGateway(
   config: GatewayConfig,
   getAccounts: () => readonly { id: string; user: string; passHash: string; totpSecret?: string }[],
+  getDshCookie?: () => string | undefined,
 ): { server: Server; dispose: () => void } {
   const { host, port, cookieName, mainPort, loginDelayMs } = config
   const allowWorkspaces = config.allowWorkspaces ?? []
@@ -153,6 +155,21 @@ export function startGateway(
   /** 校验请求 Cookie 是否含有效 token（v1.22.4：滑动过期 + 返回会话供审计） */
   const authed = (req: IncomingMessage): GatewaySession | undefined =>
     validateToken(cookieValue(req.headers.cookie, cookieName))
+
+  /**
+   * 构造上游请求头（buildProxyHeaders 基准 + dsh browser cookie 注入）。
+   * v1.28.2（0.1.2-rc.1 BrowserAuth 适配）：主端口 /api + index 需 dsh browser cookie。
+   * 反代 Host 已改写 loopback（过信任栅栏）→ 只缺 cookie → 注入内存换取 cookie
+   *（createDshCookieProvider 官方通道，零落盘）。无 cookie（旧 dsh/换取失败）→ 不注入向后兼容。
+   */
+  const upstreamHeaders = (req: IncomingMessage, bodyOverride?: string): Record<string, string | number | string[]> => {
+    const headers = buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort, bodyOverride)
+    const dshCookie = getDshCookie?.()
+    if (dshCookie !== undefined) {
+      headers.cookie = mergeCookieHeader(headers.cookie, dshCookie)
+    }
+    return headers
+  }
 
   /**
    * 反向代理：改写 Host + Origin 头 → 主端口（loopback 过信任栅栏）。
@@ -167,7 +184,7 @@ export function startGateway(
   const proxy = (req: IncomingMessage, res: ServerResponse, bodyOverride?: string): void => {
     // v1.28.0 适配 0.1.2-rc.1 A2 方案 B：method/url 派生已删（原 workspace.list 过滤分支移除——
     // rc.1 无 list unary，无 HTTP 层方法可判；create 校验在装配层直接判 pathname）
-    const headers = buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort, bodyOverride)
+    const headers = upstreamHeaders(req, bodyOverride)
     // v1.22.3 崩溃修复（S142 实测：外部连接中断 → Unhandled 'error' event → 进程崩溃）：
     // 反代链路的**客户端侧** req/res 必须挂 error 监听。外部客户端（浏览器/手机）随时会
     // 中断连接（切网络/关页面/锁屏/超时）→ socket 收到 ECONNRESET/EPIPE → 若无人监听
@@ -428,7 +445,7 @@ export function startGateway(
       port: mainPort,
       path: req.url ?? '/',
       method: req.method,
-      headers: buildProxyHeaders(req.headers as Record<string, string | string[] | undefined>, mainPort),
+      headers: upstreamHeaders(req),
     })
     upstream.on('upgrade', (ures, usock, uhead) => {
       usocket = usock
@@ -516,6 +533,25 @@ export function startGateway(
   }
 }
 
+/**
+ * 构造 dsh browser cookie 提供者（v1.28.2 0.1.2-rc.1 BrowserAuth 适配）：
+ * 经 ctx.connection（HostConnectionHandle）官方通道在内存换取 authority=127.0.0.1:<mainPort>
+ * 的 cookie 并缓存（createDshCookieProvider 惰性换取）。connection 缺失（旧 dsh/非 web 装配）
+ * → undefined → 反代不注入（旧形态无 BrowserAuth，天然兼容）。
+ */
+function buildDshCookieProvider(ctx: Context, mainPort: number): DshCookieProvider | undefined {
+  const connection = (ctx as unknown as { get?: (name: string) => unknown }).get?.('connection') as
+    | { authenticatedUrl?: (baseUrl: string) => string; authorizeIndex?: (req: unknown, res: unknown) => boolean }
+    | undefined
+  if (!connection || typeof connection.authenticatedUrl !== 'function' || typeof connection.authorizeIndex !== 'function') {
+    return undefined
+  }
+  return createDshCookieProvider(
+    connection as Parameters<typeof createDshCookieProvider>[0],
+    `127.0.0.1:${mainPort}`,
+  )
+}
+
 /** 注册 gateway（index.ts apply 调用）。
  * 归属原则（v1.22）：gateway 是 plugin 全局能力——enabled 开关读 DSH settings
  * （readSimpleSettings().gatewayEnabled），host/port/accounts 读 plugin 全局文件
@@ -563,6 +599,10 @@ export function registerGateway(ctx: Context): void {
           totpEnabled: settings.gateway.totpEnabled === true,
         },
         () => readAdvancedSettings().gateway.accounts,
+        // v1.28.2（0.1.2-rc.1 BrowserAuth 适配）：内存换取 dsh browser cookie（官方通道，
+        // 零落盘）→ 反代上游注入。connection 服务缺失（旧 dsh/非 web 装配）→ provider 返回
+        // undefined → 不注入（旧形态无 BrowserAuth 天然兼容）。authority = 反代后 Host（loopback）。
+        buildDshCookieProvider(ctx, webServer.port),
       )
       current = started
       const accounts = settings.gateway.accounts.length
