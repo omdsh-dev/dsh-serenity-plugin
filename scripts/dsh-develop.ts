@@ -109,6 +109,23 @@ function cmdTest(filter?: string): void {
   console.log(m ? `[dsh-develop] ✓ 测试通过 (${m[1]} files / ${m[2]} tests)` : '[dsh-develop] ✓ 测试通过')
 }
 
+/** coverage：vitest --coverage（v1.28.0 可测试可验证——coverage 阈值门禁见 hooks vitest.config.ts）。
+ *  从 HOOKS_DIR 运行：coverage-v8 装在 hooks 自身 node_modules（根 node_modules 无），
+ *  且 hooks/vitest.config.ts 定义 coverage 范围 = hooks src。 */
+function cmdCoverage(): void {
+  if (!existsSync(join(HOOKS_DIR, 'tests'))) {
+    fail(`hooks 测试目录缺失`, 2)
+  }
+  const r = run(join(HOOKS_DIR, 'node_modules', '.bin', 'vitest'), ['run', '--coverage'], { cwd: HOOKS_DIR })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`vitest --coverage 失败 (exit ${r.status})——覆盖率低于阈值或测试失败，见 hooks/vitest.config.ts thresholds`, 2)
+  }
+  // 汇总行（vitest coverage 文本报告在 stdout 尾部）
+  const m = r.stdout.match(/Test Files\s+(\d+) passed[\s\S]*?Tests\s+(\d+) passed/)
+  console.log(m ? `[dsh-develop] ✓ 测试通过 (${m[1]} files / ${m[2]} tests) + coverage 报告（hooks/dsh-serenity-hooks/coverage/）` : '[dsh-develop] ✓ 测试通过 + coverage 报告')
+}
+
 function cmdBuild(): void {
   cmdTypecheck()
   const staging = process.env.DSH_HOME ? join(process.env.DSH_HOME, 'source', 'current') : resolve(process.env.HOME ?? '', '.dsh', 'source', 'current')
@@ -782,6 +799,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         cmdTest(filter)
         break
       }
+      case 'coverage': cmdCoverage(); break
       case 'build': cmdBuild(); break
       case 'status': cmdStatus(); break
       case 'commit': cmdCommit(rest[0]); break
@@ -822,7 +840,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
       case '--list':
       case 'list':
-        console.log('typecheck | test [--filter] | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | publish | inspect-dsh <pattern>')
+        console.log('typecheck | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | publish | inspect-dsh <pattern>')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -841,9 +859,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case '-h':
       case undefined:
         console.log(`dsh-develop — dsh-serenity-plugin 开发操作 MSM（safe-mode 白名单通道）
-用法: dsh-develop <typecheck|test|build|status|commit|push|version|bump|deploy|restart-web> [args]
+用法: dsh-develop <typecheck|test|coverage|build|status|commit|push|version|bump|deploy|restart-web> [args]
   typecheck             tsc --noEmit
   test [--filter <p>]   vitest run
+  coverage              vitest run --coverage（阈值门禁见 vitest.config.ts）
   build                 tsc + tsdown 双 bundle
   status                git status + 版本
   commit <message>      git add -A + commit
