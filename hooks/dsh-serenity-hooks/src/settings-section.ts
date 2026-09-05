@@ -138,53 +138,47 @@ export function __setSimpleSourceForTest(source: (() => SerenitySimpleSettings) 
 export function registerSettingsSection(ctx: Context, config: SimpleConfigFragment): void {
   // v1.28.0 适配 0.1.2-rc.1（B4）：rc.1 SettingsProvider.installSection(owner, ns, schema, entry, hooks)
   // （owner = consumer 插件 ctx；ns 直接字符串——不再 settingsNamespace() 包装）。
-  // 本机类型 rc.2 无 installSection → InstallSectionFn 类型断言（rc.2 的 installSettingsSection
-  // 便捷函数在运行时即转发 installSection，语义等价；升级 0.1.2-rc.1 后断言可安全移除）。
+  // ⚠️ this 绑定（第四次同病根治）：installSection 是 SettingsProvider **方法**（内部 this.register），
+  // 必须先取实例再 .call() 调用——解构裸调用（const f = obj.m; f()）丢 this → Cannot read register（实崩）。
   interface InstallSectionHooks<T> {
     setSource: (get: () => T) => void
     onChange: () => void
     validate?: (value: T) => void
   }
-  type InstallSectionFn = (
-    owner: Context,
-    ns: string,
-    schema: unknown,
-    entry: unknown,
-    hooks: InstallSectionHooks<unknown>,
-  ) => void
+  const hooks: InstallSectionHooks<unknown> = {
+    setSource: (get) => {
+      simpleSource = get as unknown as () => SerenitySimpleSettings
+    },
+    onChange: () => {
+      // 简单配置变化（开关/阈值）→ 通知 gateway 重新 sync。
+      // 走 'serenity/settings-changed'（非强制）：sync 内部 sig 判断，
+      // 无实质 gateway 变化（如仅阈值拖动）不重建，避免无谓断 WS。
+      // 账号/监听/白名单变化（/serenity/config PUT）才走 'serenity/config-updated' 强制重建。
+      try {
+        (ctx as unknown as { emit?: (name: string, payload?: unknown) => void }).emit?.('serenity/settings-changed')
+      } catch {
+        /* 事件通知失败不影响 settings 保存 */
+      }
+    },
+  }
   const settingsAny = (ctx as unknown as { settings?: unknown }).settings as
     | {
-        installSection?: InstallSectionFn
-        installSettingsSection?: InstallSectionFn
+        installSection: (owner: Context, ns: string, schema: unknown, entry: unknown, h: InstallSectionHooks<unknown>) => void
       }
     | undefined
-  const install = settingsAny?.installSection
-    ?? settingsAny?.installSettingsSection
-    ?? ((_owner: Context, _ns: string, _schema: unknown, _entry: unknown, hooks: InstallSectionHooks<unknown>): void => {
-      // 无 settings provider → 降级：entry 为源（readSimpleSettings 兜底 defaultSimpleSettings）
-      hooks.setSource(() => ({}) as unknown)
-      hooks.onChange()
-    })
-  install(
-    ctx,
-    SERENITY_SETTINGS_NS,
-    simpleSettingsSchema,
-    entryDefaults(config),
-    {
-      setSource: (get) => {
-        simpleSource = get as unknown as () => SerenitySimpleSettings
-      },
-      onChange: () => {
-        // 简单配置变化（开关/阈值）→ 通知 gateway 重新 sync。
-        // 走 'serenity/settings-changed'（非强制）：sync 内部 sig 判断，
-        // 无实质 gateway 变化（如仅阈值拖动）不重建，避免无谓断 WS。
-        // 账号/监听/白名单变化（/serenity/config PUT）才走 'serenity/config-updated' 强制重建。
-        try {
-          (ctx as unknown as { emit?: (name: string, payload?: unknown) => void }).emit?.('serenity/settings-changed')
-        } catch {
-          /* 事件通知失败不影响 settings 保存 */
-        }
-      },
-    },
-  )
+  if (settingsAny) {
+    // 方法调用保持 this（v1.28.0 实崩修复：解构 installSection 后裸调用丢 this → this.register undefined）
+    settingsAny.installSection.call(
+      settingsAny,
+      ctx,
+      SERENITY_SETTINGS_NS,
+      simpleSettingsSchema,
+      entryDefaults(config),
+      hooks,
+    )
+    return
+  }
+  // 无 settings provider → 降级：entry 为源（readSimpleSettings 兜底 defaultSimpleSettings）
+  hooks.setSource(() => ({}) as unknown)
+  hooks.onChange()
 }
