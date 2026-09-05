@@ -605,6 +605,11 @@ export function registerGateway(ctx: Context): void {
         buildDshCookieProvider(ctx, webServer.port),
       )
       current = started
+      // 诊断（v1.28.2 BrowserAuth 适配）：connection 服务是否可取 + provider 是否就绪
+      try {
+        const conn = (ctx as unknown as { get?: (name: string) => unknown }).get?.('connection')
+        console.log(`[serenity-hooks] dsh browser-auth 适配: connection=${conn === undefined ? '✗ 不可取（不注入 dsh cookie，旧 dsh 兼容）' : '✓ 可取（内存换取 cookie 注入反代）'}`)
+      } catch { /* 诊断失败忽略 */ }
       const accounts = settings.gateway.accounts.length
       const wsNote = settings.gateway.workspaces.length === 0
         ? ''
