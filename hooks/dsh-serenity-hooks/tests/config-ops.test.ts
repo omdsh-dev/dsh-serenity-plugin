@@ -14,6 +14,7 @@ import {
   applyWirePatch,
   migrateLegacyLocalstore,
   globalConfigPath,
+  projectKnownWorkspaces,
   ADVANCED_SECTION,
 } from '../src/config-ops.js'
 import { generateTotpSecret, totpCode, nowEpochSeconds, TOTP_STEP_SECONDS } from '../src/totp.js'
@@ -178,6 +179,32 @@ describe('toWire（hash 永不落 wire）', () => {
     expect(w.gateway.accounts[1]).toEqual({ id: 'a2', user: 'd', hasPassword: false, hasTotp: false })
     expect(JSON.stringify(w)).not.toContain('passHash')
     expect(JSON.stringify(w)).not.toContain('pw')
+  })
+})
+
+describe('projectKnownWorkspaces（v1.28.0 适配 0.1.2-rc.1 A2 A′：host workspaceRegistry 投影 + 白名单过滤）', () => {
+  it('空白名单 → 全放行（向后兼容默认）；无 path 项过滤；title 缺省回退 path', () => {
+    expect(projectKnownWorkspaces([
+      { path: '/a', title: 'A' },
+      { path: '/b', title: '' },
+      { title: 'no-path' },
+    ], [])).toEqual([
+      { path: '/a', title: 'A' },
+      { path: '/b', title: '/b' },
+    ])
+  })
+
+  it('白名单前缀 → 只保留匹配项', () => {
+    const out = projectKnownWorkspaces([
+      { path: '/home/yh/home/home-serenity', title: 'home-serenity' },
+      { path: '/home/yh/zy/pangu-serenity', title: 'pangu' },
+      { path: '/data/x', title: 'data-x' },
+    ], ['/home/yh/home'])
+    expect(out.map((w) => w.path)).toEqual(['/home/yh/home/home-serenity'])
+  })
+
+  it('空输入 → 空数组', () => {
+    expect(projectKnownWorkspaces([], ['/home'])).toEqual([])
   })
 })
 
