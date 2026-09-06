@@ -1,7 +1,7 @@
 # SESSION Binding Persistence & Switch Guard — Final Implementation Plan (v1.0)
 
 > SESSION: S142 (2026-09-05)
-> Status: **FINAL — awaiting user approval before implementation**
+> Status: **APPROVED 2026-09-05 — implemented (commit `feat(session-bound)`), release pending D14**
 > Companion research: `docs/session-binding-hardening-research.md` (mechanism evidence)
 
 ---
