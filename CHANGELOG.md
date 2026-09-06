@@ -1,3 +1,25 @@
+## v1.29.2 — 2026-09-06（rebuild 任务焦点传递 + autopilot bound 优先唤起，S142 用户两项修正）——代码完成，发版待 D14
+
+**Scope:** 用户两项修正——① session_rebuild 应能传递简短任务焦点文字到重建后会话（不含历史——历史完整在 SESSION.md）② autopilot-trajectory 会话绑定更稳固（唤起时能唤起最新的、绑定 autopilot SESSION 的会话）。方案 `docs/rebuild-focus-note-and-autopilot-bound-wake.md`。
+
+### ① rebuild 任务焦点传递（R1：note 参数从丢弃 → 注入锚点）
+- `src/rebuild.ts`：`buildRebuildAnchor` 加可选 `focus` 段——`- Task focus: {focus}` 置于锚点尾部（SESSION.md path 行后）；`sanitizeFocusLine` 纯函数（**单行化**换行/回车/制表→空格 + 控制字符清除 + **≤200 字截断**——防 LLM 传多行注入伪造锚点结构）；`queueRebuild` 去 `void note`（原半成品接线——note 参数曾设计但被显式丢弃）→ 透传 pending.focus + 锚点
+- `src/tools/rebuild.ts`：note 参数 description 升级（"task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as '- Task focus: …'"）
+- **语义**：note 是给重建后自己的**任务焦点**（非历史）——锚点已有 SESSION.md 路径让模型读历史；focus 让它在读前后第一时间知道本轮做什么，降低重建后冷启动认知成本
+- 无 focus → 锚点零变化（向后兼容）；空/纯空白 → 不输出 focus 段
+
+### ② autopilot bound 优先唤起定位（R2：标题猜测 → 权威绑定）
+- **gap 实证**：`resolveTargetAgent` 旧实现只按标题猜（=== sid / startsWith(sid-)）——若绑定该 autopilot SESSION（`--auto` 目录，如 S151）的 dsh 会话标题不是 `S###-` 前缀（LLM 改过/rebuild 后 rename 异常），绑定明明在（v1.29.1 `serenity/bound` 事件）却唤起失败
+- `src/autopilot-trajectory.ts` `resolveTargetAgent` 重写：**bound.dirName 精确匹配优先**（权威证据，编码无关 U4）→ 标题匹配降级回退（存量无 bound 会话兼容）→ 多候选取 **bound.at 最新**（最近 use = 最可能当前在用）；agent 不可得继续返回 null
+- `diagnoseTargetUnavailable` 同步：bound/标题命中但 agent 未加载统一提示"会话已绑定/匹配 … 但 agent 未加载"（原只查标题）；import `readLastBound`
+
+### 测试
+- **60 files / 879 tests 全绿**（871 + 8 净增：rebuild.test R1 4 用例——buildRebuildAnchor focus 段/无 focus 兼容/sanitizeFocusLine 消毒/queueRebuild note 透传 + autopilot-trajectory.test R2 4 用例——bound 命中即使标题不匹配/标题回退兼容/多候选取最新 bound.at/诊断文案更新 1）；typecheck ✓（node + client）；build ✓
+
+### 发布链（待 D14）
+- bump v1.29.2（三处一致）→ test/build → publish npm → github-push 三推 → deploy → restart-web → 本地安装
+
+
 ## v1.29.1 — 2026-09-05（SESSION 绑定持久化 + 切换守卫，S142 用户拍板 v1.0）
 
 **Scope:** 用户需求——「会话和 SESSION 的绑定更坚固，避免 LLM 在过程中或 session_rebuild 后因智力因素自行更换 SESSION」+「能持久化更可靠」。调研实证 DSH `SessionEventMap` merge-extensible（compaction 先例）→ 绑定可做成**持久化会话事件**，零改 harness。用户裁决 U1-U8（含编码无关 U4：不假设 S###）。方案 `docs/session-binding-persist-plan.md` v1.0。

@@ -642,6 +642,128 @@ describe('performAutopilotWake（时钟与「立即唤起」共用执行体）',
     expect(steer).not.toHaveBeenCalled()
   })
 
+  // ── v1.29.2（R2）：autopilot 唤起 bound 优先定位（serenity/bound 权威绑定）──
+
+  function makeBoundCtx(sessions: Array<{ id: string; cwd?: string; events?: unknown[] }>): unknown {
+    return {
+      sessions: {
+        list: () => sessions.map((s) => ({ id: s.id, header: s.cwd ? { cwd: s.cwd } : {}, events: s.events ?? [] })),
+      },
+      agents: { get: (id: string) => (sessions.some((s) => s.id === id) ? { steer } : undefined) },
+    }
+  }
+
+  it('bound 精确匹配（dirName=目标 autopilot 目录）→ 命中，即使标题不匹配（R2 核心）', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    // 目标 autopilot 会话 2026-08-30--S143--exp--auto 被 use 绑定 → events 有 serenity/bound；
+    // 标题是别的（LLM 改过/rename 异常）——旧实现按标题会漏，bound 优先命中
+    const ctx = makeBoundCtx([
+      {
+        id: 'sess-bound',
+        cwd: tmp,
+        events: [
+          { type: 'session/title', data: { title: '某随机标题-not-S143' } },
+          {
+            type: 'serenity/bound',
+            data: { dirName: '2026-08-30--S143--exp--auto', mdPath: setupTarget(0), sessionId: 'S143', action: 'activate', at: Date.now() },
+          },
+        ],
+      },
+    ])
+    const res = await performAutopilotWake(ctx as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(true)
+    expect(steer).toHaveBeenCalledTimes(1)
+    const msg = steer.mock.calls[0]![0] as { content: { text: string }[] }
+    expect(msg.content[0]!.text).toContain('[Autopilot Trajectory · 唤起]')
+  })
+
+  it('无 bound + 标题 S### 匹配 → 标题回退命中（存量兼容）', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    const ctx = makeBoundCtx([
+      {
+        id: 'sess-title',
+        cwd: tmp,
+        events: [{ type: 'session/title', data: { title: 'S143-2026-08-30' } }],
+      },
+    ])
+    const res = await performAutopilotWake(ctx as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(true)
+    expect(steer).toHaveBeenCalledTimes(1)
+  })
+
+  it('多会话命中（bound 不同时点）→ 取绑定最新（bound.at 最大）', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    const md = setupTarget(0)
+    const agentGetIds: string[] = []
+    // 两个 live 会话都绑定了目标 autopilot SESSION——旧 at（较早 use）在前，新 at 在后
+    const ctx = {
+      sessions: {
+        list: () => [
+          {
+            id: 'sess-old',
+            header: { cwd: tmp },
+            events: [
+              {
+                type: 'serenity/bound',
+                data: { dirName: '2026-08-30--S143--exp--auto', mdPath: md, sessionId: 'S143', action: 'activate', at: 1000 },
+              },
+            ],
+          },
+          {
+            id: 'sess-new',
+            header: { cwd: tmp },
+            events: [
+              {
+                type: 'serenity/bound',
+                data: { dirName: '2026-08-30--S143--exp--auto', mdPath: md, sessionId: 'S143', action: 'switch', at: 999999 },
+              },
+            ],
+          },
+        ],
+      },
+      agents: {
+        get: (id: string) => {
+          agentGetIds.push(id)
+          return { steer } // 两个都有 agent——排序后应先查 sess-new（bound.at 更大）
+        },
+      },
+    }
+    const res = await performAutopilotWake(ctx as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(true)
+    expect(steer).toHaveBeenCalledTimes(1)
+    // 排序验证：先查 sess-new（bound.at 999999 > 1000 = 最近 use 优先）
+    expect(agentGetIds[0]).toBe('sess-new')
+  })
+
+  it('bound 命中但 agent 未加载 → 诊断提示（非静默失败）', async () => {
+    setupTarget(0)
+    writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
+    const ctx = {
+      sessions: {
+        list: () => [
+          {
+            id: 'sess-noagent',
+            header: { cwd: tmp },
+            events: [
+              {
+                type: 'serenity/bound',
+                data: { dirName: '2026-08-30--S143--exp--auto', mdPath: setupTarget(0), sessionId: 'S143', action: 'activate', at: Date.now() },
+              },
+            ],
+          },
+        ],
+      },
+      agents: { get: () => undefined }, // 已绑定但 agent 未加载
+    }
+    const res = await performAutopilotWake(ctx as never, tmp, cfg, { force: true })
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('agent 不可得')
+    expect(steer).not.toHaveBeenCalled()
+  })
+
   it('标题从 events 的 session/title 事件读取（latest-wins）', async () => {
     setupTarget(0)
     writeFileSync(join(tmp, 'bias.js'), 'console.log("x")')
@@ -717,7 +839,7 @@ describe('performAutopilotWake（时钟与「立即唤起」共用执行体）',
       agents: { get: () => undefined },
     }
     const r3 = await performAutopilotWake(noAgent as never, tmp, cfg, { force: true })
-    expect(r3.detail).toContain('已打开但 agent 未加载')
+    expect(r3.detail).toContain('已绑定/匹配 S143 但 agent 未加载')
   })
 })
 

@@ -74,16 +74,20 @@ export function stripAckSuffix(text: string): string {
 /**
  * 构建重建锚点消息（v1.22.4 定稿语义 + v1.22.5 保留 first-anchor 正文）：
  * 「[TRAJECTORY-REBUILD] + first-anchor 协议正文（去 acknowledge 尾句）+ 继续 {SESSION 名} 的工作」。
+ * v1.29.2（R1）：可选 task focus 段——简短任务焦点文字传入重建后会话（不含历史，
+ * 历史完整在 SESSION.md；让重建后的自己第一时间理解本轮焦点，降低冷启动认知成本）。
  * @param root - CCC 根
  * @param sessionName - 当前 use 的宁静号 SESSION 名（如 S142）；无激活则通用指令
  * @param activeMdPath - 持久轨迹 SESSION.md 绝对路径（保持原位）
  * @param anchorMessages - first-anchor 协议消息序列（缺省 DEFAULT_ANCHOR_MESSAGES；可注入测试）
+ * @param focus - 可选任务焦点（单行化 + ≤200 字消毒；无则不输出 focus 段——向后兼容）
  */
 export function buildRebuildAnchor(
   root: string,
   sessionName: string,
   activeMdPath: string,
   anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
+  focus?: string | null,
 ): string {
   const rel = activeMdPath.startsWith(root) ? activeMdPath.slice(root.length + 1) : activeMdPath
   // 会话目录名 = SESSION.md 的父目录 basename（可含空格，如 "…--S142--dsh-serenity-plugin 长期维护"）
@@ -92,6 +96,7 @@ export function buildRebuildAnchor(
     sessionDir !== 'AGENT_SESSIONS'
       ? `- Serenity session: ${sessionName !== '' ? `${sessionName} (${sessionDir})` : sessionDir}`
       : null
+  const focusLine = sanitizeFocusLine(focus)
   const lines = [
     `${eventToken('rebuild')} The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the trajectory continues).`,
     '',
@@ -103,9 +108,30 @@ export function buildRebuildAnchor(
     `- Persistent trajectory — SESSION.md path: ${rel}`,
     `  (the trajectory's persistent body — stays in place through rebuilds)`,
     `- Read that SESSION.md first (goal/decisions/progress/unresolved), then continue from the last checkpoint.`,
+    // v1.29.2（R1）：任务焦点——重建后会话理解当前任务（无历史；SESSION.md 含完整历史）
+    ...(focusLine ? [`- Task focus: ${focusLine}`] : []),
   ]
   return lines.join('\n')
 }
+
+/**
+ * 任务焦点行消毒（纯函数可单测）：单行化（换行/回车 → 空格）+ 控制字符清除 +
+ * ≤200 字截断。空/纯空白 → null（不输出 focus 段）。防 LLM 传多行注入伪造锚点结构。
+ */
+export function sanitizeFocusLine(focus: string | null | undefined): string | null {
+  if (!focus) return null
+  const single = focus
+    // 换行/回车/制表 → 空格（防注入额外锚点行）
+    .replace(/[\r\n\t]+/g, ' ')
+    // 其余控制字符清除（保留可见文本）
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim()
+  if (single === '') return null
+  return single.length <= FOCUS_MAX_CHARS ? single : single.slice(0, FOCUS_MAX_CHARS)
+}
+
+/** 任务焦点最大长度（字/码点；200 足够一句话任务焦点——非历史） */
+const FOCUS_MAX_CHARS = 200
 
 export interface RebuildResult {
   /** 是否成功排队（turn 结束时执行清空重建） */
@@ -176,6 +202,8 @@ interface PendingRebuild {
   summary: string
   /** 持久轨迹 SESSION.md（重建后重命名标题的编号/日期来源） */
   mdPath: string
+  /** v1.29.2（R1）：任务焦点（可选——重建后会话理解当前任务；不含历史） */
+  focus?: string
   /** 排队时间（防陈旧队列误清空——超时丢弃） */
   queuedAt: number
 }
@@ -257,7 +285,9 @@ export async function queueRebuild(
     )
   }
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)
-  const anchor = buildRebuildAnchor(root, sessionName, mdPath)
+  // v1.29.2（R1）：note → 任务焦点（单行化+截断在 buildRebuildAnchor/sanitizeFocusLine 内做）
+  const focus = note && note.trim() !== '' ? note : undefined
+  const anchor = buildRebuildAnchor(root, sessionName, mdPath, DEFAULT_ANCHOR_MESSAGES, focus)
 
   // U1（方案 v1.0）：rebuild 排队时持久化绑定（action: rebuild）——权威绑定随会话日志
   // 存续跨 rebuild（同一 dsh 会话 id 日志保留）；post-rebuild 恢复读 last bound 即此记录。
@@ -266,9 +296,8 @@ export async function queueRebuild(
   appendBound(session, 'rebuild', boundRec)
 
   // ③ 排队（覆盖同会话旧队列）——需求②：存 summary + mdPath（turn-stopping 重建后重命名标题）
-  pendingRebuilds.set(dshSessionId, { anchor, summary, mdPath, queuedAt: Date.now() })
+  pendingRebuilds.set(dshSessionId, { anchor, summary, mdPath, focus, queuedAt: Date.now() })
   writeRebuildDiag(root, { sessionId: dshSessionId, event: 'queued' })
-  void note
   return { queued: true, anchor, sessionMdPath: mdPath }
 }
 

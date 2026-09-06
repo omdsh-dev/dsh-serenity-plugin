@@ -48,7 +48,7 @@ export function createRebuildTool(ctx: Context): ReturnType<typeof defineTool> {
       'from it. Use when you receive a ' + eventToken('limit') + ' reminder (context above threshold), ' +
       'at a natural pause point. After triggering, resume from SESSION.md when this turn ends.',
     parameters: {
-      note: { type: 'string', description: 'Optional: one-sentence rebuild background note (for the rebuilt self)' },
+      note: { type: 'string', description: 'Optional: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
       summary: { type: 'string', description: 'REQUIRED: content summary ≤20 chars of the next work phase — the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after the rebuild (the rebuilt phase gets a fresh summary); sanitized/truncated server-side' },
     },
     output: {

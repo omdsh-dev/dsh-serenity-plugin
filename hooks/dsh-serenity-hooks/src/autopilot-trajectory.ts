@@ -35,6 +35,7 @@ import { basename, dirname, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutopilotTrajectorySettings } from './ccc.js'
 import { findSession, sessionsRoot, sessionEvents } from './session-ops.js'
+import { readLastBound } from './session-bound.js'
 import { readSimpleSettings } from './settings-section.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
@@ -395,32 +396,60 @@ export function registerAutopilot(ctx: Context): void {
   }
 }
 
-/** 目标 agent：从 SESSION.md 反向定位 dsh 会话（标题 F3 命名 S###-日期 匹配 + cwd 归属校验）；不可得 → null */
+/**
+ * 目标 agent：从 SESSION.md 反向定位 dsh 会话（cwd 归属校验 + **bound 精确匹配优先**，
+ * 标题 F3 命名回退）；不可得 → null。
+ *
+ * v1.29.2（R2，用户"autopilot 会话绑定应当更稳固——唤起的时候能唤起最新的、
+ * 绑定 autopilot SESSION 的会话"）：v1.29.1 `serenity/bound` 事件是权威绑定
+ * （session use 激活时 append，dirName = 完整 AGENT_SESSIONS 目录名，编码无关 U4）。
+ * 旧实现只按标题猜（=== sid / startsWith(sid-)）——若绑定该 SESSION 的 dsh 会话
+ * 标题不是 S###- 前缀（LLM 改过/重建后 rename 异常），绑定明明在却唤起失败。
+ * 加强：**bound.dirName 精确匹配优先**（权威证据），标题匹配降级为回退（存量
+ * 无 bound 的 live 会话兼容）；多候选（罕见：同 SESSION 绑定多个 live 会话）取
+ * **绑定最新**（bound.at 最大——最近 use 过 = 最可能当前在用）。
+ */
 function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
   const dirName = basename(dirname(mdPath))
   const idMatch = dirName.match(/--S(\d{3,})--/)
   const sid = idMatch ? `S${idMatch[1]}` : null
   const targetRoot = findSerenityRoot(mdPath)
+  const sessions = (ctx as unknown as { sessions?: { list?: () => Array<unknown> } }).sessions
+  const agents = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents
+  // 候选池：{ session, boundAt|null, titleMatched } —— bound 命中优先，其次标题命中
+  type Candidate = { session: { id?: string }; boundAt: number | null; titleMatched: boolean }
+  const candidates: Candidate[] = []
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ id?: string; header?: { cwd?: string } }> } }).sessions
     for (const s of sessions?.list?.() ?? []) {
+      const sess = s as { id?: string; header?: { cwd?: string } }
       // cwd 归属校验：同实例多 CCC 时不误匹配（只找目标 SESSION 所在 CCC 的会话）。
-      // targetRoot 可解析（CCC 环境）→ 会话 CCC 根必须一致；不可解析（非 CCC/测试）→
-      // 会话 cwd 必须是 mdPath 的祖先路径（覆盖 AGENT_SESSIONS 挂载场景）。
-      const cwd = s?.header?.cwd ?? ''
+      const cwd = sess?.header?.cwd ?? ''
       if (targetRoot) {
         if (findSerenityRoot(cwd) !== targetRoot) continue
       } else if (cwd !== '' && !mdPath.startsWith(cwd.endsWith('/') ? cwd : cwd + '/')) {
         continue
       }
-      const title = readSessionTitle(s)
-      if (sid && title && (title === sid || title.startsWith(`${sid}-`))) {
-        const agent = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(s.id ?? '')
-        if (agent) return agent
-      }
+      const bound = readLastBound(sess)
+      const title = readSessionTitle(sess)
+      const boundMatched = bound !== null && bound.dirName === dirName
+      const titleMatched = sid !== null && title !== null && (title === sid || title.startsWith(`${sid}-`))
+      if (boundMatched) candidates.push({ session: sess, boundAt: bound?.at ?? null, titleMatched })
+      else if (titleMatched) candidates.push({ session: sess, boundAt: null, titleMatched })
     }
   } catch {
     /* 遍历失败忽略 */
+  }
+  if (candidates.length === 0) return null
+  // bound 候选优先于纯标题候选；同类内取绑定/标题最新（bound.at 大者 = 最近 use）
+  candidates.sort((a, b) => {
+    const aBound = a.boundAt !== null
+    const bBound = b.boundAt !== null
+    if (aBound !== bBound) return aBound ? -1 : 1
+    return (b.boundAt ?? 0) - (a.boundAt ?? 0)
+  })
+  for (const c of candidates) {
+    const agent = agents?.get?.(c.session.id ?? '')
+    if (agent) return agent
   }
   return null
 }
@@ -447,7 +476,9 @@ function readSessionTitle(session: unknown): string | null {
 
 /**
  * 诊断：目标会话 agent 为何不可得（供 performAutopilotWake 失败信息——
- * 区分"live 会话里无匹配" vs "匹配但 agent 未加载"）。返回诊断文本（无则 null）。
+ * 区分"无 live 会话" / "标题不匹配" / "bound 或标题命中但 agent 未加载"）。
+ * v1.29.2（R2）：bound 命中但 agent 未加载也归入「已匹配未加载」（原只查标题）。
+ * 返回诊断文本（无则 null）。
  */
 function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null {
   const dirName = basename(dirname(mdPath))
@@ -455,31 +486,35 @@ function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null 
   const sid = idMatch ? `S${idMatch[1]}` : null
   const targetRoot = findSerenityRoot(mdPath)
   const sameCccTitles: string[] = []
-  const agentMissing = { sid: false }
+  const agentMissing = { matched: false }
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ id?: string; header?: { cwd?: string } }> } }).sessions
+    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<unknown> } }).sessions
     for (const s of sessions?.list?.() ?? []) {
-      const cwd = s?.header?.cwd ?? ''
+      const sess = s as { id?: string; header?: { cwd?: string } }
+      const cwd = sess?.header?.cwd ?? ''
       if (targetRoot) {
         if (findSerenityRoot(cwd) !== targetRoot) continue
       } else if (cwd !== '' && !mdPath.startsWith(cwd.endsWith('/') ? cwd : cwd + '/')) {
         continue
       }
-      const title = readSessionTitle(s)
+      const bound = readLastBound(sess)
+      const title = readSessionTitle(sess)
       if (title) sameCccTitles.push(title)
-      if (sid && title && (title === sid || title.startsWith(`${sid}-`))) {
-        const agent = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(s.id ?? '')
-        if (!agent) agentMissing.sid = true
+      const boundMatched = bound !== null && bound.dirName === dirName
+      const titleMatched = sid !== null && title !== null && (title === sid || title.startsWith(`${sid}-`))
+      if (boundMatched || titleMatched) {
+        const agent = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(sess.id ?? '')
+        if (!agent) agentMissing.matched = true
       }
     }
   } catch {
     /* 遍历失败忽略 */
   }
-  if (agentMissing.sid) return `会话 ${sid} 已打开但 agent 未加载（会话可能刚创建/正在恢复——稍后重试）`
+  if (agentMissing.matched) return `会话已绑定/匹配 ${sid ?? dirName} 但 agent 未加载（会话可能刚创建/正在恢复——稍后重试）`
   if (sameCccTitles.length > 0) {
-    return `目标 CCC 内 live 会话标题: [${sameCccTitles.join(', ')}]——均不匹配 ${sid}（目标会话未在 WebUI 打开，或命名未生效）`
+    return `目标 CCC 内 live 会话标题: [${sameCccTitles.join(', ')}]——均不匹配 ${sid ?? dirName}（目标会话未在 WebUI 打开，或绑定/命名未生效）`
   }
-  return `目标 CCC 内无 live 会话（先在 WebUI 打开 ${sid} 会话后重试）`
+  return `目标 CCC 内无 live 会话（先在 WebUI 打开 ${sid ?? dirName} 会话后重试）`
 }
 
 /** Autopilot 绑定的回退 CCC 根：进程 cwd 上溯 .serenity 优先，回退任一 live 会话 root */
