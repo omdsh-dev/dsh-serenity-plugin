@@ -1,42 +1,38 @@
 ---
 name: acc-git
-description: CCC 内 git 操作工具（cc-git 语义，DSH 版）。status/commit/push/log，非快进推送自动输出操作建议。pull/merge/rebase/冲突解决走 bash（不 Mech 化）。
+description: 容器 git 知识映射（v1.30：cc_git → container_git）。status/commit/push/log/pull/diff 六子命令，非快进推送自动输出建议。pull/merge/rebase/冲突解决走 bash（不 Mech 化）。localstore git 合规联动。
 ---
 
-# Skill: acc-git — git 操作（cc-git 语义）
+# Skill: acc-git — 容器 git 操作（container_git 知识映射）
+
+> **v1.30.0 工具面重构**：`cc_git` → **`container_git`**（硬切无别名）。本技能是知识映射——真实工具由 Native Cordis 插件进程内注册（`container_git`），scripts/ 已退役为空目录。
 
 ## 用途
 
 在 CCC 根内执行高频 git 操作，输出可审计。与 DSH bash 中的裸 git 相比：路径钉在 CCC 根、push 带非快进保护建议。
 
-## 操作协议
+## 调用
 
-```bash
-bun "<skill 基目录>/scripts/cc-git.ts" <subcommand> [args...]
+```json
+container_git { action: "<subcommand>", message: "<msg>", count: <n> }
 ```
 
-| 子命令 | 参数 | 说明 |
-|--------|------|------|
-| `status` | — | `git status --porcelain`（透传输出） |
-| `commit` | `-m <msg>` | `git add -A` + `git commit -m`（无改动时输出提示） |
-| `push` | — | `git push origin HEAD`；非快进被拒时输出操作建议（不自动 force） |
-| `log` | `[-n <count>]` | `git log --oneline`（默认 10 条） |
-
-## 退出码
-
-| 码 | 含义 |
-|----|------|
-| 0 | 成功 |
-| 1 | user 错误（缺参数 / commit 无消息） |
-| 2 | system 错误（非 git 仓库 / git 命令失败 / push 被拒） |
+| 子命令 | 说明 |
+|--------|------|
+| `status` | `git status --porcelain`（透传输出） |
+| `commit` | `git add -A` + `git commit -m`（无改动时输出提示） |
+| `push` | `git push`；非快进被拒时输出操作建议（不自动 force） |
+| `log` | `git log --oneline`（默认 10 条，max 100） |
+| `pull` | 拉取远程变更 |
+| `diff` | 查看工作区/暂存区/ref 差异 |
 
 ## 不 Mech 化的操作（与 ACC 标准一致）
 
-`pull` / `merge` / `rebase` / 冲突解决 → 走 bash（需要人工判断与交互），不封装。
+`merge` / `rebase` / 冲突解决 → 走 bash（需要人工判断与交互），不封装。
 
 ## push 非快进建议
 
-push 被拒（non-fast-forward）时，本工具输出建议并退出 2，**绝不自动 force**：
+push 被拒（non-fast-forward）时，本工具输出建议并拒绝，**绝不自动 force**：
 
 ```
 push rejected (non-fast-forward)

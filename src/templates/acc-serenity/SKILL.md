@@ -1,6 +1,6 @@
 ---
 name: acc-serenity
-description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供真实工具 + 拦截缝机械守卫）与协作纪律（EAP/Neat/会话追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
+description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供 10 真实工具 container_fs/container_git/container_admin/msm/praxis/logbook/dashboard/handyman/localstore/autopilot-trajectory + 拦截缝机械守卫，v1.30 命名体系）与协作纪律（EAP/Neat/会话追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
 ---
 
 # Skill: acc-serenity — 宁静号 ACC Harness（DSH 运行时）
@@ -13,8 +13,9 @@ description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/C
 ```
 名称: dsh-serenity-plugin (ACC, DSH 运行时)
 宿主: DeepSeek Harness (DSH)
-标准: 仿照 opencode-serenity-plugin (v0.8.5) 的 ACC 语义，独立实现（不复用源码）
-仓库: dsh-serenity-plugin (remote: github.com/dsh-external/dsh-serenity-plugin.git)
+标准: 仿照 opencode-serenity-plugin 的 ACC 语义，独立实现（不复用源码）
+版本: v1.30.0（npm @shgroup/dsh-serenity-hooks）
+发布: GitHub tellmewhattodo/dsh-serenity-plugin + npm registry
 ```
 
 **ACC/CCC 模型**（与 opencode 插件一致）：
@@ -35,41 +36,53 @@ description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/C
 3. 路径边界（P3 权限二分）：**根内完整权限，根外零权限**——DSH 由 fs 沙箱（workspace-write 模式）原生执行，无需自行实现
 
 激活后你会获得：
-- `acc_kit health` 三原则检查（.serenity / git / 配置）——通过 `bun scripts/acc-kit.ts health` 或等价 runner 调用
+- `dashboard health` 三原则检查（.serenity / git / 配置 + registry 完整性）
 - 本技能 + 其余 acc-* 技能的操作协议
 
-## 工具与约束（v1.x：Native Cordis 插件形态）
+## 工具与约束（v1.30：Native Cordis 插件，10 工具）
 
 ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native Cordis 插件）提供：真实 DSH 工具经 `ctx.tools.register` 进程内注册；约束由拦截缝机械执行（模型不可绕过）。本技能只承载知识（EAP/Neat/纪律）。
 
-| ACC 标准（opencode 插件） | DSH harness 实现（插件） | 性质 |
+**v1.30.0 工具面重构（13 → 10，硬切无别名）**——以下为本会话实际可用的 10 工具：
+
+| 工具 | 能力 | 隐喻 |
+|------|------|------|
+| `container_fs` | 容器文件系统（15 子命令，路径逃逸阻断） | The Hull |
+| `container_git` | CCC git 操作（status/commit/push/log） | The Hull |
+| `container_admin` | 容器管理（机务舱）：role（Skiff 角色）/ msm（注册表管理）/ config | The Manifest + Crew |
+| `msm` | MSM **单入口执行+发现**：`msm(name, args)` / 未命中候选 / `inspect:true` 查用法 / 无参目录 | The Machinery |
+| `praxis` | 可实践理论注入（section: eap/neat/cce） | Engineering Drawings |
+| `logbook` | 工作会话全周期 + rebuild（The Logbook） | The Logbook / Theseus |
+| `dashboard` | 普适仪表：health（三原则 + registry）/ time / wait | 舰桥仪表盘 |
+| `handyman` | 杂工编排（白名单模型 worker 循环） | Crew Rotation |
+| `localstore` | 凭据/配置存储（CCC 根 localstore.json） | 保留 |
+| `autopilot-trajectory` | Autopilot 一站式管理 | 保留 |
+
+**改名对照（旧 → 新，硬切无别名）**：`cc_fs`→`container_fs` / `cc_git`→`container_git` / `acc_msm`（执行面）→`msm`、`acc_msm`（管理面）→`container_admin msm` / `skiff_admin`→`container_admin role` / `session`→`logbook` / `session_rebuild`→`logbook rebuild` / `acc_kit`→`dashboard` / `eap`·`neat`·`cce` 三合一→`praxis`。旧工具名不再注册。
+
+| 机制 | DSH harness 实现（插件） | 性质 |
 |---|---|---|
-| `cc_fs`（文件系统，路径守卫） | **`cc_fs` 真实 DSH 工具**（14 子命令，进程内） | 机械 |
-| `cc_git` | **`cc_git` 真实 DSH 工具**（status/commit/push/log + 非快进建议） | 机械 |
-| `msm_list/exec/admin` | **`acc_msm` 真实 DSH 工具**（list/exec/register/deregister/check） | 机械 |
-| `session` + session-keeper | **`session` 真实 DSH 工具**（AGENT_SESSIONS 全周期）+ post-execute DCP 提醒 | 机械 |
-| `acc_kit`（health/time/wait） | **`acc_kit` 真实 DSH 工具** | 机械 |
+| 10 真实工具 | `container_fs`/`logbook`/`dashboard`/`container_git`/`msm`/`praxis`/`handyman`/`localstore`/`container_admin`/`autopilot-trajectory`（进程内） | 机械 |
 | 路径守卫 / 安全模式 / 黑名单 | `tools/pre-execute` + `ctx.tools.guard`（.serenity-safe-on 标记 + serenity.json 黑名单） | 机械 |
 | 系统提示注入 / Phase 2 | `agent/session-start` + `agent/prompt-submit`（ACC 身份播种） | 机械 |
 | 会话压缩保留 / loop / resident | DSH compact-basic / goal / 后台 subagent（原生超集） | 平台 |
-| `eap` / `neat` | `acc-eap` / `acc-neat` 知识技能（渐进式披露） | 知识 |
+| 知识框架 | `praxis`（eap/neat/cce 三合一，单工具注入） | 知识 |
 
-> 工具技能模板（acc-fs/session/msm/git/kit/safe-mode 的 SKILL.md）已被插件工具取代，仅作 fallback。
-> 若插件未加载（无 cc_fs 等工具），可降级用 fallback 模板的脚本。
+> 旧工具技能模板（acc-fs/acc-git/acc-msm/acc-kit/acc-session/acc-safe-mode 的 SKILL.md）已被插件 10 工具取代——本套 acc-* 文件现为**知识映射**（说明该领域由哪个工具提供），scripts/ 已退役为空目录。
 
 ## 协作纪律（强制）
 
 ### EAP 认知质量框架
-每次输出前自检：变量/实体明确定义（E↑）、关系指明方向/基数（E↑）、边界划定、不用歧义词汇（"处理""优化"→具体化）、不跳级讨论。
+每次输出前自检：变量/实体明确定义（E↑）、关系指明方向/基数（E↑）、边界划定、不用歧义词汇（"处理""优化"→具体化）、不跳级讨论。注入：`praxis eap`。
 
 ### Neat 协议（设计/需求对齐）
-小步对齐、显式决策、文档驱动、不跳级：需求层 → 范围层 → 方案层 → 接口层 → 实现层。
+小步对齐、显式决策、文档驱动、不跳级：需求层 → 范围层 → 方案层 → 接口层 → 实现层。注入：`praxis neat`。
 
 ### 会话追踪（AGENT_SESSIONS/）
-多步骤工作（3 步以上）**必须**先创建会话：`AGENT_SESSIONS/YYYY-MM-DD--S###--<desc>/SESSION.md`，记录目标、决策、进度；关闭时记录未解决问题。
+多步骤工作（3 步以上）**必须**先创建会话：`logbook create` → `AGENT_SESSIONS/YYYY-MM-DD--S###--<desc>/SESSION.md`，记录目标、决策、进度；关闭时记录未解决问题。
 
 ### SSH 操作规范（强制）
-涉及远程服务器时**禁止裸 `ssh user@ip`**，必须走 `ssh-connect`（或家庭既定通道），优先主机别名（router/ha/pve/ubuntu/gitlab/nas/openclaw/dengdeng/windows/experimenter/ykn-nas）。
+涉及远程服务器时**禁止裸 `ssh user@ip`**，必须走 `ssh-connect`（或家庭既定通道），优先主机别名（router/ha/pve/ubuntu/gitlab/nas/dengdeng/windows/experimenter/ykn-nas）。
 
 ### 命名规范
 技能目录 `home-<领域>` 或 `<通用名>` 小写连词符；会话目录 `YYYY-MM-DD--S###--<desc>`；设计文档 `<subject>-<scope>-<type>.md`。
@@ -79,17 +92,33 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | 任务 | 使用 |
 |------|------|
 | 进入 CCC / 系统自描述 | 本技能（acc-serenity） |
-| 文件系统操作（tree/info/find/resolve） | `cc_fs` 工具 |
-| git 操作（status/commit/push/log） | `cc_git` 工具 |
-| 执行/注册 MSM | `acc_msm` 工具 |
-| 会话创建/追踪/归档 | `session` 工具 |
-| 认知质量自检 | 加载 `acc-eap` |
-| 设计协作 | 加载 `acc-neat` |
-| 健康检查/时间/等待 | `acc_kit` 工具 |
+| 文件系统操作（tree/info/find/resolve） | `container_fs` 工具 |
+| git 操作（status/commit/push/log） | `container_git` 工具 |
+| 执行 MSM / 发现 | `msm` 工具（`msm()` 目录 / `msm("<name>")` 执行 / `inspect:true` 查用法） |
+| 管理 MSM 注册表 / Skiff 角色 / CCC 配置 | `container_admin` 工具（domain: role/msm/config） |
+| 会话创建/追踪/归档/重建 | `logbook` 工具 |
+| 认知质量自检 / 设计协作 / 连续性理论 | `praxis` 工具（section: eap/neat/cce） |
+| 健康检查/时间/等待 | `dashboard` 工具 |
 | 远程服务器操作 | home-* 领域技能 + ssh-connect |
+
+## 安装与更新
+
+本 ACC 插件通过 npm 公开分发（当前 v1.30.0）：
+
+```bash
+# 安装 / 更新（DSH profile 级）
+dsh plugin --profile web add @shgroup/dsh-serenity-hooks
+# 卸载
+dsh plugin --profile web remove @shgroup/dsh-serenity-hooks
+```
+
+- **npm**：`@shgroup/dsh-serenity-hooks`（maintainer shgroup，MIT，README 完整）
+- **源码**：https://github.com/tellmewhattodo/dsh-serenity-plugin
+- 安装后重启 dsh web；新会话自动获得 10 工具 + 系统提示词注入 + WebUI 状态徽章
+- 插件开发维护视角（架构/决策/发布流程）见 `dsh-serenity-plugin-development` skill
 
 ## 参考
 
-- ACC 标准源头：`AI_LAB/opencode-serenity-plugin/`（opencode 运行时）
+- ACC 标准源头：`serenity-plugin-development` skill（opencode 运行时，osp 侧）
 - 本实现（Native 插件）：`AI_LAB/dsh-serenity-plugin/hooks/dsh-serenity-hooks/`（DSH 运行时）
 - 宿主系统：`home-serenity` CCC 的 `.opencode/skills/home-serenity/SKILL.md`

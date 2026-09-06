@@ -1,9 +1,11 @@
 ---
 name: acc-neat
-description: Neat 设计协作协议（neat 语义，DSH 版）。小步对齐、显式决策、文档驱动、不跳级（需求→范围→方案→接口→实现）。复杂设计的每一步可追溯。
+description: Neat 设计协作协议（v1.30：知识注入走 praxis neat）。小步对齐、显式决策、文档驱动、不跳级（需求→范围→方案→接口→实现）。复杂设计的每一步可追溯。
 ---
 
 # Skill: acc-neat — Neat 设计协作协议
+
+> **v1.30.0 工具面重构**：eap/neat/cce 三合一 → **`praxis`**（可实践理论注入，section: eap/neat/cce）。本技能为知识内容（praxis neat 注入同一协议）；真实工具由 Native Cordis 插件进程内注册（`praxis`）。
 
 > Neat 是宁静号的设计协作协议：**复杂设计不是一次想出来的，是小步对齐走出来的。**
 
@@ -34,6 +36,12 @@ description: Neat 设计协作协议（neat 语义，DSH 版）。小步对齐�
 | 接口层 | 接口/协议定义 | "边界怎么交互？" |
 | 实现层 | 代码/文档 | "逐层落地" |
 
+## 调用
+
+```json
+praxis { section: "neat" }   // 注入 Neat 协议全文
+```
+
 ## 协作节奏
 
 1. 提出当前层的一个决策点（带上下文 + 建议 + 理由）
@@ -49,5 +57,5 @@ description: Neat 设计协作协议（neat 语义，DSH 版）。小步对齐�
 
 ## 参考
 
-- 会话追踪：`acc-session` 技能（决策记录到 SESSION.md）
+- 会话追踪：`acc-session` 技能（决策记录到 SESSION.md → logbook）
 - 宿主系统入口：`acc-serenity` 技能

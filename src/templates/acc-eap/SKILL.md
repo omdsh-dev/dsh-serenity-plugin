@@ -1,9 +1,11 @@
 ---
 name: acc-eap
-description: EAP 认知质量框架（eap 语义，DSH 版）。定义认知产物质量标准：E↑ 显式度 / R↓ 重建成本 / S↑ 稳定性。每次输出前的自检清单。
+description: EAP 认知质量框架（v1.30：知识注入走 praxis eap）。定义认知产物质量标准：E↑ 显式度 / R↓ 重建成本 / S↑ 稳定性。每次输出前的自检清单。
 ---
 
 # Skill: acc-eap — EAP 认知质量框架
+
+> **v1.30.0 工具面重构**：eap/neat/cce 三合一 → **`praxis`**（可实践理论注入，section: eap/neat/cce）。本技能为知识内容（praxis eap 注入同一框架）；真实工具由 Native Cordis 插件进程内注册（`praxis`）。
 
 > **"思维的功能价值与其外部可重建性成正比。"** —— EAP（Explicit Abstraction Principle）
 
@@ -29,10 +31,11 @@ EAP 是宁静号认知质量的底层标准。它回答一个问题：**一段�
 - [ ] 不跳级讨论——先对齐上层再进入下层（R↓）
 - [ ] 结构可重复执行/生成（S↑）
 
-## 渐进式披露
+## 调用
 
-- **无参数加载**：本技能即完整框架
-- **按需聚焦**：针对具体场景，把对应变量清单提出来逐项对照
+```json
+praxis { section: "eap" }   // 注入 EAP 框架全文
+```
 
 ## 与 ACC 的关系
 

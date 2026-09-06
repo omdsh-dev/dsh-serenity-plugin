@@ -1,9 +1,11 @@
 ---
 name: acc-safe-mode
-description: 安全模式协议（safe-mode 语义，DSH 版）。on/off/status/check 控制 .serenity-safe-on 标记；开启时禁用 bash（仅只读）并启用写入黑名单（前缀匹配 / regex: 前缀）。黑名单规则在 .dsh/serenity.json 的 safeMode.blacklist 配置。
+description: 安全模式协议（safe-mode 语义，DSH 版——v1.30 机制不变：WebUI 开关控制 .serenity-safe-on 标记，bash 禁用 + 写入黑名单机械执行）。on/off/status/check 控制标记；黑名单规则在 serenity.json 的 safeMode.blacklist 配置。守卫由拦截缝机械执行（非独立工具）。
 ---
 
 # Skill: acc-safe-mode — 安全模式协议
+
+> **v1.30.0 说明**：安全模式非独立工具——开关仅 WebUI（x-serenity-ui 头），agent 不可见不可自开关；守卫由拦截缝（guards seam）机械执行。本技能为知识说明。
 
 ## 用途
 
@@ -33,7 +35,7 @@ bun "<skill 基目录>/scripts/safe-mode.ts" <subcommand> [args...]
 ```json
 {
   "safeMode": {
-    "blacklist": [".secrets/", "regex:\\.env$", "credentials.json"]
+    "blacklist": [".secrets/", "regex:\\.env$", "home-credentials.json"]
   }
 }
 ```
