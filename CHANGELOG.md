@@ -1,3 +1,26 @@
+## v1.30.1 — 2026-09-06（acc-* skill 模板同步 v1.30 工具面，S142 发布后核查）
+
+**Scope:** v1.30.0 发布后用户核查发现——**技能目录（上下文注入）的 acc-* skill 描述仍是 v1.30 前旧工具语义**（acc-fs="cc-fs 语义"/acc-session="session 语义"/acc-msm="msm_list/exec/admin 语义"/acc-kit 无 dashboard 映射）。根因：v1.30 工具面重构改了代码/README/CHANGELOG/维护 skill，但**漏了 `src/templates/acc-*/SKILL.md` 模板资产**（随 npm 分发，install-skill 装到 `.dsh/skills/` 后被 DSH 技能目录投影展示给 LLM）。
+
+### 修复
+- `src/templates/` 9 个 acc-* SKILL.md 全部重写为 **v1.30 知识映射形态**（说明该领域由哪个新工具提供 + 旧→新对照；scripts/ 已退役为空目录说明）：
+  - `acc-fs`：cc_fs → **container_fs**（15 子命令 + reveal）
+  - `acc-git`：cc_git → **container_git**（6 子命令含 pull/diff）
+  - `acc-kit`：acc_kit → **dashboard**（health/time/wait，registry 段）
+  - `acc-msm`：acc_msm 拆分 → **msm**（单入口执行+发现：name/args/inspect/无参目录）+ **container_admin msm**（管理面 register/deregister/check/guide/catalog/ccc-config + 写保护）
+  - `acc-session`：session + session_rebuild → **logbook**（12 子命令含 rebuild + 绑定持久化）
+  - `acc-serenity`：入口全量重写——10 工具表 + 改名对照（硬切无别名）+ 版本 v1.30.0
+  - `acc-eap` / `acc-neat`：praxis 关联注记（知识注入走 `praxis eap`/`praxis neat`）
+  - `acc-safe-mode`：机制不变说明（WebUI 开关 + 拦截缝机械执行，非独立工具）
+- **同步三层**：① 本机 CCC `.dsh/skills/`（立即生效——已实证技能目录描述即时更新）② 插件仓 `src/templates/`（发布源）③ build 时 `cp -r src/templates dist/templates`（自动）
+
+### 验证
+- 本机 9 个 acc-* 技能目录描述即时更新（DSH 技能目录投影实证：每个 write 后 catalog 立即反映新描述）
+- 根仓 commit `7727095` + 插件仓 commit（fix(templates)）→ 双仓三 remote 同步
+
+### 发布链
+- bump v1.30.1（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推 → deploy → restart-web
+
 ## v1.30.0 — 2026-09-06（ACC 工具面重构：13 → 10 合一，S142 用户逐项裁决）
 
 **Scope:** 用户拍板"工具面越小执行越好 + msm 重构直觉入口"——ACC 工具面从 13 个重组为 10 个：container 族命名（继承 ACC/CCC 背景）+ 知识工具三合一 praxis + session/session_rebuild 并入 logbook + acc_kit→dashboard + admin 全含 container_admin（机务舱）+ acc_msm 拆 msm 单入口（执行+发现）与 container_admin（管理）。方案 `docs/acc-tool-naming-rework.md`（v1.0 FINAL）+ `docs/acc-tool-merge-and-msm-entry-rework.md`（前版）。
