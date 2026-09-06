@@ -338,6 +338,99 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
   })
 })
 
+describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
+  // 复刻 .opencode/serenity.json zhaocai 角色（2026-09-07 磁盘态）：
+  // tools 含 msm/logbook + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
+  // 而 read/web_search 通。此测试钉死逻辑层：该配置形态下 decideGuard 必须放行
+  // msm/logbook/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
+  const ZHAOCAI_MSMS = [
+    'anysearch', 'web-search', 'memory-tool', 'mail-tool', 'vlm-describe',
+    'eap-analyzer', 'qbit', 'session-log-tool', 'movie-search', 'home-diag',
+    'bill-analyzer', 'mortgage-rate-compare', 'sheet-parser', 'pdf-extract',
+    'archive-extract', 'profile-tool', 'weixin-send', 'autopilot-todo', 'subscription-tool',
+  ]
+  const ZC_ID = 'skiff-weixin-74b2a0609d13657b'
+
+  beforeEach(() => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({
+        skiff: {
+          roles: {
+            zhaocai: {
+              model: 'minimax-cn-coding-plan/MiniMax-M3',
+              msms: ZHAOCAI_MSMS,
+              tools: ['read', 'grep', 'glob', 'web_search', 'logbook', 'msm'],
+              trajectory: { session: true, keeper: false, rebuild: true },
+              systemPromptFile: '.opencode/skiff/zhaocai.md',
+            },
+          },
+        },
+      }),
+    )
+    registerSkiffSession(ZC_ID, 'zhaocai', dir)
+  })
+
+  afterEach(() => {
+    unregisterSkiffSession(ZC_ID)
+  })
+
+  it('zhaocai 形态：白名单内工具全放行（read/web_search/logbook/msm）', () => {
+    for (const tool of ['read', 'grep', 'glob', 'web_search', 'logbook', 'msm']) {
+      expect(decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID })).kind, `tool ${tool} 应 allow`).toBe('allow')
+    }
+  })
+
+  it('zhaocai 形态：白名单外工具 deny（write/bash 等）', () => {
+    for (const tool of ['write', 'edit', 'bash', 'container_fs', 'handyman', 'container_admin', 'dashboard', 'praxis']) {
+      const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID }))
+      expect(d.kind, `tool ${tool} 应 deny`).toBe('deny')
+      expect(d.deny).toContain('skiff role')
+    }
+  })
+
+  it('zhaocai 形态：msms 非空 → msm 工具本身放行（roleToolWhitelist msm 通道）', () => {
+    // 关键回归：即使 tools 不含 msm，msms 非空也必须放行 msm（roleToolWhitelist 自动加 msm）
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({
+        skiff: { roles: { zhaocai: { msms: ZHAOCAI_MSMS, tools: ['read'] } } },
+      }),
+    )
+    registerSkiffSession('skiff-weixin-zc2', 'zhaocai', dir)
+    try {
+      expect(decideGuard(base({ root: dir, toolName: 'msm', skiffSessionId: 'skiff-weixin-zc2' })).kind).toBe('allow')
+    } finally {
+      unregisterSkiffSession('skiff-weixin-zc2')
+    }
+  })
+
+  it('v1.30.2 回归：模型把 MSM 名当直接工具调 → 明确指引经 msm()（非泛化"未授权"）', () => {
+    // 用户 bug（S142）：zhaocai 调 memory-tool 等得到 "tool not allowed in this skiff role" →
+    // 误导成"没权限"。根因 = 把 MSM 名当直接工具调用。修复 = deny 消息给出 msm() 通道指引。
+    for (const msmName of ZHAOCAI_MSMS) {
+      const d = decideGuard(base({ root: dir, toolName: msmName, skiffSessionId: ZC_ID }))
+      expect(d.kind, `直接调 ${msmName} 应 deny`).toBe('deny')
+      // 明确说这是 MSM + 给调用法（可行动规避指引），不说"not allowed in this skiff role"
+      expect(d.deny, `deny 消息应含 ${msmName} 与 msm() 指引`).toContain(msmName)
+      expect(d.deny).toContain('msm("')
+      expect(d.deny).toContain('not a direct tool')
+      expect(d.deny).not.toContain('not allowed in this skiff role')
+    }
+  })
+
+  it('v1.30.2：白名单外真工具（write/bash 等）仍保守泛化 deny（不泄漏）', () => {
+    for (const tool of ['write', 'bash', 'container_fs', 'acc_msm', 'cc_fs', 'session_rebuild']) {
+      const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID }))
+      expect(d.kind, `工具 ${tool} 应 deny`).toBe('deny')
+      expect(d.deny).toContain('not allowed in this skiff role')
+      expect(d.deny).not.toContain(tool) // 不泄漏被拒工具名
+    }
+  })
+})
+
 describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，防 CCC 意外写坏搞崩自己）', () => {
   // dir 的 .serenity=test → cccName=test → 聚合档 .opencode/skills/test/references/mech-registry.json
   const aggRel = '.opencode/skills/test/references/mech-registry.json'

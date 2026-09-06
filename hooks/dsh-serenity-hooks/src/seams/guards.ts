@@ -139,6 +139,18 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     if (toolName === 'skill') return { kind: 'allow' }
     const roleName = input.skiffSessionId ? skiffRoleFor(input.skiffSessionId) : null
     const role = roleName ? readSkiffRoles(root).get(roleName) : undefined
+    // v1.30.2（S142 用户 bug）：模型把 MSM 名（memory-tool 等）当**直接工具**调 →
+    // 旧泛化 deny "tool not allowed in this skiff role" 误导成"没权限"。区分：
+    // 工具名命中角色 msms 清单 = 已授权的 MSM 但调用格式错 → 明确提示经 msm() 单入口。
+    // 安全：msms 清单已注入角色 base prompt（buildSkiffBasePrompt）——对该 skiff 会话
+    // 无新增泄漏；提示含规避指引（打回语义化 D2 哲学：告知命中 + 可行动）。
+    const msms = role?.msms ?? []
+    if (msms.includes(toolName)) {
+      return {
+        deny: `"${toolName}" is a registered MSM, not a direct tool in this role — call it through the msm tool: msm("${toolName}", ["<args>"]) (pass "--help" or inspect=true for usage)`,
+        kind: 'deny',
+      }
+    }
     const whitelist = roleToolWhitelist(role)
     if (!whitelist.has(toolName)) {
       return { deny: 'tool not allowed in this skiff role', kind: 'deny' }

@@ -1,3 +1,30 @@
+## v1.30.2 — 2026-09-07（Skiff MSM 调用报错语义化——"格式错"而非"没权限"，S142 用户 bug）
+
+**Scope:** 微信桥 zhaocai 调用 memory-tool 等全部报 "tool not allowed in this skiff role"，用户实测为全拒 → 深挖破案：**模型把 MSM 名（memory-tool/anysearch 等）当直接工具调用**（不走 `msm()` 单入口），工具名不在 tools 白名单（白名单只有 msm 执行器）→ 守卫泛化拒绝 → 误导成"没权限"（read 通是因为 read 在 tools 白名单）。
+
+### 根因链（R↓）
+1. Skiff 角色双白名单：`tools`（直接工具）+ `msms`（经 msm 单入口的 MSM 面）。zhaocai 配置 tools 含 read/grep/glob/web_search/logbook/msm + msms 19 项——**配置正确**。
+2. 模型调用形态错误：把 `memory-tool` 等 **MSM 名**当作**直接工具名**调用（旧 acc_msm 时代直觉残留 / LLM 对工具面误判）→ guards `decideGuard` skiff 分支：`roleToolWhitelist` 不含该名 → 泛化 deny。
+3. 泛化 deny 消息 "tool not allowed in this skiff role" **无规避指引** → 模型无法自我纠正，反复误判为权限问题。
+
+### 排除链实证（逻辑无 bug）
+- 补 3 个真实 zhaocai 形态回归测试（6 tools + 19 msms）：msm/logbook/read 全 allow、白名单外 deny → guards 47/47 绿
+- 全量 62/898 tests 全绿 → 纯 decideGuard 逻辑正确
+- diag-live 实证 skiff 会话 cwd 指向正确 CCC 根；container_admin role list + dashboard health 实证磁盘配置为 6-tool 形态 → 运行时 root/role 解析无问题
+
+### 修复
+- `src/seams/guards.ts` skiff 分支加**两层区分**：
+  - **工具名命中角色 msms 清单**（= 已授权 MSM 但调用格式错）→ deny 消息明确指引：`"<name>" is a registered MSM, not a direct tool in this role — call it through the msm tool: msm("<name>", ["<args>"])`（含 --help/inspect 提示）——告知命中 + 可行动规避（对齐 D2 打回语义化哲学）
+  - **白名单外真工具**（write/bash 等）→ 保持保守泛化 deny（不泄漏白名单）
+- 安全论证：msms 清单已注入角色 base prompt（`buildSkiffBasePrompt`）——对该 skiff 会话**无新增泄漏**；提示是可行动指引非白名单枚举
+
+### 验证
+- 新增 2 回归测试钉死：① 直接调 MSM 名 → deny 消息含该名 + `msm("` 指引 + 不含 "not allowed in this skiff role" ② 白名单外真工具（含旧名 acc_msm/cc_fs/session_rebuild）→ 仍保守泛化 deny 不泄漏
+- **62 files / 900 tests 全绿**（895 → 900，+5）+ typecheck 双面 ✓ + build ✓
+
+### 发布链
+- bump v1.30.2（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推 → deploy → restart-web
+
 ## v1.30.1 — 2026-09-06（acc-* skill 模板同步 v1.30 工具面，S142 发布后核查）
 
 **Scope:** v1.30.0 发布后用户核查发现——**技能目录（上下文注入）的 acc-* skill 描述仍是 v1.30 前旧工具语义**（acc-fs="cc-fs 语义"/acc-session="session 语义"/acc-msm="msm_list/exec/admin 语义"/acc-kit 无 dashboard 映射）。根因：v1.30 工具面重构改了代码/README/CHANGELOG/维护 skill，但**漏了 `src/templates/acc-*/SKILL.md` 模板资产**（随 npm 分发，install-skill 装到 `.dsh/skills/` 后被 DSH 技能目录投影展示给 LLM）。
