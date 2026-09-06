@@ -31,7 +31,7 @@
 ### 发布链
 - bump v1.29.1（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推（origin + github + omdsh）→ deploy → restart-web → 本地安装
 
-
+## v1.29.0 — 2026-09-05（三项完善 + trajectory-assistant 合并发布，S142 用户拍板）
 
 **Scope:** 两批已实现未发布的代码合并为一个版本——① **三项完善**（用户拍板：星舰意象 / 配置合一 / DSH 平台会话物理删除）② **trajectory-assistant**（用户拍板：过程中提示注入统一命名 + 关卡化设计，含 D8 词法原则）。原计划 v1.29（三项完善）+ v1.29.x（trajectory-assistant）分开，用户 D14 显式要求"发新的小版本，然后本地安装"→ 合并 v1.29.0。
 
