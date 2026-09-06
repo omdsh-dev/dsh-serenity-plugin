@@ -146,8 +146,11 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     // 锚点含规范路径行（真实存在的会话目录，非虚假 AGENT_SESSIONS/SESSION.md）
     expect(result.anchor).toContain(`SESSION.md path: AGENT_SESSIONS/2026-08-28--S200--test/SESSION.md`)
     expect(result.sessionMdPath).toBe(md)
-    // 排队不 append（surface 未动）
-    expect(session._calls).toHaveLength(0)
+    // v1.0 持久化绑定：queueRebuild append 一条 serenity/bound（rebuild action，log-only 非 surface 改动）
+    expect(session._calls).toHaveLength(1)
+    expect(session._calls[0]!.type).toBe('serenity/bound')
+    expect((session._calls[0]!.data as { action?: string }).action).toBe('rebuild')
+    expect((session._calls[0]!.opts)).toBeUndefined() // 无 surfaceOp——纯元数据
     // pending 队列有记录
     const snap = pendingRebuildSnapshot()
     expect(snap.has('session-x')).toBe(true)
@@ -324,9 +327,13 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     mkActiveSession('hook')
     const qctx = { sessions: { get: () => session } } as never
     await queueRebuild(qctx, { root: dir, summary: 'hook 重建', agentCwd: dir, dshSessionId: 's1' })
-    // 触发 turn-stopping
-    listeners[0]!({ agent, turn: 3 })
+    // queue 时已 append 1 条 bound（rebuild action 持久化绑定）
     expect(session._calls).toHaveLength(1)
+    expect(session._calls[0]!.type).toBe('serenity/bound')
+    // 触发 turn-stopping → performRebuild replace（+1，无 meter 不 append prune）→ 总数 2
+    listeners[0]!({ agent, turn: 3 })
+    expect(session._calls).toHaveLength(2)
+    expect(session._calls[1]!.type).toBe('user/message')
     expect(pendingRebuildSnapshot().has('s1')).toBe(false)
     // v1.22.5：steer 自动继续（next-step 队列 → turn 不 break → 模型自动读 SESSION.md 继续）
     expect(agent._steers).toHaveLength(1)

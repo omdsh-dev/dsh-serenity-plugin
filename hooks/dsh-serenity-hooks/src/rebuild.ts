@@ -57,6 +57,7 @@ import {
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
 import { namingTitleFor } from './tools/session.js'
 import { eventToken } from './trajectory-assistant.js'
+import { appendBound } from './session-bound.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -257,6 +258,12 @@ export async function queueRebuild(
   }
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)
   const anchor = buildRebuildAnchor(root, sessionName, mdPath)
+
+  // U1（方案 v1.0）：rebuild 排队时持久化绑定（action: rebuild）——权威绑定随会话日志
+  // 存续跨 rebuild（同一 dsh 会话 id 日志保留）；post-rebuild 恢复读 last bound 即此记录。
+  const dirName = basename(dirname(mdPath))
+  const boundRec = { dirName, mdPath, sessionId: sessionName.startsWith('S') ? sessionName : undefined, note: 'rebuild queued' }
+  appendBound(session, 'rebuild', boundRec)
 
   // ③ 排队（覆盖同会话旧队列）——需求②：存 summary + mdPath（turn-stopping 重建后重命名标题）
   pendingRebuilds.set(dshSessionId, { anchor, summary, mdPath, queuedAt: Date.now() })

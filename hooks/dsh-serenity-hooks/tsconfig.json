@@ -19,6 +19,7 @@
       "@deepseek-ai/dsh-agent": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent"],
       "@deepseek-ai/dsh-agent-presets": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-presets"],
       "@deepseek-ai/dsh-session": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session"],
+      "@deepseek-ai/dsh-session/types": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session/lib/types/types.d.ts"],
       "@deepseek-ai/dsh-llm": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm"],
       "@deepseek-ai/dsh-host-webserver": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-webserver"],
       "@deepseek-ai/dsh-shell-env": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-shell-env"],

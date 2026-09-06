@@ -16,18 +16,35 @@ import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, basename, dirname } from 'node:path'
 import { findSerenityRoot, loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction } from './guards.js'
-import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents } from '../session-ops.js'
+import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../session-ops.js'
+import { readLastBound, appendBound } from '../session-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
 // ── 纯文本构建（可单测）──
 
 export const DEFAULT_ENTRY_SKILL_MAX_CHARS = 30000
+
+/** 从 dsh 会话日志读标题（latest-wins `session/title` 事件；无返回 null）——供标题 reconcile（U3） */
+export function readDshSessionTitle(session: unknown): string | null {
+  try {
+    const events = sessionEvents<{ type?: string; data?: { title?: unknown } }>(session)
+    for (let i = events.length - 1; i >= 0; i--) {
+      const e = events[i]
+      if (e?.type === 'session/title' && typeof e.data?.title === 'string' && e.data.title.trim() !== '') {
+        return e.data.title.trim()
+      }
+    }
+  } catch {
+    /* events 访问失败忽略 */
+  }
+  return null
+}
 
 export function accIdentityText(
   root: string,
@@ -147,16 +164,44 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       try {
         const cfg = loadSerenityConfig(root, configPaths)
         if (cfg.hooks?.autoRestoreSession ?? true) {
-          const events = sessionEvents(agent.session)
-          const info = parseSessionContextFromEvents(events)
-          if (info) {
-            // v1.24.11 校验：路径可为相对（重建锚点 rel）——按 root 绝对化 + existsSync 验证，
-            // 陈旧/不存在（已归档/删除）的标记不污染内存（S142 需求：恢复必须准确指向真实 SESSION）
-            const abs = info.mdPath.startsWith(root) ? info.mdPath : resolve(root, info.mdPath)
-            if (existsSync(abs)) {
-              setActiveSessionInfo(scope, { ...info, mdPath: abs })
-              console.log(`[serenity-hooks] ↻ 从历史恢复激活会话: ${info.dirName}`)
+          const dshSession = agent.session
+          // v1.0 恢复链（方案：bound 权威 → 文本扫回退 → 标题 reconcile 兼容）——
+          // 三层均绝对化 + existsSync 校验（陈旧/归档/删除不污染内存）。
+          let restored: { dirName: string; mdPath: string; sessionId?: string } | null = null
+          // ① 持久化绑定事件（权威，U1）
+          const bound = readLastBound(dshSession)
+          if (bound) {
+            const abs = bound.mdPath.startsWith(root) ? bound.mdPath : resolve(root, bound.mdPath)
+            if (existsSync(abs)) restored = { dirName: bound.dirName, mdPath: abs, sessionId: bound.sessionId }
+          }
+          // ② 旧会话回退：文本扫描 [SESSION CONTEXT] / SESSION.md path:
+          if (!restored) {
+            const info = parseSessionContextFromEvents(sessionEvents(dshSession))
+            if (info) {
+              const abs = info.mdPath.startsWith(root) ? info.mdPath : resolve(root, info.mdPath)
+              if (existsSync(abs)) restored = { dirName: info.dirName, mdPath: abs, sessionId: info.sessionId }
             }
+          }
+          // ③ 标题 reconcile（U3/U4）：无 bound + 标题含 SESSION 引用 → 编码无关解析 + 持久化
+          if (!restored) {
+            const title = readDshSessionTitle(dshSession)
+            if (title) {
+              const md = resolveSessionByTitle(title, sessionsRoot(root))
+              if (md && existsSync(md)) {
+                const dirName = basename(dirname(md))
+                restored = { dirName, mdPath: md, sessionId: undefined }
+                appendBound(dshSession, 'reconcile', { dirName, mdPath: md, note: 'auto from title' })
+                console.log(`[serenity-hooks] ↻ 标题兼容持久化绑定: ${title} → ${dirName}`)
+              }
+            }
+          }
+          if (restored) {
+            // ActiveSessionInfo.sessionId 必填（展示码）：有则用；无则从目录名派生（S###/自定义编码段）或回退 dirName
+            const derived = restored.sessionId
+              ?? (restored.dirName.match(/--([^--]+)--/) ? restored.dirName.match(/--([^--]+)--/)![1] : undefined)
+              ?? restored.dirName
+            setActiveSessionInfo(scope, { ...restored, sessionId: derived })
+            console.log(`[serenity-hooks] ↻ 从历史恢复激活会话: ${restored.dirName}`)
           }
         }
       } catch {

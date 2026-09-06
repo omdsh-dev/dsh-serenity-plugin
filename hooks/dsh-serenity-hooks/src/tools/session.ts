@@ -22,6 +22,7 @@ import type { JsonValue } from '../json.js'
 import { join } from 'node:path'
 import { findSerenityRoot } from '../ccc.js'
 import { loadMsmEntries, runMsmAsync, type MsmEntry } from '../msm-ops.js'
+import { appendBound, readLastBound } from '../session-bound.js'
 import {
   listSessions,
   showSession,
@@ -32,6 +33,7 @@ import {
   healthCheck,
   summarize,
   qaCheck,
+  findSession,
   SESSION_ACTIONS,
   DEFAULT_SESSION_SCOPE,
   getActiveSessionInfo,
@@ -46,6 +48,25 @@ function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } })
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? DEFAULT_SESSION_SCOPE
+}
+
+/** 当前 dsh 会话对象（append bound 用）；无 → null */
+function agentDshSession(exec: { agent?: { session?: unknown } }): { append: (type: unknown, data: unknown) => unknown } | null {
+  const s = exec.agent?.session as { append?: unknown } | undefined
+  return s && typeof s.append === 'function'
+    ? { append: s.append as (type: unknown, data: unknown) => unknown }
+    : null
+}
+
+/**
+ * 当前绑定的权威 dirName（优先持久化 bound——防内存被误 use 污染；无 bound 回退内存 active）。
+ * 供 G1 守卫对比目标会话是否切换。
+ */
+function currentBoundDirName(exec: { agent?: { session?: unknown } }, scope: string): string | null {
+  const dsh = agentDshSession(exec)
+  const bound = dsh ? readLastBound(dsh) : null
+  if (bound) return bound.dirName
+  return getActiveSessionInfo(scope)?.dirName ?? null
 }
 
 // ── v1.21 F3：use 后重命名当前 dsh 会话（纯逻辑，可单测）──
@@ -322,6 +343,7 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
     goal: { type: 'string', description: 'create one-sentence goal (optional)' },
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
     confirm: { type: 'boolean', description: 'close must be true (prevents accidental close)' },
+    force: { type: 'boolean', description: 'use: allow switching away from the currently-bound session (binding guard override)' },
     dryRun: { type: 'boolean', description: 'create/archive preview mode (no actual changes)' },
   },
   output: {
@@ -368,12 +390,20 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
           dryRun: isDryRun,
         })
         let message = result.message
-        // v1.25.11（S142 用户：create 也要命名）+ 需求②（带概括）：创建成功后立即重命名
-        // 当前 dsh 会话为 S###-日期-概括（不再等 use）——createSession result 已含
-        // sessionId/dirName，activeInfoFromCreate 构造命名信息（use/create 共用
-        // renameDshSessionForActive）。dry-run 不命名（未真实创建）；issue 会话带 issue 概括（无则回退）。
+        // U6（方案 v1.0）：create 保留当前绑定——不再 rename 当前 dsh 会话为新目录
+        // （v1.25.11 旧行为：create 后立即改名夺绑定——长会话中途误 create 即被夺走）。
+        // 新会话仅在后续显式 `session use` 时才绑定；此处只 append create bound 审计记录。
         if (!isDryRun) {
-          renameDshSessionForActive(ctx, exec, activeInfoFromCreate(result), args.summary ?? args.issue)
+          appendBound(
+            agentDshSession(exec),
+            'create',
+            {
+              dirName: result.dirName,
+              mdPath: join(result.sessionPath, 'SESSION.md'),
+              sessionId: result.sessionId,
+              note: 'created (binding unchanged until explicit use)',
+            },
+          )
         }
         // ---- 钩子：create-transform（对齐 osp；仅非 dry-run 且 CCC 声明了该钩子时执行）----
         if (!isDryRun && cccHooks.includes('create-transform')) {
@@ -400,16 +430,65 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
           throw new Error('use requires --summary <content summary ≤20 chars> (appended to the dsh session title as S###-YYYY-MM-DD-<summary>; id and date stay server-derived)')
         }
         const scope = agentScope(exec)
+        // 目标目录名：findSession 定位（精确/编码/模糊——编码无关）
+        const targetEntry = findSession(join(root, 'AGENT_SESSIONS'), args.name)
+        if (!targetEntry) throw new Error(`Session not found: "${args.name}". Use "list" to see available sessions.`)
+        const targetDirName = targetEntry.dirName
+        // G1 硬守卫（U5）：目标 ≠ 当前绑定 → 拒绝（除非 --force 显式切换）
+        const currentDir = currentBoundDirName(exec, scope)
+        const switching = currentDir !== null && targetDirName !== currentDir
+        const force = args.force === true
+        if (switching && !force) {
+          throw new Error(
+            `Session is bound to ${currentDir}. Switching to ${targetDirName} would orphan the current trajectory. ` +
+            `Re-run with --force to switch (or close the current session first).`,
+          )
+        }
         const active = useSession(root, args.name, scope)
-        // v1.21 F3：激活宁静号会话后，把当前 dsh 会话重命名为命名标题（S###-日期-概括）
-        // v1.25.11：内联逻辑提取为 renameDshSessionForActive（use/create 共用）
+        // v1.21 F3：激活后重命名 dsh 会话标题（S###-日期-概括）
         const info = getActiveSessionInfo(scope)
         if (info) renameDshSessionForActive(ctx, exec, info, args.summary)
+        // 持久化绑定（U1）：无先前绑定 → activate；经 force 切换 → switch
+        const dsh = agentDshSession(exec)
+        if (dsh && info) {
+          const prevBound = readLastBound(dsh)
+          appendBound(dsh, switching && prevBound ? 'switch' : 'activate', {
+            dirName: info.dirName,
+            mdPath: info.mdPath,
+            sessionId: info.sessionId,
+            ...(switching ? { note: 'forced switch' } : {}),
+          })
+        }
         return active
       }
       case 'close': {
-        if (!args.name) throw new Error('close requires name (S### or directory name)')
-        return closeSession(root, args.name, args.confirm ?? false, agentScope(exec))
+        // U7（方案 v1.0）：close 关闭**当前绑定**会话——无 name = 关绑定；
+        // 有 name 时须指向当前绑定（经 findSession 编码无关解析），否则拒绝（防误关别的会话）。
+        const scope = agentScope(exec)
+        const requested = args.name?.trim() ?? ''
+        const boundDir = currentBoundDirName(exec, scope)
+        if (boundDir && requested) {
+          const target = findSession(join(root, 'AGENT_SESSIONS'), requested)
+          const targetDir = target?.dirName ?? requested
+          if (targetDir !== boundDir) {
+            throw new Error(
+              `Session is bound to ${boundDir}. close targets the bound session — pass the bound session (or omit name) to close it; ` +
+              `closing ${requested} while bound to another session is not allowed.`,
+            )
+          }
+        }
+        if (!boundDir && !requested) {
+          throw new Error('close requires name (no active binding to close) — pass the session to close.')
+        }
+        const nameToClose = boundDir ? boundDir : requested
+        const closed = closeSession(root, nameToClose, args.confirm ?? false, scope)
+        // release bound（U7 审计）：关闭当前绑定后 append release（closeSession 已清内存）
+        const dsh = agentDshSession(exec)
+        const bound = dsh ? readLastBound(dsh) : null
+        if (bound) {
+          appendBound(dsh, 'release', { dirName: bound.dirName, mdPath: bound.mdPath, sessionId: bound.sessionId, note: 'session closed' })
+        }
+        return closed
       }
       case 'archive': {
         return archiveSessions(root, { name: args.name, dryRun: args.dryRun ?? false }) + extHint

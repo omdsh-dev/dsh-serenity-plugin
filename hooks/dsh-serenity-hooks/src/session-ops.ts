@@ -527,6 +527,51 @@ function isSessionDirName(dirName: string): boolean {
 }
 
 /**
+ * 从 dsh 会话标题解析 SESSION 目录（编码无关 best-match，U3/U4）——
+ * 标题不假设 S### 前缀（CCC 可自定义编码：apaas-xxx / P### / 完整目录名等）。
+ * 匹配优先级（全部对 AGENT_SESSIONS 现有目录 best-match，不猜）：
+ *   ① 标题即完整目录名（含日期前缀 `YYYY-MM-DD--`）→ 精确命中
+ *   ② 标题含 `--<code>--` 段（如完整目录名被截断为 `<code>-日期-概括` 前段）→
+ *      按 code 段匹配：取标题首 token（`-` 前），与各目录 `--<code>--`/`--<code>` 尾段比对
+ *   ③ 唯一模糊子串匹配（多个则返回 null 防误猜）
+ * @param title dsh 会话标题（如 `S142-2026-08-24-概括` / `apaas-26116-…` / 完整目录名）
+ * @param sessionsDir AGENT_SESSIONS 绝对路径
+ * @returns 命中目录的绝对路径（SESSION.md）；无/歧义返回 null
+ */
+export function resolveSessionByTitle(title: string, sessionsDir: string): string | null {
+  const t = (title ?? '').trim()
+  if (!t) return null
+  const all = readAllSessions(sessionsDir)
+  if (all.length === 0) return null
+
+  // ① 完整目录名精确命中（标题可能直接就是目录名）
+  if (isSessionDirName(t)) {
+    const exact = all.find((s) => s.dirName === t)
+    if (exact) return join(exact.path, SESSION_MD)
+  }
+
+  // ② code 段匹配：标题首 token（'-' 前）作为候选 code（S142 / apaas-26116 / P31…）
+  const codeToken = t.split('-')[0]?.trim() ?? ''
+  if (codeToken) {
+    const byCode = all.filter((s) => {
+      // desc 目录 `--<code>--` 段 或 issue 目录 `--<code>` 尾段
+      const m = s.dirName.match(/--([^--]+)--/)
+      const code = m ? m[1] : null
+      const tailMatch = s.dirName.match(/--([^--]+)$/)
+      const tailCode = tailMatch && !s.dirName.includes('--', s.dirName.lastIndexOf('--') + 3) ? tailMatch[1] : null
+      return code === codeToken || tailCode === codeToken || s.dirName === codeToken || s.dirName.includes(`--${codeToken}`)
+    })
+    if (byCode.length === 1) return join(byCode[0]!.path, SESSION_MD)
+    if (byCode.length > 1) return null // 歧义不猜
+  }
+
+  // ③ 唯一模糊子串（标题概括片段可能含目录描述）
+  const fuzzy = all.filter((s) => s.dirName.toLowerCase().includes(t.toLowerCase()))
+  if (fuzzy.length === 1) return join(fuzzy[0]!.path, SESSION_MD)
+  return null
+}
+
+/**
  * 约定回退（v1.24.11）：AGENT_SESSIONS 下最新修改的**未完成**会话的 SESSION.md。
  * readAllSessions 已按「未完成优先 + mtime 降序」排序 → 首个未完成且含 SESSION.md 即最新活动。
  * 只作最后手段（内存/events/锚点全缺时），保证重建锚点至少指向一个真实存在的轨迹。
