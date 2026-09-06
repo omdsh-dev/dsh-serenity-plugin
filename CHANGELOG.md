@@ -1,4 +1,4 @@
-## v1.29.2 — 2026-09-06（rebuild 任务焦点传递 + autopilot bound 优先唤起，S142 用户两项修正）——代码完成，发版待 D14
+## v1.29.2 — 2026-09-06（rebuild 任务焦点传递 + autopilot bound 优先唤起，S142 用户两项修正）
 
 **Scope:** 用户两项修正——① session_rebuild 应能传递简短任务焦点文字到重建后会话（不含历史——历史完整在 SESSION.md）② autopilot-trajectory 会话绑定更稳固（唤起时能唤起最新的、绑定 autopilot SESSION 的会话）。方案 `docs/rebuild-focus-note-and-autopilot-bound-wake.md`。
 
@@ -16,8 +16,8 @@
 ### 测试
 - **60 files / 879 tests 全绿**（871 + 8 净增：rebuild.test R1 4 用例——buildRebuildAnchor focus 段/无 focus 兼容/sanitizeFocusLine 消毒/queueRebuild note 透传 + autopilot-trajectory.test R2 4 用例——bound 命中即使标题不匹配/标题回退兼容/多候选取最新 bound.at/诊断文案更新 1）；typecheck ✓（node + client）；build ✓
 
-### 发布链（待 D14）
-- bump v1.29.2（三处一致）→ test/build → publish npm → github-push 三推 → deploy → restart-web → 本地安装
+### 发布链
+- bump v1.29.2（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推 → deploy → restart-web → 本地安装
 
 
 ## v1.29.1 — 2026-09-05（SESSION 绑定持久化 + 切换守卫，S142 用户拍板 v1.0）
