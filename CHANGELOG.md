@@ -1,4 +1,37 @@
-## v1.29.0 — 2026-09-05（三项完善 + trajectory-assistant 关卡化注入统一命名，S142 用户拍板两批合并发布）
+## v1.29.1 — 2026-09-05（SESSION 绑定持久化 + 切换守卫，S142 用户拍板 v1.0）
+
+**Scope:** 用户需求——「会话和 SESSION 的绑定更坚固，避免 LLM 在过程中或 session_rebuild 后因智力因素自行更换 SESSION」+「能持久化更可靠」。调研实证 DSH `SessionEventMap` merge-extensible（compaction 先例）→ 绑定可做成**持久化会话事件**，零改 harness。用户裁决 U1-U8（含编码无关 U4：不假设 S###）。方案 `docs/session-binding-persist-plan.md` v1.0。
+
+### 核心机制：`serenity/bound` 持久化绑定事件
+- 新 `src/session-bound.ts`：`declare module '@deepseek-ai/dsh-session/types'` 扩展 SessionEventMap（官方 merge-extensible 机制，同 dsh-compaction compaction/* 先例）——`Session.append` 写入会话 append-only 日志 → 随 session.jsonl **持久化落盘**，重启后 snapshotEvents 可读
+- `appendBound`（log-only 无 surfaceOp，失败不阻断主流程）/ `readLastBound`（latest-wins 权威）/ `hasAnyBound`
+- **编码无关（U4）**：绑定锚 = 完整 AGENT_SESSIONS 目录名（`2026-09-05--S142--…` / issue `--apaas-26116` / autopilot `--…--auto` 均支持）；sessionId 仅派生展示
+- tsconfig.json 补 `@deepseek-ai/dsh-session/types` paths（declare module 子路径解析）
+
+### 写入点（每次绑定变化 append）
+| 动作 | action | 守卫 |
+|---|---|---|
+| `session use` 成功 | activate（经 force 切换 = switch） | **G1 硬守卫**（U5）：已绑定 + 目标 ≠ 当前 → 拒绝英文消息，需 `--force` |
+| `session create` 成功 | create（审计） | **G2（U6）**：不再 rename 夺绑定——新会话需显式 use 才绑定 |
+| `session_rebuild` 排队 | rebuild | G3：queue 时持久化（权威绑定跨 rebuild 存续） |
+| `session close` | release | **G4（U7）**：close 默认关**当前绑定**会话；name 不匹配拒绝 |
+| 启动恢复 | reconcile | **U3 标题兼容**：无 bound + 标题含编码 → 编码无关解析 + 自动持久化 |
+
+### 恢复链（context.ts seed 三层）
+① `readLastBound`（权威绑定，替代脆弱文本扫描）→ ② `parseSessionContextFromEvents`（旧会话无 bound 回退）→ ③ 标题 reconcile（`resolveSessionByTitle` 编码无关 best-match → append reconcile + 恢复）
+
+### 其他
+- `session-ops.ts` + `resolveSessionByTitle`（完整目录名/`--<code>--` 段/唯一模糊；歧义 null 不猜）
+- **效果**：LLM 不能因智力因素静默换 SESSION（每次切换需显式 --force + 日志审计）；绑定随 dsh 会话日志持久化跨 rebuild/重启；历史标题会话启动自动升级为持久绑定
+- 设计：`docs/session-binding-hardening-research.md`（调研）+ `docs/session-binding-persist-plan.md`（v1.0 FINAL）
+
+### 测试
+- **60 files / 871 tests 全绿**（859 + session-bound.test.ts 9 用例 + rebuild.test 断言更新 3）；typecheck ✓（node + client，含 declare module 子路径）；build ✓
+
+### 发布链
+- bump v1.29.1（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推（origin + github + omdsh）→ deploy → restart-web → 本地安装
+
+
 
 **Scope:** 两批已实现未发布的代码合并为一个版本——① **三项完善**（用户拍板：星舰意象 / 配置合一 / DSH 平台会话物理删除）② **trajectory-assistant**（用户拍板：过程中提示注入统一命名 + 关卡化设计，含 D8 词法原则）。原计划 v1.29（三项完善）+ v1.29.x（trajectory-assistant）分开，用户 D14 显式要求"发新的小版本，然后本地安装"→ 合并 v1.29.0。
 
