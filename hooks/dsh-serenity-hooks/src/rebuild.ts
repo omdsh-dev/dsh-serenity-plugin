@@ -1,5 +1,6 @@
 /**
- * rebuild.ts — 轨迹跟踪器（Trajectory Tracker）超限重建：session_rebuild
+ * rebuild.ts — 轨迹跟踪器（Trajectory Tracker）超限重建：logbook rebuild
+ * （v1.30 起并入 logbook 的 rebuild action；原独立 session_rebuild 工具）
  *
  * 概念（S142 用户拍板命名，v1.22.1 语义修正；v1.22.4 定稿语义）：
  *   **SESSION.md = 持久 agent（轨迹）**——身份/决策/进度/未解决问题的本体，
@@ -265,7 +266,7 @@ export async function queueRebuild(
   opts: { root: string; note?: string; summary: string; agentCwd: string; dshSessionId: string },
 ): Promise<RebuildResult> {
   if (!readSimpleSettings().rebuildEnabled) {
-    throw new Error('session_rebuild is disabled (rebuild.enabled=false — enable it in the dsh settings panel)')
+    throw new Error('logbook rebuild is disabled (rebuild.enabled=false — enable it in the dsh settings panel)')
   }
   const { root, note, summary, dshSessionId } = opts
 
@@ -281,7 +282,7 @@ export async function queueRebuild(
   if (!mdPath) {
     throw new Error(
       'Unable to determine the active SESSION.md — no session context found in this conversation. ' +
-      'Run "session use <S###> --summary <内容概括 ≤20 字>" first to activate the trajectory to resume, then retry session_rebuild.',
+      'Run "logbook use <S###> --summary <内容概括 ≤20 字>" first to activate the trajectory to resume, then retry logbook rebuild.',
     )
   }
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)
@@ -429,7 +430,7 @@ export function registerRebuildTurnHook(ctx: Context): void {
           source: PLUGIN_SOURCE,
         }))
         writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'rebuilt' })
-        console.log(`[serenity-hooks] session_rebuild executed with auto-continue (turn ${payload.turn ?? '?'} ended): ${id}`)
+        console.log(`[serenity-hooks] logbook rebuild executed with auto-continue (turn ${payload.turn ?? '?'} ended): ${id}`)
       } else {
         // surface 空（无节点可清）——极罕见；记录诊断
         writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'empty-surface' })
@@ -439,7 +440,7 @@ export function registerRebuildTurnHook(ctx: Context): void {
       // 落盘诊断 + 保留 warn。诊断文件让 agent/用户可直接定位断点。
       const msg = String((error as Error)?.message ?? error)
       writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'failed', detail: msg })
-      console.warn(`[serenity-hooks] session_rebuild failed: ${msg}`)
+      console.warn(`[serenity-hooks] logbook rebuild failed: ${msg}`)
     }
   })
 }

@@ -27,7 +27,7 @@ export const localstoreTool = defineTool({
   description:
     'ACC standard local credential/config storage: one tool manages two namespaces — credential (credentials) and config (local preferences). ' +
     'Stored in localstore.json at the CCC root (JSON format, directly readable by MSMs). ' +
-    'Git policy: .opencode/serenity.json localstore.gitTrack (allow commits / deny commits, default deny; .dsh fallback) — when deny, writes ensure .gitignore contains this file (physical guarantee), cc_git commit checks and refuses. ' +
+    'Git policy: .opencode/serenity.json localstore.gitTrack (allow commits / deny commits, default deny; .dsh fallback) — when deny, writes ensure .gitignore contains this file (physical guarantee), container_git commit checks and refuses. ' +
     'Subcommands: list (list keys, credentials never return values) / get <name> (read value) / set <name> <value> (write) / unset <name> (delete) / show <name> (metadata, credentials never print values) / doc (output the storage spec — path/format/key conventions/git policy; agents may operate the file directly with read/write per the spec). ' +
     'Default scope=credential; config requires --scope config (path is section.key, e.g. handyman.models).',
   parameters: {

@@ -1,5 +1,5 @@
 /**
- * cc-fs.ts — cc_fs 真实 DSH 工具定义（defineTool）
+ * cc-fs.ts — container_fs 真实 DSH 工具定义（defineTool）（v1.30：cc_fs → container_fs）
  *
  * 进程内注册（取代 v0.1 的 bash spawn runner）：zod/schemastery 参数校验、
  * 规范 JSON 输出、纯 render 投影。逻辑在 fs-ops.ts（可单测）。
@@ -20,9 +20,9 @@ function renderText(value: unknown): ContentBlock[] {
 }
 
 export const ccFsTool = defineTool({
-  name: 'cc_fs',
+  name: 'container_fs',
   description:
-    'CCC filesystem operations (cc-fs semantics, DSH-native). 15 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find. All paths confined to the CCC root; path escape is blocked automatically. reveal opens a path in the OS file manager (Linux xdg-open / macOS Finder / Windows Explorer). Complements read/write/edit (structural operations).',
+    'Container filesystem operations (the CCC\'s hull — file operations confined to the container root; path escape blocked automatically). 15 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find. reveal opens a path in the OS file manager (Linux xdg-open / macOS Finder / Windows Explorer). Complements read/write/edit (structural operations).',
   parameters: {
     action: {
       type: 'string',

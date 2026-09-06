@@ -6,7 +6,7 @@ description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自�
 # Skill: autopilot-trajectory-experiment
 
 > 本 skill 是 Autopilot Trajectory（自动巡航轨迹）的 **CCC 参与入口**——加载本 skill 即完整理解机制的**背景、目的、方式**。
-> 实验管理：`acc_msm exec autopilot-trajectory <doc|check|status|guide>`
+> 实验管理：`msm autopilot-trajectory <doc|check|status|guide>`（v1.30：单入口 `msm("<name>", ["<args>"])`）
 > 理论依据：serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`（v0.1 猜想）
 
 ## 触发条件/何时加载
@@ -37,7 +37,7 @@ description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自�
 
 ## 3. 参与方式（CCC 侧四步——第一步可一键 init）
 
-### ① 初始化（一键）：`acc_msm exec autopilot-trajectory init`
+### ① 初始化（一键）：`msm autopilot-trajectory init`
 
 自动完成：写配置（`.opencode/serenity.json` autopilotTrajectory 段）+ 生成偏见提供者脚本模板（CCC 根 `autopilot-bias.ts`）。
 
@@ -61,7 +61,7 @@ description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自�
 
 ### ③ 实现偏见内容提供者（`autopilot-bias.ts`）
 
-CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容**（反事实问题/探索方向/任何让轨迹偏离既有路径的输入）。**偏见内容归 CCC**——用本 CCC 自己的反馈信息来源保证"足够随机"。`acc_msm exec autopilot-trajectory random` 可验证输出。
+CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容**（反事实问题/探索方向/任何让轨迹偏离既有路径的输入）。**偏见内容归 CCC**——用本 CCC 自己的反馈信息来源保证"足够随机"。`msm autopilot-trajectory random` 可验证输出。
 
 ### ④ 标记目标会话（可选自生动机段）
 
@@ -87,13 +87,13 @@ CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容*
 
 | 用法 | 功能 |
 |------|------|
-| `acc_msm exec autopilot-trajectory`（**推荐，无参**） | **一站式全报告**：背景摘要 + 就绪度检查 + 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
-| `acc_msm exec autopilot-trajectory init` | **一键初始化**：写配置 + 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts） |
-| `acc_msm exec autopilot-trajectory random` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
-| `acc_msm exec autopilot-trajectory doc` | 机制定义说明全文（本 SKILL.md） |
-| `acc_msm exec autopilot-trajectory check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
-| `acc_msm exec autopilot-trajectory status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
-| `acc_msm exec autopilot-trajectory guide` | 仅步骤指引 |
+| `msm autopilot-trajectory`（**推荐，无参**） | **一站式全报告**：背景摘要 + 就绪度检查 + 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
+| `msm autopilot-trajectory init` | **一键初始化**：写配置 + 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts） |
+| `msm autopilot-trajectory random` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
+| `msm autopilot-trajectory doc` | 机制定义说明全文（本 SKILL.md） |
+| `msm autopilot-trajectory check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
+| `msm autopilot-trajectory status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
+| `msm autopilot-trajectory guide` | 仅步骤指引 |
 
 ## 6. 观察与验证
 

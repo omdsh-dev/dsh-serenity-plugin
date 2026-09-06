@@ -162,7 +162,7 @@ export async function fetchBiasContent(root: string, providerRel: string): Promi
     if (existsSync(legacy)) scriptAbs = legacy
   }
   if (!existsSync(scriptAbs)) {
-    return { text: null, error: `请在 CCC 根目录实现偏见内容提供者脚本: ${providerRel}（或旧默认 ${LEGACY_BIAS_PROVIDER}；stdout 输出偏见内容一行；acc_msm exec autopilot-trajectory init 可生成模板）` }
+    return { text: null, error: `请在 CCC 根目录实现偏见内容提供者脚本: ${providerRel}（或旧默认 ${LEGACY_BIAS_PROVIDER}；stdout 输出偏见内容一行；msm autopilot-trajectory init 可生成模板）` }
   }
   const runs: Array<[string, string[]]> = [
     ['bun', [scriptAbs]],

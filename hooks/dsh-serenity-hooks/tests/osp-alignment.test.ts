@@ -163,11 +163,11 @@ describe('dsp 扩展：Principles 块（v1.19.8 合并原 Constraints——spec 
     expect(block).toContain('a session is the rebuildable carrier of a')
     expect(block).toContain("SESSION.md is the trajectory's persistent body")
     expect(block).toContain('Identity belongs to the trajectory')
-    // 操作边界（原 Constraints 内容，工具名为平台真实名 acc_msm）
+    // 操作边界（原 Constraints 内容，工具名为平台真实名 msm）
     expect(block).toContain('Operational boundaries:')
     expect(block).toContain(`Root: ${dir}`)
     expect(block).toContain('File access')
-    expect(block).toContain('use acc_msm')
+    expect(block).toContain('use msm')
     expect(block).toContain('Subagent')
     expect(block).toContain('Session-first')
   })
@@ -239,24 +239,23 @@ describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     expect(block).toContain('You are running inside a Concrete Cognitive Container (CCC)')
     // 身份块不再内嵌工具清单（需求③移出 toolsBlock）
-    expect(block).not.toContain('cc_fs     —')
+    expect(block).not.toContain('container_fs     —')
     expect(block).not.toContain('handyman  —')
-    expect(block).toContain('call acc_msm list to discover them')
+    expect(block).toContain('call msm("<name>") to execute or discover')
     // 指引指向文末 Tools 块（heading 短语，非完整头——避免干扰块序 indexOf 定位）
     expect(block).toContain('"Serenity Tools" heading')
   })
 
-  it('toolsBlock() 含 13 工具清单 + MSM 调用示例（需求③）', () => {
+  it('toolsBlock() 含 10 工具清单 + msm 单入口示例（v1.30：13→10 重构）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman', 'session_rebuild', 'localstore', 'skiff_admin', 'autopilot-trajectory']) {
+    for (const tool of ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'autopilot-trajectory']) {
       expect(block).toContain(tool)
     }
-    // MSM 调用示例（3 步协议：发现/查用法/执行）
-    expect(block).toContain('MSM call protocol')
-    expect(block).toContain('acc_msm list')
-    expect(block).toContain('--schema 1')
-    expect(block).toContain('acc_msm exec <name> <args...>')
+    // msm 单入口调用（替代旧 3 步协议）
+    expect(block).toContain('msm("')
+    expect(block).toContain('inspect=true')
+    expect(block).toContain('container_admin msm register|deregister|check')
     expect(block).toContain('mech-registry.json')
   })
 })

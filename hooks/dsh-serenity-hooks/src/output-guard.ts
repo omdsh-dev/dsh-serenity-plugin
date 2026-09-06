@@ -38,7 +38,6 @@ const MECHANISM_WORDS: string[] = [
   'agent/turn-stopping',
   'tools/pre-execute',
   'tools/post-execute',
-  'session_rebuild',
   'Trajectory Steward',
   'TRAJECTORY-STEWARD',
   'TRAJECTORY-ASSISTANT',

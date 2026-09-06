@@ -1,5 +1,5 @@
 /**
- * git.ts — cc_git 真实 DSH 工具定义（defineTool）
+ * git.ts — container_git 真实 DSH 工具定义（defineTool）（v1.30：cc_git → container_git）
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -17,7 +17,7 @@ function renderText(value: unknown): ContentBlock[] {
 }
 
 export const gitTool = defineTool({
-  name: 'cc_git',
+  name: 'container_git',
   description:
     'CCC git operations (cc-git semantics, aligned with osp). status/commit/push/log/pull/diff; non-fast-forward push/pull outputs [REJECTED] + suggested actions (never auto-force). merge/rebase/conflict resolution go through bash.',
   parameters: {

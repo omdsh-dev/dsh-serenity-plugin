@@ -1,5 +1,5 @@
 /**
- * fs-ops.ts — cc_fs 纯操作层（零 DSH 依赖，可独立单测）
+ * fs-ops.ts — container_fs 纯操作层（cc_fs → container_fs，v1.30；零 DSH 依赖，可独立单测）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/fs/file-system-tool.ts）——osp 是 ACC 工具 spec：
  *   - rm：目录需 recursive 才删除；非空目录无 recursive → [SKIP]；保护 .serenity 与 CCC 根；dry-run 预览
@@ -166,11 +166,11 @@ function assertNotProtectedRegistry(root: string, absPath: string, targetLabel: 
   if (hit === null) return
   if (hit.hit === 'file') {
     throw new Error(
-      `cc-fs: refusing to directly modify mech-registry.json — use acc_msm register/deregister instead`,
+      `container-fs: refusing to directly modify mech-registry.json — use container_admin msm register/deregister instead`,
     )
   }
   throw new Error(
-    `cc-fs: refusing to ${/rm|delete|remove/i.test(targetLabel) ? 'remove' : 'move'} "${rel}" — it is an ancestor of the ACC-managed mech-registry.json (${protectedRegistryTargets(root)?.fileRel}); the registry is managed by acc_msm register/deregister`,
+    `container-fs: refusing to ${/rm|delete|remove/i.test(targetLabel) ? 'remove' : 'move'} "${rel}" — it is an ancestor of the ACC-managed mech-registry.json (${protectedRegistryTargets(root)?.fileRel}); the registry is managed by container_admin msm register/deregister`,
   )
 }
 
@@ -180,7 +180,7 @@ function validateWritePath(root: string, target: string): string {
   if (!pathInside(resolve(root), absPath)) {
     throw new Error(`cc-fs: path "${target}" resolves to "${absPath}" which is outside serenity root "${root}"`)
   }
-  // 保护 mech-registry.json — 只能通过 acc_msm register/deregister 注册/注销。
+  // 保护 mech-registry.json — 只能通过 container_admin msm register/deregister 注册/注销。
   // 需求⑤a（S142 用户拍板：注册表单级化）：**唯一合法注册表 = cccName 聚合档**
   // （.opencode/skills/<cccName>/references/mech-registry.json——cccName = .serenity 首行）。
   // 历史 root 级 + 各 skill 分散注册表已废弃：不再保护（review P1——保护永不被读的文件 = 死锁，

@@ -30,8 +30,8 @@ const SCORES: Record<string, number> = {
   grep: 1,
   glob: 1,
   skill: 1,
-  acc_msm: 1,
-  cc_fs: 1,
+  msm: 1,
+  container_fs: 1,
 }
 
 export function scoreTool(toolName: string): number {
@@ -89,16 +89,16 @@ export function reminderText(code: string, score: number): string {
  * 简短留自由度（不提"加载 eap 工具"，模型自知；只说修订 skill + 新建 skill 落 SESSION）。
  *
  * escalated=true（v1.23.3）：连续多轮超阈值仍未 rebuild → 升级强制语气
- * （STOP and rebuild now，持续注入直到调用 session_rebuild）。
+ * （STOP and rebuild now，持续注入直到调用 logbook rebuild）。
  *
  * 需求①（S142 用户拍板）：百分比比例 → K 数值——tokensK = 实际占用（千 token），
  * thresholdK = 配置阈值（千 token）；文案 `Context usage at NNNK (threshold NNNK)`。
  */
 export function rebuildReminderText(tokensK: number, thresholdK: number, escalated = false): string {
   if (escalated) {
-    return `${eventToken('limitMandatory')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called session_rebuild. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call the session_rebuild tool immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild). The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call session_rebuild.`
+    return `${eventToken('limitMandatory')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called the logbook rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call logbook rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild). The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call logbook rebuild.`
   }
-  return `${eventToken('limit')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
+  return `${eventToken('limit')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the logbook rebuild action — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
@@ -193,7 +193,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // ② 轨迹跟踪器：上下文压力检测（独立——每次工具调用后都查，不依赖计分）
     // v1.23.3 用户拍板：**不做节流，催就行了**——每次超阈值都注入（每轮都催）；
     // 连续超阈值 REBUILD_ESCALATE_AFTER 轮仍未 rebuild → 升级 [TRAJECTORY-ESCALATED]
-    // 强制语气，此后持续升级催（不重置，直到 agent 调用 session_rebuild 压力自然回落）。
+    // 强制语气，此后持续升级催（不重置，直到 agent 调用 logbook rebuild 压力自然回落）。
     // 需求①（S142 用户拍板）：判定从窗口比例改为绝对 K——projectedTokens ≥ thresholdK*1000
     // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
     if (skiffRebuild && readSimpleSettings().rebuildEnabled) {

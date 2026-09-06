@@ -1,27 +1,17 @@
 /**
- * skiff-admin.ts — skiff_admin ACC 工具（F4a'，v1.25.0 实验性，第 12 个工具）
+ * skiff-admin.ts — Skiff 角色逻辑层（v1.30：skiff_admin 工具已并入 container_admin role 域）
  *
  * 教 CCC 如何定义 Skiff 角色（仿 session 工具 hook-develop-guide 的 SEP 教学模式，
  * 用户拍板 2026-08-28：guide 定义教程 / validate 配置校验 / list 角色摘要）。
  *
- * 归属：ACC 机制工具（教会 + 校验），角色内容仍归 CCC 配置（.opencode/serenity.json skiff.roles）。
+ * 归属：ACC 机制（教会 + 校验），角色内容仍归 CCC 配置（.opencode/serenity.json skiff.roles）。
+ * 公开入口 = container_admin（domain: role → guide/validate/apply/list）；本文件保留纯逻辑。
  */
 
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '../json.js'
-import { findSerenityRoot, readHandymanConfig } from '../ccc.js'
+import { readHandymanConfig } from '../ccc.js'
 import { readSkiffRoles, resolveRoleSystemPrompt, systemPromptSource } from '../skiff-role.js'
 import { loadMsmEntries } from '../msm-ops.js'
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
-
-function renderText(value: unknown): ContentBlock[] {
-  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-  return [{ type: 'text', text }]
-}
 
 /** Skiff 定义教程（核心）：概念 / schema / 认知 MSM 写法 / 双白名单 / 轨迹纪律 / 示例角色 */
 export const SKIFF_GUIDE = `═══ Skiff Definition Guide (F4, experimental) ═══
@@ -34,7 +24,7 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
   { "skiff": { "roles": {
       "<role-name>": {
         "model": "provider/model",             // 角色模型（CCC 直接指定，无白名单校验；缺省回退 handyman.defaultModel）
-        "msms": ["msm-a", "msm-b"],            // MSM 白名单（独立）：acc_msm exec 只能跑这些；register/deregister 必拒；list 只显示这些
+        "msms": ["msm-a", "msm-b"],            // MSM 白名单（独立）：msm 工具只能执行这些；register/deregister 必拒
         "tools": ["read","grep","glob",...],   // 非 MSM 工具白名单（独立）：白名单外工具一律不可用（guard 强制）
         "trajectory": { "session": false, "keeper": false, "rebuild": false },  // 轨迹纪律子集（缺省全关 = 完全独立）
         // 角色人格/认知边界/风格（CCC 完整定义；dsp 只给基础提示词）
@@ -45,7 +35,7 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
 
 ── 双白名单语义（全按白名单暴露，白名单外全隐藏）──
   - tools 空 + msms 非空 = 纯 MSM 角色（认知问答典型形态）
-  - msms 非空 → acc_msm 工具自动可用（MSM 通道）
+  - msms 非空 → msm 工具自动可用（MSM 通道）
   - 白名单外工具即使 DSH 未来新增也自动被挡（guard 按角色判定，不枚举工具名——完备性）
 
 ── 认知 MSM 写法（读知识 / 操作能力）──
@@ -73,7 +63,7 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
     session/cancel / session/close / session/list / request_permission（恒 allow）
   启停 = 人工（设置面板开关，不随插件加载自动启动）；未开启零资源占用
   生效机制：角色配置**实时读取**（改 .opencode/serenity.json → 刷新调试页即生效）；
-  改配置后用 skiff_admin apply 做显式校验 + 应用确认（绑定 CCC + 角色清单）
+  改配置后用 container_admin role apply 做显式校验 + 应用确认（绑定 CCC + 角色清单）
   会话追问（v1.25.10）：调试页持有当前会话，追问自动续接（同会话上下文延续）；
   「新对话」按钮开新会话；进程重启后旧会话不可续（WebUI 仍可见历史）
   注意：skill 加载对 skiff **恒可用**（不设白名单——读知识面，无写能力）`
@@ -147,7 +137,7 @@ export function applySkiffConfig(root: string): JsonValue {
       cccRoot: root,
       roleCount: roles.size,
       issues: validation.issues,
-      hint: 'fix the issues above, then run skiff_admin apply again',
+      hint: 'fix the issues above, then run container_admin role apply again',
     }
   }
   return {
@@ -158,38 +148,3 @@ export function applySkiffConfig(root: string): JsonValue {
     note: 'roles are read live from .opencode/serenity.json — the skiff debug page reflects changes on refresh; skill loading is always available to skiff sessions (not whitelisted)',
   }
 }
-
-export const skiffAdminTool = defineTool({
-  name: 'skiff_admin',
-  description:
-    'Skiff (F4, experimental): CCC cognitive-subset roles (subsets of the full serenity trajectory). guide: definition tutorial (concept/role schema/cognitive MSM writing/dual whitelist/trajectory subset/examples); validate: check the CCC skiff config (roles schema legal / msms registered / model in handyman.models / system prompt resolvable — systemPromptFile (recommended) or systemPrompt non-empty); apply: validate then confirm the config is live (bound CCC + role list; roles are read live on every request); list: role summary (name/model/msms/tools/trajectory/prompt source). Roles are defined by the CCC in .opencode/serenity.json skiff.roles; skill loading is always available to skiff sessions (not whitelisted).',
-  parameters: {
-    action: {
-      type: 'string',
-      enum: ['guide', 'validate', 'apply', 'list'],
-      required: true,
-      description: 'Subcommand: guide (definition tutorial) / validate (config check) / apply (validate + confirm live) / list (role summary)',
-    },
-  },
-  output: {
-    schema: { type: 'json' },
-    render: (args, value) => renderText(value),
-  },
-  async execute(args, exec): Promise<JsonValue> {
-    const root = findSerenityRoot(agentCwd(exec))
-    if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
-    const action = args.action as 'guide' | 'validate' | 'apply' | 'list' | undefined
-    switch (action) {
-      case 'guide':
-        return { guide: SKIFF_GUIDE }
-      case 'validate':
-        return validateSkiffConfig(root)
-      case 'apply':
-        return applySkiffConfig(root)
-      case 'list':
-        return listSkiffRoles(root)
-      default:
-        throw new Error('skiff_admin requires action: guide | validate | apply | list')
-    }
-  },
-})

@@ -274,7 +274,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="超限重建"
-            desc="上下文接近上限时提示调用 session_rebuild 清空重建"
+            desc="上下文接近上限时提示调用 logbook rebuild 清空重建"
             expandable
             open={openRebuild}
             onToggle={setOpenRebuild}
@@ -282,8 +282,8 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             control={<Toggle checked={rebuildOn} onChange={(on) => toggle('rebuildEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'上下文超限自动重建（session_rebuild）：\n' +
-                  '· 机制：agent 上下文占用达到阈值时，由 LLM 主动调用重建工具\n' +
+                <p className="ss-detailIntro">{'上下文超限自动重建（logbook rebuild，v1.30 起并入 logbook）：\n' +
+                  '· 机制：agent 上下文占用达到阈值时，由 LLM 主动调用重建\n' +
                   '· 语义：完全丢弃当前 dsh 会话 + 自动新建 + 注入「继续原 SESSION 的工作」\n' +
                   '· 效果：SESSION.md 原位不动，认知轨迹延续，上下文归零\n' +
                   '· 关闭后：上下文超限时不再提示，可能导致会话卡顿或丢失'}

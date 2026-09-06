@@ -33,22 +33,22 @@ export interface GuardInput {
   blacklist: BlacklistRule[]
   /** 工具参数中可能携带的路径（write/edit 等）；无则 undefined */
   pathArg?: string
-  /** cc_fs 等复合工具的子命令 action（只读子命令不查黑名单） */
+  /** container_fs 等复合工具的子命令 action（只读子命令不查黑名单） */
   action?: string
   /** 当前 agent 的 dsh 会话 id（Skiff 角色白名单判定；非 skiff 会话不判定） */
   skiffSessionId?: string
 }
 
 /** 写类工具名（黑名单/治理文件只拦这些；读工具只做路径越界检查——对齐 osp） */
-const WRITE_TOOLS = new Set(['write', 'edit', 'str_replace_editor', 'cc_fs', 'bash', 'append', 'touch'])
+const WRITE_TOOLS = new Set(['write', 'edit', 'str_replace_editor', 'container_fs', 'bash', 'append', 'touch'])
 
-/** cc_fs 的写类子命令（mkdir/rm/mv/cp/touch/append）；其余 9 子命令（root/resolve/exists/
+/** container_fs 的写类子命令（mkdir/rm/mv/cp/touch/append）；其余 9 子命令（root/resolve/exists/
  *  list/tree/relative/reveal/info/find）为只读——只读子命令不查黑名单（同 read 语义） */
 const CC_FS_WRITE_ACTIONS = new Set(['mkdir', 'rm', 'mv', 'cp', 'touch', 'append'])
 
 /**
  * 凭据文件硬名单（数据面守卫，v1.26.3，S142 用户：localstore.json 需要在 read 工具的黑名单里）：
- * **任何工具**（含 read/grep/glob/cc_fs 只读子命令）命中这些相对 CCC 根的路径 → deny。
+ * **任何工具**（含 read/grep/glob/container_fs 只读子命令）命中这些相对 CCC 根的路径 → deny。
  *
  * 与 safeMode.blacklist（写黑名单，v1.18.5 决策只拦写）语义独立：
  * - 黑名单 = 用户可配置的写保护（REPOSITORIES/ 等只读参考源不误伤读）
@@ -60,7 +60,7 @@ export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
 
 /**
  * MSM 注册表写保护（需求⑤b S142 用户拍板："msm注册的文件需要写保护起来，避免CCC意外写坏搞崩自己"）：
- * mech-registry.json 是 CCC 执行层地基（坏 → loadMsmEntries 抛 → acc_msm/skiff/output-guard 全崩，
+ * mech-registry.json 是 CCC 执行层地基（坏 → loadMsmEntries 抛 → container_admin/output-guard 全崩，
  * register 也崩 → 自锁）。**写 deny、读 allow**（与 localstore 读 deny 语义区分 R6——注册表是
  * 结构核心不是秘密，需被 output-guard/skiff-admin 读取建 MSM 词表）。
  *
@@ -68,8 +68,8 @@ export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
  * `.opencode/skills/<cccName>/references/mech-registry.json`（cccName = .serenity 首行）。
  * 历史 root 级 `mech-registry.json` 与各 skill 分散注册表已废弃：**不再保护**
  * （review P1：保护一个永不被读的文件 = 死锁——MSM 既不可见又不可删/迁移）。
- * 写工具命中聚合档 → deny（唯一合法写通道 = acc_msm register/deregister 内部 writeRegistry，
- * 走工具实现不经 pre-execute → 天然豁免）；读工具放行。
+ * 写工具命中聚合档 → deny（唯一合法写通道 = container_admin msm register/deregister
+ * 内部 writeRegistry，走工具实现不经 pre-execute → 天然豁免）；读工具放行。
  */
 export function isProtectedRegistryRel(root: string, rel: string): boolean {
   const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
@@ -103,17 +103,17 @@ export function isProtectedRegistryRel(root: string, rel: string): boolean {
   return false
 }
 
-/** 判定工具是否为读类（read/grep/glob + cc_fs 只读子命令）：凭据文件对读工具同样 deny */
+/** 判定工具是否为读类（read/grep/glob + container_fs 只读子命令）：凭据文件对读工具同样 deny */
 export function isReadTool(toolName: string, action?: string): boolean {
   if (toolName === 'read' || toolName === 'grep' || toolName === 'glob') return true
-  if (toolName === 'cc_fs') return action !== undefined && !CC_FS_WRITE_ACTIONS.has(action)
+  if (toolName === 'container_fs') return action !== undefined && !CC_FS_WRITE_ACTIONS.has(action)
   return false
 }
 
-/** 判定工具是否为写类：普通工具按名；cc_fs 复合工具按子命令 action */
+/** 判定工具是否为写类：普通工具按名；container_fs 复合工具按子命令 action */
 export function isWriteTool(toolName: string, action?: string): boolean {
   if (!WRITE_TOOLS.has(toolName)) return false
-  if (toolName === 'cc_fs') return action !== undefined && CC_FS_WRITE_ACTIONS.has(action)
+  if (toolName === 'container_fs') return action !== undefined && CC_FS_WRITE_ACTIONS.has(action)
   return true
 }
 
@@ -131,7 +131,7 @@ export interface GuardDecisionResult {
 export function decideGuard(input: GuardInput): GuardDecisionResult {
   const { root, toolName, safeModeOn, blacklist, pathArg, action } = input
 
-  // 0) Skiff 角色白名单（F4b ⑧）：skiff 会话工具必须 ∈ 角色白名单（tools ∪ acc_msm），
+  // 0) Skiff 角色白名单（F4b ⑧）：skiff 会话工具必须 ∈ 角色白名单（tools ∪ msm 通道），
   // 白名单外一律 deny（拒绝信息泛化——不泄漏白名单外工具名；完备性：不枚举工具名）。
   // 由调用方（evaluate）传入 sessionId 判定；纯函数内通过 GuardInput.skiffSessionId 支持单测。
   // v1.25.3：skill 加载对 skiff 恒可用（S142 用户——skill 不设白名单；读知识面，无写能力）
@@ -163,26 +163,26 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     const rel = relative(root, abs).split('\\').join('/')
     // 2a) 凭据文件硬名单（数据面守卫，v1.26.3）：**任何工具**命中 localstore.json →
     //     deny（不依赖 safe-mode 开关、不看工具读写性——凭据文件不可读是结构边界；
-    //     read/grep/glob/cc_fs 只读子命令与写工具一视同仁，防凭据值进上下文）
+    //     read/grep/glob/container_fs 只读子命令与写工具一视同仁，防凭据值进上下文）
     if (SENSITIVE_CREDENTIAL_FILES.has(rel)) {
       return { deny: `access blocked: "${pathArg}" is a sensitive credential file (${rel})`, kind: 'deny' }
     }
     // 读操作（read/glob/grep 等）不查黑名单/治理文件——对齐 osp（permission-guards 只在
     // write/edit 时查黑名单）；否则 REPOSITORIES/ 这类"只读参考源"黑名单会误伤读操作
-    // （用户实测：读 REPOSITORIES/ 下 repo 被拦，见 v1.18.5；cc_fs 只读子命令同语义）
+    // （用户实测：读 REPOSITORIES/ 下 repo 被拦，见 v1.18.5；container_fs 只读子命令同语义）
     if (isWriteTool(toolName, action)) {
       // CCC 治理文件永远拒绝写入（safe-mode 是用户能力，agent 不能自行开关/篡改）
       if (rel === '.serenity-safe-on' || rel === '.serenity' || rel.startsWith('.serenity-safe-on/') || rel.startsWith('.serenity/')) {
         return { deny: `CCC governance file "${rel}" is reserved for the user — agent must not write`, kind: 'deny' }
       }
-      // 需求⑤b：MSM 注册表写保护（写 deny 读 allow）——acc_msm register/deregister 是唯一合法写通道
+      // 需求⑤b：MSM 注册表写保护（写 deny 读 allow）——container_admin msm register/deregister 是唯一合法写通道
       // review P2-2：保护范围含聚合档祖先目录（rm -r references/ / mv references/ 同拦）
       if (isProtectedRegistryRel(root, rel)) {
         const isFile = rel.endsWith('/mech-registry.json')
         return {
           deny: isFile
-            ? `mech-registry.json is ACC-managed (${rel}) — use acc_msm register/deregister instead of writing it directly`
-            : `"${rel}" is an ancestor of the ACC-managed mech-registry.json — removing/moving it would destroy the registry; the registry is managed by acc_msm register/deregister`,
+            ? `mech-registry.json is ACC-managed (${rel}) — use container_admin msm register/deregister instead of writing it directly`
+            : `"${rel}" is an ancestor of the ACC-managed mech-registry.json — removing/moving it would destroy the registry; the registry is managed by container_admin msm register/deregister`,
           kind: 'deny',
         }
       }
@@ -284,7 +284,7 @@ export function syncSafeModeRestriction(agent: Agent, root: string): void {
 
 /**
  * 从 exec 参数中提取常见路径字段（write/edit 工具）；宽松读取。
- * cc_fs 复合工具：path（单路径）/ paths（数组）/ src / dst——取第一个命中（越界检查
+ * container_fs 复合工具：path（单路径）/ paths（数组）/ src / dst——取第一个命中（越界检查
  * 逐路径由 decideGuard 单 pathArg 覆盖；多路径字段取首个，避免漏检主体路径）。
  */
 function extractPathArg(exec: ToolExecution): string | undefined {
@@ -300,7 +300,7 @@ function extractPathArg(exec: ToolExecution): string | undefined {
   return undefined
 }
 
-/** 从 exec 参数提取 cc_fs 子命令 action；无则 undefined */
+/** 从 exec 参数提取 container_fs 子命令 action；无则 undefined */
 function extractAction(exec: ToolExecution): string | undefined {
   const args = exec.arguments
   if (args === null || typeof args !== 'object') return undefined

@@ -1,5 +1,5 @@
 /**
- * kit-ops.ts — acc_kit 纯操作层（零 DSH 依赖）
+ * kit-ops.ts — dashboard 纯操作层（acc_kit → dashboard，v1.30；零 DSH 依赖）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/acc-kit.ts）——osp 是 ACC 工具 spec：
  *   - health：{ccc, root, version, status: healthy|degraded, principles: {P1_rooted, P2_git_managed, P3_binary_permissions}}
@@ -35,7 +35,7 @@ function readCccName(root: string | null): string | null {
 
 /**
  * MSM 注册表完整性检查（需求⑤c S142 用户："要有ACC层检查方法检查注册表没坏，这东西太核心了"）。
- * 注册表坏 → loadMsmEntries JSON.parse 抛 → acc_msm/skiff-admin/output-guard/session 全崩 +
+ * 注册表坏 → loadMsmEntries JSON.parse 抛 → container_admin/output-guard 全崩 +
  * register 判重也 loadMsmEntries → **自锁无法自救**（R7）——health 必须**不因坏表抛错**，
  * 独立解析（不依赖 loadMsmEntries）逐项检查，坏 = ok:false + issues + 修复指引。
  *
@@ -48,8 +48,8 @@ function readCccName(root: string | null): string | null {
  *  - path 根内 + 脚本存在（引用完整）
  *
  * 修复指引：register/deregister 每次变更精提交（只 add 注册表文件）→ 坏表可
- * `git checkout -- <registry>` 恢复（bash 可用时 / 用户手动 / cc_git 无 checkout 子命令——
- * 走 bash git restore，safe-mode 下建议用户介入）。工具只输出指引不代劳（用户拍板）。
+ * `git checkout -- <registry>` 恢复（bash 可用时 / 用户手动 / container_git 无 checkout
+ * 子命令——走 bash git restore，safe-mode 下建议用户介入）。工具只输出指引不代劳（用户拍板）。
  */
 export interface RegistryHealthReport {
   /** 聚合档路径（相对 CCC 根）；无 cccName → null */

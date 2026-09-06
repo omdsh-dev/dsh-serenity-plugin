@@ -189,7 +189,7 @@ describe('msm-ops', () => {
   })
 })
 
-describe('kit-ops: 注册表完整性检查（需求⑤c——acc_kit health registry 段）', () => {
+describe('kit-ops: 注册表完整性检查（需求⑤c——dashboard health registry 段）', () => {
   function writeRegistryFile(rel: string, content: unknown): void {
     const abs = join(dir, rel)
     mkdirSync(join(abs, '..'), { recursive: true })

@@ -21,7 +21,7 @@ import {
 /**
  * localstore-ops 单元测试（S134 重设计：CCC 根 localstore.json + git 策略）。
  * 核心：JSON 单文件 / 双命名空间（credentials 节 + config 节）/ deny 缺省
- * gitignore 物理保证 / cc_git 联动检查。
+ * gitignore 物理保证 / container_git 联动检查。
  */
 
 let dir: string

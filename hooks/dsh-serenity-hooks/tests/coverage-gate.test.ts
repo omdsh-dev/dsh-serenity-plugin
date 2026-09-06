@@ -27,9 +27,10 @@ const SKIP_CLIENT_SUFFIX = ['.tsx', '.css']
 /**
  * 显式间接覆盖白名单（模块无测试直接 import，但经宿主模块被测试执行——覆盖率实证见 coverage 报告）：
  *  - gateway-auth / gateway-proxy：gateway.ts import 它们 → gateway.test.ts 执行（auth 94.7% / proxy 100%）
- *  - tools/* 薄壳（cc-fs/git/kit/msm/handyman/localstore/session/rebuild/cce/eap/neat/autopilot-trajectory）：
- *    纯 defineTool 注册壳，逻辑在 ops 层（fs-ops/git-ops/... 已被各自测试覆盖）；
- *    存在性/注册契约由 register.test.ts（apply 注册 13 工具断言，import index.ts 全链）保障
+ *  - tools/* 薄壳（cc-fs/git/kit/msm/handyman/localstore/session/autopilot-trajectory/cce/eap/neat）：
+ *    纯 defineTool 注册壳或知识内容源（cce/eap/neat 供 praxis import），逻辑在 ops 层
+ *    （fs-ops/git-ops/... 已被各自测试覆盖）；存在性/注册契约由 register.test.ts
+ *    （apply 注册 10 工具断言，import index.ts 全链）保障；praxis 有独立镜像测试
  * 新增 src 模块一律走镜像或直接 import；需间接豁免须在此显式登记 + 注明宿主与实证
  */
 const INDIRECT_COVERED = new Set([
@@ -42,7 +43,7 @@ const INDIRECT_COVERED = new Set([
   'handyman.ts',
   'localstore.ts',
   'session.ts',
-  'rebuild.ts',
+  'autopilot-trajectory.ts',
   'cce.ts',
   'eap.ts',
   'neat.ts',

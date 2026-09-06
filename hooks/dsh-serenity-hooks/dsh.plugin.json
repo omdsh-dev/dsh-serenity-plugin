@@ -1,25 +1,22 @@
 {
   "id": "dsh-serenity-hooks",
-  "version": "1.29.2",
+  "version": "1.30.0",
   "main": "lib/index.js",
-  "description": "宁静号 ACC harness（Native Cordis 插件）：真实 DSH 工具 cc_fs/session/acc_msm/eap/neat/cce/handyman/session_rebuild/skiff_admin + 拦截缝机械约束（safe-mode/路径守卫）+ 高级设定面板（双端口网关/账号管理）+ Skiff 认知子集角色（实验性）。适配 DSH 公开版（0.1.0-rc，deepseek-ai/deepseek-harness）。",
+  "description": "宁静号 ACC harness（Native Cordis 插件）：真实 DSH 工具 container_fs/logbook/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/autopilot-trajectory + 拦截缝机械约束（safe-mode/路径守卫）+ 高级设定面板（双端口网关/账号管理）+ Skiff 认知子集角色（实验性）。适配 DSH 公开版（0.1.0-rc，deepseek-ai/deepseek-harness）。",
   "engines": {
     "dsh": ">=0.1.0-rc.5"
   },
   "contributes": {
     "tools": [
-      "cc_fs",
-      "session",
-      "acc_kit",
-      "cc_git",
-      "acc_msm",
-      "eap",
-      "neat",
-      "cce",
+      "container_fs",
+      "logbook",
+      "dashboard",
+      "container_git",
+      "msm",
+      "praxis",
       "handyman",
-      "session_rebuild",
       "localstore",
-      "skiff_admin",
+      "container_admin",
       "autopilot-trajectory"
     ],
     "skills": []

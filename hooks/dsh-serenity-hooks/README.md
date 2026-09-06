@@ -1,8 +1,8 @@
 # @shgroup/dsh-serenity-hooks
 
-宁静号 ACC（Abstract Cognitive Container）harness — **DeepSeek Harness 原生 Cordis 插件**（npm 发布单元，v1.27.12）。
+宁静号 ACC（Abstract Cognitive Container）harness — **DeepSeek Harness 原生 Cordis 插件**（npm 发布单元，v1.30.0）。
 
-为 DSH 会话提供认知容器基础设施：真实 DSH 工具（13 个）+ 拦截缝机械约束（safe-mode / 路径守卫 / 凭据守卫 / 输出守卫）+ 系统提示词注入（8 块，对齐 opencode-serenity-plugin）+ WebUI 状态胶囊 + 外部访问（双端口网关 / Skiff 问答 / ACP+Skiff 问答页）+ 微信桥（F4c-3 iLink 接入）+ Autopilot Trajectory（时钟驱动自主巡航）。
+为 DSH 会话提供认知容器基础设施：真实 DSH 工具（10 个）+ 拦截缝机械约束（safe-mode / 路径守卫 / 凭据守卫 / 输出守卫）+ 系统提示词注入（8 块，对齐 opencode-serenity-plugin）+ WebUI 状态胶囊 + 外部访问（双端口网关 / Skiff 问答 / ACP+Skiff 问答页）+ 微信桥（F4c-3 iLink 接入）+ Autopilot Trajectory（时钟驱动自主巡航）。
 
 ## 安装
 
@@ -12,9 +12,11 @@ dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
 安装后重启 dsh web。在带 `.serenity` 标记的 CCC 目录中的会话自动获得全部能力。
 
-## 工具（13）
+## 工具（10，v1.30 命名重构：13 → 10 合一）
 
-`cc_fs` / `session` / `acc_kit` / `cc_git` / `acc_msm` / `eap` / `neat` / `cce` / `handyman` / `session_rebuild` / `localstore` / `skiff_admin` / `autopilot-trajectory`
+`container_fs` / `logbook`（含 rebuild）/ `dashboard` / `container_git` / `msm`（单入口执行+发现）/ `praxis`（eap+neat+cce 三合一）/ `handyman` / `localstore` / `container_admin`（role + msm 管理 + config 机务舱）/ `autopilot-trajectory`
+
+> **改名对照**（硬切，无别名）：cc_fs → container_fs · cc_git → container_git · session+session_rebuild → logbook（rebuild 并入）· acc_kit → dashboard · acc_msm → msm（执行）+ container_admin（管理）· eap/neat/cce → praxis · skiff_admin → container_admin role。旧会话历史引用报错时按本表对照即可。
 
 ## 系统提示词（8 块）
 

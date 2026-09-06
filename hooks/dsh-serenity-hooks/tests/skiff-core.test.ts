@@ -49,11 +49,11 @@ function fakeAgent(events: unknown[] = []): { session: { id: string; events: unk
           data: {
             message: {
               content: [{ type: 'text', text: 'the answer' }],
-              tool_calls: [{ name: 'cc_fs', arguments: '{"action":"list"}' }],
+              tool_calls: [{ name: 'container_fs', arguments: '{"action":"list"}' }],
             },
           },
         },
-        { type: 'tool/result', data: { name: 'cc_fs', content: [{ type: 'text', text: 'tool result' }] } },
+        { type: 'tool/result', data: { name: 'container_fs', content: [{ type: 'text', text: 'tool result' }] } },
       )
     },
   }
@@ -359,7 +359,7 @@ describe('skiff-core: skiffTrajectoryEnabled 轨迹纪律子集', () => {
   })
 })
 
-describe('skiff-core: skiffMsmGate acc_msm 白名单门控', () => {
+describe('skiff-core: skiffMsmGate msm 白名单门控', () => {
   const qaId = `${SKIFF_SESSION_PREFIX}qa-1`
 
   beforeEach(() => {
@@ -417,11 +417,11 @@ describe('skiff-core: askSkiff 会话核心', () => {
           data: {
             message: {
               content: [{ type: 'text', text: 'the answer' }],
-              tool_calls: [{ name: 'cc_fs', arguments: '{"action":"list"}' }],
+              tool_calls: [{ name: 'container_fs', arguments: '{"action":"list"}' }],
             },
           },
         },
-        { type: 'tool/result', data: { name: 'cc_fs', content: [{ type: 'text', text: 'tool result' }] } },
+        { type: 'tool/result', data: { name: 'container_fs', content: [{ type: 'text', text: 'tool result' }] } },
       )
     }
     const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'question')
@@ -430,7 +430,7 @@ describe('skiff-core: askSkiff 会话核心', () => {
     // 轨迹 = 本轮新增（before = 0 → 全量）
     expect(result.trajectory.length).toBeGreaterThanOrEqual(3)
     expect(result.trajectory[0]).toEqual({ role: 'user', text: 'question' })
-    expect(result.trajectory.some((t) => t.role === 'assistant' && t.text.includes('cc_fs'))).toBe(true)
+    expect(result.trajectory.some((t) => t.role === 'assistant' && t.text.includes('container_fs'))).toBe(true)
     expect(result.trajectory.some((t) => t.role === 'tool' && t.text.includes('tool result'))).toBe(true)
   })
 
@@ -438,10 +438,10 @@ describe('skiff-core: askSkiff 会话核心', () => {
     const events: unknown[] = []
     const agent = { session: { id: `${SKIFF_SESSION_PREFIX}qa-1`, events }, followup: () => {} }
     agent.followup = () => {
-      events.push({ type: 'tool/result', data: { name: 'cc_fs', content: [{ type: 'text', text: 'r' }] } })
+      events.push({ type: 'tool/result', data: { name: 'container_fs', content: [{ type: 'text', text: 'r' }] } })
     }
     const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.answer).toBe('')
-    expect(result.trajectory).toEqual([{ role: 'tool', text: 'r', tool: 'cc_fs' }])
+    expect(result.trajectory).toEqual([{ role: 'tool', text: 'r', tool: 'container_fs' }])
   })
 })

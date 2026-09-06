@@ -1,5 +1,5 @@
 /**
- * git-ops.ts — cc_git 纯操作层（零 DSH 依赖）
+ * git-ops.ts — container_git 纯操作层（cc_git → container_git，v1.30；零 DSH 依赖）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/git/cc-git-tool.ts）——osp 是 ACC 工具 spec：
  *   - status：JSON {clean, files:[{status,file}], summary}
@@ -59,7 +59,7 @@ function git(root: string, args: string[]): { stdout: string; stderr: string } {
 
 function getCurrentBranch(root: string): string {
   const { stdout } = git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])
-  if (!stdout) throw new Error('cc_git: cannot determine current branch')
+  if (!stdout) throw new Error('container_git: cannot determine current branch')
   return stdout
 }
 
@@ -100,19 +100,19 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       const ls = checkLocalstoreGitCompliance(root)
       if (!ls.ok) throw new Error(ls.reason)
       if (!args.message || args.message.trim() === '') {
-        throw new Error('cc_git commit: missing required arg "message"')
+        throw new Error('container_git commit: missing required arg "message"')
       }
       if (!hasChanges(root)) return '(nothing to commit — working tree clean)'
       const addResult = git(root, ['add', '-A'])
       if (addResult.stderr) {
-        throw new Error(`cc_git commit: git add failed\n${addResult.stderr}`)
+        throw new Error(`container_git commit: git add failed\n${addResult.stderr}`)
       }
       const commitResult = git(root, ['commit', '-m', args.message])
       if (commitResult.stderr && commitResult.stderr.includes('nothing to commit')) {
         return '(nothing to commit — working tree clean)'
       }
       if (commitResult.stderr && !commitResult.stdout) {
-        throw new Error(`cc_git commit: git commit failed\n${commitResult.stderr}`)
+        throw new Error(`container_git commit: git commit failed\n${commitResult.stderr}`)
       }
       const output = commitResult.stdout || commitResult.stderr || 'committed'
       return output.trimEnd()
@@ -120,7 +120,7 @@ export function runGit(root: string, args: GitArgs): JsonValue {
     case 'push': {
       if (!hasRemote(root)) {
         throw new Error(
-          'cc_git push: no remote configured. Add one with:\n  git remote add origin <url>',
+          'container_git push: no remote configured. Add one with:\n  git remote add origin <url>',
         )
       }
       const branch = getCurrentBranch(root)
@@ -134,17 +134,17 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       // 含 `->`——旧逻辑先判 `stderr.includes('->')` 成功会把拒绝当成功（osp 同病，用户实测
       // non-fast-forward exit 1 却返回 "Pushed to ..."，提交从未上远程）
       if (stderr.includes('non-fast-forward') || stderr.includes('rejected') || stderr.includes('[rejected]')) {
-        return `[REJECTED] Push to origin/${branch} was rejected (non-fast-forward).\n\nRemote has new commits and your local branch is behind. Suggested actions:\n  1. Use bash: git fetch origin ${branch}\n  2. Inspect remote changes: git log HEAD..origin/${branch}\n  3. Merge or rebase: git merge origin/${branch} or git rebase origin/${branch}\n  4. Resolve conflicts manually if any: git add ... && git commit\n  5. Push again: cc_git push`
+        return `[REJECTED] Push to origin/${branch} was rejected (non-fast-forward).\n\nRemote has new commits and your local branch is behind. Suggested actions:\n  1. Use bash: git fetch origin ${branch}\n  2. Inspect remote changes: git log HEAD..origin/${branch}\n  3. Merge or rebase: git merge origin/${branch} or git rebase origin/${branch}\n  4. Resolve conflicts manually if any: git add ... && git commit\n  5. Push again: container_git push`
       }
       if (!stderr || stderr.includes('->') || stderr === '') {
         return stdout || `Pushed to origin/${branch}`
       }
-      throw new Error(`cc_git push failed:\n${stderr}`)
+      throw new Error(`container_git push failed:\n${stderr}`)
     }
     case 'pull': {
       if (!hasRemote(root)) {
         throw new Error(
-          'cc_git pull: no remote configured. Add one with:\n  git remote add origin <url>',
+          'container_git pull: no remote configured. Add one with:\n  git remote add origin <url>',
         )
       }
       const branch = getCurrentBranch(root)
@@ -164,9 +164,9 @@ export function runGit(root: string, args: GitArgs): JsonValue {
         mergeResult.stderr.includes('rejected') ||
         mergeResult.stderr.includes('could not be applied')
       ) {
-        return `[REJECTED] Pull from origin/${branch} was rejected (non-fast-forward).\n\nRemote has new commits and your local history diverged from remote (non-fast-forward). Suggested actions:\n  1. Inspect differences: cc_git log HEAD..origin/${branch}\n  2. Merge manually with bash: git merge origin/${branch}\n  3. Or rebase: git rebase origin/${branch}\n  4. Resolve conflicts manually if any: git add <file> && git commit\n  5. Push: cc_git push`
+        return `[REJECTED] Pull from origin/${branch} was rejected (non-fast-forward).\n\nRemote has new commits and your local history diverged from remote (non-fast-forward). Suggested actions:\n  1. Inspect differences: container_git log HEAD..origin/${branch}\n  2. Merge manually with bash: git merge origin/${branch}\n  3. Or rebase: git rebase origin/${branch}\n  4. Resolve conflicts manually if any: git add <file> && git commit\n  5. Push: container_git push`
       }
-      throw new Error(`cc_git pull failed:\n${mergeResult.stderr}`)
+      throw new Error(`container_git pull failed:\n${mergeResult.stderr}`)
     }
     case 'log': {
       // 对齐 osp：-n 默认 10，max 100（运行时兜底 + schema minimum/maximum 双保险）

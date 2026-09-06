@@ -75,7 +75,7 @@ export function identityBlock(root: string): string {
     '',
     'The DSH platform tools remain available too (read/write/edit/glob/grep/web_search/ask_user_question/subagent/workflow/goal and more) — the ACC tools are the serenity-native layer, not the only tools.',
     '',
-    'Additional MSMs registered by this CCC are available — call acc_msm list to discover them.',
+    'Additional MSMs registered by this CCC are available — call msm("<name>") to execute or discover them (see the "Serenity Tools" heading below).',
     '',
   ].join('\n')
 }
@@ -85,7 +85,7 @@ export function identityBlock(root: string): string {
  * 原 accBlock 内嵌 13 行工具清单 → 独立成块放装配末尾（SKILL 后、Session 前）。
  * 身份先行（认知轨迹开头不被 13 行清单干扰）、工具参考殿后（需要时再看）。
  * 附带 MSM 调用示例（用户拍板：顶层提示词加调用方式说明，避免偶发调用错误——
- * 模型对 acc_msm 参数面/协议 flag 理解不稳）。
+ * 模型对 msm 参数面/协议 flag 理解不稳）。
  */
 export function toolsBlock(): string {
   return [
@@ -93,27 +93,22 @@ export function toolsBlock(): string {
     '=== Serenity Tools ===',
     'The ACC (this plugin) provides the following built-in tools:',
     '',
-    '  cc_fs     — CCC filesystem operations (root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
-    '  session   — session lifecycle (list/show/create/use/close/health/qa/archive/summary/hook-develop-guide)',
-    '  acc_kit   — ACC utility kit (health: CCC three principles + MSM registry integrity report / time: now / wait: wait N seconds)',
-    '  cc_git    — git operations (status/commit/push/log)',
-    '  acc_msm   — MSM framework (list/exec/register/deregister/check/guide/catalog/ccc-config)',
-    '  eap       — return the full EAP cognitive quality framework',
-    '  neat      — return the full Neat design collaboration protocol',
-    '  cce       — return the full Cognitive Continuity Engineering framework',
-    '  handyman  — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done; jobs=[] orchestrates parallel work',
-    '  session_rebuild — rebuild this conversation in place from SESSION.md when the trajectory-tracker trips',
-    '  localstore — ACC local credential/config storage (CCC-root localstore.json, JSON format; git policy localstore.gitTrack default deny); doc subcommand outputs the spec',
-    '  skiff_admin — Skiff (F4, experimental): CCC cognitive-subset roles — guide (definition tutorial) / validate (config check) / apply (validate + confirm live) / list (role summary)',
+    '  container_fs — container filesystem operations (15 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
+    '  logbook      — the voyage\'s logbook: work-session lifecycle (list/show/create/use/close/health/qa/archive/summary/rebuild/hook-develop-guide)',
+    '  dashboard    — always-on container instruments: health (CCC three-principle check + registry integrity) / time (now) / wait (N seconds)',
+    '  container_git— git operations (status/commit/push/log)',
+    '  msm          — execute a registered CCC MSM: msm(name, args); partial name returns candidates; inspect=true shows usage',
+    '  praxis       — actionable theory injection: praxis (index) / praxis eap / praxis neat / praxis cce',
+    '  handyman     — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done; jobs=[] orchestrates parallel work',
+    '  localstore   — ACC local credential/config storage (CCC-root localstore.json; git policy localstore.gitTrack default deny)',
+    '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config',
     '  autopilot-trajectory — Autopilot Trajectory one-stop management (all/init/random/diag/doc/check/status/guide)',
     '',
-    'First-time in a CCC? Run acc_msm catalog — ACC usage directory (capability areas + where each guide lives).',
-    '',
-    'MSM call protocol (registered CCC MSMs, deterministic Mech & Semi-Mech):',
-    '  1. Discover:       acc_msm list                    — list all registered MSMs',
-    '  2. Inspect usage:  acc_msm exec <name> --schema 1  — print one MSM\'s usage/flags (protocol flag, no execution)',
-    '  3. Execute:        acc_msm exec <name> <args...>   — run the MSM with business args (first arg may be --list/--schema/--format=json)',
-    '  Register new MSMs with acc_msm register; deregister with acc_msm deregister (registry is ACC-managed — never edit mech-registry.json directly).',
+    'MSM call (registered CCC MSMs, deterministic Mech & Semi-Mech):',
+    '  Execute:       msm("<name>", ["<arg1>", "<arg2>"])   — run a registered MSM directly (partial name returns matching candidates)',
+    '  Inspect:       msm("<name>", [], inspect=true)       — view that MSM\'s usage/flags without running',
+    '  Index:         msm()                                 — summary of registered MSMs by skill',
+    '  Manage:        container_admin msm register|deregister|check (registry is ACC-managed — never edit mech-registry.json directly)',
     '',
   ].join('\n')
 }
@@ -190,7 +185,7 @@ export function principlesBlock(root: string, omitMsmPrinciples = false): string
     'The session-trajectory relation: a session is the rebuildable carrier of a',
     'trajectory. SESSION.md is the trajectory\'s persistent body — it never moves;',
     'the current conversation is a temporary work copy that may be discarded and',
-    'rebuilt (session_rebuild). Identity belongs to the trajectory, not to any',
+    'rebuilt (logbook rebuild). Identity belongs to the trajectory, not to any',
     'session.',
     '',
   ]
@@ -209,7 +204,7 @@ export function principlesBlock(root: string, omitMsmPrinciples = false): string
     'Operational boundaries:',
     `Root: ${root}`,
     '  • File access — read/edit/write/grep/glob are confined to Root; paths outside Root are rejected (RR5)',
-    '  • Shell — use acc_msm by default. Note: bash may be disabled',
+    '  • Shell — use msm by default. Note: bash may be disabled',
     '  • Subagent — copies ALL parent constraints: file boundary, shell rules, session rules (no bypass)',
     '  • Session-first — before starting multi-step work, propose an existing or new AGENT_SESSIONS entry; wait for user "use" or "使用" to confirm',
     '',
@@ -396,7 +391,7 @@ export function localstoreBlock(root: string): string {
           '=== Serenity Localstore ===',
           'localstore.json is a local private file (gitTrack=deny — not committed to git,',
           '.gitignore enforced). Credentials/config live only on this machine: do not write',
-          'them into conversation or logs; do not attempt to commit this file (cc_git will refuse).',
+          'them into conversation or logs; do not attempt to commit this file (container_git will refuse).',
           '',
         ]
   return lines.join('\n')
@@ -528,8 +523,8 @@ export function codeModeAdaptationLine(ctx: Context, scope?: unknown): string {
   return [
     '',
     '=== Serenity Code Mode ===',
-    'This session renders tools in Code Mode: direct calls to ACC tool names (cc_fs/acc_msm etc.) are rejected (UNKNOWN_TOOL).',
-    'Call them inside a single run_code program via the generated SDK bindings: `await tools.cc_fs(...)`, `await tools.acc_msm(...)`.',
+    'This session renders tools in Code Mode: direct calls to ACC tool names (container_fs/msm etc.) are rejected (UNKNOWN_TOOL).',
+    'Call them inside a single run_code program via the generated SDK bindings: `await tools.container_fs(...)`, `await tools.msm(...)`.',
     'The program only returns what you print/return — curate your output.',
     '',
   ].join('\n')

@@ -385,7 +385,7 @@ export function skiffTrajectoryEnabled(
   return trajectorySubset(role)[key]
 }
 
-// ── acc_msm 白名单门控（F4b ⑨）──
+// ── msm 白名单门控（F4b ⑨）──
 
 export interface SkiffMsmGate {
   /** 拒绝原因（有则拒绝执行） */
@@ -395,7 +395,7 @@ export interface SkiffMsmGate {
 }
 
 /**
- * acc_msm 的 Skiff 门控：非 skiff 会话恒放行；skiff 会话——
+ * msm 工具的 Skiff 门控：非 skiff 会话恒放行；skiff 会话——
  * exec 非白名单 MSM 拒绝（不列名单）、register/deregister 必拒、
  * list 白名单过滤、check/guide/ccc-config 只读放行。
  */

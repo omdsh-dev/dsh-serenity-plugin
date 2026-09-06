@@ -37,7 +37,7 @@ function writeRegistry(entries: Array<{ name: string; path: string }>): void {
   )
 }
 
-describe('skiff_admin: guide 定义教程', () => {
+describe('skiff 角色逻辑（skiff-admin.ts——v1.30 起归 container_admin role 域）: guide 定义教程', () => {
   it('含概念/schema/双白名单/认知 MSM 写法/轨迹纪律/示例角色', () => {
     expect(SKIFF_GUIDE).toContain('Skiff Definition Guide')
     expect(SKIFF_GUIDE).toContain('任意子集角色')
@@ -54,7 +54,7 @@ describe('skiff_admin: guide 定义教程', () => {
   })
 })
 
-describe('skiff_admin: validateSkiffConfig 配置校验', () => {
+describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: validateSkiffConfig 配置校验', () => {
   it('无角色 → ok（skiff disabled 零影响）', () => {
     writeConfig({})
     const r = validateSkiffConfig(dir)
@@ -127,7 +127,7 @@ describe('skiff_admin: validateSkiffConfig 配置校验', () => {
   })
 })
 
-describe('skiff_admin: listSkiffRoles 角色摘要', () => {
+describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: listSkiffRoles 角色摘要', () => {
   it('无角色 → note', () => {
     writeConfig({})
     const r = listSkiffRoles(dir) as { roles: unknown[]; note: string }
@@ -173,7 +173,7 @@ describe('skiff_admin: listSkiffRoles 角色摘要', () => {
   })
 })
 
-describe('skiff_admin: applySkiffConfig 显式生效机制（v1.25.3）', () => {
+describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: applySkiffConfig 显式生效机制（v1.25.3）', () => {
   it('合法配置 → applied true + 绑定 CCC + 角色清单', () => {
     writeConfig({
       handyman: { models: ['m/M3'] },

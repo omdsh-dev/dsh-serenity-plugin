@@ -157,10 +157,10 @@ describe('skiff-role: 子集与白名单纯函数', () => {
     expect(trajectorySubset({ msms: ['x'] })).toEqual({ session: false, keeper: false, rebuild: false })
   })
 
-  it('roleToolWhitelist：tools + msms 非空时 acc_msm 自动可用', () => {
-    expect([...roleToolWhitelist(full)].sort()).toEqual(['acc_msm', 'grep', 'read', 'write'])
+  it('roleToolWhitelist：tools + msms 非空时 msm 自动可用', () => {
+    expect([...roleToolWhitelist(full)].sort()).toEqual(['grep', 'msm', 'read', 'write'])
     expect([...roleToolWhitelist({ tools: ['read'] })].sort()).toEqual(['read'])
-    expect([...roleToolWhitelist({ msms: ['x'] })].sort()).toEqual(['acc_msm'])
+    expect([...roleToolWhitelist({ msms: ['x'] })].sort()).toEqual(['msm'])
     expect([...roleToolWhitelist(undefined)].sort()).toEqual([])
   })
 
@@ -177,7 +177,7 @@ describe('skiff-role: buildSkiffBasePrompt 动态基础提示词', () => {
     expect(p).toContain('Role: qa-readonly (defined by this CCC)')
     expect(p).toContain('MSMs: cognitive-qa')
     expect(p).toContain('Tools: read')
-    expect(p).toContain('acc_msm exec <name> [args...]')
+    expect(p).toContain('msm("<name>", ["<args>"])')
     expect(p).toContain('No other tools are available.')
   })
 

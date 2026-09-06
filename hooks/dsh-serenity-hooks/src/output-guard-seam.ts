@@ -8,7 +8,7 @@
  * 作用范围（v1.26.3 用户拍板）：**仅外部面**——skiff/ACP/问答页等对外输出会话
  * （session id `skiff-`/`acp-`/`rebuild-` 前缀；v1.22.4 rebuild 新建会话同面）。
  * **本地维护会话（普通 dsh 会话）不检测**——维护会话必然提及机制词
- * （dsh-serenity-hooks/session_rebuild/mech-registry），打回会瘫痪自身工作。
+ * （dsh-serenity-hooks/logbook rebuild/mech-registry），打回会瘫痪自身工作。
  */
 
 import type { Context } from 'cordis'

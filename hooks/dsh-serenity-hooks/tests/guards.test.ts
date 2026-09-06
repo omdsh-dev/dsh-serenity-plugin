@@ -78,32 +78,32 @@ describe('guards: decideGuard 纯决策', () => {
     expect(decideGuard(base({ toolName: 'write', pathArg: '.serenity' })).kind).toBe('deny')
   })
 
-  it('cc_fs 只读子命令（exists/list/tree）→ 黑名单不拦（对齐 read 语义）', () => {
-    // 用户实测：cc_fs exists REPOSITORIES/arsenal 被误拦（v1.19.0 后修复）
-    const d = decideGuard(base({ toolName: 'cc_fs', action: 'exists', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' }))
+  it('container_fs 只读子命令（exists/list/tree）→ 黑名单不拦（对齐 read 语义）', () => {
+    // 用户实测：container_fs exists REPOSITORIES/arsenal 被误拦（v1.19.0 后修复）
+    const d = decideGuard(base({ toolName: 'container_fs', action: 'exists', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' }))
     expect(d.kind).toBe('allow')
-    expect(decideGuard(base({ toolName: 'cc_fs', action: 'list', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/' })).kind).toBe('allow')
-    expect(decideGuard(base({ toolName: 'cc_fs', action: 'tree', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
-    expect(decideGuard(base({ toolName: 'cc_fs', action: 'info', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'container_fs', action: 'list', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/' })).kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'container_fs', action: 'tree', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
+    expect(decideGuard(base({ toolName: 'container_fs', action: 'info', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
   })
 
-  it('cc_fs 写子命令（mkdir/rm/mv/cp/touch/append）→ 黑名单仍拦', () => {
+  it('container_fs 写子命令（mkdir/rm/mv/cp/touch/append）→ 黑名单仍拦', () => {
     for (const action of ['mkdir', 'rm', 'mv', 'cp', 'touch', 'append']) {
-      const d = decideGuard(base({ toolName: 'cc_fs', action, blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal/x' }))
+      const d = decideGuard(base({ toolName: 'container_fs', action, blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal/x' }))
       expect(d.kind).toBe('deny')
       expect(d.deny).toContain('blacklist')
     }
   })
 
-  it('cc_fs 无 action（参数缺失）→ 不按写类拦截（保守 allow，越界仍拦）', () => {
-    expect(decideGuard(base({ toolName: 'cc_fs', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
+  it('container_fs 无 action（参数缺失）→ 不按写类拦截（保守 allow，越界仍拦）', () => {
+    expect(decideGuard(base({ toolName: 'container_fs', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
     // 越界检查不受影响
-    expect(decideGuard(base({ toolName: 'cc_fs', pathArg: '../escape' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'container_fs', pathArg: '../escape' })).kind).toBe('deny')
   })
 
-  it('cc_fs 治理文件保护：写子命令写 .serenity → deny；只读子命令 → allow', () => {
-    expect(decideGuard(base({ toolName: 'cc_fs', action: 'touch', pathArg: '.serenity' })).kind).toBe('deny')
-    expect(decideGuard(base({ toolName: 'cc_fs', action: 'exists', pathArg: '.serenity' })).kind).toBe('allow')
+  it('container_fs 治理文件保护：写子命令写 .serenity → deny；只读子命令 → allow', () => {
+    expect(decideGuard(base({ toolName: 'container_fs', action: 'touch', pathArg: '.serenity' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'container_fs', action: 'exists', pathArg: '.serenity' })).kind).toBe('allow')
   })
 
   // ── v1.26.3 数据面守卫：localstore.json 凭据文件任何工具不可读（S142 用户指令）──
@@ -116,17 +116,17 @@ describe('guards: decideGuard 纯决策', () => {
     expect(decideGuard(base({ toolName: 'read', safeModeOn: true, pathArg: 'localstore.json' })).kind).toBe('deny')
   })
 
-  it('grep/glob/cc_fs 只读子命令 localstore.json → deny（数据面不看工具读写性）', () => {
+  it('grep/glob/container_fs 只读子命令 localstore.json → deny（数据面不看工具读写性）', () => {
     expect(decideGuard(base({ toolName: 'grep', pathArg: 'localstore.json' })).kind).toBe('deny')
     expect(decideGuard(base({ toolName: 'glob', pathArg: 'localstore.json' })).kind).toBe('deny')
-    expect(decideGuard(base({ toolName: 'cc_fs', action: 'info', pathArg: 'localstore.json' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'container_fs', action: 'info', pathArg: 'localstore.json' })).kind).toBe('deny')
     // 嵌套目录同名文件不误伤（凭据文件只在根）
     expect(decideGuard(base({ toolName: 'read', pathArg: 'docs/localstore.json' })).kind).toBe('allow')
   })
 
   it('写工具 localstore.json → deny（写入同样阻断——凭据文件不可由 agent 改写）', () => {
     expect(decideGuard(base({ toolName: 'write', pathArg: 'localstore.json' })).kind).toBe('deny')
-    expect(decideGuard(base({ toolName: 'cc_fs', action: 'touch', pathArg: 'localstore.json' })).kind).toBe('deny')
+    expect(decideGuard(base({ toolName: 'container_fs', action: 'touch', pathArg: 'localstore.json' })).kind).toBe('deny')
   })
 
   it('凭据文件守卫先于黑名单/读保护（localstore.json 恒 deny 无论 blacklist）', () => {
@@ -278,12 +278,12 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
     }
   })
 
-  it('msms 非空 → acc_msm 通道自动可用', () => {
-    expect(decideGuard(base({ root: dir, toolName: 'acc_msm', skiffSessionId: QA_ID })).kind).toBe('allow')
+  it('msms 非空 → msm 通道自动可用', () => {
+    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffSessionId: QA_ID })).kind).toBe('allow')
   })
 
   it('白名单外工具 → deny（拒绝信息不泄漏白名单外工具名）', () => {
-    for (const tool of ['write', 'edit', 'bash', 'web_search', 'cc_fs']) {
+    for (const tool of ['write', 'edit', 'bash', 'web_search', 'container_fs']) {
       const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: QA_ID }))
       expect(d.kind).toBe('deny')
       expect(d.deny).toContain('skiff role')
@@ -303,7 +303,7 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
     expect(decideGuard(base({ root: dir, toolName: 'handyman', skiffSessionId: 'handyman-x' })).kind).toBe('allow')
   })
 
-  it('角色 tools 空（纯 MSM 角色）→ 仅 acc_msm 可用', () => {
+  it('角色 tools 空（纯 MSM 角色）→ 仅 msm 可用', () => {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
@@ -311,7 +311,7 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
     )
     registerSkiffSession('skiff-pure-1', 'pure', dir)
     try {
-      expect(decideGuard(base({ root: dir, toolName: 'acc_msm', skiffSessionId: 'skiff-pure-1' })).kind).toBe('allow')
+      expect(decideGuard(base({ root: dir, toolName: 'msm', skiffSessionId: 'skiff-pure-1' })).kind).toBe('allow')
       expect(decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-pure-1' })).kind).toBe('deny')
     } finally {
       unregisterSkiffSession('skiff-pure-1')
@@ -345,29 +345,29 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
   it('write/edit 直写 cccName 聚合档 → deny（ACC-managed）', () => {
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: aggRel })).kind).toBe('deny')
     expect(decideGuard(base({ root: dir, toolName: 'edit', pathArg: aggRel })).kind).toBe('deny')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'touch', pathArg: aggRel })).kind).toBe('deny')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'append', pathArg: aggRel })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'touch', pathArg: aggRel })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'append', pathArg: aggRel })).kind).toBe('deny')
   })
 
   it('root 级 mech-registry.json 写 → allow（review P1：废弃形态不再保护——永不被读的文件保护=死锁，可删可迁移）', () => {
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'mech-registry.json' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: 'mech-registry.json' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: 'mech-registry.json' })).kind).toBe('allow')
   })
 
   it('聚合档 references/ 祖先目录写 → deny（review P2-2：rm -r references/ 会绕过文件级保护删掉注册表）', () => {
     // references/ 目录本身
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test/references/' })).kind).toBe('deny')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'mv', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: '.opencode/skills/test/references/' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'mv', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
     // 共享父目录不误伤（.opencode/skills 属所有 skill——删它不属于本 CCC 专属保护）
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: '.opencode/skills/test' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: '.opencode/skills' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: '.opencode' })).kind).toBe('allow')
   })
 
   it('读工具读注册表 → allow（注册表需被读——output-guard/skiff-admin 建 MSM 词表；读 deny 只用于凭据）', () => {
     expect(decideGuard(base({ root: dir, toolName: 'read', pathArg: aggRel })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'info', pathArg: aggRel })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'info', pathArg: aggRel })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'grep', pathArg: aggRel })).kind).toBe('allow')
   })
 
@@ -385,16 +385,16 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
     const sibling = '.opencode/skills/test/references/msm-writing-standards.md'
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: sibling })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'edit', pathArg: sibling })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'touch', pathArg: sibling })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'append', pathArg: sibling })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: sibling })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'touch', pathArg: sibling })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'append', pathArg: sibling })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: sibling })).kind).toBe('allow')
     // 子树深层（references/sub/x.md）同样放行——只目录节点本身受保护
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: '.opencode/skills/test/references/sub/x.md' })).kind).toBe('allow')
   })
 
   it('references/ 目录节点本身 rm -r/mv → deny（review P1-1 收窄后仍防删目录绕过）', () => {
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'rm', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
-    expect(decideGuard(base({ root: dir, toolName: 'cc_fs', action: 'mv', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'mv', pathArg: '.opencode/skills/test/references' })).kind).toBe('deny')
   })
 
   it('cccName 非 test 的 CCC（.serenity=other）→ 只保护自己的聚合档，test 聚合档对其不保护', () => {

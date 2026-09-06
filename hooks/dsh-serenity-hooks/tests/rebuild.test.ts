@@ -247,12 +247,12 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(result.anchor).toContain(`SESSION.md path: AGENT_SESSIONS/${dirName}/SESSION.md`)
   })
 
-  it('queueRebuild：无任何会话上下文 → 抛错引导 session use（v1.24.11 绝不写虚假路径）', async () => {
+  it('queueRebuild：无任何会话上下文 → 抛错引导 logbook use（v1.24.11 绝不写虚假路径）', async () => {
     const session = fakeSession([10])
     const ctx = { sessions: { get: () => session } } as never
     await expect(
       queueRebuild(ctx, { root: dir, summary: '无上下文', agentCwd: dir, dshSessionId: 'solo' }),
-    ).rejects.toThrow(/session use/)
+    ).rejects.toThrow(/logbook use/)
     expect(pendingRebuildSnapshot().has('solo')).toBe(false)
   })
 
@@ -415,14 +415,14 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
 })
 
 describe('F2: rebuildReminderText（轨迹跟踪器提示，需求① K 数值化）', () => {
-  it('含 K 占用 + 持久轨迹/临时副本语义 + session_rebuild 引导', () => {
+  it('含 K 占用 + 持久轨迹/临时副本语义 + logbook rebuild 引导', () => {
     const t = rebuildReminderText(930, 900)
     expect(t).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
     expect(t).toContain('930K')
     expect(t).toContain('threshold 900K')
     expect(t).toContain('persistent body')
     expect(t).toContain('rebuildable carrier')
-    expect(t).toContain('session_rebuild')
+    expect(t).toContain('logbook rebuild')
     // v1.24.12 沉淀协议（S142 用户需求）：rebuild 前修订 skill / 新建 skill 写 SESSION 提案
     expect(t).toContain('revise the relevant existing skill')
     expect(t).toContain('SESSION.md')

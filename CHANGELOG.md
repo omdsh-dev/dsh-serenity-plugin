@@ -1,3 +1,60 @@
+## v1.30.0 — 2026-09-06（ACC 工具面重构：13 → 10 合一，S142 用户逐项裁决）
+
+**Scope:** 用户拍板"工具面越小执行越好 + msm 重构直觉入口"——ACC 工具面从 13 个重组为 10 个：container 族命名（继承 ACC/CCC 背景）+ 知识工具三合一 praxis + session/session_rebuild 并入 logbook + acc_kit→dashboard + admin 全含 container_admin（机务舱）+ acc_msm 拆 msm 单入口（执行+发现）与 container_admin（管理）。方案 `docs/acc-tool-naming-rework.md`（v1.0 FINAL）+ `docs/acc-tool-merge-and-msm-entry-rework.md`（前版）。
+
+### 用户裁决链（R↓ 全录）
+① msm 单入口同意 → ② 命名继承背景（cc_xx→container_xx）/metaphor → ③ eap/neat/cce 合并但名要好（praxis 从 drawing/blueprint/doctrine/lenses/canon/tenets 中选）→ ④ container_admin 合并 skiff_admin 及系列 admin → ⑤ session→logbook（The Logbook 隐喻）→ ⑥ kit→dashboard（普适仪表；bridge 否——隐喻冲突）→ ⑦ **praxis 定名**（可实践理论注入）→ ⑧ admin 全含（机务舱）→ ⑨ **硬切无别名**（A）→ ⑩ R2+知识合并一起做
+
+### 目标形态（13 → 10）
+`container_fs` / `container_git` / `container_admin` / `msm` / `praxis` / `logbook` / `dashboard` / `handyman` / `localstore` / `autopilot-trajectory`
+
+| 新工具 | 旧名 | 覆盖 | 隐喻 |
+|--------|------|------|------|
+| container_fs | cc_fs | 文件系统 15 子命令 | The Hull |
+| container_git | cc_git | git 操作 | The Hull |
+| container_admin | skiff_admin + acc_msm 管理面 | role（Skiff 角色）+ msm（register/deregister/check/guide/catalog/ccc-config）+ config | The Manifest + Crew（机务舱） |
+| msm | acc_msm 执行面 | MSM 单入口执行+发现（name 自由文本默认执行 + 未命中候选 + inspect + 无参目录） | The Machinery |
+| praxis | eap + neat + cce | 可实践理论注入（section: eap/neat/cce） | Engineering Drawings |
+| logbook | session + session_rebuild | 会话全周期 + rebuild | The Logbook / Theseus |
+| dashboard | acc_kit | health/time/wait（普适仪表） | 舰桥仪表盘 |
+| handyman | handyman | 杂工编排 | Crew Rotation |
+| localstore | localstore | 凭据/配置存储 | 保留 |
+| autopilot-trajectory | 同 | 自主巡航 | 保留 |
+
+### 代码实现
+- `tools/msm.ts` 重写单入口（3 参数 name/args/inspect；buildMsmIndex 无参目录 + suggestMsm 模糊候选 + inspect 走 --schema 协议 + skiff 白名单门控保留）
+- `tools/praxis.ts` 新建（import eap/neat/cce 的 CONTENT 常量——三源文件保留为内容提供者）
+- `tools/container-admin.ts` 新建（domain: role/msm/config；role→skiff-admin 逻辑 import；msm→runMsm 管理 action；register/deregister 经 skiffMsmGate 拒绝）
+- 改名：cc-fs.ts→container_fs / git.ts→container_git / kit.ts→dashboard / session.ts→logbook（+rebuild action 并入：SESSION_ACTIONS + 'rebuild' case 调 queueRebuild）
+- `index.ts` 注册 10 工具（移除 eap/neat/cce/skiff_admin/session_rebuild 独立注册；rebuild.ts/skiff-admin.ts 保留为内部逻辑文件）
+- `invariant.ts` REGISTERED_TOOLS → 10 新名；`dsh.plugin.json` contributes.tools → 10 新名
+- `system-prompt.ts` toolsBlock 重写（10 行 + msm 单入口 4 行协议）
+- **内部文件名不改**（session-ops/fs-ops/rebuild.ts/skiff-admin.ts）——只改 defineTool 对外注册名 + 引用该名的守卫/白名单/文案；内部函数 import 不变
+
+### seams/文案同步（全仓引用旧名清理）
+- `guards.ts` WRITE_TOOLS/CC_FS_WRITE_ACTIONS/isReadTool/isWriteTool/extractAction + 注册表保护提示 → container_fs / container_admin msm
+- `ccc.ts` WRITE_TOOLS → container_fs
+- `keeper.ts` SCORES → msm/container_fs；rebuildReminderText（普通+升级）session_rebuild → logbook rebuild
+- `skiff-role.ts` roleToolWhitelist → msm（msms 非空时 MSM 通道自动可用）；buildSkiffBasePrompt msm 调用法
+- `output-guard.ts` 机制词表删 session_rebuild（旧工具名已不存在；logbook/container_admin 是对外工具名不入敏感词表——防外部面误伤）
+- `system-prompt.ts` identityBlock MSM 发现行 / principlesBlock use msm / localstoreBlock container_git / CodeMode container_fs/msm
+- `msm-ops.ts` ACC_CATALOG 7 分区 + MSM_GUIDE + CCC_CONFIG_REFERENCE 全改新名；默认 usage `msm <name> [args...]`
+- `fs-ops.ts` / `git-ops.ts` / `kit-ops.ts` / `localstore-ops.ts` 错误文案与注释全同步
+- `SettingsSection.tsx` 超限重建面板文案 → logbook rebuild
+- `experiments/autopilot-trajectory/SKILL.md` → msm autopilot-trajectory
+
+### 死代码清理
+- 删除 `src/tools/rebuild.ts`（session_rebuild 壳——logbook 已内联 rebuild action；服务端 src/rebuild.ts 保留）
+- `skiff-admin.ts` 剥离死 defineTool 壳（container_admin role 域只 import 逻辑 + SKIFF_GUIDE）
+- `tools/eap.ts`/`neat.ts`/`cce.ts` 保留为 praxis 内容源（知识常量导出）
+
+### 测试
+- **62 files / 895 tests 全绿**（新增：praxis.test.ts 6 用例镜像——coverage-gate 修复；container-admin.test.ts 10 用例 2026-09-06 早前已建）+ 全量断言同步（guards/skiff-role/skiff-core/keeper/output-guard/rebuild/osp-alignment/system-prompt/acc-extras/localstore/ops/skiff-admin）；typecheck ✓（node + client）；build ✓
+- coverage-gate INDIRECT_COVERED 白名单清理（删 rebuild.ts，praxis 走独立镜像）
+
+### 发布链
+- bump v1.30.0（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推 → deploy → restart-web → 本地安装（D14 等用户显式要求）
+
 ## v1.29.2 — 2026-09-06（rebuild 任务焦点传递 + autopilot bound 优先唤起，S142 用户两项修正）
 
 **Scope:** 用户两项修正——① session_rebuild 应能传递简短任务焦点文字到重建后会话（不含历史——历史完整在 SESSION.md）② autopilot-trajectory 会话绑定更稳固（唤起时能唤起最新的、绑定 autopilot SESSION 的会话）。方案 `docs/rebuild-focus-note-and-autopilot-bound-wake.md`。

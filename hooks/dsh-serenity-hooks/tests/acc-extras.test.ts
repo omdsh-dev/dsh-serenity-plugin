@@ -45,9 +45,10 @@ describe('msm: guide + 协议 flag + path-arg', () => {
       expect(r.catalog).toContain(area)
     }
     // 各详细入口指引（目录指向 guide，不复制全文）
-    expect(r.catalog).toContain('ccc-config')
-    expect(r.catalog).toContain('skiff_admin')
-    expect(r.catalog).toContain('weixin-doctor guide')
+    expect(r.catalog).toContain('container_admin')
+    expect(r.catalog).toContain('logbook')
+    expect(r.catalog).toContain('msm("<name>"')
+    expect(r.catalog).toContain('weixin-doctor')
     expect(r.catalog).toContain('handyman')
     // 单一真相源声明
     expect(r.catalog).toContain('guides live with their feature')

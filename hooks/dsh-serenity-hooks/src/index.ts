@@ -4,7 +4,7 @@
  * 形态（DSH 官方 native hook 约定）：name / inject / Config / apply，无 default export。
  *
  * 能力：
- *   1. 真实 DSH 工具注册：cc_fs（文件系统 15 子命令，含 reveal）、session（会话全周期 7 子命令）
+ *   1. 真实 DSH 工具注册：container_fs（文件系统 15 子命令，含 reveal）、logbook（会话全周期含 rebuild）
  *   2. 拦截缝机械约束：tools/pre-execute + ctx.tools.guard（安全模式/黑名单/路径守卫）
  *
  * 加载：~/.dsh/config.yaml 加 insert 行（免改 DSH 源码），插件包装入 DSH node_modules。
@@ -18,14 +18,11 @@ import { ccFsTool } from './tools/cc-fs.js'
 import { kitTool } from './tools/kit.js'
 import { gitTool } from './tools/git.js'
 import { msmTool } from './tools/msm.js'
-import { eapTool } from './tools/eap.js'
-import { neatTool } from './tools/neat.js'
-import { cceTool } from './tools/cce.js'
+import { praxisTool } from './tools/praxis.js'
 import { createHandymanTool } from './tools/handyman.js'
 import { createSessionTool } from './tools/session.js'
-import { createRebuildTool } from './tools/rebuild.js'
 import { localstoreTool } from './tools/localstore.js'
-import { skiffAdminTool } from './tools/skiff-admin.js'
+import { containerAdminTool } from './tools/container-admin.js'
 import { createAutopilotTool } from './tools/autopilot-trajectory.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
@@ -109,18 +106,15 @@ export const Config: z<Config> = z.object({
 
 export function apply(ctx: Context, config: Config): void {
   if (config.tools) {
-    ctx.tools.register(ccFsTool)
-    ctx.tools.register(createSessionTool(ctx))
-    ctx.tools.register(kitTool)
-    ctx.tools.register(gitTool)
-    ctx.tools.register(msmTool)
-    ctx.tools.register(eapTool)
-    ctx.tools.register(neatTool)
-    ctx.tools.register(cceTool)
+    ctx.tools.register(ccFsTool) // container_fs
+    ctx.tools.register(createSessionTool(ctx)) // logbook（含 rebuild）
+    ctx.tools.register(kitTool) // dashboard
+    ctx.tools.register(gitTool) // container_git
+    ctx.tools.register(msmTool) // msm（单入口执行 + 发现）
+    ctx.tools.register(praxisTool) // praxis（eap/neat/cce 三合一）
     ctx.tools.register(createHandymanTool(ctx))
-    ctx.tools.register(createRebuildTool(ctx))
     ctx.tools.register(localstoreTool)
-    ctx.tools.register(skiffAdminTool)
+    ctx.tools.register(containerAdminTool) // container_admin（role + msm 管理 + config）
     // Autopilot Trajectory 一站式管理（v1.26.12 实验 → v1.27.4 正式化；默认关；只提供工具与知识，不自动安装任何东西）
     // v1.26.14：闭包捕获 ctx → diag-live 进程内诊断（live 会话/标题/agent 定位）
     ctx.tools.register(createAutopilotTool(ctx))
@@ -149,7 +143,7 @@ export function apply(ctx: Context, config: Config): void {
   // enabled 读 DSH settings 开关，host/port/accounts 读全局文件，不依赖具体 CCC；
   // 旧 CCC localstore 配置在首个 agent/session-start 时一次性迁移）
   registerGateway(ctx)
-  // v1.22.4 定稿：session_rebuild 排队 → agent/turn-stopping 时执行真正清空（复用旧会话原地重来）
+  // v1.22.4 定稿：logbook rebuild（原 session_rebuild）排队 → agent/turn-stopping 时执行真正清空（复用旧会话原地重来）
   registerRebuildTurnHook(ctx)
   // v1.26.3 输出守卫：最终输出敏感词检测 + steer 打回重生成（凭据/机制/MSM 名不泄露给用户）
   registerOutputGuardHook(ctx)

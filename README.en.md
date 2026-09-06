@@ -21,7 +21,7 @@ dsh web
 # 3. Verify: open a session inside a directory marked with .serenity (a CCC)
 #    · Session auto-injects ACC identity + entry-skill system prompt
 #    · WebUI session header shows the Serenity status capsule (green dot + SAFE shield slider)
-#    · Run acc_kit health → CCC three-principle check passes
+#    · Run dashboard health → CCC three-principle check passes
 ```
 
 Uninstall: `dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
@@ -35,21 +35,22 @@ Uninstall: `dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 
 ## What you get after install (capability map)
 
-### 13 ACC tools
+### 10 ACC tools (v1.30 naming rework: 13 → 10 unified)
 
 | Tool | Capability | Typical use |
 |------|-----------|-------------|
-| `cc_fs` | 15 filesystem subcommands (root/resolve/list/tree/mkdir/rm/mv/cp/touch/append/reveal/info/find…) | Paths confined to the CCC root; escape is auto-blocked |
-| `session` | Full session lifecycle (list/show/create/use/close/health/qa/archive/summary) | `session create` before multi-step work; `use` to resume |
-| `acc_kit` | Health check (CCC principles P1/P2/config) / time / wait | Routine self-check before entering a CCC |
-| `cc_git` | Git operations (status/commit/push/log/pull) | Non-fast-forward pushes suggest actions; never auto-force |
-| `acc_msm` | MSM framework (list/exec/register/deregister/check/guide/ccc-config) | Executable-unit registry + 600s-timeout safe execution |
-| `eap` / `neat` / `cce` | Cognitive-quality framework / design-collaboration protocol / continuity engineering (progressive disclosure) | Output self-check, design alignment, engineering review |
-| `handyman` | Worker loop: whitelisted-model worker runs synchronously to completion + parallel `jobs` orchestration | Delegating batch work (e.g., SQC scans) |
-| `session_rebuild` | Trajectory rebuild on context overflow (Ship of Theseus) | Prompted past threshold; LLM triggers rebuild to continue |
+| `container_fs` | Container filesystem, 15 subcommands (root/resolve/list/tree/mkdir/rm/mv/cp/touch/append/reveal/info/find…) (was cc_fs) | Paths confined to the CCC root; escape is auto-blocked |
+| `logbook` | Full session lifecycle + rebuild (was session + session_rebuild merged) | `logbook create` before multi-step work; `use` to resume; `rebuild` on context overflow |
+| `dashboard` | Health check (CCC principles P1/P2/config + registry integrity) / time / wait (was acc_kit) | Routine self-check before entering a CCC |
+| `container_git` | Git operations (status/commit/push/log/pull/diff) (was cc_git) | Non-fast-forward pushes suggest actions; never auto-force |
+| `msm` | MSM single-entry execute + discover (was acc_msm exec face): `msm("<name>", ["<args>"])`; partial name returns candidates; inspect=true shows usage | Run registered MSMs; management goes to container_admin msm |
+| `praxis` | Actionable theory injection (was eap/neat/cce merged): `praxis` (index) / `praxis eap` / `praxis neat` / `praxis cce` | Output self-check, design alignment, engineering review |
+| `handyman` | Worker orchestration: whitelisted-model worker runs synchronously to completion + parallel `jobs` | Delegating batch work (e.g., SQC scans) |
 | `localstore` | Credential/config storage (credential + config namespaces) | Central API-key/password management; git policy configurable |
-| `skiff_admin` | Skiff role management (guide/validate/apply/list) | Define/validate/apply cognitive-subset roles |
+| `container_admin` | Container administration (maintenance bay): role (Skiff roles, was skiff_admin) / msm (register/deregister/check/guide/catalog/ccc-config) / config | Role define/validate/apply, MSM registry management, config overview |
 | `autopilot-trajectory` | One-stop AutoPilot management (no-arg=full report / init / random / diag / diag-live / check / status / guide) | Clock-driven autonomous wake + prior-bias injection + per-CCC independence (S151 housekeeper) |
+
+> **Rename map** (hard switch, no aliases): cc_fs → container_fs · cc_git → container_git · session+session_rebuild → logbook · acc_kit → dashboard · acc_msm → msm (exec) + container_admin (admin) · eap/neat/cce → praxis · skiff_admin → container_admin role. If an old session's historical references error, consult this map.
 
 ### Mechanical constraints (not bypassable by the model)
 
@@ -101,8 +102,8 @@ home-serenity/                    ← CCC root (marked by the .serenity file)
 
 | # | Scenario | Operation chain (tool → subcommand → effect) |
 |---|----------|----------------------------------------------|
-| 1 | **Long-term project maintenance** | `session create --desc xxx` → auto SESSION.md → log progress step by step → `session use` to resume → `session_rebuild` on context overflow |
-| 2 | **Batch code sync** | Root repo `cc_git commit/push`; multiple sub-repos one-click `resources-management sync` (auto commit + push all) |
+| 1 | **Long-term project maintenance** | `logbook create --desc xxx` → auto SESSION.md → log progress step by step → `logbook use` to resume → `logbook rebuild` on context overflow |
+| 2 | **Batch code sync** | Root repo `container_git commit/push`; multiple sub-repos one-click `resources-management sync` (auto commit + push all) |
 | 3 | **Media subtitle production** | Find source (BT) → download → Whisper transcription → translation → bilingual SRT → mechanical QC (7 checks) → distribution (RSS/email) |
 | 4 | **Server inspection** | `server-tool health` → one-shot CPU/memory/GPU/container/service report; `server-tool container` view/restart — all via the ssh-connect whitelist channel |
 | 5 | **Intranet service lookup** | `landscape-tool` repo panorama (20+ repos: category/stack/relations); `network-tool` device/port scan |
@@ -141,7 +142,7 @@ External browser → http://LAN-IP:3081 (second listener started by the plugin)
   → WS upgrade forwarding (101 write-back + bidirectional error listeners prevent crashes)
 ```
 
-### Skiff cognitive-subset roles (3099 + skiff_admin)
+### Skiff cognitive-subset roles (3099 + container_admin role)
 
 A CCC carves out **any subset of its full-knowledge trajectory** (`.opencode/serenity.json skiff.roles`) — not limited to Q&A; may have operational capability:
 
@@ -162,7 +163,7 @@ A CCC carves out **any subset of its full-knowledge trajectory** (`.opencode/ser
 
 - **Dual whitelists**: MSM and non-MSM tools configured independently; everything outside is hidden; skill loading always available
 - Debug Q&A page (3099) with multi-CCC switching; answers rendered with marked + think folding
-- `skiff_admin validate` checks config → `apply` activates explicitly (binds CCC + role list)
+- `container_admin role validate` checks config → `apply` activates explicitly (binds CCC + role list)
 
 ### Skiff Q&A page (3100 + internet)
 
@@ -224,7 +225,7 @@ Clock-driven **autonomous cognitive cruising** — the CCC defines the trajector
 | Mechanism | Description |
 |-----------|-------------|
 | **SESSION.md** | The trajectory's persistent body, never moves; multi-step goals/decisions/progress live here |
-| **session_rebuild** | Context over threshold → `[TRAJECTORY]` prompt → LLM triggers → same-session surface wipe (anchor keeps protocol text + "continue S###") → auto-resumes; shadow-price protocol compliant (token accounting resets correctly) |
+| **logbook rebuild** | Context over threshold → `[TRAJECTORY]` prompt → LLM triggers `logbook rebuild` → same-session surface wipe (anchor keeps protocol text + "continue S###") → auto-resumes; shadow-price protocol compliant (token accounting resets correctly) |
 | **Trajectory Steward** | Scoring reminders (`[TRAJECTORY-STEWARD]` + ACK protocol) push progress back into SESSION.md; mechanism pre-declared in the system prompt |
 | **Cognitive sedimentation discipline** | Before rebuilding, if valuable cognition was produced → revise the relevant skill (EAP-structured); for new skills, write a proposal into SESSION.md for user review — never create them yourself |
 
@@ -240,7 +241,7 @@ Clock-driven **autonomous cognitive cruising** — the CCC defines the trajector
 ## Development & extension (plugin-author view)
 
 ```bash
-# Full dev loop (also via acc_msm exec dsh-develop under safe mode)
+# Full dev loop (also via msm dsh-develop under safe mode)
 pnpm typecheck          # hooks/dsh-serenity-hooks (node + client)
 pnpm test               # vitest full (52 files / 752 tests)
 pnpm build              # tsc + tsdown dual bundle (lib/index.js + client.js)
@@ -259,19 +260,19 @@ pnpm build              # tsc + tsdown dual bundle (lib/index.js + client.js)
 | Host | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no source reuse; same ACC standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, byte-aligned on platform-neutral text |
-| Tools | msm_list/exec/cc-fs/session etc. | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore/skiff_admin/autopilot-trajectory |
+| Tools | msm single-entry / container_fs / logbook etc. | container_fs/logbook/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/autopilot-trajectory |
 
 **The same CCC can switch between osp / dsh runtimes freely**: `.serenity` marker, `.opencode/skills/`, config, and `AGENT_SESSIONS/` share cross-runtime file formats; only the platform layer differs (tool names/injection channel); the cognitive constraints the agent receives are identical after switching.
 
 ## FAQ
 
-**Q: Nothing happens after install?** Make sure you entered a `.serenity`-marked directory (a CCC); outside CCCs the plugin does nothing. Run `acc_kit health` to verify the three principles.
+**Q: Nothing happens after install?** Make sure you entered a `.serenity`-marked directory (a CCC); outside CCCs the plugin does nothing. Run `dashboard health` to verify the three principles.
 
 **Q: Where did bash go?** Safe mode removes bash from the tool list — by design: registered, tested MSM channels are more reliable. Turn it off with the WebUI capsule slider.
 
 **Q: Locked out of external access (3081)?** 5 failed attempts lock for 15 minutes (exponential backoff) — wait it out, or check the account's TOTP binding.
 
-**Q: Context is nearly full?** Land your progress into SESSION.md, then call `session_rebuild` per the `[TRAJECTORY]` prompt — the trajectory continues automatically; no need to open a new session by hand.
+**Q: Context is nearly full?** Land your progress into SESSION.md, then call `logbook rebuild` per the `[TRAJECTORY]` prompt — the trajectory continues automatically; no need to open a new session by hand.
 
 **Q: What does the public Q&A page (3100) return?** Only the answer (answer/answer_html/sessionId) — internal trajectories, tool results, and mechanism information never leave the external face.
 
@@ -279,4 +280,4 @@ pnpm build              # tsc + tsdown dual bundle (lib/index.js + client.js)
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.27.12 &nbsp;|&nbsp; **Prereq**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **Tests**: 52 files / 752 tests
+> **Version**: v1.30.0 &nbsp;|&nbsp; **Prereq**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **Tests**: 62 files / 895 tests

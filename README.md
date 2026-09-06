@@ -21,7 +21,7 @@ dsh web
 # 3. 验证：进入带 .serenity 标记的 CCC 目录开会话
 #    · 会话自动注入 ACC 身份 + 入口 skill 系统提示
 #    · WebUI 会话头部出现 Serenity 状态胶囊（绿点恒亮 + SAFE 盾牌滑块）
-#    · 输入 acc_kit health → CCC 三原则健康检查通过
+#    · 输入 dashboard health → CCC 三原则健康检查通过
 ```
 
 卸载：`dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
@@ -35,21 +35,22 @@ dsh web
 
 ## 安装后你得到什么（能力地图）
 
-### 13 个 ACC 工具
+### 10 个 ACC 工具（v1.30 命名重构：13 → 10 合一）
 
 | 工具 | 能力 | 典型用法 |
 |------|------|---------|
-| `cc_fs` | 文件系统 15 子命令（root/resolve/list/tree/mkdir/rm/mv/cp/touch/append/reveal/info/find…） | 路径全部限定 CCC 根内，逃逸自动阻断 |
-| `session` | 会话全生命周期（list/show/create/use/close/health/qa/archive/summary） | 多步工作先 `session create`，中断后 `use` 恢复 |
-| `acc_kit` | 健康检查（CCC 三原则 P1/P2/配置）/ 时间 / 等待 | 进入 CCC 前的例行自检 |
-| `cc_git` | Git 操作（status/commit/push/log/pull） | 非快进推送输出建议，绝不自动 force |
-| `acc_msm` | MSM 框架（list/exec/register/deregister/check/guide/ccc-config） | 可执行单元注册表 + 600s 超时安全执行 |
-| `eap` / `neat` / `cce` | 认知质量框架 / 设计协作协议 / 连续性工程（渐进披露） | 输出自检、设计对齐、工程评估 |
-| `handyman` | 杂工循环：指定白名单模型 worker 同步循环到完成 + jobs 并行编排 | 大批量任务（如 SQC 扫描）委派 |
-| `session_rebuild` | 上下文超限时轨迹重建（Ship of Theseus） | 超阈值后自动提示，LLM 触发重建接续 |
+| `container_fs` | 容器文件系统 15 子命令（root/resolve/list/tree/mkdir/rm/mv/cp/touch/append/reveal/info/find…）（原 cc_fs） | 路径全部限定 CCC 根内，逃逸自动阻断 |
+| `logbook` | 会话全生命周期 + rebuild（原 session + session_rebuild 合并） | 多步工作先 `logbook create`，中断后 `use` 恢复；上下文超限 `rebuild` 清空重建 |
+| `dashboard` | 健康检查（CCC 三原则 P1/P2/配置 + 注册表完整性）/ 时间 / 等待（原 acc_kit） | 进入 CCC 前的例行自检 |
+| `container_git` | Git 操作（status/commit/push/log/pull/diff）（原 cc_git） | 非快进推送输出建议，绝不自动 force |
+| `msm` | MSM **单入口执行 + 发现**（原 acc_msm 执行面）：`msm("<name>", ["<args>"])`；部分名返回候选；inspect=true 查用法 | 执行已注册 MSM；管理走 container_admin msm |
+| `praxis` | 可实践理论注入（原 eap/neat/cce 三合一）：`praxis`（目录）/ `praxis eap` / `praxis neat` / `praxis cce` | 输出自检、设计对齐、工程评估 |
+| `handyman` | 杂工编排：指定白名单模型 worker 同步循环到完成 + jobs 并行 | 大批量任务（如 SQC 扫描）委派 |
 | `localstore` | 凭据/配置存储（credential/config 两命名空间） | API keys/密码集中管理，git 策略可配 |
-| `skiff_admin` | Skiff 角色管理（guide/validate/apply/list） | 定义/校验/应用认知子集角色 |
+| `container_admin` | 容器管理（机务舱）：role（Skiff 角色，原 skiff_admin）/ msm（register/deregister/check/guide/catalog/ccc-config）/ config | 角色定义校验、MSM 注册表管理、配置总览 |
 | `autopilot-trajectory` | 自动巡航轨迹一站式管理（无参=全报告 / init / random / diag / diag-live / check / status / guide） | 时钟驱动自主唤起 + 先验偏见注入 + 多 CCC 独立（S151 自主管家） |
+
+> **改名对照**（硬切，无别名）：cc_fs → container_fs · cc_git → container_git · session+session_rebuild → logbook · acc_kit → dashboard · acc_msm → msm（执行）+ container_admin（管理）· eap/neat/cce → praxis · skiff_admin → container_admin role。旧会话历史引用报错时按本表对照即可。
 
 ### 机械约束（模型不可绕过）
 
@@ -101,8 +102,8 @@ home-serenity/                    ← CCC 根（.serenity 记号文件标记）
 
 | # | 场景 | 操作链（工具 → 子命令 → 效果） |
 |---|------|--------------------------------|
-| 1 | **长期项目维护** | `session create --desc xxx` → 自动建 SESSION.md → 多步工作逐段落进度 → 中断后 `session use` 恢复 → 上下文超限 `session_rebuild` 自动接续 |
-| 2 | **批量代码同步** | 根仓 `cc_git commit/push`；多个子仓库一键 `resources-management sync`（自动 commit + push 全部） |
+| 1 | **长期项目维护** | `logbook create --desc xxx` → 自动建 SESSION.md → 多步工作逐段落进度 → 中断后 `logbook use` 恢复 → 上下文超限 `logbook rebuild` 自动接续 |
+| 2 | **批量代码同步** | 根仓 `container_git commit/push`；多个子仓库一键 `resources-management sync`（自动 commit + push 全部） |
 | 3 | **媒体字幕生产** | 搜索片源（BT）→ 下载 → Whisper 转写 → 翻译 → 双语 SRT → 机械 QC（7 项检查）→ 分发（RSS/邮件） |
 | 4 | **服务器巡检** | `server-tool health` → CPU/内存/GPU/容器/服务一键报告；`server-tool container` 查看/重启容器——全部经 ssh-connect 白名单通道 |
 | 5 | **内网服务定位** | `landscape-tool` 仓库全景（20+ 仓库分类/技术栈/关联）；`network-tool` 设备/端口扫描 |
@@ -141,7 +142,7 @@ home-serenity/                    ← CCC 根（.serenity 记号文件标记）
   → WS upgrade 转发（101 回写 + 双向 error 监听防崩溃）
 ```
 
-### Skiff 认知子集角色（3099 + skiff_admin）
+### Skiff 认知子集角色（3099 + container_admin role）
 
 CCC 从全知全能 trajectory 切出**任意子集角色**（`.opencode/serenity.json skiff.roles`）——不限于问答，可有操作能力：
 
@@ -162,7 +163,7 @@ CCC 从全知全能 trajectory 切出**任意子集角色**（`.opencode/serenit
 
 - **双白名单**：MSM 与非 MSM 工具独立配置，白名单外全隐藏；skill 加载恒可用
 - 调试问答页（3099）多 CCC 手工切换，回答 marked 渲染 + think 折叠
-- `skiff_admin validate` 校验配置 → `apply` 显式生效（绑定 CCC + 角色清单）
+- `container_admin role validate` 校验配置 → `apply` 显式生效（绑定 CCC + 角色清单）
 
 ### Skiff 问答页（3100 + 公网）
 
@@ -224,7 +225,7 @@ CCC 级配置（`.opencode/serenity.json weixin`），凭据归 CCC localstore�
 | 机制 | 说明 |
 |------|------|
 | **SESSION.md** | 轨迹的持久身体，永远原位；多步工作的目标/决策/进度都落这里 |
-| **session_rebuild** | 上下文超阈值 → `[TRAJECTORY]` 提示 LLM 主动触发 → 同会话 surface 清空重建（锚点保留协议正文 + 「继续 S###」）→ 自动继续；shadow-price 协议合规（token 计量正确回落） |
+| **logbook rebuild** | 上下文超阈值 → `[TRAJECTORY]` 提示 LLM 主动触发 `logbook rebuild` → 同会话 surface 清空重建（锚点保留协议正文 + 「继续 S###」）→ 自动继续；shadow-price 协议合规（token 计量正确回落） |
 | **Trajectory Steward** | 计分提醒（`[TRAJECTORY-STEWARD]` + ACK 协议）督促进度落回；机制预声明在系统提示词中 |
 | **认知沉淀纪律** | 重建前若产生有价值认知 → 修订相关 skill（EAP 结构化）；新建 skill 写提案到 SESSION.md 供用户审阅，不自行创建 |
 
@@ -240,9 +241,9 @@ CCC 级配置（`.opencode/serenity.json weixin`），凭据归 CCC localstore�
 ## 开发与扩展（插件作者向）
 
 ```bash
-# 完整开发循环（safe-mode 下经 acc_msm exec dsh-develop 亦可）
+# 完整开发循环（safe-mode 下经 msm dsh-develop 亦可）
 pnpm typecheck          # hooks/dsh-serenity-hooks（node + client 双面）
-pnpm test               # vitest 全量（52 files / 752 tests）
+pnpm test               # vitest 全量（62 files / 895 tests）
 pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 ```
 
@@ -259,19 +260,19 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 | 宿主 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，同一 ACC 标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关文本逐字节对齐 |
-| 工具 | msm_list/exec/cc-fs/session 等 | cc_fs/session/acc_msm/cc_git/eap/neat/cce/handyman/session_rebuild/localstore/skiff_admin/autopilot-trajectory |
+| 工具 | msm 单入口 / container_fs / logbook 等 | container_fs/logbook/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/autopilot-trajectory |
 
 **同一 CCC 可任意换用 osp / dsh 运行时**：`.serenity` 记号、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 跨运行时文件格式一致；差异仅在平台层（工具命名/注入通道），切换后 Agent 收到的认知约束完全一致。
 
 ## FAQ
 
-**Q：安装后没反应？** 确认进入的是带 `.serenity` 标记的目录（CCC）；非 CCC 目录插件零干预。`acc_kit health` 验证三原则。
+**Q：安装后没反应？** 确认进入的是带 `.serenity` 标记的目录（CCC）；非 CCC 目录插件零干预。`dashboard health` 验证三原则。
 
 **Q：bash 怎么不见了？** 安全模式开启后 bash 从工具列表消失——这是设计：走注册的、测试过的 MSM 通道更可靠。WebUI 胶囊滑块关闭即可恢复。
 
 **Q：外部访问（3081）登录失败锁定？** 5 次失败锁 15 分钟（指数退避）——等锁定过期，或检查账号 TOTP 绑定状态。
 
-**Q：上下文快满了？** 把进度落回 SESSION.md，然后按 `[TRAJECTORY]` 提示调用 `session_rebuild`——轨迹自动接续，不用手动开新会话。
+**Q：上下文快满了？** 把进度落回 SESSION.md，然后按 `[TRAJECTORY]` 提示调用 `logbook rebuild`——轨迹自动接续，不用手动开新会话。
 
 **Q：对外问答页（3100）返回什么？** 只返回回答（answer/answer_html/sessionId）——内部轨迹、工具结果、机制信息都不出对外面。
 
@@ -279,4 +280,4 @@ pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **版本**: v1.27.12 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **测试**: 52 files / 752 tests
+> **版本**: v1.30.0 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **测试**: 62 files / 895 tests

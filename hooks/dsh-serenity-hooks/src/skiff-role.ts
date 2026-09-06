@@ -69,15 +69,15 @@ export function trajectorySubset(role: SkiffRoleConfig | undefined): SkiffTrajec
   }
 }
 
-/** 角色可用工具面（白名单并集）：tools + acc_msm（msms 非空时作为 MSM 通道自动可用） */
+/** 角色可用工具面（白名单并集）：tools + msm（msms 非空时作为 MSM 通道自动可用） */
 export function roleToolWhitelist(role: SkiffRoleConfig | undefined): Set<string> {
   const out = new Set<string>()
   for (const t of role?.tools ?? []) out.add(t)
-  if ((role?.msms?.length ?? 0) > 0) out.add('acc_msm')
+  if ((role?.msms?.length ?? 0) > 0) out.add('msm')
   return out
 }
 
-/** 角色允许的 MSM 白名单（acc_msm exec 校验 / msm_list 过滤用；独立于 tools 白名单） */
+/** 角色允许的 MSM 白名单（msm 工具 exec 校验 / 过滤用；独立于 tools 白名单） */
 export function roleMsmWhitelist(role: SkiffRoleConfig | undefined): Set<string> {
   return new Set(role?.msms ?? [])
 }
@@ -125,7 +125,7 @@ export function buildSkiffBasePrompt(roleName: string, role: SkiffRoleConfig | u
     'You interact with this CCC ONLY through the exposed surface below:',
   ]
   if (msms.length > 0) {
-    lines.push(`  MSMs: ${msms.join(', ')} (call acc_msm exec <name> [args...]; pass --help as the first arg for usage)`)
+    lines.push(`  MSMs: ${msms.join(', ')} (call msm("<name>", ["<args>"]) ; pass inspect=true or "--help" as first arg for usage)`)
   } else {
     lines.push('  MSMs: (none)')
   }

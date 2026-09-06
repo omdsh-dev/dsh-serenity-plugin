@@ -63,7 +63,8 @@ describe('output-guard: 敏感词表构建（v1.26.3）', () => {
     expect(t.substring).toContain('dsh-serenity-hooks')
     expect(t.substring).toContain('mech-registry.json')
     expect(t.substring).toContain('.opencode/serenity.json')
-    expect(t.substring).toContain('session_rebuild')
+    // v1.30：session_rebuild 已并入 logbook——敏感机制词不再含旧工具名（logbook 是对外工具名）
+    expect(t.substring).not.toContain('session_rebuild')
   })
 
   it('凭据文件缺失 → 表仍含机制词 + MSM 词（不抛错）', () => {

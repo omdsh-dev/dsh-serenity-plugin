@@ -2,7 +2,7 @@
  * session-bound.ts — SESSION 绑定持久化（serenity/bound 会话事件）
  *
  * 目标（S142 用户拍板，方案 v1.0）：让「dsh 会话（载体）↔ SESSION（宁静号轨迹）」
- * 的绑定坚固——LLM 不能因智力因素（幻觉/理解偏差）在过程中或 session_rebuild 后
+ * 的绑定坚固——LLM 不能因智力因素（幻觉/理解偏差）在过程中或 logbook rebuild 后
  * 自行更换 SESSION。
  *
  * 机制（DSH 原生，零改 harness）：

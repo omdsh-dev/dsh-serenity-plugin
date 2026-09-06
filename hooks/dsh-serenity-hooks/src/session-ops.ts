@@ -33,9 +33,10 @@ export type SessionAction =
   | 'archive'
   | 'summary'
   | 'hook-develop-guide'
+  | 'rebuild'
 
 export const SESSION_ACTIONS: readonly SessionAction[] = [
-  'list', 'show', 'create', 'use', 'close', 'health', 'qa', 'archive', 'summary', 'hook-develop-guide',
+  'list', 'show', 'create', 'use', 'close', 'health', 'qa', 'archive', 'summary', 'hook-develop-guide', 'rebuild',
 ]
 
 /**

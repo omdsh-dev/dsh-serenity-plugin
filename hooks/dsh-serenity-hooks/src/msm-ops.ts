@@ -1,7 +1,7 @@
 /**
- * msm-ops.ts — acc_msm 纯操作层（零 DSH 依赖）
+ * msm-ops.ts — msm 纯操作层（acc_msm → msm 执行 + container_admin 管理面，v1.30；零 DSH 依赖）
  *
- * MSM（Mech & Semi-Mech）框架：list / exec / admin(register|deregister|check)。
+ * MSM（Mech & Semi-Mech）框架：exec 执行 / register|deregister|check 管理。
  * 复用 CCC 的 mech-registry.json（v1 或数组格式）。cwd 钉在 CCC 根。
  */
 
@@ -99,25 +99,25 @@ export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'd
 /**
  * ACC 能力目录（需求④ S142 用户拍板："acc 配置各自做 guide 越来越多，整合成目录式使用指南"）。
  * 目录在前、详情各归各——**单一真相源**：本目录只索引"去哪个工具/子命令看详情"，不复制详情
- * （避免 skiff_admin/weixin-doctor 等 guide 全文重复 → 多真相源 → 失同步）。
+ * （避免 container_admin/weixin-doctor 等 guide 全文重复 → 多真相源 → 失同步）。
  * 后续新增功能只需在此加一行（低熵可演进）。
  */
 export const ACC_CATALOG = `═══ ACC Usage Catalog ═══
 Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
 
-  ① 会话与轨迹        → session tool（list/show/create/use/close/health/qa/archive/summary/hook-develop-guide）
-                         session_rebuild（超限重建；阈值 K 见 ccc-config / 设置面板重建阈值K）
-  ② 认知质量框架      → eap（E↑/R↓/S↑）/ neat（Neat 协议）/ cce（认知连续性工程）——渐进披露，无参即全文
-  ③ 工具与执行        → cc_fs（文件系统 15 子命令）/ cc_git（git）/ acc_kit（health 含注册表检查/time/wait）
-                         acc_msm（MSM 框架：本工具 list/exec/register/deregister/check/guide/ccc-config/catalog）
-                         handyman（杂工 agent 编排——guide 子命令：acc_msm exec handyman guide）
-  ④ 角色与对外面      → skiff_admin（Skiff 认知子集角色：guide/validate/apply/list——acc_msm exec skiff_admin guide）
+  ① 会话与轨迹        → logbook（list/show/create/use/close/health/qa/archive/summary/hook-develop-guide + rebuild 超限重建）
+                         session_rebuild 已并入 logbook rebuild（超限重建；阈值 K 见 container_admin ccc-config / 设置面板重建阈值K）
+  ② 认知质量框架      → praxis（eap/neat/cce 三合一——可实践理论注入，section 渐进披露，无参即目录）
+  ③ 工具与执行        → container_fs（容器文件系统 15 子命令）/ container_git（git）/ dashboard（health 含注册表检查/time/wait）
+                         acc_msm 已并入 msm（执行+发现）与 container_admin（管理）——msm("<name>", ["<args>"])；inspect=true 查用法
+                         handyman（杂工 agent 编排——guide 子命令：handyman guide）
+  ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
                          ACP（程序化 JSON-RPC 3100）/ Skiff 问答页（公网 ask）——面板「外部能力」组
   ⑤ 自主与接入        → autopilot-trajectory（Autopilot 一站式：all/init/random/diag/doc/check/status/guide）
-                         weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：acc_msm exec weixin-doctor guide）
-  ⑥ CCC 配置总览      → acc_msm ccc-config（8 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/autopilotTrajectory/weixin）
-  ⑦ 注册表与安全      → mech-registry.json 由 acc_msm register/deregister 管理（写保护——不可直接编辑）
-                         acc_kit health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
+                         weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
+  ⑥ CCC 配置总览      → container_admin msm ccc-config（8 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/autopilotTrajectory/weixin）
+  ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
+                         dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
 
 每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
 `
@@ -128,9 +128,9 @@ export const MSM_GUIDE = `MSM Development Manual (Mech & Semi-Mech framework)
 MSM = the executable-unit layer. Mech is pure TS with zero LLM reasoning; Semi-Mech is a TS framework + LLM decision points.
 MSM is ACC's deterministic executable-unit layer — all shell/exec operations go through MSM and cannot be bypassed.
 
-## Registering a new MSM (acc_msm register)
+## Registering a new MSM (container_admin msm register)
 1. Write the script under <skill>/scripts/ (runnable via tsx; must include a main() CLI guard with an import.meta.url check)
-2. acc_msm register <name> --skill <s> --path <script path relative to root> --category <mech|semi-mech> --description <desc>
+2. container_admin msm register --domain msm --action register <name> --skill <s> --path <script path relative to root> --category <mech|semi-mech> --description <desc>
 3. Auto-writes mech-registry.json (preserving the original format) + git commit (commits only the registry file)
 4. Validation: path must be inside root, script must exist, name must be globally unique
 
@@ -141,7 +141,7 @@ flags is a new-style object array for parameter validation and path-escape guard
    {"name":"force","type":"boolean","description":"force mode","default":false}]
 - {name, type} format — new style, type:"path" enables the path-escape guard
 - {flag, description} format — old style, CLI flag description string
-- On registration, flags are passed via acc_msm register --flags '<json>' (the tool currently parses the name style)
+- On registration, flags are passed via container_admin msm register --flags '<json>'
 
 ## Script conventions
 - Top-of-file documentation: purpose / usage / exit codes
@@ -166,14 +166,14 @@ flags is a new-style object array for parameter validation and path-escape guard
 - Anti-example (forbidden): readline waiting for user input, process.stdin.on('data') blocking waits
   (MSMs have no stdin interaction channel — they hang until the 600s timeout)
 
-## Quality checks (acc_msm check, DC-M1~M4)
+## Quality checks (container_admin msm check, DC-M1~M4)
 DC-M1 has .test.ts/.spec.ts; DC-M2 has a main() guard (function main( / isMain / require.main === / import.meta.url);
 DC-M3 bidirectional: scripts unregistered + registry references missing scripts; DC-M4 path-type flags marked type:"path"
 
 ## Self-description (protocol flags, first argument only)
-acc_msm exec <name> --list        — list all MSMs
-acc_msm exec <name> --schema <n>   — view a specific MSM's parameter schema
-acc_msm exec <name> --format=json  — JSON output mode (remaining args passed through losslessly)
+msm("<name>", ["--list"])           — list all MSMs
+msm("<name>", ["--schema", "<n>"])  — view a specific MSM's parameter schema
+msm("<name>", ["--format=json"])    — JSON output mode (remaining args passed through losslessly)
 `
 
 /** CCC 配置参考（对齐 osp ccc-config action） */
@@ -204,7 +204,7 @@ trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积�
 
 ── 3. localstore.gitTrack ──
 localstore.json 的 git 策略：allow 可提交 / deny 禁提交（默认 deny）。
-deny 时写入自动确保 .gitignore 含该文件（物理保证），cc_git commit 会检查拒绝。
+deny 时写入自动确保 .gitignore 含该文件（物理保证），container_git commit 会检查拒绝。
 
   Config:
     { "localstore": { "gitTrack": "allow" } }
@@ -226,7 +226,7 @@ Skiff 角色 = 全知全能 trajectory 的任意子集（CCC 定义）。每角�
 （MSM 白名单 msms[] 与非 MSM 工具白名单 tools[]，白名单外全隐藏；skill 加载恒可用）。
 trajectory 纪律子集（session/keeper/rebuild 参与项）默认全关 = 完全独立。
 systemPrompt 内联 或 systemPromptFile（.md 引用，推荐）——角色会话的完整人格/边界提示词。
-validate 校验 / apply 生效 / list 查看：acc_msm exec skiff_admin <guide|validate|apply|list>。
+validate 校验 / apply 生效 / list 查看：container_admin role <guide|validate|apply|list>（skiff_admin 已并入）。
 
   Config:
     { "skiff": { "roles": {
@@ -242,7 +242,7 @@ CCC 定义的一条自主 trajectory——时钟到点自动唤起（前台注�
 未配置或 enabled=false → 完全不启动（零资源占用）。多 CCC 独立：每 CCC 自己的配置。
 唤起消息四段式：轨迹焦点 topPrompt（最先注入，稳定锚）→ 身份锚定 → 先验偏见
 （CCC 根脚本 biasProvider 输出）→ 任务。目标会话 session 必填（目录须带 --auto 后缀）。
-诊断/状态/立即唤起：acc_msm exec autopilot-trajectory <all|check|status|diag>。
+诊断/状态/立即唤起：autopilot-trajectory <all|check|status|diag>（msm("autopilot-trajectory", ["all"])）。
 
   Config:
     { "autopilotTrajectory": {
@@ -259,8 +259,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
 账号/路由/开关在此文件；**bot_token 凭据在 CCC localstore credential scope**
 （扫码绑定后自动写入，永不进 git 明文面）。
 路由 user → role：exact 优先，* 通配兜底；role 必须 ∈ 该 CCC skiff.roles。
-面板（WebUI 设置 → 微信桥）可扫码绑定/移除账号/编辑路由；acc_msm exec weixin-doctor
-<status|diag|verify> 排查。凭据主动查看：localstore get WEIXIN_<ACCOUNT>_TOKEN。
+面板（WebUI 设置 → 微信桥）可扫码绑定/移除账号/编辑路由；msm("weixin-doctor", ["status"|"diag"|"verify"]) 排查。凭据主动查看：localstore get WEIXIN_<ACCOUNT>_TOKEN。
 
   Config:
     { "weixin": {
@@ -330,7 +329,7 @@ export interface MsmArgs {
   description?: string
   /** register: flags JSON 字符串（对齐 osp --flags 入参；如 '[{"name":"hook","type":"string",...}]'） */
   flags?: string
-  /** register: 自定义 usage（缺省 'acc_msm exec <name> [args...]'） */
+  /** register: 自定义 usage（缺省 'msm <name> [args...]'） */
   usage?: string
 }
 
@@ -484,7 +483,7 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       }
       entries.push({
         name, path, skill, category, description,
-        usage: args.usage ?? `acc_msm exec ${name} [args...]`,
+        usage: args.usage ?? `msm ${name} [args...]`,
         flags: flags ?? [],
       })
       writeRegistry(regPath, entries, isV1Wrapped)
@@ -662,7 +661,7 @@ function msmExecResult(name: string, status: number, stdout: string, stderr: str
 }
 
 /**
- * 异步执行 MSM（acc_msm 工具主路径）：
+ * 异步执行 MSM（msm 工具主路径）：
  * 用 execFile + promisify + timeout（超时自动 kill），**不阻塞 Node 事件循环**。
  * （同步 spawnSync 版会阻塞 web 事件循环 → MSM 脚本自请求 3080 时死锁，见 postmortem。）
  */

@@ -8,7 +8,7 @@
  *   - 配置：.opencode/serenity.json `localstore.gitTrack`: "allow"（可提交）| "deny"（禁提交）
  *   - **缺省 deny（没配就是不提交）**；且 deny 的保证**不依赖 dsh 运行**——
  *     写入时自动确保 .gitignore 含 localstore.json（物理保证：即使 dsh 不在、
- *     用户手动 git commit 也不会误提交），cc_git 检查为第二道防线（拒绝 + 提示）
+ *     用户手动 git commit 也不会误提交），container_git 检查为第二道防线（拒绝 + 提示）
  *   - allow：放行（文件可提交，用户自行管理 .gitignore）
  *
  * 存储结构（JSON 顶层分节）：
@@ -86,8 +86,8 @@ export function ensureLocalstoreGitignored(root: string): { status: 'allow' | 'i
 }
 
 /**
- * cc_git 联动检查（第二道防线）：文件存在 && deny && .gitignore 未覆盖 → 不通过。
- * 调用方（cc_git commit）据此拒绝提交；status 可输出 warning。
+ * container_git 联动检查（第二道防线）：文件存在 && deny && .gitignore 未覆盖 → 不通过。
+ * 调用方（container_git commit）据此拒绝提交；status 可输出 warning。
  */
 export function checkLocalstoreGitCompliance(root: string): { ok: boolean; reason?: string } {
   if (!existsSync(localstorePath(root))) return { ok: true }
@@ -227,7 +227,7 @@ export function docText(root: string): string {
     '## Git commit policy',
     '- Config: .opencode/serenity.json `localstore.gitTrack`: `"allow"` (may commit) | `"deny"` (must not commit; .dsh fallback)',
     '- **Default deny (unset = not committed)**; when deny, writes automatically ensure .gitignore contains localstore.json',
-    '  (physical guarantee, independent of dsh runtime); cc_git commit checks and refuses',
+    '  (physical guarantee, independent of dsh runtime); container_git commit checks and refuses',
     '- To commit: set `"localstore": { "gitTrack": "allow" }` and remove localstore.json from .gitignore',
     '',
     '## Format (JSON top-level sections)',
@@ -258,7 +258,7 @@ export function docText(root: string): string {
     '## Security boundary',
     '- list/show return only key names for credentials, never values',
     '- Credential values should be used internally by the agent; never write them into conversation or logs',
-    '- Default deny: the file is not committed to git (.gitignore physical guarantee + cc_git check fallback)',
+    '- Default deny: the file is not committed to git (.gitignore physical guarantee + container_git check fallback)',
     '',
   ].join('\n')
 }

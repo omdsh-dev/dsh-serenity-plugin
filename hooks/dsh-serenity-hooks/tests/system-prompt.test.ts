@@ -80,7 +80,7 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
     expect(block).toContain(`CCC: sp-`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     // 需求③：身份块不再内嵌工具清单
-    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman']) {
+    for (const tool of ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin']) {
       expect(block).not.toMatch(new RegExp(`^  ${tool} `, 'm'))
     }
     // EAP 优化 #2：说明平台工具仍可用（关系方向明确）
@@ -90,17 +90,16 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
     expect(block).toContain('"Serenity Tools" heading')
   })
 
-  it('toolsBlock：13 工具清单 + MSM 调用示例（需求③：独立块放 SKILL 后 Session 前）', () => {
+  it('toolsBlock：10 工具清单 + msm 单入口示例（v1.30：13→10 重构）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['cc_fs', 'session', 'acc_kit', 'cc_git', 'acc_msm', 'eap', 'neat', 'cce', 'handyman', 'session_rebuild', 'localstore', 'skiff_admin', 'autopilot-trajectory']) {
+    for (const tool of ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'autopilot-trajectory']) {
       expect(block).toContain(tool)
     }
-    // MSM 调用协议示例（3 步：list 发现 / --schema 1 查用法 / exec 执行）
-    expect(block).toContain('MSM call protocol')
-    expect(block).toContain('acc_msm list')
-    expect(block).toContain('--schema 1')
-    expect(block).toContain('acc_msm exec <name> <args...>')
+    // msm 单入口调用（替代旧 3 步协议：list 发现 / --schema 查用法 / exec 执行）
+    expect(block).toContain('msm("')
+    expect(block).toContain('inspect=true')
+    expect(block).toContain('container_admin msm register|deregister|check')
     expect(block).toContain('never edit mech-registry.json directly')
   })
 
@@ -237,7 +236,7 @@ describe('system-prompt: Code Mode 适配行（S131 P0-2）', () => {
     }
     const line = codeModeAdaptationLine(fakeCtx as never)
     expect(line).toContain('=== Serenity Code Mode ===')
-    expect(line).toContain('await tools.cc_fs')
+    expect(line).toContain('await tools.container_fs')
   })
 
   it('native（run_code 不可见）→ 空串', () => {

@@ -1,5 +1,5 @@
 /**
- * kit.ts — acc_kit 真实 DSH 工具定义（defineTool）
+ * kit.ts — dashboard 真实 DSH 工具定义（defineTool）（v1.30：acc_kit → dashboard）
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -17,8 +17,8 @@ function renderText(value: unknown): ContentBlock[] {
 }
 
 export const kitTool = defineTool({
-  name: 'acc_kit',
-  description: 'ACC general-purpose utility kit: health (CCC three-principle check P1/P2/config + MSM registry integrity report, healthy/degraded) / time (now_iso/now_local/epoch_ms) / wait (wait N seconds, default 1). Routine self-check before entering a CCC.',
+  name: 'dashboard',
+  description: 'Dashboard — always-on container instruments (works any time, no side effects): health (CCC three-principle check P1/P2/config + MSM registry integrity report, healthy/degraded) / time (now_iso/now_local/epoch_ms) / wait (wait N seconds, default 1). Routine self-check before entering a CCC.',
   parameters: {
     action: { type: 'string', enum: [...KIT_ACTIONS], required: true, description: 'Subcommand' },
     seconds: { type: 'integer', description: 'Seconds to wait (positive integer, default 1)' },

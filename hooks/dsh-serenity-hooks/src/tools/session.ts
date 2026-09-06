@@ -242,11 +242,11 @@ function discoverCccSubcommands(entries: MsmEntry[]): string[] {
 /** 生成扩展提示（对齐 osp buildExtHint） */
 function buildExtHint(hasSessionTool: boolean, hooks: string[], subcommands: string[]): string {
   if (!hasSessionTool) {
-    return '\n\n[CCC] To extend session capabilities, register a session-tool MSM (acc_msm register); see session hook-develop-guide'
+    return '\n\n[CCC] To extend session capabilities, register a session-tool MSM (container_admin msm register); see session hook-develop-guide'
   }
   const parts: string[] = []
   if (hooks.length > 0) parts.push(`hooks: ${hooks.join(', ')}`)
-  if (subcommands.length > 0) parts.push(`custom subcommands (acc_msm exec session-tool): ${subcommands.join(', ')}`)
+  if (subcommands.length > 0) parts.push(`custom subcommands (msm session-tool): ${subcommands.join(', ')}`)
   const detail = parts.length > 0 ? ` (${parts.join('; ')})` : ''
   return `\n\n[CCC] session-tool MSM registered${detail}`
 }
@@ -270,13 +270,13 @@ function getHookDevelopGuide(hasSessionTool: boolean): string {
     '',
     '  create-transform',
     '    Trigger: after create writes the default SESSION.md',
-    '    Invocation: acc_msm exec session-tool --hook=create-transform --session-dir=<path>',
+    '    Invocation: msm session-tool --hook=create-transform --session-dir=<path>',
     '    Allowed: read SESSION.md and modify it in place (append fields, swap templates, call APIs, etc.)',
     '    Note: ACC has already ensured the directory and SESSION.md exist; the CCC only modifies',
     '',
     '── Extension point 2: Custom subcommands ──',
     '',
-    'The LLM can call acc_msm exec session-tool <subcommand> to run CCC-specific',
+    'The LLM can call msm session-tool <subcommand> to run CCC-specific',
     'subcommands such as reindex, export, batch-create. These bypass the ACC session',
     'tool\'s enum.',
     '',
@@ -286,7 +286,7 @@ function getHookDevelopGuide(hasSessionTool: boolean): string {
     '     .opencode/skills/<ccc-name>/scripts/session-tool.ts',
     '',
     '2. Register it in mech-registry.json:',
-    '     acc_msm register session-tool \\',
+    '     container_admin msm register session-tool \\',
     '       --skill <ccc-name> --path .opencode/skills/<ccc-name>/scripts/session-tool.ts \\',
     '       --category semi-mech \\',
     '       --description "CCC session extension: hooks + custom subcommands" \\',
@@ -303,11 +303,11 @@ function getHookDevelopGuide(hasSessionTool: boolean): string {
     '',
     '4. Subcommand declaration convention:',
     '     The --subcommand description field in flags enumerates supported subcommand names, split by |.',
-    '     The LLM can then call acc_msm exec session-tool <subcommand>.',
+    '     The LLM can then call msm session-tool <subcommand>.',
     '',
     (hasSessionTool
       ? '✅ This CCC has a session-tool MSM registered'
-      : 'ℹ️  This CCC has no session-tool MSM yet — start with acc_msm register'),
+      : 'ℹ️  This CCC has no session-tool MSM yet — start with container_admin msm register'),
     '',
     '── More information ──',
     '',
@@ -321,11 +321,12 @@ function getHookDevelopGuide(hasSessionTool: boolean): string {
  */
 export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
-  name: 'session',
+  name: 'logbook',
   description:
-    'Full work-session lifecycle (AGENT_SESSIONS/, home-session convention). list/show/create/use/close/health/qa/archive/summary/hook-develop-guide. ' +
+    'The Logbook (AGENT_SESSIONS/ trajectory log — the voyage\'s persistent record). Full work-session lifecycle: list/show/create/use/close/health/qa/archive/summary/hook-develop-guide + rebuild (trajectory-tracker overflow: clear and rebuild the current conversation in place, Ship of Theseus). ' +
     'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars, content summary — required, except --dry-run preview and --issue sessions which are exempt); close requires --confirm; ' +
     'use activates the session for the current dsh conversation (in-memory + events restore, isolated per dsh session) and requires --summary (≤20 chars). ' +
+    'rebuild requires --summary (next-phase content summary ≤20 chars) + optional --note (task focus for the rebuilt self). ' +
     'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
   parameters: {
     action: {
@@ -335,9 +336,10 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
       description:
         'Subcommand: list (status summary) / show (S### or dir name or fuzzy keyword) / create (--desc or --issue) / use (activate context, closed can be reopened) / ' +
         'close (requires --name + --confirm, irreversible) / health (stale/stalled/drift/ghost) / qa (fact check) / archive (archive, name defaults to batch) / ' +
-        'summary (dashboard) / hook-develop-guide (CCC extension guide)',
+        'summary (dashboard) / rebuild (clear-and-rebuild current conversation, Ship of Theseus — requires --summary + optional --note) / hook-develop-guide (CCC extension guide)',
     },
     name: { type: 'string', description: 'show/use/close/archive/qa session identifier (S### or dir name or keyword)' },
+    note: { type: 'string', description: 'rebuild: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
     desc: { type: 'string', description: 'create short description (any language, ≤5 words; mutually exclusive with issue)' },
     issue: { type: 'string', description: 'create ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
     goal: { type: 'string', description: 'create one-sentence goal (optional)' },
@@ -500,6 +502,30 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
       case 'qa': {
         if (!args.name) throw new Error('qa requires name (S### or directory name)')
         return qaCheck(root, args.name) + extHint
+      }
+      case 'rebuild': {
+        // v1.30：rebuild 并入 logbook（原独立 session_rebuild 工具）——超限重建：
+        // 复用旧 dsh 会话原地清空重来（Ship of Theseus），turn-stopping 时执行真正 replace
+        if (!args.summary || args.summary.trim() === '') {
+          throw new Error('rebuild requires --summary <content summary ≤20 chars> (the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild)')
+        }
+        const dshSessionId = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id ?? ''
+        if (!dshSessionId) throw new Error('Unable to determine the current dsh session id')
+        const { queueRebuild } = await import('../rebuild.js')
+        const result = await queueRebuild(ctx, {
+          root,
+          note: args.note as string | undefined,
+          summary: args.summary as string,
+          agentCwd: agentCwd(exec),
+          dshSessionId,
+        })
+        return {
+          ok: true,
+          queued: result.queued,
+          anchor: result.anchor,
+          sessionMdPath: result.sessionMdPath,
+          instruction: 'Queued clear-and-rebuild: when this turn ends, the same conversation will be cleared and injected with the "continue the work" anchor (first-anchor protocol body included), then auto-continue — no manual input needed; resume from SESSION.md at that point.',
+        }
       }
       default:
         throw new Error(`Unknown action: ${args.action as string}`)

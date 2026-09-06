@@ -77,14 +77,14 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('persistent body')
     expect(text).toContain('rebuildable carrier')
     expect(text).toContain('ACT NOW')
-    expect(text).toContain('session_rebuild')
+    expect(text).toContain('logbook rebuild')
     expect(text).toContain('not an option')
     // v1.24.12 沉淀协议：rebuild 前修订现有 skill（eap 结构化）；新建 skill 写 SESSION 提案不自行创建
     expect(text).toContain('revise the relevant existing skill of this CCC')
     expect(text).toContain('write a short proposal into SESSION.md')
     expect(text).toContain('do not create it yourself')
     // v1.28.0 需求②（P0-1 审计补断言）：文案必须指导带 --summary（重建后标题重命名）——
-    // 若删指引，模型裸调 session_rebuild 会被 summary 必填拒绝（2026-09-05 rebuild bug 教训）
+    // 若删指引，模型裸调 logbook rebuild 会被 summary 必填拒绝（2026-09-05 rebuild bug 教训）
     expect(text).toContain('--summary')
     expect(text).toContain('≤20 chars')
     expect(text).toContain('renamed to S###-YYYY-MM-DD-<summary>')
@@ -99,8 +99,8 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('threshold 400K')
     expect(text).toContain('mandatory')
     expect(text).toContain('STOP')
-    expect(text).toContain('session_rebuild')
-    expect(text).toContain('persists until you call session_rebuild')
+    expect(text).toContain('logbook rebuild')
+    expect(text).toContain('persists until you call logbook rebuild')
     // v1.24.12：升级版同样带紧凑沉淀指令（修订 skill / 新建 skill 提案进 SESSION）
     expect(text).toContain('preserve valuable cognition')
     expect(text).toContain('new-skill proposal into SESSION.md')

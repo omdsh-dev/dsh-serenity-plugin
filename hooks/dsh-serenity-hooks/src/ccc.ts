@@ -354,7 +354,7 @@ export function matchBlacklist(relPath: string, rules: BlacklistRule[]): Blackli
 }
 
 /** 写类工具名（safe-mode 下禁止） */
-export const WRITE_TOOLS = new Set(['bash', 'write', 'edit', 'str_replace_editor', 'cc_fs']);
+export const WRITE_TOOLS = new Set(['bash', 'write', 'edit', 'str_replace_editor', 'container_fs']);
 
 export function isWriteTool(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);
