@@ -69,15 +69,29 @@ export function skiffSessionSnapshot(): ReadonlyMap<string, { role: string; ccc:
 const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
 
 /**
- * 系统提示词中的工作台指引段（agent 上下文，用户对话面不可见）。
- * SESSION = 工作台——skiff 与主舱同一套机制：write/edit 记进度，logbook rebuild 续接。
+ * 系统提示词中的**工作台纪律块**（v1.30.4 升级：从单行路径 → 完整 ACC 层约束）。
+ * 用户点破（S142）：只给路径 LLM 不会主动用——需注入「已绑定 + 使用纪律 + 动作指引」。
+ * SESSION = 工作台——skiff 与主舱同一套机制（零特调，用户拍板）：
+ * 自动绑定已生效（无需 logbook use）、SESSION.md 是持久记忆载体（write/edit 维护）、
+ * rebuild 自动从本 SESSION 续接。注入 agent 系统提示词（用户对话面不可见）。
  */
 export function workspaceTrajectoryLine(mdPath: string): string {
-  return (
-    'Your trajectory workspace (auto-assigned SESSION):\n' +
-    `  SESSION.md: ${mdPath}\n` +
-    '  Record progress/decisions here with write/edit; logbook rebuild resumes from this SESSION.'
-  )
+  return [
+    '── Serenity Session Workspace ──',
+    'This role session is AUTO-BOUND to a trajectory workspace SESSION (no logbook use needed):',
+    `  SESSION.md: ${mdPath}`,
+    '',
+    'Rules of the workspace:',
+    '  1. This SESSION.md is your persistent memory carrier (like the main cabin SESSION) — ',
+    '     read it first when context feels thin or work spans turns.',
+    '  2. Record key decisions/progress/unresolved items INTO this SESSION.md with write/edit',
+    '     (sections: 目标 / 状态 / 关键决策 / 进度记录 / 未解决的问题). Keep it current — it is',
+    '     what a rebuild resumes from.',
+    '  3. When context pressure is high, run logbook rebuild — it auto-resumes from THIS SESSION.md',
+    '     (no manual use; do not switch to or read other SESSIONs unless the user explicitly asks).',
+    '  4. Never expose this internal path in user-facing replies (chat stays clean).',
+    '── ──',
+  ].join('\n')
 }
 
 /**

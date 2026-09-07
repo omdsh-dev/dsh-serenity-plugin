@@ -904,4 +904,41 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })).resolves.toBeUndefined()
     expect(sent.some((s) => s.text === '答案')).toBe(true) // 回复送达（hook 失败被吞）
   })
+
+  it('v1.30.4：session 能力角色 + existing live agent → ensure 绑定 + question 注入工作台纪律（每轮）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'logbook', 'msm'], trajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '招财' } } },
+      weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
+    }))
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const fromId = 'user@im.wechat'
+    const sid = weixinSessionIdFor(fromId)
+    // 两段式真实场景：第一次 incoming（agent 首次创建 → createSkiffAgent 内 ensure + 注册进注册表）；
+    // 第二次 incoming（同用户 → getSkiffAgent 命中 existing 快路径——v1.30.4 修复点：也 ensure + 注入纪律）
+    const ctx = fakeCtx('not-found')
+    const msg: Parameters<typeof handleIncoming>[4] = {
+      from_user_id: fromId,
+      item_list: [{ type: 1, text_item: { text: '你好' } }],
+    }
+    // 第一次：create 路径
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
+    expect(readdirSync(join(dir, 'AGENT_SESSIONS')).some((n) => n.includes('zc skiff'))).toBe(true)
+    expect([...skiffSessionSnapshot().keys()].some((id) => id === sid)).toBe(true)
+    const questionsAfterFirst = ctx.questions.length
+    // 第二次：existing 快路径（getSkiffAgent 命中——agent 已在注册表）
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
+    // existing 路径也注入工作台纪律（每轮——机制优先，用户拍板）
+    const newQuestions = ctx.questions.slice(questionsAfterFirst)
+    expect(newQuestions.some((q) => q.includes('Serenity Session Workspace') && q.includes('AUTO-BOUND') && q.includes('你好'))).toBe(true)
+  })
 })

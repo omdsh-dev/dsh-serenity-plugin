@@ -530,10 +530,14 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(mdPath).toContain('zhaocai skiff')
   })
 
-  it('workspaceTrajectoryLine：systemPrompt 指引含 SESSION.md 路径（agent 上下文）', () => {
+  it('workspaceTrajectoryLine：完整纪律块含 SESSION.md 路径 + 绑定/rebuild 约束', () => {
     const line = workspaceTrajectoryLine('/x/AGENT_SESSIONS/2026-09-07--S160--zhaocai skiff/SESSION.md')
     expect(line).toContain('SESSION.md: /x/AGENT_SESSIONS/2026-09-07--S160--zhaocai skiff/SESSION.md')
-    expect(line).toContain('logbook rebuild resumes from this SESSION')
+    // 用户点破的缺口：不只是路径——含「已自动绑定（无需 use）+ 使用纪律 + rebuild 续接」约束
+    expect(line).toContain('AUTO-BOUND')
+    expect(line).toContain('no logbook use needed')
+    expect(line).toContain('logbook rebuild')
+    expect(line).toContain('write/edit')
   })
 
   it('createSkiffAgent 集成：session 能力角色 → 自动建 + 提示词注入工作台行', async () => {
@@ -555,8 +559,9 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
       ...sessionRole(),
       systemPrompt: '角色人格',
     } as never)
-    // 提示词含工作台指引
-    expect(sections[0]?.text()).toContain('Your trajectory workspace')
+    // 提示词含工作台纪律块（AUTO-BOUND + SESSION.md 路径）
+    expect(sections[0]?.text()).toContain('Serenity Session Workspace')
+    expect(sections[0]?.text()).toContain('AUTO-BOUND')
     expect(sections[0]?.text()).toContain('SESSION.md:')
     expect(sections[0]?.text()).toContain('角色人格')
     // 激活命中

@@ -1,3 +1,25 @@
+## v1.30.4 — 2026-09-07（skiff 专属 SESSION 纪律强制在场——微信桥每轮注入工作台约束，S142 用户点破）
+
+**Scope:** v1.30.3 自动建 SESSION 后用户实测发现：**LLM 不知道已绑定 SESSION、不知道要用它**——只往 systemPrompt 塞了一行英文路径（创建时快照），老 live agent（重启后 existing 快路径）根本收不到。用户点破："我们没有给 skiff 注入任何要求和约束" + "每次都注入也行，机制比历史重要"。
+
+### 根因（R↓）
+- v1.30.3 ensure 后只注入一行 `SESSION.md: <path>`——**只给了信息没给约束**，LLM 不会主动用
+- 微信桥 `existing` 命中（重启后 live 复用）走**快路径跳过 createSkiffAgent** → 连 systemPrompt 注入都不发生 → 老 agent 完全无感知
+- 约束放 zhaocai.md（CCC 人格）优先级低 + 老 agent 快照旧
+
+### 修复
+- `skiff-core.ts` `workspaceTrajectoryLine` 升级为**完整工作台纪律块**：AUTO-BOUND（无需 use）+ SESSION.md 路径 + 4 条纪律（持久记忆载体/写进度/rebuild 自动续接/不暴露路径）——信息 + 约束 + 动作指引
+- `weixin-bridge.ts` handleIncoming：**每轮 incoming 在用户消息前注入纪律块**（用户拍板机制优先，不做一次性节流）——live/老 agent 也强制在场；hook 记录用原始 text 不泄漏注入段
+- `weixin-bridge.ts` existing 快路径补 `ensureSkiffSession`（此前只 create 路径 ensure → live agent 未绑定）
+
+### 验证
+- skiff-core 测试断言更新（完整纪律块含 AUTO-BOUND/no logbook use/rebuild 续接/write/edit）
+- weixin 新增集成测试：两段式（首次 create 建 SESSION → 二次 existing 快路径也注入纪律）
+- **62 files / 908 tests 全绿**（907 → 908 +1）+ typecheck ✓
+
+### 发布链
+- bump v1.30.4（三处一致）→ test → build → publish npm → github-push 三推 → deploy → restart-web
+
 ## v1.30.3 — 2026-09-07（Skiff 专属 SESSION：自动创建/按用户隔离，SESSION 机制零特调，S142 用户拍板）
 
 **Scope:** 微信桥 zhaocai 绑定后变成**永久性会话**，但 skiff 原设计是临时会话（无 SESSION 轨迹）——机制错配。用户拍板方向：绑定的 skiff = **权限受限的普通 agent + 自动拥有的专属工作台**；SESSION 机制（logbook create/use/rebuild + SESSION.md 读写）**不因 skiff 有任何调整**。方案 `docs/skiff-bound-trajectory-design.md` v0.3 FINAL。

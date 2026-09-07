@@ -22,7 +22,8 @@ import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeix
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
-import { createSkiffAgent, getSkiffAgent, askSkiff } from './skiff-core.js'
+import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine } from './skiff-core.js'
+import { getActiveSessionInfo } from './session-ops.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
@@ -187,6 +188,15 @@ export async function handleIncoming(
     const sessionId = weixinSessionIdFor(fromUserId)
     const existing = getSkiffAgent(sessionId)
     const hc = readHandymanConfig(root)
+    // v1.30.4：existing（进程内/重启后 live 复用）路径也走 ensureSkiffSession——
+    // create 路径由 createSkiffAgent 内 ensure；live/老 agent 快路径此前跳过 → 未绑定/未注入。
+    if (existing) {
+      try {
+        ensureSkiffSession(root, existing, roleName, role)
+      } catch (err) {
+        console.warn(`[serenity-hooks] weixin-bridge ensure 失败（不影响处理）: ${String((err as Error)?.message ?? err)}`)
+      }
+    }
     const ref = existing
       ? { agent: existing, sessionId, resumed: true }
       : await createSkiffAgent(ctx, root, roleName, role, hc?.defaultModel, sessionId)
@@ -244,7 +254,15 @@ export async function handleIncoming(
       }
 
       // question = 原文 + 媒体存在性注入 + 降级说明（不做内容转述/工具引导——M3）
+      // v1.30.4：启用了 session 能力的角色 → 每轮前缀注入工作台纪律（机制 > token——
+      // 用户拍板"每次都注入也行，机制比历史重要"；live/老 agent 也强制在场，不依赖
+      // create 时 systemPrompt 快照）。纪律进 agent 上下文（微信用户侧不可见——hook
+      // 记录用原始 text 非 question）。
       const parts: string[] = []
+      const activeWorkspace = getActiveSessionInfo(sessionId)
+      if (activeWorkspace?.mdPath) {
+        parts.push(workspaceTrajectoryLine(activeWorkspace.mdPath))
+      }
       if (text) parts.push(text)
       parts.push(...mediaNotes, ...degradedNotes)
       const question = parts.join('\n')
