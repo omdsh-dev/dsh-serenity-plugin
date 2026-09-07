@@ -1,5 +1,10 @@
 /**
- * system-prompt.ts — 顶层入口 skill 全文 + ACC/CCE/Constraints/Session 系统提示词注入
+ * system-prompt.ts — Induction（成员装配机制，specs v1.5.0 命名）装配文本构造
+ *
+ * 机制：把新实例（新会话 / rebuild 重建 / 新 agent）引入为轨迹成员的装配机制——本文件装配的文本
+ * 即 Induction 骨架（8 块五层，specs README §5）：A 主体定义（ACC/Principles/CCE）→ B 质量规范（EAP）
+ * → C 状态调节（状态块）→ D 工作供给（SKILL/Tools）→ E 任务指示（Session），稳定→易变装配序；
+ * Metaphor 为 A 层世界模型记忆钩渲染层（不计入 8 块骨架）。
  *
  * **完全对齐 opencode-serenity-plugin 的 system.transform 注入内容**（compacting.ts）：
  * 结构（v1.19.8 精简，S142 重建视角 R↓）：
@@ -53,7 +58,7 @@ function sanitizeSkillContent(content: string): string {
     .join('\n')
 }
 
-// ── 5 块注入文本（逐字对齐 opencode-serenity-plugin compacting.ts system.transform）──
+// ── Induction 装配块（8 块骨架五层 + Metaphor 渲染层；逐字对齐 opencode-serenity-plugin compacting.ts system.transform）──
 
 /** 1) 身份块：ACC 身份 + CCC 名 + 平台工具说明（需求③ S142：工具清单移出为独立 toolsBlock 放装配末尾——身份先行、工具参考殿后） */
 export function identityBlock(root: string): string {
