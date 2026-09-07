@@ -1,3 +1,26 @@
+## v1.30.3 — 2026-09-07（Skiff 专属 SESSION：自动创建/按用户隔离，SESSION 机制零特调，S142 用户拍板）
+
+**Scope:** 微信桥 zhaocai 绑定后变成**永久性会话**，但 skiff 原设计是临时会话（无 SESSION 轨迹）——机制错配。用户拍板方向：绑定的 skiff = **权限受限的普通 agent + 自动拥有的专属工作台**；SESSION 机制（logbook create/use/rebuild + SESSION.md 读写）**不因 skiff 有任何调整**。方案 `docs/skiff-bound-trajectory-design.md` v0.3 FINAL。
+
+### 用户拍板全录（R↓）
+① zhaocai tools +write/edit（SESSION.md 读写最简通道）② keeper 开（机制的一部分）③ 新建专属 SESSION（**不延续 S159** workaround）④ **多微信用户 = 各自 SESSION**（微信桥按用户派生固定 skiff 会话 id → scope 天然隔离，永不共享同一份）⑤ SESSION 命名只编号（用户不关心是谁）
+
+### 实现
+- `src/skiff-core.ts` 新增 **`ensureSkiffSession`**（懒绑定 + 幂等，per skiff 会话）：
+  - 角色 `trajectory.session !== true` → 零变化（现状完全不变）
+  - 会话日志已有**本机制自动创建**的 bound（note 前缀 `auto-created for skiff role`）→ 恢复（重启/续接记得）
+  - 无 → 自动创建专属 SESSION（`createSession desc='<role> skiff'`——编号自动递增，复用全套既有机制）+ `setActiveSessionInfo`（scope = skiff 会话 id 隔离）+ `appendBound`（note auto-created 标记）
+  - **旧手工 bound（S159 等）不认**（note 非 auto-created）→ 新建专属 SESSION（S159 workaround 退役语义）
+- `createSkiffAgent`（create/resume/live 三路径统一）：ensure 后把工作台路径经 `workspaceTrajectoryLine` 注入 systemPrompt（agent 上下文，**用户对话面零打印**）——skiff 知道工作台在哪即可 write/edit 记进度 + logbook rebuild 续接
+- **零改动** session-ops/rebuild/guards/context——复用的全是既有机制（bound 持久化 v1.29.1 / createSession / activeStore scope 隔离）
+
+### 验证
+- skiff-core 新增 7 用例：session=true 自动建（目录+SESSION.md+激活+bound）/ 幂等恢复不重复建 / session=false 零变化 / **两用户各自独立 SESSION** / 旧手工 bound 不认新建 / workspaceTrajectoryLine 内容 / createSkiffAgent 集成（提示词含工作台）
+- **62 files / 907 tests**（900 → 907 +7）除版本一致性漂移外全绿 + typecheck ✓
+
+### 发布链
+- bump v1.30.3（package.json / dsh.plugin.json / CHANGELOG 三处一致）→ test → build → publish npm → github-push 三推 → deploy → restart-web
+
 ## v1.30.2 — 2026-09-07（Skiff MSM 调用报错语义化——"格式错"而非"没权限"，S142 用户 bug）
 
 **Scope:** 微信桥 zhaocai 调用 memory-tool 等全部报 "tool not allowed in this skiff role"，用户实测为全拒 → 深挖破案：**模型把 MSM 名（memory-tool/anysearch 等）当直接工具调用**（不走 `msm()` 单入口），工具名不在 tools 白名单（白名单只有 msm 执行器）→ 守卫泛化拒绝 → 误导成"没权限"（read 通是因为 read 在 tools 白名单）。

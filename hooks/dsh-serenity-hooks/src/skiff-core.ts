@@ -11,13 +11,17 @@
 
 import type { Context } from 'cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
+import { existsSync } from 'node:fs'
 import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, type SkiffRoleConfig } from './skiff-role.js'
 import { splitModel } from './handyman-ops.js'
 import { skiffRoleFor as registryRoleFor, skiffSessionInfo as registrySessionInfo, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
+import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './session-ops.js'
+import { readLastBound, appendBound } from './session-bound.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -57,6 +61,71 @@ export function skiffSessionSnapshot(): ReadonlyMap<string, { role: string; ccc:
   const out = new Map<string, { role: string; ccc: string }>()
   for (const [id, b] of registrySnapshot()) out.set(id, { role: b.role, ccc: b.ccc })
   return out
+}
+
+// ── 专属 SESSION（v1.30.3，S142 用户拍板：SESSION 机制零特调，自动创建/管理）──
+
+/** 自动创建的 bound 标记（readLastBound 恢复判定——只恢复本机制建的；手工 use 的旧 bound 不认） */
+const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
+
+/**
+ * 系统提示词中的工作台指引段（agent 上下文，用户对话面不可见）。
+ * SESSION = 工作台——skiff 与主舱同一套机制：write/edit 记进度，logbook rebuild 续接。
+ */
+export function workspaceTrajectoryLine(mdPath: string): string {
+  return (
+    'Your trajectory workspace (auto-assigned SESSION):\n' +
+    `  SESSION.md: ${mdPath}\n` +
+    '  Record progress/decisions here with write/edit; logbook rebuild resumes from this SESSION.'
+  )
+}
+
+/**
+ * 确保启用 session 能力的 skiff 会话拥有**专属 SESSION**（工作台）：
+ * 懒绑定 + 幂等（per skiff 会话 scope 隔离——微信多用户各自独立，永不共享同一份）。
+ *
+ * 判定链：
+ * ① 角色未启用 session 能力（trajectory.session !== true）→ null（现状零变化）
+ * ② 会话日志已有**本机制自动创建**的 bound（note 前缀 auto-created）→ 恢复（重启/续接记得）
+ * ③ 无 → 自动创建专属 SESSION（createSession desc=`<role> skiff`——编号自动递增，用户不关心是谁）
+ *
+ * @returns 绑定后的 SESSION.md 绝对路径（供提示词注入）；不适用/失败 → null
+ */
+export function ensureSkiffSession(root: string, agent: Agent, roleName: string, role: SkiffRoleConfig): string | null {
+  if (!trajectorySubset(role).session) return null
+  const session = agent.session as (Session & { append?: (t: string, d: unknown) => unknown }) | null | undefined
+  const scope = String((agent.session as { id?: unknown }).id ?? agent.id)
+  // ② 已有本机制自动创建的 bound → 恢复（latest-wins）
+  const lastBound = session ? readLastBound(session) : null
+  if (lastBound && lastBound.note?.startsWith(AUTO_BOUND_NOTE_PREFIX) && existsSync(lastBound.mdPath)) {
+    setActiveSessionInfo(scope, {
+      sessionId: lastBound.sessionId ?? '',
+      dirName: lastBound.dirName,
+      mdPath: lastBound.mdPath,
+    })
+    return lastBound.mdPath
+  }
+  // ③ 无（或旧手工 bound）→ 自动创建专属 SESSION
+  const desc = `${roleName} skiff`
+  const created = createSession({ root, desc, dryRun: false })
+  const mdPath = join(created.sessionPath, 'SESSION.md')
+  setActiveSessionInfo(scope, {
+    sessionId: created.sessionId,
+    dirName: created.dirName,
+    mdPath,
+  })
+  appendBound(session, 'create', {
+    dirName: created.dirName,
+    mdPath,
+    sessionId: created.sessionId,
+    note: `${AUTO_BOUND_NOTE_PREFIX} ${roleName}`,
+  })
+  return mdPath
+}
+
+/** 当前 scope 是否已激活（幂等判定：getActiveSessionInfo 命中同 dirName）——测试用 */
+export function skiffSessionActiveFor(sessionId: string): { sessionId: string; dirName: string; mdPath: string } | null {
+  return getActiveSessionInfo(sessionId)
 }
 
 // ── agent 生命周期 ──
@@ -130,11 +199,27 @@ export async function createSkiffAgent(
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 系统提示词解析失败（回退仅基础段）: ${String((err as Error)?.message ?? err)}`)
   }
+  // v1.30.3（S142 用户拍板）：启用了 session 能力的 skiff 自动获得专属 SESSION（工作台）——
+  // 自动创建/恢复（readLastBound → createSession，幂等，per skiff 会话 scope 隔离）。
+  // 成功后把工作台路径注入 systemPrompt（agent 上下文，用户对话面不打印）。
+  let workspaceMdPath: string | null = null
+  try {
+    workspaceMdPath = ensureSkiffSession(root, agent, roleName, role)
+  } catch (err) {
+    console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 专属 SESSION 处理失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
+  }
   try {
     agent.ctx.systemPrompt.section({
       name: 'serenity-skiff',
       order: -60,
-      text: () => [buildSkiffBasePrompt(roleName, role), cccPrompt].filter(Boolean).join('\n'),
+      text: () =>
+        [
+          buildSkiffBasePrompt(roleName, role),
+          workspaceMdPath ? workspaceTrajectoryLine(workspaceMdPath) : '',
+          cccPrompt,
+        ]
+          .filter(Boolean)
+          .join('\n'),
     })
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
