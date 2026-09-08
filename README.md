@@ -1,283 +1,353 @@
-# dsh-serenity-plugin — Serenity ACC for DeepSeek Harness
+# 宁静号 ACC —— 给 DeepSeek Harness 装一个「AI 工作区」
 
-> **给 DeepSeek Harness（DSH）装上认知容器基础设施。** 任意带 `.serenity` 标记的目录（CCC, Concrete Cognitive Container）自动获得：13 个 ACC 工具、机械安全约束、会话轨迹追踪、外部访问与问答能力、微信接入与自主巡航——**一个插件，一套认知工作区**。
+> **一句话**：装上这个插件，你在电脑上给 AI 划一块自己的工作区（就是一个普通目录），
+> AI 在里面干活时就有了**记忆、纪律、工具和边界**——中途换模型、重启电脑、第二天再来，都能接着干。
 >
-> 面向 [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 0.1.0-rc 及以上。
-> 理论叙述（什么是认知容器）见 [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md)——本文只讲能力与使用。
+> 适用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）0.1.2-rc.1 及以上。
+> 想了解背后的想法（为什么叫"认知容器"），看 [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md)；本文只讲**能干什么、怎么用**。
+
+**几个词先说明白**（后面都用这几个词，不再解释）：
+
+| 词 | 说人话 |
+|---|---|
+| **工作区 / CCC** | 一个目录，里面放一个 `.serenity` 空标记文件。DSH 在别的目录里跑，插件完全不插手；一旦你进到这种目录，它自动生效 |
+| **插件 / ACC** | 就是这个仓库（npm 包 `@shgroup/dsh-serenity-hooks`）。它给 DSH 加工具、加约束、加记忆 |
+| **MSM** | 你写在工作区里的可执行小工具（一个脚本 + 一行注册）。AI 通过 `msm("名字", ["参数"])` 调用它们 |
+| **SESSION.md** | 工作区里的"工作日志"。AI 把目标、决定、进度写进去，中断后再来就从这里接着干 |
 
 ---
 
-## 快速开始（2 分钟）
+## 1. 它到底解决什么问题
 
-前置：Node ≥ 20（或 bun）、DSH 0.1.0-rc 及以上。
+不吹概念，直接说四个每天都会遇到的麻烦：
+
+| 麻烦 | 没有它 | 有了它 |
+|---|---|---|
+| **AI 干到一半忘了自己在干什么** | 上下文一满，之前的目标、决定全丢，你得重讲一遍 | 每个工作区有一本工作日志，AI 每推进一段就写进去；上下文满了就"换载体"重来，日志还在原地，接着干 |
+| **AI 到处乱翻、乱改文件** | 它能读你整台机器的文件，包括密钥 | 工作区有围墙：墙内随便用，墙外一律拒绝；密钥文件连"读"都读不到 |
+| **出门在外想用** | 只能坐在那台电脑前 | 自带一个带登录的网页入口（密码或手机验证码二选一），手机也能用 |
+| **家人想用微信问点事** | 得教他们装软件、开电脑 | 扫一次码把微信接上，家人在微信里说话，AI 用你定义的人格回话 |
+
+---
+
+## 2. 快速开始（2 分钟）
+
+前置：Node ≥ 20（或 bun）、DSH 0.1.2-rc.1 及以上。
 
 ```bash
-# 1. 从 npm registry 安装插件（自动加入 DSH profile 的 bundles 层）
+# 1. 装插件（自动加入 DSH 的 web profile）
 dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
-# 2. 重启 dsh web（插件与 WebUI client 生效）
+# 2. 重启 dsh web（插件和网页端界面一起生效）
 dsh web
 
-# 3. 验证：进入带 .serenity 标记的 CCC 目录开会话
-#    · 会话自动注入 ACC 身份 + 入口 skill 系统提示
-#    · WebUI 会话头部出现 Serenity 状态胶囊（绿点恒亮 + SAFE 盾牌滑块）
-#    · 输入 dashboard health → CCC 三原则健康检查通过
+# 3. 验证：进到带 .serenity 标记的目录里开一个会话
+#    · 会话开头会自动带上这个插件的身份说明和技能目录
+#    · 网页端会话标题旁出现一个状态胶囊（绿点常亮 + SAFE 滑块）
+#    · 输入 dashboard health，看到工作区三项检查全通过
 ```
 
 卸载：`dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 
-> **本地开发安装**（从源码）：`git clone https://github.com/tellmewhattodo/dsh-serenity-plugin.git && cd dsh-serenity-plugin && dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks`
-> ⚠️ git URL 安装（`github:...`）指向仓库根包（workspace 容器，非 bundle 层插件），不会激活——请用 link 或 npm。
+从源码装（自己改代码时用）：
 
-**开启安全模式**：点击 WebUI 胶囊中的 SAFE 滑块 → **bash 从模型的工具列表消失**（不是报错，是模型根本看不到）→ agent 只能走注册的、测试过的 MSM 通道。开关是用户能力，agent 不可见、不可自开关。
+```bash
+git clone https://github.com/tellmewhattodo/dsh-serenity-plugin.git
+cd dsh-serenity-plugin
+dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
+```
 
----
+> ⚠️ 别用 `dsh plugin add github:...` 这种写法——那个地址指向的是仓库根目录（不是插件包本身），装上了也不会生效。用 npm 或上面的 `link:` 方式。
 
-## 安装后你得到什么（能力地图）
-
-### 10 个 ACC 工具（v1.30 命名重构：13 → 10 合一）
-
-| 工具 | 能力 | 典型用法 |
-|------|------|---------|
-| `container_fs` | 容器文件系统 15 子命令（root/resolve/list/tree/mkdir/rm/mv/cp/touch/append/reveal/info/find…）（原 cc_fs） | 路径全部限定 CCC 根内，逃逸自动阻断 |
-| `logbook` | 会话全生命周期 + rebuild（原 session + session_rebuild 合并） | 多步工作先 `logbook create`，中断后 `use` 恢复；上下文超限 `rebuild` 清空重建 |
-| `dashboard` | 健康检查（CCC 三原则 P1/P2/配置 + 注册表完整性）/ 时间 / 等待（原 acc_kit） | 进入 CCC 前的例行自检 |
-| `container_git` | Git 操作（status/commit/push/log/pull/diff）（原 cc_git） | 非快进推送输出建议，绝不自动 force |
-| `msm` | MSM **单入口执行 + 发现**（原 acc_msm 执行面）：`msm("<name>", ["<args>"])`；部分名返回候选；inspect=true 查用法 | 执行已注册 MSM；管理走 container_admin msm |
-| `praxis` | 可实践理论注入（原 eap/neat/cce 三合一）：`praxis`（目录）/ `praxis eap` / `praxis neat` / `praxis cce` | 输出自检、设计对齐、工程评估 |
-| `handyman` | 杂工编排：指定白名单模型 worker 同步循环到完成 + jobs 并行 | 大批量任务（如 SQC 扫描）委派 |
-| `localstore` | 凭据/配置存储（credential/config 两命名空间） | API keys/密码集中管理，git 策略可配 |
-| `container_admin` | 容器管理（机务舱）：role（Skiff 角色，原 skiff_admin）/ msm（register/deregister/check/guide/catalog/ccc-config）/ config | 角色定义校验、MSM 注册表管理、配置总览 |
-| `autopilot-trajectory` | 自动巡航轨迹一站式管理（无参=全报告 / init / random / diag / diag-live / check / status / guide） | 时钟驱动自主唤起 + 先验偏见注入 + 多 CCC 独立（S151 自主管家） |
-
-> **改名对照**（硬切，无别名）：cc_fs → container_fs · cc_git → container_git · session+session_rebuild → logbook · acc_kit → dashboard · acc_msm → msm（执行）+ container_admin（管理）· eap/neat/cce → praxis · skiff_admin → container_admin role。旧会话历史引用报错时按本表对照即可。
-
-### 机械约束（模型不可绕过）
-
-| 约束 | 机制 |
-|------|------|
-| **安全模式** | bash 从工具列表消失（tools.restrict，每 step 同步）+ 守卫兜底 deny |
-| **路径边界** | P3 权限二分：CCC 根内完整权限，根外零权限（路径逃逸阻断） |
-| **黑名单/治理文件** | 可配黑名单 + `.serenity` 治理文件写入保护 |
-| **凭据文件守卫** | `localstore.json` 对任何工具 deny（含 read/grep/glob）——凭据值结构性不可出 |
-| **输出守卫** | 外部面（skiff/acp/rebuild 会话）最终输出检测敏感词 → 打回重生成（告知命中词+分类指引） |
-| **轨迹提醒** | Trajectory Steward 计分 + 上下文压力检测，督促进度落回 SESSION.md |
-
-### 外部面（对外服务）
-
-| 面 | 端口 | 用途 |
-|----|------|------|
-| **双端口网关** | 3081（默认 0.0.0.0） | 登录后访问完整 WebUI（密码 或 TOTP 二选一 + 工作区白名单） |
-| **Skiff 调试问答页** | 3099（默认 127.0.0.1） | 认知子集角色调试（多 CCC 切换 + 轨迹渲染） |
-| **ACP + Skiff 问答页** | 3100（默认 127.0.0.1） | ACP JSON-RPC 程序化接入 + 对外问答页（key 认证 + 容器白名单，只问答不返回内部轨迹） |
-| **微信桥（F4c-3）** | iLink 长轮询（出站） | 微信扫码接入 → skiff 角色对话（文本/语音/图片/文件），多账号，会话延续 |
+**安全模式**：点一下网页端胶囊里的 SAFE 滑块，`bash` 就会从 AI 的工具列表里**直接消失**（不是报错，是它根本看不到这个工具）。于是 AI 只能走你注册过、测试过的小工具通道。这个开关是给你用的——AI 看不见、也打不开。
 
 ---
 
-## 使用场景（真实能力）
+## 3. 装完之后你多了什么
 
-> 以真实部署「宁静号」为范例（所有地址/账号/路径/密钥均已泛化）。一个带 `.serenity` 标记的目录 = 一个 CCC。
+### 3.1 十个工具
 
-### 一个 CCC 的目录解剖
+| 工具 | 干什么 | 什么时候用 |
+|---|---|---|
+| `container_fs` | 在工作区里管文件：列目录、找文件、复制、移动、新建、追加、在文件管理器里打开 | 需要看/整理工作区里的文件时 |
+| `logbook` | 工作日志的全生命周期：新建、查看、切换、关闭、归档，还有"原地重建" | 任何多步骤的活儿，第一步就是它 |
+| `dashboard` | 仪表盘：工作区健康检查（三项）、当前时间、等待 | 进工作区先自查一下；等外部服务时用 |
+| `container_git` | git 操作：status / commit / push / log / pull / diff | 提交和推送代码；它绝不自动强推 |
+| `msm` | 小工具执行入口：`msm("名字", ["参数"])`；名字记不全就给候选；`inspect=true` 看用法 | 调用工作区里注册的任何小工具 |
+| `praxis` | 按需给 AI 注入三套"做事方法"：输出自检（eap）、设计对齐（neat）、认知连续性（cce） | 要它把话说清楚 / 先对齐再动手时 |
+| `handyman` | 杂工：派一个便宜模型的助手，循环干活直到完成；也可以一次派多个并行 | 大批量、重复性的活（比如扫描几十个技能） |
+| `localstore` | 存密钥和配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
+| `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具时 |
+| `autopilot-trajectory` | 自动巡航：定时唤醒工作区、注入当前焦点，支持多个工作区各自独立 | 想让 AI 定时自己干活（见 §6.5） |
+
+> **改过名**（旧名已彻底停用，没有兼容别名）：`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role`。老会话里看到旧名，照这张表对照即可。
+
+### 3.2 机械约束（AI 绕不过去）
+
+这些不是"提示词里劝它别做"，而是**机制上做不到**：
+
+| 约束 | 你会看到的效果 | 为什么这样做 |
+|---|---|---|
+| **安全模式** | bash 从工具列表里消失（每一步都同步一次），就算它想调也会被兜底拦下 | 走注册过的小工具，比让 AI 自己拼 shell 命令可靠得多 |
+| **工作区围墙** | 墙内什么都能干，墙外一律拒绝（连路径都解析不出去） | AI 不该碰工作区之外的东西 |
+| **黑名单 / 治理文件** | 可配黑名单；`.serenity` 这类治理文件禁止 AI 写 | 防止 AI 把自己所在的"地基"改坏 |
+| **密钥文件守卫** | `localstore.json` 对**所有**工具拒绝（包括 read/grep/glob） | 密钥值在结构上就出不来 |
+| **对外输出守卫** | 对外面的会话（子角色 / ACP / 重建会话）如果答出敏感词，会被打回重答，并告诉它命中了哪个词、该怎么改 | 外面的人不该看到内部机制 |
+| **轨迹提醒** | 做久了会提醒 AI"把进度写回工作日志"，并要求它回一个确认码 | 提醒是机制，不是靠自觉 |
+
+### 3.3 对外的入口
+
+| 入口 | 默认端口 | 给谁用 |
+|---|---|---|
+| DSH 主界面 | 3080 | 你自己在本机用（插件不碰这个端口） |
+| **网页登录入口** | 3081 | 外部/手机访问完整界面：登录后反向代理到 3080，可配工作区白名单 |
+| **微信主动发送入口** | 3082（只绑 127.0.0.1） | 工作区里的小工具用它主动给微信发消息（公网到不了，所以不需要密钥） |
+| **子角色调试页** | 3099（只绑 127.0.0.1） | 你调试"子角色"时用，能切换工作区、看对话轨迹 |
+| **ACP + 对外问答页** | 3100（只绑 127.0.0.1） | 程序化接入（JSON-RPC）+ 给别人用的问答页（key 认证，只返回答案，不返回内部轨迹） |
+| **微信桥** | 无需端口（出站长轮询） | 家人在微信里直接和 AI 说话 |
+
+> 默认只监听 127.0.0.1 的入口，要暴露到公网由你自己决定（隧道 / 反代 / 端口映射都行），插件不绑定任何特定做法。
+
+---
+
+## 4. 一个工作区长什么样
+
+工作区就是一个普通目录，加一个标记文件：
 
 ```
-home-serenity/                    ← CCC 根（.serenity 记号文件标记）
-├── .serenity                     ← 记号：本目录是一个认知容器
+my-workspace/                     ← 工作区根目录（放一个 .serenity 就成）
+├── .serenity                     ← 标记：这个目录是一个工作区
 ├── .opencode/
-│   ├── serenity.json             ← CCC 级配置：handyman 模型白名单 / 会话阈值 / skiff 角色
-│   └── skills/                   ← 领域技能（每个 = 一个领域知识的 EAP 封装）
-│       ├── home-media/           ←   媒体：获取 / 字幕 / 分发
-│       ├── home-wealth/          ←   财务：资产 / 负债 / 收支 / 预算
-│       ├── family-profiles/      ←   成员档案（唯一真相源）
-│       └── …（每个 skill 可持有 MSM 脚本）
-├── AGENT_SESSIONS/               ← 会话库房：每目录一个 SESSION.md（持久轨迹）
-│   └── 2026-08-29--S142--xxx/
-│       └── SESSION.md            ← 轨迹身体：目标 / 决策 / 进度（永远原位）
-└── _tmp/                         ← 运行时落盘（图片 / 用户粘贴文件）
+│   ├── serenity.json             ← 工作区级配置：助手模型白名单 / 日志阈值 / 子角色
+│   └── skills/                   ← 领域技能（每个技能 = 一个领域的知识 + 可能有小工具）
+│       ├── home-media/           ←   例如：媒体（找片源 / 做字幕 / 推送）
+│       ├── home-wealth/          ←   例如：家庭财务
+│       └── …（每个技能可以自带脚本）
+├── AGENT_SESSIONS/               ← 工作日志库：每个目录一本 SESSION.md
+│   └── 2026-09-08--S142--xxx/
+│       └── SESSION.md            ← 目标 / 决定 / 进度（永远留在这里，不会被搬走）
+└── _tmp/                         ← 运行时落盘：你粘贴的图片和文件
     ├── images_from_user/
     └── files_from_user/
 ```
 
-### 日常能做什么（10 个真实用例，含操作链）
+---
 
-| # | 场景 | 操作链（工具 → 子命令 → 效果） |
-|---|------|--------------------------------|
-| 1 | **长期项目维护** | `logbook create --desc xxx` → 自动建 SESSION.md → 多步工作逐段落进度 → 中断后 `logbook use` 恢复 → 上下文超限 `logbook rebuild` 自动接续 |
-| 2 | **批量代码同步** | 根仓 `container_git commit/push`；多个子仓库一键 `resources-management sync`（自动 commit + push 全部） |
-| 3 | **媒体字幕生产** | 搜索片源（BT）→ 下载 → Whisper 转写 → 翻译 → 双语 SRT → 机械 QC（7 项检查）→ 分发（RSS/邮件） |
-| 4 | **服务器巡检** | `server-tool health` → CPU/内存/GPU/容器/服务一键报告；`server-tool container` 查看/重启容器——全部经 ssh-connect 白名单通道 |
-| 5 | **内网服务定位** | `landscape-tool` 仓库全景（20+ 仓库分类/技术栈/关联）；`network-tool` 设备/端口扫描 |
-| 6 | **财务数据管理** | 本地结构化记录资产/负债/收入/支出/预算 → 查询/汇总；房贷利率对比等宏观跟踪 |
-| 7 | **成员档案** | `profile list/show/create/update`——成员资料统一维护，CCC 是唯一真相源 |
-| 8 | **想法随手记** | 有想法随时开聊 → AI 访谈式理清 → 结构化归档 → 定期回顾思考模式 |
-| 9 | **外部访问（手机/出差）** | 浏览器开 `http://内网地址:3081` → 登录页：用户名 + 密码 **或** Authenticator 6 位码 → 手机直接操作 WebUI |
-| 10 | **粘贴资料自动处理** | **图片**：粘贴 → 自动落盘 → 视觉模型识别（快递单/截图/图表）；**任意文件**：粘贴 PDF/压缩包 → 自动落盘 → agent 提取（PDF/解压/表格，均有专用 MSM） |
-| 11 | **微信接入（角色对话）** | 面板微信桥扫二维码绑定 → 微信发消息（文本/语音/图片/文件）→ 路由到 skiff 角色（如招财）回复回微信 → 多账号并行 + 同用户会话延续 |
-| 12 | **自主巡航（Autopilot）** | CCC 配置 autopilotTrajectory（interval/session/偏见脚本/topPrompt）→ 时钟到点自动唤起注入前台 → 全局开关 + 多 CCC 各自独立巡航（S151 自主管家） |
+## 5. 能拿它做什么（12 个真实用例）
 
-### 典型一天
+> 下面这些都在真实部署里跑着。地址、账号、路径都做了泛化。
+
+| # | 你想干的事 | 实际怎么走 |
+|---|---|---|
+| 1 | **长期项目不断线** | `logbook create` 建日志 → 每推进一段写进去 → 中断后 `logbook use` 接上 → 上下文满了 `logbook rebuild` 原地重建并自动继续 |
+| 2 | **批量同步代码** | 当前仓库 `container_git commit/push`；多个子仓库一条命令全同步（自动提交 + 推送） |
+| 3 | **做一集字幕** | 搜片源 → 下载 → Whisper 转写 → 翻译 → 双语 SRT → 机械质检（7 项）→ 推送订阅/邮件 |
+| 4 | **服务器巡检** | 一条命令出 CPU/内存/GPU/容器/服务报告；重启容器也在同一条白名单通道里 |
+| 5 | **内网服务定位** | 仓库全景（分类/技术栈/关联）+ 设备端口扫描 |
+| 6 | **家庭财务** | 结构化记录资产/负债/收支/预算，随时查询汇总；房贷利率对比这类宏观跟踪 |
+| 7 | **家人档案** | 成员资料统一维护，工作区是唯一真相源 |
+| 8 | **想法随手记** | 想到什么就聊，AI 访谈式问清 → 结构化归档 → 定期回顾你的思考模式 |
+| 9 | **手机/外出使用** | 浏览器打开 `http://内网地址:3081` → 输密码或 6 位验证码 → 直接用完整界面 |
+| 10 | **粘贴资料自动处理** | 粘图片 → 自动落盘 → 视觉模型识别（快递单/截图/图表）；粘 PDF/压缩包 → 自动落盘 → 提取文本/解压/读表格 |
+| 11 | **微信里用 AI** | 面板扫一次码 → 家人在微信发消息（文字/语音/图片/文件）→ 路由到指定子角色 → 回复回到微信 |
+| 12 | **定时自己干活** | 工作区配好巡航（间隔/目标会话/焦点/偏见脚本）→ 到点自动唤醒并注入焦点，全程在你眼前发生，可随时介入 |
+
+**典型一天**：
 
 ```
-早上：内网服务巡检（server-tool health）→ 一切正常
-上午：同步昨日代码（resources-management sync）→ 子仓库全部推送
-午间：收到 PDF 账单 → 粘贴到对话 → 自动落盘 + 表格提取 → 记入财务
-下午：制作一期视频字幕（Whisper → 翻译 → 双语 SRT → QC）→ 推送订阅
-晚间：外部设备访问家庭服务（3081 登录页：TOTP 码验证）→ 处理运维问题
-全程：每段工作落 SESSION.md → 轨迹连续，随时可换人/换模型/换宿主接续
+早上  服务器巡检（一条命令）→ 一切正常
+上午  同步昨天的代码 → 子仓库全部推送
+午间  收到 PDF 账单 → 粘进对话 → 自动落盘 + 表格提取 → 记进财务
+下午  做一集视频字幕（转写 → 翻译 → 双语 SRT → 质检）→ 推送订阅
+晚间  手机登录 3081 处理运维（验证码验证）
+全程  每段工作都落在 SESSION.md 里 → 轨迹连续，随时换人/换模型/换机器接着干
 ```
 
 ---
 
-## 外部访问与安全
+## 6. 对外入口详解
 
-### 双端口网关（3081）
+### 6.1 网页登录入口（3081）
+
+插件自己起第二个监听器，请求流程是：
 
 ```
-外部浏览器 → http://LAN-IP:3081（插件自起第二监听器）
-  → 未登录 → 极简登录页（用户名 + 密码 或 6 位验证码，二选一；移动端适配）
-  → POST /serenity/login：scrypt 验证 / TOTP 校验 + CSRF token 集合 + 失败锁定（5 次→15min 指数退避）
-  → HttpOnly cookie（SameSite=Strict，滑动 24h）→ 302 反代
-  → 已登录 → 反代 127.0.0.1:主端口（Host/Origin 改写过信任栅栏）
-  → /api/workspace.list 白名单过滤 + workspace.create 校验
-  → WS upgrade 转发（101 回写 + 双向 error 监听防崩溃）
+外部浏览器 → http://内网IP:3081
+  → 没登录 → 极简登录页（用户名 + 密码，或 6 位动态验证码，二选一；手机端适配）
+  → 提交 → scrypt 校验 / TOTP 校验 + CSRF 校验 + 连续失败锁定（5 次 → 15 分钟指数退避）
+  → 通过 → 下发 HttpOnly cookie（SameSite=Strict，24 小时滑动续期）→ 302 跳转
+  → 已登录 → 反向代理到 127.0.0.1:3080（改写过 Host/Origin，作为信任栅栏）
+  → 工作区列表按白名单过滤 + 新建工作区做校验
+  → WebSocket 升级也转发（101 回写 + 双向错误监听，防止连接被压垮）
 ```
 
-### Skiff 认知子集角色（3099 + container_admin role）
+### 6.2 微信桥
 
-CCC 从全知全能 trajectory 切出**任意子集角色**（`.opencode/serenity.json skiff.roles`）——不限于问答，可有操作能力：
+工作区级配置（`.opencode/serenity.json` 的 `weixin` 段），**凭据放在工作区的 `localstore.json`**（不落 git 明文）。
+DSH 一个进程可以同时带多个工作区，每个工作区各自对接自己的微信。
+
+- **扫码绑定**：设置面板 → 微信桥 → 选工作区 → 扫码（手机微信确认）→ 机器人 token 自动写入凭据
+- **多账号**：每个账号独立扫码、独立移除
+- **能收什么**：文字、语音（微信服务端自带转写，无需额外识别）、图片、文件
+  （图片和文件会从微信 CDN 下载并解密，落到 `_tmp/weixin-inbound/`，再把路径告诉 AI）
+- **正在输入**：处理期间微信会显示"正在输入…"
+- **回复干净**：自动剥掉思考过程，微信只看到正文
+- **记得住**：同一个微信号对应固定会话，重启后恢复历史，不会"失忆"
+- **路由**：微信号 → 子角色（精确匹配优先，`*` 兜底）
+- **主动发消息**：工作区里的小工具可以主动给指定用户发消息——
+  `msm("weixin-send", ["send", "--ccc", "<工作区>", "--user", "yh", "内容"])`
+  （`--ccc` 必填，没有"默认当前工作区"这种猜测；发出的消息会自动被记录）
+- **让 AI 自己决定怎么回**（v1.30.10）：配置 `"weixin": { "autoReplyWithLastMessage": false }`
+  后，插件不再自动把 AI 最后那段话转给用户，而是每轮告诉它"你必须自己发"，并附上一条可直接照抄的命令。
+  适合需要过程汇报、想分多条发、或者该安静就安静的角色。默认 `true`（保持原行为）。
+- **消息记录**：配一个 `weixin.hook` 脚本，每收/发一条消息就把事件（JSON）喂给它，存哪里由你决定。
+  记录里 `source: "reply"` 表示"回复用户"，`source: "proactive"` 表示"AI 主动发起"。
+- **排障**：`msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
+
+### 6.3 子角色（Skiff）
+
+你可以从一个"什么都能干"的助手身上，切出一个**能力受限的小角色**——不只是问答，也可以带操作能力：
 
 ```jsonc
 {
   "skiff": {
     "roles": {
       "qa": {
-        "model": "provider/model",              // per-role 模型
-        "msms": ["web-search", "vlm-describe"], // MSM 独立白名单
-        "tools": ["read", "grep", "glob"],      // 非 MSM 工具独立白名单
-        "systemPromptFile": "roles/qa.md"       // 或 systemPrompt 内联
+        "model": "provider/model",              // 这个角色单独用哪个模型
+        "msms": ["web-search", "vlm-describe"], // 它能调哪些小工具
+        "tools": ["read", "grep", "glob"],      // 它能用哪些平台工具
+        "systemPromptFile": "roles/qa.md"       // 它的人格与边界（也可以直接内联）
       }
     }
   }
 }
 ```
 
-- **双白名单**：MSM 与非 MSM 工具独立配置，白名单外全隐藏；skill 加载恒可用
-- 调试问答页（3099）多 CCC 手工切换，回答 marked 渲染 + think 折叠
-- `container_admin role validate` 校验配置 → `apply` 显式生效（绑定 CCC + 角色清单）
+- 两份白名单分开配（小工具 / 平台工具），没列出来的一律隐藏
+- 调试页（3099）可以切工作区、看轨迹；回答用 markdown 渲染，思考过程折叠
+- `container_admin role validate` 校验配置，`apply` 才真正生效
 
-### Skiff 问答页（3100 + 公网）
+### 6.4 对外问答页（3100）
 
-- **key 认证**（timing-safe + 失败 IP 锁定 + 可轮换）+ 容器白名单（空 = 全部开放）
-- **对外只问答**：响应仅 answer/answer_html/sessionId——**不返回内部轨迹**
-- **公网暴露由部署方自选方案**（隧道 / 反向代理 / 端口映射等）——插件不绑定任何特定暴露方式；默认仅监听 127.0.0.1，暴露属部署决策
+- **key 认证**（常量时间比较 + 失败 IP 锁定 + 可轮换）+ 容器白名单（留空 = 全部开放）
+- **只给答案**：响应里只有 answer / answer_html / sessionId——内部轨迹、工具结果、机制信息都不出去
+- 默认只监听 127.0.0.1；要给别人用，怎么暴露（隧道/反代/端口映射）由你决定
 
-### 微信桥（F4c-3：iLink 接入）
+### 6.5 自主巡航（Autopilot Trajectory）
 
-CCC 级配置（`.opencode/serenity.json weixin`），凭据归 CCC localstore（credential scope）——**dsh 一进程多 CCC，每个 CCC 独立对接微信桥**：
+让工作区**到点自己醒过来干活**，全程在你眼前发生（前台注入，随时可介入）：
 
-- **扫码绑定**：面板「微信桥」→ 选 CCC → 扫码（手机微信确认 liteapp）→ bot_token 自动写凭据
-- **多账号**：每账号独立扫码绑定 + 独立移除；`nextWeixinAccountId` 最小未占用自增
-- **消息能力**：文本 / 语音（服务端自带转写 `voice_item.text`）/ 图片 / 文件（CDN 下载 + AES-128-ECB 解密 → 落盘 `_tmp/weixin-inbound/` → 注入对话）
-- **正在输入**：处理前 sendtyping 1 → 处理后 0（微信侧显示"正在输入..."，失败静默）
-- **回复纯净**：`stripThink` 剥离思考块，微信只收到最终正文
-- **会话延续**：固定可重建 sessionId（`skiff-weixin-<sha256(userid)>`）+ **resume-or-create**——重启后历史恢复，不丢记忆；live 会话优先复用
-- **路由**：用户 → 角色（exact → 通配 `*` 兜底）；ACC 不绑定具体 role（如招财 zhaocai）
-- **诊断**：`weixin-doctor` MSM（status/diag/verify 五链）
+- **什么时候醒**：工作区开关打开 + 全局开关打开（默认关，只在你想跑的机器上开）+ 目标会话存在（目录带 `--auto` 后缀）+ 到了间隔（支持小数，最密约 36 秒）+ 不在避开的高峰窗口（默认北京时间 8~18 点）+ 偏见脚本就绪
+- **醒了先看什么**：先看你自己写的"焦点"（`topPrompt`，每轮最先注入，防跑偏），再看随机生成的"偏见内容"（你写的脚本，负责探索方向）
+- **多个工作区各自独立**：每个工作区自己的间隔/会话/焦点/窗口，互不干扰
+- **有审计**：每次唤醒都记一笔，面板里能看到最近几次；失败会指数退避重试
+- 没有"每天最多唤醒几次"的限制——频率只由间隔和窗口决定
 
-### Autopilot Trajectory（自动巡航轨迹）
+### 6.6 安全模型
 
-时钟驱动的**自主认知巡航**——CCC 定义轨迹焦点与偏见，插件负责到点唤起（前台注入，用户全程可见可介入）：
-
-- **唤起条件**：enabled + 全局开关（settings `autopilotEnabled`，默认关——只在指定机器跑）+ 目标会话（`--auto` 后缀）+ 间隔（支持小数，最密 0.01h≈36s）+ 避开高峰窗口（默认北京 8~18 点）+ 偏见脚本就绪
-- **焦点锚定**：`topPrompt`（CCC 定义、每次唤起最先注入）+ 偏见内容（CCC 自定义脚本，随机探索）——稳定锚 + 随机方向互补
-- **多 CCC 独立**：每 CCC 各自 interval/session/bias/topPrompt/窗口；per-CCC running 守卫 + 全局串行化；面板 CCC 选择器 + 立即唤起
-- **审计**：每次唤起记录（recentWakes ring，面板展示）；唤起失败指数退避重试
-- **v1.27.12 移除每日预算**：唤起频率只受 interval + 窗口约束（高频实验不受限）
-
-### 安全模型
-
-| 层 | 机制 |
-|----|------|
-| 登录 | scrypt 密码哈希 + 常量时间比较 + 256-bit token + 滑动 24h TTL + 审计日志 |
-| 双因素 | TOTP（RFC 6238，Authenticator 兼容）二维码扫码绑定；密码 或 验证码二选一 |
-| 防爆破 | 账号维度失败锁定（5 次 → 15min 指数退避） |
-| 防 CSRF | 登录双提交 + config PUT Origin 校验 + 服务端 token 集合（多标签不冲突） |
-| 凭据 | `localstore.json` 集中管理（git 默认拒绝提交）；数据面守卫结构性隔离 |
-| 输出 | 外部面输出守卫：敏感词检测 → 打回重生成（告知命中词 + 分类指引） |
+| 层面 | 做了什么 |
+|---|---|
+| 登录 | scrypt 密码哈希 + 常量时间比较 + 256-bit token + 24 小时滑动有效期 + 审计日志 |
+| 双因素 | TOTP（兼容 Authenticator），扫码绑定；密码和验证码二选一 |
+| 防爆破 | 按账号锁定：连续失败 5 次 → 锁 15 分钟，且指数退避 |
+| 防 CSRF | 登录双提交 + 配置写入校验 Origin + 服务端 token 集合（多标签页不冲突） |
+| 凭据 | 集中放 `localstore.json`（默认禁止提交到 git）；密钥文件对工具结构性隔离 |
+| 对外输出 | 敏感词检测 → 打回重答，并告知命中词和规避方向 |
 
 ---
 
-## 配置（4 层）
+## 7. 配置分四层
 
-| 层 | 位置 | 内容 |
-|----|------|------|
-| DSH 设置面板 | settings.yaml（DSH 原生） | 三功能开关（gateway/rebuild/naming）+ rebuild 阈值 + skiffEnabled/skiffDebugPort + acpEnabled/acpHttpPort + publicAskEnabled + **autopilotEnabled（全局开关，默认关）** |
-| plugin 全局文件 | `~/.dsh/serenity-hooks.json`（0600） | 网关账号（scrypt + TOTP）/ host / port / 工作区白名单 / cookieSecure / publicAsk key |
-| CCC 配置 | `.opencode/serenity.json` | handyman.models（白名单+缺省模型）/ sessionKeeper.threshold / safeMode.blacklist / skiff.roles / **autopilotTrajectory（interval/session/bias/topPrompt/窗口）** / **weixin（账号/路由/开关）** |
-| CCC 凭据 | `localstore.json` | 凭据/配置命名空间（git 策略可配）；微信 bot_token 存 credential scope |
+| 层 | 位置 | 放什么 |
+|---|---|---|
+| DSH 原生设置 | DSH 的 settings.yaml | 简单开关：网关 / 重建 / 会话命名、重建阈值、子角色开关与调试端口、ACP 与问答页开关、**巡航总开关（默认关）** |
+| 插件全局文件 | `~/.dsh/serenity-hooks.json`（权限 0600） | 网关账号（scrypt + TOTP）、监听地址与端口、工作区白名单、cookie 安全开关、问答页 key |
+| 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**巡航（间隔/会话/焦点/窗口）**、**微信（账号/路由/开关）** |
+| 工作区凭据 | `localstore.json` | 密钥与本地偏好；微信机器人 token 也在这一层 |
 
-> 原则：**plugin 是全局的，CCC 是具体的**——账号密码/开关/阈值归 plugin 层；角色/凭据/本地偏好归 CCC。
-
----
-
-## 上下文与轨迹管理
-
-| 机制 | 说明 |
-|------|------|
-| **SESSION.md** | 轨迹的持久身体，永远原位；多步工作的目标/决策/进度都落这里 |
-| **logbook rebuild** | 上下文超阈值 → `[TRAJECTORY]` 提示 LLM 主动触发 `logbook rebuild` → 同会话 surface 清空重建（锚点保留协议正文 + 「继续 S###」）→ 自动继续；shadow-price 协议合规（token 计量正确回落） |
-| **Trajectory Steward** | 计分提醒（`[TRAJECTORY-STEWARD]` + ACK 协议）督促进度落回；机制预声明在系统提示词中 |
-| **认知沉淀纪律** | 重建前若产生有价值认知 → 修订相关 skill（EAP 结构化）；新建 skill 写提案到 SESSION.md 供用户审阅，不自行创建 |
+> 原则：**插件是全局的，工作区是具体的**——账号、开关、阈值归插件层；角色、凭据、本地偏好归工作区层。
 
 ---
 
-## 理论（索引）
+## 8. 上下文快满了怎么办
 
-- **浓缩叙述**：[docs/cognitive-container-theory.md](docs/cognitive-container-theory.md)——认知容器定义 / 认知 Loop（动作=反馈）/ Trajectory 主体 / Session=可重建载体 / 认知闭环
-- **权威标准**：[serenity-acc-specs](https://github.com/tellmewhattodo/serenity-acc-specs)（§0 理论根基 + 注入规范 + 不变量）
+AI 一次能"记住"的内容有上限。满了不用你手动开新会话：
+
+| 机制 | 说人话 |
+|---|---|
+| **工作日志（SESSION.md）** | AI 的"笔记本"，永远留在原地。目标、决定、进度都写这儿 |
+| **原地重建（logbook rebuild）** | 快满时它会提示 AI 主动重建：把这一轮对话清空，但重新注入"你是谁 + 继续 S### 的工作"——**载体换了，活儿接着干**。重建后的 token 计量也正确回落 |
+| **进度提醒** | 做久了会按计分提醒 AI 把进度写回日志，并要求它回确认码 |
+| **沉淀纪律** | 重建前如果产生了有价值的认知，先把它写进相关技能（而不是丢掉） |
 
 ---
 
-## 开发与扩展（插件作者向）
+## 9. 给插件开发者
 
 ```bash
-# 完整开发循环（safe-mode 下经 msm dsh-develop 亦可）
-pnpm typecheck          # hooks/dsh-serenity-hooks（node + client 双面）
-pnpm test               # vitest 全量（62 files / 895 tests）
-pnpm build              # tsc + tsdown 双 bundle（lib/index.js + client.js）
+pnpm typecheck          # 类型检查（node + 浏览器端两套）
+pnpm test               # 全量测试（当前 70 个文件 / 993 个用例）
+pnpm build              # 打包（lib/index.js + client.js）
 ```
 
-- **开发 MSM**：`scripts/dsh-develop.ts`（typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/**pack-check**/github-push/npm-install-dev）+ `scripts/dsh-crash-investigate.ts`（崩溃调查，只读）——`pack-check` 发布前校验 tarball 完整性（动态核对 lib/ 全部 JS 产物 + .d.ts，防 chunk 漏发）
-- **架构**：Native Cordis 插件（真实 DSH 工具 `ctx.tools.register` + 拦截缝 `systemPrompt.section`/`tools/pre-execute`/`agent/turn-stopping`…）；**零改 DSH harness**——所有能力走插件 seam/事件/注入服务
-- **代码地图**：`docs/codebase-overview-v1.22.md`（分层架构/模块职责/数据流/配置分层）
-- **设计决策**：D1~D30+ 见 CHANGELOG.md 与维护 skill（`dsh-serenity-plugin-development`）
-- **发布**：npm `@shgroup/dsh-serenity-hooks` + GitHub 双 remote（tellmewhattodo + omdsh-dev 双推）
+- **开发用小工具**：`scripts/dsh-develop.ts`——typecheck / test / build / status / commit / push / version / bump / deploy / restart-web / publish / pack-check / github-push 一条龙。
+  `pack-check` 会在发布前核对打包产物是否完整（曾经踩过"发到 npm 少了文件"的坑）；`scripts/dsh-crash-investigate.ts` 用来查崩溃（只读）
+- **架构**：Cordis 原生插件，用 DSH 的正式接口注册工具和拦截点——**从不修改 DSH 本体**
+- **代码地图**：[docs/codebase-overview-v1.22.md](docs/codebase-overview-v1.22.md)
+- **设计决策**：见 [CHANGELOG.md](CHANGELOG.md) 和维护技能 `dsh-serenity-plugin-development`
+- **发布**：npm `@shgroup/dsh-serenity-hooks` + GitHub 双仓库同步推送
 
-## 与 opencode-serenity-plugin 的关系 / CCC 可互换
+---
 
-| | opencode-serenity-plugin | dsh-serenity-plugin（本仓） |
-|---|------|------|
-| 宿主 | OpenCode | DeepSeek Harness |
-| 实现 | 独立 | **独立**（不复用源码，同一 ACC 标准） |
-| 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关文本逐字节对齐 |
-| 工具 | msm 单入口 / container_fs / logbook 等 | container_fs/logbook/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/autopilot-trajectory |
+## 10. 和 opencode 版是什么关系
 
-**同一 CCC 可任意换用 osp / dsh 运行时**：`.serenity` 记号、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 跨运行时文件格式一致；差异仅在平台层（工具命名/注入通道），切换后 Agent 收到的认知约束完全一致。
+| | opencode-serenity-plugin | dsh-serenity-plugin（本仓库） |
+|---|---|---|
+| 跑在 | OpenCode | DeepSeek Harness |
+| 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
+| 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
+| 工具 | msm / container_fs / logbook 等 | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory |
 
-## FAQ
+**同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
+差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。
 
-**Q：安装后没反应？** 确认进入的是带 `.serenity` 标记的目录（CCC）；非 CCC 目录插件零干预。`dashboard health` 验证三原则。
+---
 
-**Q：bash 怎么不见了？** 安全模式开启后 bash 从工具列表消失——这是设计：走注册的、测试过的 MSM 通道更可靠。WebUI 胶囊滑块关闭即可恢复。
+## 11. 常见问题
 
-**Q：外部访问（3081）登录失败锁定？** 5 次失败锁 15 分钟（指数退避）——等锁定过期，或检查账号 TOTP 绑定状态。
+**Q：装完没反应？**
+先确认你进的是带 `.serenity` 标记的目录。不是工作区的话，插件完全不介入。进去后输入 `dashboard health` 看三项检查。
 
-**Q：上下文快满了？** 把进度落回 SESSION.md，然后按 `[TRAJECTORY]` 提示调用 `logbook rebuild`——轨迹自动接续，不用手动开新会话。
+**Q：bash 怎么不见了？**
+安全模式开着——这是设计，不是 bug。走注册过的小工具比让 AI 自己拼命令可靠。关掉胶囊里的 SAFE 滑块就回来了。
 
-**Q：对外问答页（3100）返回什么？** 只返回回答（answer/answer_html/sessionId）——内部轨迹、工具结果、机制信息都不出对外面。
+**Q：3081 登录被锁了？**
+连续失败 5 次锁 15 分钟（指数退避）。等锁过期，或检查账号的验证码绑定状态。
+
+**Q：上下文快满了怎么办？**
+先让 AI 把进度写回 SESSION.md，然后按提示调用 `logbook rebuild`。轨迹会自动接续，不用手动开新会话。
+
+**Q：对外问答页会返回内部信息吗？**
+不会。只返回答案本身，内部轨迹和工具结果都不出去。
+
+**Q：微信桥里，AI 的回复是怎么发出去的？**
+默认由插件自动把它的最后一段话转发给你。如果配了 `autoReplyWithLastMessage: false`，插件就不转了，改由 AI 自己发——所以这时候它如果没发，你就收不到消息（没有兜底，这是刻意设计）。
+
+**Q：主动发的微信消息会被记录吗？**
+会。和工作区里配的 `weixin.hook` 记录脚本走同一条路，事件里标 `source: "proactive"`；自动回复标 `source: "reply"`。
+
+---
+
+## 12. 延伸阅读
+
+- **这套东西的想法从哪来**：[docs/cognitive-container-theory.md](docs/cognitive-container-theory.md)——认知容器是什么、认知的"发生/存储/再发生"、轨迹与载体
+- **权威标准**：[serenity-acc-specs](https://github.com/tellmewhattodo/serenity-acc-specs)——理论根基、注入规范、不变量
+- **改了什么**：[CHANGELOG.md](CHANGELOG.md)——每个版本做了什么、为什么这么做
+
+---
 
 ## 许可
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **版本**: v1.30.0 &nbsp;|&nbsp; **前置**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **测试**: 62 files / 895 tests
+> **版本**：v1.30.11 ｜ **前置**：DSH 0.1.2-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：70 个文件 / 993 个用例
