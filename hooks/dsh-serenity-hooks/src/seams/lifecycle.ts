@@ -24,6 +24,7 @@ import { unregisterSkiffSession } from '../skiff-core.js'
 import { stopAcpHttpServer } from '../acp-http.js'
 import { stopSkiffDebugServer } from '../skiff-debug.js'
 import { stopAllBridges } from '../weixin-bridge.js'
+import { forgetManualOutputSession } from '../weixin-output-guard.js'
 import { registerDisposer } from '../host/effect.js'
 
 /** 从 Agent / Session / 事件负载中取会话 id（形状宽容：未知结构返回 null） */
@@ -47,6 +48,12 @@ export function cleanupSessionState(sessionId: string): void {
     clearActiveSessionInfo(sessionId)
   } catch {
     /* 无作用域 */
+  }
+  try {
+    // v1.30.16：手动输出闸门状态（会话销毁后不再判定；同时防 per-会话 Map 无界增长）
+    forgetManualOutputSession(sessionId)
+  } catch {
+    /* 无状态 */
   }
 }
 

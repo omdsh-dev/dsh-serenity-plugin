@@ -48,6 +48,7 @@ import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
 import { registerAutopilot } from './autopilot-trajectory.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
 import { registerWeixinSendApi } from './weixin-send-api.js'
+import { registerWeixinOutputGuard } from './weixin-output-guard.js'
 import { registerLifecycle } from './seams/lifecycle.js'
 import { registerWebFetchProvider } from './web-fetch-provider.js'
 import { registerDisposer } from './host/effect.js'
@@ -196,6 +197,10 @@ export function apply(ctx: Context, config: Config): void {
   // MSM 调用（`msm weixin-send ...`）；发送与记录都经桥（outgoing hook 带 source=proactive）。
   // **ACC 不新增工具**（用户拍板 A2：专用 loopback 端口，不经公网网关）。
   registerWeixinSendApi(ctx)
+  // v1.30.16（S142 用户"约束不够，LLM 不听"）：手动输出模式机械闸门——turn-stopping 检查
+  // 本轮是否真的成功调用过 weixin-send，未发送则 steer 打回（≤2 次）。**措辞归 CCC 角色
+  // 提示词**（本闸门只给机制事实 + 已填参数标记），与"ACC 管机制 / CCC 管内容"边界一致。
+  registerWeixinOutputGuard(ctx)
   // review F-08（v1.30.8）：生命周期——agent/session 销毁清理 per-会话状态 +
   // 插件卸载/HMR 停掉自起资源（skiff 调试页/ACP/微信桥；否则端口占用与重复轮询）
   registerLifecycle(ctx)

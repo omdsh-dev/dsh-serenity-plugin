@@ -1,3 +1,30 @@
+## v1.30.16 — 2026-09-08（手动输出纪律：措辞归 CCC + 机械闸门，S142 用户两条指令）
+
+**Scope:** 用户两条指令——① "这句词哪里配置的：── Reply Output (manual mode) ── … 用 EAP 重写，约束不够，LLM 不听" ② "**这个词不能让 ACC 定义，要让 CCC 定义**"。即 v1.30.10 手动输出模式（`weixin.autoReplyWithLastMessage: false`）的注入文案既**软**（全陈述/举例/许可，无祈使硬约束，实测 LLM 不遵守）又**归属错误**（纪律措辞属内容，归 CCC）。
+
+### 归属修正：ACC 只给机制与数据，措辞归 CCC
+- `weixinManualOutputLine()` → **`weixinManualOutputMarker(root, accountId, userId)`**（`weixin-bridge.ts`）：只输出两行——标记 `[serenity:weixin-manual-output]` + **已填好参数的完整命令**（ccc/account/user），**零纪律措辞**
+- 注入位置：用户正文**之前** → **消息末尾**（recency；旧位置被用户正文压过，实测约束失效）
+- CCC 侧措辞写进**角色提示词文件**（如 `.opencode/skiff/<role>.md`）——可随时改，v1.30.15 起**热重载**（改文件即生效，无需 ACC 发版）
+- 边界原则（沉淀）：**ACC 管机制与数据，CCC 管措辞与纪律**——提示词文案迭代不应需要插件发版
+
+### 机械闸门（软约束失效 → 机械兜底）
+新 `src/weixin-output-guard.ts`：
+- ① `noteManualOutputSession`：桥每轮登记手动模式会话（root / account / user / role）
+- ② `tools/post-execute` 观察**成功的** `msm` + `weixin-send`（`isSuccessfulWeixinSend`——失败调用不算已送达）
+- ③ `agent/turn-stopping` 本轮结束仍未发送 → `agent.steer` 打回（`WEIXIN_OUTPUT_REBUKE_MAX = 2`）；提示内容 = 标记 + 事实（"本轮未发送，用户什么都没收到"）+ 已填命令，**不含措辞**
+- 达上限放弃并**响亮告警**（用户确实什么都收不到，必须可观测）；成功发送清零计数；会话销毁经 `seams/lifecycle.ts` 的 `forgetManualOutputSession` 清理（防 per-会话 Map 无界增长）
+- 只对**已登记的手动模式会话**生效——主舱 / 其他 skiff / ACP 临时会话零干预；事件通道缺失 → 响亮降级，不阻断装配（apply 不可成为启动单点）
+
+### 文档同步
+- dsp `msm-ops.ts` CCC_CONFIG_REFERENCE §8：`weixin.autoReplyWithLastMessage` 段改写（标记形态 + 措辞归属 + 闸门语义）
+- CCC `weixin-doctor guide`：「关闭桥的自动输出」段同步（标记 + 闸门 + 措辞归 CCC）
+
+### 验证
+- 新 `tests/weixin-output-guard.test.ts` **19 用例**：成功判定矩阵（失败 / 非 msm / 形状异常）/ 登记注销幂等 / 打回文案含标记与已填命令且**不含纪律措辞** / 成功不打回且本轮结算清空 / 失败仍打回 / 其它 MSM 不计入 / 达上限响亮告警 / 成功清零计数 / 未登记会话零干预 / agent 缺失零干预 / 事件通道缺失降级
+- `weixin.test.ts` 手动模式用例改写：断言新标记 + 已填参数命令 + **不含 `Reply Output` / `no fallback` / `will NOT`** + 标记位于用户正文**之后**（末尾）；对照用例改断言不含新标记；afterEach 清闸门模块级状态
+- **73 files / 1045 tests 全绿**（1026 → 1045）+ typecheck 双面 ✓ + build ✓
+
 ## v1.30.15 — 2026-09-08（Skiff 类型二分 + 角色提示词热更新，S142 用户拍板）
 
 **Scope:** 用户提出设计问题——"skiff 应该区分的类型是**临时和长期**，临时的不绑定会话、提示词注入一次；长期的绑定 trajectory（SESSION.md）、提示词每次用户消息都注入"。设计底座落盘 `docs/skiff-type-and-injection-design.md`（现状实证 / 目标-手段分离 / 成本实证 / 三方案 / 决策点），用户拍板：**方案 A**（长期型提示词段动态重读）+ **显式字段 + 隐式兜底**。
@@ -18,6 +45,8 @@
 - **72 files / 1026 tests 全绿**（1011 → 1026）+ typecheck 双面 ✓ + build ✓
 
 
+
+## v1.30.14 — 2026-09-08（Skiff 调试页并发启动守卫 + 首次未定位降级为信息级，S142）
 
 **Scope:** v1.30.13 发布并 restart-web 后，**运行日志实证** D1 修复生效，同时暴露两处需要收敛的细节。
 

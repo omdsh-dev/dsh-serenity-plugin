@@ -275,9 +275,13 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
 
   ▸ weixin.autoReplyWithLastMessage（v1.30.10，关闭桥的自动输出）：
     缺省 true = 现状：桥在 agent 一轮结束后把**最终 assistant 文本**自动回发用户（source="reply"）。
-    显式 false = 关闭：桥**不再转发最终文本**，输出权交给 agent——每轮 question 前缀注入
-    「Reply Output (manual mode)」纪律块（含可直接照抄的 weixin-send 命令，CCC 根/账号/用户 id
-    已填好），agent 自己决定发什么、发几条（全部记 source="proactive"）。
+    显式 false = 关闭：桥**不再转发最终文本**，输出权交给 agent——每轮在用户消息**末尾**追加
+    **机制标记** [serenity:weixin-manual-output] + 一行已填好参数的 weixin-send 命令
+    （CCC 根/账号/用户 id），agent 自己决定发什么、发几条（全部记 source="proactive"）。
+    **ACC 只给机制与数据，纪律措辞归 CCC**（v1.30.16）：怎么写/必须怎么做/后果是什么写在
+    CCC 角色提示词文件里（如 .opencode/skiff/<role>.md），可热改（v1.30.15 起角色提示词热重载）。
+    机械闸门（v1.30.16）：本轮 turn 结束仍未成功调用 weixin-send → agent 被打回（≤2 次，
+    提示 = 标记 + 事实）；达上限放弃并响亮告警。失败调用不算已送达。
     语义边界（用户拍板）：只关最终文本；系统类消息（新对话通知 / 语音无法解析提示）保留；
     **agent 一轮未输出 → 静默不兜底**（否则开关失去意义）；typing 指示与 incoming hook 不受影响。
 

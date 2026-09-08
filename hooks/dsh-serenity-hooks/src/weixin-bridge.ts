@@ -23,6 +23,7 @@ import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downl
 import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
+import { noteManualOutputSession, forgetManualOutputSession } from './weixin-output-guard.js'
 import { getActiveSessionInfo } from './session-ops.js'
 import { hostSessions } from './host/access.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
@@ -132,27 +133,28 @@ async function runAccountLoop(
 }
 
 /**
- * 手动输出模式的**输出纪律块**（v1.30.10，`weixin.autoReplyWithLastMessage: false` 时注入）。
+ * 手动输出模式的**机制标记**（v1.30.10 引入；v1.30.16 按 S142 用户"这个词不能让 ACC 定义，
+ * 要让 CCC 定义"重构）。
  *
- * 为什么必须注入（R↓）：关掉自动回发后，agent 若不知道"桥不会替你转发"，用户就收不到任何回复
- * ——机制变更必须伴随可执行的行动指引。因此这里给的是**可直接照抄的完整命令**（CCC 根 + 账号 +
- * 用户 id 全部填好），而不是抽象提示（E↑）。
+ * 边界（R↓）：ACC 只提供**机制与数据**——"桥不转发最终文本"这个事实 + 三个已填好的参数值
+ * （CCC 根 / 账号 / 用户 id）。**纪律措辞归 CCC**：怎么写、必须怎么做、后果是什么，全部写在
+ * CCC 的角色提示词文件里（如 `.opencode/skiff/zhaocai.md` 的「输出通道」节），CCC 可随时改，
+ * 且 v1.30.15 起角色提示词热重载——改完立即生效，无需 ACC 发版。
  *
- * 参数全部显式：`--ccc`（必填，无隐式当前 CCC）、`--account`（沿用收到消息的账号，避免多账号下
- * 用错 bot 身份回话）、`--user`（该用户 iLink id，免去别名解析）。
+ * 为什么不用 ACC 写措辞（历史教训）：v1.30.10~v1.30.15 由 ACC 内嵌一段纪律文案，用户实测
+ * "约束不够，LLM 不听"——且措辞迭代要动插件代码 + 发版 + 重启；把措辞放 CCC 才能快速迭代，
+ * 也符合"ACC 管机制、CCC 管内容"的归属二分。
+ *
+ * 标记格式（稳定，供 CCC 提示词引用）：
+ * ```
+ * [serenity:weixin-manual-output]
+ * msm("weixin-send", ["send", "--ccc", "<root>", "--account", "<account>", "--user", "<user>", "<回复>"])
+ * ```
  */
-export function weixinManualOutputLine(root: string, accountId: string, userId: string): string {
+export function weixinManualOutputMarker(root: string, accountId: string, userId: string): string {
   return [
-    '── Reply Output (manual mode) ──',
-    'The bridge will NOT forward your final message to the user for this CCC.',
-    'Send everything the user should see yourself, e.g.:',
-    `  msm("weixin-send", ["send", "--ccc", "${root}", "--account", "${accountId}", "--user", "${userId}", "<your reply>"])`,
-    'Rules:',
-    '  1. Send your reply before the turn ends — if you send nothing, the user sees nothing (no fallback).',
-    '  2. You may send several messages (progress / final answer); split only when it helps the reader.',
-    '  3. Plain text only — WeChat renders no markdown.',
-    '  4. Each send is recorded automatically (source=proactive); do not repeat the same content.',
-    '── ──',
+    '[serenity:weixin-manual-output]',
+    `msm("weixin-send", ["send", "--ccc", "${root}", "--account", "${accountId}", "--user", "${userId}", "<回复>"])`,
   ].join('\n')
 }
 
@@ -293,13 +295,20 @@ export async function handleIncoming(
         if (!sectionOk) parts.push(workspaceTrajectoryLine(activeWorkspace.mdPath))
       }
       // v1.30.10：关闭自动回发最终文本（weixin.autoReplyWithLastMessage: false）→
-      // 每轮注入输出纪律（可执行命令），输出权交给 agent；本轮结束不再由桥转发。
+      // 每轮注入**机制标记**（事实 + 已填参数，措辞归 CCC——见 weixinManualOutputMarker 头注）。
+      // v1.30.16（用户"约束不够，LLM 不听"+"这个词要让 CCC 定义"）：
+      // ① 标记移到**消息末尾**（recency——用户正文之前的位置被压过）
+      // ② ACC 不再写纪律措辞（归 CCC 角色提示词，可热改）
+      // ③ 登记手动模式会话 → 机械闸门在 turn-stopping 检查本轮是否真的发过（不可绕过）
       const manualOutput = settings.autoReplyWithLastMessage === false
-      if (manualOutput) {
-        parts.push(weixinManualOutputLine(root, accountId, fromUserId))
-      }
       if (text) parts.push(text)
       parts.push(...mediaNotes, ...degradedNotes)
+      if (manualOutput) {
+        noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: roleName })
+        parts.push(weixinManualOutputMarker(root, accountId, fromUserId))
+      } else {
+        forgetManualOutputSession(sessionId)
+      }
       const question = parts.join('\n')
 
       // hook：incoming 事件（用户 → bot）——媒体落盘后、askSkiff 前 fire。

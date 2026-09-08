@@ -96,6 +96,9 @@ afterEach(async () => {
   // typing_ticket 缓存清空（模块级状态，防测试间污染）
   const { resetWeixinTypingCache } = await import('../src/weixin-bridge.js')
   resetWeixinTypingCache()
+  // v1.30.16：手动输出闸门模块级状态（桥每轮登记）——跨用例清空
+  const { __resetWeixinOutputGuardForTest } = await import('../src/weixin-output-guard.js')
+  __resetWeixinOutputGuardForTest()
   for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
@@ -559,7 +562,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent[1]!.contextToken).toBe('ct1') // context_token 回带
   })
 
-  it('v1.30.10 autoReplyWithLastMessage=false → 桥不回发最终文本 + 每轮注入输出纪律（可执行命令）', async () => {
+  it('v1.30.16 autoReplyWithLastMessage=false → 桥不回发最终文本 + 每轮末尾注入机制标记（措辞归 CCC）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
@@ -594,15 +597,21 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent).toHaveLength(1)
     expect(sent[0]!.text).toContain('新的对话')
 
-    // ② 每轮注入输出纪律：完整可执行命令（CCC 根 + 账号 + 用户 id 全部填好，零解析负担）
+    // ② 每轮注入**机制标记**（v1.30.16 重构：ACC 只给事实 + 已填参数，措辞归 CCC 角色提示词）
     const q = ctx.questions[0] ?? ''
-    expect(q).toContain('Reply Output (manual mode)')
+    expect(q).toContain('[serenity:weixin-manual-output]')
     expect(q).toContain('msm("weixin-send"')
     expect(q).toContain(`"--ccc", "${dir}"`)
     expect(q).toContain('"--account", "wechat-1"')
     expect(q).toContain('"--user", "manual@im.wechat"')
-    expect(q).toContain('no fallback')
-    // 用户原文仍在（纪律是前缀注入，不吞消息）
+    // ACC 不再内嵌任何纪律措辞（用户拍板"这个词不能让 ACC 定义，要让 CCC 定义"）
+    expect(q).not.toContain('Reply Output')
+    expect(q).not.toContain('no fallback')
+    expect(q).not.toContain('will NOT')
+    // 标记位于**消息末尾**（recency——旧实现放在用户正文之前，实测被压过）
+    expect(q.indexOf('[serenity:weixin-manual-output]')).toBeGreaterThan(q.indexOf('你好'))
+    expect(q.trimEnd().endsWith('])')).toBe(true)
+    // 用户原文仍在（标记是追加注入，不吞消息）
     expect(q).toContain('你好')
 
     // ③ 记录只有 incoming——桥没发消息，故无 outgoing(reply)；agent 自己发的走 source=proactive
@@ -633,7 +642,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       item_list: [{ type: 1, text_item: { text: 'hi' } }],
     })
     expect(sent.some((s) => s.text === '答案')).toBe(true)
-    expect(ctx.questions[0] ?? '').not.toContain('Reply Output (manual mode)')
+    expect(ctx.questions[0] ?? '').not.toContain('[serenity:weixin-manual-output]')
   })
 
   it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
