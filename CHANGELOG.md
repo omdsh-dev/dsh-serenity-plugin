@@ -16,8 +16,9 @@
 ### 验证
 - **62 files / 913 tests 全绿**（908 → 913 +5）+ typecheck 双面 ✓ + build ✓
 
-### 状态
-- **⏸ 未发布（代码态）**：用户明确"修完别发布，回家喊再发布"——bump/publish/deploy/restart 待 D14 显式指令
+### 发布链
+- bump v1.30.5（package.json / dsh.plugin.json / CHANGELOG 三处一致，修复此前 1.30.4/1.30.4/1.30.5 漂移）→ test **62 files / 913 tests** ✓ → build ✓（typecheck node + client）→ publish npm @shgroup/dsh-serenity-hooks → 三推（origin/github/omdsh）→ deploy → restart-web
+- **发布触发**：2026-09-08 用户到家显式触发（此前"修完别发布，回家喊再发布"= D14 显式指令）
 
 ## v1.30.4 — 2026-09-07（skiff 专属 SESSION 纪律强制在场——微信桥每轮注入工作台约束，S142 用户点破）
 
