@@ -1,283 +1,354 @@
-# dsh-serenity-plugin — Serenity ACC for DeepSeek Harness
+# Serenity ACC — an "AI workspace" for DeepSeek Harness
 
-> **Cognitive-container infrastructure for DeepSeek Harness (DSH).** Any directory marked with `.serenity` (a CCC, Concrete Cognitive Container) automatically gains: 13 ACC tools, mechanical safety constraints, session-trajectory tracking, external access & Q&A capabilities, WeChat bridging and autonomous cruising — **one plugin, one cognitive workspace**.
+> **In one line**: install this plugin and you carve out a workspace for your AI — just an ordinary directory. Inside it, the AI gains **memory, discipline, tools, and boundaries**, so it can pick up the work after a model switch, a reboot, or a night's sleep.
 >
-> Targets [deepseek-ai/deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 0.1.0-rc and later.
-> Theory (what a cognitive container is): [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md) — this README covers capabilities and usage.
+> Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 0.1.2-rc.1 or later.
+> For the thinking behind it (why "cognitive container"), see [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md). This README covers **what it does and how to use it**.
+
+**Four words, explained once** (used throughout, not repeated):
+
+| Term | Plain meaning |
+|---|---|
+| **Workspace / CCC** | A directory containing an empty `.serenity` marker file. Elsewhere, the plugin does nothing at all; the moment you open a session inside such a directory, it activates |
+| **Plugin / ACC** | This repository (npm package `@shgroup/dsh-serenity-hooks`). It adds tools, constraints, and memory to DSH |
+| **MSM** | A small executable tool you write inside the workspace (one script + one registry line). The AI calls it with `msm("name", ["args"])` |
+| **SESSION.md** | The workspace's work log. The AI writes goals, decisions, and progress there, so an interrupted task can resume from it |
 
 ---
 
-## Quick start (2 minutes)
+## 1. What problem it solves
 
-Prerequisites: Node ≥ 20 (or bun), DSH 0.1.0-rc or later.
+No theory — four everyday annoyances:
+
+| Annoyance | Without it | With it |
+|---|---|---|
+| **The AI forgets what it was doing** | Context fills up, goals and decisions are gone, you re-explain everything | Every workspace keeps a work log the AI updates as it goes. When context fills up, it swaps the carrier and continues — the log never moves |
+| **The AI rummages and edits files everywhere** | It can read your whole machine, keys included | The workspace has walls: everything inside is fair game, everything outside is refused — secret files cannot even be read |
+| **You want to use it away from the desk** | You must sit at that machine | It ships a login-protected web entry (password or phone code), so your phone works too |
+| **Your family wants to ask it things over WeChat** | You'd have to teach them to install software and boot a computer | Scan a QR code once, and they simply message it on WeChat; it answers in the persona you defined |
+
+---
+
+## 2. Quick start (2 minutes)
+
+Prerequisites: Node ≥ 20 (or bun), DSH 0.1.2-rc.1 or later.
 
 ```bash
-# 1. Install the plugin from npm registry (auto-joins the DSH profile's bundles layer)
+# 1. Install the plugin (joins the DSH web profile automatically)
 dsh plugin --profile web add @shgroup/dsh-serenity-hooks
 
-# 2. Restart dsh web (plugin + WebUI client take effect)
+# 2. Restart dsh web (plugin and web client both take effect)
 dsh web
 
-# 3. Verify: open a session inside a directory marked with .serenity (a CCC)
-#    · Session auto-injects ACC identity + entry-skill system prompt
-#    · WebUI session header shows the Serenity status capsule (green dot + SAFE shield slider)
-#    · Run dashboard health → CCC three-principle check passes
+# 3. Verify: open a session inside a directory marked with .serenity
+#    · The session starts with this plugin's identity note and skill catalog
+#    · A status capsule appears next to the session title (green dot + SAFE slider)
+#    · Run dashboard health — the three workspace checks should all pass
 ```
 
 Uninstall: `dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 
-> **Local dev install** (from source): `git clone https://github.com/tellmewhattodo/dsh-serenity-plugin.git && cd dsh-serenity-plugin && dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks`
-> ⚠️ A git-URL install (`github:...`) points at the repo root package (a workspace container, not a bundles-layer plugin) and will not activate — use link or npm.
+Install from source (when you are changing the code):
 
-**Enable safe mode**: toggle the SAFE slider on the WebUI capsule → **bash disappears from the model's tool list** (not an error — the model simply cannot see it) → the agent can only use registered, tested MSM channels. The switch is a user capability; the agent cannot see or toggle it.
+```bash
+git clone https://github.com/tellmewhattodo/dsh-serenity-plugin.git
+cd dsh-serenity-plugin
+dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
+```
 
----
+> ⚠️ Do **not** use `dsh plugin add github:...` — that URL points at the repository root package (a workspace container, not the plugin itself) and will not activate. Use npm or the `link:` form above.
 
-## What you get after install (capability map)
-
-### 10 ACC tools (v1.30 naming rework: 13 → 10 unified)
-
-| Tool | Capability | Typical use |
-|------|-----------|-------------|
-| `container_fs` | Container filesystem, 15 subcommands (root/resolve/list/tree/mkdir/rm/mv/cp/touch/append/reveal/info/find…) (was cc_fs) | Paths confined to the CCC root; escape is auto-blocked |
-| `logbook` | Full session lifecycle + rebuild (was session + session_rebuild merged) | `logbook create` before multi-step work; `use` to resume; `rebuild` on context overflow |
-| `dashboard` | Health check (CCC principles P1/P2/config + registry integrity) / time / wait (was acc_kit) | Routine self-check before entering a CCC |
-| `container_git` | Git operations (status/commit/push/log/pull/diff) (was cc_git) | Non-fast-forward pushes suggest actions; never auto-force |
-| `msm` | MSM single-entry execute + discover (was acc_msm exec face): `msm("<name>", ["<args>"])`; partial name returns candidates; inspect=true shows usage | Run registered MSMs; management goes to container_admin msm |
-| `praxis` | Actionable theory injection (was eap/neat/cce merged): `praxis` (index) / `praxis eap` / `praxis neat` / `praxis cce` | Output self-check, design alignment, engineering review |
-| `handyman` | Worker orchestration: whitelisted-model worker runs synchronously to completion + parallel `jobs` | Delegating batch work (e.g., SQC scans) |
-| `localstore` | Credential/config storage (credential + config namespaces) | Central API-key/password management; git policy configurable |
-| `container_admin` | Container administration (maintenance bay): role (Skiff roles, was skiff_admin) / msm (register/deregister/check/guide/catalog/ccc-config) / config | Role define/validate/apply, MSM registry management, config overview |
-| `autopilot-trajectory` | One-stop AutoPilot management (no-arg=full report / init / random / diag / diag-live / check / status / guide) | Clock-driven autonomous wake + prior-bias injection + per-CCC independence (S151 housekeeper) |
-
-> **Rename map** (hard switch, no aliases): cc_fs → container_fs · cc_git → container_git · session+session_rebuild → logbook · acc_kit → dashboard · acc_msm → msm (exec) + container_admin (admin) · eap/neat/cce → praxis · skiff_admin → container_admin role. If an old session's historical references error, consult this map.
-
-### Mechanical constraints (not bypassable by the model)
-
-| Constraint | Mechanism |
-|-----------|-----------|
-| **Safe mode** | bash disappears from the tool list (`tools.restrict`, synced each step) + guard fallback deny |
-| **Path boundary** | P3 binary permission: full inside CCC root, zero outside (path-escape blocking) |
-| **Blacklist/governance files** | Configurable blacklist + `.serenity` governance-file write protection |
-| **Credential-file guard** | `localstore.json` is denied to every tool (incl. read/grep/glob) — credential values structurally cannot leak |
-| **Output guard** | External faces (skiff/acp/rebuild sessions) scan final output for sensitive terms → steer-back regeneration (lists hit terms + category guidance) |
-| **Trajectory reminders** | Trajectory Steward scoring + context-pressure detection pushes progress back into SESSION.md |
-
-### External faces (services)
-
-| Face | Port | Purpose |
-|------|------|---------|
-| **Dual-port gateway** | 3081 (default 0.0.0.0) | Full WebUI after login (password OR TOTP + workspace whitelist) |
-| **Skiff debug Q&A page** | 3099 (default 127.0.0.1) | Cognitive-subset role debugging (multi-CCC switching + trajectory rendering) |
-| **ACP + Skiff Q&A page** | 3100 (default 127.0.0.1) | ACP JSON-RPC programmatic access + public Q&A page (key auth + container whitelist; Q&A only — no internal trajectory) |
-| **WeChat bridge (F4c-3)** | iLink long-polling (outbound) | WeChat QR-code access → skiff-role conversation (text/voice/image/file), multi-account, session continuity |
+**Safe mode**: flip the SAFE slider on the web capsule and `bash` **disappears from the AI's tool list** (not an error — the model simply cannot see it). From then on the AI can only use the small tools you registered and tested. The switch is yours: the AI cannot see it or flip it.
 
 ---
 
-## Usage scenarios (real capabilities)
+## 3. What you get after installing
 
-> Based on the real deployment "Serenity" (all addresses/accounts/paths/keys are generalized). One directory marked with `.serenity` = one CCC.
+### 3.1 The ten tools
 
-### Anatomy of a CCC
+| Tool | What it does | When to use it |
+|---|---|---|
+| `container_fs` | File handling inside the workspace: list, find, copy, move, create, append, reveal in file manager | Whenever you need to look at or tidy workspace files |
+| `logbook` | The whole life of a work log: create, show, switch, close, archive — plus in-place rebuild | Any multi-step job; this is step one |
+| `dashboard` | Instruments: workspace health (three checks), current time, wait | Self-check before working; wait on external services |
+| `container_git` | Git: status / commit / push / log / pull / diff | Commit and push; it never force-pushes on its own |
+| `msm` | The execution entry for your small tools: `msm("name", ["args"])`; partial names return candidates; `inspect=true` shows usage | Calling any registered tool in the workspace |
+| `praxis` | Injects one of three "ways of working" on demand: output self-check (eap), design alignment (neat), cognitive continuity (cce) | When you want it to be precise, or to align before building |
+| `handyman` | A cheap worker model runs in rounds until done; several can run in parallel | Bulk, repetitive work (e.g. scanning dozens of skills) |
+| `localstore` | Stores secrets and settings (credential and config namespaces) | Keep API keys and passwords in one place, out of git |
+| `container_admin` | The maintenance bay: manage sub-roles, manage the tool registry, view all configuration | Defining a sub-role, registering a new small tool |
+| `autopilot-trajectory` | Autonomous cruising: wake a workspace on a clock and inject its current focus; several workspaces stay independent | When you want the AI to work on its own on a schedule (see §6.5) |
+
+> **Renamed** (old names are gone for good, no aliases): `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role`. Old sessions referencing the old names will error — consult this map.
+
+### 3.2 Mechanical constraints (the AI cannot bypass them)
+
+These are not "please don't" hints in a prompt — they are **mechanically impossible**:
+
+| Constraint | What you will see | Why it is built this way |
+|---|---|---|
+| **Safe mode** | bash vanishes from the tool list (synced every step); even an attempted call is denied as a fallback | Going through registered, tested tools beats letting the AI assemble shell commands |
+| **Workspace walls** | Everything inside works, everything outside is refused (the path never even resolves) | The AI should not touch anything outside its workspace |
+| **Blocklist / governance files** | A configurable blocklist; `.serenity` and similar governance files cannot be written | So the AI cannot damage the foundation it stands on |
+| **Secret-file guard** | `localstore.json` is denied to **every** tool (read/grep/glob included) | Secret values are structurally unable to leave |
+| **Outbound output guard** | On outward-facing sessions (sub-role / ACP / rebuilt sessions), sensitive wording is rejected and regenerated, with the hit word and guidance reported | Outsiders should not see internal mechanics |
+| **Trajectory reminders** | After long stretches it reminds the AI to write progress back to the log and expects a confirmation code | The reminder is a mechanism, not a hope |
+
+### 3.3 Entry points
+
+| Entry point | Default port | Who uses it |
+|---|---|---|
+| DSH main UI | 3080 | You, locally (the plugin never touches this port) |
+| **Web login entry** | 3081 | Remote/phone access to the full UI: reverse-proxies to 3080 after login; workspace allow-list supported |
+| **WeChat proactive send** | 3082 (127.0.0.1 only) | Small tools in a workspace use it to message WeChat users proactively (not reachable from the internet, so no key is needed) |
+| **Sub-role debug page** | 3099 (127.0.0.1 only) | Debugging "sub-roles"; switch workspaces and inspect the conversation |
+| **ACP + public Q&A page** | 3100 (127.0.0.1 only) | Programmatic access (JSON-RPC) + a Q&A page for others (key auth; answers only, no internal trajectory) |
+| **WeChat bridge** | no port (outbound long-poll) | Your family talking to the AI directly in WeChat |
+
+> Entry points that default to 127.0.0.1 are yours to expose (tunnel, reverse proxy, port mapping — your call). The plugin does not prescribe any particular method.
+
+---
+
+## 4. What a workspace looks like
+
+A workspace is an ordinary directory plus one marker file:
 
 ```
-home-serenity/                    ← CCC root (marked by the .serenity file)
-├── .serenity                     ← marker: this directory is a cognitive container
+my-workspace/                     ← workspace root (just add .serenity)
+├── .serenity                     ← marker: this directory is a workspace
 ├── .opencode/
-│   ├── serenity.json             ← CCC-level config: handyman model whitelist / thresholds / skiff roles
-│   └── skills/                   ← domain skills (each = an EAP-encapsulated body of knowledge)
-│       ├── home-media/           ←   media: acquisition / subtitles / distribution
-│       ├── home-wealth/          ←   finance: assets / liabilities / budget
-│       ├── family-profiles/      ←   member profiles (single source of truth)
-│       └── … (each skill may hold MSM scripts)
-├── AGENT_SESSIONS/               ← session repository: one SESSION.md per directory (persistent trajectory)
-│   └── 2026-08-29--S142--xxx/
-│       └── SESSION.md            ← trajectory body: goals / decisions / progress (never moves)
-└── _tmp/                         ← runtime drops (images / pasted files)
+│   ├── serenity.json             ← workspace-level config: worker model allow-list / log threshold / sub-roles
+│   └── skills/                   ← domain skills (each = one domain's knowledge, possibly with small tools)
+│       ├── home-media/           ←   e.g. media (find sources / subtitles / delivery)
+│       ├── home-wealth/          ←   e.g. household finance
+│       └── … (each skill may ship scripts)
+├── AGENT_SESSIONS/               ← work-log archive: one SESSION.md per directory
+│   └── 2026-09-08--S142--xxx/
+│       └── SESSION.md            ← goals / decisions / progress (stays here forever)
+└── _tmp/                         ← runtime files: images and files you paste
     ├── images_from_user/
     └── files_from_user/
 ```
 
-### Daily capabilities (10 real use cases with operation chains)
+---
 
-| # | Scenario | Operation chain (tool → subcommand → effect) |
-|---|----------|----------------------------------------------|
-| 1 | **Long-term project maintenance** | `logbook create --desc xxx` → auto SESSION.md → log progress step by step → `logbook use` to resume → `logbook rebuild` on context overflow |
-| 2 | **Batch code sync** | Root repo `container_git commit/push`; multiple sub-repos one-click `resources-management sync` (auto commit + push all) |
-| 3 | **Media subtitle production** | Find source (BT) → download → Whisper transcription → translation → bilingual SRT → mechanical QC (7 checks) → distribution (RSS/email) |
-| 4 | **Server inspection** | `server-tool health` → one-shot CPU/memory/GPU/container/service report; `server-tool container` view/restart — all via the ssh-connect whitelist channel |
-| 5 | **Intranet service lookup** | `landscape-tool` repo panorama (20+ repos: category/stack/relations); `network-tool` device/port scan |
-| 6 | **Finance data management** | Local structured records (assets/liabilities/income/expense/budget) → query/summary; macro tracking (e.g., mortgage-rate comparison) |
-| 7 | **Member profiles** | `profile list/show/create/update` — unified member data; the CCC is the single source of truth |
-| 8 | **Thought capture** | Chat whenever an idea arises → AI interview-style clarification → structured archive → periodic pattern review |
-| 9 | **External access (phone/travel)** | Browser → `http://LAN-IP:3081` → login (username + password OR 6-digit Authenticator code) → operate the WebUI from a phone |
-| 10 | **Pasted-content auto-processing** | **Images**: paste → auto drop → vision-model recognition (receipts/screenshots/charts); **any file**: paste PDF/archive → auto drop → agent extraction (PDF/unzip/spreadsheet, dedicated MSMs) |
-| 11 | **WeChat access (role chat)** | Bind via panel WeChat-bridge QR scan → send messages (text/voice/image/file) → routed to a skiff role (e.g. Zhaocai) whose reply returns to WeChat → multi-account + per-user session continuity |
-| 12 | **Autonomous cruising (Autopilot)** | CCC configures autopilotTrajectory (interval/session/bias-script/topPrompt) → clock wakes the front session automatically → global switch + per-CCC independent cruising (S151 housekeeper) |
+## 5. What you can do with it (12 real use cases)
 
-### A typical day
+> All of these run in a real deployment. Addresses, accounts, and paths are generalized.
+
+| # | What you want | How it actually goes |
+|---|---|---|
+| 1 | **Keep a long project alive** | `logbook create` → write progress as you go → resume with `logbook use` after an interruption → `logbook rebuild` when context fills up, continuing automatically |
+| 2 | **Sync code in bulk** | `container_git commit/push` in the current repo; one command syncs every sub-repo (auto commit + push) |
+| 3 | **Produce one episode of subtitles** | Find the source → download → Whisper transcription → translation → bilingual SRT → mechanical QC (7 checks) → push to subscribers/email |
+| 4 | **Server inspection** | One command returns CPU/memory/GPU/containers/services; restarting a container goes through the same allow-listed channel |
+| 5 | **Locating internal services** | Repository overview (categories/stack/links) + device and port scanning |
+| 6 | **Household finance** | Structured records for assets/liabilities/income/expenses/budgets, queryable anytime; mortgage-rate comparisons and similar macro tracking |
+| 7 | **Family profiles** | One maintained source of truth for each member's data |
+| 8 | **Jotting down ideas** | Say what's on your mind, the AI interviews you to structure it, and periodically reviews your thinking patterns |
+| 9 | **Phone / remote use** | Open `http://LAN-IP:3081` → password or a 6-digit code → full UI on your phone |
+| 10 | **Paste and let it process** | Paste an image → saved automatically → vision model reads it (delivery slips, screenshots, charts); paste a PDF/archive → saved → extract text, unpack, read tables |
+| 11 | **Use the AI in WeChat** | Scan once from the settings panel → family members send text/voice/images/files → routed to a chosen sub-role → the reply lands back in WeChat |
+| 12 | **Let it work on a schedule** | Configure cruising (interval / target session / focus / bias script) → it wakes on time with its focus injected, in front of you, interruptible at any moment |
+
+**A typical day**:
 
 ```
-Morning:  intranet service inspection (server-tool health) → all good
-Midday:   sync yesterday's code (resources-management sync) → all sub-repos pushed
-Lunch:    receive a PDF bill → paste into chat → auto drop + table extraction → record into finance
-Afternoon: produce a video's subtitles (Whisper → translate → bilingual SRT → QC) → push to subscribers
-Evening:  external device accesses home services (3081 login: TOTP verification) → handle an ops issue
-All day:  every piece of work lands in SESSION.md → trajectory continuous, switchable across people/models/hosts
+Morning   server inspection (one command) → all clear
+Midday    sync yesterday's code → every sub-repo pushed
+Lunch     a PDF bill arrives → paste into the chat → saved + tables extracted → recorded in finance
+Afternoon produce an episode's subtitles (transcribe → translate → bilingual SRT → QC) → push to subscribers
+Evening   log in to 3081 from the phone to handle an ops issue (code verification)
+All day   every stretch of work lands in SESSION.md → the trajectory stays continuous, ready for another person, model, or machine to pick up
 ```
 
 ---
 
-## External access & security
+## 6. Entry points in detail
 
-### Dual-port gateway (3081)
+### 6.1 Web login entry (3081)
+
+The plugin starts its own second listener. A request flows like this:
 
 ```
-External browser → http://LAN-IP:3081 (second listener started by the plugin)
-  → not logged in → minimal login page (username + password OR 6-digit code; mobile-adapted)
-  → POST /serenity/login: scrypt verify / TOTP check + CSRF token set + fail-lock (5 → 15min exp. backoff)
-  → HttpOnly cookie (SameSite=Strict, sliding 24h) → 302 proxy
-  → logged in → proxy to 127.0.0.1:main-port (Host/Origin rewritten to pass the trust fence)
-  → /api/workspace.list whitelist filtering + workspace.create validation
-  → WS upgrade forwarding (101 write-back + bidirectional error listeners prevent crashes)
+external browser → http://LAN-IP:3081
+  → not logged in → minimal login page (username + password, or a 6-digit code — either one; mobile-friendly)
+  → submit → scrypt verification / TOTP check + CSRF check + lockout after repeated failures (5 tries → 15-minute exponential backoff)
+  → pass → HttpOnly cookie (SameSite=Strict, 24-hour sliding expiry) → 302 redirect
+  → logged in → reverse-proxy to 127.0.0.1:3080 (Host/Origin rewritten as a trust fence)
+  → workspace list filtered by allow-list + workspace creation validated
+  → WebSocket upgrades forwarded too (101 rewrite + two-way error listeners so a socket cannot take the process down)
 ```
 
-### Skiff cognitive-subset roles (3099 + container_admin role)
+### 6.2 WeChat bridge
 
-A CCC carves out **any subset of its full-knowledge trajectory** (`.opencode/serenity.json skiff.roles`) — not limited to Q&A; may have operational capability:
+Configured per workspace (the `weixin` section of `.opencode/serenity.json`), with **credentials in the workspace's `localstore.json`** (never plain text in git).
+One DSH process can host several workspaces, each bridging its own WeChat account.
+
+- **Scan to bind**: settings panel → WeChat bridge → pick a workspace → scan (confirm in the phone's WeChat) → the bot token is stored as a credential
+- **Multiple accounts**: each account binds and unbinds independently
+- **What it receives**: text, voice (WeChat transcribes server-side — no extra speech model needed), images, files
+  (images and files are downloaded from WeChat's CDN and decrypted into `_tmp/weixin-inbound/`, then the path is handed to the AI)
+- **Typing indicator**: WeChat shows "typing…" while the AI works
+- **Clean replies**: the thinking process is stripped; WeChat sees only the final text
+- **It remembers**: one WeChat user maps to a fixed session that survives restarts — no amnesia
+- **Routing**: WeChat user → sub-role (exact match first, `*` as fallback)
+- **Proactive messages**: a small tool in the workspace can message a specific user —
+  `msm("weixin-send", ["send", "--ccc", "<workspace>", "--user", "yh", "text"])`
+  (`--ccc` is required; there is no guessing a "current workspace". Sent messages are recorded automatically.)
+- **Let the AI decide how to reply** (v1.30.10): with `"weixin": { "autoReplyWithLastMessage": false }`
+  the plugin no longer forwards the AI's final message; instead it tells the AI every turn "you must send it yourself"
+  and hands it a ready-to-copy command. Suits roles that report progress, split messages, or stay silent when
+  silence is right. Defaults to `true` (previous behaviour).
+- **Message recording**: point `weixin.hook` at a script and every incoming/outgoing message is handed to it as JSON;
+  where you store it is up to you. In the record, `source: "reply"` means "answering a user", `source: "proactive"` means "the AI initiated it".
+- **Troubleshooting**: `msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
+
+### 6.3 Sub-roles (Skiff)
+
+Carve a **deliberately limited role** out of an all-capable assistant — not just Q&A, it can also have operational abilities:
 
 ```jsonc
 {
   "skiff": {
     "roles": {
       "qa": {
-        "model": "provider/model",              // per-role model
-        "msms": ["web-search", "vlm-describe"], // independent MSM whitelist
-        "tools": ["read", "grep", "glob"],      // independent non-MSM tool whitelist
-        "systemPromptFile": "roles/qa.md"       // or inline systemPrompt
+        "model": "provider/model",              // this role's own model
+        "msms": ["web-search", "vlm-describe"], // which small tools it may call
+        "tools": ["read", "grep", "glob"],      // which platform tools it may use
+        "systemPromptFile": "roles/qa.md"       // its persona and boundaries (inline is also fine)
       }
     }
   }
 }
 ```
 
-- **Dual whitelists**: MSM and non-MSM tools configured independently; everything outside is hidden; skill loading always available
-- Debug Q&A page (3099) with multi-CCC switching; answers rendered with marked + think folding
-- `container_admin role validate` checks config → `apply` activates explicitly (binds CCC + role list)
+- Two separate allow-lists (small tools / platform tools); anything unlisted is hidden
+- The debug page (3099) switches workspaces and shows the trajectory; answers render markdown with thinking collapsed
+- `container_admin role validate` checks the config, `apply` makes it take effect
 
-### Skiff Q&A page (3100 + internet)
+### 6.4 Public Q&A page (3100)
 
-- **Key auth** (timing-safe + per-IP fail-lock + rotatable key) + container whitelist (empty = all open)
-- **Q&A only**: response contains answer/answer_html/sessionId — **no internal trajectory**
-- **Internet exposure is a deployment-side choice** (tunnel / reverse proxy / port mapping) — the plugin does not mandate any specific exposure; default listens on 127.0.0.1 only, exposure is a deployment decision
+- **Key auth** (constant-time comparison + failed-IP lockout + rotatable key) + container allow-list (empty = all open)
+- **Answers only**: the response carries answer / answer_html / sessionId — internal trajectory, tool results, and mechanics never leave
+- Listens on 127.0.0.1 by default; how you expose it to others (tunnel/reverse proxy/port mapping) is your decision
 
-### WeChat bridge (F4c-3: iLink access)
+### 6.5 Autonomous cruising (Autopilot Trajectory)
 
-CCC-level config (`.opencode/serenity.json weixin`), credentials in the CCC's localstore (credential scope) — **one dsh process hosts multiple CCCs; each CCC runs its own bridge independently**:
+Let a workspace **wake up on its own and get to work**, in front of you (foreground injection, interruptible):
 
-- **QR-code binding**: panel "WeChat Bridge" → pick CCC → scan (confirm via liteapp) → bot_token written as credential automatically
-- **Multi-account**: per-account QR binding + independent removal; `nextWeixinAccountId` reuses the smallest free id
-- **Message capabilities**: text / voice (server-side transcription `voice_item.text`) / image / file (CDN download + AES-128-ECB decrypt → drop to `_tmp/weixin-inbound/` → injected into the chat)
-- **Typing indicator**: `sendtyping 1` before handling → `0` after (WeChat shows "typing…"; failure is silent)
-- **Clean replies**: `stripThink` removes reasoning blocks; WeChat receives only the final text
-- **Session continuity**: fixed rebuildable sessionId (`skiff-weixin-<sha256(userid)>`) + **resume-or-create** — history survives restarts; live sessions are reused first
-- **Routing**: user → role (exact match → `*` fallback); the ACC is not bound to any concrete role (e.g. Zhaocai)
-- **Diagnostics**: `weixin-doctor` MSM (status/diag/verify, five links)
+- **When it wakes**: workspace switch on + global switch on (off by default; enable it only on the machine you want) + target session exists (directory carries the `--auto` suffix) + the interval elapsed (fractions allowed, the tightest about 36 seconds) + outside the quiet window (default 08:00–18:00 Beijing) + the bias script is ready
+- **What it reads first**: the "focus" you wrote (`topPrompt`, injected first every round to prevent drift), then randomly generated "bias content" (your script, exploring directions)
+- **Workspaces stay independent**: each has its own interval, session, focus, and window
+- **Audited**: every wake is recorded (the panel shows the recent ones); failures retry with exponential backoff
+- There is no "maximum wakes per day" cap — frequency is bounded only by the interval and the window
 
-### Autopilot Trajectory (autonomous cruising)
+### 6.6 Security model
 
-Clock-driven **autonomous cognitive cruising** — the CCC defines the trajectory focus and biases; the plugin wakes on schedule (foreground injection, fully visible and interruptible):
-
-- **Wake conditions**: enabled + global switch (settings `autopilotEnabled`, default off — run only on designated machines) + target session (`--auto` suffix) + interval (decimal hours supported, min 0.01h ≈ 36s) + avoid-peak window (default Beijing 8–18) + bias script ready
-- **Focus anchoring**: `topPrompt` (CCC-defined, injected first on every wake) + bias content (CCC custom script, random exploration) — stable anchor + random direction complement each other
-- **Per-CCC independence**: each CCC has its own interval/session/bias/topPrompt/window; per-CCC running guards + global serialization; panel CCC selector + wake-now button
-- **Audit**: every wake recorded (recentWakes ring, shown in the panel); exponential-backoff retry on failure
-- **v1.27.12 removed the daily budget**: wake frequency is bounded only by interval + window (unbounded high-frequency experiments)
-
-### Security model
-
-| Layer | Mechanism |
-|-------|-----------|
-| Login | scrypt password hash + constant-time compare + 256-bit token + sliding 24h TTL + audit log |
-| 2FA | TOTP (RFC 6238, Authenticator-compatible) QR-code binding; password OR code either way |
-| Anti-brute-force | Per-account fail-lock (5 → 15min exp. backoff) |
-| Anti-CSRF | Login double-submit + config PUT Origin check + server-side token set (multi-tab safe) |
-| Credentials | `localstore.json` centralized (git refuses commits by default); data-plane guard isolates structurally |
-| Output | External-face output guard: sensitive-term detection → steer-back regeneration (lists terms + category guidance) |
+| Layer | What it does |
+|---|---|
+| Login | scrypt password hashing + constant-time comparison + 256-bit token + 24-hour sliding validity + audit log |
+| Two-factor | TOTP (Authenticator-compatible), bound by QR code; password and code are alternatives |
+| Brute force | Per-account lockout: 5 consecutive failures → 15 minutes, with exponential backoff |
+| CSRF | Login double-submit + Origin check on config writes + server-side token set (multiple tabs do not conflict) |
+| Credentials | Centralized in `localstore.json` (git commit denied by default); secret files are structurally isolated from tools |
+| Outbound output | Sensitive-wording detection → reject and regenerate, reporting the hit word and how to avoid it |
 
 ---
 
-## Configuration (4 layers)
+## 7. Configuration has four layers
 
-| Layer | Location | Contents |
-|-------|----------|----------|
-| DSH settings panel | settings.yaml (DSH native) | Feature toggles (gateway/rebuild/naming) + rebuild threshold + skiffEnabled/skiffDebugPort + acpEnabled/acpHttpPort + publicAskEnabled + **autopilotEnabled (global switch, default off)** |
-| Plugin global file | `~/.dsh/serenity-hooks.json` (0600) | Gateway accounts (scrypt + TOTP) / host / port / workspace whitelist / cookieSecure / publicAsk key |
-| CCC config | `.opencode/serenity.json` | handyman.models (whitelist + default model) / sessionKeeper.threshold / safeMode.blacklist / skiff.roles / **autopilotTrajectory (interval/session/bias/topPrompt/window)** / **weixin (accounts/routes/switch)** |
-| CCC credentials | `localstore.json` | Credential/config namespaces (git policy configurable); WeChat bot_token lives in credential scope |
+| Layer | Location | What goes there |
+|---|---|---|
+| DSH native settings | DSH `settings.yaml` | Simple switches: gateway / rebuild / session naming, rebuild threshold, sub-role switch and debug port, ACP and Q&A page switches, **cruising master switch (off by default)** |
+| Plugin global file | `~/.dsh/serenity-hooks.json` (mode 0600) | Gateway accounts (scrypt + TOTP), listen address and ports, workspace allow-list, cookie security switch, Q&A page key |
+| Workspace config | `.opencode/serenity.json` | Worker model allow-list, log threshold, safe-mode blocklist, sub-roles, **cruising (interval/session/focus/window)**, **WeChat (accounts/routes/switches)** |
+| Workspace credentials | `localstore.json` | Secrets and local preferences; the WeChat bot token lives here too |
 
-> Principle: **the plugin is global, the CCC is concrete** — accounts/toggles/thresholds belong to the plugin layer; roles/credentials/local preferences belong to the CCC.
-
----
-
-## Context & trajectory management
-
-| Mechanism | Description |
-|-----------|-------------|
-| **SESSION.md** | The trajectory's persistent body, never moves; multi-step goals/decisions/progress live here |
-| **logbook rebuild** | Context over threshold → `[TRAJECTORY]` prompt → LLM triggers `logbook rebuild` → same-session surface wipe (anchor keeps protocol text + "continue S###") → auto-resumes; shadow-price protocol compliant (token accounting resets correctly) |
-| **Trajectory Steward** | Scoring reminders (`[TRAJECTORY-STEWARD]` + ACK protocol) push progress back into SESSION.md; mechanism pre-declared in the system prompt |
-| **Cognitive sedimentation discipline** | Before rebuilding, if valuable cognition was produced → revise the relevant skill (EAP-structured); for new skills, write a proposal into SESSION.md for user review — never create them yourself |
+> Principle: **the plugin is global, the workspace is specific** — accounts, switches, and thresholds belong to the plugin layer; roles, credentials, and local preferences belong to the workspace layer.
 
 ---
 
-## Theory (index)
+## 8. When context fills up
 
-- **Condensed narrative**: [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md) — what a cognitive container is / the cognitive Loop (actions = feedback) / Trajectory as subject / Session = rebuildable carrier / cognitive closure
-- **Authoritative standard**: [serenity-acc-specs](https://github.com/tellmewhattodo/serenity-acc-specs) (§0 theoretical foundation + injection spec + invariants)
+The AI can only "remember" so much at a time. You do not have to start a fresh session:
+
+| Mechanism | In plain words |
+|---|---|
+| **Work log (SESSION.md)** | The AI's notebook, and it never moves. Goals, decisions, progress all live there |
+| **In-place rebuild (`logbook rebuild`)** | When it fills up, the AI is prompted to rebuild: this conversation is cleared, but "who you are + continue S###" is injected again — **the carrier is replaced, the work continues**. Token accounting settles correctly afterwards |
+| **Progress reminders** | After long stretches it scores the work and reminds the AI to write progress back, expecting a confirmation code |
+| **Sedimentation discipline** | If rebuilding produced valuable insight, it is written into the relevant skill first, not thrown away |
 
 ---
 
-## Development & extension (plugin-author view)
+## 9. For plugin developers
 
 ```bash
-# Full dev loop (also via msm dsh-develop under safe mode)
-pnpm typecheck          # hooks/dsh-serenity-hooks (node + client)
-pnpm test               # vitest full (52 files / 752 tests)
-pnpm build              # tsc + tsdown dual bundle (lib/index.js + client.js)
+pnpm typecheck          # type check (node + browser halves)
+pnpm test               # full suite (currently 70 files / 993 tests)
+pnpm build              # bundle (lib/index.js + client.js)
 ```
 
-- **Dev MSMs**: `scripts/dsh-develop.ts` (typecheck/test/build/status/commit/push/version/bump/deploy/restart-web/publish/**pack-check**/github-push/npm-install-dev) + `scripts/dsh-crash-investigate.ts` (crash investigation, read-only) — `pack-check` validates tarball completeness before publishing (dynamically checks all lib/ JS artifacts + .d.ts, prevents missing chunks)
-- **Architecture**: Native Cordis plugin (real DSH tools via `ctx.tools.register` + interception seams `systemPrompt.section`/`tools/pre-execute`/`agent/turn-stopping`…); **zero DSH harness changes** — everything uses plugin seams/events/injected services
-- **Code map**: `docs/codebase-overview-v1.22.md` (layered architecture / module responsibilities / data flows / config layers)
-- **Design decisions**: D1–D30+ in CHANGELOG.md and the maintenance skill (`dsh-serenity-plugin-development`)
-- **Release**: npm `@shgroup/dsh-serenity-hooks` + GitHub dual remotes (tellmewhattodo + omdsh-dev)
+- **Development tool**: `scripts/dsh-develop.ts` — typecheck / test / build / status / commit / push / version / bump / deploy / restart-web / publish / pack-check / github-push in one place.
+  `pack-check` verifies the packaged artifacts before publishing (we once shipped an npm release missing files);
+  `scripts/dsh-crash-investigate.ts` is a read-only crash investigator
+- **Architecture**: a Cordis-native plugin registering tools and interception points through DSH's official interfaces — **DSH itself is never modified**
+- **Code map**: [docs/codebase-overview-v1.22.md](docs/codebase-overview-v1.22.md)
+- **Design decisions**: see [CHANGELOG.md](CHANGELOG.md) and the maintenance skill `dsh-serenity-plugin-development`
+- **Release**: npm `@shgroup/dsh-serenity-hooks` + two GitHub remotes pushed together
 
-## Relation to opencode-serenity-plugin / CCC interchangeability
+---
+
+## 10. Relationship to the opencode version
 
 | | opencode-serenity-plugin | dsh-serenity-plugin (this repo) |
-|---|------|------|
-| Host | OpenCode | DeepSeek Harness |
-| Implementation | Independent | **Independent** (no source reuse; same ACC standard) |
-| System prompt | `system.transform` | `systemPrompt.section`, byte-aligned on platform-neutral text |
-| Tools | msm single-entry / container_fs / logbook etc. | container_fs/logbook/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/autopilot-trajectory |
+|---|---|---|
+| Runs on | OpenCode | DeepSeek Harness |
+| Implementation | Independent | **Independent** (no shared source, same standard) |
+| System prompt | `system.transform` | `systemPrompt.section`, platform-independent text aligned byte-for-byte |
+| Tools | msm / container_fs / logbook … | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory |
 
-**The same CCC can switch between osp / dsh runtimes freely**: `.serenity` marker, `.opencode/skills/`, config, and `AGENT_SESSIONS/` share cross-runtime file formats; only the platform layer differs (tool names/injection channel); the cognitive constraints the agent receives are identical after switching.
+**A workspace can switch runtimes at any time**: the `.serenity` marker, `.opencode/skills/`, configuration, and `AGENT_SESSIONS/` formats are identical.
+Only the platform layer differs (tool names, injection channel), and the constraints the AI receives stay the same.
 
-## FAQ
+---
 
-**Q: Nothing happens after install?** Make sure you entered a `.serenity`-marked directory (a CCC); outside CCCs the plugin does nothing. Run `dashboard health` to verify the three principles.
+## 11. FAQ
 
-**Q: Where did bash go?** Safe mode removes bash from the tool list — by design: registered, tested MSM channels are more reliable. Turn it off with the WebUI capsule slider.
+**Q: Nothing happens after installing?**
+Check that you are inside a directory marked with `.serenity`. Outside a workspace the plugin does not intervene at all. Once inside, run `dashboard health` to see the three checks.
 
-**Q: Locked out of external access (3081)?** 5 failed attempts lock for 15 minutes (exponential backoff) — wait it out, or check the account's TOTP binding.
+**Q: Where did bash go?**
+Safe mode is on — that is the design, not a bug. Registered small tools are more reliable than letting the AI assemble commands. Toggle the SAFE slider back to restore it.
 
-**Q: Context is nearly full?** Land your progress into SESSION.md, then call `logbook rebuild` per the `[TRAJECTORY]` prompt — the trajectory continues automatically; no need to open a new session by hand.
+**Q: The 3081 login is locked?**
+Five consecutive failures lock it for 15 minutes (exponential backoff). Wait it out, or check the account's code-binding status.
 
-**Q: What does the public Q&A page (3100) return?** Only the answer (answer/answer_html/sessionId) — internal trajectories, tool results, and mechanism information never leave the external face.
+**Q: Context is nearly full?**
+Have the AI write progress back to SESSION.md, then follow the prompt and call `logbook rebuild`. The trajectory continues automatically — no new session needed.
+
+**Q: Does the public Q&A page leak internals?**
+No. It returns only the answer; internal trajectories and tool results stay inside.
+
+**Q: How does the AI's reply actually reach WeChat?**
+By default the plugin forwards its final message for you. With `autoReplyWithLastMessage: false`, the plugin stops forwarding and the AI sends messages itself — so if it sends nothing, you receive nothing (no fallback; that is deliberate).
+
+**Q: Are proactive WeChat messages recorded?**
+Yes — through the same `weixin.hook` script configured in the workspace, with `source: "proactive"` in the event; automatic replies carry `source: "reply"`.
+
+---
+
+## 12. Further reading
+
+- **Where the ideas come from**: [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md) — what a cognitive container is, the "happening / storing / re-happening" loop, trajectory and carrier
+- **The authoritative standard**: [serenity-acc-specs](https://github.com/tellmewhattodo/serenity-acc-specs) — theory foundation, injection spec, invariants
+- **What changed**: [CHANGELOG.md](CHANGELOG.md) — what each version did and why
+
+---
 
 ## License
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.30.0 &nbsp;|&nbsp; **Prereq**: DSH 0.1.0-rc+ / Node ≥ 20 / bun &nbsp;|&nbsp; **Tests**: 62 files / 895 tests
+> **Version**: v1.30.11 &nbsp;|&nbsp; **Requires**: DSH 0.1.2-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 70 files / 993 tests
