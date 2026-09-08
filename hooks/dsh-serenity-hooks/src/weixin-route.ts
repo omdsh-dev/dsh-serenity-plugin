@@ -58,6 +58,8 @@ export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SEREN
       enabled: w.enabled === true,
       botType: typeof w.botType === 'string' && w.botType !== '' ? w.botType : undefined,
       hook: typeof w.hook === 'string' && w.hook.trim() !== '' ? w.hook.trim() : undefined,
+      // v1.30.10：缺省 true（现状）——只有显式 false 才关闭自动回发最终文本
+      autoReplyWithLastMessage: w.autoReplyWithLastMessage !== false,
       accounts: Array.isArray(w.accounts)
         ? w.accounts
             .filter((a): a is { accountId: string; name?: string; enabled?: boolean } =>

@@ -308,6 +308,18 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     expect(s.routes).toHaveLength(1)
   })
 
+  it('v1.30.10 autoReplyWithLastMessage 归一（缺省 = 自动回发；显式 false 才关）', () => {
+    // 缺省（未写该键）→ 非 false（= 现状：桥回发最终文本）
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true } }))
+    expect(readWeixinSettings(dir).autoReplyWithLastMessage).not.toBe(false)
+    // 显式 false → 关闭
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true, autoReplyWithLastMessage: false } }))
+    expect(readWeixinSettings(dir).autoReplyWithLastMessage).toBe(false)
+    // 显式 true → 开启
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true, autoReplyWithLastMessage: true } }))
+    expect(readWeixinSettings(dir).autoReplyWithLastMessage).toBe(true)
+  })
+
   it('凭据读写分离：token 只进 localstore credentials，不落 serenity.json', () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: false } }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok-1', baseUrl: 'https://ilinkai.weixin.qq.com', userId: 'u1' })
@@ -537,8 +549,84 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent[1]!.contextToken).toBe('ct1') // context_token 回带
   })
 
-  it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {
+  it('v1.30.10 autoReplyWithLastMessage=false → 桥不回发最终文本 + 每轮注入输出纪律（可执行命令）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, autoReplyWithLastMessage: false, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+    }))
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    const hookEvents: unknown[] = []
+    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    setWeixinHookRunnerForTest(async (_root, _rel, ev) => {
+      hookEvents.push(ev)
+      return { ok: true }
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'manual@im.wechat',
+      context_token: 'ct',
+      item_list: [{ type: 1, text_item: { text: '你好' } }],
+    })
+
+    // ① 桥不回发 agent 最终文本（只剩系统类「新对话」通知——用户拍板保留）
+    expect(sent.map((s) => s.text).join('|')).not.toContain('答案')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]!.text).toContain('新的对话')
+
+    // ② 每轮注入输出纪律：完整可执行命令（CCC 根 + 账号 + 用户 id 全部填好，零解析负担）
+    const q = ctx.questions[0] ?? ''
+    expect(q).toContain('Reply Output (manual mode)')
+    expect(q).toContain('msm("weixin-send"')
+    expect(q).toContain(`"--ccc", "${dir}"`)
+    expect(q).toContain('"--account", "wechat-1"')
+    expect(q).toContain('"--user", "manual@im.wechat"')
+    expect(q).toContain('no fallback')
+    // 用户原文仍在（纪律是前缀注入，不吞消息）
+    expect(q).toContain('你好')
+
+    // ③ 记录只有 incoming——桥没发消息，故无 outgoing(reply)；agent 自己发的走 source=proactive
+    expect(hookEvents.map((e) => (e as { event: string }).event)).toEqual(['incoming'])
+  })
+
+  it('v1.30.10 autoReplyWithLastMessage=true（显式）→ 仍自动回发（开关对照）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, autoReplyWithLastMessage: true, routes: [{ user: '*', role: 'qa' }] },
+    }))
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'auto@im.wechat',
+      context_token: 'ct',
+      item_list: [{ type: 1, text_item: { text: 'hi' } }],
+    })
+    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    expect(ctx.questions[0] ?? '').not.toContain('Reply Output (manual mode)')
+  })
+
+  it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },

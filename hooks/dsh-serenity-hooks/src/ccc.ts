@@ -201,6 +201,19 @@ export interface WeixinSettings {
    * 执行语义：旁路 fire-and-forget + 超时 + 失败仅日志（微信桥可靠性不受 hook 影响）。
    */
   hook?: string;
+  /**
+   * 桥是否**自动回发 agent 的最终文本**（v1.30.10，用户拍板命名；缺省 true = 现状）。
+   *
+   * 关闭（false）→ 桥不再把一轮结束时 agent 的最终 assistant 文本转发给用户；
+   * 输出权完全交给 agent：每轮 question 前缀注入「输出纪律」块（含可直接执行的
+   * weixin-send 命令），由 agent 自己决定发什么/发几条（全部记 `source=proactive`）。
+   *
+   * 为什么需要（R↓）：v1.30.9 起 agent 已能经 msm 主动输出（`weixin-send` → 桥 → iLink），
+   * 「桥替 agent 说最后一句」从机制上变成可选项——进程式汇报、多段输出、静默处理都需要它。
+   * 语义边界（用户拍板）：只关**最终文本**；系统类消息（新对话通知 / 语音无法解析提示）保留；
+   * agent 一轮未输出 → 静默不兜底（否则开关语义被破坏）。
+   */
+  autoReplyWithLastMessage?: boolean;
 }
 
 /** 微信桥账号配置（serenity.json 内；凭据部分在 localstore） */

@@ -273,10 +273,19 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
     的 weixinApi.port，默认 3082；公网不可达故无密钥）→ weixin-bridge.sendProactiveText →
     成功后触发 outgoing hook（source="proactive"）。send-file 仍由 MSM 直连 iLink 上传并自行补记。
 
+  ▸ weixin.autoReplyWithLastMessage（v1.30.10，关闭桥的自动输出）：
+    缺省 true = 现状：桥在 agent 一轮结束后把**最终 assistant 文本**自动回发用户（source="reply"）。
+    显式 false = 关闭：桥**不再转发最终文本**，输出权交给 agent——每轮 question 前缀注入
+    「Reply Output (manual mode)」纪律块（含可直接照抄的 weixin-send 命令，CCC 根/账号/用户 id
+    已填好），agent 自己决定发什么、发几条（全部记 source="proactive"）。
+    语义边界（用户拍板）：只关最终文本；系统类消息（新对话通知 / 语音无法解析提示）保留；
+    **agent 一轮未输出 → 静默不兜底**（否则开关失去意义）；typing 指示与 incoming hook 不受影响。
+
   Config:
     { "weixin": {
         "enabled": true,
         "hook": "scripts/weixin-message-hook.ts",
+        "autoReplyWithLastMessage": true,
         "accounts": [{ "accountId": "wechat-1", "name": "家庭助手", "enabled": true }],
         "routes": [{ "user": "*", "role": "zhaocai" }]
       } }

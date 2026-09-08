@@ -1,3 +1,22 @@
+## v1.30.10 — 2026-09-08（微信桥「关闭自动输出」开关：输出权交给 agent，S142）
+
+**Scope:** 用户"在这个基础上，微信桥绑定的 skiff 就不用走尾部输出那一套了，而是直接可以依赖 msm 来输出，那么搞个开关，让微信桥可以关闭输出"（拍板：CCC 级开关、命名 `autoReplyWithLastMessage`、只关最终文本、不兜底）。
+
+### `weixin.autoReplyWithLastMessage`（CCC 级，缺省 true = 现状）
+- **关闭（false）**：桥不再把一轮结束时 agent 的**最终 assistant 文本**转发给用户（原 `source="reply"` 那条不再产生）；输出权交给 agent —— 每轮 `question` 前缀注入 **`── Reply Output (manual mode) ──`** 纪律块（新导出 `weixinManualOutputLine(root, accountId, userId)`）：含**已填好 ccc/account/user 的可直接照抄命令**、明文"桥不会替你转发"、"不发 = 用户收不到（no fallback）"、纯文本、以及"记录归 source=proactive 勿重复"四条
+  - `--account` 用**收到消息的账号**（多账号下避免用错 bot 身份回话）；`--user` 用该用户 iLink id（免别名解析）
+- **保留**（用户拍板边界）：系统类消息（「新的对话已开始」/ 语音无法解析提示）、typing 指示、incoming hook —— 只关"agent 的最终文本"
+- **记录语义**：被抑制的最终文本**不记录**（记录 = 用户实际看到的内容）；agent 自己发的走 `source="proactive"`
+- **归一**：`readWeixinSettings` 缺省非 false（未写该键 = 旧行为）；显式 false 才关（向后兼容，零迁移）
+
+### 文档
+- `container_admin msm ccc-config` §8 补该键（含语义边界与配置样例）
+- `weixin-doctor guide` §7 补「关闭桥的自动输出」段（配置 / 效果 / 边界 / 适用场景）
+
+### 验证
+- **70 files / 993 tests 全绿**（990 → 993：+2 桥行为用例、+1 配置归一用例）+ typecheck 双面 ✓ + build ✓
+- **⏸ 未发布**：bump/publish 待用户显式指令（D14）
+
 ## v1.30.9 — 2026-09-08（微信主动发送通道 + skiff 工作台两条缺陷根治，S142）
 
 **Scope:** 用户需求「微信桥希望能支持被调用发消息给指定用户，允许 CCC 自己做个 MSM 来发消息、同时能被记录，但又不希望新增 ACC 层 tool」（拍板 A2：专用 loopback 监听、ccc 必填、不做密钥）+ 用户报「zhaocai skiff SESSION 爆炸」根治。

@@ -132,6 +132,31 @@ async function runAccountLoop(
 }
 
 /**
+ * 手动输出模式的**输出纪律块**（v1.30.10，`weixin.autoReplyWithLastMessage: false` 时注入）。
+ *
+ * 为什么必须注入（R↓）：关掉自动回发后，agent 若不知道"桥不会替你转发"，用户就收不到任何回复
+ * ——机制变更必须伴随可执行的行动指引。因此这里给的是**可直接照抄的完整命令**（CCC 根 + 账号 +
+ * 用户 id 全部填好），而不是抽象提示（E↑）。
+ *
+ * 参数全部显式：`--ccc`（必填，无隐式当前 CCC）、`--account`（沿用收到消息的账号，避免多账号下
+ * 用错 bot 身份回话）、`--user`（该用户 iLink id，免去别名解析）。
+ */
+export function weixinManualOutputLine(root: string, accountId: string, userId: string): string {
+  return [
+    '── Reply Output (manual mode) ──',
+    'The bridge will NOT forward your final message to the user for this CCC.',
+    'Send everything the user should see yourself, e.g.:',
+    `  msm("weixin-send", ["send", "--ccc", "${root}", "--account", "${accountId}", "--user", "${userId}", "<your reply>"])`,
+    'Rules:',
+    '  1. Send your reply before the turn ends — if you send nothing, the user sees nothing (no fallback).',
+    '  2. You may send several messages (progress / final answer); split only when it helps the reader.',
+    '  3. Plain text only — WeChat renders no markdown.',
+    '  4. Each send is recorded automatically (source=proactive); do not repeat the same content.',
+    '── ──',
+  ].join('\n')
+}
+
+/**
  * 处理单条微信消息：路由 → skiff 会话（固定 id 创建/延续）→ 提问 → 回复回写。
  *
  * 会话语义：`weixinSessionIdFor(fromUserId)` 固定可重建——同用户长期同一会话；
@@ -265,6 +290,12 @@ export async function handleIncoming(
       if (activeWorkspace?.mdPath) {
         parts.push(workspaceTrajectoryLine(activeWorkspace.mdPath))
       }
+      // v1.30.10：关闭自动回发最终文本（weixin.autoReplyWithLastMessage: false）→
+      // 每轮注入输出纪律（可执行命令），输出权交给 agent；本轮结束不再由桥转发。
+      const manualOutput = settings.autoReplyWithLastMessage === false
+      if (manualOutput) {
+        parts.push(weixinManualOutputLine(root, accountId, fromUserId))
+      }
       if (text) parts.push(text)
       parts.push(...mediaNotes, ...degradedNotes)
       const question = parts.join('\n')
@@ -288,6 +319,9 @@ export async function handleIncoming(
 
       const result = await askSkiff(ctx, ref.agent, question, undefined, { includeTrajectory: false })
       const answer = result.answer ?? ''
+      // v1.30.10：手动输出模式——桥不转发最终文本（用户拍板：静默不兜底；记录只记 agent
+      // 实际发出的消息，source=proactive）。系统类消息（新对话通知/语音提示）不受影响。
+      if (manualOutput) return
       if (answer === '') return
 
       // 回复文本：stripThink 剥离 <think> 块（微信桥用户反馈：用户不应看到思考过程）→
