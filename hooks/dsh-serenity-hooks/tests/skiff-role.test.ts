@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -11,6 +11,8 @@ import {
   roleMsmWhitelist,
   buildSkiffBasePrompt,
   resolveRoleSystemPrompt,
+  createRolePromptReader,
+  resolveSkiffKind,
   systemPromptSource,
 } from '../src/skiff-role.js'
 import type { SkiffRoleConfig } from '../src/ccc.js'
@@ -191,5 +193,111 @@ describe('skiff-role: buildSkiffBasePrompt 动态基础提示词', () => {
     const p = buildSkiffBasePrompt('r', { msms: ['a'] })
     expect(p).toContain('MSMs: a')
     expect(p).toContain('Tools: (none)')
+  })
+})
+
+describe('skiff-role: 类型二分 resolveSkiffKind（v1.30.15，S142 用户拍板）', () => {
+  it('显式 kind 优先于隐式推断', () => {
+    // 显式 temporary + 有稳定 id → 仍 temporary（CCC 主权）
+    expect(resolveSkiffKind({ kind: 'temporary' }, true)).toBe('temporary')
+    // 显式 persistent + 无稳定 id → 仍 persistent
+    expect(resolveSkiffKind({ kind: 'persistent' }, false)).toBe('persistent')
+  })
+
+  it('缺省 = 隐式推断：有稳定会话 id → persistent，否则 temporary', () => {
+    expect(resolveSkiffKind(undefined, true)).toBe('persistent')
+    expect(resolveSkiffKind(undefined, false)).toBe('temporary')
+    expect(resolveSkiffKind({ msms: ['x'] }, true)).toBe('persistent')
+    expect(resolveSkiffKind({ msms: ['x'] }, false)).toBe('temporary')
+  })
+
+  it('非法 kind 值 → 回落隐式推断（不信任脏配置）', () => {
+    expect(resolveSkiffKind({ kind: 'forever' as never }, true)).toBe('persistent')
+    expect(resolveSkiffKind({ kind: 'forever' as never }, false)).toBe('temporary')
+  })
+
+  it('readSkiffRoles 解析 kind 字段（合法值透传；非法值丢弃）', () => {
+    writeConfig({
+      skiff: {
+        roles: {
+          a: { kind: 'persistent', msms: ['x'] },
+          b: { kind: 'temporary' },
+          c: { kind: 'nonsense', msms: ['y'] },
+        },
+      },
+    })
+    const roles = readSkiffRoles(dir)
+    expect(roles.get('a')!.kind).toBe('persistent')
+    expect(roles.get('b')!.kind).toBe('temporary')
+    expect(roles.get('c')!.kind).toBeUndefined()
+  })
+})
+
+describe('skiff-role: createRolePromptReader 热更新（v1.30.15 方案 A）', () => {
+  function writePrompt(text: string): void {
+    mkdirSync(join(dir, '.opencode', 'skiff'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skiff', 'r.md'), text)
+  }
+
+  it('改文件即生效（第二次读取返回新内容，无需重启）', () => {
+    writePrompt('第一版提示词')
+    const read = createRolePromptReader(dir, { systemPromptFile: '.opencode/skiff/r.md' })
+    expect(read()).toBe('第一版提示词')
+    writePrompt('第二版提示词（热更）')
+    expect(read()).toBe('第二版提示词（热更）')
+  })
+
+  it('mtime/size 未变 → 命中缓存（同一字符串实例，零重复解析）', () => {
+    writePrompt('稳定内容')
+    const read = createRolePromptReader(dir, { systemPromptFile: '.opencode/skiff/r.md' })
+    const a = read()
+    const b = read()
+    expect(a).toBe('稳定内容')
+    expect(b).toBe(a)
+  })
+
+  it('BOM 剥除 + trim（与 resolveRoleSystemPrompt 同口径）', () => {
+    writePrompt('\uFEFF 带 BOM  \n')
+    const read = createRolePromptReader(dir, { systemPromptFile: '.opencode/skiff/r.md' })
+    expect(read()).toBe('带 BOM')
+  })
+
+  it('内嵌 systemPrompt → 静态读取器（JSON 改动需重启，符合语义）', () => {
+    const read = createRolePromptReader(dir, { systemPrompt: '内嵌' })
+    expect(read()).toBe('内嵌')
+    expect(read()).toBe('内嵌')
+    expect(createRolePromptReader(dir, undefined)()).toBe('')
+  })
+
+  it('路径逃逸 → 空读取器（不抛错，装配不阻断）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const read = createRolePromptReader(dir, { systemPromptFile: '../outside.md' })
+    expect(read()).toBe('')
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('路径非法'))).toBe(true)
+    warn.mockRestore()
+  })
+
+  it('文件被删除 → 沿用上次成功内容（绝不返回空）+ 告警一次', () => {
+    writePrompt('有效内容')
+    const read = createRolePromptReader(dir, { systemPromptFile: '.opencode/skiff/r.md' })
+    expect(read()).toBe('有效内容')
+    rmSync(join(dir, '.opencode', 'skiff', 'r.md'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(read()).toBe('有效内容')
+    expect(read()).toBe('有效内容')
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('读取失败'))).toHaveLength(1)
+    warn.mockRestore()
+  })
+
+  it('热重载打一行 info 日志（首次不报，变更才报）', () => {
+    writePrompt('v1')
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    const read = createRolePromptReader(dir, { systemPromptFile: '.opencode/skiff/r.md' })
+    read()
+    expect(info.mock.calls.filter((c) => String(c[0]).includes('热重载'))).toHaveLength(0)
+    writePrompt('v2 更长一些的内容')
+    read()
+    expect(info.mock.calls.filter((c) => String(c[0]).includes('热重载'))).toHaveLength(1)
+    info.mockRestore()
   })
 })

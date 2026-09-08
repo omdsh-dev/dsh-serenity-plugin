@@ -1,4 +1,23 @@
-## v1.30.14 — 2026-09-08（重启日志实证后的收敛：Skiff 启动并发守卫 + 首 miss 降为信息级，S142）
+## v1.30.15 — 2026-09-08（Skiff 类型二分 + 角色提示词热更新，S142 用户拍板）
+
+**Scope:** 用户提出设计问题——"skiff 应该区分的类型是**临时和长期**，临时的不绑定会话、提示词注入一次；长期的绑定 trajectory（SESSION.md）、提示词每次用户消息都注入"。设计底座落盘 `docs/skiff-type-and-injection-design.md`（现状实证 / 目标-手段分离 / 成本实证 / 三方案 / 决策点），用户拍板：**方案 A**（长期型提示词段动态重读）+ **显式字段 + 隐式兜底**。
+
+### 方案 A：角色提示词热更新（长期型）
+- **新 `createRolePromptReader(root, role)`**（`skiff-role.ts`）——返回**读取函数**而非字符串：`systemPromptFile` 按 **mtime + size** 缓存重读（命中零 IO），**改文件即生效、无需重启**；变更时打一行 `↻ skiff 角色提示词已热重载`（可观测）；读取失败**沿用上次成功内容**（绝不返回空——空提示词会让角色失去人格与纪律）并告警一次；路径逃逸 → 空读取器 + 告警（不阻断装配）
+- **`createSkiffAgent`**：角色段改为动态 `text: () => [基础段, rolePrompt()]`——persistent 型每次组装重读文件；temporary 型保留**创建时快照**（用户："临时的不绑定会话，提示词注入一次"）
+- **为什么不是"每轮注入用户消息"（R↓）**：zhaocai.md 原 18.2 KB（≈6k–9k tokens）→ 每消息注入 = 一天 50 条约 300k–450k tokens；而"改文件即生效 + 每轮在场"用**动态系统提示词段**即可达成（系统提示词本就每轮发送，零额外消息 token）。用户确认采纳方案 A。
+
+### 类型二分（显式 + 隐式兜底）
+- `SkiffRoleConfig.kind?: 'temporary' | 'persistent'`（`ccc.ts`）+ `resolveSkiffKind(role, hasStableId)`（`skiff-role.ts`）：**显式优先**，缺省按"调用方是否传稳定 sessionId"推断（微信桥传固定 id → persistent；ACP/调试页随机 id → temporary）→ 存量配置零迁移；非法值回落推断
+- `ensureSkiffSession(..., kind === 'persistent')`：工作台创建/恢复改由 kind 驱动（显式 `temporary` 即使传了稳定 id 也不建工作台）
+- `readSkiffRoles` 解析 `kind`（合法透传，非法丢弃）
+
+### 验证
+- `skiff-role.test.ts` +12：kind 优先级矩阵 / 非法值回落 / 配置解析 / 热重载（改文件生效、缓存命中、BOM、内嵌静态、逃逸降级、文件删除沿用上次内容、日志只在变更时打）
+- `skiff-core.test.ts` +4：persistent 改文件即生效 / temporary 快照不随文件变 / 显式 temporary 覆盖（不建工作台）/ 显式 persistent 覆盖（建工作台 + 热更）
+- **72 files / 1026 tests 全绿**（1011 → 1026）+ typecheck 双面 ✓ + build ✓
+
+
 
 **Scope:** v1.30.13 发布并 restart-web 后，**运行日志实证** D1 修复生效，同时暴露两处需要收敛的细节。
 

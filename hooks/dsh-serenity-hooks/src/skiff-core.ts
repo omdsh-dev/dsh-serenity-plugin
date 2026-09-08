@@ -17,7 +17,7 @@ import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, type SkiffRoleConfig } from './skiff-role.js'
+import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, createRolePromptReader, resolveSkiffKind, type SkiffRoleConfig } from './skiff-role.js'
 import { splitModel } from './handyman-ops.js'
 import { skiffRoleFor as registryRoleFor, skiffSessionInfo as registrySessionInfo, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
 import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './session-ops.js'
@@ -294,22 +294,34 @@ export async function createSkiffAgent(
   }
   const handle = await createOrResumeAgent(ctx, id, root, model, setup, sessionId !== undefined)
   const agent = handle.agent
+  // 角色类型（v1.30.15，S142 用户拍板）：显式 role.kind 优先，缺省按"是否有稳定会话 id"推断
+  const kind = resolveSkiffKind(role, sessionId !== undefined)
   // scoped 系统提示词：基础段（动态白名单清单）+ CCC 完整定义段
   // v1.25.10：CCC 段经 resolveRoleSystemPrompt——systemPromptFile 优先（md 文件，推荐），
   // 文件缺失/逃逸 → catch 降级（console.warn + 仅基础段），不阻断 agent 创建
-  let cccPrompt = ''
-  try {
-    cccPrompt = resolveRoleSystemPrompt(root, role)
-  } catch (err) {
-    console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 系统提示词解析失败（回退仅基础段）: ${String((err as Error)?.message ?? err)}`)
-  }
+  // v1.30.15（方案 A）：改为**读取器**——persistent 型每轮动态重读文件（改提示词即生效，
+  // 无需重启）；temporary 型保留"创建时快照"语义（用户："临时的不绑定会话，提示词注入一次"）。
+  const rolePrompt = kind === 'persistent'
+    ? createRolePromptReader(root, role)
+    : ((): (() => string) => {
+        let snapshot = ''
+        try {
+          snapshot = resolveRoleSystemPrompt(root, role)
+        } catch (err) {
+          console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 系统提示词解析失败（回退仅基础段）: ${String((err as Error)?.message ?? err)}`)
+        }
+        return () => snapshot
+      })()
+  // 首次求值（文件缺失/逃逸在创建时即告警；reader 内部对失败已降级为上次成功内容）
+  void rolePrompt()
   // v1.30.3（S142 用户拍板）：启用了 session 能力的 skiff 自动获得专属 SESSION（工作台）——
   // 自动创建/恢复（readLastBound → createSession，幂等，per skiff 会话 scope 隔离）。
   // 成功后把工作台路径注入 systemPrompt（agent 上下文，用户对话面不打印）。
   let workspaceMdPath: string | null = null
   try {
-    // v1.30.9：只有**持久身份**（固定会话 id）才建工作台——临时 agent（随机 id）不建
-    workspaceMdPath = ensureSkiffSession(root, agent, roleName, role, sessionId !== undefined)
+    // v1.30.9：只有**持久身份**才建工作台——临时 agent（随机 id）不建
+    // v1.30.15：判定改为 kind（显式优先；缺省 = 有稳定会话 id）
+    workspaceMdPath = ensureSkiffSession(root, agent, roleName, role, kind === 'persistent')
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 专属 SESSION 处理失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
   }
@@ -317,13 +329,8 @@ export async function createSkiffAgent(
     agent.ctx.systemPrompt.section({
       name: 'serenity-skiff',
       order: -60,
-      text: () =>
-        [
-          buildSkiffBasePrompt(roleName, role),
-          cccPrompt,
-        ]
-          .filter(Boolean)
-          .join('\n'),
+      // 动态求值：基础段清单 + 角色提示词（persistent 型每次重读文件 → 热更新）
+      text: () => [buildSkiffBasePrompt(roleName, role), rolePrompt()].filter(Boolean).join('\n'),
     })
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)

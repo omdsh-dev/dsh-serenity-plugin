@@ -243,6 +243,15 @@ export interface WeixinRouteConfig {
 export interface SkiffRoleConfig {
   /** 角色模型（provider/model；CCC 直接指定，无白名单校验——用户拍板） */
   model?: string;
+  /**
+   * 角色类型（v1.30.15，S142 用户拍板"skiff 应该区分的类型是临时和长期"）：
+   * - `temporary`：临时 skiff——不绑定 trajectory（无 SESSION.md 工作台），
+   *   提示词按创建时快照注入（"注入发生一次"）。
+   * - `persistent`：长期 skiff——绑定 trajectory（自动建/恢复 SESSION.md 工作台），
+   *   提示词**每轮动态重读文件**（改 `systemPromptFile` 即生效，无需重启）。
+   * 缺省（未写）= 隐式推断：调用方传入稳定 sessionId → persistent，否则 temporary。
+   */
+  kind?: 'temporary' | 'persistent';
   /** MSM 白名单（独立）：该角色可 exec 的 MSM 名列表；缺省空 = 无 MSM 通道 */
   msms?: string[];
   /** 非 MSM 工具白名单（独立）：平台/ACC 工具名列表；缺省空 = 仅 MSM 通道 */
@@ -256,7 +265,8 @@ export interface SkiffRoleConfig {
   /** 角色系统提示词（CCC 完整定义：人格/认知边界/回答风格） */
   systemPrompt?: string;
   /** 角色系统提示词文件（推荐：相对 CCC 根引用 md 文件——超长提示词在 JSON 内嵌不可读；
-   *  优先于 systemPrompt；文件缺失/逃逸 → resolveRoleSystemPrompt 抛错） */
+   *  优先于 systemPrompt；文件缺失/逃逸 → resolveRoleSystemPrompt 抛错。
+   *  persistent 型每轮重读（mtime 缓存），改文件即生效） */
   systemPromptFile?: string;
 }
 

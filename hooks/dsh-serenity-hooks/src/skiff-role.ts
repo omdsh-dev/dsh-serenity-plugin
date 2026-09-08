@@ -10,7 +10,7 @@
  */
 
 import { loadSerenityConfig, resolveInside, readUtf8, DEFAULT_SERENITY_CONFIG_PATHS, type SkiffRoleConfig } from './ccc.js'
-import { existsSync } from 'node:fs'
+import { existsSync, statSync } from 'node:fs'
 
 export type { SkiffRoleConfig }
 
@@ -37,6 +37,7 @@ export function readSkiffRoles(root: string, paths: string[] = DEFAULT_SERENITY_
       if (name.trim() === '') continue
       out.set(name.trim(), {
         model: typeof role.model === 'string' ? role.model : undefined,
+        kind: role.kind === 'temporary' || role.kind === 'persistent' ? role.kind : undefined,
         msms: Array.isArray(role.msms) ? role.msms.filter((m): m is string => typeof m === 'string') : undefined,
         tools: Array.isArray(role.tools) ? role.tools.filter((t): t is string => typeof t === 'string') : undefined,
         trajectory: role.trajectory && typeof role.trajectory === 'object' ? {
@@ -113,6 +114,79 @@ export function systemPromptSource(role: SkiffRoleConfig | undefined): 'file' | 
   if (role?.systemPromptFile?.trim()) return 'file'
   if (role?.systemPrompt?.trim()) return 'inline'
   return 'none'
+}
+
+/**
+ * 角色类型（v1.30.15，S142 用户拍板）：
+ * - 显式 `role.kind` 优先（`temporary` / `persistent`）
+ * - 缺省 = 隐式推断：调用方给出**稳定 sessionId** → persistent；否则 temporary
+ *   （存量配置零迁移；微信桥传固定会话 id → persistent，ACP/调试页随机 id → temporary）
+ */
+export type SkiffKind = 'temporary' | 'persistent'
+
+export function resolveSkiffKind(role: SkiffRoleConfig | undefined, hasStableId: boolean): SkiffKind {
+  const k = role?.kind
+  if (k === 'temporary' || k === 'persistent') return k
+  return hasStableId ? 'persistent' : 'temporary'
+}
+
+/**
+ * 角色提示词**读取器**（v1.30.15，方案 A：长期型热更新）。
+ *
+ * 为什么是函数而不是字符串（R↓）：旧实现 `createSkiffAgent` 在创建时把
+ * `resolveRoleSystemPrompt(...)` 的结果**快照**进系统提示词段闭包 → CCC 改了
+ * `zhaocai.md` 必须重启 dsh web 才生效（本轮实证：改完 18KB 提示词，live agent 仍用旧文本）。
+ * 现形态返回一个读取函数，由系统提示词段的 `text()` **每轮调用**：
+ *   - `systemPromptFile`：按 **mtime + size** 缓存重读（命中缓存零 IO；未变不解析）
+ *     → 改文件即生效，**无需重启**；变更时打一行 info 日志（可观测，便于确认热更生效）
+ *   - 内嵌 `systemPrompt`：静态（JSON 配置改动仍需重启/重载配置）
+ *   - 读取失败：返回**上次成功内容**（绝不返回空——空提示词会让角色失去人格与纪律），
+ *     并按标签去重告警一次
+ * @param root CCC 根
+ * @param role 角色配置
+ */
+export function createRolePromptReader(root: string, role: SkiffRoleConfig | undefined): () => string {
+  const file = role?.systemPromptFile?.trim()
+  if (!file) {
+    const inline = role?.systemPrompt ?? ''
+    return () => inline
+  }
+  let abs: string | null = null
+  try {
+    abs = resolveInside(root, file) // 逃逸 → 抛错（此处降级为空读取器 + 告警）
+  } catch (err) {
+    console.warn(`[serenity-hooks] ✗ skiff 角色提示词路径非法（${file}）: ${String((err as Error)?.message ?? err)}`)
+  }
+  if (abs === null) return () => ''
+  const absPath: string = abs
+  let cachedMtime = -1
+  let cachedSize = -1
+  let cachedText = ''
+  let warned = false
+  return () => {
+    try {
+      const st = statSync(absPath)
+      if (st.mtimeMs === cachedMtime && st.size === cachedSize) return cachedText
+      const text = readUtf8(absPath).trim()
+      const isReload = cachedMtime !== -1
+      cachedMtime = st.mtimeMs
+      cachedSize = st.size
+      cachedText = text
+      warned = false
+      if (isReload) {
+        console.info(`[serenity-hooks] ↻ skiff 角色提示词已热重载（${file}，${text.length} 字符）`)
+      }
+      return text
+    } catch (err) {
+      if (!warned) {
+        warned = true
+        console.warn(
+          `[serenity-hooks] ✗ skiff 角色提示词读取失败（${file}）——沿用上次成功内容: ${String((err as Error)?.message ?? err)}`,
+        )
+      }
+      return cachedText
+    }
+  }
 }
 
 /**

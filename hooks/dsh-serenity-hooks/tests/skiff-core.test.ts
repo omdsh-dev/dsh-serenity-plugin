@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync, readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-llm', () => ({
@@ -635,6 +635,87 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(sections[0]?.text()).not.toContain('Serenity Session Workspace')
     expect(sections[0]?.text()).toContain('角色人格')
     expect(existsSync(join(dir, 'AGENT_SESSIONS'))).toBe(false)
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  // ── v1.30.15 方案 A：类型二分 × 提示词注入时机（S142 用户拍板）──
+
+  /** 建一个可写角色提示词文件的 fake ctx（返回 sections + 文件路径） */
+  function promptFileCtx(): { ctx: unknown; sections: Array<{ name: string; text: () => string }>; promptPath: string } {
+    const sections: Array<{ name: string; text: () => string }> = []
+    const promptPath = join(dir, '.opencode', 'skiff', 'live.md')
+    mkdirSync(dirname(promptPath), { recursive: true })
+    writeFileSync(promptPath, '第一版角色提示词')
+    const ctx = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+          const agentCtx = {
+            get: () => undefined,
+            systemPrompt: { section: (s: { name: string; text: () => string }) => sections.push(s) },
+          }
+          await opts.setup?.(agentCtx)
+          return { agent: { ctx: agentCtx, session: { id: opts.sessionId, events: [], append: () => {} }, followup: () => {} } }
+        },
+      },
+    }
+    return { ctx, sections, promptPath }
+  }
+
+  it('persistent（稳定 sessionId）→ 角色提示词每轮重读文件：改文件即生效（无需重启）', async () => {
+    const { ctx, sections, promptPath } = promptFileCtx()
+    const ref = await createSkiffAgent(ctx as never, dir, 'zhaocai', {
+      ...sessionRole(),
+      systemPromptFile: '.opencode/skiff/live.md',
+    } as never, undefined, 'skiff-weixin-hot-reload')
+    const base = sections.find((s) => s.name === 'serenity-skiff')!
+    expect(base.text()).toContain('第一版角色提示词')
+    // 热更：直接改文件（模拟 CCC 编辑角色提示词）
+    writeFileSync(promptPath, '第二版角色提示词（热更后）')
+    expect(base.text()).toContain('第二版角色提示词（热更后）')
+    expect(base.text()).not.toContain('第一版角色提示词')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('temporary（无 sessionId）→ 角色提示词为创建时快照（改文件不影响本轮 agent）', async () => {
+    const { ctx, sections, promptPath } = promptFileCtx()
+    const ref = await createSkiffAgent(ctx as never, dir, 'zhaocai', {
+      ...sessionRole(),
+      systemPromptFile: '.opencode/skiff/live.md',
+    } as never)
+    const base = sections.find((s) => s.name === 'serenity-skiff')!
+    expect(base.text()).toContain('第一版角色提示词')
+    writeFileSync(promptPath, '第二版角色提示词（热更后）')
+    // 临时型 = 注入一次（快照语义）
+    expect(base.text()).toContain('第一版角色提示词')
+    expect(base.text()).not.toContain('第二版角色提示词（热更后）')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('显式 kind 覆盖隐式推断：kind=temporary + 稳定 sessionId → 不建工作台 + 快照提示词', async () => {
+    const { ctx, sections, promptPath } = promptFileCtx()
+    const ref = await createSkiffAgent(ctx as never, dir, 'zhaocai', {
+      ...sessionRole(),
+      kind: 'temporary',
+      systemPromptFile: '.opencode/skiff/live.md',
+    } as never, undefined, 'skiff-explicit-temporary')
+    expect(existsSync(join(dir, 'AGENT_SESSIONS'))).toBe(false) // 不建工作台
+    const base = sections.find((s) => s.name === 'serenity-skiff')!
+    writeFileSync(promptPath, '改了也不该生效')
+    expect(base.text()).toContain('第一版角色提示词')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
+  it('显式 kind 覆盖隐式推断：kind=persistent + 无 sessionId → 建工作台 + 热更提示词', async () => {
+    const { ctx, sections, promptPath } = promptFileCtx()
+    const ref = await createSkiffAgent(ctx as never, dir, 'zhaocai', {
+      ...sessionRole(),
+      kind: 'persistent',
+      systemPromptFile: '.opencode/skiff/live.md',
+    } as never)
+    expect(existsSync(join(dir, 'AGENT_SESSIONS'))).toBe(true) // 建工作台
+    const base = sections.find((s) => s.name === 'serenity-skiff')!
+    writeFileSync(promptPath, '热更生效')
+    expect(base.text()).toContain('热更生效')
     unregisterSkiffSession(ref.sessionId)
   })
 })
