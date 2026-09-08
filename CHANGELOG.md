@@ -19,7 +19,12 @@
 
 ### 验证
 - **70 files / 993 tests 全绿** + typecheck 双面 ✓ + build ✓
-- **⏸ 未发布**：bump/publish 待用户显式指令（D14）
+
+### 发布链（2026-09-08，用户"等英文版一起发" = D14 显式触发）
+- `version` 三处一致 1.30.11 ✓ → `publish` ✓（test 70 files / 993 tests → typecheck 双面 → build → readme-sync → pack-check **89 文件**；lib 83 项 = js 13 / d.ts 70）→ npm `@shgroup/dsh-serenity-hooks@1.30.11` → `push` origin ✓ → `github-push` github + omdsh ✓（三推全成）
+- **发布前修复（本轮发现，否则 npm README 不会更新）**：npm 页面展示的是**包内** README（`hooks/dsh-serenity-hooks/README.md`，经 package.json `files` 白名单进 tarball），**不是仓库根 README**——v1.30.11 重写根 README 后，包内 README 仍停在 v1.30.0（"8 块"等过时事实；实证：jsdelivr 取 `@1.30.10` 包内 README 得旧短版）。修复 = `dsh-develop` 新增 **`readme-sync`** 子命令并在 `publish` 前置执行：根 README → 包内 README，仓库相对链接（docs/、CHANGELOG.md、LICENSE）改写为绝对 GitHub URL（tarball 内无这些文件，相对链接在 npm 页会 404）
+- **发布后核对（五个表面全绿）**：npm 包内 README（jsdelivr `@1.30.11`）= 新版人话 README ✓ ／ npm `latest` = 1.30.11（89 文件，gitHead `e325ef0`）✓ ／ GitHub tellmewhattodo `README.md` ✓ ／ `README.en.md` 英文镜像 ✓ ／ omdsh 镜像 ✓
+- **未执行 deploy / restart-web**：本版为纯文档 + 声明面变更（`engines.dsh` / 包描述），lib/ 运行时产物与 v1.30.10 等价——本机运行时仍为 v1.30.10（需要时随时 `dsh-develop deploy`）
 
 ## v1.30.10 — 2026-09-08（微信桥「关闭自动输出」开关：输出权交给 agent，S142）
 
