@@ -61,10 +61,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # pnpm 版本与开发机一致（本机实测 11.20.0；锁文件 lockfileVersion 9.0）
+      # pnpm 版本**单一真相源** = 根 package.json 的 `packageManager`（本机实测 11.20.0；
+      # 锁文件 lockfileVersion 9.0）。**不要**在这里再传 version —— action-setup@v4 见到
+      # 两处版本会直接报 "Multiple versions of pnpm specified"（run #14 实证）。
       - uses: pnpm/action-setup@v4
-        with:
-          version: 11
 
       - uses: actions/setup-node@v4
         with:
