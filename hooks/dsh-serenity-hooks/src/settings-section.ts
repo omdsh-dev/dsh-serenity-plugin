@@ -23,6 +23,7 @@ import z from '@deepseek-ai/schemastery'
 // 故经类型断言访问——升级 0.1.2-rc.1 后类型原生匹配（见 registerSettingsSection 实现注释）。
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
+import { hostSettings } from './host/access.js'
 
 /** 插件 Config 的简单配置片段（index.ts Config 组合；settings entry base） */
 export interface SimpleConfigFragment {
@@ -96,6 +97,14 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
 /** 运行时源（installSettingsSection 注入：settings scope 或 entry fallback） */
 let simpleSource: (() => SerenitySimpleSettings) | null = null
 
+/** 缺 settings provider 的告警去重（进程级一次；降级路径可能被多次注册调用） */
+let warnedNoSettingsProvider = false
+
+/** 测试辅助：重置"缺 settings provider"告警去重（生产零调用） */
+export function __resetSettingsWarningsForTest(): void {
+  warnedNoSettingsProvider = false
+}
+
 /** 进程级默认（无 settings 服务时的兜底） */
 export function defaultSimpleSettings(): SerenitySimpleSettings {
   return {
@@ -161,7 +170,7 @@ export function registerSettingsSection(ctx: Context, config: SimpleConfigFragme
       }
     },
   }
-  const settingsAny = (ctx as unknown as { settings?: unknown }).settings as
+  const settingsAny = hostSettings(ctx) as
     | {
         installSection: (owner: Context, ns: string, schema: unknown, entry: unknown, h: InstallSectionHooks<unknown>) => void
       }
@@ -178,7 +187,15 @@ export function registerSettingsSection(ctx: Context, config: SimpleConfigFragme
     )
     return
   }
-  // 无 settings provider → 降级：entry 为源（readSimpleSettings 兜底 defaultSimpleSettings）
+  // 无 settings provider → 降级：entry 为源（readSimpleSettings 兜底 defaultSimpleSettings）。
+  // S142 review F-07：此前是**静默**降级——用户改面板开关毫无反应且无任何线索。
+  // 降级本身正确（apply 不可抛），但必须响亮：面板不生效 + 所有开关回到 entry 默认值。
+  if (!warnedNoSettingsProvider) {
+    warnedNoSettingsProvider = true
+    console.warn(
+      '[serenity-hooks] ✗ settings 服务不可用 → 简单配置降级为 entry 默认值（面板开关/阈值改动不生效；检查宿主 settings provider 是否装载）',
+    )
+  }
   hooks.setSource(() => ({}) as unknown)
   hooks.onChange()
 }

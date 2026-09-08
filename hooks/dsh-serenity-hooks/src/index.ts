@@ -34,6 +34,7 @@ import { registerStatusApi } from './api.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS, findSerenityRoot } from './ccc.js'
+import { hostSessions, hostWebServer } from './host/access.js'
 import { probeHostContract, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './status.js'
 import { readSkiffRoles } from './skiff-role.js'
@@ -46,6 +47,7 @@ import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
 import { registerAutopilot } from './autopilot-trajectory.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
+import { registerLifecycle } from './seams/lifecycle.js'
 
 export const name = 'dsh-serenity-hooks'
 
@@ -183,6 +185,9 @@ export function apply(ctx: Context, config: Config): void {
   // F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置（serenity.json weixin + localstore 凭据）→
   // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。
   registerWeixinBridge(ctx)
+  // review F-08（v1.30.8）：生命周期——agent/session 销毁清理 per-会话状态 +
+  // 插件卸载/HMR 停掉自起资源（skiff 调试页/ACP/微信桥；否则端口占用与重复轮询）
+  registerLifecycle(ctx)
 }
 
 /**
@@ -231,7 +236,7 @@ function registerSkiff(ctx: Context): void {
 function resolveSkiffRoot(ctx: Context): string | null {
   const liveRoots: string[] = []
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
+    const sessions = hostSessions(ctx)
     for (const s of sessions?.list?.() ?? []) {
       const cwd = s?.header?.cwd
       if (typeof cwd === 'string') {
@@ -256,7 +261,7 @@ function resolveSkiffRoot(ctx: Context): string | null {
 /** 主 WebUI 端口（WebUI 链接；webServer 未装配回退 3080） */
 function readWebPort(ctx: Context): number {
   try {
-    const ws = (ctx as unknown as { webServer?: { port?: number } }).webServer
+    const ws = hostWebServer(ctx)
     return typeof ws?.port === 'number' ? ws.port : 3080
   } catch {
     return 3080

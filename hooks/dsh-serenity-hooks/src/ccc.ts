@@ -285,13 +285,42 @@ export function readUtf8(path: string): string {
   return readFileSync(path, 'utf-8').replace(/^\uFEFF/, '');
 }
 
+/**
+ * 已告警过的损坏配置路径（进程级去重：同一坏文件不刷屏，但绝不静默）。
+ * S142 review F-07：此前损坏 → 静默返回 `{}`——安全模式黑名单/handyman 白名单/skiff 角色
+ * 全部**无声失效**（用户以为配了，实际没配）。守卫的输入失败必须响亮。
+ */
+const warnedBrokenConfigs = new Set<string>()
+
+/** 测试辅助：清空"已告警"记忆（生产零调用） */
+export function __resetBrokenConfigWarningsForTest(): void {
+  warnedBrokenConfigs.clear()
+}
+
+/**
+ * 读取 CCC 配置（第一个存在且可解析的候选路径）。
+ *
+ * 失败语义（F-07）：文件存在但**解析失败** → 记录响亮告警（含路径与原因，每路径一次）
+ * 并返回 `{}`。选择 fail-open 而非抛错的理由：apply 期抛错 = 整个 dsh 启动失败
+ * （app-boot "plugin(s) failed to load"），而单个 CCC 配置损坏只应影响该 CCC 的功能降级；
+ * 告警 + `dashboard health` 让损坏可见可修。
+ * @param root CCC 根
+ * @param paths 候选相对路径（按序取第一个存在的）
+ * @returns 解析后的配置；无文件/损坏 → `{}`
+ */
 export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): SerenityConfig {
   for (const candidate of paths) {
     const p = resolve(root, candidate);
     if (!existsSync(p)) continue;
     try {
       return JSON.parse(readUtf8(p)) as SerenityConfig;
-    } catch {
+    } catch (err) {
+      if (!warnedBrokenConfigs.has(p)) {
+        warnedBrokenConfigs.add(p);
+        console.warn(
+          `[serenity-hooks] ✗ CCC 配置解析失败，已按空配置继续（该 CCC 的安全模式黑名单/handyman 白名单/skiff 角色等全部失效，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
+        );
+      }
       return {};
     }
   }

@@ -103,7 +103,10 @@ export function checkLocalstoreGitCompliance(root: string): { ok: boolean; reaso
 
 type StoreShape = Record<string, Record<string, string>>
 
-/** 读取全文件（顶层分节）；文件不存在/坏 JSON 返回空 */
+/** 已告警的坏 localstore 路径（进程级去重；F-07：凭据文件损坏不得静默） */
+const warnedBrokenStores = new Set<string>()
+
+/** 读取全文件（顶层分节）；文件不存在 → 空；**坏 JSON → 空 + 响亮告警**（每路径一次） */
 function readAll(root: string): StoreShape {
   const p = localstorePath(root)
   if (!existsSync(p)) return {}
@@ -111,9 +114,20 @@ function readAll(root: string): StoreShape {
     const v = JSON.parse(readFileSync(p, 'utf-8').replace(/^\uFEFF/, '')) as unknown
     if (v && typeof v === 'object' && !Array.isArray(v)) return v as StoreShape
     return {}
-  } catch {
+  } catch (err) {
+    if (!warnedBrokenStores.has(p)) {
+      warnedBrokenStores.add(p)
+      console.warn(
+        `[serenity-hooks] ✗ localstore 解析失败，已按空存储继续（其中凭据/配置对工具表现为"未设置"，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
+      )
+    }
     return {}
   }
+}
+
+/** 测试辅助：重置"坏 localstore"告警去重（生产零调用） */
+export function __resetBrokenStoreWarningsForTest(): void {
+  warnedBrokenStores.clear()
 }
 
 /** 写回全文件（2 空格缩进 + 尾换行，方便 MSM 直接读取） */

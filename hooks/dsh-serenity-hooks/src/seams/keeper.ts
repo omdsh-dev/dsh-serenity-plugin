@@ -14,6 +14,7 @@ import type { Context } from 'cordis'
 import type { PostToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
+import { hostService } from '../host/access.js'
 import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
 import { readSimpleSettings } from '../settings-section.js'
 import { skiffTrajectoryEnabled } from '../skiff-core.js'
@@ -107,9 +108,9 @@ export function readContextPressure(
   session: unknown,
 ): { projectedTokens: number; contextWindow: number | undefined } | null {
   try {
-    const projections = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionProjections')
+    const projections = hostService<{ snapshot?: (s: unknown) => { values?: Record<string, unknown> } }>(ctx, 'sessionProjections')
     if (!projections) return null
-    const snap = (projections as { snapshot?: (s: unknown) => { values?: Record<string, unknown> } }).snapshot?.(session)
+    const snap = projections.snapshot?.(session)
     const pressure = snap?.values?.contextPressure as { projectedTokens?: number; contextWindow?: number } | undefined
     if (!pressure || typeof pressure.projectedTokens !== 'number') return null
     return { projectedTokens: pressure.projectedTokens, contextWindow: pressure.contextWindow }

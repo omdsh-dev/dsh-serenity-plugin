@@ -22,6 +22,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { basename } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import { hostService, hostSessions } from './host/access.js'
 import { marked } from 'marked'
 import { readSkiffRoles } from './skiff-role.js'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffTrajectoryEntry } from './skiff-core.js'
@@ -86,9 +87,7 @@ export async function discoverCccs(ctx: Context, defaultRoot: string): Promise<S
   }
   // ① workspaceRegistry（DSH 持久化工作区注册表；list() 同步返回 Workspace[]，含 path）
   try {
-    const registry = (ctx as unknown as { get?: (name: string) => unknown }).get?.('workspaceRegistry') as
-      | { list?: () => Array<{ path?: string }> }
-      | undefined
+    const registry = hostService<{ list?: () => Array<{ path?: string }> }>(ctx, 'workspaceRegistry')
     for (const ws of registry?.list?.() ?? []) pushRoot(ws?.path)
   } catch {
     /* workspace 服务不可用忽略 */
@@ -96,9 +95,7 @@ export async function discoverCccs(ctx: Context, defaultRoot: string): Promise<S
   // ② sessionPersistence（持久化会话 headers——覆盖所有历史会话的工作目录）
   if (roots.length === 0) {
     try {
-      const sp = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionPersistence') as
-        | { list?: () => Promise<Array<{ cwd?: string }>> }
-        | undefined
+      const sp = hostService<{ list?: () => Promise<Array<{ cwd?: string }>> }>(ctx, 'sessionPersistence')
       for (const h of (await sp?.list?.()) ?? []) pushRoot(h?.cwd)
     } catch {
       /* sessionPersistence 不可用忽略 */
@@ -107,7 +104,7 @@ export async function discoverCccs(ctx: Context, defaultRoot: string): Promise<S
   // ③ live 会话兜底
   if (roots.length === 0) {
     try {
-      const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
+      const sessions = hostSessions(ctx)
       for (const s of sessions?.list?.() ?? []) pushRoot(s?.header?.cwd)
     } catch {
       /* 遍历失败忽略 */

@@ -24,6 +24,7 @@ import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine } from './skiff-core.js'
 import { getActiveSessionInfo } from './session-ops.js'
+import { hostSessions } from './host/access.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
@@ -395,7 +396,7 @@ export function weixinBridgeStatus(): Array<{
 export function registerWeixinBridge(ctx: Context): void {
   const syncFromLive = (): void => {
     try {
-      const sessions = (ctx.sessions as unknown as { list?: () => Array<{ header?: { cwd?: string } }> } | undefined)
+      const sessions = hostSessions(ctx)
       const cwds = (sessions?.list?.() ?? []).map((s) => s.header?.cwd ?? '').filter(Boolean)
       const roots = [...new Set(cwds.map((c) => findSerenityRoot(c))).values()].filter((r): r is string => r !== null)
       // 未配置的 CCC 不启动（syncCccBridge 内部判断 enabled）

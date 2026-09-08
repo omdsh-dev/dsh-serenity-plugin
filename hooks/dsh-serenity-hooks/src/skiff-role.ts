@@ -48,8 +48,11 @@ export function readSkiffRoles(root: string, paths: string[] = DEFAULT_SERENITY_
         systemPromptFile: typeof role.systemPromptFile === 'string' ? role.systemPromptFile : undefined,
       })
     }
-  } catch {
-    /* 配置读取失败 → 空（Skiff 不启用，零影响） */
+  } catch (err) {
+    /* 配置读取失败 → 空（Skiff 角色不启用 = 权限面 fail-closed）。
+     * F-07：失败必须可见——空角色集会让所有 skiff 会话被拒，静默会让人查不到原因。
+     * （loadSerenityConfig 内的 JSON 损坏已各自告警；此处兜住其余读取异常。） */
+    console.warn(`[serenity-hooks] ✗ skiff 角色配置读取失败（按无角色继续）: ${String((err as Error)?.message ?? err)}`)
   }
   return out
 }

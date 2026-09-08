@@ -67,17 +67,31 @@ function isClientBrowserFile(rel: string): boolean {
   return rel.startsWith('client/') && SKIP_CLIENT_SUFFIX.some((s) => rel.endsWith(s))
 }
 
-/** 全测试文件内容拼接（一次读，供引用检查） */
+/** 全测试文件内容拼接（一次读，供引用检查）——**递归**：src/host/access.ts 的镜像位于
+ *  tests/host/access.test.ts（v1.30.8：门禁原先只 readdir 顶层，嵌套测试目录对门禁不可见） */
 function allTestsContent(): string {
-  const files = readdirSync(TESTS_DIR).filter((f) => f.endsWith('.test.ts'))
-  return files.map((f) => readFileSync(join(TESTS_DIR, f), 'utf-8')).join('\n')
+  return collectTestFiles(TESTS_DIR).map((f) => readFileSync(join(TESTS_DIR, f), 'utf-8')).join('\n')
+}
+
+/** 递归收集测试文件（相对 TESTS_DIR 的路径，正斜杠） */
+function collectTestFiles(dir: string, base = dir): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    const full = join(dir, entry)
+    if (statSync(full).isDirectory()) {
+      out.push(...collectTestFiles(full, base))
+    } else if (entry.endsWith('.test.ts')) {
+      out.push(relative(base, full).split('\\').join('/'))
+    }
+  }
+  return out
 }
 
 describe('src↔tests 镜像一致性门禁（P2-2，防 src 模块无测试裸奔）', () => {
   const srcModules = collectSrcTs(SRC_DIR, SRC_DIR)
     .filter((rel) => !rel.startsWith('client/') || !isClientBrowserFile(rel))
     .filter((rel) => !rel.includes('client/')) // client api 有测试但浏览器 tsx 排除——按文件粒度在循环内判
-  const testFiles = readdirSync(TESTS_DIR).filter((f) => f.endsWith('.test.ts'))
+  const testFiles = collectTestFiles(TESTS_DIR)
   const testsContent = allTestsContent()
 
   const uncovered = srcModules.filter((rel) => {
@@ -85,9 +99,10 @@ describe('src↔tests 镜像一致性门禁（P2-2，防 src 模块无测试裸�
     if (rel.startsWith('client/') && /\.(tsx|css)$/.test(rel)) return false
     // 显式间接覆盖白名单（见 INDIRECT_COVERED 注释）
     if (INDIRECT_COVERED.has(rel.split('/').pop()!)) return false
-    // 镜像：tests/<basename>.test.ts
+    // 镜像：tests/<rel>.test.ts（含嵌套目录）或 tests/<basename>.test.ts（同目录约定）
     const base = rel.split('/').pop()!.replace(/\.ts$/, '')
-    const mirror = testFiles.some((f) => f === `${base}.test.ts`)
+    const mirrorRel = rel.replace(/\.ts$/, '.test.ts')
+    const mirror = testFiles.some((f) => f === mirrorRel || f === `${base}.test.ts`)
     if (mirror) return false
     // 间接：模块 basename 出现在任一测试 import（匹配 src 路径引用各形态：
     // `../src/x.js`（跨目录）/ `./x.js`（同目录兄弟）/ `src/tools/x.js` 等）

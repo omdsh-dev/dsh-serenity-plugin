@@ -18,6 +18,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from 'cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import { hostService } from '../host/access.js'
 import type { JsonValue } from '../json.js'
 import { join } from 'node:path'
 import { findSerenityRoot } from '../ccc.js'
@@ -181,7 +182,7 @@ export function renameDshSessionForActive(
   try {
     // v1.23.2：传整个 sessionTitle 服务对象（不解构 rename 函数）——
     // 旧实现 `titles.rename` 解构后传裸函数，方法内部 this=undefined 抛错
-    const titles = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionTitle')
+    const titles = hostService(ctx, 'sessionTitle')
     const dshSession = exec.agent?.session
     if (!dshSession) {
       console.warn(`[serenity-hooks] dsh 会话重命名未执行: 缺少 agent session（info: ${info.sessionId}）`)

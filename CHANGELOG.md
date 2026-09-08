@@ -1,3 +1,30 @@
+## v1.30.8 — 2026-09-08（review 修复轮 2b：宿主访问收口 + 生命周期/竞速 + 失败策略，S142）
+
+**Scope:** review 轮 2b——用户"把 2b 也做掉，不留问题"。三条线：**F-06 宿主访问收口**（唯一读取入口）、**F-08 生命周期**（销毁订阅 + 资源拆卸 + 等待竞速）、**F-07 失败策略**（守卫输入失败必须响亮 + 空 catch 必须点名）。
+
+### F-06 宿主访问收口 `src/host/access.ts`
+- **唯一读取入口**：`hostService` / `hostInjected` / `hostSessions` / `hostAgents` / `hostWebServer` / `hostSettings` / `hostSessionCwds`——所有 `ctx.get` / `ctx.<service>` 的形状断言集中在此，**服务缺失一律返回 `undefined` 且不抛错**（宿主对插件 apply 抛错 = 整个 dsh 启动失败，访问层不能成为单点）
+- **调用点迁移**：keeper / api / gateway / rebuild / skiff-debug / tools/session / index / weixin-bridge / skiff-core / autopilot-trajectory / settings-section；`host/contract.ts` 的 `readService` 改为复用本模块
+- **残留裸读清零**：`gateway.ts` 的 `(ctx as unknown as {get}).get('webServer')` → `hostWebServer(ctx)`
+- **镜像测试** `tests/host/access.test.ts` 7 用例：服务缺失/`get` 抛错/属性与 `get` 两级回落/形状不符 → 空数组，逐条钉死降级契约
+
+### F-08 生命周期与竞速
+- **销毁订阅** `src/seams/lifecycle.ts`：订阅 `agent/disposed` / `session/disposed`（宿主实证 `core/agent/src/runtime-types.ts:175`、`core/session/src/index.ts:62`）→ `cleanupSessionState`（skiff 注册表 + 活跃 SESSION 作用域）；此前约 10 处 per-会话 Map 在长跑进程里只增不减
+- **资源拆卸** `src/host/effect.ts`（新，零依赖叶模块）：`registerDisposer(ctx, label, cleanup)`——`ctx.effect` 缺失 → **响亮降级**（告警 + 同标签去重 + 返回 false），装配期永不抛错
+  - 已登记：gateway 第二监听器（此前卸载后端口占用 → EADDRINUSE）、autopilot 时钟（此前卸载后旧定时器仍 tick）、lifecycle 聚合资源（skiff 调试页 / ACP / 微信桥）
+- **等待竞速** `src/agent-idle.ts`（新）：`waitAgentIdle` 三通道结算——`agent/status idle` / `agent/disposed` / `session/disposed` + 订阅后状态兜底。此前 skiff 问答与 handyman 各复制一份"只等 idle"的实现，**agent 先销毁则永久挂死**；两处重复实现收敛到本模块
+
+### F-07 失败策略
+- **P0 守卫/配置输入失败 → 响亮**：`ccc.loadSerenityConfig`（坏 JSON 不再静默 `{}`——安全模式黑名单/handyman 白名单/skiff 角色曾无声失效）、`localstore-ops.readAll`（凭据表现为"未设置"）、`skiff-role.readSkiffRoles`（权限面保持 fail-closed 但可见）、`settings-section`（缺 settings provider 不再静默降级，warnOnce）
+- **策略文档** `docs/failure-policy.md`：四类失败（P0 守卫输入 / P1 可选宿主服务 / P2 尽力而为清理 / P3 边界翻译）与各自义务 + 硬规则（apply 永不抛错、生命周期一律吞错但留注释、去重告警 + 测试钩子）
+- **机械门禁** `tests/failure-policy.test.ts`：src 下每个 **空 catch 必须含注释**（点名吞掉了什么），违规列出 `文件:行`；含扫描器自证用例（防空跑）。审计结论：190+ 处 catch 中空 catch 全部已命名，本轮补齐 4 处 P0 的响亮告警
+- **测试替身保真**：`register.test.ts` 的 `mockCtx` 补 `effect`（宿主确有该成员，缺它会让 F-08 装配在测试里被误判）
+
+### 验证
+- **68 files / 963 tests 全绿**（933 → 963）+ typecheck 双面 ✓ + build ✓
+- **coverage 门禁递归化**：`coverage-gate.test.ts` 原先只 `readdir` 顶层 → 嵌套测试目录（`tests/host/*`、`tests/seams/*`）对门禁不可见；改递归后新捕获 `seams/lifecycle.ts` 裸奔并补齐镜像测试
+- **⏸ 未发布**：bump/publish 待用户显式指令（D14）
+
 ## v1.30.7 — 2026-09-08（review 修复轮 2：宿主契约层 + 编译期事件契约 + 发布门禁/CI，S142）
 
 **Scope:** review（`docs/dsp-implementation-review.md`）轮 2 —— 针对"契约无单一拥有者 + 验证镜像自身假设"这两条系统性根因，建立**可执行的契约守卫**。用户拍板"直接开轮 2"。

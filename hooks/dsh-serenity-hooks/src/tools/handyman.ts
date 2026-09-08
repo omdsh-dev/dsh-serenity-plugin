@@ -12,7 +12,7 @@
  *
  * 机制：ctx.agents.create()（带 setup 钩子）创建专用 agent（进程内），
  * 每轮 followup → agent/status idle → 读 session.events 响应 → 写进度 → stop token 检查 →
- * 未完成继续下一轮；followup/waitIdle 抛错（非正常停止）→ dispose 并重新 create agent
+ * 未完成继续下一轮；followup/等待空闲抛错（非正常停止）→ dispose 并重新 create agent
  * （重启计数，≤100），同一轮重试。工厂模式：apply 时闭包捕获插件 ctx（工具 execute 无 ctx 参数）。
  *
  * preset 继承 + 工具收窄：setup 钩子里对子 agent 执行 agentPresets.composeFrom（对齐
@@ -44,6 +44,7 @@ import {
   writeProgress,
 } from '../handyman-ops.js'
 import type { JsonValue } from '../json.js'
+import { waitAgentIdle } from '../agent-idle.js'
 
 function agentCwd(exec: ToolRunContext): string {
   return (exec.agent?.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
@@ -52,22 +53,6 @@ function agentCwd(exec: ToolRunContext): string {
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
   return [{ type: 'text', text }]
-}
-
-/** 等待 agent 空闲（agent/status → idle）；无超时（handyman 可永续，agent 工作多久等多久） */
-function waitIdle(ctx: Context, agent: Agent): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false
-    const finish = (): void => {
-      if (settled) return
-      settled = true
-      dispose()
-      resolve()
-    }
-    const dispose = ctx.on('agent/status', (payload: { agent: Agent; status: string }) => {
-      if (payload.agent === agent && payload.status === 'idle') finish()
-    })
-  })
 }
 
 /** 读取会话最后一个 assistant/message 文本 */
@@ -200,7 +185,7 @@ async function runHandymanJob(
       const prompt = buildRoundPrompt({ root, session, label, round, stopToken, progress, task: job.task })
       try {
         workerAgent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-serenity-hooks' } }))
-        await waitIdle(ctx, workerAgent)
+        await waitAgentIdle(ctx, workerAgent)
         lastResponse = lastAssistantText(workerAgent)
       } catch {
         // 非正常停止：重启 agent（≤ HANDYMAN_MAX_RESTARTS 次）后重试同一轮，不消耗对话轮号

@@ -37,6 +37,8 @@ import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutopilotTraj
 import { findSession, sessionsRoot, sessionEvents } from './session-ops.js'
 import { readLastBound } from './session-bound.js'
 import { readSimpleSettings } from './settings-section.js'
+import { hostAgents, hostSessions } from './host/access.js'
+import { registerDisposer } from './host/effect.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -394,6 +396,14 @@ export function registerAutopilot(ctx: Context): void {
   } catch {
     /* 事件通道缺失不阻断（用户可重启 web 生效） */
   }
+  // ④ F-08（v1.30.8）：插件卸载/HMR → 停掉时钟。此前 timer 无人拆卸——profile 重载后
+  //    旧定时器仍在 tick（重复唤起 + 内存泄漏），且 clearInterval 只能靠进程退出。
+  registerDisposer(ctx, 'autopilot 时钟', () => {
+    if (timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  })
 }
 
 /**
@@ -414,8 +424,8 @@ function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
   const idMatch = dirName.match(/--S(\d{3,})--/)
   const sid = idMatch ? `S${idMatch[1]}` : null
   const targetRoot = findSerenityRoot(mdPath)
-  const sessions = (ctx as unknown as { sessions?: { list?: () => Array<unknown> } }).sessions
-  const agents = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents
+  const sessions = hostSessions(ctx)
+  const agents = hostAgents(ctx)
   // 候选池：{ session, boundAt|null, titleMatched } —— bound 命中优先，其次标题命中
   type Candidate = { session: { id?: string }; boundAt: number | null; titleMatched: boolean }
   const candidates: Candidate[] = []
@@ -448,7 +458,7 @@ function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
     return (b.boundAt ?? 0) - (a.boundAt ?? 0)
   })
   for (const c of candidates) {
-    const agent = agents?.get?.(c.session.id ?? '')
+    const agent = agents?.get?.(c.session.id ?? '') as Agent | undefined
     if (agent) return agent
   }
   return null
@@ -488,7 +498,7 @@ function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null 
   const sameCccTitles: string[] = []
   const agentMissing = { matched: false }
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<unknown> } }).sessions
+    const sessions = hostSessions(ctx)
     for (const s of sessions?.list?.() ?? []) {
       const sess = s as { id?: string; header?: { cwd?: string } }
       const cwd = sess?.header?.cwd ?? ''
@@ -503,7 +513,7 @@ function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null 
       const boundMatched = bound !== null && bound.dirName === dirName
       const titleMatched = sid !== null && title !== null && (title === sid || title.startsWith(`${sid}-`))
       if (boundMatched || titleMatched) {
-        const agent = (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(sess.id ?? '')
+        const agent = hostAgents(ctx)?.get?.(sess.id ?? '') as Agent | undefined
         if (!agent) agentMissing.matched = true
       }
     }
@@ -522,7 +532,7 @@ function resolveAutopilotRoot(ctx: Context): string | null {
   const fromCwd = findSerenityRoot(process.cwd())
   if (fromCwd) return fromCwd
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ header?: { cwd?: string } }> } }).sessions
+    const sessions = hostSessions(ctx)
     for (const s of sessions?.list?.() ?? []) {
       const r = findSerenityRoot(s?.header?.cwd ?? '')
       if (r) return r
@@ -623,7 +633,7 @@ export interface LiveSessionEntry {
 export function listLiveSessions(ctx: Context): LiveSessionEntry[] {
   const out: LiveSessionEntry[] = []
   try {
-    const sessions = (ctx as unknown as { sessions?: { list?: () => Array<{ id?: string; header?: { cwd?: string } }> } }).sessions
+    const sessions = hostSessions(ctx)
     for (const s of sessions?.list?.() ?? []) {
       const cwd = s?.header?.cwd ?? null
       out.push({

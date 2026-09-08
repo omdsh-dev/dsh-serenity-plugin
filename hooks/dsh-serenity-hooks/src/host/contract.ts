@@ -21,6 +21,7 @@
  */
 
 import type { Events } from 'cordis'
+import { hostInjected, hostService } from './access.js'
 
 export type HostAccess = 'injected' | 'lazy'
 
@@ -281,13 +282,7 @@ export function checkHostVersion(version: string | null): { ok: boolean; detail:
 
 /** 结构化读取宿主服务（lazy → ctx.get；injected → 直接属性，属性缺失再试 ctx.get） */
 function readService(ctx: unknown, name: string, access: HostAccess): unknown {
-  const c = ctx as { get?: (n: string) => unknown } & Record<string, unknown>
-  if (access === 'lazy') {
-    return typeof c?.get === 'function' ? c.get(name) : undefined
-  }
-  const direct = c?.[name]
-  if (direct !== undefined) return direct
-  return typeof c?.get === 'function' ? c.get(name) : undefined
+  return access === 'lazy' ? hostService(ctx, name) : hostInjected(ctx, name)
 }
 
 /**

@@ -61,8 +61,11 @@ function mockCtx() {
   const register = vi.fn(() => () => {})
   const guard = vi.fn()
   const on = vi.fn()
-  const ctx = { tools: { register, guard }, on } as any
-  return { ctx, register, guard, on }
+  // v1.30.8（review F-08）：宿主 Context 有 ctx.effect（rc.1 全量使用，如 core/tools/src/index.ts:943）
+  // ——替身必须保真，否则 lifecycle 装配在测试里被误判为"缺失"（E-01 同族：替身不镜像宿主）。
+  const effect = vi.fn(() => () => {})
+  const ctx = { tools: { register, guard }, on, effect } as any
+  return { ctx, register, guard, on, effect }
 }
 
 const FULL_CONFIG: Config = {
@@ -102,6 +105,30 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     const events = on.mock.calls.map((c) => c[0] as string)
     expect(events).toContain('tools/pre-execute')
     expect(guard).toHaveBeenCalledTimes(1)
+  })
+
+  it('v1.30.8 F-08：apply 装配生命周期（agent/session disposed 订阅 + 各资源 ctx.effect 拆卸）', () => {
+    const { ctx, on, effect } = mockCtx()
+    apply(ctx, FULL_CONFIG)
+    const events = on.mock.calls.map((c) => c[0] as string)
+    expect(events).toContain('agent/disposed')
+    expect(events).toContain('session/disposed')
+    // 三处自起资源各自登记拆卸：gateway 第二监听器 / autopilot 时钟 / lifecycle 聚合资源
+    const labels = effect.mock.calls.map((c) => String(c[1]))
+    expect(labels).toHaveLength(3)
+    expect(labels.join('|')).toContain('gateway')
+    expect(labels.join('|')).toContain('autopilot')
+    expect(labels.join('|')).toContain('self-started resources')
+  })
+
+  it('v1.30.8 F-08：ctx.effect 缺失 → 响亮降级不抛错（apply 不可成为启动单点）', () => {
+    const { ctx, register } = mockCtx()
+    delete (ctx as { effect?: unknown }).effect
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(() => apply(ctx, FULL_CONFIG)).not.toThrow()
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('ctx.effect 不可用'))).toBe(true)
+    warn.mockRestore()
+    expect(register).toHaveBeenCalledTimes(10) // 其余装配不受影响
   })
 
   it('config 开关控制注册项', () => {

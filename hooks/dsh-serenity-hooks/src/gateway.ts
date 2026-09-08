@@ -31,6 +31,7 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from './config-ops.js'
 import { findSerenityRoot } from './ccc.js'
 import { readSimpleSettings } from './settings-section.js'
+import { registerDisposer } from './host/effect.js'
 import { verifyTotpCode } from './totp.js'
 import {
   loginPageHtml,
@@ -58,6 +59,7 @@ import {
   transformHtmlForProxy,
 } from './gateway-proxy.js'
 import { createDshCookieProvider, mergeCookieHeader, type DshCookieProvider } from './gateway-dsh-auth.js'
+import { hostService, hostWebServer } from './host/access.js'
 
 // re-export 认证域 + 代理域（兼容既有 import 面；gateway-auth/gateway-proxy 为权威定义）
 export {
@@ -554,9 +556,7 @@ function buildDshCookieProvider(ctx: Context, mainPort: number): DshCookieProvid
   let diagnosed = false
   return () => {
     try {
-      const connection = (ctx as unknown as { get?: (name: string) => unknown }).get?.('connection') as
-        | { authenticatedUrl?: (baseUrl: string) => string; authorizeIndex?: (req: unknown, res: unknown) => boolean }
-        | undefined
+      const connection = hostService<{ authenticatedUrl?: (baseUrl: string) => string; authorizeIndex?: (req: unknown, res: unknown) => boolean }>(ctx, 'connection')
       if (!connection || typeof connection.authenticatedUrl !== 'function' || typeof connection.authorizeIndex !== 'function') {
         if (!diagnosed) {
           diagnosed = true
@@ -595,9 +595,8 @@ export function registerGateway(ctx: Context): void {
 
   const sync = (): void => {
     try {
-      const webServer = (ctx as unknown as { get?: (name: string) => unknown }).get?.('webServer') as
-        | { port?: number }
-        | undefined
+      // F-06：宿主访问收口——原先此处裸写 (ctx as unknown as {get}).get('webServer')
+      const webServer = hostWebServer(ctx)
       if (!webServer?.port) return
 
       const enabled = readSimpleSettings().gatewayEnabled
@@ -677,5 +676,13 @@ export function registerGateway(ctx: Context): void {
   // （不强制 lastSig=null——无实质变化的设置（如阈值拖动）不重建，避免无谓断 WS）
   ctx.on('serenity/settings-changed', () => {
     sync()
+  })
+
+  // F-08（v1.30.8）：插件卸载/HMR → 关掉第二监听器。此前 gateway 自起的 server 无人拆卸，
+  // profile 重载/HMR 后旧端口仍被占用（EADDRINUSE）→ 新实例起不来。
+  registerDisposer(ctx, 'gateway 第二监听器', () => {
+    current?.dispose()
+    current = null
+    lastSig = null
   })
 }

@@ -22,6 +22,8 @@ import { splitModel } from './handyman-ops.js'
 import { skiffRoleFor as registryRoleFor, skiffSessionInfo as registrySessionInfo, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
 import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './session-ops.js'
 import { readLastBound, appendBound } from './session-bound.js'
+import { hostAgents } from './host/access.js'
+import { waitAgentIdle } from './agent-idle.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -245,7 +247,7 @@ export async function createSkiffAgent(
 /** 取 live agent（DSH 文档：`ctx.agents.get(id)` 返回 bare Agent；会话 live 时 resume/create 均不可用） */
 function getLiveAgent(ctx: Context, id: string): Agent | undefined {
   try {
-    return (ctx as unknown as { agents?: { get?: (id: string) => Agent | undefined } }).agents?.get?.(id)
+    return hostAgents(ctx)?.get?.(id) as Agent | undefined
   } catch {
     return undefined
   }
@@ -358,24 +360,6 @@ export interface SkiffAskResult {
   trajectory: SkiffTrajectoryEntry[]
 }
 
-/** 等待 agent 空闲（agent/status → idle）；无超时（agent 工作多久等多久，handyman 同款） */
-function waitIdle(ctx: Context, agent: Agent): Promise<void> {
-  return new Promise((resolve) => {
-    let settled = false
-    // dispose 先声明后赋值：ctx.on 可能同步触发回调（测试 fake），TDZ 会导致 finish 访问未初始化
-    let dispose: () => void = () => {}
-    const finish = (): void => {
-      if (settled) return
-      settled = true
-      dispose()
-      resolve()
-    }
-    dispose = ctx.on('agent/status', (payload: { agent: Agent; status: string }) => {
-      if (payload.agent === agent && payload.status === 'idle') finish()
-    })
-  })
-}
-
 /**
  * 会话事件读取（v1.28.0 适配 0.1.2-rc.1）：rc.1 Session 移除 `.events` 属性 → `snapshotEvents()` 方法。
  * 兼容双形态（运行时 rc.1 snapshotEvents；测试替身 events）——同一函数两处语义，测试注入零侵入。
@@ -458,7 +442,7 @@ export async function askSkiff(
 ): Promise<SkiffAskResult> {
   const before = eventsStart === undefined ? sessionEvents(agent.session).length : eventsStart
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
-  await waitIdle(ctx, agent)
+  await waitAgentIdle(ctx, agent)
   const answer = lastAssistantText(agent)
   const trajectory =
     options?.includeTrajectory === false ? [] : eventsToTrajectory(sessionEvents(agent.session).slice(before))

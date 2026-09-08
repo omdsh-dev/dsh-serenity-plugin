@@ -17,6 +17,7 @@ import { extname, join } from 'node:path'
 // 类型引用：拉入 webserver / session 包的 cordis 声明增强（ctx.webServer / ctx.sessions）；运行时擦除
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import { hostService, hostSessions } from './host/access.js'
 import { getStatus, setSafeMode } from './status.js'
 import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { listActiveHandymen } from './handyman-ops.js'
@@ -160,14 +161,12 @@ export function resolveWorkspaceCore(
 function resolveWorkspace(ctx: Context, params: { sessionId?: string; workspace?: string }): string {
   let sessionCwd: string | undefined
   if (params.sessionId) {
-    const session = (ctx.sessions as { get?: (id: SessionId) => { header?: { cwd?: string } } | undefined } | undefined)?.get?.(params.sessionId as SessionId)
+    const session = hostSessions(ctx)?.get?.(params.sessionId as SessionId)
     sessionCwd = session?.header?.cwd
   }
   let listCwds: () => string[] = () => []
   try {
-    const sessions = (ctx.sessions as unknown as {
-      list?: () => Array<{ header?: { cwd?: string } }>
-    } | undefined)
+    const sessions = hostSessions(ctx)
     if (typeof sessions?.list === 'function') {
       listCwds = () => sessions.list!().map((s) => s.header?.cwd ?? '').filter(Boolean)
     }
@@ -332,9 +331,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           const settings = readAdvancedSettings()
           let known: Array<{ path: string; title: string }> = []
           try {
-            const registry = (ctx as unknown as { get?: (name: string) => unknown }).get?.('workspaceRegistry') as
-              | { list?: () => Array<{ path?: string; title?: string }> }
-              | undefined
+            const registry = hostService<{ list?: () => Array<{ path?: string; title?: string }> }>(ctx, 'workspaceRegistry')
             known = projectKnownWorkspaces(registry?.list?.() ?? [], settings.gateway.workspaces)
           } catch {
             /* workspace 服务不可用 → 空列表（面板显示"暂无可选工作区"） */

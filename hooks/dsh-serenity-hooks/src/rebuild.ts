@@ -44,6 +44,7 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message, MessageSource } from '@deepseek-ai/dsh-llm'
+import { hostService } from './host/access.js'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { findSerenityRoot } from './ccc.js'
@@ -369,9 +370,7 @@ function renameAfterRebuild(ctx: Context, agent: Agent, pending: PendingRebuild)
     const sessionId = idMatch ? `S${idMatch[1]}` : dirName.replace(/^\d{4}-\d{2}-\d{2}--/, '')
     const info = { sessionId, dirName, mdPath }
     const title = namingTitleFor(info, pending.summary)
-    const titles = (ctx as unknown as { get?: (name: string) => unknown }).get?.('sessionTitle') as
-      | { rename?: (session: unknown, title: string) => unknown }
-      | undefined
+    const titles = hostService<{ rename?: (session: unknown, title: string) => unknown }>(ctx, 'sessionTitle')
     if (!titles || typeof titles.rename !== 'function') {
       console.warn('[serenity-hooks] rebuild 后重命名跳过: sessionTitle 服务不可用')
       return
@@ -411,9 +410,7 @@ export function registerRebuildTurnHook(ctx: Context): void {
     pendingRebuilds.delete(id)
     try {
       // tokenMeter 可选（DSH 装配通常有；缺失时退化——无 shadow-price 仅计量漂移）
-      const tokenMeter = (ctx as unknown as { get?: (name: string) => unknown }).get?.('tokenMeter') as
-        | { estimateMessage?: (message: Message) => number }
-        | undefined
+      const tokenMeter = hostService<{ estimateMessage?: (message: Message) => number }>(ctx, 'tokenMeter')
       const meter =
         tokenMeter && typeof tokenMeter.estimateMessage === 'function'
           ? { estimateMessage: (m: Message) => tokenMeter.estimateMessage!(m) }
