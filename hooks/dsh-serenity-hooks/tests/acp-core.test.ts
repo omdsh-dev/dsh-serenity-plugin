@@ -75,9 +75,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-/** fake ctx：agents.create 产生带 followup/interrupt 的 fake agent；on 立即触发 idle */
+/** fake ctx：agents.create 产生带 followup/cancel 的 fake agent；on 立即触发 idle */
 function fakeCtx(events: unknown[] = []): { agents: { create: (opts: { sessionId: string }) => Promise<unknown> }; on: () => () => void } {
-  let agent: { session: { id: string; events: unknown[] }; followup: () => void; interrupt?: () => void } | undefined
+  let agent: { session: { id: string; events: unknown[] }; followup: () => void; cancel: (cause: { kind: string }) => void } | undefined
   return {
     agents: {
       // sessionId 尊重传入值（真实 DSH agents.create 行为；v1.25.10 追问延续依赖注册表 key 一致）
@@ -90,7 +90,9 @@ function fakeCtx(events: unknown[] = []): { agents: { create: (opts: { sessionId
               { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'a' }] } } },
             )
           },
-          interrupt: () => { events.push({ type: 'user/message', data: { content: [{ type: 'text', text: '[cancelled]' }] } }) },
+          // v1.30.6（review F-02）：宿主 Agent 只有 cancel(cause)，没有 interrupt——
+          // 替身必须镜像真实成员，否则测试会“认证”一个不存在的调用。
+          cancel: () => { events.push({ type: 'user/message', data: { content: [{ type: 'text', text: '[cancelled]' }] } }) },
         }
         return { agent }
       },
@@ -188,7 +190,7 @@ describe('acp-core: session/prompt / cancel / close / list', () => {
     await expect(server.handle('session/prompt', { sessionId: 'x' })).rejects.toThrow(RpcInvalidParams)
   })
 
-  it('cancel 已注册会话 → interrupt 调用（cancelled:true）；未知会话 → no-op', async () => {
+  it('cancel 已注册会话 → Agent.cancel 调用（cancelled:true）；未知会话 → no-op', async () => {
     const events: unknown[] = []
     const ctx = fakeCtx(events)
     const server = new AcpServer(ctx as never)

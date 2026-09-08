@@ -82,6 +82,40 @@ export function workspaceDenyResponse(rpcId: string): string {
   })
 }
 
+/**
+ * 判定 workspace 创建请求的端点（v1.30.6，review F-03）。
+ *
+ * 宿主 rc.1 的 Remote 端点由 `typertEndpoint({namespace,method})` 派生为
+ * `workspace/create`，因此浏览器实际请求 `POST /api/workspace/create`
+ * （packages/typert/registry/src/service.ts:63-69；client/connection/src/client/rpc.ts:44）。
+ * 旧实现只匹配 `/api/workspace.create` → 该分支从未命中，外部白名单与禁建校验失效。
+ * 保留旧端点以兼容旧宿主。
+ */
+export function isWorkspaceCreatePath(pathname: string): boolean {
+  return pathname === '/api/workspace/create' || pathname === '/api/workspace.create'
+}
+
+/**
+ * 从 workspace 创建请求体解析 `{ rpcId, path }`（v1.30.6，review F-03）。
+ *
+ * rc.1 wire 信封：`{ type:'client-request', rpcId, method:'workspace/create',
+ * payload:{ args:{ path } } }`（packages/api/gateway/src/index.ts:955 `args: payload.args`）；
+ * 旧宿主为 `payload.path`。解析失败返回 rpcId='unknown' + path=undefined。
+ */
+export function parseWorkspaceCreateBody(body: string): { rpcId: string; path?: string } {
+  try {
+    const parsed = JSON.parse(body) as {
+      rpcId?: unknown
+      payload?: { path?: unknown; args?: { path?: unknown } }
+    }
+    const rpcId = typeof parsed.rpcId === 'string' ? parsed.rpcId : 'unknown'
+    const raw = parsed.payload?.args?.path ?? parsed.payload?.path
+    return typeof raw === 'string' ? { rpcId, path: raw } : { rpcId }
+  } catch {
+    return { rpcId: 'unknown' }
+  }
+}
+
 import * as zlib from 'node:zlib'
 
 /**

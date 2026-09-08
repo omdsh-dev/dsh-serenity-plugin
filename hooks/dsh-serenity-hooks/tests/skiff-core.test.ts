@@ -23,6 +23,7 @@ import {
 } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX, type SkiffRoleConfig } from '../src/skiff-role.js'
 import { getActiveSessionInfo, resetActiveSessionStore } from '../src/session-ops.js'
+import { readLastBound } from '../src/session-bound.js'
 
 let dir: string
 
@@ -451,10 +452,11 @@ describe('skiff-core: askSkiff 会话核心', () => {
 })
 
 describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户拍板：自动创建/恢复/per 用户隔离）', () => {
-  /** fake agent：session 支持 append（bound 持久化 push 进 events）+ id */
-  function sessionAgent(id: string, events: unknown[] = []): { session: { id: string; events: unknown[]; append: (t: string, d: unknown) => void }; followup: () => void } {
+  /** fake agent：session 带 header（真实 Session 形态——绑定文件经 cwd 定位 CCC 根）+ events 记录 */
+  function sessionAgent(id: string, events: unknown[] = []): { session: { id: string; header: { id: string; cwd: string }; events: unknown[]; append: (t: string, d: unknown) => void }; followup: () => void } {
     const s = {
       id,
+      header: { id, cwd: dir },
       events,
       append: (t: string, d: unknown) => {
         events.push({ type: t, data: d })
@@ -480,8 +482,8 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     // 激活（scope = skiff 会话 id）
     const active = getActiveSessionInfo(agent.session.id)
     expect(active?.mdPath).toBe(mdPath)
-    // bound 持久化（note auto-created 标记）
-    expect(agent.session.events.some((e) => e.type === 'serenity/bound' && e.data?.note?.startsWith('auto-created for skiff role'))).toBe(true)
+    // bound 持久化（note auto-created 标记；v1.30.6 起写 CCC 内 .bindings.json）
+    expect(readLastBound(agent.session)?.note?.startsWith('auto-created for skiff role')).toBe(true)
   })
 
   it('已有 auto-created bound → 恢复不重复建（幂等）', () => {
@@ -501,7 +503,7 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     const mdPath = ensureSkiffSession(dir, agent as never, 'qa', noSessionRole())
     expect(mdPath).toBeNull()
     expect(getActiveSessionInfo(agent.session.id)).toBeNull()
-    expect(agent.session.events.some((e) => e.type === 'serenity/bound')).toBe(false)
+    expect(readLastBound(agent.session)).toBeNull()
     expect(existsSync(join(dir, 'AGENT_SESSIONS'))).toBe(false)
   })
 
@@ -514,9 +516,9 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     // 各自激活隔离
     expect(getActiveSessionInfo('skiff-weixin-user-a')?.mdPath).toBe(mdA)
     expect(getActiveSessionInfo('skiff-weixin-user-b')?.mdPath).toBe(mdB)
-    // 各自 bound
-    expect(userA.session.events.filter((e) => e.type === 'serenity/bound')).toHaveLength(1)
-    expect(userB.session.events.filter((e) => e.type === 'serenity/bound')).toHaveLength(1)
+    // 各自 bound（文件记录，按会话 id 隔离）
+    expect(readLastBound(userA.session)?.mdPath).toBe(mdA)
+    expect(readLastBound(userB.session)?.mdPath).toBe(mdB)
   })
 
   it('旧手工 bound（S159，note 非 auto-created）→ 不认，新建专属 SESSION（S159 退役语义）', () => {

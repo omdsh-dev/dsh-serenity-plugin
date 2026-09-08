@@ -52,6 +52,8 @@ import {
   filterWorkspaceList,
   workspaceAllowed,
   workspaceDenyResponse,
+  isWorkspaceCreatePath,
+  parseWorkspaceCreateBody,
   buildProxyHeaders,
   transformHtmlForProxy,
 } from './gateway-proxy.js'
@@ -64,6 +66,8 @@ export {
   filterWorkspaceList,
   workspaceAllowed,
   workspaceDenyResponse,
+  isWorkspaceCreatePath,
+  parseWorkspaceCreateBody,
   buildProxyHeaders,
   transformHtmlForProxy,
 } from './gateway-proxy.js'
@@ -272,36 +276,23 @@ export function startGateway(
     // 已登录 → 全量反代（含 /serenity/* 配置接口——第二端口登录后同样可管理）
     const session = authed(req)
     if (session !== undefined) {
-      // workspace.create：① 外部新建开关（allowWorkspaceCreate=false → 一律拒绝）
+      // workspace 创建：① 外部新建开关（allowWorkspaceCreate=false → 一律拒绝）
       // ② 白名单校验（读 body → 检查路径 → 转发或拒绝）
-      if (req.method === 'POST' && url.pathname === '/api/workspace.create') {
-        if (!allowWorkspaceCreate) {
-          void readBody(req, 128 * 1024).then((body) => {
-            let rpcId = 'unknown'
-            try {
-              const parsed = JSON.parse(body) as { rpcId?: unknown }
-              if (typeof parsed.rpcId === 'string') rpcId = parsed.rpcId
-            } catch { /* 解析失败 → 用 unknown */ }
+      // v1.30.6（review F-03）：端点与信封按宿主 rc.1 修正——旧实现匹配
+      // `/api/workspace.create` + `payload.path`，而 rc.1 是 `/api/workspace/create`
+      // + `payload.args.path`，导致该分支从未命中、白名单与禁建校验完全失效。
+      if (req.method === 'POST' && isWorkspaceCreatePath(url.pathname)) {
+        void readBody(req, 128 * 1024).then((body) => {
+          const { rpcId, path } = parseWorkspaceCreateBody(body)
+          if (!allowWorkspaceCreate) {
             res.writeHead(403, { 'content-type': 'application/json' })
             res.end(JSON.stringify({
               type: 'server-response',
               rpcId,
               result: { ok: false, error: { code: 'forbidden', message: 'workspace creation disabled for external access', details: {} } },
             }))
-          }).catch(() => {
-            res.writeHead(400, { 'content-type': 'application/json' })
-            res.end(JSON.stringify({ type: 'server-response', rpcId: 'unknown', result: { ok: false, error: { code: 'bad-request', message: 'body too large', details: {} } } }))
-          })
-          return
-        }
-        void readBody(req, 128 * 1024).then((body) => {
-          let rpcId = 'unknown'
-          let path: string | undefined
-          try {
-            const parsed = JSON.parse(body) as { rpcId?: unknown; payload?: { path?: unknown } }
-            if (typeof parsed.rpcId === 'string') rpcId = parsed.rpcId
-            if (typeof parsed.payload?.path === 'string') path = parsed.payload.path
-          } catch { /* 解析失败 → 放行（主端口会 400） */ }
+            return
+          }
           if (!workspaceAllowed(allowWorkspaces, path)) {
             res.writeHead(403, { 'content-type': 'application/json' })
             res.end(workspaceDenyResponse(rpcId))

@@ -177,16 +177,19 @@ export class AcpServer {
     return { answer: result.answer, sessionId: result.sessionId }
   }
 
-  /** session/cancel：{ sessionId } → 中断当前 prompt（DSH interrupt） */
+  /** session/cancel：{ sessionId } → 取消该会话的当前活动（Agent.cancel，宿主 rc.1 契约） */
   private cancel(params: Record<string, unknown> | undefined): { cancelled: boolean } {
     const sessionId = typeof params?.sessionId === 'string' ? params.sessionId : undefined
     if (!sessionId) return { cancelled: false }
     const agent = getSkiffAgent(sessionId)
     if (!agent) return { cancelled: false } // 未知会话 no-op（对齐官方）
     try {
-      ;(agent as unknown as { interrupt?: () => void }).interrupt?.()
+      // v1.30.6（S142 review F-02）：旧实现调 `agent.interrupt?.()`——宿主 Agent 无该成员
+      // （只有 `cancel(cause)`，见 packages/core/agent/src/runtime-types.ts:91），
+      // `?.()` 让它成为永久 no-op 却仍返回 cancelled:true（静默失效）。
+      agent.cancel({ kind: 'user' })
     } catch {
-      /* 中断失败忽略（agent 可能已空闲） */
+      /* 取消失败忽略（agent 可能已空闲） */
     }
     return { cancelled: true }
   }

@@ -1,3 +1,27 @@
+## v1.30.6 — 2026-09-08（review 修复轮 1：三个 P0——绑定持久化迁出会话日志 / ACP cancel 真中断 / 工作区白名单恢复生效，S142）
+
+**Scope:** 用户"针对整个 dsp 的实现进行 review，关注架构缺失和 dsh 版本升级带来的这类问题"→ 六分片并行审计（`docs/dsp-implementation-review.md`）发现 3 个 P0，本版修复全部三个。用户拍板 D-1~D-5 全按建议执行。
+
+### F-01（P0）绑定持久化迁出 dsh 会话日志 → `AGENT_SESSIONS/.bindings.json`
+- **根因（宿主契约实证）**：dsp 自定义会话事件 `serenity/bound` 既不在宿主的生成白名单 `KNOWN_SESSION_EVENT_TYPES`（`core/session/src/known-event-types.ts:9-22`，注释明示 out-of-repo 插件事件不在集合内），而 `Session.append`（`core/session/src/index.ts:668-697`）构造事件时只写 `{type,seq,time,data,surfaceOp?,sourceEventSeqs?}`——**没有写 envelope `ignorable` 标记的通道**；宿主的 `assertEventsSupported`（`session-persistence/src/coordinator.ts:1248-1252`，调用点含恢复/HMR 路径 `:1027,:1057,:1074,:1509`）拒绝任何"未知且非 ignorable"的事件 → 含该事件的会话冷加载可能抛 `SessionFormatUnsupportedError`。v1.29.1 的设计文档虽写明要带 `ignorable: true`（`docs/session-binding-hardening-research.md:53`），但类型层声明 ≠ 持久层标记，实际从未落盘
+- **修复**：绑定改为每 CCC 一个 JSON 文件 `AGENT_SESSIONS/.bindings.json`（会话 id 为键，latest-wins；**原子写** tmp + rename）；`appendBound`/`readLastBound`/`hasAnyBound` 签名不变（6 个调用点零改动），CCC 根由会话 `header.cwd` 上溯 `.serenity` 定位
+- **向后兼容**：文件中无该会话记录时，仍回落扫描会话日志中的旧 `serenity/bound` 事件（存量绑定不丢；只读不写）
+- **停止写入**：不再向会话日志 append 任何自定义事件类型（消除该 P0 契约违规的根源）
+- **运维**：根仓 `.gitignore` 忽略 `AGENT_SESSIONS/.bindings.json`（运行时状态不入库）
+
+### F-02（P0）ACP `session/cancel` 真中断
+- **根因**：`acp-core.ts:187` 调 `agent.interrupt?.()`——宿主 rc.1 的 `Agent` **没有** `interrupt`（只有 `cancel(cause)`，`core/agent/src/runtime-types.ts:91`），可选链使其成为**永久 no-op 却返回 `cancelled:true`**；测试替身提供 `interrupt` 因而"认证"了这个不存在的调用
+- **修复**：改 `agent.cancel({ kind: 'user' })`（`AgentCancelCause`，`core/session/src/types.ts:181-185`）；测试替身同步改为 `cancel`（不再供应宿主不存在的成员）
+
+### F-03（P0）外部工作区白名单/禁建恢复生效
+- **根因**：dsp 匹配 `POST /api/workspace.create` + `payload.path`，而宿主 rc.1 的 Remote 端点为 `typertEndpoint({namespace,method})` = `workspace/create`（`typert/registry/src/service.ts:63-69`）→ 浏览器请求 `POST /api/workspace/create`，wire 信封 `{type:'client-request',rpcId,method,payload:{args}}`（`api/gateway/src/index.ts:955` `args: payload.args`）→ **该分支从未命中**，`allowWorkspaceCreate=false` 与工作区白名单对外部用户形同虚设
+- **修复**：新增纯函数 `isWorkspaceCreatePath`（rc.1 端点 + 旧端点兼容）+ `parseWorkspaceCreateBody`（`payload.args.path` 优先、`payload.path` 回落）；gateway 分支改走两者
+
+### 验证
+- **62 files / 920 tests 全绿**（913 → 920：session-bound 重写 16 用例 + gateway F-03 三用例；rebuild/skiff-core 断言同步为新形态）+ typecheck 双面 ✓ + build ✓
+- 参考：`docs/dsp-implementation-review.md`（汇总）+ `docs/review/slice-{A..H}*.md`（六分片）
+- **⏸ 未发布**：bump/publish 待用户显式指令（D14）
+
 ## v1.30.5 — 2026-09-08（图片粘贴补救失效修复——DSH 0.1.2-rc.1 错误码契约漂移兼容，S142 诊断实证）
 
 **Scope:** 用户问"图片/文件粘贴在 Mac 上不好用"（图片能进 rail 但发送被拒、无自动落盘）——**功能代码没丢**，根因 = **DSH 0.1.1-rc.2 → 0.1.2-rc.1 升级把 host 图片拒绝错误码从 `attachment-error` 改为 `session/attachment-invalid` / `subagent/attachment-invalid`**（reason 仍 `MODEL_DOES_NOT_SUPPORT_IMAGES`），ImageFallbackDock 触发判定写死旧码 → rc.1 下补救永不触发。

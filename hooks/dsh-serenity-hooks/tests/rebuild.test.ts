@@ -42,6 +42,7 @@ import {
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
 import { setActiveSessionInfo, resetActiveSessionStore } from '../src/session-ops.js'
 import { SESSION_CONTEXT_MARKER } from '../src/session-ops.js'
+import { readLastBound } from '../src/session-bound.js'
 
 let dir: string
 
@@ -55,10 +56,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-/** 构造最小可测 dsh 会话（surface nodes 可读 + append 记录调用） */
+/** 构造最小可测 dsh 会话（surface nodes 可读 + append 记录调用 + header 供绑定文件定位） */
 function fakeSession(nodes: number[]) {
   const calls: Array<{ type: string; data: unknown; opts: unknown }> = []
   return {
+    header: { id: 'session-x', cwd: dir },
     surface: { nodes, replaceGeneration: 0 },
     append: (type: string, data: unknown, opts?: unknown) => {
       calls.push({ type, data, opts })
@@ -201,11 +203,13 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     // 锚点含规范路径行（真实存在的会话目录，非虚假 AGENT_SESSIONS/SESSION.md）
     expect(result.anchor).toContain(`SESSION.md path: AGENT_SESSIONS/2026-08-28--S200--test/SESSION.md`)
     expect(result.sessionMdPath).toBe(md)
-    // v1.0 持久化绑定：queueRebuild append 一条 serenity/bound（rebuild action，log-only 非 surface 改动）
-    expect(session._calls).toHaveLength(1)
-    expect(session._calls[0]!.type).toBe('serenity/bound')
-    expect((session._calls[0]!.data as { action?: string }).action).toBe('rebuild')
-    expect((session._calls[0]!.opts)).toBeUndefined() // 无 surfaceOp——纯元数据
+    // v1.30.6（review F-01）：绑定持久化改为 CCC 内 AGENT_SESSIONS/.bindings.json
+    // （不再向会话日志写 serenity/bound——宿主读路径拒绝未知且非 ignorable 的事件）
+    expect(session._calls).toHaveLength(0)
+    const bound = readLastBound(session)
+    expect(bound?.action).toBe('rebuild')
+    expect(bound?.dirName).toBe('2026-08-28--S200--test')
+    expect(bound?.mdPath).toBe(md)
     // pending 队列有记录
     const snap = pendingRebuildSnapshot()
     expect(snap.has('session-x')).toBe(true)
@@ -382,13 +386,13 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     mkActiveSession('hook')
     const qctx = { sessions: { get: () => session } } as never
     await queueRebuild(qctx, { root: dir, summary: 'hook 重建', agentCwd: dir, dshSessionId: 's1' })
-    // queue 时已 append 1 条 bound（rebuild action 持久化绑定）
-    expect(session._calls).toHaveLength(1)
-    expect(session._calls[0]!.type).toBe('serenity/bound')
-    // 触发 turn-stopping → performRebuild replace（+1，无 meter 不 append prune）→ 总数 2
+    // queue 时写绑定文件（rebuild action，v1.30.6 文件持久化）——会话日志零 append
+    expect(session._calls).toHaveLength(0)
+    expect(readLastBound(session)?.action).toBe('rebuild')
+    // 触发 turn-stopping → performRebuild replace（1 条 user/message；无 meter 不 append prune）
     listeners[0]!({ agent, turn: 3 })
-    expect(session._calls).toHaveLength(2)
-    expect(session._calls[1]!.type).toBe('user/message')
+    expect(session._calls).toHaveLength(1)
+    expect(session._calls[0]!.type).toBe('user/message')
     expect(pendingRebuildSnapshot().has('s1')).toBe(false)
     // v1.22.5：steer 自动继续（next-step 队列 → turn 不 break → 模型自动读 SESSION.md 继续）
     expect(agent._steers).toHaveLength(1)

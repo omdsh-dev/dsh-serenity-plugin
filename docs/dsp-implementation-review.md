@@ -138,3 +138,30 @@
 | H | `docs/review/slice-H-cross-cutting.md` | 横切（apply 失败语义/版本/CI/访问风格） | 5 项 |
 
 **局限（诚实声明）**：全部为静态核对——safe mode 下 bash 禁用，未跑 typecheck/test，未对运行中的 npm 宿主（`~/.npm-global` 在 CCC 之外，P3 边界）取字节；A-01/C-1/E-06 与 C-1 的运行时可达性、以及"生产 profile 是否挂载 session-persistence"未实测，已在 §7 给出决定性验证步骤。
+
+---
+
+## 9. 修复进展（2026-09-08 更新）
+
+### 9.1 用户实测反馈（负向结果，R↓ 如实记录）
+
+用户对 §7 的 F-01 实测步骤给出**实测答案**："4 其实没有，我们自己会话 rebuild 过多次了"——即多次 rebuild / 重启均未出现 `SessionFormatUnsupportedError`。
+
+**据此修正 F-01 的严重度表述**：机制层面**已确认**是契约违规（宿主读路径拒绝未知且非 ignorable 的事件，`append` 无该通道），但**在本部署中未观测到触发**。可能原因（未逐一验证）：① 本部署的会话在重启后走的是活跃恢复/采用路径，未对含该事件的日志做冷读；② 相关会话被 rebuild 归档后未再打开；③ 绑定事件实际未成功写入（`appendBound` 静默失败）。
+
+**结论**：F-01 从"P0 已坏"降级为 **"P0 契约违规 / 运行时未触发（潜在风险）"**；修复照做（成本低、消除潜在风险），且修复后由 §7 回归断言覆盖。
+
+### 9.2 已修复（v1.30.6，用户拍板 D-1~D-5 全部按建议执行）
+
+| 编号 | 修复 | 验证 |
+|---|---|---|
+| F-01 | 绑定持久化迁出会话日志 → `AGENT_SESSIONS/.bindings.json`（原子写 + 旧事件只读回落 + 停止 append 自定义事件） | session-bound 重写 16 用例（写入/latest-wins/会话隔离/损坏容忍/旧形态回落/编码无关/子目录 cwd）；rebuild + skiff-core 断言同步 |
+| F-02 | `agent.interrupt?.()` → `agent.cancel({ kind:'user' })`；测试替身改为 `cancel` | acp-core 用例更新（替身不再供应宿主不存在的成员） |
+| F-03 | 新增 `isWorkspaceCreatePath` + `parseWorkspaceCreateBody`（rc.1 端点/信封 + 旧形态兼容） | gateway +3 用例（端点判定 / `payload.args.path` / 旧信封与坏 JSON） |
+
+**测试基线**：913 → **920**（62 files）全绿 + typecheck 双面 ✓ + build ✓。版本 = **v1.30.6（代码态，未发布）**。
+
+### 9.3 后续轮次（待办）
+
+- 轮 2（P1 骨架）：F-05/F-06 宿主契约层 + probeHostContract → dashboard health；F-04 测试契约化（vitest alias + 5 契约测试）；F-07 失败策略；F-08 生命周期；F-14 CI。
+- 轮 3：F-09~F-13 逐项 + F-15 声明面守卫扩展 + F-16 重复实现收敛。

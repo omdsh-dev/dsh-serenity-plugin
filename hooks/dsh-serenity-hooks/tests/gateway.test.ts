@@ -42,6 +42,8 @@ import {
   filterWorkspaceList,
   workspaceAllowed,
   workspaceDenyResponse,
+  isWorkspaceCreatePath,
+  parseWorkspaceCreateBody,
   buildProxyHeaders,
   transformHtmlForProxy,
   resetFailState,
@@ -388,6 +390,41 @@ describe('v1.22: workspace.create 白名单校验', () => {
     expect(out.rpcId).toBe('r9')
     expect(out.result.ok).toBe(false)
     expect(out.result.error.code).toBe('forbidden')
+  })
+})
+
+// v1.30.6（S142 review F-03）：宿主 rc.1 把 Remote 端点改为 `workspace/create`
+// （typertEndpoint = `<namespace>/<method>`）且 wire 信封为 payload.args —— 旧实现
+// 匹配 `/api/workspace.create` + payload.path，分支从未命中 → 白名单/禁建校验失效。
+describe('v1.30.6: workspace 创建端点与信封按宿主 rc.1 修正（F-03）', () => {
+  it('端点判定：rc.1 /api/workspace/create 命中，旧端点兼容，其余不命中', () => {
+    expect(isWorkspaceCreatePath('/api/workspace/create')).toBe(true)
+    expect(isWorkspaceCreatePath('/api/workspace.create')).toBe(true)
+    expect(isWorkspaceCreatePath('/api/workspace/rename')).toBe(false)
+    expect(isWorkspaceCreatePath('/serenity/config')).toBe(false)
+  })
+
+  it('rc.1 信封 payload.args.path → 解析出路径（白名单据此生效）', () => {
+    const body = JSON.stringify({
+      type: 'client-request',
+      rpcId: 'r1',
+      method: 'workspace/create',
+      payload: { args: { path: '/home/yh/home/home-serenity' } },
+    })
+    expect(parseWorkspaceCreateBody(body)).toEqual({ rpcId: 'r1', path: '/home/yh/home/home-serenity' })
+    // 白名单据此拒绝白名单外路径
+    expect(workspaceAllowed(['/home/yh/home'], parseWorkspaceCreateBody(body).path)).toBe(true)
+    const outside = JSON.stringify({ rpcId: 'r2', payload: { args: { path: '/tmp/evil' } } })
+    expect(workspaceAllowed(['/home/yh/home'], parseWorkspaceCreateBody(outside).path)).toBe(false)
+  })
+
+  it('旧宿主信封 payload.path 仍兼容；缺路径/坏 JSON → path undefined（白名单非空即拒绝）', () => {
+    expect(parseWorkspaceCreateBody(JSON.stringify({ rpcId: 'r3', payload: { path: '/w/a' } })))
+      .toEqual({ rpcId: 'r3', path: '/w/a' })
+    expect(parseWorkspaceCreateBody(JSON.stringify({ rpcId: 'r4', payload: { args: {} } })))
+      .toEqual({ rpcId: 'r4' })
+    expect(parseWorkspaceCreateBody('not-json')).toEqual({ rpcId: 'unknown' })
+    expect(workspaceAllowed(['/home/yh/home'], undefined)).toBe(false)
   })
 })
 
