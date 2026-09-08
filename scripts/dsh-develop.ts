@@ -258,6 +258,33 @@ function cmdSquashHistory(message?: string): void {
   console.log(`[dsh-develop]   推送公开仓库需 force（如: dsh-develop github-push --force）`)
 }
 
+/**
+ * syncPackageReadme — 包内 README 与仓库 README 机械同步（单一真相源）
+ *
+ * 背景（v1.30.11）：npm 页面展示的是 **包内** README（hooks/dsh-serenity-hooks/README.md，
+ * 经 package.json files 白名单进 tarball），**不是仓库根 README**。此前包内 README 是独立
+ * 手写的短版；v1.30.11 重写根 README 后它停在 v1.30.0（"8 块"等过时事实）——于是
+ * "发布后 npm README 会更新"的预期落空（实证：jsdelivr 取 @1.30.10 包内 README 仍是旧短版）。
+ * 修复 = 发布前把根 README 复制为包内 README，并把**仓库相对链接改写成绝对 GitHub URL**
+ * （tarball 内没有 docs/、CHANGELOG.md、LICENSE，相对链接在 npm 页会 404）。
+ */
+const REPO_BLOB_URL = 'https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master'
+
+function syncPackageReadme(): void {
+  const src = join(REPO_ROOT, 'README.md')
+  const dst = join(HOOKS_DIR, 'README.md')
+  if (!existsSync(src)) fail(`包内 README 同步失败：源文件不存在 ${src}`, 2)
+  const out = readFileSync(src, 'utf-8')
+    .replace(/\]\((?!https?:\/\/|mailto:|#)([^)]+)\)/g, (_m, rel: string) => `](${REPO_BLOB_URL}/${rel})`)
+  const before = existsSync(dst) ? readFileSync(dst, 'utf-8') : ''
+  if (before === out) {
+    console.log('[dsh-develop] ✓ 包内 README 与仓库 README 一致（无变更）')
+    return
+  }
+  writeFileSync(dst, out, 'utf-8')
+  console.log(`[dsh-develop] ✓ 包内 README 已同步（README.md → hooks/dsh-serenity-hooks/README.md，${out.length} 字节）`)
+}
+
 function cmdPublish(): void {
   // npm publish @shgroup/dsh-serenity-hooks（cwd=hooks；凭据走 ~/.npmrc；publishConfig.access=public 已声明）
   // 发布前先构建（lib/ 最新）；npm cache 指向可写临时目录（沙箱 ~/.npm 只读）
@@ -268,6 +295,7 @@ function cmdPublish(): void {
   // 测试是"人记得跑"的步骤，绿着发布可能带着红测试。
   cmdTest()
   cmdBuild()
+  syncPackageReadme()
   verifyTarball()
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   const r = run('npm', ['publish', '--access', 'public', '--registry', 'https://registry.npmjs.org/'], {
@@ -815,6 +843,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'squash-history': cmdSquashHistory(rest[0]); break
       case 'publish': cmdPublish(); break
       case 'pack-check': verifyTarball(); break
+      case 'readme-sync': syncPackageReadme(); break
       case 'github-push-repo': cmdGithubPushRepo(rest[0]); break
       case 'github-ls': cmdGithubLs(rest[0]); break
       case 'version': cmdVersion(); break
@@ -843,7 +872,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
       case '--list':
       case 'list':
-        console.log('typecheck | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | publish | inspect-dsh <pattern>')
+        console.log('typecheck | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern>')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -877,6 +906,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   npm-install-dev <pkg...> hooks 开发依赖安装（npm install --save-dev；client bundle 内联）
   restart-web           kill + setsid 重启 dsh web（健康检查）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
+  pack-check            npm pack --dry-run 核对 tarball 完整性（chunk/双 bundle/类型）
+  readme-sync           包内 README ← 仓库 README（机械同步，相对链接转绝对 URL）
   publish               npm publish @shgroup/dsh-serenity-hooks（凭据走 ~/.npmrc）
   github-push [--force] push 到 GitHub 公开仓库（tellmewhattodo）`)
         break

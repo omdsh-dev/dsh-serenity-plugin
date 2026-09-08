@@ -1,50 +1,353 @@
-# @shgroup/dsh-serenity-hooks
+# 宁静号 ACC —— 给 DeepSeek Harness 装一个「AI 工作区」
 
-宁静号 ACC（Abstract Cognitive Container）harness — **DeepSeek Harness 原生 Cordis 插件**（npm 发布单元，v1.30.0）。
+> **一句话**：装上这个插件，你在电脑上给 AI 划一块自己的工作区（就是一个普通目录），
+> AI 在里面干活时就有了**记忆、纪律、工具和边界**——中途换模型、重启电脑、第二天再来，都能接着干。
+>
+> 适用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）0.1.2-rc.1 及以上。
+> 想了解背后的想法（为什么叫"认知容器"），看 [docs/cognitive-container-theory.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/docs/cognitive-container-theory.md)；本文只讲**能干什么、怎么用**。
 
-为 DSH 会话提供认知容器基础设施：真实 DSH 工具（10 个）+ 拦截缝机械约束（safe-mode / 路径守卫 / 凭据守卫 / 输出守卫）+ 系统提示词注入（8 块，对齐 opencode-serenity-plugin）+ WebUI 状态胶囊 + 外部访问（双端口网关 / Skiff 问答 / ACP+Skiff 问答页）+ 微信桥（F4c-3 iLink 接入）+ Autopilot Trajectory（时钟驱动自主巡航）。
+**几个词先说明白**（后面都用这几个词，不再解释）：
 
-## 安装
+| 词 | 说人话 |
+|---|---|
+| **工作区 / CCC** | 一个目录，里面放一个 `.serenity` 空标记文件。DSH 在别的目录里跑，插件完全不插手；一旦你进到这种目录，它自动生效 |
+| **插件 / ACC** | 就是这个仓库（npm 包 `@shgroup/dsh-serenity-hooks`）。它给 DSH 加工具、加约束、加记忆 |
+| **MSM** | 你写在工作区里的可执行小工具（一个脚本 + 一行注册）。AI 通过 `msm("名字", ["参数"])` 调用它们 |
+| **SESSION.md** | 工作区里的"工作日志"。AI 把目标、决定、进度写进去，中断后再来就从这里接着干 |
+
+---
+
+## 1. 它到底解决什么问题
+
+不吹概念，直接说四个每天都会遇到的麻烦：
+
+| 麻烦 | 没有它 | 有了它 |
+|---|---|---|
+| **AI 干到一半忘了自己在干什么** | 上下文一满，之前的目标、决定全丢，你得重讲一遍 | 每个工作区有一本工作日志，AI 每推进一段就写进去；上下文满了就"换载体"重来，日志还在原地，接着干 |
+| **AI 到处乱翻、乱改文件** | 它能读你整台机器的文件，包括密钥 | 工作区有围墙：墙内随便用，墙外一律拒绝；密钥文件连"读"都读不到 |
+| **出门在外想用** | 只能坐在那台电脑前 | 自带一个带登录的网页入口（密码或手机验证码二选一），手机也能用 |
+| **家人想用微信问点事** | 得教他们装软件、开电脑 | 扫一次码把微信接上，家人在微信里说话，AI 用你定义的人格回话 |
+
+---
+
+## 2. 快速开始（2 分钟）
+
+前置：Node ≥ 20（或 bun）、DSH 0.1.2-rc.1 及以上。
 
 ```bash
+# 1. 装插件（自动加入 DSH 的 web profile）
 dsh plugin --profile web add @shgroup/dsh-serenity-hooks
+
+# 2. 重启 dsh web（插件和网页端界面一起生效）
+dsh web
+
+# 3. 验证：进到带 .serenity 标记的目录里开一个会话
+#    · 会话开头会自动带上这个插件的身份说明和技能目录
+#    · 网页端会话标题旁出现一个状态胶囊（绿点常亮 + SAFE 滑块）
+#    · 输入 dashboard health，看到工作区三项检查全通过
 ```
 
-安装后重启 dsh web。在带 `.serenity` 标记的 CCC 目录中的会话自动获得全部能力。
+卸载：`dsh plugin --profile web remove @shgroup/dsh-serenity-hooks`
 
-## 工具（10，v1.30 命名重构：13 → 10 合一）
+从源码装（自己改代码时用）：
 
-`container_fs` / `logbook`（含 rebuild）/ `dashboard` / `container_git` / `msm`（单入口执行+发现）/ `praxis`（eap+neat+cce 三合一）/ `handyman` / `localstore` / `container_admin`（role + msm 管理 + config 机务舱）/ `autopilot-trajectory`
+```bash
+git clone https://github.com/tellmewhattodo/dsh-serenity-plugin.git
+cd dsh-serenity-plugin
+dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
+```
 
-> **改名对照**（硬切，无别名）：cc_fs → container_fs · cc_git → container_git · session+session_rebuild → logbook（rebuild 并入）· acc_kit → dashboard · acc_msm → msm（执行）+ container_admin（管理）· eap/neat/cce → praxis · skiff_admin → container_admin role。旧会话历史引用报错时按本表对照即可。
+> ⚠️ 别用 `dsh plugin add github:...` 这种写法——那个地址指向的是仓库根目录（不是插件包本身），装上了也不会生效。用 npm 或上面的 `link:` 方式。
 
-## 系统提示词（8 块）
+**安全模式**：点一下网页端胶囊里的 SAFE 滑块，`bash` 就会从 AI 的工具列表里**直接消失**（不是报错，是它根本看不到这个工具）。于是 AI 只能走你注册过、测试过的小工具通道。这个开关是给你用的——AI 看不见、也打不开。
 
-`systemPrompt.section`（order -50）：`=== Serenity ACC ===`（身份+工具清单）/ `=== Serenity Metaphor ===`（世界模型三层隐喻）/ `=== Serenity Principles ===`（认知容器本体论 + MSM 原则）/ `=== Serenity CCE ===`（5 行为约束）/ `=== Serenity EAP ===`（E↑R↓S↑ 自检）/ 状态块（Safe Mode / Localstore）/ 顶层入口 skill 全文（按 `.serenity` 记号发现）/ `=== Serenity Session ===`（活跃会话 + Trajectory Steward 预声明）—— 平台无关文本与 [opencode-serenity-plugin](https://github.com/tellmewhattodo/opencode-serenity-plugin) 逐字节对齐；同一 CCC 可任意换用 osp / dsh 运行时。
+---
 
-## 配置
+## 3. 装完之后你多了什么
 
-`.opencode/serenity.json`（CCC 级）：
+### 3.1 十个工具
+
+| 工具 | 干什么 | 什么时候用 |
+|---|---|---|
+| `container_fs` | 在工作区里管文件：列目录、找文件、复制、移动、新建、追加、在文件管理器里打开 | 需要看/整理工作区里的文件时 |
+| `logbook` | 工作日志的全生命周期：新建、查看、切换、关闭、归档，还有"原地重建" | 任何多步骤的活儿，第一步就是它 |
+| `dashboard` | 仪表盘：工作区健康检查（三项）、当前时间、等待 | 进工作区先自查一下；等外部服务时用 |
+| `container_git` | git 操作：status / commit / push / log / pull / diff | 提交和推送代码；它绝不自动强推 |
+| `msm` | 小工具执行入口：`msm("名字", ["参数"])`；名字记不全就给候选；`inspect=true` 看用法 | 调用工作区里注册的任何小工具 |
+| `praxis` | 按需给 AI 注入三套"做事方法"：输出自检（eap）、设计对齐（neat）、认知连续性（cce） | 要它把话说清楚 / 先对齐再动手时 |
+| `handyman` | 杂工：派一个便宜模型的助手，循环干活直到完成；也可以一次派多个并行 | 大批量、重复性的活（比如扫描几十个技能） |
+| `localstore` | 存密钥和配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
+| `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具时 |
+| `autopilot-trajectory` | 自动巡航：定时唤醒工作区、注入当前焦点，支持多个工作区各自独立 | 想让 AI 定时自己干活（见 §6.5） |
+
+> **改过名**（旧名已彻底停用，没有兼容别名）：`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role`。老会话里看到旧名，照这张表对照即可。
+
+### 3.2 机械约束（AI 绕不过去）
+
+这些不是"提示词里劝它别做"，而是**机制上做不到**：
+
+| 约束 | 你会看到的效果 | 为什么这样做 |
+|---|---|---|
+| **安全模式** | bash 从工具列表里消失（每一步都同步一次），就算它想调也会被兜底拦下 | 走注册过的小工具，比让 AI 自己拼 shell 命令可靠得多 |
+| **工作区围墙** | 墙内什么都能干，墙外一律拒绝（连路径都解析不出去） | AI 不该碰工作区之外的东西 |
+| **黑名单 / 治理文件** | 可配黑名单；`.serenity` 这类治理文件禁止 AI 写 | 防止 AI 把自己所在的"地基"改坏 |
+| **密钥文件守卫** | `localstore.json` 对**所有**工具拒绝（包括 read/grep/glob） | 密钥值在结构上就出不来 |
+| **对外输出守卫** | 对外面的会话（子角色 / ACP / 重建会话）如果答出敏感词，会被打回重答，并告诉它命中了哪个词、该怎么改 | 外面的人不该看到内部机制 |
+| **轨迹提醒** | 做久了会提醒 AI"把进度写回工作日志"，并要求它回一个确认码 | 提醒是机制，不是靠自觉 |
+
+### 3.3 对外的入口
+
+| 入口 | 默认端口 | 给谁用 |
+|---|---|---|
+| DSH 主界面 | 3080 | 你自己在本机用（插件不碰这个端口） |
+| **网页登录入口** | 3081 | 外部/手机访问完整界面：登录后反向代理到 3080，可配工作区白名单 |
+| **微信主动发送入口** | 3082（只绑 127.0.0.1） | 工作区里的小工具用它主动给微信发消息（公网到不了，所以不需要密钥） |
+| **子角色调试页** | 3099（只绑 127.0.0.1） | 你调试"子角色"时用，能切换工作区、看对话轨迹 |
+| **ACP + 对外问答页** | 3100（只绑 127.0.0.1） | 程序化接入（JSON-RPC）+ 给别人用的问答页（key 认证，只返回答案，不返回内部轨迹） |
+| **微信桥** | 无需端口（出站长轮询） | 家人在微信里直接和 AI 说话 |
+
+> 默认只监听 127.0.0.1 的入口，要暴露到公网由你自己决定（隧道 / 反代 / 端口映射都行），插件不绑定任何特定做法。
+
+---
+
+## 4. 一个工作区长什么样
+
+工作区就是一个普通目录，加一个标记文件：
+
+```
+my-workspace/                     ← 工作区根目录（放一个 .serenity 就成）
+├── .serenity                     ← 标记：这个目录是一个工作区
+├── .opencode/
+│   ├── serenity.json             ← 工作区级配置：助手模型白名单 / 日志阈值 / 子角色
+│   └── skills/                   ← 领域技能（每个技能 = 一个领域的知识 + 可能有小工具）
+│       ├── home-media/           ←   例如：媒体（找片源 / 做字幕 / 推送）
+│       ├── home-wealth/          ←   例如：家庭财务
+│       └── …（每个技能可以自带脚本）
+├── AGENT_SESSIONS/               ← 工作日志库：每个目录一本 SESSION.md
+│   └── 2026-09-08--S142--xxx/
+│       └── SESSION.md            ← 目标 / 决定 / 进度（永远留在这里，不会被搬走）
+└── _tmp/                         ← 运行时落盘：你粘贴的图片和文件
+    ├── images_from_user/
+    └── files_from_user/
+```
+
+---
+
+## 5. 能拿它做什么（12 个真实用例）
+
+> 下面这些都在真实部署里跑着。地址、账号、路径都做了泛化。
+
+| # | 你想干的事 | 实际怎么走 |
+|---|---|---|
+| 1 | **长期项目不断线** | `logbook create` 建日志 → 每推进一段写进去 → 中断后 `logbook use` 接上 → 上下文满了 `logbook rebuild` 原地重建并自动继续 |
+| 2 | **批量同步代码** | 当前仓库 `container_git commit/push`；多个子仓库一条命令全同步（自动提交 + 推送） |
+| 3 | **做一集字幕** | 搜片源 → 下载 → Whisper 转写 → 翻译 → 双语 SRT → 机械质检（7 项）→ 推送订阅/邮件 |
+| 4 | **服务器巡检** | 一条命令出 CPU/内存/GPU/容器/服务报告；重启容器也在同一条白名单通道里 |
+| 5 | **内网服务定位** | 仓库全景（分类/技术栈/关联）+ 设备端口扫描 |
+| 6 | **家庭财务** | 结构化记录资产/负债/收支/预算，随时查询汇总；房贷利率对比这类宏观跟踪 |
+| 7 | **家人档案** | 成员资料统一维护，工作区是唯一真相源 |
+| 8 | **想法随手记** | 想到什么就聊，AI 访谈式问清 → 结构化归档 → 定期回顾你的思考模式 |
+| 9 | **手机/外出使用** | 浏览器打开 `http://内网地址:3081` → 输密码或 6 位验证码 → 直接用完整界面 |
+| 10 | **粘贴资料自动处理** | 粘图片 → 自动落盘 → 视觉模型识别（快递单/截图/图表）；粘 PDF/压缩包 → 自动落盘 → 提取文本/解压/读表格 |
+| 11 | **微信里用 AI** | 面板扫一次码 → 家人在微信发消息（文字/语音/图片/文件）→ 路由到指定子角色 → 回复回到微信 |
+| 12 | **定时自己干活** | 工作区配好巡航（间隔/目标会话/焦点/偏见脚本）→ 到点自动唤醒并注入焦点，全程在你眼前发生，可随时介入 |
+
+**典型一天**：
+
+```
+早上  服务器巡检（一条命令）→ 一切正常
+上午  同步昨天的代码 → 子仓库全部推送
+午间  收到 PDF 账单 → 粘进对话 → 自动落盘 + 表格提取 → 记进财务
+下午  做一集视频字幕（转写 → 翻译 → 双语 SRT → 质检）→ 推送订阅
+晚间  手机登录 3081 处理运维（验证码验证）
+全程  每段工作都落在 SESSION.md 里 → 轨迹连续，随时换人/换模型/换机器接着干
+```
+
+---
+
+## 6. 对外入口详解
+
+### 6.1 网页登录入口（3081）
+
+插件自己起第二个监听器，请求流程是：
+
+```
+外部浏览器 → http://内网IP:3081
+  → 没登录 → 极简登录页（用户名 + 密码，或 6 位动态验证码，二选一；手机端适配）
+  → 提交 → scrypt 校验 / TOTP 校验 + CSRF 校验 + 连续失败锁定（5 次 → 15 分钟指数退避）
+  → 通过 → 下发 HttpOnly cookie（SameSite=Strict，24 小时滑动续期）→ 302 跳转
+  → 已登录 → 反向代理到 127.0.0.1:3080（改写过 Host/Origin，作为信任栅栏）
+  → 工作区列表按白名单过滤 + 新建工作区做校验
+  → WebSocket 升级也转发（101 回写 + 双向错误监听，防止连接被压垮）
+```
+
+### 6.2 微信桥
+
+工作区级配置（`.opencode/serenity.json` 的 `weixin` 段），**凭据放在工作区的 `localstore.json`**（不落 git 明文）。
+DSH 一个进程可以同时带多个工作区，每个工作区各自对接自己的微信。
+
+- **扫码绑定**：设置面板 → 微信桥 → 选工作区 → 扫码（手机微信确认）→ 机器人 token 自动写入凭据
+- **多账号**：每个账号独立扫码、独立移除
+- **能收什么**：文字、语音（微信服务端自带转写，无需额外识别）、图片、文件
+  （图片和文件会从微信 CDN 下载并解密，落到 `_tmp/weixin-inbound/`，再把路径告诉 AI）
+- **正在输入**：处理期间微信会显示"正在输入…"
+- **回复干净**：自动剥掉思考过程，微信只看到正文
+- **记得住**：同一个微信号对应固定会话，重启后恢复历史，不会"失忆"
+- **路由**：微信号 → 子角色（精确匹配优先，`*` 兜底）
+- **主动发消息**：工作区里的小工具可以主动给指定用户发消息——
+  `msm("weixin-send", ["send", "--ccc", "<工作区>", "--user", "yh", "内容"])`
+  （`--ccc` 必填，没有"默认当前工作区"这种猜测；发出的消息会自动被记录）
+- **让 AI 自己决定怎么回**（v1.30.10）：配置 `"weixin": { "autoReplyWithLastMessage": false }`
+  后，插件不再自动把 AI 最后那段话转给用户，而是每轮告诉它"你必须自己发"，并附上一条可直接照抄的命令。
+  适合需要过程汇报、想分多条发、或者该安静就安静的角色。默认 `true`（保持原行为）。
+- **消息记录**：配一个 `weixin.hook` 脚本，每收/发一条消息就把事件（JSON）喂给它，存哪里由你决定。
+  记录里 `source: "reply"` 表示"回复用户"，`source: "proactive"` 表示"AI 主动发起"。
+- **排障**：`msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
+
+### 6.3 子角色（Skiff）
+
+你可以从一个"什么都能干"的助手身上，切出一个**能力受限的小角色**——不只是问答，也可以带操作能力：
 
 ```jsonc
 {
-  "handyman": { "models": ["provider/model"], "defaultModel": "provider/model" },
-  "sessionKeeper": { "threshold": 100 },
-  "safeMode": { "blacklist": [".secrets/", "regex:\\.env$"] },
-  "skiff": { "roles": { "qa": { "msms": [], "tools": [], "systemPrompt": "" } } },
-  "autopilotTrajectory": { "enabled": true, "intervalHours": 2, "session": "S###", "biasProvider": "autopilot-bias.ts", "topPrompt": "…" },
-  "weixin": { "enabled": true, "accounts": [{ "accountId": "wechat-1", "name": "微信1", "enabled": true }], "routes": [{ "user": "*", "role": "zhaocai" }] }
+  "skiff": {
+    "roles": {
+      "qa": {
+        "model": "provider/model",              // 这个角色单独用哪个模型
+        "msms": ["web-search", "vlm-describe"], // 它能调哪些小工具
+        "tools": ["read", "grep", "glob"],      // 它能用哪些平台工具
+        "systemPromptFile": "roles/qa.md"       // 它的人格与边界（也可以直接内联）
+      }
+    }
+  }
 }
 ```
 
-plugin 级配置（账号/开关/阈值）在 DSH 设置面板 + `~/.dsh/serenity-hooks.json`（0600）。
+- 两份白名单分开配（小工具 / 平台工具），没列出来的一律隐藏
+- 调试页（3099）可以切工作区、看轨迹；回答用 markdown 渲染，思考过程折叠
+- `container_admin role validate` 校验配置，`apply` 才真正生效
 
-## 文档
+### 6.4 对外问答页（3100）
 
-- 完整文档：仓库 [README](https://github.com/tellmewhattodo/dsh-serenity-plugin)（能力为主）
-- 理论叙述：`docs/cognitive-container-theory.md`
-- 设计决策与架构：`CHANGELOG.md` + 维护 skill（`dsh-serenity-plugin-development`）
+- **key 认证**（常量时间比较 + 失败 IP 锁定 + 可轮换）+ 容器白名单（留空 = 全部开放）
+- **只给答案**：响应里只有 answer / answer_html / sessionId——内部轨迹、工具结果、机制信息都不出去
+- 默认只监听 127.0.0.1；要给别人用，怎么暴露（隧道/反代/端口映射）由你决定
+
+### 6.5 自主巡航（Autopilot Trajectory）
+
+让工作区**到点自己醒过来干活**，全程在你眼前发生（前台注入，随时可介入）：
+
+- **什么时候醒**：工作区开关打开 + 全局开关打开（默认关，只在你想跑的机器上开）+ 目标会话存在（目录带 `--auto` 后缀）+ 到了间隔（支持小数，最密约 36 秒）+ 不在避开的高峰窗口（默认北京时间 8~18 点）+ 偏见脚本就绪
+- **醒了先看什么**：先看你自己写的"焦点"（`topPrompt`，每轮最先注入，防跑偏），再看随机生成的"偏见内容"（你写的脚本，负责探索方向）
+- **多个工作区各自独立**：每个工作区自己的间隔/会话/焦点/窗口，互不干扰
+- **有审计**：每次唤醒都记一笔，面板里能看到最近几次；失败会指数退避重试
+- 没有"每天最多唤醒几次"的限制——频率只由间隔和窗口决定
+
+### 6.6 安全模型
+
+| 层面 | 做了什么 |
+|---|---|
+| 登录 | scrypt 密码哈希 + 常量时间比较 + 256-bit token + 24 小时滑动有效期 + 审计日志 |
+| 双因素 | TOTP（兼容 Authenticator），扫码绑定；密码和验证码二选一 |
+| 防爆破 | 按账号锁定：连续失败 5 次 → 锁 15 分钟，且指数退避 |
+| 防 CSRF | 登录双提交 + 配置写入校验 Origin + 服务端 token 集合（多标签页不冲突） |
+| 凭据 | 集中放 `localstore.json`（默认禁止提交到 git）；密钥文件对工具结构性隔离 |
+| 对外输出 | 敏感词检测 → 打回重答，并告知命中词和规避方向 |
+
+---
+
+## 7. 配置分四层
+
+| 层 | 位置 | 放什么 |
+|---|---|---|
+| DSH 原生设置 | DSH 的 settings.yaml | 简单开关：网关 / 重建 / 会话命名、重建阈值、子角色开关与调试端口、ACP 与问答页开关、**巡航总开关（默认关）** |
+| 插件全局文件 | `~/.dsh/serenity-hooks.json`（权限 0600） | 网关账号（scrypt + TOTP）、监听地址与端口、工作区白名单、cookie 安全开关、问答页 key |
+| 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**巡航（间隔/会话/焦点/窗口）**、**微信（账号/路由/开关）** |
+| 工作区凭据 | `localstore.json` | 密钥与本地偏好；微信机器人 token 也在这一层 |
+
+> 原则：**插件是全局的，工作区是具体的**——账号、开关、阈值归插件层；角色、凭据、本地偏好归工作区层。
+
+---
+
+## 8. 上下文快满了怎么办
+
+AI 一次能"记住"的内容有上限。满了不用你手动开新会话：
+
+| 机制 | 说人话 |
+|---|---|
+| **工作日志（SESSION.md）** | AI 的"笔记本"，永远留在原地。目标、决定、进度都写这儿 |
+| **原地重建（logbook rebuild）** | 快满时它会提示 AI 主动重建：把这一轮对话清空，但重新注入"你是谁 + 继续 S### 的工作"——**载体换了，活儿接着干**。重建后的 token 计量也正确回落 |
+| **进度提醒** | 做久了会按计分提醒 AI 把进度写回日志，并要求它回确认码 |
+| **沉淀纪律** | 重建前如果产生了有价值的认知，先把它写进相关技能（而不是丢掉） |
+
+---
+
+## 9. 给插件开发者
+
+```bash
+pnpm typecheck          # 类型检查（node + 浏览器端两套）
+pnpm test               # 全量测试（当前 70 个文件 / 993 个用例）
+pnpm build              # 打包（lib/index.js + client.js）
+```
+
+- **开发用小工具**：`scripts/dsh-develop.ts`——typecheck / test / build / status / commit / push / version / bump / deploy / restart-web / publish / pack-check / github-push 一条龙。
+  `pack-check` 会在发布前核对打包产物是否完整（曾经踩过"发到 npm 少了文件"的坑）；`scripts/dsh-crash-investigate.ts` 用来查崩溃（只读）
+- **架构**：Cordis 原生插件，用 DSH 的正式接口注册工具和拦截点——**从不修改 DSH 本体**
+- **代码地图**：[docs/codebase-overview-v1.22.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/docs/codebase-overview-v1.22.md)
+- **设计决策**：见 [CHANGELOG.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/CHANGELOG.md) 和维护技能 `dsh-serenity-plugin-development`
+- **发布**：npm `@shgroup/dsh-serenity-hooks` + GitHub 双仓库同步推送
+
+---
+
+## 10. 和 opencode 版是什么关系
+
+| | opencode-serenity-plugin | dsh-serenity-plugin（本仓库） |
+|---|---|---|
+| 跑在 | OpenCode | DeepSeek Harness |
+| 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
+| 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
+| 工具 | msm / container_fs / logbook 等 | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory |
+
+**同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
+差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。
+
+---
+
+## 11. 常见问题
+
+**Q：装完没反应？**
+先确认你进的是带 `.serenity` 标记的目录。不是工作区的话，插件完全不介入。进去后输入 `dashboard health` 看三项检查。
+
+**Q：bash 怎么不见了？**
+安全模式开着——这是设计，不是 bug。走注册过的小工具比让 AI 自己拼命令可靠。关掉胶囊里的 SAFE 滑块就回来了。
+
+**Q：3081 登录被锁了？**
+连续失败 5 次锁 15 分钟（指数退避）。等锁过期，或检查账号的验证码绑定状态。
+
+**Q：上下文快满了怎么办？**
+先让 AI 把进度写回 SESSION.md，然后按提示调用 `logbook rebuild`。轨迹会自动接续，不用手动开新会话。
+
+**Q：对外问答页会返回内部信息吗？**
+不会。只返回答案本身，内部轨迹和工具结果都不出去。
+
+**Q：微信桥里，AI 的回复是怎么发出去的？**
+默认由插件自动把它的最后一段话转发给你。如果配了 `autoReplyWithLastMessage: false`，插件就不转了，改由 AI 自己发——所以这时候它如果没发，你就收不到消息（没有兜底，这是刻意设计）。
+
+**Q：主动发的微信消息会被记录吗？**
+会。和工作区里配的 `weixin.hook` 记录脚本走同一条路，事件里标 `source: "proactive"`；自动回复标 `source: "reply"`。
+
+---
+
+## 12. 延伸阅读
+
+- **这套东西的想法从哪来**：[docs/cognitive-container-theory.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/docs/cognitive-container-theory.md)——认知容器是什么、认知的"发生/存储/再发生"、轨迹与载体
+- **权威标准**：[serenity-acc-specs](https://github.com/tellmewhattodo/serenity-acc-specs)——理论根基、注入规范、不变量
+- **改了什么**：[CHANGELOG.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/CHANGELOG.md)——每个版本做了什么、为什么这么做
+
+---
 
 ## 许可
 
-MIT
+MIT（见 [LICENSE](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/LICENSE)）
+
+> **版本**：v1.30.11 ｜ **前置**：DSH 0.1.2-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：70 个文件 / 993 个用例
