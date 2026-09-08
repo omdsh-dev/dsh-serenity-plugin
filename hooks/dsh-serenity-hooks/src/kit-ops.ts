@@ -17,6 +17,7 @@ import { resolve } from 'node:path'
 import { findSerenityRoot, findGitRoot, loadSerenityConfig, pathInside, readCccName as readCccNameFromCcc, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
 import { readDshVersion } from './status.js'
+import { probeHostContract } from './host/contract.js'
 import type { JsonValue } from './json.js'
 
 export type KitAction = 'health' | 'time' | 'wait'
@@ -134,7 +135,7 @@ export function checkRegistryHealth(root: string): RegistryHealthReport {
   return { path: rel, ok: issues.length === 0, present: true, issues }
 }
 
-export async function runKit(root: string | null, args: KitArgs): Promise<JsonValue> {
+export async function runKit(root: string | null, args: KitArgs, hostCtx?: unknown): Promise<JsonValue> {
   switch (args.action) {
     case 'health': {
       const cccName = readCccName(root)
@@ -187,6 +188,13 @@ export async function runKit(root: string | null, args: KitArgs): Promise<JsonVa
       }
       report.accVersion = ACC_VERSION
       report.dshVersion = readDshVersion()
+      // review F-05（v1.30.7）：宿主契约探针——把"静默漂移"变成可读信号
+      // （服务/成员缺失 + 宿主版本是否落在被验证范围；required 缺失 → status 降级）
+      if (hostCtx !== undefined) {
+        const contract = probeHostContract(hostCtx, report.dshVersion as string | null)
+        report.hostContract = contract as unknown as JsonValue
+        if (!contract.ok) report.status = 'degraded'
+      }
       return report as JsonValue
     }
     case 'time': {

@@ -1,0 +1,61 @@
+# CI — dsh-serenity-plugin（S142 review F-14，v1.30.7）
+#
+# 为什么存在：发布链此前只有 `dsh-develop publish` 的 typecheck + build + pack-check，
+# **测试是"人记得跑"的步骤**；仓库也没有任何 CI，于是 913 个测试形同建议。
+# 本工作流在每次 push/PR 上跑 typecheck + test，把"绿着发布带红测试"挡在门外。
+#
+# ⚠️ 首次运行需验证（诚实声明）：本文件在 CCC 内编写时无法执行 CI（无 bash / 网络受限），
+#    以下两处假设需首次 GitHub run 确认：
+#      ① `@deepseek-ai/dsh@0.1.2-rc.1` 在公开 npm 可安装（本机 registry 查询被内网 DNS 拦截）；
+#      ② hooks 的 tsconfig paths 指向全局安装的宿主（`$(npm root -g)/@deepseek-ai/dsh/node_modules/...`），
+#         因此必须先全局安装宿主，typecheck 才能解析 `@deepseek-ai/dsh-*` 类型。
+#    若 ① 不成立，把 host-install 步骤去掉即可——**测试本身不依赖宿主**（所有宿主调用均被 vi.mock 拦截），
+#    仅 typecheck 需要宿主类型基准。
+#
+# 本地等价命令（更快，无需 CI）：
+#   msm("dsh-develop", ["typecheck"])   # node + client 双面
+#   msm("dsh-develop", ["test"])        # 63 files / 933 tests
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # dsp 被验证过的宿主版本范围下限（与 package.json peerDependencies / src/host/contract.ts 同源）
+  DSH_VERSION: 0.1.2-rc.1
+
+jobs:
+  hooks:
+    name: hooks (typecheck + test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hooks/dsh-serenity-hooks
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 宿主类型基准：tsconfig paths 指向全局安装的 dsh CLI 内部 node_modules。
+      # 失败不阻断测试（测试不依赖宿主）——typecheck 步骤会因此红，便于定位。
+      - name: Install DSH host (type baseline)
+        continue-on-error: true
+        run: npm install -g @deepseek-ai/dsh@${{ env.DSH_VERSION }}
+
+      - name: Install dev dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck (node half)
+        run: npm run typecheck
+
+      - name: Typecheck (client half)
+        run: npx tsc -p client/tsconfig.json --noEmit
+
+      - name: Test
+        run: npm test

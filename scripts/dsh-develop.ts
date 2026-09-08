@@ -264,6 +264,9 @@ function cmdPublish(): void {
   // v1.17.4：显式 --registry https://registry.npmjs.org/ —— ~/.npmrc 默认 registry 可能指向
   // 内网 nexus（tiangong-npm-group，只读镜像 → npm publish 400 Bad Request）。@shgroup token
   // 按 registry URL 匹配，官方 registry 发布不受影响。
+  // v1.30.7（S142 review F-14）：发布前强制跑测试——此前 publish 只做 typecheck+build+pack-check，
+  // 测试是"人记得跑"的步骤，绿着发布可能带着红测试。
+  cmdTest()
   cmdBuild()
   verifyTarball()
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')

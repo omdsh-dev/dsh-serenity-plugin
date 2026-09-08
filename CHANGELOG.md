@@ -1,3 +1,27 @@
+## v1.30.7 — 2026-09-08（review 修复轮 2：宿主契约层 + 编译期事件契约 + 发布门禁/CI，S142）
+
+**Scope:** review（`docs/dsp-implementation-review.md`）轮 2 —— 针对"契约无单一拥有者 + 验证镜像自身假设"这两条系统性根因，建立**可执行的契约守卫**。用户拍板"直接开轮 2"。
+
+### F-05/F-06（宿主契约层）`src/host/contract.ts`
+- **声明式契约表**（单一真相源）：**15 个宿主服务**（injected/lazy 分级 + 依赖成员 + 缺失后果 + required 分级）+ **10 个宿主事件**（订阅点 + 后果）+ **版本范围** `REQUIRED_HOST_RANGE = ^0.1.2-rc.1`
+- **`probeHostContract(ctx, hostVersion)`**：纯函数探针，**零宿主 import**（结构化读取 `ctx.get` / 属性）→ peer-only 打包下同样成立；返回 `{ok, checked, hostVersion, versionOk, issues[]}`
+- **装载时告警**（`index.ts` apply 首段）：有 issue 即 `console.warn` 摘要；探针自身永不抛错——宿主对插件 apply 抛错会导致**整个 dsh 启动失败**（app-boot "plugin(s) failed to load" 语义），探针不能成为新单点
+- **`dashboard health` 新增 `hostContract` 段**：`required` 缺失 → `status: degraded`（把"静默漂移"变成可读信号）；`tools/kit.ts` 改 `createKitTool(ctx)` 以取得只读上下文
+- **版本探针**：`readDshVersion()` 的结果与 `REQUIRED_HOST_RANGE` 比对（低于下限 / 超出上界 / 未知 → 记为非致命 issue）——此前版本读了但从不比对（v1.30.5 那类漂移的最便宜守卫）
+
+### F-04（编译期事件契约 + 探针测试）
+- **`HOST_EVENT_NAMES ... as const satisfies readonly (keyof Events)[]`**：事件名写错或宿主改名 → **`dsh-develop typecheck` 编译失败**（本次实测通过 = 10 个事件名在 rc.1 中真实存在）。这是运行时无法验证的那一半（`ctx.on('typo')` 只会静默不订阅）
+- **`tests/host-contract.test.ts` 13 用例**：完整宿主 → ok / 必需服务缺失 → ok:false / 成员被移除 → 精确到成员 / 可选项缺失 → 降级不中断 / 空 ctx 不抛错 / 版本范围四态 / 契约表自洽
+
+### F-14（发布门禁 + CI）
+- **`dsh-develop publish` 现在先跑测试**（此前只有 typecheck + build + pack-check——"绿着发布可能带红测试"）
+- **新增 `.github/workflows/ci.yml`**：push/PR 上跑 typecheck（node + client 双面）+ test。⚠️ 文件头注明**首次运行需验证**（编写环境无 bash/网络，无法执行 CI）：① `@deepseek-ai/dsh@0.1.2-rc.1` 公开 npm 可安装 ② tsconfig paths 指向全局安装的宿主
+
+### 验证
+- **63 files / 933 tests 全绿**（920 → 933）+ typecheck 双面 ✓ + build ✓
+- **⏸ 未发布**：bump/publish 待用户显式指令（D14）
+- **轮 2b 待办**：F-06 宿主访问收口（约 40 处调用点迁入 `src/host/`）、F-07 失败策略（守卫 fail-open / 121 处 catch 审计）、F-08 生命周期（disposed 订阅 + `ctx.effect` 拆卸）
+
 ## v1.30.6 — 2026-09-08（review 修复轮 1：三个 P0——绑定持久化迁出会话日志 / ACP cancel 真中断 / 工作区白名单恢复生效，S142）
 
 **Scope:** 用户"针对整个 dsp 的实现进行 review，关注架构缺失和 dsh 版本升级带来的这类问题"→ 六分片并行审计（`docs/dsp-implementation-review.md`）发现 3 个 P0，本版修复全部三个。用户拍板 D-1~D-5 全按建议执行。

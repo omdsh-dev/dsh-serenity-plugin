@@ -15,7 +15,7 @@
 import type { Context } from 'cordis'
 import z from '@deepseek-ai/schemastery'
 import { ccFsTool } from './tools/cc-fs.js'
-import { kitTool } from './tools/kit.js'
+import { createKitTool } from './tools/kit.js'
 import { gitTool } from './tools/git.js'
 import { msmTool } from './tools/msm.js'
 import { praxisTool } from './tools/praxis.js'
@@ -34,6 +34,8 @@ import { registerStatusApi } from './api.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS, findSerenityRoot } from './ccc.js'
+import { probeHostContract, summarizeHostContract } from './host/contract.js'
+import { readDshVersion } from './status.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { registerSettingsSection, readSimpleSettings } from './settings-section.js'
 import { registerGateway } from './gateway.js'
@@ -105,10 +107,19 @@ export const Config: z<Config> = z.object({
 })
 
 export function apply(ctx: Context, config: Config): void {
+  // review F-05（v1.30.7）：装载时核对宿主契约（服务/成员/宿主版本）——把"静默漂移"
+  // 变成启动可见信号。探针自身永不抛错：宿主对插件 apply 抛错会导致整个 dsh 启动失败
+  // （app-boot 的 "plugin(s) failed to load" 语义），探针不能成为新的单点。
+  try {
+    const report = probeHostContract(ctx, readDshVersion())
+    if (report.issues.length > 0) console.warn(`[serenity-hooks] ${summarizeHostContract(report)}`)
+  } catch {
+    /* 探针失败不阻断插件装载 */
+  }
   if (config.tools) {
     ctx.tools.register(ccFsTool) // container_fs
     ctx.tools.register(createSessionTool(ctx)) // logbook（含 rebuild）
-    ctx.tools.register(kitTool) // dashboard
+    ctx.tools.register(createKitTool(ctx)) // dashboard
     ctx.tools.register(gitTool) // container_git
     ctx.tools.register(msmTool) // msm（单入口执行 + 发现）
     ctx.tools.register(praxisTool) // praxis（eap/neat/cce 三合一）
