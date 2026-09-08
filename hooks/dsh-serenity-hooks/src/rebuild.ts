@@ -53,13 +53,12 @@ import {
   getActiveSessionInfo,
   parseSessionContextFromEvents,
   extractSessionMdPathFromText,
-  findLatestActiveSessionMd,
   sessionEvents,
 } from './session-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
 import { namingTitleFor } from './tools/session.js'
 import { eventToken } from './trajectory-assistant.js'
-import { appendBound } from './session-bound.js'
+import { appendBound, readLastBound } from './session-bound.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -177,7 +176,17 @@ function sessionNameFromMdPath(mdPath: string): string {
 /**
  * 稳固的 SESSION.md 定位（多层候选 + 存在性校验，**绝不输出虚假路径**）：
  * ① 内存活跃会话（本会话显式 use 过）→ ② events 恢复（use 标记 + 重建锚点规范行，进程重启后）
- * → ③ surface 首条锚点（events 异常时兜底）→ ④ AGENT_SESSIONS 约定回退（最新未完成活动目录）。
+ * → ②b **权威绑定**（`AGENT_SESSIONS/.bindings.json`，本会话持久绑定）→ ③ surface 首条锚点
+ * （events 异常时兜底）。
+ *
+ * v1.30.13（S142 用户"微信桥 + skiff 会话锚定要准确"，诊断 D4）：**移除**原 ④「全局最新未完成
+ * 会话」（`findLatestActiveSessionMd`）。理由（R↓）：④ 是**跨轨迹**猜测——候选①②③全空时，
+ * 它会把 rebuild 静默接到 AGENT_SESSIONS 里最新的另一个会话（临时 skiff 会话 persistent=false、
+ * 重启后首条消息前、Danica 新会话都命中该形态），而"接错轨迹"比重建失败危险得多
+ * （错误轨迹被继续写入 + 正确轨迹静默丢失）。现在全部候选失败 → 返回 null → 调用方
+ * 报错引导用户显式 `logbook use`（响亮失败优于静默接错）。
+ * 备选：④ 仅在"同 scope 确无绑定"时兜底——同样会接错轨迹，故不采纳。
+ *
  * 每候选 resolve 后 existsSync 校验（相对路径按 root 解析）；全部失败返回 null → 调用方报错引导。
  */
 export function resolveSessionMdPath(root: string, scope: string, session: Session): string | null {
@@ -185,8 +194,8 @@ export function resolveSessionMdPath(root: string, scope: string, session: Sessi
   candidates.push(getActiveSessionInfo(scope)?.mdPath ?? null)
   const events = sessionEvents<unknown>(session)
   if (events.length > 0) candidates.push(parseSessionContextFromEvents(events)?.mdPath ?? null)
+  candidates.push(readLastBound(session)?.mdPath ?? null)
   candidates.push(parseAnchorMdPath(session))
-  candidates.push(findLatestActiveSessionMd(root))
   for (const c of candidates) {
     if (!c) continue
     const abs = c.startsWith(root) ? c : resolve(root, c)
@@ -281,9 +290,15 @@ export async function queueRebuild(
   // ② 稳固定位当前 use 的宁静号 SESSION（持久轨迹路径；多层候选 + 存在性校验 v1.24.11）
   const mdPath = resolveSessionMdPath(root, dshSessionId, session)
   if (!mdPath) {
+    // v1.30.13（D4）：候选链不再含"全局最新会话"猜测 → 失败即响亮报错并说明查过哪些面
+    // （E↑：用户/agent 一眼知道该补哪一步，而不是拿到一个别的轨迹）。
     throw new Error(
-      'Unable to determine the active SESSION.md — no session context found in this conversation. ' +
-      'Run "logbook use <S###> --summary <内容概括 ≤20 字>" first to activate the trajectory to resume, then retry logbook rebuild.',
+      'Unable to determine the active SESSION.md for this session — checked (in order): ' +
+      'in-memory activation (logbook use in this process), [SESSION CONTEXT] events in this conversation, ' +
+      'AGENT_SESSIONS/.bindings.json (authoritative binding), rebuild anchor in the surface. ' +
+      'None matched an existing SESSION.md. Run "logbook use <S###> --summary <内容概括 ≤20 字>" to bind this ' +
+      'conversation to a trajectory, then retry logbook rebuild. (No global fallback is applied on purpose — ' +
+      'guessing could resume a different trajectory.)',
     )
   }
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)

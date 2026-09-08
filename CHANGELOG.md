@@ -1,4 +1,36 @@
-## v1.30.12 — 2026-09-08（web_fetch 在 fake-ip 网络下被拦：ACC 接管 provider + 屏蔽宿主内置，S142）
+## v1.30.13 — 2026-09-08（会话锚定准确性 D1/D4/D5 + 微信桥注入去重，S142）
+
+**Scope:** 用户要求"**我主要是要求微信桥 + skiff 的会话锚定要准确**"——诊断出 D1~D6 六项（全实证，见 S142 §8），本轮修复其中三项（D4/D5/D1）+ 用户当轮新增需求"微信桥注入与 skiff 注入重复，注入内容直接取 skiff 的"。D2（zhaocai 轨迹归属）待用户拍板，D3/D6 随 D4 一并收口。
+
+### D4 会话锚定（核心）：`resolveSessionMdPath` 加权威绑定候选 + 去掉跨轨迹兜底
+- **候选链改为**：① 内存活跃（本进程 `logbook use`）→ ② events 的 `[SESSION CONTEXT]`（重启后恢复）→ **②b `readLastBound(session).mdPath`（`AGENT_SESSIONS/.bindings.json` 权威绑定，新增）** → ③ surface 首条重建锚点
+- **删除原 ④ `findLatestActiveSessionMd`（AGENT_SESSIONS 全局最新未完成会话）**。理由（R↓）：④ 是**跨轨迹猜测**——①②③全空时会把 rebuild 静默接到另一个会话（临时 skiff 会话 persistent=false、重启后首条消息前、Danica 新会话都命中该形态），"接错轨迹"比"重建失败"危险得多（错误轨迹被继续写入 + 正确轨迹静默丢失）。备选（④ 仅在"确无绑定"时兜底）同样会接错，不采纳
+- **失败即响亮**：全部候选失败 → 返回 null → `queueRebuild` 抛错并**逐项列出已查过的四个面** + 引导 `logbook use <S###> --summary <…>`
+
+### D5 注入纪律与能力面一致：`workspaceTrajectoryLine` 不再点名 `write/edit`
+- 旧文案 "Record … INTO this SESSION.md **with write/edit**"——而 zhaocai 角色白名单已移除 write/edit（写能力收归 CCC 的 `session-write` MSM）→ 指令指向它没有的工具
+- 现文案：`using the write channel your role is actually granted … never assume a specific write tool exists; if none is granted, report that instead of pretending to write`
+- **不写任何 CCC MSM 名**（ACC 源码不绑定某个 CCC 的注册表——归属二分；具体通道由 CCC 角色配置与角色提示词决定）
+
+### D1 Skiff 调试页 3099 启动重试：CCC root 定位失败不再"一锤子"
+- **根因（实证）**：`registerSkiff` 只在 `apply` 时同步一次 `resolveSkiffRoot`——此刻通常无 live 会话、进程 cwd 也不在 CCC 内 → null → 一行警告后**永不重试**（重启日志 `✗ Skiff 调试服务未启动：无法定位 CCC root`，`ss -ltn` 无 3099；同批 ACP 因容忍 `root ?? undefined` 而正常）
+- **三层触发**：① 启动同步 ② **退避重试**（1s/3s/8s/20s/40s，共 5 次，定时器 `unref()` 不阻进程退出）③ `agent/session-start` / `session/created`（live 会话就绪 = CCC root 现在可解析的最强信号）立即再试
+- **可观测**：首次失败告警一次（不刷屏）→ 重试成功 `info` 报告"重试 N 次后定位到 CCC root" → 耗尽则响亮告警；开关关闭时清掉待执行重试；定时器经 `registerDisposer` 随插件卸载拆卸
+
+### 微信桥注入去重（用户当轮需求）：工作台纪律单一注入点
+- **用户原话**："微信桥的注入机制，每个用户消息都会注入，skiff 本身也会注入，这样就重复，能否微信桥情况下，注入内容直接取 skiff 的，这样不用配两遍"
+- **改前**：`createSkiffAgent` 把工作台纪律塞进基础段 `serenity-skiff`（创建时一次快照）+ 微信桥**每条消息**把同一文本拼进 question（v1.30.4 为覆盖 live/existing 快路径而加）→ 新建 agent 首轮起即重复，且每轮重复付 token
+- **现形态**：新增 **`ensureWorkspacePromptSection(agent, scope)`**（`src/skiff-core.ts`）——工作台纪律**只**经此函数挂独立系统提示词段 `serenity-skiff-workspace`（order -55），`text()` **动态**按 scope 读当前活跃 mdPath（绑定变化自动跟随，无需重挂）；幂等（WeakSet，同 agent 只注册一次）
+  - `createSkiffAgent` 基础段不再含工作台行，改调该函数
+  - 微信桥不再拼 question，改为对 `ref.agent` 调该函数
+  - **降级**：该 agent 挂不上系统提示词段（返回 false）→ 回退 question 前缀注入，保证约束仍在场
+
+### 验证
+- 新测试 `tests/skiff-startup-retry.test.ts` **4 用例**（无 root 告警一次 / 退避重试成功 / 就绪事件立即重试且不重复启动 / 关开关清重试）；`rebuild.test.ts` +2（②b 绑定候选命中 / ④ 不再兜底返回 null）+ 夹具改 `bindSession()`（镜像"会话此前绑过、重启后内存空"的真实形态）；`skiff-core.test.ts` / `weixin.test.ts` 断言同步到单一注入点语义（含降级用例）
+- **72 files / 1009 tests 全绿**（1002 → 1009）+ typecheck 双面 ✓
+- 测试夹具要点：D1 用例需控 `findSerenityRoot`（开发机 cwd 恰是真实 CCC → 假阴性；vitest worker 禁 `process.chdir` → `importOriginal` 局部替换该纯函数）
+
+
 
 **Scope:** 用户报告 `web_fetch` 恒失败（"被 dsh 安全机制拦截，我需要关了它，看看能从哪个层面想办法"）→ 分层实证后拍板 **L3：ACC 注册自己的 provider**，并要求"**屏蔽掉 dsh 自身注册的**"。设计全文见 `docs/web-fetch-fakeip-design.md`。
 

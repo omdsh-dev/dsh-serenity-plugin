@@ -22,7 +22,7 @@ import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeix
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
-import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine } from './skiff-core.js'
+import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
 import { getActiveSessionInfo } from './session-ops.js'
 import { hostSessions } from './host/access.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
@@ -281,14 +281,16 @@ export async function handleIncoming(
       }
 
       // question = 原文 + 媒体存在性注入 + 降级说明（不做内容转述/工具引导——M3）
-      // v1.30.4：启用了 session 能力的角色 → 每轮前缀注入工作台纪律（机制 > token——
-      // 用户拍板"每次都注入也行，机制比历史重要"；live/老 agent 也强制在场，不依赖
-      // create 时 systemPrompt 快照）。纪律进 agent 上下文（微信用户侧不可见——hook
-      // 记录用原始 text 非 question）。
+      // v1.30.13（S142 用户："微信桥的注入机制每个用户消息都会注入，skiff 本身也会注入，
+      // 这样就重复，能否微信桥情况下注入内容直接取 skiff 的"）：工作台纪律块**单一注入点**
+      // = skiff agent 的系统提示词段（ensureWorkspacePromptSection，动态读活跃 mdPath）——
+      // 桥不再每轮把它拼进 question（省 token + 不重复配置）。仅当该 agent 挂不上
+      // 系统提示词段（返回 false）时降级为 question 前缀注入，保证约束仍在场。
       const parts: string[] = []
       const activeWorkspace = getActiveSessionInfo(sessionId)
       if (activeWorkspace?.mdPath) {
-        parts.push(workspaceTrajectoryLine(activeWorkspace.mdPath))
+        const sectionOk = ensureWorkspacePromptSection(ref.agent, sessionId)
+        if (!sectionOk) parts.push(workspaceTrajectoryLine(activeWorkspace.mdPath))
       }
       // v1.30.10：关闭自动回发最终文本（weixin.autoReplyWithLastMessage: false）→
       // 每轮注入输出纪律（可执行命令），输出权交给 agent；本轮结束不再由桥转发。

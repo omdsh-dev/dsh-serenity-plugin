@@ -432,7 +432,11 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
    *  on 立即触发 idle（waitIdle 立即返回）；followup 推入 user + assistant 答案事件。
    *  resumeMode: 'create'（resume 缺失→恒 create 路径）/ 'resume'（resume 命中历史恢复）/ 'not-found'（首次）
    *  / 'live'（v1.27.3：重启后 DSH 恢复 live——resume/create 均抛错，get 返回 live agent） */
-  function fakeCtx(resumeMode: 'create' | 'resume' | 'not-found' | 'live' = 'create', liveId?: string): {
+  function fakeCtx(
+    resumeMode: 'create' | 'resume' | 'not-found' | 'live' = 'create',
+    liveId?: string,
+    testOpts?: { noSystemPrompt?: boolean },
+  ): {
     agents: {
       create: (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
       resume?: (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown>
@@ -441,12 +445,17 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     on: () => () => void
     /** askSkiff 注入的 question 文本（媒体存在性/降级断言用） */
     questions: string[]
+    /** agent 系统提示词段（v1.30.13：工作台纪律单一注入点断言用） */
+    sections: Array<{ name: string; text: () => string }>
   } {
     let agent: { session: { id: string; events: unknown[] }; followup: (msg?: unknown) => void; interrupt?: () => void } | undefined
     const questions: string[] = []
+    const sections: Array<{ name: string; text: () => string }> = []
     const makeAgent = (id: string, opts: { setup?: (c: unknown) => Promise<void> }) => {
       const built = {
         session: { id, events: [] as unknown[] },
+        // 保真：宿主 agent 上下文有 systemPrompt.section（E-01 纪律——替身镜像宿主）
+        ctx: testOpts?.noSystemPrompt ? {} : { systemPrompt: { section: (s: { name: string; text: () => string }) => sections.push(s) } },
         followup: (msg?: { content?: Array<{ type?: string; text?: string }> }) => {
           // 捕获 askSkiff 注入的 question（含媒体存在性/降级说明）
           const q = (msg?.content ?? []).filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
@@ -507,6 +516,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
         return () => {}
       },
       questions,
+      sections,
     }
   }
 
@@ -993,7 +1003,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent.some((s) => s.text === '答案')).toBe(true) // 回复送达（hook 失败被吞）
   })
 
-  it('v1.30.4：session 能力角色 + existing live agent → ensure 绑定 + question 注入工作台纪律（每轮）', async () => {
+  it('v1.30.13：工作台纪律单一注入点——挂 skiff 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'logbook', 'msm'], trajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '招财' } } },
@@ -1012,7 +1022,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     const fromId = 'user@im.wechat'
     const sid = weixinSessionIdFor(fromId)
     // 两段式真实场景：第一次 incoming（agent 首次创建 → createSkiffAgent 内 ensure + 注册进注册表）；
-    // 第二次 incoming（同用户 → getSkiffAgent 命中 existing 快路径——v1.30.4 修复点：也 ensure + 注入纪律）
+    // 第二次 incoming（同用户 → getSkiffAgent 命中 existing 快路径）
     const ctx = fakeCtx('not-found')
     const msg: Parameters<typeof handleIncoming>[4] = {
       from_user_id: fromId,
@@ -1022,12 +1032,44 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
     expect(readdirSync(join(dir, 'AGENT_SESSIONS')).some((n) => n.includes('zc skiff'))).toBe(true)
     expect([...skiffSessionSnapshot().keys()].some((id) => id === sid)).toBe(true)
+    // 工作台纪律挂在 agent 系统提示词段（单一注入点）——question 不含（不再每轮重复）
+    const wsSections = ctx.sections.filter((s) => s.name === 'serenity-skiff-workspace')
+    expect(wsSections).toHaveLength(1)
+    expect(wsSections[0]!.text()).toContain('AUTO-BOUND')
+    // 动态 text()：每轮按 scope 读活跃 mdPath（绑定变化自动跟随，无需重挂）
+    expect(wsSections[0]!.text()).toContain('AGENT_SESSIONS')
+    expect(wsSections[0]!.text()).toContain('SESSION.md')
+    expect(ctx.questions.every((q) => !q.includes('Serenity Session Workspace'))).toBe(true)
+    expect(ctx.questions.some((q) => q.includes('你好'))).toBe(true)
     const questionsAfterFirst = ctx.questions.length
-    // 第二次：existing 快路径（getSkiffAgent 命中——agent 已在注册表）
+    // 第二次：existing 快路径（getSkiffAgent 命中——agent 已在注册表）——段幂等，question 仍不含
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
-    // existing 路径也注入工作台纪律（每轮——机制优先，用户拍板）
+    expect(ctx.sections.filter((s) => s.name === 'serenity-skiff-workspace')).toHaveLength(1)
     const newQuestions = ctx.questions.slice(questionsAfterFirst)
-    expect(newQuestions.some((q) => q.includes('Serenity Session Workspace') && q.includes('AUTO-BOUND') && q.includes('你好'))).toBe(true)
+    expect(newQuestions.some((q) => q.includes('你好'))).toBe(true)
+    expect(newQuestions.every((q) => !q.includes('Serenity Session Workspace'))).toBe(true)
+  })
+
+  it('v1.30.13：agent 无 systemPrompt 段 → 降级 question 前缀注入（约束必须在场）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { zc: { msms: [], tools: ['read', 'logbook', 'msm'], trajectory: { session: true }, systemPrompt: '招财' } } },
+      weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
+    }))
+    __setWeixinFetchForTest(async (input) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) return jsonResponse(200, { ret: 0 })
+      return jsonResponse(200, { ret: 0 })
+    })
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found', undefined, { noSystemPrompt: true })
+    const msg: Parameters<typeof handleIncoming>[4] = {
+      from_user_id: 'user2@im.wechat',
+      item_list: [{ type: 1, text_item: { text: '你好' } }],
+    }
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
+    expect(ctx.sections).toHaveLength(0)
+    expect(ctx.questions.some((q) => q.includes('Serenity Session Workspace') && q.includes('AUTO-BOUND') && q.includes('你好'))).toBe(true)
   })
 })
 

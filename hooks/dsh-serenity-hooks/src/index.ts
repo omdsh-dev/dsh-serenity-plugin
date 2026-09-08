@@ -50,6 +50,7 @@ import { registerWeixinBridge } from './weixin-bridge.js'
 import { registerWeixinSendApi } from './weixin-send-api.js'
 import { registerLifecycle } from './seams/lifecycle.js'
 import { registerWebFetchProvider } from './web-fetch-provider.js'
+import { registerDisposer } from './host/effect.js'
 
 export const name = 'dsh-serenity-hooks'
 
@@ -211,21 +212,67 @@ export function apply(ctx: Context, config: Config): void {
  * F4 Skiff 调试服务装配：启停 = 人工（设置面板 Skiff 区块开关，settings 持久化）。
  * settings-changed 事件触发同步（skiffEnabled 开 → 启动调试服务；关 → 停止）。
  * 角色配置（skiff.roles）从当前 CCC 根读取（进程 cwd 优先，live 会话兜底）。
+ *
+ * v1.30.13（S142 诊断 D1）：**CCC root 解析失败要重试**。旧实现只在 apply 时同步一次——
+ * 此刻通常还没有 live 会话，进程 cwd（服务启动目录）也不在 CCC 内 → `resolveSkiffRoot`
+ * 返回 null → 打印一行警告后**永不重试**（实证：重启日志
+ * `✗ Skiff 调试服务未启动：无法定位 CCC root`，`ss -ltn` 无 3099；同批 ACP 因容忍
+ * `root ?? undefined` 而正常启动）。现形态三层触发（用户"锚定要准确"同源要求）：
+ *   ① 启动时同步一次 ② 定位失败 → 定时退避重试（1s/3s/8s/20s/40s，共 5 次）
+ *   ③ 首个 live 会话就绪（`agent/session-start` / `session/created`）→ 立即再试一次。
  */
 function registerSkiff(ctx: Context): void {
   let started = false
-  const sync = (): void => {
+  let retryTimer: NodeJS.Timeout | null = null
+  let retries = 0
+  let warnedRoot = false
+
+  const clearRetry = (): void => {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer)
+      retryTimer = null
+    }
+  }
+
+  /** 退避重试定位 CCC root（幂等：已有待执行重试则不再排） */
+  const scheduleRootRetry = (): void => {
+    if (retryTimer !== null || started) return
+    if (retries >= SKIFF_ROOT_RETRY_DELAYS_MS.length) {
+      console.warn(
+        `[serenity-hooks] ✗ Skiff 调试服务未启动：重试 ${retries} 次仍无法定位 CCC root（进程 cwd 与 live 会话均无 .serenity）`,
+      )
+      return
+    }
+    const delay = SKIFF_ROOT_RETRY_DELAYS_MS[retries] ?? 0
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      retries += 1
+      sync()
+    }, delay)
+    // 不阻止进程退出（与 autopilot 时钟同款）
+    retryTimer.unref?.()
+  }
+
+  function sync(): void {
     const s = readSimpleSettings()
     if (s.skiffEnabled && !started) {
       const root = resolveSkiffRoot(ctx)
       if (!root) {
-        console.warn('[serenity-hooks] ✗ Skiff 调试服务未启动：无法定位 CCC root（进程 cwd 与 live 会话均无 .serenity）')
+        if (!warnedRoot) {
+          warnedRoot = true
+          console.warn(
+            '[serenity-hooks] ✗ Skiff 调试服务未启动：无法定位 CCC root（进程 cwd 与 live 会话均无 .serenity）——已排入退避重试',
+          )
+        }
+        scheduleRootRetry()
         return
       }
+      clearRetry()
       const webPort = readWebPort(ctx)
       startSkiffDebugServer(ctx, root, s.skiffDebugPort, webPort)
         .then(() => {
           started = true
+          if (retries > 0) console.info(`[serenity-hooks] ✓ Skiff 调试服务已启动（重试 ${retries} 次后定位到 CCC root: ${root}）`)
         })
         .catch((err) => {
           console.error(`[serenity-hooks] ✗ Skiff 调试服务启动失败: ${String((err as Error)?.message ?? err)}`)
@@ -233,16 +280,37 @@ function registerSkiff(ctx: Context): void {
     } else if (!s.skiffEnabled && started) {
       stopSkiffDebugServer()
       started = false
+    } else if (!s.skiffEnabled) {
+      // 关闭状态：清掉待执行的重试（避免关开关后仍起服务）
+      clearRetry()
+      retries = 0
+      warnedRoot = false
     }
   }
+
   try {
     ctx.on('serenity/settings-changed', sync)
   } catch {
     /* 事件通道缺失不阻断（启动时 sync 仍执行） */
   }
+  // ② / ③：live 会话就绪是"CCC root 现在可解析"的最强信号（重启后会话恢复、用户开始对话）
+  for (const eventName of ['agent/session-start', 'session/created'] as const) {
+    try {
+      ctx.on(eventName, () => {
+        if (!started) sync()
+      })
+    } catch {
+      /* 事件通道缺失不阻断（退避重试仍兜底） */
+    }
+  }
   // 启动时同步一次（settings.yaml 持久化 skiffEnabled=true → 重启后自动恢复调试服务）
   sync()
+  // F-08（v1.30.8 纪律）：重试定时器随插件卸载/HMR 拆卸（否则卸载后仍会尝试起服务）
+  registerDisposer(ctx, 'skiff root retry timer', clearRetry)
 }
+
+/** Skiff 调试服务 CCC root 退避重试间隔（毫秒；累计 ~72s 后放弃并响亮告警） */
+const SKIFF_ROOT_RETRY_DELAYS_MS = [1000, 3000, 8000, 20000, 40000] as const
 
 /**
  * 解析 Skiff 调试服务绑定的 CCC 根（v1.25.2 用户指出：skiff 必须绑定 CCC）：

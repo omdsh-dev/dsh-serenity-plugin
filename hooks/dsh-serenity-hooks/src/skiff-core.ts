@@ -74,8 +74,15 @@ const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
  * 系统提示词中的**工作台纪律块**（v1.30.4 升级：从单行路径 → 完整 ACC 层约束）。
  * 用户点破（S142）：只给路径 LLM 不会主动用——需注入「已绑定 + 使用纪律 + 动作指引」。
  * SESSION = 工作台——skiff 与主舱同一套机制（零特调，用户拍板）：
- * 自动绑定已生效（无需 logbook use）、SESSION.md 是持久记忆载体（write/edit 维护）、
- * rebuild 自动从本 SESSION 续接。注入 agent 系统提示词（用户对话面不可见）。
+ * 自动绑定已生效（无需 logbook use）、SESSION.md 是持久记忆载体、rebuild 自动从本 SESSION 续接。
+ * 注入 agent 系统提示词（用户对话面不可见）。
+ *
+ * v1.30.13（S142 诊断 D5）：写入纪律**不点名具体工具**。旧文案写死 "with write/edit"，
+ * 而 zhaocai 角色的工具白名单已移除 write/edit（写能力收归 CCC 的 session-write MSM）
+ * → 指令指向它根本没有的工具（注入纪律与能力面矛盾，模型只能猜）。
+ * 现文案改为「用本角色被授权的写入通道」——ACC 只声明义务（写进工作台），
+ * 具体通道由 CCC 的角色配置与角色提示词决定（ACC/CCC 归属二分；也不把某个 CCC 的
+ * MSM 名硬编码进 ACC 源码）。
  */
 export function workspaceTrajectoryLine(mdPath: string): string {
   return [
@@ -86,14 +93,68 @@ export function workspaceTrajectoryLine(mdPath: string): string {
     'Rules of the workspace:',
     '  1. This SESSION.md is your persistent memory carrier (like the main cabin SESSION) — ',
     '     read it first when context feels thin or work spans turns.',
-    '  2. Record key decisions/progress/unresolved items INTO this SESSION.md with write/edit',
-    '     (sections: 目标 / 状态 / 关键决策 / 进度记录 / 未解决的问题). Keep it current — it is',
+    '  2. Record key decisions/progress/unresolved items INTO this SESSION.md using the write channel',
+    '     your role is actually granted (use whatever write tool or MSM this role has — never assume',
+    '     a specific write tool exists; if none is granted, report that instead of pretending to write).',
+    '     Sections: 目标 / 状态 / 关键决策 / 进度记录 / 未解决的问题. Keep it current — it is',
     '     what a rebuild resumes from.',
     '  3. When context pressure is high, run logbook rebuild — it auto-resumes from THIS SESSION.md',
     '     (no manual use; do not switch to or read other SESSIONs unless the user explicitly asks).',
     '  4. Never expose this internal path in user-facing replies (chat stays clean).',
     '── ──',
   ].join('\n')
+}
+
+/**
+ * 已挂工作台提示词段的 agent（幂等：同一 agent 只注册一次，避免 duplicate section）。
+ * WeakSet → agent 被回收即自动清理，无泄漏。
+ */
+const workspaceSectionAgents = new WeakSet<object>()
+
+/** systemPrompt.section 的最小结构（宿主成员，不可假定存在） */
+interface SectionCapable {
+  systemPrompt?: { section?: (section: { name: string; order?: number; text: () => string }) => unknown }
+}
+
+/**
+ * 把**工作台纪律块**挂到 agent 的系统提示词段（单一真相源，v1.30.13 用户需求）。
+ *
+ * 用户原话（S142，2026-09-08）："微信桥的注入机制，每个用户消息都会注入，skiff 本身也会注入，
+ * 这样就重复，能否微信桥情况下，注入内容直接取 skiff 的，这样不用配两遍"。
+ *
+ * 现状（改前）：`createSkiffAgent` 把 `workspaceTrajectoryLine(mdPath)` 塞进基础段
+ * （创建时一次快照），微信桥又**每条消息**把同一文本拼进 question（v1.30.4 为覆盖
+ * "live/existing 快路径不重挂提示词"而加）→ 新建 agent 首轮起即重复，且每轮重复付 token。
+ *
+ * 现形态（单一注入点）：工作台行**只**经本函数挂系统提示词段（name `serenity-skiff-workspace`，
+ * 动态 `text()` 每轮按 scope 读当前活跃 mdPath → 绑定变化自动跟随，无需重挂）：
+ *  - `createSkiffAgent` 调它（不再把工作台行拼进基础段）；
+ *  - 微信桥对 live/existing agent 调它（不再拼 question）。
+ *
+ * @returns true = 段已在位（本次注册成功或此前已注册）；false = 该 agent 无法挂系统提示词段
+ *   （宿主 systemPrompt 缺失/注册抛错）→ 调用方降级为 question 前缀注入（约束必须在场）
+ */
+export function ensureWorkspacePromptSection(agent: Agent, scope: string): boolean {
+  if (!agent || typeof agent !== 'object') return false
+  if (workspaceSectionAgents.has(agent)) return true
+  const api = (agent.ctx as SectionCapable | undefined)?.systemPrompt
+  if (typeof api?.section !== 'function') return false
+  try {
+    api.section({
+      name: 'serenity-skiff-workspace',
+      // 排在基础段（serenity-skiff，-60）之后、CCC 角色段之前
+      order: -55,
+      text: () => {
+        const mdPath = getActiveSessionInfo(scope)?.mdPath
+        return mdPath ? workspaceTrajectoryLine(mdPath) : ''
+      },
+    })
+    workspaceSectionAgents.add(agent)
+    return true
+  } catch (err) {
+    console.warn(`[serenity-hooks] skiff 工作台提示词段注册失败（回退 question 注入）: ${String((err as Error)?.message ?? err)}`)
+    return false
+  }
 }
 
 /**
@@ -259,7 +320,6 @@ export async function createSkiffAgent(
       text: () =>
         [
           buildSkiffBasePrompt(roleName, role),
-          workspaceMdPath ? workspaceTrajectoryLine(workspaceMdPath) : '',
           cccPrompt,
         ]
           .filter(Boolean)
@@ -268,6 +328,9 @@ export async function createSkiffAgent(
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
   }
+  // v1.30.13：工作台纪律块**只**经 ensureWorkspacePromptSection 挂（单一注入点；
+  // 不再拼进上面的基础段——否则与微信桥每轮 question 注入重复，见该函数头 R↓）。
+  if (workspaceMdPath) ensureWorkspacePromptSection(agent, id)
   registerSkiffSession(id, roleName, root, agent)
   return { handle, agent, sessionId: id, resumed: handle.resumed }
 }

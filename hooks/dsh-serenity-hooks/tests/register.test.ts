@@ -113,14 +113,16 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     const events = on.mock.calls.map((c) => c[0] as string)
     expect(events).toContain('agent/disposed')
     expect(events).toContain('session/disposed')
-    // 四处自起资源各自登记拆卸：gateway 第二监听器 / autopilot 时钟 / lifecycle 聚合资源 /
-    // 微信主动发送入口（v1.30.9——只绑 loopback 的独立监听器）
+    // 自起资源各自登记拆卸：gateway 第二监听器 / autopilot 时钟 / lifecycle 聚合资源 /
+    // 微信主动发送入口（v1.30.9——只绑 loopback 的独立监听器）/
+    // skiff root 退避重试定时器（v1.30.13——D1 定位失败重试；卸载后不得再尝试起服务）
     const labels = effect.mock.calls.map((c) => String(c[1]))
-    expect(labels).toHaveLength(4)
+    expect(labels).toHaveLength(5)
     expect(labels.join('|')).toContain('gateway')
     expect(labels.join('|')).toContain('autopilot')
     expect(labels.join('|')).toContain('self-started resources')
     expect(labels.join('|')).toContain('weixin send api')
+    expect(labels.join('|')).toContain('skiff root retry timer')
   })
 
   it('v1.30.8 F-08：ctx.effect 缺失 → 响亮降级不抛错（apply 不可成为启动单点）', () => {

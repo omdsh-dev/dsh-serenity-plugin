@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, utimesSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, basename } from 'node:path'
 import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-tools', () => ({
@@ -42,7 +42,7 @@ import {
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
 import { setActiveSessionInfo, resetActiveSessionStore } from '../src/session-ops.js'
 import { SESSION_CONTEXT_MARKER } from '../src/session-ops.js'
-import { readLastBound } from '../src/session-bound.js'
+import { readLastBound, appendBound } from '../src/session-bound.js'
 
 let dir: string
 
@@ -77,6 +77,15 @@ function mkActiveSession(desc: string, mtimeBump = false): string {
   writeFileSync(md, `# SESSION ${desc}`)
   if (mtimeBump) utimesSync(md, new Date(), new Date(Date.now() + 60_000))
   return md
+}
+
+/**
+ * 预置**权威绑定**（`AGENT_SESSIONS/.bindings.json`）——v1.30.13（D4）后
+ * resolveSessionMdPath 的候选②b。真实形态 = 会话此前 use/create/skiff 自动绑过，
+ * 进程重启后内存活跃为空、events 无上下文时仍能精确定位。
+ */
+function bindSession(session: unknown, mdPath: string): void {
+  appendBound(session, 'activate', { dirName: basename(dirname(mdPath)), mdPath })
 }
 
 /** 构造最小可测 agent（session + steer 记录调用） */
@@ -173,6 +182,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
   it('queueRebuild：带 note → pending 存 focus + 锚点含 Task focus（透传）', async () => {
     const md = mkActiveSession('test')
     const session = fakeSession([10, 11, 12])
+    bindSession(session, md)
     const ctx = { sessions: { get: () => session } } as never
     const result = await queueRebuild(ctx, {
       root: dir,
@@ -188,9 +198,11 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(pending?.focus).toBe('完成 rebuild 焦点传递修正')
   })
 
-  it('queueRebuild：排队不立即改 surface（pending 记录 + 返回锚点 + 规范路径；v1.24.11 约定回退解析）', async () => {
+  it('queueRebuild：排队不立即改 surface（pending 记录 + 返回锚点 + 规范路径；权威绑定定位）', async () => {
     const md = mkActiveSession('test')
     const session = fakeSession([10, 11, 12])
+    // v1.30.13（D4）：定位走权威绑定（②b），不再靠"全局最新会话"约定回退
+    bindSession(session, md)
     const ctx = { sessions: { get: () => session } } as never
     const result = await queueRebuild(ctx, {
       root: dir,
@@ -311,7 +323,25 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(resolveSessionMdPath(dir, 's-snap', session as never)).toBe(md)
   })
 
-  it('resolveSessionMdPath：④ 全部候选缺失 → null（约定回退也无）', () => {
+  it('resolveSessionMdPath：②b 权威绑定命中（AGENT_SESSIONS/.bindings.json；v1.30.13 D4 新增候选）', () => {
+    // 真实形态：进程重启后 ① 内存活跃为空、② events 无 [SESSION CONTEXT]（skiff 会话从不写）、
+    // ③ 无 rebuild 锚点——旧实现只能落到 ④「全局最新会话」（可能接错轨迹）。
+    const bound = mkActiveSession('bound')
+    mkActiveSession('other') // 另一个"更新"的会话目录（旧 ④ 会误选它）
+    const session = fakeSession([])
+    bindSession(session, bound)
+    expect(resolveSessionMdPath(dir, 's-bound', session as never)).toBe(bound)
+  })
+
+  it('resolveSessionMdPath：④ 全局最新会话不再兜底 → null（防静默接错轨迹；v1.30.13 D4）', () => {
+    // 存在"最新未完成会话"目录，但本会话无任何绑定/上下文 → 必须返回 null（调用方报错引导），
+    // 而不是把它当成本会话的轨迹（旧行为 = 静默 resume 别的轨迹）。
+    mkActiveSession('latest')
+    const session = fakeSession([])
+    expect(resolveSessionMdPath(dir, 'unbound', session as never)).toBeNull()
+  })
+
+  it('resolveSessionMdPath：④ 全部候选缺失 → null（无会话目录时）', () => {
     const session = fakeSession([])
     expect(resolveSessionMdPath(dir, 'nobody', session as never)).toBeNull()
   })
@@ -382,8 +412,9 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     } as never
     registerRebuildTurnHook(ctx)
     expect(listeners).toHaveLength(1)
-    // 先排队（需可解析的会话上下文 → 约定回退）
-    mkActiveSession('hook')
+    // 先排队（需可解析的会话上下文 → 权威绑定，v1.30.13 D4）
+    const md = mkActiveSession('hook')
+    bindSession(session, md)
     const qctx = { sessions: { get: () => session } } as never
     await queueRebuild(qctx, { root: dir, summary: 'hook 重建', agentCwd: dir, dshSessionId: 's1' })
     // queue 时写绑定文件（rebuild action，v1.30.6 文件持久化）——会话日志零 append

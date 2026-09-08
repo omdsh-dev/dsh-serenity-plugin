@@ -577,10 +577,14 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(line).toContain('AUTO-BOUND')
     expect(line).toContain('no logbook use needed')
     expect(line).toContain('logbook rebuild')
-    expect(line).toContain('write/edit')
+    // v1.30.13（D5）：不点名具体工具——zhaocai 已无 write/edit（写能力归 CCC 的 session-write MSM），
+    // 旧文案 "with write/edit" 指向它没有的工具（注入纪律与能力面矛盾）
+    expect(line).not.toContain('write/edit')
+    expect(line).toContain('write channel')
+    expect(line).toContain('never assume')
   })
 
-  it('createSkiffAgent 集成：持久身份（固定 sessionId）→ 自动建 + 提示词注入工作台行', async () => {
+  it('createSkiffAgent 集成：持久身份（固定 sessionId）→ 自动建 + 工作台纪律独立提示词段（v1.30.13 单一注入点）', async () => {
     const sections: Array<{ name: string; text: () => string }> = []
     const fakeCtx = {
       agents: {
@@ -599,11 +603,14 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
       ...sessionRole(),
       systemPrompt: '角色人格',
     } as never, undefined, 'skiff-weixin-fixed-workspace')
-    // 提示词含工作台纪律块（AUTO-BOUND + SESSION.md 路径）
-    expect(sections[0]?.text()).toContain('Serenity Session Workspace')
-    expect(sections[0]?.text()).toContain('AUTO-BOUND')
-    expect(sections[0]?.text()).toContain('SESSION.md:')
-    expect(sections[0]?.text()).toContain('角色人格')
+    // 基础段（角色面）与工作台段分离——工作台纪律只挂一处（微信桥不再每轮拼 question）
+    const base = sections.find((s) => s.name === 'serenity-skiff')
+    const ws = sections.find((s) => s.name === 'serenity-skiff-workspace')
+    expect(base?.text()).toContain('角色人格')
+    expect(base?.text()).not.toContain('Serenity Session Workspace')
+    expect(ws?.text()).toContain('Serenity Session Workspace')
+    expect(ws?.text()).toContain('AUTO-BOUND')
+    expect(ws?.text()).toContain('SESSION.md:')
     // 激活命中
     expect(getActiveSessionInfo(ref.sessionId)).not.toBeNull()
     unregisterSkiffSession(ref.sessionId)
