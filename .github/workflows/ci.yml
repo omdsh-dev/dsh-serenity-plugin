@@ -77,12 +77,23 @@ jobs:
       # 两个独立 pnpm 项目：仓库根（tests/ + scripts/）与 hooks 包（hooks/**/tests/）。
       # 根 vitest 配置同时收集两者，故两个都要装。--frozen-lockfile：锁文件与
       # package.json 不一致即失败（防 CI 静默漂移）。
+      #
+      # 为什么带 `--ignore-scripts`（两处实证，run #15 / 本地冷 store 复现）：
+      #   ① **构建脚本批准**：pnpm 10+ 对未批准的依赖构建脚本**硬失败**
+      #      （`ERR_PNPM_IGNORED_BUILDS: esbuild@0.21.5, esbuild@0.28.1`）→ 根安装 exit 1。
+      #      esbuild 的平台二进制由 optional dep 提供，脚本非必需——实测跳过脚本后
+      #      986 + 1044 用例全绿。
+      #   ② **prepare 生命周期**：hooks 的 `prepare`（tsdown + `tsc --emitDeclarationOnly`）
+      #      依赖两个 tsconfig 的**本机硬编码 paths**（见文件头），在 runner 上必然失败
+      #      → hooks 安装 exit 2。CI 只需要**测试**，不需要构建产物。
+      # 两者都由 `--ignore-scripts` 一并解决；构建/类型门仍在本地发布链
+      # （`dsh-develop publish` = test + typecheck 双面 + build + pack-check）。
       - name: Install (repo root)
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install (hooks)
         working-directory: hooks/dsh-serenity-hooks
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       # 阻塞门：根 vitest 配置覆盖 tests/ + hooks/**/tests/ + scripts/（约 1000+ 用例）
       - name: Test
