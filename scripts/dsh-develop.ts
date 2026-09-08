@@ -891,7 +891,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case '-h':
       case undefined:
         console.log(`dsh-develop — dsh-serenity-plugin 开发操作 MSM（safe-mode 白名单通道）
-用法: dsh-develop <typecheck|test|coverage|build|status|commit|push|version|bump|deploy|restart-web> [args]
+用法: dsh-develop <typecheck|test|coverage|build|status|commit|push|version|bump|deploy|npm-install|restart-web|pack-check|readme-sync|publish|github-push|squash-history> [args]
   typecheck             tsc --noEmit
   test [--filter <p>]   vitest run
   coverage              vitest run --coverage（阈值门禁见 vitest.config.ts）
