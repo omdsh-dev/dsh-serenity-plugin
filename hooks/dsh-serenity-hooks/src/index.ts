@@ -220,12 +220,20 @@ export function apply(ctx: Context, config: Config): void {
  * `root ?? undefined` 而正常启动）。现形态三层触发（用户"锚定要准确"同源要求）：
  *   ① 启动时同步一次 ② 定位失败 → 定时退避重试（1s/3s/8s/20s/40s，共 5 次）
  *   ③ 首个 live 会话就绪（`agent/session-start` / `session/created`）→ 立即再试一次。
+ *
+ * v1.30.14（重启日志实证后的收敛）：**并发启动守卫** + 首次未定位降级为信息级日志。
+ *  - 实证（v1.30.13 重启日志）：重试定时器与"会话就绪"事件几乎同时触发 → 两次 sync 都
+ *    看到 `started === false` → **两次 start**（第一次绑定成功、第二次 `EADDRINUSE` 刷错误日志）。
+ *    → 加 `starting` 在飞标志（启动 Promise settle 前不再重复发起）。
+ *  - 首次未定位**不是失败**（apply 时无 live 会话是常态）→ 用 `console.log` 说明"等待 live 会话"，
+ *    只有**退避重试耗尽**才 `console.warn` 报错（失败语义只留给真正失败）。
  */
 function registerSkiff(ctx: Context): void {
   let started = false
+  let starting = false
   let retryTimer: NodeJS.Timeout | null = null
   let retries = 0
-  let warnedRoot = false
+  let informedRoot = false
 
   const clearRetry = (): void => {
     if (retryTimer !== null) {
@@ -236,7 +244,7 @@ function registerSkiff(ctx: Context): void {
 
   /** 退避重试定位 CCC root（幂等：已有待执行重试则不再排） */
   const scheduleRootRetry = (): void => {
-    if (retryTimer !== null || started) return
+    if (retryTimer !== null || started || starting) return
     if (retries >= SKIFF_ROOT_RETRY_DELAYS_MS.length) {
       console.warn(
         `[serenity-hooks] ✗ Skiff 调试服务未启动：重试 ${retries} 次仍无法定位 CCC root（进程 cwd 与 live 会话均无 .serenity）`,
@@ -255,13 +263,14 @@ function registerSkiff(ctx: Context): void {
 
   function sync(): void {
     const s = readSimpleSettings()
-    if (s.skiffEnabled && !started) {
+    if (s.skiffEnabled && !started && !starting) {
       const root = resolveSkiffRoot(ctx)
       if (!root) {
-        if (!warnedRoot) {
-          warnedRoot = true
-          console.warn(
-            '[serenity-hooks] ✗ Skiff 调试服务未启动：无法定位 CCC root（进程 cwd 与 live 会话均无 .serenity）——已排入退避重试',
+        if (!informedRoot) {
+          informedRoot = true
+          // 信息级（非失败）：apply 阶段无 live 会话是常态，退避重试与就绪事件会接手
+          console.log(
+            '[serenity-hooks] Skiff 调试服务等待 CCC root（此刻无 live 会话；已排入退避重试，会话就绪即试）',
           )
         }
         scheduleRootRetry()
@@ -269,6 +278,7 @@ function registerSkiff(ctx: Context): void {
       }
       clearRetry()
       const webPort = readWebPort(ctx)
+      starting = true
       startSkiffDebugServer(ctx, root, s.skiffDebugPort, webPort)
         .then(() => {
           started = true
@@ -277,6 +287,9 @@ function registerSkiff(ctx: Context): void {
         .catch((err) => {
           console.error(`[serenity-hooks] ✗ Skiff 调试服务启动失败: ${String((err as Error)?.message ?? err)}`)
         })
+        .finally(() => {
+          starting = false
+        })
     } else if (!s.skiffEnabled && started) {
       stopSkiffDebugServer()
       started = false
@@ -284,7 +297,7 @@ function registerSkiff(ctx: Context): void {
       // 关闭状态：清掉待执行的重试（避免关开关后仍起服务）
       clearRetry()
       retries = 0
-      warnedRoot = false
+      informedRoot = false
     }
   }
 

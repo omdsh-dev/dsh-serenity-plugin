@@ -117,21 +117,65 @@ afterEach(() => {
 })
 
 describe('Skiff 调试服务 CCC root 定位重试（D1）', () => {
-  it('无 CCC 可解析 → 响亮告警 + 不启动（但排入退避重试，不再"永不重试"）', () => {
+  it('无 CCC 可解析 → 信息级日志（非失败）+ 不启动（排入退避重试，不再"永不重试"）', () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { ctx } = mockCtx()
     apply(ctx, CONFIG)
     expect(h.start).not.toHaveBeenCalled()
-    expect(warn.mock.calls.some((c) => String(c[0]).includes('无法定位 CCC root'))).toBe(true)
-    // 告警只出现一次（不随重试刷屏）
-    const rootWarns = warn.mock.calls.filter((c) => String(c[0]).includes('无法定位 CCC root'))
-    expect(rootWarns).toHaveLength(1)
+    // 首次未定位 = 常态（apply 阶段无 live 会话）→ 信息级；失败语义只留给"重试耗尽"
+    expect(log.mock.calls.some((c) => String(c[0]).includes('等待 CCC root'))).toBe(true)
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('Skiff 调试服务未启动'))).toBe(false)
+    // 只说明一次（不随重试刷屏）
+    expect(log.mock.calls.filter((c) => String(c[0]).includes('等待 CCC root'))).toHaveLength(1)
+    log.mockRestore()
     warn.mockRestore()
+  })
+
+  it('重试耗尽（始终无 CCC）→ 响亮告警', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { ctx } = mockCtx()
+    apply(ctx, CONFIG)
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(h.start).not.toHaveBeenCalled()
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('重试 5 次仍无法定位 CCC root'))).toBe(true)
+    log.mockRestore()
+    warn.mockRestore()
+  })
+
+  it('并发触发只启动一次（v1.30.14：重试定时器 + 就绪事件同时到达 → 不得重复 start）', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    // 启动 Promise 延迟结算 → 制造"在飞"窗口（真实宿主里 listen 是异步的）
+    let resolveStart: (() => void) | undefined
+    h.start.mockImplementation(
+      () =>
+        new Promise<void>((res) => {
+          resolveStart = () => res()
+        }),
+    )
+    const { ctx } = mockCtx()
+    apply(ctx, CONFIG)
+    sessions.push({ header: { cwd: cccDir } })
+    // 重试定时器到点 + 就绪事件连续到达（同一 tick 内）
+    await vi.advanceTimersByTimeAsync(1000)
+    fire('session/created')
+    fire('agent/session-start')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(h.start).toHaveBeenCalledTimes(1)
+    resolveStart?.()
+    await vi.advanceTimersByTimeAsync(0)
+    // 不得出现"启动失败"（重复 start 会 EADDRINUSE）；apply 期间其它模块的日志不在此断言范围
+    expect(err.mock.calls.some((c) => String(c[0]).includes('Skiff 调试服务启动失败'))).toBe(false)
+    log.mockRestore()
+    err.mockRestore()
+    h.start.mockImplementation(async () => {})
   })
 
   it('退避重试：定时器到点后 CCC 已可解析 → 启动调试服务', async () => {
     const { ctx } = mockCtx()
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     apply(ctx, CONFIG)
     expect(h.start).not.toHaveBeenCalled()
     // CCC 变为可解析（live 会话出现）
@@ -140,12 +184,12 @@ describe('Skiff 调试服务 CCC root 定位重试（D1）', () => {
     expect(h.start).toHaveBeenCalledTimes(1)
     expect(h.start.mock.calls[0]![1]).toBe(cccDir)
     expect(h.start.mock.calls[0]![2]).toBe(3099)
-    warn.mockRestore()
+    log.mockRestore()
   })
 
   it('live 会话就绪事件（agent/session-start / session/created）→ 立即重试启动', async () => {
     const { ctx } = mockCtx()
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     apply(ctx, CONFIG)
     sessions.push({ header: { cwd: cccDir } })
     fire('session/created')
@@ -156,18 +200,18 @@ describe('Skiff 调试服务 CCC root 定位重试（D1）', () => {
     fire('agent/session-start')
     await vi.advanceTimersByTimeAsync(0)
     expect(h.start).toHaveBeenCalledTimes(1)
-    warn.mockRestore()
+    log.mockRestore()
   })
 
   it('关闭开关 → 清掉待执行的重试（不会"关了还起服务"）', async () => {
     const { ctx } = mockCtx()
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     apply(ctx, CONFIG)
     sessions.push({ header: { cwd: cccDir } })
     h.settings = { skiffEnabled: false, skiffDebugPort: 3099 }
     fire('serenity/settings-changed')
     await vi.advanceTimersByTimeAsync(120_000)
     expect(h.start).not.toHaveBeenCalled()
-    warn.mockRestore()
+    log.mockRestore()
   })
 })

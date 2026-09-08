@@ -1,3 +1,24 @@
+## v1.30.14 — 2026-09-08（重启日志实证后的收敛：Skiff 启动并发守卫 + 首 miss 降为信息级，S142）
+
+**Scope:** v1.30.13 发布并 restart-web 后，**运行日志实证** D1 修复生效，同时暴露两处需要收敛的细节。
+
+### 实证（v1.30.13 重启日志 `/tmp/dsh-web-restart-v1.30.13.log`）
+```
+[serenity-hooks] ✗ Skiff 调试服务未启动：无法定位 CCC root（…）——已排入退避重试
+[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:3099（默认 CCC: /home/yh/home/home-serenity，WebUI: 3080）
+[serenity-hooks] ✓ Skiff 调试服务已启动（重试 1 次后定位到 CCC root: /home/yh/home/home-serenity）
+[serenity-hooks] ✗ Skiff 调试服务启动失败: listen EADDRINUSE: address already in use 127.0.0.1:3099   ← 本次修复
+```
+→ **D1 修复确认有效**（3099 起得来，退避重试路径实证）；但**重试定时器与"会话就绪"事件几乎同时到达** → 两次 `sync()` 都看到 `started === false` → 发起两次启动（第一次绑定成功、第二次 `EADDRINUSE` 刷错误日志）。
+
+### 修复
+- **并发启动守卫**：新增 `starting`（在飞）标志——启动 Promise settle 前不再重复发起；`scheduleRootRetry` 同样跳过在飞状态。语义 = 「同一时刻只允许一次启动尝试」，与 `started`（已就绪）互补
+- **首次未定位降级为信息级**：apply 阶段无 live 会话是**常态而非失败** → `console.log('Skiff 调试服务等待 CCC root（…）')`；**失败语义只留给"退避重试耗尽"**（`console.warn`）——日志里不再出现误导性的 `✗ … 未启动`，可观测性语义与真实状态一致（E↑）
+
+### 验证
+- `tests/skiff-startup-retry.test.ts` 扩到 **6 用例**：信息级日志且不刷屏 / 重试耗尽才响亮告警 / **并发触发只启动一次**（延迟结算的 start Promise 制造在飞窗口，断言无"启动失败"日志）/ 退避成功 / 就绪事件即启 / 关开关清重试
+- **72 files / 1011 tests 全绿**（1009 → 1011）+ typecheck 双面 ✓ + build ✓
+
 ## v1.30.13 — 2026-09-08（会话锚定准确性 D1/D4/D5 + 微信桥注入去重，S142）
 
 **Scope:** 用户要求"**我主要是要求微信桥 + skiff 的会话锚定要准确**"——诊断出 D1~D6 六项（全实证，见 S142 §8），本轮修复其中三项（D4/D5/D1）+ 用户当轮新增需求"微信桥注入与 skiff 注入重复，注入内容直接取 skiff 的"。D2（zhaocai 轨迹归属）待用户拍板，D3/D6 随 D4 一并收口。
