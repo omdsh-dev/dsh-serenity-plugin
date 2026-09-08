@@ -30,6 +30,11 @@
 - `deploy` ✓（staging 双锚 + profile 双目标 + preflight 注入面含 `web`）
 - **⏸ 运行时验证待 restart-web**：重启后 `web_fetch` 应能抓取 fake-ip 网络下的公网站点（本方案生效点）
 
+### 发布链（2026-09-08，用户"现在就发布" = D14 显式触发）
+- `version` 三处一致 1.30.12 ✓ → `publish` ✓（test **71 files / 1002 tests** → typecheck 双面 → build → readme-sync → pack-check **90 文件**；lib 84 项 = js 13 / d.ts 71，含新 `web-fetch-provider.d.ts`）→ npm `@shgroup/dsh-serenity-hooks@1.30.12` → `push` origin ✓ → `github-push` github + omdsh ✓（三推全成）
+- `deploy` ✓ 于发布前完成（staging 双锚 + profile 双目标 + preflight 注入面含 `web`）——本机 profile 已是 v1.30.12
+- **⏸ restart-web**：用户授权后执行（执行即断当前会话，重建后接续实测 `web_fetch`）
+
 ## v1.30.11 — 2026-09-08（README 完整重写：人话版 + 声明面校准，S142）
 
 **Scope:** 用户"帮我把 dsp 的 README 完整重写吧，之前写的内容都正确，就是不太说人话"。原则：**信息一条不丢，只换说法**——所有能力/端口/配置/用例/FAQ 保留，术语首次出现给一句白话解释，长名词堆叠改成人话短句。
