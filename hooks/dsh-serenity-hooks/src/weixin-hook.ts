@@ -60,17 +60,20 @@ export interface WeixinHookIncomingEvent extends WeixinHookEventBase {
   }
 }
 
+/**
+ * outgoing 事件来源：
+ *  - `reply`（缺省，向后兼容）= 收到用户消息后的回复
+ *  - `proactive` = 桥被调用主动发给指定用户（CCC MSM 经本机入口发起）
+ *  - `reply-fallback`（v1.30.17）= 手动输出模式下 agent 本轮一次都没发送成功 → 桥兜底转发其最终文本
+ */
+export type WeixinOutgoingSource = 'reply' | 'proactive' | 'reply-fallback'
+
 /** outgoing 事件（bot → 用户）：回复文本（已剥离 think） */
 export interface WeixinHookOutgoingEvent extends WeixinHookEventBase {
   event: 'outgoing'
   reply: string
-  /**
-   * 触发来源（v1.30.9，S142 用户需求"微信桥支持被调用发消息"）：
-   *  - `reply`（缺省，向后兼容）= 收到用户消息后的回复
-   *  - `proactive` = 桥被调用主动发给指定用户（CCC MSM 经本机入口发起）
-   * 记录侧可据此区分"对话回复"与"主动留言"。
-   */
-  source?: 'reply' | 'proactive'
+  /** 触发来源（v1.30.9 引入 `proactive`；v1.30.17 增 `reply-fallback`） */
+  source?: WeixinOutgoingSource
 }
 
 /** 全部 hook 事件（判别联合） */
@@ -98,8 +101,8 @@ export interface OutgoingHookInput {
   sessionId: string
   role: string
   reply: string
-  /** 缺省 'reply'（对话回复）；'proactive' = 桥被调用主动发送 */
-  source?: 'reply' | 'proactive'
+  /** 缺省 'reply'（对话回复）；'proactive' = 主动发送；'reply-fallback' = 手动模式兜底转发 */
+  source?: WeixinOutgoingSource
 }
 
 /** 构造 incoming 事件对象（纯函数，可测） */
@@ -130,7 +133,7 @@ export function buildOutgoingHookEvent(input: OutgoingHookInput): WeixinHookOutg
     sessionId: input.sessionId,
     role: input.role,
     reply: input.reply,
-    ...(input.source === 'proactive' ? { source: 'proactive' as const } : {}),
+    ...(input.source && input.source !== 'reply' ? { source: input.source } : {}),
   }
 }
 

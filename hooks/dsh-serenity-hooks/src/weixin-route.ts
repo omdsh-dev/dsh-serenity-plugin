@@ -60,6 +60,8 @@ export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SEREN
       hook: typeof w.hook === 'string' && w.hook.trim() !== '' ? w.hook.trim() : undefined,
       // v1.30.10：缺省 true（现状）——只有显式 false 才关闭自动回发最终文本
       autoReplyWithLastMessage: w.autoReplyWithLastMessage !== false,
+      // v1.30.17：手动模式的兜底——缺省 false（严格静默，向后兼容）；只有显式 true 才启用
+      fallbackOnNoSend: w.fallbackOnNoSend === true,
       accounts: Array.isArray(w.accounts)
         ? w.accounts
             .filter((a): a is { accountId: string; name?: string; enabled?: boolean } =>

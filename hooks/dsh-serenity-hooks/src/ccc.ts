@@ -214,6 +214,23 @@ export interface WeixinSettings {
    * agent 一轮未输出 → 静默不兜底（否则开关语义被破坏）。
    */
   autoReplyWithLastMessage?: boolean;
+  /**
+   * 手动输出模式下的**兜底**（v1.30.17，S142 用户拍板"鲁棒修法"；**缺省 false = 严格静默**）。
+   *
+   * 仅在 `autoReplyWithLastMessage: false` 时生效：
+   * - `true` → 一轮结束时若 agent **一次都没成功调用 `weixin-send`**，桥把该轮最终文本转发给用户
+   *   （记录 `source: "reply-fallback"`，并在日志留响亮告警）。
+   * - `false`（缺省）→ 保持 v1.30.10 的"静默不兜底"语义。
+   *
+   * 为什么需要（实证 R↓）：v1.30.16 的机械闸门会打回 ≤2 次；但用户实测某模型在**寒暄类消息**上
+   * 连续 4 轮（turn 186/191/192/193）、跨 3 版 CCC 提示词（v0/v1/v2）仍不调工具 → 打回用尽后
+   * **用户什么都收不到**。提示词与闸门均已排除（同一模型在任务类消息下正常发送）→ 桥兜底是
+   * 唯一能保证"不丢消息"的机械手段。
+   *
+   * 代价（显式）：角色失去"故意静默"能力（它总会产出一段最终文本）→ 需要严格静默的角色保持缺省。
+   * agent 只要自己发过（哪怕只发一条），桥就不兜底——输出权仍在 agent。
+   */
+  fallbackOnNoSend?: boolean;
 }
 
 /** 微信桥账号配置（serenity.json 内；凭据部分在 localstore） */

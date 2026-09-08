@@ -1,3 +1,50 @@
+## v1.30.17 — 2026-09-09（手动模式兜底：不让消息丢掉，S142 用户拍板"鲁棒修法"）
+
+**Scope:** v1.30.16 的机械闸门（打回 ≤2 次）在真实模型上失效——用户实测某模型在**寒暄类消息**（「你好」）上
+连续 4 轮（turn 186/191/192/193）、跨 **3 版 CCC 提示词**（v0/v1/v2：v2 已写明"第一个输出必须是 weixin-send 工具调用"
+并把可照抄的完整命令递到消息末尾）仍**零工具调用** → 闸门打回用尽后**用户什么都收不到**。
+实证链：request/header 确认 v2 内容已在系统提示词中、`"type":"tool/call"` 在 turn 193 命中 0 条、
+同一模型在**任务类**消息（turn 190）下正常调工具并发送成功 → 提示词与闸门均已排除，属模型遵循度问题。
+用户拍板：**ACC 侧兜底（三态配置）**。
+
+### 新增 `weixin.fallbackOnNoSend`（缺省 false = 严格静默，向后兼容）
+- **语义**：仅在 `autoReplyWithLastMessage: false` 时生效。`true` → 一轮结束时若 agent **一次都没成功**
+  调用 `weixin-send`（闸门打回用尽），桥把该轮最终文本转发给用户（记录 `source: "reply-fallback"`，
+  日志留 `⚠ weixin 输出兜底` 告警）；agent 自己发过 → **不兜底**（输出权仍在 agent）
+- **三态**：① `autoReplyWithLastMessage: true`（缺省）= 桥总是回发；② `=false` + `fallbackOnNoSend: true`
+  = agent 优先、桥兜底（**推荐**）；③ 两者皆 false（缺省）= 严格静默（v1.30.10 语义）
+- **代价（显式写入配置注释）**：角色失去"故意静默"能力（它总会产出一段最终文本）→ 需要严格静默的角色保持缺省
+- **前置条件**：兜底只在**闸门装配成功**时生效（`isWeixinOutputGuardActive()`）——未装配则无法判定
+  "是否发送过" → 宁可静默也不冒重复发送风险
+
+### 实现（决策放桥、判定放闸门——R↓）
+- `src/ccc.ts`：`WeixinSettings.fallbackOnNoSend?: boolean`（头注写全理由/代价/实证链）
+- `src/weixin-route.ts`：`readWeixinSettings` 归一（只有显式 `true` 才启用）
+- `src/weixin-hook.ts`：新 `WeixinOutgoingSource = 'reply' | 'proactive' | 'reply-fallback'`；
+  `buildOutgoingHookEvent` 改为**透传非 `reply` 来源**（原实现只认 `proactive`，其余来源会被静默丢弃）
+- `src/weixin-output-guard.ts`：新增 `clearSentThisTurn`（**桥在每轮开始清空**——turn 边界归桥）+
+  `isWeixinOutputGuardActive`；**turn-stopping 不再清空标记**（否则桥读不到本轮结果、无法兜底）
+- `src/weixin-bridge.ts`：新纯函数 **`manualOutputFallbackNeeded`**（四条件矩阵：开关 / 闸门装配 / 未发送 /
+  有文本——把决策从装配里抽出来，可独立测试）+ `askSkiff` 后用**既有回复通道**（含 `context_token`）
+  转发最终文本 + `source: "reply-fallback"` 记录 + 响亮告警
+- **为什么兜底放桥而不是闸门（R↓）**：桥手里已有 `answer`（最终文本）与 `context_token`（正常回复通道），
+  无需从会话事件里反查文本、复用既有记录路径；闸门只负责"本轮是否发过"的判定
+
+### 文档同步
+- dsp `msm-ops.ts` CCC_CONFIG_REFERENCE §8：新增 `weixin.fallbackOnNoSend` 段（三态速查 + 前置条件 + 实证）
+  + outgoing 事件 schema 的 `source` 补 `reply-fallback`
+- CCC `weixin-doctor guide` §5/§7：事件 `source` 三值 + 新增「兜底：不让消息丢掉（v1.30.17）」段
+- CCC 侧 `.opencode/serenity.json`：home-serenity 开 `fallbackOnNoSend: true`（招财用）
+
+### 验证
+- 新 `manualOutputFallbackNeeded` 矩阵 **6 断言**（开启+未发送 → 兜底；已发送 → 不重复；缺省/显式 false → 静默；
+  闸门未装配 → 不兜底；空文本 → 不兜底）
+- 新集成用例 **2 个**：① `fallbackOnNoSend: true` + 闸门装配 + 本轮未发送 → 转发最终文本（`context_token` 回带）
+  + hook `source: "reply-fallback"`；② 缺省 → 只有系统类「新对话」通知（严格静默）
+- 闸门用例更新：标记保留到桥读取（turn-stopping 不再清空）+ `isWeixinOutputGuardActive` 两态 + 打回计数清零用例
+  改为"桥在轮开始清空"语义
+- **73 files / 1050 tests 全绿**（1045 → 1050）+ typecheck 双面 ✓ + build ✓
+
 ## v1.30.16 — 2026-09-08（手动输出纪律：措辞归 CCC + 机械闸门，S142 用户两条指令）
 
 **Scope:** 用户两条指令——① "这句词哪里配置的：── Reply Output (manual mode) ── … 用 EAP 重写，约束不够，LLM 不听" ② "**这个词不能让 ACC 定义，要让 CCC 定义**"。即 v1.30.10 手动输出模式（`weixin.autoReplyWithLastMessage: false`）的注入文案既**软**（全陈述/举例/许可，无祈使硬约束，实测 LLM 不遵守）又**归属错误**（纪律措辞属内容，归 CCC）。

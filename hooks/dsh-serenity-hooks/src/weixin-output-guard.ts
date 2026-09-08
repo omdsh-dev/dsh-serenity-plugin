@@ -39,10 +39,15 @@ export interface ManualOutputSession {
 }
 
 const manualSessions = new Map<string, ManualOutputSession>()
-/** 本轮已成功发送的会话（turn-stopping 时结算并清空） */
+/**
+ * 本轮是否已成功发送（**由桥在每轮开始时清空** `clearSentThisTurn`；闸门只置位不清空——
+ * v1.30.17 起桥要在 `askSkiff` 返回后读它决定是否兜底，故 turn-stopping 不再结算清空）。
+ */
 const sentThisTurn = new Set<string>()
 /** 连续打回计数（成功发送即清零） */
 const rebukeCounts = new Map<string, number>()
+/** 闸门是否装配成功（v1.30.17：桥据此判断能否信任"未发送"这一判定——未装配时不兜底，防重复发送） */
+let guardActive = false
 
 /** 桥：登记手动模式会话（每轮 incoming 都调用，幂等覆盖） */
 export function noteManualOutputSession(sessionId: string, session: ManualOutputSession): void {
@@ -62,9 +67,22 @@ export function isManualOutputSession(sessionId: string): boolean {
   return manualSessions.has(sessionId)
 }
 
-/** 本轮是否已成功发送（测试/诊断用） */
+/** 本轮是否已成功发送（测试/诊断用；桥在每轮结束时读它决定是否兜底） */
 export function hasSentThisTurn(sessionId: string): boolean {
   return sentThisTurn.has(sessionId)
+}
+
+/**
+ * 桥：**每轮开始时**清空本会话的"已发送"标记（turn 边界由桥掌握——v1.30.17）。
+ * 闸门侧不再于 turn-stopping 结算清空，否则桥读不到本轮结果、无法兜底。
+ */
+export function clearSentThisTurn(sessionId: string): void {
+  sentThisTurn.delete(sessionId)
+}
+
+/** 闸门是否装配成功（未装配 → 桥不做兜底：宁可静默也不冒重复发送的风险） */
+export function isWeixinOutputGuardActive(): boolean {
+  return guardActive
 }
 
 /** 从 agent / 会话对象取会话 id（形状宽容） */
@@ -98,6 +116,7 @@ export function __resetWeixinOutputGuardForTest(): void {
   manualSessions.clear()
   sentThisTurn.clear()
   rebukeCounts.clear()
+  guardActive = false
 }
 
 /**
@@ -136,15 +155,15 @@ export function registerWeixinOutputGuard(ctx: Context): void {
       const session = manualSessions.get(sessionId)
       if (!session) return
       const sent = sentThisTurn.has(sessionId)
-      sentThisTurn.delete(sessionId) // 本轮结算（下一轮重新判定）
+      // v1.30.17：**不清空**——桥在 askSkiff 返回后读 hasSentThisTurn 决定是否兜底转发
       if (sent) return
 
       const count = (rebukeCounts.get(sessionId) ?? 0) + 1
       if (count > WEIXIN_OUTPUT_REBUKE_MAX) {
         rebukeCounts.delete(sessionId)
-        // 达上限：放弃打回但**响亮告警**（用户确实什么都收不到——必须可观测）
+        // 达上限：放弃打回但**响亮告警**（若 CCC 开了 fallbackOnNoSend，桥随后会兜底转发）
         console.warn(
-          `[serenity-hooks] ✗ weixin 输出闸门：连续 ${WEIXIN_OUTPUT_REBUKE_MAX} 次打回后仍未发送（session=${sessionId}, role=${session.role}）——本轮用户将收不到任何回复`,
+          `[serenity-hooks] ✗ weixin 输出闸门：连续 ${WEIXIN_OUTPUT_REBUKE_MAX} 次打回后仍未发送（session=${sessionId}, role=${session.role}）——本轮用户将收不到 agent 自己发的消息`,
         )
         return
       }
@@ -163,5 +182,8 @@ export function registerWeixinOutputGuard(ctx: Context): void {
     })
   } catch {
     console.warn('[serenity-hooks] ✗ weixin 输出闸门未装配：agent/turn-stopping 不可用')
+    return
   }
+  // 两个事件通道都装配成功 → 桥可信任"未发送"判定（v1.30.17 兜底前置条件）
+  guardActive = true
 }

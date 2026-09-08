@@ -74,6 +74,8 @@ import {
   nextWeixinAccountId,
 } from '../src/weixin-route.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
+import { manualOutputFallbackNeeded } from '../src/weixin-bridge.js'
+import { registerWeixinOutputGuard } from '../src/weixin-output-guard.js'
 
 let dir: string
 let oldConfigEnv: string | undefined
@@ -616,6 +618,90 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
     // ③ 记录只有 incoming——桥没发消息，故无 outgoing(reply)；agent 自己发的走 source=proactive
     expect(hookEvents.map((e) => (e as { event: string }).event)).toEqual(['incoming'])
+  })
+
+  it('v1.30.17 兜底判定矩阵（manualOutputFallbackNeeded：四条件全成立才兜底）', () => {
+    const base = { guardActive: true, sentThisTurn: false, answer: '答案' }
+    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true })).toBe(true)
+    // agent 自己发过 → 不重复（输出权归 agent）
+    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true, sentThisTurn: true })).toBe(false)
+    // 缺省（未配置 / 显式 false）→ 严格静默（v1.30.10 语义，向后兼容）
+    expect(manualOutputFallbackNeeded({ ...base })).toBe(false)
+    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: false })).toBe(false)
+    // 闸门未装配 → 无法判定"是否发送过" → 不兜底（防重复发送）
+    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true, guardActive: false })).toBe(false)
+    // 无最终文本 → 不兜底
+    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true, answer: '' })).toBe(false)
+  })
+
+  it('v1.30.17 fallbackOnNoSend=true + 闸门已装配 + 本轮未发送 → 桥兜底转发最终文本（source=reply-fallback）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, autoReplyWithLastMessage: false, fallbackOnNoSend: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+    }))
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
+    const sent: Array<{ text: string; contextToken?: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }>; context_token?: string } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text, contextToken: p.msg.context_token })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    const hookEvents: unknown[] = []
+    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    setWeixinHookRunnerForTest(async (_root, _rel, ev) => {
+      hookEvents.push(ev)
+      return { ok: true }
+    })
+    // 闸门装配（handler 不会被触发 → 本轮"未发送"成立）；同时验证 guardActive=true
+    registerWeixinOutputGuard({ on: () => () => {} } as never)
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'fallback@im.wechat',
+      context_token: 'ct-fb',
+      item_list: [{ type: 1, text_item: { text: '你好' } }],
+    })
+
+    // 系统类「新对话」通知 + 兜底转发的最终文本（markdown **答**案 → 答案，context_token 回带）
+    expect(sent.map((s) => s.text)).toEqual(['（新的对话已开始）', '答案'])
+    expect(sent[1]!.contextToken).toBe('ct-fb')
+    // 记录：incoming + outgoing(source=reply-fallback) —— 与 agent 自己发的 proactive 可区分
+    const outgoing = hookEvents.filter((e) => (e as { event: string }).event === 'outgoing') as Array<{ source?: string; reply?: string }>
+    expect(outgoing).toHaveLength(1)
+    expect(outgoing[0]!.source).toBe('reply-fallback')
+    expect(outgoing[0]!.reply).toBe('答案')
+  })
+
+  it('v1.30.17 fallbackOnNoSend 缺省（false）→ 不兜底（严格静默，向后兼容）', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+      weixin: { enabled: true, autoReplyWithLastMessage: false, routes: [{ user: '*', role: 'qa' }] },
+    }))
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
+    const sent: Array<{ text: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { item_list: Array<{ text_item: { text: string } }> } }
+        sent.push({ text: p.msg.item_list[0]!.text_item.text })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    registerWeixinOutputGuard({ on: () => () => {} } as never)
+    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+      from_user_id: 'strict@im.wechat',
+      context_token: 'ct',
+      item_list: [{ type: 1, text_item: { text: '你好' } }],
+    })
+    expect(sent.map((s) => s.text)).toEqual(['（新的对话已开始）'])
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('v1.30.10 autoReplyWithLastMessage=true（显式）→ 仍自动回发（开关对照）', async () => {

@@ -23,7 +23,7 @@ import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downl
 import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
-import { noteManualOutputSession, forgetManualOutputSession } from './weixin-output-guard.js'
+import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './weixin-output-guard.js'
 import { getActiveSessionInfo } from './session-ops.js'
 import { hostSessions } from './host/access.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
@@ -156,6 +156,24 @@ export function weixinManualOutputMarker(root: string, accountId: string, userId
     '[serenity:weixin-manual-output]',
     `msm("weixin-send", ["send", "--ccc", "${root}", "--account", "${accountId}", "--user", "${userId}", "<回复>"])`,
   ].join('\n')
+}
+
+/**
+ * 手动输出模式的**兜底判定**（纯函数，v1.30.17——把决策矩阵从装配里抽出来，可独立测试）。
+ *
+ * 四个条件同时成立才兜底：
+ * ① CCC 显式开启 `fallbackOnNoSend`（缺省 false = 严格静默，向后兼容）
+ * ② 机械闸门**已装配**（未装配时无法判定"是否发送过" → 宁可静默也不冒重复发送风险）
+ * ③ 本轮**没有**成功发送（agent 自己发过 → 输出权归 agent，桥不插话）
+ * ④ 有最终文本可转发（空文本无意义）
+ */
+export function manualOutputFallbackNeeded(input: {
+  fallbackOnNoSend?: boolean
+  guardActive: boolean
+  sentThisTurn: boolean
+  answer: string
+}): boolean {
+  return input.fallbackOnNoSend === true && input.guardActive && !input.sentThisTurn && input.answer !== ''
 }
 
 /**
@@ -304,6 +322,8 @@ export async function handleIncoming(
       if (text) parts.push(text)
       parts.push(...mediaNotes, ...degradedNotes)
       if (manualOutput) {
+        // v1.30.17：本轮开始 → 清空"已发送"标记（闸门只置位；桥在 askSkiff 后读它决定兜底）
+        clearSentThisTurn(sessionId)
         noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: roleName })
         parts.push(weixinManualOutputMarker(root, accountId, fromUserId))
       } else {
@@ -330,9 +350,48 @@ export async function handleIncoming(
 
       const result = await askSkiff(ctx, ref.agent, question, undefined, { includeTrajectory: false })
       const answer = result.answer ?? ''
-      // v1.30.10：手动输出模式——桥不转发最终文本（用户拍板：静默不兜底；记录只记 agent
-      // 实际发出的消息，source=proactive）。系统类消息（新对话通知/语音提示）不受影响。
-      if (manualOutput) return
+      // v1.30.10：手动输出模式——桥不转发最终文本（输出权归 agent，记录只记 agent 实际发出的
+      // 消息，source=proactive）。系统类消息（新对话通知/语音提示）不受影响。
+      //
+      // v1.30.17 兜底（S142 用户拍板"鲁棒修法"）：`weixin.fallbackOnNoSend: true` 时，若本轮
+      // agent **一次都没成功调用 weixin-send**（闸门打回 ≤2 次仍无效——实证某模型在寒暄类消息
+      // 上跨 3 版提示词仍不调工具），桥把该轮最终文本转发给用户（`source: "reply-fallback"`），
+      // 保证"不丢消息"。前置条件 `isWeixinOutputGuardActive()`：闸门未装配 → 无法判定 → 不兜底
+      // （宁可静默也不冒重复发送的风险）。agent 自己发过 → 不兜底，输出权仍在 agent。
+      if (manualOutput) {
+        const fallback = manualOutputFallbackNeeded({
+          fallbackOnNoSend: settings.fallbackOnNoSend,
+          guardActive: isWeixinOutputGuardActive(),
+          sentThisTurn: hasSentThisTurn(sessionId),
+          answer,
+        })
+        if (!fallback) return
+        const reply = markdownToPlainText(stripThink(answer))
+        await sendTextMessage({
+          baseUrl: cred.baseUrl,
+          token: cred.token,
+          toUserId: fromUserId,
+          text: reply,
+          contextToken: msg.context_token,
+        })
+        console.warn(
+          `[serenity-hooks] ⚠ weixin 输出兜底：agent 本轮未发送（闸门打回用尽）→ 桥转发最终文本（session=${sessionId}, role=${roleName}）`,
+        )
+        if (hookRel) {
+          void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
+            cccRoot: root,
+            accountId,
+            userId: fromUserId,
+            sessionId,
+            role: roleName,
+            reply,
+            source: 'reply-fallback',
+          })).catch((err) => {
+            console.log(`[serenity-hooks] weixin hook outgoing(reply-fallback) error: ${err instanceof Error ? err.message : String(err)}`)
+          })
+        }
+        return
+      }
       if (answer === '') return
 
       // 回复文本：stripThink 剥离 <think> 块（微信桥用户反馈：用户不应看到思考过程）→

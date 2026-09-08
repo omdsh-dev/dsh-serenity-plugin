@@ -283,13 +283,25 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
     机械闸门（v1.30.16）：本轮 turn 结束仍未成功调用 weixin-send → agent 被打回（≤2 次，
     提示 = 标记 + 事实）；达上限放弃并响亮告警。失败调用不算已送达。
     语义边界（用户拍板）：只关最终文本；系统类消息（新对话通知 / 语音无法解析提示）保留；
-    **agent 一轮未输出 → 静默不兜底**（否则开关失去意义）；typing 指示与 incoming hook 不受影响。
+    typing 指示与 incoming hook 不受影响。
+
+  ▸ weixin.fallbackOnNoSend（v1.30.17，手动模式的**兜底**；缺省 false）：
+    仅在 autoReplyWithLastMessage=false 时生效。true → 一轮结束时若 agent **一次都没成功**
+    调用 weixin-send（闸门打回用尽），桥把该轮最终文本转发给用户（记录 source="reply-fallback"，
+    日志留响亮告警）——保证"不丢消息"。agent 自己发过 → 不兜底（输出权仍在 agent）。
+    为什么需要（实证）：v1.30.16 闸门会打回 ≤2 次，但实测某模型在**寒暄类消息**上连续 4 轮、
+    跨 3 版 CCC 提示词仍不调工具 → 打回用尽后用户什么都收不到；提示词与闸门均已排除。
+    代价（显式）：角色失去"故意静默"能力（它总会产出一段最终文本）→ 需严格静默的角色保持缺省。
+    三态：① autoReplyWithLastMessage=true（缺省）桥总是回发；② =false + fallbackOnNoSend=true
+    = agent 优先、桥兜底（推荐）；③ 两者皆 false（缺省）= 严格静默（v1.30.10 语义）。
+    ⚠️ 兜底只在**闸门装配成功**时生效（未装配则无法判定是否发送过 → 不冒重复发送风险）。
 
   Config:
     { "weixin": {
         "enabled": true,
         "hook": "scripts/weixin-message-hook.ts",
         "autoReplyWithLastMessage": true,
+        "fallbackOnNoSend": false,
         "accounts": [{ "accountId": "wechat-1", "name": "家庭助手", "enabled": true }],
         "routes": [{ "user": "*", "role": "zhaocai" }]
       } }
@@ -302,7 +314,8 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
     incoming  = 用户 → bot：路由命中后、媒体落盘后触发（文本含语音转写；媒体带落盘 relPath）
     outgoing  = bot → 用户：发送成功后触发（reply = 用户实际收到的纯文本，已剥离 think）
       · source="reply"（缺省）= 回复用户消息；source="proactive"（v1.30.9）= bot 主动发起
-        （CCC 经 weixin-send MSM → dsp 主动发送入口 → sendProactiveText）
+        （CCC 经 weixin-send MSM → dsp 主动发送入口 → sendProactiveText）；
+        source="reply-fallback"（v1.30.17）= 手动模式下 agent 本轮未发送 → 桥兜底转发最终文本
       · file（仅 send-file 补记）：{ "name": "报告.pdf", "size": 12345, "caption": "可选" }
 
   脚本约定（事件 JSON 单行经 stdin 传入；bun 优先 node 兜底）：
@@ -317,7 +330,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
       "message": { "text": "你好", "media": [{ "kind": "image", "relPath": "_tmp/weixin-inbound/<hash>/img_x.jpg" }] } }
     { "event": "outgoing", "ts": ..., "cccRoot": ..., "accountId": ...,
       "userId": ..., "sessionId": ..., "role": ...,
-      "reply": "已记录（纯文本）", "source": "reply" | "proactive" }
+      "reply": "已记录（纯文本）", "source": "reply" | "proactive" | "reply-fallback" }
 
   示例脚本（追加到按日文件——持久化归 CCC 自选：文件/DB/远端均可）：
     const fs = require('node:fs'); const p = '/path/ccc/AGENT_SESSIONS/_weixin-log.jsonl';

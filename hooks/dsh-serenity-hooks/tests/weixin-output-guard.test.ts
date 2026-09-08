@@ -8,10 +8,12 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 import {
   WEIXIN_OUTPUT_REBUKE_MAX,
   buildManualOutputRebuke,
+  clearSentThisTurn,
   forgetManualOutputSession,
   hasSentThisTurn,
   isManualOutputSession,
   isSuccessfulWeixinSend,
+  isWeixinOutputGuardActive,
   noteManualOutputSession,
   registerWeixinOutputGuard,
   __resetWeixinOutputGuardForTest,
@@ -148,7 +150,7 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     expect(f.has('agent/turn-stopping')).toBe(true)
   })
 
-  it('本轮成功发送 → 不打回；turn 结束清空本轮标记（下一轮重新判定）', async () => {
+  it('本轮成功发送 → 不打回；标记保留到桥读取（v1.30.17 起 turn-stopping 不再清空）', async () => {
     const f = fakeCtx()
     registerWeixinOutputGuard(f.ctx as never)
     noteManualOutputSession(SESSION, MANUAL)
@@ -157,7 +159,22 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     expect(hasSentThisTurn(SESSION)).toBe(true)
     f.stopTurn(agent)
     expect(steers).toEqual([])
-    expect(hasSentThisTurn(SESSION)).toBe(false) // 结算后清空
+    // v1.30.17：闸门不清空——桥在 askSkiff 后读它决定是否兜底；清空由桥每轮开始执行
+    expect(hasSentThisTurn(SESSION)).toBe(true)
+    clearSentThisTurn(SESSION)
+    expect(hasSentThisTurn(SESSION)).toBe(false)
+  })
+
+  it('闸门装配成功 → isWeixinOutputGuardActive() true（桥据此决定是否信任"未发送"判定）', () => {
+    const f = fakeCtx()
+    registerWeixinOutputGuard(f.ctx as never)
+    expect(isWeixinOutputGuardActive()).toBe(true)
+  })
+
+  it('事件通道缺失 → 闸门未装配且 isWeixinOutputGuardActive() false（桥不兜底，防重复发送）', () => {
+    __resetWeixinOutputGuardForTest()
+    registerWeixinOutputGuard({ on: () => { throw new Error('no channel') } } as never)
+    expect(isWeixinOutputGuardActive()).toBe(false)
   })
 
   it('本轮未发送 → steer 打回（含标记 + 已填命令）', () => {
@@ -214,6 +231,7 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     f.stopTurn(agent, 1) // 打回 1/2
     await f.runTool(sendExec(), { isError: false }) // 成功 → 计数清零
     f.stopTurn(agent, 2) // 本轮已发送 → 不打回
+    clearSentThisTurn(SESSION) // v1.30.17：新的一轮由**桥**在轮开始清空标记
     f.stopTurn(agent, 3) // 新的一轮未发送 → 重新 1/2
     expect(steers).toHaveLength(2)
     expect(log.mock.calls.some((c) => String(c[0]).includes('打回 1/2'))).toBe(true)
