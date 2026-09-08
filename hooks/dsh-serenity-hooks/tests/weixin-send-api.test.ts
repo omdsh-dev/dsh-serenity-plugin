@@ -8,8 +8,8 @@
  *  - 监听器只绑 127.0.0.1；装配按 plugin 全局配置启停；卸载时拆卸（F-08）
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ServerResponse } from 'node:http'
 
@@ -41,6 +41,8 @@ const discoverMock = vi.mocked(discoverCccs)
 
 let dir: string
 let oldConfigEnv: string | undefined
+/** 测试内自建的临时 CCC（含 .serenity）——afterEach 清理，保证不污染任何机器路径 */
+const tempCccDirs: string[] = []
 
 /** 极简响应替身：记录 status + body */
 function fakeRes() {
@@ -79,6 +81,7 @@ afterEach(() => {
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
   rmSync(dir, { recursive: true, force: true })
+  for (const d of tempCccDirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
 
 describe('weixin-send-api: 纯校验', () => {
@@ -125,13 +128,19 @@ describe('weixin-send-api: 纯校验', () => {
   })
 
   it('matchCcc：绝对路径 / 目录名 / .serenity 名 / 大小写不敏感', () => {
+    // 绝对路径分支会**读文件系统**找 `.serenity`（findSerenityRoot）——不能写死开发机
+    // 的 CCC 路径（v1.30.16：CI run #16 实证 `no CCC found from path: /home/yh/home/home-serenity`）。
+    // 自建临时 CCC：任何机器/CI 上都可复现（S↑ 不依赖隐式环境）。
+    const ccc = realpathSync(mkdtempSync(join(tmpdir(), 'weixin-send-ccc-')))
+    writeFileSync(join(ccc, '.serenity'), 'home-serenity')
+    tempCccDirs.push(ccc)
     const cands: CccCandidate[] = [
-      { root: '/home/yh/home/home-serenity', dirName: 'home-serenity', cccName: 'home-serenity' },
+      { root: ccc, dirName: basename(ccc), cccName: 'home-serenity' },
       { root: '/home/yh/lab/pangu', dirName: 'pangu', cccName: 'pangu-serenity' },
     ]
-    expect(matchCcc('/home/yh/home/home-serenity', cands)).toEqual({ ok: true, root: '/home/yh/home/home-serenity' })
-    expect(matchCcc('home-serenity', cands)).toEqual({ ok: true, root: '/home/yh/home/home-serenity' })
-    expect(matchCcc('PANGU-SERENITY', cands)).toEqual({ ok: true, root: '/home/yh/lab/pangu' })
+    expect(matchCcc(ccc, cands)).toEqual({ ok: true, root: ccc })
+    expect(matchCcc(basename(ccc), cands)).toEqual({ ok: true, root: ccc })
+    expect(matchCcc('HOME-SERENITY', cands)).toEqual({ ok: true, root: ccc })
     expect(matchCcc('pangu', cands)).toEqual({ ok: true, root: '/home/yh/lab/pangu' })
   })
 

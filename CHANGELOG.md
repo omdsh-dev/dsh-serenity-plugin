@@ -25,6 +25,28 @@
 - `weixin.test.ts` 手动模式用例改写：断言新标记 + 已填参数命令 + **不含 `Reply Output` / `no fallback` / `will NOT`** + 标记位于用户正文**之后**（末尾）；对照用例改断言不含新标记；afterEach 清闸门模块级状态
 - **73 files / 1045 tests 全绿**（1026 → 1045）+ typecheck 双面 ✓ + build ✓
 
+### 发布后修复（2026-09-08，用户"dsp 的 github 我看到有 ci 失败 研究下原因"）
+
+- **根因（三层实证）**：CI 旧版用 `npm install`，13 次运行全红（失败在**依赖解析**阶段，6 秒）——
+  `npm install --dry-run` 报 `Cannot read properties of null (reading 'edgesOut')`；逐包二分锁定
+  **`tsdown@^0.22.14`**；上游 = **npm/cli issue #9787**（arborist `#loadPeerSet` 未判空的 null 解引用，
+  触发形态 = "自引用同版本 + 通配符"的可选 peer 集合，tsdown 正是此形态）；CI 的 Node 22 自带 npm 10.x。
+- **CI 改 pnpm + 锁文件**（本仓本就是 pnpm 项目：hooks 自带 `pnpm-lock.yaml`、根 `packageManager`）：
+  `pnpm/action-setup`（版本单一真相源 = `packageManager: pnpm@11.20.0`，两处版本会报 "Multiple versions"）
+  → 根 + hooks 各自 `pnpm install --frozen-lockfile --ignore-scripts` → `pnpm test`（根 vitest 配置覆盖
+  根 tests/ + hooks tests + scripts tests）→ typecheck 设为 `continue-on-error`（信息性：宿主类型基准是
+  本机硬编码 paths，见 ci.yml 头注）。
+  - `--ignore-scripts` 的两个理由（各一实证）：① pnpm 10+ 对未批准构建脚本**硬失败**
+    （`ERR_PNPM_IGNORED_BUILDS: esbuild`）；② hooks 的 `prepare`（tsdown + tsc）依赖本机 paths。
+  - **顺带修复过期锁文件**：`hooks/dsh-serenity-hooks/pnpm-lock.yaml` 与 package.json 不一致
+    （18 个 peer 只在 package.json）→ `pnpm install --lockfile-only` 重新生成（68 KB → 122 KB）。
+- **测试可移植性修复**：`weixin-send-api.test.ts` 的 `matchCcc` 用例写死开发机 CCC 路径
+  （`/home/yh/home/home-serenity`）→ CI 上 `no CCC found from path` 失败；改为**自建临时 CCC**
+  （`mkdtemp` + `.serenity` + afterEach 清理），任何机器/CI 都可复现。
+- **防重复收集**：根 `vitest.config.ts` 加 `exclude`（`.pnpm-store` 在 hooks 目录内，其 projects
+  缓存带一份项目文件副本 → `hooks/**/tests/**` 会把同一测试收集两次，实证固定端口 3182 假 EADDRINUSE）。
+- 验证：**73 files / 1045 tests 全绿**（本机）+ CI run 见 Actions。
+
 ## v1.30.15 — 2026-09-08（Skiff 类型二分 + 角色提示词热更新，S142 用户拍板）
 
 **Scope:** 用户提出设计问题——"skiff 应该区分的类型是**临时和长期**，临时的不绑定会话、提示词注入一次；长期的绑定 trajectory（SESSION.md）、提示词每次用户消息都注入"。设计底座落盘 `docs/skiff-type-and-injection-design.md`（现状实证 / 目标-手段分离 / 成本实证 / 三方案 / 决策点），用户拍板：**方案 A**（长期型提示词段动态重读）+ **显式字段 + 隐式兜底**。
