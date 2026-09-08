@@ -8,12 +8,16 @@
  *   ② 清空输入框 rail 图片 + 以「用户提供了一张图片（已保存到 _tmp/images_from_user/）」+
  *      用户原 draft 纯文本重发（对话流消息，agent 自行查目录 → 调 CCC vlm MSM 识别）
  * 失败仅 console.warn（不打断用户）。
+ *
+ * ⚠️ v1.30.5 错误码兼容（2026-09-08 用户实测修复）：DSH 0.1.2-rc.1 起 host 错误码
+ * `attachment-error` → `session/attachment-invalid` / `subagent/attachment-invalid`
+ * （reason 不变 MODEL_DOES_NOT_SUPPORT_IMAGES）——触发判定走 isImageFallbackTrigger 纯函数。
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useRef } from 'react'
-import { imageNoteTemplate } from './image-fallback-api.js'
+import { imageNoteTemplate, isImageFallbackTrigger } from './image-fallback-api.js'
 
 /** inject 面：apply 闭包提供的图片操作回调 */
 export interface ImageFallbackInjected {
@@ -64,9 +68,10 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): null {
   const imageIds = input?.imageIds ?? []
 
   useEffect(() => {
-    if (promptError?.code !== 'attachment-error') return
-    if (promptError.details?.reason !== 'MODEL_DOES_NOT_SUPPORT_IMAGES') return
-    if (handlingRef.current || imageIds.length === 0) return
+    // v1.30.5：触发判定 = isImageFallbackTrigger（兼容 attachment-error 旧码 +
+    // rc.1 的 session/attachment-invalid / subagent/attachment-invalid——DSH 0.1.2 错误码契约漂移）
+    if (handlingRef.current || !isImageFallbackTrigger(promptError?.code, promptError?.details?.reason)) return
+    if (imageIds.length === 0) return
     handlingRef.current = true
     void (async () => {
       try {

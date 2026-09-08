@@ -1,5 +1,31 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { imageNoteTemplate, uploadImage, getDraftFiles, resendText } from '../src/client/image-fallback-api.js'
+import { imageNoteTemplate, uploadImage, getDraftFiles, resendText, isImageFallbackTrigger } from '../src/client/image-fallback-api.js'
+
+describe('image-fallback-api: isImageFallbackTrigger（v1.30.5 错误码兼容判定——rc.1 双码 + 旧码）', () => {
+  it('旧码 attachment-error + MODEL_DOES_NOT_SUPPORT_IMAGES → true（0.1.1-rc.2 契约，向后兼容）', () => {
+    expect(isImageFallbackTrigger('attachment-error', 'MODEL_DOES_NOT_SUPPORT_IMAGES')).toBe(true)
+  })
+
+  it('rc.1 主会话码 session/attachment-invalid + reason → true（0.1.2-rc.1 契约漂移修复）', () => {
+    expect(isImageFallbackTrigger('session/attachment-invalid', 'MODEL_DOES_NOT_SUPPORT_IMAGES')).toBe(true)
+  })
+
+  it('rc.1 子代理码 subagent/attachment-invalid + reason → true', () => {
+    expect(isImageFallbackTrigger('subagent/attachment-invalid', 'MODEL_DOES_NOT_SUPPORT_IMAGES')).toBe(true)
+  })
+
+  it('错误码命中但 reason 非模型不支持（如 TOO_MANY_IMAGES）→ false（不进补救）', () => {
+    expect(isImageFallbackTrigger('session/attachment-invalid', 'TOO_MANY_IMAGES')).toBe(false)
+    expect(isImageFallbackTrigger('attachment-error', 'IMAGE_TOO_LARGE')).toBe(false)
+  })
+
+  it('未知错误码 / 空码 → false', () => {
+    expect(isImageFallbackTrigger('session/other-error', 'MODEL_DOES_NOT_SUPPORT_IMAGES')).toBe(false)
+    expect(isImageFallbackTrigger(undefined, 'MODEL_DOES_NOT_SUPPORT_IMAGES')).toBe(false)
+    expect(isImageFallbackTrigger('attachment-error', undefined)).toBe(false)
+    expect(isImageFallbackTrigger(undefined, undefined)).toBe(false)
+  })
+})
 
 describe('image-fallback-api: imageNoteTemplate（图片路径提示模板，P1-2 补测）', () => {
   it('单图：The user provided an image (path: ...)', () => {

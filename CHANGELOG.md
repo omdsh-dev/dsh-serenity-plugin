@@ -1,3 +1,24 @@
+## v1.30.5 — 2026-09-08（图片粘贴补救失效修复——DSH 0.1.2-rc.1 错误码契约漂移兼容，S142 诊断实证）
+
+**Scope:** 用户问"图片/文件粘贴在 Mac 上不好用"（图片能进 rail 但发送被拒、无自动落盘）——**功能代码没丢**，根因 = **DSH 0.1.1-rc.2 → 0.1.2-rc.1 升级把 host 图片拒绝错误码从 `attachment-error` 改为 `session/attachment-invalid` / `subagent/attachment-invalid`**（reason 仍 `MODEL_DOES_NOT_SUPPORT_IMAGES`），ImageFallbackDock 触发判定写死旧码 → rc.1 下补救永不触发。
+
+### 诊断证据链（R↓）
+- 功能完整实证：ImageFallbackDock/FileFallbackDock 代码 + client/index.ts 注册链 + `conversation.input.dock` slot 契约 rc.1 仍存（ui-conversation slots.ts）+ gateway `x-serenity-ui` 头 `{...reqHeaders}` 全量透传——排除"功能丢失"与网关路径
+- rc.1 错误码实证：`dsh-harness-public`（checkout dsh-v0.1.2-rc.1）`session-controller/src/commands.ts:321` `RemoteError('session/attachment-invalid', ..., { reason: 'MODEL_DOES_NOT_SUPPORT_IMAGES' })`；rc.1 全仓 `attachment-error` 零命中
+- 用户实测区分：Edge + 127.0.0.1:3080 直连 → 与 Mac/浏览器/网关无关，Windows 同失效（用户 Mac 上发现）
+- 0.1.2-rc.1 适配轮（B4/A1/A2/B6）漏 client 错误码契约；测试只覆盖 image-fallback-api 层未达 Dock 触发判断
+
+### 修复
+- `client/image-fallback-api.ts`：新增纯函数 `isImageFallbackTrigger(code, reason)`——兼容三码（旧 `attachment-error` + rc.1 `session/attachment-invalid` / `subagent/attachment-invalid`）× reason `MODEL_DOES_NOT_SUPPORT_IMAGES` 双条件判定（可单测；client 无 DOM 测试设计同 collectNonImageFiles 先例）
+- `client/ImageFallbackDock.tsx`：useEffect 触发判定改走 `isImageFallbackTrigger`（原 L67 `promptError?.code !== 'attachment-error'` 恒 true → 永不补救）
+- 测试：image-fallback.test.ts +5（旧码兼容 / rc.1 主会话码 / rc.1 子代理码 / reason 非模型不支持 false / 未知码空码 false）
+
+### 验证
+- **62 files / 913 tests 全绿**（908 → 913 +5）+ typecheck 双面 ✓ + build ✓
+
+### 状态
+- **⏸ 未发布（代码态）**：用户明确"修完别发布，回家喊再发布"——bump/publish/deploy/restart 待 D14 显式指令
+
 ## v1.30.4 — 2026-09-07（skiff 专属 SESSION 纪律强制在场——微信桥每轮注入工作台约束，S142 用户点破）
 
 **Scope:** v1.30.3 自动建 SESSION 后用户实测发现：**LLM 不知道已绑定 SESSION、不知道要用它**——只往 systemPrompt 塞了一行英文路径（创建时快照），老 live agent（重启后 existing 快路径）根本收不到。用户点破："我们没有给 skiff 注入任何要求和约束" + "每次都注入也行，机制比历史重要"。

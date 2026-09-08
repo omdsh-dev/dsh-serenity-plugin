@@ -16,6 +16,24 @@ import type { DraftAttachmentId } from '@deepseek-ai/dsh-client-ui-conversation'
 const UPLOAD_PATH = '/serenity/image-upload'
 
 /**
+ * 判断是否触发图片落盘补救（纯函数，可单测）。
+ *
+ * ⚠️ v1.30.5 错误码契约修复（2026-09-08 用户实测"图片能进 rail 但发送被拒、无落盘"）：
+ * DSH 0.1.1-rc.2 → 0.1.2-rc.1 升级后，host session-controller 把图片被拒错误码从
+ * `attachment-error` 改为 `session/attachment-invalid`（主会话）/ `subagent/attachment-invalid`
+ * （子代理），reason 仍为 `MODEL_DOES_NOT_SUPPORT_IMAGES`（rc.1 commands.ts:321 实证）。
+ * 旧实现只匹配 `attachment-error` → rc.1 下补救永不触发。兼容三码 + reason 双条件判定。
+ *
+ * @param code - promptError.error.code（host 投影）
+ * @param reason - promptError.error.details.reason
+ * @returns true = 应触发自动落盘补救
+ */
+export function isImageFallbackTrigger(code: string | undefined, reason: string | undefined): boolean {
+  if (code !== 'attachment-error' && code !== 'session/attachment-invalid' && code !== 'subagent/attachment-invalid') return false
+  return reason === 'MODEL_DOES_NOT_SUPPORT_IMAGES'
+}
+
+/**
  * 图片提示消息模板（协议固有，S142 用户迭代）：
  *  - v1.20.5 目录级提示（无文件名）→ 用户反馈 agent 还要猜
  *  - v1.20.6 恢复具体路径（对话里一定写名图片路径，agent 直接可用，无需猜）
