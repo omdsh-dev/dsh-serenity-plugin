@@ -47,6 +47,7 @@ import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
 import { registerAutopilot } from './autopilot-trajectory.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
+import { registerWeixinSendApi } from './weixin-send-api.js'
 import { registerLifecycle } from './seams/lifecycle.js'
 
 export const name = 'dsh-serenity-hooks'
@@ -185,6 +186,11 @@ export function apply(ctx: Context, config: Config): void {
   // F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置（serenity.json weixin + localstore 凭据）→
   // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。
   registerWeixinBridge(ctx)
+  // v1.30.9（S142 用户需求"微信桥支持被调用发消息给指定用户"）：主动发送入口——
+  // 只绑 127.0.0.1 的独立监听器（默认 3082；plugin 全局配置 weixinApi），供 CCC 自己的
+  // MSM 调用（`msm weixin-send ...`）；发送与记录都经桥（outgoing hook 带 source=proactive）。
+  // **ACC 不新增工具**（用户拍板 A2：专用 loopback 端口，不经公网网关）。
+  registerWeixinSendApi(ctx)
   // review F-08（v1.30.8）：生命周期——agent/session 销毁清理 per-会话状态 +
   // 插件卸载/HMR 停掉自起资源（skiff 调试页/ACP/微信桥；否则端口占用与重复轮询）
   registerLifecycle(ctx)

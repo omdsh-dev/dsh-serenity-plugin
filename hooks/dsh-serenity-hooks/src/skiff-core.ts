@@ -101,14 +101,30 @@ export function workspaceTrajectoryLine(mdPath: string): string {
  * 懒绑定 + 幂等（per skiff 会话 scope 隔离——微信多用户各自独立，永不共享同一份）。
  *
  * 判定链：
+ * ⓪ **临时身份不建工作台**（v1.30.9，S142 用户报"SESSION 爆炸"根治）：`persistent=false`
+ *    （ACP/调试页/问答页等**无固定会话 id**的临时 agent）→ null。理由（R↓）：这些 agent 每次
+ *    调用都是新 id、无身份延续，为其建 SESSION = 每次问答留一个永久空目录（无界熵增）；
+ *    用户模型「skiff 本质是临时会话机制」——工作台属于**持久身份**，不属于单次调用。
  * ① 角色未启用 session 能力（trajectory.session !== true）→ null（现状零变化）
- * ② 会话日志已有**本机制自动创建**的 bound（note 前缀 auto-created）→ 恢复（重启/续接记得）
+ * ② 已有**本机制自动创建**的 bound（note 前缀 auto-created）→ 恢复（重启/续接记得）
+ * ②b 内存活跃记录（同 scope）→ 恢复 + **自愈补写绑定**（防御纵深：绑定写失败/事件形态未落盘时
+ *    仍复用同一 SESSION，而不是每条消息新建一个——v1.30.5 及更早"每条消息一个 SESSION"的放大效应）
  * ③ 无 → 自动创建专属 SESSION（createSession desc=`<role> skiff`——编号自动递增，用户不关心是谁）
  *
+ * @param persistent 该 skiff 会话是否有**持久身份**（固定会话 id）。默认 true（向后兼容调用点）；
+ *   `createSkiffAgent` 传 `sessionId !== undefined`，微信桥的 existing 快路径传 true。
  * @returns 绑定后的 SESSION.md 绝对路径（供提示词注入）；不适用/失败 → null
  */
-export function ensureSkiffSession(root: string, agent: Agent, roleName: string, role: SkiffRoleConfig): string | null {
+export function ensureSkiffSession(
+  root: string,
+  agent: Agent,
+  roleName: string,
+  role: SkiffRoleConfig,
+  persistent = true,
+): string | null {
   if (!trajectorySubset(role).session) return null
+  // ⓪ 临时身份（无固定会话 id）→ 不建工作台（见函数头 R↓）
+  if (!persistent) return null
   const session = agent.session as (Session & { append?: (t: string, d: unknown) => unknown }) | null | undefined
   const scope = String((agent.session as { id?: unknown }).id ?? agent.id)
   // ② 已有本机制自动创建的 bound → 恢复（latest-wins）
@@ -120,6 +136,17 @@ export function ensureSkiffSession(root: string, agent: Agent, roleName: string,
       mdPath: lastBound.mdPath,
     })
     return lastBound.mdPath
+  }
+  // ②b 内存活跃记录 → 恢复 + 自愈补写（绑定持久化失效时的最后防线）
+  const inMemory = getActiveSessionInfo(scope)
+  if (inMemory?.mdPath && existsSync(inMemory.mdPath)) {
+    appendBound(session, 'reconcile', {
+      dirName: inMemory.dirName,
+      mdPath: inMemory.mdPath,
+      ...(inMemory.sessionId ? { sessionId: inMemory.sessionId } : {}),
+      note: `${AUTO_BOUND_NOTE_PREFIX} ${roleName}`,
+    })
+    return inMemory.mdPath
   }
   // ③ 无（或旧手工 bound）→ 自动创建专属 SESSION
   const desc = `${roleName} skiff`
@@ -220,7 +247,8 @@ export async function createSkiffAgent(
   // 成功后把工作台路径注入 systemPrompt（agent 上下文，用户对话面不打印）。
   let workspaceMdPath: string | null = null
   try {
-    workspaceMdPath = ensureSkiffSession(root, agent, roleName, role)
+    // v1.30.9：只有**持久身份**（固定会话 id）才建工作台——临时 agent（随机 id）不建
+    workspaceMdPath = ensureSkiffSession(root, agent, roleName, role, sessionId !== undefined)
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 专属 SESSION 处理失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
   }

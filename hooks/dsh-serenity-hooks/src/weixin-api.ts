@@ -117,6 +117,31 @@ async function apiPost(params: { baseUrl: string; endpoint: string; body: string
   }
 }
 
+/**
+ * iLink 业务层返回码校验（v1.30.9 修复）：`apiPost` 只判 HTTP 状态，而 iLink 在 **HTTP 200**
+ * 的响应体里用 `ret` / `errcode` 表达失败（如 `{ret:1,errmsg:"denied"}`）——此前被当作成功，
+ * 于是"发送成功"的判定是假的：回复路径会给一条**从未送达**的消息触发 outgoing hook 记录
+ * （与 weixin-bridge 注释"发送失败不记录"矛盾）。发送类调用一律经此校验。
+ * 非 JSON 的 200 响应保持既有宽容语义（视为成功）。
+ * @param endpoint 端点名（错误信息定位用）
+ * @param rawText 响应体原文
+ */
+export function assertIlinkOk(endpoint: string, rawText: string): void {
+  let json: { ret?: number; errcode?: number; errmsg?: string }
+  try {
+    json = JSON.parse(rawText) as { ret?: number; errcode?: number; errmsg?: string }
+  } catch {
+    return
+  }
+  const detail = json.errmsg ? `: ${json.errmsg}` : ''
+  if (typeof json.ret === 'number' && json.ret !== 0) {
+    throw new Error(`${endpoint} ret=${json.ret}${detail}`)
+  }
+  if (typeof json.errcode === 'number' && json.errcode !== 0) {
+    throw new Error(`${endpoint} errcode=${json.errcode}${detail}`)
+  }
+}
+
 // ── 扫码登录 ──
 
 /** 取登录二维码（无需凭据；实证裸调可用） */
@@ -245,7 +270,8 @@ export const MessageType = { NONE: 0, USER: 1, BOT: 2 } as const
 export const MessageState = { NEW: 0, GENERATING: 1, FINISH: 2 } as const
 export const MessageItemType = { NONE: 0, TEXT: 1, IMAGE: 2, VOICE: 3, FILE: 4, VIDEO: 5 } as const
 
-/** 发文本消息（必须回带 context_token 关联对话；md→plain 内置——微信不支持 Markdown） */
+/** 发文本消息（主动发起时可不带 context_token；md→plain 内置——微信不支持 Markdown）。
+ *  v1.30.9：HTTP 200 但 `ret/errcode != 0` → 抛错（此前静默当成功，导致"记录已送达"的假象）。 */
 export async function sendTextMessage(params: {
   baseUrl: string
   token: string
@@ -256,7 +282,7 @@ export async function sendTextMessage(params: {
   timeoutMs?: number
 }): Promise<void> {
   const clientId = params.clientId ?? `dsp-weixin-${randomBytes(4).toString('hex')}`
-  await apiPost({
+  const rawText = await apiPost({
     baseUrl: params.baseUrl,
     endpoint: 'ilink/bot/sendmessage',
     body: JSON.stringify({
@@ -273,6 +299,7 @@ export async function sendTextMessage(params: {
     token: params.token,
     timeoutMs: params.timeoutMs ?? 15_000,
   })
+  assertIlinkOk('ilink/bot/sendmessage', rawText)
 }
 
 // ── 正在输入 / 对话配置 ──

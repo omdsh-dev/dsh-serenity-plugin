@@ -193,7 +193,8 @@ export async function handleIncoming(
     // create 路径由 createSkiffAgent 内 ensure；live/老 agent 快路径此前跳过 → 未绑定/未注入。
     if (existing) {
       try {
-        ensureSkiffSession(root, existing, roleName, role)
+        // 微信桥恒为持久身份（固定 skiff 会话 id）→ persistent=true
+        ensureSkiffSession(root, existing, roleName, role, true)
       } catch (err) {
         console.warn(`[serenity-hooks] weixin-bridge ensure 失败（不影响处理）: ${String((err as Error)?.message ?? err)}`)
       }
@@ -362,12 +363,102 @@ export function stopCccBridge(root: string): void {
   bridges.delete(root)
 }
 
-/** 停止全部桥（插件 dispose） */
+/**
+ * 停止全部桥（插件 dispose）
+ */
 export function stopAllBridges(): void {
   for (const bridge of bridges.values()) {
     for (const loop of bridge.loops.values()) loop.stopped = true
   }
   bridges.clear()
+}
+
+// ── 主动发送（v1.30.9，S142 用户需求"微信桥支持被调用发消息给指定用户"）──
+
+/** 主动发送失败原因（稳定 code——入口层翻译成 HTTP 状态 + 可行动提示） */
+export type ProactiveSendErrorCode =
+  | 'BRIDGE_DISABLED'
+  | 'NO_ACCOUNT'
+  | 'ACCOUNT_NOT_FOUND'
+  | 'ACCOUNT_NOT_BOUND'
+  | 'SEND_FAILED'
+
+export interface ProactiveSendInput {
+  /** CCC 根（绝对路径；由入口层解析名称/路径后传入） */
+  root: string
+  /** 目标用户（iLink from_user_id，形如 xxx@im.wechat；别名解析归调用方） */
+  toUserId: string
+  /** 文本（md → 微信纯文本由 sendTextMessage 内置转换） */
+  text: string
+  /** 发送账号（缺省 = 该 CCC 第一个启用且已绑定的账号） */
+  accountId?: string
+}
+
+export type ProactiveSendResult =
+  | { ok: true; accountId: string; userId: string; sessionId: string; role: string }
+  | { ok: false; code: ProactiveSendErrorCode; error: string; remediation?: string }
+
+/**
+ * 以 bot 身份主动给指定用户发文本（**不经用户消息触发**）。
+ *
+ * 为什么放在桥里而不是让 CCC 自己直连 iLink（用户拍板 A 方案）：
+ * ① **记录归桥**——发送成功后触发既有 outgoing hook，`_weixin-logs/*.jsonl` 与对话回复
+ *    同源同格式（事件多一个 `source: 'proactive'` 标记）；② 协议/账号/凭据解析单一真相源，
+ *    CCC 侧不必重复实现 sendmessage；③ 多账号可选。
+ *
+ * 记录一致性：`sessionId` 取 `weixinSessionIdFor(toUserId)`——与该用户平时对话**同一条轨迹**，
+ * 记录里能直接按会话串联；`role` 取该 CCC 路由命中角色（未命中 → 空串）。
+ *
+ * 主动消息不带 context_token（iLink 接受 bot 主动发起；带 token 的路径见 handleIncoming 回复）。
+ * @param input CCC 根 + 目标用户 + 文本 +（可选）账号
+ * @returns 成功含 accountId/userId/sessionId/role；失败含稳定 code 与可行动提示（不抛错）
+ */
+export async function sendProactiveText(input: ProactiveSendInput): Promise<ProactiveSendResult> {
+  const { root, toUserId } = input
+  const settings = readWeixinSettings(root)
+  if (!settings.enabled) {
+    return { ok: false, code: 'BRIDGE_DISABLED', error: `微信桥未启用（ccc=${root}）`, remediation: '在 CCC 的 .opencode/serenity.json weixin.enabled 打开' }
+  }
+  const accounts = (settings.accounts ?? []).filter((a) => a.enabled !== false)
+  if (accounts.length === 0) {
+    return { ok: false, code: 'NO_ACCOUNT', error: '微信桥未配置任何启用账号', remediation: '在设置面板「微信桥」扫码绑定账号' }
+  }
+  const accountId = input.accountId ?? accounts[0]!.accountId
+  if (!accounts.some((a) => a.accountId === accountId)) {
+    return {
+      ok: false,
+      code: 'ACCOUNT_NOT_FOUND',
+      error: `账号不存在或未启用: ${accountId}`,
+      remediation: `可用账号: ${accounts.map((a) => a.accountId).join(', ')}`,
+    }
+  }
+  const cred = readWeixinCredential(root, accountId)
+  if (!cred) {
+    return { ok: false, code: 'ACCOUNT_NOT_BOUND', error: `账号未绑定（无凭据）: ${accountId}`, remediation: '在设置面板重新扫码绑定' }
+  }
+
+  const sessionId = weixinSessionIdFor(toUserId)
+  const role = matchWeixinRoute(settings.routes ?? [], toUserId) ?? ''
+  try {
+    await sendTextMessage({ baseUrl: cred.baseUrl, token: cred.token, toUserId, text: input.text })
+  } catch (err) {
+    return { ok: false, code: 'SEND_FAILED', error: `发送失败: ${err instanceof Error ? err.message : String(err)}` }
+  }
+  // hook：outgoing（source=proactive）——与回复同源记录；失败仅日志（旁路容忍 H3）
+  if (settings.hook) {
+    void invokeWeixinHook(root, settings.hook, buildOutgoingHookEvent({
+      cccRoot: root,
+      accountId,
+      userId: toUserId,
+      sessionId,
+      role,
+      reply: markdownToPlainText(input.text),
+      source: 'proactive',
+    })).catch((err) => {
+      console.log(`[serenity-hooks] weixin hook outgoing(proactive) error: ${err instanceof Error ? err.message : String(err)}`)
+    })
+  }
+  return { ok: true, accountId, userId: toUserId, sessionId, role }
 }
 
 /** 桥状态快照（面板数据源）：每 CCC → 每账号 → 轮询健康 */

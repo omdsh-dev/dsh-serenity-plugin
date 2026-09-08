@@ -1,3 +1,39 @@
+## v1.30.9 — 2026-09-08（微信主动发送通道 + skiff 工作台两条缺陷根治，S142）
+
+**Scope:** 用户需求「微信桥希望能支持被调用发消息给指定用户，允许 CCC 自己做个 MSM 来发消息、同时能被记录，但又不希望新增 ACC 层 tool」（拍板 A2：专用 loopback 监听、ccc 必填、不做密钥）+ 用户报「zhaocai skiff SESSION 爆炸」根治。
+
+### 微信主动发送通道（零新增工具）
+- **`weixinApi` 配置**（`config-ops.ts`）：`{ enabled: true, port: 3082 }`——默认启用；`port: 0` 或 `enabled: false` 关闭（defaults/merge/update 三处）
+- **`src/weixin-send-api.ts`（新，326 行）**：**只绑 127.0.0.1** 的独立监听器（不经 3081 网关 → 公网不可达 → 不做共享密钥，但仍校验来源地址为 loopback）
+  - `POST /send` `{ ccc, user, text, accountId? }` → `{ ok, accountId, userId, sessionId, role }`；`GET /health`
+  - 纯函数可测：`parseSendRequest`（结构校验 + 4000 字上限）/ `isLoopbackAddress`（含 IPv4-mapped）/ `matchCcc`（绝对路径 → 目录名 → `.serenity` 名；**歧义报候选不猜**）
+  - `weixinSendEndpoint()` 供 env 注入；按配置启停 + `serenity/config-updated`/`serenity/settings-changed` 热同步 + `registerDisposer` 拆卸
+- **`weixin-bridge.sendProactiveText({root,toUserId,text,accountId?})`**：账号选择（显式 / 首个启用）→ 凭据校验 → `sendTextMessage`（**不带 context_token = bot 主动发起**）→ **触发既有 outgoing hook**（`source: 'proactive'`，`sessionId = weixinSessionIdFor(userId)`、`role` = 路由命中）；失败返回稳定 code（`BRIDGE_DISABLED` / `NO_ACCOUNT` / `ACCOUNT_NOT_FOUND` / `ACCOUNT_NOT_BOUND` / `SEND_FAILED`）
+- **`weixin-hook.ts`**：outgoing 事件新增 `source?: 'reply' | 'proactive'`（缺省 reply，向后兼容）
+- **`index.ts` 装配 + `msm-ops.buildMsmEnv` 注入 `SERENITY_WEIXIN_API`**（MSM 侧零硬编码端口）
+- **顺带修复既有缺陷（P1，测试抓到）**：`weixin-api.apiPost` 只判 HTTP 状态 → iLink 在 **HTTP 200** 里用 `ret/errcode != 0` 表达失败（如 `{ret:1,errmsg:"denied"}`）被当成功 → **回复路径也会为一条从未送达的消息触发 outgoing 记录**（与 bridge 注释「发送失败不记录」矛盾）；新增 `assertIlinkOk(endpoint, rawText)` 用于 `sendTextMessage`
+- **测试**：新 `tests/weixin-send-api.test.ts` **16 用例**（校验/loopback/CCC 解析/状态码映射/真实 loopback 往返/生命周期热同步）+ `weixin.test.ts` 新增 `sendProactiveText` 3 用例（含 5 条失败路径）
+
+### skiff 工作台两条缺陷根治（用户报「zhaocai skiff SESSION 爆炸」）
+- **根因（实证链）**：真实会话日志 `~/.dsh/sessions/--…--/skiff-weixin-74b2a0609d13657b/session.jsonl.zstd` **12302 行中 `serenity/bound` 出现 0 次**——v1.29.1~v1.30.5 的绑定写在**宿主不落盘**的自定义事件上（F-01 同源）→ 每条消息 `readLastBound` 恒 null → `ensureSkiffSession` 每次都新建；消息 ts 与 SESSION 目录 mtime **逐条同刻对应**（09-08 四条消息 → S169~S172 四个目录）；v1.30.4 起 `existing` 快路径也调 ensure → **每条消息一个 SESSION**
+- **修复 ①：临时身份不建工作台**——`ensureSkiffSession(..., persistent)`：`createSkiffAgent` 传 `sessionId !== undefined`（微信桥 = 固定 id → 建；ACP/调试页/问答页 = 随机 id → 不建）。此前**每次临时问答都留一个永久空 SESSION 目录**（无界熵增，与「skiff 本质是临时会话机制」的模型冲突）
+- **修复 ②：内存活跃自愈**——判定链新增 ②b：绑定文件失效时按 scope 复用内存活跃 SESSION 并**补写绑定**（`action: 'reconcile'`）——绑定持久化再失效也不会放大成「每条消息一个 SESSION」
+- **回归测试 +5**：跨消息形态（新 agent 空 events + 既有 `.bindings.json` → 恢复不新建）/ 绑定文件被删后自愈补写 / 临时身份零创建 / `createSkiffAgent` 集成（固定 id 建、随机 id 不建）
+
+### guide 同步
+- `weixin-doctor guide` 新增 **§7 主动发送**（调用形态 / 通道链路 / 排障）+ §5 事件 schema 补 `source` 与 `file` 字段；原 §7 凭据管理顺延为 §8
+- `container_admin msm ccc-config` §8 补「主动发送」段（入口归属 + loopback + `source=proactive`）+ hook schema 同步
+
+### 依赖解耦（自造回归的即时修复）
+- **问题（实测）**：`msm-ops.ts` 静态 import `weixin-send-api` 以取入口地址 → 拖进整条微信桥栈（`weixin-bridge` → `skiff-core` → `@deepseek-ai/dsh-llm`）→ `acc-extras` / `ops` / `skiff-admin` 三个测试套件**整文件加载失败**（它们只用到 MSM 注册表逻辑）
+- **修复**：新叶模块 `src/weixin-send-endpoint.ts`（零依赖：写者 `weixin-send-api` 启停时 `setWeixinSendEndpoint`，读者 `msm-ops` 只读）——读/写解耦，MSM env 注入不再拖桥
+- **镜像测试** `tests/weixin-send-endpoint.test.ts`（4 用例；同时满足 coverage-gate 门禁）
+
+### 验证
+- **70 files / 990 tests 全绿**（963 → 990）+ typecheck 双面 ✓ + build ✓
+- **端到端实测（S142，2026-09-08，真实 bridge + 真实 CCC MSM 子进程）**：缺 `--ccc` → `MISSING_CCC` 拒绝（exit 1）✓；`--ccc <CCC> --user yh` → 消息真实送达微信 ✓；`_weixin-logs/2026-09-08.jsonl` 出现 `{"event":"outgoing","source":"proactive","role":"zhaocai","sessionId":"skiff-weixin-74b2a0609d13657b",...}` ✓（与对话回复同源、同一轨迹）
+- **⏸ 未发布**：bump/publish 待用户显式指令（D14）
+
 ## v1.30.8 — 2026-09-08（review 修复轮 2b：宿主访问收口 + 生命周期/竞速 + 失败策略，S142）
 
 **Scope:** review 轮 2b——用户"把 2b 也做掉，不留问题"。三条线：**F-06 宿主访问收口**（唯一读取入口）、**F-08 生命周期**（销毁订阅 + 资源拆卸 + 等待竞速）、**F-07 失败策略**（守卫输入失败必须响亮 + 空 catch 必须点名）。

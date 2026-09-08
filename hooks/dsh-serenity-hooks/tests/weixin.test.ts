@@ -942,3 +942,98 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(newQuestions.some((q) => q.includes('Serenity Session Workspace') && q.includes('AUTO-BOUND') && q.includes('你好'))).toBe(true)
   })
 })
+
+describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户需求）', () => {
+  /** 捕获 sendmessage + hook 事件 */
+  function setupFetchAndHook() {
+    const sent: Array<{ to: string; text: string; contextToken?: string }> = []
+    __setWeixinFetchForTest(async (input, init) => {
+      const url = typeof input === 'string' ? input : String(input)
+      if (url.includes('sendmessage')) {
+        const p = JSON.parse(init?.body as string) as { msg: { to_user_id: string; item_list: Array<{ text_item: { text: string } }>; context_token?: string } }
+        sent.push({ to: p.msg.to_user_id, text: p.msg.item_list[0]!.text_item.text, contextToken: p.msg.context_token })
+      }
+      return jsonResponse(200, { ret: 0 })
+    })
+    const events: Array<Record<string, unknown>> = []
+    return { sent, events }
+  }
+
+  it('成功：主动发送（无 contextToken）+ outgoing hook 带 source=proactive + sessionId 复用该用户会话', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      weixin: {
+        enabled: true,
+        hook: 'scripts/hook.js',
+        accounts: [{ accountId: 'wechat-1' }, { accountId: 'wechat-2' }],
+        routes: [{ user: '*', role: 'zhaocai' }],
+      },
+    }))
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })
+    writeWeixinCredential(dir, 'wechat-2', { token: 'tok2', baseUrl: 'https://y' })
+    const { sent, events } = setupFetchAndHook()
+    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    setWeixinHookRunnerForTest(async (_root, _rel, ev) => {
+      events.push(ev as unknown as Record<string, unknown>)
+      return { ok: true }
+    })
+
+    const { sendProactiveText } = await import('../src/weixin-bridge.js')
+    const r = await sendProactiveText({ root: dir, toUserId: 'u1@im.wechat', text: '**报告**已生成' })
+    expect(r).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u1@im.wechat', sessionId: weixinSessionIdFor('u1@im.wechat'), role: 'zhaocai' })
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toMatchObject({ to: 'u1@im.wechat', text: '报告已生成' }) // md→plain
+    expect(sent[0]!.contextToken).toBeUndefined() // 主动消息不带 context_token
+    await vi.waitFor(() => expect(events).toHaveLength(1))
+    expect(events[0]).toMatchObject({
+      event: 'outgoing',
+      source: 'proactive',
+      accountId: 'wechat-1',
+      userId: 'u1@im.wechat',
+      sessionId: weixinSessionIdFor('u1@im.wechat'),
+      role: 'zhaocai',
+      reply: '报告已生成',
+    })
+  })
+
+  it('显式 accountId → 用该账号凭据；未命中路由 → role 空串', async () => {
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      weixin: {
+        enabled: true,
+        accounts: [{ accountId: 'wechat-1' }, { accountId: 'wechat-2' }],
+        routes: [{ user: 'someone-else@im.wechat', role: 'zhaocai' }],
+      },
+    }))
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })
+    writeWeixinCredential(dir, 'wechat-2', { token: 'tok2', baseUrl: 'https://y' })
+    const { sent } = setupFetchAndHook()
+    const { sendProactiveText } = await import('../src/weixin-bridge.js')
+    const r = await sendProactiveText({ root: dir, toUserId: 'u2@im.wechat', text: 'hi', accountId: 'wechat-2' })
+    expect(r).toMatchObject({ ok: true, accountId: 'wechat-2', role: '' })
+    expect(sent).toHaveLength(1)
+  })
+
+  it('失败路径：桥未启用 / 无账号 / 账号不存在 / 未绑定 / 发送失败 → 稳定 code', async () => {
+    const { sendProactiveText } = await import('../src/weixin-bridge.js')
+
+    // ① 未启用
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: false, accounts: [] } }))
+    expect(await sendProactiveText({ root: dir, toUserId: 'u@im.wechat', text: 't' })).toMatchObject({ ok: false, code: 'BRIDGE_DISABLED' })
+
+    // ② 无账号
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true, accounts: [] } }))
+    expect(await sendProactiveText({ root: dir, toUserId: 'u@im.wechat', text: 't' })).toMatchObject({ ok: false, code: 'NO_ACCOUNT' })
+
+    // ③ 账号不存在
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true, accounts: [{ accountId: 'wechat-1' }] } }))
+    expect(await sendProactiveText({ root: dir, toUserId: 'u@im.wechat', text: 't', accountId: 'nope' })).toMatchObject({ ok: false, code: 'ACCOUNT_NOT_FOUND' })
+
+    // ④ 未绑定凭据
+    clearWeixinCredential(dir, 'wechat-1')
+    expect(await sendProactiveText({ root: dir, toUserId: 'u@im.wechat', text: 't' })).toMatchObject({ ok: false, code: 'ACCOUNT_NOT_BOUND' })
+
+    // ⑤ 发送失败（iLink 返回 ret 非 0）
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
+    __setWeixinFetchForTest(async () => jsonResponse(200, { ret: 1, errmsg: 'denied' }))
+    expect(await sendProactiveText({ root: dir, toUserId: 'u@im.wechat', text: 't' })).toMatchObject({ ok: false, code: 'SEND_FAILED' })
+  })
+})

@@ -532,6 +532,44 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(mdPath).toContain('zhaocai skiff')
   })
 
+  // ── v1.30.9：S142 用户报「zhaocai skiff SESSION 爆炸」根治（实证：每条消息一个 SESSION）──
+
+  it('跨消息形态：新 agent（空 events，模拟重启）+ 既有 .bindings.json → 恢复同一 SESSION，不新建', () => {
+    const first = sessionAgent('skiff-weixin-user-a')
+    const mdPath = ensureSkiffSession(dir, first as never, 'zhaocai', sessionRole())
+    expect(mdPath).not.toBeNull()
+    // 模拟下一条消息：进程内 agent 重建（空 events——旧事件形态不落盘时的真实形态）
+    const second = sessionAgent('skiff-weixin-user-a')
+    const restored = ensureSkiffSession(dir, second as never, 'zhaocai', sessionRole())
+    expect(restored).toBe(mdPath)
+    const sessions = readdirSync(join(dir, 'AGENT_SESSIONS')).filter((n) => n.includes('zhaocai skiff'))
+    expect(sessions).toHaveLength(1)
+  })
+
+  it('绑定文件失效（②b 自愈）：删掉 .bindings.json 后同 scope 再 ensure → 复用内存活跃 SESSION 并补写绑定', () => {
+    const first = sessionAgent('skiff-weixin-user-a')
+    const mdPath = ensureSkiffSession(dir, first as never, 'zhaocai', sessionRole())
+    // 模拟绑定持久化失效（旧形态事件未落盘 / 文件被删）——内存活跃仍在
+    rmSync(join(dir, 'AGENT_SESSIONS', '.bindings.json'), { force: true })
+    const second = sessionAgent('skiff-weixin-user-a')
+    const restored = ensureSkiffSession(dir, second as never, 'zhaocai', sessionRole())
+    expect(restored).toBe(mdPath)
+    expect(readdirSync(join(dir, 'AGENT_SESSIONS')).filter((n) => n.includes('zhaocai skiff'))).toHaveLength(1)
+    // 自愈：绑定已补写（下次进程重启可恢复）
+    const healed = JSON.parse(readFileSync(join(dir, 'AGENT_SESSIONS', '.bindings.json'), 'utf-8')) as { sessions: Record<string, { mdPath: string; action: string; note?: string }> }
+    expect(healed.sessions['skiff-weixin-user-a']?.mdPath).toBe(mdPath)
+    expect(healed.sessions['skiff-weixin-user-a']?.action).toBe('reconcile')
+    expect(healed.sessions['skiff-weixin-user-a']?.note?.startsWith('auto-created for skiff role')).toBe(true)
+  })
+
+  it('临时身份（persistent=false，ACP/调试页随机 id）→ 不建工作台（零熵增）', () => {
+    const agent = sessionAgent('skiff-qa-random-uuid')
+    const mdPath = ensureSkiffSession(dir, agent as never, 'zhaocai', sessionRole(), false)
+    expect(mdPath).toBeNull()
+    expect(getActiveSessionInfo(agent.session.id)).toBeNull()
+    expect(existsSync(join(dir, 'AGENT_SESSIONS'))).toBe(false)
+  })
+
   it('workspaceTrajectoryLine：完整纪律块含 SESSION.md 路径 + 绑定/rebuild 约束', () => {
     const line = workspaceTrajectoryLine('/x/AGENT_SESSIONS/2026-09-07--S160--zhaocai skiff/SESSION.md')
     expect(line).toContain('SESSION.md: /x/AGENT_SESSIONS/2026-09-07--S160--zhaocai skiff/SESSION.md')
@@ -542,7 +580,7 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(line).toContain('write/edit')
   })
 
-  it('createSkiffAgent 集成：session 能力角色 → 自动建 + 提示词注入工作台行', async () => {
+  it('createSkiffAgent 集成：持久身份（固定 sessionId）→ 自动建 + 提示词注入工作台行', async () => {
     const sections: Array<{ name: string; text: () => string }> = []
     const fakeCtx = {
       agents: {
@@ -560,7 +598,7 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     const ref = await createSkiffAgent(fakeCtx as never, dir, 'zhaocai', {
       ...sessionRole(),
       systemPrompt: '角色人格',
-    } as never)
+    } as never, undefined, 'skiff-weixin-fixed-workspace')
     // 提示词含工作台纪律块（AUTO-BOUND + SESSION.md 路径）
     expect(sections[0]?.text()).toContain('Serenity Session Workspace')
     expect(sections[0]?.text()).toContain('AUTO-BOUND')
@@ -570,5 +608,26 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(getActiveSessionInfo(ref.sessionId)).not.toBeNull()
     unregisterSkiffSession(ref.sessionId)
     // cleanup 内置 afterEach 已 rm dir；此处 reset active 防污染
+  })
+
+  it('createSkiffAgent 集成：临时身份（无 sessionId）→ 不建工作台、提示词无工作台行（v1.30.9）', async () => {
+    const sections: Array<{ name: string; text: () => string }> = []
+    const fakeCtx = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+          const agentCtx = {
+            get: () => undefined,
+            systemPrompt: { section: (s: { name: string; text: () => string }) => sections.push(s) },
+          }
+          await opts.setup?.(agentCtx)
+          return { agent: { ctx: agentCtx, session: { id: opts.sessionId, events: [], append: () => {} }, followup: () => {} } }
+        },
+      },
+    }
+    const ref = await createSkiffAgent(fakeCtx as never, dir, 'zhaocai', { ...sessionRole(), systemPrompt: '角色人格' } as never)
+    expect(sections[0]?.text()).not.toContain('Serenity Session Workspace')
+    expect(sections[0]?.text()).toContain('角色人格')
+    expect(existsSync(join(dir, 'AGENT_SESSIONS'))).toBe(false)
+    unregisterSkiffSession(ref.sessionId)
   })
 })

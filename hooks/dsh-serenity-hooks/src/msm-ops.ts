@@ -20,6 +20,7 @@ import { join, dirname, relative, resolve } from 'node:path'
 import { platform } from 'node:process'
 import { classifyPath, readCccName as readCccNameFromCcc } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
+import { weixinSendEndpoint } from './weixin-send-endpoint.js'
 import type { JsonValue } from './json.js'
 
 const execFileAsync = promisify(execFile)
@@ -75,14 +76,21 @@ function assertPathInsideRoot(root: string, value: string, flagName: string): vo
   }
 }
 
-/** 业务子进程 env：注入 SERENITY_ROOT / SERENITY_CCC / SERENITY_VERSION（对齐 osp） */
+/**
+ * 业务子进程 env：注入 SERENITY_ROOT / SERENITY_CCC / SERENITY_VERSION（对齐 osp）
+ * + SERENITY_WEIXIN_API（v1.30.9：微信主动发送入口地址——MSM 脚本零硬编码端口；
+ *   未启动则不注入，脚本回退默认值）。
+ */
 function buildMsmEnv(root: string): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     SERENITY_ROOT: root,
     SERENITY_CCC: readCccName(root) ?? '',
     SERENITY_VERSION: ACC_VERSION,
   }
+  const weixinApi = weixinSendEndpoint()
+  if (weixinApi) env.SERENITY_WEIXIN_API = weixinApi
+  return env
 }
 
 /**
@@ -259,7 +267,11 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
 账号/路由/开关在此文件；**bot_token 凭据在 CCC localstore credential scope**
 （扫码绑定后自动写入，永不进 git 明文面）。
 路由 user → role：exact 优先，* 通配兜底；role 必须 ∈ 该 CCC skiff.roles。
-面板（WebUI 设置 → 微信桥）可扫码绑定/移除账号/编辑路由；msm("weixin-doctor", ["status"|"diag"|"verify"]) 排查。凭据主动查看：localstore get WEIXIN_<ACCOUNT>_TOKEN。
+面板（WebUI 设置 → 微信桥）可扫码绑定/移除账号/编辑路由；msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"]) 排查 + 大而全指南。凭据主动查看：localstore get WEIXIN_<ACCOUNT>_TOKEN。
+  ▸ 主动发送（v1.30.9）：CCC 用 msm("weixin-send", ["send", "--ccc", "<CCC>", "--user", "<别名|id>", "<文本>"])
+    给用户发消息——经 dsp 主动发送入口（**只绑 127.0.0.1**，plugin 全局配置 ~/.dsh/serenity-hooks.json
+    的 weixinApi.port，默认 3082；公网不可达故无密钥）→ weixin-bridge.sendProactiveText →
+    成功后触发 outgoing hook（source="proactive"）。send-file 仍由 MSM 直连 iLink 上传并自行补记。
 
   Config:
     { "weixin": {
@@ -275,7 +287,10 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
 
   触发（双向）：
     incoming  = 用户 → bot：路由命中后、媒体落盘后触发（文本含语音转写；媒体带落盘 relPath）
-    outgoing  = bot → 用户：回复发送成功后触发（reply = 用户实际收到的纯文本，已剥离 think）
+    outgoing  = bot → 用户：发送成功后触发（reply = 用户实际收到的纯文本，已剥离 think）
+      · source="reply"（缺省）= 回复用户消息；source="proactive"（v1.30.9）= bot 主动发起
+        （CCC 经 weixin-send MSM → dsp 主动发送入口 → sendProactiveText）
+      · file（仅 send-file 补记）：{ "name": "报告.pdf", "size": 12345, "caption": "可选" }
 
   脚本约定（事件 JSON 单行经 stdin 传入；bun 优先 node 兜底）：
     #!/usr/bin/env bun  或  node script.js —— 读 process.stdin 整段 JSON.parse
@@ -289,7 +304,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
       "message": { "text": "你好", "media": [{ "kind": "image", "relPath": "_tmp/weixin-inbound/<hash>/img_x.jpg" }] } }
     { "event": "outgoing", "ts": ..., "cccRoot": ..., "accountId": ...,
       "userId": ..., "sessionId": ..., "role": ...,
-      "reply": "已记录（纯文本）" }
+      "reply": "已记录（纯文本）", "source": "reply" | "proactive" }
 
   示例脚本（追加到按日文件——持久化归 CCC 自选：文件/DB/远端均可）：
     const fs = require('node:fs'); const p = '/path/ccc/AGENT_SESSIONS/_weixin-log.jsonl';

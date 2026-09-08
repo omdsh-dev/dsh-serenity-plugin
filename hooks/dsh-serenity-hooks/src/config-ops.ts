@@ -84,6 +84,17 @@ export interface AdvancedSettings {
   gateway: GatewaySettings
   persona: PersonaSettings
   publicAsk: PublicAskSettings
+  /** 主动发送入口（v1.30.9）：**只绑 127.0.0.1** 的独立监听器——CCC 的 MSM 用它发消息给指定用户 */
+  weixinApi: WeixinApiSettings
+}
+
+/**
+ * 主动发送入口配置（v1.30.9，S142 用户需求"微信桥支持被调用发消息"）。
+ * 只监听 loopback（公网网关 3081 不可达），故不做密钥；`enabled:false` 或 `port:0` 关闭。
+ */
+export interface WeixinApiSettings {
+  enabled: boolean
+  port: number
 }
 
 /** 默认值（工厂——每次返回新对象，防止调用方意外共享引用） */
@@ -106,6 +117,10 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     publicAsk: {
       key: '',
       allowed: [],
+    },
+    weixinApi: {
+      enabled: true,
+      port: 3082,
     },
   }
 }
@@ -168,6 +183,7 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
   const gateway = (o.gateway ?? {}) as Partial<GatewaySettings>
   const persona = (o.persona ?? {}) as Partial<PersonaSettings>
   const publicAsk = (o.publicAsk ?? {}) as Partial<PublicAskSettings>
+  const weixinApi = (o.weixinApi ?? {}) as Partial<WeixinApiSettings>
   return {
     gateway: {
       enabled: typeof gateway.enabled === 'boolean' ? gateway.enabled : def.gateway.enabled,
@@ -202,6 +218,12 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
       allowed: Array.isArray(publicAsk.allowed)
         ? publicAsk.allowed.filter((n): n is string => typeof n === 'string' && n !== '')
         : def.publicAsk.allowed,
+    },
+    weixinApi: {
+      enabled: typeof weixinApi.enabled === 'boolean' ? weixinApi.enabled : def.weixinApi.enabled,
+      port: typeof weixinApi.port === 'number' && Number.isInteger(weixinApi.port) && weixinApi.port >= 0
+        ? weixinApi.port
+        : def.weixinApi.port,
     },
   }
 }
@@ -259,6 +281,14 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
           : current.publicAsk.allowed,
       }
       : current.publicAsk,
+    weixinApi: patch.weixinApi !== undefined
+      ? {
+        enabled: typeof patch.weixinApi.enabled === 'boolean' ? patch.weixinApi.enabled : current.weixinApi.enabled,
+        port: typeof patch.weixinApi.port === 'number' && Number.isInteger(patch.weixinApi.port) && patch.weixinApi.port >= 0
+          ? patch.weixinApi.port
+          : current.weixinApi.port,
+      }
+      : current.weixinApi,
   }
   writeAdvancedSettings(next)
   return next
