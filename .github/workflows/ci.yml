@@ -1,20 +1,50 @@
-# CI — dsh-serenity-plugin（S142 review F-14，v1.30.7）
+# CI — dsh-serenity-plugin（S142 review F-14，v1.30.7；v1.30.16 修复为可绿）
 #
 # 为什么存在：发布链此前只有 `dsh-develop publish` 的 typecheck + build + pack-check，
-# **测试是"人记得跑"的步骤**；仓库也没有任何 CI，于是 913 个测试形同建议。
-# 本工作流在每次 push/PR 上跑 typecheck + test，把"绿着发布带红测试"挡在门外。
+# **测试是"人记得跑"的步骤**；仓库也没有任何 CI，于是 1000+ 个测试形同建议。
+# 本工作流在每次 push/PR 上跑测试，把"绿着发布带红测试"挡在门外。
 #
-# ⚠️ 首次运行需验证（诚实声明）：本文件在 CCC 内编写时无法执行 CI（无 bash / 网络受限），
-#    以下两处假设需首次 GitHub run 确认：
-#      ① `@deepseek-ai/dsh@0.1.2-rc.1` 在公开 npm 可安装（本机 registry 查询被内网 DNS 拦截）；
-#      ② hooks 的 tsconfig paths 指向全局安装的宿主（`$(npm root -g)/@deepseek-ai/dsh/node_modules/...`），
-#         因此必须先全局安装宿主，typecheck 才能解析 `@deepseek-ai/dsh-*` 类型。
-#    若 ① 不成立，把 host-install 步骤去掉即可——**测试本身不依赖宿主**（所有宿主调用均被 vi.mock 拦截），
-#    仅 typecheck 需要宿主类型基准。
+# ── v1.30.16 修复：为什么从 npm 换成 pnpm（根因，实证）──────────────────────────
+# 旧版用 `npm install`，CI **13 次运行全红**：job 步骤级证据 = checkout/setup-node 成功 →
+# `Install dev dependencies` 失败 → 之后 typecheck/test 全部 skipped；耗时仅 **6 秒**，
+# 即失败在下载之前的**依赖解析**阶段。根因三层（全部本地等价复现，公网 registry）：
+#   ① `npm install --dry-run` → `npm error Cannot read properties of null (reading 'edgesOut')`
+#   ② 逐字段/逐包二分：`minimal`/`peers-only` PASS、`dev-only` FAIL；单装 11 个 devDep →
+#      **只有 `tsdown@^0.22.14` FAIL**
+#   ③ 上游定性 = **npm/cli issue #9787**（open）：arborist `#loadPeerSet`
+#      （build-ideal-tree.js:1289/1297）**未判空的 null 解引用**；触发形态 =
+#      "自引用同版本 + 通配符"的**可选 peer 集合**——tsdown@0.22.14 正是（可选 peers
+#      `@tsdown/css:"0.22.14"`、`@tsdown/exe:"0.22.14"` + `tsx:"*"` 等 9 项）。
+#      CI 是 Node 22 → 自带 npm 10.x，正是 issue 里崩溃的版本。
+#   实测绕法：`--legacy-peer-deps` / npm 11 可避开崩溃，但前者跳过 peer 安装 → 不可取。
+# 本仓本就是 **pnpm 项目**（hooks 自带 `pnpm-lock.yaml`、根 `packageManager: pnpm@9.0.0`），
+# 用 npm 装属包管理器错配（且无锁文件 → 每次全量解析，正撞上这个 bug）。改用 pnpm 后解析
+# 由 pnpm 负责（不经过 arborist），且**版本锁定、可复现**。
 #
-# 本地等价命令（更快，无需 CI）：
-#   msm("dsh-develop", ["typecheck"])   # node + client 双面
-#   msm("dsh-develop", ["test"])        # 63 files / 933 tests
+# 顺带修复（否则 `--frozen-lockfile` 也会失败）：`hooks/dsh-serenity-hooks/pnpm-lock.yaml`
+# **与 package.json 不一致**——18 个 `peerDependencies`（`@deepseek-ai/dsh-*` / `cordis` /
+# `@deepseek-ai/cordis` / `schemastery`）只在 package.json 里、锁文件没有（加了 peer 但没重跑
+# pnpm）→ 已 `pnpm install --lockfile-only` 重新生成（68 KB → 122 KB，18 个 peer 均可解析到
+# `0.1.2-rc.1`）。**今后改 package.json 依赖后必须重跑 pnpm install 并提交锁文件。**
+#
+# ── 为什么 typecheck 是「信息性」而非阻塞门（诚实边界 E↑）────────────────────────
+# 两个 tsconfig 的 `paths` 指向**开发机上的宿主类型基准**：
+#   · node 半：`/home/yh/.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/*`（28 条）
+#   · client 半：同上 + `/home/yh/.dsh/source/current/packages/client/*`（harness 源码检出）
+# 这些路径在 runner 上不存在（旧版的 `Install DSH host` 步骤装到 runner 的全局 npm root，
+# 与这些硬编码路径**毫无关系 → 该步骤无效，已删除**）。
+# 实测：把 paths 清空（= CI 形态）后 node 半 typecheck **94 条错误**，根因是
+# `cordis` 与 `@deepseek-ai/cordis` 被装成两个包实例 → 宿主的 Context 声明合并失效
+# （`Property 'webServer' does not exist on type 'Context'`）。要真正在 CI 上跑通 typecheck，
+# 需要把宿主类型基准改成**仓库内可解析**（单 cordis 实例 + 把 client 半的 ui-slots/ui-primitives
+# 也纳入依赖）——那是一次独立改造，见 SESSION.md §8「CI 全红」条目。
+# 因此：阻塞门 = **测试**（不依赖宿主，宿主调用全部被 vi.mock 拦截）；
+#       typecheck 设为 `continue-on-error`（看得到、不阻塞），真实门在本地发布链——
+#       `dsh-develop publish` 在 npm publish 前先跑 typecheck 双面 + build，类型红则发布不了。
+#
+# 本地等价命令：
+#   msm("dsh-develop", ["test"])        # vitest（根配置覆盖 tests/ + hooks/**/tests/ + scripts/）
+#   msm("dsh-develop", ["typecheck"])   # node + client 双面（需要本机宿主安装）
 
 name: CI
 
@@ -24,38 +54,47 @@ on:
   pull_request:
   workflow_dispatch:
 
-env:
-  # dsp 被验证过的宿主版本范围下限（与 package.json peerDependencies / src/host/contract.ts 同源）
-  DSH_VERSION: 0.1.2-rc.1
-
 jobs:
-  hooks:
-    name: hooks (typecheck + test)
+  test:
+    name: test (hooks + root) + typecheck (informational)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: hooks/dsh-serenity-hooks
     steps:
       - uses: actions/checkout@v4
+
+      # pnpm 版本与开发机一致（本机实测 11.20.0；锁文件 lockfileVersion 9.0）
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            hooks/dsh-serenity-hooks/pnpm-lock.yaml
 
-      # 宿主类型基准：tsconfig paths 指向全局安装的 dsh CLI 内部 node_modules。
-      # 失败不阻断测试（测试不依赖宿主）——typecheck 步骤会因此红，便于定位。
-      - name: Install DSH host (type baseline)
-        continue-on-error: true
-        run: npm install -g @deepseek-ai/dsh@${{ env.DSH_VERSION }}
+      # 两个独立 pnpm 项目：仓库根（tests/ + scripts/）与 hooks 包（hooks/**/tests/）。
+      # 根 vitest 配置同时收集两者，故两个都要装。--frozen-lockfile：锁文件与
+      # package.json 不一致即失败（防 CI 静默漂移）。
+      - name: Install (repo root)
+        run: pnpm install --frozen-lockfile
 
-      - name: Install dev dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install (hooks)
+        working-directory: hooks/dsh-serenity-hooks
+        run: pnpm install --frozen-lockfile
 
-      - name: Typecheck (node half)
-        run: npm run typecheck
-
-      - name: Typecheck (client half)
-        run: npx tsc -p client/tsconfig.json --noEmit
-
+      # 阻塞门：根 vitest 配置覆盖 tests/ + hooks/**/tests/ + scripts/（约 1000+ 用例）
       - name: Test
-        run: npm test
+        run: pnpm test
+
+      # 信息性：宿主类型基准是本机路径（见文件头「为什么 typecheck 是信息性」）
+      - name: Typecheck (node half, informational)
+        continue-on-error: true
+        working-directory: hooks/dsh-serenity-hooks
+        run: pnpm run typecheck
+
+      - name: Typecheck (client half, informational)
+        continue-on-error: true
+        working-directory: hooks/dsh-serenity-hooks
+        run: pnpm exec tsc -p client/tsconfig.json --noEmit
