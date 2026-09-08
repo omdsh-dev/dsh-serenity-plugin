@@ -92,6 +92,15 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     required: true,
   },
   {
+    // v1.30.12：web_fetch provider 接管（fake-ip 网络下宿主内置 provider 恒拒）
+    id: 'web',
+    name: 'web',
+    access: 'injected',
+    members: [{ name: 'registerFetchProvider', kind: 'function' }],
+    impact: 'web_fetch provider 无法注册 → fake-ip 网络下 web_fetch 不可用',
+    required: false,
+  },
+  {
     id: 'systemPrompt',
     name: 'systemPrompt',
     access: 'injected',

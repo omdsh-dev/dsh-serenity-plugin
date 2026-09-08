@@ -1,8 +1,28 @@
 # dsh-serenity-hooks bundle 层（经 package.json `dsh.bundle.patch` 声明）
 # 装入 profile（`dsh plugin --profile <name> add @shgroup/dsh-serenity-hooks`）
 # 后由 profile-boot 组合：行 name 即包名，Loader 从 profile node_modules 解析。
+#
+# patch 语义（宿主 app-boot `applyEntryPatches` 实证，0.1.2-rc.1）：
+#   - `insert:` 追加条目；无 id 追加到根，有 id 追加到该 group 的 config
+#   - 无 insert 的行按 id 定向覆盖字段（`config` 为**整体替换**，非深合并）
+#   - 未命中的 patch 只告警跳过（宿主换版本时不会炸）
+#   - 各 bundle 的 patch 与本 profile 的 cordis.patch.yml 被**展平成一个列表**按序应用
+#     （本包在 bundles 末尾 → 其 patch 在所有宿主 bundle 之后生效）
 - insert:
     - id: serenity-hooks
       name: '@shgroup/dsh-serenity-hooks'
       config:
         serenityConfigPaths: ['.dsh/serenity.json', '.opencode/serenity.json']
+
+# ── v1.30.12（S142 用户拍板 L3）：web_fetch 在 fake-ip/TUN 网络下恒失败 ────────────
+# 宿主内置 provider `@deepseek-ai/dsh-web-fetch-http` 用 ipaddr.js 判「公网单播」，
+# 而本网络 DNS 走 Clash fake-ip（域名→198.18.0.0/15，实证 cdn.jsdelivr.net→198.18.1.85）
+# → 恒抛 WEB_BLOCKED_URL，且该包 Config 无开关（只有 5 个配额字段）。
+# 屏蔽：禁用宿主内置 provider，改由本插件注册的 provider 接管**同一 id**（`http`，
+# HttpFetchProvider 的实例字段 LOCAL_FETCH_PROVIDER_ID）——宿主 `web` 的既有配置
+# `fetchProvider: http` 因此无需改动（也就不会覆盖 searchProvider）。
+# 需要恢复宿主原行为：把下面两行删除或改 `disabled: false`，并同时关掉插件配置
+# `serenity-hooks.webFetch.enabled`（否则会 WEB_DUPLICATE_PROVIDER）。
+- id: web-fetch-http
+  name: '@deepseek-ai/dsh-web-fetch-http'
+  disabled: true

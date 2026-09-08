@@ -49,12 +49,13 @@ import { registerAutopilot } from './autopilot-trajectory.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
 import { registerWeixinSendApi } from './weixin-send-api.js'
 import { registerLifecycle } from './seams/lifecycle.js'
+import { registerWebFetchProvider } from './web-fetch-provider.js'
 
 export const name = 'dsh-serenity-hooks'
 
 /** 主动调用的服务；其余（agent 事件）随 harness 装配必然存在
  *  （v1.28.0 适配 0.1.2-rc.1：+ 'settings'——B4 settings 服务由 provider 插件加载后才有） */
-export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', 'agentLoop', 'agents', 'systemPrompt', 'sessionProjections', 'settings']
+export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', 'agentLoop', 'agents', 'systemPrompt', 'sessionProjections', 'settings', 'web']
 
 /** 插件配置（cordis.yml 提供；进程级） */
 export interface Config {
@@ -88,6 +89,8 @@ export interface Config {
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（entry 默认值，运行时经 DSH settings） */
   acp?: { enabled?: boolean; httpPort?: number }
+  /** v1.30.12 web_fetch provider 接管（fake-ip / TUN 网络：宿主内置 provider 判「非公网」恒拒） */
+  webFetch?: { enabled?: boolean }
 }
 
 export const Config: z<Config> = z.object({
@@ -107,6 +110,7 @@ export const Config: z<Config> = z.object({
   rebuild: z.object({ enabled: z.boolean().default(true), thresholdK: z.number().min(50).max(4000).default(400) }),
   skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(3099) }),
   acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(3100) }),
+  webFetch: z.object({ enabled: z.boolean().default(true) }),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -194,6 +198,13 @@ export function apply(ctx: Context, config: Config): void {
   // review F-08（v1.30.8）：生命周期——agent/session 销毁清理 per-会话状态 +
   // 插件卸载/HMR 停掉自起资源（skiff 调试页/ACP/微信桥；否则端口占用与重复轮询）
   registerLifecycle(ctx)
+  // v1.30.12（S142 用户拍板 L3）：web_fetch provider 接管——fake-ip 网络下宿主内置
+  // provider（web-fetch-http）把 198.18.0.0/15 判为「非公网」恒拒；本插件用同一
+  // HttpFetchProvider 实现 + 放宽后的地址判据注册同 id（宿主内置由本包 bundle patch
+  // `disabled: true` 关闭，避免 WEB_DUPLICATE_PROVIDER）。
+  if (config.webFetch?.enabled !== false) {
+    void registerWebFetchProvider(ctx)
+  }
 }
 
 /**

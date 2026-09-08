@@ -454,6 +454,39 @@ function cmdReadDsh(relPath?: string, start?: string, end?: string): void {
   console.log(r.stdout)
 }
 
+function cmdDumpConfig(pattern?: string): void {
+  // v1.30.12：机械验证 profile 合成结果——宿主 `dsh --dump-config` 与 boot 走**同一个**
+  // applyEntryPatches（app-boot 注释明示"a dump can never drift from what boots"），
+  // 因此可用它核对 bundle patch（如禁用 web-fetch-http）是否真的生效。
+  const dshBin = process.env.SERENITY_DSH_BIN ?? join(HOME_DIR, '.npm-global', 'bin', 'dsh')
+  const bin = existsSync(dshBin) ? dshBin : 'dsh'
+  const profile = process.env.SERENITY_DSH_PROFILE ?? 'web'
+  const r = run(bin, ['--profile', profile, '--dump-config'], { cwd: REPO_ROOT, quiet: true })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`dsh --dump-config 失败 (exit ${r.status})`, 2)
+  }
+  if (!pattern) {
+    console.log(r.stdout)
+    return
+  }
+  const re = new RegExp(pattern, 'i')
+  const all = r.stdout.split('\n')
+  const keep = new Set<number>()
+  all.forEach((line, i) => {
+    if (re.test(line)) {
+      keep.add(i - 1)
+      keep.add(i)
+      keep.add(i + 1)
+    }
+  })
+  if (keep.size === 0) {
+    console.log(`[dsh-develop] --dump-config 无匹配: ${pattern}`)
+    return
+  }
+  console.log(all.filter((_, i) => keep.has(i)).join('\n'))
+}
+
 function cmdApiStatus(path?: string): void {
   // 查询本地 dsh web HTTP 接口（同步阻塞版；避免异步回调在 bun 进程退出前未执行）
   const urlPath = path ?? '/serenity/status?workspace=' + (process.env.SERENITY_CCC_ROOT ?? '')
@@ -870,6 +903,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
+      case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
         console.log('typecheck | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern>')
@@ -908,6 +942,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   pack-check            npm pack --dry-run 核对 tarball 完整性（chunk/双 bundle/类型）
   readme-sync           包内 README ← 仓库 README（机械同步，相对链接转绝对 URL）
+  dump-config [pattern] dsh --dump-config（合成后的 profile 条目树；pattern 过滤）
   publish               npm publish @shgroup/dsh-serenity-hooks（凭据走 ~/.npmrc）
   github-push [--force] push 到 GitHub 公开仓库（tellmewhattodo）`)
         break

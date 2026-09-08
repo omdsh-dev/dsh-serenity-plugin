@@ -1,3 +1,35 @@
+## v1.30.12 — 2026-09-08（web_fetch 在 fake-ip 网络下被拦：ACC 接管 provider + 屏蔽宿主内置，S142）
+
+**Scope:** 用户报告 `web_fetch` 恒失败（"被 dsh 安全机制拦截，我需要关了它，看看能从哪个层面想办法"）→ 分层实证后拍板 **L3：ACC 注册自己的 provider**，并要求"**屏蔽掉 dsh 自身注册的**"。设计全文见 `docs/web-fetch-fakeip-design.md`。
+
+### 根因（代码级实证，非 DSH 误判）
+- 拦截点 `@deepseek-ai/dsh-web-fetch-http/lib/index.js:69`：`if (!isPublicIpAddress(entry.address)) throw new WebError(..., 'WEB_BLOCKED_URL')`——**无条件 throw，该包 Config 无开关**（只有 5 个配额字段）
+- 判据 = `ipaddr.js` 的 `range() === 'unicast'`；本机 DNS 走 Clash fake-ip → `cdn.jsdelivr.net` 解析为 **198.18.1.85**（`198.18.0.0/15` 被 ipaddr.js 归为 reserved）→ 恒拒
+
+### 新增 `src/web-fetch-provider.ts`
+- **复用宿主实现**：`HttpFetchProvider`（已导出）+ 注入自定义 `resolveAddresses` → 重定向策略/字节字符配额/字符集解码/连接固定全部继承
+- **最小放宽判据**：`公网单播 ∪ fake-ip 段(198.18.0.0/15)`；loopback / link-local（含 `169.254.169.254`）/ RFC1918 / CGNAT / 保留段 / 组播 / IPv6 ULA·link-local 依旧拒绝；IPv6 仅放行 `2000::/3`，`::ffff:a.b.c.d` 按内嵌 IPv4 判定；**任一地址不合法即整体拒绝**（与宿主同口径，防 DNS 重绑定）
+- **注册同 id `http`**（`LOCAL_FETCH_PROVIDER_ID`）→ 宿主 `web` 的既有配置 `fetchProvider: http` 无需改动（避免 patch 整体替换 web 配置对象时连 `searchProvider` 一起覆盖）
+- **失败策略**：后端包动态 import（宿主无该包 → 只告警，绝不让整机启动失败）；错误对象本地构造（`dsh-tool-web` 只渲染 `message`，不判 `instanceof`）
+
+### 屏蔽宿主内置（用户要求）
+- `cordis.patch.yml`（bundle patch 层）新增：`- id: web-fetch-http` + `name` + `disabled: true`
+- 依据：宿主 `applyEntryPatches` 把**所有 bundle 的 patch 与本 profile 的 cordis.patch.yml 展平为一个列表**按序应用，本包在 bundles 末尾 → patch 在所有宿主 bundle 之后生效；**未命中的 patch 只告警跳过** → 修复随插件交付，不改机器配置，宿主换版本不炸
+- 两者不能并存（同 id 会 `WEB_DUPLICATE_PROVIDER`）——刻意的响亮信号；回滚见设计文档 §5
+
+### 配套
+- `index.ts`：`inject` 增 `'web'`；新配置 `webFetch.enabled`（默认 true）；`apply` 末尾装配
+- `host/access.ts` 增 `HostWeb` / `hostWeb`；`host/contract.ts` 增 `web` 服务契约条目（optional）
+- `package.json`：peerDependencies + `@deepseek-ai/dsh-web` / `@deepseek-ai/dsh-web-fetch-http`（后者 optional）；tsconfig paths 同步
+- `dsh-develop` 新子命令 **`dump-config [pattern]`**：跑宿主 `dsh --dump-config`（与 boot 同一 patch 合成实现）核对 profile 条目树，±1 行上下文过滤
+
+### 验证
+- 新测试 `tests/web-fetch-provider.test.ts` **9 用例**（地址判据 13 个拒绝样本 / IPv6 分类 / mapped 语义 / resolver 整体拒绝 / 注册 id / 降级不抛错）
+- **71 files / 1002 tests 全绿**（993 → 1002）+ typecheck 双面 ✓ + build ✓
+- **patch 合成实证**：`dsh-develop dump-config web-fetch-http` → `# == @deepseek-ai/dsh-base, patched by @shgroup/dsh-serenity-hooks` / `- id: web-fetch-http … disabled: true` ✓
+- `deploy` ✓（staging 双锚 + profile 双目标 + preflight 注入面含 `web`）
+- **⏸ 运行时验证待 restart-web**：重启后 `web_fetch` 应能抓取 fake-ip 网络下的公网站点（本方案生效点）
+
 ## v1.30.11 — 2026-09-08（README 完整重写：人话版 + 声明面校准，S142）
 
 **Scope:** 用户"帮我把 dsp 的 README 完整重写吧，之前写的内容都正确，就是不太说人话"。原则：**信息一条不丢，只换说法**——所有能力/端口/配置/用例/FAQ 保留，术语首次出现给一句白话解释，长名词堆叠改成人话短句。

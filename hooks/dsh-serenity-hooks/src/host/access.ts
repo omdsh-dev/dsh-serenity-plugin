@@ -61,6 +61,12 @@ export interface HostSettings {
   installSection?: (...args: unknown[]) => unknown
 }
 
+/** `ctx.web`（injected；v1.30.12：fetch provider 注册通道） */
+export interface HostWeb {
+  registerFetchProvider?: (provider: unknown) => unknown
+  registerSearchProvider?: (provider: unknown) => unknown
+}
+
 /** `ctx.sessions`（injected） */
 export function hostSessions(ctx: unknown): HostSessions | undefined {
   return hostInjected<HostSessions>(ctx, 'sessions')
@@ -79,6 +85,11 @@ export function hostWebServer(ctx: unknown): HostWebServer | undefined {
 /** `ctx.settings`（injected；提供 settings 面板装配通道） */
 export function hostSettings(ctx: unknown): HostSettings | undefined {
   return hostInjected<HostSettings>(ctx, 'settings')
+}
+
+/** `ctx.web`（injected；v1.30.12 web_fetch provider 注册通道） */
+export function hostWeb(ctx: unknown): HostWeb | undefined {
+  return hostInjected<HostWeb>(ctx, 'web')
 }
 
 /** 会话 cwd 列表（live 会话；形状不符时返回空数组而非抛错） */

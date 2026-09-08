@@ -30,6 +30,9 @@
       "@deepseek-ai/dsh-session-title": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-title"],
       "@deepseek-ai/dsh-system-prompt": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-system-prompt"],
       "@deepseek-ai/dsh-agent-loop": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-loop"],
+      // v1.30.12：web_fetch provider 接管（注册进 ctx.web + 复用 HttpFetchProvider）
+      "@deepseek-ai/dsh-web": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web"],
+      "@deepseek-ai/dsh-web-fetch-http": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-fetch-http"],
       // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 → Settings* 类型源改
       // dsh-client-ui-settings/client + ui-renderer/client（官方声明合并面）
       "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
