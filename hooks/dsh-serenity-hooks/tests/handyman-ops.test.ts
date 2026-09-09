@@ -81,14 +81,19 @@ describe('handyman-ops: 轮次 prompt', () => {
 })
 
 describe('handyman-ops: guide 指引 + 运行状态列表（WebUI 等待界面数据源）', () => {
-  it('HANDYMAN_GUIDE 含 eap 要求 / 白名单 / jobs 并行 / 提示词规范（v1.24.0）', () => {
+  it('HANDYMAN_GUIDE 含 eap 要求 / 白名单 / jobs 并行 / 提示词规范 + 双模式（v1.31.3）', () => {
     expect(HANDYMAN_GUIDE).toContain('load eap and design the plan')
     expect(HANDYMAN_GUIDE).toContain('Task decomposition (E↑ Explicit)')
     expect(HANDYMAN_GUIDE).toContain('Model whitelist (CCC-configured, mandatory)')
     expect(HANDYMAN_GUIDE).toContain('handyman.models')
-    expect(HANDYMAN_GUIDE).toContain('Parallel strategy (jobs orchestration, workflow capability)')
+    expect(HANDYMAN_GUIDE).toContain('Parallel strategy (background mode only)')
     expect(HANDYMAN_GUIDE).toContain('handyman-internal agent is also required to load eap')
-    expect(HANDYMAN_GUIDE).toContain('The only completion condition = the handyman-internal agent echoes')
+    expect(HANDYMAN_GUIDE).toContain('the only completion condition = the worker echoes')
+    // v1.31.3 双模式：缺省 foreground / background 循环校验 / 选择判据
+    expect(HANDYMAN_GUIDE).toContain('Two modes (v1.31.3; default = foreground)')
+    expect(HANDYMAN_GUIDE).toContain('foreground (default)')
+    expect(HANDYMAN_GUIDE).toContain('ctx.subagents.start("spawn")')
+    expect(HANDYMAN_GUIDE).toContain('LOW-COST models')
   })
 
   it('listActiveHandymen 列出进度文件（按 updated 倒序；坏文件跳过）', () => {

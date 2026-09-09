@@ -156,15 +156,27 @@ If the task is complete, output only ${stopToken}.`
  */
 export const HANDYMAN_GUIDE = `# handyman — Scale-Up Usage Guide (guide)
 
+## Two modes (v1.31.3; default = foreground)
+| | foreground (default) | background |
+|---|---|---|
+| What | one serial child agent runs the task ONCE and returns its final text | loop-validated worker: hard while-loop + random completion code |
+| Use when | you need exactly one result back now (per-case testers, single conversions) | long/unattended work needing anti-early-finish, resumability, or parallel jobs |
+| Loop / validation | none | stop-token is the ONLY completion condition; round cap (default 100); auto-restart (≤100) |
+| Progress file | none | AGENT_SESSIONS/handyman-<label>.md/.json (same label resumes) |
+| Parallel jobs | no (call once per task) | yes (jobs=[...], handyman.maxParallel default 10) |
+| Mechanism | host delegation service ctx.subagents.start("spawn") + agentOptions | ctx.agents.create + internal while-loop |
+| Model source | CCC handyman.models whitelist (same for both) | same |
+
 ## ⚠️ Before using: load eap and design the plan
 Before calling handyman, load eap (acc-eap skill) and design the "scale-up handyman plan" based on the EAP framework.
 
 ### 1. Task decomposition (E↑ Explicit)
 - Split large tasks into explicit subtasks: each subtask defines goal / input / boundaries (what to do, what not to do) / acceptance criteria
-- Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel
+- Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel (background mode)
 
 ### 2. Prompt design (handyman's task parameter)
 - task must be detailed, fixed, and EAP-compliant: clear goal, drawn boundaries, decidable acceptance criteria
+- foreground mode: the child does NOT share your conversation — restate everything it needs in task
 - Anti-example "handle this file" — ambiguous; good example "read <path>, extract all rows of the「关键决策」table,
   output a JSON array (fields id/conclusion/evidence), do not modify the original file"
 - Reading/curating or text-writing work (extracting from files, summarizing, writing docs, generating text, etc.):
@@ -172,23 +184,27 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
 
 ### 3. Model whitelist (CCC-configured, mandatory)
 - handyman only uses models listed in .opencode/serenity.json "handyman.models" — never arbitrary models
-- Recursive subagents inside a handyman inherit the handyman's model automatically (DSH native)
-- Keep the subagent tool instance free of a fixed agentOptions, or model inheritance breaks
+- The CCC is expected to point this whitelist at LOW-COST models: handyman is the bulk-execution channel
+- background mode: recursive subagents inside a worker inherit the worker's model automatically (DSH native)
+- foreground mode: the child is started through the host delegation service with the resolved model
 
-### 4. Parallel strategy (jobs orchestration, workflow capability)
-- Independent subtasks can run in parallel via handyman(jobs=[...]): each job gets its own label + task + stop token + progress file
+### 4. Parallel strategy (background mode only)
+- Independent subtasks can run in parallel via handyman(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file
 - Concurrency safety guaranteed: unique sessionId (handyman-<label>-<uuid>), progress files isolated per label
   (AGENT_SESSIONS/handyman-<label>.json) — same label resumes, different labels never interfere
 - Parallel cap: handyman.maxParallel (default 10 — cheap models are cheap)
 - Aggregation: after each parallel job produces progress, the main agent merges (or spawns one aggregation handyman)
 - For programmable pipeline/phase orchestration at scale, use the platform's workflow tool instead
 
-## Completion criteria (osp loop standard)
-- The only completion condition = the handyman-internal agent echoes this round's random verification code (stop token); dialogue round cap (default 100, osp fail-safe, forced stop beyond the cap, resumable)
-- Automatic restart on abnormal agent stop (≤100 restarts, anti-infinite-loop)
+## Completion criteria
+- foreground: the child's run settles; done=true only when stopReason="completed" (otherwise read diagnostic)
+- background (osp loop standard): the only completion condition = the worker echoes this round's random verification
+  code (stop token); dialogue round cap (default 100, osp fail-safe, forced stop beyond the cap, resumable);
+  automatic restart on abnormal agent stop (≤100 restarts, anti-infinite-loop)
 
 ## Waiting UI
-- The WebUI session-header Serenity detail card shows running handymen's progress (label / round / last response), one line per parallel job, ~3s refresh
+- The WebUI session-header Serenity detail card shows running background handymen's progress
+  (label / round / last response), one line per parallel job, ~3s refresh (foreground mode writes no progress)
 `
 
 /** handyman 运行状态（进度文件摘要；WebUI 等待界面数据源） */

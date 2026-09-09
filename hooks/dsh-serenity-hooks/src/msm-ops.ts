@@ -193,6 +193,15 @@ Below are all available configuration sections.
 ── 1. handyman.models ──
 handyman（杂工）工具可用模型白名单（provider/model 列表）；未配置时 handyman 报错要求配置。
 缺省模型 = models[0]（可用 handyman.defaultModel 指定，必须 ∈ models）。
+**CCC 应把该白名单指向低成本模型**——handyman 是批量执行通道（v1.31.3 双模式共用同一白名单）。
+
+  Modes（v1.31.3，缺省 foreground）:
+    mode="foreground"（缺省）：一次前台串行委派（宿主委派服务 ctx.subagents.start("spawn") +
+      agentOptions 注入模型）——不循环、不校验完成码、不写进度文件；返回子 agent 最终文本。
+      适合"一次调用一次结果"（逐用例回归、单次转换）。
+    mode="background"：既有循环校验实现（内部 while 硬循环 + 随机完成码唯一判据 + 轮次上限
+      默认 100 可续跑 + 异常自动重启 ≤100 + 进度文件 AGENT_SESSIONS/handyman-<label>.md/.json +
+      jobs 并行 maxParallel 默认 10）。适合长任务/无人值守/需抗提前收工。
 
   Config:
     { "handyman": { "models": ["provider/model-name"] } }

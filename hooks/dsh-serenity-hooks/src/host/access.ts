@@ -92,6 +92,20 @@ export function hostWeb(ctx: unknown): HostWeb | undefined {
   return hostInjected<HostWeb>(ctx, 'web')
 }
 
+/**
+ * `ctx.subagents`（lazy；v1.31.3：handyman foreground 模式的委派正门）。
+ *
+ * 形状对照宿主 rc.1：`SubagentRuntime.start(name, request)` → `SubagentRun`
+ * （`result` / `dispose` / `id`）。本模块只做形状收口；语义与错误处理归调用方。
+ */
+export interface HostSubagents {
+  start?: (name: string, request: unknown) => Promise<unknown>
+}
+
+export function hostSubagents(ctx: unknown): HostSubagents | undefined {
+  return hostInjected<HostSubagents>(ctx, 'subagents')
+}
+
 /** 会话 cwd 列表（live 会话；形状不符时返回空数组而非抛错） */
 export function hostSessionCwds(ctx: unknown): string[] {
   try {

@@ -141,6 +141,14 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     required: false,
   },
   {
+    id: 'subagents',
+    name: 'subagents',
+    access: 'lazy',
+    members: [{ name: 'start', kind: 'function' }],
+    impact: 'handyman foreground 模式不可用（响亮报错，不影响 background 模式）',
+    required: false,
+  },
+  {
     id: 'sessionTitle',
     name: 'sessionTitle',
     access: 'lazy',

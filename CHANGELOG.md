@@ -1,3 +1,51 @@
+## v1.31.3 — 2026-09-09（handyman 双模式：foreground 缺省 = 一次前台串行委派；background = 既有循环校验）
+
+**Scope:** 用户需求——「ACC subagent 工具支持按角色指定模型」，落地裁决链（R↓）：
+① 「dsh 有配置但没放开估计是有原因的，我们要在 ACC 层去自动实现才行；所以我主要考虑 B 面」→ **不走宿主
+未放开的 `subagent-model-selection` 设置**；
+② 「具体的 CCC 总是会指定低成本模型，所以只要有个 subagent 机制可以使用低成本模型就好」→ 目标收窄为
+**一个能用 CCC 配置的低成本模型的委派机制**；
+③ 「名字上我们都叫 handyman 吧，分为 background 和非 background 两种，前者是旧的自带循环校验的实现，
+后者是我们本次所需的简单实现」→ **不新增工具，`handyman` 加 `mode` 维度**（工具面 11 不变）。
+
+### 形态
+| 模式 | 实现 | 语义 |
+|------|------|------|
+| **foreground（缺省，v1.31.3 新）** | 宿主委派正门 `ctx.subagents.start('spawn', {parent, prompt, signal, agentOptions:{provider,model}, toolFilter:{deny:['handyman']}})` → `await run.result` → `dispose()` | 一次前台串行委派，返回子 agent 最终文本；**不循环、不校验完成码、不写进度文件** |
+| **background** | 既有实现（`ctx.agents.create` + 内部 while 硬循环 + 随机完成码唯一判据 + 轮次上限 + 异常自动重启 + 进度文件 + `jobs` 并行） | **一行未改**；长任务/无人值守/抗提前收工 |
+
+### ⚠️ 行为变更（缺省模式）
+- **不传 `mode` 的调用从 background 变为 foreground**（用户拍板"缺省换成 foreground"）。
+  需要旧的循环校验语义 → **显式传 `mode: "background"`**。
+- 两种模式**共用** CCC 的 `handyman.models` 白名单与 `handyman.defaultModel`（**零新增配置**）。
+- foreground 传 `jobs` 会被拒绝（jobs 属 background）；`task` 在 foreground 必须自包含（子 agent 不共享本会话上下文）。
+
+### 实现
+- `src/tools/handyman.ts`：新增 `mode` 参数 + `runForegroundJob()`（模型解析复用 `splitModel` /
+  `requireWhitelistedModel`；结果映射 `stopReason==='completed'` → done，其余 → errored 结果 +
+  `diagnostic` + 部分产出，**不静默假装成功**；`dispose()` 必调）；description 重写为两模式 + 选择判据
+- `src/host/access.ts`：新增 `hostSubagents()`（形状收口，`ctx.subagents.start`）
+- `src/host/contract.ts`：服务表新增 `subagents`（lazy / `required: false` / 成员 `start`）→ hostContract 检查 34 → 35
+- `src/handyman-ops.ts`：`HANDYMAN_GUIDE` 增"两模式"对照表 + 选择判据 + 白名单指向低成本模型的说明
+- `src/seams/system-prompt.ts`：toolsBlock 的 handyman 行同步两模式
+
+### 机制依据（源码级实证，安装版 0.1.2-rc.1）
+- `SubagentStartRequest.agentOptions`（"in-process providers merge them over the parent Agent's options"）
+- `dsh-subagent-spawn-in-process`：`capabilities = { agentOptions: true, toolFilter: true, … }`
+- `SubagentRun.result` / `dispose()`；`SubagentResult.{output, diagnostic, stopReason}`
+- **不依赖** `subagent-model-selection` 设置（该路径与 `agentOptions` 无关）——故本方案无需改动宿主配置
+
+### 测试（75 files / 1110 → **76 files / 1120**）
+- 新 `tests/handyman-foreground.test.ts`（10 用例）：缺省走 foreground / 委派请求形状
+  （`agentOptions`·`parent`·`signal`·`toolFilter.deny=['handyman']`）/ 结果映射与 `dispose` /
+  非 completed → done=false + diagnostic / 白名单拒绝 / 服务缺失响亮报错 / foreground+jobs 拒绝 /
+  缺 task 与非法 mode 拒绝 / 无 `exec.agent` 拒绝 / guide 不建 agent
+- `handyman-ops.test.ts`：guide 断言同步两模式（含"default = foreground"与 `ctx.subagents.start("spawn")`）
+
+### 文档
+- README 中英双版工具表 handyman 行（两模式 + 缺省）；`msm-ops` CCC_CONFIG_REFERENCE §1 增"Modes"段
+- 维护 skill 同步；方案全文 `docs/handyman-dual-mode-design.md` v0.3
+
 ## v1.31.2 — 2026-09-09（SESSION.md 体积上限缺省 100 → 200 KB）
 
 **Scope:** 用户指令——「SESSION.md的默认阈值设定在200kb吧」。v1.31.1 引入的 LOGBOOK COMPACTION 提醒

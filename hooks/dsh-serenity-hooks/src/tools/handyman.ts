@@ -45,6 +45,7 @@ import {
 } from '../handyman-ops.js'
 import type { JsonValue } from '../json.js'
 import { waitAgentIdle } from '../agent-idle.js'
+import { hostSubagents } from '../host/access.js'
 
 function agentCwd(exec: ToolRunContext): string {
   return (exec.agent?.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
@@ -100,8 +101,7 @@ export interface HandymanJobResult {
 }
 
 /** 运行时解析 jobs 参数（DSH schema 不支持 object items 的 required/校验 → 手工校验类型） */
-function parseJobs(raw: unknown): HandymanJob[] | null {
-  if (!Array.isArray(raw) || raw.length === 0) return null
+function parseJobs(raw: unknown): HandymanJob[] | null {  if (!Array.isArray(raw) || raw.length === 0) return null
   const jobs: HandymanJob[] = []
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) return null
@@ -110,6 +110,97 @@ function parseJobs(raw: unknown): HandymanJob[] | null {
     jobs.push({ task: rec.task, label: rec.label, model: typeof rec.model === 'string' ? rec.model : undefined })
   }
   return jobs
+}
+
+// ── v1.31.3 foreground 模式：一次前台串行委派（用户裁决：handyman 双模式）──
+
+/** foreground 模式结果（一次调用一次结果；无循环、无进度文件） */
+export interface HandymanForegroundResult {
+  mode: 'foreground'
+  done: boolean
+  model: string
+  stopReason: string
+  output: string
+  childId?: string
+  diagnostic?: string
+}
+
+/** 宿主 `ctx.subagents.start()` 返回句柄的最小形状（不直接依赖宿主类型） */
+interface SubagentRunLike {
+  id?: string
+  result?: Promise<{ output?: unknown; diagnostic?: unknown; stopReason?: unknown }>
+  dispose?: () => Promise<void>
+}
+
+/** 拼接 SubagentResult.output（ContentBlock[]）中的文本块 */
+function subagentOutputText(output: unknown): string {
+  if (!Array.isArray(output)) return ''
+  return output
+    .filter((b): b is { type?: string; text?: string } => typeof b === 'object' && b !== null)
+    .filter((b) => b.type === 'text' && typeof b.text === 'string')
+    .map((b) => b.text as string)
+    .join('')
+}
+
+/**
+ * foreground 模式：单次前台串行委派（用户裁决"本次所需的简单实现"）。
+ *
+ * 与 background 的差别（R↓）：
+ *  - 走宿主**委派正门** `ctx.subagents.start('spawn', …)`——深度上限、子 agent 所有权、
+ *    `subagent/start|end` 生命周期事件、`dispose()` 收尾全部沿用宿主实现（不重写 agent 创建）；
+ *  - 模型经 `agentOptions` 注入（spawn 后端能力位 `agentOptions: true`），因此**不依赖**
+ *    宿主未放开的 `subagent-model-selection` 设置；
+ *  - 不循环、不写进度文件、不做完成码校验——"一次调用一次结果"。
+ */
+async function runForegroundJob(
+  ctx: Context,
+  opts: {
+    task: string
+    label?: string
+    model: string
+    models: string[]
+    parent: unknown
+    signal?: AbortSignal
+  },
+): Promise<HandymanForegroundResult> {
+  const { task, label, model, models, parent, signal } = opts
+  requireWhitelistedModel(model, models)
+  const subagents = hostSubagents(ctx)
+  if (!subagents?.start) {
+    throw new Error(
+      'handyman foreground: host subagents service unavailable (ctx.subagents.start missing) — '
+      + 'use mode="background" (does not need this service) or check the host-contract report',
+    )
+  }
+  if (!parent) throw new Error('handyman foreground: requires a calling agent (exec.agent was undefined)')
+  const { provider, model: modelName } = splitModel(model)
+  const run = (await subagents.start('spawn', {
+    ...(label === undefined ? {} : { label }),
+    prompt: [{ type: 'text', text: task }],
+    parent,
+    signal: signal ?? new AbortController().signal,
+    agentOptions: { ...(provider === undefined ? {} : { provider }), model: modelName },
+    // 递归防护：子 agent 不再持有 handyman（对齐 background 的 tools.restrict deny）
+    toolFilter: { deny: ['handyman'] },
+  })) as SubagentRunLike
+  try {
+    const result = run.result === undefined ? {} : await run.result
+    const stopReason = typeof result.stopReason === 'string' ? result.stopReason : 'error'
+    return {
+      mode: 'foreground',
+      done: stopReason === 'completed',
+      model,
+      stopReason,
+      output: subagentOutputText(result.output),
+      ...(typeof run.id === 'string' ? { childId: run.id } : {}),
+      ...(typeof result.diagnostic === 'string' && result.diagnostic !== ''
+        ? { diagnostic: result.diagnostic }
+        : {}),
+    }
+  } finally {
+    // dispose 幂等：无论结果如何都释放子 agent（与原生 subagent 前台路径同构）
+    if (run.dispose) await run.dispose().catch(() => {})
+  }
 }
 
 /**
@@ -243,24 +334,26 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
   return defineTool({
     name: 'handyman',
     description:
-      'The handyman (杂工): delegate a do-everything worker agent to a CCC-configured model and run it ' +
-      'synchronously in rounds until the task is done.\n' +
-      'Usage: handyman guide (print the scale-up usage guide — load eap to design a plan before using); ' +
-      'single task: handyman(task, label, [model]); multi-job orchestration (workflow capability): handyman(jobs=[{task,label,model?},...]).\n' +
+      'The handyman (杂工): delegate work to a worker agent on a CCC-configured model. Two modes (v1.31.3).\n' +
+      'Mode "foreground" (DEFAULT): one serial child agent runs the task once and returns its final text — ' +
+      'no loop, no completion-code validation, no progress file; use it for one-shot serial delegation ' +
+      '(e.g. per-case testers that just gather evidence). Usage: handyman(task, [label], [model]).\n' +
+      'Mode "background": the loop-validated worker — internal hard while-loop whose ONLY completion condition ' +
+      'is the worker echoing this round\'s random completion code (stop token, prevents low-intelligence models ' +
+      'from finishing early), round cap (default 100, resumable), automatic restart on abnormal stop (≤100), ' +
+      'progress file AGENT_SESSIONS/handyman-<label>.md/.json (same label resumes), and parallel jobs ' +
+      '(handyman.maxParallel, default 10). Usage: handyman(mode="background", task, label, [model]) or ' +
+      'handyman(mode="background", jobs=[{task,label,model?},...]).\n' +
+      'Choosing: need exactly one result back now → foreground; need anti-early-finish guarantees, resumability ' +
+      'or parallel jobs → background.\n' +
       'Model: only models whitelisted in .opencode/serenity.json "handyman.models" (missing config = error); ' +
-      'default reads handyman.defaultModel; jobs run in parallel (handyman.maxParallel, default 10 — cheap models are cheap).\n' +
-      'Behavior: each worker runs synchronously (this call blocks until done) with an internal hard while-loop; ' +
-      'the only completion condition = the worker echoes this round\'s random completion code (stop token), ' +
-      'preventing low-intelligence models from finishing early. Round cap (default 100, osp fail-safe; resumable), ' +
-      'automatic restart on abnormal stop (≤100 restarts).\n' +
-      'Recursion: a worker\'s tool set includes the subagent tool (DSH-native model inheritance — its subagents ' +
-      'use the same model), but NOT handyman itself (orchestration belongs to the main agent).\n' +
-      'Progress: AGENT_SESSIONS/handyman-<label>.md/.json; same label resumes from the last round (no redo). ' +
-      'Legacy loop- progress files are NOT compatible (v1.24.0).\n' +
-      'Example: handyman(task="扫描 SQC 并修复 DC 问题", label="sqc-scan"); handyman(jobs=[{task:"扫描 A",label:"scan-a"},{task:"扫描 B",label:"scan-b"}]); handyman guide',
+      'default reads handyman.defaultModel. Both modes share the same whitelist and default.\n' +
+      'Recursion: a worker\'s tool set excludes handyman itself (orchestration belongs to the main agent).\n' +
+      'Guide: handyman(guide=true) prints the scale-up usage guide.',
     parameters: {
-      task: { type: 'string', description: 'The task goal to complete (required for single-task mode; must be detailed and EAP-compliant)' },
-      label: { type: 'string', description: 'Task label (1-50 chars; progress file named handyman-<label>.md/.json)' },
+      mode: { type: 'string', description: 'Delegation mode: "foreground" (default — one serial child, returns its final text) or "background" (loop-validated worker with completion-code check, round cap, auto-restart, progress file, parallel jobs)' },
+      task: { type: 'string', description: 'The task goal to complete (required in both modes; foreground needs a self-contained prompt — the child does not share this conversation)' },
+      label: { type: 'string', description: 'Task label (background: 1-50 chars, names the progress file; foreground: optional child display name)' },
       session: { type: 'string', description: 'Work session S### (context hint, progress reference)' },
       model: { type: 'string', description: 'provider/model — must be in the CCC whitelist handyman.models; default reads handyman.defaultModel' },
       jobs: {
@@ -296,6 +389,39 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
           'handyman requires a model whitelist: configure .opencode/serenity.json "handyman.models" ' +
             '(e.g. {"handyman": {"models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3"}})',
         )
+      }
+
+      // ── 模式分派（v1.31.3，用户裁决）：缺省 foreground；background = 既有循环校验实现 ──
+      const mode = args.mode === 'background' ? 'background' : 'foreground'
+      if (args.mode !== undefined && args.mode !== 'background' && args.mode !== 'foreground') {
+        throw new Error('handyman: mode must be "foreground" (default) or "background"')
+      }
+      if (mode === 'foreground') {
+        if (typeof args.task !== 'string' || args.task.trim() === '') {
+          throw new Error('handyman foreground: task is required (and must be self-contained — the child does not share this conversation)')
+        }
+        if (args.jobs !== undefined) {
+          throw new Error('handyman foreground: jobs is background-only — call foreground once per task, or use mode="background" for parallel jobs')
+        }
+        const model = typeof args.model === 'string' && args.model !== '' ? args.model : hc.defaultModel
+        const res = await runForegroundJob(ctx, {
+          task: args.task,
+          ...(typeof args.label === 'string' && args.label !== '' ? { label: args.label } : {}),
+          model,
+          models: hc.models,
+          parent: exec.agent,
+          signal: (exec as { signal?: AbortSignal }).signal,
+        })
+        return {
+          ...res,
+          usage: {
+            how: 'foreground mode starts ONE serial child agent through the host delegation service (ctx.subagents.start "spawn") with the CCC-configured model; it awaits the run and returns the child\'s final text. No loop, no completion-code validation, no progress file.',
+            model: 'restricted to the CCC whitelist handyman.models; default reads handyman.defaultModel',
+            next: res.done
+              ? 'Child completed; use its output directly'
+              : `Child did not complete (stopReason=${res.stopReason}); inspect diagnostic/output and decide whether to retry, switch model, or use mode="background"`,
+          },
+        } as unknown as JsonValue
       }
 
       const jobs: HandymanJob[] = args.jobs !== undefined

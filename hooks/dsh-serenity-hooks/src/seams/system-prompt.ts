@@ -104,7 +104,7 @@ export function toolsBlock(): string {
     '  container_git— git operations (status/commit/push/log)',
     '  msm          — execute a registered CCC MSM: msm(name, args); partial name returns candidates; inspect=true shows usage',
     '  praxis       — actionable theory injection: praxis (index) / praxis eap / praxis neat / praxis cce',
-    '  handyman     — delegate a do-everything worker agent (CCC-whitelisted model) to run synchronously in rounds until done; jobs=[] orchestrates parallel work',
+    '  handyman     — delegate work to a worker agent on a CCC-whitelisted model; mode="foreground" (default) = one serial child returns its final text; mode="background" = loop-validated worker (completion code + round cap + restart + progress file), jobs=[] orchestrates parallel work',
     '  localstore   — ACC local credential/config storage (CCC-root localstore.json; git policy localstore.gitTrack default deny)',
     '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config',
     '  autopilot-trajectory — Autopilot Trajectory one-stop management (all/init/random/diag/doc/check/status/guide)',

@@ -75,7 +75,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `container_git` | git 操作：status / commit / push / log / pull / diff | 提交和推送代码；它绝不自动强推 |
 | `msm` | 小工具执行入口：`msm("名字", ["参数"])`；名字记不全就给候选；`inspect=true` 看用法 | 调用工作区里注册的任何小工具 |
 | `praxis` | 按需给 AI 注入三套"做事方法"：输出自检（eap）、设计对齐（neat）、认知连续性（cce） | 要它把话说清楚 / 先对齐再动手时 |
-| `handyman` | 杂工：派一个便宜模型的助手，循环干活直到完成；也可以一次派多个并行 | 大批量、重复性的活（比如扫描几十个技能） |
+| `handyman` | 杂工：派一个便宜模型的助手干活。**默认模式（foreground）**= 一次串行委派、拿回结果；**background 模式**= 循环干活直到完成（完成码校验 / 轮次上限 / 自动重启 / 进度文件），也可一次派多个并行 | 大批量、重复性的活（扫描几十个技能、逐用例回归） |
 | `localstore` | 存密钥和配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
 | `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具时 |
 | `autopilot-trajectory` | 自动巡航：定时唤醒工作区、注入当前焦点，支持多个工作区各自独立 | 想让 AI 定时自己干活（见 §6.5） |
