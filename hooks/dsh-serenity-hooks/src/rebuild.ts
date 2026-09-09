@@ -57,7 +57,7 @@ import {
 } from './session-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
 import { namingTitleFor } from './tools/session.js'
-import { eventToken } from './trajectory-assistant.js'
+import { eventToken, IN_FLIGHT_HEADING } from './trajectory-assistant.js'
 import { appendBound, readLastBound } from './session-bound.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
@@ -109,6 +109,8 @@ export function buildRebuildAnchor(
     `- Persistent trajectory — SESSION.md path: ${rel}`,
     `  (the trajectory's persistent body — stays in place through rebuilds)`,
     `- Read that SESSION.md first (goal/decisions/progress/unresolved), then continue from the last checkpoint.`,
+    // v1.31.1 交接协议（S142 用户需求）：读侧——要求重建后的自己处理写侧留在文末的手头事项
+    `- Then read the "${IN_FLIGHT_HEADING}" section at the very end of SESSION.md and work through those in-flight items (the previous self paused mid-task and handed them over). If that section is missing, infer the in-flight items from the latest progress entries.`,
     // v1.29.2（R1）：任务焦点——重建后会话理解当前任务（无历史；SESSION.md 含完整历史）
     ...(focusLine ? [`- Task focus: ${focusLine}`] : []),
   ]

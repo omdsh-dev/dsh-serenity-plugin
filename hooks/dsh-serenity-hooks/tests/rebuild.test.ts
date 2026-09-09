@@ -43,6 +43,7 @@ import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js
 import { setActiveSessionInfo, resetActiveSessionStore } from '../src/session-ops.js'
 import { SESSION_CONTEXT_MARKER } from '../src/session-ops.js'
 import { readLastBound, appendBound } from '../src/session-bound.js'
+import { IN_FLIGHT_HEADING } from '../src/trajectory-assistant.js'
 
 let dir: string
 
@@ -141,6 +142,26 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const a = buildRebuildAnchor(dir, '', join(dir, 'AGENT_SESSIONS', 'SESSION.md'))
     expect(a).toContain('Continue the current work')
     expect(a).not.toContain('Continue the work of S')
+  })
+
+  // ── v1.31.1 交接协议读侧（S142 用户需求②）：rebuild 锚点要求处理 SESSION.md 末尾的 in-flight 区块 ──
+
+  it('buildRebuildAnchor：含 In-flight 交接读侧指令（标题常量与写侧同源）', () => {
+    const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
+    const a = buildRebuildAnchor(dir, 'S142', mdPath)
+    // 与 keeper.rebuildReminderText（写侧）共用同一常量——标题漂移则读侧找不到写侧写的区块
+    expect(a).toContain(IN_FLIGHT_HEADING)
+    expect(a).toContain('at the very end of SESSION.md')
+    expect(a).toContain('in-flight items')
+    // 区块缺失时的兜底指引（存量 SESSION.md 无该区块 → 重建后不得空转）
+    expect(a).toContain('If that section is missing, infer the in-flight items')
+    // 顺序：先读 SESSION.md 全貌 → 再处理末尾 in-flight 区块
+    expect(a.indexOf(IN_FLIGHT_HEADING)).toBeGreaterThan(a.indexOf('Read that SESSION.md first'))
+  })
+
+  it('buildRebuildAnchor：无激活会话名时同样带 In-flight 读侧指令（非会话相关分支）', () => {
+    const a = buildRebuildAnchor(dir, '', join(dir, 'AGENT_SESSIONS', 'SESSION.md'))
+    expect(a).toContain(IN_FLIGHT_HEADING)
   })
 
   // ── v1.29.2（R1）：rebuild 任务焦点传递（note → Task focus 段）──

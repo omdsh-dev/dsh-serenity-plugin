@@ -94,6 +94,8 @@ These are not "please don't" hints in a prompt — they are **mechanically impos
 | **Secret-file guard** | `localstore.json` is denied to **every** tool (read/grep/glob included) | Secret values are structurally unable to leave |
 | **Outbound output guard** | On outward-facing sessions (sub-role / ACP / rebuilt sessions), sensitive wording is rejected and regenerated, with the hit word and guidance reported | Outsiders should not see internal mechanics |
 | **Trajectory reminders** | After long stretches it reminds the AI to write progress back to the log and expects a confirmation code | The reminder is a mechanism, not a hope |
+| **Logbook size reminder** | When the work log (SESSION.md) passes 100KB it tells the AI to stop and rewrite it, with four rewrite principles (keep the skeleton / move detail into attached files / merge what no longer matters / the rest is your call) | A log nobody can finish reading is worse than a shorter one; rewriting beats piling up. The limit is per workspace (`sessionKeeper.sessionMdMaxKB`, 0 = off) |
+| **Handover before rebuild** | Before rebuilding context it asks the AI to write "where I am / what is unfinished / the next action" at the very **end** of the work log under a fixed heading; the rebuilt self reads that section first and continues | The context is discarded, but the in-flight work must not be — write and read sides share one heading, so the section can be found |
 
 ### 3.3 Entry points
 
@@ -295,7 +297,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 
 ```bash
 pnpm typecheck          # type check (node + browser halves)
-pnpm test               # full suite (currently 75 files / 1096 tests)
+pnpm test               # full suite (currently 75 files / 1110 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
@@ -360,4 +362,4 @@ Yes — through the same `weixin.hook` script configured in the workspace, with 
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.31.0 &nbsp;|&nbsp; **Requires**: DSH 0.1.2-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 75 files / 1096 tests
+> **Version**: v1.31.1 &nbsp;|&nbsp; **Requires**: DSH 0.1.2-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 75 files / 1110 tests

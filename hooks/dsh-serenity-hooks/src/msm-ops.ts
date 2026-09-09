@@ -200,15 +200,24 @@ handyman（杂工）工具可用模型白名单（provider/model 列表）；未
   Example:
     { "handyman": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3", "maxRounds": 100, "maxParallel": 10 } }
 
-── 2. sessionKeeper.threshold ──
+── 2. sessionKeeper.threshold / sessionKeeper.sessionMdMaxKB ──
 trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积分阈值（非 headless 主 agent）。
 按工具调用加权 + 耗时计分；达到阈值注入提醒，要求模型回复 ACK 码。
 
   Config:
-    { "sessionKeeper": { "threshold": 150 } }
+    { "sessionKeeper": { "threshold": 150, "sessionMdMaxKB": 100 } }
 
   计分：write/edit = 3，task = 10，read/grep/glob/msm 等 = 1，时间 = 1/分钟
   默认：150
+
+  ▸ sessionMdMaxKB（v1.31.1）：**活跃 SESSION.md 体积上限（KB，缺省 100；0 = 关闭）**。
+    超过 → 注入 [TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION] 提醒：暂停当前工作 →
+    加载 eap（praxis eap）→ 按 EAP 分层骨架重写 SESSION.md。四条原则（ACC 内嵌，随提醒给出）：
+    ① 保留 EAP 分层骨架（不压成时间流水账）② 内容可外移到 references 文件
+    （AGENT_SESSIONS/<会话>/references/*.md，SESSION.md 留链接）③ 允许整合/删除不重要事项
+    （被取代的决策、已解决问题、中间态）④ 自主裁量权充分允许（唯一硬要求 = 骨架 +
+    未决项/决策理由/下一步仍可重建）。超限每轮提醒；连续 3 轮未重写 → 升级强制语气；
+    文件回到限内 → 自动停止（自愈）。轨迹提醒**不机械阻断工作**（与 rebuild 提醒同族）。
 
 ── 3. localstore.gitTrack ──
 localstore.json 的 git 策略：allow 可提交 / deny 禁提交（默认 deny）。

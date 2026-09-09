@@ -26,6 +26,7 @@ import { stopSkiffDebugServer } from '../skiff-debug.js'
 import { stopAllBridges } from '../weixin-bridge.js'
 import { forgetManualOutputSession } from '../weixin-output-guard.js'
 import { forgetImBridgeVisibility } from './guards.js'
+import { forgetLogbookCompactionState } from './keeper.js'
 import { registerDisposer } from '../host/effect.js'
 
 /** 从 Agent / Session / 事件负载中取会话 id（形状宽容：未知结构返回 null） */
@@ -59,6 +60,12 @@ export function cleanupSessionState(sessionId: string): void {
   try {
     // v1.31.0：im-bridge 可见性隐藏状态（同上——防 per-会话 Map 无界增长）
     forgetImBridgeVisibility(sessionId)
+  } catch {
+    /* 无状态 */
+  }
+  try {
+    // v1.31.1：SESSION.md 体积提醒的路径缓存与超限计数（同上）
+    forgetLogbookCompactionState(sessionId)
   } catch {
     /* 无状态 */
   }

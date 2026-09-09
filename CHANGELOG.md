@@ -1,3 +1,98 @@
+## v1.31.1 — 2026-09-09（trajectory-assistant 增强：SESSION.md 体积超限重写提醒 + rebuild 交接协议）
+
+**Scope（用户两条需求，同批发布）：**
+
+**需求①（SESSION.md 体积超限）**——「当 SESSION.md 文件大小超过 100KB 的时候，提示 trajectory 暂停工作加载 eap 进行
+SESSION.md 重写，重写的原则是保留 eap 分层骨架、内容可以单独写入 reference 文件、允许整合不重要事项、
+自主裁量权被充分允许」。动机实证：本 CCC 的 S142 会话日志已达 **285 KB**——轨迹身体（SESSION.md）
+只增不减，认知读取成本（H_op）随轮次上升，而现有 rebuild 机制只换载体（会话），
+**不会让 SESSION.md 变小**。
+
+**需求②（rebuild 交接）**——「在 rebuild 提示机制中，要求 LLM 将当前手头事项写在 SESSION.md 尾部，
+并要求 rebuild 后去读并处理」。动机：rebuild 只换载体、轨迹身体不动，但**手头正在做的事**
+（卡在哪一步 / 尚未完成什么 / 下一步动作）此前只存在于被丢弃的会话里——重建后的自己从 SESSION.md
+重建上下文，却不知道上一个自己被打断在哪里。**写侧**要求把 in-flight 事项写到 SESSION.md 末尾的固定标题下；
+**读侧**在重建锚点里要求去读那一段并逐项处理（区块缺失则从最新进度条目推断）。
+
+### 新增提醒 `[TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION]`
+- **触发**：活跃 SESSION.md 字节数 > 上限（缺省 **100 KB**）——在 `seams/keeper.ts` 的
+  `tools/post-execute` 里检查（与 CHECKPOINT 计分提醒、LIMIT 上下文压力提醒同族，**独立判定**）
+- **动作**：提示暂停当前工作 → 加载 eap（`praxis eap`）→ 按 EAP 分层骨架重写 SESSION.md
+- **四条原则（用户原话逐条落成可执行判据）**：① 保留 EAP 分层骨架（不压成时间流水账）
+  ② 内容可外移到 references 文件（`AGENT_SESSIONS/<会话>/references/*.md`，SESSION.md 留链接）
+  ③ 允许整合/删除不重要事项（被取代的决策、已解决问题、中间态）
+  ④ 自主裁量权充分允许（唯一硬要求 = 骨架 + 未决项/决策理由/下一步仍可重建）
+- **节奏**：超限每轮提醒；连续 3 轮未重写 → 升级强制语气（mandatory + STOP）；
+  文件回到限内 → **自动停止**（自愈，无需额外状态复位）
+- **不机械阻断**：与 LIMIT 提醒同族（提示 + 可观测），不做事 turn-stopping 打回——
+  重写是大工程，强行打断会破坏正在进行的任务
+
+### 配置（CCC 级，用户拍板"默认 100KB + CCC 可覆盖"）
+- `sessionKeeper.sessionMdMaxKB`（缺省 100；**0 = 关闭**）——与既有 `sessionKeeper.threshold` 同段；
+  理由（R↓）：不同 CCC 的 SESSION.md 规模差异大，硬编码会把小容器逼成无效提醒
+
+### 归属（D23 + 用户拍板 Q1）
+- **ACC 内嵌机制事实 + 4 条原则**（而非"ACC 只给机制、原则放 CCC 入口 skill"）：这 4 条是
+  **认知质量规范**（与 EAP 同层，不是会随角色迭代的措辞），且任何未写该纪律的 CCC 装上即生效。
+  备选（原则放 CCC）代价：逐 CCC 配置 + 新容器默认无指引
+
+### rebuild 交接协议（需求②：in-flight 区块，写侧 + 读侧共用同一常量）
+- **单一真相源 `IN_FLIGHT_HEADING = '## In-flight (rebuild handover)'`**（`trajectory-assistant.ts`）：
+  写侧与读侧引用**同一个常量**——标题一旦漂移，读侧就找不到写侧写的区块。形态为用户拍板
+  **固定英文标题行**（非 HTML 注释锚）：人读友好；ACC 写死英文，因为 SESSION.md 正文语言归 CCC，
+  但两侧的**机械锚点**必须逐字一致
+- **写侧**（`seams/keeper.ts` `rebuildReminderText`）：两条文案（普通 + escalated）都插入 handover 句——
+  要求把当前 in-flight 事项（正卡在哪一步 / 尚未完成什么 / 下一步动作）写在 **SESSION.md 最末尾**、
+  标题之下。**只在 rebuild 提醒（LIMIT）里要求**（用户拍板 Q3）——不占每轮注入
+- **读侧**（`rebuild.ts` `buildRebuildAnchor`）：在 "Read that SESSION.md first…" 之后新增一行——
+  要求读文末的 in-flight 区块并逐项处理（上一个自己在任务中途暂停并交接）；
+  **区块缺失 → 从最新进度条目推断**（存量 SESSION.md 无该区块，不能空转）
+- **读侧取"软指令"而非机械摘取**（用户拍板 Q1）：锚点只给一句指令，由重建后的自己读 SESSION.md
+  取内容——机械摘取会把区块内容复制进锚点，制造第二真相源
+
+### 实现
+- `src/trajectory-assistant.ts`：词汇表新增 `compaction: 'LOGBOOK COMPACTION'`（D8 自然词，
+  无游戏黑话）+ metaphor 变体同名 + 新导出 `IN_FLIGHT_HEADING`
+- `src/ccc.ts`：`SerenityConfig.sessionKeeper` 扩为 `{ threshold?, sessionMdMaxKB? }`
+- `src/seams/keeper.ts`：新 `DEFAULT_SESSION_MD_MAX_KB` / `resolveActiveSessionMdPath`（**短候选链**：
+  活跃会话信息 → `.bindings.json` 权威绑定；**不猜别的轨迹**——对齐 v1.30.13 D4 教训）/
+  `readFileSize` / `readSessionMdMaxKB` / `logbookCompactionReminderText`（纯函数）/
+  `forgetLogbookCompactionState` / `compactionStateSnapshot`；路径与阈值各带 60s TTL 缓存
+  （每个工具调用都要跑，贵候选不划算；`statSync` 每次做，很便宜）；`rebuildReminderText` 加 handover 句
+- `src/rebuild.ts`：`buildRebuildAnchor` 新增 in-flight 读侧指令行
+- `src/seams/lifecycle.ts`：会话销毁清理路径缓存与超限计数（review F-08 同族，防 Map 无界增长）
+
+### 声明面修复（顺带发现——v1.31.0 遗留的工具面三处未同步）
+- **现象**：v1.31.0 新增 `im-bridge`（工具面 10 → 11）时只改了 `src/tools/*` 注册与 README/skill，
+  **漏改 `src/invariant.ts` REGISTERED_TOOLS 与 `dsh.plugin.json` contributes.tools**——两侧同错 →
+  `verifyToolConsistency` 报零问题（**陈旧的双侧一致 = 静默通过**），而代码实际注册 11 个；
+  两个包的 `description` 也仍写「10 个工具」且不含 im-bridge（npm 页面 / 插件清单展示面陈旧）
+- **修复**：REGISTERED_TOOLS + `contributes.tools` 补 `im-bridge`（11）；`package.json` /
+  `dsh.plugin.json` 描述 10 → 11 且列出 im-bridge；`tests/invariant.test.ts` 补**真实清单断言**
+  （用 `import.meta.url` 定位 `dsh.plugin.json`，不依赖 cwd）——把"双侧陈旧"变成会红的测试
+- **教训（写进 invariant 注释）**：工具面变更必须同时改三处（`tools/*.ts` 注册 / REGISTERED_TOOLS /
+  `dsh.plugin.json`），否则不变量本身变成漂移的一部分
+
+### 测试（75 files / 1096 → **75 files / 1110**）
+- 集成 6 用例：超限注入（token/体积/阈值/路径/4 原则齐备）/ 未超限零注入 + 重写后自动停止 /
+  连续 3 轮升级 / `sessionMdMaxKB: 0` 关闭 / 未绑定或文件缺失不提醒不抛错 / skiff 角色
+  `trajectory.session` 关闭时不提醒
+- 纯逻辑 5 用例：文案两态 / 阈值四态（缺省、配置、0、坏值回落）/ 路径解析（优先 + 缓存 + 清理）/
+  文件字节数 / 状态快照与清理
+- 交接协议 4 用例：`keeper.test.ts` 两条 `rebuildReminderText` 断言（普通版 + 升级版：标题常量 /
+  `at the very end of SESSION.md`）+ `rebuild.test.ts` 两条 `buildRebuildAnchor` 断言
+  （**读侧**：标题常量 / 末尾语义 / 缺失兜底句 / 位于 "Read that SESSION.md first" 之后；
+  无激活会话名的分支同样带该指令）
+- 声明面 3 用例：`invariant.test.ts` 11 工具一致性 + REGISTERED_TOOLS 含 im-bridge +
+  **真实 `dsh.plugin.json` 与常量一致**（防双侧陈旧再次静默通过）
+
+### 文档
+- `msm-ops.ts` CCC_CONFIG_REFERENCE §2：`sessionKeeper` 段补 `sessionMdMaxKB`（含四原则摘要）
+- README 中英双版：机械约束表新增「工作日志体积提醒」行
+- 维护 skill：Layer 2 keeper 行 + 版本主线 v1.31.x + 变更日志 v1.20
+- specs v1.5.2：§5 Induction / §4 契约面同步（LOGBOOK COMPACTION 事件 + `sessionMdMaxKB` 配置 +
+  in-flight 交接协议）
+
 ## v1.31.0 — 2026-09-09（IM 发送能力归 ACC：新工具 `im-bridge`，条件可见，S142 用户洞察）
 
 **Scope:** 用户原话——「既然微信桥是我们 ACC 提供的，那么 weixin-send 应该是我们 ACC 提供的能力，

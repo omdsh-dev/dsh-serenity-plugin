@@ -44,8 +44,14 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
   return issues
 }
 
-/** 包级不变量：本插件注册的工具集合（与 dsh.plugin.json contributes.tools 一致） */
+/**
+ * 包级不变量：本插件注册的工具集合（与 dsh.plugin.json contributes.tools 一致）。
+ *
+ * v1.31.1 修正：v1.31.0 新增 `im-bridge`（条件可见）时**漏改此处与清单**——两侧同错 →
+ * `verifyToolConsistency` 零问题（**陈旧的双侧一致 = 静默通过**），而代码实际注册 11 个。
+ * 教训：工具面变更必须同时改三处（tools/*.ts 注册 / 本常量 / dsh.plugin.json）。
+ */
 export const REGISTERED_TOOLS = [
   'container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
-  'localstore', 'container_admin', 'autopilot-trajectory',
+  'localstore', 'container_admin', 'autopilot-trajectory', 'im-bridge',
 ] as const

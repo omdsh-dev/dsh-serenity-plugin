@@ -33,6 +33,8 @@ export const EVENT_LABEL = {
   rebuild: 'REBUILD',
   /** 敏感输出边界守卫（原 SERENITY OUTPUT GUARD） */
   guard: 'BOUNDARY GUARD',
+  /** SESSION.md 体积超限重写提醒（v1.31.1，S142 用户需求） */
+  compaction: 'LOGBOOK COMPACTION',
 } as const
 
 /** 家族标识（所有动态注入统一前缀） */
@@ -47,6 +49,18 @@ export function eventToken(event: keyof typeof EVENT_LABEL): string {
 export const ACK_PREFIX = `${ASSISTANT_PREFIX}-recorded`
 export const ACK_SKIP_PREFIX = `${ASSISTANT_PREFIX}-skipped`
 
+/**
+ * rebuild 交接区块标题（v1.31.1，S142 用户需求）。
+ *
+ * 用途：rebuild 提醒要求模型把**当前手头事项**写到 SESSION.md **末尾**的这个小标题之下；
+ * rebuild 锚点随后要求重建后的自己去读这一段并处理。两侧引用**同一个常量**——
+ * 标题一旦漂移，读侧就找不到写侧写的东西（单一真相源）。
+ *
+ * 形态（用户拍板 Q2）：**固定英文标题行**（不是 HTML 注释锚）——人读友好；ACC 写死英文，
+ * 因为 SESSION.md 的正文语言归 CCC，但两侧的**机械锚点**必须逐字一致。
+ */
+export const IN_FLIGHT_HEADING = '## In-flight (rebuild handover)'
+
 // ── 风格门面（D8：仅 plain 与 metaphor；无 game 档）──
 
 /** 风格档位：plain（默认，精确文本）/ metaphor（借星舰词——产品隐喻非游戏词） */
@@ -59,6 +73,7 @@ const METAPHOR_PREFIX: Record<keyof typeof EVENT_LABEL, string> = {
   limitMandatory: 'CONTEXT LIMIT · MANDATORY',
   rebuild: 'REBUILD',
   guard: 'BOUNDARY GUARD',
+  compaction: 'LOGBOOK COMPACTION',
 }
 
 /**
