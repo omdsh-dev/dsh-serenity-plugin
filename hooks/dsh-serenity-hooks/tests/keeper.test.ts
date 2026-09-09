@@ -286,10 +286,12 @@ describe('keeper: LOGBOOK COMPACTION 纯逻辑', () => {
     expect(esc).toContain('persists until the file is under the limit')
   })
 
-  it('阈值：未配置 → 缺省 100KB；配置生效；0 生效（关闭）；坏值回落缺省', () => {
+  it('阈值：未配置 → 缺省 200KB（v1.31.2 由 100 上调）；配置生效；0 生效（关闭）；坏值回落缺省', () => {
     const dir = mkdtempSync(join(tmpdir(), 'keeper-limit-'))
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     const cfg = join(dir, '.opencode', 'serenity.json')
+    // v1.31.2（S142 用户"默认阈值设定在200kb吧"）：缺省值硬断言——防再次静默漂移
+    expect(DEFAULT_SESSION_MD_MAX_KB).toBe(200)
     expect(readSessionMdMaxKB(dir)).toBe(DEFAULT_SESSION_MD_MAX_KB)
     writeFileSync(cfg, JSON.stringify({ sessionKeeper: { sessionMdMaxKB: 250 } }))
     __resetLogbookCompactionForTest()

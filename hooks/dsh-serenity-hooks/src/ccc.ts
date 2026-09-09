@@ -114,7 +114,7 @@ export interface SerenityConfig {
     /** 计分提醒阈值（缺省 150） */
     threshold?: number;
     /**
-     * 活跃 SESSION.md 体积上限（KB，缺省 100——v1.31.1，S142 用户需求）。
+     * 活跃 SESSION.md 体积上限（KB，缺省 200——v1.31.1 新增，v1.31.2 缺省 100→200）。
      *
      * 超过 → trajectory-assistant 注入 LOGBOOK COMPACTION 提醒（暂停工作 → 加载 eap →
      * 按 EAP 分层骨架重写 SESSION.md；内容可外移到 references 文件、可整合不重要事项、

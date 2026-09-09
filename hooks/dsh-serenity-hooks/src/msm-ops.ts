@@ -205,12 +205,12 @@ trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积�
 按工具调用加权 + 耗时计分；达到阈值注入提醒，要求模型回复 ACK 码。
 
   Config:
-    { "sessionKeeper": { "threshold": 150, "sessionMdMaxKB": 100 } }
+    { "sessionKeeper": { "threshold": 150, "sessionMdMaxKB": 200 } }
 
   计分：write/edit = 3，task = 10，read/grep/glob/msm 等 = 1，时间 = 1/分钟
   默认：150
 
-  ▸ sessionMdMaxKB（v1.31.1）：**活跃 SESSION.md 体积上限（KB，缺省 100；0 = 关闭）**。
+  ▸ sessionMdMaxKB（v1.31.1 新增，v1.31.2 缺省 100→200）：**活跃 SESSION.md 体积上限（KB，缺省 200；0 = 关闭）**。
     超过 → 注入 [TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION] 提醒：暂停当前工作 →
     加载 eap（praxis eap）→ 按 EAP 分层骨架重写 SESSION.md。四条原则（ACC 内嵌，随提醒给出）：
     ① 保留 EAP 分层骨架（不压成时间流水账）② 内容可外移到 references 文件

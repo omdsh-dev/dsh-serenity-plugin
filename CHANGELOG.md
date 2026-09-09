@@ -1,3 +1,25 @@
+## v1.31.2 — 2026-09-09（SESSION.md 体积上限缺省 100 → 200 KB）
+
+**Scope:** 用户指令——「SESSION.md的默认阈值设定在200kb吧」。v1.31.1 引入的 LOGBOOK COMPACTION 提醒
+缺省 100 KB，实测对**长期维护会话**偏紧：本 CCC 的 S142 日志达 292 KB，100 KB 阈值导致**每轮都催**
+（提醒疲劳），而重写本身是一次大工程；200 KB 仍能把"无界增长"挡在门外，又给维护类会话留出一次
+完整的重写周期。
+
+### 变更
+- `src/seams/keeper.ts`：`DEFAULT_SESSION_MD_MAX_KB` **100 → 200**（含理由与备选注释）
+- 同步面：`src/ccc.ts` 字段注释 / `msm-ops.ts` CCC_CONFIG_REFERENCE §2（含示例 JSON）/ README 中英双版
+  机械约束表 / 维护 skill / specs §3.1 + §5.11
+- `tests/keeper.test.ts`：阈值用例补**缺省值硬断言**（`DEFAULT_SESSION_MD_MAX_KB === 200`）——
+  缺省值是可被静默漂移的事实，用断言钉住（同 v1.31.1 声明面教训）
+
+### 行为影响（向后兼容）
+- **未显式配置** `sessionKeeper.sessionMdMaxKB` 的 CCC：提醒阈值从 100 KB 变为 200 KB（提醒更少）
+- 显式配置（含 `0` = 关闭）的 CCC：**行为不变**——CCC 级配置始终优先于缺省值
+- 提醒文案、四条原则、连续 3 轮升级、回限内自愈等机制均不变
+
+### 决策（R↓）
+- 备选：保持 100 KB（催得勤但疲劳）/ 只改本 CCC 配置（新容器默认仍无指引，且用户明说"默认阈值"）→ 取"改 ACC 缺省值"
+
 ## v1.31.1 — 2026-09-09（trajectory-assistant 增强：SESSION.md 体积超限重写提醒 + rebuild 交接协议）
 
 **Scope（用户两条需求，同批发布）：**

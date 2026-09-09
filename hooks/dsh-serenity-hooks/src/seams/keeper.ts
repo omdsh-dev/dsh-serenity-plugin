@@ -137,8 +137,13 @@ export function readContextPressure(
 /**
  * 活跃 SESSION.md 体积上限缺省值（KB）。
  * CCC 级可覆盖：`.opencode/serenity.json` → `sessionKeeper.sessionMdMaxKB`（0 = 关闭）。
+ *
+ * v1.31.2（S142 用户 2026-09-09）：缺省 **100 → 200**。理由（R↓）：100KB 对**长期维护会话**
+ * 偏紧——S142 自身日志达 292KB，100KB 阈值会在每轮都催（提醒疲劳），而重写本身是大工程；
+ * 200KB 仍能把"无界增长"挡在门外，又给维护类会话留出一次完整的重写周期。
+ * 备选：保持 100（催得勤但疲劳）；CCC 各自覆盖（新容器默认无指引）。
  */
-export const DEFAULT_SESSION_MD_MAX_KB = 100
+export const DEFAULT_SESSION_MD_MAX_KB = 200
 
 /** 连续超限轮数达此值 → 升级强制语气（对齐 rebuild 提醒的 REBUILD_ESCALATE_AFTER） */
 const COMPACTION_ESCALATE_AFTER = 3
