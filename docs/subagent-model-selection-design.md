@@ -1,159 +1,135 @@
-# ACC subagent 按角色指定模型 —— 方案设计（v0.1，待审核）
+# ACC subagent 使用低成本模型 —— 方案设计 v0.2（B 面 / ACC 层自实现）
 
-- **提交方需求**：宁静号天工 Bot 体系（2026-09-09）——「ACC subagent 工具支持按角色指定模型（model/provider 参数）」
+- **需求方**：宁静号天工 Bot 体系（2026-09-09）——「ACC subagent 工具支持按角色指定模型」
 - **设计方**：S142（dsp 维护会话）· 2026-09-09
-- **状态**：待用户审核（Q1~Q6 见 §6）；**未动代码**
-- **一句话结论**：**该能力 DSH 0.1.2-rc.1 已原生实现**（`subagent` 工具已有 `provider` / `model` / `reasoning_effort` 参数 + `list_subagent_models` 发现工具），**缺的只是"开启"与"CCC 侧治理面"**——因此本方案**不新增工具、不改 harness**，只做三件事：① 部署面开启 ② ACC 提供 CCC 级白名单守卫 ③ 可发现性与文档。
+- **用户裁决（v0.2 依据）**：「dsh 有配置但没放开估计是有原因的，我们要在 ACC 层去自动实现才行；所以我主要考虑 B 面，实际上具体的 CCC 总是会指定低成本模型，所以只要有个 subagent 机制可以使用低成本模型就好」
+- **状态**：待审核（Q1~Q5 见 §7）；**未动代码**
+- **一句话**：**ACC 新增一个"模型绑定委派"工具**——用 CCC 配置的低成本模型跑子 agent，底层复用宿主既有的委派服务 `ctx.subagents.start()`（不重写 agent 创建、不碰宿主设置、不改 harness）。
 
 ---
 
-## 1. 实证链（全部源码级，可复验）
+## 1. 为什么走 B 面（用户裁决 + 技术依据 R↓）
 
-| # | 事实 | 证据（安装版 0.1.2-rc.1） |
-|---|------|--------------------------|
-| E1 | `subagent` 工具**参数里已有** `provider` / `model` / `reasoning_effort`（条件暴露） | `…/dsh-tool-subagent/lib/index.js`：`...modelSelectionEnabled ? { provider: {…}, model: {…}, reasoning_effort: {…} } : {}` |
-| E2 | 参数由**实例配置** `modelSelectionSettings: true` 打开 | `lib/types/index.d.ts`：`modelSelectionSettings?: boolean`（"Sample the Host `subagent-model-selection` user setting for each new top-level session"） |
-| E3 | 开关背后的**宿主设置**是 `subagent-model-selection`，含 `enabled` + `allowedModels`（精确 provider/model 路由列表） | `lib/model-selection-settings.js`：`SUBAGENT_MODEL_SELECTION_SETTINGS_NAMESPACE = "subagent-model-selection"`；schema `{ enabled: boolean(default false), allowedModels: AllowedModelRoute[] }`；`enabled && allowedModels.length===0` → 抛错 |
-| E4 | 选择语义：`provider` 与 `model` **必须成对**；只给 effort 时沿用配置/父级路由 | `lib/types/model-selection.d.ts`：`DelegationModelRequest{provider?,model?,reasoning_effort?}` + `requestedAgentOptions(parentOptions, configured, request, enabled)` |
-| E5 | **白名单强制**：任何显式选择必须落在允许路由内；纯继承不受此策略约束 | 同上：`assertAllowedModelSelection(policy, parentOptions, requested, request)` |
-| E6 | **降级语义（需求④已满足）**：创建子 agent 前经实时适配器 preflight，非法模型报清晰错误，不静默 | 同上：`preflightChildLlmRoute(llm, parentOptions, requested, signal, inheritParentReasoningEffort?)` |
-| E7 | **可发现性（需求⑤已满足）**：开启后注册全局工具 `list_subagent_models` | `lib/types/list-models.d.ts`：`registerListSubagentModels(ctx, policy)` |
-| E8 | 实例是 `@deepseek-ai/dsh-tool-subagent`，当前 profile 挂了两实例 | `dsh-develop dump-config subagent`：`tool-subagent`（provider `spawn` / toolName `subagent` / backgroundMode `continuable`）+ `tool-subagent-fork`（provider `fork` / toolName `subagent_fork` / `one-shot`） |
-| E9 | 宿主设置服务**已挂载**（只差开与填值） | 同上 dump：`- id: subagent-model-selection-settings` = `@deepseek-ai/dsh-tool-subagent/model-selection-settings` |
-| E10 | **当前未开启**：本会话 `subagent` 工具 schema 只有 `description` / `prompt` / `run_in_background`（无 provider/model）；`~/.dsh/settings.yaml` 无 `subagent-model-selection` 段 | 本会话工具 schema 实测 + `read-dsh /home/yh/.dsh/settings.yaml` |
+| 路线 | 结论 | 理由 |
+|------|------|------|
+| **A 面：开宿主设置**（`subagent-model-selection` + `modelSelectionSettings`） | ❌ 放弃 | ① 用户判断"DSH 有配置但没放开估计有原因"——不依赖未放开的官方开关 ② 宿主设置是**全局**的（非 per-CCC），与"每个 CCC 自己定低成本模型"的诉求不匹配 ③ 只对新会话采样，存量会话无参数 |
+| **B 面：ACC 自实现**（本方案） | ✅ 采用 | 机制归 ACC、模型归 CCC（D23）；不依赖未放开开关；per-CCC 天然成立 |
+| 挂第二个 `tool-subagent` 实例（固定 `agentOptions`） | ⚠️ 备选 | 可行（宿主实例配置无需设置即生效），但需 ACC 去挂载宿主插件包 → 组合耦合 + 工具名/模型写死在组合层；且拿不到"按 CCC 配置解析 + 条件可见 + 池校验" |
 
-### 三条关键约束（决定了方案形态，必须写进决策）
+---
 
-| # | 约束 | 影响 |
+## 2. 机制实证（全部来自安装版 0.1.2-rc.1 的类型/源码）
+
+| # | 事实 | 证据 |
 |---|------|------|
-| C1 | 策略在**每个新的顶层会话**组合时采样一次，**记录进会话**、子会话继承、**后续改设置不影响已记录会话**；"恢复的会话没有记录策略则保持关闭" | **已存在的会话（含当前 S142）开启后也不会出现参数**；验证必须新开会话 |
-| C2 | **同一 tool scope 内只允许一个实例拥有模型选择**（因为 `list_subagent_models` 是全局名） | 只能在 `subagent` 或 `subagent_fork` 中**选一个**开；建议 `subagent`（见 §4.1） |
-| C3 | 宿主设置是**全局**（非 per-CCC）；`allowedModels` 是精确路由白名单，catalog 成员性仅"建议性" | 需求里的"CCC 级白名单"**不能**靠宿主设置实现 → 需 ACC 侧守卫（§4.2） |
+| E1 | 宿主提供委派服务 `ctx.subagents`，`start(name, request)` 启动一次性子 agent 并返回 `SubagentRun` | `…/dsh-subagent/lib/types/index.d.ts`：`SubagentRuntime.start(...)`；服务挂 `Context.subagents` |
+| E2 | 启动请求**可带子 agent 的 LLM 路由** | `…/lib/types/types.d.ts`：`SubagentStartRequest { label?, prompt, parent, signal, agentOptions?, outputSchema?, maxDepth?, toolFilter?, persona? }`；`agentOptions` 注释："host-Agent provider, model, reasoning-effort, and output-token overrides … in-process providers merge them over the parent Agent's options" |
+| E3 | `spawn` 后端**支持** `agentOptions`（能力位为真） | `…/dsh-subagent-spawn-in-process/lib/index.js`：`capabilities = { agentOptions: true, outputSchema: true, depthLimit: true, toolFilter: true, persona: true }`；`inheritsParentContext = false` |
+| E4 | 能力位由服务在 start 前校验，缺能力**响亮拒绝**（不静默降级） | `types.d.ts`：`SubagentCapabilities` 注释 "fail loud, no silent degradation" |
+| E5 | 一次性 run 的收尾：`run.result`（`SubagentResult`）+ `run.dispose()`；非 `completed` 的 stopReason 要映射成错误 | 同 `dsh-tool-subagent` 前台路径实现（`settleRun` / `stopReasonError`） |
+| E6 | 宿主**不需要**任何设置即可让 `agentOptions` 生效（该路径与 `subagent-model-selection` 无关） | `tool-subagent/lib/index.js`：`...config.agentOptions !== undefined ? { agentOptions: config.agentOptions } : {}` 无条件进 request；模型选择设置只控制**模型面参数**是否暴露 |
+
+> 结论：**ACC 有正门可用**——`ctx.subagents.start('spawn', { parent, prompt, signal, agentOptions:{provider, model} })`，深度限制 / 所有权 / 生命周期事件 / 清理全部沿用宿主实现。
 
 ---
 
-## 2. 需求逐条对账（用户 R1~R5 → 现状）
+## 3. 方案设计
 
-| 用户需求 | 现状 | 处置 |
-|---------|------|------|
-| R1 可选 `model`/`provider`，不传=现状 | **已实现**（E1/E4）；不传即继承父路由 | 只需开启 |
-| R2 模型白名单 | 宿主侧**已有** `allowedModels`（E3/E5），但**全局**、非 per-CCC | 宿主白名单照用；**CCC 级收窄由 ACC 补**（§4.2） |
-| R3 只切 LLM 后端，注入/工具/回传不变；嵌套继承 | **已实现**（E4：只影响 `agentOptions`；子会话继承策略 C1） | 无需动作 |
-| R4 目标模型不可用 → 清晰报错不静默 | **已实现**（E6 preflight） | 无需动作 |
-| R5 可发现模型清单 | **已实现**（E7 `list_subagent_models`） | ACC 再把允许路由写进注入（免模型多跑一次） |
+### 3.1 形态（E↑）
 
-> 结论：**R1/R3/R4/R5 是"开箱即有"**；只有 R2 的 CCC 粒度是真正的缺口。
+**新增 ACC 工具**（模型绑定委派；与原生 `subagent` 并存，原生不动）：
 
----
-
-## 3. 需求场景核对（R→C→T 与工具形态）
-
-| 角色 | 工具调用形态 | 说明 |
-|------|------------|------|
-| R 研究员（主 agent） | 不变 | — |
-| C 协调者 | `subagent(prompt, description, run_in_background:false)` | 继承主会话模型（现状即满足） |
-| **T 测试者 ×77** | `subagent(prompt, description, provider:"minimax-cn-coding-plan", model:"MiniMax-M3", run_in_background:false)` | **串行前台等待**：`subagent` 实例是 `continuable`（默认后台），显式 `run_in_background:false` 才前台等结果 → 与"单浏览器全局串行"契合 |
-
-- **为什么用 `subagent` 而非 `subagent_fork`**：fork 把父会话已完成轮次喂给子 agent（继承上下文），T 用例应"自包含、只留证据不做判断" → `subagent`（spawn，自包含）正确；且 fork 改路由会"阻止 provider 侧复用继承前缀"（README 明示）。
-- **成本杠杆**：T 层从 flash 切 M3，按两家现行计价即得节省（具体比例由你核算，本方案不臆造数字）。
-
----
-
-## 4. 方案设计
-
-### 4.1 A 面：部署开启（一次性，机器级）
-
-**A1 给 `subagent` 实例打开开关**（`~/.dsh/profiles/web/cordis.patch.yml` 追加 patch 行；只选一个实例，C2）：
-
-```yaml
-- id: tool-subagent
-  config:
-    modelSelectionSettings: true
+```
+subagent-model(prompt, description, model?, reasoning_effort?)
+  → 前台串行：等子 agent 跑完，返回其最终文本（并标注实际使用的模型）
 ```
 
-**A2 填宿主设置**（`~/.dsh/settings.yaml`，或 WebUI 设置面板同名字段）：
+| 参数 | 必填 | 语义 |
+|------|:---:|------|
+| `prompt` | ✓ | 自包含任务（子 agent 不共享本会话上下文——`spawn` 后端 `inheritsParentContext=false`） |
+| `description` | ✓ | 3-5 词标签（子会话显示名） |
+| `model` | — | 必须是 CCC 模型池成员；缺省 = CCC 配置的默认低成本模型 |
+| `reasoning_effort` | — | 透传 `agentOptions.reasoningEffort`（缺省用模型默认） |
 
-```yaml
-subagent-model-selection:
-  enabled: true
-  allowedModels:
-    - provider: minimax-cn-coding-plan
-      model: MiniMax-M3          # T 层廉价模型
-    - provider: deepseek-official
-      model: deepseek-v4-flash   # C 层中档
+- **串行为默认**（无 `run_in_background`）——正对 E2E「单浏览器全局串行」；后台能力留作 v2 扩展点。
+- **不建工作台**：子会话是 `origin=subagent` 的临时身份，不建 `AGENT_SESSIONS` 目录（对齐 v1.30.9 的"临时身份不建工作台"修复）。
+
+### 3.2 CCC 配置（数据归 CCC）
+
+```jsonc
+// .opencode/serenity.json
+"subagent": {
+  "model": "minimax-cn-coding-plan/MiniMax-M3",   // 缺省子 agent 模型（低成本）；缺省回退 handyman.defaultModel
+  "models": ["minimax-cn-coding-plan/MiniMax-M3"], // 可选：模型池（model 参数须在池内）；缺省 = handyman.models
+  "maxDepth": 3,                                    // 可选：委派深度上限（缺省 3，与原生一致）
+  "toolFilter": { "deny": ["write", "edit"] }       // 可选：子 agent 工具收窄（T 角色"只留证据"）
+}
 ```
 
-**A3 生效条件**：重启 dsh web（profile patch 变更）+ **新开会话**（C1；已存在会话不获得参数）。
+- **零重复配置**：`subagent.models` / `subagent.model` 缺省继承 `handyman.models` / `handyman.defaultModel`——CCC 只维护**一处**"低成本模型池"。
+- **条件可见**：无可用模型（`subagent.model` 与 `handyman.defaultModel` 皆空）→ 工具**从 schema 移除**（复用既有 `tools.restrict` 机制，与 `im-bridge` 同一先例）。
 
-**A4 验证（四条，缺一不可）**：① 新会话 `subagent` schema 出现 `provider`/`model`/`reasoning_effort` ② 工具列表出现 `list_subagent_models` ③ 调 `list_subagent_models` 返回两条路由 ④ 用非法 model 调用 → 得到**清晰报错**（preflight，E6）而非静默失败。
+### 3.3 实现要点
 
-### 4.2 B 面：ACC（dsp）侧贡献 —— CCC 级治理与可发现性
+| 点 | 做法 | 理由 |
+|---|------|------|
+| 委派 | `ctx.subagents.start('spawn', { label, prompt:[{type:'text',text}], parent: exec.agent, signal: exec.signal, agentOptions:{provider,model,reasoningEffort?}, maxDepth?, toolFilter? })` | 用宿主正门，不重写 agent 创建；深度/所有权/清理/事件全沿用 |
+| 模型解析 | `model` 参数（须 ∈ 池）→ `subagent.model` → `handyman.defaultModel`；三者皆空 → 工具不可见 | 解析链单一、可预测 |
+| 失败 | 模型不在池 → 拒绝并列出池；模型不可用 → 原样抛错（含路由）；**不静默回退** | 静默降级会掩盖成本/质量问题 |
+| 结果 | 返回子 agent 最终文本 + `model=…` 标注；非 `completed` stopReason → errored 结果 | 成本可见 + 失败可见 |
+| 可见性同步 | `seams/guards.ts` 新增 `syncSubagentModelVisibility(agent, root)`（对齐 `syncImBridgeVisibility`：Map<sessionId,disposer> + lifecycle 清理 + 判据抛错按放行） | 与既有条件可见机制一致 |
+| 工具面 | 11 → **12** | 需同步 `invariant.ts` REGISTERED_TOOLS + `dsh.plugin.json` contributes.tools + 两处 description（**v1.31.1 教训：三处必须同改**） |
 
-> 归属二分（D23）：**机制与数据归 ACC，措辞与纪律归 CCC**。宿主开关是部署事实，CCC 的"哪些模型允许在本容器内被用"是数据。
+### 3.4 E2E 用法（R→C→T）
 
-| 项 | 设计 | 理由（R↓） |
-|---|------|-----------|
-| **B1 CCC 白名单守卫** | CCC 配置新增 `subagent.models: ["provider/model", ...]`（缺省=不额外收窄，宿主策略生效）；`seams/guards.ts` 在既有 `tools/pre-execute` 里对 `exec.name ∈ {subagent, subagent_fork}` 且 args 带 `provider`/`model` 的调用做校验，路由不在 CCC 列表 → `{kind:'deny', reason:"…允许的路由：… 用 list_subagent_models 查看"}` | 宿主 `allowedModels` 是全局的（C3），per-CCC 收窄只能由 ACC 机械守卫实现；守卫是 deny 而非"提醒"，与路径边界同族 |
-| **B2 可发现性注入** | 注入块（toolsBlock 或状态块）加一行：`Subagent model routes allowed in this CCC: <列表>`（未配置则不注入） | 免去模型每轮先调 `list_subagent_models`；且让"允许什么"在系统提示里可见 |
-| **B3 配置文档与指南** | `msm-ops.ts` CCC_CONFIG_REFERENCE 新增 `subagent` 段；`container_admin msm guide` / CCC 配置参考同步；skill 记录"开启姿势 + 三条约束 C1~C3" | 这是最容易踩坑的地方（新会话才生效、只能一个实例）——必须落文档 |
-| **B4（可选）设置面板** | 若你希望 WebUI 能配，ACC 设置面板加只读展示 + 链接指引（**不代管宿主设置**） | ACC 不应拥有宿主设置；只做指引 |
-| **B5（可选）回退兜底** | 若目标模型不可用，ACC 不做自动降级（错误已清晰，E6）；仅在 guide 里给"改回继承"的写法 | 静默降级会掩盖成本/质量问题 |
-
-### 4.3 明确不做（边界）
-
-- ❌ **不改 harness**（D4）：不 patch `dsh-tool-subagent` 源码、不 fork 该包。
-- ❌ **不新增 ACC 工具**：不造 `subagent_model` 之类平行工具——会与原生参数形成双真相源。
-- ❌ **不重复实现 model 解析/白名单**：宿主已做（E4/E5/E6）；ACC 只做 CCC 收窄。
-- ❌ **不动 `subagent_fork` 的开关**（C2：全局名冲突）。
+```
+C 协调者：subagent-model(prompt=<T 用例>, description="T-01")                    ← 用 CCC 默认低成本模型
+T 测试者：前台串行返回；只采证据不做判断
+```
 
 ---
 
-## 5. 备选方案（若 A 面不想动部署）
+## 4. 明确不做（边界）
 
-| 备选 | 做法 | 代价 | 何时选 |
-|------|------|------|--------|
-| **B-1 静态角色实例** | 额外挂一个 tool-subagent 实例：`toolName: subagent_m3` + `agentOptions: {provider, model}`（无需宿主设置、**无需新会话**，立即生效） | 每加一个模型加一个实例；工具名≠`subagent`，"角色=工具名" | 想要"角色级默认模型"且不想碰宿主设置 |
-| **B-2 只改实例默认模型** | 直接给现有 `subagent` 实例加 `agentOptions.model`（所有子 agent 固定廉价模型） | 全局一刀切，C 层也被降级 | 仅当所有子 agent 都该用廉价模型 |
-| **B-3 继续绕道 handyman** | 现状（并行 jobs） | 与 E2E 全局串行冲突 | 不推荐 |
-| **B-4 上游提需求** | 让 DSH 把 model 做成默认参数（无需设置） | 不可控时点 | 长期最干净，但当前已无需等待 |
-
-> **推荐**：A1+A2+B1+B2+B3（动态选择为主）；若你更看重"无需新会话、角色即工具名"，则改用 B-1。
+- ❌ 不改 harness、不依赖未放开的宿主设置（`subagent-model-selection`）
+- ❌ 不重写 agent 创建（不用 `ctx.agents.create` 绕开委派服务——会丢深度限制/生命周期/所有权）
+- ❌ 不做自动降级/重试（错误清晰即可）
+- ❌ 不改原生 `subagent` / `subagent_fork` 的行为
 
 ---
 
-## 6. 待你拍板（Q1~Q6）
+## 5. 测试与文档
 
-| # | 决策点 | 选项 | 我方建议 |
-|---|--------|------|---------|
-| Q1 | 是否走 A 面（部署开启动态选择） | 是 / 否（改走 B-1 静态实例） | **是**（能力最全，含 reasoning_effort 与发现工具） |
-| Q2 | 开在哪个实例（C2 只能一个） | `subagent` / `subagent_fork` | **`subagent`**（spawn 自包含；fork 不适合 T 用例） |
-| Q3 | `allowedModels` 初始清单 | 仅 M3 / M3+flash / 更多 | **M3 + flash**（T/C 两档） |
-| Q4 | 是否要 CCC 级白名单守卫（B1） | 要 / 不要（只靠宿主全局） | **要**（per-CCC 收窄是唯一真缺口） |
-| Q5 | 是否要注入可发现性（B2） | 要 / 不要 | **要** |
-| Q6 | 版本与节奏 | 并入下一个 patch（v1.31.3）/ 单独一版 / 先只在你这台机器手工开（不写代码） | **先手工开启验证 E2E**（零代码验证价值），确认有效后再做 B1/B2 落版 |
+- **测试**：模型解析链（参数/CCC/回退 handyman/全空）、条件可见（有配置可见 / 无配置隐藏 / 热更新跟随 / 会话清理）、工具执行（fake `ctx.subagents` 断言 `agentOptions` 与 `parent`/`signal` 传递、`run.dispose()` 被调）、错误路径（不在池 / stopReason 非 completed / provider 无能力）、`register.test` 工具数 11→12、`invariant` 真实清单断言
+- **文档**：README 中英工具表 + `msm-ops` CCC_CONFIG_REFERENCE 新增 `subagent` 段 + 维护 skill + specs §4.2（宿主特定能力行）+ CHANGELOG
+- **版本**：新工具 = **v1.32.0**（minor）；发布链等 D14 显式指令
 
 ---
 
-## 7. 落地步骤与验证清单
-
-1. **手工验证（0 代码，最快闭环）**：A1+A2 → 重启 dsh web → **新开会话** → 四条验证（A4）→ 在 E2E 里把 T 层换成带 `provider`/`model` 的 `subagent` 调用，跑 2~3 例看成本与成功率。
-2. **若验证通过**：实现 B1（守卫）+ B2（注入）+ B3（文档）→ test/typecheck/build → CHANGELOG + bump（v1.31.3）→ 三仓 commit → 发布链（D14 你点头）。
-3. **若 A 面不可行**（例如 patch 不生效或 provider 不支持 agentOptions）：改走 B-1 静态实例，再评估 B1/B2。
-4. **回归项**：不开启时不传参数的行为必须与现状逐字一致（现有 `subagent` 调用零影响）。
-
-## 8. 风险与回滚
+## 6. 风险
 
 | 风险 | 处置 |
 |------|------|
-| 廉价模型工具遵循度低 → T 层"只采证据"也可能漏采 | 先跑 2~3 例对照；T 层设计本就"只留证据不做判断"，且失败会 errored 返回（可重试） |
-| 改路由使 fork 无法复用继承前缀 | 只对 `subagent`（spawn）用模型选择；fork 不开 |
-| 宿主设置改错导致挂载失败 | `enabled:true` 且 `allowedModels:[]` 会被校验拒绝（E3）——设置层即兜底 |
-| patch 改坏 profile 组合 | 回滚 `cordis.patch.yml`（同目录已有多个 `.bak`）+ 重启 |
-| 已存在会话看不到参数（C1）被误判为"没生效" | 写进文档与验证清单：**必须新开会话** |
+| 低成本模型工具遵循度低 | T 角色本就"只留证据不做判断"；失败以 errored 结果暴露，可重试 |
+| 子 agent 与原生 subagent 职责重叠（熵） | 分工写进 description：原生=继承父模型；本工具=CCC 指定的低成本模型（并在文档明说） |
+| 工具数增长 | 条件可见（未配置 CCC 不可见）；不配置即零占用 |
+| `spawn` 能力位在旧版宿主缺失 | 启动时校验能力位，缺失则工具不注册并响亮告警（E4 同族语义） |
 
-## 9. 参考
+---
 
-- 安装版源码：`/home/yh/.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tool-subagent/`（`lib/index.js` / `lib/model-selection-settings.js` / `lib/types/*.d.ts`）
-- 包文档：同目录 `README.md` §"Selecting a child LLM"（权威描述：开关、采样时机、一条实例限制、route 合并与 preflight）
-- 配置现状：`dsh-develop dump-config subagent`｜`~/.dsh/settings.yaml`｜`~/.dsh/profiles/web/cordis.patch.yml`
-- 使用方手册：`tg-bot/references/BOT-TESTING.md`（R→C→T 成本分工）
+## 7. 待你拍板
+
+| # | 决策点 | 选项 | 建议 |
+|---|--------|------|------|
+| Q1 | 工具名 | `subagent-model` / `subagent_model` / `delegate` / 其他 | **`subagent-model`**（与 `im-bridge` 同族连字符风格，语义直白） |
+| Q2 | 配置来源 | 新 `subagent` 段（缺省回退 handyman）/ 直接复用 `handyman.*` | **新段 + 回退**（语义清晰且零重复） |
+| Q3 | 是否保留 `model` 覆盖参数 | 保留（池内校验）/ 固定只用 CCC 默认 | **保留**（C/T 两档可共用同一工具） |
+| Q4 | v1 是否带 `toolFilter` | 带 / 不带 | **带**（T 角色只留证据） |
+| Q5 | 版本 | v1.32.0 / 并入下一个 patch | **v1.32.0**（新工具属 minor） |
+
+## 8. 参考
+
+- `…/dsh-subagent/lib/types/index.d.ts`（`SubagentRuntime` 服务）、`…/lib/types/types.d.ts`（`SubagentStartRequest` / `SubagentCapabilities`）
+- `…/dsh-subagent-spawn-in-process/lib/index.js`（`agentOptions: true` 能力位）
+- `…/dsh-tool-subagent/lib/index.js`（前台 run 的 settle/dispose 范式；本方案的工具实现与之同构）
+- 先例：`im-bridge` 条件可见（`seams/guards.ts syncImBridgeVisibility`）
