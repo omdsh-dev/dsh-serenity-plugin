@@ -15,7 +15,7 @@
  * - sendmessage 必须回带 context_token 关联对话
  */
 
-import { randomBytes, createDecipheriv } from 'node:crypto'
+import { randomBytes, createDecipheriv, createCipheriv, createHash } from 'node:crypto'
 
 /** iLink API Base URL（腾讯官方） */
 export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com'
@@ -300,6 +300,133 @@ export async function sendTextMessage(params: {
     timeoutMs: params.timeoutMs ?? 15_000,
   })
   assertIlinkOk('ilink/bot/sendmessage', rawText)
+}
+
+// ── 文件发送（v1.31.0：从 CCC MSM 迁入——IM 能力归 ACC）──
+
+/** getuploadurl 响应（iLink 业务层） */
+interface UploadUrlResp {
+  ret?: number
+  errcode?: number
+  errmsg?: string
+  upload_param?: string
+  upload_full_url?: string
+  filekey?: string
+}
+
+/** 文件字节数 → 16 字节对齐（协议要求 filesize 为 padded 长度） */
+function padTo16(n: number): number {
+  return Math.ceil(n / 16) * 16
+}
+
+/**
+ * 发送文件：`getuploadurl` → CDN 上传（AES-128-ECB 加密体）→ `sendmessage`（FILE item）。
+ *
+ * 语义与 v1.30.9 的 CCC MSM 实现逐行一致（协议见 `docs/weixin-bot-api.md` §6）：
+ * `media.aes_key` = base64(hex(aesKey))；`filesize` = padded 长度；上传响应的
+ * `x-encrypted-param` 头优先，缺失时回退响应体 JSON 的 `encrypted_query_param`。
+ *
+ * @param params 凭据 + 目标用户 + 本地文件路径（调用方负责 CCC 内路径校验与大小上限）
+ * @returns 实际发送的文件名与字节数
+ */
+export async function sendFileMessage(params: {
+  baseUrl: string
+  token: string
+  toUserId: string
+  data: Buffer
+  fileName: string
+  timeoutMs?: number
+}): Promise<{ fileName: string; size: number }> {
+  const { data, fileName, toUserId } = params
+  const fileSize = data.length
+  const rawFileMd5 = createHash('md5').update(data).digest('hex')
+  const aesKey = randomBytes(16)
+  const aesKeyHex = aesKey.toString('hex')
+  const aesKeyB64 = Buffer.from(aesKeyHex, 'utf-8').toString('base64')
+  const fileKey = `dsp-${randomBytes(8).toString('hex')}`
+
+  const uplRaw = await apiPost({
+    baseUrl: params.baseUrl,
+    endpoint: 'ilink/bot/getuploadurl',
+    body: JSON.stringify({
+      filekey: fileKey,
+      media_type: 3, // 3 = 文件
+      to_user_id: toUserId,
+      rawsize: fileSize,
+      rawfilemd5: rawFileMd5,
+      filesize: padTo16(fileSize),
+      aeskey: aesKeyHex,
+      no_need_thumb: true,
+    }),
+    token: params.token,
+    timeoutMs: params.timeoutMs ?? 15_000,
+  })
+  let upl: UploadUrlResp
+  try {
+    upl = JSON.parse(uplRaw) as UploadUrlResp
+  } catch {
+    throw new Error(`getuploadurl 响应非 JSON: ${uplRaw.slice(0, 300)}`)
+  }
+  assertIlinkOk('ilink/bot/getuploadurl', uplRaw)
+  if (!upl.upload_full_url && !upl.upload_param) {
+    throw new Error(`getuploadurl 响应缺 upload_full_url/upload_param: ${uplRaw.slice(0, 300)}`)
+  }
+  const uploadUrl = upl.upload_full_url
+    ?? `${ILINK_CDN_BASE_URL}/upload?encrypted_query_param=${encodeURIComponent(upl.upload_param ?? '')}&filekey=${encodeURIComponent(upl.filekey ?? fileKey)}`
+
+  const cipher = createCipheriv('aes-128-ecb', aesKey, null)
+  const encBody = Buffer.concat([cipher.update(data), cipher.final()])
+  const uploadRes = await currentFetch(uploadUrl, {
+    method: 'POST',
+    body: encBody,
+    headers: { 'Content-Type': 'application/octet-stream' },
+  })
+  const uploadText = await uploadRes.text()
+  let encryptQueryParam = uploadRes.headers.get('x-encrypted-param')
+  if (!encryptQueryParam) {
+    try {
+      const j = JSON.parse(uploadText) as { encrypted_query_param?: string; ret?: number; errcode?: number; errmsg?: string }
+      encryptQueryParam = j.encrypted_query_param ?? null
+      if (!encryptQueryParam && ((j.ret !== undefined && j.ret !== 0) || (j.errcode !== undefined && j.errcode !== 0))) {
+        throw new Error(`CDN 上传失败: ret=${j.ret} errcode=${j.errcode}${j.errmsg ? `: ${j.errmsg}` : ''}`)
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith('CDN 上传失败')) throw err
+      /* 非 JSON 且无响应头 → 按"缺 param"在下面统一报错 */
+    }
+  }
+  if (!encryptQueryParam) {
+    throw new Error(`CDN 上传响应缺 encrypt_query_param（HTTP ${uploadRes.status}）: ${uploadText.slice(0, 300)}`)
+  }
+
+  const sendRaw = await apiPost({
+    baseUrl: params.baseUrl,
+    endpoint: 'ilink/bot/sendmessage',
+    body: JSON.stringify({
+      msg: {
+        from_user_id: '',
+        to_user_id: toUserId,
+        client_id: `dsp-weixin-${randomBytes(4).toString('hex')}`,
+        message_type: MessageType.BOT,
+        message_state: MessageState.FINISH,
+        item_list: [
+          {
+            type: MessageItemType.FILE,
+            file_item: {
+              media: { encrypt_query_param: encryptQueryParam, aes_key: aesKeyB64, encrypt_type: 1 },
+              file_name: fileName,
+              md5: rawFileMd5,
+              len: String(fileSize),
+            },
+          },
+        ],
+      },
+    }),
+    token: params.token,
+    timeoutMs: params.timeoutMs ?? 15_000,
+  })
+  assertIlinkOk('ilink/bot/sendmessage', sendRaw)
+  return { fileName, size: fileSize }
 }
 
 // ── 正在输入 / 对话配置 ──

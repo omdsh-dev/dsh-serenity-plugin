@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { decideGuard, type GuardInput, syncSafeModeRestriction } from '../src/seams/guards.js'
+import {
+  decideGuard,
+  type GuardInput,
+  syncSafeModeRestriction,
+  syncImBridgeVisibility,
+  forgetImBridgeVisibility,
+  getImBridgeVisibilityDiagnostics,
+} from '../src/seams/guards.js'
+import { registerImChannel, __resetImChannelsForTest } from '../src/im-bridge.js'
 import { readBlacklist, matchBlacklist, pathInside, type BlacklistRule } from '../src/ccc.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
 
@@ -230,6 +238,92 @@ describe('safe-mode 工具隐藏（syncSafeModeRestriction）', () => {
     expect(calls.filter(c => c.on === true)).toHaveLength(1)
     expect(calls[0]!.deny).toContain('bash')
     expect(calls[0]!.deny).not.toContain('write') // 只隐藏 bash，write/edit 保留
+  })
+})
+
+describe('guards: im-bridge 条件可见（v1.31.0——未配置 IM 通道则工具不可见）', () => {
+  /** 替身 agent：记录 restrict 调用与 disposer 触发 */
+  function mkAgent(id = 's-im') {
+    const restrictCalls: { deny?: string[] }[] = []
+    const disposed: string[] = []
+    const agent = {
+      session: { id },
+      ctx: {
+        tools: {
+          restrict: (f: { deny?: string[] }) => {
+            restrictCalls.push(f)
+            return () => { disposed.push('disposed') }
+          },
+        },
+      },
+    } as any
+    return { agent, restrictCalls, disposed }
+  }
+
+  afterEach(() => {
+    __resetImChannelsForTest()
+  })
+
+  it('未配置任何 IM 通道 → restrict deny im-bridge；重复同步幂等（只隐藏一次）', () => {
+    __resetImChannelsForTest()
+    const { agent, restrictCalls } = mkAgent()
+    syncImBridgeVisibility(agent, dir)
+    syncImBridgeVisibility(agent, dir)
+    expect(restrictCalls).toHaveLength(1)
+    expect(restrictCalls[0]!.deny).toEqual(['im-bridge'])
+  })
+
+  it('配置了通道 → 不隐藏（工具可见）', () => {
+    __resetImChannelsForTest()
+    registerImChannel({ id: 'fake', isEnabled: () => true } as never)
+    const { agent, restrictCalls } = mkAgent()
+    syncImBridgeVisibility(agent, dir)
+    expect(restrictCalls).toHaveLength(0)
+  })
+
+  it('配置从有到无 / 从无到有 → 隐藏与解除实时跟随（配置热更新）', () => {
+    __resetImChannelsForTest()
+    const { agent, restrictCalls, disposed } = mkAgent()
+    syncImBridgeVisibility(agent, dir) // 无通道 → 隐藏
+    expect(restrictCalls).toHaveLength(1)
+    registerImChannel({ id: 'fake', isEnabled: () => true } as never)
+    syncImBridgeVisibility(agent, dir) // 有通道 → 解除
+    expect(disposed).toHaveLength(1)
+    syncImBridgeVisibility(agent, dir) // 已解除 → 不再动作
+    expect(restrictCalls).toHaveLength(1)
+  })
+
+  it('restrict 抛错 → 不抛且不记状态（apply/step 不可被拖垮）', () => {
+    __resetImChannelsForTest()
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const agent = {
+      session: { id: 's-boom' },
+      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
+    } as any
+    expect(() => syncImBridgeVisibility(agent, dir)).not.toThrow()
+    expect(err.mock.calls.some((c) => String(c[0]).includes('im-bridge 隐藏失败'))).toBe(true)
+    err.mockRestore()
+  })
+
+  it('会话销毁清理：forgetImBridgeVisibility 解除隐藏并清状态（防 per-会话 Map 无界增长）', () => {
+    __resetImChannelsForTest()
+    const { agent, disposed } = mkAgent('s-gone')
+    syncImBridgeVisibility(agent, dir)
+    expect(getImBridgeVisibilityDiagnostics().hiddenKeys).toContain('s-gone')
+    forgetImBridgeVisibility('s-gone')
+    expect(disposed).toHaveLength(1)
+    expect(getImBridgeVisibilityDiagnostics().hiddenKeys).not.toContain('s-gone')
+    forgetImBridgeVisibility('s-gone') // 幂等
+    expect(disposed).toHaveLength(1)
+  })
+
+  it('不同会话各自独立（一个会话的隐藏不影响另一个）', () => {
+    __resetImChannelsForTest()
+    const a = mkAgent('s-a')
+    const b = mkAgent('s-b')
+    syncImBridgeVisibility(a.agent, dir)
+    expect(getImBridgeVisibilityDiagnostics().hiddenKeys).toEqual(['s-a'])
+    expect(b.restrictCalls).toHaveLength(0)
   })
 })
 

@@ -205,10 +205,10 @@ export interface WeixinSettings {
    * 桥是否**自动回发 agent 的最终文本**（v1.30.10，用户拍板命名；缺省 true = 现状）。
    *
    * 关闭（false）→ 桥不再把一轮结束时 agent 的最终 assistant 文本转发给用户；
-   * 输出权完全交给 agent：每轮 question 前缀注入「输出纪律」块（含可直接执行的
-   * weixin-send 命令），由 agent 自己决定发什么/发几条（全部记 `source=proactive`）。
+   * 输出权完全交给 agent：每轮 question 末尾注入**机制标记 + 已填参数的命令**
+   * （v1.31.0 起为 `im-bridge` 工具形态），由 agent 自己决定发什么/发几条（全部记 `source=proactive`）。
    *
-   * 为什么需要（R↓）：v1.30.9 起 agent 已能经 msm 主动输出（`weixin-send` → 桥 → iLink），
+   * 为什么需要（R↓）：v1.30.9 起 agent 已能主动输出（工具/桥 → iLink），
    * 「桥替 agent 说最后一句」从机制上变成可选项——进程式汇报、多段输出、静默处理都需要它。
    * 语义边界（用户拍板）：只关**最终文本**；系统类消息（新对话通知 / 语音无法解析提示）保留；
    * agent 一轮未输出 → 静默不兜底（否则开关语义被破坏）。
@@ -218,8 +218,8 @@ export interface WeixinSettings {
    * 手动输出模式下的**兜底**（v1.30.17，S142 用户拍板"鲁棒修法"；**缺省 false = 严格静默**）。
    *
    * 仅在 `autoReplyWithLastMessage: false` 时生效：
-   * - `true` → 一轮结束时若 agent **一次都没成功调用 `weixin-send`**，桥把该轮最终文本转发给用户
-   *   （记录 `source: "reply-fallback"`，并在日志留响亮告警）。
+   * - `true` → 一轮结束时若 agent **一次都没成功调用输出工具**（im-bridge / 旧 weixin-send），
+   *   桥把该轮最终文本转发给用户（记录 `source: "reply-fallback"`，并在日志留响亮告警）。
    * - `false`（缺省）→ 保持 v1.30.10 的"静默不兜底"语义。
    *
    * 为什么需要（实证 R↓）：v1.30.16 的机械闸门会打回 ≤2 次；但用户实测某模型在**寒暄类消息**上

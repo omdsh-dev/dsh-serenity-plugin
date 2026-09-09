@@ -268,26 +268,33 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
 （扫码绑定后自动写入，永不进 git 明文面）。
 路由 user → role：exact 优先，* 通配兜底；role 必须 ∈ 该 CCC skiff.roles。
 面板（WebUI 设置 → 微信桥）可扫码绑定/移除账号/编辑路由；msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"]) 排查 + 大而全指南。凭据主动查看：localstore get WEIXIN_<ACCOUNT>_TOKEN。
-  ▸ 主动发送（v1.30.9）：CCC 用 msm("weixin-send", ["send", "--ccc", "<CCC>", "--user", "<别名|id>", "<文本>"])
-    给用户发消息——经 dsp 主动发送入口（**只绑 127.0.0.1**，plugin 全局配置 ~/.dsh/serenity-hooks.json
-    的 weixinApi.port，默认 3082；公网不可达故无密钥）→ weixin-bridge.sendProactiveText →
-    成功后触发 outgoing hook（source="proactive"）。send-file 仍由 MSM 直连 iLink 上传并自行补记。
+  ▸ 主动发送（v1.31.0：**ACC 工具 im-bridge**）：调
+    im-bridge({channel:"weixin", action:"send", user:"<别名|id>", text:"<文本>"}) 给用户发消息——
+    **工具只能操作本会话 CCC**（无 ccc 参数，防误发他容器）→ weixin-bridge.sendProactiveText →
+    成功后触发 outgoing hook（source="proactive"）。文件用 action:"send-file" + file:"<CCC 内路径>"
+    （逃逸/缺失/超 20MB 拒绝）+ 可选 caption。**可见性**：本 CCC 配置了 IM 通道
+    （weixin.enabled=true）才出现在模型工具清单里；未配置 → 由 guards 逐 agent
+    tools.restrict({deny:['im-bridge']}) 移除（不是"看得到但被拒"）。skiff 角色另需在
+    roles.<role>.tools 白名单列出 im-bridge。
+    历史（v1.30.9~v1.30.x）：CCC 侧 MSM weixin-send（走 loopback HTTP 入口 3082）——
+    v1.31.0 已退役（脚本删除 + 注册表注销）；3082 入口保留给**非 agent 调用者**。
 
   ▸ weixin.autoReplyWithLastMessage（v1.30.10，关闭桥的自动输出）：
     缺省 true = 现状：桥在 agent 一轮结束后把**最终 assistant 文本**自动回发用户（source="reply"）。
     显式 false = 关闭：桥**不再转发最终文本**，输出权交给 agent——每轮在用户消息**末尾**追加
-    **机制标记** [serenity:weixin-manual-output] + 一行已填好参数的 weixin-send 命令
-    （CCC 根/账号/用户 id），agent 自己决定发什么、发几条（全部记 source="proactive"）。
+    **机制标记** [serenity:weixin-manual-output] + 一行已填好参数的 im-bridge 调用
+    （账号/用户 id），agent 自己决定发什么、发几条（全部记 source="proactive"）。
     **ACC 只给机制与数据，纪律措辞归 CCC**（v1.30.16）：怎么写/必须怎么做/后果是什么写在
     CCC 角色提示词文件里（如 .opencode/skiff/<role>.md），可热改（v1.30.15 起角色提示词热重载）。
-    机械闸门（v1.30.16）：本轮 turn 结束仍未成功调用 weixin-send → agent 被打回（≤2 次，
-    提示 = 标记 + 事实）；达上限放弃并响亮告警。失败调用不算已送达。
+    机械闸门（v1.30.16）：本轮 turn 结束仍未成功调用 im-bridge（send / send-file；兼容旧
+    msm("weixin-send") 形态）→ agent 被打回（≤2 次，提示 = 标记 + 事实）；达上限放弃并响亮告警。
+    失败调用不算已送达。
     语义边界（用户拍板）：只关最终文本；系统类消息（新对话通知 / 语音无法解析提示）保留；
     typing 指示与 incoming hook 不受影响。
 
   ▸ weixin.fallbackOnNoSend（v1.30.17，手动模式的**兜底**；缺省 false）：
     仅在 autoReplyWithLastMessage=false 时生效。true → 一轮结束时若 agent **一次都没成功**
-    调用 weixin-send（闸门打回用尽），桥把该轮最终文本转发给用户（记录 source="reply-fallback"，
+    调用输出工具（闸门打回用尽），桥把该轮最终文本转发给用户（记录 source="reply-fallback"，
     日志留响亮告警）——保证"不丢消息"。agent 自己发过 → 不兜底（输出权仍在 agent）。
     为什么需要（实证）：v1.30.16 闸门会打回 ≤2 次，但实测某模型在**寒暄类消息**上连续 4 轮、
     跨 3 版 CCC 提示词仍不调工具 → 打回用尽后用户什么都收不到；提示词与闸门均已排除。
@@ -314,7 +321,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
     incoming  = 用户 → bot：路由命中后、媒体落盘后触发（文本含语音转写；媒体带落盘 relPath）
     outgoing  = bot → 用户：发送成功后触发（reply = 用户实际收到的纯文本，已剥离 think）
       · source="reply"（缺省）= 回复用户消息；source="proactive"（v1.30.9）= bot 主动发起
-        （CCC 经 weixin-send MSM → dsp 主动发送入口 → sendProactiveText）；
+        （CCC 经 im-bridge 工具（v1.31.0；旧 weixin-send MSM 已退役）→ sendProactiveText）；
         source="reply-fallback"（v1.30.17）= 手动模式下 agent 本轮未发送 → 桥兜底转发最终文本
       · file（仅 send-file 补记）：{ "name": "报告.pdf", "size": 12345, "caption": "可选" }
 

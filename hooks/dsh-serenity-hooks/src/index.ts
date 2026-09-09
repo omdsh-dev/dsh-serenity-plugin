@@ -51,6 +51,9 @@ import { registerWeixinSendApi } from './weixin-send-api.js'
 import { registerWeixinOutputGuard } from './weixin-output-guard.js'
 import { registerLifecycle } from './seams/lifecycle.js'
 import { registerWebFetchProvider } from './web-fetch-provider.js'
+import { registerImChannel } from './im-bridge.js'
+import { weixinChannel } from './im-weixin.js'
+import { createImBridgeTool } from './tools/im-bridge.js'
 import { registerDisposer } from './host/effect.js'
 
 export const name = 'dsh-serenity-hooks'
@@ -125,6 +128,11 @@ export function apply(ctx: Context, config: Config): void {
   } catch {
     /* 探针失败不阻断插件装载 */
   }
+  // v1.31.0（S142 用户洞察「微信桥是 ACC 提供的，发送能力也应是 ACC 的工具」）：
+  // IM 通道注册必须发生在工具装配**之前**——`im-bridge` 的 description 读通道枚举
+  // （imChannelIds）。可见性不在这里判定：未配置通道的 CCC 由 guards 逐 agent
+  // `tools.restrict({deny:['im-bridge']})` 从清单中移除（未配置 = 模型看不到）。
+  registerImChannel(weixinChannel)
   if (config.tools) {
     ctx.tools.register(ccFsTool) // container_fs
     ctx.tools.register(createSessionTool(ctx)) // logbook（含 rebuild）
@@ -138,6 +146,8 @@ export function apply(ctx: Context, config: Config): void {
     // Autopilot Trajectory 一站式管理（v1.26.12 实验 → v1.27.4 正式化；默认关；只提供工具与知识，不自动安装任何东西）
     // v1.26.14：闭包捕获 ctx → diag-live 进程内诊断（live 会话/标题/agent 定位）
     ctx.tools.register(createAutopilotTool(ctx))
+    // v1.31.0：IM 消息发送（条件可见——本 CCC 未配置任何 IM 通道时由 guards 移除）
+    ctx.tools.register(createImBridgeTool())
   }
   if (config.guards) {
     registerGuards(ctx, { configPaths: config.serenityConfigPaths })
@@ -193,13 +203,14 @@ export function apply(ctx: Context, config: Config): void {
   // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。
   registerWeixinBridge(ctx)
   // v1.30.9（S142 用户需求"微信桥支持被调用发消息给指定用户"）：主动发送入口——
-  // 只绑 127.0.0.1 的独立监听器（默认 3082；plugin 全局配置 weixinApi），供 CCC 自己的
-  // MSM 调用（`msm weixin-send ...`）；发送与记录都经桥（outgoing hook 带 source=proactive）。
-  // **ACC 不新增工具**（用户拍板 A2：专用 loopback 端口，不经公网网关）。
+  // 只绑 127.0.0.1 的独立监听器（默认 3082；plugin 全局配置 weixinApi），供**非 agent 调用者**
+  // （外部脚本/集成）使用。v1.31.0 起 agent 侧统一走 im-bridge 工具（进程内直调 + 记录），
+  // 旧 CCC MSM weixin-send 已退役；此 HTTP 入口保留（发送与记录都经桥，outgoing hook source=proactive）。
   registerWeixinSendApi(ctx)
   // v1.30.16（S142 用户"约束不够，LLM 不听"）：手动输出模式机械闸门——turn-stopping 检查
-  // 本轮是否真的成功调用过 weixin-send，未发送则 steer 打回（≤2 次）。**措辞归 CCC 角色
-  // 提示词**（本闸门只给机制事实 + 已填参数标记），与"ACC 管机制 / CCC 管内容"边界一致。
+  // 本轮是否真的成功调用过输出工具（im-bridge，v1.30.x 为 weixin-send），未发送则 steer 打回
+  // （≤2 次）。**措辞归 CCC 角色提示词**（本闸门只给机制事实 + 已填参数标记），与"ACC 管机制 /
+  // CCC 管内容"边界一致。
   registerWeixinOutputGuard(ctx)
   // review F-08（v1.30.8）：生命周期——agent/session 销毁清理 per-会话状态 +
   // 插件卸载/HMR 停掉自起资源（skiff 调试页/ACP/微信桥；否则端口占用与重复轮询）

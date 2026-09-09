@@ -64,7 +64,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 
 ## 3. What you get after installing
 
-### 3.1 The ten tools
+### 3.1 The eleven tools
 
 | Tool | What it does | When to use it |
 |---|---|---|
@@ -78,6 +78,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `localstore` | Stores secrets and settings (credential and config namespaces) | Keep API keys and passwords in one place, out of git |
 | `container_admin` | The maintenance bay: manage sub-roles, manage the tool registry, view all configuration | Defining a sub-role, registering a new small tool |
 | `autopilot-trajectory` | Autonomous cruising: wake a workspace on a clock and inject its current focus; several workspaces stay independent | When you want the AI to work on its own on a schedule (see §6.5) |
+| `im-bridge` | Message an IM contact (WeChat today): send text, send a file, list configured recipients, check channel health. Every successful send is recorded in the workspace log | When you want the AI to message family/colleagues proactively (see §6.6). **It only appears when this workspace has the WeChat bridge configured**, and it can only message from this workspace |
 
 > **Renamed** (old names are gone for good, no aliases): `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role`. Old sessions referencing the old names will error — consult this map.
 
@@ -100,7 +101,7 @@ These are not "please don't" hints in a prompt — they are **mechanically impos
 |---|---|---|
 | DSH main UI | 3080 | You, locally (the plugin never touches this port) |
 | **Web login entry** | 3081 | Remote/phone access to the full UI: reverse-proxies to 3080 after login; workspace allow-list supported |
-| **WeChat proactive send** | 3082 (127.0.0.1 only) | Small tools in a workspace use it to message WeChat users proactively (not reachable from the internet, so no key is needed) |
+| **WeChat proactive send** | 3082 (127.0.0.1 only) | Scripts/integrations *outside* the workspace use it to message WeChat users (not reachable from the internet, so no key is needed). The AI inside a workspace does not use this port — it calls the `im-bridge` tool directly |
 | **Sub-role debug page** | 3099 (127.0.0.1 only) | Debugging "sub-roles"; switch workspaces and inspect the conversation |
 | **ACP + public Q&A page** | 3100 (127.0.0.1 only) | Programmatic access (JSON-RPC) + a Q&A page for others (key auth; answers only, no internal trajectory) |
 | **WeChat bridge** | no port (outbound long-poll) | Your family talking to the AI directly in WeChat |
@@ -193,15 +194,23 @@ One DSH process can host several workspaces, each bridging its own WeChat accoun
 - **Clean replies**: the thinking process is stripped; WeChat sees only the final text
 - **It remembers**: one WeChat user maps to a fixed session that survives restarts — no amnesia
 - **Routing**: WeChat user → sub-role (exact match first, `*` as fallback)
-- **Proactive messages**: a small tool in the workspace can message a specific user —
-  `msm("weixin-send", ["send", "--ccc", "<workspace>", "--user", "yh", "text"])`
-  (`--ccc` is required; there is no guessing a "current workspace". Sent messages are recorded automatically.)
+- **Proactive messages** (v1.31.0): the AI sends them itself with the `im-bridge` tool —
+  `im-bridge({channel:"weixin", action:"send", user:"yh", text:"text"})`
+  (files: `action:"send-file"` + `file:"<path inside the workspace>"`, optional `caption`).
+  The tool **can only message from this workspace** (there is no "target workspace" parameter, so it cannot
+  message the wrong container), and every send is recorded automatically. It **only appears in the tool list
+  when this workspace has the WeChat bridge configured** — otherwise it is hidden entirely, not "visible but failing".
+  (The old approach — a workspace script talking to port 3082 — is retired as of v1.31.0; 3082 stays for scripts outside the workspace.)
 - **Let the AI decide how to reply** (v1.30.10): with `"weixin": { "autoReplyWithLastMessage": false }`
   the plugin no longer forwards the AI's final message; instead it tells the AI every turn "you must send it yourself"
-  and hands it a ready-to-copy command. Suits roles that report progress, split messages, or stay silent when
+  and hands it a ready-to-copy `im-bridge` call. Suits roles that report progress, split messages, or stay silent when
   silence is right. Defaults to `true` (previous behaviour).
+  If the AI still fails to send, the plugin **nudges it back** (up to 2 times); you can additionally set
+  `"fallbackOnNoSend": true` so the plugin forwards that turn's text itself (recorded as `source: "reply-fallback"`)
+  and no message is lost.
 - **Message recording**: point `weixin.hook` at a script and every incoming/outgoing message is handed to it as JSON;
-  where you store it is up to you. In the record, `source: "reply"` means "answering a user", `source: "proactive"` means "the AI initiated it".
+  where you store it is up to you. In the record, `source: "reply"` means "answering a user", `source: "proactive"` means
+  "the AI initiated it", and `source: "reply-fallback"` means "the AI did not send, the plugin did".
 - **Troubleshooting**: `msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
 
 ### 6.3 Sub-roles (Skiff)
@@ -286,7 +295,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 
 ```bash
 pnpm typecheck          # type check (node + browser halves)
-pnpm test               # full suite (currently 70 files / 993 tests)
+pnpm test               # full suite (currently 75 files / 1096 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
@@ -307,7 +316,7 @@ pnpm build              # bundle (lib/index.js + client.js)
 | Runs on | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no shared source, same standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, platform-independent text aligned byte-for-byte |
-| Tools | msm / container_fs / logbook … | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory |
+| Tools | msm / container_fs / logbook … | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory / im-bridge |
 
 **A workspace can switch runtimes at any time**: the `.serenity` marker, `.opencode/skills/`, configuration, and `AGENT_SESSIONS/` formats are identical.
 Only the platform layer differs (tool names, injection channel), and the constraints the AI receives stay the same.
@@ -351,4 +360,4 @@ Yes — through the same `weixin.hook` script configured in the workspace, with 
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.30.11 &nbsp;|&nbsp; **Requires**: DSH 0.1.2-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 70 files / 993 tests
+> **Version**: v1.31.0 &nbsp;|&nbsp; **Requires**: DSH 0.1.2-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 75 files / 1096 tests

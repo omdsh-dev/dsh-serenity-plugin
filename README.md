@@ -65,7 +65,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 
 ## 3. 装完之后你多了什么
 
-### 3.1 十个工具
+### 3.1 十一个工具
 
 | 工具 | 干什么 | 什么时候用 |
 |---|---|---|
@@ -79,6 +79,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `localstore` | 存密钥和配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
 | `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具时 |
 | `autopilot-trajectory` | 自动巡航：定时唤醒工作区、注入当前焦点，支持多个工作区各自独立 | 想让 AI 定时自己干活（见 §6.5） |
+| `im-bridge` | 给 IM 联系人发消息（目前是微信）：发文本、发文件、查已配置联系人、查通道状态。每次成功发送自动进工作区的消息记录 | 想让 AI 主动给家人/同事发消息（见 §6.6）。**只在工作区配了微信桥时才出现**，且只能发本工作区的消息 |
 
 > **改过名**（旧名已彻底停用，没有兼容别名）：`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role`。老会话里看到旧名，照这张表对照即可。
 
@@ -101,7 +102,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 |---|---|---|
 | DSH 主界面 | 3080 | 你自己在本机用（插件不碰这个端口） |
 | **网页登录入口** | 3081 | 外部/手机访问完整界面：登录后反向代理到 3080，可配工作区白名单 |
-| **微信主动发送入口** | 3082（只绑 127.0.0.1） | 工作区里的小工具用它主动给微信发消息（公网到不了，所以不需要密钥） |
+| **微信主动发送入口** | 3082（只绑 127.0.0.1） | 工作区外的脚本/集成用它给微信发消息（公网到不了，所以不需要密钥）。工作区里的 AI 不走这个端口，直接用 `im-bridge` 工具 |
 | **子角色调试页** | 3099（只绑 127.0.0.1） | 你调试"子角色"时用，能切换工作区、看对话轨迹 |
 | **ACP + 对外问答页** | 3100（只绑 127.0.0.1） | 程序化接入（JSON-RPC）+ 给别人用的问答页（key 认证，只返回答案，不返回内部轨迹） |
 | **微信桥** | 无需端口（出站长轮询） | 家人在微信里直接和 AI 说话 |
@@ -194,14 +195,21 @@ DSH 一个进程可以同时带多个工作区，每个工作区各自对接自�
 - **回复干净**：自动剥掉思考过程，微信只看到正文
 - **记得住**：同一个微信号对应固定会话，重启后恢复历史，不会"失忆"
 - **路由**：微信号 → 子角色（精确匹配优先，`*` 兜底）
-- **主动发消息**：工作区里的小工具可以主动给指定用户发消息——
-  `msm("weixin-send", ["send", "--ccc", "<工作区>", "--user", "yh", "内容"])`
-  （`--ccc` 必填，没有"默认当前工作区"这种猜测；发出的消息会自动被记录）
+- **主动发消息**（v1.31.0）：用 `im-bridge` 工具，AI 自己就能发——
+  `im-bridge({channel:"weixin", action:"send", user:"yh", text:"内容"})`
+  （发文件：`action:"send-file"` + `file:"<工作区内的路径>"`，可加 `caption`）。
+  这个工具**只能发本工作区的消息**（没有"目标工作区"参数，不会发错容器），发出的消息会自动被记录。
+  它**只在工作区配了微信桥时才出现在工具列表里**——没配就看不到，而不是"看得到但一调就报错"。
+  （旧办法是工作区里自己写个小工具走 3082 端口，v1.31.0 起已退役；3082 保留给工作区外的脚本。）
 - **让 AI 自己决定怎么回**（v1.30.10）：配置 `"weixin": { "autoReplyWithLastMessage": false }`
-  后，插件不再自动把 AI 最后那段话转给用户，而是每轮告诉它"你必须自己发"，并附上一条可直接照抄的命令。
+  后，插件不再自动把 AI 最后那段话转给用户，而是每轮告诉它"你必须自己发"，并附上一条可直接照抄的 `im-bridge` 调用。
   适合需要过程汇报、想分多条发、或者该安静就安静的角色。默认 `true`（保持原行为）。
+  该发却没发时，插件会**打回提醒**（最多 2 次）；还是不发送，可以再开
+  `"fallbackOnNoSend": true` 让插件兜底把那轮的话转给用户（记录为 `source: "reply-fallback"`），
+  保证"消息不丢"。
 - **消息记录**：配一个 `weixin.hook` 脚本，每收/发一条消息就把事件（JSON）喂给它，存哪里由你决定。
-  记录里 `source: "reply"` 表示"回复用户"，`source: "proactive"` 表示"AI 主动发起"。
+  记录里 `source: "reply"` 表示"回复用户"，`source: "proactive"` 表示"AI 主动发起"，
+  `source: "reply-fallback"` 表示"AI 没发、插件兜底发的"。
 - **排障**：`msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
 
 ### 6.3 子角色（Skiff）
@@ -286,7 +294,7 @@ AI 一次能"记住"的内容有上限。满了不用你手动开新会话：
 
 ```bash
 pnpm typecheck          # 类型检查（node + 浏览器端两套）
-pnpm test               # 全量测试（当前 70 个文件 / 993 个用例）
+pnpm test               # 全量测试（当前 75 个文件 / 1096 个用例）
 pnpm build              # 打包（lib/index.js + client.js）
 ```
 
@@ -306,7 +314,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 | 跑在 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
-| 工具 | msm / container_fs / logbook 等 | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory |
+| 工具 | msm / container_fs / logbook 等 | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory / im-bridge |
 
 **同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
 差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。
@@ -350,4 +358,4 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **版本**：v1.30.11 ｜ **前置**：DSH 0.1.2-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：70 个文件 / 993 个用例
+> **版本**：v1.31.0 ｜ **前置**：DSH 0.1.2-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：75 个文件 / 1096 个用例

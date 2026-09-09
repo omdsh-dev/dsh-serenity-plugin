@@ -22,9 +22,14 @@ import {
 const SESSION = 'skiff-weixin-74b2a0609d13657b'
 const MANUAL = { root: '/ccc/home-serenity', accountId: 'wechat-1', userId: 'u@im.wechat', role: 'zhaocai' }
 
-/** 成功的 msm("weixin-send", …) 调用（宿主 ToolExecution 形状：name + arguments + agent） */
-function sendExec(sessionId = SESSION, args: Record<string, unknown> = {}) {
-  return { name: 'msm', arguments: { name: 'weixin-send', args: ['send', '--ccc', MANUAL.root], ...args }, agent: { session: { id: sessionId } } }
+/** 成功的 im-bridge 调用（v1.31.0 主形态：ACC 工具，channel=weixin + action=send/send-file） */
+function sendExec(sessionId = SESSION, args: Record<string, unknown> = {}, action = 'send') {
+  return { name: 'im-bridge', arguments: { channel: 'weixin', action, user: MANUAL.userId, text: 'hi', ...args }, agent: { session: { id: sessionId } } }
+}
+
+/** 兼容形态：v1.30.x 的 CCC MSM 通道（迁移期闸门同时认） */
+function legacyMsmExec(sessionId = SESSION) {
+  return { name: 'msm', arguments: { name: 'weixin-send', args: ['send', '--ccc', MANUAL.root] }, agent: { session: { id: sessionId } } }
 }
 
 /** 其它工具调用（msm 但非 weixin-send / 完全别的工具） */
@@ -83,16 +88,28 @@ afterEach(() => {
 })
 
 describe('weixin-output-guard: 成功发送判定（isSuccessfulWeixinSend）', () => {
-  it('msm + weixin-send + 无错误 → 计入', () => {
+  it('im-bridge + channel=weixin + action=send / send-file + 无错误 → 计入', () => {
     expect(isSuccessfulWeixinSend(sendExec(), { isError: false })).toBe(true)
+    expect(isSuccessfulWeixinSend(sendExec(SESSION, {}, 'send-file'), { isError: false })).toBe(true)
     expect(isSuccessfulWeixinSend(sendExec(), undefined)).toBe(true) // 宿主成功结果无 isError 字段时也算成功
   })
 
-  it('msm + weixin-send 但调用失败（isError:true）→ 不计入（从未送达）', () => {
-    expect(isSuccessfulWeixinSend(sendExec(), { isError: true })).toBe(false)
+  it('兼容形态 msm("weixin-send") 仍计入（迁移期并存，逐步退役）', () => {
+    expect(isSuccessfulWeixinSend(legacyMsmExec(), { isError: false })).toBe(true)
   })
 
-  it('非 msm 工具 / msm 但别的 MSM → 不计入', () => {
+  it('调用失败（isError:true）→ 不计入（从未送达）', () => {
+    expect(isSuccessfulWeixinSend(sendExec(), { isError: true })).toBe(false)
+    expect(isSuccessfulWeixinSend(legacyMsmExec(), { isError: true })).toBe(false)
+  })
+
+  it('im-bridge 但别的通道 / 别的动作（users/status）→ 不计入', () => {
+    expect(isSuccessfulWeixinSend(sendExec(SESSION, { channel: 'other' }), { isError: false })).toBe(false)
+    expect(isSuccessfulWeixinSend(sendExec(SESSION, {}, 'users'), { isError: false })).toBe(false)
+    expect(isSuccessfulWeixinSend(sendExec(SESSION, {}, 'status'), { isError: false })).toBe(false)
+  })
+
+  it('非目标工具 / msm 但别的 MSM → 不计入', () => {
     expect(isSuccessfulWeixinSend(otherExec('container_fs', { action: 'list' }), { isError: false })).toBe(false)
     expect(isSuccessfulWeixinSend(otherExec('msm', { name: 'weixin-doctor' }), { isError: false })).toBe(false)
   })
@@ -101,6 +118,7 @@ describe('weixin-output-guard: 成功发送判定（isSuccessfulWeixinSend）', 
     expect(isSuccessfulWeixinSend(null, { isError: false })).toBe(false)
     expect(isSuccessfulWeixinSend(undefined, undefined)).toBe(false)
     expect(isSuccessfulWeixinSend({ name: 'msm' }, { isError: false })).toBe(false)
+    expect(isSuccessfulWeixinSend({ name: 'im-bridge' }, { isError: false })).toBe(false)
   })
 })
 
@@ -126,11 +144,11 @@ describe('weixin-output-guard: 打回文案（机制事实 + 标记，无纪律�
   it('含标记 + 已填参数的完整命令（零解析负担）', () => {
     const msg = buildManualOutputRebuke(MANUAL)
     expect(msg).toContain('[serenity:weixin-manual-output]')
-    expect(msg).toContain('msm("weixin-send"')
-    expect(msg).toContain(`"--ccc", "${MANUAL.root}"`)
-    expect(msg).toContain(`"--account", "${MANUAL.accountId}"`)
-    expect(msg).toContain(`"--user", "${MANUAL.userId}"`)
+    expect(msg).toContain('im-bridge({channel:"weixin", action:"send"')
+    expect(msg).toContain(`account:"${MANUAL.accountId}"`)
+    expect(msg).toContain(`user:"${MANUAL.userId}"`)
     expect(msg).toContain('ccc=/ccc/home-serenity')
+    expect(msg).not.toContain('--ccc') // v1.31.0：工具只能操作本会话 CCC → 命令里不再有目标 CCC 参数
   })
 
   it('不含纪律措辞（v1.30.16 归属二分：措辞归 CCC 角色提示词）', () => {
@@ -185,7 +203,8 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     f.stopTurn(agent)
     expect(steers).toHaveLength(1)
     expect(steers[0]).toContain('[serenity:weixin-manual-output]')
-    expect(steers[0]).toContain(`"--ccc", "${MANUAL.root}"`)
+    expect(steers[0]).toContain('im-bridge({channel:"weixin", action:"send"')
+    expect(steers[0]).toContain(`user:"${MANUAL.userId}"`)
   })
 
   it('发送失败（isError:true）→ 仍打回（失败调用不算已送达）', async () => {

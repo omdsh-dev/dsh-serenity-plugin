@@ -23,6 +23,7 @@ import {
 } from '../ccc.js'
 import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
 import { skiffRoleFor } from '../skiff-registry.js'
+import { hasEnabledImChannel } from '../im-bridge.js'
 
 // ── 纯决策（可单测）──
 
@@ -292,6 +293,71 @@ export function syncSafeModeRestriction(agent: Agent, root: string): void {
     safeModeRestrictions.delete(key)
   }
   writeRestrictDiag(root)
+}
+
+// ── im-bridge 条件可见（v1.31.0）──
+
+/** 条件可见的 IM 工具名（与 tools/im-bridge.ts 的注册名一致） */
+export const IM_BRIDGE_TOOL_NAME = 'im-bridge'
+
+/** agent key → restrict disposer（im-bridge 隐藏状态；key 同安全模式 = 会话 id） */
+const imBridgeRestrictions = new Map<string, () => void>()
+
+/** im-bridge 隐藏诊断（排查"工具为什么不在清单里"） */
+export function getImBridgeVisibilityDiagnostics(): { hiddenKeys: string[] } {
+  return { hiddenKeys: [...imBridgeRestrictions.keys()] }
+}
+
+/**
+ * 同步 im-bridge 可见性（v1.31.0，S142 用户拍板 Q3「未配置则不可见」）。
+ *
+ * 判据 = 本会话 CCC 是否启用了**任一** IM 通道（`hasEnabledImChannel`，当前只有 weixin）：
+ * - 未启用 → `agent.ctx.tools.restrict({ deny: ['im-bridge'] })`：**从 schema 移除**
+ *   （模型看不到，而不是看得到但调用被拒——用户原话"不配置则不可见"）
+ * - 启用 → 解除隐藏（CCC 配置热更新即时生效）
+ *
+ * 与 `syncSafeModeRestriction` 同点调用（pre-step 每步 + 会话就绪），失败不阻断
+ * （守卫仍兜底；restrict 不可用时最坏是"看得到但通道未配置 → 返回 CHANNEL_NOT_CONFIGURED"）。
+ */
+export function syncImBridgeVisibility(agent: Agent, root: string): void {
+  const key = (agent.session as { id?: string }).id ?? 'global'
+  let enabled = false
+  try {
+    enabled = hasEnabledImChannel(root)
+  } catch (e) {
+    // 判据失败按"未启用"处理会让工具凭空消失 → 按"启用"放行，由通道自身报未配置
+    console.error(`[serenity-hooks] im-bridge 可见性判据失败 (key=${key}):`, (e as Error).message)
+    return
+  }
+  const existing = imBridgeRestrictions.get(key)
+  if (!enabled && !existing) {
+    try {
+      const dispose = agent.ctx.tools.restrict({ deny: [IM_BRIDGE_TOOL_NAME] })
+      imBridgeRestrictions.set(key, dispose)
+    } catch (e) {
+      console.error(`[serenity-hooks] im-bridge 隐藏失败 (key=${key}):`, (e as Error).message)
+      /* 隐藏失败不阻断：调用时通道判据仍会拒绝（CHANNEL_NOT_CONFIGURED） */
+    }
+  } else if (enabled && existing) {
+    try {
+      existing()
+    } catch (e) {
+      console.error(`[serenity-hooks] im-bridge 解除隐藏失败 (key=${key}):`, (e as Error).message)
+    }
+    imBridgeRestrictions.delete(key)
+  }
+}
+
+/** 会话销毁清理（lifecycle 调用；防 per-会话 Map 无界增长——review F-08 同族） */
+export function forgetImBridgeVisibility(sessionId: string): void {
+  const existing = imBridgeRestrictions.get(sessionId)
+  if (!existing) return
+  try {
+    existing()
+  } catch {
+    /* disposer 已失效 */
+  }
+  imBridgeRestrictions.delete(sessionId)
 }
 
 /**

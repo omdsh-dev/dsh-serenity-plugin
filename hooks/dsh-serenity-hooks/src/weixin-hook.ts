@@ -74,6 +74,8 @@ export interface WeixinHookOutgoingEvent extends WeixinHookEventBase {
   reply: string
   /** 触发来源（v1.30.9 引入 `proactive`；v1.30.17 增 `reply-fallback`） */
   source?: WeixinOutgoingSource
+  /** 文件外发记录（v1.31.0：send-file 迁入 ACC 后由 ACC 记录） */
+  file?: { name: string; size: number; caption?: string }
 }
 
 /** 全部 hook 事件（判别联合） */
@@ -103,6 +105,8 @@ export interface OutgoingHookInput {
   reply: string
   /** 缺省 'reply'（对话回复）；'proactive' = 主动发送；'reply-fallback' = 手动模式兜底转发 */
   source?: WeixinOutgoingSource
+  /** 文件外发记录（可选；send-file 路径填） */
+  file?: { name: string; size: number; caption?: string }
 }
 
 /** 构造 incoming 事件对象（纯函数，可测） */
@@ -134,6 +138,7 @@ export function buildOutgoingHookEvent(input: OutgoingHookInput): WeixinHookOutg
     role: input.role,
     reply: input.reply,
     ...(input.source && input.source !== 'reply' ? { source: input.source } : {}),
+    ...(input.file ? { file: input.file } : {}),
   }
 }
 

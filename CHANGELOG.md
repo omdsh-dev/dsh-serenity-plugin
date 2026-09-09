@@ -1,3 +1,73 @@
+## v1.31.0 — 2026-09-09（IM 发送能力归 ACC：新工具 `im-bridge`，条件可见，S142 用户洞察）
+
+**Scope:** 用户原话——「既然微信桥是我们 ACC 提供的，那么 weixin-send 应该是我们 ACC 提供的能力，
+当用户配置了微信桥则可用，不配置则不可见，按照这个思路出个方案」。此前该能力**分裂在两处**：
+ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有一份 492 行 MSM 重复持有协议、
+凭据、账号选择与 `send-file` 的 CDN 上传（且它不经桥时还要自己补记事件）——机制层与内容层的归属错位。
+本版把发送能力**收归 ACC 并做成一个工具**，CCC 只保留「何时发 / 发什么 / 怎么写」。
+
+### 用户三决策（R↓）
+| # | 决策 | 理由 / 备选 |
+|---|------|------------|
+| D1 | 工具名 = **`im-bridge`**（`channel` 维度留其他 IM 扩展空间） | 家族式多层工具；连字符与既有 `autopilot-trajectory` 同例。备选：`weixin`（无扩展空间）/ `weixin_send`（下划线风格不一致） |
+| D2 | 范围 = **P1 一次做完并删 CCC MSM** | 避免"两套通道并存"的长期熵（旧通道一旦留下就会被复制）。备选：P1 兼容 → P2 吸收 send-file → P3 退役（周期长、双真相源） |
+| D3 | **取消 `ccc` 参数**（工具只能操作本会话 CCC） | 防误发他容器（R4）。代价：跨 CCC 主动发送不再支持——确有需要者走 3082 HTTP 入口 |
+
+### 新增工具 `im-bridge`（工具面 10 → 11）
+- **参数**：`channel`（通道 id，目前 `weixin`）/ `action`（`send` / `send-file` / `users` / `status`）/
+  `user`（别名或通道内 id）/ `text` / `file` / `caption` / `account`
+- **条件可见**（用户原话"不配置则不可见"）：本 CCC 未启用任何 IM 通道 → 由 `seams/guards.syncImBridgeVisibility`
+  调 `agent.ctx.tools.restrict({ deny: ['im-bridge'] })` 把工具**从 schema 移除**（不是"看得到但被拒"），
+  与 safe-mode 同一机制（每步同步 → CCC 配置热更新即时生效）；会话销毁时 `forgetImBridgeVisibility` 清理状态
+- **进程内直调**：工具 → `im-bridge`（能力层）→ `im-weixin`（通道）→ `sendProactiveText` / `sendFileMessage`，
+  零 HTTP 一跳（3082 入口保留给**非 agent 调用者**）
+- **稳定错误码**：`CHANNEL_REQUIRED` / `CHANNEL_UNKNOWN` / `CHANNEL_NOT_CONFIGURED` / `ACTION_UNKNOWN` /
+  `ACTION_UNSUPPORTED` / `USER_REQUIRED` / `ALIAS_UNKNOWN` / `TEXT_REQUIRED` / `TEXT_TOO_LONG` /
+  `FILE_REQUIRED` / `FILE_ESCAPE` / `FILE_NOT_FOUND` / `FILE_TOO_LARGE` / `SEND_FAILED`（每条带可行动提示）
+
+### 分层（E↑）
+| 文件 | 职责 | 边界 |
+|------|------|------|
+| `src/tools/im-bridge.ts` | 工具面：参数 → 从 agent cwd 解析**本会话 CCC** → 渲染结果 | 不接受目标 CCC |
+| `src/im-bridge.ts` | 能力层：通道注册表 / 可见性判据 / 动作分发 / 错误码翻译 / CCC 内文件读取 | **零宿主依赖**（可独立单测）；不认识"微信" |
+| `src/im-weixin.ts` | 微信通道：判据 / 别名解析 / 发送 / 记录 | 协议与记录复用桥，不重写 |
+
+### 实现
+- `src/im-weixin.ts`（新）：`isEnabled` = `weixin.enabled`；`resolveUser` / `listUsers`（`WEIXIN_USER_YH/DANICA/XIAOWANG`，
+  与旧 MSM 逐字一致 → 迁移零认知成本）；`send` → `sendProactiveText`；`sendFile` → `resolveWeixinAccount` +
+  `sendFileMessage` + caption 文本 + 同一 outgoing hook（`source: 'proactive'` + `file` 元数据）；`status` 显式映射
+  JSON 安全形状（`undefined` 字段用条件展开剔除）
+- `src/weixin-api.ts`：新增 `sendFileMessage()`（getuploadurl → CDN AES-128-ECB 上传 → sendmessage FILE item，
+  逐行移植旧 CCC MSM 语义）——`send-file` 从"CCC 自己实现"变为 ACC 能力
+- `src/weixin-bridge.ts`：新 `resolveWeixinAccount(root, accountId?)`（**账号选择单一真相源**，`sendProactiveText`
+  改为复用它）；`weixinManualOutputMarker` 改输出 `im-bridge(...)` 形态（**不再含 `--ccc`**）
+- `src/weixin-hook.ts`：outgoing 事件/入参加 `file?: { name, size, caption? }` + 构造透传
+- `src/weixin-output-guard.ts`：成功判定同时认 `im-bridge`（channel=weixin + action ∈ {send, send-file}）与
+  兼容形态 `msm("weixin-send", …)`；打回文案改为 `im-bridge(...)` 命令
+- `src/index.ts`：`registerImChannel(weixinChannel)` **在工具装配之前**（description 读通道枚举）+
+  `ctx.tools.register(createImBridgeTool())`
+- `src/seams/context.ts`：`seed` 与 `pre-step` 两处调用 `syncImBridgeVisibility`（与 safe-mode 同点）
+
+### 退役 CCC 侧 MSM（P1 迁移）
+- 删除 `.opencode/skills/home-serenity/scripts/weixin-send.ts`（492 行）+ `container_admin msm deregister weixin-send`
+- CCC 配置：`skiff.roles.zhaocai.tools` + `im-bridge`、`msms` − `weixin-send`；autopilot `topPrompt` 改工具形态
+- CCC 提示词与指南：`.opencode/skiff/zhaocai.md` 全量改 `im-bridge` 形态（含"无 ccc 参数、只能操作本会话 CCC"）；
+  `weixin-doctor guide` §7 重写（工具形态 / 可见性 / 错误码 / 旧通道退役说明）
+
+### 测试（73 files / 1050 → **75 files / 1096**）
+- 新 `tests/im-bridge.test.ts` **22 用例**：通道注册表 / 可见性判据（含单通道抛错不影响其他）/
+  `runImBridge` 全矩阵（14 个错误码 + 成功路径）/ 文件三类拒绝 / 结果 JSON 可往返
+- 新 `tests/im-weixin.test.ts` **20 用例**：判据 / 别名解析（大小写、缺凭据、裸 id）/ `status` 三态与 undefined 剔除 /
+  `send` 三态 / `sendFile` 六态（未启用 / 账号失败 / caption / 记录 / 无 hook / hook 失败旁路容忍）
+- `tests/guards.test.ts` **+6**：隐藏幂等 / 配置热更新跟随 / restrict 抛错不阻断 / 会话清理 / 会话隔离
+- `tests/weixin-output-guard.test.ts`：成功判定矩阵改双形态（im-bridge 正负例 + 兼容形态）；标记断言同步
+- `tests/register.test.ts`：工具数 10 → 11；`tests/weixin.test.ts`：标记断言同步（末尾 `})`）
+
+### 文档
+- README（中英双版）：工具表 10 → 11（含"条件可见"说明）+ 微信桥章节改写 + 入口表 3082 定位澄清 + 基线刷新
+- `msm-ops.ts` CCC_CONFIG_REFERENCE §8：主动发送段重写（工具形态 / 可见性 / 旧通道退役）+ `source` 说明
+- `src/templates/acc-serenity/SKILL.md` + CCC `.dsh/skills/acc-serenity/SKILL.md`：11 工具 + 条件可见机制行
+
 ## v1.30.17 — 2026-09-09（手动模式兜底：不让消息丢掉，S142 用户拍板"鲁棒修法"）
 
 **Scope:** v1.30.16 的机械闸门（打回 ≤2 次）在真实模型上失效——用户实测某模型在**寒暄类消息**（「你好」）上

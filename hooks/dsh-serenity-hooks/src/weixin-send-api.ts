@@ -6,7 +6,9 @@
  * 而 3081 的登录态属于"家庭账号"——一旦挂上去，任何已登录的外部用户都能冒充 bot 发消息。
  * 独立 loopback 监听器则**不经网关、公网不可达**，因此不做共享密钥；仍校验来源地址。
  *
- * 调用者 = CCC 自己的 MSM（`msm weixin-send ...`）：ACC **不新增工具**，只多一个本机 HTTP 面。
+ * 调用者 = **非 agent 的调用者**（外部脚本/集成/运维）。**agent 侧已不走这里**：v1.31.0 起
+ * agent 统一调 `im-bridge` 工具（进程内直调 `sendProactiveText`，无 HTTP 一跳），旧 CCC MSM
+ * `weixin-send` 已退役。本入口保留 = 给容器外的进程一个稳定的本机发送面。
  * 发送与记录都经 `weixin-bridge.sendProactiveText` → 复用既有 outgoing hook（`source: 'proactive'`）。
  *
  * 契约：

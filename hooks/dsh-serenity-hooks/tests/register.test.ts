@@ -82,10 +82,10 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(typeof apply).toBe('function')
   })
 
-  it('apply 注册 10 个真实工具（v1.30 命名重构：container 族 + msm/praxis/logbook/dashboard 合一）', () => {
+  it('apply 注册 11 个真实工具（v1.30 命名重构 + v1.31.0 im-bridge 条件可见）', () => {
     const { ctx, register } = mockCtx()
     apply(ctx, FULL_CONFIG)
-    expect(register).toHaveBeenCalledTimes(10)
+    expect(register).toHaveBeenCalledTimes(11)
     const names = register.mock.calls.map((c) => (c[0] as { name: string }).name)
     expect(names).toContain('container_fs')
     expect(names).toContain('logbook')
@@ -97,6 +97,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('localstore')
     expect(names).toContain('container_admin')
     expect(names).toContain('autopilot-trajectory')
+    expect(names).toContain('im-bridge')
   })
 
   it('apply 订阅拦截缝：tools/pre-execute + guard', () => {
@@ -132,7 +133,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(() => apply(ctx, FULL_CONFIG)).not.toThrow()
     expect(warn.mock.calls.some((c) => String(c[0]).includes('ctx.effect 不可用'))).toBe(true)
     warn.mockRestore()
-    expect(register).toHaveBeenCalledTimes(10) // 其余装配不受影响
+    expect(register).toHaveBeenCalledTimes(11) // 其余装配不受影响
   })
 
   it('config 开关控制注册项', () => {

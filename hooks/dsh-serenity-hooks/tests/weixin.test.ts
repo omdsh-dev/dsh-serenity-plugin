@@ -602,17 +602,17 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     // ② 每轮注入**机制标记**（v1.30.16 重构：ACC 只给事实 + 已填参数，措辞归 CCC 角色提示词）
     const q = ctx.questions[0] ?? ''
     expect(q).toContain('[serenity:weixin-manual-output]')
-    expect(q).toContain('msm("weixin-send"')
-    expect(q).toContain(`"--ccc", "${dir}"`)
-    expect(q).toContain('"--account", "wechat-1"')
-    expect(q).toContain('"--user", "manual@im.wechat"')
+    expect(q).toContain('im-bridge({channel:"weixin", action:"send"')
+    expect(q).toContain('account:"wechat-1"')
+    expect(q).toContain('user:"manual@im.wechat"')
+    expect(q).not.toContain('--ccc') // v1.31.0：工具只能操作本会话 CCC → 命令无目标 CCC 参数
     // ACC 不再内嵌任何纪律措辞（用户拍板"这个词不能让 ACC 定义，要让 CCC 定义"）
     expect(q).not.toContain('Reply Output')
     expect(q).not.toContain('no fallback')
     expect(q).not.toContain('will NOT')
     // 标记位于**消息末尾**（recency——旧实现放在用户正文之前，实测被压过）
     expect(q.indexOf('[serenity:weixin-manual-output]')).toBeGreaterThan(q.indexOf('你好'))
-    expect(q.trimEnd().endsWith('])')).toBe(true)
+    expect(q.trimEnd().endsWith('})')).toBe(true)
     // 用户原文仍在（标记是追加注入，不吞消息）
     expect(q).toContain('你好')
 

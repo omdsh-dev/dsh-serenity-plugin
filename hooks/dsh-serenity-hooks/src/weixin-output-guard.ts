@@ -2,14 +2,14 @@
  * weixin-output-guard.ts — 手动输出模式的**机械闸门**（v1.30.16，S142 用户"LLM 不听"）
  *
  * 问题（实证）：`weixin.autoReplyWithLastMessage: false` 时桥不回发最终文本，输出权归 agent
- * （必须自己调 `msm("weixin-send", …)`）。提示词层面已说明，但用户实测 **LLM 仍经常不发**——
- * 结果用户什么都收不到（静默）。这类"提示词软约束失效"正是 ACC 该用机械守卫兜底的场景
- * （与 output-guard 同一套思路：turn-stopping + agent.steer）。
+ * （必须自己调 `im-bridge` 工具，v1.30.x 为 `msm("weixin-send", …)`）。提示词层面已说明，
+ * 但用户实测 **LLM 仍经常不发**——结果用户什么都收不到（静默）。这类"提示词软约束失效"正是 ACC
+ * 该用机械守卫兜底的场景（与 output-guard 同一套思路：turn-stopping + agent.steer）。
  *
  * 本模块做三件事（全部是机制，不含任何纪律措辞——措辞归 CCC 角色提示词）：
  *  ① `noteManualOutputSession`：桥每轮把手动模式会话登记进来（含 root/account/user/role）
- *  ② 订阅 `tools/post-execute`：观察本轮是否真的调用了 `msm` 且首个参数为 `weixin-send`
- *     （**只在执行成功时**计入——失败调用不算"已送达"）
+ *  ② 订阅 `tools/post-execute`：观察本轮是否真的成功调用过输出工具（`im-bridge` 的
+ *     `action=send|send-file`，兼容旧 `msm("weixin-send", …)`）——**只在执行成功时**计入
  *  ③ 订阅 `agent/turn-stopping`：本轮结束仍没有成功发送 → `agent.steer` 打回一次（≤2 次），
  *     提示内容 = **标记 + 事实**（"本轮未发送，用户什么都没收到"），具体怎么做由 CCC 角色
  *     提示词定义（与 per-message 标记同名 `[serenity:weixin-manual-output]`，模型能对上）。
@@ -92,14 +92,26 @@ function sessionIdOf(value: unknown): string | null {
   return typeof id === 'string' && id !== '' ? id : null
 }
 
-/** 工具调用是否为「成功的 weixin-send」 */
+/**
+ * 工具调用是否为「成功的微信发送」。
+ *
+ * v1.31.0 起有两种合法形态（标记与闸门同时认，迁移期并存）：
+ * - `im-bridge({channel:"weixin", action:"send"|"send-file", …})` —— ACC 工具（推荐）
+ * - `msm("weixin-send", ["send"|"send-file", …])` —— CCC MSM（v1.30.x 通道，逐步退役）
+ */
 export function isSuccessfulWeixinSend(exec: unknown, result: unknown): boolean {
   const e = exec as { name?: unknown; arguments?: unknown } | null | undefined
-  if (e?.name !== 'msm') return false
-  const args = e.arguments as { name?: unknown } | null | undefined
-  if (args?.name !== 'weixin-send') return false
   const r = result as { isError?: unknown } | null | undefined
-  return r?.isError !== true
+  if (r?.isError === true) return false
+  const args = e?.arguments as { name?: unknown; action?: unknown; channel?: unknown } | null | undefined
+  if (e?.name === 'im-bridge') {
+    const channel = typeof args?.channel === 'string' ? args.channel : ''
+    if (channel !== 'weixin') return false
+    const action = typeof args?.action === 'string' ? args.action : ''
+    return action === 'send' || action === 'send-file'
+  }
+  if (e?.name === 'msm') return args?.name === 'weixin-send'
+  return false
 }
 
 /** 打回消息（机制事实 + 标记；怎么做由 CCC 角色提示词定义） */
@@ -107,7 +119,7 @@ export function buildManualOutputRebuke(session: ManualOutputSession): string {
   return [
     '[serenity:weixin-manual-output] no send detected in this turn — the user has received NOTHING.',
     `ccc=${session.root} account=${session.accountId} user=${session.userId}`,
-    `msm("weixin-send", ["send", "--ccc", "${session.root}", "--account", "${session.accountId}", "--user", "${session.userId}", "<回复>"])`,
+    `im-bridge({channel:"weixin", action:"send", account:"${session.accountId}", user:"${session.userId}", text:"<回复>"})`,
   ].join('\n')
 }
 

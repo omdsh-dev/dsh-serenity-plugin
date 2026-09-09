@@ -145,16 +145,16 @@ async function runAccountLoop(
  * "约束不够，LLM 不听"——且措辞迭代要动插件代码 + 发版 + 重启；把措辞放 CCC 才能快速迭代，
  * 也符合"ACC 管机制、CCC 管内容"的归属二分。
  *
- * 标记格式（稳定，供 CCC 提示词引用）：
+ * 标记格式（稳定，供 CCC 提示词引用；v1.31.0 起为 ACC 工具形态）：
  * ```
  * [serenity:weixin-manual-output]
- * msm("weixin-send", ["send", "--ccc", "<root>", "--account", "<account>", "--user", "<user>", "<回复>"])
+ * im-bridge({channel:"weixin", action:"send", account:"<account>", user:"<user>", text:"<回复>"})
  * ```
  */
 export function weixinManualOutputMarker(root: string, accountId: string, userId: string): string {
   return [
     '[serenity:weixin-manual-output]',
-    `msm("weixin-send", ["send", "--ccc", "${root}", "--account", "${accountId}", "--user", "${userId}", "<回复>"])`,
+    `im-bridge({channel:"weixin", action:"send", account:"${accountId}", user:"${userId}", text:"<回复>"})`,
   ].join('\n')
 }
 
@@ -354,7 +354,7 @@ export async function handleIncoming(
       // 消息，source=proactive）。系统类消息（新对话通知/语音提示）不受影响。
       //
       // v1.30.17 兜底（S142 用户拍板"鲁棒修法"）：`weixin.fallbackOnNoSend: true` 时，若本轮
-      // agent **一次都没成功调用 weixin-send**（闸门打回 ≤2 次仍无效——实证某模型在寒暄类消息
+      // agent **一次都没成功调用输出工具**（v1.31.0 起为 im-bridge；闸门打回 ≤2 次仍无效——实证某模型在寒暄类消息
       // 上跨 3 版提示词仍不调工具），桥把该轮最终文本转发给用户（`source: "reply-fallback"`），
       // 保证"不丢消息"。前置条件 `isWeixinOutputGuardActive()`：闸门未装配 → 无法判定 → 不兜底
       // （宁可静默也不冒重复发送的风险）。agent 自己发过 → 不兜底，输出权仍在 agent。
@@ -517,8 +517,18 @@ export type ProactiveSendResult =
  * @param input CCC 根 + 目标用户 + 文本 +（可选）账号
  * @returns 成功含 accountId/userId/sessionId/role；失败含稳定 code 与可行动提示（不抛错）
  */
-export async function sendProactiveText(input: ProactiveSendInput): Promise<ProactiveSendResult> {
-  const { root, toUserId } = input
+/** 账号解析结果（文本 / 文件发送共用） */
+export type WeixinAccountResolution =
+  | { ok: true; accountId: string; cred: WeixinAccountCredential }
+  | { ok: false; code: ProactiveSendErrorCode; error: string; remediation?: string }
+
+/**
+ * 解析该 CCC 的发送账号 + 凭据（v1.31.0：文本与文件发送的**单一账号选择真相源**）。
+ * 顺序：桥启用 → 有启用账号 → 指定账号存在 → 凭据已绑定（扫码）。
+ * @param root CCC 根
+ * @param accountId 指定账号（缺省 = 第一个启用账号）
+ */
+export function resolveWeixinAccount(root: string, accountId?: string): WeixinAccountResolution {
   const settings = readWeixinSettings(root)
   if (!settings.enabled) {
     return { ok: false, code: 'BRIDGE_DISABLED', error: `微信桥未启用（ccc=${root}）`, remediation: '在 CCC 的 .opencode/serenity.json weixin.enabled 打开' }
@@ -527,19 +537,28 @@ export async function sendProactiveText(input: ProactiveSendInput): Promise<Proa
   if (accounts.length === 0) {
     return { ok: false, code: 'NO_ACCOUNT', error: '微信桥未配置任何启用账号', remediation: '在设置面板「微信桥」扫码绑定账号' }
   }
-  const accountId = input.accountId ?? accounts[0]!.accountId
-  if (!accounts.some((a) => a.accountId === accountId)) {
+  const id = accountId ?? accounts[0]!.accountId
+  if (!accounts.some((a) => a.accountId === id)) {
     return {
       ok: false,
       code: 'ACCOUNT_NOT_FOUND',
-      error: `账号不存在或未启用: ${accountId}`,
+      error: `账号不存在或未启用: ${id}`,
       remediation: `可用账号: ${accounts.map((a) => a.accountId).join(', ')}`,
     }
   }
-  const cred = readWeixinCredential(root, accountId)
+  const cred = readWeixinCredential(root, id)
   if (!cred) {
-    return { ok: false, code: 'ACCOUNT_NOT_BOUND', error: `账号未绑定（无凭据）: ${accountId}`, remediation: '在设置面板重新扫码绑定' }
+    return { ok: false, code: 'ACCOUNT_NOT_BOUND', error: `账号未绑定（无凭据）: ${id}`, remediation: '在设置面板重新扫码绑定' }
   }
+  return { ok: true, accountId: id, cred }
+}
+
+export async function sendProactiveText(input: ProactiveSendInput): Promise<ProactiveSendResult> {
+  const { root, toUserId } = input
+  const settings = readWeixinSettings(root)
+  const account = resolveWeixinAccount(root, input.accountId)
+  if (!account.ok) return account
+  const { accountId, cred } = account
 
   const sessionId = weixinSessionIdFor(toUserId)
   const role = matchWeixinRoute(settings.routes ?? [], toUserId) ?? ''

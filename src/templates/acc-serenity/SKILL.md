@@ -1,6 +1,6 @@
 ---
 name: acc-serenity
-description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供 10 真实工具 container_fs/container_git/container_admin/msm/praxis/logbook/dashboard/handyman/localstore/autopilot-trajectory + 拦截缝机械守卫，v1.30 命名体系）与协作纪律（EAP/Neat/会话追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
+description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供 11 真实工具 container_fs/container_git/container_admin/msm/praxis/logbook/dashboard/handyman/localstore/autopilot-trajectory/im-bridge + 拦截缝机械守卫，v1.31 命名体系）与协作纪律（EAP/Neat/会话追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
 ---
 
 # Skill: acc-serenity — 宁静号 ACC Harness（DSH 运行时）
@@ -14,7 +14,7 @@ description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/C
 名称: dsh-serenity-plugin (ACC, DSH 运行时)
 宿主: DeepSeek Harness (DSH)
 标准: 仿照 opencode-serenity-plugin 的 ACC 语义，独立实现（不复用源码）
-版本: v1.30.0（npm @shgroup/dsh-serenity-hooks）
+版本: v1.31.0（npm @shgroup/dsh-serenity-hooks）
 发布: GitHub tellmewhattodo/dsh-serenity-plugin + npm registry
 ```
 
@@ -39,11 +39,11 @@ description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/C
 - `dashboard health` 三原则检查（.serenity / git / 配置 + registry 完整性）
 - 本技能 + 其余 acc-* 技能的操作协议
 
-## 工具与约束（v1.30：Native Cordis 插件，10 工具）
+## 工具与约束（v1.31：Native Cordis 插件，11 工具）
 
 ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native Cordis 插件）提供：真实 DSH 工具经 `ctx.tools.register` 进程内注册；约束由拦截缝机械执行（模型不可绕过）。本技能只承载知识（EAP/Neat/纪律）。
 
-**v1.30.0 工具面重构（13 → 10，硬切无别名）**——以下为本会话实际可用的 10 工具：
+**v1.30.0 工具面重构（13 → 10，硬切无别名）＋ v1.31.0 新增 `im-bridge`（11）**——以下为本会话实际可用的 11 工具：
 
 | 工具 | 能力 | 隐喻 |
 |------|------|------|
@@ -57,18 +57,20 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | `handyman` | 杂工编排（白名单模型 worker 循环） | Crew Rotation |
 | `localstore` | 凭据/配置存储（CCC 根 localstore.json） | 保留 |
 | `autopilot-trajectory` | Autopilot 一站式管理 | 保留 |
+| `im-bridge` | IM 消息发送（channel/action/user/text/file/caption/account）——**条件可见**：本 CCC 未配置任何 IM 通道（如 `weixin.enabled`）时从工具清单移除 | Crew Rotation |
 
 **改名对照（旧 → 新，硬切无别名）**：`cc_fs`→`container_fs` / `cc_git`→`container_git` / `acc_msm`（执行面）→`msm`、`acc_msm`（管理面）→`container_admin msm` / `skiff_admin`→`container_admin role` / `session`→`logbook` / `session_rebuild`→`logbook rebuild` / `acc_kit`→`dashboard` / `eap`·`neat`·`cce` 三合一→`praxis`。旧工具名不再注册。
 
 | 机制 | DSH harness 实现（插件） | 性质 |
 |---|---|---|
-| 10 真实工具 | `container_fs`/`logbook`/`dashboard`/`container_git`/`msm`/`praxis`/`handyman`/`localstore`/`container_admin`/`autopilot-trajectory`（进程内） | 机械 |
+| 11 真实工具 | `container_fs`/`logbook`/`dashboard`/`container_git`/`msm`/`praxis`/`handyman`/`localstore`/`container_admin`/`autopilot-trajectory`/`im-bridge`（进程内） | 机械 |
 | 路径守卫 / 安全模式 / 黑名单 | `tools/pre-execute` + `ctx.tools.guard`（.serenity-safe-on 标记 + serenity.json 黑名单） | 机械 |
+| 条件可见（im-bridge） | `agent.ctx.tools.restrict({deny})` 按 CCC 配置逐 agent 收窄（同 safe-mode 机制） | 机械 |
 | 系统提示注入 / Phase 2 | `agent/session-start` + `agent/prompt-submit`（ACC 身份播种） | 机械 |
 | 会话压缩保留 / loop / resident | DSH compact-basic / goal / 后台 subagent（原生超集） | 平台 |
 | 知识框架 | `praxis`（eap/neat/cce 三合一，单工具注入） | 知识 |
 
-> 旧工具技能模板（acc-fs/acc-git/acc-msm/acc-kit/acc-session/acc-safe-mode 的 SKILL.md）已被插件 10 工具取代——本套 acc-* 文件现为**知识映射**（说明该领域由哪个工具提供），scripts/ 已退役为空目录。
+> 旧工具技能模板（acc-fs/acc-git/acc-msm/acc-kit/acc-session/acc-safe-mode 的 SKILL.md）已被插件 11 工具取代——本套 acc-* 文件现为**知识映射**（说明该领域由哪个工具提供），scripts/ 已退役为空目录。
 
 ## 协作纪律（强制）
 
@@ -99,11 +101,12 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | 会话创建/追踪/归档/重建 | `logbook` 工具 |
 | 认知质量自检 / 设计协作 / 连续性理论 | `praxis` 工具（section: eap/neat/cce） |
 | 健康检查/时间/等待 | `dashboard` 工具 |
+| 给微信用户发消息（招财留言/通报） | `im-bridge` 工具（**仅当本 CCC 配置了 IM 通道时可见**；只能操作本会话 CCC） |
 | 远程服务器操作 | home-* 领域技能 + ssh-connect |
 
 ## 安装与更新
 
-本 ACC 插件通过 npm 公开分发（当前 v1.30.0）：
+本 ACC 插件通过 npm 公开分发（当前 v1.31.0）：
 
 ```bash
 # 安装 / 更新（DSH profile 级）
@@ -114,7 +117,7 @@ dsh plugin --profile web remove @shgroup/dsh-serenity-hooks
 
 - **npm**：`@shgroup/dsh-serenity-hooks`（maintainer shgroup，MIT，README 完整）
 - **源码**：https://github.com/tellmewhattodo/dsh-serenity-plugin
-- 安装后重启 dsh web；新会话自动获得 10 工具 + 系统提示词注入 + WebUI 状态徽章
+- 安装后重启 dsh web；新会话自动获得 11 工具（未配置 IM 通道的 CCC 为 10）+ 系统提示词注入 + WebUI 状态徽章
 - 插件开发维护视角（架构/决策/发布流程）见 `dsh-serenity-plugin-development` skill
 
 ## 参考

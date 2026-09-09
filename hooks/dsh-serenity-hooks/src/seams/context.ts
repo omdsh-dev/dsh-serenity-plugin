@@ -21,7 +21,7 @@ import { findSerenityRoot, loadSerenityConfig, readHandymanConfig, DEFAULT_SEREN
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
-import { syncSafeModeRestriction } from './guards.js'
+import { syncSafeModeRestriction, syncImBridgeVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../session-ops.js'
 import { readLastBound, appendBound } from '../session-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -212,6 +212,11 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     injected.add(key)
     agent.inject(accMessage(root, configPaths, entrySkillMaxChars))
     syncSafeModeRestriction(agent, root)
+    try {
+      syncImBridgeVisibility(agent, root)
+    } catch {
+      /* 可见性同步失败不阻断播种（最坏情况：工具可见但通道未配置 → 调用时返回 CHANNEL_NOT_CONFIGURED） */
+    }
   }
 
   // session-start：emit 通知，CCC 内新会话播种
@@ -241,6 +246,12 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
           syncSafeModeRestriction(agent, root)
         } catch {
           /* 同步失败不阻断 step（守卫仍兜底拦截） */
+        }
+        try {
+          // v1.31.0：im-bridge 条件可见（本 CCC 未配置 IM 通道 → 从工具清单移除）
+          syncImBridgeVisibility(agent, root)
+        } catch {
+          /* 同上：可见性失败不阻断 step */
         }
         // P0-1：pre-step 兜底路径也启用 scoped 身份 section（session-start 之外的 agent）
         registerEntrySkillSection(agent, root)
