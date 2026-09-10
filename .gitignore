@@ -8,6 +8,11 @@ coverage/
 .npm-cache/
 hooks/dsh-serenity-hooks/lib/
 
+# host-fetch 解包产物（宿主包，供 read/grep/typecheck-host 用；绝不进仓）
+_tmp/
+# typecheck-host 派生的一次性 tsconfig（基准 tsconfig 才是真相源）
+tsconfig.host-*.local.json
+
 # 公开发布排除（内部运维工具与会话记录；本地保留，不推送公开仓库）
 SESSION.md
 scripts/

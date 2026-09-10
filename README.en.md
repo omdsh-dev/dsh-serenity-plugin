@@ -2,7 +2,7 @@
 
 > **In one line**: install this plugin and you carve out a workspace for your AI — just an ordinary directory. Inside it, the AI gains **memory, discipline, tools, and boundaries**, so it can pick up the work after a model switch, a reboot, or a night's sleep.
 >
-> Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 0.1.2-rc.1 or later.
+> Requires [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (DSH) 0.1.5-rc.1 or later.
 > For the thinking behind it (why "cognitive container"), see [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md). This README covers **what it does and how to use it**.
 
 **Four words, explained once** (used throughout, not repeated):
@@ -31,7 +31,7 @@ No theory — four everyday annoyances:
 
 ## 2. Quick start (2 minutes)
 
-Prerequisites: Node ≥ 20 (or bun), DSH 0.1.2-rc.1 or later.
+Prerequisites: Node ≥ 20 (or bun), DSH 0.1.5-rc.1 or later.
 
 ```bash
 # 1. Install the plugin (joins the DSH web profile automatically)
@@ -297,7 +297,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 
 ```bash
 pnpm typecheck          # type check (node + browser halves)
-pnpm test               # full suite (currently 75 files / 1110 tests)
+pnpm test               # full suite (currently 77 files / 1139 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
@@ -362,4 +362,4 @@ Yes — through the same `weixin.hook` script configured in the workspace, with 
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.31.1 &nbsp;|&nbsp; **Requires**: DSH 0.1.2-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 75 files / 1110 tests
+> **Version**: v1.31.6 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 77 files / 1139 tests

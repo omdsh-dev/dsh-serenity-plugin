@@ -26,6 +26,10 @@
       "@deepseek-ai/dsh-client-ui-slots": ["../../../../../../../.dsh/source/current/packages/client/ui-slots/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-primitives": ["../../../../../../../.dsh/source/current/packages/client/ui-primitives/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-conversation": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
+      // v1.31.6 适配 0.1.5-rc.1：session 作用域类型面抽到新包（sessionId / Context.sessions）
+      "@deepseek-ai/dsh-client-ui-session": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-session/lib/types/client/index.d.ts"],
+      // `Context.sessions` 的声明合并源（ui-session 只 import，不重复声明）——不映射则合并进不了 program
+      "@deepseek-ai/dsh-api-session-controller/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-locale": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-locale"],
       "react": ["node_modules/@types/react"],
       "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime"]

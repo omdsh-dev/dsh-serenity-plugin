@@ -84,24 +84,34 @@ describe('image-fallback-api: uploadImage（POST /serenity/image-upload）', () 
   })
 })
 
-describe('image-fallback-api: getDraftFiles（conversation.draftImages 读 File）', () => {
+describe('image-fallback-api: getDraftFiles（conversation.resolveDraftAttachments 读 File）', () => {
+  // v1.31.6 适配 0.1.5-rc.1：宿主 `IConversation.draftImages` **已改名** `resolveDraftAttachments`
+  // （同语义同返回）。旧名在 0.1.5-rc.1 下 `=== undefined` → 静默返回 []（兜底悄悄失效），
+  // 故本组用例同时覆盖"新名可用"与"旧名不再被当作入口"。
   it('conversation 装配 → 返回 draft File 列表（方法调用保 this）', async () => {
     const f1 = new File(['a'], 'a.png', { type: 'image/png' })
-    const draftImages = vi.fn().mockReturnValue([{ file: f1 }])
-    const ctx = { get: (name: string) => (name === 'conversation' ? { draftImages } : undefined) }
+    const resolveDraftAttachments = vi.fn().mockReturnValue([{ file: f1 }])
+    const ctx = { get: (name: string) => (name === 'conversation' ? { resolveDraftAttachments } : undefined) }
     const files = await getDraftFiles(ctx as never, 's1', ['img-1'])
     expect(files).toEqual([f1])
-    // 方法调用形态：draftImages 作为 conversation 方法被调（this 绑定）
-    expect(draftImages.mock.instances[0]).toEqual({ draftImages })
+    expect(resolveDraftAttachments).toHaveBeenCalledWith(['img-1'])
+    // 方法调用形态：resolveDraftAttachments 作为 conversation 方法被调（this 绑定）
+    expect(resolveDraftAttachments.mock.instances[0]).toEqual({ resolveDraftAttachments })
   })
 
-  it('conversation 未装配 / 无 draftImages → 空数组', async () => {
+  it('conversation 未装配 / 无 resolveDraftAttachments → 空数组', async () => {
     expect(await getDraftFiles({ get: () => undefined } as never, 's1', [])).toEqual([])
     expect(await getDraftFiles({ get: (n: string) => (n === 'conversation' ? {} : undefined) } as never, 's1', [])).toEqual([])
   })
 
-  it('draftImages 返回 undefined → 空数组', async () => {
-    const ctx = { get: () => ({ draftImages: () => undefined }) }
+  it('0.1.5-rc.1 契约：只提供旧名 draftImages → 视为未装配（不静默走旧路径）', async () => {
+    // 旧名残留时不得返回 File 列表：返回 [] 是"能力缺失"的显式表现，而非悄悄用错 API
+    const legacy = { draftImages: () => [{ file: new File(['a'], 'a.png', { type: 'image/png' }) }] }
+    expect(await getDraftFiles({ get: () => legacy } as never, 's1', ['x'])).toEqual([])
+  })
+
+  it('resolveDraftAttachments 返回 undefined → 空数组', async () => {
+    const ctx = { get: () => ({ resolveDraftAttachments: () => undefined }) }
     expect(await getDraftFiles(ctx as never, 's1', ['x'])).toEqual([])
   })
 })

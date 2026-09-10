@@ -1,3 +1,77 @@
+## v1.31.6 — 2026-09-10（宿主硬切 DSH 0.1.5-rc.1：6 条真实突破 + 新宿主类型基线工具）
+
+**Scope:** 用户裁决「peer 改 `^0.1.5-rc.1`，只验新宿主，不做 0.1.2-rc.1 双基线」。
+方案全文见 [`docs/dsh-0.1.5-rc-adaptation-plan.md`](docs/dsh-0.1.5-rc-adaptation-plan.md)。
+**本轮不发布**（用户明示：他回家后自行安装 0.1.5-rc.1 再做运行时验证）。
+
+### ① 适配轮工具（`scripts/`，内部运维脚本不进公开仓）
+- **`host-fetch` 新增 `pkg@version` 逐包钉版本**——`cordis` / `schemastery` 不跟宿主版本号走
+  （实测 0.1.5-rc.1 已升 cordis `^4.0.2`、schemastery `^3.18.2`）
+- **新增 `typecheck-host <version>`**：用 `_tmp/host-<ver>/` 解包宿主做**类型对账**，不需要安装新宿主。
+  派生一次性 tsconfig（仅覆写 `paths`，编译选项逐字继承基准）；**自带假阳性防护**——
+  改写过的 paths 逐条存在性检查 + `tsc --listFiles` 统计命中解包宿主文件数，0 即 fail。
+  开发中真实踩到该陷阱（首版 `indexOf` 切错 `node_modules`，28 条 paths 全指向不存在的目录而 tsc 仍"绿"）
+- **实证**：node 半载入解包宿主 78 文件 / client 半 103 文件，paths 29+14 条全命中
+
+### ② 契约表对账：17 服务 + 10 事件**全部存活**（零改动）
+`src/host/contract.ts` 逐条核对 `_tmp/host-0.1.5-rc.1/`：`tools`/`sessions`/`agents`/`webServer`/
+`settings`/`web`/`systemPrompt`/`sessionProjections`/`skills`/`shellEnv`/`agentLoop`/`subagents`/
+`sessionTitle`/`tokenMeter`/`workspaceRegistry`/`sessionPersistence`/`connection` 的成员签名全兼容；
+10 个事件名经 `satisfies readonly (keyof Events)[]` **编译期**通过（这是 dsp 侧唯一的自动化契约断言）。
+
+### ③ 类型面突破（4 条，全在 client 半）— 根因是**隐式传递可达性断裂**
+- **现象**：`props.sessionId`（FileFallbackDock / ImageFallbackDock / SafeModePanel）与
+  `ctx.sessions`（image-fallback-api）在新宿主下编译失败
+- **根因（R↓，勿误判为"新包"）**：`SessionStandardProps.sessionId` 的声明源一直是
+  `@deepseek-ai/dsh-client-ui-session`（**0.1.2 就已存在**，非新包）；dsp 此前靠
+  `ui-conversation` 的**类型传递可达性**间接拿到它，而 0.1.5-rc.1 的
+  `ui-conversation` 不再合并 session 标准套件（`ui-slots` 的三个 StandardProps 接口本体为空，
+  注释明示声明权在 ui-session）→ 传递链断掉
+- **修复**：`src/client/index.ts` 增 `import type {} from '@deepseek-ai/dsh-client-ui-session'`
+  （空类型导入，只为显式化声明可达性）+ 两处 tsconfig `paths` 补映射（含
+  `@deepseek-ai/dsh-api-session-controller/client`——不映射则 `Context.sessions` 的合并进不了 program）
+- **净收益（超出预期）**：修复**双向兼容**——`dsh-develop typecheck`（本机 0.1.2-rc.1）与
+  `dsh-develop typecheck-host 0.1.5-rc.1` **同时通过**。隐式依赖改显式依赖在类型面没有硬切代价
+
+### ④ 静默运行时突破（2 条）——类型检查**看不见**，只能读宿主源码发现
+- **`src/client/image-fallback-api.ts`**：宿主 `IConversation.draftImages(ids)` **已改名**
+  `resolveDraftAttachments(ids)`（同语义同返回）。调用点用结构化断言隔离宿主（零宿主 import 策略），
+  旧名消失 → 运行时 `=== undefined` → 静默返回 `[]` → **图片落盘兜底悄悄失效**
+- **`src/skiff-debug.ts`**：`sessionPersistence.list()` 返回形状变更——
+  0.1.2 `SessionHeader[]`（`h.cwd`）→ 0.1.5-rc.1 `SessionPersistenceSnapshot[]`（`h.header.cwd`）。
+  形状由 dsp 自写断言决定，宿主改形在类型面不可见 → 通道 ② 静默失效 →
+  **工作区注册表为空时的 CCC 自动发现**拿不到候选（该通道正是为此兜底而存在）
+- **代价边界（已实测确认）**：这两条是**单向**的——0.1.2-rc.1 下会退化；类型面（③）则双向兼容
+
+### ⑤ 声明面硬切
+- `hooks/package.json`：17 项 peer → `^0.1.5-rc.1`；`cordis`·`@deepseek-ai/cordis` → `^4.0.2`；
+  `@deepseek-ai/schemastery` → `^3.18.2`；description 同步
+- `hooks/dsh.plugin.json`：`engines.dsh` → `>=0.1.5-rc.1`；description 同步
+- `src/host/contract.ts`：`REQUIRED_HOST_RANGE` → `^0.1.5-rc.1`，且 **floor 改为从该常量派生**
+  （此前 floor 是独立硬编码字面量——"常量说一个、判定用另一个"的双真相源；ceiling 因 caret 语义
+  无法机械派生，保留显式常量并注理由）
+- `.gitignore`：补 `_tmp/`（host-fetch 产物此前未被忽略）与 `tsconfig.host-*.local.json`
+
+### ⑥ 明确不改的（避免过度适配）
+面板 API `main`/`main.conversation` 是**新增**（dsp 用的槽位全存活）｜persona 前缀/后缀指宿主
+`dsh-persona`（dsp 的 persona 是 CCC 自有配置，同名不同物，section 名无碰撞）｜
+`HttpFetchProvider` 构造签名与 `HttpFetchResolver` 契约未变（fake-ip 接管仍成立）｜
+Session 格式 V3（dsp 不读原始日志）｜`agentLoop.create()` 异步化与 session 锁（dsp 不直接调）｜
+移除 `ctx.agent`（dsp 用事件 payload 与 `exec.agent`）｜Inbox 接口化（`prepend` 保留，未用私有成员）
+
+### 测试（77 files / 1139 tests，+6）
+- 首轮 6 红全部为硬切预期，逐条修正并**补反向用例**（锁死契约方向）：
+  - `compliance.test.ts`：schemastery 断言同步 + **F6b**（cordis 双映射必须同版本范围）+ **F6c**（dsh-* 不得混版）
+  - `host-contract.test.ts`：版本字面量**改为从 `REQUIRED_HOST_RANGE` 派生**（此前写死旧下限 →
+    换宿主版本时测试红的原因变成"测试写死"而非"契约坏了"，真假报警无法区分）+ 硬切判据用例 +
+    floor 派生判据（常量与 floor 脱钩即失败）
+  - `image-fallback.test.ts`：+「只提供旧名 `draftImages` → 视为未装配」（旧名不得静默走通）
+  - `skiff-debug.test.ts`：原用例改用 `{header:{cwd}}` 新形状 + 「0.1.2 顶层 cwd 不再被采用」反向用例
+
+### 待用户（D14）
+发布链（publish + 三推 + specs/根仓 push + deploy + restart-web）**未执行**；
+运行时验证需用户先在本机安装 DSH 0.1.5-rc.1。
+
 ## v1.31.5 — 2026-09-10（CI 转绿：失败原文可读 + 两处机器耦合用例修复 + handyman 错误优先级）
 
 **Scope:** 用户报告「github ci 报错了」。CI 自 v1.31.2（run #22）起连续三轮红，而**失败原文读不到**：

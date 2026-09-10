@@ -93,10 +93,27 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     expect(prepare).not.toMatch(/entry:\s*\{\s*index/)
   })
 
-  it('F6: peerDependencies 的 schemastery 范围在 npm 可满足（^3.18.1）', () => {
+  it('F6: peerDependencies 的 schemastery 范围在 npm 可满足（^3.18.2）', () => {
     // v1.16.0/1.16.1 曾声明 ^0.1.0-rc.5 → npm 无匹配版本（该包仅 3.18.x 系列，
-    // harness 依赖 ^3.18.1）→ dsh plugin add 报 ERR_PNPM_NO_MATCHING_VERSION
+    // harness 依赖 ^3.18.x）→ dsh plugin add 报 ERR_PNPM_NO_MATCHING_VERSION
+    // v1.31.6（0.1.5-rc.1 适配）：宿主依赖升 ^3.18.2 → 本处同步（下界跟宿主走，避免解析到宿主未验证的旧版）
     const peers = pkg.peerDependencies as Record<string, string>
-    expect(peers['@deepseek-ai/schemastery']).toBe('^3.18.1')
+    expect(peers['@deepseek-ai/schemastery']).toBe('^3.18.2')
+  })
+
+  it('F6b: peerDependencies 的 cordis 双映射版本一致（0.1.5-rc.1 起脱 rc → ^4.0.2）', () => {
+    // 双实例（`cordis` + `@deepseek-ai/cordis`）必须同版本范围——宿主 Context 声明合并靠它
+    const peers = pkg.peerDependencies as Record<string, string>
+    expect(peers['cordis']).toBe('^4.0.2')
+    expect(peers['@deepseek-ai/cordis']).toBe('^4.0.2')
+  })
+
+  it('F6c: peerDependencies 的 dsh-* 全部同一版本范围（硬切后不得混版）', () => {
+    const peers = pkg.peerDependencies as Record<string, string>
+    const dshPeers = Object.entries(peers).filter(([n]) => n.startsWith('@deepseek-ai/dsh-'))
+    expect(dshPeers.length).toBeGreaterThan(10)
+    for (const [name, range] of dshPeers) {
+      expect(range, `${name} 与 peer 范围不一致`).toBe('^0.1.5-rc.1')
+    }
   })
 })

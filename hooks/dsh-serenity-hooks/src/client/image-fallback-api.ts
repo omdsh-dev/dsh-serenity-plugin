@@ -77,10 +77,16 @@ export async function uploadImage(file: File, sessionId: string): Promise<string
 
 /**
  * 取 rail 图片的浏览器 File。
- * conversation.draftImages 是 root singleton 的公开方法（读 controller 的 draftAttachments Map，
+ *
+ * v1.31.6 适配 0.1.5-rc.1：`IConversation.draftImages(ids)` **已改名**
+ * `resolveDraftAttachments(ids)`（同语义同返回：ordered draft descriptors）。
+ * 这是**静默突破**——调用点用结构化断言隔离宿主（零宿主 import 策略），
+ * 类型检查看不见旧名消失，只会运行时 `=== undefined` → 静默返回 `[]`（兜底悄悄失效）。
+ *
+ * conversation 是 root singleton 的公开方法（读 controller 的 draftAttachments Map，
  * 与调用 ctx 的作用域无关）——直接 ctx.get('conversation')。
- * ⚠️ 必须作为方法调用（conversation.draftImages(ids)）：解构取出再调会丢失 this
- * （draftImages 内部读 this.draftAttachments → "Cannot read properties of undefined"）。
+ * ⚠️ 必须作为方法调用（conversation.resolveDraftAttachments(ids)）：解构取出再调会丢失 this
+ * （内部读 this 的 draft registry → "Cannot read properties of undefined"）。
  */
 export async function getDraftFiles(
   ctx: ClientContext,
@@ -88,10 +94,10 @@ export async function getDraftFiles(
   ids: readonly string[],
 ): Promise<File[]> {
   const conversation = (ctx as { get?: (name: string) => unknown }).get?.('conversation') as
-    | { draftImages?: (imageIds: readonly unknown[]) => readonly { file: File }[] | undefined }
+    | { resolveDraftAttachments?: (imageIds: readonly unknown[]) => readonly { file: File }[] | undefined }
     | undefined
-  if (conversation?.draftImages === undefined) return []
-  return (conversation.draftImages(ids) ?? []).map((a) => a.file)
+  if (conversation?.resolveDraftAttachments === undefined) return []
+  return (conversation.resolveDraftAttachments(ids) ?? []).map((a) => a.file)
 }
 
 /**

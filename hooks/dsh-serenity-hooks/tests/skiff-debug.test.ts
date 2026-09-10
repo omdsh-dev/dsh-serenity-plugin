@@ -119,10 +119,18 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
     writeFileSync(join(cccB, '.serenity'), 'test')
     mkdirSync(join(cccA, '.opencode'), { recursive: true })
     writeFileSync(join(cccA, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'] } } } }))
+    // v1.31.6 适配 0.1.5-rc.1：list() 返回 SessionPersistenceSnapshot[]（cwd 在 header 下），
+    // 不再是 0.1.2 的 SessionHeader[]（cwd 顶层）——形状由宿主决定，dsp 侧断言必须跟随。
     const fakeCtx = {
       get: (name: string) =>
         name === 'sessionPersistence'
-          ? { list: async () => [{ cwd: join(cccA, 'sub') }, { cwd: join(cccB, 'sub') }, { cwd: '' }, {}] }
+          ? { list: async () => [
+            { header: { cwd: join(cccA, 'sub') } },
+            { header: { cwd: join(cccB, 'sub') } },
+            { header: { cwd: '' } },
+            { header: {} },
+            {},
+          ] }
           : undefined,
       sessions: { list: () => [] },
     }
@@ -133,6 +141,20 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
     expect(cccs[1]!.root).toBe(cccB)
     rmSync(cccA, { recursive: true, force: true })
     rmSync(cccB, { recursive: true, force: true })
+  })
+
+  it('0.1.2 旧形状（顶层 cwd）不再被采用——硬切后只认 header.cwd', async () => {
+    // 反向用例：若断言误写回顶层 cwd，本用例会得到 2 而不是 1（显式锁死契约方向）
+    const cccA = mkdtempSync(join(tmpdir(), 'skiff-ccc-a-'))
+    writeFileSync(join(cccA, '.serenity'), 'test')
+    const fakeCtx = {
+      get: (name: string) =>
+        name === 'sessionPersistence' ? { list: async () => [{ cwd: cccA }] } : undefined,
+      sessions: { list: () => [] },
+    }
+    const cccs = await discoverCccs(fakeCtx as never, cccA)
+    expect(cccs).toHaveLength(1) // 仅默认 root 兜底；顶层 cwd 被忽略
+    rmSync(cccA, { recursive: true, force: true })
   })
 
   it('live 会话 cwd 去重发现 CCC + 默认 root 兜底（持久化缺失兜底路径）', async () => {

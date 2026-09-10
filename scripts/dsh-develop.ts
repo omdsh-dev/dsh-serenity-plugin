@@ -56,6 +56,35 @@ function readJson(p: string): Record<string, unknown> {
   return JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>
 }
 
+/**
+ * JSONC 解析（tsconfig.json 是 JSONC——带 `//` 行注释）。
+ * 只剥行注释，且**跳过字符串内部**（本仓库 tsconfig 的路径含 `//`? 不含，但注释剥离必须对字符串安全）。
+ */
+function parseJsonc(text: string): Record<string, unknown> {
+  let out = ''
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i] as string
+    if (inString) {
+      out += ch
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') { inString = true; out += ch; continue }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++
+      out += '\n'
+      continue
+    }
+    out += ch
+  }
+  // 容忍结尾多余逗号（JSONC 常见）
+  return JSON.parse(out.replace(/,(\s*[}\]])/g, '$1')) as Record<string, unknown>
+}
+
 function currentVersion(): { pkg: string; plugin: string; changelog: string | null } {
   const pkg = readJson(join(HOOKS_DIR, 'package.json'))
   const plugin = readJson(join(HOOKS_DIR, 'dsh.plugin.json'))
@@ -429,6 +458,210 @@ function cmdInspectDsh(pattern?: string): void {
   }
   console.log(`[dsh-develop] 匹配 ${pattern}:`)
   console.log(grep.stdout.slice(0, 4000))
+}
+
+/**
+ * host-fetch — 抓取指定版本的**宿主包**并解包到仓库内 `_tmp/host-<version>/`（**不动本机安装**）。
+ *
+ * 为什么存在（R↓，0.1.5-rc.1 适配轮）：宿主升级适配需要三样东西，全都要求**新版源码在场**：
+ *   ① 我们 peer 依赖的包的 `.d.ts`（类型面/契约核对——`host/contract.ts` 的服务与成员表要逐条对账）；
+ *   ② 宿主插件源码（如 `dsh-llm-pi-ai` 的 provider 请求构造，用于判断"特殊 header 能否在插件层注入"）；
+ *   ③ 新旧两版对比（移除/改名的 API）。
+ * 本机 `~/.npm-global/.../@deepseek-ai/dsh` 是**旧版安装**（用户要求先不升级），所以在这里把新版抓到
+ * 仓库内 `_tmp/`（gitignore）——解包后 `read`/`grep`/`glob` 可直接读，无需安装、无需改 tsconfig。
+ *
+ * 用法: dsh-develop host-fetch <version> [pkg...]
+ *   包集合 = hooks/package.json 的 peerDependencies（`@deepseek-ai/dsh-*`）+ client 半 ui 包 + 任务专用包
+ *   已是幂等：已解包的包跳过；单个包失败仅告警（不阻断其余）
+ */
+const HOST_FETCH_CLIENT_PACKAGES = [
+  '@deepseek-ai/dsh-client-ui-settings',
+  '@deepseek-ai/dsh-client-ui-renderer',
+  '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-client-ui-primitives',
+  '@deepseek-ai/dsh-client-ui-conversation',
+  '@deepseek-ai/dsh-client-locale',
+]
+
+/** 适配轮常需、但不在 peer 列表里的宿主包（核对用） */
+const HOST_FETCH_EXTRA_PACKAGES = [
+  '@deepseek-ai/dsh-llm-pi-ai',
+  '@deepseek-ai/dsh-llm-deepseek',
+  '@deepseek-ai/dsh-persona',
+  '@deepseek-ai/dsh-subagent',
+  '@deepseek-ai/dsh-subagent-spawn-in-process',
+  '@deepseek-ai/dsh-tool-subagent',
+  '@deepseek-ai/dsh-session-persistence-jsonl',
+  '@deepseek-ai/dsh-session-projection',
+  '@deepseek-ai/dsh-agent-presets',
+]
+
+function cmdHostFetch(version?: string, extra: string[] = []): void {
+  if (!version || !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
+    fail('host-fetch 需要版本号: dsh-develop host-fetch <x.y.z[-rc.n]> [pkg...]')
+  }
+  const pkg = readJson(join(HOOKS_DIR, 'package.json'))
+  const peers = Object.keys((pkg.peerDependencies ?? {}) as Record<string, string>)
+    .filter((n) => n.startsWith('@deepseek-ai/dsh-'))
+  const names = [...new Set([...peers, ...HOST_FETCH_CLIENT_PACKAGES, ...HOST_FETCH_EXTRA_PACKAGES, ...extra])]
+  const outRoot = join(REPO_ROOT, '_tmp', `host-${version}`)
+  mkdirSync(outRoot, { recursive: true })
+  const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
+  mkdirSync(cache, { recursive: true })
+  console.log(`[dsh-develop] host-fetch ${version} → ${outRoot}（${names.length} 个包）`)
+
+  const failed: string[] = []
+  let done = 0
+  let skipped = 0
+  for (const spec of names) {
+    // 支持 `pkg@version` 逐包钉版本（cordis / schemastery 这类非 dsh-* 的 peer 不跟宿主版本号走）
+    const at = spec.lastIndexOf('@')
+    const name = at > 0 ? spec.slice(0, at) : spec
+    const pkgVersion = at > 0 ? spec.slice(at + 1) : version
+    const dest = join(outRoot, name)
+    if (existsSync(join(dest, 'package.json'))) { skipped += 1; continue }
+    const packed = run('npm', ['pack', `${name}@${pkgVersion}`, '--pack-destination', outRoot,
+      '--registry', 'https://registry.npmjs.org/'], {
+      cwd: outRoot, quiet: true, env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+    })
+    if (packed.status !== 0) {
+      failed.push(spec)
+      continue
+    }
+    // npm pack 输出末行为 tarball 文件名
+    const tgz = packed.stdout.trim().split('\n').pop() ?? ''
+    const tgzPath = join(outRoot, tgz)
+    if (!tgz || !existsSync(tgzPath)) { failed.push(name); continue }
+    mkdirSync(dest, { recursive: true })
+    const x = run('tar', ['-xzf', tgzPath, '-C', dest, '--strip-components=1'], { cwd: outRoot, quiet: true })
+    rmSync(tgzPath, { force: true })
+    if (x.status !== 0) { failed.push(name); continue }
+    done += 1
+  }
+  console.log(`[dsh-develop] ✓ 解包 ${done} / 跳过（已存在）${skipped} / 失败 ${failed.length}`)
+  if (failed.length) console.log(`[dsh-develop]   失败包: ${failed.join(', ')}`)
+  console.log('[dsh-develop]   下一步：直接 read/grep/glob 读源码与 .d.ts（typecheck 基线仍指向本机安装，未改动）')
+}
+
+/**
+ * 把基准 tsconfig 里的宿主路径值改写到本次解包的宿主根下。
+ *
+ * 两类基准来源（R↓：dsp 的 client 半历史上混用了两种宿主类型来源）：
+ *  ① 本机安装：`…/node_modules/@deepseek-ai/dsh-tools[/子路径]`
+ *  ② 本机源码树：`.dsh/source/current/packages/client/ui-slots[/子路径]`
+ *     → 包名按官方约定还原为 `@deepseek-ai/dsh-client-ui-slots`
+ * 其余值（如 `node_modules/@types/react`）与宿主无关，**原样保留**——误映射会把 react 类型打断。
+ */
+function mapHostPathToTmp(value: string, hostPrefix: string): string {
+  // 基准值形如 `…/.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools`
+  // ——有**两个** `node_modules`，必须取最后一个（`indexOf` 会切出 `@deepseek-ai/dsh/node_modules/...`）。
+  const nm = value.lastIndexOf('/node_modules/@deepseek-ai/')
+  if (nm >= 0) return `${hostPrefix}/${value.slice(nm + '/node_modules/'.length)}`
+  const src = value.indexOf('.dsh/source/current/packages/')
+  if (src >= 0) {
+    const parts = value.slice(src + '.dsh/source/current/packages/'.length).split('/')
+    const pkg = `@deepseek-ai/dsh-${parts[0]}-${parts[1]}`
+    return `${hostPrefix}/${[pkg, ...parts.slice(2)].join('/')}`
+  }
+  return value
+}
+
+/** 生成派生 tsconfig 并跑 tsc；返回 { label, status, output, hostFiles } */
+function runHostTypecheckHalf(
+  tscBin: string,
+  version: string,
+  baseFile: string,
+  outFile: string,
+  hostPrefix: string,
+  label: string,
+  fileMarker: string,
+): { status: number; output: string; hostFiles: number } {
+  const baseDir = dirname(baseFile)
+  const base = parseJsonc(readFileSync(baseFile, 'utf-8'))
+  const basePaths = (base.compilerOptions as { paths?: Record<string, string[]> }).paths ?? {}
+  const paths: Record<string, string[]> = {}
+  const remapped = new Set<string>()
+  for (const [key, targets] of Object.entries(basePaths)) {
+    paths[key] = targets.map((t) => {
+      const mapped = mapHostPathToTmp(t, hostPrefix)
+      if (mapped !== t) remapped.add(key)
+      return mapped
+    })
+  }
+  const derived = { ...base, compilerOptions: { ...(base.compilerOptions as Record<string, unknown>), paths } }
+  writeFileSync(outFile, JSON.stringify(derived, null, 2) + '\n')
+  // 基线自证（R↓）：paths 若指向不存在的目录，tsc 会**静默回落** node_modules（=旧宿主/未安装），
+  // 于是"无类型错误"变成假阳性。存在性检查 + --listFiles 命中数把假阳性变成可读事实。
+  // 只校验**被改写的**条目——`react` 这类与宿主无关的值原样保留，从 client 目录看本就不该存在。
+  const missing = Object.entries(paths)
+    .filter(([key]) => remapped.has(key))
+    .filter(([, targets]) => !targets.some((t) => existsSync(resolve(baseDir, t))))
+    .map(([key]) => key)
+  if (missing.length) {
+    fail(`${label}: 派生 paths 指向缺失目录（${missing.length} 条）: ${missing.join(', ')}\n`
+      + `  说明 _tmp/host-${version}/ 解包不全 → 补跑: dsh-develop host-fetch ${version} <pkg...>`, 2)
+  }
+  console.log(`[dsh-develop] ${label}: 派生 ${basename(outFile)}，paths ${Object.keys(paths).length} 条全部命中`)
+  const args = ['-p', basename(outFile), '--noEmit']
+  const r = run(tscBin, args, { cwd: baseDir, quiet: true })
+  const listed = run(tscBin, [...args, '--listFiles'], { cwd: baseDir, quiet: true })
+  const hostFiles = listed.stdout.split('\n').filter((l) => l.includes(fileMarker)).length
+  if (hostFiles === 0) fail(`${label}: 解包宿主文件命中 0 —— 派生 paths 未生效，结论不可用`, 2)
+  console.log(`[dsh-develop]   ${label}: 实测载入解包宿主 ${hostFiles} 个文件`)
+  return { status: r.status, output: (r.stdout + r.stderr).trim(), hostFiles }
+}
+
+/**
+ * typecheck-host — 用**仓库内解包的宿主**（host-fetch 产物）对类型面做对账。
+ *
+ * 为什么存在（R↓，0.1.5-rc.1 适配轮）：正式 tsconfig 的 `paths` 硬编码指向**本机 DSH 安装**
+ * （用户要求回家后再升级 → 仍是旧版）。于是"新版宿主下哪里会红"在本地无法回答，只能人肉读 .d.ts。
+ * 本命令生成**一次性派生 tsconfig**（`tsconfig.host-<version>.local.json`，与基准同目录、gitignore）：
+ *   - 编译选项逐字继承基准（JSONC 解析后仅覆写 `paths`；两份不漂移）
+ *   - `paths` 指向 `_tmp/host-<version>/@deepseek-ai/*`（host-fetch 解包产物）
+ *   - 产物不进仓、不动本机安装、不改正式 tsconfig
+ *
+ * 用法: dsh-develop typecheck-host <version>
+ * 退出码: 0 两份全过 / 2 有类型错误（原文打印，即适配清单）
+ */
+function cmdTypecheckHost(version?: string): void {
+  if (!version || !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
+    fail('typecheck-host 需要宿主版本号: dsh-develop typecheck-host <x.y.z[-rc.n]>（先跑 host-fetch）')
+  }
+  const hostRoot = join(REPO_ROOT, '_tmp', `host-${version}`)
+  if (!existsSync(hostRoot)) {
+    fail(`未找到 ${hostRoot} —— 先跑: dsh-develop host-fetch ${version}`, 1)
+  }
+  const tscBin = join(REPO_ROOT, 'node_modules', '.bin', 'tsc')
+  const marker = `host-${version}/@deepseek-ai/`
+  const halves = [
+    {
+      label: 'node',
+      base: join(HOOKS_DIR, 'tsconfig.json'),
+      out: join(HOOKS_DIR, `tsconfig.host-${version}.local.json`),
+      prefix: `../../_tmp/host-${version}`,
+    },
+    {
+      label: 'client',
+      base: join(HOOKS_DIR, 'client', 'tsconfig.json'),
+      out: join(HOOKS_DIR, 'client', `tsconfig.host-${version}.local.json`),
+      prefix: `../../../_tmp/host-${version}`,
+    },
+  ]
+  console.log(`[dsh-develop] typecheck-host ${version}（解包宿主 → _tmp/host-${version}/）`)
+  const failures: string[] = []
+  for (const half of halves) {
+    if (!existsSync(half.base)) { failures.push(`${half.label}: 基准 tsconfig 缺失`); continue }
+    const r = runHostTypecheckHalf(tscBin, version, half.base, half.out, half.prefix, half.label, marker)
+    if (r.status !== 0) {
+      console.log(r.output)
+      failures.push(`${half.label}: tsc exit ${r.status}`)
+    } else {
+      console.log(`[dsh-develop] ✓ ${half.label} 半：新宿主 ${version} 下无类型错误`)
+    }
+  }
+  if (failures.length) fail(`typecheck-host 失败（${failures.join(' / ')}）——以上条目即适配清单`, 2)
+  console.log(`[dsh-develop] ✓ typecheck-host 通过（宿主 ${version}，node + client）`)
 }
 
 function cmdReadDsh(relPath?: string, start?: string, end?: string): void {
@@ -857,6 +1090,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     switch (sub) {
       case 'typecheck': cmdTypecheck(); break
+      case 'typecheck-host': cmdTypecheckHost(rest[0]); break
       case 'test': {
         const fi = rest.indexOf('--filter')
         const filter = fi >= 0 ? rest[fi + 1] : undefined
@@ -903,10 +1137,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
+      case 'host-fetch': cmdHostFetch(rest[0], rest.slice(1)); break
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern>')
+        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'

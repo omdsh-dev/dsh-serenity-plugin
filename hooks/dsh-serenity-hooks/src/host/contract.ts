@@ -45,7 +45,7 @@ export interface HostServiceContract {
   required: boolean
 }
 
-/** dsp 依赖的宿主服务与成员（对照 AI_LAB/dsh-harness-public @ 0.1.2-rc.1 逐一核对） */
+/** dsp 依赖的宿主服务与成员（对照 `_tmp/host-0.1.5-rc.1/`（`dsh-develop host-fetch` 产物）逐一核对） */
 export const HOST_SERVICES: readonly HostServiceContract[] = [
   {
     id: 'tools',
@@ -241,7 +241,13 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
 ] as const
 
 /** dsp 被验证过的宿主版本范围（与 package.json peerDependencies 同源，单一真相源） */
-export const REQUIRED_HOST_RANGE = '^0.1.2-rc.1'
+export const REQUIRED_HOST_RANGE = '^0.1.5-rc.1'
+
+/** 范围 floor：剥掉 caret/比较前缀（`^0.1.5-rc.1` → `0.1.5-rc.1`），供 {@link checkHostVersion} 使用 */
+const REQUIRED_HOST_FLOOR = REQUIRED_HOST_RANGE.replace(/^[\^~>=<\s]+/, '')
+
+/** 范围 ceiling：`^0.1.x` 的上界 = `<0.2.0`（显式常量，见 {@link checkHostVersion} 注释） */
+const REQUIRED_HOST_CEILING = '0.2.0'
 
 export interface HostContractIssue {
   id: string
@@ -282,13 +288,18 @@ export function compareSemver(a: string, b: string): number | null {
 }
 
 /**
- * 宿主版本是否落在 dsp 被验证的范围（`^0.1.2-rc.1`）。
+ * 宿主版本是否落在 dsp 被验证的范围（`REQUIRED_HOST_RANGE`）。
  * 无版本信息 → 视为未知（ok=false，detail 说明），不猜测。
+ *
+ * floor/ceiling **从 `REQUIRED_HOST_RANGE` 派生**（v1.31.6，0.1.5-rc.1 适配轮）：
+ * 此前 floor 是独立硬编码字面量——改 `REQUIRED_HOST_RANGE` 而忘改 floor 会造出
+ * "常量说 0.1.5、判定用 0.1.2" 的双真相源。ceiling 无法从 caret 语义机械派生（手写比较器
+ * 不实现 semver 的 caret 规则），故保留显式常量并在此声明其含义。
  */
 export function checkHostVersion(version: string | null): { ok: boolean; detail: string } {
   if (version === null) return { ok: false, detail: `host version unknown (required ${REQUIRED_HOST_RANGE})` }
-  const floor = compareSemver(version, '0.1.2-rc.1')
-  const ceiling = compareSemver(version, '0.2.0')
+  const floor = compareSemver(version, REQUIRED_HOST_FLOOR)
+  const ceiling = compareSemver(version, REQUIRED_HOST_CEILING)
   if (floor === null || ceiling === null) {
     return { ok: false, detail: `host version "${version}" not parseable (required ${REQUIRED_HOST_RANGE})` }
   }

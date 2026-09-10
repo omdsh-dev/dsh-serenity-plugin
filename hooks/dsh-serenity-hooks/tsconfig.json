@@ -37,6 +37,9 @@
       // dsh-client-ui-settings/client + ui-renderer/client（官方声明合并面）
       "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-conversation": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
+      // v1.31.6 适配 0.1.5-rc.1：session 作用域类型面（SessionStandardProps.sessionId / client Context.sessions）
+      // 从 ui-conversation 抽到新包 dsh-client-ui-session；dsp client 半经空类型 import 引入。
+      "@deepseek-ai/dsh-client-ui-session": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-session/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-slots": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-primitives": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-renderer": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/index.d.ts"],

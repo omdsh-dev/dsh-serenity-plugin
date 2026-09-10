@@ -16,6 +16,12 @@
 
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
+// v1.31.6 适配 0.1.5-rc.1：session 作用域类型面被抽成独立包。
+//  - `SessionStandardProps.sessionId`（session-scope slot props 的标准套件）：ui-conversation → ui-session
+//  - `Context.sessions`（client 面 ISessions）：ui-session 自己 import 了 api-session-controller/client
+// 故本行**一个空类型 import 同时修好两条**（缺它则 props.sessionId / ctx.sessions 在 client 半编译不过）。
+// 纯类型导入 → transform 期擦除，不触 client bundle purity 插件，PLATFORM_MODULES 无需改动。
+import type {} from '@deepseek-ai/dsh-client-ui-session'
 // v1.28.0 适配 0.1.2-rc.1（A1 补充）：官方 feature 插件经 ui-renderer/client 类型 import
 // 获得 Context.slots 等 client 面声明合并（原 dsh-client-runtime 包提供；rc.1 已删）。
 import type {} from '@deepseek-ai/dsh-client-ui-renderer'

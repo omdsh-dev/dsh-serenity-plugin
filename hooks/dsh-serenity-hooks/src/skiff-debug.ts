@@ -93,10 +93,14 @@ export async function discoverCccs(ctx: Context, defaultRoot: string): Promise<S
     /* workspace 服务不可用忽略 */
   }
   // ② sessionPersistence（持久化会话 headers——覆盖所有历史会话的工作目录）
+  // v1.31.6 适配 0.1.5-rc.1：`list()` 返回形状变了（**静默突破**——形状由本处断言自写，
+  // 宿主改名/改形在类型检查里看不见）：
+  //   0.1.2      → `Promise<SessionHeader[]>`             → `h.cwd`
+  //   0.1.5-rc.1 → `Promise<SessionPersistenceSnapshot[]>` → `h.header.cwd`
   if (roots.length === 0) {
     try {
-      const sp = hostService<{ list?: () => Promise<Array<{ cwd?: string }>> }>(ctx, 'sessionPersistence')
-      for (const h of (await sp?.list?.()) ?? []) pushRoot(h?.cwd)
+      const sp = hostService<{ list?: () => Promise<Array<{ header?: { cwd?: string } }>> }>(ctx, 'sessionPersistence')
+      for (const h of (await sp?.list?.()) ?? []) pushRoot(h?.header?.cwd)
     } catch {
       /* sessionPersistence 不可用忽略 */
     }
