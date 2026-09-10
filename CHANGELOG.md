@@ -1,3 +1,43 @@
+## v1.31.4 — 2026-09-09（修复：handyman foreground 在真实 cordis 下取不到 `ctx.subagents`）
+
+**Scope:** v1.31.3 真机首测缺陷——`handyman(mode="foreground", …)` 报
+`Error: cannot get property "subagents" without inject`。**background 不受影响**（走 `ctx.agents`）。
+
+### 根因（源码级定论，R↓）
+cordis 的 Context 是 Proxy：`ReflectService.handler.get` 对**未经 `inject` 声明**的服务名会沿
+fiber 链查找，找不到时**抛错**（`if (!fiber.runtime) throw error`），而**不是**返回 `undefined`。
+dsp 的 `hostInjected()` 此前先做**无保护的直接属性读** `ctx?.[name]`，异常直接逃逸——
+`hostService` 的 try/catch 被绕过，回落分支永不执行。
+
+`subagents` 是 **lazy** 服务（不在 `src/index.ts` 的 `inject` 列表——把它加进 inject 会让整个插件
+在宿主缺少该服务时无法装载，不可接受），其**正确读法是 `ctx.get`**（cordis docstring：
+*Read a service from the store without the inject requirement*），与 `host/contract.ts`
+的 `access:'lazy' → hostService` 一致。
+
+**关键佐证**：真机 `dashboard health` 的 host-contract **36 项全过、`issues:[]`**——该探针读
+`subagents` 走的正是 `ctx.get`，说明**宿主确实提供了该服务**。故这是 ACC 访问层缺陷，
+**不是** host↔ACC 集成缺口（外部诊断"宿主未注入"被其自身证据反驳）。
+
+**复现条件（拓扑）**：服务须由**兄弟 fiber** 提供（真机 = dsh-subagent 插件自己的 fiber）。
+若由祖先 fiber 提供，代理的 fiber 链查找会命中 `fiber.store` 直接返回——这正是误判"服务缺失"的成因。
+
+### 修复
+- `src/host/access.ts`：`hostInjected` 的直接属性读包 try/catch → 失败回落 `hostService`
+  （遵守本模块契约：服务不可用一律 `undefined`，**不抛错**——宿主对插件 apply 抛错 = 整个 dsh 启动失败）
+- `src/tools/handyman.ts`：foreground 服务缺失分支改为**可行动报错**（指引 `dashboard health`
+  的 host-contract 段与 `mode="background"` 仍可用）
+
+### 测试（76 files / 1120 → **77 files / 1133**）
+- 新 `tests/host/cordis-access.test.ts`（**真实 cordis**，11 用例）：按"离运行时最近"探测宿主实例
+  （profile-runtime `cordis@4.0.0-rc.7` + host-install `@deepseek-ai/cordis@4.0.2`），逐实例钉死
+  ① 兄弟拓扑下未声明 inject 的直接属性读**确实抛错**（回归成因，前提断言）
+  ② `hostSubagents` / `hostInjected` 回落 `ctx.get` 取到服务（修复结论）
+  ③ 服务注销 → `undefined` 且不抛 ④ 声明 inject 的路径照旧可用（injected 面未被削弱）
+  ⑤ `probeHostContract` 与访问面一致；末尾可用性自检（本机解析不到 cordis 即失败提醒补路径）
+- `tests/host/access.test.ts` +2：CI 可跑的"属性读抛错"代理替身回归（真实 cordis 用例在 CI 上 skip）
+- **教训**：宿主访问层**必须有真实 cordis 用例**——fake ctx 是普通对象，属性读只返回 undefined，
+  永远复现不了这类缺陷（v1.31.3 的 10 个 foreground 用例全绿，却挡不住真机报错）
+
 ## v1.31.3 — 2026-09-09（handyman 双模式：foreground 缺省 = 一次前台串行委派；background = 既有循环校验）
 
 **Scope:** 用户需求——「ACC subagent 工具支持按角色指定模型」，落地裁决链（R↓）：

@@ -16,6 +16,7 @@ import {
   hostAgents,
   hostWebServer,
   hostSettings,
+  hostSubagents,
   hostSessionCwds,
 } from '../../src/host/access.js'
 
@@ -51,6 +52,37 @@ describe('host/access: 通用读取', () => {
     const viaGet = { list: () => [] }
     const ctx = { agents: undefined, get: (n: string) => (n === 'agents' ? viaGet : undefined) }
     expect(hostInjected(ctx, 'agents')).toBe(viaGet)
+  })
+
+  /**
+   * v1.31.4 回归（S142）：cordis 的 Context 是 Proxy，对**未经 inject 声明**的服务名
+   * 直接属性读会**抛错**（`cannot get property "<name>" without inject`），不是返回
+   * undefined。此处用"属性读抛错"的替身钉死该契约——否则本模块的回落分支永不执行，
+   * 异常直接逃逸（v1.31.3 handyman foreground 真机报错即此）。
+   * 权威用例（真实 cordis 兄弟拓扑）见 tests/host/cordis-access.test.ts。
+   */
+  it('hostInjected：属性读抛错（cordis 未声明 inject 形态）→ 吞掉并回落 ctx.get', () => {
+    const viaGet = { start: () => undefined }
+    const cordisLike = new Proxy({ get: (n: string) => (n === 'subagents' ? viaGet : undefined) } as Record<string, unknown>, {
+      get(target, prop, receiver) {
+        if (prop === 'subagents') throw new Error('cannot get property "subagents" without inject')
+        return Reflect.get(target, prop, receiver)
+      },
+    })
+    expect(() => hostInjected(cordisLike, 'subagents')).not.toThrow()
+    expect(hostInjected(cordisLike, 'subagents')).toBe(viaGet)
+    expect(hostSubagents(cordisLike)).toBe(viaGet)
+  })
+
+  it('hostInjected：属性读抛错且 ctx.get 也不可用 → undefined（不抛）', () => {
+    const cordisLike = new Proxy({} as Record<string, unknown>, {
+      get(_t, prop) {
+        if (prop === 'get') return undefined
+        throw new Error(`cannot get property "${String(prop)}" without inject`)
+      },
+    })
+    expect(hostInjected(cordisLike, 'subagents')).toBeUndefined()
+    expect(hostSubagents(cordisLike)).toBeUndefined()
   })
 })
 

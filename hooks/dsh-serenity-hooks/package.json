@@ -1,6 +1,6 @@
 {
   "name": "@shgroup/dsh-serenity-hooks",
-  "version": "1.31.3",
+  "version": "1.31.4",
   "description": "宁静号 ACC harness（Native Cordis 插件）——给 DeepSeek Harness 装一个「AI 工作区」：11 个工具（container_fs/logbook/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/autopilot-trajectory/im-bridge）+ 机械约束（安全模式/工作区围墙/密钥守卫/对外输出守卫）+ 工作日志与原地重建 + 网页登录入口/微信桥/子角色/对外问答页/自主巡航。适配 DSH 0.1.2-rc.1。",
   "license": "MIT",
   "repository": {

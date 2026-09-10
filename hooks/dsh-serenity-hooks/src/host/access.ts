@@ -24,11 +24,33 @@ export function hostService<T = unknown>(ctx: unknown, name: string): T | undefi
   }
 }
 
-/** 直接属性读取（injected 服务：`ctx.<name>`），属性缺失时回落 `ctx.get` */
+/**
+ * 直接属性读取（injected 服务：`ctx.<name>`），属性缺失**或读取抛错**时回落 `ctx.get`。
+ *
+ * v1.31.4 修复（R↓，实证 v1.31.3 真机首测）：cordis 的 Context 是 Proxy，
+ * `ReflectService.handler.get`（`vendor/cordis/src/reflect.ts`）对**未经 `inject` 声明**
+ * 的服务名会沿 fiber 链查找，找不到时**抛错**而非返回 undefined：
+ *
+ *   cannot get property "<name>" without inject
+ *
+ * 于是"先直接属性读、失败回落 ctx.get"的写法在**真实 cordis** 下永远走不到回落分支——
+ * 异常直接逃逸（`hostService` 的 try/catch 被绕过）。v1.31.3 的 `hostSubagents`
+ * 正是这样炸的：`subagents` 是 lazy 服务（不在插件 `inject` 列表内）。
+ * 现有 fake ctx 单测（普通对象无 getter）复现不了 → 真 cordis 用例见
+ * `tests/host/cordis-access.test.ts`。
+ *
+ * 为什么吞掉异常而不是让它冒泡：本模块的契约是"服务缺失一律返回 undefined，**不抛错**"
+ * （宿主对插件 apply 抛错 = 整个 dsh 启动失败）。读取失败 = 服务不可用，等价于缺失。
+ */
 export function hostInjected<T = unknown>(ctx: unknown, name: string): T | undefined {
   const c = ctx as Record<string, unknown> | undefined
-  const direct = c?.[name]
-  if (direct !== undefined) return direct as T
+  try {
+    const direct = c?.[name]
+    if (direct !== undefined) return direct as T
+  } catch {
+    // cordis 代理对未声明 inject 的服务名抛错 → 回落 ctx.get（docstring：
+    // "Read a service from the store without the inject requirement"）
+  }
   return hostService<T>(ctx, name)
 }
 
@@ -97,6 +119,9 @@ export function hostWeb(ctx: unknown): HostWeb | undefined {
  *
  * 形状对照宿主 rc.1：`SubagentRuntime.start(name, request)` → `SubagentRun`
  * （`result` / `dispose` / `id`）。本模块只做形状收口；语义与错误处理归调用方。
+ *
+ * 注（v1.31.4）：本服务**不在** dsp 的 `inject` 列表内，因此走 `hostInjected` 的
+ * 回落分支（`ctx.get`）——见 `hostInjected` 的 v1.31.4 说明与真实 cordis 用例。
  */
 export interface HostSubagents {
   start?: (name: string, request: unknown) => Promise<unknown>

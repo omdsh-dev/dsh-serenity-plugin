@@ -168,8 +168,9 @@ async function runForegroundJob(
   const subagents = hostSubagents(ctx)
   if (!subagents?.start) {
     throw new Error(
-      'handyman foreground: host subagents service unavailable (ctx.subagents.start missing) — '
-      + 'use mode="background" (does not need this service) or check the host-contract report',
+      'handyman foreground: host subagents service unavailable — neither ctx.subagents nor '
+      + 'ctx.get("subagents") yielded a start() function. Check `dashboard health` (host-contract '
+      + 'section, service "subagents"); mode="background" does not need this service and still works.',
     )
   }
   if (!parent) throw new Error('handyman foreground: requires a calling agent (exec.agent was undefined)')

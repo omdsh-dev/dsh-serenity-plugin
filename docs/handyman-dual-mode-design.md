@@ -125,6 +125,7 @@ foreground 是"一次调用一次结果"，不产生 `AGENT_SESSIONS/handyman-<l
 | 低成本模型遵循度低 | foreground 只做"一次委派"，不依赖模型自评完成（这正是 background 循环校验存在的原因）；失败以 errored 结果暴露 |
 | 子 agent 与原生 `subagent` 职责重叠 | 文档明确：原生 `subagent` = 继承父模型；`handyman` = CCC 配置的模型（低成本池） |
 | `subagents` 服务在旧宿主缺失 | hostContract 标记为 lazy/非必需 + 调用时响亮报错 |
+| **读取 lazy 服务的姿势**（v1.31.4 实证补入） | 直接属性读 `ctx.subagents` 在真实 cordis 下**抛错**（未声明 `inject` 的服务名走 fiber 链查找，找不到即 throw）→ 必须走 `ctx.get`（见 §9） |
 
 ---
 
@@ -145,3 +146,25 @@ foreground 是"一次调用一次结果"，不产生 `AGENT_SESSIONS/handyman-<l
 - `…/dsh-subagent-spawn-in-process/lib/index.js`：`capabilities = { agentOptions: true, toolFilter: true, … }`
 - `…/dsh-tool-subagent/lib/index.js`：前台 run 的 settle/dispose 范式（本方案同构）
 - 本仓先例：`src/tools/handyman.ts`（background 实现）、`src/handyman-preset-inherit.ts`（递归防护）
+
+---
+
+## 9. v1.31.4 修复记录（foreground 真机缺陷，R↓）
+
+**现象**：`handyman(mode="foreground", …)` → `cannot get property "subagents" without inject`（background 不受影响）。
+
+**根因**：cordis 的 Context 是 Proxy——`ReflectService.handler.get` 对**未经 `inject` 声明**的服务名
+沿 fiber 链查找，找不到时**抛错**而非返回 `undefined`。`hostInjected` 此前先做**无保护的直接属性读**，
+异常逃逸并绕过 `hostService` 的 try/catch，回落分支永不执行。`subagents` 属 lazy 服务（不入插件
+`inject` 列表——入列会让整个插件在宿主缺该服务时无法装载），正确读法是 `ctx.get`
+（cordis docstring：*Read a service from the store without the inject requirement*）。
+
+**反证"宿主未注入"**：真机 `dashboard health` 的 host-contract 36 项全过、`issues:[]`——该探针读
+`subagents` 走的正是 `ctx.get`，故宿主**确实提供**该服务。这是 ACC 访问层缺陷，非 host↔ACC 集成缺口。
+
+**复现拓扑**：服务须由**兄弟 fiber** 提供（真机 = dsh-subagent 插件自己的 fiber）；若由祖先 fiber 提供，
+代理的链查找会命中 `fiber.store` 直接返回——这正是误判"服务缺失"的成因。
+
+**修复**：`hostInjected` 直接属性读包 try/catch → 回落 `hostService`（遵守"服务不可用一律 undefined、
+不抛错"契约）+ foreground 缺失分支改可行动报错。**测试**：`tests/host/cordis-access.test.ts`
+（真实 cordis，两实例 × 兄弟拓扑；含"直接属性读确实抛错"的前提断言）+ CI 可跑的抛错代理回归。
