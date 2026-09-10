@@ -38,13 +38,14 @@
 # （`Property 'webServer' does not exist on type 'Context'`）。要真正在 CI 上跑通 typecheck，
 # 需要把宿主类型基准改成**仓库内可解析**（单 cordis 实例 + 把 client 半的 ui-slots/ui-primitives
 # 也纳入依赖）——那是一次独立改造，见 SESSION.md §8「CI 全红」条目。
-# 因此：**测试与 typecheck 全部设为信息性（`continue-on-error`）**，run 恒为 success。
+# 因此：**装配 + 测试 + typecheck 每一步都设为信息性（`continue-on-error`）**，run 恒为 success
+#       （装配步也要——实测 #31 那类失败就发生在 Install 阶段，只兜 Test 覆盖不到）。
 #       —— v1.31.11 追加裁决（用户 2026-09-11）："这个 CI 我不在乎，但失败了老给我发邮件了"。
 #       GitHub 只对 conclusion=failure 的 run 发邮件；本仓 CI 的**真实消费者是 agent**
 #       （历次排障都走 `GET …/check-runs/<id>/annotations`，免认证、不依赖邮件），
 #       故让 run 永不因测试红而失败：**邮件噪音归零，失败原文仍可取证**。
 #       **真实门在本地发布链**——`dsh-develop publish` 在 npm publish 前先跑 test + typecheck 双面 + build。
-#       要恢复阻塞：删掉 Test 步的 `continue-on-error: true`（digest 步的 `if:` 两种形态兼容）。
+#       要恢复阻塞：删掉各步的 `continue-on-error: true`（digest 步的 `if:` 两种形态都兼容）。
 #
 # 本地等价命令：
 #   msm("dsh-develop", ["test"])        # vitest（根配置覆盖 tests/ + hooks/**/tests/ + scripts/）
@@ -92,10 +93,15 @@ jobs:
       #      → hooks 安装 exit 2。CI 只需要**测试**，不需要构建产物。
       # 两者都由 `--ignore-scripts` 一并解决；构建/类型门仍在本地发布链
       # （`dsh-develop publish` = test + typecheck 双面 + build + pack-check）。
+      # ⚠️ v1.31.11：两个 Install 步也加 `continue-on-error`——**必须在 Test 之前**就兜住：
+      # 实测 #31 那类失败（hooks 锁文件漂移）就发生在 Install 阶段，只给 Test 加守卫覆盖不到它，
+      # 照样会发失败邮件。装配失败时 Test 仍会跑并以同样方式降级（deps 缺失 → 测试红 → 注解）。
       - name: Install (repo root)
+        continue-on-error: true
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Install (hooks)
+        continue-on-error: true
         working-directory: hooks/dsh-serenity-hooks
         run: pnpm install --frozen-lockfile --ignore-scripts
 
