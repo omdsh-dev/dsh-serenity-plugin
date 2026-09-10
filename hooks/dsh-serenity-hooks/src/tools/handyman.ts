@@ -151,6 +151,9 @@ function subagentOutputText(output: unknown): string {
  *  - 模型经 `agentOptions` 注入（spawn 后端能力位 `agentOptions: true`），因此**不依赖**
  *    宿主未放开的 `subagent-model-selection` 设置；
  *  - 不循环、不写进度文件、不做完成码校验——"一次调用一次结果"。
+ *
+ * 前置条件：`opts.parent` 必须是发起 agent（由调用方 `execute` 在解析 CCC 之前校验；
+ * 本函数不再重复检查——单一真相源）。
  */
 async function runForegroundJob(
   ctx: Context,
@@ -173,7 +176,6 @@ async function runForegroundJob(
       + 'section, service "subagents"); mode="background" does not need this service and still works.',
     )
   }
-  if (!parent) throw new Error('handyman foreground: requires a calling agent (exec.agent was undefined)')
   const { provider, model: modelName } = splitModel(model)
   const run = (await subagents.start('spawn', {
     ...(label === undefined ? {} : { label }),
@@ -381,6 +383,15 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
       if (args.guide) {
         return { guide: HANDYMAN_GUIDE }
       }
+      // v1.31.4：前台委派的「发起方」是**调用形态**前提，先于 CCC 解析检查。
+      // 为什么顺序重要（R↓，CI 实证）：`agentCwd()` 在无 `exec.agent` 时回落
+      // `process.cwd()`，而该 cwd 未必落在任何 CCC 内（CI runner 的 cwd = 仓库根，
+      // 祖先链无 `.serenity`）→ 原顺序先抛 `No CCC found`，把真正的错误原因盖掉，
+      // 也让用例依赖"运行目录恰好在某个 CCC 里"。
+      if ((args.mode ?? 'foreground') === 'foreground' && !exec.agent) {
+        throw new Error('handyman foreground: requires a calling agent (exec.agent was undefined)')
+      }
+
       const root = findSerenityRoot(agentCwd(exec))
       if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
 

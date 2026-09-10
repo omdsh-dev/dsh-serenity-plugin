@@ -1,3 +1,36 @@
+## v1.31.5 — 2026-09-10（CI 转绿：失败原文可读 + 两处机器耦合用例修复 + handyman 错误优先级）
+
+**Scope:** 用户报告「github ci 报错了」。CI 自 v1.31.2（run #22）起连续三轮红，而**失败原文读不到**：
+job log 需 admin 权限（匿名 403），check-run annotations 只有一句
+`Process completed with exit code 1`。本轮先修**可观测性**，再修**两个机器耦合缺陷**。
+
+### ① 可观测性：CI 失败原文进注解（免 admin 即可读）
+- `.github/workflows/ci.yml`：Test 步骤改为 `set -o pipefail; pnpm test 2>&1 | tee "$RUNNER_TEMP/vitest.log"`
+  —— **`pipefail` 是阻塞门的前提**（否则管道退出码取自 `tee`，vitest 红而 step 绿，门禁静默失效）
+- 新增 `Test failure digest (annotations)` 步骤（`if: failure()`）：把 vitest 的 `Failed Tests` 段与末尾
+  汇总转成 `::error` 注解（换行转义 `%0A`）→ 排查者无需仓库权限即可看到**失败用例名 + 断言差异**
+- 实证价值：本版本的两个缺陷正是**首次运行该步骤即定位**（此前三轮只能看到 "exit code 1"）
+
+### ② `handyman` foreground 错误优先级（生产代码）
+- `src/tools/handyman.ts`：把「前台委派必须有发起方」的校验**前移到 CCC 解析之前**
+  （`runForegroundJob` 内的重复校验删除——单一真相源，前置条件写进其 JSDoc）
+- **为什么**（R↓，CI 实证）：`agentCwd()` 在无 `exec.agent` 时回落 `process.cwd()`，而该 cwd 未必在
+  任何 CCC 内（CI runner 的 cwd = 仓库根，祖先链无 `.serenity`）→ 原顺序先抛 `No CCC found`，
+  **把真正的错误原因盖掉**；调用形态错误优先于环境错误是更准确的语义
+- 附带收益：该用例不再依赖"运行目录恰好在某个 CCC 里"（原用例在本机靠 CCC 祖先目录**偶然通过**）
+
+### ③ 两处机器耦合用例（可移植性）
+- `tests/ops.test.ts`：MSM `exec` 直跑 `.ts` 需要 TS 运行时；无 bun 时 ACC 回落 `npx tsx`，而脚本位于
+  `mkdtemp` 临时 CCC 目录 → npx 只能**联网拉取 tsx** → CI 偶发 exit 1
+  （实证：run #22 `ops.test.ts:166 expected 1 to be +0`，同代码 run #25 通过）。
+  改为 `HAS_BUN` 守卫（只在 bun 在场时断言执行；注册表扫描断言恒执行），
+  对齐 `scripts/dsh-develop.test.ts` 的既有先例
+- `tests/host/cordis-access.test.ts`（v1.31.4）：真实 cordis 用例在 CI runner（无 DSH 宿主）整体 skip，
+  末尾保留"本机必须能解析到 cordis"的失败提醒
+
+### 测试（77 files / 1133 tests，本地全绿；CI 侧 1122 passed + 11 skipped + 0 failed）
+- 无新增用例（本轮修的是 CI 与用例可移植性）；`handyman-foreground.test.ts` 10 用例语义不变且**环境无关**
+
 ## v1.31.4 — 2026-09-09（修复：handyman foreground 在真实 cordis 下取不到 `ctx.subagents`）
 
 **Scope:** v1.31.3 真机首测缺陷——`handyman(mode="foreground", …)` 报

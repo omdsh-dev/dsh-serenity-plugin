@@ -9,6 +9,23 @@ import { runMsm, findEntry } from '../src/msm-ops.js'
 
 let dir: string
 
+/**
+ * MSM `exec` 直跑 `.ts` 脚本需要 **TS 运行时**：有 bun 则直跑；无 bun 时 ACC 回落到
+ * `npx tsx`——而该脚本位于**临时 CCC 目录**（`mkdtemp`），那里没有本地 tsx，npx 只能
+ * **联网拉取**。CI runner 无 bun 且网络/registry 抖动 → 偶发 exit 1（实证：CI run #22
+ * `ops.test.ts:166 expected 1 to be +0`，同代码在 run #25 通过）。
+ * 故本用例只断言"注册表扫描"（与运行时无关），执行断言仅在 bun 在场时进行——
+ * 机器耦合是可移植性缺陷，参照 `scripts/dsh-develop.test.ts` 的 hasBun 先例。
+ */
+const HAS_BUN = ((): boolean => {
+  try {
+    execFileSync('bun', ['--version'], { stdio: 'pipe' })
+    return true
+  } catch {
+    return false
+  }
+})()
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'hooks-ops-'))
   // 需求⑤a：注册表单级化——cccName = t → 聚合档 .opencode/skills/t/references/mech-registry.json
@@ -162,6 +179,8 @@ describe('msm-ops', () => {
       JSON.stringify({ version: 1, entries: [{ name: 'hello', path: '.opencode/skills/t/scripts/hello.ts', skill: 't', category: 'mech' }] }),
     )
     expect(findEntry(dir, 'hello')).not.toBeNull()
+    // 执行断言仅在 TS 运行时在场时进行（无 bun → npx 需联网，机器耦合；见 HAS_BUN 说明）
+    if (!HAS_BUN) return
     const r = runMsm(dir, { action: 'exec', name: 'hello', args: [] }) as { exit: number; stdout: string }
     expect(r.exit).toBe(0)
     expect(r.stdout).toContain('hi')
