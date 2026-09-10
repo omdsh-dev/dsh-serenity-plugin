@@ -68,7 +68,7 @@
     "@deepseek-ai/dsh-web": "^0.1.5-rc.1",
     "@deepseek-ai/dsh-web-fetch-http": "^0.1.5-rc.1",
     "@deepseek-ai/schemastery": "^3.18.2",
-    "cordis": "^4.0.2",
+    "cordis": "^4.0.0-rc.7",
     "@deepseek-ai/cordis": "^4.0.2"
   },
   "peerDependenciesMeta": {

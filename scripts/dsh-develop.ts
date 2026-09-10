@@ -1109,6 +1109,45 @@ function cmdNpmInstallDev(pkgs: string[]): void {
   console.log(`[dsh-develop] ✓ 已安装 devDeps: ${pkgs.join(', ')}（hooks/package.json）`)
 }
 
+/**
+ * lockfile — 重生成 hooks 的 pnpm 锁文件，并**用 CI 的同一把尺子当场自检**（v1.31.10）。
+ *
+ * 为什么存在（SESSION §17 实锤）：CI 的 `Install (hooks)` 走
+ * `pnpm install --frozen-lockfile --ignore-scripts`（ci.yml:96）。只要
+ * `hooks/dsh-serenity-hooks/package.json` 的依赖变了而锁文件没重跑，pnpm 判定
+ * "锁文件与 package.json 不一致" → **拒绝安装** → `Test` 整步 skipped → **vitest 从未执行**
+ * （阻塞门静默失效，注解只留 `no vitest log captured`）。
+ * 触发实例：v1.31.6 把 18 项 peerDependencies 从 `^0.1.2-rc.1` 抬到 `^0.1.5-rc.1`
+ * （锁文件自 v1.30.16 的 6751fd0 后再没重生成）→ 自 `2c59e23` 起每次 push 的 CI 皆红。
+ *
+ * 语义（两步，第二步是关键）：
+ *   ① `pnpm install --lockfile-only` —— 只重算锁文件，**不动 node_modules**
+ *   ② 复跑 `--frozen-lockfile --lockfile-only` —— CI 该步的**本地等价判定**：
+ *      exit 0 = "CI 的 Install (hooks) 必过"；exit ≠0 = 仍然漂移（原文打印）
+ *
+ * 纪律：改完 package.json 依赖后**必须**跑本命令并提交锁文件（ci.yml 文件头同款要求）。
+ * 用法：dsh-develop lockfile
+ */
+function cmdLockfile(): void {
+  // store-dir 与既有 node_modules 链接保持一致（同 npm-install-dev 的理由：
+  // 全局 store 与 hooks/.pnpm-store 冲突会 ERR_PNPM_UNEXPECTED_STORE）
+  const storeDir = join(HOOKS_DIR, '.pnpm-store')
+  console.log('[dsh-develop] ① pnpm install --lockfile-only（hooks，不动 node_modules）')
+  const r = run('pnpm', ['install', '--lockfile-only', '--store-dir', storeDir], { cwd: HOOKS_DIR, quiet: true })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`pnpm install --lockfile-only 失败 (exit ${r.status})`, 2)
+  }
+  console.log((r.stdout + r.stderr).trim() || '(no output)')
+  console.log('[dsh-develop] ② 自检：--frozen-lockfile --lockfile-only（= CI Install (hooks) 同款判定）')
+  const check = run('pnpm', ['install', '--lockfile-only', '--frozen-lockfile', '--store-dir', storeDir], { cwd: HOOKS_DIR, quiet: true })
+  if (check.status !== 0) {
+    console.error(check.stdout + check.stderr)
+    fail(`锁文件仍与 package.json 不一致 —— CI 的 Install (hooks) 必红 (exit ${check.status})`, 3)
+  }
+  console.log('[dsh-develop] ✓ 锁文件已与 package.json 一致（CI 的 Install (hooks) 这一步必过）')
+}
+
 // ── main 守卫 ──
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -1159,6 +1198,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'deploy': cmdDeploy(); break
       case 'npm-install': cmdNpmInstall(rest[0] ?? 'web', rest[1], rest[2]); break
       case 'npm-install-dev': cmdNpmInstallDev(rest); break
+      case 'lockfile': cmdLockfile(); break
       case 'restart-web': cmdRestartWeb(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
@@ -1186,7 +1226,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case '-h':
       case undefined:
         console.log(`dsh-develop — dsh-serenity-plugin 开发操作 MSM（safe-mode 白名单通道）
-用法: dsh-develop <typecheck|test|coverage|build|status|commit|push|version|bump|deploy|npm-install|restart-web|pack-check|readme-sync|publish|github-push|squash-history> [args]
+用法: dsh-develop <typecheck|test|coverage|build|status|commit|push|version|bump|deploy|npm-install|lockfile|restart-web|pack-check|readme-sync|publish|github-push|squash-history> [args]
   typecheck             tsc --noEmit
   test [--filter <p>]   vitest run
   coverage              vitest run --coverage（阈值门禁见 vitest.config.ts）
@@ -1199,6 +1239,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   deploy                load-plugin.sh 全流程（构建+双锚+shim+profile+预检）
   npm-install [profile] [version] 官方 npm 安装：缺省/latest=registry 最新；可指定精确版本
   npm-install-dev <pkg...> hooks 开发依赖安装（npm install --save-dev；client bundle 内联）
+  lockfile              重生成 hooks pnpm-lock.yaml + 用 --frozen-lockfile 自检（CI 同款判定）
   restart-web           kill + setsid 重启 dsh web（健康检查）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   pack-check            npm pack --dry-run 核对 tarball 完整性（chunk/双 bundle/类型）

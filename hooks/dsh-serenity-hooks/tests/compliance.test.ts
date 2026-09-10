@@ -101,11 +101,20 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     expect(peers['@deepseek-ai/schemastery']).toBe('^3.18.2')
   })
 
-  it('F6b: peerDependencies 的 cordis 双映射版本一致（0.1.5-rc.1 起脱 rc → ^4.0.2）', () => {
-    // 双实例（`cordis` + `@deepseek-ai/cordis`）必须同版本范围——宿主 Context 声明合并靠它
+  it('F6b: peerDependencies 的 cordis 双映射各自**可解析**（v1.31.10 修正：上游 cordis 无 4.0.2）', () => {
+    // 双实例（`cordis` + `@deepseek-ai/cordis`）都必须能被 npm 解析——否则 hooks 安装直接失败，
+    // 而失败点在 vitest 之前 → 测试整步 skipped、阻塞门静默失效（CI run #31 实证，SESSION §17）。
+    // v1.31.6 曾把两者都写成 `^4.0.2`，但那对**上游 bare `cordis`** 不可满足：
+    //   · 上游 cordis 最高只到 4.0.0-rc.10（实测 registry.npmjs.org/cordis/4.0.2 → 404）
+    //   · 宿主 profile 实际提供的 bare `cordis` 是 dsh 注入的私有 shim，版本 4.0.0-rc.7
+    //   · 43 个 DSH 0.1.5-rc.1 宿主包 peer 的都是 `@deepseek-ai/cordis`，**没有**任何宿主包 peer bare cordis
+    // 故两者本就不必同串：`@deepseek-ai/cordis` 跟宿主保持一致（^4.0.2）；bare `cordis` 用
+    // 既可解析、又覆盖运行时 shim 的 rc 线（^4.0.0-rc.7）。Context 声明合并由 tsconfig 的
+    // 双映射（两条 paths 指向同一个 @deepseek-ai/cordis 实体）保证，真实实例用例见
+    // tests/host/cordis-access.test.ts。
     const peers = pkg.peerDependencies as Record<string, string>
-    expect(peers['cordis']).toBe('^4.0.2')
     expect(peers['@deepseek-ai/cordis']).toBe('^4.0.2')
+    expect(peers['cordis']).toMatch(/^\^4\.0\.0-rc\.\d+$/)
   })
 
   it('F6c: peerDependencies 的 dsh-* 全部同一版本范围（硬切后不得混版）', () => {
