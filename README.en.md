@@ -323,7 +323,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 
 ```bash
 pnpm typecheck          # type check (node + browser halves)
-pnpm test               # full suite (currently 78 files / 1169 tests)
+pnpm test               # full suite (currently 80 files / 1176 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
@@ -388,4 +388,4 @@ Yes — through the same `weixin.hook` script configured in the workspace, with 
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.31.7 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 78 files / 1169 tests
+> **Version**: v1.31.9 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 80 files / 1176 tests

@@ -317,7 +317,7 @@ AI 一次能"记住"的内容有上限。满了不用你手动开新会话：
 
 ```bash
 pnpm typecheck          # 类型检查（node + 浏览器端两套）
-pnpm test               # 全量测试（当前 78 个文件 / 1169 个用例）
+pnpm test               # 全量测试（当前 80 个文件 / 1176 个用例）
 pnpm build              # 打包（lib/index.js + client.js）
 ```
 
@@ -381,4 +381,4 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/LICENSE)）
 
-> **版本**：v1.31.7 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：78 个文件 / 1169 个用例
+> **版本**：v1.31.9 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1176 个用例
