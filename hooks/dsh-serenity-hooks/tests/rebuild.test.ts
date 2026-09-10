@@ -378,10 +378,10 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const data = call.data as { content: Array<{ text: string }>; source?: { kind: string } }
     expect(data.content[0]!.text).toContain('Continue the work of S142')
     expect(data.source).toEqual({ kind: 'user' }) // UserMessage 契约必填
-    const op = (call.opts as { surfaceOp: { op: string; start: number; end: number } }).surfaceOp
+    const op = (call.opts as { surfaceOp: { op: string; startSeq: number; endSeq: number } }).surfaceOp
     expect(op.op).toBe('replace')
-    expect(op.start).toBe(10)
-    expect(op.end).toBe(13)
+    expect(op.startSeq).toBe(10)
+    expect(op.endSeq).toBe(13)
     const sourceEventSeqs = (call.opts as { sourceEventSeqs: number[] }).sourceEventSeqs
     expect(sourceEventSeqs).toEqual([10, 11, 12, 13])
   })
@@ -412,7 +412,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     // 紧随其后的 replace（锚点消息）
     const replace = session._calls[1]!
     expect(replace.type).toBe('user/message')
-    expect((replace.opts as { surfaceOp: { op: string; start: number; end: number } }).surfaceOp).toEqual({ op: 'replace', start: 10, end: 11 })
+    expect((replace.opts as { surfaceOp: { op: string; startSeq: number; endSeq: number } }).surfaceOp).toEqual({ op: 'replace', startSeq: 10, endSeq: 11 })
   })
 
   it('performRebuild：surface 为空 → false（无历史可清）', () => {

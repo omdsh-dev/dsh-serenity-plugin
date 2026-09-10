@@ -30,6 +30,21 @@
       "@deepseek-ai/dsh-session-title": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-title"],
       "@deepseek-ai/dsh-system-prompt": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-system-prompt"],
       "@deepseek-ai/dsh-agent-loop": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-loop"],
+      // v1.31.8：宿主**类型契约**（src/host/type-contract.ts）用真实宿主类型反证 dsp 的形状假设，
+      // 需要下列包的类型面进入 program（这些包不在 peerDeps 的必要面里，但装在宿主 node_modules 下）。
+      // 新增条目须保持同形（…/@deepseek-ai/dsh/node_modules/@deepseek-ai/<pkg>），
+      // 以便 `dsh-develop typecheck-host <ver>` 的路径改写规则能把它们指向 _tmp 解包宿主。
+      "@deepseek-ai/dsh-session-persistence": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence"],
+      "@deepseek-ai/dsh-session-projection": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-projection"],
+      // 子路径 `@deepseek-ai/dsh-session-projection/types` 是**多个宿主包共同声明增强**的模块 id
+      // （token-meter/subagent/session-title/agent 等 10+ 包往 SessionProjectionMap 里塞自己的键）。
+      // 本机安装靠 package.json exports map 解析；`typecheck-host <ver>` 的解包宿主无 node_modules，
+      // 必须显式映射到同一文件，否则增强不合并 → `contextPressure` 等键在推导基线里"消失"（假红）。
+      "@deepseek-ai/dsh-session-projection/types": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-projection/lib/types/types.d.ts"],
+      "@deepseek-ai/dsh-token-meter": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-token-meter"],
+      "@deepseek-ai/dsh-workspace": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-workspace"],
+      "@deepseek-ai/dsh-subagent": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-subagent"],
+      "@deepseek-ai/dsh-client-connection": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection"],
       // v1.30.12：web_fetch provider 接管（注册进 ctx.web + 复用 HttpFetchProvider）
       "@deepseek-ai/dsh-web": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web"],
       "@deepseek-ai/dsh-web-fetch-http": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-fetch-http"],

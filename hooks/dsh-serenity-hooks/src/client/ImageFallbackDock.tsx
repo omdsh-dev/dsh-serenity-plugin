@@ -15,6 +15,7 @@
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
+import type { DraftAttachmentId } from '@deepseek-ai/dsh-client-ui-conversation'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useRef } from 'react'
 import { imageNoteTemplate, isImageFallbackTrigger } from './image-fallback-api.js'
@@ -39,15 +40,28 @@ interface SessionLike {
   promptError?: { error?: PromptErrorLike } | null
 }
 
-/** 输入快照（InputZone.input）读取面 */
+/**
+ * 输入快照（InputZone.input）读取面。
+ *
+ * ⚠️ v1.31.8（S142 全量 review 修正，DRIFT-1）：宿主 `InputState` 的字段名是
+ * **`attachmentIds`**（`DraftAttachmentId[]`），不是 `imageIds`——0.1.5-rc.1 全仓 `imageIds`
+ * 零匹配。旧代码读 `input.imageIds` 恒空 → `:74` 早退 → **整条图片落盘兜底链从不触发**
+ * （静默失效，无报错）。重命名扫描由 `src/client/host-type-contract.ts` 机械看守。
+ */
 interface InputLike {
   draft?: string
-  imageIds?: readonly string[]
+  attachmentIds?: readonly DraftAttachmentId[]
 }
 
-/** session-scope 标准 provide channel 的 inputActions（ui-conversation sessions.provide：setDraft/removeImage/submit） */
+/**
+ * session-scope 标准 provide channel 的 inputActions（ui-conversation sessions.provide：
+ * setDraft/removeAttachment/submit）。
+ *
+ * ⚠️ v1.31.8（S142 全量 review 修正，DRIFT-2）：宿主 `InputActions` 的方法是
+ * **`removeAttachment`**，不是 `removeImage`。DRIFT-1 未修时本分支不可达；两条同一批修。
+ */
 interface InputActionsLike {
-  removeImage: (id: string) => void
+  removeAttachment: (id: DraftAttachmentId) => void
   setDraft: (text: string) => void
   submit: () => void
 }
@@ -65,17 +79,17 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): null {
   const handlingRef = useRef(false)
 
   const promptError = session?.promptError?.error
-  const imageIds = input?.imageIds ?? []
+  const attachmentIds = input?.attachmentIds ?? []
 
   useEffect(() => {
     // v1.30.5：触发判定 = isImageFallbackTrigger（兼容 attachment-error 旧码 +
     // rc.1 的 session/attachment-invalid / subagent/attachment-invalid——DSH 0.1.2 错误码契约漂移）
     if (handlingRef.current || !isImageFallbackTrigger(promptError?.code, promptError?.details?.reason)) return
-    if (imageIds.length === 0) return
+    if (attachmentIds.length === 0) return
     handlingRef.current = true
     void (async () => {
       try {
-        const files = await getDraftFiles(String(sessionId), imageIds)
+        const files = await getDraftFiles(String(sessionId), attachmentIds)
         if (files.length === 0) throw new Error('no draft image files')
         const saved: string[] = []
         for (const file of files) {
@@ -85,9 +99,9 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): null {
         const note = imageNoteTemplate(saved)
         const draft = input?.draft ?? ''
         const text = draft === '' ? note : `${draft}\n${note}`
-        if (inputActions?.removeImage !== undefined && inputActions.setDraft !== undefined && inputActions.submit !== undefined) {
+        if (inputActions?.removeAttachment !== undefined && inputActions.setDraft !== undefined && inputActions.submit !== undefined) {
           // 官方输入机器路径：清 rail 图片 → draft 更新为原文+提示 → 机器发送（draft 自动清空，无残留）
-          for (const id of imageIds) inputActions.removeImage(String(id))
+          for (const id of attachmentIds) inputActions.removeAttachment(id)
           inputActions.setDraft(text)
           inputActions.submit()
         } else {
@@ -100,7 +114,7 @@ export function ImageFallbackDock(props: ImageFallbackDockProps): null {
         handlingRef.current = false
       }
     })()
-  }, [promptError, imageIds, sessionId, uploadImage, getDraftFiles, resendText, input?.draft, inputActions])
+  }, [promptError, attachmentIds, sessionId, uploadImage, getDraftFiles, resendText, input?.draft, inputActions])
 
   return null
 }

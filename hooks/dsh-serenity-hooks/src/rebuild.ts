@@ -367,7 +367,7 @@ export function performRebuild(
     // source 必填（UserMessage 契约）——缺失会使 session.list sessionListMetadata 抛 TypeError
     source: { kind: 'user' },
   } as never, {
-    surfaceOp: { op: 'replace', start: nodes[0]!, end: nodes[nodes.length - 1]! },
+    surfaceOp: { op: 'replace', startSeq: nodes[0]!, endSeq: nodes[nodes.length - 1]! },
     sourceEventSeqs: nodes,
   } as never)
   return true

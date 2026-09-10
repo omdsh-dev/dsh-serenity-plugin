@@ -1,0 +1,237 @@
+/**
+ * host/type-contract.ts — 宿主**类型**契约（编译期反证层，v1.31.8，S142 全量 review 产物）
+ *
+ * ## 为什么存在（R↓）
+ *
+ * dsp 用**结构化断言**隔离宿主（手写 interface + `as` / `as never`，零宿主运行时 import），
+ * 换来 peer-only 打包与"不随宿主版本耦合"的灵活度；代价是**类型检查对宿主漂移失明**：
+ * 宿主把成员改名、改返回形状，dsp 侧拿不到任何编译期信号，只能靠**人读宿主源码**发现。
+ *
+ * 历史已三次静默失效：
+ *  - `Session.events` → `snapshotEvents()`（v1.28.0）
+ *  - `conversation.draftImages()` → `resolveDraftAttachments()`（v1.31.6）
+ *  - `sessionPersistence.list()` 返回形状 `SessionHeader[]`（`h.cwd`）→
+ *    `SessionPersistenceSnapshot[]`（`h.header.cwd`）（v1.31.6）
+ * 后两条是升级 0.1.5-rc.1 时**逐文件人读**才挖出来的——不是机制发现的。
+ *
+ * ## 既有三道防线的盲区（2026-09-10 全量 review 结论）
+ *
+ * | 防线 | 覆盖 | 盲区 |
+ * |------|------|------|
+ * | `contract.ts` 的 `satisfies keyof Events` | 事件**名** | payload 形状 |
+ * | `probeHostContract`（运行期） | 服务**名** + 成员**存在性** | 成员**签名**、**返回形状** |
+ * | `tests/**` | —— | **完全不参与类型检查**（tsconfig `include: ["src"]`）→ 写在测试里的"真实宿主类型断言"从未生效 |
+ *
+ * ## 本模块补的那一格：用宿主真实类型反证 dsp 的形状假设
+ *
+ * 机制：
+ *  ① `import type {} from '<宿主包>'` 把该包的 `declare module '@deepseek-ai/cordis'` 声明增强
+ *     拉进 program（**空类型 import，编译期擦除 → 零运行时依赖**，peer-only 打包不受影响；
+ *     与 `src/client/index.ts` 引 `dsh-client-ui-session` 同款手法）
+ *  ② 每条 `Expect<Extends<宿主真相, dsp 假设>>` 是一道**编译期闸门**：宿主改名/改形状 →
+ *     `dsh-develop typecheck` 当场红，升级当天报警，而不是等线上静默失效
+ *  ③ 换宿主版本时 `dsh-develop typecheck-host <ver>` 会对**解包的新宿主**跑同一批断言
+ *
+ * ## 维护纪律（强制）
+ *
+ * **新增一处对宿主的形状依赖 → 在此加一条对应闸门**（断言旁注明 dsp 消费点与后果）。
+ * 断言只表达 dsp **真正依赖**的那部分（不求与宿主全等）→ 宿主新增字段/放宽类型不会误报，
+ * 只有"dsp 依赖的东西没了或变了"才红。
+ *
+ * 注：本文件**没有任何运行时语句**，编译产物只有 `export {}`，不影响包体行为。
+ */
+
+import type { Context } from 'cordis'
+// ① 空类型 import（仅拉入各包的 Context 声明增强 + 其依赖类型）
+import type {} from '@deepseek-ai/dsh-tools'
+import type {} from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-session-projection'
+import type {} from '@deepseek-ai/dsh-token-meter'
+import type {} from '@deepseek-ai/dsh-workspace'
+import type {} from '@deepseek-ai/dsh-subagent'
+import type {} from '@deepseek-ai/dsh-session-title'
+import type {} from '@deepseek-ai/dsh-settings'
+import type {} from '@deepseek-ai/dsh-agent'
+import type {} from '@deepseek-ai/dsh-system-prompt'
+import type {} from '@deepseek-ai/dsh-web'
+import type {} from '@deepseek-ai/dsh-host-webserver'
+import type {} from '@deepseek-ai/dsh-skill'
+import type {} from '@deepseek-ai/dsh-shell-env'
+import type {} from '@deepseek-ai/dsh-agent-loop'
+import type {} from '@deepseek-ai/dsh-compaction'
+
+/** 编译期断言：T 必须为 true，否则该行报错（错误行名 = 被破坏的契约） */
+type Expect<T extends true> = T
+/** A 是否可赋给 B（结构化；`[A] extends [B]` 避免联合分发） */
+type Extends<A, B> = [A] extends [B] ? true : false
+/** 函数返回值（非函数 → never） */
+type Ret<F> = F extends (...args: never[]) => infer R ? R : never
+
+/** 宿主 Context（各包的声明增强合并后的最终形态） */
+type HostContext = Context
+
+// ─────────────────────────────────────────────────────────────
+// ② 服务成员存在性（运行期探针的同维补强：此处连**签名**一起锁）
+// ─────────────────────────────────────────────────────────────
+
+/** ACC 工具注册面（`src/index.ts` 装配 11 工具） */
+type _ToolsRegister = Expect<Extends<Ret<HostContext['tools']['register']>, unknown>>
+/** 机械守卫（`src/seams/guards.ts` safe-mode/路径/白名单——缺则守卫失效） */
+type _ToolsGuard = Expect<Extends<Ret<HostContext['tools']['guard']>, unknown>>
+
+/** 会话定位/rebuild/CCC 解析（`access.ts` `hostSessionCwds`、`skiff-debug.ts`、`api.ts`） */
+type _SessionsList = Expect<Extends<Ret<HostContext['sessions']['list']>, readonly unknown[]>>
+type _SessionsGet = Expect<Extends<Ret<HostContext['sessions']['get']>, unknown>>
+type _SessionsCreate = Expect<Extends<Ret<HostContext['sessions']['create']>, unknown>>
+
+/** CCC 自动发现回落（`skiff-debug.ts:103`；v1.31.6 C4 现场：list 形状在 0.1.5 变了） */
+type _PersistenceList = Expect<Extends<Awaited<Ret<HostContext['sessionPersistence']['list']>>, readonly unknown[]>>
+
+/** 上下文压力读数（`seams/keeper.ts:readContextPressure`——rebuild 提醒的输入） */
+type _ProjectionsSnapshot = Expect<Extends<Ret<HostContext['sessionProjections']['snapshot']>, unknown>>
+
+/** shadow-price 定价（`rebuild.ts:356` `meter.estimateMessage(message)`） */
+type _TokenMeterEstimate = Expect<Extends<Ret<HostContext['tokenMeter']['estimateMessage']>, number>>
+
+/** rebuild 后重命名会话标题（`rebuild.ts:renameAfterRebuild`——签名 `(session, title)`） */
+type _SessionTitleRename = Expect<Extends<HostContext['sessionTitle']['rename'], (session: never, title: string) => unknown>>
+
+/** 工作区白名单下拉（`api.ts:334`、`skiff-debug.ts:90`——读 `path`/`title`） */
+type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry']['list']>, readonly unknown[]>>
+
+/** handyman foreground 委派（`tools/handyman.ts:171`——`start('spawn', request)`） */
+type _SubagentsStart = Expect<Extends<HostContext['subagents']['start'], (name: string, request: never) => Promise<unknown>>>
+
+/** 设置面板装配 + 命名空间读写（`settings-section.ts`、`opencode-provider.ts` 读写 `llm-pi-ai`） */
+type _SettingsInstallSection = Expect<Extends<HostContext['settings']['installSection'], (owner: never, ns: never, schema: never, entry: never, hooks: never) => unknown>>
+type _SettingsGet = Expect<Extends<Ret<HostContext['settings']['get']>, unknown>>
+type _SettingsUpdate = Expect<Extends<Ret<HostContext['settings']['update']>, Promise<void>>>
+
+/** Induction 注入（`seams/system-prompt.ts:561` 全局 + `:604` per-agent） */
+type _SystemPromptSection = Expect<Extends<Ret<HostContext['systemPrompt']['section']>, unknown>>
+
+/** web_fetch provider 接管（`web-fetch-provider.ts`，v1.30.12 fake-ip 网络） */
+type _WebRegisterFetchProvider = Expect<Extends<Ret<HostContext['web']['registerFetchProvider']>, unknown>>
+
+/** 状态接口/网关端口发现（`api.ts`、`gateway.ts`） */
+type _WebServerRegister = Expect<Extends<Ret<HostContext['webServer']['register']>, unknown>>
+type _WebServerPort = Expect<Extends<HostContext['webServer']['port'], number>>
+
+// ─────────────────────────────────────────────────────────────
+// ③ dsp 真正**读取的形状**（这一类才是静默失效的重灾区）
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * `session.header.cwd` —— dsp 最高频的宿主形状（20+ 处：所有工具的工作目录解析、
+ * seam 的 CCC root 定位、gateway 的会话归属）。**cwd 消失 = 全 ACC 退化成 process.cwd()**。
+ */
+type _SessionHeaderCwd = Expect<Extends<NonNullable<Ret<HostContext['sessions']['get']>>['header']['cwd'], string | undefined>>
+
+/** `session.header` 的派生判据：`origin === 'subagent'` / `parentSession` / `delegationDepth`（`seams/context.ts:116`、`bootstrap.ts:285`） */
+type _SessionHeaderOrigin = Expect<Extends<NonNullable<Ret<HostContext['sessions']['get']>>['header']['origin'], 'subagent' | undefined>>
+type _SessionHeaderParent = Expect<Extends<NonNullable<Ret<HostContext['sessions']['get']>>['header']['parentSession'], unknown>>
+type _SessionHeaderDepth = Expect<Extends<NonNullable<Ret<HostContext['sessions']['get']>>['header']['delegationDepth'], number | undefined>>
+
+/**
+ * `sessionPersistence.list()` 元素形状（**v1.31.6 C4 现场**）：
+ * 0.1.2 = `SessionHeader[]`（`h.cwd`）→ 0.1.5 = `SessionPersistenceSnapshot[]`（`h.header.cwd`）。
+ * 本闸门锁死"元素上必须能读到 `header.cwd`"——旧形状会在这里编译失败。
+ */
+type _PersistenceSnapshotCwd = Expect<Extends<Awaited<Ret<HostContext['sessionPersistence']['list']>>[number]['header']['cwd'], string | undefined>>
+
+/**
+ * 上下文压力投影（`keeper.ts` 读 `snap.values.contextPressure.{projectedTokens,contextWindow}`）。
+ * key 由 `dsh-token-meter` 声明增强进 `SessionProjectionMap`——**投影键改名会在此处红**。
+ */
+type _ContextPressure = Expect<Extends<
+  NonNullable<Ret<HostContext['sessionProjections']['snapshot']>['values']['contextPressure']>,
+  { projectedTokens?: number; contextWindow?: number }
+>>
+
+/** `session.snapshotEvents()`（`session-ops.ts:57` 统一读取入口；`.events` 属性早已移除） */
+type _SessionSnapshotEvents = Expect<Extends<Ret<NonNullable<Ret<HostContext['sessions']['get']>>['snapshotEvents']>, readonly unknown[]>>
+
+/** `session.surface.nodes`（`rebuild.ts:345` 取被替换范围） */
+type _SessionSurfaceNodes = Expect<Extends<NonNullable<Ret<HostContext['sessions']['get']>>['surface']['nodes'], readonly unknown[]>>
+
+// ─────────────────────────────────────────────────────────────
+// ④ `Session.append` 的两处调用（`rebuild.ts:358/365`——**全部用 `as never` 断言，编译器原本完全失明**）
+// ─────────────────────────────────────────────────────────────
+
+/** `'compaction/prune'` 仍是合法事件类型，且 payload 形状与 dsp 传的一致（shadow-price 协议） */
+type _AppendPruneType = Expect<Extends<'compaction/prune', Parameters<NonNullable<Ret<HostContext['sessions']['get']>>['append']>[0]>>
+type _AppendPrunePayload = Expect<Extends<
+  { shadowedRange: { start: number; end: number }; shadowedSeqs: unknown[]; shadowedTokenCount: number },
+  Parameters<NonNullable<Ret<HostContext['sessions']['get']>>['append']>[1] extends never ? never : { shadowedRange: { start: unknown; end: unknown }; shadowedSeqs: unknown[]; shadowedTokenCount: number }
+>>
+
+/** `'user/message'` 仍是 **surface 事件**（`SurfaceEventType`）——surfaceOp 为**必填第三参**，漏传即运行时抛错 */
+type _AppendUserMessageType = Expect<Extends<'user/message', Parameters<NonNullable<Ret<HostContext['sessions']['get']>>['append']>[0]>>
+
+// ─────────────────────────────────────────────────────────────
+// ⑤ Agent 对象（`ctx.agents.get()/create()` 的返回值——**不在服务契约表内**，全靠结构化断言）
+// ─────────────────────────────────────────────────────────────
+
+type HostAgent = NonNullable<Ret<HostContext['agents']['get']>>
+
+/** `agent.steer(msg)` —— rebuild 自动继续（`rebuild.ts:442`）、输出守卫打回、autopilot 唤起 */
+type _AgentSteer = Expect<Extends<HostAgent['steer'], (message: never) => unknown>>
+/** `agent.inbox.prepend(target, msg)` —— first-anchor 锚定（`seams/bootstrap.ts:302`） */
+type _AgentInboxPrepend = Expect<Extends<HostAgent['inbox']['prepend'], (target: never, message: never) => unknown>>
+/** `agent.session.header.cwd` —— 工具工作目录解析 */
+type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], string | undefined>>
+/**
+ * `agent.status === 'idle'` —— 等待空闲（`agent-idle.ts:65`，handyman/autopilot 的完成判据）。
+ * 注：`status` 是可变属性（非方法），断言其**可读**且类型覆盖 'idle'。
+ */
+type _AgentStatus = Expect<Extends<HostAgent['status'], string>>
+
+/** `agent.ctx.systemPrompt.section(...)` —— skiff 角色提示词 per-agent 注入（`skiff-core.ts:329`） */
+type _AgentCtxSystemPrompt = Expect<Extends<Ret<HostAgent['ctx']['systemPrompt']['section']>, unknown>>
+
+// ─────────────────────────────────────────────────────────────
+// ⑥ 事件 payload 形状（事件**名**已由 contract.ts 的 `satisfies keyof Events` 锁死；
+//    此处补 payload——「名字对但字段改了」同样静默失效）
+// ─────────────────────────────────────────────────────────────
+
+import type { Events } from 'cordis'
+
+/** `agent/status`：dsp 读 `payload.agent` + `payload.status === 'idle'`（`agent-idle.ts:55`） */
+type _EvStatus = Expect<Extends<Parameters<Events['agent/status']>[0], { agent: unknown; status: string }>>
+/** `agent/inbox/inserted`：dsp 读 `payload.agent` / `payload.message`（`seams/bootstrap.ts`） */
+type _EvInbox = Expect<Extends<Parameters<Events['agent/inbox/inserted']>[0], { agent: unknown; message: unknown }>>
+/** `agent/session-start`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种） */
+type _EvSessionStart = Expect<Extends<Parameters<Events['agent/session-start']>[0], { agent: unknown }>>
+/** `tools/pre-execute` / `tools/post-execute`：dsp 读 `exec.agent.session.header.cwd`（守卫/计分） */
+type _EvToolPre = Expect<Extends<Parameters<Events['tools/pre-execute']>[0], { agent?: { session?: { header?: { cwd?: string } } } }>>
+type _EvToolPost = Expect<Extends<Parameters<Events['tools/post-execute']>[0], { agent?: { session?: { header?: { cwd?: string } } } }>>
+/** `agent/disposed`：lifecycle 读 `payload.agent`（per-会话态清理） */
+type _EvAgentDisposed = Expect<Extends<Parameters<Events['agent/disposed']>[0], { agent?: unknown }>>
+/** `session/disposed`：lifecycle 直接收 Session 参数，读 id/header.id（sessionIdOf） */
+type _EvSessionDisposed = Expect<Extends<Parameters<Events['session/disposed']>[0], { id?: unknown; header?: { id?: unknown } }>>
+/** `settings/updated`：opencode-provider 按 `ns === 'llm-pi-ai'` 过滤（位置参数第一参） */
+type _EvSettingsUpdated = Expect<Extends<Parameters<Events['settings/updated']>[0], string>>
+
+// ─────────────────────────────────────────────────────────────
+// ⑦ 宿主版本范围（与 contract.ts 同源；此处只做"类型层也看得见"的占位，
+//    版本判定的运行时真相仍在 contract.ts）
+// ─────────────────────────────────────────────────────────────
+
+/** 哨兵：确保本模块不是空文件被 tree-shake 掉（无运行时副作用，值为类型） */
+export type HostTypeContractSatisfied = true
+
+/*
+ * 闸门自证（2026-09-10，S142 全量 review 时实测，**勿删此记录**）：
+ *
+ *  1) 正控制：本文件全部断言 → `dsh-develop typecheck` 绿（宿主 0.1.5-rc.1）。
+ *  2) 负控制：临时插入 `type _NegativeControl = Expect<Extends<string, number>>` →
+ *     `error TS2344: Type 'false' does not satisfy the constraint 'true'`（报在断言行）。
+ *     → 证明本文件**确实参与类型检查**、假断言**确实会红**（不是又一处"写在测试里从未生效"的死契约）。
+ *  3) 历史回归反证（C4 现场）：把 `_PersistenceSnapshotCwd` 改回旧假设
+ *     `element['cwd']`（0.1.2 形态 `SessionHeader[]`）→ 编译失败（`SessionPersistenceSnapshot`
+ *     上无 `cwd`）→ 即"若当年有本模块，0.1.5-rc.1 升级当天就会报警，而不是靠人读源码"。
+ *
+ * 教训对齐：本仓已有一次"契约写在 tests/ 里但 tests 不参与类型检查"的先例（见文件头盲区表），
+ * 故任何类型层契约都必须落在 `include: ["src"]` 覆盖范围内，且**必须做一次负控制**证明它通电。
+ */

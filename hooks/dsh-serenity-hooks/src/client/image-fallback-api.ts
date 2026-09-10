@@ -3,14 +3,13 @@
  *
  * 三个操作，全部走官方 client 服务 + 同源 HTTP：
  *  - uploadImage(file)    → POST /serenity/image-upload（node half 写 _tmp/images_from_user/）
- *  - getDraftFiles(...)   → conversation.draftImages（取 rail 图片 File）
+ *  - getDraftFiles(...)   → conversation.resolveDraftAttachments（取 rail 图片 File，v1.31.6 改名）
  *  - resendText(...)      → session.prompt（纯文本重发，绕过图片门禁）
  */
 
 // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 → ClientContext 用官方同款
 // `Context as ClientContext` from '@deepseek-ai/cordis'（:70/:83 的 ctx.get/sessions 运行时面签名未变）
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { DraftAttachmentId } from '@deepseek-ai/dsh-client-ui-conversation'
 
 /** 图片落盘接口路径（node half api.ts，client 专属 x-serenity-ui 头） */
 const UPLOAD_PATH = '/serenity/image-upload'

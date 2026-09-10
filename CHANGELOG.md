@@ -1,3 +1,40 @@
+## v1.31.8 — 2026-09-10（宿主接口全量 review：2 条 client 静默失效 + rebuild 阻断修复 + 类型契约新防线）
+
+**Scope:** 用户「很可能dsh有接口变动我们不知道，全量review这类case进行检查」——按"升级 0.1.5-rc.1 后靠人读源码才发现 C3/C4"的历史教训，把**成员签名/返回形状/事件 payload/client 半**这些类型检查看不见的接触面全量审计一遍，并把这类问题变成**机械可检**。
+
+### ① 抓到并修复 2 条真实静默失效（client 半，域 A 审计）
+- **DRIFT-1** `src/client/ImageFallbackDock.tsx`：读 `input.imageIds` → 宿主 `InputState.attachmentIds`（0.1.5-rc.1 全仓 `imageIds` 零匹配）→ **图片自动落盘兜底整条链从不触发**（`?? []` 恒空 → 早退；不报错、用户无感。同批修：`attachmentIds` 直接传 `DraftAttachmentId`，不再 `String()`）
+- **DRIFT-2** 同文件：`inputActions.removeImage` → 宿主 `removeAttachment`（被 DRIFT-1 掩盖，**必须同批修**否则修好前者立即暴露降级路径）
+- 顺带：`image-fallback-api.ts` 删未用 `DraftAttachmentId` 死导入 + 注释 `draftImages`→`resolveDraftAttachments`（改名残留）
+
+### ② 修复 logbook rebuild 在 0.1.5-rc.1 下失败（阻断性，S142 自己撞上）
+- **现象**：`logbook rebuild` queued 但未执行；diag（`AGENT_SESSIONS/.rebuild-diag.json`）= `session event "user/message" carries an invalid replace surfaceOp`
+- **根因**：0.1.5-rc.1 `SurfaceOp` 的 replace 字段名 `start/end` → **`startSeq/endSeq`**（`dsh-session/lib/types/types.d.ts:429-432`；`replacementRange` 读 `op.startSeq`）；`rebuild.ts` 传旧名 + `as never` 断言（编译器失明）→ append 被拒 → executeRebuild 崩溃
+- **修复**：`rebuild.ts` `surfaceOp: {op:'replace', startSeq, endSeq}` + 测试断言同步
+
+### ③ 新防线：宿主**类型契约**（把这一类变成编译期闸门）
+- **`src/host/type-contract.ts`（新，type-only）**：`import type {}` 拉入 17 个宿主包 Context 增强，`Expect<Extends<宿主真相, dsp 形状假设>>` 逐条断言——17 服务签名 + Session.header 字段 + append 两处 `as never` 现场 + Agent(steer/inbox/status/ctx.systemPrompt) + 8 事件 payload；**宿主改名/改形状 → `typecheck` / `typecheck-host <ver>` 当场红**
+- **`src/client/host-type-contract.ts`（新）**：锁 `InputState.attachmentIds` / `InputActions.removeAttachment(setDraft/submit)` / `InputZone.{session,input}` / `SessionStandardProps.sessionId` / promptError 层级（`RemoteFailure` 是 owner 可合并的 code 判别联合 → 只锁顶层，防误报）
+- **闸门自证**：负控制实测（假断言 → `TS2344` 报在断言行）；历史回归反证（C4 旧形状 → 编译失败）
+- **基线解析盲区修复**：`@deepseek-ai/dsh-session-projection/types` 是 10+ 包共同增强的子路径模块 id → tsconfig 补映射（`typecheck-host` 解包宿主无 node_modules 解析不到）
+- **镜像门禁**：`tests/host/type-contract.test.ts` 锁"两文件留在 src/（typecheck include）"前提（tests/ 不参与 typecheck 是机制盲区根源）
+
+### ④ 事件名编译期守卫 10 → 13（域 B 审计补）
+- `agent/disposed`、`session/disposed`、`settings/updated` 三个 dsp 实际订阅事件补进 `HOST_EVENT_NAMES`（`satisfies keyof Events`）+ `HOST_EVENTS` 表 + payload 断言
+
+### ⑤ 审计结论（域 A/B/C，勿重查）
+- **A 区 10 事件 payload 全部 OK**；**B 区 settings 面全部对上**（installSection 5 位置参 / get(ns) / update 深合并+先校验后落盘 / llm-pi-ai headers 一次性求值 / 唯一保留名 user-agent）
+- **C 区 manifest（app-boot 读取端）在 CCC 外不可取证** → `dsh.bundle.patch`/`engines.dsh`/`contributes.tools` 的 0.1.5-rc.1 消费语义未复核（0.1.2 实证 + dsp 内部自洽；contributes.tools 有 invariant 测试锁）
+
+### 测试（79 files / 1171 tests，+2）
+- 新增 `tests/host/type-contract.test.ts`（2 用例：src 归属 + 可装载）
+- `tests/rebuild.test.ts` 2 用例断言字段名同步 `start/end` → `startSeq/endSeq`
+
+### 待办（下一轮）
+- type-contract ⑥ 节补剩余 4 事件 payload（agent/pre-step、turn-stopping、session/event、system-prompt/assemble 的 context.agent）
+- ImageFallbackDock 修复的真机验证（需真实"模型不支持图片"场景）
+- C 区 app-boot 复核需可访问 DSH 应用本体的环境
+
 ## v1.31.7 — 2026-09-10（opencode 路由头自动配置：装好即用，用户不必手抄请求头）
 
 **Scope:** 用户需求「我是想 1，但是我们 dsp 能不能安装好自动就配上去，省的我们用户配」
