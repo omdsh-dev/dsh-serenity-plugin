@@ -380,10 +380,11 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(data.source).toEqual({ kind: 'user' }) // UserMessage 契约必填
     const op = (call.opts as { surfaceOp: { op: string; startSeq: number; endSeq: number } }).surfaceOp
     expect(op.op).toBe('replace')
-    expect(op.startSeq).toBe(10)
+    // v1.31.8：surface node 0 = 系统提示（宿主保护）→ 替换范围从 node 1 起
+    expect(op.startSeq).toBe(11)
     expect(op.endSeq).toBe(13)
     const sourceEventSeqs = (call.opts as { sourceEventSeqs: number[] }).sourceEventSeqs
-    expect(sourceEventSeqs).toEqual([10, 11, 12, 13])
+    expect(sourceEventSeqs).toEqual([11, 12, 13])
   })
 
   it('performRebuild：带 meter → 先 append compaction/prune 定价（shadow-price 协议，v1.23.5）', () => {
@@ -404,15 +405,16 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const prune = session._calls[0]!
     expect(prune.type).toBe('compaction/prune')
     const pd = prune.data as { shadowedRange: { start: number; end: number }; shadowedSeqs: number[]; shadowedTokenCount: number }
-    expect(pd.shadowedRange).toEqual({ start: 10, end: 11 })
-    expect(pd.shadowedSeqs).toEqual([10, 11])
-    expect(pd.shadowedTokenCount).toBe(10) // 3 (user) + 7 (assistant)
-    // meter 对每个被替换节点定价
-    expect(meter.estimateMessage).toHaveBeenCalledTimes(2)
+    // v1.31.8：node 0（= 系统提示，宿主保护）不在替换范围内 → 只有 node 11 被定价
+    expect(pd.shadowedRange).toEqual({ start: 11, end: 11 })
+    expect(pd.shadowedSeqs).toEqual([11])
+    expect(pd.shadowedTokenCount).toBe(7) // 仅 assistant 节点
+    // meter 只对被替换节点定价（系统提示节点不参与）
+    expect(meter.estimateMessage).toHaveBeenCalledTimes(1)
     // 紧随其后的 replace（锚点消息）
     const replace = session._calls[1]!
     expect(replace.type).toBe('user/message')
-    expect((replace.opts as { surfaceOp: { op: string; startSeq: number; endSeq: number } }).surfaceOp).toEqual({ op: 'replace', startSeq: 10, endSeq: 11 })
+    expect((replace.opts as { surfaceOp: { op: string; startSeq: number; endSeq: number } }).surfaceOp).toEqual({ op: 'replace', startSeq: 11, endSeq: 11 })
   })
 
   it('performRebuild：surface 为空 → false（无历史可清）', () => {

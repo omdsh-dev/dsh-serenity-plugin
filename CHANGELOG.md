@@ -1,3 +1,60 @@
+## v1.31.9 — 2026-09-10（rebuild 第二条阻断规则修复 + 事件 payload 闸门补全：rebuild 全链真机跑通）
+
+**Scope:** v1.31.8 修好 `SurfaceOp` 字段名后，rebuild **走得更远但撞上第二条宿主规则**（同一诊断通道给出的第二份原文）。
+本版收口那条规则 + 把「事件 payload 无人看守」这一格补齐，并以**真机跑通**为验收。
+
+### ① rebuild 第二条阻断规则：surface node 0 是受保护的系统提示节点
+- **现象**：`logbook rebuild` 仍 failed，diag 原文
+  `surface replace: node 0 holds the system prompt and may be rewritten only by a system/message over exactly that node`
+  （宿主 `dsh-session/lib/types/surface.js` → `assertSystemHeadRewrite`）
+- **含义**：0.1.5 起 **surface node 0 = 系统提示节点且被宿主保护**——replace 只要覆盖到它，
+  就必须由 `system/message` 且**精确只改它一个节点**。而重建的语义恰恰是"**保留系统提示、只清对话历史**"，
+  故旧实现整体替换 `nodes[0..last]` 在 0.1.5 上**必被拒**
+- **修复（`src/rebuild.ts` `performRebuild`）**：替换范围 `nodes` → **`targets = nodes.slice(1)`**；
+  只剩系统提示 → 返回 `false`（无历史可清，不做 replace）；
+  `shadowedRange` / `shadowedSeqs` / `tokenCount` / `sourceEventSeqs` **全部同步为 targets**
+  （否则 prune 定价与 replace 范围不一致，shadow-price 协议被破坏）
+
+### ② 事件 payload 闸门补全（`src/host/type-contract.ts` ⑥b，4 条）
+v1.31.8 的 ⑥ 节锁了 8 条 payload，**域 B 审计点名的 4 条漏网**——它们的共同点是
+"读一个可选字段再早退"，字段消失不抛错，只让某条链路**从此不再执行**（与 DRIFT-1 的 `?? []` 恒空同构）：
+- `agent/pre-step`：读 `payload.agent`（CCC 路由 + 每步同步 safe-mode/im-bridge 可见性）+ `payload.messages`
+  （bootstrap 剥离注入消息 / 首进 CCC 前置身份消息）
+- `agent/turn-stopping`：读 `payload.agent` / `payload.turn`（rebuild 真正执行、输出守卫、微信打回）
+- `session/event`：**位置参数**（非 payload）——`session.header.cwd` + `session.id`，
+  以及 `event.type === 'compaction/end'` 与 `event.data.error`（**旧写法直接 `event.data.error`，字段没了只是 `undefined`**）
+- `system-prompt/assemble`：**位置参数**——`context.agent` 由 `dsh-agent` 的 `declare module` 合并进来
+  （**不在 dsh-system-prompt 自己的 `AssembleContext` 里**）→ 合并链断则 `context.agent` 恒 `undefined`，目录窄化静默失效
+
+**闸门通电证据（逐条变异控制，写入文件末尾"闸门自证"块）**：给 `_EvPreStep` 目标加一个不存在的必填字段 →
+`type-contract.ts(275,34) TS2344`；把 `_EvCompactionEndError` 目标改成 `{error?: number}` → 同批 `(276,34) TS2344`
+——**两条各自报在自己的断言行**（证明是活闸门，不是被前一条遮蔽的死代码）。控制插入物已删除。
+
+### ③ 真机验证（本轮验收）
+- **rebuild 全链跑通**：`AGENT_SESSIONS/.rebuild-diag.json` = `lastEvent:"rebuilt" / rebuiltCount:1 / failedCount:0`
+  （前两次分别是 `failed` × 2，两次失败各自产出一份**精确到规则的错误原文**）；本次会话本身即 rebuild 产物
+- **图片落盘兜底（DRIFT-1/2 修复）**：
+  - 产物层：仓库 `lib/client.js` 含 `attachmentIds` / `removeAttachment`，**零** `imageIds` / `removeImage`；
+    已部署 profile 的 `lib/*.js` 与本仓构建**字节数一致**（201951 / 497582 B，同 mtime）→ 运行中的插件就是这份构建
+  - 服务端半程真机：`POST /serenity/image-upload`（`x-serenity-ui: 1`）→ 200 + 落盘
+    `_tmp/images_from_user/<ISO>-<rand>.png`（70 B 实测）→ **链路的服务端一端在 0.1.5-rc.1 下活着**
+  - ⚠️ **诚实边界**：客户端触发端（模型不支持图片 → `session/attachment-invalid` / `MODEL_DOES_NOT_SUPPORT_IMAGES` →
+    自动落盘 + 文本重发）需真实 WebUI 场景（切非视觉模型 + 粘贴图片），**本轮无法自动构造**，
+    由 `src/client/host-type-contract.ts` 的两个 API 名从类型层机械看守
+
+### 测试（79 files / 1171 tests）
+- 无新增用例（① 的断言同步在 v1.31.8 已入账；② 是类型层闸门，其"测试"就是 `typecheck` 本身的红/绿）
+- **补跑验证**：v1.31.8 遗留的 coverage-gate 镜像门禁红已消除（`tests/host/type-contract.test.ts` 生效）
+
+### 门禁
+`typecheck`（node+client）✅ ｜ `typecheck-host 0.1.5-rc.1` ✅（node 115 / client 103 文件，paths 36+14 全命中）
+｜ `test` ✅ 79/1171 ｜ `build` ✅（lib/client.js 201951 B）｜ 版本三处一致 1.31.9
+
+### 待用户（D14）
+发布链（publish + 三推 + specs/根仓 push + deploy + restart-web）**未执行**。
+⚠️ **npm `latest` 目前是 1.31.8，其中不含 ① 的 node-0 修复**（本机运行态已由 `deploy` 通道带上该修复，故 rebuild 已可用）；
+下一次发版会自然补上。
+
 ## v1.31.8 — 2026-09-10（宿主接口全量 review：2 条 client 静默失效 + rebuild 阻断修复 + 类型契约新防线）
 
 **Scope:** 用户「很可能dsh有接口变动我们不知道，全量review这类case进行检查」——按"升级 0.1.5-rc.1 后靠人读源码才发现 C3/C4"的历史教训，把**成员签名/返回形状/事件 payload/client 半**这些类型检查看不见的接触面全量审计一遍，并把这类问题变成**机械可检**。
@@ -32,8 +89,10 @@
 
 ### 待办（下一轮）
 - type-contract ⑥ 节补剩余 4 事件 payload（agent/pre-step、turn-stopping、session/event、system-prompt/assemble 的 context.agent）
+  → **✅ v1.31.9 已完成**（见 v1.31.9 ②）
 - ImageFallbackDock 修复的真机验证（需真实"模型不支持图片"场景）
-- C 区 app-boot 复核需可访问 DSH 应用本体的环境
+  → **部分完成（v1.31.9 ③）**：产物层 + 服务端半程已验；客户端触发端仍需真实 GUI 场景
+- C 区 app-boot 复核需可访问 DSH 应用本体的环境（**仍待办**）
 
 ## v1.31.7 — 2026-09-10（opencode 路由头自动配置：装好即用，用户不必手抄请求头）
 

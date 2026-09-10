@@ -345,19 +345,32 @@ export function performRebuild(
   const nodes = [...session.surface.nodes]
   if (nodes.length === 0) return false
 
+  /**
+   * v1.31.8 二次修正（0.1.5-rc.1 实证，diag 原文）：
+   * `surface replace: node 0 holds the system prompt and may be rewritten only by a
+   *  system/message over exactly that node`（宿主 `dsh-session/lib/types/surface.js`
+   * `assertSystemHeadRewrite`）。
+   *
+   * → **surface node 0 是系统提示节点且被宿主保护**；而重建的语义恰恰是"保留系统提示、
+   *   只清对话历史"，故替换范围必须从 **node 1** 起。（旧实现整体替换 `nodes[0..last]`，
+   *   在 0.1.5 上必被拒——这是 §14 之后的第二条 rebuild 阻断规则。）
+   */
+  const targets = nodes.slice(1)
+  if (targets.length === 0) return false // 只剩系统提示 → 无历史可清（不 replace）
+
   // shadow-price 协议：replace 前 append compaction/prune，定价被替换范围
   if (meter) {
     let shadowedTokenCount = 0
     const events = sessionEvents<SessionEvent>(session)
-    for (const seq of nodes) {
+    for (const seq of targets) {
       const event = events[seq]
       if (!event) continue
       const message = deriveEventMessage(event)
       if (message) shadowedTokenCount += meter.estimateMessage(message)
     }
     session.append('compaction/prune', {
-      shadowedRange: { start: nodes[0]!, end: nodes[nodes.length - 1]! },
-      shadowedSeqs: nodes,
+      shadowedRange: { start: targets[0]!, end: targets[targets.length - 1]! },
+      shadowedSeqs: targets,
       shadowedTokenCount,
     } as never)
   }
@@ -367,8 +380,8 @@ export function performRebuild(
     // source 必填（UserMessage 契约）——缺失会使 session.list sessionListMetadata 抛 TypeError
     source: { kind: 'user' },
   } as never, {
-    surfaceOp: { op: 'replace', startSeq: nodes[0]!, endSeq: nodes[nodes.length - 1]! },
-    sourceEventSeqs: nodes,
+    surfaceOp: { op: 'replace', startSeq: targets[0]!, endSeq: targets[targets.length - 1]! },
+    sourceEventSeqs: targets,
   } as never)
   return true
 }

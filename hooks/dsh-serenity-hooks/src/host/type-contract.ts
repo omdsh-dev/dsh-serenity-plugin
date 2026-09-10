@@ -196,6 +196,7 @@ type _AgentCtxSystemPrompt = Expect<Extends<Ret<HostAgent['ctx']['systemPrompt']
 // ─────────────────────────────────────────────────────────────
 
 import type { Events } from 'cordis'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 /** `agent/status`：dsp 读 `payload.agent` + `payload.status === 'idle'`（`agent-idle.ts:55`） */
 type _EvStatus = Expect<Extends<Parameters<Events['agent/status']>[0], { agent: unknown; status: string }>>
@@ -212,6 +213,64 @@ type _EvAgentDisposed = Expect<Extends<Parameters<Events['agent/disposed']>[0], 
 type _EvSessionDisposed = Expect<Extends<Parameters<Events['session/disposed']>[0], { id?: unknown; header?: { id?: unknown } }>>
 /** `settings/updated`：opencode-provider 按 `ns === 'llm-pi-ai'` 过滤（位置参数第一参） */
 type _EvSettingsUpdated = Expect<Extends<Parameters<Events['settings/updated']>[0], string>>
+
+/*
+ * ── ⑥b 域 B 审计补漏（v1.31.9）：四条 dsp 依赖却在 ⑥ 节漏挂闸门的事件 ──
+ *
+ * 这四条与 ⑥ 节同因：**名字对了、payload 字段没了 / 换了名字**同样静默失效，
+ * 且比 ⑥ 节更隐蔽——它们的消费点是"读一个可选字段再早退"，字段消失不会抛错，
+ * 只会让某条链路**从此不再执行**（与 DRIFT-1 的 `?? []` 恒空同构）。
+ */
+
+/**
+ * `agent/pre-step`：dsp 读 `payload.agent`（路由到 CCC + 每步同步 safe-mode/im-bridge 可见性）
+ * 与 `payload.messages`（bootstrap 阶段剥离 suppressedSources 注入消息；首进 CCC 时前置身份消息）。
+ * 消费点 `seams/context.ts:236`、`seams/bootstrap.ts:382`；**两处都在 CCC 内必备**（required 事件）。
+ */
+type _EvPreStep = Expect<Extends<
+  Parameters<Events['agent/pre-step']>[0],
+  { agent: unknown; messages: readonly unknown[] }
+>>
+
+/**
+ * `agent/turn-stopping`：dsp 读 `payload.agent` / `payload.turn`
+ * （`rebuild.ts:424` 真正执行清空、`output-guard-seam.ts:56` 卡最终输出、`weixin-output-guard.ts:162` 打回）。
+ * dsp 侧的注解是 `{agent?: Agent; turn?: number}`（**比宿主宽**）——闸门按 dsp 假设锁"这两个键仍可读"，
+ * 宿主把 payload 换成位置参数或改名 → 此处红。
+ */
+type _EvTurnStopping = Expect<Extends<
+  Parameters<Events['agent/turn-stopping']>[0],
+  { agent?: unknown; turn?: number }
+>>
+
+/**
+ * `session/event`：**位置参数**（`session, event`），非 payload 对象。
+ * dsp 读 `session.header.cwd`（按 CCC root 路由 tracker）与 `session.id`（关联 agent）；
+ * `seams/compact.ts:50` 另读 `event.type === 'compaction/end'` 与 `event.data.error`（失败不重注入）。
+ */
+type _EvSessionEventSession = Expect<Extends<
+  Parameters<Events['session/event']>[0],
+  { id?: unknown; header?: { cwd?: string } }
+>>
+/** `event.type` 的判据值仍是合法事件类型（宿主删/改名 → 压缩后重注入永远走到不存在的分支） */
+type _EvCompactionEndType = Expect<Extends<'compaction/end', SessionEvent['type']>>
+/** `compaction/end` 的 `data.error` 仍在（**旧写法直接 `event.data.error`，字段没了会是 `undefined` 而非报错**） */
+type _EvCompactionEndError = Expect<Extends<
+  Extract<SessionEvent, { type: 'compaction/end' }>['data'],
+  { error?: string }
+>>
+
+/**
+ * `system-prompt/assemble`：**位置参数**（`assembly, context, next`）。
+ * dsp 读 `context.agent`（`seams/bootstrap.ts:335` bootstrap 阶段工具目录窄化）。
+ * ⚠️ `agent` 由 `dsh-agent` 的 `declare module '@deepseek-ai/dsh-system-prompt'` 合并进来
+ * （**不在 dsh-system-prompt 自己的 `AssembleContext` 里**）→ 合并链断则 `context.agent` 恒 undefined，
+ * 目录窄化静默失效。故此处断言的是**合并后的**第二参。
+ */
+type _EvAssembleContext = Expect<Extends<
+  Parameters<Events['system-prompt/assemble']>[1],
+  { agent?: unknown }
+>>
 
 // ─────────────────────────────────────────────────────────────
 // ⑦ 宿主版本范围（与 contract.ts 同源；此处只做"类型层也看得见"的占位，
@@ -234,4 +293,10 @@ export type HostTypeContractSatisfied = true
  *
  * 教训对齐：本仓已有一次"契约写在 tests/ 里但 tests 不参与类型检查"的先例（见文件头盲区表），
  * 故任何类型层契约都必须落在 `include: ["src"]` 覆盖范围内，且**必须做一次负控制**证明它通电。
+ *
+ * 4) v1.31.9 补 ⑥b 四事件闸门时的**逐条变异控制**（证明"新增闸门各自通电"，非"文件整体在编译"）：
+ *    ① `_EvPreStep` 目标形状追加 `nonexistent: string` → `type-contract.ts(275,34) TS2344`
+ *    ② `_EvCompactionEndError` 目标改成 `{ error?: number }`（string→number）→ 同批 `(276,34) TS2344`
+ *    → 两条**各自报在自己的断言行**，证明 ⑥b 是活闸门（不是被前一条遮蔽的死代码）。
+ *    控制插入物已删除；如需复现，照上式临时改写对应断言即可。
  */
