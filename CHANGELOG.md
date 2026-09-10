@@ -1,7 +1,8 @@
-## v1.31.9 — 2026-09-10（rebuild 第二条阻断规则修复 + 事件 payload 闸门补全：rebuild 全链真机跑通）
+## v1.31.9 — 2026-09-10（rebuild 第二条阻断规则修复 + 事件 payload 闸门补全 + 域 C 收口：rebuild 全链真机跑通）
 
 **Scope:** v1.31.8 修好 `SurfaceOp` 字段名后，rebuild **走得更远但撞上第二条宿主规则**（同一诊断通道给出的第二份原文）。
-本版收口那条规则 + 把「事件 payload 无人看守」这一格补齐，并以**真机跑通**为验收。
+本版收口那条规则 + 把「事件 payload 无人看守」这一格补齐，并以**真机跑通**为验收；
+另把 v1.31.8 遗留的**域 C（宿主 manifest 读取端）"不可取证"盲区**用 `host-fetch` 追加包名打通并落成机械闸门。
 
 ### ① rebuild 第二条阻断规则：surface node 0 是受保护的系统提示节点
 - **现象**：`logbook rebuild` 仍 failed，diag 原文
@@ -42,13 +43,14 @@ v1.31.8 的 ⑥ 节锁了 8 条 payload，**域 B 审计点名的 4 条漏网**�
     自动落盘 + 文本重发）需真实 WebUI 场景（切非视觉模型 + 粘贴图片），**本轮无法自动构造**，
     由 `src/client/host-type-contract.ts` 的两个 API 名从类型层机械看守
 
-### 测试（79 files / 1171 tests）
-- 无新增用例（① 的断言同步在 v1.31.8 已入账；② 是类型层闸门，其"测试"就是 `typecheck` 本身的红/绿）
+### 测试（80 files / 1176 tests，+5）
+- 新增 `tests/host-manifest.test.ts`（5 用例）——域 C 收口产物，把"宿主真正消费的 manifest 字段"变成会红的闸门（见 ④）
+- ① 的断言同步在 v1.31.8 已入账；② 是类型层闸门，其"测试"就是 `typecheck` 本身的红/绿
 - **补跑验证**：v1.31.8 遗留的 coverage-gate 镜像门禁红已消除（`tests/host/type-contract.test.ts` 生效）
 
 ### 门禁
 `typecheck`（node+client）✅ ｜ `typecheck-host 0.1.5-rc.1` ✅（node 115 / client 103 文件，paths 36+14 全命中）
-｜ `test` ✅ 79/1171 ｜ `build` ✅（lib/client.js 201951 B）｜ 版本三处一致 1.31.9
+｜ `test` ✅ 80/1176 ｜ `build` ✅（lib/client.js 201951 B）｜ 版本三处一致 1.31.9
 
 ### 待用户（D14）
 发布链（publish + 三推 + specs/根仓 push + deploy + restart-web）**未执行**。
@@ -83,8 +85,30 @@ v1.31.8 的 ⑥ 节锁了 8 条 payload，**域 B 审计点名的 4 条漏网**�
 - **A 区 10 事件 payload 全部 OK**；**B 区 settings 面全部对上**（installSection 5 位置参 / get(ns) / update 深合并+先校验后落盘 / llm-pi-ai headers 一次性求值 / 唯一保留名 user-agent）
 - **C 区 manifest（app-boot 读取端）在 CCC 外不可取证** → `dsh.bundle.patch`/`engines.dsh`/`contributes.tools` 的 0.1.5-rc.1 消费语义未复核（0.1.2 实证 + dsp 内部自洽；contributes.tools 有 invariant 测试锁）
 
-### 测试（79 files / 1171 tests，+2）
-- 新增 `tests/host/type-contract.test.ts`（2 用例：src 归属 + 可装载）
+### ④ 域 C 收口：宿主 **manifest 消费面**从"不可取证"变成"实证 + 机械闸门"
+- **取证突破口**：宿主**应用本体**此前不在 CCC 内 → 用 `host-fetch <ver> <pkg>` 追加抓取
+  `@deepseek-ai/dsh`（CLI app）、`@deepseek-ai/dsh-app-boot`（manifest 读取端）、
+  `@deepseek-ai/dsh-cordis-client-runner`（浏览器半发现）、`@deepseek-ai/dsh-plugin-package-inventory-deepseek`
+  → 45 个宿主包全在 CCC 内可 read/grep（`host-fetch` 本就支持追加包名，此前未用）
+- **穷举结论（`\.dsh\?\.` 全树扫描）——宿主真正消费的 manifest 字段只有四个**：
+
+| 字段 | 读取方 | 缺失后果 |
+|------|--------|---------|
+| `dsh.profile.bundles` / `patchReload` | `dsh-app-boot/lib/index.js` | profile 未列出本包 = 不被装载 |
+| **`dsh.bundle.patch`**（bundle 包**自己的** package.json） | app-boot + `dsh/lib/plugin-*.js` `isBundle()` | **响亮失败** `profile bundle "X" declares no dsh.bundle in its package.json`；`dsh plugin add` 路径则**降级为普通依赖**（warning: "installed as a plain dependency, not a profile layer"） |
+| `dsh.moduleFallback.targets` | app-boot | 非插件作者面（dsh 自写） |
+| `dsh.client` + `exports["./client"]` | `dsh-cordis-client-runner`（"the browser half ships through exports[\"./client\"], discovered from the package.json dshClient declaration"） | 浏览器半不被发现 → 面板/输入区 dock 整体消失 |
+
+- **两条旧结论在 0.1.5-rc.1 实物上复核**（此前只在 alpha.1 公开源码上验证过）：
+  - **`dsh.plugin.json` 非宿主识别格式**——45 个宿主包内**连字符串都零命中**；`contributes.tools` 概念不存在（工具走 `ctx.tools.register`）。它是本包**自维护元数据**（供 `invariant.ts` / `invariant.test.ts` 自检）
+  - **`engines.dsh` 无宿主强制**——全树 `engines` 只在无关注释里出现；**真正的版本门 = `peerDependencies` 解析 + 本包 `REQUIRED_HOST_RANGE`**
+- **dsp 声明面逐条对上**：`dsh.bundle.patch: './cordis.patch.yml'` ✓（文件在场）｜`files[]` 含 `cordis.patch.yml` + `dsh.plugin.json` ✓｜`exports["./client"]` ✓（目标在场）｜`dsh.client.platform: 'web'` ✓｜peerDeps 17 项 ✓
+- **新机械闸门 `tests/host-manifest.test.ts`（5 用例）**：把上表变成会红的测试（patch 声明+文件在场 / files 白名单 / exports["./client"] / dsh.client.platform / peerDeps 非空且范围统一）——否则这次"不可取证 → 可取证"的成果又是一次性人工发现
+- ⚠️ 仍属**域外**（不在本次接口检查范围，见 SESSION §7）：`dsh.plugin.json` 是否该并入 package.json `dsh` 段（历史遗留的"自维护元数据"身份仅靠注释标注）
+
+### 测试（80 files / 1176 tests，+5）
+- 新增 `tests/host-manifest.test.ts`（5 用例，见 ④）
+- 新增 `tests/host/type-contract.test.ts`（2 用例：src 归属 + 可装载）——v1.31.8 已入账
 - `tests/rebuild.test.ts` 2 用例断言字段名同步 `start/end` → `startSeq/endSeq`
 
 ### 待办（下一轮）
@@ -93,6 +117,7 @@ v1.31.8 的 ⑥ 节锁了 8 条 payload，**域 B 审计点名的 4 条漏网**�
 - ImageFallbackDock 修复的真机验证（需真实"模型不支持图片"场景）
   → **部分完成（v1.31.9 ③）**：产物层 + 服务端半程已验；客户端触发端仍需真实 GUI 场景
 - C 区 app-boot 复核需可访问 DSH 应用本体的环境（**仍待办**）
+  → **✅ v1.31.9 ④ 已完成**：`host-fetch` 追加包名即可取证，已穷举消费面并落机械闸门
 
 ## v1.31.7 — 2026-09-10（opencode 路由头自动配置：装好即用，用户不必手抄请求头）
 
