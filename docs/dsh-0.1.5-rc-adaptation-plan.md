@@ -21,7 +21,7 @@
 | C4 | `sessionPersistence.list()` 返回形状 | 🔴 **静默运行时** | `SessionHeader[]` → `SessionPersistenceSnapshot[]`（`cwd` 下移一层）（§4.2） |
 | D | `host/contract.ts` 契约表 17 服务 + 10 事件 | ✅ 零改动 | 逐条核对全部存活；`satisfies readonly (keyof Events)[]` 编译期通过（§5） |
 | E | tsconfig 路径处置 | ✅ 零改动（正式配置） | 正式 paths 继续指向本机安装 = **用户升级即自动切新宿主**；本轮验证走 `typecheck-host` 旁路（§2） |
-| F | 任务 B：opencode zen / go 标识头 | ✅ 检索定论 | 付费 `/zen/go` 走 `llm-pi-ai.providers.<route>.headers` **配置即可**（需 `x-opencode-session` + 身份族 `X-Title`/`HTTP-Referer`）；**免费档额外要求 `User-Agent` = DSH 保留名 → 配置不可解**（§7） |
+| F | 任务 B：opencode zen / go 标识头 | ✅ 定论 + **已实现** | 付费 `/zen/go` 走 `llm-pi-ai.providers.<route>.headers`；**v1.31.7 起由 dsp 自动注入会话族头**（用户零手配，§7.6）；**免费档额外要求 `User-Agent` = DSH 保留名 → 不可解**（§7.3~7.4） |
 
 **一句话**：真实突破点只有 **6 条**（4 条类型面 + 2 条静默运行时），全部集中在 **client 半与 CCC 自动发现路径**；node 半在新宿主下**零类型错误**（78 文件实测载入）。
 
@@ -367,8 +367,24 @@ dsh-develop typecheck-host <version>
 ### 7.5 待用户动作
 
 1. 确认走**哪条路由**（`opencode-go` 付费 / 用免费档），决定是否受 §7.4 第二条限制
-2. 回家后配 `~/.dsh/settings.yaml` 的 `llm-pi-ai.providers.opencode-go.headers`（形状见 7.3-5）
+2. ~~回家后配 `~/.dsh/settings.yaml` 的 `llm-pi-ai.providers.opencode-go.headers`（形状见 7.3-5）~~
+   → **已实现为 v1.31.7（见 §7.6）：不再需要手配，把 `OPENCODE_API_KEY` 放进环境即可**
 3. 若仍 400/429：把**响应体原文**给我——它直接写缺哪个头（`Request is missing x-opencode-session` / `FreeUsageLimitError`），可一次性定位，无需再猜
+
+### 7.6 实现落点（v1.31.7，用户「dsp 能不能安装好自动就配上去，省的我们用户配」）
+
+§7.3-5 的手抄配置**已代码化**，用户侧零动作（发布细节见 `CHANGELOG.md` v1.31.7 段）：
+
+| §7 结论 | 实现落点（`hooks/dsh-serenity-hooks/src/opencode-provider.ts`） |
+|---|---|
+| 注入通道 = `llm-pi-ai.providers.<route>.headers` | `ctx.settings.update('llm-pi-ai', patch)`——`dsh-settings` 官方写入面（深合并 + 先校验后落盘）。**不用** `cordis.patch.yml`：宿主 patch 是 config 整体替换，会冲掉部署方别的 provider |
+| §7.2 的**会话族**（`x-opencode-session`/`X-Session-ID`/`x-opencode-client`/`x-opencode-project`） | 自动注入；**L1** 补已有路由的缺失键（不覆盖用户值、头名大小写不敏感）、**L2** 环境有 `OPENCODE_API_KEY` 且无 opencode 路由时建 `opencode-go` |
+| §7.4-① 静态值局限 | 会话 id 用常量 `dsh-serenity`（随机值 = 每次启动换亲和键 = 缓存永不命中） |
+| §7.2 的**身份族**（`X-Title`/`HTTP-Referer`） | **不注入**——只在免费档滥用判别中起作用，属冒充官方客户端绕限额；用户选的是付费面 |
+| §7.4-② 免费档不可解（UA 是保留名） | 保持不可解，不尝试绕过 |
+
+> 装配按 skiff 先例做三层触发（apply 立即试 / 命名空间未注册则退避重试 / `settings/updated` 复评），
+> 失败一律不抛（apply 抛错 = 整个 dsh 启动失败）。测试 30 例见 `tests/opencode-provider.test.ts`。
 
 ---
 

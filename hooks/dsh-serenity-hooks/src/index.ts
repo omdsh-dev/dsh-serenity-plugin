@@ -51,6 +51,7 @@ import { registerWeixinSendApi } from './weixin-send-api.js'
 import { registerWeixinOutputGuard } from './weixin-output-guard.js'
 import { registerLifecycle } from './seams/lifecycle.js'
 import { registerWebFetchProvider } from './web-fetch-provider.js'
+import { registerOpencodeAutoConfig } from './opencode-provider.js'
 import { registerImChannel } from './im-bridge.js'
 import { weixinChannel } from './im-weixin.js'
 import { createImBridgeTool } from './tools/im-bridge.js'
@@ -96,6 +97,12 @@ export interface Config {
   acp?: { enabled?: boolean; httpPort?: number }
   /** v1.30.12 web_fetch provider 接管（fake-ip / TUN 网络：宿主内置 provider 判「非公网」恒拒） */
   webFetch?: { enabled?: boolean }
+  /**
+   * v1.31.7 opencode 路由自动配置（plugin 全局；S142 用户"省得用户配"）：
+   * 补 `llm-pi-ai.providers.<opencode 路由>.headers` 的路由头；环境有 OPENCODE_API_KEY 时建路由。
+   * 缺省开（`!== false` 判定）；关闭后一切回到"用户手抄"。
+   */
+  opencodeProvider?: { autoConfigure?: boolean }
 }
 
 export const Config: z<Config> = z.object({
@@ -116,6 +123,7 @@ export const Config: z<Config> = z.object({
   skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(3099) }),
   acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(3100) }),
   webFetch: z.object({ enabled: z.boolean().default(true) }),
+  opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -221,6 +229,13 @@ export function apply(ctx: Context, config: Config): void {
   // `disabled: true` 关闭，避免 WEB_DUPLICATE_PROVIDER）。
   if (config.webFetch?.enabled !== false) {
     void registerWebFetchProvider(ctx)
+  }
+  // v1.31.7（S142 用户"dsp 装好就自动配上，省得用户配"）：opencode zen/go 路由头自动配置——
+  // DSH 用的 pi-ai **库**本身不发 opencode 路由头（pi CLI 是应用层自己加的），
+  // 缺 `x-opencode-session` 时 /zen/go 直接 400。本步经官方 settings 面补齐头；
+  // 环境有 OPENCODE_API_KEY 时自动建 opencode-go 路由。缺省开，缺省值以下才跳过。
+  if (config.opencodeProvider?.autoConfigure !== false) {
+    registerOpencodeAutoConfig(ctx)
   }
 }
 

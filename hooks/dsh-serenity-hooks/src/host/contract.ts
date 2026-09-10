@@ -87,8 +87,15 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     id: 'settings',
     name: 'settings',
     access: 'injected',
-    members: [{ name: 'installSection', kind: 'function' }],
-    impact: '设置面板不安装 → 所有开关静默 no-op',
+    members: [
+      { name: 'installSection', kind: 'function' },
+      // v1.31.7：opencode 路由自动配置（src/opencode-provider.ts）读写**别人的**命名空间
+      // （`llm-pi-ai`）——`get` 读现状、`update` 深合并写入。两者缺失 = 自动配置静默失效，
+      // 故与 installSection 同级登记（本表存在的意义正是把这类隐式依赖变成可探测项）。
+      { name: 'get', kind: 'function' },
+      { name: 'update', kind: 'function' },
+    ],
+    impact: '设置面板不安装 → 所有开关静默 no-op；opencode 路由自动配置失效',
     required: true,
   },
   {

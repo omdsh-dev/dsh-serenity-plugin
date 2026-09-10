@@ -111,6 +111,27 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 
 > 默认只监听 127.0.0.1 的入口，要暴露到公网由你自己决定（隧道 / 反代 / 端口映射都行），插件不绑定任何特定做法。
 
+### 3.4 省你一步：用 opencode 的模型
+
+想在 DSH 里用 opencode 的网关（`opencode.ai/zen`），本来除了配路由还得手抄一串请求头——
+这些头是 opencode 用来做**会话亲和路由**的，少写一个 `x-opencode-session`，`/zen/go` 面就直接 400 拒绝。
+**插件装好就自动配**，这一步你不用管：
+
+| 你的情况 | 插件做什么 |
+|---|---|
+| 已经配了 opencode 路由，但缺头 | 只补缺的那几个；**你手写过的值一律不动**（头名不分大小写，`X-Title` 和 `x-title` 一样算数） |
+| 一个 opencode 路由都没有，但环境里有 `OPENCODE_API_KEY` | 自动建 `opencode-go` 路由并带全头（没有 key 的人不受影响，不会平白多出一组模型） |
+
+- **只管"会话族"的头**：`x-opencode-session` / `X-Session-ID` / `x-opencode-client` / `x-opencode-project`。
+  前两个名字是**同一个值的两个别名**——你写了其中一个，就用**你的值**补上另一个，不会出现两个互相打架的会话 id
+- **不冒充 opencode 官方客户端**：`X-Title` / `HTTP-Referer` 这类"身份头"只在免费档的滥用判别里起作用，
+  插件不注入（替你骗额度不是我们该做的事，付费面本来也不需要它们）；`User-Agent` 是 DSH 的保留名，想注也注不了
+- **会话标识是固定的**（`dsh-serenity`）：DSH 的请求头在路由解析时一次算好，只能给静态值。
+  好处是同一台机器的请求稳定落同一个上游（对缓存友好）；代价是做不到"按会话分区"
+- **配的是你自己的文件**：写入 DSH 的 settings（`llm-pi-ai.providers.<路由>.headers`），随时可改可删。
+  不想要这个自动配置，就把本插件的 `opencodeProvider.autoConfigure` 关掉（关掉后一切回到手抄）
+- **密钥不碰**：插件只补路由和头，`OPENCODE_API_KEY` 放环境变量即可
+
 ---
 
 ## 4. 一个工作区长什么样
@@ -270,7 +291,7 @@ DSH 一个进程可以同时带多个工作区，每个工作区各自对接自�
 
 | 层 | 位置 | 放什么 |
 |---|---|---|
-| DSH 原生设置 | DSH 的 settings.yaml | 简单开关：网关 / 重建 / 会话命名、重建阈值、子角色开关与调试端口、ACP 与问答页开关、**巡航总开关（默认关）** |
+| DSH 原生设置 | DSH 的 settings.yaml | 简单开关：网关 / 重建 / 会话命名、重建阈值、子角色开关与调试端口、ACP 与问答页开关、**巡航总开关（默认关）**、**opencode 路由自动配置（默认开）** |
 | 插件全局文件 | `~/.dsh/serenity-hooks.json`（权限 0600） | 网关账号（scrypt + TOTP）、监听地址与端口、工作区白名单、cookie 安全开关、问答页 key |
 | 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**巡航（间隔/会话/焦点/窗口）**、**微信（账号/路由/开关）** |
 | 工作区凭据 | `localstore.json` | 密钥与本地偏好；微信机器人 token 也在这一层 |
@@ -296,7 +317,7 @@ AI 一次能"记住"的内容有上限。满了不用你手动开新会话：
 
 ```bash
 pnpm typecheck          # 类型检查（node + 浏览器端两套）
-pnpm test               # 全量测试（当前 77 个文件 / 1139 个用例）
+pnpm test               # 全量测试（当前 78 个文件 / 1169 个用例）
 pnpm build              # 打包（lib/index.js + client.js）
 ```
 
@@ -360,4 +381,4 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/LICENSE)）
 
-> **版本**：v1.31.6 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：77 个文件 / 1139 个用例
+> **版本**：v1.31.7 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：78 个文件 / 1169 个用例

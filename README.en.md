@@ -110,6 +110,32 @@ These are not "please don't" hints in a prompt — they are **mechanically impos
 
 > Entry points that default to 127.0.0.1 are yours to expose (tunnel, reverse proxy, port mapping — your call). The plugin does not prescribe any particular method.
 
+### 3.4 One less step: using opencode models
+
+To use the opencode gateway (`opencode.ai/zen`) from DSH, you normally have to configure a route *and* hand-copy a
+handful of request headers — opencode uses them for **session-affinity routing**, and without `x-opencode-session`
+the `/zen/go` endpoint answers **400** outright. **The plugin configures this for you on install**:
+
+| Your situation | What the plugin does |
+|---|---|
+| You already have an opencode route but it lacks headers | Fills in only the missing ones; **values you wrote are never overwritten** (header names are case-insensitive — `X-Title` and `x-title` count the same) |
+| You have no opencode route at all, but `OPENCODE_API_KEY` is in the environment | Creates the `opencode-go` route with the full header set (nobody without a key is affected — no surprise extra models) |
+
+- **Only the "session family" of headers**: `x-opencode-session` / `X-Session-ID` / `x-opencode-client` /
+  `x-opencode-project`. The first two are **two alias names for the same value** — write either one and the plugin
+  fills in the other with **your value**, so you never end up with two conflicting session ids
+- **No impersonation of the official opencode client**: identity headers such as `X-Title` / `HTTP-Referer` only
+  matter for the free tier's abuse detection, so the plugin does not inject them (padding your quota by pretending
+  to be someone else's client is not our job, and the paid endpoint does not need them anyway).
+  `User-Agent` is a reserved name in DSH — it cannot be overridden even if we wanted to
+- **The session id is a fixed value** (`dsh-serenity`): DSH resolves request headers once, at route-resolution
+  time, so a static value is the only option. The upside is that requests from one machine land on a stable
+  upstream (cache-friendly); the cost is that per-session partitioning is out of reach
+- **It writes your own file**: the headers go into DSH settings
+  (`llm-pi-ai.providers.<route>.headers`) — yours to read, edit, or delete. If you don't want the auto-config,
+  turn off this plugin's `opencodeProvider.autoConfigure` (everything reverts to copying headers by hand)
+- **Your key is untouched**: the plugin only adds routes and headers; just put `OPENCODE_API_KEY` in the environment
+
 ---
 
 ## 4. What a workspace looks like
@@ -271,7 +297,7 @@ Let a workspace **wake up on its own and get to work**, in front of you (foregro
 
 | Layer | Location | What goes there |
 |---|---|---|
-| DSH native settings | DSH `settings.yaml` | Simple switches: gateway / rebuild / session naming, rebuild threshold, sub-role switch and debug port, ACP and Q&A page switches, **cruising master switch (off by default)** |
+| DSH native settings | DSH `settings.yaml` | Simple switches: gateway / rebuild / session naming, rebuild threshold, sub-role switch and debug port, ACP and Q&A page switches, **cruising master switch (off by default)**, **opencode route auto-config (on by default)** |
 | Plugin global file | `~/.dsh/serenity-hooks.json` (mode 0600) | Gateway accounts (scrypt + TOTP), listen address and ports, workspace allow-list, cookie security switch, Q&A page key |
 | Workspace config | `.opencode/serenity.json` | Worker model allow-list, log threshold, safe-mode blocklist, sub-roles, **cruising (interval/session/focus/window)**, **WeChat (accounts/routes/switches)** |
 | Workspace credentials | `localstore.json` | Secrets and local preferences; the WeChat bot token lives here too |
@@ -297,7 +323,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 
 ```bash
 pnpm typecheck          # type check (node + browser halves)
-pnpm test               # full suite (currently 77 files / 1139 tests)
+pnpm test               # full suite (currently 78 files / 1169 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
@@ -362,4 +388,4 @@ Yes — through the same `weixin.hook` script configured in the workspace, with 
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.31.6 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 77 files / 1139 tests
+> **Version**: v1.31.7 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 78 files / 1169 tests

@@ -116,14 +116,16 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(events).toContain('session/disposed')
     // 自起资源各自登记拆卸：gateway 第二监听器 / autopilot 时钟 / lifecycle 聚合资源 /
     // 微信主动发送入口（v1.30.9——只绑 loopback 的独立监听器）/
-    // skiff root 退避重试定时器（v1.30.13——D1 定位失败重试；卸载后不得再尝试起服务）
+    // skiff root 退避重试定时器（v1.30.13——D1 定位失败重试；卸载后不得再尝试起服务）/
+    // opencode 路由自动配置的重试定时器（v1.31.7——命名空间竞态退避）
     const labels = effect.mock.calls.map((c) => String(c[1]))
-    expect(labels).toHaveLength(5)
+    expect(labels).toHaveLength(6)
     expect(labels.join('|')).toContain('gateway')
     expect(labels.join('|')).toContain('autopilot')
     expect(labels.join('|')).toContain('self-started resources')
     expect(labels.join('|')).toContain('weixin send api')
     expect(labels.join('|')).toContain('skiff root retry timer')
+    expect(labels.join('|')).toContain('opencode provider auto-config retry timer')
   })
 
   it('v1.30.8 F-08：ctx.effect 缺失 → 响亮降级不抛错（apply 不可成为启动单点）', () => {

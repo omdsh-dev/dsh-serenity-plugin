@@ -1,3 +1,85 @@
+## v1.31.7 — 2026-09-10（opencode 路由头自动配置：装好即用，用户不必手抄请求头）
+
+**Scope:** 用户需求「我是想 1，但是我们 dsp 能不能安装好自动就配上去，省的我们用户配」
+（1 = 走**付费** `opencode.ai/zen/go` 面）；`L1+L2 默认都开`为用户的显式裁决。
+**本轮不发布**（D14：用户未显式要求发版）。
+
+### ① 问题：DSH 调 opencode 网关缺请求头，而这一串头没人愿意抄
+- **症状**：`/zen/go` 按**请求头**做会话亲和路由，缺 `x-opencode-session` 时**直接 400**
+  `Request is missing x-opencode-session and cannot be routed efficiently`
+- **根因**：DSH 用的 `@earendil-works/pi-ai@0.85.1` **库本身不发这些头**
+  （全库 `x-opencode` 零命中）；pi 的 CLI 是在**应用层**
+  （`packages/coding-agent/src/core/sdk.ts`）自己加的 → 直接用库的 DSH 天然缺头。
+  dsp 侧无法经插件缝补齐（`PiAiAdapter` 是宿主内部，不暴露 `transformHeaders`）
+- **证据**：[pi #4847](https://github.com/earendil-works/pi/issues/4847)（维护者回复 + 官方认可的
+  workaround 与本实现同构）、[Trae 的 Go 面代理](https://github.com/LIMTCYT/opencode-go-proxy-for-trae)
+  （Go 面 400 原文 + 头清单，README 明列"dsh 亲测有效"）、hermes #106495（免费档头指纹 429 对照实验）
+
+### ② 新模块 `src/opencode-provider.ts`（两条规则，装好即生效）
+- **L1 补头**：**已有** opencode 路由（路由名 ∈ `opencode`/`opencode-go`，或 `baseURL` 主机名等于
+  或后缀于 `.opencode.ai`——后缀匹配防误伤 `opencode.ai.evil.com`）→ **只补缺失的键**；
+  头名按 HTTP 语义**大小写不敏感**比较；**用户已写的值一律不覆盖**
+- **L2 建路由**：一个 opencode 路由都**没有** **且** 环境有 `OPENCODE_API_KEY` → 建 `opencode-go` + 全头。
+  「有 key」是用户意图的最强证据；没有 key 的人**零影响**（不会平白多出一组模型）。
+  **不写 `apiKeyEnv`**——依赖 pi-ai 目录 provider 自带的 `envApiKeyAuth(['OPENCODE_API_KEY'])` 环境发现，
+  显式再声明一次反而多一层无法验证的凭据缝
+- **会话标识的两个头名是同一逻辑值的别名**：`x-opencode-session`（Go 面 400 点名的名字）与
+  `X-Session-ID`（OpenCode 自家客户端用的名字）。判定顺序是**先定值再补名**——
+  用户任写其一 → 用**他的值**补齐另一个；都没写才用本插件常量。**绝不出现两个互相矛盾的 id**
+- **会话标识是静态常量 `dsh-serenity`**（**有意为之**，非偷懒）：DSH 的 provider `headers` 在路由解析时
+  **一次性求值**（无 per-request 模板缝），随机值等于每次进程启动换一个亲和键 → 缓存永不命中。
+  常量让「同一安装 → 同一亲和键」成立（对提示词缓存是利好；对"按会话分区"是语义偏差，
+  pi #4847 报告者亦点出该 workaround 的固有缺陷）
+
+### ③ 注入通道：`ctx.settings.update('llm-pi-ai', patch)`（唯一可用且是官方面）
+- `dsh-settings` 的官方写入面：**深合并**（`mergeLayers` 逐层递归）→ 不冲掉用户别的路由；
+  **先校验后落盘**（pi-ai 注册时给的 `validate`）→ 坏补丁被拒且不持久化；
+  写入用户 settings 文档（0600，用户可读可删）
+- **被否的备选**：① 本插件 `cordis.patch.yml` 直接改 `llm-pi-ai` 的 config——宿主 patch 语义是
+  **整体替换 config（非深合并）**，会冲掉部署方在该条目上配的其它 provider，且无法按条件启用
+  ② 让用户手抄——本次要消灭的正是这一步
+
+### ④ 诚实边界：只注入"会话族"，**不冒充 OpenCode 客户端**
+- **注入**：`x-opencode-session` / `X-Session-ID` / `x-opencode-client: dsh` / `x-opencode-project: global`
+- **不注入** `X-Title: opencode` 与 `HTTP-Referer: https://opencode.ai/`——那是**冒充** OpenCode 客户端，
+  只在**免费档的滥用判别**中起作用。冒充他人客户端绕限额不是本插件该做的事
+  （用户选的是付费面，本就不需要这两个头）
+- **不注入** `User-Agent`——它是 `@deepseek-ai/dsh-llm` 的 attribution 保留名（`APP_IDENTITY` 无配置缝），
+  宿主层面就不可覆盖
+- **不注入** `x-opencode-request`——其语义是"会话内递增"（`msg_1`/`msg_2`…），本模块只能给静态值，
+  写个假的递增 id 比不写更糟
+
+### ⑤ 装配与失败语义
+- **三层触发**（照 skiff 先例，单点触发在同装载竞态下必然漏）：① apply 立即试一次
+  ② 命名空间未注册 → 退避重试 1s/3s/8s/20s/40s（`llm-pi-ai` 与 dsp 都依赖 settings，**装载无先后保证**）
+  ③ `settings/updated` 且 `ns === 'llm-pi-ai'` → 复评（用户热改 settings.yaml 时自愈；
+  自身写入触发的复评是幂等空转）
+- **失败语义（F-08/F-07 纪律）**：**任何失败都不抛给宿主**——apply 抛错 = **整个 dsh 启动失败**。
+  一律 try/catch + 响亮告警 + 指引手抄，最坏情况退回"用户手抄头"；
+  重试定时器随卸载/HMR **拆卸**（`registerDisposer`）
+- 幂等核心：无事可做时**不写**（避免无谓触发 `settings/updated`）
+
+### ⑥ 声明面
+- `src/index.ts`：`Config.opencodeProvider?: { autoConfigure?: boolean }`，schema **缺省 true**
+  （用户裁决 L1+L2 默认都开）
+- `src/host/contract.ts`：`settings` 服务成员增 `get` + `update`（检查数 **36 → 38**），impact 文案同步
+
+### 测试（78 files / 1169 tests，+30）
+- 新增 `tests/opencode-provider.test.ts`（30 用例）：纯函数穷举（路由判定含 **4 条误伤反向用例** /
+  别名双向 / 大小写不敏感 / 幂等 skip / 多路由互不影响 / 容错不抛）+ settings 面执行
+  （写入形状 / **this 绑定** / 无事不写 / 写被拒告警 / 读抛错告警 / 服务缺失告警）+ 装配订阅
+- `tests/register.test.ts`：拆卸标签 **5 → 6**（新增 opencode 重试定时器）
+- **收到的红**（前一载体遗留 2 个，本轮处置）：
+  ① 期望写错——`X-Session-ID` 与 `x-opencode-session` 是**两个头名**，用户只写后者时前者确实该补；
+  改为断言**补出的值 == 用户写的值**，并补反向别名用例
+  ② 代码死分支——`nothing-to-do` **不可达**（路由循环后必已推入 fill/skip 或末段 no-route/create-route，
+  动作列表从不空）→ 删除该分支与联合类型成员；**同属死代码的 `'no-env-key'` 一并删除**
+  （"没有 key" 路径实际发 `no-route`），无 key 用例的 `as never` cast 随之消掉
+
+### 待用户（D14）
+发布链（publish + 三推 + specs/根仓 push + deploy + restart-web）**未执行**。
+真机生效还需把 `OPENCODE_API_KEY` 放进环境（本机 `llm-pi-ai` 当前 `config:` 为空）。
+
 ## v1.31.6 — 2026-09-10（宿主硬切 DSH 0.1.5-rc.1：6 条真实突破 + 新宿主类型基线工具）
 
 **Scope:** 用户裁决「peer 改 `^0.1.5-rc.1`，只验新宿主，不做 0.1.2-rc.1 双基线」。
