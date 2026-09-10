@@ -322,6 +322,11 @@ function cmdPublish(): void {
   // 按 registry URL 匹配，官方 registry 发布不受影响。
   // v1.30.7（S142 review F-14）：发布前强制跑测试——此前 publish 只做 typecheck+build+pack-check，
   // 测试是"人记得跑"的步骤，绿着发布可能带着红测试。
+  // v1.31.11（用户裁决 D52"检查归发布机制"）：前置补**锁文件一致性判定**——GitHub CI 不再是
+  // 我们的质量门（用户"我对 github ci 持反对态度"），原先由 CI 的 `Install (hooks)` 兜住的
+  // "锁文件漂移"改由发布链在 publish 前拦下。
+  // 发布链的检查面（= 我们的门）：锁文件一致 → 测试（含 typecheck 双面）→ 构建 → README 同步 → tarball 核对。
+  verifyLockfile()
   cmdTest()
   cmdBuild()
   syncPackageReadme()
@@ -1134,6 +1139,30 @@ function cmdNpmInstallDev(argv: string[]): void {
 }
 
 /**
+ * verifyLockfile — 锁文件与 package.json 一致性**判定**（不做重算）。
+ *
+ * 单一真相源：`cmdLockfile` 的第 ② 步与 `cmdPublish` 的前置都调它 →
+ * 跑 `lockfile` 就是在验证发布链的同一段代码（可测）。
+ *
+ * 语义：`pnpm install --lockfile-only --frozen-lockfile` = CI 的 `Install (hooks)` 同款判定；
+ * exit 0 = 一致。**只判定不乱改**——重算由 `lockfile` 命令（人显式执行）承担，
+ * 发布路径不得顺手改锁文件。
+ *
+ * 为什么发布链要管它（D52，2026-09-10 用户裁决"检查归发布机制"）：GitHub CI 不再是质量门，
+ * 原先由 CI 兜住的漂移（v1.31.6 实例：改了 peer 没重跑锁文件 → `--frozen-lockfile` 拒绝安装）
+ * 改由发布前拦下。
+ */
+function verifyLockfile(): void {
+  const storeDir = join(HOOKS_DIR, '.pnpm-store')
+  const r = run('pnpm', ['install', '--lockfile-only', '--frozen-lockfile', '--store-dir', storeDir], { cwd: HOOKS_DIR, quiet: true })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail('锁文件与 package.json 不一致 → 先跑 `dsh-develop lockfile` 并提交锁文件（否则安装/CI 会失败）', 2)
+  }
+  console.log('[dsh-develop] ✓ 锁文件与 package.json 一致')
+}
+
+/**
  * lockfile — 重生成 hooks 的 pnpm 锁文件，并**用 CI 的同一把尺子当场自检**（v1.31.10）。
  *
  * 为什么存在（SESSION §17 实锤）：CI 的 `Install (hooks)` 走
@@ -1146,8 +1175,7 @@ function cmdNpmInstallDev(argv: string[]): void {
  *
  * 语义（两步，第二步是关键）：
  *   ① `pnpm install --lockfile-only` —— 只重算锁文件，**不动 node_modules**
- *   ② 复跑 `--frozen-lockfile --lockfile-only` —— CI 该步的**本地等价判定**：
- *      exit 0 = "CI 的 Install (hooks) 必过"；exit ≠0 = 仍然漂移（原文打印）
+ *   ② `verifyLockfile()` —— CI 该步的**本地等价判定**（同一函数被 publish 前置复用）
  *
  * 纪律：改完 package.json 依赖后**必须**跑本命令并提交锁文件（ci.yml 文件头同款要求）。
  * 用法：dsh-develop lockfile
@@ -1163,13 +1191,8 @@ function cmdLockfile(): void {
     fail(`pnpm install --lockfile-only 失败 (exit ${r.status})`, 2)
   }
   console.log((r.stdout + r.stderr).trim() || '(no output)')
-  console.log('[dsh-develop] ② 自检：--frozen-lockfile --lockfile-only（= CI Install (hooks) 同款判定）')
-  const check = run('pnpm', ['install', '--lockfile-only', '--frozen-lockfile', '--store-dir', storeDir], { cwd: HOOKS_DIR, quiet: true })
-  if (check.status !== 0) {
-    console.error(check.stdout + check.stderr)
-    fail(`锁文件仍与 package.json 不一致 —— CI 的 Install (hooks) 必红 (exit ${check.status})`, 3)
-  }
-  console.log('[dsh-develop] ✓ 锁文件已与 package.json 一致（CI 的 Install (hooks) 这一步必过）')
+  console.log('[dsh-develop] ② 自检：--frozen-lockfile --lockfile-only（= CI Install (hooks) 同款判定；publish 前置复用同一函数）')
+  verifyLockfile()
 }
 
 // ── main 守卫 ──

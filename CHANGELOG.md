@@ -63,13 +63,26 @@ F7b **精确红在注入行**（`@deepseek-ai/dsh-negative-control 缺少 devDep
 
 ### ⑦ 诚实边界与待办（**不发布**）
 
-- **CI 侧尚未实证**：以上全是本机等价验证（同锁文件 / 同 tsconfig / node 22）→ 必须推送后读 CI 注解
-  确认两个 typecheck 步**在 runner 上零错误**
-- **摘安全带是第二步**：只有拿到上面那个实证，才删 ci.yml 两个 typecheck 步的 `continue-on-error: true`
-  （顺序不可颠倒——先摘会让 CI 立刻红）；随后 ci.yml 的"为什么测试不再阻塞"注释块需同步说明
-  typecheck **不再**是信息性步骤
-- 新增 32 devDep 会被 CI 安装：`--ignore-scripts` 下这些包自带 `lib/`、无需构建 → 只增下载量
+- **CI 侧已实证**（run #39，2026-09-10 15:44:35→15:45:16）：`Install (hooks)` ✓、`Typecheck (node half)` ✓、
+  `Typecheck (client half)` ✓；**check-run 注解 21 条 → 1 条**（唯一剩余 = `Node.js 20 is deprecated`）——
+  即"两个 typecheck 步在 runner 上零错误"的机械证据
+- 新增 32 devDep 会被 CI 安装：`--ignore-scripts` 下这些包自带 `lib/`、无需构建 → 只增下载量（实测 hooks 安装 3 秒）
 - devDeps 精确钉版 = 宿主升级需显式抬（与本机运行宿主一致）；新宿主探测仍由 `typecheck-host <ver>` 负责
+
+### ⑧ 用户裁决（D52）：检查归发布机制，CI 不再自动介入
+
+- **原话**：「我对 github ci 持反对态度，如果有什么是需要检查的，请在我们发布机制里检查」
+- **落地**：
+  - `ci.yml` 触发从 `push`/`pull_request` → **仅 `workflow_dispatch`**（手动）⇒ push 不再产生 run，
+    **邮件路径彻底消失**；各步 `continue-on-error` 保留（手动跑时 = 一次性诊断，不阻塞、不发信）
+  - **质量门归发布链** `dsh-develop publish`：**新增 `verifyLockfile()` 前置**（锁文件与 `package.json`
+    一致性判定，**只判定不改**）→ `cmdTest()` → `cmdBuild()`（内含 **typecheck 双面**）→ README 同步 →
+    tarball 核对。即 v1.31.10 由 CI 兜住的"锁文件漂移"、以及本轮修好的 typecheck，**都改在发布前拦下**
+  - `verifyLockfile()` 与 `lockfile` 命令的第 ② 步**共用同一函数**（单一真相源）⇒ 跑 `dsh-develop lockfile`
+    就是在验证发布链的同一段代码
+  - 恢复自动触发的方法写在 ci.yml 文件头（一行注释指引，可逆）
+- **诚实边界（E↑）**：本改动**没有 CI 实证**——触发已改手动，push 不再产生 run；能验证的是
+  "发布链前置函数本地可用"（`dsh-develop lockfile` 跑通同一函数 ✓）。typecheck 修复的 CI 实证仍是 run #39（21→1）
 
 ---
 

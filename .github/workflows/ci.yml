@@ -27,41 +27,42 @@
 # pnpm）→ 已 `pnpm install --lockfile-only` 重新生成（68 KB → 122 KB，18 个 peer 均可解析到
 # `0.1.2-rc.1`）。**今后改 package.json 依赖后必须重跑 pnpm install 并提交锁文件。**
 #
-# ── 为什么 typecheck 是「信息性」而非阻塞门（诚实边界 E↑）────────────────────────
-# 两个 tsconfig 的 `paths` 指向**开发机上的宿主类型基准**：
-#   · node 半：`/home/yh/.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/*`（28 条）
-#   · client 半：同上 + `/home/yh/.dsh/source/current/packages/client/*`（harness 源码检出）
-# 这些路径在 runner 上不存在（旧版的 `Install DSH host` 步骤装到 runner 的全局 npm root，
-# 与这些硬编码路径**毫无关系 → 该步骤无效，已删除**）。
-# 实测：把 paths 清空（= CI 形态）后 node 半 typecheck **94 条错误**，根因是
-# `cordis` 与 `@deepseek-ai/cordis` 被装成两个包实例 → 宿主的 Context 声明合并失效
-# （`Property 'webServer' does not exist on type 'Context'`）。要真正在 CI 上跑通 typecheck，
-# 需要把宿主类型基准改成**仓库内可解析**（单 cordis 实例 + 把 client 半的 ui-slots/ui-primitives
-# 也纳入依赖）——那是一次独立改造，见 SESSION.md §8「CI 全红」条目。
-# 因此：**装配 + 测试 + typecheck 每一步都设为信息性（`continue-on-error`）**，run 恒为 success
-#       （装配步也要——实测 #31 那类失败就发生在 Install 阶段，只兜 Test 覆盖不到）。
-#       —— v1.31.11 追加裁决（用户 2026-09-11）："这个 CI 我不在乎，但失败了老给我发邮件了"。
-#       GitHub 只对 conclusion=failure 的 run 发邮件；本仓 CI 的**真实消费者是 agent**
-#       （历次排障都走 `GET …/check-runs/<id>/annotations`，免认证、不依赖邮件），
-#       故让 run 永不因测试红而失败：**邮件噪音归零，失败原文仍可取证**。
-#       **真实门在本地发布链**——`dsh-develop publish` 在 npm publish 前先跑 test + typecheck 双面 + build。
-#       要恢复阻塞：删掉各步的 `continue-on-error: true`（digest 步的 `if:` 两种形态都兼容）。
+# ── typecheck 基准（v1.31.11 已修好）+ 本 workflow 的定位（D52 用户裁决）─────────────
+# 旧形态（v1.30.7~v1.31.10）：两个 tsconfig 的 `paths` 指向**开发机上的宿主类型基准**
+#   （`/home/yh/.npm-global/…/dsh/node_modules/@deepseek-ai/*` + `/home/yh/.dsh/source/…`）
+#   → runner 上全不存在，tsc 静默回落，实测 node 半 **94 条错误**（主因 `cordis` 与
+#   `@deepseek-ai/cordis` 两个包实例 → Context 声明合并失效）→ 只能设 `continue-on-error`。
 #
-# 本地等价命令：
-#   msm("dsh-develop", ["test"])        # vitest（根配置覆盖 tests/ + hooks/**/tests/ + scripts/）
-#   msm("dsh-develop", ["typecheck"])   # node + client 双面（需要本机宿主安装）
+# v1.31.11 已把基准改成**仓库内可解析**：32 个宿主包进 hooks 的 devDependencies（精确
+# `0.1.5-rc.1`）+ paths 改 `node_modules/@deepseek-ai/*` + cordis 双映射同一实体；
+# 闸门 `tests/compliance.test.ts` F7。**实证（run #39）**：runner 上两个 typecheck 步
+# = success，check-run 注解 **21 条 → 1 条**（唯一剩余 = Node 20 弃用提示）。
+#
+# ⚠️ **D52（2026-09-10 用户裁决）**："我对 github ci 持反对态度，如果有什么是需要检查的，
+#    请在我们发布机制里检查" → 本 workflow 从"每次 push 自动跑"改为**仅手动触发**
+#    （`workflow_dispatch`）；**质量门归发布链** `dsh-develop publish`：
+#      锁文件一致（verifyLockfile）→ 测试（test 内含 typecheck 双面）→ 构建 → README 同步 → tarball 核对
+#    各步仍保留 `continue-on-error`：手动跑时它是**一次性诊断**，不阻塞、不发失败邮件。
+#    若将来要恢复自动触发：把 `on:` 加回 `push: branches: [master, main]` 即可（历史见 CHANGELOG v1.31.11）。
+#
+# 本地等价命令（= 发布链的手工调用）：
+#   msm("dsh-develop", ["test"])        # vitest（根配置覆盖 tests/ + hooks/**/tests/ + scripts/）+ typecheck 双面
+#   msm("dsh-develop", ["lockfile"])    # 锁文件重算 + 与 publish 前置同一函数的一致性判定
 
 name: CI
 
+# D52（2026-09-10 用户裁决）：GitHub CI 不是我们的质量门 → **仅手动触发**。
+# 质量门 = 发布链 `dsh-develop publish`（锁文件一致 → test 含 typecheck 双面 → build → tarball 核对）。
+# 恢复自动触发 = 加回：
+#   push:
+#     branches: [master, main]
+#   pull_request:
 on:
-  push:
-    branches: [master, main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
   test:
-    name: test (hooks + root) + typecheck (informational)
+    name: test (hooks + root) + typecheck (manual diagnostic)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
