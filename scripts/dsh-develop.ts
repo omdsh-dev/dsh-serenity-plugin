@@ -1019,13 +1019,36 @@ function cmdDeploy(): void {
  * @param profile - profile 名（默认 web）。
  * @param version - 精确版本或 `latest`；缺省 = latest。
  */
-function cmdNpmInstall(profile = 'web', version?: string): void {
+/**
+ * npm-install [profile] [version] [registry]
+ *
+ * `registry`（第三参，可选——v1.31.9 新增）：**只对本次安装的子进程**用
+ * `npm_config_registry` 指向该源，**不改任何 .npmrc**。
+ *
+ * 为什么需要它（R↓，2026-09-10 实证）：profile 的 pnpm 走**部署方的内网 Nexus 镜像**
+ * （来自用户级 `~/.npmrc` 的 `registry=`，此处不写具体主机名），
+ * 其 **packument 带 ~24h TTL 缓存**——我们发布新版本比 TTL 快时，Nexus 仍报**上一版**为 latest →
+ * `ERR_PNPM_NO_MATCHING_VERSION`（v1.31.8 / v1.31.9 连续两次撞墙）。
+ * profile 目录**没有** `.npmrc`（源来自用户级文件，在 CCC 边界外，agent 无权写）。
+ *
+ * ⚠️ **实测边界（勿重复试）**：`npm_config_registry` 只对 **npm** 生效，对 `dsh plugin add` 内部的
+ * **pnpm 不生效**——2026-09-10 实测：同一 env 下 `npm view` 正确返回 1.31.9，而 `dsh plugin add`
+ * 仍从 Nexus 拉取并失败（pnpm 的源解析被更高优先级来源压过，疑似 DSH 以显式参数传入）。
+ * 故本参数**只能**修正版本发现（`latest` 分支），**不能**救活 `dsh plugin add`。
+ * 本地装新版的可行出路（按成本排序）：
+ *   ① **`dsh-develop deploy`**（本地构建直写 profile，**不碰 npm**）← 2026-09-10 两次实际走通的路
+ *   ② 用户级操作：在 `~/.dsh/profiles/<p>/` 建 `.npmrc` 写 `registry=https://registry.npmjs.org/`（CCC 边界外）
+ *   ③ 刷 Nexus 缓存（需管理权限）/ 等 ~24h TTL 过期
+ */
+function cmdNpmInstall(profile = 'web', version?: string, registry?: string): void {
   const cliBin = join(process.env.HOME ?? '', '.npm-global', 'bin', 'dsh')
   const npmDsh = join(process.env.HOME ?? '', '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'lib', 'bin.js')
   const bin = existsSync(npmDsh) ? npmDsh : cliBin
   if (!existsSync(bin)) fail(`dsh CLI 缺失: ${bin}`, 2)
+  if (registry !== undefined && !/^https?:\/\//.test(registry)) fail(`registry 必须是 http(s) URL: ${registry}`, 2)
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   mkdirSync(cache, { recursive: true })
+  const registryEnv = registry ? { npm_config_registry: registry } : {}
 
   // 解析目标版本：显式版本直接使用；缺省/latest 查 registry 最新版。
   let target = version
@@ -1033,7 +1056,7 @@ function cmdNpmInstall(profile = 'web', version?: string): void {
     const view = run('npm', ['view', '@shgroup/dsh-serenity-hooks', 'version'], {
       cwd: process.cwd(),
       quiet: true,
-      env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+      env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache, ...registryEnv },
     })
     if (view.status !== 0) {
       console.error(view.stdout + view.stderr)
@@ -1044,11 +1067,14 @@ function cmdNpmInstall(profile = 'web', version?: string): void {
     console.log(`[dsh-develop] registry 最新版本: ${target}`)
   }
   const pkgSpec = `@shgroup/dsh-serenity-hooks@${target}`
-  console.log(`[dsh-develop] npm 安装 ${pkgSpec} 到 profile '${profile}'（官方 dsh plugin add 路径）`)
+  console.log(
+    `[dsh-develop] npm 安装 ${pkgSpec} 到 profile '${profile}'（官方 dsh plugin add 路径）` +
+      (registry ? `｜源覆盖: ${registry}` : ''),
+  )
   const r = run(bin, ['plugin', '--profile', profile, 'add', pkgSpec], {
     cwd: process.cwd(),
     quiet: true,
-    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache, ...registryEnv },
   })
   if (r.status !== 0) {
     console.error(r.stdout + r.stderr)
@@ -1131,7 +1157,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }
       case 'bump': cmdBump(rest[0]); break
       case 'deploy': cmdDeploy(); break
-      case 'npm-install': cmdNpmInstall(rest[0] ?? 'web', rest[1]); break
+      case 'npm-install': cmdNpmInstall(rest[0] ?? 'web', rest[1], rest[2]); break
       case 'npm-install-dev': cmdNpmInstallDev(rest); break
       case 'restart-web': cmdRestartWeb(); break
       case 'api-status': cmdApiStatus(rest[0]); break
@@ -1141,7 +1167,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
