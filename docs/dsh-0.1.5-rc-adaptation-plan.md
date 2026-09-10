@@ -21,7 +21,7 @@
 | C4 | `sessionPersistence.list()` 返回形状 | 🔴 **静默运行时** | `SessionHeader[]` → `SessionPersistenceSnapshot[]`（`cwd` 下移一层）（§4.2） |
 | D | `host/contract.ts` 契约表 17 服务 + 10 事件 | ✅ 零改动 | 逐条核对全部存活；`satisfies readonly (keyof Events)[]` 编译期通过（§5） |
 | E | tsconfig 路径处置 | ✅ 零改动（正式配置） | 正式 paths 继续指向本机安装 = **用户升级即自动切新宿主**；本轮验证走 `typecheck-host` 旁路（§2） |
-| F | 任务 B：opencode zen 标识头 | ✅ **配置面可解** | `llm-pi-ai.providers.<route>.headers`；唯一保留名 `user-agent`（§7） |
+| F | 任务 B：opencode zen / go 标识头 | ✅ 检索定论 | 付费 `/zen/go` 走 `llm-pi-ai.providers.<route>.headers` **配置即可**（需 `x-opencode-session` + 身份族 `X-Title`/`HTTP-Referer`）；**免费档额外要求 `User-Agent` = DSH 保留名 → 配置不可解**（§7） |
 
 **一句话**：真实突破点只有 **6 条**（4 条类型面 + 2 条静默运行时），全部集中在 **client 半与 CCC 自动发现路径**；node 半在新宿主下**零类型错误**（78 文件实测载入）。
 
@@ -288,45 +288,87 @@ dsh-develop typecheck-host <version>
 
 ---
 
-## 7. 任务 B：opencode zen 标识头（独立结论）
+## 7. 任务 B：opencode zen / go 标识头（**已由互联网检索定论**）
 
 ### 7.1 结论
 
-**配置面可解，不需要 ACC 代码改动。**
+**付费 `/zen/go` 路由：配置面可解，零 ACC 代码改动。**
+**免费档模型（`*-free` / `big-pickle`）：配置面**不可解**——它额外按 `User-Agent` 判别客户端，而 `User-Agent` 是 DSH 唯一的保留头。**
 
-### 7.2 证据链
+### 7.2 需要的头（两路独立证据交叉）
+
+| 头 | 值 | 作用 | 证据 |
+|----|----|------|------|
+| `x-opencode-session` | 会话 id | 会话亲和路由（提示词缓存）；**缺失 → 400 `Request is missing x-opencode-session`** | pi issue #4847；Trae 代理 |
+| `X-Session-ID` | uuid | OpenCode 客户端自用的会话 id | hermes issue #106495（免费档 200 的复现命令） |
+| `x-opencode-client` | `cli` / `pi` / `dsh` | 客户端标识（统计） | pi #4847（pi 用 `pi`）；Trae 代理（`cli`） |
+| `x-opencode-request` | `msg_N` | 请求 id（会话内递增） | Trae 代理 |
+| `x-opencode-project` | `global` | 项目 id | Trae 代理 |
+| `HTTP-Referer` | `https://opencode.ai/` | 客户端身份（**免费档判别**） | hermes #106495 |
+| `X-Title` | `opencode` | 客户端身份（**免费档判别**） | hermes #106495 |
+| `User-Agent` | `opencode/<ver>` | **仅免费档判别**；付费路径不需要 | hermes #106495（**DSH 保留，不可覆盖**）；pi 维护者明确"不含 UA 改动" |
+
+> **与初版判断的关系**：in-flight 里那份"归档 opencode 源码同类网关注入形态"的清单（`X-Title: opencode` / `HTTP-Referer: https://opencode.ai/`）**是对的**——它们是 OpenCode 客户端实际发的身份头。当初无法确定"究竟哪个"，现在答案是**"两族都要，按档位分层"**：会话族（`x-opencode-*`）保路由，身份族（`X-Title`/`HTTP-Referer`/UA）过免费档判别。
+
+### 7.3 证据链（源码级 + 上游 issue 级）
 
 1. **注入点存在且是官方通道**：`dsh-llm-pi-ai/lib/index.js:1873`
    ```js
    snapshot.models.streamSimple(model, context, { …options, headers: requestHeaders(profile.headers) })
    ```
 2. **`requestHeaders` 的合并语义**（同文件 `:1722-1730`）：`profile.headers` 去掉与 attribution **大小写不敏感**同名的键，再叠加 attribution。
-3. **保留名只有一个**：`@deepseek-ai/dsh-llm` 的 `attributionHeaders()`（`lib/index.js:822-824`）当前只返回
-   `{ 'user-agent': 'deepseek-harness/<ver> (+https://github.com/deepseek-ai/deepseek-harness)' }`。
-   `APP_IDENTITY` 是模块常量、**无配置缝**（`attributionHeaders()` 在 pi-ai 适配器内以默认参数调用）。
-   → **只有 `User-Agent` 不可覆盖**；`X-Title` / `HTTP-Referer` / `originator` 等**全部可注入**。
-4. **配置路径**：`llm-pi-ai` 是插件注册的 settings 命名空间（`NS = "llm-pi-ai"`，`installSection` 于 `lib/index.js:2661`；条目地址 `settingsPath: ["providers", <route>]`）→ 用户在 `~/.dsh/settings.yaml` 写：
+3. **保留名只有一个**：`@deepseek-ai/dsh-llm` 的 `attributionHeaders()`（`lib/index.js:822-824`）当前只返回 `user-agent`。
+   `APP_IDENTITY` 是模块常量、**无配置缝** → **只有 `User-Agent` 不可覆盖**，其余全部可注入。
+   `catalog.d.ts:94-100` 的 compat 漂移门把 `sendSessionAffinityHeaders`/`sessionAffinityFormat` 标为 `withhold`
+   （**不允许经 profile 设置**）——但它们是 **compat 字段**；`headers` 是**顶层 profile 字段**，不受该门管辖。
+4. **`pi-ai` 库本身不发这些头**（本仓 grep 实证，`@earendil-works/pi-ai@0.85.1` 全库 `x-opencode` **零命中**；
+   只有 `sendSessionAffinityHeaders`/`sessionAffinityFormat`，格式仅 `openai`/`openai-nosession`/`openrouter`）。
+   pi **CLI 应用**是在自己的 SDK header 路径里加的（pi #4847 维护者回复：实现在
+   `packages/coding-agent/src/core/sdk.ts`，加 `x-opencode-session: <session id>` + `x-opencode-client: pi`）。
+   → **这就是 DSH（直接用库）缺这个头的原因**；也说明上游可以修（DSH 应向官方提同样需求）。
+5. **配置路径**：`llm-pi-ai` 是插件注册的 settings 命名空间（`NS = "llm-pi-ai"`，`installSection` 于 `lib/index.js:2661`；
+   条目地址 `settingsPath: ["providers", <route>]`）→ 用户在 `~/.dsh/settings.yaml` 写：
    ```yaml
    llm-pi-ai:
      providers:
        opencode-go:
          apiKeyEnv: OPENCODE_API_KEY
          headers:
-           X-Title: opencode
+           x-opencode-session: dsh-serenity      # 静态值（见 7.4 局限）
+           X-Session-ID: dsh-serenity
+           x-opencode-client: cli
            HTTP-Referer: https://opencode.ai/
+           X-Title: opencode
    ```
-5. **route 事实**：`opencode-go` 是 pi-ai **0.85.1 内置目录 provider**——`dist/providers/opencode-go.js`（id `opencode-go`，`envApiKeyAuth(["OPENCODE_API_KEY"])`，三种协议）＋ `dist/providers/data/opencode-go.json`（baseURL `https://opencode.ai/zen/go`，模型如 `minimax-m3` / `deepseek-v4-flash` / `deepseek-v4-pro`）。pi-ai **自身不发任何标识头**（全库 `grep X-Title|HTTP-Referer|originator` 零命中）。
-6. **本机现状**：`dsh-develop dump-config pi-ai` → `llm-pi-ai` 已装载但 `config:` **为空**（未配置任何 provider route）。
+   **该形状与 pi issue #4847 里官方认可 workaround 完全同构**（那份 workaround 就是 `providers.<route>.headers."x-opencode-session"`）——独立佐证本注入点成立。
+6. **route 事实**：`opencode-go` 是 pi-ai 0.85.1 **内置目录 provider**（`dist/providers/opencode-go.js`，
+   baseURL `https://opencode.ai/zen/go`，`envApiKeyAuth(["OPENCODE_API_KEY"])`，模型如 `minimax-m3`/`deepseek-v4-flash`）。
+   `https://opencode.ai/zen/go/v1` **不在官方文档的端点表里**（官方只列 `/zen/v1/...`）→ 属**未文档化面**，行为只能靠社区证据。
+7. **档位差异**：
+   - `/zen/v1`（Zen 按量付费）：**缺 session 头会被优雅兜底**（按客户端 IP 路由）——仅在同会话换 IP 时缓存未命中
+     （pi #4847 报告者本人补充）。400 `MissingSessionID` 存在，由 hermes #101864 修好。
+   - `/zen/go`（Go 档）：社区代理实证**缺 `x-opencode-session` 直接 400**。
+   - **免费档**：Zen 中继按**完整客户端头指纹**判别 → 非 OpenCode 客户端 429 `FreeUsageLimitError`
+     （hermes #106495，同 IP 秒级对照实验：换 UA/Referer/X-Title 即 200）。
+8. **本机现状**：`dsh-develop dump-config pi-ai` → `llm-pi-ai` 已装载但 `config:` **为空**（未配任何 provider route）。
 
-### 7.3 ⚠️ 未决（阻塞项）
+### 7.4 局限（必须让用户知道的边界）
 
-**zen 究竟要求哪一个头，源码层无法回答**（pi-ai 不设、opencode 归档只给出同类网关的多种形态）。需要：
-- 用户提供实际报错原文（如 `401` 响应体），或
-- 用户回家后做一次真实请求验证
+- **静态值**：DSH 的 `headers` 在 profile 解析时**一次性求值**（`config.d.ts`："validated against Fetch when the profile resolves"），
+  没有 per-request 模板缝；`transformHeaders`（pi-ai 支持）DSH 适配器未使用。
+  → 只能注入**静态**会话 id。pi #4847 报告者指出该 workaround 的固有缺陷："bound to the installation and not to the actual session"。
+  代价：跨会话共用同一亲和键 → 全部会话钉到同一上游 provider（**对缓存是利好**，对"按会话分区"是语义偏差）。
+- **免费档不可解**：需要 `User-Agent: opencode/<ver>`，而它是 DSH 的 attribution 保留名（§7.3-③）。
+  三条出路：① 不用免费档模型 ② 本机起一个注入代理（如 Trae 代理那类，把 DSH 的 `baseURL` 指过去）
+  ③ 向 DSH 官方提"opencode 路由头"需求（pi CLI 已这么做，属同族实现）。
+- **`X-Session-ID` vs `x-opencode-session`**：两个名字在不同来源各自出现（OpenCode 客户端用前者，pi/代理用后者）。
+  稳妥做法 = **两个都发**（HTTP 头名大小写不敏感但名字不同，是两个头）。
 
-**分支**：
-- 若要求 `X-Title` / `HTTP-Referer` / `originator` 类 → **§7.2 配置即可收口**，dsp 零代码改动。
-- 若要求 `User-Agent: opencode/<ver>` → **配置面不可解**（attribution 保留名 + `APP_IDENTITY` 无配置缝），需要另议（改宿主 / 上游 issue / 网关侧放行）。
+### 7.5 待用户动作
+
+1. 确认走**哪条路由**（`opencode-go` 付费 / 用免费档），决定是否受 §7.4 第二条限制
+2. 回家后配 `~/.dsh/settings.yaml` 的 `llm-pi-ai.providers.opencode-go.headers`（形状见 7.3-5）
+3. 若仍 400/429：把**响应体原文**给我——它直接写缺哪个头（`Request is missing x-opencode-session` / `FreeUsageLimitError`），可一次性定位，无需再猜
 
 ---
 
