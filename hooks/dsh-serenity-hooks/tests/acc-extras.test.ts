@@ -4,6 +4,7 @@ vi.mock('@deepseek-ai/dsh-tools', () => ({
   defineTool: (opts: unknown) => opts,
 }))
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runMsm, MSM_GUIDE, MSM_ACTIONS } from '../src/msm-ops.js'
@@ -13,6 +14,24 @@ import { NEAT_CONTENT, neatTool } from '../src/tools/neat.js'
 import { resolveSerenityEnv } from '../src/seams/env.js'
 
 let dir: string
+
+/**
+ * MSM `exec` 真跑 `.ts` 脚本需要 **TS 运行时**：有 bun 则直跑（`msm-ops.ts` 的 `bunExecutablePath()`），
+ * 无 bun 时回落 `npx tsx <script>`——脚本位于**临时 CCC 目录**（`mkdtemp`），那里没有本地 tsx，
+ * npx 只能**联网拉取**。CI runner 无 bun 且网络抖动 → 偶发 exit 1。
+ * **实证**：`exec --format=json 包装输出` 在 CI run #33（`ef71d2b`）通过、run #34（`e35aa17`，
+ * 与前者只差版本号/README）失败——同代码不同结果 = 环境/网络耦合，不是被测逻辑的问题。
+ * 故本用例**仅在 bun 在场时执行**（与 `tests/ops.test.ts` 的 `HAS_BUN` 同一先例与理由；
+ * 本文件其余用例不执行脚本，保持无条件运行）。
+ */
+const HAS_BUN = ((): boolean => {
+  try {
+    execFileSync('bun', ['--version'], { stdio: 'pipe' })
+    return true
+  } catch {
+    return false
+  }
+})()
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'acc-extras-'))
@@ -70,7 +89,7 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     expect(schema.flags[0]!.type).toBe('path')
   })
 
-  it('exec --format=json 包装输出', () => {
+  it.skipIf(!HAS_BUN)('exec --format=json 包装输出（需 bun 直跑 TS：见 HAS_BUN）', () => {
     const scriptsDir = join(dir, '.opencode', 'skills', 't', 'scripts')
     mkdirSync(scriptsDir, { recursive: true })
     writeFileSync(join(scriptsDir, 'x.ts'), 'console.log("hi");\n')
