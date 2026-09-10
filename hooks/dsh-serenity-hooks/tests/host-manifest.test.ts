@@ -49,11 +49,18 @@ describe('宿主消费面（manifest）：宿主真正读取的字段必须完�
     expect(pkg.files).toContain('dsh.plugin.json')
   })
 
-  it('exports["./client"] 存在且目标文件在场（浏览器半的发现通道）', () => {
-    const pkg = read('package.json') as { exports?: Record<string, unknown> }
+  it('exports["./client"] 声明自洽且目标被 files[] 白名单覆盖（浏览器半的发现通道）', () => {
+    const pkg = read('package.json') as { exports?: Record<string, unknown>; files?: string[] }
     const client = pkg.exports?.['./client']
     expect(typeof client).toBe('string')
-    expect(existsSync(join(packageDir, String(client)))).toBe(true)
+    // 只断**声明自洽**，**不断"构建产物在场"**：CI 用 `pnpm install --ignore-scripts` 安装
+    // （prepare 依赖本机硬编码 paths，runner 上跑不了构建）→ runner 上没有 lib/。
+    // v1.31.10 实证：CI run #32（本仓 CI 自 v1.31.6 后**首次真正跑到 vitest**）就红在这一行
+    // ——旧断言把"产物已构建"这一**环境依赖**混进了测试，于是"本地绿、CI 红"。
+    // 产物完整性归发布链的 `dsh-develop pack-check`（构建之后跑），测试只负责
+    // "export 目标与 files[] 白名单对得上"。
+    expect(String(client)).toMatch(/^\.\/lib\/.+\.js$/)
+    expect(pkg.files ?? []).toContain(String(client).replace(/^\.\//, ''))
   })
 
   it('dsh.client 声明在场（platform 决定浏览器半挂到哪个面）', () => {
