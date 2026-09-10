@@ -321,8 +321,10 @@ pnpm test               # 全量测试（当前 80 个文件 / 1176 个用例）
 pnpm build              # 打包（lib/index.js + client.js）
 ```
 
-- **开发用小工具**：`scripts/dsh-develop.ts`——typecheck / test / build / status / commit / push / version / bump / deploy / restart-web / publish / pack-check / github-push 一条龙。
-  `pack-check` 会在发布前核对打包产物是否完整（曾经踩过"发到 npm 少了文件"的坑）；`scripts/dsh-crash-investigate.ts` 用来查崩溃（只读）
+- **开发用小工具**：`scripts/dsh-develop.ts`——typecheck / test / build / status / commit / push / version / bump / deploy / **lockfile** / restart-web / publish / pack-check / github-push 一条龙。
+  `lockfile` = 重生成锁文件 + 用 `--frozen-lockfile` 自检（CI 的 `Install (hooks)` 同款判定）；
+  `pack-check` 会在发布前核对打包产物是否完整（曾经踩过"发到 npm 少了文件"的坑）；`scripts/dsh-crash-investigate.ts` 用来查崩溃（只读）。
+  ⚠️ **改完 `package.json` 依赖后必须跑 `lockfile` 并提交锁文件** —— v1.31.6 漏了这一步，CI 从此一直红（红在"测试根本没跑"，见 CHANGELOG v1.31.10）
 - **架构**：Cordis 原生插件，用 DSH 的正式接口注册工具和拦截点——**从不修改 DSH 本体**
 - **代码地图**：[docs/codebase-overview-v1.22.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/docs/codebase-overview-v1.22.md)
 - **设计决策**：见 [CHANGELOG.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/CHANGELOG.md) 和维护技能 `dsh-serenity-plugin-development`
@@ -381,4 +383,4 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/LICENSE)）
 
-> **版本**：v1.31.9 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1176 个用例
+> **版本**：v1.31.10 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1176 个用例

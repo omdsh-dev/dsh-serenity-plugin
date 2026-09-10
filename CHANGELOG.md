@@ -1,3 +1,49 @@
+## v1.31.10 — 2026-09-11（CI 恢复有效：锁文件漂移 + 上游 cordis 无 4.0.2 + 一条环境依赖断言）
+
+**Scope:** CI 自 v1.31.6 起**每次 push 都红**，且红法是"测试根本没跑"（`Install (hooks)` 即失败 →
+`Test` 整步 skipped）。本版把 CI 修回绿（**自 v1.31.5 以来第一次**），并新增开发通道子命令
+`lockfile`，让"依赖改了但锁文件没重跑"这类漂移**一条命令自检**。
+
+### ① 根因一：hooks 锁文件漂移（漂移闸门的**真阳性**）
+- **现象**：CI run #31（v1.31.9 推送）`Install (hooks)` failure → `Test` 与两个 typecheck 全 skipped，
+  20 秒结束；免认证注解原文 `vitest-digest: no vitest log captured (Test step failed before vitest ran)`
+  —— **不是测试红，是测试没跑**（阻塞门静默失效，比红更危险）
+- **根因**：`hooks/dsh-serenity-hooks/pnpm-lock.yaml` 自 v1.30.16（`6751fd0`）后再没重生成，
+  18 项宿主 peer 仍写 `^0.1.2-rc.1`，而 v1.31.6 已抬到 `^0.1.5-rc.1` →
+  `pnpm install --frozen-lockfile` 判定"锁文件与 package.json 不一致" → **拒绝安装**
+- **定性**：闸门**按设计工作**（ci.yml 文件头 v1.30.16 已写明"改依赖必须重跑 pnpm install 并提交锁文件"）
+  → 修法是**补齐锁文件**，不是关掉闸门
+
+### ② 根因二：`cordis` peer 范围上游不可满足（v1.31.6 的过度外推）
+- 重生成锁文件当场报 `ERR_PNPM_NO_MATCHING_VERSION: cordis@^4.0.2`
+- **取证三条**：`registry.npmjs.org/cordis/4.0.2` = **404**（上游 cordis 最高只到 `4.0.0-rc.10`）；
+  宿主 profile 实际提供的 bare `cordis` 是 dsh 注入的私有 shim **`4.0.0-rc.7`**（`"private": true`）；
+  43 个 DSH 0.1.5-rc.1 宿主包**无一 peer bare `cordis`**（全部 peer `@deepseek-ai/cordis@^4.0.2`）
+- **修复**：`cordis` peer `^4.0.2` → **`^4.0.0-rc.7`**；`@deepseek-ai/cordis` 保持 `^4.0.2`
+- **判据（写入断言注释）**：peer 范围 = "**registry 能否解析** + **运行时实际提供什么**"，两者都要实测，
+  不能由一个包的存在推及另一个同名包
+
+### ③ 根因三：一条把"构建产物在场"写进断言的用例（CI 首次真正跑到测试后才暴露）
+- CI 修好后 vitest 首次真正执行（run #32：79/80 files、1165/1166 tests）→ 唯一红点
+  `host-manifest.test.ts:56`「`exports["./client"]` 目标文件在场」：CI 用 `--ignore-scripts` 装
+  （`prepare` 依赖本机硬编码 paths，runner 上跑不了构建）→ runner 没有 `lib/` → `existsSync` 必 false
+- 该文件 v1.31.9 才写，而 CI 自 v1.31.6 起从未跑到 vitest → **这条断言从未被 CI 检验过**
+- **改法**：只断**声明自洽**（`./lib/*.js` 形态 + 被 `files[]` 白名单覆盖）；
+  产物完整性归发布链 `pack-check`（构建之后跑），不压在测试上
+
+### ④ 新增 `dsh-develop lockfile`
+- `pnpm install --lockfile-only`（只重算锁文件，**不动 node_modules**）+ 紧跟
+  `--frozen-lockfile --lockfile-only` **自检** = CI 的 `Install (hooks)` 同款判定
+  → 本地一条命令确认"CI 这一步必过"
+- 纪律：**改完 `package.json` 依赖后必须跑它并提交锁文件**
+- 副作用登记：pnpm 11 在 `hooks/dsh-serenity-hooks/pnpm-workspace.yaml` 写入
+  `minimumReleaseAgeExclude`（34 个 `0.1.5-rc.1` 包绕开最小发布年龄门），随本版入仓
+
+### ⑤ 验证
+- 门禁：**80 files / 1176 tests** 全绿 + typecheck 双面 + build + pack-check
+- **CI run #33 = success** —— 自 v1.31.5（run #26）以来第一次绿，阻塞门（`pnpm test`）恢复有效
+- 断言更新：`compliance.test.ts` F6b（双映射改断"各自可解析"而非"同串"）+ `host-manifest.test.ts` peer 正则
+
 ## v1.31.9 — 2026-09-10（rebuild 第二条阻断规则修复 + 事件 payload 闸门补全 + 域 C 收口：rebuild 全链真机跑通）
 
 **Scope:** v1.31.8 修好 `SurfaceOp` 字段名后，rebuild **走得更远但撞上第二条宿主规则**（同一诊断通道给出的第二份原文）。

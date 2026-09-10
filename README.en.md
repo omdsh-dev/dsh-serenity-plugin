@@ -327,9 +327,11 @@ pnpm test               # full suite (currently 80 files / 1176 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
-- **Development tool**: `scripts/dsh-develop.ts` — typecheck / test / build / status / commit / push / version / bump / deploy / restart-web / publish / pack-check / github-push in one place.
+- **Development tool**: `scripts/dsh-develop.ts` — typecheck / test / build / status / commit / push / version / bump / deploy / **lockfile** / restart-web / publish / pack-check / github-push in one place.
+  `lockfile` regenerates the lockfile and self-checks it with `--frozen-lockfile` (the same verdict CI's `Install (hooks)` uses);
   `pack-check` verifies the packaged artifacts before publishing (we once shipped an npm release missing files);
-  `scripts/dsh-crash-investigate.ts` is a read-only crash investigator
+  `scripts/dsh-crash-investigate.ts` is a read-only crash investigator.
+  ⚠️ **After changing `package.json` dependencies you must run `lockfile` and commit the lockfile** — v1.31.6 skipped it and CI stayed red ever since (red as "the tests never ran"; see CHANGELOG v1.31.10)
 - **Architecture**: a Cordis-native plugin registering tools and interception points through DSH's official interfaces — **DSH itself is never modified**
 - **Code map**: [docs/codebase-overview-v1.22.md](docs/codebase-overview-v1.22.md)
 - **Design decisions**: see [CHANGELOG.md](CHANGELOG.md) and the maintenance skill `dsh-serenity-plugin-development`
@@ -388,4 +390,4 @@ Yes — through the same `weixin.hook` script configured in the workspace, with 
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.31.9 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 80 files / 1176 tests
+> **Version**: v1.31.10 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 80 files / 1176 tests
