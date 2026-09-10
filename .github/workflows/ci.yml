@@ -95,9 +95,39 @@ jobs:
         working-directory: hooks/dsh-serenity-hooks
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # 阻塞门：根 vitest 配置覆盖 tests/ + hooks/**/tests/ + scripts/（约 1000+ 用例）
+      # 阻塞门：根 vitest 配置覆盖 tests/ + hooks/**/tests/ + scripts/（约 1100+ 用例）
+      #
+      # v1.31.4：tee 到日志文件 + **`set -o pipefail`**（必须——否则管道退出码取自 tee，
+      # vitest 红而 step 绿，阻塞门静默失效）。日志供下一步转注解用。
       - name: Test
-        run: pnpm test
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm test 2>&1 | tee "$RUNNER_TEMP/vitest.log"
+
+      # 失败原文可读（v1.31.4 排障沉淀）：job log 需 admin 权限（匿名 `…/logs` → 403），
+      # 而 **workflow command 产生的 annotation 免认证可读**
+      # （`GET /repos/<owner>/<repo>/check-runs/<id>/annotations`）。本步把 vitest 的失败摘要
+      # 转成 `::error` 注解——排查者无需仓库权限即可看到失败用例名与断言差异。
+      # 触发背景：v1.31.2~v1.31.4 连续三轮 CI 只报 "Test step exit code 1"，无法定位。
+      - name: Test failure digest (annotations)
+        if: failure()
+        shell: bash
+        run: |
+          LOG="$RUNNER_TEMP/vitest.log"
+          if [ ! -f "$LOG" ]; then
+            echo "::error title=vitest-digest::no vitest log captured (Test step failed before vitest ran)"
+            exit 0
+          fi
+          # 失败摘要：优先 "Failed Tests" 段（含用例名 + 断言 diff），否则取日志末尾
+          SUMMARY="$(sed -n '/Failed Tests/,$p' "$LOG" | head -c 4000)"
+          [ -n "$SUMMARY" ] || SUMMARY="$(tail -c 4000 "$LOG")"
+          TAIL="$(tail -n 12 "$LOG")"
+          esc() { sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g'; }
+          echo "::error title=vitest-summary::$(printf '%s' "$TAIL" | esc)"
+          echo "::error title=vitest-failure-digest::$(printf '%s' "$SUMMARY" | esc)"
+          echo "----- full vitest log (admins) -----"
+          cat "$LOG"
 
       # 信息性：宿主类型基准是本机路径（见文件头「为什么 typecheck 是信息性」）
       - name: Typecheck (node half, informational)
