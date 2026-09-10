@@ -38,9 +38,13 @@
 # （`Property 'webServer' does not exist on type 'Context'`）。要真正在 CI 上跑通 typecheck，
 # 需要把宿主类型基准改成**仓库内可解析**（单 cordis 实例 + 把 client 半的 ui-slots/ui-primitives
 # 也纳入依赖）——那是一次独立改造，见 SESSION.md §8「CI 全红」条目。
-# 因此：阻塞门 = **测试**（不依赖宿主，宿主调用全部被 vi.mock 拦截）；
-#       typecheck 设为 `continue-on-error`（看得到、不阻塞），真实门在本地发布链——
-#       `dsh-develop publish` 在 npm publish 前先跑 typecheck 双面 + build，类型红则发布不了。
+# 因此：**测试与 typecheck 全部设为信息性（`continue-on-error`）**，run 恒为 success。
+#       —— v1.31.11 追加裁决（用户 2026-09-11）："这个 CI 我不在乎，但失败了老给我发邮件了"。
+#       GitHub 只对 conclusion=failure 的 run 发邮件；本仓 CI 的**真实消费者是 agent**
+#       （历次排障都走 `GET …/check-runs/<id>/annotations`，免认证、不依赖邮件），
+#       故让 run 永不因测试红而失败：**邮件噪音归零，失败原文仍可取证**。
+#       **真实门在本地发布链**——`dsh-develop publish` 在 npm publish 前先跑 test + typecheck 双面 + build。
+#       要恢复阻塞：删掉 Test 步的 `continue-on-error: true`（digest 步的 `if:` 两种形态兼容）。
 #
 # 本地等价命令：
 #   msm("dsh-develop", ["test"])        # vitest（根配置覆盖 tests/ + hooks/**/tests/ + scripts/）
@@ -95,11 +99,16 @@ jobs:
         working-directory: hooks/dsh-serenity-hooks
         run: pnpm install --frozen-lockfile --ignore-scripts
 
-      # 阻塞门：根 vitest 配置覆盖 tests/ + hooks/**/tests/ + scripts/（约 1100+ 用例）
+      # 测试（v1.31.11：由**阻塞门**降为**信息性**——见文件头「为什么测试不再阻塞」）
       #
       # v1.31.4：tee 到日志文件 + **`set -o pipefail`**（必须——否则管道退出码取自 tee，
-      # vitest 红而 step 绿，阻塞门静默失效）。日志供下一步转注解用。
+      # vitest 红而 step 绿，失败原文会丢）。日志供下一步转注解用。
       - name: Test
+        id: test
+        # continue-on-error：测试红**不再让 run 变 failure** → GitHub 不再发失败邮件（用户诉求）；
+        # 失败原文仍由下一步转成 annotation（免认证可读，agent 用 annotations API 取证）。
+        # 要恢复阻塞语义：删掉这一行（+ 下一行注释所提的 `if:` 保持可用，两者兼容）。
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
@@ -110,8 +119,10 @@ jobs:
       # （`GET /repos/<owner>/<repo>/check-runs/<id>/annotations`）。本步把 vitest 的失败摘要
       # 转成 `::error` 注解——排查者无需仓库权限即可看到失败用例名与断言差异。
       # 触发背景：v1.31.2~v1.31.4 连续三轮 CI 只报 "Test step exit code 1"，无法定位。
+      # ⚠️ v1.31.11：Test 步加了 `continue-on-error` → job 状态恒 success，`if: failure()`
+      # **永不成立**（会静默丢失失败原文）→ 改判**上一步的 outcome**。
       - name: Test failure digest (annotations)
-        if: failure()
+        if: steps.test.outcome == 'failure'
         shell: bash
         run: |
           LOG="$RUNNER_TEMP/vitest.log"
