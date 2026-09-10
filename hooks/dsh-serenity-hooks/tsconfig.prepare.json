@@ -1,5 +1,5 @@
 {
-  "// purpose": "Consumer-side self-contained compiler settings for the `prepare` build (git installs). The repo tsconfig resolves @deepseek-ai/* through the sibling harness checkout, which a consumer machine does not have; type checking stays a dev/CI concern (`pnpm run typecheck`). tsdown only transpiles — it never needs these paths.",
+  "// purpose": "Consumer-side self-contained compiler settings for the `prepare` build (git installs). The repo tsconfig resolves @deepseek-ai/* through its own devDependencies (host type baseline, v1.31.11) — a consumer machine installing from git has no such node_modules, so this config deliberately carries no `paths`; type checking stays a dev/CI concern (`pnpm run typecheck`). tsdown only transpiles — it never needs these paths.",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

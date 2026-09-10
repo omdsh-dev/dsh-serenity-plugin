@@ -11,28 +11,31 @@
     "skipLibCheck": true,
     "noEmit": true,
     "baseUrl": ".",
+    // ── 宿主类型基准（v1.31.11 §7-8 同 node 半同步）─────────────────────────────
+    // baseUrl = client/，故路径为 `../node_modules/@deepseek-ai/<pkg>`（node_modules 在 hooks/）。
+    // 旧形态两处指向 `~/.dsh/source/current/packages/client/ui-{slots,primitives}`（**DSH 源码检出**，
+    // 比 .npm-global 更脆）→ 已实证 npm 包自带 `lib/types/`，故一并改为 devDependencies 解析。
+    // 纪律同 node 半：新增条目必须加进 devDependencies；cordis 双映射必须同实体。
     "paths": {
       // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 →
-      // ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'
-      //（cordis 双映射已存在 node half tsconfig；client 侧补路径）；
-      // SettingsScope/SettingsScopeSpec 从 '@deepseek-ai/dsh-client-ui-settings/client'
-      //（官方再导出；指向安装包 lib/types/client/index.d.ts——rc.2 已有该类型面）
-      "@deepseek-ai/cordis": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis"],
-      "cordis": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis"],
-      "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-settings/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-renderer": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-renderer/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-slots": ["../../../../../../../.dsh/source/current/packages/client/ui-slots/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-primitives": ["../../../../../../../.dsh/source/current/packages/client/ui-primitives/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-conversation": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
+      // ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'；
+      // SettingsScope/SettingsScopeSpec 从 '@deepseek-ai/dsh-client-ui-settings/client'（官方再导出）
+      "@deepseek-ai/cordis": ["../node_modules/@deepseek-ai/cordis"],
+      "cordis": ["../node_modules/@deepseek-ai/cordis"],
+      "@deepseek-ai/dsh-client-ui-settings": ["../node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings/client": ["../node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-renderer": ["../node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-renderer/client": ["../node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-slots": ["../node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["../node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-conversation": ["../node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
       // v1.31.6 适配 0.1.5-rc.1：session 作用域类型面抽到新包（sessionId / Context.sessions）
-      "@deepseek-ai/dsh-client-ui-session": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-session/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-session": ["../node_modules/@deepseek-ai/dsh-client-ui-session/lib/types/client/index.d.ts"],
       // `Context.sessions` 的声明合并源（ui-session 只 import，不重复声明）——不映射则合并进不了 program
-      "@deepseek-ai/dsh-api-session-controller/client": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-locale": ["../../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-locale"],
-      "react": ["node_modules/@types/react"],
-      "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime"]
+      "@deepseek-ai/dsh-api-session-controller/client": ["../node_modules/@deepseek-ai/dsh-api-session-controller/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-locale": ["../node_modules/@deepseek-ai/dsh-client-locale"],
+      "react": ["../node_modules/@types/react"],
+      "react/jsx-runtime": ["../node_modules/@types/react/jsx-runtime"]
     }
   },
   "include": ["../src/client"]

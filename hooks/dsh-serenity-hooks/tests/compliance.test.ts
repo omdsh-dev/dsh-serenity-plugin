@@ -126,3 +126,81 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     }
   })
 })
+
+/**
+ * F7 — 宿主类型基准（v1.31.11 §7-8）：两份 tsconfig 的 `paths` 必须**仓库内可解析**。
+ *
+ * 为什么必须机械化（R↓）：这条基准此前是**机器耦合**的（硬编码 `~/.npm-global/…/dsh` 与
+ * `~/.dsh/source/current`）→ CI 上 tsconfig 全不命中，tsc 静默回落 node_modules → 实测 94 条错误，
+ * 而 CI 的两个 typecheck 步是 `continue-on-error`，于是**没人发现它早已不是门禁**。
+ * 本组用例把新纪律变成机械事实：
+ *   a) 不许任何机器路径残留（`.npm-global` / `.dsh/source`）
+ *   b) 每条 paths 值的包名必须在 devDependencies 里（**缺一条 = tsc 静默回落 = 假绿/假红**）
+ *   c) `cordis` 与 `@deepseek-ai/cordis` 必须指向同一实体（宿主 `Context` 声明合并的前提）
+ *   d) devDependencies 的宿主包版本 == peer 范围的基准版本（改一处忘另一处 → 当场红）
+ */
+describe('宿主类型基准（F7，v1.31.11 §7-8）', () => {
+  const pkg = readJson(join(HOOKS_DIR, 'package.json'))
+  const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>
+  const peers = (pkg.peerDependencies ?? {}) as Record<string, string>
+
+  /** 两份 tsconfig 都是 JSONC（含整行 `//` 注释）——按行剥注释后解析 */
+  function readJsonc(p: string): { compilerOptions: { paths?: Record<string, string[]> } } {
+    const stripped = readFileSync(p, 'utf-8')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('//'))
+      .join('\n')
+    return JSON.parse(stripped) as { compilerOptions: { paths?: Record<string, string[]> } }
+  }
+
+  const halves = [
+    { label: 'node', file: join(HOOKS_DIR, 'tsconfig.json') },
+    { label: 'client', file: join(HOOKS_DIR, 'client', 'tsconfig.json') },
+  ]
+
+  it('F7a: 没有任何机器耦合路径残留（.npm-global / DSH 源码检出）', () => {
+    for (const half of halves) {
+      const paths = readJsonc(half.file).compilerOptions.paths ?? {}
+      expect(Object.keys(paths).length).toBeGreaterThan(5)
+      for (const [key, targets] of Object.entries(paths)) {
+        for (const t of targets) {
+          expect(t, `${half.label} 半 ${key} 仍指向本机安装`).not.toContain('.npm-global')
+          expect(t, `${half.label} 半 ${key} 仍指向 DSH 源码检出`).not.toContain('.dsh/source')
+        }
+      }
+    }
+  })
+
+  it('F7b: 每条 paths 值的包名都在 devDependencies 里（否则 tsc 静默回落）', () => {
+    for (const half of halves) {
+      const paths = readJsonc(half.file).compilerOptions.paths ?? {}
+      for (const [key, targets] of Object.entries(paths)) {
+        for (const t of targets) {
+          const m = /node_modules\/(@[^/]+\/[^/]+)/.exec(t)
+          expect(m, `${half.label} 半 ${key} 的值不是仓库内 node_modules 形态: ${t}`).toBeTruthy()
+          const pkgName = m![1]!
+          expect(devDeps[pkgName], `${pkgName} 缺少 devDependency（${half.label} 半 ${key}）`).toBeTruthy()
+        }
+      }
+    }
+  })
+
+  it('F7c: cordis 双映射指向同一实体（Context 声明合并的前提）', () => {
+    for (const half of halves) {
+      const paths = readJsonc(half.file).compilerOptions.paths ?? {}
+      expect(paths['cordis'], `${half.label} 半缺 cordis 映射`).toBeTruthy()
+      expect(paths['cordis'], `${half.label} 半 cordis 双映射不同实体`).toEqual(paths['@deepseek-ai/cordis'])
+    }
+  })
+
+  it('F7d: devDependencies 的宿主包版本 == peer 范围的基准版本', () => {
+    const hostDevDeps = Object.entries(devDeps).filter(([n]) => n.startsWith('@deepseek-ai/dsh-'))
+    expect(hostDevDeps.length).toBeGreaterThan(20)
+    // 关系式断言（不锁字面量）：peer 写 ^0.1.5-rc.1 → devDep 必须精确 0.1.5-rc.1
+    const peerBase = (peers['@deepseek-ai/dsh-tools'] ?? '').replace(/^\^/, '')
+    expect(peerBase).toBeTruthy()
+    for (const [name, range] of hostDevDeps) {
+      expect(range, `${name} 的 devDep 版本与 peer 基准版本不一致`).toBe(peerBase)
+    }
+  })
+})

@@ -1,3 +1,78 @@
+## v1.31.11 — 2026-09-10（CI typecheck 恢复为**真门**：宿主类型基准从机器耦合改为仓库内 devDependencies）
+
+**Scope:** CI 的两个 typecheck 步长期是 `continue-on-error` 的"信息性噪声"——注解里二十多条
+TS 错误没人当回事。本版把根因（**机器耦合的 paths** + **cordis 双实例**）消除，使 typecheck
+在任何克隆/CI 上都能真实回答"宿主接口漂移有没有打断 dsp"。**只落代码态，不发布。**
+
+### ① 问题：那道门其实早就不是门
+
+- CI 注解里两个 typecheck 步各报一批 TS 错误（多次 run 稳定复现），但因为 `continue-on-error` 从不阻塞
+- **实测根因形态**：把 paths 清空（= CI 的实际处境）→ node 半 **94 条错误**
+- 后果不是"少一道门"这么简单：它让**唯一能自动发现宿主漂移的手段**失效——而宿主漂移恰好是
+  dsp 最容易静默中招的形态（§13 的三次静默失效、v1.31.8 的 DRIFT-1/2 都出自这个盲区）
+
+### ② 根因（两条，均实测）
+
+| # | 根因 | 证据 |
+|---|------|------|
+| 1 | **paths 机器耦合**：两份 tsconfig 硬编码 `../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/<pkg>`（对仓库相对家目录的**深度**敏感）；client 半另有两处指向 **`~/.dsh/source/current/packages/client/ui-{slots,primitives}`**（DSH **源码检出**，比 .npm-global 更脆） | runner/克隆机上这些目录全不存在 → tsc 静默回落 node_modules → 94 条错误 |
+| 2 | **cordis 双实例**：`cordis` 与 `@deepseek-ai/cordis` 是两个包（宿主用自注入 shim 提供裸 `cordis`，上游无 `cordis@4.0.2`，见 v1.31.10 ②） | 两个 `Context` 声明不合并 → 94 条错误的主要成分 |
+
+### ③ 方案选型（保留备选，R↓）
+
+| 方案 | 做法 | 取舍 | 结论 |
+|------|------|------|------|
+| **A** | 宿主包进 **devDependencies**（精确 `0.1.5-rc.1`）；paths 改仓库内 `node_modules/@deepseek-ai/<pkg>`；`cordis` 双映射同指一实体 | 基准**单一真实源**、任何克隆可 typecheck、CI 装得上；代价 +32 devDep / 锁文件变大 | **采用** |
+| B | CI 里跑 `host-fetch <ver>` + `typecheck-host <ver>`（复用既有旁路） | 零新依赖；但版本字面量落进 ci.yml（第二真相源），committed tsconfig 仍是机器耦合（克隆即 94 错）→ 治标 | 备选 |
+| C | 保持现状（typecheck 恒为信息性） | 零成本；等于放弃这道门 | 否 |
+
+**判据**：换宿主版本时要改哪几处 —— A 改 `package.json` 一处（+ 锁文件）；B 还要改 ci.yml，且本地仍不对。
+
+### ④ 改动清单
+
+- `package.json`：devDependencies **+32**（30 × `@deepseek-ai/dsh-*` + `@deepseek-ai/cordis@4.0.2` + `@deepseek-ai/schemastery@3.18.2`，**全部精确钉版**——prerelease 用 `^` 范围会静默解析到 rc.2，与本机运行宿主 rc.1 不一致）
+- `tsconfig.json`（node 半，36 条 paths）/ `client/tsconfig.json`（14 条）：值改为仓库内相对；client 半两处 **DSH 源码检出**改为 npm 包（已实证 npm 包自带 `lib/types/`）；`react`/`@types/react` 一并显式化
+- `tsconfig.json` 内新增**两条纪律注释**：① 新增 paths 条目必须同时进 devDependencies ② `cordis` 双映射必须同实体
+- `tsconfig.prepare.json`：仅更新 `// purpose` 注释（原文"repo tsconfig 靠 sibling harness checkout"已过时）——**仍不带 paths**（消费机从 git 安装无 devDeps，这是有意设计）
+- `pnpm-lock.yaml` + `pnpm-workspace.yaml`：锁文件重算（`minimumReleaseAgeExclude` +29 条）
+
+### ⑤ 新增机械闸门 `compliance.test.ts` F7（4 用例）
+
+把上面两条纪律变成机械事实（否则下一次"加了 paths 忘了 devDep"还是静默假绿）：
+
+| 用例 | 断言 |
+|------|------|
+| F7a | 两份 tsconfig 无任何 `.npm-global` / `.dsh/source` 残留 |
+| F7b | 每条 paths 值的包名必须存在于 devDependencies（**缺一条 = tsc 静默回落**） |
+| F7c | `cordis` 与 `@deepseek-ai/cordis` 指向**同一实体**（声明合并前提） |
+| F7d | 宿主 devDep 版本 == peer 范围的基准版本（**关系式断言，不锁字面量**——改一处忘另一处当场红） |
+
+**负控制（证明通电）**：临时注入一条 `@deepseek-ai/dsh-negative-control` path →
+F7b **精确红在注入行**（`@deepseek-ai/dsh-negative-control 缺少 devDependency（node 半 …）`）；注入已删。
+
+### ⑥ 验证（本地全绿）
+
+| 门禁 | 结果 |
+|------|------|
+| `typecheck` | ✅ **一次通过**（node + client）——仓库内基准首次即绿 |
+| `typecheck-host 0.1.5-rc.1` | ✅ node **115** / client **103** 文件，paths 36+14 全命中（与改造前计数一致 = 基准等价） |
+| `lockfile` | ✅ 双步通过（`--frozen-lockfile` 自检 = CI Install (hooks) 同款判定） |
+| `test` | ✅ **80 files / 1180 tests**（含 F7 四条 + 负控制复跑） |
+| `build` | ✅ lib/index.js + lib/client.js **201951 B**（与 v1.31.10 逐字节同尺寸 → 产物零变化，只动开发配置） |
+| `pack-check` | ✅ 96 文件 / lib 90 项（同改造前） |
+
+### ⑦ 诚实边界与待办（**不发布**）
+
+- **CI 侧尚未实证**：以上全是本机等价验证（同锁文件 / 同 tsconfig / node 22）→ 必须推送后读 CI 注解
+  确认两个 typecheck 步**在 runner 上零错误**
+- **摘安全带是第二步**：只有拿到上面那个实证，才删 ci.yml 两个 typecheck 步的 `continue-on-error: true`
+  （顺序不可颠倒——先摘会让 CI 立刻红）；随后 ci.yml 的"为什么测试不再阻塞"注释块需同步说明
+  typecheck **不再**是信息性步骤
+- 新增 32 devDep 会被 CI 安装：`--ignore-scripts` 下这些包自带 `lib/`、无需构建 → 只增下载量
+- devDeps 精确钉版 = 宿主升级需显式抬（与本机运行宿主一致）；新宿主探测仍由 `typecheck-host <ver>` 负责
+
+---
+
 ## v1.31.10 — 2026-09-11（CI 恢复有效：锁文件漂移 + 上游 cordis 无 4.0.2 + 一条环境依赖断言）
 
 **Scope:** CI 自 v1.31.6 起**每次 push 都红**，且红法是"测试根本没跑"（`Install (hooks)` 即失败 →

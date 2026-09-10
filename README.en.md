@@ -323,7 +323,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 
 ```bash
 pnpm typecheck          # type check (node + browser halves)
-pnpm test               # full suite (currently 80 files / 1176 tests)
+pnpm test               # full suite (currently 80 files / 1180 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
@@ -332,6 +332,7 @@ pnpm build              # bundle (lib/index.js + client.js)
   `pack-check` verifies the packaged artifacts before publishing (we once shipped an npm release missing files);
   `scripts/dsh-crash-investigate.ts` is a read-only crash investigator.
   ⚠️ **After changing `package.json` dependencies you must run `lockfile` and commit the lockfile** — v1.31.6 skipped it and CI stayed red ever since (red as "the tests never ran"; see CHANGELOG v1.31.10)
+- **Host type baseline = devDependencies** (v1.31.11): the `paths` in `tsconfig.json` / `client/tsconfig.json` point at **in-repo** `node_modules/@deepseek-ai/*`, supplied by exactly pinned devDependencies → **a new `paths` entry must be accompanied by a devDependency** (otherwise tsc silently falls back to node_modules = false green, and CI's typecheck is a gate in name only). Mechanically guarded by `tests/compliance.test.ts` F7; on a host upgrade only `package.json` changes (+ re-run `lockfile`)
 - **Architecture**: a Cordis-native plugin registering tools and interception points through DSH's official interfaces — **DSH itself is never modified**
 - **Code map**: [docs/codebase-overview-v1.22.md](docs/codebase-overview-v1.22.md)
 - **Design decisions**: see [CHANGELOG.md](CHANGELOG.md) and the maintenance skill `dsh-serenity-plugin-development`
@@ -390,4 +391,4 @@ Yes — through the same `weixin.hook` script configured in the workspace, with 
 
 MIT (see [LICENSE](LICENSE))
 
-> **Version**: v1.31.10 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 80 files / 1176 tests
+> **Version**: v1.31.11 &nbsp;|&nbsp; **Requires**: DSH 0.1.5-rc.1+ / Node ≥ 20 or bun &nbsp;|&nbsp; **Tests**: 80 files / 1180 tests

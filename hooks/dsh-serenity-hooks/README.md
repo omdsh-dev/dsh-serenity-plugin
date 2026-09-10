@@ -317,7 +317,7 @@ AI 一次能"记住"的内容有上限。满了不用你手动开新会话：
 
 ```bash
 pnpm typecheck          # 类型检查（node + 浏览器端两套）
-pnpm test               # 全量测试（当前 80 个文件 / 1176 个用例）
+pnpm test               # 全量测试（当前 80 个文件 / 1180 个用例）
 pnpm build              # 打包（lib/index.js + client.js）
 ```
 
@@ -325,6 +325,7 @@ pnpm build              # 打包（lib/index.js + client.js）
   `lockfile` = 重生成锁文件 + 用 `--frozen-lockfile` 自检（CI 的 `Install (hooks)` 同款判定）；
   `pack-check` 会在发布前核对打包产物是否完整（曾经踩过"发到 npm 少了文件"的坑）；`scripts/dsh-crash-investigate.ts` 用来查崩溃（只读）。
   ⚠️ **改完 `package.json` 依赖后必须跑 `lockfile` 并提交锁文件** —— v1.31.6 漏了这一步，CI 从此一直红（红在"测试根本没跑"，见 CHANGELOG v1.31.10）
+- **宿主类型基准 = devDependencies**（v1.31.11）：`tsconfig.json` / `client/tsconfig.json` 的 `paths` 指向**仓库内** `node_modules/@deepseek-ai/*`，由精确钉版的 devDependencies 提供 → **新增 paths 条目必须同时加 devDependency**（否则 tsc 静默回落 node_modules = 假绿，CI 的 typecheck 也就形同虚设）。机械闸门见 `tests/compliance.test.ts` F7；升级宿主时只改 `package.json` 一处 + 重跑 `lockfile`
 - **架构**：Cordis 原生插件，用 DSH 的正式接口注册工具和拦截点——**从不修改 DSH 本体**
 - **代码地图**：[docs/codebase-overview-v1.22.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/docs/codebase-overview-v1.22.md)
 - **设计决策**：见 [CHANGELOG.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/CHANGELOG.md) 和维护技能 `dsh-serenity-plugin-development`
@@ -383,4 +384,4 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/LICENSE)）
 
-> **版本**：v1.31.10 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1176 个用例
+> **版本**：v1.31.11 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1180 个用例

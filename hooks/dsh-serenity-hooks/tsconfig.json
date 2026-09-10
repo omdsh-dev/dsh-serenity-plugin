@@ -14,56 +14,66 @@
     "outDir": "lib",
     "rootDir": "src",
     "baseUrl": ".",
+    // ── 宿主类型基准（v1.31.11 §7-8：机器耦合 → 仓库内可解析）─────────────────────────
+    // 旧形态 = `../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/<pkg>`
+    // （硬编码本机 DSH 安装 + 对仓库相对家目录的深度敏感）→ CI/克隆机上全部不存在，
+    // tsc 静默回落到 node_modules → 94 条错误（§8.6 诚实边界）。
+    // 新形态 = `node_modules/@deepseek-ai/<pkg>`：由 **devDependencies 精确钉版**
+    // （`0.1.5-rc.1`，与本机运行宿主一致）提供 → CI 装得上、任何克隆都能 typecheck。
+    // 两条纪律（勿破）：
+    //   ① 新增条目必须同时加进 devDependencies（否则 tsc 回落 → 假红/假绿）
+    //   ② `cordis` 与 `@deepseek-ai/cordis` 必须指向**同一个包实例**——宿主 `Context` 的
+    //      声明合并靠这一点；指成两个实例就是历史 94 条错误的根因
     "paths": {
-      "@deepseek-ai/dsh-tools": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools"],
-      "@deepseek-ai/dsh-agent": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent"],
-      "@deepseek-ai/dsh-agent-presets": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-presets"],
-      "@deepseek-ai/dsh-session": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session"],
-      "@deepseek-ai/dsh-session/types": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session/lib/types/types.d.ts"],
-      "@deepseek-ai/dsh-llm": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-llm"],
-      "@deepseek-ai/dsh-host-webserver": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-host-webserver"],
-      "@deepseek-ai/dsh-shell-env": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-shell-env"],
-      "@deepseek-ai/dsh-shell": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-shell"],
-      "@deepseek-ai/dsh-skill": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-skill"],
-      "@deepseek-ai/dsh-compaction": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-compaction"],
-      "@deepseek-ai/dsh-settings": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-settings"],
-      "@deepseek-ai/dsh-session-title": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-title"],
-      "@deepseek-ai/dsh-system-prompt": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-system-prompt"],
-      "@deepseek-ai/dsh-agent-loop": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-agent-loop"],
+      "@deepseek-ai/dsh-tools": ["node_modules/@deepseek-ai/dsh-tools"],
+      "@deepseek-ai/dsh-agent": ["node_modules/@deepseek-ai/dsh-agent"],
+      "@deepseek-ai/dsh-agent-presets": ["node_modules/@deepseek-ai/dsh-agent-presets"],
+      "@deepseek-ai/dsh-session": ["node_modules/@deepseek-ai/dsh-session"],
+      "@deepseek-ai/dsh-session/types": ["node_modules/@deepseek-ai/dsh-session/lib/types/types.d.ts"],
+      "@deepseek-ai/dsh-llm": ["node_modules/@deepseek-ai/dsh-llm"],
+      "@deepseek-ai/dsh-host-webserver": ["node_modules/@deepseek-ai/dsh-host-webserver"],
+      "@deepseek-ai/dsh-shell-env": ["node_modules/@deepseek-ai/dsh-shell-env"],
+      "@deepseek-ai/dsh-shell": ["node_modules/@deepseek-ai/dsh-shell"],
+      "@deepseek-ai/dsh-skill": ["node_modules/@deepseek-ai/dsh-skill"],
+      "@deepseek-ai/dsh-compaction": ["node_modules/@deepseek-ai/dsh-compaction"],
+      "@deepseek-ai/dsh-settings": ["node_modules/@deepseek-ai/dsh-settings"],
+      "@deepseek-ai/dsh-session-title": ["node_modules/@deepseek-ai/dsh-session-title"],
+      "@deepseek-ai/dsh-system-prompt": ["node_modules/@deepseek-ai/dsh-system-prompt"],
+      "@deepseek-ai/dsh-agent-loop": ["node_modules/@deepseek-ai/dsh-agent-loop"],
       // v1.31.8：宿主**类型契约**（src/host/type-contract.ts）用真实宿主类型反证 dsp 的形状假设，
-      // 需要下列包的类型面进入 program（这些包不在 peerDeps 的必要面里，但装在宿主 node_modules 下）。
-      // 新增条目须保持同形（…/@deepseek-ai/dsh/node_modules/@deepseek-ai/<pkg>），
-      // 以便 `dsh-develop typecheck-host <ver>` 的路径改写规则能把它们指向 _tmp 解包宿主。
-      "@deepseek-ai/dsh-session-persistence": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-persistence"],
-      "@deepseek-ai/dsh-session-projection": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-projection"],
+      // 需要下列包的类型面进入 program（这些包不在 peerDeps 的必要面里，必须进 devDependencies）。
+      "@deepseek-ai/dsh-session-persistence": ["node_modules/@deepseek-ai/dsh-session-persistence"],
+      "@deepseek-ai/dsh-session-projection": ["node_modules/@deepseek-ai/dsh-session-projection"],
       // 子路径 `@deepseek-ai/dsh-session-projection/types` 是**多个宿主包共同声明增强**的模块 id
       // （token-meter/subagent/session-title/agent 等 10+ 包往 SessionProjectionMap 里塞自己的键）。
-      // 本机安装靠 package.json exports map 解析；`typecheck-host <ver>` 的解包宿主无 node_modules，
-      // 必须显式映射到同一文件，否则增强不合并 → `contextPressure` 等键在推导基线里"消失"（假红）。
-      "@deepseek-ai/dsh-session-projection/types": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-session-projection/lib/types/types.d.ts"],
-      "@deepseek-ai/dsh-token-meter": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-token-meter"],
-      "@deepseek-ai/dsh-workspace": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-workspace"],
-      "@deepseek-ai/dsh-subagent": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-subagent"],
-      "@deepseek-ai/dsh-client-connection": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-connection"],
+      // 本机安装靠 package.json exports map 解析；显式映射到同一文件，保证增强合并
+      // （否则 `contextPressure` 等键"消失" → 假红）。
+      "@deepseek-ai/dsh-session-projection/types": ["node_modules/@deepseek-ai/dsh-session-projection/lib/types/types.d.ts"],
+      "@deepseek-ai/dsh-token-meter": ["node_modules/@deepseek-ai/dsh-token-meter"],
+      "@deepseek-ai/dsh-workspace": ["node_modules/@deepseek-ai/dsh-workspace"],
+      "@deepseek-ai/dsh-subagent": ["node_modules/@deepseek-ai/dsh-subagent"],
+      "@deepseek-ai/dsh-client-connection": ["node_modules/@deepseek-ai/dsh-client-connection"],
       // v1.30.12：web_fetch provider 接管（注册进 ctx.web + 复用 HttpFetchProvider）
-      "@deepseek-ai/dsh-web": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web"],
-      "@deepseek-ai/dsh-web-fetch-http": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-fetch-http"],
+      "@deepseek-ai/dsh-web": ["node_modules/@deepseek-ai/dsh-web"],
+      "@deepseek-ai/dsh-web-fetch-http": ["node_modules/@deepseek-ai/dsh-web-fetch-http"],
       // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 → Settings* 类型源改
       // dsh-client-ui-settings/client + ui-renderer/client（官方声明合并面）
-      "@deepseek-ai/dsh-client-ui-settings": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-conversation": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-settings": ["node_modules/@deepseek-ai/dsh-client-ui-settings/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-conversation": ["node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
       // v1.31.6 适配 0.1.5-rc.1：session 作用域类型面（SessionStandardProps.sessionId / client Context.sessions）
       // 从 ui-conversation 抽到新包 dsh-client-ui-session；dsp client 半经空类型 import 引入。
-      "@deepseek-ai/dsh-client-ui-session": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-session/lib/types/client/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-slots": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-primitives": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-renderer": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-ui-renderer/client": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/index.d.ts"],
-      "@deepseek-ai/dsh-client-locale": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-client-locale"],
-      "cordis": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis"],
-      "@deepseek-ai/cordis": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/cordis"],
-      "schemastery": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery"],
-      "@deepseek-ai/schemastery": ["../../../../../../.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/schemastery"]
+      "@deepseek-ai/dsh-client-ui-session": ["node_modules/@deepseek-ai/dsh-client-ui-session/lib/types/client/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-slots": ["node_modules/@deepseek-ai/dsh-client-ui-slots/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-primitives": ["node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-renderer": ["node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-ui-renderer/client": ["node_modules/@deepseek-ai/dsh-client-ui-renderer/lib/types/index.d.ts"],
+      "@deepseek-ai/dsh-client-locale": ["node_modules/@deepseek-ai/dsh-client-locale"],
+      // cordis 双映射 → **同一实体**（声明合并的前提）。裸 `cordis` 上游无 4.0.2
+      // （宿主用自注入 shim，见 §6 D51 + compliance F6b），故两条都指 @deepseek-ai/cordis。
+      "cordis": ["node_modules/@deepseek-ai/cordis"],
+      "@deepseek-ai/cordis": ["node_modules/@deepseek-ai/cordis"],
+      "schemastery": ["node_modules/@deepseek-ai/schemastery"],
+      "@deepseek-ai/schemastery": ["node_modules/@deepseek-ai/schemastery"]
     }
   },
   "include": ["src"],

@@ -546,17 +546,22 @@ function cmdHostFetch(version?: string, extra: string[] = []): void {
 /**
  * 把基准 tsconfig 里的宿主路径值改写到本次解包的宿主根下。
  *
- * 两类基准来源（R↓：dsp 的 client 半历史上混用了两种宿主类型来源）：
- *  ① 本机安装：`…/node_modules/@deepseek-ai/dsh-tools[/子路径]`
- *  ② 本机源码树：`.dsh/source/current/packages/client/ui-slots[/子路径]`
+ * 三类基准来源（R↓）：
+ *  ① **仓库内 devDependencies**（v1.31.11 §7-8 起的正式形态）：
+ *     `node_modules/@deepseek-ai/<pkg>[/子路径]`（node 半）／`../node_modules/@deepseek-ai/<pkg>`（client 半）
+ *  ② 本机安装（历史形态，v1.31.10 及更早）：`…/.npm-global/…/node_modules/@deepseek-ai/dsh-tools[/子路径]`
+ *  ③ 本机源码树（历史 client 半）：`.dsh/source/current/packages/client/ui-slots[/子路径]`
  *     → 包名按官方约定还原为 `@deepseek-ai/dsh-client-ui-slots`
- * 其余值（如 `node_modules/@types/react`）与宿主无关，**原样保留**——误映射会把 react 类型打断。
+ * 其余值（如 `../node_modules/@types/react`）与宿主无关，**原样保留**——误映射会把 react 类型打断。
  */
 function mapHostPathToTmp(value: string, hostPrefix: string): string {
-  // 基准值形如 `…/.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools`
-  // ——有**两个** `node_modules`，必须取最后一个（`indexOf` 会切出 `@deepseek-ai/dsh/node_modules/...`）。
-  const nm = value.lastIndexOf('/node_modules/@deepseek-ai/')
-  if (nm >= 0) return `${hostPrefix}/${value.slice(nm + '/node_modules/'.length)}`
+  // 三类来源的共同锚点 = `node_modules/@deepseek-ai/` 的**最后一次**出现：
+  //  · 形态①：`node_modules/@deepseek-ai/dsh-tools`（无前导斜杠 → 只出现一次）
+  //  · 形态②：`…/.npm-global/lib/node_modules/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-tools`
+  //    ——有**两个** `node_modules/@deepseek-ai/`，必须取最后一次
+  // 切片偏移 = 'node_modules/'.length（锚点不含前导斜杠——形态①下没有前导斜杠可切）
+  const nm = value.lastIndexOf('node_modules/@deepseek-ai/')
+  if (nm >= 0) return `${hostPrefix}/${value.slice(nm + 'node_modules/'.length)}`
   const src = value.indexOf('.dsh/source/current/packages/')
   if (src >= 0) {
     const parts = value.slice(src + '.dsh/source/current/packages/'.length).split('/')
@@ -1090,14 +1095,33 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
  * pnpm-lock.yaml + .pnpm-store，npm 与 pnpm node_modules 布局冲突会崩）；
  * client bundle noExternal 全 true，第三方库内联进 lib/client.js（零运行时新依赖）；
  * devDependencies 记录可复现。
+ *
+ * v1.31.11：新增可选 `--registry <url>`（对齐 npm-install 的第三参语义）。
+ * 为什么需要（§7-8 宿主类型基准落地）：要一次装 32 个宿主包（`@deepseek-ai/dsh-*`），
+ * 而 hooks 目录自身没有 .npmrc——registry 会回落到用户级 `~/.npmrc`（内网 Nexus）。
+ * 显式传官方源可绕开代理缓存（同 host-fetch 的做法），**且不改任何 .npmrc**。
+ * 用法: dsh-develop npm-install-dev [--registry <url>] <pkg[@version]>...
  */
-function cmdNpmInstallDev(pkgs: string[]): void {
-  if (pkgs.length === 0) fail('npm-install-dev 需要包名: dsh-develop npm-install-dev <pkg>[@version]...')
-  console.log(`[dsh-develop] pnpm install --save-dev ${pkgs.join(' ')}（hooks）`)
+function cmdNpmInstallDev(argv: string[]): void {
+  let registry: string | undefined
+  let pkgs = argv
+  if (argv[0] === '--registry') {
+    registry = argv[1]
+    pkgs = argv.slice(2)
+  } else if (argv[0]?.startsWith('--registry=')) {
+    registry = argv[0].slice('--registry='.length)
+    pkgs = argv.slice(1)
+  }
+  if (registry !== undefined && !/^https?:\/\//.test(registry)) fail(`--registry 必须是 http(s) URL: ${registry}`, 2)
+  if (pkgs.length === 0) fail('npm-install-dev 需要包名: dsh-develop npm-install-dev [--registry <url>] <pkg>[@version]...')
+  console.log(`[dsh-develop] pnpm install --save-dev ${pkgs.length} 个包（hooks）${registry ? `｜源覆盖: ${registry}` : ''}`)
   // store-dir 必须与既有 node_modules 链接一致（hooks/.pnpm-store/v11）——
   // pnpm 默认全局 store（~/.local/bin/store）与本地 store 冲突会 ERR_PNPM_UNEXPECTED_STORE
   const storeDir = join(HOOKS_DIR, '.pnpm-store')
-  const r = run('pnpm', ['install', '--store-dir', storeDir, '--save-dev', ...pkgs], {
+  const args = ['install', '--store-dir', storeDir, '--save-dev']
+  if (registry) args.push('--registry', registry)
+  args.push(...pkgs)
+  const r = run('pnpm', args, {
     cwd: HOOKS_DIR,
     quiet: true,
   })
@@ -1106,7 +1130,7 @@ function cmdNpmInstallDev(pkgs: string[]): void {
     fail(`pnpm install --save-dev 失败 (exit ${r.status})`, 2)
   }
   console.log(r.stdout.trim() || r.stderr.trim())
-  console.log(`[dsh-develop] ✓ 已安装 devDeps: ${pkgs.join(', ')}（hooks/package.json）`)
+  console.log(`[dsh-develop] ✓ 已安装 devDeps（${pkgs.length} 个，hooks/package.json）`)
 }
 
 /**
