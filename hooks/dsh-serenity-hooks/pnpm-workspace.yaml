@@ -1,5 +1,9 @@
+# pnpm 11：构建脚本批准表。pnpm 11 起 pnpm-workspace.yaml 是设置的唯一归属
+# （package.json 的 `pnpm.onlyBuiltDependencies` 被忽略）→ 本项 = 那份声明的等价落地。
+# esbuild 的构建脚本用于就位平台二进制 → 允许。本仓 CI 用 `--ignore-scripts`，
+# 故此项只影响本地 `pnpm install`（本地装机实际走 `dsh-develop deploy`，不经 pnpm）。
 allowBuilds:
-  esbuild: set this to true or false
+  esbuild: true
 minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-agent-loop@0.1.5-rc.1'
   - '@deepseek-ai/dsh-agent-presets@0.1.5-rc.1'
