@@ -3,7 +3,9 @@
  *
  * 背景（实证）：DSH 会话物理存储 = `$DSH_HOME/sessions/`（缺省 ~/.dsh/sessions；
  * base bundle cordis.patch.yml root: dshHomePath('sessions')）。磁盘布局：
- *   <root>/--<project-slug>--/<encoded-session-id>/session.jsonl(.zstd)
+ *   <root>/--<project-slug>--/<encoded-session-id>/session[.vN].jsonl(.zstd)
+ * **世代（v1.31.13 补）**：宿主自 DSH 0.1.5 起按世代写文件，且迁移**保留源文件**
+ * ⇒ 一个会话目录常见 v0 与 v3 两个文件并存。本模块用 `sessionLogArtifacts()` 统一枚举世代。
  * DSH **无删除会话 API**（PersistenceCoordinator 仅 create/append/load/inspect/borrow，
  * 无 delete/purge；workspace archiveSession 只加归档集不删文件）——物理删除只能直接
  * 删文件。删除后一致性（利好）：sessionPersistence.list() = readdir 扫描磁盘现存 →
@@ -59,16 +61,23 @@ export function collectEligibleSessions(
     for (const entry of readdirSync(projectPath, { withFileTypes: true })) {
       if (!entry.isDirectory()) continue
       const dirPath = join(projectPath, entry.name)
-      // 只认会话目录（含 session.jsonl 或 session.jsonl.zstd）
+      // 只认会话目录（含任意世代日志 session[.vN].jsonl[.zstd]）
+      const artifacts = sessionLogArtifacts(dirPath)
+      if (artifacts.length === 0) continue
       const log = findSessionLog(dirPath)
       if (log === null) continue
       if (liveIds.has(entry.name)) continue // live 保护
-      let mtime: number
-      try {
-        mtime = statSync(log).mtimeMs
-      } catch {
-        continue // 文件消失/不可读 → 跳过（竞态）
+      // lastActive = **全部世代的最大 mtime**（保守：任一世代被写过就算"最近活动"，
+      // 避免多世代并存时因只看当前世代而误删仍在写入的会话）
+      let mtime = Number.NEGATIVE_INFINITY
+      for (const artifact of artifacts) {
+        try {
+          mtime = Math.max(mtime, statSync(artifact.path).mtimeMs)
+        } catch {
+          /* 文件消失/不可读 → 跳过该世代（竞态） */
+        }
       }
+      if (!Number.isFinite(mtime)) continue
       if (mtime >= cutoffMs) continue // 最后活动未达阈值
       out.push({ id: entry.name, project: project.name, logPath: log, lastActiveMs: mtime })
     }
@@ -76,13 +85,45 @@ export function collectEligibleSessions(
   return out
 }
 
-/** 在会话目录下找 session 日志文件（.jsonl / .jsonl.zstd）；无 → null */
-export function findSessionLog(sessionDirPath: string): string | null {
-  for (const name of ['session.jsonl', 'session.jsonl.zstd']) {
-    const p = join(sessionDirPath, name)
-    if (existsSync(p)) return p
+/**
+ * 会话日志文件名识别：`session.jsonl` / `session.jsonl.zstd`（= **v0 世代**）/
+ * `session.v<N>.jsonl[.zstd]`（= 第 N 世代，DSH 0.1.5 起按世代写文件）。
+ * 出处：`@deepseek-ai/dsh-session-persistence-jsonl` 的 `parseSessionFormatLogFilename` 同款形态。
+ */
+const SESSION_LOG_RE = /^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/
+
+/**
+ * 列出会话目录下的**全部日志世代**，按代递增排序（同代内 `.jsonl` 在前、`.zstd` 在后 = 后者更代表"当前书写格式"）。
+ *
+ * 为什么需要（R↓，v1.31.13 修复）：宿主自 0.1.5 起改成**按世代写文件**，且迁移**保留源文件**
+ * ⇒ 同一会话常见 `session.jsonl.zstd`（v0）与 `session.v3.jsonl.zstd`（v3）**并存**。
+ * 旧实现只认前两个名字 → 新格式会话对本模块**完全不可见**（静默 no-op：清理永远不生效、磁盘只涨）。
+ */
+export function sessionLogArtifacts(sessionDirPath: string): Array<{ name: string; generation: number; path: string }> {
+  let names: string[]
+  try {
+    names = readdirSync(sessionDirPath)
+  } catch {
+    return [] // 目录不可读/消失 → 视为无日志（竞态）
   }
-  return null
+  const out: Array<{ name: string; generation: number; path: string }> = []
+  for (const name of names) {
+    const m = SESSION_LOG_RE.exec(name)
+    if (m === null) continue
+    out.push({ name, generation: m[1] === undefined ? 0 : Number(m[1]), path: join(sessionDirPath, name) })
+  }
+  return out.sort((a, b) => a.generation - b.generation
+    || (a.name.endsWith('.zstd') ? 1 : 0) - (b.name.endsWith('.zstd') ? 1 : 0))
+}
+
+/**
+ * 在会话目录下找 session 日志文件；无 → null。
+ * 多世代并存时返回**最高世代**（= 宿主 `findLog` 选中的当前世代；旧行为对单文件目录完全一致）。
+ */
+export function findSessionLog(sessionDirPath: string): string | null {
+  const artifacts = sessionLogArtifacts(sessionDirPath)
+  const latest = artifacts[artifacts.length - 1]
+  return latest === undefined ? null : latest.path
 }
 
 /** 删除执行结果 */

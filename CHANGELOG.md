@@ -1,3 +1,71 @@
+## v1.31.13 — 2026-09-11（🔴 会话打不开真因修复：`rebuild` 写坏 `user/message` + `findSessionLog` 不认世代文件）
+
+**Scope:** 用户报「DSH 升级 session 机制后**会话老是损坏**」并要求"查明是否 dsp 实现有问题"（S142 §24~§26）。调查结论：**确有两条 dsp 缺陷**——其一足以让会话**永久打不开**。本版修复两条 + 交付常备诊断工具。
+
+### ① 头号缺陷（🔴 数据可用性）：`rebuild` 写入的 `user/message` 不是完整消息
+
+**宿主规则**（`dsh-session/lib/types/index.js:229-259` `assertMessageEventShape`）：四种消息事件
+（`system/message` / `user/message` / `assistant/message` / `tool/result`）的 payload 必须是**完整消息**——
+`data.id` 非空字符串（否则 `"<subject> lacks an identified message"`）+ `data.role` 等于该事件的固定角色。
+**`user/message` 的 message 就是 `data` 本身**（不是 `data.message`）。
+
+**旧实现**（`src/rebuild.ts`）：`session.append('user/message', { content, source } as never, …)` —— **缺 `id` 与 `role`**。
+
+**后果链（为何"下次打开才坏"）**：`append` 路径**不跑**含 shape 校验的 `validateStoredEvents`
+⇒ 事件**当场落盘成功**；等**下一次打开该会话**才整份校验 → 抛 `SessionPersistenceCorruptionError`
+→ **该会话永久打不开**。这解释了"重建后用着没事、重启/再进入就损坏"的时序。
+
+**实证**（真实日志，非推理）：会话 `session-a6cbf9c4-…`（v3，7333 事件）在宿主读取路径下报
+`session event at seq 5066 lacks an identified message`；解压原日志取 seq 5066 得
+`{"type":"user/message",…,"data":{"content":[…],"source":{"kind":"user"}}}`（**无 id/role**），
+而**同一日志内**由本插件 `bootstrap` 路径写入的消息 seq 15/26 形状完整（`{id, role:'user', content, source}`）
+⇒ 对照成立：**bootstrap 写对了，rebuild 写漏了**（形状照 `seams/bootstrap.ts` 抄即可）。
+
+**修复**：payload 补 `id`（每轮唯一）+ `role: 'user'`；`tests/rebuild.test.ts` 新增回归用例，把宿主规则的
+**字面要求**（id 非空串 / role='user' / source.kind / content 为数组 + id 唯一性）钉在 dsp 产物上。
+
+> **`as never` 是共同病灶**：本缺陷与 v1.31.8 的 `surfaceOp: {start,end}` → `{startSeq,endSeq}` 同属
+> "**`as never` 让编译器失明**"一类。纪律：**写 session 事件的 payload 一律给完整形状**，并用宿主规则
+> 的字面要求写回归断言。
+
+### ② `findSessionLog()` 不认世代文件（清理静默失效）
+
+宿主自 0.1.5 起**按世代写文件**（`session.v3.jsonl.zstd`），且迁移**保留 v0 源文件** ⇒ 同一会话常见
+两代并存。旧 `findSessionLog()` 只认 `session.jsonl` / `session.jsonl.zstd` ⇒ 新格式会话对
+"旧会话清理"**完全不可见**（静默 no-op：清理永不生效、磁盘只涨；**非数据损坏**）。
+
+**修复**：新增 `sessionLogArtifacts()` 统一枚举世代（`/^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/`，按代递增，
+同代内 `.jsonl` 在前、`.zstd` 在后）；`findSessionLog()` 返回**最高世代**（= 宿主 `findLog` 语义；
+对单文件目录行为与旧实现完全一致）；`collectEligibleSessions` 的 `lastActive` 改取
+**全部世代的最大 mtime**（保守：任一世代被写过就不算旧，避免误删仍在写入的会话）。
+
+### ③ 诊断工具（让这类问题不再靠猜）
+
+- **`dsh-develop session-doctor`**：会话日志体检（**只读**）。默认**静态分诊**（判据 **version-first**：
+  `header.version > 支持` → `refused-version`；`< 支持` → **`needs-migration`** 早停不扫正文；
+  仅当前世代进词表门，并先剔除**存储行类型** `PACKED_TAGS`（`text-chunks`/`reasoning-chunks`/`tool-call-chunks`——
+  它们不是事件，旧判据把它们误报为"未知事件"，实测 3/3 全假阳性））。
+- **`--probe`**：走**宿主真实读取路径**判定（`scripts/session-probe.mjs` 实例化宿主真实的
+  `JsonlSessionPersistence`）。**关键分层**：`readStoredLog(path,id)` 是**存储层**读（**不走迁移**，
+  对历史世代报 `no upgrade path` 是**正常现象**）；**`open(id,'read')` 才是应用面**（走迁移分支，
+  迁移可能成功也可能在内容层被拒）⇒ **两条都测**，否则结论过强。
+- **`--summary`** / **`--sessions <id,...>`** / 批量探针（一次进程判定 N 个会话，全量跑不刷屏）。
+
+**全量实测（本机 302 会话）**：可打开 **238** / 打不开 **64**
+= 宿主侧 **57**（`subagent/descriptor` 版本不受支持 ⇒ 宿主 v0 迁移目录缺该记录的前向转换，**与本插件无关**）
++ **本插件 7**（① 的消息缺 id/role）。`list()` 返回 **302** ⇒ **打不开的会话照样出现在列表里**，点开才报错
+——与用户"会话老是损坏"的主观描述吻合。
+
+### ④ 测试
+
+`80 files / **1186** tests`（v1.31.12 为 1180；+6 = rebuild 回归 1 + session-cleanup 5）。
+另跑 `typecheck`（node + client）双面。**未改任何声明面/契约面**（本版纯缺陷修复）。
+
+### ⑤ 待用户
+
+- **已知不影响本版**：7 份存量受损会话经用户裁决**不救援（只止损）**；57 份 v0 迁移拒绝属**宿主侧**，
+  可向 DSH 上游反馈。
+
 ## v1.31.12 — 2026-09-11（宿主基线抬到 DSH 0.1.5-rc.2 + 新增 `host-upgrade` 维护通道）
 
 **Scope:** 本机 DSH 从 `0.1.5-rc.1` 升到 `0.1.5-rc.2`（用户 2026-09-11 裁决：**范围 C** = 主机升级 + 基准同步 + 发布；**通道 b** = 由 ACC 侧 MSM 自行执行全局安装）。dsp **零代码适配**——rc.2 对契约面无实质改动；本版只做**声明面基准同步**与**执行通道补齐**。

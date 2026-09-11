@@ -323,7 +323,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 
 ```bash
 pnpm typecheck          # type check (node + browser halves)
-pnpm test               # full suite (currently 80 files / 1180 tests)
+pnpm test               # full suite (currently 80 files / 1186 tests)
 pnpm build              # bundle (lib/index.js + client.js)
 ```
 
@@ -334,6 +334,8 @@ pnpm build              # bundle (lib/index.js + client.js)
   ⚠️ **After changing `package.json` dependencies you must run `lockfile` and commit the lockfile** — v1.31.6 skipped it and CI stayed red ever since (red as "the tests never ran"; see CHANGELOG v1.31.10)
 - **Host type baseline = devDependencies** (v1.31.11): the `paths` in `tsconfig.json` / `client/tsconfig.json` point at **in-repo** `node_modules/@deepseek-ai/*`, supplied by exactly pinned devDependencies → **a new `paths` entry must be accompanied by a devDependency** (otherwise tsc silently falls back to node_modules = false green, and CI's typecheck is a gate in name only). Mechanically guarded by `tests/compliance.test.ts` F7; on a host upgrade only `package.json` changes (+ re-run `lockfile`)
 - **Upgrading the host** (v1.31.12): `dsh-develop host-upgrade <version|dist-tag>` upgrades the global DSH CLI (package name hard-coded to `@deepseek-ai/dsh`, official registry by default, `--dry-run` to preview) → raise the `package.json` peer/devDeps baseline to the same version and re-run `lockfile` (`compliance.test.ts` F6c/F7d and `host-manifest.test.ts` force every declaration surface to stay in sync — miss one and the suite goes red) → `restart-web` → check `dshVersion` via `dashboard health`
+- **Diagnosing "session won't open"** (v1.31.13): `dsh-develop session-doctor` — a **read-only** session-log health check. `--probe` judges through the host's **real read path** (`msm("dsh-develop", ["session-doctor","--probe","--summary"])` runs it across every session).
+  ⚠️ Two easy misreads: ① `readStoredLog` is a **storage-level** read that **does not run format migration**, so its "no upgrade path" error for historical generations is **normal, not evidence of corruption** — "can the user open it?" is decided by the app-level `open(id,'read')`. ② The two real defects this tool surfaced are in CHANGELOG v1.31.13 (`rebuild` wrote a `user/message` payload missing `id`/`role` ⇒ sessions became **permanently unopenable**; `findSessionLog` did not recognise `session.vN.jsonl.zstd` ⇒ cleanup silently did nothing)
 - **Architecture**: a Cordis-native plugin registering tools and interception points through DSH's official interfaces — **DSH itself is never modified**
 - **Code map**: [docs/codebase-overview-v1.22.md](docs/codebase-overview-v1.22.md)
 - **Design decisions**: see [CHANGELOG.md](CHANGELOG.md) and the maintenance skill `dsh-serenity-plugin-development`
