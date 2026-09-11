@@ -254,9 +254,9 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
 ] as const
 
 /** dsp 被验证过的宿主版本范围（与 package.json peerDependencies 同源，单一真相源） */
-export const REQUIRED_HOST_RANGE = '^0.1.5-rc.1'
+export const REQUIRED_HOST_RANGE = '^0.1.5-rc.2'
 
-/** 范围 floor：剥掉 caret/比较前缀（`^0.1.5-rc.1` → `0.1.5-rc.1`），供 {@link checkHostVersion} 使用 */
+/** 范围 floor：剥掉 caret/比较前缀（`^0.1.5-rc.2` → `0.1.5-rc.2`），供 {@link checkHostVersion} 使用 */
 const REQUIRED_HOST_FLOOR = REQUIRED_HOST_RANGE.replace(/^[\^~>=<\s]+/, '')
 
 /** 范围 ceiling：`^0.1.x` 的上界 = `<0.2.0`（显式常量，见 {@link checkHostVersion} 注释） */

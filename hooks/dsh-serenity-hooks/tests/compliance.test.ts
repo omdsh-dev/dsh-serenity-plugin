@@ -122,7 +122,7 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     const dshPeers = Object.entries(peers).filter(([n]) => n.startsWith('@deepseek-ai/dsh-'))
     expect(dshPeers.length).toBeGreaterThan(10)
     for (const [name, range] of dshPeers) {
-      expect(range, `${name} 与 peer 范围不一致`).toBe('^0.1.5-rc.1')
+      expect(range, `${name} 与 peer 范围不一致`).toBe('^0.1.5-rc.2')
     }
   })
 })

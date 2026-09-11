@@ -3,7 +3,7 @@
 > **一句话**：装上这个插件，你在电脑上给 AI 划一块自己的工作区（就是一个普通目录），
 > AI 在里面干活时就有了**记忆、纪律、工具和边界**——中途换模型、重启电脑、第二天再来，都能接着干。
 >
-> 适用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）0.1.5-rc.1 及以上。
+> 适用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）0.1.5-rc.2 及以上。
 > 想了解背后的想法（为什么叫"认知容器"），看 [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md)；本文只讲**能干什么、怎么用**。
 
 **几个词先说明白**（后面都用这几个词，不再解释）：
@@ -32,7 +32,7 @@
 
 ## 2. 快速开始（2 分钟）
 
-前置：Node ≥ 20（或 bun）、DSH 0.1.5-rc.1 及以上。
+前置：Node ≥ 20（或 bun）、DSH 0.1.5-rc.2 及以上。
 
 ```bash
 # 1. 装插件（自动加入 DSH 的 web profile）
@@ -321,11 +321,12 @@ pnpm test               # 全量测试（当前 80 个文件 / 1180 个用例）
 pnpm build              # 打包（lib/index.js + client.js）
 ```
 
-- **开发用小工具**：`scripts/dsh-develop.ts`——typecheck / test / build / status / commit / push / version / bump / deploy / **lockfile** / restart-web / publish / pack-check / github-push 一条龙。
+- **开发用小工具**：`scripts/dsh-develop.ts`——typecheck / test / build / status / commit / push / version / bump / deploy / **lockfile** / **host-upgrade** / restart-web / publish / pack-check / github-push 一条龙。
   `lockfile` = 重生成锁文件 + 用 `--frozen-lockfile` 自检（CI 的 `Install (hooks)` 同款判定）；
   `pack-check` 会在发布前核对打包产物是否完整（曾经踩过"发到 npm 少了文件"的坑）；`scripts/dsh-crash-investigate.ts` 用来查崩溃（只读）。
   ⚠️ **改完 `package.json` 依赖后必须跑 `lockfile` 并提交锁文件** —— v1.31.6 漏了这一步，CI 从此一直红（红在"测试根本没跑"，见 CHANGELOG v1.31.10）
 - **宿主类型基准 = devDependencies**（v1.31.11）：`tsconfig.json` / `client/tsconfig.json` 的 `paths` 指向**仓库内** `node_modules/@deepseek-ai/*`，由精确钉版的 devDependencies 提供 → **新增 paths 条目必须同时加 devDependency**（否则 tsc 静默回落 node_modules = 假绿，CI 的 typecheck 也就形同虚设）。机械闸门见 `tests/compliance.test.ts` F7；升级宿主时只改 `package.json` 一处 + 重跑 `lockfile`
+- **升级宿主（v1.31.12）**：`dsh-develop host-upgrade <版本|dist-tag>` 全局升级 DSH CLI（包名硬编码 `@deepseek-ai/dsh`、默认官方源、`--dry-run` 预览）→ 把 `package.json` 的 peer/devDeps 基准抬到同一版本 + 重跑 `lockfile`（`compliance.test.ts` F6c/F7d 与 `host-manifest.test.ts` 会强制各声明面同步，漏一处必红）→ `restart-web` → `dashboard health` 看 `dshVersion`
 - **架构**：Cordis 原生插件，用 DSH 的正式接口注册工具和拦截点——**从不修改 DSH 本体**
 - **代码地图**：[docs/codebase-overview-v1.22.md](docs/codebase-overview-v1.22.md)
 - **设计决策**：见 [CHANGELOG.md](CHANGELOG.md) 和维护技能 `dsh-serenity-plugin-development`
@@ -384,4 +385,4 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **版本**：v1.31.11 ｜ **前置**：DSH 0.1.5-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1180 个用例
+> **版本**：v1.31.12 ｜ **前置**：DSH 0.1.5-rc.2+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1180 个用例

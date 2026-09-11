@@ -19,7 +19,7 @@
     // （硬编码本机 DSH 安装 + 对仓库相对家目录的深度敏感）→ CI/克隆机上全部不存在，
     // tsc 静默回落到 node_modules → 94 条错误（§8.6 诚实边界）。
     // 新形态 = `node_modules/@deepseek-ai/<pkg>`：由 **devDependencies 精确钉版**
-    // （`0.1.5-rc.1`，与本机运行宿主一致）提供 → CI 装得上、任何克隆都能 typecheck。
+    // （`0.1.5-rc.2`，与本机运行宿主一致）提供 → CI 装得上、任何克隆都能 typecheck。
     // 两条纪律（勿破）：
     //   ① 新增条目必须同时加进 devDependencies（否则 tsc 回落 → 假红/假绿）
     //   ② `cordis` 与 `@deepseek-ai/cordis` 必须指向**同一个包实例**——宿主 `Context` 的

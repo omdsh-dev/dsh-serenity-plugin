@@ -1095,6 +1095,72 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
 }
 
 /**
+ * host-upgrade — 全局升级 DSH 宿主 CLI（v1.31.12，S142 D53）。
+ *
+ * 为什么需要（R↓）：本机运行态 = `node ~/.npm-global/lib/node_modules/@deepseek-ai/dsh/lib/bin.js web`
+ * （全局 npm 安装，见 {@link cmdRestartWeb} 的注释）。宿主要从 0.1.5-rc.1 抬到 0.1.5-rc.2 时，
+ * ACC 侧**没有可用的执行通道**——safe-mode 下 agent 无 bash，`sys` 白名单（ps/ss/curl/lsof/…）
+ * 不含 npm。用户裁决（2026-09-11，通道 b）：由本 MSM 内部 spawn npm 执行。
+ *
+ * 边界收紧（防"万能执行器"，这是本子命令的安全前提）：
+ *   · 包名**硬编码** `@deepseek-ai/dsh`——不接受任意包名 ⇒ 不构成通用安装面
+ *   · 参数必须匹配 `latest|next|alpha|x.y.z[-pre]` 白名单正则
+ *   · 默认官方源 `https://registry.npmjs.org/`（预发布版 + 内网 Nexus packument TTL 双重风险），
+ *     `--registry <url>` 可覆盖
+ *   · `--dry-run` 只打印将执行的命令，不落盘
+ *
+ * 用法: dsh-develop host-upgrade <version|dist-tag> [--registry <url>] [--dry-run]
+ */
+function cmdHostUpgrade(argv: string[]): void {
+  let registry = 'https://registry.npmjs.org/'
+  let dryRun = false
+  const positional: string[] = []
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i] as string
+    if (a === '--dry-run') { dryRun = true; continue }
+    if (a === '--registry') { registry = argv[++i] ?? ''; continue }
+    if (a.startsWith('--registry=')) { registry = a.slice('--registry='.length); continue }
+    positional.push(a)
+  }
+  const target = positional[0]
+  if (target === undefined) fail('host-upgrade 需要版本或 dist-tag（如 0.1.5-rc.2 / next / latest）', 2)
+  if (!/^(latest|next|alpha|\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?)$/.test(target)) {
+    fail(`非法版本/dist-tag: ${target}（只接受 latest|next|alpha|x.y.z[-pre]）`, 2)
+  }
+  if (!/^https?:\/\//.test(registry)) fail(`registry 必须是 http(s) URL: ${registry}`, 2)
+
+  const dshDir = join(HOME_DIR, '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh')
+  const installedJson = join(dshDir, 'package.json')
+  const before = existsSync(installedJson) ? String(readJson(installedJson).version ?? '?') : '(未安装)'
+  const spec = `@deepseek-ai/dsh@${target}`
+  console.log(`[dsh-develop] 当前宿主: ${before}（${dshDir}）`)
+  console.log(`[dsh-develop] 目标: ${spec}｜源: ${registry}`)
+  if (dryRun) {
+    console.log(`[dsh-develop] --dry-run：将执行 npm install -g --registry ${registry} ${spec}`)
+    return
+  }
+  // 先解析目标版本（失败信息比 npm install 的报错更直白：源不对 / 版本不存在）
+  const view = run('npm', ['view', spec, 'version', '--registry', registry], { cwd: SCRIPTS_DIR, quiet: true })
+  if (view.status !== 0) {
+    console.error(view.stdout + view.stderr)
+    fail(`npm view ${spec} 解析失败（源 ${registry}；版本不存在或源不可达）`, 2)
+  }
+  const resolved = view.stdout.trim().split('\n').pop() ?? ''
+  console.log(`[dsh-develop] 解析结果: ${resolved || '(空)'}`)
+  const r = run('npm', ['install', '-g', '--registry', registry, spec], { cwd: SCRIPTS_DIR, quiet: true })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`npm install -g ${spec} 失败 (exit ${r.status})`, 2)
+  }
+  console.log((r.stdout + r.stderr).trim() || '(no output)')
+  if (!existsSync(installedJson)) fail(`安装后仍找不到 ${installedJson}`, 2)
+  const after = String(readJson(installedJson).version ?? '?')
+  console.log(`[dsh-develop] ✓ 宿主已升级: ${before} → ${after}`)
+  if (after === before) console.log('[dsh-develop] ⚠️ 版本未变——确认目标参数是否写错')
+  console.log('[dsh-develop] 下一步: restart-web → dashboard health 的 dshVersion 应变为新版本')
+}
+
+/**
  * npm-install-dev — 安装 hooks 开发依赖（v1.24.6：二维码绑定引入 qrcode-generator）。
  * 在 HOOKS_DIR 执行 `pnpm install --save-dev <pkgs>`（hooks 是 pnpm 项目——
  * pnpm-lock.yaml + .pnpm-store，npm 与 pnpm node_modules 布局冲突会崩）；
@@ -1247,6 +1313,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'npm-install-dev': cmdNpmInstallDev(rest); break
       case 'lockfile': cmdLockfile(); break
       case 'restart-web': cmdRestartWeb(); break
+      case 'host-upgrade': cmdHostUpgrade(rest); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
@@ -1254,7 +1321,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -1288,6 +1355,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   npm-install-dev <pkg...> hooks 开发依赖安装（npm install --save-dev；client bundle 内联）
   lockfile              重生成 hooks pnpm-lock.yaml + 用 --frozen-lockfile 自检（CI 同款判定）
   restart-web           kill + setsid 重启 dsh web（健康检查）
+  host-upgrade <ver|tag> 全局升级 DSH 宿主 CLI（包名硬编码 @deepseek-ai/dsh；默认官方源；--dry-run 预览）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   pack-check            npm pack --dry-run 核对 tarball 完整性（chunk/双 bundle/类型）
   readme-sync           包内 README ← 仓库 README（机械同步，相对链接转绝对 URL）

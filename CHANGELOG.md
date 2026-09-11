@@ -1,3 +1,67 @@
+## v1.31.12 — 2026-09-11（宿主基线抬到 DSH 0.1.5-rc.2 + 新增 `host-upgrade` 维护通道）
+
+**Scope:** 本机 DSH 从 `0.1.5-rc.1` 升到 `0.1.5-rc.2`（用户 2026-09-11 裁决：**范围 C** = 主机升级 + 基准同步 + 发布；**通道 b** = 由 ACC 侧 MSM 自行执行全局安装）。dsp **零代码适配**——rc.2 对契约面无实质改动；本版只做**声明面基准同步**与**执行通道补齐**。
+
+### ① 为什么不需要适配（先证据，后改动）
+
+| 证据 | 结果 |
+|------|------|
+| 对称 diff（rc.1 vs rc.2，46 包） | **仅 1 处实质改动**：`dsh-client-ui-primitives` 抽出 `code-file-icon-artwork`（美术数据模块，导出面未变）；其余全是版本齐步 |
+| `typecheck-host 0.1.5-rc.2`（改前） | ✅ node 半 **115 文件** / client 半 **103 文件**，paths 36+14 全命中，**两半零类型错误**（文件数与 rc.1 一致 = 基准等价） |
+| rc.2 的 `@deepseek-ai/dsh` 依赖声明 | `@deepseek-ai/cordis ^4.0.2` / `@deepseek-ai/schemastery ^3.18.2` **未变**；只有 `dsh-*` 齐步 `^0.1.5-rc.2` |
+
+⇒ 结论：**代码零改动**，要动的只是"我们相信自己跑在哪个宿主上"的声明面。
+
+### ② 新增 `host-upgrade`（`dsh-develop` 子命令，D53）
+
+**为什么需要**：本机运行态 = 全局 npm 安装（`node ~/.npm-global/lib/node_modules/@deepseek-ai/dsh/lib/bin.js web`）。
+宿主要升级时，ACC 侧**没有执行通道**——safe-mode 下 agent 无 bash，`sys` 子命令白名单（ps/ss/curl/lsof/date/ls/git…）不含 npm。
+
+**边界收紧（这是本子命令的安全前提，勿放宽）**：
+
+- 包名**硬编码** `@deepseek-ai/dsh` ⇒ 不构成通用安装面
+- 参数必须匹配 `latest|next|alpha|x.y.z[-pre]` 白名单正则
+- 默认官方源 `https://registry.npmjs.org/`（预发布版 + 内网 Nexus packument TTL 双重风险，D51 先例），`--registry` 可覆盖
+- `--dry-run` 只预览；先 `npm view` 解析目标版本（失败信息比 `npm install` 直白），安装后**读回 package.json 核验**并打印 `before → after`
+
+`dsh-develop host-upgrade 0.1.5-rc.2` 实测：`0.1.5-rc.1 → 0.1.5-rc.2`（523 包变更，59s，官方源）。
+
+### ③ 基准同步（3 处声明面 + 2 处闸门）
+
+| # | 位置 | 改动 |
+|---|------|------|
+| 1 | `hooks/package.json` | peer **15** 项 `^0.1.5-rc.1` → `^0.1.5-rc.2`；devDependencies **30** 项 `0.1.5-rc.1` → `0.1.5-rc.2`（精确钉版）；description 同步 |
+| 2 | `hooks/dsh.plugin.json` | `engines.dsh` → `>=0.1.5-rc.2` + description 同步 |
+| 3 | `src/host/contract.ts` | `REQUIRED_HOST_RANGE` → `^0.1.5-rc.2`（floor 从其派生，见 v1.31.6） |
+| 4 | `tests/compliance.test.ts` | **F6c** 字面量 → `^0.1.5-rc.2` |
+| 5 | `tests/host-manifest.test.ts` | 全 peer 值形状正则 → `^\^0\.1\.5-rc\.2$` |
+| — | `tsconfig.json` | 头注释中的基准版本 → `0.1.5-rc.2` |
+| — | `pnpm-lock.yaml` / `pnpm-workspace.yaml` | `lockfile` 重算（`minimumReleaseAgeExclude` 追加 `|| 0.1.5-rc.2`；`allowBuilds: esbuild` 存活） |
+
+**未改动（有意）**：`v1.31.6 适配 0.1.5-rc.1` 一类注释是**历史叙述**（记录"何时为何改"），不是基准声明——批量改名会把历史读成现状。
+
+**过程中被门禁抓到的遗漏（值得留档）**：第 5 处（`host-manifest.test.ts:78`）是**跑 `test` 才红的**——说明基准字面量虽散落多处，但每处都在闸门下**fail-loud**（漏改必红，不会静默漂移）。可选后续：让该正则从 `REQUIRED_HOST_RANGE` 派生以消除第三份副本（本版不做，不在发布路径上改测试语义）。
+
+### ④ 验证（全绿）
+
+| 门禁 | 结果 |
+|------|------|
+| `lockfile` | ✅ 双步（重算 + `--frozen-lockfile` 自检 = CI `Install (hooks)` 同款判定，亦即 `publish` 前置） |
+| `typecheck`（仓库内基准 rc.2） | ✅ node + client 一次通过 |
+| `typecheck-host 0.1.5-rc.2` | ✅ node 115 / client 103 文件、paths 36+14 全命中、零错误 |
+| `test` | ✅ **80 files / 1180 tests**（首轮 1 红 = 上述第 5 处基准字面量，修正后全绿） |
+| `build` | ✅ lib/index.js + lib/client.js **201951 B**（与 v1.31.10/v1.31.11 逐字节同尺寸——只动常量字面量） |
+| `pack-check` | ✅ 96 文件 / lib 90 项 |
+
+### ⑤ 诚实边界
+
+- **rc.2 仍是 npm `next`（未升 `latest`）** ⇒ 本机主动跑在预发布线上（用户明示要升）；`latest` 升版后无需再做任何 dsp 动作。
+- **升级完成后运行进程仍持 rc.1 内存态**，直到 `restart-web`（本版发布链末步）——`dashboard health` 的 `dshVersion` 以重启后为准。
+- **CI 已不自动跑（v1.31.11 D52）** ⇒ 宿主漂移不再有自动检查，只能**手动** `host-fetch <ver>` + `typecheck-host <ver>`（本版正是这条纪律的第一次执行）。
+- `host-upgrade` 是**维护者通道**（`scripts/`，不进公开 npm 包），不改变 ACC 工具面（仍 11 工具）。
+
+---
+
 ## v1.31.11 — 2026-09-10（CI typecheck 恢复为**真门**：宿主类型基准从机器耦合改为仓库内 devDependencies）
 
 **Scope:** CI 的两个 typecheck 步长期是 `continue-on-error` 的"信息性噪声"——注解里二十多条
