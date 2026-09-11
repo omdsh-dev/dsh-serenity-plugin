@@ -21,10 +21,11 @@
  * 边界（安全语义）: 本 MSM 只执行固定的开发操作集，不接受任意命令执行。
  */
 
-import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, symlinkSync, statSync, readlinkSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, symlinkSync, statSync, readlinkSync, createReadStream } from 'node:fs'
 import { resolve, dirname, join, basename } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { spawnSync, execFileSync } from 'node:child_process'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { spawnSync, execFileSync, spawn } from 'node:child_process'
+import { createInterface } from 'node:readline'
 
 const __filename = fileURLToPath(import.meta.url)
 const SCRIPTS_DIR = dirname(__filename)
@@ -1160,6 +1161,511 @@ function cmdHostUpgrade(argv: string[]): void {
   console.log('[dsh-develop] 下一步: restart-web → dashboard health 的 dshVersion 应变为新版本')
 }
 
+// ── session-doctor（v1.31.13，S142 §24「会话损坏」调查的常备诊断）──
+
+/**
+ * 会话日志体检（**只读**）。
+ *
+ * 为什么存在（R↓）：宿主自 0.1.5 起读取路径是**失败即关**（fail-closed）——
+ * `validateStoredEvents` 对「不在 `KNOWN_SESSION_EVENT_TYPES`（生成静态集）**且**未带
+ * envelope `ignorable:true`」的事件抛 `SessionFormatUnsupportedError`
+ * （"refusing to interpret the log"），对用户的表现就是**会话打不开 / 报错 / 白屏**；
+ * 且格式世代迁移（v0→v3）对未知历史事件**同样拒绝**。没有本命令时，只能靠猜。
+ *
+ * 判定面（逐份日志，逐条给证据；**判据 version-first**）：
+ *   ① 可读性：能否解压（zstd）/ 能否读行
+ *   ② 结构：header 可否解析；行是否以 `{` 开头（`--deep` 时逐行 JSON.parse）
+ *   ③ **版本门（在先）**：header 的 format version vs 本机宿主支持版本 ——
+ *      `> supported` → `refused-version`；`< supported` → **`needs-migration`**（早停，不扫正文）；
+ *      `=== supported` 才继续词表门
+ *   ④ 词表门（仅当前世代）：顶层 `type` 是否在宿主已知集内；**存储行类型先剔除**
+ *      （`PACKED_STORAGE_ROW_TAGS`，否则必然假阳性）
+ *   ⑤ 世代：同一会话 v0/v1/v2/v3 共存情况（迁移保留源文件）
+ *
+ * ⚠️ **静态扫描的诚实边界**：历史世代（v0~v2）的可读性**静态不可判**——宿主会走迁移分支，
+ * 迁移可能成功，也可能在**内容层**拒绝（实证：v0 含 `subagent/descriptor` version≠3 即被拒）。
+ * ⇒ 真判据只有 `--probe`（宿主真实 `open(id,'read')`）。静态扫描只做**分诊**，不下最终结论。
+ *
+ * 真相源（单一来源，不重复维护）：词表 + 版本号从**本机安装的宿主**读取
+ * （`~/.npm-global/.../dsh-session/lib/types/`），失败时回落到 hooks 的 devDependencies 副本；
+ * 命令会打印实际用了哪一份。
+ *
+ * 用法: dsh-develop session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--probe] [--limit <n>]
+ */
+interface DoctorOffence { type: string; seq: number | null }
+
+/**
+ * 存储行类型（**不是事件**）：`packChunks` 打包的 Assistant chunk 行。
+ * 出处：`dsh-session-persistence-jsonl/lib/worker.cjs:7724` `PACKED_TAGS`。
+ * 语义：v0/v1/v2 物理布局里它们是**顶层行**；v3 把同一内容嵌进 `assistant/message.data.stream`。
+ * ⇒ 静态扫描若把它们当事件送进词表，必然假阳性（§24.5 的坑，v1.31.13 首轮踩过）。
+ */
+const PACKED_STORAGE_ROW_TAGS = new Set(['text-chunks', 'reasoning-chunks', 'tool-call-chunks'])
+
+interface DoctorReport {
+  id: string
+  project: string
+  artifact: string
+  generation: number
+  generations: number[]
+  sizeBytes: number
+  mtimeMs: number
+  headerVersion: number | null
+  events: number
+  malformedLines: number
+  ignorableUnknown: number
+  offences: DoctorOffence[]
+  verdict: 'ok' | 'needs-migration' | 'refused-version' | 'refused-unknown-event' | 'malformed' | 'unreadable'
+  detail: string
+}
+
+/** `session.jsonl` / `session.jsonl.zstd`（= v0）/ `session.v<N>.jsonl.zstd` */
+const DOCTOR_ARTIFACT_RE = /^session(?:\.v(\d+))?\.jsonl(\.zstd)?$/
+
+function sessionStoreRoot(explicit?: string): string {
+  if (explicit !== undefined) return resolve(explicit)
+  return join(process.env.DSH_HOME ?? join(HOME_DIR, '.dsh'), 'sessions')
+}
+
+/** 读出某个会话目录下的日志世代（按代递增排序；同代重复时全部保留由调用方裁决） */
+function sessionArtifacts(dir: string): Array<{ name: string; generation: number; path: string }> {
+  let names: string[]
+  try {
+    names = readdirSync(dir)
+  } catch {
+    return []
+  }
+  const out: Array<{ name: string; generation: number; path: string }> = []
+  for (const name of names) {
+    const m = DOCTOR_ARTIFACT_RE.exec(name)
+    if (!m) continue
+    out.push({ name, generation: m[1] === undefined ? 0 : Number(m[1]), path: join(dir, name) })
+  }
+  return out.sort((a, b) => a.generation - b.generation)
+}
+
+/**
+ * 载入宿主事件词表 + 支持的格式版本。
+ * 单一真相源优先级：① 本机安装的宿主（运行时实际执行的判定）② hooks devDependencies（仓库基准）。
+ */
+async function loadSessionVocabulary(): Promise<{ known: Set<string>; supported: number | null; source: string; versionSource: string | null }> {
+  const bases = [
+    join(HOME_DIR, '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai', 'dsh-session', 'lib', 'types'),
+    join(HOOKS_DIR, 'node_modules', '@deepseek-ai', 'dsh-session', 'lib', 'types'),
+  ]
+  for (const base of bases) {
+    const knownPath = join(base, 'known-event-types.js')
+    if (!existsSync(knownPath)) continue
+    try {
+      const mod = (await import(pathToFileURL(knownPath).href)) as { KNOWN_SESSION_EVENT_TYPES?: unknown }
+      const known = mod.KNOWN_SESSION_EVENT_TYPES
+      if (!(known instanceof Set) || known.size === 0) continue
+      let supported: number | null = null
+      let versionSource: string | null = null
+      const typesPath = join(base, 'types.js')
+      if (existsSync(typesPath)) {
+        const m = /export const SESSION_FORMAT_VERSION = (\d+)/.exec(readFileSync(typesPath, 'utf-8'))
+        if (m?.[1] !== undefined) {
+          supported = Number(m[1])
+          versionSource = typesPath
+        }
+      }
+      return { known: known as Set<string>, supported, source: knownPath, versionSource }
+    } catch {
+      /* 换下一个候选源 */
+    }
+  }
+  return fail('无法载入宿主事件词表（known-event-types.js）——检查本机 DSH 安装或 hooks devDependencies', 2)
+}
+
+/** 扫描单份日志（流式，内存与日志大小无关）。**判据 version-first**（见文件头 §会话日志世代）。 */
+async function scanSessionArtifact(
+  artifact: { name: string; generation: number; path: string },
+  known: Set<string>,
+  supported: number | null,
+  deep: boolean,
+): Promise<Pick<DoctorReport, 'headerVersion' | 'events' | 'malformedLines' | 'ignorableUnknown' | 'offences' | 'verdict' | 'detail'>> {
+  let events = 0
+  let malformedLines = 0
+  let ignorableUnknown = 0
+  let headerVersion: number | null = null
+  const offences: DoctorOffence[] = []
+  let compressedExit: number | null = null
+  let compressedErr = ''
+
+  let input: NodeJS.ReadableStream
+  let child: ReturnType<typeof spawn> | null = null
+  if (artifact.name.endsWith('.zstd')) {
+    child = spawn('zstd', ['-d', '-c', artifact.path], { stdio: ['ignore', 'pipe', 'pipe'] })
+    input = child.stdout as unknown as NodeJS.ReadableStream
+    child.stderr?.on('data', (chunk: Buffer) => { compressedErr += chunk.toString('utf-8') })
+  } else {
+    input = createReadStream(artifact.path)
+  }
+  const closed = child
+    ? new Promise<void>((done) => {
+        child?.on('close', (code) => { compressedExit = code ?? 0; done() })
+        child?.on('error', (e) => { compressedExit = -1; compressedErr += e.message; done() })
+      })
+    : Promise.resolve()
+  const streamErr: { message: string | null } = { message: null }
+  input.on('error', (e: Error) => { streamErr.message = e.message })
+  const rl = createInterface({ input, crlfDelay: Infinity })
+  const iterator = rl[Symbol.asyncIterator]()
+
+  /** 早停收尾：必须显式关流并等 zstd 子进程回收，否则子进程变孤儿 / 管道 SIGPIPE。 */
+  const stopEarly = async (): Promise<void> => {
+    rl.close()
+    try { child?.kill() } catch { /* 已退出 */ }
+    input.destroy?.()
+    await closed
+  }
+
+  // ① 头行：格式世代。**版本门在先**——早于词表门，也早于全文件扫描。
+  const first = await iterator.next()
+  if (first.done !== true) {
+    const line = String(first.value)
+    if (line.length > 0) {
+      try {
+        const header = JSON.parse(line) as { version?: unknown }
+        if (typeof header.version === 'number') headerVersion = header.version
+      } catch {
+        malformedLines++
+      }
+    }
+  }
+
+  const versionKnown = headerVersion !== null && supported !== null
+  if (versionKnown && headerVersion > supported) {
+    await stopEarly()
+    return {
+      headerVersion, events, malformedLines, ignorableUnknown, offences, verdict: 'refused-version',
+      detail: `日志 format v${headerVersion} > 本机宿主支持 v${supported} → 宿主会拒绝（"written by a newer harness — upgrade the harness"）`,
+    }
+  }
+  if (versionKnown && headerVersion < supported) {
+    // 可读性**静态不可判**：宿主对历史世代走迁移分支（`open(id,'read')` → `requireStoredMigration`），
+    // 迁移**可能成功也可能在内容层拒绝**（实证：v0 日志含 `subagent/descriptor` version≠3 时被拒）。
+    // ⇒ 不报"会被拒"（那是假阳性），报 `needs-migration`，真判据交给 `--probe`。
+    await stopEarly()
+    return {
+      headerVersion, events, malformedLines, ignorableUnknown, offences, verdict: 'needs-migration',
+      detail: `历史世代 v${headerVersion}（本机宿主写 v${supported}）→ 可读性取决于迁移，须用 --probe 实测；版本门在先故未扫正文`,
+    }
+  }
+
+  // ② 正文：仅当前世代（v3）扫词表门；存储行类型先剔除，避免假阳性。
+  while (true) {
+    const next = await iterator.next()
+    if (next.done === true) break
+    const line = String(next.value)
+    if (line.length === 0) continue
+    events++
+    if (!line.startsWith('{')) { malformedLines++; continue }
+    const tm = /"type":"([^"]+)"/.exec(line)
+    if (tm?.[1] === undefined) { malformedLines++; continue }
+    const type = tm[1]
+    if (PACKED_STORAGE_ROW_TAGS.has(type) === false && !known.has(type)) {
+      if (/"ignorable":true/.test(line)) ignorableUnknown++
+      else if (offences.length < 5) {
+        const sm = /"seq":(\d+)/.exec(line)
+        offences.push({ type, seq: sm?.[1] === undefined ? null : Number(sm[1]) })
+      }
+    }
+    if (deep) {
+      try { JSON.parse(line) } catch { malformedLines++ }
+    }
+  }
+  await closed
+
+  if (streamErr.message !== null || (compressedExit !== null && compressedExit !== 0)) {
+    const why = streamErr.message ?? compressedErr.trim().split('\n')[0] ?? `zstd exit ${compressedExit}`
+    return { headerVersion, events, malformedLines, ignorableUnknown, offences, verdict: 'unreadable', detail: `无法读取: ${why}` }
+  }
+  if (malformedLines > 0) {
+    return { headerVersion, events, malformedLines, ignorableUnknown, offences, verdict: 'malformed', detail: `${malformedLines} 行不可解析（结构损坏）` }
+  }
+  // 注：`headerVersion > supported` / `< supported` 已在头行处判定并早停，此处不再重复。
+  if (offences.length > 0) {
+    return {
+      headerVersion, events, malformedLines, ignorableUnknown, offences, verdict: 'refused-unknown-event',
+      detail: `含未知且非 ignorable 的事件类型（宿主会拒绝整份日志）: ${offences.map((o) => `${o.type}@seq${o.seq ?? '?'}`).join(', ')}`,
+    }
+  }
+  const note = ignorableUnknown > 0 ? `（另有 ${ignorableUnknown} 条未知但 ignorable 的事件：宿主语义为保留不解释，安全）` : ''
+  return { headerVersion, events, malformedLines, ignorableUnknown, offences, verdict: 'ok', detail: `当前世代（v${headerVersion ?? '?'}）事件 ${events} 条全部在已知词表内${note}` }
+}
+
+/** 枚举会话目录（storeRoot/<project>/<id>/ + 其日志世代） */
+function collectSessionDirs(
+  storeRoot: string,
+  only?: Set<string>,
+): Array<{ project: string; id: string; dir: string; artifacts: Array<{ name: string; generation: number; path: string }> }> {
+  const out: Array<{ project: string; id: string; dir: string; artifacts: Array<{ name: string; generation: number; path: string }> }> = []
+  for (const project of readdirSync(storeRoot, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue
+    const projectPath = join(storeRoot, project.name)
+    for (const entry of readdirSync(projectPath, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      if (only !== undefined && !only.has(entry.name)) continue
+      const dir = join(projectPath, entry.name)
+      const artifacts = sessionArtifacts(dir)
+      if (artifacts.length === 0) continue
+      out.push({ project: project.name, id: entry.name, dir, artifacts })
+    }
+  }
+  return out
+}
+
+/**
+ * 探针模式：把日志**复制**到临时根，交给宿主自己的 `JsonlSessionPersistence.load()` 判定。
+ *
+ * 为什么必须复制（R↓）：load 可能触发格式世代迁移 → 会写新世代文件；体检不得改原存储。
+ * 为什么必须走宿主代码：判据是分层的（内存词表 + 存储行类型 + 逐格式 disposition 表 + 迁移规则），
+ * 任何自写复刻都会产出假阳性/假阴性（实测：只用内存词表会把 `text-chunks` 打包行误报为未知事件）。
+ */
+async function runSessionProbe(storeRoot: string, only: Set<string> | undefined, json: boolean, limit: number | undefined, quiet: boolean): Promise<void> {
+  const probeScript = join(SCRIPTS_DIR, 'session-probe.mjs')
+  if (!existsSync(probeScript)) fail(`探针脚本缺失: ${probeScript}`, 2)
+  const pkgBases = [
+    join(HOME_DIR, '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'node_modules', '@deepseek-ai'),
+    join(HOOKS_DIR, 'node_modules', '@deepseek-ai'),
+  ].filter((p) => existsSync(p))
+  if (pkgBases.length === 0) fail('找不到宿主包目录（本机 DSH 安装 / hooks devDependencies）', 2)
+  const say = (line: string): void => { if (!json) console.log(line) }
+  const scratchRoot = join(REPO_ROOT, '_tmp', 'session-probe', `probe-${Date.now()}`)
+  const candidates = collectSessionDirs(storeRoot, only)
+  interface ProbeSide {
+    openRead?: { ok?: boolean; events?: number | null; headerVersion?: number | null; errorName?: string; errorMessage?: string }
+    migrationChannels?: Record<string, unknown>
+    list?: { ok?: boolean; count?: number | null; errorName?: string; errorMessage?: string }
+  }
+  interface ProbeRow { project: string; id: string; file: string; generation: number; ok: boolean; events: number | null; errorName: string | null; error: string | null; side?: ProbeSide }
+  const rows: ProbeRow[] = []
+
+  // 每个会话只探测**最新世代**（`findLog` 本来就选当前世代 ⇒ 这正是"用户能不能打开"的问题）。
+  // 会话数量可达数百：**批量模式**（一次 node 进程判定多个会话）把 N 次进程启动压成 N/CHUNK 次。
+  const targets: Array<{ project: string; id: string; artifact: { name: string; generation: number; path: string } }> = []
+  for (const c of candidates) {
+    if (limit !== undefined && targets.length >= limit) break
+    const latest = c.artifacts[c.artifacts.length - 1]
+    if (latest === undefined) continue
+    targets.push({ project: c.project, id: c.id, artifact: latest })
+  }
+  for (const t of targets) {
+    const destDir = join(scratchRoot, t.project, t.id)
+    mkdirSync(destDir, { recursive: true })
+    cpSync(t.artifact.path, join(destDir, t.artifact.name))
+  }
+
+  const PROBE_CHUNK = 20
+  const parsedById = new Map<string, ProbeSide & { generations?: Array<{ ok?: boolean; events?: number | null; errorName?: string; errorMessage?: string }>; errorName?: string; errorMessage?: string; debug?: unknown }>()
+  for (let i = 0; i < targets.length; i += PROBE_CHUNK) {
+    const chunk = targets.slice(i, i + PROBE_CHUNK)
+    const args = [probeScript, scratchRoot, ...chunk.map((t) => t.id)]
+    for (const base of pkgBases) args.push('--pkg-base', base)
+    const r = run('node', args, { cwd: SCRIPTS_DIR, quiet: true })
+    for (const lineText of r.stdout.split('\n')) {
+      const line = lineText.trim()
+      if (line.length === 0 || !line.startsWith('{')) continue
+      try {
+        const parsed = JSON.parse(line) as { id?: string } & ProbeSide & { generations?: never[]; debug?: unknown }
+        if (typeof parsed.id === 'string') parsedById.set(parsed.id, parsed)
+      } catch { /* 单行解析失败不影响其余会话 */ }
+    }
+  }
+
+  for (const t of targets) {
+    const parsed = parsedById.get(t.id)
+    const gen = parsed?.generations?.[0]
+    const ok = gen?.ok === true
+    const errorName = gen?.errorName ?? parsed?.errorName ?? (ok ? null : 'ProbeError')
+    const error = ok ? null : (gen?.errorMessage ?? parsed?.errorMessage ?? '（探针无输出）')
+    // 应用面探针（open(id,'read')）与旁证字段（迁移通道 / list）**必须原样带回**：
+    // 只测 readStoredLog 无法区分"存储层拒绝"与"应用层拒绝"，而用户症状由应用面决定。
+    const side: ProbeSide = { openRead: parsed?.openRead, migrationChannels: parsed?.migrationChannels, list: parsed?.list }
+    rows.push({ project: t.project, id: t.id, file: t.artifact.name, generation: t.artifact.generation, ok, events: gen?.events ?? null, errorName, error, side })
+    const openRead = side.openRead
+    const appNote = openRead === undefined
+      ? '｜open: 未测'
+      : `｜open ${openRead.ok === true ? `✓ 可打开（${openRead.events ?? '?'} 条）` : `✗ 打不开`}`
+    if (!quiet) say(`${openRead?.ok === true ? '✓' : '✗'} ${t.id}（${t.project}）｜${t.artifact.name}｜存储层 ${ok ? '✓' : `✗ ${errorName}`}${appNote}`)
+  }
+  rmSync(scratchRoot, { recursive: true, force: true })
+
+  const unopenable = rows.filter((r) => r.side?.openRead?.ok !== true)
+  const storeLevel = rows.filter((r) => !r.ok)
+  const byProject = (list: ProbeRow[]): string => {
+    const counts = new Map<string, number>()
+    for (const r of list) counts.set(r.project, (counts.get(r.project) ?? 0) + 1)
+    return [...counts.entries()].sort().map(([p, n]) => `${p}=${n}`).join(' ')
+  }
+  const errorHistogram = (list: ProbeRow[]): Array<[string, number]> => {
+    const counts = new Map<string, number>()
+    for (const r of list) {
+      const msg = r.side?.openRead?.errorMessage ?? ''
+      // 归类到"规则级"指纹：错误文案带具体 seq/路径，须剥离才能聚合
+      const key = /subagent\/descriptor/.test(msg) ? '宿主侧：v0 迁移拒绝（subagent/descriptor 版本不受支持）'
+        : /lacks an identified message/.test(msg) ? '**我方 dsp 缺陷**：消息缺 id/role（rebuild 写坏日志）'
+          : /message must have role/.test(msg) ? '**我方 dsp 缺陷**：消息 role 不符'
+            : /no upgrade path/.test(msg) ? '宿主侧：版本门 no upgrade path'
+              : /migration .* is missing/.test(msg) ? '宿主侧：迁移链缺环'
+                : /unknown historical event type/.test(msg) ? '宿主侧：未知历史事件（迁移拒绝）'
+                  : (r.side?.openRead?.errorName ?? 'Error')
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }
+  if (json) {
+    console.log(JSON.stringify({
+      mode: 'probe', root: storeRoot, probes: rows.length,
+      openable: rows.length - unopenable.length,
+      unopenable: unopenable.length,
+      unopenableByProject: byProject(unopenable),
+      storeLevelFailing: storeLevel.length,
+      errorHistogram: errorHistogram(unopenable),
+      migrationChannels: rows[0]?.side?.migrationChannels ?? null,
+      list: rows[0]?.side?.list ?? null,
+      pkgBases, rows,
+    }, null, 2))
+    return
+  }
+  console.log('')
+  console.log(`[session-doctor] 探针 ${rows.length} 个会话（宿主真实读取路径，只读副本）`)
+  console.log(`  ✓ 应用面可打开      ${rows.length - unopenable.length}`)
+  console.log(`  ✗ 应用面打不开      ${unopenable.length}   ${byProject(unopenable)}`)
+  console.log(`  （存储层 readStoredLog 读不出 ${storeLevel.length} —— 历史世代**必然**如此，非损坏证据）`)
+  if (unopenable.length > 0) {
+    console.log('  打不开的根因分布：')
+    for (const [key, n] of errorHistogram(unopenable)) console.log(`    ${n.toString().padStart(4)}  ${key}`)
+    if (!quiet) {
+      console.log('  逐条清单：')
+      for (const r of unopenable) console.log(`    ✗ ${r.id}（${r.project}）｜${r.side?.openRead?.errorName}: ${r.side?.openRead?.errorMessage}`)
+    }
+  } else {
+    console.log('  （全部可打开）')
+  }
+  const first = rows[0]
+  if (first?.side !== undefined) {
+    console.log(`[session-doctor] 迁移通道: ${JSON.stringify(first.side.migrationChannels ?? {})}`)
+    console.log(`[session-doctor] list(): ${JSON.stringify(first.side.list ?? {})}`)
+  }
+}
+
+async function cmdSessionDoctor(argv: string[]): Promise<void> {
+  let root: string | undefined
+  let only: Set<string> | undefined
+  let json = false
+  let deep = false
+  let probe = false
+  let quiet = false
+  let limit: number | undefined
+  const addIds = (list: string): void => {
+    const ids = list.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+    if (ids.length === 0) return
+    only ??= new Set<string>()
+    for (const id of ids) only.add(id)
+  }
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i] as string
+    if (a === '--root') { root = argv[++i]; continue }
+    if (a.startsWith('--root=')) { root = a.slice('--root='.length); continue }
+    if (a === '--session') { addIds(argv[++i] ?? ''); continue }
+    if (a.startsWith('--session=')) { addIds(a.slice('--session='.length)); continue }
+    if (a === '--sessions') { addIds(argv[++i] ?? ''); continue }
+    if (a.startsWith('--sessions=')) { addIds(a.slice('--sessions='.length)); continue }
+    if (a === '--json') { json = true; continue }
+    if (a === '--deep') { deep = true; continue }
+    if (a === '--probe') { probe = true; continue }
+    if (a === '--summary') { quiet = true; continue }
+    if (a === '--limit') { limit = Number(argv[++i]); continue }
+    if (a.startsWith('--limit=')) { limit = Number(a.slice('--limit='.length)); continue }
+    fail(`session-doctor 未知参数: ${a}（用法: session-doctor [--root <dir>] [--session <id>] [--sessions <id,...>] [--json] [--deep] [--probe] [--summary] [--limit <n>]）`)
+  }
+  const storeRoot = sessionStoreRoot(root)
+  if (!existsSync(storeRoot)) fail(`会话存储不存在: ${storeRoot}`, 2)
+  if (probe) {
+    if (!json) console.log(`[session-doctor] 探针模式（宿主真实 load()；读只读副本，不动原存储）`)
+    await runSessionProbe(storeRoot, only, json, limit, quiet)
+    return
+  }
+  const vocab = await loadSessionVocabulary()
+  const say = (line: string): void => { if (!json) console.log(line) }
+  say(`[session-doctor] 存储: ${storeRoot}`)
+  say(`[session-doctor] 词表: ${vocab.known.size} 类（源: ${vocab.source}）`)
+  say(`[session-doctor] 宿主格式版本: ${vocab.supported === null ? '未知（跳过版本判定）' : `v${vocab.supported}`}${vocab.versionSource === null ? '' : `（源: ${vocab.versionSource}）`}`)
+
+  const reports: DoctorReport[] = []
+  let scanned = 0
+  for (const project of readdirSync(storeRoot, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue
+    const projectPath = join(storeRoot, project.name)
+    for (const entry of readdirSync(projectPath, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      if (only !== undefined && !only.has(entry.name)) continue
+      if (limit !== undefined && scanned >= limit) break
+      const dir = join(projectPath, entry.name)
+      const generations = sessionArtifacts(dir)
+      if (generations.length === 0) continue
+      scanned++
+      const latest = generations[generations.length - 1] as { name: string; generation: number; path: string }
+      const scan = await scanSessionArtifact(latest, vocab.known, vocab.supported, deep)
+      const report: DoctorReport = {
+        id: entry.name,
+        project: project.name,
+        artifact: latest.name,
+        generation: latest.generation,
+        generations: generations.map((g) => g.generation),
+        sizeBytes: statSync(latest.path).size,
+        mtimeMs: statSync(latest.path).mtimeMs,
+        ...scan,
+      }
+      reports.push(report)
+      say(
+        `${report.verdict === 'ok' ? '✓' : '✗'} ${report.id}｜${latest.name}｜${(report.sizeBytes / 1024 / 1024).toFixed(1)}MB｜`
+        + `${new Date(report.mtimeMs).toISOString().slice(0, 16)}｜${report.verdict}｜${report.detail}`,
+      )
+      if (only !== undefined && scanned >= only.size) break
+    }
+    if (only !== undefined && scanned >= only.size) break
+  }
+
+  const refused = reports.filter((r) => r.verdict !== 'ok' && r.verdict !== 'needs-migration')
+  const migrate = reports.filter((r) => r.verdict === 'needs-migration')
+  const byProject = (list: DoctorReport[]): string => {
+    const counts = new Map<string, number>()
+    for (const r of list) counts.set(r.project, (counts.get(r.project) ?? 0) + 1)
+    return [...counts.entries()].sort().map(([p, n]) => `${p}=${n}`).join(' ')
+  }
+  if (json) {
+    console.log(JSON.stringify({
+      root: storeRoot,
+      vocabulary: { size: vocab.known.size, source: vocab.source },
+      supportedVersion: vocab.supported,
+      scanned: reports.length,
+      ok: reports.length - refused.length - migrate.length,
+      needsMigration: migrate.length,
+      refused: refused.length,
+      refusedByProject: byProject(refused),
+      needsMigrationByProject: byProject(migrate),
+      reports,
+    }, null, 2))
+    return
+  }
+  console.log('')
+  console.log(`[session-doctor] 扫描 ${reports.length} 份日志（判据 version-first）`)
+  console.log(`  ✓ 当前世代可读      ${reports.length - refused.length - migrate.length} 份`)
+  console.log(`  ~ 历史世代待迁移判定 ${migrate.length} 份  ${byProject(migrate) || ''}`)
+  console.log(`  ✗ 静态判定会被拒    ${refused.length} 份  ${byProject(refused) || ''}`)
+  if (refused.length > 0) {
+    console.log('  静态判定会被拒的逐条：')
+    for (const r of refused) console.log(`    ✗ ${r.id}（${r.project}）: ${r.verdict} — ${r.detail}`)
+  }
+  if (migrate.length > 0) {
+    console.log('  ⚠️ 历史世代的可读性**静态不可判**——须用 `--probe` 走宿主真实迁移路径实测（迁移可能成功，也可能在内容层被拒）')
+  }
+}
+
 /**
  * npm-install-dev — 安装 hooks 开发依赖（v1.24.6：二维码绑定引入 qrcode-generator）。
  * 在 HOOKS_DIR 执行 `pnpm install --save-dev <pkgs>`（hooks 是 pnpm 项目——
@@ -1314,6 +1820,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'lockfile': cmdLockfile(); break
       case 'restart-web': cmdRestartWeb(); break
       case 'host-upgrade': cmdHostUpgrade(rest); break
+      case 'session-doctor': await cmdSessionDoctor(rest); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
@@ -1321,7 +1828,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -1356,6 +1863,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   lockfile              重生成 hooks pnpm-lock.yaml + 用 --frozen-lockfile 自检（CI 同款判定）
   restart-web           kill + setsid 重启 dsh web（健康检查）
   host-upgrade <ver|tag> 全局升级 DSH 宿主 CLI（包名硬编码 @deepseek-ai/dsh；默认官方源；--dry-run 预览）
+  session-doctor        会话日志体检（只读）：逐份判定宿主读取门（未知事件词表/格式版本/结构），列出会被拒的会话
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   pack-check            npm pack --dry-run 核对 tarball 完整性（chunk/双 bundle/类型）
   readme-sync           包内 README ← 仓库 README（机械同步，相对链接转绝对 URL）

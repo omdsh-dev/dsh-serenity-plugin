@@ -376,6 +376,22 @@ export function performRebuild(
   }
 
   session.append('user/message', {
+    /**
+     * v1.31.13 修复（**会话打不开的真因**，S142 §26）：
+     * `user/message` 的 payload 必须是**完整 UserMessage**——宿主
+     * `dsh-session/lib/types/index.js:229-259` `assertMessageEventShape` 对四种消息事件
+     * （system/user/assistant/message + tool/result）强制：
+     *   `data.id` 非空字符串 → 否则 `"<subject> lacks an identified message"`
+     *   `data.role === 'user'` → 否则 `"<subject> message must have role \"user\""`
+     * 而 `user/message` 的 message **就是 data 本身**（`type==='user/message' ? record : record.message`）。
+     *
+     * 旧实现只写 `{content, source}`（缺 `id` 与 `role`）→ 该事件**当场落盘成功**，
+     * 但宿主在**下一次打开该会话**时整份日志校验失败抛 `SessionPersistenceCorruptionError`
+     * → **会话永久打不开**（用户报的"会话老是损坏"）。实证见 S142 §26.2（真实日志 seq 5066）。
+     * 正确形状与 `seams/bootstrap.ts:306-311` 的锚定消息一致。
+     */
+    id: `rebuild-anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role: 'user',
     content: [{ type: 'text', text: pending.anchor }],
     // source 必填（UserMessage 契约）——缺失会使 session.list sessionListMetadata 抛 TypeError
     source: { kind: 'user' },

@@ -375,7 +375,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(session._calls).toHaveLength(1)
     const call = session._calls[0]!
     expect(call.type).toBe('user/message')
-    const data = call.data as { content: Array<{ text: string }>; source?: { kind: string } }
+    const data = call.data as { id?: unknown; role?: unknown; content: Array<{ text: string }>; source?: { kind: string } }
     expect(data.content[0]!.text).toContain('Continue the work of S142')
     expect(data.source).toEqual({ kind: 'user' }) // UserMessage 契约必填
     const op = (call.opts as { surfaceOp: { op: string; startSeq: number; endSeq: number } }).surfaceOp
@@ -385,6 +385,33 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(op.endSeq).toBe(13)
     const sourceEventSeqs = (call.opts as { sourceEventSeqs: number[] }).sourceEventSeqs
     expect(sourceEventSeqs).toEqual([11, 12, 13])
+  })
+
+  /**
+   * v1.31.13 回归（**会话打不开的真因**，S142 §26）：
+   * 宿主 `dsh-session/lib/types/index.js:229-259` `assertMessageEventShape` 对四种消息事件
+   * 强制 `data.id`（非空串）与 `data.role`——`user/message` 的 message **就是 data 本身**。
+   * 旧实现只写 `{content, source}` → 事件落盘成功但**下次打开整份日志校验失败**
+   * （`SessionPersistenceCorruptionError: ... lacks an identified message`）→ 会话永久打不开。
+   * 本用例把宿主规则的字面要求钉死在 dsp 产物上（无需真机即可拦住复发）。
+   */
+  it('performRebuild：user/message payload 必须是完整 UserMessage（id + role，v1.31.13 会话损坏回归）', () => {
+    const session = fakeSession([10, 11, 12])
+    const done = performRebuild(session as never, { anchor: 'Continue the work of S142.', queuedAt: Date.now() })
+    expect(done).toBe(true)
+    const data = session._calls[0]!.data as { id?: unknown; role?: unknown; content?: unknown; source?: unknown }
+    // 宿主校验 ①：`typeof message.id === 'string' && message.id !== ''`
+    expect(typeof data.id).toBe('string')
+    expect(data.id).not.toBe('')
+    // 宿主校验 ②：`message.role === <该事件类型对应的角色>`（user/message → 'user'）
+    expect(data.role).toBe('user')
+    // 宿主校验 ③④：source.kind 非空字符串 + content 是数组
+    expect((data.source as { kind?: unknown } | undefined)?.kind).toBe('user')
+    expect(Array.isArray(data.content)).toBe(true)
+    // id 必须每轮唯一（宿主以 id 标识消息；重复 id 会使 surface 改写语义错乱）
+    const second = fakeSession([10, 11, 12])
+    performRebuild(second as never, { anchor: 'x', queuedAt: Date.now() })
+    expect((second._calls[0]!.data as { id: string }).id).not.toBe(data.id)
   })
 
   it('performRebuild：带 meter → 先 append compaction/prune 定价（shadow-price 协议，v1.23.5）', () => {
