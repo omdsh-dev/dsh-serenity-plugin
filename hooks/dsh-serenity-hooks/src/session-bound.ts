@@ -128,6 +128,28 @@ export function hasAnyBound(session: unknown): boolean {
 }
 
 /**
+ * 反向查：绑定到某 trajectory 目录名的 dsh 会话 id（**按绑定时间倒序，最新在前**）。
+ *
+ * 用途（wake-scheduler 冷唤醒）：.bindings.json 以 **sessionId 为键**，而唤醒条目的
+ * target 是**目录名**——需要值侧扫描做反向索引。冷会话被唤醒时必须先知道"哪个 dsh
+ * 会话承载这条轨迹"，这是唯一的权威来源（标题只作回退，见 v1.29.2 R2）。
+ *
+ * @param root CCC 根
+ * @param dirName AGENT_SESSIONS 目录名（完整名，如 `2026-09-01--S151--x--auto`）
+ * @returns 会话 id 列表（最新绑定在前）；无绑定 → `[]`
+ */
+export function listBoundSessionIds(root: string, dirName: string): string[] {
+  const file = readBindingsFile(join(root, BINDINGS_REL_PATH))
+  const hits: Array<{ id: string; at: number }> = []
+  for (const [id, raw] of Object.entries(file.sessions)) {
+    const rec = asBoundRecord(raw)
+    if (!rec || rec.dirName !== dirName) continue
+    hits.push({ id, at: typeof rec.at === 'number' ? rec.at : 0 })
+  }
+  return hits.sort((a, b) => b.at - a.at).map((h) => h.id)
+}
+
+/**
  * 写入绑定（latest-wins 覆盖该会话记录）。
  *
  * 绑定持久化尽力而为：无法定位 CCC 根 / 无会话 id / 写盘失败 → 返回 false，不阻断主流程。

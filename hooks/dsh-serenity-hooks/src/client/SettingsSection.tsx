@@ -563,7 +563,7 @@ function SessionCleanupBlock(): React.JSX.Element {
   )
 }
 
-/** /serenity/autopilot-trajectory 状态 wire（与 src/autopilot-trajectory.ts getAutopilotStatus 对齐） */
+/** /serenity/trajectory 状态 wire（与 src/autopilot-trajectory.ts getAutopilotStatus 对齐；D58 端点更名） */
 interface AutopilotTrajectoryStatus {
   configured: boolean
   enabled: boolean
@@ -583,6 +583,18 @@ interface AutopilotTrajectoryStatus {
   recentWakes: Array<{ time: number; ok: boolean; detail: string }>
 }
 
+/** 唤醒注册表条目 wire（/serenity/trajectory 的 `wakes` 字段；与 src/wake-registry.ts WakeEntry 对齐） */
+interface WakeEntryWire {
+  id: string
+  target: string
+  at: string
+  message: string
+  state: 'pending' | 'delivered' | 'missed' | 'cancelled'
+  createdBy: string
+  attempts: number
+  lastResult: string | null
+}
+
 /** CCC 选择器条目（/serenity/cccs wire：SkiffCccEntry 同款——微信桥同源复用） */
 interface AutopilotCccEntry {
   root: string
@@ -598,6 +610,7 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
   const [cccs, setCccs] = useState<AutopilotCccEntry[]>([])
   const [selectedRoot, setSelectedRoot] = useState<string>('')
   const [status, setStatus] = useState<AutopilotTrajectoryStatus | null>(null)
+  const [wakes, setWakes] = useState<WakeEntryWire[]>([])
   const [unavailable, setUnavailable] = useState(false)
   const [waking, setWaking] = useState(false)
   const [wakeResult, setWakeResult] = useState<string | null>(null)
@@ -625,9 +638,10 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
   const refresh = useCallback(async (): Promise<void> => {
     if (!selectedRoot) return
     try {
-      const res = await fetch(`/serenity/autopilot-trajectory?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
+      const res = await fetch(`/serenity/trajectory?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
       if (!res.ok) return
-      const body = (await res.json()) as { status?: AutopilotTrajectoryStatus | null }
+      const body = (await res.json()) as { status?: AutopilotTrajectoryStatus | null; wakes?: WakeEntryWire[] }
+      if (Array.isArray(body.wakes)) setWakes(body.wakes)
       if (body.status) {
         setStatus(body.status)
         setUnavailable(false)
@@ -652,7 +666,7 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
     setWaking(true)
     setWakeResult(null)
     try {
-      const res = await fetch('/serenity/autopilot-trajectory', {
+      const res = await fetch('/serenity/trajectory', {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
         body: JSON.stringify({ action: 'wake', ccc: selectedRoot }),
@@ -717,7 +731,7 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
           help={'Autopilot Trajectory 目标认知容器：\n' +
             '· 机制：dsh 一个进程可挂载多个 CCC，每个 CCC 的 autopilot 独立配置\n' +
             '· 选择：下拉切换要查看/唤起的目标 CCC（各 CCC 时钟独立）\n' +
-            '· 配置：各 CCC 在自身 .opencode/serenity.json 定义 autopilotTrajectory\n' +
+            '· 配置：各 CCC 在自身 .opencode/serenity.json 定义 trajectory.autopilot（旧键 autopilotTrajectory 兼容）\n' +
             '· 唤起：仅对选中 CCC 生效，互不干扰'}
           control={
             <select
@@ -741,7 +755,7 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
           title="运行状态"
           desc={stateText}
           help={'Autopilot Trajectory 运行状态含义：\n' +
-            '· 未配置：该 CCC 未定义 autopilotTrajectory（机制不开始）\n' +
+            '· 未配置：该 CCC 未定义 trajectory.autopilot（机制不开始）\n' +
             '· 已配置未启用：enabled=false，零资源占用（不唤起不消耗）\n' +
             '· 已启用：时钟驱动周期性自动唤起——无人类活动满间隔小时数后\n' +
             '  启动一次前台 agent 轮（用户全程可见可介入）'}
@@ -758,6 +772,25 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
               { term: '偏见提供者', value: status.biasProvider },
               { term: '轨迹焦点', value: status.topPrompt ?? '未定义（CCC 应填写，防焦点丢失）' },
               { term: '最近唤起', value: lastWake ? `${new Date(lastWake.time).toLocaleString()} — ${lastWake.ok ? '✓' : '✗'} ${lastWake.detail}` : '尚无' },
+            ]}
+          />
+        </div>
+      </li>
+      <li>
+        <div className="ss-rowCard">
+          {/* D58：唤醒注册表（未来时刻 + 一条 message，投递给任一 trajectory）——只读展示 */}
+          <DefList
+            items={[
+              {
+                term: '唤醒注册表',
+                value: wakes.length === 0
+                  ? '无条目（agent 用 trajectory wake-add 登记：未来时刻 + 一条 message）'
+                  : `${wakes.filter((w) => w.state === 'pending').length} 条在办 / 共 ${wakes.length} 条`,
+              },
+              ...wakes.slice(0, 5).map((w) => ({
+                term: w.state === 'pending' ? '· 待唤醒' : `· ${w.state}`,
+                value: `${new Date(w.at).toLocaleString()} → ${w.target}${w.lastResult ? `（${w.lastResult}）` : ''}`,
+              })),
             ]}
           />
         </div>

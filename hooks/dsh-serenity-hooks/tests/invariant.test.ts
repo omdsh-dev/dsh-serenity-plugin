@@ -14,7 +14,7 @@ describe('invariant: 清单与注册工具一致性', () => {
       JSON.stringify({
         id: 'x',
         contributes: {
-          tools: ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'autopilot-trajectory', 'im-bridge'],
+          tools: ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'trajectory', 'im-bridge'],
         },
       }),
     )
@@ -31,7 +31,7 @@ describe('invariant: 清单与注册工具一致性', () => {
     expect(REGISTERED_TOOLS).toContain('praxis')
     expect(REGISTERED_TOOLS).toContain('dashboard')
     expect(REGISTERED_TOOLS).toContain('localstore')
-    expect(REGISTERED_TOOLS).toContain('autopilot-trajectory')
+    expect(REGISTERED_TOOLS).toContain('trajectory')
     // v1.31.1：v1.31.0 漏改此处与清单（双侧同错 → 陈旧一致静默通过），本次补齐
     expect(REGISTERED_TOOLS).toContain('im-bridge')
   })

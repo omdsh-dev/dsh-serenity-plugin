@@ -64,6 +64,9 @@ export interface SerenitySimpleSettings {
   /** Autopilot Trajectory 全局总开关（v1.27.9，默认关——只在指定电脑开启；
    *  关了即使 CCC 配置 enabled=true 也不启动定时器；CCC 级 enabled 仍为必要条件） */
   autopilotEnabled: boolean
+  /** trajectory 全局总开关（D58/M-1，S142 2026-09-13）：**autopilot 与唤醒调度器共用**。
+   *  读取顺序：`trajectoryEnabled` → 旧键 `autopilotEnabled`（逐级回退，不回写）。 */
+  trajectoryEnabled: boolean
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -77,6 +80,7 @@ export const simpleSettingsSchema = z.object({
   acpHttpPort: z.number().min(1024).max(65535).default(3100),
   publicAskEnabled: z.boolean().default(false),
   autopilotEnabled: z.boolean().default(false),
+  trajectoryEnabled: z.boolean().default(false),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -91,6 +95,7 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     acpHttpPort: config.acp?.httpPort ?? 3100,
     publicAskEnabled: config.publicAsk?.enabled ?? false,
     autopilotEnabled: false,
+    trajectoryEnabled: false,
   }
 }
 
@@ -117,6 +122,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     acpHttpPort: 3100,
     publicAskEnabled: false,
     autopilotEnabled: false,
+    trajectoryEnabled: false,
   }
 }
 

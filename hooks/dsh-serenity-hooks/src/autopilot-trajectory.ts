@@ -63,10 +63,10 @@ export const BIAS_RUN_TIMEOUT_MS = 60_000
 /** 审计历史 ring 上限（每 CCC 保留最近 N 条唤起记录） */
 export const AUDIT_HISTORY_MAX = 50
 
-/** 读配置：新键 autopilotTrajectory 优先，旧键 autotrajectory 回退（正式化兼容） */
+/** 读配置：`trajectory.autopilot`（D58 新键）优先 → 旧键 autopilotTrajectory → 旧键 autotrajectory */
 export function readAutopilotSettings(root: string): AutopilotTrajectorySettings | null {
   const cfg = loadSerenityConfig(root)
-  return cfg.autopilotTrajectory ?? cfg.autotrajectory ?? null
+  return cfg.trajectory?.autopilot ?? cfg.autopilotTrajectory ?? cfg.autotrajectory ?? null
 }
 
 /**
@@ -164,7 +164,7 @@ export async function fetchBiasContent(root: string, providerRel: string): Promi
     if (existsSync(legacy)) scriptAbs = legacy
   }
   if (!existsSync(scriptAbs)) {
-    return { text: null, error: `请在 CCC 根目录实现偏见内容提供者脚本: ${providerRel}（或旧默认 ${LEGACY_BIAS_PROVIDER}；stdout 输出偏见内容一行；msm autopilot-trajectory init 可生成模板）` }
+    return { text: null, error: `请在 CCC 根目录实现偏见内容提供者脚本: ${providerRel}（或旧默认 ${LEGACY_BIAS_PROVIDER}；stdout 输出偏见内容一行；trajectory init 可生成模板）` }
   }
   const runs: Array<[string, string[]]> = [
     ['bun', [scriptAbs]],
@@ -544,13 +544,13 @@ function resolveAutopilotRoot(ctx: Context): string | null {
 }
 
 /**
- * 面板状态（GET /serenity/autopilot-trajectory 数据源；纯逻辑，可单测）——
+ * 面板状态（GET /serenity/trajectory 数据源；纯逻辑，可单测）——
  * WebUI 设置面板「Autopilot Trajectory」只读区块展示的完整状态：配置摘要 + 目标会话
  * 命中/标志/空闲时长 + 当前窗口/可唤起判定 + 审计（最近唤起）。
- * 不运行偏见脚本（只报脚本是否就绪——运行验证走 autopilot-trajectory random）。
+ * 不运行偏见脚本（只报脚本是否就绪——运行验证走 trajectory random）。
  */
 export interface AutopilotTrajectoryStatus {
-  /** 是否配置了 autopilotTrajectory 段（.opencode/serenity.json；含旧键回退） */
+  /** 是否配置了 trajectory.autopilot 段（.opencode/serenity.json；旧键 autopilotTrajectory / autotrajectory 回退） */
   configured: boolean
   /** 总开关（缺省 false——未开零资源占用） */
   enabled: boolean
@@ -671,7 +671,24 @@ export function collectAutopilotCccs(ctx: Context, opts: { includeDisabled?: boo
 }
 
 /**
- * 进程内诊断（autopilot-trajectory diag-live 数据源；用户"排查访问不到 pangu 写个 msm"）——
+ * 所有 live 会话所属的 CCC 根（去重，保持出现顺序）。
+ *
+ * 与 {@link collectAutopilotCccs} 的区别：**不要求该 CCC 配置 trajectory.autopilot**——
+ * 唤醒注册表（wake-scheduler）的条目可以指向任何 CCC 的任何 trajectory。
+ *
+ * @param ctx 插件上下文
+ * @returns CCC 根路径列表（无 live 会话 → `[]`）
+ */
+export function collectLiveCccs(ctx: Context): string[] {
+  const roots: string[] = []
+  for (const s of listLiveSessions(ctx)) {
+    if (s.cccRoot && !roots.includes(s.cccRoot)) roots.push(s.cccRoot)
+  }
+  return roots
+}
+
+/**
+ * 进程内诊断（trajectory diag-live 数据源；用户"排查访问不到 pangu 写个 msm"）——
  * 输出当前实例 live 会话清单（id/cwd/ccc/标题）+ 每个配置了 Autopilot 的 CCC
  * 状态（配置摘要/目标命中/可唤起）+ 目标 agent 定位结果。脚本 diag 看不到运行时，
  * 本函数在插件进程内运行（能读 sessions/agents）。

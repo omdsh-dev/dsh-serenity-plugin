@@ -93,7 +93,7 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
   it('toolsBlock：10 工具清单 + msm 单入口示例（v1.30：13→10 重构）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'autopilot-trajectory']) {
+    for (const tool of ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'trajectory']) {
       expect(block).toContain(tool)
     }
     // msm 单入口调用（替代旧 3 步协议：list 发现 / --schema 查用法 / exec 执行）

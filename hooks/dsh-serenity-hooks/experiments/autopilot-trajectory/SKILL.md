@@ -1,12 +1,12 @@
 ---
 name: autopilot-trajectory-experiment
-description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自主轨迹实验）参与 skill。本 skill 让 CCC 完整理解机制背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 轨迹焦点 + 前台运行 + 多 CCC 独立），并提供一站式管理 MSM（autopilot-trajectory：无参全报告 / init 初始化 / random 验证偏见内容 / diag 诊断）。任何希望参与的 CCC 复制本目录到 .opencode/skills/ 即可开始。
+description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自主轨迹实验）参与 skill。本 skill 让 CCC 完整理解机制背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 轨迹焦点 + 前台运行 + 多 CCC 独立），并提供一站式管理工具（`trajectory`：无参全报告 / init 初始化 / random 验证偏见内容 / diag 诊断）。任何希望参与的 CCC 复制本目录到 .opencode/skills/ 即可开始。
 ---
 
 # Skill: autopilot-trajectory-experiment
 
 > 本 skill 是 Autopilot Trajectory（自动巡航轨迹）的 **CCC 参与入口**——加载本 skill 即完整理解机制的**背景、目的、方式**。
-> 实验管理：`msm autopilot-trajectory <doc|check|status|guide>`（v1.30：单入口 `msm("<name>", ["<args>"])`）
+> 实验管理：工具 `trajectory`（动作 `<all|doc|check|status|guide>`；D58 起 ACC 工具 `autopilot-trajectory` 更名 `trajectory`，硬切无别名）
 > 理论依据：serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`（v0.1 猜想）
 
 ## 触发条件/何时加载
@@ -37,31 +37,33 @@ description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自�
 
 ## 3. 参与方式（CCC 侧四步——第一步可一键 init）
 
-### ① 初始化（一键）：`msm autopilot-trajectory init`
+### ① 初始化（一键）：`trajectory init`
 
-自动完成：写配置（`.opencode/serenity.json` autopilotTrajectory 段）+ 生成偏见提供者脚本模板（CCC 根 `autopilot-bias.ts`）。
+自动完成：写配置（`.opencode/serenity.json` `trajectory.autopilot` 段）+ 生成偏见提供者脚本模板（CCC 根 `autopilot-bias.ts`）。
 
 ```jsonc
 // 写入的配置（init 后可在 .opencode/serenity.json 查看/调整）
 {
-  "autopilotTrajectory": {
-    "enabled": true,                  // 总开关（缺省 false，默认关零资源占用）
-    "intervalHours": 12,              // 无人类活动 N 小时后唤起（缺省 12）
-    "biasProvider": "autopilot-bias.ts", // 偏见内容提供者脚本（CCC 根下）
-    "topPrompt": "本轨迹的核心焦点：<CCC 填写>", // 轨迹焦点：CCC 定义，每次唤起最先注入
-    "session": "S###",                // 必填：目标会话（不配置绝不唤起）
-    "avoidWakeHours": { "start": 8, "end": 18 }  // 可选：避开北京高峰（缺省 8~18 省钱）
+  "trajectory": {
+    "autopilot": {                      // 原 autopilotTrajectory 段，字段不变
+      "enabled": true,                  // 总开关（缺省 false，默认关零资源占用）
+      "intervalHours": 12,              // 无人类活动 N 小时后唤起（缺省 12）
+      "biasProvider": "autopilot-bias.ts", // 偏见内容提供者脚本（CCC 根下）
+      "topPrompt": "本轨迹的核心焦点：<CCC 填写>", // 轨迹焦点：CCC 定义，每次唤起最先注入
+      "session": "S###",                // 必填：目标会话（不配置绝不唤起）
+      "avoidWakeHours": { "start": 8, "end": 18 }  // 可选：避开北京高峰（缺省 8~18 省钱）
+    }
   }
 }
 ```
 
 ### ② 定义轨迹焦点（topPrompt——CCC 自己填写）
 
-**CCC 定义 autopilotTrajectory 时同时定义本轨迹的顶层提示词**（`topPrompt`）：核心目标/纪律/质量要求（示例："持续深化某领域认知，产出可重建的结论与决策记录"）。它会在**每次唤起时最先注入**（`[轨迹焦点]` 段，位于身份锚定之前，影响力最大），作为**稳定焦点锚定 trajectory**——**实验观察：无焦点锚定时，多轮自主唤起中轨迹腐化严重（焦点丢失）**。与偏见内容的分工：**焦点=稳定锚（每轮不变），偏见=随机探索方向（每轮不同），互补**。init 生成占位，CCC 按自己轨迹目标改写（勿留空——留空 = 唤起无焦点锚定，轨迹易漂移）。
+**CCC 定义 `trajectory.autopilot` 时同时定义本轨迹的顶层提示词**（`topPrompt`）：核心目标/纪律/质量要求（示例："持续深化某领域认知，产出可重建的结论与决策记录"）。它会在**每次唤起时最先注入**（`[轨迹焦点]` 段，位于身份锚定之前，影响力最大），作为**稳定焦点锚定 trajectory**——**实验观察：无焦点锚定时，多轮自主唤起中轨迹腐化严重（焦点丢失）**。与偏见内容的分工：**焦点=稳定锚（每轮不变），偏见=随机探索方向（每轮不同），互补**。init 生成占位，CCC 按自己轨迹目标改写（勿留空——留空 = 唤起无焦点锚定，轨迹易漂移）。
 
 ### ③ 实现偏见内容提供者（`autopilot-bias.ts`）
 
-CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容**（反事实问题/探索方向/任何让轨迹偏离既有路径的输入）。**偏见内容归 CCC**——用本 CCC 自己的反馈信息来源保证"足够随机"。`msm autopilot-trajectory random` 可验证输出。
+CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容**（反事实问题/探索方向/任何让轨迹偏离既有路径的输入）。**偏见内容归 CCC**——用本 CCC 自己的反馈信息来源保证"足够随机"。`trajectory random` 可验证输出。
 
 ### ④ 标记目标会话（可选自生动机段）
 
@@ -83,17 +85,17 @@ CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容*
 
 **人类角色**：不触发、不中断；回复/评价天然并入（同一前台会话）；轨迹不等人类。
 
-## 5. 实验管理（autopilot-trajectory MSM）——一站式
+## 5. 实验管理（`trajectory` 工具）——一站式
 
 | 用法 | 功能 |
 |------|------|
-| `msm autopilot-trajectory`（**推荐，无参**） | **一站式全报告**：背景摘要 + 就绪度检查 + 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
-| `msm autopilot-trajectory init` | **一键初始化**：写配置 + 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts） |
-| `msm autopilot-trajectory random` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
-| `msm autopilot-trajectory doc` | 机制定义说明全文（本 SKILL.md） |
-| `msm autopilot-trajectory check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
-| `msm autopilot-trajectory status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
-| `msm autopilot-trajectory guide` | 仅步骤指引 |
+| `trajectory`（**推荐，无参**） | **一站式全报告**：背景摘要 + 就绪度检查 + 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
+| `trajectory init` | **一键初始化**：写配置 + 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts） |
+| `trajectory random` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
+| `trajectory doc` | 机制定义说明全文（本 SKILL.md） |
+| `trajectory check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
+| `trajectory status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
+| `trajectory guide` | 仅步骤指引 |
 
 ## 6. 观察与验证
 

@@ -150,6 +150,16 @@ export interface SerenityConfig {
   /** 旧键兼容（正式化前存量 CCC，如 pangu——新键 autopilotTrajectory 优先，旧键回退） */
   autotrajectory?: AutopilotTrajectorySettings;
   /**
+   * trajectory 族配置（D58，S142 2026-09-13）：`trajectory` 是一等概念，
+   * **autopilot 降为其子集**——故 autopilot 的配置迁到 `trajectory.autopilot`。
+   * 读取顺序（逐级回退，**不回写**）：`trajectory.autopilot` → `autopilotTrajectory` → `autotrajectory`。
+   * 唤醒注册表（未来时刻一次性唤醒）为 CCC 级文件 `AGENT_SESSIONS/wake-registry.json`，不在此配置。
+   */
+  trajectory?: {
+    /** autopilot（周期自唤醒的特例；每 CCC 单例，D59） */
+    autopilot?: AutopilotTrajectorySettings;
+  };
+  /**
    * 微信桥（F4c-3，v1.27.0 实验性）：**CCC 级**配置——dsh 一个进程含多个 CCC，
    * 每个 CCC 独立对接微信桥（S142 用户拍板：ACC 不绑定 role，配置归 CCC，手工）。
    * 结构/路由/开关在此文件（git 管可重建）；**bot_token 凭据在 CCC localstore**

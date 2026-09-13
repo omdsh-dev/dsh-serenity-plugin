@@ -1,0 +1,236 @@
+/**
+ * wake-scheduler.ts — trajectory 唤醒调度器（D58/D59/D60；S142 2026-09-13）
+ *
+ * 一个**中心调度器**（5min tick，复用 autopilot 的节律常量），处理 CCC 唤醒注册表里
+ * 到期的条目：把「未来时刻 + 一条 message」投递给目标 trajectory，**fire-and-forget**
+ * （无阻塞、无等待、无回执——发起方不 await，调度器不替模型结果负责）。
+ *
+ * 与 autopilot 的关系（D59）：**两个 tick 各自独立**。autopilot 是每 CCC 单例的
+ * 周期自唤醒，逻辑一行不碰；本模块只处理注册表的一次性唤醒条目。
+ *
+ * 投递路径（P-1 证据链见 SESSION.md §30.6）：
+ *  1. target（S### / 目录名）→ 目录名 + SESSION.md
+ *  2. 目标 dsh 会话 id：`.bindings.json` 里绑定该目录名的会话（按绑定时间倒序，权威）
+ *     → 回退：live 会话标题匹配
+ *  3. agent：**live 优先**（`ctx.agents.get`）→ 冷会话走 `ctx.sessionController.resolveAgent`
+ *     （宿主实现：live 优先 + resume 去重 + 由会话元数据恢复 preset）
+ *     → `sessionController` 缺席（headless profile）⇒ 仅投递 live 目标，**不静默**
+ *  4. 投递：`agent.followup(...)`（"Queue an ordinary follow-up turn and wake the driver"）
+ *
+ * 守卫（I-4 默认）：全局 `trajectoryEnabled`（旧键 `autopilotEnabled` 回退）｜
+ * 补跑窗口 2h（超窗置 missed 留痕）｜同 tick 串行｜唤起后维持 live（人类可介入）。
+ */
+
+import type { Context } from 'cordis'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import type { MessageSource } from '@deepseek-ai/dsh-llm'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { basename, join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { findSession, sessionsRoot } from './session-ops.js'
+import { listBoundSessionIds } from './session-bound.js'
+import { hostAgents, hostService } from './host/access.js'
+import { registerDisposer } from './host/effect.js'
+import { readSimpleSettings } from './settings-section.js'
+import { TICK_MS, collectLiveCccs } from './autopilot-trajectory.js'
+import {
+  loadWakeRegistry,
+  splitDueWakes,
+  updateWake,
+  WAKE_CATCH_UP_MS,
+  type WakeEntry,
+} from './wake-registry.js'
+
+const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
+
+/** 宿主 sessionController 的最小形态（`resolveAgent`：live 优先，否则 resume） */
+interface HostSessionController {
+  resolveAgent?: (sessionId: string) => Promise<{ agent?: Agent; error?: unknown }>
+}
+
+/** 投递结果（写回条目的 lastResult；人读） */
+export interface WakeDeliveryResult {
+  ok: boolean
+  detail: string
+}
+
+/** 目标定位：目录名 + SESSION.md 绝对路径 */
+interface WakeTarget {
+  dirName: string
+  mdPath: string
+}
+
+/**
+ * 解析条目的 target（`S###` 或完整目录名）→ 目录名 + SESSION.md 路径。
+ * @param root CCC 根
+ * @param target 条目里的目标标识
+ * @returns 命中返回目录信息，未命中 null
+ */
+export function resolveWakeTarget(root: string, target: string): WakeTarget | null {
+  const found = findSession(sessionsRoot(root), target)
+  if (!found) return null
+  const mdPath = join(found.path, 'SESSION.md')
+  if (!existsSync(mdPath)) return null
+  return { dirName: basename(found.path), mdPath }
+}
+
+/** 全局闸：`trajectoryEnabled` 优先，旧键 `autopilotEnabled` 回退（设置服务不可用 → 关） */
+export function wakeSchedulerEnabled(): boolean {
+  try {
+    const s = readSimpleSettings() as { trajectoryEnabled?: boolean; autopilotEnabled?: boolean }
+    return s.trajectoryEnabled === true || s.autopilotEnabled === true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 取目标 agent：live 优先 → 冷会话走 sessionController.resolveAgent → 标题回退。
+ * @param ctx 插件上下文
+ * @param root CCC 根
+ * @param dirName 目标 trajectory 目录名
+ * @returns 命中返回 agent 与取得方式（how 进 lastResult，便于诊断）；未命中返回原因
+ */
+export async function acquireWakeAgent(
+  ctx: Context,
+  root: string,
+  dirName: string,
+): Promise<{ agent: Agent; how: string } | { error: string }> {
+  const agents = hostAgents(ctx)
+  const ids = listBoundSessionIds(root, dirName)
+  for (const id of ids) {
+    const live = agents?.get?.(id) as Agent | undefined
+    if (live) return { agent: live, how: `live(bound ${id})` }
+  }
+  if (ids.length > 0) {
+    const sc = hostService<HostSessionController>(ctx, 'sessionController')
+    const resolved = sc?.resolveAgent
+    if (typeof resolved !== 'function') {
+      return { error: `目标会话未加载且 sessionController 不可用（headless profile？）——绑定 id: ${ids[0]}` }
+    }
+    const id = ids[0] as string
+    try {
+      const out = await resolved.call(sc, id)
+      if (out?.agent) return { agent: out.agent, how: `cold-resume(${id})` }
+      return { error: `sessionController.resolveAgent 未返回 agent（${id}）: ${String(out?.error ?? '未知原因')}` }
+    } catch (err) {
+      return { error: `冷会话载入失败（${id}）: ${String((err as Error)?.message ?? err)}` }
+    }
+  }
+  return { error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 logbook use 激活过` }
+}
+
+/** 唤醒消息（唤起即投递正文：身份锚定 + 唤醒信息 + 任务） */
+export function buildWakeText(entry: WakeEntry, target: WakeTarget): string {
+  return [
+    `[trajectory 唤醒] 到点（登记于 ${entry.createdAt}，发起者 ${entry.createdBy || '未知'}，id ${entry.id}）。`,
+    '',
+    `身份锚定：继续 ${target.dirName} 的 trajectory（SESSION.md: ${target.mdPath}）。`,
+    '',
+    '唤醒信息：',
+    entry.message,
+    '',
+    '任务：按上述唤醒信息继续本轨迹的工作；完成后把进展写入 SESSION.md。',
+  ].join('\n')
+}
+
+/**
+ * 投递一条唤醒（fire-and-forget：`followup` 入队即返回，不等模型结果）。
+ * @param ctx 插件上下文
+ * @param root CCC 根
+ * @param entry 唤醒条目
+ * @returns 投递结果（写回 lastResult）
+ */
+export async function deliverWake(ctx: Context, root: string, entry: WakeEntry): Promise<WakeDeliveryResult> {
+  const target = resolveWakeTarget(root, entry.target)
+  if (!target) return { ok: false, detail: `目标 trajectory 未命中（${entry.target}）` }
+  const acquired = await acquireWakeAgent(ctx, root, target.dirName)
+  if ('error' in acquired) return { ok: false, detail: acquired.error }
+  try {
+    acquired.agent.followup(createUserMessage({ content: [{ type: 'text', text: buildWakeText(entry, target) }], source: PLUGIN_SOURCE }))
+  } catch (err) {
+    return { ok: false, detail: `投递失败（${acquired.how}）: ${String((err as Error)?.message ?? err)}` }
+  }
+  return { ok: true, detail: `已投递 ${target.dirName}（${acquired.how}）` }
+}
+
+/** 一次调度 tick：遍历 live CCC → 到期项串行投递 / 超窗项置 missed；返回人读摘要 */
+export async function runWakeTick(ctx: Context): Promise<string[]> {
+  const log: string[] = []
+  for (const root of collectLiveCccs(ctx)) {
+    const { registry, error } = loadWakeRegistry(root)
+    if (error) {
+      log.push(`✗ ${root}: ${error}`)
+      continue
+    }
+    const { due, expired } = splitDueWakes(registry, Date.now(), WAKE_CATCH_UP_MS)
+    for (const e of expired) {
+      updateWake(root, e.id, { state: 'missed', lastResult: `超过补跑窗口（${WAKE_CATCH_UP_MS / 3_600_000}h）未投递` })
+      log.push(`· ${root}: ${e.id} → missed（超补跑窗口）`)
+    }
+    // 串行投递：同 tick 多目标依次进行（防模型并发挤兑）——fire-and-forget 指不等结果，不是并行
+    for (const e of due) {
+      const res = await deliverWake(ctx, root, e)
+      updateWake(root, e.id, {
+        state: res.ok ? 'delivered' : 'pending',
+        attempts: e.attempts + 1,
+        lastResult: res.detail,
+        deliveredAt: res.ok ? new Date().toISOString() : null,
+      })
+      log.push(`· ${root}: ${e.id} → ${res.ok ? 'delivered' : `重试（${res.detail}）`}`)
+    }
+  }
+  return log
+}
+
+/**
+ * 装配调度器（index.ts apply 调用）：5min tick + 生命周期 disposer +
+ * 会话出现/settings 变化时热启动（与 autopilot 同款触发面，互不干扰）。
+ * @param ctx 插件上下文
+ */
+export function registerWakeScheduler(ctx: Context): void {
+  let timer: NodeJS.Timeout | null = null
+  /** 全局串行链（同一时刻只跑一次 tick；投递本身按条目串行） */
+  let chain: Promise<void> = Promise.resolve()
+
+  const tick = (): void => {
+    if (!wakeSchedulerEnabled()) return
+    if (collectLiveCccs(ctx).length === 0) return
+    chain = chain.then(async () => {
+      try {
+        const log = await runWakeTick(ctx)
+        for (const line of log) console.log(`[serenity-hooks] trajectory 唤醒 ${line}`)
+      } catch (err) {
+        console.warn(`[serenity-hooks] ✗ trajectory 唤醒 tick 异常: ${String((err as Error)?.message ?? err)}`)
+      }
+    })
+  }
+
+  const startTimer = (): void => {
+    if (timer) return
+    if (!wakeSchedulerEnabled()) return
+    if (collectLiveCccs(ctx).length === 0) return
+    timer = setInterval(tick, TICK_MS)
+    timer.unref()
+    console.log('[serenity-hooks] ✓ trajectory 唤醒调度器启动（5min tick）')
+    tick()
+  }
+
+  startTimer()
+  try {
+    ctx.on('session/created', () => startTimer())
+  } catch {
+    /* 事件通道缺失不阻断（启动时已尝试一次） */
+  }
+  try {
+    ctx.on('serenity/settings-changed', () => startTimer())
+  } catch {
+    /* 事件通道缺失不阻断（可重启 web 生效） */
+  }
+  registerDisposer(ctx, 'trajectory 唤醒调度器', () => {
+    if (timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  })
+}

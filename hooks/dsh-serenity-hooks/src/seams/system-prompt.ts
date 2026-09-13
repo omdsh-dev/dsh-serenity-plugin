@@ -107,7 +107,7 @@ export function toolsBlock(): string {
     '  handyman     — delegate work to a worker agent on a CCC-whitelisted model; mode="foreground" (default) = one serial child returns its final text; mode="background" = loop-validated worker (completion code + round cap + restart + progress file), jobs=[] orchestrates parallel work',
     '  localstore   — ACC local credential/config storage (CCC-root localstore.json; git policy localstore.gitTrack default deny)',
     '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config',
-    '  autopilot-trajectory — Autopilot Trajectory one-stop management (all/init/random/diag/doc/check/status/guide)',
+    '  trajectory   — trajectory one-stop management (all/init/random/diag/doc/check/status/guide/diag-live) + wake registry (wake-add/wake-list/wake-rm: wake = a future instant + one message, delivered to any trajectory; fire-and-forget)',
     '',
     'MSM call (registered CCC MSMs, deterministic Mech & Semi-Mech):',
     '  Execute:       msm("<name>", ["<arg1>", "<arg2>"])   — run a registered MSM directly (partial name returns matching candidates)',

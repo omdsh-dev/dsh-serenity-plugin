@@ -1,6 +1,6 @@
 ---
 name: acc-serenity
-description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供 11 真实工具 container_fs/container_git/container_admin/msm/praxis/logbook/dashboard/handyman/localstore/autopilot-trajectory/im-bridge + 拦截缝机械守卫，v1.31 命名体系）与协作纪律（EAP/Neat/会话追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
+description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供 11 真实工具 container_fs/container_git/container_admin/msm/praxis/logbook/dashboard/handyman/localstore/trajectory/im-bridge + 拦截缝机械守卫，v1.31 命名体系）与协作纪律（EAP/Neat/会话追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
 ---
 
 # Skill: acc-serenity — 宁静号 ACC Harness（DSH 运行时）
@@ -56,14 +56,14 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | `dashboard` | 普适仪表：health（三原则 + registry）/ time / wait | 舰桥仪表盘 |
 | `handyman` | 杂工编排（白名单模型 worker 循环） | Crew Rotation |
 | `localstore` | 凭据/配置存储（CCC 根 localstore.json） | 保留 |
-| `autopilot-trajectory` | Autopilot 一站式管理 | 保留 |
+| `trajectory` | 轨迹一站式管理（D58）：trajectory 是一等概念，**autopilot 自主巡航是其子集**；**唤醒注册表** wake-add / wake-list / wake-rm（唤醒 = 未来时刻 + 一条 message） | 保留 |
 | `im-bridge` | IM 消息发送（channel/action/user/text/file/caption/account）——**条件可见**：本 CCC 未配置任何 IM 通道（如 `weixin.enabled`）时从工具清单移除 | Crew Rotation |
 
-**改名对照（旧 → 新，硬切无别名）**：`cc_fs`→`container_fs` / `cc_git`→`container_git` / `acc_msm`（执行面）→`msm`、`acc_msm`（管理面）→`container_admin msm` / `skiff_admin`→`container_admin role` / `session`→`logbook` / `session_rebuild`→`logbook rebuild` / `acc_kit`→`dashboard` / `eap`·`neat`·`cce` 三合一→`praxis`。旧工具名不再注册。
+**改名对照（旧 → 新，硬切无别名）**：`cc_fs`→`container_fs` / `cc_git`→`container_git` / `acc_msm`（执行面）→`msm`、`acc_msm`（管理面）→`container_admin msm` / `skiff_admin`→`container_admin role` / `session`→`logbook` / `session_rebuild`→`logbook rebuild` / `acc_kit`→`dashboard` / `eap`·`neat`·`cce` 三合一→`praxis` / `autopilot-trajectory`→`trajectory`。旧工具名不再注册。
 
 | 机制 | DSH harness 实现（插件） | 性质 |
 |---|---|---|
-| 11 真实工具 | `container_fs`/`logbook`/`dashboard`/`container_git`/`msm`/`praxis`/`handyman`/`localstore`/`container_admin`/`autopilot-trajectory`/`im-bridge`（进程内） | 机械 |
+| 11 真实工具 | `container_fs`/`logbook`/`dashboard`/`container_git`/`msm`/`praxis`/`handyman`/`localstore`/`container_admin`/`trajectory`/`im-bridge`（进程内） | 机械 |
 | 路径守卫 / 安全模式 / 黑名单 | `tools/pre-execute` + `ctx.tools.guard`（.serenity-safe-on 标记 + serenity.json 黑名单） | 机械 |
 | 条件可见（im-bridge） | `agent.ctx.tools.restrict({deny})` 按 CCC 配置逐 agent 收窄（同 safe-mode 机制） | 机械 |
 | 系统提示注入 / Phase 2 | `agent/session-start` + `agent/prompt-submit`（ACC 身份播种） | 机械 |

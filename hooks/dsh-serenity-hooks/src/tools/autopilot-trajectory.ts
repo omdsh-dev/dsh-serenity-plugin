@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { diagLive, type DiagLiveReport } from '../autopilot-trajectory.js'
+import { getLastActiveSessionInfo } from '../session-ops.js'
+import { addWake, listWakes, removeWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
 
 /**
  * 定位包内脚本（npm files 分发 experiments/autopilot-trajectory/）。
@@ -42,7 +44,27 @@ export function findExpScript(startDir: string): string | null {
 /** 包内脚本（上溯查找；找不到 → execute 报错提示包完整性） */
 const EXP_SCRIPT = findExpScript(dirname(fileURLToPath(import.meta.url)))
 
-export const AUTOPILOT_ACTIONS = ['all', 'init', 'random', 'diag', 'doc', 'check', 'status', 'guide', 'diag-live'] as const
+export const AUTOPILOT_ACTIONS = [
+  'all', 'init', 'random', 'diag', 'doc', 'check', 'status', 'guide', 'diag-live',
+  'wake-add', 'wake-list', 'wake-rm',
+] as const
+
+/** 进程内处理的动作（不 exec 包内脚本）：diag-live 诊断 + 唤醒注册表三动作 */
+const NATIVE_ACTIONS = new Set<string>(['diag-live', 'wake-add', 'wake-list', 'wake-rm'])
+
+/** 渲染唤醒条目（工具输出/面板共用形态；按 at 升序） */
+function renderWakeList(entries: WakeEntry[], error: string | null): string {
+  const lines: string[] = [`═══ trajectory 唤醒注册表（${entries.length} 条）═══`]
+  if (error) lines.push(`⚠ ${error}`)
+  if (entries.length === 0) lines.push('  （无条目——用 wake-add 登记：唤醒 = 未来时刻 + 一条 message）')
+  for (const e of entries) {
+    lines.push(`  · ${e.id}  [${e.state}]  at=${e.at}  target=${e.target}  by=${e.createdBy || '?'}`)
+    lines.push(`      message: ${e.message.length > 120 ? `${e.message.slice(0, 120)}…` : e.message}`)
+    if (e.lastResult) lines.push(`      last: ${e.lastResult}（attempts=${e.attempts}）`)
+  }
+  lines.push('', `补跑窗口 ${WAKE_CATCH_UP_MS / 3_600_000}h：停机期间到期且迟到未超窗 → 补投；超窗 → missed 留痕。`)
+  return lines.join('\n')
+}
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
   return exec.agent?.session?.header?.cwd ?? process.cwd()
@@ -80,33 +102,60 @@ function renderDiagLive(r: DiagLiveReport): string {
   return lines.join('\n')
 }
 
-/** 创建 autopilot-trajectory 工具（闭包捕获 ctx → diag-live 进程内诊断；v1.26.14 + v1.27.4 改名） */
+/** 创建 trajectory 工具（原 autopilot-trajectory；D58 更名 + 唤醒注册表三动作） */
 export function createAutopilotTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
-    name: 'autopilot-trajectory',
+    name: 'trajectory',
     description:
-      'Autopilot Trajectory（自动巡航轨迹，正式版 v1.27.4；前身 autotrajectory 实验）一站式管理。无参/action=all：全报告（背景摘要 + 就绪检查 + 状态 + 下一步）——CCC agent 看一次即完整理解并知道怎么开始；init：初始化辅助（写配置 + 生成偏见提供者脚本模板）；random：运行偏见提供者脚本输出当前偏见内容；diag：唤起条件链诊断（--ccc <path> 指定 CCC，无参递归扫描 /home/yh 两层；逐条件输出 + 阻断点 + 修复建议）；diag-live：**进程内诊断**（live 会话清单/标题/agent 定位/面板解析目标；排查"面板检测不到实验 CCC"）；doc：定义全文；check/status/guide：单项。**topPrompt（轨迹焦点）**：CCC 定义时自己填写本轨迹核心焦点（顶层提示词），每次唤起最先注入——稳定焦点锚定防漂移，与偏见内容（每轮随机探索）互补。多 CCC 独立（v1.27.4）：每个 live+enabled CCC 各自时钟唤起。机制是 CCC 的自选动作——dsp 只提供工具与知识，不自动安装任何东西。',
+      'trajectory 一站式管理（D58：trajectory 是一等概念，**autopilot 是其子集**——周期自唤醒的特例）。无参/action=all：全报告（背景摘要 + 就绪检查 + 状态 + 下一步）——CCC agent 看一次即完整理解并知道怎么开始；init：初始化辅助（写配置 + 生成偏见提供者脚本模板）；random：运行偏见提供者脚本输出当前偏见内容；diag：唤起条件链诊断（--ccc <path> 指定 CCC，无参递归扫描 /home/yh 两层；逐条件输出 + 阻断点 + 修复建议）；diag-live：**进程内诊断**（live 会话清单/标题/agent 定位/面板解析目标）；doc：定义全文；check/status/guide：单项。**唤醒注册表（wake-add/wake-list/wake-rm）**：唤醒 = **未来时刻 + 一条 message**——可对**自己**预定未来唤醒，也可唤醒**别人**（任一 trajectory）；落点 CCC 内 `AGENT_SESSIONS/wake-registry.json`；到点由中心调度器投递（冷会话自动载入），**fire-and-forget：无回执、无阻塞、不等待**。wake-add 参数：target（S### 或目录名）/ at（RFC3339 或 `+30m`/`+2h`）/ message；wake-rm 参数：id。**topPrompt（轨迹焦点）**：CCC 定义时自己填写本轨迹核心焦点（顶层提示词），每次唤起最先注入——稳定焦点锚定防漂移。多 CCC 独立：每个 live CCC 各自评估。机制是 CCC 的自选动作——dsp 只提供工具与知识，不自动安装任何东西。',
     parameters: {
       action: { type: 'string', enum: [...AUTOPILOT_ACTIONS], required: true, description: 'Subcommand' },
+      target: { type: 'string', description: 'wake-add：目标 trajectory（S### 或 AGENT_SESSIONS 目录名）' },
+      at: { type: 'string', description: 'wake-add：未来时刻（RFC3339 含时区，或 +30m / +2h 相对写法）' },
+      message: { type: 'string', description: 'wake-add：唤醒 message（投递给目标 trajectory 的正文）' },
+      id: { type: 'string', description: 'wake-rm：条目 id（wake-list 可见）' },
     },
     output: {
       schema: { type: 'json' },
       render: (_args, value) => renderText(value),
     },
     async execute(args, exec) {
+      const root = findSerenityRoot(agentCwd(exec))
       // diag-live：进程内诊断（不 exec 脚本——脚本是独立进程看不到 ctx.sessions/agents）
       if (args.action === 'diag-live') {
         return { output: renderDiagLive(diagLive(ctx)) }
       }
-      const root = findSerenityRoot(agentCwd(exec))
+      // 唤醒注册表三动作：进程内直改注册表文件（不 exec 脚本——注册表是 CCC 级文件）
+      if (NATIVE_ACTIONS.has(args.action ?? '')) {
+        if (!root) return { output: '⚠ 未定位到 CCC 根（.serenity）——唤醒注册表按 CCC 存放，请在 CCC 内调用' }
+        if (args.action === 'wake-list') {
+          const { entries, error } = listWakes(root)
+          return { output: renderWakeList(entries, error) }
+        }
+        if (args.action === 'wake-add') {
+          // 发起者 = 最近激活的 trajectory 会话（可见性/审计——注册表条目要能答"谁安排的这次唤醒"）
+          const active = getLastActiveSessionInfo()
+          const res = addWake(root, {
+            target: args.target ?? '',
+            at: args.at ?? '',
+            message: args.message ?? '',
+            createdBy: active?.sessionId ?? '',
+            nowMs: Date.now(),
+          })
+          if (!res.ok) return { output: `✗ 登记失败：${res.error}` }
+          return { output: `✓ 已登记唤醒\n${renderWakeList([res.entry], null)}` }
+        }
+        const removed = removeWake(root, args.id ?? '')
+        return { output: removed.ok ? `✓ 已移除唤醒条目 ${args.id}` : `✗ 移除失败：${removed.error}` }
+      }
       const result: Record<string, string> = {}
       if (!EXP_SCRIPT) {
-        result.error = 'autopilot-trajectory 脚本未随安装分发（npm 包缺 experiments/autopilot-trajectory/）——请检查包完整性'
+        result.error = 'trajectory 脚本未随安装分发（npm 包缺 experiments/autopilot-trajectory/）——请检查包完整性'
         return result
       }
       const script = EXP_SCRIPT
       if (!existsSync(script)) {
-        result.error = `autopilot-trajectory 脚本缺失（${script}）——包未随安装分发，请检查 npm 包完整性`
+        result.error = `trajectory 脚本缺失（${script}）——包未随安装分发，请检查 npm 包完整性`
         return result
       }
       const env: NodeJS.ProcessEnv = { ...process.env }
@@ -122,7 +171,7 @@ export function createAutopilotTool(ctx: Context): ReturnType<typeof defineTool>
         return result
       }
       if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
-        result.error = 'autopilot-trajectory 需要 bun 运行时（bun not found in PATH）'
+        result.error = 'trajectory 需要 bun 运行时（bun not found in PATH）'
         return result
       }
       result.error = r.stderr?.trim() || r.stdout?.trim() || `exit ${r.status ?? '?'}`

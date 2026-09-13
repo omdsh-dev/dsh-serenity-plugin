@@ -77,10 +77,10 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `handyman` | A cheap worker model does the work. **Default mode (foreground)** = one serial delegation that returns its result; **background mode** = rounds until done (completion-code check / round cap / auto-restart / progress file), and several jobs in parallel | Bulk, repetitive work (scanning dozens of skills, per-case regression) |
 | `localstore` | Stores secrets and settings (credential and config namespaces) | Keep API keys and passwords in one place, out of git |
 | `container_admin` | The maintenance bay: manage sub-roles, manage the tool registry, view all configuration | Defining a sub-role, registering a new small tool |
-| `autopilot-trajectory` | Autonomous cruising: wake a workspace on a clock and inject its current focus; several workspaces stay independent | When you want the AI to work on its own on a schedule (see §6.5) |
+| `trajectory` | Trajectory management: register a **future wake** (a wake = a future instant + one message; it can wake yourself, or another trajectory); autonomous cruising on a clock (wake a workspace and inject its current focus); several workspaces stay independent | When you want the AI to work on its own on a schedule, or to pick the work up again at a future moment (see §6.5) |
 | `im-bridge` | Message an IM contact (WeChat today): send text, send a file, list configured recipients, check channel health. Every successful send is recorded in the workspace log | When you want the AI to message family/colleagues proactively (see §6.6). **It only appears when this workspace has the WeChat bridge configured**, and it can only message from this workspace |
 
-> **Renamed** (old names are gone for good, no aliases): `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role`. Old sessions referencing the old names will error — consult this map.
+> **Renamed** (old names are gone for good, no aliases): `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory`. Old sessions referencing the old names will error — consult this map.
 
 ### 3.2 Mechanical constraints (the AI cannot bypass them)
 
@@ -270,14 +270,17 @@ Carve a **deliberately limited role** out of an all-capable assistant — not ju
 - **Answers only**: the response carries answer / answer_html / sessionId — internal trajectory, tool results, and mechanics never leave
 - Listens on 127.0.0.1 by default; how you expose it to others (tunnel/reverse proxy/port mapping) is your decision
 
-### 6.5 Autonomous cruising (Autopilot Trajectory)
+### 6.5 Trajectories and autonomous cruising (trajectory)
 
-Let a workspace **wake up on its own and get to work**, in front of you (foreground injection, interruptible):
+`trajectory` is the first-class concept: a workspace may run any number of trajectories in parallel; **autopilot (autonomous cruising) is a subset of it** — the special case of periodic self-waking.
+
+**Autonomous cruising**: let a workspace **wake up on its own and get to work**, in front of you (foreground injection, interruptible):
 
 - **When it wakes**: workspace switch on + global switch on (off by default; enable it only on the machine you want) + target session exists (directory carries the `--auto` suffix) + the interval elapsed (fractions allowed, the tightest about 36 seconds) + outside the quiet window (default 08:00–18:00 Beijing) + the bias script is ready
 - **What it reads first**: the "focus" you wrote (`topPrompt`, injected first every round to prevent drift), then randomly generated "bias content" (your script, exploring directions)
 - **Workspaces stay independent**: each has its own interval, session, focus, and window
 - **Audited**: every wake is recorded (the panel shows the recent ones); failures retry with exponential backoff
+- **You can also book a future moment**: registering a wake = a future instant + one message — you can book it for yourself, or wake another trajectory; it lands in the workspace's `AGENT_SESSIONS/wake-registry.json` (readable and auditable), and a central scheduler delivers it when due — no blocking, no waiting
 - There is no "maximum wakes per day" cap — frequency is bounded only by the interval and the window
 
 ### 6.6 Security model
@@ -350,7 +353,7 @@ pnpm build              # bundle (lib/index.js + client.js)
 | Runs on | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no shared source, same standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, platform-independent text aligned byte-for-byte |
-| Tools | msm / container_fs / logbook … | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory / im-bridge |
+| Tools | msm / container_fs / logbook … | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / trajectory / im-bridge |
 
 **A workspace can switch runtimes at any time**: the `.serenity` marker, `.opencode/skills/`, configuration, and `AGENT_SESSIONS/` formats are identical.
 Only the platform layer differs (tool names, injection channel), and the constraints the AI receives stay the same.

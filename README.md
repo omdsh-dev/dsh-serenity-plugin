@@ -78,10 +78,10 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `handyman` | 杂工：派一个便宜模型的助手干活。**默认模式（foreground）**= 一次串行委派、拿回结果；**background 模式**= 循环干活直到完成（完成码校验 / 轮次上限 / 自动重启 / 进度文件），也可一次派多个并行 | 大批量、重复性的活（扫描几十个技能、逐用例回归） |
 | `localstore` | 存密钥和配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
 | `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具时 |
-| `autopilot-trajectory` | 自动巡航：定时唤醒工作区、注入当前焦点，支持多个工作区各自独立 | 想让 AI 定时自己干活（见 §6.5） |
+| `trajectory` | 轨迹管理：登记**未来唤醒**（唤醒 = 未来某时刻 + 一条消息，可唤醒自己，也可唤醒别的轨迹）；定时自动巡航（到点唤醒工作区、注入当前焦点），支持多个工作区各自独立 | 想让 AI 定时自己干活、或安排它未来某刻自动接着干（见 §6.5） |
 | `im-bridge` | 给 IM 联系人发消息（目前是微信）：发文本、发文件、查已配置联系人、查通道状态。每次成功发送自动进工作区的消息记录 | 想让 AI 主动给家人/同事发消息（见 §6.6）。**只在工作区配了微信桥时才出现**，且只能发本工作区的消息 |
 
-> **改过名**（旧名已彻底停用，没有兼容别名）：`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role`。老会话里看到旧名，照这张表对照即可。
+> **改过名**（旧名已彻底停用，没有兼容别名）：`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory`。老会话里看到旧名，照这张表对照即可。
 
 ### 3.2 机械约束（AI 绕不过去）
 
@@ -264,14 +264,17 @@ DSH 一个进程可以同时带多个工作区，每个工作区各自对接自�
 - **只给答案**：响应里只有 answer / answer_html / sessionId——内部轨迹、工具结果、机制信息都不出去
 - 默认只监听 127.0.0.1；要给别人用，怎么暴露（隧道/反代/端口映射）由你决定
 
-### 6.5 自主巡航（Autopilot Trajectory）
+### 6.5 轨迹与自主巡航（trajectory）
 
-让工作区**到点自己醒过来干活**，全程在你眼前发生（前台注入，随时可介入）：
+`trajectory`（轨迹）是一等概念：一个工作区里可以有任意多条轨迹并行；**autopilot（自主巡航）是它的一个子集**——"周期自唤醒"的特例。
+
+**自主巡航**：让工作区**到点自己醒过来干活**，全程在你眼前发生（前台注入，随时可介入）：
 
 - **什么时候醒**：工作区开关打开 + 全局开关打开（默认关，只在你想跑的机器上开）+ 目标会话存在（目录带 `--auto` 后缀）+ 到了间隔（支持小数，最密约 36 秒）+ 不在避开的高峰窗口（默认北京时间 8~18 点）+ 偏见脚本就绪
 - **醒了先看什么**：先看你自己写的"焦点"（`topPrompt`，每轮最先注入，防跑偏），再看随机生成的"偏见内容"（你写的脚本，负责探索方向）
 - **多个工作区各自独立**：每个工作区自己的间隔/会话/焦点/窗口，互不干扰
 - **有审计**：每次唤醒都记一笔，面板里能看到最近几次；失败会指数退避重试
+- **还能预约未来某一刻**：登记一条"唤醒"= 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，不阻塞、不等待
 - 没有"每天最多唤醒几次"的限制——频率只由间隔和窗口决定
 
 ### 6.6 安全模型
@@ -344,7 +347,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 | 跑在 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
-| 工具 | msm / container_fs / logbook 等 | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / autopilot-trajectory / im-bridge |
+| 工具 | msm / container_fs / logbook 等 | container_fs / logbook / dashboard / container_git / msm / praxis / handyman / localstore / container_admin / trajectory / im-bridge |
 
 **同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
 差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。

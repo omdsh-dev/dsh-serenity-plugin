@@ -53,5 +53,5 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
  */
 export const REGISTERED_TOOLS = [
   'container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
-  'localstore', 'container_admin', 'autopilot-trajectory', 'im-bridge',
+  'localstore', 'container_admin', 'trajectory', 'im-bridge',
 ] as const

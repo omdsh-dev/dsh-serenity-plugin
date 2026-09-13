@@ -204,6 +204,22 @@ describe('readAutopilotSettings（配置键：新键 autopilotTrajectory 优先�
     writeFileSync(join(dir, 'serenity.json'), JSON.stringify(cfg))
   }
 
+  it('D58：新键 trajectory.autopilot 最优先（旧键 autopilotTrajectory / autotrajectory 仍回退）', () => {
+    writeCfg({
+      trajectory: { autopilot: { enabled: true, session: 'S200' } },
+      autopilotTrajectory: { enabled: false, session: 'S143' },
+      autotrajectory: { enabled: false, session: 'S999' },
+    })
+    const s = readAutopilotSettings(tmp)
+    expect(s?.enabled).toBe(true)
+    expect(s?.session).toBe('S200')
+  })
+
+  it('D58：无 trajectory.autopilot → 回退旧键 autopilotTrajectory', () => {
+    writeCfg({ trajectory: {}, autopilotTrajectory: { enabled: true, session: 'S143' } })
+    expect(readAutopilotSettings(tmp)?.session).toBe('S143')
+  })
+
   it('新键 autopilotTrajectory 优先（正式版）', () => {
     writeCfg({ autopilotTrajectory: { enabled: true, session: 'S143' }, autotrajectory: { enabled: false, session: 'S999' } })
     const s = readAutopilotSettings(tmp)

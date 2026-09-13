@@ -96,7 +96,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('handyman')
     expect(names).toContain('localstore')
     expect(names).toContain('container_admin')
-    expect(names).toContain('autopilot-trajectory')
+    expect(names).toContain('trajectory')
     expect(names).toContain('im-bridge')
   })
 
@@ -117,11 +117,13 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     // 自起资源各自登记拆卸：gateway 第二监听器 / autopilot 时钟 / lifecycle 聚合资源 /
     // 微信主动发送入口（v1.30.9——只绑 loopback 的独立监听器）/
     // skiff root 退避重试定时器（v1.30.13——D1 定位失败重试；卸载后不得再尝试起服务）/
-    // opencode 路由自动配置的重试定时器（v1.31.7——命名空间竞态退避）
+    // opencode 路由自动配置的重试定时器（v1.31.7——命名空间竞态退避）/
+    // trajectory 唤醒调度器（D58，v1.32.0——中心 tick + 冷唤醒投递）
     const labels = effect.mock.calls.map((c) => String(c[1]))
-    expect(labels).toHaveLength(6)
+    expect(labels).toHaveLength(7)
     expect(labels.join('|')).toContain('gateway')
     expect(labels.join('|')).toContain('autopilot')
+    expect(labels.join('|')).toContain('trajectory 唤醒调度器')
     expect(labels.join('|')).toContain('self-started resources')
     expect(labels.join('|')).toContain('weixin send api')
     expect(labels.join('|')).toContain('skiff root retry timer')

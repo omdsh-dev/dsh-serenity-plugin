@@ -30,7 +30,7 @@ const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
 const CCCS_PATH = '/serenity/cccs'
 const PUBLIC_ASK_PATH = '/serenity/public-ask'
-const AUTOPILOT_PATH = '/serenity/autopilot-trajectory'
+const TRAJECTORY_PATH = '/serenity/trajectory'
 const WEIXIN_PATH = '/serenity/weixin'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
@@ -443,7 +443,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
   // agent 不可自行唤起自己）。force=true 仍校验 enabled / 目标命中 / --auto / 偏见脚本。
   ctx.webServer.register({
     kind: 'exact',
-    path: AUTOPILOT_PATH,
+    path: TRAJECTORY_PATH,
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
         if (req.method === 'POST') {
@@ -496,7 +496,11 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           sendJson(res, 200, { status: null })
           return
         }
-        sendJson(res, 200, { status: getAutopilotStatus(effectiveRoot) })
+        // D58（v1.32.0）：同一端点同时承载**唤醒注册表**条目（trajectory 是一等概念，
+        // autopilot 是其子集）——`status` 是 autopilot 状态（保持原字段名与形状不变，面板兼容），
+        // `wakes` 是注册表全量条目（含 state/at/target/createdBy/lastResult，只读）。
+        const { listWakes } = await import('./wake-registry.js')
+        sendJson(res, 200, { status: getAutopilotStatus(effectiveRoot), wakes: listWakes(effectiveRoot).entries })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
       }

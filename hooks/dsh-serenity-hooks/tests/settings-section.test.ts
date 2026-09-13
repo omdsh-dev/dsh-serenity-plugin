@@ -49,6 +49,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       acpHttpPort: 3100,
       publicAskEnabled: false,
       autopilotEnabled: false,
+      trajectoryEnabled: false,
     })
   })
 
@@ -69,6 +70,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       acpHttpPort: 4100,
       publicAskEnabled: false,
       autopilotEnabled: false,
+      trajectoryEnabled: false,
     })
   })
 

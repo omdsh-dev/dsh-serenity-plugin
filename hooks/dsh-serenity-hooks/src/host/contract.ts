@@ -188,6 +188,14 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     required: false,
   },
   {
+    id: 'sessionController',
+    name: 'sessionController',
+    access: 'lazy',
+    members: [{ name: 'resolveAgent', kind: 'function' }],
+    impact: 'trajectory 冷会话唤醒不可用（只能唤醒已加载的 live 会话）——唤醒注册表投递降级',
+    required: false,
+  },
+  {
     id: 'connection',
     name: 'connection',
     access: 'lazy',

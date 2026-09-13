@@ -121,9 +121,9 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                          handyman（杂工 agent 编排——guide 子命令：handyman guide）
   ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
                          ACP（程序化 JSON-RPC 3100）/ Skiff 问答页（公网 ask）——面板「外部能力」组
-  ⑤ 自主与接入        → autopilot-trajectory（Autopilot 一站式：all/init/random/diag/doc/check/status/guide）
+  ⑤ 自主与接入        → trajectory（轨迹一站式：all/init/random/diag/doc/check/status/guide + 唤醒注册表 wake-add/wake-list/wake-rm）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
-  ⑥ CCC 配置总览      → container_admin msm ccc-config（8 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/autopilotTrajectory/weixin）
+  ⑥ CCC 配置总览      → container_admin msm ccc-config（8 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin）
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
 
@@ -263,22 +263,26 @@ validate 校验 / apply 生效 / list 查看：container_admin role <guide|valid
           "systemPromptFile": ".opencode/skiff/qa.md"
         } } } }
 
-── 7. autopilotTrajectory（自动巡航轨迹）──
+── 7. trajectory（轨迹：autopilot 自主巡航 + 唤醒注册表，D58）──
 CCC 定义的一条自主 trajectory——时钟到点自动唤起（前台注入，用户可见可介入）。
+**autopilot 是 trajectory 的子集**：周期自唤醒的特例；trajectory 本身是一等概念（一个 CCC 内可多条并行）。
 未配置或 enabled=false → 完全不启动（零资源占用）。多 CCC 独立：每 CCC 自己的配置。
 唤起消息四段式：轨迹焦点 topPrompt（最先注入，稳定锚）→ 身份锚定 → 先验偏见
 （CCC 根脚本 biasProvider 输出）→ 任务。目标会话 session 必填（目录须带 --auto 后缀）。
-诊断/状态/立即唤起：autopilot-trajectory <all|check|status|diag>（msm("autopilot-trajectory", ["all"])）。
+诊断/状态/立即唤起：trajectory <all|check|status|diag>（trajectory({action:"all"})）。
+唤醒注册表（wake-add/wake-list/wake-rm）：唤醒 = 未来时刻 + 一条 message，可唤醒自己或别的 trajectory；
+落点 AGENT_SESSIONS/wake-registry.json，中心调度器到点投递（fire-and-forget）。
 
   Config:
-    { "autopilotTrajectory": {
-        "enabled": true,
-        "intervalHours": 2,
-        "session": "S151",
-        "biasProvider": "autopilot-bias.ts",
-        "topPrompt": "本轨迹核心目标/纪律/质量要求（CCC 自填，防漂移）",
-        "avoidWakeHours": { "start": 8, "end": 18 }
-      } }
+    { "trajectory": {
+        "autopilot": {                   // 原 autopilotTrajectory 段，字段不变（旧键仍回退读）
+          "enabled": true,
+          "intervalHours": 2,
+          "session": "S151",
+          "biasProvider": "autopilot-bias.ts",
+          "topPrompt": "本轨迹核心目标/纪律/质量要求（CCC 自填，防漂移）",
+          "avoidWakeHours": { "start": 8, "end": 18 }
+        } } }
 
 ── 8. weixin（微信桥 F4c-3，含消息记录 hook）──
 CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 独立对接微信桥。
