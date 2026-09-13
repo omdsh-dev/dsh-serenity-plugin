@@ -21,7 +21,7 @@ import { fileURLToPath } from 'node:url'
 import { existsSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { diagLive, type DiagLiveReport } from '../autopilot-trajectory.js'
-import { getLastActiveSessionInfo } from '../session-ops.js'
+import { resolveSessionTrajectoryLabel } from '../session-bound.js'
 import { addWake, listWakes, removeWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
 
 /**
@@ -133,13 +133,14 @@ export function createAutopilotTool(ctx: Context): ReturnType<typeof defineTool>
           return { output: renderWakeList(entries, error) }
         }
         if (args.action === 'wake-add') {
-          // 发起者 = 最近激活的 trajectory 会话（可见性/审计——注册表条目要能答"谁安排的这次唤醒"）
-          const active = getLastActiveSessionInfo()
+          // 发起者 = **调用方自身**所属 trajectory（见 resolveSessionTrajectoryLabel 的缺陷说明：
+          // 旧实现取全局 lastActive 指针 ⇒ 多会话并发时张冠李戴，S142 §30.12.1 实测 by=S060）
+          const scope = (exec.agent?.session as { header?: { id?: string } } | undefined)?.header?.id ?? ''
           const res = addWake(root, {
             target: args.target ?? '',
             at: args.at ?? '',
             message: args.message ?? '',
-            createdBy: active?.sessionId ?? '',
+            createdBy: resolveSessionTrajectoryLabel(exec.agent?.session, scope),
             nowMs: Date.now(),
           })
           if (!res.ok) return { output: `✗ 登记失败：${res.error}` }

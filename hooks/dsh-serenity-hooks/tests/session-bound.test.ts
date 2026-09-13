@@ -11,7 +11,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH } from '../src/session-bound.js'
+import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, resolveSessionTrajectoryLabel } from '../src/session-bound.js'
+import { resetActiveSessionStore, setActiveSessionInfo } from '../src/session-ops.js'
 
 let ccc: string
 
@@ -19,6 +20,7 @@ beforeEach(() => {
   ccc = mkdtempSync(join(tmpdir(), 'bound-'))
   writeFileSync(join(ccc, '.serenity'), '')
   mkdirSync(join(ccc, 'AGENT_SESSIONS'), { recursive: true })
+  resetActiveSessionStore() // 内存激活表按用例隔离（进程级单例，否则跨用例串味）
 })
 
 afterEach(() => {
@@ -157,5 +159,49 @@ describe('session-bound: 编码无关（U4）', () => {
     const sub = join(ccc, 'AI_LAB', 'dsh-serenity-plugin')
     mkdirSync(sub, { recursive: true })
     expect(bindingsPathFor({ header: { id: 's', cwd: sub } })).toBe(join(ccc, BINDINGS_REL_PATH))
+  })
+})
+
+describe('session-bound: resolveSessionTrajectoryLabel（createdBy 审计归属）', () => {
+  /**
+   * 回归（S142 §30.12.1 实测缺陷）：唤醒注册表的 createdBy 曾直接取**全局** lastActive 指针，
+   * 而它记录的是"进程内最近一次被激活的 trajectory"——多会话并发时张冠李戴
+   * （实测：S142 登记唤醒被写成 `by=S060`）。本组用例把"以调用方自己为准"钉死。
+   */
+  it('① 持久 bound 命中 → 取该会话自己的标签（不看全局指针）', () => {
+    const caller = makeSession('sess-caller')
+    appendBound(caller, 'activate', {
+      dirName: '2026-08-24--S142--dsp 维护',
+      mdPath: '/r/A/SESSION.md',
+      sessionId: 'S142',
+    })
+    // 全局指针被**别的**会话污染（模拟 S060 刚激活）
+    setActiveSessionInfo('sess-other', { sessionId: 'S060', dirName: '2026-01-01--S060--x', mdPath: '/r/B/SESSION.md' })
+    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('S142')
+  })
+
+  it('② 无 bound 但本 scope 有内存激活 → 取本 scope（不看全局指针）', () => {
+    const caller = makeSession('sess-caller')
+    setActiveSessionInfo('sess-caller', { sessionId: 'S142', dirName: '2026-08-24--S142--dsp', mdPath: '/r/A/SESSION.md' })
+    setActiveSessionInfo('sess-other', { sessionId: 'S060', dirName: '2026-01-01--S060--x', mdPath: '/r/B/SESSION.md' })
+    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('S142')
+  })
+
+  it('③ 两级皆空 → 回退全局最近活跃（无绑定会话的兼容）', () => {
+    const caller = makeSession('sess-caller')
+    setActiveSessionInfo('sess-other', { sessionId: 'S060', dirName: '2026-01-01--S060--x', mdPath: '/r/B/SESSION.md' })
+    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('S060')
+  })
+
+  it('④ 三级全落空 → 空串（渲染为 `?`，不抛错）', () => {
+    expect(resolveSessionTrajectoryLabel(makeSession('sess-caller'), 'sess-caller')).toBe('')
+    expect(resolveSessionTrajectoryLabel(null, '')).toBe('')
+    expect(resolveSessionTrajectoryLabel({}, '')).toBe('')
+  })
+
+  it('⑤ 编码无关（U4）：目录名无 --S###-- → 原样返回目录名', () => {
+    const caller = makeSession('sess-caller')
+    appendBound(caller, 'activate', { dirName: '2026-09-04--apaas-26116', mdPath: '/r/C/SESSION.md' })
+    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('2026-09-04--apaas-26116')
   })
 })

@@ -27,7 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { findSerenityRoot } from './ccc.js'
-import { sessionEvents } from './session-ops.js'
+import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './session-ops.js'
 
 export type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
 
@@ -125,6 +125,37 @@ export function readLastBound(session: unknown): SessionBoundRecord | null {
 /** 判定会话是否已有绑定（供 reconcile 判定：无绑定才标题升级）。 */
 export function hasAnyBound(session: unknown): boolean {
   return readLastBound(session) !== null
+}
+
+/** 目录名 → 轨迹标签（`--S###--` 命中取 `S###`；未命中原样返回——编码无关 U4） */
+function trajectoryLabel(dirName: string): string {
+  const m = dirName.match(/--S(\d{3,})--/)
+  return m ? `S${m[1]}` : dirName
+}
+
+/**
+ * **调用方自身**所属 trajectory 的标签（审计字段 `createdBy` 的唯一正解）。
+ *
+ * 三级来源，逐级回退（R↓：为什么不用单一来源）：
+ *  1. `readLastBound(session)` —— **持久 bound**，权威（重启存活、不受别的会话激活污染）
+ *  2. `getActiveSessionInfo(scope)` —— 本 dsh 会话的**内存**激活（按 scope 隔离）
+ *  3. `getLastActiveSessionInfo()` —— **全局**最近激活指针（无绑定的会话兼容回退）
+ *
+ * ⚠️ 为何单列成本函数（S142 §30.12.1 实测缺陷）：唤醒注册表的 `createdBy` 原先直接取第 3 级
+ * 全局指针，而它记录的是"**进程内最近一次被激活的 trajectory**"——多会话并发时必然张冠李戴
+ * （实测：S142 登记唤醒被写成 `by=S060`）。`createdBy` 是 D60「以可审计替代入口栅」的**唯一凭证**，
+ * 失真即替代控制失效 ⇒ 必须以"调用方自己是谁"为准，全局指针只作最后兜底。
+ *
+ * @param session 调用方 dsh 会话对象（需 `header.id` + `header.cwd`）
+ * @param scope 调用方 dsh 会话 id（取不到传空串）
+ * @returns 轨迹标签（`S###` 或完整目录名）；三级全落空 → 空串（渲染为 `?`）
+ */
+export function resolveSessionTrajectoryLabel(session: unknown, scope: string): string {
+  const bound = session ? readLastBound(session) : null
+  if (bound?.dirName) return trajectoryLabel(bound.dirName)
+  const scoped = scope !== '' ? getActiveSessionInfo(scope) : null
+  if (scoped) return scoped.sessionId
+  return getLastActiveSessionInfo()?.sessionId ?? ''
 }
 
 /**
