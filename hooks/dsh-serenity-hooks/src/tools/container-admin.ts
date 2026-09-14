@@ -19,6 +19,7 @@ import type { JsonValue } from '../json.js'
 import { findSerenityRoot } from '../ccc.js'
 import { runMsm, MSM_ACTIONS } from '../msm-ops.js'
 import { skiffMsmGate } from '../skiff-core.js'
+import { runAutopilotScript } from '../autopilot-script.js'
 import { validateSkiffConfig, applySkiffConfig, listSkiffRoles, SKIFF_GUIDE } from './skiff-admin.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
@@ -35,19 +36,32 @@ function renderText(value: unknown): ContentBlock[] {
 }
 
 /** 管理域（container_admin 一级参数） */
-export type AdminDomain = 'role' | 'msm' | 'config'
+export type AdminDomain = 'role' | 'msm' | 'config' | 'autopilot'
 
 const DOMAIN_INTRO: Record<AdminDomain, string> = {
   role: 'Skiff cognitive-subset roles: guide (tutorial) / validate (config check) / apply (validate + confirm live) / list (role summary)',
   msm: 'MSM registry management: register / deregister / check (DC-M1~M4 quality) / guide (dev manual) / catalog (ACC capability directory) / ccc-config (CCC config reference)',
   config: 'CCC configuration (read-only view of .opencode/serenity.json sections) — direct edits go through filesystem',
+  autopilot: 'Autopilot (periodic self-wake, D59 singleton) — status (one-shot full report: background/readiness/state/next steps) / init (write CCC config + bias-provider script template) / generate-bias (run the CCC bias script and show the content it returns this round)',
 }
 
-/** 管理面动作映射：domain → 可执行 action（转发到底层 runMsm / skiff 逻辑） */
+/** 管理面动作映射：domain → 可执行 action（转发到底层 runMsm / skiff 逻辑 / autopilot 脚本） */
 const ADMIN_ACTIONS: Record<AdminDomain, readonly string[]> = {
   role: ['guide', 'validate', 'apply', 'list'],
   msm: ['register', 'deregister', 'check', 'guide', 'catalog', 'ccc-config'],
   config: ['view'],
+  autopilot: ['status', 'init', 'generate-bias'],
+}
+
+/**
+ * autopilot 域动作 → 包内脚本子命令（`container_admin` 的新名 ↔ 脚本的历史名）。
+ * 只映射三个**保留**的动作：脚本侧的 `diag`/`doc`/`check`/`status`/`guide` 已不在 CCC 工具面
+ * （S142 §32.9：`diag` 归 ACC 负责人走开发面；其余并入 `status`）。
+ */
+const AUTOPILOT_SCRIPT_ACTIONS: Record<string, string> = {
+  status: 'all',
+  init: 'init',
+  'generate-bias': 'random',
 }
 
 export const containerAdminTool = defineTool({
@@ -56,17 +70,19 @@ export const containerAdminTool = defineTool({
     'Container administration (the ship\'s maintenance bay — one entry for managing the CCC): ' +
     'role — Skiff cognitive-subset roles (guide/validate/apply/list); ' +
     'msm — MSM registry management (register/deregister/check quality DC-M1~M4) + manuals (guide dev manual / catalog ACC capability directory / ccc-config CCC configuration reference); ' +
-    'config — view CCC configuration. Execution of registered MSMs belongs to the msm tool; this tool manages the container.',
+    'config — view CCC configuration; ' +
+    'autopilot — periodic self-wake (D59): status (one-shot full report: background + readiness + state + next steps) / init (write config + bias-provider script template) / generate-bias (run the CCC bias script — the randomness source belongs to the CCC). ' +
+    'Execution of registered MSMs belongs to the msm tool; this tool manages the container.',
   parameters: {
     domain: {
       type: 'string',
-      enum: ['role', 'msm', 'config'],
+      enum: ['role', 'msm', 'config', 'autopilot'],
       required: true,
-      description: 'Management domain: role (Skiff roles) / msm (MSM registry + manuals) / config (CCC config view)',
+      description: 'Management domain: role (Skiff roles) / msm (MSM registry + manuals) / config (CCC config view) / autopilot (periodic self-wake)',
     },
     action: {
       type: 'string',
-      description: 'Domain subcommand (see domain descriptions; e.g. role: validate/apply/list/guide; msm: register/deregister/check/guide/catalog/ccc-config)',
+      description: 'Domain subcommand (see domain descriptions; e.g. role: validate/apply/list/guide; msm: register/deregister/check/guide/catalog/ccc-config; autopilot: status/init/generate-bias)',
     },
     // register 参数（msm 域）
     name: { type: 'string', description: 'MSM name (register/deregister)' },
@@ -125,12 +141,23 @@ export const containerAdminTool = defineTool({
       return out
     }
 
+    // autopilot 域 → 包内脚本通道（D59 周期自唤醒；脚本逻辑归 experiments/，本工具只转发）
+    if (domain === 'autopilot') {
+      const scriptAction = AUTOPILOT_SCRIPT_ACTIONS[action]
+      if (!scriptAction) {
+        throw new Error(`container_admin autopilot requires action: ${ADMIN_ACTIONS.autopilot.join(' | ')}`)
+      }
+      const r = runAutopilotScript(root, scriptAction)
+      if (r.error) return { error: r.error, action }
+      return { action, output: r.output ?? '' }
+    }
+
     // config 域 → CCC 配置总览（ccc-config 引用；直接视图）
     if (domain === 'config') {
       const ref = runMsm(root, { action: 'ccc-config' })
       return { config: ref }
     }
 
-    throw new Error(`container_admin requires domain: role | msm | config`)
+    throw new Error(`container_admin requires domain: role | msm | config | autopilot`)
   },
 })

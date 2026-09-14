@@ -15,34 +15,11 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from 'cordis'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { spawnSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { existsSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { diagLive, type DiagLiveReport } from '../autopilot-trajectory.js'
+import { runAutopilotScript } from '../autopilot-script.js'
 import { resolveSessionTrajectoryLabel } from '../session-bound.js'
 import { addWake, listWakes, removeWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
-
-/**
- * 定位包内脚本（npm files 分发 experiments/autopilot-trajectory/）。
- * 布局差异：tsdown bundle 后 import.meta.url 指向 lib/index.js（lib → 包根 1 层）；
- * vitest 源码直跑时指向 src/tools/x.ts（src/tools → 包根 2 层）——逐级上溯查找，
- * 两种布局都稳（找到 experiments/autopilot-trajectory/scripts/autopilot-trajectory.ts 即止）。
- */
-export function findExpScript(startDir: string): string | null {
-  let cur = startDir
-  while (true) {
-    const cand = join(cur, 'experiments', 'autopilot-trajectory', 'scripts', 'autopilot-trajectory.ts')
-    if (existsSync(cand)) return cand
-    const parent = dirname(cur)
-    if (parent === cur) return null
-    cur = parent
-  }
-}
-
-/** 包内脚本（上溯查找；找不到 → execute 报错提示包完整性） */
-const EXP_SCRIPT = findExpScript(dirname(fileURLToPath(import.meta.url)))
 
 export const AUTOPILOT_ACTIONS = [
   'all', 'init', 'random', 'diag', 'doc', 'check', 'status', 'guide', 'diag-live',
@@ -149,33 +126,10 @@ export function createAutopilotTool(ctx: Context): ReturnType<typeof defineTool>
         const removed = removeWake(root, args.id ?? '')
         return { output: removed.ok ? `✓ 已移除唤醒条目 ${args.id}` : `✗ 移除失败：${removed.error}` }
       }
+      const r = runAutopilotScript(root, args.action ?? 'all')
       const result: Record<string, string> = {}
-      if (!EXP_SCRIPT) {
-        result.error = 'trajectory 脚本未随安装分发（npm 包缺 experiments/autopilot-trajectory/）——请检查包完整性'
-        return result
-      }
-      const script = EXP_SCRIPT
-      if (!existsSync(script)) {
-        result.error = `trajectory 脚本缺失（${script}）——包未随安装分发，请检查 npm 包完整性`
-        return result
-      }
-      const env: NodeJS.ProcessEnv = { ...process.env }
-      if (root) env.SERENITY_ROOT = root
-      const r = spawnSync('bun', [script, args.action ?? 'all'], {
-        encoding: 'utf-8',
-        timeout: 600_000,
-        env,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      })
-      if (r.status === 0) {
-        result.output = r.stdout?.trim() || '(empty)'
-        return result
-      }
-      if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') {
-        result.error = 'trajectory 需要 bun 运行时（bun not found in PATH）'
-        return result
-      }
-      result.error = r.stderr?.trim() || r.stdout?.trim() || `exit ${r.status ?? '?'}`
+      if (r.error) result.error = r.error
+      else result.output = r.output ?? ''
       return result
     },
   })

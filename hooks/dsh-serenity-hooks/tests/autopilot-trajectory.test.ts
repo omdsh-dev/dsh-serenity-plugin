@@ -58,7 +58,7 @@ vi.mock('../src/session-ops.js', () => ({
 }))
 
 import { findSession, findLatestActiveSessionMd } from '../src/session-ops.js'
-import { findExpScript } from '../src/tools/autopilot-trajectory.js'
+import { findExpScript } from '../src/autopilot-script.js'
 import {
   DEFAULT_BIAS_PROVIDER,
   LEGACY_BIAS_PROVIDER,
