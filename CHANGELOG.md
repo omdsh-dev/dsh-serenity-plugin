@@ -1,3 +1,42 @@
+## v1.32.0 — 2026-09-14（⏰ trajectory 升为一等概念：`autopilot-trajectory` → `trajectory` + **唤醒注册中心**）
+
+**Scope:** 用户需求「dsp 需要一个**定时唤醒某个会话自动继续**的机制，应当是个**唤醒注册中心**，只支持按未来时刻唤醒，精度不需要很高；用于支撑 **trajectory 在时间的轴上自由地安排自己**」（S142 §30）。侦察后按三条裁决落地：**D58**（trajectory 是本体、autopilot 只是"周期自唤醒"的特例）｜**D59**（autopilot 保持独立单例循环，不进注册表）｜**D60**（注册表不设资格栅）。**协作边界（用户原话的推论）**：所有 trajectory 互相可见，但唤醒**只能是"可预期的未来时刻 + 一条信息"**——**无阻塞、无等待、无回执**（fire-and-forget）。
+
+### ① 工具更名：`autopilot-trajectory` → **`trajectory`**（硬切，无别名）
+
+概念层级修正——**trajectory 是一等概念**（`CCC 内允许多个 trajectory 任意形态并行`），autopilot 降为它的一个特例。随 v1.30 工具面重构的同一原则（D46 ⑨）：**硬切无别名**，旧名不再注册。内部文件名（`src/autopilot-trajectory.ts`）按既有原则**不改**。
+
+### ② 唤醒注册中心（新增能力）
+
+- **落点**：CCC 内 `AGENT_SESSIONS/wake-registry.json`（随 CCC git，人可读可审计；与 `.bindings.json` 同居）
+- **条目 = 未来时刻 + 一条 message**：可对自己预约，也可**唤醒别的 trajectory**（任一 CCC）
+- **工具动作**：`trajectory wake-add --target <S###|目录名> --at <RFC3339|+30m|+2h> --message <正文>` / `wake-list` / `wake-rm <id>`
+- **中心调度器**：5min tick，扫各 CCC 注册表 → 到期投递；**同 tick 串行**、**同全局闸**
+- **时间轴语义**：5min 精度｜**≤2h 补跑窗口**（停机期间到期且迟到未超窗 → 补投；超窗 → `missed` 留痕）｜一次性（投递即终结，不重投）｜**维持 live**（人类可介入）｜**不打断在跑轮次**（`followup` 排队，跑着的在下一步边界消化）
+
+### ③ 冷唤醒：`ctx.sessionController.resolveAgent`（宿主正门，不自行复刻 preset 恢复）
+
+投递路径：target → 目录名 + SESSION.md →（`.bindings.json` 值侧反查）dsh 会话 id（**live 优先** `agents.get`）→ 未加载则 `sessionController.resolveAgent(id)`（宿主实现：live 优先 + resume 去重 + 由会话元数据恢复 preset）→ `followup(message)` 投递。**`sessionController` 缺席（headless profile）⇒ 降级为「仅 live 投递」并响亮诊断——不得静默**。契约登记 `hostContract` **38 → 40 项**（一条 `HOST_SERVICES` 条目 = 1 个服务存在性检查 + 1 个成员检查，`required=false`）。
+
+### ④ 配置与端点更名（旧键保留回退读）
+
+CCC 键 `autopilotTrajectory` → **`trajectory.autopilot`**（旧键 `autopilotTrajectory` / `autotrajectory` 逐级回退）｜插件全局开关 `autopilotEnabled` → **`trajectoryEnabled`**（旧键回退，**改动才发版**的全局面）｜状态端点 `/serenity/autopilot-trajectory` → **`/serenity/trajectory`**（GET 响应新增 `wakes`，面板只读块展示在办/总数）。
+
+### ⑤ 审计字段缺陷修复（^ 本轮实测发现）
+
+`wake-add` 的 `createdBy` 原取**全局** `lastActive` 指针（= 进程内最近被激活的 trajectory），与调用者无关 ⇒ 实测 **S142 登记被误记为 `S060`**（那是**另一个 CCC** pangu-serenity 的 autopilot 轨迹）——**误归因跨了 CCC 边界**。D60 用「可审计」替代入口栅 ⇒ 审计失真即替代控制失效。**修复**：`session-bound.ts` 新增 `resolveSessionTrajectoryLabel(session, scope)`——**持久 bound（权威）→ 本会话内存激活 → 全局指针仅兜底**；5 条回归用例钉住"以调用方自己为准"。
+
+### 门禁与验收
+
+`typecheck` 双面 ✓ ｜ `test` **82 files / 1218 tests** ✓ ｜ `build` ✓ ｜ `pack-check` ✓（98 文件，含 `wake-registry.d.ts` / `wake-scheduler.d.ts`）｜`dashboard health` hostContract `checked:40 / ok:true / issues:[]`。
+**实测验收（本机真实 web 进程）**：**④** `sessionController` 可达 ✓｜**⑥ 热路径** 自唤醒条目 `w-20260913-1616-1c06` → `delivered` + `lastResult = live(bound session-b98276fe…)` + **唤醒正文确实开启了一轮** ✓。
+
+### 已知边界（诚实记录，未修）
+
+调度器**只扫「该 CCC 至少有一个 live 会话」的 CCC**（`collectLiveCccs` 由 live 会话 cwd 反推 CCC 根）⇒ **完全冷掉的 CCC 不能自唤醒自己**（宿主重启后无人打开任何会话时，到期条目停在 `pending`）。与"未打开 WebUI 也能到点自续"有张力。候选改进：持久化"已知 CCC 根"，使扫描不依赖 live 会话。
+
+---
+
 ## v1.31.13 — 2026-09-11（🔴 会话打不开真因修复：`rebuild` 写坏 `user/message` + `findSessionLog` 不认世代文件）
 
 **Scope:** 用户报「DSH 升级 session 机制后**会话老是损坏**」并要求"查明是否 dsp 实现有问题"（S142 §24~§26）。调查结论：**确有两条 dsp 缺陷**——其一足以让会话**永久打不开**。本版修复两条 + 交付常备诊断工具。
