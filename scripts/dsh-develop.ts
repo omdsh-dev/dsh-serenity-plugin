@@ -731,8 +731,31 @@ function cmdDumpConfig(pattern?: string): void {
   console.log(all.filter((_, i) => keep.has(i)).join('\n'))
 }
 
-function cmdApiStatus(path?: string): void {
-  // 查询本地 dsh web HTTP 接口（同步阻塞版；避免异步回调在 bun 进程退出前未执行）
+/**
+ * cmdDiag — 唤起条件链诊断（开发面，v1.33 S142 §32）
+ *
+ * 为什么在这里（R↓）：CCC 工具面的 `diag` 动作已撤——
+ *  · **进程内**那半（live 会话清单 / agent 定位 / 面板解析 / 唤醒注册表）改由**专属工具
+ *    `acc-diag`** 承载（默认对所有 CCC 隐藏，需 CCC 在 `exclusiveTools` 里声明）；
+ *  · **脚本侧**那半（唤起条件链：逐条件值 + 阻断点 + 修复建议）纯文件系统计算、不依赖
+ *    插件进程 ⇒ 下沉到开发面，作为 ACC 负责人的**离线通道**（插件没跑、或只想看某个 CCC
+ *    的条件链时直接可用）。
+ * 诚实边界：进程内数据只有插件本身能看到——独立 bun 进程读不到 ctx，故不能全部下沉。
+ *
+ * 用法：`dsh-develop diag [--ccc <path>]`（无 --ccc → 脚本自行递归扫描 /home/yh 两层）
+ */
+function cmdDiag(args: string[]): void {
+  const script = join(HOOKS_DIR, 'experiments', 'autopilot-trajectory', 'scripts', 'autopilot-trajectory.ts')
+  if (!existsSync(script)) fail(`diag 脚本缺失（包完整性）: ${script}`, 2)
+  const r = run('bun', [script, 'diag', ...args], { cwd: REPO_ROOT, quiet: true })
+  if (r.stdout) console.log(r.stdout)
+  if (r.status !== 0) {
+    console.error(r.stderr || `diag 退出码 ${r.status}`)
+    process.exit(r.status ?? 1)
+  }
+}
+
+function cmdApiStatus(path?: string): void {  // 查询本地 dsh web HTTP 接口（同步阻塞版；避免异步回调在 bun 进程退出前未执行）
   const urlPath = path ?? '/serenity/status?workspace=' + (process.env.SERENITY_CCC_ROOT ?? '')
   const code = `const http = require('node:http');
 const req = http.request({ host: '127.0.0.1', port: 3080, path: ${JSON.stringify(urlPath)}, method: 'GET', headers: { 'cache-control': 'no-store' } }, (res) => {
@@ -1932,6 +1955,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'host-upgrade': cmdHostUpgrade(rest); break
       case 'session-doctor': await cmdSessionDoctor(rest); break
       case 'session-repair': await cmdSessionRepair(rest); break
+      case 'diag': cmdDiag(rest); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
@@ -1939,7 +1963,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag [--ccc <path>] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -1976,6 +2000,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   host-upgrade <ver|tag> 全局升级 DSH 宿主 CLI（包名硬编码 @deepseek-ai/dsh；默认官方源；--dry-run 预览）
   session-doctor        会话日志体检（只读）：逐份判定宿主读取门（未知事件词表/格式版本/结构），列出会被拒的会话
   session-repair        会话日志治疗（缺省 dry-run）：补 rebuild 写坏的 user/message 缺 id/role；--apply 才备份+原子替换+自检
+  diag [--ccc <path>]   唤起条件链诊断（开发面；无 --ccc → 脚本自行递归扫描 /home/yh 两层）
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   pack-check            npm pack --dry-run 核对 tarball 完整性（chunk/双 bundle/类型）
   readme-sync           包内 README ← 仓库 README（机械同步，相对链接转绝对 URL）

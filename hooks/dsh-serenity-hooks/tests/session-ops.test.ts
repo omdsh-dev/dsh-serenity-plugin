@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, utimesSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
@@ -7,11 +7,7 @@ import {
   createSession,
   showSession,
   useSession,
-  closeSession,
-  archiveSessions,
-  healthCheck,
   summarize,
-  qaCheck,
   readActiveSessionMd,
   getActiveSessionInfo,
   resetActiveSessionStore,
@@ -23,10 +19,11 @@ import {
 } from '../src/session-ops.js'
 
 /**
- * session-ops 单元测试（S136 对齐 osp spec）：
+ * session-ops 单元测试（S136 对齐 osp spec；v1.33 按 trajectory 六动作收敛）：
  * - create：--desc/--issue 二选一；返回 {message, dirName, sessionPath, sessionId}
- * - list/show/health/summary/qa：文本输出（对齐 osp）
- * - archive：_archived/ 移动（需 completed + ≥7 天）
+ * - list/show/summary：文本输出（对齐 osp）
+ * - **close / archive / health / qa 四个动作已于 v1.33 删除**（S142 §32 用户裁决），
+ *   其函数与用例同批移除——「完成」由 SESSION.md 的 `[x]` 表达，归档走 `container_fs mv`
  * - 活跃会话：内存 Map（scope = dsh 会话 id）+ events 恢复（S134 保留）
  */
 
@@ -45,6 +42,12 @@ afterEach(() => {
 
 function mk(desc: string, extra: Parameters<typeof createSession>[0] = {}): ReturnType<typeof createSession> {
   return createSession({ root: dir, desc, dryRun: false, ...extra })
+}
+
+/** 标记轨迹完成（v1.33：无 close 动作——完成与否由 SESSION.md 的 `[x]` 表达） */
+function markDone(r: ReturnType<typeof createSession>): void {
+  const md = join(r.sessionPath, 'SESSION.md')
+  writeFileSync(md, readFileSync(md, 'utf-8').replace('## 状态\n- [ ] 进行中', '## 状态\n- [x] 已完成'), 'utf-8')
 }
 
 describe('session-ops: 生命周期（对齐 osp spec）', () => {
@@ -94,45 +97,12 @@ describe('session-ops: 生命周期（对齐 osp spec）', () => {
     expect(showSession(dir, 'alpha')).toContain('阿尔法')
   })
 
-  it('archive：未完成会话拒绝；标记完成 + 7 天后移动到 _archived/', () => {
-    const r = mk('x')
-    // 未完成 → skipping
-    expect(archiveSessions(dir, { name: 'S001', dryRun: false })).toContain('not completed')
-    // 标记完成 + 改 mtime 到 7 天前
-    const md = join(r.sessionPath, 'SESSION.md')
-    const content = readFileSync(md, 'utf-8').replace('## 状态\n- [ ] 进行中', '## 状态\n- [x] 已完成')
-    writeFileSync(md, content, 'utf-8')
-    const past = new Date(Date.now() - 8 * 86400000)
-    utimesSync(r.sessionPath, past, past)
-    utimesSync(md, past, past)
-    expect(archiveSessions(dir, { name: 'S001', dryRun: false })).toContain('Archived')
-    expect(existsSync(r.sessionPath)).toBe(false)
-    expect(existsSync(join(dir, 'AGENT_SESSIONS', '_archived', r.dirName))).toBe(true)
-  })
-
-  it('health 报告 stale（文本，>7 天未更新）', () => {
-    expect(healthCheck(dir)).toBe('No sessions found — nothing to check.')
-    const r = mk('old')
-    const past = new Date(Date.now() - 20 * 86400000)
-    utimesSync(r.sessionPath, past, past)
-    utimesSync(join(r.sessionPath, 'SESSION.md'), past, past)
-    const h = healthCheck(dir)
-    expect(h).toContain('[STALE]')
-  })
-
   it('summary 计数（文本仪表盘）', () => {
     mk('a')
     const s = summarize(dir)
     expect(s).toContain('Total:    1')
     expect(s).toContain('Active:   1')
     expect(s).toContain('Completed: 0')
-  })
-
-  it('qa 核对产出物（文本报告）', () => {
-    const r = mk('w')
-    const qa = qaCheck(dir, 'S001')
-    expect(qa).toContain('QA Report:')
-    expect(qa).toContain('outputs')
   })
 })
 
@@ -171,22 +141,6 @@ describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
 
   it('use 未找到会话抛错', () => {
     expect(() => useSession(dir, 'nope')).toThrow(/Session not found/)
-  })
-
-  it('close 需 confirm（对齐 osp）；confirm 后标记完成 + 清 scope', () => {
-    const c = mk('c')
-    const d = mk('d')
-    useSession(dir, 'S001', 'agent-A')
-    useSession(dir, 'S002', 'agent-B')
-    // 无 confirm → 拒绝
-    expect(closeSession(dir, 'S001', false, 'agent-A')).toContain('requires explicit confirmation')
-    expect(readActiveSessionMd(dir, 'agent-A')).not.toBeNull()
-    // confirm 后：标记完成 + 清 scope
-    expect(closeSession(dir, 'S001', true, 'agent-A')).toContain('closed')
-    expect(readFileSync(join(c.sessionPath, 'SESSION.md'), 'utf-8')).toContain('[x] 已完成')
-    expect(readActiveSessionMd(dir, 'agent-A')).toBeNull()
-    expect(readActiveSessionMd(dir, 'agent-B')).not.toBeNull()
-    expect(existsSync(join(dir, '.dsh'))).toBe(false)
   })
 })
 
@@ -260,14 +214,14 @@ describe('session-ops: v1.24.11 恢复稳固化（路径规范行即可，无需
   it('findLatestActiveSessionMd：最新未完成会话胜出；已完成跳过（约定回退）', () => {
     const old = mk('old-done')
     const active = mk('active')
-    // 关闭 old（标记完成）→ 只返回 active（SESSION.md 文件路径）
-    closeSession(dir, old.sessionId, true)
+    // 标记 old 完成 → 只返回 active（SESSION.md 文件路径）
+    markDone(old)
     expect(findLatestActiveSessionMd(dir)).toBe(join(active.sessionPath, 'SESSION.md'))
   })
 
   it('findLatestActiveSessionMd：全部完成 → null', () => {
     const a = mk('only-done')
-    closeSession(dir, a.sessionId, true)
+    markDone(a)
     expect(findLatestActiveSessionMd(dir)).toBeNull()
   })
 })

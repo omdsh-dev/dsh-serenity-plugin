@@ -170,7 +170,7 @@ describe('resolveTargetMd（目标定位——session 必填，不默认任何�
     const realDir = mkdtempSync(join(tmpdir(), 'ap-find-'))
     const realMd = join(realDir, 'SESSION.md')
     writeFileSync(realMd, '# SESSION: exp\n')
-    mockFindSession.mockReturnValue({ dirName: '2026-08-30--S143--exp--auto', path: realDir, mtime: new Date(), status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } })
+    mockFindSession.mockReturnValue({ dirName: '2026-08-30--S143--exp--auto', path: realDir, mtime: new Date(), status: { hasSessionMd: true, completed: false } })
     const md = resolveTargetMd('/root', { session: 'S143' })
     expect(mockFindSession).toHaveBeenCalledWith('/root/AGENT_SESSIONS', 'S143')
     expect(md).toBe(realMd)
@@ -511,7 +511,7 @@ describe('getAutopilotStatus（面板状态——GET /serenity/autopilot-traject
     const t = new Date(Date.now() - 99 * 3600_000) // 99h 前（超阈值）
     utimesSync(md, t, t)
     const realDir = join(tmp, 'AGENT_SESSIONS', `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`)
-    mockFindSession.mockReturnValue({ dirName: `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`, path: realDir, mtime: new Date(), status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } })
+    mockFindSession.mockReturnValue({ dirName: `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`, path: realDir, mtime: new Date(), status: { hasSessionMd: true, completed: false } })
     writeCfg({ enabled: true, intervalHours: 12, session: 'S143' })
     const s = getAutopilotStatus(tmp)
     expect(s.enabled).toBe(true)
@@ -582,7 +582,7 @@ describe('performAutopilotWake（时钟与「立即唤起」共用执行体）',
     writeFileSync(md, '# SESSION: exp\n')
     const t = new Date(Date.now() - intervalHoursAgo * 3600_000)
     utimesSync(md, t, t)
-    mockFindSession.mockReturnValue({ dirName: `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`, path: dir, mtime: t, status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } })
+    mockFindSession.mockReturnValue({ dirName: `2026-08-30--S143--exp${AUTO_DIR_SUFFIX}`, path: dir, mtime: t, status: { hasSessionMd: true, completed: false } })
     return md
   }
 
@@ -632,7 +632,7 @@ describe('performAutopilotWake（时钟与「立即唤起」共用执行体）',
     mkdirSync(dir, { recursive: true })
     const md = join(dir, 'SESSION.md')
     writeFileSync(md, '# SESSION: exp\n')
-    mockFindSession.mockReturnValue({ dirName: '2026-08-30--S143--normal', path: dir, mtime: new Date(), status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } })
+    mockFindSession.mockReturnValue({ dirName: '2026-08-30--S143--normal', path: dir, mtime: new Date(), status: { hasSessionMd: true, completed: false } })
     const res = await performAutopilotWake(makeCtx() as never, tmp, cfg, { force: true })
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('--auto')
@@ -1106,7 +1106,7 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
       for (const root of [tmp, tmp2]) {
         const dir = join(root, 'AGENT_SESSIONS', `2026-08-30--${sessionId}--exp${AUTO_DIR_SUFFIX}`)
         if (existsSync(join(dir, 'SESSION.md'))) {
-          return { dirName: `2026-08-30--${sessionId}--exp${AUTO_DIR_SUFFIX}`, path: dir, mtime: new Date(), status: { hasSessionMd: true, completed: false, completedCount: 0, pendingCount: 0, unresolvedCount: 0 } }
+          return { dirName: `2026-08-30--${sessionId}--exp${AUTO_DIR_SUFFIX}`, path: dir, mtime: new Date(), status: { hasSessionMd: true, completed: false } }
         }
       }
       return null
