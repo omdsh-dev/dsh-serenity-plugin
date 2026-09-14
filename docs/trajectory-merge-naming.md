@@ -1,5 +1,9 @@
 # trajectory 合并 · 子命令命名方案 v0.1（草案）
 
+> ⚠️ **2026-09-14 用户裁决已取代本方案的 §2/§3/§7**（废除 `logbook` 一词、动作收敛为 9 个：list/show/create/use/rebuild/wake-later/all/random/diag）。
+> 裁决全文与后果分析见 `home-serenity` CCC 的 `AGENT_SESSIONS/2026-08-24--S142--dsh-serenity-plugin 长期维护/SESSION.md` **§32.7**。
+> 本文件保留为**推理沿革**（域划分思路 + 涟漪地图 + 剪枝分析仍有参考价值；§5 涟漪地图对实施依然有效）。
+
 - **来源**：S142 §32（用户 2026-09-14「我觉得 logbook 应该和 trajectory 合并了」「合并后内部的子命令需要重新命名，给我方案」）
 - **状态**：**草案，未动代码**。供裁决用；获准后再进实施（建议实施顺序见 SESSION.md §32.4 M9）
 - **假定**：形态取 **A1（前缀式单枚举）**；若改选 A2（`domain` 参数）见 §7 备选
