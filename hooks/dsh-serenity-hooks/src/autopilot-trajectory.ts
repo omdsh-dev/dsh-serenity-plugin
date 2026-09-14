@@ -307,12 +307,19 @@ export async function performAutopilotWake(
 }
 
 /**
- * 全局总开关（v1.27.9，plugin 全局，默认关）：关 = 定时器不武装 + tick 不唤起。
+ * **周期自唤醒全局闸**（v1.34 更名收窄，原 `autopilotEnabled`）：关 = 定时器不武装 + tick 不唤起。
+ *
+ * 语义边界（用户 2026-09-15 裁决 S-1）：**只管周期自唤醒** —— 一次性唤醒（`trajectory wake-later`）
+ * 归 `wakeSchedulerEnabled`，两者**互不连带**（旧实现共用一闸是缺陷，见 wake-scheduler 注释）。
+ *
+ * 读取顺序（迁移期，不回写）：`autopilotWakeEnabled`（新键）→ `autopilotEnabled`（旧键）→ false。
+ * 用 `??` 而非 `||` 的理由：**新键显式 false 必须能覆盖旧键 true**（否则"关不掉"）。
  * 抽成模块级函数是为了让 {@link autopilotClockState}（诊断）与 tick 读**同一判据**。
  */
 export function autopilotGloballyEnabled(): boolean {
   try {
-    return readSimpleSettings().autopilotEnabled === true
+    const s = readSimpleSettings()
+    return s.autopilotWakeEnabled ?? s.autopilotEnabled ?? false
   } catch {
     return false // settings 服务不可用 → 默认关（保守：未明确开启不自动跑）
   }
@@ -378,7 +385,7 @@ export function registerAutopilot(ctx: Context): void {
 
   const tick = (): void => {
     if (!globalOn()) {
-      clockRuntime.lastSkipReason = '全局闸关闭（autopilotEnabled=false）'
+      clockRuntime.lastSkipReason = '周期自唤醒闸关闭（autopilotWakeEnabled=false）'
       return // 全局关 → 本 tick 不唤起（中途关闭即停）
     }
     // 遍历所有 live+enabled CCC（v1.27.4：多 CCC 各自独立唤起）

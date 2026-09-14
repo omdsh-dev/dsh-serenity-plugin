@@ -986,8 +986,8 @@ describe('registerAutopilot（时钟定时器——v1.34 武装门修复：全�
     liveSessions = []
     resetWakeHistory()
     __resetAutopilotClockStateForTest()
-    // v1.27.9 全局开关：register 测试默认全局已开（验证 CCC 级逻辑）；全局关门控有专门用例
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
+    // v1.34：全局开关（周期自唤醒闸）默认已开——验证 CCC 级逻辑；全局关门控有专门用例
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotWakeEnabled: true }))
     // mock setInterval/unref：记录定时器并阻止真实计时
     vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void, ms: number) => {
       timer = { fn, ms, unref: () => undefined } as unknown as ReturnType<typeof setInterval>
@@ -1033,22 +1033,52 @@ describe('registerAutopilot（时钟定时器——v1.34 武装门修复：全�
     utimesSync(md, t, t)
   }
 
-  it('v1.27.9 全局开关默认关（autopilotEnabled=false）→ 即使 CCC 启用也不启动定时器', () => {
+  it('v1.27.9 全局开关默认关（autopilotWakeEnabled 未设）→ 即使 CCC 启用也不武装', () => {
     writeCfg(tmp, { enabled: true, session: 'S143' })
     const { ctx, setSessions } = makeCtx()
     setSessions([{ id: 'a', header: { cwd: tmp } }])
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: false }))
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotWakeEnabled: false }))
     registerAutopilot(ctx as never)
     expect(timer).toBeNull() // 全局关 → 零资源占用
   })
 
-  it('v1.27.9 全局开关开启 + CCC 启用 → 启动定时器（双重门控都满足）', () => {
+  it('v1.27.9 全局开关开启 + CCC 启用 → 武装定时器（双重门控都满足）', () => {
+    writeCfg(tmp, { enabled: true, session: 'S143' })
+    const { ctx, setSessions } = makeCtx()
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotWakeEnabled: true }))
+    registerAutopilot(ctx as never)
+    expect(timer).not.toBeNull()
+  })
+
+  it('🧭 迁移回退：未设新键时读旧键 autopilotEnabled（老装机配置继续生效）', () => {
     writeCfg(tmp, { enabled: true, session: 'S143' })
     const { ctx, setSessions } = makeCtx()
     setSessions([{ id: 'a', header: { cwd: tmp } }])
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
     registerAutopilot(ctx as never)
     expect(timer).not.toBeNull()
+    expect(autopilotClockState().enabled).toBe(true)
+  })
+
+  it('🧭 迁移边界：新键**显式 false** 覆盖旧键 true（用 ?? 而非 ||——否则“关不掉”）', () => {
+    writeCfg(tmp, { enabled: true, session: 'S143' })
+    const { ctx, setSessions } = makeCtx()
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotWakeEnabled: false, autopilotEnabled: true }))
+    registerAutopilot(ctx as never)
+    expect(timer).toBeNull()
+    expect(autopilotClockState().enabled).toBe(false)
+  })
+
+  it('🔴 解耦回归钉（S-1）：唤醒调度器闸开着 **不**使周期自唤醒自动开启', () => {
+    writeCfg(tmp, { enabled: true, session: 'S143' })
+    const { ctx, setSessions } = makeCtx()
+    setSessions([{ id: 'a', header: { cwd: tmp } }])
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: true }))
+    registerAutopilot(ctx as never)
+    expect(timer).toBeNull() // 另一条线开着与本闸无关
+    expect(autopilotClockState().enabled).toBe(false)
   })
 
   it('🔴 启动时无 live 会话 → **仍武装**（v1.34 闩锁修复；旧行为=永久不武装）', () => {
@@ -1085,16 +1115,16 @@ describe('registerAutopilot（时钟定时器——v1.34 武装门修复：全�
     expect(timer).not.toBeNull()
   })
 
-  it('v1.27.10 面板打开全局开关（autopilotEnabled false→true）→ settings-changed 热启动定时器', () => {
+  it('v1.27.10 面板打开全局开关（autopilotWakeEnabled false→true）→ settings-changed 热启动定时器', () => {
     writeCfg(tmp, { enabled: true, session: 'S143' })
     const { ctx, emit, setSessions } = makeCtx()
     setSessions([{ id: 'a', header: { cwd: tmp } }])
     // 启动时全局关 → 不启动
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: false }))
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotWakeEnabled: false }))
     registerAutopilot(ctx as never)
     expect(timer).toBeNull()
     // 用户在面板打开全局开关 → settings.yaml 变化 → settings-changed 事件
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotWakeEnabled: true }))
     emit('serenity/settings-changed')
     expect(timer).not.toBeNull() // 热启动
   })

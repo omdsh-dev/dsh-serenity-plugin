@@ -46,8 +46,12 @@ export interface SerenitySimpleWire {
   acpHttpPort?: number
   /** F4d 建议问答页（v1.26.1 实验性）：按认知容器暴露问答页供他人验证（key 认证） */
   publicAskEnabled?: boolean
-  /** Autopilot Trajectory 全局总开关（v1.27.9，默认关——只在指定电脑开启） */
+  /** **周期自唤醒（autopilot）闸** —— v1.34 更名（原 autopilotEnabled），语义收窄为只管周期自唤醒 */
+  autopilotWakeEnabled?: boolean
+  /** @deprecated v1.34 前旧键（仅回退读，面板不再写它） */
   autopilotEnabled?: boolean
+  /** **唤醒调度器闸**（v1.34，原 trajectoryEnabled）：投递已登记的"未来时刻 + 一条 message"（缺省开） */
+  wakeSchedulerEnabled?: boolean
 }
 
 /** 本 section 的注入面（apply 闭包提供 settingsScope） */
@@ -228,7 +232,9 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const acpOn = value?.acpEnabled ?? false
   const acpPort = value?.acpHttpPort ?? 3100
   const publicAskOn = value?.publicAskEnabled ?? false
-  const autopilotOn = value?.autopilotEnabled ?? false
+  // v1.34 迁移：新键优先，旧键回退（老装机存的 autopilotEnabled 仍生效；新键显式 false 覆盖旧键 true）
+  const autopilotOn = value?.autopilotWakeEnabled ?? value?.autopilotEnabled ?? false
+  const wakeSchedOn = value?.wakeSchedulerEnabled ?? true // 缺省开（与 schema 一致）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
   const [openGateway, setOpenGateway] = useState(false)
@@ -237,6 +243,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openAcp, setOpenAcp] = useState(false)
   const [openPublicAsk, setOpenPublicAsk] = useState(false)
   const [openAutopilot, setOpenAutopilot] = useState(false)
+  const [openWakeSched, setOpenWakeSched] = useState(false)
 
   return (
     <div className="ss-section">
@@ -406,22 +413,44 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
         <li>
           <RowCard
-            title="Autopilot Trajectory"
-            desc="自动巡航轨迹（全局开关，默认关——只在指定电脑开启）"
+            title="周期自唤醒（autopilot）"
+            desc="定时唤起 autopilot 轨迹（全局开关，默认关——只在指定电脑开启）"
             expandable
             open={openAutopilot}
             onToggle={setOpenAutopilot}
-            control={<Toggle checked={autopilotOn} onChange={(on) => toggle('autopilotEnabled', on)} />}
+            control={<Toggle checked={autopilotOn} onChange={(on) => toggle('autopilotWakeEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'Autopilot Trajectory 全局总开关（v1.27.9）：\n' +
-                  '· 作用：控制本机（本 dsh 实例）是否运行自动巡航轨迹\n' +
+                <p className="ss-detailIntro">{'周期自唤醒全局闸（v1.34 更名收窄，原 Autopilot Trajectory 全局总开关）：\n' +
+                  '· 作用：控制本机（本 dsh 实例）是否运行**周期**自动巡航唤起\n' +
+                  '· 语义边界：**只管周期自唤醒** —— 关掉它不影响一次性唤醒（wake-later，见下一行）\n' +
                   '· 默认关：未开启即使 CCC 配置 enabled=true 也不启动定时器\n' +
                   '· 定位：多台电脑装 dsp 时，只在指定电脑开启（其余默认关）\n' +
-                  '· 双重门控：全局开关 AND CCC 级 enabled 都满足才运行\n' +
+                  '· 双重门控：本开关 AND CCC 级 enabled 都满足才运行\n' +
                   '· CCC 级配置（interval/session/偏见脚本/焦点）不受影响'}
                 </p>
                 <AutopilotTrajectoryStatusBlock autopilotOn={autopilotOn} />
+              </div>
+            }
+          />
+        </li>
+        <li>
+          <RowCard
+            title="唤醒调度器（wake-later）"
+            desc="投递已登记的“未来时刻 + 一条 message”（全局开关，默认开）"
+            expandable
+            open={openWakeSched}
+            onToggle={setOpenWakeSched}
+            control={<Toggle checked={wakeSchedOn} onChange={(on) => toggle('wakeSchedulerEnabled', on)} />}
+            detail={
+              <div className="ss-detailStack">
+                <p className="ss-detailIntro">{'唤醒调度器全局闸（v1.34 新增独立开关）：\n' +
+                  '· 作用：把 CCC 唤醒注册表（AGENT_SESSIONS/wake-registry.json）里到点的条目投递给目标轨迹\n' +
+                  '· 条目来源：`trajectory wake-later`（对自己或别的 trajectory 预约未来时刻 + 一条 message）\n' +
+                  '· 默认开：条目全部由人类/agent 显式登记，无环境自主性 ⇒ 不需要“默认关”的实验保护\n' +
+                  '· 与上一行**互不连带**：关掉周期自唤醒不会关掉本调度器（用户 2026-09-15 裁决）\n' +
+                  '· 精度：5min tick；补跑窗口 2h（超窗判 missed 留痕）；fire-and-forget 无回执'}
+                </p>
               </div>
             }
           />

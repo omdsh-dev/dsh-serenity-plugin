@@ -37,7 +37,7 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 1. 唤醒注册表 + 中心调度器（一次性定时唤醒 / 跨 trajectory 唤醒）
 2. 工具更名 `autopilot-trajectory` → **`trajectory`**（硬切无别名，v1.30 先例），新增 `wake add|list|rm`
 3. CCC 配置键 `autopilotTrajectory` → **`trajectory.autopilot`**（旧键回退读一轮）
-4. 插件全局开关 `autopilotEnabled` → **`trajectoryEnabled`**（旧键回退读）
+4. 插件全局开关：**v1.34 起为两条线各一个**（S-1 解耦，用户 2026-09-15）——周期自唤醒 `autopilotWakeEnabled`（原 `autopilotEnabled`，缺省关）｜一次性唤醒 `wakeSchedulerEnabled`（原 `trajectoryEnabled`，缺省开）。**历史**：v1.33 曾设单一 `trajectoryEnabled`（`|| autopilotEnabled` 回退），实测导致"关 auto-trajectory 连带关 wake-later"，已废
 5. 状态端点 `/serenity/autopilot-trajectory` → **`/serenity/trajectory`**；WebUI 面板同步
 6. `sessionController` 登记进 `HOST_SERVICES`
 
@@ -85,8 +85,9 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 | 到期判定 | `state === 'pending' && now >= at` | — |
 | 补跑窗口 | `now - at <= 2h` 才投递，否则 `missed` | I-4 默认 |
 | 并发 | 同 tick 多目标**串行**（复用 `wakeChain` 模式） | 防模型并发挤兑 |
-| 总闸 | 全局 `trajectoryEnabled`（缺省 false）；与 autopilot 共用同一开关 | I-4 默认 |
-| 生命周期 | `setInterval(...).unref()` + `registerDisposer` | 与 autopilot 同款 |
+| 总闸 | `wakeSchedulerEnabled`（缺省 **true**；v1.34 S-1 解耦，**不再**与 autopilot 共用/回退） | 用户 2026-09-15 裁决 |
+| 武装门 | 全局闸开**即**武装（**不**以"有 live CCC"为前置）——CCC 根只能从 live 会话反推，启动瞬间可能为空 | v1.34 静态缺口收窄（§33.2） |
+| 生命周期 | `setInterval(...).unref()` + `registerDisposer`；进程态可观测（`wakeSchedulerState()` → `acc-diag` ①b） | 与 autopilot 同款 + v1.34 可观测面 |
 
 **与 autopilot 的关系**：两个 tick 各自独立（D59）。autopilot 保持原样；本调度器只处理注册表条目。
 
@@ -139,7 +140,8 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 ```
 读取顺序：`trajectory.autopilot` → 旧 `autopilotTrajectory` → 旧 `autotrajectory`（逐级回退读，**不回写**）。
 
-**插件全局设置**：`trajectoryEnabled`（缺省 false）；读取顺序 `trajectoryEnabled` → 旧 `autopilotEnabled`。
+**插件全局设置**：`wakeSchedulerEnabled`（缺省 **true**；v1.34 S-1 起**只读本键**——不再回退 `autopilotEnabled`）。
+配套：周期自唤醒另有自己的闸 `autopilotWakeEnabled`（缺省关；迁移期回退旧键 `autopilotEnabled`）。两者**互不连带**。
 
 **状态端点**：`GET /serenity/trajectory`（原 `/serenity/autopilot-trajectory`）；WebUI 面板文案同步改名。
 
@@ -155,7 +157,7 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 
 | 项 | 策略 |
 |---|---|
-| 全局闸 | `trajectoryEnabled`（缺省 false，未开零资源占用） |
+| 全局闸 | `wakeSchedulerEnabled`（缺省 **true**）；**只关本调度器**——关周期自唤醒（`autopilotWakeEnabled`）不影响它 |
 | 资格 | **无栅**（D60）：任何 trajectory 可被写入并被唤醒；不要求 `--auto` |
 | 补跑 | 停机期间到期：`≤2h` 内补投；超过 → `missed` 留痕 |
 | 并发 | 同 tick 串行；投递后不等结果（fire-and-forget） |
@@ -175,7 +177,7 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 ## 11. 验收标准
 
 1. **门禁**：`typecheck`（node + client）+ `typecheck-host` + `test` + `build` + `pack-check` 全绿
-2. **单测**：注册表读写/到期判定/补跑窗口/串行投递/失败留痕/`wake add|list|rm`；旧 `autopilotTrajectory` / `autopilotEnabled` 回退读用例
+2. **单测**：注册表读写/到期判定/补跑窗口/串行投递/失败留痕/`wake-later`；旧 `autopilotTrajectory` 回退读用例；**v1.34 增**：武装门（全局闸开 + 零 live 会话 → 仍武装）、时钟进程态、**闸解耦回归钉**（关 `autopilotWakeEnabled` 不关 `wakeSchedulerEnabled`；`autopilotWakeEnabled` 显式 false 覆盖旧键 true）
 3. **dev 部署验证**：
    - ④ `dashboard health` 报 `sessionController` 契约项 ok
    - ⑤ 专用 `--auto` 测试轨迹：登记一条 1 分钟后唤醒 → 不打开该会话 → 到点后该会话出现唤醒轮且内容正确

@@ -282,7 +282,7 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     timer = null
     liveSessions = []
     __resetWakeSchedulerStateForTest()
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), trajectoryEnabled: true }))
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: true }))
     vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void) => {
       timer = { fn }
       return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>
@@ -306,13 +306,35 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     }
   }
 
-  it('全局闸关 → 不武装（零资源占用语义保留），且进程态如实报告 enabled=false', () => {
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), trajectoryEnabled: false, autopilotEnabled: false }))
+  it('唤醒调度器闸显式关 → 不武装（零资源占用语义保留），且进程态如实报告 enabled=false', () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: false }))
     registerWakeScheduler(makeCtx() as never)
     expect(timer).toBeNull()
     const st = wakeSchedulerState()
     expect(st.armed).toBe(false)
     expect(st.enabled).toBe(false)
+  })
+
+  it('🔴 解耦回归钉（用户 2026-09-15 裁决 S-1）：关掉周期自唤醒 **不**关掉唤醒调度器', () => {
+    // 旧实现（v1.33）：`trajectoryEnabled === true || autopilotEnabled === true` ⇒ 关 autopilot 连带关本调度器
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: false, autopilotWakeEnabled: false }))
+    registerWakeScheduler(makeCtx() as never)
+    expect(timer).not.toBeNull() // 仍武装
+    expect(wakeSchedulerState().enabled).toBe(true) // 缺省开
+  })
+
+  it('🔴 解耦回归钉之二：旧键 autopilotEnabled=true 也 **不**是本闸的依据（缺省即开）', () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
+    registerWakeScheduler(makeCtx() as never)
+    expect(timer).not.toBeNull()
+    expect(wakeSchedulerState().enabled).toBe(true)
+  })
+
+  it('缺省（未设任何键）→ 默认开（条目全由显式登记，不需要“默认关”保护）', () => {
+    __setSimpleSourceForTest(() => defaultSimpleSettings())
+    registerWakeScheduler(makeCtx() as never)
+    expect(timer).not.toBeNull()
+    expect(wakeSchedulerState().enabled).toBe(true)
   })
 
   it('🔴 全局闸开 + **零 live 会话** → 仍武装（修复前此处永久不武装）', () => {
@@ -324,13 +346,6 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     // 零 live CCC ⇒ 启动时那次 tick 被跳过，并**留痕原因**（可观测，不静默）
     expect(st.ticks).toBe(0)
     expect(st.lastSkipReason).toContain('无 live 会话')
-  })
-
-  it('旧键回退：只设 autopilotEnabled=true 也武装（不因新键缺省 false 而静默失效）', () => {
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
-    registerWakeScheduler(makeCtx() as never)
-    expect(timer).not.toBeNull()
-    expect(wakeSchedulerState().enabled).toBe(true)
   })
 
   it('live 会话出现后 tick 真执行（ticks / lastTickAt 推进，skip 原因清空）', async () => {

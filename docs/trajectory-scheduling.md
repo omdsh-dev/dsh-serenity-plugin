@@ -53,7 +53,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 | 实现 | `autopilot-trajectory.ts` `registerAutopilot` | `wake-registry.ts` + `wake-scheduler.ts` |
 | 决策 | D59：**独立单例，不进注册表** | D58/D60 |
 
-两条线**共用**同一个全局开关 `trajectoryEnabled`（旧键 `autopilotEnabled` 仍可读）。
+两条线**各自独立开关**（v1.34 S-1 解耦，用户 2026-09-15 裁决）：周期自唤醒 = `autopilotWakeEnabled`（缺省**关**）；一次性唤醒调度器 = `wakeSchedulerEnabled`（缺省**开**）。**关掉前者不再连带关掉后者**——旧实现共用一闸（`trajectoryEnabled || autopilotEnabled`）是缺陷：所有者关掉 auto-trajectory 后 wake-later 一并失效，条目静默滞留。
 
 ## 4. 结构全景
 
@@ -66,7 +66,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 | 降级 | 同上 | `sessionController` 缺席（headless profile）⇒ 仅投递 live 目标 + **响亮诊断**（禁静默） |
 | 工具面 | `tools/session.ts`（**工具名 `trajectory`**，v1.33 起 logbook 并入） | 动作 `wake-later`（**进程内**直改注册表，不 exec 脚本）；**无 list/rm**——不可回收（D60 替代控制只剩"不打断在跑轮次"+ 文件可读） |
 | 配置 | `.opencode/serenity.json` | `trajectory.autopilot` → 旧 `autopilotTrajectory` → 旧 `autotrajectory`（逐级回退，**不回写**） |
-| 全局开关 | 插件设置（宿主 settings） | `trajectoryEnabled` → 旧 `autopilotEnabled` |
+| 全局开关 | 插件设置（宿主 settings） | **两条线各一个**（v1.34 S-1）：周期自唤醒 `autopilotWakeEnabled`（缺省关；迁移期回退旧键 `autopilotEnabled`，**用 `??`** 保证新键显式 false 能覆盖旧键 true）｜一次性唤醒 `wakeSchedulerEnabled`（缺省开，**无** autopilot 回退） |
 | 端点 | `GET/POST /serenity/trajectory` | GET 返回 `{status, wakes}`（`wakes` = 注册表全量条目）；面板新增「唤醒注册表」只读块 |
 | 契约登记 | `host/contract.ts` | `sessionController.resolveAgent`（lazy，required=false）——**冷唤醒能力的可达性探针** |
 
@@ -101,8 +101,9 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 | **D58** | trajectory 一等；`autopilot-trajectory` → `trajectory`；唤醒 = 一条 message；无阻塞无等待；一个中心调度器 |
 | **D59** | autopilot **独立单例**，不进注册表（用户："autopilot 只允许一个"） |
 | **D60** | **不设资格栅**：任何 trajectory 均可被写入并被唤醒（不用 `--auto` 把关）⇒ 以"可审计 + 可回收 + 不打断在跑轮次"替代入口栅 |
-| I-1 | 命名与配置按默认：工具硬切、`trajectory.autopilot`、`trajectoryEnabled`、端点 `/serenity/trajectory` |
-| I-4 | 守卫按默认：≤2h 补投 / 串行 / 共用全局闸 / 维持 live |
+| I-1 | 命名与配置按默认：工具硬切、`trajectory.autopilot`、端点 `/serenity/trajectory`｜⚠️ 原 `trajectoryEnabled` 键 **v1.34 已被 S-1 解耦取代**（见下行） |
+| I-4 | 守卫按默认：≤2h 补投 / 串行 / 维持 live｜⚠️ 原"**共用全局闸**"**v1.34 已废**（S-1：两条线各一个闸） |
+| **S-1** | **闸解耦 + 更名**（用户 2026-09-15）：`autopilotEnabled` → `autopilotWakeEnabled`（只管周期自唤醒，缺省关）｜`trajectoryEnabled` → `wakeSchedulerEnabled`（缺省开）｜面板拆两行。**根因**：共用一闸导致"关 auto-trajectory 连带关 wake-later" |
 | P-1 | 冷唤醒路径验证（见 §8） |
 
 ## 8. 验证状态（诚实账）

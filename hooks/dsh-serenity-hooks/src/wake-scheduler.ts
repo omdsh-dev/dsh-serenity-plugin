@@ -17,7 +17,8 @@
  *     → `sessionController` 缺席（headless profile）⇒ 仅投递 live 目标，**不静默**
  *  4. 投递：`agent.followup(...)`（"Queue an ordinary follow-up turn and wake the driver"）
  *
- * 守卫（I-4 默认）：全局 `trajectoryEnabled`（旧键 `autopilotEnabled` 回退）｜
+ * 守卫（I-4 默认 + v1.34 S-1 解耦）：全局 `wakeSchedulerEnabled`（**缺省开**；**不再**回退旧键
+ * `autopilotEnabled`——关周期自唤醒不得连带关一次性唤醒）｜
  * 补跑窗口 2h（超窗置 missed 留痕）｜同 tick 串行｜唤起后维持 live（人类可介入）。
  */
 
@@ -120,11 +121,21 @@ export function resolveWakeTarget(root: string, target: string): WakeTarget | nu
   return { dirName: basename(found.path), mdPath }
 }
 
-/** 全局闸：`trajectoryEnabled` 优先，旧键 `autopilotEnabled` 回退（设置服务不可用 → 关） */
+/**
+ * 全局闸：**只看 `wakeSchedulerEnabled`**（缺省**开**；显式 `false` 才关）。
+ *
+ * ⚠️ 2026-09-15 用户裁决（S-1 **解耦**）：「auto-trajectory 的开关**只关闭 auto-trajectory 唤醒**」。
+ * ⇒ 本函数**不得**再把 `autopilotEnabled`（周期自唤醒闸）作为回退键 —— 旧实现是
+ * `trajectoryEnabled === true || autopilotEnabled === true`，后果实测：所有者关掉 auto-trajectory 后，
+ * **一次性唤醒 `wake-later` 被连带关掉**，注册表条目静默滞留（当日 6.6h 零 tick）。
+ * 缺省由 false 改 true 的理由：唤醒注册表已是一等机制（D58），条目**全部由人类/agent 显式登记**
+ * 未来时刻（无环境自主性），不需要"默认关"的实验保护；代价 = 一个 unref 的 5min 空检查。
+ *
+ * 设置服务不可用 → 关（保守；异常由日志与 `dashboard health` 响亮暴露，不静默）。
+ */
 export function wakeSchedulerEnabled(): boolean {
   try {
-    const s = readSimpleSettings() as { trajectoryEnabled?: boolean; autopilotEnabled?: boolean }
-    return s.trajectoryEnabled === true || s.autopilotEnabled === true
+    return readSimpleSettings().wakeSchedulerEnabled !== false
   } catch {
     return false
   }
@@ -241,7 +252,7 @@ export function registerWakeScheduler(ctx: Context): void {
 
   const tick = (): void => {
     if (!wakeSchedulerEnabled()) {
-      schedulerRuntime.lastSkipReason = '全局闸关闭（trajectoryEnabled / autopilotEnabled 均为 false）'
+      schedulerRuntime.lastSkipReason = '唤醒调度器闸关闭（wakeSchedulerEnabled=false）'
       return
     }
     if (collectLiveCccs(ctx).length === 0) {

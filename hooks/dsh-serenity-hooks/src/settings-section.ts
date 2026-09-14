@@ -61,12 +61,17 @@ export interface SerenitySimpleSettings {
   acpHttpPort: number
   /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
   publicAskEnabled: boolean
-  /** Autopilot Trajectory 全局总开关（v1.27.9，默认关——只在指定电脑开启；
-   *  关了即使 CCC 配置 enabled=true 也不启动定时器；CCC 级 enabled 仍为必要条件） */
-  autopilotEnabled: boolean
-  /** trajectory 全局总开关（D58/M-1，S142 2026-09-13）：**autopilot 与唤醒调度器共用**。
-   *  读取顺序：`trajectoryEnabled` → 旧键 `autopilotEnabled`（逐级回退，不回写）。 */
-  trajectoryEnabled: boolean
+  /** **周期自唤醒（autopilot）全局闸** —— v1.34 更名收窄（原 `autopilotEnabled`）。
+   *  **只管周期自唤醒**：关掉它**不**影响一次性唤醒 `trajectory wake-later`（后者归 {@link wakeSchedulerEnabled}）。
+   *  缺省关（多台电脑装 dsp 时只在指定电脑跑周期自唤醒）。
+   *  可选类型是为了**迁移语义精确**：老装机里存的旧键 `autopilotEnabled` 仍应生效，而"新键显式 false"必须能覆盖它。 */
+  autopilotWakeEnabled?: boolean
+  /** @deprecated v1.34 前的旧键（**仅迁移期回退读**，不回写）。新装/已迁移请用 `autopilotWakeEnabled` */
+  autopilotEnabled?: boolean
+  /** **唤醒调度器全局闸** —— v1.34 更名（原 `trajectoryEnabled`）：投递已登记的"未来时刻 + 一条 message"。
+   *  **缺省开**：它是 trajectory 的基础能力（D58），且**不得**被"关掉周期自唤醒"连带关掉
+   *  ——用户 2026-09-15 裁决：「auto-trajectory 的开关只关闭 auto-trajectory 唤醒」。 */
+  wakeSchedulerEnabled: boolean
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -79,8 +84,9 @@ export const simpleSettingsSchema = z.object({
   acpEnabled: z.boolean().default(false),
   acpHttpPort: z.number().min(1024).max(65535).default(3100),
   publicAskEnabled: z.boolean().default(false),
-  autopilotEnabled: z.boolean().default(false),
-  trajectoryEnabled: z.boolean().default(false),
+  autopilotWakeEnabled: z.boolean().required(false),
+  autopilotEnabled: z.boolean().required(false),
+  wakeSchedulerEnabled: z.boolean().default(true),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -94,8 +100,7 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     acpEnabled: config.acp?.enabled ?? false,
     acpHttpPort: config.acp?.httpPort ?? 3100,
     publicAskEnabled: config.publicAsk?.enabled ?? false,
-    autopilotEnabled: false,
-    trajectoryEnabled: false,
+    wakeSchedulerEnabled: true,
   }
 }
 
@@ -121,8 +126,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     acpEnabled: false,
     acpHttpPort: 3100,
     publicAskEnabled: false,
-    autopilotEnabled: false,
-    trajectoryEnabled: false,
+    wakeSchedulerEnabled: true,
   }
 }
 

@@ -213,7 +213,8 @@ export function apply(ctx: Context, config: Config): void {
   registerAutopilot(ctx)
   // trajectory 唤醒注册表（D58，v1.32.0）：中心调度器——5min tick 投递「未来时刻 + 一条
   // message」的一次性唤醒（可自唤醒、可跨 trajectory）。冷会话经 ctx.sessionController
-  // 载入后投递；与 autopilot 两个 tick 各自独立（D59）。全局闸 trajectoryEnabled（旧键回退）。
+  // 载入后投递；与 autopilot 两个 tick 各自独立（D59）。全局闸 `wakeSchedulerEnabled`（**缺省开**；
+  // v1.34 S-1 解耦：**不再**回退 autopilot 的闸——关周期自唤醒不得连带关一次性唤醒）。
   registerWakeScheduler(ctx)
   // F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置（serenity.json weixin + localstore 凭据）→
   // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。
