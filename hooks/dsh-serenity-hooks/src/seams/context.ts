@@ -21,7 +21,7 @@ import { findSerenityRoot, loadSerenityConfig, readHandymanConfig, DEFAULT_SEREN
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
-import { syncSafeModeRestriction, syncImBridgeVisibility } from './guards.js'
+import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../session-ops.js'
 import { readLastBound, appendBound } from '../session-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -217,6 +217,12 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     } catch {
       /* 可见性同步失败不阻断播种（最坏情况：工具可见但通道未配置 → 调用时返回 CHANNEL_NOT_CONFIGURED） */
     }
+    try {
+      // v1.33：专属工具（acc-diag）——未在 CCC 配置里声明 ⇒ 从 schema 移除
+      syncExclusiveToolsVisibility(agent, root)
+    } catch {
+      /* 同上：可见性失败不阻断播种 */
+    }
   }
 
   // session-start：emit 通知，CCC 内新会话播种
@@ -250,6 +256,12 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         try {
           // v1.31.0：im-bridge 条件可见（本 CCC 未配置 IM 通道 → 从工具清单移除）
           syncImBridgeVisibility(agent, root)
+        } catch {
+          /* 同上：可见性失败不阻断 step */
+        }
+        try {
+          // v1.33：专属工具条件可见（未在本 CCC 的 exclusiveTools 里声明 → 从工具清单移除）
+          syncExclusiveToolsVisibility(agent, root)
         } catch {
           /* 同上：可见性失败不阻断 step */
         }

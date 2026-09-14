@@ -25,7 +25,7 @@ import { stopAcpHttpServer } from '../acp-http.js'
 import { stopSkiffDebugServer } from '../skiff-debug.js'
 import { stopAllBridges } from '../weixin-bridge.js'
 import { forgetManualOutputSession } from '../weixin-output-guard.js'
-import { forgetImBridgeVisibility } from './guards.js'
+import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility } from './guards.js'
 import { forgetLogbookCompactionState } from './keeper.js'
 import { registerDisposer } from '../host/effect.js'
 
@@ -60,6 +60,12 @@ export function cleanupSessionState(sessionId: string): void {
   try {
     // v1.31.0：im-bridge 可见性隐藏状态（同上——防 per-会话 Map 无界增长）
     forgetImBridgeVisibility(sessionId)
+  } catch {
+    /* 无状态 */
+  }
+  try {
+    // v1.33：专属工具（acc-diag）可见性隐藏状态（同上）
+    forgetExclusiveToolsVisibility(sessionId)
   } catch {
     /* 无状态 */
   }

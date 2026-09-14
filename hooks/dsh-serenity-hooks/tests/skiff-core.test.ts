@@ -466,7 +466,7 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
   }
 
   /** 角色：开启 session 能力（用户拍板 zhaocai 形态） */
-  const sessionRole = (): SkiffRoleConfig => ({ msms: ['memory-tool'], tools: ['read', 'write', 'logbook', 'msm'], trajectory: { session: true, keeper: true, rebuild: true } })
+  const sessionRole = (): SkiffRoleConfig => ({ msms: ['memory-tool'], tools: ['read', 'write', 'trajectory', 'msm'], trajectory: { session: true, keeper: true, rebuild: true } })
   /** 未开 session 能力的角色 */
   const noSessionRole = (): SkiffRoleConfig => ({ msms: ['memory-tool'], tools: ['read'] })
 
@@ -575,8 +575,8 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(line).toContain('SESSION.md: /x/AGENT_SESSIONS/2026-09-07--S160--zhaocai skiff/SESSION.md')
     // 用户点破的缺口：不只是路径——含「已自动绑定（无需 use）+ 使用纪律 + rebuild 续接」约束
     expect(line).toContain('AUTO-BOUND')
-    expect(line).toContain('no logbook use needed')
-    expect(line).toContain('logbook rebuild')
+    expect(line).toContain('no trajectory use needed')
+    expect(line).toContain('trajectory rebuild')
     // v1.30.13（D5）：不点名具体工具——zhaocai 已无 write/edit（写能力归 CCC 的 session-write MSM），
     // 旧文案 "with write/edit" 指向它没有的工具（注入纪律与能力面矛盾）
     expect(line).not.toContain('write/edit')

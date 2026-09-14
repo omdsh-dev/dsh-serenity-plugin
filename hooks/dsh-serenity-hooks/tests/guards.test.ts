@@ -9,6 +9,9 @@ import {
   syncImBridgeVisibility,
   forgetImBridgeVisibility,
   getImBridgeVisibilityDiagnostics,
+  syncExclusiveToolsVisibility,
+  forgetExclusiveToolsVisibility,
+  getExclusiveToolsDiagnostics,
 } from '../src/seams/guards.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im-bridge.js'
 import { readBlacklist, matchBlacklist, pathInside, type BlacklistRule } from '../src/ccc.js'
@@ -327,6 +330,117 @@ describe('guards: im-bridge 条件可见（v1.31.0——未配置 IM 通道则�
   })
 })
 
+describe('guards: 专属工具条件可见（v1.33——未在 exclusiveTools 里声明则工具不可见）', () => {
+  /** 替身 agent（同 im-bridge 块形状） */
+  function mkAgent(id: string) {
+    const restrictCalls: { deny?: string[] }[] = []
+    const disposed: string[] = []
+    const agent = {
+      session: { id },
+      ctx: {
+        tools: {
+          restrict: (f: { deny?: string[] }) => {
+            restrictCalls.push(f)
+            return () => { disposed.push('disposed') }
+          },
+        },
+      },
+    } as any
+    return { agent, restrictCalls, disposed }
+  }
+
+  /** 写 CCC 配置（undefined = 不写 exclusiveTools 字段） */
+  function writeConfig(exclusiveTools?: unknown): void {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify(exclusiveTools === undefined ? { hooks: {} } : { exclusiveTools }),
+    )
+  }
+
+  it('未声明（字段缺失）→ restrict deny acc-diag；重复同步幂等（只隐藏一次）', () => {
+    writeConfig(undefined)
+    const { agent, restrictCalls } = mkAgent('s-diag-a')
+    syncExclusiveToolsVisibility(agent, dir)
+    syncExclusiveToolsVisibility(agent, dir)
+    expect(restrictCalls).toHaveLength(1)
+    expect(restrictCalls[0]!.deny).toEqual(['acc-diag'])
+    forgetExclusiveToolsVisibility('s-diag-a')
+  })
+
+  it('声明 ["acc-diag"] → 不隐藏（工具可见）', () => {
+    writeConfig(['acc-diag'])
+    const { agent, restrictCalls } = mkAgent('s-diag-b')
+    syncExclusiveToolsVisibility(agent, dir)
+    expect(restrictCalls).toHaveLength(0)
+  })
+
+  it('声明 → 取消声明 → 再声明：隐藏与解除实时跟随（配置热更新）', () => {
+    writeConfig(undefined)
+    const { agent, restrictCalls, disposed } = mkAgent('s-diag-c')
+    syncExclusiveToolsVisibility(agent, dir) // 未声明 → 隐藏
+    expect(restrictCalls).toHaveLength(1)
+    writeConfig(['acc-diag'])
+    syncExclusiveToolsVisibility(agent, dir) // 声明 → 解除
+    expect(disposed).toHaveLength(1)
+    syncExclusiveToolsVisibility(agent, dir) // 已解除 → 不再动作
+    expect(restrictCalls).toHaveLength(1)
+  })
+
+  it('配置损坏（坏 JSON）→ fail-closed 隐藏（专属工具默认不可见；配置损坏本身响亮告警）', () => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), '{ broken')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { agent, restrictCalls } = mkAgent('s-diag-d')
+    syncExclusiveToolsVisibility(agent, dir)
+    expect(restrictCalls[0]?.deny).toEqual(['acc-diag'])
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('CCC 配置解析失败'))).toBe(true)
+    warn.mockRestore()
+    forgetExclusiveToolsVisibility('s-diag-d')
+  })
+
+  it('非字符串项被忽略（只认字符串工具名）', () => {
+    writeConfig(['acc-diag', 42, null, '  '])
+    const { agent, restrictCalls } = mkAgent('s-diag-e')
+    syncExclusiveToolsVisibility(agent, dir)
+    expect(restrictCalls).toHaveLength(0)
+  })
+
+  it('restrict 抛错 → 不抛且不记状态（step 不可被拖垮）', () => {
+    writeConfig(undefined)
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const agent = {
+      session: { id: 's-diag-boom' },
+      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
+    } as any
+    expect(() => syncExclusiveToolsVisibility(agent, dir)).not.toThrow()
+    expect(err.mock.calls.some((c) => String(c[0]).includes('专属工具隐藏失败'))).toBe(true)
+    err.mockRestore()
+  })
+
+  it('会话销毁清理：forgetExclusiveToolsVisibility 解除隐藏并清状态（防 per-会话 Map 无界增长）', () => {
+    writeConfig(undefined)
+    const { agent, disposed } = mkAgent('s-diag-gone')
+    syncExclusiveToolsVisibility(agent, dir)
+    expect(getExclusiveToolsDiagnostics().hidden).toContain('s-diag-gone::acc-diag')
+    forgetExclusiveToolsVisibility('s-diag-gone')
+    expect(disposed).toHaveLength(1)
+    expect(getExclusiveToolsDiagnostics().hidden).not.toContain('s-diag-gone::acc-diag')
+    forgetExclusiveToolsVisibility('s-diag-gone') // 幂等
+    expect(disposed).toHaveLength(1)
+  })
+
+  it('不同会话各自独立（一个会话的隐藏不影响另一个）', () => {
+    writeConfig(undefined)
+    const a = mkAgent('s-diag-x')
+    const b = mkAgent('s-diag-y')
+    syncExclusiveToolsVisibility(a.agent, dir)
+    expect(getExclusiveToolsDiagnostics().hidden).toContain('s-diag-x::acc-diag')
+    expect(b.restrictCalls).toHaveLength(0)
+    forgetExclusiveToolsVisibility('s-diag-x')
+  })
+})
+
 describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-safe-on）', () => {
   it('写 .serenity-safe-on 被拒（无论安全模式）', () => {
     const d = decideGuard(base({ toolName: 'write', pathArg: '.serenity-safe-on' }))
@@ -433,10 +547,10 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
 })
 
 describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
-  // 复刻 .opencode/serenity.json zhaocai 角色（2026-09-07 磁盘态）：
-  // tools 含 msm/logbook + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
+  // 复刻 .opencode/serenity.json zhaocai 角色（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory）：
+  // tools 含 msm/trajectory + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
   // 而 read/web_search 通。此测试钉死逻辑层：该配置形态下 decideGuard 必须放行
-  // msm/logbook/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
+  // msm/trajectory/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
   const ZHAOCAI_MSMS = [
     'anysearch', 'web-search', 'memory-tool', 'mail-tool', 'vlm-describe',
     'eap-analyzer', 'qbit', 'session-log-tool', 'movie-search', 'home-diag',
@@ -455,7 +569,7 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
             zhaocai: {
               model: 'minimax-cn-coding-plan/MiniMax-M3',
               msms: ZHAOCAI_MSMS,
-              tools: ['read', 'grep', 'glob', 'web_search', 'logbook', 'msm'],
+              tools: ['read', 'grep', 'glob', 'web_search', 'trajectory', 'msm'],
               trajectory: { session: true, keeper: false, rebuild: true },
               systemPromptFile: '.opencode/skiff/zhaocai.md',
             },
@@ -470,8 +584,8 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
     unregisterSkiffSession(ZC_ID)
   })
 
-  it('zhaocai 形态：白名单内工具全放行（read/web_search/logbook/msm）', () => {
-    for (const tool of ['read', 'grep', 'glob', 'web_search', 'logbook', 'msm']) {
+  it('zhaocai 形态：白名单内工具全放行（read/web_search/trajectory/msm）', () => {
+    for (const tool of ['read', 'grep', 'glob', 'web_search', 'trajectory', 'msm']) {
       expect(decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID })).kind, `tool ${tool} 应 allow`).toBe('allow')
     }
   })

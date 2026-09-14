@@ -14,7 +14,7 @@ describe('invariant: 清单与注册工具一致性', () => {
       JSON.stringify({
         id: 'x',
         contributes: {
-          tools: ['container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'trajectory', 'im-bridge'],
+          tools: ['container_fs', 'trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'im-bridge', 'acc-diag'],
         },
       }),
     )
@@ -22,11 +22,11 @@ describe('invariant: 清单与注册工具一致性', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('REGISTERED_TOOLS 含 11 工具（v1.30 命名重构 + v1.31.0 im-bridge）', () => {
+  it('REGISTERED_TOOLS 含 11 工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并与专属工具）', () => {
     expect(REGISTERED_TOOLS).toHaveLength(11)
     expect(REGISTERED_TOOLS).toContain('container_fs')
     expect(REGISTERED_TOOLS).toContain('container_admin')
-    expect(REGISTERED_TOOLS).toContain('logbook')
+    expect(REGISTERED_TOOLS).toContain('trajectory')
     expect(REGISTERED_TOOLS).toContain('msm')
     expect(REGISTERED_TOOLS).toContain('praxis')
     expect(REGISTERED_TOOLS).toContain('dashboard')

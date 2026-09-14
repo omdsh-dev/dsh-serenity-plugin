@@ -167,6 +167,14 @@ export interface SerenityConfig {
    * 未配置或 enabled=false → 该 CCC 桥完全不启动（零资源占用）。
    */
   weixin?: WeixinSettings;
+  /**
+   * 专属工具声明（v1.33，S142 §32.11）：**ACC 注册但默认对所有 CCC 隐藏**的工具，
+   * 只有在自己这里声明的 CCC 可见（例：`["acc-diag"]` = ACC 负责人的运行态诊断）。
+   *
+   * 归属判据（D23）：**机制在 ACC（通用，任何工具名皆可），声明在 CCC**——
+   * ACC 代码里不出现任何具体 CCC 的名字；未声明（含未配置/配置损坏）⇒ 隐藏。
+   */
+  exclusiveTools?: string[];
 }
 
 /**
@@ -388,8 +396,26 @@ export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SEREN
   return {};
 }
 
-// ── 安全模式 ──
+/**
+ * 读取 CCC 声明的「专属工具」清单（`exclusiveTools`，v1.33）。
+ *
+ * 失败语义：无配置/字段缺失/配置损坏 → **空数组**（= 不声明任何专属工具 ⇒ 专属工具保持隐藏）。
+ * 这里选 **fail-closed**（与 im-bridge 的 fail-open 相反）的理由：专属工具的默认态就是"隐藏"，
+ * 判据读不到 = 没有证据表明该 CCC 要它；而配置损坏本身已在 `loadSerenityConfig` 响亮告警
+ * （不会静默）。im-bridge 相反——隐藏一个**已在使用**的通道才会静默损害能力。
+ * @param root CCC 根
+ * @param paths 候选配置相对路径
+ * @returns 去空白后的工具名列表（非字符串项被丢弃）
+ */
+export function readExclusiveTools(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
+  const list = loadSerenityConfig(root, paths).exclusiveTools;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+    .map((x) => x.trim());
+}
 
+// ── 安全模式 ──
 export const SAFE_MODE_MARKER = '.serenity-safe-on';
 
 export function isSafeModeOn(root: string): boolean {

@@ -50,8 +50,12 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
  * v1.31.1 修正：v1.31.0 新增 `im-bridge`（条件可见）时**漏改此处与清单**——两侧同错 →
  * `verifyToolConsistency` 零问题（**陈旧的双侧一致 = 静默通过**），而代码实际注册 11 个。
  * 教训：工具面变更必须同时改三处（tools/*.ts 注册 / 本常量 / dsh.plugin.json）。
+ *
+ * v1.33：`logbook` 并入 `trajectory`（10），随后新增 **专属工具 `acc-diag`**（默认对所有
+ * CCC 隐藏，只有声明 `exclusiveTools` 的 CCC 可见）⇒ 11。**条件可见不改变"注册"这一事实**：
+ * 本常量与清单都列它（与 im-bridge 同规格）。
  */
 export const REGISTERED_TOOLS = [
-  'container_fs', 'logbook', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
-  'localstore', 'container_admin', 'trajectory', 'im-bridge',
+  'container_fs', 'trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
+  'localstore', 'container_admin', 'im-bridge', 'acc-diag',
 ] as const

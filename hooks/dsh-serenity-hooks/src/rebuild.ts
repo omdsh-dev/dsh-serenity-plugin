@@ -278,7 +278,7 @@ export async function queueRebuild(
   opts: { root: string; note?: string; summary: string; agentCwd: string; dshSessionId: string },
 ): Promise<RebuildResult> {
   if (!readSimpleSettings().rebuildEnabled) {
-    throw new Error('logbook rebuild is disabled (rebuild.enabled=false — enable it in the dsh settings panel)')
+    throw new Error('trajectory rebuild is disabled (rebuild.enabled=false — enable it in the dsh settings panel)')
   }
   const { root, note, summary, dshSessionId } = opts
 
@@ -296,10 +296,10 @@ export async function queueRebuild(
     // （E↑：用户/agent 一眼知道该补哪一步，而不是拿到一个别的轨迹）。
     throw new Error(
       'Unable to determine the active SESSION.md for this session — checked (in order): ' +
-      'in-memory activation (logbook use in this process), [SESSION CONTEXT] events in this conversation, ' +
+      'in-memory activation (trajectory use in this process), [SESSION CONTEXT] events in this conversation, ' +
       'AGENT_SESSIONS/.bindings.json (authoritative binding), rebuild anchor in the surface. ' +
-      'None matched an existing SESSION.md. Run "logbook use <S###> --summary <内容概括 ≤20 字>" to bind this ' +
-      'conversation to a trajectory, then retry logbook rebuild. (No global fallback is applied on purpose — ' +
+      'None matched an existing SESSION.md. Run "trajectory use <S###> --summary <内容概括 ≤20 字>" to bind this ' +
+      'conversation to a trajectory, then retry trajectory rebuild. (No global fallback is applied on purpose — ' +
       'guessing could resume a different trajectory.)',
     )
   }

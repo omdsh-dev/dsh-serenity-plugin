@@ -64,7 +64,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 | 目标定位 | `session-bound.ts` `listBoundSessionIds` | `.bindings.json` **值侧反查**：目录名 → dsh 会话 id（最新绑定在前）——冷唤醒的唯一权威来源 |
 | 投递 | `acquireWakeAgent` → `deliverWake` | **live 优先**（`ctx.agents.get`）→ 冷会话 `ctx.sessionController.resolveAgent`（宿主负责 preset 恢复）→ **`followup`** |
 | 降级 | 同上 | `sessionController` 缺席（headless profile）⇒ 仅投递 live 目标 + **响亮诊断**（禁静默） |
-| 工具面 | `tools/autopilot-trajectory.ts`（**工具名 `trajectory`**） | 动作 `wake-add` / `wake-list` / `wake-rm`（**进程内**，不 exec 脚本）；其余动作语义不变 |
+| 工具面 | `tools/session.ts`（**工具名 `trajectory`**，v1.33 起 logbook 并入） | 动作 `wake-later`（**进程内**直改注册表，不 exec 脚本）；**无 list/rm**——不可回收（D60 替代控制只剩"不打断在跑轮次"+ 文件可读） |
 | 配置 | `.opencode/serenity.json` | `trajectory.autopilot` → 旧 `autopilotTrajectory` → 旧 `autotrajectory`（逐级回退，**不回写**） |
 | 全局开关 | 插件设置（宿主 settings） | `trajectoryEnabled` → 旧 `autopilotEnabled` |
 | 端点 | `GET/POST /serenity/trajectory` | GET 返回 `{status, wakes}`（`wakes` = 注册表全量条目）；面板新增「唤醒注册表」只读块 |
@@ -90,7 +90,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 |---|---|
 | **宿主 `@deepseek-ai/dsh-schedule`** | **不复用**。它是"会话内提醒"（投递给用户看）、明确**不唤醒冷会话**、状态在会话日志；本机制是"轨迹自续"（投给模型继续干活）、**冷唤醒是核心**、状态在 CCC 文件。理由详见设计文档 §8 |
 | `handyman` / `subagent` | 都是"**现在**派一个子 agent 干活并**等结果**"；本机制是"**未来**投一条消息并且**不等**"（正交） |
-| `logbook` rebuild | rebuild 解决"载体重置"；本机制解决"载体何时被唤醒"（互补） |
+| `trajectory rebuild` | rebuild 解决"载体重置"；本机制解决"载体何时被唤醒"（互补；v1.33 起 rebuild 与 wake-later 同属 `trajectory` 工具） |
 | keeper / compaction | 解决上下文预算；本机制不感知上下文，投递即入队 |
 | CCE 连续性 | 本机制是**时间轴上的连续性工具**：轨迹在没人看着的时候也能被自己的安排推动（见 §9） |
 
@@ -130,7 +130,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 
 但与我们熟悉的时间序列相比，它有一个**反常的性质**：
 
-> **采样网格是内生的（endogenous sampling）**——采样时刻由被观测系统自己安排（`wake-add`），而不是由外部观察者给定（autopilot 的 `intervalHours` 是半内生：由 CCC 配置，但节奏固定）。
+> **采样网格是内生的（endogenous sampling）**——采样时刻由被观测系统自己安排（`trajectory wake-later`），而不是由外部观察者给定（autopilot 的 `intervalHours` 是半内生：由 CCC 配置，但节奏固定）。
 
 经典时间序列的采样是外生的（仪器定时采集）；我们这里**被观测者就是采样器**。
 

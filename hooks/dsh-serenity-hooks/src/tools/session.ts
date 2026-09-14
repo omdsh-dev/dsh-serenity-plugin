@@ -1,18 +1,23 @@
 /**
- * session.ts — session 真实 DSH 工具定义（defineTool）
+ * session.ts — `trajectory` 真实 DSH 工具定义（defineTool）
  *
- * AGENT_SESSIONS/ 全周期管理：list/show/create/use/close/health/qa/archive/summary。
- * 行为对齐 osp（opencode-serenity-plugin/src/session/session-tool.ts）——osp 是 ACC 工具 spec：
- *   - create：--desc <desc> [--goal <goal>] 或 --issue <id>（二选一）
- *   - close：需 --confirm 防误关
- *   - archive：name 可缺省（批量归档）
- *   - hook-develop-guide 子命令 + CCC session-tool MSM 扩展提示（extHint）
- * CCC 扩展采用 osp 的"钩子后处理"模型（create-transform），而非整命令委派。
- * 活跃会话跟踪：写内存 Map（.dsh/active-sessions/<scope> 语义）+ events 恢复（S134）。
+ * v1.33（S142 §32 用户裁决）：由 `logbook` **更名并收敛为 `trajectory`**——trajectory 是一等概念
+ * （SESSION.md 是它的持久身体），本工具管它的**载体生命周期 + 一次性时间安排**。
+ * 动作收敛为 **6 个**：list / show / create / use / rebuild / wake-later。
  *
- * v1.21 F3（用户逻辑修正）：SESSION 是对话过程中创建的——**use 激活宁静号会话时，
- * 同步把当前 dsh 会话重命名为该 SESSION 目录名**（sessionTitle.rename，user source
- * pin 住标题）。非创建时预命名。
+ * 与旧面（logbook 11 动作 + trajectory 12 动作）的对应（用户逐条裁决，R↓）：
+ *   · `summary` → 并入 `list`（全库统计随清单一起给）
+ *   · `health`/`qa` → **淘汰**：其判据是"旧六节模板合规"，而 ACC 层的编写标准已升级为 EAP
+ *     ⇒ 只把**不依赖模板**的两项并入 `use`：空壳 / 长期无活动（**提示，不阻断**）
+ *   · `close`/`archive` → 删：`completed` 本就由 SESSION.md 的 `[x]` 推导（不靠 close 写）；
+ *     归档能力由 `container_fs mv → _archived/` 承担
+ *   · `hook-develop-guide` → 并入 `container_admin msm guide`（SEP 内容进开发手册）
+ *   · autopilot 面（all/init/random/diag/doc/check/status/guide）→ `container_admin` 的 autopilot 域
+ *   · `wake-add`/`wake-list`/`wake-rm` → **`wake-later`**（一次登记；**不可回收、无面板**——用户明示接受）
+ *
+ * 保留 osp 对齐语义的部分：create 的 `--desc`/`--issue` 二选一、use 激活即重命名 dsh 会话标题（F3）、
+ * CCC `session-tool` MSM 钩子后处理（create-transform）。活跃会话跟踪：内存 Map（按 dsh 会话 id 隔离）
+ * + 从 events 恢复（S134）。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -21,23 +26,21 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { hostService } from '../host/access.js'
 import type { JsonValue } from '../json.js'
 import { join } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { loadMsmEntries, runMsmAsync, type MsmEntry } from '../msm-ops.js'
-import { appendBound, readLastBound } from '../session-bound.js'
+import { appendBound, readLastBound, resolveSessionTrajectoryLabel } from '../session-bound.js'
+import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
 import {
   listSessions,
   showSession,
   createSession,
   useSession,
-  closeSession,
-  archiveSessions,
-  healthCheck,
-  summarize,
-  qaCheck,
   findSession,
-  SESSION_ACTIONS,
+  TRAJECTORY_ACTIONS,
   DEFAULT_SESSION_SCOPE,
   getActiveSessionInfo,
+  summarize,
   type ActiveSessionInfo,
   type CreateSessionResult,
 } from '../session-ops.js'
@@ -243,7 +246,7 @@ function discoverCccSubcommands(entries: MsmEntry[]): string[] {
 /** 生成扩展提示（对齐 osp buildExtHint） */
 function buildExtHint(hasSessionTool: boolean, hooks: string[], subcommands: string[]): string {
   if (!hasSessionTool) {
-    return '\n\n[CCC] To extend session capabilities, register a session-tool MSM (container_admin msm register); see session hook-develop-guide'
+    return '\n\n[CCC] To extend trajectory-tool capabilities, register a session-tool MSM (container_admin msm register); the extension protocol (SEP) is documented in container_admin msm guide'
   }
   const parts: string[] = []
   if (hooks.length > 0) parts.push(`hooks: ${hooks.join(', ')}`)
@@ -252,8 +255,16 @@ function buildExtHint(hasSessionTool: boolean, hooks: string[], subcommands: str
   return `\n\n[CCC] session-tool MSM registered${detail}`
 }
 
-/** hook-develop-guide 内容（对齐 osp getHookDevelopGuide） */
-function getHookDevelopGuide(hasSessionTool: boolean): string {
+/**
+ * SEP（Session Extension Protocol）开发者指南（原 `hook-develop-guide` 动作的内容）。
+ *
+ * v1.33（用户裁决"选 A"）：该动作**不再作为 trajectory 的动作**，内容**并进
+ * `container_admin msm guide`**（理由：SEP 的本质就是"注册一个 session-tool MSM"，
+ * 天然属于 MSM 开发手册）。⇒ 这里保留为**唯一文本源**，由 container-admin 引用，
+ * 避免两份会漂移的说明（单真相源）。
+ * @param hasSessionTool 本 CCC 是否已注册 session-tool MSM（决定了尾部的提示行）
+ */
+export function buildSepGuide(hasSessionTool: boolean): string {
   return [
     '═══ Session Extension Protocol (SEP) v1 — Developer Guide ═══',
     '',
@@ -317,37 +328,42 @@ function getHookDevelopGuide(hasSessionTool: boolean): string {
 }
 
 /**
- * 创建 session 工具（闭包捕获插件 ctx → use 后可调 ctx.sessionTitle.rename）。
- * v1.21 F3：use 激活宁静号会话 → 当前 dsh 会话重命名为该 SESSION 目录名。
+ * 创建 trajectory 工具（原 logbook；v1.33 S142 §32 更名 + 动作收敛）。
+ * 闭包捕获插件 ctx → use 后可调 ctx.sessionTitle.rename。
  */
-export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
+export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
-  name: 'logbook',
+  name: 'trajectory',
   description:
-    'The Logbook (AGENT_SESSIONS/ trajectory log — the voyage\'s persistent record). Full work-session lifecycle: list/show/create/use/close/health/qa/archive/summary/hook-develop-guide + rebuild (trajectory-tracker overflow: clear and rebuild the current conversation in place, Ship of Theseus). ' +
-    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars, content summary — required, except --dry-run preview and --issue sessions which are exempt); close requires --confirm; ' +
-    'use activates the session for the current dsh conversation (in-memory + events restore, isolated per dsh session) and requires --summary (≤20 chars). ' +
-    'rebuild requires --summary (next-phase content summary ≤20 chars) + optional --note (task focus for the rebuilt self). ' +
+    'Trajectory (AGENT_SESSIONS/ — the persistent body of a trajectory; the dsh conversation is only its rebuildable carrier). ' +
+    'Lifecycle + one-shot scheduling: list (inventory with stats and anomaly marks) / show (read one SESSION.md) / create / use (activate for this conversation, with inline integrity check) / rebuild (clear-and-rebuild the current conversation in place, Ship of Theseus) / wake-later (schedule ONE message to any trajectory at a future instant — fire-and-forget: no receipt, no recall, no panel). ' +
+    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars). ' +
+    'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound trajectory. ' +
+    'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self). ' +
+    'wake-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message. ' +
     'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
   parameters: {
     action: {
       type: 'string',
-      enum: [...SESSION_ACTIONS],
+      enum: [...TRAJECTORY_ACTIONS],
       required: true,
       description:
-        'Subcommand: list (status summary) / show (S### or dir name or fuzzy keyword) / create (--desc or --issue) / use (activate context, closed can be reopened) / ' +
-        'close (requires --name + --confirm, irreversible) / health (stale/stalled/drift/ghost) / qa (fact check) / archive (archive, name defaults to batch) / ' +
-        'summary (dashboard) / rebuild (clear-and-rebuild current conversation, Ship of Theseus — requires --summary + optional --note) / hook-develop-guide (CCC extension guide)',
+        'Subcommand: list (inventory + stats + anomaly marks) / show (S### or dir name or fuzzy keyword) / create (--desc or --issue) / ' +
+        'use (activate context; inline integrity check — pass silent, problems reported as hints, not errors) / ' +
+        'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note) / ' +
+        'wake-later (one future instant + one message, delivered to target trajectory)',
     },
-    name: { type: 'string', description: 'show/use/close/archive/qa session identifier (S### or dir name or keyword)' },
+    name: { type: 'string', description: 'show/use session identifier (S### or dir name or keyword)' },
     note: { type: 'string', description: 'rebuild: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
     desc: { type: 'string', description: 'create short description (any language, ≤5 words; mutually exclusive with issue)' },
     issue: { type: 'string', description: 'create ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
     goal: { type: 'string', description: 'create one-sentence goal (optional)' },
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
-    confirm: { type: 'boolean', description: 'close must be true (prevents accidental close)' },
-    force: { type: 'boolean', description: 'use: allow switching away from the currently-bound session (binding guard override)' },
-    dryRun: { type: 'boolean', description: 'create/archive preview mode (no actual changes)' },
+    force: { type: 'boolean', description: 'use: allow switching away from the currently-bound trajectory (binding guard override)' },
+    dryRun: { type: 'boolean', description: 'create preview mode (no actual changes)' },
+    target: { type: 'string', description: 'wake-later: target trajectory (S### or AGENT_SESSIONS directory name)' },
+    at: { type: 'string', description: 'wake-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
+    message: { type: 'string', description: 'wake-later: the single message delivered to the target trajectory' },
   },
   output: {
     schema: { type: 'json' },
@@ -364,13 +380,10 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
     const cccSubs = discoverCccSubcommands(entries)
     const extHint = buildExtHint(hasSessionTool, cccHooks, cccSubs)
 
-    if (args.action === 'hook-develop-guide') {
-      return getHookDevelopGuide(hasSessionTool)
-    }
-
     switch (args.action) {
       case 'list': {
-        return listSessions(root) + extHint
+        // v1.33：原 `summary` 动作并入 list（用户裁决）——清单 + 全库统计一次给全
+        return listSessions(root) + '\n' + summarize(root) + extHint
       }
       case 'show': {
         if (!args.name) throw new Error('show requires name (S### or directory name)')
@@ -462,47 +475,12 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
             ...(switching ? { note: 'forced switch' } : {}),
           })
         }
-        return active
-      }
-      case 'close': {
-        // U7（方案 v1.0）：close 关闭**当前绑定**会话——无 name = 关绑定；
-        // 有 name 时须指向当前绑定（经 findSession 编码无关解析），否则拒绝（防误关别的会话）。
-        const scope = agentScope(exec)
-        const requested = args.name?.trim() ?? ''
-        const boundDir = currentBoundDirName(exec, scope)
-        if (boundDir && requested) {
-          const target = findSession(join(root, 'AGENT_SESSIONS'), requested)
-          const targetDir = target?.dirName ?? requested
-          if (targetDir !== boundDir) {
-            throw new Error(
-              `Session is bound to ${boundDir}. close targets the bound session — pass the bound session (or omit name) to close it; ` +
-              `closing ${requested} while bound to another session is not allowed.`,
-            )
-          }
-        }
-        if (!boundDir && !requested) {
-          throw new Error('close requires name (no active binding to close) — pass the session to close.')
-        }
-        const nameToClose = boundDir ? boundDir : requested
-        const closed = closeSession(root, nameToClose, args.confirm ?? false, scope)
-        // release bound（U7 审计）：关闭当前绑定后 append release（closeSession 已清内存）
-        const dsh = agentDshSession(exec)
-        const bound = dsh ? readLastBound(dsh) : null
-        if (bound) {
-          appendBound(dsh, 'release', { dirName: bound.dirName, mdPath: bound.mdPath, sessionId: bound.sessionId, note: 'session closed' })
-        }
-        return closed
-      }
-      case 'archive': {
-        return archiveSessions(root, { name: args.name, dryRun: args.dryRun ?? false }) + extHint
-      }
-      case 'health':
-        return healthCheck(root) + extHint
-      case 'summary':
-        return summarize(root) + extHint
-      case 'qa': {
-        if (!args.name) throw new Error('qa requires name (S### or directory name)')
-        return qaCheck(root, args.name) + extHint
+        // 内联完整性检查（v1.33）：原 health/qa 因"判据＝旧模板"被淘汰，这里只留不依赖模板的两项
+        // —— **提示，不阻断**（用户裁决原话："通过就静默，不通过就提示，注意不是报错"）
+        const advisory = advisoryHint(targetEntry.dirName, join(targetEntry.path, 'SESSION.md'))
+        const out: Record<string, JsonValue> = { dir: active.dir, mdPath: active.mdPath, context: active.context }
+        if (advisory) out.advisory = advisory
+        return out
       }
       case 'rebuild': {
         // v1.30：rebuild 并入 logbook（原独立 session_rebuild 工具）——超限重建：
@@ -528,9 +506,67 @@ export function createSessionTool(ctx: Context): ReturnType<typeof defineTool> {
           instruction: 'Queued clear-and-rebuild: when this turn ends, the same conversation will be cleared and injected with the "continue the work" anchor (first-anchor protocol body included), then auto-continue — no manual input needed; resume from SESSION.md at that point.',
         }
       }
+      case 'wake-later': {
+        // v1.33：原 `wake-add` 并入本工具并更名（用户裁决「wake 系列只保留 wake-later，原功能即可，只是改名」）。
+        // 语义 = 一条「未来时刻 + 一条 message」；fire-and-forget：**无回执、不可回收、无面板**（用户明示接受）。
+        if (!args.target || !args.at || !args.message) {
+          throw new Error('wake-later requires target (S### or dir name) + at (RFC3339 or +30m/+2h) + message')
+        }
+        const wakeScope = agentScope(exec)
+        const res = addWake(root, {
+          target: args.target,
+          at: args.at,
+          message: args.message,
+          // 发起者 = **调用方自身**所属 trajectory（`resolveSessionTrajectoryLabel` 的三级归属）
+          createdBy: resolveSessionTrajectoryLabel(exec.agent?.session, wakeScope === DEFAULT_SESSION_SCOPE ? '' : wakeScope),
+          nowMs: Date.now(),
+        })
+        if (!res.ok) return { ok: false, error: res.error }
+        return { ok: true, output: `✓ 已登记唤醒\n${renderWakeEntry(res.entry)}` }
+      }
       default:
         throw new Error(`Unknown action: ${args.action as string}`)
     }
   },
   })
+}
+
+/**
+ * 渲染一条唤醒条目（人读；`wake-later` 的登记回执）。
+ * 显式写明"不可回收"，因为这是用户明示接受的语义（D60 调整后：无 list/rm、无面板）。
+ * @param e 刚登记的条目
+ */
+function renderWakeEntry(e: WakeEntry): string {
+  return [
+    '═══ trajectory 唤醒（1 条）═══',
+    `  · ${e.id}  [${e.state}]  at=${e.at}  target=${e.target}  by=${e.createdBy || '?'}`,
+    `      message: ${e.message.length > 120 ? `${e.message.slice(0, 120)}…` : e.message}`,
+    '',
+    `补跑窗口 ${WAKE_CATCH_UP_MS / 3_600_000}h：停机期间到期且迟到未超窗 → 补投；超窗 → missed 留痕。`,
+    '⚠ fire-and-forget：无回执、不可回收、无面板。',
+  ].join('\n')
+}
+
+/**
+ * `use` 的内联检查（v1.33）：**只报不依赖 SESSION.md 模板的两类可观测事实**，且**只提示不阻断**。
+ *
+ * 为什么只有两条（R↓）：原 `qa` 的六节名检查与 `health` 的 stalled/drift 都建立在"旧模板合规"假设上，
+ * 而 ACC 层的编写标准已升级为 **EAP**（用户裁决：「这说明 qa 应该淘汰了」）⇒ 那类判据淘汰；
+ * 剩下与模板无关、且"用到时才发现最划算"的只有：
+ *   ① **空壳**：目录在但没有 SESSION.md（无正文可载 ⇒ 由 useSession 阻断，此处只是提前说清）
+ *   ② **长期无活动**：SESSION.md 的 mtime 过旧（按 HEALTH_STALE_DAYS 同口径）
+ * @param dirName 目标轨迹目录名
+ * @param mdPath 目标 SESSION.md 绝对路径
+ * @returns 提示文本；无异常 → null（**通过就静默**）
+ */
+function advisoryHint(dirName: string, mdPath: string): string | null {
+  if (!existsSync(mdPath)) return `⚠ ${dirName}: 目录存在但没有 SESSION.md（空壳）——本次激活会失败，先补正文或改用 create`
+  let ageDays = 0
+  try {
+    ageDays = (Date.now() - statSync(mdPath).mtimeMs) / 86_400_000
+  } catch {
+    return null
+  }
+  if (ageDays >= 7) return `⚠ ${dirName}: SESSION.md 已 ${Math.floor(ageDays)} 天未更新——激活的是旧轨迹，确认是否接续的是它`
+  return null
 }

@@ -1101,7 +1101,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.13：工作台纪律单一注入点——挂 skiff 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'logbook', 'msm'], trajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '招财' } } },
+      skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'trajectory', 'msm'], trajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '招财' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -1148,7 +1148,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.13：agent 无 systemPrompt 段 → 降级 question 前缀注入（约束必须在场）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { zc: { msms: [], tools: ['read', 'logbook', 'msm'], trajectory: { session: true }, systemPrompt: '招财' } } },
+      skiff: { roles: { zc: { msms: [], tools: ['read', 'trajectory', 'msm'], trajectory: { session: true }, systemPrompt: '招财' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
     }))
     __setWeixinFetchForTest(async (input) => {

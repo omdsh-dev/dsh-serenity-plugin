@@ -19,6 +19,7 @@ import {
   readBlacklist,
   pathInside,
   readCccName,
+  readExclusiveTools,
   type BlacklistRule,
 } from '../ccc.js'
 import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
@@ -358,6 +359,81 @@ export function forgetImBridgeVisibility(sessionId: string): void {
     /* disposer 已失效 */
   }
   imBridgeRestrictions.delete(sessionId)
+}
+
+// ── 专属工具条件可见（v1.33，S142 §32.11）──
+
+/**
+ * ACC 注册但**默认对所有 CCC 隐藏**的专属工具清单。
+ *
+ * 语义（通用机制，不绑定任何具体 CCC）：只有在 CCC 的 `.opencode/serenity.json`
+ * `exclusiveTools` 里**显式声明**过的名字才可见——ACC 侧不出现 CCC 的名字（D23）。
+ * 与 im-bridge 的区别：im-bridge 是"配置了通道才可见"（能力由 CCC 配置决定），
+ * 本族是"被点名才可见"（能力归属 ACC 负责人）。
+ */
+export const EXCLUSIVE_TOOL_NAMES = ['acc-diag'] as const
+
+/** `${sessionId}::${toolName}` → restrict disposer */
+const exclusiveRestrictions = new Map<string, () => void>()
+
+/** 专属工具隐藏诊断（排查"工具为什么不在清单里"） */
+export function getExclusiveToolsDiagnostics(): { hidden: string[] } {
+  return { hidden: [...exclusiveRestrictions.keys()] }
+}
+
+/**
+ * 同步专属工具可见性（v1.33）。
+ *
+ * 判据 = CCC 配置 `exclusiveTools`（`readExclusiveTools`）：
+ * - **未声明** → `agent.ctx.tools.restrict({ deny: [tool] })`：从 schema 移除（模型看不到）
+ * - **声明** → 解除隐藏（CCC 配置热更新即时生效）
+ *
+ * 判据失败按"未声明"处理（fail-closed：专属工具默认隐藏），原因见 `readExclusiveTools` 注释。
+ * 与 `syncImBridgeVisibility` 同点调用（pre-step 每步 + 会话就绪），失败不阻断一步——
+ * 最坏情况是"看得到但被拒"，而不是让 step 出错。
+ */
+export function syncExclusiveToolsVisibility(agent: Agent, root: string): void {
+  const sessionId = (agent.session as { id?: string }).id ?? 'global'
+  let declared: string[] = []
+  try {
+    declared = readExclusiveTools(root)
+  } catch (e) {
+    console.error(`[serenity-hooks] 专属工具可见性判据失败 (session=${sessionId}):`, (e as Error).message)
+  }
+  for (const tool of EXCLUSIVE_TOOL_NAMES) {
+    const key = `${sessionId}::${tool}`
+    const existing = exclusiveRestrictions.get(key)
+    const visible = declared.includes(tool)
+    if (!visible && !existing) {
+      try {
+        exclusiveRestrictions.set(key, agent.ctx.tools.restrict({ deny: [tool] }))
+      } catch (e) {
+        console.error(`[serenity-hooks] 专属工具隐藏失败 (${key}):`, (e as Error).message)
+        /* 隐藏失败不阻断：最坏是该 CCC 看得见这个工具（诊断工具本身无副作用） */
+      }
+    } else if (visible && existing) {
+      try {
+        existing()
+      } catch (e) {
+        console.error(`[serenity-hooks] 专属工具解除隐藏失败 (${key}):`, (e as Error).message)
+      }
+      exclusiveRestrictions.delete(key)
+    }
+  }
+}
+
+/** 会话销毁清理（lifecycle 调用；本函数按 `${sessionId}::` 前缀回收全部专属工具项） */
+export function forgetExclusiveToolsVisibility(sessionId: string): void {
+  const prefix = `${sessionId}::`
+  for (const [key, dispose] of [...exclusiveRestrictions]) {
+    if (!key.startsWith(prefix)) continue
+    try {
+      dispose()
+    } catch {
+      /* disposer 已失效 */
+    }
+    exclusiveRestrictions.delete(key)
+  }
 }
 
 /**

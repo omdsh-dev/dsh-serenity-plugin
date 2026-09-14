@@ -57,5 +57,5 @@ praxis { section: "neat" }   // 注入 Neat 协议全文
 
 ## 参考
 
-- 会话追踪：`acc-session` 技能（决策记录到 SESSION.md → logbook）
+- 轨迹追踪：`acc-session` 技能（决策记录到 SESSION.md → `trajectory`）
 - 宿主系统入口：`acc-serenity` 技能

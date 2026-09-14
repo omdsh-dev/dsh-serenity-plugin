@@ -82,13 +82,13 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(typeof apply).toBe('function')
   })
 
-  it('apply 注册 11 个真实工具（v1.30 命名重构 + v1.31.0 im-bridge 条件可见）', () => {
+  it('apply 注册 11 个真实工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并/专属工具，后两者条件可见）', () => {
     const { ctx, register } = mockCtx()
     apply(ctx, FULL_CONFIG)
     expect(register).toHaveBeenCalledTimes(11)
     const names = register.mock.calls.map((c) => (c[0] as { name: string }).name)
     expect(names).toContain('container_fs')
-    expect(names).toContain('logbook')
+    expect(names).toContain('trajectory')
     expect(names).toContain('dashboard')
     expect(names).toContain('container_git')
     expect(names).toContain('msm')
@@ -98,6 +98,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('container_admin')
     expect(names).toContain('trajectory')
     expect(names).toContain('im-bridge')
+    expect(names).toContain('acc-diag')
   })
 
   it('apply 订阅拦截缝：tools/pre-execute + guard', () => {

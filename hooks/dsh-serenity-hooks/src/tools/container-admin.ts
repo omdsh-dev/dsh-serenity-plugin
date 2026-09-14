@@ -17,9 +17,10 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '../json.js'
 import { findSerenityRoot } from '../ccc.js'
-import { runMsm, MSM_ACTIONS } from '../msm-ops.js'
+import { runMsm, MSM_ACTIONS, loadMsmEntries } from '../msm-ops.js'
 import { skiffMsmGate } from '../skiff-core.js'
 import { runAutopilotScript } from '../autopilot-script.js'
+import { buildSepGuide } from './session.js'
 import { validateSkiffConfig, applySkiffConfig, listSkiffRoles, SKIFF_GUIDE } from './skiff-admin.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
@@ -138,6 +139,11 @@ export const containerAdminTool = defineTool({
         flags: args.flags as string | undefined,
         usage: args.usage as string | undefined,
       })
+      // v1.33（用户裁决"选 A"）：SEP 开发者指南并进 msm 手册——注册 MSM 正是扩展会话工具的方式
+      if (action === 'guide') {
+        const hasSessionTool = loadMsmEntries(root).some((e) => e.name === 'session-tool')
+        return { manual: out, sessionExtension: buildSepGuide(hasSessionTool) }
+      }
       return out
     }
 

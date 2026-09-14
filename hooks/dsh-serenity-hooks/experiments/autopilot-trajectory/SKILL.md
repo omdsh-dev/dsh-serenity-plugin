@@ -1,12 +1,12 @@
 ---
 name: autopilot-trajectory-experiment
-description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自主轨迹实验）参与 skill。本 skill 让 CCC 完整理解机制背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 轨迹焦点 + 前台运行 + 多 CCC 独立），并提供一站式管理工具（`trajectory`：无参全报告 / init 初始化 / random 验证偏见内容 / diag 诊断）。任何希望参与的 CCC 复制本目录到 .opencode/skills/ 即可开始。
+description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自主轨迹实验）参与 skill。本 skill 让 CCC 完整理解机制背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 轨迹焦点 + 前台运行 + 多 CCC 独立），并提供一站式管理入口（v1.33 起归 `container_admin autopilot`：status 全报告 / init 初始化 / generate-bias 验证偏见内容；条件链诊断走开发面脚本）。任何希望参与的 CCC 复制本目录到 .opencode/skills/ 即可开始。
 ---
 
 # Skill: autopilot-trajectory-experiment
 
 > 本 skill 是 Autopilot Trajectory（自动巡航轨迹）的 **CCC 参与入口**——加载本 skill 即完整理解机制的**背景、目的、方式**。
-> 实验管理：工具 `trajectory`（动作 `<all|doc|check|status|guide>`；D58 起 ACC 工具 `autopilot-trajectory` 更名 `trajectory`，硬切无别名）
+> 实验管理（v1.33 起）：`container_admin autopilot status | init | generate-bias`（原 `trajectory all/init/random`——D58 起工具更名 `trajectory`，v1.33 起 autopilot 面归机务舱，硬切无别名）
 > 理论依据：serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`（v0.1 猜想）
 
 ## 触发条件/何时加载
@@ -37,7 +37,7 @@ description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自�
 
 ## 3. 参与方式（CCC 侧四步——第一步可一键 init）
 
-### ① 初始化（一键）：`trajectory init`
+### ① 初始化（一键）：`container_admin autopilot init`
 
 自动完成：写配置（`.opencode/serenity.json` `trajectory.autopilot` 段）+ 生成偏见提供者脚本模板（CCC 根 `autopilot-bias.ts`）。
 
@@ -63,7 +63,7 @@ description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自�
 
 ### ③ 实现偏见内容提供者（`autopilot-bias.ts`）
 
-CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容**（反事实问题/探索方向/任何让轨迹偏离既有路径的输入）。**偏见内容归 CCC**——用本 CCC 自己的反馈信息来源保证"足够随机"。`trajectory random` 可验证输出。
+CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容**（反事实问题/探索方向/任何让轨迹偏离既有路径的输入）。**偏见内容归 CCC**——用本 CCC 自己的反馈信息来源保证"足够随机"。`container_admin autopilot generate-bias` 可验证输出。
 
 ### ④ 标记目标会话（可选自生动机段）
 
@@ -85,17 +85,17 @@ CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容*
 
 **人类角色**：不触发、不中断；回复/评价天然并入（同一前台会话）；轨迹不等人类。
 
-## 5. 实验管理（`trajectory` 工具）——一站式
+## 5. 实验管理（`container_admin autopilot`）——一站式
 
 | 用法 | 功能 |
 |------|------|
-| `trajectory`（**推荐，无参**） | **一站式全报告**：背景摘要 + 就绪度检查 + 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
-| `trajectory init` | **一键初始化**：写配置 + 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts） |
-| `trajectory random` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
-| `trajectory doc` | 机制定义说明全文（本 SKILL.md） |
-| `trajectory check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
-| `trajectory status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
-| `trajectory guide` | 仅步骤指引 |
+| `container_admin autopilot status`（**推荐，无参即全报告**） | **一站式全报告**：背景摘要 + 就绪度检查 + 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
+| `container_admin autopilot init` | **一键初始化**：写配置（`trajectory.autopilot`）+ 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts） |
+| `container_admin autopilot generate-bias` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
+| （开发面）`bun <包内脚本> check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
+| （开发面）`bun <包内脚本> status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
+| （开发面）`bun <包内脚本> diag` | 唤起条件链诊断（逐条件 + 阻断点 + 修复建议）——CCC 侧另有专属工具 `acc-diag`（含进程内 live 运行态） |
+| （开发面）`bun <包内脚本> doc` / `guide` | 机制定义全文（本 SKILL.md）/ 仅步骤指引 |
 
 ## 6. 观察与验证
 

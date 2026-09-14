@@ -113,19 +113,23 @@ export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'd
 export const ACC_CATALOG = `═══ ACC Usage Catalog ═══
 Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
 
-  ① 会话与轨迹        → logbook（list/show/create/use/close/health/qa/archive/summary/hook-develop-guide + rebuild 超限重建）
-                         session_rebuild 已并入 logbook rebuild（超限重建；阈值 K 见 container_admin ccc-config / 设置面板重建阈值K）
+  ① 轨迹本体          → trajectory（list/show/create/use + rebuild 超限重建 + wake-later 未来一次性唤醒）
+                         原 logbook 已并入（v1.33 用户裁决：废除 logbook 词）；close/archive 删（归档走 container_fs mv），
+                         health/qa/summary 分别并入 use / list，hook-develop-guide 并进 container_admin msm guide
+  ①b 周期自唤醒        → container_admin autopilot（status/init/generate-bias——D59 单例；status 含就绪与下一步）
   ② 认知质量框架      → praxis（eap/neat/cce 三合一——可实践理论注入，section 渐进披露，无参即目录）
   ③ 工具与执行        → container_fs（容器文件系统 15 子命令）/ container_git（git）/ dashboard（health 含注册表检查/time/wait）
                          acc_msm 已并入 msm（执行+发现）与 container_admin（管理）——msm("<name>", ["<args>"])；inspect=true 查用法
                          handyman（杂工 agent 编排——guide 子命令：handyman guide）
+                         专属工具（**默认对所有 CCC 隐藏**，只有在自己 exclusiveTools 里点名的 CCC 可见）→ acc-diag（运行态诊断）
   ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
                          ACP（程序化 JSON-RPC 3100）/ Skiff 问答页（公网 ask）——面板「外部能力」组
-  ⑤ 自主与接入        → trajectory（轨迹一站式：all/init/random/diag/doc/check/status/guide + 唤醒注册表 wake-add/wake-list/wake-rm）
+  ⑤ 自主与接入        → trajectory wake-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
-  ⑥ CCC 配置总览      → container_admin msm ccc-config（8 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin）
+  ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin/**exclusiveTools**）
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
+                         CCC 级开关：exclusiveTools（声明专属工具）/ safeMode.blacklist（写路径黑名单）
 
 每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
 `
@@ -269,9 +273,9 @@ CCC 定义的一条自主 trajectory——时钟到点自动唤起（前台注�
 未配置或 enabled=false → 完全不启动（零资源占用）。多 CCC 独立：每 CCC 自己的配置。
 唤起消息四段式：轨迹焦点 topPrompt（最先注入，稳定锚）→ 身份锚定 → 先验偏见
 （CCC 根脚本 biasProvider 输出）→ 任务。目标会话 session 必填（目录须带 --auto 后缀）。
-诊断/状态/立即唤起：trajectory <all|check|status|diag>（trajectory({action:"all"})）。
-唤醒注册表（wake-add/wake-list/wake-rm）：唤醒 = 未来时刻 + 一条 message，可唤醒自己或别的 trajectory；
-落点 AGENT_SESSIONS/wake-registry.json，中心调度器到点投递（fire-and-forget）。
+诊断/状态/立即唤起：container_admin autopilot（status/init/generate-bias）；ACC 负责人专用运行态诊断见开发面。
+唤醒注册表（trajectory wake-later）：唤醒 = 未来时刻 + 一条 message，可唤醒自己或别的 trajectory；
+落点 AGENT_SESSIONS/wake-registry.json，中心调度器到点投递（fire-and-forget；无回执、无回收）。
 
   Config:
     { "trajectory": {
@@ -368,6 +372,21 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
   执行语义（旁路容忍）：异步 fire-and-forget + 15s 超时 kill + 失败仅日志——
   微信桥消息处理/回复不受 hook 影响；脚本须在 CCC 根内（路径逃逸拒绝）。
   媒体 relPath 指向 _tmp/weixin-inbound/（临时目录）——需持久保存媒体文件请自行 copy。
+
+── 9. exclusiveTools（专属工具声明，v1.33）──
+**ACC 注册但默认对所有 CCC 隐藏**的工具，只有在自己这里**点名**的 CCC 可见。
+这是通用机制（任何工具名皆可），判据由 CCC 声明——ACC 代码里不出现任何具体 CCC 的名字。
+当前专属工具：acc-diag（运行态诊断——live 会话 / agent 定位 / 唤醒注册表 / 唤起条件链）。
+
+  ▸ 可见性语义：未声明 ⇒ 由 guards 逐 agent tools.restrict({deny:[tool]}) 从**模型工具清单移除**
+    （不是"看得到但被拒"）。配置热更新：改本文件即时生效（无需重启）。
+  ▸ 失败方向 **fail-closed**：未配置 / 字段缺失 / 配置损坏（JSON 坏）⇒ 一律按"未声明"处理
+    （专属工具保持隐藏；配置损坏本身另有响亮告警）。与 im-bridge 相反——隐藏一个**已在使用**
+    的通道才会静默损害能力，而专属工具的默认态本就是隐藏。
+  ▸ 配置损坏的响亮告警只出现一次（每路径），dashboard health 同样能看到。
+
+  Config:
+    { "exclusiveTools": ["acc-diag"] }
 `
 
 

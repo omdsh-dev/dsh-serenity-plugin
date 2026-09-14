@@ -60,12 +60,12 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     const r = runMsm(dir, { action: 'catalog' }) as { catalog: string }
     expect(r.catalog).toContain('ACC Usage Catalog')
     // 7 个能力分区
-    for (const area of ['会话与轨迹', '认知质量框架', '工具与执行', '角色与对外面', '自主与接入', 'CCC 配置总览', '注册表与安全']) {
+    for (const area of ['轨迹本体', '认知质量框架', '工具与执行', '角色与对外面', '自主与接入', 'CCC 配置总览', '注册表与安全']) {
       expect(r.catalog).toContain(area)
     }
     // 各详细入口指引（目录指向 guide，不复制全文）
     expect(r.catalog).toContain('container_admin')
-    expect(r.catalog).toContain('logbook')
+    expect(r.catalog).toContain('trajectory')
     expect(r.catalog).toContain('msm("<name>"')
     expect(r.catalog).toContain('weixin-doctor')
     expect(r.catalog).toContain('handyman')

@@ -22,21 +22,20 @@ import {
 import { join, basename, dirname } from 'node:path'
 import type { JsonValue } from './json.js'
 
-export type SessionAction =
-  | 'list'
-  | 'show'
-  | 'create'
-  | 'use'
-  | 'close'
-  | 'health'
-  | 'qa'
-  | 'archive'
-  | 'summary'
-  | 'hook-develop-guide'
-  | 'rebuild'
+/**
+ * `trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
+ *
+ * 为什么只有 6 个（R↓）：旧面是 `logbook`（11）+ `trajectory`（12）两个工具，用户裁决
+ * 「都合并成 trajectory，废除 logbook 这个词」并逐条删并 ——
+ * summary 并进 list｜health/qa 淘汰（判据＝旧模板，EAP 已取代；仅"空壳/长期无活动"并入 use）｜
+ * close/archive 删（completed 由 SESSION.md 的 `[x]` 推导；归档走 container_fs mv）｜
+ * hook-develop-guide 并进 container_admin msm guide｜autopilot 面归 container_admin 的 autopilot 域｜
+ * wake-add/list/rm 收敛为 wake-later。
+ */
+export type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'wake-later'
 
-export const SESSION_ACTIONS: readonly SessionAction[] = [
-  'list', 'show', 'create', 'use', 'close', 'health', 'qa', 'archive', 'summary', 'hook-develop-guide', 'rebuild',
+export const TRAJECTORY_ACTIONS: readonly TrajectoryAction[] = [
+  'list', 'show', 'create', 'use', 'rebuild', 'wake-later',
 ]
 
 /**

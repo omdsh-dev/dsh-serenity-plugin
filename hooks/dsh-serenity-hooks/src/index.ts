@@ -20,10 +20,9 @@ import { gitTool } from './tools/git.js'
 import { msmTool } from './tools/msm.js'
 import { praxisTool } from './tools/praxis.js'
 import { createHandymanTool } from './tools/handyman.js'
-import { createSessionTool } from './tools/session.js'
+import { createTrajectoryTool } from './tools/session.js'
 import { localstoreTool } from './tools/localstore.js'
 import { containerAdminTool } from './tools/container-admin.js'
-import { createAutopilotTool } from './tools/autopilot-trajectory.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
 import { registerKeeper } from './seams/keeper.js'
@@ -56,6 +55,7 @@ import { registerOpencodeAutoConfig } from './opencode-provider.js'
 import { registerImChannel } from './im-bridge.js'
 import { weixinChannel } from './im-weixin.js'
 import { createImBridgeTool } from './tools/im-bridge.js'
+import { createAccDiagTool } from './tools/acc-diag.js'
 import { registerDisposer } from './host/effect.js'
 
 export const name = 'dsh-serenity-hooks'
@@ -144,19 +144,22 @@ export function apply(ctx: Context, config: Config): void {
   registerImChannel(weixinChannel)
   if (config.tools) {
     ctx.tools.register(ccFsTool) // container_fs
-    ctx.tools.register(createSessionTool(ctx)) // logbook（含 rebuild）
+    // v1.33（S142 §32）：`logbook` 更名并收敛为 `trajectory`（原 autopilot 工具的动作已归
+    // container_admin 的 autopilot 域 / 唤醒动作并入本工具的 wake-later）
+    ctx.tools.register(createTrajectoryTool(ctx)) // trajectory（含 rebuild + wake-later）
     ctx.tools.register(createKitTool(ctx)) // dashboard
     ctx.tools.register(gitTool) // container_git
     ctx.tools.register(msmTool) // msm（单入口执行 + 发现）
     ctx.tools.register(praxisTool) // praxis（eap/neat/cce 三合一）
     ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(localstoreTool)
-    ctx.tools.register(containerAdminTool) // container_admin（role + msm 管理 + config）
-    // Autopilot Trajectory 一站式管理（v1.26.12 实验 → v1.27.4 正式化；默认关；只提供工具与知识，不自动安装任何东西）
-    // v1.26.14：闭包捕获 ctx → diag-live 进程内诊断（live 会话/标题/agent 定位）
-    ctx.tools.register(createAutopilotTool(ctx))
+    // container_admin（role + msm 管理 + config + **autopilot**——v1.33 起 autopilot 面归机务舱）
+    ctx.tools.register(containerAdminTool)
     // v1.31.0：IM 消息发送（条件可见——本 CCC 未配置任何 IM 通道时由 guards 移除）
     ctx.tools.register(createImBridgeTool())
+    // v1.33：运行态诊断（**专属工具**——默认对所有 CCC 隐藏，只有在自己配置的
+    // `exclusiveTools` 里声明的 CCC 可见；由 guards 逐 agent restrict）
+    ctx.tools.register(createAccDiagTool(ctx))
   }
   if (config.guards) {
     registerGuards(ctx, { configPaths: config.serenityConfigPaths })
@@ -186,7 +189,7 @@ export function apply(ctx: Context, config: Config): void {
   registerRebuildTurnHook(ctx)
   // v1.26.3 输出守卫：最终输出敏感词检测 + steer 打回重生成（凭据/机制/MSM 名不泄露给用户）
   registerOutputGuardHook(ctx)
-  // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createSessionTool 内实现，
+  // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createTrajectoryTool 内实现，
   // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {
     registerEnv(ctx)

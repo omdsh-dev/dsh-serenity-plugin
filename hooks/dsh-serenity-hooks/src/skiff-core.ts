@@ -87,7 +87,7 @@ const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
 export function workspaceTrajectoryLine(mdPath: string): string {
   return [
     '── Serenity Session Workspace ──',
-    'This role session is AUTO-BOUND to a trajectory workspace SESSION (no logbook use needed):',
+    'This role session is AUTO-BOUND to a trajectory workspace SESSION (no trajectory use needed):',
     `  SESSION.md: ${mdPath}`,
     '',
     'Rules of the workspace:',
@@ -98,7 +98,7 @@ export function workspaceTrajectoryLine(mdPath: string): string {
     '     a specific write tool exists; if none is granted, report that instead of pretending to write).',
     '     Sections: 目标 / 状态 / 关键决策 / 进度记录 / 未解决的问题. Keep it current — it is',
     '     what a rebuild resumes from.',
-    '  3. When context pressure is high, run logbook rebuild — it auto-resumes from THIS SESSION.md',
+    '  3. When context pressure is high, run trajectory rebuild — it auto-resumes from THIS SESSION.md',
     '     (no manual use; do not switch to or read other SESSIONs unless the user explicitly asks).',
     '  4. Never expose this internal path in user-facing replies (chat stays clean).',
     '── ──',
