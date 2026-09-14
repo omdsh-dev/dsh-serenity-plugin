@@ -161,6 +161,18 @@ describe('acc-diag: runAccDiag 装配 + 渲染', () => {
     expect(r.live.liveSessions).toHaveLength(1)
     expect(renderAccDiag(r)).toContain('session-a')
   })
+
+  it('① 段报告进程内两个时钟的武装状态（"为何没有 tick" 的第一手判据）', () => {
+    const r = runAccDiag(fakeCtx() as never, dir)
+    const text = renderAccDiag(r)
+    expect(r.clocks.wake).toHaveProperty('armed')
+    expect(r.clocks.wake).toHaveProperty('enabled')
+    expect(r.clocks.autopilot).toHaveProperty('armed')
+    expect(text).toContain('唤醒调度器（wake-registry tick）')
+    expect(text).toContain('autopilot 时钟（周期自唤醒 tick）')
+    expect(text).toContain('armed=')
+    expect(text).toContain('上次 tick=')
+  })
 })
 
 describe('acc-diag: 工具面', () => {

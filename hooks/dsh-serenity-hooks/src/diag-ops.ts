@@ -16,14 +16,41 @@
  */
 
 import { listWakes, WAKE_CATCH_UP_MS } from './wake-registry.js'
-import { diagLive, type DiagLiveReport } from './autopilot-trajectory.js'
+import { diagLive, type DiagLiveReport, autopilotClockState } from './autopilot-trajectory.js'
+import { wakeSchedulerState } from './wake-scheduler.js'
 import { runAutopilotScript } from './autopilot-script.js'
 import type { Context } from 'cordis'
+
+/** 进程内时钟状态（唤醒调度器 / autopilot 时钟；判据各自单一真相源） */
+type ClockState = ReturnType<typeof wakeSchedulerState> | ReturnType<typeof autopilotClockState>
+
+/** 人读渲染一行时钟状态（"为何没有 tick" 的第一手判据） */
+function renderClock(label: string, s: ClockState): string {
+  const ts = (ms: number | null): string => (ms === null ? '（从未）' : new Date(ms).toISOString())
+  const parts = [
+    `armed=${s.armed}`,
+    `全局闸=${s.enabled}`,
+    `tick 次数=${s.ticks}`,
+    `上次 tick=${ts(s.lastTickAt)}`,
+  ]
+  if (s.armedAt !== null) parts.push(`武装于=${ts(s.armedAt)}`)
+  if (s.lastSkipReason) parts.push(`上次跳过: ${s.lastSkipReason}`)
+  return `${label}: ${parts.join(' ｜ ')}`
+}
 
 export interface AccDiagReport {
   /** 调用方会话所属 CCC 根（脚本诊断的目标） */
   ccc: string
   live: DiagLiveReport
+  /**
+   * 进程内两个时钟的武装状态（2026-09-14 F 段缺陷**新暴露面**）。
+   * 为什么必须有（R↓）：此前"条目为何滞留在 pending"无法从报告回答——④ 段只算**配置**条件，
+   * 而真正的原因可能在"时钟根本没在跑"这一层。有了它，同类故障一眼可判。
+   */
+  clocks: {
+    wake: ClockState
+    autopilot: ClockState
+  }
   wakes: {
     /** 注册表文件路径问题（读不到时非空——不得静默） */
     error: string | null
@@ -55,6 +82,10 @@ export function runAccDiag(ctx: Context, root: string): AccDiagReport {
   return {
     ccc: root,
     live,
+    clocks: {
+      wake: wakeSchedulerState(),
+      autopilot: autopilotClockState(),
+    },
     wakes: {
       error,
       entries: entries.map((e) => ({
@@ -99,6 +130,11 @@ export function renderAccDiag(r: AccDiagReport): string {
       if (c.agentDiagnosis) lines.push(`      诊断: ${c.agentDiagnosis}`)
     }
   }
+  lines.push('')
+
+  // ①b 进程内时钟（**先看这一行**：时钟没武装时，④ 段的条件链再全绿也不会被唤起）
+  lines.push(renderClock('唤醒调度器（wake-registry tick）', r.clocks.wake))
+  lines.push(renderClock('autopilot 时钟（周期自唤醒 tick）', r.clocks.autopilot))
   lines.push('')
 
   // ② 面板解析

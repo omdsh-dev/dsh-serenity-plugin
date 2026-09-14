@@ -9,7 +9,7 @@
  *    冷会话且有 `sessionController` → `resolveAgent` 载入后投递（P-1 的冷唤醒正门）
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -26,7 +26,8 @@ import {
   WAKE_CATCH_UP_MS,
   type WakeEntry,
 } from '../src/wake-registry.js'
-import { buildWakeText, deliverWake, resolveWakeTarget } from '../src/wake-scheduler.js'
+import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 const HOUR = 3_600_000
 const DIR_NAME = '2026-09-13--S999--wake-target--auto'
@@ -257,5 +258,126 @@ describe('buildWakeText（投递正文：身份锚定 + 唤醒信息 + 任务）
     expect(text).toContain('/x/SESSION.md')
     expect(text).toContain('做 A')
     expect(text).toContain('S142')
+  })
+})
+
+/**
+ * 时钟武装门（**F 段缺陷回归钉**，2026-09-14）。
+ *
+ * 缺陷（实测）：CCC 根只能从 live 会话反推，而宿主刚重启时 live 会话必为空；
+ * 旧实现把"有 live CCC"当**武装前置条件** ⇒ 启动瞬间落空即**永久不武装**
+ * （`session/created` 只覆盖"新建会话"，不覆盖"浏览器恢复旧会话"）。
+ * 实测证据：2026-09-14T16:30Z 重启后零 tick 达 6.6h，注册表条目超窗仍 `pending`。
+ * ⇒ 修复：**全局闸开即武装**；"有无 live CCC"降级为 tick 内的廉价判定。
+ */
+describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () => {
+  let listeners: Record<string, Array<() => void>>
+  let disposers: Array<() => void>
+  let timer: { fn: () => void } | null
+  let liveSessions: unknown[]
+
+  beforeEach(() => {
+    listeners = {}
+    disposers = []
+    timer = null
+    liveSessions = []
+    __resetWakeSchedulerStateForTest()
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), trajectoryEnabled: true }))
+    vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void) => {
+      timer = { fn }
+      return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>
+    }) as typeof setInterval)
+    vi.spyOn(global, 'clearInterval').mockImplementation(() => { timer = null })
+  })
+
+  afterEach(() => {
+    __resetWakeSchedulerStateForTest()
+    __setSimpleSourceForTest(null)
+    vi.restoreAllMocks()
+  })
+
+  function makeCtx(): unknown {
+    return {
+      sessions: { list: () => liveSessions },
+      agents: { get: () => undefined },
+      get: () => undefined,
+      on: (name: string, fn: () => void) => { (listeners[name] ??= []).push(fn) },
+      effect: (cb: () => () => void) => { disposers.push(cb()) },
+    }
+  }
+
+  it('全局闸关 → 不武装（零资源占用语义保留），且进程态如实报告 enabled=false', () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), trajectoryEnabled: false, autopilotEnabled: false }))
+    registerWakeScheduler(makeCtx() as never)
+    expect(timer).toBeNull()
+    const st = wakeSchedulerState()
+    expect(st.armed).toBe(false)
+    expect(st.enabled).toBe(false)
+  })
+
+  it('🔴 全局闸开 + **零 live 会话** → 仍武装（修复前此处永久不武装）', () => {
+    registerWakeScheduler(makeCtx() as never) // liveSessions = []
+    expect(timer).not.toBeNull()
+    const st = wakeSchedulerState()
+    expect(st.armed).toBe(true)
+    expect(st.armedAt).not.toBeNull()
+    // 零 live CCC ⇒ 启动时那次 tick 被跳过，并**留痕原因**（可观测，不静默）
+    expect(st.ticks).toBe(0)
+    expect(st.lastSkipReason).toContain('无 live 会话')
+  })
+
+  it('旧键回退：只设 autopilotEnabled=true 也武装（不因新键缺省 false 而静默失效）', () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
+    registerWakeScheduler(makeCtx() as never)
+    expect(timer).not.toBeNull()
+    expect(wakeSchedulerState().enabled).toBe(true)
+  })
+
+  it('live 会话出现后 tick 真执行（ticks / lastTickAt 推进，skip 原因清空）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    const ctx = makeCtx()
+    registerWakeScheduler(ctx as never)
+    liveSessions = [{ id: 's1', header: { cwd: root } }]
+    ;(timer as unknown as { fn: () => void }).fn()
+    await new Promise((r) => setTimeout(r, 20))
+    const st = wakeSchedulerState()
+    expect(st.ticks).toBe(1)
+    expect(st.lastTickAt).not.toBeNull()
+    expect(st.lastSkipReason).toBeNull()
+  })
+
+  it('到期条目被真投递（live 命中 → followup 收到正文；条目推进为 delivered）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    const added = addWake(root, { target: DIR_NAME, at: '+5m', message: '到点干活', createdBy: 'S142', nowMs: Date.now() })
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    // 把条目改成"已到期"（不改系统时钟）
+    updateWake(root, added.entry.id, { at: new Date(Date.now() - 60_000).toISOString() })
+    const sent: string[] = []
+    const ctx = {
+      sessions: { list: () => [{ id: 'sess-live', header: { cwd: root } }] },
+      agents: { get: (id: string) => (id === 'sess-live' ? { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } } : undefined) },
+      get: () => undefined,
+      on: () => undefined,
+      effect: () => undefined,
+    }
+    registerWakeScheduler(ctx as never) // 启动即 tick 一次
+    await new Promise((r) => setTimeout(r, 30))
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('到点干活')
+    expect(listWakes(root).entries[0]!.state).toBe('delivered')
+    expect(listWakes(root).entries[0]!.lastResult).toContain('live(bound sess-live)')
+  })
+
+  it('卸载（disposer）→ 时钟停止且进程态复位（不留"看着还在跑"的假象）', () => {
+    registerWakeScheduler(makeCtx() as never)
+    expect(wakeSchedulerState().armed).toBe(true)
+    expect(disposers).toHaveLength(1)
+    disposers[0]!()
+    expect(timer).toBeNull()
+    expect(wakeSchedulerState().armed).toBe(false)
+    expect(wakeSchedulerState().armedAt).toBeNull()
   })
 })

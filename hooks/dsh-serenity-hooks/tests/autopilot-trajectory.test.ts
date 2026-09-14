@@ -82,6 +82,8 @@ import {
   collectAutopilotCccs,
   diagLive,
   registerAutopilot,
+  autopilotClockState,
+  __resetAutopilotClockStateForTest,
 } from '../src/autopilot-trajectory.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
@@ -966,7 +968,7 @@ describe('listLiveSessions / collectAutopilotCccs / diagLive（进程内诊断�
   })
 })
 
-describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 live 会话为空导致定时器永不启动；v1.27.4 多 CCC 独立）', () => {
+describe('registerAutopilot（时钟定时器——v1.34 武装门修复：全局闸开即武装；v1.27.4 多 CCC 独立）', () => {
   let tmp: string
   let tmp2: string
   let listeners: Record<string, Array<(payload?: unknown) => void>>
@@ -983,6 +985,7 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     timer = null
     liveSessions = []
     resetWakeHistory()
+    __resetAutopilotClockStateForTest()
     // v1.27.9 全局开关：register 测试默认全局已开（验证 CCC 级逻辑）；全局关门控有专门用例
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
     // mock setInterval/unref：记录定时器并阻止真实计时
@@ -996,6 +999,7 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     rmSync(tmp, { recursive: true, force: true })
     rmSync(tmp2, { recursive: true, force: true })
     resetWakeHistory()
+    __resetAutopilotClockStateForTest()
     __setSimpleSourceForTest(null)
     vi.restoreAllMocks()
   })
@@ -1047,29 +1051,38 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     expect(timer).not.toBeNull()
   })
 
-  it('启动时无 live 会话（或未配置）→ 不启动定时器（零资源占用）', () => {
+  it('🔴 启动时无 live 会话 → **仍武装**（v1.34 闩锁修复；旧行为=永久不武装）', () => {
     const { ctx } = makeCtx()
     registerAutopilot(ctx as never)
-    expect(timer).toBeNull()
+    expect(timer).not.toBeNull()
+    const st = autopilotClockState()
+    expect(st.armed).toBe(true)
+    expect(st.ticks).toBe(0)
+    expect(st.lastSkipReason).toContain('无 live+enabled CCC') // 跳过原因留痕，不静默
   })
 
-  it('启动时已有启用 CCC live 会话 → 立即启动定时器（v1.26.14 主路径）', () => {
+  it('启动时已有启用 CCC live 会话 → 立即武装并记一次 tick（v1.26.14 主路径）', () => {
     writeCfg(tmp, { enabled: true, session: 'S143' })
     const { ctx, setSessions } = makeCtx()
     setSessions([{ id: 'a', header: { cwd: tmp } }])
     registerAutopilot(ctx as never)
     expect(timer).not.toBeNull()
+    expect(autopilotClockState().ticks).toBe(1)
+    expect(autopilotClockState().lastSkipReason).toBeNull()
   })
 
-  it('启动时无会话 → 会话出现（session/created）后启动定时器（修复核心）', () => {
+  it('武装不再依赖 session/created（该事件只覆盖"新建会话"，不覆盖"恢复旧会话"）', () => {
     writeCfg(tmp, { enabled: true, session: 'S143' })
     const { ctx, emit, setSessions } = makeCtx() // 启动时无 live 会话
     registerAutopilot(ctx as never)
-    expect(timer).toBeNull() // 未启动
-    // 用户打开启用 CCC 会话 → session/created 触发
+    expect(timer).not.toBeNull() // 启动即武装（修复前的"等 session/created"路径已非必需）
+    // 会话出现（新建或恢复）后 tick 自行跟上——不需要任何事件
     setSessions([{ id: 'a', header: { cwd: tmp } }])
-    emit('session/created')
-    expect(timer).not.toBeNull() // 定时器启动
+    const t = timer as unknown as { fn: () => void }
+    t.fn()
+    expect(autopilotClockState().ticks).toBe(1)
+    emit('session/created') // 事件仍在（幂等：已在跑则不动）
+    expect(timer).not.toBeNull()
   })
 
   it('v1.27.10 面板打开全局开关（autopilotEnabled false→true）→ settings-changed 热启动定时器', () => {
@@ -1086,13 +1099,16 @@ describe('registerAutopilot（时钟定时器——v1.26.14 修复：启动时 l
     expect(timer).not.toBeNull() // 热启动
   })
 
-  it('配置关闭（enabled=false）→ 即使会话出现也不启动', () => {
+  it('配置关闭（enabled=false）→ 时钟武装但 tick 跳过（不唤起；原因留痕）', () => {
     writeCfg(tmp, { enabled: false })
-    const { ctx, emit, setSessions } = makeCtx()
+    const { ctx, setSessions } = makeCtx()
     registerAutopilot(ctx as never)
+    expect(timer).not.toBeNull() // v1.34：武装门只看全局闸
     setSessions([{ id: 'a', header: { cwd: tmp } }])
-    emit('session/created')
-    expect(timer).toBeNull()
+    ;(timer as unknown as { fn: () => void }).fn()
+    expect(autopilotClockState().ticks).toBe(0) // 无 enabled CCC ⇒ 不 tick
+    expect(autopilotClockState().lastSkipReason).toContain('无 live+enabled CCC')
+    expect(wakeHistoryFor(tmp)).toHaveLength(0) // 无唤起
   })
 
   it('tick 多 CCC 独立唤起（v1.27.4）：两个启用 CCC 各自评估 + 各自审计（全局串行链）', async () => {

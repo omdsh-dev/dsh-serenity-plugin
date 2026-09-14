@@ -307,6 +307,52 @@ export async function performAutopilotWake(
 }
 
 /**
+ * 全局总开关（v1.27.9，plugin 全局，默认关）：关 = 定时器不武装 + tick 不唤起。
+ * 抽成模块级函数是为了让 {@link autopilotClockState}（诊断）与 tick 读**同一判据**。
+ */
+export function autopilotGloballyEnabled(): boolean {
+  try {
+    return readSimpleSettings().autopilotEnabled === true
+  } catch {
+    return false // settings 服务不可用 → 默认关（保守：未明确开启不自动跑）
+  }
+}
+
+/**
+ * autopilot **进程态**（诊断用，模块级 = 进程级）。
+ * 与 {@link wakeSchedulerState} 同规格：回答"时钟是否武装 / 上次 tick 何时 / 为何跳过"。
+ */
+interface AutopilotClockRuntime {
+  armed: boolean
+  armedAt: number | null
+  lastTickAt: number | null
+  ticks: number
+  lastSkipReason: string | null
+}
+
+const clockRuntime: AutopilotClockRuntime = {
+  armed: false,
+  armedAt: null,
+  lastTickAt: null,
+  ticks: 0,
+  lastSkipReason: null,
+}
+
+/** autopilot 时钟进程态快照（只读） */
+export function autopilotClockState(): AutopilotClockRuntime & { enabled: boolean } {
+  return { enabled: autopilotGloballyEnabled(), ...clockRuntime }
+}
+
+/** 测试用：复位进程态 */
+export function __resetAutopilotClockStateForTest(): void {
+  clockRuntime.armed = false
+  clockRuntime.armedAt = null
+  clockRuntime.lastTickAt = null
+  clockRuntime.ticks = 0
+  clockRuntime.lastSkipReason = null
+}
+
+/**
  * 装配（index.ts apply 调用）。时钟唤起（v1.26.14 修复 + v1.27.4 多 CCC 独立）：
  *
  * v1.26.14 根因：旧实现启动时一次性解析 root——web 进程启动时 live 会话往往为空 → 定时器不启动。
@@ -327,23 +373,23 @@ export function registerAutopilot(ctx: Context): void {
   const runningByRoot = new Map<string, boolean>()
   let wakeChain: Promise<void> = Promise.resolve()
 
-  // 全局总开关（v1.27.9，用户"做全局开关，默认关闭；只在指定电脑进行"）：
-  // settings autopilotEnabled（plugin 全局，默认关）——关 = 定时器不启动 + tick 不唤起
-  // **双重门控**：全局开关 AND CCC 级 enabled（serenity.json）都满足才运行。
-  // CCC 级配置（interval/session/bias/topPrompt）不动——只加一层全局闸。
-  const globalOn = (): boolean => {
-    try {
-      return readSimpleSettings().autopilotEnabled === true
-    } catch {
-      return false // settings 服务不可用 → 默认关（保守：未明确开启不自动跑）
-    }
-  }
+  // 全局总开关（v1.27.9）：判据抽到 {@link autopilotGloballyEnabled}（诊断读同一份）
+  const globalOn = (): boolean => autopilotGloballyEnabled()
 
   const tick = (): void => {
-    if (!globalOn()) return // 全局关 → 本 tick 不唤起（中途关闭即停）
+    if (!globalOn()) {
+      clockRuntime.lastSkipReason = '全局闸关闭（autopilotEnabled=false）'
+      return // 全局关 → 本 tick 不唤起（中途关闭即停）
+    }
     // 遍历所有 live+enabled CCC（v1.27.4：多 CCC 各自独立唤起）
     const roots = collectAutopilotCccs(ctx)
-    if (roots.length === 0) return
+    if (roots.length === 0) {
+      clockRuntime.lastSkipReason = '无 live+enabled CCC（等会话出现 / 配置生效）'
+      return
+    }
+    clockRuntime.lastSkipReason = null
+    clockRuntime.lastTickAt = Date.now()
+    clockRuntime.ticks += 1
     for (const root of roots) {
       if (runningByRoot.get(root)) continue // per-CCC 防重入
       const settings = readAutopilotSettings(root)
@@ -370,11 +416,18 @@ export function registerAutopilot(ctx: Context): void {
 
   const startTimer = (): void => {
     if (timer) return
-    if (!globalOn()) return // 全局关 → 不启动定时器（零资源占用，v1.27.9）
-    if (collectAutopilotCccs(ctx).length === 0) return // 无启用 CCC → 不启动
+    if (!globalOn()) return // 全局关 → 不武装定时器（零资源占用，v1.27.9）
+    // ⚠️ 此处**不得**再判"有无 live CCC"（F 段缺陷修复，2026-09-14，与 wake-scheduler 同因）：
+    //   CCC 根只能从 live 会话反推，而宿主刚重启时 live 会话必为空；且"恢复旧会话"不触发
+    //   `session/created`（只有新建会）⇒ 启动瞬间这次判定的落空 = **时钟永久不武装**
+    //   （v1.26.14 用 session/created 补的那一刀只覆盖"新建"，不覆盖"恢复"）。
+    //   实测：2026-09-14T16:30Z 重启后零 tick 达 6.6h（wake 条目超窗仍是 pending）。
+    //   现改为「全局闸开即武装」，无 enabled CCC 时每 tick 廉价空转（unref 不阻塞退出）。
     timer = setInterval(tick, TICK_MS)
     // unref：进程存活时定时器照常触发；进程退出（插件卸载/服务器停止）不阻塞退出
     timer.unref()
+    clockRuntime.armed = true
+    clockRuntime.armedAt = Date.now()
     console.log(`[serenity-hooks] ✓ Autopilot Trajectory 定时器启动（${collectAutopilotCccs(ctx).length} 个 CCC 启用）`)
     // 启动时立即检查一次（插件重启后恢复节律，无需等首个 5min）
     tick()
@@ -403,6 +456,8 @@ export function registerAutopilot(ctx: Context): void {
       clearInterval(timer)
       timer = null
     }
+    clockRuntime.armed = false
+    clockRuntime.armedAt = null
   })
 }
 
