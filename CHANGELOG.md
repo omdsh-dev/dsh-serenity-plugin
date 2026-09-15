@@ -26,7 +26,13 @@
 ### 门禁与验收
 
 `typecheck` 双面 ✓ ｜ `test` **92 files / 1419 tests** ✓（+1 = 新回归钉）｜ `build` ✓ ｜ `pack-check` ✓（111 文件）。
-**部署后验收**：`dashboard health` 的 `hostContract` 应回到 **`checked 40 / issues []`**（与 v1.34.0 及更早一致），且 `status` 仍为 `healthy`。
+**部署后验收（2026-09-15 20:5x，`deploy` + `restart-web` 后实测）**：
+
+| 判据 | 结果 |
+|---|---|
+| ACC 横幅 | ✅ `dsh-serenity-hooks v1.34.2` |
+| 🔴 **本版核心判据** | ✅ `dashboard health` 的 `hostContract` = **`checked 40` / `issues []`**（v1.34.1 实测为 `checked 36` + 3 条假阴性）⇒ **假阴性已消除，与本版预期判据逐字相符** |
+| `status` | ✅ `healthy`（P1/P2/P3 全过；registry `ok:true issues:[]`） |
 
 ### 已知边界（诚实记录，未修）
 
