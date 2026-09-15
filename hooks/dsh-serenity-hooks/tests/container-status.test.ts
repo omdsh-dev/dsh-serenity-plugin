@@ -5,7 +5,8 @@
  *  ① **组装**：核心段各分组在给定输入下产出预期形状（含"无 CCC"降级形状）；
  *  ② **两条注册表判据相互独立**：同一份 `mech-registry.json` 上，结构完整性判据与质量契约
  *     判据（DC-M1~M4）**可以给出相反结论**——这是本模型的设计红线（不许合并）；
- *  ③ **`probeHostContract` 收敛后只跑一次**：计数桩证明"启动捕获 → 多个消费者读"不再重复探针；
+ *  ③ **宿主契约统一取数口 = 每次现探**：计数桩证明每次消费者调用都真探；并有回归钉证明
+ *     "装载期缺失的 lazy 服务"不会冻结在报告里（v1.34.2 纠正 v1.34.1 的快照设计）；
  *  ④ **时钟字段来自快照而非重算**：改变调度器的进程内模块态 ⇒ 模型输出随之变，且与调度器
  *     自述逐字一致。
  * 另覆盖时间轴分组取数（`containerWakes` / `containerAutopilot`）——它们是 `/serenity/trajectory`
@@ -24,7 +25,7 @@ import {
   containerStatus,
   containerWakes,
 } from '../src/container-status.js'
-import { hostContractReport, probeHostContract, __resetHostContractForTest } from '../src/host/contract.js'
+import { hostContractReport } from '../src/host/contract.js'
 import { runKit } from '../src/kit-ops.js'
 import { ACC_VERSION } from '../src/constants.js'
 import { registerWakeScheduler, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
@@ -50,12 +51,9 @@ beforeEach(() => {
   writeFileSync(join(dir, '.serenity'), 't\n')
   mkdirSync(join(dir, '.git'), { recursive: true })
   write('.opencode/serenity.json', JSON.stringify({ localstore: { gitTrack: 'allow' } }))
-  // 进程内唯一来源是模块级快照 ⇒ 用例之间必须复位（同 __resetWakeSchedulerStateForTest 规格）
-  __resetHostContractForTest()
 })
 
 afterEach(() => {
-  __resetHostContractForTest()
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -71,7 +69,7 @@ describe('container-status: 核心段组装', () => {
     expect(s.identity.ccc).toBe('t')
     expect(s.identity.accVersion).toBe(ACC_VERSION)
     expect(s.identity.nodeVersion).toBe(process.version)
-    // hostCtx 未给且快照为空 → 不猜、不探（null）
+    // hostCtx 未给 → 不猜、不探（null）
     expect(s.hostContract).toBeNull()
 
     // 三原则：模型只给事实，不给人读文案（文案归渲染点——见 kit-ops 的 health 渲染）
@@ -180,44 +178,56 @@ function countingCtx(): { ctx: unknown; reads: () => number } {
   return { ctx, reads: () => reads }
 }
 
-describe('container-status: 宿主契约收敛为进程内唯一来源', () => {
-  it('启动捕获一次 → health / containerStatus 多次读同一份快照（触达 ctx 次数不再增长）', async () => {
+describe('container-status: 宿主契约统一取数口（**每次现探**，v1.34.2 纠正 v1.34.1 的快照设计）', () => {
+  it('health / containerStatus 每次调用都现探——触达 ctx 次数随之增长（不是读缓存）', async () => {
     const { ctx, reads } = countingCtx()
+    expect(reads()).toBe(0)
 
-    // ① apply 时的启动探针 = **唯一计算点**
-    const captured = hostContractReport(ctx, null)
-    expect(captured).not.toBeNull()
-    const afterCapture = reads()
-    expect(afterCapture).toBeGreaterThan(0) // 探针确实跑了（桩是活的）
-
-    // ② dashboard health 两次：不再触发探针
     const h1 = (await runKit(dir, { action: 'health' }, ctx)) as Record<string, unknown>
-    const h2 = (await runKit(dir, { action: 'health' }, ctx)) as Record<string, unknown>
-    expect(reads()).toBe(afterCapture)
+    const after1 = reads()
+    expect(after1).toBeGreaterThan(0) // 确实探了（桩是活的）
     expect(h1.hostContract).toBeDefined()
-    expect(h2.hostContract).toBeDefined()
-    expect(h1.hostContract).toEqual(captured)
 
-    // ③ 模型直接取也用同一份
     const s = containerStatus({ root: dir, hostCtx: ctx })
-    expect(s.hostContract).toEqual(captured)
-    expect(reads()).toBe(afterCapture)
+    const after2 = reads()
+    expect(after2).toBeGreaterThan(after1) // 又一次现探
+    expect(s.hostContract).toEqual(h1.hostContract) // 同一桩同一时刻 ⇒ 结论一致
 
-    // ④ 反向对照：真探针会增长计数（证明 ①②③ 的"不增长"来自快照而非桩失效）
-    probeHostContract(ctx, null)
-    expect(reads()).toBeGreaterThan(afterCapture)
+    const h2 = (await runKit(dir, { action: 'health' }, ctx)) as Record<string, unknown>
+    expect(reads()).toBeGreaterThan(after2)
+    expect(h2.hostContract).toEqual(h1.hostContract)
   })
 
-  it('快照未捕获且未给 ctx → 返回 null（不猜、不暗跑探针）', () => {
+  it('🔴 回归钉：装载期缺失的 lazy 服务，运行态报告必须反映**当前**可用性（不得冻结装载瞬间的观测）', () => {
+    // 桩：`workspaceRegistry` 首次取用返回 undefined（= apply 时尚未实例化），其后可用。
+    // 这正是 v1.34.1 快照设计产生假阴性的现场（实测：快照报它缺失，而 /serenity/cccs 同时可用）。
+    let calls = 0
+    const ctx = {
+      get: (name: string) => {
+        if (name !== 'workspaceRegistry') return undefined
+        calls += 1
+        return calls === 1 ? undefined : { list: () => [] }
+      },
+    }
+
+    const first = hostContractReport(ctx, null)
+    expect(first).not.toBeNull()
+    expect(first!.issues.map((i) => i.id)).toContain('workspaceRegistry') // 装载期：确实看不到
+
+    const second = hostContractReport(ctx, null)
+    expect(second!.issues.map((i) => i.id)).not.toContain('workspaceRegistry') // 运行态：必须反映当前可用
+    expect(second!.checked).toBe(first!.checked + 1) // 该服务的成员这次被核到了
+  })
+
+  it('未给 ctx → 返回 null（不猜、不暗跑探针）', () => {
     const { ctx, reads } = countingCtx()
     expect(hostContractReport()).toBeNull()
     expect(reads()).toBe(0)
-    // 给了 ctx 才捕获
     expect(hostContractReport(ctx, null)).not.toBeNull()
     expect(reads()).toBeGreaterThan(0)
   })
 
-  it('health 未给 hostCtx 且无快照 → 不含 hostContract 字段（wire 形状与旧行为一致）', async () => {
+  it('health 未给 hostCtx → 不含 hostContract 字段（wire 形状与旧行为一致）', async () => {
     const h = (await runKit(dir, { action: 'health' })) as Record<string, unknown>
     expect(h).not.toHaveProperty('hostContract')
   })

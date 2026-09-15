@@ -385,47 +385,32 @@ export function probeHostContract(ctx: unknown, hostVersion: string | null = nul
   return { ok, checked, hostVersion, versionOk: version.ok, issues }
 }
 
-// ── 进程内唯一来源（C5「观察面归一」，S142 2026-09-15）──
+// ── 宿主契约的统一取数口（C5「观察面归一」，S142 2026-09-15；v1.34.2 纠正其缓存设计）──
 
 /**
- * 宿主契约报告的**进程内快照**。
+ * 取宿主契约报告——**每次调用现探**（`ctx` 决定"问谁"，**不缓存"答案"**）。
  *
- * 为什么需要（R↓，C5 唯一实证的重复取数）：`probeHostContract` 此前被算了**两次**——
- * `index.ts` 的启动探针（apply 时一次，用于启动告警）与 `kit-ops.ts` 的 `dashboard health`
- * （每次请求一次）。两者对**同一个已装载的宿主**问同一个问题，第二次计算的答案不可能不同，
- * 成本却是一次全服务/全成员遍历。
+ * 为什么**不缓存**（R↓：一个被实测推翻的设计，留档以免重犯）：
+ * v1.34.1 曾把 `apply()` 时的探针结果存为模块级快照，理由是"两者对**同一个已装载的宿主**
+ * 问同一个问题，第二次计算的答案**不可能不同**，成本却是一次全服务遍历"。
+ * **该前提被实测证伪**（本机 2026-09-15，v1.34.1 部署后）：
+ *  - `apply()` 跑在装载早期，表中 `access:'lazy'` 的服务**尚未实例化**（`ctx.get` 返回 undefined）
+ *    ⇒ 启动探针把它们记为 `not available (lazy)`；
+ *  - 到 `dashboard health` 被调用时它们早已可用 ⇒ **现探给的是相反结论**。
+ *  - 实测差异：快照 = `checked 36 / issues 3`（含 `workspaceRegistry not available` ＋ 后果
+ *    "工作区白名单下拉为空"），而**同一时刻** `GET /serenity/cccs` 正常返回 **4 个工作区**
+ *    （含 3 个无 live 会话的冷 CCC）⇒ 快照渲染出的是**假阴性**。
+ * ⇒ 「两次探针」**不是重复计算，问的是两个时刻**；缓存答案 = 把装载瞬间的观测冒充运行态事实。
  *
- * 收敛策略与时序（**这是本模块唯一的可变状态，语义见下**）：
- *  1. `apply()` 调 `hostContractReport(ctx, readDshVersion())` —— **唯一计算点**，探针在此跑一次；
- *     启动告警仍由返回值渲染（`summarizeHostContract`），语义逐字保留。
- *  2. 其后任何消费者（`dashboard health` / `container-status`）调同一函数 → 命中快照，
- *     **不再**触发探针。
+ * 保留统一入口的收益（这才是 C5 的正确部分）：取数口唯一——`container-status` / `kit-ops`
+ * 只问这一个函数；将来若要"筛掉装载期噪声"，只需改这一处。
  *
- * 为什么这不是"会导致状态陈旧的缓存"：报告描述的是**这次装载的宿主面**（HOST_SERVICES 列出的
- * 都是宿主核心服务/成员，由宿主在插件装载前注册）＋装载时读到的宿主版本——它是**一次性事实**，
- * 不是随运行变化的量。反之，时钟/注册表这类**会变**的量一律不在此缓存（各自由其唯一来源现读）。
- * 代价（诚实记录）：若宿主在 apply 之后才补挂某个 `HOST_SERVICES` 里的服务，`health` 不会察觉。
- * 需要"当场真探"的场合仍可直接调纯函数 {@link probeHostContract}（本函数不删它）。
- */
-let snapshot: HostContractReport | null = null
-
-/**
- * 取宿主契约报告——**进程内唯一来源**。
- *
- * @param ctx 宿主上下文；**仅当快照尚未捕获时**用于跑探针（首见即捕获一次）
+ * @param ctx 宿主上下文；**未给** ⇒ 返回 `null`（不猜、不暗跑探针）
  * @param hostVersion 运行中宿主版本（`readDshVersion()`；null = 未知）
- * @returns 契约报告；快照未捕获且未给 `ctx` → `null`（不猜、不重算）
  */
 export function hostContractReport(ctx?: unknown, hostVersion: string | null = null): HostContractReport | null {
-  if (snapshot !== null) return snapshot
   if (ctx === undefined) return null
-  snapshot = probeHostContract(ctx, hostVersion)
-  return snapshot
-}
-
-/** 测试用：复位进程内快照（避免用例间串味；与 `__resetWakeSchedulerStateForTest` 同规格） */
-export function __resetHostContractForTest(): void {
-  snapshot = null
+  return probeHostContract(ctx, hostVersion)
 }
 
 /** 单行摘要（启动告警用） */

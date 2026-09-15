@@ -135,8 +135,9 @@ export function apply(ctx: Context, config: Config): void {
   // 变成启动可见信号。探针自身永不抛错：宿主对插件 apply 抛错会导致整个 dsh 启动失败
   // （app-boot 的 "plugin(s) failed to load" 语义），探针不能成为新的单点。
   try {
-    // C5（2026-09-15）：这里是宿主契约的**唯一计算点**（探针在此跑一次）——其后
-    // `dashboard health` / `container-status` 读同一份快照，不再二次探针（见 host/contract.ts）。
+    // C5（2026-09-15）：宿主契约走统一取数口 `hostContractReport`——**每次现探，不缓存答案**。
+    // v1.34.2 纠正：装载瞬间 `lazy` 服务尚未实例化，把这次观测缓存下来会让 `dashboard health`
+    // 长期渲染假阴性（实测：快照报 workspaceRegistry 缺失，而 /serenity/cccs 同时正常返回 4 个工作区）。
     const report = hostContractReport(ctx, readDshVersion())
     if (report !== null && report.issues.length > 0) console.warn(`[serenity-hooks] ${summarizeHostContract(report)}`)
   } catch {
