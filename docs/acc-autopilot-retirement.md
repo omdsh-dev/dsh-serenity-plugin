@@ -99,6 +99,51 @@
 
 `wake-scheduler.ts`（逻辑）｜`wake-registry.ts`｜`trajectory-ops.ts`｜`trajectory-bound.ts`｜`ccc-roots.ts`｜`clock-runtime.ts`（除 import）｜`container-status.ts` 的 wake/wakes 半边｜`tools/trajectory.ts`（`container_trajectory`）｜skiff/msm/praxis/handyman/localstore/im-bridge 全家
 
+### 3.4 文档涟漪（**2026-09-15 补记：初版 v1.0 漏记，实读后补全**）
+
+**🔴 纪律（先立规矩）**：`更新说明` / `CHANGELOG.md` / `acc-story.md` 里的**历史条目一律不改写**——它们是可重建资产（§12.16：原文保留以便追溯）。**只改"现行态"段落**（工具表 / 架构 / 决策状态 / 发布现状 / 标准正文）。
+
+#### A. specs 仓（`AI_LAB/serenity-acc-specs`）—— **它是「标准」，退场要带一次版本（v1.6.1 → v1.7.0）**
+
+| 位置 | 改什么 |
+|---|---|
+| `README.md:238` | §4 工具契约：`container_admin` 行的 **autopilot 域删**（该域不再存在） |
+| `README.md:255-257` | §4.1「**两个独立全局闸**」段 ⇒ **只剩 `wakeSchedulerEnabled`**（`autopilotWakeEnabled` 及其旧键回退随机制退场） |
+| `README.md:314` | §4.4 映射表 `container_admin（autopilot 域）` 行删 |
+| `README.md:611` | **toolsBlock 镜像行**（`autopilot (status/init/generate-bias — periodic self-wake)`）删——实现侧同批改，镜像必须**逐字**回同步 |
+| `README.md:688` | token 体系：`[Autopilot Trajectory · 唤起]` **删除**（该唤起头随机制消失；实现侧 `trajectory-assistant.ts` 同批） |
+| `README.md:840/841`（v1.6.x 条） | **不改**（历史） |
+| `experiments/autopilot-trajectory/SKILL.md` | **删**（镜像；源侧同步删） |
+| `docs/self-sustaining-trajectory-hypothesis.md` | 该假设的**实验载体已退场** ⇒ 加一段"结论/现状"说明（**不删文档**：它记录的是实验本身，属认知资产） |
+| `CHANGELOG.md` | 新 §v1.7.0 条（不改历史条） |
+
+#### B. CCC skill（`.opencode/skills/`）
+
+| 位置 | 改什么 |
+|---|---|
+| `dsh-serenity-plugin-development/SKILL.md` §2 架构图（`:62` 时钟引擎两钟共用） | 改"三钟→一钟"（只剩唤醒调度器钟） |
+| 同 §3 Layer 1 工具表（`:83` `container_trajectory` 行内 autopilot 面 / `:84` `acc-diag` 行 ②④ / `:91` `container_admin` 行 autopilot 域） | 逐处删 autopilot 面；`acc-diag` 行改为**二段 + ①b wake**（含 §1 裁定的**缺口说明**） |
+| 同 §3 Layer 3（`:113` 面板「Autopilot Trajectory」区块 / `:132` settings-section 键） | 删区块与键描述 |
+| 同 §3 Layer 5（`:141` `autopilot-trajectory.ts` 行 / `:158` 四模块行 / `:159` `clock-runtime.ts` 行） | 前三者改写/删；`clock-runtime.ts` 行改为"**唯一消费者 = 唤醒调度器**"（并记 §3 存量议题：ClockOptions 收敛候选） |
+| 同 §6 决策表（D39 / D59 / **D61 内提及**） | D59 标 **废止**（指向本 doc）；D39 标**历史**；新增一条 **D63**（autopilot 退场） |
+| 同 §9 发布现状 + 版本主线 | 新增本版行（退场 + 缺口登记 + 验收判据提示） |
+| 同 `更新说明` 历史条（v1.12~v1.39） | **不改** |
+| `home-serenity/SKILL.md` 路由表 | ✅ **已改**（§12.34，指向 `msm autopilot-round`） |
+| `home-serenity/references/acc-ccc-boundary.md:11` | 工具面注释里的 autopilot 面描述同步 |
+
+#### C. 插件仓自身
+
+`README.md`（功能清单/工具清单）｜`package.json` 的 `description`｜`docs/autopilot-trajectory.md`（删或标注退场）｜`docs/self-sustaining-trajectory-hypothesis.md`（若插件仓亦有）｜`experiments/autopilot-trajectory/SKILL.md`（删）
+
+#### D. 代码点补记（初版涟漪地图漏项）
+
+| 文件 | 补记 |
+|---|---|
+| `src/trajectory-assistant.ts` | 承载唤起头 token `[Autopilot Trajectory · 唤起]` ⇒ 随机制删 token（与 specs `README.md:688` 同批） |
+| 其余 | 以 `grep -rn 'autopilot' src/` 的**完整命中清单**为准（初版地图是抽样，非穷举；实施时以 grep 兜底） |
+
+> 🔴 **本节的存在本身就是一条教训**：初版涟漪地图靠"已读过的符号依赖"抽样而成，**漏了 specs 标准面与一个代码点**。⇒ 实施时**必须以 grep 穷举为准**，不得以本 doc 的清单为闭集。
+
 ---
 
 ## 4. 硬约束（违反即退回）
@@ -120,7 +165,7 @@
 | **S2** | 删 4 个 src 模块 + 改 §3.2 全部改点 | `typecheck` 绿；`grep -rn 'autopilot' src/` 仅剩白名单（注释/文档字符串） |
 | **S3** | 删 4 份测试；修受牵连用例（`container-status.test.ts` 等） | `test` **全绿**且**总例数只减不"假绿"**（逐条说明删了哪些例、为何） |
 | **S4** | 面板与端点收口（已在 S2 内联者则本段只做人工核对） | `build` 绿；`pack-check` 文件数**逐项比对**（预期 js chunk 数下降 + d.ts 减少） |
-| **S5** | 文档同批：CCC skill（`dsh-serenity-plugin-development` / `home-serenity` / `acc-ccc-boundary`）+ specs 镜像 + README + `package.json` 描述 + `dsh.plugin.json` | `grep -rn autopilot` 在文档面仅剩"已退场"说明 |
+| **S5** | 文档同批（**规格 = §3.4**）：specs 标准面（带一次版本 v1.6.1→v1.7.0）+ CCC skill §2/§3/§6/§9 现行态 + 插件仓 README/`package.json` 描述 | `grep -rn autopilot` 在文档面仅剩"历史条目 + 已退场说明"；**历史条目零改写**（逐条核对） |
 | **S6** | 门禁四项 + `CHANGELOG` + `version bump` | `typecheck` / `test` / `build` / `pack-check` 全绿；CHANGELOG 记**退场 + 缺口登记** |
 | **S7** | 发布链 + 三推 + `deploy` + `restart-web` | 六道全绿；三 remote 同点 |
 | **S8** | **运行态验收**（D14 后必做） | ACC 横幅版本；`container_admin` **无** `autopilot` 域；`acc-diag` **段数由四降为二（①/③）+①b wake**且不报错；`dashboard health` `hostContract` **checked 数下降但 issues []**；`container_trajectory wake-later` **实调一次成功**（链路基座未伤） |
