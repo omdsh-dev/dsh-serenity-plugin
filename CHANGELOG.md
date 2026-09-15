@@ -1,3 +1,63 @@
+## v1.35.0 — 2026-09-15（ACC 侧 autopilot **整段退场**：轨迹调度只剩 `wake-later` 一条路）
+
+**来源**：所有者裁决（2026-09-15）：CCC 自管理巡航已**端到端验证**（冷会话唤醒 ✅ + 链式自排 ✅），而 ACC 侧那套"周期自唤醒"在**行为层早已停用**（`autopilotWakeEnabled` 缺省关、时钟从未武装、**tick 次数 0**）⇒ 所有者选 **(a) 整段删除**并显式下令发布（D14）。
+**实施基线**：`docs/acc-autopilot-retirement.md`（范围界定 / 二阶裁定 / 寄居者清单 / 涟漪地图 / 硬约束 / S1~S9 分段）。
+
+### 删了什么（src 1503 行 + 测试 1926 行）
+
+| 面 | 内容 |
+|---|---|
+| src | `autopilot-core.ts` / `autopilot-chain.ts` / `autopilot-ops.ts` / `autopilot-trajectory.ts` |
+| 工具面 | `container_admin` 的 **`autopilot` 域**（status / init / generate-bias）⇒ domain enum 收为 `role` / `msm` / `config` |
+| 面板面 | 设置面板「Autopilot Trajectory」区块 + 「周期自唤醒」开关（`autopilotWakeEnabled` 与其旧键 `autopilotEnabled`） |
+| HTTP | `/serenity/trajectory` 端点**整体退场**（含 POST `action:'wake'` 手动立即唤起） |
+| 配置闸 | 全局闸由**两个收为一个**：只剩 `wakeSchedulerEnabled`（缺省**开**） |
+| 测试 | 4 份 autopilot 测试（`autopilot-{core,chain,ops,trajectory}.test.ts`） |
+
+### 活下来了什么（**寄居者先救后删**）
+
+| 符号 | 为什么必须活 | 去向 |
+|---|---|---|
+| `listLiveSessions` / `readSessionTitle` / **精简版** `diagLive` | `acc-diag` ① 段的**独有取数**——"独立进程看不到运行时"正是该工具存在的理由 | 新模块 `src/live-sessions.ts` |
+| `TICK_MS` | 其**唯一**消费者是唤醒调度器，与 autopilot 无关 | 内联进 `clock-runtime.ts` |
+| `containerClocks().wake` / 唤醒注册表全套 | `wake-later` 链路的基座 | **未动** |
+
+### 🔴 `acc-diag` 段数四→三（二阶裁定 + **缺口登记**）
+
+- **删**：原 ② 面板解析（主语 = 已删的 autopilot 面板区块）、原 ④ 唤起条件链（整段都是 ACC autopilot 的唤起条件）、① 段里 autopilot CCC 的渲染。
+- **留**：① live 运行态（原样）/ ①b 唤醒时钟 / ③ 唤醒注册表。
+- **已知缺口（登记，本次不补）**：④「**为什么这轮没唤起**」的诊断在 **CCC 自管理链**上**归零**——新链的失败形态（"漏了自排下一轮" / 调度器闸关 / 未 tick）**无可视化病因查询**。一句话可补，代价 = 一条**新**条件链（调度器 armed / 闸 / tick 在跑 / 条目到期 / 补跑窗口 / 目标可解析 / CCC 闸）。
+
+### 硬约束（本次遵守，留作再犯判据）
+
+1. **`wake-later` 链路一行为不动** —— `wake-scheduler.ts` 的改动 = **纯注释**（且把失效引用改指同文件真实存在的 `acquireWakeAgent`）
+2. **`trajectory.autopilot` 配置段与 `AutopilotTrajectorySettings` 保留**（`src/ccc.ts` 未改）——工作区侧自管理巡航仍在读它
+3. **不留"第二份条件链"**、不留半死的手写版
+4. **不改既有断言** —— 反而**加强**：`container-admin.test.ts` 新增两条"已删域不得复活"回归钉；`register.test.ts` 的拆卸登记断言由 `toContain('autopilot')` 改为 **`not.toContain('autopilot')`**
+
+### 兼容性（**破坏性**，但影响面窄）
+
+- **工具面**：`container_admin` 少一个 domain（传 `autopilot` 会被**明确拒绝**，报错列出合法值）
+- **设置面板**：「周期自唤醒」开关消失；旧装机存过的 `autopilotWakeEnabled` 被 schema 忽略（无副作用）
+- **HTTP**：`/serenity/trajectory` 不再存在（面板区块是它**唯一**消费方，已同批删除）
+- **不受影响**：`container_trajectory` 全部 6 动作（尤其 **`wake-later`**）、唤醒注册表、`wakeSchedulerEnabled` 闸、工作区配置段 `trajectory.autopilot`
+
+### 门禁与验收
+
+`typecheck` 双面 ✓ ｜ `test` **89 files / 1301 tests** ✓（基线 92/1419；−3 文件 = 删 4 + 增 1 镜像测试 `live-sessions.test.ts`）｜ `build` ✓ ｜ `pack-check` **105 文件**（基线 111，**−6 可解释**：d.ts 89→86 = −4 删模块 +1 新增；js chunk 18→15）
+
+**部署后验收（2026-09-15，`deploy` + `restart-web` 后实测）**
+
+| 判据 | 结果 |
+|---|---|
+| ACC 横幅版本 | （待填） |
+| `container_admin` **无** `autopilot` 域 | （待填） |
+| `acc-diag` 段数（四→三）且不报错 | （待填） |
+| `dashboard health` `hostContract` | （待填——判据是 **`issues: []`**，`checked` 数**下降是预期**） |
+| 🔴 `container_trajectory wake-later` **实调一次**（基座未被误伤） | （待填） |
+
+---
+
 ## v1.34.2 — 2026-09-15（🔧 修 v1.34.1 引入的 `hostContract` 假阴性：**装载时快照 → 每次现探**）
 
 **来源**：v1.34.1 发布后的**运行态验收**抓到（发布纪律 D14：所有者「开始！要发布」⇒ 发布 ⇒ 验收发现 ⇒ 所有者「今晚就发 v1.34.2」）。

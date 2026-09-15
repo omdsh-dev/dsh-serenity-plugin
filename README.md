@@ -77,11 +77,11 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `praxis` | 按需给 AI 注入三套"做事方法"：输出自检（eap）、设计对齐（neat）、认知连续性（cce） | 要它把话说清楚 / 先对齐再动手时 |
 | `handyman` | 杂工：派一个便宜模型的助手干活。**默认模式（foreground）**= 一次串行委派、拿回结果；**background 模式**= 循环干活直到完成（完成码校验 / 轮次上限 / 自动重启 / 进度文件），也可一次派多个并行 | 大批量、重复性的活（扫描几十个技能、逐用例回归） |
 | `localstore` | 存密钥和配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
-| `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置，以及**定时自动巡航**（autopilot：状态 / 初始化 / 生成先验偏见） | 定义"子角色"、注册新小工具、开自动巡航时 |
+| `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具、改配置时 |
 | `im-bridge` | 给 IM 联系人发消息（目前是微信）：发文本、发文件、查已配置联系人、查通道状态。每次成功发送自动进工作区的消息记录 | 想让 AI 主动给家人/同事发消息（见 §6.6）。**只在工作区配了微信桥时才出现**，且只能发本工作区的消息 |
-| `acc-diag` | ACC 运行态诊断：一次调用出全报告——当前有多少会话活着、各自属于哪个工作区、自动巡航的到点判断与 agent 定位、唤醒登记表的每一条、以及"这一轮为什么没被唤起"的条件链 | **ACC 维护者专用**。**默认对所有工作区隐藏**，只有在工作区配置里点名（`exclusiveTools`）才出现 |
+| `acc-diag` | ACC 运行态诊断：一次调用出全报告——当前有多少会话活着、各自属于哪个工作区、唤醒时钟的武装态与 tick 次数、唤醒登记表的每一条（含状态 / 投递结果 / 补跑窗口） | **ACC 维护者专用**。**默认对所有工作区隐藏**，只有在工作区配置里点名（`exclusiveTools`）才出现 |
 
-> **改过名**（旧名已彻底停用，没有兼容别名）：下面每组的箭头链是**逐个发布版本**的名字，**末项才是今名**——`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook`（v1.30/1.31）→ `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名） · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名；其自动巡航面现归 `container_admin`）。老会话里看到旧名，**一律取所在那一组的末项**。
+> **改过名**（旧名已彻底停用，没有兼容别名）：下面每组的箭头链是**逐个发布版本**的名字，**末项才是今名**——`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook`（v1.30/1.31）→ `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名） · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名）。老会话里看到旧名，**一律取所在那一组的末项**。
 
 ### 3.2 机械约束（AI 绕不过去）
 
@@ -264,19 +264,17 @@ DSH 一个进程可以同时带多个工作区，每个工作区各自对接自�
 - **只给答案**：响应里只有 answer / answer_html / sessionId——内部轨迹、工具结果、机制信息都不出去
 - 默认只监听 127.0.0.1；要给别人用，怎么暴露（隧道/反代/端口映射）由你决定
 
-### 6.5 轨迹与自主巡航（trajectory）
+### 6.5 轨迹与定时唤醒（trajectory）
 
-`trajectory`（轨迹）是一等概念：一个工作区里可以有任意多条轨迹并行；**autopilot（自主巡航）是它的一个子集**——"周期自唤醒"的特例（开关与控制归 `container_admin autopilot`）。
+`trajectory`（轨迹）是一等概念：一个工作区里可以有任意多条轨迹并行。
 
-**自主巡航**：让工作区**到点自己醒过来干活**，全程在你眼前发生（前台注入，随时可介入）：
+**定时唤醒**：用 `container_trajectory wake-later` 登记一条"唤醒" = 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，**不阻塞、不等待、也不回执**。
 
-- **什么时候醒**：工作区开关打开 + 全局开关打开（默认关，只在你想跑的机器上开）+ 目标会话存在（目录带 `--auto` 后缀）+ 到了间隔（支持小数，最密约 36 秒）+ 不在避开的高峰窗口（默认北京时间 8~18 点）+ 偏见脚本就绪
-- **醒了先看什么**：先看你自己写的"焦点"（`topPrompt`，每轮最先注入，防跑偏），再看随机生成的"偏见内容"（你写的脚本，负责探索方向）
-- **多个工作区各自独立**：每个工作区自己的间隔/会话/焦点/窗口，互不干扰
-- **有审计**：每次唤醒都记一笔，面板里能看到最近几次；失败会指数退避重试
-- **还能预约未来某一刻**：用 `container_trajectory wake-later` 登记一条"唤醒"= 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，不阻塞、不等待、也不回执
+- **目标没打开也能唤醒**：会话不在内存里时先把它载入再投递（**冷唤醒**）；载入不了则条目留在登记表里并记下原因，**不静默丢弃**
+- **"周期"归工作区自己**：要一轮接一轮，就由**收到唤醒的那条轨迹**在每轮结束时再排一次下一轮——ACC 只提供"到点投递一条消息"这个原语，不替工作区决定节拍（焦点、节拍、偏见都由工作区自定；任意条轨迹并行、互不干扰）
 - **轨迹可以自带 skill**：在它的 `SESSION.md` 顶部 frontmatter 写 `skills: [名字, …]`，这条轨迹**被绑定期间**的每个请求都会注入这些 skill 的全文（适合把某个领域的做事方法直接挂在轨迹上）；skill 名来自工作区数据，**先过安全校验才会用于拼路径**，找不到会在提示里明说"缺失"而**不静默跳过**
-- 没有"每天最多唤醒几次"的限制——频率只由间隔和窗口决定
+
+> ⚠️ **历史（v1.35.0 起已退场）**：ACC 曾自带一套"**周期自唤醒 autopilot**"——插件内时钟 + 工作区配置里的 `topPrompt`/偏见脚本 + 面板「周期自唤醒」开关 + `container_admin autopilot` 三动作（status/init/generate-bias）。**v1.35.0 起整段删除**。理由：它相对 `wake-later` 只多两样——"周期节拍"与"提示词注入"，而这两样**工作区自己就能做**（见上）；且 `wake-later` 反而更强（**支持冷会话唤醒**，而 autopilot 要求目标会话已在内存里）。老会话 / 老文档里看到 `container_admin autopilot`、`autopilot-trajectory`、`--auto` 目录后缀、`[Autopilot Trajectory · 唤起]` 等字样，**均按本条理解**：那是已删除的机制。
 
 ### 6.6 安全模型
 
