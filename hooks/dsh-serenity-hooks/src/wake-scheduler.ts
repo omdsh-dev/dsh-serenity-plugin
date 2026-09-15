@@ -28,8 +28,8 @@ import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { findSession, sessionsRoot } from './session-ops.js'
-import { listBoundSessionIds } from './session-bound.js'
+import { findSession, sessionsRoot } from './trajectory-ops.js'
+import { listBoundSessionIds } from './trajectory-bound.js'
 import { hostAgents, hostService } from './host/access.js'
 import { registerDisposer } from './host/effect.js'
 import { readSimpleSettings } from './settings-section.js'
@@ -174,7 +174,7 @@ export async function acquireWakeAgent(
       return { error: `冷会话载入失败（${id}）: ${String((err as Error)?.message ?? err)}` }
     }
   }
-  return { error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 trajectory use 激活过` }
+  return { error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 container_trajectory use 激活过` }
 }
 
 /** 唤醒消息（唤起即投递正文：身份锚定 + 唤醒信息 + 任务） */

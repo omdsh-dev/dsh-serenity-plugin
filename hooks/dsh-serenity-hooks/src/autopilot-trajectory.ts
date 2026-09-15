@@ -34,8 +34,8 @@ import { spawnSync } from 'node:child_process'
 import { basename, dirname, join } from 'node:path'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutopilotTrajectorySettings } from './ccc.js'
-import { findSession, sessionsRoot, sessionEvents } from './session-ops.js'
-import { readLastBound } from './session-bound.js'
+import { findSession, sessionsRoot, sessionEvents } from './trajectory-ops.js'
+import { readLastBound } from './trajectory-bound.js'
 import { readSimpleSettings } from './settings-section.js'
 import { hostAgents, hostSessions } from './host/access.js'
 import { registerDisposer } from './host/effect.js'
@@ -309,7 +309,7 @@ export async function performAutopilotWake(
 /**
  * **周期自唤醒全局闸**（v1.34 更名收窄，原 `autopilotEnabled`）：关 = 定时器不武装 + tick 不唤起。
  *
- * 语义边界（用户 2026-09-15 裁决 S-1）：**只管周期自唤醒** —— 一次性唤醒（`trajectory wake-later`）
+ * 语义边界（用户 2026-09-15 裁决 S-1）：**只管周期自唤醒** —— 一次性唤醒（`container_trajectory wake-later`）
  * 归 `wakeSchedulerEnabled`，两者**互不连带**（旧实现共用一闸是缺陷，见 wake-scheduler 注释）。
  *
  * 读取顺序（迁移期，不回写）：`autopilotWakeEnabled`（新键）→ `autopilotEnabled`（旧键）→ false。

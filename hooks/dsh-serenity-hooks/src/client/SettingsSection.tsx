@@ -281,7 +281,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="超限重建"
-            desc="上下文接近上限时提示调用 trajectory rebuild 清空重建"
+            desc="上下文接近上限时提示调用 container_trajectory rebuild 清空重建"
             expandable
             open={openRebuild}
             onToggle={setOpenRebuild}
@@ -289,7 +289,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             control={<Toggle checked={rebuildOn} onChange={(on) => toggle('rebuildEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'上下文超限自动重建（trajectory rebuild，v1.33 起 logbook 并入 trajectory）：\n' +
+                <p className="ss-detailIntro">{'上下文超限自动重建（container_trajectory rebuild，v1.33 起 logbook 并入 trajectory）：\n' +
                   '· 机制：agent 上下文占用达到阈值时，由 LLM 主动调用重建\n' +
                   '· 语义：完全丢弃当前 dsh 会话 + 自动新建 + 注入「继续原 SESSION 的工作」\n' +
                   '· 效果：SESSION.md 原位不动，认知轨迹延续，上下文归零\n' +
@@ -446,7 +446,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
               <div className="ss-detailStack">
                 <p className="ss-detailIntro">{'唤醒调度器全局闸（v1.34 新增独立开关）：\n' +
                   '· 作用：把 CCC 唤醒注册表（AGENT_SESSIONS/wake-registry.json）里到点的条目投递给目标轨迹\n' +
-                  '· 条目来源：`trajectory wake-later`（对自己或别的 trajectory 预约未来时刻 + 一条 message）\n' +
+                  '· 条目来源：`container_trajectory wake-later`（对自己或别的 trajectory 预约未来时刻 + 一条 message）\n' +
                   '· 默认开：条目全部由人类/agent 显式登记，无环境自主性 ⇒ 不需要“默认关”的实验保护\n' +
                   '· 与上一行**互不连带**：关掉周期自唤醒不会关掉本调度器（用户 2026-09-15 裁决）\n' +
                   '· 精度：5min tick；补跑窗口 2h（超窗判 missed 留痕）；fire-and-forget 无回执'}
@@ -813,7 +813,7 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
               {
                 term: '唤醒注册表',
                 value: wakes.length === 0
-                  ? '无条目（agent 用 trajectory wake-later 登记：未来时刻 + 一条 message）'
+                  ? '无条目（agent 用 container_trajectory wake-later 登记：未来时刻 + 一条 message）'
                   : `${wakes.filter((w) => w.state === 'pending').length} 条在办 / 共 ${wakes.length} 条`,
               },
               ...wakes.slice(0, 5).map((w) => ({

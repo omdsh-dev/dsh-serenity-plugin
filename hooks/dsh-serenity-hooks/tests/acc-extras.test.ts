@@ -65,7 +65,7 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     }
     // 各详细入口指引（目录指向 guide，不复制全文）
     expect(r.catalog).toContain('container_admin')
-    expect(r.catalog).toContain('trajectory')
+    expect(r.catalog).toContain('container_trajectory')
     expect(r.catalog).toContain('msm("<name>"')
     expect(r.catalog).toContain('weixin-doctor')
     expect(r.catalog).toContain('handyman')

@@ -56,6 +56,6 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
  * 本常量与清单都列它（与 im-bridge 同规格）。
  */
 export const REGISTERED_TOOLS = [
-  'container_fs', 'trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
+  'container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
   'localstore', 'container_admin', 'im-bridge', 'acc-diag',
 ] as const

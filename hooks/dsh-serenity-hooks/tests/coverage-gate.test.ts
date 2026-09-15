@@ -42,7 +42,7 @@ const INDIRECT_COVERED = new Set([
   'msm.ts',
   'handyman.ts',
   'localstore.ts',
-  'session.ts',
+  'trajectory.ts',
   'autopilot-trajectory.ts',
   'cce.ts',
   'eap.ts',

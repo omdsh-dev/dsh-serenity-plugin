@@ -115,7 +115,7 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 
 ## 7. 工具面与配置
 
-**工具**：`trajectory`（原名 `autopilot-trajectory`，**硬切无别名**）
+**工具**：`container_trajectory`（v1.32 名 `autopilot-trajectory` → `trajectory`；v1.34 硬切为今名，**无别名**）
 
 | 动作 | 语义 |
 |---|---|

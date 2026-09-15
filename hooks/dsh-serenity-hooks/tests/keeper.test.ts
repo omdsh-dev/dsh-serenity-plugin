@@ -32,7 +32,7 @@ import {
   rebuildReminderText,
   readContextPressure,
   registerKeeper,
-  logbookCompactionReminderText,
+  trajectoryCompactionReminderText,
   readSessionMdMaxKB,
   readFileSize,
   resolveActiveSessionMdPath,
@@ -42,7 +42,7 @@ import {
   DEFAULT_SESSION_MD_MAX_KB,
 } from '../src/seams/keeper.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-core.js'
-import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/session-ops.js'
+import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/trajectory-ops.js'
 
 describe('keeper: 纯跟踪器', () => {
   it('计分表：write=3, task=10, read=1', () => {
@@ -93,14 +93,14 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('persistent body')
     expect(text).toContain('rebuildable carrier')
     expect(text).toContain('ACT NOW')
-    expect(text).toContain('trajectory rebuild')
+    expect(text).toContain('container_trajectory rebuild')
     expect(text).toContain('not an option')
     // v1.24.12 沉淀协议：rebuild 前修订现有 skill（eap 结构化）；新建 skill 写 SESSION 提案不自行创建
     expect(text).toContain('revise the relevant existing skill of this CCC')
     expect(text).toContain('write a short proposal into SESSION.md')
     expect(text).toContain('do not create it yourself')
     // v1.28.0 需求②（P0-1 审计补断言）：文案必须指导带 --summary（重建后标题重命名）——
-    // 若删指引，模型裸调 trajectory rebuild 会被 summary 必填拒绝（2026-09-05 rebuild bug 教训）
+    // 若删指引，模型裸调 container_trajectory rebuild 会被 summary 必填拒绝（2026-09-05 rebuild bug 教训）
     expect(text).toContain('--summary')
     expect(text).toContain('≤20 chars')
     expect(text).toContain('renamed to S###-YYYY-MM-DD-<summary>')
@@ -119,8 +119,8 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('threshold 400K')
     expect(text).toContain('mandatory')
     expect(text).toContain('STOP')
-    expect(text).toContain('trajectory rebuild')
-    expect(text).toContain('persists until you call trajectory rebuild')
+    expect(text).toContain('container_trajectory rebuild')
+    expect(text).toContain('persists until you call container_trajectory rebuild')
     // v1.24.12：升级版同样带紧凑沉淀指令（修订 skill / 新建 skill 提案进 SESSION）
     expect(text).toContain('preserve valuable cognition')
     expect(text).toContain('new-skill proposal into SESSION.md')
@@ -272,7 +272,7 @@ describe('keeper: LOGBOOK COMPACTION 纯逻辑', () => {
   afterEach(() => { __resetLogbookCompactionForTest() })
 
   it('提醒文案：非升级版含行动指令 + 4 条原则；升级版含 mandatory/STOP', () => {
-    const base = logbookCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md' })
+    const base = trajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md' })
     expect(base).toContain('[TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION]')
     expect(base).toContain('285 KB')
     expect(base).toContain('limit 100 KB')
@@ -280,7 +280,7 @@ describe('keeper: LOGBOOK COMPACTION 纯逻辑', () => {
     expect(base).toContain('Pause the current work')
     expect(base).toContain('H_op')
     expect(base).toContain('resume the paused work')
-    const esc = logbookCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md', escalated: true })
+    const esc = trajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md', escalated: true })
     expect(esc).toContain('mandatory')
     expect(esc).toContain('STOP')
     expect(esc).toContain('persists until the file is under the limit')

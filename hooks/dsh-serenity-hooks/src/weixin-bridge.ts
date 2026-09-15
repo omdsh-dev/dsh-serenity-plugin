@@ -24,7 +24,7 @@ import { readSkiffRoles } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './weixin-output-guard.js'
-import { getActiveSessionInfo } from './session-ops.js'
+import { getActiveSessionInfo } from './trajectory-ops.js'
 import { hostSessions } from './host/access.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
 

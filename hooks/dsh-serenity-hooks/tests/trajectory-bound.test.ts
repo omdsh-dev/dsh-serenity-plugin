@@ -1,5 +1,5 @@
 /**
- * session-bound.test.ts — SESSION 绑定持久化模块
+ * trajectory-bound.test.ts — SESSION 绑定持久化模块
  *
  * v1.30.6（S142 review F-01）：绑定从「dsh 会话日志事件」迁移为「CCC 内
  * `AGENT_SESSIONS/.bindings.json` 文件」——宿主读路径拒绝未知且非 ignorable 的
@@ -11,8 +11,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, resolveSessionTrajectoryLabel } from '../src/session-bound.js'
-import { resetActiveSessionStore, setActiveSessionInfo } from '../src/session-ops.js'
+import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, resolveSessionTrajectoryLabel } from '../src/trajectory-bound.js'
+import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory-ops.js'
 
 let ccc: string
 
@@ -32,7 +32,7 @@ function makeSession(id = 'sess-1', events: unknown[] = [], cwd = ccc) {
   return { header: { id, cwd }, snapshotEvents: () => events }
 }
 
-describe('session-bound: appendBound（文件持久化）', () => {
+describe('trajectory-bound: appendBound（文件持久化）', () => {
   it('写入 AGENT_SESSIONS/.bindings.json（含 dirName/mdPath/sessionId/action/at）', () => {
     const s = makeSession()
     const ok = appendBound(s, 'activate', {
@@ -81,7 +81,7 @@ describe('session-bound: appendBound（文件持久化）', () => {
   })
 })
 
-describe('session-bound: readLastBound / hasAnyBound', () => {
+describe('trajectory-bound: readLastBound / hasAnyBound', () => {
   it('无记录 → null', () => {
     expect(readLastBound(makeSession())).toBeNull()
     expect(hasAnyBound(makeSession())).toBe(false)
@@ -110,7 +110,7 @@ describe('session-bound: readLastBound / hasAnyBound', () => {
   })
 })
 
-describe('session-bound: 旧事件形态回落（v1.29.1~v1.30.5 存量绑定）', () => {
+describe('trajectory-bound: 旧事件形态回落（v1.29.1~v1.30.5 存量绑定）', () => {
   it('文件中无记录 → 回落扫描会话日志中的 serenity/bound（最后一条胜出）', () => {
     const events = [
       { type: 'user/message', data: { content: [] } },
@@ -132,7 +132,7 @@ describe('session-bound: 旧事件形态回落（v1.29.1~v1.30.5 存量绑定）
   })
 })
 
-describe('session-bound: 编码无关（U4）', () => {
+describe('trajectory-bound: 编码无关（U4）', () => {
   it('issue 会话（无 S 前缀）同样可绑定——dirName 是唯一硬锚', () => {
     const s = makeSession()
     const ok = appendBound(s, 'activate', {
@@ -162,7 +162,7 @@ describe('session-bound: 编码无关（U4）', () => {
   })
 })
 
-describe('session-bound: resolveSessionTrajectoryLabel（createdBy 审计归属）', () => {
+describe('trajectory-bound: resolveSessionTrajectoryLabel（createdBy 审计归属）', () => {
   /**
    * 回归（S142 §30.12.1 实测缺陷）：唤醒注册表的 createdBy 曾直接取**全局** lastActive 指针，
    * 而它记录的是"进程内最近一次被激活的 trajectory"——多会话并发时张冠李戴

@@ -1,7 +1,7 @@
 # Autopilot（自动巡航）— CCC 参与定义说明
 
 > **版本**：v1.27.4 正式版（前身 autopilotTrajectory 实验 v1.26.12~17；**默认关闭**；未配置 = 零资源占用）
-> **定位（D58）**：**autopilot 是 trajectory 的一个子集**——"周期自唤醒"的特例；工具面为 `trajectory`（原名 `autopilot-trajectory`，硬切无别名）。
+> **定位（D58）**：**autopilot 是 trajectory 的一个子集**——"周期自唤醒"的特例；工具面为 **`container_trajectory`**（v1.32 名 `trajectory`，v1.32 之前名 `autopilot-trajectory`，硬切无别名），周期自唤醒的面在 **`container_admin autopilot`**。
 > **依据**：serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`（v0.1 猜想，S142 2026-08-30 用户提出）
 > **机制实现**：`src/autopilot-trajectory.ts`（本插件，dsh-serenity-hooks）
 > **阅读对象**：任何希望参与本机制的 CCC（认知容器）——本文档让 CCC 完整理解其**方式、目的与背景**。

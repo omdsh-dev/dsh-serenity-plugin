@@ -24,7 +24,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { findSerenityRoot } from '../ccc.js'
-import { sessionEvents } from '../session-ops.js'
+import { sessionEvents } from '../trajectory-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
 export interface BootstrapSettings {

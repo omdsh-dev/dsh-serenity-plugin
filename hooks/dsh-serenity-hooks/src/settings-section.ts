@@ -62,7 +62,7 @@ export interface SerenitySimpleSettings {
   /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
   publicAskEnabled: boolean
   /** **周期自唤醒（autopilot）全局闸** —— v1.34 更名收窄（原 `autopilotEnabled`）。
-   *  **只管周期自唤醒**：关掉它**不**影响一次性唤醒 `trajectory wake-later`（后者归 {@link wakeSchedulerEnabled}）。
+   *  **只管周期自唤醒**：关掉它**不**影响一次性唤醒 `container_trajectory wake-later`（后者归 {@link wakeSchedulerEnabled}）。
    *  缺省关（多台电脑装 dsp 时只在指定电脑跑周期自唤醒）。
    *  可选类型是为了**迁移语义精确**：老装机里存的旧键 `autopilotEnabled` 仍应生效，而"新键显式 false"必须能覆盖它。 */
   autopilotWakeEnabled?: boolean

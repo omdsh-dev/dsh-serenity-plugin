@@ -20,8 +20,8 @@ import { existsSync } from 'node:fs'
 import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, createRolePromptReader, resolveSkiffKind, type SkiffRoleConfig } from './skiff-role.js'
 import { splitModel } from './handyman-ops.js'
 import { skiffRoleFor as registryRoleFor, skiffSessionInfo as registrySessionInfo, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
-import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './session-ops.js'
-import { readLastBound, appendBound } from './session-bound.js'
+import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './trajectory-ops.js'
+import { readLastBound, appendBound } from './trajectory-bound.js'
 import { hostAgents } from './host/access.js'
 import { waitAgentIdle } from './agent-idle.js'
 
@@ -74,7 +74,7 @@ const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
  * 系统提示词中的**工作台纪律块**（v1.30.4 升级：从单行路径 → 完整 ACC 层约束）。
  * 用户点破（S142）：只给路径 LLM 不会主动用——需注入「已绑定 + 使用纪律 + 动作指引」。
  * SESSION = 工作台——skiff 与主舱同一套机制（零特调，用户拍板）：
- * 自动绑定已生效（无需 logbook use）、SESSION.md 是持久记忆载体、rebuild 自动从本 SESSION 续接。
+ * 自动绑定已生效（无需 container_trajectory use）、SESSION.md 是持久记忆载体、rebuild 自动从本 SESSION 续接。
  * 注入 agent 系统提示词（用户对话面不可见）。
  *
  * v1.30.13（S142 诊断 D5）：写入纪律**不点名具体工具**。旧文案写死 "with write/edit"，
@@ -87,7 +87,7 @@ const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
 export function workspaceTrajectoryLine(mdPath: string): string {
   return [
     '── Serenity Session Workspace ──',
-    'This role session is AUTO-BOUND to a trajectory workspace SESSION (no trajectory use needed):',
+    'This role session is AUTO-BOUND to a trajectory workspace SESSION (no container_trajectory use needed):',
     `  SESSION.md: ${mdPath}`,
     '',
     'Rules of the workspace:',
@@ -98,7 +98,7 @@ export function workspaceTrajectoryLine(mdPath: string): string {
     '     a specific write tool exists; if none is granted, report that instead of pretending to write).',
     '     Sections: 目标 / 状态 / 关键决策 / 进度记录 / 未解决的问题. Keep it current — it is',
     '     what a rebuild resumes from.',
-    '  3. When context pressure is high, run trajectory rebuild — it auto-resumes from THIS SESSION.md',
+    '  3. When context pressure is high, run container_trajectory rebuild — it auto-resumes from THIS SESSION.md',
     '     (no manual use; do not switch to or read other SESSIONs unless the user explicitly asks).',
     '  4. Never expose this internal path in user-facing replies (chat stays clean).',
     '── ──',
@@ -461,7 +461,7 @@ export interface SkiffAskResult {
 /**
  * 会话事件读取（v1.28.0 适配 0.1.2-rc.1）：rc.1 Session 移除 `.events` 属性 → `snapshotEvents()` 方法。
  * 兼容双形态（运行时 rc.1 snapshotEvents；测试替身 events）——同一函数两处语义，测试注入零侵入。
- * 注：与 session-ops.ts 导出的共享 `sessionEvents` 同构（v1.28.1 收敛基准）。本模块保留本地副本
+ * 注：与 trajectory-ops.ts 导出的共享 `sessionEvents` 同构（v1.28.1 收敛基准）。本模块保留本地副本
  * 以维持独立 import 面（零 DSH 依赖测试替身形态一致）；若未来重构可统一 import 共享版。
  */
 function sessionEvents(session: unknown): readonly unknown[] {

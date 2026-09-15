@@ -22,8 +22,8 @@ import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility } from './guards.js'
-import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../session-ops.js'
-import { readLastBound, appendBound } from '../session-bound.js'
+import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory-ops.js'
+import { readLastBound, appendBound } from '../trajectory-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
 // ── 纯文本构建（可单测）──

@@ -1,7 +1,8 @@
 /**
- * session.ts — `trajectory` 真实 DSH 工具定义（defineTool）
+ * trajectory.ts — `container_trajectory` 真实 DSH 工具定义（defineTool）
  *
- * v1.33（S142 §32 用户裁决）：由 `logbook` **更名并收敛为 `trajectory`**——trajectory 是一等概念
+ * v1.33（S142 §32 用户裁决）：由 `logbook` **更名并收敛为 `trajectory`**（v1.34：工具名再硬切为
+ * `container_trajectory`，无别名）——trajectory 是一等概念
  * （SESSION.md 是它的持久身体），本工具管它的**载体生命周期 + 一次性时间安排**。
  * 动作收敛为 **6 个**：list / show / create / use / rebuild / wake-later。
  *
@@ -29,7 +30,7 @@ import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { loadMsmEntries, runMsmAsync, type MsmEntry } from '../msm-ops.js'
-import { appendBound, readLastBound, resolveSessionTrajectoryLabel } from '../session-bound.js'
+import { appendBound, readLastBound, resolveSessionTrajectoryLabel } from '../trajectory-bound.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
 import {
   listSessions,
@@ -43,7 +44,7 @@ import {
   summarize,
   type ActiveSessionInfo,
   type CreateSessionResult,
-} from '../session-ops.js'
+} from '../trajectory-ops.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
   return exec.agent?.session?.header?.cwd ?? process.cwd()
@@ -246,7 +247,7 @@ function discoverCccSubcommands(entries: MsmEntry[]): string[] {
 /** 生成扩展提示（对齐 osp buildExtHint） */
 function buildExtHint(hasSessionTool: boolean, hooks: string[], subcommands: string[]): string {
   if (!hasSessionTool) {
-    return '\n\n[CCC] To extend trajectory-tool capabilities, register a session-tool MSM (container_admin msm register); the extension protocol (SEP) is documented in container_admin msm guide'
+    return '\n\n[CCC] To extend container_trajectory tool capabilities, register a session-tool MSM (container_admin msm register); the extension protocol (SEP) is documented in container_admin msm guide'
   }
   const parts: string[] = []
   if (hooks.length > 0) parts.push(`hooks: ${hooks.join(', ')}`)
@@ -323,7 +324,7 @@ export function buildSepGuide(hasSessionTool: boolean): string {
     '',
     '── More information ──',
     '',
-    'Reference ACC source: src/tools/session.ts (hook invocation logic)',
+    'Reference ACC source: src/tools/trajectory.ts (hook invocation logic)',
   ].join('\n')
 }
 
@@ -333,7 +334,7 @@ export function buildSepGuide(hasSessionTool: boolean): string {
  */
 export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
-  name: 'trajectory',
+  name: 'container_trajectory',
   description:
     'Trajectory (AGENT_SESSIONS/ — the persistent body of a trajectory; the dsh conversation is only its rebuildable carrier). ' +
     'Lifecycle + one-shot scheduling: list (inventory with stats and anomaly marks) / show (read one SESSION.md) / create / use (activate for this conversation, with inline integrity check) / rebuild (clear-and-rebuild the current conversation in place, Ship of Theseus) / wake-later (schedule ONE message to any trajectory at a future instant — fire-and-forget: no receipt, no recall, no panel). ' +

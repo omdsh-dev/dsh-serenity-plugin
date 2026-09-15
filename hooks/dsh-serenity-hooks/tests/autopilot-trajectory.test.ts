@@ -45,7 +45,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   installSettingsSection: () => {},
   settingsNamespace: (v: string) => v,
 }))
-vi.mock('../src/session-ops.js', () => ({
+vi.mock('../src/trajectory-ops.js', () => ({
   sessionsRoot: (root: string) => join(root, 'AGENT_SESSIONS'),
   findSession: vi.fn(),
   findLatestActiveSessionMd: vi.fn(),
@@ -57,7 +57,7 @@ vi.mock('../src/session-ops.js', () => ({
   },
 }))
 
-import { findSession, findLatestActiveSessionMd } from '../src/session-ops.js'
+import { findSession, findLatestActiveSessionMd } from '../src/trajectory-ops.js'
 import { findExpScript } from '../src/autopilot-script.js'
 import {
   DEFAULT_BIAS_PROVIDER,

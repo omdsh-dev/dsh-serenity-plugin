@@ -231,7 +231,7 @@ describe('deliverWake（live 优先 → 冷唤醒正门）', () => {
     expect(sent[0]).toContain('继续 §30 实现')
   })
 
-  it('无绑定记录 → 报错说明需先 trajectory use（目标轨迹无载体）', async () => {
+  it('无绑定记录 → 报错说明需先 container_trajectory use（目标轨迹无载体）', async () => {
     writeSessionDir()
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
     const res = await deliverWake(ctx as never, root, makeEntry())

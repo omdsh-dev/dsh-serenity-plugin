@@ -20,8 +20,8 @@ import { hostService } from '../host/access.js'
 import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
 import { readSimpleSettings } from '../settings-section.js'
 import { skiffTrajectoryEnabled } from '../skiff-core.js'
-import { getActiveSessionInfo } from '../session-ops.js'
-import { readLastBound } from '../session-bound.js'
+import { getActiveSessionInfo } from '../trajectory-ops.js'
+import { readLastBound } from '../trajectory-bound.js'
 import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, IN_FLIGHT_HEADING } from '../trajectory-assistant.js'
 
 // ── 纯跟踪器（可单测）──
@@ -94,7 +94,7 @@ export function reminderText(code: string, score: number): string {
  * 简短留自由度（不提"加载 eap 工具"，模型自知；只说修订 skill + 新建 skill 落 SESSION）。
  *
  * escalated=true（v1.23.3）：连续多轮超阈值仍未 rebuild → 升级强制语气
- * （STOP and rebuild now，持续注入直到调用 logbook rebuild）。
+ * （STOP and rebuild now，持续注入直到调用 container_trajectory rebuild）。
  *
  * 需求①（S142 用户拍板）：百分比比例 → K 数值——tokensK = 实际占用（千 token），
  * thresholdK = 配置阈值（千 token）；文案 `Context usage at NNNK (threshold NNNK)`。
@@ -110,9 +110,9 @@ export function rebuildReminderText(tokensK: number, thresholdK: number, escalat
     + `what is not finished yet, and what the next action is) at the very end of SESSION.md under the heading `
     + `"${IN_FLIGHT_HEADING}" — the rebuilt conversation reads that section first and continues from it.`
   if (escalated) {
-    return `${eventToken('limitMandatory')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called the trajectory rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call trajectory rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild).${handover} The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call trajectory rebuild.`
+    return `${eventToken('limitMandatory')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called the container_trajectory rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call container_trajectory rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild).${handover} The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call container_trajectory rebuild.`
   }
-  return `${eventToken('limit')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself.${handover} ACT NOW: at the next natural pause (end of the current task step), call the trajectory rebuild action — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
+  return `${eventToken('limit')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself.${handover} ACT NOW: at the next natural pause (end of the current task step), call the container_trajectory rebuild action — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
@@ -188,7 +188,7 @@ export function __resetLogbookCompactionForTest(): void {
  * 解析**活跃** SESSION.md 绝对路径（缓存 60s）。
  *
  * 候选链（刻意比 rebuild 的完整链短——这里每个工具调用都要跑，贵候选不划算）：
- * ① `getActiveSessionInfo(scope).mdPath`（`logbook use` / skiff 绑定 / 重启恢复都会写）
+ * ① `getActiveSessionInfo(scope).mdPath`（`container_trajectory use` / skiff 绑定 / 重启恢复都会写）
  * ② `readLastBound(session).mdPath`（`.bindings.json` 权威绑定——重启后内存空时兜底）
  * 两者都拿不到 → null（**不猜**：宁可不提醒，也不去猜别的轨迹——对齐 v1.30.13 D4 的教训）。
  */
@@ -261,7 +261,7 @@ export function readSessionMdMaxKB(root: string, configPaths?: string[], now: ()
  * ③ 允许整合不重要事项（被取代的决策 / 已解决问题 / 中间态）
  * ④ 自主裁量权充分允许（唯一硬要求 = 骨架 + 未决项/决策理由/下一步仍可重建）
  */
-export function logbookCompactionReminderText(input: {
+export function trajectoryCompactionReminderText(input: {
   sizeKB: number
   limitKB: number
   mdPath: string
@@ -358,7 +358,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // ② 轨迹跟踪器：上下文压力检测（独立——每次工具调用后都查，不依赖计分）
     // v1.23.3 用户拍板：**不做节流，催就行了**——每次超阈值都注入（每轮都催）；
     // 连续超阈值 REBUILD_ESCALATE_AFTER 轮仍未 rebuild → 升级 [TRAJECTORY-ESCALATED]
-    // 强制语气，此后持续升级催（不重置，直到 agent 调用 logbook rebuild 压力自然回落）。
+    // 强制语气，此后持续升级催（不重置，直到 agent 调用 container_trajectory rebuild 压力自然回落）。
     // 需求①（S142 用户拍板）：判定从窗口比例改为绝对 K——projectedTokens ≥ thresholdK*1000
     // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
     if (skiffRebuild && readSimpleSettings().rebuildEnabled) {
@@ -395,7 +395,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
           st.consecutive += 1
           blocks.push({
             type: 'text',
-            text: logbookCompactionReminderText({
+            text: trajectoryCompactionReminderText({
               sizeKB: Math.round(size / 1024),
               limitKB,
               mdPath,

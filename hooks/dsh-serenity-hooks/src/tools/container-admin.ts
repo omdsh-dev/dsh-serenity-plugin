@@ -20,7 +20,7 @@ import { findSerenityRoot } from '../ccc.js'
 import { runMsm, MSM_ACTIONS, loadMsmEntries } from '../msm-ops.js'
 import { skiffMsmGate } from '../skiff-core.js'
 import { runAutopilotScript } from '../autopilot-script.js'
-import { buildSepGuide } from './session.js'
+import { buildSepGuide } from './trajectory.js'
 import { validateSkiffConfig, applySkiffConfig, listSkiffRoles, SKIFF_GUIDE } from './skiff-admin.js'
 
 function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {

@@ -547,10 +547,11 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
 })
 
 describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
-  // 复刻 .opencode/serenity.json zhaocai 角色（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory）：
-  // tools 含 msm/trajectory + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
+  // 复刻 .opencode/serenity.json zhaocai 角色（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory，
+  // v1.34 工具名硬切为 container_trajectory）：
+  // tools 含 msm/container_trajectory + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
   // 而 read/web_search 通。此测试钉死逻辑层：该配置形态下 decideGuard 必须放行
-  // msm/trajectory/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
+  // msm/container_trajectory/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
   const ZHAOCAI_MSMS = [
     'anysearch', 'web-search', 'memory-tool', 'mail-tool', 'vlm-describe',
     'eap-analyzer', 'qbit', 'session-log-tool', 'movie-search', 'home-diag',
@@ -569,7 +570,7 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
             zhaocai: {
               model: 'minimax-cn-coding-plan/MiniMax-M3',
               msms: ZHAOCAI_MSMS,
-              tools: ['read', 'grep', 'glob', 'web_search', 'trajectory', 'msm'],
+              tools: ['read', 'grep', 'glob', 'web_search', 'container_trajectory', 'msm'],
               trajectory: { session: true, keeper: false, rebuild: true },
               systemPromptFile: '.opencode/skiff/zhaocai.md',
             },
@@ -584,8 +585,8 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
     unregisterSkiffSession(ZC_ID)
   })
 
-  it('zhaocai 形态：白名单内工具全放行（read/web_search/trajectory/msm）', () => {
-    for (const tool of ['read', 'grep', 'glob', 'web_search', 'trajectory', 'msm']) {
+  it('zhaocai 形态：白名单内工具全放行（read/web_search/container_trajectory/msm）', () => {
+    for (const tool of ['read', 'grep', 'glob', 'web_search', 'container_trajectory', 'msm']) {
       expect(decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID })).kind, `tool ${tool} 应 allow`).toBe('allow')
     }
   })

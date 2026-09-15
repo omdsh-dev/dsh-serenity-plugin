@@ -19,7 +19,7 @@
  */
 
 import type { Context } from 'cordis'
-import { clearActiveSessionInfo } from '../session-ops.js'
+import { clearActiveSessionInfo } from '../trajectory-ops.js'
 import { unregisterSkiffSession } from '../skiff-core.js'
 import { stopAcpHttpServer } from '../acp-http.js'
 import { stopSkiffDebugServer } from '../skiff-debug.js'

@@ -26,8 +26,8 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { namingTitleFor, renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive, sanitizeSessionSummary } from '../src/tools/session.js'
-import { createSession } from '../src/session-ops.js'
+import { namingTitleFor, renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive, sanitizeSessionSummary } from '../src/tools/trajectory.js'
+import { createSession } from '../src/trajectory-ops.js'
 import { defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string

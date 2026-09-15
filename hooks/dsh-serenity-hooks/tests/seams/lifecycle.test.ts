@@ -11,7 +11,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 
 // lifecycle.ts 经 skiff-core 间接引入宿主 peerDep（@deepseek-ai/dsh-llm 等不在插件
 // node_modules，仅由宿主提供）——与 skiff-core.test.ts / gateway.test.ts 同款 mock，
-// 保证 vitest 可解析（依赖链：lifecycle → skiff-core → session-ops → settings-section → schemastery）
+// 保证 vitest 可解析（依赖链：lifecycle → skiff-core → trajectory-ops → settings-section → schemastery）
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
@@ -42,7 +42,7 @@ vi.mock('@deepseek-ai/schemastery', () => {
 
 import { sessionIdOf, cleanupSessionState, registerLifecycle } from '../../src/seams/lifecycle.js'
 import { registerSkiffSession, skiffSessionInfo } from '../../src/skiff-core.js'
-import { setActiveSessionInfo, getActiveSessionInfo } from '../../src/session-ops.js'
+import { setActiveSessionInfo, getActiveSessionInfo } from '../../src/trajectory-ops.js'
 
 const fakeAgent = { id: 'a1' } as never
 

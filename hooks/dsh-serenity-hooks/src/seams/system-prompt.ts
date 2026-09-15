@@ -33,7 +33,7 @@ import { basename, dirname } from 'node:path'
 import { findSerenityRoot, isSafeModeOn, readBlacklist } from '../ccc.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
-import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../session-ops.js'
+import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory-ops.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
 import { readAdvancedSettings } from '../config-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -99,7 +99,7 @@ export function toolsBlock(): string {
     'The ACC (this plugin) provides the following built-in tools:',
     '',
     '  container_fs — container filesystem operations (15 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
-    '  trajectory   — one trajectory: its persistent body (SESSION.md) + its timeline. Lifecycle: list (inventory + stats) / show / create / use (activate; inline integrity check — silent when fine) / rebuild (clear-and-rebuild this conversation in place, Ship of Theseus); scheduling: wake-later (one future instant + one message to any trajectory; fire-and-forget — no receipt, no recall)',
+    '  container_trajectory — one trajectory: its persistent body (SESSION.md) + its timeline. Lifecycle: list (inventory + stats) / show / create / use (activate; inline integrity check — silent when fine) / rebuild (clear-and-rebuild this conversation in place, Ship of Theseus); scheduling: wake-later (one future instant + one message to any trajectory; fire-and-forget — no receipt, no recall)',
     '  dashboard    — always-on container instruments: health (CCC three-principle check + registry integrity) / time (now) / wait (N seconds)',
     '  container_git— git operations (status/commit/push/log)',
     '  msm          — execute a registered CCC MSM: msm(name, args); partial name returns candidates; inspect=true shows usage',
@@ -189,7 +189,7 @@ export function principlesBlock(root: string, omitMsmPrinciples = false): string
     'The session-trajectory relation: a session is the rebuildable carrier of a',
     'trajectory. SESSION.md is the trajectory\'s persistent body — it never moves;',
     'the current conversation is a temporary work copy that may be discarded and',
-    'rebuilt (trajectory rebuild). Identity belongs to the trajectory, not to any',
+    'rebuilt (container_trajectory rebuild). Identity belongs to the trajectory, not to any',
     'session.',
     '',
   ]

@@ -1,11 +1,11 @@
 ---
 name: acc-session
-description: 轨迹追踪知识映射（v1.33：logbook 并入 trajectory）。list/show/create/use/rebuild + wake-later 操作 AGENT_SESSIONS/ 目录；rebuild = Ship of Theseus 原地清空重建。多步骤工作必须先创建轨迹。
+description: 轨迹追踪知识映射（v1.34：v1.33 logbook 并入 trajectory，v1.34 工具名改 container_trajectory）。list/show/create/use/rebuild + wake-later 操作 AGENT_SESSIONS/ 目录；rebuild = Ship of Theseus 原地清空重建。多步骤工作必须先创建轨迹。
 ---
 
 # Skill: acc-session — 轨迹追踪（trajectory 知识映射）
 
-> **v1.33.0 工具面重构**：`logbook` **并入 `trajectory`**（用户裁决「废除 logbook 这个词」——一条轨迹 = 持久身体 SESSION.md + 时间轴）。本技能是知识映射——真实工具由 Native Cordis 插件进程内注册（`trajectory`），scripts/ 已退役为空目录。
+> **v1.33/v1.34 工具面重构**：`logbook` **并入 `trajectory`**（v1.33，用户裁决「废除 logbook 这个词」——一条轨迹 = 持久身体 SESSION.md + 时间轴），**v1.34 工具名硬切为 `container_trajectory`**（准确性调整：前缀 `container` 表作用域=本容器内，不表地位）。本技能是知识映射——真实工具由 Native Cordis 插件进程内注册（`container_trajectory`），scripts/ 已退役为空目录。
 >
 > 动作收敛（原两工具 23 动作 → **6**）：`close` / `archive` 删（归档走 `container_fs mv → _archived/`）｜`health` / `qa` 并入 `use`（内联完整性检查，通过静默、不通过**提示**）｜`summary` 并入 `list`｜`hook-develop-guide` 并进 `container_admin msm guide`｜`wake-add`/`wake-list`/`wake-rm` → **`wake-later`**。
 
@@ -17,7 +17,7 @@ description: 轨迹追踪知识映射（v1.33：logbook 并入 trajectory）。l
 ## 调用
 
 ```json
-trajectory { action: "<subcommand>", name: "<S###|目录名|关键词>", summary: "<≤20字>", confirm: true }
+container_trajectory { action: "<subcommand>", name: "<S###|目录名|关键词>", summary: "<≤20字>", confirm: true }
 ```
 
 | 动作 | 说明 |
@@ -40,15 +40,15 @@ trajectory { action: "<subcommand>", name: "<S###|目录名|关键词>", summary
 
 ## 纪律（强制）
 
-1. **多步骤工作（3 步以上）必须先 `trajectory create` 轨迹**，再开始干活
+1. **多步骤工作（3 步以上）必须先 `container_trajectory create` 轨迹**，再开始干活
 2. 进度记录随时追加（时间戳 + 做了什么）；SESSION.md 体积有上限（缺省 200 KB，超限触发 rebuild 提醒）
 3. 收尾时：把未解决问题写进 SESSION.md，并在状态行体现完成（**不再有 close 动作**——完成与否由 SESSION.md 自身表达）
 
 ## 何时使用
 
 - 任何多步探索/分析/设计/实施工作
-- 被 rebuild 提醒（[TRAJECTORY-ASSISTANT · LIMIT]）要求重建时 → `trajectory rebuild`
-- 需要"未来某一刻自动继续/提醒另一条轨迹"时 → `trajectory wake-later`
+- 被 rebuild 提醒（[TRAJECTORY-ASSISTANT · LIMIT]）要求重建时 → `container_trajectory rebuild`
+- 需要"未来某一刻自动继续/提醒另一条轨迹"时 → `container_trajectory wake-later`
 
 ## 参考
 

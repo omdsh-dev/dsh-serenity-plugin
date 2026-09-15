@@ -149,7 +149,7 @@ type _ContextPressure = Expect<Extends<
   { projectedTokens?: number; contextWindow?: number }
 >>
 
-/** `session.snapshotEvents()`（`session-ops.ts:57` 统一读取入口；`.events` 属性早已移除） */
+/** `session.snapshotEvents()`（`trajectory-ops.ts:57` 统一读取入口；`.events` 属性早已移除） */
 type _SessionSnapshotEvents = Expect<Extends<Ret<NonNullable<Ret<HostContext['sessions']['get']>>['snapshotEvents']>, readonly unknown[]>>
 
 /** `session.surface.nodes`（`rebuild.ts:345` 取被替换范围） */

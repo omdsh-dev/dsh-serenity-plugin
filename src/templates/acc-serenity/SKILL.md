@@ -1,6 +1,6 @@
 ---
 name: acc-serenity
-description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供 11 真实工具 container_fs/trajectory/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/im-bridge/acc-diag——后两个按配置条件出现 + 拦截缝机械守卫，v1.33 命名体系）与协作纪律（EAP/Neat/轨迹追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
+description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/CCC 模型、激活检测、工具与约束（Native Cordis 插件提供 11 真实工具 container_fs/container_trajectory/dashboard/container_git/msm/praxis/handyman/localstore/container_admin/im-bridge/acc-diag——后两个按配置条件出现 + 拦截缝机械守卫，v1.34 命名体系）与协作纪律（EAP/Neat/轨迹追踪/SSH 规范）。进入 home-serenity（.serenity 标记目录）后应最先加载。
 ---
 
 # Skill: acc-serenity — 宁静号 ACC Harness（DSH 运行时）
@@ -14,7 +14,7 @@ description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/C
 名称: dsh-serenity-plugin (ACC, DSH 运行时)
 宿主: DeepSeek Harness (DSH)
 标准: 仿照 opencode-serenity-plugin 的 ACC 语义，独立实现（不复用源码）
-版本: v1.33.0（npm @shgroup/dsh-serenity-hooks）
+版本: v1.34.0（npm @shgroup/dsh-serenity-hooks）
 发布: GitHub tellmewhattodo/dsh-serenity-plugin + npm registry
 ```
 
@@ -39,11 +39,11 @@ description: 宁静号 ACC harness（DSH 运行时）入口技能。定义 ACC/C
 - `dashboard health` 三原则检查（.serenity / git / 配置 + registry 完整性）
 - 本技能 + 其余 acc-* 技能的操作协议
 
-## 工具与约束（v1.33：Native Cordis 插件，11 工具，其中 2 个按配置条件出现）
+## 工具与约束（v1.34：Native Cordis 插件，11 工具，其中 2 个按配置条件出现）
 
 ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native Cordis 插件）提供：真实 DSH 工具经 `ctx.tools.register` 进程内注册；约束由拦截缝机械执行（模型不可绕过）。本技能只承载知识（EAP/Neat/纪律）。
 
-**v1.30.0 工具面重构（13 → 10，硬切无别名）＋ v1.31.0 新增 `im-bridge`（11）＋ v1.33.0 `logbook` 并入 `trajectory`（10）＋ 新增专属工具 `acc-diag`（11）**——以下为本会话实际可用的 11 工具（后两个**按条件出现**）：
+**v1.30.0 工具面重构（13 → 10，硬切无别名）＋ v1.31.0 新增 `im-bridge`（11）＋ v1.33 起 `logbook` 并入 `trajectory`（10）＋ 新增专属工具 `acc-diag`（11）＋ v1.34.0 `trajectory` → `container_trajectory`**——以下为本会话实际可用的 11 工具（后两个**按条件出现**）：
 
 | 工具 | 能力 | 隐喻 |
 |------|------|------|
@@ -52,18 +52,18 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | `container_admin` | 容器管理（机务舱）：role（Skiff 角色）/ msm（注册表管理 + 开发手册）/ config / **autopilot（status/init/generate-bias——周期自唤醒）** | The Manifest + Crew |
 | `msm` | MSM **单入口执行+发现**：`msm(name, args)` / 未命中候选 / `inspect:true` 查用法 / 无参目录 | The Machinery |
 | `praxis` | 可实践理论注入（section: eap/neat/cce） | Engineering Drawings |
-| `trajectory` | **一条轨迹**：持久身体（SESSION.md）+ 时间轴。生命周期 `list`（清单+统计）/ `show` / `create` / `use`（激活；内联完整性检查，通过静默）/ `rebuild`（原地清空重建，Ship of Theseus）；调度 `wake-later`（未来时刻 + 一条 message，可唤醒任一轨迹；fire-and-forget，无回执无回收） | The Ship's Log / Theseus |
+| `container_trajectory` | **一条轨迹**：持久身体（SESSION.md）+ 时间轴。生命周期 `list`（清单+统计）/ `show` / `create` / `use`（激活；内联完整性检查，通过静默）/ `rebuild`（原地清空重建，Ship of Theseus）；调度 `wake-later`（未来时刻 + 一条 message，可唤醒任一轨迹；fire-and-forget，无回执无回收） | The Ship's Log / Theseus |
 | `dashboard` | 普适仪表：health（三原则 + registry）/ time / wait | 舰桥仪表盘 |
 | `handyman` | 杂工编排（白名单模型；foreground 串行 / background 循环校验） | Crew Rotation |
 | `localstore` | 凭据/配置存储（CCC 根 localstore.json） | 保留 |
 | `im-bridge` | IM 消息发送（channel/action/user/text/file/caption/account）——**条件可见**：本 CCC 未配置任何 IM 通道（如 `weixin.enabled`）时从工具清单移除 | Crew Rotation |
 | `acc-diag` | ACC 运行态诊断（一次调用出全报告：live 会话清单 + 面板解析 + 唤醒注册表 + 唤起条件链）——**专属工具**：**默认对所有 CCC 隐藏**，只有在自己 `.opencode/serenity.json` 的 `exclusiveTools` 里点名的 CCC 可见 | 保留（ACC 负责人专用） |
 
-**改名对照（旧 → 新，硬切无别名）**：`cc_fs`→`container_fs` / `cc_git`→`container_git` / `acc_msm`（执行面）→`msm`、`acc_msm`（管理面）→`container_admin msm` / `skiff_admin`→`container_admin role` / `session`→`logbook`（v1.30）→**`trajectory`**（v1.33 合并，动作收敛为 6） / `session_rebuild`→`logbook rebuild`→**`trajectory rebuild`** / `acc_kit`→`dashboard` / `eap`·`neat`·`cce` 三合一→`praxis` / `autopilot-trajectory`→`trajectory`（v1.32）→autopilot 面移入 `container_admin autopilot`（v1.33）。旧工具名不再注册。
+**改名对照（旧 → 新，硬切无别名；箭头链是**逐个发布版本**的名字，**末项才是今名**）**：`cc_fs`→`container_fs` / `cc_git`→`container_git` / `acc_msm`（执行面）→`msm`、`acc_msm`（管理面）→`container_admin msm` / `skiff_admin`→`container_admin role` / `session`→`logbook`（v1.30）→`trajectory`（v1.33 合并，动作收敛为 6）→**`container_trajectory`**（v1.34） / `session_rebuild`→`logbook rebuild`→`trajectory rebuild`→**`container_trajectory rebuild`** / `acc_kit`→`dashboard` / `eap`·`neat`·`cce` 三合一→`praxis` / `autopilot-trajectory`→`trajectory`（v1.32）→**`container_trajectory`**（v1.34；其周期自唤醒面 `container_admin autopilot`）。旧工具名不再注册。
 
 | 机制 | DSH harness 实现（插件） | 性质 |
 |---|---|---|
-| 11 真实工具 | `container_fs`/`trajectory`/`dashboard`/`container_git`/`msm`/`praxis`/`handyman`/`localstore`/`container_admin`/`im-bridge`/`acc-diag`（进程内） | 机械 |
+| 11 真实工具 | `container_fs`/`container_trajectory`/`dashboard`/`container_git`/`msm`/`praxis`/`handyman`/`localstore`/`container_admin`/`im-bridge`/`acc-diag`（进程内） | 机械 |
 | 路径守卫 / 安全模式 / 黑名单 | `tools/pre-execute` + `ctx.tools.guard`（.serenity-safe-on 标记 + serenity.json 黑名单） | 机械 |
 | 条件可见（im-bridge / acc-diag） | `agent.ctx.tools.restrict({deny})` 按 CCC 配置逐 agent 收窄（同 safe-mode 机制）——im-bridge 看 `weixin` 通道是否启用；acc-diag 看 `exclusiveTools` 是否点名 | 机械 |
 | 系统提示注入 / Phase 2 | `agent/session-start` + `agent/prompt-submit`（ACC 身份播种） | 机械 |
@@ -81,7 +81,7 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 小步对齐、显式决策、文档驱动、不跳级：需求层 → 范围层 → 方案层 → 接口层 → 实现层。注入：`praxis neat`。
 
 ### 轨迹追踪（AGENT_SESSIONS/）
-多步骤工作（3 步以上）**必须**先创建轨迹：`trajectory create` → `AGENT_SESSIONS/YYYY-MM-DD--S###--<desc>/SESSION.md`，记录目标、决策、进度；收尾时把未解决问题写进 SESSION.md（状态由 SESSION.md 里的勾选框体现）。
+多步骤工作（3 步以上）**必须**先创建轨迹：`container_trajectory create` → `AGENT_SESSIONS/YYYY-MM-DD--S###--<desc>/SESSION.md`，记录目标、决策、进度；收尾时把未解决问题写进 SESSION.md（状态由 SESSION.md 里的勾选框体现）。
 
 ### SSH 操作规范（强制）
 涉及远程服务器时**禁止裸 `ssh user@ip`**，必须走 `ssh-connect`（或家庭既定通道），优先主机别名（router/ha/pve/ubuntu/gitlab/nas/desk/windows/experimenter/ykn-nas）。
@@ -98,7 +98,7 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | git 操作（status/commit/push/log） | `container_git` 工具 |
 | 执行 MSM / 发现 | `msm` 工具（`msm()` 目录 / `msm("<name>")` 执行 / `inspect:true` 查用法） |
 | 管理 MSM 注册表 / Skiff 角色 / CCC 配置 / autopilot 周期 | `container_admin` 工具（domain: role/msm/config/autopilot） |
-| 轨迹创建/读取/激活/重建/定时唤醒 | `trajectory` 工具（含 `wake-later`） |
+| 轨迹创建/读取/激活/重建/定时唤醒 | `container_trajectory` 工具（含 `wake-later`） |
 | 认知质量自检 / 设计协作 / 连续性理论 | `praxis` 工具（section: eap/neat/cce） |
 | 健康检查/时间/等待 | `dashboard` 工具 |
 | 给微信用户发消息（招财留言/通报） | `im-bridge` 工具（**仅当本 CCC 配置了 IM 通道时可见**；只能操作本会话 CCC） |
@@ -107,7 +107,7 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 
 ## 安装与更新
 
-本 ACC 插件通过 npm 公开分发（当前 v1.33.0）：
+本 ACC 插件通过 npm 公开分发（当前 v1.34.0）：
 
 ```bash
 # 安装 / 更新（DSH profile 级）

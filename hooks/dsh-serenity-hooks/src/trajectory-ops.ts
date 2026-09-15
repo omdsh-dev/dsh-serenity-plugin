@@ -1,9 +1,9 @@
 /**
- * session-ops.ts — 轨迹工具纯操作层（零 DSH 依赖，可独立单测）
+ * trajectory-ops.ts — 轨迹工具纯操作层（零 DSH 依赖，可独立单测）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/session/lib.ts）——osp 是 ACC 工具 spec。
  *
- * v1.33 收敛（S142 §32）：本文件只服务 `trajectory` 的 6 个动作
+ * v1.33 收敛（S142 §32）：本文件只服务 `container_trajectory` 的 6 个动作
  * （list / show / create / use / rebuild / wake-later）。旧 `logbook` 面里
  * **close / archive / health / qa 四个动作已删**（用户裁决「功能上废弃，实际上没用」），
  * 其函数（closeSession / archiveSessions / healthCheck / qaCheck）**同批删除**——
@@ -24,7 +24,7 @@ import { join, basename, dirname } from 'node:path'
 import type { JsonValue } from './json.js'
 
 /**
- * `trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
+ * `container_trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
  *
  * 为什么只有 6 个（R↓）：旧面是 `logbook`（11）+ `trajectory`（12）两个工具，用户裁决
  * 「都合并成 trajectory，废除 logbook 这个词」并逐条删并 ——

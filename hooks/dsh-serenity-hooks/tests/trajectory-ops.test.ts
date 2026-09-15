@@ -16,10 +16,10 @@ import {
   sessionEvents,
   SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
-} from '../src/session-ops.js'
+} from '../src/trajectory-ops.js'
 
 /**
- * session-ops 单元测试（S136 对齐 osp spec；v1.33 按 trajectory 六动作收敛）：
+ * trajectory-ops 单元测试（S136 对齐 osp spec；v1.33 按 trajectory 六动作收敛）：
  * - create：--desc/--issue 二选一；返回 {message, dirName, sessionPath, sessionId}
  * - list/show/summary：文本输出（对齐 osp）
  * - **close / archive / health / qa 四个动作已于 v1.33 删除**（S142 §32 用户裁决），
@@ -50,7 +50,7 @@ function markDone(r: ReturnType<typeof createSession>): void {
   writeFileSync(md, readFileSync(md, 'utf-8').replace('## 状态\n- [ ] 进行中', '## 状态\n- [x] 已完成'), 'utf-8')
 }
 
-describe('session-ops: 生命周期（对齐 osp spec）', () => {
+describe('trajectory-ops: 生命周期（对齐 osp spec）', () => {
   it('create desc 模式自动分配 S001 + 递增', () => {
     expect(listSessions(dir)).toBe('(no sessions in AGENT_SESSIONS/)')
     const a = mk('first')
@@ -106,7 +106,7 @@ describe('session-ops: 生命周期（对齐 osp spec）', () => {
   })
 })
 
-describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
+describe('trajectory-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
   it('use 写内存 Map（不落盘）：getActiveSessionInfo + readActiveSessionMd 可读', () => {
     const r = mk('active-use')
     const used = useSession(dir, 'S001')
@@ -144,7 +144,7 @@ describe('session-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
   })
 })
 
-describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只扫自己会话）', () => {
+describe('trajectory-ops: 进程重启恢复（parseSessionContextFromEvents，只扫自己会话）', () => {
   it('events 含 [SESSION CONTEXT] 标记 → 解析出活跃会话', () => {
     const r = mk('recover-me')
     const mdPath = join(r.sessionPath, 'SESSION.md')
@@ -184,7 +184,7 @@ describe('session-ops: 进程重启恢复（parseSessionContextFromEvents，只�
   })
 })
 
-describe('session-ops: v1.24.11 恢复稳固化（路径规范行即可，无需 [SESSION CONTEXT] 标记）', () => {
+describe('trajectory-ops: v1.24.11 恢复稳固化（路径规范行即可，无需 [SESSION CONTEXT] 标记）', () => {
   it('重建锚点格式（无标记）→ 从路径行恢复（仅靠锚点的会话可恢复）', () => {
     const dirName = '2026-08-24--S142--dsh-serenity-plugin 长期维护'
     const anchor = [
@@ -226,7 +226,7 @@ describe('session-ops: v1.24.11 恢复稳固化（路径规范行即可，无需
   })
 })
 
-describe('session-ops: sessionEvents（v1.28.1 适配 0.1.2-rc.1——rc.1 起 Session 无 .events 属性，snapshotEvents() 方法）', () => {
+describe('trajectory-ops: sessionEvents（v1.28.1 适配 0.1.2-rc.1——rc.1 起 Session 无 .events 属性，snapshotEvents() 方法）', () => {
   it('snapshotEvents() 优先（真实 rc.1 Session 形态）', () => {
     const events = [{ type: 'user/message', seq: 1 }]
     const session = { snapshotEvents: () => events, events: [{ type: 'old' }] }

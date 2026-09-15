@@ -38,7 +38,7 @@ import {
   metaphorBlock,
   serenitySystemPrompt,
 } from '../src/seams/system-prompt.js'
-import { useSession, resetActiveSessionStore } from '../src/session-ops.js'
+import { useSession, resetActiveSessionStore } from '../src/trajectory-ops.js'
 import { ACC_VERSION } from '../src/constants.js'
 
 let dir: string
@@ -249,7 +249,7 @@ describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，
   it('toolsBlock() 含 9 工具清单 + msm 单入口示例（v1.33：logbook 并入 trajectory）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['container_fs', 'trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin']) {
       expect(block).toContain(tool)
     }
     // msm 单入口调用（替代旧 3 步协议）

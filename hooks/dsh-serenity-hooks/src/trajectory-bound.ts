@@ -1,8 +1,8 @@
 /**
- * session-bound.ts — SESSION 绑定持久化（CCC 内 `AGENT_SESSIONS/.bindings.json`）
+ * trajectory-bound.ts — SESSION 绑定持久化（CCC 内 `AGENT_SESSIONS/.bindings.json`）
  *
  * 目标（S142 用户拍板，方案 v1.0）：让「dsh 会话（载体）↔ SESSION（宁静号轨迹）」
- * 的绑定坚固——LLM 不能因智力因素（幻觉/理解偏差）在过程中或 logbook rebuild 后
+ * 的绑定坚固——LLM 不能因智力因素（幻觉/理解偏差）在过程中或 container_trajectory rebuild 后
  * 自行更换 SESSION。
  *
  * 存储形态（v1.30.6 起，S142 review F-01）：绑定**不再写入 dsh 会话日志**。
@@ -27,7 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { findSerenityRoot } from './ccc.js'
-import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './session-ops.js'
+import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './trajectory-ops.js'
 
 export type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
 

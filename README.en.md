@@ -69,7 +69,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | Tool | What it does | When to use it |
 |---|---|---|
 | `container_fs` | File handling inside the workspace: list, find, copy, move, create, append, reveal in file manager | Whenever you need to look at or tidy workspace files |
-| `trajectory` | **One trajectory**: its body (SESSION.md) plus its timeline. Beyond create / show / switch / in-place rebuild, it registers a **future wake** (a wake = a future instant + one message; it can wake yourself, or another trajectory) | Any multi-step job — this is step one; also to have the AI pick work up again at a future moment |
+| `container_trajectory` | **One trajectory**: its body (SESSION.md) plus its timeline. Beyond create / show / switch / in-place rebuild, it registers a **future wake** (a wake = a future instant + one message; it can wake yourself, or another trajectory) | Any multi-step job — this is step one; also to have the AI pick work up again at a future moment |
 | `dashboard` | Instruments: workspace health (three checks), current time, wait | Self-check before working; wait on external services |
 | `container_git` | Git: status / commit / push / log / pull / diff | Commit and push; it never force-pushes on its own |
 | `msm` | The execution entry for your small tools: `msm("name", ["args"])`; partial names return candidates; `inspect=true` shows usage | Calling any registered tool in the workspace |
@@ -80,7 +80,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `im-bridge` | Message an IM contact (WeChat today): send text, send a file, list configured recipients, check channel health. Every successful send is recorded in the workspace log | When you want the AI to message family/colleagues proactively (see §6.6). **It only appears when this workspace has the WeChat bridge configured**, and it can only message from this workspace |
 | `acc-diag` | ACC runtime diagnosis: one call returns the full report — which sessions are live and which workspace each belongs to, the cruising target/agent resolution, every entry in the wake registry, and the condition chain for "why did this round not wake" | **ACC maintainers only.** **Hidden from every workspace by default**; it appears only in a workspace that names it (config `exclusiveTools`) |
 
-> **Renamed** (old names are gone for good, no aliases): `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` → **`trajectory`** · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory` (its cruising controls now live in `container_admin`). Old sessions referencing the old names will error — consult this map.
+> **Renamed** (old names are gone for good, no aliases): each arrow chain below lists the name **as shipped in each release** — the **last item is the current name**: `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` (v1.30/1.31) → `trajectory` (v1.32) → **`container_trajectory`** (v1.34, current) · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory` (v1.32) → **`container_trajectory`** (v1.34, current; its cruising controls now live in `container_admin`). Old sessions referencing the old names will error — always take the **last item of the chain** as the live name.
 
 ### 3.2 Mechanical constraints (the AI cannot bypass them)
 
@@ -167,7 +167,7 @@ my-workspace/                     ← workspace root (just add .serenity)
 
 | # | What you want | How it actually goes |
 |---|---|---|
-| 1 | **Keep a long project alive** | `trajectory create` → write progress as you go → resume with `trajectory use` after an interruption → `trajectory rebuild` when context fills up, continuing automatically |
+| 1 | **Keep a long project alive** | `container_trajectory create` → write progress as you go → resume with `container_trajectory use` after an interruption → `container_trajectory rebuild` when context fills up, continuing automatically |
 | 2 | **Sync code in bulk** | `container_git commit/push` in the current repo; one command syncs every sub-repo (auto commit + push) |
 | 3 | **Produce one episode of subtitles** | Find the source → download → Whisper transcription → translation → bilingual SRT → mechanical QC (7 checks) → push to subscribers/email |
 | 4 | **Server inspection** | One command returns CPU/memory/GPU/containers/services; restarting a container goes through the same allow-listed channel |
@@ -280,7 +280,7 @@ Carve a **deliberately limited role** out of an all-capable assistant — not ju
 - **What it reads first**: the "focus" you wrote (`topPrompt`, injected first every round to prevent drift), then randomly generated "bias content" (your script, exploring directions)
 - **Workspaces stay independent**: each has its own interval, session, focus, and window
 - **Audited**: every wake is recorded (the panel shows the recent ones); failures retry with exponential backoff
-- **You can also book a future moment**: `trajectory wake-later` registers a wake = a future instant + one message — you can book it for yourself, or wake another trajectory; it lands in the workspace's `AGENT_SESSIONS/wake-registry.json` (readable and auditable), and a central scheduler delivers it when due — no blocking, no waiting, no receipt
+- **You can also book a future moment**: `container_trajectory wake-later` registers a wake = a future instant + one message — you can book it for yourself, or wake another trajectory; it lands in the workspace's `AGENT_SESSIONS/wake-registry.json` (readable and auditable), and a central scheduler delivers it when due — no blocking, no waiting, no receipt
 - There is no "maximum wakes per day" cap — frequency is bounded only by the interval and the window
 
 ### 6.6 Security model
@@ -316,7 +316,7 @@ The AI can only "remember" so much at a time. You do not have to start a fresh s
 | Mechanism | In plain words |
 |---|---|
 | **Work log (SESSION.md)** | The AI's notebook, and it never moves. Goals, decisions, progress all live there |
-| **In-place rebuild (`trajectory rebuild`)** | When it fills up, the AI is prompted to rebuild: this conversation is cleared, but "who you are + continue S###" is injected again — **the carrier is replaced, the work continues**. Token accounting settles correctly afterwards |
+| **In-place rebuild (`container_trajectory rebuild`)** | When it fills up, the AI is prompted to rebuild: this conversation is cleared, but "who you are + continue S###" is injected again — **the carrier is replaced, the work continues**. Token accounting settles correctly afterwards |
 | **Progress reminders** | After long stretches it scores the work and reminds the AI to write progress back, expecting a confirmation code |
 | **Sedimentation discipline** | If rebuilding produced valuable insight, it is written into the relevant skill first, not thrown away |
 
@@ -353,7 +353,7 @@ pnpm build              # bundle (lib/index.js + client.js)
 | Runs on | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no shared source, same standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, platform-independent text aligned byte-for-byte |
-| Tools | msm / container_fs / trajectory … | container_fs / trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
+| Tools | msm / container_fs / trajectory … | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
 
 **A workspace can switch runtimes at any time**: the `.serenity` marker, `.opencode/skills/`, configuration, and `AGENT_SESSIONS/` formats are identical.
 Only the platform layer differs (tool names, injection channel), and the constraints the AI receives stay the same.
@@ -372,7 +372,7 @@ Safe mode is on — that is the design, not a bug. Registered small tools are mo
 Five consecutive failures lock it for 15 minutes (exponential backoff). Wait it out, or check the account's code-binding status.
 
 **Q: Context is nearly full?**
-Have the AI write progress back to SESSION.md, then follow the prompt and call `trajectory rebuild`. The trajectory continues automatically — no new session needed.
+Have the AI write progress back to SESSION.md, then follow the prompt and call `container_trajectory rebuild`. The trajectory continues automatically — no new session needed.
 
 **Q: Does the public Q&A page leak internals?**
 No. It returns only the answer; internal trajectories and tool results stay inside.

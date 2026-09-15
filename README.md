@@ -70,7 +70,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | 工具 | 干什么 | 什么时候用 |
 |---|---|---|
 | `container_fs` | 在工作区里管文件：列目录、找文件、复制、移动、新建、追加、在文件管理器里打开 | 需要看/整理工作区里的文件时 |
-| `trajectory` | **一条轨迹**：它的身体（SESSION.md）+ 它的时间轴。建/看/切换/原地重建之外，还能登记**未来唤醒**（= 未来某时刻 + 一条消息，可唤醒自己，也可唤醒别的轨迹） | 任何多步骤的活儿，第一步就是它；想让 AI 未来某刻自动接着干也用它 |
+| `container_trajectory` | **一条轨迹**：它的身体（SESSION.md）+ 它的时间轴。建/看/切换/原地重建之外，还能登记**未来唤醒**（= 未来某时刻 + 一条消息，可唤醒自己，也可唤醒别的轨迹） | 任何多步骤的活儿，第一步就是它；想让 AI 未来某刻自动接着干也用它 |
 | `dashboard` | 仪表盘：工作区健康检查（三项）、当前时间、等待 | 进工作区先自查一下；等外部服务时用 |
 | `container_git` | git 操作：status / commit / push / log / pull / diff | 提交和推送代码；它绝不自动强推 |
 | `msm` | 小工具执行入口：`msm("名字", ["参数"])`；名字记不全就给候选；`inspect=true` 看用法 | 调用工作区里注册的任何小工具 |
@@ -81,7 +81,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `im-bridge` | 给 IM 联系人发消息（目前是微信）：发文本、发文件、查已配置联系人、查通道状态。每次成功发送自动进工作区的消息记录 | 想让 AI 主动给家人/同事发消息（见 §6.6）。**只在工作区配了微信桥时才出现**，且只能发本工作区的消息 |
 | `acc-diag` | ACC 运行态诊断：一次调用出全报告——当前有多少会话活着、各自属于哪个工作区、自动巡航的到点判断与 agent 定位、唤醒登记表的每一条、以及"这一轮为什么没被唤起"的条件链 | **ACC 维护者专用**。**默认对所有工作区隐藏**，只有在工作区配置里点名（`exclusiveTools`）才出现 |
 
-> **改过名**（旧名已彻底停用，没有兼容别名）：`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` → **`trajectory`** · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory`（其自动巡航面现归 `container_admin`）。老会话里看到旧名，照这张表对照即可。
+> **改过名**（旧名已彻底停用，没有兼容别名）：下面每组的箭头链是**逐个发布版本**的名字，**末项才是今名**——`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook`（v1.30/1.31）→ `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名） · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名；其自动巡航面现归 `container_admin`）。老会话里看到旧名，**一律取所在那一组的末项**。
 
 ### 3.2 机械约束（AI 绕不过去）
 
@@ -163,7 +163,7 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 
 | # | 你想干的事 | 实际怎么走 |
 |---|---|---|
-| 1 | **长期项目不断线** | `trajectory create` 建轨迹 → 每推进一段写进去 → 中断后 `trajectory use` 接上 → 上下文满了 `trajectory rebuild` 原地重建并自动继续 |
+| 1 | **长期项目不断线** | `container_trajectory create` 建轨迹 → 每推进一段写进去 → 中断后 `container_trajectory use` 接上 → 上下文满了 `container_trajectory rebuild` 原地重建并自动继续 |
 | 2 | **批量同步代码** | 当前仓库 `container_git commit/push`；多个子仓库一条命令全同步（自动提交 + 推送） |
 | 3 | **做一集字幕** | 搜片源 → 下载 → Whisper 转写 → 翻译 → 双语 SRT → 机械质检（7 项）→ 推送订阅/邮件 |
 | 4 | **服务器巡检** | 一条命令出 CPU/内存/GPU/容器/服务报告；重启容器也在同一条白名单通道里 |
@@ -274,7 +274,7 @@ DSH 一个进程可以同时带多个工作区，每个工作区各自对接自�
 - **醒了先看什么**：先看你自己写的"焦点"（`topPrompt`，每轮最先注入，防跑偏），再看随机生成的"偏见内容"（你写的脚本，负责探索方向）
 - **多个工作区各自独立**：每个工作区自己的间隔/会话/焦点/窗口，互不干扰
 - **有审计**：每次唤醒都记一笔，面板里能看到最近几次；失败会指数退避重试
-- **还能预约未来某一刻**：用 `trajectory wake-later` 登记一条"唤醒"= 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，不阻塞、不等待、也不回执
+- **还能预约未来某一刻**：用 `container_trajectory wake-later` 登记一条"唤醒"= 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，不阻塞、不等待、也不回执
 - 没有"每天最多唤醒几次"的限制——频率只由间隔和窗口决定
 
 ### 6.6 安全模型
@@ -310,7 +310,7 @@ AI 一次能"记住"的内容有上限。满了不用你手动开新会话：
 | 机制 | 说人话 |
 |---|---|
 | **工作日志（SESSION.md）** | AI 的"笔记本"，永远留在原地。目标、决定、进度都写这儿 |
-| **原地重建（trajectory rebuild）** | 快满时它会提示 AI 主动重建：把这一轮对话清空，但重新注入"你是谁 + 继续 S### 的工作"——**载体换了，活儿接着干**。重建后的 token 计量也正确回落 |
+| **原地重建（container_trajectory rebuild）** | 快满时它会提示 AI 主动重建：把这一轮对话清空，但重新注入"你是谁 + 继续 S### 的工作"——**载体换了，活儿接着干**。重建后的 token 计量也正确回落 |
 | **进度提醒** | 做久了会按计分提醒 AI 把进度写回日志，并要求它回确认码 |
 | **沉淀纪律** | 重建前如果产生了有价值的认知，先把它写进相关技能（而不是丢掉） |
 
@@ -347,7 +347,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 | 跑在 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
-| 工具 | msm / container_fs / trajectory 等 | container_fs / trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin ＋ 两个条件出现的（`im-bridge` / `acc-diag`） |
+| 工具 | msm / container_fs / trajectory 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin ＋ 两个条件出现的（`im-bridge` / `acc-diag`） |
 
 **同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
 差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。
@@ -366,7 +366,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 连续失败 5 次锁 15 分钟（指数退避）。等锁过期，或检查账号的验证码绑定状态。
 
 **Q：上下文快满了怎么办？**
-先让 AI 把进度写回 SESSION.md，然后按提示调用 `trajectory rebuild`。轨迹会自动接续，不用手动开新会话。
+先让 AI 把进度写回 SESSION.md，然后按提示调用 `container_trajectory rebuild`。轨迹会自动接续，不用手动开新会话。
 
 **Q：对外问答页会返回内部信息吗？**
 不会。只返回答案本身，内部轨迹和工具结果都不出去。
