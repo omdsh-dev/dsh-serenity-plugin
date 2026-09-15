@@ -1,3 +1,116 @@
+## v1.34.1 — 2026-09-15（🔍 构件关系复审七步：废 SEP · 发现面归一 · 对外面宿主 · autopilot 脚本退场 · 时钟引擎 P2）
+
+**Scope:** 用户给的一把尺子 —— 「**能落 harness 已有原语（skill / `ctx.skills` / settings / session 事件 / 文件标记）就不要自造协议 + 脚本管道**」，病灶形态 =「ACC 定义协议 → CCC 写脚本 → ACC 在生命周期点 spawn 它」。照它把 ACC 内部构件关系复审一遍（讨论稿 `docs/acc-component-relations-review.md`；现状说明 `docs/acc-component-relations-current-state.md`），九条裁决（Q1~Q9）后实施七步。**性质以"收敛与修复"为主**，唯一新增能力 = 轨迹声明 skill（①）。
+
+> **判据升为明面判据（Q1）**：**能落 harness 已有原语 ⇔ 不自造协议**。发布纪律 D14（用户显式下令）+ 时序条件（用户「**等回家再发布**」——发布链含 deploy/restart-web，会打断在跑会话）。
+
+### ① 废除 SEP ⇒ 轨迹在 `SESSION.md` 里声明 skill（C1）
+
+**旧机制（整体废除）**：SEP（session-extension protocol）——ACC 定义一套「`session-tool` 脚本钩子」协议，CCC 写脚本，ACC 在会话生命周期点 `spawn`。本机**实测零采用**，形态正是尺子点名的病灶。
+
+**新机制**：轨迹在 `SESSION.md` 顶部 frontmatter 声明
+
+```yaml
+skills: [some-skill, another-skill]
+```
+
+⇒ 该轨迹**被绑定期间**，每个请求按 **section** 注入其 `SKILL.md` 全文（**a2 形态**：内容**每轮重读绑定**，不是一次性灌入）。
+
+**契约（真相源 `docs/trajectory-skill-injection.md`）**：
+
+| 约束 | 内容 |
+|---|---|
+| 取路径 | **只用 `readLastBound(session).mdPath`**；**禁止**用显示 label 反查（那是模糊匹配） |
+| 🔒 安全 | skill 名来自 **CCC 数据** ⇒ **必须先过 `isSafeSkillName(name)`**（**路径穿越守卫**）；不安全 ⇒ 按缺失处理且**不发生任何以该名拼出的 fs 访问**（测试用强断言：`h.fs` 为空） |
+| 长度 | `TRAJECTORY_SKILLS_MAX_CHARS = 32 KB`（**复用**既有 `truncateContent`，不自造） |
+| 查找顺序 | `.dsh/skills` 优先 → `.opencode/skills`（解析失败**不静默**：响亮提示 + `[缺失]` 锚点） |
+| Skiff | 角色**不注入**（两处注册点均在 skiff 早退之后） |
+
+**keeper 护栏**：两条 compaction 提醒文案（普通 / escalated）均加「**保留文件顶部 YAML frontmatter 原样**」——把"compaction 重写 SESSION.md 抹掉 frontmatter"的风险，从**纯纪律依赖**变为"在**唯一会重写该文件的时刻**提醒"。
+
+**回归钉（两类都钉）**：**符号级**（`discoverCccHooks` / `buildExtHint` / `buildSepGuide` / `create-transform` / `findFlagByName` / `sessionExtension` 全 **0 命中**）＋ **散文级**（`session-extension` 在 `src/**` 命中 **0**）。⇒ 教训入册：**符号级回归钉挡不住散文级残留**（本轮抓到两处：**面向模型的 toolsBlock 文案**仍写"dev manual also carries the session-extension protocol"、客户端注释里的过期函数名）。
+
+### ② CCC 发现面归一（C2）
+
+现状：**src/ 内 19 处 + 范围外 1 处**各自解析"会话归哪个 CCC"，算法真正不同的约 **16 种**；`agentCwd + findSerenityRoot` 同一份代码**复制 10 份**（10 个工具入口）。
+
+- **新模块 `src/ccc-roots.ts`** = `listCccs(ctx, {defaultRoot, withRoles})`（**并集**语义）+ `agentCwdFor` + `cccRootForExec` + `cccRootForCwd`；**L0 原语 `findSerenityRoot` 留在 `ccc.ts` 不动**（它本来就只有一处、53 个调用点）。
+- 🔴 **短路 → 并集**：旧 `discoverCccs` 三层（`workspaceRegistry` → `sessionPersistence` → live）以 `if (roots.length === 0)` **短路** ⇒ 第一层给出任意一条则后两层不跑 ⇒ **名单可能不全**。改为**三层都跑、按 root 去重保序**。
+- **修掉 v1.34.0 记录在案的边界 #1**：「**完全冷掉的 CCC 不能自唤醒自己**」——枚举源改用 **DSH 已有的持久来源**（不新增名单、不扫盘、不写路径假设），**关着浏览器也能到点执行**。
+- **删除 Skiff 的 ~93 行退避重试**（`SKIFF_ROOT_RETRY` / `scheduleRootRetry` / 定时器）——根能直接问到，就不必重试；**保住**反应式再触发（`agent/session-start` / `session/created` / `settings-changed`）与 **EADDRINUSE 不变量**（`starting = true` 置于首个 `await` 之前）。
+- **武装门不回退**：`startTimer` 仍**只判全局闸**（"闸开即武装"），"无 CCC 可扫"下沉为 tick 内廉价判定并写 `lastSkipReason`（可观测）。
+- 顺带：`readCccName` 的两个同名不同算法版本（一处跳注释、一处整文件 trim，**含注释时静默失配**）收口。
+
+### ③ 对外面归一（C4）+ 观察面归一（C5）
+
+**C4 —— 5 个对外面 → 1 个"面宿主"**：新增 `src/face-host.ts`（`startFace` / `faceEnabled` / `stopFace` / `stopAllFaces` / `faceActive` / `facePort`）+ `src/ports.ts`（集中端口表，**`MECHANISM_PORTS` 由端口表机械派生**）。
+
+- 🔴 **顺带修一个真实缺陷**：输出守卫的机制端口词表**漏了 3082**（微信发送面）⇒ 派生后"**新增面即自动进词表**"，漂移面消失。
+- **A↔C 解耦显式保留**（`weixin-send-api.ts` 头注记明：3081 会原样反代含请求头 ⇒ 若把 3082 挂到 A 上，已登录的家庭成员号可冒充 bot）⇒ **面宿主只共享生命周期，绝不合并路由 / 监听器 / 鉴权**。
+- **拆卸归一**：删 `gateway.ts` / `weixin-send-api.ts` 两处自带 disposer ⇒ 只剩 `seams/lifecycle.ts` **一个挂点**（`stopAllFaces()`）。
+- **`unref` 逐字恢复**：C4 曾丢掉 3082 listener 的 `server.unref()`（未 unref 的 listener 会让宿主以一次性命令运行时**进程挂住不退出**）⇒ `FaceSpec` 加**可选** `unref?: boolean`，**仅微信发送面传 `true`**（其余三面 C4 前本就没有，属越界变更，**不改**）。
+- `api.ts` 9 处 `x-serenity-ui` 内联检查归一为 `requireWebUi`。
+
+**C5 —— 10 个渲染点 → 1 个容器状态模型 + 薄渲染**：新增 `src/container-status.ts` 作为**取数唯一出口**。
+
+- 复核修正：11 行重叠矩阵里 **1 行真重复**（`probeHostContract` ×2）+ **1 行已被 C2 消掉**，其余 9 行是"**同一判据的多个渲染点**"（判据层本就单源）⇒ **不为凑数制造改动**。
+- **`dashboard health` 的 wire 输出逐字不变**（逐行比对字段名/取值/出现条件/三条 detail 文案）；**两条 registry 判据仍各自具名、不合并**（结构完整性 ≠ DC-M1~M4 质量）。
+- ⚠️ **一处真实语义变更（显式接受）**：`probeHostContract` 两算收敛为一算 ⇒ health 段读 **apply 时捕获的快照**，不再每次现探 ⇒ **宿主在 apply 之后才补挂的服务，health 不再察觉**（判据：那些是宿主核心服务、在插件装载前注册；需要当场真探时该函数仍可调）。
+
+### ④ autopilot 脚本退场（C6a）
+
+**病根诊断**（用户一问定案：「它是给我们自己的工具，还是发给 CCC 的机制」）：那个独立脚本 `experiments/autopilot-trajectory/scripts/autopilot-trajectory.ts` **两面都挂**——`container_admin autopilot` 的 `status`/`init`/`generate-bias` **三动作逻辑全在它里面**（插件只转发）且**随 npm 包分发**，却**住在 `experiments/`、零测试、不在门禁内**。⇒ **一个被当作机制使用、却没按机制维护的东西**，正是"报告印假 ✅"的土壤。
+
+**处置（拆两半，退掉独立脚本）**：
+
+| 半 | 内容 | 去处 |
+|---|---|---|
+| 机制那半 | 写配置 / 状态报告 / 跑偏见脚本 | **进插件进程**（`src/autopilot-core.ts` 零 DSH 判据层 + `src/autopilot-chain.ts` 条件链唯一实现 + `src/autopilot-ops.ts` 三动作） |
+| 我们那半 | 完整条件链 / 深层诊断 | **留开发面**（`dsh-develop diag`），**判据只写一份**——它**动态 import 插件 src 的同一份 `autopilot-chain`**，不另写"文件读取版" |
+
+- **8 项结构性分歧一次全消**（缺判据 4：**全局闸** / **live 会话** / **agent 可解析性** / **重入守卫**；表达式不同 4：目标会话选择 / 间隔下界（统一 `MIN_INTERVAL_HOURS = 0.01` = tick 同源）/ bias 运行参数 / 结论口径）。
+- **额外收益**：`status` 首次把**进程态**（全局闸 / 时钟是否武装 / tick 次数 / 上次 tick / 上次跳过原因）带进 CCC 工具面——"时钟没武装时条件再全绿也不唤起"这层此前不可见。
+- **删除**：`src/autopilot-script.ts`（转发层，79 行）+ `experiments/.../scripts/autopilot-trajectory.ts`（588 行）；`package.json` `files` 相应去两行；`SKILL.md` 改为纯文档形态。
+
+### ⑤ 时钟引擎 P2（C6b）
+
+两条时钟抽出**一份共用运行时** `src/clock-runtime.ts`（**各持自己的定时器**）——**选 P2 不选 P1** 的理由：autopilot 每轮要跑 CCC 偏见脚本、**可能阻塞数十秒**，共用"排队执行链"会让另一条一起卡住。
+
+- 🔴 **硬约束写进代码**：**每实例私有**的执行链（`InstanceState.chain`）——"若把 chain 提到模块级省一次分配，**隔离即刻失效——不许**"；武装门**只判全局闸**；**两条闸必须继续分开传**（两闸解耦语义与既有回归钉不动）；可观测字段一个不丢（`acc-diag` ①b / `containerClocks` 照读）。
+- 🔴 **顺带修掉一个既有缺陷（可直接感知）**：旧实现把**事件接线**放在 `startTimer` **末尾**，而 autopilot 闸**缺省关**（= 当前配置）⇒ 启动时走不到那步 ⇒ **事件从未挂上** ⇒ **面板把闸打开后，不重启不生效**。工厂把接线提到**闸判定之前**（只挂一次，`reset()` 复位），理由写进源码：「事件是唤醒这条钟的**唯一入口**，它的存在不该依赖某一刻的闸值」。
+- **诚实记录**：净行数 **−99**（约 62%），**未达估算的 −160**——P2 的估值按"两钟样板全删"算，实际必须留下工厂真实逻辑 ~167 行 + 每条语义差的**显式表达**（`begin`/`bodyCountsTick`/`logFrom`/`events`/`startLog`/`onDispose`/`onReset`）。**当初"省 ~160 行"这个决策输入是乐观的**，记此以免未来用同一估值做决策。
+
+### ⑥ 死件清理（C3）
+
+机械"零引用导出"扫描（95 文件 / 810 导出行 ⇒ ALIVE 390｜TEST-ONLY 202｜DEAD 216｜EXTERNAL-ENTRY 2）后**分类处置**：
+
+- **真孤儿 20 条**：删声明（含 `__resetBrokenConfigWarningsForTest` / `HANDYMAN_MAX_ROUNDS` / `isReadTool` / `JsonRpcNotification` / `skiffSessionActiveFor` / `PraxisSection` / `TrajectoryStyle` 等）。
+- **自用型 ~190 条**：**只删 `export` 关键字**（删声明会编译失败——它们只在定义文件内自用）。
+- **三个死工具对象**：`tools/{cce,eap,neat}Tool`（v1.30 三合一成 `praxis` 时的遗留）⇒ **删对象、留内容模块**（`praxis.ts` 仍在 import 它们的 `*_CONTENT`——**内容模块是活的**）。
+- ⚠️ **方法局限（留档）**：动态 `await import()` 是静态图盲区（`session-cleanup` 一度被误判为死模块）⇒ 任何"零引用即删"的工具化方案（knip 等）**须先处理该盲区**。
+
+### ⑦ 顺带修复与清理
+
+- 🔴 **`autopilot status` 假满足缺陷**：判决行只统计 `✗`，把 `⏸`（间隔未到 / 高峰避开）排除在阻断外 ⇒ **每天北京 8–18 点（10 小时）都印「✅ 唤起条件全部满足」而插件实际不唤起**。修法 = 抽出 `judgeWake()` 单一判据（`diagCcc` 与 `status` 共用）＋**判决三类分档**：`✗`（需人改）/ `⏸`（等待中）/ **`?`（不可知——新增）**，**只有三者皆空才印 ✅** ⇒ 离线通道**按构造不可能印假 ✅**（结构消灭，非措辞修补）。文案纠错 `10min` → **`5min`**（对齐 `TICK_MS`）。
+- **`.gitignore` 无锚点误伤**：第 18 行 `scripts/`（原意 = 仓库根的开发工具目录）**连带藏住了一个随包分发的机制实现**（同一条规则命中 `hooks/.../experiments/autopilot-trajectory/scripts/`）⇒ 锚定为 **`/scripts/`**，**双向实测**（随包脚本不再被忽略、仓库根 `scripts/` 仍被忽略）。
+- **旧机制措辞残留**：`skiff-admin.ts` 的 SEP 类比改写为直述三动作分工；`SkiffCccEntry` 别名删除（"一个类型两个名字"与 C2"收成一个出口"相悖）；客户端注释里的过期函数名改为 `listCccs`。
+- `experiments/autopilot-trajectory/scripts/` **退化为空目录** ⇒ 清理。
+
+### 门禁与验收
+
+`typecheck` 双面 ✓ ｜ `test` **92 files / 1418 tests** ✓（**并发/端口类改动 5 连跑全绿**，零 EADDRINUSE）｜ `build` ✓ ｜ `pack-check` ✓（**111 文件**，js 18 / d.ts 89）｜ `readme-sync` ✓（发布链内）。
+
+### 已知边界（诚实记录，未修）
+
+1. **本版"新旧等价"是"既有回归钉全绿 + 逐行阅读"，不是端到端差分**：无新旧输出对照测试；C2/C4/C5 的 HTTP 面等价性在部署后按冒烟补验（见本次发布的验收记录）。
+2. **`AutopilotClockRuntime` 保留为 `type = ClockRuntime` 且零外部引用** ⇒ 留待后续死件清理裁决（本轮 C3 扫描在 C6b **之前**跑，故未覆盖它）。
+3. **仓库根 `scripts/` 目录仍未版本化**（`/scripts/` 规则原意）；本轮只修了"无锚点误伤"，**开发面工具本身是否入库仍待裁**。
+4. **`container_admin autopilot` 的间隔下界取 `0.01`**（= tick 同源）；开发面 `diag` 与进程内共用同一判据，故不再有分歧。
+5. **`probeHostContract` 语义变更**（见 ③）——health 读 apply 时快照。
+6. **3082 面被占用时仍会晚 ~10s 才告警**（缺省重试 10×1s）：失败形态只是**告警延迟**、无数据损失 ⇒ 在**实测到危害前不调参**。
+
+---
+
 ## v1.34.0 — 2026-09-15（🧩 工具面收敛与更名：`logbook` 并入 **`container_trajectory`** + 专属工具 `acc-diag` + 时钟可观测面 + 两闸解耦）
 
 **Scope:** 三条独立裁决合批发布（发布纪律 D14；用户 2026-09-15「同意，发布」）：
