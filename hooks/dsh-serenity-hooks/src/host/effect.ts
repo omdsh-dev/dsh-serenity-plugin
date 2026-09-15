@@ -10,7 +10,7 @@
  *  - `ctx.effect` 是宿主成员，但**不可假定存在**（测试替身、极旧宿主、HMR 早期阶段）。
  *    直接裸调会让 `apply` 抛错 = 整个 dsh 启动失败（app-boot "plugin(s) failed to load"），
  *    这比"资源没拆卸"严重得多——所以缺失时**响亮降级**（记录 + 返回 false）。
- *  - 零依赖叶模块：gateway / autopilot 等模块只引它，不会因此被拖进 skiff/rebuild 的依赖链。
+ *  - 零依赖叶模块：gateway 等模块只引它，不会因此被拖进 skiff/rebuild 的依赖链。
  */
 
 /** 与宿主 `ctx.effect` 同形的最小结构（避免为一次调用引入 cordis 类型依赖） */

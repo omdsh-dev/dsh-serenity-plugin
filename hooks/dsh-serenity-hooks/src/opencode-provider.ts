@@ -316,7 +316,7 @@ export function registerOpencodeAutoConfig(ctx: Context): void {
       retries += 1
       sync()
     }, delay)
-    retryTimer.unref?.() // 不阻止进程退出（与 skiff/autopilot 同款）
+    retryTimer.unref?.() // 不阻止进程退出（与 skiff 同款）
   }
 
   function sync(): void {

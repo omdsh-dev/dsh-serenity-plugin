@@ -3,11 +3,16 @@
  *
  * 覆盖三层：
  *  ① 判据：`readExclusiveTools`（声明 / 缺字段 / 损坏 JSON → fail-closed 空 / 非字符串过滤）
- *  ② 装配：`runAccDiag`（live 运行态 + 面板解析 + 唤醒注册表 + 脚本条件链；失败不吞）
- *  ③ 工具面：`createAccDiagTool`（名字 / 无参 / CCC 未解析时响亮 code / 报告四段齐）
+ *  ② 装配：`runAccDiag`（live 运行态 + 唤醒时钟 + 唤醒注册表；失败不吞）
+ *  ③ 工具面：`createAccDiagTool`（名字 / 无参 / CCC 未解析时响亮 code / 报告三段齐）
  *
  * 可见性（`tools.restrict`）不在本文件覆盖——它属拦截缝，见 `guards.test.ts`
  * 的「专属工具条件可见」一组。
+ *
+ * 2026-09-15（ACC 侧 autopilot 退场，S142 §1 二阶裁定）：报告由四段降为三段
+ * （① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。原 ② 面板解析与 ④ 唤起条件链的主语
+ * 随机制消失 ⇒ 本文件对应用例（④ 进程内判据、④ 未配置如实报告）**整组删除**，
+ * 不保留、不改为 skip。④ 的诊断缺口已登记在 `src/diag-ops.ts` 文件头与基线 doc §1。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
@@ -15,9 +20,6 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (o: unknown) => o }))
-
-// v1.34.1（⑥ C6a）：④ 段**不再 spawn 包内脚本**（改为进程内调 autopilot-chain）⇒ 本文件不再
-// 需要脚本通道 mock。判据本身在 autopilot-chain.test.ts 覆盖；此处只验**装配与渲染**。
 
 import { readExclusiveTools } from '../src/ccc.js'
 import { runAccDiag, renderAccDiag } from '../src/diag-ops.js'
@@ -120,39 +122,21 @@ describe('acc-diag: runAccDiag 装配 + 渲染', () => {
     const text = renderAccDiag(r)
     expect(text).toContain('ACC 运行态诊断')
     expect(text).toContain('① live 运行态')
-    expect(text).toContain('② 面板解析')
     expect(text).toContain('③ 唤醒注册表')
-    expect(text).toContain('④ 唤起条件链')
     expect(text).toContain('w-1 [pending]')
     expect(text).toContain('补跑窗口 2h')
-    // ④ 段 = **进程内**条件链（判据唯一实现 = autopilot-chain）——不再有子进程输出
-    expect(text).toContain('自主轨迹唤起诊断')
-  })
-
-  it('🔴 ④ 段进程内：读得到只有进程内可见的判据（全局闸），并给出判决档', async () => {
-    writeCccConfig({ trajectory: { autopilot: { enabled: true, intervalHours: 12 } } })
-    const r = await runAccDiag(fakeCtx() as never, dir)
-    // 本测试进程 settings 缺省 → 闸关（readSimpleSettings 兜底）⇒ 阻断，且**报告里能看见**
-    expect(r.autopilotChain).toContain('周期自唤醒全局闸关闭')
-    expect(r.autopilotChain).not.toContain('不可知（离线通道——只有插件进程能读 DSH 设置）')
-    expect(r.autopilotVerdict).toBe('blocked')
-    expect(renderAccDiag(r)).toContain('周期自唤醒全局闸关闭')
+    // 🔒 已退场的两段不得复活：② 面板解析 / ④ 唤起条件链（主语随 ACC autopilot 消失）
+    expect(text).not.toContain('② 面板解析')
+    expect(text).not.toContain('④ 唤起条件链')
+    expect(text).not.toContain('自主轨迹唤起诊断')
   })
 
   it('无 live 会话 / 无条目：空段显式说明"无"（不得让人误读为"沉默 = 一切正常"）', async () => {
     const r = await runAccDiag(fakeCtx([]) as never, dir)
     const text = renderAccDiag(r)
     expect(text).toContain('live 会话: 0 个')
-    expect(text).toContain('autopilot CCC: 无')
     expect(text).toContain('（无条目）')
-    // ② 段在测试进程里总能解析到"某个 CCC"（进程 cwd 就在本 CCC 内）⇒ 只断言段落在场
-    expect(text).toContain('── ② 面板解析')
-  })
-
-  it('配置缺失 → ④ 段如实报"未配置"（不是空段、不是静默）', async () => {
-    const r = await runAccDiag(fakeCtx() as never, dir)
-    expect(r.autopilotChain).toContain('trajectory.autopilot 未配置')
-    expect(r.autopilotVerdict).toBe('blocked')
+    expect(text).toContain('── ③ 唤醒注册表')
   })
 
   it('live 会话列出 id / cwd / CCC 归属', async () => {
@@ -161,16 +145,17 @@ describe('acc-diag: runAccDiag 装配 + 渲染', () => {
     expect(renderAccDiag(r)).toContain('session-a')
   })
 
-  it('① 段报告进程内两个时钟的武装状态（"为何没有 tick" 的第一手判据）', async () => {
+  it('①b 段报告唤醒时钟的武装状态（"为何没有 tick" 的第一手判据）', async () => {
     const r = await runAccDiag(fakeCtx() as never, dir)
     const text = renderAccDiag(r)
     expect(r.clocks.wake).toHaveProperty('armed')
     expect(r.clocks.wake).toHaveProperty('enabled')
-    expect(r.clocks.autopilot).toHaveProperty('armed')
     expect(text).toContain('唤醒调度器（wake-registry tick）')
-    expect(text).toContain('autopilot 时钟（周期自唤醒 tick）')
     expect(text).toContain('armed=')
     expect(text).toContain('上次 tick=')
+    // 🔒 autopilot 时钟已随机制退场（回归钉：报告里不得再有第二座钟）
+    expect(Object.keys(r.clocks)).toEqual(['wake'])
+    expect(text).not.toContain('autopilot 时钟')
   })
 })
 
@@ -179,6 +164,16 @@ describe('acc-diag: 工具面', () => {
     const tool = createAccDiagTool(fakeCtx() as never) as unknown as { name: string; parameters: unknown }
     expect(tool.name).toBe('acc-diag')
     expect(Object.keys(tool.parameters as object)).toHaveLength(0)
+  })
+
+  it('description 只承诺现存三段（②/④ 不得复现）', () => {
+    const tool = createAccDiagTool(fakeCtx() as never) as unknown as { description: string }
+    expect(tool.description).toContain('(1) live runtime')
+    expect(tool.description).toContain('(1b) wake clock')
+    expect(tool.description).toContain('(3) wake registry')
+    expect(tool.description).not.toContain('(2) panel resolution')
+    expect(tool.description).not.toContain('(4) wake condition chain')
+    expect(tool.description).not.toContain('autopilot')
   })
 
   it('CCC 未解析（cwd 不在任何 CCC 内）→ 响亮 code，不抛错', async () => {
@@ -193,13 +188,14 @@ describe('acc-diag: 工具面', () => {
     rmSync(other, { recursive: true, force: true })
   })
 
-  it('CCC 内调用 → ok + 报告含四段', async () => {
+  it('CCC 内调用 → ok + 报告含三段', async () => {
     const tool = createAccDiagTool(fakeCtx() as never) as unknown as {
       execute: (a: unknown, e: unknown) => Promise<{ ok: boolean; report: string }>
     }
     const res = await tool.execute({}, { agent: { session: { header: { cwd: dir } } } })
     expect(res.ok).toBe(true)
     expect(res.report).toContain('① live 运行态')
-    expect(res.report).toContain('④ 唤起条件链')
+    expect(res.report).toContain('唤醒调度器（wake-registry tick）')
+    expect(res.report).toContain('③ 唤醒注册表')
   })
 })

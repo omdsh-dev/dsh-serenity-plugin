@@ -15,15 +15,15 @@
  *    其模块级运行时对象里，任何"重新推导"得到的都是与真实调度器不一致的假值。
  *
  * 依赖分层（为什么本模块"重"而 `kit-ops` / `status` 保持"轻"）：
- *  {@link containerClocks} 必须读 `wake-scheduler` / `autopilot-trajectory` 的进程内快照，而这两个
- *  模块带 **@deepseek-ai 值依赖**（`dsh-llm` 的 `createUserMessage`）。故本模块**只能**被本就重型或
- *  异步的消费方使用：`diag-ops`（静态 import）、`api.ts` / `kit-ops`（`await import(...)`，与
- *  `api.ts` 既有的"保持静态链纯净"约定一致）。**轻链模块不得静态 import 本模块**。
+ *  {@link containerClocks} 必须读 `wake-scheduler` 的进程内快照，而该模块带 **@deepseek-ai 值依赖**
+ *  （`dsh-llm` 的 `createUserMessage`）。故本模块**只能**被本就重型或异步的消费方使用：
+ *  `diag-ops`（静态 import）、`api.ts` / `kit-ops`（`await import(...)`，与 `api.ts` 既有的
+ *  "保持静态链纯净"约定一致）。**轻链模块不得静态 import 本模块**。
  *
  * 已有的单一真相源继续指向原处（**不复制**）：
  *  L0 根解析 `ccc.ts findSerenityRoot`｜L1/L2 根与枚举 `ccc-roots.ts`｜宿主契约 `host/contract.ts`
- *  ｜CCC 配置 `ccc.ts loadSerenityConfig`｜注册表 `msm-ops.ts`｜时钟 `wake-scheduler.ts` /
- *  `autopilot-trajectory.ts`｜唤醒注册表 `wake-registry.ts`。
+ *  ｜CCC 配置 `ccc.ts loadSerenityConfig`｜注册表 `msm-ops.ts`｜时钟 `wake-scheduler.ts`
+ *  ｜唤醒注册表 `wake-registry.ts`。
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
@@ -40,7 +40,6 @@ import { readDshVersion } from './status.js'
 import { hostContractReport, type HostContractReport } from './host/contract.js'
 import { checkRegistryQuality, type RegistryQualityReport } from './msm-ops.js'
 import { listWakes, type WakeEntry } from './wake-registry.js'
-import { autopilotClockState, getAutopilotStatus } from './autopilot-trajectory.js'
 import { wakeSchedulerState } from './wake-scheduler.js'
 import type { JsonValue } from './json.js'
 
@@ -219,34 +218,30 @@ export function checkRegistryHealth(root: string): RegistryStructureReport {
  */
 export { checkRegistryQuality, type RegistryQualityReport }
 
-// ── 分组 4：进程内时间轴（时钟 / 唤醒注册表 / autopilot 目标）──
+// ── 分组 4：进程内时间轴（时钟 / 唤醒注册表）──
 
 /**
  * 进程内时钟快照类型。
- * ⚠️ 两个时钟的形状由**各自模块**定义（`WakeSchedulerRuntime` / `AutopilotClockRuntime`，
- * 两者都未导出且 `autopilot` 少一个 `lastTickLog` 字段）——故此处取**联合**：它们对外暴露的
- * 诊断字段（armed / enabled / ticks / lastTickAt / armedAt / lastSkipReason）语义同规格，
- * 但类型上不是同一个。**不为了合并类型去改那两个模块的导出面**。
+ * ⚠️ 形状由**时钟模块自身**定义（`wake-scheduler.ts` 未导出的 `WakeSchedulerRuntime`）——故此处
+ * 直接取其返回类型。2026-09-15：原为「唤醒调度器 ∪ autopilot」联合（两者诊断字段同规格但类型
+ * 不同）；autopilot 时钟随 ACC 侧 autopilot 退场删除后，**只剩一座钟**（唤醒调度器）。
  */
-export type ClockSnapshot = ReturnType<typeof wakeSchedulerState> | ReturnType<typeof autopilotClockState>
+export type ClockSnapshot = ReturnType<typeof wakeSchedulerState>
 
 export interface ContainerClocks {
   /** 唤醒调度器（一次性唤醒，5min tick）——**模块级快照**，不重算 */
   wake: ClockSnapshot
-  /** autopilot 时钟（周期自唤醒 tick）——**模块级快照**，不重算 */
-  autopilot: ClockSnapshot
 }
 
 /**
- * 两条时钟的进程内状态（"为什么这轮没被唤起"的第一手判据）。
+ * 时钟的进程内状态（"为什么这轮没被唤起"的第一手判据）。
  *
  * 🔴 **只读快照，不重算**（设计红线）：`armed`/`ticks`/`lastTickAt`/`lastSkipReason` 只存在于
- * 调度器自己的模块级运行时对象里（`wake-scheduler.ts schedulerRuntime` /
- * `autopilot-trajectory.ts` 同规格对象）。任何"从配置或文件重新推导"得到的值都会与真实
- * 调度器的状态不一致——那比没有可观测量更糟（会给出假的"一切正常"）。
+ * 调度器自己的模块级运行时对象里（`wake-scheduler.ts schedulerRuntime`）。任何"从配置或文件
+ * 重新推导"得到的值都会与真实调度器的状态不一致——那比没有可观测量更糟（会给出假的"一切正常"）。
  */
 export function containerClocks(): ContainerClocks {
-  return { wake: wakeSchedulerState(), autopilot: autopilotClockState() }
+  return { wake: wakeSchedulerState() }
 }
 
 export interface ContainerWakes {
@@ -265,17 +260,10 @@ export function containerWakes(root: string): ContainerWakes {
 }
 
 /**
- * autopilot 目标状态取数（读 CCC 配置 + 目标 SESSION.md 的 mtime 探测）。
- * 与 WebUI 面板 / `acc-diag` 一致——两边渲染的是**同一份** `getAutopilotStatus()` 结果。
- * 类型从该函数的返回类型派生（`AutopilotTrajectoryStatus` 未从 `autopilot-trajectory.ts` 导出，
- * 此处不为了转出而改动那个模块的导出面）。
+ * autopilot 目标状态取数（`getAutopilotStatus`）与 `AutopilotStatusSnapshot` 类型，
+ * 连同 ACC 侧 autopilot 机制于 2026-09-15 整体删除（所有者裁决 (a)）——原消费方是设置面板
+ * 的「Autopilot Trajectory」区块与 `/serenity/trajectory` 端点，两者同批删除。
  */
-export type AutopilotStatusSnapshot = ReturnType<typeof getAutopilotStatus>
-
-/** @returns CCC 根缺失（null）→ null */
-export function containerAutopilot(root: string | null): AutopilotStatusSnapshot | null {
-  return root ? getAutopilotStatus(root) : null
-}
 
 // ── 组装：核心段 ──
 
@@ -317,9 +305,10 @@ export interface ContainerStatusOptions {
 /**
  * 核心段组装（`dashboard health` 的取数：身份 + 三原则 + 注册表两判据 + 配置 + 宿主契约）。
  *
- * 时间轴三段（时钟/唤醒注册表/autopilot 目标）**不在本组装内**：它们是各自独立消费方的需要
- * （`acc-diag` / `/serenity/trajectory`），硬塞进来会让只想看三原则的调用方付无谓的 IO。
- * 需要时按名字调 {@link containerClocks} / {@link containerWakes} / {@link containerAutopilot}。
+ * 时间轴两段（时钟/唤醒注册表）**不在本组装内**：它们是各自独立消费方的需要
+ * （`acc-diag` / 开发面诊断），硬塞进来会让只想看三原则的调用方付无谓的 IO。
+ * 需要时按名字调 {@link containerClocks} / {@link containerWakes}。
+ * （原第三段「autopilot 目标」及其取数函数 `containerAutopilot` 已随 ACC 侧 autopilot 退场删除。）
  */
 export function containerStatus(opts: ContainerStatusOptions = {}): ContainerStatus {
   const root = opts.root ?? null

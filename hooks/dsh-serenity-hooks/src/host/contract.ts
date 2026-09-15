@@ -253,7 +253,7 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'agent/inbox/inserted', site: 'seams/bootstrap.ts', impact: 'first-anchor 锚定失效', required: false },
   { name: 'agent/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
   { name: 'session/event', site: 'seams/compact.ts, seams/bootstrap.ts', impact: '压缩后重注入/晋升状态失效', required: false },
-  { name: 'session/created', site: 'weixin-bridge.ts, autopilot-trajectory.ts', impact: '定时器/桥同步失效', required: false },
+  { name: 'session/created', site: 'weixin-bridge.ts', impact: '定时器/桥同步失效', required: false },
   { name: 'session/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
   { name: 'settings/updated', site: 'opencode-provider.ts（ns 过滤复评）', impact: 'opencode 路由热改不再自愈（自动配置仍覆盖首次）', required: false },
   { name: 'tools/pre-execute', site: 'seams/guards.ts', impact: '机械守卫（safe-mode/路径/白名单）失效', required: true },

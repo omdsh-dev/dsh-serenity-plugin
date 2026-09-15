@@ -1,5 +1,5 @@
 /**
- * diag-ops.ts — `acc-diag` 报告装配（v1.33，S142 §32.11）
+ * diag-ops.ts — `acc-diag` 报告装配（v1.33，S142 §32.11；2026-09-15 段数收缩）
  *
  * 为什么单独成模块（R↓）：工具面（`tools/acc-diag.ts`）只做"取 CCC 根 + 渲染"，
  * 装配逻辑放这里 ⇒ 纯函数可单测、不依赖 DSH 工具注册。
@@ -7,31 +7,36 @@
  * 为什么**无动作参数**：诊断是低频动作（§32.9 收敛取向），一次调用即出全报告，
  * 不需要子命令面；动作越多，模型选择成本越高。
  *
- * 四段内容（数据来源各自单一真相源，本模块只聚合不复制语义）：
- *   ① live 运行态 —— 插件进程内 `diagLive(ctx)`（live 会话清单 + 各 autopilot CCC 的
- *      目标命中 / agent 定位诊断）——**独立进程看不到运行时**，这正是本工具存在的理由
- *   ② 面板解析 —— `diagLive.panelResolved`（无参面板请求会落到哪个 CCC）
- *   ③ 唤醒注册表 —— `wake-registry.json` 全量条目（state / at / target / lastResult）+ 补跑窗口
- *   ④ 唤起条件链 —— **进程内** {@link buildWakeChain}（⑥ C6a）：逐条件值 + 阻断点 + 修复建议
- *      + 只有进程内能看到的三项事实（全局闸 / live 会话 / agent 可解析性）
+ * 三段内容（数据来源各自单一真相源，本模块只聚合不复制语义）：
+ *   ①  live 运行态 —— 插件进程内 `diagLive(ctx)`（进程 cwd/CCC + live 会话清单）
+ *       ——**独立进程看不到运行时**，这正是本工具存在的理由
+ *   ①b 唤醒时钟 —— `containerClocks().wake`（唤醒调度器进程内快照：武装态/计数/上次跳过原因）
+ *   ③  唤醒注册表 —— `wake-registry.json` 全量条目（state / at / target / lastResult）+ 补跑窗口
  *
- * C5「观察面归一」（2026-09-15）：①/② 仍走 `diagLive`（那是**live 运行态**的独有取数，
- * 没有第二个来源），但 ①b 时钟与 ③ 注册表改经 `container-status.ts` 取（唯一取数出口）——
- * **投影仍在本文件**（诊断段不含 `message`，面板含；这是渲染差异，不是取数差异）。
+ * ── 2026-09-15：段数由四降为三（S142「ACC 侧 autopilot 退场」§1 二阶裁定）─────────────
+ * ACC 侧 autopilot 整段退场后，报告里两段的**主语消失**，故删除（不是"暂时关掉"）：
+ *   · 原 ② 面板解析 —— `diagLive.panelResolved` 的来源是"哪个 CCC 配了 autopilot"，
+ *     面板区块同批删除 ⇒ 主语不存在。
+ *   · 原 ④ 唤起条件链 —— 整段都是 ACC autopilot 的唤起条件（`buildWakeChain` +
+ *     `autopilotRuntimeFacts`），实现模块已删 ⇒ 不留第二份条件链、也不留半死的手写版。
+ *   · 原 ① 段的 autopilot CCC 渲染（逐 CCC 目标命中 / agent 定位）同批删除。
  *
- * ⑥ C6a（2026-09-15）：④ 段由"spawn 包内脚本"改为**进程内计算**。旧实现是本报告里
- * 唯一一条**跨进程**取数：脚本看不到全局闸/live/agent ⇒ 与本工具 ① 段自相矛盾
- * （① 说"agent 未定位"，④ 却印"条件全部满足"）。现在 ④ 段与 ① 段读**同一份事实**
- * （`autopilotRuntimeFacts`），且条件链**只有一份实现**（开发面 `dsh-develop diag` import 同一个）。
+ * 🔴 **已知缺口（登记，不静默丢弃）**：④「为什么这轮没唤起」的诊断在 **CCC 自管理链**上归零。
+ * 新链的失败形态是"S151 漏了自排下一轮"或"调度器闸关/未 tick"，而删掉 ④ 后这两种病因都不可见。
+ * 按所有者裁决本次**不补**（一句话可补，代价 = 一条新条件链：调度器 armed / 闸 / tick 在跑 /
+ * 条目到期 / 补跑窗口 / 目标可解析 / CCC 闸）。**不得**以"顺手保留 ④"的方式把它偷偷带回。
+ *
+ * C5「观察面归一」（2026-09-15）：① 走 `diagLive`（那是**live 运行态**的独有取数，没有第二个
+ * 来源）；①b 时钟与 ③ 注册表经 `container-status.ts` 取（唯一取数出口）——**投影仍在本文件**
+ * （诊断段不含 `message`，面板含；这是渲染差异，不是取数差异）。
  */
 
 import { WAKE_CATCH_UP_MS } from './wake-registry.js'
-import { autopilotRuntimeFacts, diagLive, type DiagLiveReport } from './autopilot-trajectory.js'
-import { buildWakeChain, renderWakeChain } from './autopilot-chain.js'
+import { diagLive, type DiagLiveReport } from './live-sessions.js'
 import { containerClocks, containerWakes, type ClockSnapshot } from './container-status.js'
 import type { Context } from 'cordis'
 
-/** 进程内时钟状态（唤醒调度器 / autopilot 时钟；判据各自单一真相源） */
+/** 进程内时钟状态（唤醒调度器；判据单一真相源 = `wake-scheduler.ts`） */
 type ClockState = ClockSnapshot
 
 /** 人读渲染一行时钟状态（"为何没有 tick" 的第一手判据） */
@@ -53,13 +58,12 @@ interface AccDiagReport {
   ccc: string
   live: DiagLiveReport
   /**
-   * 进程内两个时钟的武装状态（2026-09-14 F 段缺陷**新暴露面**）。
-   * 为什么必须有（R↓）：此前"条目为何滞留在 pending"无法从报告回答——④ 段只算**配置**条件，
-   * 而真正的原因可能在"时钟根本没在跑"这一层。有了它，同类故障一眼可判。
+   * 唤醒调度器的进程内武装状态（2026-09-14 F 段缺陷**新暴露面**）。
+   * 为什么必须有（R↓）：此前"条目为何滞留在 pending"无法从报告回答。有了它，
+   * "时钟根本没在跑"这一类故障一眼可判——这是 ACC 现存的**唯一**轨迹调度时钟。
    */
   clocks: {
     wake: ClockState
-    autopilot: ClockState
   }
   wakes: {
     /** 注册表文件路径问题（读不到时非空——不得静默） */
@@ -75,19 +79,12 @@ interface AccDiagReport {
     }>
     pending: number
   }
-  /**
-   * 唤起条件链（进程内算出的渲染文本，含逐条件值 + 阻断点 + 修复建议）。
-   * **不是**子进程输出——判据唯一实现见 `autopilot-chain.ts`。
-   */
-  autopilotChain: string
-  /** 条件链判决档（`ready`/`waiting`/`blocked`/`unknown`；供调用方/测试断言，不再解析文本） */
-  autopilotVerdict: string
 }
 
 /**
  * 装配报告（一次调用即全报告）。
  * @param ctx 插件上下文（进程内读 sessions/agents）
- * @param root 调用方 CCC 根（条件链诊断目标）
+ * @param root 调用方 CCC 根（唤醒注册表取数目标）
  * @returns 结构化报告（渲染由 {@link renderAccDiag} 负责）
  */
 export async function runAccDiag(ctx: Context, root: string): Promise<AccDiagReport> {
@@ -95,14 +92,11 @@ export async function runAccDiag(ctx: Context, root: string): Promise<AccDiagRep
   // C5：时钟与唤醒注册表经 container-status 取数（与本文件其余段落同一取数出口）
   const clocks = containerClocks()
   const wakes = containerWakes(root)
-  // ④ 段：进程内条件链（含全局闸 / live / 重入——旧脚本看不到的三项）
-  const chain = await buildWakeChain(root, autopilotRuntimeFacts(ctx, root))
   return {
     ccc: root,
     live,
     clocks: {
       wake: clocks.wake,
-      autopilot: clocks.autopilot,
     },
     wakes: {
       error: wakes.error,
@@ -117,12 +111,10 @@ export async function runAccDiag(ctx: Context, root: string): Promise<AccDiagRep
       })),
       pending: wakes.pending,
     },
-    autopilotChain: renderWakeChain(chain),
-    autopilotVerdict: chain.verdict,
   }
 }
 
-/** 人读渲染（四段；空段也要显式说明"无"，避免"沉默 = 一切正常"的误读） */
+/** 人读渲染（三段；空段也要显式说明"无"，避免"沉默 = 一切正常"的误读） */
 export function renderAccDiag(r: AccDiagReport): string {
   const lines: string[] = []
   lines.push(`═══ ACC 运行态诊断（acc-diag）═══`)
@@ -137,28 +129,10 @@ export function renderAccDiag(r: AccDiagReport): string {
   for (const s of r.live.liveSessions) {
     lines.push(`  · ${s.id}${s.title ? `「${s.title}」` : ''} — ccc=${s.cccRoot ?? '(非 CCC)'} cwd=${s.cwd ?? '(无)'}`)
   }
-  if (r.live.autopilotCccs.length === 0) {
-    lines.push('autopilot CCC: 无（没有 live 会话配置了 trajectory.autopilot）')
-  } else {
-    lines.push(`autopilot CCC: ${r.live.autopilotCccs.length} 个`)
-    for (const c of r.live.autopilotCccs) {
-      lines.push(
-        `  · ${c.root} enabled=${c.enabled} session=${c.session ?? '(未配置)'} 目标=${c.target?.dirName ?? '(未命中)'}` +
-          ` wakeable=${c.target?.wakeable ?? false} agent=${c.agentResolved ? '已定位' : '未定位'}`,
-      )
-      if (c.agentDiagnosis) lines.push(`      诊断: ${c.agentDiagnosis}`)
-    }
-  }
   lines.push('')
 
-  // ①b 进程内时钟（**先看这一行**：时钟没武装时，④ 段的条件链再全绿也不会被唤起）
+  // ①b 进程内时钟（**先看这一行**：时钟没武装时，注册表条目再就绪也不会被投递）
   lines.push(renderClock('唤醒调度器（wake-registry tick）', r.clocks.wake))
-  lines.push(renderClock('autopilot 时钟（周期自唤醒 tick）', r.clocks.autopilot))
-  lines.push('')
-
-  // ② 面板解析
-  lines.push(`── ② 面板解析（无参 /serenity/trajectory 落到哪个 CCC）──`)
-  lines.push(r.live.panelResolved ?? '（解析不到——本进程无 live+enabled 的 autopilot CCC）')
   lines.push('')
 
   // ③ 唤醒注册表
@@ -170,10 +144,5 @@ export function renderAccDiag(r: AccDiagReport): string {
     lines.push(`  · ${w.id} [${w.state}] at=${w.at} → ${w.target} by=${w.createdBy} attempts=${w.attempts}`)
     if (w.lastResult) lines.push(`      lastResult: ${w.lastResult}`)
   }
-  lines.push('')
-
-  // ④ 唤起条件链（进程内；判据唯一实现 = autopilot-chain）
-  lines.push(`── ④ 唤起条件链（"为什么这轮没被唤起"）──`)
-  lines.push(r.autopilotChain)
   return lines.join('\n')
 }

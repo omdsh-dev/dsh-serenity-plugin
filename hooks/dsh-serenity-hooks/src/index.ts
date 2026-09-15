@@ -47,7 +47,6 @@ import { registerOutputGuardHook } from './output-guard-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive } from './acp-http.js'
-import { registerAutopilot } from './autopilot-trajectory.js'
 import { registerWakeScheduler } from './wake-scheduler.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
 import { registerWeixinSendApi } from './weixin-send-api.js'
@@ -150,8 +149,8 @@ export function apply(ctx: Context, config: Config): void {
   registerImChannel(weixinChannel)
   if (config.tools) {
     ctx.tools.register(ccFsTool) // container_fs
-    // v1.33（S142 §32）：`logbook` 更名并收敛为 `trajectory`（原 autopilot 工具的动作已归
-    // container_admin 的 autopilot 域 / 唤醒动作并入本工具的 wake-later）
+    // v1.33（S142 §32）：`logbook` 更名并收敛为 `trajectory`（原 autopilot 工具的动作 v1.33 归
+    // container_admin 的 autopilot 域——该域 2026-09-15 随之退场；唤醒动作并入本工具 wake-later）
     ctx.tools.register(createTrajectoryTool(ctx)) // container_trajectory（含 rebuild + wake-later）
     ctx.tools.register(createKitTool(ctx)) // dashboard
     ctx.tools.register(gitTool) // container_git
@@ -159,8 +158,8 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(praxisTool) // praxis（eap/neat/cce 三合一）
     ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(localstoreTool)
-    // container_admin（role + msm 管理 + config + **autopilot**——v1.33 起 autopilot 面归机务舱；
-    // v1.34.1 ⑥ C6a：改工厂传入 ctx——autopilot status 需读进程内运行态事实）
+    // container_admin（role + msm 管理 + config——v1.33 起机务舱；v1.34.1 起为工厂形态：
+    // 原为 autopilot 域传进程内运行态事实，该域已于 2026-09-15 退场，ctx 现无消费者）
     ctx.tools.register(createContainerAdminTool(ctx))
     // v1.31.0：IM 消息发送（条件可见——本 CCC 未配置任何 IM 通道时由 guards 移除）
     ctx.tools.register(createImBridgeTool())
@@ -214,14 +213,14 @@ export function apply(ctx: Context, config: Config): void {
   // F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点装配——人工开关（settings acpEnabled）→
   // 启动/停止；session/new 支持 {ccc, role, sessionId?}（复用 skiff 核心 + 会话延续）
   registerAcp(ctx)
-  // Autopilot Trajectory（v1.26.12 实验 → v1.27.4 正式化）：CCC 定义（serenity.json
-  // autopilotTrajectory，旧键 autotrajectory 兼容）→ 时钟遍历多 CCC 各自唤起 +
-  // 先验偏见注入（前台运行）。enabled=false 未配置 → 零资源占用；不触碰任何现有机制。
-  registerAutopilot(ctx)
+  // Autopilot Trajectory（ACC 周期自唤醒，v1.26.12 实验 → v1.27.4 正式化）已于 2026-09-15
+  // 整段退场（所有者裁决 (a)）——ACC 不再提供周期自唤醒：机制/时钟/`container_admin autopilot`
+  // 域/面板区块全部删除。CCC 侧的自主巡航改走 `msm autopilot-round`（S151 自管理链，
+  // 真相源 = S151 SESSION.md §1/§1b/§1c）。此处**不得**再注册任何周期时钟。
   // trajectory 唤醒注册表（D58，v1.32.0）：中心调度器——5min tick 投递「未来时刻 + 一条
   // message」的一次性唤醒（可自唤醒、可跨 trajectory）。冷会话经 ctx.sessionController
-  // 载入后投递；与 autopilot 两个 tick 各自独立（D59）。全局闸 `wakeSchedulerEnabled`（**缺省开**；
-  // v1.34 S-1 解耦：**不再**回退 autopilot 的闸——关周期自唤醒不得连带关一次性唤醒）。
+  // 载入后投递。全局闸 `wakeSchedulerEnabled`（**缺省开**，无回退键——v1.34 S-1 曾把它与
+  // 周期自唤醒闸解耦；后者已随上述退场消失）。这是 ACC 唯一的轨迹调度机制。
   registerWakeScheduler(ctx)
   // F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置（serenity.json weixin + localstore 凭据）→
   // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。

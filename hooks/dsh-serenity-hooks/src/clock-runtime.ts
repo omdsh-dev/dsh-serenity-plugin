@@ -52,7 +52,17 @@
  * 即**动两条正在跑的时钟的骨架**；**不值当**（裁决原文见 SESSION §12.8②）。
  */
 
-import { TICK_MS } from './autopilot-core.js'
+/**
+ * tick 周期（**5 分钟**）。
+ *
+ * 2026-09-15 S142「ACC 侧 autopilot 退场」：本值原从 `autopilot-core.ts` 导入（`TICK_MS`），
+ * 但该模块随 autopilot 退场，而**本模块的唯一消费者是唤醒调度器**（`wake-scheduler`）——
+ * 值本身与 autopilot 无关 ⇒ 随消费者归位到本模块（不再依赖 autopilot 判据层）。
+ *
+ * ⚠️ 语义不得变：该值同时是**报告文案的来源**（"等下个 Nmin tick"），历史上曾因文案写死
+ * 10min 与实现 5min 不符而误导排查（§12.7 文案纠错）。
+ */
+const TICK_MS = 5 * 60 * 1000
 
 /**
  * 时钟**进程态**（诊断用，模块级 = 进程级，正是诊断对象）。

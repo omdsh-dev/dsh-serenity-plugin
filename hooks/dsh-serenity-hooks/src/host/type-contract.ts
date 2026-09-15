@@ -175,14 +175,14 @@ type _AppendUserMessageType = Expect<Extends<'user/message', Parameters<NonNulla
 
 type HostAgent = NonNullable<Ret<HostContext['agents']['get']>>
 
-/** `agent.steer(msg)` —— rebuild 自动继续（`rebuild.ts:442`）、输出守卫打回、autopilot 唤起 */
+/** `agent.steer(msg)` —— rebuild 自动继续（`rebuild.ts:442`）、输出守卫打回 */
 type _AgentSteer = Expect<Extends<HostAgent['steer'], (message: never) => unknown>>
 /** `agent.inbox.prepend(target, msg)` —— first-anchor 锚定（`seams/bootstrap.ts:302`） */
 type _AgentInboxPrepend = Expect<Extends<HostAgent['inbox']['prepend'], (target: never, message: never) => unknown>>
 /** `agent.session.header.cwd` —— 工具工作目录解析 */
 type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], string | undefined>>
 /**
- * `agent.status === 'idle'` —— 等待空闲（`agent-idle.ts:65`，handyman/autopilot 的完成判据）。
+ * `agent.status === 'idle'` —— 等待空闲（`agent-idle.ts:65`，handyman 的完成判据）。
  * 注：`status` 是可变属性（非方法），断言其**可读**且类型覆盖 'idle'。
  */
 type _AgentStatus = Expect<Extends<HostAgent['status'], string>>

@@ -8,7 +8,7 @@
  * 页面结构（官方 settings 设计语言：section > title + intro + 分组(groupTitle) + rowCard）：
  *  - 访问：双端口网关开关（展开 → 完整外部访问编辑器：监听/账号/白名单/TOTP）
  *  - 上下文：超限重建开关（展开 → 阈值 + 机制说明）
- *  - 外部能力：Skiff/ACP/问答页/Autopilot 各开关（展开 → help 说明 + 各自编辑器）
+ *  - 外部能力：Skiff/ACP/问答页各开关（展开 → help 说明 + 各自编辑器）
  *  - 彩蛋模式 / 微信桥：独立配置块（无顶层 plugin 开关，保留折叠）
  * v1.29（需求② 开关与详设合一）：RowCard 可展开——整行点击 → 行内内联详设；
  *   原 hover「?」浮层 help 改行内 detail intro（常显可达）；重型编辑器挂所属开关行下。
@@ -26,7 +26,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 // 改从 '@deepseek-ai/dsh-client-ui-settings/client'（官方再导出实证；dsp 用法 getSnapshot/
 // subscribe/set 与 rc.1 SettingsScope 接口 getSnapshot/subscribe/mutate/set/unset 完全一致）
 import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-ui-settings/client'
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
 import { PublicAskEditor } from './PublicAskEditor.js'
@@ -46,10 +46,6 @@ export interface SerenitySimpleWire {
   acpHttpPort?: number
   /** F4d 建议问答页（v1.26.1 实验性）：按认知容器暴露问答页供他人验证（key 认证） */
   publicAskEnabled?: boolean
-  /** **周期自唤醒（autopilot）闸** —— v1.34 更名（原 autopilotEnabled），语义收窄为只管周期自唤醒 */
-  autopilotWakeEnabled?: boolean
-  /** @deprecated v1.34 前旧键（仅回退读，面板不再写它） */
-  autopilotEnabled?: boolean
   /** **唤醒调度器闸**（v1.34，原 trajectoryEnabled）：投递已登记的"未来时刻 + 一条 message"（缺省开） */
   wakeSchedulerEnabled?: boolean
 }
@@ -175,21 +171,6 @@ function Collapse(props: {
   )
 }
 
-/** 只读定义列表（dl/dt/dd 网格——v1.27.5 紧凑化：只读状态不再各占一行卡） */
-function DefList(props: { items: Array<{ term: string; value: React.ReactNode }> }): React.JSX.Element {
-  const { items } = props
-  return (
-    <dl className="ss-defList">
-      {items.map((it) => (
-        <div className="ss-defItem" key={it.term}>
-          <dt className="ss-defTerm">{it.term}</dt>
-          <dd className="ss-defValue">{it.value}</dd>
-        </div>
-      ))}
-    </dl>
-  )
-}
-
 /** dsh 原生设置面板：serenity-hooks 配置页（官方 settings 设计语言，多级标题） */
 export function SettingsSection(props: SettingsSectionProps): React.JSX.Element {
   const { scope } = props
@@ -232,8 +213,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const acpOn = value?.acpEnabled ?? false
   const acpPort = value?.acpHttpPort ?? 3100
   const publicAskOn = value?.publicAskEnabled ?? false
-  // v1.34 迁移：新键优先，旧键回退（老装机存的 autopilotEnabled 仍生效；新键显式 false 覆盖旧键 true）
-  const autopilotOn = value?.autopilotWakeEnabled ?? value?.autopilotEnabled ?? false
   const wakeSchedOn = value?.wakeSchedulerEnabled ?? true // 缺省开（与 schema 一致）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
@@ -242,7 +221,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openSkiff, setOpenSkiff] = useState(false)
   const [openAcp, setOpenAcp] = useState(false)
   const [openPublicAsk, setOpenPublicAsk] = useState(false)
-  const [openAutopilot, setOpenAutopilot] = useState(false)
   const [openWakeSched, setOpenWakeSched] = useState(false)
 
   return (
@@ -413,29 +391,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
         <li>
           <RowCard
-            title="周期自唤醒（autopilot）"
-            desc="定时唤起 autopilot 轨迹（全局开关，默认关——只在指定电脑开启）"
-            expandable
-            open={openAutopilot}
-            onToggle={setOpenAutopilot}
-            control={<Toggle checked={autopilotOn} onChange={(on) => toggle('autopilotWakeEnabled', on)} />}
-            detail={
-              <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'周期自唤醒全局闸（v1.34 更名收窄，原 Autopilot Trajectory 全局总开关）：\n' +
-                  '· 作用：控制本机（本 dsh 实例）是否运行**周期**自动巡航唤起\n' +
-                  '· 语义边界：**只管周期自唤醒** —— 关掉它不影响一次性唤醒（wake-later，见下一行）\n' +
-                  '· 默认关：未开启即使 CCC 配置 enabled=true 也不启动定时器\n' +
-                  '· 定位：多台电脑装 dsp 时，只在指定电脑开启（其余默认关）\n' +
-                  '· 双重门控：本开关 AND CCC 级 enabled 都满足才运行\n' +
-                  '· CCC 级配置（interval/session/偏见脚本/焦点）不受影响'}
-                </p>
-                <AutopilotTrajectoryStatusBlock autopilotOn={autopilotOn} />
-              </div>
-            }
-          />
-        </li>
-        <li>
-          <RowCard
             title="唤醒调度器（wake-later）"
             desc="投递已登记的“未来时刻 + 一条 message”（全局开关，默认开）"
             expandable
@@ -444,11 +399,11 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             control={<Toggle checked={wakeSchedOn} onChange={(on) => toggle('wakeSchedulerEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'唤醒调度器全局闸（v1.34 新增独立开关）：\n' +
+                <p className="ss-detailIntro">{'唤醒调度器全局闸（v1.34 独立开关）：\n' +
                   '· 作用：把 CCC 唤醒注册表（AGENT_SESSIONS/wake-registry.json）里到点的条目投递给目标轨迹\n' +
                   '· 条目来源：`container_trajectory wake-later`（对自己或别的 trajectory 预约未来时刻 + 一条 message）\n' +
                   '· 默认开：条目全部由人类/agent 显式登记，无环境自主性 ⇒ 不需要“默认关”的实验保护\n' +
-                  '· 与上一行**互不连带**：关掉周期自唤醒不会关掉本调度器（用户 2026-09-15 裁决）\n' +
+                  '· 唯一性：ACC 现存的**唯一**轨迹调度时钟（原并列的周期自唤醒闸已随 ACC 侧 autopilot 退场删除）\n' +
                   '· 精度：5min tick；补跑窗口 2h（超窗判 missed 留痕）；fire-and-forget 无回执'}
                 </p>
               </div>
@@ -589,262 +544,5 @@ function SessionCleanupBlock(): React.JSX.Element {
         {done && <button type="button" className="ss-wakeBtn" onClick={() => { setPreview(null); setDone(null) }}>完成</button>}
       </div>
     </div>
-  )
-}
-
-/** /serenity/trajectory 状态 wire（与 src/autopilot-trajectory.ts getAutopilotStatus 对齐；D58 端点更名） */
-interface AutopilotTrajectoryStatus {
-  configured: boolean
-  enabled: boolean
-  intervalHours: number
-  biasProvider: string
-  topPrompt: string | null
-  session: string | null
-  avoidWakeHours: { start: number; end: number }
-  target: {
-    dirName: string
-    autoFlag: boolean
-    idleHours: number
-    wakeable: boolean
-  } | null
-  beijingHour: number
-  windowAllowed: boolean
-  recentWakes: Array<{ time: number; ok: boolean; detail: string }>
-}
-
-/** 唤醒注册表条目 wire（/serenity/trajectory 的 `wakes` 字段；与 src/wake-registry.ts WakeEntry 对齐） */
-interface WakeEntryWire {
-  id: string
-  target: string
-  at: string
-  message: string
-  state: 'pending' | 'delivered' | 'missed' | 'cancelled'
-  createdBy: string
-  attempts: number
-  lastResult: string | null
-}
-
-/** CCC 选择器条目（/serenity/cccs wire：CccEntry 同款——微信桥同源复用） */
-interface AutopilotCccEntry {
-  root: string
-  name: string
-  roles: string[]
-}
-
-/** 「Autopilot Trajectory」只读状态区块（v1.26.14；v1.27.4 多 CCC：显式 CCC 选择器——
- *   GET/POST 带 ?ccc=/body.ccc——用户"两个 CCC 都设定了，但手工唤起只能唤起一个"修复）：
- *   展示所选 CCC 的状态（配置摘要 + 目标会话 + 窗口/可唤起判定 + 审计）；配置改走 CCC 配置文件
- *   v1.29：autopilotOn prop（需求②——原折叠块并入开关行 detail，全局门控状态由外部行显示） */
-function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.JSX.Element {
-  const [cccs, setCccs] = useState<AutopilotCccEntry[]>([])
-  const [selectedRoot, setSelectedRoot] = useState<string>('')
-  const [status, setStatus] = useState<AutopilotTrajectoryStatus | null>(null)
-  const [wakes, setWakes] = useState<WakeEntryWire[]>([])
-  const [unavailable, setUnavailable] = useState(false)
-  const [waking, setWaking] = useState(false)
-  const [wakeResult, setWakeResult] = useState<string | null>(null)
-
-  // 加载 CCC 列表（选择器数据源——同微信桥 /serenity/cccs listCccs）
-  useEffect(() => {
-    let alive = true
-    void (async () => {
-      try {
-        const res = await fetch('/serenity/cccs', { headers: { accept: 'application/json' } })
-        if (!res.ok) return
-        const body = (await res.json()) as { cccs?: AutopilotCccEntry[] }
-        if (!alive || !Array.isArray(body.cccs)) return
-        setCccs(body.cccs)
-        if (body.cccs.length > 0) setSelectedRoot((prev) => prev || body.cccs![0]!.root)
-        else setUnavailable(true) // 无候选 CCC → 提示
-      } catch {
-        /* 拉取失败静默（面板非关键路径） */
-      }
-    })()
-    return () => { alive = false }
-  }, [])
-
-  // 选中 CCC 变化 → 拉取该 CCC 状态（显式 ?ccc=——多 CCC 各自独立）
-  const refresh = useCallback(async (): Promise<void> => {
-    if (!selectedRoot) return
-    try {
-      const res = await fetch(`/serenity/trajectory?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json' } })
-      if (!res.ok) return
-      const body = (await res.json()) as { status?: AutopilotTrajectoryStatus | null; wakes?: WakeEntryWire[] }
-      if (Array.isArray(body.wakes)) setWakes(body.wakes)
-      if (body.status) {
-        setStatus(body.status)
-        setUnavailable(false)
-      } else {
-        setStatus(null)
-        setUnavailable(true) // 选中 CCC 无配置（未启用）→ 显示提示
-      }
-    } catch {
-      /* 拉取失败静默（面板非关键路径） */
-    }
-  }, [selectedRoot])
-
-  useEffect(() => {
-    let alive = true
-    void refresh()
-    return () => { alive = false }
-  }, [refresh])
-
-  // 立即唤起（调试用，跳过窗口/间隔；服务端 force=true 仍校验 enabled/目标/--auto/偏见脚本）
-  const wakeNow = async (): Promise<void> => {
-    if (waking || !selectedRoot) return
-    setWaking(true)
-    setWakeResult(null)
-    try {
-      const res = await fetch('/serenity/trajectory', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
-        body: JSON.stringify({ action: 'wake', ccc: selectedRoot }),
-      })
-      const body = (await res.json()) as { ok?: boolean; detail?: string; error?: string }
-      setWakeResult(body.detail ?? body.error ?? `HTTP ${res.status}`)
-      void refresh()
-    } catch (err) {
-      setWakeResult(err instanceof Error ? err.message : String(err))
-    } finally {
-      setWaking(false)
-    }
-  }
-
-  if (unavailable && cccs.length === 0) {
-    return (
-      <ul className="ss-rows">
-        <li>
-          <RowCard
-            title="未激活"
-            desc="未发现候选 CCC（/serenity/cccs 为空）——先在工作区打开一个 CCC 会话"
-            control={null}
-          />
-        </li>
-      </ul>
-    )
-  }
-  if (!status) {
-    return (
-      <ul className="ss-rows">
-        <li>
-          <RowCard title="加载中…" desc="读取 Autopilot Trajectory 状态" control={null} />
-        </li>
-      </ul>
-    )
-  }
-
-  const target = status.target
-  const { autopilotOn } = props
-  const stateText = !props.autopilotOn
-    ? '全局开关关闭（在「外部能力」组开启后才运行）'
-    : !status.configured
-      ? '未配置（机制未开始）'
-      : !status.enabled
-        ? '已配置，未启用（enabled=false，零资源占用）'
-        : '已启用 — 时钟唤起等待中'
-  const targetText = target
-    ? `${target.dirName}${target.autoFlag ? '（--auto ✓）' : '（无 --auto 标志）'} · 空闲 ${target.idleHours.toFixed(1)}h / 阈值 ${status.intervalHours}h`
-    : status.session
-      ? `会话 ${status.session} 未命中（AGENT_SESSIONS 无匹配）`
-      : '未配置目标会话（不唤起）'
-  // 调试按钮可用条件：已启用 + 目标会话就绪（配置命中且带 --auto）；偏见脚本校验由服务端 force 兜底
-  const wakeReady = status.enabled && !!target && target.autoFlag
-  const lastWake = status.recentWakes[0]
-
-  return (
-    <ul className="ss-rows">
-      <li>
-        <RowCard
-          title="目标 CCC"
-          desc="多 CCC 各自独立——选中哪个就查看/唤起哪个"
-          help={'Autopilot Trajectory 目标认知容器：\n' +
-            '· 机制：dsh 一个进程可挂载多个 CCC，每个 CCC 的 autopilot 独立配置\n' +
-            '· 选择：下拉切换要查看/唤起的目标 CCC（各 CCC 时钟独立）\n' +
-            '· 配置：各 CCC 在自身 .opencode/serenity.json 定义 trajectory.autopilot（旧键 autopilotTrajectory 兼容）\n' +
-            '· 唤起：仅对选中 CCC 生效，互不干扰'}
-          control={
-            <select
-              className="ss-select"
-              value={selectedRoot}
-              onChange={(e) => {
-                setSelectedRoot(e.target.value)
-                setStatus(null) // 切换 CCC → 回到加载态（refresh 随 selectedRoot 触发）
-              }}
-            >
-              {cccs.length === 0 && <option value="">加载中…</option>}
-              {cccs.map((c) => (
-                <option key={c.root} value={c.root}>{c.name || c.root}</option>
-              ))}
-            </select>
-          }
-        />
-      </li>
-      <li>
-        <RowCard
-          title="运行状态"
-          desc={stateText}
-          help={'Autopilot Trajectory 运行状态含义：\n' +
-            '· 未配置：该 CCC 未定义 trajectory.autopilot（机制不开始）\n' +
-            '· 已配置未启用：enabled=false，零资源占用（不唤起不消耗）\n' +
-            '· 已启用：时钟驱动周期性自动唤起——无人类活动满间隔小时数后\n' +
-            '  启动一次前台 agent 轮（用户全程可见可介入）'}
-          control={<span className="ss-value">{status.enabled ? '● 运行中' : status.configured ? '○ 待启' : '—'}</span>}
-        />
-      </li>
-      <li>
-        <div className="ss-rowCard">
-          {/* v1.27.5 紧凑化：只读状态并入一个定义列表（2 列网格），不再各占一行卡 */}
-          <DefList
-            items={[
-              { term: '目标会话', value: targetText },
-              { term: '唤起窗口', value: `北京 ${status.beijingHour} 点 — ${status.windowAllowed ? '允许' : `避开 ${status.avoidWakeHours.start}~${status.avoidWakeHours.end}`}` },
-              { term: '偏见提供者', value: status.biasProvider },
-              { term: '轨迹焦点', value: status.topPrompt ?? '未定义（CCC 应填写，防焦点丢失）' },
-              { term: '最近唤起', value: lastWake ? `${new Date(lastWake.time).toLocaleString()} — ${lastWake.ok ? '✓' : '✗'} ${lastWake.detail}` : '尚无' },
-            ]}
-          />
-        </div>
-      </li>
-      <li>
-        <div className="ss-rowCard">
-          {/* D58：唤醒注册表（未来时刻 + 一条 message，投递给任一 trajectory）——只读展示 */}
-          <DefList
-            items={[
-              {
-                term: '唤醒注册表',
-                value: wakes.length === 0
-                  ? '无条目（agent 用 container_trajectory wake-later 登记：未来时刻 + 一条 message）'
-                  : `${wakes.filter((w) => w.state === 'pending').length} 条在办 / 共 ${wakes.length} 条`,
-              },
-              ...wakes.slice(0, 5).map((w) => ({
-                term: w.state === 'pending' ? '· 待唤醒' : `· ${w.state}`,
-                value: `${new Date(w.at).toLocaleString()} → ${w.target}${w.lastResult ? `（${w.lastResult}）` : ''}`,
-              })),
-            ]}
-          />
-        </div>
-      </li>
-      <li>
-        <RowCard
-          title="立即唤起"
-          desc={wakeResult ?? '调试：手动触发一次（跳过窗口/间隔，仍校验配置与偏见脚本）'}
-          help={'立即唤起（调试语义）：\n' +
-            '· 用途：手动触发一次该 CCC 的自动唤起（不等时钟）\n' +
-            '· 跳过：唤起窗口（北京 8~18 点避开）/ 间隔\n' +
-            '· 保留校验：enabled、目标会话（--auto）、偏见脚本可运行\n' +
-            '· 场景：验证配置/偏见脚本是否就绪，或想立刻跑一轮'}
-          control={
-            <button
-              type="button"
-              className="ss-wakeBtn"
-              disabled={!wakeReady || waking}
-              onClick={() => void wakeNow()}
-            >
-              {waking ? '唤起中…' : '立即唤起'}
-            </button>
-          }
-        />
-      </li>
-    </ul>
   )
 }

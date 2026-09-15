@@ -23,17 +23,19 @@ import { runAccDiag, renderAccDiag } from '../diag-ops.js'
 
 /**
  * 运行态诊断工具（`acc-diag`）。**无动作参数**：一次调用即全报告
- * （live 运行态 / 面板解析 / 唤醒注册表 / 唤起条件链）。
+ * （① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。
+ *
+ * ⚠️ 2026-09-15（ACC 侧 autopilot 退场，S142）：原四段降为三段——原 ②「面板解析」与
+ * ④「唤起条件链」的主语随机制消失，已删（见 `../diag-ops.ts` 文件头；④ 的缺口已登记）。
  */
 export function createAccDiagTool(ctx: Context) {
   return defineTool({
     name: 'acc-diag',
     description:
       'ACC runtime diagnosis (ACC maintainers only — hidden unless this container declares "acc-diag" in .opencode/serenity.json exclusiveTools). '
-      + 'One call returns the full report: (1) live runtime — live sessions with cwd/CCC + each autopilot CCC target resolution and agent-location diagnosis; '
-      + '(2) panel resolution — which CCC a parameterless panel request lands on; '
-      + '(3) wake registry — entries with state/at/target/lastResult plus the catch-up window; '
-      + '(4) wake condition chain — per-condition values, blocking points and fix suggestions ("why did this round not wake"). '
+      + 'One call returns the full report (3 sections): (1) live runtime — live sessions with cwd/CCC; '
+      + '(1b) wake clock — the wake scheduler process snapshot (armed / gate / ticks / last tick / last skip reason); '
+      + '(3) wake registry — entries with state/at/target/lastResult plus the catch-up window. '
       + 'Read-only: it inspects process state and files, it changes nothing.',
     parameters: {},
     output: {

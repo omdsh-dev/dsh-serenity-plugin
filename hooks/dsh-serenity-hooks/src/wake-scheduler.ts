@@ -220,8 +220,8 @@ export async function deliverWake(ctx: Context, root: string, entry: WakeEntry):
  * （工作区注册表 ∪ 持久化会话 ∪ live 会话）：**没有 live 会话的 CCC 也会被扫到**。
  *
  * ⚠️ 边界（本步**只**改"枚举哪些 CCC"，**不改**"怎么找到要交付的 agent"）：
- * 把 message 交给某条 trajectory 仍必须靠 **live 会话**解析（见
- * `autopilot-trajectory.resolveTargetAgent`）；无 live 会话时该 CCC 只是**被扫到、
+ * 把 message 交给某条 trajectory 仍必须靠 **live 会话**解析（见本文件
+ * `acquireWakeAgent`）；无 live 会话时该 CCC 只是**被扫到、
  * 无交付对象** ⇒ `deliverWake` 返回 `无绑定会话记录…`，条目回 `pending` 并留痕。
  * 因此本函数**不得**让 tick 抛错（异常一律由调用方 tick 兜住，见 `runWakeTick` 的 try）。
  * @param ctx 插件上下文

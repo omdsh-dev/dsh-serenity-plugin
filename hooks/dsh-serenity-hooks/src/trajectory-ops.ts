@@ -29,7 +29,8 @@ import { join, basename, dirname } from 'node:path'
  * 「都合并成 trajectory，废除 logbook 这个词」并逐条删并 ——
  * summary 并进 list｜health/qa 淘汰（判据＝旧模板，EAP 已取代；仅"空壳/长期无活动"并入 use）｜
  * close/archive 删（completed 由 SESSION.md 的 `[x]` 推导；归档走 container_fs mv）｜
- * hook-develop-guide 并进 container_admin msm guide｜autopilot 面归 container_admin 的 autopilot 域｜
+ * hook-develop-guide 并进 container_admin msm guide｜autopilot 面归 container_admin 的 autopilot 域
+ * （该域 2026-09-15 随 ACC 侧 autopilot 退场删除）｜
  * wake-add/list/rm 收敛为 wake-later。
  */
 type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'wake-later'

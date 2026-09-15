@@ -34,7 +34,6 @@ const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
 const CCCS_PATH = '/serenity/cccs'
 const PUBLIC_ASK_PATH = '/serenity/public-ask'
-const TRAJECTORY_PATH = '/serenity/trajectory'
 const WEIXIN_PATH = '/serenity/weixin'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
@@ -445,80 +444,11 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     },
   })
 
-  // /serenity/autopilot-trajectory：Autopilot Trajectory 状态（v1.26.14 用户"给CCC的面板加个
-  // 状态来看情况"——设置面板「Autopilot Trajectory」只读区块的数据源；v1.27.4 正式化改名 +
-  // 多 CCC：GET/POST 支持显式 ?ccc=<root> 参数（微信桥 requireCcc 同款），无参 → 面板默认
-  // 解析第一个 enabled CCC）。只读状态（配置摘要 + 目标会话 + 窗口/可唤起 + 最近唤起审计）。
-  // POST { action: 'wake', ccc? }：手动立即唤起（调试用，跳过窗口/间隔；x-serenity-ui 头——
-  // agent 不可自行唤起自己）。force=true 仍校验 enabled / 目标命中 / --auto / 偏见脚本。
-  ctx.webServer.register({
-    kind: 'exact',
-    path: TRAJECTORY_PATH,
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        if (req.method === 'POST') {
-          if (!requireWebUi(req, res, '立即唤起仅限 WebUI（agent 不可自行唤起）')) return
-          const raw = await readBody(req, 16 * 1024)
-          const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; ccc?: string; action?: string }
-          if (body.action !== 'wake') {
-            sendJson(res, 400, { error: 'unsupported action (expected "wake")' })
-            return
-          }
-          const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
-          const root = cccRootForCwd(workspace)
-          // v1.27.4：显式 ccc 参数优先（多 CCC 面板选择器）；无参 → 面板默认目标（第一个 enabled CCC）
-          const effectiveRoot = body.ccc?.trim() || (!body.workspace && !body.sessionId)
-            ? (body.ccc?.trim() ?? (await import('./autopilot-trajectory.js')).collectAutopilotCccs(ctx)[0] ?? root)
-            : root
-          if (!effectiveRoot) {
-            sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
-            return
-          }
-          // v1.34.1 ⑥ C6a：判据原语（readAutopilotSettings）已归 autopilot-core（零 DSH 依赖层），
-          // 唤起执行仍在 autopilot-trajectory——两者各自动态 import（保持 api.ts 静态链纯净）
-          const { performAutopilotWake } = await import('./autopilot-trajectory.js')
-          const { readAutopilotSettings } = await import('./autopilot-core.js')
-          const settings = readAutopilotSettings(effectiveRoot)
-          if (!settings) {
-            sendJson(res, 400, { error: 'Autopilot Trajectory 未配置（.opencode/serenity.json 缺段）' })
-            return
-          }
-          const result = await performAutopilotWake(ctx, effectiveRoot, settings, { force: true })
-          sendJson(res, result.ok ? 200 : 400, result)
-          return
-        }
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { error: 'method not allowed' })
-          return
-        }
-        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-        const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
-        const root = cccRootForCwd(workspace)
-        // 动态 import：autopilot 模块依赖 dsh-agent/dsh-llm 运行时——保持 api.ts 静态链纯净
-        // （仅本端点触发时加载，api 纯函数测试不受影响）。C5 起状态取数改走 container-status
-        // （同为动态 import：它静态依赖时钟模块），此处只剩"面板默认 CCC 解析"这一个用途。
-        const { collectAutopilotCccs } = await import('./autopilot-trajectory.js')
-        // v1.27.4：显式 ?ccc=<root> 优先（多 CCC 面板）；无参 → 第一个 enabled CCC（面板默认）；
-        // 无 workspace/sessionId/ccc → 与旧语义一致（面板默认实验 CCC）
-        const effectiveRoot = url.searchParams.get('ccc')?.trim()
-          ?? (!url.searchParams.get('workspace') && !url.searchParams.get('sessionId') ? collectAutopilotCccs(ctx)[0] : null)
-          ?? root
-        if (!effectiveRoot) {
-          sendJson(res, 200, { status: null })
-          return
-        }
-        // D58（v1.32.0）：同一端点同时承载**唤醒注册表**条目（trajectory 是一等概念，
-        // autopilot 是其子集）——`status` 是 autopilot 状态（保持原字段名与形状不变，面板兼容），
-        // `wakes` 是注册表全量条目（含 state/at/target/createdBy/lastResult，只读）。
-        // C5（2026-09-15）：两段状态改经 `container-status` 取数（唯一取数出口）——投影不变
-        // （`status` 仍是 getAutopilotStatus 本体、`wakes` 仍是注册表原始条目）。
-        const { containerAutopilot, containerWakes } = await import('./container-status.js')
-        sendJson(res, 200, { status: containerAutopilot(effectiveRoot), wakes: containerWakes(effectiveRoot).entries })
-      } catch (err: any) {
-        sendJson(res, 400, { error: err.message ?? String(err) })
-      }
-    },
-  })
+  // 原 `/serenity/trajectory` 端点（Autopilot Trajectory 状态 + 唤醒注册表 + 手动立即唤起）已随
+  // ACC 侧 autopilot 退场整体删除（2026-09-15）：它的两个半边——`status`（autopilot 状态）与
+  // POST `action:'wake'`（手动唤起）——的唯一消费方是设置面板的「Autopilot Trajectory」区块，
+  // 该区块同批删除。`wakes`（唤醒注册表）半边同样失去面板消费方；注册表本身的真相源仍是
+  // `AGENT_SESSIONS/wake-registry.json`，运行态可见性走 `acc-diag` ③ 段。
 
   // /serenity/weixin：微信桥 CCC 级配置（F4c-3，v1.27.0 实验性；S142 用户拍板——
   // 配置归 CCC + 显式 ccc 参数 + 面板扫码）。全部 x-serenity-ui 头限定（client 专属）。

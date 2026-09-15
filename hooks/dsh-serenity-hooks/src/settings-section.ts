@@ -63,16 +63,11 @@ interface SerenitySimpleSettings {
   acpHttpPort: number
   /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
   publicAskEnabled: boolean
-  /** **周期自唤醒（autopilot）全局闸** —— v1.34 更名收窄（原 `autopilotEnabled`）。
-   *  **只管周期自唤醒**：关掉它**不**影响一次性唤醒 `container_trajectory wake-later`（后者归 {@link wakeSchedulerEnabled}）。
-   *  缺省关（多台电脑装 dsp 时只在指定电脑跑周期自唤醒）。
-   *  可选类型是为了**迁移语义精确**：老装机里存的旧键 `autopilotEnabled` 仍应生效，而"新键显式 false"必须能覆盖它。 */
-  autopilotWakeEnabled?: boolean
-  /** @deprecated v1.34 前的旧键（**仅迁移期回退读**，不回写）。新装/已迁移请用 `autopilotWakeEnabled` */
-  autopilotEnabled?: boolean
   /** **唤醒调度器全局闸** —— v1.34 更名（原 `trajectoryEnabled`）：投递已登记的"未来时刻 + 一条 message"。
    *  **缺省开**：它是 trajectory 的基础能力（D58），且**不得**被"关掉周期自唤醒"连带关掉
-   *  ——用户 2026-09-15 裁决：「auto-trajectory 的开关只关闭 auto-trajectory 唤醒」。 */
+   *  ——用户 2026-09-15 裁决：「auto-trajectory 的开关只关闭 auto-trajectory 唤醒」。
+   *  （原并列的周期自唤醒闸 `autopilotWakeEnabled` / 旧键 `autopilotEnabled` 已随 ACC 侧
+   *  autopilot 于 2026-09-15 整段退场删除——现只剩这一座闸。） */
   wakeSchedulerEnabled: boolean
 }
 
@@ -86,8 +81,6 @@ const simpleSettingsSchema = z.object({
   acpEnabled: z.boolean().default(false),
   acpHttpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT),
   publicAskEnabled: z.boolean().default(false),
-  autopilotWakeEnabled: z.boolean().required(false),
-  autopilotEnabled: z.boolean().required(false),
   wakeSchedulerEnabled: z.boolean().default(true),
 })
 

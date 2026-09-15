@@ -9,8 +9,9 @@
  *     "装载期缺失的 lazy 服务"不会冻结在报告里（v1.34.2 纠正 v1.34.1 的快照设计）；
  *  ④ **时钟字段来自快照而非重算**：改变调度器的进程内模块态 ⇒ 模型输出随之变，且与调度器
  *     自述逐字一致。
- * 另覆盖时间轴分组取数（`containerWakes` / `containerAutopilot`）——它们是 `/serenity/trajectory`
- * 与 `acc-diag` 的共同来源。
+ * 另覆盖时间轴分组取数（`containerWakes`）——它是 `acc-diag` ③ 段的来源。
+ * （2026-09-15：`containerAutopilot` / `containerClocks().autopilot` 随 ACC 侧 autopilot 退场删除，
+ *  本文件对应用例同批移除。）
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -20,7 +21,6 @@ import { join } from 'node:path'
 import {
   checkRegistryHealth,
   checkRegistryQuality,
-  containerAutopilot,
   containerClocks,
   containerStatus,
   containerWakes,
@@ -290,8 +290,6 @@ describe('container-status: 时钟读进程内快照（不重算）', () => {
     expect(c.wake.armedAt).not.toBeNull()
     // 同源断言：模型给的正是调度器自述的那份快照（两次同步调用之间无 await，不存在交错）
     expect(c.wake).toEqual(wakeSchedulerState())
-    // 未参与的另一条时钟保持自己的快照
-    expect(c.autopilot.armed).toBe(false)
   })
 
   it('containerStatus 不自行携带时钟（时间轴分组按需取——见 containerClocks）', () => {
@@ -322,11 +320,7 @@ describe('container-status: 时间轴分组取数', () => {
     expect(w.entries[0]).toHaveProperty('message', 'm2')
   })
 
-  it('containerAutopilot：root=null → null；CCC 未配置 → configured:false', () => {
-    expect(containerAutopilot(null)).toBeNull()
-    const s = containerAutopilot(dir)
-    expect(s).not.toBeNull()
-    expect(s!.configured).toBe(false)
-    expect(s!.target).toBeNull()
+  it('containerClocks：只返回 wake 一座钟（autopilot 时钟已随机制退场——回归钉）', () => {
+    expect(Object.keys(containerClocks())).toEqual(['wake'])
   })
 })
