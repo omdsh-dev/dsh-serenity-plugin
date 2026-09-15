@@ -197,12 +197,14 @@
   display: inline-flex;
 }
 
+/* ── 自绘 popover（卡片，替代官方 Modal）
+   v1.36.1（所有者：「卡片做成双倍宽，左侧是信息，右侧是动画」）：340 → **680px**（双倍）。
+   胶囊在头部右端，卡片 `right:0` 对齐 ⇒ 加宽只会**向左**长；再叠 `min(…, 100vw-24px)` 兜住窄视口。 */
 .sp-pop {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  width: 340px;
-  max-width: calc(100vw - 24px);
+  width: min(680px, calc(100vw - 24px));
   z-index: 2000;
   box-sizing: border-box;
   padding: 14px;
@@ -212,45 +214,77 @@
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
-/* ── 背景层：宁静号航行动画（ACC 层资产 /serenity/voyage，S142 §12.44）──
-   卡片展开时，背景换成「认知星野 + 飞船」= 宁静号的心智模型。
-   可读性设计：卡片底色改成**半透明暗色**，让动画透出来但把对比度压住——
-   正文（白色 label/value）仍落在足够暗的底上；再叠一层轻模糊做磨砂。
-   ⚠️ 动画本身在「卡片模式」下已把词元压到 22% 不透明度、铭牌层整层关闭，
-   这里只负责**让位与压暗**，不改作品。 */
+/* ── 航行动画栏：宁静号心智模型（ACC 层资产 /serenity/voyage，S142 §12.44 → v1.36.1 改右栏）
+   v1.36.1 改版（所有者：「卡片做成双倍宽，左侧是信息，右侧是动画」）：
+   动画从**背景层**改为**右栏**。这一改动解开了 v1.36.0 的取舍死结——
+   旧布局里动画垫在正文底下，必须靠 0.75 的卡片底色把它压住才读得清字；
+   分段之后两者不再争同一片像素 ⇒ 动画可以亮、正文可以干净，不必再互相妥协。
+   ⚠️ 动画本身仍是「卡片模式」（词元压到 22%、铭牌层关闭），本栏只负责**给位置**，不改作品。 */
 .sp-popVoyage {
   overflow: hidden; /* 裁掉 iframe 在 14px 圆角外的溢出 */
-  /* 合成实测（S142 §12.44，三轮）：卡片底色越深，正文越干净，但动画越"看不见"——
-     这是一个**真实取舍**，不是可以调没的参数：
-       · 0.62 → 飞船最亮的舷窗/灯带正落在「安全模式」「Handyman 模型」两行后面，白字被冲淡
-       · 0.85（VLM 建议值）→ 动画基本消失，与"卡片背景就用这个"的意图相违
-     取 **0.75** 为中值：正文全部可读，飞船仍看得出轮廓与光晕。若所有者要更干净/更明显，
-     这是唯一的旋钮（另一个旋钮 = iframe 的 blur）。 */
-  background: rgba(6, 11, 14, 0.75);
+  /* 分段后不再需要 0.75 的重压暗：压到 0.9 只压整体观感，不与正文争对比度。
+     若所有者觉得动画太亮/太暗，这仍是主旋钮（次旋钮 = iframe 的 blur）。 */
+  background: rgba(6, 11, 14, 0.9);
+  display: flex;
+  flex-direction: row;
+  /* 两栏都从**同一行高**分配（row 轴 cross = 高度）：左栏按内容、右栏吃满行高。
+     行高 = 左栏内容高度，且被 max-height 封顶 ⇒ 信息长时内部滚动，动画不把行撑破。 */
+  align-items: stretch;
+  gap: 12px;
+  padding: 12px;
+  max-height: calc(100vh - 120px);
 }
+/* 左栏：信息（正文）——固定 340px，与旧卡片同宽，保证原有排印不变 */
+.sp-popVoyage > .sp-popBody {
+  position: relative;
+  z-index: 1;
+  order: 1;
+  flex: none;
+  width: 340px;
+  min-width: 0;
+}
+/* 右栏：动画——吃掉剩余宽度，并吃满左栏高度 */
 .sp-voyage {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none; /* 纯背景：不挡点击、不抢焦点 */
+  order: 2;
+  flex: 1 1 auto;
+  min-width: 0;
+  position: relative;
+  pointer-events: none; /* 纯展示：不挡点击、不抢焦点 */
   overflow: hidden;
-  border-radius: 13px;
+  border-radius: 10px;
+  min-height: 260px; /* 动画的下限：信息很少时也不塌成一条 */
 }
 .sp-voyage iframe {
   display: block;
   width: 100%;
   height: 100%;
   border: 0;
-  /* 把星野的细小亮斑与船体高光化开，避免与正文笔画"打架"。
-     1.8px 实测（§12.44 合成第二轮）会把飞船糊成看不清形状 ⇒ 收到 1.2px：
-     既要"看得出是一艘船"，又要它退到正文之后。
-     ⚠️ 用 iframe 自身的 filter 而**不是** backdrop-filter：iframe 内容不参与本文档的
-     backdrop（跨文档不采样）⇒ backdrop-filter 对它无效，只有 filter 才是可靠的杠杆。 */
-  filter: blur(1.2px);
+  /* ⚠️ 用 iframe 自身的 filter 而**不是** backdrop-filter：iframe 内容不参与本文档的
+     backdrop（跨文档不采样）⇒ backdrop-filter 对它无效，只有 filter 才是可靠的杠杆。
+     v1.36.1：动画移入独立右栏后不再压在文字后面 ⇒ 磨砂可以收得很轻（1.2 → 0.6px），
+     既保留柔化，又让飞船细节（舷窗/引擎环）比旧版清楚。 */
+  filter: blur(0.6px);
 }
-.sp-popVoyage > .sp-popBody {
-  position: relative;
-  z-index: 1;
+
+/* 窄屏（放不下两栏）⇒ 退回单栏：信息在上、动画在下（DOM 顺序即如此，无需改结构） */
+@media (max-width: 860px) {
+  .sp-pop {
+    /* 两栏放不下时，卡片回到"不超过视口"的旧行为 */
+    width: min(420px, calc(100vw - 24px));
+  }
+  .sp-popVoyage {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sp-popVoyage > .sp-popBody {
+    width: auto; /* 单栏下不再固定 340px，跟随卡片宽度 */
+    flex: none; /* 按内容高（仍受自身 max-height 约束） */
+  }
+  .sp-voyage {
+    flex: none;
+    height: 200px; /* 单栏时给动画明确高度，避免被 flex 压扁 */
+    min-height: 0;
+  }
 }
 
 .sp-popBody {
