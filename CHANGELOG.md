@@ -1,3 +1,49 @@
+## v1.36.0 — 2026-09-16（航行动画接进 ACC 作 CCC 卡片背景 + **注入位置不再向 LLM 透露上下文消耗**）
+
+**来源**：所有者两次裁决合批发布——① 航行动画**做到 ACC 层 / 作 CCC 卡片展开背景**（§12.43/§12.44，接线已实施、只卡一句"发布"）；② 「**我们作为 ACC 不得在任何注入位置透露给 LLM**」（2026-09-16，D64）。
+
+### 新增：Serenity 航行动画（ACC 层资产 + 卡片背景层）
+
+| 面 | 内容 |
+|---|---|
+| 资产 | `assets/serenity-voyage.html`（831 018 B，自包含单文件，three r180 内联）+ `assets/serenity-voyage-preview.png` + `assets/README.md`（来历 / 重建法 / 版本口径） |
+| 路由 | 新 `src/voyage-page.ts` → `GET /serenity/voyage`（exact；静态 HTML，懒加载、零 client bundle 增长） |
+| 客户端 | `SafeModePanel.tsx` + `.css`：`sp-pop`（340px CCC 卡片）内加背景层 `<iframe>`（**仅展开时挂载** ⇒ 关闭即卸载、WebGL 上下文随之销毁）；卡片半透明 0.75 + iframe `blur(1.2px)` |
+| 出包 | `package.json` → `files` 加三项；`dsh-develop pack-check` → `required` 加资产硬断言（防"漏资产"复发，同 v1.26.15 事故形态） |
+| 内容判据 | `tests/voyage-page.test.ts` 10 例，把"**不得含外来容器内容**"钉进 CI（**大小写不敏感**——上一轮人工 grep 正是因大小写漏掉全大写 `TIANGONG`） |
+| 门禁 | typecheck ✓ / test **90 files 1311** ✓ / build ✓ / pack-check **109 文件** ✓ |
+
+⚠️ **观感取舍（非可调没的参数）**：340px 卡片 + 密排小字的双约束下，"动画看得清"与"文字全干净"互相挤压；取 0.75 + blur 1.2px 为中值。两个旋钮 = 卡片底不透明度、iframe blur；改则 `SafeModePanel.css` 与 `card-mock.html` **必须同批改**。
+⚠️ **踩坑留档**：`backdrop-filter` 对 iframe 内容**无效**（跨文档不采样 backdrop）⇒ 模糊只能加在 **iframe 自己**身上。
+
+### 修复：注入位置静默（D64 — **不再向 LLM 透露上下文消耗与限制**）
+
+**清理面**（`src/seams/keeper.ts` 三处，`grep` 穷举确认无第四处）：
+
+| # | 旧注入文本 | 新注入文本 |
+|---|---|---|
+| ① | `Score threshold reached (150)` | `Score threshold reached.`（计分是 ACC 内部账目，不回显） |
+| ② | `Context usage at 412K (threshold 400K)` | `Context usage has reached the configured rebuild threshold.` |
+| ③ | escalated 版同款数值 | 同款处理 |
+
+- 🔴 **判定语义与提醒行为一字未改**：仍读 `projectedTokens`、仍与 `thresholdK` 比对、仍连续超阈值升级催。**只是数值参数整条移出注入文本**（`rebuildReminderText()` 的两个数值参数已移除）。
+- **范围裁定（所有者当场拍板）**：① **清**；④ `SESSION.md is N KB (limit 200 KB)` **保留**——那是 SESSION.md **文件体积**，非上下文窗口消耗。
+- **与 v1.28.0 需求① 的关系**：需求① 是「**判定**」从窗口比例改为绝对 K；"显示 K 数值"只是当时顺带的**文案影响面**，**不是**所有者要求的展示 ⇒ 本项不推翻任何既有裁决。
+- **测试**：改为**钉住禁令**（`not.toContain('412K')` / `'(threshold'` / `/Context usage at/`）而非删除断言；构建产物 `lib/*.js` 复核旧数值形态 **0 命中**。
+- ⚠️ **判据边界（写测时踩过，留痕）**：禁令对象是"**数值**"，不是"**词**"——新文案自身用了 "configured rebuild threshold" 一词；word "threshold" 不透露任何量，保留。初版断言 `not.toContain('threshold')` 因此**失败**，是**测试写错**而非实现错。
+
+### 兼容性
+
+- **非破坏性**（minor）：工具面不变（仍 11）、配置键不变、`/serenity/*` 只**新增**一条路由。
+- 客户端新增背景层 iframe ⇒ **浏览器可能吃旧 client 缓存**（client 用 `?v=<accVersion>` 打缓存点，换版本即失效）。
+
+### 留档（本次不做）
+
+- ④「**为什么这轮没唤起**」诊断缺口（v1.35.0 已登记）：ACC 自管理链仍无病因查询，须**新**条件链，不得以"保留 ④"方式带回。
+- `clock-runtime.ts` 的 `ClockOptions` 存量项（`begin`/`bodyCountsTick`/`logFrom`/…）在 autopilot 退场后是否收敛——留作资产清理候选。
+
+---
+
 ## v1.35.0 — 2026-09-15（ACC 侧 autopilot **整段退场**：轨迹调度只剩 `wake-later` 一条路）
 
 **来源**：所有者裁决（2026-09-15）：CCC 自管理巡航已**端到端验证**（冷会话唤醒 ✅ + 链式自排 ✅），而 ACC 侧那套"周期自唤醒"在**行为层早已停用**（`autopilotWakeEnabled` 缺省关、时钟从未武装、**tick 次数 0**）⇒ 所有者选 **(a) 整段删除**并显式下令发布（D14）。
