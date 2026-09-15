@@ -353,7 +353,7 @@ pnpm build              # bundle (lib/index.js + client.js)
 | Runs on | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no shared source, same standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, platform-independent text aligned byte-for-byte |
-| Tools | msm / container_fs / trajectory … | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
+| Tools | msm / container_fs / logbook … | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
 
 **A workspace can switch runtimes at any time**: the `.serenity` marker, `.opencode/skills/`, configuration, and `AGENT_SESSIONS/` formats are identical.
 Only the platform layer differs (tool names, injection channel), and the constraints the AI receives stay the same.

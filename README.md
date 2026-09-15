@@ -347,7 +347,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 | 跑在 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
-| 工具 | msm / container_fs / trajectory 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin ＋ 两个条件出现的（`im-bridge` / `acc-diag`） |
+| 工具 | msm / container_fs / logbook 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin ＋ 两个条件出现的（`im-bridge` / `acc-diag`） |
 
 **同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
 差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。
