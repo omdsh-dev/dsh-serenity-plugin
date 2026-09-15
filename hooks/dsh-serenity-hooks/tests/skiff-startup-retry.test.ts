@@ -1,11 +1,18 @@
 /**
- * skiff-startup-retry.test.ts — Skiff 调试页 CCC root 定位重试（S142 诊断 D1，v1.30.13）
+ * skiff-startup-retry.test.ts — Skiff 调试页 CCC root 定位（S142 诊断 D1，v1.30.13；C2 后重写）
  *
  * 被验证的缺陷（实证）：`registerSkiff` 只在 apply 时同步一次 `resolveSkiffRoot`——
  * 此刻通常还没有 live 会话，进程 cwd 也不在 CCC 内 → 返回 null → 打印一行警告后
  * **永不重试**（重启日志 `✗ Skiff 调试服务未启动：无法定位 CCC root`，`ss -ltn` 无 3099）。
  *
- * 修复后被验证的三条触发路径：① 启动同步 ② 退避重试定时器 ③ live 会话就绪事件。
+ * **三条触发路径（本文件的核心契约，任何一条都不得丢）**：
+ *   ① 启动时同步一次
+ *   ② **反应式再触发**（`agent/session-start` / `session/created`）
+ *   ③ **持久来源兜底**（`resolveSkiffRoot` 第 ④ 档：ccc-roots 的并集枚举，含
+ *      工作区注册表 / 持久化会话——**不依赖任何 live 会话**，apply 时刻即可解析）
+ *
+ * v1.35（C2 块 C3）变更：**退避重试定时器已删除**——它存在的理由（"apply 时刻解析不到根"）
+ * 由第 ③ 条从源头消掉。原"重试耗尽 → 响亮告警"用例按新语义删除（该告警路径不复存在）。
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -18,6 +25,8 @@ const h = vi.hoisted(() => ({
   start: vi.fn(async () => {}),
   stop: vi.fn(),
   cccDir: '',
+  /** 额外可解析的 CCC 根（多候选场景用；默认只认 cccDir） */
+  extraRoots: [] as string[],
 }))
 
 vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (opts: unknown) => opts }))
@@ -66,8 +75,12 @@ vi.mock('../src/ccc.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../src/ccc.js')>()
   return {
     ...actual,
-    findSerenityRoot: (cwd: string) =>
-      typeof cwd === 'string' && h.cccDir !== '' && cwd.startsWith(h.cccDir) ? h.cccDir : null,
+    findSerenityRoot: (cwd: string) => {
+      if (typeof cwd !== 'string') return null
+      const all = [h.cccDir, ...h.extraRoots].filter((r) => r !== '')
+      for (const r of all) if (cwd.startsWith(r)) return r
+      return null
+    },
   }
 })
 
@@ -77,7 +90,11 @@ const CONFIG: Config = { tools: false, guards: false, serenityConfigPaths: [] }
 
 let cccDir: string
 let sessions: Array<{ header: { cwd: string } }>
+/** 持久来源替身：`workspaceRegistry.list()` 返回值（第 ③ 条路径的输入） */
+let workspaces: Array<{ path: string }>
 let handlers: Map<string, Array<(p?: unknown) => void>>
+/** plugin 全局配置路径的原始值（测试卫生：本文件注入临时配置，结束还原） */
+const prevCfgEnv = process.env.SERENITY_HOOKS_CONFIG
 
 function mockCtx() {
   const on = vi.fn((name: string, fn: (p?: unknown) => void) => {
@@ -90,6 +107,7 @@ function mockCtx() {
     on,
     effect: vi.fn(() => () => {}),
     sessions: { list: () => sessions },
+    get: (name: string) => (name === 'workspaceRegistry' ? { list: () => workspaces } : undefined),
   } as never
   return { ctx, on }
 }
@@ -98,53 +116,120 @@ function fire(name: string): void {
   for (const fn of handlers.get(name) ?? []) fn()
 }
 
+/** 等微任务链 settle（`sync` 为 async；启动/事件触发的解析不止一个 await） */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 8; i++) await Promise.resolve()
+}
+
 beforeEach(() => {
   vi.useFakeTimers()
   cccDir = mkdtempSync(join(tmpdir(), 'hooks-skiff-retry-'))
   writeFileSync(join(cccDir, '.serenity'), 'test')
   h.cccDir = cccDir
+  h.extraRoots = []
   sessions = []
+  workspaces = []
   handlers = new Map()
   h.settings = { skiffEnabled: true, skiffDebugPort: 3099 }
   h.start.mockClear()
+  h.start.mockImplementation(async () => {})
   h.stop.mockClear()
+  // C4 块 A 测试卫生：`apply` 会装配微信主动发送面，其 sync 读 plugin 全局配置——
+  // 不隔离就会去真绑生产端口 3082（本机真插件在跑时是占用告警，不在跑时**抢走生产端口**）。
+  // 注入临时配置（面关）→ 不绑端口、无重试噪音。
+  process.env.SERENITY_HOOKS_CONFIG = join(cccDir, 'serenity-hooks.json')
+  writeFileSync(join(cccDir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: false, port: 0 } }))
 })
 
 afterEach(() => {
   h.cccDir = ''
   vi.useRealTimers()
+  if (prevCfgEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+  else process.env.SERENITY_HOOKS_CONFIG = prevCfgEnv
   rmSync(cccDir, { recursive: true, force: true })
 })
 
-describe('Skiff 调试服务 CCC root 定位重试（D1）', () => {
-  it('无 CCC 可解析 → 信息级日志（非失败）+ 不启动（排入退避重试，不再"永不重试"）', () => {
+describe('Skiff 调试服务 CCC root 定位（D1；C2 后语义）', () => {
+  it('触发路径①：无任何 CCC 来源 → 信息级日志（非失败）+ 不启动', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { ctx } = mockCtx()
     apply(ctx, CONFIG)
+    await settle()
     expect(h.start).not.toHaveBeenCalled()
-    // 首次未定位 = 常态（apply 阶段无 live 会话）→ 信息级；失败语义只留给"重试耗尽"
+    // 首次未定位 = 常态（apply 阶段无 live 会话）→ **信息级**，不是失败
     expect(log.mock.calls.some((c) => String(c[0]).includes('等待 CCC root'))).toBe(true)
     expect(warn.mock.calls.some((c) => String(c[0]).includes('Skiff 调试服务未启动'))).toBe(false)
-    // 只说明一次（不随重试刷屏）
+    // 只说明一次（不刷屏）
     expect(log.mock.calls.filter((c) => String(c[0]).includes('等待 CCC root'))).toHaveLength(1)
     log.mockRestore()
     warn.mockRestore()
   })
 
-  it('重试耗尽（始终无 CCC）→ 响亮告警', async () => {
+  it('触发路径②：live 会话就绪事件（session/created）→ 立即启动', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { ctx } = mockCtx()
     apply(ctx, CONFIG)
-    await vi.advanceTimersByTimeAsync(120_000)
+    await settle()
     expect(h.start).not.toHaveBeenCalled()
-    expect(warn.mock.calls.some((c) => String(c[0]).includes('重试 5 次仍无法定位 CCC root'))).toBe(true)
+    sessions.push({ header: { cwd: cccDir } })
+    fire('session/created')
+    await settle()
+    expect(h.start).toHaveBeenCalledTimes(1)
+    expect(h.start.mock.calls[0]![1]).toBe(cccDir)
     log.mockRestore()
-    warn.mockRestore()
   })
 
-  it('并发触发只启动一次（v1.30.14：重试定时器 + 就绪事件同时到达 → 不得重复 start）', async () => {
+  it('触发路径②（另一事件）：agent/session-start → 立即启动；已启动后不重复启动', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const { ctx } = mockCtx()
+    apply(ctx, CONFIG)
+    await settle()
+    sessions.push({ header: { cwd: cccDir } })
+    fire('agent/session-start')
+    await settle()
+    expect(h.start).toHaveBeenCalledTimes(1)
+    expect(h.start.mock.calls[0]![1]).toBe(cccDir)
+    // started 守卫：再来一次事件不重复启动
+    fire('agent/session-start')
+    await settle()
+    expect(h.start).toHaveBeenCalledTimes(1)
+    log.mockRestore()
+  })
+
+  it('🔴 触发路径③：**无 live 会话** 但持久来源唯一 → 启动时即可解析（退避重试得以退场的原因）', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const { ctx } = mockCtx()
+    // 只有持久来源（工作区注册表），**零 live 会话**、进程 cwd 不在 CCC 内
+    workspaces = [{ path: cccDir }]
+    apply(ctx, CONFIG)
+    await settle()
+    expect(h.start).toHaveBeenCalledTimes(1)
+    expect(h.start.mock.calls[0]![1]).toBe(cccDir)
+    expect(h.start.mock.calls[0]![2]).toBe(3099)
+    log.mockRestore()
+  })
+
+  it('触发路径③ 的收敛条件：持久来源**多个候选** → 不猜（保持 null，不启动）', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const other = mkdtempSync(join(tmpdir(), 'hooks-skiff-other-'))
+    writeFileSync(join(other, '.serenity'), 'test')
+    // 两个候选**都必须可解析**（否则退化为单候选 → 会启动，测不到收敛条件）
+    h.extraRoots = [other]
+    try {
+      const { ctx } = mockCtx()
+      workspaces = [{ path: cccDir }, { path: other }]
+      apply(ctx, CONFIG)
+      await settle()
+      expect(h.start).not.toHaveBeenCalled()
+    } finally {
+      h.extraRoots = []
+      rmSync(other, { recursive: true, force: true })
+      log.mockRestore()
+    }
+  })
+
+  it('并发触发只启动一次（v1.30.14：定时/事件同拍 → 不得重复 start）', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     // 启动 Promise 延迟结算 → 制造"在飞"窗口（真实宿主里 listen 是异步的）
@@ -156,16 +241,15 @@ describe('Skiff 调试服务 CCC root 定位重试（D1）', () => {
         }),
     )
     const { ctx } = mockCtx()
+    workspaces = [{ path: cccDir }]
     apply(ctx, CONFIG)
-    sessions.push({ header: { cwd: cccDir } })
-    // 重试定时器到点 + 就绪事件连续到达（同一 tick 内）
-    await vi.advanceTimersByTimeAsync(1000)
+    // 启动 sync 仍在飞（未 settle）时，两个就绪事件同拍到达
     fire('session/created')
     fire('agent/session-start')
-    await vi.advanceTimersByTimeAsync(0)
+    await settle()
     expect(h.start).toHaveBeenCalledTimes(1)
     resolveStart?.()
-    await vi.advanceTimersByTimeAsync(0)
+    await settle()
     // 不得出现"启动失败"（重复 start 会 EADDRINUSE）；apply 期间其它模块的日志不在此断言范围
     expect(err.mock.calls.some((c) => String(c[0]).includes('Skiff 调试服务启动失败'))).toBe(false)
     log.mockRestore()
@@ -173,45 +257,29 @@ describe('Skiff 调试服务 CCC root 定位重试（D1）', () => {
     h.start.mockImplementation(async () => {})
   })
 
-  it('退避重试：定时器到点后 CCC 已可解析 → 启动调试服务', async () => {
-    const { ctx } = mockCtx()
+  it('关闭开关 → 不起服务（不因"根可解析"而启动）', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const { ctx } = mockCtx()
+    workspaces = [{ path: cccDir }]
+    h.settings = { skiffEnabled: false, skiffDebugPort: 3099 }
     apply(ctx, CONFIG)
+    await settle()
+    // 即便持久来源可解析，闸关即不启
     expect(h.start).not.toHaveBeenCalled()
-    // CCC 变为可解析（live 会话出现）
-    sessions.push({ header: { cwd: cccDir } })
-    await vi.advanceTimersByTimeAsync(1000)
+    // 随后开启（settings-changed 热同步）→ 启动
+    h.settings = { skiffEnabled: true, skiffDebugPort: 3099 }
+    fire('serenity/settings-changed')
+    await settle()
     expect(h.start).toHaveBeenCalledTimes(1)
-    expect(h.start.mock.calls[0]![1]).toBe(cccDir)
-    expect(h.start.mock.calls[0]![2]).toBe(3099)
-    log.mockRestore()
-  })
-
-  it('live 会话就绪事件（agent/session-start / session/created）→ 立即重试启动', async () => {
-    const { ctx } = mockCtx()
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    apply(ctx, CONFIG)
-    sessions.push({ header: { cwd: cccDir } })
-    fire('session/created')
-    await vi.advanceTimersByTimeAsync(0)
-    expect(h.start).toHaveBeenCalledTimes(1)
-    expect(h.start.mock.calls[0]![1]).toBe(cccDir)
-    // 已启动后事件再触发不重复启动（started 守卫）
-    fire('agent/session-start')
-    await vi.advanceTimersByTimeAsync(0)
-    expect(h.start).toHaveBeenCalledTimes(1)
-    log.mockRestore()
-  })
-
-  it('关闭开关 → 清掉待执行的重试（不会"关了还起服务"）', async () => {
-    const { ctx } = mockCtx()
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    apply(ctx, CONFIG)
-    sessions.push({ header: { cwd: cccDir } })
+    // 再关 → 停服
     h.settings = { skiffEnabled: false, skiffDebugPort: 3099 }
     fire('serenity/settings-changed')
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(h.start).not.toHaveBeenCalled()
+    await settle()
+    expect(h.stop).toHaveBeenCalledTimes(1)
+    // 关着时事件再触发也不起
+    fire('session/created')
+    await settle()
+    expect(h.start).toHaveBeenCalledTimes(1)
     log.mockRestore()
   })
 })

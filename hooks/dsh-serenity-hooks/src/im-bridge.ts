@@ -39,7 +39,7 @@ export type ImUserEntry = {
 }
 
 /** 文本发送输入（通道实现负责凭据解析与记录） */
-export interface ImSendInput {
+interface ImSendInput {
   root: string
   /** 通道内用户 id（别名已由本模块解析） */
   userId: string
@@ -48,7 +48,7 @@ export interface ImSendInput {
 }
 
 /** 文本发送结果（与既有主动发送返回一致，便于记录/诊断） */
-export interface ImSendResult {
+interface ImSendResult {
   accountId: string
   userId: string
   sessionId: string
@@ -56,7 +56,7 @@ export interface ImSendResult {
 }
 
 /** 文件发送输入（`data` 由本模块读盘并校验后传入——通道不碰 CCC 路径） */
-export interface ImSendFileInput {
+interface ImSendFileInput {
   root: string
   userId: string
   data: Buffer
@@ -123,11 +123,11 @@ export function hasEnabledImChannel(root: string): boolean {
 export type ImJson = null | boolean | number | string | ImJson[] | { [key: string]: ImJson }
 
 /** 分发结果（工具面直接渲染；错误码稳定，便于模型与日志消费） */
-export type ImToolResult =
+type ImToolResult =
   | { ok: true; channel: string; action: string; detail: ImJson }
   | { ok: false; code: string; error: string; remediation?: string }
 
-export interface ImToolRequest {
+interface ImToolRequest {
   channel?: string
   action?: string
   user?: string

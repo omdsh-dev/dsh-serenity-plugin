@@ -8,13 +8,13 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-export interface OpencodeSkillMeta {
+interface OpencodeSkillMeta {
   name: string
   description: string
   whenToUse?: string
 }
 
-export interface OpencodeSkill {
+interface OpencodeSkill {
   name: string
   dir: string
   meta: OpencodeSkillMeta

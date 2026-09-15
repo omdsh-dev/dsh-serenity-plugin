@@ -15,11 +15,11 @@ import { execFileSync } from 'node:child_process'
 import { checkLocalstoreGitCompliance } from './localstore-ops.js'
 import type { JsonValue } from './json.js'
 
-export type GitAction = 'status' | 'commit' | 'push' | 'log' | 'pull' | 'diff'
+type GitAction = 'status' | 'commit' | 'push' | 'log' | 'pull' | 'diff'
 
 export const GIT_ACTIONS: readonly GitAction[] = ['status', 'commit', 'push', 'log', 'pull', 'diff']
 
-export interface GitArgs {
+interface GitArgs {
   action: GitAction
   message?: string
   /** log 条数（对齐 osp 参数 n，默认 10，max 100） */

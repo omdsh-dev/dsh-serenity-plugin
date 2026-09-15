@@ -30,7 +30,7 @@ export function sessionsRootDir(): string {
 const DAY_MS = 24 * 60 * 60 * 1000
 
 /** 一个候选会话（删除前预览信息） */
-export interface CandidateSession {
+interface CandidateSession {
   /** 会话 id（目录名） */
   id: string
   /** 项目目录（父目录名，如 --home-yh-home-home-serenity--） */
@@ -127,7 +127,7 @@ export function findSessionLog(sessionDirPath: string): string | null {
 }
 
 /** 删除执行结果 */
-export interface CleanupResult {
+interface CleanupResult {
   deleted: string[]
   /** 尝试删除但失败的会话目录（权限/竞态） */
   errors: Array<{ id: string; reason: string }>

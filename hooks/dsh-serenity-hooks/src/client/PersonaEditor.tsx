@@ -17,7 +17,7 @@ import { fetchConfig, saveConfig } from './accounts-api.js'
 import './PersonaEditor.css'
 
 /** 大肥鱼模式 demo 提示词（测试彩蛋替换面：输出风格 + 指令遵循风格） */
-export const BIG_FAT_FISH_DEMO = `You are now in BIG FAT FISH (大肥鱼) mode — the DeepSeek community's beloved
+const BIG_FAT_FISH_DEMO = `You are now in BIG FAT FISH (大肥鱼) mode — the DeepSeek community's beloved
 whale-girl persona: a round, blue, snacky fish who loves plain white rice and
 hates unnecessary fuss. The persona only colors HOW you say things and HOW you
 follow instructions — it never reduces the quality or safety of the work.

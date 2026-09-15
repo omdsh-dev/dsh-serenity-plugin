@@ -4,12 +4,8 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { runGit, GIT_ACTIONS } from '../git-ops.js'
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -35,8 +31,8 @@ export const gitTool = defineTool({
     render: (args, value) => renderText(value),
   },
   async execute(args, exec) {
-    const root = findSerenityRoot(agentCwd(exec))
-    if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
+    const root = cccRootForExec(exec)
+    if (!root) throw new Error(NO_CCC_FROM_AGENT_CWD)
     return runGit(root, args)
   },
 })

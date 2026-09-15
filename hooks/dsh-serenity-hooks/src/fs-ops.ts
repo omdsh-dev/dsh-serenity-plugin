@@ -33,7 +33,7 @@ import { platform } from 'node:os'
 import { resolveInside, pathInside, readCccName } from './ccc.js'
 import type { JsonValue } from './json.js'
 
-export type CcFsAction =
+type CcFsAction =
   | 'root'
   | 'resolve'
   | 'exists'
@@ -76,7 +76,7 @@ export interface CcFsArgs {
   maxDepth?: number
 }
 
-export type CcFsResult = JsonValue
+type CcFsResult = JsonValue
 
 // ── 文件元数据（对齐 osp FileInfo）──
 

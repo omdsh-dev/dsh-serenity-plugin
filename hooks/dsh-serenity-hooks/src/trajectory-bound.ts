@@ -26,12 +26,12 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { findSerenityRoot } from './ccc.js'
+import { cccRootForCwd } from './ccc-roots.js'
 import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './trajectory-ops.js'
 
-export type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
+type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
 
-export interface SessionBoundRecord {
+interface SessionBoundRecord {
   dirName: string
   mdPath: string
   sessionId?: string
@@ -41,7 +41,7 @@ export interface SessionBoundRecord {
 }
 
 /** 旧形态事件类型（v1.29.1~v1.30.5 写入会话日志；v1.30.6 起只读不写——兼容存量绑定） */
-export const SESSION_BOUND_EVENT = 'serenity/bound' as const
+const SESSION_BOUND_EVENT = 'serenity/bound' as const
 
 /** 绑定文件相对 CCC 根的路径 */
 export const BINDINGS_REL_PATH = 'AGENT_SESSIONS/.bindings.json'
@@ -63,7 +63,7 @@ function sessionHeader(session: unknown): { id?: string; cwd?: string } | null {
 export function bindingsPathFor(session: unknown): string | null {
   const header = sessionHeader(session)
   if (typeof header?.cwd !== 'string') return null
-  const root = findSerenityRoot(header.cwd)
+  const root = cccRootForCwd(header.cwd)
   if (!root) return null
   return join(root, BINDINGS_REL_PATH)
 }

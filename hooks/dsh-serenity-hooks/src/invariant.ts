@@ -9,7 +9,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-export interface PluginManifest {
+interface PluginManifest {
   id: string
   version?: string
   main?: string
@@ -19,7 +19,7 @@ export interface PluginManifest {
 }
 
 /** 读取插件清单；缺失/非法返回 null */
-export function readPluginManifest(manifestPath: string): PluginManifest | null {
+function readPluginManifest(manifestPath: string): PluginManifest | null {
   if (!existsSync(manifestPath)) return null
   try {
     return JSON.parse(readFileSync(manifestPath, 'utf-8')) as PluginManifest

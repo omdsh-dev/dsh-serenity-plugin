@@ -4,9 +4,6 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-/** 插件 ID */
-export const PLUGIN_ID = 'dsh-serenity-hooks'
-
 /**
  * ACC 版本：自动从 package.json 读取（单一真相源，消除与 CHANGELOG 的漂移）。
  * 发布时只需改 package.json 的 version。

@@ -36,7 +36,7 @@ import { hostWeb } from './host/access.js'
  * `vi.mock('@deepseek-ai/dsh-tools')` 同因），而 `dsh-tool-web` 只渲染 `error.message`、
  * 不判 `instanceof`——因此本地错误对象足以满足契约，且让本模块零运行时宿主依赖。
  */
-export function fetchError(message: string, code: string): Error {
+function fetchError(message: string, code: string): Error {
   const error = new Error(message) as Error & { code?: string }
   error.code = code
   return error
@@ -49,7 +49,7 @@ export function fetchError(message: string, code: string): Error {
  * 它不导出解析后的默认值，`Config` 是 schemastery schema 而非结果）。`userAgent`
  * 运行时取该包导出的 `DEFAULT_USER_AGENT`（单一真相源，不复制字符串）。
  */
-export const FETCH_LIMIT_DEFAULTS = {
+const FETCH_LIMIT_DEFAULTS = {
   maxResponseBytes: 5_000_000,
   maxBodyChars: 100_000,
   timeoutMs: 30_000,

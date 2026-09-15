@@ -17,7 +17,7 @@
  * 实验性质：未开启时零资源占用（无监听、无 agent 创建）。
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import { AcpServer, dispatchRpc } from './acp-core.js'
 import {
@@ -29,20 +29,26 @@ import {
   resetPublicAskIpFail,
 } from './config-ops.js'
 import { readSkiffRoles } from './skiff-role.js'
-import { discoverCccs, renderSkiffMarkdown, jscSafeJsonText, type SkiffCccEntry } from './skiff-debug.js'
+import { renderSkiffMarkdown, jscSafeJsonText } from './skiff-debug.js'
 import { readSimpleSettings } from './settings-section.js'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo } from './skiff-core.js'
 import { readHandymanConfig, findSerenityRoot } from './ccc.js'
+import { listCccs, cccRootForCwd, type CccEntry } from './ccc-roots.js'
+// C4 块 A：listener 生命周期归面宿主（本面=面 E，端口语义见 ports.ts 的 FACE_PORTS.acpHttp）
+import { faceActive, facePort, startFace, stopFace, type FaceSpec } from './face-host.js'
+import { FACE_PORTS } from './ports.js'
 
-/** 运行中的 ACP HTTP 服务（单实例；进程级） */
-let active: { server: ReturnType<typeof createServer>; port: number } | null = null
+/** 面名（C4 块 A） */
+const FACE_ACP_HTTP = 'acp-http'
+/** 监听地址：**只绑 loopback**（JSON-RPC 子面无认证——仅靠 loopback；问答页另有 key 认证） */
+const ACP_HTTP_HOST = FACE_PORTS.acpHttp.host ?? '127.0.0.1'
 
 export function acpHttpActive(): boolean {
-  return active !== null
+  return faceActive(FACE_ACP_HTTP)
 }
 
 export function acpHttpPort(): number | null {
-  return active?.port ?? null
+  return facePort(FACE_ACP_HTTP)
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -68,36 +74,43 @@ function sendHtml(res: ServerResponse, html: string): void {
 }
 
 /**
+ * 本面的规格（C4 块 A/④：**只提供** name/port/host/enabled/handler）。
+ * 两个子面（ACP JSON-RPC / 对外问答页）的路由与鉴权仍全部归 {@link handle}——
+ * 面宿主不介入面语义，也**不合并** D/E 两面（两者共用会话核心但各有独立 listener/路由/HTML）。
+ */
+export function acpHttpSpec(ctx: Context, port: number, defaultRoot?: string): FaceSpec {
+  return {
+    name: FACE_ACP_HTTP,
+    port,
+    host: ACP_HTTP_HOST,
+    // 意图 = 双闸任开（acpEnabled || publicAskEnabled；子面各自再门控——见 handle 内分支）
+    enabled: () => {
+      const s = readSimpleSettings()
+      return s.acpEnabled || s.publicAskEnabled
+    },
+    handler: (req, res) => handle(ctx, defaultRoot ?? '', req, res),
+  }
+}
+
+/**
  * 启动 ACP HTTP JSON-RPC + 建议问答页服务（单实例；重复启动幂等返回既有实例）。
+ * C4 块 A：listener 的创建/监听/错误/端口占用/关闭归 `face-host`。
  * @param ctx 插件上下文（AcpServer 内部经 skiff-core 创建 agent）
  * @param port 监听端口（仅 127.0.0.1）
  * @param defaultRoot 默认 CCC 根（问答页候选发现兜底；resolveSkiffRoot 传入）
  */
 export async function startAcpHttpServer(ctx: Context, port: number, defaultRoot?: string): Promise<void> {
-  if (active) return
-  const server = createServer((req, res) => {
-    void handle(ctx, defaultRoot ?? '', req, res)
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => resolve())
-  })
-  active = { server, port }
+  if (acpHttpActive()) return
+  const handle = await startFace(acpHttpSpec(ctx, port, defaultRoot))
   const s = readSimpleSettings()
   const faces: string[] = []
   if (s.acpEnabled) faces.push('JSON-RPC')
   if (s.publicAskEnabled) faces.push('问答页(key 认证)')
-  console.log(`[serenity-hooks] ✓ ACP HTTP: http://127.0.0.1:${port}（${faces.join(' + ') || '未开启任何面'}；session/new 支持 {ccc, role, sessionId?}）`)
+  console.log(`[serenity-hooks] ✓ ACP HTTP: http://127.0.0.1:${handle.port}（${faces.join(' + ') || '未开启任何面'}；session/new 支持 {ccc, role, sessionId?}）`)
 }
 
 export function stopAcpHttpServer(): void {
-  if (!active) return
-  try {
-    active.server.close()
-  } catch {
-    /* 关闭失败忽略 */
-  }
-  active = null
+  stopFace(FACE_ACP_HTTP)
 }
 
 async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -147,11 +160,27 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
       return allowed.length === 0 || allowed.includes(name)
     }
 
+    // 候选 CCC 枚举（C2：唯一真相源 = ccc-roots.listCccs）。
+    // 默认根 = 装配时解析到的 `defaultRoot`，缺省回落进程 cwd 上溯（既有语义）。
+    // `withRoles: true` —— 问答页要渲染各 CCC 的角色（原 discoverCccs 恒读角色，行为等价）。
+    // 注：解析结果在单次请求内是常量（`req`/`ctx` 不变），故按请求记忆化
+    //（5 个分支调用同一份列表；否则每次请求要跑 5 遍三层枚举）。
+    let cccsCache: CccEntry[] | null = null
+    const cccsOf = async (): Promise<CccEntry[]> => {
+      if (cccsCache === null) {
+        cccsCache = await listCccs(ctx, {
+          defaultRoot: defaultRoot || (cccRootForCwd(process.cwd()) ?? ''),
+          withRoles: true,
+        })
+      }
+      return cccsCache
+    }
+
     // GET /c/<name> → 单容器问答页（URL 体现容器名，用户只输 key）
     const cMatch = /^\/c\/([^/]+)$/.exec(url)
     if (req.method === 'GET' && cMatch) {
       const name = decodeURIComponent(cMatch[1] ?? '')
-      const cccs = await discoverCccs(ctx, defaultRoot || (findSerenityRoot(process.cwd()) ?? ''))
+      const cccs = await cccsOf()
       const ccc = cccs.find((c) => c.name === name)
       if (!ccc) {
         sendHtml(res, publicAskContainerUnknownHtml(name))
@@ -167,7 +196,7 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
 
     // GET / → 容器列表页（只列已开放容器，链接到 /c/<name>）
     if (req.method === 'GET' && url === '/') {
-      const cccs = await discoverCccs(ctx, defaultRoot || (findSerenityRoot(process.cwd()) ?? ''))
+      const cccs = await cccsOf()
       const open = cccs.filter((c) => containerAllowed(c.name))
       sendHtml(res, publicAskListPage(open))
       return
@@ -177,7 +206,7 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
     const aMatch = /^\/c\/([^/]+)\/ask$/.exec(url)
     if (req.method === 'POST' && aMatch) {
       const name = decodeURIComponent(aMatch[1] ?? '')
-      const cccs = await discoverCccs(ctx, defaultRoot || (findSerenityRoot(process.cwd()) ?? ''))
+      const cccs = await cccsOf()
       const ccc = cccs.find((c) => c.name === name)
       if (!ccc || !containerAllowed(name)) {
         sendJson(res, 403, { error: `container "${name}" is not open for public ask` })
@@ -209,13 +238,13 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
       }
       const cccValue = typeof body.ccc === 'string' && body.ccc !== '' ? body.ccc : undefined
       const nameValue = typeof body.name === 'string' && body.name !== '' ? body.name : undefined
-      let ccc: SkiffCccEntry | undefined
+      let ccc: CccEntry | undefined
       if (nameValue) {
-        const cccs = await discoverCccs(ctx, defaultRoot || (findSerenityRoot(process.cwd()) ?? ''))
+        const cccs = await cccsOf()
         ccc = cccs.find((c) => c.name === nameValue)
       } else if (cccValue) {
         // 兼容旧 ccc=root 路径：按 root 匹配
-        const cccs = await discoverCccs(ctx, defaultRoot || (findSerenityRoot(process.cwd()) ?? ''))
+        const cccs = await cccsOf()
         ccc = cccs.find((c) => c.root === cccValue)
         // root 不在发现列表（如未挂工作区）→ 允许按 root 直接构造（白名单按目录名判定）
         if (!ccc && cccValue !== '') {
@@ -244,7 +273,7 @@ async function handle(ctx: Context, defaultRoot: string, req: IncomingMessage, r
  */
 async function handleAskParsed(
   ctx: Context,
-  ccc: SkiffCccEntry,
+  ccc: CccEntry,
   body: Record<string, unknown>,
   res: ServerResponse,
   ip: string,

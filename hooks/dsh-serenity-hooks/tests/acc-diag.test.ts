@@ -16,19 +16,12 @@ import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (o: unknown) => o }))
 
-// 脚本通道：mock 掉进程 spawn（真跑会拉起 bun 与真实脚本）
-vi.mock('../src/autopilot-script.js', () => ({
-  findExpScript: () => null,
-  EXP_SCRIPT: null,
-  runAutopilotScript: vi.fn(() => ({ output: '✓ enabled = true\n✗ session 未配置' })),
-}))
+// v1.34.1（⑥ C6a）：④ 段**不再 spawn 包内脚本**（改为进程内调 autopilot-chain）⇒ 本文件不再
+// 需要脚本通道 mock。判据本身在 autopilot-chain.test.ts 覆盖；此处只验**装配与渲染**。
 
 import { readExclusiveTools } from '../src/ccc.js'
 import { runAccDiag, renderAccDiag } from '../src/diag-ops.js'
 import { createAccDiagTool } from '../src/tools/acc-diag.js'
-import { runAutopilotScript } from '../src/autopilot-script.js'
-
-const mockRunAutopilotScript = vi.mocked(runAutopilotScript)
 
 let dir: string
 
@@ -36,8 +29,6 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'acc-diag-'))
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, 'AGENT_SESSIONS'), { recursive: true })
-  mockRunAutopilotScript.mockReset()
-  mockRunAutopilotScript.mockReturnValue({ output: '✓ enabled = true\n✗ session 未配置' })
 })
 
 afterEach(() => {
@@ -89,7 +80,7 @@ describe('acc-diag: readExclusiveTools（判据 fail-closed）', () => {
 })
 
 describe('acc-diag: runAccDiag 装配 + 渲染', () => {
-  it('注册表条目被聚合（state / at / target / lastResult / createdBy / attempts）', () => {
+  it('注册表条目被聚合（state / at / target / lastResult / createdBy / attempts）', async () => {
     writeFileSync(
       join(dir, 'AGENT_SESSIONS', 'wake-registry.json'),
       JSON.stringify({
@@ -119,7 +110,7 @@ describe('acc-diag: runAccDiag 装配 + 渲染', () => {
         ],
       }),
     )
-    const r = runAccDiag(fakeCtx() as never, dir)
+    const r = await runAccDiag(fakeCtx() as never, dir)
     expect(r.ccc).toBe(dir)
     expect(r.wakes.error).toBeNull()
     expect(r.wakes.entries).toHaveLength(2)
@@ -134,13 +125,22 @@ describe('acc-diag: runAccDiag 装配 + 渲染', () => {
     expect(text).toContain('④ 唤起条件链')
     expect(text).toContain('w-1 [pending]')
     expect(text).toContain('补跑窗口 2h')
-    // ④ 段 = 脚本输出原文（不复制语义）
-    expect(text).toContain('✓ enabled = true')
-    expect(mockRunAutopilotScript).toHaveBeenCalledWith(dir, 'diag')
+    // ④ 段 = **进程内**条件链（判据唯一实现 = autopilot-chain）——不再有子进程输出
+    expect(text).toContain('自主轨迹唤起诊断')
   })
 
-  it('无 live 会话 / 无条目：空段显式说明"无"（不得让人误读为"沉默 = 一切正常"）', () => {
-    const r = runAccDiag(fakeCtx([]) as never, dir)
+  it('🔴 ④ 段进程内：读得到只有进程内可见的判据（全局闸），并给出判决档', async () => {
+    writeCccConfig({ trajectory: { autopilot: { enabled: true, intervalHours: 12 } } })
+    const r = await runAccDiag(fakeCtx() as never, dir)
+    // 本测试进程 settings 缺省 → 闸关（readSimpleSettings 兜底）⇒ 阻断，且**报告里能看见**
+    expect(r.autopilotChain).toContain('周期自唤醒全局闸关闭')
+    expect(r.autopilotChain).not.toContain('不可知（离线通道——只有插件进程能读 DSH 设置）')
+    expect(r.autopilotVerdict).toBe('blocked')
+    expect(renderAccDiag(r)).toContain('周期自唤醒全局闸关闭')
+  })
+
+  it('无 live 会话 / 无条目：空段显式说明"无"（不得让人误读为"沉默 = 一切正常"）', async () => {
+    const r = await runAccDiag(fakeCtx([]) as never, dir)
     const text = renderAccDiag(r)
     expect(text).toContain('live 会话: 0 个')
     expect(text).toContain('autopilot CCC: 无')
@@ -149,21 +149,20 @@ describe('acc-diag: runAccDiag 装配 + 渲染', () => {
     expect(text).toContain('── ② 面板解析')
   })
 
-  it('脚本诊断失败 → 原文透传为"脚本诊断失败"文本（不静默吞掉）', () => {
-    mockRunAutopilotScript.mockReturnValue({ error: 'autopilot 脚本需要 bun 运行时' })
-    const r = runAccDiag(fakeCtx() as never, dir)
-    expect(r.autopilotChain).toContain('脚本诊断失败')
-    expect(r.autopilotChain).toContain('bun')
+  it('配置缺失 → ④ 段如实报"未配置"（不是空段、不是静默）', async () => {
+    const r = await runAccDiag(fakeCtx() as never, dir)
+    expect(r.autopilotChain).toContain('trajectory.autopilot 未配置')
+    expect(r.autopilotVerdict).toBe('blocked')
   })
 
-  it('live 会话列出 id / cwd / CCC 归属', () => {
-    const r = runAccDiag(fakeCtx([{ id: 'session-a', cwd: dir }]) as never, dir)
+  it('live 会话列出 id / cwd / CCC 归属', async () => {
+    const r = await runAccDiag(fakeCtx([{ id: 'session-a', cwd: dir }]) as never, dir)
     expect(r.live.liveSessions).toHaveLength(1)
     expect(renderAccDiag(r)).toContain('session-a')
   })
 
-  it('① 段报告进程内两个时钟的武装状态（"为何没有 tick" 的第一手判据）', () => {
-    const r = runAccDiag(fakeCtx() as never, dir)
+  it('① 段报告进程内两个时钟的武装状态（"为何没有 tick" 的第一手判据）', async () => {
+    const r = await runAccDiag(fakeCtx() as never, dir)
     const text = renderAccDiag(r)
     expect(r.clocks.wake).toHaveProperty('armed')
     expect(r.clocks.wake).toHaveProperty('enabled')

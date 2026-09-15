@@ -31,7 +31,7 @@ const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hoo
 export const WEIXIN_OUTPUT_REBUKE_MAX = 2
 
 /** 手动模式会话上下文（桥登记） */
-export interface ManualOutputSession {
+interface ManualOutputSession {
   root: string
   accountId: string
   userId: string

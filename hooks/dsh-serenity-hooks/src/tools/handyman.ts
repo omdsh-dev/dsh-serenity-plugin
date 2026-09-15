@@ -30,7 +30,8 @@ import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-agent-presets'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
-import { findSerenityRoot, loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { handymanPresetInheritance } from '../handyman-preset-inherit.js'
 import {
   buildRoundPrompt,
@@ -46,10 +47,6 @@ import {
 import type { JsonValue } from '../json.js'
 import { waitAgentIdle } from '../agent-idle.js'
 import { hostSubagents } from '../host/access.js'
-
-function agentCwd(exec: ToolRunContext): string {
-  return (exec.agent?.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
-}
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -79,17 +76,15 @@ function lastAssistantText(agent: Agent): string {
 }
 
 /** 非正常停止时重启 agent 的次数上限（防死循环保险阀）：对话轮次有上限，重启有上限 */
-export const HANDYMAN_MAX_RESTARTS = 100
-/** 对话轮次上限（对齐 osp loop-runner 的 round>=100 强制 done 保险阀） */
-export const HANDYMAN_MAX_ROUNDS = 100
+const HANDYMAN_MAX_RESTARTS = 100
 
-export interface HandymanJob {
+interface HandymanJob {
   task: string
   label: string
   model?: string
 }
 
-export interface HandymanJobResult {
+interface HandymanJobResult {
   label: string
   done: boolean
   rounds: number
@@ -115,7 +110,7 @@ function parseJobs(raw: unknown): HandymanJob[] | null {  if (!Array.isArray(raw
 // ── v1.31.3 foreground 模式：一次前台串行委派（用户裁决：handyman 双模式）──
 
 /** foreground 模式结果（一次调用一次结果；无循环、无进度文件） */
-export interface HandymanForegroundResult {
+interface HandymanForegroundResult {
   mode: 'foreground'
   done: boolean
   model: string
@@ -384,7 +379,7 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
         return { guide: HANDYMAN_GUIDE }
       }
       // v1.31.4：前台委派的「发起方」是**调用形态**前提，先于 CCC 解析检查。
-      // 为什么顺序重要（R↓，CI 实证）：`agentCwd()` 在无 `exec.agent` 时回落
+      // 为什么顺序重要（R↓，CI 实证）：`cccRootForExec` 在无 `exec.agent` 时回落
       // `process.cwd()`，而该 cwd 未必落在任何 CCC 内（CI runner 的 cwd = 仓库根，
       // 祖先链无 `.serenity`）→ 原顺序先抛 `No CCC found`，把真正的错误原因盖掉，
       // 也让用例依赖"运行目录恰好在某个 CCC 里"。
@@ -392,8 +387,8 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
         throw new Error('handyman foreground: requires a calling agent (exec.agent was undefined)')
       }
 
-      const root = findSerenityRoot(agentCwd(exec))
-      if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
+      const root = cccRootForExec(exec)
+      if (!root) throw new Error(NO_CCC_FROM_AGENT_CWD)
 
       const hc = readHandymanConfig(root, DEFAULT_SERENITY_CONFIG_PATHS)
       if (hc === null) {

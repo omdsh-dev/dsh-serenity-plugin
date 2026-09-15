@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
-export interface HandymanProgress {
+interface HandymanProgress {
   round: number
   done: boolean
   label: string
@@ -208,7 +208,7 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
 `
 
 /** handyman 运行状态（进度文件摘要；WebUI 等待界面数据源） */
-export interface HandymanRunInfo {
+interface HandymanRunInfo {
   label: string
   round: number
   done: boolean

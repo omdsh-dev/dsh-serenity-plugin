@@ -1,8 +1,8 @@
 /**
  * skiff-admin.ts — Skiff 角色逻辑层（v1.30：skiff_admin 工具已并入 container_admin role 域）
  *
- * 教 CCC 如何定义 Skiff 角色（仿 session 工具 hook-develop-guide 的 SEP 教学模式，
- * 用户拍板 2026-08-28：guide 定义教程 / validate 配置校验 / list 角色摘要）。
+ * 教 CCC 如何定义 Skiff 角色（用户拍板 2026-08-28 的三动作分工：
+ * guide 定义教程 / validate 配置校验 / list 角色摘要）。
  *
  * 归属：ACC 机制（教会 + 校验），角色内容仍归 CCC 配置（.opencode/serenity.json skiff.roles）。
  * 公开入口 = container_admin（domain: role → guide/validate/apply/list）；本文件保留纯逻辑。

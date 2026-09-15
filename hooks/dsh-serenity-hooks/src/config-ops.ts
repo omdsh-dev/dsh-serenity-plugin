@@ -19,6 +19,8 @@ import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
 import { base32Decode } from './totp.js'
+// C4 块 B：端口默认值只从集中端口表取（不再散写）
+import { FACE_PORTS, GATEWAY_PORT, WEIXIN_SEND_PORT } from './ports.js'
 
 // ── 配置模型 ──
 
@@ -26,7 +28,7 @@ import { base32Decode } from './totp.js'
 export const ADVANCED_SECTION = 'serenityAdvanced'
 
 /** 一个外部访问账号（密码只存 hash，永不落 wire） */
-export interface GatewayAccount {
+interface GatewayAccount {
   /** 稳定键（UI CRUD 定位） */
   id: string
   /** 登录用户名 */
@@ -38,7 +40,7 @@ export interface GatewayAccount {
 }
 
 /** F1 双端口网关配置 */
-export interface GatewaySettings {
+interface GatewaySettings {
   enabled: boolean
   host: string
   port: number
@@ -56,7 +58,7 @@ export interface GatewaySettings {
 /** 彩蛋功能：persona 模式（v1.23.1，S142 用户需求）
  * 配置后替换 ACC 系统提示词中"输出约束/指令遵循约束"部分（EAP 块 + MSM 原则段）；
  * 未配置（mode 空）→ 完全默认行为，零影响。 */
-export interface PersonaSettings {
+interface PersonaSettings {
   /** 彩蛋模式名（显示用；空 = 彩蛋关闭） */
   mode: string
   /** 用户替换文本（替代 EAP 块 + MSM 原则段的原文） */
@@ -66,7 +68,7 @@ export interface PersonaSettings {
 /** F4d 建议问答页（v1.26.1，S142 用户：按认知容器暴露问答页供他人验证）：
  * 与 ACP HTTP 共用 3100 端口；key 首次启用自动生成（plugin 全局文件固定），无 key 不工作。
  * v1.26.2：按容器权限控制——allowed 白名单（容器名）；空 = 全部开放（向后兼容 v1.26.1 全局开放） */
-export interface PublicAskSettings {
+interface PublicAskSettings {
   /** 访问 key（空 = 未生成；首次启用时 ensurePublicAskKey 自动生成随机 key 写回固定） */
   key: string
   /** 开放容器白名单（CCC 目录名，如 home-serenity）；空数组 = 全部容器开放 */
@@ -80,7 +82,7 @@ export interface PublicAskSettings {
  * 旧高级 rebuild 字段是死双胞胎（/serenity/config PUT 回显但运行时从不读它）——
  * 删除防误导（用户在高级面板改了却无效）。历史残留字段被 mergeWithDefaults 忽略（幂等安全）。
  */
-export interface AdvancedSettings {
+interface AdvancedSettings {
   gateway: GatewaySettings
   persona: PersonaSettings
   publicAsk: PublicAskSettings
@@ -92,7 +94,7 @@ export interface AdvancedSettings {
  * 主动发送入口配置（v1.30.9，S142 用户需求"微信桥支持被调用发消息"）。
  * 只监听 loopback（公网网关 3081 不可达），故不做密钥；`enabled:false` 或 `port:0` 关闭。
  */
-export interface WeixinApiSettings {
+interface WeixinApiSettings {
   enabled: boolean
   port: number
 }
@@ -102,8 +104,8 @@ export function defaultAdvancedSettings(): AdvancedSettings {
   return {
     gateway: {
       enabled: false,
-      host: '0.0.0.0',
-      port: 3081,
+      host: FACE_PORTS.gateway.host ?? '0.0.0.0',
+      port: GATEWAY_PORT,
       accounts: [],
       workspaces: [],
       cookieSecure: false,
@@ -120,7 +122,7 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     },
     weixinApi: {
       enabled: true,
-      port: 3082,
+      port: WEIXIN_SEND_PORT,
     },
   }
 }
@@ -335,11 +337,11 @@ export function rotatePublicAskKey(): string {
 // 复用 gateway-auth 的指数退避模式（5 次失败 → 15min → 30min → … 上限 4h）。
 
 /** 失败锁定阈值（连续失败次数） */
-export const PUBLIC_ASK_FAIL_THRESHOLD = 5
+const PUBLIC_ASK_FAIL_THRESHOLD = 5
 /** 首次锁定基础时长（指数退避底数） */
-export const PUBLIC_ASK_LOCK_BASE_MS = 15 * 60 * 1000
+const PUBLIC_ASK_LOCK_BASE_MS = 15 * 60 * 1000
 /** 锁定上限 */
-export const PUBLIC_ASK_LOCK_MAX_MS = 4 * 60 * 60 * 1000
+const PUBLIC_ASK_LOCK_MAX_MS = 4 * 60 * 60 * 1000
 
 interface IpFailState {
   count: number
@@ -404,7 +406,7 @@ export function migrateLegacyLocalstore(root: string | null): boolean {
 // ── wire 形态（面板消费；密码 hash 永不出现）──
 
 /** 账号的 wire 形态：只有 id/user + hasPassword/hasTotp（无 hash/secret） */
-export interface GatewayAccountWire {
+interface GatewayAccountWire {
   id: string
   user: string
   hasPassword: boolean
@@ -413,7 +415,7 @@ export interface GatewayAccountWire {
 }
 
 /** 设定 wire 形态（GET /serenity/config 返回；gateway 去 hash） */
-export interface AdvancedSettingsWire {
+interface AdvancedSettingsWire {
   gateway: {
     enabled: boolean
     host: string

@@ -25,7 +25,7 @@ import type { JsonValue } from './json.js'
 
 const execFileAsync = promisify(execFile)
 
-export const MSM_TIMEOUT_MS = 600_000
+const MSM_TIMEOUT_MS = 600_000
 
 // ── Windows bun 真路径探测：裸 'bun'/'.cmd' 在 CreateProcess 下不可 spawn（EINVAL/ENOENT）──
 // 优先定位真 bun.exe（PE）绝对路径 → 零 shell、argv 保真；命中失败返回 null → 走 npx shell 兜底。
@@ -50,7 +50,7 @@ function bunExecutablePath(): string | null {
 }
 
 /** CCC 名：从 .serenity 解析（review P2-2 统一收口到 ccc.ts readCccName——跳 # 注释/空行首非空行；此处保留导出名兼容内部调用） */
-export function readCccName(root: string): string | null {
+function readCccName(root: string): string | null {
   return readCccNameFromCcc(root)
 }
 
@@ -100,7 +100,7 @@ function buildMsmEnv(root: string): NodeJS.ProcessEnv {
  */
 const NPX_BIN = process.platform === 'win32' ? 'npx.cmd' : 'npx'
 
-export type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 'guide' | 'ccc-config' | 'catalog'
+type MsmAction = 'list' | 'exec' | 'register' | 'deregister' | 'check' | 'guide' | 'ccc-config' | 'catalog'
 
 export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'deregister', 'check', 'guide', 'ccc-config', 'catalog']
 
@@ -110,7 +110,7 @@ export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'd
  * （避免 container_admin/weixin-doctor 等 guide 全文重复 → 多真相源 → 失同步）。
  * 后续新增功能只需在此加一行（低熵可演进）。
  */
-export const ACC_CATALOG = `═══ ACC Usage Catalog ═══
+const ACC_CATALOG = `═══ ACC Usage Catalog ═══
 Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
 
   ① 轨迹本体          → container_trajectory（list/show/create/use + rebuild 超限重建 + wake-later 未来一次性唤醒）
@@ -189,7 +189,7 @@ msm("<name>", ["--format=json"])    — JSON output mode (remaining args passed 
 `
 
 /** CCC 配置参考（对齐 osp ccc-config action） */
-export const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═══
+const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═══
 
 CCC-level features are configured in .opencode/serenity.json.
 Below are all available configuration sections.
@@ -390,7 +390,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
 `
 
 
-export interface MsmFlag {
+interface MsmFlag {
   name: string
   type?: string
   description?: string
@@ -408,7 +408,7 @@ export interface MsmEntry {
   flags?: MsmFlag[]
 }
 
-export interface MsmArgs {
+interface MsmArgs {
   action: MsmAction
   name?: string
   args?: string[]
@@ -422,7 +422,7 @@ export interface MsmArgs {
   usage?: string
 }
 
-export function parseRegistry(raw: string): MsmEntry[] {
+function parseRegistry(raw: string): MsmEntry[] {
   // BOM 剥离（Windows 审计问题 16）：带 \uFEFF 的注册表 JSON 解析失败
   const data = JSON.parse(raw.replace(/^\uFEFF/, '')) as unknown
   if (Array.isArray(data)) return data as MsmEntry[]
@@ -438,7 +438,7 @@ export function parseRegistry(raw: string): MsmEntry[] {
  * 不再扫描/写入各 skill 目录的分散注册表（历史形态 v1.14~v1.27，register --skill
  * 曾写入各自 skill 目录 —— 多真相源，废弃）。
  */
-export function findRegistries(root: string): string[] {
+function findRegistries(root: string): string[] {
   const cccName = readCccName(root)
   if (!cccName) return []
   const aggregate = join(root, '.opencode', 'skills', cccName, 'references', 'mech-registry.json')
@@ -460,7 +460,7 @@ export function findEntry(root: string, name: string): MsmEntry | null {
 }
 
 /** 扫描各 skill scripts/ 下的非测试脚本（DC-M3 正向基准，对齐 osp） */
-export function scanSkillScripts(root: string): string[] {
+function scanSkillScripts(root: string): string[] {
   const out: string[] = []
   const skillsDir = join(root, '.opencode', 'skills')
   if (!existsSync(skillsDir)) return out
@@ -480,6 +480,71 @@ export function scanSkillScripts(root: string): string[] {
  * 注册表写入路径（需求⑤a 单级化）：永远返回 cccName 聚合档。
  * skill 参数保留签名（兼容调用方）但只进 entry 字段，不决定写入位置。
  */
+/**
+ * 注册表质量契约报告（DC-M1~M4）。**类型别名而非 interface**：`runMsm` 的返回类型是 `JsonValue`，
+ * 而 `interface` 不获得隐式索引签名（别名对象类型才有）——用别名可让本报告直接作为 `JsonValue` 返回，
+ * 不必在 `case 'check'` 里加类型断言。
+ */
+export type RegistryQualityReport = {
+  /** 被检查的注册表条目数 */
+  checked: number
+  issues: { name: string; check: string; detail: string }[]
+}
+
+/**
+ * **注册表「质量契约」判据（DC-M1~M4）** —— 具名出口（C5 观察面归一，2026-09-15）。
+ *
+ * 此前这段判据**只存在于 `runMsm` 的 `case 'check'` 分支体内**（没有名字、无法从别处取用），
+ * 于是 `dashboard health` 只能另写一份 **不同判据** 的结构检查（`checkRegistryHealth`）。
+ * 抽成具名函数后，两条判据**各自有名字、各自可被取用、且仍然完全独立**——合并它们是错的：
+ * 本判据的主语是**条目契约**（有没有测试 / main() 守卫 / 双向注册 / path 型 flag），
+ * 结构判据的主语是**文件能否安全解析**。同一份注册表在两条判据下可以给出相反结论。
+ *
+ * 行为与抽取前**逐字一致**（`runMsm` 的 `check` 分支现只做 `return checkRegistryQuality(root)`）。
+ */
+export function checkRegistryQuality(root: string): RegistryQualityReport {
+  const entries = loadMsmEntries(root)
+  const issues: { name: string; check: string; detail: string }[] = []
+  // DC-M3 正向：扫描 skills scripts/ 下未注册的脚本（对齐 osp 脚本驱动）
+  // win32 路径形式统一（正斜杠 + 大小写）避免误报（审计问题 15）
+  const norm = (p: string): string => p.split('\\').join('/').toLowerCase()
+  const registeredPaths = new Set(entries.map((e) => norm(e.path)))
+  for (const scriptPath of scanSkillScripts(root)) {
+    if (!registeredPaths.has(norm(scriptPath))) {
+      issues.push({ name: scriptPath, check: 'M3', detail: 'script not registered in mech-registry' })
+    }
+  }
+  for (const e of entries) {
+    const script = join(root, e.path)
+    const scriptExists = existsSync(script)
+    // DC-M3 反向：注册表引用但脚本缺失
+    if (!scriptExists) issues.push({ name: e.name, check: 'M3', detail: `script missing (${e.path})` })
+    // DC-M1：有 .test.ts 或 .spec.ts（对齐 osp）
+    const testFileTs = script.replace(/\.ts$/, '.test.ts')
+    const testFileSpec = script.replace(/\.ts$/, '.spec.ts')
+    if (!existsSync(testFileTs) && !existsSync(testFileSpec)) {
+      issues.push({ name: e.name, check: 'M1', detail: 'no .test.ts / .spec.ts' })
+    }
+    // DC-M2：main() 守卫（function main( / isMain / require.main === / import.meta.url，对齐 osp 判定）
+    if (scriptExists) {
+      const src = readFileSync(script, 'utf-8')
+      const hasGuard =
+        /function main\(/.test(src) ||
+        /\bisMain\b/.test(src) ||
+        /require\.main\s*===/.test(src) ||
+        /import\.meta\.url/.test(src)
+      if (!hasGuard) issues.push({ name: e.name, check: 'M2', detail: 'no main() guard' })
+    }
+    // DC-M4：路径型 flag 必须标记 type:"path"（对齐 osp）
+    for (const f of e.flags ?? []) {
+      if ('name' in f && /path|file|dir/i.test(f.name) && f.type !== 'path') {
+        issues.push({ name: e.name, check: 'M4', detail: `flag --${f.name} should be type:"path"` })
+      }
+    }
+  }
+  return { checked: entries.length, issues }
+}
+
 function registryPathFor(root: string, _skill?: string): string {
   const cccName = readCccName(root) ?? 'unknown'
   return join(root, '.opencode', 'skills', cccName, 'references', 'mech-registry.json')
@@ -615,46 +680,9 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       return CCC_CONFIG_REFERENCE
 
     case 'check': {
-      const entries = loadMsmEntries(root)
-      const issues: { name: string; check: string; detail: string }[] = []
-      // DC-M3 正向：扫描 skills scripts/ 下未注册的脚本（对齐 osp 脚本驱动）
-      // win32 路径形式统一（正斜杠 + 大小写）避免误报（审计问题 15）
-      const norm = (p: string): string => p.split('\\').join('/').toLowerCase()
-      const registeredPaths = new Set(entries.map((e) => norm(e.path)))
-      for (const scriptPath of scanSkillScripts(root)) {
-        if (!registeredPaths.has(norm(scriptPath))) {
-          issues.push({ name: scriptPath, check: 'M3', detail: 'script not registered in mech-registry' })
-        }
-      }
-      for (const e of entries) {
-        const script = join(root, e.path)
-        const scriptExists = existsSync(script)
-        // DC-M3 反向：注册表引用但脚本缺失
-        if (!scriptExists) issues.push({ name: e.name, check: 'M3', detail: `script missing (${e.path})` })
-        // DC-M1：有 .test.ts 或 .spec.ts（对齐 osp）
-        const testFileTs = script.replace(/\.ts$/, '.test.ts')
-        const testFileSpec = script.replace(/\.ts$/, '.spec.ts')
-        if (!existsSync(testFileTs) && !existsSync(testFileSpec)) {
-          issues.push({ name: e.name, check: 'M1', detail: 'no .test.ts / .spec.ts' })
-        }
-        // DC-M2：main() 守卫（function main( / isMain / require.main === / import.meta.url，对齐 osp 判定）
-        if (scriptExists) {
-          const src = readFileSync(script, 'utf-8')
-          const hasGuard =
-            /function main\(/.test(src) ||
-            /\bisMain\b/.test(src) ||
-            /require\.main\s*===/.test(src) ||
-            /import\.meta\.url/.test(src)
-          if (!hasGuard) issues.push({ name: e.name, check: 'M2', detail: 'no main() guard' })
-        }
-        // DC-M4：路径型 flag 必须标记 type:"path"（对齐 osp）
-        for (const f of e.flags ?? []) {
-          if ('name' in f && /path|file|dir/i.test(f.name) && f.type !== 'path') {
-            issues.push({ name: e.name, check: 'M4', detail: `flag --${f.name} should be type:"path"` })
-          }
-        }
-      }
-      return { checked: entries.length, issues }
+      // C5（2026-09-15）：判据实现抽成具名导出 `checkRegistryQuality`（供 container-status
+      // 的注册表分组取用）。行为逐字不变——本分支曾内联这段逻辑且**无名字**。
+      return checkRegistryQuality(root)
     }
 
     default:
@@ -663,7 +691,7 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
 }
 
 /** 解析并校验 exec 参数：返回可执行条目 + 业务参数（list/schema 协议 flag 已分流） */
-export interface PreparedExec {
+interface PreparedExec {
   entry: MsmEntry
   businessArgs: string[]
   fmtJson: boolean
@@ -673,7 +701,7 @@ export interface PreparedExec {
   protocol?: { list: { name: string; category: string | null }[] } | { schema: { name: string; path: string; flags: { name: string; type: string | null; description: string | null }[] } }
 }
 
-export function prepareExec(root: string, args: MsmArgs): PreparedExec {
+function prepareExec(root: string, args: MsmArgs): PreparedExec {
   const name = args.name ?? ''
   const entry = findEntry(root, name)
   if (!entry) throw new Error(`MSM not registered: "${name}"`)

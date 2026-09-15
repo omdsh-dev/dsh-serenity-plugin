@@ -9,7 +9,6 @@ import { existsSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { resolve, join } from 'node:path'
 import { homedir } from 'node:os'
 import {
-  findSerenityRoot,
   isSafeModeOn,
   readBlacklist,
   loadSerenityConfig,
@@ -17,6 +16,7 @@ import {
   SAFE_MODE_MARKER,
   DEFAULT_SERENITY_CONFIG_PATHS,
 } from './ccc.js'
+import { cccRootForCwd } from './ccc-roots.js'
 import { ACC_VERSION } from './constants.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
 
@@ -45,7 +45,7 @@ export function readDshVersion(): string | null {
   return null
 }
 
-export interface SerenityStatus {
+interface SerenityStatus {
   root: string | null
   accVersion: string
   dshVersion: string | null
@@ -65,7 +65,7 @@ export interface SerenityStatus {
 }
 
 export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): SerenityStatus {
-  const root = findSerenityRoot(cwd)
+  const root = cccRootForCwd(cwd)
   const restrict = getRestrictDiagnostics()
   const common = {
     accVersion: ACC_VERSION,

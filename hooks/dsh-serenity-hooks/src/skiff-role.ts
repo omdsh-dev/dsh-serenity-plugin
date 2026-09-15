@@ -59,7 +59,7 @@ export function readSkiffRoles(root: string, paths: string[] = DEFAULT_SERENITY_
 }
 
 /** 某角色的轨迹纪律子集（缺省全 false = 完全独立） */
-export interface SkiffTrajectorySubset {
+interface SkiffTrajectorySubset {
   session: boolean
   keeper: boolean
   rebuild: boolean
@@ -122,7 +122,7 @@ export function systemPromptSource(role: SkiffRoleConfig | undefined): 'file' | 
  * - 缺省 = 隐式推断：调用方给出**稳定 sessionId** → persistent；否则 temporary
  *   （存量配置零迁移；微信桥传固定会话 id → persistent，ACP/调试页随机 id → temporary）
  */
-export type SkiffKind = 'temporary' | 'persistent'
+type SkiffKind = 'temporary' | 'persistent'
 
 export function resolveSkiffKind(role: SkiffRoleConfig | undefined, hasStableId: boolean): SkiffKind {
   const k = role?.kind

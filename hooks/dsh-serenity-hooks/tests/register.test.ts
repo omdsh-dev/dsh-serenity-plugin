@@ -1,4 +1,7 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest'
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-tools', () => ({
   defineTool: (opts: unknown) => opts,
@@ -74,6 +77,29 @@ const FULL_CONFIG: Config = {
   serenityConfigPaths: [],
 }
 
+/**
+ * 测试卫生（C4 块 A 顺带修复）：`apply` 会装配微信主动发送面，其 sync 读 **plugin 全局配置**
+ * （`SERENITY_HOOKS_CONFIG` → 缺省 `~/.dsh/serenity-hooks.json`）。此前本文件没有隔离 ⇒
+ * 每个用例都去**真绑生产端口 3082**：本机真插件在跑时是被占用（触发一次"启动失败"日志），
+ * 不在跑时**测试会抢走生产端口**。现注入临时配置（面关闭）→ 不绑端口、无日志噪音。
+ */
+const prevCfgEnv = process.env.SERENITY_HOOKS_CONFIG
+let cfgDir: string
+
+beforeEach(() => {
+  cfgDir = mkdtempSync(join(tmpdir(), 'hooks-register-'))
+  const cfgPath = join(cfgDir, 'serenity-hooks.json')
+  // 面关（enabled:false）+ 端口 0：两份判据任一都足以关闭本面
+  writeFileSync(cfgPath, JSON.stringify({ weixinApi: { enabled: false, port: 0 } }))
+  process.env.SERENITY_HOOKS_CONFIG = cfgPath
+})
+
+afterEach(() => {
+  if (prevCfgEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+  else process.env.SERENITY_HOOKS_CONFIG = prevCfgEnv
+  rmSync(cfgDir, { recursive: true, force: true })
+})
+
 describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
   it('导出 name/inject/apply，无 default export', () => {
     expect(typeof name).toBe('string')
@@ -115,20 +141,24 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     const events = on.mock.calls.map((c) => c[0] as string)
     expect(events).toContain('agent/disposed')
     expect(events).toContain('session/disposed')
-    // 自起资源各自登记拆卸：gateway 第二监听器 / autopilot 时钟 / lifecycle 聚合资源 /
-    // 微信主动发送入口（v1.30.9——只绑 loopback 的独立监听器）/
-    // skiff root 退避重试定时器（v1.30.13——D1 定位失败重试；卸载后不得再尝试起服务）/
+    // 自起资源各自登记拆卸：autopilot 时钟 / lifecycle 聚合资源（**含四个自起 HTTP 面**）/
     // opencode 路由自动配置的重试定时器（v1.31.7——命名空间竞态退避）/
-    // trajectory 唤醒调度器（D58，v1.32.0——中心 tick + 冷唤醒投递）
+    // trajectory 唤醒调度器（D58，v1.32.0——中心 tick + 冷唤醒投递）。
+    // ⚠️ v1.35（C2 块 C3）：**skiff root 退避重试定时器已退场**（原 v1.30.13/D1 的第 7 项），故 7 → 6。
+    // ⚠️ C4 块 A（2026-09-15）：**gateway 第二监听器**与**weixin send api** 两处自带 disposer 已删
+    //    ——listener 生命周期归 `face-host`，拆卸路径归一到 lifecycle 的聚合入口（`stopAllFaces`）。
+    //    故 6 → 4，且这两个标签从此**不应再现**（回归钉：删了就别让它悄悄回来）。
     const labels = effect.mock.calls.map((c) => String(c[1]))
-    expect(labels).toHaveLength(7)
-    expect(labels.join('|')).toContain('gateway')
+    expect(labels).toHaveLength(4)
     expect(labels.join('|')).toContain('autopilot')
     expect(labels.join('|')).toContain('trajectory 唤醒调度器')
     expect(labels.join('|')).toContain('self-started resources')
-    expect(labels.join('|')).toContain('weixin send api')
-    expect(labels.join('|')).toContain('skiff root retry timer')
     expect(labels.join('|')).toContain('opencode provider auto-config retry timer')
+    // 退避重试定时器不得再出现（回归钉：删了就不要再悄悄回来）
+    expect(labels.join('|')).not.toContain('skiff root retry timer')
+    // C4 块 A 回归钉：两处自带 listener disposer 已被单点取代
+    expect(labels.join('|')).not.toContain('gateway 第二监听器')
+    expect(labels.join('|')).not.toContain('weixin send api')
   })
 
   it('v1.30.8 F-08：ctx.effect 缺失 → 响亮降级不抛错（apply 不可成为启动单点）', () => {

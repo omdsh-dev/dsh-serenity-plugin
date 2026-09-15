@@ -11,21 +11,22 @@
  *   类比 The Manifest（清单维护——工具注册表）+ Crew（角色管理）+ 机务（配置/手册）。
  *
  * 参数极简（LLM 直觉）：domain（管理域）+ action（该域子命令）+ 少量业务参数。
+ *
+ * v1.34.1（⑥ C6a）：由 `export const containerAdminTool` 改为**工厂**
+ * `createContainerAdminTool(ctx)`——autopilot 域搬进进程内后，`status` 必须读只有进程内
+ * 能看到的事实（全局闸 / live 会话 / agent 可解析性，见 `../autopilot-ops.js`）。
+ * 这是本轮唯一为"取 ctx"而做的形态改动（其余域不依赖 ctx，行为不变）。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { Context } from 'cordis'
 import type { JsonValue } from '../json.js'
-import { findSerenityRoot } from '../ccc.js'
-import { runMsm, MSM_ACTIONS, loadMsmEntries } from '../msm-ops.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
+import { runMsm, MSM_ACTIONS } from '../msm-ops.js'
 import { skiffMsmGate } from '../skiff-core.js'
-import { runAutopilotScript } from '../autopilot-script.js'
-import { buildSepGuide } from './trajectory.js'
+import { autopilotInit, autopilotGenerateBias, autopilotStatus } from '../autopilot-ops.js'
 import { validateSkiffConfig, applySkiffConfig, listSkiffRoles, SKIFF_GUIDE } from './skiff-admin.js'
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
 
 function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? ''
@@ -37,7 +38,7 @@ function renderText(value: unknown): ContentBlock[] {
 }
 
 /** 管理域（container_admin 一级参数） */
-export type AdminDomain = 'role' | 'msm' | 'config' | 'autopilot'
+type AdminDomain = 'role' | 'msm' | 'config' | 'autopilot'
 
 const DOMAIN_INTRO: Record<AdminDomain, string> = {
   role: 'Skiff cognitive-subset roles: guide (tutorial) / validate (config check) / apply (validate + confirm live) / list (role summary)',
@@ -46,7 +47,7 @@ const DOMAIN_INTRO: Record<AdminDomain, string> = {
   autopilot: 'Autopilot (periodic self-wake, D59 singleton) — status (one-shot full report: background/readiness/state/next steps) / init (write CCC config + bias-provider script template) / generate-bias (run the CCC bias script and show the content it returns this round)',
 }
 
-/** 管理面动作映射：domain → 可执行 action（转发到底层 runMsm / skiff 逻辑 / autopilot 脚本） */
+/** 管理面动作映射：domain → 可执行 action（转发到底层 runMsm / skiff 逻辑 / autopilot 进程内实现） */
 const ADMIN_ACTIONS: Record<AdminDomain, readonly string[]> = {
   role: ['guide', 'validate', 'apply', 'list'],
   msm: ['register', 'deregister', 'check', 'guide', 'catalog', 'ccc-config'],
@@ -55,115 +56,118 @@ const ADMIN_ACTIONS: Record<AdminDomain, readonly string[]> = {
 }
 
 /**
- * autopilot 域动作 → 包内脚本子命令（`container_admin` 的新名 ↔ 脚本的历史名）。
- * 只映射三个**保留**的动作：脚本侧的 `diag`/`doc`/`check`/`status`/`guide` 已不在 CCC 工具面
- * （S142 §32.9：`diag` 归 ACC 负责人走开发面；其余并入 `status`）。
+ * autopilot 域动作（`container_admin` 的对外实名）。
+ * 三动作的实现在**插件进程内**（`../autopilot-ops.js`）——S142 §12.8 裁决「拆两半、退掉独立脚本」：
+ * 旧实现 spawn 包内脚本（独立进程 ⇒ 看不到全局闸 / live 会话 / agent 可解析性 ⇒ 8 项结构性分歧），
+ * 现直调进程内实现，与 tick 读**同一份判据**。`diag`/`doc`/`check`/`guide` 仍不在 CCC 工具面
+ * （条件链归 `acc-diag` ④ 段 + 开发面 `dsh-develop diag`）。
  */
-const AUTOPILOT_SCRIPT_ACTIONS: Record<string, string> = {
-  status: 'all',
-  init: 'init',
-  'generate-bias': 'random',
+const AUTOPILOT_ACTIONS = ['status', 'init', 'generate-bias'] as const
+
+export function createContainerAdminTool(ctx: Context) {
+  return defineTool({
+    name: 'container_admin',
+    description:
+      'Container administration (the ship\'s maintenance bay — one entry for managing the CCC): ' +
+      'role — Skiff cognitive-subset roles (guide/validate/apply/list); ' +
+      'msm — MSM registry management (register/deregister/check quality DC-M1~M4) + manuals (guide dev manual / catalog ACC capability directory / ccc-config CCC configuration reference); ' +
+      'config — view CCC configuration; ' +
+      'autopilot — periodic self-wake (D59): status (one-shot full report: background + readiness + state + next steps) / init (write config + bias-provider script template) / generate-bias (run the CCC bias script — the randomness source belongs to the CCC). ' +
+      'Execution of registered MSMs belongs to the msm tool; this tool manages the container.',
+    parameters: {
+      domain: {
+        type: 'string',
+        enum: ['role', 'msm', 'config', 'autopilot'],
+        required: true,
+        description: 'Management domain: role (Skiff roles) / msm (MSM registry + manuals) / config (CCC config view) / autopilot (periodic self-wake)',
+      },
+      action: {
+        type: 'string',
+        description: 'Domain subcommand (see domain descriptions; e.g. role: validate/apply/list/guide; msm: register/deregister/check/guide/catalog/ccc-config; autopilot: status/init/generate-bias)',
+      },
+      // register 参数（msm 域）
+      name: { type: 'string', description: 'MSM name (register/deregister)' },
+      path: { type: 'string', description: 'register: script relative path inside root' },
+      category: { type: 'string', description: 'register: mech | semi-mech' },
+      description: { type: 'string', description: 'register: one-line description' },
+      skill: { type: 'string', description: 'register: owning skill' },
+      flags: { type: 'string', description: 'register: flags JSON string (e.g. [{"name":"x","type":"string"}] — type:"path" enables escape guard)' },
+      usage: { type: 'string', description: 'register: custom usage (auto-generated by default)' },
+    },
+    output: {
+      schema: { type: 'json' },
+      render: (args, value) => renderText(value),
+    },
+    async execute(args, exec): Promise<JsonValue> {
+      const root = cccRootForExec(exec)
+      if (!root) throw new Error(NO_CCC_FROM_AGENT_CWD)
+      const sessionId = agentSessionId(exec)
+      const domain = args.domain as AdminDomain
+      const action = (args.action as string | undefined) ?? ''
+
+      // Skiff 会话安全：role apply/validate 只读放行；msm register/deregister 必拒
+      if (domain === 'msm' && (action === 'register' || action === 'deregister')) {
+        const gate = skiffMsmGate(root, sessionId, action, args.name as string | undefined)
+        if (gate.reject) throw new Error(gate.reject)
+      }
+
+      // role 域 → skiff 逻辑（原 skiff_admin 子命令）
+      if (domain === 'role') {
+        switch (action) {
+          case 'guide': return { guide: SKIFF_GUIDE }
+          case 'validate': return validateSkiffConfig(root)
+          case 'apply': return applySkiffConfig(root)
+          case 'list': return listSkiffRoles(root)
+          default: throw new Error(`container_admin role requires action: guide | validate | apply | list`)
+        }
+      }
+
+      // msm 域 → 原 acc_msm 管理 action（exec 不在此——exec 走 msm 工具）
+      if (domain === 'msm') {
+        const mgmtActions: string[] = ['register', 'deregister', 'check', 'guide', 'catalog', 'ccc-config']
+        if (!mgmtActions.includes(action)) {
+          throw new Error(`container_admin msm requires action: ${mgmtActions.join(' | ')} (execution goes through the msm tool)`)
+        }
+        // 同步执行（register/deregister 走 git 精提交；check/guide/catalog/ccc-config 纯读）
+        const out = runMsm(root, {
+          action: action as (typeof MSM_ACTIONS)[number],
+          name: args.name as string | undefined,
+          skill: args.skill as string | undefined,
+          path: args.path as string | undefined,
+          category: args.category as string | undefined,
+          description: args.description as string | undefined,
+          flags: args.flags as string | undefined,
+          usage: args.usage as string | undefined,
+        })
+        // v1.34.1：原 SEP（Session Extension Protocol）章节已随 SEP 废除一并移除
+        // （所有者裁决「能落 harness 已有原语，就不要自造协议 + 脚本管道」）——手册只留 MSM 通用内容。
+        // 轨迹挂 skill 的扩展面见 docs/trajectory-skill-injection.md（SESSION.md frontmatter + section）。
+        return out
+      }
+
+      // autopilot 域 → **进程内**实现（D59 周期自唤醒；⑥ C6a：不再 spawn 包内脚本）
+      if (domain === 'autopilot') {
+        if (!(AUTOPILOT_ACTIONS as readonly string[]).includes(action)) {
+          throw new Error(`container_admin autopilot requires action: ${ADMIN_ACTIONS.autopilot.join(' | ')}`)
+        }
+        // ctx 传入的理由（收益判据）：status 要读**只有进程内能看到**的三项事实——
+        // 全局闸（autopilotGloballyEnabled）/ live 会话 / agent 可解析性（autopilotRuntimeFacts）。
+        const r = action === 'init'
+          ? autopilotInit(root)
+          : action === 'generate-bias'
+            ? await autopilotGenerateBias(root)
+            : await autopilotStatus(root, ctx)
+        if (r.error) return { error: r.error, action: r.action }
+        return { action: r.action, output: r.output }
+      }
+
+      // config 域 → CCC 配置总览（ccc-config 引用；直接视图）
+      if (domain === 'config') {
+        const ref = runMsm(root, { action: 'ccc-config' })
+        return { config: ref }
+      }
+
+      throw new Error(`container_admin requires domain: role | msm | config | autopilot`)
+    },
+  })
 }
-
-export const containerAdminTool = defineTool({
-  name: 'container_admin',
-  description:
-    'Container administration (the ship\'s maintenance bay — one entry for managing the CCC): ' +
-    'role — Skiff cognitive-subset roles (guide/validate/apply/list); ' +
-    'msm — MSM registry management (register/deregister/check quality DC-M1~M4) + manuals (guide dev manual / catalog ACC capability directory / ccc-config CCC configuration reference); ' +
-    'config — view CCC configuration; ' +
-    'autopilot — periodic self-wake (D59): status (one-shot full report: background + readiness + state + next steps) / init (write config + bias-provider script template) / generate-bias (run the CCC bias script — the randomness source belongs to the CCC). ' +
-    'Execution of registered MSMs belongs to the msm tool; this tool manages the container.',
-  parameters: {
-    domain: {
-      type: 'string',
-      enum: ['role', 'msm', 'config', 'autopilot'],
-      required: true,
-      description: 'Management domain: role (Skiff roles) / msm (MSM registry + manuals) / config (CCC config view) / autopilot (periodic self-wake)',
-    },
-    action: {
-      type: 'string',
-      description: 'Domain subcommand (see domain descriptions; e.g. role: validate/apply/list/guide; msm: register/deregister/check/guide/catalog/ccc-config; autopilot: status/init/generate-bias)',
-    },
-    // register 参数（msm 域）
-    name: { type: 'string', description: 'MSM name (register/deregister)' },
-    path: { type: 'string', description: 'register: script relative path inside root' },
-    category: { type: 'string', description: 'register: mech | semi-mech' },
-    description: { type: 'string', description: 'register: one-line description' },
-    skill: { type: 'string', description: 'register: owning skill' },
-    flags: { type: 'string', description: 'register: flags JSON string (e.g. [{"name":"x","type":"string"}] — type:"path" enables escape guard)' },
-    usage: { type: 'string', description: 'register: custom usage (auto-generated by default)' },
-  },
-  output: {
-    schema: { type: 'json' },
-    render: (args, value) => renderText(value),
-  },
-  async execute(args, exec): Promise<JsonValue> {
-    const root = findSerenityRoot(agentCwd(exec))
-    if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
-    const sessionId = agentSessionId(exec)
-    const domain = args.domain as AdminDomain
-    const action = (args.action as string | undefined) ?? ''
-
-    // Skiff 会话安全：role apply/validate 只读放行；msm register/deregister 必拒
-    if (domain === 'msm' && (action === 'register' || action === 'deregister')) {
-      const gate = skiffMsmGate(root, sessionId, action, args.name as string | undefined)
-      if (gate.reject) throw new Error(gate.reject)
-    }
-
-    // role 域 → skiff 逻辑（原 skiff_admin 子命令）
-    if (domain === 'role') {
-      switch (action) {
-        case 'guide': return { guide: SKIFF_GUIDE }
-        case 'validate': return validateSkiffConfig(root)
-        case 'apply': return applySkiffConfig(root)
-        case 'list': return listSkiffRoles(root)
-        default: throw new Error(`container_admin role requires action: guide | validate | apply | list`)
-      }
-    }
-
-    // msm 域 → 原 acc_msm 管理 action（exec 不在此——exec 走 msm 工具）
-    if (domain === 'msm') {
-      const mgmtActions: string[] = ['register', 'deregister', 'check', 'guide', 'catalog', 'ccc-config']
-      if (!mgmtActions.includes(action)) {
-        throw new Error(`container_admin msm requires action: ${mgmtActions.join(' | ')} (execution goes through the msm tool)`)
-      }
-      // 同步执行（register/deregister 走 git 精提交；check/guide/catalog/ccc-config 纯读）
-      const out = runMsm(root, {
-        action: action as (typeof MSM_ACTIONS)[number],
-        name: args.name as string | undefined,
-        skill: args.skill as string | undefined,
-        path: args.path as string | undefined,
-        category: args.category as string | undefined,
-        description: args.description as string | undefined,
-        flags: args.flags as string | undefined,
-        usage: args.usage as string | undefined,
-      })
-      // v1.33（用户裁决"选 A"）：SEP 开发者指南并进 msm 手册——注册 MSM 正是扩展会话工具的方式
-      if (action === 'guide') {
-        const hasSessionTool = loadMsmEntries(root).some((e) => e.name === 'session-tool')
-        return { manual: out, sessionExtension: buildSepGuide(hasSessionTool) }
-      }
-      return out
-    }
-
-    // autopilot 域 → 包内脚本通道（D59 周期自唤醒；脚本逻辑归 experiments/，本工具只转发）
-    if (domain === 'autopilot') {
-      const scriptAction = AUTOPILOT_SCRIPT_ACTIONS[action]
-      if (!scriptAction) {
-        throw new Error(`container_admin autopilot requires action: ${ADMIN_ACTIONS.autopilot.join(' | ')}`)
-      }
-      const r = runAutopilotScript(root, scriptAction)
-      if (r.error) return { error: r.error, action }
-      return { action, output: r.output ?? '' }
-    }
-
-    // config 域 → CCC 配置总览（ccc-config 引用；直接视图）
-    if (domain === 'config') {
-      const ref = runMsm(root, { action: 'ccc-config' })
-      return { config: ref }
-    }
-
-    throw new Error(`container_admin requires domain: role | msm | config | autopilot`)
-  },
-})

@@ -8,7 +8,9 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, discoverCccs, renderSkiffMarkdown, type SkiffCccEntry } from '../src/skiff-debug.js'
+import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, renderSkiffMarkdown, type CccEntry } from '../src/skiff-debug.js'
+// C2：候选 CCC 枚举的唯一真相源（原 skiff-debug.discoverCccs 已迁移至此）
+import { listCccs } from '../src/ccc-roots.js'
 
 let dir: string
 
@@ -47,13 +49,23 @@ function httpPost(port: number, path: string, body: unknown): Promise<{ status: 
   })
 }
 
-/** 空闲端口：3099 + 偏移（CI 并行安全） */
-function freePort(): number {
-  return 3300 + Math.floor(Math.random() * 500)
+/**
+ * 启动调试面于**内核分配端口**（`port:0`）并读回实际端口。
+ *
+ * v1.34.1 修 flake（块 3）：此前用 `freePort() = 3300 + random(500)` 这种"随机固定端口段"——
+ * 同文件相邻用例有概率撞同一端口，而前任面的端口未必已释放 ⇒ EADDRINUSE ⇒ 面宿主按缺省预算
+ * 重试 **10s > vitest 5s 超时** ⇒ 用例以 "Test timed out in 5000ms" 挂死（真相被超时噪音盖住）。
+ * `port:0` 由内核挑空闲端口 ⇒ 这一类撞端口 flake **在结构上不可能再发生**。
+ */
+async function startDebugEphemeral(ctx: unknown = {}, root: string = dir, webPort = 3080): Promise<number> {
+  await startSkiffDebugServer(ctx as never, root, 0, webPort)
+  const port = skiffDebugPort()
+  if (port === null) throw new Error('skiff-debug 面未在监听（startSkiffDebugServer 未生效）')
+  return port
 }
 
 describe('skiff-debug: 问答页渲染（纯函数，v1.25.4 多 CCC 切换）', () => {
-  const cccs: SkiffCccEntry[] = [
+  const cccs: CccEntry[] = [
     { root: '/ccc/home-serenity', name: 'home-serenity', roles: ['qa-readonly', 'review'] },
     { root: '/ccc/other-ccc', name: 'other-ccc', roles: ['helper'] },
   ]
@@ -84,7 +96,7 @@ describe('skiff-debug: 问答页渲染（纯函数，v1.25.4 多 CCC 切换）',
   })
 })
 
-describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace → sessionPersistence → live）', () => {
+describe('ccc-roots.listCccs 候选发现（v1.25.6 三层：workspace → sessionPersistence → live；C2 起为**并集**）', () => {
   it('workspaceRegistry 持久化工作区优先（无 live 会话也能列出）', async () => {
     const cccA = mkdtempSync(join(tmpdir(), 'skiff-ccc-a-'))
     writeFileSync(join(cccA, '.serenity'), 'test')
@@ -101,7 +113,7 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
           : undefined,
       sessions: { list: () => [] },
     }
-    const cccs = await discoverCccs(fakeCtx as never, cccA)
+    const cccs = await listCccs(fakeCtx as never, { defaultRoot: cccA, withRoles: true })
     expect(cccs).toHaveLength(2)
     expect(cccs[0]!.root).toBe(cccA)
     expect(cccs[0]!.roles).toEqual(['qa'])
@@ -134,7 +146,7 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
           : undefined,
       sessions: { list: () => [] },
     }
-    const cccs = await discoverCccs(fakeCtx as never, cccA)
+    const cccs = await listCccs(fakeCtx as never, { defaultRoot: cccA, withRoles: true })
     expect(cccs).toHaveLength(2)
     expect(cccs[0]!.root).toBe(cccA)
     expect(cccs[0]!.roles).toEqual(['qa'])
@@ -152,7 +164,7 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
         name === 'sessionPersistence' ? { list: async () => [{ cwd: cccA }] } : undefined,
       sessions: { list: () => [] },
     }
-    const cccs = await discoverCccs(fakeCtx as never, cccA)
+    const cccs = await listCccs(fakeCtx as never, { defaultRoot: cccA, withRoles: true })
     expect(cccs).toHaveLength(1) // 仅默认 root 兜底；顶层 cwd 被忽略
     rmSync(cccA, { recursive: true, force: true })
   })
@@ -176,7 +188,7 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
         ],
       },
     }
-    const cccs = await discoverCccs(fakeCtx as never, cccA)
+    const cccs = await listCccs(fakeCtx as never, { defaultRoot: cccA, withRoles: true })
     expect(cccs).toHaveLength(2)
     expect(cccs[0]!.root).toBe(cccA)
     expect(cccs[0]!.roles).toEqual(['qa'])
@@ -189,7 +201,7 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
 
   it('默认 root 不在工作区/会话 → 放首位兜底', async () => {
     const fakeCtx = { get: () => ({ list: () => [] }), sessions: { list: () => [] } }
-    const cccs = await discoverCccs(fakeCtx as never, dir)
+    const cccs = await listCccs(fakeCtx as never, { defaultRoot: dir, withRoles: true })
     expect(cccs).toHaveLength(1)
     expect(cccs[0]!.root).toBe(dir)
   })
@@ -197,8 +209,7 @@ describe('skiff-debug: discoverCccs 候选发现（v1.25.6 三层：workspace �
 
 describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
   it('start → GET / 渲染问答页（含默认 CCC）；stop → active 清除', async () => {
-    const port = freePort()
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     expect(skiffDebugActive()).toBe(true)
     expect(skiffDebugPort()).toBe(port)
     const res = await httpGet(port, '/')
@@ -210,8 +221,7 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
   })
 
   it('角色配置实时读取：写配置后 GET / 立即可见（不缓存快照，v1.25.2）', async () => {
-    const port = freePort()
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     const empty = await httpGet(port, '/')
     expect(empty.body).toContain('(未发现 CCC)')
     // 写入 skiff.roles 后刷新页面即生效（无需重启服务）
@@ -225,20 +235,18 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
   })
 
   it('POST /ask unknown role → 400（错误路径；不创建 agent）', async () => {
-    const port = freePort()
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     const res = await httpPost(port, '/ask', { role: 'ghost', question: 'hi' })
     expect(res.status).toBe(400)
     expect(res.body).toContain('unknown role')
   })
 
   it('POST /ask 切换 CCC（ccc 字段）→ 目标 CCC 无该角色 → 400（v1.25.4）', async () => {
-    const port = freePort()
     const other = mkdtempSync(join(tmpdir(), 'skiff-other-'))
     writeFileSync(join(other, '.serenity'), 'test')
     mkdirSync(join(other, '.opencode'), { recursive: true })
     writeFileSync(join(other, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { 'other-role': { msms: ['y'] } } } }))
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     // 默认 CCC（dir）无 qa 角色
     const res = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hi' })
     expect(res.status).toBe(400)
@@ -251,15 +259,13 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
   })
 
   it('POST /ask 非法 JSON → 400', async () => {
-    const port = freePort()
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     const res = await httpPost(port, '/ask', null as never)
     expect(res.status).toBe(400)
     expect(res.body).toContain('invalid JSON')
   })
 
   it('POST /ask 会话延续：新建（continued:false）→ 同会话追问（continued:true）→ 全量轨迹（v1.25.10）', async () => {
-    const port = freePort()
     // 角色配置（handyman.defaultModel 供 createSkiffAgent）
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
@@ -295,7 +301,7 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
         return () => {}
       },
     }
-    await startSkiffDebugServer(fakeCtx as never, dir, port, 3080)
+    const port = await startDebugEphemeral(fakeCtx)
     // 首次提问 → 新建会话
     const first = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hello' })
     expect(first.status).toBe(200)
@@ -317,17 +323,15 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
   })
 
   it('POST /ask 会话延续：未注册 sessionId → 400 不可恢复（重启后/不存在）', async () => {
-    const port = freePort()
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }))
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     const res = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hi', sessionId: 'skiff-qa-ghost' })
     expect(res.status).toBe(400)
     expect(res.body).toContain('not recoverable')
   })
 
   it('POST /ask 会话延续：sessionId 绑定角色/CCC 不匹配 → 400（切换残留）', async () => {
-    const port = freePort()
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }))
     // 直接注册一个绑定 role=qa 的会话（fake agent）
@@ -335,7 +339,7 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     const sid = 'skiff-qa-bound'
     const fake = { session: { id: sid, events: [] }, followup: () => {} }
     registerSkiffSession(sid, 'qa', dir, fake as never)
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     try {
       // 角色不匹配（请求 review——CCC 无该角色会先 400 unknown role？不：readSkiffRoles 无 review → 400 unknown role）
       // 所以用真实存在的第二个角色验证 role 不匹配
@@ -355,15 +359,13 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
   })
 
   it('未知路径 → 404', async () => {
-    const port = freePort()
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     const res = await httpGet(port, '/nope')
     expect(res.status).toBe(404)
   })
 
   it('重复 start 幂等（单实例）', async () => {
-    const port = freePort()
-    await startSkiffDebugServer({} as never, dir, port, 3080)
+    const port = await startDebugEphemeral()
     await startSkiffDebugServer({} as never, dir, port, 3080)
     expect(skiffDebugActive()).toBe(true)
   })

@@ -18,25 +18,32 @@
  * 实验性质：未开启时零资源占用（无监听、无 agent 创建）。
  */
 
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { basename } from 'node:path'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { hostService, hostSessions } from './host/access.js'
 import { marked } from 'marked'
 import { readSkiffRoles } from './skiff-role.js'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffTrajectoryEntry } from './skiff-core.js'
-import { readHandymanConfig, findSerenityRoot } from './ccc.js'
+import { readHandymanConfig } from './ccc.js'
+// C2（CCC 发现面归一）：候选 CCC 枚举的**唯一真相源**是 ccc-roots.ts；
+// 本模块的 `discoverCccs` 已删除（调用点改用 `listCccs`，见各 handle 分支）。
+import { listCccs, type CccEntry } from './ccc-roots.js'
+// C4 块 A：listener 生命周期归面宿主（本面=面 D，端口语义见 ports.ts 的 FACE_PORTS.skiffDebug）
+import { faceActive, facePort, startFace, stopFace, type FaceSpec } from './face-host.js'
+import { FACE_PORTS } from './ports.js'
+import { readSimpleSettings } from './settings-section.js'
 
-/** 运行中的调试服务（单实例；进程级） */
-let active: { server: ReturnType<typeof createServer>; port: number } | null = null
+/** 面名（C4 块 A） */
+const FACE_SKIFF_DEBUG = 'skiff-debug'
+/** 监听地址：**只绑 loopback**（本面无认证——仅靠 loopback 挡住外部） */
+const SKIFF_DEBUG_HOST = FACE_PORTS.skiffDebug.host ?? '127.0.0.1'
 
 export function skiffDebugActive(): boolean {
-  return active !== null
+  return faceActive(FACE_SKIFF_DEBUG)
 }
 
 export function skiffDebugPort(): number | null {
-  return active?.port ?? null
+  return facePort(FACE_SKIFF_DEBUG)
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
@@ -59,71 +66,16 @@ function sendHtml(res: ServerResponse, html: string): void {
   res.end(html)
 }
 
-/** 候选 CCC 条目（调试页 CCC 切换器数据） */
-export interface SkiffCccEntry {
-  /** CCC 根（绝对路径） */
-  root: string
-  /** 目录名（展示用） */
-  name: string
-  /** 该 CCC 的 skiff 角色名列表（实时读取） */
-  roles: string[]
-}
-
 /**
- * 发现候选 CCC 列表（多 CCC 手工切换，v1.25.6）：
- * ① **dsh 工作区注册表**（workspaceRegistry.list，持久化——所有工作目录即使无 live 会话；
- *    S142 用户 2026-08-29：应直接拉 dsh 工作区，且只列具体 CCC）
- * ② **sessionPersistence 兜底**（持久化会话 headers——必装配服务，覆盖所有历史会话工作目录；
- *    用户实测 workspaceRegistry 拉取仍空时兜底）
- * ③ live 会话兜底
- * ④ 默认绑定 root 兜底（不在列表时放首位）
+ * 候选 CCC 条目（调试页 CCC 切换器数据）。
+ *
+ * C2：定义已迁至 `ccc-roots.ts`（L2 枚举的唯一真相源）——此处只在**类型层**转出
+ * （零运行时重导出，避免把 `ccc-roots` 拉进本模块的运行时静态链）。
  */
-export async function discoverCccs(ctx: Context, defaultRoot: string): Promise<SkiffCccEntry[]> {
-  const roots: string[] = []
-  const pushRoot = (cwd: string | undefined): void => {
-    if (typeof cwd !== 'string' || cwd === '') return
-    const r = findSerenityRoot(cwd)
-    if (r && !roots.includes(r)) roots.push(r)
-  }
-  // ① workspaceRegistry（DSH 持久化工作区注册表；list() 同步返回 Workspace[]，含 path）
-  try {
-    const registry = hostService<{ list?: () => Array<{ path?: string }> }>(ctx, 'workspaceRegistry')
-    for (const ws of registry?.list?.() ?? []) pushRoot(ws?.path)
-  } catch {
-    /* workspace 服务不可用忽略 */
-  }
-  // ② sessionPersistence（持久化会话 headers——覆盖所有历史会话的工作目录）
-  // v1.31.6 适配 0.1.5-rc.1：`list()` 返回形状变了（**静默突破**——形状由本处断言自写，
-  // 宿主改名/改形在类型检查里看不见）：
-  //   0.1.2      → `Promise<SessionHeader[]>`             → `h.cwd`
-  //   0.1.5-rc.1 → `Promise<SessionPersistenceSnapshot[]>` → `h.header.cwd`
-  if (roots.length === 0) {
-    try {
-      const sp = hostService<{ list?: () => Promise<Array<{ header?: { cwd?: string } }>> }>(ctx, 'sessionPersistence')
-      for (const h of (await sp?.list?.()) ?? []) pushRoot(h?.header?.cwd)
-    } catch {
-      /* sessionPersistence 不可用忽略 */
-    }
-  }
-  // ③ live 会话兜底
-  if (roots.length === 0) {
-    try {
-      const sessions = hostSessions(ctx)
-      for (const s of sessions?.list?.() ?? []) pushRoot(s?.header?.cwd)
-    } catch {
-      /* 遍历失败忽略 */
-    }
-  }
-  if (!roots.includes(defaultRoot)) roots.unshift(defaultRoot)
-  return roots.map((root) => ({
-    root,
-    name: basename(root) || root,
-    roles: [...readSkiffRoles(root).keys()],
-  }))
-}
+export type { CccEntry }
 
 /** 问答页 HTML：CCC 切换器 + 角色下拉 + 输入 + 答案区 + 轨迹区（JS 渲染）+ WebUI 链接 */
-export function skiffDebugPage(cccs: SkiffCccEntry[], defaultRoot: string, webPort: number): string {
+export function skiffDebugPage(cccs: CccEntry[], defaultRoot: string, webPort: number): string {
   // v1.25.7 修复：内嵌 JSON **不能整体 escapeHtml**（&quot; 会让 JSON.parse 失败——用户实测
   // console 报错 position 2）。只转义 `<` → `\u003c`（JSON 合法转义，JSON.parse 还原；
   // 防 `</script>` 注入）。data-default 属性值仍走 escapeHtml（HTML 属性语境）。
@@ -433,37 +385,41 @@ export function stripThink(raw: string): string {
 }
 
 /**
+ * 本面的规格（C4 块 A/④：**只提供** name/port/host/enabled/handler）。
+ * 路由/鉴权/HTML 全部仍归本模块的 {@link handle}（面宿主不介入面语义）。
+ */
+export function skiffDebugSpec(ctx: Context, root: string, port: number, webPort: number): FaceSpec {
+  return {
+    name: FACE_SKIFF_DEBUG,
+    port,
+    host: SKIFF_DEBUG_HOST,
+    // 意图 = 设置面板「Skiff 调试」开关（装配层 index.ts 亦以此门控；此处是规格自述）
+    enabled: () => readSimpleSettings().skiffEnabled,
+    handler: (req, res) => handle(ctx, root, webPort, req, res),
+  }
+}
+
+/**
  * 启动调试问答服务（单实例；重复启动幂等返回既有实例）。
  *
  * **CCC 绑定（v1.25.2 用户指出）**：服务绑定一个默认 CCC root（调用方 resolveSkiffRoot
  * 解析：live 会话中**含 skiff.roles 的 CCC 优先**）；v1.25.4 起页面可**手工切换**到
  * 其它候选 CCC（live 会话发现的全部 CCC）；角色配置**每次请求实时读取**（不缓存快照）。
  *
+ * C4 块 A：listener 的创建/监听/错误/端口占用/关闭归 `face-host`（本函数只提供规格 + 记日志）。
+ *
  * @param root 默认绑定的 CCC 根（首次加载选中；角色配置读取 + skiff agent cwd）
  * @param port 调试端口（仅 127.0.0.1）
  * @param webPort 主 WebUI 端口（WebUI 链接）
  */
 export async function startSkiffDebugServer(ctx: Context, root: string, port: number, webPort: number): Promise<void> {
-  if (active) return
-  const server = createServer((req, res) => {
-    void handle(ctx, root, webPort, req, res)
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => resolve())
-  })
-  active = { server, port }
-  console.log(`[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:${port}（默认 CCC: ${root}，WebUI: ${webPort}）`)
+  if (skiffDebugActive()) return
+  const handle = await startFace(skiffDebugSpec(ctx, root, port, webPort))
+  console.log(`[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:${handle.port}（默认 CCC: ${root}，WebUI: ${webPort}）`)
 }
 
 export function stopSkiffDebugServer(): void {
-  if (!active) return
-  try {
-    active.server.close()
-  } catch {
-    /* 关闭失败忽略 */
-  }
-  active = null
+  stopFace(FACE_SKIFF_DEBUG)
 }
 
 async function handle(
@@ -476,8 +432,9 @@ async function handle(
   try {
     const url = (req.url ?? '/').split('?')[0] ?? '/'
     if (req.method === 'GET' && url === '/') {
-      // 实时发现候选 CCC（v1.25.4+：工作区注册表 → sessionPersistence → live 会话）+ 实时角色
-      const cccs = await discoverCccs(ctx, defaultRoot)
+      // 实时发现候选 CCC（ccc-roots.listCccs：工作区注册表 ∪ sessionPersistence ∪ live 会话）
+      // + 实时角色（withRoles: true —— 调试页的角色下拉需要各 CCC 的 skiff.roles）
+      const cccs = await listCccs(ctx, { defaultRoot, withRoles: true })
       sendHtml(res, skiffDebugPage(cccs, defaultRoot, webPort))
       return
     }
@@ -550,6 +507,3 @@ async function handle(
     sendJson(res, 500, { error: (err as Error)?.message ?? String(err) })
   }
 }
-
-/** 导出类型引用（测试断言轨迹结构） */
-export type { SkiffTrajectoryEntry }

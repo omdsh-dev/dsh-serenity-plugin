@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { createServer, request as httpRequest } from 'node:http'
 
 // gateway.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
 vi.mock('@deepseek-ai/schemastery', () => {
@@ -58,6 +59,10 @@ import {
   safeEqual,
   originAllowed,
 } from '../src/gateway.js'
+// C4 块 A 冒烟：装配入口 + 面状态真值源 + 简单配置注入
+import { registerGateway } from '../src/gateway.js'
+import { faceActive, facePort, stopAllFaces } from '../src/face-host.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string
 
@@ -483,9 +488,16 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
     expect(loginBody).toMatch(/res\.on\('error'/)
   })
 
-  it('server 级 clientError 兜底监听存在', () => {
-    const src = readFileSync(join(__dirname, '..', 'src', 'gateway.ts'), 'utf-8')
+  it('server 级 clientError 兜底监听存在（C4 块 A 起：归面宿主 face-host.ts）', () => {
+    // C4（2026-09-15）：该兜底原本内联在 gateway.ts 的 listenWithRetry 里；listener 生命周期
+    // 归一到 `face-host.ts` 后，**守护的对象没变**（server 级 clientError → 静默销毁 socket，
+    // 防"无 error 监听的 socket 直接 throw → 进程崩溃"），只是位置从面内搬到面宿主。
+    // 本断言随代码位置迁移（回归钉保留：不许静默消失）。
+    const src = readFileSync(join(__dirname, '..', 'src', 'face-host.ts'), 'utf-8')
     expect(src).toMatch(/server\.on\('clientError'/)
+    // 且 gateway.ts 不再自持一份（同一卸载语义两套实现 = C4 要收的重复形态）
+    const gw = readFileSync(join(__dirname, '..', 'src', 'gateway.ts'), 'utf-8')
+    expect(gw).not.toMatch(/server\.on\('clientError'/)
   })
 })
 
@@ -556,4 +568,129 @@ describe('v1.28.2: transformHtmlForProxy（HTML 注入 + content-encoding 解压
     const twice = transformHtmlForProxy(Buffer.from(once!.body, 'utf-8'), {})
     expect(twice!.body).toBe(once!.body)
   })
+})
+
+/**
+ * C4 块 A 验收：**面 B（3081 网关）冒烟**——真起 listener + 真 HTTP 往返。
+ *
+ * 现状取证（§⑦ 局限 1）指出：本仓此前对 gateway 只有纯函数/源文本断言
+ * （`verifyGatewayLogin` / `buildProxyHeaders` / `split(src)` 形态），**没有任何**
+ * "真的绑端口 + 真的发请求"的用例——B 面是四面里唯一没有冒烟的。
+ * 本组补齐：登录页（真实 GET）→ 登录（真实 POST，302 + 会话 cookie）→
+ * 已登录反代（真实 GET → 打到 stub 主端口，拿到上游响应体）。
+ */
+describe('C4 块 A：面 B 冒烟（真实 listener + 真实 HTTP 往返）', () => {
+  interface RawRes { status: number; headers: Record<string, string | string[] | undefined>; body: string }
+
+  function raw(opts: { port: number; method: string; path: string; headers?: Record<string, string>; body?: string }): Promise<RawRes> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port: opts.port, method: opts.method, path: opts.path, headers: opts.headers },
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (c: Buffer) => chunks.push(c))
+          res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf-8') }))
+        },
+      )
+      req.on('error', reject)
+      req.end(opts.body)
+    })
+  }
+
+  it('登录页 GET → 登录 POST(302 + 会话 cookie) → 已登录 GET 反代到主端口', async () => {
+    // v1.34.1 修 flake（块 3）：两个端口都改为**内核分配 + 读回**，不再用 `7800 + random(300)` 猜端口段
+    // ——撞端口会造成 EADDRINUSE ⇒ 面宿主重试 10s > 本用例超时/5s 单测超时 ⇒ 挂死。
+    //
+    // 主端口替身（真实 DSH WebUI 的位置）：listen(0) → 读回实际端口
+    const upstream = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('upstream-main-body')
+    })
+    const mainPort = await new Promise<number>((resolve) => {
+      upstream.listen(0, '127.0.0.1', () => {
+        const addr = upstream.address()
+        resolve(typeof addr === 'object' && addr !== null ? addr.port : 0)
+      })
+    })
+
+    const cfgDir = mkdtempSync(join(tmpdir(), 'hooks-gateway-smoke-'))
+    const cfgPath = join(cfgDir, 'serenity-hooks.json')
+    writeFileSync(cfgPath, JSON.stringify({
+      gateway: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 0, // gateway 侧同样内核分配（`toWire`/`readAdvancedSettings` 对 0 无过滤，见 config-ops.ts:193）
+        accounts: [{ id: 'a1', user: 'tester', passHash: hashPassword('pw') }],
+      },
+      weixinApi: { enabled: false, port: 0 },
+    }))
+    const prevCfg = process.env.SERENITY_HOOKS_CONFIG
+    process.env.SERENITY_HOOKS_CONFIG = cfgPath
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), gatewayEnabled: true }))
+
+    const ctx = {
+      get: (name: string) => (name === 'webServer' ? { port: mainPort } : undefined),
+      on: vi.fn(),
+      effect: vi.fn(() => () => {}),
+    }
+    try {
+      registerGateway(ctx as never)
+      // 真实 listener 起来了（异步 sync → 等 active 表）
+      await vi.waitFor(() => expect(faceActive('gateway')).toBe(true), { timeout: 5000 })
+      const gwPort = facePort('gateway') ?? 0 // 实际监听端口（状态真相源）
+      expect(gwPort).toBeGreaterThan(0)
+
+      // ① 未登录 → 内嵌登录页（真实 HTTP 往返 + CSRF cookie）
+      const page = await raw({ port: gwPort, method: 'GET', path: '/' })
+      expect(page.status).toBe(200)
+      expect(page.body).toContain('<input id="f-user"')
+      const setCookie = String(page.headers['set-cookie'] ?? '')
+      const csrf = /serenity_csrf=([^;]+)/.exec(setCookie)?.[1] ?? ''
+      expect(csrf).not.toBe('')
+
+      // ② 登录 POST → 302 + 会话 cookie（CSRF 双提交：cookie + 头同值）
+      const login = await raw({
+        port: gwPort,
+        method: 'POST',
+        path: '/serenity/login',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          'x-csrf-token': csrf,
+          cookie: `serenity_csrf=${csrf}`,
+        },
+        body: 'user=tester&password=pw',
+      })
+      expect(login.status).toBe(302)
+      const sessionToken = /serenity_session=([^;]+)/.exec(String(login.headers['set-cookie'] ?? ''))?.[1] ?? ''
+      expect(sessionToken).not.toBe('')
+
+      // ③ 已登录 → 反代到主端口（拿到上游响应体 = 真往返）
+      const proxied = await raw({
+        port: gwPort,
+        method: 'GET',
+        path: '/',
+        headers: { cookie: `serenity_session=${sessionToken}` },
+      })
+      expect(proxied.status).toBe(200)
+      expect(proxied.body).toBe('upstream-main-body')
+
+      // ④ A↔C 解耦回归钉：3081 上**没有** 3082 的本地业务路由——/health 被当普通路径反代
+      //（若把 3082 的端点挂进来，这里会拿到 { ok:true, port:3082 } 而不是上游响应体）
+      const health = await raw({
+        port: gwPort,
+        method: 'GET',
+        path: '/health',
+        headers: { cookie: `serenity_session=${sessionToken}` },
+      })
+      expect(health.body).toBe('upstream-main-body')
+      expect(health.body).not.toContain('"ok":true')
+    } finally {
+      stopAllFaces()
+      __setSimpleSourceForTest(null)
+      if (prevCfg === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+      else process.env.SERENITY_HOOKS_CONFIG = prevCfg
+      await new Promise<void>((resolve) => upstream.close(() => resolve()))
+      rmSync(cfgDir, { recursive: true, force: true })
+    }
+  }, 15_000)
 })

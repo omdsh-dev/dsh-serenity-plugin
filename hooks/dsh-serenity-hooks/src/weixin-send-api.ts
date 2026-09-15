@@ -21,12 +21,13 @@
  * 本入口只接受 iLink 形式的 id。协议、账号选择、记录归桥。
  */
 
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import { basename } from 'node:path'
 import { findSerenityRoot, readCccName } from './ccc.js'
 import { readAdvancedSettings } from './config-ops.js'
-import { registerDisposer } from './host/effect.js'
+import { faceEnabled, facePort, startFace, stopFace, type FaceSpec } from './face-host.js'
+import { FACE_PORTS } from './ports.js'
 import { sendProactiveText } from './weixin-bridge.js'
 import { setWeixinSendEndpoint, weixinSendEndpoint } from './weixin-send-endpoint.js'
 
@@ -37,14 +38,17 @@ const MAX_BODY_BYTES = 64 * 1024
 /** 文本长度上限（微信侧单条消息实践上限；超限拒绝而非静默截断） */
 export const WEIXIN_SEND_MAX_TEXT = 4000
 
-/** 运行中的入口（null = 未启动） */
-let active: { server: Server; port: number } | null = null
+/**
+ * 面名（C4 块 A：listener 生命周期归 `face-host`，面向宿主提供规格）。
+ * 本面=面 C（端口语义见 `ports.ts` 的 `FACE_PORTS.weixinSend`）。
+ */
+const FACE_WEIXIN_SEND = 'weixin-send-api'
+/** 监听地址：**只绑 loopback**（本面不变量——不经网关、公网不可达，故不做共享密钥） */
+const WEIXIN_SEND_HOST = FACE_PORTS.weixinSend.host ?? '127.0.0.1'
 
-/** 当前入口地址（MSM 环境变量注入用；未启动 → null）——状态在叶模块（msm-ops 零依赖读取） */
-
-/** 测试辅助：读取当前监听端口（生产零调用） */
-export function weixinSendPort(): number | null {
-  return active?.port ?? null
+/** 当前入口监听端口（未启动 → null；状态真相源在面宿主的 active 表） */
+function weixinSendPort(): number | null {
+  return facePort(FACE_WEIXIN_SEND)
 }
 
 /** 来源必须是 loopback（127.0.0.1 / ::1 / IPv4-mapped） */
@@ -54,7 +58,7 @@ export function isLoopbackAddress(address: string | undefined): boolean {
   return a === '127.0.0.1' || a === '::1'
 }
 
-export interface ParsedSendRequest {
+interface ParsedSendRequest {
   ok: true
   ccc: string
   user: string
@@ -62,7 +66,7 @@ export interface ParsedSendRequest {
   accountId?: string
 }
 
-export type ParseResult = ParsedSendRequest | { ok: false; error: string; remediation?: string }
+type ParseResult = ParsedSendRequest | { ok: false; error: string; remediation?: string }
 
 /**
  * 校验并归一 /send 请求体（纯函数，可测）。
@@ -139,10 +143,12 @@ export function matchCcc(input: string, candidates: CccCandidate[]): { ok: true;
   }
 }
 
-/** 组装候选列表（discoverCccs 投影 + `.serenity` 名；动态 import 保持本模块静态依赖轻量） */
+/** 组装候选列表（`ccc-roots.listCccs` 投影 + `.serenity` 名；动态 import 保持本模块静态依赖轻量） */
 async function collectCandidates(ctx: Context): Promise<CccCandidate[]> {
-  const { discoverCccs } = await import('./skiff-debug.js')
-  const entries = await discoverCccs(ctx, process.cwd())
+  // C2：候选来源改为 ccc-roots（L2 枚举唯一真相源）——不再绕 skiff-debug.js
+  // （那样会连带加载整条 skiff 链）。默认根 = process.cwd()（既有语义不变）。
+  const { listCccs } = await import('./ccc-roots.js')
+  const entries = await listCccs(ctx, { defaultRoot: process.cwd() })
   const seen = new Set<string>()
   const out: CccCandidate[] = []
   for (const e of entries) {
@@ -254,48 +260,50 @@ export async function handleWeixinSendRequest(
   sendJson(res, statusForCode(result.code), { ok: false, code: result.code, error: result.error, remediation: result.remediation })
 }
 
-/** 启动监听器（仅 127.0.0.1）；已启动 → 幂等返回 */
+/** 本面的规格（C4 块 A/④：**只提供** name/port/host/enabled/handler——样板与生命周期归 face-host） */
+export function weixinSendSpec(ctx: Context, cfg: { enabled: boolean; port: number }): FaceSpec {
+  return {
+    name: FACE_WEIXIN_SEND,
+    port: cfg.port,
+    host: WEIXIN_SEND_HOST,
+    // 意图 = 配置启用且端口有效（`port:0` 视为关闭；这一判据此前写在 sync 里，现只在规格里写一次）
+    enabled: () => cfg.enabled && cfg.port > 0,
+    handler: (req, res) => handleWeixinSendRequest(ctx, req, res),
+    // 🔒 unref（v1.34.1 恢复；C4 归一丢失前的 `weixin-send-api.ts` 原语义）：
+    //    本面**默认开**（FACE_PORTS.weixinSend.defaultEnabled）。若宿主以一次性命令方式跑
+    //    （`dsh <cmd>` 用完即退），未 unref 的 listener 会维持事件循环 ⇒ 进程**挂住不退出**。
+    //    进程存活时监听照常工作，只在"没有别的活"时才不拖住退出——故本面语义不受损。
+    unref: true,
+  }
+}
+
+/** 启动监听器（仅 127.0.0.1）；已启动 → 幂等返回既有端口 */
 export async function startWeixinSendApi(ctx: Context, port: number): Promise<number> {
-  if (active) return active.port
-  const server = createServer((req, res) => {
-    void handleWeixinSendRequest(ctx, req, res).catch((err) => {
-      // 单请求异常不得杀进程（gateway ECONNRESET 同类教训）：记录并回 500
-      console.warn(`[serenity-hooks] ✗ weixin send api 处理失败: ${String((err as Error)?.message ?? err)}`)
-      try {
-        sendJson(res, 500, { ok: false, code: 'INTERNAL', error: 'internal error' })
-      } catch {
-        /* 响应已发出/连接已断 */
-      }
-    })
-  })
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject)
-    server.listen(port, '127.0.0.1', () => resolve())
-  })
-  server.unref()
-  const addr = server.address()
-  const actualPort = typeof addr === 'object' && addr !== null ? addr.port : port
-  active = { server, port: actualPort }
-  setWeixinSendEndpoint(`http://127.0.0.1:${actualPort}`)
-  console.log(`[serenity-hooks] ✓ 微信主动发送入口: http://127.0.0.1:${actualPort}/send（仅 loopback；CCC MSM 调用）`)
-  return actualPort
+  const live = weixinSendPort()
+  if (live !== null) return live
+  // 显式启动入口（测试/程序化）：`enabled` 填 true —— `startFace` 是机械入口，不读意图；
+  // 意图判据的读取归 `faceEnabled`（装配层 sync 用）。
+  const handle = await startFace(weixinSendSpec(ctx, { enabled: true, port }))
+  setWeixinSendEndpoint(`http://127.0.0.1:${handle.port}`)
+  console.log(`[serenity-hooks] ✓ 微信主动发送入口: http://127.0.0.1:${handle.port}/send（仅 loopback；CCC MSM 调用）`)
+  return handle.port
 }
 
 /** 停止监听器（幂等） */
 export function stopWeixinSendApi(): void {
-  if (!active) return
-  try {
-    active.server.close()
-  } catch {
-    /* 已关闭 */
-  }
-  active = null
+  stopFace(FACE_WEIXIN_SEND)
   setWeixinSendEndpoint(null)
 }
 
 /**
  * 装配（index.ts apply 调用）：按 plugin 全局配置 weixinApi 启停，配置变化热同步。
  * 默认启用（仅 loopback，零公网暴露）；`enabled:false` 或 `port:0` 关闭。
+ *
+ * C4 块 A：启停判据归面规格（`weixinSendSpec.enabled`）+ 宿主统一读取（`faceEnabled`）——
+ * 本函数不再手写 `if (want && !active) start / if (!want && active) stop` 样板，
+ * 且**停服仍是同步的**（原语义：配置一关，`weixinSendEndpoint()` 当拍变 null）。
+ * 🔒 自带的 `ctx.effect` disposer 已删除：拆卸路径归一到 `seams/lifecycle.ts` 的
+ *    聚合入口（`stopAllFaces`）——两套拆卸并存正是 C4 要收的重复形态。
  */
 export function registerWeixinSendApi(ctx: Context): void {
   const sync = (): void => {
@@ -306,14 +314,18 @@ export function registerWeixinSendApi(ctx: Context): void {
       console.warn(`[serenity-hooks] ✗ weixin send api 配置读取失败，跳过同步: ${String((err as Error)?.message ?? err)}`)
       return
     }
-    const want = cfg.enabled && cfg.port > 0
-    if (want && !active) {
-      void startWeixinSendApi(ctx, cfg.port).catch((err) => {
-        console.warn(`[serenity-hooks] ✗ 微信主动发送入口启动失败（port=${cfg.port}）: ${String((err as Error)?.message ?? err)}`)
-      })
+    const spec = weixinSendSpec(ctx, cfg)
+    if (!faceEnabled(spec)) {
+      stopWeixinSendApi() // 同步停（清 endpoint + 关 listener）
       return
     }
-    if (!want && active) stopWeixinSendApi()
+    void startFace(spec)
+      .then((handle) => {
+        setWeixinSendEndpoint(`http://127.0.0.1:${handle.port}`)
+      })
+      .catch((err) => {
+        console.warn(`[serenity-hooks] ✗ 微信主动发送入口启动失败（port=${cfg.port}）: ${String((err as Error)?.message ?? err)}`)
+      })
   }
   try {
     ctx.on('serenity/config-updated', sync)
@@ -326,5 +338,4 @@ export function registerWeixinSendApi(ctx: Context): void {
     /* 同上 */
   }
   sync()
-  registerDisposer(ctx, 'weixin send api', () => stopWeixinSendApi())
 }

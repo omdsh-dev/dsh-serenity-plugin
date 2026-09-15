@@ -17,10 +17,11 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, basename, dirname } from 'node:path'
-import { findSerenityRoot, loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
-import { registerEntrySkillSection } from './system-prompt.js'
+import { registerEntrySkillSection, registerTrajectorySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory-ops.js'
 import { readLastBound, appendBound } from '../trajectory-bound.js'
@@ -28,10 +29,10 @@ import { isSkiffSessionId } from '../skiff-role.js'
 
 // ── 纯文本构建（可单测）──
 
-export const DEFAULT_ENTRY_SKILL_MAX_CHARS = 30000
+const DEFAULT_ENTRY_SKILL_MAX_CHARS = 30000
 
 /** 从 dsh 会话日志读标题（latest-wins `session/title` 事件；无返回 null）——供标题 reconcile（U3） */
-export function readDshSessionTitle(session: unknown): string | null {
+function readDshSessionTitle(session: unknown): string | null {
   try {
     const events = sessionEvents<{ type?: string; data?: { title?: unknown } }>(session)
     for (let i = events.length - 1; i >= 0; i--) {
@@ -132,7 +133,7 @@ export function shouldRestoreActive(agent: Agent): boolean {
   return events.length > 0
 }
 
-export interface ContextRegistration {
+interface ContextRegistration {
   configPaths?: string[]
   /** session-start 播种 */
   seedOnStart?: boolean
@@ -148,7 +149,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
 
   const seed = (agent: Agent): void => {
     const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
-    const root = findSerenityRoot(cwd)
+    const root = cccRootForCwd(cwd)
     if (!root) return
     const key = agentKey(agent)
     // F4 Skiff：会话 id `skiff-` 前缀 → 完全旁路（不注入 ACC 身份；角色 CCC 提示词全替换）
@@ -156,6 +157,8 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
+    // v1.34.1：轨迹声明的 skill 注入（绑定期间持续存在；无绑定/无声明 ⇒ 不注册，见 system-prompt.ts）
+    registerTrajectorySkillSection(agent, root)
     // 重启恢复（S134 v1.16.14 内存化，对齐 osp）：进程重启内存 Map 空 + 会话有历史 →
     // 从**当前会话 events** 解析 [SESSION CONTEXT] 标记恢复内存活跃会话（只扫自己会话，
     // 无跨会话串台）；全新会话（无历史）天然不恢复。autoRestoreSession 可关，默认开。
@@ -241,7 +244,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     ctx.on('agent/pre-step', async (payload, next): Promise<PreStepDecision> => {
       const { agent, messages } = payload
       const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
-      const root = findSerenityRoot(cwd)
+      const root = cccRootForCwd(cwd)
       const key = agentKey(agent)
       const downstream = await next()
       // F4 Skiff：完全旁路（不注入 ACC 身份 + 不注册 scoped section；guard 白名单仍兜底约束）
@@ -267,6 +270,8 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         }
         // P0-1：pre-step 兜底路径也启用 scoped 身份 section（session-start 之外的 agent）
         registerEntrySkillSection(agent, root)
+        // v1.34.1：轨迹声明的 skill 注入（绑定期间持续存在；无绑定/无声明 ⇒ 不注册，见 system-prompt.ts）
+        registerTrajectorySkillSection(agent, root)
       }
       if (!root || injected.has(key) || downstream.kind !== 'enter') return downstream
       injected.add(key)

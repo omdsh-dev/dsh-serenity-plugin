@@ -22,7 +22,7 @@
 import type { Context } from 'cordis'
 
 /** 从父 agent ctx 解析 preset 继承的创建期组合。 */
-export interface HandymanPresetInheritance {
+interface HandymanPresetInheritance {
   /** 父 agent 的 preset id（写入子 session meta.agentPreset，供持久化重建）；无则不写。 */
   readonly agentPreset?: string
   /** 创建 setup 钩子：子 scope join 父的 standing preset + deny handyman 工具；无 preset 继承时仅 deny。 */

@@ -12,7 +12,7 @@
  */
 
 /** 注册表值：会话绑定的角色 + CCC 根（追问延续校验用） */
-export interface SkiffSessionBinding {
+interface SkiffSessionBinding {
   role: string
   ccc: string
 }

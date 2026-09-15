@@ -19,7 +19,7 @@ import { existsSync } from 'node:fs'
 import { resolveInside } from './ccc.js'
 
 /** hook 执行超时（旁路记录足够；超时 kill 防挂死脚本） */
-export const WEIXIN_HOOK_TIMEOUT_MS = 15_000
+const WEIXIN_HOOK_TIMEOUT_MS = 15_000
 
 /** hook stderr/stdout 日志截断（防脚本刷屏） */
 const HOOK_LOG_MAX = 500
@@ -66,7 +66,7 @@ export interface WeixinHookIncomingEvent extends WeixinHookEventBase {
  *  - `proactive` = 桥被调用主动发给指定用户（CCC MSM 经本机入口发起）
  *  - `reply-fallback`（v1.30.17）= 手动输出模式下 agent 本轮一次都没发送成功 → 桥兜底转发其最终文本
  */
-export type WeixinOutgoingSource = 'reply' | 'proactive' | 'reply-fallback'
+type WeixinOutgoingSource = 'reply' | 'proactive' | 'reply-fallback'
 
 /** outgoing 事件（bot → 用户）：回复文本（已剥离 think） */
 export interface WeixinHookOutgoingEvent extends WeixinHookEventBase {
@@ -79,13 +79,13 @@ export interface WeixinHookOutgoingEvent extends WeixinHookEventBase {
 }
 
 /** 全部 hook 事件（判别联合） */
-export type WeixinHookEvent = WeixinHookIncomingEvent | WeixinHookOutgoingEvent
+type WeixinHookEvent = WeixinHookIncomingEvent | WeixinHookOutgoingEvent
 
 /** 事件载荷（JSON 序列化：不含任何会话凭据——H5） */
-export type WeixinHookEventJson = WeixinHookEvent
+type WeixinHookEventJson = WeixinHookEvent
 
 /** incoming 事件构造输入（bridge 提供实参） */
-export interface IncomingHookInput {
+interface IncomingHookInput {
   cccRoot: string
   accountId: string
   userId: string
@@ -96,7 +96,7 @@ export interface IncomingHookInput {
 }
 
 /** outgoing 事件构造输入（bridge 提供实参） */
-export interface OutgoingHookInput {
+interface OutgoingHookInput {
   cccRoot: string
   accountId: string
   userId: string
@@ -143,7 +143,7 @@ export function buildOutgoingHookEvent(input: OutgoingHookInput): WeixinHookOutg
 }
 
 /** hook 执行结果（测试/日志用；调用方只关心无异常） */
-export interface WeixinHookRunResult {
+interface WeixinHookRunResult {
   ok: boolean
   detail?: string
 }
@@ -238,13 +238,8 @@ function runOnce(cmd: string, args: string[], json: string, timeoutMs: number): 
   })
 }
 
-/** 测试辅助：把 WeixinHookEvent 转单行 JSON（脚本侧读取约定） */
-export function hookEventToStdinLine(event: WeixinHookEvent): string {
-  return JSON.stringify(event)
-}
-
 /** hook runner 签名（可注入——bridge 集成测试捕获事件防真实 spawn flake） */
-export type WeixinHookRunner = (root: string, hookRel: string, event: WeixinHookEvent) => Promise<WeixinHookRunResult>
+type WeixinHookRunner = (root: string, hookRel: string, event: WeixinHookEvent) => Promise<WeixinHookRunResult>
 
 let activeRunner: WeixinHookRunner = runWeixinHook
 

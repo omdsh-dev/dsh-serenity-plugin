@@ -38,7 +38,7 @@ export function findGitRoot(cwd: string): string | null {
 
 // ── P3 路径二分 ──
 
-export type PathClass = 'inside' | 'outside' | 'same';
+type PathClass = 'inside' | 'outside' | 'same';
 
 /**
  * 前缀判定：abs 是否位于 rootAbs 之内。
@@ -98,7 +98,7 @@ export function readCccName(root: string): string | null {
 
 // ── 配置（.opencode/serenity.json 规范位置 / .dsh/serenity.json 回退）──
 
-export interface SerenityConfig {
+interface SerenityConfig {
   /** handyman（杂工）配置：模型白名单（v1.24.0 取代 loop） */
   handyman?: {
     /** 可用模型白名单（provider/model 列表）——handyman 只能使用其中模型（用户拍板：CCC 配置控制） */
@@ -361,11 +361,6 @@ export function readUtf8(path: string): string {
  */
 const warnedBrokenConfigs = new Set<string>()
 
-/** 测试辅助：清空"已告警"记忆（生产零调用） */
-export function __resetBrokenConfigWarningsForTest(): void {
-  warnedBrokenConfigs.clear()
-}
-
 /**
  * 读取 CCC 配置（第一个存在且可解析的候选路径）。
  *
@@ -470,7 +465,7 @@ export function matchBlacklist(relPath: string, rules: BlacklistRule[]): Blackli
 }
 
 /** 写类工具名（safe-mode 下禁止） */
-export const WRITE_TOOLS = new Set(['bash', 'write', 'edit', 'str_replace_editor', 'container_fs']);
+const WRITE_TOOLS = new Set(['bash', 'write', 'edit', 'str_replace_editor', 'container_fs']);
 
 export function isWriteTool(toolName: string): boolean {
   return WRITE_TOOLS.has(toolName);

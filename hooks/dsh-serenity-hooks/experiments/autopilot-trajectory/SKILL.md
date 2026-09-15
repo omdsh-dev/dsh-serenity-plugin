@@ -1,6 +1,6 @@
 ---
 name: autopilot-trajectory-experiment
-description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自主轨迹实验）参与 skill。本 skill 让 CCC 完整理解机制背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 轨迹焦点 + 前台运行 + 多 CCC 独立），并提供一站式管理入口（v1.33 起归 `container_admin autopilot`：status 全报告 / init 初始化 / generate-bias 验证偏见内容；条件链诊断走开发面脚本）。任何希望参与的 CCC 复制本目录到 .opencode/skills/ 即可开始。
+description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自主轨迹实验）参与 skill。本 skill 让 CCC 完整理解机制背景（人类 waiting 是 trajectory 速度瓶颈）、目的（验证"无人等待的 trajectory"能否加速认知推进）、方式（时钟唤起 + 先验偏见 + 轨迹焦点 + 前台运行 + 多 CCC 独立），并提供一站式管理入口（v1.33 起归 `container_admin autopilot`：status 全报告 / init 初始化 / generate-bias 验证偏见内容；**v1.34.1 起三动作在插件进程内**）。任何希望参与的 CCC 复制本目录到 .opencode/skills/ 即可开始。
 ---
 
 # Skill: autopilot-trajectory-experiment
@@ -8,6 +8,18 @@ description: Autopilot Trajectory（自动巡航轨迹，正式版；前身自�
 > 本 skill 是 Autopilot Trajectory（自动巡航轨迹）的 **CCC 参与入口**——加载本 skill 即完整理解机制的**背景、目的、方式**。
 > 实验管理（v1.33 起）：`container_admin autopilot status | init | generate-bias`（原 `trajectory all/init/random`——D58 起工具更名 `trajectory`，v1.33 起 autopilot 面归机务舱，硬切无别名）
 > 理论依据：serenity-acc-specs `docs/self-sustaining-trajectory-hypothesis.md`（v0.1 猜想）
+
+## 0. 本目录是什么（v1.34.1 起：**只有文档，没有可执行脚本**）
+
+- 本文件是**机制定义的文档**；`container_admin autopilot` 的三动作实现**在插件进程内**，不在本目录。
+- **旧 `scripts/autopilot-trajectory.ts` 已退场**（S142 §12.8 裁决「拆两半、退掉独立脚本」）——它曾是
+  独立进程，只能读文件 ⇒ 看不到**全局闸 / live 会话 / agent 可解析性** ⇒ 与插件实际行为结构性分歧
+  （逐条件 13 项中 8 项不一致，含"全局闸关着仍印 ✅"这类用户可见假报告）。三动作现由
+  `container_admin autopilot` 直调进程内实现，与 tick 读**同一份判据**。
+- 本目录**不再参与 npm 分发**（`package.json` 的 `files` 已移除本目录两行）——它是仓库内文档。
+- 条件链诊断（"为什么这轮没被唤起"）：**`acc-diag`** ④ 段（进程内，含运行态三项）或
+  开发面 `dsh-develop diag [--ccc <path>]`（离线文件视图）——两者是**同一份判据**的两次调用
+  （入口分两处，判据只写一遍）。
 
 ## 触发条件/何时加载
 
@@ -73,7 +85,7 @@ CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容*
 ## 4. 机制运行（dsp 侧，CCC 无需干预）
 
 ```
-定时器（每 10min）→ 唤起条件全满足 →
+定时器（每 5min，与插件 TICK_MS 对齐）→ 唤起条件全满足 →
   ① 读 topPrompt（CCC 定义的轨迹焦点）→ 唤起消息首段注入
   ② 运行 <biasProvider> 脚本 → stdout = 偏见内容（CCC 自定）
   ③ 读 SESSION.md「下一轮动机」段 → 自生动机
@@ -81,21 +93,27 @@ CCC 根目录下一个脚本，**stdout 输出本轮唤起注入的偏见内容*
 → 模型自动继续：探索/反事实检验 → 产出落 SESSION.md「自主探索日志」+ 预写「下一轮动机」
 ```
 
-**唤起条件**（全部满足）：① enabled ② 会话目录 `--auto` ③ SESSION.md mtime 距今 > intervalHours ④ 北京时间非高峰（缺省避开 8~18）⑤ 无运行中的唤起轮。**偏见提供者脚本缺失 → 唤起中止并报错要求实现**（不静默）。
+**唤起条件**（全部满足）：① **插件全局闸** `autopilotWakeEnabled` 开 ② enabled ③ 会话目录 `--auto` ④ SESSION.md mtime 距今 > intervalHours ⑤ 北京时间非高峰（缺省避开 8~18）⑥ 目标会话 **live agent 已定位** ⑦ 无运行中的唤起轮。**偏见提供者脚本缺失 → 唤起中止并报错要求实现**（不静默）。
 
 **人类角色**：不触发、不中断；回复/评价天然并入（同一前台会话）；轨迹不等人类。
 
-## 5. 实验管理（`container_admin autopilot`）——一站式
+## 5. 实验管理（`container_admin autopilot`）——一站式（进程内）
 
 | 用法 | 功能 |
 |------|------|
-| `container_admin autopilot status`（**推荐，无参即全报告**） | **一站式全报告**：背景摘要 + 就绪度检查 + 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
-| `container_admin autopilot init` | **一键初始化**：写配置（`trajectory.autopilot`）+ 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts） |
-| `container_admin autopilot generate-bias` | 运行偏见提供者脚本，输出当前偏见内容（验证） |
-| （开发面）`bun <包内脚本> check` | 仅就绪度检查（配置/轨迹焦点 topPrompt/偏见提供者/--auto 标志/动机段） |
-| （开发面）`bun <包内脚本> status` | 仅当前状态（配置快照/目标会话/距上次活动/唤起窗口/可唤起性） |
-| （开发面）`bun <包内脚本> diag` | 唤起条件链诊断（逐条件 + 阻断点 + 修复建议）——CCC 侧另有专属工具 `acc-diag`（含进程内 live 运行态） |
-| （开发面）`bun <包内脚本> doc` / `guide` | 机制定义全文（本 SKILL.md）/ 仅步骤指引 |
+| `container_admin autopilot status`（**推荐，无参即全报告**） | **一站式全报告**：背景摘要 + 就绪检查（条件链逐条件）+ **进程态**（全局闸/时钟是否武装/tick 次数/上次跳过原因）+ 当前状态 + 下一步指引 + 步骤——CCC agent 看一次即完整理解并知道怎么开始 |
+| `container_admin autopilot init` | **一键初始化**：写配置（`trajectory.autopilot`，旧键迁移后删除）+ 生成偏见提供者脚本模板（CCC 根 autopilot-bias.ts）+ 报告全局闸是否已开 |
+| `container_admin autopilot generate-bias` | 运行偏见提供者脚本，输出当前偏见内容（验证）——与 tick 走**同一份**执行代码 |
+
+**条件链诊断**（"为什么这轮没被唤起"）——两处入口，**同一份判据**：
+
+| 入口 | 形态 | 能看到的 |
+|------|------|---------|
+| `acc-diag` ④ 段（专属工具，ACC 负责人） | 插件进程内 | 全部条件 + **全局闸 / live 会话 / agent 可解析性 / 重入守卫**（离线视图看不到的三项） |
+| `dsh-develop diag [--ccc <path>]`（开发面） | 独立 bun 进程（插件未跑时可用） | 配置与环境条件；运行态三项照实标"不可知"（**不**当作满足，故离线通道不会印 ✅） |
+
+> 判决语义：`✗` = 配置/环境问题（需人改）｜`⏸` = 等待中（到点/出窗口自会满足，非配置问题）｜`?` = 不可知。
+> **只有三类皆空才印 ✅**——旧脚本只统计 `✗`，把 `⏸` 排除在阻断之外，导致每天北京 8~18 点都印「满足」而实际不唤起。
 
 ## 6. 观察与验证
 

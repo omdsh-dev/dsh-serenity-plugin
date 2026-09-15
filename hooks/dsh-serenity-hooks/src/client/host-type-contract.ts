@@ -31,7 +31,7 @@
  * - 本文件只覆盖 dsp **真正读写的字段**；宿主新增字段不会误报。
  */
 import type { DraftAttachmentId, InputActions, InputState, InputZone } from '@deepseek-ai/dsh-client-ui-conversation'
-import type { PropsRuntime, SessionStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
+import type { SessionStandardProps } from '@deepseek-ai/dsh-client-ui-slots'
 
 type Expect<T extends true> = T
 type Extends<A, B> = [A] extends [B] ? true : false
@@ -81,6 +81,3 @@ type _RemoteFailureCode = Expect<Extends<NonNullable<NonNullable<InputZone['sess
 
 /** `props.sessionId`（SessionStandardProps）——ui-session 迁移类改名 → 此处红。 */
 type _SessionStandardId = Expect<Extends<SessionStandardProps['sessionId'], string>>
-
-/** 哨兵：`PropsRuntime<'conversation.input.dock'>` 本身必须可解析（两个 dock 的 props 基） */
-export type ClientDockPropsResolvable = PropsRuntime<'conversation.input.dock'>

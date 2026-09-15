@@ -24,9 +24,11 @@ import z from '@deepseek-ai/schemastery'
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import { hostSettings } from './host/access.js'
+// C4 块 B：端口默认值只从集中端口表取（不再散写）
+import { ACP_HTTP_PORT, SKIFF_DEBUG_PORT } from './ports.js'
 
 /** 插件 Config 的简单配置片段（index.ts Config 组合；settings entry base） */
-export interface SimpleConfigFragment {
+interface SimpleConfigFragment {
   gateway?: { enabled?: boolean }
   rebuild?: { enabled?: boolean; thresholdK?: number }
   /** F4 Skiff（实验性）：调试服务启停（人工） */
@@ -44,7 +46,7 @@ export const SERENITY_SETTINGS_NS = 'serenity-hooks'
  * 简单配置 schema（schemastery）：三功能总开关 + F2 阈值 + F4 Skiff 启停。
  * 与 DSH settings 的 schema 语义一致（z.object 布尔/数字）。
  */
-export interface SerenitySimpleSettings {
+interface SerenitySimpleSettings {
   /** F1 双端口网关总开关 */
   gatewayEnabled: boolean
   /** F2 超限重建总开关 */
@@ -75,14 +77,14 @@ export interface SerenitySimpleSettings {
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
-export const simpleSettingsSchema = z.object({
+const simpleSettingsSchema = z.object({
   gatewayEnabled: z.boolean().default(false),
   rebuildEnabled: z.boolean().default(true),
   rebuildThresholdK: z.number().min(50).max(4000).default(400),
   skiffEnabled: z.boolean().default(false),
-  skiffDebugPort: z.number().min(1024).max(65535).default(3099),
+  skiffDebugPort: z.number().min(1024).max(65535).default(SKIFF_DEBUG_PORT),
   acpEnabled: z.boolean().default(false),
-  acpHttpPort: z.number().min(1024).max(65535).default(3100),
+  acpHttpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT),
   publicAskEnabled: z.boolean().default(false),
   autopilotWakeEnabled: z.boolean().required(false),
   autopilotEnabled: z.boolean().required(false),
@@ -96,9 +98,9 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     rebuildEnabled: config.rebuild?.enabled ?? true,
     rebuildThresholdK: config.rebuild?.thresholdK ?? 400,
     skiffEnabled: config.skiff?.enabled ?? false,
-    skiffDebugPort: config.skiff?.debugPort ?? 3099,
+    skiffDebugPort: config.skiff?.debugPort ?? SKIFF_DEBUG_PORT,
     acpEnabled: config.acp?.enabled ?? false,
-    acpHttpPort: config.acp?.httpPort ?? 3100,
+    acpHttpPort: config.acp?.httpPort ?? ACP_HTTP_PORT,
     publicAskEnabled: config.publicAsk?.enabled ?? false,
     wakeSchedulerEnabled: true,
   }
@@ -110,11 +112,6 @@ let simpleSource: (() => SerenitySimpleSettings) | null = null
 /** 缺 settings provider 的告警去重（进程级一次；降级路径可能被多次注册调用） */
 let warnedNoSettingsProvider = false
 
-/** 测试辅助：重置"缺 settings provider"告警去重（生产零调用） */
-export function __resetSettingsWarningsForTest(): void {
-  warnedNoSettingsProvider = false
-}
-
 /** 进程级默认（无 settings 服务时的兜底） */
 export function defaultSimpleSettings(): SerenitySimpleSettings {
   return {
@@ -122,9 +119,9 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     rebuildEnabled: true,
     rebuildThresholdK: 400,
     skiffEnabled: false,
-    skiffDebugPort: 3099,
+    skiffDebugPort: SKIFF_DEBUG_PORT,
     acpEnabled: false,
-    acpHttpPort: 3100,
+    acpHttpPort: ACP_HTTP_PORT,
     publicAskEnabled: false,
     wakeSchedulerEnabled: true,
   }

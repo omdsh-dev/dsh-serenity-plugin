@@ -30,16 +30,19 @@ import type { Context } from 'cordis'
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import { existsSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { findSerenityRoot, isSafeModeOn, readBlacklist } from '../ccc.js'
+import { isSafeModeOn, readBlacklist } from '../ccc.js'
+import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
 import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory-ops.js'
+import { readLastBound } from '../trajectory-bound.js'
+import { buildTrajectorySkillsSection, hasTrajectorySkillsDeclaration } from '../trajectory-skills.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
 import { readAdvancedSettings } from '../config-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
-export function readPersonaSettings(): { mode: string; overrideText: string } {
+function readPersonaSettings(): { mode: string; overrideText: string } {
   try {
     const s = readAdvancedSettings()
     return { mode: s.persona.mode ?? '', overrideText: s.persona.overrideText ?? '' }
@@ -536,13 +539,14 @@ export function codeModeAdaptationLine(ctx: Context, scope?: unknown): string {
 
 /** 从 assembly context 解析 agent cwd（subagent/后台 agent 同样带 agent）；
  *  无 agent → undefined（不注入）；有 agent 但无 header.cwd（workflow subagent 等）
- *  回退 process.cwd()——对齐 context.ts，否则这些 agent 系统提示词注入为空
- *  （v1.18.6：workflow subagent 无宁静号上下文 bug） */
+ *  回退 process.cwd()——**cwd 回落语义取自 `ccc-roots.agentCwdFor`（C2 归一）**，否则这些
+ *  agent 系统提示词注入为空（v1.18.6：workflow subagent 无宁静号上下文 bug）。
+ *  ⚠️ 本函数比 `agentCwdFor` 多一道「**无 agent ⇒ undefined**」——那是 section 的
+ *  "不注入" 语义（`agentCwdFor` 对无 agent 会回落到 process.cwd()），故不能直接替换。 */
 function agentCwd(context: AssembleContext): string | undefined {
   const agent = context.agent
   if (!agent) return undefined
-  const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd
-  return cwd ?? process.cwd()
+  return agentCwdFor(agent as { session?: { header?: { cwd?: string } } })
 }
 
 /** 从 assembly context 解析 dsh 会话 id（Session 块按会话隔离的 scope） */
@@ -563,7 +567,7 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
       text: (context) => {
         const cwd = agentCwd(context)
         if (!cwd) return ''
-        const root = findSerenityRoot(cwd)
+        const root = cccRootForCwd(cwd)
         if (!root) return ''
         const scope = agentScope(context)
         // F4 Skiff：会话 id `skiff-` 前缀 → 不注入 ACC 默认系统提示词
@@ -613,6 +617,55 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
       },
     })
     sectionedAgents.add(key)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 轨迹 skill 注入 section（规格 `docs/trajectory-skill-injection.md` §3，v1.34.1）。
+ *
+ * **声明来源**：该会话绑定的轨迹（`readLastBound(session).mdPath` = 它的 `SESSION.md`）顶部
+ * frontmatter 的 `skills:`；正文 = 所列 skill 的 `SKILL.md` 全文（本模块只注册，装配在
+ * `trajectory-skills.ts`）。
+ *
+ * 为什么是 **per-agent scoped section**（与 `registerEntrySkillSection` 同形）：注入必须
+ * **绑定期间持续存在**（a2）——一次性注入会随对话压缩消失，而 section 每次装配重新求值。
+ *
+ * 为什么**门在注册时、内容在求值时**（R↓，两个失败模式各治一个）：
+ *   · 注册门（无绑定 / 无声明 ⇒ 不注册）：满足"零配置面不产生空 section、不产生噪声"；
+ *   · 求值回调**每轮重读 `readLastBound` + 文件**：绑定切换 / 声明被编辑后自动跟上，
+ *     且绑定消失时返回 `''`（宿主 renderSections **丢弃空 section**，不残留噪声）。
+ *
+ * ⚠️ 路径取自绑定的 `mdPath`（权威记录），**不用** `resolveSessionTrajectoryLabel` 的显示 label
+ * 去拼路径——label 是模糊匹配的展示码，拼路径即模糊匹配当精确匹配用。
+ *
+ * @param agent 目标 agent（其 `session` 需有 `header.id` + `header.cwd`）
+ * @param root 该 agent 的 CCC 根
+ * @returns 是否**本次**完成注册（已注册过 / 门未过 → false）
+ */
+const trajectorySkillAgents = new Set<string>()
+
+export function registerTrajectorySkillSection(agent: Agent, root: string): boolean {
+  const session = agent.session
+  const key = (session as { id?: string }).id ?? 'global'
+  if (trajectorySkillAgents.has(key)) return false
+  const bound = readLastBound(session)
+  if (!bound) return false
+  if (!hasTrajectorySkillsDeclaration(root, bound.mdPath)) return false
+  try {
+    agent.ctx.systemPrompt.section({
+      name: 'serenity-trajectory-skills',
+      // 排在入口身份块（-50）之后、部署 persona（0）之前：身份先立，工作供给（skill 全文）随后
+      order: -45,
+      text: () => {
+        const current = readLastBound(session)
+        if (!current) return ''
+        return buildTrajectorySkillsSection(root, current.mdPath)
+      },
+    })
+    trajectorySkillAgents.add(key)
     return true
   } catch {
     return false

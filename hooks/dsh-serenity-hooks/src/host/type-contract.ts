@@ -277,9 +277,6 @@ type _EvAssembleContext = Expect<Extends<
 //    版本判定的运行时真相仍在 contract.ts）
 // ─────────────────────────────────────────────────────────────
 
-/** 哨兵：确保本模块不是空文件被 tree-shake 掉（无运行时副作用，值为类型） */
-export type HostTypeContractSatisfied = true
-
 /*
  * 闸门自证（2026-09-10，S142 全量 review 时实测，**勿删此记录**）：
  *

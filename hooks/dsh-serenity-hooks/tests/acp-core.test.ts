@@ -263,12 +263,27 @@ function httpPost(port: number, body: unknown, path = '/'): Promise<{ status: nu
   })
 }
 
+/**
+ * 启动 ACP 面于**内核分配端口**（`port:0`）并读回实际端口。
+ *
+ * v1.34.1 修 flake（块 3）：此前每个用例自取 `base + random(n)`——相邻用例有概率撞同一端口，
+ * 而前任面的端口未必已释放 ⇒ EADDRINUSE ⇒ 面宿主按缺省预算重试 **10s > vitest 5s 超时**
+ * ⇒ 用例以 "Test timed out in 5000ms" 挂死（真相＝撞端口，报出来却像逻辑挂死）。
+ * `port:0` 由内核挑空闲端口 ⇒ 这一类撞端口 flake **在结构上不可能再发生**。
+ */
+async function startAcpEphemeral(root?: string): Promise<number> {
+  await startAcpHttpServer(fakeCtx() as never, 0, root)
+  const port = acpHttpPort()
+  if (port === null) throw new Error('acp-http 面未在监听（startAcpHttpServer 未生效）')
+  return port
+}
+
 describe('acp-http: HTTP JSON-RPC 端点（ephemeral 端口）', () => {
   it('start → POST / initialize → 响应数组；stop → active 清除', async () => {
-    const port = 3600 + Math.floor(Math.random() * 300)
-    await startAcpHttpServer(fakeCtx() as never, port)
+    const port = await startAcpEphemeral()
     expect(acpHttpActive()).toBe(true)
-    expect(acpHttpPort()).toBe(port)
+    expect(port).toBeGreaterThan(0) // port:0 → 内核分配的实际端口
+    expect(acpHttpPort()).toBe(port) // 状态真相源读回同一端口
     const res = await httpPost(port, { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
     expect(res.status).toBe(200)
     const parsed = JSON.parse(res.body) as Array<{ result: { protocolVersion: number } }>
@@ -278,8 +293,7 @@ describe('acp-http: HTTP JSON-RPC 端点（ephemeral 端口）', () => {
   })
 
   it('非法 JSON → 400 parse error 帧', async () => {
-    const port = 3900 + Math.floor(Math.random() * 100)
-    await startAcpHttpServer(fakeCtx() as never, port)
+    const port = await startAcpEphemeral()
     const res = await httpPost(port, { bad: 'json' } as never)
     // dispatchRpc 对 object 帧返回 invalid request（-32600），不是 parse error；HTTP 层 200
     expect(res.status).toBe(200)
@@ -289,8 +303,7 @@ describe('acp-http: HTTP JSON-RPC 端点（ephemeral 端口）', () => {
   })
 
   it('问答页关（publicAskEnabled=false）→ GET / 渲染未启用提示页（200 非 404）', async () => {
-    const port = 4200 + Math.floor(Math.random() * 100)
-    await startAcpHttpServer(fakeCtx() as never, port)
+    const port = await startAcpEphemeral()
     const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
       const req = request({ host: '127.0.0.1', port, path: '/', method: 'GET' }, (r) => {
         const chunks: Buffer[] = []
@@ -306,9 +319,8 @@ describe('acp-http: HTTP JSON-RPC 端点（ephemeral 端口）', () => {
   })
 
   it('重复 start 幂等（单实例）', async () => {
-    const port = 4500 + Math.floor(Math.random() * 100)
-    await startAcpHttpServer(fakeCtx() as never, port)
-    await startAcpHttpServer(fakeCtx() as never, port)
+    const port = await startAcpEphemeral()
+    await startAcpHttpServer(fakeCtx() as never, port) // 二次启动：active 守门 ⇒ 幂等，不重绑
     expect(acpHttpActive()).toBe(true)
     stopAcpHttpServer()
   })
@@ -331,10 +343,9 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('POST /ask 无 key / 错误 key → 401（没有 key 不工作）', async () => {
-    const port = 5100 + Math.floor(Math.random() * 100)
     const key = ensurePublicAskKey()
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     try {
       const noKey = await httpPost(port, { ccc: dir, question: 'hi' }, '/ask')
       expect(noKey.status).toBe(401)
@@ -357,9 +368,8 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('问答页关（publicAskEnabled=false）→ POST /ask 403', async () => {
-    const port = 5400 + Math.floor(Math.random() * 100)
     const key = ensurePublicAskKey()
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     try {
       const res = await httpPost(port, { key, ccc: dir, question: 'hi' }, '/ask')
       expect(res.status).toBe(403)
@@ -369,9 +379,8 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('GET / 问答页开启 → 渲染容器列表页（含开放容器链接）', async () => {
-    const port = 5600 + Math.floor(Math.random() * 100)
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     try {
       const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
         const req = request({ host: '127.0.0.1', port, path: '/', method: 'GET' }, (r) => {
@@ -400,9 +409,8 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('GET /c/<name> → 单容器问答页（含角色下拉 + localStorage key 恢复）', async () => {
-    const port = 5800 + Math.floor(Math.random() * 100)
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     try {
       const name = dir.split('/').filter(Boolean).pop() ?? ''
       const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
@@ -430,9 +438,8 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('GET /c/<unknown> → 容器不存在提示页', async () => {
-    const port = 5900 + Math.floor(Math.random() * 100)
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     try {
       const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
         const req = request({ host: '127.0.0.1', port, path: '/c/does-not-exist', method: 'GET' }, (r) => {
@@ -451,13 +458,12 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('allowed 白名单：开放容器可问，未开放容器 403/关闭提示页', async () => {
-    const port = 6000 + Math.floor(Math.random() * 100)
     const key = ensurePublicAskKey()
     const name = dir.split('/').filter(Boolean).pop() ?? ''
     // 白名单不含当前容器（dir 名）→ 它被"已发现但未开放"；"other" 未发现
     updateAdvancedSettings({ publicAsk: { key, allowed: ['some-other-ccc'] } })
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     try {
       // 未开放容器 POST /c/<name>/ask → 403
       const denied = await httpPost(port, { key, question: 'hi' }, `/c/${encodeURIComponent(name)}/ask`)
@@ -495,11 +501,10 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('POST /c/<name>/ask 会话延续 + 角色参数（v1.26.2 用户：应能选择角色）', async () => {
-    const port = 6100 + Math.floor(Math.random() * 100)
     const key = ensurePublicAskKey()
     const name = dir.split('/').filter(Boolean).pop() ?? ''
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     try {
       const first = await httpPost(port, { key, role: 'qa', question: 'hi' }, `/c/${encodeURIComponent(name)}/ask`)
       expect(first.status).toBe(200)
@@ -529,11 +534,10 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
   })
 
   it('IP 失败锁定：连续失败达阈值 → 锁定（429）；其它 IP 不受影响；成功重置', async () => {
-    const port = 6300 + Math.floor(Math.random() * 100)
     const key = ensurePublicAskKey()
     const name = dir.split('/').filter(Boolean).pop() ?? ''
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
-    await startAcpHttpServer(fakeCtx() as never, port, dir)
+    const port = await startAcpEphemeral(dir)
     const path = `/c/${encodeURIComponent(name)}/ask`
     try {
       // 模拟同一 IP（X-Forwarded-For）连续失败

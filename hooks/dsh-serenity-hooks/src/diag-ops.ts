@@ -9,20 +9,30 @@
  *
  * 四段内容（数据来源各自单一真相源，本模块只聚合不复制语义）：
  *   ① live 运行态 —— 插件进程内 `diagLive(ctx)`（live 会话清单 + 各 autopilot CCC 的
- *      目标命中 / agent 定位诊断）——**脚本侧看不到运行时**，这正是本工具存在的理由
+ *      目标命中 / agent 定位诊断）——**独立进程看不到运行时**，这正是本工具存在的理由
  *   ② 面板解析 —— `diagLive.panelResolved`（无参面板请求会落到哪个 CCC）
  *   ③ 唤醒注册表 —— `wake-registry.json` 全量条目（state / at / target / lastResult）+ 补跑窗口
- *   ④ 唤起条件链 —— 包内脚本 `diag`（`runAutopilotScript(root,'diag')`）：逐条件值 + 阻断点 + 修复建议
+ *   ④ 唤起条件链 —— **进程内** {@link buildWakeChain}（⑥ C6a）：逐条件值 + 阻断点 + 修复建议
+ *      + 只有进程内能看到的三项事实（全局闸 / live 会话 / agent 可解析性）
+ *
+ * C5「观察面归一」（2026-09-15）：①/② 仍走 `diagLive`（那是**live 运行态**的独有取数，
+ * 没有第二个来源），但 ①b 时钟与 ③ 注册表改经 `container-status.ts` 取（唯一取数出口）——
+ * **投影仍在本文件**（诊断段不含 `message`，面板含；这是渲染差异，不是取数差异）。
+ *
+ * ⑥ C6a（2026-09-15）：④ 段由"spawn 包内脚本"改为**进程内计算**。旧实现是本报告里
+ * 唯一一条**跨进程**取数：脚本看不到全局闸/live/agent ⇒ 与本工具 ① 段自相矛盾
+ * （① 说"agent 未定位"，④ 却印"条件全部满足"）。现在 ④ 段与 ① 段读**同一份事实**
+ * （`autopilotRuntimeFacts`），且条件链**只有一份实现**（开发面 `dsh-develop diag` import 同一个）。
  */
 
-import { listWakes, WAKE_CATCH_UP_MS } from './wake-registry.js'
-import { diagLive, type DiagLiveReport, autopilotClockState } from './autopilot-trajectory.js'
-import { wakeSchedulerState } from './wake-scheduler.js'
-import { runAutopilotScript } from './autopilot-script.js'
+import { WAKE_CATCH_UP_MS } from './wake-registry.js'
+import { autopilotRuntimeFacts, diagLive, type DiagLiveReport } from './autopilot-trajectory.js'
+import { buildWakeChain, renderWakeChain } from './autopilot-chain.js'
+import { containerClocks, containerWakes, type ClockSnapshot } from './container-status.js'
 import type { Context } from 'cordis'
 
 /** 进程内时钟状态（唤醒调度器 / autopilot 时钟；判据各自单一真相源） */
-type ClockState = ReturnType<typeof wakeSchedulerState> | ReturnType<typeof autopilotClockState>
+type ClockState = ClockSnapshot
 
 /** 人读渲染一行时钟状态（"为何没有 tick" 的第一手判据） */
 function renderClock(label: string, s: ClockState): string {
@@ -38,8 +48,8 @@ function renderClock(label: string, s: ClockState): string {
   return `${label}: ${parts.join(' ｜ ')}`
 }
 
-export interface AccDiagReport {
-  /** 调用方会话所属 CCC 根（脚本诊断的目标） */
+interface AccDiagReport {
+  /** 调用方会话所属 CCC 根（过程内诊断的目标） */
   ccc: string
   live: DiagLiveReport
   /**
@@ -65,30 +75,38 @@ export interface AccDiagReport {
     }>
     pending: number
   }
-  /** 唤起条件链（脚本输出原文；失败时给出错误文本，不吞） */
+  /**
+   * 唤起条件链（进程内算出的渲染文本，含逐条件值 + 阻断点 + 修复建议）。
+   * **不是**子进程输出——判据唯一实现见 `autopilot-chain.ts`。
+   */
   autopilotChain: string
+  /** 条件链判决档（`ready`/`waiting`/`blocked`/`unknown`；供调用方/测试断言，不再解析文本） */
+  autopilotVerdict: string
 }
 
 /**
  * 装配报告（一次调用即全报告）。
  * @param ctx 插件上下文（进程内读 sessions/agents）
- * @param root 调用方 CCC 根（脚本诊断目标）
+ * @param root 调用方 CCC 根（条件链诊断目标）
  * @returns 结构化报告（渲染由 {@link renderAccDiag} 负责）
  */
-export function runAccDiag(ctx: Context, root: string): AccDiagReport {
+export async function runAccDiag(ctx: Context, root: string): Promise<AccDiagReport> {
   const live = diagLive(ctx)
-  const { entries, error } = listWakes(root)
-  const script = runAutopilotScript(root, 'diag')
+  // C5：时钟与唤醒注册表经 container-status 取数（与本文件其余段落同一取数出口）
+  const clocks = containerClocks()
+  const wakes = containerWakes(root)
+  // ④ 段：进程内条件链（含全局闸 / live / 重入——旧脚本看不到的三项）
+  const chain = await buildWakeChain(root, autopilotRuntimeFacts(ctx, root))
   return {
     ccc: root,
     live,
     clocks: {
-      wake: wakeSchedulerState(),
-      autopilot: autopilotClockState(),
+      wake: clocks.wake,
+      autopilot: clocks.autopilot,
     },
     wakes: {
-      error,
-      entries: entries.map((e) => ({
+      error: wakes.error,
+      entries: wakes.entries.map((e) => ({
         id: e.id,
         target: e.target,
         at: e.at,
@@ -97,9 +115,10 @@ export function runAccDiag(ctx: Context, root: string): AccDiagReport {
         attempts: e.attempts ?? 0,
         lastResult: e.lastResult ?? null,
       })),
-      pending: entries.filter((e) => e.state === 'pending').length,
+      pending: wakes.pending,
     },
-    autopilotChain: script.error ? `（脚本诊断失败：${script.error}）` : (script.output ?? '(empty)'),
+    autopilotChain: renderWakeChain(chain),
+    autopilotVerdict: chain.verdict,
   }
 }
 
@@ -153,7 +172,7 @@ export function renderAccDiag(r: AccDiagReport): string {
   }
   lines.push('')
 
-  // ④ 唤起条件链
+  // ④ 唤起条件链（进程内；判据唯一实现 = autopilot-chain）
   lines.push(`── ④ 唤起条件链（"为什么这轮没被唤起"）──`)
   lines.push(r.autopilotChain)
   return lines.join('\n')

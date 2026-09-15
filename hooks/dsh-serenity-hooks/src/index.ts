@@ -22,7 +22,7 @@ import { praxisTool } from './tools/praxis.js'
 import { createHandymanTool } from './tools/handyman.js'
 import { createTrajectoryTool } from './tools/trajectory.js'
 import { localstoreTool } from './tools/localstore.js'
-import { containerAdminTool } from './tools/container-admin.js'
+import { createContainerAdminTool } from './tools/container-admin.js'
 import { registerGuards } from './seams/guards.js'
 import { registerBootstrap } from './seams/bootstrap.js'
 import { registerKeeper } from './seams/keeper.js'
@@ -32,9 +32,12 @@ import { registerCompactRetention } from './seams/compact.js'
 import { registerStatusApi } from './api.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
-import { DEFAULT_SERENITY_CONFIG_PATHS, findSerenityRoot } from './ccc.js'
+import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { cccRootForCwd, listCccs } from './ccc-roots.js'
+// C4 块 B：端口只从集中端口表取（默认值不再散写）
+import { ACP_HTTP_PORT, MAIN_WEB_PORT, SKIFF_DEBUG_PORT } from './ports.js'
 import { hostSessions, hostWebServer } from './host/access.js'
-import { probeHostContract, summarizeHostContract } from './host/contract.js'
+import { hostContractReport, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './status.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { registerSettingsSection, readSimpleSettings } from './settings-section.js'
@@ -43,7 +46,7 @@ import { registerRebuildTurnHook } from './rebuild.js'
 import { registerOutputGuardHook } from './output-guard-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
-import { startAcpHttpServer, stopAcpHttpServer } from './acp-http.js'
+import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive } from './acp-http.js'
 import { registerAutopilot } from './autopilot-trajectory.js'
 import { registerWakeScheduler } from './wake-scheduler.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
@@ -56,7 +59,7 @@ import { registerImChannel } from './im-bridge.js'
 import { weixinChannel } from './im-weixin.js'
 import { createImBridgeTool } from './tools/im-bridge.js'
 import { createAccDiagTool } from './tools/acc-diag.js'
-import { registerDisposer } from './host/effect.js'
+// （C4 块 A 顺带清理：`registerDisposer` 的 import 自 C2 删掉 skiff root 重试定时器后已无使用点）
 
 export const name = 'dsh-serenity-hooks'
 
@@ -121,8 +124,8 @@ export const Config: z<Config> = z.object({
   // v1.21 简单配置 entry 默认（schemastery：字段不 required 即可选）
   gateway: z.object({ enabled: z.boolean().default(false) }),
   rebuild: z.object({ enabled: z.boolean().default(true), thresholdK: z.number().min(50).max(4000).default(400) }),
-  skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(3099) }),
-  acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(3100) }),
+  skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(SKIFF_DEBUG_PORT) }),
+  acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT) }),
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
 })
@@ -132,8 +135,10 @@ export function apply(ctx: Context, config: Config): void {
   // 变成启动可见信号。探针自身永不抛错：宿主对插件 apply 抛错会导致整个 dsh 启动失败
   // （app-boot 的 "plugin(s) failed to load" 语义），探针不能成为新的单点。
   try {
-    const report = probeHostContract(ctx, readDshVersion())
-    if (report.issues.length > 0) console.warn(`[serenity-hooks] ${summarizeHostContract(report)}`)
+    // C5（2026-09-15）：这里是宿主契约的**唯一计算点**（探针在此跑一次）——其后
+    // `dashboard health` / `container-status` 读同一份快照，不再二次探针（见 host/contract.ts）。
+    const report = hostContractReport(ctx, readDshVersion())
+    if (report !== null && report.issues.length > 0) console.warn(`[serenity-hooks] ${summarizeHostContract(report)}`)
   } catch {
     /* 探针失败不阻断插件装载 */
   }
@@ -153,8 +158,9 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(praxisTool) // praxis（eap/neat/cce 三合一）
     ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(localstoreTool)
-    // container_admin（role + msm 管理 + config + **autopilot**——v1.33 起 autopilot 面归机务舱）
-    ctx.tools.register(containerAdminTool)
+    // container_admin（role + msm 管理 + config + **autopilot**——v1.33 起 autopilot 面归机务舱；
+    // v1.34.1 ⑥ C6a：改工厂传入 ctx——autopilot status 需读进程内运行态事实）
+    ctx.tools.register(createContainerAdminTool(ctx))
     // v1.31.0：IM 消息发送（条件可见——本 CCC 未配置任何 IM 通道时由 guards 移除）
     ctx.tools.register(createImBridgeTool())
     // v1.33：运行态诊断（**专属工具**——默认对所有 CCC 隐藏，只有在自己配置的
@@ -251,134 +257,130 @@ export function apply(ctx: Context, config: Config): void {
 /**
  * F4 Skiff 调试服务装配：启停 = 人工（设置面板 Skiff 区块开关，settings 持久化）。
  * settings-changed 事件触发同步（skiffEnabled 开 → 启动调试服务；关 → 停止）。
- * 角色配置（skiff.roles）从当前 CCC 根读取（进程 cwd 优先，live 会话兜底）。
+ * 角色配置（skiff.roles）从当前 CCC 根读取（含 skiff.roles 的 CCC 优先，进程 cwd 次之）。
  *
- * v1.30.13（S142 诊断 D1）：**CCC root 解析失败要重试**。旧实现只在 apply 时同步一次——
- * 此刻通常还没有 live 会话，进程 cwd（服务启动目录）也不在 CCC 内 → `resolveSkiffRoot`
- * 返回 null → 打印一行警告后**永不重试**（实证：重启日志
+ * v1.30.13（S142 诊断 D1）：**CCC root 解析失败不再"永不重试"**。旧实现只在 apply 时
+ * 同步一次——此刻通常还没有 live 会话，进程 cwd（服务启动目录）也不在 CCC 内 →
+ * `resolveSkiffRoot` 返回 null → 打印一行警告后**永不重试**（实证：重启日志
  * `✗ Skiff 调试服务未启动：无法定位 CCC root`，`ss -ltn` 无 3099；同批 ACP 因容忍
- * `root ?? undefined` 而正常启动）。现形态三层触发（用户"锚定要准确"同源要求）：
- *   ① 启动时同步一次 ② 定位失败 → 定时退避重试（1s/3s/8s/20s/40s，共 5 次）
- *   ③ 首个 live 会话就绪（`agent/session-start` / `session/created`）→ 立即再试一次。
+ * `root ?? undefined` 而正常启动）。
  *
  * v1.30.14（重启日志实证后的收敛）：**并发启动守卫** + 首次未定位降级为信息级日志。
- *  - 实证（v1.30.13 重启日志）：重试定时器与"会话就绪"事件几乎同时触发 → 两次 sync 都
+ *  - 实证（v1.30.13 重启日志）：定时触发与"会话就绪"事件几乎同时到达 → 两次 sync 都
  *    看到 `started === false` → **两次 start**（第一次绑定成功、第二次 `EADDRINUSE` 刷错误日志）。
  *    → 加 `starting` 在飞标志（启动 Promise settle 前不再重复发起）。
- *  - 首次未定位**不是失败**（apply 时无 live 会话是常态）→ 用 `console.log` 说明"等待 live 会话"，
- *    只有**退避重试耗尽**才 `console.warn` 报错（失败语义只留给真正失败）。
+ *  - 首次未定位**不是失败**（apply 时无 live 会话是常态）→ 用 `console.log` 说明"等待 live 会话"。
+ *
+ * v1.35（C2，S142 2026-09-15 Q5）：**退避重试定时器退场**。原形态是 ① 启动同步
+ * ② 退避重试（1s/3s/8s/20s/40s） ③ 会话就绪事件再触发。C2 把 CCC 发现面归一后，
+ * ② 的病灶（"apply 时刻解析不到根"）改由 **`resolveSkiffRoot` 第 ④ 档（ccc-roots 的
+ * **并集**枚举：工作区注册表 ∪ 持久化会话 ∪ live 会话）** 从源头消掉——持久来源不依赖
+ * 任何 live 会话，故 apply 时刻就能解析到，不再需要"等一会儿再试"。
+ *
+ * 🔒 **必须保留**（它们不是"重试"，删了会引入新缺陷）：
+ *  - **反应式再触发**（`agent/session-start` / `session/created` → sync）：宿主重启后
+ *    "恢复"旧会话不触发 `session/created`，但**开始对话**会触发 `agent/session-start`
+ *    ——这是唯一能把"进程起来时还解析不到、稍后才有会话"这条路径接上的通道。
+ *  - **`starting` 在飞标志**：防同拍双次 start → `EADDRINUSE`。
+ *    （C4 块 A 备注：面宿主亦按面名合并在飞启动，是第二道保险；**本标志仍保留**——
+ *    它管的是"解析 root 这段装配流程"的在飞语义，且调试服务的启动替身在测试里被 mock，
+ *     面宿主的 active 表在那种场景下为空，不能当作 `started` 的替代。）
+ *  - **`informedRoot` 信息级日志**（只报一次，不刷屏）、`serenity/settings-changed` 监听、
+ *    启动时那次 `sync()`。
  */
 function registerSkiff(ctx: Context): void {
   let started = false
   let starting = false
-  let retryTimer: NodeJS.Timeout | null = null
-  let retries = 0
   let informedRoot = false
+  /** 已解析到的根（成功后缓存，避免每次 sync 重复解析） */
+  let resolvedRoot: string | null = null
 
-  const clearRetry = (): void => {
-    if (retryTimer !== null) {
-      clearTimeout(retryTimer)
-      retryTimer = null
-    }
-  }
-
-  /** 退避重试定位 CCC root（幂等：已有待执行重试则不再排） */
-  const scheduleRootRetry = (): void => {
-    if (retryTimer !== null || started || starting) return
-    if (retries >= SKIFF_ROOT_RETRY_DELAYS_MS.length) {
-      console.warn(
-        `[serenity-hooks] ✗ Skiff 调试服务未启动：重试 ${retries} 次仍无法定位 CCC root（进程 cwd 与 live 会话均无 .serenity）`,
-      )
+  const sync = async (): Promise<void> => {
+    const s = readSimpleSettings()
+    if (s.skiffEnabled) {
+      if (started || starting) return
+      // ⚠️ 在飞标志**必须在任何 await 之前**置起（同步段内）——否则同一 tick 内的
+      // 第二个触发（事件 + 启动）会穿过守卫 → 双次 start → EADDRINUSE（原同步实现
+      // 天然没有这个窗口，改 async 后必须显式保住）。
+      starting = true
+      try {
+        const root = resolvedRoot ?? (await resolveSkiffRoot(ctx))
+        if (!root) {
+          if (!informedRoot) {
+            informedRoot = true
+            // 信息级（非失败）：apply 阶段无 live 会话是常态；会话就绪事件会接手再试
+            console.log(
+              '[serenity-hooks] Skiff 调试服务等待 CCC root（此刻无已知 CCC；会话就绪即试）',
+            )
+          }
+          return
+        }
+        resolvedRoot = root
+        const webPort = readWebPort(ctx)
+        await startSkiffDebugServer(ctx, root, s.skiffDebugPort, webPort)
+        started = true
+      } catch (err) {
+        console.error(`[serenity-hooks] ✗ Skiff 调试服务启动失败: ${String((err as Error)?.message ?? err)}`)
+      } finally {
+        starting = false
+      }
       return
     }
-    const delay = SKIFF_ROOT_RETRY_DELAYS_MS[retries] ?? 0
-    retryTimer = setTimeout(() => {
-      retryTimer = null
-      retries += 1
-      sync()
-    }, delay)
-    // 不阻止进程退出（与 autopilot 时钟同款）
-    retryTimer.unref?.()
-  }
-
-  function sync(): void {
-    const s = readSimpleSettings()
-    if (s.skiffEnabled && !started && !starting) {
-      const root = resolveSkiffRoot(ctx)
-      if (!root) {
-        if (!informedRoot) {
-          informedRoot = true
-          // 信息级（非失败）：apply 阶段无 live 会话是常态，退避重试与就绪事件会接手
-          console.log(
-            '[serenity-hooks] Skiff 调试服务等待 CCC root（此刻无 live 会话；已排入退避重试，会话就绪即试）',
-          )
-        }
-        scheduleRootRetry()
-        return
-      }
-      clearRetry()
-      const webPort = readWebPort(ctx)
-      starting = true
-      startSkiffDebugServer(ctx, root, s.skiffDebugPort, webPort)
-        .then(() => {
-          started = true
-          if (retries > 0) console.info(`[serenity-hooks] ✓ Skiff 调试服务已启动（重试 ${retries} 次后定位到 CCC root: ${root}）`)
-        })
-        .catch((err) => {
-          console.error(`[serenity-hooks] ✗ Skiff 调试服务启动失败: ${String((err as Error)?.message ?? err)}`)
-        })
-        .finally(() => {
-          starting = false
-        })
-    } else if (!s.skiffEnabled && started) {
+    // 关闭状态：清掉在飞态（避免关开关后仍起服务）
+    if (started) {
       stopSkiffDebugServer()
       started = false
-    } else if (!s.skiffEnabled) {
-      // 关闭状态：清掉待执行的重试（避免关开关后仍起服务）
-      clearRetry()
-      retries = 0
-      informedRoot = false
     }
+    resolvedRoot = null
+    informedRoot = false
   }
 
   try {
-    ctx.on('serenity/settings-changed', sync)
+    ctx.on('serenity/settings-changed', () => {
+      void sync()
+    })
   } catch {
     /* 事件通道缺失不阻断（启动时 sync 仍执行） */
   }
-  // ② / ③：live 会话就绪是"CCC root 现在可解析"的最强信号（重启后会话恢复、用户开始对话）
+  // 反应式再触发：live 会话就绪是"CCC root 现在可解析"的强信号（重启后会话恢复、用户开始对话）
   for (const eventName of ['agent/session-start', 'session/created'] as const) {
     try {
       ctx.on(eventName, () => {
-        if (!started) sync()
+        if (!started) void sync()
       })
     } catch {
-      /* 事件通道缺失不阻断（退避重试仍兜底） */
+      /* 事件通道缺失不阻断（settings-changed 与启动 sync 仍兜底） */
     }
   }
   // 启动时同步一次（settings.yaml 持久化 skiffEnabled=true → 重启后自动恢复调试服务）
-  sync()
-  // F-08（v1.30.8 纪律）：重试定时器随插件卸载/HMR 拆卸（否则卸载后仍会尝试起服务）
-  registerDisposer(ctx, 'skiff root retry timer', clearRetry)
+  void sync()
 }
-
-/** Skiff 调试服务 CCC root 退避重试间隔（毫秒；累计 ~72s 后放弃并响亮告警） */
-const SKIFF_ROOT_RETRY_DELAYS_MS = [1000, 3000, 8000, 20000, 40000] as const
 
 /**
  * 解析 Skiff 调试服务绑定的 CCC 根（v1.25.2 用户指出：skiff 必须绑定 CCC）：
  * ① live 会话中**配置了 skiff.roles 的 CCC 优先**（用户认知中的绑定目标）
  * ② 回退进程 cwd 上溯 .serenity
  * ③ 再回退任一 live 会话的 CCC
+ * ④ **（v1.35 / C2 新增）ccc-roots 枚举出的 CCC——仅在唯一候选时采用**
+ *
+ * 第 ④ 档为什么存在：①②③ 全部依赖 live 会话或进程 cwd；宿主重启、浏览器尚未重连时
+ * 三者可能同时落空，而 `ccc-roots.listCccs` 的**持久来源**（工作区注册表 / 持久化会话）
+ * 不依赖 live 会话 ⇒ 这正是"apply 时刻就能解析到根"的那条路，也是退避重试定时器
+ * 得以退场的原因。
+ *
+ * ④ 的收敛条件（**不猜**）：只在候选**唯一**时采用；多个候选 → 返回 `null`
+ * （留着让 ①②③ 的语义与人类的显式选择决定，不代替人拍板）。
+ *
+ * ⚠️ ①②③ 的**逐条优先级不变**；④ 只追加在末尾。
  */
-function resolveSkiffRoot(ctx: Context): string | null {
+async function resolveSkiffRoot(ctx: Context): Promise<string | null> {
   const liveRoots: string[] = []
   try {
     const sessions = hostSessions(ctx)
     for (const s of sessions?.list?.() ?? []) {
       const cwd = s?.header?.cwd
       if (typeof cwd === 'string') {
-        const r = findSerenityRoot(cwd)
+        const r = cccRootForCwd(cwd)
         if (r && !liveRoots.includes(r)) liveRoots.push(r)
       }
     }
@@ -390,19 +392,27 @@ function resolveSkiffRoot(ctx: Context): string | null {
     if (readSkiffRoles(r).size > 0) return r
   }
   // ② 进程 cwd（服务器启动目录通常即 CCC）
-  const fromCwd = findSerenityRoot(process.cwd())
+  const fromCwd = cccRootForCwd(process.cwd())
   if (fromCwd) return fromCwd
   // ③ 任一 live CCC
-  return liveRoots[0] ?? null
+  if (liveRoots[0]) return liveRoots[0]
+  // ④ 持久来源兜底（仅唯一候选；多个候选保持 null —— 不猜）
+  try {
+    const entries = await listCccs(ctx)
+    if (entries.length === 1) return entries[0]!.root
+  } catch {
+    /* 枚举失败忽略（等价于本档不存在） */
+  }
+  return null
 }
 
-/** 主 WebUI 端口（WebUI 链接；webServer 未装配回退 3080） */
+/** 主 WebUI 端口（WebUI 链接；webServer 未装配回退集中端口表的 main 面端口） */
 function readWebPort(ctx: Context): number {
   try {
     const ws = hostWebServer(ctx)
-    return typeof ws?.port === 'number' ? ws.port : 3080
+    return typeof ws?.port === 'number' ? ws.port : MAIN_WEB_PORT
   } catch {
-    return 3080
+    return MAIN_WEB_PORT
   }
 }
 
@@ -413,29 +423,30 @@ function readWebPort(ctx: Context): number {
  * 会话创建/延续走 acp-core → skiff-core；仅监听 127.0.0.1；未开启零资源占用。
  */
 function registerAcp(ctx: Context): void {
-  let started = false
-  const sync = (): void => {
+  // async：`resolveSkiffRoot` 因第 ④ 档（ccc-roots 枚举）改为异步（C2）
+  const sync = async (): Promise<void> => {
     const s = readSimpleSettings()
     const anyFace = s.acpEnabled || s.publicAskEnabled
-    if (anyFace && !started) {
-      const root = resolveSkiffRoot(ctx)
-      startAcpHttpServer(ctx, s.acpHttpPort, root ?? undefined)
-        .then(() => {
-          started = true
-        })
+    if (anyFace && !acpHttpActive()) {
+      // ACP 面容忍 root 缺席（`root ?? undefined`，绑不上也只是不问 CCC）——与 Skiff 面不同。
+      // C4 块 A：**不再自持 `started` 标志**——"面是否在监听"的真值源是 face-host 的
+      // active 表（`acpHttpActive()`）；并发触发由面宿主的在飞合并兜住（同一面只 bind 一次）。
+      const root = await resolveSkiffRoot(ctx)
+      return startAcpHttpServer(ctx, s.acpHttpPort, root ?? undefined)
         .catch((err) => {
           console.error(`[serenity-hooks] ✗ ACP HTTP 服务启动失败: ${String((err as Error)?.message ?? err)}`)
         })
-    } else if (!anyFace && started) {
+    } else if (!anyFace && acpHttpActive()) {
       stopAcpHttpServer()
-      started = false
     }
   }
   try {
-    ctx.on('serenity/settings-changed', sync)
+    ctx.on('serenity/settings-changed', () => {
+      void sync()
+    })
   } catch {
     /* 事件通道缺失不阻断（启动时 sync 仍执行） */
   }
   // 启动时同步一次（settings.yaml 持久化 acpEnabled/publicAskEnabled=true → 重启后自动恢复）
-  sync()
+  void sync()
 }

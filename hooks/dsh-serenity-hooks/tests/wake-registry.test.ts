@@ -337,26 +337,31 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     expect(wakeSchedulerState().enabled).toBe(true)
   })
 
-  it('🔴 全局闸开 + **零 live 会话** → 仍武装（修复前此处永久不武装）', () => {
+  it('🔴 全局闸开 + **零 live 会话** → 仍武装（修复前此处永久不武装）', async () => {
     registerWakeScheduler(makeCtx() as never) // liveSessions = []
     expect(timer).not.toBeNull()
+    const st0 = wakeSchedulerState()
+    expect(st0.armed).toBe(true)
+    expect(st0.armedAt).not.toBeNull()
+    // v1.35（C2 块 C1）：CCC 枚举改**并集**（含持久来源），故"无 CCC 可扫"的判定下沉到
+    // runWakeTick 内部 ⇒ 这次 tick **真执行了**（计 ticks），只是提前 return 并把原因留痕。
+    // 语义澄清：`ticks` = "真执行过的 tick"，不是"真投递过的 tick"。
+    await new Promise((r) => setTimeout(r, 20)) // runWakeTick 为 async（并集枚举含 await）
     const st = wakeSchedulerState()
-    expect(st.armed).toBe(true)
-    expect(st.armedAt).not.toBeNull()
-    // 零 live CCC ⇒ 启动时那次 tick 被跳过，并**留痕原因**（可观测，不静默）
-    expect(st.ticks).toBe(0)
-    expect(st.lastSkipReason).toContain('无 live 会话')
+    expect(st.ticks).toBe(1)
+    expect(st.lastSkipReason).toContain('无已知 CCC 可扫')
   })
 
-  it('live 会话出现后 tick 真执行（ticks / lastTickAt 推进，skip 原因清空）', async () => {
+  it('live 会话出现后 tick 真执行并清空 skip 原因（末次 tick 状态）', async () => {
     writeFileSync(join(root, '.serenity'), '')
     const ctx = makeCtx()
-    registerWakeScheduler(ctx as never)
+    registerWakeScheduler(ctx as never) // 启动即 tick 一次（此时无 live ⇒ skip，ticks=1）
     liveSessions = [{ id: 's1', header: { cwd: root } }]
     ;(timer as unknown as { fn: () => void }).fn()
     await new Promise((r) => setTimeout(r, 20))
     const st = wakeSchedulerState()
-    expect(st.ticks).toBe(1)
+    // 两次 tick：启动那次（空转，留痕）+ 本次（有 CCC，清空 skip 原因）
+    expect(st.ticks).toBe(2)
     expect(st.lastTickAt).not.toBeNull()
     expect(st.lastSkipReason).toBeNull()
   })

@@ -18,13 +18,9 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { runMsmAsync, loadMsmEntries, findEntry } from '../msm-ops.js'
 import { skiffMsmGate } from '../skiff-core.js'
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
 
 function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? ''
@@ -36,7 +32,7 @@ function renderText(value: unknown): ContentBlock[] {
 }
 
 /** 精简目录（无参调用返回；替代全量 list 的巨输出）——按 skill 分组统计 + 顶部指引 */
-export function buildMsmIndex(root: string): string {
+function buildMsmIndex(root: string): string {
   const entries = loadMsmEntries(root)
   if (entries.length === 0) return '(no MSM registered — call container_admin register to add one)'
   const bySkill = new Map<string, number>()
@@ -58,7 +54,7 @@ export function buildMsmIndex(root: string): string {
 }
 
 /** 模糊候选：name/description 子串匹配（未精确命中时返回 top-K，供 LLM 下轮选对） */
-export function suggestMsm(root: string, query: string, limit = 5): string {
+function suggestMsm(root: string, query: string, limit = 5): string {
   const q = query.toLowerCase()
   const entries = loadMsmEntries(root)
   const hits = entries
@@ -102,8 +98,8 @@ export const msmTool = defineTool({
     render: (args, value) => renderText(value),
   },
   async execute(args, exec) {
-    const root = findSerenityRoot(agentCwd(exec))
-    if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
+    const root = cccRootForExec(exec)
+    if (!root) throw new Error(NO_CCC_FROM_AGENT_CWD)
     // Skiff 白名单门控（exec 校验；skiff 角色限定的 MSM 面）
     const sessionId = agentSessionId(exec)
     const name = args.name as string | undefined

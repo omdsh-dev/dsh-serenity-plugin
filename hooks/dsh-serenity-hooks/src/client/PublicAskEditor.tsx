@@ -8,7 +8,7 @@
  *    （用户：配置处需能获取 key 和地址——管理员复制分享给使用者）。
  *
  * 数据通道（plugin 全局）：
- *  - GET /serenity/cccs       候选容器（node half discoverCccs）
+ *  - GET /serenity/cccs       候选容器（node half listCccs）
  *  - GET /serenity/public-ask key + 地址（x-serenity-ui 头）
  *  - PUT /serenity/config     publicAsk.allowed 白名单保存（accounts-api saveConfig）
  */

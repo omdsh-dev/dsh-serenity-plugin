@@ -26,9 +26,9 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import './SafeModePanel.css'
 
 /** 会话头部操作区（list 槽）props */
-export type SafeModePanelProps = PropsRuntime<'conversation.session.header.actions'>
+type SafeModePanelProps = PropsRuntime<'conversation.session.header.actions'>
 
-export interface SerenityStatus {
+interface SerenityStatus {
   root: string | null
   accVersion: string
   safeModeOn: boolean
@@ -38,7 +38,7 @@ export interface SerenityStatus {
 }
 
 /** handyman 运行状态（/serenity/handymen 数据源；WebUI 等待界面） */
-export interface HandymanRunInfo {
+interface HandymanRunInfo {
   label: string
   round: number
   done: boolean

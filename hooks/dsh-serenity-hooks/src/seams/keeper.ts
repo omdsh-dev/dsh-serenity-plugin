@@ -17,7 +17,8 @@ import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { hostService } from '../host/access.js'
-import { findSerenityRoot, loadSerenityConfig } from '../ccc.js'
+import { loadSerenityConfig } from '../ccc.js'
+import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import { readSimpleSettings } from '../settings-section.js'
 import { skiffTrajectoryEnabled } from '../skiff-core.js'
 import { getActiveSessionInfo } from '../trajectory-ops.js'
@@ -277,17 +278,22 @@ export function trajectoryCompactionReminderText(input: {
     + '(3) merge or drop what no longer matters — superseded decisions, resolved issues, intermediate states; '
     + '(4) you have full discretion on how far to go: the only hard requirements are the skeleton and that every '
     + 'still-open item, decision rationale and next step stays recoverable (reconstruction over preservation).'
+  // v1.34.1 护栏（规格 docs/trajectory-skill-injection.md §4）：compaction 是**唯一会重写 SESSION.md** 的时刻，
+  // 也正因此是 frontmatter（轨迹 skill 声明的唯一真相源）最可能被抹掉的时刻——在提醒里点名它。
+  // 残余风险（记录在案）：护栏是**文案级**，不是机械强制；文案只此一处，两条提醒共用（防两处漂移）。
+  const frontmatterGuard =
+    'Keep the YAML frontmatter at the top of the file exactly as it is — it carries this trajectory\'s skill declarations.'
   if (escalated) {
-    return `${eventToken('compaction')} ${facts} — you have been reminded repeatedly and have NOT compacted SESSION.md. This is now mandatory: STOP the current task step, load eap (praxis eap), rewrite SESSION.md, then resume. ${principles} This reminder persists until the file is under the limit.`
+    return `${eventToken('compaction')} ${facts} — you have been reminded repeatedly and have NOT compacted SESSION.md. This is now mandatory: STOP the current task step, load eap (praxis eap), rewrite SESSION.md, then resume. ${principles} ${frontmatterGuard} This reminder persists until the file is under the limit.`
   }
-  return `${eventToken('compaction')} ${facts}. Pause the current work and compact this trajectory's log (SESSION.md) before continuing — that log is the persistent body of this trajectory, and its size is operational entropy (H_op) the container pays on every read. ${principles} After rewriting, resume the paused work; this reminder stops once the file is under the limit.`
+  return `${eventToken('compaction')} ${facts}. Pause the current work and compact this trajectory's log (SESSION.md) before continuing — that log is the persistent body of this trajectory, and its size is operational entropy (H_op) the container pays on every read. ${principles} ${frontmatterGuard} After rewriting, resume the paused work; this reminder stops once the file is under the limit.`
 }
 
 // ── DSH 注册 ──
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
-export interface KeeperRegistration {
+interface KeeperRegistration {
   /** 缺省阈值（serenity.json sessionKeeper.threshold 优先，其次此值） */
   defaultThreshold?: number
   /** CCC 配置相对路径 */
@@ -318,7 +324,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const key = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id ?? 'global'
     let t = trackers.get(key)
     if (!t) {
-      const root = findSerenityRoot((exec as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd ?? process.cwd())
+      const root = cccRootForCwd(agentCwdFor(exec as { agent?: { session?: { header?: { cwd?: string } } } }))
       const threshold = root ? (loadSerenityConfig(root, opts.configPaths).sessionKeeper?.threshold ?? defaultThreshold) : defaultThreshold
       t = new KeeperTracker(threshold)
       trackers.set(key, t)
@@ -336,7 +342,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     if (!exec.agent) return next()
     // 激活门控：只在 .serenity 存在的 CCC 目录计分/提醒；其他目录零干预
     const cwd = (exec as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd ?? process.cwd()
-    const root = findSerenityRoot(cwd)
+    const root = cccRootForCwd(cwd)
     if (!root) return next()
     // F4 Skiff 旁路（F4b ⑩）：计分提醒按角色 trajectory.keeper、重建压力检测按
     // trajectory.rebuild 决定参与（默认全关 = Skiff 完全独立）；非 skiff 恒参与。

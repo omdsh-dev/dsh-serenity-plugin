@@ -14,14 +14,14 @@ import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { BashEnvContributor } from '@deepseek-ai/dsh-shell-env'
 import type { DshEnvironmentKey } from '@deepseek-ai/dsh-shell'
 import { basename } from 'node:path'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 
-export type SerenityEnvFacts = Partial<Record<DshEnvironmentKey, string>>
+type SerenityEnvFacts = Partial<Record<DshEnvironmentKey, string>>
 
 /** 纯解析：给定 cwd，返回可注入的 DSH_SERENITY_* 事实（非 CCC 返回空） */
 export function resolveSerenityEnv(cwd: string): SerenityEnvFacts {
-  const root = findSerenityRoot(cwd)
+  const root = cccRootForCwd(cwd)
   if (!root) return {}
   return {
     DSH_SERENITY_ROOT: root,

@@ -63,7 +63,7 @@ export const LLM_PI_AI_NAMESPACE = 'llm-pi-ai'
 export const OPENCODE_SESSION_ID = 'dsh-serenity'
 
 /** 视为 opencode 路由的路由名（pi-ai 目录里的两个 id） */
-export const OPENCODE_ROUTE_IDS: readonly string[] = ['opencode', 'opencode-go']
+const OPENCODE_ROUTE_IDS: readonly string[] = ['opencode', 'opencode-go']
 
 /** 自动配置时创建的路由名（pi-ai 目录的 Go 面；用户选的是付费 `/zen/go`） */
 export const OPENCODE_ROUTE_TO_CREATE = 'opencode-go'
@@ -87,7 +87,7 @@ export function opencodeRouteHeaders(): Record<string, string> {
   }
 }
 
-export interface OpencodeAutoConfigInput {
+interface OpencodeAutoConfigInput {
   /** `llm-pi-ai` 命名空间**解析后**的值（`settings.get` 结果；undefined = 命名空间未注册） */
   resolved: unknown
   /** 进程环境（注入以便测试） */
@@ -95,13 +95,13 @@ export interface OpencodeAutoConfigInput {
 }
 
 /** 一条动作记录（日志 + 测试断言共用；不返回"秘密"、只返回做了什么） */
-export type OpencodeAutoConfigAction =
+type OpencodeAutoConfigAction =
   | { kind: 'fill-headers'; route: string; keys: readonly string[] }
   | { kind: 'create-route'; route: string }
   | { kind: 'skip-route'; route: string; reason: 'headers-complete' }
   | { kind: 'idle'; reason: 'namespace-unregistered' | 'no-route' }
 
-export interface OpencodeAutoConfigPlan {
+interface OpencodeAutoConfigPlan {
   /** 传给 `settings.update` 的补丁；空对象 = 无事可做（**不写**，避免无谓触发 settings/updated） */
   patch: Record<string, unknown>
   actions: readonly OpencodeAutoConfigAction[]

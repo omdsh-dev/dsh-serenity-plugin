@@ -15,9 +15,9 @@ import { createHmac, randomBytes } from 'node:crypto'
 /** 时步（秒）——RFC 6238 默认 30 */
 export const TOTP_STEP_SECONDS = 30
 /** 验证窗口：当前时步 ± 1（容忍时钟漂移/生成延迟） */
-export const TOTP_WINDOW = 1
+const TOTP_WINDOW = 1
 /** 输出位数（标准 6 位） */
-export const TOTP_DIGITS = 6
+const TOTP_DIGITS = 6
 
 // ── base32（RFC 4648，无填充）──
 

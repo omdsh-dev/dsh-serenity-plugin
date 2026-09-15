@@ -30,7 +30,7 @@ import {
 } from './accounts-api.js'
 import './AccountsEditor.css'
 
-export interface AccountsEditorProps {
+interface AccountsEditorProps {
   /** 双端口网关开关（显示提示用） */
   gatewayOn: boolean
 }

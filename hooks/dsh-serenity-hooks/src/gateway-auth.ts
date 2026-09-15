@@ -78,7 +78,7 @@ export const FAIL_LOCK_BASE_MS = 15 * 60 * 1000
 /** 锁定时长指数退避上限 */
 export const FAIL_LOCK_MAX_MS = 4 * 60 * 60 * 1000
 
-export interface FailState {
+interface FailState {
   /** 连续失败计数（成功登录后清零） */
   count: number
   /** 当前锁定截止时间（0 = 未锁定） */
@@ -141,9 +141,9 @@ export function accountLockRemaining(user: string): number {
 // ── CSRF（双提交 cookie + Origin 校验 + 服务端 token 集合）──
 
 /** CSRF token 有效期（毫秒）：10 分钟窗口（扫码/多标签场景留足时间） */
-export const CSRF_TTL_MS = 10 * 60 * 1000
+const CSRF_TTL_MS = 10 * 60 * 1000
 /** CSRF token 集合上限（防内存膨胀；超限清理最旧） */
-export const CSRF_MAX_TOKENS = 50
+const CSRF_MAX_TOKENS = 50
 
 /**
  * 服务端 CSRF token 集合（v1.24.9 修复：多标签/刷新竞争导致登录死循环）。

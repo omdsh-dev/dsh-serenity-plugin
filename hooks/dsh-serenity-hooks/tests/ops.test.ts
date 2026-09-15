@@ -3,7 +3,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runKit, checkRegistryHealth } from '../src/kit-ops.js'
+import { runKit } from '../src/kit-ops.js'
+// C5（2026-09-15）：`checkRegistryHealth` 迁入 container-status（唯一取数出口；实现逐字未变）
+import { checkRegistryHealth } from '../src/container-status.js'
 import { runGit } from '../src/git-ops.js'
 import { runMsm, findEntry } from '../src/msm-ops.js'
 

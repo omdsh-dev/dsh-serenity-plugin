@@ -14,14 +14,10 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForExec } from '../ccc-roots.js'
 import { runImBridge, imChannelIds } from '../im-bridge.js'
 
 const ACTIONS = ['send', 'send-file', 'users', 'status'] as const
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -57,7 +53,7 @@ export function createImBridgeTool() {
       render: (_args, value) => renderText(value),
     },
     async execute(args, exec) {
-      const root = findSerenityRoot(agentCwd(exec))
+      const root = cccRootForExec(exec)
       if (!root) {
         return {
           ok: false,

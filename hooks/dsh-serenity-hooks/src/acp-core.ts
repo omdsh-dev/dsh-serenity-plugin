@@ -19,31 +19,24 @@
 
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { SessionId } from '@deepseek-ai/dsh-session'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, skiffSessionSnapshot } from './skiff-core.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { readHandymanConfig } from './ccc.js'
 
 // ── JSON-RPC 2.0 类型（传输无关；acp-http 序列化用）──
 
-export interface JsonRpcRequest {
+interface JsonRpcRequest {
   jsonrpc: '2.0'
   id?: string | number
   method: string
   params?: Record<string, unknown>
 }
 
-export interface JsonRpcResponse {
+interface JsonRpcResponse {
   jsonrpc: '2.0'
   id: string | number | null
   result?: unknown
   error?: { code: number; message: string; data?: unknown }
-}
-
-export interface JsonRpcNotification {
-  jsonrpc: '2.0'
-  method: string
-  params?: Record<string, unknown>
 }
 
 /** JSON-RPC 错误码（对齐标准） */
@@ -57,7 +50,7 @@ export const RPC_ERROR = {
 
 // ── ACP 方法面（对齐 ACP v1 + 官方 dsh-acp 演进；skiff 扩展 session/new）──
 
-export interface AcpSessionHandle {
+interface AcpSessionHandle {
   sessionId: string
   role: string
   ccc: string
@@ -259,6 +252,3 @@ function rpcCodeOf(error: unknown): number {
 function rpcError(id: string | number | null, code: number, message: string): JsonRpcResponse {
   return { jsonrpc: '2.0', id, error: { code, message } }
 }
-
-/** 断言 SessionId 类型（ACP 会话 id 即 skiff sessionId） */
-export type { SessionId }

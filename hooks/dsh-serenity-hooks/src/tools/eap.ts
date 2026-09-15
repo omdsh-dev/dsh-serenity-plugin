@@ -1,11 +1,8 @@
 /**
- * eap.ts — EAP 认知质量框架工具（渐进式披露，ACC 标准工具化）
+ * eap.ts — EAP 内容源（认知质量框架；v1.30 三工具合并为 praxis 后只保留内容常量）
  *
- * 内嵌框架内容（自包含，不依赖已安装技能）；可选 section 参数聚焦某原则。
+ * 内嵌框架内容（自包含，不依赖已安装技能）。
  */
-
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
 export const EAP_CONTENT = `# EAP Cognitive Quality Framework (Explicit Abstraction Principle)
 
@@ -33,36 +30,3 @@ CCC (home-serenity etc.) encodes cognitive content as skills/SESSIONs/design doc
 
 ## Reference
 https://github.com/tellmewhattodo/theory-eap`
-
-function renderText(value: unknown): ContentBlock[] {
-  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-  return [{ type: 'text', text }]
-}
-
-export const eapTool = defineTool({
-  name: 'eap',
-  description: 'EAP cognitive quality framework (progressive disclosure): defines E↑ explicitness / R↓ reconstructability / S↑ stability + pre-output self-check checklist. No section returns the full framework; specify a section to focus.',
-  parameters: {
-    section: {
-      type: 'string',
-      enum: ['variables', 'checklist', 'acc'],
-      description: 'Focus section: variables (three variables) / checklist (self-check list) / acc (relationship with ACC)',
-    },
-  },
-  output: {
-    schema: { type: 'string' },
-    render: (_args, value) => renderText(value),
-  },
-  async execute(args) {
-    if (args.section === 'variables') return EAP_CONTENT.split('## Pre-Output Self-Check Checklist')[0]!
-    if (args.section === 'checklist') {
-      const m = EAP_CONTENT.match(/## Pre-Output Self-Check Checklist[\s\S]*?(?=## )/)
-      return m?.[0] ?? EAP_CONTENT
-    }
-    if (args.section === 'acc') {
-      const m = EAP_CONTENT.match(/## Relationship with ACC[\s\S]*/)
-      return m?.[0] ?? EAP_CONTENT
-    }
-    return EAP_CONTENT
-  },
-})

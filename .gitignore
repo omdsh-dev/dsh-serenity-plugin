@@ -15,4 +15,8 @@ tsconfig.host-*.local.json
 
 # 公开发布排除（内部运维工具与会话记录；本地保留，不推送公开仓库）
 SESSION.md
-scripts/
+# ⚠️ 必须锚定：无锚点的 `scripts/` 会匹配**任意层级**同名目录，曾误伤
+# `hooks/dsh-serenity-hooks/experiments/autopilot-trajectory/scripts/`
+# （那是**随 npm 包分发**的机制实现，见 package.json 的 files 白名单）
+# ⇒ 锚定为仓库根目录，只排本仓的开发工具目录（S142 §12.11）
+/scripts/

@@ -17,7 +17,7 @@ import type { Context } from 'cordis'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { findSerenityRoot, readHandymanConfig } from './ccc.js'
+import { readHandymanConfig } from './ccc.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './weixin-route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
@@ -25,7 +25,6 @@ import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './weixin-output-guard.js'
 import { getActiveSessionInfo } from './trajectory-ops.js'
-import { hostSessions } from './host/access.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
@@ -151,7 +150,7 @@ async function runAccountLoop(
  * im-bridge({channel:"weixin", action:"send", account:"<account>", user:"<user>", text:"<回复>"})
  * ```
  */
-export function weixinManualOutputMarker(root: string, accountId: string, userId: string): string {
+function weixinManualOutputMarker(root: string, accountId: string, userId: string): string {
   return [
     '[serenity:weixin-manual-output]',
     `im-bridge({channel:"weixin", action:"send", account:"${accountId}", user:"${userId}", text:"<回复>"})`,
@@ -480,14 +479,14 @@ export function stopAllBridges(): void {
 // ── 主动发送（v1.30.9，S142 用户需求"微信桥支持被调用发消息给指定用户"）──
 
 /** 主动发送失败原因（稳定 code——入口层翻译成 HTTP 状态 + 可行动提示） */
-export type ProactiveSendErrorCode =
+type ProactiveSendErrorCode =
   | 'BRIDGE_DISABLED'
   | 'NO_ACCOUNT'
   | 'ACCOUNT_NOT_FOUND'
   | 'ACCOUNT_NOT_BOUND'
   | 'SEND_FAILED'
 
-export interface ProactiveSendInput {
+interface ProactiveSendInput {
   /** CCC 根（绝对路径；由入口层解析名称/路径后传入） */
   root: string
   /** 目标用户（iLink from_user_id，形如 xxx@im.wechat；别名解析归调用方） */
@@ -498,7 +497,7 @@ export interface ProactiveSendInput {
   accountId?: string
 }
 
-export type ProactiveSendResult =
+type ProactiveSendResult =
   | { ok: true; accountId: string; userId: string; sessionId: string; role: string }
   | { ok: false; code: ProactiveSendErrorCode; error: string; remediation?: string }
 
@@ -518,7 +517,7 @@ export type ProactiveSendResult =
  * @returns 成功含 accountId/userId/sessionId/role；失败含稳定 code 与可行动提示（不抛错）
  */
 /** 账号解析结果（文本 / 文件发送共用） */
-export type WeixinAccountResolution =
+type WeixinAccountResolution =
   | { ok: true; accountId: string; cred: WeixinAccountCredential }
   | { ok: false; code: ProactiveSendErrorCode; error: string; remediation?: string }
 
@@ -609,15 +608,19 @@ export function weixinBridgeStatus(): Array<{
  */
 export function registerWeixinBridge(ctx: Context): void {
   const syncFromLive = (): void => {
-    try {
-      const sessions = hostSessions(ctx)
-      const cwds = (sessions?.list?.() ?? []).map((s) => s.header?.cwd ?? '').filter(Boolean)
-      const roots = [...new Set(cwds.map((c) => findSerenityRoot(c))).values()].filter((r): r is string => r !== null)
-      // 未配置的 CCC 不启动（syncCccBridge 内部判断 enabled）
-      for (const root of roots) syncCccBridge(ctx, root)
-    } catch {
-      /* 扫描失败忽略 */
-    }
+    void (async () => {
+      try {
+        // C2（E5 修正）：CCC 枚举归 ccc-roots.listCccs——**并集**（工作区注册表 ∪ 持久化会话
+        // ∪ live 会话），取代原先"只认 live 会话 cwd"的第三份内联 Set 实现。
+        // 收益：没有 live 会话时也能为已知 CCC 启桥（原实现会漏）。
+        // 角色不读（withRoles 缺省 false）——本处只需要根。
+        const { listCccs } = await import('./ccc-roots.js')
+        // 未配置的 CCC 不启动（syncCccBridge 内部判断 enabled）
+        for (const entry of await listCccs(ctx)) syncCccBridge(ctx, entry.root)
+      } catch {
+        /* 扫描失败忽略（桥仍可在会话变化时重试） */
+      }
+    })()
   }
 
   syncFromLive()

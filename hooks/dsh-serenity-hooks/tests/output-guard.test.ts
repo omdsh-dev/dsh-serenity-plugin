@@ -109,6 +109,16 @@ describe('output-guard: 检测（detectSensitive）', () => {
     expect(detectSensitive('端口 3100 提供服务', t)).toContainEqual({ word: '3100', category: 'port' })
   })
 
+  it('🔴 C4 块 B 缺陷修复：3082（微信发送面，默认开）也在守卫端口集合内', () => {
+    // 修复前 MECHANISM_PORTS 硬写 ['3080','3081','3099','3100']——漏 3082 ⇒ 提 3082 不被打回。
+    // 现由集中端口表派生（ports.ts），本断言钉住"守卫端口集合 = 五面端口"。
+    const t = buildSensitiveTable(dir)
+    for (const port of ['3080', '3081', '3082', '3099', '3100']) {
+      expect(t.portWords, `守卫端口词表缺 ${port}`).toContain(port)
+      expect(detectSensitive(`服务监听在 ${port}`, t), `${port} 未被守卫识别`).toContainEqual({ word: port, category: 'port' })
+    }
+  })
+
   it('空文本 → 无命中', () => {
     const t = buildSensitiveTable(dir)
     expect(detectSensitive('', t)).toEqual([])

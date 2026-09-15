@@ -227,14 +227,9 @@ export function ensureSkiffSession(
   return mdPath
 }
 
-/** 当前 scope 是否已激活（幂等判定：getActiveSessionInfo 命中同 dirName）——测试用 */
-export function skiffSessionActiveFor(sessionId: string): { sessionId: string; dirName: string; mdPath: string } | null {
-  return getActiveSessionInfo(sessionId)
-}
-
 // ── agent 生命周期 ──
 
-export interface SkiffAgentRef {
+interface SkiffAgentRef {
   handle: AgentHandle
   agent: Agent
   sessionId: string
@@ -452,7 +447,7 @@ export interface SkiffTrajectoryEntry {
   tool?: string
 }
 
-export interface SkiffAskResult {
+interface SkiffAskResult {
   answer: string
   sessionId: string
   trajectory: SkiffTrajectoryEntry[]
@@ -568,7 +563,7 @@ export function skiffTrajectoryEnabled(
 
 // ── msm 白名单门控（F4b ⑨）──
 
-export interface SkiffMsmGate {
+interface SkiffMsmGate {
   /** 拒绝原因（有则拒绝执行） */
   reject?: string
   /** list 显示白名单（msms）；仅 action==='list' 时有值 */

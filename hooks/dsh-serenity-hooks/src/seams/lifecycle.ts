@@ -21,8 +21,7 @@
 import type { Context } from 'cordis'
 import { clearActiveSessionInfo } from '../trajectory-ops.js'
 import { unregisterSkiffSession } from '../skiff-core.js'
-import { stopAcpHttpServer } from '../acp-http.js'
-import { stopSkiffDebugServer } from '../skiff-debug.js'
+import { stopAllFaces } from '../face-host.js'
 import { stopAllBridges } from '../weixin-bridge.js'
 import { forgetManualOutputSession } from '../weixin-output-guard.js'
 import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility } from './guards.js'
@@ -100,18 +99,20 @@ export function registerLifecycle(ctx: Context): void {
     /* 同上 */
   }
   // ② 插件卸载/HMR → 停掉自起资源（端口/轮询器）
+  //
+  // 🔒 C4 块 A（2026-09-15）：**这是自起 HTTP listener 的唯一拆卸挂点**。
+  // 此前拆卸裂成两套——本处一个聚合 disposer，而 `gateway.ts` / `weixin-send-api.ts`
+  // 各自另注册一个（D/E 干脆没有自己的）。现在四个面（B 3081 / C 3082 / D 3099 /
+  // E 3100）的 listener 全部由 `face-host` 持有，拆卸 = `stopAllFaces()` 一处；
+  // 面自己的 `registerDisposer` 已删除（名单归 active 表，不再靠人记）。
   const disposeAll = (): void => {
     try {
-      stopSkiffDebugServer()
+      stopAllFaces()
     } catch {
       /* 已停/未启 */
     }
     try {
-      stopAcpHttpServer()
-    } catch {
-      /* 已停/未启 */
-    }
-    try {
+      // 非 listener 的自起资源（微信桥轮询器等）
       stopAllBridges()
     } catch {
       /* 已停/未启 */
@@ -120,5 +121,5 @@ export function registerLifecycle(ctx: Context): void {
   // ctx.effect 是 cordis Context 成员（宿主 rc.1 全量使用，如 core/tools/src/index.ts:943）——
   // 但**不可假定存在**：apply 抛错 = 整个 dsh 启动失败（app-boot "plugin(s) failed to load"），
   // 且测试替身/极旧宿主可能没有。缺失 → 响亮降级（registerDisposer 内记录）。
-  registerDisposer(ctx, 'self-started resources (skiff-debug/acp/weixin)', disposeAll)
+  registerDisposer(ctx, 'self-started resources (gateway/weixin/skiff-debug/acp faces + weixin bridges)', disposeAll)
 }

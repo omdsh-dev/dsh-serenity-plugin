@@ -24,7 +24,7 @@ export interface FileFallbackInjected {
   uploadFile: (file: File, sessionId: string) => Promise<string>
 }
 
-export type FileFallbackDockProps = PropsRuntime<'conversation.input.dock'> & FileFallbackInjected
+type FileFallbackDockProps = PropsRuntime<'conversation.input.dock'> & FileFallbackInjected
 
 /** 输入快照（InputZone.input）读取面 */
 interface InputLike {

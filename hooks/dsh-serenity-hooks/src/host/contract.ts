@@ -23,14 +23,14 @@
 import type { Events } from 'cordis'
 import { hostInjected, hostService } from './access.js'
 
-export type HostAccess = 'injected' | 'lazy'
+type HostAccess = 'injected' | 'lazy'
 
-export interface HostMember {
+interface HostMember {
   name: string
   kind: 'function' | 'value'
 }
 
-export interface HostServiceContract {
+interface HostServiceContract {
   /** 稳定标识（报告用） */
   id: string
   /** 服务名（`ctx.get(name)` 或 `ctx.<name>`） */
@@ -208,7 +208,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
   },
 ] as const
 
-export interface HostEventContract {
+interface HostEventContract {
   name: HostEventName
   /** 订阅方（文件） */
   site: string
@@ -240,7 +240,7 @@ export const HOST_EVENT_NAMES = [
   'system-prompt/assemble',
 ] as const satisfies readonly (keyof Events)[]
 
-export type HostEventName = (typeof HOST_EVENT_NAMES)[number]
+type HostEventName = (typeof HOST_EVENT_NAMES)[number]
 
 /**
  * dsp 订阅的宿主事件清单（与 HOST_EVENT_NAMES 同源；impact/site 供 health 报告与文档）。
@@ -270,7 +270,7 @@ const REQUIRED_HOST_FLOOR = REQUIRED_HOST_RANGE.replace(/^[\^~>=<\s]+/, '')
 /** 范围 ceiling：`^0.1.x` 的上界 = `<0.2.0`（显式常量，见 {@link checkHostVersion} 注释） */
 const REQUIRED_HOST_CEILING = '0.2.0'
 
-export interface HostContractIssue {
+interface HostContractIssue {
   id: string
   kind: 'service' | 'member' | 'version'
   detail: string
@@ -383,6 +383,49 @@ export function probeHostContract(ctx: unknown, hostVersion: string | null = nul
   }
   const ok = issues.every((i) => !i.required)
   return { ok, checked, hostVersion, versionOk: version.ok, issues }
+}
+
+// ── 进程内唯一来源（C5「观察面归一」，S142 2026-09-15）──
+
+/**
+ * 宿主契约报告的**进程内快照**。
+ *
+ * 为什么需要（R↓，C5 唯一实证的重复取数）：`probeHostContract` 此前被算了**两次**——
+ * `index.ts` 的启动探针（apply 时一次，用于启动告警）与 `kit-ops.ts` 的 `dashboard health`
+ * （每次请求一次）。两者对**同一个已装载的宿主**问同一个问题，第二次计算的答案不可能不同，
+ * 成本却是一次全服务/全成员遍历。
+ *
+ * 收敛策略与时序（**这是本模块唯一的可变状态，语义见下**）：
+ *  1. `apply()` 调 `hostContractReport(ctx, readDshVersion())` —— **唯一计算点**，探针在此跑一次；
+ *     启动告警仍由返回值渲染（`summarizeHostContract`），语义逐字保留。
+ *  2. 其后任何消费者（`dashboard health` / `container-status`）调同一函数 → 命中快照，
+ *     **不再**触发探针。
+ *
+ * 为什么这不是"会导致状态陈旧的缓存"：报告描述的是**这次装载的宿主面**（HOST_SERVICES 列出的
+ * 都是宿主核心服务/成员，由宿主在插件装载前注册）＋装载时读到的宿主版本——它是**一次性事实**，
+ * 不是随运行变化的量。反之，时钟/注册表这类**会变**的量一律不在此缓存（各自由其唯一来源现读）。
+ * 代价（诚实记录）：若宿主在 apply 之后才补挂某个 `HOST_SERVICES` 里的服务，`health` 不会察觉。
+ * 需要"当场真探"的场合仍可直接调纯函数 {@link probeHostContract}（本函数不删它）。
+ */
+let snapshot: HostContractReport | null = null
+
+/**
+ * 取宿主契约报告——**进程内唯一来源**。
+ *
+ * @param ctx 宿主上下文；**仅当快照尚未捕获时**用于跑探针（首见即捕获一次）
+ * @param hostVersion 运行中宿主版本（`readDshVersion()`；null = 未知）
+ * @returns 契约报告；快照未捕获且未给 `ctx` → `null`（不猜、不重算）
+ */
+export function hostContractReport(ctx?: unknown, hostVersion: string | null = null): HostContractReport | null {
+  if (snapshot !== null) return snapshot
+  if (ctx === undefined) return null
+  snapshot = probeHostContract(ctx, hostVersion)
+  return snapshot
+}
+
+/** 测试用：复位进程内快照（避免用例间串味；与 `__resetWakeSchedulerStateForTest` 同规格） */
+export function __resetHostContractForTest(): void {
+  snapshot = null
 }
 
 /** 单行摘要（启动告警用） */

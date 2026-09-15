@@ -16,9 +16,9 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { resolve, dirname, basename, join } from 'node:path'
 
-export type EntrySkillSource = 'serenity-marker' | 'pointer' | 'opencode' | 'dsh'
+type EntrySkillSource = 'serenity-marker' | 'pointer' | 'opencode' | 'dsh'
 
-export interface EntrySkill {
+interface EntrySkill {
   name: string
   content: string
   source: EntrySkillSource
@@ -41,15 +41,23 @@ function scanSerenityDirs(skillsRoot: string): string[] {
     .sort()
 }
 
-/** 防穿越：skill 名必须是简单目录名（拒绝分隔符与 `..`/`.` 路径段） */
-function isSafeSkillName(name: string): boolean {
+/**
+ * 防穿越：skill 名必须是简单目录名（拒绝分隔符与 `..`/`.` 路径段）。
+ * v1.34.1：导出——轨迹 skill 声明（CCC 数据）的名字也要**先过这一关**才能用于拼路径
+ * （规格 `docs/trajectory-skill-injection.md` §3「名字安全（必做）」）。
+ */
+export function isSafeSkillName(name: string): boolean {
   if (name.length === 0) return false
   if (name.includes('/') || name.includes('\\')) return false
   return !name.split(/[/\\]/).some((seg) => seg === '..' || seg === '.')
 }
 
-/** 按名在两个 skills 根下定位 SKILL.md（.dsh/skills 优先，其次 .opencode/skills） */
-function findSkillMd(root: string, name: string): string | null {
+/**
+ * 按名在两个 skills 根下定位 SKILL.md（`.dsh/skills` 优先，其次 `.opencode/skills`）。
+ * v1.34.1：导出——轨迹 skill 注入复用本函数（不新造发现逻辑）；不安全名在此**先行拒绝**
+ * （返回 null，且不发生任何以该名拼出的 fs 访问）。
+ */
+export function findSkillMd(root: string, name: string): string | null {
   if (!isSafeSkillName(name)) return null
   for (const base of ['.dsh', '.opencode']) {
     const p = resolve(root, base, 'skills', name, 'SKILL.md')

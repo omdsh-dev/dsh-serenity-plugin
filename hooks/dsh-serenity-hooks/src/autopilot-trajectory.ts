@@ -30,11 +30,28 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
-import { spawnSync } from 'node:child_process'
-import { basename, dirname, join } from 'node:path'
-import { existsSync, readFileSync, statSync } from 'node:fs'
-import { findSerenityRoot, loadSerenityConfig, resolveInside, type AutopilotTrajectorySettings } from './ccc.js'
-import { findSession, sessionsRoot, sessionEvents } from './trajectory-ops.js'
+import { basename, dirname } from 'node:path'
+import { statSync } from 'node:fs'
+import type { AutopilotTrajectorySettings } from './ccc.js'
+import {
+  DEFAULT_BIAS_PROVIDER,
+  DEFAULT_AVOID_HOURS,
+  MIN_INTERVAL_HOURS,
+  AUTO_DIR_SUFFIX,
+  beijingHour,
+  inAllowedWakeWindow,
+  isAutopilotSession,
+  readAutopilotSettings,
+  resolveTargetMd,
+  shouldWake,
+  readSelfGeneratedMotivation,
+  fetchBiasContent,
+  type WakeRecord,
+} from './autopilot-core.js'
+import { createClock, type ClockOptions, type ClockRuntime } from './clock-runtime.js'
+import type { WakeChainFacts } from './autopilot-chain.js'
+import { cccRootForCwd } from './ccc-roots.js'
+import { sessionEvents } from './trajectory-ops.js'
 import { readLastBound } from './trajectory-bound.js'
 import { readSimpleSettings } from './settings-section.js'
 import { hostAgents, hostSessions } from './host/access.js'
@@ -42,150 +59,17 @@ import { registerDisposer } from './host/effect.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
-/** 偏见内容提供者脚本缺省名（CCC 根目录下；正式版 autopilot-bias.ts） */
-export const DEFAULT_BIAS_PROVIDER = 'autopilot-bias.ts'
-/** 旧默认偏见脚本名（autotrajectory 时代；未显式配置时回退——pangu 等已配置 CCC 零迁移） */
-export const LEGACY_BIAS_PROVIDER = 'autotrajectory-bias.ts'
-/** 自主轨迹会话目录后缀标志（--auto 保留——简短且历史会话 S060--auto 已存在） */
-export const AUTO_DIR_SUFFIX = '--auto'
-/** 调度 tick 周期（5min——用户"tick改为5分钟吧"；0.01h 间隔下每 5min 评估一次） */
-export const TICK_MS = 5 * 60 * 1000
-/** 间隔下限（支持小数——用户"让它支持小数行吗，这样可以配0.01"；0.01h ≈ 36s） */
-export const MIN_INTERVAL_HOURS = 0.01
-/** SESSION.md 内「下一轮动机」段标记（自生偏见载体——轨迹预设自己的未来） */
-export const MOTIVATION_MARKER = '下一轮动机'
-/** 缺省避开的高峰时段（北京时间 [start, end) 不唤起——用量峰谷省钱） */
-export const DEFAULT_AVOID_HOURS = { start: 8, end: 18 }
-/** 偏见脚本输出上限（沙箱：截断防失控——正式版 v1.27.4） */
-export const BIAS_OUTPUT_MAX = 8 * 1024
-/** 偏见脚本执行超时（正式版沙箱；原 600s 过长阻塞 tick） */
-export const BIAS_RUN_TIMEOUT_MS = 60_000
+/**
+ * 判据原语（`readAutopilotSettings` / `beijingHour` / `inAllowedWakeWindow` /
+ * `isAutopilotSession` / `resolveTargetMd` / `judgeWake` / `shouldWake` /
+ * `readSelfGeneratedMotivation` / `fetchBiasContent` / 常量）**已提取至
+ * `autopilot-core.ts`**（S142 §12.13 ⑥ C6a）——本文件是它们的**组合方之一**
+ * （tick + 面板 + agent 定位），不再自持判据副本。
+ * 提取理由与"三处消费方共用一份判据"的约束见该文件头部注释。
+ */
+
 /** 审计历史 ring 上限（每 CCC 保留最近 N 条唤起记录） */
 export const AUDIT_HISTORY_MAX = 50
-
-/** 读配置：`trajectory.autopilot`（D58 新键）优先 → 旧键 autopilotTrajectory → 旧键 autotrajectory */
-export function readAutopilotSettings(root: string): AutopilotTrajectorySettings | null {
-  const cfg = loadSerenityConfig(root)
-  return cfg.trajectory?.autopilot ?? cfg.autopilotTrajectory ?? cfg.autotrajectory ?? null
-}
-
-/**
- * 北京时间（UTC+8）当前小时——不依赖服务器时区（服务器可能 UTC/本地任意）。
- */
-export function beijingHour(nowMs: number): number {
-  return Math.floor(((nowMs + 8 * 3600_000) % 86400_000) / 3600_000)
-}
-
-/**
- * 唤起窗口判定：北京时间 [avoidStart, avoidEnd) 内不唤起（缺省 8~18）。
- * 单段避开（start<=end）：窗口 = [0,start) ∪ [end,24)；跨零点避开（start>end）：窗口 = [end,start)。
- */
-export function inAllowedWakeWindow(nowMs: number, avoid?: { start?: number; end?: number }): boolean {
-  const start = avoid?.start ?? DEFAULT_AVOID_HOURS.start
-  const end = avoid?.end ?? DEFAULT_AVOID_HOURS.end
-  const h = beijingHour(nowMs)
-  if (start <= end) return h < start || h >= end
-  return h >= end && h < start
-}
-
-/** 标志位判定：SESSION.md 所在目录名以 --auto 结尾 → 自主轨迹形态 */
-export function isAutopilotSession(mdPath: string): boolean {
-  return basename(dirname(mdPath)).endsWith(AUTO_DIR_SUFFIX)
-}
-
-/**
- * 目标会话定位：**必须配置 cfg.session**（S###/目录名）——CCC 日常有多条 trajectory 在跑，
- * 绝不默认唤起（缺省最近活跃会误伤其他正在运行的轨迹；用户拍板：必须配置才生效）。
- * 未配置 session 或未命中 → null（不唤起）。
- */
-export function resolveTargetMd(root: string, cfg: AutopilotTrajectorySettings): string | null {
-  if (!cfg?.session) return null
-  const found = findSession(sessionsRoot(root), cfg.session)
-  if (!found) return null
-  const md = join(found.path, 'SESSION.md')
-  return existsSync(md) ? md : null
-}
-
-/**
- * 唤起条件（纯逻辑，可测）：enabled + 未在运行 + 目录标志 + mtime 超间隔 + 窗口允许。
- * v1.27.12：移除每日唤起预算上限（用户"把这个上限删了吧，没意义"——高频实验不受限）。
- */
-export function shouldWake(
-  settings: AutopilotTrajectorySettings,
-  mdPath: string | null,
-  nowMs: number,
-  running: boolean,
-  _history: readonly WakeRecord[] = [],
-): boolean {
-  if (!settings?.enabled || running) return false
-  if (!mdPath || !isAutopilotSession(mdPath)) return false
-  if (!inAllowedWakeWindow(nowMs, settings.avoidWakeHours)) return false
-  try {
-    const mtime = statSync(mdPath).mtimeMs
-    // v1.27.8：支持小数小时（用户配 0.01 ≈ 36s 高频实验）——下限 MIN_INTERVAL_HOURS
-    const hours = Math.max(MIN_INTERVAL_HOURS, settings.intervalHours ?? 12)
-    return nowMs - mtime >= hours * 3600_000
-  } catch {
-    return false
-  }
-}
-
-/** 自生动机读取：SESSION.md「下一轮动机」段内容（到下一个二级标题或文件尾；无 → null） */
-export function readSelfGeneratedMotivation(mdPath: string): string | null {
-  try {
-    const content = readFileSync(mdPath, 'utf-8')
-    const idx = content.indexOf(MOTIVATION_MARKER)
-    if (idx < 0) return null
-    const rest = content.slice(idx + MOTIVATION_MARKER.length)
-    const nextHeading = rest.search(/\n## /)
-    const seg = (nextHeading >= 0 ? rest.slice(0, nextHeading) : rest).trim()
-    return seg || null
-  } catch {
-    return null
-  }
-}
-
-/**
- * 偏见内容：直接运行 CCC 根目录下偏见提供者脚本（biasProvider，缺省 autopilot-bias.ts；
- * 未显式配置且新默认缺失 → 回退旧默认 autotrajectory-bias.ts——pangu 兼容）→ stdout。
- * 脚本缺失 → 返回 { text: null, error: 提示实现 }（唤起侧报错要求实现，不静默跳过）。
- * 路径逃逸校验（resolveInside）；bun 优先，node 兜底；**60s 超时 + 8KB 输出截断（沙箱）**。
- */
-export async function fetchBiasContent(root: string, providerRel: string): Promise<{ text: string | null; error: string | null }> {
-  let scriptAbs: string
-  try {
-    scriptAbs = resolveInside(root, providerRel)
-  } catch {
-    return { text: null, error: `biasProvider 路径逃逸（须在 CCC 根内）: ${providerRel}` }
-  }
-  // 默认名缺失 → 回退旧默认（未显式配置的存量 CCC 零迁移）
-  if (!existsSync(scriptAbs) && providerRel === DEFAULT_BIAS_PROVIDER) {
-    const legacy = resolveInside(root, LEGACY_BIAS_PROVIDER)
-    if (existsSync(legacy)) scriptAbs = legacy
-  }
-  if (!existsSync(scriptAbs)) {
-    return { text: null, error: `请在 CCC 根目录实现偏见内容提供者脚本: ${providerRel}（或旧默认 ${LEGACY_BIAS_PROVIDER}；stdout 输出偏见内容一行；trajectory init 可生成模板）` }
-  }
-  const runs: Array<[string, string[]]> = [
-    ['bun', [scriptAbs]],
-    [process.execPath, [scriptAbs]],
-  ]
-  for (const [cmd, args] of runs) {
-    try {
-      const r = spawnSync(cmd, args, { encoding: 'utf-8', timeout: BIAS_RUN_TIMEOUT_MS, stdio: ['ignore', 'pipe', 'pipe'] })
-      if (r.status === 0) {
-        const text = (r.stdout ?? '').trim().slice(0, BIAS_OUTPUT_MAX)
-        return { text: text || null, error: null }
-      }
-      // bun 缺失（ENOENT）→ 试 node；否则视为脚本失败
-      if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') continue
-      return { text: null, error: `偏见内容提供者脚本执行失败（exit ${r.status ?? '?'}）: ${r.stderr?.trim() || r.stdout?.trim() || ''}` }
-    } catch {
-      continue
-    }
-  }
-  return { text: null, error: '偏见内容提供者脚本无法运行（bun 与 node 均不可用）' }
-}
 
 /** 唤起消息（四段式：轨迹焦点[CCC 定义，稳定] / 身份锚定 / 先验偏见[自生动机+偏见内容] / 任务）——注入前台会话，用户可见 */
 export function buildWakeMessage(opts: {
@@ -224,14 +108,7 @@ export function buildWakeMessage(opts: {
 }
 
 /** 唤起结果（tick 日志 / 面板显示 / 审计记录共用） */
-export interface WakeResult {
-  ok: boolean
-  detail: string
-}
-
-/** 审计记录（每 CCC ring buffer——正式版 v1.27.4：可回看、可分析） */
-export interface WakeRecord {
-  time: number
+interface WakeResult {
   ok: boolean
   detail: string
 }
@@ -315,6 +192,10 @@ export async function performAutopilotWake(
  * 读取顺序（迁移期，不回写）：`autopilotWakeEnabled`（新键）→ `autopilotEnabled`（旧键）→ false。
  * 用 `??` 而非 `||` 的理由：**新键显式 false 必须能覆盖旧键 true**（否则"关不掉"）。
  * 抽成模块级函数是为了让 {@link autopilotClockState}（诊断）与 tick 读**同一判据**。
+ *
+ * v1.34.1（⑥ C6a）：**导出**——CCC 工具面（`container_admin autopilot status`）与条件链
+ * （{@link autopilotRuntimeFacts}）必须读**这一份**闸值。旧独立脚本读不到它 ⇒ 闸关着也印
+ * 「✅ 唤起条件全部满足」（8 项分歧之首，见 SESSION §12.13 与现状稿 §4.4）。
  */
 export function autopilotGloballyEnabled(): boolean {
   try {
@@ -326,37 +207,73 @@ export function autopilotGloballyEnabled(): boolean {
 }
 
 /**
- * autopilot **进程态**（诊断用，模块级 = 进程级）。
- * 与 {@link wakeSchedulerState} 同规格：回答"时钟是否武装 / 上次 tick 何时 / 为何跳过"。
+ * autopilot **进程态**类型（诊断用，模块级 = 进程级）。
+ *
+ * C6b（P2）：字段由 {@link ClockRuntime}（**工厂那份**）提供，**字段名与语义一个字未改**。
+ * 与 {@link wakeSchedulerState} 的差别只有一项：本钟**没有** `lastTickLog`（结果进下方
+ * `wakeHistory` 审计 ring，不走 tick 日志）——故 `ClockRuntime.lastTickLog` 在工厂里是可选的。
  */
-interface AutopilotClockRuntime {
-  armed: boolean
-  armedAt: number | null
-  lastTickAt: number | null
-  ticks: number
-  lastSkipReason: string | null
+export type AutopilotClockRuntime = ClockRuntime
+
+/**
+ * 🔴 **本钟的串行域**（C6b 硬约束）：`clock.chain` 是**本实例私有**的——
+ * 与唤醒调度器的串行链**零共享**。本钟每轮要跑 CCC 的偏见脚本（`fetchBiasContent`，
+ * 超时 60s），可能阻塞数十秒；共用链会把另一条钟一起卡住（这正是 P1 被否、取 P2 的理由，
+ * 见 SESSION §12.8②）。**这就是"两条时钟不共用排队执行链"的落点。**
+ *
+ * **为什么这里是模块级常量**（而不是 `registerAutopilot` 的局部量）：本钟的进程态是
+ * **进程级可观测面**（`acc-diag` ①b / `containerClocks` / `autopilot-ops.runtimeBlock` 在读），
+ * 且 `autopilotClockState()` / `__resetAutopilotClockStateForTest()` 是**公开导出**、
+ * 可在未装配时被调用 ⇒ 实例必须**恒在**（旧实现的 `clockRuntime` 也正是模块级常量）。
+ * 装配只做 `clock.start()`。
+ */
+const clockOpts: ClockOptions<void> = {
+  label: 'Autopilot Trajectory 时钟',
+  ctx: undefined, // 装配点填入（见 registerAutopilot 首行）
+  events: ['session/created', 'serenity/settings-changed'],
+  gate: autopilotGloballyEnabled,
+  gateOffReason: '周期自唤醒闸关闭（autopilotWakeEnabled=false）',
+  // `bodyCountsTick: true`：**本钟自己**在"枚举到 live+enabled CCC 之后"记账
+  // （见 runAutopilotBegin）。不交给工厂的原因：工厂无法知道"这一拍有没有目标"，
+  // 若由它无条件 +1，就会把"无 CCC 可扫不计 tick"这条既有语义改掉（两条回归钉会红）。
+  bodyCountsTick: true,
+  // 不给 `logFrom`：本钟无 `lastTickLog`（结果走 wakeHistory 审计 ring）
+  // `begin` 是**同步前置阶段**：本钟的 ticks/lastSkipReason 必须在 tick 的同步段定下来
+  // （既有行为；`body` 只负责投递，见 runAutopilotBegin / runAutopilotTick）
+  begin: () => runAutopilotBegin(clockOpts.ctx as Context),
+  body: () => runAutopilotTick(clockOpts.ctx as Context),
+  startLog: () =>
+    `[serenity-hooks] ✓ Autopilot Trajectory 定时器启动（${collectAutopilotCccs(clockOpts.ctx as Context).length} 个 CCC 启用）`,
+  onReset: () => runningByRoot.clear(),
+}
+const clock = createClock(clockOpts)
+
+/**
+ * autopilot **进程态**快照（只读；`enabled` = 全局闸**当前**值）。
+ * ⚠️ 与 {@link wakeSchedulerState} 同规格，但**本钟无 `lastTickLog`**（见 {@link ClockOptions.logFrom}）。
+ */
+export function autopilotClockState(): ReturnType<typeof clock.snapshot> {
+  return clock.snapshot()
 }
 
-const clockRuntime: AutopilotClockRuntime = {
-  armed: false,
-  armedAt: null,
-  lastTickAt: null,
-  ticks: 0,
-  lastSkipReason: null,
-}
-
-/** autopilot 时钟进程态快照（只读） */
-export function autopilotClockState(): AutopilotClockRuntime & { enabled: boolean } {
-  return { enabled: autopilotGloballyEnabled(), ...clockRuntime }
-}
-
-/** 测试用：复位进程态 */
+/** 测试用：复位进程态（含 per-CCC 重入守卫，避免用例间串味） */
 export function __resetAutopilotClockStateForTest(): void {
-  clockRuntime.armed = false
-  clockRuntime.armedAt = null
-  clockRuntime.lastTickAt = null
-  clockRuntime.ticks = 0
-  clockRuntime.lastSkipReason = null
+  clock.reset()
+}
+
+/**
+ * **重入守卫状态**（per-CCC：该 CCC 是否有一轮唤起正在进行）。
+ *
+ * 模块级而非常量闭包（⑥ C6a）：条件链要如实回答"此刻是否已有唤起在跑"——旧独立脚本
+ * **完全没有这一判据**（8 项分歧之一）。若在 `registerAutopilot` 闭包里再造一份镜像 map，
+ * 就是"两份判断"；故状态**提到模块级**，tick 与诊断读**同一张表**。
+ * 与既有 `wakeHistory` 同规格（它本就是模块级进程态）。
+ */
+const runningByRoot = new Map<string, boolean>()
+
+/** 该 CCC 是否有唤起轮正在进行中（tick 的 per-CCC 防重入判据；诊断读同一份） */
+export function autopilotWakeInFlight(root: string): boolean {
+  return runningByRoot.get(root) === true
 }
 
 /**
@@ -366,106 +283,79 @@ export function __resetAutopilotClockStateForTest(): void {
  * 修复：① 每次 tick 动态解析 root+settings ② 监听 session/created 启动定时器 ③ 优先实验 CCC。
  *
  * **v1.27.4 多 CCC 独立（用户"4个CCC能各自有autotrajectory吗"）**：
- * - 单定时器保留（TICK_MS 10min），每次 tick **遍历所有 live+enabled CCC**（collectAutopilotCccs）
+ * - 单定时器保留（TICK_MS 5min），每次 tick **遍历所有 live+enabled CCC**（collectAutopilotCccs）
  *   各自评估 shouldWake + 各自唤起——每 CCC 的 interval/session/bias/topPrompt/窗口独立
  * - `running` 守卫 **per-CCC**（不同 CCC 唤起互不阻塞）
  * - **全局串行化**（wakeChain：同 tick 多 CCC 到点 → 依次唤起，防模型并发挤兑）
  *
- * 零资源占用语义保留：无 enabled CCC → tick 内直接 return（定时器存在但每 10min 一次空检查，
+ * 零资源占用语义保留：无 enabled CCC → tick 内直接 return（定时器存在但每 5min 一次空检查，
  * unref 不阻塞进程退出）。
  */
 export function registerAutopilot(ctx: Context): void {
-  let timer: NodeJS.Timeout | null = null
-  // per-CCC running（防同一 CCC 重入）+ 全局串行链（多 CCC 唤起依次执行）
-  const runningByRoot = new Map<string, boolean>()
-  let wakeChain: Promise<void> = Promise.resolve()
+  clockOpts.ctx = ctx
+  clock.start()
+  // F-08（v1.30.8）：插件卸载/HMR → 停掉时钟。此前 timer 无人拆卸——profile 重载后
+  // 旧定时器仍在 tick（重复唤起 + 内存泄漏），且 clearInterval 只能靠进程退出。
+  // C6b：clearInterval + armed/armedAt 复位已收进工厂 `dispose()`（`onReset` 之外无额外清理）。
+  registerDisposer(ctx, 'autopilot 时钟', () => clock.dispose())
+}
 
-  // 全局总开关（v1.27.9）：判据抽到 {@link autopilotGloballyEnabled}（诊断读同一份）
-  const globalOn = (): boolean => autopilotGloballyEnabled()
+/**
+ * tick 的**同步前置阶段**（`clock-runtime` 在 body 前同步调用）——判据**一行未改**：
+ * 枚举 live+enabled CCC；为空 ⇒ 记跳过原因且**不计 tick**；非空 ⇒ 清空跳过原因并记一次 tick。
+ *
+ * ⚠️ 为什么与 {@link runAutopilotTick} 分开（不是风格，是**观测面正确性**）：
+ * 本钟的 `ticks` / `lastSkipReason` 在旧实现里是在 tick 的**同步段**定下来的——诊断
+ * （`autopilot-ops.runtimeBlock` / `autopilotClockState()`）在"启动即 tick"的那一瞬间就要读到
+ * 本拍的值。若把它们挪进 async body，那一瞬间会读到上一拍的旧值（假报告）。
+ * 两条回归钉守着这一点：『启动时无 live 会话 ⇒ ticks=0 + skipReason 留痕』
+ * 与『配置关闭 ⇒ ticks=0』（`tests/autopilot-trajectory.test.ts`）。
+ * @param ctx 插件上下文
+ */
+function runAutopilotBegin(ctx: Context): void {
+  const roots = collectAutopilotCccs(ctx)
+  if (roots.length === 0) {
+    clock.noteSkipReason('无 live+enabled CCC（等会话出现 / 配置生效）')
+    return
+  }
+  clock.noteSkipReason(null)
+  clock.countTick() // 有目标 ⇒ 本拍算一次 tick（同步，早于任何 await）
+}
 
-  const tick = (): void => {
-    if (!globalOn()) {
-      clockRuntime.lastSkipReason = '周期自唤醒闸关闭（autopilotWakeEnabled=false）'
-      return // 全局关 → 本 tick 不唤起（中途关闭即停）
-    }
-    // 遍历所有 live+enabled CCC（v1.27.4：多 CCC 各自独立唤起）
-    const roots = collectAutopilotCccs(ctx)
-    if (roots.length === 0) {
-      clockRuntime.lastSkipReason = '无 live+enabled CCC（等会话出现 / 配置生效）'
-      return
-    }
-    clockRuntime.lastSkipReason = null
-    clockRuntime.lastTickAt = Date.now()
-    clockRuntime.ticks += 1
-    for (const root of roots) {
-      if (runningByRoot.get(root)) continue // per-CCC 防重入
-      const settings = readAutopilotSettings(root)
-      if (!settings?.enabled) continue
-      const mdPath = resolveTargetMd(root, settings)
-      if (!shouldWake(settings, mdPath, Date.now(), false, wakeHistoryFor(root))) continue
-      runningByRoot.set(root, true)
-      // 全局串行：接到 wakeChain 尾（同 tick 多 CCC 依次唤起，防模型并发挤兑）
-      wakeChain = wakeChain.then(async () => {
-        try {
-          const res = await performAutopilotWake(ctx, root, settings!, { force: false })
-          recordWake(root, { time: Date.now(), ok: res.ok, detail: res.detail })
-          if (res.ok) console.log(`[serenity-hooks] ✓ Autopilot Trajectory 唤起（${res.detail}）`)
-          else console.warn(`[serenity-hooks] ✗ Autopilot Trajectory 唤起跳过：${res.detail}`)
-        } catch (err) {
-          recordWake(root, { time: Date.now(), ok: false, detail: `唤起异常: ${String((err as Error)?.message ?? err)}` })
-          console.warn(`[serenity-hooks] ✗ Autopilot Trajectory 唤起失败: ${String((err as Error)?.message ?? err)}`)
-        } finally {
-          runningByRoot.set(root, false)
-        }
-      })
-    }
+/**
+ * 一次 autopilot tick 的**业务体**（引擎外壳由 `clock-runtime` 提供）。
+ *
+ * 判据**一行未改**，仍全部本函数自持：枚举 live+enabled CCC → 逐 CCC 防重入 +
+ * `shouldWake` 评估 → 命中者接到**本钟私有**串行链尾（`clock.enqueue`）。
+ * 同步的"记账/跳过留痕"在 {@link runAutopilotBegin}。
+ * @param ctx 插件上下文
+ */
+function runAutopilotTick(ctx: Context): void {
+  // 遍历所有 live+enabled CCC（v1.27.4：多 CCC 各自独立唤起）
+  const roots = collectAutopilotCccs(ctx)
+  if (roots.length === 0) return // 与 begin 同判据；此处只是不在空集上白跑循环
+  for (const root of roots) {
+    if (runningByRoot.get(root)) continue // per-CCC 防重入
+    const settings = readAutopilotSettings(root)
+    if (!settings?.enabled) continue
+    const mdPath = resolveTargetMd(root, settings)
+    if (!shouldWake(settings, mdPath, Date.now(), false, wakeHistoryFor(root))) continue
+    runningByRoot.set(root, true)
+    // 全局串行：接到 wakeChain 尾（同 tick 多 CCC 依次唤起，防模型并发挤兑）
+    clock.enqueue(async () => {
+      try {
+        const res = await performAutopilotWake(ctx, root, settings!, { force: false })
+        recordWake(root, { time: Date.now(), ok: res.ok, detail: res.detail })
+        if (res.ok) console.log(`[serenity-hooks] ✓ Autopilot Trajectory 唤起（${res.detail}）`)
+        else console.warn(`[serenity-hooks] ✗ Autopilot Trajectory 唤起跳过：${res.detail}`)
+      } catch (err) {
+        recordWake(root, { time: Date.now(), ok: false, detail: `唤起异常: ${String((err as Error)?.message ?? err)}` })
+        console.warn(`[serenity-hooks] ✗ Autopilot Trajectory 唤起失败: ${String((err as Error)?.message ?? err)}`)
+      } finally {
+        runningByRoot.set(root, false)
+      }
+    })
   }
-
-  const startTimer = (): void => {
-    if (timer) return
-    if (!globalOn()) return // 全局关 → 不武装定时器（零资源占用，v1.27.9）
-    // ⚠️ 此处**不得**再判"有无 live CCC"（F 段缺陷修复，2026-09-14，与 wake-scheduler 同因）：
-    //   CCC 根只能从 live 会话反推，而宿主刚重启时 live 会话必为空；且"恢复旧会话"不触发
-    //   `session/created`（只有新建会）⇒ 启动瞬间这次判定的落空 = **时钟永久不武装**
-    //   （v1.26.14 用 session/created 补的那一刀只覆盖"新建"，不覆盖"恢复"）。
-    //   实测：2026-09-14T16:30Z 重启后零 tick 达 6.6h（wake 条目超窗仍是 pending）。
-    //   现改为「全局闸开即武装」，无 enabled CCC 时每 tick 廉价空转（unref 不阻塞退出）。
-    timer = setInterval(tick, TICK_MS)
-    // unref：进程存活时定时器照常触发；进程退出（插件卸载/服务器停止）不阻塞退出
-    timer.unref()
-    clockRuntime.armed = true
-    clockRuntime.armedAt = Date.now()
-    console.log(`[serenity-hooks] ✓ Autopilot Trajectory 定时器启动（${collectAutopilotCccs(ctx).length} 个 CCC 启用）`)
-    // 启动时立即检查一次（插件重启后恢复节律，无需等首个 5min）
-    tick()
-  }
-
-  // ① 进程启动时：若全局开且已有启用 CCC → 立即启动
-  startTimer()
-  // ② 会话出现（用户打开实验 CCC）→ 启动定时器（live 会话变化即跟上；
-  //    全局未开时 startTimer 直接 return——开全局后需重启生效）
-  try {
-    ctx.on('session/created', () => startTimer())
-  } catch {
-    /* 事件通道缺失不阻断（启动时 startTimer 已尝试一次） */
-  }
-  // ③ settings 变化（v1.27.10 修复：面板打开全局开关 autopilotEnabled → settings-changed
-  //    → 热启动定时器——否则"开了但不唤起"：开关只在 apply 时读一次，面板开启不生效）
-  try {
-    ctx.on('serenity/settings-changed', () => startTimer())
-  } catch {
-    /* 事件通道缺失不阻断（用户可重启 web 生效） */
-  }
-  // ④ F-08（v1.30.8）：插件卸载/HMR → 停掉时钟。此前 timer 无人拆卸——profile 重载后
-  //    旧定时器仍在 tick（重复唤起 + 内存泄漏），且 clearInterval 只能靠进程退出。
-  registerDisposer(ctx, 'autopilot 时钟', () => {
-    if (timer) {
-      clearInterval(timer)
-      timer = null
-    }
-    clockRuntime.armed = false
-    clockRuntime.armedAt = null
-  })
 }
 
 /**
@@ -485,7 +375,7 @@ function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
   const dirName = basename(dirname(mdPath))
   const idMatch = dirName.match(/--S(\d{3,})--/)
   const sid = idMatch ? `S${idMatch[1]}` : null
-  const targetRoot = findSerenityRoot(mdPath)
+  const targetRoot = cccRootForCwd(mdPath)
   const sessions = hostSessions(ctx)
   const agents = hostAgents(ctx)
   // 候选池：{ session, boundAt|null, titleMatched } —— bound 命中优先，其次标题命中
@@ -497,7 +387,7 @@ function resolveTargetAgent(ctx: Context, mdPath: string): Agent | null {
       // cwd 归属校验：同实例多 CCC 时不误匹配（只找目标 SESSION 所在 CCC 的会话）。
       const cwd = sess?.header?.cwd ?? ''
       if (targetRoot) {
-        if (findSerenityRoot(cwd) !== targetRoot) continue
+        if (cccRootForCwd(cwd) !== targetRoot) continue
       } else if (cwd !== '' && !mdPath.startsWith(cwd.endsWith('/') ? cwd : cwd + '/')) {
         continue
       }
@@ -556,7 +446,7 @@ function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null 
   const dirName = basename(dirname(mdPath))
   const idMatch = dirName.match(/--S(\d{3,})--/)
   const sid = idMatch ? `S${idMatch[1]}` : null
-  const targetRoot = findSerenityRoot(mdPath)
+  const targetRoot = cccRootForCwd(mdPath)
   const sameCccTitles: string[] = []
   const agentMissing = { matched: false }
   try {
@@ -565,7 +455,7 @@ function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null 
       const sess = s as { id?: string; header?: { cwd?: string } }
       const cwd = sess?.header?.cwd ?? ''
       if (targetRoot) {
-        if (findSerenityRoot(cwd) !== targetRoot) continue
+        if (cccRootForCwd(cwd) !== targetRoot) continue
       } else if (cwd !== '' && !mdPath.startsWith(cwd.endsWith('/') ? cwd : cwd + '/')) {
         continue
       }
@@ -591,12 +481,12 @@ function diagnoseTargetUnavailable(ctx: Context, mdPath: string): string | null 
 
 /** Autopilot 绑定的回退 CCC 根：进程 cwd 上溯 .serenity 优先，回退任一 live 会话 root */
 function resolveAutopilotRoot(ctx: Context): string | null {
-  const fromCwd = findSerenityRoot(process.cwd())
+  const fromCwd = cccRootForCwd(process.cwd())
   if (fromCwd) return fromCwd
   try {
     const sessions = hostSessions(ctx)
     for (const s of sessions?.list?.() ?? []) {
-      const r = findSerenityRoot(s?.header?.cwd ?? '')
+      const r = cccRootForCwd(s?.header?.cwd ?? '')
       if (r) return r
     }
   } catch {
@@ -611,7 +501,7 @@ function resolveAutopilotRoot(ctx: Context): string | null {
  * 命中/标志/空闲时长 + 当前窗口/可唤起判定 + 审计（最近唤起）。
  * 不运行偏见脚本（只报脚本是否就绪——运行验证走 trajectory random）。
  */
-export interface AutopilotTrajectoryStatus {
+interface AutopilotTrajectoryStatus {
   /** 是否配置了 trajectory.autopilot 段（.opencode/serenity.json；旧键 autopilotTrajectory / autotrajectory 回退） */
   configured: boolean
   /** 总开关（缺省 false——未开零资源占用） */
@@ -684,14 +574,22 @@ export function getAutopilotStatus(root: string): AutopilotTrajectoryStatus {
 }
 
 /** live 会话条目（诊断/面板解析用；标题从 events 读） */
-export interface LiveSessionEntry {
+interface LiveSessionEntry {
   id: string
   cwd: string | null
   cccRoot: string | null
   title: string | null
 }
 
-/** 遍历 live 会话（sessions.list()）+ 补标题（events session/title latest-wins）+ ccc 归属 */
+/**
+ * live 会话清单（诊断/面板解析用；标题从 events 读）——**只枚举 live 会话本身**。
+ *
+ * C2：CCC 枚举（"本机有哪些 CCC"）**不在这里**，归 `ccc-roots.listCccs`（并集）。
+ * 本函数保留的是它**独有**的那部分：逐条 live 会话 + cwd 归属 + 标题 + id
+ * （诊断页需要"哪个会话属于哪个 CCC"，那是会话维度、不是 CCC 维度）。
+ * @param ctx 插件上下文
+ * @returns 逐条 live 会话（`cccRoot` = 该会话 cwd 的 CCC 归属，无 → null）
+ */
 export function listLiveSessions(ctx: Context): LiveSessionEntry[] {
   const out: LiveSessionEntry[] = []
   try {
@@ -701,7 +599,7 @@ export function listLiveSessions(ctx: Context): LiveSessionEntry[] {
       out.push({
         id: s?.id ?? '',
         cwd,
-        cccRoot: cwd ? findSerenityRoot(cwd) : null,
+        cccRoot: cwd ? cccRootForCwd(cwd) : null,
         title: readSessionTitle(s),
       })
     }
@@ -733,23 +631,6 @@ export function collectAutopilotCccs(ctx: Context, opts: { includeDisabled?: boo
 }
 
 /**
- * 所有 live 会话所属的 CCC 根（去重，保持出现顺序）。
- *
- * 与 {@link collectAutopilotCccs} 的区别：**不要求该 CCC 配置 trajectory.autopilot**——
- * 唤醒注册表（wake-scheduler）的条目可以指向任何 CCC 的任何 trajectory。
- *
- * @param ctx 插件上下文
- * @returns CCC 根路径列表（无 live 会话 → `[]`）
- */
-export function collectLiveCccs(ctx: Context): string[] {
-  const roots: string[] = []
-  for (const s of listLiveSessions(ctx)) {
-    if (s.cccRoot && !roots.includes(s.cccRoot)) roots.push(s.cccRoot)
-  }
-  return roots
-}
-
-/**
  * 进程内诊断（trajectory diag-live 数据源；用户"排查访问不到 pangu 写个 msm"）——
  * 输出当前实例 live 会话清单（id/cwd/ccc/标题）+ 每个配置了 Autopilot 的 CCC
  * 状态（配置摘要/目标命中/可唤起）+ 目标 agent 定位结果。脚本 diag 看不到运行时，
@@ -773,7 +654,7 @@ export interface DiagLiveReport {
 export function diagLive(ctx: Context): DiagLiveReport {
   const liveSessions = listLiveSessions(ctx)
   const processCwd = process.cwd()
-  const processCcc = findSerenityRoot(processCwd)
+  const processCcc = cccRootForCwd(processCwd)
   const panelResolved = collectAutopilotCccs(ctx)[0] ?? resolveAutopilotRoot(ctx)
   const autopilotCccs: DiagLiveReport['autopilotCccs'] = []
   const seen = new Set<string>()
@@ -796,4 +677,44 @@ export function diagLive(ctx: Context): DiagLiveReport {
     })
   }
   return { processCwd, processCcc, liveSessions, autopilotCccs, panelResolved }
+}
+
+/**
+ * **条件链的运行态事实**（⑥ C6a 的核心出口）——把只有插件进程能看到的判据交给
+ * 条件链（{@link buildWakeChain} 的输入）：全局闸 / 重入守卫 / live 运行态。
+ *
+ * 为什么必须有（这是 C6 的动机本身）：旧独立脚本只能读文件 ⇒ 结构性地看不到这三样，
+ * 于是逐条件报告**必然**与实际唤起行为分歧（8 项，见 `acc-component-relations-current-state.md` §4.4）。
+ * 搬进进程内之后，`container_admin autopilot status` 与 `acc-diag` ④ 段读的就是**同一份事实**。
+ *
+ * `ctx` 可传 `null`（**不是**"三项全不可知"）：全局闸（`readSimpleSettings`）与重入守卫
+ * （模块级 `runningByRoot`）**都不需要 ctx**，无 ctx 时也应读出真值——只有 live 运行态
+ * （live 会话 / agent 可解析）依赖 ctx，那才是真正的"不可知"。
+ * 这条区分由 `autopilot-ops.test.ts` 的全局闸可见性用例逼出来（首版把三者一起降级为不可知，
+ * 使"闸关"在无 ctx 路径下隐形——正是本轮要消灭的那类假报告）。
+ *
+ * @param ctx 插件上下文（读 live 会话 + agent）；null = 无进程上下文（live 标不可知）
+ * @param root 目标 CCC 根
+ * @returns 条件链事实（`live` 为 null 表示"live 运行态不可知"）
+ */
+export function autopilotRuntimeFacts(ctx: Context | null, root: string): WakeChainFacts {
+  const settings = readAutopilotSettings(root)
+  const mdPath = settings ? resolveTargetMd(root, settings) : null
+  let live: WakeChainFacts['live'] = null
+  if (ctx !== null) {
+    const sessionCount = listLiveSessions(ctx).filter((s) => s.cccRoot === root).length
+    // mdPath 为 null（未配置 session / 未命中）时 agent 可解析性**不适用**（agentResolved=null），
+    // 而不是"不可解析"——那种情形已由条件链的 session 条件单独判为 ✗。
+    const agentResolved = mdPath ? resolveTargetAgent(ctx, mdPath) !== null : null
+    live = {
+      sessionCount,
+      agentResolved,
+      diagnosis: mdPath && agentResolved === false ? diagnoseTargetUnavailable(ctx, mdPath) : null,
+    }
+  }
+  return {
+    globalGate: autopilotGloballyEnabled(),
+    running: autopilotWakeInFlight(root),
+    live,
+  }
 }

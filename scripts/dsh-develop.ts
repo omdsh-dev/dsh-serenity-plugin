@@ -732,27 +732,85 @@ function cmdDumpConfig(pattern?: string): void {
 }
 
 /**
- * cmdDiag — 唤起条件链诊断（开发面，v1.33 S142 §32）
+ * cmdDiag — 唤起条件链诊断（开发面，v1.33 S142 §32；v1.34.1 ⑥ C6a 改进程外调**同一实现**）
  *
  * 为什么在这里（R↓）：CCC 工具面的 `diag` 动作已撤——
  *  · **进程内**那半（live 会话清单 / agent 定位 / 面板解析 / 唤醒注册表）改由**专属工具
  *    `acc-diag`** 承载（默认对所有 CCC 隐藏，需 CCC 在 `exclusiveTools` 里声明）；
- *  · **脚本侧**那半（唤起条件链：逐条件值 + 阻断点 + 修复建议）纯文件系统计算、不依赖
- *    插件进程 ⇒ 下沉到开发面，作为 ACC 负责人的**离线通道**（插件没跑、或只想看某个 CCC
+ *  · **条件链**那半下沉到开发面，作为 ACC 负责人的**离线通道**（插件没跑、或只想看某个 CCC
  *    的条件链时直接可用）。
- * 诚实边界：进程内数据只有插件本身能看到——独立 bun 进程读不到 ctx，故不能全部下沉。
  *
- * 用法：`dsh-develop diag [--ccc <path>]`（无 --ccc → 脚本自行递归扫描 /home/yh 两层）
+ * 🔴 **判据只写一遍**（⑥ C6a 的硬约束）：本命令 **import 插件 src 的 `buildWakeChain`**
+ * （`hooks/dsh-serenity-hooks/src/autopilot-chain.ts`），**不是**另写一份"文件读取版"——
+ * 否则刚消掉的分歧会在开发面复活。离线通道与进程内的差别**只是传入的 facts**：
+ * 离线传 `NO_RUNTIME_FACTS`（全局闸 / live 会话 / agent 可解析性 / 重入守卫 = 不可知，
+ * 照实标 `?` 而**不**当作满足 ⇒ 离线永远不会印 ✅）。
+ *
+ * 本文件为 `.ts` 且以 bun 直跑（`#!/usr/bin/env bun`），故可直接 import 插件的 TS 源码
+ * （`autopilot-chain.ts` 刻意零 DSH 依赖，正是为这条通路而设）。
+ *
+ * 用法：`dsh-develop diag [--ccc <path>]`（无 --ccc → 递归扫描 /home/yh 两层自寻 CCC）
  */
-function cmdDiag(args: string[]): void {
-  const script = join(HOOKS_DIR, 'experiments', 'autopilot-trajectory', 'scripts', 'autopilot-trajectory.ts')
-  if (!existsSync(script)) fail(`diag 脚本缺失（包完整性）: ${script}`, 2)
-  const r = run('bun', [script, 'diag', ...args], { cwd: REPO_ROOT, quiet: true })
-  if (r.stdout) console.log(r.stdout)
-  if (r.status !== 0) {
-    console.error(r.stderr || `diag 退出码 ${r.status}`)
-    process.exit(r.status ?? 1)
+
+/** 插件侧条件链（唯一实现）——动态 import 以保持诊断失败不拖垮整个开发 MSM */
+async function loadChain(): Promise<{
+  buildWakeChain: typeof import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js').buildWakeChain
+  renderWakeChain: typeof import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js').renderWakeChain
+  NO_RUNTIME_FACTS: typeof import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js').NO_RUNTIME_FACTS
+} | null> {
+  try {
+    const mod = await import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js')
+    return { buildWakeChain: mod.buildWakeChain, renderWakeChain: mod.renderWakeChain, NO_RUNTIME_FACTS: mod.NO_RUNTIME_FACTS }
+  } catch (e) {
+    fail(`条件链实现不可加载（判据唯一实现在插件 src/autopilot-chain.ts）: ${String((e as Error)?.message ?? e)}`, 2)
+    return null
   }
+}
+
+/** 递归收集 .serenity 标记目录（跳过隐藏目录；maxDepth 层内）——离线通道的 CCC 发现 */
+function collectCccs(dir: string, depth: number, out: Set<string>, maxDepth: number): void {
+  if (depth > maxDepth || !existsSync(dir)) return
+  let entries: Array<{ name: string; isDirectory: () => boolean }>
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return
+  }
+  for (const d of entries) {
+    if (!d.isDirectory() || d.name.startsWith('.')) continue
+    const r = join(dir, d.name)
+    if (existsSync(join(r, '.serenity'))) out.add(r)
+    collectCccs(r, depth + 1, out, maxDepth)
+  }
+}
+
+async function cmdDiag(args: string[]): Promise<void> {
+  const chain = await loadChain()
+  if (!chain) process.exit(2)
+  const cccIdx = args.indexOf('--ccc')
+  const explicit = cccIdx >= 0 ? args[cccIdx + 1] : undefined
+
+  if (explicit) {
+    const root = resolve(explicit)
+    const r = await chain.buildWakeChain(root, chain.NO_RUNTIME_FACTS)
+    console.log(chain.renderWakeChain(r))
+    return
+  }
+
+  // 无 --ccc：递归扫描 /home/yh 两层（覆盖 /home/yh/home/*、/home/yh/our-home/* 及任意实验 CCC 位置）
+  const roots = new Set<string>()
+  const envRoot = process.env.SERENITY_ROOT
+  if (envRoot && existsSync(join(envRoot, '.serenity'))) roots.add(envRoot)
+  collectCccs('/home/yh', 0, roots, 2)
+  const list = [...roots]
+  if (list.length === 0) {
+    console.log('[dsh-develop diag] 未发现 CCC（用 --ccc <path> 指定目标）')
+    return
+  }
+  const reports = await Promise.all(list.map((root) => chain.buildWakeChain(root, chain.NO_RUNTIME_FACTS)))
+  // 顺序 = CCC 根路径字典序（确定性；每份报告自带 enabled/闸 状态，不做隐式优先级重排）
+  reports.sort((a, b) => (a.root < b.root ? -1 : a.root > b.root ? 1 : 0))
+  console.log(reports.map(chain.renderWakeChain).join('\n\n'))
 }
 
 function cmdApiStatus(path?: string): void {  // 查询本地 dsh web HTTP 接口（同步阻塞版；避免异步回调在 bun 进程退出前未执行）
@@ -1955,7 +2013,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'host-upgrade': cmdHostUpgrade(rest); break
       case 'session-doctor': await cmdSessionDoctor(rest); break
       case 'session-repair': await cmdSessionRepair(rest); break
-      case 'diag': cmdDiag(rest); break
+      case 'diag': await cmdDiag(rest); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break

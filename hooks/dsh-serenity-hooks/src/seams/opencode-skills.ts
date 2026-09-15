@@ -11,7 +11,7 @@
 
 import type { Context } from 'cordis'
 import type { SkillProvider, SkillCandidate, SkillDefinition, SkillLookupOptions } from '@deepseek-ai/dsh-skill'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForCwd } from '../ccc-roots.js'
 import { listOpencodeSkillDirs, loadOpencodeSkill } from '../skills/opencode-scan.js'
 
 export const OPENCODE_PROVIDER = 'opencode-skills'
@@ -22,7 +22,7 @@ export function registerOpencodeSkills(ctx: Context): void {
     name: OPENCODE_PROVIDER,
     async list(options: SkillLookupOptions) {
       const cwd = options.cwd ?? process.cwd()
-      const root = findSerenityRoot(cwd)
+      const root = cccRootForCwd(cwd)
       if (!root) return { candidates: [], complete: true }
 
       const candidates: SkillCandidate[] = []

@@ -12,13 +12,15 @@ import { mkdtempSync, writeFileSync, rmSync, realpathSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ServerResponse } from 'node:http'
+import { createServer } from 'node:http'
 
 // 桥与 CCC 发现都替身化：本模块的契约是"入口层"，不需要真实 iLink / 真实 skiff 链
 vi.mock('../src/weixin-bridge.js', () => ({
   sendProactiveText: vi.fn(),
 }))
-vi.mock('../src/skiff-debug.js', () => ({
-  discoverCccs: vi.fn(),
+// C2：候选来源由 skiff-debug.discoverCccs 迁至 ccc-roots.listCccs（本模块改问后者）
+vi.mock('../src/ccc-roots.js', () => ({
+  listCccs: vi.fn(),
 }))
 
 import {
@@ -31,22 +33,38 @@ import {
   startWeixinSendApi,
   stopWeixinSendApi,
   weixinSendEndpoint,
+  weixinSendSpec,
   type CccCandidate,
 } from '../src/weixin-send-api.js'
 import { sendProactiveText } from '../src/weixin-bridge.js'
-import { discoverCccs } from '../src/skiff-debug.js'
+import { listCccs } from '../src/ccc-roots.js'
 
 const sendMock = vi.mocked(sendProactiveText)
-const discoverMock = vi.mocked(discoverCccs)
+const discoverMock = vi.mocked(listCccs)
 
 let dir: string
 let oldConfigEnv: string | undefined
 /** 测试内自建的临时 CCC（含 .serenity）——afterEach 清理，保证不污染任何机器路径 */
 const tempCccDirs: string[] = []
 
+/**
+ * 预留一个**确定空闲**的端口：先由内核分配（`listen(0)`）再释放。
+ * 用于"必须给定具体端口号、不能用 0"的用例（本面 `port:0` = 关闭）——避开硬写端口的碰撞类 flake。
+ */
+async function reserveFreePort(): Promise<number> {
+  const probe = createServer()
+  const port = await new Promise<number>((resolve) => {
+    probe.listen(0, '127.0.0.1', () => {
+      const addr = probe.address()
+      resolve(typeof addr === 'object' && addr !== null ? addr.port : 0)
+    })
+  })
+  await new Promise<void>((resolve) => probe.close(() => resolve()))
+  return port
+}
+
 /** 极简响应替身：记录 status + body */
-function fakeRes() {
-  const out: { status: number; body: unknown } = { status: 0, body: undefined }
+function fakeRes() {  const out: { status: number; body: unknown } = { status: 0, body: undefined }
   const res = {
     writeHead: (status: number) => { out.status = status },
     end: (body: string) => { out.body = JSON.parse(body) },
@@ -197,7 +215,7 @@ describe('weixin-send-api: 请求处理', () => {
     expect(b.out.body).toMatchObject({ code: 'BAD_REQUEST' })
   })
 
-  it('未知 CCC → 404（候选提示来自 discoverCccs）', async () => {
+  it('未知 CCC → 404（候选提示来自 listCccs）', async () => {
     discoverMock.mockResolvedValue([{ root: '/ccc/a', name: 'a', roles: [] }])
     const { res, out } = fakeRes()
     await handleWeixinSendRequest({} as never, fakeReq({ body: JSON.stringify({ ccc: 'b', user: 'u@im.wechat', text: 't' }) }) as never, res)
@@ -259,18 +277,32 @@ describe('weixin-send-api: 监听器生命周期', () => {
       on: (name: string, cb: () => void) => { handlers.set(name, cb); return () => handlers.delete(name) },
       effect: () => () => {},
     }
-    // 默认配置（enabled:true, port:3082）——为避免占用真实端口，写入临时配置指定 0 不行
-    // （0 视为关闭）→ 用 enabled:false 验证不启动，再 enabled:true + 随机高位端口验证启动
+    // 默认配置（enabled:true, port:3082）——为避免占用真实端口，写入临时配置。
+    // ⚠️ `port: 0` 在本面**做不到**：`weixinSendSpec.enabled` 把 0 判为关闭（见 src 面规格），
+    //    而本用例测的正是"配置启用的端口被真的绑上"。
+    // v1.34.1 修 flake：原写法硬写 3182（一个固定端口）——该端口若被别的进程/残留监听者占着，
+    //    面宿主会按缺省预算重试 10s > vitest 5s ⇒ 挂死。改为**预留一个确定空闲的端口**
+    //    （内核先分配再释放），保留"配置端口被采纳"这一原意，同时去掉对固定外部端口的依赖。
+    const cfgPort = await reserveFreePort()
     writeFileSync(join(dir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: false, port: 3082 } }))
     registerWeixinSendApi(ctx as never)
     expect(weixinSendEndpoint()).toBeNull()
 
-    writeFileSync(join(dir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: true, port: 3182 } }))
+    writeFileSync(join(dir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: true, port: cfgPort } }))
     handlers.get('serenity/config-updated')?.()
-    await vi.waitFor(() => expect(weixinSendEndpoint()).toBe('http://127.0.0.1:3182'))
+    await vi.waitFor(() => expect(weixinSendEndpoint()).toBe(`http://127.0.0.1:${cfgPort}`))
 
-    writeFileSync(join(dir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: false, port: 3182 } }))
+    writeFileSync(join(dir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: false, port: cfgPort } }))
     handlers.get('serenity/settings-changed')?.()
     expect(weixinSendEndpoint()).toBeNull()
+  })
+
+  it('面 C 规格携带 unref:true（v1.34.1：本面**默认开**，不得拖住一次性命令 `dsh <cmd>` 不退出）', () => {
+    const s = weixinSendSpec({} as never, { enabled: true, port: 3082 })
+    expect(s.unref).toBe(true)
+    // 意图判据不变（port:0 = 关闭）——unref 只是"不阻止进程退出"，不改变本面启停语义
+    expect(s.enabled()).toBe(true)
+    expect(weixinSendSpec({} as never, { enabled: true, port: 0 }).enabled()).toBe(false)
+    expect(weixinSendSpec({} as never, { enabled: false, port: 3082 }).enabled()).toBe(false)
   })
 })

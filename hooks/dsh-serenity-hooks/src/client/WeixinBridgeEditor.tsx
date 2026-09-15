@@ -2,7 +2,7 @@
  * WeixinBridgeEditor.tsx — 「微信桥」配置区块（F4c-3，v1.27.0 实验性）
  *
  * **CCC 级配置**（S142 用户拍板：dsh 一个进程含多个 CCC，每个 CCC 独立对接微信桥）：
- * - 顶部 **CCC 选择器**（数据源 /serenity/cccs——discoverCccs 复用）——显式选择配置目标，
+ * - 顶部 **CCC 选择器**（数据源 /serenity/cccs——listCccs 复用）——显式选择配置目标，
  *   不隐式依赖"当前活跃会话"（WebUI 顶层全局，微信桥是配置写入必须显式）
  * - 选中 CCC 后：总开关 / 账号列表（扫码绑定）/ 路由表（user → role）
  * - 扫码绑定：POST login-start → qrcode-generator 生成二维码 SVG（复用 v1.24.6 TOTP 同款机制）
@@ -14,7 +14,7 @@
 import { useEffect, useState } from 'react'
 import qrcode from 'qrcode-generator'
 
-/** CCC 选择器条目（/serenity/cccs wire：SkiffCccEntry 同款） */
+/** CCC 选择器条目（/serenity/cccs wire：CccEntry 同款） */
 interface CccEntry {
   root: string
   name: string

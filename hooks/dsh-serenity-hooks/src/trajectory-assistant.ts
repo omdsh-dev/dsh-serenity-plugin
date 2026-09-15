@@ -64,7 +64,7 @@ export const IN_FLIGHT_HEADING = '## In-flight (rebuild handover)'
 // ── 风格门面（D8：仅 plain 与 metaphor；无 game 档）──
 
 /** 风格档位：plain（默认，精确文本）/ metaphor（借星舰词——产品隐喻非游戏词） */
-export type TrajectoryStyle = 'plain' | 'metaphor'
+type TrajectoryStyle = 'plain' | 'metaphor'
 
 /** 星舰词变体（仅在 style=metaphor 时替换可见前缀；正文不动） */
 const METAPHOR_PREFIX: Record<keyof typeof EVENT_LABEL, string> = {

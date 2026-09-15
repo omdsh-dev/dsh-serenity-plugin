@@ -15,7 +15,7 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
-import { findSerenityRoot } from './ccc.js'
+import { cccRootForCwd } from './ccc-roots.js'
 import { isSkiffSessionId } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { buildSensitiveTable, detectSensitive, buildRebuke, rebukeStates, REBUKE_MAX_ROUNDS } from './output-guard.js'
@@ -25,7 +25,7 @@ const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hoo
 
 /** 外部面会话判定（v1.26.3 用户拍板：仅外部面检测，本地维护会话豁免）：
  *  skiff-（F4 问答）/ acp-（F4c 程序化）/ rebuild-（v1.22.4 重建会话）前缀 */
-export function isExternalFaceSession(sessionId: string | undefined): boolean {
+function isExternalFaceSession(sessionId: string | undefined): boolean {
   if (!sessionId) return false
   return isSkiffSessionId(sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
 }
@@ -62,7 +62,7 @@ export function registerOutputGuardHook(ctx: Context): void {
     if (!isExternalFaceSession(sessionId)) return
     // 激活门控：只在 .serenity 存在的 CCC 目录检测（非 CCC 目录零干预）
     const cwd = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? process.cwd()
-    const root = findSerenityRoot(cwd)
+    const root = cccRootForCwd(cwd)
     if (!root) return
 
     const id = agent.id

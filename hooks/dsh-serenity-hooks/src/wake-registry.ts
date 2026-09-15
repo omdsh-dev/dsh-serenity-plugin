@@ -17,10 +17,10 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 
 /** 注册表相对 CCC 根的路径（与 `.bindings.json` 同居 AGENT_SESSIONS/） */
-export const WAKE_REGISTRY_REL_PATH = 'AGENT_SESSIONS/wake-registry.json'
+const WAKE_REGISTRY_REL_PATH = 'AGENT_SESSIONS/wake-registry.json'
 
 /** 注册表格式版本（结构变更时 +1；读取端只接受本版本） */
-export const WAKE_REGISTRY_VERSION = 1
+const WAKE_REGISTRY_VERSION = 1
 
 /**
  * 补跑窗口（缺省 2h）：dsh 停机期间到期的条目，若迟到不超过本窗口则补投，
@@ -29,7 +29,7 @@ export const WAKE_REGISTRY_VERSION = 1
 export const WAKE_CATCH_UP_MS = 2 * 60 * 60 * 1000
 
 /** 条目状态：一次性唤醒只有这四种归宿 */
-export type WakeState = 'pending' | 'delivered' | 'missed' | 'cancelled'
+type WakeState = 'pending' | 'delivered' | 'missed' | 'cancelled'
 
 /** 一条唤醒条目 */
 export interface WakeEntry {
@@ -56,7 +56,7 @@ export interface WakeEntry {
 }
 
 /** 注册表文件形态 */
-export interface WakeRegistry {
+interface WakeRegistry {
   version: number
   entries: WakeEntry[]
 }
@@ -114,7 +114,7 @@ export function loadWakeRegistry(root: string): { registry: WakeRegistry; error:
 }
 
 /** 原子写（tmp + rename；与 .bindings.json 同款形态） */
-export function saveWakeRegistry(root: string, registry: WakeRegistry): { ok: boolean; error: string | null } {
+function saveWakeRegistry(root: string, registry: WakeRegistry): { ok: boolean; error: string | null } {
   const path = wakeRegistryPath(root)
   try {
     mkdirSync(dirname(path), { recursive: true })

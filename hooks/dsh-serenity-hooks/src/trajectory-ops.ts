@@ -21,7 +21,6 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
-import type { JsonValue } from './json.js'
 
 /**
  * `container_trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
@@ -33,7 +32,7 @@ import type { JsonValue } from './json.js'
  * hook-develop-guide 并进 container_admin msm guide｜autopilot 面归 container_admin 的 autopilot 域｜
  * wake-add/list/rm 收敛为 wake-later。
  */
-export type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'wake-later'
+type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'wake-later'
 
 export const TRAJECTORY_ACTIONS: readonly TrajectoryAction[] = [
   'list', 'show', 'create', 'use', 'rebuild', 'wake-later',
@@ -83,7 +82,7 @@ interface SessionStatus {
   completed: boolean
 }
 
-export interface SessionEntry {
+interface SessionEntry {
   dirName: string
   path: string
   mtime: Date
@@ -198,7 +197,7 @@ export function showSession(root: string, key: string): string {
 
 // ── create ──
 
-export interface CreateSessionOptions {
+interface CreateSessionOptions {
   root: string
   /** --desc 模式的描述（与 issue 互斥） */
   desc?: string
@@ -231,7 +230,7 @@ function sessionMdTemplate(title: string, id: string, goal: string | undefined, 
 
 /** create 子命令（对齐 osp createSession：--desc/--issue 二选一 + dry-run + 长度限制） */
 /** 目录名脱敏（Windows 审计问题 10）：非法字符 → '-', 去尾点/空格, 保留名（CON/NUL 等）加前缀 */
-export function sanitizeDirName(s: string): string {
+function sanitizeDirName(s: string): string {
   const cleaned = s
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
     .replace(/[ .]+$/g, '')
@@ -566,9 +565,3 @@ export function summarize(root: string): string {
   }
   return lines.join('\n')
 }
-
-// ── 其他 ──
-
-// 兼容导出（部分调用方依赖旧签名）
-export type SessionInfo = SessionEntry
-export type { JsonValue }

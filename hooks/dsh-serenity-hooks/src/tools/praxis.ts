@@ -17,8 +17,6 @@ import { EAP_CONTENT } from './eap.js'
 import { NEAT_CONTENT } from './neat.js'
 import { CCE_CONTENT } from './cce.js'
 
-export type PraxisSection = 'eap' | 'neat' | 'cce'
-
 /** 框架清单（无参调用时返回的精简目录） */
 export const PRAXIS_INDEX = `praxis — 可实践理论注入（认知框架，按需加载）
 选择框架：praxis eap（认知质量——E↑/R↓/S↑ 三变量 + 输出前自检）

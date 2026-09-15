@@ -27,7 +27,7 @@ export interface ImageFallbackInjected {
   resendText: (sessionId: string, text: string) => Promise<void>
 }
 
-export type ImageFallbackDockProps = PropsRuntime<'conversation.input.dock'> & ImageFallbackInjected
+type ImageFallbackDockProps = PropsRuntime<'conversation.input.dock'> & ImageFallbackInjected
 
 /** 输入区快照中携带的提示错误（host 准入拒绝：MODEL_DOES_NOT_SUPPORT_IMAGES） */
 interface PromptErrorLike {

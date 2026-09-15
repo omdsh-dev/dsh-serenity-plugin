@@ -12,13 +12,14 @@
  *     ⇒ 只把**不依赖模板**的两项并入 `use`：空壳 / 长期无活动（**提示，不阻断**）
  *   · `close`/`archive` → 删：`completed` 本就由 SESSION.md 的 `[x]` 推导（不靠 close 写）；
  *     归档能力由 `container_fs mv → _archived/` 承担
- *   · `hook-develop-guide` → 并入 `container_admin msm guide`（SEP 内容进开发手册）
+ *   · `hook-develop-guide` → **淘汰**（v1.34.1：SEP 整体废除——「能落 harness 已有原语，
+ *     就不要自造协议 + 脚本管道」；轨迹挂哪些 skill 改由 SESSION.md frontmatter 声明 +
+ *     `systemPrompt.section` 注入，见 `docs/trajectory-skill-injection.md`）
  *   · autopilot 面（all/init/random/diag/doc/check/status/guide）→ `container_admin` 的 autopilot 域
  *   · `wake-add`/`wake-list`/`wake-rm` → **`wake-later`**（一次登记；**不可回收、无面板**——用户明示接受）
  *
- * 保留 osp 对齐语义的部分：create 的 `--desc`/`--issue` 二选一、use 激活即重命名 dsh 会话标题（F3）、
- * CCC `session-tool` MSM 钩子后处理（create-transform）。活跃会话跟踪：内存 Map（按 dsh 会话 id 隔离）
- * + 从 events 恢复（S134）。
+ * 保留 osp 对齐语义的部分：create 的 `--desc`/`--issue` 二选一、use 激活即重命名 dsh 会话标题（F3）。
+ * 活跃会话跟踪：内存 Map（按 dsh 会话 id 隔离）+ 从 events 恢复（S134）。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -29,7 +30,7 @@ import type { JsonValue } from '../json.js'
 import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
-import { loadMsmEntries, runMsmAsync, type MsmEntry } from '../msm-ops.js'
+import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { appendBound, readLastBound, resolveSessionTrajectoryLabel } from '../trajectory-bound.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
 import {
@@ -45,10 +46,6 @@ import {
   type ActiveSessionInfo,
   type CreateSessionResult,
 } from '../trajectory-ops.js'
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
 
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
@@ -78,7 +75,7 @@ function currentBoundDirName(exec: { agent?: { session?: unknown } }, scope: str
 // v1.27.1：**永远开启**（S142 用户拍板"开关下掉，永远开启"）——命名是固定行为，
 // 移除 naming.enabled 简单配置开关；仅剩 sessionTitle 服务可用性守卫。
 
-export interface RenameOnUseDeps {
+interface RenameOnUseDeps {
   /** sessionTitle 服务可用性 */
   sessionTitleAvailable: boolean
 }
@@ -215,118 +212,11 @@ function renderText(value: unknown): ContentBlock[] {
   return [{ type: 'text', text }]
 }
 
-// ── CCC session-tool MSM 扩展发现（对齐 osp discoverCccHooks/discoverCccSubcommands）──
-
-/** 从 flags 中查找 name 匹配的 flag，仅在 new-style 对象上检查 */
-function findFlagByName(
-  flags: MsmEntry['flags'] | undefined, name: string,
-): { description?: string } | undefined {
-  if (!flags) return undefined
-  for (const f of flags) {
-    if ('name' in f && f.name === name) return f
-  }
-  return undefined
-}
-
-/** 从 CCC 的 session-tool MSM flags 中提取支持的钩子名列表 */
-function discoverCccHooks(entries: MsmEntry[]): string[] {
-  const msm = entries.find((e) => e.name === 'session-tool')
-  const hookFlag = findFlagByName(msm?.flags, 'hook')
-  if (!hookFlag?.description) return []
-  return hookFlag.description.split('|').map((s) => s.trim()).filter(Boolean)
-}
-
-/** 从 CCC 的 session-tool MSM flags 中提取自定义子命令清单 */
-function discoverCccSubcommands(entries: MsmEntry[]): string[] {
-  const msm = entries.find((e) => e.name === 'session-tool')
-  const subFlag = findFlagByName(msm?.flags, 'subcommand')
-  if (!subFlag?.description) return []
-  return subFlag.description.split('|').map((s) => s.trim()).filter(Boolean)
-}
-
-/** 生成扩展提示（对齐 osp buildExtHint） */
-function buildExtHint(hasSessionTool: boolean, hooks: string[], subcommands: string[]): string {
-  if (!hasSessionTool) {
-    return '\n\n[CCC] To extend container_trajectory tool capabilities, register a session-tool MSM (container_admin msm register); the extension protocol (SEP) is documented in container_admin msm guide'
-  }
-  const parts: string[] = []
-  if (hooks.length > 0) parts.push(`hooks: ${hooks.join(', ')}`)
-  if (subcommands.length > 0) parts.push(`custom subcommands (msm session-tool): ${subcommands.join(', ')}`)
-  const detail = parts.length > 0 ? ` (${parts.join('; ')})` : ''
-  return `\n\n[CCC] session-tool MSM registered${detail}`
-}
-
-/**
- * SEP（Session Extension Protocol）开发者指南（原 `hook-develop-guide` 动作的内容）。
- *
- * v1.33（用户裁决"选 A"）：该动作**不再作为 trajectory 的动作**，内容**并进
- * `container_admin msm guide`**（理由：SEP 的本质就是"注册一个 session-tool MSM"，
- * 天然属于 MSM 开发手册）。⇒ 这里保留为**唯一文本源**，由 container-admin 引用，
- * 避免两份会漂移的说明（单真相源）。
- * @param hasSessionTool 本 CCC 是否已注册 session-tool MSM（决定了尾部的提示行）
- */
-export function buildSepGuide(hasSessionTool: boolean): string {
-  return [
-    '═══ Session Extension Protocol (SEP) v1 — Developer Guide ═══',
-    '',
-    'A CCC can extend the ACC session tool by registering a session-tool MSM,',
-    'without modifying plugin code. ACC behavior is never reduced — the CCC only',
-    'does post-processing after ACC completes.',
-    '',
-    '── Extension point 1: Post-processing hooks ──',
-    '',
-    'After certain ACC subcommands complete, ACC checks whether the CCC\'s',
-    'session-tool MSM has registered a matching hook. If so, ACC invokes the MSM',
-    'for post-processing.',
-    '',
-    'Available hooks:',
-    '',
-    '  create-transform',
-    '    Trigger: after create writes the default SESSION.md',
-    '    Invocation: msm session-tool --hook=create-transform --session-dir=<path>',
-    '    Allowed: read SESSION.md and modify it in place (append fields, swap templates, call APIs, etc.)',
-    '    Note: ACC has already ensured the directory and SESSION.md exist; the CCC only modifies',
-    '',
-    '── Extension point 2: Custom subcommands ──',
-    '',
-    'The LLM can call msm session-tool <subcommand> to run CCC-specific',
-    'subcommands such as reindex, export, batch-create. These bypass the ACC session',
-    'tool\'s enum.',
-    '',
-    '── How to register a session-tool MSM ──',
-    '',
-    '1. Write the script under the CCC skills directory:',
-    '     .opencode/skills/<ccc-name>/scripts/session-tool.ts',
-    '',
-    '2. Register it in mech-registry.json:',
-    '     container_admin msm register session-tool \\',
-    '       --skill <ccc-name> --path .opencode/skills/<ccc-name>/scripts/session-tool.ts \\',
-    '       --category semi-mech \\',
-    '       --description "CCC session extension: hooks + custom subcommands" \\',
-    '       --flags \'[',
-    '         {"name":"hook","type":"string","description":"create-transform"},',
-    '         {"name":"subcommand","type":"string","description":"reindex | export"},',
-    '         {"name":"session-dir","type":"path","description":"session directory path"},',
-    '         {"name":"dry-run","type":"boolean","description":"preview mode"}',
-    '       ]\'',
-    '',
-    '3. Hook declaration convention:',
-    '     The --hook description field in flags enumerates supported hook names, split by |.',
-    '     When ACC finds create-transform in the list, it invokes it after create.',
-    '',
-    '4. Subcommand declaration convention:',
-    '     The --subcommand description field in flags enumerates supported subcommand names, split by |.',
-    '     The LLM can then call msm session-tool <subcommand>.',
-    '',
-    (hasSessionTool
-      ? '✅ This CCC has a session-tool MSM registered'
-      : 'ℹ️  This CCC has no session-tool MSM yet — start with container_admin msm register'),
-    '',
-    '── More information ──',
-    '',
-    'Reference ACC source: src/tools/trajectory.ts (hook invocation logic)',
-  ].join('\n')
-}
+// ── v1.34.1：SEP（Session Extension Protocol）整体废除 ──
+// 原「CCC 注册 session-tool MSM → ACC 在生命周期点 spawn 它」的协议 + 脚本管道已删除
+// （所有者裁决「能落 harness 已有原语，就不要自造协议 + 脚本管道」）。扩展面改为：
+//   · 轨迹挂哪些 skill → SESSION.md frontmatter 声明 + systemPrompt.section（docs/trajectory-skill-injection.md）
+//   · 其余扩展 → harness 已有原语（工具/section/配置），不再经 ACC 的钩子通道。
 
 /**
  * 创建 trajectory 工具（原 logbook；v1.33 S142 §32 更名 + 动作收敛）。
@@ -371,24 +261,17 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
     render: (args, value) => renderText(value),
   },
   async execute(args, exec) {
-    const root = findSerenityRoot(agentCwd(exec))
-    if (!root) throw new Error('No CCC found: no .serenity file from agent cwd')
-
-    // 检测 CCC 是否注册了 session-tool MSM（对齐 osp：ACC 总是执行内置逻辑，钩子只做后处理）
-    const entries = loadMsmEntries(root)
-    const hasSessionTool = entries.some((e) => e.name === 'session-tool')
-    const cccHooks = discoverCccHooks(entries)
-    const cccSubs = discoverCccSubcommands(entries)
-    const extHint = buildExtHint(hasSessionTool, cccHooks, cccSubs)
+    const root = cccRootForExec(exec)
+    if (!root) throw new Error(NO_CCC_FROM_AGENT_CWD)
 
     switch (args.action) {
       case 'list': {
         // v1.33：原 `summary` 动作并入 list（用户裁决）——清单 + 全库统计一次给全
-        return listSessions(root) + '\n' + summarize(root) + extHint
+        return listSessions(root) + '\n' + summarize(root)
       }
       case 'show': {
         if (!args.name) throw new Error('show requires name (S### or directory name)')
-        return showSession(root, args.name) + extHint
+        return showSession(root, args.name)
       }
       case 'create': {
         // 需求②：create 也加 summary（用户拍板"create 也带概括"）——必填（编号日期固定派生，概括由调用方显式给）
@@ -406,7 +289,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
           goal: args.goal,
           dryRun: isDryRun,
         })
-        let message = result.message
+        const message = result.message
         // U6（方案 v1.0）：create 保留当前绑定——不再 rename 当前 dsh 会话为新目录
         // （v1.25.11 旧行为：create 后立即改名夺绑定——长会话中途误 create 即被夺走）。
         // 新会话仅在后续显式 `session use` 时才绑定；此处只 append create bound 审计记录。
@@ -422,23 +305,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
             },
           )
         }
-        // ---- 钩子：create-transform（对齐 osp；仅非 dry-run 且 CCC 声明了该钩子时执行）----
-        if (!isDryRun && cccHooks.includes('create-transform')) {
-          try {
-            const hookResult = (await runMsmAsync(root, {
-              action: 'exec',
-              name: 'session-tool',
-              args: ['--hook=create-transform', `--session-dir=${result.sessionPath}`],
-            })) as { stdout?: string; data?: string; ok?: boolean }
-            const hookOut = hookResult.ok !== undefined && hookResult.ok === false
-              ? (hookResult.data ?? '')
-              : (hookResult.stdout ?? '')
-            message += `\n  [create-transform] ${hookOut.trim()}`
-          } catch (err) {
-            message += `\n  [WARN] create-transform hook failed: ${err instanceof Error ? err.message : String(err)}`
-          }
-        }
-        return message + extHint
+        return message
       }
       case 'use': {
         if (!args.name) throw new Error('use requires name (S### or directory name)')
@@ -496,7 +363,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
           root,
           note: args.note as string | undefined,
           summary: args.summary as string,
-          agentCwd: agentCwd(exec),
+          agentCwd: agentCwdFor(exec),
           dshSessionId,
         })
         return {

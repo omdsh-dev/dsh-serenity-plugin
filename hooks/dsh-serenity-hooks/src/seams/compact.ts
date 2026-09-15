@@ -24,12 +24,13 @@ import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 // 类型扩展：拉入 @deepseek-ai/dsh-compaction 对 SessionEventMap 的 declare module 合并
 // （compact/start | compact/summary | compact/end 事件类型；公开版由 dsh-compact 改名而来）
 import type {} from '@deepseek-ai/dsh-compaction'
-import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { cccRootForCwd } from '../ccc-roots.js'
 // 复用 context.ts 的完整 ACC 注入消息（简短头 + ACC 5 块 + CCC 顶层 skill 原文）
 import { accMessage } from './context.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
-export interface CompactRegistration {
+interface CompactRegistration {
   /** CCC 配置相对路径；缺省用 DEFAULT_SERENITY_CONFIG_PATHS */
   configPaths?: string[]
   /** 入口 skill 内容注入上限（与 context.ts 对齐） */
@@ -58,7 +59,7 @@ export function registerCompactRetention(ctx: Context, opts: CompactRegistration
     if (!agent) return
 
     const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
-    const root = findSerenityRoot(cwd)
+    const root = cccRootForCwd(cwd)
     if (!root) return
 
     try {

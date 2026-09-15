@@ -18,9 +18,9 @@
 import { randomBytes, createDecipheriv, createCipheriv, createHash } from 'node:crypto'
 
 /** iLink API Base URL（腾讯官方） */
-export const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com'
+const ILINK_DEFAULT_BASE_URL = 'https://ilinkai.weixin.qq.com'
 /** CDN Base（媒体上传/下载；P3 媒体期用） */
-export const ILINK_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c'
+const ILINK_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c'
 /** iLink-App-Id（openclaw-weixin 同款） */
 const ILINK_APP_ID = 'bot'
 /** 通道版本（对齐 openclaw-weixin 2.1.1；buildClientVersion 编码） */
@@ -65,7 +65,7 @@ function buildHeaders(token?: string): Record<string, string> {
 }
 
 /** fetch 注入点（测试替换；生产 = 全局 fetch） */
-export type FetchLike = typeof fetch
+type FetchLike = typeof fetch
 
 let currentFetch: FetchLike = (...args) => fetch(...args)
 
@@ -126,7 +126,7 @@ async function apiPost(params: { baseUrl: string; endpoint: string; body: string
  * @param endpoint 端点名（错误信息定位用）
  * @param rawText 响应体原文
  */
-export function assertIlinkOk(endpoint: string, rawText: string): void {
+function assertIlinkOk(endpoint: string, rawText: string): void {
   let json: { ret?: number; errcode?: number; errmsg?: string }
   try {
     json = JSON.parse(rawText) as { ret?: number; errcode?: number; errmsg?: string }
@@ -160,7 +160,7 @@ export async function fetchQRCode(params: {
 }
 
 /** 扫码状态（轮询；1s 间隔建议，5min 有效） */
-export interface QrStatusResult {
+interface QrStatusResult {
   status: string
   bot_token?: string
   ilink_bot_id?: string
@@ -190,7 +190,7 @@ export async function pollQRStatus(params: {
 // ── 消息收发 ──
 
 /** CDN 媒体元数据（下载侧；协议见 docs/weixin-bot-api.md §6） */
-export interface CDNMedia {
+interface CDNMedia {
   encrypt_query_param?: string
   aes_key?: string
   encrypt_type?: number
@@ -230,7 +230,7 @@ export interface WeixinMessage {
   context_token?: string
 }
 
-export interface GetUpdatesResp {
+interface GetUpdatesResp {
   ret?: number
   errcode?: number
   errmsg?: string
@@ -266,9 +266,9 @@ export async function getUpdates(params: {
 
 // ── 发送 ──
 
-export const MessageType = { NONE: 0, USER: 1, BOT: 2 } as const
-export const MessageState = { NEW: 0, GENERATING: 1, FINISH: 2 } as const
-export const MessageItemType = { NONE: 0, TEXT: 1, IMAGE: 2, VOICE: 3, FILE: 4, VIDEO: 5 } as const
+const MessageType = { NONE: 0, USER: 1, BOT: 2 } as const
+const MessageState = { NEW: 0, GENERATING: 1, FINISH: 2 } as const
+const MessageItemType = { NONE: 0, TEXT: 1, IMAGE: 2, VOICE: 3, FILE: 4, VIDEO: 5 } as const
 
 /** 发文本消息（主动发起时可不带 context_token；md→plain 内置——微信不支持 Markdown）。
  *  v1.30.9：HTTP 200 但 `ret/errcode != 0` → 抛错（此前静默当成功，导致"记录已送达"的假象）。 */
@@ -436,7 +436,7 @@ export async function sendFileMessage(params: {
  *  onCleanup → status 0）——早期协议注释"2=CANCEL"为误记，以参考实现为准。 */
 export const TypingStatus = { TYPING: 1, CANCEL: 0 } as const
 
-export interface GetConfigResp {
+interface GetConfigResp {
   ret?: number
   errmsg?: string
   typing_ticket?: string

@@ -23,11 +23,11 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForCwd } from '../ccc-roots.js'
 import { sessionEvents } from '../trajectory-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
-export interface BootstrapSettings {
+interface BootstrapSettings {
   /** 首请求（bootstrap 阶段）工具集（缺省 dsp 核心；zeroTools 时忽略——0 工具） */
   bootstrapTools: string[]
   /** 晋升信号类型集合 */
@@ -79,14 +79,14 @@ export function hasUserMessageHistory(session: unknown): boolean {
 
 // ── 阶段机（等价 anchored compaction-epoch.mjs createEpochPromotion）──
 
-export interface PromotionStatus {
+interface PromotionStatus {
   /** 最后一次 compaction/end 的 seq（-1 = 未压缩过） */
   boundary: number
   /** 边界后是否存在持久晋升信号 */
   promoted: boolean
 }
 
-export interface PromotionTracker {
+interface PromotionTracker {
   status(agent: Agent | undefined): PromotionStatus
   observe(session: unknown, event: unknown): void
 }
@@ -236,7 +236,7 @@ export function resolveBootstrapSettings(): BootstrapSettings {
 function agentRoot(agent: unknown): string | null {
   const cwd = (agent as { session?: { header?: { cwd?: string } } } | undefined)?.session?.header?.cwd
   if (typeof cwd !== 'string') return null
-  return findSerenityRoot(cwd)
+  return cccRootForCwd(cwd)
 }
 
 /** 协议固有设置（零配置面）：所有 CCC 使用同一固化设置 */
@@ -262,7 +262,7 @@ export function registerBootstrap(ctx: Context): void {
     try {
       const cwd = (session as { header?: { cwd?: string } } | undefined)?.header?.cwd
       if (typeof cwd !== 'string') return
-      const root = findSerenityRoot(cwd)
+      const root = cccRootForCwd(cwd)
       if (!root) return
       trackerFor(root).observe(session, event)
     } catch {

@@ -8,9 +8,9 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runMsm, MSM_GUIDE, MSM_ACTIONS } from '../src/msm-ops.js'
-import { EAP_CONTENT, eapTool } from '../src/tools/eap.js'
-import { cceTool, CCE_CONTENT } from '../src/tools/cce.js'
-import { NEAT_CONTENT, neatTool } from '../src/tools/neat.js'
+import { EAP_CONTENT } from '../src/tools/eap.js'
+import { CCE_CONTENT } from '../src/tools/cce.js'
+import { NEAT_CONTENT } from '../src/tools/neat.js'
 import { resolveSerenityEnv } from '../src/seams/env.js'
 
 let dir: string
@@ -115,19 +115,17 @@ describe('msm: guide + 协议 flag + path-arg', () => {
   })
 })
 
-describe('eap/neat 工具内容', () => {
-  it('EAP 完整框架含三变量与自检清单（v1.23.0 英化）', async () => {
+describe('eap/neat 内容常量', () => {
+  it('EAP 完整框架含三变量与自检清单（v1.23.0 英化）', () => {
     expect(EAP_CONTENT).toContain('E↑ Explicitness')
     expect(EAP_CONTENT).toContain('Pre-Output Self-Check Checklist')
-    const v = await eapTool.execute({ section: 'checklist' }, {} as never)
-    expect(String(v)).toContain('Self-Check')
+    expect(EAP_CONTENT).toContain('Self-Check')
   })
 
-  it('Neat 完整协议含四铁律与五层（v1.23.0 英化）', async () => {
+  it('Neat 完整协议含四铁律与五层（v1.23.0 英化）', () => {
     expect(NEAT_CONTENT).toContain('Four Iron Rules')
     expect(NEAT_CONTENT).toContain('Requirements')
-    const v = await neatTool.execute({ section: 'layers' }, {} as never)
-    expect(String(v)).toContain('Five-Layer Progression')
+    expect(NEAT_CONTENT).toContain('Five-Layer Progression')
   })
 })
 
@@ -144,13 +142,11 @@ describe('env: DSH_SERENITY_* 事实', () => {
   })
 })
 
-describe('cce 工具内容', () => {
-  it('CCE 完整框架含核心命题与六阶段（v1.23.0 英化）', async () => {
-    const { cceTool, CCE_CONTENT } = await import('../src/tools/cce.js')
+describe('cce 内容常量', () => {
+  it('CCE 完整框架含核心命题与六阶段（v1.23.0 英化）', () => {
     expect(CCE_CONTENT).toContain('Cognitive Continuity Engineering')
     expect(CCE_CONTENT).toContain('H_op')
     expect(CCE_CONTENT).toContain('Six-Phase Lifecycle')
-    const v = await cceTool.execute({ section: 'lifecycle' }, {} as never)
-    expect(String(v)).toContain('Reconstruction')
+    expect(CCE_CONTENT).toContain('Reconstruction')
   })
 })

@@ -19,9 +19,13 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { hostService, hostSessions } from './host/access.js'
 import { getStatus, setSafeMode } from './status.js'
-import { findSerenityRoot, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+// C2（CCC 发现面归一）：L1 单根解析 / L2 枚举一律问 ccc-roots（本文件不再自写上溯包裹）
+import { cccRootForCwd, listCccs } from './ccc-roots.js'
 import { listActiveHandymen } from './handyman-ops.js'
 import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey, rotatePublicAskKey, projectKnownWorkspaces } from './config-ops.js'
+// C4 块 B：端口取值只从集中端口表取（原处硬写 3100 回退）
+import { ACP_HTTP_PORT } from './ports.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const HANDYMEN_PATH = '/serenity/handymen'
@@ -35,14 +39,14 @@ const WEIXIN_PATH = '/serenity/weixin'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
 export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
-export const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 const EXT_BY_MEDIA: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif' }
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 单图 10MB 上限
 
 /** 文件落盘目录（CCC 根相对；v1.24.1 粘贴任意文件自动落盘——agent 经 CCC 既有 MSM（pdf-extract/archive-extract 等）自主处理） */
 export const FILE_UPLOAD_DIR = '_tmp/files_from_user'
 /** 拒绝的可执行/危险扩展名（安全边界：不落盘可执行文件，防 agent 被诱导执行） */
-export const BLOCKED_FILE_EXTS = new Set([
+const BLOCKED_FILE_EXTS = new Set([
   'exe', 'dll', 'msi', 'bat', 'cmd', 'ps1', 'com', 'scr', 'lnk', 'sh', 'vbs', 'bin', 'app', 'deb', 'rpm', 'jar',
 ])
 const MAX_FILE_BYTES = 10 * 1024 * 1024 // 单文件 10MB 上限（用户拍板：与图片一致）
@@ -134,7 +138,29 @@ function sendJson(res: ServerResponse, code: number, body: unknown): void {
   res.end(payload)
 }
 
-export interface StatusApiRegistration {
+/**
+ * WebUI 专属动作的来源判别（C4 块 C：此前 **9 处内联** `req.headers['x-serenity-ui'] !== '1'`）。
+ *
+ * ⚠️ 语义边界（勿误读为认证）：这是**客户端判别头**——任何本机能发 HTTP 的进程都可自带它
+ * （无密钥、无签名、不校验来源，见现状取证 §② 面 A "认证与守卫"）。它区分的是
+ * "WebUI 触发的动作"与"agent/curl 触发的动作"（如 safe-mode 不可由 agent 自行开关）。
+ * 本 helper 只做**同一判据的归一**，不放宽也不收紧：判据、状态码、文案均由调用方给出。
+ */
+export function senderIsWebUi(req: IncomingMessage): boolean {
+  return req.headers['x-serenity-ui'] === '1'
+}
+
+/**
+ * WebUI 闸门：非 WebUI 来源 → 回 403（文案由调用方给，**响应体逐字不变**）并返回 false。
+ * 用法：`if (!requireWebUi(req, res, '<原文案>')) return`
+ */
+function requireWebUi(req: IncomingMessage, res: ServerResponse, message: string): boolean {
+  if (senderIsWebUi(req)) return true
+  sendJson(res, 403, { error: message })
+  return false
+}
+
+interface StatusApiRegistration {
   configPaths?: string[]
 }
 
@@ -153,7 +179,7 @@ export function resolveWorkspaceCore(
   if (sessionCwd) return sessionCwd
   if (workspaceParam) return workspaceParam
   for (const cwd of listCwds()) {
-    if (cwd && findSerenityRoot(cwd)) return cwd
+    if (cwd && cccRootForCwd(cwd)) return cwd
   }
   return fallback
 }
@@ -191,7 +217,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         }
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
-        const root = findSerenityRoot(workspace)
+        const root = cccRootForCwd(workspace)
         if (!root) {
           sendJson(res, 200, { handymen: [] })
           return
@@ -215,14 +241,11 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           sendJson(res, 405, { error: 'method not allowed' })
           return
         }
-        if (req.headers['x-serenity-ui'] !== '1') {
-          sendJson(res, 403, { error: '图片落盘仅限 WebUI（client 专用）' })
-          return
-        }
+        if (!requireWebUi(req, res, '图片落盘仅限 WebUI（client 专用）')) return
         const raw = await readBody(req, 20 * 1024 * 1024)
         const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; mediaType?: string; data?: string }
         const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
-        const root = findSerenityRoot(workspace)
+        const root = cccRootForCwd(workspace)
         if (!root) {
           sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
           return
@@ -247,14 +270,11 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           sendJson(res, 405, { error: 'method not allowed' })
           return
         }
-        if (req.headers['x-serenity-ui'] !== '1') {
-          sendJson(res, 403, { error: '文件落盘仅限 WebUI（client 专用）' })
-          return
-        }
+        if (!requireWebUi(req, res, '文件落盘仅限 WebUI（client 专用）')) return
         const raw = await readBody(req, 20 * 1024 * 1024)
         const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; name?: string; data?: string }
         const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
-        const root = findSerenityRoot(workspace)
+        const root = cccRootForCwd(workspace)
         if (!root) {
           sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
           return
@@ -286,14 +306,11 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         }
         if (req.method === 'POST') {
           // safe-mode 是用户能力：POST 需 WebUI 专属头，agent 工具/curl 无法自行开关
-          if (req.headers['x-serenity-ui'] !== '1') {
-            sendJson(res, 403, { error: 'safe-mode 切换仅限 WebUI（agent 不可自行开关）' })
-            return
-          }
+          if (!requireWebUi(req, res, 'safe-mode 切换仅限 WebUI（agent 不可自行开关）')) return
           const raw = await readBody(req, 64 * 1024)
           const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; on?: boolean }
           const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
-          const root = findSerenityRoot(workspace)
+          const root = cccRootForCwd(workspace)
           if (!root) {
             sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
             return
@@ -320,10 +337,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     path: CONFIG_PATH,
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
-        if (req.headers['x-serenity-ui'] !== '1') {
-          sendJson(res, 403, { error: '高级设定仅限 WebUI（client 专用）' })
-          return
-        }
+        if (!requireWebUi(req, res, '高级设定仅限 WebUI（client 专用）')) return
         if (req.method === 'GET') {
           // v1.28.0 适配 0.1.2-rc.1 A2 方案 A′：响应附 knownWorkspaces（host workspaceRegistry
           // 投影 + 白名单过滤）——rc.1 workspace.list unary 删除，AccountsEditor 白名单下拉
@@ -360,7 +374,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
   })
 
   // /serenity/cccs：候选认知容器列表（v1.26.2 设置面板「开放容器」白名单选择的数据源；
-  // 只读；与 skiff 调试页同一 discoverCccs——工作区注册表 + 持久化会话 + live 兜底）
+  // 只读；与 skiff 调试页/微信桥/ACP 问答页**同一** listCccs——工作区注册表 ∪ 持久化会话 ∪ live）
   ctx.webServer.register({
     kind: 'exact',
     path: CCCS_PATH,
@@ -372,11 +386,10 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         }
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
-        const root = findSerenityRoot(workspace) ?? ''
-        // 动态 import：discoverCccs 依赖 skiff 核心（dsh-llm 运行时 import）——
-        // 保持 api.ts 静态链纯净（仅本端点触发时加载，api 纯函数测试不受影响）
-        const { discoverCccs } = await import('./skiff-debug.js')
-        const cccs = await discoverCccs(ctx, root)
+        const root = cccRootForCwd(workspace) ?? ''
+        // C2：枚举归 ccc-roots（不再绕 skiff-debug.js 加载整条 skiff 链）；
+        // CccEntry 带 name + roles ⇒ 面板选择器需要的字段齐备（与旧 discoverCccs 输出同形）。
+        const cccs = await listCccs(ctx, { defaultRoot: root, withRoles: true })
         sendJson(res, 200, { cccs })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
@@ -392,10 +405,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     path: PUBLIC_ASK_PATH,
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
-        if (req.headers['x-serenity-ui'] !== '1') {
-          sendJson(res, 403, { error: '仅限 WebUI（key 属敏感凭据）' })
-          return
-        }
+        if (!requireWebUi(req, res, '仅限 WebUI（key 属敏感凭据）')) return
         if (req.method === 'PUT') {
           const raw = await readBody(req, 16 * 1024)
           const body = JSON.parse(raw) as { action?: string }
@@ -418,7 +428,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         const simple = readSimpleSettings()
         const allowed = settings.publicAsk.allowed
         // 地址：单容器页 /c/<name>（开放容器）+ 列表页 /
-        const port = simple.acpHttpPort ?? 3100
+        const port = simple.acpHttpPort ?? ACP_HTTP_PORT
         const base = `http://127.0.0.1:${port}`
         const containerUrls = allowed.map((name) => ({ name, url: `${base}/c/${encodeURIComponent(name)}` }))
         sendJson(res, 200, {
@@ -447,10 +457,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
         if (req.method === 'POST') {
-          if (req.headers['x-serenity-ui'] !== '1') {
-            sendJson(res, 403, { error: '立即唤起仅限 WebUI（agent 不可自行唤起）' })
-            return
-          }
+          if (!requireWebUi(req, res, '立即唤起仅限 WebUI（agent 不可自行唤起）')) return
           const raw = await readBody(req, 16 * 1024)
           const body = JSON.parse(raw) as { sessionId?: string; workspace?: string; ccc?: string; action?: string }
           if (body.action !== 'wake') {
@@ -458,7 +465,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             return
           }
           const workspace = resolveWorkspace(ctx, { sessionId: body.sessionId, workspace: body.workspace })
-          const root = findSerenityRoot(workspace)
+          const root = cccRootForCwd(workspace)
           // v1.27.4：显式 ccc 参数优先（多 CCC 面板选择器）；无参 → 面板默认目标（第一个 enabled CCC）
           const effectiveRoot = body.ccc?.trim() || (!body.workspace && !body.sessionId)
             ? (body.ccc?.trim() ?? (await import('./autopilot-trajectory.js')).collectAutopilotCccs(ctx)[0] ?? root)
@@ -467,7 +474,10 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             sendJson(res, 404, { error: `no CCC found from workspace: ${workspace}` })
             return
           }
-          const { performAutopilotWake, readAutopilotSettings } = await import('./autopilot-trajectory.js')
+          // v1.34.1 ⑥ C6a：判据原语（readAutopilotSettings）已归 autopilot-core（零 DSH 依赖层），
+          // 唤起执行仍在 autopilot-trajectory——两者各自动态 import（保持 api.ts 静态链纯净）
+          const { performAutopilotWake } = await import('./autopilot-trajectory.js')
+          const { readAutopilotSettings } = await import('./autopilot-core.js')
           const settings = readAutopilotSettings(effectiveRoot)
           if (!settings) {
             sendJson(res, 400, { error: 'Autopilot Trajectory 未配置（.opencode/serenity.json 缺段）' })
@@ -483,10 +493,11 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         }
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
-        const root = findSerenityRoot(workspace)
+        const root = cccRootForCwd(workspace)
         // 动态 import：autopilot 模块依赖 dsh-agent/dsh-llm 运行时——保持 api.ts 静态链纯净
-        // （仅本端点触发时加载，api 纯函数测试不受影响）
-        const { getAutopilotStatus, collectAutopilotCccs } = await import('./autopilot-trajectory.js')
+        // （仅本端点触发时加载，api 纯函数测试不受影响）。C5 起状态取数改走 container-status
+        // （同为动态 import：它静态依赖时钟模块），此处只剩"面板默认 CCC 解析"这一个用途。
+        const { collectAutopilotCccs } = await import('./autopilot-trajectory.js')
         // v1.27.4：显式 ?ccc=<root> 优先（多 CCC 面板）；无参 → 第一个 enabled CCC（面板默认）；
         // 无 workspace/sessionId/ccc → 与旧语义一致（面板默认实验 CCC）
         const effectiveRoot = url.searchParams.get('ccc')?.trim()
@@ -499,8 +510,10 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         // D58（v1.32.0）：同一端点同时承载**唤醒注册表**条目（trajectory 是一等概念，
         // autopilot 是其子集）——`status` 是 autopilot 状态（保持原字段名与形状不变，面板兼容），
         // `wakes` 是注册表全量条目（含 state/at/target/createdBy/lastResult，只读）。
-        const { listWakes } = await import('./wake-registry.js')
-        sendJson(res, 200, { status: getAutopilotStatus(effectiveRoot), wakes: listWakes(effectiveRoot).entries })
+        // C5（2026-09-15）：两段状态改经 `container-status` 取数（唯一取数出口）——投影不变
+        // （`status` 仍是 getAutopilotStatus 本体、`wakes` 仍是注册表原始条目）。
+        const { containerAutopilot, containerWakes } = await import('./container-status.js')
+        sendJson(res, 200, { status: containerAutopilot(effectiveRoot), wakes: containerWakes(effectiveRoot).entries })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
       }
@@ -519,10 +532,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     path: WEIXIN_PATH,
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
-        if (req.headers['x-serenity-ui'] !== '1') {
-          sendJson(res, 403, { error: '微信桥配置仅限 WebUI（client 专用）' })
-          return
-        }
+        if (!requireWebUi(req, res, '微信桥配置仅限 WebUI（client 专用）')) return
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
 
         if (req.method === 'GET') {
@@ -659,10 +669,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     path: `${WEIXIN_PATH}/login`,
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
-        if (req.headers['x-serenity-ui'] !== '1') {
-          sendJson(res, 403, { error: '微信桥配置仅限 WebUI（client 专用）' })
-          return
-        }
+        if (!requireWebUi(req, res, '微信桥配置仅限 WebUI（client 专用）')) return
         if (req.method !== 'GET') {
           sendJson(res, 405, { error: 'method not allowed' })
           return
@@ -765,10 +772,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           sendJson(res, 405, { error: 'method not allowed' })
           return
         }
-        if (req.headers['x-serenity-ui'] !== '1') {
-          sendJson(res, 403, { error: '会话清理仅限 WebUI（client 专用）' })
-          return
-        }
+        if (!requireWebUi(req, res, '会话清理仅限 WebUI（client 专用）')) return
         const { result } = performCleanup(root, cutoffDaysAgo(days), liveIds)
         sendJson(res, 200, {
           root,
@@ -799,7 +803,7 @@ const WEIXIN_LOGIN_TTL_MS = 5 * 60_000
 /** 校验微信桥面板操作的头/参数（x-serenity-ui + ccc 必填） */
 function requireCcc(root: string | undefined): { ok: true; root: string } | { ok: false; error: string } {
   if (!root || root.trim() === '') return { ok: false, error: 'missing ccc param' }
-  const serenityRoot = findSerenityRoot(root)
+  const serenityRoot = cccRootForCwd(root)
   if (!serenityRoot) return { ok: false, error: `no CCC found from: ${root}` }
   return { ok: true, root: serenityRoot }
 }

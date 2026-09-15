@@ -56,35 +56,35 @@ export function hostInjected<T = unknown>(ctx: unknown, name: string): T | undef
 
 // ── 常用服务的类型化读取器（形状对照宿主 rc.1）──
 
-export interface HostSessionLike {
+interface HostSessionLike {
   id?: string
   header?: { cwd?: string; id?: string }
   snapshotEvents?: () => unknown[]
 }
 
-export interface HostSessions {
+interface HostSessions {
   list?: () => HostSessionLike[]
   get?: (id: unknown) => HostSessionLike | undefined
   create?: (...args: unknown[]) => unknown
 }
 
-export interface HostAgents {
+interface HostAgents {
   create?: (...args: unknown[]) => unknown
   get?: (id: string) => unknown
   resume?: (...args: unknown[]) => unknown
 }
 
-export interface HostWebServer {
+interface HostWebServer {
   register?: (registration: unknown) => unknown
   port?: number
 }
 
-export interface HostSettings {
+interface HostSettings {
   installSection?: (...args: unknown[]) => unknown
 }
 
 /** `ctx.web`（injected；v1.30.12：fetch provider 注册通道） */
-export interface HostWeb {
+interface HostWeb {
   registerFetchProvider?: (provider: unknown) => unknown
   registerSearchProvider?: (provider: unknown) => unknown
 }
@@ -123,7 +123,7 @@ export function hostWeb(ctx: unknown): HostWeb | undefined {
  * 注（v1.31.4）：本服务**不在** dsp 的 `inject` 列表内，因此走 `hostInjected` 的
  * 回落分支（`ctx.get`）——见 `hostInjected` 的 v1.31.4 说明与真实 cordis 用例。
  */
-export interface HostSubagents {
+interface HostSubagents {
   start?: (name: string, request: unknown) => Promise<unknown>
 }
 

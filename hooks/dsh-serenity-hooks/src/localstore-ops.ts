@@ -23,7 +23,7 @@ import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import type { JsonValue } from './json.js'
 
 /** 命名空间：credential（凭据）| config（配置） */
-export type LocalStoreScope = 'credential' | 'config'
+type LocalStoreScope = 'credential' | 'config'
 
 export const LOCALSTORE_SCOPES: readonly LocalStoreScope[] = ['credential', 'config']
 
@@ -31,19 +31,19 @@ export const LOCALSTORE_SCOPES: readonly LocalStoreScope[] = ['credential', 'con
 export const LOCALSTORE_FILENAME = 'localstore.json'
 
 /** 凭据保留节名（JSON 顶层） */
-export const CREDENTIALS_SECTION = 'credentials'
+const CREDENTIALS_SECTION = 'credentials'
 
 /** 凭据 key 规范：大写蛇形，如 HOME_GITLAB_TOKEN */
 export const CREDENTIAL_KEY_RE = /^[A-Z][A-Z0-9_]*$/
 
 /** 配置节名规范：小写字母数字连字符 */
-export const CONFIG_SECTION_RE = /^[a-z][a-z0-9-]*$/
+const CONFIG_SECTION_RE = /^[a-z][a-z0-9-]*$/
 
 /** 配置 key 规范（节内）：小驼峰，如 defaultModel */
-export const CONFIG_KEY_RE = /^[a-z][a-zA-Z0-9_]*$/
+const CONFIG_KEY_RE = /^[a-z][a-zA-Z0-9_]*$/
 
 /** git 提交策略 */
-export type GitTrack = 'allow' | 'deny'
+type GitTrack = 'allow' | 'deny'
 
 // ── 路径与 git 策略 ──
 
@@ -125,11 +125,6 @@ function readAll(root: string): StoreShape {
   }
 }
 
-/** 测试辅助：重置"坏 localstore"告警去重（生产零调用） */
-export function __resetBrokenStoreWarningsForTest(): void {
-  warnedBrokenStores.clear()
-}
-
 /** 写回全文件（2 空格缩进 + 尾换行，方便 MSM 直接读取） */
 function writeAll(root: string, data: StoreShape): void {
   writeFileSync(localstorePath(root), JSON.stringify(data, null, 2) + '\n', 'utf-8')
@@ -144,14 +139,14 @@ export function readStore(root: string, scope: LocalStoreScope): Record<string, 
 }
 
 /** 校验凭据 key 合法（大写蛇形）；不合法抛错 */
-export function assertCredentialKey(key: string): void {
+function assertCredentialKey(key: string): void {
   if (!CREDENTIAL_KEY_RE.test(key)) {
     throw new Error(`credential key "${key}" must match UPPER_SNAKE ^[A-Z][A-Z0-9_]*$ (e.g. HOME_GITLAB_TOKEN)`)
   }
 }
 
 /** 校验 config 路径（节.key）；不合法抛错 */
-export function assertConfigPath(path: string): { section: string; key: string } {
+function assertConfigPath(path: string): { section: string; key: string } {
   const idx = path.indexOf('.')
   if (idx <= 0 || idx === path.length - 1) {
     throw new Error(`config path "${path}" must be section.key (e.g. handyman.models)`)

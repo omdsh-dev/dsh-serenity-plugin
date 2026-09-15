@@ -1,13 +1,10 @@
 /**
- * cce.ts — CCE 认知连续性工程工具（渐进式披露，ACC 标准工具化）
+ * cce.ts — CCE 内容源（认知连续性工程；v1.30 三工具合并为 praxis 后只保留内容常量）
  *
  * 内容：认知连续性工程（Cognitive Continuity Engineering）——在有限资源与
  * 不可逆不确定性约束下，维持认知实体身份、可达性与演化能力的工程学科。
  * 来源：home-serenity `.opencode/skills/cce/SKILL.md` + CCE 理论。
  */
-
-import { defineTool } from '@deepseek-ai/dsh-tools'
-import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
 export const CCE_CONTENT = `# CCE — Cognitive Continuity Engineering
 
@@ -55,45 +52,3 @@ CCE answers "how structured knowledge should keep evolving across time without l
 ## Relationship with Serenity
 Serenity's session system, session tracking, and entropy management mechanisms (SQC quality loop) are all engineering implementations of CCE;
 the behavioral constraints embedded in CCC system prompts come from CCE.`
-
-function renderText(value: unknown): ContentBlock[] {
-  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
-  return [{ type: 'text', text }]
-}
-
-export const cceTool = defineTool({
-  name: 'cce',
-  description:
-    'CCE cognitive continuity engineering (progressive disclosure): the engineering discipline of maintaining a cognitive entity\'s identity/accessibility/evolution under bounded resources and irreversible uncertainty. No section returns the full framework; specify a section to focus.',
-  parameters: {
-    section: {
-      type: 'string',
-      enum: ['container', 'entropy', 'lifecycle', 'eap'],
-      description: 'Focus section: container (5 cognitive-container properties) / entropy (operational entropy H_op) / lifecycle (six phases) / eap (relationship with EAP)',
-    },
-  },
-  output: {
-    schema: { type: 'string' },
-    render: (_args, value) => renderText(value),
-  },
-  async execute(args) {
-    const section = args.section
-    const blocks: Record<string, { start: string; end?: string }> = {
-      container: { start: '## Cognitive Container', end: '## Operational Cognitive Entropy' },
-      entropy: { start: '## Operational Cognitive Entropy (H_op)', end: '## Continuity Maintenance Condition' },
-      lifecycle: { start: '## Six-Phase Lifecycle' },
-      eap: { start: '## Relationship with EAP' },
-    }
-    if (section) {
-      const b = blocks[section]
-      if (b) {
-        const startIdx = CCE_CONTENT.indexOf(b.start)
-        if (startIdx >= 0) {
-          const slice = b.end ? CCE_CONTENT.slice(startIdx, CCE_CONTENT.indexOf(b.end, startIdx)) : CCE_CONTENT.slice(startIdx)
-          return slice.trim()
-        }
-      }
-    }
-    return CCE_CONTENT
-  },
-})

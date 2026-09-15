@@ -33,7 +33,8 @@ import { listBoundSessionIds } from './trajectory-bound.js'
 import { hostAgents, hostService } from './host/access.js'
 import { registerDisposer } from './host/effect.js'
 import { readSimpleSettings } from './settings-section.js'
-import { TICK_MS, collectLiveCccs } from './autopilot-trajectory.js'
+import { createClock, type ClockOptions, type ClockRuntime } from './clock-runtime.js'
+import { listCccs } from './ccc-roots.js'
 import {
   loadWakeRegistry,
   splitDueWakes,
@@ -50,7 +51,7 @@ interface HostSessionController {
 }
 
 /** 投递结果（写回条目的 lastResult；人读） */
-export interface WakeDeliveryResult {
+interface WakeDeliveryResult {
   ok: boolean
   detail: string
 }
@@ -59,47 +60,13 @@ export interface WakeDeliveryResult {
  * 调度器**进程态**（诊断用，模块级 = 进程级，正是诊断对象）。
  *
  * 为什么需要它（R↓，2026-09-14 F 段缺陷）：调度器此前**没有任何可观测面**——
- * "条目为何一直是 pending" 只能靠反推。有了这四个字段，`acc-diag` 一次调用即可回答
+ * "条目为何一直是 pending" 只能靠反推。有了这几个字段，`acc-diag` 一次调用即可回答
  * "时钟是否武装 / 上次 tick 何时 / 为何跳过"。
+ *
+ * C6b（P2）：字段由 {@link ClockRuntime} 提供（**工厂那份**，字段名与语义一个字未改）；
+ * 此处只把 `lastTickLog` 收为**必需**（本钟独有，autopilot 没有它——现状稿 §2.4）。
  */
-interface WakeSchedulerRuntime {
-  /** 定时器是否在跑（startTimer 成功 → true；disposer 拆卸 → false） */
-  armed: boolean
-  /** 武装时刻（ms；null = 从未） */
-  armedAt: number | null
-  /** 上次真正执行 tick 的时刻（ms；null = 从未——被跳过的 tick 不刷新它） */
-  lastTickAt: number | null
-  /** 真正执行过多少次 tick */
-  ticks: number
-  /** 上次 tick 的逐行摘要（投递 / missed 留痕） */
-  lastTickLog: string[]
-  /** 上次被跳过 / 异常的原因（null = 上次正常执行） */
-  lastSkipReason: string | null
-}
-
-const schedulerRuntime: WakeSchedulerRuntime = {
-  armed: false,
-  armedAt: null,
-  lastTickAt: null,
-  ticks: 0,
-  lastTickLog: [],
-  lastSkipReason: null,
-}
-
-/** 调度器进程态快照（只读；`enabled` = 全局闸**当前**值，便于区分"未武装"与"闸关"） */
-export function wakeSchedulerState(): WakeSchedulerRuntime & { enabled: boolean } {
-  return { enabled: wakeSchedulerEnabled(), ...schedulerRuntime, lastTickLog: [...schedulerRuntime.lastTickLog] }
-}
-
-/** 测试用：复位进程态（避免用例间串味） */
-export function __resetWakeSchedulerStateForTest(): void {
-  schedulerRuntime.armed = false
-  schedulerRuntime.armedAt = null
-  schedulerRuntime.lastTickAt = null
-  schedulerRuntime.ticks = 0
-  schedulerRuntime.lastTickLog = []
-  schedulerRuntime.lastSkipReason = null
-}
+export type WakeSchedulerRuntime = ClockRuntime & { lastTickLog: string[] }
 
 /** 目标定位：目录名 + SESSION.md 绝对路径 */
 interface WakeTarget {
@@ -133,12 +100,46 @@ export function resolveWakeTarget(root: string, target: string): WakeTarget | nu
  *
  * 设置服务不可用 → 关（保守；异常由日志与 `dashboard health` 响亮暴露，不静默）。
  */
-export function wakeSchedulerEnabled(): boolean {
+function wakeSchedulerEnabled(): boolean {
   try {
     return readSimpleSettings().wakeSchedulerEnabled !== false
   } catch {
     return false
   }
+}
+
+/**
+ * 🔴 **本钟的串行域**（C6b 硬约束）：`clock.chain` 是**本实例私有**的——
+ * 与 autopilot 的串行链**零共享**。autopilot 每轮跑 CCC 偏见脚本可能阻塞数十秒，
+ * 共用链会把一次性唤醒一起卡住（这正是 P1 被否、取 P2 的理由，见 SESSION §12.8②）。
+ *
+ * **为什么这里是模块级常量**（而不是 `registerWakeScheduler` 的局部量）：本钟的进程态是
+ * **进程级可观测面**（`acc-diag` ①b / `containerClocks` 在读），且 `wakeSchedulerState()` /
+ * `__resetWakeSchedulerStateForTest()` 是**公开导出**、可在未装配时被调用 ⇒ 实例必须**恒在**
+ * （旧实现的 `schedulerRuntime` 也正是模块级常量）。装配只做 `clock.start()`。
+ */
+/** 本钟的装配项（`ctx` 由 {@link registerWakeScheduler} 在装配点填入） */
+const clockOpts: ClockOptions<string[]> = {
+  label: 'trajectory 唤醒调度器',
+  ctx: undefined,
+  events: ['session/created', 'serenity/settings-changed'],
+  gate: wakeSchedulerEnabled,
+  gateOffReason: '唤醒调度器闸关闭（wakeSchedulerEnabled=false）',
+  body: () => runWakeTick(clockOpts.ctx as Context),
+  // `countBeforeBody` 缺省 false：本钟 `ticks` = **真跑完**的 tick 数（既有语义，勿改）
+  logFrom: { prefix: '[serenity-hooks] trajectory 唤醒 ', lines: (lines) => lines },
+  startLog: () => '[serenity-hooks] ✓ trajectory 唤醒调度器启动（5min tick）',
+}
+const clock = createClock(clockOpts)
+
+/** 调度器进程态快照（只读；`enabled` = 全局闸**当前**值，便于区分"未武装"与"闸关"） */
+export function wakeSchedulerState(): WakeSchedulerRuntime & { enabled: boolean } {
+  return clock.snapshot() as WakeSchedulerRuntime & { enabled: boolean }
+}
+
+/** 测试用：复位进程态（避免用例间串味） */
+export function __resetWakeSchedulerStateForTest(): void {
+  clock.reset()
 }
 
 /**
@@ -148,7 +149,7 @@ export function wakeSchedulerEnabled(): boolean {
  * @param dirName 目标 trajectory 目录名
  * @returns 命中返回 agent 与取得方式（how 进 lastResult，便于诊断）；未命中返回原因
  */
-export async function acquireWakeAgent(
+async function acquireWakeAgent(
   ctx: Context,
   root: string,
   dirName: string,
@@ -211,10 +212,37 @@ export async function deliverWake(ctx: Context, root: string, entry: WakeEntry):
   return { ok: true, detail: `已投递 ${target.dirName}（${acquired.how}）` }
 }
 
-/** 一次调度 tick：遍历 live CCC → 到期项串行投递 / 超窗项置 missed；返回人读摘要 */
-export async function runWakeTick(ctx: Context): Promise<string[]> {
+/**
+ * 本 tick 要扫的 CCC 根集合（**并集**）。
+ *
+ * C2（S142 2026-09-15 Q5）：原实现是 `collectLiveCccs`——**只认 live 会话** ⇒
+ * "完全冷掉的 CCC 不能自唤醒自己"（已知边界）。现改为 `ccc-roots.listCccs` 的并集枚举
+ * （工作区注册表 ∪ 持久化会话 ∪ live 会话）：**没有 live 会话的 CCC 也会被扫到**。
+ *
+ * ⚠️ 边界（本步**只**改"枚举哪些 CCC"，**不改**"怎么找到要交付的 agent"）：
+ * 把 message 交给某条 trajectory 仍必须靠 **live 会话**解析（见
+ * `autopilot-trajectory.resolveTargetAgent`）；无 live 会话时该 CCC 只是**被扫到、
+ * 无交付对象** ⇒ `deliverWake` 返回 `无绑定会话记录…`，条目回 `pending` 并留痕。
+ * 因此本函数**不得**让 tick 抛错（异常一律由调用方 tick 兜住，见 `runWakeTick` 的 try）。
+ * @param ctx 插件上下文
+ * @returns CCC 根列表（无任何来源 → `[]`）
+ */
+async function collectWakeCccs(ctx: Context): Promise<string[]> {
+  return (await listCccs(ctx)).map((e) => e.root)
+}
+
+/** 一次调度 tick：遍历已知 CCC → 到期项串行投递 / 超窗项置 missed；返回人读摘要 */
+async function runWakeTick(ctx: Context): Promise<string[]> {
   const log: string[] = []
-  for (const root of collectLiveCccs(ctx)) {
+  // 无 CCC 可扫：廉价空转（**不**改变"全局闸开即武装"的语义：武装在 startTimer，
+  // 与有无 CCC 无关；此处只是本 tick 无事可做）
+  const roots = await collectWakeCccs(ctx).catch((): string[] => [])
+  if (roots.length === 0) {
+    clock.noteSkipReason('无已知 CCC 可扫（等某个会话/工作区出现）')
+    return log
+  }
+  clock.noteSkipReason(null)
+  for (const root of roots) {
     const { registry, error } = loadWakeRegistry(root)
     if (error) {
       log.push(`✗ ${root}: ${error}`)
@@ -246,71 +274,23 @@ export async function runWakeTick(ctx: Context): Promise<string[]> {
  * @param ctx 插件上下文
  */
 export function registerWakeScheduler(ctx: Context): void {
-  let timer: NodeJS.Timeout | null = null
-  /** 全局串行链（同一时刻只跑一次 tick；投递本身按条目串行） */
-  let chain: Promise<void> = Promise.resolve()
-
-  const tick = (): void => {
-    if (!wakeSchedulerEnabled()) {
-      schedulerRuntime.lastSkipReason = '唤醒调度器闸关闭（wakeSchedulerEnabled=false）'
-      return
-    }
-    if (collectLiveCccs(ctx).length === 0) {
-      schedulerRuntime.lastSkipReason = '无 live 会话 ⇒ 无 CCC 可扫（等某个会话出现）'
-      return
-    }
-    schedulerRuntime.lastSkipReason = null
-    schedulerRuntime.lastTickAt = Date.now()
-    chain = chain.then(async () => {
-      try {
-        const log = await runWakeTick(ctx)
-        schedulerRuntime.ticks += 1
-        schedulerRuntime.lastTickLog = log
-        for (const line of log) console.log(`[serenity-hooks] trajectory 唤醒 ${line}`)
-      } catch (err) {
-        schedulerRuntime.lastTickLog = [`✗ tick 异常: ${String((err as Error)?.message ?? err)}`]
-        console.warn(`[serenity-hooks] ✗ trajectory 唤醒 tick 异常: ${String((err as Error)?.message ?? err)}`)
-      }
-    })
-  }
-
-  const startTimer = (): void => {
-    if (timer) return
-    if (!wakeSchedulerEnabled()) return
-    // ⚠️ 此处**不得**再判"有无 live CCC"（F 段缺陷修复，2026-09-14）：
-    //   CCC 根**只能从 live 会话的 cwd 反推**（collectLiveCccs），而宿主刚重启时 live 会话
-    //   必然为空（浏览器尚未重连）；更关键的是——**"恢复旧会话"不触发 `session/created`**
-    //   （只有**新建**会话才触发），所以启动瞬间的这一次判定一旦落空，时钟就**永久不武装**，
-    //   要等人类**新建**一个会话才恢复。
-    //   实测证据（2026-09-14）：16:30Z 重启 → 次日 23:13Z 查得注册表条目超窗 6.6h 仍为
-    //   `pending` / `attempts=0`（真跑过 tick 的条目必为 delivered 或 missed）⇒ 6.6h 零 tick。
-    //   现改为「**全局闸开即武装**」：定时器恒在，每 tick 自行判定（无 live CCC 时廉价跳过）。
-    //   代价 = 一个 unref 的 5min 空检查，远小于"时钟静默"的代价。
-    timer = setInterval(tick, TICK_MS)
-    timer.unref()
-    schedulerRuntime.armed = true
-    schedulerRuntime.armedAt = Date.now()
-    console.log('[serenity-hooks] ✓ trajectory 唤醒调度器启动（5min tick）')
-    tick()
-  }
-
-  startTimer()
-  try {
-    ctx.on('session/created', () => startTimer())
-  } catch {
-    /* 事件通道缺失不阻断（启动时已尝试一次） */
-  }
-  try {
-    ctx.on('serenity/settings-changed', () => startTimer())
-  } catch {
-    /* 事件通道缺失不阻断（可重启 web 生效） */
-  }
-  registerDisposer(ctx, 'trajectory 唤醒调度器', () => {
-    if (timer) {
-      clearInterval(timer)
-      timer = null
-    }
-    schedulerRuntime.armed = false
-    schedulerRuntime.armedAt = null
-  })
+  // ⚠️ 此处**不得**再判"有无 live CCC"（F 段缺陷修复，2026-09-14）：
+  //   CCC 根当时**只能从 live 会话的 cwd 反推**（collectLiveCccs），而宿主刚重启时 live 会话
+  //   必然为空（浏览器尚未重连）；更关键的是——**"恢复旧会话"不触发 `session/created`**
+  //   （只有**新建**会话才触发），所以启动瞬间的这一次判定一旦落空，时钟就**永久不武装**，
+  //   要等人类**新建**一个会话才恢复。
+  //   实测证据（2026-09-14）：16:30Z 重启 → 次日 23:13Z 查得注册表条目超窗 6.6h 仍为
+  //   `pending` / `attempts=0`（真跑过 tick 的条目必为 delivered 或 missed）⇒ 6.6h 零 tick。
+  //   现改为「**全局闸开即武装**」：定时器恒在，每 tick 自行判定（无可扫 CCC 时廉价跳过）。
+  //   代价 = 一个 unref 的 5min 空检查，远小于"时钟静默"的代价。
+  //   🔒 C2（2026-09-15）**不许回退**这一条：源侧的"无 live 会话"已由并集枚举（ccc-roots）
+  //   消掉一部分，但**武装门本身必须继续只判全局闸**——否则"恢复旧会话不触发事件"那条
+  //   路径会再次让时钟永不武装。武装与"本次有无目标"是两件事，不得耦合。
+  //   🔒 C6b（2026-09-15）该门已收进 `clock-runtime.createClock` 的 `start()`（硬约束二），
+  //      本文件只传 `gate: wakeSchedulerEnabled`——语义**未变**，改动只是位置。
+  //   ⚠️ 同一条链上的另一条约束：tick **不预判"有无 CCC"**（C2 起 CCC 枚举为**并集**），
+  //      "无 CCC 可扫"的廉价跳过下沉到 runWakeTick 内部并写 lastSkipReason 供 acc-diag 判读。
+  clockOpts.ctx = ctx
+  clock.start()
+  registerDisposer(ctx, 'trajectory 唤醒调度器', () => clock.dispose())
 }

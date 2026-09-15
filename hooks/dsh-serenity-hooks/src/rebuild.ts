@@ -48,7 +48,7 @@ import type { Message, MessageSource } from '@deepseek-ai/dsh-llm'
 import { hostService } from './host/access.js'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { findSerenityRoot } from './ccc.js'
+import { agentCwdFor, cccRootForCwd } from './ccc-roots.js'
 import { readSimpleSettings } from './settings-section.js'
 import {
   getActiveSessionInfo,
@@ -137,7 +137,7 @@ export function sanitizeFocusLine(focus: string | null | undefined): string | nu
 /** 任务焦点最大长度（字/码点；200 足够一句话任务焦点——非历史） */
 const FOCUS_MAX_CHARS = 200
 
-export interface RebuildResult {
+interface RebuildResult {
   /** 是否成功排队（turn 结束时执行清空重建） */
   queued: boolean
   /** 锚点消息文本（将在 turn 结束时注入） */
@@ -489,8 +489,13 @@ export function registerRebuildTurnHook(ctx: Context): void {
   })
 }
 
-/** 从 agent 会话 cwd 解析 CCC 根（诊断落盘用）；无则回退进程 cwd */
+/**
+ * 从 agent 会话 cwd 解析 CCC 根（诊断落盘用）；无则回退进程 cwd。
+ *
+ * ⚠️ **语义与 `cccRootForExec` 不同且必须不同**：这里 `?? process.cwd()` 是**返回假根**
+ * （诊断落盘总要有个位置，没有根也要写），而工具/缝入口要的是 `null`（让调用方报错）。
+ * C2 归一后此处仍保留该差异，只把"取 cwd"那半交给 `agentCwdFor`（现状稿 §2.D 第 7 条）。
+ */
 function resolveSerenityRootFor(agent: Agent): string {
-  const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd
-  return findSerenityRoot(cwd ?? process.cwd()) ?? process.cwd()
+  return cccRootForCwd(agentCwdFor(agent as { session?: { header?: { cwd?: string } } })) ?? process.cwd()
 }

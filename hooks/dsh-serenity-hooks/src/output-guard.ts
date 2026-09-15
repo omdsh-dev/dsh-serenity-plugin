@@ -20,6 +20,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadMsmEntries } from './msm-ops.js'
+import { MECHANISM_PORTS } from './ports.js'
 import { eventToken } from './trajectory-assistant.js'
 
 // ── 静态机制词（内部结构词汇；公开称呼词不入表）──
@@ -51,21 +52,27 @@ const MECHANISM_WORDS: string[] = [
   'output-guard',
 ]
 
-/** 内部端口（宁静号服务面） */
-const MECHANISM_PORTS: string[] = ['3080', '3081', '3099', '3100']
+/**
+ * 内部端口（宁静号服务面）。
+ *
+ * 🔴 C4 块 B（2026-09-15）**缺陷修复**：此处原为硬写常量 `['3080','3081','3099','3100']`
+ * ——**漏了 3082**（微信主动发送面，**默认开**）⇒ 守卫拦不住 agent 在用户可见输出里提及 3082。
+ * 现改为**由集中端口表派生**（`ports.ts` 的 `MECHANISM_PORTS`）：五面齐全，且新增面时
+ * 自动进表——不再存在"另抄一份词表 → 静默漂移"的面。
+ */
 
 // ── 词表构建 ──
 
 /** 敏感词分类（v1.26.11：打回消息按类给规避指引——裸词不够，模型要知道词是什么/怎么规避） */
-export type SensitiveCategory = 'credential' | 'mechanism' | 'port' | 'msm'
+type SensitiveCategory = 'credential' | 'mechanism' | 'port' | 'msm'
 
 /** 一次命中（词 + 分类） */
-export interface SensitiveHit {
+interface SensitiveHit {
   word: string
   category: SensitiveCategory
 }
 
-export interface SensitiveWordTable {
+interface SensitiveWordTable {
   /** 精确匹配词（条目名/值/工具名——命中即敏感） */
   exact: Set<string>
   /** 子串匹配词（机制词——命中即敏感） */

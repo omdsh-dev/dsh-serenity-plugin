@@ -27,11 +27,12 @@
  */
 
 import type { Context } from 'cordis'
-import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from './config-ops.js'
-import { findSerenityRoot } from './ccc.js'
+import { cccRootForCwd } from './ccc-roots.js'
 import { readSimpleSettings } from './settings-section.js'
-import { registerDisposer } from './host/effect.js'
+// C4 块 A：listener 生命周期归面宿主（本面=面 B，端口语义见 ports.ts 的 FACE_PORTS.gateway）
+import { startFace, type FaceHandle } from './face-host.js'
 import { verifyTotpCode } from './totp.js'
 import {
   loginPageHtml,
@@ -58,6 +59,9 @@ import {
   buildProxyHeaders,
   transformHtmlForProxy,
 } from './gateway-proxy.js'
+
+/** 面名（C4 块 A：listener 生命周期归 `face-host`） */
+const FACE_GATEWAY = 'gateway'
 import { createDshCookieProvider, mergeCookieHeader, type DshCookieProvider } from './gateway-dsh-auth.js'
 import { hostService, hostWebServer } from './host/access.js'
 
@@ -108,7 +112,7 @@ declare module 'cordis' {
 
 // ── 服务注册 ──
 
-export interface GatewayConfig {
+interface GatewayConfig {
   host: string
   port: number
   /** 登录态 cookie 名 */
@@ -144,16 +148,18 @@ function readBody(req: IncomingMessage, maxBytes: number): Promise<string> {
 }
 
 /**
- * 启动第二监听器。返回 { server, dispose }——dispose 关 server（**不清 token**：
- * token 模块级，进程重启自然清空；热重建清 token → 已登录用户 WS 断 + 重连 cookie 无效）。
+ * 启动第二监听器（C4 块 A：listener 的创建/监听/错误/端口占用重试/关闭归 `face-host`）。
+ *
+ * 返回面句柄——**dispose 只关 server，不清 token**（token 模块级，进程重启自然清空；
+ * 热重建清 token → 已登录用户 WS 断 + 重连 cookie 无效）。
  * @param config - 监听/代理配置。
  * @param getAccounts - 运行时读取账号列表（plugin 全局文件；gateway.enabled 开关在调用方判）。
  */
-export function startGateway(
+async function startGateway(
   config: GatewayConfig,
   getAccounts: () => readonly { id: string; user: string; passHash: string; totpSecret?: string }[],
   getDshCookie?: () => string | undefined,
-): { server: Server; dispose: () => void } {
+): Promise<FaceHandle> {
   const { host, port, cookieName, mainPort, loginDelayMs } = config
   const allowWorkspaces = config.allowWorkspaces ?? []
   const cookieSecure = config.cookieSecure === true
@@ -260,7 +266,8 @@ export function startGateway(
   // v1.22.4 S1b：账号 id → 最近成功 TOTP counter（防重放；模块级，重启清空）
   const lastTotpCounter = new Map<string, number>()
 
-  const server = createServer((req, res) => {
+  // 单请求处理（路由 / 登录 / CSRF / 反代 / 白名单校验全部归本面——面宿主只做派发）
+  const handleRequest = (req: IncomingMessage, res: ServerResponse): void => {
     const url = new URL(req.url ?? '/', `http://${host}:${port}`)
 
     // ── 登出（v1.22.4 S5）：主动吊销会话 → 清除 cookie → 回登录页 ──
@@ -424,6 +431,16 @@ export function startGateway(
       'set-cookie': `serenity_csrf=${csrf}; HttpOnly; SameSite=Strict; Path=/`,
     })
     res.end(loginPageHtml('', csrf))
+  }
+
+  // C4 块 A：listener 由面宿主统一创建/监听（错误 / EADDRINUSE 重试 / clientError 兜底 / 关闭）
+  const handle = await startFace({
+    name: FACE_GATEWAY,
+    port,
+    host,
+    // 意图 = DSH settings 的 gatewayEnabled（装配层以此门控；本处是规格自述）
+    enabled: () => readSimpleSettings().gatewayEnabled,
+    handler: handleRequest,
   })
 
   // WS upgrade 转发：主端口握手 + socket pipe
@@ -434,7 +451,7 @@ export function startGateway(
   //    事件不自动回写；只 pipe 数据 → 浏览器收到无头响应 → handshake 失败）
   //  - 监听 'response'（DSH 返回 403/404/426 等非 101）→ 透传普通 HTTP 响应
   //    （此前只监听 upgrade/error，非 101 时连接挂起 → ERR_INVALID_HTTP_RESPONSE）
-  server.on('upgrade', (req, socket, head) => {
+  handle.server.on('upgrade', (req, socket, head) => {
     if (!authed(req)) {
       socket.destroy()
       return
@@ -504,40 +521,10 @@ export function startGateway(
     upstream.end()
   })
 
-  // v1.22.1 稳定性：listen 加 error 监听——EADDRINUSE（旧进程未释放）时**不崩溃**，
-  // 记录并延迟重试（最多 10 次，间隔 1s）；其余错误记录后放弃。
-  // 根因：restart-web 曾因 3081 被旧进程占用直接抛 unhandled 'error' 导致 Node 进程崩溃。
-  const listenWithRetry = (attempt = 0): void => {
-    const onError = (err: NodeJS.ErrnoException): void => {
-      if (err.code === 'EADDRINUSE' && attempt < 10) {
-        console.warn(`[serenity-hooks] gateway 端口 ${port} 被占用（${err.code}），1s 后重试（${attempt + 1}/10）…`)
-        setTimeout(() => listenWithRetry(attempt + 1), 1000)
-        return
-      }
-      console.warn(`[serenity-hooks] gateway 监听 ${host}:${port} 失败: ${err.message ?? String(err)}`)
-    }
-    server.removeAllListeners('error')
-    server.on('error', onError)
-    // v1.22.3 崩溃修复：server 级 clientError 兜底——http server 解析失败/连接异常时
-    // 会 emit 'clientError'（如外部客户端半开连接、畸形请求后断开）。不监听则 Node
-    // 对无 'error' 监听器的 socket 直接 throw → 进程崩溃。这里静默销毁即可。
-    server.removeAllListeners('clientError')
-    server.on('clientError', (_err: Error, socket: import('node:net').Socket) => {
-      try { socket.destroy() } catch { /* noop */ }
-    })
-    server.listen(port, host)
-  }
-  listenWithRetry()
-
-  return {
-    server,
-    dispose: () => {
-      // v1.22.1 稳定性：**不再清空 token**——token 是模块级集合，进程重启自然清空
-      // （用户决策"重启重新登录"仍满足）；热重建（settings/配置变化 → gateway 重建）
-      // 若清 token 会把所有已登录用户踢下线（WS 断 + 重连 cookie 无效 → ERR_INVALID_HTTP_RESPONSE）。
-      server.close()
-    },
-  }
+  // v1.22.1 稳定性：listen 的 EADDRINUSE 重试与 clientError 兜底**已归面宿主**
+  // （`face-host.ts` 的 `listenWithRetry` / `dispatch`；此前面只有 gateway 独享这套样板，
+  //  C4 归一后四个面统一享有——见 face-host 的模块头注释）。
+  return handle
 }
 
 /**
@@ -590,61 +577,65 @@ function buildDshCookieProvider(ctx: Context, mainPort: number): DshCookieProvid
  * 事件驱动：config-updated（/serenity/config PUT 后 emit）+ DSH settings 变化（onChange emit）触发重新 sync。
  */
 export function registerGateway(ctx: Context): void {
-  let current: { dispose: () => void } | null = null
+  let current: FaceHandle | null = null
   let lastSig: string | null = null
+  /** 串行化：配置驱动的重建不并发（重建 = dispose + startFace，两个 sync 交叠会互相关掉对方） */
+  let queue: Promise<void> = Promise.resolve()
+
+  const doSync = async (): Promise<void> => {
+    // F-06：宿主访问收口——原先此处裸写 (ctx as unknown as {get}).get('webServer')
+    const webServer = hostWebServer(ctx)
+    if (!webServer?.port) return
+
+    const enabled = readSimpleSettings().gatewayEnabled
+    const settings = readAdvancedSettings()
+    // 签名：enabled + host + port + 账号数 + 白名单（配置变化才重启）
+    const sig = `${enabled}|${settings.gateway.host}|${settings.gateway.port}|${settings.gateway.accounts.length}|${settings.gateway.workspaces.join(',')}|${webServer.port}`
+    if (sig === lastSig) return
+    lastSig = sig
+
+    // 停旧
+    if (current) {
+      current.dispose()
+      current = null
+    }
+    if (!enabled) {
+      console.log('[serenity-hooks] gateway 已停止（gatewayEnabled=false，可在 dsh 设置面板开启）')
+      return
+    }
+    const handle = await startGateway(
+      {
+        host: settings.gateway.host,
+        port: settings.gateway.port,
+        cookieName: 'serenity_session',
+        mainPort: webServer.port,
+        loginDelayMs: 0,
+        allowWorkspaces: settings.gateway.workspaces,
+        cookieSecure: settings.gateway.cookieSecure === true,
+        allowWorkspaceCreate: settings.gateway.allowWorkspaceCreate !== false,
+        totpEnabled: settings.gateway.totpEnabled === true,
+      },
+      () => readAdvancedSettings().gateway.accounts,
+      // v1.28.2（0.1.2-rc.1 BrowserAuth 适配）：内存换取 dsh browser cookie（官方通道，
+      // 零落盘）→ 反代上游注入。connection 服务缺失（旧 dsh/非 web 装配）→ provider 返回
+      // undefined → 不注入（旧形态无 BrowserAuth 天然兼容）。authority = 反代后 Host（loopback）。
+      buildDshCookieProvider(ctx, webServer.port),
+    )
+    current = handle
+    const accounts = settings.gateway.accounts.length
+    const wsNote = settings.gateway.workspaces.length === 0
+      ? ''
+      : `；工作区白名单 ${settings.gateway.workspaces.length} 条`
+    console.log(
+      `[serenity-hooks] gateway 已启动: http://${settings.gateway.host}:${settings.gateway.port} → 127.0.0.1:${webServer.port}` +
+      (accounts === 0 ? '（⚠️ 未配置账号，登录页将提示）' : `（${accounts} 个账号）`) + wsNote,
+    )
+  }
 
   const sync = (): void => {
-    try {
-      // F-06：宿主访问收口——原先此处裸写 (ctx as unknown as {get}).get('webServer')
-      const webServer = hostWebServer(ctx)
-      if (!webServer?.port) return
-
-      const enabled = readSimpleSettings().gatewayEnabled
-      const settings = readAdvancedSettings()
-      // 签名：enabled + host + port + 账号数 + 白名单（配置变化才重启）
-      const sig = `${enabled}|${settings.gateway.host}|${settings.gateway.port}|${settings.gateway.accounts.length}|${settings.gateway.workspaces.join(',')}|${webServer.port}`
-      if (sig === lastSig) return
-      lastSig = sig
-
-      // 停旧
-      if (current) {
-        current.dispose()
-        current = null
-      }
-      if (!enabled) {
-        console.log('[serenity-hooks] gateway 已停止（gatewayEnabled=false，可在 dsh 设置面板开启）')
-        return
-      }
-      const started = startGateway(
-        {
-          host: settings.gateway.host,
-          port: settings.gateway.port,
-          cookieName: 'serenity_session',
-          mainPort: webServer.port,
-          loginDelayMs: 0,
-          allowWorkspaces: settings.gateway.workspaces,
-          cookieSecure: settings.gateway.cookieSecure === true,
-          allowWorkspaceCreate: settings.gateway.allowWorkspaceCreate !== false,
-          totpEnabled: settings.gateway.totpEnabled === true,
-        },
-        () => readAdvancedSettings().gateway.accounts,
-        // v1.28.2（0.1.2-rc.1 BrowserAuth 适配）：内存换取 dsh browser cookie（官方通道，
-        // 零落盘）→ 反代上游注入。connection 服务缺失（旧 dsh/非 web 装配）→ provider 返回
-        // undefined → 不注入（旧形态无 BrowserAuth 天然兼容）。authority = 反代后 Host（loopback）。
-        buildDshCookieProvider(ctx, webServer.port),
-      )
-      current = started
-      const accounts = settings.gateway.accounts.length
-      const wsNote = settings.gateway.workspaces.length === 0
-        ? ''
-        : `；工作区白名单 ${settings.gateway.workspaces.length} 条`
-      console.log(
-        `[serenity-hooks] gateway 已启动: http://${settings.gateway.host}:${settings.gateway.port} → 127.0.0.1:${webServer.port}` +
-        (accounts === 0 ? '（⚠️ 未配置账号，登录页将提示）' : `（${accounts} 个账号）`) + wsNote,
-      )
-    } catch (err) {
+    queue = queue.then(doSync).catch((err) => {
       console.warn(`[serenity-hooks] gateway 同步失败: ${String((err as Error)?.message ?? err)}`)
-    }
+    })
   }
 
   // apply 即尝试（webServer 已 inject；若尚未就绪由事件兜底）
@@ -655,7 +646,7 @@ export function registerGateway(ctx: Context): void {
     try {
       const cwd = (payload as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd
       if (cwd) {
-        const root = findSerenityRoot(cwd)
+        const root = cccRootForCwd(cwd)
         if (root && migrateLegacyLocalstore(root)) {
           console.log(`[serenity-hooks] ✓ 已迁移 serenityAdvanced（CCC localstore → plugin 全局文件）`)
         }
@@ -678,11 +669,8 @@ export function registerGateway(ctx: Context): void {
     sync()
   })
 
-  // F-08（v1.30.8）：插件卸载/HMR → 关掉第二监听器。此前 gateway 自起的 server 无人拆卸，
-  // profile 重载/HMR 后旧端口仍被占用（EADDRINUSE）→ 新实例起不来。
-  registerDisposer(ctx, 'gateway 第二监听器', () => {
-    current?.dispose()
-    current = null
-    lastSig = null
-  })
+  // 🔒 C4 块 A（2026-09-15）：**不自带 disposer**。此前 gateway 在此 `registerDisposer`
+  // 自管第二监听器（v1.30.8/F-08），而 `seams/lifecycle.ts` 另有一个聚合 disposer
+  // ——同一种"自起资源拆卸"两套路径。现在 listener 的生命周期归面宿主，拆卸归一处：
+  // `seams/lifecycle.ts` → `stopAllFaces()`（gateway 面在 active 表里，随之关闭）。
 }

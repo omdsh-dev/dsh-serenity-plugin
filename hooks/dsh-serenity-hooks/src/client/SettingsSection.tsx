@@ -59,7 +59,7 @@ export interface SettingsSectionInjected {
   scope: SettingsScope<SerenitySimpleWire>
 }
 
-export type SettingsSectionProps = PropsRuntime<'settings.section'> & SettingsSectionInjected
+type SettingsSectionProps = PropsRuntime<'settings.section'> & SettingsSectionInjected
 
 /** 降级提示文案（旧 RC 白名单时引导去宁静号面板） */
 const DEGRADE_NOTE =
@@ -624,7 +624,7 @@ interface WakeEntryWire {
   lastResult: string | null
 }
 
-/** CCC 选择器条目（/serenity/cccs wire：SkiffCccEntry 同款——微信桥同源复用） */
+/** CCC 选择器条目（/serenity/cccs wire：CccEntry 同款——微信桥同源复用） */
 interface AutopilotCccEntry {
   root: string
   name: string

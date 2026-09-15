@@ -29,7 +29,7 @@ function accountKeyPart(accountId: string): string {
 }
 
 /** 微信桥 skiff 会话 id 前缀（seams 旁路判定；对外面纯净——守卫识别外部面） */
-export const WEIXIN_SESSION_PREFIX = 'skiff-weixin-'
+const WEIXIN_SESSION_PREFIX = 'skiff-weixin-'
 
 /** 判定 sessionId 是否为微信桥会话（外部面——输出守卫/轨迹隐藏生效） */
 export function isWeixinSessionId(sessionId: string | undefined): boolean {

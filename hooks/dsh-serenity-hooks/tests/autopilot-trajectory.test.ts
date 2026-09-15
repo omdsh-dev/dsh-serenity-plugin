@@ -45,6 +45,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   installSettingsSection: () => {},
   settingsNamespace: (v: string) => v,
 }))
+// v1.34.1 ⑥ C6a：偏见执行路径归 autopilot-core（本文件仍覆盖它——旧默认名回退/沙箱）
 vi.mock('../src/trajectory-ops.js', () => ({
   sessionsRoot: (root: string) => join(root, 'AGENT_SESSIONS'),
   findSession: vi.fn(),
@@ -58,11 +59,11 @@ vi.mock('../src/trajectory-ops.js', () => ({
 }))
 
 import { findSession, findLatestActiveSessionMd } from '../src/trajectory-ops.js'
-import { findExpScript } from '../src/autopilot-script.js'
+// v1.34.1（⑥ C6a）：判据原语已提取到 autopilot-core（零 DSH 依赖层）——本文件继续覆盖它们，
+// 但 import 自**新家**（判据单一真相源；引擎文件只保留"组合 + 进程态 + agent 定位"）。
 import {
   DEFAULT_BIAS_PROVIDER,
   LEGACY_BIAS_PROVIDER,
-  AUDIT_HISTORY_MAX,
   AUTO_DIR_SUFFIX,
   beijingHour,
   inAllowedWakeWindow,
@@ -71,8 +72,11 @@ import {
   shouldWake,
   readSelfGeneratedMotivation,
   fetchBiasContent,
-  buildWakeMessage,
   readAutopilotSettings,
+} from '../src/autopilot-core.js'
+import {
+  AUDIT_HISTORY_MAX,
+  buildWakeMessage,
   recordWake,
   wakeHistoryFor,
   resetWakeHistory,
@@ -94,38 +98,6 @@ const mockFindLatest = vi.mocked(findLatestActiveSessionMd)
 function beijingUtcMs(hour: number, minute = 0): number {
   return Date.UTC(2026, 7, 30, hour - 8, minute, 0)
 }
-
-describe('findExpScript（包内实验脚本定位——bundle lib/ 与源码 src/ 两种布局）', () => {
-  let tmp: string
-  beforeEach(() => {
-    tmp = mkdtempSync(join(tmpdir(), 'ap-exp-'))
-  })
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true })
-  })
-
-  it('从 lib/index.js 一层上溯（bundle 布局）→ 找到包根 experiments', () => {
-    const pkg = join(tmp, 'pkg')
-    mkdirSync(join(pkg, 'lib'), { recursive: true })
-    const script = join(pkg, 'experiments', 'autopilot-trajectory', 'scripts', 'autopilot-trajectory.ts')
-    mkdirSync(join(pkg, 'experiments', 'autopilot-trajectory', 'scripts'), { recursive: true })
-    writeFileSync(script, '// exp\n')
-    expect(findExpScript(join(pkg, 'lib'))).toBe(script)
-  })
-
-  it('从 src/tools 两层上溯（源码/测试布局）→ 找到包根 experiments', () => {
-    const pkg = join(tmp, 'pkg2')
-    mkdirSync(join(pkg, 'src', 'tools'), { recursive: true })
-    const script = join(pkg, 'experiments', 'autopilot-trajectory', 'scripts', 'autopilot-trajectory.ts')
-    mkdirSync(join(pkg, 'experiments', 'autopilot-trajectory', 'scripts'), { recursive: true })
-    writeFileSync(script, '// exp\n')
-    expect(findExpScript(join(pkg, 'src', 'tools'))).toBe(script)
-  })
-
-  it('找不到 → null', () => {
-    expect(findExpScript(tmp)).toBeNull()
-  })
-})
 
 describe('beijingHour / inAllowedWakeWindow（用量峰谷省钱）', () => {
   it('北京时间 = UTC+8（服务器时区无关）', () => {

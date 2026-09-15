@@ -18,12 +18,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from 'cordis'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForExec } from '../ccc-roots.js'
 import { runAccDiag, renderAccDiag } from '../diag-ops.js'
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
 
 /**
  * 运行态诊断工具（`acc-diag`）。**无动作参数**：一次调用即全报告
@@ -48,7 +44,7 @@ export function createAccDiagTool(ctx: Context) {
       },
     },
     async execute(_args, exec) {
-      const root = findSerenityRoot(agentCwd(exec))
+      const root = cccRootForExec(exec)
       if (!root) {
         return {
           ok: false,
@@ -57,7 +53,7 @@ export function createAccDiagTool(ctx: Context) {
           report: '',
         }
       }
-      return { ok: true, code: '', error: '', report: renderAccDiag(runAccDiag(ctx, root)) }
+      return { ok: true, code: '', error: '', report: renderAccDiag(await runAccDiag(ctx, root)) }
     },
   })
 }

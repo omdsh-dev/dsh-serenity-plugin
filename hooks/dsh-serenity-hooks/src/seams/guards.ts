@@ -13,7 +13,6 @@ import type { Context } from 'cordis'
 import type { ToolExecution, PreToolDecision } from '@deepseek-ai/dsh-tools'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import {
-  findSerenityRoot,
   isSafeModeOn,
   matchBlacklist,
   readBlacklist,
@@ -22,6 +21,7 @@ import {
   readExclusiveTools,
   type BlacklistRule,
 } from '../ccc.js'
+import { cccRootForCwd } from '../ccc-roots.js'
 import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
 import { skiffRoleFor } from '../skiff-registry.js'
 import { hasEnabledImChannel } from '../im-bridge.js'
@@ -58,7 +58,7 @@ const CC_FS_WRITE_ACTIONS = new Set(['mkdir', 'rm', 'mv', 'cp', 'touch', 'append
  *   对齐 CCE Bounded Space + wardn "structural guarantee, not policy"：localstore.json
  *   含 API keys/tokens/SSH 密码，即使 prompt 纪律失败也无值可吐（机械保证）。
  */
-export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
+const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
 
 /**
  * MSM 注册表写保护（需求⑤b S142 用户拍板："msm注册的文件需要写保护起来，避免CCC意外写坏搞崩自己"）：
@@ -73,7 +73,7 @@ export const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
  * 写工具命中聚合档 → deny（唯一合法写通道 = container_admin msm register/deregister
  * 内部 writeRegistry，走工具实现不经 pre-execute → 天然豁免）；读工具放行。
  */
-export function isProtectedRegistryRel(root: string, rel: string): boolean {
+function isProtectedRegistryRel(root: string, rel: string): boolean {
   const lower = (s: string): string => (process.platform === 'win32' ? s.toLowerCase() : s)
   const relCi = lower(rel)
   // cccName 聚合档：.opencode/skills/<cccName>/references/mech-registry.json
@@ -105,21 +105,14 @@ export function isProtectedRegistryRel(root: string, rel: string): boolean {
   return false
 }
 
-/** 判定工具是否为读类（read/grep/glob + container_fs 只读子命令）：凭据文件对读工具同样 deny */
-export function isReadTool(toolName: string, action?: string): boolean {
-  if (toolName === 'read' || toolName === 'grep' || toolName === 'glob') return true
-  if (toolName === 'container_fs') return action !== undefined && !CC_FS_WRITE_ACTIONS.has(action)
-  return false
-}
-
 /** 判定工具是否为写类：普通工具按名；container_fs 复合工具按子命令 action */
-export function isWriteTool(toolName: string, action?: string): boolean {
+function isWriteTool(toolName: string, action?: string): boolean {
   if (!WRITE_TOOLS.has(toolName)) return false
   if (toolName === 'container_fs') return action !== undefined && CC_FS_WRITE_ACTIONS.has(action)
   return true
 }
 
-export interface GuardDecisionResult {
+interface GuardDecisionResult {
   deny?: string
   kind: 'allow' | 'deny'
 }
@@ -226,7 +219,7 @@ const SAFE_MODE_DENY_TOOLS = ['bash']
 const safeModeRestrictions = new Map<string, () => void>()
 
 /** restrict 诊断状态（status API 暴露；排查 restrict 未生效问题） */
-export interface RestrictDiagnostics {
+interface RestrictDiagnostics {
   lastKey: string | null
   lastAttemptAt: string | null
   lastSuccess: boolean | null
@@ -299,7 +292,7 @@ export function syncSafeModeRestriction(agent: Agent, root: string): void {
 // ── im-bridge 条件可见（v1.31.0）──
 
 /** 条件可见的 IM 工具名（与 tools/im-bridge.ts 的注册名一致） */
-export const IM_BRIDGE_TOOL_NAME = 'im-bridge'
+const IM_BRIDGE_TOOL_NAME = 'im-bridge'
 
 /** agent key → restrict disposer（im-bridge 隐藏状态；key 同安全模式 = 会话 id） */
 const imBridgeRestrictions = new Map<string, () => void>()
@@ -371,7 +364,7 @@ export function forgetImBridgeVisibility(sessionId: string): void {
  * 与 im-bridge 的区别：im-bridge 是"配置了通道才可见"（能力由 CCC 配置决定），
  * 本族是"被点名才可见"（能力归属 ACC 负责人）。
  */
-export const EXCLUSIVE_TOOL_NAMES = ['acc-diag'] as const
+const EXCLUSIVE_TOOL_NAMES = ['acc-diag'] as const
 
 /** `${sessionId}::${toolName}` → restrict disposer */
 const exclusiveRestrictions = new Map<string, () => void>()
@@ -462,7 +455,7 @@ function extractAction(exec: ToolExecution): string | undefined {
   return typeof a.action === 'string' ? a.action : undefined
 }
 
-export interface GuardRegistration {
+interface GuardRegistration {
   /** 配置路径；缺省用 DEFAULT_SERENITY_CONFIG_PATHS */
   configPaths?: string[]
 }
@@ -476,7 +469,7 @@ export function registerGuards(ctx: Context, opts: GuardRegistration = {}): void
 
   const evaluate = (exec: ToolExecution): GuardDecisionResult => {
     const cwd = resolveAgentCwd(exec)
-    const root = findSerenityRoot(cwd)
+    const root = cccRootForCwd(cwd)
     if (!root) return { kind: 'allow' } // 非 CCC，不干预
 
     const safeModeOn = isSafeModeOn(root)

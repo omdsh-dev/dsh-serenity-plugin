@@ -5,12 +5,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from 'cordis'
-import { findSerenityRoot } from '../ccc.js'
+import { cccRootForExec } from '../ccc-roots.js'
 import { runKit, KIT_ACTIONS } from '../kit-ops.js'
-
-function agentCwd(exec: { agent?: { session?: { header?: { cwd?: string } } } }): string {
-  return exec.agent?.session?.header?.cwd ?? process.cwd()
-}
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -35,7 +31,7 @@ export function createKitTool(ctx: Context) {
     },
     async execute(args, exec) {
       // CCC 缺失时不抛错——health 返回 degraded 报告（对齐 osp 未激活语义）
-      const root = findSerenityRoot(agentCwd(exec))
+      const root = cccRootForExec(exec)
       return await runKit(root, args, ctx)
     },
   })
