@@ -314,6 +314,19 @@ describe('trajectory-skills: 回归钉（SEP 已废除，规格 §5/§6-7）', (
     }
     expect(hits).toEqual([])
   })
+
+  it('🔴 散文残留：`session-extension` 在 src/** 命中数 = 0（符号名断言抓不到散文写法）', () => {
+    // 2026-09-15 实测漏网后补：C1 原本只钉四个**符号名**，而**面向模型的 toolsBlock 文案**里
+    // 仍留着 "the dev manual also carries the session-extension protocol"（指向已废章节）——
+    // 符号没了、散文还在。⇒ 判据必须同时覆盖"旧机制的词"，不只覆盖"旧机制的标识符"。
+    // 注：`Session Extension Protocol` 的**首字母大写全称**在 `container-admin.ts` / `trajectory.ts`
+    // 里作为**"已废除"的中文说明**合法存在（属历史沿革记录），故此处只钉连字小写的英文散文形态。
+    const hits: string[] = []
+    for (const file of collectTs(SRC_DIR)) {
+      if (readFileSync(file, 'utf-8').includes('session-extension')) hits.push(relative(HOOKS_DIR, file))
+    }
+    expect(hits).toEqual([])
+  })
 })
 
 // ── 8. keeper 护栏（规格 §4/§6-8）──

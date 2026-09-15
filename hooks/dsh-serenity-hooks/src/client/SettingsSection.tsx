@@ -644,7 +644,7 @@ function AutopilotTrajectoryStatusBlock(props: { autopilotOn: boolean }): React.
   const [waking, setWaking] = useState(false)
   const [wakeResult, setWakeResult] = useState<string | null>(null)
 
-  // 加载 CCC 列表（选择器数据源——同微信桥 /serenity/cccs discoverCccs）
+  // 加载 CCC 列表（选择器数据源——同微信桥 /serenity/cccs listCccs）
   useEffect(() => {
     let alive = true
     void (async () => {

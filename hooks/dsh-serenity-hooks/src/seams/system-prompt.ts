@@ -109,7 +109,7 @@ export function toolsBlock(): string {
     '  praxis       — actionable theory injection: praxis (index) / praxis eap / praxis neat / praxis cce',
     '  handyman     — delegate work to a worker agent on a CCC-whitelisted model; mode="foreground" (default) = one serial child returns its final text; mode="background" = loop-validated worker (completion code + round cap + restart + progress file), jobs=[] orchestrates parallel work',
     '  localstore   — ACC local credential/config storage (CCC-root localstore.json; git policy localstore.gitTrack default deny)',
-    '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config — the dev manual also carries the session-extension protocol) / config (view) / autopilot (status/init/generate-bias — periodic self-wake)',
+    '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config (view) / autopilot (status/init/generate-bias — periodic self-wake)',
     '',
     'MSM call (registered CCC MSMs, deterministic Mech & Semi-Mech):',
     '  Execute:       msm("<name>", ["<arg1>", "<arg2>"])   — run a registered MSM directly (partial name returns matching candidates)',
