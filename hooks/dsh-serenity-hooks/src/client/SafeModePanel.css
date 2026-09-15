@@ -212,6 +212,47 @@
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
 }
 
+/* ── 背景层：宁静号航行动画（ACC 层资产 /serenity/voyage，S142 §12.44）──
+   卡片展开时，背景换成「认知星野 + 飞船」= 宁静号的心智模型。
+   可读性设计：卡片底色改成**半透明暗色**，让动画透出来但把对比度压住——
+   正文（白色 label/value）仍落在足够暗的底上；再叠一层轻模糊做磨砂。
+   ⚠️ 动画本身在「卡片模式」下已把词元压到 22% 不透明度、铭牌层整层关闭，
+   这里只负责**让位与压暗**，不改作品。 */
+.sp-popVoyage {
+  overflow: hidden; /* 裁掉 iframe 在 14px 圆角外的溢出 */
+  /* 合成实测（S142 §12.44，三轮）：卡片底色越深，正文越干净，但动画越"看不见"——
+     这是一个**真实取舍**，不是可以调没的参数：
+       · 0.62 → 飞船最亮的舷窗/灯带正落在「安全模式」「Handyman 模型」两行后面，白字被冲淡
+       · 0.85（VLM 建议值）→ 动画基本消失，与"卡片背景就用这个"的意图相违
+     取 **0.75** 为中值：正文全部可读，飞船仍看得出轮廓与光晕。若所有者要更干净/更明显，
+     这是唯一的旋钮（另一个旋钮 = iframe 的 blur）。 */
+  background: rgba(6, 11, 14, 0.75);
+}
+.sp-voyage {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none; /* 纯背景：不挡点击、不抢焦点 */
+  overflow: hidden;
+  border-radius: 13px;
+}
+.sp-voyage iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  /* 把星野的细小亮斑与船体高光化开，避免与正文笔画"打架"。
+     1.8px 实测（§12.44 合成第二轮）会把飞船糊成看不清形状 ⇒ 收到 1.2px：
+     既要"看得出是一艘船"，又要它退到正文之后。
+     ⚠️ 用 iframe 自身的 filter 而**不是** backdrop-filter：iframe 内容不参与本文档的
+     backdrop（跨文档不采样）⇒ backdrop-filter 对它无效，只有 filter 才是可靠的杠杆。 */
+  filter: blur(1.2px);
+}
+.sp-popVoyage > .sp-popBody {
+  position: relative;
+  z-index: 1;
+}
+
 .sp-popBody {
   display: flex;
   flex-direction: column;

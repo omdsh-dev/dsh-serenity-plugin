@@ -372,7 +372,9 @@ function verifyTarball(): void {
   } catch {
     fail(`npm pack --dry-run 输出解析失败（非预期 JSON）：\n${dry.stdout.slice(0, 400)}`, 2)
   }
-  const required = ['lib/index.js', 'lib/client.js', 'lib/invariant.js']
+  // S142 §12.44：航行动画资产（/serenity/voyage 路由要读它；漏了 ⇒ 卡片背景 500）
+  // 同 v1.26.15 事故形态（files 白名单漏运行时必需文件）⇒ 提到发布前硬断言。
+  const required = ['lib/index.js', 'lib/client.js', 'lib/invariant.js', 'assets/serenity-voyage.html']
   const missing = required.filter((f) => !tarballFiles.includes(f))
   if (missing.length > 0) {
     fail(`tarball 缺必需文件（${missing.join(', ')}）——检查 tsdown.prepare.config.ts 是否构建完整双 bundle，中止发布`, 2)

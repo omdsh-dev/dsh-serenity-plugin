@@ -28,6 +28,9 @@
     "lib/*.js",
     "lib/*.d.ts",
     "lib/**/*.d.ts",
+    "assets/serenity-voyage.html",
+    "assets/serenity-voyage-preview.png",
+    "assets/README.md",
     "cordis.patch.yml",
     "dsh.plugin.json",
     "README.md"

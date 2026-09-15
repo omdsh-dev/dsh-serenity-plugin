@@ -30,6 +30,7 @@ import { registerContext } from './seams/context.js'
 import { registerEntrySkillSectionGlobal } from './seams/system-prompt.js'
 import { registerCompactRetention } from './seams/compact.js'
 import { registerStatusApi } from './api.js'
+import { registerVoyageApi } from './voyage-page.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
@@ -183,6 +184,10 @@ export function apply(ctx: Context, config: Config): void {
   }
   if (config.api) {
     registerStatusApi(ctx, { configPaths: config.serenityConfigPaths })
+    // S142 §12.44：宁静号航行动画（ACC 层静态资产）——
+    // /serenity/voyage 发 assets/serenity-voyage.html（无参=全屏版 / ?card=1=卡片模式），
+    // 供会话头部状态胶囊展开卡片（SafeModePanel 的 sp-pop）当背景层用。
+    registerVoyageApi(ctx)
   }
   // v1.21 分层：简单配置（开关/阈值）注册到 dsh 原生设置面板（零改 DSH；
   // 旧 RC 白名单存在时 client 侧自动降级，账号复杂配置走宁静号面板不受影响）

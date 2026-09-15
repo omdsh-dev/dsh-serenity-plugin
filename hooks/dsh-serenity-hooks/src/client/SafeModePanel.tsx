@@ -211,7 +211,24 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
 
       {/* 自绘 popover（340px 右上角卡片；外点/Escape 关闭） */}
       {open && (
-        <div className={cx('sp-pop')} role="dialog" aria-label="CCC 状态栏">
+        <div className={cx('sp-pop', 'sp-popVoyage')} role="dialog" aria-label="CCC 状态栏">
+          {/* 背景层：宁静号航行动画（ACC 层资产 /serenity/voyage，S142 §12.44）。
+              认知星野 + 飞船 = "宁静号的心智模型"，作为卡片展开态的背景。
+              · 用 iframe：作品是自包含单文件（830 KB，85% 是 three.js），内联会灌进
+                client bundle 并与卡片样式互相污染；iframe 隔离干净、**惰性加载**
+                （只在展开时请求一次）、关闭即卸载 ⇒ WebGL 上下文随之释放。
+              · ?card=1 → 卡片模式（作品自带的大标题/航速/事实面板/铭牌层全部让位）
+              · ?v=版本 → 资产随包变、URL 稳定 ⇒ 用 ACC 版本号打点，升级即失效重取
+              · aria-hidden + 无 tabindex：纯装饰，不进无障碍树、不可聚焦 */}
+          <div className={cx('sp-voyage')} aria-hidden="true">
+            <iframe
+              key={status.accVersion}
+              src={`/serenity/voyage?card=1&v=${encodeURIComponent(status.accVersion)}`}
+              title=""
+              loading="lazy"
+              tabIndex={-1}
+            />
+          </div>
           <div className={cx('sp-popBody')}>
             {inCcc ? (
               <>
