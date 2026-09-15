@@ -76,25 +76,46 @@ describe('keeper: 纯跟踪器', () => {
   })
 
   it('reminderText 含确认码（trajectory-assistant checkpoint 前缀）', () => {
-    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-ASSISTANT-recorded-K1]')
-    expect(reminderText('K1', 150)).toContain('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
-    expect(reminderText('K1', 150)).not.toContain('SESSION-KEEPER')
-    expect(reminderText('K1', 150)).not.toContain('[TRAJECTORY-STEWARD]')
+    expect(reminderText('K1')).toContain('[TRAJECTORY-ASSISTANT-recorded-K1]')
+    expect(reminderText('K1')).toContain('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
+    expect(reminderText('K1')).not.toContain('SESSION-KEEPER')
+    expect(reminderText('K1')).not.toContain('[TRAJECTORY-STEWARD]')
+  })
+
+  // 🔴 2026-09-16（S142 所有者指令，D64）：注入文本不得携带任何数值
+  //
+  // ⚠️ 判据边界（第一版写错过，留痕）：初版断言 `not.toContain('threshold')` **失败**——
+  //    因为新文案自身用了 "reached the configured rebuild threshold" 这个词。
+  //    失败的**不是实现**：禁令的对象是"**数值**"，不是"**词**"。
+  //    word "threshold" 只为可读性而保留，它不透露任何量。
+  //    ⇒ 断言只拒绝**数值形态**与旧版式（`Context usage at`），不拒绝词。
+  it('reminderText 不再注入计分数值（D64：内部账目不进 LLM 上下文）', () => {
+    const text = reminderText('K1')
+    // 旧文案形态 = `Score threshold reached (150)`；新文案不得回显该计数
+    expect(text).not.toContain('(150)')
+    expect(text).not.toContain('reached (')
+    // 确认协议不受影响（必须仍然可用——它是正常工作的前提）
+    expect(text).toContain('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
+    expect(text).toContain('[TRAJECTORY-ASSISTANT-recorded-K1]')
   })
 })
 
 describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () => {
-  it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本（需求① K 数值化）', () => {
-    // 需求①：参数从 (ratio, threshold 比例) 改为 (tokensK, thresholdK 千 token)
-    const text = rebuildReminderText(412, 400)
+  it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本（D64：注入不带数值）', () => {
+    // 需求①（v1.28.0）曾把**判定**从比例改为绝对 K，并顺带让文案显示 K 数值；
+    // 2026-09-16 所有者指令（D64）撤销"文案显示"这一半：**判定照旧读 K，注入文本不带数值**。
+    const text = rebuildReminderText()
     expect(text).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
-    expect(text).toContain('412K')
-    expect(text).toContain('threshold 400K')
     expect(text).toContain('persistent body')
     expect(text).toContain('rebuildable carrier')
     expect(text).toContain('ACT NOW')
     expect(text).toContain('container_trajectory rebuild')
     expect(text).toContain('not an option')
+    // 🔴 D64 钉子：不得出现上下文消耗 / 阈值**数值**（旧文案 = `Context usage at 412K (threshold 400K)`）
+    //    （"threshold" 一词本身不算违规——见上方 reminderText 用例的判据边界说明）
+    expect(text).not.toContain('412K')
+    expect(text).not.toContain('(threshold')
+    expect(text).not.toMatch(/Context usage at/)
     // v1.24.12 沉淀协议：rebuild 前修订现有 skill（eap 结构化）；新建 skill 写 SESSION 提案不自行创建
     expect(text).toContain('revise the relevant existing skill of this CCC')
     expect(text).toContain('write a short proposal into SESSION.md')
@@ -112,11 +133,11 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).not.toContain('0.75~0.9')
   })
 
-  it('rebuildReminderText 升级语气（escalated=true，需求① K 数值化）', () => {
-    const text = rebuildReminderText(460, 400, true)
+  it('rebuildReminderText 升级语气（escalated=true，D64：同样不带数值）', () => {
+    const text = rebuildReminderText(true)
     expect(text).toContain('[TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]')
-    expect(text).toContain('460K')
-    expect(text).toContain('threshold 400K')
+    expect(text).not.toContain('460K')
+    expect(text).not.toContain('(threshold')
     expect(text).toContain('mandatory')
     expect(text).toContain('STOP')
     expect(text).toContain('container_trajectory rebuild')

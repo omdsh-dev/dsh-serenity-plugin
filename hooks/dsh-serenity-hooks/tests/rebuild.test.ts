@@ -499,12 +499,15 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
   })
 })
 
-describe('F2: rebuildReminderText（轨迹跟踪器提示，需求① K 数值化）', () => {
-  it('含 K 占用 + 持久轨迹/临时副本语义 + container_trajectory rebuild 引导', () => {
-    const t = rebuildReminderText(930, 900)
+describe('F2: rebuildReminderText（轨迹跟踪器提示，D64：注入不带消耗/阈值数值）', () => {
+  it('不含 K 占用/阈值数值 + 持久轨迹/临时副本语义 + container_trajectory rebuild 引导', () => {
+    // 2026-09-16 所有者指令（D64）：判定仍读 K，但**注入文本不得透露消耗与限制**。
+    // 触发判定本身在 keeper.test.ts 的 Tracker 用例里覆盖。
+    const t = rebuildReminderText()
     expect(t).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
-    expect(t).toContain('930K')
-    expect(t).toContain('threshold 900K')
+    expect(t).not.toContain('930K')
+    expect(t).not.toContain('(threshold')
+    expect(t).not.toMatch(/Context usage at/)
     expect(t).toContain('persistent body')
     expect(t).toContain('rebuildable carrier')
     expect(t).toContain('container_trajectory rebuild')

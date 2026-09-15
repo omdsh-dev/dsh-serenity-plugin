@@ -77,11 +77,17 @@ export class KeeperTracker {
   }
 }
 
-export function reminderText(code: string, score: number): string {
+export function reminderText(code: string): string {
   // v1.18.7：英文 + 不中断工作语气（用户要求）——无需停下，顺手回应即可
   // v1.23.0：前缀 SESSION-KEEPER → TRAJECTORY-STEWARD（用户定名：trajectory 维护机制）
   // v0.3/v1.29：统一进 trajectory-assistant（TRAJECTORY-STEWARD → TRAJECTORY-ASSISTANT · CHECKPOINT）
-  return `${eventToken('checkpoint')} Score threshold reached (${score}). Please acknowledge with [${ACK_PREFIX}-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
+  // 2026-09-16（S142 所有者指令，D64）：**不再注入计分数值**。
+  //   计分是 ACC 的内部账目（工具调用次数换算），LLM 拿到它既不构成可执行动作，
+  //   又与"上下文消耗"同属"非必要信息"（占用注意力 ⇒ 净损耗）。
+  //   关联既有纪律：v1.23.3 "不向 LLM 植入阈值建议"——本条是同一原则的延伸。
+  //   ⚠️ 计分**仍在**（KeeperTracker.score 决定何时该提醒；面板照常显示给人看），
+  //   只是**不再进入注入文本**。
+  return `${eventToken('checkpoint')} Score threshold reached. Please acknowledge with [${ACK_PREFIX}-${code}] once progress is synced to the working session (acc-session show). No need to interrupt your work — just acknowledge inline and keep going.`
 }
 
 /**
@@ -97,23 +103,29 @@ export function reminderText(code: string, score: number): string {
  * escalated=true（v1.23.3）：连续多轮超阈值仍未 rebuild → 升级强制语气
  * （STOP and rebuild now，持续注入直到调用 container_trajectory rebuild）。
  *
- * 需求①（S142 用户拍板）：百分比比例 → K 数值——tokensK = 实际占用（千 token），
- * thresholdK = 配置阈值（千 token）；文案 `Context usage at NNNK (threshold NNNK)`。
+ * 需求①（S142 用户拍板，v1.28.0）：百分比比例 → K 数值——**判定**改为绝对
+ * `projectedTokens ≥ thresholdK*1000`（触发语义，未变）。
+ * 🔴 2026-09-16（S142 所有者指令，D64）：**判定用 K，但注入文本里不再给任何数值**——
+ *   原文案 `Context usage at NNNK (threshold NNNK)` 属于"向 LLM 透露上下文消耗与限制"，
+ *   是非必要信息（LLM 不据此决策，只占注意力）。⇒ 参数退化为仅 `escalated`。
+ *   ⚠️ 触发判定与提醒行为**一字未改**（仍读 projectedTokens / thresholdK 比对；仍升级催）；
+ *   变的只是**注入文本不再携带 tokensK / thresholdK**。
+ *   使用者若要查看当前占用/阈值：看面板（`rebuildThresholdK` 滑块 + 状态显示）——那是给人看的。
  *
  * v1.31.1 交接协议（S142 用户需求"要求 LLM 将当前手头事项写在 SESSION.md 尾部，并要求
  * rebuild 后去读并处理"）：**写侧** = 这里（两条文案都要求把 in-flight 事项写在
  * SESSION.md 末尾的 `IN_FLIGHT_HEADING` 之下）；**读侧** = rebuild 锚点（rebuild.ts）。
  * 两侧共用 trajectory-assistant 的标题常量（单一真相源）。
  */
-export function rebuildReminderText(tokensK: number, thresholdK: number, escalated = false): string {
+export function rebuildReminderText(escalated = false): string {
   const handover =
     ` Before rebuilding, write your current in-flight items (the exact step you are in the middle of, `
     + `what is not finished yet, and what the next action is) at the very end of SESSION.md under the heading `
     + `"${IN_FLIGHT_HEADING}" — the rebuilt conversation reads that section first and continues from it.`
   if (escalated) {
-    return `${eventToken('limitMandatory')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K) — you have been reminded repeatedly and have NOT called the container_trajectory rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call container_trajectory rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild).${handover} The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call container_trajectory rebuild.`
+    return `${eventToken('limitMandatory')} Context usage has reached the configured rebuild threshold — you have been reminded repeatedly and have NOT called the container_trajectory rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call container_trajectory rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild).${handover} The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call container_trajectory rebuild.`
   }
-  return `${eventToken('limit')} Context usage at ${Math.round(tokensK)}K (threshold ${Math.round(thresholdK)}K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself.${handover} ACT NOW: at the next natural pause (end of the current task step), call the container_trajectory rebuild action — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
+  return `${eventToken('limit')} Context usage has reached the configured rebuild threshold. This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself.${handover} ACT NOW: at the next natural pause (end of the current task step), call the container_trajectory rebuild action — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
@@ -358,7 +370,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // ① 计分达标 → SESSION-KEEPER 确认码提醒
     if (shouldRemind) {
       const code = tracker.ack()
-      blocks.push({ type: 'text', text: reminderText(code, tracker.currentScore) })
+      blocks.push({ type: 'text', text: reminderText(code) })
     }
 
     // ② 轨迹跟踪器：上下文压力检测（独立——每次工具调用后都查，不依赖计分）
@@ -367,19 +379,20 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // 强制语气，此后持续升级催（不重置，直到 agent 调用 container_trajectory rebuild 压力自然回落）。
     // 需求①（S142 用户拍板）：判定从窗口比例改为绝对 K——projectedTokens ≥ thresholdK*1000
     // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
+    // 🔴 2026-09-16（S142 所有者指令，D64）：**判定照旧读 K，但注入文本不再带数值**
+    // （`rebuildReminderText` 参数已退化为仅 escalated；见其头注）。
     if (skiffRebuild && readSimpleSettings().rebuildEnabled) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
         const pressure = readContextPressure(ctx, session)
         if (pressure && pressure.projectedTokens > 0) {
-          const tokensK = pressure.projectedTokens / 1000
           const thresholdK = readSimpleSettings().rebuildThresholdK
           if (pressure.projectedTokens >= thresholdK * 1000) {
             const key = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id ?? 'global'
             const st = rebuildReminderStates.get(key) ?? { consecutive: 0 }
             st.consecutive += 1
             const escalated = st.consecutive >= REBUILD_ESCALATE_AFTER
-            blocks.push({ type: 'text', text: rebuildReminderText(tokensK, thresholdK, escalated) })
+            blocks.push({ type: 'text', text: rebuildReminderText(escalated) })
             rebuildReminderStates.set(key, st)
           }
         }
