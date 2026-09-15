@@ -1,3 +1,94 @@
+## v1.34.0 — 2026-09-15（🧩 工具面收敛与更名：`logbook` 并入 **`container_trajectory`** + 专属工具 `acc-diag` + 时钟可观测面 + 两闸解耦）
+
+**Scope:** 三条独立裁决合批发布（发布纪律 D14；用户 2026-09-15「同意，发布」）：
+
+- **§32 工具面合并**（用户「我觉得 logbook 应该和 trajectory 合并了，顺手讨论下方案吧」+ 四轮逐条拍板）：**`logbook` 一词废止**，动作 **23 → 6**；
+- **§33/§34 时钟静默事件**（用户「是因为我把 auto-trajectory 关了调度器不工作吗？」⇒ 真因**就是全局闸被关**，非重启、非 live 为空）：新增**时钟可观测面** + 收窄武装门 + **两闸解耦**（S-1）；
+- **§35 H 段更名**（用户「**名称改称 `trajectory` 是准确性调整**——它是我们容器内的机制……**specs 也在本 trajectory 改**；**osp 不管**」）：工具名与实现文件名硬切为 **`container_trajectory`**。
+
+### ① 工具面合并：`logbook` + `trajectory` → 单一 **`trajectory`**（动作 23 → 6）
+
+两个工具本是**同一主语的两个侧面**（载体生命周期 vs 时间轴），且**事实上已耦合**（`logbook use` 写 `.bindings.json`，而唤醒定位正是读它）。合并后由**同一 owner** 显式承担。工具面 **11 → 10**（沿 D46「工具面越小执行越好」），**硬切无别名**。
+
+| 保留（6） | 说明 |
+|---|---|
+| `list` | 轨迹清单 **+ 统计 + 异常标注**（原 `summary` 并入） |
+| `show` | 读**单条** SESSION.md 正文 |
+| `create` | 新建轨迹（`--desc` / `--issue` 二选一 + `--summary`） |
+| `use` | 激活 + **内联完整性检查**（目标存在？SESSION.md 在？长期无活动？——**通过静默、不通过提示，不阻断**） |
+| `rebuild` | 原地清空重建（Ship of Theseus；**keeper 依赖它**） |
+| `wake-later` | 未来时刻 + 一条 message（可唤醒任一轨迹，含自己）；fire-and-forget |
+
+**淘汰/并入**：`close`·`archive` 删（`completed` 本就从 SESSION.md 的 `[x]` 推导；归档能力由 `container_fs mv → _archived/` 承担）｜`health`·`qa` → `use`（**判据升级**：`qa` 拿旧六节模板当判据、`health` 数勾选框完成率与关键词频次——其判据已被 ACC 层的 **EAP** 取代，属**双重标准**，故淘汰；只把**不依赖模板**的"空壳 / 长期无活动"并入 `use`）｜`summary` → `list`｜`hook-develop-guide` → **`container_admin msm guide`**（SEP 的本质就是"注册一个 `session-tool` MSM"）｜`wake-add`/`wake-list`/`wake-rm` → **`wake-later`**（**不可回收、不做面板**，用户明示接受）
+
+**⚠️ 代价（显式接受）**：删 `wake-rm` ⇒ D60 的三条替代控制只剩「可审计（文件随 CCC git 可读）」+「不打断在跑轮次」，**写入即不可撤回**。
+
+### ② autopilot 面归机务舱：`container_admin autopilot`
+
+`status`（原 `trajectory all` 一站式报告）｜`init` ｜`generate-bias`（原 `random`）——**周期自唤醒是"容器运维"，主语是容器不是轨迹**。原 `doc`/`check`/`status`/`guide` 四个"给我看文档"的动作并入 `status`；`diag`/`diag-live` 下沉为**开发面**能力（`dsh-develop diag`）+ **运行态专属工具**（见 ③）。
+
+### ③ 专属工具 `acc-diag` + **`exclusiveTools`** 机制（新，通用）
+
+- **机制**：ACC 注册该工具但**默认对所有 CCC 隐藏**；只有在自己 `.opencode/serenity.json` 的 `exclusiveTools` 里**逐字点名**的 CCC 可见。复用既有**条件可见**通道（`tools.restrict` 按工具名从 **schema 移除**，不是"看得到但被拒"）。**归属判据（D23）**：机制通用在 ACC、声明具体在 CCC——**ACC 代码里不出现任何具体 CCC 的名字**。
+- **失败方向 fail-closed**：未配置 / 字段缺失 / JSON 损坏 ⇒ 一律按"未声明"处理（保持隐藏）。与 `im-bridge` **相反**——隐藏一个**已在使用**的通道才会静默损害能力，而专属工具的默认态本就是隐藏。
+- **内容（一次调用即全报告，无动作参数）**：① live 运行态（live 会话清单 + autopilot 目标定位与诊断）**＋ ①b 两个时钟态**（见 ④）｜② 面板解析落在哪个 CCC｜③ 唤醒注册表条目与补跑窗口｜④ 唤起条件链（"为什么这轮没被唤起"逐条件 + 阻断点 + 修复建议）。
+- **为何必须是独立工具**（不能做成 `container_admin` 的一个域）：`tools.restrict` 是**工具级** deny，无域级粒度——做成域就只能连 `role`/`msm`/`config` 一起隐藏。
+
+### ④ 时钟可观测面 + 武装门收窄（**⚠️ 措辞纪律见下**）
+
+**背景（真因，含一次公开的归因更正）**：用户报"时钟静默 6.6 小时"时，我**先**把零 tick 归因为"武装闩锁"，**没有先读一次闸值**就写下了根因；用户提问"是因为我把 auto-trajectory 关了吗"后实测才确证——**全局闸 = false、armed = false、tick = 0（从未）**。⇒ 纪律强化「**探针必须先做正控**」（现象与机制之间必须有一次实测，不得用机制解释替代实证）。
+
+- **新增可观测面**：`wakeSchedulerState()` / `autopilotClockState()` → `acc-diag` **①b 两行**（armed / armedAt / 全局闸 / tick 次数 / 上次 tick / **上次跳过原因**）。它一眼分开"闸关"与"未武装"——**这两者过去在报告里同形**，正是误判的土壤。
+- **武装门收窄**：原 `startTimer()` 有两道门（全局闸 + 「至少一个 live CCC」），而 CCC 根**只能**从 live 会话 cwd 反推 ⇒ **宿主刚重启时 live 必为空 ⇒ 时钟根本不武装**；且 `session/created` **不覆盖"浏览器恢复旧会话"**，靠事件补挂有洞。⇒ 改为「**全局闸开即武装**」，"有无 live CCC"降级为 **tick 内的廉价判定**（代价 = 一个 unref 的 5min 空检查）。
+- **🔴 措辞纪律（诚实记录）**：本轮**并未观测到**武装闩锁的真实触发实例（证据等级 = **仅静态**：代码路径 + 事件语义）。**本条不得写成"修复了一次线上故障"**；事实是 ① 新增了当时缺失的可观测面 ② 把静态发现的缺口一并收窄。
+
+### ⑤ 两闸解耦与更名（S-1，用户「只关闭 auto-trajectory 唤醒 + 名字也改合适」）
+
+原 `wakeSchedulerEnabled()` 的判据是 `trajectoryEnabled === true || autopilotEnabled === true` ⇒ **关掉周期自唤醒会连带关掉一次性唤醒**（"跨轨迹预约未来时刻"与"周期自唤醒"绑在同一开关上）。解耦：
+
+| 旧名 | 新名 | 语义 |
+|---|---|---|
+| `autopilotEnabled` | **`autopilotWakeEnabled`** | **周期**自唤醒闸（**缺省关**）；迁移期 `?? autopilotEnabled`（**`??` 不是 `\|\|`**——新键显式 `false` 必须能覆盖旧键 `true`） |
+| `trajectoryEnabled` | **`wakeSchedulerEnabled`** | 唤醒**调度器**闸（**缺省开**，**无** autopilot 回退）——达到"关周期自唤醒不再连带关 wake-later" |
+
+面板拆两行（「周期自唤醒（autopilot）」/「唤醒调度器（wake-later）」），详情写明**互不连带**。（踩坑留档：schemastery **没有 `.optional()`**，表达"未设"用 `.required(false)`。）
+
+### ⑥ 工具名与实现文件名硬切：`trajectory` → **`container_trajectory`**（H 段 / D61）
+
+**性质 = 准确性调整**（不是"改名让它更像一等公民"）：`container_` 前缀表**作用域（在本容器内）**，**不表**"与容器平级"——**D58「trajectory 是一等概念」地位不变**。⇒ 由此得到**可复用命名判据**：
+
+> **`container_<X>` = 掌管本容器自身之 X 的工具**（`container_fs` / `container_git` / `container_trajectory` / `container_admin`）。
+> 出处（一手，早于本次）：specs `docs/acc-story.md:222`「命名继承背景：`cc_xx` → `container_xx`」。
+
+同一批清**内部实现文件名的债**（形态 B）：`tools/session.ts` → `tools/trajectory.ts`｜`session-ops.ts` → `trajectory-ops.ts`｜`session-bound.ts` → `trajectory-bound.ts`（⚠️ `session-cleanup.ts` **不动**——它的主语是 DSH 会话，不是轨迹）。**三层名字只改后两层**：概念词（trajectory / The Ship's Log / Ship of Theseus）**不动**。
+
+**🔴 同批硬约束（不同批 = 静默失效）**：`tools.restrict` 按**工具名字符串**匹配 ⇒ CCC 侧 skiff 角色白名单（`.opencode/serenity.json` + 角色提示词）**必须与 ACC 同批改**，否则角色**静默失去该工具**（不留任何报错）。过渡窗口内可双列新旧名；部署验证通过后须删旧名。
+
+### ⑦ 顺带修复
+
+- **`dsh.plugin.json` 声明面失真**：`contributes.tools` 列了 **12** 项且 `trajectory` **重复两次**；`package.json` 描述清单含**已废除的 `logbook`** 且**缺 `acc-diag`**——而两处 description 都自称"11 个工具"。⇒ 按真实 11 项与 `REGISTERED_TOOLS` **同序**改写（三处一致）。
+- **README 对照表左列笔误**：osp/dsp 双运行时对照表的**左列（osp）**写着 `trajectory`（osp 契约面是 `logbook`）⇒ 改为 `logbook`。
+- **`logbook` 残留扫尾**：非历史表述改净（含 keeper 函数名 `logbookCompactionReminderText` → `trajectoryCompactionReminderText`、两条运行时 console 文案、LLM 可见的 SEP 提示串）；**13 处显式历史陈述有意保留**（带版本归属的沿革句）。
+
+### 门禁与验收
+
+`typecheck` 双面 ✓ ｜ `test` **83 files / 1250 tests** ✓ ｜ `build` ✓（lib 204658 B）｜ `pack-check` ✓（**101 文件**）｜ `readme-sync` ✓。
+**实测验收（本机真实 web 进程，dev 部署后）**：
+
+- **工具名生效**：`container_trajectory show S142` 调用成功（旧名已不注册）——**判据取"能否调用"，不取版本号**（`accVersion` 在发布前必然滞后）；
+- **`acc-diag` 四段齐** + **①b 两个时钟态**：唤醒调度器 `armed=true`（**缺省开、零 live 会话也武装**——重启瞬间即 armed，首次 tick 留痕"无 live 会话 ⇒ 无 CCC 可扫"）｜autopilot 时钟 `armed=false`（所有者关着）⇒ **两线各归各**；
+- `dashboard health` = healthy；registry `ok:true issues:[]`；`hostContract` **checked:40 / ok:true / issues:[]**；
+- **唤醒注册表端到端**（v1.32.0 已验、本版沿用）：**热路径** `live(bound …)` ✓｜**冷路径** `cold-resume(…)` ✓（冷会话经 `sessionController.resolveAgent` 载入并投递）。
+
+### 已知边界（诚实记录，未修）
+
+1. **完全冷掉的 CCC 不能自唤醒自己**（v1.32.0 起记录，本版**只收窄了武装门、未修发现面**）：调度器仍只遍历**至少有一个 live 会话**的 CCC（CCC 根由 live 会话 cwd 反推）⇒ 整机无人打开任何会话时，到期条目停在 `pending`（超 2h 补跑窗后置 `missed`）。候选改进 = 持久化"已知 CCC 根"。
+2. **唤醒不可回收**：`wake-rm` 已删（见 ① 代价）；目前只能等它到期，或人工改 `wake-registry.json`。
+3. **闸关期间滞留条目**：终局由"是否超 2h 补跑窗"决定（`delivered` / `missed`）；是否要为闸关引入 `paused` 态**待裁决**。
+4. **`use` 的内联检查只做"可用性/完整性"三项**，**不做格式合规检查**——格式归 EAP 与 skill，**不归工具**（这是 ① 淘汰 `qa` 的同一判据）。
+
+---
+
 ## v1.32.0 — 2026-09-14（⏰ trajectory 升为一等概念：`autopilot-trajectory` → `trajectory` + **唤醒注册中心**）
 
 **Scope:** 用户需求「dsp 需要一个**定时唤醒某个会话自动继续**的机制，应当是个**唤醒注册中心**，只支持按未来时刻唤醒，精度不需要很高；用于支撑 **trajectory 在时间的轴上自由地安排自己**」（S142 §30）。侦察后按三条裁决落地：**D58**（trajectory 是本体、autopilot 只是"周期自唤醒"的特例）｜**D59**（autopilot 保持独立单例循环，不进注册表）｜**D60**（注册表不设资格栅）。**协作边界（用户原话的推论）**：所有 trajectory 互相可见，但唤醒**只能是"可预期的未来时刻 + 一条信息"**——**无阻塞、无等待、无回执**（fire-and-forget）。
