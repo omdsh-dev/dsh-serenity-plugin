@@ -26,7 +26,7 @@ import {
   WAKE_CATCH_UP_MS,
   type WakeEntry,
 } from '../src/wake-registry.js'
-import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 const HOUR = 3_600_000
@@ -258,6 +258,125 @@ describe('buildWakeText（投递正文：身份锚定 + 唤醒信息 + 任务）
     expect(text).toContain('/x/SESSION.md')
     expect(text).toContain('做 A')
     expect(text).toContain('S142')
+  })
+})
+
+/**
+ * 即时投递（`container_trajectory send-message`，2026-09-16 所有者裁决）。
+ *
+ * **钉住的不变量**：与 `wake-later` **共用取用通路**（live 优先 → 冷载入），
+ * 区别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）。
+ * 设计稿 = `docs/trajectory-send-message-design.md`（v0.2 定稿）。
+ */
+describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () => {
+  it('live 命中 ⇒ followup 收到**即时消息**正文（不是唤醒正文）', async () => {
+    writeSessionDir()
+    writeBinding('sess-live')
+    const sent: string[] = []
+    const fakeAgent = { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } }
+    const ctx = { agents: { get: (id: string) => (id === 'sess-live' ? fakeAgent : undefined) } }
+
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '现在就做这件事', 'S142')
+    expect(res.ok).toBe(true)
+    expect(res.detail).toContain('live(bound sess-live)')
+    expect(sent).toHaveLength(1)
+    // 正文要点：来自谁 / 是**即时消息** / 原样带上 message / 身份锚定到目标
+    expect(sent[0]).toContain('[即时消息]')
+    expect(sent[0]).toContain('S142')
+    expect(sent[0]).toContain('现在就做这件事')
+    expect(sent[0]).toContain(DIR_NAME)
+    // 🔴 关键区分：**不得**把它说成"到点唤醒"（那是错的事实）。
+    // ⚠️ 判据形态订正（本轮实测踩到）：**不能用 `not.toContain('到点')`** —— 本正文里那句
+    //    "（**不是**到点唤醒）"自身就含"到点" ⇒ 该断言是**假阳性**，会把我方措辞当违规。
+    //    ⇒ 改用**精确判别符**：唤醒正文的头部标识 `[trajectory 唤醒]`（`buildWakeText` 第一行）。
+    expect(sent[0]).not.toContain('[trajectory 唤醒]')
+    expect(sent[0]).not.toContain('登记于')
+  })
+
+  it('非 live ⇒ 走 sessionController 冷载入（**等效于直接 wake**，但不等 tick）', async () => {
+    writeSessionDir()
+    writeBinding('sess-cold')
+    const sent: string[] = []
+    const resumed = { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } }
+    let asked: string | null = null
+    const ctx = {
+      agents: { get: () => undefined },
+      get: (name: string) => (name === 'sessionController'
+        ? { resolveAgent: async (id: string) => { asked = id; return { agent: resumed } } }
+        : undefined),
+    }
+    const res = await sendToTrajectory(ctx as never, root, 'S999', '给冷会话的一句话', 'S142')
+    expect(res.ok).toBe(true)
+    expect(asked).toBe('sess-cold')
+    expect(res.detail).toContain('cold-resume(sess-cold)')
+    expect(sent[0]).toContain('给冷会话的一句话')
+  })
+
+  it('冷会话 + sessionController 缺席 ⇒ 响亮报错（不静默、不误报成功）', async () => {
+    writeSessionDir()
+    writeBinding('sess-cold')
+    const ctx = { agents: { get: () => undefined }, get: () => undefined }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('sessionController')
+  })
+
+  it('无绑定记录 ⇒ 报错说明需先 container_trajectory use', async () => {
+    writeSessionDir()
+    const ctx = { agents: { get: () => undefined }, get: () => undefined }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('.bindings.json')
+  })
+
+  it('目标未命中 ⇒ 报错', async () => {
+    const ctx = { agents: { get: () => undefined }, get: () => undefined }
+    const res = await sendToTrajectory(ctx as never, root, 'S404', 'x', 'S142')
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('未命中')
+  })
+
+  it('followup 抛错 ⇒ ok:false 且留原因（不静默吞掉）', async () => {
+    writeSessionDir()
+    writeBinding('sess-boom')
+    const ctx = {
+      agents: {
+        get: (id: string) => (id === 'sess-boom'
+          ? { followup: () => { throw new Error('driver down') } }
+          : undefined),
+      },
+    }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('投递失败')
+    expect(res.detail).toContain('driver down')
+  })
+
+  it('🔴 **不落注册表**（所有者 2026-09-16 裁 (A)）—— 唤醒注册表保持"未来时刻表"单一语义', async () => {
+    writeSessionDir()
+    writeBinding('sess-live')
+    const ctx = {
+      agents: { get: (id: string) => (id === 'sess-live' ? { followup: () => {} } : undefined) },
+    }
+    const before = listWakes(root).entries.length
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '不留痕的一句话', 'S142')
+    expect(res.ok).toBe(true)
+    expect(listWakes(root).entries.length).toBe(before)
+  })
+})
+
+describe('🔴 回归钉：即时投递**不得**靠放宽 addWake 来实现（两者语义分界不许被抹平）', () => {
+  it('addWake 仍然拒绝 at ≤ now（"时刻必须在未来"）', () => {
+    const now = Date.parse('2026-09-16T12:00:00Z')
+    // 过去的绝对时刻
+    expect(addWake(root, { target: DIR_NAME, at: '2026-09-16T11:00:00Z', message: 'x', createdBy: 'S142', nowMs: now }).ok).toBe(false)
+    // 恰好现在
+    expect(addWake(root, { target: DIR_NAME, at: '2026-09-16T12:00:00Z', message: 'x', createdBy: 'S142', nowMs: now }).ok).toBe(false)
+    // 拒绝理由必须点名"未来"（不是含糊的解析失败）
+    const r = addWake(root, { target: DIR_NAME, at: '2026-09-16T11:00:00Z', message: 'x', createdBy: 'S142', nowMs: now })
+    expect(r.ok === false && r.error).toContain('未来')
+    // 正控：真正未来的仍可登记（证明上面的 false 不是解析器坏了）
+    expect(addWake(root, { target: DIR_NAME, at: '+1h', message: 'x', createdBy: 'S142', nowMs: now }).ok).toBe(true)
   })
 })
 

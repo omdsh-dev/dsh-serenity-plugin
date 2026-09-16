@@ -1,3 +1,50 @@
+## v1.38.0 — 2026-09-16（`container_trajectory` 新增第 7 个动作 **`send-message`（即时投递）**）
+
+**来源**：所有者令「trajectory 除了 wake later，还要支持一个 **send message 用于实时使用提示词注入来回应**，如果会话不活跃，则**等效于直接 wake**。设计下」→ 设计稿 `docs/trajectory-send-message-design.md`（v0.2 定稿，三个决策点已裁）→「**同意，开工**」。
+
+### 新增：`send-message`（即时投递）
+
+| | `wake-later`（原有） | **`send-message`（新）** |
+|---|---|---|
+| 时刻 | **未来**（`addWake` 硬拒 `at ≤ now`） | **现在** |
+| 语义 | 预约（fire-and-forget） | 递话（**同步回执**） |
+| 回执 | **无**（D58 明示接受） | **有** |
+| 落点 | `AGENT_SESSIONS/wake-registry.json` | **不落注册表** |
+
+**取用通路与唤醒完全共用**：live 命中 → 立即 `followup` 注入；非 live → `sessionController.resolveAgent` **冷载入**后投递（**这就是"等效于直接 wake"**，但**不等 5 分钟 tick**）。
+
+### 🔴 两条设计地基（R↓）
+
+1. **为什么冷路径不落注册表**：`addWake` 显式拒绝 `at ≤ now`（"时刻必须在未来"——那是**预约**语义的地基）。即时投递**不能**靠一条 `at=now` 的条目实现：既会撞上该不变量，又会让调度器把一次性即时投递当 `pending` **每 tick 重试**。⇒ 直接复用 `acquireWakeAgent`，**同步**投递。
+2. **为什么用"新原语"而不是给 `wake-later` 打补丁**：S142 §12.B 曾提"给 wake 加投递后确认"并标注"⚠️ 触及 D58 ⇒ 须裁"。本次取**加一条独立原语**：**D58 一个字不改**（预约仍无回执），要回执的人改用 `send-message` ⇒ **两个动作各自语义干净**（打补丁会让同一动作有两种语义）。
+
+### ⚠️ 能力边界（写进工具描述，避免被误当成"发出去就已经发生"）
+
+- 回执只到「**已入队**」——**不表示**目标已执行/已答复。
+- 目标正在跑轮次 ⇒ 消息在**轮次边界**生效（**不打断当前轮**）。
+- 冷载入本身有延迟（历史实测投递→起轮 **6~31s**）。
+- 要判"目标真的动了" ⇒ 必须用**文件级判据**（它自己的 `SESSION.md`）。
+
+### 实现落点
+
+- `src/wake-scheduler.ts`：**新增** `buildSendText()` + `sendToTrajectory()`（**纯新增，`deliverWake` 一行为未动**——v1.35.0 硬约束①仍守）。归属理由："怎么把一句话送到一条轨迹"是**调度器的知识**，不是工具的知识。
+- `src/tools/trajectory.ts` + `src/trajectory-ops.ts`：第 7 个动作（enum / 描述 / 参数 / 分支）。
+- `src/seams/system-prompt.ts` 的 `toolsBlock`、`src/msm-ops.ts` 的 `ACC_CATALOG`、包内模板 `acc-serenity/SKILL.md` + `acc-session/SKILL.md`（**会随包分发并被注入 agent 上下文 ⇒ 属契约面**）。
+- 顺手订正模板里一处**失效陈述**：`acc-session/SKILL.md` 仍在指 `container_admin autopilot`（该域 **v1.35.0 已整段退场**）。
+
+### 测试（`tests/wake-registry.test.ts`，27 → **35**）
+
+live 命中（正文含 `[即时消息]`/sender/message，且**不含唤醒头**）｜非 live 冷载入｜`sessionController` 缺席 ⇒ 响亮报错｜无绑定｜目标未命中｜`followup` 抛错 ⇒ 留原因｜🔴 **不落注册表**（裁 (A) 的回归钉）｜🔴 **`addWake` 仍拒 `at ≤ now`**（防有人为了 send 顺手放宽它）。
+
+> 🔴 **本轮实测踩到并订正的一条判据形态**：首版断言写 `expect(sent[0]).not.toContain('到点')`，被自己正文里那句"（**不是**到点唤醒）"**判成违规**（**假阳性**）。⇒ 判据改用**精确判别符**（唤醒头 `[trajectory 唤醒]` / `登记于`）。**教训**：`not.toContain` 一类否定判据要**先想想自己的解释性措辞会不会撞上它**。
+
+### 兼容性
+
+- **纯新增**（新动作 + 新导出函数）；**既有 6 动作行为零变化**，`wake-later` 链路**一行为未动**（`deliverWake` 原样，`wake-registry.test.ts` 原有用例**未改断言**即全绿）。
+- 注册表 **schema 未变**（不写 send 条目 ⇒ 无需 `kind` 字段、无需"永不 pending"特例）。
+
+---
+
 ## v1.37.0 — 2026-09-16（提示词注入整理 **C / G**：指引修正 + 不再注入 handyman 模型名）
 
 **来源**：所有者令「整理下我们 dsp 做的所有提示词注入，找到可以砍掉的候选（口径是 **没有必要 / 冗余 / 对 LLM 造成了干扰**），我来审核」（S142 §0e）。审计稿 = `docs/injection-audit.md`；本版落地其中**两条已裁决**的候选 + 两处残留清理。

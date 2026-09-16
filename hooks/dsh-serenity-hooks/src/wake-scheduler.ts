@@ -213,6 +213,76 @@ export async function deliverWake(ctx: Context, root: string, entry: WakeEntry):
 }
 
 /**
+ * 即时消息正文（**刻意不复用** {@link buildWakeText}）：唤醒文本以「**到点**（登记于…）」开头，
+ * 对即时投递那是**错的事实**。本函数显式区分"这是即时消息、不是到点唤醒"，
+ * 并写明"消息已入队、若此前在跑轮次则本轮结束后生效"（防目标误判时序）。
+ * @param target 目标轨迹（目录名 + SESSION.md）
+ * @param message 递送正文
+ * @param sender 发起者轨迹标识（供目标与人类识别来源）
+ */
+export function buildSendText(target: WakeTarget, message: string, sender: string): string {
+  return [
+    `[即时消息] 来自 ${sender || '未知轨迹'}。`,
+    '',
+    `身份锚定：继续 ${target.dirName} 的 trajectory（SESSION.md: ${target.mdPath}）。`,
+    '',
+    '消息：',
+    message,
+    '',
+    '说明：这是**即时投递**（不是到点唤醒）——消息已进入你的队列；你此前若正在跑轮次，它在本轮结束后生效。处理完照常把进展写入 SESSION.md。',
+  ].join('\n')
+}
+
+/**
+ * 即时投递（`container_trajectory send-message`）——与唤醒**共用取用通路**，
+ * 区别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）：
+ *   · `wake-later`：未来时刻 + 一条 message → 落注册表 → 本文件的调度器到点投递（**fire-and-forget，无回执**）
+ *   · `send-message`：**此刻**把一条 message 递进目标队列 → **同步回执** → **不落注册表**
+ *
+ * **为什么冷路径落在这里（R↓，2026-09-16 所有者裁决）**：`addWake` 显式拒绝 `at ≤ now`
+ * （"时刻必须在未来"——那是"**预约**"语义的地基，不许放宽）⇒ 即时投递**不能**靠一条
+ * `at=now` 的注册表条目实现（那还会让调度器把一次性即时投递当 `pending` **每 tick 重试**）。
+ * 必须直接走 {@link acquireWakeAgent}（live 优先 → `sessionController.resolveAgent` 冷载入）。
+ * 这正对应所有者要的「**会话不活跃则等效于直接 wake**」：**同一条冷载入通路**，只是**不等 tick**。
+ *
+ * ⚠️ **承诺边界（不许含糊）**：回执只到「**已入队**」（`followup` 未抛错），
+ * **到不了**"目标已执行/已答复" —— 与 `deliverWake` 同一层。目标若正在跑轮次，
+ * 消息**排在轮次边界**（**不打断当前轮**）。判"目标真的动了"必须用**文件级判据**
+ * （它自己的 SESSION.md），**不得凭回执结案**（§12.B 的 `delivered ≠ 跑了一轮`）。
+ *
+ * **归属**：本函数放在调度器侧而非工具侧 —— "怎么把一句话送到一条轨迹"是**调度器的知识**，
+ * 工具只该知道"有这个动作"。这样 `trajectory.ts` 完全不碰调度器内部（v1.35.0 硬约束①：
+ * `wake-later` 链路**一行为不动**，本次改动 = **纯新增**）。
+ *
+ * @param ctx 插件上下文
+ * @param root CCC 根
+ * @param target `S###` 或 AGENT_SESSIONS 目录名
+ * @param message 递送正文
+ * @param sender 发起者轨迹标识
+ * @returns 投递结果（**同步**返回给调用方）
+ */
+export async function sendToTrajectory(
+  ctx: Context,
+  root: string,
+  target: string,
+  message: string,
+  sender: string,
+): Promise<WakeDeliveryResult> {
+  const t = resolveWakeTarget(root, target)
+  if (!t) return { ok: false, detail: `目标 trajectory 未命中（${target}）` }
+  const acquired = await acquireWakeAgent(ctx, root, t.dirName)
+  if ('error' in acquired) return { ok: false, detail: acquired.error }
+  try {
+    acquired.agent.followup(
+      createUserMessage({ content: [{ type: 'text', text: buildSendText(t, message, sender) }], source: PLUGIN_SOURCE }),
+    )
+  } catch (err) {
+    return { ok: false, detail: `投递失败（${acquired.how}）: ${String((err as Error)?.message ?? err)}` }
+  }
+  return { ok: true, detail: `已即时投递 ${t.dirName}（${acquired.how}）` }
+}
+
+/**
  * 本 tick 要扫的 CCC 根集合（**并集**）。
  *
  * C2（S142 2026-09-15 Q5）：原实现是 `collectLiveCccs`——**只认 live 会话** ⇒

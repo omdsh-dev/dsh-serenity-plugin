@@ -32,11 +32,13 @@ import { join, basename, dirname } from 'node:path'
  * hook-develop-guide 并进 container_admin msm guide｜autopilot 面归 container_admin 的 autopilot 域
  * （该域 2026-09-15 随 ACC 侧 autopilot 退场删除）｜
  * wake-add/list/rm 收敛为 wake-later。
+ * 2026-09-16（所有者裁决）：新增 **send-message** —— 即时投递（与 wake-later 共用取用通路，
+ *   差别只在时刻"现在 vs 未来"与回执"有 vs 无"）。设计稿 docs/trajectory-send-message-design.md。
  */
-type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'wake-later'
+type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'wake-later' | 'send-message'
 
 export const TRAJECTORY_ACTIONS: readonly TrajectoryAction[] = [
-  'list', 'show', 'create', 'use', 'rebuild', 'wake-later',
+  'list', 'show', 'create', 'use', 'rebuild', 'wake-later', 'send-message',
 ]
 
 /**
