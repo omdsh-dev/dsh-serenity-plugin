@@ -88,6 +88,11 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
     expect(block).toContain('read/write/edit/glob/grep')
     // 指引指向文末 Tools 块（heading 短语，非完整头——避免干扰块序 indexOf 定位）
     expect(block).toContain('"Serenity Tools" heading')
+    // 2026-09-16（S142 §0e-C，所有者裁「同意修正」）：MSM 一行的指引**不得**再指向
+    // "Serenity Tools" 标题——那里列的是 **ACC 内置工具**，而 MSM 是 CCC 注册的**另一层**
+    // （两者不是一回事）；指错对象 = 对 LLM 的干扰。改指 msm() 无参目录。
+    expect(block).not.toContain('(see the "Serenity Tools" heading below)')
+    expect(block).toContain('call msm() with no arguments to list them')
   })
 
   it('toolsBlock：9 工具清单 + msm 单入口示例（v1.33：logbook 并入 trajectory，im-bridge 条件可见不入块）', () => {

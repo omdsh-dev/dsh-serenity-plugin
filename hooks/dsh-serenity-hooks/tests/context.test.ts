@@ -29,10 +29,20 @@ describe('context: ACC 身份文本', () => {
     expect(t).toContain('[ACC] Serenity cognitive container active')
   })
 
-  it('读取 handyman 默认模型', () => {
+  // 🔴 2026-09-16（S142 §0e-G，所有者令）：**不再**注入 handyman 默认模型。
+  //    判据（R↓）：模型名对 LLM 不构成可执行动作——调 handyman 时不由它选模型
+  //    （默认值由 `handyman.ts` 自己读配置决定），拿到名字也无法据此决策 ⇒ 纯噪音。
+  //    ⚠️ 机制与面板**未受影响**（`status.ts` 仍把它喂给 WebUI 面板，那是给人看的）。
+  //    本用例由「应包含 mock-model」**反转为「不得包含」**——留下回归钉，防它悄悄回来。
+  it('不注入 handyman 默认模型（§0e-G 反转钉）', () => {
     mkdirSync(join(dir, '.opencode'))
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ handyman: { models: ['mock-model'] } }))
-    expect(accIdentityText(dir)).toContain('mock-model')
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ handyman: { models: ['mock-model'], defaultModel: 'mock-model' } }))
+    const t = accIdentityText(dir)
+    expect(t).not.toContain('mock-model')
+    expect(t).not.toContain('handyman default model')
+    // 身份锚点的既有内容不受影响（CCC 根 / 约束 / 知识指引仍在）
+    expect(t).toContain(dir)
+    expect(t).toContain('[ACC] Serenity cognitive container active')
   })
 
   it('存在 PHASE2-PROMPT.md 时提示访谈', () => {

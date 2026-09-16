@@ -241,7 +241,11 @@ describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，
     // 身份块不再内嵌工具清单（需求③移出 toolsBlock）
     expect(block).not.toContain('container_fs     —')
     expect(block).not.toContain('handyman  —')
-    expect(block).toContain('call msm("<name>") to execute or discover')
+    // 2026-09-16（S142 §0e-C，所有者裁「同意修正」）：MSM 指引改指 msm() 无参目录。
+    // 旧文 `call msm("<name>") to execute or discover them (see the "Serenity Tools" heading below)`
+    // 把 **MSM**（CCC 注册的另一层）指到 **ACC 内置工具清单**标题下 ⇒ 指错对象，属干扰。
+    expect(block).toContain('call msm() with no arguments to list them')
+    expect(block).not.toContain('(see the "Serenity Tools" heading below)')
     // 指引指向文末 Tools 块（heading 短语，非完整头——避免干扰块序 indexOf 定位）
     expect(block).toContain('"Serenity Tools" heading')
   })

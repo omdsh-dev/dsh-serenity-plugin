@@ -17,7 +17,7 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, basename, dirname } from 'node:path'
-import { loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
@@ -52,10 +52,6 @@ export function accIdentityText(
   configPaths: string[] = DEFAULT_SERENITY_CONFIG_PATHS,
   entrySkillMaxChars: number = DEFAULT_ENTRY_SKILL_MAX_CHARS,
 ): string {
-  const cfg = loadSerenityConfig(root, configPaths)
-  // v1.24.0：loop.defaultModel → handyman 配置（模型白名单）
-  const hc = readHandymanConfig(root, configPaths)
-  const defaultModel = hc?.defaultModel
   const phase2 = existsSync(resolve(root, '.dsh', 'PHASE2-PROMPT.md'))
   const lines = [
     `[ACC] Serenity cognitive container active (dsh-serenity-hooks v${ACC_VERSION})`,
@@ -63,7 +59,12 @@ export function accIdentityText(
     `- Constraints: path isolation (P3, fs sandbox) + session tracking (AGENT_SESSIONS/)`,
     `- Knowledge: load the acc-serenity entry skill; use acc-eap / acc-neat for design collaboration`,
   ]
-  if (defaultModel) lines.push(`- handyman default model: ${defaultModel}`)
+  // 🔴 曾在此注入 `- handyman default model: <model>`（所有者 2026-09-16 令删，S142 §0e-G）：
+  //   模型名对 LLM **不构成可执行动作**（调 handyman 时不由它选模型——默认值由 `handyman.ts`
+  //   自己读配置决定，见 `handyman.ts:213/461`），所以它拿到这个名字也无法据此决策 ⇒ 纯噪音。
+  //   ⇒ 删注入；**机制与面板都保留**（`status.ts:85` 仍把 handymanModel 喂给 WebUI 面板，那是给人看的）。
+  //   出处依据：所有者「我记得 handyman 用的模型是啥总是被注入，这个 LLM 不关注的，需要删掉」。
+  //   连带清理：`readHandymanConfig` 的读取也一并去掉（它只为这一行存在，留下即为未使用变量）。
   if (phase2) {
     lines.push('- ⚠️ **Phase 2 cognitive alignment interview pending**: work through the 5 Topics below and record answers in an AGENT_SESSIONS/ session')
     try {
@@ -81,7 +82,8 @@ export function accIdentityText(
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 /**
- * ACC 注入消息（S134 去重）：**只含简短身份锚点**（[ACC] 已激活 + CCC 根 + 约束 + handyman 模型 + Phase 2）。
+ * ACC 注入消息（S134 去重）：**只含简短身份锚点**（[ACC] 已激活 + CCC 根 + 约束 + Phase 2）。
+ * ⚠️ 原文案含「+ handyman 模型」，该注入已于 2026-09-16 删除（§0e-G）⇒ 此处同步订正（散文级残留）。
  * 完整身份（ACC 5 块 + CCE + Constraints + EAP + SKILL 全文 + Session 块）由**系统提示词层**
  * （systemPrompt.section，每轮 prompt 装配自动注入，含 subagent）承担——对话消息流/压缩重注入
  * 不再重复注入同一内容（token 双倍浪费，见 S134 注入方案梳理）。

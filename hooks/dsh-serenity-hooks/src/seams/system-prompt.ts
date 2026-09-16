@@ -83,7 +83,7 @@ export function identityBlock(root: string): string {
     '',
     'The DSH platform tools remain available too (read/write/edit/glob/grep/web_search/ask_user_question/subagent/workflow/goal and more) — the ACC tools are the serenity-native layer, not the only tools.',
     '',
-    'Additional MSMs registered by this CCC are available — call msm("<name>") to execute or discover them (see the "Serenity Tools" heading below).',
+    'Additional MSMs registered by this CCC are available — call msm() with no arguments to list them, or msm("<name>") to execute one.',
     '',
   ].join('\n')
 }
