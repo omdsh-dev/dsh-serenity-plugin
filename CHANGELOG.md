@@ -1,3 +1,40 @@
+## v1.37.0 — 2026-09-16（提示词注入整理 **C / G**：指引修正 + 不再注入 handyman 模型名）
+
+**来源**：所有者令「整理下我们 dsp 做的所有提示词注入，找到可以砍掉的候选（口径是 **没有必要 / 冗余 / 对 LLM 造成了干扰**），我来审核」（S142 §0e）。审计稿 = `docs/injection-audit.md`；本版落地其中**两条已裁决**的候选 + 两处残留清理。
+
+### 改了什么
+
+| # | 面 | 旧 | 新 | 判据（所有者口径） |
+|---|---|---|---|---|
+| **C** | `identityBlock` 末行（`system-prompt.ts:86`） | `call msm("<name>") to execute or discover them (see the "Serenity Tools" heading below)` | `call msm() with no arguments to list them, or msm("<name>") to execute one.` | **干扰**：原句把 **MSM**（CCC 注册的那一层）指到 `"Serenity Tools"` 标题下，而那里列的是 **ACC 内置工具**——把一个东西指到另一个东西的名字下 |
+| **G** | `accIdentityText()`（`context.ts`，对话消息流侧身份锚点） | 注入 `- handyman default model: <model>` | **删该行**（连带删只为它存在的 `defaultModel` 读取） | **没有必要**：模型名对 LLM **不构成可执行动作**——调 `handyman` 时不由它选模型（`handyman.ts:213/461` 自己读配置），拿到名字也无法据此决策 ⇒ 纯噪音。所有者：「这个 LLM 不关注的」 |
+
+**G 的边界（重要）**：删的**只是注入**。**机制与面板都保留** —— `handyman.ts` 仍按配置选模型、`status.ts:85` 仍把 `handymanModel` 喂给 WebUI 面板（那是**给人看**的）。⇒ **零功能影响**。
+
+### 回归钉（都钉在"不得回来"，不是删断言）
+
+- `system-prompt.test.ts` / `osp-alignment.test.ts`：`not.toContain('(see the "Serenity Tools" heading below)')` + `toContain('call msm() with no arguments to list them')`。
+- `context.test.ts`：原「应包含 `mock-model`」**反转为**「不得包含」（`not.toContain('mock-model')`）——夹具仍写入 `localstore/serenity.json` 的 `handyman.defaultModel`，确保钉的是"读了也不注入"。
+
+### 顺手清理（发布前复验时发现的两处 G 残留）
+
+1. `context.ts` 删已成**死导入**的 `readHandymanConfig`（穷举 grep 确认全文件无第二处使用；该函数在另外 7 个消费者里活着，**导出不动**）。
+2. 订正 `context.ts` 的文档注释中仍写着「+ handyman 模型」的旧状描述。
+
+> 两处都是**同一类病**：改注入时只覆盖了「标识符」，漏了「散文/尸体」——与 S142 §12.23 记的两条漏网同源。
+> ⚠️ **登记一个门禁缺口**：本仓未开 `noUnusedLocals`，所以"删掉某标识符的最后一次使用"留下的死 import **没有任何机械门在守**，typecheck 抓不到。
+
+### 兼容性
+
+- **无 API/工具面/配置面变化**（工具面仍 11；配置键未增删）；纯文案与死代码。
+- 门禁：`typecheck` 双面 ✓ ｜ `test` **90 files / 1312 tests** ✓ ｜ `build` ✓ ｜ `pack-check` **109 文件** ✓。
+
+### 同批（**不发版**，CCC 侧内容）
+
+`home-serenity/SKILL.md` 削减（所有者裁决 F1/B/F2/F3/F4/F6）：**476 行 / 47 790 B → 405 行 / 40 555 B**（−71 行 / −7 235 B）。含删 `## 相关技能`（与技能清单表重复）、删「四层的关系」表（架构图的重述）、删 SSH 主机别名静态表（改为指向 `ssh-connect list`）、合并路由表重复行、删两处过期数字。
+
+---
+
 ## v1.36.1 — 2026-09-16（CCC 卡片改**双栏**：左信息 / 右动画）
 
 **来源**：所有者（2026-09-16，v1.36.0 刚发布后）：「这个飞船有点问题，那个点击出来的卡片做成**双倍宽，左侧是信息，右侧是动画**吧」。
