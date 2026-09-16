@@ -52,7 +52,7 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | `container_admin` | 容器管理（机务舱）：role（Skiff 角色）/ msm（注册表管理 + 开发手册）/ config / **autopilot（status/init/generate-bias——周期自唤醒）** | The Manifest + Crew |
 | `msm` | MSM **单入口执行+发现**：`msm(name, args)` / 未命中候选 / `inspect:true` 查用法 / 无参目录 | The Machinery |
 | `praxis` | 可实践理论注入（section: eap/neat/cce） | Engineering Drawings |
-| `container_trajectory` | **一条轨迹**：持久身体（SESSION.md）+ 时间轴。生命周期 `list`（清单+统计）/ `show` / `create` / `use`（激活；内联完整性检查，通过静默）/ `rebuild`（原地清空重建，Ship of Theseus）；投递 `wake-later`（未来时刻 + 一条 message，可唤醒任一轨迹；fire-and-forget，无回执无回收）/ **`send-message`**（**即时**递送：live 目标立即注入、非 live 冷载入＝等效于直接 wake；**有同步回执**） | The Ship's Log / Theseus |
+| `container_trajectory` | **一条轨迹**：持久身体（SESSION.md）+ 时间轴。生命周期 `list`（清单+统计）/ `show` / `create` / `use`（激活；内联完整性检查，通过静默）/ `rebuild`（原地清空重建，Ship of Theseus）；投递 **`send-now`**（**即时**递送：live 目标立即注入、非 live 冷载入＝等效于直接 wake；**有同步回执**）/ `send-later`（未来时刻 + 一条 message，可唤醒任一轨迹；fire-and-forget，无回执无回收） | The Ship's Log / Theseus |
 | `dashboard` | 普适仪表：health（三原则 + registry）/ time / wait | 舰桥仪表盘 |
 | `handyman` | 杂工编排（白名单模型；foreground 串行 / background 循环校验） | Crew Rotation |
 | `localstore` | 凭据/配置存储（CCC 根 localstore.json） | 保留 |
@@ -98,7 +98,7 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | git 操作（status/commit/push/log） | `container_git` 工具 |
 | 执行 MSM / 发现 | `msm` 工具（`msm()` 目录 / `msm("<name>")` 执行 / `inspect:true` 查用法） |
 | 管理 MSM 注册表 / Skiff 角色 / CCC 配置 / autopilot 周期 | `container_admin` 工具（domain: role/msm/config/autopilot） |
-| 轨迹创建/读取/激活/重建/定时唤醒/即时递话 | `container_trajectory` 工具（含 `wake-later`（未来）/ `send-message`（现在，有回执）） |
+| 轨迹创建/读取/激活/重建/定时唤醒/即时递话 | `container_trajectory` 工具（含 `send-now`（现在，有回执）/ `send-later`（未来）） |
 | 认知质量自检 / 设计协作 / 连续性理论 | `praxis` 工具（section: eap/neat/cce） |
 | 健康检查/时间/等待 | `dashboard` 工具 |
 | 给微信用户发消息（招财留言/通报） | `im-bridge` 工具（**仅当本 CCC 配置了 IM 通道时可见**；只能操作本会话 CCC） |

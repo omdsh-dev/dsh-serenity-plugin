@@ -4,11 +4,17 @@
  * v1.33（S142 §32 用户裁决）：由 `logbook` **更名并收敛为 `trajectory`**（v1.34：工具名再硬切为
  * `container_trajectory`，无别名）——trajectory 是一等概念
  * （SESSION.md 是它的持久身体），本工具管它的**载体生命周期 + 一次性时间安排**。
- * 动作收敛为 **6 个**：list / show / create / use / rebuild / wake-later。
+ * 动作面现行 **7 个**：list / show / create / use / rebuild / **`send-now`** / **`send-later`**。
  * 🔴 2026-09-16（所有者裁决）：**第 7 个动作 `send-message`（即时投递）**
  *    ——与 `wake-later` 共用取用通路，差别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）；
  *    实现落在 `wake-scheduler.ts` 的 `sendToTrajectory()`（"怎么把一句话送到一条轨迹"是调度器的知识）。
  *    设计稿 = `docs/trajectory-send-message-design.md`（v0.2 定稿）。
+ * 🔴 2026-09-17（所有者裁决 · **命名 A 案**）：**两个投递动作更名** —— `wake-later` → **`send-later`**、
+ *    `send-message` → **`send-now`**。判据（R↓）：两者本是**同一条投递通路**（同取用机制 / 同载荷 /
+ *    同落点语义），只差**时刻**；而「唤醒（冷载入）」是**两条路径共有**的属性，不配做区分
+ *    ⇒ 族名取共享词干 **`send-`**、轴取 **`-now` / `-later`**（同构）。**硬切无别名**（D46/D61 先例）；
+ *    机制层词汇（`wake-registry.json` / `w-*` id / `WakeEntry` / 调度器名 / 配置键 `wakeSchedulerEnabled`）
+ *    **一律不动** —— 接受"机制叫 wake、动作叫 send-later"的**分层命名**（二者本是两层）。
  *
  * 与旧面（logbook 11 动作 + trajectory 12 动作）的对应（用户逐条裁决，R↓）：
  *   · `summary` → 并入 `list`（全库统计随清单一起给）
@@ -20,7 +26,7 @@
  *     就不要自造协议 + 脚本管道」；轨迹挂哪些 skill 改由 SESSION.md frontmatter 声明 +
  *     `systemPrompt.section` 注入，见 `docs/trajectory-skill-injection.md`）
  *   · autopilot 面（all/init/random/diag/doc/check/status/guide）→ `container_admin` 的 autopilot 域
- *   · `wake-add`/`wake-list`/`wake-rm` → **`wake-later`**（一次登记；**不可回收、无面板**——用户明示接受）
+ *   · `wake-add`/`wake-list`/`wake-rm` → **`wake-later`**（v1.33 收敛；**2026-09-17 更名 `send-later`**）
  *
  * 保留 osp 对齐语义的部分：create 的 `--desc`/`--issue` 二选一、use 激活即重命名 dsh 会话标题（F3）。
  * 活跃会话跟踪：内存 Map（按 dsh 会话 id 隔离）+ 从 events 恢复（S134）。
@@ -232,12 +238,12 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
   name: 'container_trajectory',
   description:
     'Trajectory (AGENT_SESSIONS/ — the persistent body of a trajectory; the dsh conversation is only its rebuildable carrier). ' +
-    'Lifecycle + delivery: list (inventory with stats and anomaly marks) / show (read one SESSION.md) / create / use (activate for this conversation, with inline integrity check) / rebuild (clear-and-rebuild the current conversation in place, Ship of Theseus) / wake-later (schedule ONE message to any trajectory at a future instant — fire-and-forget: no receipt, no recall, no panel) / send-message (deliver ONE message to a trajectory RIGHT NOW — live: injected immediately; not live: cold-resumed, i.e. equivalent to a direct wake; returns a synchronous receipt). ' +
+    'Lifecycle + delivery: list (inventory with stats and anomaly marks) / show (read one SESSION.md) / create / use (activate for this conversation, with inline integrity check) / rebuild (clear-and-rebuild the current conversation in place, Ship of Theseus) / send-now (deliver ONE message to a trajectory RIGHT NOW — live: injected immediately; not live: cold-resumed, i.e. equivalent to a direct wake; returns a synchronous receipt) / send-later (schedule ONE message to any trajectory at a future instant — fire-and-forget: no receipt, no recall, no panel). ' +
     'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars). ' +
     'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound trajectory. ' +
     'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self). ' +
-    'wake-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message. ' +
-    'send-message requires target + message. Its receipt means the message was QUEUED into the target (it does NOT mean the target ran or replied; a busy target applies it at its next round boundary). ' +
+    'send-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message. ' +
+    'send-now requires target + message. Its receipt means the message was QUEUED into the target (it does NOT mean the target ran or replied; a busy target applies it at its next round boundary). ' +
     'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
   parameters: {
     action: {
@@ -248,8 +254,8 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
         'Subcommand: list (inventory + stats + anomaly marks) / show (S### or dir name or fuzzy keyword) / create (--desc or --issue) / ' +
         'use (activate context; inline integrity check — pass silent, problems reported as hints, not errors) / ' +
         'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note) / ' +
-        'wake-later (one future instant + one message, delivered to target trajectory) / ' +
-        'send-message (deliver one message RIGHT NOW: live target injected immediately, non-live cold-resumed like a direct wake; returns a synchronous receipt)',
+        'send-now (deliver one message RIGHT NOW: live target injected immediately, non-live cold-resumed like a direct wake; returns a synchronous receipt) / ' +
+        'send-later (one future instant + one message, delivered to target trajectory)',
     },
     name: { type: 'string', description: 'show/use session identifier (S### or dir name or keyword)' },
     note: { type: 'string', description: 'rebuild: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
@@ -259,9 +265,9 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
     force: { type: 'boolean', description: 'use: allow switching away from the currently-bound trajectory (binding guard override)' },
     dryRun: { type: 'boolean', description: 'create preview mode (no actual changes)' },
-    target: { type: 'string', description: 'wake-later/send-message: target trajectory (S### or AGENT_SESSIONS directory name)' },
-    at: { type: 'string', description: 'wake-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
-    message: { type: 'string', description: 'wake-later/send-message: the single message delivered to the target trajectory' },
+    target: { type: 'string', description: 'send-later/send-now: target trajectory (S### or AGENT_SESSIONS directory name)' },
+    at: { type: 'string', description: 'send-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
+    message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target trajectory' },
   },
   output: {
     schema: { type: 'json' },
@@ -381,11 +387,11 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
           instruction: 'Queued clear-and-rebuild: when this turn ends, the same conversation will be cleared and injected with the "continue the work" anchor (first-anchor protocol body included), then auto-continue — no manual input needed; resume from SESSION.md at that point.',
         }
       }
-      case 'wake-later': {
-        // v1.33：原 `wake-add` 并入本工具并更名（用户裁决「wake 系列只保留 wake-later，原功能即可，只是改名」）。
+      case 'send-later': {
+        // v1.33：原 `wake-add` 并入本工具；**2026-09-17 由 `wake-later` 更名 `send-later`**（命名 A 案）。
         // 语义 = 一条「未来时刻 + 一条 message」；fire-and-forget：**无回执、不可回收、无面板**（用户明示接受）。
         if (!args.target || !args.at || !args.message) {
-          throw new Error('wake-later requires target (S### or dir name) + at (RFC3339 or +30m/+2h) + message')
+          throw new Error('send-later requires target (S### or dir name) + at (RFC3339 or +30m/+2h) + message')
         }
         const wakeScope = agentScope(exec)
         const res = addWake(root, {
@@ -399,13 +405,13 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
         if (!res.ok) return { ok: false, error: res.error }
         return { ok: true, output: `✓ 已登记唤醒\n${renderWakeEntry(res.entry)}` }
       }
-      case 'send-message': {
-        // 即时投递（2026-09-16 所有者裁决；设计稿 docs/trajectory-send-message-design.md）。
-        // 与 wake-later **共用取用通路**（live 优先 → 冷载入），区别只在：
+      case 'send-now': {
+        // 即时投递（2026-09-16 所有者裁决；**2026-09-17 由 `send-message` 更名 `send-now`**，命名 A 案）。
+        // 与 send-later **共用取用通路**（live 优先 → 冷载入），区别只在：
         //   · 时刻：**现在**（不是未来；`addWake` 硬拒 at ≤ now ⇒ 本动作**不落注册表**）
-        //   · 回执：**有**（同步返回；wake-later 是 fire-and-forget）
+        //   · 回执：**有**（同步返回；send-later 是 fire-and-forget）
         if (!args.target || !args.message) {
-          throw new Error('send-message requires target (S### or dir name) + message')
+          throw new Error('send-now requires target (S### or dir name) + message')
         }
         const sendScope = agentScope(exec)
         const res = await sendToTrajectory(
@@ -434,7 +440,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
 }
 
 /**
- * 渲染一条唤醒条目（人读；`wake-later` 的登记回执）。
+ * 渲染一条唤醒条目（人读；`send-later` 的登记回执）。
  * 显式写明"不可回收"，因为这是用户明示接受的语义（D60 调整后：无 list/rm、无面板）。
  * @param e 刚登记的条目
  */

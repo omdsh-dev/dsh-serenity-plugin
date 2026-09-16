@@ -1,3 +1,38 @@
+## v1.39.0 — 2026-09-17（`container_trajectory` 两个投递动作**更名**：`wake-later` → **`send-later`**、`send-message` → **`send-now`**）
+
+**来源**：所有者提问「wake-later 和 send message 之间的关系很近，帮我想个好名字」→ 命名专题（S142 §0n：ontology 诊断 + 判据 + 三案）→「**那就A吧，改个名字**」→「发版」。
+
+### 🔴 命名判据（R↓）：两者是**一条投递通路的两端**，轴应当取「时刻」
+
+**诊断**：两个动作**共享**取用机制（`acquireWakeAgent`：live 优先 → 冷载入）、**共享**载荷形态（一条 message）、**共享**落点语义（轮次边界生效、不打断当前轮）；真正的分界只有一条 —— **时刻**（现在 / 未来）。而**回执**（有/无）、**落注册表**、**不可回收**三项**皆由"未来"推出**，属**派生**差异。
+⇒ 旧名把**共享属性**（唤醒）写进了**其中一个**名字（`wake-later`），而 `send-message` 对冷目标**同样要唤醒**（非 live 走冷载入＝等效直接 wake）——**名字选错了轴**，这才是"两个名字关系很近却别扭"的真因。
+
+| | 案 | 判 |
+|---|---|---|
+| ✅ **取** | **`send-now` / `send-later`** | 共享词干 `send-`；轴 `-now`/`-later` **同构**（S↑）；`send` 的承诺等级恰为「**发出**」而非「送达」——与实际只到「已入队」吻合 |
+| ❌ | `deliver-now` / `deliver-later` | `deliver` 承诺「**送达**」> 实际能力 ⇒ 会**加剧**"以为已送达"的误读 |
+| ❌ | `send-now` / `send-at` | `-at` 呼应参数名与 `at(1)`、"预约"味足，但与 `-now` **不同构**（副词 vs 介词） |
+| ❌ | `wake-now` / `wake-later` | 把**共享属性**升格为族名；且 `wake-now` 暗示"立刻打断"，与"**不打断当前轮**"矛盾 |
+
+### 改名范围（**硬切无别名**，D46/D61 先例）
+
+- **改 = 13 文件**：`src/` **7**（`trajectory-ops` / `tools/trajectory` / `wake-scheduler` / `seams/system-prompt` / `msm-ops` / `index` / `client/SettingsSection`）+ `tests/` **1** + **包内模板 2**（会随包分发**且被注入 agent 上下文** ⇒ 属契约面）+ README×3（含 `readme-sync` 同步的包内副本）。
+- 🔴 **一律不动（分层命名）**：**机制层词汇** —— `wake-registry.json` / entry id 前缀 `w-*` / `WakeEntry` / `addWake` / `deliverWake` / 调度器名 / 配置键 `wakeSchedulerEnabled`。理由：那些词汇描述的是**机制**、与**动作**本就是两层；且改动会波及 86 条历史条目与 id 前缀。
+- **历史零改写**：`docs/` 设计档（含 `trajectory-send-message-design.md` 的**文件名**）、CHANGELOG 历史条目、各轨迹历史记录。
+- **注释处理纪律**：**当前态陈述 → 改名；带日期的历史陈述 → 保留原名**，另加 2026-09-17 命名条目说明更名 ⇒ **既不留散文级旧名残留，也不伪造历史**。
+
+### 验证
+
+- **四门禁**：`typecheck`（node + client）✓｜`test` **90 files / 1320**（与 v1.38.0 **同数**）✓｜`build` ✓｜`pack-check` **109 文件** ✓
+- 🔴 **产物复核（D64 式）**：`lib/*.js` 中旧名共 9 处命中，**逐条看上下文 = 全为 JSDoc 注释行**（历史条目 / "（原 X）"括注 / 设计稿文件名）⇒ **运行时字符串零残留** ✓
+- 🔴 **验收判据自伤（留档）**：首版验收 grep 写了 `{src,tests}` 花括号，在 `sh` 下**未展开**且错误只进 stderr ⇒ 该段**静默少扫两个目录**（靠另一段全仓扫描才补上覆盖）。**教训**：多路径判据要么**逐条列路径**，要么**先验一次"我实际扫到几个文件"**。
+
+### ⚠️ 升级提示（硬切）
+
+老文档 / 老会话里的 `wake-later` / `send-message`，**即今日的 `send-later` / `send-now`**。**CCC 侧消费方**（如 `msm autopilot-round` 内联的命令、各轨迹的协议段）须与运行态**同刻**改到新名，否则表现为 `Unknown action` —— **响亮报错，不静默错投**。
+
+---
+
 ## v1.38.0 — 2026-09-16（`container_trajectory` 新增第 7 个动作 **`send-message`（即时投递）**）
 
 **来源**：所有者令「trajectory 除了 wake later，还要支持一个 **send message 用于实时使用提示词注入来回应**，如果会话不活跃，则**等效于直接 wake**。设计下」→ 设计稿 `docs/trajectory-send-message-design.md`（v0.2 定稿，三个决策点已裁）→「**同意，开工**」。

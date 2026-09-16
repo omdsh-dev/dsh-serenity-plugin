@@ -113,7 +113,7 @@ export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'd
 const ACC_CATALOG = `═══ ACC Usage Catalog ═══
 Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
 
-  ① 轨迹本体          → container_trajectory（list/show/create/use + rebuild 超限重建 + wake-later 未来一次性唤醒 + send-message 即时投递）
+  ① 轨迹本体          → container_trajectory（list/show/create/use + rebuild 超限重建 + send-now 即时投递 + send-later 未来一次性唤醒）
                          原 logbook 已并入（v1.33 用户裁决：废除 logbook 词）；close/archive 删（归档走 container_fs mv），
                          health/qa/summary 分别并入 use / list，hook-develop-guide 并进 container_admin msm guide
   ② 认知质量框架      → praxis（eap/neat/cce 三合一——可实践理论注入，section 渐进披露，无参即目录）
@@ -123,8 +123,8 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                          专属工具（**默认对所有 CCC 隐藏**，只有在自己 exclusiveTools 里点名的 CCC 可见）→ acc-diag（运行态诊断）
   ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
                          ACP（程序化 JSON-RPC 3100）/ Skiff 问答页（公网 ask）——面板「外部能力」组
-  ⑤ 自主与接入        → container_trajectory wake-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
-                         container_trajectory send-message（跨轨迹的**即时**递送：live 目标立即注入，非 live 冷载入——等效于直接 wake；**有同步回执**）
+  ⑤ 自主与接入        → container_trajectory send-now（跨轨迹的**即时**递送：live 目标立即注入，非 live 冷载入——等效于直接 wake；**有同步回执**）
+                         container_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
   ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin/**exclusiveTools**）
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
@@ -274,7 +274,7 @@ CCC 的一条 trajectory = 持久身体（SESSION.md）+ 时间轴（AGENT_SESSI
 域/面板区块一并删除）。自主巡航改由 CCC 自己驱动（home-serenity 侧 msm autopilot-round 每轮自排下一轮，
 真相源 = S151 SESSION.md §1/§1b/§1c）。**本轮的 trajectory.autopilot 配置段保留**（见下表）——
 它现由 **CCC 侧脚本**读取，ACC 不再消费该段。
-唤醒注册表（container_trajectory wake-later）：唤醒 = 未来时刻 + 一条 message，可唤醒自己或别的 trajectory；
+唤醒注册表（container_trajectory send-later）：唤醒 = 未来时刻 + 一条 message，可唤醒自己或别的 trajectory；
 落点 AGENT_SESSIONS/wake-registry.json，中心调度器到点投递（fire-and-forget；无回执、无回收）。
 运行态诊断（ACC 负责人专用）：acc-diag（① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。
 

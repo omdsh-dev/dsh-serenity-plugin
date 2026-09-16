@@ -94,7 +94,7 @@ export function resolveWakeTarget(root: string, target: string): WakeTarget | nu
  * ⚠️ 2026-09-15 用户裁决（S-1 **解耦**）：「auto-trajectory 的开关**只关闭 auto-trajectory 唤醒**」。
  * ⇒ 本函数**不得**再把 `autopilotEnabled`（周期自唤醒闸）作为回退键 —— 旧实现是
  * `trajectoryEnabled === true || autopilotEnabled === true`，后果实测：所有者关掉 auto-trajectory 后，
- * **一次性唤醒 `wake-later` 被连带关掉**，注册表条目静默滞留（当日 6.6h 零 tick）。
+ * **一次性唤醒 `wake-later`（今 `send-later`）被连带关掉**，注册表条目静默滞留（当日 6.6h 零 tick）。
  * 缺省由 false 改 true 的理由：唤醒注册表已是一等机制（D58），条目**全部由人类/agent 显式登记**
  * 未来时刻（无环境自主性），不需要"默认关"的实验保护；代价 = 一个 unref 的 5min 空检查。
  *
@@ -234,10 +234,10 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
 }
 
 /**
- * 即时投递（`container_trajectory send-message`）——与唤醒**共用取用通路**，
+ * 即时投递（`container_trajectory send-now`）——与 `send-later`（预约）**共用取用通路**（`acquireWakeAgent`），
  * 区别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）：
- *   · `wake-later`：未来时刻 + 一条 message → 落注册表 → 本文件的调度器到点投递（**fire-and-forget，无回执**）
- *   · `send-message`：**此刻**把一条 message 递进目标队列 → **同步回执** → **不落注册表**
+ *   · `send-later`（原 `wake-later`）：未来时刻 + 一条 message → 落注册表 → 本文件的调度器到点投递（**fire-and-forget，无回执**）
+ *   · `send-now`（原 `send-message`）：**此刻**把一条 message 递进目标队列 → **同步回执** → **不落注册表**
  *
  * **为什么冷路径落在这里（R↓，2026-09-16 所有者裁决）**：`addWake` 显式拒绝 `at ≤ now`
  * （"时刻必须在未来"——那是"**预约**"语义的地基，不许放宽）⇒ 即时投递**不能**靠一条
@@ -252,7 +252,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
  *
  * **归属**：本函数放在调度器侧而非工具侧 —— "怎么把一句话送到一条轨迹"是**调度器的知识**，
  * 工具只该知道"有这个动作"。这样 `trajectory.ts` 完全不碰调度器内部（v1.35.0 硬约束①：
- * `wake-later` 链路**一行为不动**，本次改动 = **纯新增**）。
+ * `send-later` 链路**一行为不动**，本次改动 = **纯新增**）。
  *
  * @param ctx 插件上下文
  * @param root CCC 根

@@ -151,8 +151,8 @@ export function apply(ctx: Context, config: Config): void {
   if (config.tools) {
     ctx.tools.register(ccFsTool) // container_fs
     // v1.33（S142 §32）：`logbook` 更名并收敛为 `trajectory`（原 autopilot 工具的动作 v1.33 归
-    // container_admin 的 autopilot 域——该域 2026-09-15 随之退场；唤醒动作并入本工具 wake-later）
-    ctx.tools.register(createTrajectoryTool(ctx)) // container_trajectory（含 rebuild + wake-later）
+    // container_admin 的 autopilot 域——该域 2026-09-15 随之退场；投递动作并入本工具）
+    ctx.tools.register(createTrajectoryTool(ctx)) // container_trajectory（含 rebuild + send-now / send-later）
     ctx.tools.register(createKitTool(ctx)) // dashboard
     ctx.tools.register(gitTool) // container_git
     ctx.tools.register(msmTool) // msm（单入口执行 + 发现）

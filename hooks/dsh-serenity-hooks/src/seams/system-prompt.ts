@@ -102,7 +102,7 @@ export function toolsBlock(): string {
     'The ACC (this plugin) provides the following built-in tools:',
     '',
     '  container_fs — container filesystem operations (15 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
-    '  container_trajectory — one trajectory: its persistent body (SESSION.md) + its timeline. Lifecycle: list (inventory + stats) / show / create / use (activate; inline integrity check — silent when fine) / rebuild (clear-and-rebuild this conversation in place, Ship of Theseus); delivery: wake-later (one future instant + one message to any trajectory; fire-and-forget — no receipt, no recall) / send-message (deliver one message RIGHT NOW; live target injected immediately, non-live cold-resumed like a direct wake — returns a synchronous receipt)',
+    '  container_trajectory — one trajectory: its persistent body (SESSION.md) + its timeline. Lifecycle: list (inventory + stats) / show / create / use (activate; inline integrity check — silent when fine) / rebuild (clear-and-rebuild this conversation in place, Ship of Theseus); delivery: send-now (deliver one message RIGHT NOW; live target injected immediately, non-live cold-resumed like a direct wake — returns a synchronous receipt) / send-later (one future instant + one message to any trajectory; fire-and-forget — no receipt, no recall)',
     '  dashboard    — always-on container instruments: health (CCC three-principle check + registry integrity) / time (now) / wait (N seconds)',
     '  container_git— git operations (status/commit/push/log)',
     '  msm          — execute a registered CCC MSM: msm(name, args); partial name returns candidates; inspect=true shows usage',

@@ -262,9 +262,9 @@ describe('buildWakeText（投递正文：身份锚定 + 唤醒信息 + 任务）
 })
 
 /**
- * 即时投递（`container_trajectory send-message`，2026-09-16 所有者裁决）。
+ * 即时投递（`container_trajectory send-now`；2026-09-16 所有者裁决，**2026-09-17 由 `send-message` 更名**）。
  *
- * **钉住的不变量**：与 `wake-later` **共用取用通路**（live 优先 → 冷载入），
+ * **钉住的不变量**：与 `send-later`（原 `wake-later`）**共用取用通路**（live 优先 → 冷载入），
  * 区别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）。
  * 设计稿 = `docs/trajectory-send-message-design.md`（v0.2 定稿）。
  */

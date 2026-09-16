@@ -280,7 +280,7 @@ Carve a **deliberately limited role** out of an all-capable assistant — not ju
 - **What it reads first**: the "focus" you wrote (`topPrompt`, injected first every round to prevent drift), then randomly generated "bias content" (your script, exploring directions)
 - **Workspaces stay independent**: each has its own interval, session, focus, and window
 - **Audited**: every wake is recorded (the panel shows the recent ones); failures retry with exponential backoff
-- **You can also book a future moment**: `container_trajectory wake-later` registers a wake = a future instant + one message — you can book it for yourself, or wake another trajectory; it lands in the workspace's `AGENT_SESSIONS/wake-registry.json` (readable and auditable), and a central scheduler delivers it when due — no blocking, no waiting, no receipt
+- **You can also book a future moment**: `container_trajectory send-later` (formerly `wake-later`) registers a wake = a future instant + one message — you can book it for yourself, or wake another trajectory; it lands in the workspace's `AGENT_SESSIONS/wake-registry.json` (readable and auditable), and a central scheduler delivers it when due — no blocking, no waiting, no receipt
 - There is no "maximum wakes per day" cap — frequency is bounded only by the interval and the window
 
 ### 6.6 Security model

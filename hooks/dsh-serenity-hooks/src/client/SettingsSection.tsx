@@ -391,7 +391,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
         <li>
           <RowCard
-            title="唤醒调度器（wake-later）"
+            title="唤醒调度器（条目来源：send-later）"
             desc="投递已登记的“未来时刻 + 一条 message”（全局开关，默认开）"
             expandable
             open={openWakeSched}
@@ -401,7 +401,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
               <div className="ss-detailStack">
                 <p className="ss-detailIntro">{'唤醒调度器全局闸（v1.34 独立开关）：\n' +
                   '· 作用：把 CCC 唤醒注册表（AGENT_SESSIONS/wake-registry.json）里到点的条目投递给目标轨迹\n' +
-                  '· 条目来源：`container_trajectory wake-later`（对自己或别的 trajectory 预约未来时刻 + 一条 message）\n' +
+                  '· 条目来源：`container_trajectory send-later`（对自己或别的 trajectory 预约未来时刻 + 一条 message）\n' +
                   '· 默认开：条目全部由人类/agent 显式登记，无环境自主性 ⇒ 不需要“默认关”的实验保护\n' +
                   '· 唯一性：ACC 现存的**唯一**轨迹调度时钟（原并列的周期自唤醒闸已随 ACC 侧 autopilot 退场删除）\n' +
                   '· 精度：5min tick；补跑窗口 2h（超窗判 missed 留痕）；fire-and-forget 无回执'}

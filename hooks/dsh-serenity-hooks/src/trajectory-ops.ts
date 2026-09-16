@@ -3,8 +3,8 @@
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/session/lib.ts）——osp 是 ACC 工具 spec。
  *
- * v1.33 收敛（S142 §32）：本文件只服务 `container_trajectory` 的 6 个动作
- * （list / show / create / use / rebuild / wake-later）。旧 `logbook` 面里
+ * v1.33 收敛（S142 §32）：本文件只服务 `container_trajectory` 的动作面
+ * （现行 **7 个**：list / show / create / use / rebuild / **send-now** / **send-later**）。旧 `logbook` 面里
  * **close / archive / health / qa 四个动作已删**（用户裁决「功能上废弃，实际上没用」），
  * 其函数（closeSession / archiveSessions / healthCheck / qaCheck）**同批删除**——
  * 保留下来的只有：create（--desc / --issue 二选一、dry-run 预览）、
@@ -31,14 +31,20 @@ import { join, basename, dirname } from 'node:path'
  * close/archive 删（completed 由 SESSION.md 的 `[x]` 推导；归档走 container_fs mv）｜
  * hook-develop-guide 并进 container_admin msm guide｜autopilot 面归 container_admin 的 autopilot 域
  * （该域 2026-09-15 随 ACC 侧 autopilot 退场删除）｜
- * wake-add/list/rm 收敛为 wake-later。
- * 2026-09-16（所有者裁决）：新增 **send-message** —— 即时投递（与 wake-later 共用取用通路，
- *   差别只在时刻"现在 vs 未来"与回执"有 vs 无"）。设计稿 docs/trajectory-send-message-design.md。
+ * wake-add/list/rm 收敛为 wake-later（**2026-09-17 更名 `send-later`**）。
+ * 2026-09-16（所有者裁决）：新增 **send-message**（**2026-09-17 更名 `send-now`**）—— 即时投递
+ *   （与 wake-later 共用取用通路，差别只在时刻"现在 vs 未来"与回执"有 vs 无"）。
+ *   设计稿 docs/trajectory-send-message-design.md。
+ * 2026-09-17（所有者裁决 · 命名 A 案）：**两个投递动作更名** —— `wake-later` → **`send-later`**、
+ *   `send-message` → **`send-now`**。判据（R↓）：两者是**同一条投递通路**（同取用机制 / 同载荷 /
+ *   同落点语义），只差**时刻**；而「唤醒（冷载入）」是**两条路径共有**的属性，不配做区分
+ *   ⇒ 族名取共享词干 **`send-`**、轴取 **`-now` / `-later`**（同构）。**硬切无别名**；
+ *   机制层词汇（`wake-registry.json` / `w-*` id / `WakeEntry` / 调度器名）**一律不动**（分层命名）。
  */
-type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'wake-later' | 'send-message'
+type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'send-now' | 'send-later'
 
 export const TRAJECTORY_ACTIONS: readonly TrajectoryAction[] = [
-  'list', 'show', 'create', 'use', 'rebuild', 'wake-later', 'send-message',
+  'list', 'show', 'create', 'use', 'rebuild', 'send-now', 'send-later',
 ]
 
 /**
