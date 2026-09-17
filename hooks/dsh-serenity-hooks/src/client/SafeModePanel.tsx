@@ -22,11 +22,24 @@ import {
   IconChevronDownOutline14,
   IconWarningOutline16,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 import './SafeModePanel.css'
 
 /** 会话头部操作区（list 槽）props */
 type SafeModePanelProps = PropsRuntime<'conversation.session.header.actions'>
+
+/** popover 与锚点胶囊之间的间距（= 旧 CSS `top: calc(100% + 8px)` 的 8） */
+const POP_GAP_PX = 8
+/** popover 与视口边缘的最小留白（夹取用，防卡片贴边或被视口切掉） */
+const POP_VIEW_PAD_PX = 8
+/** 尚未落位时的屏外坐标（`useLayoutEffect` 在绘制前就会覆写，肉眼看不到） */
+const POP_OFFSCREEN = -9999
+
+/** 自绘 popover 的视口坐标（v1.39.1：fixed 定位后由 JS 计算） */
+interface PopPlacement {
+  left: number
+  top: number
+}
 
 interface SerenityStatus {
   root: string | null
@@ -82,6 +95,9 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [handymen, setHandymen] = useState<HandymanRunInfo[]>([])
   const [handymenOpen, setHandymenOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const popRef = useRef<HTMLDivElement>(null)
+  // v1.39.1：popover 改 `position:fixed` 后的视口坐标（null = 尚未测量，此时渲染在屏外）
+  const [popPos, setPopPos] = useState<PopPlacement | null>(null)
 
   const sessionId = props.sessionId
 
@@ -135,6 +151,44 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     return () => {
       document.removeEventListener('mousedown', onDocMouseDown)
       document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  // 自绘 popover 定位（v1.39.1）——`position:fixed` + 视口夹取
+  // 为什么不是纯 CSS 定位：卡片锚在会话头右端的胶囊上，而会话中列是 `overflow:hidden`
+  //   （真机实测 `pI_x6G_centerCol` / `wSkVaW_root` 左边界 = 280，卡片左边界 274.2）
+  //   ⇒ 绝对定位的卡片向左长出去会被祖先**裁掉**（左边框与圆角消失）。
+  //   `position:fixed` 的子元素不受祖先 `overflow` 裁切（且已实测本应用无祖先会捕获 fixed）。
+  // 为什么是 useLayoutEffect：要在**浏览器绘制前**量到真实尺寸并落位，否则会闪一帧在屏外。
+  // 为什么点"外部关闭"不受影响：`rootRef.current.contains()` 走 **DOM 树**，与定位方式无关。
+  useLayoutEffect(() => {
+    if (!open) {
+      setPopPos(null)
+      return
+    }
+    const place = (): void => {
+      const anchor = rootRef.current
+      const pop = popRef.current
+      if (!anchor || !pop) return
+      const a = anchor.getBoundingClientRect()
+      const vw = window.innerWidth
+      const vh = window.innerHeight
+      const w = pop.offsetWidth
+      const h = pop.offsetHeight
+      // 右端对齐胶囊右端（等价旧的 `right:0`），再夹取进视口 —— 窄视口时退化为"左留白对齐"
+      const left = Math.max(POP_VIEW_PAD_PX, Math.min(a.right - w, vw - w - POP_VIEW_PAD_PX))
+      // 卡片从胶囊下方展开；顶边同样夹取（高度另有 CSS `max-height: calc(100vh - 120px)` 兜底）
+      const top = Math.max(POP_VIEW_PAD_PX, Math.min(a.bottom + POP_GAP_PX, vh - h - POP_VIEW_PAD_PX))
+      setPopPos({ left, top })
+    }
+    place()
+    // 锚点会随窗口尺寸变化 / 侧栏开合 / 内部滚动容器滚动而移动 ⇒ 重算
+    // （capture=true：会话区滚动发生在内层滚动容器上，冒泡阶段接不到）
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
     }
   }, [open])
 
@@ -209,9 +263,19 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
         <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
       </button>
 
-      {/* 自绘 popover（v1.36.1：加宽为两栏——左=信息 / 右=航行动画；外点/Escape 关闭） */}
+      {/* 自绘 popover（v1.36.1：加宽为两栏——左=信息 / 右=航行动画；外点/Escape 关闭）
+          v1.39.1：`position:fixed` + 坐标由上面的 useLayoutEffect 计算（避免被祖先 overflow 裁切）。
+          落位前渲染在屏外（POP_OFFSCREEN）——布局仍在，故 `offsetWidth/Height` 可量。 */}
       {open && (
-        <div className={cx('sp-pop', 'sp-popVoyage')} role="dialog" aria-label="CCC 状态栏">
+        <div
+          ref={popRef}
+          className={cx('sp-pop', 'sp-popVoyage')}
+          role="dialog"
+          aria-label="CCC 状态栏"
+          style={
+            popPos ? { left: popPos.left, top: popPos.top } : { left: POP_OFFSCREEN, top: POP_OFFSCREEN }
+          }
+        >
           <div className={cx('sp-popBody')}>
             {inCcc ? (
               <>

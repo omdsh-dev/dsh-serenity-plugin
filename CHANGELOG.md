@@ -1,3 +1,61 @@
+## v1.39.1 — 2026-09-17（修复：会话头状态胶囊的展开卡片**左边缘被祖先裁切**）
+
+**来源**：所有者转发反馈「**下拉 dialog / 弹窗内容过宽后，会被左侧元素遮挡**」（经 S172 转达）。
+
+### 🔴 根因（真机 CDP 取证，非推断）：祖先 `overflow:hidden` **裁切**，不是 z-index 也不是宽度不够
+
+胶囊展开卡片 `.sp-pop` 原为 `position:absolute; right:0`，锚在会话头右端的**状态胶囊**上。
+真机实测（1280/1600/1920 三档一致）：
+
+| 量 | 值 |
+|---|---|
+| 胶囊右端 | `x = 954.2`（**与会口宽度无关**——会话头是定宽列） |
+| 卡片宽度 | `680`（v1.36.1 加宽） |
+| ⇒ 卡片左边界 | `954.2 − 680 = 274.2` |
+| 祖先 `pI_x6G_centerCol` / `wSkVaW_root` | `overflow: hidden`，**左边界 = 280** |
+| ⇒ **左边缘被裁** | **5.8px**（左边框线与圆角消失） |
+
+**这是 v1.36.1 的回归**：加宽前卡片 340px，左边界 614.2 远在 280 右侧，不越界。
+`right:0` 对齐意味着**加宽只会向左长**——跨过 280 那条裁剪线就出事。
+⇒ 所有者描述的"内容**过宽后**"精确对应这次加宽。
+
+**已排除的另两个假设**：② 层叠上下文被困（`z-index:2000` 失效被兄弟盖住）——真机 `covered = 0`，
+且祖先链**全无** `transform/filter/contain/will-change`；③ header 插槽宽度不足——绝对定位元素不参与槽宽裁切。
+
+### 修法：改 `position: fixed` + JS 算坐标并夹取进视口
+
+- `position: fixed` 的子元素**不受祖先 `overflow` 裁切**；坐标由 `SafeModePanel` 用
+  `getBoundingClientRect()` 从胶囊算出（右端对齐，等价旧 `right:0`）＋ **视口夹取**（窄视口不溢出）。
+- 用 `useLayoutEffect` 在**浏览器绘制前**量尺寸落位（否则会闪一帧）；落位前渲染在屏外常量坐标。
+- 窗口 `resize` / 内部滚动容器 `scroll`（capture）时重算——锚点会随侧栏开合移动。
+- **为什么不用 `createPortal`**：本仓 client 侧**无 `react-dom` 依赖**（只有 `react`）⇒ 不可用；`fixed` 是等效且更轻的出路。
+- 宽度、窄屏断点、两栏布局、外点/Escape 关闭行为**均未改**（外点关闭走 `rootRef.contains()` = DOM 树判定，与定位方式无关）。
+
+### 验证（**三档宽度真机实测**）
+
+| 视口宽度 | 修前（absolute） | 修后（fixed） |
+|---|---|---|
+| 820（窄，跨 860 断点） | `clipDepth 0` · OK | `clipDepth 0` · OK |
+| 1280（中） | **`clipDepth 4` · CLIPPED** | **`clipDepth 0` · OK** |
+| 1920（宽） | **`clipDepth 4` · CLIPPED** | **`clipDepth 0` · OK** |
+
+- **判据 = hit-test**（`elementsFromPoint` 沿卡片左边界逐档取点，看栈顶是否为卡片本身）——
+  它**裁切感知**：修前左边界 275→278px 命中 **0/4**、280px 起 **4/4**（跃变点正好 = 裁剪祖先左边界）。
+- 三档均 `outOfViewport = false`；像素级旁证：左边缘窄条 PNG 字节数 168 → 280。
+- **反例 mock**（脱离本应用的隔离证明）：`overflow:hidden` 祖先 + 卡片，
+  `absolute` 变体 CLIPPED、`fixed` 变体 OK ⇒ **机制与修法双向成立**。
+- **回归守卫**：新增 `tests/client-popover-clip-guard.test.ts`（5 断言）——`.sp-pop` 一旦退回 absolute 立即红。
+
+⚠️ 记录一条**判据教训**（本轮踩过）：首版判据用"卡片 rect 超出裁剪祖先内容盒多少 px"，
+它把**修好后同样超界但正常绘制**的 `fixed` 版本误判为 CLIPPED（假阴性，一度以为修法无效）。
+**几何超界 ≠ 被裁**；判据必须是"有没有真画出来"。
+
+### 验证门禁
+
+`typecheck`（node + client）✓｜`test` **91 files / 1325**（+1 文件 / +5 断言）✓｜`build` ✓｜`pack-check` ✓｜`coverage` 阈值 ✓
+
+---
+
 ## v1.39.0 — 2026-09-17（`container_trajectory` 两个投递动作**更名**：`wake-later` → **`send-later`**、`send-message` → **`send-now`**）
 
 **来源**：所有者提问「wake-later 和 send message 之间的关系很近，帮我想个好名字」→ 命名专题（S142 §0n：ontology 诊断 + 判据 + 三案）→「**那就A吧，改个名字**」→「发版」。
