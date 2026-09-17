@@ -428,7 +428,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
             '✓ 已即时投递',
             `  · ${res.detail}`,
             '  · 语义：**不排队** —— 目标正在跑轮次则**当场注入当前轮**（steer），空闲则立即起一轮（followup）。',
-            '  · ⚠️ 回执只到「已注入/已入队」——**不表示**目标已执行或已答复。判"目标真的动了"须看它自己的 SESSION.md（文件级判据）。',
+            '  · ⚠️ 回执只到「已注入 / 已起轮」——**不表示**目标已执行或已答复。判"目标真的动了"须看它自己的 SESSION.md（文件级判据）。',
           ].join('\n'),
         }
       }
