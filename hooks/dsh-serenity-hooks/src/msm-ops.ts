@@ -123,7 +123,7 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                          专属工具（**默认对所有 CCC 隐藏**，只有在自己 exclusiveTools 里点名的 CCC 可见）→ acc-diag（运行态诊断）
   ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
                          ACP（程序化 JSON-RPC 3100）/ Skiff 问答页（公网 ask）——面板「外部能力」组
-  ⑤ 自主与接入        → container_trajectory send-now（跨轨迹的**即时**递送：live 目标立即注入，非 live 冷载入——等效于直接 wake；**有同步回执**）
+  ⑤ 自主与接入        → container_trajectory send-now（跨轨迹的**即时**递送，**不排队**：live 目标在跑就当场注入当前轮、空闲则立即起轮；非 live 冷载入——等效于直接 wake；**有同步回执**）
                          container_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
   ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin/**exclusiveTools**）
