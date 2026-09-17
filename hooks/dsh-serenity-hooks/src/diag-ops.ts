@@ -35,13 +35,14 @@ import { WAKE_CATCH_UP_MS } from './wake-registry.js'
 import { diagLive, type DiagLiveReport } from './live-sessions.js'
 import { containerClocks, containerWakes, type ClockSnapshot } from './container-status.js'
 import type { Context } from 'cordis'
+import { isoLocal } from './time.js'
 
 /** 进程内时钟状态（唤醒调度器；判据单一真相源 = `wake-scheduler.ts`） */
 type ClockState = ClockSnapshot
 
 /** 人读渲染一行时钟状态（"为何没有 tick" 的第一手判据） */
 function renderClock(label: string, s: ClockState): string {
-  const ts = (ms: number | null): string => (ms === null ? '（从未）' : new Date(ms).toISOString())
+  const ts = (ms: number | null): string => (ms === null ? '（从未）' : isoLocal(ms))
   const parts = [
     `armed=${s.armed}`,
     `全局闸=${s.enabled}`,

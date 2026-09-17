@@ -60,6 +60,7 @@ import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
 import { namingTitleFor } from './tools/trajectory.js'
 import { eventToken, IN_FLIGHT_HEADING } from './trajectory-assistant.js'
 import { appendBound, readLastBound } from './trajectory-bound.js'
+import { isoLocal } from './time.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -252,7 +253,7 @@ function writeRebuildDiag(root: string, entry: { sessionId: string; event: strin
     if (entry.event === 'rebuilt') s.rebuiltCount += 1
     if (entry.event === 'ttl-dropped') s.droppedCount += 1
     if (entry.event === 'failed') s.failedCount += 1
-    s.lastTs = new Date().toISOString()
+    s.lastTs = isoLocal()
     s.lastSessionId = entry.sessionId
     s.lastEvent = entry.event
     s.detail = entry.detail
@@ -450,7 +451,7 @@ export function registerRebuildTurnHook(ctx: Context): void {
       writeRebuildDiag(resolveSerenityRootFor(agent), {
         sessionId: id,
         event: 'ttl-dropped',
-        detail: `queuedAt=${new Date(pending.queuedAt).toISOString()} older than ${PENDING_TTL_MS / 60000}min TTL — turn did not end in time`,
+        detail: `queuedAt=${isoLocal(pending.queuedAt)} older than ${PENDING_TTL_MS / 60000}min TTL — turn did not end in time`,
       })
       return
     }

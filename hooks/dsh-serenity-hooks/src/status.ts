@@ -19,6 +19,7 @@ import {
 import { cccRootForCwd } from './ccc-roots.js'
 import { ACC_VERSION } from './constants.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
+import { isoLocal } from './time.js'
 
 /**
  * 读取已安装 DSH CLI 版本；读不到返回 null。
@@ -91,7 +92,7 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
 export function setSafeMode(root: string, on: boolean): { on: boolean } {
   const marker = resolve(root, SAFE_MODE_MARKER)
   if (on) {
-    if (!existsSync(marker)) writeFileSync(marker, new Date().toISOString() + '\n', 'utf-8')
+    if (!existsSync(marker)) writeFileSync(marker, isoLocal() + '\n', 'utf-8')
   } else {
     rmSync(marker, { force: true })
   }

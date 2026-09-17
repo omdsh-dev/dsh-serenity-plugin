@@ -167,8 +167,24 @@ describe('updateWake / removeWake / listWakes', () => {
     expect(listWakes(root).entries).toHaveLength(1)
   })
 
-  it('newWakeId 形态：w-<UTC 到分钟>-<4 hex>', () => {
-    expect(newWakeId(Date.parse('2026-09-13T12:34:56Z'), () => 0.5)).toMatch(/^w-20260913-1234-[0-9a-f]{4}$/)
+  it('newWakeId 形态：w-<当地到分钟>-<4 hex>（D67：UTC → 当地，2026-09-17）', () => {
+    const ms = Date.parse('2026-09-13T12:34:56Z')
+    const id = newWakeId(ms, () => 0.5)
+    expect(id).toMatch(/^w-\d{8}-\d{4}-[0-9a-f]{4}$/)
+
+    // 期望值**独立重推**（不经 `localIdStamp` —— 调它就是把断言写成自证）：由该时刻的当地钟面直接构造
+    const d = new Date(ms)
+    const p = (n: number) => String(n).padStart(2, '0')
+    const localStamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`
+    expect(id).toBe(`w-${localStamp}-8000`)
+
+    // 🔴 旧版本把期望值**硬编码成 UTC 戳**（`w-20260913-1234-…`）⇒ 本机 +08:00 下必红。
+    //    改为"由当地钟面推"，既钉住"已从 UTC 改为当地"，又**不依赖机器时区**（UTC 机器上同样通过）；
+    //    非 UTC 机器再补一条**负向断言**，钉死"不再是 UTC 戳"。
+    if (d.getTimezoneOffset() !== 0) {
+      const utcStamp = `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}-${p(d.getUTCHours())}${p(d.getUTCMinutes())}`
+      expect(id).not.toContain(`-${utcStamp}-`)
+    }
   })
 })
 

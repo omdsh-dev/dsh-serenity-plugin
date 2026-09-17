@@ -21,6 +21,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
+import { localDate, localDateTimeMinutes } from './time.js'
 
 /**
  * `container_trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
@@ -76,7 +77,7 @@ const HEALTH_STALE_DAYS = 7
 const DAY = 86_400_000
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10)
+  return localDate()
 }
 
 export function sessionsRoot(root: string): string {
@@ -225,7 +226,7 @@ export interface CreateSessionResult {
 
 /** 生成 SESSION.md 模板（对齐 osp：goal 写入目标段，时间戳 YYYY-MM-DD HH:mm） */
 function sessionMdTemplate(title: string, id: string, goal: string | undefined, now: Date): string {
-  const ts = now.toISOString().slice(0, 16).replace('T', ' ')
+  const ts = localDateTimeMinutes(now)
   return (
     `# SESSION: ${title}\n- ID: ${id}\n\n` +
     `## 目标\n${goal ?? '（待补充）'}\n\n` +
@@ -253,7 +254,7 @@ export function createSession(opts: CreateSessionOptions): CreateSessionResult {
   const { root, desc, issue, goal, dryRun } = opts
   const sessionsDir = sessionsRoot(root)
   const now = new Date()
-  const datePrefix = now.toISOString().slice(0, 10)
+  const datePrefix = localDate(now)
 
   if (!desc && !issue) {
     throw new Error('create requires either --desc or --issue')

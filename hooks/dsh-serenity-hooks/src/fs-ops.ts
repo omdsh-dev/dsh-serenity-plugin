@@ -32,6 +32,7 @@ import { join, relative, dirname, resolve } from 'node:path'
 import { platform } from 'node:os'
 import { resolveInside, pathInside, readCccName } from './ccc.js'
 import type { JsonValue } from './json.js'
+import { isoLocal } from './time.js'
 
 type CcFsAction =
   | 'root'
@@ -109,7 +110,7 @@ function getFileInfo(absPath: string, name: string): FileInfo {
       type: detectFileType(stat),
       size: stat.size,
       sizeHuman: humanSize(stat.size),
-      mtime: stat.mtime.toISOString(),
+      mtime: isoLocal(stat.mtime),
     }
   } catch {
     return { name, type: 'other', size: 0, sizeHuman: '?', mtime: '?' }
@@ -456,7 +457,7 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
         `path: ${safeRel(root, absPath)}`,
         `type: ${fileType}`,
         `size: ${stat.size} (${humanSize(stat.size)})`,
-        `mtime: ${stat.mtime.toISOString()}`,
+        `mtime: ${isoLocal(stat.mtime)}`,
         `mode: ${modeStr}`,
         `uid: ${stat.uid}`,
         `gid: ${stat.gid}`,

@@ -26,6 +26,7 @@ import { listActiveHandymen } from './handyman-ops.js'
 import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey, rotatePublicAskKey, projectKnownWorkspaces } from './config-ops.js'
 // C4 块 B：端口取值只从集中端口表取（原处硬写 3100 回退）
 import { ACP_HTTP_PORT } from './ports.js'
+import { isoLocal, localFileStamp } from './time.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const HANDYMEN_PATH = '/serenity/handymen'
@@ -69,7 +70,7 @@ export function saveImageToTmp(root: string, mediaType: string, data: string): s
   const dir = join(root, IMAGE_UPLOAD_DIR)
   mkdirSync(dir, { recursive: true })
   const ext = EXT_BY_MEDIA[mediaType] ?? 'img'
-  const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}-${Math.random().toString(36).slice(2, 8)}.${ext}`
+  const filename = `${localFileStamp()}-${Math.random().toString(36).slice(2, 8)}.${ext}`
   writeFileSync(join(dir, filename), bytes)
   return `${IMAGE_UPLOAD_DIR}/${filename}`
 }
@@ -111,7 +112,7 @@ export function saveFileToTmp(root: string, fileName: string, data: string): str
   const dir = join(root, FILE_UPLOAD_DIR)
   mkdirSync(dir, { recursive: true })
   const safeName = sanitizeFileName(fileName)
-  const filename = `${new Date().toISOString().replace(/[:.]/g, '-')}-${Math.random().toString(36).slice(2, 8)}-${safeName}`
+  const filename = `${localFileStamp()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`
   writeFileSync(join(dir, filename), bytes)
   return `${FILE_UPLOAD_DIR}/${filename}`
 }
@@ -692,7 +693,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             candidates: candidates.map((c) => ({
               id: c.id,
               project: c.project,
-              lastActive: new Date(c.lastActiveMs).toISOString(),
+              lastActive: isoLocal(c.lastActiveMs),
             })),
           })
           return

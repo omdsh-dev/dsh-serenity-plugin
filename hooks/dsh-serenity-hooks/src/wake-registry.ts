@@ -16,6 +16,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { isoLocal, localIdStamp } from './time.js'
 
 /** 注册表相对 CCC 根的路径（与 `.bindings.json` 同居 AGENT_SESSIONS/） */
 const WAKE_REGISTRY_REL_PATH = 'AGENT_SESSIONS/wake-registry.json'
@@ -34,11 +35,11 @@ type WakeState = 'pending' | 'delivered' | 'missed' | 'cancelled'
 
 /** 一条唤醒条目 */
 export interface WakeEntry {
-  /** 稳定 id（不复用；`w-<UTC 到分钟>-<4 hex>`） */
+  /** 稳定 id（不复用；`w-<当地到分钟>-<4 hex>`） */
   id: string
   /** 目标 trajectory：`S###` 或完整 AGENT_SESSIONS 目录名（编码无关，与绑定锚一致） */
   target: string
-  /** 绝对时刻（UTC RFC3339，如 `2026-09-14T01:00:00.000Z`） */
+  /** 绝对时刻（当地 RFC3339 带偏移，如 `2026-09-14T09:00:00.000+08:00`） */
   at: string
   /** 唤醒 message（投递给目标 trajectory 的正文） */
   message: string
@@ -46,13 +47,13 @@ export interface WakeEntry {
   state: WakeState
   /** 发起者（轨迹标识，如 `S142`；可见性/审计用） */
   createdBy: string
-  /** 登记时刻（UTC RFC3339） */
+  /** 登记时刻（当地 RFC3339 带偏移） */
   createdAt: string
   /** 已尝试投递次数 */
   attempts: number
   /** 最近一次投递结果（人读；失败必须留痕——禁止静默） */
   lastResult: string | null
-  /** 投递成功时刻（UTC RFC3339） */
+  /** 投递成功时刻（当地 RFC3339 带偏移） */
   deliveredAt: string | null
 }
 
@@ -128,10 +129,9 @@ function saveWakeRegistry(root: string, registry: WakeRegistry): { ok: boolean; 
   }
 }
 
-/** 条目 id：`w-<UTC 到分钟>-<4 hex>`（可读 + 低碰撞；不复用由"物理移除"保证） */
+/** 条目 id：`w-<当地到分钟>-<4 hex>`（可读 + 低碰撞；不复用由"物理移除"保证） */
 export function newWakeId(nowMs: number, rand: () => number = Math.random): string {
-  const iso = new Date(nowMs).toISOString()
-  const stamp = `${iso.slice(0, 10).replace(/-/g, '')}-${iso.slice(11, 16).replace(':', '')}`
+  const stamp = localIdStamp(nowMs)
   const hex = Math.floor(rand() * 0x10000).toString(16).padStart(4, '0')
   return `w-${stamp}-${hex}`
 }
@@ -181,11 +181,11 @@ export function addWake(
   const entry: WakeEntry = {
     id: newWakeId(input.nowMs),
     target,
-    at: new Date(parsed.ms).toISOString(),
+    at: isoLocal(parsed.ms),
     message,
     state: 'pending',
     createdBy: input.createdBy,
-    createdAt: new Date(input.nowMs).toISOString(),
+    createdAt: isoLocal(input.nowMs),
     attempts: 0,
     lastResult: null,
     deliveredAt: null,

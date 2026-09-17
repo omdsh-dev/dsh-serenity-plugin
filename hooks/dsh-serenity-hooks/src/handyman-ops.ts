@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
+import { isoLocal } from './time.js'
 
 interface HandymanProgress {
   round: number
@@ -54,7 +55,7 @@ export function writeProgress(root: string, label: string, p: HandymanProgress):
   mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
   writeFileSync(
     json,
-    JSON.stringify({ ...p, status: p.status ?? 'running', updated: new Date().toISOString() }, null, 2) + '\n',
+    JSON.stringify({ ...p, status: p.status ?? 'running', updated: isoLocal() }, null, 2) + '\n',
     'utf-8',
   )
   const lines = [`# handyman: ${label}`, `- Model: ${p.model}`, `- Round: ${p.round}`, `- Done: ${p.done}`, '', `## Latest response`, '', p.lastResponse, '']
@@ -77,7 +78,7 @@ export function writeFailedStatus(root: string, label: string, info: { errorCode
         status: 'failed',
         errorCode: info.errorCode,
         errorMessage: info.errorMessage,
-        updated: new Date().toISOString(),
+        updated: isoLocal(),
         lastResponse: prev?.lastResponse ?? '',
       },
       null,
@@ -239,6 +240,6 @@ export function listActiveHandymen(root: string): HandymanRunInfo[] {
       /* 坏进度文件跳过 */
     }
   }
-  out.sort((a, b) => (a.updated < b.updated ? 1 : -1))
+  out.sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated))
   return out
 }

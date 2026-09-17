@@ -47,6 +47,7 @@ import {
 import type { JsonValue } from '../json.js'
 import { waitAgentIdle } from '../agent-idle.js'
 import { hostSubagents } from '../host/access.js'
+import { isoLocal } from '../time.js'
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -287,7 +288,7 @@ async function runHandymanJob(
         await spawnAgent()
         continue
       }
-      progress = { round, done: false, label, model, updated: new Date().toISOString(), lastResponse }
+      progress = { round, done: false, label, model, updated: isoLocal(), lastResponse }
       writeProgress(root, label, progress)
       // 唯一正常结束条件（当且仅当）：agent 精确回显本轮随机验证码。
       // agent 自报"完成"但未回显验证码 → 不算完成，继续下一轮；
@@ -299,7 +300,7 @@ async function runHandymanJob(
       }
       round++
     }
-    writeProgress(root, label, { round: finalRound, done, label, model, updated: new Date().toISOString(), lastResponse, status: done ? 'done' : 'running' })
+    writeProgress(root, label, { round: finalRound, done, label, model, updated: isoLocal(), lastResponse, status: done ? 'done' : 'running' })
     // 失败状态落盘（对齐 osp writeFailedStatus）：保险阀终止 → done:true/status:failed/errorCode
     if (finishReason !== 'done') {
       writeFailedStatus(root, label, {

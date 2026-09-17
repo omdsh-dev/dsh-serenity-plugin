@@ -25,6 +25,7 @@ import { cccRootForCwd } from '../ccc-roots.js'
 import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
 import { skiffRoleFor } from '../skiff-registry.js'
 import { hasEnabledImChannel } from '../im-bridge.js'
+import { isoLocal } from '../time.js'
 
 // ── 纯决策（可单测）──
 
@@ -267,12 +268,12 @@ export function syncSafeModeRestriction(agent: Agent, root: string): void {
       const dispose = agent.ctx.tools.restrict({ deny: [...SAFE_MODE_DENY_TOOLS] })
       safeModeRestrictions.set(key, dispose)
       restrictDiag.lastKey = key
-      restrictDiag.lastAttemptAt = new Date().toISOString()
+      restrictDiag.lastAttemptAt = isoLocal()
       restrictDiag.lastSuccess = true
       restrictDiag.lastError = null
     } catch (e) {
       restrictDiag.lastKey = key
-      restrictDiag.lastAttemptAt = new Date().toISOString()
+      restrictDiag.lastAttemptAt = isoLocal()
       restrictDiag.lastSuccess = false
       restrictDiag.lastError = (e as Error).message
       console.error(`[serenity-hooks] restrict 失败 (key=${key}):`, (e as Error).message)

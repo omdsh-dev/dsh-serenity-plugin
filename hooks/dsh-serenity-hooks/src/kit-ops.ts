@@ -21,6 +21,7 @@
  */
 
 import type { JsonValue } from './json.js'
+import { isoLocal } from './time.js'
 
 type KitAction = 'health' | 'time' | 'wait'
 
@@ -84,7 +85,7 @@ export async function runKit(root: string | null, args: KitArgs, hostCtx?: unkno
     case 'time': {
       const now = new Date()
       return {
-        now_iso: now.toISOString(),
+        now_iso: isoLocal(now),
         now_local: now.toString(),
         epoch_ms: now.getTime(),
       }

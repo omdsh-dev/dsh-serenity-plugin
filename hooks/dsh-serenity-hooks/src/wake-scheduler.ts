@@ -35,7 +35,7 @@ import { registerDisposer } from './host/effect.js'
 import { readSimpleSettings } from './settings-section.js'
 import { createClock, type ClockOptions, type ClockRuntime } from './clock-runtime.js'
 import { listCccs } from './ccc-roots.js'
-import { localHuman } from './time.js'
+import { isoLocal, localHuman } from './time.js'
 import {
   loadWakeRegistry,
   splitDueWakes,
@@ -246,7 +246,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
  * 即时投递（`container_trajectory send-now`）——与 `send-later`（预约）**共用取用通路**（`acquireWakeAgent`），
  * 区别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）：
  *   · `send-later`（原 `wake-later`）：未来时刻 + 一条 message → 落注册表 → 本文件的调度器到点投递（**fire-and-forget，无回执**）
- *   · `send-now`（原 `send-message`）：**此刻**把一条 message 递进目标队列 → **同步回执** → **不落注册表**
+ *   · `send-now`（原 `send-message`）：**此刻**把一条 message 递给目标 → **同步回执** → **不落注册表**
  *
  * **为什么冷路径落在这里（R↓，2026-09-16 所有者裁决）**：`addWake` 显式拒绝 `at ≤ now`
  * （"时刻必须在未来"——那是"**预约**"语义的地基，不许放宽）⇒ 即时投递**不能**靠一条
@@ -254,7 +254,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
  * 必须直接走 {@link acquireWakeAgent}（live 优先 → `sessionController.resolveAgent` 冷载入）。
  * 这正对应所有者要的「**会话不活跃则等效于直接 wake**」：**同一条冷载入通路**，只是**不等 tick**。
  *
- * ⚠️ **承诺边界（不许含糊）**：回执只到「**已注入 / 已入队**」（宿主调用未抛错），
+ * ⚠️ **承诺边界（不许含糊）**：回执只到「**已注入 / 已起轮**」（宿主调用未抛错），
  * **到不了**"目标已执行/已答复" —— 与 `deliverWake` 同一层。
  * 判"目标真的动了"必须用**文件级判据**（它自己的 SESSION.md），
  * **不得凭回执结案**（§12.B 的 `delivered ≠ 跑了一轮`）。
@@ -373,7 +373,7 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
         state: res.ok ? 'delivered' : 'pending',
         attempts: e.attempts + 1,
         lastResult: res.detail,
-        deliveredAt: res.ok ? new Date().toISOString() : null,
+        deliveredAt: res.ok ? isoLocal() : null,
       })
       log.push(`· ${root}: ${e.id} → ${res.ok ? 'delivered' : `重试（${res.detail}）`}`)
     }
