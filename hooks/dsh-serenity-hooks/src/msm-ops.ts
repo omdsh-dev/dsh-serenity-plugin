@@ -460,7 +460,27 @@ export function findEntry(root: string, name: string): MsmEntry | null {
   return loadMsmEntries(root).find((e) => e.name === name) ?? null
 }
 
-/** 扫描各 skill scripts/ 下的非测试脚本（DC-M3 正向基准，对齐 osp） */
+/**
+ * 扫描各 skill `scripts/` 下的**未注册候选**（DC-M3 正向基准，对齐 osp）。
+ *
+ * 🔴 **入口判据**（S151 轮 112 跨轨迹信号 → S142 实测精化，2026-09-17；取证见 S142 §0q）：
+ *   · **入口 ⟺ 有 shebang（`^#!`） ∨ 声明了 `function main(`** —— **`process.argv` 单独不算**。
+ *     反例（实测）：`home-desk/scripts/lib/desk-dispatch.ts` 含 **5** 处 `process.argv`，
+ *     但无 shebang / 无 `main()`，且被 `desk-window.ts`、`desk-vision.ts` **import** ⇒ **它是库**。
+ *   · **库 ⟺ 无 shebang ∧ 无 `main()` ∧ 被其它脚本 import** ⇒ **不是 MSM 候选，不上报**。
+ *     ⚠️ **"有 `.test.ts`" 不是入口证据** —— 库**同样**有测试
+ *     （`home-serenity/scripts/dev-kit/dev-kit.test.ts` 开头自述"**共享库单测**"）。
+ *     📌 实现只测**前两条**（shebang / `main()`）：第三条"被 import"是**描述性**的，不作判据 ——
+ *     因为**无 CLI 入口的文件本来就不可能被 `msm()` 调用**，上报它只会得到一条无法处置的欠账。
+ *     🔗 **与 DC-M2 自洽**：DC-M2 本就要求**已注册**脚本必须有 main() 守卫 ⇒ 把"无入口"的文件
+ *     排除出候选，与注册表的契约**同向**（两条判据不会互相打架）。
+ *
+ * 🔴 **本函数只扫 `scripts/` 一层（非递归），这是当前刻意的语义**（嵌套子域对容器不可见；
+ *   见 CCC `docs/t024-msm-skill-inventory.md` §3b）。**若将来改为递归，上面的判据就是护栏**：
+ *   嵌套候选实测 **8 个**（`dev-kit/` 5 + `home-desk/scripts/lib/` 3）**全部是库**——
+ *   不按判据过滤，一次递归就会制造 8 条假欠账，并可能诱使后续轮次把库注册成**假 MSM**。
+ *   ⇒ **改递归前先读本条注释。**
+ */
 function scanSkillScripts(root: string): string[] {
   const out: string[] = []
   const skillsDir = join(root, '.opencode', 'skills')
@@ -469,12 +489,37 @@ function scanSkillScripts(root: string): string[] {
     const scriptsDir = join(skillsDir, skill, 'scripts')
     if (!existsSync(scriptsDir)) continue
     for (const f of readdirSync(scriptsDir)) {
-      if (/\.(ts|js|mjs)$/.test(f) && !/\.(test|spec)\./.test(f)) {
-        out.push(join('.opencode', 'skills', skill, 'scripts', f))
+      const abs = join(scriptsDir, f)
+      // 目录**显式**排除：原先只是"靠目录名不以 .ts/.js/.mjs 结尾"碰巧被扩展名判据放过——
+      // 不要把正确性建立在巧合上（一个名为 `foo.ts/` 的目录就会把它变成误报）。
+      let isFile = false
+      try {
+        isFile = statSync(abs).isFile()
+      } catch {
+        continue // 悬空符号链接 / 竞态 ⇒ 不是可判定的脚本文件
       }
+      if (!isFile) continue
+      if (!/\.(ts|js|mjs)$/.test(f)) continue
+      if (/\.(test|spec)\./.test(f)) continue // 测试文件不是 MSM 候选
+      if (!hasCliEntry(abs)) continue // 库模块不是 MSM 候选（DC-M3 只报"未注册的**入口**"）
+      out.push(join('.opencode', 'skills', skill, 'scripts', f))
     }
   }
   return out.sort()
+}
+
+/** 入口判据的机械实现（判据、反例与递归化护栏见 `scanSkillScripts` 注释） */
+function hasCliEntry(absPath: string): boolean {
+  let text: string
+  try {
+    text = readFileSync(absPath, 'utf-8')
+  } catch {
+    // 读不出来 ⇒ **按入口上报**（不静默放过）：M3 的职责是"别漏候选"，
+    // 且"扫到却读不了"本身也是值得被看见的信号。
+    return true
+  }
+  if (/^#!/.test(text)) return true
+  return /\b(?:async\s+)?function\s+main\s*\(/.test(text)
 }
 
 /**
