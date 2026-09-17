@@ -14,7 +14,8 @@
  *     → 回退：live 会话标题匹配
  *  3. agent：**live 优先**（`ctx.agents.get`）→ 冷会话走 `ctx.sessionController.resolveAgent`
  *     （宿主实现：live 优先 + resume 去重 + 由会话元数据恢复 preset）
- *     → `sessionController` 缺席（headless profile）⇒ 仅投递 live 目标，**不静默**
+ *     → `sessionController` 缺席 ⇒ 仅投递 live 目标，**不静默**（v1.39.3：**归为"环境未就绪"**
+ *       而非"投递失败"，见 `WakeDeliveryResult.notReady` —— 启动那一拍早于懒服务就绪是常态）
  *  4. 投递：`agent.followup(...)`（"Queue an ordinary follow-up turn and wake the driver"）
  *
  * 守卫（I-4 默认 + v1.34 S-1 解耦）：全局 `wakeSchedulerEnabled`（**缺省开**；**不再**回退旧键
@@ -55,6 +56,19 @@ interface HostSessionController {
 interface WakeDeliveryResult {
   ok: boolean
   detail: string
+  /**
+   * 🔴 **环境未就绪**（不是投递失败）——只有一种情形：目标需要**冷载入**，而宿主此刻**还没把
+   * 懒服务 `sessionController` 供上来**（典型 = `dsh web` 刚重启：时钟武装时**立刻跑一次 tick**，
+   * 那一拍早于懒服务就绪、也早于会话恢复）。
+   *
+   * 为什么要把它和"真失败"分开（2026-09-17 实测，S142 §0t）：
+   * 旧实现把这一情形当成投递失败写进条目 ⇒ ① `attempts` 无端 +1 ② `lastResult` 留下一条
+   * **误导性错误**（原文猜"headless profile？"，而真因是**重启窗口**，属**假陈述**）
+   * ③ 注册表/面板里出现"失败的投递"，**每次 restart 都必然复现**——一个**假告警发生器**
+   * （所有者 2026-09-17 就是被它引来的）。而消息**从未丢失**：下一个 tick 就投成功了。
+   * ⇒ 判据：**"宿主服务还没起来"不是投递结果**，不得计入条目。
+   */
+  notReady?: boolean
 }
 
 /**
@@ -149,12 +163,13 @@ export function __resetWakeSchedulerStateForTest(): void {
  * @param root CCC 根
  * @param dirName 目标 trajectory 目录名
  * @returns 命中返回 agent 与取得方式（how 进 lastResult，便于诊断）；未命中返回原因
+ *   （原因带 `notReady` = **环境未就绪**而非投递失败，调用方**不得**据此记一次失败）
  */
 async function acquireWakeAgent(
   ctx: Context,
   root: string,
   dirName: string,
-): Promise<{ agent: Agent; how: string } | { error: string }> {
+): Promise<{ agent: Agent; how: string } | { error: string; notReady?: boolean }> {
   const agents = hostAgents(ctx)
   const ids = listBoundSessionIds(root, dirName)
   for (const id of ids) {
@@ -165,7 +180,16 @@ async function acquireWakeAgent(
     const sc = hostService<HostSessionController>(ctx, 'sessionController')
     const resolved = sc?.resolveAgent
     if (typeof resolved !== 'function') {
-      return { error: `目标会话未加载且 sessionController 不可用（headless profile？）——绑定 id: ${ids[0]}` }
+      // 🔴 这是**环境未就绪**，不是投递失败（见 `WakeDeliveryResult.notReady` 的说明）：
+      //    典型成因 = `dsh web` 刚重启，启动那一拍早于懒服务就绪 / 早于会话恢复。
+      //    ⚠️ 文案必须**说真话**：旧文猜"headless profile？"是错的猜测（真因常常是重启窗口），
+      //    实测把维护者都引偏过一次 ⇒ 两种成因都要说，并点明"下个 tick 会重试"。
+      return {
+        error:
+          `宿主尚未就绪：目标会话未加载，且 sessionController 服务此刻不可用` +
+          `（重启后的启动窗口，或本进程确实无该服务）——绑定 id: ${ids[0]}`,
+        notReady: true,
+      }
     }
     const id = ids[0] as string
     try {
@@ -207,7 +231,7 @@ export async function deliverWake(ctx: Context, root: string, entry: WakeEntry):
   const target = resolveWakeTarget(root, entry.target)
   if (!target) return { ok: false, detail: `目标 trajectory 未命中（${entry.target}）` }
   const acquired = await acquireWakeAgent(ctx, root, target.dirName)
-  if ('error' in acquired) return { ok: false, detail: acquired.error }
+  if ('error' in acquired) return { ok: false, detail: acquired.error, notReady: acquired.notReady === true }
   try {
     acquired.agent.followup(createUserMessage({ content: [{ type: 'text', text: buildWakeText(entry, target) }], source: PLUGIN_SOURCE }))
   } catch (err) {
@@ -369,6 +393,17 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
     // 串行投递：同 tick 多目标依次进行（防模型并发挤兑）——fire-and-forget 指不等结果，不是并行
     for (const e of due) {
       const res = await deliverWake(ctx, root, e)
+      // 🔴 环境未就绪（`notReady`）**不计入条目**（2026-09-17 实测缺陷修复，S142 §0t）：
+      //   不改 state、不动 attempts、**不写 lastResult**——因为这条"结果"不是投递的结果，
+      //   而是"这次没轮到投递"。典型场景：`dsh web` 刚重启，启动那一拍跑在懒服务
+      //   `sessionController` 就绪**之前** ⇒ 旧实现每次重启都给"到点条目"盖一条假失败，
+      //   制造假告警（消息其实一个都没丢，下个 tick 就投成功了）。
+      //   代价 = 该条目在本 tick 无痕迹；但**不丢信息**：真正超窗的条目仍由上面的
+      //   `expired` 分支落 `missed` 留痕（那是**时间**判据，与「试过几次」无关）。
+      if (res.notReady) {
+        log.push(`· ${root}: ${e.id} → 跳过（宿主服务未就绪，下个 tick 再试；不计失败）`)
+        continue
+      }
       updateWake(root, e.id, {
         state: res.ok ? 'delivered' : 'pending',
         attempts: e.attempts + 1,

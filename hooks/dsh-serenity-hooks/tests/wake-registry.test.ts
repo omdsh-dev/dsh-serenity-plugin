@@ -226,6 +226,14 @@ describe('deliverWake（live 优先 → 冷唤醒正门）', () => {
     const res = await deliverWake(ctx as never, root, makeEntry())
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('sessionController')
+    // 🔴 v1.39.3（S142 §0t，2026-09-17 实测缺陷）：这一情形是**环境未就绪**，不是投递失败
+    //    ⇒ 必须带 `notReady`，否则调用方（tick）会把它当失败写进条目 ——
+    //    每次 `restart-web` 都给"到点条目"伪造一条"失败的投递"（假告警发生器）。
+    expect(res.notReady).toBe(true)
+    // 文案**不得再猜成因**：旧文写「（headless profile？）」，而真因**常常是重启窗口**
+    // —— 假陈述把维护者引偏过一次（所有者 2026-09-17 就是被这条假失败引来的）。
+    expect(res.detail).not.toContain('headless profile？')
+    expect(res.detail).toContain('宿主尚未就绪')
   })
 
   it('冷会话 + sessionController 可用 → resolveAgent 载入后投递（P-1 冷唤醒路径）', async () => {
@@ -524,6 +532,33 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     expect(sent[0]).toContain('到点干活')
     expect(listWakes(root).entries[0]!.state).toBe('delivered')
     expect(listWakes(root).entries[0]!.lastResult).toContain('live(bound sess-live)')
+  })
+
+  it('🔴 启动窗口（宿主服务未就绪）⇒ 条目**不被记失败**：state/attempts/lastResult 全不动', async () => {
+    // 复现 2026-09-17 21:09 的真实现场：`dsh web` 刚重启 ⇒ 时钟武装时**立刻跑一次 tick**，
+    // 而那一拍早于懒服务 `sessionController` 就绪、也早于会话恢复。
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-cold')
+    const added = addWake(root, { target: DIR_NAME, at: '+5m', message: '到点干活', createdBy: 'S142', nowMs: Date.now() })
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    updateWake(root, added.entry.id, { at: new Date(Date.now() - 60_000).toISOString() }) // 改成已到期
+    const ctx = {
+      // CCC 可被发现（另有 live 会话在同 CCC 里）——但**目标**会话没加载，且懒服务缺席：
+      sessions: { list: () => [{ id: 'sess-other', header: { cwd: root } }] },
+      agents: { get: () => undefined },
+      get: () => undefined, // ← sessionController 缺席（启动窗口的实况）
+      on: () => undefined,
+      effect: () => undefined,
+    }
+    registerWakeScheduler(ctx as never) // 启动即 tick 一次
+    await new Promise((r) => setTimeout(r, 30))
+    const e = listWakes(root).entries[0]!
+    expect(e.state).toBe('pending') // 仍待投（不是"投失败"）
+    expect(e.attempts).toBe(0) // 🔴 不计次 —— 修复前这里会被加成 1（假失败）
+    expect(e.lastResult).toBeNull() // 🔴 不留假陈述 —— 修复前会写入"sessionController 不可用"
+    expect(e.deliveredAt).toBeNull()
   })
 
   it('卸载（disposer）→ 时钟停止且进程态复位（不留"看着还在跑"的假象）', () => {

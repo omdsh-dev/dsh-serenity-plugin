@@ -63,7 +63,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 | 调度器 | `wake-scheduler.ts` `registerWakeScheduler` | 5min tick（复用 autopilot 的 `TICK_MS`）；遍历 **live CCC**；串行投递；生命周期 disposer；`session/created` + `settings-changed` 热启动 |
 | 目标定位 | `trajectory-bound.ts` `listBoundSessionIds` | `.bindings.json` **值侧反查**：目录名 → dsh 会话 id（最新绑定在前）——冷唤醒的唯一权威来源 |
 | 投递 | `acquireWakeAgent` → `deliverWake` | **live 优先**（`ctx.agents.get`）→ 冷会话 `ctx.sessionController.resolveAgent`（宿主负责 preset 恢复）→ **`followup`** |
-| 降级 | 同上 | `sessionController` 缺席（headless profile）⇒ 仅投递 live 目标 + **响亮诊断**（禁静默） |
+| 降级 | 同上 | `sessionController` 缺席 ⇒ 仅投递 live 目标 + **响亮诊断**（禁静默）。<br>🔴 **v1.39.3 更正（2026-09-17 实测）**：这一情形归 **「环境未就绪」** 而非「投递失败」（`notReady`）——<br>典型成因**不是** headless profile，而是 **`dsh web` 刚重启**：时钟武装时**立刻跑一次 tick**，那一拍早于懒服务就绪、也早于会话恢复 ⇒ **每次 restart 都会命中**。<br>旧实现把它当失败写进条目 ⇒ 条目被记 `attempts+1` + 一条**误导性** `lastResult`（猜"headless profile？"）= **假告警发生器**（消息实际一个没丢，下个 tick 就投成功）。<br>现行：tick **不改该条目的任何字段**（state/attempts/lastResult 全不动），只记一行 tick 日志「跳过（宿主服务未就绪）」。超窗仍由**时间**判据（2h）落 `missed`。 |
 | 工具面 | `tools/trajectory.ts`（**工具名 `container_trajectory`**；v1.33 起 logbook 并入 `trajectory`，v1.34 工具名硬切为 `container_trajectory`，实现文件同步更名） | 动作 `wake-later`（**进程内**直改注册表，不 exec 脚本）；**无 list/rm**——不可回收（D60 替代控制只剩"不打断在跑轮次"+ 文件可读） |
 | 配置 | `.opencode/serenity.json` | `trajectory.autopilot` → 旧 `autopilotTrajectory` → 旧 `autotrajectory`（逐级回退，**不回写**） |
 | 全局开关 | 插件设置（宿主 settings） | **两条线各一个**（v1.34 S-1）：周期自唤醒 `autopilotWakeEnabled`（缺省关；迁移期回退旧键 `autopilotEnabled`，**用 `??`** 保证新键显式 false 能覆盖旧键 true）｜一次性唤醒 `wakeSchedulerEnabled`（缺省开，**无** autopilot 回退） |
