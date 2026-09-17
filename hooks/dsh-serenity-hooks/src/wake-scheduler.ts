@@ -35,6 +35,7 @@ import { registerDisposer } from './host/effect.js'
 import { readSimpleSettings } from './settings-section.js'
 import { createClock, type ClockOptions, type ClockRuntime } from './clock-runtime.js'
 import { listCccs } from './ccc-roots.js'
+import { localHuman } from './time.js'
 import {
   loadWakeRegistry,
   splitDueWakes,
@@ -182,6 +183,9 @@ async function acquireWakeAgent(
 export function buildWakeText(entry: WakeEntry, target: WakeTarget): string {
   return [
     `[trajectory 唤醒] 到点（登记于 ${entry.createdAt}，发起者 ${entry.createdBy || '未知'}，id ${entry.id}）。`,
+    // v1.39.2（S142 §0r，所有者令「注入时除了内容再带上当前时间」）：目标据此判断"现在几点"，
+    // 不必去翻系统提示或自己算——尤其是**冷载入**的目标，它的上下文里没有任何近期时间锚。
+    `当前时间：${localHuman()}（当地时区）。`,
     '',
     `身份锚定：继续 ${target.dirName} 的 trajectory（SESSION.md: ${target.mdPath}）。`,
     '',
@@ -214,22 +218,27 @@ export async function deliverWake(ctx: Context, root: string, entry: WakeEntry):
 
 /**
  * 即时消息正文（**刻意不复用** {@link buildWakeText}）：唤醒文本以「**到点**（登记于…）」开头，
- * 对即时投递那是**错的事实**。本函数显式区分"这是即时消息、不是到点唤醒"，
- * 并写明"消息已入队、若此前在跑轮次则本轮结束后生效"（防目标误判时序）。
+ * 对即时投递那是**错的事实**。本函数显式区分"这是即时消息、不是到点唤醒"。
+ *
+ * ⚠️ **v1.39.2 起"已入队"这句话必须删掉**（S142 §0r，所有者令「不排队、直接即时注入」）：
+ * 旧文案写"消息已进入你的队列；你此前若正在跑轮次，它在本轮结束后生效"——
+ * 那是**旧的 followup 语义**；现在在跑的目标走 `steer`（当场注入当前轮），
+ * 留着这句话就是**注入一条假陈述**（比没有更坏：目标会误判自己看到它的时机）。
  * @param target 目标轨迹（目录名 + SESSION.md）
  * @param message 递送正文
  * @param sender 发起者轨迹标识（供目标与人类识别来源）
  */
 export function buildSendText(target: WakeTarget, message: string, sender: string): string {
   return [
-    `[即时消息] 来自 ${sender || '未知轨迹'}。`,
+    `[即时消息] 来自 ${sender || '未知轨迹'}。当前时间：${localHuman()}（当地时区）。`,
     '',
     `身份锚定：继续 ${target.dirName} 的 trajectory（SESSION.md: ${target.mdPath}）。`,
     '',
     '消息：',
     message,
     '',
-    '说明：这是**即时投递**（不是到点唤醒）——消息已进入你的队列；你此前若正在跑轮次，它在本轮结束后生效。处理完照常把进展写入 SESSION.md。',
+    '说明：这是**即时投递**（不是到点唤醒）——它**不排队**：目标正在跑轮次就**当场注入当前轮**，' +
+      '目标空闲则立即起一轮。处理完照常把进展写入 SESSION.md。',
   ].join('\n')
 }
 
@@ -245,10 +254,20 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
  * 必须直接走 {@link acquireWakeAgent}（live 优先 → `sessionController.resolveAgent` 冷载入）。
  * 这正对应所有者要的「**会话不活跃则等效于直接 wake**」：**同一条冷载入通路**，只是**不等 tick**。
  *
- * ⚠️ **承诺边界（不许含糊）**：回执只到「**已入队**」（`followup` 未抛错），
- * **到不了**"目标已执行/已答复" —— 与 `deliverWake` 同一层。目标若正在跑轮次，
- * 消息**排在轮次边界**（**不打断当前轮**）。判"目标真的动了"必须用**文件级判据**
- * （它自己的 SESSION.md），**不得凭回执结案**（§12.B 的 `delivered ≠ 跑了一轮`）。
+ * ⚠️ **承诺边界（不许含糊）**：回执只到「**已注入 / 已入队**」（宿主调用未抛错），
+ * **到不了**"目标已执行/已答复" —— 与 `deliverWake` 同一层。
+ * 判"目标真的动了"必须用**文件级判据**（它自己的 SESSION.md），
+ * **不得凭回执结案**（§12.B 的 `delivered ≠ 跑了一轮`）。
+ *
+ * 🔴 **v1.39.2 语义变更（S142 §0r，所有者 2026-09-17 令：「希望 send message 时不排队，
+ * 可以直接作为提示词即时注入进去」）**：
+ * 旧实现一律 `followup`（宿主注释：*Queue an ordinary follow-up turn*）⇒ 目标**正在跑轮次**时
+ * 消息**排在轮次边界**（即旧文案的"不打断当前轮"）。现按宿主 `agent.status` 分流：
+ *   · `status === 'idle'` ⇒ `followup`（宿主**同步**把 status 置 running ⇒ **立即起轮**，本就不排队）
+ *   · 否则（在跑）      ⇒ **`steer`** —— **当场注入当前轮**，这才是"不排队"的关键路径
+ * ⚠️ **fail-safe**：`steer` 抛错 ⇒ **退回 `followup`**：**宁可排队，不可静默丢消息**。
+ * ⚠️ **只改 `send-now`**：`send-later`（{@link deliverWake}）**保持 `followup`** ——
+ * 预约的本职是"到点唤起"，且在跑时排队不打断是它被实证验收过的行为，不顺手动它。
  *
  * **归属**：本函数放在调度器侧而非工具侧 —— "怎么把一句话送到一条轨迹"是**调度器的知识**，
  * 工具只该知道"有这个动作"。这样 `trajectory.ts` 完全不碰调度器内部（v1.35.0 硬约束①：
@@ -272,14 +291,38 @@ export async function sendToTrajectory(
   if (!t) return { ok: false, detail: `目标 trajectory 未命中（${target}）` }
   const acquired = await acquireWakeAgent(ctx, root, t.dirName)
   if ('error' in acquired) return { ok: false, detail: acquired.error }
-  try {
-    acquired.agent.followup(
-      createUserMessage({ content: [{ type: 'text', text: buildSendText(t, message, sender) }], source: PLUGIN_SOURCE }),
-    )
-  } catch (err) {
-    return { ok: false, detail: `投递失败（${acquired.how}）: ${String((err as Error)?.message ?? err)}` }
+  const agent = acquired.agent
+  const make = (): ReturnType<typeof createUserMessage> =>
+    createUserMessage({ content: [{ type: 'text', text: buildSendText(t, message, sender) }], source: PLUGIN_SOURCE })
+  // 🔴 v1.39.2（S142 §0r，所有者令「不排队、直接即时注入」）：见函数头部的语义变更说明。
+  // 判据 = 宿主 agent 的 `status`（`agent-idle.ts` 同款读法：`followup`/`steer` 会**同步**置 running）。
+  const idle = (agent as { status?: string }).status === 'idle'
+  if (idle) {
+    try {
+      agent.followup(make())
+    } catch (err) {
+      return { ok: false, detail: `投递失败（${acquired.how}）: ${String((err as Error)?.message ?? err)}` }
+    }
+    return { ok: true, detail: `已即时投递 ${t.dirName}（${acquired.how}；目标空闲 ⇒ followup 立即起轮）` }
   }
-  return { ok: true, detail: `已即时投递 ${t.dirName}（${acquired.how}）` }
+  try {
+    agent.steer(make())
+    return { ok: true, detail: `已即时注入 ${t.dirName}（${acquired.how}；目标在跑 ⇒ steer 当场注入当前轮）` }
+  } catch (err) {
+    // fail-safe：宁可排队，不可静默丢消息
+    try {
+      agent.followup(make())
+    } catch (err2) {
+      return {
+        ok: false,
+        detail: `投递失败（${acquired.how}）: steer 与 followup 均失败: ${String((err as Error)?.message ?? err)} / ${String((err2 as Error)?.message ?? err2)}`,
+      }
+    }
+    return {
+      ok: true,
+      detail: `已投递 ${t.dirName}（${acquired.how}；steer 不可用 ⇒ 退回 followup）: ${String((err as Error)?.message ?? err)}`,
+    }
+  }
 }
 
 /**

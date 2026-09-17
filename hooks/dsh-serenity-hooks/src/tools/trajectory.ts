@@ -243,7 +243,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
     'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound trajectory. ' +
     'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self). ' +
     'send-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message. ' +
-    'send-now requires target + message. Its receipt means the message was QUEUED into the target (it does NOT mean the target ran or replied; a busy target applies it at its next round boundary). ' +
+    'send-now requires target + message. It delivers IMMEDIATELY (never queued behind the current turn): a busy target is steered mid-turn so it reads the message in the CURRENT turn, and an idle target starts a turn right away. Its receipt means the message was injected into the target (it does NOT mean the target ran or replied). ' +
     'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
   parameters: {
     action: {
@@ -427,8 +427,8 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
           output: [
             '✓ 已即时投递',
             `  · ${res.detail}`,
-            '  · 语义：消息**已进入目标队列**；目标若正在跑轮次，则在**轮次边界**生效（不打断当前轮）。',
-            '  · ⚠️ 回执只到「已入队」——**不表示**目标已执行或已答复。判"目标真的动了"须看它自己的 SESSION.md（文件级判据）。',
+            '  · 语义：**不排队** —— 目标正在跑轮次则**当场注入当前轮**（steer），空闲则立即起一轮（followup）。',
+            '  · ⚠️ 回执只到「已注入/已入队」——**不表示**目标已执行或已答复。判"目标真的动了"须看它自己的 SESSION.md（文件级判据）。',
           ].join('\n'),
         }
       }
