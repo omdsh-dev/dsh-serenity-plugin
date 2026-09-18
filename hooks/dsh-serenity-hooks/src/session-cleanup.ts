@@ -163,6 +163,60 @@ function dirOf(logPath: string): string {
   return logPath.slice(0, logPath.lastIndexOf('/')) || logPath
 }
 
+/**
+ * 某一 dsh 会话（目录名 / 会话 id）的**当前世代日志体积**（字节）。
+ *
+ * 为什么要它（S142 §0y「旧会话累积 ⇒ dsh 内存崩溃」，所有者令）：
+ *   · 宿主恢复/继续一条会话必须**重放全部事件**（`scanLog` → `materializeAppendBatch`）
+ *     ⇒ **代价 ∝ 日志体积**；
+ *   · 实测（`_tmp/measure-session-load.mjs`，照宿主 `scanZstdFrames` 复刻）：
+ *     一条 **72.2 MB**（zstd）的日志 = 35 559 个 frame / 252.6 MB 文本 / 62 680 条事件，
+ *     **光是读一遍峰值 RSS +1 175 MB**（探针什么都不保留）；
+ *   · 而宿主的解析缓存 `COLD_LOG_MEMO_MAX_ENTRIES = 2` 是**按条数限、不按字节限**的
+ *     （`dsh-session-persistence-jsonl/lib/index.js:2175`）⇒ 两条巨日志 = 上限内。
+ * 🔴 **在本函数之前，ACC 侧没有任何地方知道"绑定的这条会话日志多大"——这个信号根本不存在。**
+ * 这是"靠 agent 自觉 rebuild 不够"的机制层原因（keeper 的 K 量的是**模型上下文**，压缩后回落；
+ * 而**日志文件只增不减** ⇒ rebuild 提醒永远不会因为"日志 72 MB"触发）。
+ *
+ * 只认会话目录（含任意世代日志）；返回**最高世代**的日志（= 宿主 `findLog` 选中的当前世代）。
+ * 未命中 / 不可读 → null（非错误，调用方按"未知"处理）。
+ * @param root - DSH 会话 root（{@link sessionsRootDir}）
+ * @param sessionId - 会话目录名（`.bindings.json` 的键，含 `session-` 前缀）或裸 id
+ * @returns 字节数 + 日志绝对路径；未命中 → null
+ */
+export function sessionLogBytesById(
+  root: string,
+  sessionId: string,
+): { bytes: number; path: string } | null {
+  if (sessionId === '' || !existsSync(root)) return null
+  const dirName = sessionId.startsWith('session-') ? sessionId : `session-${sessionId}`
+  for (const project of readdirSync(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue
+    const log = findSessionLog(join(root, project.name, dirName))
+    if (log === null) continue
+    try {
+      return { bytes: statSync(log).size, path: log }
+    } catch {
+      return null // 文件消失（竞态）→ 视为未知
+    }
+  }
+  return null
+}
+
+/**
+ * **(c) 绑定一致性兜底**的判据：某会话的日志**是否仍在磁盘上**。
+ *
+ * 🔴 **fail-closed**：sessions root 本身不存在时**一律返回 true（当作"在"）**——
+ * 否则换 `DSH_HOME` / 换机器会让"全部绑定看起来都悬空"，进而误清整张绑定表。
+ * 只有"root 在、而这个会话目录确实不在"才算悬空。
+ * @param sessionRoot - DSH 会话 root（{@link sessionsRootDir}）
+ * @param sessionId - 会话目录名（`.bindings.json` 的键）或裸 id
+ */
+export function hasSessionLogById(sessionRoot: string, sessionId: string): boolean {
+  if (!existsSync(sessionRoot)) return true
+  return sessionLogBytesById(sessionRoot, sessionId) !== null
+}
+
 /** 便捷：默认 N 天前为 cutoff（供 API/调用方） */
 export function cutoffDaysAgo(days: number, nowMs = Date.now()): number {
   return nowMs - days * DAY_MS

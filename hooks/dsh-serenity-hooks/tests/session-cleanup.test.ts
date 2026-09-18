@@ -2,7 +2,7 @@
  * session-cleanup.test.ts — DSH 平台旧会话清理纯逻辑（v1.29 需求③）
  */
 
-import { existsSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -10,8 +10,10 @@ import {
   collectEligibleSessions,
   cutoffDaysAgo,
   findSessionLog,
+  hasSessionLogById,
   performCleanup,
   sessionLogArtifacts,
+  sessionLogBytesById,
 } from '../src/session-cleanup.js'
 
 /** 造一个真实会话目录（project/session-id/session.jsonl），mtime 可调 */
@@ -177,5 +179,51 @@ describe('performCleanup', () => {
     const newDir = makeSession(root, '--proj--', 'new-1', 1 * 24 * 3600 * 1000)
     performCleanup(root, cutoffDaysAgo(7))
     expect(existsSync(newDir)).toBe(true)
+  })
+})
+
+/**
+ * S142 §0y：绑定会话的**日志体积**与**存在性**判据。
+ *
+ * 体积为什么重要：宿主恢复一条会话必须重放全部事件 ⇒ 代价 ∝ 日志体积
+ * （实测 72.2 MB 的日志读一遍峰值 RSS +1 175 MB）。
+ * 存在性判据供 (c) 清理悬空绑定 —— **必须 fail-closed**（读不到 root ⇒ 当作"在"）。
+ */
+describe('session-cleanup: sessionLogBytesById / hasSessionLogById（§0y）', () => {
+  it('按会话 id 命中并返回字节数 + 路径（跨 project 目录查找）', () => {
+    const dir = makeSession(root, '--proj--', 'session-abc', 1000)
+    const log = join(dir, 'session.jsonl')
+    const hit = sessionLogBytesById(root, 'session-abc')
+    expect(hit?.path).toBe(log)
+    expect(hit?.bytes).toBe(statSync(log).size)
+  })
+
+  it('裸 id（无 session- 前缀）同样命中', () => {
+    makeSession(root, '--proj--', 'session-abc', 1000)
+    expect(sessionLogBytesById(root, 'abc')?.bytes).toBeGreaterThan(0)
+  })
+
+  it('多世代并存 → 取**最高世代**（= 宿主 findLog 选中的当前世代）', () => {
+    const dir = makeSession(root, '--proj--', 'session-gen', 1000, '.jsonl.zstd')
+    writeFileSync(join(dir, 'session.v3.jsonl.zstd'), 'x'.repeat(99), 'utf-8')
+    expect(sessionLogBytesById(root, 'session-gen')?.bytes).toBe(99)
+  })
+
+  it('未命中 / root 不存在 / 空 id → null（非错误）', () => {
+    expect(sessionLogBytesById(root, 'nope')).toBeNull()
+    expect(sessionLogBytesById(join(root, '不存在'), 'session-abc')).toBeNull()
+    expect(sessionLogBytesById(root, '')).toBeNull()
+  })
+
+  it('hasSessionLogById：命中 → true；确认缺失 → false', () => {
+    makeSession(root, '--proj--', 'session-abc', 1000)
+    expect(hasSessionLogById(root, 'session-abc')).toBe(true)
+    expect(hasSessionLogById(root, 'session-gone')).toBe(false)
+  })
+
+  it('🔴 hasSessionLogById **fail-closed**：root 不存在 → 一律 true（否则换 DSH_HOME 会误清整张绑定表）', () => {
+    const ghostRoot = join(root, '根本没有这个目录')
+    expect(hasSessionLogById(ghostRoot, 'session-anything')).toBe(true)
+    expect(hasSessionLogById(ghostRoot, 'whatever')).toBe(true)
   })
 })

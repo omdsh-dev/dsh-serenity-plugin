@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, resolveSessionTrajectoryLabel } from '../src/trajectory-bound.js'
+import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionTrajectoryLabel, supersedeOtherBindings } from '../src/trajectory-bound.js'
 import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory-ops.js'
 
 let ccc: string
@@ -203,5 +203,104 @@ describe('trajectory-bound: resolveSessionTrajectoryLabel（createdBy 审计归�
     const caller = makeSession('sess-caller')
     appendBound(caller, 'activate', { dirName: '2026-09-04--apaas-26116', mdPath: '/r/C/SESSION.md' })
     expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('2026-09-04--apaas-26116')
+  })
+})
+
+/**
+ * S142 §0y (b)/(c)（所有者 2026-09-18 裁「不上 a、做 b + c」）
+ *
+ * 实证背景：`.bindings.json` 只增不清——真实盘上 S142 名下挂 **4 代**、S185 挂 **2 代**，
+ * 而唤醒选人是"遍历全部绑定 id、任一条 live 就用它" ⇒ **两条 live 会话都能被唤醒选中**
+ * （各持一份完整上下文 = 内存翻倍，且都在写同一批文件 = 双写者）。
+ */
+describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理', () => {
+  const DIR = '2026-08-24--S142--dsp 维护'
+  const MD = '/r/AGENT_SESSIONS/2026-08-24--S142--dsp 维护/SESSION.md'
+
+  /** 直接写绑定文件（绕过 appendBound 的 cwd 定位，便于构造多会话场景） */
+  function seed(records: Record<string, { dirName: string; at: number }>): void {
+    const sessions: Record<string, unknown> = {}
+    for (const [id, r] of Object.entries(records)) {
+      sessions[id] = { dirName: r.dirName, mdPath: MD, action: 'rebuild', at: r.at }
+    }
+    writeFileSync(join(ccc, BINDINGS_REL_PATH), JSON.stringify({ version: 1, sessions }, null, 2))
+  }
+
+  function readSessions(): Record<string, { dirName: string; supersededAt?: number }> {
+    return (JSON.parse(readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8')) as {
+      sessions: Record<string, { dirName: string; supersededAt?: number }>
+    }).sessions
+  }
+
+  it('listBoundSessionIds：按 at 倒序（最新在前）返回该轨迹的全部绑定', () => {
+    seed({ a: { dirName: DIR, at: 100 }, b: { dirName: DIR, at: 300 }, c: { dirName: DIR, at: 200 } })
+    expect(listBoundSessionIds(ccc, DIR)).toEqual(['b', 'c', 'a'])
+  })
+
+  it('listBoundSessionIds：**不返回**已被取代的绑定（(b) 守卫的核心判据）', () => {
+    seed({ a: { dirName: DIR, at: 100 }, b: { dirName: DIR, at: 300 } })
+    const marked = supersedeOtherBindings(ccc, DIR, new Set(['b']))
+    expect(marked).toEqual(['a'])
+    expect(listBoundSessionIds(ccc, DIR)).toEqual(['b']) // a 不再进入唤醒候选
+  })
+
+  it('supersedeOtherBindings：**保留记录**（沿革不丢，仅退出候选）', () => {
+    seed({ a: { dirName: DIR, at: 100 }, b: { dirName: DIR, at: 300 } })
+    supersedeOtherBindings(ccc, DIR, new Set(['b']))
+    const sessions = readSessions()
+    expect(sessions.a?.dirName).toBe(DIR) // 记录仍在
+    expect(typeof sessions.a?.supersededAt).toBe('number')
+    expect(sessions.b?.supersededAt).toBeUndefined() // keepIds 不动
+  })
+
+  it('supersedeOtherBindings：幂等（第二次无新标记 → 空数组）', () => {
+    seed({ a: { dirName: DIR, at: 100 }, b: { dirName: DIR, at: 300 } })
+    expect(supersedeOtherBindings(ccc, DIR, new Set(['b']))).toEqual(['a'])
+    expect(supersedeOtherBindings(ccc, DIR, new Set(['b']))).toEqual([])
+  })
+
+  it('supersedeOtherBindings：**不碰别的轨迹**的绑定', () => {
+    seed({ a: { dirName: DIR, at: 100 }, b: { dirName: DIR, at: 300 }, x: { dirName: '2026-09-13--S185--别的', at: 50 } })
+    supersedeOtherBindings(ccc, DIR, new Set(['b']))
+    expect(readSessions().x?.supersededAt).toBeUndefined()
+  })
+
+  it('pruneMissingBindings：只删判据**确认缺失**的条目，返回升序 id', () => {
+    seed({ a: { dirName: DIR, at: 1 }, b: { dirName: DIR, at: 2 }, c: { dirName: DIR, at: 3 } })
+    const removed = pruneMissingBindings(ccc, (id) => id === 'c' || id === 'a')
+    expect(removed).toEqual(['a', 'c'])
+    expect(Object.keys(readSessions())).toEqual(['b'])
+  })
+
+  it('pruneMissingBindings：判据抛错 → **保留**该条（fail-closed，宁可不删）', () => {
+    seed({ a: { dirName: DIR, at: 1 }, b: { dirName: DIR, at: 2 } })
+    const removed = pruneMissingBindings(ccc, (id) => {
+      if (id === 'a') throw new Error('判据自身炸了')
+      return true
+    })
+    expect(removed).toEqual(['b'])
+    expect(Object.keys(readSessions())).toEqual(['a'])
+  })
+
+  it('pruneMissingBindings：无可删 → 空数组且**不改写文件**', () => {
+    seed({ a: { dirName: DIR, at: 1 } })
+    const before = readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8')
+    expect(pruneMissingBindings(ccc, () => false)).toEqual([])
+    expect(readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8')).toBe(before)
+  })
+
+  /**
+   * 接线钉（同 `client-popover-clip-guard.test.ts` 的形态）：
+   * 上面两个函数**本身对**不等于**被接上了**——机制死在"实现了但没人调用"是最常见的静默失效。
+   * 这里钉住 `container_trajectory use` 这条真实路径确实调用它们，并确实把结果报出去。
+   */
+  it('🔴 接线钉：`use` 路径确实调用 supersedeOtherBindings + pruneMissingBindings 并回报结果', () => {
+    const src = readFileSync(new URL('../src/tools/trajectory.ts', import.meta.url), 'utf-8')
+    const useCase = src.slice(src.indexOf("case 'use':"), src.indexOf("case 'rebuild':", src.indexOf("case 'use':")))
+    expect(useCase).toContain('supersedeOtherBindings(')
+    expect(useCase).toContain('pruneMissingBindings(')
+    expect(useCase).toContain('hasSessionLogById(') // (c) 判据必须 fail-closed 的那个函数
+    expect(useCase).toContain("out.supersededBindings = ") // 结果要报出去（否则用户不知道发生了什么）
+    expect(useCase).toContain("out.prunedBindings = ")
   })
 })

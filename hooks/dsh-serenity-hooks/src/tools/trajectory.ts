@@ -41,7 +41,8 @@ import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
-import { appendBound, readLastBound, resolveSessionTrajectoryLabel } from '../trajectory-bound.js'
+import { appendBound, pruneMissingBindings, readLastBound, resolveSessionTrajectoryLabel, supersedeOtherBindings } from '../trajectory-bound.js'
+import { hasSessionLogById, sessionsRootDir } from '../session-cleanup.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
 import { sendToTrajectory } from '../wake-scheduler.js'
 import {
@@ -361,6 +362,23 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
         const advisory = advisoryHint(targetEntry.dirName, join(targetEntry.path, 'SESSION.md'))
         const out: Record<string, JsonValue> = { dir: active.dir, mdPath: active.mdPath, context: active.context }
         if (advisory) out.advisory = advisory
+        // (b) 机械守卫（S142 §0y，所有者 2026-09-18 裁「b 做」）：
+        //   同一 trajectory 的**其它**绑定一律标记 superseded —— 它们仍可被人工使用，
+        //   但**不再被唤醒选中**，从而消除"两条 live 会话各持一份完整上下文 + 双写者"。
+        //   放在 appendBound 之后：本会话刚写入的记录是最新的，保留集合里只留自己。
+        if (dsh) {
+          const selfId = String((dsh as { header?: { id?: unknown } }).header?.id ?? '')
+          const superseded = supersedeOtherBindings(
+            root,
+            info?.dirName ?? targetDirName,
+            selfId === '' ? new Set<string>() : new Set([selfId]),
+          )
+          if (superseded.length > 0) out.supersededBindings = superseded
+          // (c) 兜底：清掉指向**已不存在**的 dsh 会话的悬空绑定（判据 fail-closed，
+          //     见 hasSessionLogById —— sessions root 读不到时一律保留）。
+          const pruned = pruneMissingBindings(root, (id) => !hasSessionLogById(sessionsRootDir(), id))
+          if (pruned.length > 0) out.prunedBindings = pruned
+        }
         return out
       }
       case 'rebuild': {

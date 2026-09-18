@@ -38,6 +38,17 @@ interface SessionBoundRecord {
   action: SessionBoundAction
   at: number
   note?: string
+  /**
+   * **(b) 已被取代标记**（S142 §0y，所有者 2026-09-18 裁「b 做」）。
+   *
+   * 语义：这条绑定**仍然存在**（沿革不丢、正向 `readLastBound` 仍能查到"我曾属于哪条轨迹"），
+   * 但**不再作为唤醒候选**（{@link listBoundSessionIds} 过滤掉）——这正是"解绑"的机械形态。
+   *
+   * 为什么需要（实证）：`.bindings.json` 只增不清——实测 S142 名下挂 **4 代**、S185 挂 **2 代**，
+   * 同一 trajectory 因此可以有**两条 live 会话**：各持一份完整上下文（内存翻倍）
+   * 且**都在写同一批文件**（双写者）。
+   */
+  supersededAt?: number
 }
 
 /** 旧形态事件类型（v1.29.1~v1.30.5 写入会话日志；v1.30.6 起只读不写——兼容存量绑定） */
@@ -175,9 +186,96 @@ export function listBoundSessionIds(root: string, dirName: string): string[] {
   for (const [id, raw] of Object.entries(file.sessions)) {
     const rec = asBoundRecord(raw)
     if (!rec || rec.dirName !== dirName) continue
+    // (b) 守卫：已被取代的绑定**不再作为唤醒候选**（记录仍在 → 沿革与正向查询不受影响）
+    if (rec.supersededAt !== undefined) continue
     hits.push({ id, at: typeof rec.at === 'number' ? rec.at : 0 })
   }
   return hits.sort((a, b) => b.at - a.at).map((h) => h.id)
+}
+
+/**
+ * **(b) 同一 trajectory 多 live 会话的机械守卫**（S142 §0y，所有者 2026-09-18 裁「b 做」）。
+ *
+ * 把绑定到 `dirName` 的**其它**会话 id 标记为 `supersededAt` —— **保留记录**（沿革/正向查询不丢），
+ * 只切断"**唤醒还会找到它**"这条路。语义上即"解绑"，且**不动那个会话本身**（它仍可被人工使用）。
+ *
+ * 为什么必须有机制（R↓）：`.bindings.json` 的语义是"latest-wins 覆盖**本条会话记录**"，
+ * 对**同一 trajectory 的其它会话**没有任何约束 ⇒ 多代会话自然堆积（实测 S142 4 代 / S185 2 代），
+ * 而 `acquireWakeAgent` 是"遍历全部绑定 id、任一条 live 就用它"——**两条 live 都能被选中**。
+ *
+ * @param root CCC 根
+ * @param dirName 目标 trajectory 目录名
+ * @param keepIds 保留（不标记）的会话 id 集合——通常是"当前正在 use 的这条"
+ * @returns **实际被标记**的会话 id（升序稳定；供调用方如实报告，未标记任何一条 → `[]`）
+ */
+export function supersedeOtherBindings(
+  root: string,
+  dirName: string,
+  keepIds: ReadonlySet<string>,
+): string[] {
+  const path = join(root, BINDINGS_REL_PATH)
+  const file = readBindingsFile(path)
+  const marked: string[] = []
+  const at = Date.now()
+  for (const [id, raw] of Object.entries(file.sessions)) {
+    const rec = asBoundRecord(raw)
+    if (!rec || rec.dirName !== dirName) continue
+    if (keepIds.has(id) || rec.supersededAt !== undefined) continue
+    rec.supersededAt = at
+    file.sessions[id] = rec
+    marked.push(id)
+  }
+  if (marked.length === 0) return []
+  try {
+    writeBindingsFile(path, file)
+  } catch {
+    return [] // 写盘失败不阻断主流程（与 appendBound 同款"尽力而为"口径）
+  }
+  return marked.sort()
+}
+
+/**
+ * **(c) 绑定一致性兜底**（S142 §0y，所有者 2026-09-18 裁「c 也算个兜底」）：
+ * 删除指向**已不存在**的 dsh 会话的绑定记录。
+ *
+ * 为什么需要：`.bindings.json` **只增不清**，而 DSH 会话目录会被
+ * `session-cleanup`（本仓既有机制）物理删除 ⇒ 表里必然残留**悬空 id**。
+ * 悬空记录本身无害，但它会**污染反向索引**（`listBoundSessionIds` 是唤醒选人的唯一入口），
+ * 让"这条轨迹到底还有没有可用会话"变得不可判。
+ *
+ * 🔴 **安全性由调用方的判据负责**（本函数是纯函数，不认识文件系统）：
+ * `isMissing` 必须是 **fail-closed** 的（读不到 ⇒ 返回 false = "不当作缺失"），
+ * 见 `hasSessionLogById`。判据写错会**清掉整张表**，故此处刻意不提供默认实现。
+ *
+ * @param root CCC 根
+ * @param isMissing 判据：该会话 id 是否**确认**已不存在（false = 保留）
+ * @returns 被删除的会话 id（升序稳定；未删任何一条 → `[]`）
+ */
+export function pruneMissingBindings(
+  root: string,
+  isMissing: (sessionId: string) => boolean,
+): string[] {
+  const path = join(root, BINDINGS_REL_PATH)
+  const file = readBindingsFile(path)
+  const removed: string[] = []
+  for (const id of Object.keys(file.sessions)) {
+    let missing: boolean
+    try {
+      missing = isMissing(id)
+    } catch {
+      continue // 判据自身出错 ⇒ 保留（fail-closed）
+    }
+    if (!missing) continue
+    delete file.sessions[id]
+    removed.push(id)
+  }
+  if (removed.length === 0) return []
+  try {
+    writeBindingsFile(path, file)
+  } catch {
+    return []
+  }
+  return removed.sort()
 }
 
 /**
