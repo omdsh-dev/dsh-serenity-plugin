@@ -1,3 +1,76 @@
+## v1.39.3 — 2026-09-18（dsh 内存崩溃的 (b)(c) 两项机制 + 两处既有欠账收尾）
+
+**来源**：所有者 2026-09-18 令（S142 §0y，经 S185 / S172 转达）：
+> 「我重启了 dsh…核心是**旧会话累积的内容太多了导致 dsh 内存崩溃**，所以我需要开新的」
+
+**裁决原话**：「**a 没必要**，我更想解决的是上下文已经通过 rebuild 机制几乎无限续航了，
+最大的会话累计输入达到了 **2550m+**，但累计过大导致了新的风险，**b 很合理，这是个很好的保障措施，
+c 也算个兜底**。」⇒ **不上 (a)，做 (b) + (c)**。
+
+### ① (b) 同一 trajectory 多 live 会话 —— **机械守卫**
+
+背景（实测，非推断）：`.bindings.json` **只增不清** —— 本机实测 S142 名下挂 **4 代**、S185 挂 **2 代**
+（全部 `action: "rebuild"`）。而 `acquireWakeAgent` 的选人语义是
+「**遍历该轨迹的全部绑定 id，任一条 live 就用它**」⇒ 同一 trajectory 的**两条 live 会话都能被唤醒选中**：
+各自持一份完整上下文（**内存翻倍**），且**都在写同一批文件**（双写者）。
+
+| 改动 | 说明 |
+|---|---|
+| `SessionBoundRecord` + `supersededAt` | 新增"已被取代"标记 |
+| `listBoundSessionIds` **过滤**已取代项 | 被取代的绑定**不再进入唤醒候选** |
+| 新增 **`supersedeOtherBindings(root, dirName, keepIds)`** | 把同轨迹的**其它**绑定标记为已取代 |
+| 接线：`container_trajectory use` | 在 `appendBound` 之后调用；结果经 **`supersededBindings`** 如实回报 |
+
+🔴 **关键设计取舍（R↓）**：**保留记录、只切断候选** ——
+记录留着，所以"这条会话曾属于哪条轨迹"的**沿革不丢**（正向 `readLastBound(session)` 不受影响），
+被解绑的会话**仍可被人工使用**；变的只有"唤醒还会不会找到它"。
+
+### ② (c) 悬空绑定清理（**兜底**）
+
+| 改动 | 说明 |
+|---|---|
+| 新增 **`pruneMissingBindings(root, isMissing)`** | 删除指向**已不存在**的 dsh 会话的绑定记录（反向索引不被悬空 id 污染） |
+| 新增 `sessionLogBytesById` / `hasSessionLogById` | 会话日志体积 + 存在性判据 |
+| 接线：同上，经 **`prunedBindings`** 回报 | |
+
+🔴 **安全判据必须 fail-closed**：`hasSessionLogById` 在 **sessions root 本身不存在时一律返回 true（当作"在"）**——
+否则换 `DSH_HOME` / 换机器会让"全部绑定看起来都悬空"，进而**误清整张绑定表**。
+`pruneMissingBindings` 另外规定"**判据自身抛错 ⇒ 保留该条**"。
+
+### ③ 顺带（先于本轮，`372658e`）：启动窗口**不再伪造"失败的投递"**
+
+`restart-web` 后新进程的**首拍 tick** 早于宿主懒服务（`sessionController`）就绪 ⇒
+任何此刻到点的条目**必然**被判失败（现象 = 注册表里一堆 `attempts=1` + 误导性 `lastResult`；
+本机实测每次重启**必然复现**，是**假告警发生器**）。
+修法：`WakeDeliveryResult` 新增 **`notReady`**，该分支**不改条目任何字段**（state / attempts / lastResult 全不动），
+只记一行"下个 tick 再试；不计失败"；并把**猜错成因**的文案（`（headless profile？）`）改成说真话。
+⚠️ **零丢失**：真正超窗的条目仍由**时间**判据落 `missed`——与"试过几次"无关（已正控实测自愈）。
+
+### ④ 顺带（先于本轮，`84ec674`）：`send-now` 回执残留旧词
+
+回执文案仍写「已入队」——而 v1.39.2 起忙路径已是 `steer`（当场注入当前轮），该词已不成立 ⇒
+改为「**已注入 / 已起轮**」，与工具描述 / acc-session skill 模板 / README 对齐。
+
+### ⑤ 🔴 否决留痕：(a) 的候选「自动 rebuild」**经复核不成立**
+
+原方案 A2（超限即自动 `rebuild`，设想为"机械版的开新会话"）**动手前回源码复核，发现它做不成那件事**：
+`rebuild` 只做 **surface replace**（`session.append('compaction/prune')` + `session.append('user/message')`），
+**同一个 dsh 会话 id 与同一份日志文件都保留**（`src/rebuild.ts:313-314` 原注释即「同一 dsh 会话 id 日志保留」）。
+⇒ 它重置的是**模型上下文**，**不是会话日志**，对内存问题**零效果**。
+**故未实施，且今后不应再提 A2。**（所有者"a 没必要"与我方复核两条独立判断同向。）
+
+### 门禁（发布链实跑）
+
+| 项 | 结果 |
+|---|---|
+| `typecheck`（node + client） | ✓ |
+| `test` | **93 files / 1362 tests** ✓（较 1.39.2 **+15**：`trajectory-bound.test.ts` +8 含**接线钉**、`session-cleanup.test.ts` +7 含 fail-closed 断言） |
+| `coverage` | ✓（阈值门禁通过） |
+| `build` | ✓ |
+| `pack-check` | ✓（见发布记录） |
+
+---
+
 ## v1.39.2 — 2026-09-17（三条所有者令：`send-now` **不排队**即时注入 + 注入带**当地时间** + 全 ACC 时间统一**当地时区**）
 
 **来源**：所有者 2026-09-17 令（S142 §0r）：
