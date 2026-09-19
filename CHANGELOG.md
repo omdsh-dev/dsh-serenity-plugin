@@ -1,3 +1,99 @@
+## v1.41.0 — 2026-09-19（§0x-9：**DeepSeek 多模态临时补丁** —— 模型名含 deepseek 即补 `image` 声明）
+
+**来源**：owner 2026-09-19 令 ——
+「**临时的我允许，还是要 patch**，帮我做个逻辑，**如果发现任何 deepseek 模型，都直接 patch 支持多模态**；
+以后 dsh 做的更完善了我们这个功能再下掉，暂时的就 patch」（S142 §26 §0x-9e）。
+
+### 问题（这东西解决什么）
+
+DSH 里「某个模型能不能收图」**不是自动识别的**，而是靠**声明**。声明链
+（`dsh-llm-pi-ai/lib/index.js:682`）：
+
+```
+input: declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput]
+```
+
+- 少数模型在**内置目录**里声明了 `["text","image"]`（如 `deepseek-v4-flash-vision-exp`）⇒ 已能收图；
+- 🔴 而**不在目录里**的模型走最后一段兜底，`DEFAULT_INPUT = ["text"]`（`:906`）
+  ⇒ **明明支持图片的模型被当成"只能收文字"**（图片被丢/报错）。
+  **当前默认模型 `opencode-go-responses/deepseek-v4.1-flash` 正是这种**（§0x-7a 实测解析出 `["text"]`）。
+
+### 实现
+
+新增 `src/deepseek-vision-patch.ts`，**照 `src/opencode-provider.ts` 同款形态**
+（纯函数出计划 + `settings.update` 执行 + 永不抛错），三段：
+
+| 段 | 函数 | 职责 |
+|---|---|---|
+| 纯函数 | `planDeepseekVisionPatch({resolved, enabled})` | 出 `{patch, actions}`，**不读文件不碰 ctx** ⇒ 可穷举测试 |
+| 执行 | `applyDeepseekVisionPatchOnce(ctx, enabled)` | 走官方通道 `ctx.settings.update('llm-pi-ai', patch)`；**任何失败都不抛**（apply 抛错 = 整个 dsh 启动失败） |
+| 装配 | `registerDeepseekVisionPatch(ctx, enabled)` | ① apply 立即试 ② 命名空间竞态退避重试（1s~40s）③ `settings/updated` 热改自愈 |
+
+**判据（每条可机械执行）**：
+
+| # | 判据 | 取值 |
+|---|---|---|
+| J1 | **触发** | 模型 `id` 含 `deepseek`（**大小写不敏感**） |
+| J2 | **范围** | **所有 provider / 所有 route**（owner："任何 deepseek 模型"） |
+| J3 | **补什么** | `input` 补 `image`；**已含 ⇒ 跳过**（幂等） |
+| J4 | **不动什么** | 已显式声明且含 image 的 ⇒ 一字不改；**非 deepseek 模型 ⇒ 一字不改** |
+| J5 | **写哪** | `llm-pi-ai.providers.<route>.models[i].input` |
+
+### 🔴 两处关键实现约束（本版最易错处）
+
+1. **models 数组「读-改-整写」**：
+   宿主 `mergeLayers` 的语义是「**数组整体替换**」（`dsh-settings/lib/index.js:203-216` 逐字：
+   *"every other value (arrays included) replaces the lower layer wholesale"*）
+   ⇒ **只发"想改的那一个元素"会静默冲掉该 route 上其它所有模型**。
+   ⇒ 必须**读出现有 `models` 全量 → 内存里改目标元素 → 整个数组回写**（元素用 `{...原对象}` 保字段）。
+2. **绝不新建 `models`**：`models` 与 `modelOverrides` **互斥**（`dsh-llm-pi-ai:643`）
+   ⇒ 某 route 没有 `models` 时**直接跳过**，为它造一个会让该 route 当场校验失败。
+
+### 开关与撤除（**临时性 ⇒ 必须易撤**）
+
+- 开关 `config.visionPatch.enabled`（**缺省开**）；
+- 撤除三层：① 关开关（停止再补）② 删本文件 + `index.ts` 一行装配 ③ 手动清理已写入的值；
+- 🔴 **刻意不做"回滚已写入的值"**：我们写的是**事实**（"该模型支持图片"），不是**偏好**——
+  停掉插件后它依然是事实。做回滚需要一份"哪些是我们写的"的**写入台账**，
+  那是第二真相源，属本仓已多次识别过的"只增不清"病族，**不值得为它引入**。
+
+### 取证（**先探针后代码**）
+
+**V-1 探针** `tests/host/deepseek-vision-probe.test.ts`（真实 `dsh-settings` + 真实 cordis，同 §0L 手法）：
+
+| 点 | 判据 | 结果 |
+|---|---|---|
+| W-0 正控 | 注册命名空间 + `update` 普通对象 patch 能写成功 | ✅ |
+| **W-1 🔴 核心** | 发单元素 `models` 数组 ⇒ **原有模型全被冲掉**（2 → 1） | ✅ **实测证实数组整体替换** |
+| W-3 读-改-整写 | 整写 `models` 保住非目标模型 + `contextWindow` 等字段 | ✅ |
+
+⚠️ **诚实边界**：探针验的是 **`dsh-settings` 通道**，**不含 `llm-pi-ai` 自己的 `validate` /
+`assertServiceable`**（需装载真 pi-ai 包）⇒ **"通道通 ≠ 被 pi-ai 接受"**；
+该层由发布后的**真机实测验收**覆盖（判据 = 那个解析出 `["text"]` 的模型**真能收图**）。
+
+**探针自身两处缺陷（已记，方法论）**：
+① 脚手架三处（`register` 是三参 / `schema` 必须是函数 / `writable` 由子类定义）
+—— 均属「**先分诊脚手架失败还是被测对象失败**」的适用面；
+② 🔴 **时序**：W-3 首跑红，真因是 **W-1 已把 models 冲成残局**（状态污染），非方案缺陷
+⇒ **新判据：同探针内验"正确做法"前必须先重置初始态**（与"探针先做正控"同族）。
+
+### 边界（诚实标注，不可外推）
+
+🔴 **本版只作用于 `llm-pi-ai` 面**。`dsh-llm-deepseek` 有自己的 `DEFAULT_MODELS` +
+`inputModalities` 字段（`dsh-llm-deepseek/lib/index.js:1841-1884`），**是另一条声明链**。
+⇒ 若某 deepseek 模型仍收不了图，**第一步应判定它走哪条链**，而非断定本 patch 失效。
+
+### 验收
+
+- 新增镜像测试 `tests/deepseek-vision-patch.test.ts`（**38 用例**：穷举设计 §4.2 的 6 种 `input` 现状 /
+  数组整写不丢模型与字段 / 绝不新建 models / 幂等 / 执行层永不抛错 / 装配自愈与拆卸）；
+- `register.test.ts` 的 disposer 标签数 **3 → 4**（新增 `deepseek vision patch retry timer`，**有意登记**）；
+- 门禁：`typecheck` 双面 ✅ ｜ **97 files / 1445 tests** ✅（本轮 +2 files / +41 tests）
+  ｜ `coverage` ✅ ｜ `build` ✅ ｜ `pack-check` ✅（112 文件）；
+- 设计档：`docs/deepseek-multimodal-patch-design.md`（v1.0）。
+
+---
+
 ## v1.40.1 — 2026-09-19（§0L 迁移修正：**发布后实测**暴露的 cwd 缺陷）
 
 **来源**：v1.40.0 发布重启后的**实测验收**（S142）。
