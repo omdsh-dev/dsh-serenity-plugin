@@ -1,4 +1,197 @@
-# 三级层级的可行性调研：工作区 / **trajectory** / 会话 — v0.1
+# 三级层级的可行性调研：工作区 / **trajectory** / 会话 — v0.2
+
+> 立项：owner 2026-09-19 11:45 令（经 S172 转达）：「我们**通过 dsp 尝试扩展 dsh 会话机制**，从**工作区、会话两级**变更成**工作区、trajectory、会话三级**，这样很多问题就解决了。调研下这个方向的可行性。」
+> **v0.2 说明**：v0.1 的 §2「硬障碍」结论**被自己的取证推翻**（见 §2′）。推翻的证据来自**宿主源码本身**，
+> 而 v0.1 当时错误地以为"宿主源码读不到"。**按容器纪律，推翻先前的结论必须显式更正，不得静默改写。**
+> 状态：宿主侧取证**已完成**（直接读宿主 0.1.5-rc.2 编译产物，46 包解包副本）。
+
+---
+
+## 0. 结论（**已修正**）
+
+**方向可行，且比 v0.1 判断的乐观得多。**
+
+owner 的直觉是对的：**三级不是"要发明的层级"，而是"宿主已经预留了表达它的两种机制，只是没有把它组织成第三级"。**
+
+三条修正后的要点：
+1. 🟢 **可表达**：宿主**显式保留**了一条给下游插件写自定义记录的通道（`ignorable` 标记 + `SessionEventMap` 声明合并），
+   且**宿主自己写明"事件名注册被否决"**——用的是**标记**而不是注册。
+2. 🟢 **真正缺的不是通道，是"层级语义"**：宿主没有"注册一个新的分组层/顶层实体"的面（Q2 负面证据确凿）。
+   ⇒ **三级要做的不是"加一种事件"，而是"让第二种分组关系被宿主认知"**。
+3. 🔴 **真正的墙在 header，不在事件日志**：`SessionHeader` 的持久化校验是 **fail-closed 于未知键**
+   （连未知字段都拒绝）⇒ **"会话属于哪条轨迹"无法作为 header 字段落盘**。这是本方向**唯一确凿的硬约束**。
+
+---
+
+## 2′. 🔴 **更正 v0.1 的错误结论**（必须显式留下）
+
+**v0.1 写的**（错）：「插件无法把任何自己的概念写进宿主的会话模型……**硬障碍**」。
+**错在哪**：我把"**读侧拒绝未知事件**"当成了终点，**没有读宿主对这条设计的完整说明**。
+**宿主自己的原文**（`dsh-session/lib/types/known-event-types.d.ts:7-20`，**我已亲自逐字复核**）：
+
+> "Downstream (out-of-repo) plugin events are outside this list by construction.
+> **The persisted `SessionEvent.ignorable` marker is the compatibility mechanism; event-name registration was rejected**
+> because it does not classify omission safety and would make reads composition-dependent."
+
+⇒ 🔴 **这是有意的设计，不是遗漏**：宿主**故意拒绝"事件名注册"**（理由：注册只解决了"叫什么"，
+没解决"丢了安不安全"，且会让读取行为依赖于装载了哪些插件），**改用「写入者自报安全标记」**。
+
+**对 v0.1 那条"硬障碍"的准确重述**：
+- ❌ 不是："插件不能写自定义事件"（**能写**，且是**契约内的机制**）；
+- ✅ 而是："插件**必须自己声明**该事件是 `ignorable`（可安全跳过），**否则**读侧会拒绝整个会话"。
+- **本容器 v1.29.1 撞墙的真实原因**：写 `serenity/bound` 时**没有带 `ignorable`** ⇒ 读侧拒绝。
+  **而当时的代码根本表达不了它**——因为 `Session.append` 的信封只有 `{type,seq,time,data,surfaceOp?,sourceEventSeqs?}`。
+  ⇒ **真正的障碍是"写入通道的表达力"，不是"词表封闭"。**
+
+---
+
+## 2″. 全量取证结果（**直接读宿主源码**，非镜像声明）
+
+**取证通道（本身是重要发现）**：宿主源码确实在 CCC 根之外、沙箱读不到，
+**但仓库内有一份 46 包的宿主解包副本**：`AI_LAB/dsh-serenity-plugin/_tmp/host-0.1.5-rc.2/@deepseek-ai/`
+（`dsh-develop host-fetch` 产出，插件 `tsconfig.host-0.1.5-rc.2.local.json` 的 paths 指向它）。
+⚠️ 是**子集**（46/~150）；`dsh-storage-domain`、`dsh-api-workspace-controller` **未解包**（见 §7 缺口）。
+
+### 层级与关系（Q1/Q4）
+
+| 结论 | 证据 |
+|---|---|
+| 两级各由一个包定义：`dsh-session`（会话）+ `dsh-workspace`（工作区） | — |
+| 🔴 **会话→工作区的关系不是字段，而是"派生相等"**：工作区持有 `sessionIds` 数组，成员资格 = **id 在数组中 ∧ 会话 `header.cwd` == 工作区 `path`** | `dsh-workspace/lib/types/types.d.ts:22-27` 原文；运行时强制 `dsh-workspace/lib/index.js:114-122`（cwd 缺失/不解析/非目录/不相等 四种拒绝） |
+| `SessionHeader` 共 8 字段：`version / id / createdAt / cwd? / parentSession? / isSeeded / origin? / delegationDepth? / agentPreset?`；**全文件无 workspace 字样** | `dsh-session/lib/types/types.d.ts:58-95` |
+| **不可跨工作区移动**（成员资格由不可变 `header.cwd` 决定；`attachSession` 不等即 throw） | `dsh-workspace/lib/index.js:122` |
+
+### 扩展缝（Q2）——**负面结论确凿**
+
+- 有**类型级 merge**（编译期，不形成宿主认知的层级）：`SessionProjectionMap`（`dsh-session-projection/.../types.d.ts:16-24`）、`SessionEventMap`（`dsh-session/.../types.d.ts:242`）。
+- 有一处**能到 UI 的运行注册表**：`register<K extends keyof SessionProjectionMap>`——**但 K 被约束为会话级表的键** ⇒ 它加的是"某个 session 的属性"，**不是分组层**。
+- 🔴 **否决性检索**（负面证据的来源）：`registerGrouping|registerTier|registerEntity|registerKind|GroupingId|TierId` → **0 命中**；
+  169 处 `kind:` **全为闭合字面量联合**；工作区域是**硬编码单例**（`dsh-workspace/.../spec.js:54-61` 的 `defineDomain`）。
+- ⇒ **没有"注册一个新的层级/顶层实体"的面。**
+
+### 会话 id 不变量（Q3）
+
+- 生成：`session-<randomUUID>`（`dsh-api-session-controller/.../commands.js:92`）；**宿主不做任何 id 格式解析**（全包 grep 0 条假设）；
+  类型是 `SessionId = Branded<'SessionId'>`（**纯品牌字符串，无正则**）。
+- 真实约束：id 被当**路径段**编码（`encodeSegment` 转义 `[A-Za-z0-9._-]` 之外的字符，含 `/ ~ .`）⇒ 不会逃逸。
+- 🔴 **插入父级会被挡在**：**header 的 fail-closed 白名单**（`HEADER_REQUIRED_KEYS`(6) + `HEADER_OPTIONAL_KEYS`(4)`，
+  `dsh-session-persistence-jsonl/lib/index.js:776-790,839` 断言"每个键都必须在白名单里"）；
+  `parentSession` **已被占用**（语义 = fork 血统）；`origin` 是**闭合字面量** `'subagent'`。
+
+### 持久化面（Q6，**最关键**）
+
+| | 结论 |
+|---|---|
+| `sessionPersistence` 接口 | `create` / `open` / `flush` / `stat` / `list`（`dsh-session-persistence/lib/types/index.d.ts:99-156`） |
+| 🔴 **header 放任意元数据** | **不可行**——持久化层枚举白名单 + **拒绝未知键**（fail-closed） |
+| 🟢 **事件日志放自定义记录** | **可行，且是宿主明示的插件通道**：`ignorable?: true` 信封标记（`types.d.ts:468-478`：*"Absent means required: a reader meeting an unrecognized type without this marker MUST refuse to reconstruct"*） |
+| **扩展手法（仓库内先例，插件可照抄）** | `declare module '@deepseek-ai/dsh-session/types' { interface SessionEventMap { … } }`——**已被 8 个包使用**（如 `dsh-session-title` 注册 `'session/title'`，注释 *"Log-only: it never enters the model surface"*；`dsh-compaction` 注册 `'compaction/*'`） |
+| **本容器已在用** | `compaction/prune`（shadow-price 协议）在 `KNOWN_SESSION_EVENT_TYPES` 内，且 `host/type-contract.ts:163-167` 有编译期断言 |
+
+⇒ **可行上限（事实陈述）**：
+- **可表达**：无限条、无损 JSON、可标 `ignorable`、随会话落盘、可经投影注册表送到 UI 的**自定义记录**；
+- **不可表达**：**header 级元数据**（fail-closed）、**新的分组层级**（无注册面）、**新的顶层实体**（存储 schema 固定）。
+
+---
+
+## 3. 🔴 那么"三级"到底卡在哪（**修正后的真问题**）
+
+把 Q2 与 Q6 合起来看，**真正的缺口只有一处**：
+
+> **宿主允许"往会话里加记录"，但（a）不允许"把关系写进会话的 header"，（b）不允许"注册一个新的分组层"。**
+> ⇒ **三级不能靠"加字段"或"加类型"实现；只能靠"把轨迹表达成宿主已经认识的东西"。**
+
+**这就把问题从"能不能扩展宿主"变成了**：
+> **轨迹能不能被映射到宿主已有的两种机制之一**——
+> ① **事件日志**（记录型：可记"这条会话属于轨迹 X"，但**读取方必须知道去哪读**）？还是
+> ② **既有层级字段**（`parentSession` / `delegationDepth`：**宿主认识**，但**语义已被 fork/委派占用**）？
+
+**这个映射才是本方向的真正设计题**（v0.1 完全没看到这一层）。三条可能的映射形态**待设计层展开**，
+但**必须先由 owner 定 §4 的门**（D4），因为不同门后的可行解不同。
+
+---
+
+## 4. 三条路线（**代价，已按新证据修正**）
+
+| 路线 | 形态 | 与 D4 | 新证据下的判断 |
+|---|---|---|---|
+| **L1 · 宿主原生三级** | 宿主把 trajectory 做成一等实体 | ❌ 破 D4 | 需要**上游接受**（插件无注册面）——**本地做不到**，除非自己 fork 宿主；升级耦合 |
+| **L2 · 插件层"半三级"** | ACC 自建 registry + **把轨迹关系写进会话日志（`ignorable` 事件）** | ✅ 守住 D4 | 🟢 **比 v0.1 判断的强得多**：日志通道是**契约内的**，宿主侧**能看见**这条记录（不再是"完全看不见"）；但宿主 UI/清理**仍不按轨迹分组**（无注册面） |
+| **L3 · 中间态（仍倾向）** | 先做 L2，同时向上游提"三级"最小诉求 | ✅ | 同上；且 L2 现在**有了宿主认可的载体**（`ignorable` 事件），不再是"纯自娱自乐" |
+
+**判据（同 v0.1）**：宿主侧的三个盲区（列表 / 清理 / UI）发生频率有多高？
+高频 ⇒ 值得 push L1；低频 ⇒ L3。
+
+---
+
+## 5. 逐条核：owner 说"很多问题就解决了"（**须逐条验，不顺着说**）
+
+| 原问题 | L1（宿主原生） | **L2（插件半三级，已修正）** |
+|---|---|---|
+| 词汇把主语指错 | ✅ | ✅ |
+| `.bindings.json` 键错位 | ✅ | ✅ **可解**（关系可进日志/registry，且宿主认识 `ignorable` 事件） |
+| `pendingRebuilds` 载体键+仅内存 | ✅ | 🟡 半解（需自建持久化，但有了正确层级） |
+| `compactionStates` 键≠主语 | ✅ | ✅ |
+| keeper 两表无清理 | ✅ | 🟡 半解（需自建 disposal） |
+| `wake-registry` 只增 | 🟡 | 🟡 **与本提议无直接关系** |
+| 载体不可退役 | ✅ | ✅ **可解**（会话是轨迹下级 ⇒ `rotate` 自然） |
+| §0b 洞察三（宿主共享盲区） | ✅ | 🔴 **仍不解**（宿主 UI/清理不按轨迹分组——**无注册面**） |
+| §0b 洞察二（载体无法自证更替） | ✅ | 🟡 部分（轨迹关系落在日志里后，更替可由读取方确认） |
+
+🔴 **诚实结论（修正）**：**L2 比 v0.1 说的强**——它现在能解 ACC 侧几乎全部，
+**并且关系有宿主认可的落点**；**唯一仍解不了的是"宿主自己的 UI/清理按轨迹分组"**（因为宿主没有分组注册面）。
+⇒ **"要真解"仍须 L1；但 L2 已不是权宜之计，而是一条有宿主背书的正路。**
+
+---
+
+## 6. 待裁（**owner**）
+
+1. **D4 这道门**：破不破"零改 DSH harness"？（不破 ⇒ L2/L3；破 ⇒ 须自 fork 或上游接受）
+2. 若走 **L2/L3**：接受"宿主 UI/清理短期内仍按会话分组"吗？
+3. 若走 **L1**：自用改宿主，还是**向上游提需求**（我们只是下游插件）？
+
+## 7. 取证缺口（**已补关键一项**）
+
+1. ✅ **`dsh-storage-domain` 已补齐**（我本轮直接 `dsh-develop host-fetch 0.1.5-rc.2 @deepseek-ai/dsh-storage-domain` 拉到并读过）——
+   **结论：它没有翻盘，但给出了本方向最重要的一个新事实**（见下）。
+2. `dsh-api-workspace-controller` 未解包（client 侧 workspace API）。
+3. **无运行态实测**（safe mode 禁 bash）——全部为**静态代码证据**（读的是随包发布的编译产物）。
+4. 宿主设计正本 `.agents/notes/…2026-08-30-retain-ignorable…md` **未随包发布**（仅见注释引用）。
+5. 副本是子集（46/~150 ⇒ 现 47）：`dsh-session-query-sqlite` / `projection-cache` / `checkpoint-policy` 等未在内。
+6. `dsh-client-ui-slots` 完整插槽目录未穷尽。
+
+### 7.1 🔴 补齐后的关键发现：**插件可以自建"存储域"——但存储域 ≠ 层级**
+
+**事实（`dsh-storage-domain/lib/types/index.d.ts`，已读）**：
+- `ctx.storageDomain`（`DomainFacility`）**是公开面**：`open(spec)` / `get(name)` / `closeAll()`；
+  导出 `defineDomain` / `domainTable` / `descriptorOf`（`index.d.ts:16`）。
+- ⇒ **任何插件都能 `defineDomain` 自己的持久化域**（带 zod schema、版本、表）——**这是宿主明示的扩展面**。
+- 先例：工作区自己就是这么做的（`dsh-workspace/lib/types/spec.d.ts:53-79`，`defineDomain({name:'workspace', version:2, tables:{workspaces: domainTable(...)}})`）。
+
+**⇒ 对"三级"的准确意义（重要，且**不**翻盘 Q2）**：
+
+| 能做 | 不能做 |
+|---|---|
+| 插件可以**自建一张表**，以轨迹为键存 `{轨迹 → 载体列表}`——**持久、有 schema、有版本、跨会话存活** | 🔴 **这仍然不是"层级"**：宿主**不认知**它。宿主的会话树（`deriveGroups`）、清理、`workspace.sessionIds` 都**不会**因为这个域的存在而改变 |
+| 它能替代本容器现在的 `.bindings.json`，**并把它升级为宿主生态内的正规存储**（带 schema 校验、版本迁移、backend 路由） | 它**不能**让宿主 UI 把会话按轨迹分组，也**不能**让"会话属于哪条轨迹"成为宿主可查询的关系 |
+
+⇒ 🔴 **这正好精确划定了 L2 的能力边界**：
+> **L2 能做到"宿主生态内、有 schema 与版本的自建台账"（比 v0.1 判断的强），但做不到"宿主承认的层级"（与 Q2 一致）。**
+> **"三级"的第二种分组关系，只有 L1 能真正提供。**
+
+**顺带（与本令无关但值得记）**：`defineDomain` 是本容器**尚未使用**的宿主扩展面——
+它是 `.bindings.json` / `wake-registry.json` 这类自建台账的**更正规替代**（有 zod 校验、版本、`per-record` 布局、`backup-and-skip` 策略）。
+**建议登记为独立改进项**（不属本轮 §0C 结论，但成本低、收益明确）。
+
+---
+
+## 附：本档的边界与自我批评
+
+- 🔴 **v0.1 的错误已显式更正（§2′）**：把"读侧拒绝未知事件"当成硬障碍，**没读宿主对这条设计的完整说明**。
+  真正的原因是"**写入通道表达不了 `ignorable`**"——**结论方向反了**（不是"不能写"，是"写完要标安全"）。
+- **本档未改任何代码**。
+- §5 **刻意不顺着 owner 的话说**：L1 与 L2 的差别必须摊开（**现在 L2 的评价由 v0.1 的"权宜"上调为"有宿主背书的正路"**，但那一条仍解不了）。
+- 证据链在 SESSION.md §0C；本档不复制（单一真相源）。
 
 > 立项：owner 2026-09-19 11:45 令（经 S172 转达）：「我们**通过 dsp 尝试扩展 dsh 的会话机制**，从**工作区、会话两级**变更成**工作区、trajectory、会话三级**，这样很多问题就解决了。调研下这个方向的可行性。」
 > 前置：§0B（深层洞察 v0.2）——其中 §8 提出"轨迹**该不该**成为实体"的取舍，**本令正是它的第三种答案**。
