@@ -27,6 +27,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { cccRootForCwd } from './ccc-roots.js'
+import { type BindingStore, type BindingRecord } from './host/storage-domain.js'
 import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './trajectory-ops.js'
 
 type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
@@ -58,6 +59,85 @@ const SESSION_BOUND_EVENT = 'serenity/bound' as const
 export const BINDINGS_REL_PATH = 'AGENT_SESSIONS/.bindings.json'
 
 const BINDINGS_VERSION = 1
+
+// ── §0L（S142 2026-09-19）：宿主存储域作为**权威载体**，旧文件作**兜底** ──────────────
+//
+// 为什么是"域优先、文件兜底"而不是"二选一"（R↓，owner 硬约束「向前兼容」）：
+//  · **域不可用**（宿主未装载 storage-domain / 老宿主 / open 失败）⇒ 必须仍能工作
+//    ⇒ **读回落到旧文件**，行为与升级前**完全一致**（零回归）；
+//  · **域可用** ⇒ 以域为准（这是 owner 要的"放对地方"），同时**继续写旧文件**
+//    （迁移期双写：万一域出问题，旧表仍是完整的可用副本）。
+//
+// 句柄是**模块级**的：由 `index.ts` 装载期 `setBindingStore(await openBindingDomain(ctx))` 注入。
+// 为什么模块级而不是逐调用点传 ctx：`readLastBound(session)` 等 **10 个调用点全是同步签名**
+// 且多数拿不到插件 ctx（如 system-prompt 的每轮求值、keeper）——句柄驻留模块级
+// 是"签名不变"这一硬要求的唯一实现方式（域读是同步的，见 host/storage-domain.ts）。
+
+let domainStore: BindingStore | null = null
+
+/**
+ * 注入域句柄（装载期调用一次）。传 `null` = 域不可用 ⇒ 全部退回旧文件行为。
+ * 幂等：重复调用以后者为准（HMR / 重载场景）。
+ */
+export function setBindingStore(store: BindingStore | null): void {
+  domainStore = store
+}
+
+/** 当前域句柄（诊断用；`null` = 未接线/不可用） */
+export function getBindingStore(): BindingStore | null {
+  return domainStore
+}
+
+/** 域记录 → 本模块记录形状（同名字段，无需映射表；见 host/storage-domain.ts 头注） */
+function fromDomainRecord(rec: BindingRecord): SessionBoundRecord {
+  return {
+    dirName: rec.dirName,
+    mdPath: rec.mdPath,
+    ...(rec.sessionId ? { sessionId: rec.sessionId } : {}),
+    action: (rec.action ?? 'activate') as SessionBoundAction,
+    at: typeof rec.at === 'number' ? rec.at : 0,
+    ...(rec.note ? { note: rec.note } : {}),
+    ...(rec.supersededAt !== undefined ? { supersededAt: rec.supersededAt } : {}),
+  }
+}
+
+/** 本模块记录 → 域记录形状 */
+function toDomainRecord(rec: SessionBoundRecord): BindingRecord {
+  return {
+    dirName: rec.dirName,
+    mdPath: rec.mdPath,
+    ...(rec.sessionId ? { sessionId: rec.sessionId } : {}),
+    action: rec.action,
+    at: rec.at,
+    ...(rec.note ? { note: rec.note } : {}),
+    ...(rec.supersededAt !== undefined ? { supersededAt: rec.supersededAt } : {}),
+  }
+}
+
+/**
+ * 域内读一条（同步）。域不可用 → `undefined`（调用方据此回落文件）。
+ * @param sessionId dsh 会话 id
+ */
+function readFromDomain(sessionId: string): SessionBoundRecord | undefined {
+  if (!domainStore?.available) return undefined
+  const rec = domainStore.get(sessionId)
+  return rec ? fromDomainRecord(rec) : undefined
+}
+
+/**
+ * 域内取**某轨迹的全部绑定**（同步；已排除 superseded —— 与 `listBoundSessionIds` 同判据）。
+ * 域不可用 → `null`（**注意与"空结果"区分**：null = 回落文件，[] = 域里确实没有）。
+ */
+function listFromDomain(dirName: string): Array<{ id: string; rec: SessionBoundRecord }> | null {
+  if (!domainStore?.available) return null
+  const out: Array<{ id: string; rec: SessionBoundRecord }> = []
+  for (const [id, raw] of domainStore.entries()) {
+    const rec = fromDomainRecord(raw)
+    if (rec.dirName !== dirName) continue
+    out.push({ id, rec })
+  }
+  return out
+}
 
 interface BindingsFile {
   version: number
@@ -120,16 +200,28 @@ function readLegacyBoundFromEvents(session: unknown): SessionBoundRecord | null 
 }
 
 /**
- * 读取会话当前绑定（权威，latest-wins）：文件记录优先，无则回落旧事件形态。
+ * 读取会话当前绑定（权威，latest-wins）。
+ *
+ * 读取顺序（§0L，S142 2026-09-19）：
+ *  1. **宿主存储域**（域可用时的权威来源）；
+ *  2. **旧文件** `.bindings.json`（域不可用 ⇒ 零回归回落；域可用但该会话未迁移 ⇒ 兜底）；
+ *  3. **旧事件形态** `serenity/bound`（v1.30.5 及更早的存量）。
  * 无绑定返回 null。
  */
 export function readLastBound(session: unknown): SessionBoundRecord | null {
-  const path = bindingsPathFor(session)
   const id = sessionHeader(session)?.id
+  // ① 域优先
+  if (typeof id === 'string') {
+    const fromDomain = readFromDomain(id)
+    if (fromDomain) return fromDomain
+  }
+  // ② 旧文件兜底
+  const path = bindingsPathFor(session)
   if (path && typeof id === 'string') {
     const rec = asBoundRecord(readBindingsFile(path).sessions[id])
     if (rec) return rec
   }
+  // ③ 旧事件形态
   return readLegacyBoundFromEvents(session)
 }
 
@@ -181,13 +273,27 @@ export function resolveSessionTrajectoryLabel(session: unknown, scope: string): 
  * @returns 会话 id 列表（最新绑定在前）；无绑定 → `[]`
  */
 export function listBoundSessionIds(root: string, dirName: string): string[] {
-  const file = readBindingsFile(join(root, BINDINGS_REL_PATH))
   const hits: Array<{ id: string; at: number }> = []
+
+  // §0L：域优先。注意 `listFromDomain` 返回 `null` = **域不可用**（回落文件），
+  // 返回 `[]` = 域可用但该轨迹无绑定 —— 两者语义不同，不可混用。
+  const fromDomain = listFromDomain(dirName)
+  if (fromDomain !== null) {
+    for (const { id, rec } of fromDomain) {
+      if (rec.supersededAt !== undefined) continue
+      hits.push({ id, at: typeof rec.at === 'number' ? rec.at : 0 })
+    }
+    // 域可用但该轨迹无记录 ⇒ 仍回落文件（迁移期：域尚未灌入该轨迹的历史绑定）
+    if (hits.length > 0) return hits.sort((a, b) => b.at - a.at).map((h) => h.id)
+  }
+
+  const file = readBindingsFile(join(root, BINDINGS_REL_PATH))
   for (const [id, raw] of Object.entries(file.sessions)) {
     const rec = asBoundRecord(raw)
     if (!rec || rec.dirName !== dirName) continue
     // (b) 守卫：已被取代的绑定**不再作为唤醒候选**（记录仍在 → 沿革与正向查询不受影响）
     if (rec.supersededAt !== undefined) continue
+    if (hits.some((h) => h.id === id)) continue // 域已给出的不重复
     hits.push({ id, at: typeof rec.at === 'number' ? rec.at : 0 })
   }
   return hits.sort((a, b) => b.at - a.at).map((h) => h.id)
@@ -217,6 +323,17 @@ export function supersedeOtherBindings(
   const file = readBindingsFile(path)
   const marked: string[] = []
   const at = Date.now()
+
+  // §0L：域侧标记（异步 fire-and-forget；失败只影响域，旧文件仍同步更新）
+  if (domainStore?.available) {
+    for (const [id, raw] of domainStore.entries()) {
+      const rec = fromDomainRecord(raw)
+      if (rec.dirName !== dirName) continue
+      if (keepIds.has(id) || rec.supersededAt !== undefined) continue
+      void domainStore.put(id, toDomainRecord({ ...rec, supersededAt: at })).catch(() => {})
+    }
+  }
+
   for (const [id, raw] of Object.entries(file.sessions)) {
     const rec = asBoundRecord(raw)
     if (!rec || rec.dirName !== dirName) continue
@@ -258,6 +375,21 @@ export function pruneMissingBindings(
   const path = join(root, BINDINGS_REL_PATH)
   const file = readBindingsFile(path)
   const removed: string[] = []
+
+  // §0L：域侧删除（异步；与文件侧同一判据 `isMissing`——判据抛错则保留，fail-closed）
+  if (domainStore?.available) {
+    for (const [id] of domainStore.entries()) {
+      let missingDomain: boolean
+      try {
+        missingDomain = isMissing(id)
+      } catch {
+        continue
+      }
+      if (!missingDomain) continue
+      void domainStore.delete(id).catch(() => {})
+    }
+  }
+
   for (const id of Object.keys(file.sessions)) {
     let missing: boolean
     try {
@@ -293,21 +425,34 @@ export function appendBound(
 ): boolean {
   const path = bindingsPathFor(session)
   const id = sessionHeader(session)?.id
-  if (!path || typeof id !== 'string') return false
+  if (typeof id !== 'string') return false
+  const record: SessionBoundRecord = {
+    dirName: rec.dirName,
+    mdPath: rec.mdPath,
+    ...(rec.sessionId ? { sessionId: rec.sessionId } : {}),
+    action,
+    at: Date.now(),
+    ...(rec.note ? { note: rec.note } : {}),
+  }
+
+  // §0L 双写：域（权威，异步落盘 fire-and-forget）+ 旧文件（兜底，同步）。
+  // 为什么域写**不 await**：本函数是同步签名（10 个调用点依赖），且绑定的可靠性由
+  // "旧文件同步写成功" 保底——域写失败只损失"新载体"，不损失绑定本身。
+  if (domainStore?.available) {
+    void domainStore.put(id, toDomainRecord(record)).catch(() => {
+      /* 域写失败静默：旧文件已写，绑定不丢 */
+    })
+  }
+
+  // 旧文件兜底写（**永久保留**：owner「向前兼容」的第二道保险）
+  if (!path) return domainStore?.available === true
   try {
     const file = readBindingsFile(path)
-    file.sessions[id] = {
-      dirName: rec.dirName,
-      mdPath: rec.mdPath,
-      ...(rec.sessionId ? { sessionId: rec.sessionId } : {}),
-      action,
-      at: Date.now(),
-      ...(rec.note ? { note: rec.note } : {}),
-    }
+    file.sessions[id] = record
     writeBindingsFile(path, file)
     return true
   } catch {
     /* 写盘失败（权限/磁盘）不阻断主流程——绑定持久化尽力而为 */
-    return false
+    return domainStore?.available === true
   }
 }

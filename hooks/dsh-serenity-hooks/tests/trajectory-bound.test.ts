@@ -11,7 +11,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionTrajectoryLabel, supersedeOtherBindings } from '../src/trajectory-bound.js'
+import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionTrajectoryLabel, supersedeOtherBindings, setBindingStore } from '../src/trajectory-bound.js'
+import { bindingStore } from '../src/host/storage-domain.js'
 import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory-ops.js'
 
 let ccc: string
@@ -21,10 +22,12 @@ beforeEach(() => {
   writeFileSync(join(ccc, '.serenity'), '')
   mkdirSync(join(ccc, 'AGENT_SESSIONS'), { recursive: true })
   resetActiveSessionStore() // 内存激活表按用例隔离（进程级单例，否则跨用例串味）
+  setBindingStore(null) // §0L：域句柄是模块级单例 ⇒ 每例复位，避免跨用例串味
 })
 
 afterEach(() => {
   rmSync(ccc, { recursive: true, force: true })
+  setBindingStore(null)
 })
 
 /** 最小可测 dsh 会话：header（id + cwd 定位 CCC）+ snapshotEvents（旧事件回落用） */
@@ -302,5 +305,106 @@ describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理',
     expect(useCase).toContain('hasSessionLogById(') // (c) 判据必须 fail-closed 的那个函数
     expect(useCase).toContain("out.supersededBindings = ") // 结果要报出去（否则用户不知道发生了什么）
     expect(useCase).toContain("out.prunedBindings = ")
+  })
+})
+
+/**
+ * §0L（S142 2026-09-19）：宿主存储域作为**权威载体**，旧文件作**兜底**。
+ *
+ * 这组用例钉住 owner 的硬约束「**向前兼容**」：
+ *  · 域可用 ⇒ 域优先（新载体生效，owner 要的"放对地方"）；
+ *  · 域不可用 ⇒ **行为与升级前完全一致**（零回归——上面 27 条既有用例即此证明）；
+ *  · 迁移期 ⇒ 域里没有的条目仍能从旧文件读到（不丢绑定）。
+ *
+ * 域用**替身**注入（`bindingStore(fakeDomain)`）——真实域的行为已由
+ * `tests/host/storage-domain-module.test.ts` 与 `tests/host/storage-domain.test.ts` 钉住。
+ */
+describe('trajectory-bound: §0L 域优先 / 文件兜底 / 双写', () => {
+  const DIR = '2026-09-05--S142--dsp'
+
+  /** 造一个可读写的假域（形状 = BindingStore 期望的 DomainLike 结构子集） */
+  function fakeDomain(initial: Record<string, unknown> = {}) {
+    const records: Record<string, unknown> = { ...initial }
+    return {
+      records,
+      domain: {
+        table: () => ({
+          get: (k: string) => records[k],
+          entries: () => Object.entries(records)[Symbol.iterator](),
+          size: Object.keys(records).length,
+          put: async (k: string, v: unknown) => { records[k] = v },
+          delete: async (k: string) => delete records[k],
+        }),
+      },
+    }
+  }
+
+  it('🔴 域可用 ⇒ **域优先**（域与文件冲突时以域为准）', () => {
+    const s = makeSession('sess-1')
+    appendBound(s, 'activate', { dirName: 'file-wins-before-0L', mdPath: '/r/F/SESSION.md' })
+    const { domain } = fakeDomain({
+      'sess-1': { dirName: DIR, mdPath: '/r/D/SESSION.md', action: 'activate', at: 9 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    expect(readLastBound(s)?.dirName).toBe(DIR) // 域覆盖了文件里的旧值
+  })
+
+  it('🔴 域不可用 ⇒ 回落旧文件（**零回归**：与升级前逐字一致）', () => {
+    const s = makeSession('sess-1')
+    appendBound(s, 'activate', { dirName: DIR, mdPath: '/r/F/SESSION.md' })
+    setBindingStore(null)
+    expect(readLastBound(s)?.dirName).toBe(DIR)
+  })
+
+  it('🔴 迁移期：域里没有该会话 ⇒ 仍从旧文件兜底读到（不丢绑定）', () => {
+    const s = makeSession('sess-legacy')
+    appendBound(s, 'activate', { dirName: DIR, mdPath: '/r/L/SESSION.md' })
+    const { domain } = fakeDomain({}) // 空域 = 尚未迁移
+    setBindingStore(bindingStore(domain as never))
+    expect(readLastBound(s)?.dirName).toBe(DIR)
+  })
+
+  it('🔴 双写：appendBound 同时写域与旧文件（迁移期两道保险）', async () => {
+    const { domain, records } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    const s = makeSession('sess-w')
+    appendBound(s, 'activate', { dirName: DIR, mdPath: '/r/W/SESSION.md' })
+
+    // 旧文件已同步写入
+    const file = JSON.parse(readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8')) as {
+      sessions: Record<string, { dirName?: string }>
+    }
+    expect(file.sessions['sess-w']?.dirName).toBe(DIR)
+
+    // 域写是异步 fire-and-forget ⇒ 让微任务队列跑完再断言
+    await Promise.resolve()
+    expect((records['sess-w'] as { dirName?: string })?.dirName).toBe(DIR)
+  })
+
+  it('listBoundSessionIds：域优先，且排除 superseded（与文件侧同判据）', () => {
+    const s1 = makeSession('d1')
+    const s2 = makeSession('d2')
+    appendBound(s1, 'activate', { dirName: DIR, mdPath: '/r/1/SESSION.md' })
+    appendBound(s2, 'activate', { dirName: DIR, mdPath: '/r/2/SESSION.md' })
+    const { domain } = fakeDomain({
+      d1: { dirName: DIR, mdPath: '/r/1/SESSION.md', action: 'activate', at: 10 },
+      d2: { dirName: DIR, mdPath: '/r/2/SESSION.md', action: 'activate', at: 20, supersededAt: 99 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    expect(listBoundSessionIds(ccc, DIR)).toEqual(['d1']) // d2 已被取代 ⇒ 退出候选
+  })
+
+  it('supersedeOtherBindings：域可用时**域侧也标记**（不只改文件）', async () => {
+    const { domain, records } = fakeDomain({
+      keep: { dirName: DIR, mdPath: '/r/K/SESSION.md', action: 'activate', at: 1 },
+      other: { dirName: DIR, mdPath: '/r/O/SESSION.md', action: 'activate', at: 2 },
+      alien: { dirName: '2026-01-01--S001--x', mdPath: '/r/X/SESSION.md', action: 'activate', at: 3 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    supersedeOtherBindings(ccc, DIR, new Set(['keep']))
+    await Promise.resolve()
+    expect((records.other as { supersededAt?: number }).supersededAt).toBeTypeOf('number')
+    expect((records.keep as { supersededAt?: number }).supersededAt).toBeUndefined()
+    expect((records.alien as { supersededAt?: number }).supersededAt).toBeUndefined() // 不碰别的轨迹
   })
 })
