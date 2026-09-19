@@ -55,6 +55,7 @@ import { registerWeixinOutputGuard } from './weixin-output-guard.js'
 import { registerLifecycle } from './seams/lifecycle.js'
 import { registerWebFetchProvider } from './web-fetch-provider.js'
 import { registerOpencodeAutoConfig } from './opencode-provider.js'
+import { registerDeepseekVisionPatch } from './deepseek-vision-patch.js'
 import { registerImChannel } from './im-bridge.js'
 import { weixinChannel } from './im-weixin.js'
 import { createImBridgeTool } from './tools/im-bridge.js'
@@ -110,6 +111,14 @@ export interface Config {
    * 缺省开（`!== false` 判定）；关闭后一切回到"用户手抄"。
    */
   opencodeProvider?: { autoConfigure?: boolean }
+  /**
+   * v1.40.x DeepSeek 多模态临时补丁（plugin 全局；S142 owner 2026-09-19 令）：
+   * 给 id 含 `deepseek` 的模型补 `input: [...,"image"]`——因为 DSH 里"模型能否收图"靠**声明**，
+   * 而**不在内置目录里**的模型走 `DEFAULT_INPUT = ["text"]` 兜底 ⇒ 明明支持图片却被当成只能收文字。
+   * 缺省开（`!== false` 判定）。🔴 **临时功能**：owner「以后 dsh 做得更完善了我们这个功能再下掉」
+   * ⇒ 关闭 = 停止再补；**不回滚已写入的值**（写的是"该模型支持图片"这个**事实**，不是偏好）。
+   */
+  visionPatch?: { enabled?: boolean }
 }
 
 export const Config: z<Config> = z.object({
@@ -131,6 +140,7 @@ export const Config: z<Config> = z.object({
   acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT) }),
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
+  visionPatch: z.object({ enabled: z.boolean().default(true) }),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -280,6 +290,15 @@ export function apply(ctx: Context, config: Config): void {
   // 环境有 OPENCODE_API_KEY 时自动建 opencode-go 路由。缺省开，缺省值以下才跳过。
   if (config.opencodeProvider?.autoConfigure !== false) {
     registerOpencodeAutoConfig(ctx)
+  }
+  // v1.40.x（S142 §26 §0x-9，owner 2026-09-19 令「临时的我允许」）：DeepSeek 多模态补丁——
+  // 给 id 含 `deepseek` 的模型补 `input` 的 `image`，因为"模型能否收图"在 DSH 里靠**声明**
+  // （`declaredInput(entry.input) ?? base?.input ?? [...defaultInput]`），而**不在内置目录**的模型
+  // 走 `DEFAULT_INPUT = ["text"]` 兜底 ⇒ 支持图片的模型被当成只能收文字。
+  // 与上一条同款通道（`settings.update` 写 `llm-pi-ai`）、同款"永不抛错"纪律。
+  // 🔴 临时功能，缺省开；`visionPatch.enabled=false` 停止再补（不回滚已写入的值）。
+  if (config.visionPatch?.enabled !== false) {
+    registerDeepseekVisionPatch(ctx, true)
   }
 }
 
