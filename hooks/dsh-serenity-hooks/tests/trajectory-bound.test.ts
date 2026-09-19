@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionTrajectoryLabel, supersedeOtherBindings, setBindingStore } from '../src/trajectory-bound.js'
+import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionTrajectoryLabel, supersedeOtherBindings, setBindingStore, migrateBindingsToDomain } from '../src/trajectory-bound.js'
 import { bindingStore } from '../src/host/storage-domain.js'
 import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory-ops.js'
 
@@ -406,5 +406,126 @@ describe('trajectory-bound: §0L 域优先 / 文件兜底 / 双写', () => {
     expect((records.other as { supersededAt?: number }).supersededAt).toBeTypeOf('number')
     expect((records.keep as { supersededAt?: number }).supersededAt).toBeUndefined()
     expect((records.alien as { supersededAt?: number }).supersededAt).toBeUndefined() // 不碰别的轨迹
+  })
+})
+
+/**
+ * §0L **一次性迁移**（N-3）：旧 `.bindings.json` → 宿主存储域。
+ *
+ * 🔴 这是**唯一会碰历史数据**的一步 ⇒ 判据必须最严：
+ *  ① **不丢绑定**（逐条灌入，实测 15 条的量级）；
+ *  ② **幂等**（每次启动都调用，不得覆盖域里的现行状态）；
+ *  ③ **不动旧文件**（向前兼容的第二道保险必须完好）；
+ *  ④ 域不可用 ⇒ 静默返回零计数、**不抛**（装载期，不能成为启动单点）。
+ */
+describe('trajectory-bound: §0L 一次性迁移 migrateBindingsToDomain', () => {
+  const DIR = '2026-09-05--S142--dsp'
+
+  function fakeDomain(initial: Record<string, unknown> = {}) {
+    const records: Record<string, unknown> = { ...initial }
+    return {
+      records,
+      domain: {
+        table: () => ({
+          get: (k: string) => records[k],
+          entries: () => Object.entries(records)[Symbol.iterator](),
+          size: Object.keys(records).length,
+          put: async (k: string, v: unknown) => { records[k] = v },
+          delete: async (k: string) => delete records[k],
+        }),
+      },
+    }
+  }
+
+  /** 直接写旧表（绕过 appendBound 的 cwd 定位，便于构造多会话场景） */
+  function seedFile(sessions: Record<string, unknown>): void {
+    writeFileSync(
+      join(ccc, BINDINGS_REL_PATH),
+      JSON.stringify({ version: 1, sessions }, null, 2),
+    )
+  }
+
+  it('🔴 全量灌入：旧表 N 条 → 域 N 条（不丢绑定）', async () => {
+    seedFile({
+      a: { dirName: DIR, mdPath: '/r/A/SESSION.md', action: 'activate', at: 1 },
+      b: { dirName: '2026-09-13--S185--x', mdPath: '/r/B/SESSION.md', action: 'rebuild', at: 2 },
+      c: { dirName: '2026-09-01--S151--y--auto', mdPath: '/r/C/SESSION.md', action: 'activate', at: 3 },
+    })
+    const { domain, records } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    const stats = migrateBindingsToDomain(ccc)
+    expect(stats).toEqual({ migrated: 3, skipped: 0, failed: 0 })
+    await Promise.resolve()
+    expect(Object.keys(records).sort()).toEqual(['a', 'b', 'c'])
+    // 字段完整搬运（dirName 硬锚 + action + at 不能丢）
+    expect((records.a as { dirName?: string }).dirName).toBe(DIR)
+    expect((records.b as { action?: string }).action).toBe('rebuild')
+    expect((records.c as { at?: number }).at).toBe(3)
+  })
+
+  it('🔴 幂等：域里已有的**跳过、不覆盖**（重复调用安全）', async () => {
+    seedFile({
+      a: { dirName: 'old-value', mdPath: '/r/A/SESSION.md', action: 'activate', at: 1 },
+      b: { dirName: DIR, mdPath: '/r/B/SESSION.md', action: 'activate', at: 2 },
+    })
+    const { domain, records } = fakeDomain({
+      // 域里 a 已有**更新的**状态（例如 0L 生效后被重新绑定过）
+      a: { dirName: 'NEWER', mdPath: '/r/A2/SESSION.md', action: 'switch', at: 99 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    const stats = migrateBindingsToDomain(ccc)
+    expect(stats).toEqual({ migrated: 1, skipped: 1, failed: 0 })
+    await Promise.resolve()
+    // 域里的新值**未被旧表覆盖**（这是幂等的核心判据）
+    expect((records.a as { dirName?: string }).dirName).toBe('NEWER')
+    expect((records.b as { dirName?: string }).dirName).toBe(DIR)
+  })
+
+  it('🔴 不动旧文件（迁移只读不写旧表）', () => {
+    seedFile({ a: { dirName: DIR, mdPath: '/r/A/SESSION.md', action: 'activate', at: 1 } })
+    const before = readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8')
+    const { domain } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    migrateBindingsToDomain(ccc)
+    expect(readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8')).toBe(before)
+  })
+
+  it('域不可用 ⇒ 零计数且不抛（装载期不能成为启动单点）', () => {
+    seedFile({ a: { dirName: DIR, mdPath: '/r/A/SESSION.md', action: 'activate', at: 1 } })
+    setBindingStore(null)
+    expect(() => migrateBindingsToDomain(ccc)).not.toThrow()
+    expect(migrateBindingsToDomain(ccc)).toEqual({ migrated: 0, skipped: 0, failed: 0 })
+  })
+
+  it('旧表不存在 / 损坏 ⇒ 零计数且不抛', () => {
+    const { domain } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    expect(migrateBindingsToDomain(ccc)).toEqual({ migrated: 0, skipped: 0, failed: 0 })
+    writeFileSync(join(ccc, BINDINGS_REL_PATH), '{ not json')
+    expect(migrateBindingsToDomain(ccc)).toEqual({ migrated: 0, skipped: 0, failed: 0 })
+  })
+
+  it('形状不符的条目被跳过（缺 dirName 不迁移）', async () => {
+    seedFile({
+      good: { dirName: DIR, mdPath: '/r/G/SESSION.md', action: 'activate', at: 1 },
+      bad: { action: 'activate' },
+    })
+    const { domain, records } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    expect(migrateBindingsToDomain(ccc)).toEqual({ migrated: 1, skipped: 0, failed: 0 })
+    await Promise.resolve()
+    expect(Object.keys(records)).toEqual(['good'])
+  })
+
+  it('🔴 迁移后 readLastBound 能从域读到（迁移与读路径闭环）', async () => {
+    seedFile({ 'sess-m': { dirName: DIR, mdPath: '/r/M/SESSION.md', action: 'rebuild', at: 7 } })
+    const { domain } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    migrateBindingsToDomain(ccc)
+    await Promise.resolve()
+    // 把旧文件删掉，证明这次读到的是**域**而不是文件
+    rmSync(join(ccc, BINDINGS_REL_PATH), { force: true })
+    expect(readLastBound(makeSession('sess-m'))?.dirName).toBe(DIR)
+    expect(readLastBound(makeSession('sess-m'))?.action).toBe('rebuild')
   })
 })

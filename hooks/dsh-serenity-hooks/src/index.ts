@@ -59,6 +59,9 @@ import { registerImChannel } from './im-bridge.js'
 import { weixinChannel } from './im-weixin.js'
 import { createImBridgeTool } from './tools/im-bridge.js'
 import { createAccDiagTool } from './tools/acc-diag.js'
+// §0L（S142 2026-09-19）：绑定载体迁到宿主存储域——装载期开域 + 注入句柄 + 一次性迁移
+import { openBindingDomain, bindingStore } from './host/storage-domain.js'
+import { setBindingStore, migrateBindingsToDomain } from './trajectory-bound.js'
 // （C4 块 A 顺带清理：`registerDisposer` 的 import 自 C2 删掉 skiff root 重试定时器后已无使用点）
 
 export const name = 'dsh-serenity-hooks'
@@ -148,6 +151,30 @@ export function apply(ctx: Context, config: Config): void {
   // （imChannelIds）。可见性不在这里判定：未配置通道的 CCC 由 guards 逐 agent
   // `tools.restrict({deny:['im-bridge']})` 从清单中移除（未配置 = 模型看不到）。
   registerImChannel(weixinChannel)
+  // §0L（S142 2026-09-19，owner「同意，开工吧，注意向前兼容」）：把「会话 ↔ 轨迹」绑定的
+  // 载体从 CCC 内 `.bindings.json` 迁到**宿主自己的存储域**（`~/.dsh/storages/`）。
+  // 形态 = **域优先 + 文件兜底 + 双写**（向前兼容：域不可用/未迁移时行为与升级前逐字一致）。
+  // 全程 **fire-and-forget + 永不抛错**：装载期开域失败不得成为启动单点（同契约探针口径）。
+  void (async () => {
+    try {
+      const domain = await openBindingDomain(ctx)
+      setBindingStore(bindingStore(domain))
+      if (domain) {
+        // 一次性迁移（幂等，只灌域里还没有的）。CCC 根按进程 cwd 解析；解析不到则跳过
+        // （各 CCC 的迁移会在其会话活动时由后续调用补上，不阻断启动）。
+        const root = process.cwd()
+        const stats = migrateBindingsToDomain(root)
+        if (stats.migrated > 0) {
+          console.log(`[serenity-hooks] §0L 绑定已迁移入宿主存储域：${stats.migrated} 条（跳过 ${stats.skipped}）`)
+        }
+      } else {
+        console.log('[serenity-hooks] §0L 存储域不可用 → 绑定继续走 CCC 内 .bindings.json（向前兼容回落）')
+      }
+    } catch {
+      /* 开域/迁移失败静默：旧文件路径仍然完整可用 */
+      setBindingStore(null)
+    }
+  })()
   if (config.tools) {
     ctx.tools.register(ccFsTool) // container_fs
     // v1.33（S142 §32）：`logbook` 更名并收敛为 `trajectory`（原 autopilot 工具的动作 v1.33 归

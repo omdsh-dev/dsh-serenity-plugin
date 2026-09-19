@@ -115,6 +115,49 @@ function toDomainRecord(rec: SessionBoundRecord): BindingRecord {
 }
 
 /**
+ * §0L **一次性迁移**：把某个 CCC 的旧 `.bindings.json` 全量灌入宿主存储域。
+ *
+ * 设计要点（R↓）：
+ *  - **幂等**：只写域里**尚不存在**的键（`skip existing`）。⇒ 重复调用（每次启动都调）
+ *    不会覆盖域里的新状态，也不会因并发而互相踩踏。
+ *  - **不删旧文件**：迁移只读不写旧表（owner「向前兼容」的第二道保险仍在）。
+ *  - **不丢绑定**：逐条迁移，单条失败不影响其余（返回计数供诊断）。
+ *  - **失败静默**：域写不可用 ⇒ 返回 `{migrated:0, skipped:0, failed:0}`，不抛错
+ *    （装载期调用，不能成为启动单点）。
+ *
+ * @param root CCC 根（`AGENT_SESSIONS/.bindings.json` 所在）
+ * @returns 迁移计数（诊断用；`migrated` = 本次真正灌入的条数）
+ */
+export function migrateBindingsToDomain(root: string): { migrated: number; skipped: number; failed: number } {
+  const out = { migrated: 0, skipped: 0, failed: 0 }
+  if (!domainStore?.available) return out
+  let file: BindingsFile
+  try {
+    file = readBindingsFile(join(root, BINDINGS_REL_PATH))
+  } catch {
+    return out
+  }
+  for (const [id, raw] of Object.entries(file.sessions)) {
+    const rec = asBoundRecord(raw)
+    if (!rec) continue
+    // 幂等判据：域里已有该会话 ⇒ 跳过（**不覆盖**域中的现行状态）
+    if (domainStore.get(id)) {
+      out.skipped += 1
+      continue
+    }
+    try {
+      void domainStore.put(id, toDomainRecord(rec)).catch(() => {
+        /* 单条域写失败：不影响其余（计数已在同步段体现，此处为异步兜底） */
+      })
+      out.migrated += 1
+    } catch {
+      out.failed += 1
+    }
+  }
+  return out
+}
+
+/**
  * 域内读一条（同步）。域不可用 → `undefined`（调用方据此回落文件）。
  * @param sessionId dsh 会话 id
  */
