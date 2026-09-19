@@ -38,7 +38,9 @@ import { createClock, type ClockOptions, type ClockRuntime } from './clock-runti
 import { listCccs } from './ccc-roots.js'
 import { isoLocal, localHuman } from './time.js'
 import {
+  finalizeWake,
   loadWakeRegistry,
+  purgeFinalizedWakes,
   splitDueWakes,
   updateWake,
   WAKE_CATCH_UP_MS,
@@ -380,6 +382,13 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
   }
   clock.noteSkipReason(null)
   for (const root of roots) {
+    // 🔴 存量清理（owner 2026-09-19 裁「直接删」，S142 §0Q 甲案）：
+    //   本版上线前表里积压了 143+ 条**终态**记录（308 KB）。只改行为不清存量 ⇒ 文件不再涨但仍臃肿。
+    //   **幂等**（无终态时空转不写盘）⇒ 放在每 tick 开头，天然自愈；不依赖"跑一次迁移"。
+    const purged = purgeFinalizedWakes(root)
+    if (purged.ok && purged.purged > 0) {
+      log.push(`· ${root}: 清除 ${purged.purged} 条已结案记录（存量首清）`)
+    }
     const { registry, error } = loadWakeRegistry(root)
     if (error) {
       log.push(`✗ ${root}: ${error}`)
@@ -387,8 +396,10 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
     }
     const { due, expired } = splitDueWakes(registry, Date.now(), WAKE_CATCH_UP_MS)
     for (const e of expired) {
-      updateWake(root, e.id, { state: 'missed', lastResult: `超过补跑窗口（${WAKE_CATCH_UP_MS / 3_600_000}h）未投递` })
-      log.push(`· ${root}: ${e.id} → missed（超补跑窗口）`)
+      // 🔴 owner 2026-09-19 裁「直接删」（S142 §0Q 甲案）：超窗 = 已结案 ⇒ **写终态后同一笔事务删掉**
+      //    （原实现只置 `missed` 而**永不删** ⇒ 本表只增到 308 KB）。
+      finalizeWake(root, e.id, 'missed', `超过补跑窗口（${WAKE_CATCH_UP_MS / 3_600_000}h）未投递`)
+      log.push(`· ${root}: ${e.id} → missed（超补跑窗口，已清除）`)
     }
     // 串行投递：同 tick 多目标依次进行（防模型并发挤兑）——fire-and-forget 指不等结果，不是并行
     for (const e of due) {
@@ -404,13 +415,16 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
         log.push(`· ${root}: ${e.id} → 跳过（宿主服务未就绪，下个 tick 再试；不计失败）`)
         continue
       }
-      updateWake(root, e.id, {
-        state: res.ok ? 'delivered' : 'pending',
-        attempts: e.attempts + 1,
-        lastResult: res.detail,
-        deliveredAt: res.ok ? isoLocal() : null,
-      })
-      log.push(`· ${root}: ${e.id} → ${res.ok ? 'delivered' : `重试（${res.detail}）`}`)
+      if (res.ok) {
+        // 🔴 owner 2026-09-19 裁「直接删」：投递成功 = 结案 ⇒ 同一笔事务写终态 + 移除。
+        //    审计由 SESSION.md / 工具输出承担（`wake-registry.ts` 既有注释承诺，本次做实）。
+        finalizeWake(root, e.id, 'delivered', res.detail)
+        log.push(`· ${root}: ${e.id} → delivered（已清除）`)
+      } else {
+        // 失败 ⇒ **仍在办**：保留行、记 attempts 与原因（不能删——否则等于静默丢唤醒）
+        updateWake(root, e.id, { state: 'pending', attempts: e.attempts + 1, lastResult: res.detail })
+        log.push(`· ${root}: ${e.id} → 重试（${res.detail}）`)
+      }
     }
   }
   return log

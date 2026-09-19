@@ -239,7 +239,78 @@ export function splitDueWakes(
 }
 
 /**
+ * 🔴 结案并**移除**一条（owner 2026-09-19 裁定「**直接删**」，S142 §0Q 甲案）。
+ *
+ * ## 为什么删（R↓）
+ *
+ * 本模块原本是「`pending` → 终态」但**终态条目永不移除** ⇒ 文件**只增**（实测 308 KB / 143+ 条）。
+ * owner 明令「应当**唤醒后就清理**的」⇒ 终态即删。
+ *
+ * **审计不丢**：由 **SESSION.md 与工具输出**承担——这正是本文件 `removeWake` 的既有注释承诺
+ * （*"审计由 SESSION.md 与工具输出承担——注册表只保留在办项"*）。
+ * ⚠️ 此前该承诺**并未兑现**（`updateWake` 只改 state 从不删行）⇒ 本次是**把承诺做实**。
+ *
+ * ## 与 `updateWake` 的分工（**别混用**）
+ *
+ * - `updateWake`：**仍在办**的推进（失败重试 `state:'pending'` + `attempts+1`）⇒ **保留行**；
+ * - `finalizeWake`：**不再办**的归宿（投递成功 / 超窗 missed）⇒ 写终态后**同一笔事务里删掉**。
+ *
+ * 🔴 **为什么两个动作要同一次写盘**：若先 `updateWake(delivered)` 再 `removeWake`，
+ * 中间被打断会留下一条"已终结但没删"的条目 ⇒ 又回到只增。
+ * 故本函数**读一次、改一次、删一次、写一次**（单次原子落盘）。
+ *
+ * @param root CCC 根
+ * @param id 条目 id
+ * @param terminal 终态（`delivered` / `missed` / `cancelled`）——写入仅用于**日志文案**，
+ *                 随即整行移除；保留该参数是为了让调用点语义自明（"它归到哪一档了"）。
+ * @param result 人读结果（进日志，不进表）
+ * @returns `removed` = 被移除的条目（供调用方打印"它是什么"）；不存在 → 稳定错误码
+ */
+export function finalizeWake(
+  root: string,
+  id: string,
+  terminal: 'delivered' | 'missed' | 'cancelled',
+  result: string,
+): { ok: boolean; error: string | null; removed: WakeEntry | null } {
+  const { registry, error } = loadWakeRegistry(root)
+  if (error) return { ok: false, error, removed: null }
+  const idx = registry.entries.findIndex((e) => e.id === id)
+  if (idx < 0) return { ok: false, error: `wake_not_found: ${id}`, removed: null }
+  const [removed] = registry.entries.splice(idx, 1)
+  // 终态只在**返回值**上留痕（给调用方打印/写 SESSION.md 用）；表里不留行。
+  const saved = saveWakeRegistry(root, registry)
+  if (!saved.ok) return { ok: false, error: saved.error, removed: null }
+  return { ok: true, error: null, removed: { ...(removed as WakeEntry), state: terminal, lastResult: result } }
+}
+
+/**
+ * 一次性清除**存量终态条目**（`delivered` / `missed` / `cancelled`）。
+ *
+ * ## 为什么需要（不是可选）
+ *
+ * 本函数上线前，表里已积压 143+ 条终态记录（308 KB）⇒ **只改行为不改存量 = 文件不再涨但仍很大**。
+ * 故首次运行须清一次。**幂等**（无终态条目时空转，不写盘）。
+ *
+ * 审计不丢：与 `finalizeWake` 同理（终态本就属性"已结案"，其史由 SESSION.md 承担）。
+ * @param root CCC 根
+ * @returns 清掉几条（0 = 本来就没有）
+ */
+export function purgeFinalizedWakes(root: string): { ok: boolean; error: string | null; purged: number } {
+  const { registry, error } = loadWakeRegistry(root)
+  if (error) return { ok: false, error, purged: 0 }
+  const kept = registry.entries.filter((e) => e.state === 'pending')
+  const purged = registry.entries.length - kept.length
+  if (purged === 0) return { ok: true, error: null, purged: 0 } // 不写盘（避免无谓 IO）
+  const saved = saveWakeRegistry(root, { ...registry, entries: kept })
+  if (!saved.ok) return { ok: false, error: saved.error, purged: 0 }
+  return { ok: true, error: null, purged }
+}
+
+/**
  * 更新一条（状态推进；调用方给最终状态与结果文案）。
+ *
+ * ⚠️ **只用于"仍在办"的推进**（主要是失败重试）。**终态请用 `finalizeWake`**——
+ * 否则该行会永远留下（这正是本表过去只增的根因，见 `finalizeWake` 注释）。
  * @param root CCC 根
  * @param id 条目 id
  * @param patch 要写入的字段

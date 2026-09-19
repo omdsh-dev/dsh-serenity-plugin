@@ -131,12 +131,16 @@ describe('acc-diag: runAccDiag 装配 + 渲染', () => {
     expect(text).not.toContain('自主轨迹唤起诊断')
   })
 
-  it('无 live 会话 / 无条目：空段显式说明"无"（不得让人误读为"沉默 = 一切正常"）', async () => {
+  it('无 live 会话 / 无在办条目：空段显式说明"无"（不得让人误读为"沉默 = 一切正常"）', async () => {
     const r = await runAccDiag(fakeCtx([]) as never, dir)
     const text = renderAccDiag(r)
     expect(text).toContain('live 会话: 0 个')
-    expect(text).toContain('（无条目）')
+    // 🔴 2026-09-19（§0Q 甲案）：③ 段现在只列**在办项**（终态结案即清除）
+    //    ⇒ 措辞由「（无条目）」改为「（无在办条目）」，且标题须**显式声明该段只列在办**，
+    //      否则读者会以为"记录丢了"（静默改语义比改行为更坏）。
+    expect(text).toContain('（无在办条目）')
     expect(text).toContain('── ③ 唤醒注册表')
+    expect(text).toContain('已结案条目即时清除')
   })
 
   it('live 会话列出 id / cwd / CCC 归属', async () => {

@@ -509,7 +509,7 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     expect(st.lastSkipReason).toBeNull()
   })
 
-  it('到期条目被真投递（live 命中 → followup 收到正文；条目推进为 delivered）', async () => {
+  it('🔴 到期条目被真投递 → 收到正文，且**投递后条目被清除**（owner 2026-09-19 裁「直接删」）', async () => {
     writeFileSync(join(root, '.serenity'), '')
     writeSessionDir()
     writeBinding('sess-live')
@@ -518,6 +518,8 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     if (!added.ok) return
     // 把条目改成"已到期"（不改系统时钟）
     updateWake(root, added.entry.id, { at: new Date(Date.now() - 60_000).toISOString() })
+    // 投递前：确实在表里（否则下面的"清除了"就没有对照）
+    expect(listWakes(root).entries.map((e) => e.id)).toContain(added.entry.id)
     const sent: string[] = []
     const ctx = {
       sessions: { list: () => [{ id: 'sess-live', header: { cwd: root } }] },
@@ -530,8 +532,31 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     await new Promise((r) => setTimeout(r, 30))
     expect(sent).toHaveLength(1)
     expect(sent[0]).toContain('到点干活')
-    expect(listWakes(root).entries[0]!.state).toBe('delivered')
-    expect(listWakes(root).entries[0]!.lastResult).toContain('live(bound sess-live)')
+    // 🔴 行为变更钉（§0Q 甲案）：终态条目**不再留在表里** ⇒ 注册表只保在办项（表不再只增）
+    expect(listWakes(root).entries, '投递成功后该条应已被清除').toHaveLength(0)
+  })
+
+  it('🔴 超窗条目 → 置 missed 后**同样被清除**（终态一律不留行）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    const added = addWake(root, { target: DIR_NAME, at: '+5m', message: '过期活', createdBy: 'S142', nowMs: Date.now() })
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    // 拨到**超出补跑窗口**（2h + 1m）
+    updateWake(root, added.entry.id, { at: new Date(Date.now() - (WAKE_CATCH_UP_MS + 60_000)).toISOString() })
+    // ⚠️ 必须让本 CCC **可被发现**（tick 只扫"已知 CCC"——来源是 live 会话/工作区）：
+    //    否则 roots 为空 ⇒ 整个 tick 空转，本用例会假红（首跑即踩此坑）。
+    const ctx = {
+      sessions: { list: () => [{ id: 'sess-live', header: { cwd: root } }] },
+      agents: { get: () => undefined },
+      get: () => undefined,
+      on: () => undefined,
+      effect: () => undefined,
+    }
+    registerWakeScheduler(ctx as never)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(listWakes(root).entries, '超窗结案后该条应已被清除').toHaveLength(0)
   })
 
   it('🔴 启动窗口（宿主服务未就绪）⇒ 条目**不被记失败**：state/attempts/lastResult 全不动', async () => {

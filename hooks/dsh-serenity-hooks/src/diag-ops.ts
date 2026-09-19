@@ -11,7 +11,9 @@
  *   ①  live 运行态 —— 插件进程内 `diagLive(ctx)`（进程 cwd/CCC + live 会话清单）
  *       ——**独立进程看不到运行时**，这正是本工具存在的理由
  *   ①b 唤醒时钟 —— `containerClocks().wake`（唤醒调度器进程内快照：武装态/计数/上次跳过原因）
- *   ③  唤醒注册表 —— `wake-registry.json` 全量条目（state / at / target / lastResult）+ 补跑窗口
+ *   ③  唤醒注册表 —— `wake-registry.json` 的**在办条目**（state / at / target / lastResult）+ 补跑窗口
+ *       （🔴 2026-09-19 §0Q 甲案：终态条目**结案即清除** ⇒ 本段只列在办项，不再是"历史全量"；
+ *        历史由 SESSION.md / 工具输出承担——该承诺原本就写在 `wake-registry.ts` 注释里，本次做实）
  *
  * ── 2026-09-15：段数由四降为三（S142「ACC 侧 autopilot 退场」§1 二阶裁定）─────────────
  * ACC 侧 autopilot 整段退场后，报告里两段的**主语消失**，故删除（不是"暂时关掉"）：
@@ -137,10 +139,15 @@ export function renderAccDiag(r: AccDiagReport): string {
   lines.push('')
 
   // ③ 唤醒注册表
-  lines.push(`── ③ 唤醒注册表（${r.ccc}/AGENT_SESSIONS/wake-registry.json）──`)
+  // 🔴 2026-09-19（§0Q 甲案）：注册表**只保在办项**——终态（delivered/missed/cancelled）
+  //   在结案那一刻即被移除（owner 裁「唤醒后就清理」）。故本段**不再显示历史**，
+  //   只显示"还在等的"；历史归属 SESSION.md / 工具输出。
+  //   标题显式写明，避免读成"记录丢了"（静默改语义比改行为更坏）。
+  lines.push(`── ③ 唤醒注册表（在办项；已结案条目即时清除，历史见 SESSION.md）──`)
+  lines.push(`  （${r.ccc}/AGENT_SESSIONS/wake-registry.json）`)
   if (r.wakes.error) lines.push(`⚠ 注册表读取问题: ${r.wakes.error}`)
   lines.push(`条目: ${r.wakes.entries.length} 条（在办 ${r.wakes.pending}）｜补跑窗口 ${WAKE_CATCH_UP_MS / 3600_000}h`)
-  if (r.wakes.entries.length === 0) lines.push('（无条目）')
+  if (r.wakes.entries.length === 0) lines.push('（无在办条目）')
   for (const w of r.wakes.entries) {
     lines.push(`  · ${w.id} [${w.state}] at=${w.at} → ${w.target} by=${w.createdBy} attempts=${w.attempts}`)
     if (w.lastResult) lines.push(`      lastResult: ${w.lastResult}`)
