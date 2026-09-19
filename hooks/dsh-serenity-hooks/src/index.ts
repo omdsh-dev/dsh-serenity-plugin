@@ -61,7 +61,7 @@ import { createImBridgeTool } from './tools/im-bridge.js'
 import { createAccDiagTool } from './tools/acc-diag.js'
 // §0L（S142 2026-09-19）：绑定载体迁到宿主存储域——装载期开域 + 注入句柄 + 一次性迁移
 import { openBindingDomain, bindingStore } from './host/storage-domain.js'
-import { setBindingStore, migrateBindingsToDomain } from './trajectory-bound.js'
+import { setBindingStore } from './trajectory-bound.js'
 // （C4 块 A 顺带清理：`registerDisposer` 的 import 自 C2 删掉 skiff root 重试定时器后已无使用点）
 
 export const name = 'dsh-serenity-hooks'
@@ -155,23 +155,20 @@ export function apply(ctx: Context, config: Config): void {
   // 载体从 CCC 内 `.bindings.json` 迁到**宿主自己的存储域**（`~/.dsh/storages/`）。
   // 形态 = **域优先 + 文件兜底 + 双写**（向前兼容：域不可用/未迁移时行为与升级前逐字一致）。
   // 全程 **fire-and-forget + 永不抛错**：装载期开域失败不得成为启动单点（同契约探针口径）。
+  //
+  // ⚠️ **迁移不在这里做**（实测修正，R↓）：dsh 服务进程的 cwd 是 `/home/yh`，**不是 CCC 根**
+  // （`acc-diag` 实测：`进程 cwd: /home/yh ｜ 进程 CCC: （无）`）⇒ 装载期按 cwd 迁移会读到
+  // 一个不存在的文件、静默迁移 0 条（首版发布的实测症状）。迁移改由
+  // `bindingsPathFor` 惰性触发（`ensureBindingsMigrated`）——那里才稳定拿得到 CCC 根。
   void (async () => {
     try {
       const domain = await openBindingDomain(ctx)
       setBindingStore(bindingStore(domain))
-      if (domain) {
-        // 一次性迁移（幂等，只灌域里还没有的）。CCC 根按进程 cwd 解析；解析不到则跳过
-        // （各 CCC 的迁移会在其会话活动时由后续调用补上，不阻断启动）。
-        const root = process.cwd()
-        const stats = migrateBindingsToDomain(root)
-        if (stats.migrated > 0) {
-          console.log(`[serenity-hooks] §0L 绑定已迁移入宿主存储域：${stats.migrated} 条（跳过 ${stats.skipped}）`)
-        }
-      } else {
+      if (!domain) {
         console.log('[serenity-hooks] §0L 存储域不可用 → 绑定继续走 CCC 内 .bindings.json（向前兼容回落）')
       }
     } catch {
-      /* 开域/迁移失败静默：旧文件路径仍然完整可用 */
+      /* 开域失败静默：旧文件路径仍然完整可用 */
       setBindingStore(null)
     }
   })()

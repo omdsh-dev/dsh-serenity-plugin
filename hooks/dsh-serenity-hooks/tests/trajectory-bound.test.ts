@@ -626,3 +626,73 @@ describe('trajectory-bound: D69「只留一条」（域路径）', () => {
     expect(records['domain-only']).toBeUndefined()
   })
 })
+
+/**
+ * 🔴 **惰性补迁移**（§0L 修正，S142 2026-09-19）——修复一个**发布后实测**才暴露的缺陷。
+ *
+ * 首版把迁移放在装载期、用 `process.cwd()` 当 CCC 根。而 dsh **服务进程的 cwd 是 `/home/yh`**
+ * （`acc-diag` 实测：`进程 cwd: /home/yh ｜ 进程 CCC: （无）`）⇒ 迁移读到不存在的文件，
+ * **静默迁移 0 条**：v1.40.0 发布重启后 `~/.dsh/storages/serenity_bindings.json` **没出现**。
+ *
+ * 判据：**任何一次能定位 CCC 根的绑定读写，都应顺带把该 CCC 的历史绑定补灌进域**。
+ */
+describe('trajectory-bound: §0L 惰性补迁移（bindingsPathFor 触发）', () => {
+  const DIR = '2026-09-05--S142--dsp'
+
+  function fakeDomain(initial: Record<string, unknown> = {}) {
+    const records: Record<string, unknown> = { ...initial }
+    return {
+      records,
+      domain: {
+        table: () => ({
+          get: (k: string) => records[k],
+          entries: () => Object.entries(records)[Symbol.iterator](),
+          size: Object.keys(records).length,
+          put: async (k: string, v: unknown) => { records[k] = v },
+          delete: async (k: string) => delete records[k],
+        }),
+      },
+    }
+  }
+
+  it('🔴 读路径即触发迁移：只需一次 readLastBound，旧表就被补灌进域', async () => {
+    writeFileSync(
+      join(ccc, BINDINGS_REL_PATH),
+      JSON.stringify({
+        version: 1,
+        sessions: {
+          'sess-a': { dirName: DIR, mdPath: '/r/A/SESSION.md', action: 'activate', at: 1 },
+          'sess-b': { dirName: '2026-09-13--S185--x', mdPath: '/r/B/SESSION.md', action: 'rebuild', at: 2 },
+        },
+      }, null, 2),
+    )
+    const { domain, records } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    // 只做一次普通读——迁移应被**惰性**带出来
+    readLastBound(makeSession('sess-a'))
+    await Promise.resolve()
+    expect(Object.keys(records).sort()).toEqual(['sess-a', 'sess-b'])
+  })
+
+  it('🔴 bindingsPathFor 本身即触发（它标定了"该 CCC 的绑定在哪"）', async () => {
+    writeFileSync(
+      join(ccc, BINDINGS_REL_PATH),
+      JSON.stringify({ version: 1, sessions: { 'sess-z': { dirName: DIR, mdPath: '/r/Z/SESSION.md', action: 'activate', at: 3 } } }),
+    )
+    const { domain, records } = fakeDomain({})
+    setBindingStore(bindingStore(domain as never))
+    expect(bindingsPathFor(makeSession('sess-z'))).toBe(join(ccc, BINDINGS_REL_PATH))
+    await Promise.resolve()
+    expect(records['sess-z']).toBeTruthy()
+  })
+
+  it('域不可用 ⇒ 惰性迁移是 no-op（不抛、不写；旧文件仍可读 = 零回归）', () => {
+    writeFileSync(
+      join(ccc, BINDINGS_REL_PATH),
+      JSON.stringify({ version: 1, sessions: { 'sess-a': { dirName: DIR, mdPath: '/r/A/SESSION.md', action: 'activate', at: 1 } } }),
+    )
+    setBindingStore(null)
+    expect(() => readLastBound(makeSession('sess-a'))).not.toThrow()
+    expect(readLastBound(makeSession('sess-a'))?.dirName).toBe(DIR)
+  })
+})

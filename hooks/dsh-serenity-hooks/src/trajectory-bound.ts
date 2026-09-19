@@ -154,7 +154,37 @@ export function migrateBindingsToDomain(root: string): { migrated: number; skipp
       out.failed += 1
     }
   }
+  // 🔴 已迁移过的 CCC 记一笔（进程内去重）：避免同一 CCC 在每轮读路径上重复扫旧表
+  // （幂等本身已保证正确性；去重只为省 IO）。
+  if (out.migrated > 0) migratedRoots.add(root)
   return out
+}
+
+/** 已补过迁移的 CCC 根（进程内去重；跨进程各补一次是可接受的——迁移幂等） */
+const migratedRoots = new Set<string>()
+
+/**
+ * **按 CCC 惰性补迁移**（§0L 修正，S142 2026-09-19）。
+ *
+ * 🔴 为什么需要它（实测缺陷，R↓）：
+ * 装载期那次迁移用的是 `process.cwd()` —— 而 dsh **服务进程的 cwd 是 `/home/yh`**，
+ * **不是 CCC 根**（实测 `acc-diag`：`进程 cwd: /home/yh ｜ 进程 CCC: （无）`）。
+ * ⇒ 迁移读的是一个**不存在的文件**，静默迁移 0 条
+ * （症状：发布后 `~/.dsh/storages/serenity_bindings.json` **没出现**）。
+ *
+ * 现在改为：**任何一次能定位到 CCC 根的路径**都顺手补一次迁移（幂等 + 进程内去重）。
+ * 这样无论服务从哪个 cwd 启动，只要那条 CCC 有会话活动，它的绑定就会被带上。
+ *
+ * @param root CCC 根
+ */
+export function ensureBindingsMigrated(root: string): void {
+  if (!domainStore?.available) return
+  if (migratedRoots.has(root)) return
+  try {
+    migrateBindingsToDomain(root)
+  } catch {
+    /* 惰性迁移失败不阻断读路径（旧文件仍完整可用） */
+  }
 }
 
 /**
@@ -199,6 +229,10 @@ export function bindingsPathFor(session: unknown): string | null {
   if (typeof header?.cwd !== 'string') return null
   const root = cccRootForCwd(header.cwd)
   if (!root) return null
+  // §0L 惰性补迁移（§0L 修正）：**这是每次绑定的读/写都会经过的收口点**，
+  // 也是本模块唯一能稳定拿到 CCC 根的地方 ⇒ 把"该 CCC 的历史绑定补灌进域"挂在这里。
+  // 幂等 + 进程内去重 ⇒ 首次之后是零成本的分支判断。
+  ensureBindingsMigrated(root)
   return join(root, BINDINGS_REL_PATH)
 }
 
