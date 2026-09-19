@@ -206,6 +206,32 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     impact: '双端口网关无法换取 dsh cookie → 外部反代 401',
     required: false,
   },
+  {
+    // §0L（S142 2026-09-19）：「会话 ↔ 轨迹」绑定的宿主侧载体。
+    //
+    // 为什么登记（R↓）：§0L 实施后，**轨迹身份映射改存宿主的存储域**
+    // （`~/.dsh/storages/`，与宿主自己的 `workspace.json` 同处同类），
+    // 不再放 CCC 的 `.bindings.json`（owner 裁「放 CCC 不合适」）。
+    // ⇒ storageDomain 由**可选**变为**真实依赖**，故与 tools/sessions 同级进表：
+    //   将来宿主改名/移除时，`dashboard health` 与装载期告警会**响亮报出**，
+    //   而不是让绑定读写静默失效。
+    //
+    // access 取 `lazy` 的依据（实测，非推测）：dsp 的 `inject` 列表
+    // （src/index.ts L68）**不含** storageDomain ⇒ 属性直读 `ctx.storageDomain`
+    // 在真实 cordis 下会**抛错** `cannot get property ... without inject`
+    // （同 v1.31.4 的 subagents 陷阱）；产品侧必须走 `hostService`（= `ctx.get`）。
+    // 实测（tests/host/storage-domain-probe.test.ts，真实 cordis 兄弟 fiber 拓扑）：
+    // `hostService(ctx,'storageDomain')` 取到 `DomainFacility`。
+    //
+    // 域名约束（实测，实施时勿违）：`UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/`
+    // ⇒ 域名为 `serenity_bindings`（**下划线**；连字符 `serenity-bindings` 非法）。
+    id: 'storageDomain',
+    name: 'storageDomain',
+    access: 'lazy',
+    members: [{ name: 'open', kind: 'function' }],
+    impact: '轨迹绑定无处可存 → §0L 整体不可用（须退回"写会话日志"备选方案）',
+    required: false,
+  },
 ] as const
 
 interface HostEventContract {

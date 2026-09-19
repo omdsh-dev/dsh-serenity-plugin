@@ -1,24 +1,29 @@
 /**
- * storage-domain-probe.test.ts — §0L 可行性探针（S142，**临时一次性**，验后删除）
+ * storage-domain.test.ts — 宿主存储域（`storageDomain`）契约回归用例（S142 §0L）
  *
- * 问题（一句话）：插件能否用宿主自己的存储域（`storageDomain`）存「会话 ↔ 轨迹」绑定？
- * 三个待验点（SESSION.md §0L-4）：
- *   C-1 插件能否拿到 `storageDomain`；
- *   C-2 能否 `defineDomain` + `open` + `put` + 读回（完整往返，含落盘）；
- *   C-3 域名字符集/保留字（`serenity-bindings` vs `serenity_bindings`）。
+ * 为什么存在（R↓）：§0L 把「会话 ↔ 轨迹」绑定的载体从 CCC 的 `.bindings.json`
+ * 搬到**宿主自己的存储域**（`~/.dsh/storages/`，与宿主 `workspace.json` 同处同类）。
+ * ⇒ `storageDomain` 从可选面变为 **ACC 的真实依赖**，故：
+ *   ① 在 `src/host/contract.ts` 的 `HOST_SERVICES` 登记（`dashboard health` 可探）；
+ *   ② 由本文件钉住其**运行时行为**（契约表只能证明"服务在不在"，证明不了"能不能用"）。
  *
- * 为什么用真实 cordis 拓扑而不是 `restart-web`（R↓）：
+ * 本文件由 §0L 的一次性探针**转化而来**（原 `storage-domain-probe.test.ts`，2026-09-19）：
+ * owner 未就该探针的去留下达决策（「不知道是干啥用的」）⇒ 按维护者倾向**保留为契约用例**，
+ * 理由：依赖一旦成立就应有长期体检项，否则宿主漂移只会静默失效（与 v1.30.5 的错误码漂移同族）。
+ *
+ * 为什么用真实 cordis 拓扑而不是起真机（R↓）：
  *   ① 可复现——进测试套件，`msm dsh-develop test` 可重跑；
- *   ② **零打断**——restart-web 会杀掉当前正在跑的会话（D62 的代价）；
- *   ③ 拓扑同构——与 `tests/host/cordis-access.test.ts` 同一手法；
- *   ④ 取证等级更高——"我读了源码" ≠ "我执行了那条链"（§4.2 判据）。
+ *   ② **零打断**——起真机会杀掉当前正在跑的会话（D62 的代价）；
+ *   ③ 拓扑同构——与 `tests/host/cordis-access.test.ts` 同一手法（**兄弟 fiber**）。
  *
- * ⚠️ **不进发布物**：`package.json` 的 `files` 白名单不含 tests；验完即删。
+ * 已实测钉死的三条（§0L 的三个验收点）：
+ *   C-1 插件能否拿到 `storageDomain`（经 `ctx.get`，非 inject 属性直读）；
+ *   C-2 `defineDomain` + `open` + `put` + 读回 + **关闭重开仍可读**（真落盘）；
+ *   C-3 域名字符集：`serenity_bindings` 合法 / `serenity-bindings` 非法。
  *
- * 已知静态取证（本探针要**实测**它们，而非复述）：
- *   · `dsh-develop dump-config` 实测：`- id: storage-domain / config: { backend: json }` 已装载；
- *   · storage-domain 源码 L450：`domainCtx.provide("storageDomain", facility)`；
- *   · dsh-storage 源码 L80：`UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/`（⇒ 连字符非法）。
+ * 诚实边界（E↑）：宿主后端 `dsh-storage-json` **只在宿主里**（CCC 内无此包）
+ * ⇒ 本文件自实现一个**最小 JSON 后端**（实现 `KvFacet`/`KvUnit` 契约）走真实链路；
+ * 这验的是"域语义 + 调用链"，不是"宿主 json 后端的实现质量"。
  */
 import { describe, it, expect } from 'vitest'
 import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -26,6 +31,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { hostService } from '../../src/host/access.js'
+import { probeHostContract } from '../../src/host/contract.js'
 
 type Ctx = Record<string, unknown>
 
@@ -68,7 +74,7 @@ const report: Record<string, unknown> = {
 }
 const errors: string[] = []
 
-describe.skipIf(!depsReady)('§0L 探针：storageDomain（真实 cordis + 真实 storage 包）', () => {
+describe.skipIf(!depsReady)('§0L storageDomain（真实 cordis + 真实 storage 包）', () => {
   it('C-1/C-2/C-3 一次完整取证', async () => {
     const { Context } = (await import(cPath!)) as { Context: new () => Ctx }
     const storageMod = (await import(storagePath!)) as {
@@ -80,7 +86,6 @@ describe.skipIf(!depsReady)('§0L 探针：storageDomain（真实 cordis + 真�
       apply: (ctx: Ctx, config: unknown) => unknown
       defineDomain: (spec: unknown) => unknown
     }
-    const z = (await import('@deepseek-ai/schemastery')).default as unknown
 
     // ── C-3：域名字符集（静态常量的**运行时**取值）──
     const RE = storageMod.UNIT_NAME_RE
@@ -89,7 +94,6 @@ describe.skipIf(!depsReady)('§0L 探针：storageDomain（真实 cordis + 真�
     report['C-3 UNIT_NAME_RE'] = String(RE)
     expect(RE.test('serenity-bindings'), '连字符名应被拒绝').toBe(false)
     expect(RE.test('serenity_bindings'), '下划线名应被接受').toBe(true)
-    void z
 
     // ── 搭真机同构拓扑 ──
     // 真机：storage 由 @deepseek-ai/dsh-storage 提供；storage-domain 注入
@@ -211,7 +215,7 @@ describe.skipIf(!depsReady)('§0L 探针：storageDomain（真实 cordis + 真�
             },
           },
         })
-        type Table = { put: (k: string, v: unknown) => Promise<void>; get: (k: string) => unknown; keys: () => Iterable<string> }
+        type Table = { put: (k: string, v: unknown) => Promise<void>; get: (k: string) => unknown }
         type Domain = { table: (n: string) => Table; close: () => Promise<void> }
         try {
           // 第一次打开：写一条
@@ -246,6 +250,16 @@ describe.skipIf(!depsReady)('§0L 探针：storageDomain（真实 cordis + 真�
       }
 
       report['errors'] = errors
+
+      // ── 契约面一致性：probeHostContract 必须认得 storageDomain（§0L 依赖已登记）──
+      if (dspCtx) {
+        const contract = probeHostContract(dspCtx, null)
+        report['契约面 storageDomain 无缺失'] = !contract.issues.some((i) => i.id.startsWith('storageDomain'))
+        expect(
+          contract.issues.some((i) => i.id.startsWith('storageDomain')),
+          'storageDomain 已登记进 HOST_SERVICES ⇒ 不应被报缺失',
+        ).toBe(false)
+      }
     } finally {
       rmSync(tmp, { recursive: true, force: true })
     }
@@ -261,8 +275,8 @@ describe.skipIf(!depsReady)('§0L 探针：storageDomain（真实 cordis + 真�
   }, 30000)
 })
 
-describe('§0L 探针：环境自检', () => {
-  it('依赖可解析（否则本探针失去保护力）', () => {
+describe('§0L storageDomain：环境与契约登记自检', () => {
+  it('依赖可解析（否则本文件失去保护力）', () => {
     if (process.env.CI) return
     expect(
       { cordis: Boolean(cPath), storage: Boolean(storagePath), domain: Boolean(domainPath) },
@@ -270,9 +284,18 @@ describe('§0L 探针：环境自检', () => {
     ).toEqual({ cordis: true, storage: true, domain: true })
   })
 
-  it('打印探针结论（回填 SESSION.md 用）', () => {
+  it('storageDomain 已登记进 HOST_SERVICES（§0L 依赖可被 dashboard health 探到）', async () => {
+    const { HOST_SERVICES } = await import('../../src/host/contract.js')
+    const entry = HOST_SERVICES.find((s) => s.id === 'storageDomain')
+    expect(entry, 'HOST_SERVICES 应含 storageDomain 条目').toBeTruthy()
+    // 实测依据：dsp 的 inject 列表不含它 ⇒ 必须走 ctx.get（lazy），属性直读会抛错
+    expect(entry?.access).toBe('lazy')
+    expect(entry?.members.map((m) => m.name)).toContain('open')
+  })
+
+  it('打印取证结论（诊断用）', () => {
     // eslint-disable-next-line no-console
-    console.log('\n===== §0L storageDomain 探针结论 =====\n'
+    console.log('\n===== §0L storageDomain 取证结论 =====\n'
       + JSON.stringify(report, null, 2)
       + '\n=====================================\n')
   })
