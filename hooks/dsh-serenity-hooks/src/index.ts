@@ -49,6 +49,7 @@ import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive } from './acp-http.js'
 import { registerWakeScheduler } from './wake-scheduler.js'
+import { registerCroTurnTracking } from './cro-turns.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
 import { registerWeixinSendApi } from './weixin-send-api.js'
 import { registerWeixinOutputGuard } from './weixin-output-guard.js'
@@ -256,6 +257,14 @@ export function apply(ctx: Context, config: Config): void {
   // 整段退场（所有者裁决 (a)）——ACC 不再提供周期自唤醒：机制/时钟/`container_admin autopilot`
   // 域/面板区块全部删除。CCC 侧的自主巡航改走 `msm autopilot-round`（S151 自管理链，
   // 真相源 = S151 SESSION.md §1/§1b/§1c）。此处**不得**再注册任何周期时钟。
+  // CRO（Continuous Re-Occurrence，S142 §7.8 / `docs/cro-design.md`；owner 2026-09-19
+  // 令「在 dsp 做一版实现」）：让一条轨迹**自带一段程序**，由调度器每 tick 跑它、由其判定
+  // 该不该唤起。归属 = **机制属 ACC / 程序属 CCC**；运行契约 = **只 spawn，从不 import**
+  // （设计 §2.3 B 案：进程边界同时挡掉"ACC 依赖 CCC 源码路径"与"用户程序语法错放倒 ACC"）。
+  // 🔴 本行**必须在 `registerWakeScheduler` 之前**：后者会立刻跑第一次 tick，而 CRO 快照的
+  // `binding.runningSessionIds` 唯一数据源就是这张表（晚装 = 首拍读到空表 = 谎报"没在跑"）。
+  // 评估与投递面在 tick 内（`wake-scheduler.ts` 的 `runCroPhase`），本行只装"是否正在跑轮次"。
+  registerCroTurnTracking(ctx)
   // trajectory 唤醒注册表（D58，v1.32.0）：中心调度器——5min tick 投递「未来时刻 + 一条
   // message」的一次性唤醒（可自唤醒、可跨 trajectory）。冷会话经 ctx.sessionController
   // 载入后投递。全局闸 `wakeSchedulerEnabled`（**缺省开**，无回退键——v1.34 S-1 曾把它与

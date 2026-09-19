@@ -27,6 +27,8 @@ import {
   type WakeEntry,
 } from '../src/wake-registry.js'
 import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+import { CRO_FILENAME } from '../src/cro.js'
+import { __resetCroTurnsForTest } from '../src/cro-turns.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 const HOUR = 3_600_000
@@ -61,6 +63,30 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
+
+/**
+ * 轮询等待（CRO 集成用例用）：CRO 阶段要**起子进程**，耗时不确定 ⇒ 固定 sleep 会 flaky。
+ * @param pred 判据
+ * @param ms 上限
+ */
+async function waitFor(pred: () => boolean, ms = 8_000): Promise<void> {
+  const t0 = Date.now()
+  while (!pred() && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 25))
+}
+
+/** 往轨迹目录里写一份 CRO 程序（`continuous-re-occurrence.ts` = 启用判据） */
+function writeCro(dirName: string, source: string): void {
+  writeFileSync(join(root, 'AGENT_SESSIONS', dirName, CRO_FILENAME), source, 'utf-8')
+}
+
+/** 一份"吐固定决策"的 CRO 程序（**纯 JS 写在 .ts 里**：多 runner 下都能跑，同 `cro.test.ts` 手法） */
+function croProgram(decisionJson: string): string {
+  return (
+    "let s='';process.stdin.on('data',d=>{s+=d}).on('end',()=>{const o=JSON.parse(s);" +
+    `const d=${decisionJson};d.reason=(d.reason||'')+' dir='+o.identity.dirName;` +
+    'process.stdout.write(JSON.stringify(d))})'
+  )
+}
 
 describe('parseWakeAt（RFC3339 或 +Nm/+Nh/+Nd）', () => {
   it('相对写法按单位换算', () => {
@@ -595,4 +621,125 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     expect(wakeSchedulerState().armed).toBe(false)
     expect(wakeSchedulerState().armedAt).toBeNull()
   })
+})
+
+/**
+ * CRO 与调度器的**集成**（S142 §7.9，设计 §5/§6）——
+ * 这里测的不是"CRO 逻辑对不对"（`cro.test.ts` 已测），而是**它与既有链路的关系**：
+ *   · 🔴 设计 §5 的机械判据：**故意报错的 CRO 程序，不得影响既有投递**
+ *   · 设计 §6.1：CRO 判定为真 ⇒ 走投递（真起子进程 + 真投递 → 收到 CRO 正文）
+ *   · 设计 §6.3：**CRO 不写唤醒表**（判定为真也不给表增加/清除任何一行）
+ *
+ * ⚠️ 每个用例都必须让本 CCC **可被发现**（`sessions.list` 给 cwd = root），
+ *    否则 `roots` 为空 ⇒ 整个 tick 空转，用例会**假红**（本仓已踩过此坑，见上文同款注释）。
+ */
+describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）', () => {
+  let disposers: Array<() => void>
+  let timer: { fn: () => void } | null
+
+  beforeEach(() => {
+    disposers = []
+    timer = null
+    __resetWakeSchedulerStateForTest()
+    __resetCroTurnsForTest()
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: true }))
+    vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void) => {
+      timer = { fn }
+      return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>
+    }) as typeof setInterval)
+    vi.spyOn(global, 'clearInterval').mockImplementation(() => {
+      timer = null
+    })
+  })
+
+  afterEach(() => {
+    __resetWakeSchedulerStateForTest()
+    __resetCroTurnsForTest()
+    __setSimpleSourceForTest(null)
+    vi.restoreAllMocks()
+  })
+
+  /** 一个"CCC 可被发现 + 目标会话 live + 收集投递正文"的 ctx */
+  function croCtx(sent: string[]): unknown {
+    const agent = { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } }
+    return {
+      sessions: { list: () => [{ id: 'sess-live', header: { cwd: root } }] },
+      agents: { get: (id: string) => (id === 'sess-live' ? agent : undefined) },
+      get: () => undefined,
+      on: () => undefined,
+      effect: (cb: () => () => void) => { disposers.push(cb()) },
+    }
+  }
+
+  it('🔴 铁律：**故意报错**的 CRO 程序 ⇒ 既有投递链路一切正常（设计 §5 的机械判据）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, "throw new Error('cro boom')\n") // 🔴 半成品：跑起来就报错
+    const added = addWake(root, { target: DIR_NAME, at: '+5m', message: '到点干活', createdBy: 'S142', nowMs: Date.now() })
+    expect(added.ok).toBe(true)
+    if (!added.ok) return
+    updateWake(root, added.entry.id, { at: new Date(Date.now() - 60_000).toISOString() }) // 改成已到期
+    const sent: string[] = []
+    registerWakeScheduler(croCtx(sent) as never) // 启动即 tick 一次
+    await waitFor(() => sent.length > 0)
+    // ① 既有链路**照常工作**：到点条目仍被投递
+    expect(sent, 'CRO 报错绝不能让到点唤醒投不出去').toHaveLength(1)
+    expect(sent[0]).toContain('到点干活')
+    // ② 条目照常结案清除（既有语义不受影响）
+    expect(listWakes(root).entries).toHaveLength(0)
+    // ③ CRO 的失败**被看见**（不是静默吞掉）——留痕在 tick 日志里
+    const log = (wakeSchedulerState().lastTickLog ?? []).join('\n')
+    expect(log).toContain('CRO')
+    expect(log).toContain('跳过本轮')
+  }, 20_000)
+
+  it('🟢 CRO 判定为真 ⇒ 真起子进程并投递 CRO 正文（快照确实经 stdin 到达程序）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    // reason 里回填 `dir=o.identity.dirName` ⇒ 若 stdin 没送到，这一条就取不到值
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"你的 SESSION.md 已很大，请先压缩再继续。"}'))
+    const sent: string[] = []
+    registerWakeScheduler(croCtx(sent) as never)
+    await waitFor(() => sent.length > 0)
+    expect(sent, 'CRO 判定为真应投递一条').toHaveLength(1)
+    expect(sent[0]).toContain('CRO 唤起') // 正文**自我表明**来源（不是唤醒正文、不是即时消息）
+    expect(sent[0]).toContain('你的 SESSION.md 已很大') // 提示词透传
+    expect(sent[0]).toContain(`dir=${DIR_NAME}`) // 🔴 快照经 stdin 真到达了程序
+    expect(sent[0]).not.toContain('[trajectory 唤醒]') // 不得冒充"到点唤醒"
+  }, 20_000)
+
+  it('🔴 CRO **不写唤醒表**（设计 §6.3）：判定为真 ⇒ 投递，但表里一行都不增不减', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"该干活了"}'))
+    // 一条**未到期**的在办条目：它是"表内容"的对照物（既不该被 CRO 清掉，也不该被 CRO 补写）
+    const keep = addWake(root, { target: DIR_NAME, at: '+5m', message: '稍后再干', createdBy: 'S142', nowMs: Date.now() })
+    expect(keep.ok).toBe(true)
+    if (!keep.ok) return
+    const sent: string[] = []
+    registerWakeScheduler(croCtx(sent) as never)
+    await waitFor(() => sent.length > 0)
+    expect(sent).toHaveLength(1) // CRO 的投递发生了
+    const entries = listWakes(root).entries
+    expect(entries.map((e) => e.id)).toEqual([keep.entry.id]) // 表内容**逐字未变**
+    expect(entries[0]!.state).toBe('pending')
+    expect(entries[0]!.attempts).toBe(0) // 也没被 CRO 误记为"投过"
+  }, 20_000)
+
+  it('不唤起（wake:false）⇒ 不投递任何消息（**常态是不打扰**）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":false,"reason":"天还没亮"}'))
+    const sent: string[] = []
+    registerWakeScheduler(croCtx(sent) as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 8_000)
+    expect(sent).toHaveLength(0)
+    // 汇总行仍如实报告"评估了 1 条、唤起 0"
+    const log = (wakeSchedulerState().lastTickLog ?? []).join('\n')
+    expect(log).toContain('CRO 评估 1 条（唤起 0')
+  }, 20_000)
 })

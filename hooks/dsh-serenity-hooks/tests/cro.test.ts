@@ -23,6 +23,7 @@ import {
   deriveCode,
   evaluateCro,
   isCroEnabled,
+  listCroTrajectories,
   parseCroOutput,
   readCroSnapshotInput,
   renderCroOutcome,
@@ -96,6 +97,41 @@ describe('CRO: 位置与形态（设计 §2）', () => {
 
   it('路径逃逸时 isCroEnabled 返回 false（不抛）', () => {
     expect(isCroEnabled(root, '../outside')).toBe(false)
+  })
+})
+
+describe('CRO: 启用轨迹扫描（listCroTrajectories，调度器每 tick 用）', () => {
+  it('只列出**有** CRO 文件的轨迹（无注册表 ⇒ 靠扫目录）', () => {
+    makeTrajectory(DIR_NAME, 'export {}')
+    makeTrajectory('2026-09-14--S186--no-cro') // 不写 CRO 文件
+    expect(listCroTrajectories(root)).toEqual([DIR_NAME])
+  })
+
+  it('🔴 跳过 `_` / `.` 前缀目录（_archived/_skiff-logs/_weixin-logs 不是轨迹）', () => {
+    makeTrajectory(DIR_NAME, 'export {}')
+    const sys = join(root, 'AGENT_SESSIONS', '_archived', '2026-01-01--S001--old')
+    mkdirSync(sys, { recursive: true })
+    writeFileSync(join(sys, CRO_FILENAME), 'export {}', 'utf-8')
+    const hidden = join(root, 'AGENT_SESSIONS', '.hidden')
+    mkdirSync(hidden, { recursive: true })
+    writeFileSync(join(hidden, CRO_FILENAME), 'export {}', 'utf-8')
+    expect(listCroTrajectories(root)).toEqual([DIR_NAME])
+  })
+
+  it('顶层文件（非目录）被跳过', () => {
+    makeTrajectory(DIR_NAME, 'export {}')
+    writeFileSync(join(root, 'AGENT_SESSIONS', 'stray.md'), 'x', 'utf-8')
+    expect(listCroTrajectories(root)).toEqual([DIR_NAME])
+  })
+
+  it('排序稳定（同 tick 顺序可比对）', () => {
+    makeTrajectory('2026-09-13--S185--b', 'export {}')
+    makeTrajectory('2026-09-13--S185--a', 'export {}')
+    expect(listCroTrajectories(root)).toEqual(['2026-09-13--S185--a', '2026-09-13--S185--b'])
+  })
+
+  it('🔴 AGENT_SESSIONS 不存在 ⇒ 空数组（**绝不抛**——跑在调度器 tick 内）', () => {
+    expect(listCroTrajectories(join(root, 'no-such-root'))).toEqual([])
   })
 })
 

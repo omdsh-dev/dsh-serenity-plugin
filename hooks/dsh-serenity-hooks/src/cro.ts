@@ -45,7 +45,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { resolveInside } from './ccc.js'
 import { sessionsRoot } from './trajectory-ops.js'
@@ -279,6 +279,46 @@ export function isCroEnabled(root: string, dirName: string): boolean {
   } catch {
     return false // 路径逃逸 ⇒ 视为未启用（不抛）
   }
+}
+
+/**
+ * 列出**启用了 CRO 的轨迹目录名**（供调度器每 tick 扫描，设计 §6.1）。
+ *
+ * ## 判据与形态（R↓）
+ * · 判据 = **文件在不在**（同 §2.1）——**没有注册表**，所以"谁启用了"只能靠**扫目录**：
+ *   `AGENT_SESSIONS/` 下每个目录查一次 `<目录>/continuous-re-occurrence.ts`。
+ * · **一次 readdir + 每个目录一次 existsSync**：N 条轨迹的代价是 O(N) 次 `stat`，
+ *   每 5min 一次 —— 与既有 `listSessions` 同量级，可接受。
+ * · 跳过 **`_` 前缀**（`_archived` / `_skiff-logs` / `_weixin-logs` = 系统与日志目录）
+ *   与 **`.` 前缀**（隐藏）——它们**不是轨迹**，且扫它们纯属浪费。
+ * · 🔴 **本函数绝不抛错**（返回 `[]`）——它跑在调度器 tick 内，任何异常都可能影响既有链路
+ *   （设计 §5 铁律）。目录读不到（不存在 / 权限）⇒ `[]` = "没有轨迹启用 CRO"，语义正确。
+ *
+ * ⚠️ **为什么不做缓存**：缓存会引入"文件删了但缓存还在"的失效模式（本容器栽过的"第二真相源"），
+ * 而这里省下的只是一次 `readdir`——**不值当**。
+ *
+ * @param root CCC 根
+ * @returns 启用了 CRO 的轨迹目录名（**排序后**，保证同 tick 顺序稳定、便于日志比对）
+ */
+export function listCroTrajectories(root: string): string[] {
+  const rootDir = sessionsRoot(root)
+  let entries: Dirent[]
+  try {
+    entries = readdirSync(rootDir, { withFileTypes: true })
+  } catch {
+    return [] // 目录不存在/读不到 ⇒ 没有轨迹启用 CRO（不抛）
+  }
+  const out: string[] = []
+  for (const e of entries) {
+    if (!e.isDirectory()) continue
+    if (e.name.startsWith('_') || e.name.startsWith('.')) continue // 系统/隐藏目录不是轨迹
+    try {
+      if (existsSync(join(rootDir, e.name, CRO_FILENAME))) out.push(e.name)
+    } catch {
+      /* 单条读不到 ⇒ 跳过该条，不影响其余（不抛） */
+    }
+  }
+  return out.sort()
 }
 
 /**

@@ -153,13 +153,18 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     // ⚠️ 2026-09-19（§26 §0x-9 DeepSeek 多模态临时补丁）：新增
     //    `deepseek vision patch retry timer`（与 opencode 路由自动配置同款"命名空间竞态退避"）
     //    ⇒ 3 → 4。**这是有意的登记**（F-08 纪律：自起资源必须各带拆卸），不是悄悄复活旧机制。
+    // ⚠️ 2026-09-19（CRO，§7.8 `docs/cro-design.md`）：新增 `cro turn tracking`
+    //    ——「是否正在跑轮次」是**进程级内存表**，载体销毁必须清项（该模块的头号风险
+    //    就是本容器栽过 5 次的"只增不清"）⇒ **必须在拆卸时清表**，故计入本清单。
+    //    ⇒ 4 → 5。
     const labels = effect.mock.calls.map((c) => String(c[1]))
-    expect(labels).toHaveLength(4)
+    expect(labels).toHaveLength(5)
     expect(labels.join('|')).not.toContain('autopilot')
     expect(labels.join('|')).toContain('trajectory 唤醒调度器')
     expect(labels.join('|')).toContain('self-started resources')
     expect(labels.join('|')).toContain('opencode provider auto-config retry timer')
     expect(labels.join('|')).toContain('deepseek vision patch retry timer')
+    expect(labels.join('|')).toContain('cro turn tracking')
     // 退避重试定时器不得再出现（回归钉：删了就不要再悄悄回来）
     expect(labels.join('|')).not.toContain('skiff root retry timer')
     // C4 块 A 回归钉：两处自带 listener disposer 已被单点取代

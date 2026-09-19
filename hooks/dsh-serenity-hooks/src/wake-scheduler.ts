@@ -31,6 +31,8 @@ import { basename, join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { findSession, sessionsRoot } from './trajectory-ops.js'
 import { listBoundSessionIds } from './trajectory-bound.js'
+import { evaluateCro, listCroTrajectories, readCroSnapshotInput, renderCroOutcome } from './cro.js'
+import { runningCarriersOf } from './cro-turns.js'
 import { hostAgents, hostService } from './host/access.js'
 import { registerDisposer } from './host/effect.js'
 import { readSimpleSettings } from './settings-section.js'
@@ -370,6 +372,161 @@ async function collectWakeCccs(ctx: Context): Promise<string[]> {
   return (await listCccs(ctx)).map((e) => e.root)
 }
 
+// ── CRO（Continuous Re-Occurrence · 持续再发生；设计 `docs/cro-design.md`，S142 §7.8）──
+//
+// 归属（所有者 2026-09-19 定）：**机制属 ACC，程序属 CCC**。本文件持有"调度"那一面：
+// 每 tick 对**每条启用了 CRO 的轨迹**跑它自带的 `continuous-re-occurrence.ts`，
+// 按它的判定投递。**ACC 只 spawn，从不 import** 用户的 TS（设计 §2.3 B 案）。
+
+/**
+ * CRO 唤起消息正文（**刻意不复用** {@link buildWakeText} / {@link buildSendText}）。
+ *
+ * 三种唤起各有自己的**事实**；混用 = 注入一条假陈述（本容器栽过：`buildSendText` 里
+ * 那句"消息已入队"就是一条假陈述，见该函数注释）：
+ * · `buildWakeText` —— 「**到点**了」（登记过的未来时刻，人/agent 算好的）
+ * · `buildSendText` —— 「**有人此刻给我发了一条消息**」
+ * · 本函数         —— 「**我自己的程序**看情况判定该叫我了」（**没有到点、也没有人发消息**）
+ *
+ * 🔴 `reason` 的呈现（设计 §4.2）：**程序没写就明说没写**，不留空白 ——
+ * 改成程序判定后，"当时为什么叫了"**不再能从时间表重建**（原因在程序肚子里）；
+ * 留空白 = 连"丢在哪一环"都看不出来。写明"未提供"至少把缺口标出来了（CCE：重建 > 保存）。
+ * @param dirName 目标轨迹目录名
+ * @param mdPath 目标 SESSION.md 绝对路径
+ * @param prompt 程序给的唤起提示词
+ * @param reason 程序给的判定理由（可为 null）
+ * @returns 投递正文
+ */
+export function buildCroWakeText(dirName: string, mdPath: string, prompt: string, reason: string | null): string {
+  return [
+    `[CRO 唤起] ${dirName} 自带的 continuous-re-occurrence.ts 判定：现在该唤起。`,
+    `当前时间：${localHuman()}（当地时区）。`,
+    '',
+    `身份锚定：继续 ${dirName} 的 trajectory（SESSION.md: ${mdPath}）。`,
+    '',
+    `判定理由：${reason ?? '（程序未提供 reason —— 见 CRO 编写指南 §7 坑 3）'}`,
+    '',
+    '唤起提示词：',
+    prompt,
+    '',
+    '说明：这是由**本轨迹自己的 CRO 程序**按当时情况做的判定（**不是**定时唤醒，**也不是**别人发的消息）。' +
+      '处理完照常把进展写入 SESSION.md。',
+  ].join('\n')
+}
+
+/**
+ * 投递一条 CRO 唤起（**fire-and-forget**，与 {@link deliverWake} 同层）。
+ *
+ * · **取用通路复用** {@link acquireWakeAgent}（live 优先 → 冷载入）：这是调度器侧唯一的
+ *   "怎么把一句话送到一条轨迹"的知识 ⇒ 不另立第二条（设计 §9-2 的倾向：复用投递面）。
+ * · 🔴 **不落唤醒表**（设计 §6.3）：CRO 是"**持续判定**"，不是"**某个未来时刻**"。
+ *   落表会给 §0Q（投递即删、表只保在办）**增加一个新的写入源**。
+ * · 用 `followup`（不用 `steer`）：CRO 由**调度器**发起，与 `send-later` 同层；
+ *   `steer`（当场注入当前轮）是 `send-now` 的语义 —— 那是人类/agent 的**即时动作**。
+ * · 🔴 **失败不回滚、不重试**（与条目投递不同）：下一 tick 会**重新判定**——
+ *   CRO 的判据是"情况"，不是"这条消息还没送出去" ⇒ 自愈来自**重判**，不来自重投。
+ * @param ctx 插件上下文
+ * @param root CCC 根
+ * @param dirName 目标轨迹目录名（= CRO 只能唤起**自己**，设计 §9-8 的倾向）
+ * @param prompt 唤起提示词
+ * @param reason 判定理由
+ * @returns 投递结果（进 tick 日志；**不写注册表**）
+ */
+async function deliverCroWake(
+  ctx: Context,
+  root: string,
+  dirName: string,
+  prompt: string,
+  reason: string | null,
+): Promise<WakeDeliveryResult> {
+  const mdPath = join(sessionsRoot(root), dirName, 'SESSION.md')
+  const acquired = await acquireWakeAgent(ctx, root, dirName)
+  if ('error' in acquired) return { ok: false, detail: acquired.error, notReady: acquired.notReady === true }
+  try {
+    acquired.agent.followup(
+      createUserMessage({
+        content: [{ type: 'text', text: buildCroWakeText(dirName, mdPath, prompt, reason) }],
+        source: PLUGIN_SOURCE,
+      }),
+    )
+  } catch (err) {
+    return { ok: false, detail: `CRO 投递失败（${acquired.how}）: ${String((err as Error)?.message ?? err)}` }
+  }
+  return { ok: true, detail: `已投递（${acquired.how}）` }
+}
+
+/**
+ * CRO 阶段：本 tick 对**每条启用了 CRO 的轨迹**跑一次它自带的程序，按判定投递。
+ *
+ * ## 为什么放在既有投递**之后**（R↓）
+ * · 既有条目（`send-later`）**有到点承诺** ⇒ 优先级天然更高；
+ * · CRO 是"看着情况叫"，**晚一拍无成本**（tick 粒度本就是 5min）；
+ * · ⇒ 铁律（设计 §5）：**CRO 的任何失败都不影响既有链路** —— 整段由调用方兜住，
+ *   且**每条轨迹各自 try/catch**（一条坏程序不得连累同 tick 的其它轨迹）。
+ *
+ * ## 日志口径（刻意与既有投递不同）
+ * "每 tick × 每条轨迹"都写一行 ⇒ 对"**常态是不唤起**"的 CRO 就是刷屏。
+ * ⇒ 逐条只记 **唤起**（`reason` 进日志 —— 设计 §4.2 要求可重建）与 **跳过**（异常，必须看见）；
+ *   **不唤起只进汇总行**（`唤起 x，不唤起 y，跳过 z`）。
+ * ⚠️ **诚实标注**：因此"某条轨迹当轮**为何没叫**"**不进 tick 日志**（它在程序肚子里）。
+ *    要完整的逐次判定审计，须**程序自己**写状态文件（设计 §3.3）——ACC 给不了。
+ * @param ctx 插件上下文
+ * @param root CCC 根
+ * @param registry 本 tick 已载入的唤醒注册表条目（供快照的 `pendingWakes`；读坏时传 `[]`）
+ * @param log 本 tick 的人读摘要（就地追加）
+ */
+async function runCroPhase(ctx: Context, root: string, registry: WakeEntry[], log: string[]): Promise<void> {
+  let dirs: string[]
+  try {
+    dirs = listCroTrajectories(root)
+  } catch {
+    return // 扫描失败 ⇒ 静默跳过本 tick 的 CRO（不影响既有链路）
+  }
+  if (dirs.length === 0) return // 常态（还没有轨迹写 CRO 程序）：代价 = 一次 readdir
+  const nowMs = Date.now()
+  const s = wakeSchedulerState()
+  const scheduler = { armed: s.armed, enabled: s.enabled, ticks: s.ticks, lastSkipReason: s.lastSkipReason }
+  const agents = hostAgents(ctx)
+  let wakes = 0
+  let quiet = 0
+  let skips = 0
+  for (const dirName of dirs) {
+    try {
+      const bound = listBoundSessionIds(root, dirName)
+      // 🔴 `running ≠ live`（设计 §3.2）：running 来自 `cro-turns` 的事件夹取 + TTL 兜底
+      const running = runningCarriersOf(bound, nowMs)
+      const live = bound.filter((id) => Boolean(agents?.get?.(id)))
+      // 本轨迹在办的唤醒条目 —— **只给摘要**（id/at/createdAt/createdBy），
+      // **不给 message 正文**（设计 §9-7 的有界空间倾向：一条轨迹不该能读遍全容器）
+      const pendingWakes = registry
+        .filter((e) => e.state === 'pending' && resolveWakeTarget(root, e.target)?.dirName === dirName)
+        .map((e) => ({ id: e.id, at: e.at, createdAt: e.createdAt, createdBy: e.createdBy }))
+      const input = readCroSnapshotInput(root, dirName, nowMs, {
+        boundSessionIds: bound,
+        liveSessionIds: live,
+        runningSessionIds: running,
+        pendingWakes,
+        scheduler,
+      })
+      const outcome = await evaluateCro(root, dirName, input)
+      if (outcome.status === 'wake') {
+        wakes += 1
+        const res = await deliverCroWake(ctx, root, dirName, outcome.prompt, outcome.decision.reason)
+        log.push(`· ${root}: ${renderCroOutcome(dirName, outcome)} → ${res.ok ? '已投递' : `投递未成功：${res.detail}`}`)
+      } else if (outcome.status === 'skipped') {
+        skips += 1
+        log.push(`· ${root}: ${renderCroOutcome(dirName, outcome)}`)
+      } else if (outcome.status === 'no-wake') {
+        quiet += 1
+      }
+      // `disabled`：本不该出现（`dirs` 已按"文件在"筛过）⇒ 只可能是扫描后被删的竞态 ⇒ 静默
+    } catch (err) {
+      skips += 1
+      log.push(`· ${root}: ${dirName}: CRO 内部异常（已忽略，不影响既有链路）: ${String((err as Error)?.message ?? err)}`)
+    }
+  }
+  log.push(`· ${root}: CRO 评估 ${dirs.length} 条（唤起 ${wakes}，不唤起 ${quiet}，跳过 ${skips}）`)
+}
+
 /** 一次调度 tick：遍历已知 CCC → 到期项串行投递 / 超窗项置 missed；返回人读摘要 */
 async function runWakeTick(ctx: Context): Promise<string[]> {
   const log: string[] = []
@@ -392,6 +549,9 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
     const { registry, error } = loadWakeRegistry(root)
     if (error) {
       log.push(`✗ ${root}: ${error}`)
+      // 🔴 注册表读坏**不连带停掉 CRO**（两者是**并列**的唤起来源，设计 §6.2）：
+      //   以空表（= "无在办条目"）继续 CRO 阶段，否则一个坏 JSON 会让 CRO 也一起静默。
+      await runCroPhase(ctx, root, [], log)
       continue
     }
     const { due, expired } = splitDueWakes(registry, Date.now(), WAKE_CATCH_UP_MS)
@@ -426,6 +586,8 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
         log.push(`· ${root}: ${e.id} → 重试（${res.detail}）`)
       }
     }
+    // CRO 阶段（设计 §6.1：执行者 = 本调度器）：既有投递**之后**（见 `runCroPhase` 的排序理由）
+    await runCroPhase(ctx, root, registry.entries, log)
   }
   return log
 }
