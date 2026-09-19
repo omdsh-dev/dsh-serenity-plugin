@@ -1,3 +1,69 @@
+## v1.40.0 — 2026-09-19（§0L：轨迹绑定载体迁入**宿主存储域** + D69「只留一条」）
+
+**来源**：所有者 2026-09-19 令（S142 §0G~§0L，经多轮对齐）：
+> 「**放 CCC 不合适**」→「**不存、实时找**」→「相当于**存 dsh 全局**去了，可行性如何，调研下」
+> →「**同意，开工吧，注意向前兼容**」→「**开工**」
+
+### 核心变更：绑定的载体从 CCC 内文件 → **宿主自己的存储域**
+
+原先「会话 ↔ 轨迹」的绑定存在 **CCC 内** `AGENT_SESSIONS/.bindings.json`。
+所有者指出该位置不合适（CCC 是 git 管的、会话 id 是**本地机器**的 → 跨机错配）。
+
+现改为存**宿主自己的存储域**（`~/.dsh/storages/`）——
+这正是宿主自己存放「工作区 → 有哪些会话」（`workspace.json`）的**同一个位置、同一类结构**。
+
+| 面 | 改动 |
+|---|---|
+| 新增 `src/host/storage-domain.ts` | `openBindingDomain(ctx)` / `BindingStore` / `bindingDomainSpec()` |
+| `src/trajectory-bound.ts` | 读写改 **域优先 / 文件兜底 / 双写**（**导出签名一个未改**） |
+| `src/index.ts` | 装载期开域接线 + 一次性迁移（fire-and-forget，永不抛错） |
+| `src/host/contract.ts` | `HOST_SERVICES` 登记 `storageDomain`（lazy / `open`）——依赖可被 `dashboard health` 探到 |
+
+🔴 **域名 = `serenity_bindings`（下划线）**。宿主约束 `UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/`
+⇒ 连字符形如 `serenity-bindings` **非法**（会在 `defineDomain` 模块加载期抛错）。
+
+🔴 **取服务必须走 `hostService(ctx,'storageDomain')`（= `ctx.get`）**，**不可**属性直读
+——dsp 的 `inject` 列表不含它，属性直读在真实 cordis 下抛
+`cannot get property "storageDomain" without inject`（同 v1.31.4 的 `subagents` 陷阱）。
+
+### 向前兼容（所有者硬约束：「注意向前兼容」）
+
+| 保证 | 实现 |
+|---|---|
+| 旧数据不丢 | **一次性迁移**：旧 `.bindings.json` 全量灌入域（**幂等**：只写域里还没有的） |
+| 旧行为不破 | **域不可用 ⇒ 行为与升级前逐字一致**（读回落到旧文件，三级回退仍保留） |
+| 迁移不丢绑定 | 逐条迁移；单条失败不影响其余；**不删旧文件**（第二道保险完好） |
+| 可回退 | 旧文件**永久保留**且持续双写 ⇒ 关掉域即可完全退回旧形态 |
+
+🔴 **技术前提（决定实现形态）**：域句柄的**读是同步的**（`get`/`entries`/`keys`/`size` 走内存），
+**写才异步**。⇒ 启动时 `open` 一次、握住 handle，**10 个既有调用点的同步签名可原样保留**
+（system-prompt 每轮求值 / keeper / rebuild / skiff / trajectory / wake-scheduler **零改动**）。
+
+### D69「只留一条」（所有者 2026-09-19 裁：「2.只留一条」）
+
+同一轨迹的**多条会话**：新会话绑上时，**旧载体自动退休**——
+**不删**（记录保留，正向 `readLastBound` 仍可查到"曾属于哪条轨迹"、可审计 `supersededAt`），
+只**退出唤醒候选**（`listBoundSessionIds` 过滤）。实测 S142 曾同时挂 **4** 个载体 → 收敛为 1。
+
+🔴 **本轮实施抓到并修复一个真 bug**（由新的 D69 域路径用例发现）：
+`supersedeOtherBindings` / `pruneMissingBindings` 的**返回值**只在**文件循环**里收集，
+而记录已搬进域 ⇒ 两者**都返回 `[]`**：
+- 调用方（`container_trajectory use`）靠返回值决定是否回报 `supersededBindings`/`prunedBindings`；
+- 且 `marked.length === 0` 会**短路跳过写盘**。
+
+⇒ 症状 = **「只留一条」静默不生效**（记录没被标记，返回也看不出异常）。
+**修复**：两个函数改为取 **域 ∪ 文件的并集**；判定与施加分离；写盘失败不再清空返回值。
+
+### 验收
+
+- **既有 `trajectory-bound.test.ts` 27 条断言逐字未改且全绿**（向前兼容的机械证明）
+- 新增测试：域优先/兜底/双写/迁移幂等/D69 域路径/pruneMissingBindings 域侧回归钉
+- 门禁：`typecheck`（node + client）✅ ｜ **95 files / 1401 tests** ✅
+- 前置可行性探针三点实测全绿（`tests/host/storage-domain.test.ts`）：
+  ① 服务可见（`DomainFacility`）② 域往返可落盘（关闭重开仍在）③ 域名约束
+
+---
+
 ## v1.39.3 — 2026-09-18（dsh 内存崩溃的 (b)(c) 两项机制 + 两处既有欠账收尾）
 
 **来源**：所有者 2026-09-18 令（S142 §0y，经 S185 / S172 转达）：
