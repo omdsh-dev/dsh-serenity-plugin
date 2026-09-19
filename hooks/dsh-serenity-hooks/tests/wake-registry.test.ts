@@ -28,7 +28,9 @@ import {
 } from '../src/wake-registry.js'
 import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
 import { CRO_FILENAME } from '../src/cro.js'
+import { croWakeLogPath } from '../src/cro-log.js'
 import { __resetCroTurnsForTest } from '../src/cro-turns.js'
+import { existsSync, readFileSync } from 'node:fs'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 const HOUR = 3_600_000
@@ -747,4 +749,94 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     const log = (wakeSchedulerState().lastTickLog ?? []).join('\n')
     expect(log).toContain('CRO 评估 1 条（唤起 0')
   }, 20_000)
+
+  /** 一个"CCC 可被发现 + 目标**无 live 载体** + 无 sessionController"的 ctx（投递走 notReady 分支） */
+  function croCtxNoTarget(): unknown {
+    return {
+      sessions: { list: () => [{ id: 'sess-live', header: { cwd: root } }] }, // CCC 仍可被发现
+      agents: { get: () => undefined }, // 但没有活着的 agent
+      get: () => undefined, // 也没有 sessionController（冷载入通道缺席）
+      on: () => undefined,
+      effect: (cb: () => () => void) => { disposers.push(cb()) },
+    }
+  }
+
+  /** 一个"目标 live 但投递动作抛错"的 ctx（**真失败**，非 notReady） */
+  function croCtxThrowOnDeliver(): unknown {
+    const agent = {
+      followup: () => {
+        throw new Error('followup boom')
+      },
+    }
+    return {
+      sessions: { list: () => [{ id: 'sess-live', header: { cwd: root } }] },
+      agents: { get: (id: string) => (id === 'sess-live' ? agent : undefined) },
+      get: () => undefined,
+      on: () => undefined,
+      effect: (cb: () => () => void) => { disposers.push(cb()) },
+    }
+  }
+
+  it('🟢 **成功唤起 ⇒ 落一条流水**（真 tick ⇒ 真子进程 ⇒ 真投递 ⇒ 真落盘）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"该整理日志了","reason":"心跳到点"}'))
+    const sent: string[] = []
+    registerWakeScheduler(croCtx(sent) as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
+    expect(sent).toHaveLength(1)
+    // 🔴 判据 = **磁盘上的档**（不是返回值）：固定名文件就在该轨迹目录里
+    const path = croWakeLogPath(root, DIR_NAME)
+    expect(existsSync(path), 'CRO 唤起的流水必须落在轨迹目录的固定名文件里').toBe(true)
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as { version: number; entries: Record<string, unknown>[] }
+    expect(raw.entries).toHaveLength(1)
+    expect(raw.entries[0]!.ok).toBe(true)
+    // ⚠️ 用 toContain 而非全等：`croProgram` 会把 `dir=<目录名>` 接在 reason 后（证明 stdin 真到达程序）
+    expect(String(raw.entries[0]!.reason)).toContain('心跳到点')
+    expect(String(raw.entries[0]!.detail)).toContain('已投递')
+    expect(typeof raw.entries[0]!.tick).toBe('number')
+    expect(raw.entries[0]!.promptDigest).toMatchObject({ length: 6, head: '该整理日志了' })
+  }, 30_000)
+
+  it('🔴 **投递失败 ⇒ 也落一条（ok:false + 原因）**（所有者令「失败成功都记录」）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"叫我"}'))
+    registerWakeScheduler(croCtxThrowOnDeliver() as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
+    const path = croWakeLogPath(root, DIR_NAME)
+    expect(existsSync(path), '失败也是一次"唤起尝试" ⇒ 必须留痕').toBe(true)
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as { entries: Record<string, unknown>[] }
+    expect(raw.entries).toHaveLength(1)
+    expect(raw.entries[0]!.ok).toBe(false)
+    expect(String(raw.entries[0]!.detail)).toContain('followup boom') // 原因可重建（不是空串）
+    // 既有链路照常：CRO 的失败没有连累任何东西
+    expect(listWakes(root).entries).toHaveLength(0)
+  }, 30_000)
+
+  it('🔴 `notReady`（环境未就绪）**不算失败、不记流水**（`:171` 既定语义：记了就是假失败）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"叫我"}'))
+    registerWakeScheduler(croCtxNoTarget() as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
+    // tick 日志里看得到"投递未成功"，但**流水档不该出现**（它不是一次投递失败）
+    const log = (wakeSchedulerState().lastTickLog ?? []).join('\n')
+    expect(log).toContain('投递未成功')
+    expect(existsSync(croWakeLogPath(root, DIR_NAME)), 'notReady 是环境未就绪 ⇒ 不得记成失败').toBe(false)
+  }, 30_000)
+
+  it('🔴 不唤起（wake:false）⇒ **不产生流水档**（没有尝试就没有记录）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":false,"reason":"没事"}'))
+    const sent: string[] = []
+    registerWakeScheduler(croCtx(sent) as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
+    expect(existsSync(croWakeLogPath(root, DIR_NAME)), '没发生尝试就不该建空档').toBe(false)
+  }, 30_000)
 })

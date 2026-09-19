@@ -33,6 +33,7 @@ import { findSession, sessionsRoot } from './trajectory-ops.js'
 import { listBoundSessionIds } from './trajectory-bound.js'
 import { evaluateCro, listCroTrajectories, readCroSnapshotInput, renderCroOutcome } from './cro.js'
 import { runningCarriersOf } from './cro-turns.js'
+import { appendCroWakeLog } from './cro-log.js'
 import { hostAgents, hostService } from './host/access.js'
 import { registerDisposer } from './host/effect.js'
 import { readSimpleSettings } from './settings-section.js'
@@ -512,6 +513,22 @@ async function runCroPhase(ctx: Context, root: string, registry: WakeEntry[], lo
         wakes += 1
         const res = await deliverCroWake(ctx, root, dirName, outcome.prompt, outcome.decision.reason)
         log.push(`· ${root}: ${renderCroOutcome(dirName, outcome)} → ${res.ok ? '已投递' : `投递未成功：${res.detail}`}`)
+        // 🔴 ACC 侧流水（所有者令 2026-09-20「ACC 有必要进行 CRO 唤醒的日志记录」「失败成功都记录」）：
+        // 落点 = **该轨迹目录**下的固定名文件（`cro-log.ts`），只留两日、写入时按窗裁剪。
+        // ⚠️ 两条硬约束：
+        //   ① **`notReady` 不记**（`:171` 既定语义：环境未就绪 ≠ 投递失败 ⇒ 记了就是**假失败**）；
+        //   ② **写流水失败绝不影响投递与既有链路**（设计 §5 铁律）⇒ 失败只进 tick 日志一行。
+        if (!res.notReady) {
+          const rec = appendCroWakeLog(
+            root,
+            dirName,
+            { ok: res.ok, detail: res.detail, tick: s.ticks, reason: outcome.decision.reason ?? null, prompt: outcome.prompt },
+            nowMs,
+          )
+          if (!rec.ok) {
+            log.push(`· ${root}: ${dirName}: CRO 流水写入失败（已忽略，不影响投递）: ${rec.error}`)
+          }
+        }
       } else if (outcome.status === 'skipped') {
         skips += 1
         log.push(`· ${root}: ${renderCroOutcome(dirName, outcome)}`)
