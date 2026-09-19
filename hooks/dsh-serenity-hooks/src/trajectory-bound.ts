@@ -364,34 +364,61 @@ export function supersedeOtherBindings(
 ): string[] {
   const path = join(root, BINDINGS_REL_PATH)
   const file = readBindingsFile(path)
-  const marked: string[] = []
   const at = Date.now()
+  /**
+   * 需要退休的会话 id 集合。
+   *
+   * 🔴 必须取**域 ∪ 文件的并集**（实测缺陷，2026-09-19）：
+   * 首版实现只在**文件循环**里 `marked.push(id)`，于是"记录只在域里"时
+   * 返回值恒为 `[]` —— 而调用方（`tools/trajectory.ts` 的 `use`）**靠这个返回值**决定
+   * 是否回报 `supersededBindings`，并且早先用 `marked.length === 0` 短路**跳过了写盘**。
+   * ⇒ 症状是"D69 只留一条**静默不生效**"（记录没被标记，返回也看不出异常）。
+   * 由 `tests/trajectory-bound.test.ts` 的 D69 域路径用例抓到。
+   */
+  const toMark = new Set<string>()
 
-  // §0L：域侧标记（异步 fire-and-forget；失败只影响域，旧文件仍同步更新）
+  // 域侧收集
   if (domainStore?.available) {
     for (const [id, raw] of domainStore.entries()) {
       const rec = fromDomainRecord(raw)
       if (rec.dirName !== dirName) continue
       if (keepIds.has(id) || rec.supersededAt !== undefined) continue
-      void domainStore.put(id, toDomainRecord({ ...rec, supersededAt: at })).catch(() => {})
+      toMark.add(id)
     }
   }
-
+  // 文件侧收集（与域侧同判据）
   for (const [id, raw] of Object.entries(file.sessions)) {
     const rec = asBoundRecord(raw)
     if (!rec || rec.dirName !== dirName) continue
     if (keepIds.has(id) || rec.supersededAt !== undefined) continue
+    toMark.add(id)
+  }
+
+  if (toMark.size === 0) return []
+
+  // 域侧施加（异步 fire-and-forget；失败只影响域，旧文件仍同步更新）
+  if (domainStore?.available) {
+    for (const id of toMark) {
+      const raw = domainStore.get(id)
+      if (!raw) continue
+      void domainStore.put(id, toDomainRecord({ ...fromDomainRecord(raw), supersededAt: at })).catch(() => {})
+    }
+  }
+
+  // 文件侧施加
+  for (const id of toMark) {
+    const rec = asBoundRecord(file.sessions[id])
+    if (!rec) continue
     rec.supersededAt = at
     file.sessions[id] = rec
-    marked.push(id)
   }
-  if (marked.length === 0) return []
   try {
     writeBindingsFile(path, file)
   } catch {
-    return [] // 写盘失败不阻断主流程（与 appendBound 同款"尽力而为"口径）
+    /* 写盘失败不阻断主流程（与 appendBound 同款"尽力而为"口径）；
+       域侧已施加成功的话语义仍达成，故**不**在此清空返回值以免谎报"什么都没做" */
   }
-  return marked.sort()
+  return [...toMark].sort()
 }
 
 /**
@@ -417,40 +444,46 @@ export function pruneMissingBindings(
 ): string[] {
   const path = join(root, BINDINGS_REL_PATH)
   const file = readBindingsFile(path)
-  const removed: string[] = []
 
-  // §0L：域侧删除（异步；与文件侧同一判据 `isMissing`——判据抛错则保留，fail-closed）
+  // 🔴 与 supersedeOtherBindings 同款修正（同一实测缺陷族，2026-09-19）：
+  // 返回值必须取**域 ∪ 文件的并集**，否则"只在域里"的悬空记录虽被删掉，
+  // 但调用方看到 `[]` ⇒ 回报不出 `prunedBindings`（静默）。
+  const toRemove = new Set<string>()
+  const judge = (id: string): boolean => {
+    try {
+      return isMissing(id)
+    } catch {
+      return false // 判据自身出错 ⇒ 保留（fail-closed）
+    }
+  }
+
   if (domainStore?.available) {
     for (const [id] of domainStore.entries()) {
-      let missingDomain: boolean
-      try {
-        missingDomain = isMissing(id)
-      } catch {
-        continue
-      }
-      if (!missingDomain) continue
+      if (judge(id)) toRemove.add(id)
+    }
+  }
+  for (const id of Object.keys(file.sessions)) {
+    if (judge(id)) toRemove.add(id)
+  }
+
+  if (toRemove.size === 0) return []
+
+  // 域侧删除（异步；判据已在上一步统一判过，fail-closed 语义已落实）
+  if (domainStore?.available) {
+    for (const id of toRemove) {
       void domainStore.delete(id).catch(() => {})
     }
   }
-
-  for (const id of Object.keys(file.sessions)) {
-    let missing: boolean
-    try {
-      missing = isMissing(id)
-    } catch {
-      continue // 判据自身出错 ⇒ 保留（fail-closed）
-    }
-    if (!missing) continue
+  // 文件侧删除
+  for (const id of toRemove) {
     delete file.sessions[id]
-    removed.push(id)
   }
-  if (removed.length === 0) return []
   try {
     writeBindingsFile(path, file)
   } catch {
-    return []
+    /* 写盘失败不阻断主流程；域侧已删的话语义仍达成，故不清空返回值以免谎报 */
   }
-  return removed.sort()
+  return [...toRemove].sort()
 }
 
 /**

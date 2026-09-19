@@ -529,3 +529,100 @@ describe('trajectory-bound: §0L 一次性迁移 migrateBindingsToDomain', () =>
     expect(readLastBound(makeSession('sess-m'))?.action).toBe('rebuild')
   })
 })
+
+/**
+ * **D69「只留一条」**（owner 2026-09-19 裁定：「2.只留一条」）。
+ *
+ * 语义（owner 原话 → 机械形态）：
+ *  · 新会话绑上时，同一轨迹的**旧载体自动退休**；
+ *  · **不删**（记录保留 → 沿革与"我曾属于哪条轨迹"仍可查）；
+ *  · 效果 = 唤醒不再选中旧载体（消除"两条 live 各持一份完整上下文 + 双写者"）。
+ *
+ * 为什么这组用例重要：§0L 换了载体（文件 → 域），**退休语义必须在域上同样成立**，
+ * 否则"只留一条"会随载体迁移**静默失效**——这正是 owner 这条裁定要防的病。
+ */
+describe('trajectory-bound: D69「只留一条」（域路径）', () => {
+  const DIR = '2026-08-24--S142--dsp 长期维护'
+
+  function fakeDomain(initial: Record<string, unknown> = {}) {
+    const records: Record<string, unknown> = { ...initial }
+    return {
+      records,
+      domain: {
+        table: () => ({
+          get: (k: string) => records[k],
+          entries: () => Object.entries(records)[Symbol.iterator](),
+          size: Object.keys(records).length,
+          put: async (k: string, v: unknown) => { records[k] = v },
+          delete: async (k: string) => delete records[k],
+        }),
+      },
+    }
+  }
+
+  it('🔴 旧载体退休：候选只剩最新的那条（唤醒不再选中旧的）', async () => {
+    // 复刻实测现状：S142 曾同时挂 4 个载体
+    const { domain } = fakeDomain({
+      'carrier-1': { dirName: DIR, mdPath: '/r/1/SESSION.md', action: 'rebuild', at: 1 },
+      'carrier-2': { dirName: DIR, mdPath: '/r/2/SESSION.md', action: 'rebuild', at: 2 },
+      'carrier-3': { dirName: DIR, mdPath: '/r/3/SESSION.md', action: 'rebuild', at: 3 },
+      'carrier-4': { dirName: DIR, mdPath: '/r/4/SESSION.md', action: 'rebuild', at: 4 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    // 有 4 条时：唤醒候选 = 4（这就是 owner 要根治的"挂 4 条"）
+    expect(listBoundSessionIds(ccc, DIR).length).toBe(4)
+
+    // 新会话（carrier-4）绑上 ⇒ 其余自动退休
+    const marked = supersedeOtherBindings(ccc, DIR, new Set(['carrier-4']))
+    expect(marked.sort()).toEqual(['carrier-1', 'carrier-2', 'carrier-3'])
+    await Promise.resolve()
+
+    // ⇒ 只留一条
+    expect(listBoundSessionIds(ccc, DIR)).toEqual(['carrier-4'])
+  })
+
+  it('🔴 退休 = **不删**：旧载体的记录仍在，正向查询仍能查到"我曾属于哪条轨迹"', async () => {
+    const { domain, records } = fakeDomain({
+      old: { dirName: DIR, mdPath: '/r/O/SESSION.md', action: 'rebuild', at: 1 },
+      fresh: { dirName: DIR, mdPath: '/r/F/SESSION.md', action: 'activate', at: 2 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    supersedeOtherBindings(ccc, DIR, new Set(['fresh']))
+    await Promise.resolve()
+
+    // 记录仍在（不删）
+    expect(records.old).toBeTruthy()
+    // 且带上了退休标记（可审计"何时退休的"）
+    expect((records.old as { supersededAt?: number }).supersededAt).toBeTypeOf('number')
+    // 正向查询（"这条旧会话属于哪条轨迹"）**不受影响** —— D69 的"可逆/不丢沿革"语义
+    expect(readLastBound(makeSession('old'))?.dirName).toBe(DIR)
+  })
+
+  it('幂等：对已退休的再调一次 → 不重复标记（空数组）', async () => {
+    const { domain } = fakeDomain({
+      a: { dirName: DIR, mdPath: '/r/A/SESSION.md', action: 'activate', at: 1 },
+      b: { dirName: DIR, mdPath: '/r/B/SESSION.md', action: 'activate', at: 2 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    expect(supersedeOtherBindings(ccc, DIR, new Set(['b']))).toEqual(['a'])
+    expect(supersedeOtherBindings(ccc, DIR, new Set(['b']))).toEqual([])
+  })
+
+  /**
+   * 🔴 **同族回归钉**（实测缺陷，2026-09-19）：`pruneMissingBindings` 的首版实现
+   * 与 `supersedeOtherBindings` 犯了**同一个错**——返回值只在**文件循环**里收集，
+   * 于是"记录只在域里"时调用方拿到 `[]`（回报不出 `prunedBindings`，静默）。
+   * 这条用例专门钉"域侧也要被计入返回值"。
+   */
+  it('🔴 pruneMissingBindings：**域侧**记录的删除也被计入返回值（同族缺陷回归钉）', async () => {
+    const { domain, records } = fakeDomain({
+      'domain-only': { dirName: DIR, mdPath: '/r/D/SESSION.md', action: 'activate', at: 1 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    // 旧文件里**没有**任何条目 ⇒ 首版实现会返回 []
+    const removed = pruneMissingBindings(ccc, (id) => id === 'domain-only')
+    expect(removed).toEqual(['domain-only'])
+    await Promise.resolve()
+    expect(records['domain-only']).toBeUndefined()
+  })
+})
