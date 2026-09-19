@@ -683,6 +683,11 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     const sent: string[] = []
     registerWakeScheduler(croCtx(sent) as never) // 启动即 tick 一次
     await waitFor(() => sent.length > 0)
+    // 🔴 **同步点必须在 tick 收尾**，不能只等"副作用出现了"：
+    //    `lastTickLog` 是 **body 跑完之后**才写回的（`clock-runtime` 的 tick 外壳），
+    //    而到点投递（副作用）发生在 body **中途** ⇒ 只等 `sent` 会读到**上一拍的日志**（实测假红一次）。
+    //    这与 v1.42.0 那条「tick 类用例必须先让被测 CCC 可被发现」同族：**都是测试脚手架的同步问题**。
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).length > 0)
     // ① 既有链路**照常工作**：到点条目仍被投递
     expect(sent, 'CRO 报错绝不能让到点唤醒投不出去').toHaveLength(1)
     expect(sent[0]).toContain('到点干活')

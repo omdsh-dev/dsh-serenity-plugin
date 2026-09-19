@@ -4,7 +4,7 @@
  * 行为对齐 osp（opencode-serenity-plugin/src/session/lib.ts）——osp 是 ACC 工具 spec。
  *
  * v1.33 收敛（S142 §32）：本文件只服务 `container_trajectory` 的动作面
- * （现行 **7 个**：list / show / create / use / rebuild / **send-now** / **send-later**）。旧 `logbook` 面里
+ * （现行 **8 个**：list / show / create / use / rebuild / **send-now** / **send-later** / **cro-guide**）。旧 `logbook` 面里
  * **close / archive / health / qa 四个动作已删**（用户裁决「功能上废弃，实际上没用」），
  * 其函数（closeSession / archiveSessions / healthCheck / qaCheck）**同批删除**——
  * 保留下来的只有：create（--desc / --issue 二选一、dry-run 预览）、
@@ -41,11 +41,17 @@ import { localDate, localDateTimeMinutes } from './time.js'
  *   同落点语义），只差**时刻**；而「唤醒（冷载入）」是**两条路径共有**的属性，不配做区分
  *   ⇒ 族名取共享词干 **`send-`**、轴取 **`-now` / `-later`**（同构）。**硬切无别名**；
  *   机制层词汇（`wake-registry.json` / `w-*` id / `WakeEntry` / 调度器名）**一律不动**（分层命名）。
+ * 2026-09-20（CRO 落地，owner 令「搞定了发一版」）：新增 **`cro-guide`** —— CRO
+ *   （Continuous Re-Occurrence，`docs/cro-design.md`）的**编写指南**出口。
+ *   判据（R↓，为何挂在本工具而不新增域）：CRO 程序**放在轨迹自己的目录里**
+ *   （`<轨迹目录>/continuous-re-occurrence.ts`）⇒ 「怎么写它」是**逐轨迹**的知识，
+ *   而**管轨迹的人正是用本工具的人**；挂这儿 = 设计 §9-5 的"**既有 guide 位置、不新增域**"。
+ *   ⚠️ 本动作**纯读**（输出指南正文，不碰 fs、不碰注册表）。
  */
-type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'send-now' | 'send-later'
+type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'send-now' | 'send-later' | 'cro-guide'
 
 export const TRAJECTORY_ACTIONS: readonly TrajectoryAction[] = [
-  'list', 'show', 'create', 'use', 'rebuild', 'send-now', 'send-later',
+  'list', 'show', 'create', 'use', 'rebuild', 'send-now', 'send-later', 'cro-guide',
 ]
 
 /**

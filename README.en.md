@@ -283,6 +283,33 @@ Carve a **deliberately limited role** out of an all-capable assistant — not ju
 - ⚠️ **The one exception path**: when `steer` is unavailable it **falls back to queueing** (fail-safe: **queueing is preferable to silently dropping the message**) — the receipt text says so explicitly. **`send-later` is unaffected**: booking exists to wake the target at a due instant, and "queue rather than interrupt the current round" is behaviour that has been empirically validated for it.
 - **A closed target can still be woken**: if the session is not in memory it is loaded first (**cold wake**); if it cannot be loaded, the entry stays in the registry with the reason recorded — **never silently dropped**.
 - **"Periodic" belongs to the workspace**: to go round after round, the **receiving** trajectory schedules the next round at the end of each round. ACC provides only the primitive "deliver one message when due" — it does not decide the cadence for you (focus, cadence and bias are yours; any number of trajectories run in parallel, independent of each other).
+
+#### CRO — let a trajectory decide **when it should be woken**
+
+**The problem**: both actions above require a **pre-computed instant** ("wake me at 3"). But **whether to wake is often not a matter of time**: a trajectory should only wake when "it is daylight + someone is home + not peak hours"; if it is already working it should not be woken again; if its log is nearly full, the next wake should **ask it to tidy up first**.
+
+**The approach**: **let a trajectory carry its own program**, which ACC runs on every check — **that program decides "should I be woken now, and what should the wake say"**.
+
+| | |
+|---|---|
+| **Where the program lives** | `<CCC root>/AGENT_SESSIONS/<trajectory dir>/continuous-re-occurrence.ts` (inside the trajectory's **own directory** ⇒ it survives carrier changes and is version-controlled with git) |
+| **Switch** | 🔴 **There is none** — **file present = enabled, file absent = disabled** (no enabled field, no registry) |
+| **Who runs it** | ACC's wake scheduler (the existing **5-minute** tick) |
+| **What it receives** | a **JSON snapshot** on stdin: identity / time / trajectory body (SESSION.md size and mtime, `references/` listing) / binding and carriers (bound, live, and 🔴 **currently running a round**) / scheduling (this trajectory's pending wakes, scheduler state) |
+| **What it returns** | **one line of JSON** on stdout: `{"wake":true,"prompt":"…","reason":"…"}` or `{"wake":false}` (**absent = do not disturb**) |
+| **Read before writing** | `container_trajectory cro-guide` — the **guide plus a ready-to-use sample snapshot** |
+
+**Hard constraints that shaped the design** (none of them arbitrary):
+
+- 🔴 **ACC only spawns a process — it never imports your program.** The process boundary kills two birds at once: ACC does not depend on the workspace's **source path** (an installed copy lives elsewhere, and two paths means two sources of truth), and **a syntax error in one user program cannot take down the whole container**.
+- 🔴 **A half-finished program is allowed to just error out**: it errors / times out (hard 60-second timeout, then killed) / emits invalid output ⇒ **one log line + skip this round**.
+- 🔴 **No CRO failure may affect the existing mechanisms** — `send-later` / `send-now` / registry delivery keep working. This one is pinned by a real test, not a verbal promise.
+- 🔴 **Fill in `reason`**: once a program decides, "why was I woken then" **can no longer be reconstructed from the timetable** (the reason lives in the program's belly); without it, an incident cannot be replayed.
+- **If the program wants to remember what it decided last time, it records that itself** — a state file in **its own trajectory directory** (that state lives in its own process; ACC cannot reach it). So **debouncing is the program's job too**: if it wants "do not wake me too often", it keeps its own timestamp.
+- ⚠️ **It is not self-testing**: the guide's recommended flow is to **write it under a dev name first** (e.g. `continuous-re-occurrence.dev.ts`, which is **not** enabled) → get the self-test green → **then rename it to the real name** (because "file present = enabled", **the rename is the go-live action**).
+
+> 🔵 **This is not a comeback of autopilot**: what retired was the **decision content** (periodic cadence + prompts); the **scheduling capability** stayed. CRO adds what a workspace cannot do itself — **deciding whether to wake while nobody is awake** (a workspace's own scheduling only runs *when it is woken*).
+
 - ⚠️ **History (retired in v1.35.0)**: ACC used to ship its own "**periodic self-wake autopilot**" — an in-plugin clock + a `topPrompt`/bias script + the "periodic self-wake" panel switch + the `container_admin autopilot` actions. **Removed entirely in v1.35.0.** Reason: over a plain wake it added only two things — a **periodic cadence** and **prompt injection** — both of which a workspace can do itself; and it was actually **weaker** (it required the target session to be **in memory**, whereas a wake supports **cold** sessions). Older wording such as `container_admin autopilot`, `autopilot-trajectory`, the `--auto` directory suffix or `[Autopilot Trajectory · 唤起]` should all be read through this note: **that mechanism is gone.**
 
 ### 6.6 Security model

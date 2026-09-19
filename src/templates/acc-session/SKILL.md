@@ -1,13 +1,13 @@
 ---
 name: acc-session
-description: 轨迹追踪知识映射（v1.34：v1.33 logbook 并入 trajectory，v1.34 工具名改 container_trajectory）。list/show/create/use/rebuild + send-now（即时投递）/ send-later（未来唤醒）操作 AGENT_SESSIONS/ 目录；rebuild = Ship of Theseus 原地清空重建。多步骤工作必须先创建轨迹。
+description: 轨迹追踪知识映射（v1.34：v1.33 logbook 并入 trajectory，v1.34 工具名改 container_trajectory）。list/show/create/use/rebuild + send-now（即时投递）/ send-later（未来唤醒）/ cro-guide（CRO 编写指南：让轨迹自己判断何时该被叫醒）操作 AGENT_SESSIONS/ 目录；rebuild = Ship of Theseus 原地清空重建。多步骤工作必须先创建轨迹。
 ---
 
 # Skill: acc-session — 轨迹追踪（trajectory 知识映射）
 
 > **v1.33/v1.34 工具面重构**：`logbook` **并入 `trajectory`**（v1.33，用户裁决「废除 logbook 这个词」——一条轨迹 = 持久身体 SESSION.md + 时间轴），**v1.34 工具名硬切为 `container_trajectory`**（准确性调整：前缀 `container` 表作用域=本容器内，不表地位）。本技能是知识映射——真实工具由 Native Cordis 插件进程内注册（`container_trajectory`），scripts/ 已退役为空目录。
 >
-> 动作收敛（原两工具 23 动作 → **6**；**2026-09-16 增第 7 个 `send-message`**；🔴 **2026-09-17 两个投递动作更名（命名 A 案，硬切无别名）：`wake-later` → `send-later`、`send-message` → `send-now`**——判据：两者本是**同一条投递通路**、只差**时刻**，而「唤醒」是**共有**属性不配做区分 ⇒ 族名 `send-`、轴 `-now`/`-later`）：`close` / `archive` 删（归档走 `container_fs mv → _archived/`）｜`health` / `qa` 并入 `use`（内联完整性检查，通过静默、不通过**提示**）｜`summary` 并入 `list`｜`hook-develop-guide` 并进 `container_admin msm guide`｜`wake-add`/`wake-list`/`wake-rm` → **`send-later`**（原 `wake-later`）。
+> 动作收敛（原两工具 23 动作 → **6**；**2026-09-16 增第 7 个 `send-message`**；🔴 **2026-09-17 两个投递动作更名（命名 A 案，硬切无别名）：`wake-later` → `send-later`、`send-message` → `send-now`**——判据：两者本是**同一条投递通路**、只差**时刻**，而「唤醒」是**共有**属性不配做区分 ⇒ 族名 `send-`、轴 `-now`/`-later`）：`close` / `archive` 删（归档走 `container_fs mv → _archived/`）｜`health` / `qa` 并入 `use`（内联完整性检查，通过静默、不通过**提示**）｜`summary` 并入 `list`｜`hook-develop-guide` 并进 `container_admin msm guide`｜`wake-add`/`wake-list`/`wake-rm` → **`send-later`**（原 `wake-later`）。**2026-09-20 增第 8 个 `cro-guide`**（CRO 编写指南；判别据=它是**逐轨迹**的知识，故挂在管轨迹的工具上，不新增域）。
 
 ## 用途
 
@@ -30,7 +30,10 @@ container_trajectory { action: "<subcommand>", name: "<S###|目录名|关键词>
 | `send-later` | **定时唤醒**（原 `wake-later`）：未来时刻（RFC3339 或 `+30m`/`+2h`）+ 一条 message，可唤醒任一轨迹（含自己）；落点 `AGENT_SESSIONS/wake-registry.json`，中心调度器到点投递；**fire-and-forget——无回执、无回收** |
 | `send-now` | **即时投递**（2026-09-16 增；**2026-09-17 由 `send-message` 更名**）：**现在**就把一条 message 递给目标。live 目标 → **不排队**：在跑则 `steer` **当场注入当前轮**、空闲则立即起一轮；非 live → 走 `sessionController` **冷载入**（**等效于直接 wake**，但**不等 5min tick**）。**同步回执**；**不落注册表**（注册表保持"未来时刻表"单一语义）。⚠️ 回执只到「**已注入 / 已起轮**」——**不表示**目标已执行/已答复；要确证"目标真的动了"必须看它自己的 `SESSION.md`（**不得凭回执结案**）。⚠️ 若 `steer` 不可用会**退回排队**（fail-safe：宁可排队，不可静默丢消息），此时回执文案会写明 |
 
+| `cro-guide` | **CRO 编写指南**（2026-09-20）：读一下"怎么给**这条轨迹**配一段自己的程序、由它决定**该不该叫我**"。现行唤醒只认**时间**（"3 点叫我"）；CRO 让它认**情况**（"天亮且家里有人才叫我"）。**无参数**（纯读，吐指南正文 + 一份可直接用的样例快照）。程序放 `<轨迹目录>/continuous-re-occurrence.ts`（**文件在 = 启用**），由 ACC 的唤醒调度器每 tick 跑它 |
+
 > 周期自唤醒（autopilot）**已不存在**：ACC 侧那套于 **v1.35.0 整段退场**（`container_admin` 的 `autopilot` 域已删）。现行自管理巡航 = **CCC 自管理链路**（`msm autopilot-round` + `container_trajectory send-later`），见各 CCC 自己的 SESSION.md 协议段。
+> ⚠️ **CRO 不是 autopilot 的回归**（`docs/cro-design.md` §6.4）：退场删的是**判据内容**（周期节拍 + 提示词），留下的是**调度能力**；CRO 补的是"**在没人醒着时判断该不该醒**"——那正是 CCC 自己做不到的那件（CCC 的自排是"被唤起时才跑"）。
 
 ## 轨迹命名规范
 
@@ -51,6 +54,7 @@ container_trajectory { action: "<subcommand>", name: "<S###|目录名|关键词>
 - 被 rebuild 提醒（[TRAJECTORY-ASSISTANT · LIMIT]）要求重建时 → `container_trajectory rebuild`
 - 需要"未来某一刻自动继续/提醒另一条轨迹"时 → `container_trajectory send-later`
 - 需要"**现在就**把一件事告诉另一条轨迹（或叫醒一条冷轨迹）并拿到投递回执"时 → `container_trajectory send-now`
+- 需要让**这条轨迹自己判断"什么时候该被叫醒"**（而不是写死一个时刻）时 → 先 `container_trajectory cro-guide`，照指南写那段程序
 
 ## 参考
 

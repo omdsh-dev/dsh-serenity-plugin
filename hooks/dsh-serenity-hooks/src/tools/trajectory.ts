@@ -4,7 +4,7 @@
  * v1.33（S142 §32 用户裁决）：由 `logbook` **更名并收敛为 `trajectory`**（v1.34：工具名再硬切为
  * `container_trajectory`，无别名）——trajectory 是一等概念
  * （SESSION.md 是它的持久身体），本工具管它的**载体生命周期 + 一次性时间安排**。
- * 动作面现行 **7 个**：list / show / create / use / rebuild / **`send-now`** / **`send-later`**。
+ * 动作面现行 **8 个**：list / show / create / use / rebuild / **`send-now`** / **`send-later`** / **`cro-guide`**。
  * 🔴 2026-09-16（所有者裁决）：**第 7 个动作 `send-message`（即时投递）**
  *    ——与 `wake-later` 共用取用通路，差别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）；
  *    实现落在 `wake-scheduler.ts` 的 `sendToTrajectory()`（"怎么把一句话送到一条轨迹"是调度器的知识）。
@@ -27,6 +27,9 @@
  *     `systemPrompt.section` 注入，见 `docs/trajectory-skill-injection.md`）
  *   · autopilot 面（all/init/random/diag/doc/check/status/guide）→ `container_admin` 的 autopilot 域
  *   · `wake-add`/`wake-list`/`wake-rm` → **`wake-later`**（v1.33 收敛；**2026-09-17 更名 `send-later`**）
+ *   · 2026-09-20（CRO 落地）：新增 **`cro-guide`** —— CRO 编写指南的出口（纯读）。
+ *     判据（R↓，为何在此而不新增域）：CRO 程序放在**轨迹自己的目录**里 ⇒ "怎么写它"是
+ *     **逐轨迹**的知识，而管轨迹的人正是用本工具的人（设计 §9-5「既有 guide 位置，不新增域」）。
  *
  * 保留 osp 对齐语义的部分：create 的 `--desc`/`--issue` 二选一、use 激活即重命名 dsh 会话标题（F3）。
  * 活跃会话跟踪：内存 Map（按 dsh 会话 id 隔离）+ 从 events 恢复（S134）。
@@ -45,6 +48,7 @@ import { appendBound, pruneMissingBindings, readLastBound, resolveSessionTraject
 import { hasSessionLogById, sessionsRootDir } from '../session-cleanup.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
 import { sendToTrajectory } from '../wake-scheduler.js'
+import { CRO_GUIDE } from '../cro-guide.js'
 import {
   listSessions,
   showSession,
@@ -239,7 +243,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
   name: 'container_trajectory',
   description:
     'Trajectory (AGENT_SESSIONS/ — the persistent body of a trajectory; the dsh conversation is only its rebuildable carrier). ' +
-    'Lifecycle + delivery: list (inventory with stats and anomaly marks) / show (read one SESSION.md) / create / use (activate for this conversation, with inline integrity check) / rebuild (clear-and-rebuild the current conversation in place, Ship of Theseus) / send-now (deliver ONE message to a trajectory RIGHT NOW — live: injected immediately; not live: cold-resumed, i.e. equivalent to a direct wake; returns a synchronous receipt) / send-later (schedule ONE message to any trajectory at a future instant — fire-and-forget: no receipt, no recall, no panel). ' +
+    'Lifecycle + delivery: list (inventory with stats and anomaly marks) / show (read one SESSION.md) / create / use (activate for this conversation, with inline integrity check) / rebuild (clear-and-rebuild the current conversation in place, Ship of Theseus) / send-now (deliver ONE message to a trajectory RIGHT NOW — live: injected immediately; not live: cold-resumed, i.e. equivalent to a direct wake; returns a synchronous receipt) / send-later (schedule ONE message to any trajectory at a future instant — fire-and-forget: no receipt, no recall, no panel) / cro-guide (the CRO programming guide: how to give THIS trajectory its own program that decides when it should be woken). ' +
     'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars). ' +
     'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound trajectory. ' +
     'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self). ' +
@@ -256,7 +260,8 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
         'use (activate context; inline integrity check — pass silent, problems reported as hints, not errors) / ' +
         'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note) / ' +
         'send-now (deliver one message RIGHT NOW: live target injected immediately, non-live cold-resumed like a direct wake; returns a synchronous receipt) / ' +
-        'send-later (one future instant + one message, delivered to target trajectory)',
+        'send-later (one future instant + one message, delivered to target trajectory) / ' +
+        'cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot)',
     },
     name: { type: 'string', description: 'show/use session identifier (S### or dir name or keyword)' },
     note: { type: 'string', description: 'rebuild: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
@@ -449,6 +454,14 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
             '  · ⚠️ 回执只到「已注入 / 已起轮」——**不表示**目标已执行或已答复。判"目标真的动了"须看它自己的 SESSION.md（文件级判据）。',
           ].join('\n'),
         }
+      }
+      case 'cro-guide': {
+        // CRO 编写指南（2026-09-20；owner 令「机制属 ACC / 程序属 CCC」+「指南 ACC 内置，guide 老套路」）。
+        // 纯读：只是把 `cro-guide.ts` 的正文吐出来（正文含**由装配器实时生成**的样例快照，
+        // 故**永不与 schema 漂移** —— 见该文件头的单真相源纪律）。
+        // 为什么挂在本工具：CRO 程序放在**轨迹自己的目录**里 ⇒ 这是"逐轨迹"的知识，
+        // 而管轨迹的人正是用本工具的人（设计 §9-5：既有 guide 位置，不新增域）。
+        return CRO_GUIDE
       }
       default:
         throw new Error(`Unknown action: ${args.action as string}`)

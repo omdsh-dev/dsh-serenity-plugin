@@ -113,7 +113,8 @@ export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'd
 const ACC_CATALOG = `═══ ACC Usage Catalog ═══
 Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
 
-  ① 轨迹本体          → container_trajectory（list/show/create/use + rebuild 超限重建 + send-now 即时投递 + send-later 未来一次性唤醒）
+  ① 轨迹本体          → container_trajectory（list/show/create/use + rebuild 超限重建 + send-now 即时投递 + send-later 未来一次性唤醒
+                          + cro-guide CRO 编写指南）
                          原 logbook 已并入（v1.33 用户裁决：废除 logbook 词）；close/archive 删（归档走 container_fs mv），
                          health/qa/summary 分别并入 use / list，hook-develop-guide 并进 container_admin msm guide
   ② 认知质量框架      → praxis（eap/neat/cce 三合一——可实践理论注入，section 渐进披露，无参即目录）
