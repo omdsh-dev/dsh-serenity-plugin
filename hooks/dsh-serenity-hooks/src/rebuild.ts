@@ -230,6 +230,21 @@ const PENDING_TTL_MS = 10 * 60 * 1000
 // ── rebuild 诊断（2026-09-05 用户 bug：调用成功但会话没重建——错误被 console.warn 吞掉不可见）──
 // 每次排队/消费路径都落盘 AGENT_SESSIONS/.rebuild-diag.json（CCC 内可读诊断通道，
 // 复用 .restrict-diag.json 先例——单文件覆盖保留最近状态）——复现后 agent/用户直接读文件定位断点。
+//
+// ⚠️ 计数语义（2026-09-20 回源码答复 S151 的观察，勿再当谜）：
+//  · **四个计数都是「进程内累计量」**（模块级 `diagState`，进程启动归零），**不是单次快照**；
+//    文件是「累计计数 + 最近一次事件」的**覆盖写快照**（每次事件重写，`lastTs` = 最后一次事件时间）。
+//  · 🔴 **`queueCount − rebuiltCount` 不是常数，且差值不代表"丢账"**。除 `ttl-dropped` / `failed`
+//    之外，**还有三类会让差值 +1 的路径**：
+//      P1 **`empty-surface`（有事件、不计数）**——`performRebuild` 返回 false（无节点可清；见
+//         `performRebuild` 的两处 `return false`）⇒ 落 `empty-surface` 事件，而下方增量只认
+//         4 类事件名 ⇒ **它既不进 rebuilt 也不进 dropped/failed**。识别法：`lastEvent === 'empty-surface'`。
+//      P2 **同会话在消费前重复排队**——`queueRebuild` 用 `pendingRebuilds.set()`（语义 = 覆盖同会话旧队列）
+//         ⇒ N 条 `queued` 只对应 1 条 `rebuilt` ⇒ 差值 +(N−1)。**良性**：重建仍恰好发生一次。
+//      P3 **进程重启**——`pendingRebuilds` 是内存 Map：重启即丢（**不产生任何事件**）；同时
+//         `diagState` 归零 ⇒ **计数不可跨重启累加比较**，且**文件在下次事件前仍留着死进程的数值**。
+//  · 🔴 **读这个文件的纪律**：必须同时读 `acc-diag` 的「武装于」——若 `lastTs < 武装于`，
+//    则文件是**上一个进程的残留**，其计数与当前进程无关（判据可机械执行，别凭感觉）。
 interface RebuildDiagState {
   lastTs: string
   lastSessionId: string

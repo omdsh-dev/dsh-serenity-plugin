@@ -169,6 +169,17 @@ export function __resetWakeSchedulerStateForTest(): void {
  * @param dirName 目标 trajectory 目录名
  * @returns 命中返回 agent 与取得方式（how 进 lastResult，便于诊断）；未命中返回原因
  *   （原因带 `notReady` = **环境未就绪**而非投递失败，调用方**不得**据此记一次失败）
+ *
+ * 🔴 **前置条件：本轨迹名下必须有一条「未取代」的绑定记录**（2026-09-20 回源码答复 S151 实测）：
+ * 选人是**遍历 `listBoundSessionIds(root, dirName)` 给出的 id**（按绑定时间倒序），**live 只是这条
+ * 记录的一个加分项**——「绑定里的那条恰好 live ⇒ 直接注入」，否则走冷载入。
+ * ⇒ **「有 live 会话」≠「有绑定」**：会话活着但该轨迹**零条未取代绑定**时，本函数**直接返回
+ * `无绑定会话记录…`**（`send-now` / `send-later` 到点投递同此判据）。
+ * 实证（2026-09-20）：S142 三条旧绑定于 **08:03** 被 `supersededAt` 取代（D69「同轨迹只留一条」），
+ * 而当前载体的绑定**直到 17:05 那次 rebuild 才写入**（`queueRebuild` 内的 `appendBound(action:'rebuild')`）
+ * ⇒ **10:42 的 `send-now` 落在这个窗口里** ⇒ 报"无绑定会话记录"（当时确有 live 会话）。
+ * ⚠️ 已知**注释漂移**：本行上方"→ 标题回退"在函数体内**没有对应分支**（标题回退属 v1.29.2 R2，
+ * 现行实现已只认绑定）；**仅登记，未改**（改它属 ACC 代码改动，须具名令）。
  */
 async function acquireWakeAgent(
   ctx: Context,
