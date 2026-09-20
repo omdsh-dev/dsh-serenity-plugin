@@ -30,13 +30,17 @@ import type { Context } from 'cordis'
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import { existsSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { isSafeModeOn, readBlacklist } from '../ccc.js'
+import { isSafeModeOn, readBlacklist, readTrajectorySkills } from '../ccc.js'
 import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
 import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory-ops.js'
 import { readLastBound } from '../trajectory-bound.js'
-import { buildTrajectorySkillsSection, hasTrajectorySkillsDeclaration } from '../trajectory-skills.js'
+import {
+  buildTrajectorySkillsSection,
+  hasTrajectorySkillsDeclaration,
+  TRAJECTORY_SKILLS_MAX_CHARS,
+} from '../trajectory-skills.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
 import { readAdvancedSettings } from '../config-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -626,17 +630,22 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
 /**
  * 轨迹 skill 注入 section（规格 `docs/trajectory-skill-injection.md` §3，v1.34.1）。
  *
- * **声明来源**：该会话绑定的轨迹（`readLastBound(session).mdPath` = 它的 `SESSION.md`）顶部
- * frontmatter 的 `skills:`；正文 = 所列 skill 的 `SKILL.md` 全文（本模块只注册，装配在
- * `trajectory-skills.ts`）。
+ * **声明来源（两条，并集）**：
+ *   · **CCC 级**（v1.44.0，owner 令）= `.opencode/serenity.json` 的 `trajectory.skills`
+ *     ——**本 CCC 的每条轨迹都带**（含 skiff 角色会话），是容器给的底座；
+ *   · **轨迹级** = 该会话绑定的轨迹（`readLastBound(session).mdPath` = 它的 `SESSION.md`）
+ *     顶部 frontmatter 的 `skills:`——这条轨迹额外的。
+ *   合并规则与顺序见 `trajectory-skills.mergeSkillNames`（CCC 级在前，同名去重）。
+ *   正文 = 合并清单里各 skill 的 `SKILL.md` 全文（本模块只注册，装配在 `trajectory-skills.ts`）。
  *
  * 为什么是 **per-agent scoped section**（与 `registerEntrySkillSection` 同形）：注入必须
  * **绑定期间持续存在**（a2）——一次性注入会随对话压缩消失，而 section 每次装配重新求值。
  *
  * 为什么**门在注册时、内容在求值时**（R↓，两个失败模式各治一个）：
- *   · 注册门（无绑定 / 无声明 ⇒ 不注册）：满足"零配置面不产生空 section、不产生噪声"；
- *   · 求值回调**每轮重读 `readLastBound` + 文件**：绑定切换 / 声明被编辑后自动跟上，
- *     且绑定消失时返回 `''`（宿主 renderSections **丢弃空 section**，不残留噪声）。
+ *   · 注册门（**无绑定 / 两条来源皆无** ⇒ 不注册）：满足"零配置面不产生空 section、不产生噪声"；
+ *   · 求值回调**每请求重读 `readLastBound` + 文件 + CCC 配置**：绑定切换 / 声明或配置被编辑后
+ *     自动跟上（**动态注入，不缓存**），且绑定消失时返回 `''`
+ *     （宿主 renderSections **丢弃空 section**，不残留噪声）。
  *
  * ⚠️ 路径取自绑定的 `mdPath`（权威记录），**不用** `resolveSessionTrajectoryLabel` 的显示 label
  * 去拼路径——label 是模糊匹配的展示码，拼路径即模糊匹配当精确匹配用。
@@ -653,7 +662,9 @@ export function registerTrajectorySkillSection(agent: Agent, root: string): bool
   if (trajectorySkillAgents.has(key)) return false
   const bound = readLastBound(session)
   if (!bound) return false
-  if (!hasTrajectorySkillsDeclaration(root, bound.mdPath)) return false
+  // 门（v1.44.0 放宽）：**CCC 有声明 ∨ 该轨迹有声明** ⇒ 注册。
+  // 轨迹级那条老规则不变（无绑定 / 两条来源皆无 ⇒ 不注册，不产生空 section、不产生噪声）。
+  if (readTrajectorySkills(root).length === 0 && !hasTrajectorySkillsDeclaration(root, bound.mdPath)) return false
   try {
     agent.ctx.systemPrompt.section({
       name: 'serenity-trajectory-skills',
@@ -662,7 +673,14 @@ export function registerTrajectorySkillSection(agent: Agent, root: string): bool
       text: () => {
         const current = readLastBound(session)
         if (!current) return ''
-        return buildTrajectorySkillsSection(root, current.mdPath)
+        // 🔴 动态注入（owner 令 2026-09-20：「注入是动态注入就行」）：CCC 配置与轨迹 frontmatter
+        // **每请求重读**——改配置/改 frontmatter 都即时生效，无需重新 use、无需重启，故不缓存。
+        return buildTrajectorySkillsSection(
+          root,
+          current.mdPath,
+          TRAJECTORY_SKILLS_MAX_CHARS,
+          readTrajectorySkills(root),
+        )
       },
     })
     trajectorySkillAgents.add(key)

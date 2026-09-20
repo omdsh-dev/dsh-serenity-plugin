@@ -617,6 +617,47 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     // cleanup 内置 afterEach 已 rm dir；此处 reset active 防污染
   })
 
+  it('🔴 createSkiffAgent 集成：CCC 级 trajectory.skills ⇒ skiff 会话也拿到该 section（v1.44.0，owner「skiff 也支持」）', async () => {
+    // CCC 级声明：一处声明、全容器生效（含 skiff）
+    writeConfig({ trajectory: { skills: ['cce'] } })
+    mkdirSync(join(dir, '.dsh', 'skills', 'cce'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'skills', 'cce', 'SKILL.md'), '# CCE 正文')
+    const sections: Array<{ name: string; order?: number; text: () => string }> = []
+    const events: unknown[] = []
+    const fakeCtx2 = {
+      agents: {
+        create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+          const agentCtx = {
+            get: () => undefined,
+            systemPrompt: { section: (s: { name: string; order?: number; text: () => string }) => sections.push(s) },
+          }
+          await opts.setup?.(agentCtx)
+          return {
+            agent: {
+              ctx: agentCtx,
+              // header 必备：绑定读取以 header.cwd 定位 CCC 根、以 header.id 为键
+              session: { id: opts.sessionId, header: { id: opts.sessionId, cwd: dir }, events, append: (t: string, d: unknown) => events.push({ type: t, data: d }) },
+              followup: () => {},
+            },
+          }
+        },
+      },
+    }
+    const ref = await createSkiffAgent(fakeCtx2 as never, dir, 'zhaocai', {
+      ...sessionRole(),
+      systemPrompt: '角色人格',
+    } as never, undefined, 'skiff-weixin-fixed-cccskills')
+    // skiff 自己的段照旧在
+    expect(sections.find((s) => s.name === 'serenity-skiff')?.text()).toContain('角色人格')
+    // 🔴 CCC 级 skill 供给也送达（复用同一 registerTrajectorySkillSection，不另写一套）
+    const injected = sections.find((s) => s.name === 'serenity-trajectory-skills')
+    expect(injected).toBeDefined()
+    expect(injected?.order).toBe(-45)
+    expect(injected?.text()).toContain('=== skill: cce ===')
+    expect(injected?.text()).toContain('# CCE 正文')
+    unregisterSkiffSession(ref.sessionId)
+  })
+
   it('createSkiffAgent 集成：临时身份（无 sessionId）→ 不建工作台、提示词无工作台行（v1.30.9）', async () => {
     const sections: Array<{ name: string; text: () => string }> = []
     const fakeCtx = {

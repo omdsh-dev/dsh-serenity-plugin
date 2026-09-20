@@ -132,37 +132,73 @@ export function hasTrajectorySkillsDeclaration(root: string, mdPath: string): bo
   }
 }
 
+/** 去空白 + 丢空项 + 同名去重（保留首次出现位置）——两条声明来源共用同一规范化 */
+function normalizeNames(names: readonly string[]): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const raw of names) {
+    const clean = raw.trim()
+    if (clean === '' || seen.has(clean)) continue
+    seen.add(clean)
+    out.push(clean)
+  }
+  return out
+}
+
 /**
- * 装配注入正文（规格 §3）：按声明顺序拼接各 skill 的 `SKILL.md` 全文，每段带来源抬头
+ * 合并两条声明来源（v1.44.0）：**CCC 级在前，轨迹级追加**，同名去重取首次位置。
+ *
+ * 两条来源（owner 令 2026-09-20）：
+ *   · **CCC 级** = `.opencode/serenity.json` 的 `trajectory.skills`（本 CCC 所有轨迹共有的底座）；
+ *   · **轨迹级** = 该轨迹 `SESSION.md` frontmatter 的 `skills:`（这条轨迹额外的）。
+ *
+ * 为什么是**并集**而不是二选一（R↓）：C1 设计当初否决"纯 CCC 全局"的理由是"会**丢掉
+ * per-trajectory**"；并集把两侧都保住——容器给底座，单条轨迹仍可加自己的额外项。
+ * 为什么 CCC 级**在前**：底座先立、增量随后，与"入口身份块 order=-50 → 本 section order=-45"
+ * 的既有先后观感一致。
+ */
+export function mergeSkillNames(cccSkills: readonly string[], trajSkills: readonly string[]): string[] {
+  return normalizeNames([...cccSkills, ...trajSkills])
+}
+
+/**
+ * 装配注入正文（规格 §3）：按**合并后的**顺序拼接各 skill 的 `SKILL.md` 全文，每段带来源抬头
  * `=== skill: <name> ===`；拿不到全文的一律以 `[缺失]` 响亮提示占位（**不静默**）。
  *
- * 安全（规格 §3 🔒）：名字来自 CCC 数据（frontmatter）⇒ **先过 `isSafeSkillName`**；
+ * 安全（规格 §3 🔒）：名字来自 CCC 数据（frontmatter / CCC 配置）⇒ **先过 `isSafeSkillName`**；
  * 不安全 ⇒ 按缺失处理，且不调用 `findSkillMd` ⇒ **不发生任何以该名拼出的 fs 访问**。
  *
- * 长度守卫：复用已导出的 `truncateContent`，超限截断并在末尾写明 `truncated`。
+ * 长度守卫：复用已导出的 `truncateContent`，**在合并之后**统一截断（两条来源共享同一上限，
+ * 不是各给 32 KB——否则上限会随来源数翻倍）。
  *
  * @param root CCC 根
  * @param mdPath 轨迹的 SESSION.md 路径（**来自绑定的 `mdPath`**，不用 label 拼）
  * @param maxChars 总长上限（字符）
- * @returns 注入正文；无声明 → `''`（空串 = 宿主不产出该 section 块）；SESSION.md 缺失 → 响亮提示
+ * @param cccSkills CCC 级声明（`readTrajectorySkills`；缺省空 = 只有轨迹级，行为与 v1.43 一致）
+ * @returns 注入正文；两条来源皆无声明 → `''`（空串 = 宿主不产出该 section 块）；
+ *          SESSION.md 缺失/读失败 → 响亮提示（若同时有 CCC 级声明，则提示在前、正文随后——
+ *          **提示不因"别处有内容"而被吞掉**）
  */
 export function buildTrajectorySkillsSection(
   root: string,
   mdPath: string,
   maxChars: number = TRAJECTORY_SKILLS_MAX_CHARS,
+  cccSkills: readonly string[] = [],
 ): string {
   const abs = absoluteMdPath(root, mdPath)
+  let trajNames: string[] = []
+  let notice = ''
   if (!existsSync(abs)) {
-    return `${SKILL_MISSING_MARK} ${abs}（轨迹的 SESSION.md 不存在——skill 声明无从读取；若刚重建/移动过轨迹，请确认绑定记录）`
+    notice = `${SKILL_MISSING_MARK} ${abs}（轨迹的 SESSION.md 不存在——skill 声明无从读取；若刚重建/移动过轨迹，请确认绑定记录）`
+  } else {
+    try {
+      trajNames = parseDeclaredSkills(readFileSync(abs, 'utf-8'))
+    } catch (err) {
+      notice = `${SKILL_MISSING_MARK} ${abs}（SESSION.md 读取失败：${err instanceof Error ? err.message : String(err)}）`
+    }
   }
-  let sessionMd: string
-  try {
-    sessionMd = readFileSync(abs, 'utf-8')
-  } catch (err) {
-    return `${SKILL_MISSING_MARK} ${abs}（SESSION.md 读取失败：${err instanceof Error ? err.message : String(err)}）`
-  }
-  const names = parseDeclaredSkills(sessionMd)
-  if (names.length === 0) return ''
+  const names = mergeSkillNames(cccSkills, trajNames)
+  if (names.length === 0) return notice
 
   const blocks: string[] = []
   for (const name of names) {
@@ -181,5 +217,6 @@ export function buildTrajectorySkillsSection(
       blocks.push(missingNotice(name))
     }
   }
-  return truncateContent(blocks.join('\n\n'), maxChars)
+  const body = blocks.join('\n\n')
+  return truncateContent(notice ? `${notice}\n\n${body}` : body, maxChars)
 }

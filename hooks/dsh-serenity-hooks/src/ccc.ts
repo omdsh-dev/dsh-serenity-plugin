@@ -158,6 +158,25 @@ interface SerenityConfig {
   trajectory?: {
     /** autopilot（周期自唤醒的特例；每 CCC 单例，D59） */
     autopilot?: AutopilotTrajectorySettings;
+    /**
+     * **CCC 级 skill 供给**（v1.44.0；owner 令 2026-09-20：「要求实现我的诉求……skiff 也支持」）。
+     *
+     * 语义：**本 CCC 的每条轨迹都带这些 skill**——声明的 skill 全文在该轨迹**被绑定期间**
+     * 动态注入系统提示词（每请求重新求值，不缓存）。与轨迹自己在 `SESSION.md` frontmatter
+     * 里的 `skills:` 是**并集**（CCC 级在前、轨迹级追加、同名去重）⇒ 容器给底座、
+     * 单条轨迹仍可加自己的额外项（这正是 C1 设计当初否决"纯 CCC 全局"的理由所在：
+     * 全局化会**丢掉 per-trajectory**；并集把它保住）。
+     *
+     * 归属（D23）：**机制在 ACC**（读取 + 合并 + 注入 + 守卫），**声明在 CCC**（本键）——
+     * ACC 代码里不出现任何具体 CCC 或具体 skill 名。
+     *
+     * 失败语义：未配置 / 字段缺失 / 配置损坏 ⇒ **空数组**（= 没有 CCC 级供给；轨迹级声明照旧生效）。
+     * 配置损坏本身已由 `loadSerenityConfig` 响亮告警（不静默）。
+     *
+     * ⚠️ 与 `create` 的关系：**不触发**——`create` 刻意不夺绑定（U6），注入的门是"存在绑定"。
+     * ⚠️ 作用面：**含 skiff 角色会话**（它们同样绑定工作台轨迹）。
+     */
+    skills?: string[];
   };
   /**
    * 微信桥（F4c-3，v1.27.0 实验性）：**CCC 级**配置——dsh 一个进程含多个 CCC，
@@ -404,6 +423,30 @@ export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SEREN
  */
 export function readExclusiveTools(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
   const list = loadSerenityConfig(root, paths).exclusiveTools;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+    .map((x) => x.trim());
+}
+
+/**
+ * 读取 CCC 声明的「轨迹默认 skill」清单（`trajectory.skills`，v1.44.0）。
+ *
+ * 语义与失败方向（R↓）：
+ *   · 有声明 ⇒ 该 CCC **每条被绑定的轨迹**都注入这些 skill（与轨迹自己的声明**并集**）；
+ *   · 未配置 / 字段缺失 / 配置损坏 ⇒ **空数组** = 无 CCC 级供给（**轨迹级声明不受影响**）。
+ *     这里不必像 `exclusiveTools` 那样强调 fail-closed：本键的默认态本就是"无供给"
+ *     （空数组即该默认态），且配置损坏已有 `loadSerenityConfig` 的响亮告警兜住。
+ *
+ * 🟢 **名字**在此**不做**安全过滤——那是装配层的职责（`trajectory-skills.ts` 走 `isSafeSkillName`
+ * 后才拼路径）。本函数只做"取字符串、去空白、丢非字符串"，**保持书写顺序**（注入顺序 = 书写顺序）。
+ *
+ * @param root CCC 根
+ * @param paths 候选配置相对路径
+ * @returns 去空白后的 skill 名列表（非字符串/空白项被丢弃）
+ */
+export function readTrajectorySkills(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
+  const list = loadSerenityConfig(root, paths).trajectory?.skills;
   if (!Array.isArray(list)) return [];
   return list
     .filter((x): x is string => typeof x === 'string' && x.trim() !== '')

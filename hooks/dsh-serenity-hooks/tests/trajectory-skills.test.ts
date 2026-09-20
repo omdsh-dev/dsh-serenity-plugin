@@ -45,8 +45,10 @@ import {
   extractFrontmatter,
   buildTrajectorySkillsSection,
   hasTrajectorySkillsDeclaration,
+  mergeSkillNames,
   TRAJECTORY_SKILLS_MAX_CHARS,
 } from '../src/trajectory-skills.js'
+import { readTrajectorySkills } from '../src/ccc.js'
 import { findSkillMd } from '../src/skills-discovery.js'
 import { registerTrajectorySkillSection } from '../src/seams/system-prompt.js'
 import { trajectoryCompactionReminderText } from '../src/seams/keeper.js'
@@ -340,5 +342,129 @@ describe('trajectory-skills: keeper compaction 护栏', () => {
     expect(escalated).toContain('frontmatter')
     expect(normal).toContain('skill declarations')
     expect(escalated).toContain('skill declarations')
+  })
+})
+
+// ── 9. CCC 级声明（v1.44.0；规格 v1.1 §2.3）──
+//
+// owner 令 2026-09-20：「要求实现我的诉求……注入是动态注入就行；create 先不触发吧；skiff 也支持」
+// ⇒ 声明来源由"轨迹自己"扩为**两条并集**（CCC 级在前、轨迹级追加）。
+
+describe('trajectory-skills: CCC 级声明（trajectory.skills）', () => {
+  /** 写 CCC 配置（原始文本——损坏场景要能写坏 JSON） */
+  function writeCccConfig(root: string, raw: string): void {
+    mkdirSync(join(root, '.opencode'), { recursive: true })
+    writeFileSync(join(root, '.opencode', 'serenity.json'), raw)
+  }
+
+  it('readTrajectorySkills：读数组 / 去空白 / 丢非字符串 / 保序；未配置或无该键 ⇒ []', () => {
+    expect(readTrajectorySkills(dir)).toEqual([])
+    writeCccConfig(dir, JSON.stringify({ trajectory: { skills: [' a ', 'b', 7, '', null, 'c'] } }))
+    expect(readTrajectorySkills(dir)).toEqual(['a', 'b', 'c'])
+    writeCccConfig(dir, JSON.stringify({ trajectory: { autopilot: { enabled: true } } }))
+    expect(readTrajectorySkills(dir)).toEqual([])
+    expect(readTrajectorySkills(dir, ['.dsh/serenity.json'])).toEqual([])
+  })
+
+  it('配置损坏 ⇒ 空数组、不抛（轨迹级声明不受牵连）', () => {
+    writeCccConfig(dir, '{ broken json')
+    expect(() => readTrajectorySkills(dir)).not.toThrow()
+    expect(readTrajectorySkills(dir)).toEqual([])
+  })
+
+  it('mergeSkillNames：CCC 级在前、轨迹级追加、同名去重取首次位置', () => {
+    expect(mergeSkillNames(['a', 'b'], ['b', 'c'])).toEqual(['a', 'b', 'c'])
+    expect(mergeSkillNames([], ['x'])).toEqual(['x'])
+    expect(mergeSkillNames(['x'], [])).toEqual(['x'])
+    expect(mergeSkillNames([' x '], ['x', ' '])).toEqual(['x'])
+  })
+
+  it('只有 CCC 级（该轨迹无声明）⇒ 仍注入全文 —— v1.1 的新覆盖', () => {
+    writeSkill(dir, '.opencode', 'ccc-only', 'CCC 级正文')
+    const mdPath = writeSession(dir, '2026-09-15--S999--x', '# SESSION\n无 frontmatter\n')
+    const out = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, ['ccc-only'])
+    expect(out).toContain('=== skill: ccc-only ===')
+    expect(out).toContain('CCC 级正文')
+  })
+
+  it('并集装配：CCC 级在前、轨迹级在后；同名只出现一次', () => {
+    writeSkill(dir, '.opencode', 'base', 'BASE 正文')
+    writeSkill(dir, '.opencode', 'extra', 'EXTRA 正文')
+    const mdPath = writeSession(dir, '2026-09-15--S999--x', '---\nskills: [extra, base]\n---\n')
+    const out = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, ['base'])
+    expect(out.indexOf('=== skill: base ===')).toBeLessThan(out.indexOf('=== skill: extra ==='))
+    expect(out.match(/=== skill: base ===/g)).toHaveLength(1)
+  })
+
+  it('mdPath 缺失但 CCC 级有声明 ⇒ 响亮提示在前、正文随后（提示不被吞掉）', () => {
+    writeSkill(dir, '.opencode', 'base', 'BASE 正文')
+    const missing = join(dir, 'AGENT_SESSIONS', 'ghost', 'SESSION.md')
+    const out = buildTrajectorySkillsSection(dir, missing, TRAJECTORY_SKILLS_MAX_CHARS, ['base'])
+    expect(out).toContain('[缺失]')
+    expect(out).toContain('BASE 正文')
+    expect(out.indexOf('[缺失]')).toBeLessThan(out.indexOf('=== skill: base ==='))
+  })
+
+  it('长度守卫：**合并后**统一截断（两条来源共享一份上限）', () => {
+    writeSkill(dir, '.opencode', 'big', 'y'.repeat(TRAJECTORY_SKILLS_MAX_CHARS + 5_000))
+    const mdPath = writeSession(dir, '2026-09-15--S999--x', '---\nskills: [big]\n---\n')
+    const out = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, ['big'])
+    expect(out.match(/=== skill: big ===/g)).toHaveLength(1) // 去重后只一份
+    expect(out.length).toBeLessThan(TRAJECTORY_SKILLS_MAX_CHARS + 100)
+  })
+
+  it('注册门（v1.1）：有绑定 + CCC 有声明 + 该轨迹无声明 ⇒ 注册并注入', () => {
+    writeSkill(dir, '.opencode', 'ccc-skill', 'CCC 级正文')
+    writeCccConfig(dir, JSON.stringify({ trajectory: { skills: ['ccc-skill'] } }))
+    const id = freshSessionId()
+    const mdPath = writeSession(dir, '2026-09-15--S999--x', '# SESSION\n无声明\n')
+    bind(dir, id, '2026-09-15--S999--x', mdPath)
+    const { agent, sections } = fakeAgent(dir, id)
+    expect(registerTrajectorySkillSection(agent, dir)).toBe(true)
+    const text = renderText(sections[0]!)
+    expect(text).toContain('=== skill: ccc-skill ===')
+    expect(text).toContain('CCC 级正文')
+  })
+
+  it('注册门：无绑定 + CCC 有声明 ⇒ 仍不注册（注入的门是"存在绑定"，不是"CCC 配了"）', () => {
+    writeCccConfig(dir, JSON.stringify({ trajectory: { skills: ['ccc-skill'] } }))
+    mkdirSync(join(dir, 'AGENT_SESSIONS'), { recursive: true })
+    const { agent, sections } = fakeAgent(dir, freshSessionId())
+    expect(registerTrajectorySkillSection(agent, dir)).toBe(false)
+    expect(sections).toEqual([])
+  })
+
+  it('注册门：两条来源皆无 + 有绑定 ⇒ 不注册（v1.0 行为不变、零噪声）', () => {
+    const id = freshSessionId()
+    const mdPath = writeSession(dir, '2026-09-15--S999--x', '# SESSION\n无声明\n')
+    bind(dir, id, '2026-09-15--S999--x', mdPath)
+    const { agent, sections } = fakeAgent(dir, id)
+    expect(registerTrajectorySkillSection(agent, dir)).toBe(false)
+    expect(sections).toEqual([])
+  })
+
+  it('🔴 动态注入：改 CCC 配置后，同一 section 的下一次求值跟随变化（不缓存）', () => {
+    writeSkill(dir, '.opencode', 'before', 'BEFORE 正文')
+    writeSkill(dir, '.opencode', 'after', 'AFTER 正文')
+    writeCccConfig(dir, JSON.stringify({ trajectory: { skills: ['before'] } }))
+    const id = freshSessionId()
+    const mdPath = writeSession(dir, '2026-09-15--S999--x', '# SESSION\n无声明\n')
+    bind(dir, id, '2026-09-15--S999--x', mdPath)
+    const { agent, sections } = fakeAgent(dir, id)
+    expect(registerTrajectorySkillSection(agent, dir)).toBe(true)
+    expect(renderText(sections[0]!)).toContain('BEFORE 正文')
+    writeCccConfig(dir, JSON.stringify({ trajectory: { skills: ['after'] } }))
+    const next = renderText(sections[0]!)
+    expect(next).toContain('AFTER 正文')
+    expect(next).not.toContain('BEFORE 正文')
+  })
+
+  it('create 不触发：CCC 有声明也不因 create 而注入（U6 不动——门始终是"存在绑定"）', () => {
+    // 该判据是**语义钉**：create 只写审计记录、不改绑定（trajectory.ts:312-326），
+    // 故"未绑定的会话"拿不到注入，哪怕 CCC 配了 skills。
+    writeCccConfig(dir, JSON.stringify({ trajectory: { skills: ['ccc-skill'] } }))
+    const { agent, sections } = fakeAgent(dir, freshSessionId())
+    expect(registerTrajectorySkillSection(agent, dir)).toBe(false)
+    expect(sections).toEqual([])
   })
 })

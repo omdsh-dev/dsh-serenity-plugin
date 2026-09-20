@@ -131,6 +131,7 @@ Directory of ACC capabilities — each area lists where to go for details (guide
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
                          CCC 级开关：exclusiveTools（声明专属工具）/ safeMode.blacklist（写路径黑名单）
+                         CCC 级 skill 供给：trajectory.skills（v1.44.0——**本 CCC 每条轨迹都带**，含 skiff 会话；与轨迹自己的 frontmatter 声明取并集）
 
 每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
 `
@@ -279,8 +280,21 @@ CCC 的一条 trajectory = 持久身体（SESSION.md）+ 时间轴（AGENT_SESSI
 落点 AGENT_SESSIONS/wake-registry.json，中心调度器到点投递（fire-and-forget；无回执、无回收）。
 运行态诊断（ACC 负责人专用）：acc-diag（① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。
 
+▸ trajectory.skills（v1.44.0，**CCC 级 skill 供给**；owner 令 2026-09-20「要求实现我的诉求……
+  注入是动态注入就行；create 先不触发吧；**skiff 也支持**」）：
+  **本 CCC 的每条轨迹都带这些 skill**——声明的 skill 全文在该轨迹**被绑定期间**注入系统提示词
+  （**动态注入**：每请求重新求值、不缓存 ⇒ 改配置或改 frontmatter **即时生效**，无需重新 use、无需重启）。
+  两条声明来源**并集**（不是二选一）：本键 **trajectory.skills**（容器给的底座，**在前**）
+  ＋ 轨迹自己 SESSION.md 顶部 frontmatter 的 skills:（这条轨迹额外的，**追加**；同名去重）。
+  ✅ **含 skiff 角色会话**（旁路的是 ACC 身份与纪律；skill 是"工作资料"，照给）。
+  守卫：名字先过安全校验才用于拼路径（防穿越）｜**合并后**统一 32 KB 上限截断｜找不到响亮写 [缺失]。
+  ⚠️ 与 create **无关**（create 刻意不夺绑定，U6）⇒ 注入的门是"**存在绑定**"（container_trajectory use）。
+  失败语义：未配置 / 字段缺失 / 配置损坏 ⇒ **空数组**（= 无 CCC 级供给；轨迹级声明照旧生效）。
+  归属（D23）：**机制在 ACC**（读取 + 合并 + 注入 + 守卫），**声明在 CCC**（本键）。
+
   Config:
     { "trajectory": {
+        "skills": ["acc-session", "cce"],   // v1.44.0：本 CCC 的每条轨迹都带（含 skiff 会话）
         "autopilot": {                   // 原 autopilotTrajectory 段，字段不变（旧键仍回退读）
           "enabled": true,
           "intervalHours": 2,

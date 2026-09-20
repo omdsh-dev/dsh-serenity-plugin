@@ -24,6 +24,7 @@ import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './tra
 import { readLastBound, appendBound } from './trajectory-bound.js'
 import { hostAgents } from './host/access.js'
 import { waitAgentIdle } from './agent-idle.js'
+import { registerTrajectorySkillSection } from './seams/system-prompt.js'
 
 const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
@@ -329,6 +330,25 @@ export async function createSkiffAgent(
     })
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
+  }
+  // v1.44.0（owner 令 2026-09-20：「**skiff 也支持**」）：CCC 级 `trajectory.skills` 与轨迹级
+  // frontmatter 声明，同样送到 skiff 会话。
+  //
+  // 为什么这不与"skiff 旁路 ACC 身份注入"矛盾（R↓）：旁路掉的是**ACC 身份与纪律**（skiff 用
+  // CCC 自己的角色提示词立人格）；而 skill 供给是**工作资料**（"这件事按哪套方法做"），
+  // 与人格无关 ⇒ 照给。判据是「旁路的是谁的身份」，不是「凡是 ACC 的 section 都旁路」。
+  //
+  // 门：与普通会话同一函数、同一判据（**存在绑定 ∨ CCC 有声明**）。skiff 的绑定由上面
+  // `ensureSkiffSession` 建立（工作台 SESSION）⇒ 通常此刻已具备。
+  // 失败旁路容忍：该函数内部已 catch（不抛），这里再兜一层，**绝不影响 agent 创建**。
+  // 守卫 `agent?.session`：注册以会话绑定为前提；无 session 的构造路径（部分测试替身）
+  // 直接跳过——否则会在读 `session.id` 时抛 TypeError，白刷一条告警（噪音≠响亮）。
+  if (agent?.session) {
+    try {
+      registerTrajectorySkillSection(agent, root)
+    } catch (err) {
+      console.warn(`[serenity-hooks] skiff 轨迹 skill 注入注册失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
+    }
   }
   // v1.30.13：工作台纪律块**只**经 ensureWorkspacePromptSection 挂（单一注入点；
   // 不再拼进上面的基础段——否则与微信桥每轮 question 注入重复，见该函数头 R↓）。
