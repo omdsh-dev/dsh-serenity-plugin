@@ -260,7 +260,7 @@ describe('container-status: 时钟读进程内快照（不重算）', () => {
     listeners = {}
     disposers = []
     __resetWakeSchedulerStateForTest()
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: true }))
+    __setSimpleSourceForTest(() => defaultSimpleSettings())
     vi.spyOn(global, 'setInterval').mockImplementation((((fn: () => void) => {
       timer = { fn }
       return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>

@@ -37,7 +37,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部默认（gateway off / rebuild on 400K / skiff off 3099 / acp off 3100 / 周期自唤醒 off / 唤醒调度器 **on**）', () => {
+  it('空 Config → 全部默认（gateway off / rebuild on 400K / skiff off 3099 / acp off 3100 / CRO **on**）', () => {
     const d = entryDefaults({})
     expect(d).toEqual({
       gatewayEnabled: false,
@@ -48,7 +48,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       acpEnabled: false,
       acpHttpPort: 3100,
       publicAskEnabled: false,
-      wakeSchedulerEnabled: true,
+      croEnabled: true,
     })
   })
 
@@ -68,7 +68,7 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
       acpEnabled: true,
       acpHttpPort: 4100,
       publicAskEnabled: false,
-      wakeSchedulerEnabled: true,
+      croEnabled: true,
     })
   })
 

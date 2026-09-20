@@ -109,24 +109,20 @@ export function resolveWakeTarget(root: string, target: string): WakeTarget | nu
 }
 
 /**
- * 全局闸：**只看 `wakeSchedulerEnabled`**（缺省**开**；显式 `false` 才关）。
+ * 🔴 **本钟的全局闸已于 2026-09-21 砍掉**（所有者令逐字：「**send-later 的开关不再重要了，砍掉**」）。
  *
- * ⚠️ 2026-09-15 用户裁决（S-1 **解耦**）：「auto-trajectory 的开关**只关闭 auto-trajectory 唤醒**」。
- * ⇒ 本函数**不得**再把 `autopilotEnabled`（周期自唤醒闸）作为回退键 —— 旧实现是
- * `trajectoryEnabled === true || autopilotEnabled === true`，后果实测：所有者关掉 auto-trajectory 后，
- * **一次性唤醒 `wake-later`（今 `send-later`）被连带关掉**，注册表条目静默滞留（当日 6.6h 零 tick）。
- * 缺省由 false 改 true 的理由：唤醒注册表已是一等机制（D58），条目**全部由人类/agent 显式登记**
- * 未来时刻（无环境自主性），不需要"默认关"的实验保护；代价 = 一个 unref 的 5min 空检查。
+ * **为什么砍**（R↓）：唤醒已从"可选实验能力"长成**全容器的续接绳**——S142/S151/S185 的链、
+ * 跨轨迹投递、`send-now`/`send-later` 都走它。留一个"能被误关的开关"的**代价**是
+ * "整条链静默停摆且无人告警"（本仓已实测过同族事故：闸关 6.6h 零 tick、断链 1 天 14 小时）；
+ * 而**收益**只剩"关掉一个 5min unref 空检查"。⇒ **收益 < 代价，故删闸**（不是改为缺省开——是**没有这个键了**）。
  *
- * 设置服务不可用 → 关（保守；异常由日志与 `dashboard health` 响亮暴露，不静默）。
+ * ⚠️ **兼容**：旧配置文件里残留的 `wakeSchedulerEnabled` **静默忽略**（无回退键、无告警噪声；
+ * 与旧 `bootstrap` 段的处置先例一致）。**机制本身一行未动**（所有者："我说的只是开关"）。
+ *
+ * 历史（勿误读）：v1.34 S-1 曾把两闸解耦（周期自唤醒 `autopilotWakeEnabled` / 本钟 `wakeSchedulerEnabled`），
+ * 理由是"关 auto-trajectory 不得连带关一次性唤醒"；随 ACC 侧 autopilot 于 v1.35.0 整段退场，
+ * 两闸只剩本钟一座 ⇒ 现已整座移除。详见 `docs/trajectory-scheduling.md` §S-1 与 v1.44 CHANGELOG。
  */
-function wakeSchedulerEnabled(): boolean {
-  try {
-    return readSimpleSettings().wakeSchedulerEnabled !== false
-  } catch {
-    return false
-  }
-}
 
 /**
  * 🔴 **本钟的串行域**（C6b 硬约束）：`clock.chain` 是**本实例私有**的——
@@ -143,8 +139,8 @@ const clockOpts: ClockOptions<string[]> = {
   label: 'trajectory 唤醒调度器',
   ctx: undefined,
   events: ['session/created', 'serenity/settings-changed'],
-  gate: wakeSchedulerEnabled,
-  gateOffReason: '唤醒调度器闸关闭（wakeSchedulerEnabled=false）',
+  // 🔴 无闸（2026-09-21 砍掉 `wakeSchedulerEnabled`）：**恒武装**。工厂的 `gate` 是可选能力，
+  //    本钟不再使用它 ⇒ 永不因闸跳过（`lastSkipReason` 只由 tick 内的真实原因写，如"无 CCC 可扫"）。
   body: () => runWakeTick(clockOpts.ctx as Context),
   // `countBeforeBody` 缺省 false：本钟 `ticks` = **真跑完**的 tick 数（既有语义，勿改）
   logFrom: { prefix: '[serenity-hooks] trajectory 唤醒 ', lines: (lines) => lines },
@@ -152,7 +148,9 @@ const clockOpts: ClockOptions<string[]> = {
 }
 const clock = createClock(clockOpts)
 
-/** 调度器进程态快照（只读；`enabled` = 全局闸**当前**值，便于区分"未武装"与"闸关"） */
+/** 调度器进程态快照（只读）。
+ *  ⚠️ `enabled` 对**本钟已无意义**（2026-09-21 起无闸 ⇒ 恒 `true`）；保留字段只为沿用工厂快照形状。
+ *  "这轮为什么没被唤起"现在看 `armed` / `lastSkipReason`（tick 内真实原因）+ **CRO 闸**（见 `croEnabled`）。 */
 export function wakeSchedulerState(): WakeSchedulerRuntime & { enabled: boolean } {
   return clock.snapshot() as WakeSchedulerRuntime & { enabled: boolean }
 }
@@ -487,6 +485,14 @@ async function deliverCroWake(
  * @param log 本 tick 的人读摘要（就地追加）
  */
 async function runCroPhase(ctx: Context, root: string, registry: WakeEntry[], log: string[]): Promise<void> {
+  // 🔴 CRO 闸（2026-09-21 所有者令新增，缺省**开**）：关掉只影响**本阶段** ——
+  //    `send-later` / `send-now` / 唤醒表投递**照常**（`cro.ts` 头注的承诺）。
+  //    跳过**记一行**（否则"关掉 CRO 后轨迹不再被自编程唤起"这件事在 tick 日志里不可见 —— 同族缺口：
+  //    "为什么这轮没唤起"必须可答）。
+  if (readSimpleSettings().croEnabled === false) {
+    log.push('CRO 阶段：已关闭（croEnabled=false）——既有唤醒投递不受影响')
+    return
+  }
   let dirs: string[]
   try {
     dirs = listCroTrajectories(root)

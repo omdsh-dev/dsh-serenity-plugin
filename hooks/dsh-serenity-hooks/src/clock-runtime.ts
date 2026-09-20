@@ -142,10 +142,16 @@ export interface ClockOptions<T> {
   ctx: unknown
   /** 热启动触发面事件名（回调恒为 `() => start()`——两条钟的触发面同形，不开放自定义回调） */
   events?: string[]
-  /** 全局闸：**每次现读**（不缓存——面板改开关后要能立刻反映）+ 武装门**只**判它 */
-  gate: () => boolean
-  /** body 被**闸**跳过时写入 `lastSkipReason` 的文案（文案归各钟，工厂不编） */
-  gateOffReason: string
+  /**
+   * 闸（**可选**）：**每次现读**（不缓存——面板改开关后要能立刻反映）+ 武装门**只**判它。
+   *
+   * ⚠️ **2026-09-21（所有者令）起可为缺省**：唤醒调度器的闸已被**砍掉**（原话「send-later 的开关
+   * 不再重要了，砍掉」）⇒ 「**本钟没有闸**」必须能被表达。**缺省 = 无闸**：恒武装、永不因闸跳过、
+   * `snapshot().enabled` 恒 `true`。（工厂**能力**保留——将来任何钟仍可自带闸。）
+   */
+  gate?: () => boolean
+  /** body 被**闸**跳过时写入 `lastSkipReason` 的文案（文案归各钟，工厂不编；**无闸时无意义**） */
+  gateOffReason?: string
   /**
    * **同步前置阶段**（在 body 被调用**之前**、同一个 tick 内同步执行）。
    *
@@ -260,8 +266,8 @@ export function createClock<T>(opts: ClockOptions<T>): Clock {
   }
 
   const tick = (): void => {
-    if (!opts.gate()) {
-      runtime.lastSkipReason = opts.gateOffReason
+    if (opts.gate !== undefined && !opts.gate()) {
+      runtime.lastSkipReason = opts.gateOffReason ?? null
       return
     }
     // 同步前置阶段（见 ClockOptions.begin）：tick 的"这一拍算不算数"必须**同步**定下来，
@@ -311,7 +317,7 @@ export function createClock<T>(opts: ClockOptions<T>): Clock {
       st.wired = true
       attachClockEvents(opts.ctx, api, opts.events)
     }
-    if (!opts.gate()) return
+    if (opts.gate !== undefined && !opts.gate()) return
     st.timer = setInterval(tick, TICK_MS)
     // unref：进程存活时定时器照常触发；进程退出（插件卸载 / 服务器停止）不阻塞退出
     st.timer.unref()
@@ -336,7 +342,7 @@ export function createClock<T>(opts: ClockOptions<T>): Clock {
     start,
     dispose,
     snapshot: () => ({
-      enabled: opts.gate(),
+      enabled: opts.gate === undefined ? true : opts.gate(),
       ...runtime,
       ...(runtime.lastTickLog ? { lastTickLog: [...runtime.lastTickLog] } : {}),
     }),

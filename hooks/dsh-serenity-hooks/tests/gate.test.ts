@@ -104,7 +104,7 @@ describe('v1.23.3 重建提醒：不做节流（每轮都催）+ 连续 3 轮升
     } as any
     registerKeeper(ctx, { defaultThreshold: 200 })
     // 需求①：注入简单配置源（rebuildEnabled + 低 K 阈值 8 → 9000 ≥ 8000 恒触发）
-    __setSimpleSourceForTest(() => ({ gatewayEnabled: false, rebuildEnabled: true, rebuildThresholdK: 8, skiffEnabled: false, skiffDebugPort: 3099, acpEnabled: false, acpHttpPort: 3100, publicAskEnabled: false, wakeSchedulerEnabled: true }))
+    __setSimpleSourceForTest(() => ({ gatewayEnabled: false, rebuildEnabled: true, rebuildThresholdK: 8, skiffEnabled: false, skiffDebugPort: 3099, acpEnabled: false, acpHttpPort: 3100, publicAskEnabled: false, croEnabled: true }))
     return { listener: captured }
   }
 

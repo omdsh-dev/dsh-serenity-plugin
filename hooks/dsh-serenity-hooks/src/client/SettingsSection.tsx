@@ -47,7 +47,7 @@ export interface SerenitySimpleWire {
   /** F4d 建议问答页（v1.26.1 实验性）：按认知容器暴露问答页供他人验证（key 认证） */
   publicAskEnabled?: boolean
   /** **唤醒调度器闸**（v1.34，原 trajectoryEnabled）：投递已登记的"未来时刻 + 一条 message"（缺省开） */
-  wakeSchedulerEnabled?: boolean
+  croEnabled?: boolean
 }
 
 /** 本 section 的注入面（apply 闭包提供 settingsScope） */
@@ -213,7 +213,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const acpOn = value?.acpEnabled ?? false
   const acpPort = value?.acpHttpPort ?? 3100
   const publicAskOn = value?.publicAskEnabled ?? false
-  const wakeSchedOn = value?.wakeSchedulerEnabled ?? true // 缺省开（与 schema 一致）
+  const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
   const [openGateway, setOpenGateway] = useState(false)
@@ -221,7 +221,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openSkiff, setOpenSkiff] = useState(false)
   const [openAcp, setOpenAcp] = useState(false)
   const [openPublicAsk, setOpenPublicAsk] = useState(false)
-  const [openWakeSched, setOpenWakeSched] = useState(false)
+  const [openCro, setOpenCro] = useState(false)
 
   return (
     <div className="ss-section">
@@ -391,20 +391,23 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
         <li>
           <RowCard
-            title="唤醒调度器（条目来源：send-later）"
-            desc="投递已登记的“未来时刻 + 一条 message”（全局开关，默认开）"
+            title="CRO（轨迹自编程唤起）"
+            desc="让轨迹用自己的一段程序决定何时唤起（全局开关，默认开）"
             expandable
-            open={openWakeSched}
-            onToggle={setOpenWakeSched}
-            control={<Toggle checked={wakeSchedOn} onChange={(on) => toggle('wakeSchedulerEnabled', on)} />}
+            open={openCro}
+            onToggle={setOpenCro}
+            control={<Toggle checked={croOn} onChange={(on) => toggle('croEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'唤醒调度器全局闸（v1.34 独立开关）：\n' +
-                  '· 作用：把 CCC 唤醒注册表（AGENT_SESSIONS/wake-registry.json）里到点的条目投递给目标轨迹\n' +
-                  '· 条目来源：`container_trajectory send-later`（对自己或别的 trajectory 预约未来时刻 + 一条 message）\n' +
-                  '· 默认开：条目全部由人类/agent 显式登记，无环境自主性 ⇒ 不需要“默认关”的实验保护\n' +
-                  '· 唯一性：ACC 现存的**唯一**轨迹调度时钟（原并列的周期自唤醒闸已随 ACC 侧 autopilot 退场删除）\n' +
-                  '· 精度：5min tick；补跑窗口 2h（超窗判 missed 留痕）；fire-and-forget 无回执'}
+                <p className="ss-detailIntro">{'CRO = Continuous Re-Occurrence（轨迹自编程唤起）。\n' +
+                  '· 作用：轨迹目录下放一个 continuous-re-occurrence.ts，ACC 的 5min tick 会 spawn 它，\n' +
+                  '  由这段程序自己决定“要不要唤、何时唤、唤起时说什么”\n' +
+                  '· 怎么启用：程序文件在即启用（无需在此配置）；本开关是**总闸**\n' +
+                  '· 关掉它的后果：**只有 CRO 阶段停跑** —— 定时唤醒（send-later）、即时投递（send-now）\n' +
+                  '  与唤醒表投递**照常工作**\n' +
+                  '· 默认开：已在生产稳定运行，且“没有程序文件的轨迹”本来就不参与（默认存在感为零）\n' +
+                  '· 与它同时废止的开关：原“唤醒调度器”闸（2026-09-21 所有者令砍掉）——\n' +
+                  '  唤醒调度器现**恒开**，不再有可被误关的开关'}
                 </p>
               </div>
             }

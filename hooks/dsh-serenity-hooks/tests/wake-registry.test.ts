@@ -453,7 +453,7 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     timer = null
     liveSessions = []
     __resetWakeSchedulerStateForTest()
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: true }))
+    __setSimpleSourceForTest(() => defaultSimpleSettings())
     vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void) => {
       timer = { fn }
       return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>
@@ -477,36 +477,27 @@ describe('registerWakeScheduler（时钟武装门 + 进程态可观测）', () =
     }
   }
 
-  it('唤醒调度器闸显式关 → 不武装（零资源占用语义保留），且进程态如实报告 enabled=false', () => {
+  it('🔴 2026-09-21 砍闸回归钉：旧键 `wakeSchedulerEnabled=false` **残留在配置里也照样武装**', () => {
+    // 所有者令（逐字）：「send-later 的开关不再重要了，砍掉」⇒ 该键**已不存在**，旧配置里的残留值**静默忽略**。
+    // 这条钉锁两件事：① 闸**真的没有了**（不会被残留的旧值关掉 —— 否则"整条链静默停摆"会重演）
+    //                ② 兼容（不因残留键报错/降级/告警噪声）
     __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: false }))
     registerWakeScheduler(makeCtx() as never)
-    expect(timer).toBeNull()
-    const st = wakeSchedulerState()
-    expect(st.armed).toBe(false)
-    expect(st.enabled).toBe(false)
-  })
-
-  it('🔴 解耦回归钉（用户 2026-09-15 裁决 S-1）：关掉周期自唤醒 **不**关掉唤醒调度器', () => {
-    // 旧实现（v1.33）：`trajectoryEnabled === true || autopilotEnabled === true` ⇒ 关 autopilot 连带关本调度器
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: false, autopilotWakeEnabled: false }))
-    registerWakeScheduler(makeCtx() as never)
     expect(timer).not.toBeNull() // 仍武装
-    expect(wakeSchedulerState().enabled).toBe(true) // 缺省开
+    expect(wakeSchedulerState().armed).toBe(true)
   })
 
-  it('🔴 解耦回归钉之二：旧键 autopilotEnabled=true 也 **不**是本闸的依据（缺省即开）', () => {
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), autopilotEnabled: true }))
-    registerWakeScheduler(makeCtx() as never)
-    expect(timer).not.toBeNull()
-    expect(wakeSchedulerState().enabled).toBe(true)
-  })
-
-  it('缺省（未设任何键）→ 默认开（条目全由显式登记，不需要“默认关”保护）', () => {
+  it('无闸 ⇒ 恒武装；`enabled` 字段恒 true（保留只为沿用工厂快照形状，不再是闸值）', () => {
     __setSimpleSourceForTest(() => defaultSimpleSettings())
     registerWakeScheduler(makeCtx() as never)
     expect(timer).not.toBeNull()
     expect(wakeSchedulerState().enabled).toBe(true)
   })
+
+  // ⚠️ 2026-09-21 移除两条旧钉：「闸显式关 → 不武装」「S-1 两闸解耦（关 autopilot 不关本闸）」
+  //    —— **主语已消失**（本钟无闸；且 ACC 侧 autopilot 在 v1.35.0 整段退场后，"两闸"只剩一座，
+  //    现整座移除）。按本仓先例（A15：「主语消失 ⇒ 销项」）删除而非留成空转断言。
+  //    它们的**意图**由上面第一条钉继承：唤醒调度器**不得**再有任何"能被误关"的开关。
 
   it('🔴 全局闸开 + **零 live 会话** → 仍武装（修复前此处永久不武装）', async () => {
     registerWakeScheduler(makeCtx() as never) // liveSessions = []
@@ -644,7 +635,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     timer = null
     __resetWakeSchedulerStateForTest()
     __resetCroTurnsForTest()
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), wakeSchedulerEnabled: true }))
+    __setSimpleSourceForTest(() => defaultSimpleSettings())
     vi.spyOn(global, 'setInterval').mockImplementation(((fn: () => void) => {
       timer = { fn }
       return { unref: () => undefined } as unknown as ReturnType<typeof setInterval>

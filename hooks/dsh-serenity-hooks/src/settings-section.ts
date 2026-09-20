@@ -63,12 +63,18 @@ interface SerenitySimpleSettings {
   acpHttpPort: number
   /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
   publicAskEnabled: boolean
-  /** **唤醒调度器全局闸** —— v1.34 更名（原 `trajectoryEnabled`）：投递已登记的"未来时刻 + 一条 message"。
-   *  **缺省开**：它是 trajectory 的基础能力（D58），且**不得**被"关掉周期自唤醒"连带关掉
-   *  ——用户 2026-09-15 裁决：「auto-trajectory 的开关只关闭 auto-trajectory 唤醒」。
-   *  （原并列的周期自唤醒闸 `autopilotWakeEnabled` / 旧键 `autopilotEnabled` 已随 ACC 侧
-   *  autopilot 于 2026-09-15 整段退场删除——现只剩这一座闸。） */
-  wakeSchedulerEnabled: boolean
+  /** **CRO（轨迹自编程唤起）总开关** —— 2026-09-21 所有者令新增。
+   *
+   *  CRO = 轨迹目录下放一个 `continuous-re-occurrence.ts`，由 ACC 的 5min tick spawn，
+   *  由**程序**决定"要不要唤、何时唤、唤起的提示词是什么"。
+   *
+   *  **缺省开**：① 它已在生产上稳定运行（S151 / S185 各有程序在跑）；② 它的**默认存在感为零**
+   *  ——没有程序文件的轨迹本来就不参与；③ 缺省关会让"已上线的程序突然不跑"（等于静默回退）。
+   *  **只关 CRO 阶段**：`send-later` / `send-now` / 唤醒表投递**照常**（见 `cro.ts` 头注的承诺）。
+   *
+   *  ⚠️ 与它**同时废止**的键：`wakeSchedulerEnabled`（所有者 2026-09-21 令「send-later 的开关
+   *  不再重要了，砍掉」）——唤醒调度器**不再有任何闸**（恒开）；旧配置里的该键**静默忽略**。 */
+  croEnabled: boolean
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -81,7 +87,7 @@ const simpleSettingsSchema = z.object({
   acpEnabled: z.boolean().default(false),
   acpHttpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT),
   publicAskEnabled: z.boolean().default(false),
-  wakeSchedulerEnabled: z.boolean().default(true),
+  croEnabled: z.boolean().default(true),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -95,7 +101,7 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     acpEnabled: config.acp?.enabled ?? false,
     acpHttpPort: config.acp?.httpPort ?? ACP_HTTP_PORT,
     publicAskEnabled: config.publicAsk?.enabled ?? false,
-    wakeSchedulerEnabled: true,
+    croEnabled: true,
   }
 }
 
@@ -116,7 +122,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     acpEnabled: false,
     acpHttpPort: ACP_HTTP_PORT,
     publicAskEnabled: false,
-    wakeSchedulerEnabled: true,
+    croEnabled: true,
   }
 }
 

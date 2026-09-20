@@ -38,6 +38,7 @@ import { diagLive, type DiagLiveReport } from './live-sessions.js'
 import { containerClocks, containerWakes, type ClockSnapshot } from './container-status.js'
 import type { Context } from 'cordis'
 import { isoLocal } from './time.js'
+import { readSimpleSettings } from './settings-section.js'
 
 /** 进程内时钟状态（唤醒调度器；判据单一真相源 = `wake-scheduler.ts`） */
 type ClockState = ClockSnapshot
@@ -47,7 +48,10 @@ function renderClock(label: string, s: ClockState): string {
   const ts = (ms: number | null): string => (ms === null ? '（从未）' : isoLocal(ms))
   const parts = [
     `armed=${s.armed}`,
-    `全局闸=${s.enabled}`,
+    // 🔴 2026-09-21 替换：原 `全局闸=${s.enabled}` —— 调度器的闸已砍掉（恒开，该字段失去信息量），
+    //    改报**CRO 闸**（本容器唯一还存在的"会拦住某阶段"的开关）。它回答的是
+    //    "这轮为什么没有自编程唤起"——与 armed / lastSkipReason 同属"为何没动"的第一手判据。
+    `CRO 闸=${readSimpleSettings().croEnabled !== false}`,
     `tick 次数=${s.ticks}`,
     `上次 tick=${ts(s.lastTickAt)}`,
   ]
