@@ -40,7 +40,35 @@ container_trajectory { action: "<subcommand>", name: "<S###|目录名|关键词>
 - 目录：`YYYY-MM-DD--S###--<short-description>`（小写英文连词符，≤5 词）
 - S###：自动分配（当前最大 + 1，3 位补零）
 - dsh 会话标题：`S###-YYYY-MM-DD-<summary>`（summary ≤20 字，use/create/rebuild 必填）
-- **SESSION 绑定持久化（v1.29.1）**：`serenity/bound` 会话事件随 session.jsonl 持久化（跨 rebuild/重启）——use 硬守卫防 LLM 静默换 SESSION；编码无关（锚=完整目录名）；**定时唤醒的目标定位也读它**（`.bindings.json` 反查）
+- **SESSION 绑定持久化**：绑定记录落**宿主存储域** `~/.dsh/storages/serenity_bindings.json`（v1.40.x 起**权威**）；CCC 内 `AGENT_SESSIONS/.bindings.json` **仍双写**作兜底；更早的 `serenity/bound` 会话事件（v1.30.5 及更早）只作存量回落。锚 = **完整目录名**（编码无关）——用途之一是唤起时定位目标的 **dsh 会话 id**（而**目录名本身**的解析走 `AGENT_SESSIONS/` 扫描）。use 硬守卫防 LLM 静默换 SESSION
+
+## 轨迹自带 skill（`SESSION.md` 顶部 frontmatter 的 `skills:`）
+
+**它解决什么**：把**某个领域的做事方法**直接挂在某条轨迹身上——不必每轮在提示词里重复交代"这次按哪套规矩做"。
+
+**怎么写**（唯一真相源 = 该轨迹 `SESSION.md` 的**最顶部**）：
+
+```markdown
+---
+skills: [home-rhetoric, acc-eap]
+---
+
+# SESSION: …
+```
+
+**生效语义**（逐条有代码判据）：
+
+| 面 | 语义 |
+|---|---|
+| **内容** | 所列 skill 的 `SKILL.md` **全文**，按**声明顺序**拼接，每段带抬头 `=== skill: <名字> ===` |
+| 🔴 **生效时机** | **不是"`use` 时灌一次"，而是"绑定期间一直供着"**——注入点是 per-agent `systemPrompt.section`，**每次请求装配重新求值** ⇒ ① **不随对话压缩消失**；② **改了 frontmatter 立即生效，不必重新 `use`**；③ 换绑定自动跟上（绑定消失 ⇒ 该段自动消失，不留空段） |
+| **门（何时开始有）** | 该会话**存在轨迹绑定**时。`use` 是主要开关；⚠️ **`create` 不触发注入**——新建轨迹**刻意不夺走当前绑定**（防"长会话中途误 create 被夺走"）⇒ 新轨迹须**后续显式 `use`** 才挂上 |
+| **找不到某个 skill** | 段内**响亮**写 `[缺失] <名字>`，**不静默跳过** |
+| **守卫** | 总长 **32 KB** 截断并明示（防上下文膨胀）；skill 名来自工作区数据 ⇒ **先过安全校验才用于拼路径**（防路径穿越） |
+
+⚠️ **重写 `SESSION.md` 时必须原样保留顶部 frontmatter**：compaction / rebuild 会要求重写该文件，抹掉 frontmatter 等于**静默撤销**这条轨迹的全部 skill 声明。keeper 两条重写提醒里各有一句提示，但那是**文案级护栏**（**非机械强制**）。
+
+> 接口真相源：插件仓 `docs/trajectory-skill-injection.md`
 
 ## 纪律（强制）
 

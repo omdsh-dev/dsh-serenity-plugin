@@ -83,6 +83,8 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 ### 轨迹追踪（AGENT_SESSIONS/）
 多步骤工作（3 步以上）**必须**先创建轨迹：`container_trajectory create` → `AGENT_SESSIONS/YYYY-MM-DD--S###--<desc>/SESSION.md`，记录目标、决策、进度；收尾时把未解决问题写进 SESSION.md（状态由 SESSION.md 里的勾选框体现）。
 
+**轨迹可自带 skill**：在 `SESSION.md` **顶部 frontmatter** 写 `skills: [名字, …]`，该轨迹**被绑定期间**注入这些 skill 的**全文**——⚠️ **不是"`use` 时灌一次"，而是每次请求装配重新求值**（改了 frontmatter 立即生效、不随对话压缩消失）。⚠️ `create` 只新建、**不夺走当前绑定** ⇒ 新轨迹须**显式 `use`** 才挂上。**重写 SESSION.md 时必须保留那段 frontmatter**（抹掉 = 静默撤销声明）。详见 `acc-session` 技能。
+
 ### SSH 操作规范（强制）
 涉及远程服务器时**禁止裸 `ssh user@ip`**，必须走 `ssh-connect`（或家庭既定通道），优先主机别名（router/ha/pve/ubuntu/gitlab/nas/desk/windows/experimenter/ykn-nas）。
 
@@ -100,6 +102,7 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | 管理 MSM 注册表 / Skiff 角色 / CCC 配置 / autopilot 周期 | `container_admin` 工具（domain: role/msm/config/autopilot） |
 | 轨迹创建/读取/激活/重建/定时唤醒/即时递话 | `container_trajectory` 工具（含 `send-now`（现在，有回执）/ `send-later`（未来）） |
 | 让轨迹**自己判断何时该被叫醒**（不写死时刻） | ① `container_trajectory cro-guide`（读指南 + 取样例快照）→ ② 照指南在**该轨迹目录**写 `continuous-re-occurrence.ts`（**文件在 = 启用**） |
+| 让某条轨迹**自带一个 skill**（绑定期间注入其全文） | 在该轨迹 `SESSION.md` **顶部 frontmatter** 写 `skills: [名字, …]`（**保留 frontmatter**）→ **显式 `container_trajectory use`** 使其生效（`create` 不夺绑定） |
 | 认知质量自检 / 设计协作 / 连续性理论 | `praxis` 工具（section: eap/neat/cce） |
 | 健康检查/时间/等待 | `dashboard` 工具 |
 | 给微信用户发消息（招财留言/通报） | `im-bridge` 工具（**仅当本 CCC 配置了 IM 通道时可见**；只能操作本会话 CCC） |

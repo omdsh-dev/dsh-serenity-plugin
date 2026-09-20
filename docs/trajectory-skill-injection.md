@@ -2,6 +2,7 @@
 
 > **本文件的地位**：C1 的**接口真相源**（数据契约 + 注入契约 + 验收清单）。实现见 `src/seams/system-prompt.ts` / `src/trajectory-bound.ts` / `src/skills-discovery.ts`；决策与理由见 SESSION S142 §12 与 `acc-component-relations-review.md` §5.1。
 > **日期**：2026-09-15（v1.34.1 代码态，发布待 D14）
+> **行号约定（2026-09-20 补充）**：正文引用的 `文件:行号` **只是写档时的就近指引，会随重构漂移**——**判定一律以符号名为准**，行号仅供查找。📌 2026-09-20 已按当前工作树核正一轮（五处：四处行号 + 一处"私有待导出"的过期状态描述）；**这本身是教训**：把行号当契约用，就会周期性地长出假陈述。
 
 ---
 
@@ -56,14 +57,14 @@ skills: [home-rhetoric, acc-eap]
 
 | 项 | 规格 |
 |---|---|
-| **触发条件** | 该会话**存在轨迹绑定**时——**用 `readLastBound(session)`**（`src/trajectory-bound.ts:115`）。它返回 `SessionBoundRecord = { dirName, mdPath }` ⇒ **`mdPath` 即 `SESSION.md` 的路径，直接可用，不必自拼**。⚠️ `resolveSessionTrajectoryLabel` 只产出**显示用 label**，**不要**用它去拼路径（那是模糊匹配）。 |
+| **触发条件** | 该会话**存在轨迹绑定**时——**用 `readLastBound(session)`**（`src/trajectory-bound.ts:288`）。它返回 `SessionBoundRecord = { dirName, mdPath }` ⇒ **`mdPath` 即 `SESSION.md` 的路径，直接可用，不必自拼**。⚠️ `resolveSessionTrajectoryLabel` 只产出**显示用 label**，**不要**用它去拼路径（那是模糊匹配）。 |
 | **形态** | **per-agent** `ctx.systemPrompt.section({…})`——沿 `skiff-core.ts:329` 的既有先例 |
 | **生命周期** | **绑定期间持续存在**（a2）。⇒ 不因对话压缩而消失（这正是 a1 被否的原因） |
 | **内容** | 所列 skill 的 `SKILL.md` **全文**，按声明顺序拼接，每段带来源抬头（`=== skill: <name> ===`） |
-| **读取来源** | 复用 `src/skills-discovery.ts` 的 **`findSkillMd(root, name)`**（`:52`）——查找顺序 **`.dsh/skills` 优先 → 其次 `.opencode/skills`**，解析为 `<root>/<base>/skills/<name>/SKILL.md`。⚠️ 它**目前是私有的**⇒ 需**导出**（或加一个同语义的导出包装）。**不新造发现逻辑**。 |
-| **🔒 名字安全（必做）** | 名字来自 **CCC 数据**（frontmatter）⇒ **必须过 `isSafeSkillName(name)`**（`:45`）**才可用于拼路径**，否则是**路径穿越**入口（`../../…`）。**不安全的名字 ⇒ 按"缺失"处理并响亮提示**，绝不拼路径。 |
+| **读取来源** | 复用 `src/skills-discovery.ts` 的 **`findSkillMd(root, name)`**（`:60`，**已导出**）——查找顺序 **`.dsh/skills` 优先 → 其次 `.opencode/skills`**，解析为 `<root>/<base>/skills/<name>/SKILL.md`。**不新造发现逻辑**。 |
+| **🔒 名字安全（必做）** | 名字来自 **CCC 数据**（frontmatter）⇒ **必须过 `isSafeSkillName(name)`**（`:49`）**才可用于拼路径**，否则是**路径穿越**入口（`../../…`）。**不安全的名字 ⇒ 按"缺失"处理并响亮提示**，绝不拼路径。 |
 | **找不到某个 skill** | **响亮提示**（section 内写明 `[缺失] <name>（未找到该 skill）`），**不静默** |
-| **长度守卫** | **复用已导出的 `truncateContent(content, maxChars)`**（`:108`）。全文注入设**总长上限**（缺省 **32 KB**），超出截断并在 section 末尾写明"已截断"——防上下文爆炸 |
+| **长度守卫** | **复用已导出的 `truncateContent(content, maxChars)`**（`:116`）。全文注入设**总长上限**（缺省 **32 KB**），超出截断并在 section 末尾写明"已截断"——防上下文爆炸 |
 | **无绑定 / 无声明** | **完全不注册该 section**（不产生空 section，不产生噪声） |
 
 ---
@@ -116,7 +117,8 @@ skills: [home-rhetoric, acc-eap]
 
 | 构件 | 关系 |
 |---|---|
-| `container_trajectory use` | **它只管绑定**（写 `.bindings.json`）；注入由本规格的 section 承担，**不落 `use`**（a2 的实现选择） |
+| `container_trajectory use` | **它只管绑定**（写绑定记录：**宿主存储域** `~/.dsh/storages/serenity_bindings.json` 权威 ＋ CCC `AGENT_SESSIONS/.bindings.json` 兜底）；注入由本规格的 section 承担，**不落 `use`**（a2 的实现选择） |
+| 🔴 `container_trajectory create` | **不触发注入**——它**刻意不夺走当前绑定**（U6；防"长会话中途误 `create` 即被夺走"），只写一条 `'create'` 审计记录（note 逐字 `binding unchanged until explicit use`）⇒ **新建轨迹须后续显式 `use`** 才挂上 skill |
 | `container_admin msm guide` | SEP 章节移除；MSM 手册其余内容不动 |
 | `skiff` 角色提示词 | **同机制的另一消费者**（`skiff-core.ts:329`）；两者互不依赖，各自注册自己的 section |
 | `SESSION.md` 体积上限（D48，200 KB） | 本规格**不改变**它；frontmatter 体积可忽略 |
