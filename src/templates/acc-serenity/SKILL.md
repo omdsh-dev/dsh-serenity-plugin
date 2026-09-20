@@ -101,7 +101,7 @@ ACC 由 **`@shgroup/dsh-serenity-hooks`**（dsh-serenity-plugin 仓库，Native 
 | 执行 MSM / 发现 | `msm` 工具（`msm()` 目录 / `msm("<name>")` 执行 / `inspect:true` 查用法） |
 | 管理 MSM 注册表 / Skiff 角色 / CCC 配置 / autopilot 周期 | `container_admin` 工具（domain: role/msm/config/autopilot） |
 | 轨迹创建/读取/激活/重建/定时唤醒/即时递话 | `container_trajectory` 工具（含 `send-now`（现在，有回执）/ `send-later`（未来）） |
-| 让轨迹**自己判断何时该被叫醒**（不写死时刻） | ① `container_trajectory cro-guide`（读指南 + 取样例快照）→ ② 照指南在**该轨迹目录**写 `continuous-re-occurrence.ts`（**文件在 = 启用**） |
+| 让轨迹**自己判断何时该被叫醒**（不写死时刻） | ① `container_trajectory cro-guide`（读指南 + 取样例快照）→ ② 照指南在**该轨迹目录**写 `continuous-re-occurrence.ts`（**文件在 = 启用**；另有**全局总闸** `croEnabled`，缺省开） |
 | 让轨迹**带上某个 skill**（绑定期间注入其全文） | ① **所有轨迹都要** ⇒ `.opencode/serenity.json` 的 `trajectory.skills`（本 CCC 每条都带，**含 skiff**）② **只这条要** ⇒ 其 `SESSION.md` **顶部 frontmatter** 写 `skills: [名字, …]`（**保留 frontmatter**）→ **显式 `container_trajectory use`** 生效（`create` 不夺绑定） |
 | 认知质量自检 / 设计协作 / 连续性理论 | `praxis` 工具（section: eap/neat/cce） |
 | 健康检查/时间/等待 | `dashboard` 工具 |

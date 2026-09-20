@@ -209,4 +209,16 @@ describe('CRO 指南: 与实现常量一致（防"文档说 60 秒、代码是 3
     for (const k of ['"wake"', '"prompt"', '"reason"']) expect(CRO_GUIDE).toContain(k)
     expect(CRO_GUIDE).toContain('可选')
   })
+
+  /**
+   * 2026-09-21 所有者令新增全局总闸 `croEnabled`（「需要上 CRO 的开关」）之后补的钉。
+   *
+   * 钉的是**一句容易漏的话**：指南原文只写「文件在 = 启用」，读者会顺理成章地推成
+   * 「文件在 ⇒ 一定会跑」。总闸关掉时 ACC **根本不调用**程序 —— 这两种情况在
+   * 现象上都是「没被叫醒」，只有 tick 日志能分辨。所以这句必须在正文里。
+   */
+  it('🔴 指南点名全局总闸 `croEnabled`（"文件在" ≠ "一定会跑"）', () => {
+    expect(CRO_GUIDE).toContain('croEnabled')
+    expect(CRO_GUIDE).toContain('总闸')
+  })
 })
