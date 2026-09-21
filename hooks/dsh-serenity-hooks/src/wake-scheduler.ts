@@ -18,8 +18,9 @@
  *       而非"投递失败"，见 `WakeDeliveryResult.notReady` —— 启动那一拍早于懒服务就绪是常态）
  *  4. 投递：`agent.followup(...)`（"Queue an ordinary follow-up turn and wake the driver"）
  *
- * 守卫（I-4 默认 + v1.34 S-1 解耦）：全局 `wakeSchedulerEnabled`（**缺省开**；**不再**回退旧键
- * `autopilotEnabled`——关周期自唤醒不得连带关一次性唤醒）｜
+ * 守卫（2026-09-21 起**本钟无闸**）：🔴 **恒武装**——原 `wakeSchedulerEnabled` 已砍，
+ * 本钟不再有「可被误关的开关」；旧配置残留该键**静默忽略**，且**不**回退 `autopilotEnabled`｜
+ * CRO 阶段另有**独立**总闸 `croEnabled`（只停 CRO，**不影响**本注册表投递）｜
  * 补跑窗口 2h（超窗置 missed 留痕）｜同 tick 串行｜唤起后维持 live（人类可介入）。
  */
 
@@ -644,8 +645,11 @@ export function registerWakeScheduler(ctx: Context): void {
   //   🔒 C2（2026-09-15）**不许回退**这一条：源侧的"无 live 会话"已由并集枚举（ccc-roots）
   //   消掉一部分，但**武装门本身必须继续只判全局闸**——否则"恢复旧会话不触发事件"那条
   //   路径会再次让时钟永不武装。武装与"本次有无目标"是两件事，不得耦合。
-  //   🔒 C6b（2026-09-15）该门已收进 `clock-runtime.createClock` 的 `start()`（硬约束二），
-  //      本文件只传 `gate: wakeSchedulerEnabled`——语义**未变**，改动只是位置。
+  //   🔒 C6b（2026-09-15）该门已收进 `clock-runtime.createClock` 的 `start()`（硬约束二）。
+  //   🔴 2026-09-21 更新：本钟**已不传 `gate`** —— `wakeSchedulerEnabled` 被砍 ⇒ **无闸恒武装**；
+  //      上面那条"武装门只判全局闸"的原则因此**自动满足**（没有闸可判），但**理由不变**：
+  //      武装**不得**与"本次有无目标"耦合。⚠️ CRO 的 `croEnabled` 是**另一层**（在 `runCroPhase`
+  //      入口，不在时钟武装门）——**不得**混进本门。
   //   ⚠️ 同一条链上的另一条约束：tick **不预判"有无 CCC"**（C2 起 CCC 枚举为**并集**），
   //      "无 CCC 可扫"的廉价跳过下沉到 runWakeTick 内部并写 lastSkipReason 供 acc-diag 判读。
   clockOpts.ctx = ctx

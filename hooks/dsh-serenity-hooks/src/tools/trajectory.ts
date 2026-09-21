@@ -15,6 +15,9 @@
  *    ⇒ 族名取共享词干 **`send-`**、轴取 **`-now` / `-later`**（同构）。**硬切无别名**（D46/D61 先例）；
  *    机制层词汇（`wake-registry.json` / `w-*` id / `WakeEntry` / 调度器名 / 配置键 `wakeSchedulerEnabled`）
  *    **一律不动** —— 接受"机制叫 wake、动作叫 send-later"的**分层命名**（二者本是两层）。
+ *    🔴 **2026-09-21 补注（不改写历史，只标失效时点）**：上句里那个**配置键 `wakeSchedulerEnabled`
+ *    已随后续所有者令被砍**（唤醒调度器无闸、恒武装）⇒ 该词从"机制层词汇"里**自然减员**；
+ *    现行总闸键是 CRO 阶段的 **`croEnabled`**。
  *
  * 与旧面（logbook 11 动作 + trajectory 12 动作）的对应（用户逐条裁决，R↓）：
  *   · `summary` → 并入 `list`（全库统计随清单一起给）
