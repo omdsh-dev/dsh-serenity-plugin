@@ -1,14 +1,16 @@
 /**
  * skills-discovery.ts — CCC 入口 skill 自动发现（纯逻辑，零 DSH 依赖）
  *
- * 发现全部入口技能（原文全量，不截断）：
+ * 发现全部入口技能（原文全量，不截断）—— **现行三个来源**（原为四个，**来源 3 已于 2026-09-21 删除**）：
  *   0. **`.serenity` 记号文件内容 = 顶层入口 skill 名**（CCC 记号文件的权威语义，
  *      tiangong-serenity 的 .serenity 内容为 `tg-serenity`）—— 最高优先
  *   1. `.dsh/entry-skill` 指针文件（内容 = skill 名）—— 兼容旧约定
  *   2. `.opencode/skills/*-serenity/SKILL.md` —— 自动扫描该 CCC 的顶层入口
  *      （home-serenity / tg-serenity / pangu-serenity …，命名模式 `*-serenity`）
- *   3. `.dsh/skills/*-serenity/SKILL.md` —— 自动扫描 ACC/harness 入口（acc-serenity 等）
- * 按名去重；顺序 = 记号文件 → 指针 → opencode 入口 → dsh 入口。
+ *   ~~3. `.dsh/skills/*-serenity/SKILL.md`（扫 ACC 装进 CCC 的技能副本）~~ —— 🔴 **已删**：
+ *      owner 2026-09-21 令「连模板和安装命令一起删」（B 案）。**判据、实测证据与日期逐字记在
+ *      `findEntrySkills()` 体内那一段注释里**——本头部只留结论，**不复述判据**（避免两处会漂的真相源）。
+ * 按名去重；顺序 = 记号文件 → 指针 → opencode 入口。
  *
  * 任何 CCC 都能自动注入其顶层入口 skill 全文（不硬编码名字）。
  */
