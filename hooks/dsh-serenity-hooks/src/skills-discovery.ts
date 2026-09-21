@@ -100,11 +100,18 @@ export function findEntrySkills(root: string): EntrySkill[] {
   for (const dir of scanSerenityDirs(resolve(root, '.opencode', 'skills'))) {
     add(join(dir, 'SKILL.md'), 'opencode')
   }
-  // 3) DSH/harness 入口：自动扫描 .dsh/skills/*-serenity（acc-serenity 等）
-  for (const dir of scanSerenityDirs(resolve(root, '.dsh', 'skills'))) {
-    add(join(dir, 'SKILL.md'), 'dsh')
-  }
-
+  // 🔴 **来源 3 已删**（2026-09-21 所有者令「连模板和安装命令一起删」＝ B 案）
+  //
+  // 删掉的是：自动扫描 `.dsh/skills/*-serenity`——即把"ACC 安装进 CCC 的技能副本"也当**入口技能**收。
+  //
+  // **为什么删（实测证据）**：`.dsh/entry-skill` 自 **2026-08-07** 起就写着 `acc-serenity`，
+  // 但当时**两个 skills 根里都没有该文件** ⇒ `findSkillMd` 返回 null ⇒ **一直没生效**；
+  // **2026-09-17 那次 `install --skills`** 让 `.dsh/skills/acc-serenity/SKILL.md` **第一次存在**
+  // ⇒ `findSkillMd` 命中它 ⇒ **自那天起，每请求静默多注入 10,355 B**（10 KB）。
+  // ⇒ 现象：owner 2026-09-21 问「系统提示词怎么膨胀了好多倍」；实测入口块 = 43,089（home-serenity）
+  //    + 10,355（acc-serenity）≈ **53 KB / 每请求**，且**无任何提示**。
+  //
+  // 副本机制（模板 + `install --skills` + `.dsh/skills`）整体退场 ⇒ 此处不再有第三个来源。
   return out
 }
 

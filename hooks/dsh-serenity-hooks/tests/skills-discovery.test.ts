@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { findEntrySkill, findEntrySkills, truncateContent } from '../src/skills-discovery.js'
+import { findEntrySkill, findEntrySkills, findSkillMd, truncateContent } from '../src/skills-discovery.js'
 
 let dir: string
 
@@ -20,13 +20,13 @@ describe('skills-discovery: 入口 skill 发现', () => {
     expect(findEntrySkill(dir)).toBeNull()
   })
 
-  it('约定回退：.dsh/skills/acc-serenity', () => {
+  it('🔴 **来源 3 已退场**：`.dsh/skills/*-serenity` 的副本**不再**被当入口技能收（B 案回归钉）', () => {
     mkdirSync(join(dir, '.dsh', 'skills', 'acc-serenity'), { recursive: true })
     writeFileSync(join(dir, '.dsh', 'skills', 'acc-serenity', 'SKILL.md'), 'entry-content')
-    const s = findEntrySkill(dir)
-    expect(s).not.toBeNull()
-    expect(s!.name).toBe('acc-serenity')
-    expect(s!.content).toContain('entry-content')
+    // 修复前：此处会被自动扫描收成入口技能（并且自 2026-09-17 起每请求静默多注入 10 KB）
+    expect(findEntrySkill(dir)).toBeNull()
+    // 但 `.dsh/skills` 本身**仍是 `findSkillMd` 的合法搜索根**（该语义另有钉，未动）
+    expect(findSkillMd(dir, 'acc-serenity')).not.toBeNull()
   })
 
   it('约定回退：.opencode/skills/home-serenity', () => {
@@ -66,7 +66,7 @@ describe('skills-discovery: 入口 skill 发现', () => {
 })
 
 describe('skills-discovery: 全量入口发现（加强版）', () => {
-  it('同时发现 home-serenity（opencode 系统入口）+ acc-serenity（dsh 入口）', () => {
+  it('🔴 只发现 home-serenity（opencode 入口）；`.dsh/skills` 副本**不再**入列（B 案后语义）', () => {
     mkdirSync(join(dir, '.opencode', 'skills', 'home-serenity'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'skills', 'home-serenity', 'SKILL.md'), '---\nname: home-serenity\ndescription: 系统入口\n---\n系统入口正文')
     mkdirSync(join(dir, '.dsh', 'skills', 'acc-serenity'), { recursive: true })
@@ -74,12 +74,11 @@ describe('skills-discovery: 全量入口发现（加强版）', () => {
     const skills = findEntrySkills(dir)
     const names = skills.map((s) => s.name)
     expect(names).toContain('home-serenity')
-    expect(names).toContain('acc-serenity')
+    // 修复前此处含 'acc-serenity'（来源 3 自动扫描）——那正是每请求静默 +10 KB 的来路
+    expect(names).not.toContain('acc-serenity')
+    expect(skills).toHaveLength(1)
     const hs = skills.find((s) => s.name === 'home-serenity')!
     expect(hs.source).toBe('opencode')
-    expect(hs.content).toContain('系统入口正文')
-    // 原文全量，不截断
-    const acc = skills.find((s) => s.name === 'acc-serenity')!
-    expect(acc.content).toContain('harness 正文')
+    expect(hs.content).toContain('系统入口正文') // 原文全量，不截断（该语义未变）
   })
 })
