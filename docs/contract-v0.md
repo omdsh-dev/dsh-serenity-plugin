@@ -12,7 +12,7 @@
 | C6 | **私有** — 仅 dsh-external 组织可见（GitHub private），不发布 npm | remote = `git@github.com:dsh-external/dsh-serenity-plugin.git`；package.json `private: true` |
 | C7 | 开发流程：skill 驱动 + AGENT_SESSIONS 追踪 + 独立 git 仓 | 本仓即实践 |
 | C8 | ACC 层不占用 CCC 注册表空间 — 读取合法，注册由 CCC 管理 | acc-msm 不自动注册 ACC 工具 |
-| C9 | 技能模板安装幂等 — 重复安装不覆盖已有内容 | install-skill 默认 skip（--force 覆盖） |
+| ~~C9~~ | ~~技能模板安装幂等 — 重复安装不覆盖已有内容~~ 🔴 **2026-09-21 作废** | 🔴 **无实现（机制已整条退场）** —— owner 2026-09-21 令「**连模板和安装命令一起删**」（B 案）：`install` 子命令、`src/skills/install-skill.ts`、`template-loader.ts` 与 9 份模板 `SKILL.md` 全部删除（提交 `b6a964b` 起）。原实现（install-skill 默认 skip / `--force` 覆盖）见 git 历史。**作废理由**：它保护的是一条不该存在的路径——ACC 往 CCC 装技能副本（正是系统提示词 +10 KB/请求的来源） |
 | C10 | 平台原生能力（守卫/循环/常驻/压缩）不重复实现 | 见 architecture-v0 §3 DD-07 |
 
 ## 错误类（13）

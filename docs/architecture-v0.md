@@ -2,6 +2,15 @@
 
 > 状态：v0.0.1 立项版。仿照 opencode-serenity-plugin 的 8 层架构，DSH 运行时适配。
 
+> 🔴 **失效时点补注（2026-09-21）**：owner 令「**连模板和安装命令一起删**」（B 案）⇒ 本文件
+> 中**四类陈述已不再描述现实**，下方均就地标注（**不改写历史**，只标失效）：
+> ①「安装技能到 `.dsh/skills/`」整条机制退场（`install` 子命令 / `install-skill.ts` /
+> `template-loader.ts` / 9 份模板 `SKILL.md` 全删，`init` 也不再装技能）；
+> ②`src/templates/` 现仅存 6 个 **runner 脚本**（被仓内 6 个测试文件 import），**没有 SKILL.md**；
+> ③真正对外的是 **npm 包 `@shgroup/dsh-serenity-hooks`**（hooks 目录，DSH 原生插件），
+> 本目录的 CLI 包 `@shgroup/dsh-serenity-plugin` 是 **private**（仅 home GitLab）；
+> ④L2 平台层那句"技能束 + runner"描述的是 v0 设计，**现行形态是 native cordis 插件注册真实工具**。
+
 ## 0. 核心差异（opencode vs DSH）
 
 | 维度 | opencode-serenity-plugin | dsh-serenity-plugin |
@@ -9,7 +18,7 @@
 | 宿主 | OpenCode（插件 API：tools + hooks） | DeepSeek Harness（无插件工具 API） |
 | 工具注册 | `hooks.tool` 注册 11 工具 | **技能束**（`.dsh/skills/<name>/SKILL.md`）+ **runner 脚本**（技能束内 `scripts/`） |
 | hook 注入 | system.transform / tool.execute.before / shell.env 等 | DSH skill 加载 + fs 沙箱（原生） |
-| 安装 | npm 包 + opencode.json plugin 引用 | CLI 安装器拷贝模板到 `.dsh/skills/` |
+| 安装 | npm 包 + opencode.json plugin 引用 | ~~CLI 安装器拷贝模板到 `.dsh/skills/`~~ 🔴 **2026-09-21 作废**：现行 = `dsh plugin --profile web add @shgroup/dsh-serenity-hooks`（DSH 原生插件）；**技能不再由 ACC 安装** |
 | 复用策略 | — | **独立实现**（用户要求，不复用源码） |
 
 **模型侧唯一扩展面是技能系统**（skill-local：`<projectRoot>/.dsh/skills/` + `~/.dsh/skills/`）→ ACC 工具全部以「技能文档定义协议 + 脚本实现执行」呈现，与 .opencode 技能的 scripts/ 模式同构。
@@ -17,9 +26,10 @@
 ## 1. 分层架构（DSH 适配）
 
 ```
-L0 标准层   src/templates/           ACC 技能模板（安装到 CCC 后成为 .dsh/skills/*）
-L1 实现层   src/{index,install,activation,errors,config-schema}.ts + src/skills/
+L0 标准层   src/templates/           🔴 2026-09-21 后：只剩 runner 脚本（无 SKILL.md）；安装语义已删
+L1 实现层   src/{index,activation,errors,config-schema}.ts + src/init/（install-skill / template-loader 已删）
 L2 平台层   DSH 原生：fs 沙箱(P3) / goal+subagent(loop/resident) / compact-basic(压缩) / todo
+           ＋（现行形态）native cordis 插件 `hooks/dsh-serenity-hooks` 注册 11 个真实工具
 ```
 
 | 层 | 组件 | 职责 |
@@ -27,9 +37,9 @@ L2 平台层   DSH 原生：fs 沙箱(P3) / goal+subagent(loop/resident) / compa
 | 激活 | `src/activation.ts` | P1 有根（.serenity 上溯）/ P2 git 管 / P3 路径二分（DSH fs 沙箱执行） |
 | 配置 | `src/config-schema.ts` | `.dsh/serenity.json` zod schema（loop/sessionKeeper/safeMode） |
 | 错误 | `src/errors.ts` | 13 错误类（serenityCode + impact），C3 保留 stdout/stderr |
-| 安装 | `src/skills/install-skill.ts` + `template-loader.ts` | 模板→目标 .dsh/skills，占位符替换，幂等 |
-| CLI | `src/index.ts` + `bin/` | install / init / list / status |
-| 技能模板 | `src/templates/acc-*` | ACC 工具协议（文档）+ runner（脚本） |
+| ~~安装~~ | ~~`src/skills/install-skill.ts` + `template-loader.ts`~~ | 🔴 **2026-09-21 已删**（B 案）——无对象，勿按本行去找这两个文件 |
+| CLI | `src/index.ts` + `bin/` | init / list / status（~~install~~ 2026-09-21 删） |
+| ~~技能模板~~ | ~~`src/templates/acc-*`~~ | 🔴 **2026-09-21 起不再是"技能模板"**：9 份 `SKILL.md` 已删，目录只剩 6 个 runner 脚本 |
 
 ## 2. 激活协议
 
@@ -41,6 +51,10 @@ L2 平台层   DSH 原生：fs 沙箱(P3) / goal+subagent(loop/resident) / compa
 ```
 
 ## 3. 工具映射决策
+
+> 🔴 **2026-09-21 补注**：下表每行的「`acc-*` **技能**」= 随模板安装的 `SKILL.md`，**已删**（B 案）；
+> **`scripts/*.ts` runner 仍在**（`src/templates/<skill>/scripts/`，被仓内 6 个测试文件 import）。
+> 现行运行时**不再依赖这些 runner**：工具由 native cordis 插件 `hooks/dsh-serenity-hooks` 直接注册。
 
 | ACC 标准 | DSH 实现方式 | 决策编号 |
 |----------|-------------|---------|
@@ -76,8 +90,8 @@ L2 平台层   DSH 原生：fs 沙箱(P3) / goal+subagent(loop/resident) / compa
 | DD-01 | 包名 | `@shgroup/dsh-serenity-plugin`（与 opencode 插件同 scope，未来可发布） |
 | DD-02 | 远程 | 原 home GitLab（private）；v1.14.2 起 GitHub `git@github.com:dsh-external/dsh-serenity-plugin.git`（private） |
 | DD-03 | 默认分支 | master（home-git 约定：AI_LAB 域） |
-| DD-04 | 技能安装目标 | v0.1 先支持 `--scope ccc`（CCC 级），`user` 级为可选 |
-| DD-05 | 模板占位符 | `{{prefix}} / {{ccc_name}} / {{date}}`（与 opencode 插件一致） |
+| ~~DD-04~~ | ~~技能安装目标~~ | 🔴 **2026-09-21 作废**：安装机制整条退场（B 案）——ACC 不再往 CCC 装技能 |
+| ~~DD-05~~ | ~~模板占位符~~ | 🔴 **2026-09-21 作废**：`template-loader.ts` 已删（`{{prefix}}/{{ccc_name}}/{{date}}` 无消费者） |
 | DD-06 | MSM 注册表 | 复用 `mech-registry.json` v1 格式（CCC 内），plugin-root 注册表仅 CLI 调试 |
 | DD-07 | 测试标准 | vitest，随工具技能逐步补齐（对齐 opencode 插件 487+ 的纪律） |
 | DD-08 | 私有 | package.json `private: true`；仅 dsh-external 组织（GitHub private），不发布 npm |

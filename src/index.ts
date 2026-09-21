@@ -2,109 +2,52 @@
  * index.ts — dsh-serenity-plugin CLI 入口
  *
  * 子命令：
- *   install [--scope ccc|user] [--target <dir>] [--force] [--skills <csv|all>]
- *                                                          安装 ACC 技能到目标 .dsh/skills
- *   init <path> --name <ccc> --description <desc>          创建新 CCC（git init + .serenity + 骨架 + 技能）
- *   list [--target <dir>]                                  列出已安装技能
+ *   init <path> --name <ccc> --description <desc>          创建新 CCC（git init + .serenity + 骨架 + Phase 2 提示）
+ *   list [--target <dir>]                                  列出目标 .dsh/skills 下的目录（只读诊断）
  *   status [--dir <dir>]                                   显示当前目录激活状态（P1/P2）
+ *
+ * 🔴 2026-09-21（B 案第 2 步②；owner 令「**连模板和安装命令一起删**」）：`install` 子命令
+ * 已**整体删除** —— 连同 `src/skills/install-skill.ts` / `template-loader.ts`，以及
+ * `src/templates/` 下每个技能的 `SKILL.md`（共 9 份，见提交 `b6a964b`）。
+ *
+ * 为什么删（证据链，勿凭记忆改回）：
+ *   1. owner 问「系统提示词怎么膨胀了好多倍」。查明**不是同一份被注入两次**，而是入口块
+ *      = `home-serenity`(43,089 B) + `acc-serenity`(10,355 B) ≈ **53 KB/请求**；第二份的来路是
+ *      `.dsh/entry-skill` 指针（自 2026-08-07 起就点名 `acc-serenity`），而它**直到 2026-09-17
+ *      那次 `install --skills` 才第一次存在** ⇒ 自那天起每请求静默 +10 KB。
+ *   2. 本安装器是那条路径**唯一的生产者** ⇒ 生产者退场，B 案第 1 步（删 `findEntrySkills` 的
+ *      来源 3「扫 `.dsh/skills/*-serenity`」）才算完整闭环。
+ *   3. 判据（owner 2026-09-21 选 **B 案**）：这套"ACC 往 CCC 装一份技能副本"的机制**整条退场**
+ *      —— CCC 的技能由 CCC 自己维护（`.opencode/skills/`）。
+ *
+ * ⚠️ **保留**：模板目录里的 6 个 `scripts/*.ts`（`msm` / `cc-git` / `acc-kit` /
+ * `session-tool` / `safe-mode` / `cc-fs`）—— 它们不是"指南"，被仓内 **6 个测试文件** import；
+ * 删它们会连带删测试，**超出 owner 说的"模板"范围**。目录名沿用，但**不再有安装语义**。
+ *
+ * ⚠️（写本文件时踩到的坑，留给后来者）：**块注释里不能出现 `*` + `/` 连写**——
+ * 描述路径通配（`src/templates/<skill>/SKILL.md`）时若照抄 shell 通配符，注释会被提前终止，
+ * esbuild 报 `Expected ";" but found "..."`。同族先例：往 TS 模板字符串里插文本要先确认反引号。
  */
 
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { checkActivation } from './activation.js';
-import { installAll, DEFAULT_TEMPLATE_SKILLS } from './skills/install-skill.js';
 import { runInit } from './init/init-wizard.js';
-
-// 模板目录：src/templates（开发时）/ dist/templates（构建后）
-const here = fileURLToPath(new URL('.', import.meta.url));
-const templatesDir = existsSync(join(here, 'templates'))
-  ? join(here, 'templates')
-  : join(here, '..', 'src', 'templates');
-
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-/** 模板目录下实际存在的技能（判据 = 该目录里有 `SKILL.md`） */
-export function listTemplateSkills(dir: string = templatesDir): string[] {
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((name) => existsSync(join(dir, name, 'SKILL.md')))
-    .sort();
-}
-
-/**
- * resolveInstallSkills — 解析 `--skills` 选中的技能集合（纯函数，可单测）。
- *
- * 三种取值（`install-skill.ts` 的注释一直声称支持 `--skills`，本函数把它做实）：
- *   · **缺省 / 空** ⇒ `DEFAULT_TEMPLATE_SKILLS`（入口 + EAP + Neat；工具技能模板**已退役**为 fallback）
- *   · **`all`** ⇒ 模板目录下**实际存在**的全部技能 —— 用于**刷新既有 CCC 的存量技能**
- *     （先例：2026-09-20 补齐「轨迹自带 skill」指南时，CCC 里存着 9 份旧印，而默认集只覆盖 3 份）
- *   · **显式 CSV** ⇒ 逐个校验；**不存在的名字进 `missing` 响亮列出**（不静默丢）
- */
-export function resolveInstallSkills(
-  skillsArg: string | null | undefined,
-  available: readonly string[] = listTemplateSkills(),
-): { skills: string[]; missing: string[] } {
-  const arg = (skillsArg ?? '').trim();
-  if (arg === '') return { skills: [...DEFAULT_TEMPLATE_SKILLS], missing: [] };
-  if (arg === 'all') return { skills: [...available], missing: [] };
-  const wanted = arg
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return {
-    skills: wanted.filter((n) => available.includes(n)),
-    missing: wanted.filter((n) => !available.includes(n)),
-  };
-}
 
 function usage(): void {
   console.log(`dsh-serenity-plugin — 宁静号 ACC (DSH 运行时)
 
 用法:
-  dsh-serenity-plugin install [--scope ccc|user] [--target <dir>] [--force] [--skills <csv|all>]
-      --scope  安装目标：ccc（CCC 级 .dsh/skills，默认）/ user（用户级 ~/.dsh/skills）
-      --target 显式指定安装目录（覆盖 scope 推断）
-      --skills 装哪些（缺省 = 入口 + EAP + Neat 三件；all = 模板里实际存在的全部，
-               用于刷新既有 CCC 的存量技能；也可给逗号分隔的名字）
   dsh-serenity-plugin init <path> --name <ccc> --description <desc>
-      创建新 CCC：git init + .serenity + 骨架 + 安装技能
+      创建新 CCC：git init + .serenity + 骨架 + Phase 2 提示
   dsh-serenity-plugin list [--target <dir>]
+      列出目标 .dsh/skills 下的目录（只读诊断；不再有 install，故这里通常为空）
   dsh-serenity-plugin status [--dir <dir>]
-`);
-}
+      显示当前目录激活状态（P1 有根 / P2 git 管）
 
-export function cmdInstall(args: string[]): number {
-  let scope: 'ccc' | 'user' = 'ccc';
-  let target: string | null = null;
-  let force = false;
-  let skillsArg: string | null = null;
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === '--scope') scope = args[++i] as 'ccc' | 'user';
-    else if (a === '--target') target = args[++i] ?? null;
-    else if (a === '--force') force = true;
-    else if (a === '--skills') skillsArg = args[++i] ?? null;
-  }
-  const cccRoot = target ?? (scope === 'ccc' ? process.cwd() : homedir());
-  const userDshHome = homedir();
-  const ctx = { prefix: 'dsh', cccName: 'home-serenity', date: today() };
-  const { skills, missing } = resolveInstallSkills(skillsArg);
-  const result = installAll(templatesDir, { scope, cccRoot, userDshHome, force }, ctx, skills);
-  console.log(`skills dir: ${result.skillsDir}`);
-  for (const r of result.results) {
-    console.log(`  [${r.status}] ${r.skill}${r.error ? ` — ${r.error}` : ''}`);
-  }
-  if (missing.length > 0) {
-    console.log(`  [missing] 模板里没有这些技能（未安装）：${missing.join(', ')}`);
-  }
-  if (!force) {
-    console.log('提示：目标已存在同名技能时会被跳过（幂等）；要覆盖请加 --force');
-  }
-  return 0;
+⚠️ install 子命令已于 2026-09-21 删除（owner 令「连模板和安装命令一起删」）：
+ACC 不再往 CCC 装技能副本；技能由 CCC 自己维护（.opencode/skills/）。
+`);
 }
 
 export function cmdList(args: string[]): number {
@@ -149,8 +92,7 @@ export function cmdInit(args: string[]): number {
     return 1;
   }
   try {
-    const result = runInit({ path: pathArg, name, description, templatesDir });
-    console.log(`installed ${result.installed} skills into ${join(result.root, '.dsh', 'skills')}`);
+    const result = runInit({ path: pathArg, name, description });
     console.log(`Phase 2 提示已生成: ${result.phase2Path}`);
     console.log(`CCC "${name}" initialized at ${result.root}`);
     return 0;
@@ -163,8 +105,6 @@ export function cmdInit(args: string[]): number {
 export function main(argv: string[] = process.argv.slice(2)): number {
   const cmd = argv[0];
   switch (cmd) {
-    case 'install':
-      return cmdInstall(argv.slice(1));
     case 'init':
       return cmdInit(argv.slice(1));
     case 'list':

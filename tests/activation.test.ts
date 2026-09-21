@@ -3,7 +3,6 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { findSerenityRoot, findGitRoot, classifyPath, resolveInside, checkActivation } from '../src/activation.js';
-import { installAll, resolveSkillsDir } from '../src/skills/install-skill.js';
 
 let dir: string;
 
@@ -71,31 +70,7 @@ describe('activation: checkActivation', () => {
   });
 });
 
-describe('installer', () => {
-  it('scope 路径解析：ccc → <root>/.dsh/skills，user → ~/.dsh/skills', () => {
-    const opts = { scope: 'ccc' as const, cccRoot: dir, userDshHome: '/home/test-user' };
-    expect(resolveSkillsDir(opts)).toBe(join(dir, '.dsh', 'skills'));
-    expect(resolveSkillsDir({ ...opts, scope: 'user' })).toBe('/home/test-user/.dsh/skills');
-  });
-
-  it('安装器只安装存在的模板', () => {
-    const templatesDir = join(dir, 'templates');
-    mkdirSync(join(templatesDir, 'acc-serenity'), { recursive: true });
-    writeFileSync(join(templatesDir, 'acc-serenity', 'SKILL.md'), 'name: {{ccc_name}}');
-    const result = installAll(
-      templatesDir,
-      { scope: 'ccc', cccRoot: dir, userDshHome: dir },
-      { prefix: 'dsh', cccName: 'home-serenity', date: '2026-08-06' },
-    );
-    expect(result.results).toHaveLength(1);
-    expect(result.results[0]!.skill).toBe('acc-serenity');
-    expect(result.results[0]!.status).toBe('installed');
-    // 幂等：重复安装 skip
-    const again = installAll(
-      templatesDir,
-      { scope: 'ccc', cccRoot: dir, userDshHome: dir },
-      { prefix: 'dsh', cccName: 'home-serenity', date: '2026-08-06' },
-    );
-    expect(again.results[0]!.status).toBe('skipped');
-  });
-});
+// 🔴 2026-09-21（B 案第 2 步④）：原 `describe('installer')` 两条用例（`resolveSkillsDir` 的
+// scope 路径解析 / `installAll` 的"只安装存在的模板"+"幂等 skip"）**随安装器一并删除**——
+// 主语（`src/skills/install-skill.ts`）已经不存在。owner 令「连模板和安装命令一起删」。
+// ⇒ 负向钉（"安装器面确实没了"）另置 `tests/cli.test.ts`，不在此处留空壳。
