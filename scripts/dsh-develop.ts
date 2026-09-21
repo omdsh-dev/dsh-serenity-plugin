@@ -7,6 +7,7 @@
  *
  * 子命令:
  *   dsh-develop typecheck             tsc --noEmit（hooks 目录）
+ *   dsh-develop typecheck-cli         tsc --noEmit（**仓库根包** src/——CLI/init/模板脚本；v1.46-dev 补）
  *   dsh-develop test [--filter <p>]   vitest run（hooks 目录）
  *   dsh-develop build                 tsc + tsdown 双 bundle（产物 lib/）
  *   dsh-develop status                插件仓库 git status + 版本
@@ -120,6 +121,34 @@ function cmdTypecheck(): void {
     fail(`client typecheck 失败 (exit ${clientR.status})`, 2)
   }
   console.log(`[dsh-develop] ✓ typecheck 通过（node + client）`)
+}
+
+/**
+ * cmdTypecheckCli — **仓库根包**（CLI + init 向导 + 模板脚本，即 `@shgroup/dsh-serenity-plugin`）的 typecheck。
+ *
+ * 🔴 为什么补这一条（2026-09-21，S142 B 案收口轮，**当场验证过缺口是真缺口**）：
+ * 在此之前 `dsh-develop typecheck` **只**跑 hooks 的 node + client 两面（cwd = HOOKS_DIR），
+ * 而根包 `src/`（`src/index.ts` / `src/init/` / `src/templates/<skill>/scripts/`）**不在任何门禁范围内**。
+ * ⇒ 在那里删错东西（例如 import 了刚删掉的模块）**不会变红**——除非恰好有测试 import 到它。
+ * B 案第 2 步删的正是根包（`install-skill.ts` / `template-loader.ts` / `install` 子命令面），
+ * 所以这一条是那次施工留下的**必修欠账**，不是顺手加的功能。
+ *
+ * 判据 = 仓库根 `tsconfig.json`（`include: ["src"]`、`exclude: [...,"tests"]`）——
+ * **不新造配置**，也不改 hooks 那两面的语义（保持"双面"这个既有口径不变）。
+ * 与发布链的关系：**刻意不并入 `publish`/`build`**（那是改发布链语义，属 owner 决策）；
+ * 本命令先作为**可单独调用**的门禁存在。
+ */
+function cmdTypecheckCli(): void {
+  const tsconfig = join(REPO_ROOT, 'tsconfig.json')
+  if (!existsSync(tsconfig)) fail(`仓库根 tsconfig.json 缺失: ${tsconfig}`, 2)
+  const tscBin = join(REPO_ROOT, 'node_modules', '.bin', 'tsc')
+  if (!existsSync(tscBin)) fail(`tsc 不可用（先 pnpm install 仓库根依赖）: ${tscBin}`, 2)
+  const r = run(tscBin, ['-p', 'tsconfig.json', '--noEmit'], { cwd: REPO_ROOT, quiet: true })
+  if (r.status !== 0) {
+    console.error(r.stdout + r.stderr)
+    fail(`根包 typecheck 失败 (exit ${r.status})`, 2)
+  }
+  console.log(`[dsh-develop] ✓ 根包 typecheck 通过（仓库根 tsconfig.json；include src）`)
 }
 
 function cmdTest(filter?: string): void {
@@ -1967,6 +1996,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     switch (sub) {
       case 'typecheck': cmdTypecheck(); break
+      case 'typecheck-cli': cmdTypecheckCli(); break
       case 'typecheck-host': cmdTypecheckHost(rest[0]); break
       case 'test': {
         const fi = rest.indexOf('--filter')
@@ -2023,7 +2053,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag [--ccc <path>] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-cli | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag [--ccc <path>] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -2042,8 +2072,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case '-h':
       case undefined:
         console.log(`dsh-develop — dsh-serenity-plugin 开发操作 MSM（safe-mode 白名单通道）
-用法: dsh-develop <typecheck|test|coverage|build|status|commit|push|version|bump|deploy|npm-install|lockfile|restart-web|pack-check|readme-sync|publish|github-push|squash-history> [args]
-  typecheck             tsc --noEmit
+用法: dsh-develop <typecheck|typecheck-cli|test|coverage|build|status|commit|push|version|bump|deploy|npm-install|lockfile|restart-web|pack-check|readme-sync|publish|github-push|squash-history> [args]
+  typecheck             tsc --noEmit（hooks 的 node + client 两面）
+  typecheck-cli         tsc --noEmit（**仓库根包** src/——CLI / init 向导 / 模板脚本；此前无门禁，2026-09-21 补）
   test [--filter <p>]   vitest run
   coverage              vitest run --coverage（阈值门禁见 vitest.config.ts）
   build                 tsc + tsdown 双 bundle
