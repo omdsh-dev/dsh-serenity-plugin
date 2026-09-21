@@ -296,16 +296,197 @@ describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理',
    * 接线钉（同 `client-popover-clip-guard.test.ts` 的形态）：
    * 上面两个函数**本身对**不等于**被接上了**——机制死在"实现了但没人调用"是最常见的静默失效。
    * 这里钉住 `container_trajectory use` 这条真实路径确实调用它们，并确实把结果报出去。
+   *
+   * 🔴 **2026-09-21 改向（F1/F2 修复）**：退休动作**不再**由 `use` 路径自己发起——
+   * 它收进了 `appendBound` 单一入口（写自己那条时，同一次 RMW 内退休同轨迹其它条）。
+   * ⇒ 本钉由"正向"改为**正负双钉**：`use` **必须不再**出现 `supersedeOtherBindings(` /
+   * `out.supersededBindings`（**F1 的根因形态 = 调用方自己算 selfId**，一旦回归本钉就红），
+   * 而**退休判据必须出现在 `appendBound` 里**（否则"只留一条"又变成没人调用）。
    */
-  it('🔴 接线钉：`use` 路径确实调用 supersedeOtherBindings + pruneMissingBindings 并回报结果', () => {
+  it('🔴 接线钉：`use` 路径**不再**自己发起退休（F1 根因防回归）+ 仍调 pruneMissingBindings 并回报', () => {
     const src = readFileSync(new URL('../src/tools/trajectory.ts', import.meta.url), 'utf-8')
     const useCase = src.slice(src.indexOf("case 'use':"), src.indexOf("case 'rebuild':", src.indexOf("case 'use':")))
-    expect(useCase).toContain('supersedeOtherBindings(')
+    // 负向：F1 的根因形态不得回归
+    expect(useCase).not.toContain('supersedeOtherBindings(')
+    expect(useCase).not.toContain('out.supersededBindings')
+    // 正向：(c) 兜底与 fail-closed 判据仍在
     expect(useCase).toContain('pruneMissingBindings(')
     expect(useCase).toContain('hasSessionLogById(') // (c) 判据必须 fail-closed 的那个函数
-    expect(useCase).toContain("out.supersededBindings = ") // 结果要报出去（否则用户不知道发生了什么）
-    expect(useCase).toContain("out.prunedBindings = ")
+    expect(useCase).toContain("out.prunedBindings = ") // 结果要报出去（否则用户不知道发生了什么）
   })
+
+  it('🔴 接线钉：退休判据确实在 `appendBound` 单一入口里（否则「只留一条」无人调用）', () => {
+    const src = readFileSync(new URL('../src/trajectory-bound.ts', import.meta.url), 'utf-8')
+    const fn = src.slice(src.indexOf('export function appendBound('))
+    expect(fn).toContain('collectSupersedeTargets(')
+    expect(fn).toContain('supersededAt = record.at') // 同一次调用共用一个 at（与既有语义一致）
+  })
+})
+
+/**
+ * 🔴 D69「只留一条」**收进 `appendBound` 单一入口**（F1/F2 修复；owner 令 2026-09-21「**这个要修，充分测试**」）。
+ *
+ * 修的两个真缺陷（原实现把退休挂在 `use` 路径上）：
+ *  · **F1（多退）**：`use` 拿到的是**只带 `append` 的包装对象** ⇒ 读 `.header.id` **恒 `''`**
+ *    ⇒ 保留集为空 ⇒ **把自己刚写的那条也标掉** ⇒ 该轨迹瞬间**零可用绑定**（唤醒报"无绑定会话记录"）。
+ *  · **F2（少退）**：`rebuild` 换代**根本不调用**退休 ⇒ 旧载体永不退休、多载体堆积。
+ *
+ * 🔴 **测试形态的硬要求（原测试的盲区，必须点名）**：既有用例**全部直接调 `supersedeOtherBindings`
+ * 并显式传非空 `keepIds`** ⇒ **从不走真正出事的路径**；唯一"覆盖 `use`"的还只是**源码字符串接线钉**
+ * （只能证明"**调用了**"，证明不了"**参数是对的**"）。⇒ 本组一律**走 `appendBound` 生产路径**。
+ */
+describe('trajectory-bound: 🔴 D69 收进 appendBound 单一入口（F1/F2 修复）', () => {
+  const DIR = '2026-08-24--S142--dsp 维护'
+  const MD = '/r/AGENT_SESSIONS/2026-08-24--S142--dsp 维护/SESSION.md'
+
+  /** 直接写绑定文件（绕过 appendBound 的 cwd 定位，便于构造多载体场景） */
+  function seed(records: Record<string, { dirName: string; at: number }>): void {
+    const sessions: Record<string, unknown> = {}
+    for (const [id, r] of Object.entries(records)) {
+      sessions[id] = { dirName: r.dirName, mdPath: MD, action: 'rebuild', at: r.at }
+    }
+    writeFileSync(join(ccc, BINDINGS_REL_PATH), JSON.stringify({ version: 1, sessions }, null, 2))
+  }
+
+  function readSessions(): Record<string, { dirName: string; supersededAt?: number }> {
+    return (JSON.parse(readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8')) as {
+      sessions: Record<string, { dirName: string; supersededAt?: number }>
+    }).sessions
+  }
+
+  /** 假域（形状 = BindingStore 期望的 DomainLike 结构子集；put 为 async ⇒ 需等一个微任务） */
+  function fakeDomain(initial: Record<string, unknown> = {}) {
+    const records: Record<string, unknown> = { ...initial }
+    return {
+      records,
+      domain: {
+        table: () => ({
+          get: (k: string) => records[k],
+          entries: () => Object.entries(records)[Symbol.iterator](),
+          size: Object.keys(records).length,
+          put: async (k: string, v: unknown) => { records[k] = v },
+          delete: async (k: string) => delete records[k],
+        }),
+      },
+    }
+  }
+  const tick = () => new Promise((r) => setTimeout(r, 0))
+
+  it('🔴 F1 正控（核心）：写自己那条时**自己不被退休**、同轨迹其它条被退休 ⇒ 可用绑定恰好只剩自己', () => {
+    seed({
+      'carrier-1': { dirName: DIR, at: 100 },
+      'carrier-2': { dirName: DIR, at: 200 },
+    })
+    // = `use` 路径写入"当前载体"的同一动作（生产路径，不是直接调底层函数）
+    appendBound(makeSession('carrier-3'), 'activate', { dirName: DIR, mdPath: MD })
+
+    const sessions = readSessions()
+    expect(sessions['carrier-3'].supersededAt).toBeUndefined() // ← F1 的核心断言
+    expect(sessions['carrier-1'].supersededAt).toBeTypeOf('number')
+    expect(sessions['carrier-2'].supersededAt).toBeTypeOf('number')
+    // 修复前的症状：这里**恒为 `[]`**（进而唤醒/`send-now` 报"无绑定会话记录"）
+    expect(listBoundSessionIds(ccc, DIR)).toEqual(['carrier-3'])
+    // 退休 ≠ 删除：沿革与正向查询仍完整
+    expect(Object.keys(sessions).sort()).toEqual(['carrier-1', 'carrier-2', 'carrier-3'])
+  })
+
+  it('🔴 F2：`rebuild` 换代同样退休旧载体（此前该路径**从不**退休）', () => {
+    seed({ 'old-carrier': { dirName: DIR, at: 100 } })
+    appendBound(makeSession('new-carrier'), 'rebuild', { dirName: DIR, mdPath: MD })
+    expect(readSessions()['old-carrier'].supersededAt).toBeTypeOf('number')
+    expect(listBoundSessionIds(ccc, DIR)).toEqual(['new-carrier'])
+  })
+
+  it('`create` 路径一致生效（同一入口 ⇒ 全路径一致，不必各路径各写一遍）', () => {
+    seed({ old: { dirName: DIR, at: 100 } })
+    appendBound(makeSession('fresh'), 'create', { dirName: DIR, mdPath: MD })
+    expect(readSessions()['old'].supersededAt).toBeTypeOf('number')
+    expect(readSessions()['fresh'].supersededAt).toBeUndefined()
+  })
+
+  it('一次调用共用一个 `at`（与"同一次标记共用时间戳"既有语义一致）', () => {
+    seed({ a: { dirName: DIR, at: 100 }, b: { dirName: DIR, at: 200 } })
+    appendBound(makeSession('mine'), 'activate', { dirName: DIR, mdPath: MD })
+    const s = readSessions()
+    expect(s['a'].supersededAt).toBe(s['b'].supersededAt)
+  })
+
+  it('幂等：再写一次 → 已退休的不重复标记（时间戳不变）', () => {
+    seed({ old: { dirName: DIR, at: 100 } })
+    appendBound(makeSession('mine'), 'activate', { dirName: DIR, mdPath: MD })
+    const first = readSessions()['old'].supersededAt
+    appendBound(makeSession('mine'), 'activate', { dirName: DIR, mdPath: MD })
+    expect(readSessions()['old'].supersededAt).toBe(first)
+  })
+
+  it('🔴 **不碰别的轨迹**的绑定（判据是 `dirName`，不是"所有非自己"）', () => {
+    seed({
+      mine: { dirName: DIR, at: 100 },
+      other: { dirName: '2026-09-13--S185--相机', at: 200 },
+    })
+    appendBound(makeSession('fresh'), 'activate', { dirName: DIR, mdPath: MD })
+    const s = readSessions()
+    expect(s['other'].supersededAt).toBeUndefined()
+    expect(s['mine'].supersededAt).toBeTypeOf('number')
+  })
+
+  it('🔴 域侧同样退休（不只改文件）—— 域是权威载体，漏了等于没退休', async () => {
+    const { domain, records } = fakeDomain({
+      'domain-old-1': { dirName: DIR, mdPath: MD, action: 'rebuild', at: 100 },
+      'domain-old-2': { dirName: DIR, mdPath: MD, action: 'rebuild', at: 200 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    appendBound(makeSession('domain-new'), 'activate', { dirName: DIR, mdPath: MD })
+    await tick() // 域写是 fire-and-forget ⇒ 让微任务跑完
+    expect((records['domain-old-1'] as { supersededAt?: number }).supersededAt).toBeTypeOf('number')
+    expect((records['domain-old-2'] as { supersededAt?: number }).supersededAt).toBeTypeOf('number')
+    expect((records['domain-new'] as { supersededAt?: number }).supersededAt).toBeUndefined()
+  })
+
+  it('🔴 只在域里、文件里没有的条目也被退休（**域 ∪ 文件并集**判据——同族历史缺陷的回归钉）', async () => {
+    const { domain, records } = fakeDomain({
+      'domain-only': { dirName: DIR, mdPath: MD, action: 'rebuild', at: 100 },
+    })
+    setBindingStore(bindingStore(domain as never))
+    appendBound(makeSession('union-new'), 'activate', { dirName: DIR, mdPath: MD })
+    await tick()
+    expect((records['domain-only'] as { supersededAt?: number }).supersededAt).toBeTypeOf('number')
+  })
+
+  /**
+   * 🔴 **F3 的机制钉**（`use` 路径"从不写绑定"的根因）。
+   *
+   * `use` 原先交给 `appendBound` 的是**被削成只带 `append` 的包装对象**（`{ append: s.append }`），
+   * 而绑定读写定位"哪条会话 / 哪个 CCC 根"靠的是 `session.header.id` 与 `header.cwd` ⇒
+   * 包装对象取不到 ⇒ **在读 id 处直接 `return false`**（**静默 no-op**，一行都不写）。
+   *
+   * 本钉把这条机制**变成机械可检**：无 header ⇒ false 且**不产生文件**；有 header ⇒ 正常写入。
+   */
+  it('🔴 F3 机制：无 header 的包装对象 ⇒ appendBound **静默 no-op**（一行都不写）', () => {
+    const wrapper = { append: () => {} } // = 旧 `agentDshSession` 的产物
+    expect(appendBound(wrapper, 'activate', { dirName: DIR, mdPath: MD })).toBe(false)
+    expect(existsSync(join(ccc, BINDINGS_REL_PATH))).toBe(false) // 不是"写了空表"，是**根本没写**
+    // 对照：同一个逻辑会话，只要带上 header ⇒ 正常写入
+    expect(appendBound(makeSession('ok-1'), 'activate', { dirName: DIR, mdPath: MD })).toBe(true)
+    expect(readSessions()['ok-1']).toBeDefined()
+  })
+
+  it('🔴 F3 接线钉：`agentDshSession` **不得把会话削成只带 `append`**（否则上面那条机制复发）', () => {
+    const src = readFileSync(new URL('../src/tools/trajectory.ts', import.meta.url), 'utf-8')
+    const fn = src.slice(src.indexOf('function agentDshSession('))
+    expect(fn.slice(0, fn.indexOf('\n}'))).not.toContain('{ append: s.append')
+    expect(fn).toContain('header?: unknown') // 类型上就承认"会话带 header"
+  })
+
+  /**
+   * ⚠️ **诚实标注：为什么这里没有"端到端跑 `use`"的用例**（试过，撤了）。
+   *
+   * `use` 动作末尾会跑 `pruneMissingBindings(root, (id) => !hasSessionLogById(sessionsRootDir(), id))`
+   * —— 判据按**真实 dsh 会话日志**判定。夹具里的假会话 id 没有真日志 ⇒ **写进去的行随即被清掉**
+   * ⇒ 端到端用例断言不到"当前载体拿到绑定"。
+   * ⇒ 要做真正的端到端用例，**前提是把 sessions root 做成可注入的**（当前是模块内解析）。
+   * 在具备该注入点之前，F1/F3 的证据 = 上面这些**走 `appendBound` 生产路径**的用例 + 源码接线钉。
+   */
 })
 
 /**

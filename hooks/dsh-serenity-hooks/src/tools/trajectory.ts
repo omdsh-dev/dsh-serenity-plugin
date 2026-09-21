@@ -71,11 +71,24 @@ function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? DEFAULT_SESSION_SCOPE
 }
 
-/** 当前 dsh 会话对象（append bound 用）；无 → null */
-function agentDshSession(exec: { agent?: { session?: unknown } }): { append: (type: unknown, data: unknown) => unknown } | null {
+/**
+ * 当前 dsh 会话对象（绑定的读写都要用它）；无 `append` → null。
+ *
+ * 🔴 **2026-09-21 修 F3（原实现是 F1 的上游成因）**：本函数原先把会话**削成只带 `append` 的包装对象**。
+ * 但 `appendBound` / `readLastBound` 定位"这是哪条会话、哪个 CCC 根"靠的是
+ * `session.header.id` 与 `session.header.cwd`（见 `trajectory-bound.ts` 的 `sessionHeader`）——
+ * **包装对象没有 header** ⇒ ① `appendBound` **在读 id 处直接 `return false`**（静默 no-op）
+ * ⇒ **`use` 这条路从来不写当前载体的绑定**（实证吻合：S142 §7.4 记录"当前载体的绑定**直到
+ * 17:05 那次 rebuild 才写入**"）② `readLastBound` 同样恒 null ⇒ G1 切换守卫只能靠内存回退。
+ * ⇒ 改为**返回原会话对象**（只增字段、不削字段）：只用 `append` 的调用点行为不变，
+ *   而绑定读写从此拿得到 header。
+ */
+function agentDshSession(
+  exec: { agent?: { session?: unknown } },
+): { append: (type: unknown, data: unknown) => unknown; header?: unknown } | null {
   const s = exec.agent?.session as { append?: unknown } | undefined
   return s && typeof s.append === 'function'
-    ? { append: s.append as (type: unknown, data: unknown) => unknown }
+    ? (s as { append: (type: unknown, data: unknown) => unknown })
     : null
 }
 
@@ -370,18 +383,15 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
         const advisory = advisoryHint(targetEntry.dirName, join(targetEntry.path, 'SESSION.md'))
         const out: Record<string, JsonValue> = { dir: active.dir, mdPath: active.mdPath, context: active.context }
         if (advisory) out.advisory = advisory
-        // (b) 机械守卫（S142 §0y，所有者 2026-09-18 裁「b 做」）：
-        //   同一 trajectory 的**其它**绑定一律标记 superseded —— 它们仍可被人工使用，
-        //   但**不再被唤醒选中**，从而消除"两条 live 会话各持一份完整上下文 + 双写者"。
-        //   放在 appendBound 之后：本会话刚写入的记录是最新的，保留集合里只留自己。
+        // (b) 多 live 会话守卫（S142 §0y，所有者 2026-09-18 裁「b 做」）：
+        //   🔴 **2026-09-21 起退休动作由 `appendBound` 单一入口负责**（上一步那次写入时，
+        //      **同一次 RMW** 里就把同轨迹的其它条标 superseded）。**此处不再自己算 selfId**——
+        //      那正是 F1 的成因：`agentDshSession(exec)` 返回的是**只带 `append` 的包装对象**，
+        //      读 `.header?.id` **恒得 `''`** ⇒ 保留集为空 ⇒ 把**刚写进去的自己那条**也标掉
+        //      ⇒ 该轨迹瞬间**零可用绑定** ⇒ 唤醒 / `send-now` / `send-later` 全部报
+        //      「无绑定会话记录」（且症状与"到点没人接"不可区分）。
+        //      收进入口后，`create`/`activate`/`switch`/`rebuild` **全部路径一致生效**（F2 同解）。
         if (dsh) {
-          const selfId = String((dsh as { header?: { id?: unknown } }).header?.id ?? '')
-          const superseded = supersedeOtherBindings(
-            root,
-            info?.dirName ?? targetDirName,
-            selfId === '' ? new Set<string>() : new Set([selfId]),
-          )
-          if (superseded.length > 0) out.supersededBindings = superseded
           // (c) 兜底：清掉指向**已不存在**的 dsh 会话的悬空绑定（判据 fail-closed，
           //     见 hasSessionLogById —— sessions root 读不到时一律保留）。
           const pruned = pruneMissingBindings(root, (id) => !hasSessionLogById(sessionsRootDir(), id))

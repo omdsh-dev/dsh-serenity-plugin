@@ -377,6 +377,40 @@ export function listBoundSessionIds(root: string, dirName: string): string[] {
 }
 
 /**
+ * 🔴 **「只留一条」的唯一判据**（2026-09-21 收进单一实现；此前同一判据在域侧/文件侧各写一遍）。
+ *
+ * 判据：同 `dirName` ∧ **不是** `keepIds` 里的 ∧ **尚未** `supersededAt`。
+ * 域侧与文件侧**同判据**——历史缺陷（2026-09-19）正是"只在一侧收集 ⇒ 返回值恒空"，
+ * 见 {@link supersedeOtherBindings} 的注释。
+ *
+ * @param fileSessions 旧文件表的记录集
+ * @param domainEntries 域侧条目（域不可用时传 `undefined` = 不参与判定）
+ */
+function collectSupersedeTargets(
+  dirName: string,
+  keepIds: ReadonlySet<string>,
+  fileSessions: Record<string, unknown>,
+  domainEntries: Iterable<[string, BindingRecord]> | undefined,
+): Set<string> {
+  const toMark = new Set<string>()
+  if (domainEntries) {
+    for (const [id, raw] of domainEntries) {
+      const rec = fromDomainRecord(raw)
+      if (rec.dirName !== dirName) continue
+      if (keepIds.has(id) || rec.supersededAt !== undefined) continue
+      toMark.add(id)
+    }
+  }
+  for (const [id, raw] of Object.entries(fileSessions)) {
+    const rec = asBoundRecord(raw)
+    if (!rec || rec.dirName !== dirName) continue
+    if (keepIds.has(id) || rec.supersededAt !== undefined) continue
+    toMark.add(id)
+  }
+  return toMark
+}
+
+/**
  * **(b) 同一 trajectory 多 live 会话的机械守卫**（S142 §0y，所有者 2026-09-18 裁「b 做」）。
  *
  * 把绑定到 `dirName` 的**其它**会话 id 标记为 `supersededAt` —— **保留记录**（沿革/正向查询不丢），
@@ -409,24 +443,12 @@ export function supersedeOtherBindings(
    * ⇒ 症状是"D69 只留一条**静默不生效**"（记录没被标记，返回也看不出异常）。
    * 由 `tests/trajectory-bound.test.ts` 的 D69 域路径用例抓到。
    */
-  const toMark = new Set<string>()
-
-  // 域侧收集
-  if (domainStore?.available) {
-    for (const [id, raw] of domainStore.entries()) {
-      const rec = fromDomainRecord(raw)
-      if (rec.dirName !== dirName) continue
-      if (keepIds.has(id) || rec.supersededAt !== undefined) continue
-      toMark.add(id)
-    }
-  }
-  // 文件侧收集（与域侧同判据）
-  for (const [id, raw] of Object.entries(file.sessions)) {
-    const rec = asBoundRecord(raw)
-    if (!rec || rec.dirName !== dirName) continue
-    if (keepIds.has(id) || rec.supersededAt !== undefined) continue
-    toMark.add(id)
-  }
+  const toMark = collectSupersedeTargets(
+    dirName,
+    keepIds,
+    file.sessions,
+    domainStore?.available ? domainStore.entries() : undefined,
+  )
 
   if (toMark.size === 0) return []
 
@@ -524,6 +546,11 @@ export function pruneMissingBindings(
  * 写入绑定（latest-wins 覆盖该会话记录）。
  *
  * 绑定持久化尽力而为：无法定位 CCC 根 / 无会话 id / 写盘失败 → 返回 false，不阻断主流程。
+ *
+ * 🔴 **同时是「只留一条」（D69）的唯一写入口**（2026-09-21 起）：每写一条，就在**同一次 RMW** 里
+ * 把同轨迹的**其它**条标 `supersededAt`（自己除外）。⇒ 任何调用路径（`create`/`activate`/`switch`/
+ * `rebuild`/`reconcile`）**都自动满足"只留一条"**，调用方**不需要**（也**不应当**）自己算 selfId。
+ *
  * @param session 目标 dsh 会话（需 `header.id` + `header.cwd` 可定位 CCC 根）
  * @param action 绑定动作
  * @param rec 绑定记录（dirName + mdPath 必填；sessionId 可选展示码）
@@ -559,7 +586,44 @@ export function appendBound(
   try {
     const file = readBindingsFile(path)
     file.sessions[id] = record
+    // 🔴 **「只留一条」收进本单一入口**（2026-09-21 修 F1/F2）：
+    //   在同**一次 RMW** 里把同轨迹的**其它**条标 `supersededAt`（自己排除在外）。
+    //
+    //   为什么收进来（而不是让调用方再调一次 `supersedeOtherBindings`）——两个真缺陷（§7.4）：
+    //    · **F1（多退）**：调用方要自己算 selfId，而 `use` 路径拿到的 dsh 会话对象是**只带
+    //      `append` 的包装** ⇒ 读 `.header.id` **恒为 `''`** ⇒ 保留集为空 ⇒ 把**自己刚写的那条**
+    //      也标掉 ⇒ 该轨迹**瞬间零可用绑定** ⇒ 唤醒 / `send-now` / `send-later` 全部报
+    //      「无绑定会话记录」。**本函数自己就持有 `id`** ⇒ 判据在这里是天然的，不需要调用方传。
+    //    · **F2（少退）**：`rebuild` 换代**根本不调用**退休 ⇒ 旧载体永不退休、多载体堆积
+    //      （正是 D69 要消灭的"两条 live 各持一份上下文 + 双写者"）。收进入口 ⇒
+    //      `create` / `activate` / `switch` / `rebuild` / `reconcile` **全部路径一致生效**。
+    //
+    //   ⚠️ 必须并入**同一次** load→modify→save：再调一次 `supersedeOtherBindings` 会
+    //      二次读盘/写盘 + 域侧二次 `put`（本仓既有教训：**RMW 无锁 ⇒ 别自造丢更新窗口**）。
+    const targets = collectSupersedeTargets(
+      rec.dirName,
+      new Set([id]),
+      file.sessions,
+      domainStore?.available ? domainStore.entries() : undefined,
+    )
+    for (const other of targets) {
+      const otherRec = asBoundRecord(file.sessions[other])
+      // 只存在于域侧的条目：文件侧无行可标，交给下面的域侧分支
+      if (!otherRec) continue
+      otherRec.supersededAt = record.at
+      file.sessions[other] = otherRec
+    }
     writeBindingsFile(path, file)
+    // 域侧退休：与自身那条**同口径**（fire-and-forget；失败静默——旧文件侧语义已达成）
+    if (domainStore?.available) {
+      for (const other of targets) {
+        const raw = domainStore.get(other)
+        if (!raw) continue
+        void domainStore
+          .put(other, toDomainRecord({ ...fromDomainRecord(raw), supersededAt: record.at }))
+          .catch(() => {})
+      }
+    }
     return true
   } catch {
     /* 写盘失败（权限/磁盘）不阻断主流程——绑定持久化尽力而为 */
