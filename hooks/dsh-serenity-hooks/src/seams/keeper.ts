@@ -24,6 +24,7 @@ import { skiffTrajectoryEnabled } from '../skiff-core.js'
 import { getActiveSessionInfo } from '../trajectory-ops.js'
 import { readLastBound } from '../trajectory-bound.js'
 import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, IN_FLIGHT_HEADING } from '../trajectory-assistant.js'
+import { recordToolUsage } from '../usage-stats.js'
 
 // ── 纯跟踪器（可单测）──
 
@@ -345,11 +346,14 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
   }
 
   // observe-and-enrich：先 next() 委托，再折叠提醒（block 决策也附加 context）。
-  // v1.22.1 重构：**两个独立机制**——
+  // v1.22.1 重构：**两个独立机制**——（🔴 **2026-09-22 起本缝为三个**，见 ③）
   // ① SESSION-KEEPER 计分提醒（DCP 确认码，阈值 150 缺省）
   // ② 轨迹跟踪器（Trajectory Tracker）上下文压力检测：每次工具调用后独立检查
   //    contextPressure 投影，超 rebuildThresholdK（K 数值）追加 rebuild 提示——**不依赖计分达标**
   //    （此前嵌套在 shouldRemind 内 + inject 缺 sessionProjections → 永不触发）。
+  // ③ 🆕 **用量统计**（owner 令 2026-09-22）= **纯观测**：把 `skill` / `msm` 两类调用记一笔到
+  //    该 CCC 的 `_tmp/acc-usage.json`（逻辑在 `../usage-stats.ts`）。
+  //    ⇒ 本缝的**决策**仍只有 ①②；**③ 一律忽略返回值、抛错被吞，绝不改变任何决策**。
   ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
     if (!exec.agent) return next()
     // 激活门控：只在 .serenity 存在的 CCC 目录计分/提醒；其他目录零干预
@@ -364,6 +368,16 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const tracker = trackerFor(exec)
     const shouldRemind = skiffKeeper ? tracker.step(exec.name) : false
     const downstream = await next()
+
+    // ③ 用量统计（owner 令 2026-09-22）：`skill` 加载与 `msm` 执行各记一笔到该 CCC 的
+    //    `_tmp/acc-usage.json`。🔴 **纯观测**：返回值一律忽略 —— 统计绝不改变本缝的任何决策。
+    //    （`usage-stats.ts` 自身永不抛；此处再兜一层 try 是纵深防御：本缝每轮都跑，
+    //    宁可少记一笔，也不能让统计打断会话。）
+    try {
+      recordToolUsage(root, exec.name, (exec as { arguments?: unknown }).arguments)
+    } catch {
+      /* 静默忽略（不打日志：本缝频度高，噪声会盖过信息） */
+    }
 
     const blocks: ContentBlock[] = []
 

@@ -1,3 +1,65 @@
+## Unreleased — **用量统计：skill 加载次数 ＋ MSM 执行次数**（落该 CCC 的 `_tmp/acc-usage.json`）
+
+**来源**：owner 2026-09-22 令「**我需要对 ACC 增加一个统计功能，包括 skill 加载次数统计，msm 执行次数统计；
+要求这个统计自动生成在 CCC 的 `_tmp` 内的指定文件**」⇒ 方案对齐后「**同意这个方案，开工**」。
+⚠️ **尚未发布**（D14：生效须具名发版令）⇒ 本节在发版时改为版本头。
+
+---
+
+### 一、这东西解决什么（白话）
+
+在此之前，「**哪些 skill 真的被加载过、哪些 MSM 真的在跑**」在 ACC 侧**一个数都没有** ——
+要判断"这东西还有人用吗"，只能翻会话记录**猜**。
+⇒ 本版让**每个 CCC 留下一份纯计数账本**：**用了哪个、多少次、第一次与最近一次是什么时候**。
+用途 = **清理 / 精简的依据**（没人用的与天天在用的，不再靠猜）。
+
+### 二、口径（🔴 两个 skill 字段，**勿合并**）
+
+| 字段 | 含义 | 喂它的地方 |
+|---|---|---|
+| `skill.loads` | 模型**主动**调宿主 `skill` 工具（把某 skill 的 `SKILL.md` 全文载入） | `tools/post-execute`（工具名 = `skill`） |
+| `skill.injections` | ACC **每请求注入**的 skill 段（CCC `trajectory.skills` / 轨迹 frontmatter 声明） | `seams/system-prompt.ts` 的 trajectory-skills section 求值回调 |
+| `msm` | `msm` 工具的一次执行，**按 MSM 名分桶** | `tools/post-execute`（工具名 = `msm`） |
+
+⇒ 两者**差好几个数量级**（`loads` = 模型的**动作**，稀疏；`injections` = **请求的属性**，稠密）。
+**合并成一个数就再也读不出**「这个 skill 是被人主动用的，还是只是被配上了」。
+
+### 三、落点与形态
+
+| 项 | 内容 |
+|---|---|
+| 落点 | **`<CCC>/_tmp/acc-usage.json`**（固定名常量 `USAGE_STATS_FILENAME`；每 CCC 各一份） |
+| 形态 | `{version, updatedAt, skill:{loads,injections}, msm}`；每格 = `{count, firstAt, lastAt}` |
+| 🔴 **只记名字** | **绝不写 `arguments`**（MSM 参数里可能有凭据/正文）⇒ 只留**计数键**，并对**键长**（`USAGE_NAME_MAX_CHARS`）与**每桶键数**（`USAGE_MAX_KEYS_PER_BUCKET`）设上限 ⇒ **文件规模结构上有界**，不需轮转 |
+| 🔴 **重启续算** | 每次写盘 = **读旧文件 → 自增 → 原子写**（`tmp + rename`，与 `wake-registry.ts` / `cro-log.ts` 同款）⇒ 宿主重启后计数**自然延续**（本容器实测 24h 内宿主被换 3 次，这条是必须的） |
+| 无噪声 | 非 `skill`/`msm` 的工具、取不到名字的调用 ⇒ **什么都不记、连文件都不建** |
+
+### 四、接线（**零改 DSH harness**；**纯观测，绝不改决策**）
+
+| 位置 | 改动 |
+|---|---|
+| `src/usage-stats.ts` | 🆕 **新模块**（逻辑全在此；每个导出函数**永不抛**，与 `cro-log.ts` 同族铁律） |
+| `src/seams/keeper.ts` | 在既有 `tools/post-execute` 处理里加**一笔**：`recordToolUsage(root, exec.name, exec.arguments)` —— **返回值一律忽略、抛错被吞** ⇒ 该缝的**决策**仍只有计分与 rebuild 压力两项 |
+| `src/trajectory-skills.ts` | `buildTrajectorySkillsSection()` 增**可选观察者** `onInjectedNames`（在 `names.length === 0` 之后调用 ⇒ **空 section 不计数**天然成立；回调抛错被吞，**不影响注入正文**） |
+| `src/seams/system-prompt.ts` | 上述回调接 `recordSkillInjections(root, names)` |
+
+> 为什么**复用既有缝**而不是新开一个：`tools/post-execute` 已是宿主合约登记的缝（`contract.ts`），
+> 且 `exec.arguments` 本就可用 ⇒ **不需要动 DSH、不需要新契约项**。
+
+### 五、测试（`tests/usage-stats.test.ts`，**22 条**）
+
+落点与初态（不存在 ⇒ 空账本且**不建文件**）｜自增语义（**firstAt 不漂**、lastAt 跟进）｜
+🔴 **重启续算**（只 load 也能读到旧值，再记即 3）｜两个 skill 口径**不混**｜
+🔴 **只记名字**（入参里的哨兵串**不得**出现在文件里）｜损坏容错（不抛 + 下一次记录**自愈**）｜
+非法条目丢弃、合法保留｜原子写**不留 `.tmp`**｜写盘失败返回 `ok:false` 且不抛｜
+键长与键数上界（满桶**不新增键**但仍能自增已有键）｜`bumpBucket` 是**纯函数**。
+
+**门禁（本批自跑）**：typecheck 双面 ✅ ｜ **104 files / 1624 tests** ✅ ｜ coverage ✅（exit 0）｜ 未发版 ⇒ 未 bump 版本号。
+
+---
+
+
+
 ## v1.45.1 — 2026-09-21（**修复：轨迹绑定「只留一条」失效** —— 被 `use` 过的轨迹会**静默哑掉**）
 
 **来源**：owner 2026-09-21 令「**这个要修，充分测试**」＋「**发布吧**」（发版令 ⇒ 本版）。

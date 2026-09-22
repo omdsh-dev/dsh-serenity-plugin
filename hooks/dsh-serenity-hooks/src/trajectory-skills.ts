@@ -175,6 +175,8 @@ export function mergeSkillNames(cccSkills: readonly string[], trajSkills: readon
  * @param mdPath 轨迹的 SESSION.md 路径（**来自绑定的 `mdPath`**，不用 label 拼）
  * @param maxChars 总长上限（字符）
  * @param cccSkills CCC 级声明（`readTrajectorySkills`；缺省空 = 只有轨迹级，行为与 v1.43 一致）
+ * @param onInjectedNames 观测回调（本次请求实际带上的 skill 名；**纯观测**，供用量统计用——
+ *        回调抛错被吞，**不影响注入正文**）
  * @returns 注入正文；两条来源皆无声明 → `''`（空串 = 宿主不产出该 section 块）；
  *          SESSION.md 缺失/读失败 → 响亮提示（若同时有 CCC 级声明，则提示在前、正文随后——
  *          **提示不因"别处有内容"而被吞掉**）
@@ -184,6 +186,7 @@ export function buildTrajectorySkillsSection(
   mdPath: string,
   maxChars: number = TRAJECTORY_SKILLS_MAX_CHARS,
   cccSkills: readonly string[] = [],
+  onInjectedNames?: (names: readonly string[]) => void,
 ): string {
   const abs = absoluteMdPath(root, mdPath)
   let trajNames: string[] = []
@@ -199,6 +202,17 @@ export function buildTrajectorySkillsSection(
   }
   const names = mergeSkillNames(cccSkills, trajNames)
   if (names.length === 0) return notice
+
+  // 🆕 用量统计（owner 令 2026-09-22）：把**本次请求真的带上的** skill 名交给观察者。
+  // 🔴 纯观测：回调包在 try 里 —— **统计失败绝不影响注入正文**（统计不是注入的一部分）；
+  //    放在 `names.length === 0` 之后 ⇒ "空 section 不计数"天然成立（宿主也会丢弃空块）。
+  if (onInjectedNames) {
+    try {
+      onInjectedNames(names)
+    } catch {
+      /* 静默忽略：统计不得影响注入 */
+    }
+  }
 
   const blocks: string[] = []
   for (const name of names) {

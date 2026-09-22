@@ -41,6 +41,7 @@ import {
   hasTrajectorySkillsDeclaration,
   TRAJECTORY_SKILLS_MAX_CHARS,
 } from '../trajectory-skills.js'
+import { recordSkillInjections } from '../usage-stats.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
 import { readAdvancedSettings } from '../config-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -680,6 +681,9 @@ export function registerTrajectorySkillSection(agent: Agent, root: string): bool
           current.mdPath,
           TRAJECTORY_SKILLS_MAX_CHARS,
           readTrajectorySkills(root),
+          // 🆕 用量统计（owner 令 2026-09-22）：记一笔 `skill.injections`（与 `skill.loads` 分字段）。
+          // 🔴 纯观测 —— 回调**只在真的带上了非空 skill 清单**时被调用（见该函数内注释）。
+          (names) => recordSkillInjections(root, names),
         )
       },
     })
