@@ -126,31 +126,45 @@ function logEvent(
  * @returns 便于用例观察的判定结果文本（生产不使用返回值）
  */
 function handleTurnStopping(agent: Agent, turn: number | null): string {
+  // 🔴 便宜门先行（**只是短路**，不是第二套判据：判定语义仍然只在 `decideUnattendedAction` 里，
+  //    这几条与它开头那几条逐字同义 ⇒ 结论必然相同）。
+  // 为什么必须先短路（本函数挂在**每个会话每一轮**的 turn-stopping 上）：
+  //    `hasCroProgram` / `logEvent` 都要读**绑定**（文件或宿主存储域 = I/O），而闸关着时
+  //    每一次收尾都会做一次注定 skip 的判定 ⇒ 白付 I/O。
   const settings = readSimpleSettings()
+  if (settings.unattendedEnabled !== true) return 'skip:mode-off'
   const sessionId = sessionIdOf(agent)
+  if (sessionId === '') return 'skip:no-session-id'
   const root = cccRootForCwd(cwdOf(agent))
+  if (root === null) return 'skip:not-in-ccc'
+
   const session = sessionOf(agent)
   const nowMs = Date.now()
-  const run = sessionId !== '' ? getProxyRun(sessionId) : null
+  const run = getProxyRun(sessionId)
   const text = lastAssistantText(agent)
   const nonces = parseDoneNonces(text)
 
+  // 同样只在这几道便宜门都过了之后才去查 CRO 程序（要读绑定 ⇒ I/O）
+  const sessionIdExcluded = isProxyExcludedSessionId(sessionId)
+  const userInitiated = turn === null ? true : isUserTurn(sessionId, turn)
+  const cro = !sessionIdExcluded && !userInitiated && isMainSession(agent) ? hasCroProgram(session, root) : false
+
   const verdict = decideUnattendedAction({
-    enabled: settings.unattendedEnabled === true,
+    enabled: true,
     root,
     isMainSession: isMainSession(agent),
-    sessionIdExcluded: isProxyExcludedSessionId(sessionId),
+    sessionIdExcluded,
     // ⚠️ 取不到 turn（payload 异常）⇒ 视为"用户发起"（保守：宁可不动）
-    userInitiated: turn === null ? true : isUserTurn(sessionId, turn),
-    hasCroProgram: root !== null ? hasCroProgram(session, root) : false,
+    userInitiated,
+    hasCroProgram: cro,
     run,
     nowMs,
     doneNonce: nonces.length > 0 ? (nonces[nonces.length - 1] ?? null) : null,
     claimsNotify: claimsUserNotification(text),
-    outboundSeen: root !== null && run !== null ? hasOutboundSendSince(root, run.startedAt, nowMs) : false,
+    outboundSeen: run !== null && hasOutboundSendSince(root, run.startedAt, nowMs),
   })
 
-  if (verdict.action === 'skip' || root === null || sessionId === '') return `skip:${verdict.reason}`
+  if (verdict.action === 'skip') return `skip:${verdict.reason}`
 
   if (verdict.action === 'accept' || verdict.action === 'cap') {
     clearProxyRun(sessionId)
