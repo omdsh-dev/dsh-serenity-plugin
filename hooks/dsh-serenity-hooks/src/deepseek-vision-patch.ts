@@ -120,7 +120,7 @@ export function desiredInput(input: unknown): string[] {
 }
 
 interface DeepseekVisionPatchInput {
-  /** `llm-pi-ai` 命名空间**解析后**的值（`settings.get` 结果；undefined = 命名空间未注册） */
+  /** `llm-pi-ai` 命名空间**解析后**的值（0.1.7 读面 `settings.describe()` 里按 `ns` 挑出的 `value`；undefined = 命名空间未注册） */
   resolved: unknown
   /** 开关（CCC 配置 `visionPatch.enabled`）；undefined ⇒ 按默认 true */
   enabled?: boolean
@@ -207,7 +207,11 @@ export function planDeepseekVisionPatch(input: DeepseekVisionPatchInput): Deepse
 
 /** 最小 settings 面（结构化读取；零宿主 import 策略 —— 与 opencode-provider 同款） */
 interface SettingsLike {
-  get?: (ns: string) => unknown
+  /** 🔴 0.1.7 的读面（取代 `get`）：`SettingsForms.describe()` 按**条目 id** 给出表单，
+   *  其 `value` = 该条目已解析的配置。⚠️ 它有**副作用**：修订号变化时会 emit
+   *  `settings/document-updated` ⇒ 本函数被该事件再触发时，第二次 `describe` 的 raw 不变
+   *  ⇒ 不会再 emit（**收敛，不成环**）。与 `opencode-provider.ts` 同款通道，两处须同步改。 */
+  describe?: (options?: { redactSecrets?: boolean }) => readonly { ns?: string; value?: unknown }[] | undefined
   update?: (ns: string, patch: object) => Promise<void>
 }
 
@@ -243,13 +247,14 @@ export async function applyDeepseekVisionPatchOnce(
   enabled?: boolean,
 ): Promise<DeepseekVisionApplyResult> {
   const settings = hostSettings(ctx) as SettingsLike | undefined
-  if (settings?.get === undefined || settings.update === undefined) {
+  if (settings?.describe === undefined || settings.update === undefined) {
     console.warn('[serenity-hooks] DeepSeek 多模态补丁跳过：settings 服务不可用（未能读写 llm-pi-ai 命名空间）')
     return { wrote: false, registered: false }
   }
   let resolved: unknown
   try {
-    resolved = settings.get.call(settings, LLM_PI_AI_NAMESPACE)
+    const forms = settings.describe.call(settings) ?? []
+    resolved = forms.find((f) => f.ns === LLM_PI_AI_NAMESPACE)?.value
   } catch (error) {
     console.warn(`[serenity-hooks] DeepSeek 多模态补丁跳过：读取 ${LLM_PI_AI_NAMESPACE} 失败: ${String((error as Error)?.message ?? error)}`)
     return { wrote: false, registered: false }

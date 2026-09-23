@@ -20,9 +20,12 @@ echo "PLUGIN_LINK   = ${PLUGIN_LINK:-<unset>}" | tee -a "$LOG/entrypoint.log"
 } > "$LOG/host-version.txt" 2>&1
 
 # ── 1. 装插件 ──
-# 两种模式（同一镜像两种用法，别混）：
-#   PLUGIN_SPEC = npm 已发布版（验"发布物在新宿主上能用吗"）
-#   PLUGIN_LINK = 本地构建目录（验"我这次的改动在新宿主上能用吗" —— 适配轮主用这个）
+# 三种模式（同一镜像三用，别混）：
+#   PLUGIN_SPEC   = npm 已发布版（验"发布物在新宿主上能用吗"）
+#   PLUGIN_SPEC   = 容器内 .tgz 绝对路径（🔴 **mode B 主用**：验"我这次的改动在新宿主上能用吗" ——
+#                   由 bench-docker 的 `--plugin-tarball` 打进 /ccc/dist 并挂载，见其注释）
+#   PLUGIN_LINK   = 本地构建目录（同一目的的另一种做法；需调用方自行 -v 挂载）
+# ⚠️ PLUGIN_LINK 优先于 PLUGIN_SPEC（与 bench-docker 的互斥校验同向）
 if [ -n "${PLUGIN_LINK:-}" ] && [ -d "${PLUGIN_LINK}" ]; then
   echo "--- plugin: link ${PLUGIN_LINK}" | tee -a "$LOG/entrypoint.log"
   dsh plugin --profile web add "link:${PLUGIN_LINK}" > "$LOG/plugin-install.log" 2>&1

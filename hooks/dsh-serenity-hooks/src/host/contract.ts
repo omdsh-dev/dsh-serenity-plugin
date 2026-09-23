@@ -88,14 +88,18 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'settings',
     access: 'injected',
     members: [
-      { name: 'installSection', kind: 'function' },
-      // v1.31.7：opencode 路由自动配置（src/opencode-provider.ts）读写**别人的**命名空间
-      // （`llm-pi-ai`）——`get` 读现状、`update` 深合并写入。两者缺失 = 自动配置静默失效，
-      // 故与 installSection 同级登记（本表存在的意义正是把这类隐式依赖变成可探测项）。
-      { name: 'get', kind: 'function' },
+      // 🔴 0.1.7 硬切：`installSection` 与 `get` **已被宿主删除**（`SettingsProvider` → `SettingsForms`）。
+      //   现读面 = `describe`（按**条目 id** 取表单，其 `value` 为已解析配置）；
+      //   页策略 = `configure`（本插件用它关掉自动生成页）；写面 = `update`。
+      // ⚠️ 2026-09-23 实测教训（**本表漏改的代价**）：漏改 ⇒ 契约恒报 `BROKEN (2 required)`
+      //   ⇒ `hostService(ctx,'settings')` 判"不可用" ⇒ opencode 自动配置与多模态补丁**双双静默跳过**
+      //   （不崩、不报错，只是什么都不做）。🔴 **typecheck 看不见它**（成员名是运行时字符串），
+      //   只有**真机上跑一次**才看得见 —— 这正是 Docker 测试台存在的理由（bench V6）。
+      { name: 'configure', kind: 'function' },
+      { name: 'describe', kind: 'function' },
       { name: 'update', kind: 'function' },
     ],
-    impact: '设置面板不安装 → 所有开关静默 no-op；opencode 路由自动配置失效',
+    impact: '设置面板不装配 → 所有开关静默 no-op；opencode 路由自动配置与多模态补丁失效',
     required: true,
   },
   {

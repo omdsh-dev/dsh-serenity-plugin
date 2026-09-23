@@ -24,12 +24,26 @@ DSH 每发一个新的 rc，我们都要把插件适配过去。但**在本机�
 | **事件名换了、我们没跟上** | `agent/created`（0.1.7 由 `agent/session-start` 改名）是**身份播种**的挂载点 ⇒ 失效**静默** | **V5**：ACC 横幅出现在宿主日志里 |
 | **设置面板整页消失** | 0.1.7 换了设置模型（`SettingsProvider` → `SettingsForms`）⇒ 装错就是**页面上什么都不出现** | **V6**：装配路径无报错 |
 
-## 3. 两种用法（同一镜像）
+## 3. 三种用法（同一镜像）
 
 | 模式 | 传什么 | 回答的问题 | 用在什么时候 |
 |---|---|---|---|
-| **发布物** | `PLUGIN_SPEC=@shgroup/dsh-serenity-hooks@<ver>` | 「**已经发出去的**那个包，在新宿主上能用吗」 | 发布后补验 / 排障 |
-| **本地构建** | `PLUGIN_LINK=/ccc/plugin`（挂载仓库内 `hooks/dsh-serenity-hooks`） | 「**我这次的改动**在新宿主上能用吗」 | 🔴 **适配轮主用这个** —— 它能在**发布之前**给出运行态证据 |
+| **发布物** | `--plugin-spec=@shgroup/dsh-serenity-hooks@<ver>` | 「**已经发出去的**那个包，在新宿主上能用吗」 | 发布后补验 / 排障 |
+| **本地构建**（🔴 推荐） | **`--plugin-tarball`** —— 工具自己 `npm pack` 本地工作树 → 推远端 → 起容器时挂到 `/ccc/dist` | 「**我这次的改动**在新宿主上能用吗」 | 🔴 **适配轮主用** —— 它能在**发布之前**给出运行态证据 |
+| **本地目录**（旧通道） | `--plugin-link=<容器内路径>` | 同上 | ⚠️ 需调用方**自行 `-v` 挂载**（旧缺口，故有了 `--plugin-tarball`） |
+
+> 🔴 **为什么 mode B 用 tarball 而不是"直接挂目录"**：`--plugin-tarball` 走的是 **npm 发布物的同一条安装路径**
+> （`dsh plugin add <tgz>`，包内容也由同一份 `package.json` 的 `files` 白名单决定）⇒
+> 它与 mode A 的**唯一差别就是"内容来自我的本地构建"**。挂目录（`link:`）则是另一条安装路径，
+> 多一个"link 语义本身是否与发布语义一致"的变量。
+
+**mode B 的标准流程**（三步，全走 MSM，不手敲 ssh）：
+
+```
+msm("dsh-develop", ["build"])                          # 1. 产出本地 lib/（mode B 验的就是它）
+msm("bench-docker", ["up", "--run=mb1", "--plugin-tarball"])   # 2. 打包 → 推 → 起容器（后台，立即返回）
+msm("bench-docker", ["wait", "mb1"])                   # 3. 有界轮询；然后 verify + logs 收判据
+```
 
 ## 4. 执行纪律（**不是风格，是踩过的坑**）
 

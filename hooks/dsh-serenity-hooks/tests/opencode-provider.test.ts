@@ -4,6 +4,7 @@
  * 覆盖三类判据：
  *   ① 计划（纯函数）：路由识别 / 只补缺失键 / 大小写不敏感 / L2 建路由条件 / 各种 idle
  *   ② 执行（settings 面）：深合并补丁形状 / 命名空间未注册 → 交给重试 / 写被拒 → 响亮不抛
+ *      🔴 v0.1.7 读面 = `describe()`（列举条目表单后按 `ns` 挑）；夹具形状见 `describeStub`
  *   ③ 装配：settings/updated 自愈 + 定时器随卸载拆卸（F-08 纪律）
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -24,6 +25,19 @@ const HEADERS = opencodeRouteHeaders()
 
 function plan(resolved: unknown, env: Record<string, string | undefined> = {}) {
   return planOpencodeAutoConfig({ resolved, env })
+}
+
+/** 造 0.1.7 `SettingsForms.describe()` 的返回形状（`SettingsDescriptor[]`）。
+ *  🔴 `describe` 取代了 0.1.7 前被删除的 `settings.get()`：读面从"按 ns 取值"
+ *  改成"列举所有条目表单、再按 `ns` 自己挑" ⇒ **未注册命名空间 = 数组里没有该条目**
+ *  （不是"有 ns 但值为 undefined"）。夹具必须复现这个差别，否则测不出重试判据。 */
+function describeStub(found: { ns?: string; value?: unknown }[] | undefined) {
+  return vi.fn().mockReturnValue(found)
+}
+
+/** 单条目情形（绝大多数用例）：命名空间已注册且值为 `value` */
+function describeOne(value: unknown) {
+  return describeStub([{ ns: LLM_PI_AI_NAMESPACE, value }])
 }
 
 describe('opencode-provider: 路由识别', () => {
@@ -195,7 +209,7 @@ describe('opencode-provider: 执行（settings 面）', () => {
   }
 
   it('命名空间未注册 → 不写、标记 registered:false（交由装配层重试）', async () => {
-    const settings = { get: vi.fn().mockReturnValue(undefined), update: vi.fn() }
+    const settings = { describe: describeStub([]), update: vi.fn() }
     const { ctx } = fakeCtx(settings)
     const r = await applyOpencodeAutoConfigOnce(ctx, {})
     expect(r).toEqual({ wrote: false, registered: false })
@@ -204,20 +218,32 @@ describe('opencode-provider: 执行（settings 面）', () => {
 
   it('补齐 → 调用 update 且 patch 形状正确；读的是 llm-pi-ai 命名空间', async () => {
     const settings = {
-      get: vi.fn().mockReturnValue({ providers: { 'opencode-go': {} } }),
+      describe: describeOne({ providers: { 'opencode-go': {} } }),
       update: vi.fn().mockResolvedValue(undefined),
     }
     const { ctx } = fakeCtx(settings)
     const r = await applyOpencodeAutoConfigOnce(ctx, {})
     expect(r).toEqual({ wrote: true, registered: true })
-    expect(settings.get).toHaveBeenCalledWith(LLM_PI_AI_NAMESPACE)
+    // 🔴 钉住 `describe` 契约：**必以零参调用**（传 options 无妨，但不能传 ns —— 它不是取值器）
+    expect(settings.describe).toHaveBeenCalledWith()
+    expect(settings.describe).toHaveBeenCalledTimes(1)
     expect(settings.update).toHaveBeenCalledWith(LLM_PI_AI_NAMESPACE, { providers: { 'opencode-go': { headers: HEADERS } } })
+  })
+
+  it('describe 返回里有别的 ns 但没有 llm-pi-ai → registered:false（按条目挑，认 ns 字段）', async () => {
+    const settings = { describe: describeStub([{ ns: 'someone-else', value: { providers: {} } }]), update: vi.fn() }
+    const { ctx } = fakeCtx(settings)
+    const r = await applyOpencodeAutoConfigOnce(ctx, {})
+    expect(r).toEqual({ wrote: false, registered: false })
+    expect(settings.update).not.toHaveBeenCalled()
   })
 
   it('方法调用保 this（解构裸调用会丢 this —— 本仓第四次同病，故断言 this 绑定）', async () => {
     const settings = {
       seen: 'me' as string | undefined,
-      get(this: { seen?: string }) { return this.seen === 'me' ? { providers: { opencode: {} } } : undefined },
+      describe(this: { seen?: string }) {
+        return this.seen === 'me' ? [{ ns: LLM_PI_AI_NAMESPACE, value: { providers: { opencode: {} } } }] : []
+      },
       async update(this: { seen?: string }) { if (this.seen !== 'me') throw new Error('lost this') },
     }
     const { ctx } = fakeCtx(settings)
@@ -226,7 +252,7 @@ describe('opencode-provider: 执行（settings 面）', () => {
 
   it('无事可做 → 不调用 update（避免无谓触发 settings/updated）', async () => {
     const settings = {
-      get: vi.fn().mockReturnValue({ providers: { opencode: { headers: { ...HEADERS } } } }),
+      describe: describeOne({ providers: { opencode: { headers: { ...HEADERS } } } }),
       update: vi.fn(),
     }
     const { ctx } = fakeCtx(settings)
@@ -238,7 +264,7 @@ describe('opencode-provider: 执行（settings 面）', () => {
   it('写入被拒 → 响亮告警但不抛（apply 抛错 = 整个 dsh 启动失败）', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const settings = {
-      get: vi.fn().mockReturnValue({ providers: { 'opencode-go': {} } }),
+      describe: describeOne({ providers: { 'opencode-go': {} } }),
       update: vi.fn().mockRejectedValue(new Error('route not serviceable')),
     }
     const { ctx } = fakeCtx(settings)
@@ -251,7 +277,7 @@ describe('opencode-provider: 执行（settings 面）', () => {
   it('读取抛错 → 告警但不抛', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const settings = {
-      get: vi.fn().mockImplementation(() => { throw new Error('settings disposed') }),
+      describe: vi.fn().mockImplementation(() => { throw new Error('settings disposed') }),
       update: vi.fn(),
     }
     const { ctx } = fakeCtx(settings)
@@ -260,9 +286,20 @@ describe('opencode-provider: 执行（settings 面）', () => {
     warn.mockRestore()
   })
 
-  it('settings 服务缺失（无 get/update）→ 告警但不抛', async () => {
+  it('settings 服务缺失（无 describe/update）→ 告警但不抛', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const { ctx } = fakeCtx({ installSection: () => undefined })
+    // 🔴 用 0.1.7 **真实存在但不是我方读面**的成员做夹具（`configure` 只做页策略）
+    //    —— 比"传个旧成员"更能证明"缺 describe 就一定跳过"
+    const { ctx } = fakeCtx({ configure: () => undefined })
+    const r = await applyOpencodeAutoConfigOnce(ctx, {})
+    expect(r).toEqual({ wrote: false, registered: false })
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('settings 服务不可用'))
+    warn.mockRestore()
+  })
+
+  it('有 describe 但缺 update（半拉服务）→ 同样跳过，不抛', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const { ctx } = fakeCtx({ describe: describeOne({ providers: {} }) })
     const r = await applyOpencodeAutoConfigOnce(ctx, {})
     expect(r).toEqual({ wrote: false, registered: false })
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('settings 服务不可用'))
@@ -272,7 +309,7 @@ describe('opencode-provider: 执行（settings 面）', () => {
 
 describe('opencode-provider: 装配（registerOpencodeAutoConfig）', () => {
   it('apply 时立即尝试一次；命名空间未注册 → 排入退避重试（非失败日志）', async () => {
-    const settings = { get: vi.fn().mockReturnValue(undefined), update: vi.fn() }
+    const settings = { describe: describeStub([]), update: vi.fn() }
     const handlers = new Map<string, (arg?: unknown) => void>()
     const ctx = {
       settings,
@@ -282,14 +319,14 @@ describe('opencode-provider: 装配（registerOpencodeAutoConfig）', () => {
     }
     registerOpencodeAutoConfig(ctx as never)
     await new Promise((r) => setImmediate(r))
-    expect(settings.get).toHaveBeenCalledWith(LLM_PI_AI_NAMESPACE)
+    expect(settings.describe).toHaveBeenCalledWith()
     // 已订阅 settings/document-updated（自愈路径；v0.1.7 前名 settings/updated）
     expect(handlers.has('settings/document-updated')).toBe(true)
   })
 
   it('settings/document-updated 只对 llm-pi-ai 命名空间复评（别人的命名空间不触发）', async () => {
     const settings = {
-      get: vi.fn().mockReturnValue({ providers: { opencode: { headers: { ...HEADERS } } } }),
+      describe: describeOne({ providers: { opencode: { headers: { ...HEADERS } } } }),
       update: vi.fn(),
     }
     const handlers = new Map<string, (arg?: unknown) => void>()
@@ -301,13 +338,13 @@ describe('opencode-provider: 装配（registerOpencodeAutoConfig）', () => {
     }
     registerOpencodeAutoConfig(ctx as never)
     await new Promise((r) => setImmediate(r))
-    const before = settings.get.mock.calls.length
+    const before = settings.describe.mock.calls.length
     handlers.get('settings/document-updated')?.('serenity-hooks') // 别人的命名空间
     await new Promise((r) => setImmediate(r))
-    expect(settings.get.mock.calls.length).toBe(before)
+    expect(settings.describe.mock.calls.length).toBe(before)
     // v0.1.7：载荷为**两个位置参** `(ns, revision)`；我方只读 ns
     handlers.get('settings/document-updated')?.(LLM_PI_AI_NAMESPACE, 1) // 我们的目标命名空间
     await new Promise((r) => setImmediate(r))
-    expect(settings.get.mock.calls.length).toBeGreaterThan(before)
+    expect(settings.describe.mock.calls.length).toBeGreaterThan(before)
   })
 })

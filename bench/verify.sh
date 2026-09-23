@@ -30,6 +30,20 @@ check() { # id, 人话, 0/1
   fi
 }
 
+# ── V0 🔴 先自证"我这份脚本是本地最新推过来的那份" ──
+# 为什么排第一条（2026-09-24 实测踩到的**假红**）：`verify.sh` 是**构建期 bake 进镜像**的；
+# 本地改好判据后重跑 `up`（不重建镜像）⇒ 容器里跑的还是**旧脚本**，于是按**已废弃的判据**报 FAIL。
+# ⇒ 判据纪律「读数器本身要先证明不瞎」在此处 = **先证明跑的是哪份脚本**。
+SELF_SHA=$(sha256sum /usr/local/bin/verify.sh 2>/dev/null | cut -d' ' -f1)
+PUSHED_SHA=$(cat /usr/local/bin/verify.sh.sha256 2>/dev/null || echo "")
+if [ -n "$PUSHED_SHA" ] && [ "$SELF_SHA" = "$PUSHED_SHA" ]; then
+  check V0 "判据脚本 = 本地推入版（vpush 已生效）" 0 "sha ${SELF_SHA:0:12}…"
+elif [ -z "$PUSHED_SHA" ]; then
+  check V0 "判据脚本 = 本地推入版（vpush 已生效）" 1 "未推过（跑的是**镜像 bake 版**）⇒ 判据可能已过期，先 vpush"
+else
+  check V0 "判据脚本 = 本地推入版（vpush 已生效）" 1 "容器内 sha 与推送记录不符（被人改过？）"
+fi
+
 # ── V1 宿主版本 ──
 hv=$(cat "$LOG/host-version.txt" 2>/dev/null || echo "")
 if [ -n "$EXPECT_DSH" ]; then
@@ -52,11 +66,13 @@ web="$LOG/dsh-web.log"
 if [ -s "$web" ]; then
   skiphit=$(grep -icE 'skip|incompatible|refus|not compatible' "$web" || true)
   check V3 "宿主启动日志无「跳过/不兼容」痕迹" "$([ "${skiphit:-0}" -eq 0 ] && echo 0 || echo 1)" "命中 ${skiphit:-0} 行"
-  # 正面证据：我们的包名出现在启动日志里
+  # 正面证据：**我们的日志前缀**出现在启动日志里
   # 🔵 判据修正（2026-09-23 首跑踩到）：最初 grep `dsh-serenity-hooks`（**包名**），
   #    而宿主的日志前缀逐字是 `[serenity-hooks]` ⇒ **假红**。⇒ 改成 grep `serenity`。
+  #    🔴 同族第二跳（2026-09-24）：判据改了、**容器里跑的却还是旧脚本**（bake 在镜像里）⇒ 依旧假红。
+  #    ⇒ 已由 V0 兜住：V0 FAIL 时，V3b 的红**不算数**。
   ours=$(grep -c 'serenity' "$web" || true)
-  check V3b "启动日志里出现我们的包名" "$([ "${ours:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${ours:-0} 行"
+  check V3b "启动日志里出现我们的日志前缀（serenity）" "$([ "${ours:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${ours:-0} 行"
 else
   check V3  "宿主启动日志无「跳过/不兼容」痕迹" 1 "dsh-web.log 为空/不存在"
   check V3b "启动日志里出现我们的包名" 1 "dsh-web.log 为空/不存在"
@@ -80,8 +96,25 @@ seed=$(grep -c 'Serenity cognitive container active' "$web" 2>/dev/null || true)
 check V5 "身份播种痕迹（ACC 横幅）" "$([ "${seed:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${seed:-0} 行（0 可能只是还没建会话）"
 
 # ── V6 设置面板（B1：0.1.7 换了模型 ⇒ 装错就整页不出现）──
+# 🔵 判据升级（2026-09-24：原判据只有"grep 无报错" = **只能证明"没炸"**，证明不了"契约没破"）。
+#    升级为**显式断言**：启动日志里的 `host contract` 行**不得含 `BROKEN`**。
+#    先例（B1 只迁一半）：`host contract BROKEN (2 required): service "settings" is missing
+#    function "installSection"` ⇒ 插件照常"能装、能起"，但两条功能**静默跳过**
+#    （`opencode 路由自动配置跳过` / `DeepSeek 多模态补丁跳过`）—— 这正是最该被抓住的形态。
 sset=$(grep -icE 'settings.*(fail|error)|installSection|SettingsProvider' "$web" 2>/dev/null || true)
 check V6 "设置面板装配无报错" "$([ "${sset:-0}" -eq 0 ] && echo 0 || echo 1)" "命中 ${sset:-0} 行"
+
+broken=$(grep -c 'host contract BROKEN' "$web" 2>/dev/null || true)
+hcline=$(grep -m1 'host contract' "$web" 2>/dev/null || echo "(无 host contract 行)")
+check V6b "host contract 不含 BROKEN（无 required 成员缺失）" \
+  "$([ "${broken:-0}" -eq 0 ] && echo 0 || echo 1)" "BROKEN 命中 ${broken:-0} 行；实测: ${hcline:0:110}"
+
+# 🔵 与 V6b 配对的**功能级**判据：契约破了必然伴随这两条"静默跳过"，故显式盯住它们
+skiproute=$(grep -c 'opencode 路由自动配置跳过' "$web" 2>/dev/null || true)
+skipvis=$(grep -c 'DeepSeek 多模态补丁跳过' "$web" 2>/dev/null || true)
+check V6c "两条 settings 依赖的功能未被静默跳过" \
+  "$([ "${skiproute:-0}" -eq 0 ] && [ "${skipvis:-0}" -eq 0 ] && echo 0 || echo 1)" \
+  "路由跳过 ${skiproute:-0} 行 / 多模态跳过 ${skipvis:-0} 行"
 
 # ── 汇总 ──
 echo "═══ 运行态验收（宿主 ${EXPECT_DSH:-?} ／ 期望 ACC ${EXPECT_ACC:-?}）═══"

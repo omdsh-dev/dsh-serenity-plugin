@@ -88,7 +88,7 @@ export function opencodeRouteHeaders(): Record<string, string> {
 }
 
 interface OpencodeAutoConfigInput {
-  /** `llm-pi-ai` 命名空间**解析后**的值（`settings.get` 结果；undefined = 命名空间未注册） */
+  /** `llm-pi-ai` 命名空间**解析后**的值（0.1.7 读面 `settings.describe()` 里按 `ns` 挑出的 `value`；undefined = 命名空间未注册） */
   resolved: unknown
   /** 进程环境（注入以便测试） */
   env: Readonly<Record<string, string | undefined>>
@@ -210,7 +210,11 @@ export function planOpencodeAutoConfig(input: OpencodeAutoConfigInput): Opencode
 
 /** 最小 settings 面（结构化读取；零宿主 import 策略——`dsh-settings` 不在 peerDeps 的必要面里） */
 interface SettingsLike {
-  get?: (ns: string) => unknown
+  /** 🔴 0.1.7 的读面（取代 `get`）：`SettingsForms.describe()` 按**条目 id** 给出表单，
+   *  其 `value` = 该条目已解析的配置。⚠️ 它有**副作用**：修订号变化时会 emit
+   *  `settings/document-updated` ⇒ 本函数被该事件再触发时，第二次 `describe` 的 raw 不变
+   *  ⇒ 不会再 emit（**收敛，不成环**），但改这里时必须把这条交互记在案。 */
+  describe?: (options?: { redactSecrets?: boolean }) => readonly { ns?: string; value?: unknown }[] | undefined
   update?: (ns: string, patch: object) => Promise<void>
 }
 
@@ -236,13 +240,14 @@ export function describeOpencodeAction(action: OpencodeAutoConfigAction): string
  */
 export async function applyOpencodeAutoConfigOnce(ctx: Context, env?: Readonly<Record<string, string | undefined>>): Promise<{ wrote: boolean; registered: boolean }> {
   const settings = hostSettings(ctx) as SettingsLike | undefined
-  if (settings?.get === undefined || settings.update === undefined) {
+  if (settings?.describe === undefined || settings.update === undefined) {
     console.warn('[serenity-hooks] opencode 路由自动配置跳过：settings 服务不可用（未能读取/写入 llm-pi-ai 命名空间）')
     return { wrote: false, registered: false }
   }
   let resolved: unknown
   try {
-    resolved = settings.get.call(settings, LLM_PI_AI_NAMESPACE)
+    const forms = settings.describe.call(settings) ?? []
+    resolved = forms.find((f) => f.ns === LLM_PI_AI_NAMESPACE)?.value
   } catch (error) {
     console.warn(`[serenity-hooks] opencode 路由自动配置跳过：读取 ${LLM_PI_AI_NAMESPACE} 失败: ${String((error as Error)?.message ?? error)}`)
     return { wrote: false, registered: false }

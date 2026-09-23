@@ -5,6 +5,7 @@
  *   ① 计划（纯函数）：deepseek 识别 / 六种 input 现状 / 幂等 / 非 deepseek 不动 /
  *      🔴 **models 数组整写不丢其它模型与字段** / **绝不新建 models**
  *   ② 执行（settings 面）：补丁形状 / 命名空间未注册 → 交重试 / 写被拒 → 响亮不抛
+ *      🔴 v0.1.7 读面 = `describe()`（列举条目表单后按 `ns` 挑）；`fakeCtx` 已按新形状造桩
  *   ③ 装配：settings/updated 自愈 + 定时器随卸载拆卸（F-08）+ 开关
  *
  * 🔴 本文件的核心价值 = 把设计 §2.3「**深合并对数组是整体替换**」变成机械回归：
@@ -252,15 +253,16 @@ describe('deepseek-vision-patch: 动作描述', () => {
 
 /** 造一个最小 settings 面（结构化桩；不依赖真宿主）。
  * ⚠️ 形状必须是 `{ settings: {...} }` —— `hostSettings(ctx)` 读的就是 `ctx.settings`
- * （与 `opencode-provider.test.ts` 同款；首版我写成 `__settings` ⇒ 全部执行层用例假红）。 */
-function fakeCtx(getResult: unknown, opts: { getThrows?: boolean; updateThrows?: boolean } = {}) {
+ * （与 `opencode-provider.test.ts` 同款；首版我写成 `__settings` ⇒ 全部执行层用例假红）。
+ * 🔴 v0.1.7 读面 = `SettingsForms.describe()`（取代被删除的 `get`）：**列举条目表单、按 `ns` 挑**。
+ * ⇒ `getResult === undefined` 表示"**未注册**"（数组里没有该条目），**不是**"有 ns 但值为 undefined"。 */
+function fakeCtx(getResult: unknown, opts: { readThrows?: boolean; updateThrows?: boolean } = {}) {
   const calls: { ns: string; patch: object }[] = []
   const ctx = {
     settings: {
-      get: (ns: string) => {
-        if (opts.getThrows) throw new Error('boom-get')
-        expect(ns).toBe(LLM_PI_AI_NAMESPACE)
-        return getResult
+      describe: () => {
+        if (opts.readThrows) throw new Error('boom-describe')
+        return getResult === undefined ? [] : [{ ns: LLM_PI_AI_NAMESPACE, value: getResult }]
       },
       update: async (ns: string, patch: object) => {
         if (opts.updateThrows) throw new Error('boom-update')
@@ -306,7 +308,7 @@ describe('deepseek-vision-patch: 执行层', () => {
 
   it('读抛错 ⇒ 响亮告警但不抛', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { ctx } = fakeCtx(undefined, { getThrows: true })
+    const { ctx } = fakeCtx(undefined, { readThrows: true })
     const r = await applyDeepseekVisionPatchOnce(ctx)
     expect(r).toEqual({ wrote: false, registered: false })
     expect(warn.mock.calls.some((c) => String(c[0]).includes('读取'))).toBe(true)
@@ -356,7 +358,7 @@ describe('deepseek-vision-patch: 装配', () => {
     const calls: object[] = []
     const handlers: Record<string, (ns?: unknown) => void> = {}
     const settings = {
-      get: () => resolved,
+      describe: () => (resolved === undefined ? [] : [{ ns: LLM_PI_AI_NAMESPACE, value: resolved }]),
       update: async (_ns: string, patch: object) => { calls.push(patch) },
     }
     const ctx = {
@@ -378,7 +380,7 @@ describe('deepseek-vision-patch: 装配', () => {
     const calls: object[] = []
     const handlers: Record<string, (ns?: unknown) => void> = {}
     const settings = {
-      get: () => resolved,
+      describe: () => (resolved === undefined ? [] : [{ ns: LLM_PI_AI_NAMESPACE, value: resolved }]),
       update: async (_ns: string, patch: object) => { calls.push(patch) },
     }
     const ctx = {
@@ -396,7 +398,7 @@ describe('deepseek-vision-patch: 装配', () => {
   })
 
   it('事件通道缺失 ⇒ 不抛（①② 仍覆盖首次配置）', () => {
-    const ctx = { settings: { get: () => undefined, update: async () => {} } }
+    const ctx = { settings: { describe: () => [], update: async () => {} } }
     expect(() => { registerDeepseekVisionPatch(ctx as never) }).not.toThrow()
   })
 })
