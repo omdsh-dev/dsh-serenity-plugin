@@ -19,6 +19,15 @@ echo "PLUGIN_LINK   = ${PLUGIN_LINK:-<unset>}" | tee -a "$LOG/entrypoint.log"
   npm ls -g --depth=0 2>&1 | grep -E '@deepseek-ai/dsh' || true
 } > "$LOG/host-version.txt" 2>&1
 
+# ── 0b. 把**镜像里 bake 的**判据脚本落进 /usr/local/bin ──
+# 🔴 为什么要有这一步：`verify.sh` 是**构建期** COPY 进镜像的 ⇒ 不重建镜像时，
+#    容器里跑的是**旧判据**（实测踩过：V3b 假红）。`bench-docker vpush` 可以把**本地最新**
+#    的那份推进正在跑的容器（并落 `.sha256` 供 `verify.sh` 的 V0 自证"跑的是哪份"）。
+#    ⇒ 这里只负责**首次落地**；"改判据后要推"是调用方的纪律（见 README §4）。
+for f in verify.sh v8-client-check.mjs; do
+  [ -f "/usr/local/bin/$f" ] && echo "judge script present: $f" | tee -a "$LOG/entrypoint.log"
+done
+
 # ── 1. 装插件 ──
 # 三种模式（同一镜像三用，别混）：
 #   PLUGIN_SPEC   = npm 已发布版（验"发布物在新宿主上能用吗"）

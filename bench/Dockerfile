@@ -28,8 +28,14 @@ ENV DSH_VERSION=${DSH_VERSION} \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl git jq procps tini \
+      ca-certificates curl git jq procps tini zstd \
  && rm -rf /var/lib/apt/lists/*
+# ⚠️ `zstd` 是 V5 判据的**读数器**（2026-09-24 加，非可选）：
+#    身份播种的 ACC 横幅**只进对话消息流**、**不打 stdout** ⇒ 唯一能机械读到它的地方是
+#    宿主自己的会话日志（`/root/.dsh/sessions/**/session.v*.jsonl.zstd`）。
+#    没有 zstd CLI ⇒ V5 只能报"没法读"，而"没法读"与"没播种"在验收表上长得一样（会误导后人）。
+#    🔵 镜像里**没有** zstd 的 JS/原生模块（实测：`node:zstd` 不存在、无 `*.node`、无 node_modules/zstd）
+#       ⇒ 必须走 CLI。libzstd.so.1 本来就有，CLI 只多几百 KB。
 
 # 宿主 CLI：全局装（二进制名实测 = `dsh`）
 # ⚠️ 还要装 **pnpm** —— 🔴 2026-09-23 首跑实测：DSH 的插件管理器**自己 spawn pnpm**
@@ -46,6 +52,8 @@ RUN mkdir -p /logs /ccc && touch /ccc/.serenity
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY verify.sh     /usr/local/bin/verify.sh
+# V8 探针（设置面板的**客户端面**证据；Node 脚本，verify.sh 调它）
+COPY v8-client-check.mjs /usr/local/bin/v8-client-check.mjs
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh
 
 WORKDIR /ccc

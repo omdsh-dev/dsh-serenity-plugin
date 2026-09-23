@@ -92,8 +92,46 @@ else
 fi
 
 # ── V5 身份播种（agent/created 挂载点）──
-seed=$(grep -c 'Serenity cognitive container active' "$web" 2>/dev/null || true)
-check V5 "身份播种痕迹（ACC 横幅）" "$([ "${seed:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${seed:-0} 行（0 可能只是还没建会话）"
+# 🔴 判据重写（2026-09-24 实测纠正，**旧判据是错的**）：
+#    ① 旧判据 grep 的 `Serenity cognitive container active`（`seams/context.ts` 的 ACC 横幅）
+#       **从不打 stdout** —— 它是**注入进对话消息流**的 ⇒ 原判据**结构上不可能命中**（恒 0）。
+#    ② `agent/created` 是**「agent 创建」事件**，**不是**「session 创建」（`session/create` 不触发它）
+#       ⇒ 需要**一条真实用户轮**（`session/prompt`）才会走到播种（`bench-docker turn` 造它）。
+#    ⇒ 新判据 = **在宿主自己的会话日志里找那条横幅**（`zstd -dc` 解压后 grep）——
+#       这是"播种内容真的进了这条会话"的**唯一机械可读证据**。
+sessdir=/root/.dsh/sessions
+if command -v zstd >/dev/null 2>&1; then
+  seed=0
+  for f in $(find "$sessdir" -name 'session.v*.jsonl.zstd' 2>/dev/null); do
+    n=$(zstd -dc "$f" 2>/dev/null | grep -c 'Serenity cognitive container active' || true)
+    seed=$((seed + ${n:-0}))
+  done
+  check V5 "身份播种真的进了会话（ACC 横幅在会话日志里）" \
+    "$([ "${seed:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "命中 ${seed:-0} 处；扫描 $(find "$sessdir" -name 'session.v*.jsonl.zstd' 2>/dev/null | wc -l | tr -d ' ') 份会话日志"
+else
+  check V5 "身份播种真的进了会话（ACC 横幅在会话日志里）" 1 \
+    "🔴 **读数器缺失**（镜像里没有 zstd CLI）⇒ 无法读会话日志；**这不等于没播种**（见 Dockerfile 注释）"
+fi
+# 🔵 与 V5 配对：**宿主是否真的创建过 agent** —— `agent/created` 的宿主侧同源痕迹
+prompted=$(grep -c 'bootstrap: anchor turns injected' "$web" 2>/dev/null || true)
+check V5b "宿主真的创建过 agent（轮次缝被走到）" \
+  "$([ "${prompted:-0}" -gt 0 ] && echo 0 || echo 1)" \
+  "锚点注入痕迹 ${prompted:-0} 条（0 = 容器内**没有任何真实用户轮** ⇒ 先跑 bench-docker turn）"
+
+# ── V7 🔴 运行期「我们真的被宿主调用了」证据（与 V5 配对，**本轮新增**）──
+# 为什么需要它：V5 判的是"播种内容对不对"，而它依赖一整条真实轮次；V7 判的是
+# **"宿主的运行期调用链真的走到我们的缝里了吗"** —— 这一条**不依赖模型**（缝在模型调用之前跑）。
+# 判据 = 三个**只有真被调用才会打印**的 host 侧痕迹：
+#   · `anchor turns injected`（`seams/bootstrap.ts`，首个真实轮次时注入锚点）
+#   · 全局入口 skill section 注册 / 唤醒调度器启动（装配面）
+seam_skill=$(grep -c '全局入口 skill section 已注册' "$web" 2>/dev/null || true)
+seam_wake=$(grep -c 'trajectory 唤醒调度器启动' "$web" 2>/dev/null || true)
+seam_ok=$([ "${seam_skill:-0}" -gt 0 ] && [ "${seam_wake:-0}" -gt 0 ] && echo 0 || echo 1)
+check V7 "我们的缝在宿主运行期真被调用（装配面 ≥2 条自证行）" "$seam_ok" \
+  "入口 skill ${seam_skill:-0} 行 / 唤醒调度器 ${seam_wake:-0} 行 / 锚点注入 ${prompted:-0} 行"
+check V7b "首个真实轮次走到了 bootstrap 缝（锚点已注入会话）" \
+  "$([ "${prompted:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${prompted:-0} 条"
 
 # ── V6 设置面板（B1：0.1.7 换了模型 ⇒ 装错就整页不出现）──
 # 🔵 判据升级（2026-09-24：原判据只有"grep 无报错" = **只能证明"没炸"**，证明不了"契约没破"）。
@@ -115,6 +153,22 @@ skipvis=$(grep -c 'DeepSeek 多模态补丁跳过' "$web" 2>/dev/null || true)
 check V6c "两条 settings 依赖的功能未被静默跳过" \
   "$([ "${skiproute:-0}" -eq 0 ] && [ "${skipvis:-0}" -eq 0 ] && echo 0 || echo 1)" \
   "路由跳过 ${skiproute:-0} 行 / 多模态跳过 ${skipvis:-0} 行"
+
+# ── V8 🆕 设置面板的**客户端面**证据（B1 的第三档：交付面）──
+# 判据阶梯（R↓：为什么需要第三档）：
+#   V6b = **契约层**（服务端有 configure/describe/update）
+#   V6c = **功能层**（两条 settings 依赖的功能没被静默跳过）
+#   V8  = **交付层**（宿主真发给浏览器的 client bundle 里，我们那张设置页在场且槽位注册语句在场）
+#   （真实浏览器级"用户看到了页" = **未做**，登记为后续可选）
+if [ -f /usr/local/bin/v8-client-check.mjs ]; then
+  v8out=$(node /usr/local/bin/v8-client-check.mjs 2>&1)
+  v8ok=$?
+  v8detail=$(printf '%s' "$v8out" | grep -c '^PASS' | tr -d '\n')
+  check V8 "设置面板客户端面（bundle 交付 + 槽位注册在场）" "$v8ok" "PASS ${v8detail:-0} 项；$(printf '%s' "$v8out" | grep -m1 '^FAIL' || echo '无 FAIL 行')"
+  if [ "$v8ok" != "0" ]; then printf '%s\n' "$v8out" | sed 's/^/      /'; fi
+else
+  check V8 "设置面板客户端面（bundle 交付 + 槽位注册在场）" 1 "探针不在（`vpush` 未推 v8-client-check.mjs）"
+fi
 
 # ── 汇总 ──
 echo "═══ 运行态验收（宿主 ${EXPECT_DSH:-?} ／ 期望 ACC ${EXPECT_ACC:-?}）═══"

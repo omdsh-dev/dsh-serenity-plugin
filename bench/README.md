@@ -37,13 +37,41 @@ DSH 每发一个新的 rc，我们都要把插件适配过去。但**在本机�
 > 它与 mode A 的**唯一差别就是"内容来自我的本地构建"**。挂目录（`link:`）则是另一条安装路径，
 > 多一个"link 语义本身是否与发布语义一致"的变量。
 
-**mode B 的标准流程**（三步，全走 MSM，不手敲 ssh）：
+**mode B 的标准流程**（五步，全走 MSM，不手敲 ssh）：
 
 ```
 msm("dsh-develop", ["build"])                          # 1. 产出本地 lib/（mode B 验的就是它）
 msm("bench-docker", ["up", "--run=mb1", "--plugin-tarball"])   # 2. 打包 → 推 → 起容器（后台，立即返回）
-msm("bench-docker", ["wait", "mb1"])                   # 3. 有界轮询；然后 verify + logs 收判据
+msm("bench-docker", ["wait", "mb1"])                   # 3. 有界轮询（容器内装插件 + 起宿主需要时间）
+msm("bench-docker", ["turn", "mb1", "hi"])             # 4. 🔴 **造一条真实用户轮**（V5/V7b 的前提）
+msm("bench-docker", ["vpush", "mb1"])                  # 5. 🔴 推**本地最新判据**进容器（否则按镜像 bake 的旧版验收）
+msm("bench-docker", ["verify", "mb1", "--acc-version=1.47.0"])
 ```
+
+🔴 **第 4、5 步都不能省**：
+- **省 turn** ⇒ V5（身份播种）与 V7b 只能报"未验"（而"未验"与"坏了"在表上长得一样）；
+- **省 vpush** ⇒ 改了判据却按**镜像里那份旧的**验收（实测踩过：V3b 假红）——`V0` 会把这件事报出来。
+
+### 判据一览（15 条，2026-09-24 实测全绿）
+
+| 判据 | 它回答什么 |
+|---|---|
+| **V0** | 跑的是**本地那份**判据吗（sha 自证；防"镜像旧版"假红） |
+| V1 / V2 / V2b | 宿主版本对不对 ／ 插件进 profile 了吗 ／ 安装有没有报错 |
+| V3 / V3b | 补丁层**真的生效**吗（无 skip 痕迹）／ 我们的前缀在启动日志里吗 |
+| **V4** | 插件**自报版本** = 期望版本吗（`/serenity/status`） |
+| **V5 / V5b** | 🔴 **身份播种真的进了会话**（读会话日志里的 ACC 横幅）／ 宿主真的创建过 agent |
+| **V6 / V6b / V6c** | 设置面板：装配无报错 ／ **契约层**不含 `host contract BROKEN` ／ **功能层**两条 settings 依赖的功能未被静默跳过 |
+| **V7 / V7b** | 我们的**缝**在宿主运行期真被调用（装配面自证行）／ 首个真实轮次走到了 bootstrap 缝 |
+| **V8** | **客户端交付层**：宿主发给浏览器的 client bundle 里，我们那张设置页在场且槽位注册语句在场 |
+
+> 🔵 **V6b → V6c → V8 是同一件事的三档证据**（契约层 → 功能层 → 交付层）；
+> **真实浏览器级**（"用户看到了页"）**仍未做**，登记为后续可选。
+>
+> 🔴 **V5 的证据位置容易找错**（我本轮就找错过）：ACC 身份横幅**只进对话消息流、不打 stdout**
+> ⇒ 唯一能机械读到它的地方是**宿主自己的会话日志**（`/root/.dsh/sessions/**/session.v*.jsonl.zstd`，
+> 故镜像里装了 `zstd` CLI 当读数器）。`agent/created` 是**「agent 创建」**事件，
+> **不是**「session 创建」⇒ `session/create` 不触发它，**必须有一条真实 `session/prompt`**。
 
 ## 4. 执行纪律（**不是风格，是踩过的坑**）
 
@@ -63,10 +91,22 @@ msm("bench-docker", ["wait", "mb1"])                   # 3. 有界轮询；然�
 
 | 文件 | 作用 |
 |---|---|
-| `Dockerfile` | 常驻镜像：node:22 + **DSH CLI**（`ARG DSH_VERSION`）＋ 工作区 ＋ 日志目录 |
-| `entrypoint.sh` | 容器启动：装插件（两种模式）→ 后台起 `dsh web` → 保持存活 |
-| `verify.sh` | **运行态验收**（容器内跑，只读）：V1~V6 判据 → 表格 ＋ `verify.json` |
-| `../docs/host-adaptation-bench-design.md` | 设计背景与本台的边界（诚实声明） |
+| `Dockerfile` | 常驻镜像：node:22 + **DSH CLI**（`ARG DSH_VERSION`）＋ **pnpm**（DSH 的插件管理器自己 spawn 它）＋ **zstd**（V5 的读数器）＋ 工作区 ＋ 日志目录 |
+| `entrypoint.sh` | 容器启动：装插件（三种模式）→ 后台起 `dsh web` → 保持存活 |
+| `verify.sh` | **运行态验收**（容器内跑，只读）：**V0~V8 共 15 条判据** → 表格 ＋ `verify.json` |
+| `v8-client-check.mjs` | **V8 探针**：设置面板的**客户端交付层**证据（bundle 交付 ＋ 槽位注册在场） |
+| `../docs/host-adaptation-bench-design.md` | 设计背景、**静态检查清单 A~C（含 C6）** 与本台的边界（诚实声明） |
+
+## 5b. 驱动面（MSM `bench-docker`）速查
+
+| 子命令 | 用途 |
+|---|---|
+| `probe` / `sync` / `build` | 远端能力探测 ／ 推 bench 文件 ／ 后台构建镜像 |
+| `up` | 起容器（`--plugin-spec` 发布物 ／ 🔴 `--plugin-tarball` 本地构建 ／ `--plugin-link` 旧通道） |
+| `wait` / `logs` / `clogs` | 有界轮询 ／ 取远端 run 日志 ／ **取容器自身 stdout**（判据主证据面） |
+| **`turn`** | 🔴 **驱动一条真实用户轮**（`session/create` → `session/prompt`）——V5/V7b 的前提 |
+| **`vpush`** | 🔴 把**本地最新判据**推进**正在跑的**容器（`verify.sh` 是 bake 进镜像的！） |
+| `verify` / `sh` / `down` / `list` | 跑判据 ／ 容器内跑一条命令 ／ 停删 ／ 台账 |
 
 ## 6. 已知边界（诚实声明，别把它读成"万能验收"）
 
