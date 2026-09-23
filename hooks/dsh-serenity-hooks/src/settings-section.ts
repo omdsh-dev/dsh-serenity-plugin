@@ -75,6 +75,17 @@ interface SerenitySimpleSettings {
    *  ⚠️ 与它**同时废止**的键：`wakeSchedulerEnabled`（所有者 2026-09-21 令「send-later 的开关
    *  不再重要了，砍掉」）——唤醒调度器**不再有任何闸**（恒开）；旧配置里的该键**静默忽略**。 */
   croEnabled: boolean
+  /** **无人值守代理回复（unattended proxy）总开关** —— 2026-09-23 所有者令新增。
+   *
+   *  开启后：CCC 会话**被 LLM 主动停止**且无人应答时，ACC 注入一次**代理用户的结构化回复**，
+   *  以**验证码（nonce）**作「**合法收束**」判据 —— **未回码 ⇒ 继续，回码 ⇒ 放过**。
+   *
+   *  **缺省关**：它把**人**从回路里拿掉（失败模式是静默的）⇒ 默认关、人工开。
+   *  **排除面**：仅有 CRO 程序的轨迹不适用（所有者 2026-09-23 裁决：**口径由"宽"改"窄"**
+   *  —— 原"任何自排唤醒都排除"会让本机制**永远够不着靠续接绳活着的维护会话**，
+   *  等于**放弃"代替旧机制"**；改窄后**自排绳不再排除**，绳退化为**长周期保险丝**）。
+   *  设计全文见 S142 会话记录 **D77**（CCC 侧）。 */
+  unattendedEnabled: boolean
 }
 
 /** schemastery schema（与 DSH 各插件 Config 同款） */
@@ -88,6 +99,7 @@ const simpleSettingsSchema = z.object({
   acpHttpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT),
   publicAskEnabled: z.boolean().default(false),
   croEnabled: z.boolean().default(true),
+  unattendedEnabled: z.boolean().default(false),
 })
 
 /** 从插件 Config 提取 entry 默认（settings base 层） */
@@ -102,6 +114,7 @@ export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSetti
     acpHttpPort: config.acp?.httpPort ?? ACP_HTTP_PORT,
     publicAskEnabled: config.publicAsk?.enabled ?? false,
     croEnabled: true,
+    unattendedEnabled: false,
   }
 }
 
@@ -123,6 +136,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     acpHttpPort: ACP_HTTP_PORT,
     publicAskEnabled: false,
     croEnabled: true,
+    unattendedEnabled: false,
   }
 }
 

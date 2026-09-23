@@ -48,6 +48,9 @@ export interface SerenitySimpleWire {
   publicAskEnabled?: boolean
   /** **唤醒调度器闸**（v1.34，原 trajectoryEnabled）：投递已登记的"未来时刻 + 一条 message"（缺省开） */
   croEnabled?: boolean
+  /** **无人值守代理回复总开关**（2026-09-23 新增）：会话被 LLM 主动停下且无人应答时，
+   *  由 ACC 注入一次"代理用户"的结构化回复，以验证码作合法收束判据（缺省**关**） */
+  unattendedEnabled?: boolean
 }
 
 /** 本 section 的注入面（apply 闭包提供 settingsScope） */
@@ -214,6 +217,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const acpPort = value?.acpHttpPort ?? 3100
   const publicAskOn = value?.publicAskEnabled ?? false
   const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
+  const unattendedOn = value?.unattendedEnabled ?? false // 缺省关（与 schema 一致）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
   const [openGateway, setOpenGateway] = useState(false)
@@ -222,6 +226,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openAcp, setOpenAcp] = useState(false)
   const [openPublicAsk, setOpenPublicAsk] = useState(false)
   const [openCro, setOpenCro] = useState(false)
+  const [openUnattended, setOpenUnattended] = useState(false)
 
   return (
     <div className="ss-section">
@@ -302,6 +307,35 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       </Group>
 
       {/* 外部能力开关组（v1.27.5 紧凑化；v1.29 需求②：每行可展开——help 入 detail intro） */}
+      <Group title="无人值守">
+        <li>
+          <RowCard
+            title="无人值守代理回复"
+            desc="你走开后，会话被模型停下且无人应答时，由 ACC 代你回一句让它自己收束（默认关）"
+            expandable
+            open={openUnattended}
+            onToggle={setOpenUnattended}
+            control={<Toggle checked={unattendedOn} onChange={(on) => toggle('unattendedEnabled', on)} />}
+            detail={
+              <div className="ss-detailStack">
+                <p className="ss-detailIntro">{'无人值守代理回复（unattended proxy）\n' +
+                  '· 作用：你发完任务就走开，模型干一段停下来又没人接话 ⇒ 会话就挂住了；\n' +
+                  '  本机制由 ACC 注入一条“代理用户”的结构化回复，让它自己接着干\n' +
+                  '· 收束方式：每轮给一个验证码；只有四种明确收束才放过 —— 干完了 / 已通知你并停下等你 /\n' +
+                  '  需确认但可自决（按最保守可逆的做并记理由）/ 撞上“不可代批”的事（立刻停并写待办）\n' +
+                  '· 身份：代理消息会自报“无人值守代理 · 非本人”，不会被当成你说的话\n' +
+                  '· 不适用：有 CRO 程序的轨迹（它自己有续驱）、对外面与微信桥会话、子代理会话\n' +
+                  '· 默认关：它把“人”从回路里拿掉，失败是静默的 ⇒ 只在你要离开时才开\n' +
+                  '· 配套：自排续接绳退化为“长周期保险丝”，即时续驱交给本机制\n' +
+                  '· 本版现状：开关与诊断面（acc-diag 的「无人值守闸=」）已就位；\n' +
+                  '  代理注入行为待实现（设计已定，见 S142 会话记录 D77）'}
+                </p>
+              </div>
+            }
+          />
+        </li>
+      </Group>
+
       <Group title="外部能力">
         <li>
           <RowCard

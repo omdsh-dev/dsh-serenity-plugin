@@ -52,6 +52,9 @@ function renderClock(label: string, s: ClockState): string {
     //    改报**CRO 闸**（本容器唯一还存在的"会拦住某阶段"的开关）。它回答的是
     //    "这轮为什么没有自编程唤起"——与 armed / lastSkipReason 同属"为何没动"的第一手判据。
     `CRO 闸=${readSimpleSettings().croEnabled !== false}`,
+    // 2026-09-23 新增：无人值守代理回复闸（与 CRO 闸同层——都是"会让某阶段不跑"的全局开关）。
+    // 它回答"为什么会话停下后没人接着推"——开关在/不在是可观测的一手判据。
+    `无人值守闸=${readSimpleSettings().unattendedEnabled === true}`,
     `tick 次数=${s.ticks}`,
     `上次 tick=${ts(s.lastTickAt)}`,
   ]
