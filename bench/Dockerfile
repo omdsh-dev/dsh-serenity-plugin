@@ -32,8 +32,14 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # 宿主 CLI：全局装（二进制名实测 = `dsh`）
-RUN npm i -g --registry "${NPM_REGISTRY}" "@deepseek-ai/dsh@${DSH_VERSION}" \
- && command -v dsh
+# ⚠️ 还要装 **pnpm** —— 🔴 2026-09-23 首跑实测：DSH 的插件管理器**自己 spawn pnpm**
+#    来装插件（`dsh: pnpm was not found; install pnpm and make it available on PATH.`），
+#    只装 npm 会让 `dsh plugin add` **失败**而镜像看起来"装好了"。
+#    版本取宿主仓自己 pin 的那个（`packageManager: pnpm@11.7.0`），避免版本漂移制造第二类故障。
+RUN npm i -g --registry "${NPM_REGISTRY}" \
+      "@deepseek-ai/dsh@${DSH_VERSION}" \
+      "pnpm@11.7.0" \
+ && command -v dsh && command -v pnpm && pnpm --version
 
 # 日志与工作区（CCC 根 = 带 .serenity 标记的普通目录）
 RUN mkdir -p /logs /ccc && touch /ccc/.serenity

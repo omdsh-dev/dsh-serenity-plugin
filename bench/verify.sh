@@ -42,7 +42,10 @@ fi
 # ── V2 插件进到 profile 了没 ──
 prof=$(ls -d /root/.dsh/profiles/web/node_modules/@shgroup/* 2>/dev/null | head -1)
 [ -n "$prof" ] && check V2 "插件已装进 profile" 0 "$prof" || check V2 "插件已装进 profile" 1 "profile 里没有 @shgroup/*"
-[ -s "$LOG/plugin-install.log" ] && check V2b "插件安装无报错输出" "$(grep -qiE 'error|ERR!|denied' "$LOG/plugin-install.log" && echo 1 || echo 0)" "$(tail -1 "$LOG/plugin-install.log")"
+[ -s "$LOG/plugin-install.log" ] && check V2b "插件安装无报错输出" "$(grep -qiE 'fail|error|ERR!|denied|ENOENT|not found' "$LOG/plugin-install.log" && echo 1 || echo 0)" "$(tail -1 "$LOG/plugin-install.log")"
+# 🔵 判据修正（2026-09-23 首跑踩到）：最初只 grep `error|ERR!|denied`，
+#    而真实失败原文是 `dsh: plugin command failed; …` ⇒ **"failed" 不在模式里 ⇒ 假绿**。
+#    ⇒ 同族纪律：**验收 grep 必须先自检判据本身**（拿一个必然命中的样本跑同一 pattern）。
 
 # ── V3 🔴 补丁层真的生效了没（防"静默 skip"）──
 web="$LOG/dsh-web.log"
@@ -50,7 +53,9 @@ if [ -s "$web" ]; then
   skiphit=$(grep -icE 'skip|incompatible|refus|not compatible' "$web" || true)
   check V3 "宿主启动日志无「跳过/不兼容」痕迹" "$([ "${skiphit:-0}" -eq 0 ] && echo 0 || echo 1)" "命中 ${skiphit:-0} 行"
   # 正面证据：我们的包名出现在启动日志里
-  ours=$(grep -c 'dsh-serenity-hooks' "$web" || true)
+  # 🔵 判据修正（2026-09-23 首跑踩到）：最初 grep `dsh-serenity-hooks`（**包名**），
+  #    而宿主的日志前缀逐字是 `[serenity-hooks]` ⇒ **假红**。⇒ 改成 grep `serenity`。
+  ours=$(grep -c 'serenity' "$web" || true)
   check V3b "启动日志里出现我们的包名" "$([ "${ours:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${ours:-0} 行"
 else
   check V3  "宿主启动日志无「跳过/不兼容」痕迹" 1 "dsh-web.log 为空/不存在"
