@@ -89,13 +89,23 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     access: 'injected',
     members: [
       // 🔴 0.1.7 硬切：`installSection` 与 `get` **已被宿主删除**（`SettingsProvider` → `SettingsForms`）。
-      //   现读面 = `describe`（按**条目 id** 取表单，其 `value` 为已解析配置）；
-      //   页策略 = `configure`（本插件用它关掉自动生成页）；写面 = `update`。
+      //   本表只列**两个宿主世代都提供**的成员 —— 这一条是**跨版本纪律**，理由见下。
+      //   · 读面 = `describe`（按**条目 id** 取表单，其 `value` 为已解析配置）；
+      //     它在 **0.1.5 就存在**（`SettingsProvider.describe`）⇒ 换过去是**共同面**，不是新能力。
+      //   · 写面 = `update`（两代同名同形）。
       // ⚠️ 2026-09-23 实测教训（**本表漏改的代价**）：漏改 ⇒ 契约恒报 `BROKEN (2 required)`
       //   ⇒ `hostService(ctx,'settings')` 判"不可用" ⇒ opencode 自动配置与多模态补丁**双双静默跳过**
       //   （不崩、不报错，只是什么都不做）。🔴 **typecheck 看不见它**（成员名是运行时字符串），
       //   只有**真机上跑一次**才看得见 —— 这正是 Docker 测试台存在的理由（bench V6）。
-      { name: 'configure', kind: 'function' },
+      // 🔴🔴 **2026-09-24 修正（我上一版自己引入的回归）**：本表**曾**把 `configure` 也列为 required。
+      //   实测（`sys curl file://…/@deepseek-ai/dsh-settings/lib/index.js`，本机装机 = 0.1.5-rc.2）：
+      //   **`configure` 根本不存在于 `SettingsProvider`**（它是 0.1.7 的 `SettingsForms` 才有的**页策略**）
+      //   ⇒ 若把它算 required，则**在仍然在跑的老宿主上**，`settings` 会被判"不可用"，
+      //   两条功能**又**变成静默跳过 —— 即：**修好了新宿主，却弄坏了老宿主**。
+      //   ⇒ 判据（本条的一般化）：**`required` 成员必须是"两代都提供"的交集**；
+      //     只在某一代存在的成员，**不得**进 required（它若真的必需，应由调用点自己守卫）。
+      //   · `configure` 的调用点 = `settings-section.ts`，**本就写成 `settings?.configure?.({auto:false})`**
+      //     （可选链 + try/catch）⇒ **不要求它，零损失**：老宿主上只是多出一张宿主自动生成的设置页。
       { name: 'describe', kind: 'function' },
       { name: 'update', kind: 'function' },
     ],

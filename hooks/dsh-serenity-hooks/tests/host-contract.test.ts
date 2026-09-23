@@ -175,4 +175,23 @@ describe('host-contract: 契约表自洽', () => {
     const required = HOST_SERVICES.filter((s) => s.required).map((s) => s.id)
     expect(required).toEqual(expect.arrayContaining(['tools', 'sessions', 'agents', 'webServer', 'settings']))
   })
+
+  // ── 🔴 跨版本纪律（2026-09-24 加，来自一次**我自己引入的回归**）──
+  // 事故：修 0.1.7 适配时，我把 `settings` 的 members 写成 `configure`/`describe`/`update`，
+  //   而 **`configure` 只存在于 0.1.7**（`SettingsForms`）；老宿主（0.1.5-rc.2）的
+  //   `SettingsProvider` 里**根本没有它** ⇒ 契约在**老宿主上恒报 BROKEN** ⇒ `settings` 判不可用
+  //   ⇒ 两条功能**又**静默跳过（**修好新宿主、弄坏老宿主**）。
+  // ⇒ 机械判据：**`settings` 的 required 成员必须是"两代都提供"的交集**（此处 = describe/update）。
+  it('🔴 settings 的 members 不得含只在 0.1.7 存在的成员（configure）—— 跨版本交集纪律', () => {
+    const settings = HOST_SERVICES.find((s) => s.id === 'settings')
+    expect(settings).toBeDefined()
+    const names = (settings?.members ?? []).map((m) => m.name)
+    // 两代共有的读/写面必须在
+    expect(names).toEqual(expect.arrayContaining(['describe', 'update']))
+    // 只在 0.1.7 存在的页策略成员**不得**进表（调用点自己用可选链守卫）
+    expect(names).not.toContain('configure')
+    // 0.1.7 已删的两个成员也不得回来
+    expect(names).not.toContain('installSection')
+    expect(names).not.toContain('get')
+  })
 })
