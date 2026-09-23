@@ -30,12 +30,14 @@ function isExternalFaceSession(sessionId: string | undefined): boolean {
   return isSkiffSessionId(sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
 }
 
-/** 读会话最后一个 assistant/message 文本（skiff-core 同款；仅用于守卫检测，不导出）
+/** 读会话最后一个 assistant/message 文本（skiff-core 同款）
+ *  **2026-09-23（S142 D77）起导出**：`unattended-seam.ts` 复用同一读法（本容器纪律：
+ *  「同一读法只留一份」——两份 `lastAssistantText` 会在宿主改事件形状时**只修一处**）。
  *  **v1.27.7：剥离 think 块再检测**（用户："不检查think内容（因为不输出）"）——
  *  ` think…` 是模型思考过程，不进入用户可见输出；敏感词检测只针对**最终呈现文本**，
  *  否则 think 内提及内部机制词（思考过程必然推演机制）会误打回。复用 stripThink
  *  （v1.26.8 状态机，弃正则——同 v1.27.1 微信桥回复链路）。 */
-function lastAssistantText(agent: Agent): string {
+export function lastAssistantText(agent: Agent): string {
   const events = sessionEvents(agent.session)
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i] as { type?: string; data?: { message?: { content?: unknown }; content?: unknown } } | undefined

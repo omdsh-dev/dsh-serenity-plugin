@@ -20,6 +20,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve as resolvePath, relative, isAbsolute } from 'node:path'
+import { noteOutboundSend } from './unattended-ops.js'
 
 /** 文本长度上限（微信侧单条实践上限；超限拒绝而非静默截断——与 HTTP 入口同值） */
 export const IM_SEND_MAX_TEXT = 4000
@@ -220,6 +221,9 @@ export async function runImBridge(root: string, req: ImToolRequest): Promise<ImT
     if (!resolved) return fail('ALIAS_UNKNOWN', `unknown user "${rawUser}"`)
     try {
       const sent = await channel.send({ root, userId: resolved.id, text, accountId: req.account })
+      // 无人值守代理的可核验性（S142 D77 / 设计 §7）：**成功发送**才记账 —— 代理那侧据此判
+      // 「声称已通知用户」是真是假。账本只在此处写（本函数 = 全部 IM 发送的**唯一漏斗**）。
+      noteOutboundSend(root)
       return { ok: true, channel: channelId, action, detail: { ...sent, user: resolved.alias ?? resolved.id } }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -245,6 +249,7 @@ export async function runImBridge(root: string, req: ImToolRequest): Promise<ImT
         caption: req.caption,
         accountId: req.account,
       })
+      noteOutboundSend(root)
       return { ok: true, channel: channelId, action, detail: { ...sent, user: resolved.alias ?? resolved.id } }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

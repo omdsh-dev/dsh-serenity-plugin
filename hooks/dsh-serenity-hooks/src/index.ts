@@ -45,6 +45,7 @@ import { registerSettingsSection, readSimpleSettings } from './settings-section.
 import { registerGateway } from './gateway.js'
 import { registerRebuildTurnHook } from './rebuild.js'
 import { registerOutputGuardHook } from './output-guard-seam.js'
+import { registerUnattendedSeam } from './unattended-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive } from './acp-http.js'
@@ -235,6 +236,13 @@ export function apply(ctx: Context, config: Config): void {
   registerRebuildTurnHook(ctx)
   // v1.26.3 输出守卫：最终输出敏感词检测 + steer 打回重生成（凭据/机制/MSM 名不泄露给用户）
   registerOutputGuardHook(ctx)
+  // 🔵 2026-09-23（S142 D77，owner 令「我需要的是一个机制」）：**无人值守代理回复**——
+  // CCC 主会话**被 LLM 主动停止**且无人应答时，注入一次「**代理用户**」的结构化回复（四选一），
+  // 以**每轮新生成的验证码（nonce）**作「合法收束」判据：**未回码 ⇒ 继续（≤轮上限），回码 ⇒ 放过**。
+  // 总闸 = settings `unattendedEnabled`（**缺省关**；开关落点 = Serenity 全局面板「无人值守」组）。
+  // 口径 = **窄**（单一续驱者：只排除**有 CRO 程序**的轨迹；自排绳不再排除，退化为长周期保险丝）；
+  // 外部面/桥/worker 会话**写死不许开**（替家人说话 = 冒充）。机制层见 `unattended-ops.ts`。
+  registerUnattendedSeam(ctx)
   // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createTrajectoryTool 内实现，
   // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {
