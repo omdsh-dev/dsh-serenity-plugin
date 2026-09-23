@@ -71,6 +71,8 @@ DSH 升到 0.1.7 之后，插件里有**四处宿主的接口/数据形状被换
 2. **一处覆盖缺口（已显式登记，不许静默）**：`tests/host/deepseek-vision-probe.test.ts` 的**新写入路径端到端探针缺失** —— 旧探针测的 `SettingsProvider` 已随 0.1.7 移除；替代证据是宿主的 **`mergeLayers` 实现契约**（*"plain objects merge recursively, every other value (arrays included) replaces the lower layer wholesale"*）⇒ **"宿主文档契约"等级 ≠ "真跑一条链"等级**。
 3. **`typecheck-host` 的包集非全集**：`@deepseek-ai/dsh-agent-presets` 在新线**已不存在同版本**（它被改名了）⇒ 该包在解包集里**永久失败**（预期，不是缺陷）。
 4. **准入判定是"按 semver 语义推理"**（`^0.1.5-rc.2` 准入 `0.1.7-rc.1`：caret on `0.x` + `includePrerelease`），**非执行验证**。
+5. 🔴 **本版 registry 上的 `gitHead` = `37f07f3`，而承载本版代码的提交是 `8f47794`**（**两者不是同一个**）。**成因**：npm 的 `gitHead` 记的是 **pack 那一刻的 `HEAD`**，而本版走的是 **先 `publish`、后 `commit`** 的顺序。**内容侧无损失**：`publish` 与 `commit` 之间**没有任何写操作**（`git status` 前后两次读数一致），且 registry 的 **`fileCount` = 120** 与本地 `pack-check` 的 **120** 逐字相符 ⇒ **发布物与 `8f47794` 是同一份工作树**，只是**哈希记到了上一个提交**。
+   ⇒ 🔵 **纪律（本条为过程教训，供后续各版遵守）**：**发布链里「提交」必须排在 `publish` 之前** —— 否则 npm 记下的 `gitHead` **指不到发布内容**（**前几版的 `gitHead` 与「发布准备提交」逐字相同，正因为它们先提交**；本版是**目前唯一的例外**，如实标注）。
 
 ---
 
