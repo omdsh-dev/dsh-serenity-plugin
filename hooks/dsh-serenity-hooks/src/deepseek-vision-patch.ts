@@ -345,10 +345,11 @@ export function registerDeepseekVisionPatch(ctx: Context, enabled?: boolean): vo
       })
   }
 
-  // ③ settings 变化 → 复评（事件名非宿主类型化 Events 成员，故结构化订阅并容错）
+  // ③ settings 变化 → 复评（结构化订阅：通道缺失时不阻断；事件名在 HOST_EVENT_NAMES 白名单里编译期已钉）
+  // ⚠️ v0.1.7：`settings/updated` → `settings/document-updated`（**两个位置参** `(ns, revision)`，只读 ns）
   try {
-    const on = (ctx as unknown as { on?: (name: string, fn: (ns?: unknown) => void) => unknown }).on
-    on?.call(ctx, 'settings/updated', (ns?: unknown) => {
+    const on = (ctx as unknown as { on?: (name: string, fn: (ns?: unknown, revision?: unknown) => void) => unknown }).on
+    on?.call(ctx, 'settings/document-updated', (ns?: unknown) => {
       if (ns === LLM_PI_AI_NAMESPACE) sync()
     })
   } catch {

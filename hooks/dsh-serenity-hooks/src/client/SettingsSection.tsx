@@ -14,18 +14,20 @@
  *   原 hover「?」浮层 help 改行内 detail intro（常显可达）；重型编辑器挂所属开关行下。
  *
  * 数据通道（双层）：
- *  - 简单配置：ctx.settingsScope.bind({ namespace: 'serenity-hooks' })（settings.yaml）
+ *  - 简单配置：`ctx.configForms.get('serenity-hooks')`（**v1.47 / 0.1.7-rc.1 A 案**）——
+ *    0.1.7 起设置页由「profile 条目 Config」投影成表单，命名空间 = 条目 id（= 旧 settings.yaml 段名）；
+ *    旧版 `ctx.settingsScope.bind({ namespace })` 通道**已随 0.1.7 移除**。
  *  - 复杂配置（账号/白名单）：同源 HTTP /serenity/config（accounts-api.ts，服务端 scrypt hash）
  *
- * 降级守卫：snapshot.status === 'unavailable'（旧 RC 白名单）→ 降级提示。
+ * 降级守卫：**v1.47 起由 host 侧承担** —— `configForms.whileServed([ns], …)` 只在宿主
+ * serve 该命名空间时才注册本页（没 serve 就整页不出现），比旧版"页内一句降级提示"更干净。
+ * 因此本组件**不再有** `status === 'unavailable'` 分支。
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
-// v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 → SettingsScope/SettingsScopeSpec
-// 改从 '@deepseek-ai/dsh-client-ui-settings/client'（官方再导出实证；dsp 用法 getSnapshot/
-// subscribe/set 与 rc.1 SettingsScope 接口 getSnapshot/subscribe/mutate/set/unset 完全一致）
-import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
+import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
@@ -33,7 +35,7 @@ import { PublicAskEditor } from './PublicAskEditor.js'
 import { WeixinBridgeEditor } from './WeixinBridgeEditor.js'
 import './SettingsSection.css'
 
-/** serenity-hooks 简单配置 wire 形态（与 host 侧 schema 对齐） */
+/** serenity-hooks 简单配置 wire 形态（= 插件 Config 的**面板层**扁平键；host 侧同名） */
 export interface SerenitySimpleWire {
   gatewayEnabled?: boolean
   rebuildEnabled?: boolean
@@ -46,34 +48,22 @@ export interface SerenitySimpleWire {
   acpHttpPort?: number
   /** F4d 建议问答页（v1.26.1 实验性）：按认知容器暴露问答页供他人验证（key 认证） */
   publicAskEnabled?: boolean
-  /** **唤醒调度器闸**（v1.34，原 trajectoryEnabled）：投递已登记的"未来时刻 + 一条 message"（缺省开） */
+  /** **CRO（轨迹自编程唤起）总闸**（缺省开；只关 CRO 阶段，投递照常） */
   croEnabled?: boolean
   /** **无人值守代理回复总开关**（2026-09-23 新增）：会话被 LLM 主动停下且无人应答时，
    *  由 ACC 注入一次"代理用户"的结构化回复，以验证码作合法收束判据（缺省**关**） */
   unattendedEnabled?: boolean
 }
 
-/** 本 section 的注入面（apply 闭包提供 settingsScope） */
+/** 本 section 的注入面（apply 闭包提供表单源与写回调；组件**不含**任何订阅机制） */
 export interface SettingsSectionInjected {
-  scope: SettingsScope<SerenitySimpleWire>
+  /** 表单快照源（渲染器绑成 `useSerenitySettings` 选择器 hook） */
+  hooks: { serenitySettings: ConfigForm<SerenitySimpleWire> }
+  /** 写一个面板层字段（宿主校验 + 落 profile 文档） */
+  set: (field: keyof SerenitySimpleWire, value: unknown) => void
 }
 
-type SettingsSectionProps = PropsRuntime<'settings.section'> & SettingsSectionInjected
-
-/** 降级提示文案（旧 RC 白名单时引导去宁静号面板） */
-const DEGRADE_NOTE =
-  '当前运行版本未暴露 serenity-hooks 配置（旧 RC 白名单）。请升级 DSH 或使用会话头部 Serenity 状态栏。'
-
-/** 解码 wire section → 组件状态（缺失字段用默认值） */
-function decodeSection(section: unknown): SerenitySimpleWire | undefined {
-  if (section === null || typeof section !== 'object') return undefined
-  return section as SerenitySimpleWire
-}
-
-const SPEC: SettingsScopeSpec<SerenitySimpleWire> = {
-  namespace: 'serenity-hooks',
-  decode: decodeSection,
-}
+type SettingsSectionProps = PropsRuntime<'settings.section'> & InjectFace<SettingsSectionInjected>
 
 /** 开关（官方 settings 语言：label 右置 toggle，--dsw-alias-* token） */
 function Toggle(props: { checked: boolean; disabled?: boolean; onChange: (on: boolean) => void }): React.JSX.Element {
@@ -176,36 +166,24 @@ function Collapse(props: {
 
 /** dsh 原生设置面板：serenity-hooks 配置页（官方 settings 设计语言，多级标题） */
 export function SettingsSection(props: SettingsSectionProps): React.JSX.Element {
-  const { scope } = props
-  const [snapshot, setSnapshot] = useState(() => scope.getSnapshot())
-
-  useEffect(() => {
-    return scope.subscribe(() => setSnapshot(scope.getSnapshot()))
-  }, [scope])
-
+  const { set, useSerenitySettings } = props
+  // 数据只经注入面的选择器 hook 到达（组件内**不做**任何订阅机制：见 client AGENTS 纪律）。
+  // 选择器入参显式标注：渲染器的 hook 面在跨包解析时会给不出上下文类型（否则 TS7006）。
+  const snapshot = useSerenitySettings((s: ConfigFormSnapshot<SerenitySimpleWire>) => s)
   const value = snapshot.value
-  const ready = snapshot.status === 'ready'
 
   const toggle = (field: keyof SerenitySimpleWire, on: boolean): void => {
-    void scope.set(field, on)
+    set(field, on)
   }
   const setThreshold = (v: number): void => {
     // 需求①：K 数值（默认 400K；范围 50~4000，纯绝对无窗口比例保护）
-    void scope.set('rebuildThresholdK', Math.min(4000, Math.max(50, Math.round(v))))
+    set('rebuildThresholdK', Math.min(4000, Math.max(50, Math.round(v))))
   }
   const setSkiffPort = (v: number): void => {
-    void scope.set('skiffDebugPort', Math.min(65535, Math.max(1024, Math.round(v))))
+    set('skiffDebugPort', Math.min(65535, Math.max(1024, Math.round(v))))
   }
   const setAcpPort = (v: number): void => {
-    void scope.set('acpHttpPort', Math.min(65535, Math.max(1024, Math.round(v))))
-  }
-
-  if (!ready) {
-    return (
-      <div className="ss-section">
-        <p className="ss-degrade">{DEGRADE_NOTE}</p>
-      </div>
-    )
+    set('acpHttpPort', Math.min(65535, Math.max(1024, Math.round(v))))
   }
 
   const gatewayOn = value?.gatewayEnabled ?? false

@@ -480,7 +480,8 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const steered = agent._steers[0] as { content?: Array<{ text?: string }>; source?: { kind?: string } }
     expect(steered.content?.[0]?.text).toContain('[TRAJECTORY-ASSISTANT · REBUILD]')
     expect(steered.content?.[0]?.text).toContain('cleared and rebuilt')
-    expect(steered.source?.kind).toBe('plugin')
+    // v1.47：ACC 注入来源的 kind 由 `'plugin'`（已随 0.1.7 的类型面废止）改为自声明 kind
+    expect(steered.source?.kind).toBe('plugin:dsh-serenity-hooks')
   })
 
   it('registerRebuildTurnHook：无 pending → 零开销', () => {

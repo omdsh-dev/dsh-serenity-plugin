@@ -27,7 +27,7 @@ import type { Context } from 'cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-agent-loop'
 // 类型引用：拉入 agentPresets 的 cordis 声明增强（ctx.get('agentPresets') 类型解析；运行时擦除）
-import type {} from '@deepseek-ai/dsh-agent-presets'
+import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
 import { loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
@@ -45,6 +45,7 @@ import {
   writeProgress,
 } from '../handyman-ops.js'
 import type { JsonValue } from '../json.js'
+import { PLUGIN_SOURCE } from '../message-source.js'
 import { waitAgentIdle } from '../agent-idle.js'
 import { hostSubagents } from '../host/access.js'
 import { isoLocal } from '../time.js'
@@ -274,7 +275,7 @@ async function runHandymanJob(
       finalRound = round
       const prompt = buildRoundPrompt({ root, session, label, round, stopToken, progress, task: job.task })
       try {
-        workerAgent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: { kind: 'plugin', plugin: 'dsh-serenity-hooks' } }))
+        workerAgent.followup(createUserMessage({ content: [{ type: 'text', text: prompt }], source: PLUGIN_SOURCE }))
         await waitAgentIdle(ctx, workerAgent)
         lastResponse = lastAssistantText(workerAgent)
       } catch {

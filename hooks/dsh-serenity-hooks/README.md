@@ -3,7 +3,7 @@
 > **一句话**：装上这个插件，你在电脑上给 AI 划一块自己的工作区（就是一个普通目录），
 > AI 在里面干活时就有了**记忆、纪律、工具和边界**——中途换模型、重启电脑、第二天再来，都能接着干。
 >
-> 适用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）0.1.5-rc.2 及以上。
+> 适用 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）0.1.7-rc.1 及以上。
 > 想了解背后的想法（为什么叫"认知容器"），看 [docs/cognitive-container-theory.md](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/docs/cognitive-container-theory.md)；本文只讲**能干什么、怎么用**。
 
 **几个词先说明白**（后面都用这几个词，不再解释）：
@@ -32,7 +32,7 @@
 
 ## 2. 快速开始（2 分钟）
 
-前置：Node ≥ 20（或 bun）、DSH 0.1.5-rc.2 及以上。
+前置：Node ≥ 20（或 bun）、DSH 0.1.7-rc.1 及以上。
 
 ```bash
 # 1. 装插件（自动加入 DSH 的 web profile）
@@ -423,4 +423,4 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](https://github.com/tellmewhattodo/dsh-serenity-plugin/blob/master/LICENSE)）
 
-> **版本**：v1.31.13 ｜ **前置**：DSH 0.1.5-rc.2+ / Node ≥ 20 或 bun ｜ **测试**：80 个文件 / 1186 个用例
+> **版本**：v1.47.0 ｜ **前置**：DSH 0.1.7-rc.1+ / Node ≥ 20 或 bun ｜ **测试**：107 个文件 / 1679 个用例

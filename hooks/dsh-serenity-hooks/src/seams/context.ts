@@ -1,5 +1,5 @@
 /**
- * context.ts — 拦截缝：ACC 上下文注入（agent/session-start + agent/prompt-submit）
+ * context.ts — 拦截缝：ACC 上下文注入（agent/created + agent/prompt-submit）
  *
  * 对应 opencode-serenity-plugin 的 system.transform（ACC 身份/约束注入）+ Phase 2 访谈提示。
  *
@@ -14,7 +14,7 @@ import type { Context } from 'cordis'
 import type { Agent, PreStepDecision } from '@deepseek-ai/dsh-agent'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve, basename, dirname } from 'node:path'
 import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
@@ -26,6 +26,7 @@ import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisi
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory-ops.js'
 import { readLastBound, appendBound } from '../trajectory-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
+import { PLUGIN_SOURCE } from '../message-source.js'
 
 // ── 纯文本构建（可单测）──
 
@@ -78,8 +79,6 @@ export function accIdentityText(
 }
 
 // ── DSH 注册 ──
-
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 /**
  * ACC 注入消息（S134 去重）：**只含简短身份锚点**（[ACC] 已激活 + CCC 根 + 约束 + Phase 2）。
@@ -230,9 +229,12 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     }
   }
 
-  // session-start：emit 通知，CCC 内新会话播种
+  // agent/created：serial 事件（监听器被 await、抛错会使创建失败）⇒ CCC 内新会话播种。
+  // ⚠️ v0.1.7：由 `agent/session-start`（emit）取代为 `agent/created`（serial），载荷仍为 `{ agent, … }`。
+  // 🔴 契约要求返回 `undefined | Promise<undefined>`（裸 `void` 不被接受）⇒ 用 `async`（宿主自身
+  //    插件同款写法）；函数体同步执行到首个 await，播种仍是瞬时的，不会拖慢创建。
   if (opts.seedOnStart ?? true) {
-    ctx.on('agent/session-start', (payload) => {
+    ctx.on('agent/created', async (payload) => {
       try {
         seed(payload.agent)
       } catch {

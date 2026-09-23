@@ -26,6 +26,7 @@ import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { cccRootForCwd } from '../ccc-roots.js'
 import { sessionEvents } from '../trajectory-ops.js'
 import { isSkiffSessionId } from '../skiff-role.js'
+import { ACC_MESSAGE_KIND } from '../message-source.js'
 
 interface BootstrapSettings {
   /** 首请求（bootstrap 阶段）工具集（缺省 dsp 核心；zeroTools 时忽略——0 工具） */
@@ -298,7 +299,7 @@ export function registerBootstrap(ctx: Context): void {
         if (sid !== undefined && anchoredSessions.has(sid)) return
       }
       // 插件来源消息不递归锚定（含我们自己的锚定消息）
-      if ((message as { source?: { kind?: string } })?.source?.kind === 'plugin') return
+      if ((message as { source?: { kind?: string } })?.source?.kind === ACC_MESSAGE_KIND) return
       const inbox = (agent as { inbox?: { prepend?: (queue: string, msg: unknown) => void } }).inbox
       if (!inbox?.prepend) return
       // 逆序 prepend（prepend 插到队首）：最终队列 = [anchorMessages[0], ..., anchorMessages[n-1], 真实消息]
@@ -307,7 +308,7 @@ export function registerBootstrap(ctx: Context): void {
           id: `bootstrap-anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
           role: 'user',
           content: [{ type: 'text', text: SETTINGS.anchorMessages[i] }],
-          source: { kind: 'plugin', plugin: 'dsh-serenity-hooks', form: 'notice', summary: 'bootstrap anchor turn' },
+          source: { kind: ACC_MESSAGE_KIND, form: 'notice', summary: 'bootstrap anchor turn' },
         })
       }
       if (sid !== undefined) anchoredSessions.add(sid)

@@ -103,9 +103,10 @@ type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry'
 /** handyman foreground 委派（`tools/handyman.ts:171`——`start('spawn', request)`） */
 type _SubagentsStart = Expect<Extends<HostContext['subagents']['start'], (name: string, request: never) => Promise<unknown>>>
 
-/** 设置面板装配 + 命名空间读写（`settings-section.ts`、`opencode-provider.ts` 读写 `llm-pi-ai`） */
-type _SettingsInstallSection = Expect<Extends<HostContext['settings']['installSection'], (owner: never, ns: never, schema: never, entry: never, hooks: never) => unknown>>
-type _SettingsGet = Expect<Extends<Ret<HostContext['settings']['get']>, unknown>>
+/** 设置面板（v0.1.7 起 = `SettingsForms`）：本插件用 `configure` 关掉自动生成页；
+ *  `update`/`describe` 供诊断与将来的写入面（`settings-section.ts`） */
+type _SettingsConfigure = Expect<Extends<HostContext['settings']['configure'], (presentation: { auto?: boolean }, owner?: never) => unknown>>
+type _SettingsDescribe = Expect<Extends<Ret<HostContext['settings']['describe']>, readonly unknown[]>>
 type _SettingsUpdate = Expect<Extends<Ret<HostContext['settings']['update']>, Promise<void>>>
 
 /** Induction 注入（`seams/system-prompt.ts:561` 全局 + `:604` per-agent） */
@@ -206,8 +207,10 @@ type _EvInbox = Expect<Extends<Parameters<Events['agent/inbox/inserted']>[0], { 
  *  （`unattended-seam.ts`）——**这三个字段是「本轮是否由真实用户发起」的唯一判据**，
  *  任一改名 ⇒ 判据失真且**静默**（该动的不动 / 不该动的动），故在此钉住。 */
 type _EvInboxClaimed = Expect<Extends<Parameters<Events['agent/inbox/claimed']>[0], { agent: unknown; message: { source?: { kind?: string } }; turn: number }>>
-/** `agent/session-start`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种） */
-type _EvSessionStart = Expect<Extends<Parameters<Events['agent/session-start']>[0], { agent: unknown }>>
+/** `agent/created`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种 · `cro-turns.ts` 标"在跑" ·
+ *  `index.ts` 反应式同步）。⚠️ **v0.1.7 起该事件 `@mode = serial`**（监听器被 await、抛错会使
+ *  创建失败 ⇒ 我方处理函数必须快速返回且不得抛；此处只钉字段，模式由实现纪律守） */
+type _EvAgentCreated = Expect<Extends<Parameters<Events['agent/created']>[0], { agent: unknown }>>
 /** `tools/pre-execute` / `tools/post-execute`：dsp 读 `exec.agent.session.header.cwd`（守卫/计分） */
 type _EvToolPre = Expect<Extends<Parameters<Events['tools/pre-execute']>[0], { agent?: { session?: { header?: { cwd?: string } } } }>>
 type _EvToolPost = Expect<Extends<Parameters<Events['tools/post-execute']>[0], { agent?: { session?: { header?: { cwd?: string } } } }>>
@@ -215,8 +218,9 @@ type _EvToolPost = Expect<Extends<Parameters<Events['tools/post-execute']>[0], {
 type _EvAgentDisposed = Expect<Extends<Parameters<Events['agent/disposed']>[0], { agent?: unknown }>>
 /** `session/disposed`：lifecycle 直接收 Session 参数，读 id/header.id（sessionIdOf） */
 type _EvSessionDisposed = Expect<Extends<Parameters<Events['session/disposed']>[0], { id?: unknown; header?: { id?: unknown } }>>
-/** `settings/updated`：opencode-provider 按 `ns === 'llm-pi-ai'` 过滤（位置参数第一参） */
-type _EvSettingsUpdated = Expect<Extends<Parameters<Events['settings/updated']>[0], string>>
+/** `settings/document-updated`：opencode-provider / deepseek-vision-patch 按 `ns === 'llm-pi-ai'`
+ *  过滤（**两个位置参** `(ns, revision)`；v0.1.7 前名为 `settings/updated` 且只给 `ns`） */
+type _EvSettingsDocumentUpdated = Expect<Extends<Parameters<Events['settings/document-updated']>[0], string>>
 
 /*
  * ── ⑥b 域 B 审计补漏（v1.31.9）：四条 dsp 依赖却在 ⑥ 节漏挂闸门的事件 ──

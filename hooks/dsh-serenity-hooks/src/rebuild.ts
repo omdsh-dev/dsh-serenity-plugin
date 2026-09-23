@@ -44,8 +44,9 @@ import { deriveEventMessage } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { Message, MessageSource } from '@deepseek-ai/dsh-llm'
+import type { Message } from '@deepseek-ai/dsh-llm'
 import { hostService } from './host/access.js'
+import { PLUGIN_SOURCE } from './message-source.js'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { agentCwdFor, cccRootForCwd } from './ccc-roots.js'
@@ -61,8 +62,6 @@ import { namingTitleFor } from './tools/trajectory.js'
 import { eventToken, IN_FLIGHT_HEADING } from './trajectory-assistant.js'
 import { appendBound, readLastBound } from './trajectory-bound.js'
 import { isoLocal } from './time.js'
-
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 /** acknowledge 尾句（first-anchor 的确认要求——rebuild 重建后不重走确认轮，直接继续） */
 const ACK_SUFFIX_RE = /Please simply reply "acknowledge" — no action needed\.\s*$/

@@ -23,9 +23,7 @@
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource } from '@deepseek-ai/dsh-llm'
-
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
+import { PLUGIN_SOURCE } from './message-source.js'
 
 /** 打回上限（超过则放弃并告警——避免与模型无限拉扯） */
 export const WEIXIN_OUTPUT_REBUKE_MAX = 2

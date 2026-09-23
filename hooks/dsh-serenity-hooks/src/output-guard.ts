@@ -35,7 +35,7 @@ const MECHANISM_WORDS: string[] = [
   'localstore.json',
   '.opencode/serenity.json',
   'AGENT_SESSIONS',
-  'agent/session-start',
+  'agent/created',
   'agent/turn-stopping',
   'tools/pre-execute',
   'tools/post-execute',

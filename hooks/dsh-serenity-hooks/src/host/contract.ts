@@ -251,7 +251,7 @@ interface HostEventContract {
  * 该 import 为 type-only，编译期擦除，不产生运行时依赖。
  */
 export const HOST_EVENT_NAMES = [
-  'agent/session-start',
+  'agent/created',
   'agent/pre-step',
   'agent/turn-stopping',
   'agent/status',
@@ -261,7 +261,7 @@ export const HOST_EVENT_NAMES = [
   'session/event',
   'session/created',
   'session/disposed',
-  'settings/updated',
+  'settings/document-updated',
   'tools/pre-execute',
   'tools/post-execute',
   'system-prompt/assemble',
@@ -273,7 +273,7 @@ type HostEventName = (typeof HOST_EVENT_NAMES)[number]
  * dsp 订阅的宿主事件清单（与 HOST_EVENT_NAMES 同源；impact/site 供 health 报告与文档）。
  */
 export const HOST_EVENTS: readonly HostEventContract[] = [
-  { name: 'agent/session-start', site: 'seams/context.ts, gateway.ts', impact: 'ACC 身份播种失效', required: true },
+  { name: 'agent/created', site: 'seams/context.ts, gateway.ts, cro-turns.ts, index.ts', impact: 'ACC 身份播种失效（identity + 工具可见性/restrict 不播种）', required: true },
   { name: 'agent/pre-step', site: 'seams/context.ts, seams/bootstrap.ts', impact: '上下文注入/首轮锚定失效', required: true },
   { name: 'agent/turn-stopping', site: 'rebuild.ts, output-guard-seam.ts', impact: 'rebuild 不执行 / 输出守卫失效', required: true },
   { name: 'agent/status', site: 'skiff-core.ts, tools/handyman.ts', impact: '等待空闲逻辑失效', required: false },
@@ -283,16 +283,16 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'session/event', site: 'seams/compact.ts, seams/bootstrap.ts', impact: '压缩后重注入/晋升状态失效', required: false },
   { name: 'session/created', site: 'weixin-bridge.ts', impact: '定时器/桥同步失效', required: false },
   { name: 'session/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
-  { name: 'settings/updated', site: 'opencode-provider.ts（ns 过滤复评）', impact: 'opencode 路由热改不再自愈（自动配置仍覆盖首次）', required: false },
+  { name: 'settings/document-updated', site: 'opencode-provider.ts, deepseek-vision-patch.ts（ns 过滤复评）', impact: 'opencode 路由 / 多模态补丁热改不再自愈（自动配置仍覆盖首次）', required: false },
   { name: 'tools/pre-execute', site: 'seams/guards.ts', impact: '机械守卫（safe-mode/路径/白名单）失效', required: true },
   { name: 'tools/post-execute', site: 'seams/keeper.ts', impact: 'trajectory-assistant 计分失效', required: false },
   { name: 'system-prompt/assemble', site: 'seams/bootstrap.ts', impact: '工具目录两阶段装配失效', required: false },
 ] as const
 
 /** dsp 被验证过的宿主版本范围（与 package.json peerDependencies 同源，单一真相源） */
-export const REQUIRED_HOST_RANGE = '^0.1.5-rc.2'
+export const REQUIRED_HOST_RANGE = '^0.1.7-rc.1'
 
-/** 范围 floor：剥掉 caret/比较前缀（`^0.1.5-rc.2` → `0.1.5-rc.2`），供 {@link checkHostVersion} 使用 */
+/** 范围 floor：剥掉 caret/比较前缀（`^0.1.7-rc.1` → `0.1.7-rc.1`），供 {@link checkHostVersion} 使用 */
 const REQUIRED_HOST_FLOOR = REQUIRED_HOST_RANGE.replace(/^[\^~>=<\s]+/, '')
 
 /** 范围 ceiling：`^0.1.x` 的上界 = `<0.2.0`（显式常量，见 {@link checkHostVersion} 注释） */

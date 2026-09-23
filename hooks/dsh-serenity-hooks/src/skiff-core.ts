@@ -13,7 +13,6 @@ import type { Context } from 'cordis'
 import type { Agent, AgentHandle } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -25,8 +24,7 @@ import { readLastBound, appendBound } from './trajectory-bound.js'
 import { hostAgents } from './host/access.js'
 import { waitAgentIdle } from './agent-idle.js'
 import { registerTrajectorySkillSection } from './seams/system-prompt.js'
-
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
+import { PLUGIN_SOURCE } from './message-source.js'
 
 // ── 会话注册表（sessionId → role + agent；ACP/调试页会话映射，页面/连接关闭时清理）──
 // 角色名 + CCC 根存 skiff-registry（零依赖，guards 等 seams 可安全查询；v1.25.10 起

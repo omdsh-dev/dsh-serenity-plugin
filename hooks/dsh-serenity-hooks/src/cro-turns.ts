@@ -12,7 +12,7 @@
  *
  * | 事件 | 动作 | 出处 |
  * |---|---|---|
- * | `agent/session-start` | 标记「在跑」 | `host/contract.ts:275`（dsp 已在 `seams/context.ts:235` 订阅） |
+ * | `agent/created` | 标记「在跑」 | `host/contract.ts`（dsp 已在 `seams/context.ts` 订阅）。⚠️ v0.1.7 前名为 `agent/session-start`；新事件 `@mode = serial` ⇒ 处理函数须快速返回 |
  * | `agent/turn-stopping` | 清除标记 | `host/contract.ts:277`（dsp 已在 `rebuild.ts:442` 等 4 处订阅） |
  * | `agent/disposed` | **清该载体的项** | `host/contract.ts:280` |
  * | `session/disposed` | **清该载体的项** | `host/contract.ts:283` |
@@ -67,7 +67,7 @@ interface TurnRecord {
  * 进程内的「正在跑」表（键 = 载体 dsh 会话 id）。
  *
  * ⚠️ **仅内存**：进程重启即空 —— 这是**可接受的**，因为重启后宿主会重发
- * `session-start`（或至少下一次 `turn-stopping` 会清掉残留），且空表 = "没有在跑"，
+ * `agent/created`（或至少下一次 `turn-stopping` 会清掉残留），且空表 = "没有在跑"，
  * 落到上面那条**便宜**的误判方向。
  */
 const runningBySession = new Map<string, TurnRecord>()
@@ -78,7 +78,7 @@ function sessionIdOf(agent: unknown): string | null {
   return typeof id === 'string' && id !== '' ? id : null
 }
 
-/** 标记「在跑」（`agent/session-start` + `agent/status=running` 调用） */
+/** 标记「在跑」（`agent/created` + `agent/status=running` 调用） */
 export function markTurnRunning(sessionId: string, nowMs: number, turn: number | null = null): void {
   if (!sessionId) return
   runningBySession.set(sessionId, { at: nowMs, turn })
@@ -137,7 +137,7 @@ export function __resetCroTurnsForTest(): void {
  * 装配追踪（`index.ts` apply 调用）：订阅四个既有事件 + 拆卸。
  *
  * **为什么订阅四个而不是两个**（R↓）：
- * · 前两个（`session-start` / `turn-stopping`）负责**语义**——"在不在跑"；
+ * · 前两个（`agent/created` / `turn-stopping`）负责**语义**——"在不在跑"；
  * · 后两个（`agent/disposed` / `session/disposed`）负责**生命周期**——
  *   载体没了必须清项，否则表按载体只增（本模块的头号风险）。
  *
@@ -155,8 +155,8 @@ export function registerCroTurnTracking(ctx: Context): void {
     }
   }
 
-  // ① 开轮：session-start（新会话首次进入）+ status=running（每次开轮都会发）
-  on('agent/session-start', (payload) => {
+  // ① 开轮：agent/created（新会话首次进入；v0.1.7 前名 session-start）+ status=running（每次开轮都会发）
+  on('agent/created', (payload) => {
     const id = sessionIdOf((payload as { agent?: unknown })?.agent)
     if (id) markTurnRunning(id, Date.now())
   })

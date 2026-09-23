@@ -32,6 +32,22 @@
  * 那需要装载真 pi-ai 包。⇒ 探针结论对"settings 通道"是真的；
  * 对"pi-ai 会不会拒"**只是必要条件**（通道通 ≠ 被 pi-ai 接受）。
  * 这一层留给 P-6 的**真机实测验收**（判据 = 那个模型真能收图）。
+ *
+ * ## 🔴 v1.47（0.1.7-rc.1 适配）：本探针**主体已失效，整体停用**
+ *
+ * 它探的对象 `SettingsProvider`（含 `register` / `section` / `writable` / `persist`）
+ * **在 0.1.7 已被整段替换为 `SettingsForms`** ⇒ 子类化那套接口不再可能。
+ *
+ * **替代证据（同一判据，不同证据等级 —— 必须如实标注）**：新写入路径的合并语义由宿主
+ * **自己在实现里写明的契约**给出 —— `packages/settings/settings/src/index.ts` 的 `mergeLayers`
+ * 逐字：*"plain objects merge recursively, **every other value (arrays included) replaces
+ * the lower layer wholesale**"*。⇒ **W-1 的结论（数组整体替换）在新路径上原样成立**，
+ * 我方两处读-改-整写（`opencode-provider.ts` / `deepseek-vision-patch.ts`）**无需改语义**。
+ * ⚠️ 但这是**"宿主文档/实现契约"**等级的证据，**不是**旧探针那种"真跑一条链"的等级
+ * （§4.2：*"我读了源码"与"我执行了那条链"是两个证据等级*）⇒ **已作为残留项登记**
+ * （S142：新写入路径尚无端到端探针）。
+ *
+ * 本文件保留为**历史取证记录**（结论仍在 SESSION §0x-9 V-1 里被引用），**不再执行**。
  */
 import { describe, it, expect } from 'vitest'
 import { existsSync, mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -73,7 +89,8 @@ const report: Record<string, unknown> = {
 }
 const errors: string[] = []
 
-describe.skipIf(!depsReady)('§26 §0x-9 V-1 探针（真实 dsh-settings）', () => {
+// 🔴 整体停用（v1.47）：被测类 `SettingsProvider` 已随 0.1.7 移除。停用理由与替代证据见文件头。
+describe.skip('§26 §0x-9 V-1 探针（真实 dsh-settings）—— ⛔ 0.1.7 起被测类已移除，保留为历史记录', () => {
   it('W-0/W-1/W-2 一次完整取证', async () => {
     const mod = (await import(settingsPath!)) as {
       SettingsProvider: new (ctx: Ctx) => Record<string, unknown>

@@ -13,7 +13,7 @@
 import type { Context } from 'cordis'
 import type { PostToolDecision, ToolExecution, ToolExecutionResult } from '@deepseek-ai/dsh-tools'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource, ContentBlock } from '@deepseek-ai/dsh-llm'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, statSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { hostService } from '../host/access.js'
@@ -25,6 +25,7 @@ import { getActiveSessionInfo } from '../trajectory-ops.js'
 import { readLastBound } from '../trajectory-bound.js'
 import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, IN_FLIGHT_HEADING } from '../trajectory-assistant.js'
 import { recordToolUsage } from '../usage-stats.js'
+import { PLUGIN_SOURCE } from '../message-source.js'
 
 // ── 纯跟踪器（可单测）──
 
@@ -303,8 +304,6 @@ export function trajectoryCompactionReminderText(input: {
 }
 
 // ── DSH 注册 ──
-
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 interface KeeperRegistration {
   /** 缺省阈值（serenity.json sessionKeeper.threshold 优先，其次此值） */

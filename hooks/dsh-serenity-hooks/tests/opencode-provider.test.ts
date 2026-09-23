@@ -283,11 +283,11 @@ describe('opencode-provider: 装配（registerOpencodeAutoConfig）', () => {
     registerOpencodeAutoConfig(ctx as never)
     await new Promise((r) => setImmediate(r))
     expect(settings.get).toHaveBeenCalledWith(LLM_PI_AI_NAMESPACE)
-    // 已订阅 settings/updated（自愈路径）
-    expect(handlers.has('settings/updated')).toBe(true)
+    // 已订阅 settings/document-updated（自愈路径；v0.1.7 前名 settings/updated）
+    expect(handlers.has('settings/document-updated')).toBe(true)
   })
 
-  it('settings/updated 只对 llm-pi-ai 命名空间复评（别人的命名空间不触发）', async () => {
+  it('settings/document-updated 只对 llm-pi-ai 命名空间复评（别人的命名空间不触发）', async () => {
     const settings = {
       get: vi.fn().mockReturnValue({ providers: { opencode: { headers: { ...HEADERS } } } }),
       update: vi.fn(),
@@ -302,10 +302,11 @@ describe('opencode-provider: 装配（registerOpencodeAutoConfig）', () => {
     registerOpencodeAutoConfig(ctx as never)
     await new Promise((r) => setImmediate(r))
     const before = settings.get.mock.calls.length
-    handlers.get('settings/updated')?.('serenity-hooks') // 别人的命名空间
+    handlers.get('settings/document-updated')?.('serenity-hooks') // 别人的命名空间
     await new Promise((r) => setImmediate(r))
     expect(settings.get.mock.calls.length).toBe(before)
-    handlers.get('settings/updated')?.(LLM_PI_AI_NAMESPACE) // 我们的目标命名空间
+    // v0.1.7：载荷为**两个位置参** `(ns, revision)`；我方只读 ns
+    handlers.get('settings/document-updated')?.(LLM_PI_AI_NAMESPACE, 1) // 我们的目标命名空间
     await new Promise((r) => setImmediate(r))
     expect(settings.get.mock.calls.length).toBeGreaterThan(before)
   })

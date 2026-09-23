@@ -642,7 +642,10 @@ export function registerGateway(ctx: Context): void {
   sync()
 
   // 会话出现 → ① 一次性迁移旧 CCC localstore 配置（v1.21.x → v1.22 全局文件）② 兜底重同步
-  ctx.on('agent/session-start', (payload) => {
+  // ⚠️ v0.1.7：`agent/session-start` 已被 `agent/created` 取代，且新事件 `@mode = serial`
+  //    （契约要求返回 `undefined | Promise<undefined>`，裸 `void` 不被接受 ⇒ 用 `async`；
+  //     函数体只做同步迁移 + 入队，无 await，不会拖慢创建）
+  ctx.on('agent/created', async (payload) => {
     try {
       const cwd = (payload as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd
       if (cwd) {

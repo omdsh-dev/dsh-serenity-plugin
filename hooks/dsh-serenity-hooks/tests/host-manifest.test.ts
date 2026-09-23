@@ -75,7 +75,9 @@ describe('宿主消费面（manifest）：宿主真正读取的字段必须完�
     for (const value of Object.values(pkg.peerDependencies ?? {})) {
       // bare `cordis` 走 rc 线（^4.0.0-rc.N）：上游 cordis 从未发布 4.0.2（npm 404），
       // 宿主 profile 提供的 shim 是 4.0.0-rc.7 —— 见 compliance.test.ts F6b 与 SESSION §17
-      expect(value).toMatch(/^\^0\.1\.5-rc\.2$|^\^3\.18\.2$|^\^4\.0\.2$|^\^4\.0\.0-rc\.\d+$/)
+      // v1.47（0.1.7-rc.1 适配）：宿主线整体升一档 ⇒ 本 pattern 同批抬到新档
+      // （`^0.1.7-rc.1` / `^3.18.4` / cordis `^4.0.4` / bare cordis rc 线）
+      expect(value).toMatch(/^\^0\.1\.7-rc\.1$|^\^3\.18\.4$|^\^4\.0\.4$|^\^4\.0\.0-rc\.\d+$/)
     }
   })
 })

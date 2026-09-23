@@ -180,18 +180,18 @@ describe('Skiff 调试服务 CCC root 定位（D1；C2 后语义）', () => {
     log.mockRestore()
   })
 
-  it('触发路径②（另一事件）：agent/session-start → 立即启动；已启动后不重复启动', async () => {
+  it('触发路径②（另一事件）：agent/created → 立即启动；已启动后不重复启动', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {})
     const { ctx } = mockCtx()
     apply(ctx, CONFIG)
     await settle()
     sessions.push({ header: { cwd: cccDir } })
-    fire('agent/session-start')
+    fire('agent/created')
     await settle()
     expect(h.start).toHaveBeenCalledTimes(1)
     expect(h.start.mock.calls[0]![1]).toBe(cccDir)
     // started 守卫：再来一次事件不重复启动
-    fire('agent/session-start')
+    fire('agent/created')
     await settle()
     expect(h.start).toHaveBeenCalledTimes(1)
     log.mockRestore()

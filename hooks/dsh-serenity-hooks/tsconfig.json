@@ -27,7 +27,7 @@
     "paths": {
       "@deepseek-ai/dsh-tools": ["node_modules/@deepseek-ai/dsh-tools"],
       "@deepseek-ai/dsh-agent": ["node_modules/@deepseek-ai/dsh-agent"],
-      "@deepseek-ai/dsh-agent-presets": ["node_modules/@deepseek-ai/dsh-agent-presets"],
+      "@deepseek-ai/dsh-agent-preset-registry": ["node_modules/@deepseek-ai/dsh-agent-preset-registry"],
       "@deepseek-ai/dsh-session": ["node_modules/@deepseek-ai/dsh-session"],
       "@deepseek-ai/dsh-session/types": ["node_modules/@deepseek-ai/dsh-session/lib/types/types.d.ts"],
       "@deepseek-ai/dsh-llm": ["node_modules/@deepseek-ai/dsh-llm"],

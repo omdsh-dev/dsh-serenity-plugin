@@ -26,10 +26,12 @@ import type {} from '@deepseek-ai/dsh-client-ui-session'
 // 获得 Context.slots 等 client 面声明合并（原 dsh-client-runtime 包提供；rc.1 已删）。
 import type {} from '@deepseek-ai/dsh-client-ui-renderer'
 // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 →
-// ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'；
-// SettingsScope/SettingsScopeSpec 改从 '@deepseek-ai/dsh-client-ui-settings/client'（官方再导出实证）。
+// ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'。
+// 🔴 v1.47 适配 0.1.7-rc.1：`SettingsScope`/`SettingsScopeSpec` 与 `settingsScope` 服务**已从
+//    `dsh-client-ui-settings` 移除**（实测：该包 client 面只导出 ConfigForms / ConfigForm /
+//    SettingsSchemaService / SettingsDescribe*）⇒ 设置页数据改走 `ctx.configForms`
+//    （按 profile 条目 Config 投影的表单），注册面改走 `configForms.whileServed`。
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
-import type { SettingsScope, SettingsScopeSpec } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { SafeModePanel } from './SafeModePanel.js'
 import { ImageFallbackDock, ImageFallbackInjected } from './ImageFallbackDock.js'
 import { uploadImage, getDraftFiles, resendText } from './image-fallback-api.js'
@@ -37,16 +39,13 @@ import { FileFallbackDock, FileFallbackInjected } from './FileFallbackDock.js'
 import { uploadFile } from './file-fallback-api.js'
 import { SettingsSection, SettingsSectionInjected, SerenitySimpleWire } from './SettingsSection.js'
 
-export const inject = ['slots', 'conversation', 'sessions', 'settingsScope']
+export const inject = ['slots', 'conversation', 'sessions', 'configForms']
 
-/** serenity-hooks 简单配置 scope spec（与 host 侧 registerSettingsSection 对齐） */
-const SERENITY_SCOPE_SPEC: SettingsScopeSpec<SerenitySimpleWire> = {
-  namespace: 'serenity-hooks',
-  decode: (section) => (section !== null && typeof section === 'object' ? (section as SerenitySimpleWire) : undefined),
-}
+/** 设置页命名空间 = profile 条目 id（与 host 侧 `SERENITY_SETTINGS_NS` 同值；单一真相源在 host 侧常量，此处只作字面量引用） */
+const SERENITY_SETTINGS_NS = 'serenity-hooks'
 
 export function apply(ctx: ClientContext): void {
-  ctx.inject(['slots', 'conversation', 'sessions', 'settingsScope'], (scope: ClientContext) => {
+  ctx.inject(['slots', 'conversation', 'sessions', 'configForms'], (scope: ClientContext) => {
     // v1.22.4 定稿：container_trajectory rebuild 复用旧会话原地清空（turn 结束 surface replace），
     // 无新会话创建 → 无需 client 自动切换（同会话 id、同工作区天然保持）。
 
@@ -96,22 +95,32 @@ export function apply(ctx: ClientContext): void {
       'serenity: file fallback dock',
     )
 
-    // v1.21 分层：简单配置 → dsh 原生设置面板（settings.section；降级守卫在组件内）
-    const settingsScope = scope.get('settingsScope') as {
-      bind: <T>(spec: SettingsScopeSpec<T>) => SettingsScope<T>
-    }
-    const serenityScope = settingsScope.bind<SerenitySimpleWire>(SERENITY_SCOPE_SPEC)
+    // v1.21 分层：简单配置 → dsh 原生设置面板（settings.section）。
+    // v1.47（0.1.7-rc.1 A 案）：数据面 = `configForms.get(条目 id)`（条目 Config 投影的表单）；
+    // 注册面 = `configForms.whileServed`——**宿主没在 serve 这个命名空间就不注册**，
+    // 这正是旧版 `snapshot.status === 'unavailable'` 降级提示的官方替代（页面自动出现/消失）。
+    const serenityForm = scope.configForms.get<SerenitySimpleWire>(SERENITY_SETTINGS_NS)
     scope.effect(
       () =>
-        scope.slots.register(
-          {
-            name: 'settings.section',
-            id: 'serenity-hooks',
-            order: 90,
-            label: () => 'Serenity',
-            inject: (): SettingsSectionInjected => ({ scope: serenityScope }),
-          },
-          SettingsSection,
+        scope.configForms.whileServed([SERENITY_SETTINGS_NS], () =>
+          scope.slots.inject('settings.section', () =>
+            scope.slots.register(
+              {
+                name: 'settings.section',
+                id: SERENITY_SETTINGS_NS,
+                order: 90,
+                label: () => 'Serenity',
+                inject: (): SettingsSectionInjected => ({
+                  hooks: { serenitySettings: serenityForm },
+                  set: (field, value) => {
+                    // 写失败不抛给 UI：表单快照会由宿主回读（镜像）自行收敛
+                    void serenityForm.set(field, value).catch((_error: unknown) => { /* 见上 */ })
+                  },
+                }),
+              },
+              SettingsSection,
+            ),
+          ),
         ),
       'serenity: simple settings section',
     )

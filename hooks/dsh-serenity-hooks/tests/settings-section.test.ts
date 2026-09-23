@@ -24,21 +24,20 @@ vi.mock('@deepseek-ai/schemastery', () => {
   }
 })
 
-// dsh-settings 运行时不可解析（peerDep）——mock installSettingsSection/settingsNamespace
+// dsh-settings 运行时不可解析（peerDep）——mock 宿主设置面（v1.47 起为 SettingsForms.configure）
 vi.mock('@deepseek-ai/dsh-settings', () => ({
-  installSettingsSection: () => {},
-  settingsNamespace: (v: string) => v,
+  default: class {},
 }))
 
-import { entryDefaults, defaultSimpleSettings, SERENITY_SETTINGS_NS } from '../src/settings-section.js'
+import { simpleSettingsFromConfig, defaultSimpleSettings, SERENITY_SETTINGS_NS } from '../src/settings-section.js'
 
-describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
-  it('namespace 固定为 serenity-hooks', () => {
+describe('settings-section: 简单配置读取（host 侧）', () => {
+  it('命名空间 = profile 条目 id（serenity-hooks；与旧 settings.yaml 段名逐字相同）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部默认（gateway off / rebuild on 400K / skiff off 3099 / acp off 3100 / CRO **on**）', () => {
-    const d = entryDefaults({})
+  it('空 Config → 全部内建缺省（gateway off / rebuild on 400K / skiff off 3099 / acp off 3100 / CRO **on**）', () => {
+    const d = simpleSettingsFromConfig({})
     expect(d).toEqual({
       gatewayEnabled: false,
       rebuildEnabled: true,
@@ -53,8 +52,8 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
     })
   })
 
-  it('Config 覆盖生效', () => {
-    const d = entryDefaults({
+  it('🔴 部署层（嵌套段）生效 —— 面板层未设时读嵌套段', () => {
+    const d = simpleSettingsFromConfig({
       gateway: { enabled: true },
       rebuild: { enabled: false, thresholdK: 500 },
       skiff: { enabled: true, debugPort: 4000 },
@@ -74,14 +73,34 @@ describe('settings-section: 简单配置 entry 默认（host 侧）', () => {
     })
   })
 
+  it('🔴 面板层（扁平键）优先于部署层 —— 旧 settings.yaml 的值压过 cordis.yml 的段', () => {
+    const d = simpleSettingsFromConfig({
+      gateway: { enabled: false },
+      gatewayEnabled: true, // 面板层
+      rebuild: { enabled: false, thresholdK: 500 },
+      rebuildThresholdK: 700, // 面板层
+    })
+    expect(d.gatewayEnabled).toBe(true)
+    expect(d.rebuildThresholdK).toBe(700)
+    // 面板层没设的字段仍走部署层
+    expect(d.rebuildEnabled).toBe(false)
+  })
+
   it('部分覆盖保留其余默认', () => {
-    const d = entryDefaults({ rebuild: { thresholdK: 700 } })
+    const d = simpleSettingsFromConfig({ rebuild: { thresholdK: 700 } })
     expect(d.rebuildThresholdK).toBe(700)
     expect(d.rebuildEnabled).toBe(true)
     expect(d.gatewayEnabled).toBe(false)
   })
 
-  it('defaultSimpleSettings 与空 Config entry 一致', () => {
-    expect(defaultSimpleSettings()).toEqual(entryDefaults({}))
+  it('三个纯面板层开关（问答页 / CRO / 无人值守）只经扁平键', () => {
+    const d = simpleSettingsFromConfig({ publicAskEnabled: true, croEnabled: false, unattendedEnabled: true })
+    expect(d.publicAskEnabled).toBe(true)
+    expect(d.croEnabled).toBe(false)
+    expect(d.unattendedEnabled).toBe(true)
+  })
+
+  it('defaultSimpleSettings 与空 Config 一致', () => {
+    expect(defaultSimpleSettings()).toEqual(simpleSettingsFromConfig({}))
   })
 })

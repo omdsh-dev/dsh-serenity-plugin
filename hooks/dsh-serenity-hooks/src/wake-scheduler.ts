@@ -26,7 +26,6 @@
 
 import type { Context } from 'cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
 import { existsSync } from 'node:fs'
@@ -50,8 +49,7 @@ import {
   WAKE_CATCH_UP_MS,
   type WakeEntry,
 } from './wake-registry.js'
-
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
+import { PLUGIN_SOURCE } from './message-source.js'
 
 /** 宿主 sessionController 的最小形态（`resolveAgent`：live 优先，否则 resume） */
 interface HostSessionController {

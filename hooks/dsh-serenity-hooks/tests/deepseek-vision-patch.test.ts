@@ -365,15 +365,15 @@ describe('deepseek-vision-patch: 装配', () => {
       on: (name: string, fn: (ns?: unknown) => void) => { handlers[name] = fn },
     }
     registerDeepseekVisionPatch(ctx as never)
-    await vi.waitFor(() => { expect(handlers['settings/updated']).toBeTruthy() })
+    await vi.waitFor(() => { expect(handlers['settings/document-updated']).toBeTruthy() })
 
     // 模拟"用户后来配好了 pi-ai + 有 deepseek 模型"
     resolved = { providers: { r: { models: [{ id: 'deepseek-late' }] } } }
-    handlers['settings/updated']!(LLM_PI_AI_NAMESPACE)
+    handlers['settings/document-updated']!(LLM_PI_AI_NAMESPACE)
     await vi.waitFor(() => { expect(calls.length).toBe(1) })
   })
 
-  it('settings/updated（别的 ns）⇒ 不复评', async () => {
+  it('settings/document-updated（别的 ns）⇒ 不复评', async () => {
     let resolved: unknown = { providers: { r: { models: [{ id: 'deepseek-a' }] } } }
     const calls: object[] = []
     const handlers: Record<string, (ns?: unknown) => void> = {}
@@ -388,7 +388,7 @@ describe('deepseek-vision-patch: 装配', () => {
     }
     registerDeepseekVisionPatch(ctx as never)
     await vi.waitFor(() => { expect(calls.length).toBe(1) })
-    handlers['settings/updated']!('some-other-ns')
+    handlers['settings/document-updated']!('some-other-ns')
     // 不该多出写入
     await new Promise((r) => setTimeout(r, 20))
     expect(calls.length).toBe(1)

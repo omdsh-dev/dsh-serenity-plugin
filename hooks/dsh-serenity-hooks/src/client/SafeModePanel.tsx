@@ -19,8 +19,11 @@
 import type {} from '@deepseek-ai/dsh-client-ui-conversation'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import {
-  IconChevronDownOutline14,
-  IconWarningOutline16,
+  // v0.1.7（0.1.7-rc.1）：ui-primitives 图标改名 —— 尺寸后缀（`…14`/`…16`）换成
+  // 笔画粗细后缀（`…Regular` 1px / `…Medium` 1.3px），尺寸一律走 `size` prop。
+  // 本面板两处都是小尺寸图标 ⇒ 取 Medium（细笔在小号下更易读）。
+  IconChevronDownOutlineMedium,
+  IconWarningOutlineMedium,
 } from '@deepseek-ai/dsh-client-ui-primitives'
 import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 import './SafeModePanel.css'
@@ -260,7 +263,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
             </span>
           </>
         )}
-        <IconChevronDownOutline14 size={12} className={cx('sp-chev')} />
+        <IconChevronDownOutlineMedium size={12} className={cx('sp-chev')} />
       </button>
 
       {/* 自绘 popover（v1.36.1：加宽为两栏——左=信息 / 右=航行动画；外点/Escape 关闭）
@@ -312,7 +315,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       disabled={busy}
                       onClick={() => void toggle(!status.safeModeOn)}
                     >
-                      {status.safeModeOn && <IconWarningOutline16 size={14} className={cx('sp-toggleIcon')} />}
+                      {status.safeModeOn && <IconWarningOutlineMedium size={14} className={cx('sp-toggleIcon')} />}
                       safe-mode {status.safeModeOn ? 'ON' : 'OFF'}
                     </button>
                     <span className={cx('sp-toggleDesc')}>

@@ -198,7 +198,7 @@ describe('CRO turn 追踪: 事件接缝', () => {
   it('🔴 订阅的 5 个事件名**全部**在宿主契约表里（防"名字写错 ⇒ 静默不订阅"）', () => {
     install()
     expect(subscribed.sort()).toEqual(
-      ['agent/disposed', 'agent/session-start', 'agent/status', 'agent/turn-stopping', 'session/disposed'].sort(),
+      ['agent/created', 'agent/disposed', 'agent/status', 'agent/turn-stopping', 'session/disposed'].sort(),
     )
     const contract = new Set(HOST_EVENTS.map((e) => e.name))
     for (const name of subscribed) {
@@ -206,9 +206,9 @@ describe('CRO turn 追踪: 事件接缝', () => {
     }
   })
 
-  it('`agent/session-start` ⇒ 标记在跑', () => {
+  it('`agent/created`（v0.1.7 前名 `agent/session-start`）⇒ 标记在跑', () => {
     const f = install()
-    f.emit('agent/session-start', agentPayload(A))
+    f.emit('agent/created', agentPayload(A))
     expect(listRunningSessionIds(NOW)).toEqual([A])
   })
 
@@ -222,7 +222,7 @@ describe('CRO turn 追踪: 事件接缝', () => {
 
   it('`agent/turn-stopping` ⇒ 清除（正常收轮路径）', () => {
     const f = install()
-    f.emit('agent/session-start', agentPayload(A))
+    f.emit('agent/created', agentPayload(A))
     f.emit('agent/turn-stopping', agentPayload(A))
     expect(listRunningSessionIds(NOW)).toEqual([])
     expect(croTurnTableSize()).toBe(0)
@@ -230,14 +230,14 @@ describe('CRO turn 追踪: 事件接缝', () => {
 
   it('🔴 `agent/disposed`（payload `{ agent }`）⇒ 清除', () => {
     const f = install()
-    f.emit('agent/session-start', agentPayload(A))
+    f.emit('agent/created', agentPayload(A))
     f.emit('agent/disposed', agentPayload(A))
     expect(croTurnTableSize()).toBe(0)
   })
 
   it('🔴 `session/disposed` 的 payload **本身就是那个 session**（形状与上一条不同）⇒ 清除', () => {
     const f = install()
-    f.emit('agent/session-start', agentPayload(A))
+    f.emit('agent/created', agentPayload(A))
     f.emit('session/disposed', { id: A }) // 直接有 .id，没有 .agent
     expect(croTurnTableSize()).toBe(0)
   })
@@ -245,7 +245,7 @@ describe('CRO turn 追踪: 事件接缝', () => {
   it('畸形 payload ⇒ 不抛、也不误标（不制造无名项）', () => {
     const f = install()
     for (const bad of [undefined, null, {}, { agent: {} }, { agent: { session: {} } }, { id: 42 }]) {
-      expect(() => f.emit('agent/session-start', bad)).not.toThrow()
+      expect(() => f.emit('agent/created', bad)).not.toThrow()
       expect(() => f.emit('session/disposed', bad)).not.toThrow()
     }
     expect(croTurnTableSize()).toBe(0)
@@ -253,7 +253,7 @@ describe('CRO turn 追踪: 事件接缝', () => {
 
   it('🔴 拆卸 ⇒ 表清空（内存态不留残余）', () => {
     const f = install()
-    f.emit('agent/session-start', agentPayload(A))
+    f.emit('agent/created', agentPayload(A))
     expect(croTurnTableSize()).toBe(1)
     for (const cleanup of f.cleanups) cleanup()
     expect(croTurnTableSize()).toBe(0)

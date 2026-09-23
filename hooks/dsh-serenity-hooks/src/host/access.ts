@@ -79,8 +79,14 @@ interface HostWebServer {
   port?: number
 }
 
+/** `ctx.settings`（v0.1.7 起为 `SettingsForms`：按条目 Config 投影表单 + 页策略） */
 interface HostSettings {
-  installSection?: (...args: unknown[]) => unknown
+  /** 页策略（本插件用它关掉自动生成页；v0.1.7 前无此成员） */
+  configure?: (presentation: { auto?: boolean }, owner?: unknown) => unknown
+  /** 读各条目表单（含 live 值 / 用户层）；保留可选读取，供诊断面取证 */
+  describe?: (options?: { redactSecrets?: boolean }) => unknown
+  /** 写一个条目的 config（宿主负责落 profile 文档 + 校验） */
+  update?: (ns: string, patch: object, expectedRevision?: number) => Promise<void>
 }
 
 /** `ctx.web`（injected；v1.30.12：fetch provider 注册通道） */

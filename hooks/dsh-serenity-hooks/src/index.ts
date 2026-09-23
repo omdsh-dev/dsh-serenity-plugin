@@ -121,6 +121,33 @@ export interface Config {
    * ⇒ 关闭 = 停止再补；**不回滚已写入的值**（写的是"该模型支持图片"这个**事实**，不是偏好）。
    */
   visionPatch?: { enabled?: boolean }
+  // ── 设置面板层（扁平键）────────────────────────────────────────────────
+  // 🔴 这些键是**旧 `settings.yaml` 的段名/字段名，故意原样保留**（v1.47 A 案）：
+  //    0.1.7 起设置页由「profile 条目 Config」投影而来，而本插件条目 id 逐字 = `serenity-hooks`
+  //    （= 旧 settings.yaml 的段名）⇒ 宿主的 `importLegacyDocument()` 会把旧值导入同一命名空间，
+  //    声明了这些键 ⇒ **旧值零迁移自动生效**（schemastery 非 strict 会保留未声明键，但读取需要声明）。
+  //    ⚠️ **一律不带 `.default()`**：带上就永远非 undefined，部署层（`gateway.enabled` 等）
+  //    会被无声压死。读取优先级见 `settings-section.ts`：面板层 > 部署层 > 内建缺省。
+  /** F1 双端口网关总开关（面板层；部署层同义键 = `gateway.enabled`） */
+  gatewayEnabled?: boolean
+  /** F2 超限重建总开关（面板层；部署层同义键 = `rebuild.enabled`） */
+  rebuildEnabled?: boolean
+  /** F2 触发阈值（K token；面板层；部署层同义键 = `rebuild.thresholdK`） */
+  rebuildThresholdK?: number
+  /** F4 Skiff 调试服务总开关（面板层；部署层同义键 = `skiff.enabled`） */
+  skiffEnabled?: boolean
+  /** F4 Skiff 调试端口（面板层；部署层同义键 = `skiff.debugPort`） */
+  skiffDebugPort?: number
+  /** F4c ACP HTTP 端点总开关（面板层；部署层同义键 = `acp.enabled`） */
+  acpEnabled?: boolean
+  /** F4c ACP HTTP 端口（面板层；部署层同义键 = `acp.httpPort`） */
+  acpHttpPort?: number
+  /** F4d 建议问答页总开关（面板层；无部署层同义键） */
+  publicAskEnabled?: boolean
+  /** CRO（轨迹自编程唤起）总闸（面板层；无部署层同义键；缺省开） */
+  croEnabled?: boolean
+  /** 无人值守代理回复总闸（面板层；无部署层同义键；缺省关） */
+  unattendedEnabled?: boolean
 }
 
 export const Config: z<Config> = z.object({
@@ -143,6 +170,19 @@ export const Config: z<Config> = z.object({
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
+  // ── 设置面板层（v1.47 A 案）：旧 `settings.yaml` 的扁平键，**刻意无默认值** ──
+  // 无默认 ⇒ "用户没设过" = `undefined` ⇒ 部署层（嵌套段）才有机会生效。
+  // 约束（min/max）与旧 settings schema 逐字一致，保证面板输入仍被宿主校验。
+  gatewayEnabled: z.boolean(),
+  rebuildEnabled: z.boolean(),
+  rebuildThresholdK: z.number().min(50).max(4000),
+  skiffEnabled: z.boolean(),
+  skiffDebugPort: z.number().min(1024).max(65535),
+  acpEnabled: z.boolean(),
+  acpHttpPort: z.number().min(1024).max(65535),
+  publicAskEnabled: z.boolean(),
+  croEnabled: z.boolean(),
+  unattendedEnabled: z.boolean(),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -344,9 +384,10 @@ export function apply(ctx: Context, config: Config): void {
  * 任何 live 会话，故 apply 时刻就能解析到，不再需要"等一会儿再试"。
  *
  * 🔒 **必须保留**（它们不是"重试"，删了会引入新缺陷）：
- *  - **反应式再触发**（`agent/session-start` / `session/created` → sync）：宿主重启后
- *    "恢复"旧会话不触发 `session/created`，但**开始对话**会触发 `agent/session-start`
- *    ——这是唯一能把"进程起来时还解析不到、稍后才有会话"这条路径接上的通道。
+ *  - **反应式再触发**（`agent/created` / `session/created` → sync）：宿主重启后
+ *    "恢复"旧会话不触发 `session/created`，但**开始对话**会触发 `agent/created`
+ *    （v0.1.7 前名 `agent/session-start`）——这是唯一能把"进程起来时还解析不到、稍后才有会话"
+ *    这条路径接上的通道。
  *  - **`starting` 在飞标志**：防同拍双次 start → `EADDRINUSE`。
  *    （C4 块 A 备注：面宿主亦按面名合并在飞启动，是第二道保险；**本标志仍保留**——
  *    它管的是"解析 root 这段装配流程"的在飞语义，且调试服务的启动替身在测试里被 mock，
@@ -409,7 +450,8 @@ function registerSkiff(ctx: Context): void {
     /* 事件通道缺失不阻断（启动时 sync 仍执行） */
   }
   // 反应式再触发：live 会话就绪是"CCC root 现在可解析"的强信号（重启后会话恢复、用户开始对话）
-  for (const eventName of ['agent/session-start', 'session/created'] as const) {
+  // ⚠️ v0.1.7：`agent/session-start` → `agent/created`（serial ⇒ 处理函数只做同步判断，不 await）
+  for (const eventName of ['agent/created', 'session/created'] as const) {
     try {
       ctx.on(eventName, () => {
         if (!started) void sync()

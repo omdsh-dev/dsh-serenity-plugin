@@ -124,7 +124,9 @@ describe('host-contract: 宿主版本范围', () => {
   it('checkHostVersion：下限之下 / 范围内 / 上界之外 / 未知', () => {
     expect(checkHostVersion(BELOW_FLOOR_HOST).ok).toBe(false) // 低于下限
     expect(checkHostVersion(IN_RANGE_HOST).ok).toBe(true) // 恰好等于下限（含预发布）
-    expect(checkHostVersion('0.1.6-rc.1').ok).toBe(true)
+    // v1.47（0.1.7-rc.1 适配）：原先此处断言 `'0.1.6-rc.1'` 在范围内 —— 它**只是**下限之上
+    // 的同线版本，已由下面 `0.1.9` 覆盖；写死一个"刚好落在旧下限之上"的字面量，会在每次抬
+    // 下限时变成假报警（与文件头注释里 IN_RANGE_HOST 的教训同族）⇒ 删掉，不再复现该形态。
     expect(checkHostVersion('0.1.9').ok).toBe(true)
     expect(checkHostVersion('0.2.0').ok).toBe(false) // 超出验证范围
     expect(checkHostVersion(null).ok).toBe(false)

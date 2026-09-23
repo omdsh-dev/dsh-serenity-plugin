@@ -1,3 +1,79 @@
+## v1.47.0 — 2026-09-23（**适配 DSH 0.1.7-rc.1**：设置面板改走「条目 Config 投影 · 零迁移」＋ 两组事件/来源硬切 ＋ 两处审计漏报修掉）
+
+**来源**：owner 2026-09-23 21:2x 令「**算了，npm还没发，github发了。先拉github代码做方案吧**」⇒ 先出方案（插件仓 `docs/dsh-0.1.7-rc.1-adaptation-plan.md`）⇒ 22:0x 令「**走A，工作量无所谓；目前npm 他们也发了，我们可以正式开始适配工作，开始工作前要求加载eap 整理SESSION.md，指定合理的分层抽象计划，然后完整进行工作；最终npm发布；（我会在发布后再升级本地的dsh）**」（**D14 具名发版令** ⇒ 本版；「走A」= 面板**移植**，不计工作量）。
+
+🔴 **本版的适用边界（先读这条）**：本版是**跨宿主版本**的适配版。本机宿主**仍是 0.1.5-rc.2**，故 **`deploy` / `restart-web` 一律推迟**到 owner 完成宿主升级之后（适配后的代码依赖 0.1.7 的 API，deploy 到 0.1.5 上会**当场打断在跑会话**）⇒ **本版在 0.1.5 运行态下的行为未验收**（见 §六 诚实边界）。
+
+---
+
+### 一、这东西解决什么（白话）
+
+DSH 升到 0.1.7 之后，插件里有**四处宿主的接口/数据形状被换掉了**。它们的症状各不相同，但都不是"崩"，而是**悄悄少一块**：
+
+- 我们的**设置面板会整个不出现**（你再也找不到那个页面开关）；
+- 每条会话开头那句"**你是谁**"的播种不再发生；
+- 两条宿主通知**收不到**（设置被改动、会话开始）；
+- 编译**直接过不去**（一个包改了名）。
+
+本版把这四处全部接上**新接口**，并顺手修掉两处只有真跑类型对撞才暴露的漏项 ⇒ **在 0.1.7 上功能不缺、面板照常**。
+
+### 二、四组断裂（＋一条改名）与修法
+
+| # | 断了什么 | 新形态 | 修法 |
+|---|---|---|---|
+| **B1** | `settings.installSection` ＋ `settings.get` **被移除**（`SettingsProvider` → `SettingsForms`，只剩 `configure`/`prepareDocument`/`describe`/`update`/`replace`/`mutate`） | 0.1.7 起设置页由**条目 Config 投影**而来 | 🔵 **A 案的「零迁移」变体**（见 §三）——**不写任何迁移代码** |
+| **B2** | 事件 **`agent/session-start` 被移除**（我方标 `required:true`） | 后继 **`agent/created`**，载荷 `{agent, source, signal?}`；🔴 **`@mode` 由 `emit` 改 `serial`** | 5 处订阅 ＋ 2 处声明改订新名；🔴 **监听器必须返回 `undefined \| Promise<undefined>`（裸 `void` 不被接受）** ⇒ 两处 handler 改 `async`（宿主自身插件同款写法） |
+| **B3** | 事件 **`settings/updated` 被移除** | 后继 **`settings/document-updated(ns, revision)`**（**两个位置参**） | 2 处声明 ＋ 4 处「绕过类型化 `Events` 的结构化订阅/字符串清单」**同批改**（`typecheck` 抓不到它们） |
+| **B4** | **`kind:'plugin'` 不再合法**（9 处裸写；0.1.7 做了 **session format v3→v4** 迁移，第一方之外一律写成 `` `plugin:<旧 plugin 字段>` ``） | 生产者须**各自声明**自己的 kind | 🆕 **新建 `src/message-source.ts`** = **唯一的声明合并处 ＋ 唯一的常量处**（`ACC_MESSAGE_KIND` / `PLUGIN_SOURCE`），取代原先**散在 10 个文件的同一字面量**（熵减 10 → 1） |
+| **B5** | `@deepseek-ai/dsh-agent-presets` **包改名** → `@deepseek-ai/dsh-agent-preset-registry` | 服务名仍 `agentPresets`、`composeFrom(ctx,parent)` **签名不变** | **只改包标识（5 处）**：import ／ tsconfig paths ／ peer+optional-meta+devDep ／ `pnpm-workspace.yaml` ⇒ **调用点一行不动** |
+
+**B4 的定论过程值得留档**（因为它**改变修法**）：`MessageSourceMap` **不是开放映射**，而是**合并和类型**（`@deepseek-ai/dsh-llm` 的 `src/message.ts`，JSDoc 逐字 *"each producer declares its own `kind` in its own module; there is no shared catch-all `plugin` kind"*）⇒ `` `plugin:${string}` `` **在类型层不成立**；它只是 v3→v4 迁移里的一个**运行时值**（`session-format-v3-to-v4/src/sources.ts` 的 `producerKind()`）。⇒ **唯二可行修法 = 声明合并**（宿主自己的插件即此法）。**取值取 `plugin:dsh-serenity-hooks`**（**不是** `dsh-serenity-hooks`）——迁移表把第三方旧生产者一律写成 `plugin:<旧 plugin 字段>`，而我方旧字段值逐字就是它 ⇒ **存量会话升级后即此字面量，新代码沿用则一个生产者只有一个 kind**。
+
+### 三、B1 的「零迁移」变体（本版最值钱的一条认知）
+
+0.1.7 起设置页由**条目 Config 投影**而来，而**本插件条目 id 逐字 = `serenity-hooks`**（= 旧 `settings.yaml` 的段名，见 `cordis.patch.yml` 的 `- insert: - id: serenity-hooks`）⇒ **宿主的 `importLegacyDocument()` 会把旧扁平键导入同一命名空间**；schemastery 的 object 解析在非 strict 下走 `merge(result, data)`（源码实证 `Schema.extend('object', …)`）⇒ **只要扁平键仍在 Config 里声明，旧值零迁移自动生效**。
+
+⇒ 本版做的是：
+
+1. **`Config` 新增 10 个扁平键**（旧 `settings.yaml` **原样拼写**）；🔴 **一律不带 `.default()`** —— 带默认值就永远非 `undefined`，会把部署层**无声压死**；
+2. 读取优先级 = **面板层（扁平） > 部署层（嵌套段） > 内建缺省**（`simpleSettingsFromConfig()`）；
+3. `registerSettingsSection` **不再安装 section**，只做「把 `ctx.fiber.config` 接成简单配置源」＋ `settings.configure({ auto: false })`（关掉宿主按 Config schema 自动生成的通用页，只留我们的自定义页）。
+
+🔴 **为什么必须"原样保留扁平键"而不是"改写成嵌套"** —— 本机 `~/.dsh/settings.yaml` 实测的旧值里，**前三条是在跑的对外服务**：`gatewayEnabled: true`（3081 网关）／`skiffEnabled: true`（3099 Skiff）／`publicAskEnabled: true`（3100 问答页）——**不迁移即静默掉线**。
+
+### 四、两处「审计漏报」，只有真跑类型对撞才抓得到
+
+| # | 漏报 | 为什么静态审计看不见 |
+|---|---|---|
+| 1 | 🔴 **client 半从未被 typecheck 过** —— `dsh-develop typecheck` 先跑 node 半，**node 半失败即 `process.exit(2)` 短路** ⇒ 本适配轮此前的每一次 `typecheck` **都只覆盖 node 半**。补查后查出 0.1.7 的 `@deepseek-ai/dsh-client-ui-settings` **已无 `SettingsScope` / `SettingsScopeSpec` / `settingsScope`** ⇒ 我方 client 入口整条「设置 scope」通道已被移除 | 短路在脚手架里，不在被审代码里 |
+| 2 | **`ui-primitives` 图标改名**：尺寸后缀（`IconChevronDownOutline14`）→ **笔画后缀**（`…Regular` 1px / `…Medium` 1.3px），尺寸走 `size` prop | 属"包内导出面细粒度改名"，不在"服务/事件"契约面上 |
+
+⇒ **client 面修法**：照**在树官方先例** `packages/client/ui-agent-preset`（功能插件自持设置页）改走 `ctx.configForms.get(条目 id)` ＋ `configForms.whileServed([ns], …)` 注册（**宿主没 serve 就不注册** = 官方替代了旧版"页内降级提示"）——**不新造机制**。
+
+### 五、门禁（本批自跑，**权威读数**）
+
+| 项 | 结果 |
+|---|---|
+| `typecheck`（**双面**） | ✅ 通过（node ＋ client —— **本仓首次真正跑到 client 半**） |
+| `typecheck-cli` | ✅ 通过 |
+| 🔴 `typecheck-host 0.1.7-rc.1`（**真包对撞**） | ✅ 通过 —— node 半**实测载入解包宿主 114 个文件**、client 半 **123 个文件**，paths **36 + 14 全命中** |
+| `test` | ✅ **107 files / 1679 tests** |
+| `coverage` | ✅ exit 0 |
+| `build` | ✅ `lib/client.js` = **201,986 B** |
+| `pack-check` | ✅ **120 文件**（含 `lib/index.js` ＋ `lib/client.js` ＋ `lib/invariant.js`），包内 `.d.ts` 共 **98** 个 |
+
+**取证纪律（新增）**：🔴 **只有真包的 `typecheck` 抓得到类型层断裂** —— 本轮"替身（`0.1.7-alpha.2`）＋ 静态审计"**漏掉了 B4 与上面两条**。替身阶段还**必须**标注作用域（实测 `git log dsh-v0.1.7-alpha.2..dsh-v0.1.7-rc.1` 之间**仍有实质提交**）。
+**另一条（准入面）**：我方是 **bundle**（`dsh.bundle.patch`）⇒ **bundle 的版本不兼容是"静默"的**（启动时 `skip` ＋ 一行 stderr；plugin row 才是硬拒）⇒ ① peer 范围**不得收窄**到会排除新线；② **每次宿主升级后须另证"补丁层真的生效"**（判据 = 我们的行/禁用项出现在组合后的配置里），**不能只看门禁绿**。
+
+### 六、诚实边界（未验证项，逐条声明）
+
+1. 🔴 **本版未在 0.1.7 运行态下验收** —— 只做到"**编译期 + 测试套件**对新宿主全绿"；`deploy` / `restart-web` 推迟（等 owner 升级宿主，§0 边界）。**运行期行为（面板真实渲染、身份播种真的注入、serial 时序真的不阻塞）尚未见真机。**
+2. **一处覆盖缺口（已显式登记，不许静默）**：`tests/host/deepseek-vision-probe.test.ts` 的**新写入路径端到端探针缺失** —— 旧探针测的 `SettingsProvider` 已随 0.1.7 移除；替代证据是宿主的 **`mergeLayers` 实现契约**（*"plain objects merge recursively, every other value (arrays included) replaces the lower layer wholesale"*）⇒ **"宿主文档契约"等级 ≠ "真跑一条链"等级**。
+3. **`typecheck-host` 的包集非全集**：`@deepseek-ai/dsh-agent-presets` 在新线**已不存在同版本**（它被改名了）⇒ 该包在解包集里**永久失败**（预期，不是缺陷）。
+4. **准入判定是"按 semver 语义推理"**（`^0.1.5-rc.2` 准入 `0.1.7-rc.1`：caret on `0.x` + `includePrerelease`），**非执行验证**。
+
+---
+
 ## v1.46.0 — 2026-09-22（**用量统计**：skill 加载次数 ＋ MSM 执行次数，落该 CCC 的 `_tmp/acc-usage.json`）
 
 **来源**：owner 2026-09-22 令「**我需要对 ACC 增加一个统计功能，包括 skill 加载次数统计，msm 执行次数统计；

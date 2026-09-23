@@ -1,132 +1,110 @@
 /**
- * settings-section.ts — 简单配置注册（dsh 原生设置面板，v1.21 分层）
+ * settings-section.ts — 简单配置读取（dsh 原生设置面板；v1.21 分层，**v1.47 A 案移植到 0.1.7 表单模型**）
  *
  * 分层决策（S142）：**简单配置（开关/阈值）→ dsh 原生设置面板**；
  * **复杂配置（账号列表）→ 宁静号高级面板**（localstore + /serenity/config）。
  *
- * 本模块承载简单配置层：`SettingsProvider.installSection(ctx, 'serenity-hooks', schema, entry)`
- * 注册 `serenity-hooks` namespace——三功能总开关 + F2 阈值。
- * （v1.28.0 适配 0.1.2-rc.1：installSettingsSection/settingsNamespace 便捷函数消失 → 方法调用）
+ * ## 🔴 v0.1.7 起（A 案）：**"安装 section"这件事整段退场**
  *
- * 运行时降级守卫（版本鲁棒性）：旧 RC（staging 架构）api-proxy 有
- * `WEB_SETTINGS_NAMESPACES` 静态白名单，第三方 ns 会收到 settings-not-exposed
- * ——client 面板读不到。新 RC（官方 master）已删除白名单（全量 describe）。
- * 本模块不依赖白名单状态：register 总是执行（host 侧零成本）；
- * **client 侧**（SettingsSection 组件）以 describe 结果为据——ns 不在描述列表
- * 则显示降级提示（引导去宁静号面板），在则渲染 schema 表单。零配置自动适配。
+ * 宿主把 `SettingsProvider.installSection` 换成 `SettingsForms`：设置页不再由插件
+ * "注册一个 namespace + schema + entry + hooks"，而是**由插件自己的 cordis `Config`
+ * schema 投影成表单**（`packages/settings/settings` 的 `describe()` 遍历 profile 条目）。
+ * ⇒ 命名空间**就是 profile 条目 id** —— 本插件 = `serenity-hooks`
+ * （见 `cordis.patch.yml` 的 `- insert: - id: serenity-hooks`）。
+ *
+ * ## 为什么旧扁平键**原样保留**（这是本文件最容易被后人改错的地方）
+ *
+ * 旧模型把简单配置存成 `~/.dsh/settings.yaml` 的 `serenity-hooks:` 段，字段名是**扁平**的
+ * （`gatewayEnabled` / `skiffEnabled` / …）。新模型的命名空间**逐字相同**
+ * （`serenity-hooks`），而宿主的 `SettingsForms.importLegacyDocument()` 会把该段
+ * **按同名条目导入**；schemastery 的 object 解析在非 strict 模式下 `merge(result, data)`
+ * ⇒ **未声明的键会被保留而非报错**。⇒ 只要这些扁平键**仍在本插件 Config 里声明**，
+ * **旧值就自动随宿主导入搬过来，零迁移代码**（这正是宿主的迁移惯例：`LEGACY_SECTION_ENTRIES`
+ * 只重映射**段名**，从不改写字段名）。
+ *
+ * ## 两层拼写（**有意保留，不是重复真相源**）
+ *
+ * | 层 | 拼写 | 谁写 | 语义 |
+ * |---|---|---|---|
+ * | **面板层**（用户层） | 扁平键 `gatewayEnabled` | 设置面板 / 宿主 legacy 导入 | 用户在界面上改的那个 |
+ * | **部署层** | 嵌套段 `gateway.enabled` | `cordis.yml` / bundle patch | 部署时的缺省 |
+ *
+ * 读取优先级 = **面板层 > 部署层 > 内建缺省**（`simpleSettingsFromConfig`）。
+ * 🔴 面板层的键**故意不带 schemastery 默认值** —— 有默认值就永远非 `undefined`，
+ * 部署层会被无声压死（"未设置"必须可观测）。
  */
 
 import type { Context } from 'cordis'
-import z from '@deepseek-ai/schemastery'
-// v1.28.0 适配 0.1.2-rc.1（B4）：installSettingsSection/settingsNamespace 便捷函数在 rc.1 消失 →
-// 改 SettingsProvider.installSection。本机运行时仍 rc.2（类型无 installSection），
-// 故经类型断言访问——升级 0.1.2-rc.1 后类型原生匹配（见 registerSettingsSection 实现注释）。
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-import type { SettingsProvider } from '@deepseek-ai/dsh-settings'
 import { hostSettings } from './host/access.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
 import { ACP_HTTP_PORT, SKIFF_DEBUG_PORT } from './ports.js'
 
-/** 插件 Config 的简单配置片段（index.ts Config 组合；settings entry base） */
+/** 插件 Config 的简单配置片段（index.ts 的 Config 子集；面板层 + 部署层两种拼写） */
 interface SimpleConfigFragment {
+  // ── 部署层（cordis.yml / bundle patch）──
   gateway?: { enabled?: boolean }
   rebuild?: { enabled?: boolean; thresholdK?: number }
   /** F4 Skiff（实验性）：调试服务启停（人工） */
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
   acp?: { enabled?: boolean; httpPort?: number }
-  /** F4d 建议问答页（实验性）：按认知容器暴露问答页供他人验证（全局开关；与 ACP 共用端口） */
-  publicAsk?: { enabled?: boolean }
+  // ── 面板层（扁平键；无默认值 ⇒ "未设置"可观测）──
+  gatewayEnabled?: boolean
+  rebuildEnabled?: boolean
+  rebuildThresholdK?: number
+  skiffEnabled?: boolean
+  skiffDebugPort?: number
+  acpEnabled?: boolean
+  acpHttpPort?: number
+  publicAskEnabled?: boolean
+  croEnabled?: boolean
+  unattendedEnabled?: boolean
 }
 
-/** 简单配置命名空间（dsh 设置面板的 section id / settings.yaml section） */
+/**
+ * 设置面板命名空间 = **profile 条目 id**（v0.1.7 起；与旧 `settings.yaml` 段名逐字相同）。
+ */
 export const SERENITY_SETTINGS_NS = 'serenity-hooks'
 
-/**
- * 简单配置 schema（schemastery）：三功能总开关 + F2 阈值 + F4 Skiff 启停。
- * 与 DSH settings 的 schema 语义一致（z.object 布尔/数字）。
- */
+/** 简单配置的扁平形态（运行时读取的统一形状；各功能门控只看它） */
 interface SerenitySimpleSettings {
   /** F1 双端口网关总开关 */
   gatewayEnabled: boolean
   /** F2 超限重建总开关 */
   rebuildEnabled: boolean
-  /** F2 触发阈值（需求① S142 用户拍板：百分比比例 → K 数值；projectedTokens ≥ thresholdK*1000 触发，纯绝对无窗口比例保护） */
+  /** F2 触发阈值（需求① S142 用户拍板：百分比比例 → K 数值；projectedTokens ≥ thresholdK*1000 触发） */
   rebuildThresholdK: number
   /** F4 Skiff 调试服务总开关（实验性；默认关——不随插件加载自动启动，人工开启） */
   skiffEnabled: boolean
   /** F4 Skiff 调试端口（默认 3099，仅 127.0.0.1） */
   skiffDebugPort: number
-  /** F4c ACP HTTP JSON-RPC 端点总开关（实验性；默认关——人工开启） */
+  /** F4c ACP HTTP JSON-RPC 端点总开关（实验性；默认关） */
   acpEnabled: boolean
   /** F4c ACP HTTP 端口（默认 3100，仅 127.0.0.1） */
   acpHttpPort: number
   /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
   publicAskEnabled: boolean
-  /** **CRO（轨迹自编程唤起）总开关** —— 2026-09-21 所有者令新增。
+  /** **CRO（轨迹自编程唤起）总开关**（2026-09-21 所有者令新增；**缺省开**）。
    *
    *  CRO = 轨迹目录下放一个 `continuous-re-occurrence.ts`，由 ACC 的 5min tick spawn，
    *  由**程序**决定"要不要唤、何时唤、唤起的提示词是什么"。
-   *
-   *  **缺省开**：① 它已在生产上稳定运行（S151 / S185 各有程序在跑）；② 它的**默认存在感为零**
-   *  ——没有程序文件的轨迹本来就不参与；③ 缺省关会让"已上线的程序突然不跑"（等于静默回退）。
-   *  **只关 CRO 阶段**：`send-later` / `send-now` / 唤醒表投递**照常**（见 `cro.ts` 头注的承诺）。
-   *
-   *  ⚠️ 与它**同时废止**的键：`wakeSchedulerEnabled`（所有者 2026-09-21 令「send-later 的开关
-   *  不再重要了，砍掉」）——唤醒调度器**不再有任何闸**（恒开）；旧配置里的该键**静默忽略**。 */
+   *  缺省开的理由：① 已在生产稳定运行（S151 / S185）；② 默认存在感为零（没有程序文件的轨迹
+   *  本来就不参与）；③ 缺省关会让"已上线的程序突然不跑"。
+   *  **只关 CRO 阶段**：`send-later` / `send-now` / 唤醒表投递**照常**。
+   *  ⚠️ 与它**同时废止**的键：`wakeSchedulerEnabled`（唤醒调度器现恒开、无闸；旧键静默忽略）。 */
   croEnabled: boolean
-  /** **无人值守代理回复（unattended proxy）总开关** —— 2026-09-23 所有者令新增。
+  /** **无人值守代理回复（unattended proxy）总开关**（2026-09-23 所有者令新增；**缺省关**）。
    *
    *  开启后：CCC 会话**被 LLM 主动停止**且无人应答时，ACC 注入一次**代理用户的结构化回复**，
-   *  以**验证码（nonce）**作「**合法收束**」判据 —— **未回码 ⇒ 继续，回码 ⇒ 放过**。
-   *
-   *  **缺省关**：它把**人**从回路里拿掉（失败模式是静默的）⇒ 默认关、人工开。
-   *  **排除面**：仅有 CRO 程序的轨迹不适用（所有者 2026-09-23 裁决：**口径由"宽"改"窄"**
-   *  —— 原"任何自排唤醒都排除"会让本机制**永远够不着靠续接绳活着的维护会话**，
-   *  等于**放弃"代替旧机制"**；改窄后**自排绳不再排除**，绳退化为**长周期保险丝**）。
-   *  🔵 **术语**（2026-09-23 补）：**"绳" = 轨迹用 `send-later` 给未来的自己排的"定时叫醒"**，
-   *  内部俗称、**非产品名**；**每轮收尾必须再排一根，链才不断**（见 `wake-scheduler.ts` 同注）。
-   *  设计全文见 S142 会话记录 **D77**（CCC 侧）。 */
+   *  以**验证码（nonce）**作「合法收束」判据 —— **未回码 ⇒ 继续，回码 ⇒ 放过**。
+   *  **缺省关**：它把**人**从回路里拿掉（失败模式是静默的）。
+   *  **排除面**：仅有 CRO 程序的轨迹不适用（所有者 2026-09-23 裁决：口径由"宽"改"窄"
+   *  —— 原"任何自排唤醒都排除"会让本机制永远够不着靠续接绳活着的维护会话；改窄后
+   *  **自排绳不再排除**，绳退化为**长周期保险丝**）。设计全文见 S142 的 **D77**。 */
   unattendedEnabled: boolean
 }
 
-/** schemastery schema（与 DSH 各插件 Config 同款） */
-const simpleSettingsSchema = z.object({
-  gatewayEnabled: z.boolean().default(false),
-  rebuildEnabled: z.boolean().default(true),
-  rebuildThresholdK: z.number().min(50).max(4000).default(400),
-  skiffEnabled: z.boolean().default(false),
-  skiffDebugPort: z.number().min(1024).max(65535).default(SKIFF_DEBUG_PORT),
-  acpEnabled: z.boolean().default(false),
-  acpHttpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT),
-  publicAskEnabled: z.boolean().default(false),
-  croEnabled: z.boolean().default(true),
-  unattendedEnabled: z.boolean().default(false),
-})
-
-/** 从插件 Config 提取 entry 默认（settings base 层） */
-export function entryDefaults(config: SimpleConfigFragment): SerenitySimpleSettings {
-  return {
-    gatewayEnabled: config.gateway?.enabled ?? false,
-    rebuildEnabled: config.rebuild?.enabled ?? true,
-    rebuildThresholdK: config.rebuild?.thresholdK ?? 400,
-    skiffEnabled: config.skiff?.enabled ?? false,
-    skiffDebugPort: config.skiff?.debugPort ?? SKIFF_DEBUG_PORT,
-    acpEnabled: config.acp?.enabled ?? false,
-    acpHttpPort: config.acp?.httpPort ?? ACP_HTTP_PORT,
-    publicAskEnabled: config.publicAsk?.enabled ?? false,
-    croEnabled: true,
-    unattendedEnabled: false,
-  }
-}
-
-/** 运行时源（installSettingsSection 注入：settings scope 或 entry fallback） */
-let simpleSource: (() => SerenitySimpleSettings) | null = null
-
-/** 缺 settings provider 的告警去重（进程级一次；降级路径可能被多次注册调用） */
-let warnedNoSettingsProvider = false
-
-/** 进程级默认（无 settings 服务时的兜底） */
+/** 进程级默认（无 Config 可读时的兜底；与 Config 各字段的缺省一致） */
 export function defaultSimpleSettings(): SerenitySimpleSettings {
   return {
     gatewayEnabled: false,
@@ -143,81 +121,73 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
 }
 
 /**
- * 读取当前简单配置（settings 解析值；无 provider/未注册 → entry 默认）。
- * 各功能（gateway/rebuild/naming）启动与运行时判断开关都经此函数。
+ * Config（宿主 Loader 校验后的解析值）→ 扁平简单配置。**本文件唯一的读取语义**。
+ *
+ * 优先级：**面板层（扁平键）> 部署层（嵌套段）> 内建缺省**。
+ * @param config - 插件 Config（`fiber.config` 或 apply 收到的 config）
+ * @returns 扁平开关集合
+ */
+export function simpleSettingsFromConfig(config: SimpleConfigFragment): SerenitySimpleSettings {
+  const d = defaultSimpleSettings()
+  return {
+    gatewayEnabled: config.gatewayEnabled ?? config.gateway?.enabled ?? d.gatewayEnabled,
+    rebuildEnabled: config.rebuildEnabled ?? config.rebuild?.enabled ?? d.rebuildEnabled,
+    rebuildThresholdK: config.rebuildThresholdK ?? config.rebuild?.thresholdK ?? d.rebuildThresholdK,
+    skiffEnabled: config.skiffEnabled ?? config.skiff?.enabled ?? d.skiffEnabled,
+    skiffDebugPort: config.skiffDebugPort ?? config.skiff?.debugPort ?? d.skiffDebugPort,
+    acpEnabled: config.acpEnabled ?? config.acp?.enabled ?? d.acpEnabled,
+    acpHttpPort: config.acpHttpPort ?? config.acp?.httpPort ?? d.acpHttpPort,
+    publicAskEnabled: config.publicAskEnabled ?? d.publicAskEnabled,
+    croEnabled: config.croEnabled ?? d.croEnabled,
+    unattendedEnabled: config.unattendedEnabled ?? d.unattendedEnabled,
+  }
+}
+
+/** 运行时源（`registerSettingsSection` 装配：读本插件 fiber 的**当前** Config） */
+let simpleSource: (() => SerenitySimpleSettings) | null = null
+
+/**
+ * 读取当前简单配置（各功能 gateway/rebuild/skiff/… 的启动与运行时判断都经此）。
+ *
+ * 源 = 本插件 fiber 的 `config`（宿主在配置变更时走 `fiber.update()` ⇒ `config` 始终最新，
+ * **不必**依赖 apply 重跑，也不必缓存）。
+ * @returns 扁平开关集合
  */
 export function readSimpleSettings(): SerenitySimpleSettings {
   return simpleSource ? simpleSource() : defaultSimpleSettings()
 }
 
 /**
- * 测试注入钩子（生产零调用）：替换/恢复运行时源，便于单测各功能门控
- * （registerSettingsSection 的 setSource 回调在 mock dsh-settings 时不会触发）。
+ * 测试注入钩子（生产零调用）：替换/恢复运行时源，便于单测各功能门控。
  */
 export function __setSimpleSourceForTest(source: (() => SerenitySimpleSettings) | null): void {
   simpleSource = source
 }
 
 /**
- * 注册简单配置到 DSH settings（零改 DSH；settings.yaml 持久化 + 原生面板渲染）。
- * 注：插件 Config（cordis.yml 组合层）作为 base；用户文档层叠加其上。
- * 运行时读取简单配置统一经 `readSimpleSettings()`。
- * v1.28.0 适配 0.1.2-rc.1（B4）：`installSettingsSection`/`settingsNamespace` 便捷函数在
- * rc.1 消失 → 改 `SettingsProvider.installSection(owner, ns, schema, entry, hooks)`
- * （owner = consumer 插件 ctx；ns 直接字符串）。
+ * 装配简单配置读取面（v1.21 分层；**v0.1.7 起不再注册任何 section**）。
+ *
+ * 两件事：
+ *  1. 把"本插件自己的 Config"接成简单配置源 —— 读 `ctx.fiber.config`（宿主 `fiber.update()`
+ *     保证最新），拿不到 fiber 时退回 apply 收到的 `config`。
+ *  2. 关掉宿主按 Config schema **自动生成**的通用页（`settings.configure({ auto: false })`）——
+ *     门面是我们的自定义页 `client/SettingsSection.tsx`（同一个命名空间，同一份数据）。
+ *
+ * ⚠️ 两个失败都不阻断插件装载（面板是附属能力，绝不能成为启动单点）。
+ * @param ctx - 插件上下文
+ * @param config - apply 收到的 Config（fiber.config 不可用时的兜底）
  */
 export function registerSettingsSection(ctx: Context, config: SimpleConfigFragment): void {
-  // v1.28.0 适配 0.1.2-rc.1（B4）：rc.1 SettingsProvider.installSection(owner, ns, schema, entry, hooks)
-  // （owner = consumer 插件 ctx；ns 直接字符串——不再 settingsNamespace() 包装）。
-  // ⚠️ this 绑定（第四次同病根治）：installSection 是 SettingsProvider **方法**（内部 this.register），
-  // 必须先取实例再 .call() 调用——解构裸调用（const f = obj.m; f()）丢 this → Cannot read register（实崩）。
-  interface InstallSectionHooks<T> {
-    setSource: (get: () => T) => void
-    onChange: () => void
-    validate?: (value: T) => void
+  const fiber = (ctx as unknown as { fiber?: { config?: unknown } }).fiber
+  const readConfig = (): SimpleConfigFragment => (fiber?.config ?? config) as SimpleConfigFragment
+  simpleSource = () => simpleSettingsFromConfig(readConfig())
+
+  const settings = hostSettings(ctx) as { configure?: (presentation: { auto?: boolean }, owner?: unknown) => unknown } | undefined
+  try {
+    // 自动生成页 = 把整张 Config schema（含 serenityConfigPaths / 部署层各段）摊给用户看，
+    // 与我们那张按功能分组、带中文说明的自定义页重复 ⇒ 只留自定义页。
+    settings?.configure?.({ auto: false }, fiber)
+  } catch {
+    /* 面板策略设置失败不影响插件运行（最坏情况：多出一张通用页） */
   }
-  const hooks: InstallSectionHooks<unknown> = {
-    setSource: (get) => {
-      simpleSource = get as unknown as () => SerenitySimpleSettings
-    },
-    onChange: () => {
-      // 简单配置变化（开关/阈值）→ 通知 gateway 重新 sync。
-      // 走 'serenity/settings-changed'（非强制）：sync 内部 sig 判断，
-      // 无实质 gateway 变化（如仅阈值拖动）不重建，避免无谓断 WS。
-      // 账号/监听/白名单变化（/serenity/config PUT）才走 'serenity/config-updated' 强制重建。
-      try {
-        (ctx as unknown as { emit?: (name: string, payload?: unknown) => void }).emit?.('serenity/settings-changed')
-      } catch {
-        /* 事件通知失败不影响 settings 保存 */
-      }
-    },
-  }
-  const settingsAny = hostSettings(ctx) as
-    | {
-        installSection: (owner: Context, ns: string, schema: unknown, entry: unknown, h: InstallSectionHooks<unknown>) => void
-      }
-    | undefined
-  if (settingsAny) {
-    // 方法调用保持 this（v1.28.0 实崩修复：解构 installSection 后裸调用丢 this → this.register undefined）
-    settingsAny.installSection.call(
-      settingsAny,
-      ctx,
-      SERENITY_SETTINGS_NS,
-      simpleSettingsSchema,
-      entryDefaults(config),
-      hooks,
-    )
-    return
-  }
-  // 无 settings provider → 降级：entry 为源（readSimpleSettings 兜底 defaultSimpleSettings）。
-  // S142 review F-07：此前是**静默**降级——用户改面板开关毫无反应且无任何线索。
-  // 降级本身正确（apply 不可抛），但必须响亮：面板不生效 + 所有开关回到 entry 默认值。
-  if (!warnedNoSettingsProvider) {
-    warnedNoSettingsProvider = true
-    console.warn(
-      '[serenity-hooks] ✗ settings 服务不可用 → 简单配置降级为 entry 默认值（面板开关/阈值改动不生效；检查宿主 settings provider 是否装载）',
-    )
-  }
-  hooks.setSource(() => ({}) as unknown)
-  hooks.onChange()
 }

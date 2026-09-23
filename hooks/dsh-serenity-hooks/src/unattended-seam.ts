@@ -19,7 +19,7 @@
  * |---|---|
  * | 每条进入 inbox 的消息都发 `agent/inbox/inserted { agent, message }`；**在轮内离开 inbox 时**发 `agent/inbox/claimed { agent, message, turn }` | `@deepseek-ai/dsh-agent` README（Inbox 段）＋ `runtime-types.d.ts` |
  * | `claimed.turn` = **拥有该消息的那一轮**；`turn-stopping.turn` = **即将关闭的那一轮** ⇒ 两者同编号可直接比对 | `runtime-types.d.ts` 同一文件两处 `turn` 声明 |
- * | 消息来源可辨：`MessageSourceMap` 里**真实用户** = `kind: 'user'`（`user` ／ `user-rpc` 两种形态**同 kind**）；**ACC 自己注入**的一律 `kind: 'plugin'` | `@deepseek-ai/dsh-llm` `types/message.d.ts` ＋ 本仓 `PLUGIN_SOURCE`（wake/send-now/send-later/keeper/output-guard 五处同值） |
+ * | 消息来源可辨：`MessageSourceMap` 里**真实用户** = `kind: 'user'`（`user` ／ `user-rpc` 两种形态**同 kind**）；**ACC 自己注入**的一律 `kind: 'plugin:dsh-serenity-hooks'`（v1.47.0 改；旧值 = `'plugin'`） | `@deepseek-ai/dsh-llm` `src/message.ts` 的 `MessageSourceMap`（合并和类型）＋ 本仓 `message-source.ts`（**唯一**声明处与常量处） |
  *
  * ⇒ **判据 = 「这一轮 claim 到的消息里，有没有 `source.kind === 'user'`」**。
  * 没有现成信号时本可退化为"记账法"（我们知道自己投过什么），**但不必**：宿主已给出一手信号。
@@ -40,8 +40,8 @@ import { join } from 'node:path'
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { MessageSource } from '@deepseek-ai/dsh-llm'
 import { cccRootForCwd } from './ccc-roots.js'
+import { PLUGIN_SOURCE } from './message-source.js'
 import { readLastBound } from './trajectory-bound.js'
 import { sessionsRoot } from './trajectory-ops.js'
 import { CRO_FILENAME } from './cro.js'
@@ -68,9 +68,6 @@ import {
   setProxyRun,
   type UnattendedLogEntry,
 } from './unattended-ops.js'
-
-/** 本插件注入消息的**统一来源标记**（与 output-guard / wake / keeper 同值 ⇒ 一眼可辨"不是用户"） */
-const PLUGIN_SOURCE: MessageSource = { kind: 'plugin', plugin: 'dsh-serenity-hooks' }
 
 /** 取载体 id（payload 的 `agent` 面；取不到 ⇒ 空串） */
 function sessionIdOf(agent: unknown): string {
