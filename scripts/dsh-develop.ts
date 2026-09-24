@@ -763,85 +763,39 @@ function cmdDumpConfig(pattern?: string): void {
 }
 
 /**
- * cmdDiag — 唤起条件链诊断（开发面，v1.33 S142 §32；v1.34.1 ⑥ C6a 改进程外调**同一实现**）
+ * 🔴 **`diag` 已退役（2026-09-24 S142）** —— 它的对象是 **ACC autopilot 的"唤起条件链"**，
+ * 而该机制已随 **v1.35.0 ACC 侧 autopilot 整段退场**删除（提交 `2386f6f`；判据唯一实现
+ * `hooks/dsh-serenity-hooks/src/autopilot-chain.ts` 已不在仓里）。
  *
- * 为什么在这里（R↓）：CCC 工具面的 `diag` 动作已撤——
- *  · **进程内**那半（live 会话清单 / agent 定位 / 面板解析 / 唤醒注册表）改由**专属工具
- *    `acc-diag`** 承载（默认对所有 CCC 隐藏，需 CCC 在 `exclusiveTools` 里声明）；
- *  · **条件链**那半下沉到开发面，作为 ACC 负责人的**离线通道**（插件没跑、或只想看某个 CCC
- *    的条件链时直接可用）。
+ * **本命令是那次退场的漏网消费者**：退场清单覆盖了 `acc-diag` ④ 段与 `container_admin autopilot`
+ * 域，**漏了开发面这一条** ⇒ 自 v1.35.0 起每次调用都 `exit 2`
+ * （`Cannot find module '…/autopilot-chain.js'`）—— 症状看着像"环境缺模块"，实为**对象已不存在**。
  *
- * 🔴 **判据只写一遍**（⑥ C6a 的硬约束）：本命令 **import 插件 src 的 `buildWakeChain`**
- * （`hooks/dsh-serenity-hooks/src/autopilot-chain.ts`），**不是**另写一份"文件读取版"——
- * 否则刚消掉的分歧会在开发面复活。离线通道与进程内的差别**只是传入的 facts**：
- * 离线传 `NO_RUNTIME_FACTS`（全局闸 / live 会话 / agent 可解析性 / 重入守卫 = 不可知，
- * 照实标 `?` 而**不**当作满足 ⇒ 离线永远不会印 ✅）。
+ * **为什么删而不是重写**（R↓，与既有书面裁决一致）：`acc-diag` 行的 v1.35.0 标注写着
+ * **「不留第二份条件链、也不留半死的手写版」** ⇒ 重写一份"离线条件链"正是该条否掉的东西。
+ * 且"为什么这轮没唤起"这个**已登记缺口**（插件仓 `docs/acc-autopilot-retirement.md` §8/§9）
+ * **不因保留本命令而闭合**（它当年渲染的是 autopilot 的条件，不是 CRO / 注册表的事实）。
  *
- * 本文件为 `.ts` 且以 bun 直跑（`#!/usr/bin/env bun`），故可直接 import 插件的 TS 源码
- * （`autopilot-chain.ts` 刻意零 DSH 依赖，正是为这条通路而设）。
- *
- * 用法：`dsh-develop diag [--ccc <path>]`（无 --ccc → 递归扫描 /home/yh 两层自寻 CCC）
+ * **替代品（命令输出里也印）**：运行态诊断 = **`acc-diag`**（专属工具：live ／ 时钟态 ／
+ * 注册表在办项）；**离线**想看一眼唤醒态 = **直接读 `<CCC>/AGENT_SESSIONS/wake-registry.json`
+ * 与 `<CCC>/AGENT_SESSIONS/cro-state.json`**（数据是它们自己的真相源，**不复制判据**）。
  */
 
-/** 插件侧条件链（唯一实现）——动态 import 以保持诊断失败不拖垮整个开发 MSM */
-async function loadChain(): Promise<{
-  buildWakeChain: typeof import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js').buildWakeChain
-  renderWakeChain: typeof import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js').renderWakeChain
-  NO_RUNTIME_FACTS: typeof import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js').NO_RUNTIME_FACTS
-} | null> {
-  try {
-    const mod = await import('../hooks/dsh-serenity-hooks/src/autopilot-chain.js')
-    return { buildWakeChain: mod.buildWakeChain, renderWakeChain: mod.renderWakeChain, NO_RUNTIME_FACTS: mod.NO_RUNTIME_FACTS }
-  } catch (e) {
-    fail(`条件链实现不可加载（判据唯一实现在插件 src/autopilot-chain.ts）: ${String((e as Error)?.message ?? e)}`, 2)
-    return null
-  }
-}
+/**
+ * 🔴 **退出码 = 2**（不是 0）：这是一条**已失效**的命令 —— 退出 0 会让调用方以为"诊断跑通了"。
+ * 保留命令名而不整条从 CLI 摘掉的理由：老习惯（含我自己）仍会敲它，**路牌**比
+ * `Cannot find module '…/autopilot-chain.js'` 有用得多 —— 后者看着像"环境缺模块"。
+ */
+function cmdDiag(): void {
+  console.error('[dsh-develop diag] 🔴 本命令已退役（对象已不存在）')
 
-/** 递归收集 .serenity 标记目录（跳过隐藏目录；maxDepth 层内）——离线通道的 CCC 发现 */
-function collectCccs(dir: string, depth: number, out: Set<string>, maxDepth: number): void {
-  if (depth > maxDepth || !existsSync(dir)) return
-  let entries: Array<{ name: string; isDirectory: () => boolean }>
-  try {
-    entries = readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return
-  }
-  for (const d of entries) {
-    if (!d.isDirectory() || d.name.startsWith('.')) continue
-    const r = join(dir, d.name)
-    if (existsSync(join(r, '.serenity'))) out.add(r)
-    collectCccs(r, depth + 1, out, maxDepth)
-  }
-}
-
-async function cmdDiag(args: string[]): Promise<void> {
-  const chain = await loadChain()
-  if (!chain) process.exit(2)
-  const cccIdx = args.indexOf('--ccc')
-  const explicit = cccIdx >= 0 ? args[cccIdx + 1] : undefined
-
-  if (explicit) {
-    const root = resolve(explicit)
-    const r = await chain.buildWakeChain(root, chain.NO_RUNTIME_FACTS)
-    console.log(chain.renderWakeChain(r))
-    return
-  }
-
-  // 无 --ccc：递归扫描 /home/yh 两层（覆盖 /home/yh/home/*、/home/yh/our-home/* 及任意实验 CCC 位置）
-  const roots = new Set<string>()
-  const envRoot = process.env.SERENITY_ROOT
-  if (envRoot && existsSync(join(envRoot, '.serenity'))) roots.add(envRoot)
-  collectCccs('/home/yh', 0, roots, 2)
-  const list = [...roots]
-  if (list.length === 0) {
-    console.log('[dsh-develop diag] 未发现 CCC（用 --ccc <path> 指定目标）')
-    return
-  }
-  const reports = await Promise.all(list.map((root) => chain.buildWakeChain(root, chain.NO_RUNTIME_FACTS)))
-  // 顺序 = CCC 根路径字典序（确定性；每份报告自带 enabled/闸 状态，不做隐式优先级重排）
-  reports.sort((a, b) => (a.root < b.root ? -1 : a.root > b.root ? 1 : 0))
-  console.log(reports.map(chain.renderWakeChain).join('\n\n'))
+  console.error('  · 对象 = ACC autopilot 的「唤起条件链」；该机制随 v1.35.0 ACC 侧 autopilot 退场一并删除')
+  console.error('    （判据唯一实现 hooks/dsh-serenity-hooks/src/autopilot-chain.ts 已不在仓里，提交 2386f6f）。')
+  console.error('  · 本命令是那次退场的漏网消费者 ⇒ 自 v1.35.0 起恒 exit 2，与"环境缺模块"无关。')
+  console.error('  · 不留重写版：acc-diag 行的既有裁决 = 「不留第二份条件链、也不留半死的手写版」。')
+  console.error('  ⇒ 运行态诊断：`acc-diag`（专属工具：live ／ 时钟态 ／ 注册表在办项）')
+  console.error('  ⇒ 离线看一眼唤醒态：直接读 <CCC>/AGENT_SESSIONS/wake-registry.json 与 cro-state.json')
+  process.exit(2)
 }
 
 function cmdApiStatus(path?: string): void {  // 查询本地 dsh web HTTP 接口（同步阻塞版；避免异步回调在 bun 进程退出前未执行）
@@ -2045,7 +1999,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'host-upgrade': cmdHostUpgrade(rest); break
       case 'session-doctor': await cmdSessionDoctor(rest); break
       case 'session-repair': await cmdSessionRepair(rest); break
-      case 'diag': await cmdDiag(rest); break
+      case 'diag': cmdDiag(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
@@ -2053,7 +2007,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-cli | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag [--ccc <path>] | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-cli | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -2091,7 +2045,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   host-upgrade <ver|tag> 全局升级 DSH 宿主 CLI（包名硬编码 @deepseek-ai/dsh；默认官方源；--dry-run 预览）
   session-doctor        会话日志体检（只读）：逐份判定宿主读取门（未知事件词表/格式版本/结构），列出会被拒的会话
   session-repair        会话日志治疗（缺省 dry-run）：补 rebuild 写坏的 user/message 缺 id/role；--apply 才备份+原子替换+自检
-  diag [--ccc <path>]   唤起条件链诊断（开发面；无 --ccc → 脚本自行递归扫描 /home/yh 两层）
+  diag                  🔴 **已退役**（对象 = autopilot 唤起条件链，随 v1.35.0 退场）⇒ 只印路牌，恒 exit 2
   squash-history [msg]  抹除历史为单个初始 commit（公开发布前清敏感历史；不可逆）
   pack-check            npm pack --dry-run 核对 tarball 完整性（chunk/双 bundle/类型）
   readme-sync           包内 README ← 仓库 README（机械同步，相对链接转绝对 URL）
