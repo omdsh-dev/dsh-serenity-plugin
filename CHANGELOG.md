@@ -1,3 +1,95 @@
+## v1.47.2 — 2026-09-24（**修「设置面板不见了」**：面板层十键补 `.volatile()` ＋ 读取面同批解包）
+
+**来源**：owner 2026-09-24 08:0x 令「**做个抄代码的msm … 然后 复现和研究和修正 并自己发小版本重启来验收**」（= **D80**，**D14 的具名发版令**）。
+
+---
+
+### 一、这东西解决什么（白话）
+
+**你的设置页整节消失了 —— 这不是你不小心改没了，是缺陷。**
+
+宿主升级到新版本后，"哪些设置能被面板编辑器编辑"换了个新判据：**字段上必须标一个 `volatile` 记号**，
+面板才会去收录它所属的那一节。我们的十个设置字段**一个都没标** ⇒ 宿主**根本不知道我们有设置页** ⇒
+面板上**一个痕迹都不留**（不是渲染坏了、也不是报错，是**压根没注册**）。
+
+顺带解释另一个现象：面板读不到的那十个开关**全部落回内建缺省**（网关 / Skiff / 问答页被关、
+CRO 被开）—— 同一个根因。**已向你确认过你没改配置 ⇒ 判定为缺陷**，本版修掉。
+
+### 二、根因链（每一步都有实测，可重放）
+
+| # | 事实 | 取证方式 |
+|---|---|---|
+| 1 | 真浏览器进界面 ⇒ **页眉徽章「Serenity v1.47.1｜SAFE」在场** | `browser` MSM ⇒ **客户端半边是活的**，"客户端整块死"排除 |
+| 2 | 找到宿主 RPC `POST /api/settings/describe`（信封 `{type:'client-request',rpcId,method:'settings/describe',payload:{args:{}}}`；`args` 必须是**普通对象**） | 同上 |
+| 3 | 实测返回 `result.value.namespaces` **16 条** ⇒ 🔴 **`serenity-hooks` 不在其中** | 同上 |
+| 4 | 宿主 `describe()` 的收录条件 = 有 schema ＋ 条目 fiber 就绪 ＋ **`volatileForm(schema) !== undefined`**；而 `volatileForm` **只认 `meta.volatile`**（object 递归，一个都没有 ⇒ `undefined`） | 读宿主 `dsh-settings` 源码（`code-port grep host:`） |
+| 5 | 🔴 我们 `Config` 的**十个面板层键全是裸 `z.boolean()` / `z.number()`** ⇒ 必为 `undefined` ⇒ 条目不进 describe | 本仓源码 |
+| 6 | 客户端 `configForms.whileServed(['serenity-hooks'], …)` ⇒ **宿主不 serve 这个命名空间 ⇒ 面板一个痕迹都不留**（宿主自己的 d.ts 逐字：*"a deployment that never composed the owner shows no trace of the page"*） | 读 `dsh-client-ui-settings` 类型 |
+| 7 | 宿主自己的写法（对照）：`dsh-agent-default-model` = `z.string().required().volatile()`；`dsh-settings` 另有显式报错 `Plugin entry "<ns>" has no volatile fields` ⇒ **"volatile = 用户可改字段"是本模型的硬约定** | 读宿主源码 |
+
+### 三、修法（三个源文件，两处互为前提）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| **①** | `src/index.ts` | 面板层**十键**的 schema 全部加 **`.volatile()`**；`Config` 接口同十键类型 → **`Volatile<boolean \| undefined>`** / **`Volatile<number \| undefined>`**。**部署层嵌套段（`gateway.enabled` 等）一律不动** —— 它们不是"用户可改字段" |
+| **②** | `src/settings-section.ts` | 新增 **`unwrapVolatile<T>()`** ＋ `VolatileRef<T>`（**结构判定** `typeof value.get === 'function'`；**刻意不引 cosmokit 运行时依赖**）；`simpleSettingsFromConfig` **十行全部解包** |
+| **③** | `src/index.ts` | 🔴 同批**摘掉 `z<Config>` 标注**（原因见 §四-1） |
+
+🔴 **② 不是优化而是硬前提**（两个事实的合成）：schemastery 的 `Schema.resolve()` 对 `meta.volatile`
+**无条件**包 `createVolatile(value)`，且该分支排在"缺省值回退"**之前** ⇒ **"用户没设过"的字段在运行期
+也是恒真对象**（`.get()` 返回 `undefined`），**不是 `undefined`** ⇒ 不解包则 `??` 链**短路在包装上**
+⇒ **网关 / Skiff / ACP 会被无意打开**（比"面板不显示"更坏：静默改变对外暴露面）。
+
+### 四、两条被判据钉住的坑（都是本轮实测撞出来的）
+
+1. 🔴 **`z<Config>` 标注与 `.volatile()` 不可共存**：volatile 键的**输入形状**（裸 `boolean`）与
+   **解析后形状**（`Volatile<boolean \| undefined>`）**必然不同**，而 `z<Config>` 只用**一个**类型参数
+   同时充当两侧 ⇒ 实测 **TS2322**（报在 `required().default`，逐字："Type 'Volatile<boolean | undefined> | undefined'
+   is not assignable to type 'boolean | null | undefined'"）。⇒ 与**宿主自己的做法**一致
+   （`dsh-agent-default-model` 同样只声明接口 + 走 `ObjectS`/`ObjectT` 推导，**不手写 `z<Config>`**）；
+   **schema ↔ 解析后接口的对账改由机械 pin 承担**。
+2. 🔴 **"未设置"必须仍然可观测**：十键**不得**带 `.required()`（会把面板字段变成必填）
+   也**不得**带 `.default()`（带上就永远非 `undefined`，**部署层会被无声压死**）—— 两条都进了 pin。
+
+### 五、机械 pin（三条独立判据，且**每条都做过正控**）
+
+| 判据 | 落点 | 正控（实测） |
+|---|---|---|
+| 十键都在 schema 里且 **`meta.volatile === true`**；volatile 字段集**恰等于**十键 | `tests/config-volatile.test.ts`（🆕 **用真 schemastery**） | 临时撤掉一个 `.volatile()` ⇒ **红**，并**点名** `gatewayEnabled` |
+| 部署层嵌套段**不得** volatile（两层是一份数据的两种拼写，都标 ⇒ 用户看到两个打架的控件） | 同上 | — |
+| 十键**不得** `required` / `default` | 同上 | — |
+| 🔴 **回归**："未设置"的包装不得让开关被打开（结果须与全缺省逐字相同）＋ 裸值原样 ＋ 包装让位/压过部署层 | `tests/settings-section.test.ts` | 临时禁用解包 ⇒ **红**，读数逐字显示包装对象泄漏进设置（`gatewayEnabled: { get: [Function] }`） |
+
+🔵 **为什么这条 pin 必须用真 schemastery**：本仓其余 import `index.ts` 的测试都 mock 了它，而那个替身是
+**"任何属性都返回真值"的 Proxy 链** ⇒ 在那里断言 `meta.volatile === true` 会**恒真**（拿掉 `.volatile()` 也照样绿）⇒ **假绿**。
+
+### 六、门禁（本批自跑，权威读数）
+
+| 项 | 结果 |
+|---|---|
+| `typecheck`（**双面** node ＋ client） | ✅ 通过 |
+| `typecheck-cli` | ✅ 通过 |
+| `typecheck-host 0.1.7-rc.1`（**真包对撞**） | ✅ node **114** / client **123** 文件，paths **36 + 14** 全命中 |
+| `test` | ✅ **108 files / 1694 tests**（新增 12 条：4 条 schema pin ＋ 4 条解包/回归 ＋ 原有） |
+| `coverage` | ✅ **exit 0** |
+| `build` | ✅ 通过 |
+| `pack-check` | ✅ **120 文件** |
+
+### 七、验收（**不靠 curl 代替**）
+
+- 🔴 **真浏览器**（`browser` MSM，CDP）打开设置页：**应出现 Serenity 那一节**，且 `POST /api/settings/describe`
+  的 `namespaces` 应**出现 `serenity-hooks`**（截图留证）。
+- 顺手复核 `3081` / `3100` 是否随面板恢复（它们是面板层键的产物）。
+- ⚠️ **诚实边界**：若 `restart-web` 使 token URL 失效，则以新 URL 复验；**未取到新 URL 前的读数一律标"未验收"**。
+
+### 八、诚实边界（未验证项）
+
+1. **面板初值的正确性**靠 §五的回归用例覆盖（构造层）；**真浏览器只验"那一节出现"与命名空间进了 describe**。
+2. 🔴 **未验证**：面板上**改一个开关 → 值真的落到 profile 条目里**（写路径的端到端）。本版只修了**收录（describe）**与**读取**两段。
+3. 遗留两处**非本版范围**的缺陷（已登记，未修）：① `msm dsh-develop diag` 加载失败（`Cannot find module '../hooks/dsh-serenity-hooks/src/autopilot-chain.js'`）② 本机 `deploy` 的安装副本含 `coverage/ experiments/ pnpm-lock.yaml` ⇒ **不是从 npm 发布物装的**（推翻旧"与发布物同一安装路径"的验收叙事）。
+
+---
+
 ## v1.47.1 — 2026-09-24（**补上 v1.47.0 的 B1「只迁一半」＋ 一处我自己引入的跨版本回归**；并附带发出「DSH 宿主适配测试台」）
 
 **来源**：owner 2026-09-24 07:3x 令「**很好，发布然后本地安装吧**」（D14 **具名发版令** ⇒ 本版）。🔴 **本版是 v1.47.0 之后第一次授权走完 `deploy` / `restart-web`**（v1.47.0 时这两步被推迟到宿主升级之后）。

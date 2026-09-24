@@ -12,7 +12,7 @@
  * 配置：进程级 Config（cordis.yml 提供）+ 运行时读取 CCC 的 .opencode/serenity.json（规范位置，.dsh 回退）。
  */
 
-import type { Context } from 'cordis'
+import type { Context, Volatile } from 'cordis'
 import z from '@deepseek-ai/schemastery'
 import { ccFsTool } from './tools/cc-fs.js'
 import { createKitTool } from './tools/kit.js'
@@ -129,28 +129,34 @@ export interface Config {
   //    ⚠️ **一律不带 `.default()`**：带上就永远非 undefined，部署层（`gateway.enabled` 等）
   //    会被无声压死。读取优先级见 `settings-section.ts`：面板层 > 部署层 > 内建缺省。
   /** F1 双端口网关总开关（面板层；部署层同义键 = `gateway.enabled`） */
-  gatewayEnabled?: boolean
+  gatewayEnabled?: Volatile<boolean | undefined>
   /** F2 超限重建总开关（面板层；部署层同义键 = `rebuild.enabled`） */
-  rebuildEnabled?: boolean
+  rebuildEnabled?: Volatile<boolean | undefined>
   /** F2 触发阈值（K token；面板层；部署层同义键 = `rebuild.thresholdK`） */
-  rebuildThresholdK?: number
+  rebuildThresholdK?: Volatile<number | undefined>
   /** F4 Skiff 调试服务总开关（面板层；部署层同义键 = `skiff.enabled`） */
-  skiffEnabled?: boolean
+  skiffEnabled?: Volatile<boolean | undefined>
   /** F4 Skiff 调试端口（面板层；部署层同义键 = `skiff.debugPort`） */
-  skiffDebugPort?: number
+  skiffDebugPort?: Volatile<number | undefined>
   /** F4c ACP HTTP 端点总开关（面板层；部署层同义键 = `acp.enabled`） */
-  acpEnabled?: boolean
+  acpEnabled?: Volatile<boolean | undefined>
   /** F4c ACP HTTP 端口（面板层；部署层同义键 = `acp.httpPort`） */
-  acpHttpPort?: number
+  acpHttpPort?: Volatile<number | undefined>
   /** F4d 建议问答页总开关（面板层；无部署层同义键） */
-  publicAskEnabled?: boolean
+  publicAskEnabled?: Volatile<boolean | undefined>
   /** CRO（轨迹自编程唤起）总闸（面板层；无部署层同义键；缺省开） */
-  croEnabled?: boolean
+  croEnabled?: Volatile<boolean | undefined>
   /** 无人值守代理回复总闸（面板层；无部署层同义键；缺省关） */
-  unattendedEnabled?: boolean
+  unattendedEnabled?: Volatile<boolean | undefined>
 }
 
-export const Config: z<Config> = z.object({
+// 🔴 **刻意不写 `z<Config>` 标注**（v1.47.2 起）：volatile 键的**输入形状**（裸 `boolean`）与
+// **解析后形状**（`Volatile<boolean | undefined>`）**必然不同**，而 `z<Config>` 只用**一个**
+// 类型参数同时充当两侧 ⇒ 一加 `.volatile()` 就是 TS2322（实测：`required().default` 两侧互不兼容）。
+// 与宿主自己的做法一致：`dsh-agent-default-model` 也是「`Config` 声明解析后形状（带 `Volatile`）
+// ＋ `static Config: z<ObjectS<…>, ObjectT<…>, 'plain'>` 走推导」，**不手写 `z<Config>`**。
+// ⇒ **schema ↔ 解析后接口的对账改由机械 pin 承担** = `tests/config-volatile.test.ts`。
+export const Config = z.object({
   serenityConfigPaths: z.array(z.string()).default([...DEFAULT_SERENITY_CONFIG_PATHS]),
   tools: z.boolean().default(true),
   guards: z.boolean().default(true),
@@ -170,19 +176,25 @@ export const Config: z<Config> = z.object({
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
-  // ── 设置面板层（v1.47 A 案）：旧 `settings.yaml` 的扁平键，**刻意无默认值** ──
-  // 无默认 ⇒ "用户没设过" = `undefined` ⇒ 部署层（嵌套段）才有机会生效。
+  // ── 设置面板层（v1.47 A 案；**v1.47.2 起补 `.volatile()`**）：旧 `settings.yaml` 的扁平键，**刻意无默认值** ──
+  // 无默认 ⇒ "用户没设过"在**语义上**是 `undefined` ⇒ 部署层（嵌套段）才有机会生效。
+  // 🔴 **必须标 `.volatile()`**（0.1.7 设置面硬约定）：宿主 `settings.describe()` 只收录
+  //    `volatileForm(schema) !== undefined` 的条目，而 `volatileForm` **只认 `meta.volatile`**
+  //    ⇒ 一个 volatile 字段都没有 ⇒ **本插件命名空间整个不进 describe** ⇒ 设置面板那一节消失
+  //    （实证 = 0.1.7-rc.1 真机 `namespaces` 16 条里没有 `serenity-hooks`）。
+  // ⚠️ **读取面必须配合**：运行期 volatile 字段是 `Volatile<T>` **恒真包装**（缺省时 `.get()`
+  //    返回 `undefined`），**不是** `undefined` ⇒ 一律经 `settings-section.ts` 的 `unwrapVolatile()`。
   // 约束（min/max）与旧 settings schema 逐字一致，保证面板输入仍被宿主校验。
-  gatewayEnabled: z.boolean(),
-  rebuildEnabled: z.boolean(),
-  rebuildThresholdK: z.number().min(50).max(4000),
-  skiffEnabled: z.boolean(),
-  skiffDebugPort: z.number().min(1024).max(65535),
-  acpEnabled: z.boolean(),
-  acpHttpPort: z.number().min(1024).max(65535),
-  publicAskEnabled: z.boolean(),
-  croEnabled: z.boolean(),
-  unattendedEnabled: z.boolean(),
+  gatewayEnabled: z.boolean().volatile(),
+  rebuildEnabled: z.boolean().volatile(),
+  rebuildThresholdK: z.number().min(50).max(4000).volatile(),
+  skiffEnabled: z.boolean().volatile(),
+  skiffDebugPort: z.number().min(1024).max(65535).volatile(),
+  acpEnabled: z.boolean().volatile(),
+  acpHttpPort: z.number().min(1024).max(65535).volatile(),
+  publicAskEnabled: z.boolean().volatile(),
+  croEnabled: z.boolean().volatile(),
+  unattendedEnabled: z.boolean().volatile(),
 })
 
 export function apply(ctx: Context, config: Config): void {

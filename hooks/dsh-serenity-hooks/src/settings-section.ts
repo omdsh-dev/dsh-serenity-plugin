@@ -34,10 +34,20 @@
  * 部署层会被无声压死（"未设置"必须可观测）。
  */
 
-import type { Context } from 'cordis'
+import type { Context, Volatile } from 'cordis'
 import { hostSettings } from './host/access.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
 import { ACP_HTTP_PORT, SKIFF_DEBUG_PORT } from './ports.js'
+
+/**
+ * 面板层布尔键的**两种来法**（v1.47.2）：
+ *  - 宿主 Loader 解析后的 Config ⇒ `Volatile<boolean | undefined>` **引用包装**（0.1.7 起面板字段必须 volatile）
+ *  - 手写 Config / 部署 bundle / 单测 ⇒ 裸布尔
+ * ⇒ 本层两种都收，**读取一律先 `unwrapVolatile()`**（否则包装对象恒真 ⇒ 开关被无意打开）。
+ */
+type PanelBoolean = boolean | Volatile<boolean | undefined>
+/** 面板层数值键：同 `PanelBoolean`（两种来法） */
+type PanelNumber = number | Volatile<number | undefined>
 
 /** 插件 Config 的简单配置片段（index.ts 的 Config 子集；面板层 + 部署层两种拼写） */
 interface SimpleConfigFragment {
@@ -48,17 +58,17 @@ interface SimpleConfigFragment {
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
   acp?: { enabled?: boolean; httpPort?: number }
-  // ── 面板层（扁平键；无默认值 ⇒ "未设置"可观测）──
-  gatewayEnabled?: boolean
-  rebuildEnabled?: boolean
-  rebuildThresholdK?: number
-  skiffEnabled?: boolean
-  skiffDebugPort?: number
-  acpEnabled?: boolean
-  acpHttpPort?: number
-  publicAskEnabled?: boolean
-  croEnabled?: boolean
-  unattendedEnabled?: boolean
+  // ── 面板层（扁平键；无默认值 ⇒ "未设置"可观测；**0.1.7 起运行期是 `Volatile<T>` 包装**）──
+  gatewayEnabled?: PanelBoolean
+  rebuildEnabled?: PanelBoolean
+  rebuildThresholdK?: PanelNumber
+  skiffEnabled?: PanelBoolean
+  skiffDebugPort?: PanelNumber
+  acpEnabled?: PanelBoolean
+  acpHttpPort?: PanelNumber
+  publicAskEnabled?: PanelBoolean
+  croEnabled?: PanelBoolean
+  unattendedEnabled?: PanelBoolean
 }
 
 /**
@@ -120,6 +130,36 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
   }
 }
 
+/** volatile 引用的**可观察形状**（结构判定用；刻意不引 cosmokit —— 它是宿主内部包，不是我们的 peerDep） */
+interface VolatileRef<T> {
+  get(): T
+}
+
+/**
+ * volatile 字段的**结构化解包**（v1.47.2；本文件读取语义的第一道）。
+ *
+ * ## 为什么必须有它（两个事实的合成，缺一即错）
+ * ① **0.1.7 的面板层字段必须标 `.volatile()`** —— 否则本插件命名空间整个不进宿主的
+ *    `settings.describe()`（`volatileForm()` 只认 `meta.volatile`）⇒ **设置面板那一节消失**。
+ * ② **标了之后，运行期拿到的是引用包装，不是裸值** —— schemastery 的 `Schema.resolve()` 对
+ *    `meta.volatile` **无条件**包 `createVolatile(value)`，且该分支排在"缺省值回退"那一段
+ *    **之前** ⇒ **"用户没设过"的字段也是恒真对象**（`.get()` 返回 `undefined`），**不是 `undefined`**。
+ *
+ * ⇒ 若这里不解包，下面十行的 `??` 链会**短路在这层包装上** ⇒ 网关 / Skiff / ACP 会被
+ * **无意打开**（比"面板不显示"更坏：静默改变对外暴露面）。
+ *
+ * ## 为什么用结构判定
+ * 可观察形状就是"有 `get()`"（cosmokit 的 `isVolatile` 也这么判）；本模块不引它的运行时依赖。
+ *
+ * @param value - volatile 引用 ｜ 裸值 ｜ undefined
+ * @returns 解包后的裸值（引用 ⇒ `.get()`；裸值原样；缺省 ⇒ `undefined`）
+ */
+export function unwrapVolatile<T>(value: T | VolatileRef<T> | undefined): T | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof (value as VolatileRef<T>).get === 'function') return (value as VolatileRef<T>).get()
+  return value as T
+}
+
 /**
  * Config（宿主 Loader 校验后的解析值）→ 扁平简单配置。**本文件唯一的读取语义**。
  *
@@ -130,16 +170,16 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
 export function simpleSettingsFromConfig(config: SimpleConfigFragment): SerenitySimpleSettings {
   const d = defaultSimpleSettings()
   return {
-    gatewayEnabled: config.gatewayEnabled ?? config.gateway?.enabled ?? d.gatewayEnabled,
-    rebuildEnabled: config.rebuildEnabled ?? config.rebuild?.enabled ?? d.rebuildEnabled,
-    rebuildThresholdK: config.rebuildThresholdK ?? config.rebuild?.thresholdK ?? d.rebuildThresholdK,
-    skiffEnabled: config.skiffEnabled ?? config.skiff?.enabled ?? d.skiffEnabled,
-    skiffDebugPort: config.skiffDebugPort ?? config.skiff?.debugPort ?? d.skiffDebugPort,
-    acpEnabled: config.acpEnabled ?? config.acp?.enabled ?? d.acpEnabled,
-    acpHttpPort: config.acpHttpPort ?? config.acp?.httpPort ?? d.acpHttpPort,
-    publicAskEnabled: config.publicAskEnabled ?? d.publicAskEnabled,
-    croEnabled: config.croEnabled ?? d.croEnabled,
-    unattendedEnabled: config.unattendedEnabled ?? d.unattendedEnabled,
+    gatewayEnabled: unwrapVolatile(config.gatewayEnabled) ?? config.gateway?.enabled ?? d.gatewayEnabled,
+    rebuildEnabled: unwrapVolatile(config.rebuildEnabled) ?? config.rebuild?.enabled ?? d.rebuildEnabled,
+    rebuildThresholdK: unwrapVolatile(config.rebuildThresholdK) ?? config.rebuild?.thresholdK ?? d.rebuildThresholdK,
+    skiffEnabled: unwrapVolatile(config.skiffEnabled) ?? config.skiff?.enabled ?? d.skiffEnabled,
+    skiffDebugPort: unwrapVolatile(config.skiffDebugPort) ?? config.skiff?.debugPort ?? d.skiffDebugPort,
+    acpEnabled: unwrapVolatile(config.acpEnabled) ?? config.acp?.enabled ?? d.acpEnabled,
+    acpHttpPort: unwrapVolatile(config.acpHttpPort) ?? config.acp?.httpPort ?? d.acpHttpPort,
+    publicAskEnabled: unwrapVolatile(config.publicAskEnabled) ?? d.publicAskEnabled,
+    croEnabled: unwrapVolatile(config.croEnabled) ?? d.croEnabled,
+    unattendedEnabled: unwrapVolatile(config.unattendedEnabled) ?? d.unattendedEnabled,
   }
 }
 
