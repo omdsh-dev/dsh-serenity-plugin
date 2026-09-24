@@ -22,7 +22,7 @@
  * 边界（安全语义）: 本 MSM 只执行固定的开发操作集，不接受任意命令执行。
  */
 
-import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, symlinkSync, statSync, readlinkSync, createReadStream } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, copyFileSync, symlinkSync, statSync, readlinkSync, createReadStream } from 'node:fs'
 import { resolve, dirname, join, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync, execFileSync, spawn } from 'node:child_process'
@@ -965,7 +965,105 @@ function stripInsertBlock(content: string, id: string): string | null {
   return out.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
 }
 
-function cmdDeploy(): void {
+/**
+ * publishFileList — **「发布物」的唯一定义**：`npm pack --dry-run --json` 报出的文件清单。
+ *
+ * 🔴 **为什么要有它**（S142 2026-09-24 10:3x 取证）：deploy 以前用**黑名单** `cpSync` 复制**工作树**
+ * （只排除 `tests/src/.pnpm-store/client/node_modules` ＋ 两个后缀），而 `publish` 走
+ * `package.json` 的**白名单** `files[]` ⇒ **「发布物」有两个各自演化的定义**。实测后果（本机安装副本）：
+ * 多出 **11 类**发布物外条目（`coverage/ experiments/ pnpm-lock.yaml pnpm-workspace.yaml
+ * tsconfig.host-*.local.json ×5 tsdown.config.ts tsdown.prepare.config.ts vitest.config.ts`），
+ * 并**反向缺 `dsh.plugin.json`**（它在 `files[]` 里，却被那条 filter 的 `endsWith` 排掉）。
+ * ⇒ 改为**白名单驱动**：副本集合直接取自发布物自身，**两套定义合一**（副本 = 发布物，逐条相同）。
+ *
+ * 🔴 **`--ignore-scripts` 是硬约束，不是优化**：`npm pack` 会跑 `package.json` 的 `prepare`
+ * （`tsdown --config tsdown.prepare.config.ts`——**只构建 Node 半**），而 cmdDeploy 的 1/4 步
+ * 已用 cmdBuild 建好**双 bundle**；让 prepare 在 pack 时再跑一次会**清掉 `lib/client.js`**
+ * ⇒ 副本缺 client bundle（**v1.26.15 同类事故形态**：DSH web 激活抛 `MissingClientBundleError`）。
+ * 本函数**先证清单含双 bundle 再返回**（前置断言，见下）——防的就是"prepare 失效后照样往下拷"。
+ */
+function publishFileList(): string[] {
+  const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
+  mkdirSync(cache, { recursive: true })
+  const dry = run('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: HOOKS_DIR,
+    quiet: true,
+    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
+  })
+  if (dry.status !== 0) {
+    console.error(dry.stdout + dry.stderr)
+    fail(`deploy: npm pack --dry-run 失败 (exit ${dry.status})——取不到发布物清单，中止（不猜）`, 2)
+  }
+  let files: string[] = []
+  try {
+    const parsed = JSON.parse(dry.stdout) as Array<{ files?: Array<{ path?: string }> }>
+    files = (parsed[0]?.files ?? []).map((f) => String(f.path ?? '')).filter((f) => f.length > 0)
+  } catch {
+    fail(`deploy: npm pack --dry-run 输出解析失败（非预期 JSON）：\n${dry.stdout.slice(0, 400)}`, 2)
+  }
+  // 路径守卫：发布物清单只应是**包内相对路径**。出现绝对路径或上跳 ⇒ 判据本身可疑，绝不往下拷。
+  const bad = files.filter((f) => f.startsWith('/') || f.split('/').includes('..'))
+  if (bad.length > 0) fail(`deploy: 发布物清单含非法路径（${bad.join(', ')}）——中止`, 2)
+  // 🔴 前置断言：**先证清单非空且含双 bundle，再动任何文件**（与 verifyTarball 的 required 同源）。
+  const required = ['lib/index.js', 'lib/client.js', 'lib/invariant.js', 'assets/serenity-voyage.html']
+  const missing = required.filter((f) => !files.includes(f))
+  if (missing.length > 0) {
+    fail(`deploy: 发布物清单缺必需文件（${missing.join(', ')}）——疑 pack 时 prepare 被触发、--ignore-scripts 未生效，中止`, 2)
+  }
+  return files
+}
+
+/**
+ * copyPublishProduct — 逐文件复制发布物（副本内容 ⟺ 发布物内容，逐条相同）。
+ * 调用方已 `rmSync` 清空 dst ⇒ 不残留上一次的旧文件（陈旧残留正是本缺陷暴露出来的形态）。
+ */
+function copyPublishProduct(dst: string, files: string[]): void {
+  for (const rel of files) {
+    const to = join(dst, rel)
+    mkdirSync(dirname(to), { recursive: true })
+    copyFileSync(join(HOOKS_DIR, rel), to)
+  }
+}
+
+/**
+ * verifyCopyMatchesPublish — 复制后**回读整棵副本树**，与发布物清单逐条比。
+ * 判据 = 文件相对路径集合**完全相等**；多一个或少一个都失败并**点名**（不给"大概对"）。
+ *
+ * 为什么这不是同义反复（它抓的是三类**静默漂移**，正是本缺陷的形态）：
+ * ① **陈旧残留**（`rmSync` 失败或被 `force` 吞掉 ⇒ 上次的文件还在）；
+ * ② **复制漏项**（某项没拷成）；
+ * ③ **清单与盘上不符**（`files[]` 变了但没人知道）。
+ */
+function verifyCopyMatchesPublish(dst: string, files: string[]): void {
+  const expect = new Set(files)
+  const actual = new Set<string>()
+  const walk = (rel: string): void => {
+    for (const e of readdirSync(rel ? join(dst, rel) : dst, { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name
+      if (e.isDirectory()) walk(r)
+      else actual.add(r)
+    }
+  }
+  walk('')
+  const extra = [...actual].filter((f) => !expect.has(f)).sort()
+  const missing = [...expect].filter((f) => !actual.has(f)).sort()
+  if (extra.length > 0 || missing.length > 0) {
+    fail('deploy: 副本 ≠ 发布物（多 ' + extra.length + ' / 少 ' + missing.length + '）'
+      + (extra.length > 0 ? `\n  多出: ${extra.join(', ')}` : '')
+      + (missing.length > 0 ? `\n  缺失: ${missing.join(', ')}` : ''), 2)
+  }
+  console.log(`    ✓ 副本 = 发布物（${actual.size} 文件，逐条相同）`)
+}
+
+function cmdDeploy(opts: { listCopySet?: boolean } = {}): void {
+  // 🔴 `--list-copy-set`：**只读**印出发布物清单（= deploy 的复制集合），不动任何文件、不构建。
+  // 用途：① 让"副本 = 发布物"成为**可查询的事实**（而不是文档里的形容词）；② 可被测试机械断言。
+  if (opts.listCopySet) {
+    const files = publishFileList().slice().sort()
+    console.log(`[dsh-develop] 发布物清单（deploy 的复制集合；判据 = npm pack --dry-run --json --ignore-scripts）：${files.length} 文件`)
+    for (const f of files) console.log(`  ${f}`)
+    return
+  }
   // 复刻 scripts/load-plugin.sh 全流程（纯 Node 实现，不依赖 bash）
   // 公开版适配（v1.16+）：运行时 = rc.6 CLI + profile（~/.dsh/profiles/node_modules），
   // staging 双锚保留为源码调试目标（旧架构，非运行时）。
@@ -985,18 +1083,16 @@ function cmdDeploy(): void {
   cmdBuild()
 
   console.log('==> 2/4 复制插件（staging 双锚 + profile 双目标：profiles/node_modules + profiles/web/node_modules）')
+  // 🔴 复制集合 = **发布物清单**（白名单驱动）——不再用黑名单枚举工作树（见 publishFileList 头注释）
+  const publishFiles = publishFileList()
+  console.log(`    发布物 ${publishFiles.length} 文件（npm pack --dry-run --json --ignore-scripts）`)
   for (const nm of targets) {
     const dst = join(nm, '@shgroup', 'dsh-serenity-hooks')
     rmSync(dst, { recursive: true, force: true })
     mkdirSync(join(nm, '@shgroup'), { recursive: true })
-    cpSync(HOOKS_DIR, dst, {
-      recursive: true,
-      filter: (src) => {
-        const base = src.split('/').pop() ?? ''
-        return !['tests', 'src', '.pnpm-store', 'client', 'node_modules'].includes(base) && !src.endsWith('tsconfig.json') && !src.endsWith('dsh.plugin.json')
-      },
-    })
+    copyPublishProduct(dst, publishFiles)
     console.log(`    copied -> ${dst}`)
+    verifyCopyMatchesPublish(dst, publishFiles)
   }
   // profile 真实目录（公开版运行时目标）：替换任何历史符号链接（旧 staging 时代残留）
   for (const dst of profileTargets) {
@@ -1005,14 +1101,9 @@ function cmdDeploy(): void {
     } catch { /* 不存在或非链接 */ }
     rmSync(dst, { recursive: true, force: true })
     mkdirSync(dirname(dst), { recursive: true })
-    cpSync(HOOKS_DIR, dst, {
-      recursive: true,
-      filter: (src) => {
-        const base = src.split('/').pop() ?? ''
-        return !['tests', 'src', '.pnpm-store', 'client', 'node_modules'].includes(base) && !src.endsWith('tsconfig.json') && !src.endsWith('dsh.plugin.json')
-      },
-    })
+    copyPublishProduct(dst, publishFiles)
     console.log(`    copied -> ${dst}（真实目录，非链接）`)
+    verifyCopyMatchesPublish(dst, publishFiles)
   }
 
   console.log('==> 3/4 依赖 shim（仅 staging 锚需要；profile 目标走 rc.6 profile node_modules）')
@@ -1991,7 +2082,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         break
       }
       case 'bump': cmdBump(rest[0]); break
-      case 'deploy': cmdDeploy(); break
+      case 'deploy': cmdDeploy({ listCopySet: rest.includes('--list-copy-set') }); break
       case 'npm-install': cmdNpmInstall(rest[0] ?? 'web', rest[1], rest[2]); break
       case 'npm-install-dev': cmdNpmInstallDev(rest); break
       case 'lockfile': cmdLockfile(); break
@@ -2007,7 +2098,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-cli | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-cli | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy [--list-copy-set] | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -2037,7 +2128,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   push                  git push origin（GitHub，SSH-443）
   version               三处版本一致性
   bump <x.y.z>          package.json + dsh.plugin.json 版本同步
-  deploy                load-plugin.sh 全流程（构建+双锚+shim+profile+预检）
+  deploy [--list-copy-set]  load-plugin.sh 全流程（构建+双锚+shim+profile+预检）；复制集合 = 发布物清单（白名单驱动，副本逐条 = 发布物）；--list-copy-set 只读印清单
   npm-install [profile] [version] 官方 npm 安装：缺省/latest=registry 最新；可指定精确版本
   npm-install-dev <pkg...> hooks 开发依赖安装（npm install --save-dev；client bundle 内联）
   lockfile              重生成 hooks pnpm-lock.yaml + 用 --frozen-lockfile 自检（CI 同款判定）
