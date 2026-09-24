@@ -69,3 +69,38 @@ test('未知子命令报错（退出码 1）', () => {
   expect(r.status).toBe(1)
   expect(r.stdout).toContain('未知子命令')
 })
+
+/**
+ * 🔴 退役命令的行为 pin（S142 2026-09-24）：`diag` 的对象（autopilot 唤起条件链）随 v1.35.0
+ * 整段退场后已不存在 ⇒ 它**只印路牌且恒 exit 2**。**exit 2 是验收的一部分**：
+ * 退出 0 会让调用方以为"诊断跑通了"（静默的假成功，比报错更坏）。
+ */
+test('diag 已退役：印路牌且恒 exit 2（不许变 0）', () => {
+  if (!hasBun) return
+  const r = runDshDevelop('diag')
+  expect(r.status).toBe(2)
+  expect(r.stdout).toContain('已退役')
+  expect(r.stdout).toContain('acc-diag')          // 替代品写进了路牌
+  expect(r.stdout).not.toContain('Cannot find module') // 不再是"看着像环境缺模块"的症状
+})
+
+/**
+ * 🔴 `deploy` 的复制集合必须是**发布物清单本身**（S142 2026-09-24 取证后的修法）。
+ * 判据 = 白名单驱动：发布物有的**必须有**，发布物没有的**一个都不许有**。
+ * 反例清单取自那次**实测**的缺陷读数（当时副本多出 11 类、并反向缺 dsh.plugin.json）。
+ */
+test('deploy --list-copy-set：复制集合 = 发布物白名单（无黑名单漏项）', () => {
+  if (!hasBun) return
+  const r = runDshDevelop('deploy', '--list-copy-set')
+  expect(r.status).toBe(0)
+  // 必须有的（双 bundle + 声明面 + 清单本体）
+  for (const f of ['lib/index.js', 'lib/client.js', 'lib/invariant.js',
+    'assets/serenity-voyage.html', 'cordis.patch.yml', 'dsh.plugin.json', 'package.json']) {
+    expect(r.stdout).toContain(f)
+  }
+  // 🔴 一个都不许有的（本缺陷的形态：黑名单只能枚举"想不到的"，所以它总会漏）
+  for (const f of ['coverage/', 'experiments/', 'pnpm-lock.yaml', 'pnpm-workspace.yaml',
+    'tsdown.config.ts', 'vitest.config.ts', 'tsconfig.prepare.json', 'tsconfig.host-']) {
+    expect(r.stdout).not.toContain(f)
+  }
+})
