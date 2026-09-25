@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from 'node:fs'
+import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { request } from 'node:http'
 
@@ -37,7 +37,8 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 }))
 
 import { AcpServer, dispatchRpc, RpcMethodError, RpcInvalidParams, RPC_ERROR } from '../src/acp-core.js'
-import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive, acpHttpPort } from '../src/acp-http.js'
+import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive, acpHttpPort, acpHttpSpec } from '../src/acp-http.js'
+import { faceEnabled } from '../src/face-host.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX } from '../src/skiff-role.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
@@ -572,6 +573,307 @@ describe('F4d: 建议问答页 key 认证（v1.26.1）', () => {
       resetPublicAskIpFail('1.2.3.4')
       const afterReset = await post('1.2.3.4', { key, question: 'hi' })
       expect(afterReset.status).toBe(200)
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🆕 2026-09-25 ⑤ 第 28 件：`acp-http.ts` 的门控 / 路由 / 入参边界面
+//
+// 挑靶依据 = **先逐行读覆盖率报告的 `cstat-no`/`cbranch-no`，再判可达性**（别按 branch% 排序硬上）。
+// 本块只覆盖**逐行核对后确认可达**的分支；其余按 §3-8 登记为「构造上不可达」，
+// **刻意不硬凑用例**（硬凑 = 把「从不发生」固化成「期望形态」）。详见地图 §2.7m。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 目录基名（发现列表里的 `name` 就是它——`listCccs` 的 `basename(root)`） */
+function basenameOf(p: string): string {
+  return p.split('/').filter(Boolean).pop() ?? ''
+}
+
+/**
+ * **独立读数器**：从 `process.cwd()` 上溯找 `.serenity`（= CCC 标记）。
+ * 🔴 刻意**不复用** `cccRootForCwd` —— 用实现去验实现是自证（读数器要先证明不瞎）。
+ * 本仓在 `<某 CCC>/AI_LAB/dsh-serenity-plugin` 下时，它返回的是**外层那个 CCC**。
+ */
+function enclosingCccFromCwd(): string | null {
+  let cur = process.cwd()
+  for (let i = 0; i < 32; i++) {
+    if (existsSync(join(cur, '.serenity'))) return cur
+    const parent = dirname(cur)
+    if (parent === cur) break
+    cur = parent
+  }
+  return null
+}
+
+/** 裸体 POST：body **原样**发送（用于触发 HTTP 层 `JSON.parse` 失败、`null` / 非对象体） */
+function httpPostRaw(port: number, raw: string, path = '/'): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      { host: '127.0.0.1', port, path, method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(raw) } },
+      (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c: Buffer) => chunks.push(c))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }))
+      },
+    )
+    req.on('error', reject)
+    req.end(raw)
+  })
+}
+
+/** GET（既有用例各自手搓 Promise；本块统一走它） */
+function httpGet(port: number, path: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: '127.0.0.1', port, path, method: 'GET' }, (res) => {
+      const chunks: Buffer[] = []
+      res.on('data', (c: Buffer) => chunks.push(c))
+      res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+describe('acp-http: 门控 / 路由 / 入参边界面（⑤ 第 28 件）', () => {
+  // 白名单置空 = 全部开放（本块测的是门控/路由/入参，白名单语义已由既有用例覆盖；
+  // 显式写一次是为了**不依赖前面的用例留下的全局状态**——顺序无关）
+  beforeEach(() => {
+    updateAdvancedSettings({ publicAsk: { key: ensurePublicAskKey(), allowed: [] } })
+  })
+
+  it('① 双闸读取 = acpEnabled || publicAskEnabled（含两个都关 ⇒ false）', () => {
+    const spec = acpHttpSpec(fakeCtx() as never, 0)
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: false }))
+    expect(faceEnabled(spec)).toBe(true)
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: false, publicAskEnabled: true }))
+    expect(faceEnabled(spec)).toBe(true)
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: false, publicAskEnabled: false }))
+    expect(faceEnabled(spec)).toBe(false)
+  })
+
+  it('② 两个闸全关：startFace 仍机械启动（面不自门控）⇒ 日志如实写「未开启任何面」', async () => {
+    const logs: string[] = []
+    const spy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      logs.push(a.join(' '))
+    })
+    try {
+      __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: false, publicAskEnabled: false }))
+      await startAcpHttpServer(fakeCtx() as never, 0)
+      // face-host 头部注释的不变量：startFace 只做机械绑定，**不读** spec.enabled()（调用方保证意图）
+      expect(acpHttpActive()).toBe(true)
+      expect(logs.some((l) => l.includes('未开启任何面'))).toBe(true)
+    } finally {
+      spy.mockRestore()
+      stopAcpHttpServer()
+    }
+  })
+
+  it('③ POST / ：acpEnabled=false（问答页开）⇒ 403「ACP JSON-RPC disabled」', async () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: false, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    try {
+      const res = await httpPost(port, { jsonrpc: '2.0', id: 1, method: 'initialize', params: {} })
+      expect(res.status).toBe(403)
+      expect(JSON.parse(res.body)).toEqual({ error: 'ACP JSON-RPC disabled (enable in Serenity settings)' })
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('④ POST / ：体不是合法 JSON ⇒ 400 parse error 帧（id:null / -32700）', async () => {
+    const port = await startAcpEphemeral(dir)
+    try {
+      const res = await httpPostRaw(port, '{not-json')
+      expect(res.status).toBe(400)
+      expect(JSON.parse(res.body)).toEqual([
+        { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } },
+      ])
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑤ 问答页关：/c/ 两条路由走「未启用」分支 ＋ 未知路径 404', async () => {
+    const port = await startAcpEphemeral(dir) // 缺省：acp 开 / 问答页关
+    const name = basenameOf(dir)
+    try {
+      const page = await httpGet(port, `/c/${encodeURIComponent(name)}`)
+      expect(page.status).toBe(200)
+      expect(page.body).toContain('问答页未启用')
+
+      const ask = await httpPostRaw(port, JSON.stringify({ question: 'hi' }), `/c/${encodeURIComponent(name)}/ask`)
+      expect(ask.status).toBe(403)
+      expect(JSON.parse(ask.body)).toEqual({ error: 'public ask disabled (enable in Serenity settings)' })
+
+      const nope = await httpGet(port, '/nope')
+      expect(nope.status).toBe(404)
+      expect(JSON.parse(nope.body)).toEqual({ error: 'not found' })
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑥ 问答页开：未知路径（GET 与 POST 两侧）⇒ 404', async () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    try {
+      expect((await httpGet(port, '/nope')).status).toBe(404)
+      expect((await httpPost(port, { key: ensurePublicAskKey(), question: 'hi' }, '/nope')).status).toBe(404)
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑦ POST /ask ：非法 JSON ／ null ／ 非对象体 ⇒ 400 invalid JSON body', async () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    try {
+      for (const raw of ['{bad', 'null', '"str"']) {
+        const res = await httpPostRaw(port, raw, '/ask')
+        expect(res.status).toBe(400)
+        expect(JSON.parse(res.body)).toEqual({ error: 'invalid JSON body' })
+      }
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑧ POST /c/<name>/ask ：null 体 ⇒ 400 invalid JSON body（体解析先于 key 校验）', async () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    try {
+      const res = await httpPostRaw(port, 'null', `/c/${encodeURIComponent(basenameOf(dir))}/ask`)
+      expect(res.status).toBe(400)
+      expect(JSON.parse(res.body)).toEqual({ error: 'invalid JSON body' })
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑨ POST /ask 兼容面：name 命中；ccc=未发现根 ⇒ 按 root 构造（角色从该根读，出真答）', async () => {
+    const key = ensurePublicAskKey()
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    const other = mkdtempSync(join(tmpdir(), 'acp-other-'))
+    try {
+      // other 与 dir 同款配置，但**不是** defaultRoot ⇒ `listCccs` 不含它（本仓发现源在 fake ctx 下
+      // 只有 defaultRoot 一路），于是必走「按 root 直接构造」那条分支
+      writeFileSync(join(other, '.serenity'), 'other')
+      mkdirSync(join(other, '.opencode'), { recursive: true })
+      writeFileSync(
+        join(other, '.opencode', 'serenity.json'),
+        JSON.stringify({ handyman: { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
+      )
+
+      const byName = await httpPost(port, { key, name: basenameOf(dir), question: 'hi' }, '/ask')
+      expect(byName.status).toBe(200)
+      expect((JSON.parse(byName.body) as { answer: string }).answer).toBe('a')
+
+      const byRoot = await httpPost(port, { key, ccc: other, question: 'hi' }, '/ask')
+      expect(byRoot.status).toBe(200)
+      expect((JSON.parse(byRoot.body) as { answer: string }).answer).toBe('a')
+    } finally {
+      rmSync(other, { recursive: true, force: true })
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑩ POST /ask ：name 未命中 ／ 两个都没给 ⇒ 403 container is not open', async () => {
+    const key = ensurePublicAskKey()
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    try {
+      const unknownName = await httpPost(port, { key, name: 'no-such-ccc', question: 'hi' }, '/ask')
+      expect(unknownName.status).toBe(403)
+      expect(JSON.parse(unknownName.body)).toEqual({ error: 'container is not open for public ask' })
+
+      const neither = await httpPost(port, { key, question: 'hi' }, '/ask')
+      expect(neither.status).toBe(403)
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑪ POST /ask ：question 缺失 ／ 全空白 ／ 非字符串 ⇒ 400 empty question', async () => {
+    const key = ensurePublicAskKey()
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    const name = basenameOf(dir)
+    try {
+      for (const body of [{ key, name, question: undefined }, { key, name, question: '   ' }, { key, name, question: 123 }]) {
+        const res = await httpPost(port, body, '/ask')
+        expect(res.status).toBe(400)
+        expect(JSON.parse(res.body)).toEqual({ error: 'empty question' })
+      }
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑫ 根无 skiff 角色 ⇒ 400 no skiff role available（fail-closed，不静默 200）', async () => {
+    const key = ensurePublicAskKey()
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral(dir)
+    const bare = mkdtempSync(join(tmpdir(), 'acp-bare-'))
+    try {
+      writeFileSync(join(bare, '.serenity'), 'bare') // 有意**不写** .opencode/serenity.json（无 skiff.roles）
+      const res = await httpPost(port, { key, ccc: bare, question: 'hi' }, '/ask')
+      expect(res.status).toBe(400)
+      expect(JSON.parse(res.body)).toEqual({ error: `no skiff role available in ccc: ${bare}` })
+    } finally {
+      rmSync(bare, { recursive: true, force: true })
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑬ 顶层兜底：设置源抛错 ⇒ 500（带原因；面不崩、不挂死）', async () => {
+    const port = await startAcpEphemeral(dir)
+    try {
+      __setSimpleSourceForTest(() => {
+        throw new Error('settings-source-boom')
+      })
+      const res = await httpGet(port, '/')
+      expect(res.status).toBe(500)
+      expect(JSON.parse(res.body)).toEqual({ error: 'settings-source-boom' })
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑭ 无默认根 ⇒ cccsOf 回落「cwd 上溯」：解析到**外层那个 CCC**（不在任何 CCC 内则空态）', async () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true, publicAskEnabled: true }))
+    const port = await startAcpEphemeral() // 有意不传 root：handler 收到 defaultRoot=''
+    try {
+      const res = await httpGet(port, '/')
+      expect(res.status).toBe(200)
+      expect(res.body).toContain('Serenity Public Ask')
+      const enclosing = enclosingCccFromCwd()
+      if (enclosing === null) {
+        // 本仓被检出到任何 CCC 之外 ⇒ 上溯无所获 ⇒ 空态页
+        expect(res.body).toContain('暂无可问答的认知容器')
+      } else {
+        // 本仓位于 <外层 CCC>/AI_LAB/dsh-serenity-plugin 之下 ⇒ 上溯命中的是**外层那个 CCC**
+        // （源码注释的「缺省回落进程 cwd 上溯」= 就这条；断言名而非路径，免受检出位置影响）
+        expect(res.body).toContain(`data-name="${basenameOf(enclosing)}"`)
+      }
+    } finally {
+      stopAcpHttpServer()
+    }
+  })
+
+  it('⑮ 顶层兜底对**任意抛出物**都成立：非 Error（字符串）抛出 ⇒ 500 且错误面仍可读', async () => {
+    const port = await startAcpEphemeral(dir)
+    try {
+      // 抛出物不是 Error ⇒ 走 `(err as Error)?.message ?? String(err)` 的右支
+      __setSimpleSourceForTest(() => {
+        throw 'plain-string-boom'
+      })
+      const res = await httpGet(port, '/')
+      expect(res.status).toBe(500)
+      expect(JSON.parse(res.body)).toEqual({ error: 'plain-string-boom' })
     } finally {
       stopAcpHttpServer()
     }
