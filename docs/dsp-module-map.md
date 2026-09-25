@@ -895,7 +895,16 @@
 | `clock-runtime.ts` 文件头 | "仍提 `wakeSchedulerEnabled` 闸（2026-09-21 已砍）" | ⛔ **假阳性**：原文写"（**原** `wakeSchedulerEnabled` 于 2026-09-21 所有者令砍掉 ⇒ 调用方**不传** `gate`）" ⇒ 同为**留档** |
 | `clock-runtime.ts` 硬约束三 | （原判未列） | ✅ **真残留，本批已修**：原文"**现只余** autopilot `autopilotWakeEnabled`（缺省关）**一条**"——而 autopilot 已随 **v1.35.0 整段退场**，全仓 grep `autopilotWakeEnabled` = **零处代码、仅两处历史提及** ⇒ **当前零条闸在用**，已改写为"更正：当前零条闸在用" |
 | `trajectory-ops.ts` 第二段注释 | （原判未列） | ✅ **真残留，本批已修**：原文"为什么**只有 6 个**"，而 `TRAJECTORY_ACTIONS` 实测 = **8**（list/show/create/use/rebuild/send-now/send-later/cro-guide），且与**同文件文件头**的"现行 **8 个**"**自相矛盾** ⇒ 已改为"v1.33 收敛时 6 个，其后追加 `send-now`/`cro-guide`" |
-| `clock-runtime.ts` 的"回归钉"引用 | （原判未列） | ⏳ **真残留，留第 2 批**：两处以 `autopilot-trajectory.test.ts` 作"实测 / 回归钉"引用，而**该文件全仓已不存在**（`glob **/*autopilot*` 零命中）⇒ 属"**指向已删对象的断言**"；处置取决于 `bodyCountsTick` 的去留（见 §3-8 第 5 行），故**同批不动** |
+| `clock-runtime.ts` 的"回归钉"引用 | （原判未列） | ✅ **真残留，2026-09-25 已修**（提交 `1081d91`）：两处以 `autopilot-trajectory.test.ts` 作"实测 / 回归钉"引用，而**该文件全仓已不存在**（随 v1.35.0 autopilot 退场）。⇒ **只修引用**：所述行为与断言**都真实存在**，落在 `clock-runtime.test.ts`（『bodyCountsTick=true → 工厂不记账，由 body 决定』／『闸关时 start ⇒ 事件仍必须挂上』／『闸先关后开 → 可补武装』）⇒ 已把引用改指真实文件并**补上断言原文**。⚠️ 原文以为"处置取决于 `bodyCountsTick` 的去留（§3-8 第 5 行）"—— **实测不必**：改的是**引用**，不是 `bodyCountsTick` 本身 |
+
+**🆕 同批新发现：第 3 处悬空引用（`host/contract.ts`，同一次核验抓到）**
+
+| 对象 | 悬空对象 | 结论 |
+|---|---|---|
+| `host/contract.ts` 的 storageDomain 段 | `tests/host/storage-domain-probe.test.ts` | ✅ **真残留，2026-09-25 已修**（同一提交 `1081d91`）：那是**一次性探针**，**2026-09-19 已转化**为长期契约用例 `tests/host/storage-domain.test.ts` —— 🔵 **该目标文件头部第 10 行自述此事**（"本文件由 §0L 的一次性探针**转化而来**（原 `storage-domain-probe.test.ts`）"），第 17 行自证"**兄弟 fiber** 拓扑" ⇒ 原引用指向的是**改名前的旧名**，而注释**没跟着改** |
+
+🔴 **本档的核验方法（可重跑，一次抽全、逐个对账）**：把 `src/**` 里出现的所有 `<name>.test.ts` 抽出（本次 **11 个引用**），逐个对 `tests/**` 实际清单核验 ⇒ **3 个解析不到**（即上表两行 ＋ 本表一行），**全部已修**；其余 8 个（`cordis-access` ／ `host-contract` ／ `storage-domain` ／ `gateway` ／ `face-host` ／ `deepseek-vision-probe` ／ `trajectory-bound` ／ `clock-runtime` ／ `config-volatile` ／ `trajectory-ops`）**均存在**。🔵 **两个非测试项不算悬空**：`cro-guide.ts` 里的 `continuous-re-occurrence.dev.test.ts` 是**给用户看的示例名**（不是仓内对象）；`msm-ops.ts` 里的 `dev-kit.test.ts` 属 **CCC 仓**、不在本包。
+🔴 **沉淀判据（本档最值钱的一条）**：**注释里的引用也是真相源，也会漂** —— 删／改／重命名测试文件时，`src/**` 里指向它的注释**不会有任何机械信号**（编译过、测试绿、覆盖率不变）。⇒ 它是**静默失效**的一族，与 v1.30.5 的错误码漂移、`today` 的"指向已删对象"同族。**建议长期做法** = 本档这条核验法（抽 `src` 的测试引用 → 对 `tests` 清单核验），可做成常备体检项。
 
 > 🔵 **教训（判据纪律）**：**"注释里出现了已删对象的名字" ≠ "注释过期"** —— 必须读那句话**是断言现状、还是记录历史**。本条原判只按关键词命中，两边各错一次（假阳 2）。反向的坑也在：**关键词没命中的地方才有真残留**（本批两处真残留均非原判所指）。
 
