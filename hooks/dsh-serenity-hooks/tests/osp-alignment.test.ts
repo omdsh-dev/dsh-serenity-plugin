@@ -102,21 +102,39 @@ const OSP_CCE = [
   '',
 ].join('\n')
 
-/** osp Session 块模板（DSH 适配版：todowrite 首项无 priority——DSH 平台 schema 不支持，v1.17.2；v1.23.0 载体关系行 + steward 预声明——dsp 领先扩展） */
+/**
+ * osp Session 块模板（DSH 适配版：todowrite 首项无 priority——DSH 平台 schema 不支持，v1.17.2；
+ * v1.23.0 载体关系行 + steward 预声明——dsp 领先扩展）。
+ *
+ * 🔴 2026-09-25（S142，owner 裁决）：**本块的 `Rules` / `IMPORTANT` 两段已被替换**为
+ * 「SESSION.md 格式与粒度契约」—— 触发 = 里程碑/决策（不再"每轮都记"）；粒度受 **EAP 抽象层**约束
+ * （L3 执行细节归 commit message）；**固定段集合**；不写"写下即变"的值。
+ * ⚠️ 🔴 **osp 侧必须同步改**：本测试**两边一起改所以照旧绿** ⇒ 它会**静默掩盖**"osp 仍在注入旧文本"
+ * （= 双实现分叉）。⇒ 已登记给 osp 维护轨迹（S138／S156）。**判据** = osp 仓 Session 块等价实现里
+ * 出现同一段文本（含"固定段集合"那两行）。
+ */
 const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   '',
   '=== Serenity Session ===',
   `Active session: ${sessionId} — ${dirName} (this session is the rebuildable carrier of the trajectory)`,
   `SESSION.md path: ${mdPath} (the trajectory's persistent body — stays in place through rebuilds)`,
   '',
-  'Rules:',
-  '  • Record all progress into this SESSION.md',
-  '  • Update the "进度记录" section after advancing work',
+  'Rules (SESSION.md is the trajectory log — keep its format & granularity fixed):',
+  '  • Write only when a MILESTONE landed or a DECISION was made — not every round',
+  '  • One entry = one abstraction level, at the highest one that can express it:',
+  '    identity/anchors (rare) › decision (one line + rationale/rejected) › milestone',
+  '    (one line + an evidence pointer, e.g. a commit id). Execution detail — test',
+  '    counts, coverage decimals, per-file readings, step narration — belongs in the',
+  '    COMMIT MESSAGE, not here',
+  '  • Never write a value that changes by the act of writing it (file size; the hash',
+  '    of the commit containing this edit)',
+  '  • Fixed sections, in this order: 身份与边界 / 权威锚点 / 工作纪律 / 决策 / 日志 /',
+  '    当前状态 / 待 owner 裁决.  The 日志 section appends only; 当前状态 and',
+  '    待 owner 裁决 are OVERWRITTEN each round',
   '  • Reference this session in all subsequent messages',
   '',
-  'IMPORTANT: Read SESSION.md now. Parse the "剩余工作" / "进度记录" /',
-  '"变更日志" sections and call todowrite to synchronize the built-in todo',
-  'list. Keep todos in sync with SESSION.md as work progresses.',
+  'IMPORTANT: Read SESSION.md now to RESUME — not to audit. Sync the todo list from',
+  'the 当前状态 and 待 owner 裁决 sections only.',
   '',
   'CRITICAL: When calling todowrite, the first item in the todos array MUST',
   'always be:',

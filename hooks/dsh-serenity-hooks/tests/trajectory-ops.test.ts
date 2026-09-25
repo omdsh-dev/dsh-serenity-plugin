@@ -44,10 +44,15 @@ function mk(desc: string, extra: Parameters<typeof createSession>[0] = {}): Retu
   return createSession({ root: dir, desc, dryRun: false, ...extra })
 }
 
-/** 标记轨迹完成（v1.33：无 close 动作——完成与否由 SESSION.md 的 `[x]` 表达） */
+/**
+ * 标记轨迹完成（v1.33：无 close 动作——完成与否由 SESSION.md 的 `[x]` 表达）。
+ * 🔴 **这里的字面量就是机器契约本体**：状态行必须同时含 `[ ]`／`[x]` 标记与标签，
+ * 与 `src/trajectory-ops.ts` 的 `sessionMdTemplate` 逐字对齐；改模板时必须同步改这里
+ * （2026-09-25 就是漏了这一步 ⇒ 本文件两条用例变红）。
+ */
 function markDone(r: ReturnType<typeof createSession>): void {
   const md = join(r.sessionPath, 'SESSION.md')
-  writeFileSync(md, readFileSync(md, 'utf-8').replace('## 状态\n- [ ] 进行中', '## 状态\n- [x] 已完成'), 'utf-8')
+  writeFileSync(md, readFileSync(md, 'utf-8').replace('- 状态: [ ] 进行中', '- 状态: [x] 已完成'), 'utf-8')
 }
 
 describe('trajectory-ops: 生命周期（对齐 osp spec）', () => {
@@ -89,6 +94,25 @@ describe('trajectory-ops: 生命周期（对齐 osp spec）', () => {
   it('create goal 写入目标段', () => {
     const r = mk('goal', { goal: '完成对照' })
     expect(readFileSync(join(r.sessionPath, 'SESSION.md'), 'utf-8')).toContain('完成对照')
+  })
+
+  it('create 模板 = 固定格式契约（状态行标记 ＋ 七个固定段按序 ＋ 全模板无 [x]）', () => {
+    const r = mk('format-contract')
+    const md = readFileSync(join(r.sessionPath, 'SESSION.md'), 'utf-8')
+    // ① 状态行是**被解析的机器契约**（completed 由出现 `[x]` 推导）⇒ 未完成形态必须带 `[ ]` 标记
+    expect(md).toContain('- 状态: [ ] 进行中')
+    // ② 且模板里**不得出现任何 `[x]`** —— 否则新会话一出生就被判 completed
+    expect(md).not.toMatch(/\[\s*x\s*\]/i)
+    // ③ 固定段集合与顺序（owner 2026-09-25 裁决：格式在 ACC harness 固定）
+    expect(md.split('\n').filter((l) => l.startsWith('## '))).toEqual([
+      '## 身份与边界',
+      '## 权威锚点',
+      '## 工作纪律',
+      '## 决策',
+      '## 日志',
+      '## 当前状态',
+      '## 待 owner 裁决',
+    ])
   })
 
   it('show 按 id / 关键词（返回文本）', () => {

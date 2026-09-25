@@ -95,7 +95,11 @@ export function sessionsRoot(root: string): string {
 
 interface SessionStatus {
   hasSessionMd: boolean
-  /** 「完成」的判据 = SESSION.md 里出现 `[x]`（v1.33 起不再由 close 动作写入） */
+  /**
+   * 「完成」的判据 = SESSION.md 里**出现 `[x]`**（v1.33 起不再由 close 动作写入）。
+   * 🔴 这是**全文匹配**、两代格式通用：新格式的状态行 `- 状态: [x] …` 与旧格式的
+   * `## 状态` 段内 `- [x] 已完成` 都能被识别 ⇒ **不可改成锚定某一行的正则**（会让旧会话永远"未完成"）。
+   */
   completed: boolean
 }
 
@@ -231,17 +235,25 @@ export interface CreateSessionResult {
   sessionId: string
 }
 
-/** 生成 SESSION.md 模板（对齐 osp：goal 写入目标段，时间戳 YYYY-MM-DD HH:mm） */
+/**
+ * 生成 SESSION.md 模板（固定格式，owner 2026-09-25 裁决；时间戳 YYYY-MM-DD HH:mm）。
+ *
+ * 🔴 **状态行是被解析的机器契约**：`completed` 的判据 = SESSION.md 里出现 `[x]`（见 `parseSessionMd`）
+ * ⇒ 状态行必须带标记 token：未完成 `- 状态: [ ] <label>`／已完成 `- 状态: [x] <label>`。
+ * ⚠️ 改模板时**两件事必须同时成立**：① 状态行保留 `[ ]`（且全模板不得出现任何 `[x]`——否则新会话
+ * 一出生就被判 completed）② 七个固定段的名字与顺序不得动（契约钉在 `tests/trajectory-ops.test.ts`）。
+ */
 function sessionMdTemplate(title: string, id: string, goal: string | undefined, now: Date): string {
   const ts = localDateTimeMinutes(now)
   return (
-    `# SESSION: ${title}\n- ID: ${id}\n\n` +
-    `## 目标\n${goal ?? '（待补充）'}\n\n` +
-    `## 状态\n- [ ] 进行中\n\n` +
-    `## 关键决策\n| # | 决策 | 理由 |\n|---|------|------|\n| 1 | | |\n\n` +
-    `## 进度记录\n- ${ts} — 创建\n\n` +
-    `## 产出物\n- \n\n` +
-    `## 未解决的问题\n- \n`
+    `# SESSION: ${title}\n- ID: ${id}\n- 状态: [ ] 进行中\n\n` +
+    `## 身份与边界\n${goal ?? '（待补充）'}\n\n` +
+    `## 权威锚点\n- （指针：仓库 / 工具 / 单一真相源位置）\n\n` +
+    `## 工作纪律\n- （只放本轨迹特有的；通用项外推到 skill）\n\n` +
+    `## 决策\n| # | 决策 | 理由 / 否决项 |\n|---|------|------|\n| 1 | | |\n\n` +
+    `## 日志\n- ${ts} — 创建（里程碑 ＋ 证据指针；执行细节归 commit message）\n\n` +
+    `## 当前状态\n- 在办：\n- 断点：\n\n` +
+    `## 待 owner 裁决\n- \n`
   )
 }
 
@@ -452,7 +464,8 @@ export function useSession(root: string, key: string, scope = DEFAULT_SESSION_SC
     ``,
     `→ All subsequent work should refer back to this session.`,
     `  Use "session show ${sessionId}" to check current progress.`,
-    `  After advancing work, update the "进度记录" (progress) section in SESSION.md.`,
+    `  When a milestone lands or a decision is made: overwrite "当前状态" and append ONE`,
+    `  milestone line to "日志" (one line + an evidence pointer — details go to the commit message).`,
     ``,
     `→ BEFORE responding to the user, you MUST call todowrite immediately`,
     `  with the session todo list. The first item MUST be:`,
