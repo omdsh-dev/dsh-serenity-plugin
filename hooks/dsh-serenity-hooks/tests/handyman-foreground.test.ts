@@ -61,6 +61,63 @@ function execIn(agent: unknown = { session: { header: { cwd: dir } } }) {
   return { agent, signal: new AbortController().signal }
 }
 
+/**
+ * 替身 llm 服务（`ctx.llm` → `LlmRuntime` 的**取证面**）。
+ * ⚠️ 不传时为 `undefined` ⇒ 预检**不阻断**（"增强不得变成新失败源"）。
+ */
+function fakeLlm(opts: {
+  registered?: Array<{ id: string; name?: string }>
+  declared?: Array<{ provider: string; displayName?: string; settingsNs?: string }>
+} = {}) {
+  return {
+    listProviders: () => opts.registered ?? [],
+    listConfigurableProviders: () => opts.declared ?? [],
+  }
+}
+
+/** ctx：subagents ＋ llm 两服务可分别注入（用于预检的正/反控） */
+function ctxWithLlm(subagentsRuntime: unknown, llm: unknown) {
+  return {
+    get: (name: string) => (name === 'subagents' ? subagentsRuntime : name === 'llm' ? llm : undefined),
+  } as never
+}
+
+/**
+ * 替身 agents 服务（**background 路径**）：记录 `create` 参数；worker 从**本轮 prompt** 里取出
+ * stop token 回显 ⇒ **1 轮即完成**（确定性，不依赖真实模型）。
+ */
+function fakeAgents() {
+  const created: Record<string, unknown>[] = []
+  const runtime = {
+    create: async (options: Record<string, unknown>) => {
+      created.push(options)
+      let events: unknown[] = []
+      const agent = {
+        status: 'idle',
+        session: { id: options.sessionId, snapshotEvents: () => events },
+        followup: (message: { content?: Array<{ text?: string }> }) => {
+          const text = (message?.content ?? []).map((b) => b.text ?? '').join('')
+          const token = /SERENITY_HANDYMAN_DONE_[0-9a-f]+/.exec(text)?.[0] ?? ''
+          events = [{
+            type: 'assistant/message',
+            data: { message: { content: [{ type: 'text', text: `done ${token}` }] } },
+          }]
+        },
+      }
+      return { agent, dispose: async () => {} }
+    },
+  }
+  return { runtime, created }
+}
+
+/** ctx（background）：`ctx.agents` 为**属性**（runHandymanJob 直接读属性），llm 走 `ctx.get` */
+function ctxForBackground(agentsRuntime: unknown, llm?: unknown) {
+  return {
+    agents: agentsRuntime,
+    get: (name: string) => (name === 'agents' ? agentsRuntime : name === 'llm' ? llm : undefined),
+  } as never
+}
+
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'handyman-fg-'))
   writeCcc(['minimax-cn-coding-plan/MiniMax-M3'], 'minimax-cn-coding-plan/MiniMax-M3')
@@ -165,5 +222,93 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
     const out = await tool.execute({ guide: true }, execIn())
     expect(String(out.guide)).toContain('Two modes (v1.31.3; default = foreground)')
     expect(fake.calls).toHaveLength(0)
+  })
+})
+
+/**
+ * provider 预检（v1.48，S142 2026-09-25）：owner 在 **Mac** 上实测 `no adapter registered for
+ * provider "<p>"` —— provider adapter 由**每台机器的宿主**注册，而白名单写在**随 git 走的 CCC** 里。
+ * 本组 pin：① 缺失时**不创建注定失败的子 agent** 且把可执行原因写进 `diagnostic`；
+ * ② 有 adapter 时**不误伤**（正控）；③ 取证面不可读时**放行**（增强不得变成新失败源）。
+ */
+describe('handyman provider 预检（把沉默的失败变成可执行的错误）', () => {
+  it('本机没有该 provider 的 adapter ⇒ 不委派 + diagnostic 带完整可执行信息', async () => {
+    writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'probe-no-adapter/ProbeModel'], 'minimax-cn-coding-plan/MiniMax-M3')
+    const fake = fakeSubagents()
+    const tool = createHandymanTool(
+      ctxWithLlm(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan', name: 'MiniMax CN' }] })) as never,
+    ) as unknown as typeof TOOL
+    const out = await tool.execute({ task: 'x', model: 'probe-no-adapter/ProbeModel' }, execIn())
+    expect(out.done).toBe(false)
+    expect(out.stopReason).toBe('error')
+    const d = String(out.diagnostic)
+    expect(d).toContain('no adapter registered on this machine')
+    expect(d).toContain('probe-no-adapter')
+    expect(d).toContain('Available on this machine')
+    expect(d).toContain('minimax-cn-coding-plan')
+    expect(d).toContain('handyman.models')
+    expect(d).toContain('Do not retry unchanged')
+    expect(fake.calls).toHaveLength(0)   // 🔴 关键：不为注定失败的模型创建子 agent
+  })
+
+  it('正控：provider 本机有 adapter ⇒ 照常委派（预检不误伤）', async () => {
+    const fake = fakeSubagents()
+    const tool = createHandymanTool(
+      ctxWithLlm(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan' }] })) as never,
+    ) as unknown as typeof TOOL
+    const out = await tool.execute({ task: 'x' }, execIn())
+    expect(out.done).toBe(true)
+    expect(fake.calls).toHaveLength(1)
+  })
+
+  it('llm 取证面不可读（旧宿主 / 无该服务）⇒ 预检放行，保持旧行为', async () => {
+    const fake = fakeSubagents()
+    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const out = await tool.execute({ task: 'x' }, execIn())
+    expect(out.done).toBe(true)
+    expect(fake.calls).toHaveLength(1)
+  })
+})
+
+/**
+ * 🔴 后台**单 job** 的 `model` 透传（v1.48 修复的真因）：此前只构造 `{task,label}` ⇒
+ * `runHandymanJob` 回落 `defaultModel`，**调用方指定的模型被静默忽略**。实测形态：传
+ * `probe-no-adapter/ProbeModel`，实际跑 `defaultModel` ⇒ 在 provider 不同的机器上必然起不来。
+ */
+describe('handyman background 单 job 的 model 透传（真因修复）', () => {
+  it('🔴 显式 model 必须进 agentOptions（不再静默回退 defaultModel）', async () => {
+    writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'], 'minimax-cn-coding-plan/MiniMax-M3')
+    const fake = fakeAgents()
+    const tool = createHandymanTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
+    const out = await tool.execute(
+      { mode: 'background', task: 'x', label: 'bg-1', model: 'deepseek-official/deepseek-v4-flash' },
+      execIn(),
+    )
+    expect(fake.created).toHaveLength(1)
+    expect(fake.created[0].agentOptions).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    const jobs = out.jobs as Array<Record<string, unknown>>
+    expect(jobs[0].model).toBe('deepseek-official/deepseek-v4-flash')
+    expect(jobs[0].done).toBe(true)
+  })
+
+  it('不传 model ⇒ 仍用 defaultModel（缺省路径行为不变）', async () => {
+    const fake = fakeAgents()
+    const tool = createHandymanTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
+    const out = await tool.execute({ mode: 'background', task: 'x', label: 'bg-2' }, execIn())
+    expect(fake.created[0].agentOptions).toEqual({ provider: 'minimax-cn-coding-plan', model: 'MiniMax-M3' })
+    const jobs = out.jobs as Array<Record<string, unknown>>
+    expect(jobs[0].model).toBe('minimax-cn-coding-plan/MiniMax-M3')
+  })
+
+  it('后台遇缺失 provider ⇒ 抛可执行错误，且**未创建 worker**', async () => {
+    writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'probe-no-adapter/ProbeModel'], 'minimax-cn-coding-plan/MiniMax-M3')
+    const fake = fakeAgents()
+    const tool = createHandymanTool(
+      ctxForBackground(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan' }] })) as never,
+    ) as unknown as typeof TOOL
+    await expect(
+      tool.execute({ mode: 'background', task: 'x', label: 'bg-3', model: 'probe-no-adapter/ProbeModel' }, execIn()),
+    ).rejects.toThrow(/no adapter registered on this machine/)
+    expect(fake.created).toHaveLength(0)
   })
 })

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildRoundPrompt, handymanProgressPaths, HANDYMAN_GUIDE, listActiveHandymen, newStopToken, readProgress, requireWhitelistedModel, sanitizeLabel, splitModel, writeProgress } from '../src/handyman-ops.js'
+import { buildRoundPrompt, handymanProgressPaths, HANDYMAN_GUIDE, listActiveHandymen, newStopToken, providerAvailabilityError, readProgress, requireWhitelistedModel, sanitizeLabel, splitModel, writeProgress } from '../src/handyman-ops.js'
 
 let dir: string
 
@@ -134,5 +134,69 @@ describe('handyman-ops: guide 指引 + 运行状态列表（WebUI 等待界面�
     // handymanProgressPaths 用清洗后的 label
     const p = handymanProgressPaths(dir, 'a:b/c')
     expect(p.json).toContain('handyman-a-b-c.json')
+  })
+})
+
+/**
+ * providerAvailabilityError（v1.48，S142 2026-09-25）：owner 在 **Mac** 上实测到
+ * `no adapter registered for provider "<p>"`，而前台 `diagnostic` 是空的 ⇒ 调用方无法自我修正。
+ * 本组 pin 的是「**把沉默的失败变成可执行的错误**」这条契约。
+ */
+describe('handyman-ops: provider 可用性判据（可执行错误，v1.48）', () => {
+  const reg = [{ id: 'minimax-cn-coding-plan', name: 'MiniMax CN Coding Plan' }, { id: 'deepseek-official', name: 'DeepSeek' }]
+
+  it('全部 provider 本机都有 adapter ⇒ null（不打扰正常路径）', () => {
+    expect(providerAvailabilityError(['minimax-cn-coding-plan/MiniMax-M3'], { registered: reg })).toBeNull()
+    expect(providerAvailabilityError(['deepseek-official/x', 'minimax-cn-coding-plan/y'], { registered: reg })).toBeNull()
+  })
+
+  it('model 串无 "/"（取不到 provider）⇒ 不判定（沿用 agent 默认路由）', () => {
+    expect(providerAvailabilityError(['MiniMax-M3'], { registered: [] })).toBeNull()
+    expect(providerAvailabilityError([], { registered: [] })).toBeNull()
+  })
+
+  it('provider 缺失 ⇒ 报出：请求的模型 / 配置出处 / **本机可用清单** / 两条修法 / 禁止原样重试', () => {
+    const msg = providerAvailabilityError(['probe-no-adapter/ProbeModel'], {
+      registered: reg,
+      configPath: '.opencode/serenity.json',
+    })
+    expect(msg).not.toBeNull()
+    const m = msg as string
+    expect(m).toContain('handyman: provider "probe-no-adapter" has no adapter registered on this machine')
+    expect(m).toContain('probe-no-adapter/ProbeModel')                    // 请求的模型串
+    expect(m).toContain('.opencode/serenity.json')                         // 配置出处
+    expect(m).toContain('"handyman.models"')                               // 落点
+    expect(m).toContain('Available on this machine (registered adapters)')
+    expect(m).toContain('minimax-cn-coding-plan (MiniMax CN Coding Plan)') // 本机真能用的
+    expect(m).toContain('deepseek-official (DeepSeek)')
+    expect(m).toContain('Declared but NOT active here')
+    expect(m).toContain('Fix (pick one, then retry):')
+    expect(m).toContain('Do not retry unchanged')                          // 防死循环
+  })
+
+  it('已声明但休眠的 provider ⇒ 给出激活用的 settings 命名空间', () => {
+    const msg = providerAvailabilityError(['probe-no-adapter/ProbeModel'], {
+      registered: reg,
+      declared: [
+        { provider: 'probe-no-adapter', displayName: 'Probe', settingsNs: 'llm-pi-ai' },
+        { provider: 'unrelated-provider', displayName: '其它', settingsNs: 'x' },
+      ],
+    }) as string
+    expect(msg).toContain('probe-no-adapter (Probe) — settings namespace "llm-pi-ai"')
+    expect(msg).not.toContain('unrelated-provider')   // 只列与缺失项相关的声明
+  })
+
+  it('本机一个 provider 都没有 ⇒ 明确写 (none)，不假装有', () => {
+    const m = providerAvailabilityError(['ghost/m'], { registered: [] }) as string
+    expect(m).toContain('(none)')
+    expect(m).toContain('ghost')
+  })
+
+  it('多个缺失 provider 去重且逐个点名；请求的模型串如实回显（供自查）', () => {
+    const m = providerAvailabilityError(['a/m1', 'a/m2', 'b/m3'], { registered: [] }) as string
+    expect(m).toContain('"a", "b"')   // 去重（a 出现两次只报一次），保持首次出现顺序
+    expect(m).toContain('a/m1')
+    expect(m).toContain('a/m2')
+    expect(m).toContain('b/m3')
   })
 })

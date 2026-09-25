@@ -109,6 +109,75 @@ export function requireWhitelistedModel(model: string, models: string[]): void {
   }
 }
 
+/**
+ * providerAvailabilityError — 判定「**本机有没有该 provider 的 adapter**」，并产出**可执行**的错误文本。
+ * 返回 `null` = 全部可用（调用方照常继续）。
+ *
+ * 🔴 为什么需要它（S142 2026-09-25，owner 在 **Mac** 上实测）：`handyman` 的模型白名单写在
+ *   **CCC**（`.opencode/serenity.json`，**随 git 走**），而 provider adapter 由**每台机器的宿主**
+ *   注册（profile 配置 / settings 命名空间）⇒ 同一份白名单在一台机器可用、在另一台必失败。
+ *   实测症状：宿主抛 `no adapter registered for provider "<p>"`（`dsh-llm`，code `NO_ADAPTER`），
+ *   而**前台路径的 `diagnostic` 是空的** ⇒ 调用方（LLM）拿到 `stopReason:"error"` 却**不知道为什么**，
+ *   也就无法修正自己的配置 —— 本条把「沉默的失败」变成「可执行的错误」。
+ *
+ * 数据来源（宿主 `LlmRuntime`）：`listProviders()` = **有 adapter 的路由**；
+ * `listConfigurableProviders()` = **已声明但未必激活**的路由（含激活用的 settings 命名空间）。
+ *
+ * 判据边界：`model` 串里**没有 `/`** 时取不到 provider（沿用 agent 默认路由）⇒ **不判定**（跳过）。
+ */
+export function providerAvailabilityError(
+  models: readonly string[],
+  facts: {
+    registered: readonly { id: string; name?: string }[]
+    declared?: readonly { provider: string; displayName?: string; settingsNs?: string }[]
+    configPath?: string
+  },
+): string | null {
+  const registered = new Set(facts.registered.map((r) => r.id))
+  const requested = models
+    .map((m) => ({ raw: m, provider: splitModel(m).provider }))
+    .filter((e): e is { raw: string; provider: string } => typeof e.provider === 'string' && e.provider !== '')
+  const missing = [...new Set(requested.filter((e) => !registered.has(e.provider)).map((e) => e.provider))]
+  if (missing.length === 0) return null
+
+  const list = (items: string[], cap = 12): string =>
+    items.length === 0
+      ? '  (none)'
+      : items.slice(0, cap).map((s) => `  - ${s}`).join('\n')
+        + (items.length > cap ? `\n  … and ${items.length - cap} more` : '')
+
+  const available = facts.registered.map((r) => (r.name ? `${r.id} (${r.name})` : r.id)).sort()
+  const declared = (facts.declared ?? []).filter((d) => missing.includes(d.provider))
+  const configPath = facts.configPath ?? '<ccc>/.opencode/serenity.json'
+  const missingList = missing.map((p) => `"${p}"`).join(', ')
+
+  return [
+    `handyman: provider ${missingList} has no adapter registered on this machine.`,
+    '',
+    '  Requested model(s) :',
+    ...requested.map((e) => `    ${e.raw}`),
+    `  Configured in      : ${configPath} → "handyman.models" / "handyman.defaultModel"`,
+    '',
+    '  Why this happens   : the whitelist lives in the CCC (it travels with the repository), while',
+    '                       provider adapters are registered per machine by the host. An entry that',
+    '                       works on one machine can fail on another.',
+    '',
+    '  Available on this machine (registered adapters):',
+    list(available),
+    '',
+    '  Declared but NOT active here (activate via settings, then retry):',
+    list(declared.map((d) => `${d.provider}${d.displayName ? ` (${d.displayName})` : ''}${d.settingsNs ? ` — settings namespace "${d.settingsNs}"` : ''}`)),
+    '',
+    '  Fix (pick one, then retry):',
+    `    1. Point the whitelist at a provider that IS registered here — edit ${configPath}`,
+    '       ("handyman.models", and "handyman.defaultModel" if that is what you relied on).',
+    `    2. Register/activate provider ${missingList} on this machine (host profile config,`,
+    '       or the settings namespace listed above).',
+    '',
+    '  Do not retry unchanged — the same call fails identically.',
+  ].join('\n')
+}
+
 /** 轮次 prompt（对齐老 loop 结构：回顾进度 → 自由工作 → 汇报；S134 EAP 化：固定详尽） */
 export function buildRoundPrompt(opts: {
   root: string
@@ -188,6 +257,18 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
 - The CCC is expected to point this whitelist at LOW-COST models: handyman is the bulk-execution channel
 - background mode: recursive subagents inside a worker inherit the worker's model automatically (DSH native)
 - foreground mode: the child is started through the host delegation service with the resolved model
+
+### 3b. 🔴 Provider availability (per-machine — the whitelist is NOT enough)
+- The whitelist lives in the **CCC** ("serenity.json", it **travels with the repository**), but provider
+  **adapters are registered per machine by the host** (profile config / settings namespace). An entry that
+  works on one machine can fail on another with: "no adapter registered for provider <p>".
+- Before spawning, handyman verifies the provider of the resolved model against the adapters registered
+  **on this machine**; if it is missing it reports the requested model, where it is configured, **the
+  providers that ARE available here**, any declared-but-dormant route (with its settings namespace), and the
+  exact fix — foreground puts this in "diagnostic", background throws it.
+- ⇒ If you see "has no adapter registered on this machine": edit ".opencode/serenity.json" "handyman.models"
+  (and "handyman.defaultModel") to a provider listed as available, or activate/register the provider on this
+  machine. **Do not retry the same call unchanged** — it fails identically.
 
 ### 4. Parallel strategy (background mode only)
 - Independent subtasks can run in parallel via handyman(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file

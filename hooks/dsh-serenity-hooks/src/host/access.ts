@@ -137,6 +137,31 @@ export function hostSubagents(ctx: unknown): HostSubagents | undefined {
   return hostInjected<HostSubagents>(ctx, 'subagents')
 }
 
+/**
+ * `ctx.llm`（`LlmRuntime`；v1.48：handyman 的 **provider 预检**取证面）。
+ *
+ * 形状对照宿主 rc.2（`@deepseek-ai/dsh-llm`）：
+ *   · `listProviders()` → `{ id, name }[]` —— **有 adapter** 的路由（"本机真能用"）
+ *   · `listConfigurableProviders()` → `{ provider, displayName, settingsNs, … }[]` ——
+ *     **已声明但未必激活**的路由（"可以激活"）
+ *
+ * 🔴 为什么走 `hostInjected` 而不是直接属性读：`llm` **不在** dsp 的 `inject` 列表内
+ *   （见 `src/index.ts` 的 `inject`）⇒ 真实 cordis 下直接属性读对未声明服务**会抛**
+ *   （`cannot get property "llm" without inject`），必须回落 `ctx.get`。
+ *
+ * 🔴 为什么**刻意不把 `llm` 加进 `inject`**：预检是**尽力而为**的增强，不是运行前提。
+ *   加进 `inject` 会让"没有 llm 服务的 profile"**整块不激活插件** —— 为了一条诊断信息
+ *   换来插件不上线，代价与收益倒挂。缺失一律 `undefined`，调用方**不得**因此抛错。
+ */
+interface HostLlm {
+  listProviders?: () => unknown
+  listConfigurableProviders?: () => unknown
+}
+
+export function hostLlm(ctx: unknown): HostLlm | undefined {
+  return hostInjected<HostLlm>(ctx, 'llm')
+}
+
 /** 会话 cwd 列表（live 会话；形状不符时返回空数组而非抛错） */
 export function hostSessionCwds(ctx: unknown): string[] {
   try {

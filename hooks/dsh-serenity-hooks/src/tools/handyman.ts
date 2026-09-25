@@ -38,6 +38,7 @@ import {
   HANDYMAN_GUIDE,
   handymanProgressPaths,
   newStopToken,
+  providerAvailabilityError,
   readProgress,
   requireWhitelistedModel,
   splitModel,
@@ -47,7 +48,7 @@ import {
 import type { JsonValue } from '../json.js'
 import { PLUGIN_SOURCE } from '../message-source.js'
 import { waitAgentIdle } from '../agent-idle.js'
-import { hostSubagents } from '../host/access.js'
+import { hostLlm, hostSubagents } from '../host/access.js'
 import { isoLocal } from '../time.js'
 
 function renderText(value: unknown): ContentBlock[] {
@@ -140,6 +141,41 @@ function subagentOutputText(output: unknown): string {
 }
 
 /**
+ * providerPreflight — 在**创建任何 worker 之前**判定「本机有没有该 provider 的 adapter」。
+ *
+ * 返回**可执行**的错误文本；`null` = 可用，**或无法取证**（服务缺失 / 形状不符 / 读取抛错
+ * ⇒ 一律**不阻断**，保持旧行为 —— 增强不得变成新的失败源）。
+ *
+ * 为什么必须放在"创建之前"：宿主对未知 provider 抛 `no adapter registered for provider "…"`
+ * （`dsh-llm`，code `NO_ADAPTER`）。若照常创建：前台只拿回 `stopReason:"error"` ＋ **空
+ * `diagnostic`**（实测），后台整条失败且**不带原因** ⇒ 调用方（LLM）无法自我修正配置。
+ */
+function providerPreflight(ctx: Context, model: string): string | null {
+  const llm = hostLlm(ctx)
+  if (typeof llm?.listProviders !== 'function') return null
+  let registered: Array<{ id: string; name?: string }>
+  try {
+    const raw = llm.listProviders()
+    if (!Array.isArray(raw)) return null   // 形状不符（旧宿主）⇒ 不判定
+    registered = raw.filter((r): r is { id: string; name?: string } =>
+      typeof r === 'object' && r !== null && typeof (r as { id?: unknown }).id === 'string')
+  } catch {
+    return null                            // 读取失败 = 服务不可用（等价缺失）⇒ 不判定
+  }
+  let declared: Array<{ provider: string; displayName?: string; settingsNs?: string }> = []
+  try {
+    const raw = llm.listConfigurableProviders?.()
+    if (Array.isArray(raw)) {
+      declared = raw.filter((d): d is { provider: string; displayName?: string; settingsNs?: string } =>
+        typeof d === 'object' && d !== null && typeof (d as { provider?: unknown }).provider === 'string')
+    }
+  } catch {
+    /* 声明面读不到只是少一段建议，不影响判定 */
+  }
+  return providerAvailabilityError([model], { registered, declared, configPath: '.opencode/serenity.json' })
+}
+
+/**
  * foreground 模式：单次前台串行委派（用户裁决"本次所需的简单实现"）。
  *
  * 与 background 的差别（R↓）：
@@ -172,6 +208,12 @@ async function runForegroundJob(
       + 'ctx.get("subagents") yielded a start() function. Check `dashboard health` (host-contract '
       + 'section, service "subagents"); mode="background" does not need this service and still works.',
     )
+  }
+  // 🔴 provider 预检（v1.48）：本机没有该 provider 的 adapter ⇒ **不创建注定失败的子 agent**，
+  // 而是把**可执行原因**放进 `diagnostic`（前台路径既有的"失败解释"位，工具描述也指向它）。
+  const preflight = providerPreflight(ctx, model)
+  if (preflight !== null) {
+    return { mode: 'foreground', done: false, model, stopReason: 'error', output: '', diagnostic: preflight }
   }
   const { provider, model: modelName } = splitModel(model)
   const run = (await subagents.start('spawn', {
@@ -224,6 +266,10 @@ async function runHandymanJob(
   const label = job.label
   const model = job.model ?? defaultModel
   requireWhitelistedModel(model, models)
+
+  // 🔴 provider 预检（v1.48）：与前台同源；后台**抛错**——不静默回退、不留不明失败。
+  const preflightError = providerPreflight(ctx, model)
+  if (preflightError !== null) throw new Error(preflightError)
 
   const { provider, model: modelName } = splitModel(model)
   const stopToken = newStopToken()
@@ -348,6 +394,10 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
       'or parallel jobs → background.\n' +
       'Model: only models whitelisted in .opencode/serenity.json "handyman.models" (missing config = error); ' +
       'default reads handyman.defaultModel. Both modes share the same whitelist and default.\n' +
+      'Provider check: the whitelist lives in the CCC (it travels with the repo) while provider adapters are ' +
+      'registered per machine by the host — so before spawning, the provider of the resolved model is verified ' +
+      'against the adapters present on THIS machine. If it is missing you get the available providers plus the ' +
+      'exact fix (foreground: in `diagnostic`; background: thrown), never an opaque failure.\n' +
       'Recursion: a worker\'s tool set excludes handyman itself (orchestration belongs to the main agent).\n' +
       'Guide: handyman(guide=true) prints the scale-up usage guide.',
     parameters: {
@@ -443,7 +493,12 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
             if (typeof args.task !== 'string' || typeof args.label !== 'string') {
               throw new Error('handyman: task and label are required (single-job mode)')
             }
-            return [{ task: args.task, label: args.label }]
+            // 🔴 修复（S142 2026-09-25 实测）：**单 job 后台模式此前丢弃 `model` 参数** —— 只构造了
+            // `{task,label}`，于是 `runHandymanJob` 回落 `hc.defaultModel` ⇒ 调用方指定的模型被
+            // **静默忽略**（实测：传 `probe-no-adapter/ProbeModel`，实际跑的是 `defaultModel`）。
+            // 与 `jobs` 路径（`parseJobs` 带上 model）**不对称**。这正是"换台机器起不来"的成因：
+            // CCC 的 `defaultModel` 随 git 走，而 provider 由**每台机器的宿主**注册。
+            return [{ task: args.task, label: args.label, ...(typeof args.model === 'string' && args.model !== '' ? { model: args.model } : {}) }]
           })()
       if (jobs.length === 0) throw new Error('handyman: no jobs provided')
       if (jobs.length > hc.maxParallel) {
