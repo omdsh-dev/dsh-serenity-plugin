@@ -381,6 +381,12 @@
 
 ### 3-9. 🔴 测试面缺口（**第 ⑤ 项的输入**）
 
+✅ **2026-09-25 进展（最大的一件已补）**：**`src/seams/context.ts` 的 `registerContext` 此前零执行** —— 模块实测 **43.85%**、未覆盖行 = **148–285**，即该函数**整个从未被执行**，而它正是「**会话连续性**」的机制本体（播种 ACC 身份 ＋ 重启恢复激活会话 ＋ pre-step 兜底）。
+⇒ 新增 `tests/seams/context-register.test.ts`（**16 用例**，按 L2 装配测试放 `tests/seams/`）：接线开关 ／ 播种幂等 ／ skiff 旁路 ／ **重启恢复链（正负控成对）** ／ **「context-only 必须 next() 委托」回归钉 ＋ 消息顺序**。提交 **`50ad1f3`**；test **1699 → 1715**。
+
+🔵 **挑靶方法（可复用，本条即 ⑤ 的工作法）**：**先看 coverage 表的"未覆盖行号"** —— 它直接指出"哪个函数从没跑过"，**别凭感觉挑**；写测前**读源码确认替身安全**（本次核了 `registerEntrySkillSection` / `registerTrajectorySkillSection` **均内部 try/catch**、且后者无绑定即早返回 ⇒ 缺 `agent.ctx` **不抛**，故 `agent.inject` 的断言才可靠）。
+⚠️ **本项剩余靶（同法挑）**：`tools/msm.ts` 41.42% ／ `tools/trajectory.ts` 57.66% ／ `seams/bootstrap.ts` 65.84% ／ `seams/env.ts` 70.21% ／ 客户端半（下表 #1~#3）。
+
 | # | 缺口 | 证据 / 读数 |
 |---|---|---|
 | 1 | **客户端半零行为测试** | 8 个 `.tsx` ＋ 4 个 `.css` **无任何行为/渲染测试**；根因可判定 = 两份 vitest 配置 `environment: 'node'` 且 `devDependencies` **无 jsdom** ⇒ 客户端半在测试面上**不可执行** |
