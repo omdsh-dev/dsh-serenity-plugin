@@ -265,3 +265,147 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
     expect(f.steers).toEqual([])
   })
 })
+
+/**
+ * ⑤ 第 20 件：**边界与失败路径**（挑靶依据 = 覆盖率报告的 `cbranch-no`/`cstat-no`，**不是**"再测一遍正常路径"）。
+ *
+ * 本文件上面那组只走**顺利路径**（外部面 ∧ 有文本 ∧ steer 不抛 ∧ turn 有值）⇒ 下列**真实可达**的
+ * 分支从未被执行：`payload` 无 agent ／ 会话 id 缺失 ／ `session.header` 缺失（cwd 回落）／
+ * 无可用最终输出（**四种事件形状**）／`payload.turn` 缺失（两条日志各一处回落）／`agent.steer` 抛错。
+ * 🔴 与 `msm-ops.ts` 那类"平台门/不可达"不同 —— 这些**都是产线会真走到的路**（宿主事件形状不保证齐全）。
+ */
+describe('output-guard-seam: 边界与失败路径（⑤ 第 20 件）', () => {
+  /** 可变夹具：**每条用例只针对一个具体分支**（不要用它去"再测一遍正常路径"） */
+  function harness(opts: { omitSessionId?: boolean; sessionId?: string; withHeader?: boolean; steerThrows?: boolean } = {}) {
+    const steers: string[] = []
+    let hook: ((p: { agent?: unknown; turn?: number }) => void) | undefined
+    const session: Record<string, unknown> = { events: [] as unknown[] }
+    if (opts.omitSessionId !== true) session.id = opts.sessionId ?? 'skiff-edge-uuid'
+    if (opts.withHeader !== false) session.header = { cwd: dir }
+    const agent = {
+      id: 'edge-agent',
+      session,
+      steer: (m: { content?: Array<{ type?: string; text?: string }> }) => {
+        if (opts.steerThrows === true) throw new Error('steer boom')
+        steers.push(m.content?.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n') ?? '')
+      },
+    }
+    let cb: ((p: unknown) => void) | undefined
+    return {
+      steers,
+      agent,
+      /** 缺 turn ⇒ 覆盖 `payload.turn ?? '?'` 的**回落侧** */
+      fire: (turn?: number) => (turn === undefined ? cb?.({ agent }) : cb?.({ agent, turn })),
+      fireNoAgent: () => cb?.({}),
+      register: () => registerOutputGuardHook({ on: (_ev: string, fn: (p: unknown) => void) => { cb = fn as (p: unknown) => void } } as never),
+    }
+  }
+
+  const SENSITIVE_EVENT = { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '密码是 hunter2-secret' }] } } }
+
+  it('payload 缺 agent ⇒ 直接 return（不抛）', () => {
+    const f = harness()
+    f.register()
+    expect(() => f.fireNoAgent()).not.toThrow()
+    expect(f.steers).toEqual([])
+  })
+
+  it('会话 id 缺失 ⇒ 判为非外部面 ⇒ 不检测（同批覆盖 `id ?? 空串` 回落）', () => {
+    const f = harness({ omitSessionId: true })
+    f.register()
+    f.agent.session.events.push(SENSITIVE_EVENT)
+    f.fire(1)
+    expect(f.steers).toEqual([])
+  })
+
+  it('session.header 缺失 ⇒ cwd 回落 process.cwd()（spy 钉在无 .serenity 的临时目录 ⇒ 零干预）', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'og-nocwd-'))
+    const cwd = vi.spyOn(process, 'cwd').mockReturnValue(outside)
+    try {
+      const f = harness({ withHeader: false })
+      f.register()
+      f.agent.session.events.push(SENSITIVE_EVENT)
+      f.fire(1)
+      // 结构判据：`header` 整个缺席 ⇒ `header?.cwd` 必为 undefined ⇒ `?? process.cwd()` **必然**执行
+      expect(cwd).toHaveBeenCalled()
+      expect(f.steers).toEqual([]) // 非 CCC ⇒ 零干预
+    } finally {
+      cwd.mockRestore()
+      rmSync(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('无可用文本的四种事件形状 ⇒ 不打回（逐条覆盖 `??` 回落与"text 为空"）', () => {
+    const f = harness()
+    f.register()
+    // 逆序扫描（从末尾往前）⇒ 末条先被看：
+    f.agent.session.events.push(
+      { type: 'assistant/message', data: { content: [{ type: 'text', text: '正常回答' }] } }, // 覆盖 `?? e.data?.content`
+      { type: 'assistant/message', data: { message: { content: [{ type: 'tool-call' }] } } }, // 非 text 块 ⇒ text 为空
+      { type: 'assistant/message', data: {} }, // 两个 content 都缺 ⇒ `?? []`
+      { type: 'tool/call', data: {} }, // 非 assistant/message 事件
+    )
+    f.fire(1)
+    expect(f.steers).toEqual([]) // 最终取到的文本 = 首条（'正常回答' ⇒ 无命中）
+  })
+
+  it('完全无可用文本 ⇒ 返回空串 ＋ 不检测（工具调用轮等）', () => {
+    const f = harness()
+    f.register()
+    f.agent.session.events.push(
+      { type: 'assistant/message', data: { message: { content: [{ type: 'tool-call' }] } } },
+      { type: 'tool/call', data: {} },
+    )
+    f.fire(1)
+    expect(f.steers).toEqual([])
+  })
+
+  it('payload.turn 缺失 ⇒ 两条日志都回落 `?`（打回行与放弃行各一处）', () => {
+    const f = harness()
+    f.register()
+    f.agent.session.events.push(SENSITIVE_EVENT)
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      for (let i = 0; i < REBUKE_MAX_ROUNDS + 1; i++) f.fire()
+      const logs = log.mock.calls.map((c) => c.join(' ')).join('\n')
+      const warns = warn.mock.calls.map((c) => c.join(' ')).join('\n')
+      expect(logs).toContain('turn=?')
+      expect(warns).toContain('turn=?')
+      expect(f.steers.length).toBe(REBUKE_MAX_ROUNDS)
+    } finally {
+      log.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('agent.steer 抛错 ⇒ 不向外抛 ＋ 告警（打回机制失效不得拖垮 turn）', () => {
+    const f = harness({ steerThrows: true })
+    f.register()
+    f.agent.session.events.push(SENSITIVE_EVENT)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(() => f.fire(1)).not.toThrow()
+      expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('steer failed')
+      expect(f.steers).toEqual([])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('agent.steer 抛**非 Error**（无 `message` 字段）⇒ 告警仍成立（覆盖 `?? error` 回落侧）', () => {
+    const f = harness()
+    f.agent.steer = () => {
+      throw { code: 'E_FAIL' } // 非 Error：`(error as Error)?.message` 为 undefined ⇒ 走 `?? error`
+    }
+    f.register()
+    f.agent.session.events.push(SENSITIVE_EVENT)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(() => f.fire(1)).not.toThrow()
+      expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('steer failed')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+})
