@@ -211,20 +211,42 @@ try {
     return false
   }
   /** **真输入**点击（CDP `Input.*`）：有 moved/pressed/released 三段，`isTrusted=true`。
+   *
    *  🔴 点击前先做**命中测试**（`elementFromPoint`）—— 实测踩到：落地页上有一个开机弹窗的
-   *  `mask` 铺满全屏，真输入会被它吃掉，而"点了没反应"从返回码上完全看不出来。 */
+   *  `mask` 铺满全屏，真输入会被它吃掉，而"点了没反应"从返回码上完全看不出来。
+   *
+   *  🔴 **2026-09-25 22:2x 修正（V8c 曾因此偶发 FAIL）**：原版**算了 `hit` 却不用它** ——
+   *     明知命中点不是自己，照样把鼠标发过去。后果 = 红绿取决于"那个 mask 在不在"，
+   *     而它与被测代码无关（判据纪律 53：外部实例必须每轮唯一）。
+   *     ⇒ 现在 `hit !== 'self'` 时**先清障再重试**（而不是盲点）。
+   *     ⚠️ 诚实边界：清障只处理**已知形态**（落地页 `role=dialog` 的 mask）＋ Escape；
+   *        仍打不中就**如实返回 `occluded`**，绝不静默降级成 DOM click 充数。 */
+  const hitOf = async (expr) => evalJs(`(() => { const e = ${expr}; if (!e) return null
+    const r = e.getBoundingClientRect()
+    const p = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height, tag: e.tagName,
+      hit: !p ? 'none' : ((e === p || e.contains(p)) ? 'self' : (p.tagName + ' class=' + ((p.getAttribute('class') || '')).slice(0, 50))),
+      label: (e.getAttribute('aria-label') || e.textContent || '').trim().slice(0, 40) } })()`)
   const realClick = async (expr) => {
-    const box = await evalJs(`(() => { const e = ${expr}; if (!e) return null
-      const r = e.getBoundingClientRect()
-      const p = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)
-      const hit = !p ? 'none' : ((e === p || e.contains(p)) ? 'self' : (p.tagName + ' class=' + ((p.getAttribute('class') || '')).slice(0, 50)))
-      return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height, tag: e.tagName, hit,
-        label: (e.getAttribute('aria-label') || e.textContent || '').trim().slice(0, 40) } })()`)
+    let box = await hitOf(expr)
     if (box === null) return { ok: false, via: 'not-found' }
     if (!(box.w > 0 && box.h > 0)) {
       // 0 尺寸 ⇒ 真输入打不中；退回 DOM click，并**如实标注**这个退化（不静默）
       const r = await evalJs(`(() => { const e = ${expr}; e.click(); return true })()`)
       return { ok: !!r, via: 'dom-click（元素 0 尺寸，真输入打不中）', ...box }
+    }
+    // 命中点不是自己 ⇒ 有覆盖层挡路：清一次障再重测（最多两轮，不做无限重试）
+    for (let attempt = 0; attempt < 2 && box.hit !== 'self'; attempt++) {
+      await dismissBlocking()
+      await pressEscape()
+      await sleep(500)
+      const again = await hitOf(expr)
+      if (again === null) return { ok: false, via: 'not-found（清障后元素消失）', ...box }
+      box = again
+    }
+    if (box.hit !== 'self') {
+      // 清不掉 ⇒ 如实报"被挡"，**不点**（点了也只是把失败伪装成"点过了"）
+      return { ok: false, via: `occluded（命中点=${box.hit}，清障两轮仍未让开）`, ...box }
     }
     await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: box.x, y: box.y, button: 'none' })
     await sleep(120)
@@ -238,22 +260,49 @@ try {
     await cdp('Input.dispatchKeyEvent', { type: 'keyDown', ...k })
     await cdp('Input.dispatchKeyEvent', { type: 'keyUp', ...k })
   }
-  /** 关掉挡在路上的开机弹窗（**不是**我们的设置面板）。返回观察到的弹窗文案，供记录。 */
+  /** 用**真输入**点一个元素（绕开"DOM click 不经命中测试"的盲区）。
+   *  用于关掉挡路的弹窗：实测该弹窗的按钮**本身可命中**（mask 是它的**兄弟**节点、且在它下面，
+   *  `dlgZ=1` vs `maskZ=auto`；探针实测 `elementFromPoint(按钮中心)` = 按钮自己）⇒ 真输入能点中。
+   *  ⚠️ 但 `b.click()`（DOM click）在**某些**层叠形态下会静默无效 ⇒ 用真输入更稳。 */
+  const realClickExpr = async (expr) => {
+    const b = await evalJs(`(() => { const e = ${expr}; if (!e) return null; const r = e.getBoundingClientRect()
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height } })()`)
+    if (b === null || !(b.w > 0 && b.h > 0)) return false
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: b.x, y: b.y, button: 'none' })
+    await sleep(80)
+    await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: b.x, y: b.y, button: 'left', clickCount: 1 })
+    await sleep(50)
+    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: b.x, y: b.y, button: 'left', clickCount: 1 })
+    return true
+  }
+  /** 关掉挡在路上的开机弹窗（**不是**我们的设置面板）。返回观察到的弹窗文案，供记录。
+   *
+   *  🔴 **2026-09-25 22:2x 修正（V8c 曾因此偶发 FAIL）**：原版有三处会让红绿与代码无关：
+   *   ① **只在 P1 之后调用一次** —— 而该弹窗**可能晚于 `#root` 挂载才渲染**（实测：重载后
+   *      1.5s 内它**根本不出现**；换个 profile 又出现）⇒ 一次调用会整个错过它；
+   *   ② 只用 `b.click()`（DOM click）—— 不经命中测试，层叠形态一变就静默无效；
+   *   ③ 判定式只找 `[role=dialog]`，**不认"对话框已走、mask 还留着"**的中间态。
+   *   ⇒ 现在：真输入点击 ＋ Escape ＋ **末了补一刀"确认 mask 真没了"**；调用方（`realClick`）
+   *      还会在命中测试失败时**再调它一次**（双保险，见 `realClick`）。 */
   const dismissBlocking = async () => {
     const seen = []
     for (let i = 0; i < 4; i++) {
       const info = await evalJs(`(() => { const d = ${BLOCKING_EXPR}; if (!d) return null
         return { text: (d.innerText || '').replace(/\\s+/g, ' ').slice(0, 100),
           buttons: [...d.querySelectorAll('button')].map((b) => ((b.textContent || '') + '|' + (b.getAttribute('aria-label') || '')).trim()).slice(0, 8) } })()`)
-      if (info === null) return seen
+      if (info === null) break
       seen.push(info)
-      // 先试它自己的"继续/知道了"按钮；没有再试 Escape（宿主 useModalLayer 支持 Esc 关闭）
-      const clicked = await evalJs(`(() => { const d = ${BLOCKING_EXPR}; if (!d) return false
-        const b = [...d.querySelectorAll('button')].find((x) => /continue|got it|close|dismiss|agree|accept|ok|继续|知道了|关闭|确定|同意/i.test(((x.textContent || '') + (x.getAttribute('aria-label') || '')).trim()))
-        if (!b) return false
-        b.click(); return true })()`)
+      // 优先点它自己的"继续/知道了"按钮（**真输入**）；没有再试 Escape（宿主 useModalLayer 支持 Esc 关闭）
+      const clicked = await realClickExpr(`(() => { const d = ${BLOCKING_EXPR}; if (!d) return null
+        return [...d.querySelectorAll('button')].find((x) => /continue|got it|close|dismiss|agree|accept|ok|继续|知道了|关闭|确定|同意/i.test(((x.textContent || '') + (x.getAttribute('aria-label') || '')).trim())) || null })()`)
       if (!clicked) await pressEscape()
       await sleep(800)
+    }
+    // 收尾：对话框走了但 mask 可能还在（实测的中间态）⇒ 再 Escape 一次并等一拍
+    const leftover = await evalJs(`document.querySelectorAll('[class*="mask"]').length > 0`)
+    if (leftover) {
+      await pressEscape()
+      await sleep(600)
     }
     return seen
   }
