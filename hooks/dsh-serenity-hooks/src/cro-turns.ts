@@ -49,8 +49,6 @@
  * ⚠️ 这也天然处理了「同一轨迹多载体」（S142 曾挂 4 条）的情形。
  */
 
-import type { Context } from 'cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
 import { registerDisposer } from './host/effect.js'
 
 /** 一次「在跑」记录的 TTL（见文件头的方向性判据） */
@@ -143,13 +141,31 @@ export function __resetCroTurnsForTest(): void {
  *
  * ⚠️ **失败不抛**：任一事件通道缺失 ⇒ 响亮日志 + 该订阅跳过（**apply 不可成为启动单点**，
  * 与 `registerDeepseekVisionPatch` 等既有装配同款纪律）。
- * @param ctx 插件上下文
+ *
+ * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────
+ * **两个宿主 import 全部清除**（`Context`（cordis）＋ `Agent`（`@deepseek-ai/dsh-agent`）），
+ * `ctx` 参数类型 → `unknown`。
+ *
+ * 🔴 **本处顺带更正 §2.7 的一处分档**：本文件原被列在"剩余 3 个属**真依赖**档"里，
+ * 但**逐符号查证后与那个判断不符** ——
+ *   · `Context`：`ctx` 只被**结构化访问**（原码本就写着 `ctx as unknown as { on: … }`）
+ *     ⇒ 该注解未提供任何类型保证（与 `agent-idle.ts` 同档）。
+ *   · `Agent`：**导入后从未使用** —— 事件 payload 一律按 `{ agent?: unknown }` 解构，
+ *     再交给 `sessionIdOf(...)`（它收 `unknown`）。⇒ **纯粹是死 import**。
+ * ⇒ **判据（本件再证一次，且比上一件更硬）**：分档**必须逐符号看"它有没有参与类型检查"**，
+ *   **不能按文件整档划分** —— 同一个文件里可以并存"真依赖符号"与"纯名义符号"。
+ * 🔵 **剩余 2 个文件**才是真依赖档：`rebuild.ts` 用 `Session`/`SessionEvent`/
+ *   `deriveEventMessage`/`Agent` 等**真调用**的类型；`wake-scheduler.ts` 用 `Agent` 的
+ *   `followup`/`steer`（**真调用**）⇒ 它们走 §2.7-③ **选项 (b)** 或把中立接口下沉到 L0，
+ *   **另立一件**（D85 一次只改一件事）。
+ * @param ctx 插件上下文（**结构化访问** `on`，故类型为 `unknown`，见下方 I2 说明）
  */
-export function registerCroTurnTracking(ctx: Context): void {
+export function registerCroTurnTracking(ctx: unknown): void {
   const on = (event: string, handler: (payload: unknown) => void): void => {
     try {
       // 宿主事件为字符串键，写错只会静默不订阅 ⇒ 名字取自 HOST_EVENTS 白名单（编译期已钉）
-      ;(ctx as unknown as { on: (e: string, h: (p: unknown) => void) => void }).on(event, handler)
+      // 🔵 I2 收敛后 `ctx` 本就是 `unknown` ⇒ 原 `as unknown as` 双重断言已冗余，化简为单次。
+      ;(ctx as { on: (e: string, h: (p: unknown) => void) => void }).on(event, handler)
     } catch (err) {
       console.log(`[serenity-hooks] ✗ CRO turn 追踪未装配（${event} 不可用）: ${String((err as Error)?.message ?? err)}`)
     }
