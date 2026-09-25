@@ -26,7 +26,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { IMAGE_UPLOAD_DIR, registerStatusApi } from '../src/api.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
@@ -1045,6 +1045,68 @@ describe('src/api.ts：残余 catch 与尾部支线（⑤ 第 18 件）', () => 
       const bad = await raw({ port: api.port, method: 'GET', path: '/serenity/session-cleanup?olderThanDays=30', headers: UI_HEADERS })
       expect(bad.status).toBe(400)
       expect(String(jsonBody(bad).error)).toContain('sessions.list boom')
+    } finally {
+      await api.close()
+    }
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🆕 2026-09-25 ⑤ 第 31 件：`resolveWorkspace` 的**默认箭头**（`listCwds = () => []`）
+//
+// 挑靶依据 = **先逐行读覆盖率报告的 `cstat-no`/`fstat-no`**（别按 branch% 排序硬上）：
+// 当时 `api.ts` 的**唯一未执行函数**就是那句默认箭头（语句面已 99.73%，另一处 2 条属
+// **构造上不可达**的 catch ⇒ 地图 §3-8 第 9 行已登记）⇒ 补掉它即可让该文件**函数面全满**。
+//
+// 🔴 为什么既有用例没覆盖到：⑰ 件那组测的是"**列表存在**"的两条路（`sessions.get` ／
+//    `sessions.list`），而默认箭头只在 **宿主连 `sessions` 服务都没有**时才存活到被调用。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * **独立读数器**：从 `process.cwd()` 上溯找 `.serenity`（= CCC 标记）。
+ * 🔴 刻意**不复用** `cccRootForCwd` —— 用实现去验实现是自证（读数器要先证明不瞎，纪律 §2.7j）。
+ */
+function enclosingCccFromCwd(): string | null {
+  let cur = process.cwd()
+  for (let i = 0; i < 32; i++) {
+    if (existsSync(join(cur, '.serenity'))) return cur
+    const parent = dirname(cur)
+    if (parent === cur) break
+    cur = parent
+  }
+  return null
+}
+
+describe('src/api.ts：`resolveWorkspace` 的默认箭头（⑤ 第 31 件）', () => {
+  const jsonBody = (r: RawRes): any => JSON.parse(r.body)
+
+  it('🔴 宿主无 `sessions` 服务 ⇒ 默认箭头 `() => []` 被真调用 ⇒ 回落 `process.cwd()`（含判别性对照）', async () => {
+    // 夹具自证：`bootApi()` 不带任何 opts ⇒ `ctx.get('sessions')` 返回 undefined
+    // ⇒ `listCwds` **保持默认箭头**（既有的两条件路都会把它换掉）
+    const api = await bootApi()
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: '/serenity/status', headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      const enclosing = enclosingCccFromCwd()
+      if (enclosing === null) {
+        // 本仓被检出到任何 CCC 之外 ⇒ cwd 上溯无所获
+        expect(jsonBody(res).root).toBeNull()
+      } else {
+        // 本仓位于 `<外层 CCC>/AI_LAB/dsh-serenity-plugin` 之下 ⇒ 落点是**外层那个 CCC**
+        expect(jsonBody(res).root, '默认箭头 ⇒ 空列表 ⇒ 回落 process.cwd()').toBe(enclosing)
+      }
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 判别性对照：同一条链上**只要** `sessions.list` 在场，落点就变成它给的 cwd（不是 `process.cwd()`）', async () => {
+    const api = await bootApi({ liveSessionCwds: [ccc] })
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: '/serenity/status', headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      expect(jsonBody(res).root, '列表在场 ⇒ 采用它的 cwd').toBe(ccc)
+      expect(jsonBody(res).root, '且**不是** cwd 上溯的结果').not.toBe(enclosingCccFromCwd())
     } finally {
       await api.close()
     }
