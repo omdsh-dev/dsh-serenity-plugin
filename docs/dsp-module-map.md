@@ -306,6 +306,15 @@
 ⇒ 后果：`namingTitleFor` 是唯一把 `trajectory.ts` 拽进 L1 的东西；它让"改工具面"能影响领域核心的装载图。
 ⇒ 处置方向（第 ④ 项）：把那一个小函数**下沉**到 L1（或 `trajectory-ops`/`time` 这类中立模块），`rebuild` 与 `tools/trajectory` 各自向下依赖。**功能无影响的判据** = `namingTitleFor` 的输入输出与调用点不变 ＋ 全量测试绿。
 
+✅ **已解（2026-09-25，工程化程序第 ④ 项·第 1 步）**：`sanitizeSessionSummary` ＋ `namingTitleFor` **下沉到 L1 的 `trajectory-ops.ts`**（零 DSH 依赖）。改动面 = 4 个文件：① `trajectory-ops.ts` 新增两函数 ② `rebuild.ts` 改从 `./trajectory-ops.js` 取（**删掉那条 L3 import**）③ `tools/trajectory.ts` 删两处定义、改为从 `../trajectory-ops.js` 取 ④ `tests/session-title.test.ts` 拆 import（两函数改指 L1）。
+
+**复核判据（实测 grep）**：`src/**` 下 `tools/trajectory.js` 的 import **只剩 `index.ts`（组装点，非 L1）** ⇒ **L1 不再有任何 `tools/` 上行边**；仅存的跨层边 `tools/trajectory.ts → ../rebuild.js`（**动态、L3→L1 向下**）合法。
+**功能无影响的证据** = 七项门禁全绿，且 test **108 files / 1699 tests** 与改前**逐字相同**（无用例增减）＋ 两函数签名与全部调用点未变。
+
+⚠️ **一处可见的副作用（非行为影响，据实记）**：`pack-check` 的发布物文件数 **120 → 118** —— 打包器把两个共享 chunk（`session-cleanup-*.js` / `wake-scheduler-*.js`）**并回了 `index.js`**（模块图变了 ⇒ rolldown 的分块启发式随之改变）。**判据**：`lib/*.d.ts` 清单**未减**（仍 98 个）、`register.test` 的「apply 注册 11 工具」仍绿 ⇒ 这是**分块布局**变化，**不是模块丢失**。🔵 **通用教训**：改动模块图时，打包产物的**“文件数”会漂** —— 不要把它当成“必须恒定”的读数（要判丢失，看**类型清单**与**契约测试**）。
+
+> 🔵 **为何 `sanitizeSessionSummary` 必须同批下沉**（否则只是把坏边改个名）：它是 `namingTitleFor` 的**私有助手**，若留在 L3，则 `trajectory-ops.ts`（L1）就得 `import '../tools/trajectory.js'` ⇒ **同一类上行边照旧存在**。⇒ **通用判据：搬一个函数之前，先查它的私有助手在哪一层。**
+
 ### 3-7. 核心域的死代码与退役残留（**候选，未判**）
 
 **a) 导出但全仓零引用（连 tests 也不用）**：`ccc.ts:AutopilotTrajectorySettings`｜`ccc-roots.ts:ExecOrAgent` / `ListCccsOptions`｜`clock-runtime.ts:Clock`｜`cro.ts:readSessionMdBytes`（**已核：全仓仅定义点 1 处，零调用**）/ `CroDeps` / `CroParseResult` / `CroRunResult` / `CroOutcome`｜`cro-turns.ts:CroAgent`｜`cro-guide.ts` 的 `export { CRO_FILENAME, CRO_TIMEOUT_MS }`（使用方直接从 `cro.js` 取）｜`trajectory-assistant.ts:onSettlement`（空实现，文件头自述"无调用者"）｜`trajectory-bound.ts:ensureBindingsMigrated` / `getBindingStore`｜`trajectory-skills.ts:SKILL_MISSING_MARK`｜`usage-stats.ts` 若干类型/常量｜`wake-scheduler.ts:WakeSchedulerRuntime`（⚠️ `container-status.ts` 注释仍称其"未导出" ⇒ **注释过期**）。

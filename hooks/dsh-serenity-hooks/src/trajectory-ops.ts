@@ -342,6 +342,54 @@ export interface ActiveSessionInfo {
   mdPath: string
 }
 
+// ── 会话命名（F3/v1.22.9 格式 + 需求② 概括）────────────────────────────────
+// 🔴 2026-09-25（S142 工程化程序第 ④ 项·第 1 步）**从 `tools/trajectory.ts` 下沉至此**。
+// 为何在 L1：`rebuild.ts`（L1）原**静态** import `tools/trajectory.ts`（L3）**只为取 `namingTitleFor`**
+// ⇒ 既是 L1→L3 上行边，又与 `tools/trajectory.ts` 里 `await import('../rebuild.js')` 的合法下行边
+// **成环**（证据＝模块图 §3-6）。两个纯函数（**零 DSH 依赖**）下沉到本模块后，两侧各自向下依赖，环解开。
+// 🔵 为何 `sanitizeSessionSummary` 必须**同批**下沉：它是 `namingTitleFor` 的私有助手，若留在 L3
+// 就会被 L1 反向 import ⇒ 只是把那条坏边挪个名字。**功能无影响的判据** = 输入输出与全部调用点不变 ＋ 全量测试绿。
+
+/**
+ * 概括清洗（标题用；需求② S142 用户拍板：编号日期后加 ≤20 字内容概括）。
+ * 规则（服务端统一，不信任 LLM 输入）：
+ *   - 去控制字符/换行/回车/制表（防标题注入/多行污染）
+ *   - trim（去首尾空白）
+ *   - 截断 ≤20 字符（按 Unicode 码点——中英混排统一；emoji 等代理对按码点保留）
+ *   - 去 `/`（防标题被误读为路径分隔）
+ * @returns 清洗后的概括（空输入 → 空串；调用方决定是否允许空）
+ */
+export function sanitizeSessionSummary(summary: string): string {
+  const cleaned = summary
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\//g, '')
+    .trim()
+  return [...cleaned].slice(0, 20).join('')
+}
+
+/**
+ * 从激活会话派生命名标题（v1.22.9 格式修正 + 需求② 概括）：
+ * F3 原始需求是 **`S###-日期`**（如 `S143-2026-08-26`）——从 `sessionId` 派生，
+ * 而非完整目录名（`2026-08-24--S142--...` 超长 + 中文，不符合用户拍板格式）。
+ * 需求②（S142 用户拍板）：编号日期后加 ≤20 字内容概括 → `S###-YYYY-MM-DD-<概括>`
+ * ——概括来自显式 summary 参数（服务端截断/清洗，可靠不靠猜）；编号日期仍固定派生。
+ * 无 S### 编号（issue 会话等）→ 回退目录名。
+ * @param active 激活会话信息（sessionId + dirName）
+ * @param summary 内容概括（≤20 字，服务端清洗截断；空 → 不带概括的 `S###-日期`）
+ * @returns `S143-2026-08-26-概括` / `S143-2026-08-26` / 原目录名
+ */
+export function namingTitleFor(active: ActiveSessionInfo, summary?: string): string {
+  const sid = active.sessionId
+  if (typeof sid === 'string' && /^S\d+$/.test(sid)) {
+    const date = active.dirName.match(/^(\d{4}-\d{2}-\d{2})--/)?.[1] ?? ''
+    const cleaned = summary ? sanitizeSessionSummary(summary) : ''
+    const base = date ? `${sid}-${date}` : sid
+    return cleaned ? `${base}-${cleaned}` : base
+  }
+  return active.dirName
+}
+
 /** 内存活跃会话：scope（dsh 会话 id）→ 会话信息（不落盘；并行多会话各自 key 隔离） */
 const activeStore = new Map<string, ActiveSessionInfo>()
 /** 全局最近活跃（对齐 osp lastActive；供无 scope 上下文使用） */

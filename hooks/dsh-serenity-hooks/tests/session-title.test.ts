@@ -26,8 +26,9 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { namingTitleFor, renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive, sanitizeSessionSummary } from '../src/tools/trajectory.js'
-import { createSession } from '../src/trajectory-ops.js'
+import { renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive } from '../src/tools/trajectory.js'
+// 🔴 2026-09-25（S142 第 ④ 项·第 1 步）：这两个已下沉到 L1 的 trajectory-ops.ts（解依赖环）
+import { createSession, namingTitleFor, sanitizeSessionSummary } from '../src/trajectory-ops.js'
 import { defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string

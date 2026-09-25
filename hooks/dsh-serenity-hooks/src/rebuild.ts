@@ -55,10 +55,10 @@ import {
   getActiveSessionInfo,
   parseSessionContextFromEvents,
   extractSessionMdPathFromText,
+  namingTitleFor,
   sessionEvents,
 } from './trajectory-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
-import { namingTitleFor } from './tools/trajectory.js'
 import { eventToken, IN_FLIGHT_HEADING } from './trajectory-assistant.js'
 import { appendBound, readLastBound } from './trajectory-bound.js'
 import { isoLocal } from './time.js'
