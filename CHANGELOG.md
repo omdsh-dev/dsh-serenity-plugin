@@ -1,3 +1,53 @@
+## v1.47.3 — 2026-09-25（**修 handyman 换机必挂**：后台单 job 丢弃 `model` 参数 ＋ 新增 provider 预检，把"沉默的失败"变成"可执行的错误"）
+
+**来源**：owner 2026-09-25 报「**handyman 在 Mac 上起不来**」（`no adapter registered for provider minimax-cn-coding-plan`）＋ 令「**应该加个合理的反馈**」；发版令 = owner 2026-09-25 15:3x 具名授权「**授权 bump patch → publish（1.47.3）**」（D14）。
+
+---
+
+### 一、这东西解决什么（白话）
+
+**handyman 这台机器上能用，换一台机器就必然起不来 —— 而且它不说为什么。**
+
+我们给 handyman 指定的模型写在**容器配置**里，这份配置**跟着 git 走到每一台机器**；而"这台机器认识哪些模型提供方"是**每台机器的宿主各自注册的**。于是同一份配置在一台机器可用、在另一台必挂。
+
+更糟的是**两个毛病叠加**：① 后台单任务模式**把调用方指定的模型参数丢掉了**（静默回落配置里的默认值 ⇒ 你换了模型也没用）；② 失败时**什么都不说** —— 调用方只拿到一句"出错了"，既不知道是哪个提供方缺的，也不知道这台机器上有什么可用。
+
+本版把两件事都修掉：**参数不再被丢**，**失败时把原因、这台机器可用的清单、以及两条修法一起给你**。
+
+### 二、根因链（每一步都有实测）
+
+| # | 事实 | 取证方式 |
+|---|---|---|
+| 1 | **单 job 后台**构造 job 时只给 `{task,label}` ⇒ **`model` 被丢** ⇒ `runHandymanJob` 回落 `hc.defaultModel` | 本仓源码；**实测复现**：临时往白名单加 `probe-no-adapter/ProbeModel`，调 `handyman(mode="background", model="probe-no-adapter/ProbeModel")` ⇒ 返回 `model: "minimax-cn-coding-plan/MiniMax-M3"`（**不是传进去的那个**） |
+| 2 | `jobs` 并行路径（`parseJobs`）**带 model** ⇒ 🔴 **两条路径不对称**（同一工具两种行为） | 源码对照 |
+| 3 | CCC 的 `defaultModel = minimax-cn-coding-plan/MiniMax-M3` **随 git 走**；provider adapter 由**每台机器的宿主**注册 ⇒ **换机必挂** | owner 在 Mac 的实测症状 |
+| 4 | 前台路径失败时 `stopReason:"error"` 但 **`diagnostic` 为空** ⇒ 调用方**无法据其修正配置** | 本仓源码 ＋ 宿主 `dsh-llm` 的 `NO_ADAPTER` |
+
+### 三、修法（三个源文件）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `src/tools/handyman.ts` | ① 单 job 后台**带上 `model`**（与 `jobs` 路径对齐）② **`providerPreflight()`** —— **创建 worker 之前**判定 provider 有无 adapter：**前台不创建注定失败的子 agent**、把**可执行原因**写进既有 `diagnostic` 字段；**后台抛错** ③ 工具描述补 provider check 一段 |
+| 2 | `src/handyman-ops.ts` | **`providerAvailabilityError()`** 纯函数 —— 错误文本含：请求的模型 ／ 配置出处 ／ **本机可用清单** ／ 已声明但休眠者（含 settings 命名空间）／ **两条修法（改配置 或 在本机注册）** ／ **明确禁止原样重试**；`HANDYMAN_GUIDE` 新增 **§3b Provider availability** |
+| 3 | `src/host/access.ts` | **`hostLlm(ctx)`** = `ctx.get('llm')`；🔴 **刻意不加进 `inject`**（加了会让缺该服务的 profile **整块不激活插件**）；不可读 ⇒ **no-op 不阻断** |
+
+### 四、正控（两条都做过，不是声明）
+
+- **撤 model 透传** ⇒ 断言实收 `{provider:'minimax-cn-coding-plan', model:'MiniMax-M3'}` —— **正是 owner 报的症状**。
+- **撤 provider 预检** ⇒ 前台 `done:true` 且 **无 diagnostic**。
+
+### 五、门禁（本仓七项）
+
+typecheck（node + client）✅｜typecheck-cli ✅｜**typecheck-host `0.1.7-rc.2`** ✅（node 114 / client 128；paths 36+14 全命中）＋ **`0.1.7-rc.1`** ✅｜test ✅ **108 files / 1700 tests**（改前 1688，**+12 对账相符**）｜coverage ✅ exit 0（Stmts **89.86%**）｜build ✅（`lib/client.js` **201986 B**，与改前同体积）｜pack-check ✅ **120 文件**。
+
+### 六、仍存在的独立缺陷（**本版未动**，已登记）
+
+`lastResponse.includes(stopToken)` 匹配**全部 text 块（含推理）**，而 stopToken **明文印在每轮 prompt 里** ⇒ worker **只要在思考里复述该码就被判 done**（4 次实测命中；其中一次 worker 明确写 "This task is NOT complete" 仍得 `done:true`）⇒ **「提及」=「回显」**。修法方向：判据只匹配**最终答案**或要求码出现在**特定结构**里。**未纳入本版**（改动面与本次修复无关，避免混批）。
+
+---
+
+
+
 ## v1.47.2 — 2026-09-24（**修「设置面板不见了」**：面板层十键补 `.volatile()` ＋ 读取面同批解包）
 
 **来源**：owner 2026-09-24 08:0x 令「**做个抄代码的msm … 然后 复现和研究和修正 并自己发小版本重启来验收**」（= **D80**，**D14 的具名发版令**）。
