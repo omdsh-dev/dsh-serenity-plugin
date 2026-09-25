@@ -173,6 +173,25 @@ else
   check V8 "设置面板客户端面（bundle 交付 + 槽位注册在场）" 1 "探针不在（`vpush` 未推 v8-client-check.mjs）"
 fi
 
+# ── V8b 🆕 设置面板的**渲染面**证据（真浏览器在容器里跑一遍）──
+# 为什么还需要这一档（R↓）：V8 是**交付面**（文件与槽位语句在场），作者自述**非真浏览器证据**；
+#   而 A19 的失效形态（十键未标 `.volatile()` ⇒ 设置页整块消失）**日志上一条报错都没有** ⇒
+#   只有"真引擎渲染一次、DOM 里看我方标记"才抓得到。读数器 = 容器内 headless chromium。
+if [ -f /usr/local/bin/v8b-browser-check.mjs ]; then
+  if command -v chromium >/dev/null 2>&1; then
+    v8bout=$(node /usr/local/bin/v8b-browser-check.mjs 2>&1)
+    v8bok=$?
+    v8bdetail=$(printf '%s' "$v8bout" | grep -c '^PASS' | tr -d '\n')
+    check V8b "真浏览器面（页面真渲染 ＋ 我方客户端模块真被浏览器请求）" "$v8bok" "PASS ${v8bdetail:-0} 项；$(printf '%s' "$v8bout" | grep -m1 '^FAIL' || echo '无 FAIL 行')"
+    if [ "$v8bok" != "0" ]; then printf '%s\n' "$v8bout" | sed 's/^/      /'; fi
+  else
+    # 🔴 读数器缺失 ⇒ **报 FAIL 而不是 PASS**（"判不了"与"过了"在验收表上不能长得一样）
+    check V8b "真浏览器面（页面真渲染 ＋ 我方客户端模块真被浏览器请求）" 1 "读数器缺失：镜像里没有 chromium（重建镜像）"
+  fi
+else
+  check V8b "真浏览器面（页面真渲染 ＋ 我方客户端模块真被浏览器请求）" 1 "探针不在（`vpush` 未推 v8b-browser-check.mjs）"
+fi
+
 # ── V9 🔴 「真实轮次成功」—— 第 ⑥ 项要的**功能可用**判据（本判据此前**不存在**）──
 # 为什么必须新增（R↓）：V5/V7b 只判「缝被走到」，它们在**没有任何模型凭据**的容器里照样能绿
 #   ⇒ 旧判据集**结构性无法回答** owner 的问题（"装完能不能真的用"）。2026-09-25 之前容器里

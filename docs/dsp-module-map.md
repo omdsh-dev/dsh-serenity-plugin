@@ -523,14 +523,14 @@
 | `bench/Dockerfile` | 常驻干净镜像：**真宿主 ＋ 本插件** | `node:22-bookworm-slim`；`npm i -g @deepseek-ai/dsh@${DSH_VERSION}`（ARG 默认 **0.1.7-rc.1**）＋ `pnpm`；apt 装 `zstd`（V5 读数器）/`tini`；`ENV DSH_HOME=/root/.dsh`；`mkdir /logs /ccc && touch /ccc/.serenity`；`ENTRYPOINT tini -- entrypoint.sh`；`EXPOSE 3080` | **无任何模型凭据注入**；不发布端口；插件安装刻意放在启动期（同一镜像三用） |
 | 🆕 `bench/profile-patch.yml` | **把容器的默认模型指向"我们真有凭据的那个"**（键 A 路由 ＋ 键 B 默认模型，§2.9 第 4 行） | 两段 `- id:` 条目（`llm-pi-ai` 路由 `minimax-bench` ＋ `agent-default-model ⇒ minimax-bench/MiniMax-M3`）；**刻意不含任何密钥** —— 路由只写 `apiKeyEnv: MINIMAX_BENCH_API_KEY` | ⚠️ **patch 语义 = 按 id 整体替换（不深合并）** ⇒ 每条要写全字段；baseURL 形状抄自本机真实 patch（**本机那一份用的是内联 `apiKey`** ⇒ 容器里刻意改用 `apiKeyEnv`） |
 | `bench/entrypoint.sh` | 落 profile patch → 装插件 → 起宿主 → 保活 | 落（步 0c，**起宿主之前**）：把 `$PROFILE_PATCH`（= 挂进来的 `/ccc/profile-patch.yml`）`cp` 到 `/root/.dsh/profiles/web/cordis.patch.yml`，并 `sha256sum` 落 `/logs/profile-patch.sha256`（**V9d 读数源**）｜装：`dsh plugin --profile web add "link:$PLUGIN_LINK"`（优先，需目录存在）／否则 `add "$PLUGIN_SPEC" --registry "$NPM_REGISTRY"`（可为容器内 `.tgz`）｜起：先 `: > /logs/dsh-web.log` 清结果文件，再 `nohup dsh web > /logs/dsh-web.log 2>&1 < /dev/null &`｜保活 `sleep infinity`；**单步失败永不 exit** | 🔴 **本文件不碰密钥值** —— patch 里只有 `apiKeyEnv: MINIMAX_BENCH_API_KEY`（**一个名字**），真值由 `docker run -e` 在**运行期**注入（约束文档 §5.4-5）；patch 落地依赖 `$PROFILE_PATCH` 由 `up` 传入（未传 ⇒ 只记一行日志、默认模型仍是镜像内的） |
-| `bench/verify.sh` | 容器内**只读**验收 **19 条** ＋ 落 `/logs/verify.json` | grep / curl / sha256 / `zstd -dc`（逐条见下） | V0 依赖 `vpush`；V5/V5b/V7b/**V9 家族** 依赖 `turn` |
+| `bench/verify.sh` | 容器内**只读**验收 **20 条** ＋ 落 `/logs/verify.json` | grep / curl / sha256 / `zstd -dc`（逐条见下） | V0 依赖 `vpush`；V5/V5b/V7b/**V9 家族** 依赖 `turn`；**V8b** 依赖容器内 chromium（镜像层，见 §2.8c） |
 | `bench/v8-client-check.mjs` | V8 客户端交付层探针 | 读 profile 里的 `lib/client.js` ＋ `package.json#dsh.client`，再 `fetch http://127.0.0.1:3080/` | **非真浏览器证据**（作者自述边界） |
 | CCC 侧驱动 `bench-docker`（MSM） | 远端 Docker 全生命周期 | `setsid -w ssh` ＋ `SSH_ASKPASS`；后台脱离 ＋ `*.done`/`*.code` 标记轮询；base64 分块过桥 ＋ sha256 自证；子命令 `probe/sync/build/up/wait/logs/verify/**secretcheck**/vpush/sh/clogs/turn/down/list` | 🔴 **`cmdUp` 已改**：推 patch（`PROFILE_PATCH_REMOTE` → 挂 `/ccc/profile-patch.yml:ro`）＋ `-e PROFILE_PATCH` ＋ **裸 `-e MINIMAX_BENCH_API_KEY`**（docker 语义：不给值 ⇒ 从 CLI 环境取）；🔴 **密钥只走 launch 环境前缀，不写 payload 文件**（旧写法会把密钥**留在远端盘上**）＋ payload 首行**正控**断言该变量非空。⚠️ 仍存：`cmdTurn` 请求体**不带 model**（宿主不从请求读模型） |
 
 **容器内生命周期与落点**：步 0 `dsh --version` → `/logs/host-version.txt`（V1 读数源）｜步 0c 落 profile patch → `/logs/profile-patch.sha256`（**V9d 读数源**）｜步 1 装插件 → `/logs/plugin-install.log`（V2b 读数源）｜步 2 起宿主 → `/logs/dsh-web.log` ＋ `/logs/dsh-web.pid`｜步 3 `sleep infinity`。
 **路径**：`DSH_HOME=/root/.dsh` ⇒ profile = `/root/.dsh/profiles/web/`（**宿主设置文档 = `/root/.dsh/profiles/web/cordis.patch.yml`**）；会话日志 = `/root/.dsh/sessions/**/session.v*.jsonl.zstd`；CCC 根 = `/ccc`（含 `.serenity`）。
 
-**判据清单（V0~V9 共 19 条）**
+**判据清单（V0~V9b 共 20 条）**
 
 | 判据 | 断言什么 | 怎么读 | 前置 |
 |---|---|---|---|
@@ -543,6 +543,8 @@
 | V6 / V6b / V6c | 设置面板装配无报错 ／ 契约层无 `host contract BROKEN` ／ 两条 settings 依赖功能未被静默跳过 | `dsh-web.log` grep | 宿主已起 |
 | V7 / V7b | 我方缝在运行期真被调用 ／ 首个真实轮走到 bootstrap 缝 | `dsh-web.log` grep | V7b **必须先 `turn`** |
 | V8 | 客户端 bundle 交付 ＋ 槽位注册在场 | `node v8-client-check.mjs` | 宿主已起；探针已 `vpush` |
+| 🆕 **V8b** | **真浏览器面**：页面在真引擎里**真渲染**（DOM 已挂载）＋ 我方客户端模块**真被浏览器请求**（netlog 命中）＋ 渲染期零致命 JS 错误 | `node v8b-browser-check.mjs`（容器内 headless chromium） | 镜像含 chromium；宿主已起（`/logs/dsh-web.log` 里有 token） |
+| ⛭ **V8c（未做，已登记）** | **元素级渲染**：点开设置面板后断言我方 section 的 DOM 元素出现 | 需容器内 CDP（`--remote-debugging-port` ＋ Node 内建 WebSocket） | — |
 | 🆕 **V9** | **真实轮次正常收束**（`"turn/end" … "kind":"completed"`） | `zstd -dc sessions/**.jsonl.zstd` ＋ grep | **必须先 `turn`** ＋ zstd CLI |
 | 🆕 **V9b** | 该轮**用的就是我们指定的路由/模型**（`"provider":"minimax-bench"`） | 同上 | 同上 |
 | 🆕 **V9c** | 会话日志里**零**凭据错误（`MISSING_CREDENTIAL` 命中 = 0） | 同上 | 同上 |
@@ -561,6 +563,23 @@
 
 **结果**：🔴 **`PASS=19 FAIL=0`**（容器 `dsh-bench-r20260925-1659-dd9e`，已 `down`）。逐条读数示例：V1 宿主 = **0.1.7-rc.1**｜V4 ACC = **1.47.3**｜V5 身份播种 2 处｜V6b `host contract degraded (4 optional)` **非 BROKEN**｜V8 客户端面 7 项｜**V9 完成轮次 3 ／ V9b 模型命中 7 ／ V9c `MISSING_CREDENTIAL` 0 ／ V9d patch 已落地**。`secretcheck` 三读数同样全过（在场 ∧ 未进镜像层 ∧ 未落盘）。
 ⇒ **结论：同一台、同一套 19 条判据，在 rc.1 与 rc.2 上都判 PASS**（rc.2 的读数见 §2.9a）。**换 rc 的操作纪律**：**`build` 一次（或至少 `vpush` ＋ 核对 V0）** —— "复用旧镜像" ≠ "复用测试台"（镜像里 bake 的是**构建那一刻**的脚本，㊳ 同族）。
+
+#### 2.8c ✅ 真浏览器面（V8b）—— 判据 19 → **20 条**（2026-09-25 17:1x）
+
+**动机**：V8 是**交付面**（宿主 profile 里有我们的 bundle ＋ 槽位语句在场），作者自述边界＝"**非真浏览器证据**"；而 **A19**（十键未标 `.volatile()` ⇒ 设置页整块消失）在日志上**一条报错都没有**（V6b 全绿）⇒ 只有真渲染才看得见。**判据阶梯**：V6b 契约层 → V6c 功能层 → V8 交付层 → **V8b 真浏览器层**。
+
+**做法**：① `bench/Dockerfile` 装 **chromium**（读数器）② 新增 **`bench/v8b-browser-check.mjs`** ③ `verify.sh` 接 **V8b**（读数器缺失 ⇒ **报 FAIL 不报 PASS**：`"判不了"与"过了"在验收表上不能长得一样`）④ CCC 侧 `bench-docker.ts`：`BENCH_FILES` 加入该探针 ＋ `up` 新增**默认关闭**的 `--publish=<hostPort>`（真浏览器取证备用通道）。
+
+**实测读数（载体容器 `dsh-bench-r20260925-1709-93d9`，宿主 rc.2 ／ 插件 1.47.3，**`PASS=20 / FAIL=0`**）**：**P1** 页面在真引擎启动（DOM **493,591 字节**）｜**P2** 我方客户端模块**真被浏览器请求**（netlog 命中 `dsh-serenity-hooks` **7** 处 ／ `client.js` 455 处）｜**P3** 渲染期零致命 JS 错误｜另落截图 `/logs/v8b-panel.png`（36,935 B）。
+
+🔴 **本节最重要的一条：V8b 首版差点**假绿** —— 判据写法的陷阱（可复用的教训）**
+- 首版判据 = `html.includes('sp-brand')`（"DOM 里有我方类名 ⇒ 渲染了"）。
+- 实测：**元素级命中 0 ／ 类名文本命中 3** ⇒ 那 3 处来自**注入的 `<style>` 选择器文本** —— **组件一个都没渲染时也会命中**（判据读的是 CSS，不是 DOM 元素）。
+- 收紧为"元素形态"`class="… ss-title …"` 后**如实 FAIL**；继查"落地页无会话（截图实证 'No sessions yet'）＋ 设置页非路由可达（`/settings`、`/?view=settings`、`/#/settings`、`/` 四入口元素级命中皆 0）"⇒ **元素级渲染必须靠 CDP 交互**（点开设置面板）。
+- ⇒ 最终 V8b 改判「**页面真渲染 ＋ 我方模块真被浏览器请求**」（**严格强于 V8** 的"profile 里有文件"），并把 verify 行的标签同步改名，避免**过度声称**。
+- ⛭ **V8c（登记为后续增量）**：容器内起 chromium 带 `--remote-debugging-port` ＋ 用 Node 内建 `WebSocket` 说 CDP（参考本 CCC 的 `home-browser` skill 的零依赖实现），**点开设置面板**后断言元素级渲染 —— 那是"A19 同类缺陷的完整机械守卫"。
+
+🔵 **两条环境读数（同批实测，勿重复踩）**：① **`--virtual-time-budget` 会让 `--dump-dom` 永不返回**（被 60s 超时杀 ⇒ 表现为"chromium 起不来"＝**读数器失败被误读成被测对象失败**）⇒ 改用 chromium 自己的 `--timeout`；② **测试台宿主端口从本机连不上**（实测 `192.168.1.4:80` = 200、临时发布的 `:18080` **被拒**，服务器上也没有浏览器）⇒ 真浏览器取证走**容器内**最稳。
 
 #### 2.8b 🔴 修正：`down` 的磁盘警告曾是**写死的旧读数**（读数器撒谎，已修）
 

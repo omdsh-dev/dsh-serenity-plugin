@@ -28,8 +28,14 @@ ENV DSH_VERSION=${DSH_VERSION} \
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl git jq procps tini zstd \
+      ca-certificates curl git jq procps tini zstd chromium \
  && rm -rf /var/lib/apt/lists/*
+# ⚠️ `chromium` 是 **V8b 判据**的读数器（2026-09-25 加，非可选）：
+#    V8 只做 `fetch` ＋ bundle/槽位文本检查 —— 作者自述边界就是"**非真浏览器证据**"；
+#    而 A19 那类缺陷（十键未标 `.volatile()` ⇒ 设置页整块消失）**只有真浏览器看得见**。
+#    V8b 用容器内的 headless chromium 真渲染一次页面 ⇒ 判据从"交付面"升级到"**渲染面**"。
+#    （为什么不从本机 CDP 取证：测试台的宿主端口默认不发布，而临时发布到 LAN 后
+#      从本机仍**连不上**——实测 192.168.1.4:80 可达、`:18080` 被拒 ⇒ 走容器内最稳。）
 # ⚠️ `zstd` 是 V5 判据的**读数器**（2026-09-24 加，非可选）：
 #    身份播种的 ACC 横幅**只进对话消息流**、**不打 stdout** ⇒ 唯一能机械读到它的地方是
 #    宿主自己的会话日志（`/root/.dsh/sessions/**/session.v*.jsonl.zstd`）。
@@ -54,6 +60,8 @@ COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY verify.sh     /usr/local/bin/verify.sh
 # V8 探针（设置面板的**客户端面**证据；Node 脚本，verify.sh 调它）
 COPY v8-client-check.mjs /usr/local/bin/v8-client-check.mjs
+# V8b 探针（设置面板的**渲染面**证据：容器内 headless chromium 真渲染一次；Node 脚本，verify.sh 调它）
+COPY v8b-browser-check.mjs /usr/local/bin/v8b-browser-check.mjs
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh
 
 WORKDIR /ccc
