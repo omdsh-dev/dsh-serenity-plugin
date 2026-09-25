@@ -131,16 +131,25 @@ grep -rn "^import .*from '@deepseek-ai/\|^} from '@deepseek-ai/\|from 'cordis'" 
 |---|---|
 | ① 禁止 import 宿主内部实现路径 | ✅ **达标**（`W3-①` 实测 **0 处**） |
 | ② 禁止访问未声明服务 | ✅ 由契约表 ＋ `hostContract` 读数把关（当前 `checked 41 / issues []`） |
-| ③ 宿主类型接触点收敛到白名单 | 🟡 **收敛中**：L1 违反 **6 个文件、16 行 → 2 个文件、9 行**（2026-09-25 两步：`fc5e946` ＋ `cc3574`）⇒ 剩 `rebuild.ts` 7 ／ `wake-scheduler.ts` 3，**按 §2.7-③ 选项 (b) 另立一件** |
+| ③ 宿主类型接触点收敛到白名单 | 🟡 **收敛中**：L1 违反 **6 个文件、16 行 → 2 个文件、10 行**（2026-09-25 三步：`fc5e946` ＋ `2cc3574` ＋ `94cabae`）⇒ 剩 `rebuild.ts` 7 ／ `wake-scheduler.ts` 2 ／ `agent-idle.ts` 1，**按 §2.7-③ 选项 (b) 另立一件** |
 
-**② L1 违反逐文件（6 / 18 → 🟡 2 / 18）**
+🔴 **口径（2026-09-25 更正）**：**行数 = 本表各文件行值直接相加**（`rebuild.ts` 7 ＋ `wake-scheduler.ts` 2 ＋ `agent-idle.ts` 1 ＝ **10**）。
+本处原写「2 文件 / 9 行」，**与本表自身的行值不符**（当时表内为 7 ＋ 3 ＝ 10，且 `agent-idle.ts` 另留 1）⇒ 该数**无法从表内重建**，已按「以表为准」改正。
+⚠️ **本表行值含 §2.6 的 W1 必要接触行**（如 `createUserMessage`／`deriveEventMessage`）—— 它们**不是违反**，只是"该文件碰了宿主包"。⇒ **本表的"行"是"宿主接触行"，不是"违反行"**；读它时不要与 §2.6 的 W2 混为一谈。
+
+**② L1 违反逐文件（6 / 18 → 🟡 1 / 18）**
+
+> 🔵 **两个计数并存，各有各的用途（2026-09-25 澄清）**：
+> - **「还有宿主接触行」**（本表的"接触行"列，含 W1）⇒ 剩 **3 个文件 / 10 行**（`rebuild.ts` 7 ／ `wake-scheduler.ts` 2 ／ `agent-idle.ts` 1）
+> - **「还有 W2 违反」**（L1 不允许的那一类）⇒ 剩 **1 个文件 / 6 行**（`rebuild.ts` 的 `Context`／`SessionId`+`Session`／`SessionEvent`／`Agent`／`Message`；`wake-scheduler.ts` 只余 `createUserMessage`〔W1-③〕＋`Agent` 已单独走选项 (b)，`agent-idle.ts` 只余 `Agent`）
+> ⚠️ 二者**不矛盾**，但**必须标明用的哪一个** —— 混用会得出互相打脸的数（这正是本表此前"9 行"的成因）。
 
 | L1 文件 | 接触行 | 符号 | 状态 |
 |---|---|---|---|
 | `rebuild.ts` | 7 | `Context`／`SessionId`+`Session`／`deriveEventMessage`／`SessionEvent`／`Agent`／`createUserMessage`／`Message` | ⏭️ **待办（选项 b）** —— 已逐符号核实：**全是真调用** |
-| `wake-scheduler.ts` | 3 | `Context`／`createUserMessage`／`Agent` | ⏭️ **待办（选项 b）** —— `Agent` 的 `followup`/`steer` **真被调用** |
+| `wake-scheduler.ts` | ~~3~~ → **2** | ~~`Context`~~ ／ `createUserMessage`（W1-③）／ `Agent` | ✅ **`Context` 已清**（`94cabae`）：**纯透传档**（`ctx.` 在代码中 **0 命中**）｜🔵 **剩 2 行不是待收敛项**：`createUserMessage` 属 §2.6 **W1-③ 必要接触**（本就允许），`Agent` 是**真依赖**（`followup`/`steer` 真被调用）⇒ 本行**归零「违反」**，其 W1/真依赖部分随 `rebuild.ts` 一并走选项 (b) |
 | ~~`cro-turns.ts`~~ | ~~2~~ → **0** | ~~`Context`~~ ／ ~~`Agent`~~ | ✅ **已清**（`2cc3574`）：`Context` 属结构化访问档；**`Agent` 是死 import** |
-| ~~`agent-idle.ts`~~ | ~~2~~ → **1** | ~~`Context`~~／`Agent` | ✅ **`Context` 已清**（`fc5e946`）；`Agent` **保留**（真使用：`p?.agent === agent` 同一性比较） |
+| `agent-idle.ts` | ~~2~~ → **1** | ~~`Context`~~／`Agent` | ✅ **`Context` 已清**（`fc5e946`）；`Agent` **保留**（真使用：`p?.agent === agent` 同一性比较）⇒ 🔴 **本行仍计 1 行**（真依赖，随选项 (b)），**不要读成"已归零"** |
 | ~~`ccc-roots.ts`~~ | ~~1~~ → **0** | ~~`Context`~~ | ✅ **已清**（`fc5e946`） |
 | ~~`live-sessions.ts`~~ | ~~1~~ → **0** | ~~`Context`~~ | ✅ **已清**（`fc5e946`） |
 
@@ -152,6 +161,11 @@ grep -rn "^import .*from '@deepseek-ai/\|^} from '@deepseek-ai/\|from 'cordis'" 
 - **结构化访问档**：调用点**本就**写着 `ctx as unknown as {…}`（主动绕过该类型）⇒ 注解同样未提供保证（`agent-idle` ／ `cro-turns`）。
 - **死 import 档**：导入后**从未被引用**（`cro-turns` 的 `Agent`）⇒ 直接删。
 - 🔴 **真依赖档（只能走选项 b）**：符号**被真正使用** —— 参与参数/返回类型、被调用、或作同一性比较（`rebuild.ts` 全部 ／ `wake-scheduler.ts` 的 `Agent` ／ `agent-idle.ts` 的 `Agent`）。
+
+🔴 **2026-09-25 第三次印证同一条（第 3 步的产出，提交 `94cabae`）**：`wake-scheduler.ts` 原被并入「真依赖档」，**理由本身没错但结论越界** —— 它确实真依赖 `Agent`（`followup`/`steer` 真被调用），
+**但"用了某个宿主类型"推不出"这个文件的所有宿主 import 都是真依赖"**。逐符号查证后它的 `Context` 属**纯透传档**（`grep -n 'ctx\.' src/wake-scheduler.ts` ⇒ 代码中 **0 命中**；全部去向是交给 L0 取数口或转发给同文件内其它函数，而四个被调方签名本就写作 `ctx: unknown`）⇒ 清除、`ctx` → `unknown`。
+⇒ 🔴 **本条是本清单上第三次「按文件整档」栽跟头**（`ccc-roots` ／ `cro-turns` ／ `wake-scheduler`）⇒ **该粒度错是系统性的，不是偶发**：判据已固化为**逐符号**，此后**任何"这个文件是真依赖档"的结论都必须在符号级给出证据**。
+🔵 **附带实证**：「**只有真包的 `typecheck` 抓得到类型层断裂**」—— 改造中途 typecheck 红过一次（`:322` 的 `sendToTrajectory` 签名漏改），是四道门禁里唯一报出来的。
 
 
 
