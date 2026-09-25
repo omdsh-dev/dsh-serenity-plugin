@@ -15,9 +15,19 @@
  * 留下的 = **进程 cwd/CCC + live 会话清单**（`acc-diag` ① 段仍需要）。
  *
  * 判据纪律：本模块**不得**反向依赖 autopilot 判据层（那会让退场半途而废）。
+ *
+ * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────
+ * **本模块的 `ctx` 参数类型从 `Context` 改为 `unknown`** —— 消除本文件唯一的 `W2` 接触
+ * （直接 import 宿主 `cordis` 的类型）。
+ *
+ * **为什么这是"真解耦"而不是"把类型藏起来"（判据）：** `ctx` 在本模块**从不被解引用** ——
+ * 它只被**原样透传**给 `hostSessions(ctx)`，而后者（`host/access.ts`，**L0**）的参数
+ * 本就声明为 `ctx: unknown` ⇒ `Context` 这个 import **在语义上是多余的**，
+ * 它没有参与任何类型检查，只贡献了一处 L1→宿主 的接触点。
+ * 🔵 **证据**：grep 本文件 `ctx` 全部 5 处命中 —— 3 处在参数/调用位、2 处在注释，
+ * **零处**属性访问（`ctx.xxx`）。
  */
 
-import type { Context } from 'cordis'
 import { cccRootForCwd } from './ccc-roots.js'
 import { hostSessions } from './host/access.js'
 import { sessionEvents } from './trajectory-ops.js'
@@ -56,10 +66,10 @@ export function readSessionTitle(session: unknown): string | null {
  * CCC 枚举（"本机有哪些 CCC"）**不在这里**，归 `ccc-roots.listCccs`（并集语义）；
  * 本函数保留的是它**独有**的那部分：会话维度 + cwd 归属 + 标题 + id。
  *
- * @param ctx 插件上下文
+ * @param ctx 插件上下文（**只透传**给 L0 取数口，本模块不解引用 ⇒ 类型为 `unknown`）
  * @returns 逐条 live 会话
  */
-export function listLiveSessions(ctx: Context): LiveSessionEntry[] {
+export function listLiveSessions(ctx: unknown): LiveSessionEntry[] {
   const out: LiveSessionEntry[] = []
   try {
     const sessions = hostSessions(ctx)
@@ -90,7 +100,7 @@ export interface DiagLiveReport {
   liveSessions: LiveSessionEntry[]
 }
 
-export function diagLive(ctx: Context): DiagLiveReport {
+export function diagLive(ctx: unknown): DiagLiveReport {
   const processCwd = process.cwd()
   return {
     processCwd,

@@ -17,10 +17,20 @@
  *
  * 不新增持久状态（Q5 裁决：**不新增"本机 CCC 名单"**、不扫盘、不写路径假设）——
  * 枚举只读 **DSH 已有的三个来源**。
+ *
+ * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────
+ * **本模块的 `ctx` 参数类型从 `Context` 改为 `unknown`** —— 消除本文件唯一的 `W2` 接触。
+ *
+ * **判据（与 `live-sessions.ts` 同款，但本文件要多过一道）：** 约束文档 §2.7 原记本处
+ * `Context` 是"**实测真被用到**"（因它调 `hostService(ctx,…)`／`hostSessions(ctx)`）。
+ * 🔴 **该判断把"透传"与"解引用"混为一谈了** —— 实测本文件 `ctx` 的**唯一**去向是
+ * **原样透传**给两个 L0 取数口（签名均为 `ctx: unknown`），**零处** `ctx.xxx` 属性访问。
+ * ⇒ `Context` 这个 import **未参与任何类型检查**，只贡献了一处 L1→宿主 的接触点。
+ * 🔵 **证据（可重跑）**：grep 本文件 —— `ctx.` **0 命中**；`ctx` 命中全在
+ * 参数位／调用位（`hostService(ctx, …)` ／ `hostSessions(ctx)`）。
  */
 
 import { basename } from 'node:path'
-import type { Context } from 'cordis'
 import { hostService, hostSessions } from './host/access.js'
 import { findSerenityRoot } from './ccc.js'
 
@@ -116,7 +126,7 @@ function makeCollector(): { push(cwd: string | undefined): void; roots: string[]
  * ① **dsh 工作区注册表**（`workspaceRegistry.list`，持久化——所有工作目录即使无 live 会话）。
  * S142 用户 2026-08-29：应直接拉 dsh 工作区，且只列具体 CCC。
  */
-function workspaceRegistryPaths(ctx: Context): string[] {
+function workspaceRegistryPaths(ctx: unknown): string[] {
   const out: string[] = []
   try {
     const registry = hostService<{ list?: () => Array<{ path?: string }> }>(ctx, 'workspaceRegistry')
@@ -137,7 +147,7 @@ function workspaceRegistryPaths(ctx: Context): string[] {
  *   0.1.2      → `Promise<SessionHeader[]>`             → `h.cwd`
  *   0.1.5-rc.1 → `Promise<SessionPersistenceSnapshot[]>` → `h.header.cwd`
  */
-async function sessionPersistencePaths(ctx: Context): Promise<string[]> {
+async function sessionPersistencePaths(ctx: unknown): Promise<string[]> {
   const out: string[] = []
   try {
     const sp = hostService<{ list?: () => Promise<Array<{ header?: { cwd?: string } }>> }>(ctx, 'sessionPersistence')
@@ -151,7 +161,7 @@ async function sessionPersistencePaths(ctx: Context): Promise<string[]> {
 }
 
 /** ③ **live 会话**（`sessions.list()` 的 cwd；`host/access.ts` 收口） */
-function liveSessionPaths(ctx: Context): string[] {
+function liveSessionPaths(ctx: unknown): string[] {
   const out: string[] = []
   try {
     for (const s of hostSessions(ctx)?.list?.() ?? []) {
@@ -179,7 +189,7 @@ function liveSessionPaths(ctx: Context): string[] {
  * @param opts.defaultRoot 默认根（不在列表 → 置首）；opts.withRoles 是否读 `skiff.roles`
  * @returns 按上述顺序去重的 CCC 条目（无任何来源 → 空数组 + 可选默认根）
  */
-export async function listCccs(ctx: Context, opts: ListCccsOptions = {}): Promise<CccEntry[]> {
+export async function listCccs(ctx: unknown, opts: ListCccsOptions = {}): Promise<CccEntry[]> {
   const c = makeCollector()
   // 三层**依次**跑（保序），但**不做短路**：每层都执行，贡献自己的候选
   for (const path of workspaceRegistryPaths(ctx)) c.push(path)
