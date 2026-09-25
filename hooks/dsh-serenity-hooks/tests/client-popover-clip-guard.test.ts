@@ -15,7 +15,13 @@
  *
  * 本测试**机械守卫该形态**：`.sp-pop` 一旦被改回 absolute 定位（或被"顺手简化"回去），
  * 立即变红——因为那不是样式偏好，而是本 bug 的**成因本身**。
- * 行为面证据（hit-test / 三档宽度）在 `ui-probe/`（CDP 真机），不在本单测（node 环境无 DOM）。
+ * 行为面证据（hit-test / 三档宽度）在 **CCC（宁静号仓）** 的
+ *   `AGENT_SESSIONS/2026-08-24--S142--dsh-serenity-plugin 长期维护/ui-probe/`
+ * （CDP 真机探针：`measure.mjs`（测量唯一真相源）／`probe.mjs`／`verify.mjs`／`mock-probe.mjs` ＋ `artifacts/` 读数），
+ * **不在本插件仓** —— 两仓分离（本插件仓只放代码与单测；真机取证链住在 CCC）。
+ * ⚠️ 2026-09-25 更正：此行原先只写 `ui-probe/`（**仓内相对路径写法**）⇒ 在本仓找不到，
+ * 会被读成"指向一个已删目录"（地图 §3-9 第 9 行当时就是这么判的）。
+ * 本单测跑在 node 环境（无 DOM）⇒ 只能守**形态**；行为面必须回上面那条路径取证。
  */
 
 import { describe, it, expect } from 'vitest'

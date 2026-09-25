@@ -672,7 +672,10 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         const daysParam = Number(url.searchParams.get('olderThanDays') ?? '30')
         const days = Number.isFinite(daysParam) && daysParam >= 1 ? daysParam : 30
         // live 会话保护：删除前取当前 live id 集合（安全底线——绝不动正在跑的会话）
-        const sessions = ctx.get('sessions') as { list?: () => Array<{ header?: { id?: string }; id?: string }> } | undefined
+        // 🔴 2026-09-25 走收口层（F-06 残留收敛）：原先直接 `ctx.get('sessions')`，
+        //    绕过了 `host/access` 的**唯一读取入口**（该层会吞掉 getter 抛错 ⇒ 失败模式一致为"缺失"）。
+        //    行为无影响：`sessions` 是 injected 服务 ⇒ `hostSessions` 先属性读、再回落 `ctx.get`（超集）。
+        const sessions = hostSessions(ctx)
         const liveIds = new Set<string>()
         if (sessions?.list) {
           for (const s of sessions.list()) {

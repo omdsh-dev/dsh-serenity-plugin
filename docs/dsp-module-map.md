@@ -217,7 +217,7 @@
 
 🔴 **客户端半的两条结构事实**：① 它引用的宿主契约与 node 半**不同**（浏览器侧 `configForms`/`slots`/RPC）⇒ 由 `typecheck-host` 的 **client 半**单独把关（§2.5 的例外条款）；② **`vitest.config.ts` 的 coverage 把 `src/client/**` 整体排除** ⇒ 客户端半**不在覆盖率门禁内**（见 §3-9）。
 
-### 2.7 测试面（**113 文件 / 1799 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 五件各加一批：`50ad1f3` → 109/1715，`ae195a7` → 110/1733，`e834e17` → 111/1756，`a5815c6` → 112/1767，`58d58b2` → **113/1799**；第 6 件（gateway 语义化）→ **113/1801**（同文件 +2））
+### 2.7 测试面（**114 文件 / 1807 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 五件各加一批：`50ad1f3` → 109/1715，`ae195a7` → 110/1733，`e834e17` → 111/1756，`a5815c6` → 112/1767，`58d58b2` → **113/1799**；第 6 件（gateway 语义化）→ **113/1801**（同文件 +2）；第 7 件（lazy 守卫 ＋ 台账复核）→ **114/1807**（+1 文件 +6 用例））
 
 | 维度 | 读数 |
 |---|---|
@@ -246,6 +246,9 @@
 - 🔴 **且这 6 个多半不是"待收敛"而是"定层错"**：§3.3 准入三问**第 1 问**即「碰宿主类型或服务吗？→ 是 ⇒ **L0**」⇒ 它们**按自己的准入判据就不该在 L1**。⇒ 处置 = **逐文件二选一**（**(a) 真解耦：接触注入化** ／ **(b) 重新定层：挪到 L0/L2 并同批改 §2.5／§3.2 归属**），**是裁决、不是机械重构** ⇒ 按 D85 逐个做。
 - ✅ **子条款①「禁止 import 宿主内部实现路径」实测 0 处 ⇒ 达标**（此前未单列 ⇒ 容易被"146"这个大数掩盖成一个整体欠账）。
 - 🔵 **顺带证伪一条便宜猜测**：`ccc-roots.ts` / `live-sessions.ts` 各只 1 行 `Context`，**曾怀疑是死导入**（可零风险删）—— **实测两处都真被用到**（`hostService(ctx,…)` ／ `hostSessions(ctx)`）⇒ **不是死代码**，只能走上面的 (a)/(b)。
+- 🆕 🔴 **2026-09-25：读取入口（F-06）的残留收敛 —— 实测还剩 1 处**。`host/access.ts` 自述是"**唯一**读取宿主服务的入口"，实测仍有绕过：
+  - ✅ **已收敛**：`src/api.ts` 的 `ctx.get('sessions')` → 改走 **`hostSessions(ctx)`**（**行为无影响**：`sessions` 是 injected ⇒ `hostInjected` 先属性读、再回落 `ctx.get`，是**超集**）。判据命令 = `grep "ctx\.get\(" src/**`，收敛后只剩 `api.ts` 一处。
+  - ⏳ **待收敛（不是机械替换）**：`src/api.ts` 的 **`ctx.get('codeRuntime')`**（P2-7 的装配态探测）—— 该服务**不在 `HOST_SERVICES` 契约表里** ⇒ 要收敛得**先给它建契约条目 ＋ 类型化读取器**，属"补契约"而非"改调用"。
 
 ### 3-2. 只被 tests 用（或过度导出）的符号（候选，未判）
 
@@ -434,13 +437,33 @@
 | 1 | **客户端半零行为测试** | 8 个 `.tsx` ＋ 4 个 `.css` **无任何行为/渲染测试**；根因可判定 = 两份 vitest 配置 `environment: 'node'` 且 `devDependencies` **无 jsdom** ⇒ 客户端半在测试面上**不可执行** |
 | 2 | **客户端半不在覆盖率门禁内** | `hooks/vitest.config.ts` 的 `coverage.exclude` 含 `src/client/**`（阈值 statements 60 / branches 55 / functions 55 / lines 60） |
 | 3 | **槽位装配无门禁看护** | `client/index.ts` 的 3 次 `slots.register` ＋ `configForms.whileServed` 无测试；且 `coverage-gate.test.ts` 的过滤条件 `.filter(rel => !rel.includes('client/'))` 把整个 `client/` 排除 |
-| 4 | **白名单残留项** | `coverage-gate` 的 `INDIRECT_COVERED` 含 **`autopilot-trajectory.ts`** —— 该文件在 `src/tools/` 下**已不存在**（目录实测 15 文件，无此名） |
+| 4 | ~~**白名单残留项**：`coverage-gate` 的 `INDIRECT_COVERED` 含 `autopilot-trajectory.ts`~~ ⇒ 🔴 **2026-09-25 复核：原判已陈旧、本行销账** | **实测** `INDIRECT_COVERED` = **12 项**（`gateway-auth` / `gateway-proxy` / `cc-fs` / `git` / `kit` / `msm` / `handyman` / `localstore` / `trajectory` / `cce` / `eap` / `neat`），**不含** `autopilot-trajectory.ts`⇒ 该残留已在某轮被清掉，**无需再动**（判据 = 读 `coverage-gate.ts` 的常量表，不是读本行） |
 | 5 | 🔴 **缺口形态 = "未被真正执行"，不是"未被提及"** | `coverage-gate.test.ts` 用正则 `['"][^'"]*\/mod\.js['"]` 在**测试源码文本**里匹配 import 字符串 ⇒ **"提到即算覆盖"**。本仓**不存在门禁意义上裸奔的模块**（这一区别决定第 ⑤ 项该怎么补） |
 | 6 | **只有 3 个测试走生产入口** | `register` / `config-volatile` / `skiff-startup-retry` 才 `import { apply } from '../src/index.ts'` |
-| 7 | 🔴 **fake ctx 的已知盲区（有真实先例）** | 真宿主 cordis 的 `Context` 是 **Proxy**：访问**未在 `inject` 声明**的服务名会**抛错**，而普通对象 ctx 只返回 `undefined` ⇒ v1.31.3 handyman foreground **真机报** `cannot get property "subagents" without inject`，而"**全部 fake ctx 单测都是绿的**"（证据 = 同仓 `host/cordis-access.test.ts` 注释） |
+| 7 | 🔴 **fake ctx 的已知盲区（有真实先例）** | 真宿主 cordis 的 `Context` 是 **Proxy**：访问**未在 `inject` 声明**的服务名会**抛错**，而普通对象 ctx 只返回 `undefined` ⇒ v1.31.3 handyman foreground **真机报** `cannot get property "subagents" without inject`，而"**全部 fake ctx 单测都是绿的**"（证据 = 同仓 `host/cordis-access.test.ts` 注释）<br>🆕 ✅ **2026-09-25 补一条机械守卫（在调用点也有保护力）**：新增 **`tests/host/lazy-service-access.test.ts`** —— **lazy 服务不得被直接属性读**（名单**从 `HOST_SERVICES` 派生、不手抄**；🔴 **先剥注释与字符串字面量**再匹配，防"docstring 里的 `ctx.subagents`"造出假阳性 —— CCC 侧 `hasCliEntry()` 就踩过同款坑）。含**三条正控**：① 真实属性读能被抓 ② 注释/串里的不算 ③ **真实文件双面控**（`tools/handyman.ts` 原文含 `ctx.subagents`、剥后必须为空）＋ **扫描域自证**（文件数 > 50 且被排除的 `access.ts` 确实在域内）⇒ 防"扫了零个文件 ⇒ 永远绿" |
 | 8 | **唯一的真宿主访问层测试可整体 skip** | `host/cordis-access.test.ts` 用宿主真实 cordis（peer-only，本仓不安装）；"一个都找不到时（CI runner 未装 DSH 宿主）**整体 skip**" |
-| 9 | **行为证据指向不存在的落点** | `client-popover-clip-guard.test.ts` 注释指向 `ui-probe/`（CDP 真机行为证据目录）—— **该目录在本仓不存在**（全仓 grep 仅该注释一处命中） |
+| 9 | ~~**行为证据指向不存在的落点**~~ ⇒ 🔴 **2026-09-25 复核：表述失真（结论改了）** | `ui-probe/` **存在**，只是**不在本插件仓** —— 它在 **CCC（宁静号仓）**：`AGENT_SESSIONS/2026-08-24--S142--dsh-serenity-plugin 长期维护/ui-probe/`（`measure.mjs`（测量唯一真相源）／`probe.mjs`／`verify.mjs`／`mock-probe.mjs`／`chain.mjs`／`explore.mjs`／`launch-cdp.sh` ＋ `artifacts/` 真机读数）。⇒ **真问题 = 指针不可解析**（注释用**仓内相对路径**写法 ⇒ 读的人在本仓找不到，会被误读成"指向已删目录"）——**已修**：`client-popover-clip-guard.test.ts` 注释改为写明**仓分离**与真实位置 |
 | 10 | 行为测试内夹源码文本断言 | `gateway` L465-499 ／ `trajectory-bound` L307/319/475 ／ `trajectory-skills` L300-328（读 `src/**` 文本）⇒ 属于"接线钉"，不构成行为证据<br>🆕 **2026-09-25：`gateway` 那组已配语义孪生** —— 新增 **v1.22.3 语义化**（真 listener ＋ 真 socket 硬断 RST ＋ 真上游）：**进程不崩 ＋ 中断后网关仍可用**。🔴 **顺带产出一条发现**（见下方"第 6 件"）⇒ `gateway` 的字符串钉**保留**（互补：钉管"实现还在"，语义组管"崩没崩"）；其余三处**仍未语义化** |
+
+#### 3-9a 🔴 台账复核（2026-09-25 · 逐行重新取证）
+
+🔴 **为什么值得单独跑一遍**：**本表是 ⑤ 的挑靶输入** —— 输入失真会直接变成**白干的一轮**（先例：一条已撤销的观察项被当成在办项**连续携带五轮**）。⇒ **把本表当输入之前，先重读对应代码，而不是信本表的字面。**
+
+| # | 原判 | 复核结论（2026-09-25 实测） | 判据（可重跑） |
+|---|---|---|---|
+| 1 | 客户端半零行为测试 | ✅ **仍成立** | `hooks/vitest.config.ts` `environment: 'node'`；`package.json` devDeps **无 jsdom / happy-dom** |
+| 2 | 客户端半不在覆盖率门禁内 | ✅ **仍成立** | 同文件 `coverage.exclude` 含 **`src/client/**`**；阈值 60/55/55/60 |
+| 3 | 槽位装配无门禁看护 | ✅ **仍成立** | `coverage-gate.test.ts` 的 `.filter((rel) => !rel.includes('client/'))` —— **一次性排除整个 `client/`** |
+| 4 | 白名单残留项 | 🔴 **陈旧 ⇒ 已销账** | `INDIRECT_COVERED` 实测 **12 项**，**不含** `autopilot-trajectory.ts` |
+| 5 | 缺口形态 = "未被真正执行" | ✅ **仍成立** | 该门禁用正则 `['"][^'"]*\/mod\.js['"]` 在**测试源码文本**里匹配 import ⇒ **提到即算覆盖** |
+| 6 | 只有 3 个测试走生产入口 | ✅ **仍成立（实测恰为 3）** | grep `from '../src/index.ts'` → `register` ／ `config-volatile` ／ `skiff-startup-retry` |
+| 7 | fake ctx 的已知盲区 | 🟡 **部分已闭（2026-09-25 又加一层）** | ① `tests/host/access.test.ts` 早有 **cordis-like Proxy**（未声明 inject 的服务名**直接属性读抛错**）；② 🆕 **新增 `tests/host/lazy-service-access.test.ts`** 把"**lazy 服务不得直接属性读**"变成机械守卫 ⇒ 保护力从"access 层可见"扩到"**调用点可见**"；⚠️ **批量套件的 ctx 仍是普通对象**（未迁移，非阻塞） |
+| 8 | 真宿主访问层测试可整体 skip | 🟡 **设计如此，不是缺口** | `cordis-access.test.ts` 末尾自检：`if (process.env.CI) return`（CI 允许跳过）／**本机必须解析到宿主 cordis，否则明确失败**；🔵 本机实测**未 skip（6 用例真跑）** |
+| 9 | 行为证据指向不存在的落点 | 🔴 **表述失真 ⇒ 已修** | `ui-probe/` **存在**，在 **CCC** 而非本仓（详见第 9 行更正 ＋ 测试注释） |
+| 10 | 行为测试内夹源码文本断言 | 🟡 **部分已闭** | `gateway` 那组**已配语义孪生**（第 6 件）；`trajectory-bound` 两处**其语义孪生已在同文件内**（"走 `appendBound` 生产路径"的 F1 正控组）；`trajectory-skills` 两处是**缺席检查**（SEP 符号/散文在 `src/**` 命中 0）——**"缺席"无法行为化**，保留字符串形态即可 |
+
+🔵 **本次复核净结果**：**销账 1**（#4）／**更正表述 1**（#9）／**部分已闭 3**（#7、#10，＋第 6 件当日的 gateway）／**降级为"设计如此" 1**（#8）。
+⇒ **真正还开着的 = #1~#3（客户端半，**待裁决**：要不要引入 DOM 测试环境）＋ #5/#6（**形态事实**，不是待办）＋ #7 的"批量套件 ctx 未迁移"（可选增强，非阻塞）。**
 
 ### 2.8 L5 · 开发面：容器集成测试台 `bench/`（＋ CCC 侧驱动）
 
