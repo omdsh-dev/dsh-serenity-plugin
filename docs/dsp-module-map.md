@@ -26,7 +26,7 @@
 | 项 | 读数 |
 |---|---|
 | `src/` 模块总数 | 顶层 `~70` ＋ `client/` 18 ＋ `host/` 5 ＋ `seams/` 9 ＋ `tools/` 15 ＋ `skills/` 1 ≈ **118** |
-| 测试 | **112 文件 / 1767 用例**（锚定 2026-09-25 **⑤ 第 4 件 `a5815c6` 之后**的一次 `dsh-develop test` 读数；演进：1700 →（死代码第 1 批）1699 →（⑤ 第 1 件）1715 →（第 2 件）1733 →（第 3 件）1756 → **1767**） |
+| 测试 | **113 文件 / 1799 用例**（锚定 2026-09-25 **⑤ 第 5 件 `58d58b2` 之后**的一次 `dsh-develop test` 读数；演进：1700 →（死代码第 1 批）1699 →（⑤ 第 1~5 件）1715 → 1733 → 1756 → 1767 → **1799**） |
 | `docs/` 条目 | **72**（其中**绝大多数是历史设计/评审**，不是现行依据） |
 | 对宿主包的直接 import | **146 处**（实测 grep `from '@deepseek-ai/…'` 或 `'cordis'`）⇒ 见 §3-1 |
 
@@ -217,7 +217,7 @@
 
 🔴 **客户端半的两条结构事实**：① 它引用的宿主契约与 node 半**不同**（浏览器侧 `configForms`/`slots`/RPC）⇒ 由 `typecheck-host` 的 **client 半**单独把关（§2.5 的例外条款）；② **`vitest.config.ts` 的 coverage 把 `src/client/**` 整体排除** ⇒ 客户端半**不在覆盖率门禁内**（见 §3-9）。
 
-### 2.7 测试面（**112 文件 / 1767 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 四件各加一批：第 1 件 `50ad1f3` → 109/1715，第 2 件 `ae195a7` → 110/1733，第 3 件 `e834e17` → 111/1756，第 4 件 `a5815c6` → **112/1767**）
+### 2.7 测试面（**113 文件 / 1799 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 五件各加一批：`50ad1f3` → 109/1715，`ae195a7` → 110/1733，`e834e17` → 111/1756，`a5815c6` → 112/1767，`58d58b2` → **113/1799**）
 
 | 维度 | 读数 |
 |---|---|
@@ -392,6 +392,7 @@
 | 5 | 🆕 `clock-runtime.ts:ClockOptions.bodyCountsTick`（**公开选项**） | `src/**` 除本文件"定义 + 实现"外**零调用**（唤醒调度器不传它）；`tests/**` 6 处显式传 `true`。**成因可判定**：它存在的唯一理由是 **autopilot 的记账语义**（"无 target 则不计 tick"），而 `autopilot-trajectory.ts` **已随 v1.35.0 整段退场** ⇒ **在产线已是死选项**。⚠️ 属**公开面**（导出接口的选项）⇒ 按 **D84 留待第 2 批单独确认**，本批不动 |
 | 6 | 🆕 `seams/bootstrap.ts`：**「Anchored 变体」分支不可达** —— `registerBootstrap` 的 `system-prompt/assemble` 处理器里 `if (SETTINGS.zeroTools)` 的 **else 路径** | 🔴 **不可达（本次实测）**：`SETTINGS` = **模块级 `const`**（`resolveBootstrapSettings()`，**无参、零配置面**，文件头自述"协议固有"），其中 `zeroTools` **硬编码 `true`**，且**全仓无 setter、无处可改** ⇒ 该 `if` **恒真** ⇒ else 分支**永不执行**（其体：`bootstrapTools` ＋ 压缩后追加 `compactionTools` 的窄化 ＋ 缺一降级告警）。<br>⚠️ 属**公开面 / 需确认**档 ⇒ 按 **D84 归第 2 批**，**不自行删除**（先问「谁依赖它」）。<br>🔵 **旁证（本次实测）**：新增的 `tests/seams/bootstrap-register.test.ts` **不覆盖它** —— 那 18 用例断言的是 **`zeroTools` 路径内**的 `missing.length > 0` 降级分支（coverage stderr 实证 `bootstrap: expected compaction tools missing=["todo_write"]`），**与 else 分支是两处** |
 | 7 | 🆕 `tools/msm.ts`：**两处 `gate.whitelist` 分支不可达**（skiff「白名单过滤」与「候选加已过滤前缀」） | 🔴 **不可达（本次实测；`tests/msm-tool.test.ts` 钉住可观测契约）**。**三读判据**：① msm.ts 只在 **name 为空**时把 action 传 `'list'`，否则传 `'exec'`；② `skiffMsmGate` **只在 `action === 'list'` 分支返回 `whitelist`**（exec 路只返 `{}` 或 `{reject}`）；③ 而 name 为空的那一路在处理器前段**已提前返回**（且那处 return 用的正是 whitelist）。⇒ 走到这两行时 `gate.whitelist` **恒为 `undefined`** ⇒ 过滤分支与「已过滤」前缀**永不生效**；**语义上也不亏**：skiff 的越权请求已在门控处 `{reject}` 抛错。<br>⚠️ 属**公开面 / 需确认**档 ⇒ 按 **D84 归第 2 批**，**不自行删除**。🔵 **旁证**：断言"白名单内但未注册的名字 ⇒ 走**无前缀**候选"的用例已随第 3 件落档（即该分支不执行的正向证据） |
+| 8 | 🆕 `tools/trajectory.ts:advisoryHint` 的**空壳分支**（`!existsSync(mdPath)` ⇒ 提示"目录存在但没有 SESSION.md"） | 🔴 **不可达（本次实测；`tests/trajectory-tool.test.ts` 钉住实际失败点）**。**判据**：① `advisoryHint` **全仓只有一个调用点**（`use` 分支内），且它排在 `useSession(...)` **之后**；② `useSession` 对**同一个 mdPath** 已经做过 `existsSync` 校验并**会抛**（`has no SESSION.md — nothing to load.`）；③ 两次定位同 root 同 key（`findSession` 同参数）⇒ **同一个 entry** ⇒ 走到 `advisoryHint` 时文件**必然存在**。<br>⇒ 该分支**除"两步之间的竞态"外永不执行**；同函数末尾的 `catch { return null }`（`statSync` 抛）同理属竞态档。⚠️ **可读性上的意义**：它在 `use` 的**提示文案**里承诺了一条**永远不会出现的话**。⚠️ 属**语义档**（删掉它就失去竞态兜底）⇒ 按 **D84 归第 2 批**，**不自行删除**。🔵 **钉法**：测试断言"空壳目录 ⇒ 错误来自 `useSession`（含 `has no SESSION.md`），**不含** `空壳`" ⇒ 把"哪一步失败"变成机械事实，而不是靠读代码相信 |
 
 ### 3-9. 🔴 测试面缺口（**第 ⑤ 项的输入**）
 
@@ -411,8 +412,14 @@
 ⇒ 新增 `tests/seams/env.test.ts`（**11 用例**）：装配一次且形态正确（缝名 ＋ 三条 `DSH_SERENITY_*` ＋ 各带 description）／cwd 在根内 · 子目录上溯 · 非 CCC ⇒ **空对象**／**无 agent ⇒ 回落 `process.cwd()`（用 `vi.spyOn` 控住，不依赖"本机仓库恰好位于某 CCC 内"）**／空 cwd 串两态／**🔴「CCC 名两套定义」的机械钉（见 §3-3c）**。提交 **`a5815c6`**；test **1756 → 1767**（+1 文件 +11 用例）；build 与 pack-check **与改前逐字相同**（未动 `src`）。
 🔵 **本件顺带产出**：**「CCC 名」同名两义**（§3-3c）—— 夹具刻意让"目录名 ≠ `.serenity` 首行"（且带 `expect(basename(dir)).not.toBe(CCC_NAME)` 自控）⇒ 测试**能区分**两套定义；**若哪天统一了，本组会红**（那正是要的信号）。
 
+✅ **2026-09-25 进展（第 5 件已补）**：**`src/tools/trajectory.ts` 的 `execute` 分派面从未被调用** —— 模块实测 **57.66%**，`fstat-no` 逐条命中 6 处：`agentScope` / `agentDshSession` / `currentBoundDirName` / `renderText`（＋ `output.render`）/ `renderWakeEntry` / `advisoryHint`。既有 `trajectory-ops.test.ts`（纯函数）与 `session-title.test.ts`（重命名门面）**都不碰 `execute`** ⇒ 典型"**被提到、但从没被执行**"。
+⇒ 新增 `tests/trajectory-tool.test.ts`（**32 用例**；**真实现 ＋ 真夹具**）：工具面/render ／ 根解析失败 ／ list（含空库两态）／ show ／ create（summary 必填·dry-run 豁免·issue 豁免·真建目录＋写 `create` 审计绑定）／ **use**（summary 必填·未找到·happy 写 `activate` 绑定·**G1 切换守卫（拒 / `--force` 放行 + `action=switch` + note）**·重复 use 仍 `activate`·无 append ⇒ 不写绑定·**悬空绑定剪枝两态**）／ **重命名门面两态**（`sessionTitle` 在 ⇒ 收到 `S900-<日期>-<概括>`；不在 ⇒ 不抛只告警）／ **advisory 陈旧与新鲜两态** ＋ **空壳的真实失败点**／ send-later（三守卫·回执渲染·长消息截断 `>120`）／ send-now 守卫 ／ rebuild 两条守卫 ／ cro-guide ／ 未知动作。
+🔴 **打桩只两处，且理由写进文件头**：① `session-cleanup.js` 的 `hasSessionLogById`（**宿主会话日志面在测试里不可能为真** ⇒ 打成可控开关；不桩它则"剪枝"分支恒剪掉刚写的绑定 ⇒ 断言变成**环境耦合的假绿**）② `setBindingStore(null)`（把绑定钉回 CCC 内 `.bindings.json`，与 `trajectory-bound.test.ts` 同款 ⇒ 全程密闭）。
+提交 **`58d58b2`**；test **1767 → 1799**（+1 文件 +32 用例）；build 与 pack-check **与改前逐字相同**（未动 `src`）。
+🔵 **本件顺带产出**：**第三条不可达分支**（`advisoryHint` 空壳档，§3-8 第 8 行）＋ **一条夹具纪律**：`exec` 夹具**必须带 `cwd`** —— 缺它会让 `agentCwdFor` 回落 `process.cwd()`，于是工具去**跑测试的那个真 CCC 根**里找夹具会话（本轮实测报 `Session not found: S900`，**症状与"逻辑错"不可区分**）。
+
 🔵 **挑靶方法（可复用，本条即 ⑤ 的工作法）**：**先看 coverage 表的"未覆盖行号"** —— 它直接指出"哪个函数从没跑过"，**别凭感觉挑**；写测前**读源码确认替身安全**（本次核了 `registerEntrySkillSection` / `registerTrajectorySkillSection` **均内部 try/catch**、且后者无绑定即早返回 ⇒ 缺 `agent.ctx` **不抛**，故 `agent.inject` 的断言才可靠）。
-⚠️ **本项剩余靶（同法挑）**：`tools/trajectory.ts` 57.66% ／ 客户端半（下表 #1~#3）。✅ **`seams/bootstrap.ts` 已攻（第 2 件）**——其残余未覆盖行 = **不可达的 else 分支**（§3-8 第 6 行），**再写测也提不上去**，除非先裁决该分支的去留 ⇒ **不再当靶**。✅ **`tools/msm.ts` 已攻（第 3 件）**——其残余未覆盖行**同理**（`gate.whitelist` 两处，§3-8 第 7 行）⇒ **亦不再当靶**。✅ **`seams/env.ts` 已攻（第 4 件）**——未覆盖面 = `registerEnv`，**已全覆盖** ⇒ **不再当靶**。<br>⚠️ **上列百分比是"某次 coverage 跑的实测读数"**（锚定 2026-09-25 ⑤ 开工时那一跑），**不是"当前值"**（每次补测都会变）⇒ 引用时须标时点（§4.2-㉞ 同族）。
+⚠️ **本项剩余靶（同法挑）**：**只剩「客户端半零行为测试」（下表 #1~#3）** —— 它是**结构性**缺口（无 jsdom ＋ `src/client/**` 被排除在覆盖率门外），不是"某个函数没跑"，**处置要先有裁决**（要不要为它引入 DOM 测试环境）。✅ **`seams/bootstrap.ts` 已攻（第 2 件）**——其残余未覆盖行 = **不可达的 else 分支**（§3-8 第 6 行）⇒ **不再当靶**。✅ **`tools/msm.ts` 已攻（第 3 件）**——同理（`gate.whitelist` 两处，§3-8 第 7 行）。✅ **`seams/env.ts` 已攻（第 4 件）**——`registerEnv` 已全覆盖。✅ **`tools/trajectory.ts` 已攻（第 5 件）**——未覆盖的 6 个函数全部触达；**残余 = `advisoryHint` 的竞态档**（§3-8 第 8 行）⇒ **亦不再当靶**。<br>🔵 **⇒ 服务端半（`src/**`，覆盖率门禁内的部分）已无"零执行函数"级缺口**；后续 ⑤ 的增量应转向**语义深度**（行为断言密度 / 边界与错误路径），或按 §5.1「更要有语义断言」处理下表 #10 的接线钉。<br>⚠️ **上列百分比是"某次 coverage 跑的实测读数"**（锚定 2026-09-25 ⑤ 开工时那一跑），**不是"当前值"**（每次补测都会变）⇒ 引用时须标时点（§4.2-㉞ 同族）。
 
 | # | 缺口 | 证据 / 读数 |
 |---|---|---|
