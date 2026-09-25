@@ -258,7 +258,28 @@
 
 ### 3-3. 重复实现（同一语义写多份）
 
-- `seams/lifecycle.ts:sessionIdOf` **导出了**，但 `cro-turns.ts` / `weixin-output-guard.ts` / `unattended-seam.ts` **各自另写私有同名副本**，未 import 该导出。⇒ 语义漂移风险（四处各改各的）。
+**a) `sessionIdOf`：⚠️ 2026-09-25 复核后**降级** —— 它们**不是**"同一函数的副本"，本项**不构成待处理欠账**
+
+原判（"`seams/lifecycle.ts:sessionIdOf` 导出了，但 `cro-turns.ts`/`weixin-output-guard.ts`/`unattended-seam.ts` 各自另写私有同名副本 ⇒ 语义漂移风险"）**方向对、定性不准**，且**漏计两处**。实测（grep ＋ 逐个读实现）：
+
+| # | 位置 | 读哪些形状 | 缺失时返回 | 消费者 |
+|---|---|---|---|---|
+| 1 | `seams/lifecycle.ts`（**export**） | `session.id ?? id ?? header.id`（**三种**） | `null`（且拒 `''`） | 🔴 **`src/**` 里 0 个 import**；仅 `tests/seams/lifecycle.test.ts` 引用（含 **8 条断言**：三类形状 ＋ 五类拒收） |
+| 2 | `cro-turns.ts`（private） | **仅** `agent.session.id` | `null`（拒 `''`） | 本文件 4 处 |
+| 3 | `weixin-output-guard.ts`（private） | `session.id ?? id`（**两种**） | `null`（拒 `''`） | 本文件 3 处 |
+| 4 | `unattended-seam.ts`（private） | **仅** `agent.session.id` | **`''`**（**接受 `''`**） | 本文件 3 处 |
+| 5 | `seams/bootstrap.ts`（局部闭包，**原判漏计**） | 只吃 **Session 对象**的 `id`（**不吃 Agent 包装**） | **`undefined`** | 本文件 4 处 |
+
+⇒ 🔴 **结论：这五处不是"同一个函数的五份副本"，而是"同名、但语义各自不同的五个小工具"** —— 在**三个维度**上各自不同：
+① **读路径**（`session` ／ `+id` ／ `+header.id`）—— 因为**调用点拿到的对象形状本来就不同**（Agent 包装 ／ 裸 Session ／ disposed 负载）；
+② **缺失哨兵**（`null` ／ `undefined` ／ `''`）—— 各自匹配自己调用点的判空写法；
+③ **空串政策**（四拒一收）。
+
+⇒ **因此"合一"不是机械去重，而是一次语义裁决**：把 #2/#3 换成 #1 的读法会**放宽**它们的读路径（`agent.id` 从此也认）⇒ 属**行为变化**，不满足"功能无影响"（违反 D85 的判据）。
+⇒ **处置 = 本项从「欠账」降级为「已登记的设计注记」；不合并。** 若日后确要合一，**须先定"以哪种形状与哨兵为准"** —— 那是**裁决**，不是重构。
+⇒ **附带更正**：#1 的 `export` 属"**仅 tests 引用 ＋ 有真行为测试**"（§3-2 类）—— **不建议降级为模块内**，那等于**拆掉一条真行为钉**（8 条断言）。
+
+**b) `isWriteTool`（§3-7c-5 亦记）**：`ccc.ts:isWriteTool(toolName)` 与 `seams/guards.ts:isWriteTool(toolName, action)` **签名不同**（后者多一个 `action` 判据）⇒ 同样**不是**机械可合的重复；且 `ccc` 版属"仅 tests 引用"（第 2 批候选）。
 
 ### 3-4. 无清理路径的 in-memory 状态（仅内存，重启自愈）
 
