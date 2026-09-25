@@ -367,11 +367,67 @@ function cmdPublish(): void {
     quiet: true,
     env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },
   })
+  // 🔴 2026-09-25（S142，v1.47.3 实测事故）：**成功路径此前完全不印 npm 的输出** ⇒
+  //   一次「exit 0 但包里什么都没上去」的静默假成功**无任何痕迹可查**（见下方 verifyPublished）。
+  //   从此两条路径都印 —— 发布是低频、高代价动作，宁可多印。
+  if (r.stdout.trim()) console.log(r.stdout.trim())
+  if (r.stderr.trim()) console.error(r.stderr.trim())
   if (r.status !== 0) {
-    console.error(r.stdout + r.stderr)
     fail(`npm publish 失败 (exit ${r.status})`, 2)
   }
+  verifyPublished(currentVersion().pkg)
   console.log(`[dsh-develop] ✓ published @shgroup/dsh-serenity-hooks@${currentVersion().pkg}（npm registry）`)
+}
+
+/**
+ * verifyPublished — **落地判据**：npm 报成功 ≠ 包真的能被装上。
+ *
+ * 🔴 为什么必须（2026-09-25 S142 v1.47.3 实测）：发布链的"成功"曾经**只是 npm 的退出码**。
+ *   既有纪律早写着**「落地判据 = tarball 200，不是看元数据」**，但那条判据此前**靠人肉执行**。
+ *
+ * 🔴 为什么**不能只读 tarball**（同日实测，两个反向陷阱）：
+ *   ① 普通 packument 读会**滞后**（本例滞后 >10 分钟：`latest` 仍显示上一版），
+ *      只有 **`?write=true`** 是**绕开 CDN 的权威读**；
+ *   ② tarball 的 404 **也会被边缘负缓存**（本例连续 15 分钟 404），
+ *      ⇒ **单读 tarball 会误判"没上去"**，把已落地的发布判成失败。
+ *
+ * ⇒ 判据取**两条读数**，缺一不可：
+ *   **A（权威）** `GET {packument}/{version}?write=true` == 200 ⇒ 版本记录已在 registry 上；
+ *   **B（可装）** `GET {dist.tarball}` == 200 ⇒ 包体真能下载（**这才是用户能不能装**）。
+ *   A 绿 B 红 = **半上架**（记录在、包体取不到）⇒ **正是"staged 待批准"的签名**，必须响亮失败。
+ */
+function landingRead(version: string): { record: string; tarball: string } {
+  const base = 'https://registry.npmjs.org/@shgroup%2Fdsh-serenity-hooks'
+  const r = run('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', `${base}/${version}?write=true`],
+    { cwd: SCRIPTS_DIR, quiet: true, env: {} })
+  const t = run('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}',
+    `https://registry.npmjs.org/@shgroup/dsh-serenity-hooks/-/dsh-serenity-hooks-${version}.tgz`],
+    { cwd: SCRIPTS_DIR, quiet: true, env: {} })
+  return {
+    record: (r.stdout || '').trim() || `curl exit ${r.status}`,
+    tarball: (t.stdout || '').trim() || `curl exit ${t.status}`,
+  }
+}
+
+function verifyPublished(version: string): void {
+  const deadline = Date.now() + 90_000
+  let last: { record: string; tarball: string } = { record: '?', tarball: '?' }
+  for (;;) {
+    last = landingRead(version)
+    if (last.record === '200' && last.tarball === '200') {
+      console.log(`[dsh-develop] ✓ 落地核对：版本记录 200 ＋ tarball 200 — ${version}`)
+      return
+    }
+    if (Date.now() >= deadline) break
+    run('sleep', ['3'], { cwd: SCRIPTS_DIR, quiet: true, env: {} })
+  }
+  const verdict = last.record === '200' && last.tarball !== '200'
+    ? '  🔴 形态 = **半上架**：版本记录已在 registry（?write=true 200），但 **tarball 取不到** ⇒\n'
+      + '     用户装不上，而 `latest` 可能已指向它 ⇒ **这是"staged 待批准"的签名**，不是缓存问题。\n'
+      + '     处置：到 npm 账号侧批准/删除该 staged 版本，或换版本号重发（不要原样重发 —— 会 409）。'
+    : '  🔴 形态 = 版本记录本身取不到（= 没上去）。处置：看上方 npm 的实际输出再重跑 publish。'
+  fail(`landing 核对失败：version record = ${last.record} ／ tarball = ${last.tarball}\n`
+    + `  （判据 = ?write=true 的版本端点 ＋ tarball；两者都要 200）\n${verdict}`, 2)
 }
 
 /**
@@ -2061,6 +2117,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       }
       case 'squash-history': cmdSquashHistory(rest[0]); break
       case 'publish': cmdPublish(); break
+      // 落地判据可单独调用（发布后复核 / 事后审计都用它）——**只读**，不改任何东西。
+      case 'publish-landed': {
+        const v = rest[0] ?? currentVersion().pkg
+        const read = landingRead(v)
+        console.log(`[dsh-develop] publish-landed ${v}`)
+        console.log(`  版本记录（${v}?write=true） = ${read.record}`)
+        console.log(`  tarball（-/${v}.tgz）        = ${read.tarball}`)
+        if (read.record === '200' && read.tarball === '200') {
+          console.log('[dsh-develop] ✓ 已落地（记录 ＋ 包体都取得到）')
+        } else {
+          fail(`landing 未成立（record=${read.record} / tarball=${read.tarball}）`, 2)
+        }
+        break
+      }
       case 'pack-check': verifyTarball(); break
       case 'readme-sync': syncPackageReadme(); break
       case 'github-push-repo': cmdGithubPushRepo(rest[0]); break
