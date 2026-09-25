@@ -26,7 +26,7 @@
 | 项 | 读数 |
 |---|---|
 | `src/` 模块总数 | 顶层 `~70` ＋ `client/` 18 ＋ `host/` 5 ＋ `seams/` 9 ＋ `tools/` 15 ＋ `skills/` 1 ≈ **118** |
-| 测试 | **108 文件 / 1700 用例**（`dsh-develop test` 读数） |
+| 测试 | **110 文件 / 1733 用例**（锚定 2026-09-25 **⑤ 第 2 件 `ae195a7` 之后**的一次 `dsh-develop test` 读数；演进：1700 →（死代码第 1 批）1699 →（⑤ 第 1 件）1715 → **1733**） |
 | `docs/` 条目 | **72**（其中**绝大多数是历史设计/评审**，不是现行依据） |
 | 对宿主包的直接 import | **146 处**（实测 grep `from '@deepseek-ai/…'` 或 `'cordis'`）⇒ 见 §3-1 |
 
@@ -217,7 +217,7 @@
 
 🔴 **客户端半的两条结构事实**：① 它引用的宿主契约与 node 半**不同**（浏览器侧 `configForms`/`slots`/RPC）⇒ 由 `typecheck-host` 的 **client 半**单独把关（§2.5 的例外条款）；② **`vitest.config.ts` 的 coverage 把 `src/client/**` 整体排除** ⇒ 客户端半**不在覆盖率门禁内**（见 §3-9）。
 
-### 2.7 测试面（108 文件 / 1699 用例 —— 锚定 2026-09-25「死代码第 1 批」落盘后实测；该批删 1 个用例，原 1700）
+### 2.7 测试面（**110 文件 / 1733 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 两件各加一批：第 1 件 `50ad1f3` → 109/1715，第 2 件 `ae195a7` → **110/1733**）
 
 | 维度 | 读数 |
 |---|---|
@@ -378,14 +378,20 @@
 | 3 | `tools/trajectory.ts` 的 `sanitizeSessionSummary` / `renameDshSessionOnUse` / `activeInfoFromCreate` / `renameDshSessionForActive` | 包内自用，对外**只被 `session-title.test.ts` 引用** |
 | 4 | ⚠️ 形状问题：`msm-ops.ts:MsmArgs` **未导出**，却被 `runMsm`/`runMsmAsync` 的**公开签名**引用 | 外部调用方只能传结构等价字面量（类型不可见 = 契约不完整）<br>✅ **2026-09-25 第 1 批已修**：补 `export`（**零行为变化**，纯类型面） |
 | 5 | 🆕 `clock-runtime.ts:ClockOptions.bodyCountsTick`（**公开选项**） | `src/**` 除本文件"定义 + 实现"外**零调用**（唤醒调度器不传它）；`tests/**` 6 处显式传 `true`。**成因可判定**：它存在的唯一理由是 **autopilot 的记账语义**（"无 target 则不计 tick"），而 `autopilot-trajectory.ts` **已随 v1.35.0 整段退场** ⇒ **在产线已是死选项**。⚠️ 属**公开面**（导出接口的选项）⇒ 按 **D84 留待第 2 批单独确认**，本批不动 |
+| 6 | 🆕 `seams/bootstrap.ts`：**「Anchored 变体」分支不可达** —— `registerBootstrap` 的 `system-prompt/assemble` 处理器里 `if (SETTINGS.zeroTools)` 的 **else 路径** | 🔴 **不可达（本次实测）**：`SETTINGS` = **模块级 `const`**（`resolveBootstrapSettings()`，**无参、零配置面**，文件头自述"协议固有"），其中 `zeroTools` **硬编码 `true`**，且**全仓无 setter、无处可改** ⇒ 该 `if` **恒真** ⇒ else 分支**永不执行**（其体：`bootstrapTools` ＋ 压缩后追加 `compactionTools` 的窄化 ＋ 缺一降级告警）。<br>⚠️ 属**公开面 / 需确认**档 ⇒ 按 **D84 归第 2 批**，**不自行删除**（先问「谁依赖它」）。<br>🔵 **旁证（本次实测）**：新增的 `tests/seams/bootstrap-register.test.ts` **不覆盖它** —— 那 18 用例断言的是 **`zeroTools` 路径内**的 `missing.length > 0` 降级分支（coverage stderr 实证 `bootstrap: expected compaction tools missing=["todo_write"]`），**与 else 分支是两处** |
 
 ### 3-9. 🔴 测试面缺口（**第 ⑤ 项的输入**）
 
 ✅ **2026-09-25 进展（最大的一件已补）**：**`src/seams/context.ts` 的 `registerContext` 此前零执行** —— 模块实测 **43.85%**、未覆盖行 = **148–285**，即该函数**整个从未被执行**，而它正是「**会话连续性**」的机制本体（播种 ACC 身份 ＋ 重启恢复激活会话 ＋ pre-step 兜底）。
 ⇒ 新增 `tests/seams/context-register.test.ts`（**16 用例**，按 L2 装配测试放 `tests/seams/`）：接线开关 ／ 播种幂等 ／ skiff 旁路 ／ **重启恢复链（正负控成对）** ／ **「context-only 必须 next() 委托」回归钉 ＋ 消息顺序**。提交 **`50ad1f3`**；test **1699 → 1715**。
 
+✅ **2026-09-25 进展（第 2 件已补）**：**`registerBootstrap` 的四条缝处理器体此前无任何测试调用** —— grep 实证**全仓只有 `src/index.ts` 调它**，而 `tests/bootstrap.test.ts` 只测纯函数（设置解析／晋升 tracker）⇒ 四条处理器内的**分支逻辑从未被执行**。
+⇒ 新增 `tests/seams/bootstrap-register.test.ts`（**18 用例**，L2 装配测试同放 `tests/seams/`）：**接线**（4 条缝各 1 个 handler）｜**`system-prompt/assemble` 首锚「目录窄化」**（`boundary<0` ⇒ **0 工具**；非 CCC／恒晋升／已晋升 ⇒ 完整目录；`boundary≥0` ⇒ 窄化到 `compactionTools`；**缺一 ⇒ 降级完整目录**；`tools` 非数组 ⇒ 原样）｜**`agent/pre-step` 首锚「剥离注入上下文」**（剥 `skill-catalog`／`agent-instructions`；无抑制来源 ⇒ **`toBe` 身份断言**返回同一对象；已晋升／非 CCC／`kind=reject`／`messages` 非数组 ⇒ 原样）｜**`agent/inbox/inserted` 锚定轮注入**（**逆序 prepend**；已有 `user/message` 历史 ⇒ 不重锚；handyman／skiff ⇒ 不锚定；`ACC_MESSAGE_KIND` ⇒ 不递归）。提交 **`ae195a7`**；test **1715 → 1733**（+1 文件 +18 用例）。
+🔵 **"非空洞"的旁证（就写在 coverage 的 stderr 里，可直接引用）**：`bootstrap: expected compaction tools missing=["todo_write"] — bootstrap disabled, full catalog exposed` ⇒ **降级分支真被执行**；`bootstrap: anchor turns injected: 2 条` ⇒ **注入路径真被执行**，并顺带证实 `DEFAULT_ANCHOR_MESSAGES.length === 2`。⚠️ **诚实边界**：本件**不覆盖** `if (SETTINGS.zeroTools)` 的 else 分支（它在产线不可达，见 **§3-8 第 6 行**）。
+🔵 **本件新得的判据**：🔴 **不要凭猜写常量字面量** —— 本件原先把 `ACC_MESSAGE_KIND` 猜成 `'serenity-bootstrap-anchor'`，**grep 实测 = `'plugin:dsh-serenity-hooks'`** ⇒ 已改为 **import 真常量**（不硬编码）。**同族判据**：凡"我以为是这个值"的断言，**先 grep 真值再写**。
+
 🔵 **挑靶方法（可复用，本条即 ⑤ 的工作法）**：**先看 coverage 表的"未覆盖行号"** —— 它直接指出"哪个函数从没跑过"，**别凭感觉挑**；写测前**读源码确认替身安全**（本次核了 `registerEntrySkillSection` / `registerTrajectorySkillSection` **均内部 try/catch**、且后者无绑定即早返回 ⇒ 缺 `agent.ctx` **不抛**，故 `agent.inject` 的断言才可靠）。
-⚠️ **本项剩余靶（同法挑）**：`tools/msm.ts` 41.42% ／ `tools/trajectory.ts` 57.66% ／ `seams/bootstrap.ts` 65.84% ／ `seams/env.ts` 70.21% ／ 客户端半（下表 #1~#3）。
+⚠️ **本项剩余靶（同法挑）**：`tools/msm.ts` 41.42% ／ `tools/trajectory.ts` 57.66% ／ `seams/env.ts` 70.21% ／ 客户端半（下表 #1~#3）。✅ **`seams/bootstrap.ts` 已攻（第 2 件）**——其残余未覆盖行 = **不可达的 else 分支**（§3-8 第 6 行），**再写测也提不上去**，除非先裁决该分支的去留 ⇒ **不再当靶**。<br>⚠️ **上列百分比是"某次 coverage 跑的实测读数"**（锚定 2026-09-25 ⑤ 开工时那一跑），**不是"当前值"**（每次补测都会变）⇒ 引用时须标时点（§4.2-㉞ 同族）。
 
 | # | 缺口 | 证据 / 读数 |
 |---|---|---|
