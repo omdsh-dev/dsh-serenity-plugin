@@ -50,7 +50,7 @@ import {
 } from '../src/trajectory-skills.js'
 import { readTrajectorySkills } from '../src/ccc.js'
 import { findSkillMd } from '../src/skills-discovery.js'
-import { registerTrajectorySkillSection } from '../src/seams/system-prompt.js'
+import { registerTrajectorySkillSection, serenitySystemPrompt } from '../src/seams/system-prompt.js'
 import { trajectoryCompactionReminderText } from '../src/seams/keeper.js'
 
 let dir: string
@@ -328,6 +328,51 @@ describe('trajectory-skills: 回归钉（SEP 已废除，规格 §5/§6-7）', (
       if (readFileSync(file, 'utf-8').includes('session-extension')) hits.push(relative(HOOKS_DIR, file))
     }
     expect(hits).toEqual([])
+  })
+})
+
+// ── 7b. SEP 的**语义孪生**：同一条主张，断言点从「源码文本」搬到「真的会进模型的文案」──
+
+/**
+ * 🔴 为什么需要这一组（⑤ 第 16 件；判据 = 地图 §3-9 #10 那行"接线钉不构成行为证据"）：
+ * 上面两枚钉读的是 **`src/**` 的源码文本** ⇒ 它们能证明"仓库里没人写回这些词"，
+ * 却证明不了**模型实际收到的那段文案**里没有 —— 而 §7 记录的**真实漏网形态恰恰就是这一层**：
+ * "符号没了、散文还在"（C1 只钉了四个符号名，而**面向模型的 toolsBlock 文案**里仍留着
+ * `session-extension` 的散文写法）。⇒ 语义孪生取"**渲染输出级**"：调真注入路径，扫它吐出来的字。
+ * ⚠️ 边界（刻意与源码钉同域）：只对 **ACC 自产文案**成立 —— CCC 自己的 SKILL.md／历史沿革记录里
+ * 合法出现这些词（如中文说明"SEP 已废除"），本组**不**扫 CCC 内容（夹具里也没有入口 skill）。
+ */
+describe('trajectory-skills: 🔴 SEP 语义孪生（扫**渲染输出**，不扫源码文本）', () => {
+  /** 与上面两枚源码钉**同一张词表**（四个符号名 ＋ 那条真实漏网的散文形态） */
+  const OBSOLETE = ['discoverCccHooks', 'buildExtHint', 'buildSepGuide', 'create-transform', 'session-extension']
+  /** 扫描器 = 唯一的读数器；它自己不瞎由下面第三条用例证明 */
+  const scan = (text: string): string[] => OBSOLETE.filter((w) => text.includes(w))
+
+  it('🔴 入口注入正文（`serenitySystemPrompt`，真 CCC 夹具）不含已废机制词 —— **且正文非空**（防"扫了空串"式假绿）', () => {
+    const prompt = serenitySystemPrompt(dir)
+    // 🔵 正控（先证明"有东西可扫"）：身份锚在场、量级合理
+    expect(prompt.length).toBeGreaterThan(500)
+    expect(prompt).toContain('Serenity')
+    expect(scan(prompt)).toEqual([])
+  })
+
+  it('🔴 轨迹 skill 注入器**自产的三条 notice 文案**同样不含（缺 SESSION.md ／ 名字不安全 ／ skill 不存在）', () => {
+    const mdPath = 'AGENT_SESSIONS/nope/SESSION.md' // 不存在 ⇒ 走 notice 分支
+    const missingMd = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, ['home-rhetoric'])
+    const unsafeName = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, ['../evil'])
+    const notFound = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, ['no-such-skill-at-all'])
+    for (const [label, text] of [['缺 SESSION.md', missingMd], ['名字不安全', unsafeName], ['skill 不存在', notFound]] as const) {
+      // 正控：**确实是那条 notice**（不是空串、也不是别的东西）
+      expect(text.length, `${label}：notice 不该为空`).toBeGreaterThan(0)
+      expect(text, `${label}：应带缺失标记`).toContain('[缺失]')
+      expect(scan(text), `${label}：ACC 自产文案里出现已废机制词`).toEqual([])
+    }
+  })
+
+  it('🔵 读数器自证（正控）：把同一个词表喂给一段**含该词**的样本 ⇒ 必须命中（否则前两条的"不含"什么都不说明）', () => {
+    expect(scan('prefix session-extension suffix')).toEqual(['session-extension'])
+    expect(scan('call discoverCccHooks(root)')).toEqual(['discoverCccHooks'])
+    expect(scan('干净的一段文案')).toEqual([])
   })
 })
 
