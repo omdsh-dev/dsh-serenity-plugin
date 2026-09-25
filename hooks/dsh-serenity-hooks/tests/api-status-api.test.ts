@@ -25,7 +25,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { IMAGE_UPLOAD_DIR, registerStatusApi } from '../src/api.js'
@@ -40,7 +40,7 @@ interface Booted {
 }
 
 /** 起一台真 listener：把 `registerStatusApi` 注册的处理器按**精确路径**派发出去。 */
-async function bootApi(): Promise<Booted> {
+async function bootApi(opts: { liveSessionIds?: string[] } = {}): Promise<Booted> {
   const handlers = new Map<string, Handler>()
   const routes: string[] = []
   const ctx = {
@@ -54,7 +54,13 @@ async function bootApi(): Promise<Booted> {
     //    `ctx.get('codeRuntime')`（F-06 残留，见地图 §3-1 登记项）。夹具不提供它时，
     //    异常会被 handler 的 catch 吞成 **400** ⇒ 整端点降级为"不可用"，而**不是**"codeRuntime 为 null"。
     //    ⇒ 这一处正是"走收口层（`hostService`，异常吞掉返回 undefined）vs 裸调用"的**失败模式差异**的实证。
-    get: () => undefined,
+    get: (name: string) => {
+      // 只有 cleanup 那组需要"宿主里正在跑的会话"（live 保护 = 该端点的安全底线）
+      if (name === 'sessions' && opts.liveSessionIds !== undefined) {
+        return { list: () => opts.liveSessionIds!.map((id) => ({ header: { id } })) }
+      }
+      return undefined
+    },
     // 也刻意不提供 sessions/agents ⇒ `resolveWorkspace` 走"无参回落"分支
   }
   registerStatusApi(ctx as never)
@@ -111,6 +117,8 @@ let ccc: string
 let plain: string
 let cfgDir: string
 let prevCfgEnv: string | undefined
+let prevDshHome: string | undefined
+let dshHome: string
 
 beforeEach(() => {
   ccc = mkdtempSync(join(tmpdir(), 'hooks-api-ccc-'))
@@ -124,15 +132,23 @@ beforeEach(() => {
   cfgDir = mkdtempSync(join(tmpdir(), 'hooks-api-cfg-'))
   process.env.SERENITY_HOOKS_CONFIG = join(cfgDir, 'serenity-hooks.json')
   __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings() }))
+  //   ③ `DSH_HOME` → 临时目录：`session-cleanup` 的 POST **会真删会话**（`sessionsRootDir()` 认
+  //      这个 env）⇒ 不隔离就会删到**真机会话日志**。隔离后该端点才敢测（见文件末尾那组）。
+  prevDshHome = process.env.DSH_HOME
+  dshHome = mkdtempSync(join(tmpdir(), 'hooks-api-dsh-'))
+  process.env.DSH_HOME = dshHome
 })
 
 afterEach(() => {
   __setSimpleSourceForTest(null)
   if (prevCfgEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = prevCfgEnv
+  if (prevDshHome === undefined) delete process.env.DSH_HOME
+  else process.env.DSH_HOME = prevDshHome
   rmSync(ccc, { recursive: true, force: true })
   rmSync(plain, { recursive: true, force: true })
   rmSync(cfgDir, { recursive: true, force: true })
+  rmSync(dshHome, { recursive: true, force: true })
 })
 
 describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
@@ -498,7 +514,7 @@ describe('src/api.ts：其余路由（config ／ cccs ／ public-ask ／ weixin 
     }
   })
 
-  it('🔴 /serenity/session-cleanup GET：dryRun 预览（只读；POST 会真删会话 ⇒ 本轮**不测**）', async () => {
+  it('🔴 /serenity/session-cleanup GET：dryRun 预览（只读；POST 会真删会话 ⇒ 见下一组）', async () => {
     const api = await bootApi()
     try {
       const res = await raw({ port: api.port, method: 'GET', path: '/serenity/session-cleanup?olderThanDays=30' })
@@ -509,6 +525,114 @@ describe('src/api.ts：其余路由（config ／ cccs ／ public-ask ／ weixin 
       expect(typeof body.count).toBe('number')
       expect(Array.isArray(body.candidates)).toBe(true)
       expect(body.candidates.length).toBe(body.count)
+    } finally {
+      await api.close()
+    }
+  })
+})
+
+/**
+ * 🔴 破坏性端点：`session-cleanup` 的 **POST 真删**（2026-09-25 · ⑤ 第 10 件）。
+ *
+ * 为什么现在才测：它**会物理删掉会话日志**（`performCleanup` 无 dryRun）。上一轮因此只敢测 GET 预览。
+ * 本轮先补**夹具**：`DSH_HOME` 隔离到临时目录（`sessionsRootDir()` 认它）⇒ 删的只是夹具自己造的
+ * `<tmp>/sessions/<project>/<id>/session.jsonl`，**碰不到真机会话**。
+ *
+ * 钉住的三件事（按重要性）：
+ *   ① 🔴 **live 保护 = 该端点的安全底线**：宿主里正在跑的会话**即使超龄也不许删**（代码注释原话：
+ *      "绝不动正在跑的会话"）；
+ *   ② 阈值语义：超龄的删、未超龄的留；
+ *   ③ **不是会话目录的东西不动**（无 `session*.jsonl` 的目录不进候选）。
+ */
+describe('src/api.ts：session-cleanup 的 POST（隔离 DSH_HOME 下的真删）', () => {
+  /** 造一个会话目录：`<DSH_HOME>/sessions/<project>/<id>/session.jsonl`，mtime = 现在 − ageDays */
+  function makeSession(project: string, id: string, ageDays: number): string {
+    const dir = join(process.env.DSH_HOME!, 'sessions', project, id)
+    mkdirSync(dir, { recursive: true })
+    const log = join(dir, 'session.jsonl')
+    writeFileSync(log, '{"kind":"turn/end"}\n')
+    const t = (Date.now() - ageDays * 24 * 3600 * 1000) / 1000
+    utimesSync(log, t, t) // 决定"是否超龄"的是**文件 mtime**，不是目录
+    return dir
+  }
+
+  /** 造一个"像会话但其实不是"的目录（没有 session*.jsonl）—— 不该被动 */
+  function makeNoise(project: string, id: string): string {
+    const dir = join(process.env.DSH_HOME!, 'sessions', project, id)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'notes.txt'), 'no session log here\n')
+    return dir
+  }
+
+  it('🔴 夹具自证：三个会话目录 + 一个非会话目录都在隔离的 DSH_HOME 下（不是真机）', () => {
+    const old = makeSession('--proj-old--', 'old-1', 40)
+    expect(old.startsWith(process.env.DSH_HOME!)).toBe(true)
+    expect(existsSync(old)).toBe(true)
+  })
+
+  it('GET 预览（正负成对）：只列超龄且非 live 的那一个；**盘上谁也不动**', async () => {
+    const old = makeSession('--proj-old--', 'old-1', 40)
+    const fresh = makeSession('--proj-new--', 'new-1', 1)
+    const live = makeSession('--proj-live--', 'live-1', 60) // 超龄 **但** live
+    const noise = makeNoise('--proj-noise--', 'noise-1')
+    const api = await bootApi({ liveSessionIds: ['live-1'] })
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: '/serenity/session-cleanup?olderThanDays=30' })
+      expect(res.status).toBe(200)
+      const body = JSON.parse(res.body) as { candidates: Array<{ id: string }>; count: number }
+      expect(body.candidates.map((c) => c.id)).toEqual(['old-1'])
+      expect(body.count).toBe(1)
+      // 🔴 预览的实质：四个目录**全都还在**
+      for (const d of [old, fresh, live, noise]) expect(existsSync(d), `${d} 不该被预览删掉`).toBe(true)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 POST 真删：超龄的删掉；**live 的即使超龄也保留**；未超龄与"非会话目录"保留', async () => {
+    const old = makeSession('--proj-old--', 'old-1', 40)
+    const fresh = makeSession('--proj-new--', 'new-1', 1)
+    const live = makeSession('--proj-live--', 'live-1', 60)
+    const noise = makeNoise('--proj-noise--', 'noise-1')
+    const api = await bootApi({ liveSessionIds: ['live-1'] })
+    try {
+      const res = await raw({
+        port: api.port,
+        method: 'POST',
+        path: '/serenity/session-cleanup?olderThanDays=30',
+        headers: UI_HEADERS,
+        body: JSON.stringify({}),
+      })
+      expect(res.status).toBe(200)
+      const body = JSON.parse(res.body) as { dryRun: boolean; deleted: string[]; errors: string[] }
+      expect(body.dryRun).toBe(false)
+      expect(body.deleted).toEqual(['old-1'])
+      expect(body.errors).toEqual([])
+
+      // 🔴 以**盘上状态**为准（响应说什么 ≠ 真删了什么）
+      expect(existsSync(old), '超龄会话应当被物理删除').toBe(false)
+      expect(existsSync(fresh), '未超龄的必须保留').toBe(true)
+      expect(existsSync(live), '🔴 live 会话即使超龄也必须保留（安全底线）').toBe(true)
+      expect(existsSync(noise), '不是会话目录的不许动').toBe(true)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 无 WebUI 头 ⇒ 403，且**盘上什么都没删**（守卫生效的实质证据）', async () => {
+    const old = makeSession('--proj-old--', 'old-1', 40)
+    const api = await bootApi()
+    try {
+      const res = await raw({
+        port: api.port,
+        method: 'POST',
+        path: '/serenity/session-cleanup?olderThanDays=30',
+        headers: { 'content-type': 'application/json' }, // 故意不带 x-serenity-ui
+        body: JSON.stringify({}),
+      })
+      expect(res.status).toBe(403)
+      expect(JSON.parse(res.body)).toEqual({ error: '会话清理仅限 WebUI（client 专用）' })
+      expect(existsSync(old)).toBe(true) // 🔴 回 403 不算数 —— 要看**动作没发生**
     } finally {
       await api.close()
     }
