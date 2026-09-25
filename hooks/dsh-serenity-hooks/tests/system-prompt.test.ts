@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import {
   entrySkillSectionText,
   registerEntrySkillSectionGlobal,
+  registerEntrySkillSection,
   serenitySystemPrompt,
   identityBlock,
   toolsBlock,
@@ -198,6 +199,103 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
       },
     }
     expect(() => registerEntrySkillSectionGlobal(fakeCtx as never)).not.toThrow()
+  })
+})
+
+/**
+ * ⑤ 第 36 件：**scoped 注册变体** `registerEntrySkillSection`（agent 级 section）
+ *
+ * 🔴 **为什么它此前零行为证据**：全局变体（`...Global`）有 3 条用例，而**本变体一条也没有**
+ * —— 覆盖率报告把它整段标成 `fstat-no` ＋ 6 行 `cstat-no`（函数体连同语句一起没进过）。
+ * 🔴 **可达性已取证**（挑靶四条，动手前）：`src/seams/context.ts` 两处调用它
+ * （`agent/created` 播种 与 会话恢复路径），`src/skiff-core.ts` 另有一处同族调用 ⇒ **是活路径不是死代码**。
+ *
+ * **它与全局变体的三处语义差异**（本组逐条钉住，这才是它的价值所在）：
+ *   ① **`sectionedAgents` 幂等闸**（模块级 Set，key = dsh 会话 id）⇒ 同会话第二次调用返回 `false` 且**不重复注册**
+ *   ② **`scope` 来自 `agent.session.id`**（缺省回落 `DEFAULT_SESSION_SCOPE`）—— 全局变体是从 **context** 取
+ *   ③ **`codeModeAdaptationLine` 吃 `agent.ctx`**（不是全局变体的插件 ctx）
+ * ⚠️ `sectionedAgents` 是**模块级状态** ⇒ 用例间必须用**各自唯一的 session id**，否则会互相污染（幂等闸误伤）。
+ */
+describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第 36 件）', () => {
+  /** 假 agent：捕获 section 注册；ctx 供 code-mode 判定（无 tools ⇒ 不加适配行） */
+  function fakeAgent(sessionId: string, root: string): {
+    agent: { session: { id: string; header: { cwd: string } }; ctx: unknown }
+    captured: () => { name: string; order: number; text: (c: unknown) => string } | null
+  } {
+    let captured: { name: string; order: number; text: (c: unknown) => string } | null = null
+    const agent = {
+      session: { id: sessionId, header: { cwd: root } },
+      ctx: {
+        systemPrompt: {
+          section: (s: { name: string; order: number; text: (c: unknown) => string }) => {
+            captured = s
+          },
+        },
+        tools: undefined,
+      },
+    }
+    return { agent, captured: () => captured }
+  }
+
+  it('注册形态：section 名 serenity-entry / order -50 / 首次返回 true', () => {
+    setupCccWithSkill('tg-serenity')
+    const { agent, captured } = fakeAgent('sp-scoped-form-1', dir)
+    const ok = registerEntrySkillSection(agent as never, dir)
+    expect(ok).toBe(true)
+    expect(captured()).not.toBeNull()
+    expect(captured()!.name).toBe('serenity-entry')
+    expect(captured()!.order).toBe(-50)
+  })
+
+  it('🔴 幂等闸（本变体独有）：同 session id 第二次调用 ⇒ false，且**不重复注册**', () => {
+    setupCccWithSkill('tg-serenity')
+    const first = fakeAgent('sp-scoped-idem-2', dir)
+    expect(registerEntrySkillSection(first.agent as never, dir)).toBe(true)
+    const callsAfterFirst = first.captured()
+
+    // 同一 session id，换一个新 agent 对象（模拟同会话被再次播种）
+    const second = fakeAgent('sp-scoped-idem-2', dir)
+    expect(registerEntrySkillSection(second.agent as never, dir)).toBe(false)
+    // 判据 = **没有发生第二次 section 注册**（而不是仅仅返回 false）
+    expect(second.captured()).toBeNull()
+    // 正控：第一次确实注册过（避免"两边都是 null 也算过"的假绿）
+    expect(callsAfterFirst).not.toBeNull()
+  })
+
+  it('text 回调：CCC cwd ⇒ 完整注入；非 CCC ⇒ 空（scoped 版闭包持有 root，不读 context.agent.cwd）', () => {
+    setupCccWithSkill('tg-serenity')
+    const { agent, captured } = fakeAgent('sp-scoped-text-3', dir)
+    registerEntrySkillSection(agent as never, dir)
+    const text = captured()!.text
+
+    // 闭包持有 root ⇒ 即便 context 里给别的 agent/cwd，正文仍是本 CCC 的
+    const out = text({ agent: { session: { id: 'someone-else', header: { cwd: '/tmp' } } } })
+    expect(out).toContain('=== Serenity ACC ===')
+    expect(out).toContain('顶层入口原文内容')
+    // 全局变体在非 CCC cwd 时返回空；scoped 变体**不按 context 判定** —— 这条差异是刻意的
+    expect(out).not.toBe('')
+  })
+
+  it('🔴 scope 取自 agent.session.id：`skiff-` 前缀 ⇒ 空（角色提示词全替换的兜底闸）', () => {
+    setupCccWithSkill('tg-serenity')
+    const { agent, captured } = fakeAgent('skiff-qa-readonly-probe-4', dir)
+    registerEntrySkillSection(agent as never, dir)
+    expect(captured()!.text({})).toBe('')
+  })
+
+  it('注册失败（section 抛错）⇒ 返回 false 且不抛（apply 不可成为启动单点）', () => {
+    const agent = {
+      session: { id: 'sp-scoped-throw-5', header: { cwd: dir } },
+      ctx: {
+        systemPrompt: {
+          section: () => {
+            throw new Error('duplicate section')
+          },
+        },
+      },
+    }
+    expect(() => registerEntrySkillSection(agent as never, dir)).not.toThrow()
+    expect(registerEntrySkillSection(agent as never, dir)).toBe(false)
   })
 })
 
