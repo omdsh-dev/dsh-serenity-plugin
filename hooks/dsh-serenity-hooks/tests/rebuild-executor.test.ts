@@ -52,9 +52,9 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
   deriveEventMessage: (event: unknown) => (event as { data?: { message?: unknown } })?.data?.message ?? null,
 }))
 
-import { queueRebuild, registerRebuildTurnHook, pendingRebuildSnapshot } from '../src/rebuild.js'
+import { queueRebuild, registerRebuildTurnHook, pendingRebuildSnapshot, buildRebuildAnchor, performRebuild, resolveSessionMdPath } from '../src/rebuild.js'
 import { readLastBound, appendBound } from '../src/trajectory-bound.js'
-import { resetActiveSessionStore } from '../src/trajectory-ops.js'
+import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory-ops.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string
@@ -170,7 +170,7 @@ describe('rebuild-executor：queueRebuild 的门与回落', () => {
     ).rejects.toThrow(/Unable to locate dsh session gone-1/)
   })
 
-  it('无内存活跃信息 ⇒ 会话名**由目录名派生**；非 `S###` 目录 ⇒ 绑定行 sessionId=undefined（不编造 S 号）', async () => {
+  it('会话名的两态：**无**内存活跃信息 ⇒ 由目录名派生（非 `S###` 则不编造编号）；**有** ⇒ 直接用活跃会话名', async () => {
     const session = fakeSession([10, 11])
     const md = mkSessionDir('2026-08-28--no-id-here')
     bindSession(session, md)
@@ -182,6 +182,13 @@ describe('rebuild-executor：queueRebuild 的门与回落', () => {
     expect(bound?.action).toBe('rebuild')
     expect(bound?.sessionId).toBeUndefined() // 目录名不含 S### ⇒ 不编造
     expect(bound?.note).toBe('rebuild queued')
+
+    // ② 有内存活跃信息 ⇒ 走 `?.sessionId` 的**左侧**（生产常态：`container_trajectory use` 之后重启重建）
+    setActiveSessionInfo('s1', { sessionId: 'S777', dirName: '2026-08-28--no-id-here', mdPath: md })
+    const r2 = await queueRebuild(qctx(session), { root: dir, summary: 'x', agentCwd: dir, dshSessionId: 's1' })
+    expect(r2.queued).toBe(true)
+    expect(r2.anchor).toContain('S777') // 锚点里的会话名来自活跃存储，不是目录名
+    expect(readLastBound(session)?.sessionId).toBe('S777')
   })
 })
 
@@ -357,5 +364,124 @@ describe('rebuild-executor：诊断根的回落', () => {
     // ⚠️ 计数是**进程级**的（`diagState` 模块单例，源码 P3 已注明"不可跨重启累加比较"）
     // ⇒ 同一进程内多个用例会累加，故此处只能断言"≥1"，不能断言"恰好 1"（那是用例顺序耦合）
     expect(diag.rebuiltCount).toBeGreaterThanOrEqual(1)
+  })
+})
+
+// ── 第二片：锚点 ／ 定位 ／ 定价 ／ 重命名的残余分支（⑤ 第 23 件） ────────────────────
+
+describe('rebuild 第二片：锚点/定位/定价/重命名的残余分支', () => {
+  it('buildRebuildAnchor：mdPath **在根外** ⇒ 路径行直接用绝对路径（`startsWith(root)` 的 else 侧）', () => {
+    const outsideMd = join(tmpdir(), 'elsewhere-x', 'SESSION.md')
+    const anchor = buildRebuildAnchor(dir, 'S900', outsideMd, ['body'])
+    expect(anchor).toContain(`SESSION.md path: ${outsideMd}`)
+    // 正控：根内路径走 slice 侧（相对路径）——两条路必须产出**不同**形态，否则本用例读不出差别
+    const insideMd = join(dir, 'AGENT_SESSIONS', '2026-01-01--S901--x', 'SESSION.md')
+    expect(buildRebuildAnchor(dir, 'S901', insideMd, ['body'])).toContain('SESSION.md path: AGENT_SESSIONS/2026-01-01--S901--x/SESSION.md')
+  })
+
+  it('buildRebuildAnchor：**无激活会话名** ⇒ 通用指令 ＋ 会话行只写目录名（不写空名）', () => {
+    const md = join(dir, 'AGENT_SESSIONS', '2026-01-01--S902--named', 'SESSION.md')
+    const anchor = buildRebuildAnchor(dir, '', md, ['body'])
+    expect(anchor).toContain('Continue the current work.')
+    expect(anchor).not.toContain('Continue the work of .')
+    expect(anchor).toContain('- Serenity session: 2026-01-01--S902--named') // 空名 ⇒ 只目录名，不带 "( )"
+  })
+
+  it('buildRebuildAnchor：会话目录 = `AGENT_SESSIONS` 本身 ⇒ **整行不输出**（sessionLine null）', () => {
+    const anchor = buildRebuildAnchor(dir, 'S903', join(dir, 'AGENT_SESSIONS', 'SESSION.md'), ['body'])
+    expect(anchor).not.toContain('- Serenity session:')
+  })
+
+  it('parseAnchorMdPath 的守卫与 `?? 空串` 回落（经 resolveSessionMdPath 的候选④）——三形态走守卫，另两形态走**真分支**（catch ／ 非 text 内容项）', () => {
+    // ① 事件存在但取不出 message ⇒ `!message` 守卫 ⇒ 候选全空 ⇒ null
+    const s1 = fakeSession([0])
+    ;(s1 as { events?: unknown[] }).events = [{ type: 'user/message' }]
+    expect(resolveSessionMdPath(dir, 'scope-none', s1 as never)).toBeNull()
+
+    // ② 有 content 但 text 块缺 `text` 字段 ⇒ `.text ?? ''` 回落 ⇒ 文本为空 ⇒ null
+    const s2 = fakeSession([0])
+    ;(s2 as { events?: unknown[] }).events = [{ type: 'user/message', data: { message: { role: 'user', content: [{ type: 'text' }] } } }]
+    expect(resolveSessionMdPath(dir, 'scope-none', s2 as never)).toBeNull()
+
+    // ③ message **无 content** ⇒ 可选链整体短路（`.join('')` 侧不炸）⇒ `?? ''` 回落 ⇒ null
+    const s3 = fakeSession([0])
+    ;(s3 as { events?: unknown[] }).events = [{ type: 'user/message', data: { message: { role: 'user' } } }]
+    expect(resolveSessionMdPath(dir, 'scope-none', s3 as never)).toBeNull()
+
+    // ④ 🔴 **真抛进 catch** 的形态：`content` 是**字符串**（非数组）⇒ `.map` 不是函数 ⇒ TypeError
+    //    （判据 = 源码只写 `content?.map`，**无 Array.isArray 守卫** ⇒ 该 catch **可达**，不是死代码；
+    //      三形态只走守卫、从不抛，故本形态专测「抛了也不炸、仍回落 null」）
+    const s4 = fakeSession([0])
+    ;(s4 as { events?: unknown[] }).events = [{ type: 'user/message', data: { message: { role: 'user', content: 'not-an-array' } } }]
+    expect(resolveSessionMdPath(dir, 'scope-none', s4 as never)).toBeNull()
+
+    // ⑤ 内容项**不是 text**（多模态：`{type:'image'}`）⇒ `.map` 的**三元 else 侧**（空串）
+    //    —— ④ 与 ⑤ 各补掉一条**真分支**（都不是死代码：一个是异常兜底、一个是图片项）
+    const s5 = fakeSession([0])
+    ;(s5 as { events?: unknown[] }).events = [{ type: 'user/message', data: { message: { role: 'user', content: [{ type: 'image', source: {} }] } } }]
+    expect(resolveSessionMdPath(dir, 'scope-none', s5 as never)).toBeNull()
+  })
+
+  it('🔴 performRebuild：被替换 node **无对应事件** ⇒ `continue`（prune 仍 append，但**定价 0** 且 meter 不被调用）', () => {
+    const session = fakeSession([10, 11])
+    // node 11 无事件（events 只到 index 10）⇒ 命中 `if (!event) continue`
+    ;(session as { events?: unknown[] }).events = [undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined]
+    const estimate = vi.fn(() => 7)
+    const done = performRebuild(session as never, { anchor: 'x', queuedAt: Date.now() } as never, { estimateMessage: estimate })
+
+    expect(done).toBe(true)
+    expect(estimate).not.toHaveBeenCalled() // 🔴「prune 出现」≠「真定了价」——两者必须分开断言
+    const prune = session._calls[0]!
+    expect(prune.type).toBe('compaction/prune')
+    expect((prune.data as { shadowedTokenCount: number }).shadowedTokenCount).toBe(0)
+  })
+
+  it('rename：无 `--S###--` 的目录名两种形态 —— 剥离日期前缀得 S 号则走 `S###-日期-概括`，否则**整名回退且概括被丢弃**', async () => {
+    // ① 剥离后**不是** S### ⇒ `namingTitleFor` 回退**原始目录名**，summary 不进标题（契约既定：非 S### ⇒ 回退目录名）
+    const s1 = fakeSession([10, 11])
+    await queueFor(s1, { summary: '匿名阶段', dirName: '2026-08-30--no-session-id' })
+    const rename1 = vi.fn()
+    hookCtx({ sessionTitle: { rename: rename1 } }).fire({ agent: fakeAgent('s1', s1), turn: 1 })
+
+    const t1 = String((rename1.mock.calls[0] as [unknown, string])[1])
+    expect(t1).toBe('2026-08-30--no-session-id') // 逐字 = 目录名（日期前缀**没有**被剥掉：那条 replace 只喂 sessionId）
+    expect(t1).not.toContain('匿名阶段') // 🔵 该回退路径**丢弃**概括——「编号派生」与「标题成形」是两段
+
+    // ② 剥离后**是** S###（短目录名 `YYYY-MM-DD--S###`，无尾 `--`，故 `--S###--` 匹配不上）⇒ 走 S###-日期-概括
+    const s2 = fakeSession([10, 11])
+    await queueFor(s2, { summary: '匿名阶段', dirName: '2026-08-30--S123' })
+    const rename2 = vi.fn()
+    hookCtx({ sessionTitle: { rename: rename2 } }).fire({ agent: fakeAgent('s1', s2), turn: 1 })
+
+    expect(String((rename2.mock.calls[0] as [unknown, string])[1])).toBe('S123-2026-08-30-匿名阶段')
+  })
+
+  it('两处 `?? error` 回落：抛**非 Error** 时仍报出内容（rename 与 rebuild 失败各一处）', async () => {
+    // ① rename 抛非 Error（字符串）
+    const s1 = fakeSession([10, 11])
+    await queueFor(s1, { dirName: '2026-08-28--S220--nonerr-rename' })
+    const warn1 = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    hookCtx({ sessionTitle: { rename: () => { throw 'plain-string-err' } } }).fire({ agent: fakeAgent('s1', s1), turn: 1 })
+    expect(warn1.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('plain-string-err')
+    warn1.mockRestore()
+
+    // ② rebuild 失败抛非 Error（对象）⇒ `String(error?.message ?? error)` ⇒ '[object Object]'
+    const s2 = fakeSession([10, 11])
+    ;(s2 as unknown as { append: () => never }).append = () => { throw { code: 'E_FAIL' } }
+    await queueFor(s2, { dirName: '2026-08-28--S221--nonerr-failed' })
+    const warn2 = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    hookCtx().fire({ agent: fakeAgent('s1', s2), turn: 1 })
+    expect(readDiag().detail ?? '').toContain('object')
+    expect(warn2.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('rebuild failed')
+    warn2.mockRestore()
+  })
+
+  it('turn 缺失 ⇒ 成功日志回落 `(turn ? ended)`（宿主不带 turn 的事件）', async () => {
+    const session = fakeSession([10, 11])
+    await queueFor(session, { dirName: '2026-08-28--S222--noturn' })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    hookCtx().fire({ agent: fakeAgent('s1', session) }) // 不传 turn
+    expect(log.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('(turn ? ended)')
+    log.mockRestore()
   })
 })
