@@ -131,18 +131,26 @@ grep -rn "^import .*from '@deepseek-ai/\|^} from '@deepseek-ai/\|from 'cordis'" 
 |---|---|
 | ① 禁止 import 宿主内部实现路径 | ✅ **达标**（`W3-①` 实测 **0 处**） |
 | ② 禁止访问未声明服务 | ✅ 由契约表 ＋ `hostContract` 读数把关（当前 `checked 41 / issues []`） |
-| ③ 宿主类型接触点收敛到白名单 | 🔴 **未达标**：L1 有 **6 个文件、16 行**命中 `W2` |
+| ③ 宿主类型接触点收敛到白名单 | 🟡 **收敛中**：L1 违反 **6 个文件、16 行 → 3 个文件、11 行**（2026-09-25 第 1 步，提交 `fc5e946`）⇒ 剩 `rebuild.ts` 7 ／ `wake-scheduler.ts` 3 ／ `cro-turns.ts` 2，**按 §2.7-③ 选项 (b) 另立一件** |
 
-**② L1 违反逐文件（6 / 18）**
+**② L1 违反逐文件（6 / 18 → 🟡 3 / 18）**
 
-| L1 文件 | 接触行 | 符号 |
-|---|---|---|
-| `rebuild.ts` | 7 | `Context`／`SessionId`+`Session`／`deriveEventMessage`／`SessionEvent`／`Agent`／`createUserMessage`／`Message` |
-| `wake-scheduler.ts` | 3 | `Context`／`createUserMessage`／`Agent` |
-| `cro-turns.ts` | 2 | `Context`／`Agent` |
-| `agent-idle.ts` | 2 | `Context`／`Agent` |
-| `ccc-roots.ts` | 1 | `Context`（**实测真被用到**：`hostService(ctx,…)`／`hostSessions(ctx)`） |
-| `live-sessions.ts` | 1 | `Context`（**实测真被用到**：`hostSessions(ctx)`） |
+| L1 文件 | 接触行 | 符号 | 状态 |
+|---|---|---|---|
+| `rebuild.ts` | 7 | `Context`／`SessionId`+`Session`／`deriveEventMessage`／`SessionEvent`／`Agent`／`createUserMessage`／`Message` | ⏭️ **待办（选项 b）** |
+| `wake-scheduler.ts` | 3 | `Context`／`createUserMessage`／`Agent` | ⏭️ **待办（选项 b）** |
+| `cro-turns.ts` | 2 | `Context`／`Agent` | ⏭️ **待办（选项 b）** |
+| ~~`agent-idle.ts`~~ | ~~2~~ → **1** | ~~`Context`~~／`Agent` | ✅ **`Context` 已清**（`fc5e946`）；`Agent` **保留**（真使用：`p?.agent === agent` 同一性比较） |
+| ~~`ccc-roots.ts`~~ | ~~1~~ → **0** | ~~`Context`~~ | ✅ **已清**（`fc5e946`） |
+| ~~`live-sessions.ts`~~ | ~~1~~ → **0** | ~~`Context`~~ | ✅ **已清**（`fc5e946`） |
+
+🔴 **2026-09-25 更正一条本表原判**：`ccc-roots.ts` 的 `Context` 原被记为「**实测真被用到**」，理由是"它调 `hostService(ctx,…)`／`hostSessions(ctx)`"。**该理由不成立** —— 那两个被调方（`host/access.ts`，**L0**）的签名**本就写作 `ctx: unknown`**，本模块**零处** `ctx.xxx` 属性访问 ⇒ 它属**纯透传**，与 `live-sessions.ts` 同档。（原判把「把 ctx 传下去」与「解引用 ctx」混为一谈。）
+
+🔵 **本步确立的判据（用于区分"真解耦"与"把类型藏起来"）**：**看那个 import 有没有参与类型检查** ——
+- **纯透传档**：`ctx` 只被交给 L0 取数口（其签名已是 `unknown`）⇒ 该 import 是**纯名义**的，删掉零影响（`live-sessions` ／ `ccc-roots`）。
+- **结构化访问档**：调用点**本就**写着 `ctx as unknown as {…}`（主动绕过该类型）⇒ 该注解**同样未提供任何保证**（`agent-idle`）。
+- 🔴 **反档（不该动）**：import 的符号**被真正使用**（如 `Agent` 参与同一性比较、`deriveEventMessage` 被调用）⇒ 那是**真依赖**，只能走选项 (b) **重新定层**，不能靠改标注消掉。
+
 
 **③ 处置不是"无脑收敛"，而是逐文件二选一** —— §3.3 准入三问**第 1 问**即「它碰宿主包类型或宿主服务吗？→ 是 ⇒ **L0**」⇒ 上述 6 个**按它们自己的准入判据就不该在 L1**：
 - **(a) 真解耦**：宿主接触**注入化**（L0 供中立接口，L1 只吃它）；
