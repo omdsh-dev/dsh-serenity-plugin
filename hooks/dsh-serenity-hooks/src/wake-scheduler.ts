@@ -24,7 +24,6 @@
  * 补跑窗口 2h（超窗置 missed 留痕）｜同 tick 串行｜唤起后维持 live（人类可介入）。
  */
 
-import type { Context } from 'cordis'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
@@ -50,6 +49,27 @@ import {
   type WakeEntry,
 } from './wake-registry.js'
 import { PLUGIN_SOURCE } from './message-source.js'
+
+/**
+ * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────
+ * **`Context`（cordis）import 已清除**，本文件全部 `ctx` 参数类型 → `unknown`。
+ *
+ * 🔴 **本处是本清单上第三次「按文件整档」判错的实例**（前两次见 `ccc-roots.ts`
+ * 与 `cro-turns.ts`）。本文件原被并进"**真依赖档**"，理由是"它用了 `Agent` 的
+ * `followup`/`steer`"—— 但那证明的是 **`Agent` 是真依赖**，**不能顺带证明
+ * `Context` 也是**。逐符号查证后：
+ *   · `Agent` ⇒ ✅ **真依赖**（`followup`/`steer` **真被调用**；参与返回类型）⇒ **保留**。
+ *   · `Context` ⇒ ❌ **纯透传档** —— 本文件 `ctx` 的**全部**去向是交给 L0 取数口
+ *     （`hostAgents(ctx)` ／ `hostService(ctx,…)` ／ `listCccs(ctx)` ／
+ *     `registerDisposer(ctx,…)`）或**转发给同文件内的其它函数**；
+ *     🔵 **证据（可重跑）**：`ctx.` 在本文件**代码中 0 命中**（唯一命中在 :15 的注释里）。
+ *     而上述四个被调方的签名**本就写作 `ctx: unknown`**（`host/access.ts` ／
+ *     `host/effect.ts` ／ `ccc-roots.ts`）⇒ 该 import **未参与任何类型检查**。
+ *   · 顺带化简 :145 的 `clockOpts.ctx as Context`（`ClockOptions.ctx` 本就声明 `unknown`）
+ *     与 :322 的签名 —— 那两处 cast 都是**为了迁就一个没人需要的类型**。
+ * ⇒ 🆕 **判据（第三次印证）**：**分档必须逐符号做**；"用了某个宿主类型"**不能**推出
+ *   "这个文件的所有宿主 import 都是真依赖"。
+ */
 
 /** 宿主 sessionController 的最小形态（`resolveAgent`：live 优先，否则 resume） */
 interface HostSessionController {
@@ -142,7 +162,7 @@ const clockOpts: ClockOptions<string[]> = {
   events: ['session/created', 'serenity/settings-changed'],
   // 🔴 无闸（2026-09-21 砍掉 `wakeSchedulerEnabled`）：**恒武装**。工厂的 `gate` 是可选能力，
   //    本钟不再使用它 ⇒ 永不因闸跳过（`lastSkipReason` 只由 tick 内的真实原因写，如"无 CCC 可扫"）。
-  body: () => runWakeTick(clockOpts.ctx as Context),
+  body: () => runWakeTick(clockOpts.ctx),
   // `countBeforeBody` 缺省 false：本钟 `ticks` = **真跑完**的 tick 数（既有语义，勿改）
   logFrom: { prefix: '[serenity-hooks] trajectory 唤醒 ', lines: (lines) => lines },
   startLog: () => '[serenity-hooks] ✓ trajectory 唤醒调度器启动（5min tick）',
@@ -181,7 +201,7 @@ export function __resetWakeSchedulerStateForTest(): void {
  * 现行实现已只认绑定）；**仅登记，未改**（改它属 ACC 代码改动，须具名令）。
  */
 async function acquireWakeAgent(
-  ctx: Context,
+  ctx: unknown,
   root: string,
   dirName: string,
 ): Promise<{ agent: Agent; how: string } | { error: string; notReady?: boolean }> {
@@ -242,7 +262,7 @@ export function buildWakeText(entry: WakeEntry, target: WakeTarget): string {
  * @param entry 唤醒条目
  * @returns 投递结果（写回 lastResult）
  */
-export async function deliverWake(ctx: Context, root: string, entry: WakeEntry): Promise<WakeDeliveryResult> {
+export async function deliverWake(ctx: unknown, root: string, entry: WakeEntry): Promise<WakeDeliveryResult> {
   const target = resolveWakeTarget(root, entry.target)
   if (!target) return { ok: false, detail: `目标 trajectory 未命中（${entry.target}）` }
   const acquired = await acquireWakeAgent(ctx, root, target.dirName)
@@ -320,7 +340,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
  * @returns 投递结果（**同步**返回给调用方）
  */
 export async function sendToTrajectory(
-  ctx: Context,
+  ctx: unknown,
   root: string,
   target: string,
   message: string,
@@ -379,7 +399,7 @@ export async function sendToTrajectory(
  * @param ctx 插件上下文
  * @returns CCC 根列表（无任何来源 → `[]`）
  */
-async function collectWakeCccs(ctx: Context): Promise<string[]> {
+async function collectWakeCccs(ctx: unknown): Promise<string[]> {
   return (await listCccs(ctx)).map((e) => e.root)
 }
 
@@ -443,7 +463,7 @@ export function buildCroWakeText(dirName: string, mdPath: string, prompt: string
  * @returns 投递结果（进 tick 日志；**不写注册表**）
  */
 async function deliverCroWake(
-  ctx: Context,
+  ctx: unknown,
   root: string,
   dirName: string,
   prompt: string,
@@ -485,7 +505,7 @@ async function deliverCroWake(
  * @param registry 本 tick 已载入的唤醒注册表条目（供快照的 `pendingWakes`；读坏时传 `[]`）
  * @param log 本 tick 的人读摘要（就地追加）
  */
-async function runCroPhase(ctx: Context, root: string, registry: WakeEntry[], log: string[]): Promise<void> {
+async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], log: string[]): Promise<void> {
   // 🔴 CRO 闸（2026-09-21 所有者令新增，缺省**开**）：关掉只影响**本阶段** ——
   //    `send-later` / `send-now` / 唤醒表投递**照常**（`cro.ts` 头注的承诺）。
   //    跳过**记一行**（否则"关掉 CRO 后轨迹不再被自编程唤起"这件事在 tick 日志里不可见 —— 同族缺口：
@@ -563,7 +583,7 @@ async function runCroPhase(ctx: Context, root: string, registry: WakeEntry[], lo
 }
 
 /** 一次调度 tick：遍历已知 CCC → 到期项串行投递 / 超窗项置 missed；返回人读摘要 */
-async function runWakeTick(ctx: Context): Promise<string[]> {
+async function runWakeTick(ctx: unknown): Promise<string[]> {
   const log: string[] = []
   // 无 CCC 可扫：廉价空转（**不**改变"全局闸开即武装"的语义：武装在 startTimer，
   // 与有无 CCC 无关；此处只是本 tick 无事可做）
@@ -632,7 +652,7 @@ async function runWakeTick(ctx: Context): Promise<string[]> {
  * 会话出现/settings 变化时热启动（与 autopilot 同款触发面，互不干扰）。
  * @param ctx 插件上下文
  */
-export function registerWakeScheduler(ctx: Context): void {
+export function registerWakeScheduler(ctx: unknown): void {
   // ⚠️ 此处**不得**再判"有无 live CCC"（F 段缺陷修复，2026-09-14）：
   //   CCC 根当时**只能从 live 会话的 cwd 反推**（collectLiveCccs），而宿主刚重启时 live 会话
   //   必然为空（浏览器尚未重连）；更关键的是——**"恢复旧会话"不触发 `session/created`**
