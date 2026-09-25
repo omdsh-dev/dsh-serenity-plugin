@@ -83,10 +83,6 @@ const SESSION_MD = 'SESSION.md'
 const HEALTH_STALE_DAYS = 7
 const DAY = 86_400_000
 
-function today(): string {
-  return localDate()
-}
-
 export function sessionsRoot(root: string): string {
   return join(root, 'AGENT_SESSIONS')
 }

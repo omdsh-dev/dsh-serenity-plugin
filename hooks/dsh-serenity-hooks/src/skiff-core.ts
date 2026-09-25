@@ -238,17 +238,6 @@ interface SkiffAgentRef {
   resumed: boolean
 }
 
-/**
- * resume 失败是否应降级 create：仅当会话无持久化 log（首次）或持久化未配置时。
- * 其他错误（损坏/版本不符/live 占用）→ 透传（真问题不掩盖）。
- */
-function isResumeFallbackError(err: unknown): boolean {
-  if (!(err instanceof Error)) return false
-  if (err.name === 'SessionPersistenceNotFoundError') return true
-  if (/session persistence is not configured/.test(err.message)) return true
-  return false
-}
-
 /** Skiff agent 挂载的 DSH preset（v1.25.3 修复：read/grep/glob 等平台工具由 preset 决定工具面；
  *  handyman 经 composeFrom 继承父、skiff 无父上下文——直接挂 DSH 默认 standard preset；
  *  guard 角色白名单再按角色过滤可见/可用面——白名单外工具仍 deny） */
