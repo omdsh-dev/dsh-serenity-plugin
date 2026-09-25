@@ -906,6 +906,27 @@
 **读数（同一 192 语句分母）**：`git-ops.ts` **79.68% → 96.35%**（153 → 185 条，**+32**；分支 **44.26% → 77.1%**）｜全仓语句 **94.77% → 94.93%**｜test **1842 → 1866**。
 ⚠️ **仍未覆盖的两处 + 一条理由**：`git()` 的**超时**分支（常量 `GIT_TIMEOUT_MS = 30_000` ⇒ 真触发要挂 30 秒以上，用 PATH 替身也一样）；`pull` 的 `[REJECTED]` 分支（**被发现 ① 挡住**，修好即由那条 `it.fails` 翻绿覆盖）。
 
+---
+
+#### 3-9b 🔴 全量 `fstat-no` 复扫（**2026-09-25 19:2x**，⑤ 第 31 件收尾时顺手跑）—— **44 处未执行函数 / 23 文件**，并给出**下一靶的机械依据**
+
+🔴 **为什么跑这一遍**：⑤ 此前是**一件一挑靶**，挑靶依据多来自"上一块的 ⏭️ 叙述"—— 而这**正是 §2.7i 点名过的坏习惯**（"不许把上一块的叙述当读数"）。⇒ 换成**一次性全量扫描**，让下一靶由**报告本身**推出，不由叙述推出。
+🔵 **命令（可重跑）**：对 `coverage/src/**/*.html` grep 字面量 **`fstat-no`**（`fstat-no` = **函数体从未进入**；与 `cstat-no` = 语句未执行**是两件事**，§4.2-㊽）。读数 = **44 处 / 23 文件**。
+
+🔵 **聚类（按"形态是否同一"分，不按文件重要性分）**：
+
+| 类 | 文件数 / 处数 | 形态 | 判读 |
+|---|---|---|---|
+| **A · `tools/*` 的 render 面** | **9 文件 / 23 处** | `renderText()` ＋ `output.render`（`(_args, value) => renderText(value)`）**恒缺**；`execute` **另缺**于 `cc-fs`／`git`／`kit`／`localstore`／`im-bridge`（这 5 个**无专属测试驱动 `execute`**），而 `praxis`／`container-admin`／`handyman`／`acc-diag` 的 `execute` **已有专属测试**（如 `tests/praxis.test.ts` 真调 `execute`） | 🔴 **下一靶首选**：形态**高度同一**（`renderText` 恒一个 `typeof value === 'string'` 三分支 ＋ 一条 JSON 支线）、**可达性已证**（既有测试就在用 `tool as {execute}` 取值 ⇒ 工具对象在测试里可达）、**残余性质 = 工具面输出契约本体**（不是防御性 `??`）⇒ 一个测试文件即可批量触达 |
+| **B · `readSimpleSettings().enabled` 闭包** | 2 文件 / 2 处 | `enabled: () => readSimpleSettings().<x>Enabled`（`gateway.ts` ／ `skiff-debug.ts`） | 形态同一，**廉价**；但性质是"设置读取的接线"，属**顺带**档 |
+| **C · 单点杂项** | 12 文件 / 19 处 | `handyman-ops.writeFailedStatus` ／ `weixin-api.currentFetch` 默认箭头(×2) ／ `face-host.permanentOnError` ／ `web-fetch-provider.lookupAll` ／ `seams/system-prompt` 的 `text` 回调 ／ `gateway-dsh-auth.end` ／ `seams/guards`（**4 处，且皆 `cstat-no` 同标**：`resolveAgentCwd`／`extractPathArg`／`extractAction`／`evaluate`）／ `skiff-core`（`isResumeFallbackError` ＋ `dispose`）／ `msm-ops` 的 Windows bun 路径箭头 ／ `trajectory-ops`（`today`／`resolveSessionByTitle`）／ `host/storage-domain`（`parse`／`safeParse`）／ `unattended-ops.outboundSendRoots` | **逐条判"可达性 + 残余性质"再动手**（挑靶四条）；⚠️ 其中若干可能是**构造上不可达的默认值**（同 §3-8 家族）⇒ **先证可达，再写测**，别把"从不发生"固化成期望值 |
+
+🔴 **两条读数纪律（本扫顺带实证）**：
+1. **`fstat-no` 与 `cstat-no` 要分开数、分开用** —— 只有前者才回答"**哪个函数从没跑过**"；本扫 44 处 `fstat-no`，其中**多处在报告里同时带 `cstat-no`**（= 整个函数连同语句一起没跑），但**也有只带 `fstat-no` 的**（函数没进，但其所在行被别的东西跑过）。
+2. **本读数锚定 2026-09-25 19:2x 那一跑**（第 31 件已补之后）⇒ 下一件做完**必须重扫**：本表是**快照，不是不变量**（分母与集合都会随执行而变，§2.7e 系列）。
+
+🔵 **下方这张表是 §3-9 原有的十行"结构性缺口"表** —— 与上面 §3-9b 的**未执行函数快照**是**两种东西**，勿混：本表记的是"整类能力没有测试形态"（客户端半 ／ 门禁口径 ／ fake ctx 盲区），§3-9b 记的是"**报告里某函数体从没进过**"（读数会随每一件而变）。
+
 | # | 缺口 | 证据 / 读数 |
 |---|---|---|
 | 1 | **客户端半零行为测试** | 8 个 `.tsx` ＋ 4 个 `.css` **无任何行为/渲染测试**；根因可判定 = 两份 vitest 配置 `environment: 'node'` 且 `devDependencies` **无 jsdom** ⇒ 客户端半在测试面上**不可执行** |
