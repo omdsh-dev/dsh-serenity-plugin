@@ -217,7 +217,7 @@
 
 🔴 **客户端半的两条结构事实**：① 它引用的宿主契约与 node 半**不同**（浏览器侧 `configForms`/`slots`/RPC）⇒ 由 `typecheck-host` 的 **client 半**单独把关（§2.5 的例外条款）；② **`vitest.config.ts` 的 coverage 把 `src/client/**` 整体排除** ⇒ 客户端半**不在覆盖率门禁内**（见 §3-9）。
 
-### 2.7 测试面（108 文件 / 1700 用例）
+### 2.7 测试面（108 文件 / 1699 用例 —— 锚定 2026-09-25「死代码第 1 批」落盘后实测；该批删 1 个用例，原 1700）
 
 | 维度 | 读数 |
 |---|---|
@@ -321,16 +321,29 @@
 | 3 | `ccc.ts:AutopilotTrajectorySettings` ＋ `autopilotTrajectory`/`autotrajectory`/`autopilot` 三配置键 | ACC 侧 autopilot 2026-09-15 **已整段退场** |
 | 4 | `ccc.ts:findGitRoot` 与**仓根包** `src/activation.ts:findGitRoot` 同实现两份 | ⚠️ **已核**：`activation.ts` 不在 `hooks/` 包内，而在**仓根包** `src/`（v0.1–v0.2 旧 runner 的遗留）——两份实现属**不同包**，不是同包重复 |
 | 5 | `ccc.ts:isWriteTool` vs `seams/guards.ts` 同名局部实现 | 同一语义两份；`ccc` 版**仅 tests 引用** |
-| 6 | **注释层残留** | `trajectory-ops.ts` 文件头仍列 `logbook/close/archive/health/qa`（代码已删）｜`clock-runtime.ts` 文件头仍提 `wakeSchedulerEnabled` 闸（2026-09-21 已砍） |
+| 6 | **注释层残留** | 🔴 **2026-09-25 复核：原判两处均为假阳性**（两处皆是**显式历史留档**，非过期）⇒ 见正下方「注释层复核」。**真残留 = 3 处**：2 处已随第 1 批清掉，1 处留第 2 批 |
+
+**注释层复核（2026-09-25，死代码第 1 批随手做；**原判错在哪**与**真残留是什么**分开记）**
+
+| 对象 | 原判 | 复核结论 |
+|---|---|---|
+| `trajectory-ops.ts` 文件头 | "仍列 `logbook/close/archive/health/qa`（代码已删）" | ⛔ **假阳性**：文件头**正确地**写着"旧 `logbook` 面里 close / archive / health / qa **四个动作已删**……其函数**同批删除**" ⇒ 这是**留档**，不是过期 |
+| `clock-runtime.ts` 文件头 | "仍提 `wakeSchedulerEnabled` 闸（2026-09-21 已砍）" | ⛔ **假阳性**：原文写"（**原** `wakeSchedulerEnabled` 于 2026-09-21 所有者令砍掉 ⇒ 调用方**不传** `gate`）" ⇒ 同为**留档** |
+| `clock-runtime.ts` 硬约束三 | （原判未列） | ✅ **真残留，本批已修**：原文"**现只余** autopilot `autopilotWakeEnabled`（缺省关）**一条**"——而 autopilot 已随 **v1.35.0 整段退场**，全仓 grep `autopilotWakeEnabled` = **零处代码、仅两处历史提及** ⇒ **当前零条闸在用**，已改写为"更正：当前零条闸在用" |
+| `trajectory-ops.ts` 第二段注释 | （原判未列） | ✅ **真残留，本批已修**：原文"为什么**只有 6 个**"，而 `TRAJECTORY_ACTIONS` 实测 = **8**（list/show/create/use/rebuild/send-now/send-later/cro-guide），且与**同文件文件头**的"现行 **8 个**"**自相矛盾** ⇒ 已改为"v1.33 收敛时 6 个，其后追加 `send-now`/`cro-guide`" |
+| `clock-runtime.ts` 的"回归钉"引用 | （原判未列） | ⏳ **真残留，留第 2 批**：两处以 `autopilot-trajectory.test.ts` 作"实测 / 回归钉"引用，而**该文件全仓已不存在**（`glob **/*autopilot*` 零命中）⇒ 属"**指向已删对象的断言**"；处置取决于 `bodyCountsTick` 的去留（见 §3-8 第 5 行），故**同批不动** |
+
+> 🔵 **教训（判据纪律）**：**"注释里出现了已删对象的名字" ≠ "注释过期"** —— 必须读那句话**是断言现状、还是记录历史**。本条原判只按关键词命中，两边各错一次（假阳 2）。反向的坑也在：**关键词没命中的地方才有真残留**（本批两处真残留均非原判所指）。
 
 ### 3-8. 工具面的死代码候选
 
 | # | 对象 | 读数 |
 |---|---|---|
-| 1 | `msm-ops.ts:MsmEntry`（export interface） | `src/**` 仅自身 8 处、`tests/**` **0 处** ⇒ 无外部消费者（纯类型） |
+| 1 | `msm-ops.ts:MsmEntry`（export interface） | `src/**` 仅自身 8 处、`tests/**` **0 处** ⇒ 无外部消费者（纯类型）<br>🔴 **2026-09-25 复核更正：它出现在**公开签名**里** —— `loadMsmEntries(): MsmEntry[]` 与 `findEntry(): MsmEntry \| null` **都是导出函数** ⇒ 它是**契约类型**、**不是死代码**（"零消费者"只说明**仓内**没人直接写这个名字）。⇒ **本次不动它**；同批动的是第 4 行的 `MsmArgs`（**补导出**，方向相反） |
 | 2 | `tools/praxis.ts:PRAXIS_INDEX` | `src/**` 除本文件 2 处外 0；**只被 tests 用** |
 | 3 | `tools/trajectory.ts` 的 `sanitizeSessionSummary` / `renameDshSessionOnUse` / `activeInfoFromCreate` / `renameDshSessionForActive` | 包内自用，对外**只被 `session-title.test.ts` 引用** |
-| 4 | ⚠️ 形状问题：`msm-ops.ts:MsmArgs` **未导出**，却被 `runMsm`/`runMsmAsync` 的**公开签名**引用 | 外部调用方只能传结构等价字面量（类型不可见 = 契约不完整） |
+| 4 | ⚠️ 形状问题：`msm-ops.ts:MsmArgs` **未导出**，却被 `runMsm`/`runMsmAsync` 的**公开签名**引用 | 外部调用方只能传结构等价字面量（类型不可见 = 契约不完整）<br>✅ **2026-09-25 第 1 批已修**：补 `export`（**零行为变化**，纯类型面） |
+| 5 | 🆕 `clock-runtime.ts:ClockOptions.bodyCountsTick`（**公开选项**） | `src/**` 除本文件"定义 + 实现"外**零调用**（唤醒调度器不传它）；`tests/**` 6 处显式传 `true`。**成因可判定**：它存在的唯一理由是 **autopilot 的记账语义**（"无 target 则不计 tick"），而 `autopilot-trajectory.ts` **已随 v1.35.0 整段退场** ⇒ **在产线已是死选项**。⚠️ 属**公开面**（导出接口的选项）⇒ 按 **D84 留待第 2 批单独确认**，本批不动 |
 
 ### 3-9. 🔴 测试面缺口（**第 ⑤ 项的输入**）
 

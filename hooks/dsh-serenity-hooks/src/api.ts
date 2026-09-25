@@ -146,7 +146,7 @@ function sendJson(res: ServerResponse, code: number, body: unknown): void {
  * "WebUI 触发的动作"与"agent/curl 触发的动作"（如 safe-mode 不可由 agent 自行开关）。
  * 本 helper 只做**同一判据的归一**，不放宽也不收紧：判据、状态码、文案均由调用方给出。
  */
-export function senderIsWebUi(req: IncomingMessage): boolean {
+function senderIsWebUi(req: IncomingMessage): boolean {
   return req.headers['x-serenity-ui'] === '1'
 }
 

@@ -83,11 +83,6 @@ export function setBindingStore(store: BindingStore | null): void {
   domainStore = store
 }
 
-/** 当前域句柄（诊断用；`null` = 未接线/不可用） */
-export function getBindingStore(): BindingStore | null {
-  return domainStore
-}
-
 /** 域记录 → 本模块记录形状（同名字段，无需映射表；见 host/storage-domain.ts 头注） */
 function fromDomainRecord(rec: BindingRecord): SessionBoundRecord {
   return {
@@ -177,7 +172,7 @@ const migratedRoots = new Set<string>()
  *
  * @param root CCC 根
  */
-export function ensureBindingsMigrated(root: string): void {
+function ensureBindingsMigrated(root: string): void {
   if (!domainStore?.available) return
   if (migratedRoots.has(root)) return
   try {

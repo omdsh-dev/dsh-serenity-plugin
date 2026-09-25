@@ -85,7 +85,7 @@ interface WakeDeliveryResult {
  * C6b（P2）：字段由 {@link ClockRuntime} 提供（**工厂那份**，字段名与语义一个字未改）；
  * 此处只把 `lastTickLog` 收为**必需**（本钟独有，autopilot 没有它——现状稿 §2.4）。
  */
-export type WakeSchedulerRuntime = ClockRuntime & { lastTickLog: string[] }
+type WakeSchedulerRuntime = ClockRuntime & { lastTickLog: string[] }
 
 /** 目标定位：目录名 + SESSION.md 绝对路径 */
 interface WakeTarget {

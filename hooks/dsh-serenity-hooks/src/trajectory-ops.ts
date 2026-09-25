@@ -26,7 +26,8 @@ import { localDate, localDateTimeMinutes } from './time.js'
 /**
  * `container_trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
  *
- * 为什么只有 6 个（R↓）：旧面是 `logbook`（11）+ `trajectory`（12）两个工具，用户裁决
+ * 为什么收敛到这 8 个（R↓；v1.33 收敛时为 **6 个** —— 其后追加 `send-now`（09-16）
+ * 与 `cro-guide`（09-20），🔴 2026-09-25 更正计数，勿再写成"6 个"）：旧面是 `logbook`（11）+ `trajectory`（12）两个工具，用户裁决
  * 「都合并成 trajectory，废除 logbook 这个词」并逐条删并 ——
  * summary 并进 list｜health/qa 淘汰（判据＝旧模板，EAP 已取代；仅"空壳/长期无活动"并入 use）｜
  * close/archive 删（completed 由 SESSION.md 的 `[x]` 推导；归档走 container_fs mv）｜

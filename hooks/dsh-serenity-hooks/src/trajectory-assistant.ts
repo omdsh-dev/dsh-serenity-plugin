@@ -15,8 +15,9 @@
  * L6 结算）仅在本模块注释与内部文档出现，永不浮现在提示词文本。
  *
  * 结算（settlement）挂点：D6 用户拍板——若 CCC 有标准 SESSION 复盘仪式，
- * 结算视图归 trajectory-assistant。当前 close/archive 无复盘摘要 → 机制
- * 延后，仅留 onSettlement 导出 seam（OP-1，无调用者）。
+ * 结算视图归 trajectory-assistant。当前 close/archive 无复盘摘要 ⇒ 机制延后。
+ * 🔴 2026-09-25（S142 分批清死代码·第 1 批）：原先那个 `onSettlement(cb)` **空 seam 已删**
+ * （零调用者、无触发器、空实现）——仪式真落地时按当时的信号重新设计，**不再靠空占位**。
  */
 
 // ── level-event 词汇表（内部设计简写 → 可见前缀用词）──
@@ -88,11 +89,3 @@ export function styledToken(event: keyof typeof EVENT_LABEL, style: TrajectorySt
   return eventToken(event)
 }
 
-/**
- * 结算 seam（OP-1/D6）：未来标准 SESSION 复盘仪式接入点。当前无调用者，
- * 仅导出契约：onSettlement(cb) 在"工作完成且被用户认可"时触发——该信号
- * 尚无可靠自动检测（D2 用户拍板记录为未解问题），实现留待仪式落地。
- */
-export function onSettlement(_cb: (sessionId: string) => void): void {
-  /* 预留：结算触发器尚未实现（OP-1） */
-}

@@ -195,5 +195,3 @@ export function registerCroTurnTracking(ctx: Context): void {
   })
 }
 
-/** 类型再导出（调用方少一处 import） */
-export type { Agent as CroAgent }

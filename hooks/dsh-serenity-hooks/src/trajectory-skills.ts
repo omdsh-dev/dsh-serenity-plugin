@@ -21,8 +21,10 @@ import { findSkillMd, isSafeSkillName, truncateContent } from './skills-discover
 /** 全文注入总长上限（字符数；规格 §3「缺省 32 KB」——防上下文爆炸） */
 export const TRAJECTORY_SKILLS_MAX_CHARS = 32 * 1024
 
-/** 缺失标记（规格 §3/§6-3 的验收锚点：任何"拿不到全文"的情况都必须带它，绝不静默） */
-export const SKILL_MISSING_MARK = '[缺失]'
+/** 缺失标记（规格 §3/§6-3 的验收锚点：任何"拿不到全文"的情况都必须带它，绝不静默）
+ *  🔴 2026-09-25（S142 分批清死代码·第 1 批）：**降为模块内常量**——全仓唯一消费者在本文件，
+ *  导出只服务测试（测试用的是字面量 `'[缺失]'`）⇒ 导出面无意义。 */
+const SKILL_MISSING_MARK = '[缺失]'
 
 /** 统一缺失提示（规格 §3 逐字约定：`[缺失] <name>（未找到该 skill）`） */
 function missingNotice(name: string): string {

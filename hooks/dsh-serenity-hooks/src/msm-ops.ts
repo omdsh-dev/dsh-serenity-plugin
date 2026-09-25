@@ -424,7 +424,9 @@ export interface MsmEntry {
   flags?: MsmFlag[]
 }
 
-interface MsmArgs {
+/** 🔴 2026-09-25（S142 第 1 批）：本接口**必须导出** —— `runMsm`/`runMsmAsync` 的**公开签名**引用它
+ *  （此前未导出 ⇒ 外部调用方看不到该类型，只能传结构等价字面量 = 契约不完整）。 */
+export interface MsmArgs {
   action: MsmAction
   name?: string
   args?: string[]

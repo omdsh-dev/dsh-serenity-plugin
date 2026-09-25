@@ -448,14 +448,6 @@ function readMdStat(mdPath: string): { bytes: number | null; mtimeMs: number | n
   }
 }
 
-/** 读 SESSION.md 体积（供看门狗判据等复用；读不到 ⇒ null） */
-export function readSessionMdBytes(mdPath: string): number | null {
-  try {
-    return statSync(mdPath).size
-  } catch {
-    return null
-  }
-}
 
 /** 读取快照所需的 fs 侧数据（**纯读取，不抛**） */
 export function readCroSnapshotInput(

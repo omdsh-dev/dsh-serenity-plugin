@@ -13,7 +13,6 @@ import {
   ACK_SKIP_PREFIX,
   eventToken,
   styledToken,
-  onSettlement,
 } from '../src/trajectory-assistant.js'
 
 describe('trajectory-assistant: token 常量（单一真相源）', () => {
@@ -57,14 +56,3 @@ describe('trajectory-assistant: 风格门面（plain 默认 / metaphor 变体）
   })
 })
 
-describe('trajectory-assistant: 结算 seam（OP-1/D6 预留契约）', () => {
-  it('onSettlement 可安全调用（当前无调用者，无触发器——D2 记录未解）', () => {
-    let fired = 0
-    onSettlement((id) => {
-      fired += 1
-      expect(id).toBe('S999')
-    })
-    // 结算触发器尚未实现 → 注册不立即触发（契约：未来仪式接入后触发）
-    expect(fired).toBe(0)
-  })
-})
