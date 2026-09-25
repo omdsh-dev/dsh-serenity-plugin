@@ -31,6 +31,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { hostService } from '../../src/host/access.js'
+import { bindingDomainSpec } from '../../src/host/storage-domain.js'
 import { probeHostContract } from '../../src/host/contract.js'
 
 type Ctx = Record<string, unknown>
@@ -275,8 +276,72 @@ describe.skipIf(!depsReady)('§0L storageDomain（真实 cordis + 真实 storage
   }, 30000)
 })
 
-describe('§0L storageDomain：环境与契约登记自检', () => {
-  it('依赖可解析（否则本文件失去保护力）', () => {
+describe('storage-domain：本模块自产规格的可用性（⑤ 第 37 件）', () => {
+  /**
+   * 🔴 **为什么它此前零行为证据**：`bindingDomainSpec()` 出产的规格里，`passthroughSchema`
+   * 的 `parse` / `safeParse` 两个箭头**从没被调用过** —— 既有 C-2 用例是在测试里
+   * **手写自己的内联 schema 字面量**（`{ parse: (v) => v, safeParse: ... }`），
+   * 走的不是本模块那份。
+   * 🔴 **可达性取证**（挑靶四条）：`bindingDomainSpec()` 被 `openBindingDomain()` 调用，
+   * 而 `openBindingDomain()` 是**活路径**（宿主落盘读回边界时宿主拿这个 schema 校验）
+   * ⇒ 不是死代码；缺的正是"**我们交出去的那个 schema 到底合不合规、放不放行**"。
+   * ⚠️ **真机用例对它是空的**：那条只在**本机解析得到 `dsh-storage-domain`** 时才跑
+   * （`domainPath` 为假则整块跳过）⇒ 它**不能**替代本组。本组**零依赖**，恒可跑。
+   */
+  it('bindingDomainSpec：域规格形状（名字/版本/表/值 schema 齐备，且可被 defineDomain 接受）', async () => {
+    const spec = bindingDomainSpec() as {
+      name: string
+      version: number
+      tables: Record<string, { valueSchema: unknown }>
+    }
+    expect(spec.name).toBe('serenity_bindings')
+    expect(spec.version).toBe(1)
+    // 🔴 域名约束：下划线合法、连字符非法（文件头登记，宿主 defineDomain 在模块加载期就抛）
+    expect(spec.name).toMatch(/^[a-z][a-z0-9_]*$/)
+    expect(Object.keys(spec.tables)).toEqual(['bindings'])
+    expect(spec.tables.bindings!.valueSchema).toBeDefined()
+    // 正控：真的用宿主的 defineDomain 走一遍（若本机可解析该包）——不可解析则跳过，不假装通过
+    if (domainPath) {
+      const mod = (await import(domainPath)) as { defineDomain?: (spec: unknown) => unknown }
+      expect(typeof mod.defineDomain).toBe('function')
+      expect(() => mod.defineDomain!(spec)).not.toThrow()
+    }
+  })
+
+  it('🔴 valueSchema 语义 = 恒等放行（parse 原样返回 / safeParse 恒 success）', () => {
+    const spec = bindingDomainSpec() as { tables: Record<string, { valueSchema: unknown }> }
+    const schema = spec.tables.bindings!.valueSchema as {
+      parse: (v: unknown) => unknown
+      safeParse: (v: unknown) => { success: boolean; data?: unknown }
+    }
+    // 本模块的设计是**恒等放行**（真正的形状把关在读侧的 asBindingRecord）
+    // ⇒ 三个判别性输入都要被原样放行，包括"看起来像坏数据"的那些
+    for (const v of [{ dirName: 'x' }, null, 'not-an-object']) {
+      expect(schema.parse(v)).toBe(v)
+      const r = schema.safeParse(v)
+      expect(r.success).toBe(true)
+      expect(r.data).toBe(v)
+    }
+  })
+
+  it('🔴 恒等放行的边界与 asBindingRecord 的分工（放行 ≠ 接受）', async () => {
+    // 这两件事必须分开钉：schema 放行一切，而**读侧**才真正决定"算不算一条绑定"
+    const { BindingStore } = await import('../../src/host/storage-domain.js')
+    const table = {
+      get: (): unknown => ({ notADirName: 1 }), // 形状不合法的记录
+      entries: () => [[ 'k', { notADirName: 1 } as unknown ] as [string, unknown]],
+      size: 1,
+      put: async () => {},
+      delete: async () => true,
+    }
+    const store = new BindingStore({ table: () => table } as never)
+    // schema 会放行它，但 store 读出来必须是 undefined（形状把关在 asBindingRecord）
+    expect(store.get('k')).toBeUndefined()
+    expect(store.entries()).toEqual([])
+  })
+})
+
+describe('§0L storageDomain：环境与契约登记自检', () => {  it('依赖可解析（否则本文件失去保护力）', () => {
     if (process.env.CI) return
     expect(
       { cordis: Boolean(cPath), storage: Boolean(storagePath), domain: Boolean(domainPath) },
