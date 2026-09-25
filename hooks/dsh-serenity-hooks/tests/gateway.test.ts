@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer, request as httpRequest } from 'node:http'
 import { connect as netConnect } from 'node:net'
+import { gzipSync } from 'node:zlib'
 
 // gateway.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
 vi.mock('@deepseek-ai/schemastery', () => {
@@ -1134,6 +1135,293 @@ describe('面 B 集成：登录三态 / 账号锁定 / TOTP 二选一与防重�
       expect(after.status).toBe(200)
       expect(after.body).toContain('<input id="f-user"')
       expect(after.body).not.toContain('upstream-main-body')
+    } finally {
+      await h.cleanup()
+    }
+  }, 20_000)
+})
+
+/**
+ * ⑤ 第 12 件（反代面集成，2026-09-25）：上一组补的是**登录面**，本组补**已登录之后的三个装配分支**
+ * ——它们在覆盖率报告里同批是 `fstat-no`/未执行：
+ *   ① **HTML 注入反代**（`proxy()` 里 `status===200 && text/html` 那一支）：函数级 `transformHtmlForProxy`
+ *      早有单测，但**装配层这段接线**（取 chunks → 变换 → `writeHead(transformed.headers)` → `end(body)`）
+ *      从未被执行 ⇒ v1.28.2「gzip HTML 被当文本注入 → 白屏」这条**线上事故**此前没有端到端回归钉。
+ *   ② **workspace.create 三态**（禁建 ／ 白名单拒 ／ 放行转发）：`readBody` 与 `bodyOverride` 重放同批。
+ *   ③ **PUT /serenity/config 的跨源拒绝**（v1.22.4 S3）。
+ *
+ * 断言全部取"客户端看到什么"（状态码 ／ 响应头 ／ 响应体字节），**不复用源码字符串**。
+ * 🔴 每条拒绝类断言都配**同夹具的正控**（例如同为 POST workspace/create，白名单内路径必须 200），
+ * 否则"403 通过"可能只是夹具坏了。
+ */
+describe('面 B 集成：HTML 注入反代（含 gzip 白屏根因）/ workspace.create 三态 / 跨源配置写拒绝（真 listener）', () => {
+  type RawRes = { status: number; headers: Record<string, string | string[] | undefined>; body: string; buf: Buffer }
+
+  /** 上游 HTML（明文），供注入路径使用 */
+  const PLAIN_HTML = '<!doctype html><html><head><title>t</title></head><body>hello-upstream</body></html>'
+  /** 损坏的 gzip 字节（解压必失败）——用于钉"失败即原样透传，绝不注入" */
+  const CORRUPT_GZ = Buffer.from('this-is-not-gzip-at-all', 'utf-8')
+
+  function raw(opts: { port: number; method: string; path: string; headers?: Record<string, string>; body?: string }): Promise<RawRes> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest(
+        { host: '127.0.0.1', port: opts.port, method: opts.method, path: opts.path, headers: opts.headers },
+        (res) => {
+          const chunks: Buffer[] = []
+          res.on('data', (c: Buffer) => chunks.push(c))
+          res.on('end', () => {
+            const buf = Buffer.concat(chunks)
+            resolve({ status: res.statusCode ?? 0, headers: res.headers, body: buf.toString('utf-8'), buf })
+          })
+        },
+      )
+      req.on('error', reject)
+      req.end(opts.body)
+    })
+  }
+
+  const cookieOf = (res: RawRes, name: string): string =>
+    new RegExp(`${name}=([^;]+)`).exec(String(res.headers['set-cookie'] ?? ''))?.[1] ?? ''
+
+  const POLYFILL_MARKER = 'data-sp-randomuuid-polyfill'
+
+  interface ProxyHarness { gwPort: number; mainPort: number; token: string; cleanup: () => Promise<void> }
+
+  /** 起真网关 + 按路径分派的上游替身（HTML 明文 ／ gzip ／ 坏 gzip ／ 500 ／ 回显式 create 端点）。 */
+  async function bootProxy(cfg: { workspaces?: string[]; allowWorkspaceCreate?: boolean }): Promise<ProxyHarness> {
+    const upstream = createServer((req, res) => {
+      const path = req.url ?? '/'
+      if (path.startsWith('/html-gz')) {
+        const gz = gzipSync(Buffer.from(PLAIN_HTML, 'utf-8'))
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip' })
+        res.end(gz)
+        return
+      }
+      if (path.startsWith('/html-bad-gz')) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'content-encoding': 'gzip' })
+        res.end(CORRUPT_GZ)
+        return
+      }
+      if (path.startsWith('/html-500')) {
+        res.writeHead(500, { 'content-type': 'text/html; charset=utf-8' })
+        res.end(PLAIN_HTML)
+        return
+      }
+      if (path.startsWith('/html')) {
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        res.end(PLAIN_HTML)
+        return
+      }
+      if (path.startsWith('/api/workspace/create')) {
+        // 回显：证明网关**真的把请求体转发过来了**（bodyOverride 重放路径）
+        const chunks: Buffer[] = []
+        req.on('data', (c: Buffer) => chunks.push(c))
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({ echoedLength: Buffer.concat(chunks).length, method: req.method }))
+        })
+        return
+      }
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('upstream-main-body')
+    })
+    const mainPort = await new Promise<number>((resolve) => {
+      upstream.listen(0, '127.0.0.1', () => {
+        const addr = upstream.address()
+        resolve(typeof addr === 'object' && addr !== null ? addr.port : 0)
+      })
+    })
+
+    const cfgDir = mkdtempSync(join(tmpdir(), 'hooks-gw-proxy-'))
+    const cfgPath = join(cfgDir, 'serenity-hooks.json')
+    writeFileSync(cfgPath, JSON.stringify({
+      gateway: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 0,
+        accounts: [{ id: 'a1', user: 'tester', passHash: hashPassword('pw') }],
+        ...(cfg.workspaces === undefined ? {} : { workspaces: cfg.workspaces }),
+        ...(cfg.allowWorkspaceCreate === undefined ? {} : { allowWorkspaceCreate: cfg.allowWorkspaceCreate }),
+      },
+      weixinApi: { enabled: false, port: 0 },
+    }))
+    const prevCfg = process.env.SERENITY_HOOKS_CONFIG
+    process.env.SERENITY_HOOKS_CONFIG = cfgPath
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), gatewayEnabled: true }))
+    const ctx = {
+      get: (name: string) => (name === 'webServer' ? { port: mainPort } : undefined),
+      on: vi.fn(),
+      effect: vi.fn(() => () => {}),
+    }
+    registerGateway(ctx as never)
+    await vi.waitFor(() => expect(faceActive('gateway')).toBe(true), { timeout: 5000 })
+    const gwPort = facePort('gateway') ?? 0
+    expect(gwPort).toBeGreaterThan(0)
+
+    // 真登录（拿会话 token），后面的断言全部走"已登录"分支
+    const page = await raw({ port: gwPort, method: 'GET', path: '/' })
+    const csrf = cookieOf(page, 'serenity_csrf')
+    const login = await raw({
+      port: gwPort,
+      method: 'POST',
+      path: '/serenity/login',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-csrf-token': csrf, cookie: `serenity_csrf=${csrf}` },
+      body: 'user=tester&password=pw',
+    })
+    expect(login.status).toBe(302)
+    const token = cookieOf(login, 'serenity_session')
+    expect(token).not.toBe('')
+
+    return {
+      gwPort,
+      mainPort,
+      token,
+      cleanup: async () => {
+        stopAllFaces()
+        __setSimpleSourceForTest(null)
+        if (prevCfg === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+        else process.env.SERENITY_HOOKS_CONFIG = prevCfg
+        upstream.closeAllConnections()
+        await new Promise<void>((resolve) => {
+          upstream.close(() => resolve())
+          setTimeout(resolve, 1000)
+        })
+        rmSync(cfgDir, { recursive: true, force: true })
+      },
+    }
+  }
+
+  it('① 明文 HTML → 反代时注入 polyfill ＋ 重算 content-length（装配层接线）', async () => {
+    const h = await bootProxy({})
+    try {
+      const res = await raw({ port: h.gwPort, method: 'GET', path: '/html', headers: { cookie: `serenity_session=${h.token}` } })
+      expect(res.status).toBe(200)
+      expect(res.body).toContain(POLYFILL_MARKER)
+      expect(res.body).toContain('hello-upstream')
+      // 注入位置：仍在 </head> 之前（不是把整页顶掉）
+      expect(res.body.indexOf(POLYFILL_MARKER)).toBeLessThan(res.body.indexOf('</head>'))
+      // 长度声明与实体一致（否则浏览器截断 ⇒ 白屏的另一种形态）
+      expect(Number(res.headers['content-length'])).toBe(Buffer.byteLength(res.body, 'utf-8'))
+    } finally {
+      await h.cleanup()
+    }
+  }, 20_000)
+
+  it('② gzip HTML → 解压后注入 ＋ 去掉 content-encoding（v1.28.2 白屏根因端到端回归钉）', async () => {
+    const h = await bootProxy({})
+    try {
+      const res = await raw({ port: h.gwPort, method: 'GET', path: '/html-gz', headers: { cookie: `serenity_session=${h.token}` } })
+      expect(res.status).toBe(200)
+      // 🔴 事故形态：不解压就注入 ⇒ 压缩字节里找不到 </head> ⇒ polyfill 前置 ⇒ HTML 全毁 ⇒ 白屏。
+      //    修好之后客户端应当拿到**明文**（encoding 头已去掉）＋ 注入标记 ＋ 原内容完整。
+      expect(res.headers['content-encoding']).toBeUndefined()
+      expect(res.body).toContain(POLYFILL_MARKER)
+      expect(res.body).toContain('hello-upstream')
+      expect(res.body.indexOf(POLYFILL_MARKER)).toBeLessThan(res.body.indexOf('</head>'))
+      expect(Number(res.headers['content-length'])).toBe(Buffer.byteLength(res.body, 'utf-8'))
+    } finally {
+      await h.cleanup()
+    }
+  }, 20_000)
+
+  it('③ 解压失败（坏 gzip）→ **原样透传**：不注入、保留 content-encoding、字节逐字不变', async () => {
+    const h = await bootProxy({})
+    try {
+      const res = await raw({ port: h.gwPort, method: 'GET', path: '/html-bad-gz', headers: { cookie: `serenity_session=${h.token}` } })
+      expect(res.status).toBe(200)
+      expect(res.headers['content-encoding']).toBe('gzip')
+      expect(res.body).not.toContain(POLYFILL_MARKER)
+      expect(res.buf.equals(CORRUPT_GZ)).toBe(true) // 一个字节都没动（"宁可不解，绝不弄坏"）
+    } finally {
+      await h.cleanup()
+    }
+  }, 20_000)
+
+  it('④ 非 200 的 HTML（500）→ 不注入（注入只发生在 200 上）', async () => {
+    const h = await bootProxy({})
+    try {
+      const res = await raw({ port: h.gwPort, method: 'GET', path: '/html-500', headers: { cookie: `serenity_session=${h.token}` } })
+      expect(res.status).toBe(500)
+      expect(res.body).not.toContain(POLYFILL_MARKER)
+      expect(res.body).toContain('hello-upstream') // 透传仍在（错误页也要能看见上游内容）
+    } finally {
+      await h.cleanup()
+    }
+  }, 20_000)
+
+  // ── workspace.create 三态（禁建 ／ 白名单拒 ／ 放行转发）──
+
+  const createBody = (rpcId: string, path: string): string =>
+    JSON.stringify({ type: 'client-request', rpcId, method: 'workspace/create', payload: { args: { path } } })
+
+  const postCreate = (h: ProxyHarness, body: string): Promise<RawRes> =>
+    raw({
+      port: h.gwPort,
+      method: 'POST',
+      path: '/api/workspace/create',
+      headers: { 'content-type': 'application/json', cookie: `serenity_session=${h.token}` },
+      body,
+    })
+
+  it('⑤ allowWorkspaceCreate=false → 403（禁建文案 ＋ rpcId 回显），且**不转发**给上游', async () => {
+    const h = await bootProxy({ allowWorkspaceCreate: false })
+    try {
+      const res = await postCreate(h, createBody('r-deny', '/home/yh/home/proj'))
+      expect(res.status).toBe(403)
+      const parsed = JSON.parse(res.body) as { rpcId: string; result: { ok: boolean; error: { code: string; message: string } } }
+      expect(parsed.rpcId).toBe('r-deny')
+      expect(parsed.result.ok).toBe(false)
+      expect(parsed.result.error.code).toBe('forbidden')
+      expect(parsed.result.error.message).toContain('disabled for external access')
+      expect(res.body).not.toContain('echoedLength') // 没被转发（上游的回显体不该出现）
+    } finally {
+      await h.cleanup()
+    }
+  }, 20_000)
+
+  it('⑥ 白名单外的路径 → 403（allowlist 文案）；**同夹具的白名单内路径必须 200**（正控）', async () => {
+    const h = await bootProxy({ workspaces: ['/home/yh/home'] })
+    try {
+      const denied = await postCreate(h, createBody('r-out', '/tmp/evil'))
+      expect(denied.status).toBe(403)
+      expect(denied.body).toContain('workspace not in external allowlist')
+      expect(denied.body).toContain('r-out')
+      expect(denied.body).not.toContain('echoedLength')
+
+      // 🔴 正控：同一夹具、同一条端点，换成白名单内路径 ⇒ 真转发（否则上面那条 403 可能只是夹具坏）
+      const body = createBody('r-in', '/home/yh/home/proj')
+      const allowed = await postCreate(h, body)
+      expect(allowed.status).toBe(200)
+      const echoed = JSON.parse(allowed.body) as { echoedLength: number; method: string }
+      expect(echoed.method).toBe('POST')
+      // 白名单分支是"先读 body、再重放转发"（bodyOverride）⇒ 上游收到的长度必须与原 body 逐字等长
+      expect(echoed.echoedLength).toBe(Buffer.byteLength(body, 'utf-8'))
+    } finally {
+      await h.cleanup()
+    }
+  }, 20_000)
+
+  it('⑦ PUT /serenity/config：跨源 Origin → 403；loopback 主端口 Origin → 放行（正控）', async () => {
+    const h = await bootProxy({})
+    try {
+      const cross = await raw({
+        port: h.gwPort,
+        method: 'PUT',
+        path: '/serenity/config',
+        headers: { cookie: `serenity_session=${h.token}`, origin: 'https://evil.example' },
+      })
+      expect(cross.status).toBe(403)
+      expect(cross.body).toContain('cross-origin config write rejected')
+
+      // 🔴 正控：换成主端口 loopback Origin ⇒ 过闸（本用例里"过闸"表现为透传到上游）
+      const same = await raw({
+        port: h.gwPort,
+        method: 'PUT',
+        path: '/serenity/config',
+        headers: { cookie: `serenity_session=${h.token}`, origin: `http://127.0.0.1:${h.mainPort}` },
+      })
+      expect(same.status).toBe(200)
+      expect(same.body).toBe('upstream-main-body')
     } finally {
       await h.cleanup()
     }
