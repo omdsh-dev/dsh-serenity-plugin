@@ -407,4 +407,21 @@ describe('src/api.ts：微信扫码登录（假 iLink 后端 ＋ 真 HTTP 往返
       await api.close()
     }
   })
+
+  it('🔴 ⑩ `/login` 的 catch：**confirmed 时落盘失败**（`.opencode` 被占成一个普通文件）⇒ 400（真实故障形态，不是 mock）', async () => {
+    const api = await bootApi()
+    try {
+      // 先出码（此时 CCC 布局正常）
+      const started = json(await postWeixin(api.port, { action: 'login-start' })) as { loginKey: string }
+      // 🔴 破坏 CCC 布局：`.opencode` 变成普通文件 ⇒ 写 `.opencode/serenity.json` 必然抛（ENOTDIR/EEXIST）
+      writeFileSync(join(ccc, '.opencode'), 'not a directory')
+      fake.set(STATUS_PATH, { status: 200, body: { status: 'confirmed', bot_token: 'tok-x', ilink_user_id: 'u-9' } })
+
+      const res = await pollLogin(api.port, started.loginKey)
+      expect(res.status, '落盘失败必须被端点 catch 收敛成 400，而不是崩').toBe(400)
+      expect(String(json(res).error)).toBeTruthy()
+    } finally {
+      await api.close()
+    }
+  })
 })

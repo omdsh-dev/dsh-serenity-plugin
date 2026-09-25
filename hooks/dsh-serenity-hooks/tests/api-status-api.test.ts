@@ -48,6 +48,12 @@ async function bootApi(opts: {
   liveSessionCwds?: string[]
   /** 🆕 同上：让 `ctx.emit` 抛错 —— 覆盖 config PUT 的"事件通知失败不影响保存"分支 */
   emitThrows?: boolean
+  /** 🆕 ⑤ 第 18 件：让 `sessions.get` **抛错** —— 触发端点自己的 catch（真实故障形态：宿主服务读取失败） */
+  sessionGetThrows?: boolean
+  /** 🆕 同上：让 `workspaceRegistry.list()` 抛错 —— 覆盖 config GET 的"工作区服务不可用"支线 */
+  registryListThrows?: boolean
+  /** 🆕 ⑤ 第 18 件：让 `sessions.list()` 抛错 —— 它在 `session-cleanup` 里是**裸调用**（不被收口层吞） */
+  sessionListThrows?: boolean
 } = {}): Promise<Booted> {
   const handlers = new Map<string, Handler>()
   const routes: string[] = []
@@ -63,8 +69,13 @@ async function bootApi(opts: {
     //    异常会被 handler 的 catch 吞成 **400** ⇒ 整端点降级为"不可用"，而**不是**"codeRuntime 为 null"。
     //    ⇒ 这一处正是"走收口层（`hostService`，异常吞掉返回 undefined）vs 裸调用"的**失败模式差异**的实证。
     get: (name: string) => {
+      if (name === 'workspaceRegistry' && opts.registryListThrows) {
+        return { list: () => { throw new Error('workspaceRegistry.list boom') } }
+      }
       // 只有 cleanup 那组需要"宿主里正在跑的会话"（live 保护 = 该端点的安全底线）
       if (name !== 'sessions') return undefined
+      if (opts.sessionGetThrows) return { get: () => { throw new Error('sessions.get boom') } }
+      if (opts.sessionListThrows) return { list: () => { throw new Error('sessions.list boom') } }
       const wantGet = opts.sessionCwdById !== undefined
       const wantList = opts.liveSessionIds !== undefined || opts.liveSessionCwds !== undefined
       if (!wantGet && !wantList) return undefined
@@ -948,6 +959,92 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
       const res = await raw({ port: api.port, method: 'PUT', path: '/serenity/config', headers: UI_HEADERS, body: JSON.stringify({ config: {} }) })
       expect(res.status).toBe(200)
       expect(jsonBody(res).config, '保存结果必须照常返回').toBeTypeOf('object')
+    } finally {
+      await api.close()
+    }
+  })
+})
+
+/**
+ * 🔴 ⑤ 第 18 件：`api.ts` 的**残余 catch 与尾部支线**（第 17 件后剩 22 条里的可覆盖部分）。
+ *
+ * 🔵 **本件的判据要点：用"真实故障形态"触发 catch，不用 mock 制造异常**（§4.2-㊾）。
+ *    三种形态都是产线上真会发生的：① 宿主服务读取抛错（cordis Proxy 对未声明服务确实会抛）
+ *    ② 请求体不是合法 JSON（面板发坏包）③ `DSH_HOME` 被指到一个**文件**（配置被写坏）。
+ *
+ * ⚠️ 唯一**刻意不覆盖**的一条：`resolveWorkspace` 的 `catch`（"遍历失败 → 空列表"）——
+ *    实测**构造上不可达**（三层访问器全吞异常），硬凑会把"从不发生"固化成"期望形态"
+ *    ⇒ 已登记地图 §3-8 第 9 行。
+ */
+describe('src/api.ts：残余 catch 与尾部支线（⑤ 第 18 件）', () => {
+  const jsonBody = (r: RawRes): any => JSON.parse(r.body)
+
+  it('🔴 宿主服务读取抛错 ⇒ `handymen` ／ `cccs` 各自的 catch 回 400（不是 500、不是崩）', async () => {
+    const api = await bootApi({ sessionGetThrows: true })
+    try {
+      for (const path of ['/serenity/handymen', '/serenity/cccs']) {
+        const res = await raw({ port: api.port, method: 'GET', path: `${path}?sessionId=s-1`, headers: UI_HEADERS })
+        expect(res.status, `${path} 应把异常收敛成 400`).toBe(400)
+        expect(String(jsonBody(res).error)).toContain('sessions.get boom')
+      }
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 config GET：工作区服务**抛错** ⇒ 仍 200 且 `knownWorkspaces: []`（面板显示"暂无可选工作区"，不是整页失败）', async () => {
+    const api = await bootApi({ registryListThrows: true })
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: '/serenity/config', headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      expect(jsonBody(res).knownWorkspaces).toEqual([])
+      expect(jsonBody(res).config, '配置本体必须照常返回').toBeTypeOf('object')
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 坏 JSON 请求体 ⇒ `config PUT` ／ `public-ask PUT` 各自的 catch 回 400（面板发坏包的真实形态）', async () => {
+    const api = await bootApi()
+    try {
+      const cfg = await raw({ port: api.port, method: 'PUT', path: '/serenity/config', headers: UI_HEADERS, body: '{ not json' })
+      expect(cfg.status).toBe(400)
+      expect(String(jsonBody(cfg).error)).toMatch(/JSON|Unexpected/i)
+
+      const ask = await raw({ port: api.port, method: 'PUT', path: '/serenity/public-ask', headers: UI_HEADERS, body: '{ not json' })
+      expect(ask.status).toBe(400)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 `public-ask`：非 PUT/GET ⇒ 405（此前只测了 PUT 的两态与 GET）', async () => {
+    const api = await bootApi()
+    try {
+      const res = await raw({ port: api.port, method: 'POST', path: '/serenity/public-ask', headers: UI_HEADERS, body: '{}' })
+      expect(res.status).toBe(405)
+      expect(jsonBody(res).error).toBe('method not allowed')
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 `session-cleanup`：非 GET/POST ⇒ 405；`sessions.list()` 抛错 ⇒ catch 回 400（它在端点里是**裸调用**，不被收口层吞）', async () => {
+    const wrongMethod = await bootApi()
+    try {
+      const del = await raw({ port: wrongMethod.port, method: 'DELETE', path: '/serenity/session-cleanup', headers: UI_HEADERS })
+      expect(del.status).toBe(405)
+    } finally {
+      await wrongMethod.close()
+    }
+
+    // 🔵 真实故障形态的对照（**已实测**）：把 `DSH_HOME` 指到一个**文件** *不会* 让这条端点失败
+    //    （会话根不可读被它自己容错成"零候选"）⇒ 所以这条 catch 的触发面是**服务调用抛错**，不是 fs。
+    const api = await bootApi({ sessionListThrows: true })
+    try {
+      const bad = await raw({ port: api.port, method: 'GET', path: '/serenity/session-cleanup?olderThanDays=30', headers: UI_HEADERS })
+      expect(bad.status).toBe(400)
+      expect(String(jsonBody(bad).error)).toContain('sessions.list boom')
     } finally {
       await api.close()
     }
