@@ -439,15 +439,16 @@
 | 组件 | 它做什么 | 关键实现手段 | 缺口 |
 |---|---|---|---|
 | `bench/Dockerfile` | 常驻干净镜像：**真宿主 ＋ 本插件** | `node:22-bookworm-slim`；`npm i -g @deepseek-ai/dsh@${DSH_VERSION}`（ARG 默认 **0.1.7-rc.1**）＋ `pnpm`；apt 装 `zstd`（V5 读数器）/`tini`；`ENV DSH_HOME=/root/.dsh`；`mkdir /logs /ccc && touch /ccc/.serenity`；`ENTRYPOINT tini -- entrypoint.sh`；`EXPOSE 3080` | **无任何模型凭据注入**；不发布端口；插件安装刻意放在启动期（同一镜像三用） |
-| `bench/entrypoint.sh` | 装插件 → 起宿主 → 保活 | 装：`dsh plugin --profile web add "link:$PLUGIN_LINK"`（优先，需目录存在）／否则 `add "$PLUGIN_SPEC" --registry "$NPM_REGISTRY"`（可为容器内 `.tgz`）｜起：先 `: > /logs/dsh-web.log` 清结果文件，再 `nohup dsh web > /logs/dsh-web.log 2>&1 < /dev/null &`｜保活 `sleep infinity`；**单步失败永不 exit** | 不写 profile patch、不注入 key |
-| `bench/verify.sh` | 容器内**只读**验收 **15 条** ＋ 落 `/logs/verify.json` | grep / curl / sha256（逐条见下） | V0 依赖 `vpush`；V5/V5b/V7b 依赖 `turn` |
+| 🆕 `bench/profile-patch.yml` | **把容器的默认模型指向"我们真有凭据的那个"**（键 A 路由 ＋ 键 B 默认模型，§2.9 第 4 行） | 两段 `- id:` 条目（`llm-pi-ai` 路由 `minimax-bench` ＋ `agent-default-model ⇒ minimax-bench/MiniMax-M3`）；**刻意不含任何密钥** —— 路由只写 `apiKeyEnv: MINIMAX_BENCH_API_KEY` | ⚠️ **patch 语义 = 按 id 整体替换（不深合并）** ⇒ 每条要写全字段；baseURL 形状抄自本机真实 patch（**本机那一份用的是内联 `apiKey`** ⇒ 容器里刻意改用 `apiKeyEnv`） |
+| `bench/entrypoint.sh` | 落 profile patch → 装插件 → 起宿主 → 保活 | 落（步 0c，**起宿主之前**）：把 `$PROFILE_PATCH`（= 挂进来的 `/ccc/profile-patch.yml`）`cp` 到 `/root/.dsh/profiles/web/cordis.patch.yml`，并 `sha256sum` 落 `/logs/profile-patch.sha256`（**V9d 读数源**）｜装：`dsh plugin --profile web add "link:$PLUGIN_LINK"`（优先，需目录存在）／否则 `add "$PLUGIN_SPEC" --registry "$NPM_REGISTRY"`（可为容器内 `.tgz`）｜起：先 `: > /logs/dsh-web.log` 清结果文件，再 `nohup dsh web > /logs/dsh-web.log 2>&1 < /dev/null &`｜保活 `sleep infinity`；**单步失败永不 exit** | 🔴 **本文件不碰密钥值** —— patch 里只有 `apiKeyEnv: MINIMAX_BENCH_API_KEY`（**一个名字**），真值由 `docker run -e` 在**运行期**注入（约束文档 §5.4-5）；patch 落地依赖 `$PROFILE_PATCH` 由 `up` 传入（未传 ⇒ 只记一行日志、默认模型仍是镜像内的） |
+| `bench/verify.sh` | 容器内**只读**验收 **19 条** ＋ 落 `/logs/verify.json` | grep / curl / sha256 / `zstd -dc`（逐条见下） | V0 依赖 `vpush`；V5/V5b/V7b/**V9 家族** 依赖 `turn` |
 | `bench/v8-client-check.mjs` | V8 客户端交付层探针 | 读 profile 里的 `lib/client.js` ＋ `package.json#dsh.client`，再 `fetch http://127.0.0.1:3080/` | **非真浏览器证据**（作者自述边界） |
-| CCC 侧驱动 `bench-docker`（MSM） | 远端 Docker 全生命周期 | `setsid -w ssh` ＋ `SSH_ASKPASS`；后台脱离 ＋ `*.done`/`*.code` 标记轮询；base64 分块过桥 ＋ sha256 自证；子命令 `probe/sync/build/up/wait/logs/verify/vpush/sh/clogs/turn/down/list` | `cmdUp` 的 `envs` **只给 3 个变量**（无凭据）；`cmdTurn` 请求体**不带 model**（且宿主不从请求读模型） |
+| CCC 侧驱动 `bench-docker`（MSM） | 远端 Docker 全生命周期 | `setsid -w ssh` ＋ `SSH_ASKPASS`；后台脱离 ＋ `*.done`/`*.code` 标记轮询；base64 分块过桥 ＋ sha256 自证；子命令 `probe/sync/build/up/wait/logs/verify/**secretcheck**/vpush/sh/clogs/turn/down/list` | 🔴 **`cmdUp` 已改**：推 patch（`PROFILE_PATCH_REMOTE` → 挂 `/ccc/profile-patch.yml:ro`）＋ `-e PROFILE_PATCH` ＋ **裸 `-e MINIMAX_BENCH_API_KEY`**（docker 语义：不给值 ⇒ 从 CLI 环境取）；🔴 **密钥只走 launch 环境前缀，不写 payload 文件**（旧写法会把密钥**留在远端盘上**）＋ payload 首行**正控**断言该变量非空。⚠️ 仍存：`cmdTurn` 请求体**不带 model**（宿主不从请求读模型） |
 
-**容器内生命周期与落点**：步 0 `dsh --version` → `/logs/host-version.txt`（V1 读数源）｜步 1 装插件 → `/logs/plugin-install.log`（V2b 读数源）｜步 2 起宿主 → `/logs/dsh-web.log` ＋ `/logs/dsh-web.pid`｜步 3 `sleep infinity`。
+**容器内生命周期与落点**：步 0 `dsh --version` → `/logs/host-version.txt`（V1 读数源）｜步 0c 落 profile patch → `/logs/profile-patch.sha256`（**V9d 读数源**）｜步 1 装插件 → `/logs/plugin-install.log`（V2b 读数源）｜步 2 起宿主 → `/logs/dsh-web.log` ＋ `/logs/dsh-web.pid`｜步 3 `sleep infinity`。
 **路径**：`DSH_HOME=/root/.dsh` ⇒ profile = `/root/.dsh/profiles/web/`（**宿主设置文档 = `/root/.dsh/profiles/web/cordis.patch.yml`**）；会话日志 = `/root/.dsh/sessions/**/session.v*.jsonl.zstd`；CCC 根 = `/ccc`（含 `.serenity`）。
 
-**判据清单（V0~V8 共 15 条）**
+**判据清单（V0~V9 共 19 条）**
 
 | 判据 | 断言什么 | 怎么读 | 前置 |
 |---|---|---|---|
@@ -460,12 +461,21 @@
 | V6 / V6b / V6c | 设置面板装配无报错 ／ 契约层无 `host contract BROKEN` ／ 两条 settings 依赖功能未被静默跳过 | `dsh-web.log` grep | 宿主已起 |
 | V7 / V7b | 我方缝在运行期真被调用 ／ 首个真实轮走到 bootstrap 缝 | `dsh-web.log` grep | V7b **必须先 `turn`** |
 | V8 | 客户端 bundle 交付 ＋ 槽位注册在场 | `node v8-client-check.mjs` | 宿主已起；探针已 `vpush` |
+| 🆕 **V9** | **真实轮次正常收束**（`"turn/end" … "kind":"completed"`） | `zstd -dc sessions/**.jsonl.zstd` ＋ grep | **必须先 `turn`** ＋ zstd CLI |
+| 🆕 **V9b** | 该轮**用的就是我们指定的路由/模型**（`"provider":"minimax-bench"`） | 同上 | 同上 |
+| 🆕 **V9c** | 会话日志里**零**凭据错误（`MISSING_CREDENTIAL` 命中 = 0） | 同上 | 同上 |
+| 🆕 **V9d** | profile patch **真落地**（`/logs/profile-patch.sha256` 在 ＋ patch 里路由名命中 > 0） | `cat` sha ＋ grep 路由名 | `up` 时传了 `PROFILE_PATCH` |
 
-**192.168.1.4 实测状态（锚定 2026-09-25 15:31）**：容器 `dsh-bench-mb3` running（重启 0 次，`ExitCode 0`，起动 **2026-09-24 02:23 +08:00** ⇒ ≈37h）｜镜像 `dsh-bench:0.1.7-rc.1`｜`PortBindings {}`（3080 **仅 EXPOSE**，未发布）｜挂载 `/opt/dsh-bench/dist:/ccc/dist:ro`（⇒ 该容器是 **tarball 模式**起的）｜`RestartPolicy no`。
+> 🔵 **V9 家族为什么必须新增（判据纪律）**：**"缝被走到" ≠ "功能可用"** —— V5/V7b 在**没有任何模型凭据**的容器里**照样全绿**，而那时**每条真实轮次都以 `MISSING_CREDENTIAL` 结束** ⇒ 旧判据集**结构性回答不了** owner 的问题（"装完能不能真的用"）。V9 家族把三件事拆成三档（**收束** / **模型身份** / **零凭据错误**）＋ V9d 补**装配面**旁证。EXPECT 可用 `EXPECT_PROVIDER` / `EXPECT_MODEL` 覆盖（默认 `minimax-bench` / `MiniMax-M3`）。
 
-### 2.9 🔴 第 ⑥ 项改动点清单（**已取证，待执行**）
+**192.168.1.4 实测状态（锚定 2026-09-25 16:1x，读数器 = `bench-docker list`）**：**新容器** `dsh-bench-r20260925-1614-4eb2` running（镜像 **`dsh-bench:0.1.7-rc.2`**，1.04 GB —— **第 ⑥ 项实测的载体**，证据见 §2.9 对账表）｜**旧容器** `dsh-bench-mb3` 仍在 running（镜像 `dsh-bench:0.1.7-rc.1`，1.08 GB，起动 **2026-09-24 02:23 +08:00**）｜两镜像并存｜远端磁盘 `/` 489G ／ 已用 360G ／ **可用 109G（77%）**。
+（**历史读数**，锚定 2026-09-25 15:31，勿当前值用）：当时只见 `dsh-bench-mb3`（重启 0 次，`ExitCode 0`，≈37h）｜`PortBindings {}`（3080 **仅 EXPOSE**，未发布）｜挂载 `/opt/dsh-bench/dist:/ccc/dist:ro`（⇒ 该容器是 **tarball 模式**起的）｜`RestartPolicy no`。
+
+### 2.9 ✅ 第 ⑥ 项改动点清单（**已取证 · 2026-09-25 16:1x 已执行**）
 
 **目标（owner 令）**：容器里跑通 —— **能安装 → 装完能启动 → 启动后功能可用 → 全程用真实模型（MiniMax）**。
+
+⚠️ 下表（第 1~9 行）是**动手之前的取证记录**（"当时是什么状态"）——**不是现状**；**处置与结果见 §2.9a**。
 
 | # | 事实 | 取证 |
 |---|---|---|
@@ -479,7 +489,25 @@
 | 6 | **凭据注入两条可用层**：`docker run -e MINIMAX_API_KEY=…`（**启动环境快照**优先级最高）／或写 `/root/.dsh/.credentials.yaml` 的 `refs:` 节 | `credentials-local` 的层序：启动环境 > `$DSH_HOME/.credentials.yaml` > `/ccc/.env` > `/root/.dsh/.env` |
 | 7 | MiniMax M3 的 OpenAI 兼容端点 = `api.minimaxi.com/v1`（**逐字 baseURL 未取证**，本机真实 profile patch 在 CCC 外） | 本仓 `CHANGELOG.md` ＋ 归档会话记录 |
 | 8 | 要改的文件：① `bench/entrypoint.sh`（装插件后、起宿主前 → 写 profile patch 与/或导出 key）② `.opencode/.../bench-docker.ts` 的 `cmdUp()`（`envs`/`mounts`；密钥从 `findRoot()` 的 `localstore.json` 读，现只读 SSH 口令）③ 若要 patch 常驻则 `bench/Dockerfile` ④ **`bench/verify.sh` 现无「真实轮次成功」判据**（V5/V7b 只判缝走到）⇒ 第 ⑥ 项要**新增判据** | 各文件 |
-| 9 | profile patch 送进容器**现状无通道**（`cmdUp` 的 `mounts` 或 entrypoint 内 heredoc 二选一） | `cmdUp` 实现 |
+| 9 | profile patch 送进容器**现状无通道**（`cmdUp` 的 `mounts` 或 entrypoint 内 heredoc 二选一） | ✅ **已选 mount** |
+
+#### 2.9a ✅ 执行对账（2026-09-25；载体 = 容器 `dsh-bench-r20260925-1614-4eb2`，实测 **PASS=19 / FAIL=0**）
+
+| # | 原事实 | 处置 | 证据（读数） |
+|---|---|---|---|
+| 1 | 轮次以 `MISSING_CREDENTIAL` 结束 | ✅ **已解** | **V9 = 完成轮次 3**｜**V9c = `MISSING_CREDENTIAL` 命中 0**；会话日志逐字：`"turn/end" … "kind":"completed"`、助手输出含 **`BENCH-OK`**、usage `input 9894 / output 22 / cacheRead 3712` |
+| 2 | 模型不能按轮指定 | ➖ **不改宿主** —— 沿用「部署默认」这条既有机制（即键 B） | **V9b = 模型命中 7**（`"provider":"minimax-bench","model":"MiniMax-M3"`）；`cmdTurn` 请求体**仍不带 model**（刻意） |
+| 3 | 部署默认在镜像 base bundle 写死 `deepseek-official` / `deepseek-flash` | ✅ **被 patch 覆盖** | **V9d**（`profile-patch.sha256` 在 ＋ 路由名命中 > 0）＋ V9b |
+| 4 | 要改的两个键（键 A 路由 ／ 键 B 默认模型） | ✅ **两键都写** | **新增** `bench/profile-patch.yml`（41 行，**无密钥**）；⚠️ patch 语义 = **按 id 整体替换、不深合并** ⇒ 条目必须写全字段（本轮再次印证） |
+| 5 | patch 语义 = 按 id 定位整体替换 | ✅ 已按此写 | 同上 |
+| 6 | 凭据两条可用层（启动环境 ／ `.credentials.yaml`） | ✅ **选「启动环境快照」那条**（`docker run -e`） | `secretcheck` 三读数：**S1 = 1**（容器进程环境**含** ⇒ 有它才可能有真实轮次）｜**S2 = 0**（镜像 `Config.Env` **不含** ⇒ 没 bake 进层）｜**S3 = 0 个文件**（远端文件系统**不含** ⇒ 没落盘）；密钥长度 125（**只打印长度，不打印值**）。**未**走 `.credentials.yaml` |
+| 7 | MiniMax M3 的 baseURL = `api.minimaxi.com/v1`（**当时逐字未取证**） | ✅ **已取证（逐字）** | 本机真实 profile patch 只读取证：route `minimax-cn-coding-plan`｜`api: openai-completions`｜`baseURL: https://api.minimaxi.com/v1`｜`models: [MiniMax-M3]`｜`apiKeyEnv: MINIMAX_CN_CODING_PLAN_API_KEY`（⚠️ 本机实际靠该文件里的**内联 `apiKey`** 生效）⇒ 容器内**另起名 `minimax-bench`** ＋ `apiKeyEnv: MINIMAX_BENCH_API_KEY`（**刻意不用内联**，内联 = 密钥进文件） |
+| 8 | 要改的文件 ①②③④ | ✅ ① `bench/entrypoint.sh`（步 0c 落 patch ＋ 写 sha256）② `bench-docker.ts` 的 `cmdUp()`（推 patch ＋ 挂载 ＋ `-e PROFILE_PATCH` ＋ `-e` 密钥）＋ `runDetached` 加 `launchEnv` ＋ 新增 `secretcheck` ④ `bench/verify.sh`（**新增 V9 家族 4 条**）｜➖ ③ `bench/Dockerfile` **未改**（patch 走 mount ⇒ 不必 bake） | 插件仓提交 **`46362e5`** ／ CCC 仓提交 **`dace4f08`** |
+| 9 | patch 进容器无通道 | ✅ **选 mount 通道**：`PROFILE_PATCH_REMOTE → /ccc/profile-patch.yml:ro` ＋ `-e PROFILE_PATCH=<容器内路径>` | 同上（`up` 每次重推） |
+
+🔵 **本项顺带确立的两条纪律**：
+1. 🔴 **密钥不得进 `runDetached` 的 payload** —— payload 逐字落远端盘（`<runDir>/<step>.payload.sh`）⇒ 旧写法会把密钥**留在盘上**。**正解 = launch 环境前缀**（`KEY=value <payload>`）＋ payload 里写**裸 `-e KEY`**（docker 语义：不给值 ⇒ 从 CLI 环境取）＋ payload 首行**正控**断言该变量非空（否则失败形态是"容器能起、每轮都失败"，**看起来像模型问题**）。
+2. 🔵 `DEFAULT_DSH` 仍是 **`0.1.7-rc.1`**（`bench-docker.ts` 顶部常量，**不指行号**），而实测靶已到 **rc.2** ⇒ 每次都要显式 `--dsh-version=0.1.7-rc.2`。**登记待裁**（改默认值 = 一处小行为变更）。
 
 🔴 **凭据纪律（与约束文档 §5.4-5 一致）**：key **只能运行时注入**，**不得 bake 进镜像层**。
 
@@ -517,6 +545,6 @@
 | 轨迹/会话/唤醒核心域（L1） | ✅ §2.5（＋ 依赖环 §3-6、死代码 §3-7、数据真相源 §4） |
 | 对外面与集成域（L2/L3） | ✅ §2.3（含外露面总表 §2.3.1、配置读取面 §2.3.2） |
 | `src/client/`（L4）＋ 测试面 | ✅ §2.6（客户端半）／ §2.7（测试面）／ §3-9（测试缺口） |
-| `scripts/` / `bench/`（L5） | ✅ §2.8（集成测试台 ＋ 判据清单）／ §2.9（第 ⑥ 项改动点） |
+| `scripts/` / `bench/`（L5） | ✅ §2.8（集成测试台 ＋ 判据清单 **V0~V9 共 19 条**）／ §2.9 ＋ **§2.9a（第 ⑥ 项 · 已执行对账）** |
 
 ⇒ **六域全部到齐**（2026-09-25）。本文件自此为**完整的现况地图**；后续按 §6.2 与新增/删除同批维护。

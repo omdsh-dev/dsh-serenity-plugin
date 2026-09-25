@@ -37,22 +37,26 @@ DSH 每发一个新的 rc，我们都要把插件适配过去。但**在本机�
 > 它与 mode A 的**唯一差别就是"内容来自我的本地构建"**。挂目录（`link:`）则是另一条安装路径，
 > 多一个"link 语义本身是否与发布语义一致"的变量。
 
-**mode B 的标准流程**（五步，全走 MSM，不手敲 ssh）：
+**mode B 的标准流程**（七步，全走 MSM，不手敲 ssh）：
 
 ```
 msm("dsh-develop", ["build"])                          # 1. 产出本地 lib/（mode B 验的就是它）
-msm("bench-docker", ["up", "--run=mb1", "--plugin-tarball"])   # 2. 打包 → 推 → 起容器（后台，立即返回）
+msm("bench-docker", ["up", "--run=mb1", "--plugin-tarball",
+                     "--dsh-version=0.1.7-rc.2"])      # 2. 打包 → 推 → 起容器（后台，立即返回）
+                                                       #    🔴 up 还会推 profile patch ＋ 运行期注入 key
 msm("bench-docker", ["wait", "mb1"])                   # 3. 有界轮询（容器内装插件 + 起宿主需要时间）
-msm("bench-docker", ["turn", "mb1", "hi"])             # 4. 🔴 **造一条真实用户轮**（V5/V7b 的前提）
+msm("bench-docker", ["turn", "mb1", "hi"])             # 4. 🔴 **造一条真实用户轮**（V5/V7b/**V9 家族** 的前提）
 msm("bench-docker", ["vpush", "mb1"])                  # 5. 🔴 推**本地最新判据**进容器（否则按镜像 bake 的旧版验收）
-msm("bench-docker", ["verify", "mb1", "--acc-version=1.47.0"])
+msm("bench-docker", ["verify", "mb1", "--acc-version=1.47.3"])  # 6. 跑判据（V0~V9 共 19 条）
+msm("bench-docker", ["secretcheck", "mb1"])                     # 7. 凭据纪律三读数（在场 ∧ 未进层 ∧ 未落盘）
 ```
 
 🔴 **第 4、5 步都不能省**：
-- **省 turn** ⇒ V5（身份播种）与 V7b 只能报"未验"（而"未验"与"坏了"在表上长得一样）；
+- **省 turn** ⇒ V5（身份播种）、V7b 与 **V9 家族（真实轮次）** 只能报"未验"（而"未验"与"坏了"在表上长得一样）；
 - **省 vpush** ⇒ 改了判据却按**镜像里那份旧的**验收（实测踩过：V3b 假红）——`V0` 会把这件事报出来。
+- ⚠️ **`--dsh-version` 要显式给** —— 工具里的 `DEFAULT_DSH` 仍是 `0.1.7-rc.1`，而实测靶已在 **rc.2**（登记为待裁项）。
 
-### 判据一览（15 条，2026-09-24 实测全绿）
+### 判据一览（19 条，2026-09-25 实测 19 PASS / 0 FAIL）
 
 | 判据 | 它回答什么 |
 |---|---|
@@ -64,6 +68,15 @@ msm("bench-docker", ["verify", "mb1", "--acc-version=1.47.0"])
 | **V6 / V6b / V6c** | 设置面板：装配无报错 ／ **契约层**不含 `host contract BROKEN` ／ **功能层**两条 settings 依赖的功能未被静默跳过 |
 | **V7 / V7b** | 我们的**缝**在宿主运行期真被调用（装配面自证行）／ 首个真实轮次走到了 bootstrap 缝 |
 | **V8** | **客户端交付层**：宿主发给浏览器的 client bundle 里，我们那张设置页在场且槽位注册语句在场 |
+| 🆕 **V9** | 🔴 **真实轮次真的跑通了**吗 —— 会话日志里有 `turn/end + kind=completed`（"答完了"） |
+| 🆕 **V9b** | 该轮**用的就是我们指定的路由/模型**（默认 `minimax-bench` / `MiniMax-M3`；可 `EXPECT_PROVIDER`/`EXPECT_MODEL` 覆盖）—— "用的是真模型，不是某个默认兜底" |
+| 🆕 **V9c** | 会话日志里**零**凭据错误（`MISSING_CREDENTIAL` 命中 = 0）—— 把旧失败形态变成**显式负判据** |
+| 🆕 **V9d** | profile patch **真落地**（`/logs/profile-patch.sha256` 在 ＋ patch 里路由名命中 > 0）—— 与 V9 配对的**装配面**旁证 |
+
+> 🔴 **V9 家族为什么必须存在（这条是判据纪律，不是补丁）**：**"缝被走到" ≠ "功能可用"** ——
+> V5/V7b 在**没有任何模型凭据**的容器里**照样全绿**，而那时**每条真实轮次都以 `MISSING_CREDENTIAL` 结束**
+> ⇒ 旧判据集**结构性地**回答不了那个问题（"装完能不能真的用"），且**在验收表上完全看不出来**。
+> V9 把三件事拆成三档（**收束** / **模型身份** / **零凭据错误**），V9d 补装配面。
 
 > 🔵 **V6b → V6c → V8 是同一件事的三档证据**（契约层 → 功能层 → 交付层）；
 > **真实浏览器级**（"用户看到了页"）**仍未做**，登记为后续可选。
@@ -91,9 +104,10 @@ msm("bench-docker", ["verify", "mb1", "--acc-version=1.47.0"])
 
 | 文件 | 作用 |
 |---|---|
-| `Dockerfile` | 常驻镜像：node:22 + **DSH CLI**（`ARG DSH_VERSION`）＋ **pnpm**（DSH 的插件管理器自己 spawn 它）＋ **zstd**（V5 的读数器）＋ 工作区 ＋ 日志目录 |
-| `entrypoint.sh` | 容器启动：装插件（三种模式）→ 后台起 `dsh web` → 保持存活 |
-| `verify.sh` | **运行态验收**（容器内跑，只读）：**V0~V8 共 15 条判据** → 表格 ＋ `verify.json` |
+| `Dockerfile` | 常驻镜像：node:22 + **DSH CLI**（`ARG DSH_VERSION`，默认值随 `bench-docker.ts` 的 `DEFAULT_DSH` = **0.1.7-rc.1** ⇒ 靶在 rc.2 时用 `--dsh-version` 覆盖）＋ **pnpm**（DSH 的插件管理器自己 spawn 它）＋ **zstd**（V5/V9 的读数器）＋ 工作区 ＋ 日志目录 |
+| `entrypoint.sh` | 容器启动：**先落 profile patch**（起宿主之前）→ 装插件（三种模式）→ 后台起 `dsh web` → 保持存活。🔴 **本文件不碰密钥值**：patch 里只有 `apiKeyEnv` 那个**名字**，真值由 `docker run -e` 运行期注入 |
+| 🆕 `profile-patch.yml` | **把容器的默认模型指向"我们真有凭据的那个"**（键 A 路由 `minimax-bench` ＋ 键 B `agent-default-model`）—— 没有它，每条真实轮次都以 `MISSING_CREDENTIAL` 结束。**刻意不含任何密钥** |
+| `verify.sh` | **运行态验收**（容器内跑，只读）：**V0~V9 共 19 条判据** → 表格 ＋ `verify.json` |
 | `v8-client-check.mjs` | **V8 探针**：设置面板的**客户端交付层**证据（bundle 交付 ＋ 槽位注册在场） |
 | `../docs/host-adaptation-bench-design.md` | 设计背景、**静态检查清单 A~C（含 C6）** 与本台的边界（诚实声明） |
 
@@ -102,15 +116,17 @@ msm("bench-docker", ["verify", "mb1", "--acc-version=1.47.0"])
 | 子命令 | 用途 |
 |---|---|
 | `probe` / `sync` / `build` | 远端能力探测 ／ 推 bench 文件 ／ 后台构建镜像 |
-| `up` | 起容器（`--plugin-spec` 发布物 ／ 🔴 `--plugin-tarball` 本地构建 ／ `--plugin-link` 旧通道） |
+| `up` | 起容器（`--plugin-spec` 发布物 ／ 🔴 `--plugin-tarball` 本地构建 ／ `--plugin-link` 旧通道）—— 🆕 还会**推 profile patch**（挂 `/ccc/profile-patch.yml:ro`）＋ **运行期注入 key**（`-e MINIMAX_BENCH_API_KEY`，值取自 CCC `localstore`；🔴 **只走 launch 环境，不写 payload 文件**） |
+| 🆕 **`secretcheck`** | 🔴 **凭据纪律三读数**：**S1** 容器进程环境**含** key（有它才可能有真实轮次）／**S2** 镜像 `Config.Env` **不含**（0 = 没 bake 进层）／**S3** 远端文件系统**不含**（0 个文件 = 没落盘）。**只打印密钥长度，不打印值** |
 | `wait` / `logs` / `clogs` | 有界轮询 ／ 取远端 run 日志 ／ **取容器自身 stdout**（判据主证据面） |
-| **`turn`** | 🔴 **驱动一条真实用户轮**（`session/create` → `session/prompt`）——V5/V7b 的前提 |
+| **`turn`** | 🔴 **驱动一条真实用户轮**（`session/create` → `session/prompt`）——V5/V7b/**V9 家族** 的前提 |
 | **`vpush`** | 🔴 把**本地最新判据**推进**正在跑的**容器（`verify.sh` 是 bake 进镜像的！） |
 | `verify` / `sh` / `down` / `list` | 跑判据 ／ 容器内跑一条命令 ／ 停删 ／ 台账 |
 
 ## 6. 已知边界（诚实声明，别把它读成"万能验收"）
 
-1. **无模型凭据 ⇒ 不跑真实对话轮**。本台验的是**装配面与插件面**（补丁层生效 / 自报版本 / 身份播种挂载 / 设置面板装配），**不是**"一次完整对话跑通"。
-2. **磁盘紧张**：192.168.1.4 的 `/` 实测 **21 GB 可用（96% 已用）** ⇒ 镜像要精简、用完 `docker rmi` 清理；别在上面拉大镜像。
-3. **判据 V5/V6 是"日志级"证据**，不是"用户在界面上看到了"。要升到界面级需真实浏览器（未做，登记为后续）。
+1. **模型凭据只走运行期**（2026-09-25 更新）。旧边界原文是"**无模型凭据 ⇒ 不跑真实对话轮**"——**那一条已不再成立**：现在能跑真实轮次（**V9 家族**就是为此新增的判据，容器内实测 19 PASS）。凭据来源 = **CCC `localstore` 的 `MINIMAX_API_KEY`**（owner 令 D86），且**只在 `docker run -e` 注入**，`secretcheck` 三读数（在场 ∧ 未进镜像层 ∧ 未落盘）机械守住这条。
+   ⚠️ **仍存的两条边界**：① 判据 V5/V6/V8 是**日志级／交付层级**证据，**不是**"用户在界面上看到了"（真浏览器级未做，登记为后续可选）；② 真实轮次用的是**我们的 MiniMax 路由**（`minimax-bench`），**不是** DSH 官方默认路由 —— 验的是"装配＋接线＋一轮真跑通"，**不是**"官方模型可用"。
+2. **磁盘**（读数随时点变，**锚定 2026-09-25 16:1x 实测**）：192.168.1.4 的 `/` = 489G ／ 已用 360G ／ **可用 109G（77%）**（较 2026-09-24 的"21 GB 可用 / 96%"已缓解）⇒ 仍要精简镜像、用完 `docker rmi` 清理；别在上面拉大镜像。
+3. ~~判据 V5/V6 是"日志级"证据，不是"用户在界面上看到了"~~ ⇒ **已并入本节第 1 条的 ⚠️①**（同一条边界不留两处说法）。
 4. `dsh plugin --profile web add` 的**确切 flag 形态**以首次实跑为准 —— 若与预期不符，**只改 `entrypoint.sh` 一处**（这正是把安装放在启动时、而不是构建时的理由）。
