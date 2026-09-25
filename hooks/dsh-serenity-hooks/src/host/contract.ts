@@ -234,8 +234,11 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     // （src/index.ts L68）**不含** storageDomain ⇒ 属性直读 `ctx.storageDomain`
     // 在真实 cordis 下会**抛错** `cannot get property ... without inject`
     // （同 v1.31.4 的 subagents 陷阱）；产品侧必须走 `hostService`（= `ctx.get`）。
-    // 实测（tests/host/storage-domain-probe.test.ts，真实 cordis 兄弟 fiber 拓扑）：
+    // 实测（`tests/host/storage-domain.test.ts`，真实 cordis **兄弟 fiber** 拓扑）：
     // `hostService(ctx,'storageDomain')` 取到 `DomainFacility`。
+    // 🔴 **引用更正（2026-09-25）**：原文写 `storage-domain-probe.test.ts` —— 那是**一次性探针**，
+    //    已于 2026-09-19 **转化**为长期契约用例 `storage-domain.test.ts`（该文件头部第 10 行自述此事）
+    //    ⇒ 原引用指向**已不存在的对象**。本处**只修引用**，结论与语义逐字未动。
     //
     // 域名约束（实测，实施时勿违）：`UNIT_NAME_RE = /^[a-z][a-z0-9_]*$/`
     // ⇒ 域名为 `serenity_bindings`（**下划线**；连字符 `serenity-bindings` 非法）。

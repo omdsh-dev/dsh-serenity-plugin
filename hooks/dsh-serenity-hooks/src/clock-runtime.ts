@@ -184,8 +184,11 @@ export interface ClockOptions<T> {
    *   `ticks`/`lastTickAt` 在**枚举到 live+enabled CCC 之后、任何 await 之前**同步记账；
    *   "无 CCC 可扫" 的那一拍**不计**（既有行为：`ticks` 停在 0 直到真有 CCC 可唤起）。
    *   若把它交给工厂"body 前同步记账"，就会**在闸之后无条件 +1**——那会把
-   *   "无 CCC 可扫时不计数"这条既有语义改掉（实测：`autopilot-trajectory.test.ts`
-   *   的『启动时无 live 会话』与『配置关闭』两条回归钉立刻变红）。
+   *   "无 CCC 可扫时不计数"这条既有语义改掉（🔴 **回归钉在 `clock-runtime.test.ts`**：
+   *   『`bodyCountsTick=true` → 工厂不记账，由 body 决定（autopilot 语义：无目标则不计）』
+   *   ＋『body 调 `countTick` 才计，且可在 await 之前同步计』—— 原文曾指向
+   *   `autopilot-trajectory.test.ts`，**该文件已随 v1.35.0 退场、全仓不存在**
+   *   ⇒ 2026-09-25 **只修引用**，语义与断言逐字未动）。
    *
    * ⚠️ 故本项**不是**"记账早晚"的风格开关，而是"**谁**知道该不该记"的归属划分：
    *   知道"有没有目标"的只有 body ⇒ 由 body 决定何时记账。
@@ -314,7 +317,10 @@ export function createClock<T>(opts: ClockOptions<T>): Clock {
     // 事件接线必须**早于**闸判定（否则会永久失联）：
     //   旧实现把「挂事件」放在函数末尾 ⇒ 启动时闸关 ⇒ 根本走不到那一步 ⇒ **事件从未挂上**；
     //   此后人类在面板把闸打开 → `serenity/settings-changed` 无人监听 → **热启动失效**
-    //   （回归钉：`autopilot-trajectory.test.ts`『面板打开全局开关 → settings-changed 热启动定时器』）。
+    //   （🔴 **回归钉在 `clock-runtime.test.ts`**：『闸关时 start ⇒ 事件仍必须挂上（否则面板开闸后
+    //    热启动永久失联）』＋『闸先关后开 → 事件/再次调用 start() 可补武装（热启动路径）』——
+    //    原文曾指向 `autopilot-trajectory.test.ts`，**该文件已随 v1.35.0 退场、全仓不存在**
+    //    ⇒ 2026-09-25 **只修引用**，语义与断言逐字未动）。
     //   事件是"唤醒这条钟"的唯一入口，它的存在**不该依赖某一刻的闸值**。
     //   只挂一次（`wired` 守卫）：`start()` 会被反复调用（每次事件 + 组装点），不能重复注册监听器。
     if (opts.events && !st.wired) {
