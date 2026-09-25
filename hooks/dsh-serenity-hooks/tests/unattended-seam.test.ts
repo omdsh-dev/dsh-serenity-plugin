@@ -34,9 +34,11 @@ import {
   doneToken,
   getProxyRun,
   hasOutboundSendSince,
+  isUserTurn,
   loadUnattendedLog,
   noteOutboundSend,
   parseDoneNonces,
+  setProxyRun,
 } from '../src/unattended-ops.js'
 import { CRO_FILENAME } from '../src/cro.js'
 
@@ -370,5 +372,191 @@ describe('unattended-seam: 让位与清理', () => {
     h.stop(1)
     const run = getProxyRun(SESSION_ID)
     expect(h.steers[0]).toContain(doneToken(run?.nonce ?? ''))
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🆕 2026-09-25 ⑤ 第 30 件：`unattended-seam.ts` 的**装配面 / 守卫面 / 清理面**
+//
+// 挑靶依据 = **先逐行读覆盖率报告的 `cstat-no`/`cbranch-no` 判可达性**（别按 branch% 排序硬上）。
+// 本件残余的性质 = **三条 handler 的守卫与 catch ＋ 装配 catch ＋ 卸载 disposer** —— 都是
+// 「失败不得影响 turn 收尾」「防按载体只增」这两条**铁律**的落点，不是纯防御性 `??`。
+// 🔴 失败形态一律真实：宿主形态的**抛错 getter**（同 §2.7k 的 `authenticatedUrl`）／
+//    **tmp 路径被占成目录**（同 §2.7n 的手法）—— **不用 mock**。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * 自建装配替身：**暴露事件处理器表与 effect 回调**。
+ * （上方 `harness()` 把二者都吞掉了 ⇒ 驱动不了"畸形 payload"与"卸载"两类形态。）
+ */
+function seamRig(): {
+  handlers: Map<string, (p: unknown) => void>
+  effects: Array<() => () => void>
+  fire: (event: string, payload?: unknown) => void
+} {
+  const handlers = new Map<string, (p: unknown) => void>()
+  const effects: Array<() => () => void> = []
+  registerUnattendedSeam({
+    on: (e: string, cb: (p: unknown) => void) => {
+      handlers.set(e, cb)
+    },
+    effect: (cb: () => () => void) => {
+      effects.push(cb)
+    },
+  } as never)
+  return { handlers, effects, fire: (event, payload) => handlers.get(event)?.(payload) }
+}
+
+/** 极简 agent 替身：`session` 可整个畸形／省字段（驱动守卫面），并收集 steer 正文 */
+function bareAgent(session: unknown, steers: string[] = []): { session: unknown; steer: (m: unknown) => void } {
+  return {
+    session,
+    steer: (m: unknown) => {
+      const content = (m as { content?: Array<{ type?: string; text?: string }> }).content ?? []
+      steers.push(content.filter((b) => b.type === 'text').map((b) => b.text ?? '').join('\n'))
+    },
+  }
+}
+
+/** 捕获 console.log（本块多处判据 = "是否**如实**记了一行"） */
+function captureLog(fn: () => void): string[] {
+  const logs: string[] = []
+  const spy = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+    logs.push(a.join(' '))
+  })
+  try {
+    fn()
+  } finally {
+    spy.mockRestore()
+  }
+  return logs
+}
+
+describe('unattended-seam: 装配面 / 守卫面 / 清理面（⑤ 第 30 件）', () => {
+  it('① 装配面：`ctx.on` 不可用 ⇒ 不抛，且**四个事件各自响亮降级**（装配不可成为启动单点）', () => {
+    const logs = captureLog(() => {
+      expect(() => registerUnattendedSeam({} as never)).not.toThrow()
+    })
+    expect(logs.filter((l) => l.includes('无人值守代理未装配')), '四条订阅各自如实记一行').toHaveLength(4)
+  })
+
+  it('② turn-stopping 守卫：载体 id 取不到 ⇒ 短路（正控：只把 id 换成合法串 ⇒ 照常注入）', () => {
+    const rig = seamRig()
+    const bad: string[] = []
+    rig.fire('agent/turn-stopping', {
+      agent: bareAgent({ id: 42, header: { cwd: dir, delegationDepth: 0 }, events: [] }, bad),
+      turn: 1,
+    })
+    expect(bad, 'id 非串 ⇒ 短路在"取事实"之前').toHaveLength(0)
+
+    const good: string[] = []
+    rig.fire('agent/turn-stopping', {
+      agent: bareAgent({ id: SESSION_ID, header: { cwd: dir, delegationDepth: 0 }, events: [] }, good),
+      turn: 1,
+    })
+    expect(good, '正控：同一条链、只换 id ⇒ 真注入').toHaveLength(1)
+  })
+
+  it('③ turn-stopping：payload 里没有 agent ⇒ 直接返回（不抛、不注入）', () => {
+    const rig = seamRig()
+    expect(() => rig.fire('agent/turn-stopping', {})).not.toThrow()
+    expect(() => rig.fire('agent/turn-stopping', undefined)).not.toThrow()
+  })
+
+  it('④ `delegationDepth` 缺省 ⇒ 视为主会话（仍注入）；显式子代理 ⇒ 不代理（对照）', () => {
+    const rig = seamRig()
+    const main: string[] = []
+    rig.fire('agent/turn-stopping', { agent: bareAgent({ id: SESSION_ID, header: { cwd: dir }, events: [] }, main), turn: 1 })
+    expect(main, '缺省 0 = 主会话').toHaveLength(1)
+
+    const sub: string[] = []
+    rig.fire('agent/turn-stopping', { agent: bareAgent({ id: `${SESSION_ID}-sub`, header: { cwd: dir, delegationDepth: 2 }, events: [] }, sub), turn: 1 })
+    expect(sub, '子代理不代理').toHaveLength(0)
+  })
+
+  it('⑤ turn-stopping：处置内部抛错 ⇒ 吞掉并记一行（**turn 收尾不可被本机制影响**）', () => {
+    const rig = seamRig()
+    const bad = {
+      get session(): never {
+        throw new Error('session getter boom')
+      },
+      steer: () => {},
+    }
+    const logs = captureLog(() => {
+      expect(() => rig.fire('agent/turn-stopping', { agent: bad, turn: 1 })).not.toThrow()
+    })
+    expect(logs.some((l) => l.includes('turn-stopping 处置失败（已忽略）'))).toBe(true)
+  })
+
+  it('⑥ claimed 守卫：载体 id 取不到 ⇒ 直接返回；`turn` 非数字 ⇒ 记作 **-1**（用户在场信号不丢）', () => {
+    const rig = seamRig()
+    rig.fire('agent/inbox/claimed', { agent: bareAgent({ id: 42 }), message: { source: { kind: 'user' } }, turn: 3 })
+    expect(isUserTurn('', -1), 'id 取不到 ⇒ 什么都没记').toBe(false)
+
+    rig.fire('agent/inbox/claimed', { agent: bareAgent({ id: SESSION_ID }), message: { source: { kind: 'user' } } })
+    expect(isUserTurn(SESSION_ID, -1), 'turn 缺省 ⇒ 记 -1，而不是"当没发生"').toBe(true)
+  })
+
+  it('⑦ `header.cwd` 取不到 ⇒ 回落 `process.cwd()`（让位照常发生，不因缺 cwd 卡住）', () => {
+    const rig = seamRig()
+    setProxyRun(SESSION_ID, { round: 1, nonce: 'abc123', startedAt: Date.now() })
+    expect(getProxyRun(SESSION_ID)).not.toBeNull()
+    // 🔴 刻意**不绑定轨迹** ⇒ 下面那条 I/O 路径无落点、只回 false（不把测试写进真 CCC）
+    expect(() =>
+      rig.fire('agent/inbox/claimed', { agent: bareAgent({ id: SESSION_ID, events: [] }), message: { source: { kind: 'user' } }, turn: 5 }),
+    ).not.toThrow()
+    expect(getProxyRun(SESSION_ID), '用户回来 ⇒ 让位（清代理段）').toBeNull()
+  })
+
+  it('⑧ claimed：观察内部抛错 ⇒ 吞掉并记一行（不干扰宿主事件链）', () => {
+    const rig = seamRig()
+    const bad = {
+      get session(): never {
+        throw new Error('claimed boom')
+      },
+    }
+    const logs = captureLog(() => {
+      expect(() => rig.fire('agent/inbox/claimed', { agent: bad, message: { source: { kind: 'user' } }, turn: 1 })).not.toThrow()
+    })
+    expect(logs.some((l) => l.includes('claimed 观察失败'))).toBe(true)
+  })
+
+  it('⑨ 两条 disposed 在 id 缺失/畸形时直接返回 —— 且**不得误清别的载体**', () => {
+    const rig = seamRig()
+    setProxyRun(SESSION_ID, { round: 2, nonce: 'beef', startedAt: Date.now() })
+    expect(() => rig.fire('agent/disposed', { agent: bareAgent({ id: 42 }) })).not.toThrow()
+    expect(() => rig.fire('agent/disposed', {})).not.toThrow()
+    expect(() => rig.fire('session/disposed', {})).not.toThrow()
+    expect(() => rig.fire('session/disposed', { id: '' })).not.toThrow()
+    expect(() => rig.fire('session/disposed', { id: 7 })).not.toThrow()
+    expect(getProxyRun(SESSION_ID), '畸形 id 不得误清别的载体').not.toBeNull()
+  })
+
+  it('⑩ 卸载（disposer）⇒ 清**两张**进程内表（"按载体只增"的卸载面）', () => {
+    const rig = seamRig()
+    // 🔵 先记用户轮次（此刻**还没有**代理段 ⇒ 不触发让位）；再开代理段
+    //    （⚠️ 反过来写就测不到了：`claimed` 一旦发现 run 存在会**当场让位清掉它** —— 见 ⑩ 首跑红）
+    rig.fire('agent/inbox/claimed', { agent: bareAgent({ id: SESSION_ID }), message: { source: { kind: 'user' } } })
+    setProxyRun(SESSION_ID, { round: 2, nonce: 'deadbeef', startedAt: Date.now() })
+    expect(getProxyRun(SESSION_ID)).not.toBeNull()
+    expect(isUserTurn(SESSION_ID, -1)).toBe(true)
+
+    expect(rig.effects, '装配时登记了一个 disposer').toHaveLength(1)
+    rig.effects[0]!()() // 宿主在 fiber 销毁时执行的那一次
+    expect(getProxyRun(SESSION_ID)).toBeNull()
+    expect(isUserTurn(SESSION_ID, -1), '用户轮次表同样清空').toBe(false)
+  })
+
+  it('⑪ 流水落盘失败（tmp 被占成目录）⇒ 如实记一行，且**机制本体照常**（打回已发生）', () => {
+    const h = harness()
+    bind(h)
+    say(h, '先停')
+    const logPath = join(dir, 'AGENT_SESSIONS', DIR_NAME, 'unattended-log.json')
+    mkdirSync(`${logPath}.tmp`, { recursive: true }) // 真实故障形态：写 tmp 必 EISDIR
+    const logs = captureLog(() => {
+      h.stop(1)
+    })
+    expect(h.steers, '落盘失败不得影响机制本体').toHaveLength(1)
+    expect(logs.some((l) => l.includes('流水未落盘'))).toBe(true)
   })
 })
