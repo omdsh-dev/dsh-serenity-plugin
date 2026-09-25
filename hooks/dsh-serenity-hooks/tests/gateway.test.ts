@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer, request as httpRequest } from 'node:http'
+import { connect as netConnect } from 'node:net'
 
 // gateway.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
 vi.mock('@deepseek-ai/schemastery', () => {
@@ -693,4 +694,214 @@ describe('C4 块 A：面 B 冒烟（真实 listener + 真实 HTTP 往返）', ()
       rmSync(cfgDir, { recursive: true, force: true })
     }
   }, 15_000)
+})
+
+/**
+ * 🔴 v1.22.3 崩溃防护的**语义化**验收（2026-09-25 · ⑤ 语义深度 · 对应地图 §3-9 #10「接线钉」）。
+ *
+ * 上文那组接线钉（`readFileSync(src)` ＋ `toMatch(/req\.on\('error'/)`）只能证明**那句话被写在文件里**，
+ * 证不了**这条链真的生效** —— 而它的失效形态是**整个 dsh web 进程崩掉**（v1.22.3 线上实测事故）。
+ * ⇒ 本组不复用任何源码字符串，改为**真实 listener ＋ 真实 socket 硬断（RST）**跑两条真实路径
+ * （反代 HTTP ／ WS upgrade），断言**崩溃回归**这一半：**中断之后进程与面都还活着、还能正常反代**。
+ * 若 error 链失效，失效形态是**进程级**的（Node 直接 throw），本用例根本走不到断言处。
+ *
+ * 🆕 🔴 **本组顺带实测到的一条发现（2026-09-25，真 socket；已登记，不写成断言）**：
+ *   客户端 RST 之后，**上游那一侧并没有被销毁** ——
+ *   ① 反代路径：上游请求悬挂（`/hold` 那条 5s 内仍未被 abort）；
+ *      **机制已定位**（探针实测）：网关 `proxy()` 是 `req.pipe(target)` ⇒ 请求**已 complete**，
+ *      而 Node 只对"**未读完**的请求"在 socket 出错时补发 `req`/`res` 的 `error`
+ *      （对照实验：处理器**不读**请求 ⇒ `req:error` 触发；**pipe 读完** ⇒ 一个事件都不触发）
+ *      ⇒ `req.on('error')` / `res.on('error')` 这两条**在这条最常见路径上不会触发**。
+ *   ② WS upgrade 路径：上游 usock 1.5s 内未关闭；**原因未定位**
+ *      （复刻探针本身不成立 = 读数器失败 ⇒ 不作判据，不下结论）。
+ *   ⇒ 处置不在本回合：这是**行为缺口**（不是死代码），归 §3-9 #10 / SESSION.md S142 待裁。
+ *
+ * 🔵 **诚实边界（I7）**：本组断言的是**可观测不变量（进程不崩 ＋ 面可用）**；上述"对端未销毁"实测读数
+ * **故意不写成断言** —— 断言会把它固化成"期望行为"。要定位 ② 需在源码里插桩（本回合未做）。
+ * ⚠️ 因此本组与上文接线钉是**互补**关系，不是替代：接线钉管"实现还在"，本组管"崩没崩"。
+ */
+describe('v1.22.3 语义化：外部连接硬断不崩（真 socket ＋ 真上游）', () => {
+  interface UpstreamProbe {
+    server: import('node:http').Server
+    mainPort: number
+    holdSeen: boolean
+    holdTornDown: boolean
+    upgradeSeen: boolean
+    upgradeTornDown: boolean
+  }
+
+  /** 上游替身：`/hold` 故意**不响应**（悬挂）；`upgrade` 回 101；其余回固定体。 */
+  async function startUpstream(): Promise<UpstreamProbe> {
+    const probe: UpstreamProbe = {
+      server: undefined as never,
+      mainPort: 0,
+      holdSeen: false,
+      holdTornDown: false,
+      upgradeSeen: false,
+      upgradeTornDown: false,
+    }
+    const server = createServer((req, res) => {
+      if ((req.url ?? '').startsWith('/hold')) {
+        probe.holdSeen = true
+        // 两种"对端不在了"的读数都收：Node 世代不同时给 'aborted' 或 'close'+未 end
+        req.on('aborted', () => { probe.holdTornDown = true })
+        res.on('close', () => { if (!res.writableEnded) probe.holdTornDown = true })
+        return // 故意不响应 ⇒ 请求悬挂到客户端断连为止
+      }
+      res.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' })
+      res.end('upstream-main-body')
+    })
+    server.on('upgrade', (_req, sock) => {
+      probe.upgradeSeen = true
+      sock.on('close', () => { probe.upgradeTornDown = true })
+      sock.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n')
+    })
+    probe.mainPort = await new Promise<number>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const addr = server.address()
+        resolve(typeof addr === 'object' && addr !== null ? addr.port : 0)
+      })
+    })
+    probe.server = server
+    return probe
+  }
+
+  type RawRes = { status: number; headers: Record<string, string | string[] | undefined>; body: string }
+
+  function raw(opts: { port: number; method: string; path: string; headers?: Record<string, string> }): Promise<RawRes> {
+    return new Promise((resolve, reject) => {
+      const req = httpRequest({ host: '127.0.0.1', port: opts.port, method: opts.method, path: opts.path, headers: opts.headers }, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c: Buffer) => chunks.push(c))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf-8') }))
+      })
+      req.on('error', reject)
+      req.end()
+    })
+  }
+
+  /** 起真网关（内核分配端口）＋ 真登录，返回 { gwPort, token, cleanup }。 */
+  async function boot(probe: UpstreamProbe): Promise<{ gwPort: number; token: string; cleanup: () => Promise<void> }> {
+    const cfgDir = mkdtempSync(join(tmpdir(), 'hooks-gw-abort-'))
+    const cfgPath = join(cfgDir, 'serenity-hooks.json')
+    writeFileSync(cfgPath, JSON.stringify({
+      gateway: {
+        enabled: true,
+        host: '127.0.0.1',
+        port: 0, // 内核分配（同 C4 冒烟：不猜端口段，防 EADDRINUSE ⇒ 面宿主重试 10s 挂死）
+        accounts: [{ id: 'a1', user: 'tester', passHash: hashPassword('pw') }],
+      },
+      weixinApi: { enabled: false, port: 0 },
+    }))
+    const prevCfg = process.env.SERENITY_HOOKS_CONFIG
+    process.env.SERENITY_HOOKS_CONFIG = cfgPath
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), gatewayEnabled: true }))
+    const ctx = {
+      get: (name: string) => (name === 'webServer' ? { port: probe.mainPort } : undefined),
+      on: vi.fn(),
+      effect: vi.fn(() => () => {}),
+    }
+    registerGateway(ctx as never)
+    await vi.waitFor(() => expect(faceActive('gateway')).toBe(true), { timeout: 5000 })
+    const gwPort = facePort('gateway') ?? 0
+
+    const page = await raw({ port: gwPort, method: 'GET', path: '/' })
+    const csrf = /serenity_csrf=([^;]+)/.exec(String(page.headers['set-cookie'] ?? ''))?.[1] ?? ''
+    const loginRes = await new Promise<RawRes>((resolve, reject) => {
+      const req = httpRequest({
+        host: '127.0.0.1', port: gwPort, method: 'POST', path: '/serenity/login',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', 'x-csrf-token': csrf, cookie: `serenity_csrf=${csrf}` },
+      }, (res) => {
+        const chunks: Buffer[] = []
+        res.on('data', (c: Buffer) => chunks.push(c))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString('utf-8') }))
+      })
+      req.on('error', reject)
+      req.end('user=tester&password=pw')
+    })
+    const token = /serenity_session=([^;]+)/.exec(String(loginRes.headers['set-cookie'] ?? ''))?.[1] ?? ''
+    expect(loginRes.status).toBe(302)
+    expect(token).not.toBe('')
+
+    return {
+      gwPort,
+      token,
+      cleanup: async () => {
+        stopAllFaces()
+        __setSimpleSourceForTest(null)
+        if (prevCfg === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+        else process.env.SERENITY_HOOKS_CONFIG = prevCfg
+        // 🔴 cleanup 绝不允许挂住：**悬挂的连接会让 `server.close()` 永不回调**，
+        // 于是"断言失败"会被伪装成"用例超时"（20s），真因被吞掉（本用例首跑就踩了这个）。
+        probe.server.closeAllConnections()
+        await new Promise<void>((resolve) => {
+          probe.server.close(() => resolve())
+          setTimeout(resolve, 1000) // 有界兜底：1s 内没关干净也往下走
+        })
+        rmSync(cfgDir, { recursive: true, force: true })
+      },
+    }
+  }
+
+  it('① 反代链路：客户端 RST ⇒ **进程不崩 ＋ 网关仍可用**（真 socket ＋ 真上游）', async () => {
+    const probe = await startUpstream()
+    const { gwPort, token, cleanup } = await boot(probe)
+    try {
+      // 裸 socket 发一个会悬挂的反代请求（上游 /hold 不响应），确认请求**真到了上游**
+      const sock = netConnect({ host: '127.0.0.1', port: gwPort })
+      sock.on('error', () => { /* 我们主动 RST，错误是预期内的 */ })
+      sock.write(`GET /hold HTTP/1.1\r\nHost: 127.0.0.1:${gwPort}\r\nCookie: serenity_session=${token}\r\nConnection: keep-alive\r\n\r\n`)
+      await vi.waitFor(() => expect(probe.holdSeen).toBe(true), { timeout: 5000 })
+
+      // 🔴 硬断（RST，不是 FIN —— 生产事故的形态就是 ECONNRESET）
+      sock.resetAndDestroy()
+
+      // 🔴 语义断言：**进程与面都还活着** —— 中断之后再要一次，仍能拿到上游响应体。
+      //    这正是 v1.22.3 事故的本体（"无人监听 'error' → Node 直接 throw → 整个进程崩"）：
+      //    若那条链失效，本用例会在**进程级**炸掉，而不是在这里拿到 200。
+      await vi.waitFor(async () => {
+        const after = await raw({ port: gwPort, method: 'GET', path: '/', headers: { cookie: `serenity_session=${token}` } })
+        expect(after.status).toBe(200)
+        expect(after.body).toBe('upstream-main-body')
+      }, { timeout: 5000 })
+
+      // ⚠️ **不断言的一半（诚实边界）**：RST 之后上游那条请求**并未被销毁**（本回合实测
+      //    `probe.holdTornDown` 恒 false；机制见 SESSION.md S142「⑤ 语义深度」与地图 §3-9 #10）。
+      //    不写成断言 = 不把"当前缺陷"固化成"期望行为"；该读数已作为**发现项**登记。
+    } finally {
+      await cleanup()
+    }
+  }, 20_000)
+
+  it('② WS upgrade：客户端 socket RST ⇒ **进程不崩、网关仍可用**（真握手 ＋ 真管道）', async () => {
+    const probe = await startUpstream()
+    const { gwPort, token, cleanup } = await boot(probe)
+    try {
+      const sock = netConnect({ host: '127.0.0.1', port: gwPort })
+      sock.on('error', () => { /* 主动 RST */ })
+      let handshake = ''
+      sock.on('data', (c: Buffer) => { handshake += c.toString('utf-8') })
+      sock.write(
+        `GET /ws HTTP/1.1\r\nHost: 127.0.0.1:${gwPort}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n` +
+        `Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\nCookie: serenity_session=${token}\r\n\r\n`,
+      )
+      await vi.waitFor(() => expect(probe.upgradeSeen).toBe(true), { timeout: 5000 })
+      // 101 真的被回写（= 网关把上游的握手透传回来了 ⇒ 双向 pipe 已建立）
+      await vi.waitFor(() => expect(handshake).toContain('101'), { timeout: 5000 })
+
+      // upgrade 后的客户端 socket 已脱离 http 生命周期 ⇒ 这条路径正是"无人监听 'error' 就崩"的现场
+      sock.resetAndDestroy()
+
+      // 🔴 语义断言 = 进程/面未崩：中断之后 HTTP 侧仍能正常反代
+      await vi.waitFor(async () => {
+        const after = await raw({ port: gwPort, method: 'GET', path: '/', headers: { cookie: `serenity_session=${token}` } })
+        expect(after.body).toBe('upstream-main-body')
+      }, { timeout: 5000 })
+
+      // ⚠️ **不断言的一半**：RST 之后上游 usock **未在 1.5s 内关闭**（本回合实测 `probe.upgradeTornDown` false）。
+      //    原因**未定位**（复刻件不成立 = 读数器失败 ⇒ 不作判据）；已登记为发现项。
+    } finally {
+      await cleanup()
+    }
+  }, 20_000)
 })
