@@ -217,7 +217,7 @@
 
 🔴 **客户端半的两条结构事实**：① 它引用的宿主契约与 node 半**不同**（浏览器侧 `configForms`/`slots`/RPC）⇒ 由 `typecheck-host` 的 **client 半**单独把关（§2.5 的例外条款）；② **`vitest.config.ts` 的 coverage 把 `src/client/**` 整体排除** ⇒ 客户端半**不在覆盖率门禁内**（见 §3-9）。
 
-### 2.7 测试面（**118 文件 / 1879 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 五件各加一批：`50ad1f3` → 109/1715，`ae195a7` → 110/1733，`e834e17` → 111/1756，`a5815c6` → 112/1767，`58d58b2` → **113/1799**；第 6 件（gateway 语义化）→ **113/1801**（同文件 +2）；第 7 件（lazy 守卫 ＋ 台账复核）→ **114/1807**（+1 文件 +6 用例）；第 8 件（**HTTP 对外面 `api.ts`**）→ **115/1816**（+1 文件 +9 用例）；第 9 件（同面补齐其余 5 条路由）→ **115/1822**（同文件 +6）；第 10 件（**破坏性端点** session-cleanup POST）→ **115/1826**（同文件 +4）；第 11 件（weixin 三个写动作）→ **115/1830**（同文件 +4）；第 12 件（**gateway 装配链**：登录面 ＋ 反代面）→ **115/1842**（同文件 +12，分两笔：`82d0dcf` 后为 1835，`a936d75` 后为 1842）；第 13 件（**文件发送三步链**）→ **116/1854**（+1 文件 +12 用例）；第 14 件（**container_git 远程流程 ＋ 失败注入**）→ **117/1866**（+1 文件 +12 用例）；第 15 件（**微信扫码登录全链 ＋ 假 iLink 后端**）→ **118/1876**（+1 文件 +10 用例，见 §2.7a）；第 16 件（**§3-9 #10 的语义孪生 ＋ 台账复核**）→ **118/1879**（同文件 +3））
+### 2.7 测试面（**118 文件 / 1887 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 五件各加一批：`50ad1f3` → 109/1715，`ae195a7` → 110/1733，`e834e17` → 111/1756，`a5815c6` → 112/1767，`58d58b2` → **113/1799**；第 6 件（gateway 语义化）→ **113/1801**（同文件 +2）；第 7 件（lazy 守卫 ＋ 台账复核）→ **114/1807**（+1 文件 +6 用例）；第 8 件（**HTTP 对外面 `api.ts`**）→ **115/1816**（+1 文件 +9 用例）；第 9 件（同面补齐其余 5 条路由）→ **115/1822**（同文件 +6）；第 10 件（**破坏性端点** session-cleanup POST）→ **115/1826**（同文件 +4）；第 11 件（weixin 三个写动作）→ **115/1830**（同文件 +4）；第 12 件（**gateway 装配链**：登录面 ＋ 反代面）→ **115/1842**（同文件 +12，分两笔：`82d0dcf` 后为 1835，`a936d75` 后为 1842）；第 13 件（**文件发送三步链**）→ **116/1854**（+1 文件 +12 用例）；第 14 件（**container_git 远程流程 ＋ 失败注入**）→ **117/1866**（+1 文件 +12 用例）；第 15 件（**微信扫码登录全链 ＋ 假 iLink 后端**）→ **118/1876**（+1 文件 +10 用例，见 §2.7a）；第 16 件（**§3-9 #10 的语义孪生 ＋ 台账复核**）→ **118/1879**（同文件 +3）；第 17 件（**`api.ts` 错误与边界分支批**）→ **118/1887**（同文件 +8，见 §2.7b））
 
 | 维度 | 读数 |
 |---|---|
@@ -243,6 +243,30 @@
 **实测读数（判据一律看盘上状态，不看响应自述）**：`api.ts` 语句 **70.12% → 91.38%**（521 → **679/743**）｜分支 **70.44%**（143/203）｜函数 **91.3%**（21/23）｜全仓语句 **94.93% → 95.2%**（24578/25815）｜**test 1866 → 1876**（+1 文件）。覆盖 9 组：`login-start` 正常（**假后端真收到请求 ＋ `bot_type` 透传**）／传输层 503 ⇒ 400／轮询 wait→confirmed 全链（**凭据真落 `localstore.json` 的 `WEIXIN_WECHAT_1_TOKEN` ＋ 账号真进 `serenity.json` ＋ loginKey 被消费**）／confirmed 无 `bot_token` ⇒ error ＋ **盘上零改动**（负控）／`expired` ⇒ 登录项被清／未知 key 404 ＋ 非 GET 405 ＋ 无 UI 头 403／**TTL 时间旅行**（`vi.useFakeTimers({toFake:['Date']})`：新 `login-start` 清过期项 ＋ 过期项轮询 ⇒ `expired`）／带账号 `set-enabled`（200 ＋ 配置落盘；**无凭据 ⇒ 不启桥**）／**已绑定账号 ⇒ enable 真把桥起起来**（`weixinBridgeStatus()` 可见；disable ⇒ 停）。
 
 🔴 **本件顺带抓到一条待裁（不是缺陷声明，是登记）**：`login-start` 对 iLink 的**业务返回码不做校验** —— 后端以 `HTTP 200 + {errcode:40001}` 报失败时，端点回 **200 且 `qrcode` 为空**（`fetchQRCode` 只走 `apiGet` ＋ `JSON.parse`；`assertIlinkOk` 按设计只挂在**发送类**调用上）。**兜底在客户端**（`WeixinBridgeEditor.tsx` 判 `!res.ok || !qrcode_img_content || !loginKey` ⇒ 面板照常报失败，不是静默假绿）⇒ 是否把校验也挂到 QR/登录面 = **行为变更，待 owner 拍板**。首跑时我把它当成"应当 400"，红下来分诊才发现是**我的期望写错**（判据纪律"红不一定是我的错，也不一定是它的错"）。
+
+#### 2.7b ✅ ⑤ 第 17 件：`api.ts` 的**错误与边界分支**（2026-09-25 18:0x）—— 64 → **22** 条未覆盖语句
+
+**挑靶法（本件确立，可复用）**：`coverage/src/index.html` 里**已无任何 `file low/medium` 行**（每个 src 文件 ≥80%）⇒ 挑靶不能再看"按文件排序"，要**逐文件读未覆盖分支**：从 `coverage/src/<f>.ts.html` 的 **`cline-no`** 反推源行（该文件的 `class="text"><pre>` 块起始 HTML 行 = 源行 1；`api.ts` 锚定本件那版报告实测 **源行 = HTML 行 − 808**）。⚠️ 换文件/换一跑偏移就变 ⇒ **必须重算，不许抄这个数**（§4.2-㉞ 同族）。
+
+**本轮只做"不需要裁决"的那一档**（405 ／ 404 ／ 取值兜底 ／ 事件通知失败 ／ 账号移除），**不碰**待裁项（`readBody` 超限体在实践里被 `req.destroy()` 变成 ECONNRESET ⇒ 断言"400"会把假期望固化）。
+
+| 覆盖的簇 | 判据要点（都看**盘上/ wire 读数**，不看响应自述） |
+|---|---|
+| `resolveWorkspace` 两条真路径 | `?sessionId=` ⇒ 取会话 `header.cwd`（**首选**）；无 sessionId ⇒ **遍历 live 会话**挑出能解析成 CCC 的 cwd；＋负控（非 CCC 的 cwd **不被采用**） |
+| `/serenity/handymen` | `workspace` 指向真 CCC ⇒ 走 `listActiveHandymen(root)` 分支（既有用例只测了"无 CCC ⇒ 空表"） |
+| `/serenity/status` POST | 解析不到 CCC ⇒ **404** ＋ **盘上零改动**（负控：`.serenity-safe-on` 不得出现）；非 GET/POST ⇒ 405 |
+| 两条上传端点 | 🔴 **方法检查排在守卫之前**（GET **不带** UI 头仍应是 **405** 而不是 403 —— 顺序本身是契约）＋ 无 CCC ⇒ 404 ＋ **盘上无 `_tmp/` 落盘** |
+| `/serenity/weixin` GET **带账号** | `bound` 按 localstore 凭据**两态**（有/无 token）＋ 脱敏强化（**token 值本身**不出现在 wire） |
+| `/serenity/weixin` POST 边界 | 非 POST ⇒ 405；**缺 `ccc` ⇒ 400 `missing ccc param`** |
+| `remove-account` **成功路径** | 账号从 `serenity.json` 消失 ＋ 凭据从 `localstore.json` 消失（**路由表不动**）——此前只测了缺参 400 |
+| `/serenity/config` PUT | 🔴 **`emit` 抛错仍回 200**（`serenity/config-updated` 只是通知，不是保存的一部分） |
+
+**读数（同一 743 语句分母）**：`api.ts` **91.38% → 97.03%**（679 → **721/743**；分支 **70.44% → 78.4%**（167/213）；函数 **21/23 → 22/23**）｜全仓语句 **95.21% → 95.37%**（24620/25815；分支 83.08%；函数 94.52%）｜test **1879 → 1887**（同文件 +8 用例）。
+
+🆕 🔴 **本件顺带判定一条"构造上不可达"（已登记 §3-8 第 9 行）**：`resolveWorkspace` 里那句 `catch { /* 遍历失败 → 空列表 */ }` **进不去** —— 它 try 的三条语句里，`hostSessions(ctx)` 经 `hostInjected` → `hostService` **三层都吞异常**（模块契约："服务缺失/读取失败一律返回 undefined，不抛错"），剩下的是一个 `typeof … === 'function'` 判断与一次赋值 ⇒ 除非 `sessions.list` 是"读属性即抛"的 **getter**，永不进 catch。🔵 可读性上它在注释里承诺了一条不会发生的话 ⇒ 同 §3-8 家族，**归第 2 批待裁，不自行删除**。
+
+⏭️ **剩余 22 条（下一轮靶，多数可廉价覆盖）**：四条端点的 **catch 块**（用**真实故障形态**触发：`sessions.get` 抛错 ⇒ 端点 catch ⇒ 400；请求体坏 JSON ⇒ 400）、`public-ask` 的非 PUT/GET ⇒ 405 与其 catch、`session-cleanup` 尾部（~706-708 / ~719-720）、`weixin /login` 的 catch（~657-658，触发面待判定）。⚠️ 逐条先判"**用户能不能真走到**"：走不到的就登记成 §3-8 候选，**不硬凑测试**。
+
 
 
 ---
@@ -409,6 +433,8 @@
 | 5 | 🆕 `clock-runtime.ts:ClockOptions.bodyCountsTick`（**公开选项**） | `src/**` 除本文件"定义 + 实现"外**零调用**（唤醒调度器不传它）；`tests/**` 6 处显式传 `true`。**成因可判定**：它存在的唯一理由是 **autopilot 的记账语义**（"无 target 则不计 tick"），而 `autopilot-trajectory.ts` **已随 v1.35.0 整段退场** ⇒ **在产线已是死选项**。⚠️ 属**公开面**（导出接口的选项）⇒ 按 **D84 留待第 2 批单独确认**，本批不动 |
 | 6 | 🆕 `seams/bootstrap.ts`：**「Anchored 变体」分支不可达** —— `registerBootstrap` 的 `system-prompt/assemble` 处理器里 `if (SETTINGS.zeroTools)` 的 **else 路径** | 🔴 **不可达（本次实测）**：`SETTINGS` = **模块级 `const`**（`resolveBootstrapSettings()`，**无参、零配置面**，文件头自述"协议固有"），其中 `zeroTools` **硬编码 `true`**，且**全仓无 setter、无处可改** ⇒ 该 `if` **恒真** ⇒ else 分支**永不执行**（其体：`bootstrapTools` ＋ 压缩后追加 `compactionTools` 的窄化 ＋ 缺一降级告警）。<br>⚠️ 属**公开面 / 需确认**档 ⇒ 按 **D84 归第 2 批**，**不自行删除**（先问「谁依赖它」）。<br>🔵 **旁证（本次实测）**：新增的 `tests/seams/bootstrap-register.test.ts` **不覆盖它** —— 那 18 用例断言的是 **`zeroTools` 路径内**的 `missing.length > 0` 降级分支（coverage stderr 实证 `bootstrap: expected compaction tools missing=["todo_write"]`），**与 else 分支是两处** |
 | 7 | 🆕 `tools/msm.ts`：**两处 `gate.whitelist` 分支不可达**（skiff「白名单过滤」与「候选加已过滤前缀」） | 🔴 **不可达（本次实测；`tests/msm-tool.test.ts` 钉住可观测契约）**。**三读判据**：① msm.ts 只在 **name 为空**时把 action 传 `'list'`，否则传 `'exec'`；② `skiffMsmGate` **只在 `action === 'list'` 分支返回 `whitelist`**（exec 路只返 `{}` 或 `{reject}`）；③ 而 name 为空的那一路在处理器前段**已提前返回**（且那处 return 用的正是 whitelist）。⇒ 走到这两行时 `gate.whitelist` **恒为 `undefined`** ⇒ 过滤分支与「已过滤」前缀**永不生效**；**语义上也不亏**：skiff 的越权请求已在门控处 `{reject}` 抛错。<br>⚠️ 属**公开面 / 需确认**档 ⇒ 按 **D84 归第 2 批**，**不自行删除**。🔵 **旁证**：断言"白名单内但未注册的名字 ⇒ 走**无前缀**候选"的用例已随第 3 件落档（即该分支不执行的正向证据） |
+| 9 | 🆕 `api.ts:resolveWorkspace` 的 **`catch { /* 遍历失败 → 空列表 */ }` 不可达**（005 第 17 件实测） | 🔴 **判据（三层吞异常）**：该 try 体内只有三条语句 —— `hostSessions(ctx)`（→ `hostInjected` → `hostService`，**三层各自 `try/catch` 且契约写明"服务缺失/读取失败一律 undefined、不抛错"**）、一个 `typeof sessions?.list === 'function'` 判断、一次赋值 ⇒ 唯一能抛的是"**读 `.list` 属性即抛**"的 getter（构造性场景，产线无此形态）。<br>⚠️ 属**可读性档**（它在注释里承诺了一条永不发生的话："遍历失败 → 空列表"）⇒ 按 D84 归**第 2 批待裁**，**不自行删除**。🔵 **旁证**：新增的 §2.7b 那批用例**刻意不覆盖它** —— 硬凑（造一个抛错 getter）会把"从不发生"固化成"期望形态"。 |
+| 10 | 🆕 ⑤ 第 17 件**剩余 22 条**（四条端点 catch ／ `public-ask` 405+catch ／ `session-cleanup` 尾部 ／ `weixin /login` catch） | ⏭️ **不是死代码，是"还没走到"** ⇒ 下一轮靶。逐条先判"用户能不能真走到"：能 ⇒ 用**真实故障形态**补测；不能 ⇒ 挪进本表当候选。 |
 | 8 | 🆕 `tools/trajectory.ts:advisoryHint` 的**空壳分支**（`!existsSync(mdPath)` ⇒ 提示"目录存在但没有 SESSION.md"） | 🔴 **不可达（本次实测；`tests/trajectory-tool.test.ts` 钉住实际失败点）**。**判据**：① `advisoryHint` **全仓只有一个调用点**（`use` 分支内），且它排在 `useSession(...)` **之后**；② `useSession` 对**同一个 mdPath** 已经做过 `existsSync` 校验并**会抛**（`has no SESSION.md — nothing to load.`）；③ 两次定位同 root 同 key（`findSession` 同参数）⇒ **同一个 entry** ⇒ 走到 `advisoryHint` 时文件**必然存在**。<br>⇒ 该分支**除"两步之间的竞态"外永不执行**；同函数末尾的 `catch { return null }`（`statSync` 抛）同理属竞态档。⚠️ **可读性上的意义**：它在 `use` 的**提示文案**里承诺了一条**永远不会出现的话**。⚠️ 属**语义档**（删掉它就失去竞态兜底）⇒ 按 **D84 归第 2 批**，**不自行删除**。🔵 **钉法**：测试断言"空壳目录 ⇒ 错误来自 `useSession`（含 `has no SESSION.md`），**不含** `空壳`" ⇒ 把"哪一步失败"变成机械事实，而不是靠读代码相信 |
 
 ### 3-9. 🔴 测试面缺口（**第 ⑤ 项的输入**）

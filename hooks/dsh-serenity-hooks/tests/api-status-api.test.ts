@@ -40,7 +40,15 @@ interface Booted {
 }
 
 /** 起一台真 listener：把 `registerStatusApi` 注册的处理器按**精确路径**派发出去。 */
-async function bootApi(opts: { liveSessionIds?: string[] } = {}): Promise<Booted> {
+async function bootApi(opts: {
+  liveSessionIds?: string[]
+  /** 🆕 ⑤ 第 17 件：`sessions.get(id).header.cwd` —— 覆盖 `resolveWorkspace` 的**首选路径** */
+  sessionCwdById?: Record<string, string>
+  /** 🆕 同上：live 会话的 cwd（覆盖 `resolveWorkspace` 的**遍历兜底**） */
+  liveSessionCwds?: string[]
+  /** 🆕 同上：让 `ctx.emit` 抛错 —— 覆盖 config PUT 的"事件通知失败不影响保存"分支 */
+  emitThrows?: boolean
+} = {}): Promise<Booted> {
   const handlers = new Map<string, Handler>()
   const routes: string[] = []
   const ctx = {
@@ -56,11 +64,32 @@ async function bootApi(opts: { liveSessionIds?: string[] } = {}): Promise<Booted
     //    ⇒ 这一处正是"走收口层（`hostService`，异常吞掉返回 undefined）vs 裸调用"的**失败模式差异**的实证。
     get: (name: string) => {
       // 只有 cleanup 那组需要"宿主里正在跑的会话"（live 保护 = 该端点的安全底线）
-      if (name === 'sessions' && opts.liveSessionIds !== undefined) {
-        return { list: () => opts.liveSessionIds!.map((id) => ({ header: { id } })) }
+      if (name !== 'sessions') return undefined
+      const wantGet = opts.sessionCwdById !== undefined
+      const wantList = opts.liveSessionIds !== undefined || opts.liveSessionCwds !== undefined
+      if (!wantGet && !wantList) return undefined
+      return {
+        ...wantGet
+          ? {
+              get: (id: string) => {
+                const cwd = opts.sessionCwdById![id]
+                return cwd === undefined ? undefined : { header: { id, cwd } }
+              },
+            }
+          : {},
+        ...wantList
+          ? {
+              list: () => [
+                ...(opts.liveSessionIds ?? []).map((id) => ({ header: { id } })),
+                ...(opts.liveSessionCwds ?? []).map((cwd) => ({ header: { id: 'live-from-cwd', cwd } })),
+              ],
+            }
+          : {},
       }
-      return undefined
     },
+    ...opts.emitThrows
+      ? { emit: () => { throw new Error('emit boom') } }
+      : {},
     // 也刻意不提供 sessions/agents ⇒ `resolveWorkspace` 走"无参回落"分支
   }
   registerStatusApi(ctx as never)
@@ -739,6 +768,186 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
       const unknown = await postWeixin(api.port, { action: 'nope' })
       expect(unknown.status).toBe(400)
       expect(JSON.parse(unknown.body)).toEqual({ error: 'unsupported action: nope' })
+    } finally {
+      await api.close()
+    }
+  })
+})
+
+/**
+ * 🔴 ⑤ 第 17 件：`api.ts` 的**错误与边界分支**（客户端真会走到，此前 64 条语句零执行）。
+ *
+ * 挑靶法（本轮写入地图 §2.7b）：从 `coverage/src/api.ts.html` 的 `cline-no` **反推源行**
+ * （该文件 `class="text"` 块起始 HTML 行 = 源行 1）⇒ 得到的是"哪些分支从没走过"，
+ * 而不是"哪个文件覆盖率低"（后者已无靶：每个 src 文件都 ≥80%）。
+ *
+ * 分档（本轮只做**不需要裁决**的那一档）：405 ／ 404 ／ 取值兜底 ／ 事件通知失败 ／ 账号移除——
+ * 全是"用户点到了就会走到"的路径。**不碰**待裁项（`readBody` 超限体在实践里被 `req.destroy()`
+ * 变成 ECONNRESET ⇒ 断言"400"会把假期望固化）。
+ */
+describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
+  const jsonBody = (r: RawRes): any => JSON.parse(r.body)
+  /** 与上一组同名但**作用域不同**（那一个定义在另一个 describe 内 ⇒ 这里必须自带一份） */
+  const postWeixin = (port: number, body: Record<string, unknown>): Promise<RawRes> =>
+    raw({ port, method: 'POST', path: '/serenity/weixin', headers: UI_HEADERS, body: JSON.stringify({ ccc, ...body }) })
+
+  it('🔴 `resolveWorkspace` 两条真路径：`?sessionId=` 取会话 cwd（首选）／无 sessionId 时遍历 live 会话找 CCC', async () => {
+    const byId = await bootApi({ sessionCwdById: { 's-1': ccc } })
+    try {
+      const res = await raw({ port: byId.port, method: 'GET', path: `/serenity/status?sessionId=s-1`, headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      expect(jsonBody(res).root, 'sessionId → header.cwd 必须被真用上').toBe(ccc)
+    } finally {
+      await byId.close()
+    }
+
+    // 遍历兜底：无 sessionId、无 workspace ⇒ 从 live 会话列表里挑出"能解析出 CCC 的那个 cwd"
+    const byList = await bootApi({ liveSessionCwds: [ccc] })
+    try {
+      const res = await raw({ port: byList.port, method: 'GET', path: `/serenity/status`, headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      expect(jsonBody(res).root).toBe(ccc)
+    } finally {
+      await byList.close()
+    }
+
+    // 对照（负控）：live 会话的 cwd **不是** CCC ⇒ 不采用它，落到 process.cwd()
+    // ⚠️ 这里**不能**断言 `root === null`：测试进程的 cwd 就在真 CCC（本仓）里 ⇒ 回落也会解析出根。
+    //    ⇒ 判据取"**没有采用那个非 CCC 的 cwd**"（即没走 197 行的采纳分支）。
+    const plainCwd = await bootApi({ liveSessionCwds: [plain] })
+    try {
+      const res = await raw({ port: plainCwd.port, method: 'GET', path: `/serenity/status`, headers: UI_HEADERS })
+      expect(jsonBody(res).root).not.toBe(plain)
+      expect(jsonBody(res).root).not.toBe(ccc)
+    } finally {
+      await plainCwd.close()
+    }
+  })
+
+  it('🔴 `handymen`：workspace 指向真 CCC ⇒ 走 `listActiveHandymen(root)` 分支（既有用例只测了"无 CCC ⇒ 空表"）', async () => {
+    const api = await bootApi()
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/handymen?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      expect(jsonBody(res).handymen).toEqual([]) // 无进度文件 ⇒ 空数组，但**走的是 root 分支**
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 status POST：workspace 解析不到 CCC ⇒ 404 `no CCC found from workspace`，且**盘上零改动**（负控）；非 GET/POST ⇒ 405', async () => {
+    const api = await bootApi()
+    try {
+      const res = await raw({
+        port: api.port, method: 'POST', path: '/serenity/status', headers: UI_HEADERS,
+        body: JSON.stringify({ workspace: plain, on: true }),
+      })
+      expect(res.status).toBe(404)
+      expect(String(jsonBody(res).error)).toContain('no CCC found from workspace')
+      // 🔴 负控：**动作没发生**（不是"回了个 404 就算数"）
+      expect(existsSync(join(plain, '.serenity-safe-on'))).toBe(false)
+
+      const del = await raw({ port: api.port, method: 'DELETE', path: '/serenity/status', headers: UI_HEADERS })
+      expect(del.status).toBe(405)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 两条上传端点：**先判方法**（GET ⇒ 405，不因缺 UI 头变 403）＋ workspace 无 CCC ⇒ 404，且盘上无新目录', async () => {
+    const api = await bootApi()
+    try {
+      for (const path of ['/serenity/image-upload', '/serenity/file-upload']) {
+        // 刻意**不带** UI 头：证明"方法检查排在守卫之前"（顺序本身是契约的一部分）
+        const wrongMethod = await raw({ port: api.port, method: 'GET', path })
+        expect(wrongMethod.status, `${path} 的 GET 应为 405`).toBe(405)
+        expect(jsonBody(wrongMethod).error).toBe('method not allowed')
+
+        const noCcc = await raw({
+          port: api.port, method: 'POST', path, headers: UI_HEADERS,
+          body: JSON.stringify({ workspace: plain, data: 'AAAA', mediaType: 'image/png', name: 'x.txt' }),
+        })
+        expect(noCcc.status, `${path} 无 CCC 应为 404`).toBe(404)
+        expect(String(jsonBody(noCcc).error)).toContain('no CCC found from workspace')
+      }
+      // 负控：两条落盘目录都不该被建出来
+      expect(existsSync(join(plain, '_tmp'))).toBe(false)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 weixin GET **带账号**：`bound` 按 localstore 凭据真伪两态（此前只测了空账号表 ⇒ 该映射整段零执行）', async () => {
+    mkdirSync(join(ccc, '.opencode'), { recursive: true })
+    writeFileSync(join(ccc, '.opencode', 'serenity.json'), JSON.stringify({
+      weixin: { accounts: [{ accountId: 'wechat-1', name: '微信 1' }, { accountId: 'wechat-2' }] },
+    }, null, 2))
+    writeFileSync(join(ccc, 'localstore.json'), JSON.stringify({
+      credentials: { WEIXIN_WECHAT_1_TOKEN: 'tok-1' },
+    }, null, 2))
+    const api = await bootApi()
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/weixin?ccc=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      const body = jsonBody(res) as { accounts: Array<{ accountId: string; name?: string; enabled: boolean; bound: boolean }> }
+      expect(body.accounts).toEqual([
+        { accountId: 'wechat-1', name: '微信 1', enabled: true, bound: true },
+        { accountId: 'wechat-2', name: undefined, enabled: true, bound: false },
+      ])
+      // 脱敏不变量（强化版）：token 值本身也**不出现**在 wire 上
+      expect(res.body).not.toContain('tok-1')
+      expect(res.body).not.toContain('WEIXIN_WECHAT_1_TOKEN')
+      expect(body.accounts[0]).not.toHaveProperty('token')
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 weixin POST 边界：非 POST ⇒ 405；**缺 ccc ⇒ 400 `missing ccc param`**（此前只测了 GET 一侧）', async () => {
+    const api = await bootApi()
+    try {
+      const put = await raw({ port: api.port, method: 'PUT', path: '/serenity/weixin', headers: UI_HEADERS, body: '{}' })
+      expect(put.status).toBe(405)
+
+      const noCcc = await raw({ port: api.port, method: 'POST', path: '/serenity/weixin', headers: UI_HEADERS, body: JSON.stringify({ action: 'login-start' }) })
+      expect(noCcc.status).toBe(400)
+      expect(jsonBody(noCcc)).toEqual({ error: 'missing ccc param' })
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 `remove-account` 成功路径：账号与凭据**都从盘上消失**（此前只测了缺参 400）', async () => {
+    mkdirSync(join(ccc, '.opencode'), { recursive: true })
+    writeFileSync(join(ccc, '.opencode', 'serenity.json'), JSON.stringify({
+      weixin: { accounts: [{ accountId: 'wechat-1' }], routes: [{ user: 'u1', role: 'qa' }] },
+    }, null, 2))
+    writeFileSync(join(ccc, 'localstore.json'), JSON.stringify({
+      credentials: { WEIXIN_WECHAT_1_TOKEN: 'tok-1', WEIXIN_WECHAT_1_BASEURL: 'https://x.invalid' },
+    }, null, 2))
+    const api = await bootApi()
+    try {
+      const res = await postWeixin(api.port, { action: 'remove-account', accountId: 'wechat-1' })
+      expect(res.status).toBe(200)
+      expect(jsonBody(res)).toEqual({ removed: 'wechat-1' })
+
+      // 🔴 盘上读数（不看响应自述）
+      const cfg = JSON.parse(readFileSync(join(ccc, '.opencode', 'serenity.json'), 'utf-8')) as { weixin?: { accounts?: unknown[]; routes?: unknown[] } }
+      expect(cfg.weixin?.accounts).toEqual([])
+      expect(cfg.weixin?.routes, '移除账号不该动路由表').toEqual([{ user: 'u1', role: 'qa' }])
+      const creds = JSON.parse(readFileSync(join(ccc, 'localstore.json'), 'utf-8')) as { credentials?: Record<string, string> }
+      expect(Object.keys(creds.credentials ?? {}).filter((k) => k.startsWith('WEIXIN_WECHAT_1_'))).toEqual([])
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 config PUT：**事件通知抛错仍回 200**（`serenity/config-updated` 只是通知，不是保存的一部分）', async () => {
+    const api = await bootApi({ emitThrows: true })
+    try {
+      const res = await raw({ port: api.port, method: 'PUT', path: '/serenity/config', headers: UI_HEADERS, body: JSON.stringify({ config: {} }) })
+      expect(res.status).toBe(200)
+      expect(jsonBody(res).config, '保存结果必须照常返回').toBeTypeOf('object')
     } finally {
       await api.close()
     }
