@@ -13,6 +13,8 @@ import {
   resetActiveSessionStore,
   parseSessionContextFromEvents,
   findLatestActiveSessionMd,
+  resolveSessionByTitle,
+  sessionsRoot,
   sessionEvents,
   SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
@@ -247,6 +249,58 @@ describe('trajectory-ops: v1.24.11 恢复稳固化（路径规范行即可，无
     const a = mk('only-done')
     markDone(a)
     expect(findLatestActiveSessionMd(dir)).toBeNull()
+  })
+
+  /**
+   * ⑤ 第 38 件：`resolveSessionByTitle`（标题 → 轨迹目录，U3/U4 编码无关 best-match）
+   *
+   * 🔴 **为何此前零执行**：本文件**一条用例都没有** import 过它；唯一调用点是
+   * `src/seams/context.ts` 的「③ 标题 reconcile」分支，而那需要**真 dsh 会话标题**才走得到。
+   * 🔴 **可达性取证**：`resolveSessionByTitle(title, sessionsRoot(root))` 是活路径
+   * （重启恢复链的第三条回退），不是死代码 ⇒ 值得补。
+   *
+   * **三级优先序逐条钉住**（注释里写了优先级，本组把"注释"变成"断言"）：
+   *   ① 标题即完整目录名 → 精确命中
+   *   ② 标题首 token 作 code 段匹配（`--<code>--` 或尾段 `--<code>`）→ **唯一才返回，歧义返回 null**
+   *   ③ 唯一模糊子串 → 返回；**多个则返回 null 防误猜**
+   */
+  it('resolveSessionByTitle：三级优先序（精确目录名 / code 段唯一 / 模糊唯一）', () => {
+    const a = mk('alpha')
+    const b = mk('beta')
+
+    // ① 标题即完整目录名 ⇒ 精确命中（即使它不是最新）
+    expect(resolveSessionByTitle(a.dirName, sessionsRoot(dir))).toBe(join(a.sessionPath, 'SESSION.md'))
+
+    // ② code 段：标题首 token `-` 前 = S001 / S002 ⇒ 各唯一命中
+    expect(resolveSessionByTitle('S001-2026-01-01-任意概括', sessionsRoot(dir))).toBe(join(a.sessionPath, 'SESSION.md'))
+    expect(resolveSessionByTitle('S002-别的概括', sessionsRoot(dir))).toBe(join(b.sessionPath, 'SESSION.md'))
+
+    // ③ 模糊子串：全体目录名里唯一包含该串者
+    expect(resolveSessionByTitle('alph', sessionsRoot(dir))).toBe(join(a.sessionPath, 'SESSION.md'))
+  })
+
+  it('resolveSessionByTitle：歧义不猜 + 空标题 + 空目录（三条边界都要返回 null）', () => {
+    // 多个目录都含该子串 ⇒ 必须 null（防误猜，这是本函数的立意）
+    mk('dup-one')
+    mk('dup-two')
+    expect(resolveSessionByTitle('dup', sessionsRoot(dir))).toBeNull()
+
+    // 空 / 空白标题
+    expect(resolveSessionByTitle('', sessionsRoot(dir))).toBeNull()
+    expect(resolveSessionByTitle('   ', sessionsRoot(dir))).toBeNull()
+
+    // 无任何会话的目录
+    const empty = mkdtempSync(join(tmpdir(), 'ops-empty-'))
+    mkdirSync(join(empty, 'AGENT_SESSIONS'), { recursive: true })
+    expect(resolveSessionByTitle('anything', sessionsRoot(empty))).toBeNull()
+    rmSync(empty, { recursive: true, force: true })
+  })
+
+  it('resolveSessionByTitle：code 段歧义 ⇒ null（S00 同时前缀命中 S001/S002）', () => {
+    mk('one')
+    mk('two')
+    // 首 token = 'S0' ⇒ 两个目录的 `--S00N--` 都不等于 'S0'，但 includes('--S0') 两边都真 ⇒ 歧义
+    expect(resolveSessionByTitle('S0-x', sessionsRoot(dir))).toBeNull()
   })
 })
 
