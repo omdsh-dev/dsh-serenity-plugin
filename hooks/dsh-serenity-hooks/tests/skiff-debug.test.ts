@@ -8,9 +8,12 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, renderSkiffMarkdown, type CccEntry } from '../src/skiff-debug.js'
+import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, renderSkiffMarkdown, skiffDebugSpec, type CccEntry } from '../src/skiff-debug.js'
 // C2：候选 CCC 枚举的唯一真相源（原 skiff-debug.discoverCccs 已迁移至此）
 import { listCccs } from '../src/ccc-roots.js'
+// ⑤ 第 34 件：意图读取通路（面规格 `enabled` ← `faceEnabled`）
+import { faceEnabled } from '../src/face-host.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings, readSimpleSettings } from '../src/settings-section.js'
 
 let dir: string
 
@@ -406,5 +409,67 @@ describe('skiff-debug: renderSkiffMarkdown 服务端渲染（v1.25.9 marked）',
     const html = renderSkiffMarkdown('正常内容 <script>alert(1)</script>')
     expect(html).not.toContain('<script>')
     expect(html).toContain('&lt;script&gt;')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🆕 2026-09-25 ⑤ 第 34 件：面规格的**意图读取**通路（`FaceSpec.enabled` ← `faceEnabled`）
+//
+// 挑靶依据 = §3-9b 的 B 类（`readSimpleSettings().enabled` 闭包）。**形态与 §2.7m 的 acp 那条同构**
+// （`const spec = xxxSpec(...); expect(faceEnabled(spec))` 三态），本件沿用同一写法。
+//
+// 🔴 **本件同时产出并登记一条结构性发现（见地图 §3-8 与 §2.7s）**：
+//    `FaceSpec.enabled` 是**类型上的必填字段** ⇒ **四个面都写了**（`weixin` / `acp-http` / `gateway` / `skiff-debug`），
+//    但全仓**只有一个读者**：`faceEnabled`（`face-host.ts`），**且只有一处调用点**（`weixin-send-api.ts`）。
+//    ⇒ `gateway` ／ `acp-http` ／ `skiff-debug` 三处的声明**当前无人读取**。
+//    ⚠️ 其中 **`gateway` 连被"以同一形态"取到都不可能** —— 它的 spec 是 `startFace({...})` 里的**内联字面量**，
+//    该模块**没有 spec 构造函数**（`gateway.ts` 的唯一导出是 `registerGateway`）⇒ 对象从不外泄 ⇒
+//    既谈不上被 `faceEnabled` 读，也无法在测试里按 §2.7m 的形态取到（**构造上不可达**）。
+//    ⇒ 🔴 **本件刻意不给 `gateway` 那处硬凑测试**（拦截 `startFace` 抓内联字面量 = 把"产线从不发生"固化成"期望形态"，
+//    且会把这条发现**涂绿掩盖掉**）—— 它归 **② 死代码／装配缺口**那一批，不归 ⑤。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('skiff-debug: 面规格的意图读取（⑤ 第 34 件）', () => {
+  beforeEach(() => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings() }))
+  })
+  afterEach(() => {
+    __setSimpleSourceForTest(null)
+  })
+
+  /** 注入「Skiff 调试」开关（`readSimpleSettings` 认这个源） */
+  function setSkiffEnabled(on: boolean): void {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), skiffEnabled: on }))
+  }
+
+  it('🔴 读数器自证：注入的开关真的被 readSimpleSettings 读到（否则下面两条可能是空断言）', () => {
+    setSkiffEnabled(true)
+    expect(readSimpleSettings().skiffEnabled).toBe(true)
+    setSkiffEnabled(false)
+    expect(readSimpleSettings().skiffEnabled).toBe(false)
+  })
+
+  it('规格自述的意图随开关走：开 ⇒ true、关 ⇒ false（判别性：两次读数必须不同）', () => {
+    // 🔵 规格**只构造一次** —— `enabled` 是**每次调用实时读设置**（不是构造时快照）；
+    //    这条断言正是在钉那个语义：构造后改开关，读数必须跟着变。
+    const spec = skiffDebugSpec({} as never, dir, 0, 3080)
+
+    setSkiffEnabled(true)
+    const on = faceEnabled(spec)
+    setSkiffEnabled(false)
+    const off = faceEnabled(spec)
+
+    expect(on).toBe(true)
+    expect(off).toBe(false)
+    expect(on, '若该闭包是常量，本条先红').not.toBe(off)
+  })
+
+  it('规格其余字段与入参一致（形状；不硬编码模块私有常量）', () => {
+    const spec = skiffDebugSpec({} as never, dir, 43_210, 3080)
+    expect(spec.port).toBe(43_210)
+    expect(typeof spec.name).toBe('string')
+    expect(spec.name.length).toBeGreaterThan(0)
+    expect(typeof spec.host).toBe('string')
+    expect(typeof spec.handler).toBe('function')
   })
 })
