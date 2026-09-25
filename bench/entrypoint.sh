@@ -28,6 +28,27 @@ for f in verify.sh v8-client-check.mjs; do
   [ -f "/usr/local/bin/$f" ] && echo "judge script present: $f" | tee -a "$LOG/entrypoint.log"
 done
 
+# ── 0c. profile patch 落地（集成测试台第 ⑥ 项：把默认模型指向**我们真有凭据的那个**）──
+# 🔴 为什么必须在**起宿主之前**、且必须在**装插件之前**：
+#    · 默认模型（`agent-default-model`）与模型路由（`llm-pi-ai`）都是宿主**启动时**读的配置层；
+#      宿主起来之后再写 = 本轮不生效（要重启才生效）。
+#    · 装插件这一步可能校验 profile 配置的可用性 ⇒ 路由**先在场**更安全。
+# 🔴 本文件**不碰密钥**：patch 里只有 `apiKeyEnv: MINIMAX_BENCH_API_KEY`（一个名字），
+#    真实值由 `docker run -e MINIMAX_BENCH_API_KEY` 在**运行期**注入（约束文档 §5.4-5：不得进任何层）。
+if [ -n "${PROFILE_PATCH:-}" ] && [ -f "${PROFILE_PATCH}" ]; then
+  mkdir -p /root/.dsh/profiles/web
+  cp "${PROFILE_PATCH}" /root/.dsh/profiles/web/cordis.patch.yml
+  # 留 sha256 供 verify 判"容器里跑的确实是这份 patch"（同 V0 的读数器自证思路）
+  sha256sum /root/.dsh/profiles/web/cordis.patch.yml | cut -d' ' -f1 > "$LOG/profile-patch.sha256"
+  {
+    echo "profile patch installed: ${PROFILE_PATCH} → /root/.dsh/profiles/web/cordis.patch.yml"
+    echo "sha256 = $(cat "$LOG/profile-patch.sha256")"
+    grep -c 'minimax-bench' /root/.dsh/profiles/web/cordis.patch.yml | sed 's/^/minimax-bench 命中行数 = /'
+  } | tee -a "$LOG/entrypoint.log"
+else
+  echo "profile patch 未提供（PROFILE_PATCH 未设或文件不在）—— 默认模型保持镜像内 base bundle 的值（真实轮次会因缺凭据而失败）" | tee -a "$LOG/entrypoint.log"
+fi
+
 # ── 1. 装插件 ──
 # 三种模式（同一镜像三用，别混）：
 #   PLUGIN_SPEC   = npm 已发布版（验"发布物在新宿主上能用吗"）

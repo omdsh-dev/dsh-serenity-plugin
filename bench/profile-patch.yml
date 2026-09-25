@@ -1,0 +1,41 @@
+# bench/profile-patch.yml — 集成测试台的 profile patch（**默认模型的指向**）
+#
+# 它解决什么麻烦（白话）：测试台的容器里默认用的模型是"镜像里写死的那一个"，而那个模型
+#   容器里没有凭据 ⇒ 每一条真实对话轮都以 `MISSING_CREDENTIAL` 结束 ⇒ 测不了"功能可用"。
+#   本文件把容器的默认模型改成**我们真有凭据的那个**（MiniMax M3）。
+#
+# 🔴 **本文件刻意不含任何密钥**（与约束文档 §5.4-5 一致：key 只能运行时注入，不得进任何层）。
+#   路由用 `apiKeyEnv` **引用**环境变量名；真实值由 `bench-docker up` 在 `docker run` 时注入。
+#   逐字形状抄自**本机真实 profile patch**（`~/.dsh/profiles/web/cordis.patch.yml`，2026-09-25 取证），
+#   差别只有两处、且都是**刻意**的：
+#     ① 路由名 `minimax-bench`（本机叫 `minimax-cn-coding-plan`）—— 让容器里的路由在日志里**一眼可辨**；
+#     ② 用 `apiKeyEnv: MINIMAX_BENCH_API_KEY` 取代本机的**内联 `apiKey:`** —— 内联 = 密钥进文件，禁止。
+#
+# 落地方式（三者缺一不可，见 bench/entrypoint.sh 与 bench-docker 的 cmdUp）：
+#   本文件 → 推到远端 `/opt/dsh-bench/dist/bench-profile-patch.yml` → 挂进容器 `/ccc/profile-patch.yml:ro`
+#   → entrypoint 在起宿主**之前** `cp` 到 `/root/.dsh/profiles/web/cordis.patch.yml`。
+#   ⚠️ patch 语义 = **按 id 定位整体替换**该条目 config（**不深合并**）⇒ 每个条目要写全它的字段。
+#
+# 两个条目（第 ⑥ 项改动点的「键 A / 键 B」，见 docs/dsp-module-map.md §2.9）：
+#   键 A = `llm-pi-ai` 的 `config.providers.<route>`：目录外路由必须给 `api` + `baseURL` + **非空 models**。
+#   键 B = `agent-default-model` 的 `config.provider` / `config.model`：宿主只吃这个做每轮默认。
+- id: llm-pi-ai
+  config:
+    providers:
+      minimax-bench:
+        api: openai-completions
+        baseURL: https://api.minimaxi.com/v1
+        apiKeyEnv: MINIMAX_BENCH_API_KEY
+        models:
+          - id: MiniMax-M3
+            contextWindow: 1024000
+            maxTokens: 64000
+            input: []
+            compat: {}
+        retryPolicy:
+          mode: normal
+          maxRetries: 100
+- id: agent-default-model
+  config:
+    provider: minimax-bench
+    model: MiniMax-M3

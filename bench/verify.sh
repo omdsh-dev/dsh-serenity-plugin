@@ -8,7 +8,10 @@
 #   V2/V3 —— bundle 的版本不兼容是**静默**的（启动 skip + 一行 stderr）⇒ 必须**显式证明补丁层生效**
 #   V4    —— ACC 自报版本（旧宿主上会自报旧版 ⇒ 能区分"装上了"与"生效了"）
 #   V5    —— `agent/created`（0.1.7 起由 `agent/session-start` 改名）是**身份播种**的挂载点 ⇒ 失效即静默
-#   V6    —— 设置面板（B1）在 0.1.7 换了模型 ⇒ 装错就是**页面上什么都不出现**
+#   V    —— 设置面板（B1）在 0.1.7 换了模型 ⇒ 装错就是**页面上什么都不出现**
+#   V9   —— 🆕 第 ⑥ 项（2026-09-25）：**"缝走到" ≠ "功能可用"** —— V5/V7b 在没有模型凭据的
+#           容器里照样绿，而每条真实轮次都以 `MISSING_CREDENTIAL` 结束（验收表上**看不出来**）
+#           ⇒ V9 判"轮次真的正常收束 + 用的是指定路由/模型 + 零凭据错误"
 set -uo pipefail
 
 LOG=${LOG:-/logs}
@@ -168,6 +171,49 @@ if [ -f /usr/local/bin/v8-client-check.mjs ]; then
   if [ "$v8ok" != "0" ]; then printf '%s\n' "$v8out" | sed 's/^/      /'; fi
 else
   check V8 "设置面板客户端面（bundle 交付 + 槽位注册在场）" 1 "探针不在（`vpush` 未推 v8-client-check.mjs）"
+fi
+
+# ── V9 🔴 「真实轮次成功」—— 第 ⑥ 项要的**功能可用**判据（本判据此前**不存在**）──
+# 为什么必须新增（R↓）：V5/V7b 只判「缝被走到」，它们在**没有任何模型凭据**的容器里照样能绿
+#   ⇒ 旧判据集**结构性无法回答** owner 的问题（"装完能不能真的用"）。2026-09-25 之前容器里
+#   每条真实轮次都以 `MISSING_CREDENTIAL` 结束，而验收表上**看不出来**。
+# 🔵 判据来源 = **实测样本**（不是猜的）：一条成功轮的会话日志尾部逐字含
+#   `"provider":"minimax-bench","model":"MiniMax-M3"` ＋ `"turn/end" ... "kind":"completed"`；
+#   而失败形态是日志里出现 `MISSING_CREDENTIAL`。三条各判一件事：
+#   V9  轮次**正常收束**（有 turn/end + kind=completed）—— "答完了"
+#   V9b 该轮**用的是我们指定的路由/模型** —— "用的是真模型，不是某个默认兜底"
+#   V9c 会话日志里**零**凭据错误 —— 把旧失败形态变成显式负判据
+EXPECT_PROVIDER=${EXPECT_PROVIDER:-minimax-bench}
+EXPECT_MODEL=${EXPECT_MODEL:-MiniMax-M3}
+if command -v zstd >/dev/null 2>&1; then
+  turns_done=0; model_hits=0; cred_err=0
+  for f in $(find "$sessdir" -name 'session.v*.jsonl.zstd' 2>/dev/null); do
+    d=$(zstd -dc "$f" 2>/dev/null || true)
+    turns_done=$((turns_done + $(printf '%s' "$d" | grep -c '"turn/end".*"kind":"completed"' || true)))
+    model_hits=$((model_hits + $(printf '%s' "$d" | grep -c "\"provider\":\"$EXPECT_PROVIDER\"" || true)))
+    cred_err=$((cred_err + $(printf '%s' "$d" | grep -c 'MISSING_CREDENTIAL' || true)))
+  done
+  check V9 "真实轮次正常收束（会话日志有 turn/end + kind=completed）" \
+    "$([ "${turns_done:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "完成轮次 ${turns_done:-0} 个（0 = 还没有真实轮次 ⇒ 先 bench-docker turn）"
+  check V9b "该轮用的是指定路由/模型（$EXPECT_PROVIDER / $EXPECT_MODEL）" \
+    "$([ "${model_hits:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "日志命中 ${model_hits:-0} 处（0 = 路由 patch 没生效，或宿主用了别的默认）"
+  check V9c "会话日志里零凭据错误（MISSING_CREDENTIAL）" \
+    "$([ "${cred_err:-0}" -eq 0 ] && echo 0 || echo 1)" "命中 ${cred_err:-0} 处"
+else
+  check V9  "真实轮次正常收束（会话日志有 turn/end + kind=completed）" 1 "🔴 读数器缺失（无 zstd CLI）⇒ 读不到会话日志"
+  check V9b "该轮用的是指定路由/模型（$EXPECT_PROVIDER / $EXPECT_MODEL）" 1 "🔴 读数器缺失（无 zstd CLI）"
+  check V9c "会话日志里零凭据错误（MISSING_CREDENTIAL）" 1 "🔴 读数器缺失（无 zstd CLI）"
+fi
+# 与 V9 配对的**装配面**旁证：profile patch 真的落地了（entrypoint 写的 sha + 路由名命中）
+if [ -f "$LOG/profile-patch.sha256" ]; then
+  psha=$(cat "$LOG/profile-patch.sha256")
+  phit=$(grep -c "$EXPECT_PROVIDER" /root/.dsh/profiles/web/cordis.patch.yml 2>/dev/null || true)
+  check V9d "profile patch 已落地（sha 记录在 + 路由名命中）" \
+    "$([ "${phit:-0}" -gt 0 ] && echo 0 || echo 1)" "sha ${psha:0:12}… / 路由名命中 ${phit:-0} 行"
+else
+  check V9d "profile patch 已落地（sha 记录在 + 路由名命中）" 1 "无 $LOG/profile-patch.sha256 ⇒ entrypoint 没收到 PROFILE_PATCH（默认模型仍是镜像内的）"
 fi
 
 # ── 汇总 ──
