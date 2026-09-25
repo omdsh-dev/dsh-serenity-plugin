@@ -312,6 +312,45 @@ describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id c
     unregisterSkiffSession(ref.sessionId)
   })
 
+  /**
+   * 🔴 **⑤ 第 39 件：本条用例是"发现"，不是"靶"** —— 保留它是为了把结论钉成机械事实。
+   *
+   * **起因**：`skiff-core.ts` 的 `liveReuseRef` 返回对象里的 `dispose: async () => {}` 是 `fstat-no`
+   * （从没被进入）。按挑靶流程先证可达性，结论与预期相反：
+   *
+   * 1. `dispose` 是 **`AgentHandle` 上的成员**，而 `createSkiffAgent` 的返回类型 `SkiffAgentRef`
+   *    只挑出 `{ handle, agent, sessionId, resumed }` ⇒ **`liveReuseRef` 造的那个 dispose 只挂在
+   *    内层 handle 上**，外层**不转发**它的 `dispose`（外层是 `handle: AgentHandle` 整个带出去的）。
+   * 2. **全仓零调用**：`ref.handle.dispose()` 在 `src/**` 无命中（调用方 `acp-core` / `weixin-bridge` /
+   *    `acp-http` / `skiff-debug` 都只读 `agent` 与 `handle` 的其它成员）。
+   * ⇒ 结论：**该箭头在当前调用图里不可达**（不是"还没走到"）。它存在的意义是"满足 `AgentHandle`
+   * 的必填成员"，而**没有任何调用方会执行它** —— 与 §3-8 第 19／20 行（`today` /
+   * `isResumeFallbackError`）同族：**`fstat-no` 榜上混着死代码**。
+   * ⇒ 已登记地图 **§3-8 第 21 行**，**不写"为了让它变绿"的测试**（那是把"从不发生"固化成"期望形态"）。
+   *
+   * 本用例只钉**一件确定的事**：live 复用路径下 `createSkiffAgent` 的返回**不含 `dispose`**
+   * （即"调用方若想 dispose，必须经 `ref.handle.dispose`"这一事实）。**这是契约记录，不是行为验收。**
+   */
+  it('🔴 记录：live 复用路径的返回形状（dispose 不在外层，只在内层 handle）—— ⑤ 第 39 件的发现', async () => {
+    const ctx = fakeResumeCtx('live')
+    const ref = await createSkiffAgent(ctx as never, dir, 'qa', { msms: ['x'] }, undefined, 'skiff-weixin-live-1')
+
+    // 正控：确认走的是 live 复用路径
+    expect(ref.resumed).toBe(true)
+    expect(ctx.calls).toEqual([])
+
+    // 事实一：外层返回**没有** dispose（SkiffAgentRef = { handle, agent, sessionId, resumed }）
+    expect((ref as { dispose?: unknown }).dispose).toBeUndefined()
+    // 事实二：内层 handle 带着它（liveReuseRef 造的 `dispose: async () => {}` 在这里）
+    expect(typeof (ref.handle as { dispose?: unknown }).dispose).toBe('function')
+    // 事实三：**它可被调用且不抛**（空操作是安全的）—— 这条是唯一真正验收了那个箭头的断言
+    await expect((ref.handle as { dispose: () => Promise<void> }).dispose()).resolves.toBeUndefined()
+    // 事实四：调用它**不拆掉 live agent**（"不能拆"那句注释的机械判据）
+    expect(ref.agent).toBeTruthy()
+
+    unregisterSkiffSession(ref.sessionId)
+  })
+
   it('resume 其他错误（非 not-found）→ 也降级 create + 打堆栈（用户拍板：不静默不唤醒）', async () => {
     const spy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const ctx = fakeResumeCtx('not-found')
