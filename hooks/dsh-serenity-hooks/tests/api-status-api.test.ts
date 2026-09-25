@@ -25,10 +25,11 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { createServer, request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
-import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { IMAGE_UPLOAD_DIR, registerStatusApi } from '../src/api.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => unknown
 
@@ -108,16 +109,30 @@ const UI_HEADERS = { 'content-type': 'application/json', 'x-serenity-ui': '1' }
 
 let ccc: string
 let plain: string
+let cfgDir: string
+let prevCfgEnv: string | undefined
 
 beforeEach(() => {
   ccc = mkdtempSync(join(tmpdir(), 'hooks-api-ccc-'))
   writeFileSync(join(ccc, '.serenity'), 'test')
   plain = mkdtempSync(join(tmpdir(), 'hooks-api-plain-')) // 无 .serenity ⇒ cccRootForCwd 解析不到
+  // 🔴 环境隔离（两条，都是"绝不碰真实环境"）：
+  //   ① `SERENITY_HOOKS_CONFIG` → 临时文件：`/serenity/config` 的 PUT 与 public-ask 的 key
+  //      轮换都会**写全局配置**（`globalConfigPath()` 认这个 env）⇒ 不隔离就会改到真机配置。
+  //   ② simple settings 源：`readSimpleSettings()` 需要宿主 settings 源，测试里注入默认值。
+  prevCfgEnv = process.env.SERENITY_HOOKS_CONFIG
+  cfgDir = mkdtempSync(join(tmpdir(), 'hooks-api-cfg-'))
+  process.env.SERENITY_HOOKS_CONFIG = join(cfgDir, 'serenity-hooks.json')
+  __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings() }))
 })
 
 afterEach(() => {
+  __setSimpleSourceForTest(null)
+  if (prevCfgEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
+  else process.env.SERENITY_HOOKS_CONFIG = prevCfgEnv
   rmSync(ccc, { recursive: true, force: true })
   rmSync(plain, { recursive: true, force: true })
+  rmSync(cfgDir, { recursive: true, force: true })
 })
 
 describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
@@ -328,6 +343,172 @@ describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
       const res = await raw({ port: api.port, method: 'GET', path: '/api/whatever' })
       expect(res.status).toBe(404)
       expect(res.body).toBe('no such route')
+    } finally {
+      await api.close()
+    }
+  })
+})
+
+/**
+ * 其余四条路由的验收（2026-09-25 · ⑤ 第 9 件）：`config` ／ `cccs` ／ `public-ask` ／ `weixin`
+ * ／ `session-cleanup`（第 8 件只覆盖了 status/handymen/两个 upload ⇒ 本组把这块 HTTP 面补齐）。
+ * 🔴 两条纪律：① **写操作只落临时全局配置**（`SERENITY_HOOKS_CONFIG` 已隔离，见 beforeEach）；
+ * ② **破坏性动作不做** —— `session-cleanup` 只验 **GET 的 dryRun 预览**（POST 会真删会话，不测）。
+ */
+describe('src/api.ts：其余路由（config ／ cccs ／ public-ask ／ weixin ／ session-cleanup）', () => {
+  it('/serenity/config：无 WebUI 头 ⇒ 403；带头 GET ⇒ 200（wire 形态 ＋ knownWorkspaces）', async () => {
+    const api = await bootApi()
+    try {
+      const denied = await raw({ port: api.port, method: 'GET', path: '/serenity/config' })
+      expect(denied.status).toBe(403)
+      expect(JSON.parse(denied.body)).toEqual({ error: '高级设定仅限 WebUI（client 专用）' })
+
+      const ok = await raw({ port: api.port, method: 'GET', path: '/serenity/config', headers: { 'x-serenity-ui': '1' } })
+      expect(ok.status).toBe(200)
+      const body = JSON.parse(ok.body) as { config?: unknown; knownWorkspaces?: unknown }
+      expect(body.config).toBeTypeOf('object')
+      expect(Array.isArray(body.knownWorkspaces)).toBe(true)
+
+      const wrong = await raw({ port: api.port, method: 'DELETE', path: '/serenity/config', headers: { 'x-serenity-ui': '1' } })
+      expect(wrong.status).toBe(405)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 /serenity/config PUT：**真写进临时全局配置**，且明文口令既不上 wire 也不落盘', async () => {
+    const api = await bootApi()
+    try {
+      const SECRET = 'S3cret-pw-value'
+      const res = await raw({
+        port: api.port,
+        method: 'PUT',
+        path: '/serenity/config',
+        headers: UI_HEADERS,
+        body: JSON.stringify({ config: { gateway: { accounts: [{ id: 'a1', user: 'tester', pass: SECRET }] } } }),
+      })
+      expect(res.status).toBe(200)
+      const wire = JSON.parse(res.body) as { config: { gateway: { accounts?: Array<Record<string, unknown>> } } }
+      // ① 回包是 wire 形态：账号只回元信息（**口令不回**）
+      expect(res.body).not.toContain(SECRET)
+      expect(wire.config.gateway.accounts?.[0]).toMatchObject({ id: 'a1', user: 'tester', hasPassword: true })
+
+      // ② 端到端：文件**真的**写到了隔离路径上（并且口令是 hash，不是明文）
+      const onDisk = readFileSync(process.env.SERENITY_HOOKS_CONFIG!, 'utf-8')
+      expect(onDisk).toContain('tester')
+      expect(onDisk).not.toContain(SECRET)
+      expect(onDisk.toLowerCase()).toContain('hash')
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('/serenity/cccs：GET ⇒ 200（候选容器数组）；POST ⇒ 405', async () => {
+    const api = await bootApi()
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/cccs?workspace=${encodeURIComponent(ccc)}` })
+      expect(res.status).toBe(200)
+      expect(Array.isArray((JSON.parse(res.body) as { cccs: unknown }).cccs)).toBe(true)
+
+      const wrong = await raw({ port: api.port, method: 'POST', path: '/serenity/cccs' })
+      expect(wrong.status).toBe(405)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 /serenity/public-ask：无头 ⇒ 403；GET ⇒ 200；rotate **真换 key**（旧 key 立即失效）；非法 action ⇒ 400', async () => {
+    const api = await bootApi()
+    try {
+      const denied = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask' })
+      expect(denied.status).toBe(403)
+      expect(JSON.parse(denied.body)).toEqual({ error: '仅限 WebUI（key 属敏感凭据）' })
+
+      const before = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
+      expect(before.status).toBe(200)
+      const b = JSON.parse(before.body) as { key: string; urls: unknown[]; listUrl: string }
+      expect(b.key).not.toBe('')
+      expect(Array.isArray(b.urls)).toBe(true)
+      expect(b.listUrl).toContain('/')
+
+      const rotated = await raw({
+        port: api.port,
+        method: 'PUT',
+        path: '/serenity/public-ask',
+        headers: UI_HEADERS,
+        body: JSON.stringify({ action: 'rotate' }),
+      })
+      expect(rotated.status).toBe(200)
+      const newKey = (JSON.parse(rotated.body) as { key: string }).key
+      expect(newKey).not.toBe('')
+      expect(newKey, 'rotate 必须换成**新** key（旧 key 立即失效）').not.toBe(b.key)
+
+      // 再 GET 一次：盘上生效的是新 key（不是内存态幻觉）
+      const after = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
+      expect((JSON.parse(after.body) as { key: string }).key).toBe(newKey)
+
+      const bad = await raw({
+        port: api.port,
+        method: 'PUT',
+        path: '/serenity/public-ask',
+        headers: UI_HEADERS,
+        body: JSON.stringify({ action: 'nope' }),
+      })
+      expect(bad.status).toBe(400)
+      expect(JSON.parse(bad.body)).toEqual({ error: 'unsupported action (expected "rotate")' })
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('/serenity/weixin：无头 ⇒ 403；缺 ccc ⇒ 400；非 CCC 目录 ⇒ 400；真 CCC ⇒ 200（脱敏形态）', async () => {
+    const api = await bootApi()
+    try {
+      const denied = await raw({ port: api.port, method: 'GET', path: '/serenity/weixin' })
+      expect(denied.status).toBe(403)
+      expect(JSON.parse(denied.body)).toEqual({ error: '微信桥配置仅限 WebUI（client 专用）' })
+
+      const missing = await raw({ port: api.port, method: 'GET', path: '/serenity/weixin', headers: { 'x-serenity-ui': '1' } })
+      expect(missing.status).toBe(400)
+      expect(JSON.parse(missing.body)).toEqual({ error: 'missing ccc param' })
+
+      const notCcc = await raw({
+        port: api.port,
+        method: 'GET',
+        path: `/serenity/weixin?ccc=${encodeURIComponent(plain)}`,
+        headers: { 'x-serenity-ui': '1' },
+      })
+      expect(notCcc.status).toBe(400)
+      expect(String((JSON.parse(notCcc.body) as { error: string }).error)).toContain('no CCC found from:')
+
+      const ok = await raw({
+        port: api.port,
+        method: 'GET',
+        path: `/serenity/weixin?ccc=${encodeURIComponent(ccc)}`,
+        headers: { 'x-serenity-ui': '1' },
+      })
+      expect(ok.status).toBe(200)
+      const body = JSON.parse(ok.body) as Record<string, unknown>
+      expect(body.enabled).toBe(false) // 空 CCC ⇒ 未启用
+      expect(body.accounts).toEqual([])
+      // 🔴 脱敏不变量：**token 永不落 wire**（面板只回元信息）
+      expect(JSON.stringify(body)).not.toContain('token')
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 /serenity/session-cleanup GET：dryRun 预览（只读；POST 会真删会话 ⇒ 本轮**不测**）', async () => {
+    const api = await bootApi()
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: '/serenity/session-cleanup?olderThanDays=30' })
+      expect(res.status).toBe(200)
+      const body = JSON.parse(res.body) as { dryRun: boolean; count: number; candidates: unknown[]; olderThanDays: number }
+      expect(body.dryRun).toBe(true) // 🔴 预览语义：GET 绝不删
+      expect(body.olderThanDays).toBe(30)
+      expect(typeof body.count).toBe('number')
+      expect(Array.isArray(body.candidates)).toBe(true)
+      expect(body.candidates.length).toBe(body.count)
     } finally {
       await api.close()
     }
