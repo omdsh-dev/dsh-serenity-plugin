@@ -62,6 +62,8 @@ COPY verify.sh     /usr/local/bin/verify.sh
 COPY v8-client-check.mjs /usr/local/bin/v8-client-check.mjs
 # V8b 探针（设置面板的**渲染面**证据：容器内 headless chromium 真渲染一次；Node 脚本，verify.sh 调它）
 COPY v8b-browser-check.mjs /usr/local/bin/v8b-browser-check.mjs
+# V8c 探针（**元素级**证据：容器内起 chromium＋CDP，点开设置面板后 querySelector 断言我方 UI）
+COPY v8c-cdp-panel-check.mjs /usr/local/bin/v8c-cdp-panel-check.mjs
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh
 
 WORKDIR /ccc

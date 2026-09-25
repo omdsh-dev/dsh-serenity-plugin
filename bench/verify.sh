@@ -192,6 +192,23 @@ else
   check V8b "真浏览器面（页面真渲染 ＋ 我方客户端模块真被浏览器请求）" 1 "探针不在（`vpush` 未推 v8b-browser-check.mjs）"
 fi
 
+# ── V8c 🆕 设置面板的**元素级**证据（容器内 CDP：真点开设置页，querySelector 断言）──
+# 判据阶梯最后一档：V8 交付层 → V8b 真浏览器层（模块真被请求）→ **V8c 元素级**（真的渲染出我们的 section）。
+# 🔴 唯一能抓住 A19 那类"页消失了但日志零报错"的判据。
+if [ -f /usr/local/bin/v8c-cdp-panel-check.mjs ]; then
+  if command -v chromium >/dev/null 2>&1; then
+    v8cout=$(node /usr/local/bin/v8c-cdp-panel-check.mjs 2>&1)
+    v8cok=$?
+    v8cdetail=$(printf '%s' "$v8cout" | grep -c '^PASS' | tr -d '\n')
+    check V8c "设置面板元素级渲染（容器内 CDP 点开设置，querySelector 命中我方 UI）" "$v8cok" "PASS ${v8cdetail:-0} 项；$(printf '%s' "$v8cout" | grep -m1 '^FAIL' || echo '无 FAIL 行')"
+    if [ "$v8cok" != "0" ]; then printf '%s\n' "$v8cout" | sed 's/^/      /'; fi
+  else
+    check V8c "设置面板元素级渲染（容器内 CDP 点开设置，querySelector 命中我方 UI）" 1 "读数器缺失：镜像里没有 chromium（重建镜像）"
+  fi
+else
+  check V8c "设置面板元素级渲染（容器内 CDP 点开设置，querySelector 命中我方 UI）" 1 "探针不在（`vpush` 未推 v8c-cdp-panel-check.mjs）"
+fi
+
 # ── V9 🔴 「真实轮次成功」—— 第 ⑥ 项要的**功能可用**判据（本判据此前**不存在**）──
 # 为什么必须新增（R↓）：V5/V7b 只判「缝被走到」，它们在**没有任何模型凭据**的容器里照样能绿
 #   ⇒ 旧判据集**结构性无法回答** owner 的问题（"装完能不能真的用"）。2026-09-25 之前容器里

@@ -523,14 +523,16 @@
 | `bench/Dockerfile` | 常驻干净镜像：**真宿主 ＋ 本插件** | `node:22-bookworm-slim`；`npm i -g @deepseek-ai/dsh@${DSH_VERSION}`（ARG 默认 **0.1.7-rc.1**）＋ `pnpm`；apt 装 `zstd`（V5 读数器）/`tini`；`ENV DSH_HOME=/root/.dsh`；`mkdir /logs /ccc && touch /ccc/.serenity`；`ENTRYPOINT tini -- entrypoint.sh`；`EXPOSE 3080` | **无任何模型凭据注入**；不发布端口；插件安装刻意放在启动期（同一镜像三用） |
 | 🆕 `bench/profile-patch.yml` | **把容器的默认模型指向"我们真有凭据的那个"**（键 A 路由 ＋ 键 B 默认模型，§2.9 第 4 行） | 两段 `- id:` 条目（`llm-pi-ai` 路由 `minimax-bench` ＋ `agent-default-model ⇒ minimax-bench/MiniMax-M3`）；**刻意不含任何密钥** —— 路由只写 `apiKeyEnv: MINIMAX_BENCH_API_KEY` | ⚠️ **patch 语义 = 按 id 整体替换（不深合并）** ⇒ 每条要写全字段；baseURL 形状抄自本机真实 patch（**本机那一份用的是内联 `apiKey`** ⇒ 容器里刻意改用 `apiKeyEnv`） |
 | `bench/entrypoint.sh` | 落 profile patch → 装插件 → 起宿主 → 保活 | 落（步 0c，**起宿主之前**）：把 `$PROFILE_PATCH`（= 挂进来的 `/ccc/profile-patch.yml`）`cp` 到 `/root/.dsh/profiles/web/cordis.patch.yml`，并 `sha256sum` 落 `/logs/profile-patch.sha256`（**V9d 读数源**）｜装：`dsh plugin --profile web add "link:$PLUGIN_LINK"`（优先，需目录存在）／否则 `add "$PLUGIN_SPEC" --registry "$NPM_REGISTRY"`（可为容器内 `.tgz`）｜起：先 `: > /logs/dsh-web.log` 清结果文件，再 `nohup dsh web > /logs/dsh-web.log 2>&1 < /dev/null &`｜保活 `sleep infinity`；**单步失败永不 exit** | 🔴 **本文件不碰密钥值** —— patch 里只有 `apiKeyEnv: MINIMAX_BENCH_API_KEY`（**一个名字**），真值由 `docker run -e` 在**运行期**注入（约束文档 §5.4-5）；patch 落地依赖 `$PROFILE_PATCH` 由 `up` 传入（未传 ⇒ 只记一行日志、默认模型仍是镜像内的） |
-| `bench/verify.sh` | 容器内**只读**验收 **20 条** ＋ 落 `/logs/verify.json` | grep / curl / sha256 / `zstd -dc`（逐条见下） | V0 依赖 `vpush`；V5/V5b/V7b/**V9 家族** 依赖 `turn`；**V8b** 依赖容器内 chromium（镜像层，见 §2.8c） |
+| `bench/verify.sh` | 容器内**只读**验收 **21 条** ＋ 落 `/logs/verify.json` | grep / curl / sha256 / `zstd -dc`（逐条见下） | V0 依赖 `vpush`；V5/V5b/V7b/**V9 家族** 依赖 `turn`；**V8b/V8c** 依赖容器内 chromium（镜像层，见 §2.8c/§2.8d） |
 | `bench/v8-client-check.mjs` | V8 客户端交付层探针 | 读 profile 里的 `lib/client.js` ＋ `package.json#dsh.client`，再 `fetch http://127.0.0.1:3080/` | **非真浏览器证据**（作者自述边界） |
+| 🆕 `bench/v8b-browser-check.mjs` | V8b **真浏览器面**探针（页面真渲染 ＋ 我方模块真被请求 ＋ 零致命 JS 错误 ＋ 截图） | 容器内 headless chromium `--dump-dom` / `--log-net-log` / `--screenshot`（**禁用 `--virtual-time-budget`**，见 §2.8c） | 镜像含 chromium；宿主已起 |
+| 🆕 `bench/v8c-cdp-panel-check.mjs` | V8c **元素级**探针（真点开设置面板 → 我方 section 导航行 → 点它 → `.ss-title` 是 HTML 元素） | 容器内 chromium `--remote-debugging-port` ＋ Node 内建 `WebSocket` 说 CDP；**真输入**（`Input.dispatchMouseEvent`）＋ 命中测试（`elementFromPoint`） | 镜像含 chromium；**每轮唯一 CDP 端口 ＋ 唯一 profile**（否则会连到上一轮遗留实例，见 §2.8d） |
 | CCC 侧驱动 `bench-docker`（MSM） | 远端 Docker 全生命周期 | `setsid -w ssh` ＋ `SSH_ASKPASS`；后台脱离 ＋ `*.done`/`*.code` 标记轮询；base64 分块过桥 ＋ sha256 自证；子命令 `probe/sync/build/up/wait/logs/verify/**secretcheck**/vpush/sh/clogs/turn/down/list` | 🔴 **`cmdUp` 已改**：推 patch（`PROFILE_PATCH_REMOTE` → 挂 `/ccc/profile-patch.yml:ro`）＋ `-e PROFILE_PATCH` ＋ **裸 `-e MINIMAX_BENCH_API_KEY`**（docker 语义：不给值 ⇒ 从 CLI 环境取）；🔴 **密钥只走 launch 环境前缀，不写 payload 文件**（旧写法会把密钥**留在远端盘上**）＋ payload 首行**正控**断言该变量非空。⚠️ 仍存：`cmdTurn` 请求体**不带 model**（宿主不从请求读模型） |
 
 **容器内生命周期与落点**：步 0 `dsh --version` → `/logs/host-version.txt`（V1 读数源）｜步 0c 落 profile patch → `/logs/profile-patch.sha256`（**V9d 读数源**）｜步 1 装插件 → `/logs/plugin-install.log`（V2b 读数源）｜步 2 起宿主 → `/logs/dsh-web.log` ＋ `/logs/dsh-web.pid`｜步 3 `sleep infinity`。
 **路径**：`DSH_HOME=/root/.dsh` ⇒ profile = `/root/.dsh/profiles/web/`（**宿主设置文档 = `/root/.dsh/profiles/web/cordis.patch.yml`**）；会话日志 = `/root/.dsh/sessions/**/session.v*.jsonl.zstd`；CCC 根 = `/ccc`（含 `.serenity`）。
 
-**判据清单（V0~V9b 共 20 条）**
+**判据清单（V0~V9d 共 21 条）**
 
 | 判据 | 断言什么 | 怎么读 | 前置 |
 |---|---|---|---|
@@ -544,7 +546,7 @@
 | V7 / V7b | 我方缝在运行期真被调用 ／ 首个真实轮走到 bootstrap 缝 | `dsh-web.log` grep | V7b **必须先 `turn`** |
 | V8 | 客户端 bundle 交付 ＋ 槽位注册在场 | `node v8-client-check.mjs` | 宿主已起；探针已 `vpush` |
 | 🆕 **V8b** | **真浏览器面**：页面在真引擎里**真渲染**（DOM 已挂载）＋ 我方客户端模块**真被浏览器请求**（netlog 命中）＋ 渲染期零致命 JS 错误 | `node v8b-browser-check.mjs`（容器内 headless chromium） | 镜像含 chromium；宿主已起（`/logs/dsh-web.log` 里有 token） |
-| ⛭ **V8c（未做，已登记）** | **元素级渲染**：点开设置面板后断言我方 section 的 DOM 元素出现 | 需容器内 CDP（`--remote-debugging-port` ＋ Node 内建 WebSocket） | — |
+| 🆕 **V8c** | **元素级渲染**：真点开设置面板 ⇒ **我方 section 的导航行是元素** ⇒ 点它 ⇒ **`.ss-title` 是 HTML 元素且文本含 `Serenity`** | `node v8c-cdp-panel-check.mjs`（容器内 chromium ＋ CDP 真输入） | 镜像含 chromium；宿主已起；**每轮唯一 profile/端口**（见 §2.8d） |
 | 🆕 **V9** | **真实轮次正常收束**（`"turn/end" … "kind":"completed"`） | `zstd -dc sessions/**.jsonl.zstd` ＋ grep | **必须先 `turn`** ＋ zstd CLI |
 | 🆕 **V9b** | 该轮**用的就是我们指定的路由/模型**（`"provider":"minimax-bench"`） | 同上 | 同上 |
 | 🆕 **V9c** | 会话日志里**零**凭据错误（`MISSING_CREDENTIAL` 命中 = 0） | 同上 | 同上 |
@@ -554,6 +556,7 @@
 
 **192.168.1.4 实测状态（锚定 2026-09-25 16:1x，读数器 = `bench-docker list`）**：**新容器** `dsh-bench-r20260925-1614-4eb2` running（镜像 **`dsh-bench:0.1.7-rc.2`**，1.04 GB —— **第 ⑥ 项实测的载体**，证据见 §2.9 对账表）｜**旧容器** `dsh-bench-mb3` 仍在 running（镜像 `dsh-bench:0.1.7-rc.1`，1.08 GB，起动 **2026-09-24 02:23 +08:00**）｜两镜像并存｜远端磁盘 `/` 489G ／ 已用 360G ／ **可用 109G（77%）**。
 （**历史读数**，锚定 2026-09-25 15:31，勿当前值用）：当时只见 `dsh-bench-mb3`（重启 0 次，`ExitCode 0`，≈37h）｜`PortBindings {}`（3080 **仅 EXPOSE**，未发布）｜挂载 `/opt/dsh-bench/dist:/ccc/dist:ro`（⇒ 该容器是 **tarball 模式**起的）｜`RestartPolicy no`。
+**🔵 最新读数（锚定 2026-09-25 18:1x，读数器 = `bench-docker list`）**：**containers 段为空**（`mb3` ／ `1614-4eb2` ／ `1704-2565` ／ `1717-71ff` 已全部 `down`，见 §2.8e）｜镜像 `dsh-bench:0.1.7-rc.2`（1.71GB）在｜远端磁盘 **489G ／ 已用 363G ／ 可用 107G（78%）**。⚠️ 上述"两镜像并存"已不成立（rc.1 镜像随 mb3 一起清掉）。
 
 #### 2.8a ✅ 复用性验证（2026-09-25 17:0x，**⑥ 的后续增量之一**）
 
@@ -577,7 +580,7 @@
 - 实测：**元素级命中 0 ／ 类名文本命中 3** ⇒ 那 3 处来自**注入的 `<style>` 选择器文本** —— **组件一个都没渲染时也会命中**（判据读的是 CSS，不是 DOM 元素）。
 - 收紧为"元素形态"`class="… ss-title …"` 后**如实 FAIL**；继查"落地页无会话（截图实证 'No sessions yet'）＋ 设置页非路由可达（`/settings`、`/?view=settings`、`/#/settings`、`/` 四入口元素级命中皆 0）"⇒ **元素级渲染必须靠 CDP 交互**（点开设置面板）。
 - ⇒ 最终 V8b 改判「**页面真渲染 ＋ 我方模块真被浏览器请求**」（**严格强于 V8** 的"profile 里有文件"），并把 verify 行的标签同步改名，避免**过度声称**。
-- ⛭ **V8c（登记为后续增量）**：容器内起 chromium 带 `--remote-debugging-port` ＋ 用 Node 内建 `WebSocket` 说 CDP（参考本 CCC 的 `home-browser` skill 的零依赖实现），**点开设置面板**后断言元素级渲染 —— 那是"A19 同类缺陷的完整机械守卫"。
+- ✅ **V8c 已交付**（2026-09-25 17:4x，见 **§2.8d**）：容器内起 chromium 带 `--remote-debugging-port` ＋ Node 内建 `WebSocket` 说 CDP，**真点开设置面板**后断言元素级渲染 —— 这是"A19 同类缺陷的完整机械守卫"。
 
 🔵 **两条环境读数（同批实测，勿重复踩）**：① **`--virtual-time-budget` 会让 `--dump-dom` 永不返回**（被 60s 超时杀 ⇒ 表现为"chromium 起不来"＝**读数器失败被误读成被测对象失败**）⇒ 改用 chromium 自己的 `--timeout`；② **测试台宿主端口从本机连不上**（实测 `192.168.1.4:80` = 200、临时发布的 `:18080` **被拒**，服务器上也没有浏览器）⇒ 真浏览器取证走**容器内**最稳。
 
@@ -588,6 +591,39 @@
 **修正（CCC 侧 `bench-docker.ts` 的 `cmdDown`）**：改为在**同一次 ssh 往返**里取实时 `df -h /`（零额外开销），并把提示改成中性表述。
 **验收判据（可重跑）**：`msm("bench-docker", ["down", "<任一容器>", "--keep-image"])` 的输出必须含 `--- disk（清理后实时）` 行且数值与 `list` 一致；**不得**再出现"只剩 ~18 GB"字样。
 **实测验收**（2026-09-25 17:0x）：用一个一次性容器做探针 ⇒ 输出 `--- disk（清理后实时）` ＋ `489G 361G 108G 77% /`，随后 `docker ps -a` 复核该容器确已删除。
+
+#### 2.8d ✅ 元素级渲染面（V8c）—— 判据 20 → **21 条**（2026-09-25 17:4x）
+
+**动机**：A19（十键漏标 `.volatile()` ⇒ 设置页整块消失）**在日志上零报错**；V8 只证"bundle 送达"、V8b 只证"模块真被浏览器请求" —— **送达到 ≠ 渲染出来**。V8c 把最后一跳（"那个 section 真的出现在页面上"）机械化了。
+
+**做法**：① `bench/Dockerfile` 加 **chromium** ② 新增 **`bench/v8c-cdp-panel-check.mjs`**（真输入 CDP 点击 ＋ 元素级断言）③ `verify.sh` 接 **V8c**（读数器缺失 ⇒ FAIL 不 PASS）④ CCC 侧 `BENCH_FILES` 收录该探针。
+
+**实测读数（载体容器 `dsh-bench-r20260925-1717-71ff`，宿主 rc.2 ／ 插件 1.47.3，`PASS=21 / FAIL=0`）**：
+- **P1** 页面经 CDP 可交互（`#root` 已挂载）｜**P2** 真输入点击触发器 ⇒ **设置模态框真打开**（`[data-shortcut-modal="settings"][role=dialog]`）｜**P3 我方 section 导航行作为元素出现**（面板导航行逐字 = `General / Models / Built-in plugins / Agent presets /` **`Serenity`** `/ Open configuration file / Close / …`）｜**P4** 点我方后 **`.ss-title` 是 `HTMLElement` 且文本 = `Serenity`**，我方 class 元素 **117** 个，面板尾部逐字含「ACP ／ Skiff 问答页 ／ CRO（轨迹自编程唤起）／ 彩蛋模式 ／ 微信桥 ／ 会话清理」（与 `src/client/SettingsSection.tsx` 文案一致）。
+
+**🔴 四条根因（首版三次红/假绿，全部以宿主源码 ＋ 实测取证；后两条属"读数器自己不可信"）**：
+
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | 找不到"设置入口"（候选按钮为空） | `Settings` 只是**触发器按钮里的 `<span>`**（`TriggerContent` 只渲染 icon ＋ label span）；真正的可点元素是 `<button aria-label="Settings" aria-haspopup="dialog">` | 选**语义锚**（`aria-*`）＋ **CDP `Input.*` 真输入**点击（`isTrusted`、有 moved/pressed/released 三段） |
+| 2 | 点开设置后查 `.ss-title` 恒为 0 | 设置 UI 是 **body-portaled 模态框**，且**默认选中第一节（general）** ⇒ 我方 section 只有**点它自己的导航行**才渲染 | 判据链改为 **开面板 → 我方导航行是元素 → 点它 → `.ss-title` 是元素**（四环，逐环有读数） |
+| 3 | 真输入"点了没反应" | 落地页自带**开机提示弹窗**（"Internal Testing Notice"）的 `mask` 铺满全屏 —— 实测 `elementFromPoint(触发器中心)` = `DIV class=_mask_…` | 探针**先关掉挡路弹窗**（点它自己的按钮 ／ Escape）＋ `realClick` 内置**命中测试**（命中点不是目标就如实打印） |
+| 4 | 同一份代码**一次绿一次红**（`verify` 里红、单跑绿） | 🔴 **判据连到了上一轮遗留的浏览器上**：① `process.exit()` **不执行 `finally`** ⇒ 每轮留一个 chromium 孤儿；② chromium 对同一 `user-data-dir` 是**单例**（新实例把请求交给旧实例后自己退出）⇒ "新的一轮"其实连在**旧实例**上（页面停在上一轮交互后的状态） | **每轮唯一 profile ＋ 唯一 CDP 端口**（pid 派生）＋ 收摊挂 `process.on('exit')` ＋ 开头**清场并等旧实例真死**（`pkill -9 -f -- '--user-data-dir=/tmp/v8c-profile'` ＋ 轮询） |
+
+**另两条实测陷阱（同批踩到）**：① **`pkill` 的模式会命中自己所在的进程树** —— 写 `pkill -9 -f v8c-profile` 会把**调用它的 shell 自己**杀掉（那条命令的 cmdline 就含该子串）⇒ 整条测试命令 `exit 137`（看起来像"探针崩了"）⇒ 模式必须**带旗标**（`--user-data-dir=…`）；② **"URL 里带 token"不能当身份判据** —— 宿主会把 token 从地址栏抹掉（写进自己的存储后 `replaceState`）⇒ 该判据**恒假**，探针会一直报「CDP 端点未就绪」（像"chromium 起不来"）⇒ 身份靠**每轮唯一端口**保证，靶是谁打进读数。
+
+**稳定性验收（判据纪律"时序/端口改动 ≥5 连跑"）**：`for i in 1..5` 连跑 **5/5 全绿**（每轮 `PASS=4 FAIL=0`），**零遗留 chromium**（`ps -eo args | grep -c [c]hromium` = 0）。
+
+#### 2.8e 🔴 修正：`down` 的"已删"曾是**假成功**（读数器撒谎，已修）—— 与 §2.8b 同族，但**退出码本身也在撒谎**
+
+**事实**（2026-09-25 18:0x 实测）：`down dsh-bench-mb3`（名字多写了一层前缀，容器真名 = `dsh-bench-<run-id>`）打印 **"container removed"**，而**同一时刻** `bench-docker list` 里它**还在跑**。
+**两层根因**：① `cmdDown` 原先写 `docker rm -f <name> >/dev/null 2>&1 || true` 紧跟一句**无条件**的 `echo container removed`；② 更麻烦的是 —— **这条命令的退出码本身不可信**：远端 **Docker 29.1.3** 对**不存在的容器** `docker rm -f zzz-definitely-absent` 报 `No such container`（stderr）**却 `exit 0`**（`ssh-connect exec` 复现：`RM-RC=0`）⇒ **"按退出码判断"在这里依然会撒谎**。
+**修正（CCC 侧 `bench-docker.ts` 的 `cmdDown`）**：判据改为**读结果状态** ＋ **先判"它到底有没有"**：
+- `PRE=$(docker ps -a --filter name=^<name>$ …)` 为空 ⇒ 打印 **「container 不存在（未执行删除）」** ＋ 名字规则提示（把"名字写错"与"删失败"分开报）；
+- 否则 `docker rm` 后**再读一次 `ps -a`**：列表已无它 ⇒ `container removed（rm exit=…；ps -a 列表已无它）`；仍在 ⇒ `container NOT removed（…；ps -a 列表里仍在）`＋ 附 stderr。
+**验收（三条形态各跑一次，2026-09-25 18:1x 实测）**：① `down zzz-nope-nothing` ⇒ **「container 不存在（未执行删除）」**（修前打印"已删"）② `down mb3 --keep-image` ⇒ **真删**（`container removed … ps -a 列表已无它；image=dsh-bench:0.1.7-rc.1`，随后 `list` 复核确已消失）③ `down r20260925-1717-71ff`（已 `down` 过）⇒ **「container 不存在（未执行删除）」**。
+**同批（卫生）**：容器 `r20260925-1614-4eb2` / `r20260925-1704-2565` / `dsh-bench-mb3` / `r20260925-1717-71ff` **全部 down**（各留镜像）⇒ **锚定 2026-09-25 18:1x 实测**：`list` 的 containers 段为空、镜像 `dsh-bench:0.1.7-rc.2` 在、远端磁盘 **107G 可用（78%）**。
+⚠️ **仍存（低成本待办）**：`down --keep-image` 保留了**未打 tag 的镜像层**（`ed087861443c` ／ `c3bcebe53501`）—— 清它们需确认无 tag 指向（避免误删 `dsh-bench:0.1.7-rc.2` 的 tag）。
 
 ### 2.9 ✅ 第 ⑥ 项改动点清单（**已取证 · 2026-09-25 16:1x 已执行**）
 
@@ -663,6 +699,6 @@
 | 轨迹/会话/唤醒核心域（L1） | ✅ §2.5（＋ 依赖环 §3-6、死代码 §3-7、数据真相源 §4） |
 | 对外面与集成域（L2/L3） | ✅ §2.3（含外露面总表 §2.3.1、配置读取面 §2.3.2） |
 | `src/client/`（L4）＋ 测试面 | ✅ §2.6（客户端半）／ §2.7（测试面）／ §3-9（测试缺口） |
-| `scripts/` / `bench/`（L5） | ✅ §2.8（集成测试台 ＋ 判据清单 **V0~V9 共 19 条**）／ §2.9 ＋ **§2.9a（第 ⑥ 项 · 已执行对账）** |
+| `scripts/` / `bench/`（L5） | ✅ §2.8（集成测试台 ＋ 判据清单 **V0~V9d 共 21 条**）／ **§2.8a 复用性验证** ／ **§2.8b/§2.8e 读数器撒谎修正** ／ **§2.8c 真浏览器面（V8b）** ／ **§2.8d 元素级渲染面（V8c）** ／ §2.9 ＋ **§2.9a（第 ⑥ 项 · 已执行对账）** |
 
 ⇒ **六域全部到齐**（2026-09-25）。本文件自此为**完整的现况地图**；后续按 §6.2 与新增/删除同批维护。
