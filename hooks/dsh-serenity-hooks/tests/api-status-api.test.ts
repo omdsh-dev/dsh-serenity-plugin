@@ -638,3 +638,109 @@ describe('src/api.ts：session-cleanup 的 POST（隔离 DSH_HOME 下的真删�
     }
   })
 })
+
+/**
+ * weixin 的三个**写动作**（2026-09-25 · ⑤ 第 11 件）：`save-routes` ／ `set-enabled` ／ `remove-account`
+ * —— 它们都只写 **CCC 自己的 `serenity.json`**（`.opencode/serenity.json`）⇒ 临时 CCC 夹具即可。
+ *
+ * 🔴 **刻意不测 `login-start` 与"带账号的 enable"**（诚实边界）：前者 `fetchQRCode()` 要**真连微信后端**、
+ * 后者 `syncCccBridge()` 会**真起轮询循环**（`runAccountLoop`）⇒ 同"外向动作先隔离作用域"的判据：
+ * **当前没有假微信后端**，贸然测就是把测试接到真网络上。它们的夹具设计留作后续。
+ */
+describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => {
+  function writeCccConfig(cfg: unknown): void {
+    mkdirSync(join(ccc, '.opencode'), { recursive: true })
+    writeFileSync(join(ccc, '.opencode', 'serenity.json'), JSON.stringify(cfg, null, 2))
+  }
+  function readCccConfig(): { weixin?: { enabled?: boolean; routes?: Array<{ user: string; role: string }> } } {
+    return JSON.parse(readFileSync(join(ccc, '.opencode', 'serenity.json'), 'utf-8')) as never
+  }
+  async function postWeixin(port: number, body: Record<string, unknown>): Promise<RawRes> {
+    return raw({ port, method: 'POST', path: '/serenity/weixin', headers: UI_HEADERS, body: JSON.stringify({ ccc, ...body }) })
+  }
+
+  it('save-routes：形状不合 ⇒ 400（非数组 ／ 空 user ／ 空 role）；**省略 routes = 清空表**（整体替换语义）', async () => {
+    writeCccConfig({ skiff: { roles: { qa: { prompt: 'x' } } } })
+    const api = await bootApi()
+    try {
+      for (const bad of [{ routes: 'nope' }, { routes: [{ user: '', role: 'qa' }] }, { routes: [{ user: 'u', role: '' }] }]) {
+        const res = await postWeixin(api.port, { action: 'save-routes', ...bad })
+        expect(res.status, JSON.stringify(bad)).toBe(400)
+        expect(JSON.parse(res.body)).toEqual({ error: 'invalid routes (expected [{user, role}, ...])' })
+      }
+
+      // 先存一条，再用"省略 routes"把它清掉 —— 钉住「整体替换」语义
+      // （首跑时我把它当成"非法输入"，实测是 200：`body.routes ?? []`）
+      await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', role: 'qa' }] })
+      expect(readCccConfig().weixin?.routes).toEqual([{ user: 'u1', role: 'qa' }])
+      const cleared = await postWeixin(api.port, { action: 'save-routes' })
+      expect(cleared.status).toBe(200)
+      expect(JSON.parse(cleared.body)).toEqual({ saved: 0 })
+      expect(readCccConfig().weixin?.routes).toEqual([])
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('🔴 save-routes：角色必须 ∈ 该 CCC 的 `skiff.roles`；合法时**真写进 CCC 配置**', async () => {
+    writeCccConfig({}) // 未配置 skiff.roles
+    const api = await bootApi()
+    try {
+      const denied = await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', role: 'qa' }] })
+      expect(denied.status).toBe(400)
+      expect(String((JSON.parse(denied.body) as { error: string }).error)).toContain('unknown role: qa')
+      // 负控：被拒的写入**没落盘**
+      expect(readCccConfig().weixin?.routes).toBeUndefined()
+    } finally {
+      await api.close()
+    }
+
+    // 配上角色后同一个请求应当成功（同一夹具、只改配置）
+    writeCccConfig({ skiff: { roles: { qa: { prompt: '你是质检' } } } })
+    const api2 = await bootApi()
+    try {
+      const ok = await postWeixin(api2.port, { action: 'save-routes', routes: [{ user: 'u1', role: 'qa' }] })
+      expect(ok.status).toBe(200)
+      expect(JSON.parse(ok.body)).toEqual({ saved: 1 })
+      // 🔴 端到端：配置**真落盘**（不是只在内存里）
+      expect(readCccConfig().weixin?.routes).toEqual([{ user: 'u1', role: 'qa' }])
+    } finally {
+      await api2.close()
+    }
+  })
+
+  it('🔴 set-enabled：无账号时 enable ⇒ 400（提示先绑定）且**配置未改**；disable ⇒ 200 且真写入', async () => {
+    writeCccConfig({ weixin: { enabled: true } })
+    const api = await bootApi()
+    try {
+      const enable = await postWeixin(api.port, { action: 'set-enabled', enabled: true })
+      expect(enable.status).toBe(400)
+      expect(JSON.parse(enable.body)).toEqual({ error: '启用前请先扫码绑定至少一个账号' })
+      // 负控：被拒时**配置保持原样**（原值就是 true —— 证明它没被"顺手改成 false"）
+      expect(readCccConfig().weixin?.enabled).toBe(true)
+
+      const disable = await postWeixin(api.port, { action: 'set-enabled', enabled: false })
+      expect(disable.status).toBe(200)
+      expect(JSON.parse(disable.body)).toEqual({ enabled: false })
+      expect(readCccConfig().weixin?.enabled).toBe(false)
+    } finally {
+      await api.close()
+    }
+  })
+
+  it('remove-account：缺 accountId ⇒ 400；未知 action ⇒ 400（都不落盘）', async () => {
+    writeCccConfig({})
+    const api = await bootApi()
+    try {
+      const missing = await postWeixin(api.port, { action: 'remove-account' })
+      expect(missing.status).toBe(400)
+      expect(JSON.parse(missing.body)).toEqual({ error: 'missing accountId' })
+
+      const unknown = await postWeixin(api.port, { action: 'nope' })
+      expect(unknown.status).toBe(400)
+      expect(JSON.parse(unknown.body)).toEqual({ error: 'unsupported action: nope' })
+    } finally {
+      await api.close()
+    }
+  })
+})
