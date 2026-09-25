@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildRoundPrompt, handymanProgressPaths, HANDYMAN_GUIDE, listActiveHandymen, newStopToken, providerAvailabilityError, readProgress, requireWhitelistedModel, sanitizeLabel, splitModel, writeProgress } from '../src/handyman-ops.js'
+import { buildRoundPrompt, handymanProgressPaths, HANDYMAN_GUIDE, listActiveHandymen, newStopToken, providerAvailabilityError, readProgress, requireWhitelistedModel, sanitizeLabel, splitModel, writeFailedStatus, writeProgress } from '../src/handyman-ops.js'
 
 let dir: string
 
@@ -31,6 +31,69 @@ describe('handyman-ops: 进度读写（续跑）', () => {
 
   it('无进度返回 null', () => {
     expect(readProgress(dir, 'nope')).toBeNull()
+  })
+})
+
+/**
+ * writeFailedStatus（⑤ 第 40 件，S142 2026-09-25）—— 本模块最后一个未执行函数。
+ *
+ * 可达性取证：**有活调用点** = `src/tools/handyman.ts` 保险阀终止分支
+ * （`finishReason !== 'done'` ⇒ `max_rounds` ／ `restart_exceeded`），非死代码。
+ * 残余性质 = **失败面**（不是防御性 `??`）⇒ 属挑靶四条里最值钱的一档。
+ */
+describe('handyman-ops: 失败状态落盘（writeFailedStatus，对齐 osp）', () => {
+  it('无既有进度 ⇒ 用文档化默认值落盘：done=true / status=failed / round 0', () => {
+    writeFailedStatus(dir, 'boom', { errorCode: 'max_rounds', errorMessage: 'Reached 100 rounds' })
+    const { json } = handymanProgressPaths(dir, 'boom')
+    expect(existsSync(json)).toBe(true)
+    const raw = JSON.parse(readFileSync(json, 'utf-8'))
+    expect(raw.status).toBe('failed')
+    // 失败即终态：`done=true` 让续跑者一眼看出"别再等它了"（对齐 osp writeFailedStatus）
+    expect(raw.done).toBe(true)
+    expect(raw.errorCode).toBe('max_rounds')
+    expect(raw.errorMessage).toBe('Reached 100 rounds')
+    // 无既有进度时的文档化兜底（不是抛错、也不是 undefined）
+    expect(raw.round).toBe(0)
+    expect(raw.model).toBe('')
+    expect(raw.lastResponse).toBe('')
+    expect(raw.label).toBe('boom')
+    expect(typeof raw.updated).toBe('string')
+  })
+
+  it('有既有进度 ⇒ 保留 round / model / lastResponse（只覆盖状态面，不抹掉历史）', () => {
+    writeProgress(dir, 'keep', {
+      round: 7,
+      done: false,
+      label: 'keep',
+      model: 'minimax-cn-coding-plan/MiniMax-M3',
+      updated: 't',
+      lastResponse: '已处理 7 轮，剩 X',
+    })
+    writeFailedStatus(dir, 'keep', { errorCode: 'restart_exceeded' })
+    const p = readProgress(dir, 'keep')!
+    // 历史读数必须留存 —— 否则"失败"会把"做到哪了"一起抹掉，后续续跑失去依据
+    expect(p.round).toBe(7)
+    expect(p.model).toBe('minimax-cn-coding-plan/MiniMax-M3')
+    expect(p.lastResponse).toContain('剩 X')
+    // 状态面被失败覆盖
+    expect(p.status).toBe('failed')
+    expect(p.done).toBe(true)
+    expect(p.errorCode).toBe('restart_exceeded')
+    // errorMessage 可选：不给就是 undefined（不是空串占位）
+    expect(p.errorMessage).toBeUndefined()
+  })
+
+  it('目录不存在也能落盘（mkdirSync recursive）；label 走脱敏', () => {
+    const fresh = mkdtempSync(join(tmpdir(), 'handyman-fresh-'))
+    rmSync(join(fresh, 'AGENT_SESSIONS'), { recursive: true, force: true })
+    try {
+      writeFailedStatus(fresh, 'a:b/c', { errorCode: 'max_rounds' })
+      const { json } = handymanProgressPaths(fresh, 'a:b/c')
+      expect(json).toContain('handyman-a-b-c.json')
+      expect(JSON.parse(readFileSync(json, 'utf-8')).errorCode).toBe('max_rounds')
+    } finally {
+      rmSync(fresh, { recursive: true, force: true })
+    }
   })
 })
 

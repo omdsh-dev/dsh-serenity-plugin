@@ -30,6 +30,7 @@ import {
   newNonce,
   noteOutboundSend,
   noteUserTurn,
+  outboundSendRoots,
   parseDoneNonces,
   pruneUnattendedLogEntries,
   proxyRunSessionIds,
@@ -276,6 +277,29 @@ describe('unattended: 出站发送账本（设计 §7 可核验性）', () => {
     expect(hasOutboundSendSince('/never', 0, 1)).toBe(false)
     noteOutboundSend('')
     expect(hasOutboundSendSince('', 0, 1)).toBe(false)
+  })
+
+  /**
+   * `outboundSendRoots`（⑤ 第 42 件，S142 2026-09-25）—— 该账本**唯一的读面**。
+   *
+   * 可达性：**导出且无调用点** —— 自述用途 = 「诊断 / 测试用」⇒ 属**活契约占位**那一档
+   * （不是死代码、也不是防御性 `??`）。🔵 与 `today` 的处置不同：`today` 零调用 ∧ 无用途声明
+   * ⇒ 判死代码；本例**有文档化用途**（诊断面）⇒ **钉住它，不删**（删它 = 拆掉诊断能力）。
+   * 🔴 纪律对照：`fstat-no` 里混着三种性质 ⇒ 先问「它有没有调用点 / 有没有用途声明」再定处置。
+   */
+  it('outboundSendRoots：报出有记录的 CCC（诊断面）；空根不入表', () => {
+    const before = outboundSendRoots()
+    noteOutboundSend('/diag-a', 1_000)
+    noteOutboundSend('/diag-b', 2_000)
+    const after = outboundSendRoots()
+    expect(after).toContain('/diag-a')
+    expect(after).toContain('/diag-b')
+    // 空根被 `noteOutboundSend` 前置拦掉 ⇒ 永不入表（与 hasOutboundSendSince 的空根分支同口径）
+    noteOutboundSend('', 3_000)
+    expect(outboundSendRoots()).not.toContain('')
+    // 只增不减：本函数是**只读**视图（清理归写入侧裁剪），调用它不得改变表大小
+    expect(outboundSendRoots()).toHaveLength(after.length)
+    expect(after.length).toBeGreaterThanOrEqual(before.length)
   })
 })
 

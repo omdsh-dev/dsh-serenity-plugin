@@ -11,6 +11,12 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
+// 🔴 域名分支的替身（⑤ 第 41 件）：`src/web-fetch-provider.ts` 从 `node:dns/promises` import `lookup`。
+// 必须在 import 被测模块之前声明（vi.mock 提升），否则拿到的是真解析器 ⇒ 用例依赖外网。
+// ⚠️ 这是**模块级** mock：本文件既有用例全走 IP 字面量（不触发 `lookup`），故不受影响。
+const lookupMock = vi.hoisted(() => vi.fn())
+vi.mock('node:dns/promises', () => ({ lookup: lookupMock }))
+
 // 宿主 peer 包在测试环境不可解析（与现有测试 mock @deepseek-ai/dsh-tools 同因）——
 // 这里替身只需满足本模块用到的三个导出形状。
 vi.mock('@deepseek-ai/dsh-web-fetch-http', () => ({
@@ -108,6 +114,110 @@ describe('v1.30.12 web fetch 地址判据', () => {
       code: 'WEB_BLOCKED_URL',
     })
     await expect(resolveAllowedAddresses('127.0.0.1', new AbortController().signal)).rejects.toThrow(/non-public/)
+  })
+})
+
+/**
+ * 🔴 域名解析分支（`lookupAll`）—— ⑤ 第 41 件，S142 2026-09-25。
+ *
+ * **为何此前零执行**：本文件所有既有 resolver 用例都传 **IP 字面量**
+ * （`1.1.1.1` / `[2606:4700::1111]` / `198.18.1.85` / `192.168.1.4` / `127.0.0.1`）
+ * ⇒ `resolveAllowedAddresses` 里 `isIP(bare) !== 0` ⇒ **直接走 else，从不进 `lookupAll`**。
+ * 这是本仓唯一**同时带 `fstat-no` 与 `cstat-no`** 的残余（其余残余只带 `fstat-no`）。
+ *
+ * **可达性（先取证再动手）**：`lookupAll` 由 `resolveAllowedAddresses` 在
+ * 「非 IP 字面量」时无条件调用 —— 而这**正是生产里最常见的形态**（`web_fetch` 传的是域名，
+ * 不是 IP）。⇒ 不是死代码、不是防御性 `??`，是**主路径**；此前只是没被测试走到。
+ * **残余的性质** = 真 DNS 路径（挑靶四条里最值钱一档）。
+ */
+describe('v1.30.12 resolver 域名分支（lookupAll：本模块唯一带 cstat-no 的残余）', () => {
+  it('域名 ⇒ 走 lookup；解析结果原样映射为 {address, family}', async () => {
+    lookupMock.mockResolvedValueOnce([
+      { address: '104.16.0.1', family: 4 },
+      { address: '2606:4700::1111', family: 6 },
+    ])
+    await expect(resolveAllowedAddresses('example.com', new AbortController().signal)).resolves.toEqual([
+      { address: '104.16.0.1', family: 4 },
+      { address: '2606:4700::1111', family: 6 },
+    ])
+    // 取证「真调了谁」：非字面量的 hostname 才进 lookup，且不带方括号
+    expect(lookupMock).toHaveBeenCalledWith('example.com', { all: true, order: 'verbatim' })
+  })
+
+  it('域名解析到私网 ⇒ 仍被拒（放宽的只是 fake-ip，不是全部私网）', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '192.168.1.4', family: 4 }])
+    await expect(resolveAllowedAddresses('evil.example.com', new AbortController().signal)).rejects.toMatchObject({
+      code: 'WEB_BLOCKED_URL',
+    })
+  })
+
+  it('域名解析到 DNS 重绑定混合集（公网 + 私网）⇒ 整体拒绝，不放行任何一条', async () => {
+    lookupMock.mockResolvedValueOnce([
+      { address: '104.16.0.1', family: 4 },
+      { address: '127.0.0.1', family: 4 },
+    ])
+    await expect(resolveAllowedAddresses('rebind.example.com', new AbortController().signal)).rejects.toMatchObject({
+      code: 'WEB_BLOCKED_URL',
+    })
+  })
+
+  it('域名解析到 fake-ip 段 ⇒ 放行（本模块存在的理由）', async () => {
+    lookupMock.mockResolvedValueOnce([{ address: '198.18.1.85', family: 4 }])
+    await expect(resolveAllowedAddresses('cdn.jsdelivr.net', new AbortController().signal)).resolves.toEqual([
+      { address: '198.18.1.85', family: 4 },
+    ])
+  })
+
+  it('解析结果为空 ⇒ 报 resolved to no addresses（不静默放行）', async () => {
+    lookupMock.mockResolvedValueOnce([])
+    await expect(resolveAllowedAddresses('nowhere.example.com', new AbortController().signal)).rejects.toThrow(
+      /resolved to no addresses/,
+    )
+  })
+
+  it('调用前已 abort ⇒ 立即 WEB_ABORTED，且不发起 DNS 查询', async () => {
+    lookupMock.mockClear()
+    const ctl = new AbortController()
+    ctl.abort()
+    await expect(resolveAllowedAddresses('example.com', ctl.signal)).rejects.toMatchObject({ code: 'WEB_ABORTED' })
+    // 判据 = 「没查」而不是「查了不要」：前置 abort 必须短路，省一次 OS 查询
+    expect(lookupMock).not.toHaveBeenCalled()
+  })
+
+  it('解析期间 abort ⇒ 竞速由 abort 分支胜出（WEB_ABORTED），未被 lookup 拖住', async () => {
+    let release: ((v: Array<{ address: string; family: number }>) => void) | undefined
+    lookupMock.mockImplementationOnce(
+      () => new Promise<Array<{ address: string; family: number }>>((resolve) => { release = resolve }),
+    )
+    const ctl = new AbortController()
+    const pending = resolveAllowedAddresses('slow.example.com', ctl.signal)
+    ctl.abort()
+    await expect(pending).rejects.toMatchObject({ code: 'WEB_ABORTED' })
+    // 收尾：让未决的 lookup 落定，避免挂着的 promise 泄漏到下一条用例
+    release?.([{ address: '104.16.0.1', family: 4 }])
+  })
+
+  it('abort 后 lookup 才失败 ⇒ 不产生 unhandled rejection（finally 里的吞异常）', async () => {
+    let rejectLookup: ((e: Error) => void) | undefined
+    lookupMock.mockImplementationOnce(
+      () => new Promise<Array<{ address: string; family: number }>>((_res, rej) => { rejectLookup = rej }),
+    )
+    const unhandled: unknown[] = []
+    const onUnhandled = (e: unknown): void => { unhandled.push(e) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      const ctl = new AbortController()
+      const pending = resolveAllowedAddresses('boom.example.com', ctl.signal)
+      ctl.abort()
+      await expect(pending).rejects.toMatchObject({ code: 'WEB_ABORTED' })
+      // 🔴 本用例的靶 = `finally` 里那句 `lookupPromise.catch(() => undefined)`：
+      //    abort 胜出后 lookup 才 reject，若无该句则成为 unhandled rejection（真实故障形态注入）。
+      rejectLookup?.(new Error('ENOTFOUND boom.example.com'))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 })
 
