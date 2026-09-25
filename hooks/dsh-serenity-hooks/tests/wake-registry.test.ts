@@ -15,10 +15,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   addWake,
+  finalizeWake,
   listWakes,
   loadWakeRegistry,
   newWakeId,
   parseWakeAt,
+  purgeFinalizedWakes,
   removeWake,
   splitDueWakes,
   updateWake,
@@ -830,4 +832,211 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
     expect(existsSync(croWakeLogPath(root, DIR_NAME)), '没发生尝试就不该建空档').toBe(false)
   }, 30_000)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 🆕 2026-09-25 ⑤ 第 29 件：`wake-registry.ts` 的**读面容错 / 写面失败 / 结案清理**三面
+//
+// 挑靶依据 = **先逐行读覆盖率报告的 `cstat-no`/`cbranch-no` 判可达性**（别按 branch% 排序硬上）。
+// 🔴 本件最值钱的一处：`purgeFinalizedWakes` 的**真写盘路径从未被执行过** —— 它正是
+//    「owner 2026-09-19 裁『直接删』」把那张只增的表（实测 308 KB / 143+ 条）刹住的那条路。
+// 🔴 失败路径一律用**真实故障形态**注入（㊾）：盘上损坏的 JSON ／ 路径被占成目录 —— **不用 mock**。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 往盘上直接写一份注册表正文（构造"手改过的表""路径被占"等形态；`body` 原样落盘） */
+function writeRegistryRaw(body: string): string {
+  mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
+  writeFileSync(wakeRegistryPath(root), body, 'utf-8')
+  return wakeRegistryPath(root)
+}
+
+/** 一条形状合法的条目（直接拼 JSON —— 本块测的是**读入侧**，要能表达"手改"的各种坏形状） */
+function rawEntry(id: string, state = 'pending', extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id,
+    target: DIR_NAME,
+    at: new Date(Date.now() + HOUR).toISOString(),
+    message: `m-${id}`,
+    state,
+    createdBy: 'S142',
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+    lastResult: null,
+    deliveredAt: null,
+    ...extra,
+  }
+}
+
+describe('wake-registry: 读面容错 / 写面失败 / 结案清理（⑤ 第 29 件）', () => {
+  it('① 盘上的 JSON 损坏 ⇒ `loadWakeRegistry` 回空表 ＋ error，**不抛**', () => {
+    writeRegistryRaw('{ this is not json')
+    const r = loadWakeRegistry(root)
+    expect(r.error).toContain('唤醒注册表解析失败')
+    expect(r.registry.entries).toEqual([])
+  })
+
+  it('② 坏表之下：五个动作各自回**稳定错误**（不抛、不半改、一个字节都不许改）', () => {
+    const path = writeRegistryRaw('{ nope')
+    const before = readFileSync(path, 'utf-8')
+    expect(addWake(root, { target: DIR_NAME, at: '+1h', message: 'x', createdBy: 'S142', nowMs: Date.now() }).ok).toBe(false)
+    expect(updateWake(root, 'w-any', { state: 'delivered' }).ok).toBe(false)
+    expect(removeWake(root, 'w-any').ok).toBe(false)
+    expect(finalizeWake(root, 'w-any', 'delivered', 'x').ok).toBe(false)
+    const purged = purgeFinalizedWakes(root)
+    expect(purged.ok).toBe(false)
+    expect(purged.purged).toBe(0)
+    expect(readFileSync(path, 'utf-8'), '读不出来 ⇒ 一个字节都不许改').toBe(before)
+  })
+
+  it('③ 手改容错：`entries` 非数组 ⇒ 空表；坏条目被丢而合法条留存；未知 state 回落 pending', () => {
+    writeRegistryRaw(JSON.stringify({ version: 1, entries: 'nope' }))
+    expect(loadWakeRegistry(root).registry.entries).toEqual([])
+
+    writeRegistryRaw(
+      JSON.stringify({
+        version: 1,
+        entries: [
+          null,
+          42,
+          'str', // 非对象 ⇒ 丢
+          { target: DIR_NAME }, // 缺 id ⇒ 丢
+          { id: 'w-no-target' }, // 缺 target ⇒ 丢
+          { id: 'w-no-at', target: DIR_NAME }, // 缺 at ⇒ 丢
+          rawEntry('w-ok'),
+          rawEntry('w-bad-state', 'nonsense'),
+        ],
+      }),
+    )
+    const { registry, error } = loadWakeRegistry(root)
+    expect(error).toBeNull()
+    expect(registry.entries.map((e) => e.id)).toEqual(['w-ok', 'w-bad-state'])
+    expect(registry.entries[1]!.state, '未知 state 不丢条目，回落 pending').toBe('pending')
+  })
+
+  it('④ 字段默认值：`createdBy`/`createdAt` 非串 ⇒ `\'\'`；`attempts` 非数或非有限 ⇒ `0`', () => {
+    writeRegistryRaw(
+      JSON.stringify({
+        version: 1,
+        entries: [rawEntry('w-def', 'pending', { createdBy: 7, createdAt: null, attempts: '3' })],
+      }),
+    )
+    const a = loadWakeRegistry(root).registry.entries[0]!
+    expect(a.createdBy).toBe('')
+    expect(a.createdAt).toBe('')
+    expect(a.attempts).toBe(0)
+    expect(a.lastResult).toBeNull()
+    expect(a.deliveredAt).toBeNull()
+
+    // 🔴 `Number.isFinite` 那一侧：JSON **源码里**写 `1e999` ⇒ 解析成 Infinity（`JSON.stringify` 做不到这点，它会写成 null）
+    writeRegistryRaw(
+      JSON.stringify({ version: 1, entries: [rawEntry('w-inf', 'pending', { attempts: '__INF__' })] }).replace('"__INF__"', '1e999'),
+    )
+    expect(loadWakeRegistry(root).registry.entries[0]!.attempts, 'Infinity 不算一次尝试').toBe(0)
+  })
+
+  it('⑤ 注册表路径被**占成目录** ⇒ load 报错而非抛（真实"路径被占"形态）', () => {
+    mkdirSync(wakeRegistryPath(root), { recursive: true })
+    const r = loadWakeRegistry(root)
+    expect(r.error).toContain('唤醒注册表解析失败')
+    expect(r.registry.entries).toEqual([])
+  })
+
+  it('⑥ 写盘失败（tmp 路径被占成目录）⇒ addWake 回 ok:false，且**不留下半个表**', () => {
+    mkdirSync(`${wakeRegistryPath(root)}.tmp`, { recursive: true })
+    const res = addWake(root, { target: DIR_NAME, at: '+1h', message: 'x', createdBy: 'S142', nowMs: Date.now() })
+    expect(res.ok).toBe(false)
+    expect(existsSync(wakeRegistryPath(root)), '写失败不得留下一个"看起来已登记"的表').toBe(false)
+  })
+
+  it('⑦ 写盘失败 ⇒ updateWake 回 ok:false，且盘上那条**逐字未变**', () => {
+    const body = JSON.stringify({ version: 1, entries: [rawEntry('w-1')] })
+    const path = writeRegistryRaw(body)
+    mkdirSync(`${path}.tmp`, { recursive: true })
+    expect(updateWake(root, 'w-1', { state: 'delivered', attempts: 1 }).ok).toBe(false)
+    expect(readFileSync(path, 'utf-8'), '失败不得"看起来已改"').toBe(body)
+  })
+
+  it('⑧ 写盘失败 ⇒ removeWake 回 ok:false，且那条**仍在盘上**', () => {
+    const body = JSON.stringify({ version: 1, entries: [rawEntry('w-1')] })
+    const path = writeRegistryRaw(body)
+    mkdirSync(`${path}.tmp`, { recursive: true })
+    const res = removeWake(root, 'w-1')
+    expect(res.ok).toBe(false)
+    expect(res.removed).toBeNull()
+    expect(readFileSync(path, 'utf-8')).toBe(body)
+  })
+
+  it('⑨ 写盘失败 ⇒ finalizeWake 回 ok:false，且那条**仍在盘上**（结案不能"半结"）', () => {
+    const body = JSON.stringify({ version: 1, entries: [rawEntry('w-1')] })
+    const path = writeRegistryRaw(body)
+    mkdirSync(`${path}.tmp`, { recursive: true })
+    const res = finalizeWake(root, 'w-1', 'delivered', '已投递')
+    expect(res.ok).toBe(false)
+    expect(res.removed).toBeNull()
+    expect(readFileSync(path, 'utf-8')).toBe(body)
+  })
+
+  it('⑩ 写盘失败 ⇒ purge 回 ok:false 且 `purged:0`（**不许只报"清掉了"而没落盘**）', () => {
+    const body = JSON.stringify({ version: 1, entries: [rawEntry('w-p'), rawEntry('w-d', 'delivered')] })
+    const path = writeRegistryRaw(body)
+    mkdirSync(`${path}.tmp`, { recursive: true })
+    expect(purgeFinalizedWakes(root)).toEqual({ ok: false, error: expect.stringContaining('唤醒注册表写入失败'), purged: 0 })
+    expect(readFileSync(path, 'utf-8')).toBe(body)
+  })
+
+  it('⑪ finalizeWake 命中 ⇒ 返回带终态与结果的 removed，**表里不留行**（owner「直接删」）', () => {
+    const added = addWake(root, { target: DIR_NAME, at: '+1h', message: '结案我', createdBy: 'S142', nowMs: Date.now() })
+    expect(added.ok).toBe(true)
+    const id = added.ok ? added.entry.id : ''
+    const res = finalizeWake(root, id, 'delivered', '已投递')
+    expect(res.ok).toBe(true)
+    expect(res.removed?.id).toBe(id)
+    expect(res.removed?.state).toBe('delivered') // 终态只在返回值上留痕
+    expect(res.removed?.lastResult).toBe('已投递')
+    expect(loadWakeRegistry(root).registry.entries, '终态条目不得留在表里').toHaveLength(0)
+  })
+
+  it('⑫ purge 真清理 ⇒ 盘上只剩 pending（**这条写盘路径此前从未被执行过**）', () => {
+    writeRegistryRaw(
+      JSON.stringify({
+        version: 1,
+        entries: [rawEntry('w-p1'), rawEntry('w-p2'), rawEntry('w-d', 'delivered'), rawEntry('w-m', 'missed'), rawEntry('w-c', 'cancelled')],
+      }),
+    )
+    const res = purgeFinalizedWakes(root)
+    expect(res.ok).toBe(true)
+    expect(res.purged).toBe(3)
+    expect(loadWakeRegistry(root).registry.entries.map((e) => e.id), '终态三个清掉、在办两个留下').toEqual(['w-p1', 'w-p2'])
+    expect(readFileSync(wakeRegistryPath(root), 'utf-8'), '真写盘（不是只在内存里过滤）').toContain('w-p2')
+  })
+
+  it('⑬ 无终态条目 ⇒ `purged:0` 且**不写盘**（避免无谓 IO 的承诺）', () => {
+    const body = JSON.stringify({ version: 1, entries: [rawEntry('w-p1')] })
+    const path = writeRegistryRaw(body)
+    expect(purgeFinalizedWakes(root)).toEqual({ ok: true, error: null, purged: 0 })
+    expect(readFileSync(path, 'utf-8'), '无可清 ⇒ 逐字不动').toBe(body)
+
+    // 连"表都不存在"时也不该凭空建一个
+    rmSync(path)
+    expect(purgeFinalizedWakes(root).purged).toBe(0)
+    expect(existsSync(path), '空转不得建空表').toBe(false)
+  })
+
+  it('⑭ 未知 id ⇒ 稳定错误码（finalizeWake / updateWake 都不新建、不静默成功）', () => {
+    const f = finalizeWake(root, 'w-nope', 'missed', 'x')
+    expect(f.ok).toBe(false)
+    expect(f.error).toBe('wake_not_found: w-nope')
+    expect(f.removed).toBeNull()
+
+    const u = updateWake(root, 'w-nope', { state: 'delivered' })
+    expect(u.ok).toBe(false)
+    expect(u.error).toBe('wake_not_found: w-nope')
+    expect(loadWakeRegistry(root).registry.entries, '报错不得顺带建条目').toHaveLength(0)
+  })
+
+  it('⑮ `at` 无法解析 ⇒ addWake 原样透出解析错误（`!parsed.ok` 分支）', () => {
+    const res = addWake(root, { target: DIR_NAME, at: 'tomorrow-ish', message: 'x', createdBy: 'S142', nowMs: Date.now() })
+    expect(res.ok).toBe(false)
+    if (!res.ok) expect(res.error).toContain('时刻无法解析')
+  })
 })
