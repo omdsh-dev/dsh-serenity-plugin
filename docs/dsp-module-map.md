@@ -141,7 +141,7 @@
 | 读的地方 | 来源 | 键 |
 |---|---|---|
 | `config-ops.ts:readAdvancedSettings()` | 宿主全局 `~/.dsh/serenity-hooks.json`（节 `serenityAdvanced`） | `gateway.{enabled,host,port,accounts,workspaces,cookieSecure,allowWorkspaceCreate,totpEnabled}`、`publicAsk.{key,allowed}`、`weixinApi.{enabled,port}`、`persona` |
-| `settings-section.ts:readSimpleSettings()` | 本插件 fiber **Config**（经宿主 settings 面板 `ns=serenity-hooks`） | `gatewayEnabled`/`rebuildEnabled`/`rebuildThresholdK`/`skiffEnabled`/`skiffDebugPort`/`acpEnabled`/`acpHttpPort`/`publicAskEnabled`/`croEnabled`/`unattendedEnabled`（旧嵌套形态 `gateway.enabled`、`skiff.debugPort`、`acp.httpPort` **亦收**） |
+| `settings-section.ts:readSimpleSettings()` | 本插件 fiber **Config**（经宿主 settings 面板 `ns=serenity-hooks`） | `gatewayEnabled`/`rebuildThresholdK`/`skiffEnabled`/`skiffDebugPort`/`acpEnabled`/`acpHttpPort`/`publicAskEnabled`/`croEnabled`/`unattendedEnabled`（旧嵌套形态 `gateway.enabled`、`skiff.debugPort`、`acp.httpPort` **亦收**）。🔴 **v1.49.0 起 `rebuildEnabled` 已砍掉**（超限重建恒开、无总闸） |
 | `weixin-route.ts` / `skiff-role.ts` | **CCC** `.opencode/serenity.json` | `weixin.*`、`skiff.roles` |
 | `localstore-ops.ts` / `weixin-route.ts` / `im-weixin.ts` | **CCC** `localstore.json`（节 `credential`\|`config`） | `WEIXIN_<ID>_*`、`localstore.gitTrack` |
 | 不读配置（纯常量/机制） | — | `message-source` / `output-guard(.|seam)` / `face-host` / `ports` |
@@ -383,7 +383,7 @@
 
 | 块 | 判据（🔵 = 可复用形态）|
 |---|---|
-| `queueRebuild` 两道门 | **总闸关**（`__setSimpleSourceForTest` 注入 `rebuildEnabled:false`）⇒ 抛错**且不排队**｜**会话定位失败** ⇒ 报出是哪个 id |
+| `queueRebuild` 的门 | **会话定位失败** ⇒ 报出是哪个 id。🔴 **v1.49.0 起「总闸关」那道门已砍掉** —— 改为**砍闸回归钉**：`__setSimpleSourceForTest` 注入残留的 `rebuildEnabled:false` ⇒ **照样排队**（旧键静默忽略） |
 | 会话名回落 | 无内存活跃信息 ⇒ 由 mdPath 目录名派生；**目录名不含 `S###` ⇒ 绑定行 `sessionId=undefined`**（不编造 S 号）|
 | turn 钩子守卫 | `payload` 无 agent ⇒ return，且**队列原样保留** |
 | **TTL 丢弃** | `vi.useFakeTimers()` ＋ `setSystemTime` 推进 20min（TTL = 10min）⇒ 清队列 ＋ 记 `ttl-dropped` ＋ **绝不误清空 surface** |

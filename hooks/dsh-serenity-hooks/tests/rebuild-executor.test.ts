@@ -65,7 +65,7 @@ beforeEach(() => {
   altRoot = null
   writeFileSync(join(dir, '.serenity'), 'test')
   resetActiveSessionStore()
-  __setSimpleSourceForTest(null) // 恢复默认源（默认 rebuildEnabled = true）
+  __setSimpleSourceForTest(null) // 恢复默认源（v1.49.0 起超限重建无总闸，默认即"恒开"）
 })
 
 afterEach(() => {

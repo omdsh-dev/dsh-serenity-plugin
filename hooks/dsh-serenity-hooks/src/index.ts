@@ -130,8 +130,9 @@ export interface Config {
   //    会被无声压死。读取优先级见 `settings-section.ts`：面板层 > 部署层 > 内建缺省。
   /** F1 双端口网关总开关（面板层；部署层同义键 = `gateway.enabled`） */
   gatewayEnabled?: Volatile<boolean | undefined>
-  /** F2 超限重建总开关（面板层；部署层同义键 = `rebuild.enabled`） */
-  rebuildEnabled?: Volatile<boolean | undefined>
+  // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` 的**声明也删掉**（不只删 schema）——
+  //    该键已退役、**无任何读取方**；留着声明只会让"旧值仍被导入"看起来像还有这个功能。
+  //    旧配置残留该键 ⇒ 静默忽略（schemastery 非 strict ⇒ 未声明键不会让旧文档被拒）。
   /** F2 触发阈值（K token；面板层；部署层同义键 = `rebuild.thresholdK`） */
   rebuildThresholdK?: Volatile<number | undefined>
   /** F4 Skiff 调试服务总开关（面板层；部署层同义键 = `skiff.enabled`） */
