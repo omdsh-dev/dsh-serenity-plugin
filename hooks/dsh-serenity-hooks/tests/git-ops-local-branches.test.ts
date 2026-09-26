@@ -297,7 +297,7 @@ describe('git-ops 分支：D 组 —— log 正路与降级', () => {
 // ── E 组：pull 的降级告警面（第 14 件只覆盖了成功/拒绝/无远程） ─────────────────────
 
 describe('git-ops 分支：E 组 —— pull 降级告警', () => {
-  it('🔴 E1 fetch 失败（远程不可达）⇒ 返回 `[WARN] fetch had stderr`（`:152`）', () => {
+  it('🔴 E1 fetch 失败（远程不可达）⇒ 返回 `[WARN] fetch failed`（响亮告警，不得静默）', () => {
     initRepo(dir)
     writeFileSync(join(dir, 'a.txt'), 'a')
     g(dir, 'add', '-A')
@@ -308,7 +308,8 @@ describe('git-ops 分支：E 组 —— pull 降级告警', () => {
     const r = runGit(dir, { action: 'pull' }) as string
 
     // 🔴 方向断言：必须**响亮告警**，绝不能静默返回 'Already up to date.'
-    expect(r).toContain('[WARN] fetch had stderr')
+    //    （2026-09-26 措辞改：`had stderr` → `failed` —— 因为 stderr 现在**只在失败时**才有值）
+    expect(r).toContain('[WARN] fetch failed')
     expect(r).not.toContain('Already up to date')
   })
 

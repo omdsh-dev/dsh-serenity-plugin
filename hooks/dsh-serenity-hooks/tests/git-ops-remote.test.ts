@@ -16,9 +16,13 @@
  *   3. **失败路径用真触发，不用 mock** —— `git add` 失败 = **残留 `.git/index.lock`**（生产真实形态）；
  *      `git commit` 失败 = **`pre-commit` 钩子 exit 1**。两者都不需要替身，也不需要联网。
  *
- * ⚠️ **诚实边界（本文件不覆盖）**：`git()` 的**超时**分支（`err.killed` ⇒ "git operation timed out"）——
- * 常量 `GIT_TIMEOUT_MS = 30_000`，要真触发就得让用例挂 30 秒以上；用 PATH 替身骗过 `execFileSync` 也是
- * 30 秒。⇒ 该分支**保持未覆盖**，理由记在此处（不是遗漏）。
+ * 🔵 **2026-09-26 更新 —— 此前的"诚实边界"已闭合**：`git()` 的**超时**分支当时记为不可覆盖
+ * （"要真触发就得让用例挂 30 秒以上"）。该理由**在旧设计下成立**；新设计给了超时覆盖缝
+ * （`DSH_GIT_TIMEOUT_MS` / `DSH_GIT_NET_TIMEOUT_MS`，见 `src/git-ops.ts`）⇒ 现可在 **300ms** 内
+ * 真触发。回归测试见 `tests/git-commit-push-coupling.test.ts` 的「B 回归」组。
+ * ⚠️ 同批**更正旧判据**：超时**不设 `err.killed`**（实测 `code=ETIMEDOUT` / `signal=SIGTERM` /
+ * `status=null` / stderr 长度 0）—— 旧守卫 `err.killed ? … : err.stderr` 因此是**死代码**，
+ * 这正是"push 超时被报成成功"的一半成因（另一半：`execFileSync` 成功时丢弃 stderr）。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs'
@@ -99,23 +103,23 @@ describe('⑤ 第 14 件：container_git 远程流程（真 git ＋ 真 bare 远
 
     const r = runGit(world.a, { action: 'push' }) as string
     expect(r).not.toContain('[REJECTED]')
-    expect(r).toMatch(/Pushed to origin\/main/)
+    // 🔵 2026-09-26 改：成功判据换成 `--porcelain`（stdout）⇒ 回执带**可核验事实**（SHA 变迁）
+    expect(r).toMatch(/✅ 已推送 origin\/main/)
+    expect(r).toMatch(/[0-9a-f]{7}\.\.[0-9a-f]{7}/) // before..after 的 SHA 变迁
     // 🔴 语义断言：不看文本看**远程**（文本曾经在 non-fast-forward 时也报成功）
     expect(remoteHead(world)).toBe(newHead)
   })
 
-  it('🔴 探测并钉住：本地已与远程同步时 push ⇒ 不应被当成失败', () => {
+  it('🔴 探测并钉住：本地已与远程同步时 push ⇒ 不被当成失败，且**与"真推送"可区分**', () => {
     // 此时 A 刚 push -u 过，本地与远程同点 ⇒ 这条 `git push` 是**合法的空操作**
     const before = remoteHead(world)
     const r = runGit(world.a, { action: 'push' }) as string
     expect(r).not.toContain('[REJECTED]')
-    // 🔵 **实测（探针读到的真值）**：这里返回的是 fallback 文案 `Pushed to origin/main`，
-    //    而**不是** `Everything up-to-date`。根因（已定位）：`git()` 在**成功**时只回传 stdout、
-    //    **丢弃 stderr**，而 `git push` 的 "Everything up-to-date" 恰好走 stderr。
-    //    ⇒ 本地领先与已最新两种情况**返回同一句话**（"说推了"而实际没推）。
-    //    该读数已登记为**待裁项**（属行为/措辞变更）⇒ 本用例只钉不变量（不报拒绝 ＋ 远程不动），
-    //    **不把这个 wart 写成契约**。
-    expect(r).toMatch(/Pushed to origin\/main|Everything up-to-date/)
+    // 🔵 **2026-09-26 已修（此前的 wart）**：旧版这里返回 fallback `Pushed to origin/main` ——
+    //    与"真的推了"**同一句话**（根因：`git()` 成功时丢弃 stderr，而 `git push` 的输出走 stderr）。
+    //    本版改走 `--porcelain`（走 stdout）⇒ 「已最新」与「真推送」现在是**两句不同的话**。
+    expect(r).toMatch(/已是最新/)
+    expect(r).not.toMatch(/✅ 已推送/) // 空操作**不得**被说成"推了"
     expect(remoteHead(world)).toBe(before) // 空操作 ⇒ 远程不动
   })
 
@@ -124,7 +128,7 @@ describe('⑤ 第 14 件：container_git 远程流程（真 git ＋ 真 bare 远
     mkdirSync(bare)
     initRepo(bare, 'main')
     commitFile(bare, 'x.txt', 'x', 'x')
-    expect(() => runGit(bare, { action: 'push' })).toThrow(/no remote configured/)
+    expect(() => runGit(bare, { action: 'push' })).toThrow(/未配置 remote/)
     expect(() => runGit(bare, { action: 'push' })).toThrow(/git remote add origin/)
   })
 
@@ -232,12 +236,15 @@ describe('⑤ 第 14 件：container_git 远程流程（真 git ＋ 真 bare 远
     expect(byPath).toContain('again')
   })
 
-  it('🔴 push：远程配了但不可达（URL 指向不存在的路径）⇒ 抛 `push failed`（fetch 失败不误判成功）', () => {
+  it('🔴 push：远程配了但不可达（URL 指向不存在的路径）⇒ 抛 `[FAILED]`（fetch 失败不误判成功）', () => {
     // 真触发：把 origin 指向一个不存在的路径 ⇒ `git fetch` 与 `git push` 都失败。
-    // 期望：fetch 的失败**不阻断**（它本就被 try/catch 包着）⇒ 落到 push 自己的失败判据上，
-    //       且**绝不**返回 "Pushed to origin/main"（这正是 v1.18.8 那类误报的同族风险）。
+    // 期望：fetch 的失败**不阻断**（它本就被忽略）⇒ 落到 push 自己的失败判据上，
+    //       且**绝不**返回 "已推送"（这正是 v1.18.8 那类误报的同族风险）。
     g(world.b, 'remote', 'set-url', 'origin', join(world.dir, 'no-such-remote.git'))
-    expect(() => runGit(world.b, { action: 'push' })).toThrow(/container_git push failed/)
+    const call = () => runGit(world.b, { action: 'push' })
+    expect(call).toThrow(/\[FAILED\]/)
+    expect(call).toThrow(/未推送/)
+    expect(call).toThrow(/git ls-remote origin main/) // 回执必须给**核验指令**
   })
 
   it('未知 action ⇒ 抛 `Unknown action`（默认分支不是静默）', () => {
