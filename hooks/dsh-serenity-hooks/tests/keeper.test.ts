@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 vi.mock('@deepseek-ai/dsh-llm', () => ({
@@ -40,6 +40,11 @@ import {
   forgetLogbookCompactionState,
   __resetLogbookCompactionForTest,
   DEFAULT_SESSION_MD_MAX_KB,
+  rebuildTodoReminderText,
+  DEFAULT_REBUILD_TODO_MAX_KB,
+  rebuildTodoStateSnapshot,
+  forgetRebuildTodoState,
+  __resetRebuildTodoForTest,
 } from '../src/seams/keeper.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-core.js'
 import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/trajectory-ops.js'
@@ -125,10 +130,16 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('--summary')
     expect(text).toContain('≤20 chars')
     expect(text).toContain('renamed to S###-YYYY-MM-DD-<summary>')
-    // v1.31.1 交接协议（写侧）：要求把手头事项写在 SESSION.md 末尾的固定英文标题下
-    expect(text).toContain('## In-flight (rebuild handover)')
+    // v1.49.0 交接协议（写侧，owner 2026-09-26 裁决"砍掉 in-flight"）：改指**独立便签文件**
+    expect(text).toContain('REBUILD-TODO.md')
     expect(text).toContain('current in-flight items')
-    expect(text).toContain('at the very end of SESSION.md')
+    expect(text).toContain('create it if it does not exist')
+    // 🔴 砍掉 in-flight 的回归钉：写侧**不得**再指向 SESSION.md 末尾的段
+    expect(text).not.toContain('In-flight (rebuild handover)')
+    expect(text).not.toContain('at the very end of SESSION.md')
+    // 便签的性质要在写侧就讲清（无格式义务 / 无留档义务 / 可随时丢弃）
+    expect(text).toContain('no format obligation')
+    expect(text).toContain('safe to discard at any time')
     // v1.23.3：不向 LLM 植入阈值建议（设定是用户自由）
     expect(text).not.toContain('0.75~0.9')
   })
@@ -148,9 +159,9 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     // v1.28.0 需求②（P0-1 审计补断言）：升级版同样指导带 --summary
     expect(text).toContain('--summary')
     expect(text).toContain('renamed to S###-YYYY-MM-DD-<summary>')
-    // v1.31.1 交接协议：升级版同样要求写 in-flight 区块
-    expect(text).toContain('## In-flight (rebuild handover)')
-    expect(text).toContain('at the very end of SESSION.md')
+    // v1.49.0 交接协议：升级版同样要求写交界便签
+    expect(text).toContain('REBUILD-TODO.md')
+    expect(text).not.toContain('In-flight (rebuild handover)')
   })
 
   it('readContextPressure：sessionProjections 装配时读取投影', () => {
@@ -372,6 +383,132 @@ describe('keeper: LOGBOOK COMPACTION 纯逻辑', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+describe('keeper: REBUILD-TODO 交界便签体积超限（v1.49.0，owner 2026-09-26 需求）', () => {
+  let dir: string
+  let handler: ((exec: unknown, result: unknown, next: () => Promise<unknown>) => Promise<unknown>) | null = null
+  const SCOPE = 'todo-size-1'
+
+  /** 建 SESSION.md 并把同目录的 REBUILD-TODO.md 写到指定字节数；返回便签绝对路径 */
+  function bindSessionWithTodo(todoBytes: number | null): string {
+    const sessionDir = join(dir, 'AGENT_SESSIONS', '2026-01-01--S001--todo-test')
+    mkdirSync(sessionDir, { recursive: true })
+    const mdPath = join(sessionDir, 'SESSION.md')
+    writeFileSync(mdPath, 'x')
+    const todoPath = join(sessionDir, 'REBUILD-TODO.md')
+    if (todoBytes !== null) writeFileSync(todoPath, 'x'.repeat(todoBytes))
+    setActiveSessionInfo(SCOPE, { sessionId: 'S001', dirName: '2026-01-01--S001--todo-test', mdPath })
+    return todoPath
+  }
+
+  async function fire(): Promise<string[]> {
+    const exec = { name: 'read', agent: { session: { id: SCOPE, header: { cwd: dir } } } }
+    const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as {
+      additionalContexts?: Array<{ content?: Array<{ text?: string }> }>
+    }
+    return (result.additionalContexts ?? []).map((m) => m.content?.[0]?.text ?? '')
+  }
+
+  beforeEach(() => {
+    __resetRebuildTodoForTest()
+    // 🔴 必须一并清**路径缓存**：`resolveActiveSessionMdPath` 按 scope 缓存 60s（且缓存命中时
+    // 不再做 existsSync）⇒ 上个用例的临时目录已被删，缓存里仍是它的旧路径 ⇒ 便签路径指向
+    // 不存在的文件 ⇒ 静默零注入（本用例首跑就是栽在这条上）。
+    __resetLogbookCompactionForTest()
+    dir = mkdtempSync(join(tmpdir(), 'keeper-todo-'))
+    writeFileSync(join(dir, '.serenity'), 'test')
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    // 阈值设很大 → 屏蔽计分提醒噪音，只观察便签体积提醒
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ sessionKeeper: { threshold: 99999 } }))
+    handler = null
+    registerKeeper({ on: (name: string, fn: unknown) => { if (name === 'tools/post-execute') handler = fn as typeof handler } } as never)
+  })
+
+  afterEach(() => {
+    clearActiveSessionInfo(SCOPE)
+    __resetRebuildTodoForTest()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('上限硬编码 10KB（owner 裁决：不设配置键）', () => {
+    expect(DEFAULT_REBUILD_TODO_MAX_KB).toBe(10)
+  })
+
+  it('提醒文案：独立 token + 事实三件套 + 三条清理建议 + 整份丢弃授权 + 参照 eap', () => {
+    const base = rebuildTodoReminderText({ sizeKB: 14, limitKB: 10, mdPath: '/ccc/AGENT_SESSIONS/S1/REBUILD-TODO.md' })
+    // 🔴 与 SESSION.md 档**分开的 token**——共用会让模型误以为要动 SESSION.md
+    expect(base).toContain('[TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
+    expect(base).not.toContain('LOGBOOK COMPACTION')
+    expect(base).toContain('REBUILD-TODO.md is 14 KB (limit 10 KB)')
+    expect(base).toContain('/ccc/AGENT_SESSIONS/S1/REBUILD-TODO.md')
+    // 动作 = **清理**，不是重写保骨架
+    expect(base).toContain('Prune it now')
+    expect(base).toContain('praxis eap')
+    expect(base).not.toContain('keep the EAP layered skeleton')
+    expect(base).not.toContain('frontmatter')
+    // 三条清理建议（已完成 / 已被取代 / 已进 SESSION.md）
+    expect(base).toContain('already done')
+    expect(base).toContain('superseded')
+    expect(base).toContain('already recorded in SESSION.md')
+    // 🔴 明确授权整份丢弃 + 唯一机械约束 = 体积（不规定内部结构）
+    expect(base).toContain('discard it')
+    expect(base).toContain('the only mechanical constraint on this file is its size')
+  })
+
+  it('升级版：语气加重，但动作仍只是清理、不阻断工作（与 SESSION.md 档的强制语义区分）', () => {
+    const esc = rebuildTodoReminderText({ sizeKB: 14, limitKB: 10, mdPath: '/p/REBUILD-TODO.md', escalated: true })
+    expect(esc).toContain('[TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
+    expect(esc).toContain('reminded repeatedly')
+    expect(esc).toContain('persists until the file is under the limit')
+    // 🔴 与 compaction 档的差别：**不得**出现强制重写语义
+    expect(esc).not.toContain('mandatory')
+    expect(esc).not.toContain('STOP')
+  })
+
+  it('注入行为：文件缺失 → 零注入且不自动创建；超限 → 注入且计数自增；清理回限内 → 停止并清零', async () => {
+    // ① 文件缺失 ⇒ 零注入，且**不自动创建**（空文件本身即熵）
+    const todoPath = bindSessionWithTodo(null)
+    expect(await fire()).toHaveLength(0)
+    expect(existsSync(todoPath)).toBe(false)
+
+    // ② 超限（11 KB > 10 KB）⇒ 注入 + 计数自增
+    writeFileSync(todoPath, 'x'.repeat(11 * 1024))
+    const texts = await fire()
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toContain('[TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
+    expect(texts[0]).toContain('REBUILD-TODO.md is 11 KB (limit 10 KB)')
+    expect(rebuildTodoStateSnapshot().get(SCOPE)?.consecutive).toBe(1)
+    expect(await fire()).toHaveLength(1)
+    expect(rebuildTodoStateSnapshot().get(SCOPE)?.consecutive).toBe(2)
+
+    // ②b 会话销毁路径：按 scope 清理计数（防 per-会话 Map 无界增长）
+    forgetRebuildTodoState(SCOPE)
+    expect(rebuildTodoStateSnapshot().has(SCOPE)).toBe(false)
+
+    // ③ 清理回限内 ⇒ 不再注入 + 计数保持清零（提醒自动停止）
+    writeFileSync(todoPath, 'x')
+    expect(await fire()).toHaveLength(0)
+    expect(rebuildTodoStateSnapshot().has(SCOPE)).toBe(false)
+  })
+
+  it('与 SESSION.md 档互不干扰：便签超限时 SESSION.md 未超限 ⇒ 只注入便签那一条', async () => {
+    const todoPath = bindSessionWithTodo(11 * 1024)
+    const texts = await fire()
+    expect(texts).toHaveLength(1)
+    expect(texts[0]).toContain('SCRATCH PRUNE')
+    expect(texts[0]).not.toContain('LOGBOOK COMPACTION')
+    // 反向：便签清掉后，把 SESSION.md 撑过限 ⇒ 只注入 compaction 那一条
+    writeFileSync(todoPath, 'x')
+    writeFileSync(join(dirname(todoPath), 'SESSION.md'), 'x'.repeat(2048))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ sessionKeeper: { threshold: 99999, sessionMdMaxKB: 1 } }))
+    __resetLogbookCompactionForTest()
+    const texts2 = await fire()
+    expect(texts2).toHaveLength(1)
+    expect(texts2[0]).toContain('LOGBOOK COMPACTION')
+    expect(texts2[0]).not.toContain('SCRATCH PRUNE')
+  })
+})
+
 
 describe('keeper: Skiff 轨迹纪律子集旁路（F4b ⑩）', () => {
   let dir: string

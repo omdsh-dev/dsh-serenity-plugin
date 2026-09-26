@@ -59,7 +59,7 @@ import {
   sessionEvents,
 } from './trajectory-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
-import { eventToken, IN_FLIGHT_HEADING } from './trajectory-assistant.js'
+import { eventToken, REBUILD_TODO_FILENAME } from './trajectory-assistant.js'
 import { appendBound, readLastBound } from './trajectory-bound.js'
 import { isoLocal } from './time.js'
 
@@ -92,6 +92,9 @@ export function buildRebuildAnchor(
   focus?: string | null,
 ): string {
   const rel = activeMdPath.startsWith(root) ? activeMdPath.slice(root.length + 1) : activeMdPath
+  // 交界便签（v1.49.0）：与 SESSION.md **同目录**的兄弟文件；路径同样独立成行（便于新我直接 read）
+  const todoAbs = join(dirname(activeMdPath), REBUILD_TODO_FILENAME)
+  const todoRel = todoAbs.startsWith(root) ? todoAbs.slice(root.length + 1) : todoAbs
   // 会话目录名 = SESSION.md 的父目录 basename（可含空格，如 "…--S142--dsh-serenity-plugin 长期维护"）
   const sessionDir = basename(dirname(activeMdPath))
   const sessionLine =
@@ -110,8 +113,9 @@ export function buildRebuildAnchor(
     `- Persistent trajectory — SESSION.md path: ${rel}`,
     `  (the trajectory's persistent body — stays in place through rebuilds)`,
     `- Read that SESSION.md first (goal/decisions/progress/unresolved), then continue from the last checkpoint.`,
-    // v1.31.1 交接协议（S142 用户需求）：读侧——要求重建后的自己处理写侧留在文末的手头事项
-    `- Then read the "${IN_FLIGHT_HEADING}" section at the very end of SESSION.md and work through those in-flight items (the previous self paused mid-task and handed them over). If that section is missing, infer the in-flight items from the latest progress entries.`,
+    // v1.49.0 交接协议（owner 2026-09-26 裁决"**砍掉 in-flight**，这正是目的"）：读侧改指**独立便签文件**。
+    // 🔴 便签**不是权威**（可被随时丢弃）——权威仍是 SESSION.md；此处刻意点明，防新我拿便签当状态真相源。
+    `- Then read the handover scratch note: ${todoRel} (path: ${todoAbs}) — the previous self paused mid-task and left its in-flight items there. That file carries no format obligation and may be discarded at any time; it is NOT the authoritative state. If it is missing, infer the in-flight items from SESSION.md's latest progress entries.`,
     // v1.29.2（R1）：任务焦点——重建后会话理解当前任务（无历史；SESSION.md 含完整历史）
     ...(focusLine ? [`- Task focus: ${focusLine}`] : []),
   ]

@@ -36,6 +36,11 @@ export const EVENT_LABEL = {
   guard: 'BOUNDARY GUARD',
   /** SESSION.md 体积超限重写提醒（v1.31.1，S142 用户需求） */
   compaction: 'LOGBOOK COMPACTION',
+  /** **交界便签（REBUILD-TODO.md）体积超限清理提醒**（v1.49.0，owner 2026-09-26 需求）。
+   *
+   *  🔴 **刻意与 `compaction` 分开**：那条要求"**重写 SESSION.md 并保留 EAP 骨架**"，
+   *  本条只要求"**清理便签**"——共用一个 token 会让模型误以为要动 SESSION.md。 */
+  scratchPrune: 'SCRATCH PRUNE',
 } as const
 
 /** 家族标识（所有动态注入统一前缀） */
@@ -51,16 +56,24 @@ export const ACK_PREFIX = `${ASSISTANT_PREFIX}-recorded`
 export const ACK_SKIP_PREFIX = `${ASSISTANT_PREFIX}-skipped`
 
 /**
- * rebuild 交接区块标题（v1.31.1，S142 用户需求）。
+ * rebuild 交界便签的**文件名**（v1.49.0；owner 2026-09-26 需求）。
  *
- * 用途：rebuild 提醒要求模型把**当前手头事项**写到 SESSION.md **末尾**的这个小标题之下；
- * rebuild 锚点随后要求重建后的自己去读这一段并处理。两侧引用**同一个常量**——
- * 标题一旦漂移，读侧就找不到写侧写的东西（单一真相源）。
+ * ## 它取代了什么（owner 原话：*"砍掉 in-flight，这正是目的"*）
+ * v1.31.1 的交界协议要求把手头事项写进 **SESSION.md 末尾**的 `## In-flight (rebuild handover)` 段。
+ * 实测的代价（S142 自身取证）：In-flight 段曾积 **12 块**（含多份**已被取代**的交接），
+ * 而 SESSION.md 是**有格式义务**的持久文件（7 段固定 ＋ 粒度受 EAP 约束）⇒
+ * ① 持久文件被临时物污染 ② 每次整理都要付"压缩＋归档＋保真"三件套（该文件曾达 292 KB）。
  *
- * 形态（用户拍板 Q2）：**固定英文标题行**（不是 HTML 注释锚）——人读友好；ACC 写死英文，
- * 因为 SESSION.md 的正文语言归 CCC，但两侧的**机械锚点**必须逐字一致。
+ * ⇒ 分家：**只用一次的交界材料**写进这份**临时便签**（无格式义务、无留档义务、可随时丢弃）。
+ *
+ * ## 🔴 三处引用同一常量（单一真相源）
+ * **写侧** = `seams/keeper.ts` 的 `rebuildReminderText()`｜**读侧** = `rebuild.ts` 的重建锚点｜
+ * **体积提醒** = `seams/keeper.ts` 的 `rebuildTodoReminderText()`。
+ * 文件名一旦漂移，写侧写的东西读侧就找不到 —— **且没有任何机械信号会报警**。
+ *
+ * 🔴 **不得改名**（owner 已具名）。形态 = **固定文件名**（人读友好；比照旧 IN_FLIGHT_HEADING 的取舍）。
  */
-export const IN_FLIGHT_HEADING = '## In-flight (rebuild handover)'
+export const REBUILD_TODO_FILENAME = 'REBUILD-TODO.md'
 
 // ── 风格门面（D8：仅 plain 与 metaphor；无 game 档）──
 
@@ -75,6 +88,7 @@ const METAPHOR_PREFIX: Record<keyof typeof EVENT_LABEL, string> = {
   rebuild: 'REBUILD',
   guard: 'BOUNDARY GUARD',
   compaction: 'LOGBOOK COMPACTION',
+  scratchPrune: 'SCRATCH PRUNE',
 }
 
 /**

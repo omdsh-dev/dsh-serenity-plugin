@@ -43,7 +43,7 @@ import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js
 import { setActiveSessionInfo, resetActiveSessionStore } from '../src/trajectory-ops.js'
 import { SESSION_CONTEXT_MARKER } from '../src/trajectory-ops.js'
 import { readLastBound, appendBound } from '../src/trajectory-bound.js'
-import { IN_FLIGHT_HEADING } from '../src/trajectory-assistant.js'
+import { REBUILD_TODO_FILENAME } from '../src/trajectory-assistant.js'
 
 let dir: string
 
@@ -144,24 +144,35 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(a).not.toContain('Continue the work of S')
   })
 
-  // ── v1.31.1 交接协议读侧（S142 用户需求②）：rebuild 锚点要求处理 SESSION.md 末尾的 in-flight 区块 ──
+  // ── v1.49.0 交接协议读侧（owner 2026-09-26 裁决"**砍掉 in-flight**，这正是目的"）：
+  //    rebuild 锚点改指**独立便签文件** REBUILD-TODO.md（文件名常量与写侧同源）──
 
-  it('buildRebuildAnchor：含 In-flight 交接读侧指令（标题常量与写侧同源）', () => {
+  it('buildRebuildAnchor：含交界便签读侧指令（文件名常量与写侧同源）', () => {
     const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
     const a = buildRebuildAnchor(dir, 'S142', mdPath)
-    // 与 keeper.rebuildReminderText（写侧）共用同一常量——标题漂移则读侧找不到写侧写的区块
-    expect(a).toContain(IN_FLIGHT_HEADING)
-    expect(a).toContain('at the very end of SESSION.md')
-    expect(a).toContain('in-flight items')
-    // 区块缺失时的兜底指引（存量 SESSION.md 无该区块 → 重建后不得空转）
-    expect(a).toContain('If that section is missing, infer the in-flight items')
-    // 顺序：先读 SESSION.md 全貌 → 再处理末尾 in-flight 区块
-    expect(a.indexOf(IN_FLIGHT_HEADING)).toBeGreaterThan(a.indexOf('Read that SESSION.md first'))
+    // 与 keeper.rebuildReminderText（写侧）共用同一常量——文件名漂移则读侧找不到写侧写的东西
+    expect(a).toContain(REBUILD_TODO_FILENAME)
+    // 绝对路径与相对路径都给（新我可直接 read，不必自己推导兄弟路径）
+    expect(a).toContain(join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', REBUILD_TODO_FILENAME))
+    expect(a).toContain('AGENT_SESSIONS/2026-08-24--S142--dsp/' + REBUILD_TODO_FILENAME)
+    // 🔴 便签**不是权威**——明确写出，防新我拿它当状态真相源（它可被随时丢弃）
+    expect(a).toContain('NOT the authoritative state')
+    // 便签缺失时的兜底指引（存量轨迹尚未建该文件 → 重建后不得空转）
+    expect(a).toContain('If it is missing, infer the in-flight items')
+    // 顺序：先读 SESSION.md 全貌 → 再读交界便签
+    expect(a.indexOf(REBUILD_TODO_FILENAME)).toBeGreaterThan(a.indexOf('Read that SESSION.md first'))
   })
 
-  it('buildRebuildAnchor：无激活会话名时同样带 In-flight 读侧指令（非会话相关分支）', () => {
+  it('🔴 buildRebuildAnchor：不再指向已砍掉的 SESSION.md In-flight 段（回归钉）', () => {
+    const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
+    const a = buildRebuildAnchor(dir, 'S142', mdPath)
+    expect(a).not.toContain('In-flight (rebuild handover)')
+    expect(a).not.toContain('at the very end of SESSION.md')
+  })
+
+  it('buildRebuildAnchor：无激活会话名时同样带交界便签读侧指令（非会话相关分支）', () => {
     const a = buildRebuildAnchor(dir, '', join(dir, 'AGENT_SESSIONS', 'SESSION.md'))
-    expect(a).toContain(IN_FLIGHT_HEADING)
+    expect(a).toContain(REBUILD_TODO_FILENAME)
   })
 
   // ── v1.29.2（R1）：rebuild 任务焦点传递（note → Task focus 段）──

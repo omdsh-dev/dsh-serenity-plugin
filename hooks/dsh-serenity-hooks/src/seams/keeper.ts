@@ -15,7 +15,7 @@ import type { PostToolDecision, ToolExecution, ToolExecutionResult } from '@deep
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, statSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { hostService } from '../host/access.js'
 import { loadSerenityConfig } from '../ccc.js'
 import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
@@ -23,7 +23,7 @@ import { readSimpleSettings } from '../settings-section.js'
 import { skiffTrajectoryEnabled } from '../skiff-core.js'
 import { getActiveSessionInfo } from '../trajectory-ops.js'
 import { readLastBound } from '../trajectory-bound.js'
-import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, IN_FLIGHT_HEADING } from '../trajectory-assistant.js'
+import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, REBUILD_TODO_FILENAME } from '../trajectory-assistant.js'
 import { recordToolUsage } from '../usage-stats.js'
 import { PLUGIN_SOURCE } from '../message-source.js'
 
@@ -115,15 +115,20 @@ export function reminderText(code: string): string {
  *   使用者若要查看当前占用/阈值：看面板（`rebuildThresholdK` 滑块 + 状态显示）——那是给人看的。
  *
  * v1.31.1 交接协议（S142 用户需求"要求 LLM 将当前手头事项写在 SESSION.md 尾部，并要求
- * rebuild 后去读并处理"）：**写侧** = 这里（两条文案都要求把 in-flight 事项写在
- * SESSION.md 末尾的 `IN_FLIGHT_HEADING` 之下）；**读侧** = rebuild 锚点（rebuild.ts）。
- * 两侧共用 trajectory-assistant 的标题常量（单一真相源）。
+ * rebuild 后去读并处理"）：**写侧** = 这里；**读侧** = rebuild 锚点（rebuild.ts）。
+ * 两侧共用 trajectory-assistant 的常量（单一真相源）。
+ *
+ * 🔴 **v1.49.0（owner 2026-09-26 裁决："砍掉 in-flight，这正是目的"）**：写侧**不再**指向
+ * SESSION.md 末尾的段，改指**独立便签文件** `REBUILD-TODO_FILENAME`（轨迹目录下）——
+ * 理由见该常量的头注（持久文件 vs 只用一次的交界材料必须分家）。
  */
 export function rebuildReminderText(escalated = false): string {
   const handover =
     ` Before rebuilding, write your current in-flight items (the exact step you are in the middle of, `
-    + `what is not finished yet, and what the next action is) at the very end of SESSION.md under the heading `
-    + `"${IN_FLIGHT_HEADING}" — the rebuilt conversation reads that section first and continues from it.`
+    + `what is not finished yet, and what the next action is) into "${REBUILD_TODO_FILENAME}" in this trajectory's `
+    + `directory — create it if it does not exist. That file is a scratch note for the handover only: `
+    + `no format obligation, no archival duty, safe to discard at any time. The rebuilt conversation reads it first `
+    + `and continues from it.`
   if (escalated) {
     return `${eventToken('limitMandatory')} Context usage has reached the configured rebuild threshold — you have been reminded repeatedly and have NOT called the container_trajectory rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call container_trajectory rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild).${handover} The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call container_trajectory rebuild.`
   }
@@ -303,6 +308,85 @@ export function trajectoryCompactionReminderText(input: {
   return `${eventToken('compaction')} ${facts}. Pause the current work and compact this trajectory's log (SESSION.md) before continuing — that log is the persistent body of this trajectory, and its size is operational entropy (H_op) the container pays on every read. ${principles} ${frontmatterGuard} After rewriting, resume the paused work; this reminder stops once the file is under the limit.`
 }
 
+// ── REBUILD-TODO.md（交界便签）体积超限 → 清理提醒（v1.49.0，owner 2026-09-26 需求）──
+
+/**
+ * 交界便签体积上限（KB）—— **硬编码，刻意不设配置键**。
+ *
+ * 🔴 owner 2026-09-26 裁决（逐字）：*"不需要设定，很多设定项我想砍掉了，好的功能用久了就发现
+ * 离不开，就不需要了"* ⇒ **不提供 `sessionKeeper.rebuildTodoMaxKB`**（设计件 Q4 的原倾向被否）。
+ * 对照：SESSION.md 的上限**保留可配置**（既有面，本版不动）。
+ */
+export const DEFAULT_REBUILD_TODO_MAX_KB = 10
+
+/** 连续超限轮数达此值 → 语气升级（对齐 COMPACTION_ESCALATE_AFTER / REBUILD_ESCALATE_AFTER） */
+const REBUILD_TODO_ESCALATE_AFTER = 3
+
+interface RebuildTodoState {
+  /** 连续超限轮数（文件降回限内即清零 → 清理完成后提醒自动停止） */
+  consecutive: number
+}
+
+const rebuildTodoStates = new Map<string, RebuildTodoState>()
+
+/** 测试/调试：查看交界便签超限提醒状态 */
+export function rebuildTodoStateSnapshot(): ReadonlyMap<string, RebuildTodoState> {
+  return new Map(rebuildTodoStates)
+}
+
+/** 会话销毁/测试重置：清理超限计数（防 per-会话 Map 无界增长） */
+export function forgetRebuildTodoState(scope: string): void {
+  rebuildTodoStates.delete(scope)
+}
+
+/** 测试辅助：清空交界便签提醒状态 */
+export function __resetRebuildTodoForTest(): void {
+  rebuildTodoStates.clear()
+}
+
+/**
+ * 交界便签超限提醒文案（v1.49.0）。
+ *
+ * ## 与 SESSION.md 档的**语义差别**（刻意，不是疏漏）
+ *
+ * | | SESSION.md 超限（`trajectoryCompactionReminderText`） | 便签超限（本条） |
+ * |---|---|---|
+ * | 动作 | **重写**（compaction） | **清理／丢弃**（prune） |
+ * | 结构义务 | 保 EAP 骨架 ＋ 4 条重写原则 ＋ frontmatter 护栏 | **无** |
+ * | 强度 | 升级后**强制**（"STOP…必须先重写"） | 升级后**语气加重，但动作仍只是"清理"** |
+ * | 授权 | — | 🔴 **明确授权整份删除** |
+ *
+ * ## 归属（D23）
+ * 机制（文件名 ／ 上限 ／ 注入时机）归 **ACC**；**写什么、怎么组织、何时丢**归 **CCC**。
+ * 🔴 owner 裁决（逐字）：*"rebuild 提示 Agent 去写，清空我们就不干涉了，只管最大量"* ⇒
+ * **ACC 只提醒，不做任何写／删／归档操作**（自动删 = 数据丢失风险：rebuild 时序上新我还没读就被删）。
+ *
+ * ## 为什么要求"参照 eap"
+ * owner 裁决（逐字）：*"不规定，但要求参照 eap 来编写（这样质量会好点）"* ⇒
+ * **不规定内部结构**（不给骨架），但**要求按 EAP 写**（显式 ／ 可重建 ／ 稳定）。
+ */
+export function rebuildTodoReminderText(input: {
+  sizeKB: number
+  limitKB: number
+  mdPath: string
+  escalated?: boolean
+}): string {
+  const { sizeKB, limitKB, mdPath, escalated = false } = input
+  const facts = `${REBUILD_TODO_FILENAME} is ${sizeKB} KB (limit ${limitKB} KB): ${mdPath}`
+  const action =
+    `This file is a scratch note for the rebuild handover — it carries no archival duty and you may discard it `
+    + `wholesale at any time. Prune it now, writing in the spirit of eap (praxis eap): `
+    + `(1) delete what is already done; (2) delete what has been superseded; `
+    + `(3) delete what is already recorded in SESSION.md — that file is the trajectory's persistent body, `
+    + `this one only carries what the next self needs once. Do not restructure it into a formal document: `
+    + `the only mechanical constraint on this file is its size.`
+  if (escalated) {
+    return `${eventToken('scratchPrune')} ${facts} — you have been reminded repeatedly and have NOT pruned it. `
+      + `Prune it now. ${action} This reminder persists until the file is under the limit.`
+  }
+  return `${eventToken('scratchPrune')} ${facts}. ${action} This reminder stops once the file is under the limit.`
+}
+
 // ── DSH 注册 ──
 
 interface KeeperRegistration {
@@ -439,6 +523,36 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
           // 文件已回到限内（重写完成）→ 清零，提醒自动停止
           compactionStates.delete(scope)
         }
+      }
+    }
+
+    // ④ 交界便签（REBUILD-TODO.md）体积检查（v1.49.0，owner 2026-09-26 需求）：
+    // 与 ③ **同形**（同一 post-execute 钩子 ／ 同一 stat 口径 ／ 同一升级机制），但**语义不同**——
+    // ③ 要求"重写 SESSION.md 并保 EAP 骨架"，④ 只要求"**清理便签**"（可整份丢弃、不阻断工作）。
+    // 🔴 **文件不存在 ⇒ 零成本**（`readFileSize` 返回 null ⇒ 直接清零；**不自动创建**——空文件本身即熵）。
+    // 🔴 ACC 只提醒，**不做任何写／删／归档**（owner：*"清空我们就不干涉了，只管最大量"*）。
+    if (skiffTrajectoryEnabled(root, sessionId, 'session')) {
+      const scope = sessionId ?? 'global'
+      const session = (exec as { agent?: { session?: unknown } }).agent?.session
+      const mdPath = resolveActiveSessionMdPath(root, scope, session)
+      const todoPath = mdPath ? join(dirname(mdPath), REBUILD_TODO_FILENAME) : null
+      const size = todoPath ? readFileSize(todoPath) : null
+      if (todoPath && size !== null && size > DEFAULT_REBUILD_TODO_MAX_KB * 1024) {
+        const st = rebuildTodoStates.get(scope) ?? { consecutive: 0 }
+        st.consecutive += 1
+        blocks.push({
+          type: 'text',
+          text: rebuildTodoReminderText({
+            sizeKB: Math.round(size / 1024),
+            limitKB: DEFAULT_REBUILD_TODO_MAX_KB,
+            mdPath: todoPath,
+            escalated: st.consecutive >= REBUILD_TODO_ESCALATE_AFTER,
+          }),
+        })
+        rebuildTodoStates.set(scope, st)
+      } else {
+        // 文件不存在（size === null）或已回到限内 → 清零，提醒自动停止
+        rebuildTodoStates.delete(scope)
       }
     }
 
