@@ -37,10 +37,10 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
 
 import { Config } from '../src/index.ts'
 
-/** 设置面板层（扁平键）——**用户能在界面上改的十个字段**（= 必须 volatile 的那批） */
+/** 设置面板层（扁平键）——**用户能在界面上改的九个字段**（= 必须 volatile 的那批）
+ *  🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）⇒ 十个 → 九个 */
 const PANEL_KEYS = [
   'gatewayEnabled',
-  'rebuildEnabled',
   'rebuildThresholdK',
   'skiffEnabled',
   'skiffDebugPort',

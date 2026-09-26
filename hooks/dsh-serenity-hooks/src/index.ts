@@ -170,7 +170,10 @@ export const Config = z.object({
   opencodeSkills: z.boolean().default(true),
   // v1.21 简单配置 entry 默认（schemastery：字段不 required 即可选）
   gateway: z.object({ enabled: z.boolean().default(false) }),
-  rebuild: z.object({ enabled: z.boolean().default(true), thresholdK: z.number().min(50).max(4000).default(400) }),
+  // v1.49.0（owner 2026-09-26 裁决）：「超限重建总开关」`rebuild.enabled` **已砍掉** ——
+  // 长期验证下超限重建已能很好地代替上下文压缩 ⇒ 不再需要"整体关掉"这个逃生门。
+  // 同族先例 = `wakeSchedulerEnabled`（2026-09-21 砍掉，旧键静默忽略）。
+  rebuild: z.object({ thresholdK: z.number().min(50).max(4000).default(400) }),
   skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(SKIFF_DEBUG_PORT) }),
   acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT) }),
   webFetch: z.object({ enabled: z.boolean().default(true) }),
@@ -186,7 +189,8 @@ export const Config = z.object({
   //    返回 `undefined`），**不是** `undefined` ⇒ 一律经 `settings-section.ts` 的 `unwrapVolatile()`。
   // 约束（min/max）与旧 settings schema 逐字一致，保证面板输入仍被宿主校验。
   gatewayEnabled: z.boolean().volatile(),
-  rebuildEnabled: z.boolean().volatile(),
+  // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` **已砍掉**（超限重建恒开、无闸）。
+  // 旧配置里若残留该键 ⇒ **静默忽略**（同 `wakeSchedulerEnabled` 的处置）。
   rebuildThresholdK: z.number().min(50).max(4000).volatile(),
   skiffEnabled: z.boolean().volatile(),
   skiffDebugPort: z.number().min(1024).max(65535).volatile(),

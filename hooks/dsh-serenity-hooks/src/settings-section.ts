@@ -53,14 +53,15 @@ type PanelNumber = number | Volatile<number | undefined>
 interface SimpleConfigFragment {
   // ── 部署层（cordis.yml / bundle patch）──
   gateway?: { enabled?: boolean }
-  rebuild?: { enabled?: boolean; thresholdK?: number }
+  // 🔴 v1.49.0：`rebuild.enabled` 与扁平键 `rebuildEnabled` 均已砍掉（owner 2026-09-26 裁决）
+  rebuild?: { thresholdK?: number }
   /** F4 Skiff（实验性）：调试服务启停（人工） */
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
   acp?: { enabled?: boolean; httpPort?: number }
   // ── 面板层（扁平键；无默认值 ⇒ "未设置"可观测；**0.1.7 起运行期是 `Volatile<T>` 包装**）──
   gatewayEnabled?: PanelBoolean
-  rebuildEnabled?: PanelBoolean
+  // 🔴 v1.49.0：`rebuildEnabled` 面板键已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
   rebuildThresholdK?: PanelNumber
   skiffEnabled?: PanelBoolean
   skiffDebugPort?: PanelNumber
@@ -80,8 +81,9 @@ export const SERENITY_SETTINGS_NS = 'serenity-hooks'
 interface SerenitySimpleSettings {
   /** F1 双端口网关总开关 */
   gatewayEnabled: boolean
-  /** F2 超限重建总开关 */
-  rebuildEnabled: boolean
+  // 🔴 v1.49.0（owner 2026-09-26 裁决）：原「F2 超限重建总开关」`rebuildEnabled` **已砍掉** ——
+  // 长期验证下超限重建已能很好地代替上下文压缩 ⇒ 不再需要"整体关掉"的逃生门。
+  // 触发阈值 `rebuildThresholdK` **仍在**（面板那个滑块不动）⇒ 要调敏感度改阈值即可。
   /** F2 触发阈值（需求① S142 用户拍板：百分比比例 → K 数值；projectedTokens ≥ thresholdK*1000 触发） */
   rebuildThresholdK: number
   /** F4 Skiff 调试服务总开关（实验性；默认关——不随插件加载自动启动，人工开启） */
@@ -118,7 +120,6 @@ interface SerenitySimpleSettings {
 export function defaultSimpleSettings(): SerenitySimpleSettings {
   return {
     gatewayEnabled: false,
-    rebuildEnabled: true,
     rebuildThresholdK: 400,
     skiffEnabled: false,
     skiffDebugPort: SKIFF_DEBUG_PORT,
@@ -171,7 +172,8 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
   const d = defaultSimpleSettings()
   return {
     gatewayEnabled: unwrapVolatile(config.gatewayEnabled) ?? config.gateway?.enabled ?? d.gatewayEnabled,
-    rebuildEnabled: unwrapVolatile(config.rebuildEnabled) ?? config.rebuild?.enabled ?? d.rebuildEnabled,
+    // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` **已砍掉** —— 超限重建恒开、无总闸。
+    // 旧配置残留该键 ⇒ 不进本结构、无人读（静默忽略）。
     rebuildThresholdK: unwrapVolatile(config.rebuildThresholdK) ?? config.rebuild?.thresholdK ?? d.rebuildThresholdK,
     skiffEnabled: unwrapVolatile(config.skiffEnabled) ?? config.skiff?.enabled ?? d.skiffEnabled,
     skiffDebugPort: unwrapVolatile(config.skiffDebugPort) ?? config.skiff?.debugPort ?? d.skiffDebugPort,

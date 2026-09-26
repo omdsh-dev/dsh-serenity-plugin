@@ -36,11 +36,10 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部内建缺省（gateway off / rebuild on 400K / skiff off 3099 / acp off 3100 / CRO **on**）', () => {
+  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / acp off 3100 / CRO **on**）', () => {
     const d = simpleSettingsFromConfig({})
     expect(d).toEqual({
       gatewayEnabled: false,
-      rebuildEnabled: true,
       rebuildThresholdK: 400,
       skiffEnabled: false,
       skiffDebugPort: 3099,
@@ -52,16 +51,25 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     })
   })
 
+  it('🔴 v1.49.0 砍闸回归钉：简单配置里**不再有** rebuildEnabled（旧配置残留该键也不进结构）', () => {
+    // owner 2026-09-26 裁决：超限重建总开关已砍掉 ⇒ 扁平键与嵌套 `rebuild.enabled` 双双退场。
+    // 用"键在不在"断言（而非 toBeUndefined）——契约是**无该键**，不是"值为 undefined"。
+    expect('rebuildEnabled' in simpleSettingsFromConfig({})).toBe(false)
+    const stale = simpleSettingsFromConfig({ rebuildEnabled: true, rebuild: { enabled: true } } as never)
+    expect('rebuildEnabled' in stale).toBe(false)
+    // 阈值这条仍在（要调敏感度改它）
+    expect(stale.rebuildThresholdK).toBe(400)
+  })
+
   it('🔴 部署层（嵌套段）生效 —— 面板层未设时读嵌套段', () => {
     const d = simpleSettingsFromConfig({
       gateway: { enabled: true },
-      rebuild: { enabled: false, thresholdK: 500 },
+      rebuild: { thresholdK: 500 },
       skiff: { enabled: true, debugPort: 4000 },
       acp: { enabled: true, httpPort: 4100 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
-      rebuildEnabled: false,
       rebuildThresholdK: 500,
       skiffEnabled: true,
       skiffDebugPort: 4000,
@@ -77,19 +85,16 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     const d = simpleSettingsFromConfig({
       gateway: { enabled: false },
       gatewayEnabled: true, // 面板层
-      rebuild: { enabled: false, thresholdK: 500 },
+      rebuild: { thresholdK: 500 },
       rebuildThresholdK: 700, // 面板层
     })
     expect(d.gatewayEnabled).toBe(true)
     expect(d.rebuildThresholdK).toBe(700)
-    // 面板层没设的字段仍走部署层
-    expect(d.rebuildEnabled).toBe(false)
   })
 
   it('部分覆盖保留其余默认', () => {
     const d = simpleSettingsFromConfig({ rebuild: { thresholdK: 700 } })
     expect(d.rebuildThresholdK).toBe(700)
-    expect(d.rebuildEnabled).toBe(true)
     expect(d.gatewayEnabled).toBe(false)
   })
 

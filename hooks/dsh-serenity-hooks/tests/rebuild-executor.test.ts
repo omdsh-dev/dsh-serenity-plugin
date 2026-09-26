@@ -6,7 +6,7 @@
  * 而既有 `tests/rebuild.test.ts` 已覆盖顺利路径（排队 → replace → steer 自动继续）。
  *
  * 🔴 **本件补的正是"出错时用户看到什么"**：
- *   · `queueRebuild` 的两道门 ⇒ **总闸关**（rebuild.enabled=false）／**会话定位失败**（可能已关闭）
+ *   · `queueRebuild` 的两道门 ⇒ **会话定位失败**（可能已关闭）＋（v1.49.0 起）**已退役的总闸残留值不得再拦**
  *   · 会话名的**回落派生**（无内存活跃信息 ⇒ 由 mdPath 目录名派生）＋ 非 `S###` 目录名 ⇒ 绑定行**不编造 S 号**
  *   · turn 钩子：**无 agent** ／ **陈旧队列超 TTL**（丢弃 ＋ 记 `ttl-dropped`）／
  *     **meter 三态**（缺失退化 ／ 有 `estimateMessage` ⇒ 真走 shadow-price 包装 ／ 有服务但无该方法 ⇒ 同样退化）
@@ -151,17 +151,18 @@ async function queueFor(session: unknown, o: { summary?: string; dirName?: strin
 // ── queueRebuild 的两道门 ＋ 会话名回落 ─────────────────────────────────────────
 
 describe('rebuild-executor：queueRebuild 的门与回落', () => {
-  it('🔴 总闸关闭（rebuildEnabled=false）⇒ 响亮抛错且**不排队**', async () => {
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), rebuildEnabled: false }))
+  it('🔴 v1.49.0 砍闸回归钉：旧配置残留 `rebuildEnabled=false` ⇒ **照样排队**（该键已砍、静默忽略）', async () => {
+    // owner 2026-09-26 裁决：超限重建总开关已砍掉 ⇒ 旧配置里的残留值**不得再拦下 rebuild**。
+    // 同族先例 = `wakeSchedulerEnabled`（2026-09-21 砍掉，旧键静默忽略）。
+    const staleSource = (): ReturnType<typeof defaultSimpleSettings> =>
+      ({ ...defaultSimpleSettings(), rebuildEnabled: false }) as unknown as ReturnType<typeof defaultSimpleSettings>
+    __setSimpleSourceForTest(staleSource)
     const session = fakeSession([10, 11])
-    const md = mkSessionDir('2026-08-28--S200--disabled')
+    const md = mkSessionDir('2026-08-28--S200-retired-switch')
     bindSession(session, md)
 
-    await expect(
-      queueRebuild(qctx(session), { root: dir, summary: 'x', agentCwd: dir, dshSessionId: 's1' }),
-    ).rejects.toThrow(/rebuild is disabled/)
-    expect(pendingRebuildSnapshot().size).toBe(0) // 队列未被写入
-    expect(session._calls).toHaveLength(0) // surface 零改动
+    await queueRebuild(qctx(session), { root: dir, summary: 'x', agentCwd: dir, dshSessionId: 's1' })
+    expect(pendingRebuildSnapshot().size).toBe(1) // 队列被写入 —— 不再有"总闸"这一道门
   })
 
   it('会话定位失败（可能已关闭）⇒ 抛错说明是哪个 id，不静默', async () => {

@@ -478,7 +478,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
     // 🔴 2026-09-16（S142 所有者指令，D64）：**判定照旧读 K，但注入文本不再带数值**
     // （`rebuildReminderText` 参数已退化为仅 escalated；见其头注）。
-    if (skiffRebuild && readSimpleSettings().rebuildEnabled) {
+    if (skiffRebuild) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
         const pressure = readContextPressure(ctx, session)

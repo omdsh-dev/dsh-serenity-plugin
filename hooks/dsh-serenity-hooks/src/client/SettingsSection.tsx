@@ -38,7 +38,7 @@ import './SettingsSection.css'
 /** serenity-hooks 简单配置 wire 形态（= 插件 Config 的**面板层**扁平键；host 侧同名） */
 export interface SerenitySimpleWire {
   gatewayEnabled?: boolean
-  rebuildEnabled?: boolean
+  // 🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
   rebuildThresholdK?: number
   /** F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务启停 + 端口 */
   skiffEnabled?: boolean
@@ -84,7 +84,8 @@ function Toggle(props: { checked: boolean; disabled?: boolean; onChange: (on: bo
 function RowCard(props: {
   title: string
   desc: string
-  control: React.ReactNode
+  /** 右置控件；**可选** —— v1.49.0 起有"恒开、无开关"的行（如超限重建：总闸已砍） */
+  control?: React.ReactNode
   help?: string
   expandable?: boolean
   /** 受控展开态（外部持有 state 时）；缺省内部自管理 */
@@ -123,7 +124,7 @@ function RowCard(props: {
           </span>
         )}
       </div>
-      <div className="ss-rowControl">{control}</div>
+      {control !== undefined && <div className="ss-rowControl">{control}</div>}
       {expandable && open && detail !== undefined && (
         <div className="ss-rowDetail">{detail}</div>
       )}
@@ -187,7 +188,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   }
 
   const gatewayOn = value?.gatewayEnabled ?? false
-  const rebuildOn = value?.rebuildEnabled ?? true
+  // v1.49.0：`rebuildOn` 已随总开关一起砍掉（超限重建恒开，面板不再有该 Toggle）
   const thresholdK = value?.rebuildThresholdK ?? 400
   const skiffOn = value?.skiffEnabled ?? false
   const skiffPort = value?.skiffDebugPort ?? 3099
@@ -247,14 +248,14 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             open={openRebuild}
             onToggle={setOpenRebuild}
             expandHint="配置"
-            control={<Toggle checked={rebuildOn} onChange={(on) => toggle('rebuildEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
                 <p className="ss-detailIntro">{'上下文超限自动重建（container_trajectory rebuild，v1.33 起 logbook 并入 trajectory）：\n' +
                   '· 机制：agent 上下文占用达到阈值时，由 LLM 主动调用重建\n' +
                   '· 语义：完全丢弃当前 dsh 会话 + 自动新建 + 注入「继续原 SESSION 的工作」\n' +
                   '· 效果：SESSION.md 原位不动，认知轨迹延续，上下文归零\n' +
-                  '· 关闭后：上下文超限时不再提示，可能导致会话卡顿或丢失'}
+                  '· 无总开关（v1.49.0 砍掉）：长期验证下它已能很好地代替上下文压缩；\n' +
+                  '  要调敏感度就改下面的阈值'}
                 </p>
                 <RowCard
                   title="重建阈值"
@@ -263,7 +264,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                     '· 含义：上下文 projected tokens 达到 thresholdK × 1000 时触发提醒\n' +
                     '· 纯绝对数值（不再依赖窗口比例）\n' +
                     '· 迁移：旧版 0~1 比例（settings.yaml rebuildThreshold）已废弃被忽略\n' +
-                    '· 调低更早触发 / 调高更晚触发；仅「超限重建」开启时有意义'}
+                    '· 调低更早触发 / 调高更晚触发（v1.49.0 起无总开关，它恒生效）'}
                   control={
                     <input
                       className="ss-portInput"
@@ -272,7 +273,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                       max={4000}
                       step={50}
                       value={thresholdK}
-                      disabled={!rebuildOn}
                       title="重建阈值（K token，默认 400）"
                       onChange={(e) => setThreshold(Number(e.target.value))}
                     />

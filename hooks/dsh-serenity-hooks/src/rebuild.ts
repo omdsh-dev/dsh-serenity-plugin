@@ -50,7 +50,6 @@ import { PLUGIN_SOURCE } from './message-source.js'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { agentCwdFor, cccRootForCwd } from './ccc-roots.js'
-import { readSimpleSettings } from './settings-section.js'
 import {
   getActiveSessionInfo,
   parseSessionContextFromEvents,
@@ -297,9 +296,8 @@ export async function queueRebuild(
   ctx: Context,
   opts: { root: string; note?: string; summary: string; agentCwd: string; dshSessionId: string },
 ): Promise<RebuildResult> {
-  if (!readSimpleSettings().rebuildEnabled) {
-    throw new Error('container_trajectory rebuild is disabled (rebuild.enabled=false — enable it in the dsh settings panel)')
-  }
+  // 🔴 v1.49.0（owner 2026-09-26 裁决）：原「总闸」`rebuild.enabled=false` 的拒绝分支**已砍掉** ——
+  // 超限重建恒开、无闸。要调敏感度改阈值（`rebuildThresholdK`），不再有"整体关掉"这个态。
   const { root, note, summary, dshSessionId } = opts
 
   // ① 定位 dsh 会话（turn-stopping 时按 agent 匹配；此处先验证存在）
