@@ -1,3 +1,43 @@
+## v1.48.2 — 2026-09-26（**`container_git`：提交与推送不再分家 ＋ 修「push 回成功而远程未变」的假成功**）
+
+**来源**：owner 2026-09-26 追加要求「`container_git` commit 和 push 是分离的，导致 CC 常常只 commit 没有 push」；
+同批并入 **tiangong-serenity 的报障**（`container_git push` 连续 3 次回成功，远程 ref **3/3 未变**）。设计件 = `docs/git-commit-push-coupling-design.md`。
+
+> 🔴 **两个问题在根上是同一个**：工具面**无法区分「做到了」与「没做到」**。
+> ① `commit` 的终点是**本地对象库**（push 另一步）⇒ 半途与完成**同形**；实测本仓有 **6h11m** 的未推送窗口。
+> ② 更严重：`push` 把**被超时杀掉**报成成功 —— 实测 `execFileSync` 超时**不设 `err.killed`**（真值 `code=ETIMEDOUT` /
+> `signal=SIGTERM` / `status=null` / stderr 长度 0），而成功时**丢弃 stderr**（`git push` 的输出本就走 stderr）
+> ⇒ 两者都交出 `{stdout:'',stderr:''}`，旧判据 `if (!stderr) → 成功` 判错，回显 `Pushed to origin/<branch>`。
+
+---
+
+### 一、改了什么（白话）
+
+1. **提交后自动推送。** `container_git commit` 默认**随后 push**（`noPush` 可显式关）；push 失败**不吞** ——
+   回执写「**已本地提交，但未推送**」＋ 原因 ＋ 重试指引。
+2. **只提交你指定的路径。** `commit` 新增 `paths`（不传＝旧行为整仓 `add -A`，但**回执显式告知**"本次含整仓改动"）。
+   ⇒ CCC 不必再为了躲开 `add -A` 而绕道 `sys git`，**"提交 ⇒ 自动推送"的覆盖因此成立**。
+3. **推送的成功判据换成可核验事实。** 走 `git push --porcelain` 的 stdout ref 行
+   （flag：` `=快进 ／ `+`=强推 ／ `*`=新建 ／ `=`=已最新 ／ `!`=被拒），回执回显 `before..after` 的 SHA 变迁。
+   **超时 ／ 读不到 ref 行一律不声称成功**，并附 `git ls-remote` 核验指令。
+   ⚠️ 实现首版只认 `*`/`+`，而**正常快进用【空格】flag** ⇒ 把真成功报成"已最新"（**假阴性**，与原 bug 同族），被测试当场打回。
+4. **本地领先看得见。** `status` 新增 `ahead`/`behind`，领先时 `summary` 明写「**N 笔未推送**」。
+5. **超时可配。** `DSH_GIT_TIMEOUT_MS`（默认 30s）／ `DSH_GIT_NET_TIMEOUT_MS`（默认 **180s**；此前固定 30s ⇒ 大体量推送必然被杀）。
+
+### 二、给使用者的唯一判据
+
+> **推送成功的唯一判据** = `git ls-remote origin <branch>`（或 `git fetch && git rev-parse origin/<branch>`）
+> 与本地 `HEAD` 比对 —— **不得采信任何回执。**
+
+### 三、已知边界（本版**未做**，勿当成已完成）
+
+- **`dashboard health` 未加 pending-push 项**（只做了 `status` 的可见面）。
+- **网络动作仍是同步 `execFileSync`** ⇒ 一次长推会把 DSH server 的事件循环**冻住**（上限 = 超时值）。
+  真正的解法是 `spawn` + await；本版以"抬高超时"作为权衡。
+- **> 180s 的推送**未在真环境验证；更慢的远端请设 `DSH_GIT_NET_TIMEOUT_MS`。
+
+---
+
 ## v1.48.1 — 2026-09-26（**把 v1.48.0 的自动补模型修到真能用**：补上路由级 `baseURL` ＋ 给「已列出但缺规格」的模型补推理档）
 
 **来源**：owner 2026-09-26 令「**修掉**」—— 直指 v1.48.0 在**真机上根本没生效**（D14 具名令）。
