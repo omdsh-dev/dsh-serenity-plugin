@@ -113,6 +113,16 @@ export interface OpencodeExtraModel {
   readonly name: string
   /** 该模型说的 wire 协议；见 {@link OPENCODE_GO_NON_COMPLETIONS} 的安全闸 */
   readonly api: string
+  /**
+   * 该模型的端点基址 —— 🔴 **目录外模型的必需品**（v1.48.1 补）。
+   *
+   * 宿主 `resolveRouteModels` 的兜底链是 `request.baseURL ?? base?.baseUrl ?? providerBaseUrl`；
+   * 目录里没有它 ⇒ `base` 为 undefined，而 pi-ai 的 `opencodeGoProvider()` **也没有 provider 级
+   * baseUrl** ⇒ 三级全空 ⇒ 宿主**严格写入直接把整条补丁拒掉**（v1.48.0 真机实测原文：
+   * `model "deepseek-v4.1-flash" needs a baseURL; the installed catalog does not describe this route`）。
+   * 故本字段是**唯一可控的那一环**：路由自身没写 `baseURL` 时，必须由我们补上。
+   */
+  readonly baseUrl: string
   readonly contextWindow: number
   readonly maxTokens: number
   readonly input: readonly string[]
@@ -135,6 +145,8 @@ export const OPENCODE_EXTRA_MODELS: Readonly<Record<string, OpencodeExtraModel>>
   'deepseek-v4.1-flash': {
     name: 'DeepSeek V4.1 Flash',
     api: 'openai-completions',
+    // 逐字取自目录里 deepseek-v4-flash 的 baseUrl（同族兄弟、同端点）——不自行发明
+    baseUrl: 'https://opencode.ai/zen/go/v1',
     contextWindow: 1_000_000,
     maxTokens: 384_000,
     input: ['text'],
@@ -191,7 +203,8 @@ type OpencodeAutoConfigAction =
   | { kind: 'create-route'; route: string }
   | { kind: 'skip-route'; route: string; reason: 'headers-complete' }
   | { kind: 'add-models'; route: string; ids: readonly string[]; api: string | null }
-  | { kind: 'skip-models'; route: string; reason: 'catalog-served' | 'mixed-protocol' | 'api-conflict' }
+  | { kind: 'enrich-models'; route: string; ids: readonly string[] }
+  | { kind: 'skip-models'; route: string; reason: 'catalog-served' | 'mixed-protocol' | 'api-conflict' | 'api-missing' }
   | { kind: 'idle'; reason: 'namespace-unregistered' | 'no-route' }
 
 interface OpencodeAutoConfigPlan {
@@ -200,66 +213,123 @@ interface OpencodeAutoConfigPlan {
   actions: readonly OpencodeAutoConfigAction[]
 }
 
-/** 路由的 models 列表里已有 / 缺哪些补丁模型 */
+/** 路由的 models 列表里"补"了什么（**追加**目录外模型 ／ 给**已列出**的补规格） */
 interface ExtraModelsPlan {
-  /** 追加后的**完整** models 数组（原条目**逐字保留**）；undefined = 不改这一项 */
+  /** 改写后的**完整** models 数组（未改动的条目**逐字保留**）；undefined = 不改这一项 */
   models?: readonly unknown[]
   /** 需要同时设的路由级 `api`（缺省不出现在补丁里） */
   api?: string
+  /** 需要同时设的路由级 `baseURL`（缺省不出现在补丁里；路由自己写过就不动它） */
+  baseUrl?: string
   /** 追加进去的模型 id */
   addedIds: readonly string[]
-  /** 为何没补（`addedIds` 非空时无意义） */
-  skip?: 'catalog-served' | 'mixed-protocol' | 'api-conflict'
+  /** 就地补齐了规格的模型 id（已列出但缺 `reasoningEfforts`） */
+  enrichedIds: readonly string[]
+  /** 为何没补（`addedIds`／`enrichedIds` 皆空时才有意义） */
+  skip?: 'catalog-served' | 'mixed-protocol' | 'api-conflict' | 'api-missing'
 }
 
 /**
- * 往**已有显式 `models` 列表**的路由里追加目录未收录的模型（**纯函数**）。
+ * 把 {@link OPENCODE_EXTRA_MODELS} 落到一个**已有显式 `models` 列表**的路由上（**纯函数**）。
  *
- * 三条拒绝条件（每条都对应一个会让配置变坏的真实形态）：
- *   ① **没有显式 `models` 列表** ⇒ 该路由此刻服务的是 pi-ai 目录本体；
- *      一旦我们写出 `models`，**整个目录会被顶掉**（宿主的 `models` 是"整体替换"语义）
- *      ⇒ 宁可不动。
+ * 两种落法（v1.48.1 起）：
+ *   · **追加**（模型不在表里）—— 目录里没有它，连条目都得我们造。
+ *   · **补规格**（模型已在表里、但缺 `reasoningEfforts`）—— 🔴 **这是"手加过"的形态**：
+ *     用户把模型抄进列表了，可没抄推理档 ⇒ 宿主 `resolveModelReasoning` 走 `base?.reasoning ?? false`
+ *     ⇒ **能用但永远不出 thinking**。只补"缺失的模型"是补不到这一形态的。
+ *
+ * 拒绝条件（每条都对应一个会让配置变坏的真实形态；宁可不动也不硬来）：
+ *   ① **没有显式 `models` 列表**（含空表）⇒ 该路由此刻服务的是 pi-ai 目录本体；
+ *      一旦我们写出 `models`，**整个目录会被顶掉**（宿主的 `models` 是"整体替换"语义）。
  *   ② **列表里出现已知异协议模型** ⇒ 设路由级 `api` 会覆盖它们的 `base.api`，把它们配坏。
  *   ③ **路由已显式设了别的 `api`** ⇒ 同上，且那是用户的显式选择，不覆盖。
+ *   ④ **要补规格却判不出协议**（路由没写 `api`，又不追加任何模型）⇒ 无法保证 compat 合法。
  */
 function planExtraModels(profile: Record<string, unknown>): ExtraModelsPlan {
   const raw = profile.models
-  if (!Array.isArray(raw) || raw.length === 0) return { addedIds: [], skip: 'catalog-served' }
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return { addedIds: [], enrichedIds: [], skip: 'catalog-served' }
+  }
 
-  const ids = new Set<string>()
+  const byId = new Map<string, Record<string, unknown>>()
   for (const entry of raw) {
-    if (isPlainObject(entry) && typeof entry.id === 'string') ids.add(entry.id)
+    if (isPlainObject(entry) && typeof entry.id === 'string') byId.set(entry.id, entry)
   }
-  const missing = Object.entries(OPENCODE_EXTRA_MODELS).filter(([id]) => !ids.has(id))
-  if (missing.length === 0) return { addedIds: [] }
-
-  for (const id of ids) {
-    if (OPENCODE_GO_NON_COMPLETIONS.has(id)) return { addedIds: [], skip: 'mixed-protocol' }
+  // ②：已知异协议模型在场 ⇒ 任何路由级 api/baseURL 都别写
+  for (const id of byId.keys()) {
+    if (OPENCODE_GO_NON_COMPLETIONS.has(id)) return { addedIds: [], enrichedIds: [], skip: 'mixed-protocol' }
   }
 
-  // 仅当待补模型的协议**一致**时才继续（路由级 api 只能有一个值）
-  const apis = new Set(missing.map(([, model]) => model.api))
-  if (apis.size !== 1) return { addedIds: [], skip: 'mixed-protocol' }
-  const api = [...apis][0] as string
+  const missing = Object.entries(OPENCODE_EXTRA_MODELS).filter(([id]) => !byId.has(id))
+  const existingApi = typeof profile.api === 'string' && profile.api !== '' ? profile.api : undefined
 
-  const existingApi = profile.api
-  if (typeof existingApi === 'string' && existingApi !== api) return { addedIds: [], skip: 'api-conflict' }
+  // 路由级 api：待补模型的协议必须一致（路由级 api 只能有一个值）
+  let pendingApi: string | undefined
+  if (missing.length > 0) {
+    const apis = new Set(missing.map(([, model]) => model.api))
+    if (apis.size !== 1) return { addedIds: [], enrichedIds: [], skip: 'mixed-protocol' }
+    pendingApi = [...apis][0] as string
+  }
+  if (existingApi !== undefined && pendingApi !== undefined && existingApi !== pendingApi) {
+    return { addedIds: [], enrichedIds: [], skip: 'api-conflict' }
+  }
+  /** 写完之后该路由的**有效协议**（第三方条目也会按它解析） */
+  const effectiveApi = existingApi ?? pendingApi
 
-  const appended: unknown[] = missing.map(([id, model]) => ({
-    id,
-    name: model.name,
-    contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
-    input: [...model.input],
-    reasoningEfforts: { ...model.reasoningEfforts },
-    compat: { ...model.compat },
-  }))
+  // 已列出、但缺推理档的那些 ⇒ 就地补规格
+  const toEnrich: Array<[string, OpencodeExtraModel, Record<string, unknown>]> = []
+  for (const [id, model] of Object.entries(OPENCODE_EXTRA_MODELS)) {
+    const entry = byId.get(id)
+    if (entry === undefined) continue
+    if (entry.reasoningEfforts !== undefined) continue // 用户写过就别碰（含显式 `false`）
+    if (effectiveApi === undefined) return { addedIds: [], enrichedIds: [], skip: 'api-missing' }
+    if (effectiveApi !== model.api) return { addedIds: [], enrichedIds: [], skip: 'api-conflict' }
+    toEnrich.push([id, model, entry])
+  }
+
+  if (missing.length === 0 && toEnrich.length === 0) return { addedIds: [], enrichedIds: [] }
+
+  // 路由自己写过 baseURL ⇒ 兜底链已成立，**不动它**（用户的端点就是用户的端点）；
+  // 没写过 ⇒ 必须由我们给出，否则宿主严格写入会以 `needs a baseURL` 拒掉整条补丁（v1.48.0 事故）。
+  let baseUrl: string | undefined
+  if (!(typeof profile.baseURL === 'string' && profile.baseURL !== '')) {
+    const want = new Set([...missing.map(([, m]) => m), ...toEnrich.map(([, m]) => m)].map((m) => m.baseUrl))
+    if (want.size !== 1) return { addedIds: [], enrichedIds: [], skip: 'mixed-protocol' }
+    baseUrl = [...want][0]
+  }
+
+  const enrichById = new Map(toEnrich.map(([id, model]) => [id, model]))
+  const models: unknown[] = raw.map((entry) => {
+    if (!isPlainObject(entry) || typeof entry.id !== 'string') return entry
+    const model = enrichById.get(entry.id)
+    if (model === undefined) return entry
+    return {
+      // 原条目**逐字保留**，只补上缺的那两项 —— 用户字段一个都不许丢、更不许改
+      ...entry,
+      reasoningEfforts: { ...model.reasoningEfforts },
+      // compat 合并：我们的规格在前、**用户已写的键优先**（绝不覆盖用户的选择）
+      compat: { ...model.compat, ...(isPlainObject(entry.compat) ? entry.compat : {}) },
+    }
+  })
+  for (const [id, model] of missing) {
+    models.push({
+      id,
+      name: model.name,
+      contextWindow: model.contextWindow,
+      maxTokens: model.maxTokens,
+      input: [...model.input],
+      reasoningEfforts: { ...model.reasoningEfforts },
+      compat: { ...model.compat },
+    })
+  }
+
   return {
-    // 原条目**逐字保留**（不重建、不规范化——用户字段一个都不许丢）
-    models: [...raw, ...appended],
+    models,
     // 已显式设过同值 api 时不重复写（避免无谓的 settings/updated）
-    ...(existingApi === api ? {} : { api }),
+    ...(pendingApi !== undefined && existingApi === undefined ? { api: pendingApi } : {}),
+    ...(baseUrl === undefined ? {} : { baseUrl }),
     addedIds: missing.map(([id]) => id),
+    enrichedIds: toEnrich.map(([id]) => id),
   }
 }
 
@@ -343,13 +413,15 @@ export function planOpencodeAutoConfig(input: OpencodeAutoConfigInput): Opencode
     // `catalog-served`（没有 models 列表）是**常态**，不出声；只有"有列表却拒绝"才值得说明
     if (extra.skip !== undefined && extra.skip !== 'catalog-served') {
       actions.push({ kind: 'skip-models', route, reason: extra.skip })
-    } else if (extra.addedIds.length > 0) {
-      actions.push({ kind: 'add-models', route, ids: extra.addedIds, api: extra.api ?? null })
+    } else {
+      if (extra.addedIds.length > 0) actions.push({ kind: 'add-models', route, ids: extra.addedIds, api: extra.api ?? null })
+      if (extra.enrichedIds.length > 0) actions.push({ kind: 'enrich-models', route, ids: extra.enrichedIds })
     }
     const routePatch: Record<string, unknown> = {}
     if (keys.length > 0) routePatch.headers = missing
     if (extra.models !== undefined) routePatch.models = extra.models
     if (extra.api !== undefined) routePatch.api = extra.api
+    if (extra.baseUrl !== undefined) routePatch.baseURL = extra.baseUrl
     if (keys.length === 0 && Object.keys(routePatch).length === 0) {
       actions.push({ kind: 'skip-route', route, reason: 'headers-complete' })
       continue
@@ -397,13 +469,18 @@ export function describeOpencodeAction(action: OpencodeAutoConfigAction): string
     case 'add-models':
       return `为 ${action.route} 补目录未收录的模型：${action.ids.join(', ')}`
         + (action.api === null ? '' : `（并设路由 api=${action.api}）`)
+    case 'enrich-models':
+      return `为 ${action.route} 已列出的模型补推理档：${action.ids.join(', ')}`
+        + '（此前「能用但没 thinking」）'
     case 'skip-models':
       return `${action.route} 未补模型（${
         action.reason === 'catalog-served'
           ? '该路由未声明 models 列表，补 models 会顶掉整个目录'
           : action.reason === 'mixed-protocol'
             ? '该路由含异协议模型，设路由 api 会把它们配坏'
-            : '该路由已显式设了别的 api'
+            : action.reason === 'api-missing'
+              ? '该模型已列出但缺推理档，而路由没写 api ⇒ 判不出该用哪套 compat'
+              : '该路由的 api 与本表规格不一致'
       }）`
     case 'idle':
       return `无需动作（${action.reason}）`

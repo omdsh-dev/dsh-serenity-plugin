@@ -427,10 +427,11 @@ describe('opencode-provider: L3 补目录未收录的模型', () => {
     expect(p.actions).toEqual([{ kind: 'add-models', route: 'opencode-go', ids: [EXTRA_ID], api: EXTRA.api }])
   })
 
-  it('🔴 缺头 + 缺模型 ⇒ 两个动作都在，补丁含 headers 与 models', () => {
+  it('🔴 缺头 + 缺模型 ⇒ 两个动作都在，补丁含 headers ／ models ／ api ／ baseURL', () => {
     const p = plan({ providers: { 'opencode-go': { models: [{ id: 'deepseek-v4-flash' }] } } })
     const route = (p.patch.providers as Record<string, Record<string, unknown>>)['opencode-go']!
-    expect(Object.keys(route).sort()).toEqual(['api', 'headers', 'models'])
+    // baseURL 是 v1.48.1 补的（目录外模型的必需品；缺了会被宿主整条拒绝）
+    expect(Object.keys(route).sort()).toEqual(['api', 'baseURL', 'headers', 'models'])
     expect(p.actions.map((a) => a.kind).sort()).toEqual(['add-models', 'fill-headers'])
   })
 
@@ -459,5 +460,111 @@ describe('opencode-provider: L3 补目录未收录的模型', () => {
     expect(describeOpencodeAction({ kind: 'skip-models', route: 'r', reason: 'catalog-served' })).toContain('目录')
     expect(describeOpencodeAction({ kind: 'skip-models', route: 'r', reason: 'mixed-protocol' })).toContain('异协议')
     expect(describeOpencodeAction({ kind: 'skip-models', route: 'r', reason: 'api-conflict' })).toContain('api')
+  })
+})
+
+/**
+ * v1.48.1 —— 两处**真机暴露**的缺口（v1.48.0 在本机被宿主整条拒绝，逐字证据见 SESSION.md）：
+ *   A 目录外模型缺 **路由级 `baseURL`** ⇒ 宿主 `resolveRouteModels` 三级兜底全空 ⇒ 严格写入拒绝。
+ *   B 模型**已经在列表里**但缺 `reasoningEfforts`（"手抄过"的形态）⇒ 宿主判非推理 ⇒ 能用但没 thinking；
+ *     只补"缺失的模型"补不到它。
+ */
+describe('opencode-provider: v1.48.1 两处缺口（baseURL / 已列出但缺规格）', () => {
+  const EXTRA_ID = Object.keys(OPENCODE_EXTRA_MODELS)[0] as string
+  const EXTRA = OPENCODE_EXTRA_MODELS[EXTRA_ID] as NonNullable<(typeof OPENCODE_EXTRA_MODELS)[string]>
+
+  /** 真机形态：路由**带着四个头**（本插件的稳态）——夹具不带头会让"补头"分支也开火，看不准本层 */
+  function providers(route: Record<string, unknown>) {
+    return { providers: { 'opencode-go': { headers: { ...HEADERS }, ...route } } }
+  }
+  function routeOf(p: { patch: Record<string, unknown> }) {
+    return (p.patch.providers as Record<string, Record<string, unknown>>)['opencode-go']!
+  }
+
+  it('🔴 缺口 A：追加目录外模型时**必须**一并设路由级 baseURL（宿主 :669 三级兜底里唯一可控项）', () => {
+    // 事故原文：model "deepseek-v4.1-flash" needs a baseURL; the installed catalog does not describe this route
+    const p = plan(providers({ models: [{ id: 'deepseek-v4-flash' }] }))
+    expect(routeOf(p).baseURL).toBe(EXTRA.baseUrl)
+  })
+
+  it('缺口 A：路由自己写过 baseURL ⇒ 绝不覆盖（用户的端点就是用户的端点）', () => {
+    const p = plan(providers({ baseURL: 'https://my-proxy.example/v1', models: [{ id: 'deepseek-v4-flash' }] }))
+    expect(Object.keys(routeOf(p))).not.toContain('baseURL')
+  })
+
+  it('🔴 缺口 B：模型**已列出**但缺 reasoningEfforts ⇒ 就地补齐（条目数不变、原字段逐字保留）', () => {
+    const listed = { id: EXTRA_ID, name: '我自己起的名字', contextWindow: 1024000, maxTokens: 384000, input: ['text', 'image'] }
+    const p = plan(providers({ api: EXTRA.api, baseURL: 'https://opencode.ai/zen/go/v1/', models: [listed] }))
+    const models = routeOf(p).models as Record<string, unknown>[]
+    expect(models).toHaveLength(1) // 不是追加，是就地补
+    expect(models[0]!.reasoningEfforts).toEqual(EXTRA.reasoningEfforts)
+    // 用户字段一个都不许丢、更不许改
+    expect(models[0]!.name).toBe('我自己起的名字')
+    expect(models[0]!.contextWindow).toBe(1024000)
+    expect(models[0]!.input).toEqual(['text', 'image'])
+    // 不重复写 api / baseURL（路由本就写过），也不重复补头
+    expect(Object.keys(routeOf(p))).toEqual(['models'])
+    expect(p.actions).toEqual([{ kind: 'enrich-models', route: 'opencode-go', ids: [EXTRA_ID] }])
+  })
+
+  it('缺口 B：compat 是**合并**，用户已写的键优先（绝不覆盖用户的选择）', () => {
+    const p = plan(providers({
+      api: EXTRA.api,
+      baseURL: 'https://opencode.ai/zen/go/v1/',
+      models: [{ id: EXTRA_ID, compat: { thinkingFormat: '自家协议', chatTemplateKwargs: {} } }],
+    }))
+    const compat = (routeOf(p).models as { compat: Record<string, unknown> }[])[0]!.compat
+    expect(compat.thinkingFormat).toBe('自家协议') // 用户值赢
+    expect(compat.chatTemplateKwargs).toEqual({}) // 用户键保留
+    expect(compat.maxTokensField).toBe('max_tokens') // 用户没写的由我们补
+  })
+
+  it('缺口 B 幂等：已带 reasoningEfforts（含显式 false）⇒ 一个字节都不动', () => {
+    for (const efforts of [{ low: 'low' }, false]) {
+      const p = plan(providers({ api: EXTRA.api, baseURL: 'https://x/v1', models: [{ id: EXTRA_ID, reasoningEfforts: efforts }] }))
+      expect(p.patch).toEqual({})
+    }
+  })
+
+  it('缺口 B 拒绝面：已列出缺档、路由**没写 api**、又无需追加 ⇒ 判不出协议，不碰', () => {
+    const p = plan(providers({ baseURL: 'https://x/v1', models: [{ id: EXTRA_ID }] }))
+    expect(p.patch).toEqual({})
+    expect(p.actions).toContainEqual({ kind: 'skip-models', route: 'opencode-go', reason: 'api-missing' })
+  })
+
+  it('缺口 B 拒绝面：路由 api 与本表规格不一致 ⇒ 不补（compat 会配错协议）', () => {
+    const p = plan(providers({ api: 'anthropic-messages', models: [{ id: EXTRA_ID }] }))
+    expect(p.patch).toEqual({})
+    expect(p.actions).toContainEqual({ kind: 'skip-models', route: 'opencode-go', reason: 'api-conflict' })
+  })
+
+  it('★ 真机形态复刻：owner 那条手写路由（api+baseURL+三条 models，其中本表模型缺档）⇒ 只动那一条', () => {
+    const others = [
+      { id: 'union-alpha', name: 'union-alpha', input: [] },
+      { id: 'mimo-v2.6-flash', name: 'mimo-v2.6-flash' },
+    ]
+    const target = { id: EXTRA_ID, name: EXTRA_ID, contextWindow: 1024000, maxTokens: 384000, input: ['text', 'image'] }
+    const p = plan(providers({
+      apiKeyEnv: 'OPENCODE_GO_RESPONSES_API_KEY',
+      api: 'openai-completions',
+      baseURL: 'https://opencode.ai/zen/go/v1/',
+      models: [target, ...others],
+    }))
+    const models = routeOf(p).models as Record<string, unknown>[]
+    expect(models).toHaveLength(3)
+    // 另外两条**逐字不变**（值与键序都一致）
+    expect(models[1]).toEqual(others[0])
+    expect(models[2]).toEqual(others[1])
+    expect(models[0]!.reasoningEfforts).toEqual(EXTRA.reasoningEfforts)
+    // 只改 models 一项 —— 别的键一个都不写
+    expect(Object.keys(routeOf(p))).toEqual(['models'])
+  })
+
+  it('结构事实：本表只有 1 条 ⇒ "追加"与"就地补规格"**互斥**（不可能同批发生）', () => {
+    // 该模型已在列表里 ⇒ 没有东西要追加 ⇒ 此时判不出协议就该**整条不碰**（api-missing）
+    // 注意：这时连 providers 都不该出现在补丁里（头已齐备 ⇒ 无事可做 ⇒ 不写，避免无谓触发 settings/updated）
+    const p = plan(providers({ models: [{ id: EXTRA_ID }] }))
+    expect(p.patch).toEqual({})
+    expect(p.actions).toContainEqual({ kind: 'skip-models', route: 'opencode-go', reason: 'api-missing' })
   })
 })
