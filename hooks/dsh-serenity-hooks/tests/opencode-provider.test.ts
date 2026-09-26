@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from 'vitest'
 import {
   LLM_PI_AI_NAMESPACE,
   OPENCODE_API_KEY_ENV,
+  OPENCODE_EXTRA_MODELS,
   OPENCODE_ROUTE_TO_CREATE,
   OPENCODE_SESSION_ID,
   applyOpencodeAutoConfigOnce,
@@ -346,5 +347,117 @@ describe('opencode-provider: 装配（registerOpencodeAutoConfig）', () => {
     handlers.get('settings/document-updated')?.(LLM_PI_AI_NAMESPACE, 1) // 我们的目标命名空间
     await new Promise((r) => setImmediate(r))
     expect(settings.describe.mock.calls.length).toBeGreaterThan(before)
+  })
+})
+
+// ── L3 补模型（v1.48.0）──
+
+describe('opencode-provider: L3 补目录未收录的模型', () => {
+  const EXTRA_ID = Object.keys(OPENCODE_EXTRA_MODELS)[0] as string
+  const EXTRA = OPENCODE_EXTRA_MODELS[EXTRA_ID] as NonNullable<(typeof OPENCODE_EXTRA_MODELS)[string]>
+
+  /** 一个"用户已显式声明 models 列表"的 opencode-go 路由（本层唯一会动的形态） */
+  function routeWithModels(models: unknown[], api?: unknown) {
+    return {
+      providers: {
+        'opencode-go': {
+          headers: { ...HEADERS },
+          models,
+          ...(api === undefined ? {} : { api }),
+        },
+      },
+    }
+  }
+
+  it('🔴 有 models 列表却缺该模型 ⇒ 追加条目 + 一并设路由 api（目录服务档才会需要它）', () => {
+    const p = plan(routeWithModels([{ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' }]))
+    const route = (p.patch.providers as Record<string, Record<string, unknown>>)['opencode-go']!
+    // 原条目逐字保留 + 新条目在尾部
+    const models = route.models as { id: string }[]
+    expect(models).toHaveLength(2)
+    expect(models[0]).toEqual({ id: 'deepseek-v4-flash', name: 'DeepSeek V4 Flash' })
+    expect(models[1]!.id).toBe(EXTRA_ID)
+    // 新模型必须带 reasoningEfforts（否则宿主判它非推理 ⇒ "能用但没 thinking"）
+    expect(models[1]).toMatchObject({
+      name: EXTRA.name,
+      reasoningEfforts: EXTRA.reasoningEfforts,
+      compat: EXTRA.compat,
+    })
+    // 目录外模型拿不到 base.api ⇒ 必须设路由级 api
+    expect(route.api).toBe(EXTRA.api)
+  })
+
+  it('🔴 目录服务档（没有 models 列表）⇒ **绝不**补 —— 补 models 会把整个目录顶掉', () => {
+    const p = plan({ providers: { 'opencode-go': { apiKeyEnv: 'OPENCODE_GO_API_KEY', headers: { ...HEADERS } } } })
+    expect(p.patch).toEqual({})
+    // 常态不出声（否则每次起服务都刷一行）
+    expect(p.actions).toEqual([{ kind: 'skip-route', route: 'opencode-go', reason: 'headers-complete' }])
+  })
+
+  it('幂等：该模型已在列表里 ⇒ 不重复追加、也不重复写 api', () => {
+    const p = plan(routeWithModels([{ id: EXTRA_ID, name: 'x' }]))
+    expect(p.patch).toEqual({})
+  })
+
+  it('🔴 安全闸：列表含已知异协议模型（minimax-m3 走 anthropic-messages）⇒ 拒绝补，并说明原因', () => {
+    // 设路由 api 会覆盖该条目的 base.api，把它配坏 ⇒ 宁可不动
+    const p = plan(routeWithModels([{ id: 'minimax-m3' }, { id: 'deepseek-v4-flash' }]))
+    expect(p.patch).toEqual({})
+    expect(p.actions).toContainEqual({ kind: 'skip-models', route: 'opencode-go', reason: 'mixed-protocol' })
+  })
+
+  it('安全闸：路由已显式设了**别的** api ⇒ 拒绝补（那是用户的显式选择）', () => {
+    const p = plan(routeWithModels([{ id: 'deepseek-v4-flash' }], 'anthropic-messages'))
+    expect(p.patch).toEqual({})
+    expect(p.actions).toContainEqual({ kind: 'skip-models', route: 'opencode-go', reason: 'api-conflict' })
+  })
+
+  it('路由已显式设了**同值** api ⇒ 补模型但不重复写 api（避免无谓的 settings/updated）', () => {
+    const p = plan(routeWithModels([{ id: 'deepseek-v4-flash' }], EXTRA.api))
+    const route = (p.patch.providers as Record<string, Record<string, unknown>>)['opencode-go']!
+    expect(route.api).toBeUndefined() // 键不在场（纪律⑱：不写 undefined）
+    expect((route.models as unknown[]).length).toBe(2)
+  })
+
+  it('🔴 头齐备 **不阻断** 补模型：两者在同一笔补丁里（曾被 continue 短路）', () => {
+    const p = plan(routeWithModels([{ id: 'deepseek-v4-flash' }]))
+    const route = (p.patch.providers as Record<string, Record<string, unknown>>)['opencode-go']!
+    expect(route.headers).toBeUndefined() // 头已齐 ⇒ 不重复补
+    expect(route.models).toBeDefined() // 但模型照补
+    expect(p.actions).toEqual([{ kind: 'add-models', route: 'opencode-go', ids: [EXTRA_ID], api: EXTRA.api }])
+  })
+
+  it('🔴 缺头 + 缺模型 ⇒ 两个动作都在，补丁含 headers 与 models', () => {
+    const p = plan({ providers: { 'opencode-go': { models: [{ id: 'deepseek-v4-flash' }] } } })
+    const route = (p.patch.providers as Record<string, Record<string, unknown>>)['opencode-go']!
+    expect(Object.keys(route).sort()).toEqual(['api', 'headers', 'models'])
+    expect(p.actions.map((a) => a.kind).sort()).toEqual(['add-models', 'fill-headers'])
+  })
+
+  it('模型条目形状：input 是**拷贝**（不共享表里的数组 ⇒ 调用方改补丁不会污染表）', () => {
+    const p = plan(routeWithModels([{ id: 'deepseek-v4-flash' }]))
+    const route = (p.patch.providers as Record<string, Record<string, unknown>>)['opencode-go']!
+    const added = (route.models as { id: string; input: string[] }[])[1]!
+    expect(added.input).toEqual(EXTRA.input)
+    expect(added.input).not.toBe(EXTRA.input)
+  })
+
+  it('★ 规格取自目录同族兄弟：thinkingFormat=deepseek 且 reasoningEfforts 各档非空', () => {
+    // 判据来源 = pi-ai data/opencode-go.json 的 deepseek-v4-flash（不自行发明规格）
+    expect(EXTRA.compat.thinkingFormat).toBe('deepseek')
+    expect(EXTRA.api).toBe('openai-completions')
+    for (const [level, wire] of Object.entries(EXTRA.reasoningEfforts)) {
+      // 宿主：除 off 外必须给非空 wire 值，否则 invalid
+      if (level !== 'off') expect(wire).not.toBe('')
+    }
+  })
+
+  it('describeOpencodeAction 覆盖三个新动作（日志可读，含拒绝原因）', () => {
+    expect(describeOpencodeAction({ kind: 'add-models', route: 'opencode-go', ids: [EXTRA_ID], api: 'openai-completions' }))
+      .toContain(EXTRA_ID)
+    expect(describeOpencodeAction({ kind: 'add-models', route: 'r', ids: [EXTRA_ID], api: null })).not.toContain('api=')
+    expect(describeOpencodeAction({ kind: 'skip-models', route: 'r', reason: 'catalog-served' })).toContain('目录')
+    expect(describeOpencodeAction({ kind: 'skip-models', route: 'r', reason: 'mixed-protocol' })).toContain('异协议')
+    expect(describeOpencodeAction({ kind: 'skip-models', route: 'r', reason: 'api-conflict' })).toContain('api')
   })
 })

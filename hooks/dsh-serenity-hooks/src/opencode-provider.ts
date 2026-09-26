@@ -16,6 +16,19 @@
  * - **L2 建路由**：环境里有 `OPENCODE_API_KEY` 且没有任何 opencode 路由 → 建 `opencode-go` 并带全头。
  *   “有 key”就是用户意图的最强证据 → 不需要的人（没 key）零影响（不会平白多出一组模型）。
  *
+ * ## L3 补模型（v1.48.0；S142 owner 具名令「做成自动吧」）
+ *
+ * pi-ai 目录**收录不全**（如 `deepseek-v4.1-flash` 已在官方端点表、目录里却没有）⇒
+ * 面板不显示；手加也不带推理（目录外模型 `base` 为 undefined ⇒ `reasoning` 恒 false，
+ * 见 {@link OPENCODE_EXTRA_MODELS} 的注释）⇒ **"能用但没 thinking"**。
+ * 本层把 {@link OPENCODE_EXTRA_MODELS} 里的模型补进该路由的 `models` 列表。
+ *
+ * 🔴 **三条拒绝条件**（每条都对应一个会把配置弄坏的真实形态，宁可不动）：
+ *   ① 路由**没有显式 `models` 列表** —— 补 `models` 会顶掉整个 pi-ai 目录（宿主是"整体替换"语义）
+ *   ② 列表里含**已知异协议**模型 —— 设路由级 `api` 会覆盖它们的 `base.api`
+ *   ③ 路由已显式设了**别的 `api`** —— 同上，且那是用户的显式选择
+ * 判据与来源见 `planExtraModels` / `OPENCODE_GO_NON_COMPLETIONS`。
+ *
  * ## 注入通道（唯一可用且是官方的）
  *
  * `ctx.settings.update('llm-pi-ai', patch)` —— `dsh-settings` 的官方写入面：
@@ -87,6 +100,84 @@ export function opencodeRouteHeaders(): Record<string, string> {
   }
 }
 
+/**
+ * 一个「pi-ai 目录尚未收录、但我们已知怎么配」的 opencode-go 模型。
+ *
+ * 🔴 **为什么必须有 `reasoningEfforts`**：`dsh-llm-pi-ai` 的 `resolveModelReasoning` 是
+ * `if (efforts === void 0) return { reasoning: base?.reasoning ?? false }` ——
+ * **目录里没有的模型 `base` 为 undefined ⇒ 一律判成非推理模型**（"能用但没 thinking"的唯一成因）。
+ * 已收录的兄弟模型（如 `deepseek-v4-flash`）从目录的 `base` 拿到 `reasoning`/`thinkingLevelMap`，
+ * 故本表**只需收录目录没有的那些**。
+ */
+export interface OpencodeExtraModel {
+  readonly name: string
+  /** 该模型说的 wire 协议；见 {@link OPENCODE_GO_NON_COMPLETIONS} 的安全闸 */
+  readonly api: string
+  readonly contextWindow: number
+  readonly maxTokens: number
+  readonly input: readonly string[]
+  /** pi-ai 推理档 → wire 取值（除 `off` 外都必须非空；空值会被宿主 `invalid` 拒绝） */
+  readonly reasoningEfforts: Readonly<Record<string, string>>
+  /** 该模型族的 compat（推理 wire 格式在这里；值取自目录里同族兄弟模型） */
+  readonly compat: Readonly<Record<string, unknown>>
+}
+
+/**
+ * 目录补丁表（**唯一真相源 = pi-ai 的 `dist/providers/data/opencode-go.json`**）。
+ *
+ * 录取判据：① 官方文档 <https://opencode.ai/docs/zh-cn/go/> 的端点表列了它；
+ * ② pi-ai 目录里**没有**它 ⇒ 面板不显示、手加也没 thinking。
+ *
+ * `deepseek-v4.1-flash` 的各字段**逐字取自目录里 `deepseek-v4-flash`**（同族兄弟，
+ * 同 `chat/completions` 端点 + 同 `thinkingFormat: deepseek`）——不自行发明规格。
+ */
+export const OPENCODE_EXTRA_MODELS: Readonly<Record<string, OpencodeExtraModel>> = {
+  'deepseek-v4.1-flash': {
+    name: 'DeepSeek V4.1 Flash',
+    api: 'openai-completions',
+    contextWindow: 1_000_000,
+    maxTokens: 384_000,
+    input: ['text'],
+    reasoningEfforts: { low: 'low', high: 'high', max: 'max' },
+    compat: {
+      supportsStore: false,
+      supportsDeveloperRole: false,
+      maxTokensField: 'max_tokens',
+      requiresReasoningContentOnAssistantMessages: true,
+      thinkingFormat: 'deepseek',
+    },
+  },
+}
+
+/**
+ * opencode-go 上**已知不说 `openai-completions`** 的模型 id（安全闸）。
+ *
+ * 为什么需要它：给路由设 `api` 会**覆盖该路由每个条目的 `base.api`**
+ * （`resolveRouteModels` 的 `request.api ?? base?.api ?? routeApi`）⇒
+ * 若用户的 models 列表里混着异协议模型，设 `api` 会把它们**配坏**。
+ * 故：列表里只要出现下表中的任一 id，本模块**放弃补模型**（响亮说明原因，不硬来）。
+ *
+ * 来源 = 官方文档端点表（`@ai-sdk/anthropic` 与 `@ai-sdk/openai`（Responses）两族）。
+ */
+const OPENCODE_GO_NON_COMPLETIONS: ReadonlySet<string> = new Set([
+  // @ai-sdk/anthropic → /zen/go/v1/messages
+  'minimax-m3',
+  'minimax-m2.7',
+  'minimax-m2.5',
+  'qwen3.8-max',
+  'qwen3.8-flash',
+  'qwen3.7-max',
+  'qwen3.7-plus',
+  'qwen3.6-plus',
+  // @ai-sdk/openai → /zen/go/v1/responses
+  'grok-4.7',
+  'grok-4.6',
+  'gpt-6-luna',
+  'gpt-5.6-luna',
+  'muse-spark-1.3-contributor',
+  'muse-spark-1.2-contributor',
+])
+
 interface OpencodeAutoConfigInput {
   /** `llm-pi-ai` 命名空间**解析后**的值（0.1.7 读面 `settings.describe()` 里按 `ns` 挑出的 `value`；undefined = 命名空间未注册） */
   resolved: unknown
@@ -99,12 +190,77 @@ type OpencodeAutoConfigAction =
   | { kind: 'fill-headers'; route: string; keys: readonly string[] }
   | { kind: 'create-route'; route: string }
   | { kind: 'skip-route'; route: string; reason: 'headers-complete' }
+  | { kind: 'add-models'; route: string; ids: readonly string[]; api: string | null }
+  | { kind: 'skip-models'; route: string; reason: 'catalog-served' | 'mixed-protocol' | 'api-conflict' }
   | { kind: 'idle'; reason: 'namespace-unregistered' | 'no-route' }
 
 interface OpencodeAutoConfigPlan {
   /** 传给 `settings.update` 的补丁；空对象 = 无事可做（**不写**，避免无谓触发 settings/updated） */
   patch: Record<string, unknown>
   actions: readonly OpencodeAutoConfigAction[]
+}
+
+/** 路由的 models 列表里已有 / 缺哪些补丁模型 */
+interface ExtraModelsPlan {
+  /** 追加后的**完整** models 数组（原条目**逐字保留**）；undefined = 不改这一项 */
+  models?: readonly unknown[]
+  /** 需要同时设的路由级 `api`（缺省不出现在补丁里） */
+  api?: string
+  /** 追加进去的模型 id */
+  addedIds: readonly string[]
+  /** 为何没补（`addedIds` 非空时无意义） */
+  skip?: 'catalog-served' | 'mixed-protocol' | 'api-conflict'
+}
+
+/**
+ * 往**已有显式 `models` 列表**的路由里追加目录未收录的模型（**纯函数**）。
+ *
+ * 三条拒绝条件（每条都对应一个会让配置变坏的真实形态）：
+ *   ① **没有显式 `models` 列表** ⇒ 该路由此刻服务的是 pi-ai 目录本体；
+ *      一旦我们写出 `models`，**整个目录会被顶掉**（宿主的 `models` 是"整体替换"语义）
+ *      ⇒ 宁可不动。
+ *   ② **列表里出现已知异协议模型** ⇒ 设路由级 `api` 会覆盖它们的 `base.api`，把它们配坏。
+ *   ③ **路由已显式设了别的 `api`** ⇒ 同上，且那是用户的显式选择，不覆盖。
+ */
+function planExtraModels(profile: Record<string, unknown>): ExtraModelsPlan {
+  const raw = profile.models
+  if (!Array.isArray(raw) || raw.length === 0) return { addedIds: [], skip: 'catalog-served' }
+
+  const ids = new Set<string>()
+  for (const entry of raw) {
+    if (isPlainObject(entry) && typeof entry.id === 'string') ids.add(entry.id)
+  }
+  const missing = Object.entries(OPENCODE_EXTRA_MODELS).filter(([id]) => !ids.has(id))
+  if (missing.length === 0) return { addedIds: [] }
+
+  for (const id of ids) {
+    if (OPENCODE_GO_NON_COMPLETIONS.has(id)) return { addedIds: [], skip: 'mixed-protocol' }
+  }
+
+  // 仅当待补模型的协议**一致**时才继续（路由级 api 只能有一个值）
+  const apis = new Set(missing.map(([, model]) => model.api))
+  if (apis.size !== 1) return { addedIds: [], skip: 'mixed-protocol' }
+  const api = [...apis][0] as string
+
+  const existingApi = profile.api
+  if (typeof existingApi === 'string' && existingApi !== api) return { addedIds: [], skip: 'api-conflict' }
+
+  const appended: unknown[] = missing.map(([id, model]) => ({
+    id,
+    name: model.name,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    input: [...model.input],
+    reasoningEfforts: { ...model.reasoningEfforts },
+    compat: { ...model.compat },
+  }))
+  return {
+    // 原条目**逐字保留**（不重建、不规范化——用户字段一个都不许丢）
+    models: [...raw, ...appended],
+    // 已显式设过同值 api 时不重复写（避免无谓的 settings/updated）
+    ...(existingApi === api ? {} : { api }),
+    addedIds: missing.map(([id]) => id),
+  }
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -183,12 +339,23 @@ export function planOpencodeAutoConfig(input: OpencodeAutoConfigInput): Opencode
       if (!hasHeaderCaseInsensitive(existing, name)) missing[name] = value
     }
     const keys = Object.keys(missing)
-    if (keys.length === 0) {
+    const extra = planExtraModels(profile)
+    // `catalog-served`（没有 models 列表）是**常态**，不出声；只有"有列表却拒绝"才值得说明
+    if (extra.skip !== undefined && extra.skip !== 'catalog-served') {
+      actions.push({ kind: 'skip-models', route, reason: extra.skip })
+    } else if (extra.addedIds.length > 0) {
+      actions.push({ kind: 'add-models', route, ids: extra.addedIds, api: extra.api ?? null })
+    }
+    const routePatch: Record<string, unknown> = {}
+    if (keys.length > 0) routePatch.headers = missing
+    if (extra.models !== undefined) routePatch.models = extra.models
+    if (extra.api !== undefined) routePatch.api = extra.api
+    if (keys.length === 0 && Object.keys(routePatch).length === 0) {
       actions.push({ kind: 'skip-route', route, reason: 'headers-complete' })
       continue
     }
-    patchProviders[route] = { headers: missing }
-    actions.push({ kind: 'fill-headers', route, keys })
+    if (keys.length > 0) actions.push({ kind: 'fill-headers', route, keys })
+    patchProviders[route] = routePatch
   }
 
   if (!sawOpencodeRoute) {
@@ -227,6 +394,17 @@ export function describeOpencodeAction(action: OpencodeAutoConfigAction): string
       return `创建 ${action.route} 路由（检测到 ${OPENCODE_API_KEY_ENV}）+ 路由头`
     case 'skip-route':
       return `${action.route} 路由头已齐备（跳过）`
+    case 'add-models':
+      return `为 ${action.route} 补目录未收录的模型：${action.ids.join(', ')}`
+        + (action.api === null ? '' : `（并设路由 api=${action.api}）`)
+    case 'skip-models':
+      return `${action.route} 未补模型（${
+        action.reason === 'catalog-served'
+          ? '该路由未声明 models 列表，补 models 会顶掉整个目录'
+          : action.reason === 'mixed-protocol'
+            ? '该路由含异协议模型，设路由 api 会把它们配坏'
+            : '该路由已显式设了别的 api'
+      }）`
     case 'idle':
       return `无需动作（${action.reason}）`
   }
@@ -269,6 +447,11 @@ export async function applyOpencodeAutoConfigOnce(ctx: Context, env?: Readonly<R
   }
   for (const action of plan.actions) {
     if (action.kind === 'idle' || action.kind === 'skip-route') continue
+    // 未补模型是"说明"不是"成果" ⇒ 用不同标记，避免和 ✓ 混在一起看
+    if (action.kind === 'skip-models') {
+      console.log(`[serenity-hooks] · opencode 路由：${describeOpencodeAction(action)}`)
+      continue
+    }
     console.log(`[serenity-hooks] ✓ opencode 路由：${describeOpencodeAction(action)}`)
   }
   return { wrote: true, registered: true }

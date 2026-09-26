@@ -1,3 +1,75 @@
+## v1.48.0 — 2026-09-26（**目录不齐也能用**：自动把 pi-ai 目录漏收的模型补进 opencode 路由，并照同族兄弟的规格带上推理档）
+
+**来源**：owner 2026-09-26 具名令「**可以，做成自动吧 完成后发一版**」（= **实现令 ＋ 发版令**，D14）。
+起因 = 面板里**看不到** `deepseek-v4.1-flash`；手动写进配置又「**能用，但永远不出 thinking**」。
+
+---
+
+### 一、这东西解决什么（白话）
+
+**官方端点表里有的模型，pi-ai 的目录里未必有 —— 于是它既不出现在面板上，手动加进去也没有思考能力。**
+
+两件事叠在一起：
+
+1. **目录没收录 ⇒ 面板不列它** —— 你得先知道模型 id，才谈得上手写进配置；
+2. **手写也不行** —— 宿主判断"一个模型支不支持推理"靠的是**目录里的兄弟条目**；目录里没有它，
+   就**一律判成非推理模型** ⇒ 它**能用，但永远不出 thinking**。
+
+本版把这件事**做成自动**：插件启动时，若某个 opencode 路由**已经声明了自己的 `models` 列表**、
+而列表里缺我们已知怎么配的模型 ⇒ 自动补进去，并按目录里**同族兄弟模型**的规格把推理档一起配好。
+
+🔵 **只补"我们有规格的"**：补丁表当前 1 条（`deepseek-v4.1-flash`），表里每个字段都**逐字取自目录里的同族兄弟** ⇒
+**不自行发明规格**（唯一真相源 = pi-ai 的 `dist/providers/data/opencode-go.json`）。
+
+### 二、根因链（每一步都有实测）
+
+| # | 事实 | 取证方式 |
+|---|---|---|
+| 1 | `deepseek-v4.1-flash` 在**官方端点表**里，但 **pi-ai 目录里没有** | 官方文档（`opencode.ai/docs/zh-cn/go/`）＋ 目录 JSON |
+| 2 | 🔴 **"能用但没 thinking"的唯一成因**：宿主 `dsh-llm-pi-ai` 的 `resolveModelReasoning` 是 `if (efforts === void 0) return { reasoning: base?.reasoning ?? false }` ⇒ **目录外模型 `base` 为 undefined ⇒ 一律判成非推理** | 读宿主源码；已收录的兄弟模型从目录 `base` 拿到 `reasoning`/`thinkingLevelMap`（`...base` 先展开 ⇒ `thinkingLevelMap` 得以保留） |
+| 3 | `modelOverrides` **无法新增模型** —— 宿主严格校验：`modelOverrides names "X", which the installed catalog does not describe` | 实测报错 |
+| 4 | **`models` 是"整体替换"语义** ⇒ 给「目录服务档」补 `models` 会**顶掉整个 pi-ai 目录** | 宿主 `resolveRouteModels` |
+| 5 | `modelProfile` **没有 per-entry `api`**（只有 `name`/`contextWindow`/`maxTokens`/`input`/`reasoningEfforts`/`compat`）⇒ 目录外模型**只能靠路由级 `api`** | 读宿主类型 |
+| 6 | 而路由级 `api` 会**覆盖该路由每个条目的 `base.api`**（`request.api ?? base?.api ?? routeApi`）；opencode-go 又是**混协议**的（`anthropic-messages` ／ `openai-completions` ／ `responses` 三代）⇒ 宿主自己的 `sharedCatalogApi` 在目录内协议不一致时**返回 undefined** | 宿主源码 ＋ 官方端点表 |
+
+⇒ **合成结论**：补模型的正确形态 = **只在「路由已有显式 `models` 列表」时，追加条目 ＋ 设路由级 `api`**；
+其余形态**一律不动**（见 §三 三条拒绝条件）。🔵 路由级 `api` 正是官方为此设计的机制
+（`sharedCatalogApi` 在混协议时返回 `undefined`，就是它存在的理由），**不是 hack**。
+
+### 三、修法（一个源文件 ＋ 一个测试文件）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `src/opencode-provider.ts` | 新增 **L3 补模型**层：`OPENCODE_EXTRA_MODELS`（补丁表）＋ `planExtraModels`（纯函数）＋ 动作/日志接线（新增 `add-models` ／ `skip-models` 两个动作；`skip-models` 用 `·` 标记，与成果行区分） |
+| 2 | `tests/opencode-provider.test.ts` | **+11 用例** |
+
+🔴 **三条拒绝条件**（每条都对应一个会把配置弄坏的真实形态 —— 宁可不动，也不硬来）：
+
+1. **路由没有显式 `models` 列表** ⇒ 该路由此刻服务的是目录本体；一旦我们写出 `models`，**整个目录被顶掉**。
+2. **列表里含已知异协议模型**（`OPENCODE_GO_NON_COMPLETIONS`：anthropic 族 8 个 ＋ responses 族 6 个）⇒ 设路由级 `api` 会**把它们配坏**。
+3. **路由已显式设了别的 `api`** ⇒ 同上，且那是用户的显式选择，不覆盖。
+
+🔵 **两条克制**：① 原条目**逐字保留**（不重建、不规范化 —— 用户字段一个都不许丢）；
+② 已显式设过**同值** `api` 时不重复写（少一次无谓的 `settings/updated`）。
+
+### 四、正控（两条都做过，不是声明）
+
+- **拆掉"混协议安全闸"** ⇒ **恰好 1 红 / 42 绿**。
+- **拆掉"目录服务档"闸** ⇒ **8 红** —— 失败输出**具象化了没有它会怎样**：插件会改写**每一个** opencode 路由、
+  写出只含一个模型的 `models`、**把整个 pi-ai 目录顶掉**。
+- 两次均**逐字还原**（判据 = `grep 'false &&'` 零命中）。
+
+### 五、门禁（本仓七项，锚定 2026-09-26 08:0x 那一跑）
+
+typecheck（node ＋ client）✅｜typecheck-cli ✅｜**typecheck-host `0.1.7-rc.2`** ✅（node 实测载入 114 文件 ／ client 128 文件，paths 36+14 全命中）｜test ✅ **154 文件 / 2509 用例**｜coverage ✅ exit 0（**All files 语句 98.36% = 25661/26087**；分支 **91.16% = 5883/6453**；函数 **99.56% = 909/913**）｜build ✅（`lib/index.js` ＋ `lib/client.js` **201986 B**）｜pack-check ✅ **118 文件**。
+📌 **读数口径**：覆盖率分母**会随执行变** ⇒ 百分比**跨跑不可直比**，绝对量可比；引用一律**连分母一起写**。
+
+### 六、本版**未纳入**
+
+无。本版是单点功能新增（补模型一层），未触碰其它面。
+
+---
+
 ## v1.47.4 — 2026-09-25（**工程化底座版**：顶层约束 ＋ 功能块地图 ＋ 分层单元测试 35 件 ＋ 容器集成测试台 ＋ **SESSION.md 格式与粒度契约**）
 
 **来源**：owner 2026-09-25 令「**我们要做一个能存活很多年的 plugin**」（六项：顶层约束文档 ／ 清理死代码 ／ 功能块列表与抽象分层 ／ 无影响重构 ／ 成体系的分层单元测试 ／ 容器集成测试体系；**强调「尤其是和 dsh 的衔接处」**）＋ 同日 owner 令「**固定 SESSION.md 格式 ＋ 日志粒度受 EAP 抽象层约束**」。
