@@ -29,10 +29,10 @@ import {
   planInboundRoute, appendHumanChannelAudit, type InboundRoutePlan,
 } from './human-channel.js'
 // 机器级配置的**唯一读取入口**（P0-1 起 `humanChannel` 随它一起出）⇒ 天然热生效（方案 Q8）
-import { readSimpleSettings } from './settings-section.js'
+import { readSimpleSettings, type HumanChannelSettings } from './settings-section.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './weixin-route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
-import { readSkiffRoles } from './skiff-role.js'
+import { readSkiffRoles, type SkiffRoleConfig } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './weixin-output-guard.js'
@@ -56,6 +56,19 @@ interface CccBridge {
 }
 
 const bridges = new Map<string, CccBridge>()
+
+/**
+ * 🔴 **机器级 poller 的"根"哨兵**（P0-3 A）—— 它**不是一个目录**。
+ *
+ * 机器级 poller **不属于任何 CCC**（这正是"上移 ACC 层"的含义：谁轮询不再由 CCC 数量决定）。
+ * 用途有二：① `runAccountLoop` 的 `root` 形参在机器级模式下不被使用，传它以示"无根"；
+ * ② 归属表（`human-channel.ts`）按 root 区分拥有者 ⇒ 机器级用这个哨兵值，
+ *    与任何**真实** CCC 根都不会撞（真根一律是绝对路径）。
+ */
+const MACHINE_SCOPE = '<machine>'
+
+/** 机器级 poller（账号 id → 循环）。与 `bridges` **互斥**：同一时刻只有一种模式在跑。 */
+const machineLoops = new Map<string, AccountLoop>()
 
 /** 轮询间隔（getupdates 失败后重试延迟；成功 = 立即续轮询） */
 const POLL_RETRY_MS = 3_000
@@ -116,6 +129,11 @@ async function runAccountLoop(
   accountId: string,
   cred: WeixinAccountCredential,
   loop: AccountLoop,
+  /**
+   * P0-3 A：**机器级 poller**。为真时逐条消息先由订阅表解析目标（`root` 入参**不使用**，
+   * 传 `MACHINE_SCOPE` 即可）—— 因为"投到哪个 CCC"是**每条消息**才决定的。
+   */
+  machine = false,
 ): Promise<void> {
   let buf = ''
   while (!loop.stopped) {
@@ -132,7 +150,8 @@ async function runAccountLoop(
         if (loop.stopped) break
         // 只处理用户消息（message_type=1）——忽略 bot 自己/系统消息
         if (msg.message_type !== 1) continue
-        await handleIncoming(ctx, root, accountId, cred, msg)
+        if (machine) await handleMachineIncoming(ctx, accountId, cred, msg)
+        else await handleIncoming(ctx, root, accountId, cred, msg)
       }
       // 成功 → 立即续轮询（不 sleep；长轮询本身 hold 35s）
     } catch (err) {
@@ -210,6 +229,84 @@ async function resolveCccRootByAlias(ctx: Context, alias: string): Promise<strin
 }
 
 /**
+ * 路由解析结果：目标根 ＋ 角色名 ＋ **角色配置**（三者一起给，避免调用方再读一次 skiff.roles）。
+ * `null` 从本函数出去 ⇒ **不投递**（未命中已留痕 ／ 目标不存在已响亮出声）。
+ */
+interface ResolvedInboundTarget {
+  root: string
+  roleName: string
+  role: SkiffRoleConfig
+}
+
+/**
+ * **入站路由的单一解析处**（P0-3）：机器级订阅表优先 → CCC 级回退；三档语义都在这里落地。
+ *
+ * 🔴 为什么抽成一个函数而不是写两遍：**两种模式（CCC 起桥 ／ 机器级起 poller）走的是同一套
+ * 判据**，差别只有一格 —— **有没有 CCC 级回退**（`cccFallback`）。写两遍必然分叉。
+ *
+ * 三档（方案 §3.1，**刻意分档**）：
+ *  - **未命中** ⇒ 不投递 ＋ **留痕**（`console.warn`，静默档：这是"表里没有你"，不是错误）
+ *  - **表残缺** ⇒ **响亮出声**（`console.error`；且**独立于是否命中**）
+ *  - **目标不存在**（CCC ／ 角色）⇒ **响亮报错**（`console.error`；不静默丢弃）
+ *
+ * @param input.cccFallback 过渡期回退（方案 Q5）；**机器级模式传 `null`** ⇒ 未命中即不投递
+ */
+async function resolveInboundTarget(ctx: Context, input: {
+  account: string
+  user: string
+  cccFallback: { root: string; role: string } | null
+}): Promise<ResolvedInboundTarget | null> {
+  const route: InboundRoutePlan = planInboundRoute({
+    subscriptions: readSimpleSettings().humanChannel.subscriptions,
+    account: input.account,
+    user: input.user,
+    // 🔴 回退目标的 `ccc` 装的是**本 CCC 的绝对路径**（不是别名）—— 计划层两种写法都收
+    //    （先按别名匹配、再按根匹配），故此处无需解析；`source === 'ccc-fallback'` 时
+    //    下面**跳过**枚举查找，直接把 `target.ccc` 当根用。
+    fallback: input.cccFallback ? { ccc: input.cccFallback.root, role: input.cccFallback.role } : null,
+  })
+
+  // 表残缺 ⇒ **响亮出声**（与"未命中"分档：笔误必须有人去改）
+  // ⚠️ 它**独立于是否命中** —— 命中一条完好的行不掩盖另一行的笔误。
+  for (const defect of route.defects) {
+    console.error(
+      `[serenity-hooks] ✗ human-channel: 订阅表第 ${defect.index + 1} 行**残缺**（缺 ${defect.missing.join(' / ')}）`
+      + `｜已有字段 ${JSON.stringify(defect.present)}｜该行**不生效** —— 请补全或删掉（机器级 humanChannel.subscriptions）`,
+    )
+    appendHumanChannelAudit({ kind: 'subscription-defect', account: input.account, index: defect.index, missing: defect.missing, present: defect.present })
+  }
+
+  const target = route.target
+  // ① 未命中 ⇒ **不投递 ＋ 留痕**（**静默档**：这不是错误，是"表里没有你"）
+  if (!target) {
+    const detail = route.skipReason === 'no-subscription'
+      ? '机器级订阅表为空（且无 CCC 级回退）'
+      : '订阅表里没有匹配 (账号, 用户) 的行'
+    console.warn(`[serenity-hooks] ⚠ human-channel: 入站未命中订阅 ⇒ **不投递**（account=${input.account} user=${input.user}）：${detail}`)
+    appendHumanChannelAudit({ kind: 'inbound-unrouted', account: input.account, user: input.user, reason: route.skipReason ?? 'no-match', detail })
+    return null
+  }
+
+  // ② 目标**不存在** ⇒ **响亮报错**（方案 §3.1 / W5'：**不静默丢弃**）
+  // 🔴 回退来源的 `ccc` **就是已知的本 CCC 根** ⇒ 不做枚举查找（省一次 IO，也不依赖它出现在枚举里）
+  const root = route.source === 'ccc-fallback' ? target.ccc : await resolveCccRootByAlias(ctx, target.ccc)
+  if (root === null) {
+    const detail = `订阅表指向的 CCC "${target.ccc}" 在本机 CCC 枚举里不存在`
+    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${input.account} user=${input.user}）—— 该消息**未投递**，请改订阅表`)
+    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: input.account, user: input.user, ccc: target.ccc, role: target.role, detail })
+    return null
+  }
+  const role = readSkiffRoles(root).get(target.role)
+  if (!role) {
+    const detail = `目标 CCC "${target.ccc}" 未定义 skiff 角色 "${target.role}"`
+    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${input.account} user=${input.user}）—— 该消息**未投递**，请改订阅表或该 CCC 的 skiff.roles`)
+    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: input.account, user: input.user, ccc: target.ccc, role: target.role, detail })
+    return null
+  }
+  return { root, roleName: target.role, role }
+}
+
+/**
  * 处理单条微信消息：路由 → skiff 会话（固定 id 创建/延续）→ 提问 → 回复回写。
  *
  * 会话语义：`weixinSessionIdFor(fromUserId)` 固定可重建——同用户长期同一会话；
@@ -238,6 +335,14 @@ export async function handleIncoming(
   accountId: string,
   cred: WeixinAccountCredential,
   msg: Pick<WeixinMessage, 'from_user_id' | 'context_token' | 'item_list'>,
+  /**
+   * **机器级模式**（P0-3 A）：目标已由 `handleMachineIncoming` 解析好（`root` 入参即该目标根）。
+   * 给了它 ⇒ 本函数**不再自行路由**，且**不看本 CCC 的 `weixin.enabled`** ——
+   * 起 poller 与路由都已上移机器级（目标 CCC 没配 weixin 段也照样收得到）。
+   * ⚠️ **行为开关仍归目标 CCC**（`hook` ／ `autoReplyWithLastMessage` ／ `fallbackOnNoSend`）
+   * —— 机器级只管"**谁收**"与"**投到哪**"，不管"**怎么答**"。
+   */
+  preset?: { target: ResolvedInboundTarget },
 ): Promise<void> {
   const fromUserId = msg.from_user_id
   if (!fromUserId) return
@@ -245,61 +350,29 @@ export async function handleIncoming(
   const mediaRefs = extractWeixinMedia(msg)
 
   const settings = readWeixinSettings(root)
-  if (!settings.enabled) return
 
   // ── P0-3 路由：**机器级订阅表优先** → CCC 级 `routes` 回退 ─────────────────────────
   // 🔴 回退是**过渡期**语义（方案 §11.3 **Q5**："不打断在用的微信"）：机器级账号表为空时，
   //    桥仍按 CCC 起、路由也仍认 CCC 级 routes。机器级一旦配起来 ⇒ 回退传 null ⇒
   //    **未命中 = 不投递**（**不是**"投给默认角色" —— 方案 §3.1 明令禁止）。
-  const cccRole = matchWeixinRoute(settings.routes ?? [], fromUserId)
-  const route: InboundRoutePlan = planInboundRoute({
-    subscriptions: readSimpleSettings().humanChannel.subscriptions,
-    account: accountId,
-    user: fromUserId,
-    fallback: cccRole ? { ccc: root, role: cccRole } : null,
-  })
-
-  // 表残缺 ⇒ **响亮出声**（与"未命中"分档：笔误必须有人去改）
-  // ⚠️ 它**独立于是否命中** —— 命中一条完好的行不掩盖另一行的笔误。
-  for (const defect of route.defects) {
-    console.error(
-      `[serenity-hooks] ✗ human-channel: 订阅表第 ${defect.index + 1} 行**残缺**（缺 ${defect.missing.join(' / ')}）`
-      + `｜已有字段 ${JSON.stringify(defect.present)}｜该行**不生效** —— 请补全或删掉（机器级 humanChannel.subscriptions）`,
-    )
-    appendHumanChannelAudit({ kind: 'subscription-defect', account: accountId, index: defect.index, missing: defect.missing, present: defect.present })
+  // 🔴 三档语义（未命中 ／ 表残缺 ／ 目标不存在）的落地**只有一处** = `resolveInboundTarget`。
+  let resolved: ResolvedInboundTarget | null
+  if (preset) {
+    resolved = preset.target // 机器级模式：目标已解析（且**不看本 CCC 的 enabled**）
+  } else {
+    if (!settings.enabled) return
+    const cccRole = matchWeixinRoute(settings.routes ?? [], fromUserId)
+    resolved = await resolveInboundTarget(ctx, {
+      account: accountId,
+      user: fromUserId,
+      cccFallback: cccRole ? { root, role: cccRole } : null,
+    })
   }
-
-  const target = route.target
-  // ① 未命中 ⇒ **不投递 ＋ 留痕**（**静默档**：这不是错误，是"表里没有你"）
-  if (!target) {
-    const detail = route.skipReason === 'no-subscription'
-      ? '机器级订阅表为空（且无 CCC 级回退）'
-      : '订阅表里没有匹配 (账号, 用户) 的行'
-    console.warn(`[serenity-hooks] ⚠ human-channel: 入站未命中订阅 ⇒ **不投递**（account=${accountId} user=${fromUserId}）：${detail}`)
-    appendHumanChannelAudit({ kind: 'inbound-unrouted', account: accountId, user: fromUserId, reason: route.skipReason ?? 'no-match', detail })
-    return
-  }
-
-  // ② 目标**不存在** ⇒ **响亮报错**（方案 §3.1 / W5'：**不静默丢弃**）
-  // 🔴 回退来源的 `ccc` **就是已知的本 CCC 根** ⇒ 不做枚举查找（省一次 IO，也不依赖它出现在枚举里）
-  const targetRoot = route.source === 'ccc-fallback' ? root : await resolveCccRootByAlias(ctx, target.ccc)
-  if (targetRoot === null) {
-    const detail = `订阅表指向的 CCC "${target.ccc}" 在本机 CCC 枚举里不存在`
-    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${accountId} user=${fromUserId}）—— 该消息**未投递**，请改订阅表`)
-    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: accountId, user: fromUserId, ccc: target.ccc, role: target.role, detail })
-    return
-  }
-  const roleName = target.role
-  const role = readSkiffRoles(targetRoot).get(roleName)
-  if (!role) {
-    const detail = `目标 CCC "${target.ccc}" 未定义 skiff 角色 "${roleName}"`
-    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${accountId} user=${fromUserId}）—— 该消息**未投递**，请改订阅表或该 CCC 的 skiff.roles`)
-    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: accountId, user: fromUserId, ccc: target.ccc, role: roleName, detail })
-    return
-  }
+  if (!resolved) return // 未命中／目标不存在 ⇒ 已留痕／已出声，两者都**不投递**
+  const { roleName, role } = resolved
   // 🔴 此后本函数的 `root` 语义 = **投递目标根**：回退模式下恒 === 入参 root；
-  //    机器级模式下由订阅表指定，**可能与入参不同** ⇒ 下面整段投递体一律用它。
-  root = targetRoot
+  //    机器级模式下由订阅表指定（`handleMachineIncoming` 已把入参传成该根）。
+  root = resolved.root
 
   // 纯语音无转写（无文本无媒体）→ 降级提示（不静默；不创建会话）
   if (!text && mediaRefs.length === 0) {
@@ -516,6 +589,33 @@ export async function handleIncoming(
 }
 
 /**
+ * **机器级 poller 的单条消息入口**（P0-3 A）。
+ *
+ * 与 `handleIncoming` 的唯一差别：**目标由机器级订阅表逐条解析，且没有 CCC 级回退**
+ * （方案 §3.1：机器级模式下**未命中 = 不投递**，不是"投给默认角色"）。
+ * 解析出来后把**目标根**当 `root` 交给 `handleIncoming`（并带上 `preset` ⇒ 它不再自行路由、
+ * 也不看目标 CCC 的 `weixin.enabled`）。
+ *
+ * 🔴 为什么"起 poller"与"路由"必须同批（本件即 P0-2 的后半）：机器级 poller 收到消息时
+ * **不知道它属于哪个 CCC** —— 那个答案是订阅表给的。没有订阅表 ⇒ **能收不能投**。
+ *
+ * 🔵 **导出供测试直接驱动**（与 `handleIncoming` 同款：它俩都是"单条消息的入口"，
+ * 生产路径 `runAccountLoop` 只是循环壳）。
+ */
+export async function handleMachineIncoming(
+  ctx: Context,
+  accountId: string,
+  cred: WeixinAccountCredential,
+  msg: Pick<WeixinMessage, 'from_user_id' | 'context_token' | 'item_list'>,
+): Promise<void> {
+  const fromUserId = msg.from_user_id
+  if (!fromUserId) return
+  const target = await resolveInboundTarget(ctx, { account: accountId, user: fromUserId, cccFallback: null })
+  if (!target) return // 未命中／目标不存在 ⇒ 已留痕／已响亮出声，两者都**不投递**
+  await handleIncoming(ctx, target.root, accountId, cred, msg, { target })
+}
+
+/**
  * 启动/重建某 CCC 的桥：读配置 → 对每个 enabled + 有凭据的账号启动轮询循环。
  * 已存在（配置变化热重建）→ 先停旧循环再启动新的。
  *
@@ -581,14 +681,140 @@ export function stopCccBridge(root: string): void {
 }
 
 /**
- * 停止全部桥（插件 dispose）
+ * 停掉**全部 CCC 级桥**（不碰机器级 poller）＋ 释放它们各自的账号归属。
+ * 🔴 模式切换时必须先调它：否则同一个 bot 会被**两处**轮询（方案 §2.6 要消灭的正是这个）。
+ */
+function stopCccBridges(): void {
+  for (const root of [...bridges.keys()]) stopCccBridge(root)
+}
+
+/** 停掉**机器级 poller**（不碰 CCC 级桥）＋ 释放机器级归属 */
+function stopMachineLoops(): void {
+  for (const loop of machineLoops.values()) loop.stopped = true
+  machineLoops.clear()
+  releasePollersOf(MACHINE_SCOPE)
+}
+
+/**
+ * 停止全部桥（插件 dispose）：CCC 级 ＋ 机器级
  */
 export function stopAllBridges(): void {
-  for (const bridge of bridges.values()) {
-    for (const loop of bridge.loops.values()) loop.stopped = true
-  }
-  bridges.clear()
+  stopCccBridges()
+  stopMachineLoops()
   releaseAllPollers()
+}
+
+// ── P0-3 A：机器级账号表 ⇒ 起 poller（"上移 ACC 层"的第二步）──────────────────────
+
+/** 已告警过的"未实现渠道"（避免每次 session/created 都刷一行） */
+const warnedChannels = new Set<string>()
+
+/**
+ * **机器级模式**：按**账号**起 poller（方案 §2.6「一账号一 poller」的正面形态）。
+ *
+ * 与 CCC 模式的差别：poller **不属于任何 CCC** —— 消息投到哪由**订阅表逐条决定**
+ * （见 `handleMachineIncoming`）。凭据来自机器级配置本身（方案 Q3：凭据落插件 Config）。
+ *
+ * 🔴 进入本函数即**先停掉全部 CCC 级桥**：两种模式**互斥**（同时跑 = 同一 bot 两处轮询）。
+ */
+function syncMachinePollers(ctx: Context, hc: HumanChannelSettings): void {
+  stopCccBridges()
+
+  const requests: PollerRequest[] = []
+  const creds = new Map<string, WeixinAccountCredential>()
+  for (const account of hc.accounts) {
+    const id = account.id
+    if (account.enabled === false) continue
+    if (!id) {
+      console.warn('[serenity-hooks] ⚠ human-channel: 机器级账号表有一行**缺 `id`** ⇒ 跳过（该行无法被订阅表引用）')
+      continue
+    }
+    // 只有已实现的渠道能起 poller（P2 才加第二个实现）⇒ 未实现的**出声但不静默跳过**
+    if (account.channel !== 'weixin') {
+      if (!warnedChannels.has(`${id}:${account.channel ?? ''}`)) {
+        warnedChannels.add(`${id}:${account.channel ?? ''}`)
+        console.warn(`[serenity-hooks] ⚠ human-channel: 账号 ${id} 的渠道 "${account.channel ?? '(未填)'}" **本机未实现** ⇒ 不起 poller（当前只有 weixin）`)
+      }
+      continue
+    }
+    const token = (account.token ?? '').trim()
+    if (token === '') {
+      console.warn(`[serenity-hooks] ⚠ human-channel: 账号 ${id} **无 token**（未绑定）⇒ 不起 poller`)
+      continue
+    }
+    // baseUrl 留空 = 走官方默认（机器级 schema 里刻意没有它；§2.2 拟稿同）
+    creds.set(id, { token, baseUrl: '', userId: account.userId })
+    requests.push({ root: MACHINE_SCOPE, accountId: id, identity: accountIdentity(MACHINE_SCOPE, id, token) })
+  }
+
+  // 归属判定复用 P0-2 的同一套（**同批重复身份一律跳过**：机器级表里两行绑同一个 bot
+  // 也会被拦下 —— 与"跨 CCC 同账号"是同一类错误，不该有两套判据）
+  const plan = planPollerClaims(requests, pollerOwners())
+  for (const { request, ownedBy } of plan.skipped) {
+    console.warn(
+      `[serenity-hooks] ⚠ human-channel: 机器级账号 ${request.accountId} 与 ${ownedBy.accountId} **绑的是同一个 bot**`
+      + ' ⇒ 本处不重复起循环（一账号一 poller；方案 §2.6）',
+    )
+  }
+
+  stopMachineLoops()
+  for (const claim of plan.claims) {
+    const cred = creds.get(claim.accountId)
+    if (!cred) continue
+    const loop: AccountLoop = { stopped: false, lastPollAt: 0 }
+    machineLoops.set(claim.accountId, loop)
+    void runAccountLoop(ctx, MACHINE_SCOPE, claim.accountId, cred, loop, true)
+  }
+  commitPollerClaims(plan)
+  if (machineLoops.size > 0) {
+    console.log(`[serenity-hooks] ✓ human-channel: 机器级 poller accounts=${[...machineLoops.keys()].join(',')}（与 CCC 无关）`)
+  }
+}
+
+/**
+ * 人机信道的**装配入口**（P0-3 A）—— 决定用哪种模式起 poller。
+ *
+ * 🔴 **模式由机器级账号表决定**（方案 §11.3 **Q5** 的过渡期语义）：
+ *  - 账号表**非空** ⇒ **机器级模式**：按账号起 poller；路由**只认订阅表**
+ *  - 账号表**为空** ⇒ **回退模式**（今天的形态）：按 CCC 起桥；路由**先查订阅表，未命中回退
+ *    到 CCC 级 routes** ⇒ **不打断在用的微信**
+ * ⚠️ 两种模式**互斥**（各自进入时先停掉另一种），否则同一个 bot 会被两处轮询。
+ */
+export function syncHumanChannel(ctx: Context): void {
+  let hc: HumanChannelSettings | undefined
+  try {
+    hc = readSimpleSettings().humanChannel
+  } catch (err) {
+    console.warn(`[serenity-hooks] ✗ human-channel: 机器级配置读取失败 ⇒ 按"未配置"处理（回退按 CCC 起桥）: ${String((err as Error)?.message ?? err)}`)
+  }
+  // 🔴 缺 `humanChannel` 与"读取失败"**同处理** = **未配置** ⇒ 回退模式（不打断在用的微信）。
+  //    ⚠️ 这不是"防御性编程"：本函数在 `apply` 的调用链上，而**宿主对插件 apply 抛错 = 整个 dsh
+  //    启动失败** ⇒ 一个形状不全的设置源绝不能把启动带下去。**门禁实测抓到过这一处**
+  //    （`skiff-startup-retry.test.ts` 对设置模块做了部分替身 ⇒ `humanChannel` 不在其中）。
+  //    🔵 顺带：**"缺这一段"与"这段是空的"语义相同**（都是"机器级未配置"）⇒ 无需造一个缺省对象。
+  if (hc && hc.accounts.length > 0) {
+    try {
+      syncMachinePollers(ctx, hc)
+    } catch (err) {
+      console.warn(`[serenity-hooks] ✗ human-channel: 机器级 poller 装配失败: ${String((err as Error)?.message ?? err)}`)
+    }
+    return
+  }
+  // 过渡期回退：按 CCC 起桥（原 `registerWeixinBridge` 的形态，逐字保留）
+  void (async () => {
+    try {
+      stopMachineLoops()
+      // C2（E5 修正）：CCC 枚举归 ccc-roots.listCccs——**并集**（工作区注册表 ∪ 持久化会话
+      // ∪ live 会话），取代原先"只认 live 会话 cwd"的第三份内联 Set 实现。
+      // 收益：没有 live 会话时也能为已知 CCC 启桥（原实现会漏）。
+      // 角色不读（withRoles 缺省 false）——本处只需要根。
+      const { listCccs } = await import('./ccc-roots.js')
+      // 未配置的 CCC 不启动（syncCccBridge 内部判断 enabled）
+      for (const entry of await listCccs(ctx)) syncCccBridge(ctx, entry.root)
+    } catch {
+      /* 扫描失败忽略（桥仍可在会话变化时重试） */
+    }
+  })()
 }
 
 // ── 主动发送（v1.30.9，S142 用户需求"微信桥支持被调用发消息给指定用户"）──
@@ -698,51 +924,37 @@ export async function sendProactiveText(input: ProactiveSendInput): Promise<Proa
   return { ok: true, accountId, userId: toUserId, sessionId, role }
 }
 
-/** 桥状态快照（面板数据源）：每 CCC → 每账号 → 轮询健康 */
+/**
+ * 桥状态快照（面板数据源）：每 CCC → 每账号 → 轮询健康。
+ * 🔴 **P0-3 A 起多一行**：机器级 poller 以 `ccc: '<machine>'`（`MACHINE_SCOPE`）出现 ——
+ * 它**不属于任何 CCC**，故**不伪装成某个 CCC 的行**（面板按原样显示这个哨兵值即可）。
+ */
 export function weixinBridgeStatus(): Array<{
   ccc: string
   accounts: Array<{ accountId: string; lastPollAt: number; lastError?: string }>
 }> {
   const out: Array<{ ccc: string; accounts: Array<{ accountId: string; lastPollAt: number; lastError?: string }> }> = []
-  for (const [root, bridge] of bridges) {
-    out.push({
-      ccc: root,
-      accounts: [...bridge.loops.entries()].map(([accountId, loop]) => ({
-        accountId,
-        lastPollAt: loop.lastPollAt,
-        ...(loop.lastError ? { lastError: loop.lastError } : {}),
-      })),
-    })
-  }
+  const toAccounts = (loops: Map<string, AccountLoop>) => [...loops.entries()].map(([accountId, loop]) => ({
+    accountId,
+    lastPollAt: loop.lastPollAt,
+    ...(loop.lastError ? { lastError: loop.lastError } : {}),
+  }))
+  for (const [root, bridge] of bridges) out.push({ ccc: root, accounts: toAccounts(bridge.loops) })
+  if (machineLoops.size > 0) out.push({ ccc: MACHINE_SCOPE, accounts: toAccounts(machineLoops) })
   return out
 }
 
 /**
- * 装配（index.ts 调用）：扫描 live CCC 启动桥 + 监听会话变化。
- * 事件驱动（对齐 autotrajectory v1.26.15）：live 会话出现 → 同步该 CCC 桥。
+ * 装配（index.ts 调用）：**按机器级配置决定模式**（P0-3 A：`syncHumanChannel`），
+ * 并监听会话变化以重扫（新 CCC 出现即启动其桥；配置变化也可经此路径热重建）。
+ * 事件驱动（对齐 autotrajectory v1.26.15）。
  */
 export function registerWeixinBridge(ctx: Context): void {
-  const syncFromLive = (): void => {
-    void (async () => {
-      try {
-        // C2（E5 修正）：CCC 枚举归 ccc-roots.listCccs——**并集**（工作区注册表 ∪ 持久化会话
-        // ∪ live 会话），取代原先"只认 live 会话 cwd"的第三份内联 Set 实现。
-        // 收益：没有 live 会话时也能为已知 CCC 启桥（原实现会漏）。
-        // 角色不读（withRoles 缺省 false）——本处只需要根。
-        const { listCccs } = await import('./ccc-roots.js')
-        // 未配置的 CCC 不启动（syncCccBridge 内部判断 enabled）
-        for (const entry of await listCccs(ctx)) syncCccBridge(ctx, entry.root)
-      } catch {
-        /* 扫描失败忽略（桥仍可在会话变化时重试） */
-      }
-    })()
-  }
+  syncHumanChannel(ctx)
 
-  syncFromLive()
-
-  // 会话创建/关闭 → 重扫（新 CCC 出现即启动其桥；配置变化也可经此路径热重建）
+  // 会话创建/关闭 → 重扫（配置变化经此路径热重建 ⇒ 方案 Q8 的"热生效"）
   try {
-    ctx.on('session/created', () => syncFromLive())
+    ctx.on('session/created', () => syncHumanChannel(ctx))
   } catch {
     /* 事件监听失败不阻断（桥仍可按需启动） */
   }
