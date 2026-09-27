@@ -68,6 +68,8 @@ import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } fr
 
 let dir: string
 let oldConfigEnv: string | undefined
+/** P0-3：机器级留痕的 env 隔离（见 `beforeEach` 注释） */
+let oldAuditEnv: string | undefined
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -168,6 +170,11 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'weixin-bridge-br-'))
   oldConfigEnv = process.env.SERENITY_HOOKS_CONFIG
   process.env.SERENITY_HOOKS_CONFIG = join(dir, 'serenity-hooks.json')
+  // 🔴 P0-3 起 `handleIncoming` 会写**机器级留痕**（未命中 ／ 目标不存在）—— 必须隔离，
+  //    否则"入站未命中"的用例会把行**追加到开发者真机的 `~/.dsh/human-channel-audit.jsonl`**。
+  //    （与 `register.test.ts` 当年踩过的同一个坑：机器级文件缺 env 隔离 ⇒ 测试污染真机。）
+  oldAuditEnv = process.env.SERENITY_HUMAN_CHANNEL_AUDIT
+  process.env.SERENITY_HUMAN_CHANNEL_AUDIT = join(dir, 'human-channel-audit.jsonl')
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
 })
@@ -181,6 +188,8 @@ afterEach(async () => {
   for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
+  if (oldAuditEnv === undefined) delete process.env.SERENITY_HUMAN_CHANNEL_AUDIT
+  else process.env.SERENITY_HUMAN_CHANNEL_AUDIT = oldAuditEnv
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -307,7 +316,7 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
     expect(sent).toHaveLength(0)
   })
 
-  it('C4 路由命中角色但该 CCC 未定义该角色 → 告警并 return（`:230`）', async () => {
+  it('C4 路由命中角色但该 CCC 未定义该角色 → **响亮报错**并 return（P0-3 起走 `console.error`）', async () => {
     // 路由指向 qa，但 skiff.roles 里没有 qa
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
@@ -321,7 +330,9 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
       if (url.includes('sendmessage')) sent.push(String(init?.body))
       return jsonResponse(200, { ret: 0 })
     })
-    const warn = vi.spyOn(console, 'log').mockImplementation(() => {})
+    // 🔴 P0-3 起这一档**升格**：原来是 `console.log`（"告警"），现为 `console.error`
+    //    —— 方案 §3.1 要求"目标不存在 ⇒ **响亮报错**，不静默丢弃"。
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const { handleIncoming } = await import('../src/weixin-bridge.js')
     await handleIncoming(fakeCtx() as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
@@ -331,8 +342,8 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
 
     expect(sent).toHaveLength(0)
     // 🔴 可观测性断言：不是"静默返回"，而是**留下指引性日志**（告诉运维查 skiff.roles）
-    expect(warn.mock.calls.some((c) => String(c[0]).includes('skiff.roles'))).toBe(true)
-    warn.mockRestore()
+    expect(err.mock.calls.some((c) => String(c[0]).includes('skiff.roles'))).toBe(true)
+    err.mockRestore()
   })
 
   it('C5 existing agent 的 ensureSkiffSession 抛错 → 告警但**不阻断本轮处理**（`:244`）', async () => {

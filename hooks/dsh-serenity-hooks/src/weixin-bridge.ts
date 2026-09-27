@@ -23,7 +23,13 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { readHandymanConfig } from './ccc.js'
 // P0-2（方案 §2.6）：机器级归属判定（一账号一 poller）—— 机制在 human-channel.ts，本文件只接线
-import { accountIdentity, planPollerClaims, commitPollerClaims, releasePollersOf, releaseAllPollers, pollerOwners, type PollerRequest } from './human-channel.js'
+// P0-3（方案 §11.4）：订阅表 ＋ 路由 ＋ 机器级留痕 —— 同上，机制在 human-channel.ts
+import {
+  accountIdentity, planPollerClaims, commitPollerClaims, releasePollersOf, releaseAllPollers, pollerOwners, type PollerRequest,
+  planInboundRoute, appendHumanChannelAudit, type InboundRoutePlan,
+} from './human-channel.js'
+// 机器级配置的**唯一读取入口**（P0-1 起 `humanChannel` 随它一起出）⇒ 天然热生效（方案 Q8）
+import { readSimpleSettings } from './settings-section.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './weixin-route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
@@ -182,6 +188,28 @@ export function manualOutputFallbackNeeded(input: {
 }
 
 /**
+ * 订阅表里的 `ccc` **别名 → CCC 根**（P0-3）。
+ *
+ * 别名取值与面板下拉**同源**（方案 §2.3：`listCccs({withRoles:true})` 的下拉）⇒
+ * 先按 **`CccEntry.name`**（= CCC 根目录名，`basename(root)`）匹配；再退一步接受**绝对路径**
+ * （手写配置时人会直接粘路径）。两条都试 ⇒ 两种写法都可用，且**不引入第二张名字表**。
+ * @returns 命中的 CCC 根；枚举里没有 ⇒ `null`（调用方**响亮报错**，不静默丢弃）
+ */
+async function resolveCccRootByAlias(ctx: Context, alias: string): Promise<string | null> {
+  try {
+    const { listCccs } = await import('./ccc-roots.js')
+    const entries = await listCccs(ctx)
+    const byName = entries.find((e) => e.name === alias)
+    if (byName) return byName.root
+    const byRoot = entries.find((e) => e.root === alias)
+    return byRoot ? byRoot.root : null
+  } catch {
+    // 枚举失败（服务不可用等）⇒ 与"没找到"同处理（响亮报错 + 留痕，由调用方做）
+    return null
+  }
+}
+
+/**
  * 处理单条微信消息：路由 → skiff 会话（固定 id 创建/延续）→ 提问 → 回复回写。
  *
  * 会话语义：`weixinSessionIdFor(fromUserId)` 固定可重建——同用户长期同一会话；
@@ -198,6 +226,11 @@ export function manualOutputFallbackNeeded(input: {
  *   `_tmp/weixin-inbound/<userhash>/` → question 注入「存在性 + 路径」（ACC 层只保证
  *   可达性——"让会话知道文件的存在并可以拿到"；识别/解析归角色 LLM 决策，不编排）。
  *   降级不静默：下载失败 / 超 20MB → 注入说明进对话；typing 窗口覆盖下载（M7）。
+ *
+ * 🔴 **P0-3（2026-09-27）：路由改由机器级订阅表决定**（本函数的 `root` 入参退为
+ * **回退目标**）。两档语义刻意分开（方案 §3.1）：**未命中 ⇒ 不投递 ＋ 留痕**（静默档）；
+ * **目标不存在（CCC ／ 角色）⇒ 响亮报错**（`console.error` ＋ 机器级留痕）。两者都
+ * **不是**"投给默认角色"。
  */
 export async function handleIncoming(
   ctx: Context,
@@ -213,8 +246,60 @@ export async function handleIncoming(
 
   const settings = readWeixinSettings(root)
   if (!settings.enabled) return
-  const roleName = matchWeixinRoute(settings.routes ?? [], fromUserId)
-  if (!roleName) return // 无路由 → 不回复（未配置该用户）
+
+  // ── P0-3 路由：**机器级订阅表优先** → CCC 级 `routes` 回退 ─────────────────────────
+  // 🔴 回退是**过渡期**语义（方案 §11.3 **Q5**："不打断在用的微信"）：机器级账号表为空时，
+  //    桥仍按 CCC 起、路由也仍认 CCC 级 routes。机器级一旦配起来 ⇒ 回退传 null ⇒
+  //    **未命中 = 不投递**（**不是**"投给默认角色" —— 方案 §3.1 明令禁止）。
+  const cccRole = matchWeixinRoute(settings.routes ?? [], fromUserId)
+  const route: InboundRoutePlan = planInboundRoute({
+    subscriptions: readSimpleSettings().humanChannel.subscriptions,
+    account: accountId,
+    user: fromUserId,
+    fallback: cccRole ? { ccc: root, role: cccRole } : null,
+  })
+
+  // 表残缺 ⇒ **响亮出声**（与"未命中"分档：笔误必须有人去改）
+  // ⚠️ 它**独立于是否命中** —— 命中一条完好的行不掩盖另一行的笔误。
+  for (const defect of route.defects) {
+    console.error(
+      `[serenity-hooks] ✗ human-channel: 订阅表第 ${defect.index + 1} 行**残缺**（缺 ${defect.missing.join(' / ')}）`
+      + `｜已有字段 ${JSON.stringify(defect.present)}｜该行**不生效** —— 请补全或删掉（机器级 humanChannel.subscriptions）`,
+    )
+    appendHumanChannelAudit({ kind: 'subscription-defect', account: accountId, index: defect.index, missing: defect.missing, present: defect.present })
+  }
+
+  const target = route.target
+  // ① 未命中 ⇒ **不投递 ＋ 留痕**（**静默档**：这不是错误，是"表里没有你"）
+  if (!target) {
+    const detail = route.skipReason === 'no-subscription'
+      ? '机器级订阅表为空（且无 CCC 级回退）'
+      : '订阅表里没有匹配 (账号, 用户) 的行'
+    console.warn(`[serenity-hooks] ⚠ human-channel: 入站未命中订阅 ⇒ **不投递**（account=${accountId} user=${fromUserId}）：${detail}`)
+    appendHumanChannelAudit({ kind: 'inbound-unrouted', account: accountId, user: fromUserId, reason: route.skipReason ?? 'no-match', detail })
+    return
+  }
+
+  // ② 目标**不存在** ⇒ **响亮报错**（方案 §3.1 / W5'：**不静默丢弃**）
+  // 🔴 回退来源的 `ccc` **就是已知的本 CCC 根** ⇒ 不做枚举查找（省一次 IO，也不依赖它出现在枚举里）
+  const targetRoot = route.source === 'ccc-fallback' ? root : await resolveCccRootByAlias(ctx, target.ccc)
+  if (targetRoot === null) {
+    const detail = `订阅表指向的 CCC "${target.ccc}" 在本机 CCC 枚举里不存在`
+    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${accountId} user=${fromUserId}）—— 该消息**未投递**，请改订阅表`)
+    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: accountId, user: fromUserId, ccc: target.ccc, role: target.role, detail })
+    return
+  }
+  const roleName = target.role
+  const role = readSkiffRoles(targetRoot).get(roleName)
+  if (!role) {
+    const detail = `目标 CCC "${target.ccc}" 未定义 skiff 角色 "${roleName}"`
+    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${accountId} user=${fromUserId}）—— 该消息**未投递**，请改订阅表或该 CCC 的 skiff.roles`)
+    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: accountId, user: fromUserId, ccc: target.ccc, role: roleName, detail })
+    return
+  }
+  // 🔴 此后本函数的 `root` 语义 = **投递目标根**：回退模式下恒 === 入参 root；
+  //    机器级模式下由订阅表指定，**可能与入参不同** ⇒ 下面整段投递体一律用它。
+  root = targetRoot
 
   // 纯语音无转写（无文本无媒体）→ 降级提示（不静默；不创建会话）
   if (!text && mediaRefs.length === 0) {
@@ -231,11 +316,6 @@ export async function handleIncoming(
   }
 
   try {
-    const role = readSkiffRoles(root).get(roleName)
-    if (!role) {
-      console.log(`[serenity-hooks] weixin-bridge: 路由命中角色 "${roleName}" 但该 CCC 未定义（检查 skiff.roles）`)
-      return
-    }
     const sessionId = weixinSessionIdFor(fromUserId)
     const existing = getSkiffAgent(sessionId)
     const hc = readHandymanConfig(root)

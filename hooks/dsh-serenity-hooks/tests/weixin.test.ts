@@ -79,6 +79,8 @@ import { registerWeixinOutputGuard } from '../src/weixin-output-guard.js'
 
 let dir: string
 let oldConfigEnv: string | undefined
+/** P0-3：机器级留痕的 env 隔离（`handleIncoming` 的未命中／目标不存在档会写它） */
+let oldAuditEnv: string | undefined
 
 /** fake Response（fetch mock 返回值） */
 function jsonResponse(status: number, body: unknown): Response {
@@ -89,6 +91,9 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'weixin-'))
   oldConfigEnv = process.env.SERENITY_HOOKS_CONFIG
   process.env.SERENITY_HOOKS_CONFIG = join(dir, 'serenity-hooks.json')
+  // 🔴 同 `weixin-bridge-branches.test.ts`：不隔离 ⇒ 用例会把行写进**真机** `~/.dsh/`
+  oldAuditEnv = process.env.SERENITY_HUMAN_CHANNEL_AUDIT
+  process.env.SERENITY_HUMAN_CHANNEL_AUDIT = join(dir, 'human-channel-audit.jsonl')
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
 })
@@ -104,6 +109,8 @@ afterEach(async () => {
   for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
+  if (oldAuditEnv === undefined) delete process.env.SERENITY_HUMAN_CHANNEL_AUDIT
+  else process.env.SERENITY_HUMAN_CHANNEL_AUDIT = oldAuditEnv
   rmSync(dir, { recursive: true, force: true })
 })
 
