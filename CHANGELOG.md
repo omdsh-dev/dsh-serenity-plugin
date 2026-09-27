@@ -1,3 +1,51 @@
+## v1.50.0 — 2026-09-27（**handyman 前台并行（cap 5）＋ human-channel 机器级配置与「一账号一 poller」**）
+
+**来源**：owner 2026-09-27 具名令（逐字）——
+*"提一个顺带的改进，handyman foreground 能否允许并行，最大 5；就当是支持自定模型的 subagent 用了，急需"*。
+
+> 🔴 **本版最要紧的一句**：**前台并行不是"顺手加个并发"** —— 它把 handyman 从"一次一个结果"变成
+> "一次 N 个结果"，而**前台会占住主 agent 的这一轮**（调用方在等）⇒ 上限刻意**比 background 更紧**（**5** vs 10）。
+
+---
+
+### 一、handyman foreground 支持并行（owner 具名令）
+
+1. `handyman(jobs=[{task,label?,model?},...])` **在 foreground 模式下可用**（原实现**直接抛**
+   `jobs is background-only`）。**上限硬编码 5**（owner 原话就是"最大 5" ⇒ **刻意不新增配置键**；
+   不用 background 的 `maxParallel`=10 的理由见上）。
+2. 语义：每个 job 各起一个子 agent（走宿主委派正门 `ctx.subagents.start("spawn")`），
+   **结果保持传入顺序**；**per-job `model` 覆盖调用级 model**；`label` **可选**（前台只是显示名）。
+3. 与 background 的差别（**有意保留**）：**不循环 ／ 不校验完成码 ／ 不写进度文件**。
+4. 自述四处同步（工具 `description` ／ `mode` ／ `jobs` ／ `handyman(guide=true)` 指引 §4）＋
+   **系统提示词的工具清单行** —— 那行**每请求都注入**，只改工具描述会让**注入面与工具面说法不一致**。
+
+### 二、human-channel（人机信道）机器级配置 ＋ 一账号一 poller
+
+> 背景：微信桥今天"**按 CCC 起**"（`for entry of listCccs ⇒ syncCccBridge`）⇒ 两个 CCC 各配同一个微信号
+> 就会**两处轮询同一条消息**（重复投递 ＋ 重复落盘）。本版起把这条不变量立在**机器级**。
+
+1. **机器级配置 `humanChannel`**（插件 Config，一个 dsh 进程一份；不是每 CCC 一份）：
+   `accounts` ／ `subscriptions` ／ `relay` ／ `sending`。经 `settings-section` 投影进
+   `readSimpleSettings().humanChannel`（**读取入口仍唯一** ⇒ 天然享受 `fiber.update()` 的热生效）。
+   缺省：空表 ＋ 无主控（`null`）＋ `sending.allow = ['*']`（**所有 CCC 都能发给人**）。
+   🔴 **刻意不含 `weixin` 兼容别名**（硬切无别名）；**旧 CCC 侧 `weixin.*` 本版照旧生效**（退役在后续版本，
+   届时**必须出声** —— 那是"**家搬了**"，不是"键没了"）。
+2. **一账号一 poller**（`src/human-channel.ts`，机器级机制层；`weixin-bridge` 只接线）：
+   起循环**之前**过归属判定 —— 同一账号（= **同一份凭据**；身份 = **token 哈希**，**不是** `accountId`，
+   后者是每 CCC 的本地标签）在同一时刻**只有一个轮询者**；被跳过者**留响亮日志**
+   （否则表现为"某个 CCC 的桥莫名其妙不工作"）。归属**粘住不漂**（热重建语义见源码注释）。
+3. 🔵 **本版范围（诚实登记）**：只做**归属判定**；"**机器级账号表 ⇒ 起 poller**"**随订阅表（下一版）一起** ——
+   没有订阅表时机器级 poller **能收不能投**。过渡期（机器级为空）**完全维持旧行为** ⇒ **不打断在用的微信**。
+
+### 三、判据（可复跑）
+
+- foreground + jobs ⇒ 3 个 job 起 **3** 个子 agent，**prompt 顺序 = 传入顺序 = 结果顺序**
+- 超过 5 ⇒ **拒绝且一个子 agent 都不起**（拒绝发生在**创建之前**）
+- 一账号一 poller：两个 CCC 配**同一份凭据** ⇒ `weixinBridgeStatus()` **只列一个**（＋**正控**：不同凭据 ⇒ 两个都起）
+- **回归钉**：机器级 schema 里**不得**出现 `weixin`（变异：加别名 ⇒ **恰好 1 红**）
+
+---
+
 ## v1.49.0 — 2026-09-26（**交界材料分家：新增 `REBUILD-TODO.md` ＋ 砍掉 In-flight 段 ＋ 砍掉「超限重建总开关」**）
 
 **来源**：owner 2026-09-26 需求与裁决（逐字）——
