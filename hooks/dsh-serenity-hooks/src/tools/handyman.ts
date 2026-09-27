@@ -110,6 +110,35 @@ function parseJobs(raw: unknown): HandymanJob[] | null {  if (!Array.isArray(raw
   return jobs
 }
 
+/**
+ * 🔴 **foreground 并行上限 = 5**（owner 2026-09-27 具名令：「handyman foreground 能否允许并行，最大 5；
+ * 就当是支持自定模型的 subagent 用了，急需」）。
+ *
+ * 为什么是**硬编码**而不是又一个配置键：owner 的原话就是"最大 5"（同 `REBUILD-TODO` 那次的裁决口径
+ * —— 设定项能不加就不加，见 S142 的「可砍设定项」）。若将来真要调，再按具名令改成配置。
+ *
+ * 为什么 foreground 也要限流（而不是直接复用 `handyman.maxParallel` = 10）：**foreground 会占住主
+ * agent 的这一轮**（调用方在等结果），并发越高越容易把宿主的并发面与用量推上去 ⇒ 前台给一个更紧的闸。
+ */
+const FOREGROUND_MAX_PARALLEL = 5
+
+/** foreground 的 jobs 解析（与 background 的差别：**label 可选** —— 前台 label 只是显示名，不命名进度文件） */
+function parseForegroundJobs(raw: unknown): Array<{ task: string; label?: string; model?: string }> | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  const jobs: Array<{ task: string; label?: string; model?: string }> = []
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) return null
+    const rec = item as Record<string, unknown>
+    if (typeof rec.task !== 'string' || rec.task.trim() === '') return null
+    jobs.push({
+      task: rec.task,
+      ...(typeof rec.label === 'string' && rec.label !== '' ? { label: rec.label } : {}),
+      ...(typeof rec.model === 'string' && rec.model !== '' ? { model: rec.model } : {}),
+    })
+  }
+  return jobs
+}
+
 // ── v1.31.3 foreground 模式：一次前台串行委派（用户裁决：handyman 双模式）──
 
 /** foreground 模式结果（一次调用一次结果；无循环、无进度文件） */
@@ -390,8 +419,8 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
       'progress file AGENT_SESSIONS/handyman-<label>.md/.json (same label resumes), and parallel jobs ' +
       '(handyman.maxParallel, default 10). Usage: handyman(mode="background", task, label, [model]) or ' +
       'handyman(mode="background", jobs=[{task,label,model?},...]).\n' +
-      'Choosing: need exactly one result back now → foreground; need anti-early-finish guarantees, resumability ' +
-      'or parallel jobs → background.\n' +
+      'Choosing: need exactly one result back now → foreground; need anti-early-finish guarantees or resumability ' +
+      '→ background; need N results back now (parallel, per-job model) → foreground with jobs (cap 5).\n' +
       'Model: only models whitelisted in .opencode/serenity.json "handyman.models" (missing config = error); ' +
       'default reads handyman.defaultModel. Both modes share the same whitelist and default.\n' +
       'Provider check: the whitelist lives in the CCC (it travels with the repo) while provider adapters are ' +
@@ -401,14 +430,14 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
       'Recursion: a worker\'s tool set excludes handyman itself (orchestration belongs to the main agent).\n' +
       'Guide: handyman(guide=true) prints the scale-up usage guide.',
     parameters: {
-      mode: { type: 'string', description: 'Delegation mode: "foreground" (default — one serial child, returns its final text) or "background" (loop-validated worker with completion-code check, round cap, auto-restart, progress file, parallel jobs)' },
+      mode: { type: 'string', description: 'Delegation mode: "foreground" (default — child agent(s) run once and return their final text; accepts `jobs` for parallel fan-out, cap 5) or "background" (loop-validated worker with completion-code check, round cap, auto-restart, progress file, parallel jobs)' },
       task: { type: 'string', description: 'The task goal to complete (required in both modes; foreground needs a self-contained prompt — the child does not share this conversation)' },
       label: { type: 'string', description: 'Task label (background: 1-50 chars, names the progress file; foreground: optional child display name)' },
       session: { type: 'string', description: 'Work session S### (context hint, progress reference)' },
       model: { type: 'string', description: 'provider/model — must be in the CCC whitelist handyman.models; default reads handyman.defaultModel' },
       jobs: {
         type: 'array',
-        description: 'Multi-job orchestration (workflow capability): [{task, label, model?}, ...] — runs jobs in parallel (cap handyman.maxParallel, default 10)',
+        description: 'Multi-job orchestration (workflow capability): [{task, label?, model?}, ...] — runs jobs in parallel. Cap: foreground 5 (fixed) / background handyman.maxParallel (default 10). Results keep the order you passed them in.',
         items: {
           type: 'object',
           properties: {
@@ -456,11 +485,44 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
         throw new Error('handyman: mode must be "foreground" (default) or "background"')
       }
       if (mode === 'foreground') {
+        // 🆕 2026-09-27（owner 具名令）：foreground **也允许 jobs**（并行 ≤5）——
+        //    原实现是直接抛「jobs is background-only」；现在它是"支持自定模型的 subagent 扇出"。
+        //    与 background 的差别：**label 可选**、**不循环/不校验完成码/不写进度文件**、上限 5。
+        if (args.jobs !== undefined) {
+          const jobs = parseForegroundJobs(args.jobs)
+          if (jobs === null) throw new Error('handyman foreground: jobs must be [{task, label?, model?}, ...] (every job requires a non-empty task)')
+          if (jobs.length > FOREGROUND_MAX_PARALLEL) {
+            throw new Error(
+              `handyman foreground: ${jobs.length} jobs exceed the foreground parallel cap ${FOREGROUND_MAX_PARALLEL}`
+                + ' (split into batches, or use mode="background" whose cap is handyman.maxParallel)',
+            )
+          }
+          const results = await Promise.all(
+            jobs.map((job) => runForegroundJob(ctx, {
+              task: job.task,
+              ...(job.label === undefined ? {} : { label: job.label }),
+              model: job.model ?? (typeof args.model === 'string' && args.model !== '' ? args.model : hc.defaultModel),
+              models: hc.models,
+              parent: exec.agent,
+              signal: (exec as { signal?: AbortSignal }).signal,
+            })),
+          )
+          const done = results.every((r) => r.done)
+          return {
+            mode: 'foreground',
+            done,
+            jobs: results,
+            usage: {
+              how: `foreground parallel mode starts ${results.length} child agents at once through the host delegation service (ctx.subagents.start "spawn"), awaits all of them, and returns each child's final text. No loop, no completion-code validation, no progress file. Cap = ${FOREGROUND_MAX_PARALLEL}.`,
+              model: 'restricted to the CCC whitelist handyman.models; per-job model overrides the call-level model; default reads handyman.defaultModel',
+              next: done
+                ? 'All children completed; use each job\'s output directly (results are in the same order as the jobs you passed)'
+                : 'Some children did not complete — inspect each job\'s diagnostic/output (results keep the order you passed); for anti-early-finish guarantees use mode="background"',
+            },
+          } as unknown as JsonValue
+        }
         if (typeof args.task !== 'string' || args.task.trim() === '') {
           throw new Error('handyman foreground: task is required (and must be self-contained — the child does not share this conversation)')
-        }
-        if (args.jobs !== undefined) {
-          throw new Error('handyman foreground: jobs is background-only — call foreground once per task, or use mode="background" for parallel jobs')
         }
         const model = typeof args.model === 'string' && args.model !== '' ? args.model : hc.defaultModel
         const res = await runForegroundJob(ctx, {

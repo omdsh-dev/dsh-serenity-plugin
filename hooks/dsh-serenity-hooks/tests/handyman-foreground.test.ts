@@ -197,10 +197,78 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
     await expect(tool.execute({ task: 'x' }, execIn())).rejects.toThrow(/mode="background"/)
   })
 
-  it('foreground 传 jobs → 拒绝（jobs 属 background）', async () => {
+  /**
+   * 🆕 2026-09-27（owner 具名令）：foreground **也允许 jobs**（并行 ≤5）——
+   * 「就当是支持自定模型的 subagent 用了，急需」。
+   * ⚠️ 本条**取代**旧的「foreground 传 jobs → 拒绝（background-only）」用例：那是**有意的行为变更**，
+   * 不是回归（旧断言已随实现一起退场）。
+   */
+  it('🔴 foreground + jobs ⇒ 真并行扇出：每个 job 各起一个子 agent，结果**保持传入顺序**', async () => {
+    const fake = fakeSubagents({ output: [{ type: 'text', text: 'R' }], stopReason: 'completed' })
+    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const out = await tool.execute(
+      {
+        jobs: [
+          { task: 'a', label: 'A' },
+          { task: 'b', label: 'B' },
+          { task: 'c' }, // label 可选（前台 label 只是显示名）
+        ],
+      },
+      execIn(),
+    )
+    expect(fake.calls).toHaveLength(3)
+    expect(fake.calls.map((c) => (c.request.prompt as Array<{ text: string }>)[0]?.text)).toEqual(['a', 'b', 'c'])
+    expect(out.mode).toBe('foreground')
+    expect(out.done).toBe(true)
+    const jobs = out.jobs as Array<Record<string, unknown>>
+    expect(jobs).toHaveLength(3)
+    expect(jobs.map((j) => j.done)).toEqual([true, true, true])
+    expect(jobs.map((j) => j.output)).toEqual(['R', 'R', 'R'])
+  })
+
+  it('🔴 per-job model 覆盖调用级 model（"支持自定模型的 subagent"的字面含义）', async () => {
+    writeCcc(
+      ['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'],
+      'minimax-cn-coding-plan/MiniMax-M3',
+    )
     const fake = fakeSubagents()
     const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
-    await expect(tool.execute({ task: 'x', jobs: [{ task: 'a', label: 'a' }] }, execIn())).rejects.toThrow(/background-only/)
+    await tool.execute(
+      {
+        model: 'minimax-cn-coding-plan/MiniMax-M3',
+        jobs: [{ task: 'a', model: 'deepseek-official/deepseek-v4-flash' }, { task: 'b' }],
+      },
+      execIn(),
+    )
+    expect((fake.calls[0]?.request.agentOptions as Record<string, unknown>).model).toBe('deepseek-v4-flash')
+    // 正控：没给 per-job model 的那个走调用级 model（不是"全都用第一个 job 的模型"）
+    expect((fake.calls[1]?.request.agentOptions as Record<string, unknown>).model).toBe('MiniMax-M3')
+  })
+
+  it('🔴 超过前台并行上限 5 ⇒ 拒绝且**一个子 agent 都不起**（含 cap 文案）', async () => {
+    const fake = fakeSubagents()
+    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const jobs = Array.from({ length: 6 }, (_, i) => ({ task: `t${i}` }))
+    await expect(tool.execute({ jobs }, execIn())).rejects.toThrow(/exceed the foreground parallel cap 5/)
+    expect(fake.calls).toHaveLength(0) // ← 关键：拒绝发生在创建之前
+  })
+
+  it('非法 jobs（非数组 / 空 / 缺 task）⇒ 拒绝', async () => {
+    const fake = fakeSubagents()
+    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    await expect(tool.execute({ jobs: 'nope' }, execIn())).rejects.toThrow(/jobs must be/)
+    await expect(tool.execute({ jobs: [] }, execIn())).rejects.toThrow(/jobs must be/)
+    await expect(tool.execute({ jobs: [{ label: 'no-task' }] }, execIn())).rejects.toThrow(/jobs must be/)
+    expect(fake.calls).toHaveLength(0)
+  })
+
+  it('正控：不传 jobs ⇒ 单任务路径逐字不变（一次委派、一个结果）', async () => {
+    const fake = fakeSubagents()
+    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const out = await tool.execute({ task: 'solo' }, execIn())
+    expect(fake.calls).toHaveLength(1)
+    expect(out.mode).toBe('foreground')
+    expect(out.jobs).toBeUndefined() // ← 单任务路径**不**产出 jobs 数组（形状未被污染）
   })
 
   it('task 缺失 / 非法 mode → 拒绝', async () => {

@@ -229,11 +229,11 @@ export const HANDYMAN_GUIDE = `# handyman — Scale-Up Usage Guide (guide)
 ## Two modes (v1.31.3; default = foreground)
 | | foreground (default) | background |
 |---|---|---|
-| What | one serial child agent runs the task ONCE and returns its final text | loop-validated worker: hard while-loop + random completion code |
-| Use when | you need exactly one result back now (per-case testers, single conversions) | long/unattended work needing anti-early-finish, resumability, or parallel jobs |
+| What | child agent(s) run the task ONCE and return their final text (jobs=[...] ⇒ parallel, cap 5) | loop-validated worker: hard while-loop + random completion code |
+| Use when | you need result(s) back now (per-case testers, single conversions, parallel fan-out) | long/unattended work needing anti-early-finish, resumability, or parallel jobs |
 | Loop / validation | none | stop-token is the ONLY completion condition; round cap (default 100); auto-restart (≤100) |
 | Progress file | none | AGENT_SESSIONS/handyman-<label>.md/.json (same label resumes) |
-| Parallel jobs | no (call once per task) | yes (jobs=[...], handyman.maxParallel default 10) |
+| Parallel jobs | **yes** — jobs=[{task,label?,model?},...], **cap 5 (fixed)** | yes (jobs=[...], handyman.maxParallel default 10) |
 | Mechanism | host delegation service ctx.subagents.start("spawn") + agentOptions | ctx.agents.create + internal while-loop |
 | Model source | CCC handyman.models whitelist (same for both) | same |
 
@@ -242,7 +242,7 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
 
 ### 1. Task decomposition (E↑ Explicit)
 - Split large tasks into explicit subtasks: each subtask defines goal / input / boundaries (what to do, what not to do) / acceptance criteria
-- Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel (background mode)
+- Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel (both modes)
 
 ### 2. Prompt design (handyman's task parameter)
 - task must be detailed, fixed, and EAP-compliant: clear goal, drawn boundaries, decidable acceptance criteria
@@ -270,12 +270,15 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
   (and "handyman.defaultModel") to a provider listed as available, or activate/register the provider on this
   machine. **Do not retry the same call unchanged** — it fails identically.
 
-### 4. Parallel strategy (background mode only)
-- Independent subtasks can run in parallel via handyman(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file
+### 4. Parallel strategy (both modes)
+- Independent subtasks can run in parallel:
+  · **foreground** — handyman(jobs=[{task,label?,model?},...]) ⇒ fan-out of custom-model subagents, **cap 5**,
+    results come back **in the order you passed them** (label is only a display name here; per-job "model" allowed)
+  · **background** — handyman(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file
 - Concurrency safety guaranteed: unique sessionId (handyman-<label>-<uuid>), progress files isolated per label
   (AGENT_SESSIONS/handyman-<label>.json) — same label resumes, different labels never interfere
-- Parallel cap: handyman.maxParallel (default 10 — cheap models are cheap)
-- Aggregation: after each parallel job produces progress, the main agent merges (or spawns one aggregation handyman)
+- Parallel cap: **foreground 5 (fixed)** / background handyman.maxParallel (default 10 — cheap models are cheap)
+- Aggregation: foreground returns all outputs in one result; background: after each parallel job produces progress, the main agent merges (or spawns one aggregation handyman)
 - For programmable pipeline/phase orchestration at scale, use the platform's workflow tool instead
 
 ## Completion criteria
