@@ -9,6 +9,10 @@
  * 实验性质：未配置/未启用 → 完全不启动（零资源占用）。配置变化（面板写入）
  * → 热重建受影响 CCC 的桥（对齐 gateway 热重建模式）。
  *
+ * 🔴 **P0-2（2026-09-27，方案 §2.6）：起桥仍按 CCC，但"谁轮询"按账号判定** ——
+ * 同一个账号（= 同一份凭据）在同一时刻**只允许一个 poller**，判定与归属表在
+ * `human-channel.ts`（机器级机制；本文件只接线）。这是"微信桥上移 ACC 层"的第一步。
+ *
  * 外部面纯净（D9/D11 延续）：微信桥会话 = 外部面——session/prompt 走
  * includeTrajectory:false（对外不返回轨迹）；skiff 角色白名单即授权（G9）。
  */
@@ -18,6 +22,8 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { readHandymanConfig } from './ccc.js'
+// P0-2（方案 §2.6）：机器级归属判定（一账号一 poller）—— 机制在 human-channel.ts，本文件只接线
+import { accountIdentity, planPollerClaims, commitPollerClaims, releasePollersOf, releaseAllPollers, pollerOwners, type PollerRequest } from './human-channel.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './weixin-route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles } from './skiff-role.js'
@@ -432,6 +438,11 @@ export async function handleIncoming(
 /**
  * 启动/重建某 CCC 的桥：读配置 → 对每个 enabled + 有凭据的账号启动轮询循环。
  * 已存在（配置变化热重建）→ 先停旧循环再启动新的。
+ *
+ * 🔴 **P0-2（2026-09-27，方案 §2.6）：一账号一 poller** —— 起循环**之前**先过机器级归属判定
+ * （`human-channel.ts`）：身份被**别的** CCC 占着的账号**不起循环**，只留一条响亮日志。
+ * 身份 = **凭据 token 的哈希**（不是 `accountId`：那是每 CCC 的本地标签，跨 CCC 无意义）。
+ * 先 `releasePollersOf(root)` 再重新 claim —— 热重建语义与"归属粘住不漂"的论证见该函数注释。
  */
 export function syncCccBridge(ctx: Context, root: string): void {
   const existing = bridges.get(root)
@@ -439,28 +450,51 @@ export function syncCccBridge(ctx: Context, root: string): void {
     for (const loop of existing.loops.values()) loop.stopped = true
     bridges.delete(root)
   }
+  // 先放开本 CCC 的旧归属（同步段：无 await ⇒ 没有"被别人抢走"的窗口）
+  releasePollersOf(root)
 
   const settings = readWeixinSettings(root)
   if (!settings.enabled) return
 
-  const bridge: CccBridge = { root, loops: new Map() }
+  // 组装请求（只含 enabled ＋ 已绑定凭据的账号）——凭据随请求带上，避免后面二次读取
+  const requests: PollerRequest[] = []
+  const creds = new Map<string, WeixinAccountCredential>()
   for (const account of settings.accounts ?? []) {
     if (account.enabled === false) continue
     const cred = readWeixinCredential(root, account.accountId)
     if (!cred) continue // 无凭据（未扫码绑定）→ 跳过
-    const loop: AccountLoop = { stopped: false, lastPollAt: 0 }
-    bridge.loops.set(account.accountId, loop)
-    void runAccountLoop(ctx, root, account.accountId, cred, loop)
+    creds.set(account.accountId, cred)
+    requests.push({ root, accountId: account.accountId, identity: accountIdentity(root, account.accountId, cred.token) })
   }
+
+  const plan = planPollerClaims(requests, pollerOwners())
+  // 被跳过**必须出声**：否则表现为"某个 CCC 的桥莫名其妙不工作"（fail-closed 但可见）
+  for (const { request, ownedBy } of plan.skipped) {
+    console.warn(
+      `[serenity-hooks] ⚠ weixin-bridge: 账号 ${request.accountId}（ccc=${root}）已被 ccc=${ownedBy.root} 的账号 ${ownedBy.accountId} 轮询` +
+        ' ⇒ 本处不重复起循环（一账号一 poller；方案 §2.6）',
+    )
+  }
+
+  const bridge: CccBridge = { root, loops: new Map() }
+  for (const claim of plan.claims) {
+    const cred = creds.get(claim.accountId)
+    if (!cred) continue
+    const loop: AccountLoop = { stopped: false, lastPollAt: 0 }
+    bridge.loops.set(claim.accountId, loop)
+    void runAccountLoop(ctx, root, claim.accountId, cred, loop)
+  }
+  commitPollerClaims(plan)
   if (bridge.loops.size > 0) {
     bridges.set(root, bridge)
     console.log(`[serenity-hooks] ✓ weixin-bridge: ccc=${root} accounts=${[...bridge.loops.keys()].join(',')}`)
   }
 }
 
-/** 停止某 CCC 的桥（移除账号/禁用时） */
+/** 停止某 CCC 的桥（移除账号/禁用时）；同时释放它的账号归属 */
 export function stopCccBridge(root: string): void {
   const bridge = bridges.get(root)
+  releasePollersOf(root)
   if (!bridge) return
   for (const loop of bridge.loops.values()) loop.stopped = true
   bridges.delete(root)
@@ -474,6 +508,7 @@ export function stopAllBridges(): void {
     for (const loop of bridge.loops.values()) loop.stopped = true
   }
   bridges.clear()
+  releaseAllPollers()
 }
 
 // ── 主动发送（v1.30.9，S142 用户需求"微信桥支持被调用发消息给指定用户"）──
