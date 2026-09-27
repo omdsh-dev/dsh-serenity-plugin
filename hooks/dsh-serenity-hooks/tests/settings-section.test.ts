@@ -48,6 +48,8 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       publicAskEnabled: false,
       croEnabled: true,
       unattendedEnabled: false,
+      // 2026-09-26（P0-1）：机器级 human-channel 搭本结构出（读取入口唯一）；缺省见 human-channel-config.test.ts
+      humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
   })
 
@@ -78,6 +80,7 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       publicAskEnabled: false,
       croEnabled: true,
       unattendedEnabled: false,
+      humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
   })
 

@@ -73,6 +73,83 @@ export const name = 'dsh-serenity-hooks'
  *  （v1.28.0 适配 0.1.2-rc.1：+ 'settings'——B4 settings 服务由 provider 插件加载后才有） */
 export const inject = ['tools', 'webServer', 'sessions', 'shellEnv', 'skills', 'agentLoop', 'agents', 'systemPrompt', 'sessionProjections', 'settings', 'web']
 
+/**
+ * human-channel（人机信道）的**机器级**配置形状（2026-09-26 owner 定案 ⇒ 实现方案 §2.2）。
+ *
+ * ## 为什么落在这里
+ * **插件 Config 本身就是机器级的**（宿主 `serenity-hooks` 命名空间，一个 dsh 进程一份），
+ * 而 human-channel 的三张表（账号 ／ 订阅 ／ 主控）天然是**跨 CCC** 的 ⇒ 不必新造文件。
+ *
+ * ## 为什么只有一种拼写（与 `gatewayEnabled` ／ `gateway.enabled` 那对刻意不同）
+ * 那一对是「面板层扁平键」与「部署层嵌套段」的分工；human-channel 是**结构化表**，
+ * 面板整块读写它 ⇒ **多一种拼写就多一个会漂的真相源**。
+ *
+ * ## 各字段为什么一律不 `.required()`
+ * schemastery 的「不 `.required()` 即可选」⇒ 手写 Config ／ 部署 bundle 里可以整段不给。
+ * 🔴 **实测更正（2026-09-26，真 schemastery）**：经宿主 Loader 解析后**本段恒存在** ——
+ *    `Config({}).humanChannel` = `{accounts:[],subscriptions:[],relay:{},sending:{allow:['*']}}`
+ *    （子段对象被**物化**、数组取各自缺省）。⇒ 「没设过」在**解析面上不可观测**；那与
+ *    「面板层扁平键刻意无缺省」（`gatewayEnabled` 那一类，为的是让位给部署层）是**两回事**。
+ * ⇒ 由此两条纪律：① 缺省值**只在 schema 写一次**（读取面的缺省与它同值，不各写一套）；
+ *    ② 读取面仍要能处理「整段不存在」（手写 Config ／ 未走宿主解析的调用方）。
+ *    ⚠️ 另实测：显式 `sending.allow: []` **穿过解析仍为 `[]`**（`.default()` 不吞显式空数组）——
+ *    这是「谁都不许」语义的地基。
+ *
+ * 🔴 **`relay.ccc` = 唯一主控**：人设（机器级），**CCC 不得自声明**（自声明 = 自己给自己发通行证）。
+ * 🔴 **`sending.allow` 缺省 `['*']`** = 所有 CCC 都能发给人（owner Q7 裁决）；显式 `[]` = 谁都不许
+ *    （**不是**"回退到 `*`" —— 见投影的 `??` 语义）。
+ */
+/**
+ * human-channel **账号表的一行**（机器级）。
+ * 🔴 声明成 `type` 而**不是** `interface`：`type` 的对象字面量形态带**隐式索引签名**
+ * ⇒ 才满足 schemastery 内部 `ObjectS<X extends Dict>` 对 `Dict` 的约束（`interface` 不带）。
+ */
+export type HumanChannelAccountConfig = {
+  /** 账号 id（机器内唯一；订阅表按它引用） */
+  id?: string
+  /** 渠道实现名（注册表里的 id；`weixin` ／ 将来的 `feishu` ／ `mail`） */
+  channel?: string
+  /** 该账号轮询开关（缺省 true —— 投影归一为定值布尔） */
+  enabled?: boolean
+  /** 凭据（owner Q3：落插件 Config，机器级；面板可编辑） */
+  token?: string
+  /** 渠道侧的用户标识（iLink 的 `ilink_user_id`） */
+  userId?: string
+}
+
+/** human-channel **订阅表的一行**：`(账号, 用户) → (CCC, 角色)`（声明为 `type` 的理由同上） */
+export type HumanChannelSubscriptionConfig = {
+  /** 账号 id（∈ `accounts[].id`） */
+  account?: string
+  /** 渠道侧的用户标识（如 `userA@im.wechat`；`*` = 通配兜底） */
+  user?: string
+  /** 目标 CCC（别名） */
+  ccc?: string
+  /** 目标 skiff 角色名（∈ 该 CCC 的 `skiff.roles`） */
+  role?: string
+}
+
+export interface HumanChannelConfig {
+  /** 账号表（`id` 是订阅表引用它的键；`channel` 是渠道实现名，如 `weixin`） */
+  accounts?: HumanChannelAccountConfig[]
+  /**
+   * 订阅表：`(账号, 用户) → (CCC, 角色)` —— **收到**谁的消息。
+   * 🔴 机器级**显式表**，**不得**由"该 CCC 有没有 skiff 角色"推断（owner 2026-09-26 更正）：
+   * skiff 用途很多（传话员只是其一），推断会让**为别的目的建的 skiff 被静默误接上微信**。
+   */
+  subscriptions?: HumanChannelSubscriptionConfig[]
+  /** 主控（relay）：**唯一**可做跨 CCC 动作的 CCC */
+  relay?: {
+    /** CCC 别名（空白 ／ 缺省 ⇒ 无主控，投影归一为 `null`） */
+    ccc?: string
+  }
+  /** 出站（CCC → 人）：谁能给人发消息 */
+  sending?: {
+    /** 白名单（`*` = 全体；缺省 `['*']`）；显式 `[]` = 谁都不许 */
+    allow?: string[]
+  }
+}
+
 /** 插件配置（cordis.yml 提供；进程级） */
 export interface Config {
   /** CCC 配置相对路径（运行时从根读取）；缺省 .opencode/serenity.json（规范）+ .dsh/serenity.json（回退） */
@@ -121,6 +198,8 @@ export interface Config {
    * ⇒ 关闭 = 停止再补；**不回滚已写入的值**（写的是"该模型支持图片"这个**事实**，不是偏好）。
    */
   visionPatch?: { enabled?: boolean }
+  /** human-channel（人机信道；**机器级**；2026-09-26 owner 定案）—— 见 `HumanChannelConfig` */
+  humanChannel?: HumanChannelConfig
   // ── 设置面板层（扁平键）────────────────────────────────────────────────
   // 🔴 这些键是**旧 `settings.yaml` 的段名/字段名，故意原样保留**（v1.47 A 案）：
   //    0.1.7 起设置页由「profile 条目 Config」投影而来，而本插件条目 id 逐字 = `serenity-hooks`
@@ -157,6 +236,36 @@ export interface Config {
 // 与宿主自己的做法一致：`dsh-agent-default-model` 也是「`Config` 声明解析后形状（带 `Volatile`）
 // ＋ `static Config: z<ObjectS<…>, ObjectT<…>, 'plain'>` 走推导」，**不手写 `z<Config>`**。
 // ⇒ **schema ↔ 解析后接口的对账改由机械 pin 承担** = `tests/config-volatile.test.ts`。
+// 🔴 **human-channel 的行 schema 必须「具名 ＋ 显式类型标注」**（2026-09-26 实测，别改回去）：
+//    `Config` 是 `declaration: true` 下的**导出常量**，其**推导类型**里只要出现
+//    `z.array(z.object({…}))`，tsc 就**无法命名**该类型 —— 报
+//    `TS2742: The inferred type of 'Config' cannot be named without a reference to …cosmokit`。
+//    根因在 schemastery 的类型面：`array<X>` 展开成 `Schema<TypeS<X>[], …>`，而
+//    `TypeS<X>` 落到 `ObjectS<X> = {…} & Dict`，`Dict` 来自 cosmokit，**schemastery 的公开
+//    类型面没有按名再导出它**（`ObjectS` 在全局命名空间里，`Dict` 不在）。
+//    ⇒ 标注成 `Schemastery.Schema<…>`（**全局命名空间**里的名字 ⇒ 可命名）。
+//    ⚠️ 实测**不**可行的写法（别重试）：① 内联 `z.array(z.object({…}))` ② 具名但不标注
+//       ③ 把常量 `export` 出去 ④ `Schemastery.Schema<…>` / `Schemastery.Schemastery<…>`
+//       （命名空间里没有这两个名字）。可用的名字 = **全局接口 `Schemastery<S,T>`**
+//       （它在 `declare global` 里与同名命名空间并存）⇒ 本文件起别名 `SchemaOf`。
+/** schemastery 的 schema 类型（别名只为可读；**名字取自全局命名空间**，见上方 TS2742 说明） */
+type SchemaOf<S, T = S> = Schemastery<S, T>
+/** human-channel 账号行 schema（行形状 = `HumanChannelAccountConfig`） */
+export const humanChannelAccountSchema: SchemaOf<HumanChannelAccountConfig> = z.object({
+  id: z.string(),
+  channel: z.string(),
+  enabled: z.boolean().default(true),
+  token: z.string(),
+  userId: z.string(),
+})
+/** human-channel 订阅行 schema：`(账号, 用户) → (CCC, 角色)` */
+export const humanChannelSubscriptionSchema: SchemaOf<HumanChannelSubscriptionConfig> = z.object({
+  account: z.string(),
+  user: z.string(),
+  ccc: z.string(),
+  role: z.string(),
+})
+
 export const Config = z.object({
   serenityConfigPaths: z.array(z.string()).default([...DEFAULT_SERENITY_CONFIG_PATHS]),
   tools: z.boolean().default(true),
@@ -180,6 +289,23 @@ export const Config = z.object({
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
+  // ── human-channel（人机信道；**机器级**；2026-09-26 owner 定案 ⇒ 方案 §2.2）──────────
+  // 🔴 **机器级**：一个 dsh 进程一份（插件 Config），**不是每 CCC 一份** —— 因为它的三张表
+  //    （账号 ／ 订阅 ／ 主控）天然跨 CCC；CCC 侧原 `weixin.*` 随之退役（见方案 §2.4：
+  //    **"家搬了"必须出声** ⇒ 启动警告，不静默；那一步在 P0-4，本版只立机器级 schema）。
+  // 🔴 **不得标 `.volatile()`**：`volatile` 是**面板层布尔/数值开关**的约定（0.1.7 的
+  //    `volatileForm` 硬要求），本键是**结构化表**；标了会让 `config-volatile.test.ts`
+  //    的"volatile 字段集恰等于九个面板键"这条 pin 变红（那是**有意**的护栏，不是要绕过的）。
+  // 🔴 **不得出现 `weixin` 兼容键**（硬切无别名，同 D61 先例）：旧 CCC 侧 `weixin.*` 既不上移
+  //    也不做机器级别名 —— 回归钉见 `tests/human-channel-config.test.ts`。
+  humanChannel: z.object({
+    // 账号表：id 是订阅表引用它的键；channel = 渠道实现名；凭据落这里（owner Q3）
+    accounts: z.array(humanChannelAccountSchema).default([]),
+    // 订阅表：机器级**显式**表 (账号, 用户) → (CCC, 角色)；不得由"有没有 skiff 角色"推断
+    subscriptions: z.array(humanChannelSubscriptionSchema).default([]),
+    relay: z.object({ ccc: z.string() }),
+    sending: z.object({ allow: z.array(z.string()).default(['*']) }),
+  }),
   // ── 设置面板层（v1.47 A 案；**v1.47.2 起补 `.volatile()`**）：旧 `settings.yaml` 的扁平键，**刻意无默认值** ──
   // 无默认 ⇒ "用户没设过"在**语义上**是 `undefined` ⇒ 部署层（嵌套段）才有机会生效。
   // 🔴 **必须标 `.volatile()`**（0.1.7 设置面硬约定）：宿主 `settings.describe()` 只收录

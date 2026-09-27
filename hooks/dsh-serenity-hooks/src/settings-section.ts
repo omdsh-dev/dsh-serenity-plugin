@@ -32,6 +32,14 @@
  * 读取优先级 = **面板层 > 部署层 > 内建缺省**（`simpleSettingsFromConfig`）。
  * 🔴 面板层的键**故意不带 schemastery 默认值** —— 有默认值就永远非 `undefined`，
  * 部署层会被无声压死（"未设置"必须可观测）。
+ *
+ * ## 🔵 2026-09-26（P0-1）：多一类成员 —— `humanChannel`（机器级结构化表）
+ *
+ * 它不是开关/阈值，但**读取语义归本文件**（"本文件唯一的读取语义"这条不破）：宿主 Loader
+ * 解析出的 `Config.humanChannel` 经 `humanChannelSettingsFromConfig()` 归一后，随
+ * `SerenitySimpleSettings.humanChannel` 一起出（⇒ 消费方仍只认 `readSimpleSettings()` 一个入口，
+ * 且天然享受 `fiber.update()` 的**热生效**语义 —— 方案 Q8）。缺省 ／ 归一规则见该函数与
+ * `defaultHumanChannelSettings`。设计全文 = 插件仓 `docs/human-channel-plan.md` §2。
  */
 
 import type { Context, Volatile } from 'cordis'
@@ -59,6 +67,8 @@ interface SimpleConfigFragment {
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
   acp?: { enabled?: boolean; httpPort?: number }
+  /** human-channel（人机信道；**机器级**；2026-09-26 owner 定案）：账号 ／ 订阅表 ／ 主控 ／ 出站白名单 */
+  humanChannel?: HumanChannelConfigFragment
   // ── 面板层（扁平键；无默认值 ⇒ "未设置"可观测；**0.1.7 起运行期是 `Volatile<T>` 包装**）──
   gatewayEnabled?: PanelBoolean
   // 🔴 v1.49.0：`rebuildEnabled` 面板键已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
@@ -77,7 +87,9 @@ interface SimpleConfigFragment {
  */
 export const SERENITY_SETTINGS_NS = 'serenity-hooks'
 
-/** 简单配置的扁平形态（运行时读取的统一形状；各功能门控只看它） */
+/** 简单配置的扁平形态（运行时读取的统一形状；各功能门控只看它）。
+ *  🔵 **2026-09-26（P0-1）起多一类成员**：`humanChannel` 是**机器级结构化表**（不是开关/阈值），
+ *  搭这个结构的车只为**读取入口唯一**（`readSimpleSettings()`；方案 §5-2 ／ §11.4 P0-1）。 */
 interface SerenitySimpleSettings {
   /** F1 双端口网关总开关 */
   gatewayEnabled: boolean
@@ -114,6 +126,11 @@ interface SerenitySimpleSettings {
    *  —— 原"任何自排唤醒都排除"会让本机制永远够不着靠续接绳活着的维护会话；改窄后
    *  **自排绳不再排除**，绳退化为**长周期保险丝**）。设计全文见 S142 的 **D77**。 */
   unattendedEnabled: boolean
+  /** **human-channel（人机信道）机器级配置**（2026-09-26 owner 定案；P0-1 立 schema ＋ 投影）。
+   *  三张表（账号 ／ 订阅 ／ 主控）＋ 出站白名单；**跨 CCC** ⇒ 归机器级，CCC 侧 `weixin.*` 随之退役
+   *  （退役动作在 P0-2~P0-4；本版**只立机器级面**，旧面照旧）。缺省与归一规则见
+   *  `defaultHumanChannelSettings` ／ `humanChannelSettingsFromConfig`。 */
+  humanChannel: HumanChannelSettings
 }
 
 /** 进程级默认（无 Config 可读时的兜底；与 Config 各字段的缺省一致） */
@@ -128,6 +145,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     publicAskEnabled: false,
     croEnabled: true,
     unattendedEnabled: false,
+    humanChannel: defaultHumanChannelSettings(),
   }
 }
 
@@ -161,6 +179,110 @@ export function unwrapVolatile<T>(value: T | VolatileRef<T> | undefined): T | un
   return value as T
 }
 
+// ── human-channel（人机信道）投影：机器级配置 → 运行时归一形态（P0-1）──────────────
+// 归属（D23）：**机制**（键名 ／ 缺省 ／ 归一规则）归 ACC；**纪律**（怎么填表 ／ 谁来维护）归 CCC。
+// 设计全文 = 插件仓 `docs/human-channel-plan.md`（§2 配置侧 ／ §11 定案 ／ §11.4 开工顺序 P0-1）。
+
+/** 机器级 `humanChannel` 片段（**结构性**声明，刻意不从 `index.ts` 引类型：本模块保持零宿主依赖） */
+export interface HumanChannelConfigFragment {
+  accounts?: Array<{ id?: string; channel?: string; enabled?: boolean; token?: string; userId?: string }>
+  subscriptions?: Array<{ account?: string; user?: string; ccc?: string; role?: string }>
+  relay?: { ccc?: string }
+  sending?: { allow?: string[] }
+}
+
+/** 账号行的运行时形态：`enabled` 归一为**定值布尔**（轮询者要一个确定答案，不要 `undefined`） */
+export interface HumanChannelAccountSettings {
+  id?: string
+  channel?: string
+  enabled: boolean
+  token?: string
+  userId?: string
+}
+
+/** 订阅行的运行时形态（透传；行内字段的**校验**归 P0-3，见下） */
+export interface HumanChannelSubscriptionSettings {
+  account?: string
+  user?: string
+  ccc?: string
+  role?: string
+}
+
+/**
+ * human-channel 的运行时归一形态（各功能只看它）。
+ *
+ * 🔴 **本投影刻意不做"清洗"**（不丢行 ／ 不判重 ／ 不校验目标存在）：那些都是**策略**，
+ * 而策略的答案在 P0-3（目标不存在 ⇒ 响亮报错）与 P0-4（迁移警告）里。在这里静默丢行会
+ * **掩盖配置错误** —— 而本方案的 §2.4 精神恰恰是"**不静默**"（"家搬了"必须出声）。
+ */
+export interface HumanChannelSettings {
+  /** 账号表（`enabled` 已归一为定值布尔；缺 `id` ／ `channel` 的行**保留**，由下游响亮报错） */
+  accounts: HumanChannelAccountSettings[]
+  /** 订阅表：`(账号, 用户) → (CCC, 角色)` */
+  subscriptions: HumanChannelSubscriptionSettings[]
+  /** 主控 CCC 别名（`null` = 未指定 ／ 未配置 ／ 空白 —— 三者语义相同："没有主控"） */
+  relayCcc: string | null
+  /** 出站白名单（`*` = 全体）；缺省 `['*']` */
+  sendingAllow: string[]
+}
+
+/** human-channel 的内建缺省（与 `Config` 的 schema 缺省**同源**：这里是读取面，那里是解析面） */
+export function defaultHumanChannelSettings(): HumanChannelSettings {
+  return {
+    accounts: [],
+    subscriptions: [],
+    // 无主控是**合法的初始态**（"还没指定"），不是错误 ⇒ 用 null 而不是空串（空串会被当成员名）
+    relayCcc: null,
+    // owner Q7：**所有 CCC 都能发给人**（对上"给每个 CCC 都接上微信"）；`sending.allow` 可收窄
+    sendingAllow: ['*'],
+  }
+}
+
+/** 取"有内容的字符串"（首尾空白剥掉；空白串 ⇒ `undefined`）—— 面板空文本框会写 `''`，那是"没填"不是"填了个空名" */
+function nonEmptyText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : trimmed
+}
+
+/**
+ * `humanChannel` 片段 → 运行时归一形态。**优先级：显式值 > 内建缺省**（与 `simpleSettingsFromConfig` 同族）。
+ *
+ * 🔴 三处"缺省 vs 显式"的语义差别，别写反：
+ *  ① `sending.allow: []` ⇒ **`[]`**（"谁都不许"），**不是**回退到 `['*']` —— 故用 `??`
+ *     （只对 `undefined`/`null` 回退）。⚠️ **别拿 `??`→`||` 当变异探针**：空数组在 JS 里是
+ *     **真值** ⇒ 两种写法在这个输入上**恰好同效**，那是**非变异**（会得出"测试不承重"的假结论）。
+ *  ② `relay.ccc` 空白 ⇒ `null`（"没填"与"没这一项"同义），**不是**把空白当 CCC 名；
+ *  ③ 账号 `enabled` 缺省 **true**（老账号表里 `enabled` 不写就是开）。
+ *
+ * 🔴 **旧 CCC 侧 `weixin.*` 不在这里、也不该在这里**：机器级面**只**认 `humanChannel`
+ *   （硬切无别名，同 D61 先例）⇒ 传进来的旧键**一律不进结构**（回归钉见
+ *   `tests/human-channel-config.test.ts`；CCC 侧旧读取面的退役在 P0-2~P0-4）。
+ * @param fragment - `Config.humanChannel`（可能整个不存在 —— 那是**合法**初始态）
+ * @returns 归一形态（永不 `undefined`）
+ */
+export function humanChannelSettingsFromConfig(fragment: HumanChannelConfigFragment | undefined): HumanChannelSettings {
+  const d = defaultHumanChannelSettings()
+  if (!fragment) return d
+  return {
+    accounts: (fragment.accounts ?? []).map((a) => ({
+      id: nonEmptyText(a?.id),
+      channel: nonEmptyText(a?.channel),
+      enabled: a?.enabled !== false,
+      token: a?.token,
+      userId: a?.userId,
+    })),
+    subscriptions: (fragment.subscriptions ?? []).map((s) => ({
+      account: nonEmptyText(s?.account),
+      user: nonEmptyText(s?.user),
+      ccc: nonEmptyText(s?.ccc),
+      role: nonEmptyText(s?.role),
+    })),
+    relayCcc: nonEmptyText(fragment.relay?.ccc) ?? d.relayCcc,
+    sendingAllow: fragment.sending?.allow ?? d.sendingAllow,
+  }
+}
+
 /**
  * Config（宿主 Loader 校验后的解析值）→ 扁平简单配置。**本文件唯一的读取语义**。
  *
@@ -182,6 +304,8 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
     publicAskEnabled: unwrapVolatile(config.publicAskEnabled) ?? d.publicAskEnabled,
     croEnabled: unwrapVolatile(config.croEnabled) ?? d.croEnabled,
     unattendedEnabled: unwrapVolatile(config.unattendedEnabled) ?? d.unattendedEnabled,
+    // human-channel（机器级）：结构化表**不经 volatile**（volatile 是面板层开关的约定）
+    humanChannel: humanChannelSettingsFromConfig(config.humanChannel),
   }
 }
 
