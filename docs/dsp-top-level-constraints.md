@@ -220,12 +220,15 @@ L3 ──► L2 ──► L1 ──► L0 ──► 宿主
 
 ## 4. 工程与发布约束
 
-### 4.1 门禁（七项，交付前**全部自己重跑**，不引旧回执）
+### 4.1 门禁（**六项**，交付前**全部自己重跑**，不引旧回执）
+
+> 🔴 **2026-09-28 变更**：原第七项 `typecheck-cli` **已退役** —— 它的对象（仓库根包 `src/` ＝ 安装器 CLI ＋ init 向导 ＋ 技能模板）已随**安装器族整体删除**（S142 ③ 周边整合）⇒ 该命令恒 exit 2，**不再是一道会跑绿的门**。
+> ⚠️ **连带后果（诚实登记）**：**`scripts/**` 现在【无】类型门禁** —— 它不被任何 tsconfig 覆盖，而 `bun` 只转译不检查 ⇒ 118 KB 的 `dsh-develop.ts` 改动**无机械判据**。修法待裁（`REBUILD-TODO` 的 A26-c）。
 
 | # | 命令 | 判据 | 何时必跑 |
 |---|---|---|---|
 | 1 | `dsh-develop typecheck` | node ＋ client 两半都过 | 任何源码改动 |
-| 2 | `dsh-develop typecheck-cli` | 根包（dev 工具）过 | 改了 `scripts/` |
+| 2 | ~~`dsh-develop typecheck-cli`~~ 🔴 **已退役（恒 exit 2）** | 对象已不存在；**不再是门** | ⚠️ 无替代 ⇒ 改 `scripts/` 时**无类型门禁**（见上注） |
 | 3 | `dsh-develop typecheck-host <ver>` | **真宿主包**下 node ＋ client 都无类型错误，paths 全命中 | 任何碰衔接面的改动 ＋ 宿主升级轮 |
 | 4 | `dsh-develop test` | 全绿（文件数/用例数**记录基线**，变化要能对账） | 任何改动 |
 | 5 | `dsh-develop coverage` | exit 0（有覆盖率门） | 新增 `src` 模块（**必须同批带镜像测试**） |

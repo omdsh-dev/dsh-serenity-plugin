@@ -7,7 +7,7 @@
 
 import { test, expect, beforeAll } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
@@ -148,4 +148,33 @@ test('host-fetch --list：默认包集 ⊇ 两份基准 tsconfig 声明的全部
     expect(bare.has(vendor)).toBe(true)
     expect(raw.some((l) => l.startsWith(`${vendor}@`))).toBe(true)
   }
+})
+
+/**
+ * 🔴 回归钉（判据 43：退役必须留「旧形态不再出现」的钉）：**安装器族整体退役**。
+ *
+ * 钉的是什么：仓库根包 `@shgroup/dsh-serenity-plugin`（安装器 CLI ＋ init 向导 ＋ 技能模板）
+ * 与其测试、其 tsconfig、其根级 mech-registry —— 2026-09-28（S142 ③ 周边整合）整体删除。
+ * 判据形态用**枚举型 + 正控**：枚举 5 个旧路径断言**不存在**，再用**真产物在场**作正控
+ * （否则"都不存在"可能只是我把路径写错了 —— 那是无法自证的假绿）。
+ */
+test('安装器族已退役：根 src/ bin/ tests/ tsconfig.json mech-registry.json 均不存在（含正控）', () => {
+  for (const rel of ['src', 'bin', 'tests', 'tsconfig.json', 'mech-registry.json']) {
+    expect(existsSync(join(REPO_ROOT, rel)), `旧路径仍在: ${rel}`).toBe(false)
+  }
+  // 正控：真产物必须在场 —— 证明上面那组"不存在"不是因为根路径解析错了
+  expect(existsSync(join(REPO_ROOT, 'hooks', 'dsh-serenity-hooks', 'package.json'))).toBe(true)
+  expect(existsSync(join(SCRIPTS_DIR, 'dsh-develop.ts'))).toBe(true)
+})
+
+/**
+ * 🔴 同一条退役的第二个钉：**旧命令失去"绿门"形态**（判据 43 的第二半）。
+ * 原先 `typecheck-cli` 是一道**会跑绿的门禁**，退役后它必须**恒非 0** ——
+ * 否则门禁清单里会留一个"看起来还有这一关"的假象。
+ */
+test('typecheck-cli 已退役：恒 exit 2 且印路牌（不再是一道会跑绿的门）', () => {
+  if (!hasBun) return
+  const r = runDshDevelop('typecheck-cli')
+  expect(r.status).toBe(2)
+  expect(r.stdout).toContain('已退役')
 })

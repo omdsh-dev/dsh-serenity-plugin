@@ -1,34 +1,12 @@
 {
-  "name": "@shgroup/dsh-serenity-plugin",
-  "version": "0.2.0",
+  "name": "dsh-serenity-plugin-repo",
+  "version": "0.0.0",
   "private": true,
-  "description": "dsh-serenity-plugin — 宁静号 ACC (Abstract Cognitive Container) 的 DSH 运行时实现。为 DeepSeek Harness Agent 提供认知容器基础设施：技能束（acc-serenity/acc-fs/acc-git/acc-msm/acc-session/acc-eap/acc-neat/acc-kit）+ 安装器 CLI + 测试 + 文档。独立实现，不复用 opencode-serenity-plugin 源码。私有不公开（仅 home GitLab）。",
+  "description": "dsh-serenity-plugin 的**仓库容器**（私有、不可安装）。🔴 真产物 = `hooks/dsh-serenity-hooks`（npm `@shgroup/dsh-serenity-hooks`）—— 三处版本一致性的对象也是它。本文件只提供开发期工具链（根 vitest ／ `scripts/` 下的开发 MSM）。👉 安装器 CLI 族（`src/` ／ `bin/` ／ `dist/` ／ `tests/` ＋ 根 `tsconfig.json` ＋ 根 `mech-registry.json`）已于 2026-09-28 整体退役（S142 ③ 周边整合）：owner 早前令「连模板和安装命令一起删」，`fd5352f` 逐字留给了「下一单元」，本轮即该单元。",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "bin": {
-    "dsh-serenity-plugin": "./bin/dsh-serenity-plugin.js"
-  },
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist",
-    "bin",
-    "src/templates",
-    "README.md",
-    "docs"
-  ],
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && cp -r src/templates dist/templates",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist coverage *.tsbuildinfo"
+    "test:watch": "vitest"
   },
   "keywords": [
     "dsh",
@@ -42,9 +20,6 @@
     "node": ">=20"
   },
   "packageManager": "pnpm@11.20.0",
-  "dependencies": {
-    "zod": "4.1.8"
-  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "tsx": "^4.7.0",

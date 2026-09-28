@@ -216,7 +216,7 @@
 2. 🔴 **待裁**：§7.4 选 A / B / C。
 3. 按选择改 **S1/S3 ＋ G1/G2 ＋ tsconfig 头注释**（同一提交内改完，避免基准半抬）。
 4. `lockfile` 重算 ＋ frozen 自检 ／ 🆕 **核实 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude` 是否已自动追加 `0.2.0-rc.1`**（并确认 `allowBuilds: esbuild` 未被覆盖，见 §7.6）。
-5. **七项门禁**：`typecheck`（node+client）／ `typecheck-cli` ／ `typecheck-host 0.2.0-rc.1` ／ `test` ／ `coverage` ／ `build` ／ `pack-check`。
+5. **门禁（🔴 2026-09-28 起为【六项】—— `typecheck-cli` 已随安装器族退役）**：`typecheck`（node+client）／ `typecheck-host 0.2.0-rc.1` ／ `test` ／ `coverage` ／ `build` ／ `pack-check`。
 6. 🔴 **bench（docker 安装测试）** —— `msm("bench-docker", …)`，用 **`--plugin-tarball`**（§8.14：「**验我这次的改动** ⇒ 这是发布之前拿到运行态证据的**唯一**通道」）：
    `probe` → `sync`/`build` → `up --plugin-tarball=…` → `wait`/`logs` → **`verify`（V0~V6c）** → `down`。
    **必须遵守四条硬纪律**（长任务后台脱离 ＋ 有界轮询 ／ 改判据后 `vpush` ／ 大文件分块＋sha256 ／ `--ignore-scripts` 打包）。
@@ -255,7 +255,7 @@
 |---|---|---|
 | **1** | **发版令（D14）** | ⚠️ **不要当成已授权** —— owner 本轮说的是"开始进行适配工作 ＋ 做安装测试"，**没有具名到"发版"**。⇒ 适配完成后再问。 |
 | **2** | 🔴 **§7.4 的范围写法取 A / B / C** | 影响：A = 公告面继续说假话且排除 0.2.0 正式版；**B = 收窄 peer（有装载风险）＋ 本机必须先升宿主**；C = 双档（要改一处 `src`）。**先例提示**：上一轮 owner 裁的是"硬切＋不做双基线"。 |
-| **3** | **`scripts/` 类型门禁** | `scripts/` 不被任何 gate 类型检查（根 `tsconfig` `include: src`；`typecheck-cli` 只管根包 `src`；脚本由 `bun` 跑＝**只转译**）⇒ 118 KB 的 `dsh-develop.ts` 改动**无机械判据**。要不要补？⚠️ 补之前**须先探一遍存量错误**（它从未被类型检查过）。 |
+| **3** | **`scripts/` 类型门禁** | 🔴 **2026-09-28 后此缺口更明确了**：`scripts/` **不被任何 tsconfig 覆盖**（根 `tsconfig.json` 已随安装器族删除；`typecheck-cli` 已退役；脚本由 `bun` 跑＝**只转译**）⇒ 118 KB 的 `dsh-develop.ts` 改动**无机械判据**。要不要补一个 `scripts/` 的 tsconfig + 门禁？⚠️ 补之前**须先探一遍存量错误**（它从未被类型检查过）。 |
 
 ---
 
