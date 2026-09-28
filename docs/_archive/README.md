@@ -29,6 +29,7 @@
 | `docs/dsh-0.1.2-rc1-adapt-plan.md` | [`dsh-0.1.2-rc1-adapt-plan.md`](./dsh-0.1.2-rc1-adapt-plan.md) | 0.1.2-rc1 适配方案 —— 同上 |
 | `docs/dsh-0.1.2-rc1-adapt-report.md` | [`dsh-0.1.2-rc1-adapt-report.md`](./dsh-0.1.2-rc1-adapt-report.md) | 0.1.2-rc1 适配报告 —— 同上 |
 | `docs/review/slice-{A..H}-*.md`（8 份） | [`review/`](./review/) | 0.1.5 那一轮的**八分片审计**（190 KB，`dsp-implementation-review.md` 的配套件）。审计所见的问题**已逐条修完或被后继轮覆盖**；⚠️ 引用它的 `dsp-implementation-review.md` 自己也是历史件（"六分片"的说法**在当年就不准**：实有 8 片） |
+| `hooks/dsh-serenity-hooks/experiments/autopilot-trajectory/SKILL.md` | [`experiments-autopilot-trajectory/SKILL.md`](./experiments-autopilot-trajectory/SKILL.md) | 🔴 **不是 doc 而是"退场机制的包里残件"**：自主轨迹实验的 skill 说明。**两条实测**：① 它的 `scripts/` 已随 **C6a（v1.34.1）autopilot 脚本退场**删除，机制本体**整段移进插件进程**；② 它**从来不在 `package.json` 的 `files` 白名单里** ⇒ **根本没随包分发**（`.gitignore` 旧注释说它"随 npm 包分发"是**错的**，同轮更正）。**为什么是"搬"而不是删**：`acc-autopilot-retirement.md` 的涟漪表里写的是"（删）"，但同族件（`self-sustaining-trajectory-hypothesis.md`）它自己坚持"**不删文档 —— 记录的是实验本身，属认知资产**" ⇒ 取后者：**移出产品树、留在归档层** |
 
 ## 边界
 

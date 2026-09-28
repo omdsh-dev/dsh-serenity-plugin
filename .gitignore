@@ -15,8 +15,12 @@ tsconfig.host-*.local.json
 
 # 公开发布排除（内部运维工具与会话记录；本地保留，不推送公开仓库）
 SESSION.md
-# ⚠️ 必须锚定：无锚点的 `scripts/` 会匹配**任意层级**同名目录，曾误伤
+# ⚠️ 必须锚定：无锚点的 `scripts/` 会匹配**任意层级**同名目录 —— 曾误伤
 # `hooks/dsh-serenity-hooks/experiments/autopilot-trajectory/scripts/`
-# （那是**随 npm 包分发**的机制实现，见 package.json 的 files 白名单）
+# 🔴 **2026-09-28 实测更正**：那条"被误伤"的路径**两层都不在了** ——
+#   其 `scripts/` 随 **C6a（v1.34.1）autopilot 脚本退场**删除；整个 `experiments/` 随本轮
+#   **周边整合**移入 `docs/_archive/experiments-autopilot-trajectory/`（**且实测它从来【不在】`files` 白名单里**
+#   ⇒ 旧注释说它"随 npm 包分发"**是错的**）。**锚定本身仍然正确、必须保留**（无锚点的 `scripts/` 会匹配
+#   任意层级同名目录，包内若将来再出现同名目录仍会被误伤）。
 # ⇒ 锚定为仓库根目录，只排本仓的开发工具目录（S142 §12.11）
 /scripts/
