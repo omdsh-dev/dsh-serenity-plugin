@@ -22,7 +22,7 @@
  * 边界（安全语义）: 本 MSM 只执行固定的开发操作集，不接受任意命令执行。
  */
 
-import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, copyFileSync, symlinkSync, statSync, readlinkSync, createReadStream } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, copyFileSync, symlinkSync, statSync, lstatSync, readlinkSync, createReadStream } from 'node:fs'
 import { resolve, dirname, join, basename } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync, execFileSync, spawn } from 'node:child_process'
@@ -145,8 +145,54 @@ function cmdTypecheckCli(): void {
     + ' ＋ 根 tsconfig（include: src）\n'
     + '  · 该族与其 9 个测试已于 2026-09-28 整体删除（S142 ③ 周边整合；owner 令「连模板和安装命令一起删」）\n'
     + '  ⇒ 真产物 = `hooks/dsh-serenity-hooks`，它的类型门禁 = **`typecheck`（node + client 双面）**\n'
-    + '  ⇒ 若你要找的是"脚本自己有没有类型错误"：**目前无此门禁**（见 REBUILD-TODO 的 A26-c）')
+    + '  ⇒ 若你要找的是"脚本自己有没有类型错误"：见 `typecheck-scripts`（A26-c）')
   process.exit(2)
+}
+
+/**
+ * cmdTypecheckScripts — `scripts/` 下**开发工具**的类型检查（**A26-c 的探针／门禁**）。
+ *
+ * 为什么存在（R↓，2026-09-28 实测缺口）：`scripts/` 由 **bun 直接跑**（只转译、**不检查**），
+ * 且它**不在任何 tsconfig 的 `include` 里** ⇒ `dsh-develop.ts`（123 KB）的改动
+ * **没有任何机械判据**（`typecheck` 只管 `hooks/` 双面；`typecheck-cli` 随安装器族退役 ⇒ 恒 exit 2）。
+ *
+ * 两条设计约束：
+ *  ① 🔴 **不落盘任何配置** —— `/scripts/` 被 `.gitignore` 排除（本仓的开发工具目录，A12）；
+ *     往里加 `tsconfig.json` 会**加深"被忽略 ∧ 已跟踪"的灰区** ⇒ 参数**全部走 CLI**。
+ *  ② **默认 `--strict`**，且报错时**逐条打印**（不吞）：本目录**从未被检查过**，首跑的意义是
+ *     **量出存量**，不是假装一直绿。若存量太大 ⇒ 那是**要给 owner 看的数**（A26-c 的判据），
+ *     而不是把它悄悄降级成宽松档。
+ *
+ * 用法: `dsh-develop typecheck-scripts [--no-strict]`
+ */
+function cmdTypecheckScripts(strict: boolean): void {
+  const tscBin = join(REPO_ROOT, 'node_modules', '.bin', 'tsc')
+  if (!existsSync(tscBin)) fail(`找不到 tsc: ${tscBin}（先 pnpm install）`, 2)
+  const files = readdirSync(SCRIPTS_DIR)
+    .filter((f) => f.endsWith('.ts'))
+    .map((f) => join(SCRIPTS_DIR, f))
+    .sort()
+  if (files.length === 0) fail(`scripts/ 下没有 .ts（SCRIPTS_DIR=${SCRIPTS_DIR}）`, 2)
+  const args = [
+    '--noEmit',
+    '--target', 'ES2022',
+    '--module', 'ESNext',
+    '--moduleResolution', 'Bundler',
+    '--esModuleInterop',
+    '--skipLibCheck',
+    '--types', 'node',
+    ...(strict ? ['--strict'] : []),
+    ...files,
+  ]
+  const r = run(tscBin, args, { cwd: SCRIPTS_DIR, quiet: true })
+  const out = `${r.stdout}${r.stderr}`.trim()
+  if (r.status !== 0) {
+    if (out) console.error(out)
+    const errs = out.split('\n').filter((l) => /error TS\d+/.test(l)).length
+    fail(`typecheck-scripts 失败（exit ${r.status}；${errs} 条 error TS；strict=${strict}）——`
+      + `未见"全绿"不等于"没坏"，见上方逐条`, 2)
+  }
+  console.log(`[dsh-develop] ✓ typecheck-scripts 通过（${files.length} 个 .ts；strict=${strict}）`)
 }
 
 function cmdTest(filter?: string): void {
@@ -1354,7 +1400,7 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
   if (registry !== undefined && !/^https?:\/\//.test(registry)) fail(`registry 必须是 http(s) URL: ${registry}`, 2)
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   mkdirSync(cache, { recursive: true })
-  const registryEnv = registry ? { npm_config_registry: registry } : {}
+  const registryEnv: Record<string, string> = registry ? { npm_config_registry: registry } : {}
 
   // 解析目标版本：显式版本直接使用；缺省/latest 查 registry 最新版。
   let target = version
@@ -1612,7 +1658,9 @@ async function scanSessionArtifact(
   const stopEarly = async (): Promise<void> => {
     rl.close()
     try { child?.kill() } catch { /* 已退出 */ }
-    input.destroy?.()
+    // ⚠️ `NodeJS.ReadableStream` 这个类型面（@types/node 20）**没有声明 `destroy`**，而 Node 流运行时恒有它
+    // （`typecheck-scripts` 首跑抓到）；收窄到有 `destroy` 的形状，**保留 `?.`**（语义与改前逐字相同）。
+    ;(input as NodeJS.ReadableStream & { destroy?: () => void }).destroy?.()
     await closed
   }
 
@@ -1630,15 +1678,16 @@ async function scanSessionArtifact(
     }
   }
 
-  const versionKnown = headerVersion !== null && supported !== null
-  if (versionKnown && headerVersion > supported) {
+  // 🔴 版本门：两个来源都已知才判 —— **直接内联**而非借道布尔量，因为 TS 的**控制流收窄不穿过中间变量**
+  // （`typecheck-scripts` 首跑抓到：`versionKnown && headerVersion > supported` 会被判 `possibly null`）。
+  if (headerVersion !== null && supported !== null && headerVersion > supported) {
     await stopEarly()
     return {
       headerVersion, events, malformedLines, ignorableUnknown, offences, verdict: 'refused-version',
       detail: `日志 format v${headerVersion} > 本机宿主支持 v${supported} → 宿主会拒绝（"written by a newer harness — upgrade the harness"）`,
     }
   }
-  if (versionKnown && headerVersion < supported) {
+  if (headerVersion !== null && supported !== null && headerVersion < supported) {
     // 可读性**静态不可判**：宿主对历史世代走迁移分支（`open(id,'read')` → `requireStoredMigration`），
     // 迁移**可能成功也可能在内容层拒绝**（实证：v0 日志含 `subagent/descriptor` version≠3 时被拒）。
     // ⇒ 不报"会被拒"（那是假阳性），报 `needs-migration`，真判据交给 `--probe`。
@@ -2179,6 +2228,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   try {
     switch (sub) {
       case 'typecheck': cmdTypecheck(); break
+      case 'typecheck-scripts': cmdTypecheckScripts(!rest.includes('--no-strict')); break
       case 'typecheck-cli': cmdTypecheckCli(); break
       case 'typecheck-host': cmdTypecheckHost(rest[0]); break
       case 'test': {
@@ -2250,7 +2300,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-cli（🔴 已退役） | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy [--list-copy-set] | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]] [--list]')
+        console.log('typecheck | typecheck-scripts | typecheck-cli（🔴 已退役） | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy [--list-copy-set] | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]] [--list]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
@@ -2269,8 +2319,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case '-h':
       case undefined:
         console.log(`dsh-develop — dsh-serenity-plugin 开发操作 MSM（safe-mode 白名单通道）
-用法: dsh-develop <typecheck|typecheck-cli（🔴 已退役）|test|coverage|build|status|commit|push|version|bump|deploy|npm-install|lockfile|restart-web|pack-check|readme-sync|publish|github-push|squash-history> [args]
+用法: dsh-develop <typecheck|typecheck-scripts|typecheck-cli（🔴 已退役）|test|coverage|build|status|commit|push|version|bump|deploy|npm-install|lockfile|restart-web|pack-check|readme-sync|publish|github-push|squash-history> [args]
   typecheck             tsc --noEmit（hooks 的 node + client 两面）
+  typecheck-scripts [--no-strict]  tsc --noEmit 覆盖 scripts/*.ts（开发工具面；默认 strict。A26-c）
   typecheck-cli         🔴 已退役（恒 exit 2）：对象 = 仓库根包 src/（安装器 CLI ／ init 向导 ／ 技能模板），2026-09-28 随该族整体删除
   test [--filter <p>]   vitest run
   coverage              vitest run --coverage（阈值门禁见 vitest.config.ts）
