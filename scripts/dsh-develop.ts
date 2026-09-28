@@ -563,9 +563,12 @@ function cmdInspectDsh(pattern?: string): void {
  * 本机 `~/.npm-global/.../@deepseek-ai/dsh` 是**旧版安装**（用户要求先不升级），所以在这里把新版抓到
  * 仓库内 `_tmp/`（gitignore）——解包后 `read`/`grep`/`glob` 可直接读，无需安装、无需改 tsconfig。
  *
- * 用法: dsh-develop host-fetch <version> [pkg...]
+ * 用法: dsh-develop host-fetch <version> [pkg...] [--list]
  *   包集合 = hooks/package.json 的 peerDependencies（`@deepseek-ai/dsh-*`）+ client 半 ui 包 + 任务专用包
+ *            ＋ **两份基准 tsconfig 的 `paths` 派生**（见 `hostPackagesFromTsConfig`）——末项的用途是
+ *            让随后那句 `typecheck-host <version>` **一次就能跑到**，不必人工补跑
  *   已是幂等：已解包的包跳过；单个包失败仅告警（不阻断其余）
+ *   `--list`：只打印解析后的包集（逐项含版本）**不抓取**——供测试与人工核对
  */
 const HOST_FETCH_CLIENT_PACKAGES = [
   '@deepseek-ai/dsh-client-ui-settings',
@@ -576,7 +579,15 @@ const HOST_FETCH_CLIENT_PACKAGES = [
   '@deepseek-ai/dsh-client-locale',
 ]
 
-/** 适配轮常需、但不在 peer 列表里的宿主包（核对用） */
+/**
+ * 适配轮常需、但不在 peer 列表里的宿主包（核对用）。
+ *
+ * 🔴 2026-09-28：**删去 `@deepseek-ai/dsh-agent-presets`** —— 该包在新线已改名为
+ * `@deepseek-ai/dsh-agent-preset-registry`（后者本来就在 peerDependencies 里），
+ * 故这一项**两代（0.1.7-rc.2 / 0.2.0-rc.1）都必然 `npm pack` 失败**，
+ * 每次跑都留下一条 "失败 1"，把"包集不完整"与"包已改名"两种情形混成同一个信号。
+ * 谁依赖它：无——它只出现在这张抓取表里，仓库内 `grep` 不到任何引用。
+ */
 const HOST_FETCH_EXTRA_PACKAGES = [
   '@deepseek-ai/dsh-llm-pi-ai',
   '@deepseek-ai/dsh-llm-deepseek',
@@ -586,27 +597,100 @@ const HOST_FETCH_EXTRA_PACKAGES = [
   '@deepseek-ai/dsh-tool-subagent',
   '@deepseek-ai/dsh-session-persistence-jsonl',
   '@deepseek-ai/dsh-session-projection',
-  '@deepseek-ai/dsh-agent-presets',
 ]
 
-function cmdHostFetch(version?: string, extra: string[] = []): void {
-  if (!version || !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
-    fail('host-fetch 需要版本号: dsh-develop host-fetch <x.y.z[-rc.n]> [pkg...]')
+/**
+ * `typecheck-host` 的**必需包集** = 基准 tsconfig 的 `paths` 里指向宿主 `node_modules` 的包。
+ *
+ * 为什么必须派生（2026-09-28，**第二次**踩同一坑）：`host-fetch` 的默认集此前是**手维护**的
+ * （peer 过滤 `@deepseek-ai/dsh-` ＋ 两张硬编码表），它与 tsconfig 的 `paths` **各自演化** ⇒
+ * 手维护那份必然漂移，而漂移**只在下一步才暴露**。两次实测都当场卡住：
+ * `host-fetch <ver>` 跑完报"成功"，紧接着 `typecheck-host <ver>` 立刻失败于
+ * 「派生 paths 指向缺失目录（10 条）」—— **看起来像宿主删包，其实只是默认集少了它们**
+ * （node 半那 10 条键 = **8 个包**：6 个只在 devDependencies 里 ∧ 过不了 peer 的
+ * `@deepseek-ai/dsh-` 前缀过滤的 `dsh-*`，＋ `cordis`/`schemastery` 这对**不以 `dsh-` 开头、
+ * 被该过滤器整类丢掉**的 vendor 包；client 半另需 `dsh-api-session-controller` ⇒ **合计 9 个**）。
+ * ⇒ **包集的唯一真相源 = tsconfig 的 `paths`**（那里本就是类型基准的声明处）。
+ *
+ * 锚点与 `mapHostPathToTmp` **同一处**（`node_modules/@deepseek-ai/` 的最后一次出现）——
+ * 另起一套解析必然再次分叉。
+ */
+function hostPackagesFromTsConfig(file: string): string[] {
+  let parsed: { compilerOptions?: { paths?: Record<string, string[]> } }
+  try {
+    parsed = parseJsonc(readFileSync(file, 'utf-8')) as typeof parsed
+  } catch {
+    return [] // 基准缺失不阻断（另一份仍供包）
   }
+  const out = new Set<string>()
+  for (const targets of Object.values(parsed.compilerOptions?.paths ?? {})) {
+    for (const target of targets) {
+      const nm = target.lastIndexOf('node_modules/@deepseek-ai/')
+      if (nm < 0) continue
+      const name = target.slice(nm + 'node_modules/@deepseek-ai/'.length).split('/')[0]
+      if (name) out.add(`@deepseek-ai/${name}`)
+    }
+  }
+  return [...out]
+}
+
+/** 两份基准 = node 半 ＋ client 半，与 `typecheck-host` 用的**同一批文件** */
+const HOST_FETCH_BASELINE_TSCONFIGS = [
+  join(HOOKS_DIR, 'tsconfig.json'),
+  join(HOOKS_DIR, 'client', 'tsconfig.json'),
+]
+
+/**
+ * 非 `dsh-*` 的宿主包（`@deepseek-ai/cordis` / `@deepseek-ai/schemastery`）**不跟宿主版本号走**
+ * （宿主各包声明的是 `~4.0.4` / `~3.18.4`）⇒ 取仓库内**已装版本**
+ * —— 与类型基准同源，两版解包快照才**对称**（否则 diff 会把 cordis 显示成"被改动"，
+ * 而那是**我这次抓取造成的**假象，不是宿主变化）。
+ */
+function vendorHostVersion(name: string): string | undefined {
+  try {
+    const pkg = readJson(join(HOOKS_DIR, 'node_modules', name, 'package.json')) as { version?: string }
+    return pkg.version
+  } catch {
+    return undefined
+  }
+}
+
+function cmdHostFetch(version?: string, extraArg: string[] = []): void {
+  if (!version || !/^\d+\.\d+\.\d+(-[\w.]+)?$/.test(version)) {
+    fail('host-fetch 需要版本号: dsh-develop host-fetch <x.y.z[-rc.n]> [pkg...] [--list]')
+  }
+  const listOnly = extraArg.includes('--list')
+  const extra = extraArg.filter((a) => a !== '--list')
   const pkg = readJson(join(HOOKS_DIR, 'package.json'))
   const peers = Object.keys((pkg.peerDependencies ?? {}) as Record<string, string>)
     .filter((n) => n.startsWith('@deepseek-ai/dsh-'))
-  const names = [...new Set([...peers, ...HOST_FETCH_CLIENT_PACKAGES, ...HOST_FETCH_EXTRA_PACKAGES, ...extra])]
+  const fromBaselines = HOST_FETCH_BASELINE_TSCONFIGS.flatMap(hostPackagesFromTsConfig)
+  const names = [...new Set([
+    ...peers, ...HOST_FETCH_CLIENT_PACKAGES, ...HOST_FETCH_EXTRA_PACKAGES, ...fromBaselines, ...extra,
+  ])]
+  // 未钉版的条目：`dsh-*` 跟宿主版本号走；其余（vendor）钉到仓库内已装版本
+  const specs = names.map((n) => {
+    if (n.includes('@', 1)) return n
+    if (n.startsWith('@deepseek-ai/dsh-')) return n
+    const v = vendorHostVersion(n)
+    if (!v) console.log(`[dsh-develop]   ⚠️ ${n} 未在仓库内找到已装版本 ⇒ 按宿主版本号试取（可能失败）`)
+    return v ? `${n}@${v}` : n
+  })
+  if (listOnly) {
+    console.log(`[dsh-develop] host-fetch 默认包集（${specs.length} 项；--list 不抓取）:`)
+    console.log(specs.join('\n'))
+    return
+  }
   const outRoot = join(REPO_ROOT, '_tmp', `host-${version}`)
   mkdirSync(outRoot, { recursive: true })
   const cache = join(process.env.HOME ?? '', '.cache', 'npm-publish')
   mkdirSync(cache, { recursive: true })
-  console.log(`[dsh-develop] host-fetch ${version} → ${outRoot}（${names.length} 个包）`)
+  console.log(`[dsh-develop] host-fetch ${version} → ${outRoot}（${specs.length} 个包；其中 ${fromBaselines.length} 项由基准 tsconfig 派生）`)
 
   const failed: string[] = []
   let done = 0
   let skipped = 0
-  for (const spec of names) {
+  for (const spec of specs) {
     // 支持 `pkg@version` 逐包钉版本（cordis / schemastery 这类非 dsh-* 的 peer 不跟宿主版本号走）
     const at = spec.lastIndexOf('@')
     const name = at > 0 ? spec.slice(0, at) : spec
@@ -2168,7 +2252,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-cli | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy [--list-copy-set] | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]]')
+        console.log('typecheck | typecheck-cli | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy [--list-copy-set] | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]] [--list]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
