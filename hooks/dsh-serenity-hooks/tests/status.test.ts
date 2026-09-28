@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { getStatus, setSafeMode, readDshVersion } from '../src/status.js'
+import { getStatus, setSafeMode, readDshVersion, dshVersionFromEntry } from '../src/status.js'
 
 /**
  * 🔴 **实测发现（本件首跑即撞到，值得记）**：**在本进程内改 `process.env.HOME` 不会改变 `os.homedir()`** ——
@@ -96,13 +96,20 @@ describe('status: setSafeMode（WebUI 开关通道）', () => {
  * ⑦ 才断言终态 —— 没有 ⑥ 的话，⑦ 的 null 可能是"替身没生效"的假绿。
  * ⚠️ 本组替换掉上方 ④ 那条"两者之一成立即可"的**弱断言**（它对 `dshVersion` 实际上什么都没判）。
  */
-describe('status: readDshVersion（DSH 安装位置探测：三条候选 ＋ 失败终态）', () => {
+describe('status: readDshVersion 的**静态候选链**（入口档不适用时：三条候选 ＋ 失败终态）', () => {
   const KEYS = ['npm_config_prefix', 'APPDATA'] as const
   let saved: Record<string, string | undefined>
+  let savedArgv1: string | undefined
 
   beforeEach(() => {
     saved = {}
     for (const k of KEYS) saved[k] = process.env[k]
+    // 🔴 让**入口档**（`dshVersionFromEntry`）在本组**确定性地不适用**：本机真实 `argv[1]` 是 vitest 的入口，
+    //    它的祖先里没有 `@deepseek-ai/dsh` 包 ⇒ 本来就该返回 null。但那是**隐式环境假设**
+    //    （"vitest 恰好不在某个 dsh 包内"），一旦将来有环境把测试进程挂在 dsh 包内，本组会**静默改义**。
+    //    ⇒ 显式钉住：入口指向一个**不存在**的路径（realpath 抛 ⇒ 本档不适用）。入口档本身由下一组逐条覆盖。
+    savedArgv1 = process.argv[1]
+    process.argv[1] = join(dir, 'not-a-dsh-entry.js')
   })
 
   afterEach(() => {
@@ -111,6 +118,8 @@ describe('status: readDshVersion（DSH 安装位置探测：三条候选 ＋ 失
       if (v === undefined) delete process.env[k]
       else process.env[k] = v
     }
+    if (savedArgv1 === undefined) delete process.argv[1]
+    else process.argv[1] = savedArgv1
     osStub.home = null // 替身复位（透传真实现）
   })
 
@@ -188,5 +197,111 @@ describe('status: readDshVersion（DSH 安装位置探测：三条候选 ＋ 失
     process.env.APPDATA = b
     osStub.home = home // 第三条候选 ⇒ <home>/.npm-global/... 不存在（⑥ 已证替身真生效）
     expect(readDshVersion()).toBeNull()
+  })
+})
+
+/**
+ * 🔴 **布局无关档**（2026-09-28；修的是 docker bench 实测出的一处**静默失效**）。
+ *
+ * 缺陷形态：静态候选链**猜**三个安装位置 ⇒ 宿主装在别处（容器镜像 = `/usr/local/lib/node_modules/…`）
+ * 时**全不中** ⇒ `null` ⇒ `checkHostVersion(null)` 只给 `required:false` 的 issue ⇒ `ok` 仍 true
+ * ⇒ **版本门完全静默**（bench 逐字 `host contract degraded (1 optional): host version unknown`）。
+ * 修法：从 `process.argv[1]`（= 启动本进程的那个脚本）**反推**宿主包根 —— "我们正跑在哪个宿主里"
+ * 本来就有直接证据，不必猜。
+ *
+ * 本组把 `dshVersionFromEntry` **按注入参数**逐条打：不碰全局 `process.argv`（除 ⑦ 的组合用例），
+ * 也不碰 `os.homedir` 替身 ⇒ 与上面那组的夹具互不干扰。所有临时目录都建在**外层 `dir` 之下**（它的
+ * `afterEach` 负责清理）。
+ */
+describe('status: dshVersionFromEntry（布局无关档：从运行入口反推宿主包根）', () => {
+  /** 造宿主包：`<root>/node_modules/@deepseek-ai/dsh/package.json`（`name` 可改，用于假阳性档） */
+  function hostPkg(root: string, version: string, name = '@deepseek-ai/dsh'): string {
+    const pkgDir = join(root, 'node_modules', '@deepseek-ai', 'dsh')
+    mkdirSync(pkgDir, { recursive: true })
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version }))
+    return pkgDir
+  }
+  /** 在宿主包内造一个入口脚本，返回其路径；`sub` = 包内相对目录链（如 `['lib']`） */
+  function entryIn(pkgDir: string, sub: string[]): string {
+    const at = join(pkgDir, ...sub)
+    mkdirSync(at, { recursive: true })
+    const file = join(at, 'bin.js')
+    writeFileSync(file, '// entry')
+    return file
+  }
+
+  it('① 🔴 容器布局命中：入口 = `<root>/node_modules/@deepseek-ai/dsh/lib/bin.js`', () => {
+    const pkgDir = hostPkg(dir, '7.1.1-container')
+    expect(dshVersionFromEntry(entryIn(pkgDir, ['lib']))).toBe('7.1.1-container')
+  })
+
+  it('② 入口是**符号链接**（全局安装的常态）⇒ 仍命中 —— 正控：证 realpath 真生效', () => {
+    const pkgDir = hostPkg(dir, '7.2.2-via-symlink')
+    const real = entryIn(pkgDir, ['lib'])
+    const linkDir = join(dir, 'bin')
+    mkdirSync(linkDir, { recursive: true })
+    const link = join(linkDir, 'dsh')
+    symlinkSync(real, link)
+    // 若没有 realpath，`argv[1]` 停在 `<…>/bin/dsh` ⇒ 上溯不到包根 ⇒ 本断言红
+    expect(dshVersionFromEntry(link)).toBe('7.2.2-via-symlink')
+  })
+
+  it('③ 🔴 入口**不是** dsh（vitest/npx 那类）⇒ null：绝不误报别人的 package.json', () => {
+    const other = join(dir, 'not-dsh')
+    mkdirSync(other, { recursive: true })
+    writeFileSync(join(other, 'package.json'), JSON.stringify({ name: 'vitest', version: '1.6.1' }))
+    const file = join(other, 'cli.js')
+    writeFileSync(file, '// entry')
+    expect(dshVersionFromEntry(file)).toBeNull()
+  })
+
+  it('④ 入口在包内**多层**（`lib/a/b/c/`）⇒ 仍命中（不是只认 `lib/` 一层）', () => {
+    const pkgDir = hostPkg(dir, '7.4.4-deep-inside')
+    expect(dshVersionFromEntry(entryIn(pkgDir, ['lib', 'a', 'b', 'c']))).toBe('7.4.4-deep-inside')
+  })
+
+  it('🔴 上溯**有界**：宿主包落在 7 层之外 ⇒ null（证明它不会一路爬到文件系统根）', () => {
+    const pkgDir = hostPkg(dir, '7.5.5-out-of-reach')
+    // 从 `lib/a/b/c/d/e/f` 到包根需 7 次上溯 > MAX_ENTRY_ASCENT(6) ⇒ 够不到
+    expect(dshVersionFromEntry(entryIn(pkgDir, ['lib', 'a', 'b', 'c', 'd', 'e', 'f']))).toBeNull()
+  })
+
+  it('🔴 目录形态像 dsh 但 **name 对不上** ⇒ 不取它的 version（本档唯一的假阳性来源）', () => {
+    const pkgDir = hostPkg(dir, '7.6.6-impostor', '@deepseek-ai/dsh-lookalike')
+    expect(dshVersionFromEntry(entryIn(pkgDir, ['lib']))).toBeNull()
+  })
+
+  it('🔴 入口不存在 ⇒ null 且不抛（`node -e` 一类 ⇒ 交给静态候选链）', () => {
+    expect(dshVersionFromEntry(join(dir, 'nope', 'bin.js'))).toBeNull()
+    expect(dshVersionFromEntry(undefined)).toBeNull()
+    expect(dshVersionFromEntry('')).toBeNull()
+  })
+
+  it('入口是**目录** ⇒ 从该目录起上溯（防御档：`argv[1]` 正常是脚本路径，但不做此假设）', () => {
+    const pkgDir = hostPkg(dir, '7.8.8-dir-entry')
+    mkdirSync(join(pkgDir, 'lib'), { recursive: true })
+    expect(dshVersionFromEntry(join(pkgDir, 'lib'))).toBe('7.8.8-dir-entry')
+  })
+
+  it('⑦ 组合：入口档**优先于**静态候选链（两者都能命中时取入口的那个）', () => {
+    const entryPkg = hostPkg(dir, '7.7.7-entry')
+    const entry = entryIn(entryPkg, ['lib'])
+    const envRoot = join(dir, 'env-root')
+    const envPkg = join(envRoot, 'lib', 'node_modules', '@deepseek-ai', 'dsh')
+    mkdirSync(envPkg, { recursive: true })
+    writeFileSync(join(envPkg, 'package.json'), JSON.stringify({ name: '@deepseek-ai/dsh', version: '9.9.9-env' }))
+
+    const savedArgv1 = process.argv[1]
+    const savedPrefix = process.env.npm_config_prefix
+    process.argv[1] = entry
+    process.env.npm_config_prefix = envRoot
+    try {
+      expect(readDshVersion()).toBe('7.7.7-entry') // 两个都能命中 ⇒ 直接证据赢
+    } finally {
+      if (savedArgv1 === undefined) delete process.argv[1]
+      else process.argv[1] = savedArgv1
+      if (savedPrefix === undefined) delete process.env.npm_config_prefix
+      else process.env.npm_config_prefix = savedPrefix
+    }
   })
 })
