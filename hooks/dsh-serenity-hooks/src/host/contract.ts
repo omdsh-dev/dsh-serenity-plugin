@@ -306,14 +306,41 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'system-prompt/assemble', site: 'seams/bootstrap.ts', impact: '工具目录两阶段装配失效', required: false },
 ] as const
 
-/** dsp 被验证过的宿主版本范围（与 package.json peerDependencies 同源，单一真相源） */
-export const REQUIRED_HOST_RANGE = '^0.1.7-rc.1'
+/**
+ * dsp **被验证过的宿主版本档**（单一真相源）—— 每档 = 一个半开区间 `[floor, ceiling)`。
+ *
+ * 🔴 为什么是"档"而不是一条 caret 范围（R↓：2026-09-28 0.2.0-rc.1 适配轮实测得出）：
+ *  - **宿主门的判据是真 semver**（`@deepseek-ai/dsh-app-boot:evaluatePluginCompatibility`
+ *    = `semver.satisfies(runtime, range, { includePrerelease: true })`）⇒ **它支持 `||` 联合范围**；
+ *  - 而 **dsp 这边是手写比较器**（{@link compareSemver}），**不实现 semver 的 range 语义**：
+ *    旧写法"用正则从 `REQUIRED_HOST_RANGE` 剥前缀取 floor"在**联合范围上会取到垃圾**
+ *    （`^0.1.7-rc.1 || ^0.2.0-rc.1` 的预发布捕获组 `(.*)` 会**吞掉 `||` 之后整段**）
+ *    ⇒ 判定**变瞎**（既非"通过"也非"低于下限"，而是不可解释的值）。
+ *  ⇒ 故**档表是唯一被验证的真相**：`REQUIRED_HOST_RANGE`（给宿主门看的串）与
+ *    `checkHostVersion`（给自己的手写比较器）**都从它派生**，两者不可能互相漂移。
+ *
+ * 🔴 两档的由来（**实测，非推断**；判据表见插件仓 `docs/dsh-0.2.0-rc.1-adaptation-plan.md` §7.4）：
+ *  - `^0.1.7-rc.1` 在 `0.2.0-rc.1` 上被宿主**整包拒绝 ＋ 回滚**
+ *    （逐字 `installation rejected: … incompatible with dsh 0.2.0-rc.1` ＋ `restored package.json, …`）；
+ *  - 单档 `^0.2.0-rc.1` 会**同样硬拒本机正在跑的 `0.1.7-rc.2`**
+ *    ⇒ 发布后 deploy 必须先升宿主，**而升级会打断本容器**；
+ *  - ⇒ 双档是**唯一不把本机宿主堵死的写法**（两档在真 semver 下均 PASS）。
+ * 档上界取 `<0.2.0` / `<0.3.0`（即 `^0.2.0-rc.1` 的 caret 上界）：第二档同时覆盖
+ * `0.2.0` 正式版与后续 `0.2.0-rc.N`。
+ */
+export const VERIFIED_HOST_BANDS: readonly { floor: string; ceiling: string }[] = [
+  { floor: '0.1.7-rc.1', ceiling: '0.2.0' },
+  { floor: '0.2.0-rc.1', ceiling: '0.3.0' },
+]
 
-/** 范围 floor：剥掉 caret/比较前缀（`^0.1.7-rc.1` → `0.1.7-rc.1`），供 {@link checkHostVersion} 使用 */
-const REQUIRED_HOST_FLOOR = REQUIRED_HOST_RANGE.replace(/^[\^~>=<\s]+/, '')
-
-/** 范围 ceiling：`^0.1.x` 的上界 = `<0.2.0`（显式常量，见 {@link checkHostVersion} 注释） */
-const REQUIRED_HOST_CEILING = '0.2.0'
+/**
+ * 与 `package.json` 的 `peerDependencies` **逐字同串**的宿主版本范围（由 {@link VERIFIED_HOST_BANDS} 派生）。
+ *
+ * 🔴 这个字符串**就是**宿主门（`evaluatePluginCompatibility`）拿去跑 `semver.satisfies` 的那个串
+ * ⇒ 它与档表**必须一致**（"声明 union、判定单档"是一种自相矛盾）。
+ * 一致性由 `tests/host-contract.test.ts` 的**跨文件对账用例**钉住（读 package.json 逐字比对）。
+ */
+export const REQUIRED_HOST_RANGE = VERIFIED_HOST_BANDS.map((b) => `^${b.floor}`).join(' || ')
 
 interface HostContractIssue {
   id: string
@@ -354,24 +381,43 @@ export function compareSemver(a: string, b: string): number | null {
 }
 
 /**
- * 宿主版本是否落在 dsp 被验证的范围（`REQUIRED_HOST_RANGE`）。
+ * 宿主版本是否落在 dsp **被验证过的档**（{@link VERIFIED_HOST_BANDS}）之内。
  * 无版本信息 → 视为未知（ok=false，detail 说明），不猜测。
  *
- * floor/ceiling **从 `REQUIRED_HOST_RANGE` 派生**（v1.31.6，0.1.5-rc.1 适配轮）：
- * 此前 floor 是独立硬编码字面量——改 `REQUIRED_HOST_RANGE` 而忘改 floor 会造出
- * "常量说 0.1.5、判定用 0.1.2" 的双真相源。ceiling 无法从 caret 语义机械派生（手写比较器
- * 不实现 semver 的 caret 规则），故保留显式常量并在此声明其含义。
+ * 🔴 **逐档判**（v1.50.x，0.2.0-rc.1 适配轮）：判据 = "∃ 档：`version >= floor ∧ version < ceiling`"。
+ * 曾经的做法是"从 `REQUIRED_HOST_RANGE` 剥前缀取一个 floor ＋ 一个显式 ceiling"——
+ * **单档假设一旦不成立（改联合范围），那个正则就会取到垃圾**（详见 {@link VERIFIED_HOST_BANDS}
+ * 的注释）⇒ 故本函数**只读档表**，不再从范围串反推。
+ * ⚠️ 手写比较器**不实现 semver 的 range 语义**（本条只做"区间内/外"），这也是必须逐档判的原因。
  */
 export function checkHostVersion(version: string | null): { ok: boolean; detail: string } {
   if (version === null) return { ok: false, detail: `host version unknown (required ${REQUIRED_HOST_RANGE})` }
-  const floor = compareSemver(version, REQUIRED_HOST_FLOOR)
-  const ceiling = compareSemver(version, REQUIRED_HOST_CEILING)
-  if (floor === null || ceiling === null) {
+  let matched = false
+  let belowEveryFloor = true
+  let unparseable = false
+  for (const band of VERIFIED_HOST_BANDS) {
+    const floor = compareSemver(version, band.floor)
+    const ceiling = compareSemver(version, band.ceiling)
+    if (floor === null || ceiling === null) {
+      unparseable = true
+      break
+    }
+    if (floor >= 0) {
+      belowEveryFloor = false
+      if (ceiling < 0) {
+        matched = true
+        break
+      }
+    }
+  }
+  if (unparseable) {
     return { ok: false, detail: `host version "${version}" not parseable (required ${REQUIRED_HOST_RANGE})` }
   }
-  if (floor < 0) return { ok: false, detail: `host ${version} is below the verified floor (required ${REQUIRED_HOST_RANGE})` }
-  if (ceiling >= 0) return { ok: false, detail: `host ${version} is outside the verified range (required ${REQUIRED_HOST_RANGE})` }
-  return { ok: true, detail: `host ${version} within ${REQUIRED_HOST_RANGE}` }
+  if (matched) return { ok: true, detail: `host ${version} within ${REQUIRED_HOST_RANGE}` }
+  // 连**最低一档的下限**都没够到 ⇒ 用 "below the verified floor"（这是最老的宿主形态）
+  if (belowEveryFloor) return { ok: false, detail: `host ${version} is below the verified floor (required ${REQUIRED_HOST_RANGE})` }
+  // 够到了某档下限、但不落在任何档内（如高于最高档的 ceiling）
+  return { ok: false, detail: `host ${version} is outside the verified range (required ${REQUIRED_HOST_RANGE})` }
 }
 
 /** 结构化读取宿主服务（lazy → ctx.get；injected → 直接属性，属性缺失再试 ctx.get） */

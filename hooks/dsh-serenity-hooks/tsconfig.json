@@ -20,6 +20,10 @@
     // tsc 静默回落到 node_modules → 94 条错误（§8.6 诚实边界）。
     // 新形态 = `node_modules/@deepseek-ai/<pkg>`：由 **devDependencies 精确钉版**
     // （`0.1.7-rc.1`；本机运行宿主为 `0.1.7-rc.2`，同线）提供 → CI 装得上、任何克隆都能 typecheck。
+    // ⚠️ **双档声明下，本仓类型基准只钉【最低档】**：`package.json` 的 dsh peers 现在是
+    //    `^0.1.7-rc.1 || ^0.2.0-rc.1`（两档都验过），而这里钉的是**最低档那一版**（= node_modules 里装的）。
+    //    高档由 `dsh-develop typecheck-host 0.2.0-rc.1` 单独验（`host-fetch` 解出该版宿主包再跑 tsc）
+    //    —— 两处职责不同，**别顺手把 devDependencies 一起抬**（会换掉本地 node_modules ＋ 重算锁文件，收益为零）。
     // 两条纪律（勿破）：
     //   ① 新增条目必须同时加进 devDependencies（否则 tsc 回落 → 假红/假绿）
     //   ② `cordis` 与 `@deepseek-ai/cordis` 必须指向**同一个包实例**——宿主 `Context` 的

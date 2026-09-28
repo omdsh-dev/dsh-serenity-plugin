@@ -122,8 +122,15 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     const peers = pkg.peerDependencies as Record<string, string>
     const dshPeers = Object.entries(peers).filter(([n]) => n.startsWith('@deepseek-ai/dsh-'))
     expect(dshPeers.length).toBeGreaterThan(10)
+    // 🔴 0.2.0-rc.1 适配轮：dsh-* 从单档 `^0.1.7-rc.1` 改为**双档联合范围**。
+    //   依据（实测，非推断）：宿主门 `evaluatePluginCompatibility` 的判据是真
+    //   `semver.satisfies(runtime, range, { includePrerelease: true })` ⇒ **支持 `||`**；
+    //   而单档 `^0.1.7-rc.1` 在 `0.2.0-rc.1` 上被**整包拒绝 ＋ 回滚**、单档 `^0.2.0-rc.1`
+    //   又会把本机在跑的 `0.1.7-rc.2` 堵死 ⇒ 双档是唯一两全写法。
+    //   ⚠️ 本处**刻意保留字面量**（不 import `contract.ts` 的常量）：本文件的职责是查**发布物形状**，
+    //   与源码常量同串的一致性由 `tests/host-contract.test.ts` 的跨文件对账用例负责。
     for (const [name, range] of dshPeers) {
-      expect(range, `${name} 与 peer 范围不一致`).toBe('^0.1.7-rc.1')
+      expect(range, `${name} 与 peer 范围不一致`).toBe('^0.1.7-rc.1 || ^0.2.0-rc.1')
     }
   })
 })
@@ -194,11 +201,18 @@ describe('宿主类型基准（F7，v1.31.11 §7-8）', () => {
     }
   })
 
-  it('F7d: devDependencies 的宿主包版本 == peer 范围的基准版本', () => {
+  it('F7d: devDependencies 的宿主包版本 == peer 范围的**最低档**基准版本', () => {
     const hostDevDeps = Object.entries(devDeps).filter(([n]) => n.startsWith('@deepseek-ai/dsh-'))
     expect(hostDevDeps.length).toBeGreaterThan(20)
-    // 关系式断言（不锁字面量）：peer 写 ^0.1.5-rc.1 → devDep 必须精确 0.1.5-rc.1
-    const peerBase = (peers['@deepseek-ai/dsh-tools'] ?? '').replace(/^\^/, '')
+    // 关系式断言（不锁字面量）：peer 写 `^0.1.5-rc.1` → devDep 必须精确 `0.1.5-rc.1`。
+    // 🔴 0.2.0-rc.1 适配轮：peer 成了**联合范围**（`^0.1.7-rc.1 || ^0.2.0-rc.1`）⇒ 取
+    //   **第一个候选项**（= 最低档）作基准 —— 因为本仓的 `paths` 类型基准就是**最低档那一版**
+    //   （`node_modules/` 里装的就是它）；**高档由 `dsh-develop typecheck-host <ver>` 单独验**
+    //   （`host-fetch` 把该版宿主包解到 `_tmp/` 再跑 tsc）。两处职责不同：
+    //   把 devDependencies 一起抬 ⇒ 本地 node_modules 换版 ＋ 锁文件重算，而收益是零。
+    //   ⚠️ 不取 `||` 之后那段：`'^0.1.7-rc.1 || ^0.2.0-rc.1'.replace(/^\^/,'')` 会得到
+    //     `0.1.7-rc.1 || ^0.2.0-rc.1` 这类**永不相等的垃圾**（与 contract.ts 本轮修掉的那个 bug 同源）。
+    const peerBase = (peers['@deepseek-ai/dsh-tools'] ?? '').split('||')[0]!.trim().replace(/^\^/, '')
     expect(peerBase).toBeTruthy()
     for (const [name, range] of hostDevDeps) {
       expect(range, `${name} 的 devDep 版本与 peer 基准版本不一致`).toBe(peerBase)
