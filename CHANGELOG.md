@@ -1,3 +1,67 @@
+## v1.50.1 — 2026-09-28（**适配 DSH 0.2.0-rc.1：宿主范围改「双档」＋ 修 `readDshVersion` 的静默失效**）
+
+**来源**：owner 2026-09-28 令「**dsh 发布了 0.2.0-rc 开始进行适配工作，本次适配安装测试也要做，利用好 docker**…」⇒ 适配落地并跑通安装测试后，owner 令「**别的我不管，先发版吧**」（**D14 具名发版令**）。
+
+> 🔴 **本版为什么是 patch 而不是 minor**：两处都是「**让既有能力继续成立**」的修正 ——
+> ① 把**已验证的宿主范围如实写成两档**（此前的单档在 `0.2.0-rc.1` 上**根本装不上**）；
+> ② 修一个**静默失效**的版本门。**没有新增用户可见能力**。
+
+---
+
+### 一、宿主版本范围：单档 → **双档**（`^0.1.7-rc.1 || ^0.2.0-rc.1`）
+
+**判据（实测，不是推断）**：
+
+1. **宿主门**（`@deepseek-ai/dsh-app-boot:evaluatePluginCompatibility`，读源码得）**只检查**
+   `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 两类 peer，判据 = `semver.satisfies(runtime, range,
+   { includePrerelease: true })` ⇒ **真 semver ⇒ `||` 联合范围受支持**。
+2. **docker bench 实测**：单档 `^0.1.7-rc.1` 在 `0.2.0-rc.1` 上被 **`installation rejected` ＋ 回滚**
+   （**根本装不上**，不是"公告面说假话"那么轻）；单档 `^0.2.0-rc.1` 会**同样硬拒本机在跑的
+   `0.1.7-rc.2`**（发布后 `deploy` 必先升宿主，**而升级会打断本容器**）⇒ **双档是唯一"不把本机宿主
+   堵死"且不收窄 peer 的写法**。
+3. **双档在真宿主上装得上**：`plugin-install exit=0`、宿主日志**无** `installation rejected`、
+   且**未授任何豁免**。
+
+### 二、`src/host/contract.ts`：`VERIFIED_HOST_BANDS` 成单一真相源 ＋ `checkHostVersion` 逐档判
+
+**为什么必须同批改**（R↓）：本文件是**手写比较器**（不实现 semver 的 range 语义），旧写法「用正则从
+范围串剥前缀取 floor」在**联合范围**上会取到 `0.1.7-rc.1 || ^0.2.0-rc.1` 这类**垃圾**（预发布捕获组
+`(.*)` 吞掉 `||` 之后整段）⇒ **判定变瞎**。现在**两档是唯一被验证的真相**，`REQUIRED_HOST_RANGE`
+由它派生 ⇒ "声明 union、判定单档"这种自相矛盾在结构上不可能再出现。
+退休 `REQUIRED_HOST_FLOOR` ／ `REQUIRED_HOST_CEILING`（本文件内部常量，全仓无外部引用）。
+
+### 三、修 `readDshVersion()` 的**静默失效**（bench `V6b` 实证）
+
+**症状**：容器里逐字 `host contract degraded (1 optional): host version unknown` —— 而宿主就装在
+`/usr/local/lib/node_modules/@deepseek-ai/dsh`。
+
+**根因**：该函数只试 **3 个硬编码位置**（`npm_config_prefix` ／ `APPDATA\npm` ／ `~/.npm-global`）
+⇒ 装在别处时**三个全不中** ⇒ 返回 `null` ⇒ `checkHostVersion(null)` 只产生一条 **`required: false`**
+的 issue ⇒ `ok = issues.every(i => !i.required)` 仍为 `true` ⇒ **版本门实际失效，且完全静默**。
+🔴 这类坏法**比"偶尔报警"更危险**：一条**永远为假**的判据，看起来像"没报警 = 没问题"。
+
+**修法**：新增 `dshVersionFromEntry()` —— 从 `process.argv[1]`（**正在跑的那个入口**）反推宿主包根；
+`readDshVersion()` 变**两档**（**入口档优先** ＋ 静态候选链兜底，后者留给"本进程不是 dsh CLI"的场合）。
+三条判据要点（每条对应一个实测过的坑）：
+① **先 `realpath`** —— 全局安装的 `dsh` 是**符号链接**，而 Node 的 `argv[1]` **保留调用路径、不解析符号链接**；
+② **核对包名** `@deepseek-ai/dsh` —— 否则在 vitest / npx 等入口下会误取**别人的** `package.json`；
+③ **上溯有界**（6 层）—— 否则不在任何 dsh 包内的入口会一路爬到文件系统根。
+
+**真机读数**：`host version unknown` **命中 0**；链路实测 `argv[1]` = `/usr/local/bin/dsh`（**符号链接**）
+→ realpath → `…/@deepseek-ai/dsh/lib/bin.js` → `version 0.2.0-rc.1` ∈ **第二档**。
+
+### 四、验收（docker bench：宿主 `0.2.0-rc.1` ＋ `--plugin-tarball` 装本机工作树的包）
+
+**`PASS=20 / FAIL=1`**（适配前一轮为 `19 / 2`）：**`V2b` 由 FAIL 转 PASS**（= 第一条判据 3）。
+唯一 FAIL = `V8c`（CDP 点击被宿主 `_mask_` 拦住、`dialogs:1`）＝ **测试台×宿主 DOM 分叉**（同 `0a0a0a2`
+族），**非本插件缺陷**。轮内另跑了一次真实用户轮 ⇒ `V5`／`V5b`／`V7b`／`V9`／`V9b` 全转 PASS。
+
+---
+
+**（同批但不进发布物）**：`scripts/` 新增开发用类型闸门 `dsh-develop typecheck-scripts`（首跑即抓到
+`cmdDeploy` 里一个**从未 import 的 `lstatSync`** —— 恒抛 `ReferenceError` 且被裸 `catch {}` 吞掉）；
+`docs/` 分层（14 件移入 `docs/_archive/`）。两者**都不在发布物内** —— `pack-check` 实测 **119 文件不变**。
+
 ## v1.50.0 — 2026-09-27（**handyman 前台并行（cap 5）＋ human-channel 机器级配置与「一账号一 poller」**）
 
 **来源**：owner 2026-09-27 具名令（逐字）——
