@@ -242,7 +242,9 @@ describe('diagram 工具视图：注册形态守卫（防"加载即抛"与静默
   it('注册进 keyed 槽 tool.call.toolview，key = diagram（拼错则永不派发）', () => {
     expect(entrySource).toMatch(/slots\.inject\(\s*'tool\.call\.toolview'/)
     expect(entrySource).toMatch(/name:\s*'tool\.call\.toolview',\s*key:\s*'diagram'/)
-    expect(viewSource).toMatch(/DIAGRAM_TOOL_NAME = 'diagram'/)
+    // v1.51.3：字面量的**唯一真相源**移到了 `diagram-result.ts`（轮尾行读同一个常量）
+    // ⇒ 这里钉"本行是**引用**它"，不再钉"本行写了它"
+    expect(code(viewSource)).toMatch(/import \{ DIAGRAM_TOOL_NAME,/)
   })
 
   it('row 真的消费 owner 交来的 loadImage（自渲染图片的唯一合法通路）', () => {

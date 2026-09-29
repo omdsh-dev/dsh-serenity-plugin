@@ -36,6 +36,32 @@
       "@deepseek-ai/dsh-client-ui-tool/client": ["../node_modules/@deepseek-ai/dsh-client-ui-tool/lib/types/client/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-primitives": ["../node_modules/@deepseek-ai/dsh-client-ui-primitives/lib/types/index.d.ts"],
       "@deepseek-ai/dsh-client-ui-conversation": ["../node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
+      // v1.51.3 `conversation.chat.turnTail` 的**槽契约与快照类型**来源：`SlotMap['conversation.chat.turnTail']`
+      // 与 `ConversationViewSnapshotMap['chat']`（= ChatSnapshot：locations/nodes/timeline）都只由本包声明。
+      // 🔴 与 ui-tool 同规矩（v1.51.2 实测）：没有 import 时该 .d.ts **不进 program** ⇒ 槽名被判"不在 SlotMap"。
+      "@deepseek-ai/dsh-client-ui-chat/client": ["../node_modules/@deepseek-ai/dsh-client-ui-chat/lib/types/client/index.d.ts"],
+      // 🔴 v1.51.3 实测（`typecheck-host 0.2.0-rc.1` 抓到的**升级漂移**）：**宿主自己的 .d.ts 里**
+      // 用的模块说明符，也必须在 paths 里有一条 —— ui-chat 的 `contract/snapshot.d.ts` 写着
+      // `declare module '@deepseek-ai/dsh-client-ui-conversation/client'`，而此前只钉了**裸名**那一条
+      // ⇒ 派生宿主 tsconfig 里 `/client` 这形态没有映射 ⇒ 回落 node 解析到**本机 node_modules 的另一版本**
+      // ⇒ **模块身份分裂** ⇒ 那句增强合并不进去（症状：`binding().target('chat')` 的参数类型变成 `never`）。
+      // 判据 = 同一句话的两种写法（裸名 / `/client`）必须指向**同一个文件**。
+      "@deepseek-ai/dsh-client-ui-conversation/client": ["../node_modules/@deepseek-ai/dsh-client-ui-conversation/lib/types/client/index.d.ts"],
+      // 🔴 v1.51.3 实测第二条（同族，但根因在**宿主包自己的传递类型依赖**）：ui-conversation 的
+      // `records.d.ts` 第 4 行 `import type { ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'`
+      // —— 不钉它 ⇒ 解包宿主那份（纯目录、**没有兄弟 node_modules**）解析不到 ⇒ `skipLibCheck` 下
+      // 静默退化成 `any` ⇒ `host-type-contract.ts` §④ 的**品牌断言**当场红（`Extends<string, any>` 恒真）。
+      // 钉它之后：本机 program 用 pnpm 那份、宿主 program 用解包那份，两边都是**真类型**。
+      "@deepseek-ai/dsh-attachment": ["../node_modules/@deepseek-ai/dsh-attachment/lib/types/index.d.ts"],
+      // 同族的**第二跳**：`AttachmentId = Branded<'AttachmentId'>`（`dsh-attachment/brand.d.ts` 里
+      // `import type { Branded } from '@deepseek-ai/dsh-brand'`）⇒ 不钉 `dsh-brand` 则品牌类型同样退化。
+      "@deepseek-ai/dsh-brand": ["../node_modules/@deepseek-ai/dsh-brand/lib/types/index.d.ts"],
+      // 同族**第三跳**：`records.d.ts` 的 `content: readonly ContentBlock[]` 里
+      // `ContentBlock` 来自 `@deepseek-ai/dsh-llm/types` —— 不钉它，宿主那份会**按 node 解析**到
+      // 另一个版本 ⇒ 联合类型的某个成员退化成 `any` ⇒ `Extract<…,{type:'image'}>` 整个变 `any`
+      // （症状：`host-type-contract.ts` §④ 的**品牌断言**红，而"防 any"那条却绿 —— 极隐蔽）。
+      "@deepseek-ai/dsh-llm/types": ["../node_modules/@deepseek-ai/dsh-llm/lib/types/types.d.ts"],
+      "@deepseek-ai/dsh-llm/brand": ["../node_modules/@deepseek-ai/dsh-llm/lib/types/brand.d.ts"],
       // v1.31.6 适配 0.1.5-rc.1：session 作用域类型面抽到新包（sessionId / Context.sessions）
       "@deepseek-ai/dsh-client-ui-session": ["../node_modules/@deepseek-ai/dsh-client-ui-session/lib/types/client/index.d.ts"],
       // `Context.sessions` 的声明合并源（ui-session 只 import，不重复声明）——不映射则合并进不了 program

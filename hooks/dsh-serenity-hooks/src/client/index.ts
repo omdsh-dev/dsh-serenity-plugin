@@ -33,6 +33,10 @@ import type {} from '@deepseek-ai/dsh-client-ui-renderer'
 //      "接了真契约"才暴露出来的；本地 `declare module` 那版会把这个事实**盖住**）。
 // 走**公开包入口**（`/client`），不是宿主内部实现路径（§2.4-1 禁止后者）。
 import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
+// 🆕 v1.51.3：`conversation.chat.turnTail` 这个槽条目**由宿主包 ui-chat 声明**（同一个道理 ——
+// 没有 import 就没有模块增强）。写在**注册点**，是为了让这一行自足：
+// 即便哪天 `diagram-tail.ts` 不再 import 该包，槽名在这里仍解析得到。
+import type {} from '@deepseek-ai/dsh-client-ui-chat/client'
 // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 →
 // ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'。
 // 🔴 v1.47 适配 0.1.7-rc.1：`SettingsScope`/`SettingsScopeSpec` 与 `settingsScope` 服务**已从
@@ -47,14 +51,17 @@ import { FileFallbackDock, FileFallbackInjected } from './FileFallbackDock.js'
 import { uploadFile } from './file-fallback-api.js'
 import { SettingsSection, SettingsSectionInjected, SerenitySimpleWire } from './SettingsSection.js'
 import { DiagramToolView } from './DiagramToolView.js'
+import { DiagramImageTail, diagramTailInjected } from './DiagramImageTail.js'
 
-export const inject = ['slots', 'conversation', 'sessions', 'configForms']
+// v1.51.3 加 `uiConversation`：轮尾图行要用宿主的 Chat 快照（`binding().target('chat')`）
+// 与宿主的会话授权图片 URL 缓存（`imageUrl` / `peekImageUrl`）—— 两者都在这个服务上。
+export const inject = ['slots', 'conversation', 'sessions', 'configForms', 'uiConversation']
 
 /** 设置页命名空间 = profile 条目 id（与 host 侧 `SERENITY_SETTINGS_NS` 同值；单一真相源在 host 侧常量，此处只作字面量引用） */
 const SERENITY_SETTINGS_NS = 'serenity-hooks'
 
 export function apply(ctx: ClientContext): void {
-  ctx.inject(['slots', 'conversation', 'sessions', 'configForms'], (scope: ClientContext) => {
+  ctx.inject(['slots', 'conversation', 'sessions', 'configForms', 'uiConversation'], (scope: ClientContext) => {
     // v1.22.4 定稿：container_trajectory rebuild 复用旧会话原地清空（turn 结束 surface replace），
     // 无新会话创建 → 无需 client 自动切换（同会话 id、同工作区天然保持）。
 
@@ -147,6 +154,28 @@ export function apply(ctx: ClientContext): void {
           scope.slots.register({ name: 'tool.call.toolview', key: 'diagram' }, DiagramToolView),
         ),
       'serenity: diagram tool view',
+    )
+
+    // v1.51.3 轮尾图行（Chat 视图）：工具卡**可折叠** ⇒ 折起来图就没了。owner 的诉求是
+    // "图要出现在回答区域、且仍不落盘" —— 走宿主给的正路：`conversation.chat.turnTail`
+    // 这个**list 槽**（官方 `ui-deliverables` 就是这么挂交付物的），在图归属我们的前提下
+    // 自己渲染。数据与 URL 都取自宿主既有设施（Chat 快照 ＋ 会话授权图片 URL 缓存），
+    // **不新建 HTTP 路由、不落工作区文件、不常驻内存**（见 `DiagramImageTail.tsx` 文件头）。
+    // 🔴 该槽**要求** `inject` 面（实测 0.1.7-rc.1 契约：缺它 tsc 直接报 "Property 'inject' is missing"）
+    // ⇒ 按官方同款（`ui-deliverables`）把客户端 ctx 包成注入面交给组件。
+    scope.effect(
+      () =>
+        scope.slots.inject('conversation.chat.turnTail', () =>
+          scope.slots.register(
+            {
+              name: 'conversation.chat.turnTail',
+              id: 'serenity-diagram-tail',
+              inject: () => diagramTailInjected(scope),
+            },
+            DiagramImageTail,
+          ),
+        ),
+      'serenity: diagram image tail',
     )
   })
 }

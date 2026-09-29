@@ -1,0 +1,29 @@
+/**
+ * DiagramImageTail.css — 轮尾图行的样式（v1.51.3）
+ *
+ * 与 `DiagramToolView.css` 同规矩：**只用官方 `--dsw-alias-*` 词汇表里的令牌**，
+ * 圆角/尺寸用字面量（`--dsw-radius-*` **不在**官方 alias 词汇表里，`client-css-tokens.test.ts`
+ * 会把它当自造 token 拦下 —— 浅色主题下会变成黑块）。
+ */
+.sp-dtRoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sp-dtImage {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+/* 字节还在读（或读数被拒）时的占位 —— 与图的左边缘对齐，避免行高跳动 */
+.sp-dtPending {
+  width: 160px;
+  height: 100px;
+  border-radius: 6px;
+  background: var(--dsw-alias-interactive-bg-hover);
+}

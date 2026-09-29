@@ -52,6 +52,12 @@ export type DiagramImageRef = DiagramImageBlock['attachment']
  */
 export const DIAGRAM_IMAGE_MEDIA_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
 
+/**
+ * 本插件认领的 wire Tool 名（= 客户端两处的唯一真相源，v1.51.3 起）：
+ * 工具卡行（`tool.call.toolview` 的 key）与轮尾行（从 Chat 快照里挑图）都读它，**不再各写一份字面量**。
+ */
+export const DIAGRAM_TOOL_NAME = 'diagram'
+
 /** 一次已结算 `diagram` 调用贡献的全部展示材料。 */
 export interface DiagramResultView {
   /** 首行信封文字（行摘要；无文字块时为空串）。 */

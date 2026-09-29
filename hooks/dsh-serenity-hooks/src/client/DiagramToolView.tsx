@@ -50,12 +50,16 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 
-import { diagramResultModel } from './diagram-result.js'
+import { DIAGRAM_TOOL_NAME, diagramResultModel } from './diagram-result.js'
 import type { DiagramImageRef } from './diagram-result.js'
 import './DiagramToolView.css'
 
-/** 本行认领的 wire Tool 名（= 注册键；拼错则永不派发）。 */
-export const DIAGRAM_TOOL_NAME = 'diagram'
+/**
+ * 本行认领的 wire Tool 名（= 注册键；拼错则永不派发）。
+ * 🔴 **单一真相源在 `diagram-result.ts`**（v1.51.3 起）：轮尾行（`diagram-tail.ts`）读**同一个**常量 ——
+ * 两处各写一份字面量，迟早会漂成两条真相。
+ */
+export { DIAGRAM_TOOL_NAME }
 
 /** 本行 props = 框架合成的完整面（owner ＋ keyed key ＋ session 标准套件）。 */
 export type DiagramToolViewProps = PropsRuntime<'tool.call.toolview'>

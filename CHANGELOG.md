@@ -1,3 +1,62 @@
+## v1.51.3 — 2026-09-30（**图进「回答」**：本轮尾部内联显示 —— 不落盘、不需地址、不新增存储）
+
+**来源**：owner 2026-09-30 ——「**tool 会折叠**，还是希望**回答能引用这个图**，但又要确保**不存盘**」
+＋（否掉"内存 loop"方案）「loop 也不合适，**会长期占内存的**，存哪里好呢」＋ 拍板「可以；**搞一版试试看**」。
+
+---
+
+### 一、🔴 为什么**不是**"在回答里写一个图片地址"（两条路都量过）
+
+| 路 | 实测结论 |
+|---|---|
+| **markdown 内联图** | 宿主渲染器契约逐字：*"**Images additionally require absolute HTTP(S)**"*，且它的 DOM 被 fixtures **逐字钉死**（"must not drift"）⇒ 那是宿主包、我们**零改 DSH** ⇒ **地址包不掉** |
+| **`pathImages` 那条 resolver 缝**（本可把自定义目的地换成可显示 URL） | **假缝**：宿主在自己的 `AssistantMarkdown` 里 `useMemo` 现造 `{resolve: v => localPathMediaUrl(document.baseURI, v)}`，**不查任何服务** ⇒ 插件塞不进去 |
+| **`fileMentions`**（真缝） | 只作用于**行内代码**，产物是**可点链接**，**不产图** |
+
+⇒ **改走宿主给的正路**：`conversation.chat.turnTail` —— 一个 **`kind:'list'` 的槽**，专用于
+"在一轮完成后的尾部追加功能行"（官方 `ui-deliverables` 就是这么挂交付物行的）。
+
+### 二、实现（**纯客户端**，三件）
+
+| 文件 | 职责 |
+|---|---|
+| `src/client/diagram-tail.ts` | **纯**挑选器：从一轮的 tool-call 根里挑出 `diagram` 的图（复用工具卡那条**同一条**派生规则；深度/根数上限；畸形输入不抛）。**只允许类型导入宿主包** |
+| `src/client/DiagramImageTail.tsx` | 槽组件：取**宿主自己的** Chat 快照（`uiConversation.binding(sessionId).target('chat')` → `nodes.turnDataSource(turn,'tool-call')`，契约保证**含被隐藏的节点** ⇒ 工具卡折叠与否都不影响），再用**宿主自己的**会话授权 URL 缓存（`peekImageUrl` / `imageUrl`）换 URL 渲染 `<img>` |
+| `src/client/index.ts` | 注册 `{ name:'conversation.chat.turnTail', id:'serenity-diagram-tail', inject: … }`；`inject` 增 `uiConversation` |
+
+🔴 **存储上的三条硬性质**（正对 owner 的两条约束）：**不落工作区文件**（字节仍在**宿主的 durable
+附件库** —— `src/tools/diagram.ts` 早已用 `attachments.saveImage` 存的那份）· **不常驻内存**
+（URL 由宿主的 per-session 缓存管，组件不持有字节）· **不新建 HTTP 路由**。
+
+### 三、🔴 三条**类型面**发现（都由 `typecheck-host` 逼出来，价值超过本功能本身）
+
+1. **该槽在 0.1.7-rc.1 契约里 `inject` 是必需的**（与线上 0.2.0-rc.1 的写法不同）
+   ⇒ 按官方同款走 `inject` 面，组件用 `InjectFace<…>` 声明自己的面。
+2. 🔴 **宿主 `.d.ts` 里用到的每一种说明符写法，都要在 `paths` 里有一条**：此前只钉了
+   `@deepseek-ai/dsh-client-ui-conversation`（**裸名**），而 ui-chat 的 `snapshot.d.ts` 写着
+   `declare module '@deepseek-ai/dsh-client-ui-conversation/client'` ⇒ 派生宿主 tsconfig 里 `/client`
+   这形态**没有映射** ⇒ 回落 node 解析到**另一个版本** ⇒ **模块身份分裂、增强不合并**
+   （症状：`binding().target('chat')` 的参数类型变成 `never`）。
+   ⇒ 这同时说明 **v1.51.2 那次"typecheck-host 绿"对这条链是部分假绿**（它一直拿本机那份在编）。
+3. 🔴 **解包宿主的传递类型依赖也要钉**：`records.d.ts → @deepseek-ai/dsh-attachment → @deepseek-ai/dsh-brand`
+   与 `ContentBlock ← @deepseek-ai/dsh-llm/types`。不钉则解包目录（**纯目录、没有兄弟 node_modules**）
+   解析不到 ⇒ `skipLibCheck` 下**静默退化**，且**症状反直觉**：`host-type-contract.ts` §④ 里
+   "防 any"那条**绿**、而**品牌断言**红（`Extract<union,{type:'image'}>` 因某个成员变 `any` 而整体变 `any`）。
+   🔴 **诊断手法**（本条最值钱）：**用探针把真身逼出来** —— 把待查类型赋给一个不可能的字面量类型，
+   让 tsc 把解析结果打进错误信息；再配 `IsAny` / `IsNever` 两个条件类型做"三选一"。
+   本轮靠它把"以为是解析问题"精确定位成"自家 `Extract` 被 any 污染"。
+
+### 四、门禁与已知边界
+
+六项全绿：`typecheck` ✓ ｜ `typecheck-host 0.2.0-rc.1` ✓（node 114 文件 ／ **client paths 21 条全中 ·
+168 文件**，原 15 ／ 132）｜ `test` ✓ ｜ `coverage` ✓（语句 28011/28507 = 98.26%）｜ `build` ✓
+（`lib/client.js` 213890 → **225459 B**）｜ `pack-check` ✓（131 文件）。
+
+⚠️ **已知边界**：图出现在**本轮尾部**（正文区），不是"引用它的那一句"；本仓 client 单测**无 DOM**
+⇒ "真的渲染出来了"仍需**真浏览器**验收（`home-browser` / CDP）。
+
+---
+
 ## v1.51.2 — 2026-09-30（🔴 **`diagram` 的图在「会话」里内联显示** —— 补上 v1.51.1 漏掉的那半个缺陷）
 
 **来源**：owner 2026-09-29 装完 v1.51.1 **当场实测打回半条** ——「图片生成了、效果也不错，
