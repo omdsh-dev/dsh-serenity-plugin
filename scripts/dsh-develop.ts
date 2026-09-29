@@ -1320,6 +1320,29 @@ function cmdDeploy(opts: { listCopySet?: boolean } = {}): void {
     }
   }
 
+  // 🔴 v1.51.0（D104）**运行时依赖**的 shim（与上面的 peer shim 是两件事，别合并）：
+  //   `dependencies` 里的包（`@resvg/resvg-wasm`，diagram 的光栅化器）**不由宿主提供**，
+  //   而 deploy 是**文件复制**（不是 `npm install`）⇒ 不补这一步，复制过去的那份
+  //   `lib/index.js` 会 `ERR_MODULE_NOT_FOUND: Cannot find package '@resvg/resvg-wasm'`
+  //   ——**实测**：v1.51.0 首次 deploy 就是这么在**预检**上失败的（预检拦住了"复制成功但装不上"）。
+  //   ⚠️ 只在**本机开发路径**用仓库里的（pnpm）副本：公开用户的正确路径是 `npm install`
+  //   （`dsh plugin add` 会连依赖一起装，见 `cmdNpmInstall`），那条路不需要本 shim。
+  const runtimeDepShims: Record<string, string> = {
+    '@resvg/resvg-wasm': join(HOOKS_DIR, 'node_modules', '@resvg', 'resvg-wasm'),
+  }
+  for (const dst of [...targets.map((nm) => join(nm, '@shgroup', 'dsh-serenity-hooks')),
+    ...profileTargets]) {
+    for (const [spec, target] of Object.entries(runtimeDepShims)) {
+      if (!existsSync(target)) {
+        console.log(`    !! 运行时依赖 shim 目标缺失: ${spec} -> ${target}（先 dsh-develop npm-install-dev ${spec}）`)
+        continue
+      }
+      const link = join(dst, 'node_modules', spec)
+      mkdirSync(dirname(link), { recursive: true })
+      try { symlinkSync(target, link) } catch { /* 已存在 */ }
+    }
+  }
+
   console.log('==> 4/4 profile 挂载 + 预检')
   const profileDir = join(dshHome, 'profiles', 'web')
   const patchFile = join(profileDir, 'cordis.patch.yml')

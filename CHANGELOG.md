@@ -59,6 +59,13 @@ owner 具名令。7 处改动：常量 ＋ 注释 ＋ 工具描述 ×2 ＋ 指�
    否则真失败会被静默成"图是空白的"，比抛错坏得多。
 3. **`pack-check` 的 `required` 清单补两条运行时必需资产硬断言**：内置字体 ＋ 其 Apache-2.0 许可证
    （同 v1.26.15 事故形态：`files` 白名单漏掉运行时必需文件 ⇒ 装上了也跑不起来）。
+4. **🔴 `deploy` 的「运行时依赖」补齐**（本版**新的问题类**）：本插件此前**零 `dependencies`**
+   （peer 全由宿主提供），而 `deploy` 是**文件复制**、不是 `npm install` ⇒
+   首跑实测 `ERR_MODULE_NOT_FOUND: Cannot find package '@resvg/resvg-wasm'` 在 **preflight** 上失败
+   （预检把"复制成功但装不上"拦住了，值得记一笔）。修法 = shim 表**分成两件事**：
+   peer shim（走 staging 源码树，原样）＋ **运行时依赖 shim**（走仓库 `node_modules`，且
+   **同时覆盖两个 profile 目标**——那正是实际加载路径）。公开用户的正确路径不受影响：
+   `dsh plugin add` 会**连依赖一起装**（实测 pnpm `Packages: +2`）。
 
 ### 五、验收（六项门禁 ＋ 一条探针，均本机真跑）
 
