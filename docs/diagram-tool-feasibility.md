@@ -198,3 +198,45 @@ Serenity 设置页一个 Group（客户端的 `SettingsSection.tsx`）。
 ① **宿主默认包集**（`dsh-serenity-plugin/_tmp/host-0.2.0-rc.1/`）—— 图/uI 通路与插槽面
 ② **本机 live 安装**（`/home/yh/.npm-global/lib/node_modules/@deepseek-ai/dsh/`，经 `sys curl file://` 读）—— 补上 0.2.0 缺的两个包
 ③ **本机系统面**（`sys ls` / `sys curl` registry）—— 光栅化能力清点
+
+---
+
+## 7. owner 裁决（2026-09-29）＋ docker 实测
+
+**裁决**：**G1 内置**（"尺寸不是问题"）⇒ 定为 **`@resvg/resvg-wasm` ＋ 内置一个中文字体**（不借 DSH 的 sharp、不靠系统字体、不起浏览器）｜
+**G2 ACC 级**开关｜**G3 由我做**（owner 不手跑）｜**G4 不在本机做那个 1 分钟实验，改去 docker 验**，并问「**是不是需要一个有图形界面的 Linux**」。
+
+### 7.1 「需要图形界面的 Linux 吗」—— 🔴 **不需要**（判据＝镜像定义，非推断）
+
+- 测试台基础镜像 = `node:22-bookworm-slim` —— **无 X、无桌面、无 Xvfb、无 `DISPLAY`**；
+  镜像只**多装一个 `chromium` 二进制**（`bench/Dockerfile:31`）。
+- V8b：`chromium --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage` ＋ `--dump-dom` ／ `--screenshot`
+  （`v8b-browser-check.mjs:64`）；V8c：同款 headless ＋ **CDP** 点开设置面板做元素级断言。
+- 🔴 **分档**：**工具侧的光栅化连 chromium 都不需要**（纯 node）；
+  **只有"图真的出现在 GUI 里"这条验收**才需要 headless chromium。
+
+⇒ **要的是容器里的 `chromium` 二进制，不是图形界面。**
+
+### 7.2 docker 实测（`bench-docker`；容器 `dsh-bench:0.1.7-rc.2`，验完已 `down` 并删镜像）
+
+| 测项 | 读数 |
+|---|---|
+| `npm i @resvg/resvg-wasm@2.6.2` | **exit 0 ／ 2 s ／ 1 个包** —— **无原生编译、无 postinstall 构建** |
+| 容器自带字体 | `fc-list` **6 条 ／ CJK = 0** |
+| 装 `fonts-arphic-uming` 后 | 系统字体就位（`fc-list` 认 uming；`uming.ttc` 21 MB） |
+| 渲染 CJK SVG（默认 ／ `loadSystemFonts:false`） | 两者**逐字节相同 = 518 B**（＝空白画布）⇒ 🔴 **wasm 完全看不见系统字体** |
+| 渲染 CJK SVG（`fontBuffers` 喂 uming） | **5591 B** ⇒ 字**真画出来了** |
+| 图尺寸画布 1000×780（23 块 ＋ 6 行注释，全 CJK） | **64 ms ／ 54.5 KB PNG** |
+| 同图按宽 2×（2000） | **63 ms ／ 147 KB PNG** |
+
+### 7.3 由实测推出的三条后果
+
+1. 🔴 **必须内置字体**（走 `fontBuffers`）——【实测】wasm **对系统字体完全不可见**（容器里装好了 `uming` 也没用）。
+   🔵 这条**恰好与 owner 的「内置」同向**，并**白拿一个好处**：**输出与机器无关** —— 同一份内置字体 ⇒ 逐字节可复现（S↑ 稳定）。
+   代价 = 包体：`Noto Sans SC` ≈10 MB ／ 子集可更小；`AR PL UMing` 21 MB。
+2. ⚠️ **两个渲染端会不一致**：GUI 里那张 SVG 由**宿主的浏览器**渲染，而**本机的 CJK 覆盖只有 AR PL UMing**
+   —— 我们在 SVG 里声明的 `'Noto Sans CJK SC'`／`'Source Han Sans SC'`／`'Microsoft YaHei'` **本机一个都不存在**。
+   ⇒ **同一份源码，GUI 看到的字形与 PNG 里的字形可能不同**。demo 阶段可接受；要一致就得让两边吃同一份字体。
+3. ⚠️ **验收容器自己也缺中文字体** ⇒ 若将来给 bench 加"图的渲染面"判据，**镜像必须先装中文字体**，
+   否则判据会在**正确的实现**上变红（读数器缺陷被误读成被测对象失败 —— 与 V8b 注释里记的那类坑同族）。
+
