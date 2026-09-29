@@ -1,4 +1,4 @@
-import type { DslModel, DslRect, DslSeg, DslText } from './dsl.js'
+import type { DslModel } from './dsl.js'
 
 export interface DslRender {
   svg: string
@@ -32,10 +32,9 @@ interface Model {
   x1?: number
   y0?: number
   y1?: number
-  rects?: DslRect[]
-  segs?: DslSeg[]
-  lines?: DslSeg[]
-  texts?: DslText[]
+  rects?: Rect[]
+  segs?: Seg[]
+  texts?: Txt[]
   legend?: Legend
   colors?: Record<string, string>
 }
@@ -81,13 +80,41 @@ const segHitsBox = (ax: number, ay: number, bx: number, by: number, box: [number
 }
 
 /** 把模型渲染成 SVG，并做四项体检。绝不抛异常：出错的图元跳过、记 errors、其余照画。 */
+/**
+ * 🔴 **适配层（2026-09-29 加，修一处真缺陷）**
+ *
+ * 本文件此前用 `model as unknown as Model` 把 `DslModel` **硬 cast** 成自己的内部形状
+ * ⇒ **编译器对字段名彻底变瞎**。而两侧字段名实际不同：
+ * `W/H` vs `width/height` ／ `fill` vs `color` ／ `ln` vs `line` ／ `align` vs `anchor`
+ * ⇒ 运行期整片取到 `undefined`，**而 `typecheck` 照样绿**（那个绿是假信号）。
+ *
+ * 现在改为**逐字段显式搬运**：类型系统会核对每一个名字 ⇒ 再对不上就**编译不过**。
+ * 🆕 判据：**"typecheck 通过"≠"两侧接口一致"** —— 一个 cast 就足以让类型检查失效；
+ * 这一层在，`typecheck` 才是证据。
+ */
+function adapt(model: DslModel): Model {
+  return {
+    title: model.title,
+    subtitle: model.subtitle,
+    width: model.W,
+    height: model.H,
+    pad: model.pad,
+    x0: model.x0, x1: model.x1, y0: model.y0, y1: model.y1,
+    colors: model.colors,
+    legend: model.legend,
+    rects: model.rects.map((r) => ({ id: r.id, label: r.label, x0: r.x0, y0: r.y0, x1: r.x1, y1: r.y1, color: r.fill, size: r.size })),
+    segs: model.segments.map((s) => ({ kind: s.kind, from: s.from, to: s.to, color: s.color, width: s.width, dash: s.dash, free: s.free, line: s.ln })),
+    texts: model.texts.map((t) => ({ x: t.x, y: t.y, text: t.text, size: t.size, color: t.color, anchor: t.align })),
+  }
+}
+
 export function renderDsl(model: DslModel): DslRender {
-  const m = model as unknown as Model
+  const m = adapt(model)
   const lint: string[] = []
   const errors: string[] = []
-  const rects = (m.rects ?? []) as unknown as Rect[]
-  const segs = (m.segs ?? m.lines ?? []) as unknown as Seg[]
-  const texts = (m.texts ?? []) as unknown as Txt[]
+  const rects: Rect[] = m.rects ?? []
+  const segs: Seg[] = m.segs ?? []
+  const texts: Txt[] = m.texts ?? []
   const colors: Record<string, string> = m.colors ?? {}
   const ids = rects.map((r) => r.id)
 
