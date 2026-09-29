@@ -31,10 +31,16 @@
     "assets/serenity-voyage.html",
     "assets/serenity-voyage-preview.png",
     "assets/README.md",
+    "assets/diagram/DroidSansFallbackFull.ttf",
+    "assets/diagram/LICENSE-Apache-2.0.txt",
+    "assets/diagram/PROVENANCE.md",
     "cordis.patch.yml",
     "dsh.plugin.json",
     "README.md"
   ],
+  "dependencies": {
+    "@resvg/resvg-wasm": "2.6.2"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

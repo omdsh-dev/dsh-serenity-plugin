@@ -149,9 +149,10 @@ describe('handyman-ops: guide 指引 + 运行状态列表（WebUI 等待界面�
     expect(HANDYMAN_GUIDE).toContain('Task decomposition (E↑ Explicit)')
     expect(HANDYMAN_GUIDE).toContain('Model whitelist (CCC-configured, mandatory)')
     expect(HANDYMAN_GUIDE).toContain('handyman.models')
-    // 2026-09-27（owner 具名令）：并行不再只属 background —— 前台也扇出（cap 5）
+    // 2026-09-27（owner 具名令）：并行不再只属 background —— 前台也扇出
+    // 🆕 2026-09-29（owner 具名令）：前台上限 5 → 10（数值变了、语义没变；断言随之更新）
     expect(HANDYMAN_GUIDE).toContain('Parallel strategy (both modes)')
-    expect(HANDYMAN_GUIDE).toContain('cap 5 (fixed)')
+    expect(HANDYMAN_GUIDE).toContain('cap 10 (fixed)')
     expect(HANDYMAN_GUIDE).toContain('handyman-internal agent is also required to load eap')
     expect(HANDYMAN_GUIDE).toContain('the only completion condition = the worker echoes')
     // v1.31.3 双模式：缺省 foreground / background 循环校验 / 选择判据

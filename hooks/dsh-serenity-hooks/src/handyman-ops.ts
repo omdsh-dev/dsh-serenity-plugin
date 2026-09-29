@@ -229,11 +229,11 @@ export const HANDYMAN_GUIDE = `# handyman — Scale-Up Usage Guide (guide)
 ## Two modes (v1.31.3; default = foreground)
 | | foreground (default) | background |
 |---|---|---|
-| What | child agent(s) run the task ONCE and return their final text (jobs=[...] ⇒ parallel, cap 5) | loop-validated worker: hard while-loop + random completion code |
+| What | child agent(s) run the task ONCE and return their final text (jobs=[...] ⇒ parallel, cap 10) | loop-validated worker: hard while-loop + random completion code |
 | Use when | you need result(s) back now (per-case testers, single conversions, parallel fan-out) | long/unattended work needing anti-early-finish, resumability, or parallel jobs |
 | Loop / validation | none | stop-token is the ONLY completion condition; round cap (default 100); auto-restart (≤100) |
 | Progress file | none | AGENT_SESSIONS/handyman-<label>.md/.json (same label resumes) |
-| Parallel jobs | **yes** — jobs=[{task,label?,model?},...], **cap 5 (fixed)** | yes (jobs=[...], handyman.maxParallel default 10) |
+| Parallel jobs | **yes** — jobs=[{task,label?,model?},...], **cap 10 (fixed)** | yes (jobs=[...], handyman.maxParallel default 10) |
 | Mechanism | host delegation service ctx.subagents.start("spawn") + agentOptions | ctx.agents.create + internal while-loop |
 | Model source | CCC handyman.models whitelist (same for both) | same |
 
@@ -272,12 +272,12 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
 
 ### 4. Parallel strategy (both modes)
 - Independent subtasks can run in parallel:
-  · **foreground** — handyman(jobs=[{task,label?,model?},...]) ⇒ fan-out of custom-model subagents, **cap 5**,
+  · **foreground** — handyman(jobs=[{task,label?,model?},...]) ⇒ fan-out of custom-model subagents, **cap 10**,
     results come back **in the order you passed them** (label is only a display name here; per-job "model" allowed)
   · **background** — handyman(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file
 - Concurrency safety guaranteed: unique sessionId (handyman-<label>-<uuid>), progress files isolated per label
   (AGENT_SESSIONS/handyman-<label>.json) — same label resumes, different labels never interfere
-- Parallel cap: **foreground 5 (fixed)** / background handyman.maxParallel (default 10 — cheap models are cheap)
+- Parallel cap: **foreground 10 (fixed)** / background handyman.maxParallel (default 10 — cheap models are cheap)
 - Aggregation: foreground returns all outputs in one result; background: after each parallel job produces progress, the main agent merges (or spawns one aggregation handyman)
 - For programmable pipeline/phase orchestration at scale, use the platform's workflow tool instead
 

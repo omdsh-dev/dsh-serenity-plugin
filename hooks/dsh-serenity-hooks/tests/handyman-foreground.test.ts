@@ -245,11 +245,11 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
     expect((fake.calls[1]?.request.agentOptions as Record<string, unknown>).model).toBe('MiniMax-M3')
   })
 
-  it('🔴 超过前台并行上限 5 ⇒ 拒绝且**一个子 agent 都不起**（含 cap 文案）', async () => {
+  it('🔴 超过前台并行上限 10 ⇒ 拒绝且**一个子 agent 都不起**（含 cap 文案）', async () => {
     const fake = fakeSubagents()
     const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
-    const jobs = Array.from({ length: 6 }, (_, i) => ({ task: `t${i}` }))
-    await expect(tool.execute({ jobs }, execIn())).rejects.toThrow(/exceed the foreground parallel cap 5/)
+    const jobs = Array.from({ length: 11 }, (_, i) => ({ task: `t${i}` }))
+    await expect(tool.execute({ jobs }, execIn())).rejects.toThrow(/exceed the foreground parallel cap 10/)
     expect(fake.calls).toHaveLength(0) // ← 关键：拒绝发生在创建之前
   })
 
