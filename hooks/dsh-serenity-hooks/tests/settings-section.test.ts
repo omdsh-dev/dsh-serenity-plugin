@@ -48,6 +48,7 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       publicAskEnabled: false,
       croEnabled: true,
       unattendedEnabled: false,
+      diagramEnabled: false,
       // 2026-09-26（P0-1）：机器级 human-channel 搭本结构出（读取入口唯一）；缺省见 human-channel-config.test.ts
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
@@ -80,6 +81,7 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       publicAskEnabled: false,
       croEnabled: true,
       unattendedEnabled: false,
+      diagramEnabled: false,
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
   })
@@ -106,6 +108,15 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(d.publicAskEnabled).toBe(true)
     expect(d.croEnabled).toBe(false)
     expect(d.unattendedEnabled).toBe(true)
+  })
+
+  it('🆕 D104 diagram：面板层 > 部署层，且两端都缺省**关**（两个方向都钉）', () => {
+    expect(simpleSettingsFromConfig({}).diagramEnabled).toBe(false) // 缺省关
+    expect(simpleSettingsFromConfig({ diagram: { enabled: true } }).diagramEnabled).toBe(true) // 部署层
+    // 面板层为真 ⇒ 压过部署层的 false
+    expect(simpleSettingsFromConfig({ diagram: { enabled: false }, diagramEnabled: true }).diagramEnabled).toBe(true)
+    // 面板层为假 ⇒ 压过部署层的 true（**两个方向都钉**：只测单向会漏掉 `??` 写成 `||` 的错法）
+    expect(simpleSettingsFromConfig({ diagram: { enabled: true }, diagramEnabled: false }).diagramEnabled).toBe(false)
   })
 
   it('defaultSimpleSettings 与空 Config 一致', () => {

@@ -62,6 +62,7 @@ import { registerImChannel } from './im-bridge.js'
 import { weixinChannel } from './im-weixin.js'
 import { createImBridgeTool } from './tools/im-bridge.js'
 import { createAccDiagTool } from './tools/acc-diag.js'
+import { createDiagramTool } from './tools/diagram.js'
 // §0L（S142 2026-09-19）：绑定载体迁到宿主存储域——装载期开域 + 注入句柄 + 一次性迁移
 import { openBindingDomain, bindingStore } from './host/storage-domain.js'
 import { setBindingStore } from './trajectory-bound.js'
@@ -198,6 +199,11 @@ export interface Config {
    * ⇒ 关闭 = 停止再补；**不回滚已写入的值**（写的是"该模型支持图片"这个**事实**，不是偏好）。
    */
   visionPatch?: { enabled?: boolean }
+  /**
+   * diagram 工具（实验性 demo；2026-09-29 owner 具名令 **D104**）：标签格式源码 → 进程内
+   * 光栅化成 PNG（**不借浏览器**）。缺省关；部署层同义键 = 面板层 `diagramEnabled`。
+   */
+  diagram?: { enabled?: boolean }
   /** human-channel（人机信道；**机器级**；2026-09-26 owner 定案）—— 见 `HumanChannelConfig` */
   humanChannel?: HumanChannelConfig
   // ── 设置面板层（扁平键）────────────────────────────────────────────────
@@ -228,6 +234,8 @@ export interface Config {
   croEnabled?: Volatile<boolean | undefined>
   /** 无人值守代理回复总闸（面板层；无部署层同义键；缺省关） */
   unattendedEnabled?: Volatile<boolean | undefined>
+  /** **diagram 工具总闸**（面板层；部署层同义键 = `diagram.enabled`；缺省关；D104） */
+  diagramEnabled?: Volatile<boolean | undefined>
 }
 
 // 🔴 **刻意不写 `z<Config>` 标注**（v1.47.2 起）：volatile 键的**输入形状**（裸 `boolean`）与
@@ -289,6 +297,8 @@ export const Config = z.object({
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
+  // diagram（实验性 demo；D104）：部署层缺省关（面板层同义键 = `diagramEnabled`，两者取或见 settings-section）
+  diagram: z.object({ enabled: z.boolean().default(false) }),
   // ── human-channel（人机信道；**机器级**；2026-09-26 owner 定案 ⇒ 方案 §2.2）──────────
   // 🔴 **机器级**：一个 dsh 进程一份（插件 Config），**不是每 CCC 一份** —— 因为它的三张表
   //    （账号 ／ 订阅 ／ 主控）天然跨 CCC；CCC 侧原 `weixin.*` 随之退役（见方案 §2.4：
@@ -326,6 +336,9 @@ export const Config = z.object({
   publicAskEnabled: z.boolean().volatile(),
   croEnabled: z.boolean().volatile(),
   unattendedEnabled: z.boolean().volatile(),
+  // D104（2026-09-29 owner 具名令）：diagram 工具总闸（面板层；**缺省关**）。第十号面板键——
+  // 与 `config-volatile.test.ts` 的 PANEL_KEYS / DEPLOY_KEYS 两张表**必须同步**（少一处那条 pin 就红）。
+  diagramEnabled: z.boolean().volatile(),
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -411,6 +424,14 @@ export function apply(ctx: Context, config: Config): void {
   // v1.21 分层：简单配置（开关/阈值）注册到 dsh 原生设置面板（零改 DSH；
   // 旧 RC 白名单存在时 client 侧自动降级，账号复杂配置走宁静号面板不受影响）
   registerSettingsSection(ctx, config)
+  // D104（2026-09-29 owner 具名令）：diagram 工具 —— agent 给一段标签格式源码，进程内光栅化成
+  // PNG（**不借浏览器**）并让图进对话。实验性 demo ⇒ **缺省关**；关时**不注册**
+  // （工具不进模型工具清单 ⇒ 零 token、不会被误调），同 skiff／acp 的"未开启零资源占用"口径。
+  // 🔴 **本行必须在 `registerSettingsSection` 之后**：开关经 `readSimpleSettings()` 读（唯一读取入口），
+  //    而那个源是在 registerSettingsSection 里才接上的（早读 = 恒读到内建缺省 = 开关永远无效）。
+  // 🔴 面板拨开关**无需**额外热同步订阅：宿主 `fiber.update()` 的语义 = 校验新 config 后 **restart 本插件**
+  //    （cordis `Fiber.update` 文档）⇒ apply 重跑、这一行自然重新判一次。
+  if (config.tools) registerDiagramTool(ctx)
   // v1.21 F1：双端口网关（第二监听器 + 登录 + 反代；v1.22 起 plugin 全局——
   // enabled 读 DSH settings 开关，host/port/accounts 读全局文件，不依赖具体 CCC；
   // 旧 CCC localstore 配置在首个 agent/session-start 时一次性迁移）
@@ -500,6 +521,27 @@ export function apply(ctx: Context, config: Config): void {
   // 🔴 临时功能，缺省开；`visionPatch.enabled=false` 停止再补（不回滚已写入的值）。
   if (config.visionPatch?.enabled !== false) {
     registerDeepseekVisionPatch(ctx, true)
+  }
+}
+
+/**
+ * diagram 工具装配（**D104**，2026-09-29 owner 具名令）：**默认关**的实验性工具 ⇒ 关时**不注册**。
+ *
+ * 归属与边界（E↑）：**机制归 ACC**（工具面 ＋ 开关 ＋ 光栅化），**图的语义归调用方**
+ * （标签语法与四项体检在 `src/diagram/`，权威设计 = 插件仓 `docs/diagram-tool-feasibility.md`）。
+ *
+ * 🔴 **两条被实测钉住的接线前提**（改这里之前先读）：
+ *  ① 必须**晚于** `registerSettingsSection`（开关值经 `readSimpleSettings()`，源在那里接上）；
+ *  ② 注册失败**不得**成为启动单点（同 `hostContractReport` 的口径），但要**响亮**——
+ *     静默失败会让"拨了开关没反应"看起来像开关坏了（判据：**失败必须可见**）。
+ * @param ctx - 插件上下文
+ */
+function registerDiagramTool(ctx: Context): void {
+  if (!readSimpleSettings().diagramEnabled) return
+  try {
+    ctx.tools.register(createDiagramTool(ctx))
+  } catch (err) {
+    console.error(`[serenity-hooks] ✗ diagram 工具注册失败: ${String((err as Error)?.message ?? err)}`)
   }
 }
 

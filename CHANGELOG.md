@@ -1,3 +1,83 @@
+## v1.51.0 — 2026-09-29（**新增 `diagram` 工具：agent 给标签源码 ⇒ 进程内出图**；`handyman` 前台并行 5→10）
+
+**来源**：owner 2026-09-29 具名令（**D14**）——「实现一版 diagram 工具」（口径 =「做成一个 tool，**ACC 级别**的，
+配合一个开关（demo 功能嘛，默认关，开了才可用）；Agent 调用这个 tool **直接给代码**就行，
+然后 dsh 可以**自动渲染成图片**（注意**不借助浏览器生成截图**）」）＋「**handyman 并行度 5 → 10**」。
+权威设计 = `docs/diagram-tool-feasibility.md`。
+
+---
+
+### 一、`diagram` 工具（**实验性 demo，缺省关**）
+
+**链路**：标签源码 → `parseDsl` → `renderDsl`（SVG ＋ 四项体检）→ `@resvg/resvg-wasm` 光栅化 →
+PNG → 落 `<CCC>/_tmp/diagram/`（`.svg` 可读可改 ＋ `.png` 是进对话的那份）＋ **图片块进对话**。
+**全程进程内，不起浏览器、不截图。**
+
+- **开关（可行性报告 G2：ACC 机器级）**：面板层 `diagramEnabled` ＋ 部署层 `diagram.enabled`，**缺省关**；
+  **关时不注册**（工具根本不进模型工具清单 ⇒ 零 token、不会被误调），同 `skiff`／`acp` 的"未开启零资源占用"口径。
+  落点 = Serenity 设置页新增的「工具」组一行（可展开详设）。
+- **内置字体** `assets/diagram/DroidSansFallbackFull.ttf`（3.8 MB，Apache-2.0，含许可证与出处）。
+  **为什么必须内置（实测，不是偏好）**：docker 里给容器装好中文字体（`fc-list` 认它）后，resvg-wasm
+  渲染中文**仍得到空白画布**，且 `loadSystemFonts: true|false` 的 PNG **逐字节相同** ⇒ **wasm 对系统字体完全不可见**，
+  只有 `fontBuffers` 才画得出字。顺带白拿一条：**输出与机器无关**（同一份内置字体 ⇒ 逐字节可复现）。
+- **四项体检**（**只告警不拦图**）：块重叠 ／ 标签溢出 ／ 悬空端点 ／ 线压字。`errors`（写错的图元被跳过）
+  与 `lint`（画了但不好看）**分档**——有错的图仍然出图。
+
+### 二、🔴 两条宿主契约（**现场取证**：第一版实现被其中一条判死）
+
+**① `output.render` 是「同步投影」，宿主不 `await` 它。**
+`@deepseek-ai/dsh-tools` 的 `createSuccessResult()` 直接 `rendered = tool.output.render(args, value)`，
+紧接着 `snapshotJsonValue(rendered)` ⇒ **返回 Promise 会被判「非 lossless JSON」**。
+第一版把 async 实现 cast 成同步 ⇒ **整条工具调用失败**（图片与文字回执**一起**丢），
+而代码里那段"拿不到图片块仍返回文字回执"的自兜底**根本走不到**（它以为的失败模式不是真失败模式）。
+
+**② 图片块的 `attachment` 是附件服务的 durable 引用，而存字节是 async ⇒ 只能分两段。**
+`execute` 里 `saveImage`（async，引用拼进**纯 JSON** 的返回值），`render` 里**同步**装配
+`{ type:'image', attachment: … }`。平台自家 `read_image` 就是这个形态（本机 live 安装 `dsh-tool-fs` 取证：
+`imageRefFromValue` ＋ `render: (_args, value) => imageReadContent(value)`）。
+
+**回归钉**：`tests/diagram-tool.test.ts` 有一条**形状断言**（render 返回数组、没有 `then`），
+外加图块字段**逐字**断言 —— 工具里那句 `as unknown as ContentBlock` 是必要的（本包不引 `dsh-attachment`），
+但它**同时让类型检查对字段名变瞎**，所以字段名由测试承重。
+
+**四条降级，一律"只降级、不吞回执"**：附件服务未挂载 ／ 部署不收 `image/png` ／
+**当前模型路由未声明图像输入**（同 `read_image` 的门）／ `saveImage` 自身报错 ⇒
+图**仍落盘**、文字回执带路径与**原因**（`imageSkip`）。
+
+### 三、`handyman` 前台并行 **5 → 10**
+
+owner 具名令。7 处改动：常量 ＋ 注释 ＋ 工具描述 ×2 ＋ 指南 ×3 ＋ 系统提示词那行。
+🔴 刻意**不合并** foreground ／ background 两档常量（数值相等、**语义不同**）；**不改**历史 CHANGELOG 条目。
+
+### 四、同批修的三处（各有独立判据）
+
+1. **`rasterize.ts` 的包根定位**：`voyage-page.ts` 那套「`..` 一次」对本模块**不成立**（它在 `src/diagram/` 里）
+   ⇒ 开发态（vitest 直接跑 TS 源码）会去找 `src/assets/…`，**实测 ENOENT**（现象是"字体不在"，与真因"路径层级算错"长得完全不同）
+   ⇒ 改为**按 `package.json` 上溯**，对开发态与发布态**都**成立。
+2. **`initWasm()` 是进程级一次性**：模块被重新加载（HMR ／ 面板拨开关触发的插件 restart ／ vitest 用例隔离）时
+   它会抛 `Already initialized` —— **那不是失败**（wasm 早在跑）⇒ 只吞这一种，其余照抛。
+   否则真失败会被静默成"图是空白的"，比抛错坏得多。
+3. **`pack-check` 的 `required` 清单补两条运行时必需资产硬断言**：内置字体 ＋ 其 Apache-2.0 许可证
+   （同 v1.26.15 事故形态：`files` 白名单漏掉运行时必需文件 ⇒ 装上了也跑不起来）。
+
+### 五、验收（六项门禁 ＋ 一条探针，均本机真跑）
+
+| 门 | 读数 |
+|---|---|
+| `typecheck` | ✅ node ＋ client |
+| `typecheck-host 0.2.0-rc.1` | ✅ node（实测载入 114 文件）＋ client（129 文件）；paths 36 ／ 14 条全命中 |
+| `test` | ✅ **153 files ／ 2580 tests**（其中 `diagram-*` 3 files ／ 20 tests 为本版新增） |
+| `coverage` | ✅ 语句 **27848/28350 = 98.22%**｜分支 **6304/6996 = 90.1%**｜函数 **972/978 = 99.38%**｜行 98.22%（阈值 60/55/55/60） |
+| `build` | ✅ `lib/index.js` ＋ `lib/client.js` |
+| `pack-check` | ✅ tarball **126 文件**；**内置字体与许可证已入包**（本版新增的两条硬断言） |
+| 探针 `typecheck-scripts` | 3 条**存量**假阳（zstd 类型面 vs `@types/node@^20`），**本版无新增**；碰了 `scripts/` 故照跑 |
+
+**关键用例**：标签 DSL 解析／渲染（6 例，接口断裂回归钉）｜光栅化（5 例，含**差分判据**：
+同图"有字 vs 无字"逐字节**必须不同** —— 字体没喂进 wasm 本条必红）｜工具面（9 例：返回值／
+同步 render／图块字段／四条降级／无 CCC 根响亮报错／有错也出图）。
+
+---
+
 ## v1.50.1 — 2026-09-28（**适配 DSH 0.2.0-rc.1：宿主范围改「双档」＋ 修 `readDshVersion` 的静默失效**）
 
 **来源**：owner 2026-09-28 令「**dsh 发布了 0.2.0-rc 开始进行适配工作，本次适配安装测试也要做，利用好 docker**…」⇒ 适配落地并跑通安装测试后，owner 令「**别的我不管，先发版吧**」（**D14 具名发版令**）。

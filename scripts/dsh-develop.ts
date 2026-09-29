@@ -503,7 +503,15 @@ function verifyTarball(): void {
   }
   // S142 §12.44：航行动画资产（/serenity/voyage 路由要读它；漏了 ⇒ 卡片背景 500）
   // 同 v1.26.15 事故形态（files 白名单漏运行时必需文件）⇒ 提到发布前硬断言。
-  const required = ['lib/index.js', 'lib/client.js', 'lib/invariant.js', 'assets/serenity-voyage.html']
+  // 🔴 D104（2026-09-29）：**diagram 的内置字体**同理 —— `rasterize.ts` 在**运行时**读它
+  //    （wasm 对系统字体不可见 ⇒ 没有它就连中文都画不出），而它 3.8 MB、又是二进制资产
+  //    ⇒ 最容易在 files 白名单里被漏掉。许可证同属"必须随包分发"（Apache-2.0 的再分发条件）。
+  const required = [
+    'lib/index.js', 'lib/client.js', 'lib/invariant.js',
+    'assets/serenity-voyage.html',
+    'assets/diagram/DroidSansFallbackFull.ttf',
+    'assets/diagram/LICENSE-Apache-2.0.txt',
+  ]
   const missing = required.filter((f) => !tarballFiles.includes(f))
   if (missing.length > 0) {
     fail(`tarball 缺必需文件（${missing.join(', ')}）——检查 tsdown.prepare.config.ts 是否构建完整双 bundle，中止发布`, 2)

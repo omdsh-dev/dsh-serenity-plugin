@@ -54,8 +54,12 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
  * v1.33：`logbook` 并入 `trajectory`（10），随后新增 **专属工具 `acc-diag`**（默认对所有
  * CCC 隐藏，只有声明 `exclusiveTools` 的 CCC 可见）⇒ 11。**条件可见不改变"注册"这一事实**：
  * 本常量与清单都列它（与 im-bridge 同规格）。
+ *
+ * v1.51（**D104**）：新增 **`diagram`**（标签源码 → 进程内光栅化成 PNG；**缺省关**，
+ * 关时连 `ctx.tools.register` 都不调用）⇒ **12**。同规格：开关关着**不影响这里列它** ——
+ * 本常量描述的是"插件**具备**的工具面"，不是"此刻注册了几个"。
  */
 export const REGISTERED_TOOLS = [
   'container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
-  'localstore', 'container_admin', 'im-bridge', 'acc-diag',
+  'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram',
 ] as const

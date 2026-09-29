@@ -53,6 +53,9 @@ export interface SerenitySimpleWire {
   /** **无人值守代理回复总开关**（2026-09-23 新增）：会话被 LLM 主动停下且无人应答时，
    *  由 ACC 注入一次"代理用户"的结构化回复，以验证码作合法收束判据（缺省**关**） */
   unattendedEnabled?: boolean
+  /** **diagram 工具总开关**（2026-09-29 owner 具名令 D104）：agent 给一段标签式源码，
+   *  进程内光栅化成 PNG 并贴进对话（**不借浏览器**；实验性 demo，缺省**关**） */
+  diagramEnabled?: boolean
 }
 
 /** 本 section 的注入面（apply 闭包提供表单源与写回调；组件**不含**任何订阅机制） */
@@ -197,6 +200,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const publicAskOn = value?.publicAskEnabled ?? false
   const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
   const unattendedOn = value?.unattendedEnabled ?? false // 缺省关（与 schema 一致）
+  const diagramOn = value?.diagramEnabled ?? false // 缺省关（与 schema 一致；D104）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
   const [openGateway, setOpenGateway] = useState(false)
@@ -206,6 +210,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openPublicAsk, setOpenPublicAsk] = useState(false)
   const [openCro, setOpenCro] = useState(false)
   const [openUnattended, setOpenUnattended] = useState(false)
+  const [openDiagram, setOpenDiagram] = useState(false)
 
   return (
     <div className="ss-section">
@@ -427,7 +432,36 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
       </Group>
 
-      {/* 彩蛋 persona（无顶层 plugin 开关——独立配置块，保留折叠） */}
+      {/* 工具（D104，2026-09-29 owner 具名令）：图（diagram）—— 实验性 demo，默认关；
+          关时工具**根本不注册**（模型看不到它），开时 agent 给源码即出图 */}
+      <Group title="工具">
+        <li>
+          <RowCard
+            title="图（diagram）"
+            desc="agent 给一段标签式源码，进程内直接画出 PNG 并贴进对话（不借浏览器；默认关）"
+            expandable
+            open={openDiagram}
+            onToggle={setOpenDiagram}
+            control={<Toggle checked={diagramOn} onChange={(on) => toggle('diagramEnabled', on)} />}
+            detail={
+              <div className="ss-detailStack">
+                <p className="ss-detailIntro">{'图（diagram 工具）\n' +
+                  '· 作用：agent 给一段**标签式源码**（<diagram> 根 ＋ <rect>/<arrow>/<text>/<color>/<legend>），\n' +
+                  '  由 ACC **在进程内**画成图并贴进对话 —— 不启浏览器、不截图\n' +
+                  '· 产物：图进对话记录（可回看、可被后续轮次引用、可转微信）；同时落两份文件在容器的\n' +
+                  '  _tmp/diagram/（.svg 可读可改 ／ .png 是进对话的那份）\n' +
+                  '· 自带体检：重叠块 ／ 标签溢出 ／ 悬空端点 ／ 线压字，四条**只告警不拦图**；\n' +
+                  '  写错的图元被跳过并逐条报错，其余照画\n' +
+                  '· 中文能画：字体**随插件内置**（约 3.8 MB）—— 光栅化引擎看不见系统字体，只能喂内置的\n' +
+                  '· 默认关：它是 owner 要的 demo 功能；**关着的时候工具根本不注册**（模型看不到它，不占上下文）\n' +
+                  '· 图要贴进对话有个前提：**当前模型路由要声明收图像输入**。没声明时图照样画、照样落盘，\n' +
+                  '  回执里写明原因并给路径（同「读图」工具的门）'}
+                </p>
+              </div>
+            }
+          />
+        </li>
+      </Group>
       <Collapse title="彩蛋模式" desc="persona 输出风格（默认关闭）">
         <PersonaEditor />
       </Collapse>

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { verifyToolConsistency, REGISTERED_TOOLS } from '../src/invariant.js'
 
 describe('invariant: 清单与注册工具一致性', () => {
-  it('一致时零问题（11 工具，与 dsh.plugin.json contributes.tools 一致）', () => {
+  it('一致时零问题（12 工具，与 dsh.plugin.json contributes.tools 一致）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'inv-'))
     const manifest = join(dir, 'dsh.plugin.json')
     writeFileSync(
@@ -14,7 +14,7 @@ describe('invariant: 清单与注册工具一致性', () => {
       JSON.stringify({
         id: 'x',
         contributes: {
-          tools: ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'im-bridge', 'acc-diag'],
+          tools: ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram'],
         },
       }),
     )
@@ -22,8 +22,8 @@ describe('invariant: 清单与注册工具一致性', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('REGISTERED_TOOLS 含 11 工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并与专属工具）', () => {
-    expect(REGISTERED_TOOLS).toHaveLength(11)
+  it('REGISTERED_TOOLS 含 12 工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并与专属工具 + v1.51 diagram）', () => {
+    expect(REGISTERED_TOOLS).toHaveLength(12)
     expect(REGISTERED_TOOLS).toContain('container_fs')
     expect(REGISTERED_TOOLS).toContain('container_admin')
     expect(REGISTERED_TOOLS).toContain('container_trajectory')

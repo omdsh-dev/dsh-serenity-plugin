@@ -37,8 +37,9 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
 
 import { Config } from '../src/index.ts'
 
-/** 设置面板层（扁平键）——**用户能在界面上改的九个字段**（= 必须 volatile 的那批）
- *  🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）⇒ 十个 → 九个 */
+/** 设置面板层（扁平键）——**用户能在界面上改的十个字段**（= 必须 volatile 的那批）
+ *  🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）⇒ 十个 → 九个
+ *  🔴 v1.51（D104）：新增 `diagramEnabled`（图工具总闸，缺省关）⇒ 九个 → 十个 */
 const PANEL_KEYS = [
   'gatewayEnabled',
   'rebuildThresholdK',
@@ -49,10 +50,13 @@ const PANEL_KEYS = [
   'publicAskEnabled',
   'croEnabled',
   'unattendedEnabled',
+  'diagramEnabled',
 ] as const
 
-/** 部署层（嵌套段）——**不是**用户可改字段，与面板层是同一份数据的两种拼写 */
-const DEPLOY_KEYS = ['gateway', 'rebuild', 'skiff', 'acp'] as const
+/** 部署层（嵌套段）——**不是**用户可改字段，与面板层是同一份数据的两种拼写
+ *  🔴 v1.51（D104）：新增 `diagram`（缺省关）。**它必须在这里被钉住"不标 volatile"**：
+ *  同义键两端都标 ⇒ 面板出现两个互相打架的控件。 */
+const DEPLOY_KEYS = ['gateway', 'rebuild', 'skiff', 'acp', 'diagram'] as const
 
 /** 取 schema 字典里的一个字段（`z.object` 的 dict；读不到 ⇒ undefined） */
 function field(key: string) {

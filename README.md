@@ -65,7 +65,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 
 ## 3. 装完之后你多了什么
 
-### 3.1 十一个工具（其中两个按条件出现）
+### 3.1 十二个工具（其中三个按条件出现）
 
 | 工具 | 干什么 | 什么时候用 |
 |---|---|---|
@@ -80,6 +80,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具、改配置时 |
 | `im-bridge` | 给 IM 联系人发消息（目前是微信）：发文本、发文件、查已配置联系人、查通道状态。每次成功发送自动进工作区的消息记录 | 想让 AI 主动给家人/同事发消息（见 §6.6）。**只在工作区配了微信桥时才出现**，且只能发本工作区的消息 |
 | `acc-diag` | ACC 运行态诊断：一次调用出全报告——当前有多少会话活着、各自属于哪个工作区、唤醒时钟的武装态与 tick 次数、唤醒登记表的每一条（含状态 / 投递结果 / 补跑窗口） | **ACC 维护者专用**。**默认对所有工作区隐藏**，只有在工作区配置里点名（`exclusiveTools`）才出现 |
+| `diagram` | 画图：AI 给一段**标签式源码**（`<diagram>` 根 ＋ `<rect>` / `<arrow>` / `<text>` / `<color>` / `<legend>`），插件**在进程内**把它画成 PNG 并贴进对话——**不启浏览器、不截图**。同时落一份 `.svg`（可读可改）与一份 `.png` 在工作区的 `_tmp/diagram/`。自带四项体检（块重叠 / 标签溢出 / 悬空端点 / 线压字），**只告警不拦图**；写错的图元被跳过并逐条报错，其余照画 | 想把关系图/示意图直接放进对话时。**实验性 demo，默认关**：关着的时候这个工具**根本不注册**（AI 看不到它，不占上下文）；开关在设置面板「工具」组。中文能画，是因为字体**随插件内置**（约 3.8 MB） |
 
 > **改过名**（旧名已彻底停用，没有兼容别名）：下面每组的箭头链是**逐个发布版本**的名字，**末项才是今名**——`cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook`（v1.30/1.31）→ `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名） · `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理）· `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory`（v1.32）→ **`container_trajectory`**（v1.34，今名）。老会话里看到旧名，**一律取所在那一组的末项**。
 
@@ -379,7 +380,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 | 跑在 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
-| 工具 | msm / container_fs / logbook 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin ＋ 两个条件出现的（`im-bridge` / `acc-diag`） |
+| 工具 | msm / container_fs / logbook 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin ＋ 三个条件出现的（`im-bridge` / `acc-diag` / `diagram`） |
 
 **同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
 差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。

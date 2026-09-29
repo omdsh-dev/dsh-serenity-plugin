@@ -67,6 +67,8 @@ interface SimpleConfigFragment {
   skiff?: { enabled?: boolean; debugPort?: number }
   /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
   acp?: { enabled?: boolean; httpPort?: number }
+  /** diagram（实验性 demo；2026-09-29 owner 具名令 D104）：标签源码 → 进程内出图（不借浏览器） */
+  diagram?: { enabled?: boolean }
   /** human-channel（人机信道；**机器级**；2026-09-26 owner 定案）：账号 ／ 订阅表 ／ 主控 ／ 出站白名单 */
   humanChannel?: HumanChannelConfigFragment
   // ── 面板层（扁平键；无默认值 ⇒ "未设置"可观测；**0.1.7 起运行期是 `Volatile<T>` 包装**）──
@@ -80,6 +82,7 @@ interface SimpleConfigFragment {
   publicAskEnabled?: PanelBoolean
   croEnabled?: PanelBoolean
   unattendedEnabled?: PanelBoolean
+  diagramEnabled?: PanelBoolean
 }
 
 /**
@@ -126,6 +129,15 @@ interface SerenitySimpleSettings {
    *  —— 原"任何自排唤醒都排除"会让本机制永远够不着靠续接绳活着的维护会话；改窄后
    *  **自排绳不再排除**，绳退化为**长周期保险丝**）。设计全文见 S142 的 **D77**。 */
   unattendedEnabled: boolean
+  /** **diagram 工具总开关**（2026-09-29 owner 具名令 **D104**；**缺省关**）。
+   *
+   *  开启后：ACC 注册 `diagram` 工具 —— agent **直接给一段标签格式源码**，进程内
+   *  `parseDsl → renderDsl（SVG ＋ 四项体检）→ resvg-wasm 光栅化（内置字体）→ PNG`，
+   *  产物落 CCC `_tmp/diagram/` 且**图片块进对话**（**不借浏览器、不截图**）。
+   *  **缺省关**：owner 口中的"demo 功能" ⇒ 关时**不注册**（工具不进模型工具清单：
+   *  零 token、不会被误调），同 `skiff`／`acp` 的"未开启零资源占用"口径。
+   *  依赖面：随包分发 3.8 MB 内置字体（`assets/diagram/`，wasm 对系统字体不可见）。 */
+  diagramEnabled: boolean
   /** **human-channel（人机信道）机器级配置**（2026-09-26 owner 定案；P0-1 立 schema ＋ 投影）。
    *  三张表（账号 ／ 订阅 ／ 主控）＋ 出站白名单；**跨 CCC** ⇒ 归机器级，CCC 侧 `weixin.*` 随之退役
    *  （退役动作在 P0-2~P0-4；本版**只立机器级面**，旧面照旧）。缺省与归一规则见
@@ -145,6 +157,7 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     publicAskEnabled: false,
     croEnabled: true,
     unattendedEnabled: false,
+    diagramEnabled: false,
     humanChannel: defaultHumanChannelSettings(),
   }
 }
@@ -304,6 +317,7 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
     publicAskEnabled: unwrapVolatile(config.publicAskEnabled) ?? d.publicAskEnabled,
     croEnabled: unwrapVolatile(config.croEnabled) ?? d.croEnabled,
     unattendedEnabled: unwrapVolatile(config.unattendedEnabled) ?? d.unattendedEnabled,
+    diagramEnabled: unwrapVolatile(config.diagramEnabled) ?? config.diagram?.enabled ?? d.diagramEnabled,
     // human-channel（机器级）：结构化表**不经 volatile**（volatile 是面板层开关的约定）
     humanChannel: humanChannelSettingsFromConfig(config.humanChannel),
   }

@@ -127,6 +127,21 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('acc-diag')
   })
 
+  it('🆕 D104：diagram 工具按开关注册 —— 关（缺省）时**不注册**，开时成为第 12 个', () => {
+    // 关（= 本文件的 FULL_CONFIG 不带 diagramEnabled）
+    const off = mockCtx()
+    apply(off.ctx, FULL_CONFIG)
+    const offNames = off.register.mock.calls.map((c) => (c[0] as { name: string }).name)
+    expect(offNames).not.toContain('diagram')
+    expect(off.register).toHaveBeenCalledTimes(11)
+    // 开 ⇒ **多一个**（不是"多注册一遍全部"：总数为 12 才算对）
+    const on = mockCtx()
+    apply(on.ctx, { ...FULL_CONFIG, diagramEnabled: true } as Config)
+    const onNames = on.register.mock.calls.map((c) => (c[0] as { name: string }).name)
+    expect(onNames).toContain('diagram')
+    expect(on.register).toHaveBeenCalledTimes(12)
+  })
+
   it('apply 订阅拦截缝：tools/pre-execute + guard', () => {
     const { ctx, on, guard } = mockCtx()
     apply(ctx, FULL_CONFIG)
