@@ -30,7 +30,14 @@
           - id: MiniMax-M3
             contextWindow: 1024000
             maxTokens: 64000
-            input: []
+            # 🔴 v1.51.1 修正（**保真度**，不是放宽判据）：原为 `input: []` —— 那等于把这条路由
+            #    声明成"**不收图**"，于是 `diagram` 只可能走**降级落盘**分支、"图进对话"这一格
+            #    **结构性验不到**（实测：工具如实回「当前模型路由未声明图像输入」并把 PNG 落盘）。
+            #    而本机真实路由（`minimax-cn` 的 MiniMax-M3）声明的是 `[text, image]` ⇒ 容器里也该一致，
+            #    否则测试台验的是一个**线上不存在的形态**。
+            input:
+              - text
+              - image
             compat: {}
         retryPolicy:
           mode: normal
@@ -39,3 +46,15 @@
   config:
     provider: minimax-bench
     model: MiniMax-M3
+
+# ── 第三条目（v1.51.1）：把 diagram 工具**打开** ──────────────────────────────
+# 为什么必须在这里开（而不是等容器里的模型去拨面板）：`diagram` 是**缺省关**的实验性工具，
+# 关时**不注册** ⇒ 容器里根本没有这个工具，V10~V14 全部无从谈起。
+# 🔴 patch 语义 = **按 id 整体替换该条目 config**（不深合并）⇒ 没写的字段回落到 schema 缺省，
+#    与"完全没有这个条目"等价 ⇒ 只写我们要改的那一个键即可。
+# 🔴 这一条同时**顺带验了 v1.51.1 的部署层通路**：开关经 `readSimpleSettings()` 读
+#    （优先级 面板层 > 部署层 > 内建缺省），而"宿主写配置要不要重启才生效"正是本版修的缺陷。
+- id: serenity-hooks
+  name: "@shgroup/dsh-serenity-hooks"
+  config:
+    diagramEnabled: true

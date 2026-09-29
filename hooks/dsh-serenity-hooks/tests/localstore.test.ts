@@ -179,9 +179,15 @@ describe('localstore: runLocalStore 入口', () => {
   })
 
   it('show 对凭据只返回元数据（无值）', () => {
-    writeEntry(dir, 'credential', 'SECRET_X', 'v1')
+    // 🔴 哨兵值必须**不可能出现在路径里**（S142 v1.51.1 修的一处**假红**）：
+    //    旧版哨兵是 `'v1'`（两字符），而 `show` 的返回体含 `path` =
+    //    `<dir>/localstore.json`，其中 `<dir>` 是 `mkdtempSync('localstore-')` 的**随机后缀**。
+    //    实测撞上一次：临时目录名 `localstore-nv1jgH` 里带 `v1` ⇒ 断言
+    //    `not.toContain('v1')` **假红**（被测行为完全正确）。
+    //    ⇒ 判据纪律「读数器本身要先证明不瞎」：**断言里的哨兵不能与"无关字段的取值空间"重叠**。
+    writeEntry(dir, 'credential', 'SECRET_X', 'sentinel-top-secret-9z')
     const r = runLocalStore(dir, { action: 'show', name: 'SECRET_X' }) as { exists: boolean }
     expect(r.exists).toBe(true)
-    expect(JSON.stringify(r)).not.toContain('v1')
+    expect(JSON.stringify(r)).not.toContain('sentinel-top-secret-9z')
   })
 })

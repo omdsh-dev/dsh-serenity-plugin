@@ -10,13 +10,20 @@
  *   ⇒ **wasm 对系统字体完全不可见**。只有 `fontBuffers` 才画得出字。
  *   ⇒ 顺带白拿一个好处：**输出与机器无关**（同一份内置字体 ⇒ 逐字节可复现，S↑ 稳定）。
  *
- * 字体资产随包分发：`assets/diagram/DroidSansFallbackFull.ttf`（3.8 MB，Apache-2.0，含许可证与出处）。
+ * 字体资产随包分发（三个，各有各的覆盖，见 `fonts.ts` 的表）：汉字 3.8 MB（Apache-2.0）／
+ * 拉丁 0.5 MB（OFL-1.1）／符号 0.75 MB（DejaVu 许可证），各自带许可证与出处。
  */
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { initWasm, Resvg } from '@resvg/resvg-wasm'
+import {
+  DIAGRAM_CJK_FONT_ASSET,
+  DIAGRAM_CJK_FONT_FAMILY,
+  DIAGRAM_LATIN_FONT_ASSET,
+  DIAGRAM_SYMBOL_FONT_ASSET,
+} from './fonts.js'
 
 /**
  * 包根 = **向上找到含 `package.json` 的那一级**。
@@ -37,23 +44,38 @@ function packageRootPath(): string {
   return join(start, '..')
 }
 
-/** 字体资产相对包根的路径（**必须同时出现在 package.json 的 files 白名单里**，pack-check 会核对） */
-export const DIAGRAM_FONT_ASSET = 'assets/diagram/DroidSansFallbackFull.ttf'
+/** 汉字字型资产（相对包根的路径）——**必须出现在 package.json 的 files 白名单里**（pack-check 会核对） */
+export const DIAGRAM_FONT_ASSET = DIAGRAM_CJK_FONT_ASSET
+/** 拉丁字型资产（v1.51.1 新增：CJK 字型**不含拉丁** ⇒ 只带一个时英文字母全渲染成方框） */
+export const DIAGRAM_FONT_ASSET_LATIN = DIAGRAM_LATIN_FONT_ASSET
+/** 符号字型资产（v1.51.1 新增：前两个**都没有** `① ② ③` ／ `⇒` ／ `→` 的字形 ⇒ 只带前两个时它们仍是方框） */
+export const DIAGRAM_FONT_ASSET_SYMBOL = DIAGRAM_SYMBOL_FONT_ASSET
 
-/** 字体绝对路径（导出以便测试与 pack-check 共用同一判据来源） */
+/** 汉字字型绝对路径（导出以便测试与 pack-check 共用同一判据来源） */
 export function diagramFontPath(): string {
-  return join(packageRootPath(), DIAGRAM_FONT_ASSET)
+  return join(packageRootPath(), DIAGRAM_CJK_FONT_ASSET)
+}
+
+/** 拉丁字型绝对路径 */
+export function diagramLatinFontPath(): string {
+  return join(packageRootPath(), DIAGRAM_LATIN_FONT_ASSET)
+}
+
+/** 符号字型绝对路径 */
+export function diagramSymbolFontPath(): string {
+  return join(packageRootPath(), DIAGRAM_SYMBOL_FONT_ASSET)
 }
 
 /**
- * 内置字体的族名。SVG 里声明的 `Noto Sans CJK SC` ／ `Source Han Sans SC` ／ `Microsoft YaHei`
- * 在本机**一个都不存在**（本机 CJK 覆盖只有 AR PL UMing ＋ Droid Sans Fallback）
- * ⇒ 光栅化时必须由这里兜底，否则中文会退化成缺字方框。
+ * 兜底字型的族名 = **汉字字型**（本工具的图以中文为主）。
+ * 两个内置字型的家族名与 CSS 家族栈统一定义在 `fonts.ts`（单一真相源），此处只透出兜底那一个。
  */
-export const DIAGRAM_FONT_FAMILY = 'Droid Sans Fallback'
+export const DIAGRAM_FONT_FAMILY = DIAGRAM_CJK_FONT_FAMILY
 
 let wasmReady: Promise<void> | null = null
 let fontBuf: Uint8Array | null = null
+let latinBuf: Uint8Array | null = null
+let symbolBuf: Uint8Array | null = null
 
 /**
  * wasm 模块路径：**先解析 JS 入口再取同目录的 `.wasm`**。
@@ -81,10 +103,20 @@ function ensureReady(): Promise<void> {
   return wasmReady
 }
 
-/** 字体只读一次（3.8 MB，进程内缓存） */
+/** 三个字型各只读一次（3.8 MB ＋ 0.5 MB ＋ 0.75 MB，进程内缓存） */
 function fontBuffer(): Uint8Array {
   if (fontBuf === null) fontBuf = readFileSync(diagramFontPath())
   return fontBuf
+}
+
+function latinFontBuffer(): Uint8Array {
+  if (latinBuf === null) latinBuf = readFileSync(diagramLatinFontPath())
+  return latinBuf
+}
+
+function symbolFontBuffer(): Uint8Array {
+  if (symbolBuf === null) symbolBuf = readFileSync(diagramSymbolFontPath())
+  return symbolBuf
 }
 
 export interface RasterResult {
@@ -107,7 +139,9 @@ export async function rasterizeSvg(svg: string, width: number): Promise<RasterRe
   const r = new Resvg(svg, {
     fitTo: { mode: 'width', value: width },
     font: {
-      fontBuffers: [fontBuffer()],
+      // 🔴 **三个都要给**（顺序 = 回退顺序）：拉丁走 Noto，符号落 DejaVu，汉字到 Droid。
+      //    少给一个的实测后果：v1.51.0 只带 CJK ⇒ 图里 `diagram`／`①`／`·` 全是方框。
+      fontBuffers: [latinFontBuffer(), symbolFontBuffer(), fontBuffer()],
       loadSystemFonts: false,
       defaultFontFamily: DIAGRAM_FONT_FAMILY,
     },
@@ -117,10 +151,12 @@ export async function rasterizeSvg(svg: string, width: number): Promise<RasterRe
   return { png, width: img.width, height: img.height, ms: Date.now() - t0 }
 }
 
-/** 测试用：清本模块的缓存（**字体缓冲 + 就绪 promise**）。
+/** 测试用：清本模块的缓存（**三个字体缓冲 + 就绪 promise**）。
  *  ⚠️ **wasm 本身无法"重置"**（`initWasm` 进程级一次性）⇒ 清掉后下一次 `rasterizeSvg`
  *  会**重新走一遍 init 并命中共用态**（"already initialized" 由 `ensureReady` 吞掉）。 */
 export function resetRasterCache(): void {
   wasmReady = null
   fontBuf = null
+  latinBuf = null
+  symbolBuf = null
 }

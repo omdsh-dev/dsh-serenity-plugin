@@ -74,8 +74,21 @@ function lineAt(src: string, idx: number): number {
 export function parseDsl(source: string): DslParse {
   const src = stripComments(source)
   const errors: string[] = []
+  /**
+   * 🔴 **默认坐标系 = 画布像素、y 向下**（v1.51.1 修的真缺陷，见下）。
+   *
+   * v1.51.0 的默认值是从旧 mini-SVG 移植时**原样带过来**的：`0~100 × −19~72 且 y 向上`
+   * —— 而工具描述里**只写了 `box="x0,y0,x1,y1"`，没写量程与单位**。
+   * 模型按常识写画布像素（`box="100,100,400,200"`）⇒ 渲染器把它塞进那个 100 宽的域里
+   * ⇒ **所有坐标飞出画布**（实测 SVG：`x=990 y=-919 w=2940`），而 `errors`／`lint` **全空**
+   * ⇒ 图是空白却一声不吭，模型只能反复试错（owner 实测「别的 CCC 根本用不起来」的根因）。
+   *
+   * ⇒ 现在：**默认域 = `0,0,width,height`**（`width/height` 未写时 1000×780）⇒ 1 单位 ≈ 1 像素量级，
+   * `y` 越大越靠下（`dsl-render.ts` 的 `py()` 同批改成 y 向下）。
+   * `domain="x0,y0,x1,y1"` 仍然保留 —— 需要"数学式坐标窗口"时显式写它（**y 也向下**，口径只有一种）。
+   */
   const model: DslModel = {
-    W: 1000, H: 780, x0: 0, y0: -19, x1: 100, y1: 72, pad: 10,
+    W: 1000, H: 780, x0: 0, y0: 0, x1: 1000, y1: 780, pad: 10,
     title: '', subtitle: '', colors: {},
     rects: [], segments: [], texts: [] }
   const ids = new Set<string>()
@@ -165,6 +178,12 @@ export function parseDsl(source: string): DslParse {
           model.x1 = d.x1
           model.y1 = d.y1
         } else fail(tagIndex, ln, `domain 不是 4 个数字：${attrs.domain}（已忽略）`)
+      } else {
+        // 未写 domain ⇒ **域 = 画布**（1 单位 ≈ 1 像素；y 向下）。见本函数开头那段"默认坐标系"说明。
+        model.x0 = 0
+        model.y0 = 0
+        model.x1 = model.W
+        model.y1 = model.H
       }
       continue
     }
@@ -203,7 +222,10 @@ export function parseDsl(source: string): DslParse {
         continue
       }
       const label = attrs.label
-      const id = attrs.id || label || `rect${rectOrdinal}`
+      // 🔴 `name=` 也是 id 的来源（v1.51.1）：模型天然会写 `<rect name="A">`（HTML/SVG 习惯），
+      //    而 v1.51.0 只认 `id=` ⇒ 落到 `label` 兜底 ⇒ 锚点 `A.e` 解析不了，
+      //    且报错会把**整串 label**当 id 打出来（owner 那个会话里刷了一屏）。
+      const id = attrs.id || attrs.name || label || `rect${rectOrdinal}`
       if (ids.has(id)) {
         fail(tagIndex, ln, `rect id 重复：${id}`)
         continue
@@ -245,7 +267,11 @@ export function parseDsl(source: string): DslParse {
         continue
       }
       const al = attrs.align
-      const align: DslText['align'] = al === 'center' || al === 'right' ? al : 'left'
+      // 两种词表都收（`left/center/right` 是 DSL 词表；`start/middle/end` 是 SVG 原词）
+      const align: DslText['align'] =
+        al === 'center' || al === 'middle' ? 'center'
+          : al === 'right' || al === 'end' ? 'right'
+            : 'left'
       const t: DslText = { x, y, text: content, align, size: num(attrs.size) ?? 12.5, ln }
       if (attrs.color !== undefined) t.color = attrs.color
       model.texts.push(t)

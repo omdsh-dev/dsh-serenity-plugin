@@ -41,7 +41,7 @@ import { hostSessions, hostWebServer } from './host/access.js'
 import { hostContractReport, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './status.js'
 import { readSkiffRoles } from './skiff-role.js'
-import { registerSettingsSection, readSimpleSettings } from './settings-section.js'
+import { registerSettingsSection, readSimpleSettings, SERENITY_SETTINGS_NS } from './settings-section.js'
 import { registerGateway } from './gateway.js'
 import { registerRebuildTurnHook } from './rebuild.js'
 import { registerOutputGuardHook } from './output-guard-seam.js'
@@ -530,19 +530,59 @@ export function apply(ctx: Context, config: Config): void {
  * 归属与边界（E↑）：**机制归 ACC**（工具面 ＋ 开关 ＋ 光栅化），**图的语义归调用方**
  * （标签语法与四项体检在 `src/diagram/`，权威设计 = 插件仓 `docs/diagram-tool-feasibility.md`）。
  *
- * 🔴 **两条被实测钉住的接线前提**（改这里之前先读）：
- *  ① 必须**晚于** `registerSettingsSection`（开关值经 `readSimpleSettings()`，源在那里接上）；
- *  ② 注册失败**不得**成为启动单点（同 `hostContractReport` 的口径），但要**响亮**——
- *     静默失败会让"拨了开关没反应"看起来像开关坏了（判据：**失败必须可见**）。
+ * 🔴 **v1.51.1 修的真缺陷（owner 实测：「我把开关开了，工具没出来」）**：
+ * 面板拨开关**只改配置、不重跑 `apply`**（铁证 = 插件重启才刷新"武装于"；`cordis.patch.yml` 里
+ * `diagramEnabled: true` 已落盘而工具没注册）⇒ 旧实现"apply 时判一次"等于**开关要重启才生效**。
+ * ⇒ 现在改成**反应式**：
+ *   ① 听宿主的**真事件** `settings/document-updated`（ns = 我们那张设置页）——顺带说明为什么不用
+ *      我们自己的 `serenity/settings-changed`：那个事件**全仓没有任何 `emit` 点**（只有 `ctx.on` 侧
+ *      在用）＝**死通道**，照着它接线等于接了个永远不响的铃；
+ *   ② 兜底再挂 `agent/created` ／ `session/created`（与 skiff／acp 同款做法，那两条在实测里确实会 fire）
+ *      —— 宿主事件面若换名，至少还有这一条能自愈；
+ *   ③ 启动时同步一次（apply 时按当前配置定初始态）。
+ * 🔴 **关的时候要注销**（不是"留着但不响应"）：与"关时不注册"同一口径 —— 工具不出现在模型清单里。
  * @param ctx - 插件上下文
  */
 function registerDiagramTool(ctx: Context): void {
-  if (!readSimpleSettings().diagramEnabled) return
-  try {
-    ctx.tools.register(createDiagramTool(ctx))
-  } catch (err) {
-    console.error(`[serenity-hooks] ✗ diagram 工具注册失败: ${String((err as Error)?.message ?? err)}`)
+  /** 当前注册的 disposer（`null` = 未注册）。宿主 `ctx.tools.register` **返回注销器**。 */
+  let dispose: (() => void) | null = null
+
+  const sync = (): void => {
+    const on = readSimpleSettings().diagramEnabled
+    if (on && dispose === null) {
+      try {
+        dispose = ctx.tools.register(createDiagramTool(ctx))
+      } catch (err) {
+        // 注册失败**不得**成为启动单点；但要**响亮**——静默失败会让"拨了开关没反应"看起来像开关坏了
+        console.error(`[serenity-hooks] ✗ diagram 工具注册失败: ${String((err as Error)?.message ?? err)}`)
+      }
+      return
+    }
+    if (!on && dispose !== null) {
+      try {
+        dispose()
+      } catch {
+        /* 注销失败不阻断（插件重启会收） */
+      }
+      dispose = null
+    }
   }
+
+  try {
+    ctx.on('settings/document-updated', (ns: unknown) => {
+      if (String(ns) === SERENITY_SETTINGS_NS) sync()
+    })
+  } catch {
+    /* 事件通道缺失不阻断（下面还有兜底与启动那次） */
+  }
+  for (const eventName of ['agent/created', 'session/created'] as const) {
+    try {
+      ctx.on(eventName, () => { sync() })
+    } catch {
+      /* 同上 */
+    }
+  }
+  sync()
 }
 
 /**

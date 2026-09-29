@@ -1,4 +1,5 @@
 import type { DslModel } from './dsl.js'
+import { DIAGRAM_FONT_STACK } from './fonts.js'
 
 export interface DslRender {
   svg: string
@@ -144,7 +145,16 @@ export function renderDsl(model: DslModel): DslRender {
   const scaleX = (W - 2 * pad) / (x1 - x0 || 1)
   const scaleY = (H - TITLE_BAND - pad) / (y1 - y0 || 1)
   const px = (x: number): number => r2(pad + (x - x0) * scaleX)
-  const py = (y: number): number => r2(TITLE_BAND + (y1 - y) * scaleY)
+  // 🔴 **y 向下**（v1.51.1）：与 `dsl.ts` 的默认域（画布像素）同批改 ——
+  //    旧的 `y1 - y` 是"数学坐标系（y 向上）"的写法，与模型/人类的画布直觉相反。
+  const py = (y: number): number => r2(TITLE_BAND + (y - y0) * scaleY)
+
+  /** 绘图窗口 = 声明的域（默认就是画布）。出窗口的图元**报错并跳过**，不静默画到看不见的地方。 */
+  const tolX = Math.abs(x1 - x0) * 0.01
+  const tolY = Math.abs(y1 - y0) * 0.01
+  const outside = (x: number, y: number): boolean =>
+    x < x0 - tolX || x > x1 + tolX || y < y0 - tolY || y > y1 + tolY
+  const windowText = `坐标窗口 x ${r2(x0)}..${r2(x1)} ／ y ${r2(y0)}..${r2(y1)}（y 向下；不写 domain 时＝画布）`
 
   // 锚点：`x,y` 数字对 或 `<id>.<n|s|e|w|c|ne|nw|se|sw>[±dx,±dy]`
   const resolve = (token: unknown): Pt | null => {
@@ -162,8 +172,9 @@ export function renderDsl(model: DslModel): DslRender {
     const cx = (rx0 + rx1) / 2
     const cy = (ry0 + ry1) / 2
     const table: Record<string, [number, number]> = {
-      n: [cx, ry1], s: [cx, ry0], e: [rx1, cy], w: [rx0, cy], c: [cx, cy],
-      ne: [rx1, ry1], nw: [rx0, ry1], se: [rx1, ry0], sw: [rx0, ry0]
+      // 🔴 y 向下（v1.51.1）：north = **y 最小**的那条边（= 视觉上的上边），south = y 最大
+      n: [cx, ry0], s: [cx, ry1], e: [rx1, cy], w: [rx0, cy], c: [cx, cy],
+      ne: [rx1, ry0], nw: [rx0, ry0], se: [rx1, ry1], sw: [rx0, ry1]
     }
     const base = table[mt[2] ?? '']
     if (!base) return null
@@ -194,7 +205,7 @@ export function renderDsl(model: DslModel): DslRender {
   const textEls: string[] = [], legendEls: string[] = [], l3: string[] = [], l4: string[] = []
   let marks = 0
 
-  headEls.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="-apple-system, 'Noto Sans CJK SC', 'Source Han Sans SC', 'Microsoft YaHei', sans-serif">`)
+  headEls.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="${DIAGRAM_FONT_STACK}">`)
   headEls.push(`<rect width="${W}" height="${H}" fill="#fbfaf7"/>`)
   marks += 2
   if (m.title) headEls.push(`<text x="10" y="34" font-size="21" font-weight="bold" fill="#111">${esc(m.title)}</text>`)
@@ -203,10 +214,17 @@ export function renderDsl(model: DslModel): DslRender {
   if (m.subtitle) marks += 1
 
   for (const r of rects) {
+    // 🔴 出窗口 ⇒ **报错并跳过**（v1.51.1 新增；owner 实测里正是"整片坐标飞出画布而一声不吭"
+    //    导致模型反复试错 ⇒ 判据：**静默的空白是最坏的失败形态**，宁可少画一个也要出声）
+    if (outside(n(r.x0, 0), n(r.y0, 0)) || outside(n(r.x1, 0), n(r.y1, 0))) {
+      errors.push(`矩形「${r.label ?? r.id}」在绘图窗口外：box=${r2(n(r.x0, 0))},${r2(n(r.y0, 0))},${r2(n(r.x1, 0))},${r2(n(r.y1, 0))} ／ ${windowText} ⇒ 该图元已跳过`)
+      continue
+    }
+    // y 向下（v1.51.1）：**y0 是上边**、y1 是下边
     const X = px(n(r.x0, 0))
-    const Y = py(n(r.y1, 0))
+    const Y = py(n(r.y0, 0))
     const bw = r2(px(n(r.x1, 0)) - X)
-    const bh = r2(py(n(r.y0, 0)) - Y)
+    const bh = r2(py(n(r.y1, 0)) - Y)
     rectEls.push(`<rect x="${X}" y="${Y}" width="${bw}" height="${bh}" rx="2" fill="${esc(col(r.color, DEF_FILL))}" stroke="#ffffff" stroke-width="1.5"/>`)
     marks += 1
     if (!r.label) continue
@@ -223,7 +241,15 @@ export function renderDsl(model: DslModel): DslRender {
     const b = resolve(s.to)
     if (!a || !b) {
       const bad = !a ? s.from : s.to
-      errors.push(`第 ${lineNo(s, i)} 行 ${kind}：锚点引用解析不了（${esc(bad)}）；已知 id = ${ids.join('、')} ⇒ 该图元已跳过`)
+      // 🔴 错误里**只列真正的 id**，且**限量**（v1.51.1）：v1.51.0 会把整串 label 当 id 打出来，
+      //    owner 那个会话里刷了一屏（`rect` 缺 id 时 id 回落到 label ⇒ 报错信息爆炸）。
+      const shown = ids.slice(0, 8).join('、')
+      errors.push(`第 ${lineNo(s, i)} 行 ${kind}：锚点引用解析不了（${esc(bad)}）；已知 id = ${shown}${ids.length > 8 ? ` …（共 ${ids.length} 个）` : ''}；rect 要能被引用请写 id="…"（name="…" 亦可）⇒ 该图元已跳过`)
+      continue
+    }
+    // 出窗口的线同样**报错并跳过**（半截线画到画布外只会让人误判）
+    if (outside(a.x, a.y) || outside(b.x, b.y)) {
+      errors.push(`第 ${lineNo(s, i)} 行 ${kind}：端点在绘图窗口外 (${r2(a.x)},${r2(a.y)})→(${r2(b.x)},${r2(b.y)}) ／ ${windowText} ⇒ 该图元已跳过`)
       continue
     }
     const X0 = px(a.x)
@@ -264,20 +290,29 @@ export function renderDsl(model: DslModel): DslRender {
   }
 
   for (const t of texts) {
-    const anchor = t.anchor === 'start' || t.anchor === 'end' ? t.anchor : 'middle'
+    if (outside(n(t.x, 0), n(t.y, 0))) {
+      errors.push(`文字「${t.text}」在绘图窗口外：(x ${r2(n(t.x, 0))}, y ${r2(n(t.y, 0))}) ／ ${windowText} ⇒ 该图元已跳过`)
+      continue
+    }
+    // 🔴 `align` 词表对齐（v1.51.1）：DSL 产出的词是 `left/center/right`，而 v1.51.0 这里只认
+    //    `start/end` ⇒ **三种取值全落进 `middle`**（即"写了 left/right 也没用，一律居中"）。
+    const anchor = t.anchor === 'left' || t.anchor === 'start' ? 'start'
+      : t.anchor === 'right' || t.anchor === 'end' ? 'end'
+        : 'middle'
     textEls.push(`<text x="${px(n(t.x, 0))}" y="${py(n(t.y, 0))}" font-size="${n(t.size, DEF_SIZE)}" fill="${esc(col(t.color, '#4a4a4a'))}" text-anchor="${anchor}" dominant-baseline="middle">${esc(t.text)}</text>`)
     marks += 1
   }
 
   if (m.legend) {
     const size = n(m.legend.size, DEF_SIZE)
-    const LX = r2(n(m.legend.x, 0))
-    const LY = r2(n(m.legend.y, 0))
-    legendEls.push(`<text x="${LX}" y="${LY}" font-size="${size + 1}" font-weight="bold" fill="#333">阵营</text>`)
-    marks += 1
+    // 🔴 坐标改成**域单位**（v1.51.1）：v1.51.0 这里直接当 px 用 ⇒ rect/text 用域、legend 用 px，
+    //    两套坐标混在一张图里（写对了也别扭，写错了没人告诉你）。
+    const LX = px(n(m.legend.x, 0))
+    const LY = py(n(m.legend.y, 0))
+    // 标题不再硬编码（v1.51.0 写死"阵营"，对多数图都是错的话）；只画色块 ＋ 色名
     const entries = Object.entries(colors)
     for (let i = 0; i < entries.length; i++) {
-      const row = LY + 20 + i * (size + 6)
+      const row = LY + i * (size + 6)
       legendEls.push(`<rect x="${LX}" y="${r2(row - 8)}" width="12" height="12" rx="2" fill="${esc(entries[i]![1])}"/>`)
       legendEls.push(`<text x="${r2(LX + 18)}" y="${r2(row)}" font-size="${size}" fill="#333" dominant-baseline="middle">${esc(entries[i]![0])}</text>`)
       marks += 2

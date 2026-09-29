@@ -59,16 +59,52 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
 }))
 
 import { name, inject, apply, type Config } from '../src/index.ts'
+import { __setSimpleSourceForTest, defaultSimpleSettings, SERENITY_SETTINGS_NS } from '../src/settings-section.js'
 
+/**
+ * 宿主替身。
+ * 🔴 `disposers` 必须逐次收好：宿主 `tools.register` **返回注销器**，而"关开关 ⇒ 注销"这条
+ *    需求的**唯一可观察效果**就是这个返回的函数被调用（`register` 的调用次数只会增加）。
+ */
 function mockCtx() {
-  const register = vi.fn(() => () => {})
+  const disposers: Array<ReturnType<typeof vi.fn>> = []
+  const register = vi.fn(() => {
+    const d = vi.fn()
+    disposers.push(d)
+    return d
+  })
   const guard = vi.fn()
   const on = vi.fn()
   // v1.30.8（review F-08）：宿主 Context 有 ctx.effect（rc.1 全量使用，如 core/tools/src/index.ts:943）
   // ——替身必须保真，否则 lifecycle 装配在测试里被误判为"缺失"（E-01 同族：替身不镜像宿主）。
   const effect = vi.fn(() => () => {})
   const ctx = { tools: { register, guard }, on, effect } as any
-  return { ctx, register, guard, on, effect }
+  return { ctx, register, guard, on, effect, disposers }
+}
+
+/** 该替身上被注册过的工具名（按注册顺序） */
+function registeredNames(register: ReturnType<typeof mockCtx>['register']): string[] {
+  return register.mock.calls.map((c) => (c[0] as { name: string }).name)
+}
+
+/**
+ * 派发一条宿主事件。
+ * 🔴 必须**广播给该事件的所有监听器**（宿主就是这么做的）：同一个事件名上还挂着
+ *    `opencode-provider` ／ `deepseek-vision-patch` ／ `weixin-bridge` 的监听器 ⇒
+ *    只挑"第一条"会让本用例取决于注册顺序（一个与需求无关的偶然量）。
+ * ⚠️ 无关监听器抛错**吞掉**：本替身不是真宿主（没有 `ctx.settings` 等面），它们抛的是
+ *    "替身不够保真"，与被测行为无关；被测行为由**断言**（注册了没有／注销器调没调）承载，
+ *    我们的监听器若自己抛错，断言照样会红 ⇒ 吞掉不损失信号。
+ */
+function emit(ctx: { on: ReturnType<typeof vi.fn> }, event: string, ...args: unknown[]): void {
+  for (const c of ctx.on.mock.calls) {
+    if (c[0] !== event) continue
+    try {
+      ;(c[1] as (...a: unknown[]) => void)(...args)
+    } catch {
+      /* 无关监听器（见上） */
+    }
+  }
 }
 
 const FULL_CONFIG: Config = {
@@ -140,6 +176,54 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     const onNames = on.register.mock.calls.map((c) => (c[0] as { name: string }).name)
     expect(onNames).toContain('diagram')
     expect(on.register).toHaveBeenCalledTimes(12)
+  })
+
+  /**
+   * 🔴 v1.51.1 回归钉：**面板拨开关热生效**（owner 实测「我把开关开了，工具没出来」）。
+   *
+   * 根因（已复现）：宿主写配置**不重跑 `apply`**（铁证 = 插件重启才刷新"武装于"；
+   * `cordis.patch.yml` 里 `diagramEnabled: true` 已落盘而工具没注册）⇒ 旧实现"apply 时判一次"
+   * 等于**开关要重启才生效**。修法 = 听宿主的真事件 `settings/document-updated` ＋ 兜底事件，
+   * 且**关的时候要注销**（不是"留着不响应"）。
+   *
+   * 本用例把这三件事钉死：① 拨开 ⇒ 当场注册；② 拨回 ⇒ **注销器被调用**；
+   * ③ **别的命名空间**的写入不得把工具打出来（漏掉 ns 过滤会变成"任何设置写入都注册一次"）。
+   */
+  it('🆕 v1.51.1：diagram 开关**热生效** —— 拨开/拨回都当场生效，且只认本插件的命名空间', () => {
+    const cfg: Config = { ...FULL_CONFIG, diagramEnabled: false }
+    const { ctx, register, on, disposers } = mockCtx()
+    apply(ctx, cfg)
+    expect(registeredNames(register)).not.toContain('diagram') // 初始：关
+
+    // 宿主写了一份**新配置**（真宿主 = 换 `fiber.config`；本替身无 fiber ⇒ 源 = 我们注入的这份）
+    let enabled = false
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), diagramEnabled: enabled }))
+    try {
+      // ③ 负控先行：**别的**命名空间写入 ⇒ 不得注册（ns 过滤若丢了，本条即红）
+      emit(ctx, 'settings/document-updated', 'llm-pi-ai', 1)
+      expect(registeredNames(register)).not.toContain('diagram')
+
+      // ① 拨开 ⇒ 宿主发 settings/document-updated（ns = 我们那张设置页）⇒ 当场注册
+      enabled = true
+      emit(ctx, 'settings/document-updated', SERENITY_SETTINGS_NS, 2)
+      expect(registeredNames(register)).toContain('diagram')
+      expect(register).toHaveBeenCalledTimes(12) // 只多这一个，不是"重注册一遍全部"
+
+      // ② 拨回 ⇒ **注销**（工具从模型工具清单里消失，不是"留着但不响应"）
+      const idx = registeredNames(register).indexOf('diagram')
+      expect(disposers[idx]).toHaveBeenCalledTimes(0)
+      enabled = false
+      emit(ctx, 'settings/document-updated', SERENITY_SETTINGS_NS, 3)
+      expect(disposers[idx]).toHaveBeenCalledTimes(1)
+
+      // ①b 兜底通道：宿主事件面若换名，`session/created` 仍能把开关的最新值同步过来
+      enabled = true
+      emit(ctx, 'session/created')
+      expect(registeredNames(register)).toHaveLength(13) // 再一次注册（前一次已注销）⇒ 第二次同名注册
+      expect(disposers[12]).not.toBe(disposers[idx])
+    } finally {
+      __setSimpleSourceForTest(null) // 模块级源必须复位（跨用例泄漏会让别处的门控判据失真）
+    }
   })
 
   it('apply 订阅拦截缝：tools/pre-execute + guard', () => {

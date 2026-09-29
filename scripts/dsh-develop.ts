@@ -511,6 +511,13 @@ function verifyTarball(): void {
     'assets/serenity-voyage.html',
     'assets/diagram/DroidSansFallbackFull.ttf',
     'assets/diagram/LICENSE-Apache-2.0.txt',
+    // v1.51.1：补拉丁字型（CJK 字型**不含拉丁** ⇒ 只带一个时英文字母全渲染成方框）
+    'assets/diagram/NotoSans-Regular.ttf',
+    'assets/diagram/LICENSE-OFL-1.1.txt',
+    // v1.51.1（续，D108）：再补**符号**字型 —— 视觉取证显示前两个**都没有** `①`／`⇒`／`→` 的字形，
+    //    只带前两个时它们仍是方框（DejaVu 的许可证与 Apache/OFL 不同 ⇒ 必须单独随包）。
+    'assets/diagram/DejaVuSans.ttf',
+    'assets/diagram/LICENSE-DejaVu.txt',
   ]
   const missing = required.filter((f) => !tarballFiles.includes(f))
   if (missing.length > 0) {

@@ -252,6 +252,75 @@ else
   check V9d "profile patch 已落地（sha 记录在 + 路由名命中）" 1 "无 $LOG/profile-patch.sha256 ⇒ entrypoint 没收到 PROFILE_PATCH（默认模型仍是镜像内的）"
 fi
 
+# ── V10~V14 🔴 v1.51.1：diagram 工具**在真实宿主里端到端能用**（owner 具名令「去 docker 验」）──
+# 为什么这一组单测替代不了：单测验的是**函数**；这里验的是
+# **开关落地 → 工具注册 → 模型自己选用 → 图进对话 → 不落文件 → 写错坐标响亮报错** 整条链在真宿主机里的形态。
+# owner 报的那个缺陷（"别的 CCC 根本用不起来、难度太高"）**只在整链上才看得见**：
+# 单测里坐标怎么算都对，而模型按常识写的"画布像素"在那个（已废弃的）默认域里全部飞出画布，
+# 渲染器一声不吭 ⇒ 模型只能反复试错。
+#
+# 🔵 判据形态**全部取自实测样本**（2026-09-29 容器内两条真实轮，本文件的判据不是猜的）：
+#   · 工具调用  = 事件 `"type":"tool/call"` 且同行含 `"name":"diagram"`
+#   · 成功结果  = 同一行含 `图已生成` ＋ `体检干净`，且**不含** `源码错误`
+#   · 图片块    = `{"type":"image","attachment":{"mediaType":"image/png","bytes":…,"width":…,"height":…}}`
+#   · 越界报错  = `在绘图窗口外：box=…` ＋ `坐标窗口 x … ／ y …（y 向下；不写 domain 时＝画布）`
+#   · 降级落盘  = `已降级落盘：`（模型路由不收图时的兜底分支，**正常路径不该出现**）
+#
+# 🔴 前置：本组要求容器里**真的跑过带图请求的真实轮**（`bench-docker turn`，见本文件顶部说明）。
+#    没跑过 ⇒ 全组红，detail 会直说"先 turn" —— "没验"不能长得像"过了"。
+DIAG_OUT_DIR=${DIAG_OUT_DIR:-/ccc/_tmp/diagram}
+
+# V10 装配面：开关真的落到了部署层（少了它，容器里工具**根本不注册** ⇒ 后面全组无从谈起）
+if grep -q 'diagramEnabled: true' /root/.dsh/profiles/web/cordis.patch.yml 2>/dev/null; then
+  check V10 "diagram 开关落在部署层（profile patch）" 0 "profile patch 含 diagramEnabled: true"
+else
+  check V10 "diagram 开关落在部署层（profile patch）" 1 \
+    "profile patch 里没有 diagramEnabled: true ⇒ 工具**关着**（关时不注册），后面几条必然全红"
+fi
+
+if command -v zstd >/dev/null 2>&1; then
+  d_calls=0; d_ok=0; d_img=0; d_err=0; d_degrade=0; d_imgdesc="(无)"
+  for f in $(find "$sessdir" -name 'session.v*.jsonl.zstd' 2>/dev/null); do
+    d=$(zstd -dc "$f" 2>/dev/null || true)
+    d_calls=$((d_calls + $(printf '%s' "$d" | grep '"type":"tool/call"' | grep -c '"name":"diagram"' || true)))
+    d_ok=$((d_ok + $(printf '%s' "$d" | grep '"type":"tool/result"' | grep '图已生成' | grep '体检干净' | grep -vc '源码错误' || true)))
+    d_img=$((d_img + $(printf '%s' "$d" | grep '"type":"tool/result"' | grep -c '"mediaType":"image/png"' || true)))
+    d_err=$((d_err + $(printf '%s' "$d" | grep -c '在绘图窗口外：box=' || true)))
+    d_degrade=$((d_degrade + $(printf '%s' "$d" | grep -c '已降级落盘：' || true)))
+    one=$(printf '%s' "$d" | grep -o '"mediaType":"image/png","bytes":[0-9]*,"width":[0-9]*,"height":[0-9]*' | tail -1)
+    [ -n "$one" ] && d_imgdesc="$one"
+  done
+
+  check V11 "模型**自己**选用了 diagram（真实轮里有该工具调用）" \
+    "$([ "${d_calls:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "工具调用 ${d_calls:-0} 次（0 = 没跑过图相关的真实轮 ⇒ 先 bench-docker turn；或工具没注册）"
+
+  check V12 "零文档的自然语言请求 ⇒ **首次出正确图**（结果含「图已生成」＋「体检干净」，且无「源码错误」）" \
+    "$([ "${d_ok:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "无错出图 ${d_ok:-0} 次 / 越界报错 ${d_err:-0} 次（判据 = 模型没看过任何文档、直接写画布像素坐标）"
+
+  check V13 "图**真进了对话**（工具结果里有 image/png 附件块）" \
+    "$([ "${d_img:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "图片块 ${d_img:-0} 个；末次 $d_imgdesc"
+
+  # 🔴 V14 与 V13 **成对读**：图没进对话时"没落文件"不成立 —— 那时走的是**降级落盘**分支
+  #   （v1.51.0 实测见过：模型路由未声明 image 输入 ⇒ 工具如实说明并把 PNG 落盘）。
+  #   ⇒ 只有"图进了对话 ∧ 无降级 ∧ 盘上无 PNG"三条同时成立，才是"正常路径不落文件"。
+  diag_files=$(find "$DIAG_OUT_DIR" -name '*.png' 2>/dev/null | wc -l | tr -d ' ')
+  d_nofile=1
+  [ "${d_img:-0}" -gt 0 ] && [ "${d_degrade:-0}" -eq 0 ] && [ "${diag_files:-0}" -eq 0 ] && d_nofile=0
+  check V14 "正常路径**不落文件**（图进对话 ∧ 无降级 ∧ \$CCC/_tmp/diagram 无 PNG）" "$d_nofile" \
+    "图片块 ${d_img:-0} / 降级落盘 ${d_degrade:-0} / 落盘 PNG ${diag_files:-0} 个（三者要一起看）"
+
+  check V15 "写错坐标 ⇒ **响亮报错**（越界图元报「在绘图窗口外」并跳过，不再静默出空白图）" \
+    "$([ "${d_err:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "越界报错 ${d_err:-0} 次（0 = 没跑过那条「照抄越界坐标」的轮，或静默空白图又回来了）"
+else
+  for id in V11 V12 V13 V14 V15; do
+    check "$id" "diagram 端到端（读数器缺失）" 1 "🔴 镜像里没有 zstd CLI ⇒ 读不到会话日志"
+  done
+fi
+
 # ── 汇总 ──
 echo "═══ 运行态验收（宿主 ${EXPECT_DSH:-?} ／ 期望 ACC ${EXPECT_ACC:-?}）═══"
 for r in "${ROWS[@]}"; do IFS='|' read -r st_ id label extra <<<"$r"; printf '%-4s %-4s %-42s %s\n' "$st_" "$id" "$label" "$extra"; done
