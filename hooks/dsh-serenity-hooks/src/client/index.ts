@@ -25,6 +25,14 @@ import type {} from '@deepseek-ai/dsh-client-ui-session'
 // v1.28.0 适配 0.1.2-rc.1（A1 补充）：官方 feature 插件经 ui-renderer/client 类型 import
 // 获得 Context.slots 等 client 面声明合并（原 dsh-client-runtime 包提供；rc.1 已删）。
 import type {} from '@deepseek-ai/dsh-client-ui-renderer'
+// 🆕 v1.51.2：`tool.call.toolview` 这个 SlotMap 条目**由宿主包 ui-tool 声明**（模块增强）
+// ⇒ 必须**真的把它 import 进来**。🔴 只加 devDependency ＋ `paths` 条目**不够**：
+//    `paths` 只是一张映射表，**没有任何 import 时那个 `.d.ts` 根本不进本程序**
+//    ⇒ 增强不生效、`slots.register({name:'tool.call.toolview'})` 被判"不在 SlotMap"
+//    （2026-09-29 实测：TS2344 ＋ TS2769，槽名被列进一串它不认识的名字里 —— 这条错误正是
+//      "接了真契约"才暴露出来的；本地 `declare module` 那版会把这个事实**盖住**）。
+// 走**公开包入口**（`/client`），不是宿主内部实现路径（§2.4-1 禁止后者）。
+import type {} from '@deepseek-ai/dsh-client-ui-tool/client'
 // v1.28.0 适配 0.1.2-rc.1（A1）：dsh-client-runtime 包已删 →
 // ClientContext 用官方同款 `Context as ClientContext` from '@deepseek-ai/cordis'。
 // 🔴 v1.47 适配 0.1.7-rc.1：`SettingsScope`/`SettingsScopeSpec` 与 `settingsScope` 服务**已从
@@ -38,6 +46,7 @@ import { uploadImage, getDraftFiles, resendText } from './image-fallback-api.js'
 import { FileFallbackDock, FileFallbackInjected } from './FileFallbackDock.js'
 import { uploadFile } from './file-fallback-api.js'
 import { SettingsSection, SettingsSectionInjected, SerenitySimpleWire } from './SettingsSection.js'
+import { DiagramToolView } from './DiagramToolView.js'
 
 export const inject = ['slots', 'conversation', 'sessions', 'configForms']
 
@@ -123,6 +132,21 @@ export function apply(ctx: ClientContext): void {
           ),
         ),
       'serenity: simple settings section',
+    )
+
+    // v1.51.2 diagram 图片行（Chat 视图）：`diagram` 的结果是 `[text 信封, image 图块]`，
+    // 但宿主只有内建 `read_image` 声明了 durable 图片画廊（子槽 `tool.call.images`），
+    // 未注册的 Tool 名落通用行 ⇒ 只 flatten 成文字、**图不出现**。
+    // 🔴 **本条目刻意不声明任何子槽**：子槽「恰好一个条目声明」——再声明一个 `tool.call.images`
+    //    **加载即抛**（宿主 `dsh-client-ui-tool` 槽契约原话）。故本行自己用 owner 交来的
+    //    `loadImage` 取图渲染（见 `DiagramToolView.tsx` 文件头）。
+    // `slots.inject` 而非直接 register：该槽归宿主 `ui-tool` 所有，可能后于本插件装上。
+    scope.effect(
+      () =>
+        scope.slots.inject('tool.call.toolview', () =>
+          scope.slots.register({ name: 'tool.call.toolview', key: 'diagram' }, DiagramToolView),
+        ),
+      'serenity: diagram tool view',
     )
   })
 }

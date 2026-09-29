@@ -321,6 +321,32 @@ else
   done
 fi
 
+# ── V16 🔴 v1.51.2：**客户端半真的装上了**（`diagram` 的 Chat 渲染面）──
+# 为什么必须有这条：v1.51.1 之前，`diagram` 的图在 **Chat** 里看不见、只在**轨迹**里看得见 ——
+# 根因是宿主 Chat 的图片画廊走子槽 `tool.call.images`，而那个子槽**只允许一个声明者**
+# （已被宿主内置 `read_image` 占住）⇒ 我们的图落进通用行，只剩扁平文本。
+# 修法 = 本插件 **client 半**注册自己的 keyed tool view（`tool.call.toolview` key=`diagram`），
+# 用 owner 载荷的 `loadImage` 自己渲染 ⇒ **这条链路只存在于客户端 bundle 里**，
+# node 半与服务端日志**都看不见它** ⇒ 必须直接对**装进容器的那份 bundle**取证。
+#
+# ⚠️ **证据等级要说清**（判据纪律：别把"交付层"当"渲染层"）：
+#   ✅ 它证明：客户端半装上了，且那段注册语句**在 bundle 里**
+#   ❌ 它**不**证明：浏览器真把图画出来了 —— 那要真浏览器元素级（同 V8b/V8c 的分档）
+DIAG_CLIENT=/root/.dsh/profiles/web/node_modules/@shgroup/dsh-serenity-hooks/lib/client.js
+if [ -s "$DIAG_CLIENT" ]; then
+  dreg=$(grep -c 'tool\.call\.toolview' "$DIAG_CLIENT" 2>/dev/null || true)
+  dkey=$(grep -c 'key: "diagram"' "$DIAG_CLIENT" 2>/dev/null || true)
+  # 🔴 反向判据：**不许**声明子槽 `tool.call.images` —— 契约里「一个子槽只有一个声明者」，
+  #    声明了会在**插件装载期直接抛错**（不是渲染丑，是起不来）。
+  dchild=$(grep -c 'tool\.call\.images' "$DIAG_CLIENT" 2>/dev/null || true)
+  check V16 "客户端半已装：diagram 的 Chat tool view 注册在 bundle 里（且未声明子槽）" \
+    "$([ "${dreg:-0}" -gt 0 ] && [ "${dkey:-0}" -gt 0 ] && [ "${dchild:-0}" -eq 0 ] && echo 0 || echo 1)" \
+    "tool.call.toolview ${dreg:-0} 处 / key: diagram ${dkey:-0} 处 / 违规声明子槽 ${dchild:-0} 处（须为 0）"
+else
+  check V16 "客户端半已装：diagram 的 Chat tool view 注册在 bundle 里（且未声明子槽）" 1 \
+    "读不到 $DIAG_CLIENT（插件没装进 profile？）"
+fi
+
 # ── 汇总 ──
 echo "═══ 运行态验收（宿主 ${EXPECT_DSH:-?} ／ 期望 ACC ${EXPECT_ACC:-?}）═══"
 for r in "${ROWS[@]}"; do IFS='|' read -r st_ id label extra <<<"$r"; printf '%-4s %-4s %-42s %s\n' "$st_" "$id" "$label" "$extra"; done

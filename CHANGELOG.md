@@ -1,3 +1,83 @@
+## v1.51.2 — 2026-09-30（🔴 **`diagram` 的图在「会话」里内联显示** —— 补上 v1.51.1 漏掉的那半个缺陷）
+
+**来源**：owner 2026-09-29 装完 v1.51.1 **当场实测打回半条** ——「图片生成了、效果也不错，
+**但我在会话中看不到，要跑到轨迹才能看到**」。⇒ 裁 **A33 = A**（本插件 **client 侧**给 `diagram`
+注册自己的工具视图），并附一条**长期纪律**：「**后面 dsh 升级都要单独检查这个依赖是否还稳定**」。
+
+---
+
+### 一、🔴 根因（读到宿主代码，不是推断）：图片画廊是个**只能有一个声明者**的子槽
+
+Chat 里工具卡片的图片画廊走**子槽** `tool.call.images`，而全仓**只有一个条目声明了它** ——
+宿主内建的 `read_image` 行（`dsh-client-ui-tool` 的 `readImageToolview`，`key:"read_image"`）。
+⇒ **第三方工具返回的图片块在 Chat 里结构性进不了画廊**，落通用行 ⇒ 只把结果 flatten 成文字。
+轨迹视图走的是**另一条**槽（`conversation.trajectory.images`）⇒ 所以那边一直看得见。
+
+🔴 **⇒ v1.51.1 那条「正常路径不落文件」的前提是错的**：它默认"图片块进了对话"就等于"人能看见"。
+本版不推翻那条令（仍不落文件），而是把**看不见**这件事本身修掉。
+
+### 二、修法：走契约自己指的第二条路（**不是**照抄 `read_image`）
+
+宿主槽契约原文（`dsh-client-ui-tool/lib/types/client/contract/slots.d.ts`）：
+
+> *"A child slot is declared by exactly one entry: registering a second toolview that declares
+> the same child **throws at load**, so a future image-bearing tool must **reuse this entry or
+> own a distinct slot**."*
+
+⇒ 照抄 `read_image` 的写法（声明同一个子槽）**会在插件装载期直接抛错**（整个 client half 起不来）。
+改走 **keyed tool view**：`slots.inject('tool.call.toolview', …)` ＋
+`slots.register({ name: 'tool.call.toolview', key: 'diagram' }, DiagramToolView)`，
+**不声明任何子槽**，并用 owner 载荷里的 `loadImage`（会话授权的耐久图片 loader；`peek` 命中则
+不发起读取）自己渲染 `<img>`。
+
+| 新增 | 职责 |
+|---|---|
+| `src/client/DiagramToolView.tsx` | 三阶段分流（只有 `result` 才取图）；图 ＋ 信封文字；加载失败落错误态、**不抛上 React 树** |
+| `src/client/diagram-result.ts` | 纯派生模型（无 React）：`title` ／ `text` ／ `image` ／ `isError`。**绝不 flatten** `block.content`（否则图片下面会印出原始 attachment 对象）；类型取自**真定义处** |
+| `src/client/DiagramToolView.css` | 只用官方 `--dsw-alias-*` 令牌（跟随主题） |
+
+### 三、🔴 类型面：接**真契约**，不再在本地抄一份
+
+原先那版用本地 `declare module '@deepseek-ai/dsh-client-ui-slots'` **抄一份**槽形状让注册编译通过
+—— 那正是本仓 F7 要防的**假绿**：拿不到真契约时照样编译，且把"宿主槽契约变了"变成**我们不知道**。
+现改为**真包**，**三件齐**：
+
+1. `devDependencies` 钉 `@deepseek-ai/dsh-client-ui-tool@0.1.7-rc.1`；
+2. `client/tsconfig.json` 的 `paths` 加**同一条目**（F7 要求两件成对）；
+3. **并且**在 `src/client/index.ts` 写一行 `import type {} from '@deepseek-ai/dsh-client-ui-tool/client'`
+   （走**公开包入口**，不是宿主内部实现路径）。
+
+🔴 **只加前两件不够**：`paths` 只是一张**映射表** —— 没有任何 import 时那个 `.d.ts`
+**根本不进本程序** ⇒ 模块增强（`SlotMap`）不生效 ⇒ 注册被判"槽名不在 SlotMap"
+（实测 **TS2344 ＋ TS2769**）。**三件齐了才叫"对着真宿主类型编译"**；已写进
+`docs/dsp-top-level-constraints.md` **§2.5.1**（连带明令禁止本地 `declare module` 抄形状）。
+
+**读数**：`typecheck-host 0.2.0-rc.1` ⇒ client 半 **paths 15 条全中 ／ 载入 132 个文件**（原 14 ／ 129）
+⇒ owner 那条「DSH 升级必查该依赖」在**类型面**已机械化；**语义面**（那个槽的**声明者**是谁、
+我们要用的 `key` 有没有被占、`loadImage` 的**行为**是否仍如文档）类型抓不住 ⇒ 按 §2.5.1 **两档**
+在升级时人工逐条对。
+
+### 四、回归钉（防"加载即抛"与"静默丢图"）
+
+- `tests/diagram-toolview.test.ts`（30 条）两段：① 纯派生逻辑真值测试（降级／畸形输入**一律不抛**）；
+  ② **注册形态守卫**（读源码、**先剥注释**）——**不得**出现被 `read_image` 独占的子槽名、
+  **不得**带 `children:` 声明、**不得**再出现本地 `declare module`、注册键必须
+  `tool.call.toolview` ＋ `key: 'diagram'`；正控钉 `PropsRuntime<'tool.call.toolview'>`
+  （证明判据本身不瞎，且钉的串**只在正文出现**）。
+- `bench/verify.sh` **V16**（装进容器的 `lib/client.js` 里**有注册语句** ∧ **未声明子槽**）
+  ＋ 新永久门 `tests/bench-verify-shape.test.ts`（`bash -n` 语法门 ＋ V10~V16 的 id／形态在场）。
+
+### 五、门禁与已知边界
+
+六项全绿：`typecheck` ✓ ｜ `typecheck-host 0.2.0-rc.1` ✓（node 114 文件 ／ client 15 paths·132 文件）｜
+`test` ✓（**156 files ／ 2628 tests**）｜ `coverage` ✓（语句 **28011/28507 = 98.26%** ／ 分支
+6380/7062 = 90.34% ／ 函数 980/985 = 99.49%）｜ `build` ✓ ｜ `pack-check` ✓（131 文件）。
+
+⚠️ **诚实边界**：本仓 client 单测跑在 **node**（无 DOM）⇒ 本版测的是"**从结果里挑什么**"与
+"**注册形态**"两类可测的东西；**"图真的渲染出来了"只能靠真浏览器看**（同一份会话，改动前后各看一次）。
+
+---
+
 ## v1.51.1 — 2026-09-29（🔴 **`diagram` 的「第一次就能用」修复** ＋ 开关热生效 ＋ 三个内置字型）
 
 **来源**：owner 2026-09-29 实测反馈 ——「**别的 CCC 根本用不起来，难度太高**」＋「这个 diagram 生成文件

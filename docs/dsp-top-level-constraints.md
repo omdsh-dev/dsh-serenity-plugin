@@ -99,6 +99,44 @@ dsp 是 **DSH（DeepSeek Harness）运行时的 ACC 实现**：一个把"认知�
 
 `src/client/` 跑在**浏览器**里，它引用的是**宿主客户端契约**（`configForms` / `slots` / RPC），**不能**被 `src/host/` 的 node 侧类型覆盖 ⇒ 它**豁免 I2 的字面 grep 判据**，但必须满足：① 客户端对宿主的接触点收敛在 `src/client/host-type-contract.ts` ＋ `index.ts` ② 由 `typecheck-host` 的 **client 半**把关（与 node 半分开跑）。
 
+#### 2.5.1 🔴 客户端**槽 API** 是"会被占住"的耦合面（2026-09-29 实测，S142）
+
+**事实（读到宿主契约文件，不是推断）**：`tool.call.images`（Chat 里工具卡片渲染耐久图片的那个子槽）
+**只允许一个声明者**。契约原文：
+
+> *"A child slot is declared by exactly one entry: registering a second toolview that declares the same
+> child **throws at load**, so a future image-bearing tool must **reuse this entry or own a distinct slot**."*
+
+而那个槽已被宿主内置的 `read_image` 工具视图占住（`dsh-client-ui-tool` 的 `readImageToolview`，
+`key: "read_image"`）⇒ **第三方工具照抄 `read_image` 的写法会在插件装载期直接抛错**。
+
+**本案的合规做法**（= 契约自己给的第二条路）：注册**自己的 keyed tool view**
+（`slots.register({ name:'tool.call.toolview', key:'<工具名>' }, Row)`），并且**用 owner 载荷里的
+`loadImage`**（`ToolCallCommonProps.loadImage`，会话授权的耐久图片 loader）自己渲染
+—— **不声明任何子槽**，因此不撞"一个子槽只有一个声明者"。
+
+> 🔴 **接真契约要三件齐（2026-09-30 实测踩到，缺一即假绿）**：
+> ① `hook` 的 `devDependencies` 钉该宿主包的一个**基准版本**（`@deepseek-ai/dsh-client-ui-tool@0.1.7-rc.1`）；
+> ② `client/tsconfig.json` 的 `paths` 加**同一条目**（F7 要求 devDep 与 paths **成对**）；
+> ③ **并且在该半的某个文件里写一行真 `import type {} from '@deepseek-ai/dsh-client-ui-tool/client'`**。
+> 🔴 **③ 最容易被漏**：`paths` 只是一张**映射表** —— 没有任何 import 时那个 `.d.ts`
+> **根本不进本程序**，模块增强（`SlotMap`）不生效 ⇒ `slots.register({ name:'tool.call.toolview' })`
+> 被判"槽名不在 SlotMap"（实测 **TS2344 ＋ TS2769**，槽名被列进一串我们不认识的名字里）。
+> 走**公开包入口**（`/client`），不是宿主内部实现路径（§2.4-1 禁止后者）。
+>
+> ⛔ **禁止**在本地 `declare module '@deepseek-ai/dsh-client-ui-slots'` **抄一份**槽形状当兜底：
+> 那让"拿不到真契约"时照样编译通过（= **F7 要防的假绿**），并把"宿主槽契约变了"
+> 变成**我们不知道**。接真包之后，宿主升级时的类型面漂移才由 `typecheck-host <ver>` 自动抓住。
+
+> 🔴 **纪律（owner 2026-09-29 具名）**：**DSH 每一次升级，都要单独检查这条依赖是否还稳定。**
+
+**检查面分两档，别混为一谈**（"能编译"≠"还成立"）：
+
+| 档 | 查什么 | 谁抓 |
+|---|---|---|
+| **类型面** | `tool.call.toolview` 的 kind/scope、`ToolCallOwnerProps` 的字段与 `loadImage` 的类型 | ✅ `typecheck-host <ver>` 的 **client 半**（§2.3 第 2 步） |
+| **语义面** | 那个槽的**声明者**是谁、我们要用的 `key` 有没有被占、`loadImage` 的**行为**是否还如文档所述 | ❌ 类型抓不住 ⇒ **§2.3 第 3 步"契约穷举"时必须逐条对一遍** |
+
 ---
 
 ### 2.6 宿主接触点白名单（**分级**；I2 条款③ 的判据表）
@@ -353,3 +391,5 @@ bump（版本三处一致）→ 门禁七项 → CHANGELOG 条目 → 提交（�
 |---|---|---|
 | 2026-09-25 | 立档（v1.0）：定位／7 条不变量／衔接面细则／六层模型／工程与发布约束／五层测试／演进纪律 | owner 令「做一个能存活很多年的 plugin」＋ 六项工程化要求 |
 | 2026-09-25 | **补 §2.6（宿主接触点白名单，分级 W1/W2/W3/豁免）＋ §2.7（I2 收敛清单实测快照）**；I2 的验收栏改指这两节 | 🔴 **修悬空引用**：I2 条款③ 原文写「见 §2.6」，而本文件**当时没有 §2.6**（§2.5 后直接进 §3）⇒ 声明指向不存在的东西（违反 I7）。同时把 I2 从"一个大数（146 处）"拆成**可逐文件裁决的清单** |
+| 2026-09-29 | **补 §2.5.1（客户端槽 API 是"会被占住"的耦合面 ＋ 升级检查两档）** | owner 令「**后面 DSH 升级都要单独检查这个依赖是否还稳定**」。触发事实：`tool.call.images` 只允许一个声明者且已被宿主内置 `read_image` 占住 ⇒ 第三方工具照抄会**在装载期抛错**（读到契约原文，非推断）；合规路 = 自己的 keyed tool view ＋ owner 的 `loadImage` |
+| 2026-09-30 | **§2.5.1 补"接真契约要三件齐"**（devDep ＋ `paths` ＋ **一行真 import**；并明令禁止本地 `declare module` 抄形状） | 实测：只加 devDep 与 `paths`、**没有 import** 时那个 `.d.ts` **不进 program** ⇒ 模块增强不生效、槽名被判"不在 SlotMap"（TS2344/TS2769）。这条是**一次调试的产物**，不写下来下一个人要重付 |

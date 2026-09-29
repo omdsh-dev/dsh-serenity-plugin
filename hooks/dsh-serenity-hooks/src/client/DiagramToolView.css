@@ -1,0 +1,55 @@
+/*
+ * DiagramToolView.css — `diagram` 工具行（Chat 视图）
+ *
+ * 🔴 只用 design-platform 的**官方** token（`--dsw-alias-*`）。
+ * 自造 token（如 --sp-color / --text-primary）在浅色主题下 var() 永不解析 ⇒ 永远走深色 fallback
+ * ⇒ 黑块 / 黑字（2026-09-04 S142 用户反馈的成因）。`tests/client-css-tokens.test.ts` 机械守卫此约束。
+ * 本文件用到的 5 个 token 均在官方词汇表内：bg-layer-1 / border-l1 /
+ * label-primary / label-secondary / state-error-primary。
+ */
+
+.sp-dgRow {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sp-dgTitle {
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+  word-break: break-word;
+}
+
+.sp-dgHint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* 图自身有像素尺寸；这里只兜住容器宽度（窄屏不溢出）与圆角/描边 */
+.sp-dgImage {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 6px;
+  background: var(--dsw-alias-bg-layer-1);
+}
+
+/* 信封文字：结果原文里的换行是有意排版的（一行一个图元/lint 项）⇒ 保留换行 */
+.sp-dgText {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.sp-dgError {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-state-error-primary);
+}
