@@ -131,6 +131,7 @@ Directory of ACC capabilities — each area lists where to go for details (guide
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
                          CCC 级开关：exclusiveTools（声明专属工具）/ safeMode.blacklist（写路径黑名单）
+                         / safeMode.hiddenTools（**安全模式开启期间**额外隐藏的工具，v1.51.4）
                          CCC 级 skill 供给：trajectory.skills（v1.44.0——**本 CCC 每条轨迹都带**，含 skiff 会话；与轨迹自己的 frontmatter 声明取并集）
 
 每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
@@ -247,11 +248,21 @@ deny 时写入自动确保 .gitignore 含该文件（物理保证），container
   Config:
     { "hooks": { "autoRestoreSession": false } }
 
-── 5. safeMode / blacklist ──
+── 5. safeMode（黑名单 ＋ 开启期间隐藏的工具）──
 safe-mode 由 WebUI 开关控制（写 .serenity-safe-on 标记）；黑名单路径受 guards seam 拦截。
 
+  ▸ blacklist：写路径黑名单（同下 Config）。
+  ▸ hiddenTools（v1.51.4，owner 2026-10-09 令）：**仅在安全模式开启期间**额外从模型工具
+    清单隐藏的工具（ACC 基础表恒隐 bash）。打开 safe-mode 生效、**关掉即全部恢复**；
+    改本键**热生效**（下一个 pre-step 重算，无需重启）。声明在 CCC（D23）——ACC 代码里
+    不出现任何具体工具名。
+    ⚠️ 写一个**本 CCC 未注册**的名字会让**整次 restrict 失败**（DSH 契约逐字："unknown
+    names … fail"）⇒ 此时**退化为只隐藏基础表**并在日志响亮报错（绝不因一个错名丢掉
+    safe-mode 的核心隐藏）。诊断：\`AGENT_SESSIONS/.restrict-diag.json\` 的 \`denyByKey\`。
+    ⚠️ 隐藏 = **从 schema 移除**（agent 根本看不到该工具）⇒ 别把 skill/文档还在教的工具写进来。
+
   Config:
-    { "safeMode": { "blacklist": [".secrets/"] } }
+    { "safeMode": { "blacklist": [".secrets/"], "hiddenTools": ["workflow", "job_kill"] } }
 
 ── 6. skiff.roles（F4 认知子集角色）──
 Skiff 角色 = 全知全能 trajectory 的任意子集（CCC 定义）。每角色独立模型 + 双白名单

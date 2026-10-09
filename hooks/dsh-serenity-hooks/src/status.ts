@@ -119,6 +119,8 @@ interface SerenityStatus {
     lastSuccess: boolean | null
     lastError: string | null
     activeKeys: string[]
+    /** v1.51.4：每个 key **实际生效**的 deny 清单（含 safeMode.hiddenTools 的并集） */
+    denyByKey: Record<string, string[]>
   }
 }
 

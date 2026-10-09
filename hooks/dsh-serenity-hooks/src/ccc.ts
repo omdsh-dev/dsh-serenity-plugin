@@ -122,7 +122,18 @@ interface SerenityConfig {
      */
     sessionMdMaxKB?: number;
   };
-  safeMode?: { blacklist?: string[] };
+  safeMode?: {
+    blacklist?: string[];
+    /**
+     * **安全模式开启期间**额外从模型工具清单隐藏的工具（v1.51.4，owner 2026-10-09 令）。
+     *
+     * 语义（与 `exclusiveTools` 的区别，判据是"条件"）：本键不是无条件的可见性白名单，
+     * 而是**条件屏蔽**——`\.serenity-safe-on` 标记存在时才隐藏，标记消失即**全部恢复**
+     * （基础表恒隐 `bash` 不受影响）。机制在 ACC、声明在 CCC（D23）：
+     * ACC 代码里不出现任何具体工具名。
+     */
+    hiddenTools?: string[];
+  };
   /** localstore git 提交策略（S134 重设计）：allow 可提交 / deny 禁提交（缺省 deny） */
   localstore?: { gitTrack?: 'allow' | 'deny' };
   // 注意：bootstrap 配置段已于 v1.19.5 移除（S142 用户原则——first-anchor 属
@@ -423,6 +434,34 @@ export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SEREN
  */
 export function readExclusiveTools(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
   const list = loadSerenityConfig(root, paths).exclusiveTools;
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((x): x is string => typeof x === 'string' && x.trim() !== '')
+    .map((x) => x.trim());
+}
+
+/**
+ * 读取 CCC 声明的「安全模式期间隐藏的工具」清单（`safeMode.hiddenTools`，v1.51.4）。
+ *
+ * 语义（R↓）：**标记文件存在 ⇒ 才生效**。deny = `['bash', ...本清单]`（并集去重）；
+ * 标记消失 ⇒ 连同 `bash` 一起解除（调用点在 `syncSafeModeRestriction`，与基础表同一处）。
+ *
+ * 失败方向 = **fail-open**（与 `exclusiveTools` 的 fail-closed 相反，理由不同）：
+ * 未配置 / 字段缺失 / 配置损坏 ⇒ **空数组** = 只隐藏基础表。本键是**附加**屏蔽，
+ * 读不到声明就等于"没有证据要求多藏"；且**隐藏是危险方向**（藏掉 agent 真正要用的工具
+ * 会静默损害能力），而配置损坏本身已有 `loadSerenityConfig` 的响亮告警（不静默）。
+ *
+ * 🔴 名字在此**不做**校验——未注册的名字会被 DSH `restrict` 拒绝（宿主契约逐字：
+ * "Empty filters, unknown names, scope-local names, and reserved transport names **fail**"）
+ * ⇒ **调用方必须按"失败退化为基础表"处理**（见 `syncSafeModeRestriction`），
+ * 否则 CCC 写错一个名字会连 `bash` 的隐藏一起丢掉。
+ *
+ * @param root CCC 根
+ * @param paths 候选配置相对路径
+ * @returns 去空白后的工具名列表（非字符串/空白项被丢弃）
+ */
+export function readSafeModeHiddenTools(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
+  const list = loadSerenityConfig(root, paths).safeMode?.hiddenTools;
   if (!Array.isArray(list)) return [];
   return list
     .filter((x): x is string => typeof x === 'string' && x.trim() !== '')

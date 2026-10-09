@@ -1,3 +1,63 @@
+## v1.51.4 — 2026-10-09（**safe mode 期间可关工具**：新增 CCC 级键 `safeMode.hiddenTools`）
+
+**来源**：owner 2026-10-09 —— 先令「dsh 提供的 tool 太多了，**盘点下**，我想**通过 dsp 关掉几个用不上的**，
+**列出来我看看**」，看清单后**点名 7 个**（`exit_plan_mode`／`job_kill`／`subagent_fork`／`job_output`／
+`interrupt_agent`／`workflow`／`job_list`），并补一条**条件**：「我的要求是**开启 safe-mode 情况下**关掉」。
+
+### 一、是什么
+
+新增 **CCC 级键 `safeMode.hiddenTools`**：**仅在安全模式开启期间**额外从模型工具清单隐藏的工具名。
+打开 safe-mode 生效、**关掉即全部恢复**；ACC 基础表（`bash`）恒隐，不受本键影响。改本键**热生效**。
+
+    { "safeMode": { "blacklist": [".secrets/"], "hiddenTools": ["workflow", "job_kill"] } }
+
+🔴 **为什么放 `safeMode` 段而不是顶层 `hiddenTools`**：owner 的条件**就是**本键的语义——它不是
+"这个工具永远不要"，而是"**无人值守时不要**"。放进 `safeMode` 段让"条件"成为**结构**，
+而不是文档里的一句提醒。（顶层无条件键已被本条件排除。）
+
+### 二、机制（复用既有接缝，**零新增缝**）
+
+`syncSafeModeRestriction`（pre-step 每步 ＋ 会话就绪）原本只 `restrict({ deny: ['bash'] })`。
+现在 `deny = 基础表 ∪ CCC 声明`（并集去重），**同一处、同一时机** ⇒ 开／关／**改声明**三种变化都热生效
+（v1.51.4 前只覆盖前两种；"改声明"由本版新增的**签名比对**覆盖）。
+
+### 三、🔴 两条由**宿主契约**逼出来的设计（读 `.d.ts`，非推测）
+
+1. 🔴 **未注册的名字会让整次 `restrict` 失败** —— `@deepseek-ai/dsh-tools` 类型面**逐字**：
+   *"Empty filters, **unknown names**, scope-local names, and reserved transport names **fail**."*
+   ⇒ 若 CCC 写错一个名字而整次调用抛错，**连 `bash` 的隐藏也会一起丢掉**（safe-mode 核心行为回归）。
+   ⇒ 实现为：失败时**退化为基础表** ＋ 响亮报错 ＋ 诊断留痕（并按**期望签名**记账，不每步重试刷屏）。
+   **回归钉** = 对应用例（替身 `restrict` 按该契约抛错）。
+2. **`deny: []` 同样会失败**（同句契约 "Empty filters"）⇒ 本实现**永不发空 deny**。
+
+### 四、失败语义（三处**方向各不相同**，各自写明理由）
+
+| 键 | 读不到判据时 | 为什么是这个方向 |
+|---|---|---|
+| `exclusiveTools` | **fail-closed**（保持隐藏） | 专属工具的**默认态本就是隐藏** |
+| `im-bridge` | **fail-open**（保持可见） | 隐藏一个**已在使用**的通道会静默损害能力 |
+| **`safeMode.hiddenTools`** | **fail-open**（= 只隐基础表） | 本键是**附加**屏蔽；且**隐藏是危险方向**（会藏掉 agent 真正要用的工具）⇒ 读不到声明就没有证据要多藏 |
+
+### 五、诊断与文档
+
+- `AGENT_SESSIONS/.restrict-diag.json` 新增 **`denyByKey`**（每个会话**实际生效**的 deny 清单）⇒
+  "某工具为什么／为什么没被隐藏"可查；`status` API 同步暴露该字段。
+- `container_admin msm ccc-config` §5 改写为「safeMode（黑名单 ＋ 开启期间隐藏的工具）」。
+
+### 六、判据（本轮实测）
+
+- **六项门禁全绿**：`typecheck` ✓｜`typecheck-host 0.2.0-rc.2` ✓（node paths 36 ／ client paths 21，实测载入 114 ／ 169 文件）｜
+  `test` ✓ **157 files ／ 2656 tests**｜`coverage` ✓（阈值语句 60 ／ 分支 55 ／ 函数 55 ／ 行 60）｜
+  `build` ✓（`lib/index.js` ＋ `lib/client.js` **225 459 B**）｜`pack-check` ✓（131 文件；lib/ 117 项）。
+- **新增用例 12 条**（`tests/guards.test.ts`）：**判据三态**（未配置／无该键／非数组 ⇒ `[]`；数组去空白·丢非字符串·保序；
+  **配置损坏 ⇒ `[]`** = fail-open）＋ **行为九条**（只隐基础表／基础表 ∪ 声明／无标记不生效／标记消失解除／
+  同签名幂等／**改声明热重算**／**未注册名 ⇒ 退化为基础表**／退化态不每步重试／非法项与重名过滤）。
+- 🔴 **本轮自己踩的坑（已修，写给下一次）**：`msm-ops.ts` 的 CCC 配置手册是**模板字符串**，插入文本里的
+  反引号**必须转义**。未转义 ⇒ 整个 `src/` 解析失败（全量测试 21 处红），而 `typecheck` 的报错**从模板字符串
+  之后的每一行**开始报 —— 症状与病因相距极远，先怀疑"改动面"会白查一圈。
+
+
+
 ## v1.51.3 — 2026-09-30（**图进「回答」**：本轮尾部内联显示 —— 不落盘、不需地址、不新增存储）
 
 **来源**：owner 2026-09-30 ——「**tool 会折叠**，还是希望**回答能引用这个图**，但又要确保**不存盘**」

@@ -14,7 +14,7 @@ import {
   getExclusiveToolsDiagnostics,
 } from '../src/seams/guards.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im-bridge.js'
-import { readBlacklist, matchBlacklist, pathInside, type BlacklistRule } from '../src/ccc.js'
+import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/ccc.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
 
 let dir: string
@@ -214,33 +214,154 @@ describe('blacklist: 对象条目解析（对齐 osp readBlacklist）', () => {
   })
 })
 
+describe('readSafeModeHiddenTools（判据：fail-open）', () => {
+  function write(cfg: unknown): void {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), typeof cfg === 'string' ? cfg : JSON.stringify(cfg))
+  }
+
+  it('未配置 / 无该键 / 非数组 ⇒ []（不抛）', () => {
+    expect(readSafeModeHiddenTools(dir)).toEqual([])
+    write({ safeMode: {} })
+    expect(readSafeModeHiddenTools(dir)).toEqual([])
+    write({ safeMode: { hiddenTools: 'workflow' } })
+    expect(readSafeModeHiddenTools(dir)).toEqual([])
+  })
+
+  it('读数组 / 去空白 / 丢非字符串 / 保序', () => {
+    write({ safeMode: { hiddenTools: [' workflow ', 42, null, '', 'job_kill'] } })
+    expect(readSafeModeHiddenTools(dir)).toEqual(['workflow', 'job_kill'])
+  })
+
+  it('🔴 配置损坏 ⇒ []（fail-open：隐藏是危险方向，读不到声明就不多藏）', () => {
+    write('{ this is not json')
+    expect(() => readSafeModeHiddenTools(dir)).not.toThrow()
+    expect(readSafeModeHiddenTools(dir)).toEqual([])
+  })
+})
+
 describe('safe-mode 工具隐藏（syncSafeModeRestriction）', () => {
-  it('标记存在 → restrict deny 隐藏写工具；消失 → 解除', () => {
-    // 纯逻辑验证：restrict 的 deny 列表由 SAFE_MODE_DENY_TOOLS 定义
-    // （agent.ctx.tools.restrict 为 DSH 运行时行为，这里验证调用契约）
-    const calls: { on: boolean; deny?: string[] }[] = []
-    const mkAgent = (on: boolean) => {
-      const key = on ? 'k1' : 'k2'
-      return {
-        session: { id: key },
-        ctx: {
-          tools: {
-            restrict: (f: { deny?: string[] }) => {
-              calls.push({ on, deny: f.deny })
-              return () => { calls.push({ on: false }) }
-            },
+  /**
+   * 替身 agent：记录 restrict 调用与 disposer 触发。
+   * `rejectUnknown` 复刻宿主契约——**未注册的工具名会让整次 restrict 失败**
+   * （`dsh-tools` 类型面逐字："Empty filters, unknown names, scope-local names,
+   * and reserved transport names fail"）。
+   */
+  function mkAgent(id: string, opts: { rejectUnknown?: string } = {}) {
+    const calls: { deny?: string[] }[] = []
+    const disposed: string[] = []
+    const agent = {
+      session: { id },
+      ctx: {
+        tools: {
+          restrict: (f: { deny?: string[] }) => {
+            if (opts.rejectUnknown !== undefined && (f.deny ?? []).includes(opts.rejectUnknown)) {
+              throw new Error(`unknown tool: ${opts.rejectUnknown}`)
+            }
+            calls.push(f)
+            return () => { disposed.push((f.deny ?? []).join(',')) }
           },
         },
-      } as any
-    }
-    // 直接验证守卫工具列表不含 bash/write 时的整体语义由运行时保证；
-    // 此处验证 syncSafeModeRestriction 在标记 on 时调用 restrict
+      },
+    } as any
+    return { agent, calls, disposed }
+  }
+
+  function declareHidden(list: unknown): void {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ safeMode: { hiddenTools: list } }))
+  }
+
+  it('未声明 → 只隐藏基础表（bash），write/edit 保留', () => {
     writeFileSync(join(dir, '.serenity-safe-on'), 'x')
-    const agent = mkAgent(true)
-    syncSafeModeRestriction(agent, dir)
-    expect(calls.filter(c => c.on === true)).toHaveLength(1)
-    expect(calls[0]!.deny).toContain('bash')
-    expect(calls[0]!.deny).not.toContain('write') // 只隐藏 bash，write/edit 保留
+    const m = mkAgent('sm-base')
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls).toHaveLength(1)
+    expect(m.calls[0]!.deny).toEqual(['bash'])
+    expect(m.calls[0]!.deny).not.toContain('write')
+  })
+
+  it('声明 hiddenTools → deny = 基础表 ∪ 声明（安全模式开启期间）', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden(['workflow', 'job_kill'])
+    const m = mkAgent('sm-declared')
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls).toHaveLength(1)
+    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow', 'job_kill'])
+  })
+
+  it('无安全模式标记 → 声明不生效（一次 restrict 都不发）', () => {
+    declareHidden(['workflow'])
+    const m = mkAgent('sm-off')
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls).toHaveLength(0)
+  })
+
+  it('标记消失 → 解除隐藏（disposer 被调用），且是可逆的', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden(['workflow'])
+    const m = mkAgent('sm-toggle')
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls).toHaveLength(1)
+    rmSync(join(dir, '.serenity-safe-on'))
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.disposed).toEqual(['bash,workflow'])
+  })
+
+  it('清单未变 → 幂等（不重复 restrict）', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden(['workflow'])
+    const m = mkAgent('sm-idem')
+    syncSafeModeRestriction(m.agent, dir)
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls).toHaveLength(1)
+  })
+
+  it('🔴 改声明 → 热重算（解除旧的，应用新的）', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden(['workflow'])
+    const m = mkAgent('sm-reload')
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow'])
+    declareHidden(['workflow', 'interrupt_agent'])
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.disposed).toEqual(['bash,workflow'])
+    expect(m.calls).toHaveLength(2)
+    expect(m.calls[1]!.deny).toEqual(['bash', 'workflow', 'interrupt_agent'])
+  })
+
+  it('🔴 未注册的名字 → 整次 restrict 失败 ⇒ 退化为基础表（不丢掉 bash 的隐藏）', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden(['workflow', 'not_a_real_tool'])
+    const m = mkAgent('sm-unknown', { rejectUnknown: 'not_a_real_tool' })
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls).toHaveLength(1)
+    expect(m.calls[0]!.deny).toEqual(['bash'])
+  })
+
+  it('退化态按期望签名记账 ⇒ 下一步不重试刷屏', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden(['not_a_real_tool'])
+    const m = mkAgent('sm-unknown-idem', { rejectUnknown: 'not_a_real_tool' })
+    syncSafeModeRestriction(m.agent, dir)
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls).toHaveLength(1)
+  })
+
+  it('非法声明项（数字/空白）跳过，只留字符串', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden([42, null, '  ', 'workflow'])
+    const m = mkAgent('sm-invalid')
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow'])
+  })
+
+  it('声明与基础表重名 ⇒ 去重', () => {
+    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
+    declareHidden(['bash', 'workflow'])
+    const m = mkAgent('sm-dedupe')
+    syncSafeModeRestriction(m.agent, dir)
+    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow'])
   })
 })
 

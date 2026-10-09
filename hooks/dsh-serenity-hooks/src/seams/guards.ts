@@ -19,6 +19,7 @@ import {
   pathInside,
   readCccName,
   readExclusiveTools,
+  readSafeModeHiddenTools,
   type BlacklistRule,
 } from '../ccc.js'
 import { cccRootForCwd } from '../ccc-roots.js'
@@ -213,11 +214,27 @@ function resolveAgentCwd(exec: ToolExecution): string {
   return agent?.session?.header?.cwd ?? process.cwd()
 }
 
-/** 安全模式开启时从模型工具列表隐藏的工具（只隐藏 bash；write/edit 保留） */
+/**
+ * 安全模式开启时从模型工具列表隐藏的工具 —— **基础表**（只隐藏 bash；write/edit 保留）。
+ * 它**恒隐**、与 CCC 配置无关；CCC 声明的 `safeMode.hiddenTools` 是**附加**项（见下）。
+ */
 const SAFE_MODE_DENY_TOOLS = ['bash']
 
-/** agent key → restrict disposer（安全模式工具隐藏状态） */
-const safeModeRestrictions = new Map<string, () => void>()
+/**
+ * agent key → 安全模式下的隐藏状态（v1.51.4：由"一次性 disposer"升级为"签名 ＋ 实际 deny ＋ disposer"）。
+ *
+ * 为什么记签名：CCC 的 `safeMode.hiddenTools` 可被改（配置热更新是既有语义）⇒ 每步必须能判
+ * "清单变没变"——变了就重算（解除旧的、应用新的），没变则**一次 restrict 调用都不多发**。
+ */
+interface SafeModeRestriction {
+  /** 本次**期望**的 deny 清单签名（退化时仍记期望值 ⇒ 不每步重试刷屏） */
+  signature: string
+  /** **实际生效**的 deny 清单（诊断用；退化时 = 基础表） */
+  deny: string[]
+  dispose: () => void
+}
+
+const safeModeRestrictions = new Map<string, SafeModeRestriction>()
 
 /** restrict 诊断状态（status API 暴露；排查 restrict 未生效问题） */
 interface RestrictDiagnostics {
@@ -226,6 +243,8 @@ interface RestrictDiagnostics {
   lastSuccess: boolean | null
   lastError: string | null
   activeKeys: string[]
+  /** v1.51.4：每个 key **实际生效**的 deny 清单（排查"某工具为什么／为什么没被隐藏"） */
+  denyByKey: Record<string, string[]>
 }
 
 const restrictDiag: RestrictDiagnostics = {
@@ -234,10 +253,15 @@ const restrictDiag: RestrictDiagnostics = {
   lastSuccess: null,
   lastError: null,
   activeKeys: [],
+  denyByKey: {},
 }
 
 export function getRestrictDiagnostics(): RestrictDiagnostics {
-  return { ...restrictDiag, activeKeys: [...safeModeRestrictions.keys()] }
+  return {
+    ...restrictDiag,
+    activeKeys: [...safeModeRestrictions.keys()],
+    denyByKey: Object.fromEntries([...safeModeRestrictions].map(([k, v]) => [k, v.deny])),
+  }
 }
 
 /** 诊断落盘：AGENT_SESSIONS/.restrict-diag.json（文件通道，避免 HTTP 自锁） */
@@ -256,37 +280,85 @@ function writeRestrictDiag(root: string): void {
 }
 
 /**
- * 同步安全模式工具隐藏：标记存在 → agent.ctx.tools.restrict deny 隐藏写工具；
- * 标记消失 → 解除。pre-step 每步调用 → 切换实时生效。
+ * 同步安全模式工具隐藏：标记存在 → `agent.ctx.tools.restrict deny` 隐藏
+ * **基础表（bash）∪ CCC 声明的 `safeMode.hiddenTools`**；标记消失 → 全部解除。
+ * pre-step 每步调用 ⇒ 开／关／**改声明**三种变化都实时生效（v1.51.4 起含"改声明"）。
+ *
+ * 与 `readSafeModeHiddenTools` 的分工（R↓）：本函数负责**形状与失败退化**，reader 只管取值。
+ * 🔴 退化规则：DSH 契约规定 **未注册的工具名会让整次 restrict 失败**（"unknown names … fail"）
+ * ⇒ 绝不能让 CCC 写错一个名字就丢掉 safe-mode 的核心隐藏（bash）。失败时退化为**只隐藏基础表**，
+ * 并在日志响亮报错；退化态**按期望签名记账**，不会每步重试刷屏。
  */
 export function syncSafeModeRestriction(agent: Agent, root: string): void {
   const key = (agent.session as { id?: string }).id ?? 'global'
   const on = isSafeModeOn(root)
   const existing = safeModeRestrictions.get(key)
-  if (on && !existing) {
-    try {
-      const dispose = agent.ctx.tools.restrict({ deny: [...SAFE_MODE_DENY_TOOLS] })
-      safeModeRestrictions.set(key, dispose)
-      restrictDiag.lastKey = key
-      restrictDiag.lastAttemptAt = isoLocal()
-      restrictDiag.lastSuccess = true
-      restrictDiag.lastError = null
-    } catch (e) {
-      restrictDiag.lastKey = key
-      restrictDiag.lastAttemptAt = isoLocal()
-      restrictDiag.lastSuccess = false
-      restrictDiag.lastError = (e as Error).message
-      console.error(`[serenity-hooks] restrict 失败 (key=${key}):`, (e as Error).message)
-      /* 限制失败不阻断（守卫仍兜底拦截） */
+
+  if (!on) {
+    if (existing !== undefined) {
+      try {
+        existing.dispose()
+      } catch (e) {
+        console.error(`[serenity-hooks] restrict 解除失败 (key=${key}):`, (e as Error).message)
+      }
+      safeModeRestrictions.delete(key)
     }
-  } else if (!on && existing) {
+    writeRestrictDiag(root)
+    return
+  }
+
+  // 安全模式开启：deny = 基础表 ∪ CCC 声明（声明只在安全模式期间生效 —— owner 2026-10-09 令）
+  let declared: string[] = []
+  try {
+    declared = readSafeModeHiddenTools(root)
+  } catch (e) {
+    console.error(`[serenity-hooks] safeMode.hiddenTools 判据读取失败 (key=${key}):`, (e as Error).message)
+  }
+  const deny = [...new Set([...SAFE_MODE_DENY_TOOLS, ...declared])]
+  const signature = deny.join(',')
+
+  if (existing !== undefined && existing.signature === signature) {
+    writeRestrictDiag(root)
+    return
+  }
+  if (existing !== undefined) {
     try {
-      existing()
+      existing.dispose()
     } catch (e) {
-      console.error(`[serenity-hooks] restrict 解除失败 (key=${key}):`, (e as Error).message)
+      console.error(`[serenity-hooks] restrict 重算前解除失败 (key=${key}):`, (e as Error).message)
     }
     safeModeRestrictions.delete(key)
   }
+
+  let applied = deny
+  let dispose: () => void
+  try {
+    dispose = agent.ctx.tools.restrict({ deny: [...deny] })
+  } catch (e) {
+    restrictDiag.lastKey = key
+    restrictDiag.lastAttemptAt = isoLocal()
+    restrictDiag.lastSuccess = false
+    restrictDiag.lastError = (e as Error).message
+    console.error(
+      `[serenity-hooks] restrict 失败，已退化为基础表（多为 safeMode.hiddenTools 里有本 CCC **未注册**的工具名）(key=${key}):`,
+      (e as Error).message,
+    )
+    applied = [...SAFE_MODE_DENY_TOOLS]
+    try {
+      dispose = agent.ctx.tools.restrict({ deny: applied })
+    } catch (e2) {
+      restrictDiag.lastError = `${(e as Error).message} ／ 退化亦失败: ${(e2 as Error).message}`
+      console.error(`[serenity-hooks] restrict 退化失败（守卫仍兜底拦截）(key=${key}):`, (e2 as Error).message)
+      safeModeRestrictions.set(key, { signature, deny: [], dispose: () => {} })
+      writeRestrictDiag(root)
+      return
+    }
+  }
+  restrictDiag.lastKey = key
+  restrictDiag.lastAttemptAt = isoLocal()
+  restrictDiag.lastSuccess = true
+  restrictDiag.lastError = null
+  safeModeRestrictions.set(key, { signature, deny: applied, dispose })
   writeRestrictDiag(root)
 }
 
