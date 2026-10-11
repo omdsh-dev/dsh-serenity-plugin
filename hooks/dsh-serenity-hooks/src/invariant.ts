@@ -62,8 +62,15 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
  * v1.52（**D121**，owner 2026-10-11 裁「引擎搬进 ACC」）：新增 **`ontology`** —— 本体工程
  * **引擎**（原为 CCC 的 MSM `ontology-engineering`，逐字搬迁；见 `src/ontology/engine.ts` 文件头
  * 的三处改写）。它与 `praxis ontology`（**方法文本**）是**同一领域的两个面**：一个说、一个跑 ⇒ **13**。
+ *
+ * v1.54（**serenity-skill P3**，owner 2026-10-11 令「要一个 serenity-skill-creator 的 tool」）：
+ * 新增 **`serenity-skill-creator`** —— 增强型 skill 标准（serenity-skill）的 creator：
+ * `guide`（方法文本）／`create`（脚手架；**基础链的相对路径由它算**）／`check`（调 P2 的 A1/A2）／
+ * `review`（C 档，调引擎 `compliance`）／`index`（调 P1 的生成器）／`status` ⇒ **14**。
+ * 同规格：**条件可见与否不影响这里列它**（本常量 = "插件**具备**的工具面"）。
  */
 export const REGISTERED_TOOLS = [
   'container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
   'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology',
+  'serenity-skill-creator',
 ] as const

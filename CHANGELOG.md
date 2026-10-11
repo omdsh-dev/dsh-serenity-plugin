@@ -1,3 +1,88 @@
+## v1.54.0 — 2026-10-11（**serenity-skill P2 ＋ P3**：本体预留口的检查 ＋ creator 工具）
+
+**来源**：owner 2026-10-11 令「扩展 skill 相关 tool，将**基于本体论建模的 skill 编写和优化方法**进行交代，
+其实也就是我们这种增强型 skill 的 creator」；他在七条裁决里**点名**（**Q5**）「要一个 `serenity-skill-creator` tool」
+⇒ 工具面 **13 → 14**，并**否决**了原倾向的「文本进 `praxis` 第 5 段 ＋ 机械动作进 `ontology` 子命令」。
+设计件 = 插件仓 `docs/serenity-skill-design.md` **v0.2（接口已冻结）**；**本版 = 设计的 P2 ＋ P3**（P1 已在 v1.53.0 发布）。
+**性质**：新增一个库模块（P2）＋ 一个工具（P3）；**行为变化** = 工具面多一个工具 ＋ 系统提示词多一行；其余零行为变化。
+
+### 一、P2：本体预留口的**发现**与**检查**（`src/skills/skill-ontology.ts`）
+
+固定名 = **`<skill>/skill.ttl`**（与 `SKILL.md` 并列；裁决 Q1）—— **唯一被认的名字**；
+旧写法 `references/<name>-domain.ttl` **不特殊对待**（当普通参考件：**不报错、不告警**；裁决 Q6）。
+
+`inspectSkillOntology(skillDir, { root })` 出**三态** `none | ok | error`：
+
+- **A1 结构合法** ＝ 引擎 `check --level strict` exit 0（M1–M10）；
+- **A2 链上基础链** ＝ 引擎 `explain` exit 0 **且**报告里真有 `Imports:` 行。
+
+🔴 **A2 存在的全部理由是一条实测反例**：CCC 侧那 14 份领域本体写的是 `sr:imports`，而**引擎只解析 `owl:imports`**
+⇒ **A1 照样报 "All checks passed"**，而链**从来没有连上过** ⇒ 只看 A1 会把它们**统统判成合格**。
+（属「检查没跑／声明没被读，看起来像全绿」那一族 —— 这是**第四次**；已立为回归钉 J2 的正控 ＋ 负控。）
+
+🔴 **同批删掉原设计的 A3 档**（"引用可兑现"）：那是我**照引擎源码里 "Fall back to loading just this file (no imports)"
+那句推断它对缺失 import 是静默的** —— **实测打假**：引擎在两条路上都**响亮**（`check` ⇒ `ERR [M10] Ontology file not
+found: <abs>` exit 1 ／ `explain` ⇒ exit 2 · `ONTO_FILE_NOT_FOUND`）⇒ **不写第二实现**。
+（同族教训：**照源码的"意图"抄 ≠ 引擎实际怎么行为**。）
+
+### 二、P3：工具 `serenity-skill-creator`（六个子命令）
+
+| 子命令 | 做什么 | 关键取舍 |
+|---|---|---|
+| `guide` | 印《serenity-skill 编写与优化方法》：何时该建模／三个动作／两层树的写法习惯／从领域散文到 ttl 的步骤／优化回路 | **只写方法**；判据在代码里、语义审查在引擎里 ⇒ **三者不许互相抄**（同一件事写两遍必然漂移） |
+| `create <name>` | 脚手架 = `SKILL.md` ＋ `skill.ttl` ＋ `references/` | **基础链的相对路径由它算**（从该 skill 目录指向顶层 skill 的 `references/`），**不靠人肉推**；**目标目录已存在一律拒** |
+| `check <name>` | A1 ＋ A2（调 P2，**不重写**） | 三态文本**两两可分辨**；「普通 skill（未建模）」明确写出**这不是"检查通过"** |
+| `review <name>` | C 档：调引擎 `compliance`，出**问题清单** | **半机械** —— 它给的是要人回答的问题，**不是"通过／不通过"** |
+| `index <name>` | 预览模型**实际会看到**的第二层参考件清单（调 P1 的生成器） | 让"露没露、顺序对不对"在编辑时就能自查 |
+| `status` | 全容器一览：已建模通过／普通 skill／**建模了但检查没跑成** | **未建模不是异常**（J9） |
+
+🔴 **写文件只发生在 `create`**；其余五个子命令**只读**。
+🔴 **三段分工**（本版最容易被后人混掉的一点）：**方法文本**在该工具的 `SKILL_CREATOR_GUIDE`／**机械判据**在
+`resource-index.ts`（P1）与 `skill-ontology.ts`（P2）／**语义档**在引擎的 `compliance` ⇒ 本工具**只做转发与呈现**。
+
+### 三、工具面 13 → 14（五处同批，J10）
+
+| # | 位置 | 改动 |
+|---|---|---|
+| 1 | `src/invariant.ts` 的 `REGISTERED_TOOLS` | 13 → 14（＋ 一段 v1.54 注释。🔴 该常量的语义 = "插件**具备**的工具面"，**条件可见与否不影响这里列它**） |
+| 2 | `dsh.plugin.json` 的 `contributes.tools` ＋ 描述的工具数 | 13 → 14，**点名**（不用"后 N 个"那种位置指代 —— v1.52.1 那次失真的根因） |
+| 3 | `seams/system-prompt.ts` 的工具行 | 新增一行 |
+| 4 | `tests/register.test.ts`（注册次数 12/13 ⇒ 13/14；diagram 开 ⇒ 14；注销后再注册 ⇒ 15 ＋ `disposers[14]`）＋ `tests/invariant.test.ts`（`toHaveLength(14)` ＋ 清单样本 ＋ `toContain`） | 同步 |
+| 5 | `README.md` 的工具表 | 加一行 |
+
+### 四、判据
+
+- **P2** = `tests/skill-ontology.test.ts` **8 例**（每条带正控 ＋ 负控）：J1 固定名正控／**负控**（`foo.ttl` 不算预留口）／
+  A1 坏文件／J2 正控（`owl:imports` ＋ 目标存在 ⇒ 两档全绿）／**J2 负控（`sr:imports` ⇒ A1 绿、A2 红）**／
+  形态分诊（**探测没跑成不许说成"没声明"**）／J3 三态文本与记号两两不同。
+- **P3** = `tests/skill-creator.test.ts` **12 例**，其中本工具**独有的一条性质**：🔴 **`create` 出来的骨架当场 `check`
+  必须全绿**（脚手架不许生成一个当场就不合格的 skill）；其余 = 可达性自证／`create` 负控（已存在／非法名）／
+  缺 `name` 守卫／**J9 三个负控**（普通 skill 的 `check`／`review`／`status` 全程无声，且文本里**不含** `❌`）／
+  `index` 两态／J10。
+
+### 五、实测读数（锚定本版一跑）
+
+- `typecheck` ✓ ／ `typecheck-host 0.2.0-rc.2` ✓（node 114 文件、client 169 文件，paths **36 ＋ 21** 条全中）
+- `test` **164 files ／ 2737 tests** ✓（**预测先于实跑**：163 基线 ＋ 1 新文件 ／ 2725 基线 ＋ 12 ⇒ **逐字命中**）
+- `coverage` ✓ 语句 **31636/32918 = 96.10%** ／ 分支 **7104/8030 = 88.46%** ／ 函数 **1074/1088 = 98.71%**（阈值远未逼近）
+- `build` ✓ —— 🔵 **`lib/client.js` 仍是 225459 B**（与 v1.51.3 那次读数**逐字相同**）⇒ **client 半一个字没动**
+  （本版只动 node 半；这是一条**独立于测试**的"改动面"判据）
+- `pack-check` ✓ **137 文件**（🔴 **预测错了一次，值得记**：按"135 ＋ P3 新增 1"应为 136，实测 **137**
+  —— 因为 **P2 的 `lib/skills/skill-ontology.d.ts` 也在这条 delta 里**：它随 `d3d7b34` 已提交、但**从未发布**
+  ⇒ v1.53.0 那次读数（135）里**没有它**。正确算法 = **135 ＋ P2（1）＋ P3（1）＝ 137**）
+- 🔴 **发布链前置**：`dsh-develop version` 三处一致（`package.json` ／ `dsh.plugin.json` ／ 本文件）
+  —— ⚠️ **它的机械钉在 `scripts/dsh-develop.test.ts` 里**（`test` 会跑它）⇒ **本段没写完时 `test` 必红**
+  （本版实测：先跑 `test` ⇒ 唯一失败项就是它），故发布链顺序 = **bump → 补本段 → 门禁**。
+
+### 六、未做项（**故意不做**，别当遗漏）
+
+- 🚫 **CCC 侧 14 份 `references/*-domain.ttl` 的改名与 `sr:imports` → `owl:imports`** —— 属 **CCC**（D23：措辞与纪律归 CCC）。
+  机制侧**只认固定名**（Q6），故不做这一步**也不会有任何告警**；由 CCC 自行推进（改完逐个 `check` 验，判据 J2）。
+- 🚫 **旧名兼容读取** —— Q6 明确否决（"**静默 ＋ CCC 自行修正 ＋ 仍兼容普通 skill**"）；
+  但 `guide` 里**明写**了这个陷阱（"不被认：不是报错，是**没有人会看它**"）。
+
+---
+
 ## v1.53.0 — 2026-10-11（**serenity-skill P1**：skill 的**第二层披露树**）
 
 **来源**：owner 2026-10-11 令「在 dsp 级别升级 skill 能力」三条之一 ——

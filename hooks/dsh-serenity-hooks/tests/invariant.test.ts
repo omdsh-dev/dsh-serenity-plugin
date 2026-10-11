@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { verifyToolConsistency, REGISTERED_TOOLS } from '../src/invariant.js'
 
 describe('invariant: 清单与注册工具一致性', () => {
-  it('一致时零问题（13 工具，与 dsh.plugin.json contributes.tools 一致）', () => {
+  it('一致时零问题（14 工具，与 dsh.plugin.json contributes.tools 一致）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'inv-'))
     const manifest = join(dir, 'dsh.plugin.json')
     writeFileSync(
@@ -14,7 +14,7 @@ describe('invariant: 清单与注册工具一致性', () => {
       JSON.stringify({
         id: 'x',
         contributes: {
-          tools: ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology'],
+          tools: ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology', 'serenity-skill-creator'],
         },
       }),
     )
@@ -22,8 +22,8 @@ describe('invariant: 清单与注册工具一致性', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('REGISTERED_TOOLS 含 13 工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并与专属工具 + v1.51 diagram + v1.52 ontology）', () => {
-    expect(REGISTERED_TOOLS).toHaveLength(13)
+  it('REGISTERED_TOOLS 含 14 工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并与专属工具 + v1.51 diagram + v1.52 ontology + v1.54 serenity-skill-creator）', () => {
+    expect(REGISTERED_TOOLS).toHaveLength(14)
     expect(REGISTERED_TOOLS).toContain('container_fs')
     expect(REGISTERED_TOOLS).toContain('container_admin')
     expect(REGISTERED_TOOLS).toContain('container_trajectory')
@@ -34,6 +34,7 @@ describe('invariant: 清单与注册工具一致性', () => {
     expect(REGISTERED_TOOLS).toContain('container_trajectory')
     // v1.31.1：v1.31.0 漏改此处与清单（双侧同错 → 陈旧一致静默通过），本次补齐
     expect(REGISTERED_TOOLS).toContain('im-bridge')
+    expect(REGISTERED_TOOLS).toContain('serenity-skill-creator')
   })
 
   it('真实清单与 REGISTERED_TOOLS 一致（防双侧陈旧再次静默通过）', () => {

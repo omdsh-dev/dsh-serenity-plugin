@@ -20,6 +20,7 @@ import { gitTool } from './tools/git.js'
 import { msmTool } from './tools/msm.js'
 import { praxisTool } from './tools/praxis.js'
 import { createOntologyTool } from './tools/ontology-eng.js'
+import { createSkillCreatorTool } from './tools/skill-creator.js'
 import { createHandymanTool } from './tools/handyman.js'
 import { createTrajectoryTool } from './tools/trajectory.js'
 import { localstoreTool } from './tools/localstore.js'
@@ -393,6 +394,10 @@ export function apply(ctx: Context, config: Config): void {
     // v1.52（D121）：本体工程**引擎**（原 CCC 的 MSM `ontology-engineering` 逐字搬进 ACC）。
     // 与 praxis ontology 的分工：那个是**方法文本**，这个是**可执行的那个**（13）。
     ctx.tools.register(createOntologyTool())
+    // v1.54.0（serenity-skill P3，owner 令）：增强型 skill 标准（serenity-skill）的 **creator** ——
+    // 方法文本（guide）＋ 机械档（check：调 P2 的 A1/A2）＋ 语义档（review：调引擎 compliance）
+    // ＋ 第二层预览（index：调 P1 的生成器）＋ 全容器一览（status）＋ 脚手架（create）。工具面 13→14。
+    ctx.tools.register(createSkillCreatorTool())
     ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(localstoreTool)
     // container_admin（role + msm 管理 + config——v1.33 起机务舱；v1.34.1 起为工厂形态：
