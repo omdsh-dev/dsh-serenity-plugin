@@ -419,7 +419,7 @@ function cmdPublish(): void {
   if (r.status !== 0) {
     fail(`npm publish 失败 (exit ${r.status})`, 2)
   }
-  verifyPublished(currentVersion().pkg)
+  verifyPublished(currentVersion().pkg, r.stdout + r.stderr)
   console.log(`[dsh-develop] ✓ published @shgroup/dsh-serenity-hooks@${currentVersion().pkg}（npm registry）`)
 }
 
@@ -454,22 +454,17 @@ function landingRead(version: string): { record: string; tarball: string } {
 }
 
 /**
- * packumentHasVersion — **权威读**：registry 的 packument 里到底有没有这个版本。
+ * packumentHasVersion — 第三个读数：registry 的 packument 里有没有这个版本。
  *
- * 🔴 为什么必须加这第三个读数（2026-10-11 v1.51.6 实测，三个读数互相矛盾）：
- *   发布后 90 秒内，`?write=true` 与 tarball **双双 404** ⇒ 旧判据打印
- *   「形态 = 版本记录本身取不到（= 没上去）。处置：…再重跑 publish」——
- *   而这次**重量级错误**：packument 的 `dist-tags.latest` 当时**已经是 `1.51.6`**，
- *   且 `versions['1.51.6'].dist` 的 `shasum`（`03f5eec0…`）／`fileCount`（132）／
- *   `unpackedSize`（8184876）／`integrity` 与 npm 发布回执**逐字相同** ⇒ **发布已成立**。
- *   若照那句诊断"重跑 publish"，只会拿到 409（版本已存在）。
- *   ⇒ 这正是「**否定性判据必须自带对照组**」那一类：两个读数的 404 是**同一个 CDN 的
- *     传播延迟／边缘负缓存**，它们一起变红**不构成"没上去"的证据**。
+ * 🔴 **它不是权威读（这一条被实测推翻过一次，别再把单个读数当权威）**：
+ *   2026-10-11 v1.51.6 发布时，`?write=true` 与 tarball **双双 404** 而 **packument 已完整含该版本**
+ *   （`dist` 的 shasum／fileCount／unpackedSize／integrity 与 npm 回执逐字相同）⇒ 当时我据此把
+ *   "权威 = packument" 写进了判据。**同一天 v1.52.0 发布把这条推翻**：t≈90s 时**三个读数都没有** 1.52.0，
+ *   t≈4min 时 **record 已 200 而 packument 仍无** —— **与 1.51.6 恰好相反**。
  *
- * ⇒ 判据分层（本函数 + {@link verifyPublished} 共同实现）：
- *   · **上架成立**（权威）= packument 含该版本 —— `?write=true` 与 tarball 都可能滞后；
- *   · **此刻可装**（能力）= tarball 200 —— 用户能不能真下载。
- *   两者**分开报**，不再用"tarball 404"去否定"上架"。
+ * ⇒ **三个读数（record `?write=true` ／ packument ／ tarball）各自独立滞后**，没有谁永远更快；
+ *   **哪一个都不能单独当权威**（单次观测得出的"权威"是我犯过的错 —— n=1 的结论）。
+ *   真正的"已提交"证据只有 **npm 自己**：`exit 0` ＋ stdout 含 `+ <pkg>@<ver>`（见 {@link npmReportedSuccess}）。
  */
 function packumentHasVersion(version: string): { has: boolean; detail: string } {
   const r = run('curl', ['-s', '--max-time', '20',
@@ -489,7 +484,29 @@ function packumentHasVersion(version: string): { has: boolean; detail: string } 
   }
 }
 
-function verifyPublished(version: string): void {
+/**
+ * npmReportedSuccess — **"已提交"的唯一证据**：npm 自己报的 `+ <pkg>@<ver>`。
+ *
+ * 为什么它就是证据：npm 会在**服务端接受发布**之后才打印这一行；三个落地读数都只是**传播**，
+ * 它们可以在发布成功后仍然全部显示旧态（v1.52.0 实测：90 秒内三个读数皆无、而 npm 已成功）。
+ * ⇒ **把"提交"与"传播"分开判**：提交看 npm，传播看读数。
+ */
+function npmReportedSuccess(npmOutput: string, version: string): boolean {
+  return npmOutput.includes(`+ @shgroup/dsh-serenity-hooks@${version}`)
+}
+
+/**
+ * verifyPublished — **落地核对**：把「已提交」（npm）与「已传播」（三个读数）分开判。
+ *
+ * 判据（三层，别退化成单条）：
+ *   ① **已提交** = npm exit 0 且 stdout 含 `+ <pkg>@<ver>`（由调用方传入，见 {@link npmReportedSuccess}）；
+ *   ② **上架成立** = 三个读数**任一**为真（record 200 ／ packument 含该版本 ／ tarball 200）
+ *      —— 它们**各自独立滞后**，所以是**析取**，不是合取、也不是"某个读数说了算"；
+ *   ③ **两者都假** ⇒ 若 ① 为真 = **未确认（传播中）**，**不判失败**（重跑 publish 只会 409）；
+ *      若 ① 为假 = 真失败。
+ */
+function verifyPublished(version: string, npmOutput: string): void {
+  const reported = npmReportedSuccess(npmOutput, version)
   const deadline = Date.now() + 90_000
   let last: { record: string; tarball: string } = { record: '?', tarball: '?' }
   for (;;) {
@@ -501,19 +518,24 @@ function verifyPublished(version: string): void {
     if (Date.now() >= deadline) break
     run('sleep', ['3'], { cwd: SCRIPTS_DIR, quiet: true, env: {} })
   }
-  // 90 秒内两读数未同时转绿 ⇒ 用**权威读**定案（分包体/记录两种滞后，见 packumentHasVersion 注释）
   const pk = packumentHasVersion(version)
-  if (pk.has) {
-    console.log(`[dsh-develop] ⚠️ 落地核对：packument **已含** ${version}（${pk.detail}）⇒ **上架成立**（权威读）`)
-    console.log(`   但 90 秒内 record=${last.record} ／ tarball=${last.tarball} 仍未转 200。`)
-    console.log('   形态 = **包体仍在传播**（tarball 的 404 会被边缘负缓存；本仓实测：v1.51.6 首跑两读数皆 404 而 packument 已完整，'
-      + 'v1.51.5 约 40 分钟后才 206）'
-      + (last.record === '200' ? ' ／ 旧文案把这叫作「半上架」，本仓三次实测均为传播延迟' : ''))
-    console.log(`   ⇒ **不判失败**（重跑 publish 会 409）。复核 = publish-landed ${version}；装 = npm-install（该步自带传播重试）`)
+  const anyFresh = last.record === '200' || last.tarball === '200' || pk.has
+  if (anyFresh) {
+    console.log(`[dsh-develop] ✓ 落地核对：**上架成立**（三个读数任一为真）— ${version}`)
+    console.log(`   读数：record=${last.record} ／ tarball=${last.tarball} ／ packument.has=${pk.has}（${pk.detail}）`)
+    console.log('   落后者属**传播延迟**（三者各自独立滞后：v1.51.6 是 packument 先到，v1.52.0 是 record 先到）'
+      + ' ⇒ 若此刻装不上，等几分钟再试；`npm-install` 自带传播重试')
     return
   }
-  fail(`landing 核对失败：packument **不含** ${version}（${pk.detail}；record=${last.record} ／ tarball=${last.tarball}）\n`
-    + '  （判据 = ① packument 成员资格〔权威〕 ② ?write=true 版本端点 ③ tarball 可下载；三条一起解释，别用单条否定）\n'
+  if (reported) {
+    console.log(`[dsh-develop] ⚠️ 落地核对：**未确认（传播中）** — ${version}`)
+    console.log(`   三个读数此刻都还没有它：record=${last.record} ／ tarball=${last.tarball} ／ packument=${pk.has}（${pk.detail}）`)
+    console.log('   但 **npm 自己报了成功**（stdout 含 `+ @shgroup/dsh-serenity-hooks@' + version + '`）⇒ 视为**已提交、正在传播**。')
+    console.log(`   ⇒ **不判失败**（重跑 publish 只会 409）。复核 = publish-landed ${version}；装 = npm-install（该步自带传播重试）`)
+    return
+  }
+  fail(`landing 核对失败：三个读数都没有 ${version}，**且 npm 也没有报成功**\n`
+    + `  （record=${last.record} ／ tarball=${last.tarball} ／ packument=${pk.has}（${pk.detail}））\n`
     + '  🔴 形态 = 真没上去。处置：看上方 npm 的实际输出再重跑 publish。', 2)
 }
 
@@ -2353,21 +2375,25 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'squash-history': cmdSquashHistory(rest[0]); break
       case 'publish': cmdPublish(); break
       // 落地判据可单独调用（发布后复核 / 事后审计都用它）——**只读**，不改任何东西。
+      // ⚠️ 这里是**事后**审计（传播早已完成）⇒ 判据 = **三个读数任一为真**；全假才是"真没有"。
+      //    （发布**当时**不能用这条判据 —— 那会儿三个读数可能都还没到，见 verifyPublished。）
       case 'publish-landed': {
         const v = rest[0] ?? currentVersion().pkg
         const read = landingRead(v)
         const pk = packumentHasVersion(v)
         console.log(`[dsh-develop] publish-landed ${v}`)
-        console.log(`  packument 含该版本（权威）   = ${pk.has}（${pk.detail}）`)
         console.log(`  版本记录（${v}?write=true） = ${read.record}`)
         console.log(`  tarball（-/${v}.tgz）        = ${read.tarball}`)
-        if (pk.has) {
-          console.log('[dsh-develop] ✓ **上架成立**（权威读 = packument）')
+        console.log(`  packument 含该版本           = ${pk.has}（${pk.detail}）`)
+        const fresh = read.record === '200' || read.tarball === '200' || pk.has
+        if (fresh) {
+          console.log('[dsh-develop] ✓ **上架成立**（三读数任一为真）')
           if (read.tarball === '200') console.log('[dsh-develop] ✓ 且包体此刻可下载（tarball 200）')
           else console.log(`[dsh-develop] ⚠️ 包体此刻仍取不到（tarball=${read.tarball}）⇒ 传播延迟／边缘负缓存，`
             + '不是"没上架"；装不上就等几分钟重试')
         } else {
-          fail(`**上架未成立**：packument 不含 ${v}（${pk.detail}；record=${read.record} / tarball=${read.tarball}）`, 2)
+          fail(`**三读数都没有 ${v}**（record=${read.record} / tarball=${read.tarball} / packument=${pk.has}）`
+            + ' —— 事后审计下这已是"真没有"', 2)
         }
         break
       }
