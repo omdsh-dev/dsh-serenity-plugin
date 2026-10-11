@@ -189,6 +189,26 @@ O ── Ontology
 ⑤ register it through the container's registry (never by editing the registry file directly)
 \`\`\`
 
+**Retrofit — modelling a system that already exists** (the reverse direction; the three workflows above
+assume the model comes first, which is not how it usually goes)
+
+\`\`\`
+① draw the boundary as an ACTIVITY, not as a system ("developing X", not "the whole of X")
+② enumerate the artefacts by MEASURING, never by recall — list the files, the registry entries, the
+  running processes; a model built from memory reproduces memory's errors
+③ classify each artefact: type · instance · property. Only types get a class
+④ for every type: rigidity + identity. A role/stage is anti-rigid; a thing that persists is rigid
+⑤ write the relations that carry OWNERSHIP and CAUSALITY first (owner · produces · guards · proves)
+⑥ write axioms from the rules you ALREADY follow but never wrote down — that is where the payout is
+⑦ record known failure modes as INSTANCES, not as prose paragraphs
+⑧ strict check → 0 errors; then the semantic review
+\`\`\`
+
+🔴 **The tell that a retrofit model is worth keeping**: running it surfaces at least one
+**contradiction in the existing system** — a thing owned in two places, a declared value that does not
+match reality, a rule everyone follows that nobody wrote down. A model that only restates what was
+already obvious has not earned its maintenance cost.
+
 ## 10. Universal axioms (violating any of these is a defect, not a style choice)
 
 | Axiom | Content | Consequence of violation |
@@ -201,6 +221,51 @@ O ── Ontology
 
 **Axiom discipline**: axioms are named (\`AX-*\`), individually citable, and each carries a rationale.
 Breaking an axiom is allowed only by stating the break explicitly and recording the reason.
+
+### The axiom rule expression (what \`M8\` parses, and what \`M9\` resolves against)
+
+\`sr:rule\` is **not free text** — it is a small expression language:
+
+\`\`\`
+expr        ::= implication
+implication ::= or_expr ('implies' or_expr)?
+or_expr     ::= and_expr ('or' and_expr)*
+and_expr    ::= not_expr ('and' not_expr)*
+not_expr    ::= 'not' not_expr | comparison
+comparison  ::= additive (cmp additive)?          ← at most ONE comparison; it does not chain
+cmp         ::= == | != | > | >= | < | <= | in    ← there is no 'not in'; see the traps below
+additive    ::= primary (('+' | '-') primary)*
+primary     ::= quantifier | func_call | prop_access | literal | '(' expr ')'
+quantifier  ::= ('exists' | 'forall') ident 'in' Type ':' expr
+func_call   ::= ident '(' (expr (',' expr)*)? ')'
+prop_access ::= ident ('.' ident)*
+literal     ::= number | 'string' | true | false | null
+\`\`\`
+
+🔴 **The property that makes every other trap dangerous**: \`M8\` accepts a rule as soon as a **prefix**
+parses. It never requires the input to be consumed to the end, so whatever follows the longest parsable
+prefix is **silently dropped** — and \`M9\` then checks only the AST that survived, so the dropped tail is
+invisible to **both** checks. Measured, with its control: \`Thing.count >= 1 NoSuchType.x == 1\` passes
+**clean**, while the same fragment alone (\`NoSuchType.x == 1\`) raises an M9 warning. And
+\`Thing.count >= 1 garbage here\` passes clean. ⇒ **A green check does not mean the whole rule was
+understood.** Keep one rule to a single clause; if you suspect a fragment is being dropped, put it alone
+in a throwaway axiom — a fragment that complains alone but not in place is a fragment being dropped.
+
+**Traps, each measured against the engine** (\`check --level strict\`, one probe axiom per boundary):
+
+| Trap | What the engine actually does |
+|---|---|
+| \`exists\` / \`forall\` / \`in\` are **reserved words** | they cannot be used as identifiers or property names: \`ReleaseTag.exists\` ⇒ \`Expected identifier after '.'\`. Express existence through a counted property (\`X.count >= 1\`) instead |
+| there is **no \`distinct\`** | \`count(distinct version)\` ⇒ \`Expected ')' after args of count\` (the argument parse stops at \`distinct\`, then hits \`version\`). Put the derived quantity in its own property (\`VersionTriple.distinctCount == 1\`) |
+| there is **no \`not in\`** | the operator is unreachable: \`x not in y\` parses as \`x\` and the rest vanishes **with no message**. Write \`not (x in y)\` — verified clean |
+| comparisons do **not chain** | \`a >= 1 >= 0\` parses as \`a >= 1\`; the tail is dropped silently. Use \`and\` |
+| \`M9\` checks **exactly two things** | (a) dotted paths of **two or more** segments ⇒ **warning** when the head is neither a declared type nor a relation; (b) a quantifier's **type name** ⇒ **error** when undeclared. Single bare identifiers and **function-call names are never checked**: \`noSuchFunction(X) == 1\` and \`noSuchBareThing == 1\` both pass clean ⇒ a mistyped relation inside \`occupies(…)\` is invisible |
+| \`M8\` errors are fatal, **M9's property tier is only a warning** | \`check\` can exit non-zero on M8 alone while a wrong head name slips past as a warning ⇒ read the warnings, not just the exit code |
+
+**Rule of thumb**: if a constraint cannot be said in this grammar, it is probably a
+**description + rationale** (prose) rather than a rule — say it there, do not bend the syntax.
+⚠️ Prose is also the honest place for anything the checks **cannot** see: a constraint the engine silently
+drops is worse than an unstated one, because it reads as verified.
 
 ## 11. Dispatching a review subagent
 

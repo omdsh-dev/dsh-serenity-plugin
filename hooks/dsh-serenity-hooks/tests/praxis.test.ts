@@ -67,6 +67,19 @@ describe('praxis（v1.30：eap/neat/cce 三合一；v1.51.5 增 ontology）', ()
     expect(s).toContain('ΔH_org')
   })
 
+  it('🔴 公理表达式语法段必须在场，且不得把 `not in` 当运算符宣传（实测：它是死分支、静默截断）', () => {
+    // EBNF 在场（写公理的人要照着它写）
+    expect(ONTOLOGY_CONTENT).toContain('implication ::=')
+    expect(ONTOLOGY_CONTENT).toContain('prop_access ::=')
+    // 合法写法在场（正解：用 not ( ... in ... )）
+    expect(ONTOLOGY_CONTENT).toContain('not (x in y)')
+    // 前缀即通过这条性质必须在场（否则绿检会被当成"整条规则被读懂"）
+    expect(ONTOLOGY_CONTENT).toContain('silently dropped')
+    // 🔴 回归钉：引擎里那个不可达的 `not in` 分支不得再被抄回语法表 ——
+    //    抄了它 = 教人写一条会被静默丢掉的规则（实测 probe：`x not in y` 无任何报错）
+    expect(ONTOLOGY_CONTENT).not.toContain("in | 'not in'")
+  })
+
   it('🔴 内容纪律：本体方法群不得出现任何具体 CCC 的名字（D23——机制与措辞归 ACC、数据归 CCC）', () => {
     for (const name of ['home-serenity', 'tiangong', 'pangu-serenity', 'sh-serenity', 'tg-ontology', 'home-ontology']) {
       expect(ONTOLOGY_CONTENT).not.toContain(name)
