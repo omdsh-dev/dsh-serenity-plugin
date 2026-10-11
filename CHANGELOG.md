@@ -1,3 +1,84 @@
+## v1.52.0 — 2026-10-11（**本体工程引擎搬进 ACC**：新工具 `ontology`，工具面 12→13）
+
+**来源**：owner 2026-10-11 三条指令之一 —— 「**1. 搬到ACC**」（原话整段：「1. 搬到ACC ｜ 2. 保留，归到顶层skill
+｜ 345我觉得就都可以修好了」）。上下文 = 上一轮答复里那张「**ACC 没覆盖什么**」的表：ACC 侧此前只有
+`praxis ontology` 的**方法文本**（说得出判据 M1–M10 的编号与含义），却**一行可执行代码都没有**；
+能真跑 `check/verify/compliance` 的是引擎，而引擎当时在 CCC 的 MSM `ontology-engineering` 里。
+
+### 一、是什么
+
+新增**第 13 个工具 `ontology`**，六个子命令（`init`／`check`／`explain`／`verify`／`review`／`compliance`），
+引擎本体（Turtle 解析 ＋ M1–M10 结构检查 ＋ L1–L5 提示 ＋ D1–D8 语义审查提示词 ＋ V1–V4 运行时合规
+＋ 公理↔技能合规清单）**逐字搬进 ACC**：
+
+| 层 | 落点 | 说明 |
+|---|---|---|
+| **引擎** | `src/ontology/engine.ts` | 纯函数（**只用 node 内建模块**，零第三方依赖、零 CCC import） |
+| **工具壳** | `src/tools/ontology-eng.ts` | 参数 → argv、**路径守卫**（`resolveInside`）、把退出码与引擎原文翻成回执 |
+| **方法手册** | `src/tools/ontology.ts`（praxis 第四段，v1.51.5 已有） | **不动** —— 与引擎是同一领域的两个面：一个说、一个跑 |
+
+### 二、搬迁方式 = **复制 ＋ 机械改写三处**（行为差异仅此三处）
+
+1. **输出不再直写 `process.stdout`** ⇒ 经 `emit()`/`emitErr()` 汇聚成字符串。宿主是**长驻进程**，
+   工具调用必须**返回文本**，不能污染服务器自己的 stdout。
+2. **`main()` ＋ `process.argv` 守卫 ⇒ 导出 `runOntologyCli(argv, opts)`**：**不再 `process.exit`**，
+   退出码（0/1/2/4）改为**返回值**，由工具壳翻译成可读回执（`code !== 0` **不抛异常** —— 否则调用方
+   读不到 `check` 的 ERR 明细）。
+3. **容器根由调用方给**（`opts.cwd` = CCC 根）：引擎多处按相对路径解析 `.opencode/skills`。
+
+🔴 **第 3 条的形态在实现中途被实测改过一次**：初版用 `process.chdir()` 临时切目录（并附了"引擎全程同步
+⇒ 等价原子"的论证），**但 `process.chdir()` 在 worker 线程里不被支持**（`ERR_WORKER_UNSUPPORTED_OPERATION`；
+vitest 就用 worker 跑）⇒ 5 条工具用例当场全红。改为**显式基准目录 `BASE`**（`resolve(BASE, x)`，对绝对
+路径天然无害），**根本不用 chdir** —— 既修掉 worker 问题，也去掉了"长驻进程改全局 cwd"这个隐患。
+
+### 三、🔴 移植保真度：**逐字同输出**（有 golden 为证）
+
+"机械改写没改行为"这句话不能靠"改得小心"支撑 ⇒ 新增 `tests/ontology-golden.test.ts`：
+在 CCC 侧 MSM **注销之前**，用**原引擎**对同一份 fixture 跑 `check --level strict` 与 `explain`，**原样抄下
+stdout** 固化成断言；搬迁后的引擎必须**逐字**重现（`exit 1` 与 `exit 0` 两条通道各一条）。
+
+- ⚠️ fixture 里 `sr:name` 必给 ⇒ 报告标题用本体名而非文件路径 ⇒ golden **与路径无关**（否则是假红工厂）；
+  另有一条**路径无关性**用例（同内容换文件名/目录 ⇒ 输出不变）钉住这一点。
+- 🔴 **正控（防"空断言"）**：换一份**不同**的 fixture ⇒ 输出必须**不再**等于 golden。
+  这条正控本身第一次是**失败**的 —— 变异选在了一条**干净规则**上，而 `check` **只列 issue、不回显全部
+  规则** ⇒ 输出没变。改用**悬空运算符**（实测令 M8 报错、`Errors: 1→2`）后通过。
+  ⇒ 即"正控也要先证明不瞎"（D119 判据在本版的第二次实例）。
+
+### 四、过程中的两个真缺口（都是实测抓到的，都不是"搬"本身）
+
+| # | 缺口 | 处置 |
+|---|---|---|
+| 1 | 引擎原以 `npx tsx` 运行，**从未过类型检查**（`tsx` 不做类型检查）⇒ 进 ACC 的 `strict` ＋ `noUncheckedIndexedAccess` 后 **87 条 error** | 逐条修到 **0**：`!` 非空断言 54 处（同函数内可证）／`??` **0 处**（会在真边界改行为）／类型面 1 处（`VerifyIssue.severity` 补 `"info"`，原代码靠 `as any` 硬塞）／**新增 `@ts-ignore`/`@ts-nocheck`/`as any` 均为 0** |
+| 2 | `process.chdir()` 在 worker 线程不被支持（见 §二-3） | 改显式 `BASE` 基准 |
+
+> 🔴 **选 `!` 而不选 `??` 的理由（可复核）**：`engine.ts` 里有一处 `/[a-z]/i.test(input[i + 1])` **没有**边界守卫
+> —— 原代码在串尾会执行 `test(undefined)`，而 JS 把 `undefined` 转成字符串 `"undefined"`（含字母 ⇒ **true**）。
+> 写成 `?? ""` 就变成 `test("")` ⇒ **false**，**末字符边界上行为被改**。`!` 运行时被完全擦除 ⇒ 与原文逐位一致。
+> 这类"改动要落在哪一侧"的判断，正是本版最容易被悄悄改坏的地方。
+
+### 五、边界（D23：机制归 ACC、数据归 CCC）
+
+- **ACC 现在同时有**：方法手册（`praxis ontology`）＋ **引擎**（`ontology`）；
+- **CCC 仍持有**（本轮**不动**）：领域模型 `.ttl`、技能注册表；引擎里的容器约定（`sr:` 命名空间与顶层 skill 名）
+  已抽成**可覆盖常量**，缺省值与原脚本**逐字相同**；
+- 路径守卫：`path`／`skills` 先过 `resolveInside`（`init` 会**写文件**，少了这道就绕过 CCC 边界）。
+
+### 六、门禁与读数（六项全绿）
+
+- `typecheck` ✓｜`typecheck-host 0.2.0-rc.2` ✓（node 114 文件 ／ client 169 文件；paths 36 条 ＋ 21 条全中）
+- `test` ✓ **160 files ／ 2691 tests**（v1.51.6 是 157／2659 ⇒ **+3 文件／+32 用例**：`ontology-tool` 12 ＋
+  `ontology-engine` 15 ＋ `ontology-golden` 4，另随工具面计数更新 `register`／`invariant`／`tools-render-face`）
+- `coverage` ✓ **语句 30703/32095 = 95.66%**（分支 88.65% ／ 函数 98.4%）— 🔵 **读数比上一版低（98.28% → 95.66%）**：
+  引擎带来 ~3.2k 语句、自身覆盖约 71% ⇒ 全局被摊薄。**阈值（60/55/55/60）仍远未逼近**，且这一版多的是**真用例**。
+- `build` ✓（client 半未动 ／ `lib/index.js` 因并入引擎而增大）
+- `pack-check` ✓ **134 文件**（v1.51.6 是 132；新增 `lib/ontology/engine.d.ts` ＋ `lib/tools/ontology-eng.d.ts`）
+
+### 七、文档同步（同一发布内）
+
+`README.md` 工具表（新增 `ontology` 行；**顺带修了 `praxis` 那行仍写"三套"的陈旧说法** —— v1.51.5 加第四段时漏改）／
+`docs/dsp-module-map.md`（模块表 ＋ 注册事实 11→13／12 ＋ `string` schema 契约边界 ＋ 工具→实现映射）／
+`src/seams/system-prompt.ts`（工具行，**明写与 `praxis ontology` 的分工**）／`src/msm-ops.ts`（ACC 目录 ② 行）。
+
 ## v1.51.6 — 2026-10-11（**本体方法群补两处 ＋ 一处由实测推翻的语法断言**）
 
 **来源**：owner 2026-10-11 的四件事里的 C —— 「在过程中我们用到的知识都应逐步补充到 ACC 层」。

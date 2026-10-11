@@ -158,7 +158,9 @@
 | `tools/git.ts` | `container_git` | CCC git status/commit/push/log/pull/diff | 总是可见 | ⚠️ 无镜像测试（INDIRECT_COVERED ＋ `ops.test`） |
 | `tools/msm.ts` | `msm` | 执行/发现已注册 MSM（单入口 ＋ 模糊候选） | 总是可见；skiff 角色另受 `msms` 白名单门控 | ⚠️ 无镜像测试（INDIRECT_COVERED） |
 | `tools/kit.ts` | `dashboard` | health / time / wait 常开仪器 | 总是可见 | ⚠️ 无镜像测试（INDIRECT_COVERED） |
-| `tools/praxis.ts` | `praxis` | 按 section 注入 eap/neat/cce 框架 | 总是可见 | ✅ `praxis` |
+| `tools/praxis.ts` | `praxis` | 按 section 注入 eap/neat/cce/**ontology** 四套框架文本 | 总是可见 | ✅ `praxis` |
+| `tools/ontology-eng.ts` | `ontology` | 本体工程**引擎**（第 13 个工具）：init/check/explain/verify/review/compliance；路径先过 `resolveInside`，回执带退出码 | 总是可见 | ✅ `ontology-tool` / `ontology-golden`（移植保真） |
+| `ontology/engine.ts` | —（**不注册工具**） | 引擎本体：Turtle 解析 ＋ M1–M10／L1–L5／D1–D8／V1–V4 ＋ review/compliance 提示词生成（v1.52 由 CCC 的 MSM `ontology-engineering` **逐字搬来**） | 无 | ✅ `ontology-engine` / `ontology-golden` |
 | `tools/localstore.ts` | `localstore` | 凭据/配置本地存储（credential/config 双命名空间） | 总是可见 | ⚠️ 无镜像测试（INDIRECT_COVERED） |
 | `tools/container-admin.ts` | `container_admin` | CCC 管理面：role / msm / config 三域 | 总是可见 | ✅ `container-admin` |
 | `tools/im-bridge.ts` | `im-bridge` | 经 IM 通道向家人 send/send-file/users/status | 需 `hasEnabledImChannel(root)` | ⚠️ 无直接 import（能力层由 `im-bridge.test` 覆盖） |
@@ -166,11 +168,11 @@
 | `tools/eap.ts` / `tools/neat.ts` / `tools/cce.ts` | —（**不注册工具**） | 三份框架**文本常量**，由 `praxis.ts` 消费 | 无 | ✅ `acc-extras` |
 | `tools/skiff-admin.ts` | —（**不注册工具**） | Skiff 角色逻辑（guide/validate/apply/list），经 `container_admin role` 暴露 | 无 | ✅ `skiff-admin` |
 
-**注册路径事实**：装配点 = `src/index.ts:apply` → `ctx.tools.register(...)` ×**11**（工厂式 6 ＋ 常量式 5）。
+**注册路径事实**：装配点 = `src/index.ts:apply` → `ctx.tools.register(...)` ×**12**（工厂式 7 ＋ 常量式 5）。
 - **顺序约束**：`registerImChannel(weixinChannel)` 必须早于工具装配 —— `createImBridgeTool()` 的 description 读 `imChannelIds()`。
-- **清单三处一致（单一真相源）**：`src/invariant.ts:REGISTERED_TOOLS` ＋ `dsh.plugin.json` 的 `contributes.tools` 双列 11 名，由 `verifyToolConsistency()` 校验；`tests/register.test.ts` 断言 `register` 被调 11 次。
+- **清单三处一致（单一真相源）**：`src/invariant.ts:REGISTERED_TOOLS` ＋ `dsh.plugin.json` 的 `contributes.tools` 双列 **13** 名，由 `verifyToolConsistency()` 校验；`tests/register.test.ts` 断言 `register` 被调 **12** 次（`diagram` 关着的缺省态；开着则 13）。
 - **条件可见的统一实现**：`agent.ctx.tools.restrict({ deny: [...] })`（**从模型清单移除**，不是"看得到但被拒"），调用点全在 `seams/context.ts`（会话就绪 ＋ pre-step）：`im-bridge` ← `syncImBridgeVisibility`（判据 `hasEnabledImChannel`）／ `acc-diag` ← `syncExclusiveToolsVisibility`（判据 `EXCLUSIVE_TOOL_NAMES` ＋ `ccc.ts:readExclusiveTools`，fail-closed）。全体工具另受 `syncSafeModeRestriction`（`SAFE_MODE_DENY_TOOLS = ['bash']`）与 skiff 角色双白名单（pre-execute guard）两道 restrict。
-- **工具 → 实现**（薄壳证据）：`acc-diag`→`diag-ops:runAccDiag`｜`cc-fs`→`fs-ops:runCcFs`｜`git`→`git-ops:runGit`｜`kit`→`kit-ops:runKit`｜`localstore`→`localstore-ops:runLocalStore`｜`msm`/`container_admin`→`msm-ops:runMsm(Async)`｜`handyman`→`handyman-ops:*` ＋ `host/access:hostSubagents` ＋ `agent-idle:waitAgentIdle`｜`im-bridge`→`im-bridge:runImBridge`｜`trajectory`→`trajectory-ops:*` ＋ `rebuild:queueRebuild`（**动态 import**）＋ `wake-registry:addWake` ＋ `wake-scheduler:sendToTrajectory` ＋ `trajectory-bound:*`。
+- **工具 → 实现**（薄壳证据）：`acc-diag`→`diag-ops:runAccDiag`｜`cc-fs`→`fs-ops:runCcFs`｜`git`→`git-ops:runGit`｜`kit`→`kit-ops:runKit`｜`localstore`→`localstore-ops:runLocalStore`｜`ontology`→`ontology/engine:runOntologyCli`（**同步**、纯 node 内建依赖）｜`msm`/`container_admin`→`msm-ops:runMsm(Async)`｜`handyman`→`handyman-ops:*` ＋ `host/access:hostSubagents` ＋ `agent-idle:waitAgentIdle`｜`im-bridge`→`im-bridge:runImBridge`｜`trajectory`→`trajectory-ops:*` ＋ `rebuild:queueRebuild`（**动态 import**）＋ `wake-registry:addWake` ＋ `wake-scheduler:sendToTrajectory` ＋ `trajectory-bound:*`。
 
 ### 2.5 L1 · 轨迹／会话／唤醒核心域（18 个文件）
 
@@ -667,7 +669,7 @@
 | ③ **判别性探针**（同用例内） | 喂一个**长得像 JSON 的字符串**（`{"a":1}`）⇒ 必须**原样透传**；若实现被写成"先 stringify"或两分支接反 ⇒ 这里会得到**带转义的引号串** |
 | ④ **非字符串值**（仅 8 个 json 工具） | 归一化为 `JSON.stringify(value, null, 2)`；样本刻意用**键序非字典序 ＋ 嵌套 ＋ 混合类型**（同时钉"缩进 2"与"键序保持插入序"）＋ **正控**：期望值本身必须含换行（否则该断言对"没缩进"也成立 ⇒ 空断言） |
 
-⚠️ 🔴 **契约边界（决定 praxis 少一条用例 —— 这是本件唯一的"刻意不做"）**：`output.schema` **只有 `praxis` 是 `{ type: 'string' }`**，其余 8 个都是 `{ type: 'json' }`。而 `praxis` 的 `execute` **恒返回字符串**（`EAP_CONTENT` / `NEAT_CONTENT` / `CCE_CONTENT` / `PRAXIS_INDEX`）⇒ 那条 `JSON.stringify` 支线**在产线永不执行**（"构造上不可达／防御性归一化"档）。**刻意不测它** —— 硬凑会把"从不发生"固化成"期望形态"（同 §2.7b／§2.7n 的判断）。🔵 **本件要的是函数面**（`fstat-no` 归零），**进入函数即可**，不需要把不可达支线填满。✅ **事后复核佐证**：`praxis.ts` 残余 `cbranch-no` **恰 1 条，且就是那句 `value : JSON.stringify(value, null, 2)`** ⇒ "它是唯一残余"是**读数**，不是断言。
+⚠️ 🔴 **契约边界**：`output.schema` 是 `{ type: 'string' }` 的**只有 2 个**（`praxis`，以及 v1.52 新增的 `ontology` —— 后者刻意用 string：引擎报告是多行 Markdown，走 json 会被 `JSON.stringify` 把换行转义成 `\n`），其余 8 个都是 `{ type: 'json' }`。而 `praxis` 的 `execute` **恒返回字符串**（`EAP_CONTENT` / `NEAT_CONTENT` / `CCE_CONTENT` / `PRAXIS_INDEX`）⇒ 那条 `JSON.stringify` 支线**在产线永不执行**（"构造上不可达／防御性归一化"档）。**刻意不测它** —— 硬凑会把"从不发生"固化成"期望形态"（同 §2.7b／§2.7n 的判断）。🔵 **本件要的是函数面**（`fstat-no` 归零），**进入函数即可**，不需要把不可达支线填满。✅ **事后复核佐证**：`praxis.ts` 残余 `cbranch-no` **恰 1 条，且就是那句 `value : JSON.stringify(value, null, 2)`** ⇒ "它是唯一残余"是**读数**，不是断言。
 
 **读数（锚定 2026-09-25 19:25 那一跑）**：
 - 🔴 **机械判据（本件的直接验收）**：`coverage/src/**/*.html` 的 **`fstat-no` = 27 处**（改前 44）——🆕 **`44 → 27` 是本件开工前"预登记"的预测值，实测逐字命中**（同 §2.7i/o 家族：预测可证伪才算判据）。

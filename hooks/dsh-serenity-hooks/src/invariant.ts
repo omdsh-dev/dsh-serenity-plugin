@@ -58,8 +58,12 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
  * v1.51（**D104**）：新增 **`diagram`**（标签源码 → 进程内光栅化成 PNG；**缺省关**，
  * 关时连 `ctx.tools.register` 都不调用）⇒ **12**。同规格：开关关着**不影响这里列它** ——
  * 本常量描述的是"插件**具备**的工具面"，不是"此刻注册了几个"。
+ *
+ * v1.52（**D121**，owner 2026-10-11 裁「引擎搬进 ACC」）：新增 **`ontology`** —— 本体工程
+ * **引擎**（原为 CCC 的 MSM `ontology-engineering`，逐字搬迁；见 `src/ontology/engine.ts` 文件头
+ * 的三处改写）。它与 `praxis ontology`（**方法文本**）是**同一领域的两个面**：一个说、一个跑 ⇒ **13**。
  */
 export const REGISTERED_TOOLS = [
   'container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
-  'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram',
+  'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology',
 ] as const

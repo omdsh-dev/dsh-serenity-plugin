@@ -112,6 +112,7 @@ export function toolsBlock(): string {
     '  container_git— git operations (status/commit/push/log)',
     '  msm          — execute a registered CCC MSM: msm(name, args); partial name returns candidates; inspect=true shows usage',
     '  praxis       — actionable theory injection: praxis (index) / praxis eap / praxis neat / praxis cce / praxis ontology',
+    '  ontology     — ontology engineering ENGINE (executable): init (write template) / check (M1-M10 structural; level=strict adds L1-L5 hints) / explain (summary) / verify (V1-V4 runtime compliance) / review (semantic-review prompt) / compliance (axiom-vs-skill checklist). Sibling of `praxis ontology` — that one is the METHOD TEXT, this one RUNS it. path must stay inside the container; the receipt carries the engine exit code (0/1/2/4) and the engine text verbatim, so read it rather than assuming success',
     '  handyman     — delegate work to a worker agent on a CCC-whitelisted model; mode="foreground" (default) = child agent(s) run once and return their final text (jobs=[...] fans out in parallel, cap 10, per-job model); mode="background" = loop-validated worker (completion code + round cap + restart + progress file), jobs=[] orchestrates parallel work',
     '  localstore   — ACC local credential/config storage (CCC-root localstore.json; git policy localstore.gitTrack default deny)',
     '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config (view)',

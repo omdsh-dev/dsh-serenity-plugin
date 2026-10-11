@@ -21,10 +21,12 @@
  *    ⚠️ **本件刻意不用 `vi.mock('@deepseek-ai/dsh-tools')`**（`acc-diag.test.ts` 那种 identity 桩）——
  *    走**真的 `defineTool`**，于是测到的是**产线的那个包装**，不是替身。
  *
- * ⚠️ **契约边界（决定本件测哪几条分支）**：`output.schema` 只有 `praxis` 是 `{ type: 'string' }`，
- *    其余 8 个都是 `{ type: 'json' }` ⇒ 对 8 个 json 工具，"非字符串值"是**契约内**的正常形态；
- *    而对 `praxis`，其 `execute` **恒返回字符串**（`EAP_CONTENT` / `NEAT_CONTENT` / `CCE_CONTENT` / `PRAXIS_INDEX`）
- *    ⇒ 那条 `JSON.stringify` 支线**在产线永不执行**（属"构造上不可达／防御性归一化"档）。
+ * ⚠️ **契约边界（决定本件测哪几条分支）**：`output.schema` 是 `{ type: 'string' }` 的只有 **2 个**
+ *    （`praxis`，以及 v1.52 起新增的 `ontology` —— 后者刻意用 string：引擎报告是多行 Markdown 式，
+ *    走 json 会被 `JSON.stringify` 把换行转义成 `\n`），其余 8 个都是 `{ type: 'json' }`
+ *    ⇒ 对 8 个 json 工具，"非字符串值"是**契约内**的正常形态；
+ *    而两个 string 工具的 `execute` **恒返回字符串** ⇒ 那条 `JSON.stringify` 支线**在产线永不执行**
+ *    （属"构造上不可达／防御性归一化"档）。
  *    ⇒ 🔴 **刻意不测它**：硬凑会把"从不发生"固化成"期望形态"（同 §2.7b／§2.7n 的判断）。
  *    本件要的是**函数面**（`fstat-no` 归零），进入函数即可，**不需要把不可达支线填满**。
  *
@@ -44,6 +46,7 @@ import { createContainerAdminTool } from '../src/tools/container-admin.js'
 import { createImBridgeTool } from '../src/tools/im-bridge.js'
 import { createHandymanTool } from '../src/tools/handyman.js'
 import { createAccDiagTool } from '../src/tools/acc-diag.js'
+import { createOntologyTool } from '../src/tools/ontology-eng.js'
 
 /** 单个内容块的**结构性**视图（本件只关心 `type` 与 `text`，不引宿主类型） */
 type Block = { type: string; text?: string }
@@ -83,7 +86,7 @@ function renderOf(tool: unknown, label: string): (args: unknown, value: unknown)
   return out.render as (args: unknown, value: unknown) => Block[]
 }
 
-/** 9 个靶（schema 决定"非字符串值"是否属契约内 —— 见文件头） */
+/** 10 个靶（schema 决定"非字符串值"是否属契约内 —— 见文件头） */
 const TOOLS: Array<{ label: string; schema: 'string' | 'json'; make: () => unknown }> = [
   { label: 'praxis', schema: 'string', make: () => praxisTool },
   { label: 'cc-fs', schema: 'json', make: () => ccFsTool },
@@ -94,12 +97,15 @@ const TOOLS: Array<{ label: string; schema: 'string' | 'json'; make: () => unkno
   { label: 'im-bridge', schema: 'json', make: () => createImBridgeTool() },
   { label: 'handyman', schema: 'json', make: () => createHandymanTool(ctx) },
   { label: 'acc-diag', schema: 'json', make: () => createAccDiagTool(ctx) },
+  // v1.52（D121）：本体工程引擎。**schema 刻意是 string 而非 json** —— 引擎报告是多行 Markdown 式，
+  // 走 json 会被 `JSON.stringify` 把换行转义成 `\n`（模型读到的是一坨转义串）。见 `ontology-eng.ts` 的 receiptOf。
+  { label: 'ontology', schema: 'string', make: () => createOntologyTool() },
 ]
 
 describe('tools/*：`output.render` 通路（⑤ 第 32 件）', () => {
-  it('🔴 可达性自证：9 个工具对象都真的暴露 output.render（本件全部断言的前提）', () => {
-    // ⚠️ 扫描域自证：先钉"靶确实是 9 个"，否则"零个不合格"会永远绿（同 §3-9 #7 的写法）
-    expect(TOOLS).toHaveLength(9)
+  it('🔴 可达性自证：10 个工具对象都真的暴露 output.render（本件全部断言的前提）', () => {
+    // ⚠️ 扫描域自证：先钉"靶确实是 10 个"，否则"零个不合格"会永远绿（同 §3-9 #7 的写法）
+    expect(TOOLS).toHaveLength(10)
     const unreachable = TOOLS.filter((t) => {
       try {
         renderOf(t.make(), t.label)

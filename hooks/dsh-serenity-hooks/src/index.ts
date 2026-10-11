@@ -19,6 +19,7 @@ import { createKitTool } from './tools/kit.js'
 import { gitTool } from './tools/git.js'
 import { msmTool } from './tools/msm.js'
 import { praxisTool } from './tools/praxis.js'
+import { createOntologyTool } from './tools/ontology-eng.js'
 import { createHandymanTool } from './tools/handyman.js'
 import { createTrajectoryTool } from './tools/trajectory.js'
 import { localstoreTool } from './tools/localstore.js'
@@ -389,6 +390,9 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(gitTool) // container_git
     ctx.tools.register(msmTool) // msm（单入口执行 + 发现）
     ctx.tools.register(praxisTool) // praxis（eap/neat/cce/ontology 四合一）
+    // v1.52（D121）：本体工程**引擎**（原 CCC 的 MSM `ontology-engineering` 逐字搬进 ACC）。
+    // 与 praxis ontology 的分工：那个是**方法文本**，这个是**可执行的那个**（13）。
+    ctx.tools.register(createOntologyTool())
     ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(localstoreTool)
     // container_admin（role + msm 管理 + config——v1.33 起机务舱；v1.34.1 起为工厂形态：
