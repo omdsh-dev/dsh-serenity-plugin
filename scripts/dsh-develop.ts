@@ -1542,8 +1542,15 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
     })
     if (r.status === 0) break
     const out = r.stdout + r.stderr
-    const isTarball404 = /ERR_PNPM_FETCH_404/.test(out) && /dsh-serenity-hooks[-\d.]*\.tgz/.test(out)
-    if (!isTarball404) {
+    // 🔴 2026-10-11（S142 实测）：传播延迟在 pnpm 侧有**两种**报错形态，**都要重试**——
+    //   ① `ERR_PNPM_FETCH_404`（packument 已知该版本，但 tarball 还没到边缘）—— 走 `latest` 时常见
+    //   ② `ERR_PNPM_NO_MATCHING_VERSION`（**packument 本身还没列出该版本**）—— **指定精确版本**时常见
+    //   实测：`npm-install web 1.52.3` 在发布后 ~1 分钟报 ② 而**当场退出、一轮都不等**；
+    //   同一时刻走 ① 的路径（`latest` 还是上一版）反倒能装上 ⇒ 只认 ① 会把
+    //   "指定版本的正常传播等待"误判成失败（同族：把"传播"当"没上去"）。
+    const isPropagation = (/ERR_PNPM_FETCH_404/.test(out) && /dsh-serenity-hooks[-\d.]*\.tgz/.test(out))
+      || /ERR_PNPM_NO_MATCHING_VERSION/.test(out)
+    if (!isPropagation) {
       console.error(out)
       fail(`dsh plugin add 失败 (exit ${r.status})`, 2)
     }
@@ -1553,8 +1560,9 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
         + `  这是**传播延迟**（不是发布未成功）：packument 已含 ${target}。\n`
         + `  处置：等几分钟后重跑 \`dsh-develop npm-install\`（或 publish-landed 复核）。`, 2)
     }
-    console.log(`[dsh-develop] ⏳ tarball 尚未传播（第 ${attempt}/${TARBALL_WAIT_ATTEMPTS} 轮；60s 后重试）`
-      + ' —— ERR_PNPM_FETCH_404，非真失败')
+    const shape = /ERR_PNPM_NO_MATCHING_VERSION/.test(out) ? 'ERR_PNPM_NO_MATCHING_VERSION' : 'ERR_PNPM_FETCH_404'
+    console.log(`[dsh-develop] ⏳ 尚未传播（第 ${attempt}/${TARBALL_WAIT_ATTEMPTS} 轮；60s 后重试）`
+      + ` —— ${shape}，非真失败`)
     run('sleep', ['60'], { cwd: process.cwd(), quiet: true })
   }
   console.log(r.stdout.trim() || r.stderr.trim())
@@ -2375,8 +2383,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'squash-history': cmdSquashHistory(rest[0]); break
       case 'publish': cmdPublish(); break
       // 落地判据可单独调用（发布后复核 / 事后审计都用它）——**只读**，不改任何东西。
-      // ⚠️ 这里是**事后**审计（传播早已完成）⇒ 判据 = **三个读数任一为真**；全假才是"真没有"。
-      //    （发布**当时**不能用这条判据 —— 那会儿三个读数可能都还没到，见 verifyPublished。）
+      // ⚠️ 判据 = **三个读数任一为真** ⇒「上架成立」。
+      // 🔴 2026-10-11 实测（S142）：**三读数全假时只能说"未确认"，不能说"真没有"** ——
+      //    发布 1.52.3 后 ~1 分钟跑本命令 ⇒ 三读数**全假**；而 npm 当时**明确报过成功**
+      //    （`+ @shgroup/dsh-serenity-hooks@1.52.3`），且 35 分钟后再看 **全真**（对照：1.52.2 全真）。
+      //    ⇒ 三读数的滞后**可以超过十分钟**，与"没上去"**在读数上不可分**。
+      //    要分开只有一个办法：看 **publish 当时的 npm 回执**（那一步在 {@link verifyPublished}，
+      //    它拿得到 npm 输出，所以说得出"未确认（传播中）"）。本命令拿不到 ⇒ 不许下断言。
       case 'publish-landed': {
         const v = rest[0] ?? currentVersion().pkg
         const read = landingRead(v)
@@ -2392,8 +2405,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
           else console.log(`[dsh-develop] ⚠️ 包体此刻仍取不到（tarball=${read.tarball}）⇒ 传播延迟／边缘负缓存，`
             + '不是"没上架"；装不上就等几分钟重试')
         } else {
-          fail(`**三读数都没有 ${v}**（record=${read.record} / tarball=${read.tarball} / packument=${pk.has}）`
-            + ' —— 事后审计下这已是"真没有"', 2)
+          fail(`**三读数都没有 ${v}**（record=${read.record} / tarball=${read.tarball} / packument=${pk.has}）\n`
+            + '  ⚠️ 这**不是**"真没有"：三读数可滞后十几分钟，与"没上去"**在读数上不可分**。\n'
+            + `  处置：**不要重跑 publish**（同一版本只会 409）。隔 2~5 分钟复测本命令；\n`
+            + '  若隔 >15 分钟仍全假，才去看 publish 当时的 npm 回执（那才是权威）。', 2)
         }
         break
       }
