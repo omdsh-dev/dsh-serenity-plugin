@@ -13,14 +13,20 @@
  * ⚠️ **ACC/CCC 边界（D23：机制与措辞归 ACC、数据归 CCC）**：`compliance` 回归守卫的
  *    fixture = **真实注册表 ＋ skills 目录**，那是 **CCC 数据**，不在 ACC 仓内。
  *    原用例跑在 CCC 里，靠相对深度（`../references/…`、`../..`）命中；搬进 ACC 仓后
- *    相对深度不再成立 ⇒ 改为「自本文件上溯，找最近的含 `.opencode/skills` 的祖先目录 = CCC 根」，
- *    注册表 = `<CCC 根>/.opencode/skills/home-ontology/references/serenity-skills-ontology.ttl`。
- *    找不到（= 独立克隆 / CI，本仓为公开仓）则整块 **skip** —— 断言文本仍一字未改。
+ *    相对深度不再成立 ⇒ 改为「自本文件上溯，找最近的含 `.opencode/skills` 的祖先目录 = CCC 根」。
+ *    🔴 **v1.52.1（2026-10-11）第二次修正：注册表按文件名搜，不再写死"谁持有它"。**
+ *    原写法写死 `<CCC 根>/.opencode/skills/home-ontology/references/serenity-skills-ontology.ttl`，
+ *    而注册表 2026-10-11 随 owner 三条令**搬到了 `home-serenity/references/`**（前者整个 skill 退役）
+ *    ⇒ 原路径当场失效 ⇒ `HAS_FIXTURE` 变 false ⇒ **整块 6 条断言静默消失**
+ *    （`test` 只报"文件数不变、用例数少 6"，**没有任何失败信号** —— 这正是最坏的失败形态）。
+ *    ⇒ 两处一起改：① **按文件名搜**（注册表属于哪个 skill 目录是实现细节）；
+ *    ② **在 CCC 内却定位不到 ⇒ 响亮失败**，不 skip（见下方「fixture 定位」守卫用例）。
+ *    只有「上溯不到 CCC 根」（= 独立克隆 / CI，本仓为公开仓）才是**合法**的 skip。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runOntologyCli, MsmError, validateOnto } from "../src/ontology/engine.js";
-import { writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -146,11 +152,39 @@ function findCccRoot(start: string): string | undefined {
   return undefined;
 }
 
+/**
+ * 🔴 注册表**按文件名搜** —— 不再写死"哪个 skill 目录持有它"。
+ * 它已经搬过一次家（home-ontology → home-serenity，2026-10-11），把持有者写进来就会**再坏一次**。
+ */
+function findRegistry(skillsDir: string): string | undefined {
+  for (const name of readdirSync(skillsDir)) {
+    const p = join(skillsDir, name, "references", "serenity-skills-ontology.ttl");
+    if (existsSync(p)) return p;
+  }
+  return undefined;
+}
+
 const CCC_ROOT = findCccRoot(__dirname);
 const SKILLS = CCC_ROOT ? join(CCC_ROOT, ".opencode", "skills") : "";
-const REG = SKILLS ? join(SKILLS, "home-ontology", "references", "serenity-skills-ontology.ttl") : "";
+const REG = SKILLS ? (findRegistry(SKILLS) ?? "") : "";
 /** fixture（真实注册表 ＋ skills 目录）到位才跑本块 —— 它们是 CCC 数据，不在 ACC 仓内 */
 const HAS_FIXTURE = REG !== "" && existsSync(REG) && existsSync(SKILLS);
+
+/**
+ * 🆕 v1.52.1：**防静默跳过的守卫**。本块此前只会 skip，于是"CCC 侧把注册表搬了家"
+ * 表现成"全绿"（6 条断言凭空消失）。⇒ 把"在 CCC 内就必须定位到 fixture"写成
+ * **无条件运行的用例**：CI/独立克隆（上溯不到 CCC 根）本就该 skip，故那时它是 no-op。
+ */
+describe("fixture 定位（防静默跳过）", () => {
+  it("在 CCC 内运行时，本体注册表必须可定位（否则本文件的 compliance 守卫被静默拔掉）", () => {
+    if (!CCC_ROOT) return; // 独立克隆 / CI：fixture 本就不该存在 —— 合法的 no-op
+    expect(
+      REG,
+      `找不到 ${SKILLS}/*/references/serenity-skills-ontology.ttl（CCC 根 = ${CCC_ROOT}）`
+        + ` ⇒ 多半是 CCC 侧把注册表搬家/改名了：请更新本件的定位逻辑，别写死 skill 目录名。`,
+    ).not.toBe("");
+  });
+});
 
 describe.skipIf(!HAS_FIXTURE)("compliance 生成器（S188 修复回归守卫）", () => {
   function runCompliance(): any {
