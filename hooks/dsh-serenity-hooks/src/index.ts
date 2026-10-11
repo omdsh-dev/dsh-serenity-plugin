@@ -388,7 +388,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(createKitTool(ctx)) // dashboard
     ctx.tools.register(gitTool) // container_git
     ctx.tools.register(msmTool) // msm（单入口执行 + 发现）
-    ctx.tools.register(praxisTool) // praxis（eap/neat/cce 三合一）
+    ctx.tools.register(praxisTool) // praxis（eap/neat/cce/ontology 四合一）
     ctx.tools.register(createHandymanTool(ctx))
     ctx.tools.register(localstoreTool)
     // container_admin（role + msm 管理 + config——v1.33 起机务舱；v1.34.1 起为工厂形态：

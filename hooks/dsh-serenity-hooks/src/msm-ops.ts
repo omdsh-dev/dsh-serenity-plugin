@@ -117,7 +117,7 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                           + cro-guide CRO 编写指南）
                          原 logbook 已并入（v1.33 用户裁决：废除 logbook 词）；close/archive 删（归档走 container_fs mv），
                          health/qa/summary 分别并入 use / list，hook-develop-guide 并进 container_admin msm guide
-  ② 认知质量框架      → praxis（eap/neat/cce 三合一——可实践理论注入，section 渐进披露，无参即目录）
+  ② 认知质量框架      → praxis（eap/neat/cce/ontology 四合一——可实践理论注入，section 渐进披露，无参即目录）
   ③ 工具与执行        → container_fs（容器文件系统 15 子命令）/ container_git（git）/ dashboard（health 含注册表检查/time/wait）
                          acc_msm 已并入 msm（执行+发现）与 container_admin（管理）——msm("<name>", ["<args>"])；inspect=true 查用法
                          handyman（杂工 agent 编排——guide 子命令：handyman guide）

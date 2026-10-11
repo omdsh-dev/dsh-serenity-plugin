@@ -111,7 +111,7 @@ export function toolsBlock(): string {
     '  dashboard    — always-on container instruments: health (CCC three-principle check + registry integrity) / time (now) / wait (N seconds)',
     '  container_git— git operations (status/commit/push/log)',
     '  msm          — execute a registered CCC MSM: msm(name, args); partial name returns candidates; inspect=true shows usage',
-    '  praxis       — actionable theory injection: praxis (index) / praxis eap / praxis neat / praxis cce',
+    '  praxis       — actionable theory injection: praxis (index) / praxis eap / praxis neat / praxis cce / praxis ontology',
     '  handyman     — delegate work to a worker agent on a CCC-whitelisted model; mode="foreground" (default) = child agent(s) run once and return their final text (jobs=[...] fans out in parallel, cap 10, per-job model); mode="background" = loop-validated worker (completion code + round cap + restart + progress file), jobs=[] orchestrates parallel work',
     '  localstore   — ACC local credential/config storage (CCC-root localstore.json; git policy localstore.gitTrack default deny)',
     '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config (view)',
