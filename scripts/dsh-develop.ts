@@ -453,6 +453,42 @@ function landingRead(version: string): { record: string; tarball: string } {
   }
 }
 
+/**
+ * packumentHasVersion — **权威读**：registry 的 packument 里到底有没有这个版本。
+ *
+ * 🔴 为什么必须加这第三个读数（2026-10-11 v1.51.6 实测，三个读数互相矛盾）：
+ *   发布后 90 秒内，`?write=true` 与 tarball **双双 404** ⇒ 旧判据打印
+ *   「形态 = 版本记录本身取不到（= 没上去）。处置：…再重跑 publish」——
+ *   而这次**重量级错误**：packument 的 `dist-tags.latest` 当时**已经是 `1.51.6`**，
+ *   且 `versions['1.51.6'].dist` 的 `shasum`（`03f5eec0…`）／`fileCount`（132）／
+ *   `unpackedSize`（8184876）／`integrity` 与 npm 发布回执**逐字相同** ⇒ **发布已成立**。
+ *   若照那句诊断"重跑 publish"，只会拿到 409（版本已存在）。
+ *   ⇒ 这正是「**否定性判据必须自带对照组**」那一类：两个读数的 404 是**同一个 CDN 的
+ *     传播延迟／边缘负缓存**，它们一起变红**不构成"没上去"的证据**。
+ *
+ * ⇒ 判据分层（本函数 + {@link verifyPublished} 共同实现）：
+ *   · **上架成立**（权威）= packument 含该版本 —— `?write=true` 与 tarball 都可能滞后；
+ *   · **此刻可装**（能力）= tarball 200 —— 用户能不能真下载。
+ *   两者**分开报**，不再用"tarball 404"去否定"上架"。
+ */
+function packumentHasVersion(version: string): { has: boolean; detail: string } {
+  const r = run('curl', ['-s', '--max-time', '20',
+    '-H', 'Accept: application/vnd.npm.install-v1+json',
+    'https://registry.npmjs.org/@shgroup%2Fdsh-serenity-hooks'],
+    { cwd: SCRIPTS_DIR, quiet: true, env: {} })
+  if (r.status !== 0) return { has: false, detail: `curl exit ${r.status}` }
+  const body = (r.stdout || '').trim()
+  if (!body) return { has: false, detail: 'packument 空响应' }
+  try {
+    const doc = JSON.parse(body) as { 'dist-tags'?: Record<string, string>; versions?: Record<string, unknown> }
+    const has = typeof doc.versions === 'object' && doc.versions !== null && version in doc.versions
+    const latest = doc['dist-tags']?.latest ?? '?'
+    return { has, detail: `latest=${latest}` }
+  } catch {
+    return { has: false, detail: 'packument 解析失败' }
+  }
+}
+
 function verifyPublished(version: string): void {
   const deadline = Date.now() + 90_000
   let last: { record: string; tarball: string } = { record: '?', tarball: '?' }
@@ -465,13 +501,20 @@ function verifyPublished(version: string): void {
     if (Date.now() >= deadline) break
     run('sleep', ['3'], { cwd: SCRIPTS_DIR, quiet: true, env: {} })
   }
-  const verdict = last.record === '200' && last.tarball !== '200'
-    ? '  🔴 形态 = **半上架**：版本记录已在 registry（?write=true 200），但 **tarball 取不到** ⇒\n'
-      + '     用户装不上，而 `latest` 可能已指向它 ⇒ **这是"staged 待批准"的签名**，不是缓存问题。\n'
-      + '     处置：到 npm 账号侧批准/删除该 staged 版本，或换版本号重发（不要原样重发 —— 会 409）。'
-    : '  🔴 形态 = 版本记录本身取不到（= 没上去）。处置：看上方 npm 的实际输出再重跑 publish。'
-  fail(`landing 核对失败：version record = ${last.record} ／ tarball = ${last.tarball}\n`
-    + `  （判据 = ?write=true 的版本端点 ＋ tarball；两者都要 200）\n${verdict}`, 2)
+  // 90 秒内两读数未同时转绿 ⇒ 用**权威读**定案（分包体/记录两种滞后，见 packumentHasVersion 注释）
+  const pk = packumentHasVersion(version)
+  if (pk.has) {
+    console.log(`[dsh-develop] ⚠️ 落地核对：packument **已含** ${version}（${pk.detail}）⇒ **上架成立**（权威读）`)
+    console.log(`   但 90 秒内 record=${last.record} ／ tarball=${last.tarball} 仍未转 200。`)
+    console.log('   形态 = **包体仍在传播**（tarball 的 404 会被边缘负缓存；本仓实测：v1.51.6 首跑两读数皆 404 而 packument 已完整，'
+      + 'v1.51.5 约 40 分钟后才 206）'
+      + (last.record === '200' ? ' ／ 旧文案把这叫作「半上架」，本仓三次实测均为传播延迟' : ''))
+    console.log(`   ⇒ **不判失败**（重跑 publish 会 409）。复核 = publish-landed ${version}；装 = npm-install（该步自带传播重试）`)
+    return
+  }
+  fail(`landing 核对失败：packument **不含** ${version}（${pk.detail}；record=${last.record} ／ tarball=${last.tarball}）\n`
+    + '  （判据 = ① packument 成员资格〔权威〕 ② ?write=true 版本端点 ③ tarball 可下载；三条一起解释，别用单条否定）\n'
+    + '  🔴 形态 = 真没上去。处置：看上方 npm 的实际输出再重跑 publish。', 2)
 }
 
 /**
@@ -1461,14 +1504,36 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
     `[dsh-develop] npm 安装 ${pkgSpec} 到 profile '${profile}'（官方 dsh plugin add 路径）` +
       (registry ? `｜源覆盖: ${registry}` : ''),
   )
-  const r = run(bin, ['plugin', '--profile', profile, 'add', pkgSpec], {
-    cwd: process.cwd(),
-    quiet: true,
-    env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache, ...registryEnv },
-  })
-  if (r.status !== 0) {
-    console.error(r.stdout + r.stderr)
-    fail(`dsh plugin add 失败 (exit ${r.status})`, 2)
+  // 🔴 tarball 传播重试（2026-10-11 v1.51.6 实测）：publish 成功后 packument **立刻**含该版本，
+  //   但 tarball 的 404 会被**边缘负缓存** ⇒ 紧跟发布的 npm-install 会吃到 ERR_PNPM_FETCH_404
+  //   （实测：发布后约 5 分钟 pnpm 仍报 ERR_PNPM_FETCH_404，而版本记录与 integrity 都已齐）。
+  //   ⇒ **只对这一种错误**做有界重试（其余失败原样立刻报错，不掩盖真问题）。
+  //   ⚠️ 总预算须留在 msm 的 600s 执行超时内 ⇒ 6 轮 × 60s ≈ 5 分钟；更长的传播延迟要手动重跑。
+  const TARBALL_WAIT_ATTEMPTS = 6
+  const TARBALL_WAIT_MS = 60_000
+  let r: { status: number; stdout: string; stderr: string } = { status: 0, stdout: '', stderr: '' }
+  for (let attempt = 1; ; attempt++) {
+    r = run(bin, ['plugin', '--profile', profile, 'add', pkgSpec], {
+      cwd: process.cwd(),
+      quiet: true,
+      env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache, ...registryEnv },
+    })
+    if (r.status === 0) break
+    const out = r.stdout + r.stderr
+    const isTarball404 = /ERR_PNPM_FETCH_404/.test(out) && /dsh-serenity-hooks[-\d.]*\.tgz/.test(out)
+    if (!isTarball404) {
+      console.error(out)
+      fail(`dsh plugin add 失败 (exit ${r.status})`, 2)
+    }
+    if (attempt >= TARBALL_WAIT_ATTEMPTS) {
+      console.error(out)
+      fail(`dsh plugin add 失败 (exit ${r.status})：tarball 仍取不到 —— 已等 ${attempt} 轮 × 60s。\n`
+        + `  这是**传播延迟**（不是发布未成功）：packument 已含 ${target}。\n`
+        + `  处置：等几分钟后重跑 \`dsh-develop npm-install\`（或 publish-landed 复核）。`, 2)
+    }
+    console.log(`[dsh-develop] ⏳ tarball 尚未传播（第 ${attempt}/${TARBALL_WAIT_ATTEMPTS} 轮；60s 后重试）`
+      + ' —— ERR_PNPM_FETCH_404，非真失败')
+    run('sleep', ['60'], { cwd: process.cwd(), quiet: true })
   }
   console.log(r.stdout.trim() || r.stderr.trim())
   console.log(`[dsh-develop] ✓ 已安装 ${pkgSpec}（npm registry）→ 重启 dsh web 生效（restart-web）`)
@@ -2291,13 +2356,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'publish-landed': {
         const v = rest[0] ?? currentVersion().pkg
         const read = landingRead(v)
+        const pk = packumentHasVersion(v)
         console.log(`[dsh-develop] publish-landed ${v}`)
+        console.log(`  packument 含该版本（权威）   = ${pk.has}（${pk.detail}）`)
         console.log(`  版本记录（${v}?write=true） = ${read.record}`)
         console.log(`  tarball（-/${v}.tgz）        = ${read.tarball}`)
-        if (read.record === '200' && read.tarball === '200') {
-          console.log('[dsh-develop] ✓ 已落地（记录 ＋ 包体都取得到）')
+        if (pk.has) {
+          console.log('[dsh-develop] ✓ **上架成立**（权威读 = packument）')
+          if (read.tarball === '200') console.log('[dsh-develop] ✓ 且包体此刻可下载（tarball 200）')
+          else console.log(`[dsh-develop] ⚠️ 包体此刻仍取不到（tarball=${read.tarball}）⇒ 传播延迟／边缘负缓存，`
+            + '不是"没上架"；装不上就等几分钟重试')
         } else {
-          fail(`landing 未成立（record=${read.record} / tarball=${read.tarball}）`, 2)
+          fail(`**上架未成立**：packument 不含 ${v}（${pk.detail}；record=${read.record} / tarball=${read.tarball}）`, 2)
         }
         break
       }
