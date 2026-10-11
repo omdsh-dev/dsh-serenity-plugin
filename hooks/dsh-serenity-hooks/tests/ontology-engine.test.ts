@@ -26,7 +26,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { runOntologyCli, MsmError, validateOnto } from "../src/ontology/engine.js";
-import { writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { writeFileSync, mkdirSync, rmSync, existsSync, readdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -279,6 +279,72 @@ describe.skipIf(!HAS_FIXTURE)("compliance 生成器（S188 修复回归守卫）
     expect(selfChecks.length).toBeGreaterThanOrEqual(1);
     for (const c of selfChecks) {
       expect(c.verification).not.toContain("{skill}");
+    }
+  });
+});
+
+/**
+ * 🔴 v1.52.2 回归钉：**V3 不得静默跳过**。
+ *
+ * 原缺陷（2026-10-11 实测）：`loadMechRegistry` 拼路径时**漏了 `references/` 段**
+ *   （`…/skills/<topSkill>/mech-registry.json`），而本文件自己的文案写着 `references/`
+ *   ⇒ 每次 `verify` 都走 else 分支打印「No mech-registry.json found — check skipped」，
+ *   于是「**MSM 的 `skill` 字段必须指向一个真实存在的 skill 目录**」这条检查
+ *   **从来没有跑过一条**（静默跳过 = 最坏的失败形态）。
+ *
+ * 本件把两侧都钉住：**孤儿必须被抓**（正控）＋ **正常的不得被误报**（负控）。
+ * 用 `opts.cwd` 造一个最小 CCC（引擎的 ROOT 由调用方给 —— 就是为了这种可测性）。
+ */
+describe("V3 MSM 注册一致性（防静默跳过）", () => {
+  const MINI_TTL = `@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix sr: <http://home-serenity/ontology#> .
+@prefix : <http://example.org/onto#> .
+
+:onto a owl:Ontology ;
+    sr:name "mini" ;
+    owl:versionInfo "0.1.0" .
+
+:Skill a owl:Class ; rdfs:label "Skill" ; sr:rigidity "rigid" .
+:HomeSerenity a owl:Class ; rdfs:label "home-serenity" ; rdfs:subClassOf :Skill ; sr:rigidity "rigid" .
+:RealSkill a owl:Class ; rdfs:label "real-skill" ; rdfs:subClassOf :Skill ; sr:rigidity "rigid" .
+`;
+
+  it("注册表在 <CCC>/.opencode/skills/<topSkill>/references/ ⇒ V3 真检查：孤儿报错、正常的静默", () => {
+    const root = mkdtempSync(join(tmpdir(), "onto-v3-"));
+    try {
+      const skills = join(root, ".opencode", "skills");
+      for (const n of ["home-serenity", "real-skill"]) {
+        mkdirSync(join(skills, n), { recursive: true });
+        writeFileSync(join(skills, n, "SKILL.md"), `# ${n}\n`);
+      }
+      mkdirSync(join(skills, "home-serenity", "references"), { recursive: true });
+      writeFileSync(
+        join(skills, "home-serenity", "references", "mech-registry.json"),
+        JSON.stringify({
+          msms: [
+            { name: "ok-msm", skill: "real-skill" },
+            { name: "orphan-msm", skill: "no-such-skill" },
+          ],
+        }),
+      );
+      const ttl = join(root, "mini.ttl");
+      writeFileSync(ttl, MINI_TTL);
+
+      const r = runOntologyCli(["verify", ttl, "--level", "operational"], {
+        cwd: root,
+        topSkill: "home-serenity",
+      });
+
+      // ① 不再静默跳过（原缺陷的指纹：这一句以前每次都会出现）
+      expect(r.stdout + r.stderr).not.toContain("No mech-registry.json found");
+      // ② 正控：孤儿被真抓出来
+      expect(r.stdout).toContain('"orphan-msm"');
+      expect(r.stdout).toContain("no-such-skill");
+      // ③ 负控：指向**真实**目录的那条不得被误报（否则等于"见注册表就报"）
+      expect(r.stdout).not.toContain('"ok-msm"');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
   });
 });

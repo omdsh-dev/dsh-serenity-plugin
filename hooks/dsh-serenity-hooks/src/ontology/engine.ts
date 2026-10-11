@@ -1860,7 +1860,15 @@ function getOntoSkillList(onto: OntologyDefinition): string[] {
 }
 
 function loadMechRegistry(rootPath: string): Record<string, { skill: string }> {
-  const regPath = join(rootPath, ".opencode", "skills", TOP_SKILL, "mech-registry.json");
+  // 🔴 2026-10-11（v1.52.2）修一处**静默失效**：本行原先漏了 `"references"` 段
+  //   （`join(rootPath, ".opencode", "skills", TOP_SKILL, "mech-registry.json")`），而真正的位置
+  //   是 `<CCC>/.opencode/skills/<TOP_SKILL>/references/mech-registry.json` —— 本文件**自己的文案**
+  //   （下方 V3 的 info 消息与 cmdCompliance 里那句）都写着 `references/`，**代码与它的说明互相矛盾**，
+  //   而矛盾的那一侧（代码）让 V3 **永远走 else 分支**：
+  //     每次 verify 都打印「No mech-registry.json found — check skipped」，
+  //   ⇒ **"MSM 的 skill 字段必须指向一个真实存在的 skill 目录"这条检查从来没跑过一条**。
+  //   这正是本仓一再撞见的形态：**静默跳过 = 最坏的失败形态**（比报错更难发现）。
+  const regPath = join(rootPath, ".opencode", "skills", TOP_SKILL, "references", "mech-registry.json");
   if (!existsSync(regPath)) return {};
   try {
     const raw = JSON.parse(readFileSync(regPath, "utf-8"));

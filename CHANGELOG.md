@@ -1,3 +1,40 @@
+## v1.52.2 — 2026-10-11（**修一处静默失效**：`verify` 的 V3「MSM 归属」检查**从未运行过**）
+
+**来源**：CCC 侧收口（owner 令「都修掉吧」）时按 A36-residual **补跑 `ontology verify`** ⇒
+**它自己把这个缺陷报了出来**（打印「No mech-registry.json found — check skipped」，而那份文件就在它旁边）。
+**性质**：`src/` **一行**修复 ＋ 1 条回归钉；**唯一行为变化** = V3 从「永远跳过」变成**真检查**。
+
+### 一、缺陷：**代码与它自己的文案互相矛盾**
+
+| 位置 | 内容 |
+|---|---|
+| `src/ontology/engine.ts` `loadMechRegistry()` | `join(rootPath, ".opencode", "skills", TOP_SKILL, "mech-registry.json")` ← **漏了 `references/`** |
+| 同文件的 V3 info 文案 | 「…`/skills/<TOP_SKILL>/references/mech-registry.json`」（**带** `references/`） |
+| `cmdCompliance` 里的文案 | 同上（**带** `references/`） |
+
+真实位置（`dashboard health` 与 dsp 技能 §8.10 **都逐字写着**）= `<CCC>/.opencode/skills/<topSkill>/references/mech-registry.json`。
+⇒ 代码那一侧的 `existsSync` **永远为假** ⇒ 每次都走 else 分支打印「check skipped」：
+
+> 「**MSM 的 `skill` 字段必须指向一个真实存在的 skill 目录**」这条检查，**从上线到现在一条都没跑过**。
+
+### 二、为什么这条值得单独记一笔
+
+它**不是崩溃，是静默**：退出码 **0**、报表写着 **0 errors**，只是**这一节什么都没查**。
+🔴 **与 v1.52.1 修的那条是同一家族** —— 那次是测试 fixture 定位不到就**整块 skip**（6 条断言凭空消失）。
+⇒ 两天内**两次**撞见同一形态，故把判据钉在这里：**「检查没跑」必须与「检查通过」在输出上分得开**。
+V3 其实**已经**会打印 info 说明跳过 —— 但**没有人会把 info 当失败看**；本次加固 = **让它必须真跑**。
+
+### 三、回归钉（正控 ＋ 负控，同一件里互相为对照组）
+
+`tests/ontology-engine.test.ts` 新增一件：用 `opts.cwd` 造一个**最小 CCC**（引擎的 ROOT 由调用方给 ——
+那个设计正是为了这种可测性），注册表放**两条**：一条指向**真实** skill 目录、一条指向**不存在**的。
+
+1. 断言「check skipped」那句**不再出现**（修前必失败 —— 这是本件的"回归"含义）
+2. 断言**孤儿被抓出来**（正控：它同时证明注册表**确实被加载了** ⇒ 是 ① 的对照组，本件不是空断言）
+3. 断言正常的那条**不被误报**（否则等于"见注册表就报"）
+
+---
+
 ## v1.52.1 — 2026-10-11（**文档同步**：把「第 13 个工具 `ontology`」补齐到三处声明面）
 
 **来源**：owner 2026-10-11 「**发**」（回答 S142 的 A38 —— v1.52.0 的 README 文档尾巴要不要单独发一版）。
