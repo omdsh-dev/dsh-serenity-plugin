@@ -141,15 +141,31 @@ Load referenced resources only as needed.        ← 🔴 宿主明说「按需�
 | 1.1 | **固定名**：`<skill dir>/skill.ttl`（与 `SKILL.md` 并列）。语义 = **本 skill 的本体（领域模型 ＋ 公理）** | 命名漂移 |
 | 1.2 | **可发现**：ACC 侧**唯一解析函数** `skillOntologyPath(skillDir)`（照「路径只许有一个出口」的既有教训）—— 不依赖注册表、不依赖任何索引 | 「没人知道哪份 ttl 属于哪个 skill」 |
 | 1.3 | **可链**：`skill.ttl` **必须** `owl:imports` 基础链；**链不上 ⇒ error** | 「声明了但没人读」 |
-| 1.4 | **可检**：**A 结构档 ＋ B 引用档**（见下），由 creator 工具的 `check` 呈现 | 静默通过 |
+| 1.4 | **可检**：**A1 结构 ＋ A2 链上**（见下），由 creator 工具的 `check` 呈现 | 静默通过 |
 
 **「总约束」的强度（Q4 裁决后的最终形态）**：
 
 | 档 | 内容 | 机械性 | 归属（**裁决后**） |
 |---|---|---|---|
-| **A 结构档** | 预留口存在 ⇒ ttl 能 parse ＋ `check --level strict` 通过 ＋ **含 `owl:imports` 基础链** | 纯机械 | **skill 机制（creator `check`）** |
-| **B 引用档** | ttl 里出现的 skill 名 / 文件路径 / MSM 名**必须真实存在** | 纯机械 | **skill 机制（creator `check`）** |
+| **A1 结构合法** | `check --level strict` exit 0（引擎的 M1–M10） | 纯机械 | **skill 机制（P2 已实现）** |
+| **A2 链上基础链** | `explain` exit 0 **且**报告里有 `Imports:` 行 | 纯机械 | **skill 机制（P2 已实现）** |
+| **B 引用档** | 「ttl 里的引用必须真实存在」 | 🔴 **不做** —— 引擎已经做了且是**响亮的**（见下） | — |
 | **C 语义档** | 「文字内容是否遵守该 ttl 的模型与公理」 | **半机械**（生成逐条可回答问题清单，LLM/人在环回答） | 🔴 **归 creator 工具**（Q4）—— **不进注入、不在每请求跑** |
+
+🔴 **P2 实现期实测修正（2026-10-11，逐条带读数）**：
+
+1. **A1 绿 ≠ 链上了** —— 这是 A2 存在的**唯一理由**。对照（同一引擎、同一天）：
+   `home-rhetoric-domain.ttl`（写 `sr:imports`）⇒ `check --level strict` = **✓ exit 0 · All checks passed**，
+   而 `explain` **没有** `Imports:` 行；注册表（写 `owl:imports`）⇒ `explain` **打印** `Imports: ccc-ontology.ttl`。
+   ⇒ 只看 A1，会把 CCC 侧 **14 份没链上的本体判成合格**。**已立为回归钉**（`skill-ontology.test.ts` 的 J2 负控）。
+2. **原设计的「A3 引用可兑现」被删** —— 引擎**已经**在两条路上响亮地做这件事：
+   import 目标不存在 ⇒ `check` 报 **`ERR [M10] Ontology file not found: <abs>`**（**exit 1**）／
+   `explain` 报 **exit 2 · `ONTO_FILE_NOT_FOUND`**。⇒ 再写一遍 = **同一件事的第二实现**。
+   🔵 **而被删的起因值得记**：我原本照源码里那句 `Fall back to loading just this file (no imports)`
+   **推断**引擎对缺失 import 是静默的 —— **实测把这条推断打假**（两条路都响亮）。
+   ⇒ **D119 同族：照源码的"意图"抄 ≠ 引擎实际怎么行为。**
+3. **§5.2 的骨架原文是错的**（`<URI> owl:imports true .`）—— 那样写，引擎会把 import 目标读成字面量
+   `true`。**正确形式见 §5.2（已改）**，且**相对路径由 creator 的 `create` 计算**，不靠人肉推。
 
 🔴 **诚实边界**：skill 的文字是自然语言 ⇒ **机械上做不到"全量强制"**。**不设计编译器式强制**（做不到，硬做只会造假绿）。
 
@@ -231,13 +247,21 @@ Load referenced resources only as needed.        ← 🔴 宿主明说「按需�
 @prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
 @prefix :     <http://home-serenity/ontology/<skill-name>#> .   # 🔴 显式默认前缀（避开 @base 粘连）
 
-# 令 1.3：**必须**链上基础链 —— 用 owl:imports（引擎只认它；缺了 ⇒ A 档 error）
-<http://home-serenity/ontology/serenity-skills.ttl> owl:imports true .
-
-<> a owl:Ontology ;
-   rdfs:label "<skill-name> domain ontology"@en ;
-   sr:version "0.1.0" .
+# 令 1.3：**必须**链上基础链。🔴 形式 = `owl:imports <相对路径>`（相对**本文件所在目录**解析）
+:onto a owl:Ontology ;
+   sr:name "<skill-name>" ;
+   owl:versionInfo "0.1.0" ;
+   owl:imports <../home-serenity/references/serenity-skills-ontology.ttl> .
 ```
+
+🔴 **两条实测约束（P2 期定的，照抄别改）**：
+1. **必须**用 `owl:imports` —— 引擎**只解析它**；写 `sr:imports` **不会被读**，而且 `check` 对它**照样报全绿**
+   （见 §4.1 实测 ①）⇒ 这正是 A2 那一档存在的理由。
+2. **不能**写成 `<URI> owl:imports true .` —— 那样引擎会把 import 目标读成**字面量 `true`**。
+   （这是本设计 v0.2 的原文，**是实现期查出来的错**，留此一行做墓碑。）
+   ⇒ **相对路径不靠人肉推**：由 creator 的 `create` **从 skill 目录算到顶层 skill 的
+   `references/serenity-skills-ontology.ttl`**（ACC 知道 CCC 根与顶层 skill 名）。
+   ⚠️ 上例的 `home-serenity` 是**本 CCC 的顶层 skill 名**；别的 CCC（如 `tiangong-serenity`）按同规则由 `create` 算。
 
 ### 5.3 声明面（把预留口暴露给宿主，零成本）
 
@@ -274,7 +298,7 @@ Load referenced resources only as needed.        ← 🔴 宿主明说「按需�
 | # | 判据 | 正控 | 负控 |
 |---|---|---|---|
 | J1 | 固定名可发现 | 放 `skill.ttl` ⇒ 被找到 | 放 `foo.ttl` ⇒ **不**被当预留口 |
-| J2 | 链上基础链被真检查 | `skill.ttl` 缺 `owl:imports` ⇒ **error**（今天静默） | 写对 ⇒ 通过 |
+| J2 | 链上基础链被真检查 | 写 `sr:imports`（**CCC 侧 14 份的真实形态**）⇒ **A1 照样绿、A2 红** ⇒ error（今天**没人看**） | 写对 `owl:imports` ＋ 目标存在 ⇒ 两档全绿 |
 | J3 | 三态可分辨 | 普通 skill／有 ttl 但坏／有 ttl 且好 ⇒ **三种输出各不相同** | — |
 | J4 | 索引只枚举不注入正文 | 索引含文件名 | 注入文本**不含** `references/*.md` 的**正文**（字节级比对） |
 | J5 | 索引确定性 | 同目录跑两次 ⇒ 逐字相同 | 改 mtime ⇒ **输出不变** |
@@ -343,8 +367,8 @@ Load referenced resources only as needed.        ← 🔴 宿主明说「按需�
 | 期 | 内容 | 依赖 |
 |---|---|---|
 | **P1** | 生成器 `buildResourceIndex` ＋ **三个消费点** ＋ J4~J7、J9 | 无（独立、便宜、**立即可感知**） |
-| **P2** | 预留口 `skillPath` 解析 ＋ A/B 档检查 ＋ J1~J3 ＋ **J2 回归钉** | 依赖 P1（索引要标 `skill.ttl`） |
-| **P3** | 工具 `serenity-skill-creator`（guide/create/check/review/index/status）＋ §5.5 五处 ＋ J10 | 依赖 P2 定形（`check`/`review` 要调 P2 的检查） |
+| **P2** | 预留口解析 ＋ A1/A2 档检查 ＋ J1~J3 ＋ **J2 回归钉** | ✅ **已实现**（`src/skills/skill-ontology.ts` ＋ 8 例判据；**本档不发版**：库层无对外面 ⇒ 与 P3 同批发 v1.54.0）｜依赖 P1（索引要标 `skill.ttl`） |
+| **P3** | 工具 `serenity-skill-creator`（guide/create/check/review/index/status）＋ §5.5 五处 ＋ J10 | ⏳ 依赖 P2（`check`/`review` 调 P2 的检查） |
 
 **每期都须发版**（§0 判据前置）。**CCC 侧配套**（不由 ACC 做）：把 14 份 `*-domain.ttl` 改名为 `skill.ttl` ＋ `sr:imports` 改 `owl:imports`（Q6 的「CCC 自行修正」）。
 
