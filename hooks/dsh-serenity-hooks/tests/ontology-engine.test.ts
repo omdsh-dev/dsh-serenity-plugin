@@ -348,3 +348,30 @@ describe("V3 MSM 注册一致性（防静默跳过）", () => {
     }
   });
 });
+
+/**
+ * 🆕 v1.52.2 的另一半：**把 V3 钉在"真实注册表"上**（合成 fixture 之外的实物对照）。
+ *
+ * 上一件证明「V3 会抓孤儿」；本件证明「**对着真实 CCC 的注册表它确实在跑**」。
+ * 为什么值得单独一件：V3 因路径 bug **从未运行过** ⇒ 真实注册表里的归属一致性
+ * **从来没有被检查过一次**（而它正是"MSM 的 skill 必须指向真实目录"的守卫）。
+ * 钉上之后，以后每次 `test` 都会过一遍 —— 真出现孤儿就当场红，不再静默。
+ */
+describe.skipIf(!HAS_FIXTURE)("V3 对真实注册表（CCC fixture）", () => {
+  it("真跑（不 skip）且 0 个孤儿", () => {
+    // 🔴 前置自证（可达性）：本件的断言依赖这三个事实，差一个就是在测空气
+    expect(CCC_ROOT, `CCC_ROOT=${CCC_ROOT}`).toBeTruthy();
+    expect(REG, `REG=${REG}`).toContain("serenity-skills-ontology.ttl");
+    const regReal = join(CCC_ROOT!, ".opencode", "skills", "home-serenity", "references", "mech-registry.json");
+    expect(existsSync(regReal), `CCC_ROOT=${CCC_ROOT} ／ 期望注册表=${regReal}`).toBe(true);
+
+    const r = runOntologyCli(["verify", REG, "--level", "operational"], { cwd: CCC_ROOT!, topSkill: "home-serenity" });
+    const out = r.stdout + r.stderr;
+    // ① V3 真的跑了（修前这句**每次**都会出现 ⇒ 本断言就是那个 bug 的指纹）
+    expect(out).not.toContain("No mech-registry.json found");
+    // ② 无孤儿（真出现 = 有 MSM 注册在一个不存在的 skill 下 ⇒ 该去修，不该静默）
+    expect(out).not.toContain("directory not found");
+    // ③ 总错误数为 0（把 V1/V2/V3 一起钉住；格式是本仓自己的报表）
+    expect(out).not.toMatch(/Errors:\s*[1-9]/);
+  });
+});

@@ -1859,23 +1859,34 @@ function getOntoSkillList(onto: OntologyDefinition): string[] {
   return Object.keys(onto.types || {}).filter((n) => isConcreteSkill(n, onto));
 }
 
+/**
+ * 🔴 2026-10-11（v1.52.2）：**注册表路径的唯一出口**。
+ * 此前这条路径在 `cmdCompliance` 的文案里是对的、在 `loadMechRegistry` 里漏了 `references/`——
+ * **同一事实写两遍就必然漂移**。⇒ 抽成一个函数，谁要用谁来取。
+ */
+function mechRegistryPath(rootPath: string): string {
+  return join(rootPath, ".opencode", "skills", TOP_SKILL, "references", "mech-registry.json");
+}
+
 function loadMechRegistry(rootPath: string): Record<string, { skill: string }> {
-  // 🔴 2026-10-11（v1.52.2）修一处**静默失效**：本行原先漏了 `"references"` 段
-  //   （`join(rootPath, ".opencode", "skills", TOP_SKILL, "mech-registry.json")`），而真正的位置
-  //   是 `<CCC>/.opencode/skills/<TOP_SKILL>/references/mech-registry.json` —— 本文件**自己的文案**
-  //   （下方 V3 的 info 消息与 cmdCompliance 里那句）都写着 `references/`，**代码与它的说明互相矛盾**，
-  //   而矛盾的那一侧（代码）让 V3 **永远走 else 分支**：
-  //     每次 verify 都打印「No mech-registry.json found — check skipped」，
-  //   ⇒ **"MSM 的 skill 字段必须指向一个真实存在的 skill 目录"这条检查从来没跑过一条**。
-  //   这正是本仓一再撞见的形态：**静默跳过 = 最坏的失败形态**（比报错更难发现）。
-  const regPath = join(rootPath, ".opencode", "skills", TOP_SKILL, "references", "mech-registry.json");
+  // 🔴 本函数原有两个**叠加的静默缺陷**（形态相同：读不到 ⇒ 返回 {} ⇒ 上层打印"没有文件"）：
+  //   ① 路径漏 `references/` 段 —— 已修（见上 mechRegistryPath）
+  //   ② **顶层键找错** —— 真实文件是 `{ version, description, entries: [...] }`，
+  //      而这里只找 `raw.msms` ⇒ `entries = raw`（**整个对象**）⇒ `Object.values` 出来的
+  //      每个值都没有 `.name` ⇒ **result = {}** ⇒ 与"文件不存在"**完全同形**。
+  //   ⚠️ **实测教训：修 ① 不够** —— 只修路径时，`verify` **照样**打印「check skipped」。
+  //      是"对真实注册表"的那条断言把它逼出来的（合成 fixture 永远过不了这一关）。
+  const regPath = mechRegistryPath(rootPath);
   if (!existsSync(regPath)) return {};
   try {
     const raw = JSON.parse(readFileSync(regPath, "utf-8"));
-    const entries = raw.msms || raw;
+    const list = Array.isArray(raw) ? raw : raw.entries || raw.msms || [];
     const result: Record<string, { skill: string }> = {};
-    for (const e of (Array.isArray(entries) ? entries : Object.values(entries))) {
-      if (e.name) result[e.name] = { skill: e.skill || "" };
+    for (const e of Array.isArray(list) ? list : Object.values(list as object)) {
+      if (e && typeof e === "object" && typeof (e as { name?: unknown }).name === "string") {
+        const it = e as { name: string; skill?: string };
+        result[it.name] = { skill: it.skill || "" };
+      }
     }
     return result;
   } catch {
@@ -1975,10 +1986,18 @@ function cmdVerify(args: string[]): void {
           }
         }
       }
-    } else {
+    } else if (!existsSync(mechRegistryPath(rootPath))) {
       issues.push({
         check: "V3", severity: "info",
         message: "No mech-registry.json found — MSM registration check skipped (MSMs managed by ACC at runtime)",
+      });
+    } else {
+      // 🔴 文件**在**、却一条都读不出来 ⇒ **绝不能说成"没有文件"**：那正是本函数两次静默失效的形态
+      //   （路径漏段 ／ 顶层键找错）。这条从 info 升为 **error**：检查**没跑成**必须响。
+      issues.push({
+        check: "V3", severity: "error",
+        message: `mech-registry.json exists at ${mechRegistryPath(rootPath)} but yielded 0 readable entries`
+          + ` — MSM registration check **could not run**（这不是"没有文件"，是"读了但读不出来"）`,
       });
     }
   }
