@@ -34,6 +34,7 @@ import { isSafeModeOn, readBlacklist, readTrajectorySkills } from '../ccc.js'
 import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
+import { buildResourceIndex } from '../skills/resource-index.js'
 import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory-ops.js'
 import { readLastBound } from '../trajectory-bound.js'
 import {
@@ -410,14 +411,22 @@ export function localstoreBlock(root: string): string {
   return lines.join('\n')
 }
 
-/** 4) SKILL.md 全文：该 CCC 顶层入口 skill 原文（对齐 osp：原文直推，无包裹头；仅过滤治理内容） */
+/** 4) SKILL.md 全文：该 CCC 顶层入口 skill 原文（对齐 osp：原文直推，无包裹头；仅过滤治理内容）
+ *  ＋ 🆕 **第二层披露树**（serenity-skill P1，设计 §4.2）：每个入口 skill 后附**参考件清单**
+ *  （只有文件名与一行标题，**不含正文** —— 正文留给模型按需 `read`）。
+ *  索引为空（该 skill 无 `references/` 也无 `skill.ttl`）⇒ **不产出该块**（空标题是噪声）。 */
 export function entrySkillSectionText(root: string): string {
   const skills = findEntrySkills(root)
   if (skills.length === 0) return ''
   // 对齐 opencode-serenity-plugin：注入 state.skillContent 原文（不截断）。
   // 多入口（DSH 超集，osp 仅单入口）时以空行分隔。
   return skills
-    .map((s) => sanitizeSkillContent(s.content))
+    .map((s) => {
+      const body = sanitizeSkillContent(s.content)
+      if (body.length === 0) return ''
+      const index = buildResourceIndex(s.dir)
+      return index ? `${body}\n\n${index}` : body
+    })
     .filter((c) => c.length > 0)
     .join('\n\n')
 }

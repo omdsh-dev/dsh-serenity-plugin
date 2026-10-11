@@ -1,3 +1,106 @@
+## v1.53.0 — 2026-10-11（**serenity-skill P1**：skill 的**第二层披露树**）
+
+**来源**：owner 2026-10-11 令「在 dsp 级别升级 skill 能力」三条之一 ——
+「**注入除了标准的 SKILL.md 头外，skill 目录的 reference 目录内的 `*.md` 文件名也要加载，也就是将 skill 做成两层披露树**」。
+设计件（三条令全貌、七个叉口与 owner 裁决）= 插件仓 `docs/serenity-skill-design.md` **v0.2（接口已冻结）**。
+**性质**：新增一个纯逻辑模块 ＋ **三条注入通路各接一次**；**行为变化** = 每请求的注入文本里多出一份"参考件清单"。
+**本版只做 P1**（两层披露树）；P2（本体预留口 `skill.ttl` ＋ A/B 档检查）／P3（工具 `serenity-skill-creator`）未做。
+
+### 一、为什么是"补宿主留给 provider 的那一半"，不是发明新概念
+
+读宿主 `@deepseek-ai/dsh-skill` 的 `renderSkillContent()`（`lib/index.js` L57-81）—— 模型看到的规范形态是：
+
+```
+<skill_resources>
+Base directory for this skill: <skill 目录>
+Resolve relative paths mentioned by this skill against the base directory before using them.
+Load referenced resources only as needed.        ← 宿主明说「按需加载参考件」
+</skill_resources>
+```
+
+⇒ **宿主自己就承认两层模型**（指令层 ＋ 按需的资源层）；而 `SkillSummary` / `SkillDefinition`
+**没有任何列举子文件的字段**（只有 `resourceBase` 一个基址）⇒ **枚举这一半是刻意留给 provider 的**。
+本版把它补上：**只说"有什么"，不说"是什么"**（正文仍留给第三层的按需 `read`）。
+
+### 二、六条硬性规则（`resource-index.ts` 的模块契约，改它先改设计 §4.2）
+
+| # | 规则 | 为什么 |
+|---|---|---|
+| ① | **只枚举，不注入正文** | 令 2 逐字；判据 J4 用"正文哨兵"钉死 |
+| ② | 排序 = 相对路径的 **UTF-8 字节序**（🔴 **不用 mtime**） | mtime 随检出漂移 ⇒ 每请求的注入文本会抖。**先例对照**：`cro.ts:101` 那份**落盘快照**用 `{name,bytes,mtime}` —— 快照要时间序、注入要稳定，**同一件事两处取舍相反，这个差异是判据不是巧合** |
+| ③ | **有界 ＋ 响亮** | 超限必须写「还有 N 项未列出」，**绝不静默截断** |
+| ④ | 摘要 = 该文件**首个 `#` 标题**（跳过 frontmatter；取不到留空） | **不编** —— 编一个摘要等于让索引说假话 |
+| ⑤ | 固定名 `skill.ttl` 存在 ⇒ 该行标 🧬 ＋ 顶部加"已建模"句 | 缝 P1 与 P2（本版已实现标注，检查留 P2） |
+| ⑥ | 范围 = `references/` **一级条目** ＋ `skill.ttl` | 见下"被真实输入修订"一条 |
+
+### 三、🔴 被**真实输入**推翻过一条子规则（本版最值钱的部分）
+
+规则⑥ 原写「递归不进子目录」，实现成"只列一级文件 ＋ 一句『另有 N 个子目录未列出』"。
+**拿真实的 5 个 skill 一跑**，发现 `references/` 下**确有内容目录**：
+
+| skill | 被那句"未列出"盖住的东西 |
+|---|---|
+| `home-rhetoric` | `references/corpus-subject-own/` — **3 文件 ／ 190,161 B**（owner 自己的语域语料） |
+| `family-profiles` | `references/baby-handlebook/` |
+| `home-serenity` | `references/diagram-lab/` |
+
+⇒ 只报"有 N 个子目录"而**不给名字 = 不可行动**（模型知道有东西、却无法去读）。
+**⇒ 改为：子目录列一行（名字 ＋ 其下文件数 ＋ 汇总字节），仍不展开、仍不读正文。**
+仍在 owner 裁决 Q2「只披露名字、不注入正文」的意图内；**回退点写在设计 §4.2 规则⑥**。
+
+> 这条与 v1.52.2/v1.52.3 那条是**同一族**：**"合成 fixture 通过" ≠ "在真实输入上通过"**。
+> 只不过这次被真实输入推翻的是**设计**，不是代码。
+
+### 四、三条注入通路（判据 J7：**必须同源**）
+
+| 通路 | 位置 | 触发 |
+|---|---|---|
+| A 入口段 | `seams/system-prompt.ts`（order −50） | 每请求（该 CCC 的 `*-serenity` 入口） |
+| B 轨迹段 | `trajectory-skills.ts`（order −45） | 每请求（`SESSION.md` frontmatter 的 `skills:` ∪ CCC 的 `trajectory.skills`） |
+| C 目录 provider | `seams/opencode-skills.ts` 的 `provider.get()` 的 `content` | 按需（`skill` 工具 / 用户显式调用） |
+
+三条通路**彼此独立实现** ⇒ 漏接任何一条，"两层树"就只在部分路径上成立，**而那种漏没有任何失败信号**。
+⇒ 新增 `tests/serenity-skill-second-layer.test.ts`（5 例）：三条各断言一次 ＋
+**同源证据**（同一个 skill 的三处索引块**逐字相同**，且 ＝ 生成器直接产出）＋
+**J9 负控**（普通 skill 无 `references/` ⇒ 三处都**不产出**该块、零告警 ⇒ 增强向后兼容）。
+
+### 五、实测读数（锚定本版一跑）
+
+- `typecheck` ✓ ／ `typecheck-host 0.2.0-rc.2` ✓（node 114 文件、client 169 文件，paths **36 ＋ 21** 条全中）
+- `test` **162 files ／ 2717 tests** ✓（**预测先于实跑**：2694 基线 ＋ 18（生成器）＋ 5（三通路）＝ 2717）
+- `coverage` ✓ 语句 **31136/32425 = 96.02%** ／ 分支 **6984/7901 = 88.39%** ／ 函数 **1062/1074 = 98.88%**
+- `build` ✓ —— 🔵 **`lib/client.js` 仍是 225459 B**（与本版之前**逐字相同**）⇒ **client 半一个字没动**
+  （本版纯 node 半；这是一条独立于测试的"改动面"判据）
+- `pack-check` ✓ **135 文件**（134 → ＋1 = 新增 `lib/skills/resource-index.d.ts`）
+
+**注入预算（设计 §7 要求"实施前先量一次"——量了，不是估的）**：
+
+| 段 | 变化 |
+|---|---|
+| 入口段 | 全长 **29,783 字符**，其中 home-serenity 的索引 **939 字符（≈3.2%）**——无上限段，离风险很远 |
+| 轨迹段 | 全长 **7,296 字符**（上限 32,768，**未截断**），其中 home-session 索引 **191 字符（≈2.6%）** |
+
+⇒ **预算不紧张**；③的"有界＋响亮"是防未来，不是救当下。
+
+### 六、🔬 变异验证（证明判据不瞎，不是"跑绿即算"）
+
+把生成器的排序**临时改成逆序** ⇒ **恰好那两条** pin 红（字节序断言 ＋ mtime 负控），
+**其余 16 条全绿** ⇒ 这两条 pin 对"顺序"**确实敏感**；还原后 18/18 绿。
+（另：mtime 那条初稿只用**一个**文件 ⇒ "按 mtime 排"与"按路径排"产出相同 ⇒ **那条断言本来是瞎的**，
+已改成**三个**文件 ＋ 把字节序第一的文件改成最新 ⇒ 两种排序**可分**。）
+
+### 七、本版**未做**（别当成漏）
+
+- **P2**：`skill.ttl` 的发现/A 档结构检查/B 档引用检查 ＋ **J2 回归钉**（本次查出的"14 份领域本体
+  `sr:imports` 没人读"由它收口）。
+- **P3**：工具 `serenity-skill-creator`（工具面 13 → 14，五处同批）。
+- **CCC 侧配套**（不由 ACC 做）：把 14 份 `references/*-domain.ttl` 改名为 `skill.ttl`
+  ＋ `sr:imports` 改 `owl:imports`（owner 裁决 Q6：静默、CCC 自行修正）。
+
+---
+
+
+
 ## v1.52.3 — 2026-10-11（**v1.52.2 修得不完整**：V3 的第二条静默原因 = 顶层键找错）
 
 **一句话**：v1.52.2 修好了路径，**但 V3 仍然一条都没跑**——第二条原因藏在**读文件那一步**。

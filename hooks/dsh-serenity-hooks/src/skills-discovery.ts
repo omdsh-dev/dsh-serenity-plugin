@@ -23,6 +23,8 @@ type EntrySkillSource = 'serenity-marker' | 'pointer' | 'opencode' | 'dsh'
 interface EntrySkill {
   name: string
   content: string
+  /** skill 目录（= SKILL.md 的父目录）—— 第二层披露树要按目录扫 `references/`（serenity-skill P1） */
+  dir: string
   source: EntrySkillSource
 }
 
@@ -77,7 +79,7 @@ export function findEntrySkills(root: string): EntrySkill[] {
     const name = forcedName ?? basename(dirname(path))
     if (seen.has(name)) return
     seen.add(name)
-    out.push({ name, content: readFileSync(path, 'utf-8'), source })
+    out.push({ name, content: readFileSync(path, 'utf-8'), dir: dirname(path), source })
   }
 
   // 0) `.serenity` 记号文件（CCC 记号文件的权威语义 = 顶层入口 skill 名）

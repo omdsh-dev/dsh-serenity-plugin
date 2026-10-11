@@ -13,6 +13,7 @@ import type { Context } from 'cordis'
 import type { SkillProvider, SkillCandidate, SkillDefinition, SkillLookupOptions } from '@deepseek-ai/dsh-skill'
 import { cccRootForCwd } from '../ccc-roots.js'
 import { listOpencodeSkillDirs, loadOpencodeSkill } from '../skills/opencode-scan.js'
+import { buildResourceIndex } from '../skills/resource-index.js'
 
 export const OPENCODE_PROVIDER = 'opencode-skills'
 export const OPENCODE_RANK = 250
@@ -48,6 +49,9 @@ export function registerOpencodeSkills(ctx: Context): void {
       const dir = candidate.locator as string
       const skill = loadOpencodeSkill(dir)
       if (!skill) return undefined
+      // 🆕 第二层披露树（serenity-skill P1，设计 §4.2）：**第三条通路** —— `skill` 工具/显式调用
+      //   走的正是这里 ⇒ 索引必须同源附在 `content` 上，否则"两层树"只在注入通路上成立。
+      const index = buildResourceIndex(dir)
       return {
         name: skill.meta.name,
         description: skill.meta.description || candidate.description,
@@ -56,7 +60,7 @@ export function registerOpencodeSkills(ctx: Context): void {
         source: candidate.source,
         provider: OPENCODE_PROVIDER,
         resourceBase: candidate.resourceBase,
-        content: skill.content,
+        content: index ? `${skill.content}\n\n${index}` : skill.content,
         path: skill.path,
       }
     },

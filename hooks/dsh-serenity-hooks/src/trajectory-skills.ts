@@ -15,8 +15,9 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { findSkillMd, isSafeSkillName, truncateContent } from './skills-discovery.js'
+import { buildResourceIndex } from './skills/resource-index.js'
 
 /** 全文注入总长上限（字符数；规格 §3「缺省 32 KB」——防上下文爆炸） */
 export const TRAJECTORY_SKILLS_MAX_CHARS = 32 * 1024
@@ -228,7 +229,11 @@ export function buildTrajectorySkillsSection(
       continue
     }
     try {
-      blocks.push(`=== skill: ${name} ===\n${readFileSync(file, 'utf-8')}`)
+      // 🆕 第二层披露树（serenity-skill P1，设计 §4.2）：SKILL.md 全文后附**参考件清单**
+      //   （只列文件名 ＋ 一行标题，不含正文）。索引为空 ⇒ 不附（不产出空标题）。
+      const index = buildResourceIndex(dirname(file))
+      const body = readFileSync(file, 'utf-8')
+      blocks.push(`=== skill: ${name} ===\n${index ? `${body}\n\n${index}` : body}`)
     } catch {
       blocks.push(missingNotice(name))
     }
