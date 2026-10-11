@@ -74,7 +74,8 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `dashboard` | 仪表盘：工作区健康检查（三项）、当前时间、等待 | 进工作区先自查一下；等外部服务时用 |
 | `container_git` | git 操作：status / commit / push / log / pull / diff | 提交和推送代码；它绝不自动强推 |
 | `msm` | 小工具执行入口：`msm("名字", ["参数"])`；名字记不全就给候选；`inspect=true` 看用法 | 调用工作区里注册的任何小工具 |
-| `praxis` | 按需给 AI 注入三套"做事方法"：输出自检（eap）、设计对齐（neat）、认知连续性（cce） | 要它把话说清楚 / 先对齐再动手时 |
+| `praxis` | 按需给 AI 注入四套"做事方法"：输出自检（eap）、设计对齐（neat）、认知连续性（cce）、本体工程（ontology） | 要它把话说清楚 / 先对齐再动手 / 动手前先把领域结构显式化时 |
+| `ontology` | 本体工程**引擎**（能跑的那个）：读 `.ttl` 本体文件，做结构校验（M1–M10，含公理表达式语法）、生成摘要、查声明与实况是否一致（V1–V4）、出语义审查提示词、出"公理 ↔ 技能"合规清单；还能写一份新本体的模板 | 想给某个领域建/校验本体时。⚠️ 与 `praxis ontology` 是**同一领域的两个面**：那个是**方法文本**（怎么建模），这个是**引擎**（真去检查）。路径必须在工作区内 |
 | `handyman` | 杂工：派一个便宜模型的助手干活。**默认模式（foreground）**= 一次串行委派、拿回结果；**background 模式**= 循环干活直到完成（完成码校验 / 轮次上限 / 自动重启 / 进度文件），也可一次派多个并行 | 大批量、重复性的活（扫描几十个技能、逐用例回归） |
 | `localstore` | 存密钥和配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
 | `container_admin` | 机务舱：管理子角色、管理小工具注册表、查看全部配置 | 定义"子角色"、注册新小工具、改配置时 |
@@ -380,7 +381,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 | 跑在 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
-| 工具 | msm / container_fs / logbook 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin ＋ 三个条件出现的（`im-bridge` / `acc-diag` / `diagram`） |
+| 工具 | msm / container_fs / logbook 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / ontology / handyman / localstore / container_admin ＋ 三个条件出现的（`im-bridge` / `acc-diag` / `diagram`） |
 
 **同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
 差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。
