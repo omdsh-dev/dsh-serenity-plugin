@@ -1,3 +1,59 @@
+## v1.56.1 — 2026-10-12（修：本体引擎把规则里的 `:LocalName` 按**硬编码命名空间**解析）
+
+**来源**：owner 2026-10-12 令「**修**」（= 本会话记的 **A45**）。**性质**：引擎行为修复 ＋ **3 条回归钉**。
+
+### 一、根因（一行）
+
+`src/ontology/engine.ts` 的 `resolveIri()` 对**空前缀**：
+
+```ts
+if (prefix === "") return baseIri + local;   // ❌ baseIri 硬编码 http://example.org/onto#
+```
+
+`baseIri` 只在文件声明 `@base` 时才被改写 ⇒ **文件自己写的 `@prefix : <…>` 对 `:Local` 形同虚设**：
+所有 `:X` 都被解析成 `http://example.org/onto#X`。
+
+### 二、症状链（为什么它表现为"检查没在测它以为在测的东西"）
+
+`:X` 被钉成那个硬编码 IRI ⇒ `i2q()`（IRI→QName）**回不到文件声明的任何前缀** ⇒ 类型名变成
+**`<http://example.org/onto#X>`**（带尖括号的完整 IRI）⇒ **M9 用裸名查表**（`typeNames.has("X")`）**必然失败**
+⇒ 对「默认前缀不是那个值」的文件报**假错**：`ERR [M9] quantifier references unknown type "X"`。
+🔴 更隐蔽的是：**同一个 bug 也让 `explain` 把类型名印成 `<完整 IRI>`**，而**检查通过**的文件看不出异常
+—— 典型"读数器本身在瞎报"（本仓记过的同族：**读数器本身要先证明不瞎**）。
+
+### 三、修法
+
+空前缀**先查文件自己声明的默认前缀**，没有才回落 `baseIri`：
+
+```ts
+if (prefix === "") {
+  const def = prefixes.get("");
+  return def !== undefined ? def + local : baseIri + local;
+}
+```
+
+**语义顺序也对**：真 Turtle 里 `:X` 由 `:` 前缀展开、`@base` 只管相对 IRI（`<foo>`）⇒ **`@prefix :` 优先于 `@base`**。
+
+### 四、判据（**变异验证**，不是"跑绿即算"）
+
+`tests/ontology-engine.test.ts` 新增 **A45 组 3 例**（该文件 18 → **21**）：
+
+| 用例 | 修前（把修复改回去跑） | 修后 |
+|---|---|---|
+| **pin**：自定义默认前缀 ＋ 规则引用**本文件声明的**类 | ❌ **红** —— `ERR [M9] quantifier references unknown type "Thing"` ＋ `[L3] Type "<http://example.org/onto#Thing>"`（**那个 bug 的指纹**） | ✅ 绿（exit 0） |
+| **负控**：同一形态里放**未声明**类型 | ✅ 报（检查在跑） | ✅ 报（**没被关掉**） |
+| **正控**：默认前缀 = `http://example.org/onto#` 的文件 | ✅ 绿 | ✅ 绿（**行为不变**） |
+
+⇒ **恰好那一条 pin 红、另两条照旧绿** ⇒ 这条 pin 是**差异化**的（不是"两种状态下都绿"的假钉）。
+
+### 五、爆炸半径（已量）
+
+全容器**只有两个文件**声明了别的默认前缀：`home-browser`（`home-serenity/domains/browser#`）与
+`home-daemon`（`home-serenity/daemon#`）。**两者都不引用基础链的类型名**（grep 实测：只有 `owl:imports`
+的 IRI 与自己的 `:X`；`home-daemon` 的规则里只有**裸关系名**，而 M9 **从不检查裸标识符**）⇒
+修复只把它们自己的 IRI **整体**从 `example.org/onto#X` 改成 `<own#>X`（**文件内自洽**）⇒ **不影响链**。
+其余文件（含基础链 `serenity-skills-ontology.ttl` ／ `ccc-` ／ `cce-`）默认前缀**就是**那个值 ⇒ **零变化**。
+
 ## v1.56.0 — 2026-10-12（**目录面带上参考件名字** ＋ 修掉一处"同一份清单载入时带两遍"的冗余）
 
 **来源**：owner 两条令（同日）—— ① 回答「`available_skills` 里为什么看不到 `references/`」之后，

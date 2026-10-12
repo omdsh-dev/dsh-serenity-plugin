@@ -324,7 +324,20 @@ function parseTurtle(raw: string): TurtleParseResult {
       const colon = tk.value.indexOf(":");
       const prefix = tk.value.slice(0, colon);
       const local = tk.value.slice(colon + 1);
-      if (prefix === "") return baseIri + local;
+      // 🔴 **A45 修复（v1.56.1）**：空前缀（`:Local`）**必须先看文件自己声明的默认前缀**
+      //    （`@prefix : <…>`），只有它没声明时才回落到 `baseIri`。
+      //    修前这里直接 `return baseIri + local` ⇒ 文件写的 `@prefix :` **形同虚设**：
+      //    所有 `:Local` 都被解析成 `http://example.org/onto#Local`（硬编码值）。
+      //    症状（2026-10-12 探针实测，见 `tests/ontology-engine.test.ts` 的 A45 组）：
+      //    `i2q()` 回不到任何前缀 ⇒ 类型名变成 `<完整 IRI>` ⇒ M9 的**裸名查表**失败
+      //    ⇒ 对「默认前缀不是那个硬编码值」的文件报**假错**
+      //    （`ERR [M9] quantifier references unknown type "X"`）。
+      //    ⚠️ 语义顺序：真 Turtle 里 `:X` 由 `:` 前缀展开、`@base` 只管相对 IRI
+      //    ⇒ **`@prefix :` 优先于 `@base` 是对的**。
+      if (prefix === "") {
+        const def = prefixes.get("");
+        return def !== undefined ? def + local : baseIri + local;
+      }
       const ns = prefixes.get(prefix);
       return ns ? ns + local : `unknown:${tk.value}`;
     }

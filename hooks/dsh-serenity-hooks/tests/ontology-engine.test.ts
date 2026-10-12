@@ -375,3 +375,73 @@ describe.skipIf(!HAS_FIXTURE)("V3 对真实注册表（CCC fixture）", () => {
     expect(out).not.toMatch(/Errors:\s*[1-9]/);
   });
 });
+
+/**
+ * 🆕 A45（v1.56.1）—— **规则里的 `:LocalName` 必须按文件自己的默认前缀解析**。
+ *
+ * 缘起（2026-10-12，CCC 侧 `dsh-serenity-plugin-development/skill.ttl` 的 P2 工作）：要把一条公理
+ * 改写成「所链 `Evidence` 的 kind …」时，按容器纪律**先探针后落笔**（D119：不许照源码的"意图"
+ * 抄引擎行为）。探针本体 `_tmp/ael-probe-043/probe.ttl` 用的是**自定义默认前缀**
+ * （`@prefix : <…/probe043#>`）⇒ 同一组规则**报 5 条 `ERR [M9] quantifier references unknown type`**；
+ * 把默认前缀改成 `http://example.org/onto#` 就全绿。**根因 = `resolveIri()` 对空前缀直接
+ * `return baseIri + local`**（`baseIri` 硬编码 `http://example.org/onto#`），**从不看 `@prefix :`**。
+ *
+ * 本组把"文件自己的默认前缀说了算"钉住，**并带负控**（未声明类型仍必须报）——
+ * 否则"没报"与"检查没跑"分不开（这正是 D119 的教训）。
+ */
+describe("A45 · 规则里的 `:LocalName` 按**文件自己的默认前缀**解析", () => {
+  /** 造一份本体：默认前缀**故意不是**引擎那个硬编码值 */
+  function writeCustomPrefix(axiomRule: string): void {
+    writeFileSync(
+      file,
+      [
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
+        "@prefix sr: <http://home-serenity/ontology#> .",
+        "@prefix : <http://home-serenity/domains/a45probe#> .",
+        "",
+        ':onto a owl:Ontology ; rdfs:label "A45 probe" .',
+        ':Thing a owl:Class ; rdfs:label "a thing" ; sr:rigidity "rigid" ; sr:identity :thingId .',
+        "",
+        `:onto sr:axiom [ sr:axiomId "A45" ; sr:rule "${axiomRule}" ] .`,
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+  }
+
+  it("🔴 修前必红的形态：自定义默认前缀 ＋ 规则引用**本文件声明的**类 ⇒ 现在 exit 0", () => {
+    writeCustomPrefix("forall t in Thing: t.ok == true");
+    const r = runOntologyCli(["check", file, "--level", "strict"], { cwd: TMP });
+    // 修前这句每次都会出现（= 那个 bug 的指纹）；修后 `Thing` 按 `@prefix :` 解析 ⇒ 表里有它
+    expect(r.stdout).not.toContain("quantifier references unknown type");
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+  });
+
+  it("🔴 负控：同一形态里放**未声明**类型 ⇒ 仍必须报（证明检查真在跑，不是被关掉）", () => {
+    writeCustomPrefix("forall t in NoSuchThing: t.ok == true");
+    const r = runOntologyCli(["check", file, "--level", "strict"], { cwd: TMP });
+    expect(r.stdout).toContain('unknown type "NoSuchThing"');
+  });
+
+  it("🔴 正控：**引擎那个默认前缀**（`http://example.org/onto#`）的文件行为不变", () => {
+    writeFileSync(
+      file,
+      [
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
+        "@prefix sr: <http://home-serenity/ontology#> .",
+        "@prefix : <http://example.org/onto#> .",
+        "",
+        ':onto a owl:Ontology ; rdfs:label "default-ns probe" .',
+        ':Thing a owl:Class ; rdfs:label "a thing" ; sr:rigidity "rigid" ; sr:identity :thingId .',
+        "",
+        ':onto sr:axiom [ sr:axiomId "A45b" ; sr:rule "forall t in Thing: t.ok == true" ] .',
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    const r = runOntologyCli(["check", file, "--level", "strict"], { cwd: TMP });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+  });
+});
