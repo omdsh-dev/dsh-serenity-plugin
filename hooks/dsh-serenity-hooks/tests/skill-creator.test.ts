@@ -120,14 +120,36 @@ describe('P3 · serenity-skill-creator', () => {
     await expect(tool.execute({ action: 'check' }, execIn(root))).rejects.toThrow(/`name` is required/)
   })
 
-  // ── J9：普通 skill 全程无声 ──────────────────────────────────────────
-  it('🔴 J9：普通 skill ⇒ check 说"未建模"并**明说这不是通过**，且**不含**错误记号', async () => {
+  // ── J9：普通 skill 全程无声（**只关于"没建模"这件事**；A3 分层是另一条轴）──
+  /** 顶层合规的 SKILL.md：够厚 ＋ 不自称导航 ＋ 点名各子树（A3 三判据都过） */
+  function writeCompliantTop(name: string): void {
+    const dir = join(skillsRoot, name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'SKILL.md'),
+      `---\nname: ${name}\ndescription: d\n---\n\n# ${name}\n\n## 1. 身份与边界\n\n本 skill 管 ${name}。\n\n`
+        + `${'顶层陈述：这是什么、边界在哪、哪些约束永远成立。'.repeat(80)}\n`,
+      'utf-8',
+    )
+  }
+
+  it('🔴 J9：普通 skill（顶层合规）⇒ check 说"未建模"并**明说这不是通过**，且**不含**错误记号', async () => {
     mkPlainSkill('plain')
+    writeCompliantTop('plain')
     const t = await run({ action: 'check', name: 'plain' })
     expect(t).toContain('普通 skill（未建模）')
     expect(t).toContain('这不是"检查通过"')
-    expect(t.startsWith('⬜')).toBe(true)
+    expect(t).toContain('✅ A3 分层档')
     expect(t).not.toContain('❌')
+  })
+
+  it('🔴 A3 是**另一条轴**：顶层是桩 ⇒ 报分层红（带 A3 码），而"未建模"仍不算错误', async () => {
+    mkPlainSkill('stub')
+    const t = await run({ action: 'check', name: 'stub' })
+    expect(t).toContain('❌ A3 分层档')
+    expect(t).toContain('[A3-1]')
+    expect(t).toContain('这不是异常（J9）')
+    expect(t).toContain('普通 skill（未建模）')
   })
 
   it('🔴 J9-review：普通 skill 跑 review ⇒ **不是错误**，只说明没有可审的模型', async () => {

@@ -7,8 +7,10 @@
  *
  * 🔴 **三段分工（别混）**：
  *   · **方法文本** = 本文件的 `SKILL_CREATOR_GUIDE`（`guide` 子命令印它）—— 给人/模型读"怎么做"。
- *   · **机械判据** = `src/skills/skill-ontology.ts`（P2）与 `src/skills/resource-index.ts`（P1）——
- *     本工具**只做转发与呈现，绝不重写一遍检查**（同一件事的第二实现是本仓的老账）。
+ *   · **机械判据** = `src/skills/skill-ontology.ts`（P2 ／ **A1·A2 本体档**）、`src/skills/resource-index.ts`（P1）
+ *     与 `src/skills/skill-layering.ts`（**A3 分层抽象树档** —— 2026-10-12 owner 令「确保未来创建和改进
+ *     skill 都保持 EAP 分层抽象树结构」）—— 本工具**只做转发与呈现，绝不重写一遍检查**（同一件事的
+ *     第二实现是本仓的老账）。
  *   · **语义档 C** = 引擎的 `compliance`（半机械：出逐条可回答问题清单，交 LLM/人在环回答）。
  *
  * 🔴 **J9：未建模 ≠ 异常。** 没有 `skill.ttl` 的**普通 skill** 全程无声 —— 本工具任何子命令都
@@ -25,6 +27,7 @@ import { resolveInside } from '../ccc.js'
 import { isSafeSkillName } from '../skills-discovery.js'
 import { runOntologyCli } from '../ontology/engine.js'
 import { buildResourceIndex, REFERENCE_DIR, SKILL_ONTOLOGY_FILE } from '../skills/resource-index.js'
+import { analyzeSkillLayering, formatLayeringReport } from '../skills/skill-layering.js'
 import { formatSkillOntologyInspection, inspectSkillOntology } from '../skills/skill-ontology.js'
 
 const ACTIONS = ['guide', 'create', 'check', 'review', 'index', 'status'] as const
@@ -67,7 +70,32 @@ export const SKILL_CREATOR_GUIDE = `# serenity-skill —— 增强型 skill 的�
    🔴 **相对路径由 \`create\` 算**（从本 skill 目录指向顶层 skill 的 references/），**不要人肉推**。
    🔴 引擎**只解析 \`owl:imports\`**；写 \`sr:imports\` **不会被读**，而且 \`check\` 对它**照样报全绿** ——
    所以别只看 \`check\` 绿就以为链上了（这正是本工具 \`check\` 要同时跑 A2 的原因）。
-3. 让 \`check\` 全绿（A1 结构合法 ＋ A2 链上基础链）。
+3. 让 \`check\` 全绿（**A1 结构合法 ＋ A2 链上基础链**）。另有一档 **A3 分层抽象树**对**每个** skill
+   都适用（与有没有 ttl 无关）—— 见上面「分层抽象树」一节。
+
+## 分层抽象树（EAP）—— 顶层说顶层的话（🔴 2026-10-12 事故沉淀，机械档 A3 查它）
+
+> ⚠️ **编号消歧**：本档的 **A3** 与 v1.54.0 记录里那个**已下线的旧 A3（"引用可兑现"）不是同一档** ——
+> 旧那条是照引擎源码"意图"推断的，**实测打假后不写了**；本条是 2026-10-12 **新立**的**分层形态**档。
+
+skill 不是"一个文件 ＋ 一堆参考件"，而是一棵**按抽象层排的树**：
+
+\`\`\`
+第 0 层  SKILL.md          ← 顶层：这是什么 ／ 边界 ／ 领域模型（形状）／ 永远成立的约束 ／ 怎么读下面
+第 1 层  references/*.md   ← 各子树：一件事一件（细节 ／ 沿革 ／ 清单 ／ 逐条读数）
+第 2 层  各子树内的 H2/H3
+\`\`\`
+
+四条硬规矩（**A3 查前三条**）：
+
+1. **顶层必须自己说顶层的话**：读 SKILL.md 就能重建「这是什么 ／ 骨架长什么样 ／ 哪些约束永远成立 ／
+   细节去哪找」。🔴 **反例（真实事故）**：把 SKILL.md 切成几 KB 的"导航层"、顶层只列文件名 ——
+   这叫**树倒置**：顶层不再说顶层的话，读者拿不到任何上层陈述。
+2. **顶层不许自称"只是导航层"**（A3-2）：顶层声明自己什么都不说 ≡ 顶层空缺。
+3. **顶层是地图**（A3-3）：\`references/\` 下每一件都要**被点名**，并写清"什么时候该下潜到哪一件"。
+4. **一条内容只有一个家**：细节下沉时**原处删掉并留指针**；把下层的顶层陈述**上提（hoist）**时同理。
+   ⇒ 父层给**形状/抽象**、子层给**清单/细节**；父层**不复述**子层的清单，也**不含会漂的数**
+   （版本 ／ 计数 ／ 测试基线 —— 那些留在单一真相源里）。
 
 ## 两层披露树的写法习惯（影响模型能不能找得到）
 
@@ -89,7 +117,8 @@ export const SKILL_CREATOR_GUIDE = `# serenity-skill —— 增强型 skill 的�
 
 \`\`\`
 serenity-skill-creator index <skill>    ← 先看模型到底会看到什么（露没露、顺序对不对）
-serenity-skill-creator check <skill>    ← A1 结构 ＋ A2 链上（机械，必须全绿）
+serenity-skill-creator check <skill>    ← A3 分层（顶层非桩 ／ 不自述导航 ／ 点名各子树）＋ A1 结构 ＋ A2 链上
+                                          （机械，必须全绿）
 serenity-skill-creator review <skill>   ← C 档：文字与 ttl 逐条的合规问题清单（要人在环答）
 （改 SKILL.md / skill.ttl / references）
    ↑__________________________ 回到第一步
@@ -153,21 +182,50 @@ description: （一句话说清这个 skill 管什么、什么时候该加载它
 
 # Skill: ${name}
 
-## 用途
+> 一句话身份：本 skill 是<谁的><什么面>。
+> 🔴 **本文件是第 0 层（顶层）**：读完它就能重建「这是什么 ／ 骨架长什么样 ／ 哪些约束永远成立 ／ 细节去哪找」；
+> **细节不进正文**，按 §5 的树按需 \`read\` \`${REFERENCE_DIR}/\` 各子树。
 
-（这个领域是什么、管什么、不管什么）
+## 1. 身份与边界
 
-## 触发条件/何时加载
+| 项 | 内容 |
+|---|---|
+| **是什么** | （一句话） |
+| **管** | （本 skill 负责的领域） |
+| **不管** | （越界的事去哪 —— 指名上下游 skill） |
 
-（什么情况下该加载本 skill）
+## 2. 用途与触发条件
 
-## 领域结构
+**用途**：（把"什么是这里最该一次读全的"写清）
 
-（有本体时：本领域的类型与关系在这里只做**指路**，真相源是同级 \`${SKILL_ONTOLOGY_FILE}\`）
+**何时加载**（任一命中）：
+
+- （具体场景 1）
+- （具体场景 2）
+
+## 3. 领域模型（形状）
+
+（这个领域的**顶层结构**：有哪几类东西、什么先于什么、什么永远成立。
+ 🔴 **只给形状，不给清单** —— 清单会漂，且只该住在一处；有本体时真相源是同级 \`${SKILL_ONTOLOGY_FILE}\`。）
+
+## 4. 永远成立的约束
+
+1. （违反了就算缺陷的规则，一条一行；每条给一句"为什么"）
+2. （会漂的值**不写死** —— 版本 ／ 计数 ／ 基线一律指向它们的单一真相源）
+
+## 5. 抽象树：怎么读这个 skill
+
+第 0 层 = 本文件；第 1 层 = \`${REFERENCE_DIR}/\` 各子树。**建一件就补一行**（顶层是地图）：
+
+| 子树 | 覆盖什么 | 什么时候下潜 |
+|---|---|---|
+| \`${REFERENCE_DIR}/00-xxx.md\` | （覆盖范围） | （触发场景） |
+
+> 参考件**首个 \`#\` 标题**会被当作第二层索引里的摘要 ⇒ 给每个 .md 写一个说人话的首标题。
 
 ## 相关技能
 
-（上下游 skill）
+（上下游 skill：谁先于本 skill、本 skill 产出给谁）
 `,
     [SKILL_ONTOLOGY_FILE]: `@prefix sr:   <http://home-serenity/ontology#> .
 @prefix owl:  <http://www.w3.org/2002/07/owl#> .
@@ -199,7 +257,8 @@ export function createSkillCreatorTool() {
       'Creator for serenity-skills (this container\'s enhanced skill standard): write and optimize ontology-modeled skills. '
       + 'Subcommands: guide (the authoring/optimization method — read this first when creating or reworking a skill) / '
       + 'create <name> (scaffold a skill dir: SKILL.md + skill.ttl + references/, with the base-chain import path computed) / '
-      + 'check <name> (A1 structural + A2 base-chain chained; three states — modeled-ok / plain-skill / modeled-but-check-could-not-run) / '
+      + 'check <name> (A3 layering tier — applies to EVERY skill: the top layer must exist, must not be a bare nav stub, '
+      + 'and must name every references/*.md; plus A1 structural + A2 base-chain for modeled skills) / '
       + 'review <name> (C tier: axiom-vs-text compliance question list, half-mechanical — a human/LLM answers it) / '
       + 'index <name> (preview the second-layer resource list the model will actually see) / '
       + 'status (whole container: which skills are modeled, which are plain). '
@@ -247,11 +306,23 @@ export function createSkillCreatorTool() {
           if (insp.state === 'ok') modeled.push(n)
           else broken.push(formatSkillOntologyInspection(n, insp))
         }
+        // A3 分层档的**存量一览**（先量存量、再谈当不当门；未建模的 skill 同样适用本档）
+        const layeringFail: string[] = []
+        for (const n of names) {
+          const rep = analyzeSkillLayering(join(root, '.opencode', 'skills', n))
+          if (!rep.ok) layeringFail.push(`${n}(${rep.findings.map((f) => f.code).join('/')})`)
+        }
         return [
           `serenity-skill 一览（顶层 skill = ${readTopSkill(root)}）`,
           `\n🧬 **已建模且通过** ${modeled.length} 个` + (modeled.length > 0 ? `：${modeled.join(', ')}` : ''),
           `\n⬜ **普通 skill（未建模）** ${plain.length} 个`,
           '   ⚠️ 这**不是异常**，只是少一项能力（J9：增强对普通 skill 完全向后兼容）。',
+          `\n📐 **A3 分层档**：${names.length - layeringFail.length} ／ ${names.length} 个通过`
+            + (layeringFail.length > 0
+              ? `；未过 ${layeringFail.length} 个（**存量，非本次引入**）`
+                + `：${layeringFail.slice(0, 12).join(', ')}${layeringFail.length > 12 ? ` …还有 ${layeringFail.length - 12} 个` : ''}`
+                + '\n   逐个看：`check <name>`（判据与修法见 `guide` 的「分层抽象树」一节）'
+              : '（全部通过）'),
           broken.length > 0 ? `\n❌ **建模了但检查没跑成** ${broken.length} 个：\n${broken.join('\n')}` : '',
         ]
           .filter((s) => s !== '')
@@ -297,16 +368,24 @@ export function createSkillCreatorTool() {
           : `以下就是模型在提示词里**真正会看到**的第二层（只有清单，没有正文）：\n\n${idx}`
       }
 
-      // ── check：A1/A2 两档（调 P2 的检查，**不重写**）─────────────────────
+      // ── check：**A3 分层档（所有 skill 都适用）** ＋ A1/A2 本体档（只对已建模；调 P2，不重写）──
       if (action === 'check') {
+        const layering = formatLayeringReport(name, analyzeSkillLayering(dir))
         const insp = inspectSkillOntology(dir, { root })
         const body = formatSkillOntologyInspection(name, insp)
         if (insp.state === 'none') {
-          return `${body}\n\n（要建模：\`serenity-skill-creator guide\` 看三个动作，或 \`create\` 生成骨架。）`
+          return [
+            layering,
+            '',
+            body,
+            '',
+            '（A1/A2 是**本体档**，未建模 ⇒ 不适用，这不是异常（J9）。要建模：`guide` 的「三个动作」，'
+              + '或 `create` 生成带骨架的 skill。）',
+          ].join('\n')
         }
         return insp.state === 'ok'
-          ? `${body}\n\n👉 机械档过了。语义档（文字是否真遵守模型/公理）走 \`review\`。`
-          : `${body}\n\n👉 修完**重跑本命令**（本仓教训：「检查没跑」与「检查通过」必须分得开）。`
+          ? `${layering}\n\n${body}\n\n👉 A3 ＋ A1/A2 都过了。语义档（文字是否真遵守模型/公理）走 \`review\`。`
+          : `${layering}\n\n${body}\n\n👉 修完**重跑本命令**（本仓教训：「检查没跑」与「检查通过」必须分得开）。`
       }
 
       // ── review：C 档（半机械；调引擎的 compliance，**不重写**）─────────────

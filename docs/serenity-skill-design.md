@@ -386,3 +386,35 @@ ontology(command="explain", path=".opencode/skills/home-serenity/references/sere
 # 宿主给好的缝（skill_resources / "Load referenced resources only as needed"）
 #   @deepseek-ai/dsh-skill/lib/index.js  L57-81  renderSkillContent / renderResourceHint
 ```
+
+---
+
+## 11. A3 分层抽象树档（v1.55.0 新增；owner 2026-10-12 令）
+
+**来源**：owner 令「**根据本次经验完善 serenity-skill-creator；确保未来创建和改进 skill 都保持 EAP
+分层抽象树结构**」。触发事故 = 同一天把 dsp 开发 skill 的 `SKILL.md` 切成 3.4 KB 的"导航层" ⇒
+**顶层只指向下、不说顶层的话**（树倒置）。事后该 skill 按"顶层归位（hoist）"修好。
+
+**接口变化（本设计件 §4.3／§5／§6 的补充，不改变既有条款）**：
+
+| 面 | 变化 |
+|---|---|
+| `guide` | 增《分层抽象树（EAP）》一节：三层树 ＋ 四条硬规矩（顶层说顶层的话 ／ 不许自称导航层 ／ 顶层是地图 ／ 一条内容只有一个家）＋ 事故作为反例 |
+| `create` | 骨架 `SKILL.md` = **带顶层骨架**（身份与边界／用途与触发／领域模型（形状）／永远成立的约束／抽象树读法表／相关技能） |
+| `check <name>` | 打印 **A3 → A1/A2**；**A3 对每个 skill 都适用**（与有无 `skill.ttl` 无关），A1/A2 仍只对已建模者适用（**J9 未动**） |
+| `status` | 增 **A3 存量一览**（通过 N ／ 总数 M ＋ 未过前 12 个）；**只报不拦**（「上闸分两步：先量存量、再决定当不当门」） |
+
+**A3 三条判据**（`src/skills/skill-layering.ts`，纯逻辑、零 DSH 依赖）：
+
+- **A3-1 顶层非桩**：顶层正文（**已扣** frontmatter 与生成的导航块）≥ **2,048 B**。
+  🔴 扣生成物是判据的关键 —— 否则一份大清单会把桩撑"厚"（有专门用例钉住）。
+- **A3-2 顶层不自述"只是导航层"**：事故的**直接症状**；正常 skill 不会写 ⇒ 几乎不假阳。
+- **A3-3 顶层是地图**：`references/` 一级的 `.md` 必须**在 SKILL.md 里被点名**。
+
+**判据面**：`tests/skill-layering.test.ts`（10 例；A3-1／A3-2／A3-3 各自**正控＋负控**、
+导航块与 frontmatter **不计入**顶层正文、无 SKILL.md 不抛、渲染带可行动指引）＋ **真实输入件**
+（跑真实 CCC 的 38 个 skill：CCC 根守卫 ／ 探针不瞎 ／ **回归钉** = `dsh-serenity-plugin-development`
+必须过 A3）。
+
+🔴 **编号消歧**：本档的 **A3** 与 v1.54.0 记录里那个**已下线的旧 A3（"引用可兑现"）不是同一档** ——
+旧那条照引擎源码"意图"推断、实测打假后**决定不写第二实现**；本条是**新立的分层形态档**。
