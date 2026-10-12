@@ -1505,21 +1505,50 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
   mkdirSync(cache, { recursive: true })
   const registryEnv: Record<string, string> = registry ? { npm_config_registry: registry } : {}
 
-  // 解析目标版本：显式版本直接使用；缺省/latest 查 registry 最新版。
+  // 解析目标版本：
+  //   · 显式版本 ⇒ 用它
+  //   · `latest`  ⇒ registry 的 dist-tag latest（**显式要求"最新"时才走**）
+  //   · 缺省      ⇒ 🔴 **本仓 package.json 的版本**（见下）
+  const npmViewEnv = { npm_config_cache: cache, NPM_CONFIG_CACHE: cache, ...registryEnv }
+  const viewVersion = (spec: string): string | null => {
+    const r = run('npm', ['view', spec, 'version'], { cwd: process.cwd(), quiet: true, env: npmViewEnv })
+    if (r.status !== 0) return null
+    return r.stdout.trim().split('\n').pop()?.trim() || null
+  }
   let target = version
-  if (target === undefined || target === 'latest') {
-    const view = run('npm', ['view', '@shgroup/dsh-serenity-hooks', 'version'], {
-      cwd: process.cwd(),
-      quiet: true,
-      env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache, ...registryEnv },
-    })
-    if (view.status !== 0) {
-      console.error(view.stdout + view.stderr)
-      fail(`npm view 最新版本失败 (exit ${view.status})`, 2)
+  if (target === undefined) {
+    // 🔴 **缺省语义修正**（2026-10-12 v1.56.1 实测逼出）：缺省**不再等于 registry `latest`**，
+    //   而是"**装本仓声明的那个版本**"。
+    //   为什么（实测经过）：publish 之后 dist-tag `latest` 仍会指**上一版**（发布后约 2 分钟
+    //   `npm view … version` 仍返回 1.56.0）⇒ 缺省路径**照它装**：pnpm 成功、零报错、
+    //   `Packages: +1`、还打印「✓ 已安装」—— 而 deploy 刚铺好的新版被**上一版覆盖**，
+    //   此刻重启得到的运行态就是旧版。**每一步都报成功**是最坏的失败形态。
+    //   本命令在发布链里的意图本就是"装上我刚发布的那个" ⇒ 拿本仓的版本当目标才对；
+    //   `latest` 是**传播读数**，不是意图。
+    const repoVer = currentVersion().pkg
+    if (repoVer === '') fail('读不到本仓 hooks/dsh-serenity-hooks/package.json 的 version', 2)
+    if (viewVersion(`@shgroup/dsh-serenity-hooks@${repoVer}`) === null) {
+      // 🔴 **不回落 `latest`** —— 那正是要根除的动作（会静默装成上一版）。
+      fail(`registry 上取不到本仓版本 ${repoVer} —— 无法确定该装哪个。\n`
+        + `  两种情形，处置不同：\n`
+        + `    · 刚 publish 完（传播中）⇒ 等 1~2 分钟重跑本命令（缺省路径即可）\n`
+        + `    · 本仓还没发布（bump 了没 publish）⇒ 先 \`dsh-develop publish\`；`
+        + `或**显式**要最新已发布版：\`dsh-develop npm-install ${profile} latest\``, 2)
     }
-    target = view.stdout.trim().split('\n').pop() ?? ''
-    if (target === '') fail('npm view 返回空版本', 2)
+    target = repoVer
+    console.log(`[dsh-develop] 目标 = 本仓版本 ${target}（缺省语义；已确认 registry 上有它）`)
+  }
+  if (target === 'latest') {
+    const latest = viewVersion('@shgroup/dsh-serenity-hooks')
+    if (latest === null) fail('npm view 最新版本失败', 2)
+    target = latest
     console.log(`[dsh-develop] registry 最新版本: ${target}`)
+    // 显式要 latest 时，若它落后于本仓 ⇒ 说一句（不是错，只是"最新"此刻指谁）
+    const repoVer = currentVersion().pkg
+    if (repoVer !== '' && repoVer !== target) {
+      console.log(`[dsh-develop] ⚠️ 本仓 package.json = ${repoVer}，而 registry latest = ${target}`
+        + ` ⇒ \`latest\` 的传播可能还没到（发布链里应缺省调用或显式给 ${repoVer}）`)
+    }
   }
   const pkgSpec = `@shgroup/dsh-serenity-hooks@${target}`
   console.log(
@@ -1566,6 +1595,38 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
     run('sleep', ['60'], { cwd: process.cwd(), quiet: true })
   }
   console.log(r.stdout.trim() || r.stderr.trim())
+
+  // 🔴 **装机核对**（2026-10-12 v1.56.1 实测逼出；与 D120「已提交 vs 已传播」同族）：
+  //   pnpm 报 `Packages: +1` **只说明"装成功了"**，不说明"装的是你要的那个版本"。
+  //   实测：缺省路径（latest）在发布后 ~2 分钟静默装成**上一版** 1.56.0 —— 全程零错误，
+  //   而 deploy 刚铺好的 1.56.1 被覆盖。⇒ 装完**回读装机副本的版本**与目标对账。
+  //   判据分层（读数器先证明不瞎）：**读不到 = 无法核对**（警告，不判失败）；
+  //   **读得到且不等 = 真失败**（响亮，且给出可执行的处置）。
+  const installedPkg = join(HOME_DIR, '.dsh', 'profiles', profile, 'node_modules', '@shgroup', 'dsh-serenity-hooks', 'package.json')
+  let installed: string | null = null
+  if (existsSync(installedPkg)) {
+    try {
+      installed = String(readJson(installedPkg).version ?? '') || null
+    } catch {
+      installed = null
+    }
+  }
+  if (installed === null) {
+    console.log(`[dsh-develop] ⚠️ 装机核对：读不到 ${installedPkg} —— **无法确认**装的是 ${target}（不当成失败）`)
+  } else if (installed !== target) {
+    // 处置按"该装哪个"给，不按 target 复读（target 可能就是错的那个）：
+    // 本仓 package.json 与 target 不等 ⇒ 该装的是本仓那个版本；相等 ⇒ 只能等传播。
+    const want = currentVersion().pkg
+    const remedy = want !== '' && want !== target
+      ? `用**显式版本**重跑（该路径自带传播重试）—— \`dsh-develop npm-install ${profile} ${want}\``
+      : `registry 侧尚未传播到位：等 2~5 分钟后重跑 \`dsh-develop npm-install ${profile} ${target}\``
+    fail(`装机核对失败：目标是 ${target}，而装机副本是 ${installed}。\n`
+      + `  这不是"装不上"——pnpm 报了成功，只是**装上了另一个版本**。\n`
+      + `  原因多半是 registry 侧还没传播到（dist-tag \`latest\` 或内网 Nexus 的 packument 缓存仍是上一版）。\n`
+      + `  处置：${remedy}。`, 2)
+  } else {
+    console.log(`[dsh-develop] ✓ 装机核对：装机副本版本 = ${installed}`)
+  }
   console.log(`[dsh-develop] ✓ 已安装 ${pkgSpec}（npm registry）→ 重启 dsh web 生效（restart-web）`)
 }
 
@@ -2481,7 +2542,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   version               三处版本一致性
   bump <x.y.z>          package.json + dsh.plugin.json 版本同步
   deploy [--list-copy-set]  load-plugin.sh 全流程（构建+双锚+shim+profile+预检）；复制集合 = 发布物清单（白名单驱动，副本逐条 = 发布物）；--list-copy-set 只读印清单
-  npm-install [profile] [version] 官方 npm 安装：缺省/latest=registry 最新；可指定精确版本
+  npm-install [profile] [version] 官方 npm 安装：缺省/latest=registry 最新（**发布链里请显式给版本**）；装完回读装机副本核对版本
   npm-install-dev <pkg...> hooks 开发依赖安装（npm install --save-dev；client bundle 内联）
   lockfile              重生成 hooks pnpm-lock.yaml + 用 --frozen-lockfile 自检（CI 同款判定）
   restart-web           kill + setsid 重启 dsh web（健康检查）
