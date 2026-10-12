@@ -27,10 +27,20 @@
  *    `references/*-domain.ttl`（旧名）一律当**普通参考件**：不特殊对待、不告警 —— 那 14 份由 CCC 自行改名。
  * 🔴 「未建模」不是异常（裁决 Q6 ／ 判据 J9）：无 `skill.ttl` 的**普通 skill** 照常产出索引，
  *    **零告警、零误差** —— 增强必须对普通 skill 完全向后兼容。
+ *
+ * 🔴 **两个面，两个入口**（2026-10-12 增；owner 裁决 O2）—— 同源、但成本形态不同：
+ *    · **载入面** `buildResourceIndex()` —— 完整索引（名字 ＋ 首标题 ＋ 字节），带 `.md` 文件头读取；
+ *      在三条路径上各附一次：入口段（`system-prompt.ts` order −50）／轨迹段（`trajectory-skills.ts`
+ *      order −45）／目录 provider 的 `get()`（`opencode-skills.ts`）。
+ *    · **目录面** `buildResourceNameSuffix()` —— **只有名字**，**不读任何正文**；只挂一处：
+ *      目录 provider 的 `list()`（`available_skills` 的 `SkillSummary.description`）。
+ *      🔴 为什么目录面在这里：`SkillSummary` 契约里**没有列资源的位**（只有 name/description/whenToUse）
+ *      ⇒ `description` 是唯一位置，且必须**自动生成**。
+ *    ⇒ 两个面**共用** `collectEntries()`（范围 = 规则⑥只写一遍）。
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 
 /** 第二层占位口：本 skill 的本体约束文件（固定名，设计 §5.1） */
 export const SKILL_ONTOLOGY_FILE = 'skill.ttl'
@@ -120,8 +130,9 @@ function scanDirStats(dir: string): { files: number; bytes: number; capped: bool
   return { files, bytes, capped }
 }
 
-/** 按 UTF-8 **字节序**比较两个相对路径（规则②；不是 locale 比较、不是 mtime） */
-function byByteOrder(a: ResourceItem, b: ResourceItem): number {
+/** 按 UTF-8 **字节序**比较两个相对路径（规则②；不是 locale 比较、不是 mtime）。
+ *  参数放宽到 `{ key }`：**未加水**的条目与**已加水**的条目共用同一个比较器 ⇒ 排序规则只写一遍。 */
+function byByteOrder(a: { key: Buffer }, b: { key: Buffer }): number {
   return Buffer.compare(a.key, b.key)
 }
 
@@ -174,26 +185,28 @@ export function firstHeading(file: string): string {
   return ''
 }
 
-/** 收集候选（`references/` 一级条目 ＋ 固定名本体），并按字节序排好 */
-function collectItems(skillDir: string): ResourceItem[] {
-  const items: ResourceItem[] = []
+/** 第二层的一个**条目**（未"加水"：字节与摘要都要读盘，故分开 —— 见 `collectEntries`） */
+interface ResourceEntry {
+  /** 相对 skill 目录的路径（如 `references/00-x.md` ／ `skill.ttl`） */
+  rel: string
+  kind: 'file' | 'dir'
+  /** 绝对路径（给"加水"阶段用；**名字清单不碰它**） */
+  abs: string
+  /** 本体文件（固定名命中） */
+  ontology: boolean
+  /** 排序键：相对路径的 UTF-8 字节 */
+  key: Buffer
+}
 
-  const add = (rel: string, abs: string, ontology: boolean): void => {
-    let bytes: number
-    try {
-      bytes = statSync(abs).size
-    } catch {
-      return // 读不到就不列（宁可少列，也不列出读不到的项）
-    }
-    items.push({
-      rel,
-      kind: 'file',
-      bytes,
-      excerpt: rel.endsWith('.md') ? firstHeading(abs) : '',
-      ontology,
-      key: Buffer.from(rel, 'utf-8'),
-    })
-  }
+/**
+ * 收集第二层的**条目**（范围 = 规则⑥：`references/` 一级条目 ＋ 固定名本体）。
+ *
+ * 🔴 **只做 `readdir` / `stat`，不读任何文件正文** —— 两个消费者（第二层索引 ／ 目录面的名字清单）
+ *    **共用这一份范围定义**：规则⑥只该有一个家，各写一遍必然漂移。
+ * 🔴 返回已按**字节序**排好（规则②：确定性，不用 mtime）。
+ */
+function collectEntries(skillDir: string): ResourceEntry[] {
+  const entries: ResourceEntry[] = []
 
   const refDir = join(skillDir, REFERENCE_DIR)
   if (existsSync(refDir)) {
@@ -212,27 +225,65 @@ function collectItems(skillDir: string): ResourceItem[] {
         continue
       }
       const rel = `${REFERENCE_DIR}/${name}`
-      if (isDir) {
-        // 子目录：**给名字 ＋ 计数，不展开内容**（见 scanDirStats 的理由）
-        const { files, bytes, capped } = scanDirStats(abs)
-        items.push({
-          rel,
-          kind: 'dir',
-          bytes,
-          excerpt: `子目录 · ${capped ? `≥${groupThousands(files)}` : groupThousands(files)} 个文件`,
-          ontology: false,
-          key: Buffer.from(rel, 'utf-8'),
-        })
-        continue
-      }
-      add(rel, abs, false)
+      entries.push({ rel, kind: isDir ? 'dir' : 'file', abs, ontology: false, key: Buffer.from(rel, 'utf-8') })
     }
   }
 
   const ontoAbs = join(skillDir, SKILL_ONTOLOGY_FILE)
-  if (existsSync(ontoAbs)) add(SKILL_ONTOLOGY_FILE, ontoAbs, true)
+  if (existsSync(ontoAbs)) {
+    entries.push({
+      rel: SKILL_ONTOLOGY_FILE,
+      kind: 'file',
+      abs: ontoAbs,
+      ontology: true,
+      key: Buffer.from(SKILL_ONTOLOGY_FILE, 'utf-8'),
+    })
+  }
 
-  items.sort(byByteOrder)
+  entries.sort(byByteOrder)
+  return entries
+}
+
+/**
+ * 给条目**加水**（字节 ＋ 摘要）—— 这两项都要读盘，因此与"有哪些条目"分开。
+ * 读不到 ⇒ `null`（宁可少列，也不列出读不到的项）。
+ */
+function hydrate(entry: ResourceEntry): ResourceItem | null {
+  if (entry.kind === 'dir') {
+    // 子目录：**给名字 ＋ 计数，不展开内容**（见 scanDirStats 的理由）
+    const { files, bytes, capped } = scanDirStats(entry.abs)
+    return {
+      rel: entry.rel,
+      kind: 'dir',
+      bytes,
+      excerpt: `子目录 · ${capped ? `≥${groupThousands(files)}` : groupThousands(files)} 个文件`,
+      ontology: false,
+      key: entry.key,
+    }
+  }
+  let bytes: number
+  try {
+    bytes = statSync(entry.abs).size
+  } catch {
+    return null
+  }
+  return {
+    rel: entry.rel,
+    kind: 'file',
+    bytes,
+    excerpt: entry.rel.endsWith('.md') ? firstHeading(entry.abs) : '',
+    ontology: entry.ontology,
+    key: entry.key,
+  }
+}
+
+/** 收集候选（`references/` 一级条目 ＋ 固定名本体），加好水并按字节序排好 */
+function collectItems(skillDir: string): ResourceItem[] {
+  const items: ResourceItem[] = []
+  for (const entry of collectEntries(skillDir)) {
+    const item = hydrate(entry)
+    if (item !== null) items.push(item)
+  }
   return items
 }
 
@@ -280,4 +331,43 @@ export function buildResourceIndex(skillDir: string, options: ResourceIndexOptio
   if (body.length <= maxChars) return body
   // 字符上限：**照样响亮**（截断可见，且不改排序/条目内容）
   return `${body.slice(0, maxChars)}\n…(第二层索引已按 ${groupThousands(maxChars)} 字符上限截断，原文 ${groupThousands(body.length)} 字符)`
+}
+
+/** 目录面（`SkillSummary.description`）用的名字清单 —— **只有名字**，无摘要、无字节 */
+export interface ResourceNameList {
+  /** 条目的**基名**（目录带尾 `/`；本体文件就是 `skill.ttl`），按字节序 */
+  names: string[]
+  /** 因条数上限**没列出**的条数（`> 0` ⇒ 调用方必须**响亮**写出，规则③） */
+  hidden: number
+}
+
+/**
+ * 收集**只有名字**的第二层清单（目录面专用）。
+ *
+ * 为什么单独一个入口（而不是复用 `buildResourceIndex`）：**成本形态不同** ——
+ * 索引要给每个 `.md` 读文件头取摘要（规则④），而目录面是**每请求 × 每个 skill** 都要算的
+ * ⇒ 这条路径**一个字节正文都不读**（只 `readdir`/`stat`）。
+ * 范围仍与索引**同源**（共用 `collectEntries` ⇒ 规则⑥只有一个家）。
+ */
+export function buildResourceNames(skillDir: string, options: ResourceIndexOptions = {}): ResourceNameList {
+  const maxItems = options.maxItems ?? RESOURCE_INDEX_MAX_ITEMS
+  const entries = collectEntries(skillDir)
+  const shown = entries.slice(0, maxItems)
+  return {
+    names: shown.map((e) => (e.kind === 'dir' ? `${basename(e.rel)}/` : basename(e.rel))),
+    hidden: entries.length - shown.length,
+  }
+}
+
+/**
+ * 目录面后缀：把名字清单拼成**可直接接在 `description` 后面**的一段文本。
+ *
+ * 🔴 **自动生成，绝不手写**（手写必与文件树漂）；无可列项 ⇒ `''`（**普通 skill 零噪声** —— 判据 J9）。
+ * 🔴 **有界 ＋ 响亮**（规则③）：超上限时写出"另有 N 项"，**绝不静默截断**。
+ */
+export function buildResourceNameSuffix(skillDir: string, options: ResourceIndexOptions = {}): string {
+  const { names, hidden } = buildResourceNames(skillDir, options)
+  if (names.length === 0) return ''
+  const tail = hidden > 0 ? ` …另有 ${hidden} 项` : ''
+  return `（参考件：${names.join(' / ')}${tail}）`
 }

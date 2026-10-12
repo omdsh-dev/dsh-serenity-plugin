@@ -149,4 +149,24 @@ describe('P1b · 三个消费点都带第二层（J7）', () => {
     expect(def.content).toContain('# plain-entry 正文')
     expect(def.content).not.toContain(INDEX_HEADING)
   })
+
+  it('🔴 第四处落点 = 目录面（O2）：`list()` 的 description 带参考件**名字**；普通 skill 一字不改', async () => {
+    mkSkill('cat-skill', { refs: ['00-a.md', '10-b.md'], ontology: true })
+    mkSkill('cat-plain')
+    const provider = captureProvider()
+    const cands = (await provider.list({ cwd: root })).candidates as { name: string; description: string }[]
+
+    const cat = cands.find((c) => c.name === 'cat-skill')
+    expect(cat).toBeDefined()
+    // 正控：名字在（**只有名字** —— 目录面不重复载入面那份"名字 ＋ 首标题 ＋ 字节"的索引）
+    expect(cat?.description).toContain('00-a.md')
+    expect(cat?.description).toContain('10-b.md')
+    expect(cat?.description).toContain('skill.ttl')
+    expect(cat?.description).toContain('参考件')
+    // 负控：索引块的形态**一个都不许**漏进目录面；正文更不许
+    expect(cat?.description).not.toContain(INDEX_HEADING)
+    expect(cat?.description).not.toContain(BODY_SENTINEL)
+    // J9：普通 skill（无 references/ 且无 skill.ttl）的 description **逐字不变**（零噪声）
+    expect(cands.find((c) => c.name === 'cat-plain')?.description).toBe('cat-plain 的说明')
+  })
 })

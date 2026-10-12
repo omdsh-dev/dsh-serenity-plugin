@@ -1,3 +1,61 @@
+## v1.56.0 — 2026-10-12（**目录面带上参考件名字** ＋ 修掉一处"同一份清单载入时带两遍"的冗余）
+
+**来源**：owner 两条令（同日）—— ① 回答「`available_skills` 里为什么看不到 `references/`」之后，
+他在"只给件数 ／ **给文件名** ／ 混合 ／ 维持现状"里选了 **给文件名**（本会话记的 **O2**）；
+② 「**你发现的搞两遍的 bug 也修掉**」。
+
+**性质**：① 新增**目录面**渲染（`provider.list()` 的 `description`）；② 把第二层的"范围定义"抽成
+**唯一一个家**并让两个面共用；③ CCC 侧切片工具写入的重复清单已去掉（ACC 侧只跟随改了一处**滞后的注释**）。
+
+### 一、目录面（O2）：`SkillSummary.description` 带上参考件名字
+
+**取证（读宿主契约，逐字）**：`@deepseek-ai/dsh-skill` 的 **`SkillSummary`** =
+`path? ／ name ／ description ／ whenToUse? ／ invocation ／ source ／ provider ／ resourceBase?`
+—— **没有任何列举资源的字段**；带 `content` 的是 `SkillDefinition`（**只在载入时才有**）
+⇒ 想让**目录面**（`available_skills`）带参考件，**唯一位置就是 `description`**，且**必须自动生成**（手写必漂）。
+
+| 面 | 入口 | 内容 | 何时 |
+|---|---|---|---|
+| **载入面**（已有） | `buildResourceIndex()` | 名字 ＋ 首标题 ＋ 字节 | 注入三条路径 ＋ `provider.get()` |
+| **目录面**（本版） | `buildResourceNameSuffix()` | **只有名字** | `provider.list()`，每请求 × 每 skill |
+
+🔴 **成本形态正是这两个面分开的全部理由**：目录面是"**每请求 × 每个 skill**"的路径（38 个 skill 每轮都算），
+而摘要要为每个 `.md` **读文件头** ⇒ 目录面这条路径**一个字节正文都不读**（只 `readdir` / `stat`）。
+**判据 = 差分正控**（`tests/resource-index-catalog.test.ts`）：同一个目录上，**目录面 0 次读**、
+**载入面必读 > 0 次**（后者同时证明插桩探针不瞎）。
+
+🔴 **两个面共用一份"范围定义"**：新抽 `collectEntries()`（`references/` 一级条目 ＋ 固定名本体，只 `readdir`/`stat`），
+`collectItems = collectEntries + hydrate`（加水：字节 ＋ 摘要）⇒ 规则⑥（**范围**）**只写一遍** —— 各写一遍必然漂移。
+
+**向后兼容（J9 未动）**：无可列项 ⇒ 后缀为空串 ⇒ 普通 skill 的 `description` **逐字不变**（有用例钉住）。
+
+### 二、修掉"同一份清单载入时带两遍"
+
+**形状**：CCC 的 `skill-lint split` 在切片后的 `SKILL.md` 里写一份**静态文件清单**（哨兵块），
+而我们的生成器在**载入时**又按文件树即时生成一份 —— 两份内容重复 ⇒ 模型把同一份清单**读两遍**
+（白花 token，且文件树一变它必漂）。
+
+**修法**（CCC 侧 `scripts/skill-lint.ts` 的 `navBlock()`）：哨兵块**只留哨兵与指针、不列任何文件名**。
+哨兵**必须留着**：`split` 靠它认出"已切过"，`src/skills/skill-layering.ts` 靠**同一对哨兵**把这几个字节
+从"顶层正文"里扣掉 ⇒ **哨兵文本是跨仓契约**，改它要两边同批（本仓那侧有一份同字符串常量）。
+
+🔴 **ACC 侧只有一处跟随**：`skill-layering.ts` 的 A3-3 注释原写"导航块里点名也算 —— 那是生成物"，
+**已不成立**（导航块不再点名）⇒ 改为写明"点名只能由**作者手写的地图**满足，这是有意为之"。
+⚠️ **这条改动的真实代价，明写在此**：`split` 之后顶层**不再自动满足 A3-3** ——
+机器清单回答"**有什么**"，地图回答"**什么时候去拿哪一件**"；**把清单当 A3-3 的满足物正是假绿**。
+
+### 三、代码面
+
+| 文件 | 变化 |
+|---|---|
+| `src/skills/resource-index.ts` | 抽 `collectEntries()`（**范围的唯一出口**）＋ `hydrate()`；新增 `buildResourceNames()` / `buildResourceNameSuffix()`；`byByteOrder` 参数放宽到 `{key}`（两个阶段共用一个比较器） |
+| `src/seams/opencode-skills.ts` | `list()` 追加名字后缀（**目录面**）；头注释写明"本 provider 是第四条落点所在" |
+| `src/skills/skill-layering.ts` | A3-3 注释随 CCC 侧改动同步（**只有注释**，行为未动） |
+
+**判据**：新件 `tests/resource-index-catalog.test.ts` **7 例**（差分正控 ／ 名字与字节序 ／ 后缀形态 ／
+J9 负控 ／ 规则③ 响亮（正负控）／ 规则① 不泄漏正文与摘要）；`tests/serenity-skill-second-layer.test.ts`
+**＋1 例**（**第四处落点**：`list()` 的 description 带名字、不带索引块形态、普通 skill 逐字不变）。
+
 ## v1.55.0 — 2026-10-12（**serenity-skill 长出 A3 分层抽象树档**：让"树不能倒置"成为可跑的判据）
 
 **来源**：owner 2026-10-12 令「**根据本次经验完善 serenity-skill-creator；确保未来创建和改进 skill

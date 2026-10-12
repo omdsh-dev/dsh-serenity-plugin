@@ -141,7 +141,11 @@ export function analyzeSkillLayering(skillDir: string): LayeringReport {
     })
   }
 
-  // A3-3 树可下潜：references/ 一级 .md 必须被 SKILL.md 点名（导航块里点名也算 —— 那是生成物）
+  // A3-3 树可下潜：references/ 一级 .md 必须被 SKILL.md 点名。
+  // 🔴 2026-10-12：CCC 的 `skill-lint split` **不再往 SKILL.md 写文件清单**（只留哨兵与指针 ——
+  //    那份清单与我们的生成块重复，载入时会带两遍）⇒ 这条"点名"实际上**只能由作者手写的地图**满足。
+  //    这是**有意为之**：机器清单回答"有什么"，地图回答"**什么时候去拿哪一件**"——
+  //    把清单当 A3-3 的满足物正是本仓反复撞见的"假绿"。
   const referenceDocs = listReferenceDocs(skillDir)
   const notNamedInTop = referenceDocs.filter((d) => !raw.includes(d))
   if (notNamedInTop.length > 0) {

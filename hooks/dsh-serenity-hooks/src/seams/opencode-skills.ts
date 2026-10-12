@@ -7,13 +7,18 @@
  * 使 references/scripts 相对引用可解析。
  *
  * rank = 250：低于 project-dsh（100）与 custom（300）之间——本地 .dsh/skills 优先。
+ *
+ * 🔴 **本 provider 是第二层披露树的第四条落点所在**（2026-10-12，owner 裁决 O2）：
+ *    · `list()` = **目录面**（`available_skills` 的 `SkillSummary`）⇒ 参考件只能挂在 `description` 上（**只有名字**）；
+ *    · `get()`  = **载入面**（`SkillDefinition.content`）⇒ 挂**完整索引**（名字 ＋ 首标题 ＋ 字节）。
+ *    两处**同源**（`src/skills/resource-index.ts`），不是各写一遍。
  */
 
 import type { Context } from 'cordis'
 import type { SkillProvider, SkillCandidate, SkillDefinition, SkillLookupOptions } from '@deepseek-ai/dsh-skill'
 import { cccRootForCwd } from '../ccc-roots.js'
 import { listOpencodeSkillDirs, loadOpencodeSkill } from '../skills/opencode-scan.js'
-import { buildResourceIndex } from '../skills/resource-index.js'
+import { buildResourceIndex, buildResourceNameSuffix } from '../skills/resource-index.js'
 
 export const OPENCODE_PROVIDER = 'opencode-skills'
 export const OPENCODE_RANK = 250
@@ -30,9 +35,15 @@ export function registerOpencodeSkills(ctx: Context): void {
       for (const dir of listOpencodeSkillDirs(root)) {
         const skill = loadOpencodeSkill(dir)
         if (!skill || !skill.meta.name) continue
+        // 🆕 第二层披露树的**第四条落点 = 目录面**（`available_skills`，owner 裁决 O2）：
+        //    `SkillSummary` 契约上**只能带 name/description/whenToUse**（无资源清单字段）⇒ 想让它
+        //    带参考件，**唯一位置就是 `description`**，且必须**自动生成**（手写必漂）。
+        //    这里追加的是**只有名字**的清单：这条路径**不读任何文件正文**（见 buildResourceNames）。
+        const baseDesc = skill.meta.description || '(opencode skill)'
+        const nameSuffix = buildResourceNameSuffix(dir)
         candidates.push({
           name: skill.meta.name,
-          description: skill.meta.description || '(opencode skill)',
+          description: nameSuffix ? `${baseDesc}${nameSuffix}` : baseDesc,
           ...(skill.meta.whenToUse ? { whenToUse: skill.meta.whenToUse } : {}),
           invocation: { modelInvocable: true, userInvocable: true },
           source: 'opencode-skills',
