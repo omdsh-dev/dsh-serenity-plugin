@@ -26,7 +26,7 @@
 | 10 | localstoreBlock | 296 | 0.7% | 每轮 | `:383` |
 | 11 | sessionBlock | 0 | 0% | 条件 | `:439` |
 
-> **读表要点**：**第 1 行就是全部问题**。其余十块加起来 12 006 chars，只占 26%。
+> **读表要点**：**第 1 行即全部问题**。其余十块加起来 12 006 chars，只占 26%。
 > ⇒ **任何"砍小块"的动作，总量上都是噪音**；真正值得讨论的只有 `SKILL.md` 全文注入这一条。
 > （这不代表小块没有**干扰**价值 —— 干扰与体量是两回事，见候选 B/C。）
 
@@ -63,14 +63,14 @@
 
 ### 🅱️ 候选 2 —— `principlesBlock` 的 MSM 三原则（**353 chars**，**设计上已有开关但未启用**）
 
-**现状**：`principlesBlock(root, omitMsmPrinciples = false)` —— **这个开关就是为砍它而存在的**，但
+**现状**：`principlesBlock(root, omitMsmPrinciples = false)` —— **该开关即为砍它而存在**，但
 `serenitySystemPrompt()` 调用时**没传 true**（`:495`），于是：
 
 - ACC 注入：`MSM principles — machinery before improvisation:` + Determinism first / Single source of truth / Registered to act
 - CCC 的 `SKILL.md`：**同一组原则，措辞不同**（「确定性优先」「单真相源」「已注册才可执行」）
 
 **判断**：**纯冗余**（同一原则两份文本 = 多一处会漂移的真相）。**且修复成本几乎为零**：
-传 `omitMsmPrinciples=true` 即可（前提：确认该 CCC 的 SKILL.md 确实覆盖了这三条 —— 本机属实）。
+传 `omitMsmPrinciples=true` 即可（须确认该 CCC 的 SKILL.md 确实覆盖了这三条 —— 本机属实）。
 
 **风险**：低。**需发版**（ACC 机制改动）。
 
@@ -102,7 +102,7 @@ identityBlock 末尾写：
 | D2 | 压缩为「**十条一行式**」清单（保留名字 + 核心断言） | ~2 000 chars | 中 —— 失去"物理事实"的叙事力，而那正是隐喻的**作用机制** |
 | D3 | 整块退化为**指针**（`praxis` 已有 `cce/eap/neat`，可加 metaphor 段） | ~3 000 chars | 高 —— 隐喻**当前每轮在场**；移出后"约束的生动性"要靠工具调用才能拿回 |
 
-⚠️ **我的倾向**：**D1**（低风险、明确删冗余），D2/D3 我不建议现在做 —— 隐喻的设计意图就是
+⚠️ **倾向：D1**（低风险、明确删冗余）；**D2/D3 不建议现在做** —— 隐喻的设计意图 ＝
 "**每轮在场**的物理约束"，而它的收益恰恰来自"不必调用就能被记住"。
 
 ---
@@ -167,7 +167,7 @@ D1 属 ACC 文案改动（需发版）。⇒ 建议**攒一批再发**，不必�
 
 ## 5. 订正 + 裁决结果 + 实施状态（2026-09-16 补，S142 §0e/§0f/§0h）
 
-> 本节**追加**，不回改上文（保留"当时的判断"作为可重建的痕迹）。上文若有与本节的冲突，**以本节为准**。
+> **本段为追加**，不回改上文（保留"当时的判断"作为可重建的痕迹）。上文若有与本段的冲突，**以本段为准**。
 
 ### 5.1 🔴 两处订正（本文档自身的错）
 
@@ -212,7 +212,7 @@ D1 属 ACC 文案改动（需发版）。⇒ 建议**攒一批再发**，不必�
 
 1. **入口 skill 注入 = 原文、不截断**：`entrySkillSectionText()`（`system-prompt.ts:408-417`）注释明写「注入 state.skillContent 原文（**不截断**）」。
    ⇒ **A 的"全文注入"是字面意义的全文**；也意味着 **F1 的削减 1:1 反映到每轮载荷**。
-   ⚠️ **别把 `context.ts:32` 的 `DEFAULT_ENTRY_SKILL_MAX_CHARS = 30000` 与它混起来** —— 那个上限只作用于 **Phase2 提示词**（`Math.min(entrySkillMaxChars, 8000)`，`context.ts:72`），**不作用于 SKILL.md**。
+   ⚠️ **不得把 `context.ts:32` 的 `DEFAULT_ENTRY_SKILL_MAX_CHARS = 30000` 与它混起来** —— 那个上限只作用于 **Phase2 提示词**（`Math.min(entrySkillMaxChars, 8000)`，`context.ts:72`），**不作用于 SKILL.md**。
 2. **`sanitizeSkillContent` 按行静默剔除**：`system-prompt.ts:55` 的 `HIDDEN_LINES = /安全模式|safe-mode|\.serenity-safe-on/`，逐行过滤（无 `g` flag，防 `lastIndex` 游移）。
    ⇒ 本 CCC 的 SKILL.md 命中**恰好 1 行**（布局树里的 `.serenity-safe-on` 那行），已在收到的注入副本中确认缺失（**运行态证实**）。
-   🔴 **副作用（登记）**：任何写在 SKILL.md 里的"**安全模式**"字样会**静默不进 agent 上下文**——包括**写给 agent 的指令**。将来若有人写"安全模式下你要……"，那条指令会**静默失效**且无告警。
+   🔴 **副作用（登记）**：任何写在 SKILL.md 里的"**安全模式**"字样会**静默不进 agent 上下文**——包括**写给 agent 的指令**。将来若写入"安全模式下应……"，那条指令会**静默失效**且无告警。

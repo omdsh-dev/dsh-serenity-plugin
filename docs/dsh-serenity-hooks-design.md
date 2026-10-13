@@ -211,7 +211,7 @@ ctx.on('agent/session-start', (agent, source) => {
 **路线 B（备选，需 dsh-customize）**：
 - 插件放入 DSH checkout `packages/hooks/dsh-serenity-hooks`，`apps/cli/config/base.cordis.yml` 增行，走 task worktree + staging merge.lock 流程。
 
-**Web production 模式注意**：集成后需重建 web 产物并刷新验证；无 `--dev` 时 HMR 仅覆盖 personal config（insert 行变更会触发 loader 层重载，但新包模块解析稳妥起见重启一次）。
+**Web production 模式**：集成后需重建 web 产物并刷新验证；无 `--dev` 时 HMR 仅覆盖 personal config（insert 行变更会触发 loader 层重载，但新包模块解析稳妥起见重启一次）。
 
 ## 7. 测试策略
 
