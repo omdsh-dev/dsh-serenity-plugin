@@ -652,23 +652,36 @@ function turtleToOnto(r: TurtleParseResult): OntologyDefinition {
     onto.relations![name] = rd;
   }
 
-  // Parse axioms (blank nodes attached to ontology or types)
-  for (const [subj, stmts] of subjectMap) {
+  // Parse axioms — **两种主语写法都要收**（2026-10-13 S142 第一次修正）
+  // 🔴 原实现**只认匿名式**（`:onto sr:axiom [ … ]`，靠 `s.objectType === "blank"`）⇒
+  //    **具名式**（`:ax-rule-has-a-source a sr:Axiom ; sr:axiomRule "…"`）**一条都收不到**。
+  //    而这是**同一个病的镜像**：viz 只认具名式（⇒ 8/16 文件公理数归零），
+  //    引擎只认匿名式（⇒ `home-rhetoric` 的 9 条具名公理在引擎侧消失，只剩继承来的）。
+  //    实测：`home-rhetoric/skill.ttl` 的 9 条 `a sr:Axiom` 在 `explain` 上从不出现。
+  //    ⇒ 判据 = **`a sr:Axiom` 这件事本身**（与主语写法无关），另加原本兼容的 `sr:axiom` 谓词形态。
+  const axiomBnodes = new Set<string>();
+  for (const [, stmts] of subjectMap) {
     for (const s of stmts) {
-      if (s.predicate === SR + "axiom" && s.objectType === "blank") {
-        const anode = String(s.object);
-        const astmts = subjectMap.get(anode) || [];
-        const ad: AxiomDef = { rule: "" };
-        for (const as_ of astmts) {
-          if (as_.predicate === SR + "description") ad.description = String(as_.object);
-          else if (as_.predicate === RDFS + "label") { ad.label = String(as_.object); if (ad.description === undefined) ad.description = String(as_.object); }
-          else if (as_.predicate === RDFS + "comment") { ad.comment = String(as_.object); if (ad.description === undefined) ad.description = String(as_.object); }
-          if (as_.predicate === SR + "rule") ad.rule = String(as_.object);
-          if (as_.predicate === SR + "axiomType") ad.type = String(as_.object);
-        }
-        onto.axioms!.push(ad);
-      }
+      if (s.predicate === SR + "axiom" && s.objectType === "blank") axiomBnodes.add(String(s.object));
     }
+  }
+  for (const [subj, stmts] of subjectMap) {
+    // ① 匿名式：只收 `sr:axiom` 指过去的那个空白节点（不是所有空白节点）
+    // ② 具名式：主语自己 `a sr:Axiom`
+    const isNamed = stmts.some(
+      (s) => s.predicate === RDF + "type" && stripDefaultPrefix(i2q(String(s.object), prefixes)) === "sr:Axiom",
+    );
+    if (!axiomBnodes.has(subj) && !isNamed) continue;
+    const astmts = stmts;
+    const ad: AxiomDef = { rule: "" };
+    for (const as_ of astmts) {
+      if (as_.predicate === SR + "description") ad.description = String(as_.object);
+      else if (as_.predicate === RDFS + "label") { ad.label = String(as_.object); if (ad.description === undefined) ad.description = String(as_.object); }
+      else if (as_.predicate === RDFS + "comment") { ad.comment = String(as_.object); if (ad.description === undefined) ad.description = String(as_.object); }
+      if (as_.predicate === SR + "axiomRule" || as_.predicate === SR + "rule") ad.rule = String(as_.object);
+      if (as_.predicate === SR + "axiomType") ad.type = String(as_.object);
+    }
+    onto.axioms!.push(ad);
   }
 
   // Parse instances — `:Name a :SomeDeclaredClass ; <字面量谓语> "…"`（2026-10-13 S142）
