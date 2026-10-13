@@ -111,6 +111,12 @@ interface PropertyDef {
 
 interface TypeDef {
   description?: string;
+  // 🔴 `label` 与 `comment` 是**两个字段**（2026-10-13 S142）：
+  //    原实现把 `rdfs:label` 与 `rdfs:comment` 都写进同一个 `description`（后者覆盖前者），
+  //    ⇒ 同一份文件里**一句话被另一句吃掉**，且**没有任何门会报警**（`check --level strict` 全绿）。
+  //    `description` 保留为"主描述"（label 优先）⇒ **既有消费点一个都不用改**。
+  label?: string;
+  comment?: string;
   superTypes?: string[];
   rigidity?: "rigid" | "anti-rigid" | "semi-rigid";
   identity?: string[];
@@ -120,6 +126,9 @@ interface TypeDef {
 }
 
 interface RelationDef {
+  // 关系此前**完全不收** label/comment（连合并都没有）⇒ 图上关系只剩本地名。
+  label?: string;
+  comment?: string;
   domain?: string;
   range?: string;
   cardinality?: string;
@@ -133,6 +142,10 @@ interface RelationDef {
 
 interface AxiomDef {
   description?: string;
+  /** `rdfs:label`（与 `description` 分开存；description 仍以 `sr:description` 优先） */
+  label?: string;
+  /** `rdfs:comment` */
+  comment?: string;
   rule: string;
   type?: string;
 }
@@ -566,7 +579,8 @@ function turtleToOnto(r: TurtleParseResult): OntologyDefinition {
     const td: TypeDef = {};
     for (const s of stmts) {
       if (s.predicate === RDFS + "subClassOf") td.superTypes = [...(td.superTypes || []), stripDefaultPrefix(i2q(String(s.object), prefixes))];
-      if (s.predicate === RDFS + "label" || s.predicate === RDFS + "comment") td.description = String(s.object);
+      if (s.predicate === RDFS + "label") { td.label = String(s.object); td.description = String(s.object); }
+      else if (s.predicate === RDFS + "comment") { td.comment = String(s.object); if (td.label === undefined) td.description = String(s.object); }
       if (s.predicate === SR + "rigidity") td.rigidity = String(s.object) as TypeDef["rigidity"];
       if (s.predicate === SR + "identity") {
         td.identity = [...(td.identity || []), String(s.object)];
@@ -609,6 +623,8 @@ function turtleToOnto(r: TurtleParseResult): OntologyDefinition {
     for (const s of stmts) {
       if (s.predicate === RDFS + "domain") rd.domain = stripDefaultPrefix(i2q(String(s.object), prefixes));
       if (s.predicate === RDFS + "range") rd.range = stripDefaultPrefix(i2q(String(s.object), prefixes));
+      if (s.predicate === RDFS + "label") rd.label = String(s.object);
+      if (s.predicate === RDFS + "comment") rd.comment = String(s.object);
       if (s.predicate === SR + "cardinality") rd.cardinality = String(s.object);
       // Functional/Transitive/Symmetric already handled above
     }
@@ -623,7 +639,9 @@ function turtleToOnto(r: TurtleParseResult): OntologyDefinition {
         const astmts = subjectMap.get(anode) || [];
         const ad: AxiomDef = { rule: "" };
         for (const as_ of astmts) {
-          if (as_.predicate === SR + "description" || as_.predicate === RDFS + "label") ad.description = String(as_.object);
+          if (as_.predicate === SR + "description") ad.description = String(as_.object);
+          else if (as_.predicate === RDFS + "label") { ad.label = String(as_.object); if (ad.description === undefined) ad.description = String(as_.object); }
+          else if (as_.predicate === RDFS + "comment") { ad.comment = String(as_.object); if (ad.description === undefined) ad.description = String(as_.object); }
           if (as_.predicate === SR + "rule") ad.rule = String(as_.object);
           if (as_.predicate === SR + "axiomType") ad.type = String(as_.object);
         }
@@ -2296,6 +2314,10 @@ function cmdReview(args: string[]): void {
         types: Object.entries(types).map(([n, t]) => ({
           name: n,
           description: t.description,
+          // 🔴 分开暴露：`description` 是"主描述"（label 优先，向后兼容），
+          //    这两个是**各自的原文** —— 合并成一个字段会让其中一句话被吃掉（2026-10-13 S142）。
+          label: t.label,
+          comment: t.comment,
           superTypes: t.superTypes,
           rigidity: t.rigidity,
           identity: t.identity,

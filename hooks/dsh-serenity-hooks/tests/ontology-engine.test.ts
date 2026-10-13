@@ -445,3 +445,99 @@ describe("A45 · 规则里的 `:LocalName` 按**文件自己的默认前缀**解
     expect(r.code, r.stdout + r.stderr).toBe(0);
   });
 });
+
+describe("label/comment 分离（2026-10-13 S142：原实现把两者合并 ⇒ 一句话静默吃掉）", () => {
+  /** 同一实体上**同时**写 label 与 comment —— 这正是修前会丢内容的形态 */
+  function writeBoth(): void {
+    writeFileSync(
+      file,
+      [
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
+        "@prefix sr: <http://home-serenity/ontology#> .",
+        "@prefix : <http://example.org/probe#> .",
+        "",
+        ':onto a owl:Ontology ; sr:name "lc-probe" ; owl:versionInfo "0.0.1" .',
+        ':Thing a owl:Class ;',
+        '    rdfs:label "SHORT-LABEL" ;',
+        '    rdfs:comment "LONG-COMMENT" ;',
+        '    sr:rigidity "rigid" ;',
+        '    sr:identity :thingName .',
+        ':thingName a owl:DatatypeProperty .',
+        ':rel a owl:ObjectProperty ;',
+        '    rdfs:label "REL-LABEL" ;',
+        '    rdfs:comment "REL-COMMENT" ;',
+        '    rdfs:domain :Thing ;',
+        '    rdfs:range :Thing .',
+        ':onto sr:axiom [',
+        '    sr:axiomId "AX-PROBE" ;',
+        '    rdfs:label "AX-LABEL" ;',
+        '    rdfs:comment "AX-COMMENT" ;',
+        '    sr:rule "Thing.thingName != \'\'" ;',
+        '    sr:axiomType "state"',
+        '  ] .',
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+  }
+
+  /** 取 `review --format=json` 的 JSON 块（stdout 里紧随一行工具抬头） */
+  function reviewJson(): any {
+    const r = runOntologyCli(["review", file, "--format", "json"], { cwd: TMP });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const start = r.stdout.indexOf("{");
+    expect(start, r.stdout).toBeGreaterThanOrEqual(0);
+    return JSON.parse(r.stdout.slice(start));
+  }
+
+  it("🔴 类型：label 与 comment **各自原样到达**（修前 label 被 comment 覆盖、两者都不出口）", () => {
+    writeBoth();
+    const t = reviewJson().ontology.types.find((x: any) => x.name === "Thing");
+    expect(t.label).toBe("SHORT-LABEL");
+    expect(t.comment).toBe("LONG-COMMENT");
+  });
+
+  it("🔴 兼容：`description` 仍是**主描述**（label 优先）⇒ 既有消费点一字不用改", () => {
+    writeBoth();
+    const t = reviewJson().ontology.types.find((x: any) => x.name === "Thing");
+    expect(t.description).toBe("SHORT-LABEL");
+  });
+
+  it("🔴 关系：label/comment 原先**完全不收** ⇒ 现在两个都在", () => {
+    writeBoth();
+    const rel = reviewJson().ontology.relations.find((x: any) => x.name === "rel");
+    expect(rel.label).toBe("REL-LABEL");
+    expect(rel.comment).toBe("REL-COMMENT");
+  });
+
+  it("🔴 公理：`sr:description` 优先，label/comment 另存 ⇒ 三者不再互相覆盖", () => {
+    writeBoth();
+    const ax = reviewJson().ontology.axioms[0];
+    expect(ax.label).toBe("AX-LABEL");
+    expect(ax.comment).toBe("AX-COMMENT");
+    // 本 fixture 没有 sr:description ⇒ description 回落 label（保持旧行为）
+    expect(ax.description).toBe("AX-LABEL");
+  });
+
+  it("🔴 负控：只写 comment、不写 label ⇒ comment 仍要能当 description 用（不因分离而丢）", () => {
+    writeFileSync(
+      file,
+      [
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
+        "@prefix sr: <http://home-serenity/ontology#> .",
+        "@prefix : <http://example.org/probe#> .",
+        "",
+        ':onto a owl:Ontology ; sr:name "lc-probe2" .',
+        ':OnlyComment a owl:Class ; rdfs:comment "ONLY-COMMENT" .',
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    const t = reviewJson().ontology.types.find((x: any) => x.name === "OnlyComment");
+    expect(t.comment).toBe("ONLY-COMMENT");
+    expect(t.label).toBeUndefined();
+    expect(t.description).toBe("ONLY-COMMENT");
+  });
+});
