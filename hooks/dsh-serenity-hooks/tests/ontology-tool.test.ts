@@ -160,3 +160,58 @@ describe('ontology 工具：执行面（退出码随回执返回）', () => {
     expect(r).toContain('exit 2 = 文件缺失')
   })
 })
+
+/**
+ * viz 是**唯一产出文件**的子命令 ⇒ 它的产物命名是**工具契约的一部分**，不是实现细节。
+ * 🔴 本组用例的靶 = 2026-10-13 实测缺陷：产物名只取 `basename` 时，两份**都叫 `skill.ttl`** 的
+ * 本体（`skill.ttl` 是本容器的**约定文件名**，撞名是常态而非巧合）互相覆盖，**而两次回执都报成功**。
+ * ⚠️ 因此这组**必须跑两份不同来源** —— 只跑一份时该缺陷**在结构上不可观测**（这正是它逃过既有用例的原因）。
+ */
+describe('ontology 工具：viz 产物命名（🔴 两份同名来源不得互相覆盖）', () => {
+  const MAIL = '.opencode/skills/home-mail/skill.ttl'
+  const DSP = '.opencode/skills/dsh-serenity-plugin-development/skill.ttl'
+  const OUT = ['_tmp', 'ontology-viz']
+
+  function seed(name: string, ontoName: string): void {
+    const dir = join(ccc, '.opencode', 'skills', name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'skill.ttl'), GOOD_TTL.replace('"probe"', `"${ontoName}"`), 'utf-8')
+  }
+
+  it('可达性自证：单份 viz 真产出 HTML（下面那条断言的前提）', async () => {
+    seed('home-mail', 'mail')
+    const r = (await tool.execute({ command: 'viz', path: MAIL }, execIn(ccc))) as string
+    expect(r).toContain('[ontology viz] ✓')
+    expect(existsSync(join(ccc, ...OUT, '.opencode__skills__home-mail__skill.html'))).toBe(true)
+  })
+
+  it('🔴 两份同名 `skill.ttl` 各跑一次 ⇒ 产物**两个不同文件名**，且第一份**仍在**', async () => {
+    seed('home-mail', 'mail')
+    seed('dsh-serenity-plugin-development', 'dsp')
+
+    const r1 = (await tool.execute({ command: 'viz', path: MAIL }, execIn(ccc))) as string
+    const r2 = (await tool.execute({ command: 'viz', path: DSP }, execIn(ccc))) as string
+
+    // 回执报出的路径 = 各自来源（不是同一个名字）
+    expect(r1).toContain('.opencode__skills__home-mail__skill.html')
+    expect(r2).toContain('.opencode__skills__dsh-serenity-plugin-development__skill.html')
+
+    // 两份产物**同时存在**（第二跑没有把第一份覆盖掉 —— 这才是缺陷本身）
+    expect(existsSync(join(ccc, ...OUT, '.opencode__skills__home-mail__skill.html'))).toBe(true)
+    expect(existsSync(join(ccc, ...OUT, '.opencode__skills__dsh-serenity-plugin-development__skill.html'))).toBe(true)
+
+    // 🔴 负控：旧写法（只取 basename）的落点**必须不存在** —— 回退到 basename 时本条立刻变红
+    expect(existsSync(join(ccc, ...OUT, 'skill.html'))).toBe(false)
+  })
+
+  it('产物名含来源路径 ⇒ 同名文件在不同目录下也互不相同（判据是路径形状，不是个数）', async () => {
+    seed('home-mail', 'mail')
+    seed('dsh-serenity-plugin-development', 'dsp')
+    await tool.execute({ command: 'viz', path: MAIL }, execIn(ccc))
+    await tool.execute({ command: 'viz', path: DSP }, execIn(ccc))
+    const { readdirSync } = await import('node:fs')
+    const htmls = readdirSync(join(ccc, ...OUT)).filter((f) => f.endsWith('.html'))
+    expect(htmls.length).toBe(2)
+    expect(new Set(htmls).size).toBe(2)
+  })
+})

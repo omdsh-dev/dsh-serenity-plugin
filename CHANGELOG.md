@@ -1,3 +1,46 @@
+## v1.56.5 — 2026-10-13（修 `ontology viz` 的**产物撞名**：文件名必须含来源路径）
+
+**性质**：缺陷修复。与 v1.56.4 那条崩溃**同族** —— 都是"产物层的标识没有带上来源"，
+且都在**真跑多份文件**时才现形。本条**不发出去不会自己暴露**：单跑一份永远是对的。
+
+### 一、症状
+
+对两份**不同**本体跑 `ontology viz`，产物**互相覆盖**，而**两次调用的回执都报成功**：
+
+```
+viz .opencode/skills/home-mail/skill.ttl                      → skill.html / skill.png
+viz .opencode/skills/dsh-serenity-plugin-development/skill.ttl → skill.html / skill.png  ← 覆盖上一份
+```
+
+实测证据：`_tmp/ontology-viz/` 里两个不同本体**只剩一个 `skill.html`**（前一份已不可见）。
+⇒ 最坏形态：**用户以为手里有两张图，其实只剩后一张**，且**全程没有任何信号**。
+
+### 二、根因
+
+产物名只取 `basename(relPath)` ⇒ 两份文件**都叫 `skill.ttl`** ⇒ `stem` 相同 ⇒ 撞名。
+本容器里 `skill.ttl` 是**约定文件名**（§技能目录约定：固定名），所以**这不是罕见巧合，而是会反复发生的常态**。
+
+### 三、修法
+
+`basename(relPath)` → **相对路径压平**（`/` → `__`），与 CCC 侧 `ontology-viz all` 的命名同形：
+
+```
+.opencode__skills__home-mail__skill.html
+.opencode__skills__dsh-serenity-plugin-development__skill.html
+```
+
+### 四、验证
+
+- `typecheck` ✓ ／ `test` **168 files · 2789 tests** ✓ ／ `coverage` ✓ ／ `build` ✓
+- `typecheck-host 0.2.0-rc.2` ✓（node 114 ／ client 169 文件）／ `pack-check` ✓（139 文件）
+- **判据（发布后真跑核）**：对 `home-mail` 与 `dsp-dev` **各跑一次** ⇒ 必须出现**两个不同文件名**的产物。
+
+### 五、🔴 教训（承 v1.56.4 的同一判据）
+
+v1.56.4 的教训是"**测试全绿 ≠ 真能跑**"，本条是它的**同一族的第二个形态**：
+**"单份跑通" ≠ "多份跑通"** —— 夹具只喂一份时，撞名**在结构上不可能被观测到**。
+⇒ 判据补一条：凡**产物落盘**的功能，用例里必须**至少跑两份不同来源**，断言**产物名互不相同**。
+
 ## v1.56.4 — 2026-10-13（修 `ontology viz` 的**实况崩溃**：刚性值三种形态归一）
 
 **性质**：缺陷修复。**v1.56.3 一发出去就是坏的** —— 装上重启后**第一次真跑就当场炸**。

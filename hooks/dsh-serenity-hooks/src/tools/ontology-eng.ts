@@ -19,7 +19,7 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { relative, basename, dirname, join } from 'node:path'
+import { relative, dirname, join } from 'node:path'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { resolveInside } from '../ccc.js'
