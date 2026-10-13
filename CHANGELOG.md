@@ -1,3 +1,48 @@
+## v1.56.4 — 2026-10-13（修 `ontology viz` 的**实况崩溃**：刚性值三种形态归一）
+
+**性质**：缺陷修复。**v1.56.3 一发出去就是坏的** —— 装上重启后**第一次真跑就当场炸**。
+
+### 一、症状（真实报错）
+
+```
+ontology(command="viz", path=".opencode/skills/home-mail/skill.ttl")
+→ Error: Cannot read properties of undefined (reading 'class')
+```
+
+### 二、根因（读源码定位）
+
+渲染器用 `RIG_FILL[c.rigidity ?? "none"]!.class` 取颜色，`RIG_FILL` 的键是
+`rigid` / `anti-rigid` / `semi-rigid` / `none`。而 `sr:rigidity` 在容器里有**三种实际形态**：
+
+| 写法 | 出处 | 引擎存成 |
+|---|---|---|
+| `sr:rigidity "rigid"` | 基础链（`ccc-ontology.ttl` 等） | `rigid` ✅ |
+| `sr:rigidity sr:rigid` | 领域本体（`home-mail`／`home-browser`／`home-gpu`…） | **完整 IRI** `http://home-serenity/ontology#rigid` ❌ |
+| 异常值 | — | 原样 ❌ |
+
+🔴 `engine.ts` 对该谓词是 `String(s.object)`，**不 i2q 回短名** ⇒ 带前缀项进来的是
+**展开后的完整 IRI**（实测确认，不是 `sr:rigid`）。⇒ 查表取到 `undefined` ⇒
+`!` 断言的运行时对象不存在 ⇒ 抛 TypeError。**这是搬家时我漏做的适配**。
+
+### 三、修法
+
+`normRigidity()`：取 `#` 之后那段 → 再去前缀 → 只接受三个合法值，其余归 `null`
+（`null` 是渲染器**已支持**的"未声明刚性"分支，安全）。
+
+### 四、验证（三重，其中两重用真文件）
+
+1. 单元 +2 例：带前缀项归一；**异常值归 null**（负控）。
+2. 🔴 **真文件探针 6 例**（新件 `ontology-viz-real-probe.test.ts`）：对**六份真容器文件**
+   实跑 `fromEngine → layout → toSvg → toHtml`，断言不抛、且刚性值只可能是 `null` 或三个合法值。
+   **两种形态各三份**（领域本体＝带前缀项；基础链＝字面量）。
+3. 门禁：typecheck ／ full test ／ coverage ／ build ／ pack-check。
+
+### 五、🔴 教训（比修复本身重要）
+
+**"测试全绿"与"真能跑"是两个证据等级。** 这条缺陷**逃过了 61 个例**（含 8 例专为 viz 写的新用例）
+—— 因为那些用例喂的是**我假设的** `rigidity` 形态，而真文件用的是**我没有的那个**形态。
+⇒ 判据：**搬家类改动必须有"真文件"那一路的用例**，不能只喂自造夹具。
+
 ## v1.56.3 — 2026-10-13（本体论**画图进工具面**：`ontology viz`；顺带修引擎的**镜像 bug**）
 
 **来源**：owner 2026-10-13 三条令 —— ①「**画啊**」②「我只要质量最好的图，**只保留一种**即可」
