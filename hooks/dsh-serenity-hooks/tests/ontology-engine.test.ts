@@ -540,4 +540,42 @@ describe("label/comment 分离（2026-10-13 S142：原实现把两者合并 ⇒ 
     expect(t.label).toBeUndefined();
     expect(t.description).toBe("ONLY-COMMENT");
   });
+
+  it("🔴 `explain` 的类型表**显示描述**，且描述里的 `|` 与换行被转义（否则整表错位）", () => {
+    writeFileSync(
+      file,
+      [
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
+        "@prefix sr: <http://home-serenity/ontology#> .",
+        "@prefix : <http://example.org/probe#> .",
+        "",
+        ':onto a owl:Ontology ; sr:name "explain-probe" .',
+        // 描述里**故意**放 `|` 与换行 —— 这正是会把 Markdown 表切错列/断行的形态
+        ':Piped a owl:Class ; rdfs:label "left | right" .',
+        ':Multiline a owl:Class ; rdfs:label "line1',
+        'line2" .',
+        ':Bare a owl:Class .',
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    const r = runOntologyCli(["explain", file], { cwd: TMP });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    // ① 描述**真的到达输出面**（这正是本轮修的那件事）
+    expect(r.stdout).toContain("Description");
+    expect(r.stdout).toContain("left \\| right");
+    // ② 含 `|` 的描述**没有把行切成多列**：该行仍是 5 个单元格
+    //    ⚠️ 不能用裸 `|` 计数 —— 转义后的 `\|` 本身仍是 `|` 字符（首版就这么写错了）。
+    //    判据 = 先摘掉转义的 `\|`，再按 `|` 切：`["", …5 格…, ""]` ⇒ 长度 − 2 = 5。
+    const pipedRow = r.stdout.split("\n").find((l) => l.includes("Piped"))!;
+    const cells = pipedRow.replace(/\\\|/g, "").split("|");
+    expect(cells.length - 2, pipedRow).toBe(5);
+    // ③ 多行描述被压成一行，表格没被断行
+    const multiRow = r.stdout.split("\n").find((l) => l.includes("Multiline"))!;
+    expect(multiRow).toContain("line1 line2");
+    // ④ 没有描述的类回落到 `-`，不留空单元格
+    const bareRow = r.stdout.split("\n").find((l) => l.includes("Bare"))!;
+    expect(bareRow.trimEnd().endsWith("| - |"), bareRow).toBe(true);
+  });
 });

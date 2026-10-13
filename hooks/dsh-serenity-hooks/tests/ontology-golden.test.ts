@@ -7,6 +7,14 @@
  *
  * 🔴 **golden 的采集方式（可重建）**：在 CCC 侧 MSM **注销之前**，用**原引擎**对同一份 fixture
  * 跑 `check --level strict` 与 `explain`，**原样抄下 stdout**（2026-10-11，S142）。
+ *
+ * 🔴 **`GOLDEN_EXPLAIN` 于 2026-10-13（S142）被有意识地移动过一次**：`explain` 的类型表
+ * **新增 `Description` 列**（owner 当面指名：「48我觉得应该显示description」）。原实现把
+ * `rdfs:label`/`rdfs:comment` 合并进一个 `description` 且**从不显示** ⇒ 本体里最要紧的一句
+ * 话（"这个类是什么"）在 `explain` 上根本看不到，而 `check --level strict` **照样全绿**
+ * ⇒ 属"声明没被读、看起来像全绿"那一族。
+ * **本次移动的边界**：只动**这一张表**（加一列）；`check` 的 golden **逐字未动**，
+ * 其余章节（Relations／Axioms／Dependency Graph）亦未动。`mdCell()` 负责表格转义。
  * 本件把它固化成断言 ⇒ 即使原 MSM 已注销，这份"行为基线"仍然在（这是搬迁能留下的最强证据）。
  *
  * 采集时的两个读数（当时原引擎的输出）：
@@ -111,10 +119,10 @@ Version: 0.0.1
 
 ### Types (2)
 
-| Type | SuperTypes | Rigidity | Properties |
-|------|-----------|----------|------------|
-| Widget | - | rigid | widgetName, count |
-| Gadget | - | anti-rigid | gadgetId |
+| Type | SuperTypes | Rigidity | Properties | Description |
+|------|-----------|----------|------------|-------------|
+| Widget | - | rigid | widgetName, count | A widget |
+| Gadget | - | anti-rigid | gadgetId | A gadget |
 
 ### Relations
 

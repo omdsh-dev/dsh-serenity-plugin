@@ -1793,6 +1793,20 @@ function printLlmReviewHints(onto: OntologyDefinition, issues: CheckIssue[]): vo
 // subcommand: explain (Semi-Mech — outputs structured data for LLM)
 // ═══════════════════════════════════════════════════════════════════
 
+/**
+ * Markdown **表格单元**转义（`explain` 的类型表用）。
+ *
+ * 🔴 为什么必须有：描述是**任意散文**，而表格行由 `|` 分列、由换行断行 ⇒
+ *  - 描述里出现 `|`（本容器实测有：`sr:identity` 一类规则句、A45 探针注释都带）
+ *    ⇒ **当场多切一列**，整表错位；
+ *  - 描述跨多行 ⇒ **断行**，表格结构直接散架。
+ * 两处都是"看着还能读、其实已经错位"的形态 ⇒ 在**唯一出口**统一处理，不指望作者自律。
+ */
+function mdCell(v: string | undefined): string {
+  if (v === undefined || v === "") return "-";
+  return v.replace(/\|/g, "\\|").replace(/\r?\n/g, " ");
+}
+
 function cmdExplain(args: string[]): void {
   if (args.length === 0) {
     throw new MsmError(
@@ -1820,13 +1834,13 @@ function cmdExplain(args: string[]): void {
   const types = merged.types || {};
   const typeNames = Object.keys(types);
   emit(`\n### Types (${typeNames.length})\n\n`);
-  emit("| Type | SuperTypes | Rigidity | Properties |\n");
-  emit("|------|-----------|----------|------------|\n");
+  emit("| Type | SuperTypes | Rigidity | Properties | Description |\n");
+  emit("|------|-----------|----------|------------|-------------|\n");
   for (const [name, td] of Object.entries(types)) {
     const st = (td.superTypes || []).join(", ") || "-";
     const rig = td.rigidity || "-";
     const props = td.properties ? Object.keys(td.properties).join(", ") : "-";
-    emit(`| ${name} | ${st} | ${rig} | ${props} |\n`);
+    emit(`| ${name} | ${st} | ${rig} | ${props} | ${mdCell(td.description)} |\n`);
   }
 
   // Relations
