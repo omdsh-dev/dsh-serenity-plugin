@@ -65,7 +65,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 
 ## 3. 装完之后你多了什么
 
-### 3.1 十二个工具（其中三个按条件出现）
+### 3.1 十四个工具（其中三个按条件出现）
 
 | 工具 | 干什么 | 什么时候用 |
 |---|---|---|

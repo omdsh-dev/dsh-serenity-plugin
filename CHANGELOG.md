@@ -1,3 +1,65 @@
+## v1.56.2 — 2026-10-13（本体引擎：描述**存得住 ＋ 看得见**；声明面散文**钉成可判**）
+
+**来源**：owner 2026-10-13 两条令 —— ① 裁 **A48**「**应该显示 description**」② 指「**1**」（＝
+授权收尾声明面那笔在途工作，本会话记的 **A49**）。**性质**：引擎信息损失修复 ＋ 一个显示列 ＋
+**一类"靠纪律"改成机械钉**。**三个主题都是同一族**：**声明存着、没人读，而门照样全绿**。
+
+### 一、`rdfs:label` 与 `rdfs:comment` 被合并成一个字段 ⇒ 一句话**静默消失**
+
+`turtleToOnto` 原写法把两个谓词都写进同一个 `td.description`：
+
+```ts
+if (s.predicate === RDFS + "label" || s.predicate === RDFS + "comment") td.description = String(s.object);
+```
+
+⇒ 同一实体上两句话**只剩最后出现的那句**；另一句消失且**无任何信号**（`check --level strict` 全绿）。
+此外 `RelationDef` **完全不收** label/comment（连合并都没有）。
+
+**修法（纯增量）**：`TypeDef`/`RelationDef`/`AxiomDef` 各增 `label?`/`comment?`；
+`description` **语义不变**（仍是"主描述"：label 优先，无 label 时回落 comment）⇒
+既有消费点（`explain`/`validateOnto`/`review`/`compliance`/`verify`）行为不变；
+`review --format=json` 只**增**两个键。
+
+**根因由变异证明**（不是推断）：把那一行临时改回旧写法 ⇒ 新增用例中 3 例当场变红，
+报错逐字 `expected 'LONG-COMMENT' to be 'SHORT-LABEL'` ⇒「label 被覆盖」是**实测**。
+
+### 二、`explain` 的类型表**显示描述**（owner 裁 A48）
+
+`explain` 是"这份本体说了什么"的主输出面，而类型表**只有 4 列**（Type/SuperTypes/Rigidity/Properties）
+—— `description`（本体里最要紧的那句"这个类是什么"）**一个字都不显示**，而 `review --format=json`
+一直带着它。
+
+- 加第 5 列 `Description`；新增 `mdCell()` **表格转义**（描述是任意散文：里面的 `|` 会**切错列**、
+  换行会**把表断行** ⇒ 在唯一出口统一处理，转义 `\|`、换行压空格、空描述回落 `-`）。
+- 🔴 **有意识地移动了 `GOLDEN_EXPLAIN`**（`ontology-golden.test.ts` 头部已写明"移动了什么／为什么／边界"）。
+  **判据：只有那一张表变了**；`GOLDEN_CHECK` **逐字未动**，其余章节未动。
+- 消费方核对：`skill-ontology.ts:parseImports` 读的是 `Imports:` 行（本改未碰）⇒ 其 8 例真容器测试全绿。
+
+### 三、声明面散文从"靠纪律"改成**机械钉**（A49 收尾）
+
+同一形状的漏改本仓已犯**三次**（v1.31.0 加 `im-bridge`／v1.52.0 加 `ontology`／v1.54.0 加
+`serenity-skill-creator`：两处 `description` 的工具数与名单、两份 README 的 §3.1 标题都落后）。
+v1.52.1 当时写的判据是「后三处只能靠纪律」—— **纪律已被三次证伪，本版起改为机械钉**。
+
+`assertManifestProse()` 判三处（都是装包的人最先看到的）：① `contributes.tools` 与 `REGISTERED_TOOLS`
+**同长**；② 两份 `description` 都含**正确总数**（防"数错"）；③ 两份 `description` 都含**每一个工具名**
+（防"数对了、名单漏了"）；④ 两份 README 的 §3.1 标题数字跟上。
+⚠️ **刻意不逐句解析散文**：「后三个按条件出现」由 `REGISTERED_TOOLS` 的**顺序约定**保证永远为真
+（常驻在前、条件在后 ⇒ **别按字母序重排**），另出 `CONDITIONAL_TOOL_COUNT`。
+
+### 四、测试
+
+新增：label/comment 分离 5 例（含负控"只写 comment"）｜`explain` 显示与转义 1 例｜
+声明面散文 6 例（主判据 ＋ 正控"钉子不瞎" ＋ **4 条负控**分别对应真实犯过的四个形态）。
+🔵 本版共 **+12 例**；一处自纠记录在案：新用例首版用裸 `|` 计数报 `expected 7 to be 6`
+——**错的是断言不是代码**（转义后的 `\|` 本身仍是 `|` 字符）。
+
+### 五、边界
+
+- 只影响**本体引擎的输出与数据模型**；不新增工具、不改任何工具契约面。
+- 与 v1.56.1 的关系：v1.56.1 修"规则里的 `:Local` 按文件自己的前缀解析"（A45），本版接着把它
+  读出来的 `label`/`comment` 分开保存并显示 ⇒ 两版合起来才让"描述"这条信息**从解析到呈现**完整。
+
 ## v1.56.1 — 2026-10-12（修：本体引擎把规则里的 `:LocalName` 按**硬编码命名空间**解析）
 
 **来源**：owner 2026-10-12 令「**修**」（= 本会话记的 **A45**）。**性质**：引擎行为修复 ＋ **3 条回归钉**。

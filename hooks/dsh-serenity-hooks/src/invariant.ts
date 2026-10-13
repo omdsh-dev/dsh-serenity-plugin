@@ -7,7 +7,7 @@
  */
 
 import { readFileSync, existsSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, dirname } from 'node:path'
 
 interface PluginManifest {
   id: string
@@ -45,6 +45,96 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
 }
 
 /**
+ * 把「声明面散文」钉成可判（v1.56.2，2026-10-12）。
+ *
+ * 🔴 **为什么需要它**：同一形状的漏改本仓已经犯过**三次** ——
+ *  - v1.31.0 加 `im-bridge`：两个包的 `description` 仍写「10 个工具」且不含它；
+ *  - v1.52.0 加 `ontology`：`package.json` 的 description 仍写「12 个工具」、`dsh.plugin.json`
+ *    的收尾用**位置指代**（"后三个按条件出现"）而被追加项**当场改指**、`README.md` 缺行；
+ *  - **v1.54.0 加 `serenity-skill-creator`**：`package.json` 的 description 仍写「13 个工具」
+ *    （且清单里没有它）、**两份 `README.md` 的 §3.1 标题**仍写「十二个工具」。
+ * v1.52.1 当时写下的判据是「后三处只能靠纪律」—— **本版起改为机械钉**：纪律已被三次证伪。
+ *
+ * 被判的三处（都是**装包的人最先看到的**，也都没有别的钉子）：
+ *  ① `contributes.tools.length === REGISTERED_TOOLS.length`；
+ *  ② **两份** `description` 都含正确的**总数**（`N 个工具`）—— 防"数错"；
+ *  ③ **两份** `description` 都含**每一个**工具名 —— 防"数对了、名单漏了"（v1.54.0 的形态）。
+ * ⚠️ 判据刻意**不要求**工具名出现在特定的逗号分隔段里（散文的排布是人的事，一钉就碎）；
+ *    「后三个按条件出现」这句话由 `CONDITIONAL_TOOL_COUNT` ＋ **顺序约定**保证**永远为真**
+ *    （见 `REGISTERED_TOOLS` 的注释），**不需要**逐句解析。
+ *
+ * @param manifestPath dsh.plugin.json 路径
+ * @param readmePaths   需要一并被判的 README 路径（仓库根 ＋ 包内两份；缺文件即报）
+ */
+export function assertManifestProse(
+  manifestPath: string,
+  readmePaths: readonly string[],
+): string[] {
+  const manifest = readPluginManifest(manifestPath)
+  if (!manifest) return [`manifest not found or invalid: ${manifestPath}`]
+  const tools = manifest.contributes?.tools ?? []
+  const n = tools.length
+  const issues: string[] = []
+
+  if (n !== REGISTERED_TOOLS.length) {
+    issues.push(
+      `contributes.tools 有 ${n} 项，而 REGISTERED_TOOLS 有 ${REGISTERED_TOOLS.length} 项（两侧必须同长）`,
+    )
+  }
+
+  // ① 包内 package.json 的 description（⚠️ 与 dsh.plugin.json **同目录**，不是上一级 ——
+  //    `resolve(manifestPath, '..', '..')` 会指到 `hooks/`，正控当场抓到过这个错）
+  const pkgPath = resolve(dirname(manifestPath), 'package.json')
+  const surfaces: { where: string; text: string }[] = []
+  if (existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { description?: string }
+      surfaces.push({ where: 'package.json description', text: pkg.description ?? '' })
+    } catch {
+      issues.push(`package.json 无法解析：${pkgPath}`)
+    }
+  } else {
+    issues.push(`package.json 不存在：${pkgPath}`)
+  }
+  surfaces.push({ where: 'dsh.plugin.json description', text: manifest.description ?? '' })
+
+  for (const s of surfaces) {
+    if (!s.text.includes(`${n} 个工具`)) {
+      issues.push(`${s.where} 未声明工具总数「${n} 个工具」（防"数错"）`)
+    }
+    const absent = tools.filter((t) => !s.text.includes(t))
+    if (absent.length) {
+      issues.push(`${s.where} 的名单缺 ${absent.length} 项：${absent.join(', ')}（防"数对了、名单漏了"）`)
+    }
+  }
+
+  // ② 两份 README 的 §3.1 标题（防"表体更新了、标题里的数字没更新"）
+  const cn = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+  const countCn =
+    n <= 10
+      ? cn[n]
+      : n < 20
+        ? `十${cn[n - 10]}`
+        : `二十${n === 20 ? '' : cn[n - 20]}`
+  for (const p of readmePaths) {
+    if (!existsSync(p)) {
+      issues.push(`README 不存在：${p}`)
+      continue
+    }
+    const text = readFileSync(p, 'utf-8')
+    const m = text.match(/^###\s*3\.1\s*(\S+?)个工具/m)
+    if (!m) {
+      issues.push(`${p} 里找不到 §3.1 的「…个工具」标题（形态已变 ⇒ 钉子也要跟着改）`)
+      continue
+    }
+    if (m[1] !== countCn) {
+      issues.push(`${p} 的 §3.1 标题写「${m[1]}个工具」，应为「${countCn}个工具」（工具数已 ${n}）`)
+    }
+  }
+  return issues
+}
+
+/**
  * 包级不变量：本插件注册的工具集合（与 dsh.plugin.json contributes.tools 一致）。
  *
  * v1.31.1 修正：v1.31.0 新增 `im-bridge`（条件可见）时**漏改此处与清单**——两侧同错 →
@@ -70,7 +160,15 @@ export function verifyToolConsistency(manifestPath: string, registeredTools: rea
  * 同规格：**条件可见与否不影响这里列它**（本常量 = "插件**具备**的工具面"）。
  */
 export const REGISTERED_TOOLS = [
-  'container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman',
-  'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology',
-  'serenity-skill-creator',
+  // ⚠️ **顺序有意义**：**常驻在前、条件在后**（条件者 = `im-bridge` / `acc-diag` / `diagram`）。
+  //   它被 `assertManifestProse`（本文件）用来把"后三个按条件出现"这类句子**钉成可判**——
+  //   所以**别按字母序重排**，加工具时**加在对应段的末尾**（常驻加在 `serenity-skill-creator` 之后、
+  //   条件加在末位），否则那条钉子会对**正确的文字**报假错。
+  'container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'ontology',
+  'serenity-skill-creator', 'handyman', 'localstore', 'container_admin',
+  // ↓ 条件出现的三个（按注册期的条件钩子判可见性，见各自 `src/tools/*.ts`）
+  'im-bridge', 'acc-diag', 'diagram',
 ] as const
+
+/** 条件出现的工具数（`REGISTERED_TOOLS` 的**末段**；`assertManifestProse` 用） */
+export const CONDITIONAL_TOOL_COUNT = 3
