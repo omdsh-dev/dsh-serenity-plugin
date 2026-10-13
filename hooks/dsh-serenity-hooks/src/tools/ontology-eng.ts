@@ -160,7 +160,12 @@ export function createOntologyTool() {
         const L = layout(model, { axioms: false, instances: true, imports: true })
         const svg = toSvg(model, L, { axioms: false })
         const html = toHtml(model, L, svg)
-        const stem = basename(relPath).replace(/\.ttl$/, '')
+        // 🔴 **文件名必须含来源路径**（2026-10-13 实测缺陷）：只取 basename 时，
+        //    `home-mail/skill.ttl` 与 `dsp-dev/skill.ttl` **都叫 `skill.ttl`** ⇒
+        //    产物 `skill.html`／`skill.png` **互相覆盖**，而两次调用的回执**都报成功**
+        //    （最坏形态：用户以为有两张图，其实只剩后一张）。
+        //    ⇒ 用**相对路径**压平（`/` → `__`），与 CCC 侧 `ontology-viz all` 的命名同形。
+        const stem = relPath.replace(/\.ttl$/, '').replace(/[\\/]/g, '__')
         const outDir = join(root, '_tmp', 'ontology-viz')
         mkdirSync(outDir, { recursive: true })
         const htmlPath = join(outDir, `${stem}.html`)
