@@ -139,6 +139,22 @@ function fromEngine(file: string, absPath: string): OntoModel {
     unknownTypes: [],
   };
 
+  // 🔴 **刚性值的三种形态都要归一**（2026-10-13 S142 实测；**这是 v1.56.3 发出去的那个崩溃**）：
+  //    · `sr:rigidity "rigid"`              ← **字面量**（`ccc-ontology.ttl` 等基础链全用这种）
+  //    · `sr:rigidity sr:rigid`             ← **带前缀的项**（`home-mail`／`home-browser` 等领域本体用这种）
+  //    · 引擎对它存的是**展开后的完整 IRI** `http://home-serenity/ontology#rigid`
+  //      （`engine.ts` 对该谓词是 `String(s.object)`，不 i2q 回短名 —— 实测确认）
+  //    原渲染器查表键是 `rigid`／`anti-rigid`／`semi-rigid` ⇒ 后两种**查不到**
+  //    ⇒ 颜色表取到 `undefined` ⇒ **渲染当场抛 TypeError**（症状：`Cannot read properties of
+  //    undefined (reading 'class')`）。⇒ 在**唯一入口**归一，渲染器不感知多种写法。
+  const normRigidity = (v: string | undefined): "rigid" | "anti-rigid" | "semi-rigid" | null => {
+    if (v === undefined || v === "") return null;
+    // 取最后一段：`http://home-serenity/ontology#rigid` → `rigid`；`sr:rigid` → `rigid`；`rigid` → `rigid`
+    const last = v.slice(v.lastIndexOf("#") + 1);
+    const bare = last.includes(":") ? last.slice(last.lastIndexOf(":") + 1) : last;
+    return bare === "rigid" || bare === "anti-rigid" || bare === "semi-rigid" ? bare : null;
+  };
+
   // ── 类 ──
   // 🔴 `label` 与 `comment` 是**两个字段**（引擎 v1.56.2 起）：图上节点名取 `label`，
   //    侧栏详情取 `comment` —— 原实现把两者合并进一个 `description`，后者覆盖前者
@@ -149,7 +165,7 @@ function fromEngine(file: string, absPath: string): OntoModel {
       id,
       label: td.label ?? td.description ?? id,
       comment: td.comment ?? td.description ?? "",
-      rigidity: td.rigidity ?? null,
+      rigidity: normRigidity(td.rigidity),
       identity: td.identity ?? [],
       properties: Object.entries(td.properties ?? {}).map(([name, pd]) => ({
         name,
