@@ -99,7 +99,7 @@
 ## 7. 🎯 PTC 与观察项 15（**触发条件已实现**）
 
 - **事实**：`packages/workflow/workflow-ptc/` 已是独立包（`@deepseek-ai/dsh-workflow-ptc`，"Workflow orchestration in the shared sandboxed Node PTC runtime"）；`ctx.ptcRuntime` 存在（`ptc-runtime/src/index.ts:93`）；**旧的 `codeRuntime` 改名为 `ptcRuntime`**；`tools/ptc-dispatch-log` 缝存在。
-- **但要降一档说**：🔵 **PTC 不是新东西** —— `tools/ptc-dispatch-log` 在 **0.1.2 就有**。⇒ owner 2026-09-20 说的"下个大版本要动这个模式"**方向上成立，但"PTC 首次出现"不成立**（别把更名读成诞生）。
+- **但要降一档说**：🔵 **PTC 不是新东西** —— `tools/ptc-dispatch-log` 在 **0.1.2 就有**。⇒ owner 2026-09-20 说的"下个大版本要动这个模式"**方向上成立，但"PTC 首次出现"不成立**（不得把更名读成诞生）。
 - **对前缀缓存（观察项 15 的第二问）**：目录策略文档 `docs/tool-catalog.md:36,47` 明说**provider 选择留在服务层 ⇒ 模型可见 schema 保持稳定**；agent-loop 另有"装配后的工具 schema 是否与已记录请求头不同"的跟踪（`runtime-context.ts:46`）⇒ **暂未见"每轮目录翻转"的反例**。
 - **⇒ 该怎么动**：观察项 15 的**"复查"现在可以做**（只读）；但其预登记的**实测判据（一次真实会话的逐轮 `cacheReadTokens`）需要真实运行态** ⇒ **归到 `host-upgrade` 那一步之后**。⚠️ 仍守原纪律：**触发前不要实测 PTC、不要改 `bootstrap.ts`**。
 

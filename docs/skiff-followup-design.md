@@ -9,7 +9,7 @@
 ## 1. 需求（Neat 需求层，用户 2026-08-29 提出）
 
 1. **R1 md 文件提示词**：CCC 倾向定义超长提示词，在 `.opencode/serenity.json` 内嵌 JSON 字符串很难阅读——希望修正配置方式，**支持引用一个 md 文件**，并**作为推荐配置方法**。
-2. **R2 dsh 会话追问**：希望 dsh 会话概念在 skiff 能绑定——**允许用户使用同一个 qa 会话进行追问**（多轮对话，上下文延续），而非当前每次提问新建会话。
+2. **R2 dsh 会话追问**：希望 dsh 会话概念在 skiff 能绑定——**允许用户在同一 qa 会话中追问**（多轮对话，上下文延续），而非当前每次提问新建会话。
 
 ---
 
@@ -114,7 +114,7 @@ POST /ask:
 - `skiffRoleFor(sessionId)` 返回 role 不变（guards/seams 依赖，向后兼容）
 - 新增 `skiffSessionInfo(sessionId): { role, ccc } | null`
 - `registerSkiffSession(sessionId, role, ccc)` 签名扩展（skiff-core 调用点同步）
-- 注意：**skiffAgents（skiff-core 内存 Map）进程重启清空**，但 DSH JSONL 持久化在——resume 是重启后唯一恢复通道；registry 内存态同样清空 → resume 后重新注册
+- **skiffAgents（skiff-core 内存 Map）进程重启清空**，但 DSH JSONL 持久化在——resume 是重启后唯一恢复通道；registry 内存态同样清空 → resume 后重新注册
 
 ### 4.5 UI（调试页）
 

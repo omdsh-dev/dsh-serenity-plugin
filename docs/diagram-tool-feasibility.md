@@ -125,7 +125,7 @@ export type ImageMediaType = 'image/png' | 'image/jpeg' | 'image/webp' | 'image/
 | 先例 | 形态 | 语义 |
 |---|---|---|
 | `skiffEnabled` ／ `acpEnabled` ／ **`unattendedEnabled`** | settings 面板**扁平键**（`PanelBoolean`）＋ 部署层嵌套 `x.enabled` ＋ DEFAULTS 里 `false` | **默认关的实验性功能** —— **与 owner 要的"demo 开关"逐字对应** |
-| `exclusiveTools` ＋ `tools.restrict` | CCC 配置里点名 | **默认对所有 CCC 隐藏**，点名才可见（`acc-diag` 就是这个） |
+| `exclusiveTools` ＋ `tools.restrict` | CCC 配置里点名 | **默认对所有 CCC 隐藏**，点名才可见（`acc-diag` 即此例） |
 | IM 通道缺失 ⇒ guards 摘掉 `im-bridge` | 条件可见 | "看不见" 优于 "会被拒" |
 
 **实现落点**（若取第一行）：`src/settings-section.ts` 的 **DEFAULTS 对象（:139-147）＋ unwrap 行（:296-306）** ＋
@@ -156,8 +156,8 @@ Serenity 设置页一个 Group（客户端的 `SettingsSection.tsx`）。
 ### 我的倾向：**先路 1，路 2 作为二期**
 
 **理由（按分量排）**：
-1. 🔴 **只有路 1 能把图放进对话记录** —— 而"图是给人看的"这个目的，落在**记录里**才算数：可回看、可被后续轮次引用、
-   **可经微信桥发给家人**。路 2 的图是"你正好开着右栏才看得到"。
+1. 🔴 **只有路 1 能把图放进对话记录** —— 而"图是给人看的"此目的，落在**记录里**才算数：可回看、可被后续轮次引用、
+   **可经微信桥发给家人**。路 2 的图仅在右栏开启时可见。
 2. 路 1 的链路**类型级可证**（`saveImage` → ImageBlock → RPC → blob），路 2 的"打开右栏"在 0.2.0 上**还有一格未证**。
 3. 路 2 **不是被否，是排后**：它零依赖、矢量、可实时刷新，作为"**看图/调图的工作面**"体验更好 —— 二期做。
 

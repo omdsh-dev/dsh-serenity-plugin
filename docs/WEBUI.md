@@ -1,6 +1,6 @@
 # WEBUI — Serenity 插件实时状态 + safe-mode 开关（client half）
 
-> 状态：阶段 1 完成（服务端接口，v1.6.0）；阶段 2 client bundle 进行中。
+> 状态：阶段 1 完成（服务端接口，v1.6.0）；阶段 2 client bundle 开发中。
 > 需求：safe-mode 由用户**直接 WebUI 实时开关**（非斜杠命令、非模型中介）；WebUI 显示 Serenity 插件实时状态。
 
 ## 架构

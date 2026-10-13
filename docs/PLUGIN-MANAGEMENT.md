@@ -49,7 +49,7 @@
 | 开启 | `touch <CCC>/.serenity-safe-on` | 立即机械生效（agent 的 bash 被 deny） |
 | 关闭 | `rm <CCC>/.serenity-safe-on` | 立即恢复 |
 
-> ⚠️ 注意：开启后 agent 无法自行关闭（bash 已被禁，形成死锁）——**只能由你在终端执行 rm**。这是安全模式的预期语义（agent 不能自证清白）。
+> ⚠️ 开启后 agent 无法自行关闭（bash 已被禁，形成死锁）——**只能由用户在终端执行 rm**。属安全模式的预期语义（agent 不能自证清白）。
 
 ## 4. 行为配置（各 CCC 的 `.dsh/serenity.json`）
 

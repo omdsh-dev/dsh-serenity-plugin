@@ -15,7 +15,7 @@
 |---|-------|--------|
 | D1 | Scope of the rename | **All dynamic prompt-injection layers** (runtime injections + anchoring + compact + autopilot; both wording and code) |
 | D2 | Settlement review trigger | Only when work is **finished AND user-approved** — hard to detect automatically; **record as an open problem**, do not implement detection now |
-| D3 | Naming token | **Unify on the new token** (the "after" form). Legacy/live sessions need **no back-compat** — old tokens are simply obsolete |
+| D3 | Naming token | **Unify on the new token** (the "after" form). Legacy/live sessions need **no back-compat** — old tokens are obsolete |
 | D4 | Level granularity | SESSION = level. Long sessions cannot be auto-subdivided reliably → **not implemented** (recorded as open problem) |
 | D5 | Experiment mechanics | **Not a heavyweight A/B experiment apparatus** — trajectory-assistant is an ACC built-in mechanism; language style is one built-in facet (config selectable, default = usable) |
 | D6 | Settlement mechanism | **Yes** — IF the CCC has a standard SESSION-review/close ritual, the settlement view belongs to trajectory-assistant. Current ACC close/archive has no review summary → mechanism deferred; design the hook point |
@@ -24,7 +24,7 @@
 
 Open problems (recorded, NOT implemented in this pass):
 - **OP-1 (settlement trigger)**: "user approves the work" has no reliable machine signal today. Candidate future signals: user explicit confirmation in conversation / SESSION `close` with review notes / a future standard review ritual. Design keeps a hook point; no auto-detection.
-- **OP-2 (long-SESSION subdivision)**: auto-subdividing a SESSION level by SESSION.md sections/targets is undecidable reliably. Future idea: derive sub-segments from SESSION.md `## 章节` when present; not implemented.
+- **OP-2 (long-SESSION subdivision)**: auto-subdividing a SESSION level by SESSION.md sections/targets cannot be decided reliably. Future idea: derive sub-segments from SESSION.md `## 章节` when present; not implemented.
 
 ---
 
@@ -65,7 +65,7 @@ is the *guidance* (the pilot giving course cues at key moments).
 | SESSION-KEEPER (legacy comments) | removed / TRAJECTORY-ASSISTANT | — | — |
 
 ACK codes become: `[TRAJECTORY-ASSISTANT-recorded-{code}]` / `[TRAJECTORY-ASSISTANT-skipped-{code}]`.
-Per D3: **no compatibility shim** — old tokens simply replaced; no mixed emission.
+Per D3: **no compatibility shim** — old tokens replaced directly; no mixed emission.
 
 > Per D8: "checkpoint / limit / tutorial / guard" are natural cross-domain terms usable in
 > prompt text. Design-shorthand labels (L0-L6, "boss", "level") appear only in internal
@@ -99,7 +99,7 @@ After:
 [TRAJECTORY-ASSISTANT · LIMIT] Context usage at 320K (threshold 400K). This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself. ACT NOW: at the next natural pause (end of the current task step), call the session_rebuild tool — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.
 ```
 
-> Change = token only (`TRAJECTORY` → `TRAJECTORY-ASSISTANT · LIMIT`); body text already strong (kept verbatim — mechanics preserved).
+> Change = token only (`TRAJECTORY` → `TRAJECTORY-ASSISTANT · LIMIT`); body text unchanged (kept verbatim — mechanics preserved).
 
 ### M-B'. Rebuild cue (escalated / mandatory) — `keeper.ts` `rebuildReminderText(escalated=true)`
 
@@ -175,7 +175,7 @@ Kept as-is (L0 beacon, not a level event). No text change. Only comments may gai
 
 The four-segment structure stays (focus / identity / bias / task); `[轨迹焦点]` is CCC content — untouched.
 The wake message already uses natural product naming (`[Autopilot Trajectory 唤起]`); **per D8 no
-level-design wording is added to the visible text** (no "关卡/level" flavor). Alignment = the header
+level-design wording is added to the visible text** (no "关卡/level" terminology). Alignment = the header
 token gains the trajectory-assistant family mark at most; the body wording is unchanged.
 
 Before:
@@ -285,7 +285,7 @@ Also update: `src/output-guard.ts` sensitive mechanism-word list (`'Trajectory S
 
 ## 8. Open questions for review (before implementation)
 
-- **Q1**: first-anchor rounds — the protocol body is byte-identical today and reused by rebuild anchors; per D8 no game-word prefix should be added to it. Confirm: **keep body-identical** (no `TUTORIAL`-style prefix), only internal comments may reference the tutorial framing? (Recommendation: yes — D8 already decides this; Q1 just confirms the protocol body stays pristine.)
+- **Q1**: first-anchor rounds — the protocol body is byte-identical today and reused by rebuild anchors; per D8 no game-word prefix should be added to it. Confirm: **keep body-identical** (no `TUTORIAL`-style prefix), only internal comments may reference the tutorial framing? (Recommendation: yes — D8 already decides this; Q1 confirms the protocol body stays pristine.)
 - **Q2**: `[ACC]` identity beacon — confirmed keep as-is (no level-event token)? (Recommendation: yes.)
 - **Q3**: Style facade — build the 2-style facade now (`plain` default + `metaphor` variant), or ship `plain` only and add `metaphor` later when actually experimenting? (Recommendation: build the facade with plain default — it is ~30 lines and future-proofs the tone experiment you may run later; but it is removable. `game` is excluded by D8.)
 - **Q4**: autopilot header — minimal family mark (`[Autopilot Trajectory · 唤起]`) vs keep exactly as today (`[Autopilot Trajectory 唤起]`)? Body wording is NOT changed either way (D8). (Recommendation: minimal family mark for consistency — but either is acceptable; this is the only user-visible message in the batch.)

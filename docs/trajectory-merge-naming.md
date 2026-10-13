@@ -7,7 +7,7 @@
 - **来源**：S142 §32（用户 2026-09-14「我觉得 logbook 应该和 trajectory 合并了」「合并后内部的子命令需要重新命名，给我方案」）
 - **状态**：**草案，未动代码**。供裁决用；获准后再进实施（建议实施顺序见 SESSION.md §32.4 M9）
 - **假定**：形态取 **A1（前缀式单枚举）**；若改选 A2（`domain` 参数）见 §7 备选
-- **与权限正交**：本方案**不解决** M5（权限面）——`tools.restrict` 是**工具级** deny，改名不改变谁能调；权限模型须单独裁决
+- **与权限正交**：本方案**不解决** M5（权限面）——`tools.restrict` 是**工具级** deny，改名不改变调用权限归属；权限模型须单独裁决
 
 ---
 
@@ -16,9 +16,9 @@
 | # | 规则 | 理由（R↓） |
 |---|------|-----------|
 | **R1** | **一个工具 `trajectory` + `<域>-<动作>` 前缀式单枚举** | 合并后动作池是并集，"无前缀"必生歧义（§3 实证）；单枚举不引入第二个耦合参数 |
-| **R2** | 动作层**小写动词、连字符分隔**，域内唯一 | 与既有习惯一致（`wake-add`/`wake-list`/`wake-rm` 已经长这样，**零改动**） |
-| **R3** | **隐喻只出现在域层**（`logbook`/`wake`/`auto`），动作层一律平实动词 | 避免"隐喻的二次翻译"：模型只需理解三个域，不必逐动作猜隐喻 |
-| **R4** | 新动作**先归域、再命名**；归不进任何域 ⇒ 说明该拆而不是硬塞 | 防止合并块变成杂物间（熵） |
+| **R2** | 动作层**小写动词、连字符分隔**，域内唯一 | 与既有习惯一致（`wake-add`/`wake-list`/`wake-rm` 已采用该形态，**零改动**） |
+| **R3** | **隐喻只出现在域层**（`logbook`/`wake`/`auto`），动作层一律平实动词 | 避免"隐喻的二次翻译"：模型只需理解三个域，不必逐动作推断隐喻 |
+| **R4** | 新动作**先归域、再命名**；归不进任何域 ⇒ 说明该动作应当拆分，而非强行归入既有域 | 防止合并块变成杂物间（熵） |
 
 ## 2. 域划分（三分，按"主语"切）
 
@@ -48,26 +48,26 @@
 | 12 | `trajectory.wake-add` | `wake-add` | **不变**（已合规） |
 | 13 | `trajectory.wake-list` | `wake-list` | **不变** |
 | 14 | `trajectory.wake-rm` | `wake-rm` | **不变** |
-| 15 | `trajectory.all` | `auto-report` | **动词化**（`all` 是形容词式命名，读不出"干什么"） |
+| 15 | `trajectory.all` | `auto-report` | **动词化**（`all` 是形容词式命名，读不出所执行的动作） |
 | 16 | `trajectory.status` | `auto-status` | |
 | 17 | `trajectory.check` | `auto-check` | |
 | 18 | `trajectory.diag` | `auto-diag` | 唤起条件链诊断（脚本侧） |
 | 19 | `trajectory.diag-live` | `auto-diag-live` | 进程内诊断 |
-| 20 | `trajectory.random` | `auto-random` | 跑偏见脚本取随机方向 |
+| 20 | `trajectory.random` | `auto-random` | 执行偏见脚本取随机方向 |
 | 21 | `trajectory.init` | `auto-init` | 可选剪枝（§6） |
 | 22 | `trajectory.doc` | `auto-doc` | 可选剪枝（§6） |
 | 23 | `trajectory.guide` | `auto-guide` | 可选剪枝（§6） |
 
-⇒ **改动 20 个名字、3 个保持不变**（`wake-*` 三兄弟本就合规）。
+⇒ **改动 20 个名字、3 个保持不变**（`wake-*` 三个动作本已合规）。
 
 ## 4. 冲突消解（"为什么必须有前缀"的实证）
 
 | 冲突面 | 合并前的旧状 | 无前缀会怎样 | 新解 |
 |--------|--------------|--------------|------|
-| `list` | `logbook.list`（列会话） vs `trajectory.wake-list`（列唤醒） | 合并后 `list` **歧义**（列谁？） | `logbook-list` / `wake-list` |
-| `status`/`check`/`health` | 三个"查状态"，分属两个工具 | 无法从名字判断查的是什么 | `auto-status`/`auto-check`/`logbook-health` |
-| `summary` / `all` | `logbook.summary`（会话总览） vs `trajectory.all`（全报告） | 两个"给我总览" | `logbook-summary` / `auto-report` |
-| `show`/`doc`/`guide` | 三个"给我看" | 同上 | `logbook-show` / `auto-doc` / `auto-guide`（或移出） |
+| `list` | `logbook.list`（列会话） vs `trajectory.wake-list`（列唤醒） | 合并后 `list` **歧义**（无法判定所列对象） | `logbook-list` / `wake-list` |
+| `status`/`check`/`health` | 三个"查状态"，分属两个工具 | 无法从名字判断所查对象 | `auto-status`/`auto-check`/`logbook-health` |
+| `summary` / `all` | `logbook.summary`（会话总览） vs `trajectory.all`（全报告） | 两个"总览类动作" | `logbook-summary` / `auto-report` |
+| `show`/`doc`/`guide` | 三个"展示类动作" | 同上 | `logbook-show` / `auto-doc` / `auto-guide`（或移出） |
 
 ## 5. 涟漪地图（改名必须同批动 vs 明确不动）
 
@@ -97,7 +97,7 @@
 
 | 动作 | 建议 | 理由 |
 |------|------|------|
-| `auto-doc` / `auto-guide` / `logbook-hook-guide` | **移出工具面**（改由 ACC 文档 + skill 承载），或降为**布尔参数** `guide: true`（`handyman(guide=true)` 有先例） | 三者都是"给我看文档"，不是动作；留在 enum 里只增选择成本 |
+| `auto-doc` / `auto-guide` / `logbook-hook-guide` | **移出工具面**（改由 ACC 文档 + skill 承载），或降为**布尔参数** `guide: true`（`handyman(guide=true)` 有先例） | 三者均为"文档展示类"，不属动作；留在 enum 里只增选择成本 |
 | `auto-init` | 移出（低频；配置模板可进文档） | 一次性动作 |
 | `logbook-health` 与 `logbook-qa` | **两者都留** | 判据不同：health = 结构异常（stale/drift/ghost）；qa = 事实核对 |
 | `logbook-summary` 与 `logbook-list` | 保留（描述里写明分工：list = 清单+状态码；summary = 仪表盘） | 重叠但视角不同 |

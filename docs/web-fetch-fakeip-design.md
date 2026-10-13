@@ -26,7 +26,7 @@
 |---|---|---|---|
 | **L1 DSH 配置** | 找"允许非公网"开关 | ❌ | `dsh-web-fetch-http` 的 Config 只有 5 个配额字段（maxResponseBytes / maxBodyChars / timeoutMs / maxRedirects / userAgent）；`dsh-web` 只有 `searchProvider` / `fetchProvider`。**只能换 provider，不能关校验** |
 | **L2① 网络逐域名** | 加进 `custom/openclash_custom_fake_filter.list`（先例 `+.argotunnel.com`） | ✅ | 模型要抓任意站点 → 打地鼠，不可持续 |
-| **L2② 网络全局** | `enhanced-mode: redir-host` 或 `fake-ip-filter-mode: whitelist` | ✅ | 影响全家所有设备的 DNS 行为；当初选 fake-ip 就是为 TUN |
+| **L2② 网络全局** | `enhanced-mode: redir-host` 或 `fake-ip-filter-mode: whitelist` | ✅ | 影响全家所有设备的 DNS 行为；当初选择 fake-ip 是为支持 TUN |
 | **L3 ACC 插件**（**采纳**） | ACC 注册自己的 fetch provider | ✅ | ~100 行 + 测试；零改 DSH；升级不丢 |
 | **L4 改 DSH** | 改 `lib/index.js:69` | ⚠️ | 违反"零改 DSH"；`dsh` 升级即被覆盖 |
 | **L5 绕开** | `dsh-develop sys curl` / anysearch extract | ✅ | 平台 `web_fetch` 对模型仍不可用 |
@@ -35,7 +35,7 @@
 
 ### 3.1 复用而非重写
 
-宿主 `HttpFetchProvider` **已导出**，且构造器第二参数就是 `resolveAddresses`（`HttpFetchResolver`）：
+宿主 `HttpFetchProvider` **已导出**，且构造器第二参数为 `resolveAddresses`（`HttpFetchResolver`）：
 
 ```ts
 new HttpFetchProvider(limits, resolveAddresses)   // limits: HttpFetchLimits
@@ -62,7 +62,7 @@ new HttpFetchProvider(limits, resolveAddresses)   // limits: HttpFetchLimits
 ```
 
 - **为什么不是改宿主 profile**：宿主 app-boot 的 `applyEntryPatches` 把**所有 bundle 的 patch 与本 profile 的 cordis.patch.yml 展平成一个列表**按序应用（`loadProfile` → `composeEntries`）。本包在 `dsh.profile.bundles` 末尾 → 它的 patch 在所有宿主 bundle 之后生效。**因此修复随插件交付，不需要改机器配置。**
-- **未命中只告警跳过**（宿主源码注释："A patch that matches nothing warns and is skipped"）→ 宿主换版本时不会炸。
+- **未命中只告警跳过**（宿主源码注释："A patch that matches nothing warns and is skipped"）→ 宿主换版本时不会失败。
 - **为什么用同一 id `http`**：`HttpFetchProvider` 的 `id` 是实例字段（`LOCAL_FETCH_PROVIDER_ID = 'http'`）。接管同一 id 后，宿主 `web` 的既有配置 `fetchProvider: http` **无需改动**——避免了"整体替换 web 配置对象"（patch 的 `config` 是替换非深合并，会连 `searchProvider` 一起覆盖）。
 - **两者不能并存**：同时注册同一 id 会 `WEB_DUPLICATE_PROVIDER`——这是刻意保留的响亮信号。
 

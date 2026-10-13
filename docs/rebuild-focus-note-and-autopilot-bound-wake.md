@@ -68,7 +68,7 @@ Continue the work of S142.
 - Persistent trajectory — SESSION.md path: ...
 ```
 
-**注意**：note 是给重建后自己的**任务焦点**，不是历史——用户已明确"无需包含历史"。锚点已有 SESSION.md 路径，模型会去读；note 只是让它在读之前/读之后知道本轮焦点。单行化处理防注入多行伪造结构。
+**语义边界**：note 是给重建后自己的**任务焦点**，不是历史——用户已明确"无需包含历史"。锚点已有 SESSION.md 路径，模型会去读；note 只让它在读之前/读之后知道本轮焦点。单行化处理防注入多行伪造结构。
 
 ### R2：autopilot 唤起定位改 bound 优先
 
@@ -104,7 +104,7 @@ resolveTargetAgent(ctx, mdPath):
 | `src/autopilot-trajectory.ts` | `resolveTargetAgent` bound 优先 + 多候选取最新；`diagnoseTargetUnavailable` 同步（bound 存在但 agent 未加载也提示）；import `readLastBound` |
 | 测试 `tests/autopilot-trajectory.test.ts` | mock sessions 形状加 `events` 含 `serenity/bound` 的用例：bound.dirName 匹配命中（即使标题不匹配）/ bound 不匹配但标题匹配回退 / 多候选取最新 / bound 命中但 agent 未加载诊断 |
 
-**测试 mock 注意**：现有 mock `events` 数组直接是事件对象数组（`{type:'session/title',...}`）——`sessionEvents` helper 读 `.events`（兜底形态）能工作；bound 事件直接加进 mock events 数组即可（`{type:'serenity/bound', data:{dirName, mdPath, ...}}`）。需确认 `readLastBound` 用 `sessionEvents` 兼容 mock 的 `.events` 数组形态（v1.28.1 sessionEvents helper snapshotEvents 优先 + events 兜底——mock 无 snapshotEvents → 走 events 兜底 ✓）。
+**测试 mock 形态**：现有 mock `events` 数组直接是事件对象数组（`{type:'session/title',...}`）——`sessionEvents` helper 读 `.events`（兜底形态）能工作；bound 事件直接加进 mock events 数组即可（`{type:'serenity/bound', data:{dirName, mdPath, ...}}`）。须确认 `readLastBound` 用 `sessionEvents` 兼容 mock 的 `.events` 数组形态（v1.28.1 sessionEvents helper snapshotEvents 优先 + events 兜底——mock 无 snapshotEvents → 走 events 兜底 ✓）。
 
 ---
 

@@ -25,7 +25,7 @@
 ### 方案要点（K 语义）
 
 - 触发判定改：`projectedTokens >= thresholdK * 1000`（不再依赖 contextWindow 比例）
-- 文案改：`Context usage at ${Math.round(tokens/1000)}K (threshold ${thresholdK}K)`——keep 英文结构（v1.23.0 全英化 + osp 对齐？**注意 rebuildReminderText 非 osp 对齐块**——仅 CCE/Session 逐字节对齐，rebuild 文案为 dsp 自有，可自由改）
+- 文案改：`Context usage at ${Math.round(tokens/1000)}K (threshold ${thresholdK}K)`——keep 英文结构（v1.23.0 全英化 + osp 对齐？**rebuildReminderText 非 osp 对齐块**——仅 CCE/Session 逐字节对齐，rebuild 文案为 dsp 自有，可自由改）
 - 配置默认值：需按常用模型窗口取（如 deepseek 系大窗口）；**拍板项**——默认 K 值与上下限
 - 字段命名：settings 键 `rebuildThreshold`（现比例 0.9）→ 若直接复用此键则值 0.9 会变成 0.9K（错误语义）；建议**新键 `rebuildThresholdK`**（保留旧键读取做迁移/降级？或直接断——settings.yaml 用户少，可拍板）
 
@@ -79,7 +79,7 @@
 | `session-ops.ts` | ActiveSessionInfo 或调用侧带 summary；useSession 不改（摘要不落 SESSION.md——只影响 dsh 会话标题） |
 | `tools/rebuild.ts` | 参数 +summary → queueRebuild opts |
 | `rebuild.ts` | queueRebuild 存 summary → PendingRebuild 扩展 → performRebuild 后（或 registerRebuildTurnHook 内）rename agent 会话标题 |
-| autopilot | **无需改**（startsWith(sid-) 兼容验证 ✓）；但注意 readSessionTitle 在 rebuild/autopilot 的读取兼容（latest-wins 读新标题） |
+| autopilot | **无需改**（startsWith(sid-) 兼容验证 ✓）；但 `readSessionTitle` 在 rebuild/autopilot 的读取兼容须一并核（latest-wins 读新标题） |
 | 测试 | session-title.test / session-tool.test / rebuild.test / autopilot 标题匹配用例（若断言精确标题 `S143-日期` 需放宽为 startsWith） |
 
 ### 建议拍板

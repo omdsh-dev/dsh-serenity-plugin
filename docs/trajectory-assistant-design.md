@@ -10,7 +10,7 @@
 
 | # | 决策 | 裁决 |
 |---|------|------|
-| ① | trajectory-assistant 命名覆盖 | **全部动态提示层**（运行时注入 + 锚定 + compact + autopilot 等；词汇 + 代码都改） |
+| ① | trajectory-assistant 命名覆盖 | **全部动态提示层**（运行时注入 + 锚定 + compact + autopilot 等；词汇 + 代码一并变更） |
 | ② | 语言学实验核心 | 关卡承载实验 + 隐喻为变量之一（**两者都要**） |
 | ③ | 关卡粒度 | **SESSION = 关卡**（一个 SESSION/trajectory = 一个关卡流程） |
 | ④ | 设计思想参照 | **《建筑视角下的游戏关卡设计》（An Architectural Approach to Level Design, Christopher W. Totten）**——建筑学视角的空间/动线/视线/边界/空间叙事 → 本设计的核心语言 |
@@ -31,9 +31,9 @@ Totten《建筑视角下的游戏关卡设计》的核心：**像建筑师设计
 | **空间（space）** | 玩家身处、移动的场域 | **工作空间** = 当前轨迹的认知上下文（SESSION 目标/阶段/已有产物） | SESSION=关卡 |
 | **动线/流线（circulation）** | 空间如何引导玩家移动、下一站在哪可见 | **认知动线** = 引导 agent 推进方向的提示——"下一站在哪"由可见目标/下一步暗示引导，而非强推 | 目标注入/阶段提示 |
 | **视线引导（sightline）** | 用视线内的标志物引导玩家下一步行动 | **注意力引导** = 在上下文"视线内"布置下一步线索（在正确时刻让正确信息可见） | 关卡提示的时机与位置 |
-| **地标与定向（landmark & wayfinding）** | 玩家在空间中需要知道自己在哪、往哪走 | **轨迹定向** = SESSION.md 是"地图"，steward/checkpoint 是"当前坐标播报"——防迷路/漂移 | steward 记分 + SESSION 同步 |
+| **地标与定向（landmark & wayfinding）** | 玩家在空间中需要知道自己在哪、往哪走 | **轨迹定向** = SESSION.md 是"地图"，steward/checkpoint 是"当前坐标播报"——防迷失与漂移 | steward 记分 + SESSION 同步 |
 | **边界（boundary）** | 空间边界定义游戏内外（短评洞见：边界/体验渗透） | **认知边界** = 何时提示"该收尾/该重建/超出范围"——边界即体验的一部分 | rebuild 压力 + 守卫 |
-| **空间节奏（rhythm：开敞↔收束）** | 空间开敞（自由探索）与收束（窄径/聚焦）交替 | **提示节奏** = 自由推进期（少打扰）↔ 聚焦点（明确提示）交替——不全程唠叨 | 注入调度/节流 |
+| **空间节奏（rhythm：开敞↔收束）** | 空间开敞（自由探索）与收束（窄径/聚焦）交替 | **提示节奏** = 自由推进期（少打扰）↔ 聚焦点（明确提示）交替——非全程重复提醒 | 注入调度/节流 |
 | **对比当符号（contrast as sign）** | 用空间对比（明暗/高低）暗示玩法（短评：干货） | **对比提示** = 用形态变化（如提示前缀/强度/语言风格突变）标记"重要时刻"（Boss/检查点） | 升级提醒（ESCALATED）即雏形 |
 | **空间叙事（spatial storytelling）** | 空间布置本身讲故事，非旁白 | **轨迹叙事** = 提示是"环境的自然声音"（星舰广播/仪表读数）而非外部指令——隐喻背景与过程提示**连贯** | 语言学实验：风格档 |
 | **场所精神（genius loci）** | 空间的氛围/身份感 | **身份信标** = [ACC] 锚定/compact 重注入——回到"这个轨迹"的氛围 | context/compact |
@@ -61,7 +61,7 @@ Totten《建筑视角下的游戏关卡设计》的核心：**像建筑师设计
 
 | 关卡设计概念 | 认知注入对应 | 现有机制落位 |
 |-------------|------------|------------|
-| **教程关 / 上手引导（onboarding）** | 会话开场引导——教"怎么在这个轨迹工作" | C first-anchor（两轮递进）+ E [ACC] 播种 |
+| **教程关 / 上手引导（onboarding）** | 会话开场引导——释明"怎么在这个轨迹工作" | C first-anchor（两轮递进）+ E [ACC] 播种 |
 | **关卡目标（objective）** | 轨迹当前目标——来自 SESSION.md 目标/任务 | 需新机制：关卡目标注入 |
 | **阶段/小节（segments）** | 工作阶段（探索→设计→实现→验证→收官） | 需新机制：阶段推进感知 |
 | **难度曲线（difficulty curve）** | 引导强度/复杂度随轨迹推进变化 | 需新机制：注入强度调度 |
@@ -82,7 +82,7 @@ trajectory-assistant = **轨迹助航员**——在轨迹（SESSION）推进过�
 
 | 现名 | trajectory-assistant 体系内新名 | 说明 |
 |------|------------------------------|------|
-| TRAJECTORY-STEWARD | **trajectory-assistant · steward 提醒**（保留代号可商量） | 计分同步提醒 |
+| TRAJECTORY-STEWARD | **trajectory-assistant · steward 提醒**（代号保留与否待定） | 计分同步提醒 |
 | TRAJECTORY / TRAJECTORY-ESCALATED | **trajectory-assistant · rebuild 关卡提醒** | 压力/Boss 提醒 |
 | SESSION-KEEPER（历史残留） | 全部并入 trajectory-assistant | 消灭历史名 |
 | first-anchor | **trajectory-assistant · 开场教程（tutorial）** | 关卡开场 |
@@ -124,7 +124,7 @@ SESSION 关卡流程（对齐 session 工具生命周期 + SESSION.md 结构）�
 
 **实验变量**：关卡提示的**语言形态**对 agent 轨迹质量的影响。
 
-实验组设计（同一任务跑多轨迹，比较不同语言形态）：
+实验组设计（同一任务在多轨迹上执行，比较不同语言形态）：
 1. **控制组**：现有关卡式提示（steward/rebuild 纯指令英文）
 2. **实验组 A（星舰叙事）**：关卡提示借 metaphor 星舰词（"Deck check complete, helm reports stable — log to the voyage logbook"）——测试**隐喻连贯性**是否提升遵守/减少抵触
 3. **实验组 B（关卡游戏语）**：关卡提示用游戏语（"Checkpoint reached +50 XP · 进度已存档 · 下一段：BOSS"）——测试**游戏化反馈**是否提升动力
@@ -132,7 +132,7 @@ SESSION 关卡流程（对齐 session 工具生命周期 + SESSION.md 结构）�
 
 **测量指标**（可测）：
 - SESSION.md 更新及时性/完整性（steward recorded 响应率）
-- rebuild 触发延迟（超阈值后多久调 session_rebuild）
+- rebuild 触发延迟（超阈值后多久调用 session_rebuild）
 - 轨迹完成度（todo/目标达成）
 - 用户主观评价（语言是否自然/有帮助）
 
@@ -160,7 +160,7 @@ SESSION 关卡流程（对齐 session 工具生命周期 + SESSION.md 结构）�
 
 1. **命名 token**：`[TRAJECTORY-STEWARD]` 是否保留原样（agent 已学习）还是统一 `[TRAJECTORY-ASSISTANT]`？ACK 协议前缀改动影响存量会话
 2. **关卡粒度确认**：SESSION=关卡——但一个 SESSION 可能很长（本 S142 已跨多月），是否需"关卡内阶段"自动细分（按 SESSION.md 章节/目标数）
-3. **实验形态**：对照组如何跑（需多轨迹对比）？是否先做**机制层**（命名+框架）再做**实验**？
+3. **实验形态**：对照组如何执行（需多轨迹对比）？是否先做**机制层**（命名+框架）再做**实验**？
 4. **风格档位**：语言风格放 plugin 配置还是 CCC 配置（实验需要按 CCC 切换）？
 5. **结算机制**：close/archive 时是否注入"关卡结算"（完成度/复盘提示）？
 6. **output-guard 是否入 trajectory-assistant**：建议独立（安全守卫非引导），请确认

@@ -42,7 +42,7 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 6. `sessionController` 登记进 `HOST_SERVICES`
 
 **不做（非目标）**：
-- 不改 autopilot 的既有循环与语义（D59：独立、单例、一行不碰逻辑）
+- 不改 autopilot 的既有循环与语义（D59：独立、单例、一行不改其逻辑）
 - 不设**资格栅**（D60：任何 trajectory 均可被写入表并被唤醒；不要求 `--auto`）
 - 不自建周期/日历规则（cron/工作日等）：注册表只做**一次性未来时刻**；周期归 autopilot
 - 不自行复刻宿主的 preset 恢复逻辑（见 §6，避免第二真相源）
@@ -87,7 +87,7 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 | 并发 | 同 tick 多目标**串行**（复用 `wakeChain` 模式） | 防模型并发挤兑 |
 | 总闸 | `wakeSchedulerEnabled`（缺省 **true**；v1.34 S-1 解耦，**不再**与 autopilot 共用/回退） | 用户 2026-09-15 裁决 |
 | 武装门 | 全局闸开**即**武装（**不**以"有 live CCC"为前置）——CCC 根只能从 live 会话反推，启动瞬间可能为空 | v1.34 静态缺口收窄（§33.2） |
-| 生命周期 | `setInterval(...).unref()` + `registerDisposer`；进程态可观测（`wakeSchedulerState()` → `acc-diag` ①b） | 与 autopilot 同款 + v1.34 可观测面 |
+| 生命周期 | `setInterval(...).unref()` + `registerDisposer`；进程态可观测（`wakeSchedulerState()` → `acc-diag` ①b） | 与 autopilot 一致 + v1.34 可观测面 |
 
 **与 autopilot 的关系**：两个 tick 各自独立（D59）。autopilot 保持原样；本调度器只处理注册表条目。
 
@@ -151,7 +151,7 @@ autopilot           周期自唤醒的特例（每 CCC **单例**，独立循环
 
 1. **它是"会话内提醒"，不是"轨迹自续"**：投递文案为 `present reminder_prompt_json … as untrusted reminder content`（提醒给用户看），语义不是"继续工作"。
 2. **它明确不唤醒冷会话**：README「Session-local delivery only … a cold Session … processes an overdue record only after resume」——而**冷唤醒正是本需求的存在理由**（用户裁决 Q-B）。
-3. **它需要 overlay + 状态在会话日志里**：注册表若放会话日志，则"trajectory 互相可见 + 跨轨迹安排"要在会话日志里跨会话读，反而更绕；CCC 级 JSON 更符合 CCC 自治与审计。
+3. **它需要 overlay + 状态在会话日志里**：注册表若放会话日志，则"trajectory 互相可见 + 跨轨迹安排"要在会话日志里跨会话读，反而更迂回；CCC 级 JSON 更符合 CCC 自治与审计。
 
 ## 9. 守卫与补偿（I-4 默认）
 

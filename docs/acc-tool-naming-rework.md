@@ -38,7 +38,7 @@
 | 9 | `localstore` | localstore | 凭据/配置存储 | 保留（敏感清晰） |
 | 10 | `autopilot-trajectory` | 同 | 自主巡航 | 保留（产品名） |
 
-> 注：10 个（原 13）——skiff_admin 并入 container_admin 后不再是独立工具；eap/neat/cce 三合一为 praxis；session_rebuild 并入 logbook。工具头从 13 降 10，再加 description 瘦身。
+> 10 个（原 13）——skiff_admin 并入 container_admin 后不再是独立工具；eap/neat/cce 三合一为 praxis；session_rebuild 并入 logbook。工具头从 13 降 10，再加 description 瘦身。
 
 ---
 
@@ -108,7 +108,7 @@ msm(name: string, args: string[], inspect?: boolean)
 改名是破坏性变更——**已运行的 CCC 的 skill 文档/会话/SESSION.md 里大量引用旧工具名**（cc_fs/session/acc_msm/acc_kit/eap...）。选项：
 - **A 硬切**：直接改名，文档同步全做，旧名失效（干净但过渡期 LLM 在旧会话会调错）
 - **B 双名过渡**：新旧名都注册（alias），v1 版本双名共存，文档/白名单渐进迁移后择机弃旧
-- 倾向 **B**（alias 层：旧名工具注册为转发到新名；成本=注册 3-4 个薄转发工具，但工具面不减反增——违背目标！）
+- 倾向 **B**（alias 层：旧名工具注册为转发到新名；成本=注册 3-4 个薄转发工具，但工具面不减反增——违背目标。）
 
 **修正倾向**：命名重构**硬切** + 系统提示词 toolsBlock 明示"工具已改名"对照表（旧→新），LLM 每轮看到即学。文档同步靠本 CCC 维护。旧会话的历史引用会因工具不存在而报错 → LLM 看 toolsBlock 即知新名。**硬切（选项 A）更符合"工具面越小越好"目标**——alias 会使工具面膨胀。
 

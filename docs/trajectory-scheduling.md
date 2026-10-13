@@ -16,7 +16,7 @@ decisions: D58 / D59 / D60
 
 ## 1. 一句话
 
-**在宁静号里，trajectory 是一等的、可并行的认知轨迹；"唤醒"就是把「未来某时刻 + 一条 message」投给某条 trajectory——可以给自己，也可以给别人；autopilot 只是"周期自唤醒"的特例。**
+**在宁静号里，trajectory 是一等的、可并行的认知轨迹；"唤醒"即把「未来某时刻 + 一条 message」投给某条 trajectory——可以给自己，也可以给别人；autopilot 只是"周期自唤醒"的特例。**
 
 ## 2. 概念模型
 
@@ -53,7 +53,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 | 实现 | `autopilot-trajectory.ts` `registerAutopilot` | `wake-registry.ts` + `wake-scheduler.ts` |
 | 决策 | D59：**独立单例，不进注册表** | D58/D60 |
 
-两条线**各自独立开关**（v1.34 S-1 解耦，用户 2026-09-15 裁决）：周期自唤醒 = `autopilotWakeEnabled`（缺省**关**）；一次性唤醒调度器 = `wakeSchedulerEnabled`（缺省**开**）。**关掉前者不再连带关掉后者**——旧实现共用一闸（`trajectoryEnabled || autopilotEnabled`）是缺陷：所有者关掉 auto-trajectory 后 wake-later 一并失效，条目静默滞留。
+两条线**各自独立开关**（v1.34 S-1 解耦，用户 2026-09-15 裁决）：周期自唤醒 = `autopilotWakeEnabled`（缺省**关**）；一次性唤醒调度器 = `wakeSchedulerEnabled`（缺省**开**）。**关闭前者不再连带关闭后者**——旧实现共用一闸（`trajectoryEnabled || autopilotEnabled`）是缺陷：所有者关闭 auto-trajectory 后 wake-later 一并失效，条目静默滞留。
 
 ## 4. 结构全景
 
@@ -76,7 +76,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 |---|---|---|
 | 精度 | **5 分钟 tick** | 用户："精度不需要很高" |
 | 补跑窗口 | **≤2h 补投**；超过 → `missed` 留痕 | 停机期间的到期项既不能白丢，也不能"早上连环补跑" |
-| 过期条目 | 状态推进为 `missed`，**不投递** | 一次性唤醒的语义是"那个时刻"，不是"尽快" |
+| 过期条目 | 状态推进为 `missed`，**不投递** | 一次性唤醒的语义是"登记的到期时刻"，不是"尽快" |
 | 回执 | **无** | C3；`lastResult` 只记"投递/失败"事实，不代表模型完成 |
 | 失败重试 | 同一条目下个 tick 重试，直到超窗 | 失败必须写 `lastResult`（禁静默） |
 | 并发 | 同 tick **串行**（跨 CCC 依次）；单条 fire-and-forget | 防模型并发挤兑 |
@@ -88,8 +88,8 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 
 | 邻居 | 关系 |
 |---|---|
-| **宿主 `@deepseek-ai/dsh-schedule`** | **不复用**。它是"会话内提醒"（投递给用户看）、明确**不唤醒冷会话**、状态在会话日志；本机制是"轨迹自续"（投给模型继续干活）、**冷唤醒是核心**、状态在 CCC 文件。理由详见设计文档 §8 |
-| `handyman` / `subagent` | 都是"**现在**派一个子 agent 干活并**等结果**"；本机制是"**未来**投一条消息并且**不等**"（正交） |
+| **宿主 `@deepseek-ai/dsh-schedule`** | **不复用**。它是"会话内提醒"（投递给用户看）、明确**不唤醒冷会话**、状态在会话日志；本机制是"轨迹自续"（投给模型继续执行任务）、**冷唤醒是核心**、状态在 CCC 文件。理由详见设计文档 §8 |
+| `handyman` / `subagent` | 都是"**现在**派一个子 agent 执行任务并**等结果**"；本机制是"**未来**投一条消息并且**不等**"（正交） |
 | `container_trajectory rebuild` | rebuild 解决"载体重置"；本机制解决"载体何时被唤醒"（互补；v1.33 起 rebuild 与 wake-later 同属 `container_trajectory` 工具） |
 | keeper / compaction | 解决上下文预算；本机制不感知上下文，投递即入队 |
 | CCE 连续性 | 本机制是**时间轴上的连续性工具**：轨迹在没人看着的时候也能被自己的安排推动（见 §9） |

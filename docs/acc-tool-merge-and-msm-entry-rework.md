@@ -46,8 +46,8 @@
   2. Inspect usage:  acc_msm exec <name> --schema 1
   3. Execute:        acc_msm exec <name> <args...>
   ```
-  → **三步才完成一次执行**！每次都是独立 tool-call round-trip → LLM 上下文膨胀 + 延迟。
-- 实际 CCC 注册 MSM 规模：home-serenity ~75 个 + pangu ~90 个（每家 CCC 各自注册）——list 输出巨长，每次发现成本高
+  → **三步才完成一次执行**。每次都是独立 tool-call round-trip → LLM 上下文膨胀 + 延迟。
+- 实际 CCC 注册 MSM 规模：home-serenity ~75 个 + pangu ~90 个（每家 CCC 各自注册）——list 输出极长，每次发现成本高
 
 ### 2.3 历史决策 D12（SESSION.md §5，2026-08-27 工具精简作罢）
 
@@ -78,7 +78,7 @@
 
 ### 3.1 R2（先做，核心）：MSM 入口重构——单一入口 + 自描述执行
 
-**核心洞察（LLM 直觉）**：LLM 不该"先 list 再 schema 再 exec"——它应该**直接说想干嘛**。MSM 是"可执行单元"，理想入口 = 一个工具，参数 = `{"name": "...", "args": [...]}`，工具内部：找不到 → 返回候选列表（代替 list）；找到 → 直接执行（代替 exec）。
+**核心洞察（LLM 直觉）**：LLM 不该"先 list 再 schema 再 exec"——它应该**直接表达意图**。MSM 是"可执行单元"，理想入口 = 一个工具，参数 = `{"name": "...", "args": [...]}`，工具内部：找不到 → 返回候选列表（代替 list）；找到 → 直接执行（代替 exec）。
 
 **方案 A（推荐）：`acc_msm` 行为重构——list/exec 合并为 `msm` 单入口**
 
@@ -92,10 +92,10 @@ msm(<name: string>, <args: string[]>, <inspect?: boolean>)
 | `msm(name: "不存在", args: [])` | 我想找一个能做 X 的 MSM | 返回模糊匹配候选列表（含 name+description，等价原 list 的过滤版） |
 | `msm(name: "ssh-connect", inspect: true)` | 我想知道它怎么用 | 返回 usage/flags（等价原 exec --schema 1） |
 | `msm(name: "ssh-connect", args: ["--help"])` | 我想看它帮助 | 透传（MSM 自身 --help） |
-| `msm()` | 我在新 CCC 想了解有什么 | 返回**精简目录**（分类分组，替代全量 list 巨输出） |
+| `msm()` | 我在新 CCC 想了解有什么 | 返回**精简目录**（分类分组，替代全量 list 庞大输出） |
 
 **关键设计点**：
-1. **name 是自由文本不是 enum**——LLM 不需要先知道有哪些 name 才能调（enum 会强制先 list！这是"不符合直觉"的根源）。name 不存在 → 返回 top-K 模糊候选（名称/描述子串匹配）
+1. **name 是自由文本不是 enum**——LLM 不需要先知道有哪些 name 才能调（enum 会强制先 list；这是"不符合直觉"的根源）。name 不存在 → 返回 top-K 模糊候选（名称/描述子串匹配）
 2. **args 是 string[]**——与 shell 直觉一致（exec 现有形态保留）
 3. **inspect: true** = 原 `--schema` 协议 flag 语义化
 4. **默认错误恢复**：执行失败（MSM 退出非 0）→ 返回错误 + usage 提示（现已有 --help TIP 机制，保留）
@@ -103,7 +103,7 @@ msm(<name: string>, <args: string[]>, <inspect?: boolean>)
 6. register/deregister/check/guide/ccc-config/catalog → **移出主入口为管理子命令**（低频管理操作，不占主路径认知）——可保留在 acc_msm action 里或独立 `acc_admin` 工具
 
 **为什么这符合 LLM 直觉**：
-- 现有痛点：LLM 看 toolsBlock 学"三步协议"→ 实际调用时经常第一步就 list（输出 75 个 MSM 巨大）→ 再挑 name → 忘了 --schema 直接 exec 传错参 → 失败 → 重试。**认知负担 = 协议学习 + 每一步输出处理**
+- 现有痛点：LLM 看 toolsBlock 学"三步协议"→ 实际调用时经常第一步就 list（输出 75 个 MSM，规模巨大）→ 再挑 name → 忘了 --schema 直接 exec 传错参 → 失败 → 重试。**认知负担 = 协议学习 + 每一步输出处理**
 - 新形态：LLM 只需"我要 X"→ 工具自己兜底发现/提示/执行。name 自由文本 = 无需预知清单
 
 ### 3.2 R1：工具面合并

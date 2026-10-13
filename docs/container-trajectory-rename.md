@@ -12,7 +12,7 @@
 
 > 「要改就都改了；名称改称 `trajectory` 是**准确性调整**——它是我们 ACC 提供的**容器内** trajectory 机制，尽管是**一等公民**，但仍然是我们**容器内**的；**specs 也在本 trajectory 改**；**osp 不管**」
 
-**这句更正了更名的语义**（R↓，避免后人误读）：
+**该引语更正了更名的语义**（R↓，避免后续读者误读）：
 
 | 旧读法（我原先隐含的） | 正确读法（用户裁决） |
 |---|---|
@@ -32,7 +32,7 @@
 |---|------|------|
 | **概念词** | trajectory（D58 一等概念）/ The Ship's Log / Ship of Theseus / keeper 英文散文 "the carrier of the trajectory" | ❌ **不动**（先例：工具 `container_fs` vs 隐喻 The Hull） |
 | **工具名** | `trajectory` → **`container_trajectory`** | ✅ |
-| **实现文件名** | 工具住在 `tools/session.ts`；数据层 `session-ops.ts` / `session-bound.ts` | ✅ 清债（B 形态） |
+| **实现文件名** | 工具位于 `tools/session.ts`；数据层 `session-ops.ts` / `session-bound.ts` | ✅ 清债（B 形态） |
 
 **为什么概念词不动**（被否方案 C 的理由）：波及隐喻域（system-prompt 的 8 块骨架）、keeper 两条强制提醒的英文散文、轨迹连续性理论、`home-research` 的 RSI 笔记——**收益低而风险高**；且"概念名 = 隐喻域 / 工具名 = 容器族"的分层本来是正确结构。
 
@@ -40,18 +40,18 @@
 
 | 文件 | 变更 | 判据 |
 |------|------|------|
-| `src/tools/session.ts` | → `src/tools/trajectory.ts` | 它就是工具本体（`createTrajectoryTool`） |
+| `src/tools/session.ts` | → `src/tools/trajectory.ts` | 该文件即工具本体（`createTrajectoryTool`） |
 | `src/session-ops.ts` | → `src/trajectory-ops.ts` | 主语是 `AGENT_SESSIONS/` 的**轨迹**（findSession / sessionsRoot / summarize / ACTIONS / 激活表） |
 | `src/session-bound.ts` | → `src/trajectory-bound.ts` | 主语是**载体↔轨迹绑定**（`.bindings.json` 反查） |
-| `src/session-cleanup.ts` | **不动** | ⚠️ 它的主语是 **DSH 会话**（平台对话历史）的删除，**不是轨迹**——按名一刀切会把它误伤 |
+| `src/session-cleanup.ts` | **不动** | ⚠️ 该文件的主语是 **DSH 会话**（平台对话历史）的删除，**不是轨迹**——按名一刀切会误伤该文件 |
 | `src/wake-registry.ts` / `wake-scheduler.ts` | 不动 | 主语是"唤醒"这条线 |
 | `src/autopilot-trajectory.ts` | 不动 | 主语是 autopilot 这条线（D58 后为 trajectory 的周期特例） |
-| `src/rebuild.ts` | 不动 | 它的名字是"动作名"（rebuild 是 action），非主语 |
+| `src/rebuild.ts` | 不动 | 该文件的名字是"动作名"（rebuild 是 action），非主语 |
 
 ## 4. 硬约束（**同批，不可拆**）
 
-1. 🔴 **`tools.restrict` 按工具名字符串** ⇒ skiff 角色白名单（`.opencode/serenity.json` 的 `skiff.roles.zhaocai.tools` + `.opencode/skiff/zhaocai.md`）**必须与 ACC 同批改**，否则**招财静默失去该工具**（v1.33 `logbook→trajectory` 已踩过同型坑）。
-2. 🔴 **工具名的每一处"命令形态"提及都是可执行指令**（keeper 提醒里写 `trajectory rebuild`，LLM 照做会失败）⇒ 必须全量扫。
+1. 🔴 **`tools.restrict` 按工具名字符串** ⇒ skiff 角色白名单（`.opencode/serenity.json` 的 `skiff.roles.zhaocai.tools` + `.opencode/skiff/zhaocai.md`）**必须与 ACC 同批改**，否则**招财静默失去该工具**（v1.33 `logbook→trajectory` 已发生过同型问题）。
+2. 🔴 **工具名的每一处"命令形态"提及都是可执行指令**（keeper 提醒里写 `trajectory rebuild`，LLM 依此调用会失败）⇒ 必须全量扫描。
 3. **specs 在**本 trajectory（S142）**内改**（用户裁决，取代原 M6"另开会话"）。
 4. **osp 不动**（其工具面是 `logbook`，属另一运行时，遵循 §1 边界）。
 

@@ -137,7 +137,7 @@ dsh-develop typecheck-host <version>
 - `src/host/contract.ts:48` 注释（"对照 …@ 0.1.2-rc.1 逐一核对"）
 - `tests/host-contract.test.ts` 的版本字面量（多处）
 
-**边界**：源码注释里大量"vX 适配 0.1.2-rc.1"是**历史记录**（R↓：记录当时踩的坑），**不改**——改了就是抹掉历史。
+**边界**：源码注释里大量"vX 适配 0.1.2-rc.1"是**历史记录**（R↓：记录当时踩的坑），**不改**——改了即抹掉历史。
 
 ---
 
@@ -325,7 +325,7 @@ dsh-develop typecheck-host <version>
    只有 `sendSessionAffinityHeaders`/`sessionAffinityFormat`，格式仅 `openai`/`openai-nosession`/`openrouter`）。
    pi **CLI 应用**是在自己的 SDK header 路径里加的（pi #4847 维护者回复：实现在
    `packages/coding-agent/src/core/sdk.ts`，加 `x-opencode-session: <session id>` + `x-opencode-client: pi`）。
-   → **这就是 DSH（直接用库）缺这个头的原因**；也说明上游可以修（DSH 应向官方提同样需求）。
+   → **此即 DSH（直接用库）缺该请求头的原因**；也说明上游可以修（DSH 应向官方提同样需求）。
 5. **配置路径**：`llm-pi-ai` 是插件注册的 settings 命名空间（`NS = "llm-pi-ai"`，`installSection` 于 `lib/index.js:2661`；
    条目地址 `settingsPath: ["providers", <route>]`）→ 用户在 `~/.dsh/settings.yaml` 写：
    ```yaml
@@ -340,7 +340,7 @@ dsh-develop typecheck-host <version>
            HTTP-Referer: https://opencode.ai/
            X-Title: opencode
    ```
-   **该形状与 pi issue #4847 里官方认可 workaround 完全同构**（那份 workaround 就是 `providers.<route>.headers."x-opencode-session"`）——独立佐证本注入点成立。
+   **该形状与 pi issue #4847 里官方认可的 workaround 完全同构**（那份 workaround ＝ `providers.<route>.headers."x-opencode-session"`）——独立佐证本注入点成立。
 6. **route 事实**：`opencode-go` 是 pi-ai 0.85.1 **内置目录 provider**（`dist/providers/opencode-go.js`，
    baseURL `https://opencode.ai/zen/go`，`envApiKeyAuth(["OPENCODE_API_KEY"])`，模型如 `minimax-m3`/`deepseek-v4-flash`）。
    `https://opencode.ai/zen/go/v1` **不在官方文档的端点表里**（官方只列 `/zen/v1/...`）→ 属**未文档化面**，行为只能靠社区证据。

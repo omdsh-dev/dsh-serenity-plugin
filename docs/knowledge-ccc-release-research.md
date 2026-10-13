@@ -17,8 +17,8 @@
 
 | 场景 | 本质 | 与远程访问（F1）的区别 |
 |------|------|----------------------|
-| ① 问答助手 | 把知识 CCC 实例化为**独立问答服务**——单独部署（独立进程/实例）+ 单独设定约束（知识域、行为、工具面），像 Loop 一样自主循环到完成 | F1 是"人访问 Web UI"；这里是"程序/机器人访问知识"，面向自动化消费 |
-| ② IM 知识机器人 | 通过**类 ACP 协议**把知识 CCC 暴露给 IM（微信/Telegram/飞书等），充当知识提供机器人 | F1 是 Web 界面人机交互；这里是消息渠道人机交互，且可编程 |
+| ① 问答助手 | 把知识 CCC 实例化为**独立问答服务**——单独部署（独立进程/实例）+ 单独设定约束（知识域、行为、工具面），像 Loop 一样自主循环到完成 | F1 是"人访问 Web UI"；本场景是"程序/机器人访问知识"，面向自动化消费 |
+| ② IM 知识机器人 | 通过**类 ACP 协议**把知识 CCC 暴露给 IM（微信/Telegram/飞书等），充当知识提供机器人 | F1 是 Web 界面人机交互；本场景是消息渠道人机交互，且可编程 |
 
 核心洞察：**两种需求共享同一条技术主线 = 把 CCC 的知识 + agent 能力通过标准协议暴露为可编程服务**。ACP（Agent Client Protocol）是这条主线的行业标准。
 
@@ -100,7 +100,7 @@ OpenClaw 官方支持 **ACP agents**（docs2.openclaw.ai/tools/acp-agents）：O
 
 ## 6. ACP 协议本体
 
-- 官方站：agentclientprotocol.com（v1：initialize/session/new/session/prompt/session/update/session/cancel/session/request_permission；v2 draft 进行中）
+- 官方站：agentclientprotocol.com（v1：initialize/session/new/session/prompt/session/update/session/cancel/session/request_permission；v2 draft 编制中）
 - 生态：opencode（原生 ACP mode）、gemini-cli（ACP mode）、Cursor CLI（acp）、Zed、Claude Code 均支持
 - **ACP 是 client-server 模式**：agent 侧起 ACP server（stdio 或 socket），工具/IDE/IM 桥作 client
 

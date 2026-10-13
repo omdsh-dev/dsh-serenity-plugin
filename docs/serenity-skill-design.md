@@ -8,7 +8,7 @@
 
 ## 0. 怎么读
 
-| 你关心什么 | 看 |
+| 关心什么 | 看 |
 |---|---|
 | **v0.1 → v0.2 改了什么（含被否项）** | **§0.1** |
 | owner 要什么（原话与解读） | §1 |
@@ -96,7 +96,7 @@ owner 2026-10-11 原话（逐字）：
 
 **处置（按 Q6 裁决）**：**ACC 不为旧名做特殊处理**（不兼容读取、不告警）；这 14 份由 **CCC 自行修正**（改名为 `skill.ttl` ＋ 把 `sr:imports` 改成 `owl:imports`）。机制侧只保证：**`skill.ttl` 里缺 `owl:imports` ⇒ A 档报 error**（J2）。
 
-**附带观察（非本次范围）**：`home-rhetoric-domain.ttl` 用 `@base <…/home-rhetoric>` ＋ `:Source`，引擎解析出的类型名是 `<http://home-serenity/ontology/home-rhetoricSource>`（**base 与本地名直接粘连、缺分隔符**），而 `check --level strict` **全绿**。⇒ 骨架**避开这种写法**（§5.2 显式声明默认前缀）。
+**附带观察（非本次范围）**：`home-rhetoric-domain.ttl` 用 `@base <…/home-rhetoric>` ＋ `:Source`，引擎解析出的类型名是 `<http://home-serenity/ontology/home-rhetoricSource>`（**base 与本地名直接粘连、缺分隔符**），而 `check --level strict` **全绿**。⇒ 骨架**避开此写法**（§5.2 显式声明默认前缀）。
 
 ### 2.4 宿主已经给好的缝（**令 2 的落点在此**）
 
@@ -196,7 +196,7 @@ Load referenced resources only as needed.        ← 🔴 宿主明说「按需�
 5. **本体文件特殊标注**（缝令 1 与令 2）：`skill.ttl` 存在 ⇒ 该行标 🧬，并在索引顶部加一句「**本 skill 已建模，文字内容以 `skill.ttl` 为总约束**」。
 6. **范围 = `references/` 一级条目 ＋ `skill.ttl`**（`.md` 给标题、非 `.md` 只给名）；**无可列项 ⇒ 整块不产出**（规则的**一般化**：`references/` 与 `skill.ttl` 都没有时，空标题只是噪声）。
    🔴 **2026-10-11 修订（实施 P1a 时由**真实输入**逼出，非推测）**：本规则原写「递归不进子目录」，**被实测推翻** —— 真实 `references/` 下确有**内容目录**：`home-rhetoric/references/corpus-subject-own`（**3 文件 / 190,161 B**，正是 owner 自己的语域语料）／`family-profiles/references/baby-handlebook`／`home-serenity/references/diagram-lab`。只写一句「另有 N 个子目录未列出」而**不给名字 = 不可行动**（模型知道有东西、却无法去读）。
-   ⇒ **改为：子目录列一行（名字 ＋ 其下文件数 ＋ 汇总字节），仍不展开、仍不读正文** —— 仍在裁决 Q2「只披露名字、不注入正文」的意图内。**若 owner 认为这是越界，回退点就是本段**（退回"只计数不给名"）。
+   ⇒ **改为：子目录列一行（名字 ＋ 其下文件数 ＋ 汇总字节），仍不展开、仍不读正文** —— 仍在裁决 Q2「只披露名字、不注入正文」的意图内。**若 owner 认为这是越界，回退点即本段**（退回"只计数不给名"）。
 
 **三个消费点**（Q3 裁决 = 三条全做）：
 

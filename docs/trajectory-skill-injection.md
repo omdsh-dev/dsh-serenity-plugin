@@ -87,7 +87,7 @@ ACC 代码里不出现任何具体 CCC 或具体 skill 名。
 | **读取来源** | 复用 `src/skills-discovery.ts` 的 **`findSkillMd(root, name)`**（`:60`，**已导出**）——查找顺序 **`.dsh/skills` 优先 → 其次 `.opencode/skills`**，解析为 `<root>/<base>/skills/<name>/SKILL.md`。**不新造发现逻辑**。 |
 | **🔒 名字安全（必做）** | 名字来自 **CCC 数据**（frontmatter 或 CCC 配置）⇒ **必须过 `isSafeSkillName(name)`**（`:49`）**才可用于拼路径**，否则是**路径穿越**入口（`../../…`）。**不安全的名字 ⇒ 按"缺失"处理并响亮提示**，绝不拼路径。⚠️ 安全判定**只在装配层做一次**（配置读取层不做，见 §2.3） |
 | **找不到某个 skill** | **响亮提示**（section 内写明 `[缺失] <name>（未找到该 skill）`），**不静默** |
-| **长度守卫** | **复用已导出的 `truncateContent(content, maxChars)`**（`:116`）。**合并之后**统一设**总长上限**（缺省 **32 KB**，两条来源共享同一上限——不是各给 32 KB），超出截断并在 section 末尾写明"已截断"——防上下文爆炸 |
+| **长度守卫** | **复用已导出的 `truncateContent(content, maxChars)`**（`:116`）。**合并之后**统一设**总长上限**（缺省 **32 KB**，两条来源共享同一上限——不是各给 32 KB），超出截断并在 section 末尾写明"已截断"——防上下文膨胀 |
 | **无绑定 / 无声明** | **完全不注册该 section**（不产生空 section，不产生噪声） |
 
 ---

@@ -26,7 +26,7 @@
 | 层 | 含义 | 处数 |
 |---|---|---|
 | **L0 原语** | `findSerenityRoot`（`ccc.ts:16`） | **1 处，无重复**；**53 个调用点** |
-| **L1** | 「**这个会话 / 这个路径属于哪个 CCC**」 | **12 处** |
+| **L1** | 「**会话 / 路径归属哪个 CCC**」 | **12 处** |
 | **L2** | 「**本机一共有哪些 CCC**」 | **7 处** |
 | **L3** | CCC **名**解析 | **2 处** |
 | 范围外 | 脚本侧 | **1 处**（独门算法） |
@@ -92,7 +92,7 @@
 | C6 | 绑定落盘 | `trajectory-bound.ts:198` | 根缺失 ⇒ **返回 false 不重试** ⇒ 冷唤醒报"无绑定会话记录"（`wake-scheduler.ts:177`） |
 | C7 | 工具/seam 回落 | 各处 | `?? process.cwd()`（副作用见 `handyman.ts:387-393`，靠调换检查顺序规避） |
 | C8 | rebuild 诊断 | `rebuild.ts` | 落进 `process.cwd()` |
-| C9 | 脚本层 | 脚本 | `SERENITY_ROOT` 环境注入 + `--ccc` **人肉指定** |
+| C9 | 脚本层 | 脚本 | `SERENITY_ROOT` 环境注入 + `--ccc` **手工指定** |
 
 ### 1.7 依赖的数据面
 
@@ -254,7 +254,7 @@
 **候选前提被修正**：`METAPHOR_PREFIX` **不是导出**（模块私有 const）｜`onSettlement`、`styledToken` = **TEST-ONLY**（各有测试引用）｜`TrajectoryStyle` = **DEAD**。
 
 **最尖锐发现**：`seams/*` 共 **87 导出**而生产面**只用 21 个**；`system-prompt.ts` 的 13 个 block 构造与 `keeper.ts` 的 13 个 tracker **只被测试引用**；**`tools/{cce,eap,neat}Tool` 三个工具对象只被测试引用、生产从未注册**。
-> ⚠️ **2026-09-15 复核更正（进 C3 前实查）**：`tools/{cce,eap,neat}.ts` **三个文件本身是活的**——`praxis.ts:16-18` 从它们 import 知识常量 `EAP_CONTENT` / `NEAT_CONTENT` / `CCE_CONTENT`。**死的只是三个工具对象**（`eapTool` / `cceTool` / `neatTool`，v1.30 三合一成 `praxis` 后遗留）。⇒ **照扫描结论直接删文件会把 `praxis` 弄坏**（这条更正即"动手前必须复核"的实例）。
+> ⚠️ **2026-09-15 复核更正（进 C3 前实查）**：`tools/{cce,eap,neat}.ts` **三个文件本身是活的**——`praxis.ts:16-18` 从它们 import 知识常量 `EAP_CONTENT` / `NEAT_CONTENT` / `CCE_CONTENT`。**死的只是三个工具对象**（`eapTool` / `cceTool` / `neatTool`，v1.30 三合一成 `praxis` 后遗留）。⇒ **照扫描结论直接删文件会破坏 `praxis`**（这条更正即"动手前必须复核"的实例）。
 
 **盲区（诚实）**：**动态 `await import()` 是静态图盲区**——`session-cleanup` 一度被误判为死模块，被 `api.ts:745` 的 `await import()` 纠正 ⇒ 工具化方案（如 knip）须先处理，否则误报 5+ 模块。
 

@@ -138,7 +138,7 @@ skiff-design.md §9 Q2 已承认缺口：
    - **appendBound(session, 'activate'/'reconcile', {dirName, mdPath})**——会话日志持久化绑定
    - 系统提示词 Session 块（scoped）注入该轨迹上下文（简化版：sessionId + SESSION.md path + 归属声明"你属于轨迹 X"）
 3. **rebuild.ts `resolveSessionMdPath`**：skiff 会话**优先读 bound 事件**（readLastBound）——绑定即定位，不再需要手工 use；候选 0 = 会话日志 bound（在 ① 内存活跃之前）
-4. **session.ts（logbook use）**：bound 角色的会话 use 别的不属于它的 SESSION 时拒绝/警告（硬守卫可选，对齐 v1.29.1 use 守卫）
+4. **session.ts（logbook use）**：bound 角色的会话 use 不属于它的 SESSION 时拒绝/警告（硬守卫可选，对齐 v1.29.1 use 守卫）
 5. **keeper 压力提醒**：bound 角色的 rebuild 提醒文案带其专属 SESSION 名（"[TRAJECTORY-ASSISTANT · LIMIT] 你的轨迹是 S159 — call logbook rebuild"）
 
 **优点**：最小改动（~150-250 行 + 测试）；机制面清晰；微信桥/ACP/调试页全部自动受益（会话创建统一入口）；向后兼容
@@ -175,7 +175,7 @@ skiff-design.md §9 Q2 已承认缺口：
 
 **推荐 A（最小机制面）**，理由：
 1. **贴合用户当下需求**：微信桥 zhaocai 绑定专属轨迹（S159），让 rebuild 可靠——A 恰好解决，不引入未验证的复杂
-2. **复用成熟机制**：session-bound 事件（v1.29.1）本就是为此设计的——"权威绑定 = 会话日志最后一条 bound"，只是 skiff 从未 append。A 是**补上缺失的接线**
+2. **复用成熟机制**：session-bound 事件（v1.29.1）正是为此设计的——"权威绑定 = 会话日志最后一条 bound"，只是 skiff 从未 append。A 是**补上缺失的接线**
 3. **一处改动全入口受益**：createSkiffAgent 是微信桥/ACP/调试页统一入口——绑定逻辑放这里，三个入口全自动
 4. **保持子集哲学**：A 不改变"skiff = 能力子集"——只加"子集有家（轨迹）"。能力面（tools/msms）仍 CCC 控
 5. **C 可作为 A 的后续演进**：A 落地验证后，若需"模式一等化"再升 C（mode 字段 = boundDir 的泛化）
