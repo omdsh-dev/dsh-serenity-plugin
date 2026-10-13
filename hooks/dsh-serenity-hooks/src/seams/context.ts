@@ -22,7 +22,7 @@ import { cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection, registerTrajectorySkillSection } from './system-prompt.js'
-import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility } from './guards.js'
+import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory-ops.js'
 import { readLastBound, appendBound } from '../trajectory-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -151,6 +151,14 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
   const seed = (agent: Agent): void => {
     const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
     const root = cccRootForCwd(cwd)
+    // 🔴 v1.56.6（owner 报缺陷）：工具是 `apply()` 里注册到**宿主级**的 ⇒ 与会话 cwd 无关地
+    //    出现在每个会话的清单里。其余各缝"不在 CCC ⇒ 不注入"即自然失效，**工具面必须显式隐藏**
+    //    ⇒ 这一句就是那道门（必须在下面的 `if (!root) return` **之前**，否则非 CCC 永远走不到）。
+    try {
+      syncCccToolVisibility(agent, root)
+    } catch {
+      /* 可见性同步失败不阻断播种（最坏：工具可见，调用时仍被各工具自身的 !root 判据拒绝） */
+    }
     if (!root) return
     const key = agentKey(agent)
     // F4 Skiff：会话 id `skiff-` 前缀 → 完全旁路（不注入 ACC 身份；角色 CCC 提示词全替换）
@@ -253,6 +261,14 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       const downstream = await next()
       // F4 Skiff：完全旁路（不注入 ACC 身份 + 不注册 scoped section；guard 白名单仍兜底约束）
       if (isSkiffSessionId(key)) return downstream
+      // 🔴 v1.56.6：非 CCC 会话 ⇒ 隐藏全部 ACC 工具（**必须在 `if (root)` 之外**——
+      //    那道分支只在 CCC 内执行，把本句放进去等于非 CCC 一条 restrict 都不发＝缺陷原样）。
+      //    与 `syncSafeModeRestriction` 同点调用、同样每步无条件同步（会话可能在两态间迁移）。
+      try {
+        syncCccToolVisibility(agent, root)
+      } catch {
+        /* 可见性同步失败不阻断 step */
+      }
       // 每步无条件同步 safe-mode 工具隐藏（restrict 实时跟随标记文件；必须在 early-return 之前）
       if (root) {
         try {

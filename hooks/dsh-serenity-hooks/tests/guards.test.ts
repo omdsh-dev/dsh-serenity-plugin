@@ -12,7 +12,11 @@ import {
   syncExclusiveToolsVisibility,
   forgetExclusiveToolsVisibility,
   getExclusiveToolsDiagnostics,
+  syncCccToolVisibility,
+  forgetNonCccToolVisibility,
+  getNonCccHiddenDiagnostics,
 } from '../src/seams/guards.js'
+import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im-bridge.js'
 import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/ccc.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
@@ -562,8 +566,168 @@ describe('guards: 专属工具条件可见（v1.33——未在 exclusiveTools �
   })
 })
 
-describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-safe-on）', () => {
-  it('写 .serenity-safe-on 被拒（无论安全模式）', () => {
+/**
+ * 🔴 v1.56.6（owner 2026-10-13 报缺陷）：「宁静号所有功能在非宁静号目录不生效」。
+ *
+ * 靶 = **工具可见性这一层唯独没有非 CCC 的门**：工具注册在宿主级 ⇒ 与会话 cwd 无关地
+ * 出现在每个会话清单里；其余各缝有 `if (!root) return`，而这里没有 ⇒ 非 CCC 目录下
+ * 模型仍看得见 14 个工具，调了才抛 `No CCC found`（**运行时报错 ≠ 事先不可见**）。
+ *
+ * ⚠️ **本组必须同时钉两态**：只钉"非 CCC 隐藏"会漏掉"CCC 内**一次 restrict 都不发**"
+ * —— 后半条是"既有行为零改变"的机械证据（否则修复会把 CCC 内的可见性也改坏）。
+ */
+describe('guards: 非 CCC 会话的全工具面隐藏（v1.56.6）', () => {
+  /** 替身 agent（同前两块形状） */
+  function mkAgent(id: string) {
+    const restrictCalls: { deny?: string[] }[] = []
+    const disposed: string[] = []
+    const agent = {
+      session: { id },
+      ctx: {
+        tools: {
+          restrict: (f: { deny?: string[] }) => {
+            restrictCalls.push(f)
+            return () => { disposed.push('disposed') }
+          },
+        },
+      },
+    } as any
+    return { agent, restrictCalls, disposed }
+  }
+
+  it('🔴 不在 CCC 内（root=null）⇒ restrict 隐藏**全部** REGISTERED_TOOLS', () => {
+    const { agent, restrictCalls } = mkAgent('s-noccc-a')
+    syncCccToolVisibility(agent, null)
+    expect(restrictCalls).toHaveLength(1)
+    // 与"插件具备的工具面"对齐（不硬编码清单——加工具时本条自动跟随）
+    expect(restrictCalls[0]!.deny).toEqual([...REGISTERED_TOOLS])
+    forgetNonCccToolVisibility('s-noccc-a')
+  })
+
+  it('🔴 在 CCC 内（root 为真）⇒ **一次 restrict 都不发**（既有行为零改变）', () => {
+    const { agent, restrictCalls } = mkAgent('s-noccc-b')
+    syncCccToolVisibility(agent, dir)
+    expect(restrictCalls).toHaveLength(0)
+  })
+
+  it('幂等：重复同步非 CCC 不重复 restrict', () => {
+    const { agent, restrictCalls } = mkAgent('s-noccc-c')
+    syncCccToolVisibility(agent, null)
+    syncCccToolVisibility(agent, null)
+    syncCccToolVisibility(agent, null)
+    expect(restrictCalls).toHaveLength(1)
+    forgetNonCccToolVisibility('s-noccc-c')
+  })
+
+  it('🔴 会话从非 CCC 迁入 CCC ⇒ 解除隐藏（可逆）', () => {
+    const { agent, restrictCalls, disposed } = mkAgent('s-noccc-d')
+    syncCccToolVisibility(agent, null)
+    expect(restrictCalls).toHaveLength(1)
+    syncCccToolVisibility(agent, dir) // 迁入 CCC
+    expect(disposed).toHaveLength(1)
+    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-d')
+  })
+
+  it('不同会话各自独立（非 CCC 的隐藏不波及 CCC 内的会话）', () => {
+    const a = mkAgent('s-noccc-e')
+    const b = mkAgent('s-noccc-f')
+    syncCccToolVisibility(a.agent, null)
+    syncCccToolVisibility(b.agent, dir)
+    expect(getNonCccHiddenDiagnostics().hidden).toEqual(['s-noccc-e'])
+    expect(b.restrictCalls).toHaveLength(0)
+    forgetNonCccToolVisibility('s-noccc-e')
+  })
+
+  it('会话销毁清理：forgetNonCccToolVisibility 解除隐藏并清状态（防 Map 无界增长）', () => {
+    const { agent, disposed } = mkAgent('s-noccc-gone')
+    syncCccToolVisibility(agent, null)
+    expect(getNonCccHiddenDiagnostics().hidden).toContain('s-noccc-gone')
+    forgetNonCccToolVisibility('s-noccc-gone')
+    expect(disposed).toHaveLength(1)
+    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-gone')
+    forgetNonCccToolVisibility('s-noccc-gone') // 幂等
+    expect(disposed).toHaveLength(1)
+  })
+
+  it('restrict 抛错 → 不抛且不记状态（step 不可被拖垮；调用时仍有各工具自身的 !root 兜底）', () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const agent = {
+      session: { id: 's-noccc-boom' },
+      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
+    } as any
+    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
+    expect(err.mock.calls.some((c) => String(c[0]).includes('两档全失败'))).toBe(true)
+    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-boom')
+    err.mockRestore()
+  })
+
+  it('🔴 对照：宿主 `restrict` 对未注册名会让整次失败 ⇒ deny 清单必须只含 REGISTERED_TOOLS 里的名字', () => {
+    // 复刻宿主契约（同 safe-mode 块）：未知名字 ⇒ 抛
+    const known = new Set<string>(REGISTERED_TOOLS)
+    const agent = {
+      session: { id: 's-noccc-contract' },
+      ctx: {
+        tools: {
+          restrict: (f: { deny?: string[] }) => {
+            for (const n of f.deny ?? []) if (!known.has(n)) throw new Error(`unknown tool: ${n}`)
+            return () => {}
+          },
+        },
+      },
+    } as any
+    // 真契约下必须成功（若清单里混入未注册名，这里会抛 ⇒ 隐藏整体失效）
+    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
+    expect(getNonCccHiddenDiagnostics().hidden).toContain('s-noccc-contract')
+    forgetNonCccToolVisibility('s-noccc-contract')
+  })
+
+  it('🔴 两档尝试：全表被拒（条件工具不在册）⇒ 退到常驻段，**仍然隐藏**（不静默退回"可见"）', () => {
+    // 复刻"diagram 关着"的真实形态：`diagram` 未注册 ⇒ 全表 deny 被整次拒绝
+    const residentKnown = new Set<string>(
+      REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT),
+    )
+    const calls: { deny?: string[] }[] = []
+    const agent = {
+      session: { id: 's-noccc-tier' },
+      ctx: {
+        tools: {
+          restrict: (f: { deny?: string[] }) => {
+            for (const n of f.deny ?? []) if (!residentKnown.has(n)) throw new Error(`unknown tool: ${n}`)
+            calls.push(f)
+            return () => {}
+          },
+        },
+      },
+    } as any
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
+    // 第一次（全表）被拒、第二次（常驻段）成功 ⇒ **只记一次** restrict 调用（档①那次没记）
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.deny).toEqual([...residentKnown])
+    // 判别性：**必须真的隐藏了常驻段**，而不是"两档都失败、静默放过"
+    expect(getNonCccHiddenDiagnostics().hidden).toContain('s-noccc-tier')
+    // 🔴 档①失败是**常态**（diagram 缺省不在册）⇒ **不许**刷假警报（只看得到"两档全失败"那种真失败）
+    expect(err.mock.calls.some((c) => String(c[0]).includes('两档全失败'))).toBe(false)
+    err.mockRestore()
+    forgetNonCccToolVisibility('s-noccc-tier')
+  })
+
+  it('🔴 两档全失败 ⇒ 不记状态（下轮可重试）＋ 响亮告警（不静默假成功）', () => {
+    const agent = {
+      session: { id: 's-noccc-allfail' },
+      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
+    } as any
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
+    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-allfail')
+    expect(err.mock.calls.some((c) => String(c[0]).includes('两档全失败'))).toBe(true)
+    err.mockRestore()
+  })
+})
+
+describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-safe-on）', () => {  it('写 .serenity-safe-on 被拒（无论安全模式）', () => {
     const d = decideGuard(base({ toolName: 'write', pathArg: '.serenity-safe-on' }))
     expect(d.kind).toBe('deny')
     expect(d.deny).toContain('governance file')

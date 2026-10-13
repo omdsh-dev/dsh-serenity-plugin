@@ -31,6 +31,8 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 
 import { registerContext } from '../../src/seams/context.js'
 import { getActiveSessionInfo } from '../../src/trajectory-ops.js'
+import { REGISTERED_TOOLS } from '../../src/invariant.js'
+import { forgetNonCccToolVisibility } from '../../src/seams/guards.js'
 
 type Handler = (...args: unknown[]) => unknown
 
@@ -181,6 +183,73 @@ describe('registerContext: agent/created 播种', () => {
     await fireCreated(ctx, agent)
 
     expect(injected).toHaveLength(0)
+  })
+})
+
+// ── 🔴 非 CCC ⇒ 工具面隐藏（v1.56.6，owner 报缺陷）──────────────────────────
+// 靶 = **接线**：`syncCccToolVisibility` 必须真被两条缝调用，且**在 `if (root)` 之外**
+// （放进那道分支里 = 非 CCC 一条 restrict 都不发 = 缺陷原样）。
+
+describe('registerContext: 非 CCC 会话的工具面隐藏（v1.56.6 接线）', () => {
+  /** 带 `ctx.tools.restrict` 记录的 agent（记录每次 deny 清单） */
+  function fakeAgentWithTools(id: string, cwd: string): { agent: unknown; restrictCalls: { deny?: string[] }[] } {
+    const restrictCalls: { deny?: string[] }[] = []
+    return {
+      agent: {
+        session: { id, header: { cwd } },
+        inject: () => {},
+        ctx: {
+          tools: {
+            restrict: (f: { deny?: string[] }) => {
+              restrictCalls.push(f)
+              return () => {}
+            },
+          },
+        },
+      },
+      restrictCalls,
+    }
+  }
+
+  it('🔴 agent/created：非 CCC ⇒ 发一次 restrict 隐藏全部工具（在 `if (!root) return` 之前）', async () => {
+    const { agent, restrictCalls } = fakeAgentWithTools('main-noccc-created', outside)
+    const ctx = fakeCtx()
+    registerContext(ctx as never, { injectOnPrompt: false })
+
+    await fireCreated(ctx, agent)
+
+    expect(restrictCalls).toHaveLength(1)
+    expect(restrictCalls[0]!.deny).toEqual([...REGISTERED_TOOLS])
+    forgetNonCccToolVisibility('main-noccc-created')
+  })
+
+  it('🔴 agent/pre-step：非 CCC ⇒ 同样发 restrict（**不能只在 `if (root)` 里**）', async () => {
+    const { agent, restrictCalls } = fakeAgentWithTools('main-noccc-pre', outside)
+    const ctx = fakeCtx()
+    registerContext(ctx as never, { seedOnStart: false })
+
+    const downstream = { kind: 'enter', messages: [] }
+    await firePreStep(ctx, agent, [], downstream)
+
+    expect(restrictCalls).toHaveLength(1)
+    expect(restrictCalls[0]!.deny).toEqual([...REGISTERED_TOOLS])
+    forgetNonCccToolVisibility('main-noccc-pre')
+  })
+
+  it('🔴 对照：CCC 内会话 ⇒ **不隐藏工具面**（既有行为零改变的机械证据）', async () => {
+    const { agent, restrictCalls } = fakeAgentWithTools('main-ccc-created', dir)
+    const ctx = fakeCtx()
+    registerContext(ctx as never, { injectOnPrompt: false })
+
+    await fireCreated(ctx, agent)
+
+    // ⚠️ 不能断言 "零 restrict" —— CCC 内本来就有 im-bridge / acc-diag 两条**条件可见**同步会发
+    //    restrict（本临时 CCC 未配 IM 通道、未声明 exclusiveTools ⇒ 各自发一条，**这是既有正确行为**）。
+    //    判别点 = **有没有"整工具面隐藏"那一条**（deny 覆盖 REGISTERED_TOOLS）。
+    const fullHide = restrictCalls.filter((c) => (c.deny ?? []).length === REGISTERED_TOOLS.length)
+    expect(fullHide).toHaveLength(0)
+    // 判别性：确认本用例**真的**观测到了那两条条件可见（否则"零 fullHide"可能是"什么都没发生"）
+    expect(restrictCalls.length).toBeGreaterThan(0)
   })
 })
 

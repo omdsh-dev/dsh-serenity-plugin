@@ -26,6 +26,7 @@ import { cccRootForCwd } from '../ccc-roots.js'
 import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
 import { skiffRoleFor } from '../skiff-registry.js'
 import { hasEnabledImChannel } from '../im-bridge.js'
+import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../invariant.js'
 import { isoLocal } from '../time.js'
 
 // ── 纯决策（可单测）──
@@ -500,6 +501,119 @@ export function forgetExclusiveToolsVisibility(sessionId: string): void {
     }
     exclusiveRestrictions.delete(key)
   }
+}
+
+// ── 🔴 非 CCC 会话：**全工具面隐藏**（v1.56.6，owner 2026-10-13 报缺陷）──
+
+/**
+ * 非 CCC 会话的工具隐藏状态（sessionId → restrict disposer）。
+ *
+ * 🔴 **为什么需要它（缺陷根因）**：工具是 `apply()` 里 `ctx.tools.register(...)` 注册到**宿主级**的
+ * ⇒ 它们出现在**每一个**会话的工具清单里，**与会话 cwd 无关**。其余各缝（身份注入 ／ guards ／
+ * keeper ／ output-guard ／ unattended ／ bootstrap）都已有 `if (!root) return` 这道门，
+ * **唯独"工具可见性"这一层没有** ⇒ 在非 CCC 目录开会话时，模型仍看得见这 14 个工具，
+ * 于是会去调 —— 调了才抛 `No CCC found`。**那是运行时报错，不是事先不可见**。
+ *
+ * 判据（owner 原话：「宁静号所有功能在非宁静号目录不生效」）：
+ * - **在 CCC 内** → 解除隐藏（本机制**一次 restrict 都不发**，既有行为零改变）
+ * - **不在 CCC 内** → `restrict({ deny: [...REGISTERED_TOOLS] })` ⇒ 从模型工具清单移除
+ *
+ * ⚠️ **与 `syncExclusiveToolsVisibility` 的分工**：那个管"CCC 内哪个工具可见"（按 CCC 配置判）；
+ * 本函数管"**这个会话配不配看到任何 ACC 工具**"（按"在不在 CCC 内"判）。二者独立、可叠加。
+ *
+ * ⚠️ **必须逐个名字显式列出**：宿主的 `restrict` 对**未注册的工具名**会让**整次调用失败**
+ * （`dsh-tools` 契约逐字："Empty filters, unknown names … fail"）⇒ 不能写通配。
+ * 但 `REGISTERED_TOOLS` 是"插件**具备**的工具面"，其中 **`diagram` 是按开关注册的**
+ * （缺省关 ⇒ 缺省**并不在册**）⇒ 直接拿全表去 deny **可能整次失败**，那样就会
+ * **静默退回"工具照样可见"**＝缺陷没修好。故此处走**两档尝试**（见 `hideAllFor`）。
+ */
+const nonCccRestrictions = new Map<string, () => void>()
+
+/** 非 CCC 隐藏诊断（排查"工具为什么不见了"） */
+export function getNonCccHiddenDiagnostics(): { hidden: string[] } {
+  return { hidden: [...nonCccRestrictions.keys()] }
+}
+
+/**
+ * 在非 CCC 会话上隐藏全部 ACC 工具（两档尝试）。
+ *
+ * 🔴 **为什么要两档（D119：不许照源码"意图"断言宿主行为）**：取消注册的工具名会让整次
+ * `restrict` 失败，而 `diagram` 缺省不在册。若只发一次全表 deny，"deny 里有个不在册的名字"
+ * 就会让**整次调用**失败 ⇒ 一个都不隐藏（且只有一行 console.error）。
+ *
+ * 档位（**先全覆盖、失败再退到"恒在册"那一段**）：
+ *   ① 全表 `REGISTERED_TOOLS`（14：含条件工具）—— 首选，覆盖最全
+ *   ② 常驻段（前 `length - CONDITIONAL_TOOL_COUNT` 个）—— 退路：只保证**恒注册**的那些被隐藏
+ *
+ * 返回**实际生效的注销器**；两档都失败 → `{ failed: [...] }`（原因一并带回，由调用方决定怎么响）。
+ *
+ * ⚠️ **档位失败不在这里逐条告警**：档 ① 在 `diagram` 缺省关时**按设计**就会失败（它不在册），
+ * 那是**常态**、不是故障 ⇒ 逐条 error 会在每个非 CCC 会话上刷**假警报**（看着像坏了，其实档 ② 已成功）。
+ * 真正的失败只由调用方在"两档全失败"时**响亮报一次**。
+ */
+function hideAllFor(agent: Agent): { dispose: () => void; names: readonly string[] } | { failed: string[] } {
+  const resident = REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT)
+  const tiers: Array<{ label: string; names: readonly string[] }> = [
+    { label: '全表（含条件工具）', names: REGISTERED_TOOLS },
+    { label: '常驻段（跳过条件工具）', names: resident },
+  ]
+  const failed: string[] = []
+  for (const tier of tiers) {
+    try {
+      return { dispose: agent.ctx.tools.restrict({ deny: [...tier.names] }), names: tier.names }
+    } catch (e) {
+      failed.push(`${tier.label}: ${(e as Error).message}`)
+    }
+  }
+  return { failed }
+}
+
+/**
+ * 同步「本会话在不在 CCC 内」的工具可见性（v1.56.6）。
+ *
+ * @param agent 目标会话的 agent
+ * @param root 该会话的 CCC 根；`null` ⇒ **不在任何 CCC 内** ⇒ 隐藏全部 ACC 工具
+ *
+ * 幂等：同一会话重复调用不会重复 restrict（已是目标态即直接返回）。
+ * 失败不抛（最坏情况：工具可见，但**调用时**仍被各工具自己的根解析拒绝——既有兜底不变）。
+ */
+export function syncCccToolVisibility(agent: Agent, root: string | null): void {
+  const sessionId = (agent.session as { id?: string }).id ?? 'global'
+  const existing = nonCccRestrictions.get(sessionId)
+  const shouldHide = root === null
+
+  if (shouldHide && !existing) {
+    const hidden = hideAllFor(agent)
+    if ('failed' in hidden) {
+      console.error(
+        `[serenity-hooks] 非 CCC 工具隐藏**两档全失败**(session=${sessionId}) —— 工具仍可见（但有各工具自身的 !root 兜底）：${hidden.failed.join(' ／ ')}`,
+      )
+      return
+    }
+    nonCccRestrictions.set(sessionId, hidden.dispose)
+    return
+  }
+  if (!shouldHide && existing) {
+    // 会话从非 CCC 迁入 CCC（或根中途出现）⇒ 恢复可见
+    try {
+      existing()
+    } catch (e) {
+      console.error(`[serenity-hooks] 非 CCC 工具恢复失败 (session=${sessionId}):`, (e as Error).message)
+    }
+    nonCccRestrictions.delete(sessionId)
+  }
+}
+
+/** 会话销毁清理（lifecycle 调用；防 per-会话 Map 无界增长） */
+export function forgetNonCccToolVisibility(sessionId: string): void {
+  const existing = nonCccRestrictions.get(sessionId)
+  if (!existing) return
+  try {
+    existing()
+  } catch {
+    /* disposer 已失效 */
+  }
+  nonCccRestrictions.delete(sessionId)
 }
 
 /**
