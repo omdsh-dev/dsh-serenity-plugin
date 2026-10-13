@@ -157,6 +157,27 @@ interface OntologyDefinition {
   types?: Record<string, TypeDef>;
   relations?: Record<string, RelationDef>;
   axioms?: AxiomDef[];
+  /** 个体（`a <本文件已声明的类>`）。图要画它们，故收进模型（2026-10-13 S142）。 */
+  instances?: InstanceDef[];
+}
+
+/**
+ * 一个个体：`:trapFalseGreen a :KnownTrap ; sr:trapName "…"`。
+ *
+ * 🔴 **判据刻意是"`a` 指向的类是【本文件已声明的类】**"，不是"任何非 owl:* 的东西" ——
+ *    后者会把 `rdfs:domain :A`、`sr:imports`、甚至**外部实体**全误认成个体
+ *    （viz 侧实测：`dsh-serenity-plugin-development/skill.ttl` 有 13 个真个体，
+ *    而宽松判据会捞回一堆假货）。
+ *
+ * 标签取用顺序（`label` 一个字段，兼容既有 `description`）：
+ * `rdfs:label` → `sr:trapName` / `sr:name` → **第一条字面量谓语**（如 `sr:signature`）。
+ * 最后那条是 2026-10-13 加的：实测 `:KnownTrap` 的 7 个个体**既无 `rdfs:label` 也无 `sr:name`**，
+ * 只有 `sr:trapName`／`sr:signature` ⇒ 不兜底的话图上 7 个方块全是裸 id。
+ */
+interface InstanceDef {
+  id: string;
+  ofClass: string;
+  label?: string;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -519,7 +540,7 @@ function stripDefaultPrefix(name: string): string {
 
 function turtleToOnto(r: TurtleParseResult): OntologyDefinition {
   const { prefixes, triples, errors } = r;
-  const onto: OntologyDefinition = { types: {}, relations: {}, axioms: [] };
+  const onto: OntologyDefinition = { types: {}, relations: {}, axioms: [], instances: [] };
 
   // Group triples by subject
   const subjectMap = new Map<string, Triple[]>();
@@ -648,6 +669,36 @@ function turtleToOnto(r: TurtleParseResult): OntologyDefinition {
         onto.axioms!.push(ad);
       }
     }
+  }
+
+  // Parse instances — `:Name a :SomeDeclaredClass ; <字面量谓语> "…"`（2026-10-13 S142）
+  // 🔴 判据 = `a` 指向的类**在本文件已声明**；宽松判据会把 domain/imports 误认成个体。
+  for (const [subj, stmts] of subjectMap) {
+    // ⚠️ `bnodeId()` 返回的**是 `""` 不是 `null`**（空串 = 非空白节点）——
+    //    这里必须比空串，写成 `!== null` 会**恒为真**，把每个主语都跳过
+    //    （实测踩过：整表零个体，而症状只是"图上的实例框没了"，不报错）。
+    if (bnodeId(subj) !== "") continue;
+    const typeStmt = stmts.find((s) => s.predicate === RDF + "type");
+    if (typeStmt === undefined) continue;
+    const cls = stripDefaultPrefix(i2q(String(typeStmt.object), prefixes));
+    // 排除本体自身与属性声明：它们不是个体
+    if (cls === "owl:Ontology" || propIris.has(String(typeStmt.object))) continue;
+    if (onto.types === undefined || onto.types[cls] === undefined) continue;
+
+    const inst: InstanceDef = { id: stripDefaultPrefix(i2q(subj, prefixes)), ofClass: cls };
+    const litOf = (p: string): string | undefined => {
+      const hit = stmts.find((s) => s.predicate === p && s.objectType === "literal");
+      return hit === undefined ? undefined : String(hit.object);
+    };
+    inst.label =
+      litOf(RDFS + "label") ??
+      litOf(SR + "trapName") ??
+      litOf(SR + "name") ??
+      // 兜底：**第一条字面量谓语**（实测 :KnownTrap 的个体只有 sr:trapName/sr:signature）
+      stmts.find((s) => s.objectType === "literal" && !s.predicate.startsWith(RDF))?.object !== undefined
+        ? String(stmts.find((s) => s.objectType === "literal" && !s.predicate.startsWith(RDF))!.object)
+        : undefined;
+    onto.instances!.push(inst);
   }
 
   return onto;
@@ -2340,6 +2391,8 @@ function cmdReview(args: string[]): void {
         })),
         relations: Object.entries(relations).map(([n, r]) => ({ name: n, ...r })),
         axioms: axioms,
+        // 个体（仅新增键，不改既有）；`instances` 见 `InstanceDef` 的判据注释
+        instances: onto.instances || [],
       },
       reviewLevel: level,
       dimensions: dimensions.map((d) => ({ id: d.id, name: d.name, checklist: d.checklist })),
@@ -3027,4 +3080,4 @@ export function runOntologyCli(argv: string[], opts: OntologyRunOptions = {}): O
   return { code, stdout: out, stderr: err };
 }
 
-export { MsmError, validateOnto, type OntologyDefinition, type CheckIssue, type ExprNode };
+export { MsmError, validateOnto, tokenizeTurtle, parseTurtle, turtleToOnto, loadOntoFile, loadOntoFileWithImports, type OntologyDefinition, type CheckIssue, type ExprNode, type TypeDef, type RelationDef, type AxiomDef, type InstanceDef, type PropertyDef };

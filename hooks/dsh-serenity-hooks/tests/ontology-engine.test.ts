@@ -578,4 +578,64 @@ describe("label/comment 分离（2026-10-13 S142：原实现把两者合并 ⇒ 
     const bareRow = r.stdout.split("\n").find((l) => l.includes("Bare"))!;
     expect(bareRow.trimEnd().endsWith("| - |"), bareRow).toBe(true);
   });
+
+  it("🔴 个体（instances）：只认 `a` 指向**本文件已声明的类**，且标签有兜底（S142）", () => {
+    writeFileSync(
+      file,
+      [
+        "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .",
+        "@prefix owl: <http://www.w3.org/2002/07/owl#> .",
+        "@prefix sr: <http://home-serenity/ontology#> .",
+        "@prefix : <http://example.org/inst#> .",
+        "",
+        ':onto a owl:Ontology ; sr:name "inst-probe" .',
+        ':Trap a owl:Class ; rdfs:label "Trap" .',
+        ':Other a owl:Class .',
+        ':rel a owl:ObjectProperty ; rdfs:domain :Trap ; rdfs:range :Other .',
+        "",
+        ':i1 a :Trap ; rdfs:label "第一" .',
+        ':i2 a :Trap ; sr:trapName "假绿" ; sr:signature "形状抄来的" .',
+        ':i3 a :Trap ; sr:signature "只有签名" .',
+        ':i4 a :NotDeclaredHere ; rdfs:label "不该出现" .',
+        "",
+      ].join("\n"),
+      "utf-8",
+    );
+    const out = runOntologyCli(["review", file, "--format", "json"], { cwd: TMP });
+    expect(out.code, out.stdout + out.stderr).toBe(0);
+    const parsed = JSON.parse(out.stdout.slice(out.stdout.indexOf("{")));
+    const insts = (parsed.ontology.instances ?? []) as { id: string; ofClass: string; label?: string }[];
+    const byId = new Map(insts.map((i) => [i.id, i]));
+
+    expect(byId.get("i1")?.label, "rdfs:label 优先").toBe("第一");
+    expect(byId.get("i2")?.label, "无 label/name ⇒ 兜到 sr:trapName").toBe("假绿");
+    expect(byId.get("i3")?.label, "连 trapName 都没有 ⇒ 兜到第一条字面量谓语").toBe("只有签名");
+    expect(byId.get("i1")?.ofClass).toBe("Trap");
+    // 负控：`a` 指向**未声明**的类 ⇒ 不算个体（否则外部实体会被误认）
+    expect(byId.has("i4"), "未声明的类不得当个体").toBe(false);
+    // 负控：本体自身（a owl:Ontology）不得混进来
+    expect(insts.some((i) => i.ofClass === "owl:Ontology")).toBe(false);
+  });
+
+  // ⚠️ **合法 skip**：独立克隆 / CI 时上溯不到 CCC 根（与上方 compliance 块同一判据）
+  describe.skipIf(!HAS_FIXTURE)("🔴 个体解析：**真容器文件**（整合，非夹具）", () => {
+    it("dsp-dev skill.ttl 的 13 个真个体被解析出，且**标签非空**（实测 :KnownTrap 无 rdfs:label）", () => {
+      const ttl = join(SKILLS, "dsh-serenity-plugin-development", "skill.ttl");
+      const r = runOntologyCli(["review", ttl, "--format", "json"], { cwd: CCC_ROOT! });
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      const parsed = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+      const insts = (parsed.ontology.instances ?? []) as { id: string; ofClass: string; label?: string }[];
+      // ① 真个体确实被捞出来（该文件实测 13 个：2 AccRuntime + 4 DevMsm + 7 KnownTrap）
+      expect(insts.length, JSON.stringify(insts.map((i) => i.id))).toBeGreaterThanOrEqual(13);
+      // ② 🔴 关键：`:KnownTrap` 的个体**既无 rdfs:label 也无 sr:name**，
+      //    只有 sr:trapName/sr:signature ⇒ 不兜底的话标签全空（图上 7 个裸 id）。
+      const traps = insts.filter((i) => i.ofClass === "KnownTrap");
+      expect(traps.length).toBeGreaterThan(0);
+      for (const t of traps) {
+        expect(t.label, `${t.id} 的标签不得为空`).toBeTruthy();
+      }
+      // ③ 负控：`a owl:Ontology` 与关系声明不得混进个体
+      expect(insts.some((i) => i.ofClass === "owl:Ontology")).toBe(false);
+    });
+  });
 });
