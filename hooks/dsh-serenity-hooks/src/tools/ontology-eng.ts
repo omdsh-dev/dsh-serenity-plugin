@@ -19,12 +19,15 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { relative } from 'node:path'
+import { relative, basename, dirname, join } from 'node:path'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { resolveInside } from '../ccc.js'
 import { runOntologyCli } from '../ontology/engine.js'
+import { fromEngine, layout, toSvg, toHtml } from '../ontology/viz.js'
+import { rasterizeSvg } from '../diagram/rasterize.js'
 
-const COMMANDS = ['init', 'check', 'explain', 'verify', 'review', 'compliance'] as const
+const COMMANDS = ['init', 'check', 'explain', 'verify', 'review', 'compliance', 'viz'] as const
 const LEVELS = ['normal', 'strict', 'operational', 'continuity', 'full', 'semantic', 'onto-clean'] as const
 const TEMPLATES = ['minimal', 'full'] as const
 const FORMATS = ['prompt', 'json'] as const
@@ -121,6 +124,10 @@ export function createOntologyTool() {
         enum: [...FORMATS],
         description: 'review / compliance only: prompt (LLM-readable checklist, default) or json.',
       },
+      png: {
+        type: 'boolean',
+        description: 'viz only: also rasterize a PNG next to the HTML (for pasting a static image into the conversation).',
+      },
     },
     output: {
       schema: { type: 'string' },
@@ -144,6 +151,36 @@ export function createOntologyTool() {
       const relPath = relative(root, absPath) || '.'
 
       const argv: string[] = [command, absPath]
+
+      // ── viz：**不走引擎 CLI**（它是独立渲染模块），单独一条分支 ──────────────
+      // 🔴 与其余六个子命令的分工：那六个跑引擎、回一段报告文本；viz **产出文件**
+      //    （html 交互版 ＋ 可选 PNG），回执给**路径与读数**。
+      if (command === 'viz') {
+        const model = fromEngine(relPath, absPath)
+        const L = layout(model, { axioms: false, instances: true, imports: true })
+        const svg = toSvg(model, L, { axioms: false })
+        const html = toHtml(model, L, svg)
+        const stem = basename(relPath).replace(/\.ttl$/, '')
+        const outDir = join(root, '_tmp', 'ontology-viz')
+        mkdirSync(outDir, { recursive: true })
+        const htmlPath = join(outDir, `${stem}.html`)
+        writeFileSync(htmlPath, html, 'utf-8')
+        const lines = [
+          `[ontology viz] ✓ ${relPath}`,
+          ``,
+          `类 ${model.classes.length} ／ 关系 ${model.relations.length} ／ 公理 ${model.axioms.length} ／ 实例 ${model.instances.length}`,
+          `交互版 HTML ⇒ ${relative(root, htmlPath)}`,
+          `  打开后可拖动平移、滚轮缩放、点节点看详情（注释／属性／进出关系／涉及的公理）`,
+        ]
+        // `--png`：复用 diagram 既有的进程内光栅化（不新起浏览器）
+        if (args.png === true) {
+          const r = await rasterizeSvg(svg, 2400)
+          const pngPath = join(outDir, `${stem}.png`)
+          writeFileSync(pngPath, r.png)
+          lines.push(`静态 PNG ⇒ ${relative(root, pngPath)}（${r.width}×${r.height}，${r.ms} ms）`)
+        }
+        return lines.join('\n')
+      }
 
       const level = typeof args.level === 'string' ? args.level.trim() : ''
       if (level !== '') {
