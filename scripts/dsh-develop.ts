@@ -438,7 +438,19 @@ function cmdPublish(): void {
  * ⇒ 判据取**两条读数**，缺一不可：
  *   **A（权威）** `GET {packument}/{version}?write=true` == 200 ⇒ 版本记录已在 registry 上；
  *   **B（可装）** `GET {dist.tarball}` == 200 ⇒ 包体真能下载（**这才是用户能不能装**）。
- *   A 绿 B 红 = **半上架**（记录在、包体取不到）⇒ **正是"staged 待批准"的签名**，必须响亮失败。
+ *
+ * 🔴🔴 **2026-10-14 更正（本处曾写过一个没有证据的断言，并因此害人）**：
+ *   原文写着「A 绿 B 红 = **半上架**（记录在、包体取不到）⇒ **正是"staged 待批准"的签名**，必须响亮失败」。
+ *   **该断言从未被验证过**，而它**正是 S142 那次误判的源头** —— 我照它把一句
+ *   `409 … Cannot publish over previously staged version` 文案**命名成了 npm 的「staged 待批」机制**，
+ *   并**据此让 owner 去网页批准**；实测 `GET /-/stage` 返 `{"items":[],"total":0}`
+ *   （**没有任何待批项**），该版本**自己上架了**。
+ *   ⇒ **正确表述**：A 绿 B 红 = **记录在、包体此刻取不到**；**成因是开放的**
+ *      （边缘负缓存 / 传播 / 其它），**不得就此断言任何具体机制**。
+ *   ⇒ **判据（D131）**：**错误文案不是机制的证据** —— 要给状态命名，必须能从
+ *      **该机制自己的权威读数面**独立取到。staged 的权威面 = `GET /-/stage`（**须带 token**；
+ *      **401 = 查不到 ≠ 没有**，`200 + items:[]` 才是"没有"的证据）。
+ *   ⇒ 现成入口：`msm("npm-registry-doctor", ["status"])`（四档判读，含 staged 权威面）。
  */
 function landingRead(version: string): { record: string; tarball: string } {
   const base = 'https://registry.npmjs.org/@shgroup%2Fdsh-serenity-hooks'
@@ -2469,7 +2481,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
           fail(`**三读数都没有 ${v}**（record=${read.record} / tarball=${read.tarball} / packument=${pk.has}）\n`
             + '  ⚠️ 这**不是**"真没有"：三读数可滞后十几分钟，与"没上去"**在读数上不可分**。\n'
             + `  处置：**不要重跑 publish**（同一版本只会 409）。隔 2~5 分钟复测本命令；\n`
-            + '  若隔 >15 分钟仍全假，才去看 publish 当时的 npm 回执（那才是权威）。', 2)
+            + '  🔴 **若要判断"是否卡在待批"之类的具体机制，别靠错误文案猜** —— 那正是 2026-10-14 我犯过的错\n'
+            + '     （照一句 `409 … previously staged` 编出了 npm 的"staged 待批"，实际 `/-/stage` 是空的）。\n'
+            + `     跑 \`msm("npm-registry-doctor", ["status", "${v}"])\`：它带 **staged 权威面**，一次分清四档。`, 2)
         }
         break
       }
