@@ -89,7 +89,7 @@ carrier       承载 trajectory 的 dsh 会话（可弃——Ship of Theseus，�
 | 邻居 | 关系 |
 |---|---|
 | **宿主 `@deepseek-ai/dsh-schedule`** | **不复用**。它是"会话内提醒"（投递给用户看）、明确**不唤醒冷会话**、状态在会话日志；本机制是"轨迹自续"（投给模型继续执行任务）、**冷唤醒是核心**、状态在 CCC 文件。理由详见设计文档 §8 |
-| `handyman` / `subagent` | 都是"**现在**派一个子 agent 执行任务并**等结果**"；本机制是"**未来**投一条消息并且**不等**"（正交） |
+| `cheap-worker` / `subagent` | 都是"**现在**派一个子 agent 执行任务并**等结果**"；本机制是"**未来**投一条消息并且**不等**"（正交） |
 | `container_trajectory rebuild` | rebuild 解决"载体重置"；本机制解决"载体何时被唤醒"（互补；v1.33 起 rebuild 与 wake-later 同属 `container_trajectory` 工具） |
 | keeper / compaction | 解决上下文预算；本机制不感知上下文，投递即入队 |
 | CCE 连续性 | 本机制是**时间轴上的连续性工具**：轨迹在没人看着的时候也能被自己的安排推动（见 §9） |

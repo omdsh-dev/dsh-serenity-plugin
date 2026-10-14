@@ -289,7 +289,7 @@ describe('msm-ops · list / ccc-config / 未知 action', () => {
   it('ccc-config ⇒ 返回非空配置参考（对齐 osp）', () => {
     const out = runMsm(dir, { action: 'ccc-config' }) as string
     expect(out).toContain('CCC Configuration Reference')
-    expect(out).toContain('handyman.models')
+    expect(out).toContain('cheap-worker.models')
   })
 
   it('未知 action ⇒ 抛 Unknown action（响亮而非静默默认）', () => {

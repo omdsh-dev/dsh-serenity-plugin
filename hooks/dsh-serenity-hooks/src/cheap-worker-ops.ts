@@ -1,9 +1,9 @@
 /**
- * handyman-ops.ts — handyman（杂工）纯逻辑层（零 DSH 依赖，可独立单测）
+ * cheap-worker-ops.ts — cheap-worker（杂工）纯逻辑层（零 DSH 依赖，可独立单测）
  *
- * v1.24.0：loop（牛马）→ handyman（杂工）重命名。语义对齐 osp loop：
- * 进度文件（handyman-<label>.md/.json）、续跑、轮次 prompt 结构、stop token。
- * 不兼容旧 loop- 进度文件（用户拍板：仅新 handyman- 前缀）。
+ * v1.24.0：loop（牛马）→ cheap-worker（杂工）重命名。语义对齐 osp loop：
+ * 进度文件（cheap-worker-<label>.md/.json）、续跑、轮次 prompt 结构、stop token。
+ * 不兼容旧 loop- 进度文件（用户拍板：仅新 cheap-worker- 前缀）。
  */
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
@@ -11,7 +11,7 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { isoLocal } from './time.js'
 
-interface HandymanProgress {
+interface CheapWorkerProgress {
   round: number
   done: boolean
   label: string
@@ -33,38 +33,38 @@ export function sanitizeLabel(label: string): string {
     .join('')
 }
 
-export function handymanProgressPaths(root: string, label: string): { md: string; json: string } {
+export function cheapWorkerProgressPaths(root: string, label: string): { md: string; json: string } {
   const dir = join(root, 'AGENT_SESSIONS')
   const safe = sanitizeLabel(label)
-  return { md: join(dir, `handyman-${safe}.md`), json: join(dir, `handyman-${safe}.json`) }
+  return { md: join(dir, `cheap-worker-${safe}.md`), json: join(dir, `cheap-worker-${safe}.json`) }
 }
 
 /** 读取进度（续跑）；无文件返回 round 0 */
-export function readProgress(root: string, label: string): HandymanProgress | null {
-  const { json } = handymanProgressPaths(root, label)
+export function readProgress(root: string, label: string): CheapWorkerProgress | null {
+  const { json } = cheapWorkerProgressPaths(root, label)
   if (!existsSync(json)) return null
   try {
-    return JSON.parse(readFileSync(json, 'utf-8')) as HandymanProgress
+    return JSON.parse(readFileSync(json, 'utf-8')) as CheapWorkerProgress
   } catch {
     return null
   }
 }
 
-export function writeProgress(root: string, label: string, p: HandymanProgress): void {
-  const { md, json } = handymanProgressPaths(root, label)
+export function writeProgress(root: string, label: string, p: CheapWorkerProgress): void {
+  const { md, json } = cheapWorkerProgressPaths(root, label)
   mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
   writeFileSync(
     json,
     JSON.stringify({ ...p, status: p.status ?? 'running', updated: isoLocal() }, null, 2) + '\n',
     'utf-8',
   )
-  const lines = [`# handyman: ${label}`, `- Model: ${p.model}`, `- Round: ${p.round}`, `- Done: ${p.done}`, '', `## Latest response`, '', p.lastResponse, '']
+  const lines = [`# cheap-worker: ${label}`, `- Model: ${p.model}`, `- Round: ${p.round}`, `- Done: ${p.done}`, '', `## Latest response`, '', p.lastResponse, '']
   writeFileSync(md, lines.join('\n'), 'utf-8')
 }
 
 /** 失败状态落盘（对齐 osp writeFailedStatus：done=true / status=failed / errorCode） */
 export function writeFailedStatus(root: string, label: string, info: { errorCode: string; errorMessage?: string }): void {
-  const { json } = handymanProgressPaths(root, label)
+  const { json } = cheapWorkerProgressPaths(root, label)
   mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
   const prev = readProgress(root, label)
   writeFileSync(
@@ -89,7 +89,7 @@ export function writeFailedStatus(root: string, label: string, info: { errorCode
 }
 
 export function newStopToken(): string {
-  return `SERENITY_HANDYMAN_DONE_${randomBytes(8).toString('hex')}`
+  return `SERENITY_CHEAP_WORKER_DONE_${randomBytes(8).toString('hex')}`
 }
 
 /** 解析 model 字符串（provider/model）→ {provider, model}；无 / 视为 model-only */
@@ -103,8 +103,8 @@ export function splitModel(model: string): { provider: string | undefined; model
 export function requireWhitelistedModel(model: string, models: string[]): void {
   if (!models.includes(model)) {
     throw new Error(
-      `handyman: model "${model}" is not in the CCC whitelist. ` +
-        `Configure .opencode/serenity.json "handyman.models" with one of: ${models.join(', ')}`,
+      `cheap-worker: model "${model}" is not in the CCC whitelist. ` +
+        `Configure .opencode/serenity.json "cheap-worker.models" with one of: ${models.join(', ')}`,
     )
   }
 }
@@ -113,7 +113,7 @@ export function requireWhitelistedModel(model: string, models: string[]): void {
  * providerAvailabilityError — 判定「**本机有没有该 provider 的 adapter**」，并产出**可执行**的错误文本。
  * 返回 `null` = 全部可用（调用方照常继续）。
  *
- * 🔴 为什么需要它（S142 2026-09-25，owner 在 **Mac** 上实测）：`handyman` 的模型白名单写在
+ * 🔴 为什么需要它（S142 2026-09-25，owner 在 **Mac** 上实测）：`cheap-worker` 的模型白名单写在
  *   **CCC**（`.opencode/serenity.json`，**随 git 走**），而 provider adapter 由**每台机器的宿主**
  *   注册（profile 配置 / settings 命名空间）⇒ 同一份白名单在一台机器可用、在另一台必失败。
  *   实测症状：宿主抛 `no adapter registered for provider "<p>"`（`dsh-llm`，code `NO_ADAPTER`），
@@ -152,11 +152,11 @@ export function providerAvailabilityError(
   const missingList = missing.map((p) => `"${p}"`).join(', ')
 
   return [
-    `handyman: provider ${missingList} has no adapter registered on this machine.`,
+    `cheap-worker: provider ${missingList} has no adapter registered on this machine.`,
     '',
     '  Requested model(s) :',
     ...requested.map((e) => `    ${e.raw}`),
-    `  Configured in      : ${configPath} → "handyman.models" / "handyman.defaultModel"`,
+    `  Configured in      : ${configPath} → "cheap-worker.models" / "cheap-worker.defaultModel"`,
     '',
     '  Why this happens   : the whitelist lives in the CCC (it travels with the repository), while',
     '                       provider adapters are registered per machine by the host. An entry that',
@@ -170,7 +170,7 @@ export function providerAvailabilityError(
     '',
     '  Fix (pick one, then retry):',
     `    1. Point the whitelist at a provider that IS registered here — edit ${configPath}`,
-    '       ("handyman.models", and "handyman.defaultModel" if that is what you relied on).',
+    '       ("cheap-worker.models", and "cheap-worker.defaultModel" if that is what you relied on).',
     `    2. Register/activate provider ${missingList} on this machine (host profile config,`,
     '       or the settings namespace listed above).',
     '',
@@ -185,7 +185,7 @@ export function buildRoundPrompt(opts: {
   label: string
   round: number
   stopToken: string
-  progress?: HandymanProgress | null
+  progress?: CheapWorkerProgress | null
   task?: string
 }): string {
   const { root, session, label, round, stopToken, progress, task } = opts
@@ -195,7 +195,7 @@ export function buildRoundPrompt(opts: {
       : 'This is the first round.'
   const sessionNote = session ? `Work session: ${session} (progress recorded in AGENT_SESSIONS/${session}/SESSION.md)` : ''
   const taskNote = task ? `Task: ${task}` : `Task: follow the work corresponding to label "${label}" (if a work session exists, read SESSION.md first to clarify the goal)`
-  return `# ${label} — handyman round ${round}
+  return `# ${label} — cheap-worker round ${round}
 
 CCC root: ${root}
 ${sessionNote}
@@ -220,11 +220,11 @@ If the task is complete, output only ${stopToken}.`
 }
 
 /**
- * handyman 规模化使用指引（guide 子命令输出；S134 继承 + v1.24.0 更新）：
- * 使用 handyman 前必须先加载 eap 设计方案；并行策略（jobs 编排）；提示词规范（详尽固定 EAP）；
- * 阅读/文字编写类 handyman 内部也加载 eap。
+ * cheap-worker 规模化使用指引（guide 子命令输出；S134 继承 + v1.24.0 更新）：
+ * 使用 cheap-worker 前必须先加载 eap 设计方案；并行策略（jobs 编排）；提示词规范（详尽固定 EAP）；
+ * 阅读/文字编写类 cheap-worker 内部也加载 eap。
  */
-export const HANDYMAN_GUIDE = `# handyman — Scale-Up Usage Guide (guide)
+export const CHEAP_WORKER_GUIDE = `# cheap-worker — Scale-Up Usage Guide (guide)
 
 ## Two modes (v1.31.3; default = foreground)
 | | foreground (default) | background |
@@ -232,29 +232,29 @@ export const HANDYMAN_GUIDE = `# handyman — Scale-Up Usage Guide (guide)
 | What | child agent(s) run the task ONCE and return their final text (jobs=[...] ⇒ parallel, cap 10) | loop-validated worker: hard while-loop + random completion code |
 | Use when | you need result(s) back now (per-case testers, single conversions, parallel fan-out) | long/unattended work needing anti-early-finish, resumability, or parallel jobs |
 | Loop / validation | none | stop-token is the ONLY completion condition; round cap (default 100); auto-restart (≤100) |
-| Progress file | none | AGENT_SESSIONS/handyman-<label>.md/.json (same label resumes) |
-| Parallel jobs | **yes** — jobs=[{task,label?,model?},...], **cap 10 (fixed)** | yes (jobs=[...], handyman.maxParallel default 10) |
+| Progress file | none | AGENT_SESSIONS/cheap-worker-<label>.md/.json (same label resumes) |
+| Parallel jobs | **yes** — jobs=[{task,label?,model?},...], **cap 10 (fixed)** | yes (jobs=[...], cheap-worker.maxParallel default 10) |
 | Mechanism | host delegation service ctx.subagents.start("spawn") + agentOptions | ctx.agents.create + internal while-loop |
-| Model source | CCC handyman.models whitelist (same for both) | same |
+| Model source | CCC cheap-worker.models whitelist (same for both) | same |
 
 ## ⚠️ Before using: load eap and design the plan
-Before calling handyman, load eap (acc-eap skill) and design the "scale-up handyman plan" based on the EAP framework.
+Before calling cheap-worker, load eap (acc-eap skill) and design the "scale-up cheap-worker plan" based on the EAP framework.
 
 ### 1. Task decomposition (E↑ Explicit)
 - Split large tasks into explicit subtasks: each subtask defines goal / input / boundaries (what to do, what not to do) / acceptance criteria
 - Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel (both modes)
 
-### 2. Prompt design (handyman's task parameter)
+### 2. Prompt design (cheap-worker's task parameter)
 - task must be detailed, fixed, and EAP-compliant: clear goal, drawn boundaries, decidable acceptance criteria
 - foreground mode: the child does NOT share your conversation — restate everything it needs in task
 - Anti-example "handle this file" — ambiguous; good example "read <path>, extract all rows of the「关键决策」table,
   output a JSON array (fields id/conclusion/evidence), do not modify the original file"
 - Reading/curating or text-writing work (extracting from files, summarizing, writing docs, generating text, etc.):
-  the handyman-internal agent is also required to load eap and organize output per the EAP standard
+  the cheap-worker-internal agent is also required to load eap and organize output per the EAP standard
 
 ### 3. Model whitelist (CCC-configured, mandatory)
-- handyman only uses models listed in .opencode/serenity.json "handyman.models" — never arbitrary models
-- The CCC is expected to point this whitelist at LOW-COST models: handyman is the bulk-execution channel
+- cheap-worker only uses models listed in .opencode/serenity.json "cheap-worker.models" — never arbitrary models
+- The CCC is expected to point this whitelist at LOW-COST models: cheap-worker is the bulk-execution channel
 - background mode: recursive subagents inside a worker inherit the worker's model automatically (DSH native)
 - foreground mode: the child is started through the host delegation service with the resolved model
 
@@ -262,23 +262,23 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
 - The whitelist lives in the **CCC** ("serenity.json", it **travels with the repository**), but provider
   **adapters are registered per machine by the host** (profile config / settings namespace). An entry that
   works on one machine can fail on another with: "no adapter registered for provider <p>".
-- Before spawning, handyman verifies the provider of the resolved model against the adapters registered
+- Before spawning, cheap-worker verifies the provider of the resolved model against the adapters registered
   **on this machine**; if it is missing it reports the requested model, where it is configured, **the
   providers that ARE available here**, any declared-but-dormant route (with its settings namespace), and the
   exact fix — foreground puts this in "diagnostic", background throws it.
-- ⇒ If you see "has no adapter registered on this machine": edit ".opencode/serenity.json" "handyman.models"
-  (and "handyman.defaultModel") to a provider listed as available, or activate/register the provider on this
+- ⇒ If you see "has no adapter registered on this machine": edit ".opencode/serenity.json" "cheap-worker.models"
+  (and "cheap-worker.defaultModel") to a provider listed as available, or activate/register the provider on this
   machine. **Do not retry the same call unchanged** — it fails identically.
 
 ### 4. Parallel strategy (both modes)
 - Independent subtasks can run in parallel:
-  · **foreground** — handyman(jobs=[{task,label?,model?},...]) ⇒ fan-out of custom-model subagents, **cap 10**,
+  · **foreground** — cheap-worker(jobs=[{task,label?,model?},...]) ⇒ fan-out of custom-model subagents, **cap 10**,
     results come back **in the order you passed them** (label is only a display name here; per-job "model" allowed)
-  · **background** — handyman(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file
-- Concurrency safety guaranteed: unique sessionId (handyman-<label>-<uuid>), progress files isolated per label
-  (AGENT_SESSIONS/handyman-<label>.json) — same label resumes, different labels never interfere
-- Parallel cap: **foreground 10 (fixed)** / background handyman.maxParallel (default 10 — cheap models are cheap)
-- Aggregation: foreground returns all outputs in one result; background: after each parallel job produces progress, the main agent merges (or spawns one aggregation handyman)
+  · **background** — cheap-worker(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file
+- Concurrency safety guaranteed: unique sessionId (cheap-worker-<label>-<uuid>), progress files isolated per label
+  (AGENT_SESSIONS/cheap-worker-<label>.json) — same label resumes, different labels never interfere
+- Parallel cap: **foreground 10 (fixed)** / background cheap-worker.maxParallel (default 10 — cheap models are cheap)
+- Aggregation: foreground returns all outputs in one result; background: after each parallel job produces progress, the main agent merges (or spawns one aggregation cheap-worker)
 - For programmable pipeline/phase orchestration at scale, use the platform's workflow tool instead
 
 ## Completion criteria
@@ -288,12 +288,12 @@ Before calling handyman, load eap (acc-eap skill) and design the "scale-up handy
   automatic restart on abnormal agent stop (≤100 restarts, anti-infinite-loop)
 
 ## Waiting UI
-- The WebUI session-header Serenity detail card shows running background handymen's progress
+- The WebUI session-header Serenity detail card shows running background cheapWorkers's progress
   (label / round / last response), one line per parallel job, ~3s refresh (foreground mode writes no progress)
 `
 
-/** handyman 运行状态（进度文件摘要；WebUI 等待界面数据源） */
-interface HandymanRunInfo {
+/** cheap-worker 运行状态（进度文件摘要；WebUI 等待界面数据源） */
+interface CheapWorkerRunInfo {
   label: string
   round: number
   done: boolean
@@ -302,15 +302,15 @@ interface HandymanRunInfo {
   lastResponse: string
 }
 
-/** 列出 AGENT_SESSIONS/handyman-*.json 的全部进度（按 updated 倒序；坏文件跳过） */
-export function listActiveHandymen(root: string): HandymanRunInfo[] {
+/** 列出 AGENT_SESSIONS/cheap-worker-*.json 的全部进度（按 updated 倒序；坏文件跳过） */
+export function listActiveCheapWorkers(root: string): CheapWorkerRunInfo[] {
   const dir = join(root, 'AGENT_SESSIONS')
   if (!existsSync(dir)) return []
-  const out: HandymanRunInfo[] = []
+  const out: CheapWorkerRunInfo[] = []
   for (const entry of readdirSync(dir)) {
-    if (!entry.startsWith('handyman-') || !entry.endsWith('.json')) continue
+    if (!entry.startsWith('cheap-worker-') || !entry.endsWith('.json')) continue
     try {
-      const data = JSON.parse(readFileSync(join(dir, entry), 'utf-8')) as HandymanRunInfo
+      const data = JSON.parse(readFileSync(join(dir, entry), 'utf-8')) as CheapWorkerRunInfo
       if (typeof data.label !== 'string' || typeof data.round !== 'number') continue
       out.push({
         label: data.label,

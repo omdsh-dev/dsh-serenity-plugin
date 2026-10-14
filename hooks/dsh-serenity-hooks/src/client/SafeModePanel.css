@@ -421,9 +421,9 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* handyman 运行状态区块 */
+/* cheap-worker 运行状态区块 */
 
-.sp-handymenToggle {
+.sp-cheapWorkersToggle {
   flex: none;
   padding: 2px 10px;
   border: 1px solid var(--dsw-alias-border-l1);
@@ -434,18 +434,18 @@
   cursor: pointer;
 }
 
-.sp-handymenToggle:hover {
+.sp-cheapWorkersToggle:hover {
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.sp-handymenList {
+.sp-cheapWorkersList {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-top: 2px;
 }
 
-.sp-handymanItem {
+.sp-cheapWorkerItem {
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -455,14 +455,14 @@
   min-width: 0;
 }
 
-.sp-handymanHead {
+.sp-cheapWorkerHead {
   display: flex;
   align-items: baseline;
   gap: 8px;
   min-width: 0;
 }
 
-.sp-handymanLabel {
+.sp-cheapWorkerLabel {
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -473,19 +473,19 @@
   color: var(--dsw-alias-label-primary);
 }
 
-.sp-handymanRound {
+.sp-cheapWorkerRound {
   flex: none;
   font-size: 11px;
   color: var(--dsw-alias-label-dimmed);
 }
 
-.sp-handymanTime {
+.sp-cheapWorkerTime {
   flex: none;
   font-size: 11px;
   color: var(--dsw-alias-label-dimmed);
 }
 
-.sp-handymanResp {
+.sp-cheapWorkerResp {
   font-size: 11px;
   line-height: 16px;
   color: var(--dsw-alias-label-secondary);
@@ -494,7 +494,7 @@
   white-space: nowrap;
 }
 
-.sp-handymenMore {
+.sp-cheapWorkersMore {
   font-size: 11px;
   color: var(--dsw-alias-label-dimmed);
   padding: 4px 12px;

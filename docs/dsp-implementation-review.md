@@ -70,7 +70,7 @@
 ### 3.3 P2（清理，摘要）
 
 - **F-15 声明面漂移**（分片 G，10 条）：`engines.dsh` 陈旧、`@deepseek-ai/dsh-settings` 未列入 peerDeps、npm 描述/README 停在 v1.30.0 与旧工具名、`cp -r` 非幂等的 templates 构建、双包版本线（0.2.0 vs 1.30.5）无关系说明、`version` 守卫只查 3 个文件。
-- **F-16 重复实现**：3 份 `sessionEvents` 读取器（`session-ops.ts:52` 权威 + `skiff-core.ts:385` + `tools/handyman.ts:77`，其中一份注释自称是副本）、`filterWorkspaceList` 死代码但测试仍绿、4 个配置存储无归属表。
+- **F-16 重复实现**：3 份 `sessionEvents` 读取器（`session-ops.ts:52` 权威 + `skiff-core.ts:385` + `tools/cheap-worker.ts:77`，其中一份注释自称是副本）、`filterWorkspaceList` 死代码但测试仍绿、4 个配置存储无归属表。
 - 其他：`as never` 239 处（测试）、非声明错误码 `forbidden`/`bad-request`、ImageFallbackDock 注释仍写 `attachment-error`、`DraftAttachmentId` 从根入口导入但根不导出。
 
 ---

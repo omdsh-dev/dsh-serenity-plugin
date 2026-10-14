@@ -134,9 +134,9 @@
 | # | 入口 | 载体 | 定位 |
 |---|------|------|------|
 | 1 | `acc_msm guide` | `msm-ops.ts MSM_GUIDE` | MSM 开发手册（面向写 MSM 的 CCC） |
-| 2 | `acc_msm ccc-config` | `msm-ops.ts CCC_CONFIG_REFERENCE` | **CCC 配置参考**（8 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/autopilotTrajectory/weixin）——唯一接近"目录"的现成物，但只讲配置段不讲用法 |
+| 2 | `acc_msm ccc-config` | `msm-ops.ts CCC_CONFIG_REFERENCE` | **CCC 配置参考**（8 段：cheap-worker/sessionKeeper/localstore/hooks/safeMode/skiff/autopilotTrajectory/weixin）——唯一接近"目录"的现成物，但只讲配置段不讲用法 |
 | 3 | `skiff_admin guide` | `tools/skiff-admin.ts SKIFF_GUIDE` | Skiff 角色定义教程（F4） |
-| 4 | `handyman guide` | `handyman-ops.ts HANDYMAN_GUIDE` | handyman 规模化使用指引（v1.24.0） |
+| 4 | `cheap-worker guide` | `cheap-worker-ops.ts CHEAP_WORKER_GUIDE` | cheap-worker 规模化使用指引（v1.24.0） |
 | 5 | `autopilot-trajectory`（doc/check/status/guide） | `tools/autopilot-trajectory.ts` + `experiments/autopilot-trajectory/SKILL.md` | Autopilot 一站式管理 + 实验参与指南 |
 | 6 | `weixin-doctor guide`（CCC 侧 MSM） | `.opencode/skills/home-serenity/scripts/weixin-doctor.ts` | 微信桥 CCC 指南（今天新增，含 hook 事件格式） |
 | 7 | `session hook-develop-guide` | `tools/session.ts` | CCC session-tool 扩展指南 |
@@ -151,7 +151,7 @@
 按能力分区列出：
   ① 会话与轨迹   → session / session_rebuild（rebuild 阈值 K 见配置 §）
   ② 认知质量框架 → eap / neat / cce（渐进披露，工具直达）
-  ③ 工具与执行   → cc_fs / cc_git / acc_kit / acc_msm / handyman（handyman guide）
+  ③ 工具与执行   → cc_fs / cc_git / acc_kit / acc_msm / cheap-worker（cheap-worker guide）
   ④ 角色与对外   → skiff_admin guide（Skiff 子集角色）/ ACP / 问答页
   ⑤ 自主与接入   → autopilot-trajectory（自动巡航）/ weixin（微信桥 weixin-doctor guide）
   ⑥ CCC 配置总览 → ccc-config（每段配置 + 钩子用法）

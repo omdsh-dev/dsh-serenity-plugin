@@ -78,7 +78,7 @@ function jsonResponse(status: number, body: unknown): Response {
 /** 写 CCC 配置（显式传 weixin 段，允许省略字段以驱动缺省分支）。 */
 function writeConfig(weixin: unknown): void {
   writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-    handyman: { models: ['p/m'], defaultModel: 'p/m' },
+    'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
     skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
     weixin,
   }))
@@ -319,7 +319,7 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
   it('C4 路由命中角色但该 CCC 未定义该角色 → **响亮报错**并 return（P0-3 起走 `console.error`）', async () => {
     // 路由指向 qa，但 skiff.roles 里没有 qa
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: {} }, // ← 空角色表
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))

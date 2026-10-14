@@ -15,7 +15,7 @@
  *
  * 本组用的是**真 listener ＋ 真 HTTP 往返 ＋ 真 CCC 夹具**（不是构造 req/res 假对象）：
  *   ① `ctx.webServer.register` 的**接线自证**（9 条路由真被注册、且全在 `/serenity/` 下）
- *   ② handymen 端点：GET（无 CCC ⇒ 空表）／ 非 GET ⇒ 405
+ *   ② cheapWorkers 端点：GET（无 CCC ⇒ 空表）／ 非 GET ⇒ 405
  *   ③ status GET：200 ＋ `codeRuntime: null`（探测服务缺失时的降级形态）
  *   ④ status POST 的**安全边界**（v1.22.4 语义）：**无 WebUI 头 ⇒ 403 且 `on` 的标记文件绝不出现**（正负成对）
  *   ⑤ status POST 带 WebUI 头 ＋ 真 CCC ⇒ 200 且 **`.serenity-safe-on` 真的被写到盘上**
@@ -197,7 +197,7 @@ describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
       try {
         const expected = [
           '/serenity/status',
-          '/serenity/handymen',
+          '/serenity/cheap-workers',
           '/serenity/image-upload',
           '/serenity/file-upload',
           '/serenity/config',
@@ -216,14 +216,14 @@ describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
     })
   })
 
-  it('/serenity/handymen：GET（无 CCC ⇒ 空表）／POST ⇒ 405', async () => {
+  it('/serenity/cheap-workers：GET（无 CCC ⇒ 空表）／POST ⇒ 405', async () => {
     const api = await bootApi()
     try {
-      const empty = await raw({ port: api.port, method: 'GET', path: `/serenity/handymen?workspace=${encodeURIComponent(plain)}` })
+      const empty = await raw({ port: api.port, method: 'GET', path: `/serenity/cheap-workers?workspace=${encodeURIComponent(plain)}` })
       expect(empty.status).toBe(200)
-      expect(JSON.parse(empty.body)).toEqual({ handymen: [] })
+      expect(JSON.parse(empty.body)).toEqual({ cheapWorkers: [] })
 
-      const wrong = await raw({ port: api.port, method: 'POST', path: '/serenity/handymen' })
+      const wrong = await raw({ port: api.port, method: 'POST', path: '/serenity/cheap-workers' })
       expect(wrong.status).toBe(405)
       expect(JSON.parse(wrong.body)).toEqual({ error: 'method not allowed' })
     } finally {
@@ -407,7 +407,7 @@ describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
 
 /**
  * 其余四条路由的验收（2026-09-25 · ⑤ 第 9 件）：`config` ／ `cccs` ／ `public-ask` ／ `weixin`
- * ／ `session-cleanup`（第 8 件只覆盖了 status/handymen/两个 upload ⇒ 本组把这块 HTTP 面补齐）。
+ * ／ `session-cleanup`（第 8 件只覆盖了 status/cheapWorkers/两个 upload ⇒ 本组把这块 HTTP 面补齐）。
  * 🔴 两条纪律：① **写操作只落临时全局配置**（`SERENITY_HOOKS_CONFIG` 已隔离，见 beforeEach）；
  * ② **破坏性动作不做** —— `session-cleanup` 只验 **GET 的 dryRun 预览**（POST 会真删会话，不测）。
  */
@@ -835,12 +835,12 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
     }
   })
 
-  it('🔴 `handymen`：workspace 指向真 CCC ⇒ 走 `listActiveHandymen(root)` 分支（既有用例只测了"无 CCC ⇒ 空表"）', async () => {
+  it('🔴 `cheapWorkers`：workspace 指向真 CCC ⇒ 走 `listActiveCheapWorkers(root)` 分支（既有用例只测了"无 CCC ⇒ 空表"）', async () => {
     const api = await bootApi()
     try {
-      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/handymen?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
+      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/cheap-workers?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
       expect(res.status).toBe(200)
-      expect(jsonBody(res).handymen).toEqual([]) // 无进度文件 ⇒ 空数组，但**走的是 root 分支**
+      expect(jsonBody(res).cheapWorkers).toEqual([]) // 无进度文件 ⇒ 空数组，但**走的是 root 分支**
     } finally {
       await api.close()
     }
@@ -979,10 +979,10 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
 describe('src/api.ts：残余 catch 与尾部支线（⑤ 第 18 件）', () => {
   const jsonBody = (r: RawRes): any => JSON.parse(r.body)
 
-  it('🔴 宿主服务读取抛错 ⇒ `handymen` ／ `cccs` 各自的 catch 回 400（不是 500、不是崩）', async () => {
+  it('🔴 宿主服务读取抛错 ⇒ `cheapWorkers` ／ `cccs` 各自的 catch 回 400（不是 500、不是崩）', async () => {
     const api = await bootApi({ sessionGetThrows: true })
     try {
-      for (const path of ['/serenity/handymen', '/serenity/cccs']) {
+      for (const path of ['/serenity/cheap-workers', '/serenity/cccs']) {
         const res = await raw({ port: api.port, method: 'GET', path: `${path}?sessionId=s-1`, headers: UI_HEADERS })
         expect(res.status, `${path} 应把异常收敛成 400`).toBe(400)
         expect(String(jsonBody(res).error)).toContain('sessions.get boom')

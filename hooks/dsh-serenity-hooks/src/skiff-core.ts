@@ -17,7 +17,7 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, createRolePromptReader, resolveSkiffKind, type SkiffRoleConfig } from './skiff-role.js'
-import { splitModel } from './handyman-ops.js'
+import { splitModel } from './cheap-worker-ops.js'
 import { skiffRoleFor as registryRoleFor, skiffSessionInfo as registrySessionInfo, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
 import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './trajectory-ops.js'
 import { readLastBound, appendBound } from './trajectory-bound.js'
@@ -239,7 +239,7 @@ interface SkiffAgentRef {
 }
 
 /** Skiff agent 挂载的 DSH preset（v1.25.3 修复：read/grep/glob 等平台工具由 preset 决定工具面；
- *  handyman 经 composeFrom 继承父、skiff 无父上下文——直接挂 DSH 默认 standard preset；
+ *  cheap-worker 经 composeFrom 继承父、skiff 无父上下文——直接挂 DSH 默认 standard preset；
  *  guard 角色白名单再按角色过滤可见/可用面——白名单外工具仍 deny） */
 const SKIFF_PRESET = 'standard'
 
@@ -474,7 +474,7 @@ function sessionEvents(session: unknown): readonly unknown[] {
   return s.events ?? []
 }
 
-/** 读会话最后一个 assistant/message 文本（handyman 同款） */
+/** 读会话最后一个 assistant/message 文本（cheap-worker 同款） */
 function lastAssistantText(agent: Agent): string {
   const events = sessionEvents(agent.session)
   for (let i = events.length - 1; i >= 0; i--) {

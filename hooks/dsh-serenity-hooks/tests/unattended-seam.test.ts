@@ -165,7 +165,7 @@ describe('unattended-seam: 前置门（闸 / 空间 / 会话资格）', () => {
   })
 
   it('外部面 / 桥 / worker 会话 ⇒ **写死不许开**（替家人说话 = 冒充）', () => {
-    for (const sid of ['skiff-weixin-abc', 'acp-1', 'handyman-w1']) {
+    for (const sid of ['skiff-weixin-abc', 'acp-1', 'cheap-worker-w1']) {
       const h = harness(sid)
       say(h, '停一下')
       h.stop(1)

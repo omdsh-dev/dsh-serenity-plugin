@@ -372,7 +372,7 @@ describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id c
 describe('skiff-core: skiffTrajectoryEnabled 轨迹纪律子集', () => {
   it('非 skiff 会话恒 true（正常参与所有轨迹机制）', () => {
     expect(skiffTrajectoryEnabled(dir, 'normal-session', 'keeper')).toBe(true)
-    expect(skiffTrajectoryEnabled(dir, 'handyman-x', 'rebuild')).toBe(true)
+    expect(skiffTrajectoryEnabled(dir, 'cheap-worker-x', 'rebuild')).toBe(true)
     expect(skiffTrajectoryEnabled(dir, undefined, 'session')).toBe(true)
   })
 

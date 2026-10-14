@@ -21,7 +21,7 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, skiffSessionSnapshot } from './skiff-core.js'
 import { readSkiffRoles } from './skiff-role.js'
-import { readHandymanConfig } from './ccc.js'
+import { readCheapWorkerConfig } from './ccc.js'
 
 // ── JSON-RPC 2.0 类型（传输无关；acp-http 序列化用）──
 
@@ -142,7 +142,7 @@ export class AcpServer {
       return { sessionId, role: roleName, ccc, continued: true }
     }
 
-    const hc = readHandymanConfig(ccc)
+    const hc = readCheapWorkerConfig(ccc)
     const ref = await createSkiffAgent(this.ctx, ccc, roleName, role, hc?.defaultModel)
     return { sessionId: ref.sessionId, role: roleName, ccc, continued: false }
   }

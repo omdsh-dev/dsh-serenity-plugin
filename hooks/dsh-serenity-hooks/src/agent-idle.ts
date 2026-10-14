@@ -1,7 +1,7 @@
 /**
  * agent-idle.ts — 等待 agent 空闲（含销毁竞速，S142 review F-08）
  *
- * 为什么单独成模块：`askSkiff`（skiff 问答）与 `handyman`（杂工循环）都要"等这一轮做完"，
+ * 为什么单独成模块：`askSkiff`（skiff 问答）与 `cheap-worker`（杂工循环）都要"等这一轮做完"，
  * 此前各自复制了一份只监听 `agent/status → idle` 的实现。该实现有一个静默挂死：
  * **agent 先被销毁（会话关闭/进程回收/显式 dispose）就永远不会再发 idle 事件**，
  * 等待方 Promise 永不结算 → 问答/杂工永久卡住（宿主的 disposal 语义：
@@ -12,7 +12,7 @@
  *  ② `agent/disposed` 且是同一个 agent —— 销毁竞速（宿主 `runtime-types.ts:175`）
  *  ③ `session/disposed` 且是同一会话 —— 会话先于 agent 消失（宿主 `core/session/src/index.ts:62`）
  *
- * 无超时：agent 工作多久等多久（handyman 可永续）。订阅后再查一次 `agent.status`——
+ * 无超时：agent 工作多久等多久（cheap-worker 可永续）。订阅后再查一次 `agent.status`——
  * 宿主 `followup`/`steer` 会同步把 phase 置为 running（`agent.ts:181-201`），
  * 因此此刻读到 idle 只可能是"唤醒已在订阅前收敛"，立即结算以避免漏事件挂死。
  *

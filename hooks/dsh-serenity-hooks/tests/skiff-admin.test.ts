@@ -64,7 +64,7 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: validat
 
   it('合法配置 → ok', () => {
     writeConfig({
-      handyman: { models: ['m/M3'] },
+      'cheap-worker': { models: ['m/M3'] },
       skiff: {
         roles: {
           'qa-readonly': {
@@ -89,15 +89,15 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: validat
     expect(r.issues.some((i: string) => i.includes('ghost-msm') && i.includes('not registered'))).toBe(true)
   })
 
-  it('model 不在 handyman.models → 问题清单', () => {
+  it('model 不在 cheap-worker.models → 问题清单', () => {
     writeConfig({
-      handyman: { models: ['m/M3'] },
+      'cheap-worker': { models: ['m/M3'] },
       skiff: { roles: { qa: { msms: ['x'], model: 'other/model', systemPrompt: 'p' } } },
     })
     writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
     const r = validateSkiffConfig(dir)
     expect(r.ok).toBe(false)
-    expect(r.issues.some((i: string) => i.includes('other/model') && i.includes('not in handyman.models'))).toBe(true)
+    expect(r.issues.some((i: string) => i.includes('other/model') && i.includes('not in cheap-worker.models'))).toBe(true)
   })
 
   it('systemPrompt 空 → 问题清单', () => {
@@ -137,7 +137,7 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: listSki
 
   it('有角色 → 摘要（名/模型/msms/tools/轨迹纪律）', () => {
     writeConfig({
-      handyman: { models: ['m/M3'] },
+      'cheap-worker': { models: ['m/M3'] },
       skiff: {
         roles: {
           'qa-readonly': { msms: ['cognitive-qa'], tools: [] },
@@ -148,7 +148,7 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: listSki
     const r = listSkiffRoles(dir) as { roles: Array<Record<string, unknown>>; count: number }
     expect(r.count).toBe(2)
     const qa = r.roles.find((x) => x.name === 'qa-readonly')!
-    expect(qa.model).toBe('(handyman default)')
+    expect(qa.model).toBe('(cheap-worker default)')
     expect(qa.msms).toEqual(['cognitive-qa'])
     expect(qa.tools).toEqual([])
     expect((qa.trajectory as Record<string, boolean>).keeper).toBe(false)
@@ -176,7 +176,7 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: listSki
 describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: applySkiffConfig 显式生效机制（v1.25.3）', () => {
   it('合法配置 → applied true + 绑定 CCC + 角色清单', () => {
     writeConfig({
-      handyman: { models: ['m/M3'] },
+      'cheap-worker': { models: ['m/M3'] },
       skiff: { roles: { qa: { msms: ['x'], tools: ['read'], systemPrompt: 'p' } } },
     })
     writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])

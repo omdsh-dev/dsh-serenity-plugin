@@ -38,7 +38,7 @@ describe('skiff-role: sessionId 判定', () => {
     expect(isSkiffSessionId(`${SKIFF_SESSION_PREFIX}qa-readonly-uuid`)).toBe(true)
     expect(isSkiffSessionId('skiff-x-1')).toBe(true)
     expect(isSkiffSessionId('normal-session')).toBe(false)
-    expect(isSkiffSessionId('handyman-x-1')).toBe(false)
+    expect(isSkiffSessionId('cheap-worker-x-1')).toBe(false)
     expect(isSkiffSessionId(undefined)).toBe(false)
     expect(isSkiffSessionId('')).toBe(false)
   })
@@ -46,7 +46,7 @@ describe('skiff-role: sessionId 判定', () => {
 
 describe('skiff-role: readSkiffRoles 配置解析', () => {
   it('无 skiff 段 / 空 roles → 空 Map（Skiff 未启用）', () => {
-    writeConfig({ handyman: { models: ['m/M'] } })
+    writeConfig({ 'cheap-worker': { models: ['m/M'] } })
     expect(readSkiffRoles(dir).size).toBe(0)
     writeConfig({ skiff: {} })
     expect(readSkiffRoles(dir).size).toBe(0)

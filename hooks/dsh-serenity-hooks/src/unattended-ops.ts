@@ -45,7 +45,7 @@
  * 注入文本**自带**"请回复 ABCD" ⇒ 模型**复述指令**即**假完成**（高概率，不是小概率）
  * ⇒ 用**每轮新生成**的 nonce ＋ **包装 ＋ 独占一行**（`[[UNATTENDED-DONE:<hex>]]`），
  * 明写「**旧码作废**」，校验**只认当前轮**（防上下文里的旧码复活）。
- * 先例 = `handyman` background 的 `SERENITY_HANDYMAN_DONE_<16hex>`（同族实现）。
+ * 先例 = `cheap-worker` background 的 `SERENITY_CHEAP_WORKER_DONE_<16hex>`（同族实现）。
  */
 
 import { randomBytes } from 'node:crypto'
@@ -69,7 +69,7 @@ export const UNATTENDED_PROXY_MARK = '[[UNATTENDED-PROXY v1]]'
 /** 🔴 合成消息**固定身份句**（owner 已裁：「形如用户消息，但首句自报身份与权限边界」） */
 export const UNATTENDED_IDENTITY_LINE = '无人值守代理 · 非本人'
 
-/** nonce 字节数 ⇒ 16 个 hex 字符（与 handyman 同量级；够长到不可能被复述猜中） */
+/** nonce 字节数 ⇒ 16 个 hex 字符（与 cheap-worker 同量级；够长到不可能被复述猜中） */
 export const UNATTENDED_NONCE_BYTES = 8
 
 /** 生成一枚新 nonce（**每轮一枚**；旧码作废由调用方在文本里声明） */
@@ -107,7 +107,7 @@ export function hasDoneToken(text: string, nonce: string): boolean {
 
 // ── 上限（失效安全，设计 §10）──
 
-/** 单个会话在一个"代理段"内的**轮次上限**（设计建议 10–20；取 15——远小于 handyman 的 100） */
+/** 单个会话在一个"代理段"内的**轮次上限**（设计建议 10–20；取 15——远小于 cheap-worker 的 100） */
 export const UNATTENDED_MAX_ROUNDS = 15
 
 /** 一个"代理段"的**墙钟上限**（自第一次注入起算；跨轮累计，防"轮次没到但烧了一天"） */
@@ -214,14 +214,14 @@ export function claimsUserNotification(text: string): boolean {
 /**
  * **不许开**的会话（设计 §3 的"建议写死"，本版**确实写死**）：
  * `skiff-`（F4 问答 / **微信桥会话也是这个前缀** —— 桥那侧的"用户"是**家人**，
- * 代理替家人说话 = **冒充**）｜ `acp-`（对外程序化面）｜ `handyman-`（自主 worker，已有自己的完成码循环）。
+ * 代理替家人说话 = **冒充**）｜ `acp-`（对外程序化面）｜ `cheap-worker-`（自主 worker，已有自己的完成码循环）。
  *
  * ⚠️ **`rebuild-` 不在排除面**（与 `output-guard-seam.ts` 的取向**刻意不同**）：重建会话是
  * **同一轨迹的载体**（内部维护面），不是对外面；把它排除会让"重建后就没人推了"。
  */
 export function isProxyExcludedSessionId(sessionId: string): boolean {
   if (typeof sessionId !== 'string' || sessionId === '') return true // 取不到 id ⇒ 保守排除
-  return isSkiffSessionId(sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('handyman-')
+  return isSkiffSessionId(sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('cheap-worker-')
 }
 
 // ── 判定（**纯函数** ⇒ 可穷举测试；seam 只负责取事实 + 执行）──

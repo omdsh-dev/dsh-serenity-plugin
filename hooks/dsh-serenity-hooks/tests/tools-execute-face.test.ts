@@ -3,7 +3,7 @@
  *
  * 挑靶依据 = §3-9b 全量 `fstat-no` 复扫的**残余 A 类**：**6 处 / 6 文件** ——
  *   5 个 `execute`（`container_fs` ／ `container_git` ／ `dashboard` ／ `localstore` ／ `im-bridge`）
- *   ＋ `handyman` 的 `parseJobs`（只在 `jobs` 多任务编排路径被调用）。
+ *   ＋ `cheap-worker` 的 `parseJobs`（只在 `jobs` 多任务编排路径被调用）。
  *
  * 🔴 **为什么与 §2.7q（render 面）必须分开做**：`execute` 要吃各自的 `ctx`/`exec` 夹具，
  *   而那正是 **§3-9 #7 的 fake ctx 盲区**所在（真宿主 `Context` 是 Proxy：访问未 `inject`
@@ -22,7 +22,7 @@
  *   `im-bridge` ⇒ **不抛**，返回**结构化** `{ok:false, code:'CCC_UNRESOLVED'}`。
  *   ⇒ 三者是**同一个问题的三种设计选择**，本件把它们并排钉住（任一处被改成另一种，本组先红）。
  *
- * 🔵 **本件的边界（不是遗漏）**：`handyman` 的 `runHandymanJob`／前台委派链路**不在本件**
+ * 🔵 **本件的边界（不是遗漏）**：`cheap-worker` 的 `runCheapWorkerJob`／前台委派链路**不在本件**
  *   （那要起真子代理）；本件只补"**编排前的参数与上限校验**"这一段——它此前零执行。
  */
 
@@ -39,7 +39,7 @@ import { gitTool } from '../src/tools/git.js'
 import { localstoreTool } from '../src/tools/localstore.js'
 import { createKitTool } from '../src/tools/kit.js'
 import { createImBridgeTool } from '../src/tools/im-bridge.js'
-import { createHandymanTool } from '../src/tools/handyman.js'
+import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
 
 /** 工厂形工具的 ctx 形参类型（不额外 import `cordis` 的类型） */
 type Ctx = Parameters<typeof createKitTool>[0]
@@ -69,7 +69,7 @@ function execIn(cwd: string): unknown {
   return { agent: { session: { header: { cwd } } } }
 }
 
-let ccc = ''      // 有 `.serenity` ＋ `.opencode/serenity.json`（含 handyman 配置）
+let ccc = ''      // 有 `.serenity` ＋ `.opencode/serenity.json`（含 cheap-worker 配置）
 let outside = ''  // 无 `.serenity` ⇒ cccRootForExec 解析不到
 let gitCcc = ''   // 有 `.serenity` ＋ 真 `git init`（`container_git status` 要真仓库）
 
@@ -80,7 +80,7 @@ beforeEach(() => {
   writeFileSync(
     join(ccc, '.opencode', 'serenity.json'),
     // `maxParallel: 1` 是**刻意调小的**：让"超上限"成为一条**不需要起任何子代理**就能走到的校验路径
-    JSON.stringify({ handyman: { models: ['probe/Model'], defaultModel: 'probe/Model', maxParallel: 1 } }),
+    JSON.stringify({ 'cheap-worker': { models: ['probe/Model'], defaultModel: 'probe/Model', maxParallel: 1 } }),
     'utf-8',
   )
 
@@ -106,7 +106,7 @@ const ALL: Array<{ label: string; make: () => unknown }> = [
   { label: 'localstore', make: () => localstoreTool },
   { label: 'dashboard', make: () => createKitTool(ctx) },
   { label: 'im-bridge', make: () => createImBridgeTool() },
-  { label: 'handyman', make: () => createHandymanTool(ctx) },
+  { label: 'cheap-worker', make: () => createCheapWorkerTool(ctx) },
 ]
 
 describe('tools/*：`execute` 通路（⑤ 第 33 件）', () => {
@@ -237,21 +237,21 @@ describe('tools/*：`execute` 通路（⑤ 第 33 件）', () => {
   })
 
   // ───────────────────────────────────────────────────────────────────────────
-  // D. handyman：`jobs` 编排前的解析与上限校验（parseJobs —— 此前零执行）
+  // D. cheap-worker：`jobs` 编排前的解析与上限校验（parseJobs —— 此前零执行）
   // ───────────────────────────────────────────────────────────────────────────
 
-  describe('D · handyman 的 `parseJobs` 与上限校验', () => {
-    const handyman = () => execOf(createHandymanTool(ctx), 'handyman')
+  describe('D · cheap-worker 的 `parseJobs` 与上限校验', () => {
+    const cheapWorker = () => execOf(createCheapWorkerTool(ctx), 'cheap-worker')
 
     it('数组项缺 label ⇒ parseJobs 返回 null ⇒ **响亮抛错**（且没有任何子代理被起）', async () => {
       await expect(
-        handyman().execute({ mode: 'background', jobs: [{ task: 't' }] }, execIn(ccc)),
+        cheapWorker().execute({ mode: 'background', jobs: [{ task: 't' }] }, execIn(ccc)),
       ).rejects.toThrow('jobs must be [{task, label, model?}, ...]')
     })
 
     it('合法 jobs 但**超过 maxParallel** ⇒ 抛上限错误（夹具把 maxParallel 调成 1）', async () => {
       await expect(
-        handyman().execute(
+        cheapWorker().execute(
           { mode: 'background', jobs: [{ task: 'a', label: 'a' }, { task: 'b', label: 'b' }] },
           execIn(ccc),
         ),
@@ -265,7 +265,7 @@ describe('tools/*：`execute` 通路（⑤ 第 33 件）', () => {
       //    而 parseJobs 未导出、唯一调用点就在本 execute 内）。
       // 🔵 本用例把这条"不可达"**变成机械读数**，而不是写在散文里（house rule：别把"从不发生"固化成期望形态）。
       await expect(
-        handyman().execute({ mode: 'background', jobs: 'nope' }, execIn(ccc)),
+        cheapWorker().execute({ mode: 'background', jobs: 'nope' }, execIn(ccc)),
       ).rejects.toBeInstanceOf(ToolArgsError)
     })
   })

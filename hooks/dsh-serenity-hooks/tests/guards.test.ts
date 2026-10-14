@@ -793,7 +793,7 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
   it('非 skiff 会话（无 skiffSessionId / 普通 id）→ 不受白名单影响', () => {
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'write', skiffSessionId: 'normal-session', pathArg: 'docs/a.md' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'handyman', skiffSessionId: 'handyman-x' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cheap-worker', skiffSessionId: 'cheap-worker-x' })).kind).toBe('allow')
   })
 
   it('角色 tools 空（纯 MSM 角色）→ 仅 msm 可用', () => {
@@ -877,7 +877,7 @@ describe('guards: Skiff 角色白名单——真实 my-role 配置形态（S142 
   })
 
   it('my-role 形态：白名单外工具 deny（write/bash 等）', () => {
-    for (const tool of ['write', 'edit', 'bash', 'container_fs', 'handyman', 'container_admin', 'dashboard', 'praxis']) {
+    for (const tool of ['write', 'edit', 'bash', 'container_fs', 'cheap-worker', 'container_admin', 'dashboard', 'praxis']) {
       const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID }))
       expect(d.kind, `tool ${tool} 应 deny`).toBe('deny')
       expect(d.deny).toContain('skiff role')

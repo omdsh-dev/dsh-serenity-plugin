@@ -258,7 +258,7 @@ describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，
     expect(block).toContain('You are running inside a Concrete Cognitive Container (CCC)')
     // 身份块不再内嵌工具清单（需求③移出 toolsBlock）
     expect(block).not.toContain('container_fs     —')
-    expect(block).not.toContain('handyman  —')
+    expect(block).not.toContain('cheap-worker  —')
     // 2026-09-16（S142 §0e-C，所有者裁「同意修正」）：MSM 指引改指 msm() 无参目录。
     // 旧文 `call msm("<name>") to execute or discover them (see the "Serenity Tools" heading below)`
     // 把 **MSM**（CCC 注册的另一层）指到 **ACC 内置工具清单**标题下 ⇒ 指错对象，属干扰。
@@ -271,7 +271,7 @@ describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，
   it('toolsBlock() 含 9 工具清单 + msm 单入口示例（v1.33：logbook 并入 trajectory）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
       expect(block).toContain(tool)
     }
     // msm 单入口调用（替代旧 3 步协议）

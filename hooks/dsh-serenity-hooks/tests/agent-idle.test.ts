@@ -1,7 +1,7 @@
 /**
  * agent-idle.test.ts — 等待 agent 空闲（S142 review F-08：销毁竞速）
  *
- * 此前 skiff/handyman 各自复制了一份"只等 agent/status → idle"的实现，agent 先销毁
+ * 此前 skiff/cheap-worker 各自复制了一份"只等 agent/status → idle"的实现，agent 先销毁
  * 就永久挂起。本测试钉死三条结算通道 + 订阅后状态兜底。
  */
 import { describe, it, expect, vi } from 'vitest'

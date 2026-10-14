@@ -80,7 +80,7 @@
 | `'agent/created'` | `context.ts`（async）→ `seed(agent)` | 注册 scoped `serenity-entry` section；`agent.inject(accMessage)` **播种身份**；同步 safe-mode / im-bridge / 专属工具 restrict |
 | `'agent/pre-step'` | `bootstrap.ts`（`{prepend:true}`，先 `next()`） | bootstrap 阶段剥离 `source.kind ∈ {skill-catalog, agent-instructions}` |
 | `'agent/pre-step'` | `context.ts`（`next()` 后组装） | 同步 3 类 restrict ＋ 2 个 section；首次进 CCC 返回 `{kind:'enter', messages:[accMessage,…]}`（`injected` Set 保证只一次） |
-| `'agent/inbox/inserted'` | `bootstrap.ts` → `inbox.prepend('next-turn', …)` | 注入 2 条 `bootstrap-anchor-*` 锚定消息（`handyman-`/`skiff-` 前缀与插件来源消息跳过） |
+| `'agent/inbox/inserted'` | `bootstrap.ts` → `inbox.prepend('next-turn', …)` | 注入 2 条 `bootstrap-anchor-*` 锚定消息（`cheap-worker-`/`skiff-` 前缀与插件来源消息跳过） |
 | `'agent/disposed'` / `'session/disposed'` | `lifecycle.ts` → `cleanupSessionState()` | 清 6 项 per-会话态 |
 | `'session/event'` | `compact.ts` | `compaction/end` 无 error ⇒ `agent.inject(accMessage)`（Skiff 会话旁路） |
 | `'session/event'` | `bootstrap.ts` → `trackerFor(root).observe()` | 累计轮数；`compaction/end` 重置 boundary |
@@ -122,7 +122,7 @@
 | **宿主补丁 / provider** | `deepseek-vision-patch.ts`(L2) / `opencode-provider.ts`(L2) / `web-fetch-provider.ts`(L2) | 给 deepseek 路由补 image 输入；opencode 路由自动补头/建路由；fetch 地址白名单解析器（放行 fake-ip 段） | 无（宿主 settings / provider 补丁） | ✅ 各自 |
 | **面宿主** | `face-host.ts`(L2) | 对外面 listener 的**唯一启停真相源**（`startFace`/`stopFace`/`FaceSpec`） | 无（绑各面端口） | ✅ `face-host` |
 | **配置与设置** | `config-ops.ts`(L2) / `settings-section.ts`(L2) / `localstore-ops.ts`(L2) | 插件**全局**配置读写；宿主设置面板 ns=`serenity-hooks`；CCC localstore 读写 ＋ git 策略 | 文件：`~/.dsh/serenity-hooks.json` ／ CCC `localstore.json` | ✅ `config-ops` / `settings-section` / `localstore` |
-| **工具后端（`*-ops`）** | `git-ops.ts` / `fs-ops.ts` / `kit-ops.ts` / `container-status.ts` / `handyman-ops.ts` / `handyman-preset-inherit.ts`（均 L2） | 各工具的实现后端；`container-status` = CCC 身份/三原则/注册表两判据/时钟；`handyman-ops` = 杂工进度/提示词/白名单判定 | 无（工具后端）／文件 | ✅ `ops` / `fs-ops` / `container-status` / `handyman-ops` / `handyman-preset` |
+| **工具后端（`*-ops`）** | `git-ops.ts` / `fs-ops.ts` / `kit-ops.ts` / `container-status.ts` / `cheap-worker-ops.ts` / `cheap-worker-preset-inherit.ts`（均 L2） | 各工具的实现后端；`container-status` = CCC 身份/三原则/注册表两判据/时钟；`cheap-worker-ops` = 杂工进度/提示词/白名单判定 | 无（工具后端）／文件 | ✅ `ops` / `fs-ops` / `container-status` / `cheap-worker-ops` / `cheap-worker-preset` |
 | **发现与消息** | `skills-discovery.ts`(L2) / `message-source.ts`(L1) | 入口 skill/`SKILL.md` 发现与截断；ACC 注入消息 `kind` 的**单一真相源** | 文件 ／ 无 | ✅ 各自 |
 
 #### 2.3.1 外露面总表（`ports.ts:FACE_PORTS`）
@@ -153,7 +153,7 @@
 | 文件 | 工具名 | 一句话职责 | 可见性条件 | 被测 |
 |---|---|---|---|---|
 | `tools/trajectory.ts` | `container_trajectory` | 轨迹生命周期（list/show/create/use/rebuild）＋ 跨轨迹投递（send-now/send-later）＋ CRO 指南 | 总是可见 | ✅ `cro-guide` / `session-title`（直接 import） |
-| `tools/handyman.ts` | `handyman` | 委派 worker agent（foreground / background 双模式） | 总是可见；`model` 须在 CCC `handyman.models` 白名单 | ✅ `handyman-foreground` |
+| `tools/cheap-worker.ts` | `cheap-worker` | 委派 worker agent（foreground / background 双模式） | 总是可见；`model` 须在 CCC `cheap-worker.models` 白名单 | ✅ `cheap-worker-foreground` |
 | `tools/cc-fs.ts` | `container_fs` | 容器文件系统 15 子命令（路径逃逸自动阻断） | 总是可见 | ⚠️ 无镜像测试（INDIRECT_COVERED ＋ `fs-ops.test`） |
 | `tools/git.ts` | `container_git` | CCC git status/commit/push/log/pull/diff | 总是可见 | ⚠️ 无镜像测试（INDIRECT_COVERED ＋ `ops.test`） |
 | `tools/msm.ts` | `msm` | 执行/发现已注册 MSM（单入口 ＋ 模糊候选） | 总是可见；skiff 角色另受 `msms` 白名单门控 | ⚠️ 无镜像测试（INDIRECT_COVERED） |
@@ -172,7 +172,7 @@
 - **顺序约束**：`registerImChannel(weixinChannel)` 必须早于工具装配 —— `createImBridgeTool()` 的 description 读 `imChannelIds()`。
 - **清单三处一致（单一真相源）**：`src/invariant.ts:REGISTERED_TOOLS` ＋ `dsh.plugin.json` 的 `contributes.tools` 双列 **13** 名，由 `verifyToolConsistency()` 校验；`tests/register.test.ts` 断言 `register` 被调 **12** 次（`diagram` 关着的缺省态；开着则 13）。
 - **条件可见的统一实现**：`agent.ctx.tools.restrict({ deny: [...] })`（**从模型清单移除**，不是"看得到但被拒"），调用点全在 `seams/context.ts`（会话就绪 ＋ pre-step）：`im-bridge` ← `syncImBridgeVisibility`（判据 `hasEnabledImChannel`）／ `acc-diag` ← `syncExclusiveToolsVisibility`（判据 `EXCLUSIVE_TOOL_NAMES` ＋ `ccc.ts:readExclusiveTools`，fail-closed）。全体工具另受 `syncSafeModeRestriction`（`SAFE_MODE_DENY_TOOLS = ['bash']`）与 skiff 角色双白名单（pre-execute guard）两道 restrict。
-- **工具 → 实现**（薄壳证据）：`acc-diag`→`diag-ops:runAccDiag`｜`cc-fs`→`fs-ops:runCcFs`｜`git`→`git-ops:runGit`｜`kit`→`kit-ops:runKit`｜`localstore`→`localstore-ops:runLocalStore`｜`ontology`→`ontology/engine:runOntologyCli`（**同步**、纯 node 内建依赖）｜`msm`/`container_admin`→`msm-ops:runMsm(Async)`｜`handyman`→`handyman-ops:*` ＋ `host/access:hostSubagents` ＋ `agent-idle:waitAgentIdle`｜`im-bridge`→`im-bridge:runImBridge`｜`trajectory`→`trajectory-ops:*` ＋ `rebuild:queueRebuild`（**动态 import**）＋ `wake-registry:addWake` ＋ `wake-scheduler:sendToTrajectory` ＋ `trajectory-bound:*`。
+- **工具 → 实现**（薄壳证据）：`acc-diag`→`diag-ops:runAccDiag`｜`cc-fs`→`fs-ops:runCcFs`｜`git`→`git-ops:runGit`｜`kit`→`kit-ops:runKit`｜`localstore`→`localstore-ops:runLocalStore`｜`ontology`→`ontology/engine:runOntologyCli`（**同步**、纯 node 内建依赖）｜`msm`/`container_admin`→`msm-ops:runMsm(Async)`｜`cheap-worker`→`cheap-worker-ops:*` ＋ `host/access:hostSubagents` ＋ `agent-idle:waitAgentIdle`｜`im-bridge`→`im-bridge:runImBridge`｜`trajectory`→`trajectory-ops:*` ＋ `rebuild:queueRebuild`（**动态 import**）＋ `wake-registry:addWake` ＋ `wake-scheduler:sendToTrajectory` ＋ `trajectory-bound:*`。
 
 ### 2.5 L1 · 轨迹／会话／唤醒核心域（18 个文件）
 
@@ -219,7 +219,7 @@
 
 🔴 **客户端半的两条结构事实**：① 它引用的宿主契约与 node 半**不同**（浏览器侧 `configForms`/`slots`/RPC）⇒ 由 `typecheck-host` 的 **client 半**单独把关（§2.5 的例外条款）；② **`vitest.config.ts` 的 coverage 把 `src/client/**` 整体排除** ⇒ 客户端半**不在覆盖率门禁内**（见 §3-9）。
 
-### 2.7 测试面（**126 文件 / 2065 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 五件各加一批：`50ad1f3` → 109/1715，`ae195a7` → 110/1733，`e834e17` → 111/1756，`a5815c6` → 112/1767，`58d58b2` → **113/1799**；第 6 件（gateway 语义化）→ **113/1801**（同文件 +2）；第 7 件（lazy 守卫 ＋ 台账复核）→ **114/1807**（+1 文件 +6 用例）；第 8 件（**HTTP 对外面 `api.ts`**）→ **115/1816**（+1 文件 +9 用例）；第 9 件（同面补齐其余 5 条路由）→ **115/1822**（同文件 +6）；第 10 件（**破坏性端点** session-cleanup POST）→ **115/1826**（同文件 +4）；第 11 件（weixin 三个写动作）→ **115/1830**（同文件 +4）；第 12 件（**gateway 装配链**：登录面 ＋ 反代面）→ **115/1842**（同文件 +12，分两笔：`82d0dcf` 后为 1835，`a936d75` 后为 1842）；第 13 件（**文件发送三步链**）→ **116/1854**（+1 文件 +12 用例）；第 14 件（**container_git 远程流程 ＋ 失败注入**）→ **117/1866**（+1 文件 +12 用例）；第 15 件（**微信扫码登录全链 ＋ 假 iLink 后端**）→ **118/1876**（+1 文件 +10 用例，见 §2.7a）；第 16 件（**§3-9 #10 的语义孪生 ＋ 台账复核**）→ **118/1879**（同文件 +3）；第 17 件（**`api.ts` 错误与边界分支批**）→ **118/1887**（同文件 +8，见 §2.7b）；第 18 件（**残余 catch 与尾部支线**）→ **118/1893**（两文件 +6，见 §2.7c）；第 19 件（**MSM 管理面 ＋ 安全边界**：`msm-ops.ts`）→ **119/1923**（+1 文件 +30 用例，见 §2.7d）；第 20 件（**打回闸门缝的边界与失败路径**：`output-guard-seam.ts`）→ **119/1931**（同文件 +8 用例，见 §2.7e））；第 21 件（**`container_fs` 的守卫面与路径校验**：`fs-ops.ts`）→ **120/1951**（+1 文件 +20 用例，见 §2.7f））；第 22 件（**超限重建的执行面与失败面**：`rebuild.ts`）→ **121/1962**（+1 文件 +11 用例，见 §2.7g））；第 23 件（**重建第二片 ＋ 三处「疑不可达」证伪**：`rebuild.ts` **三面全满**）→ **121/1970**（同文件 +8 用例，见 §2.7h））；第 24 件（**面 B 的 WS 反代残余面**：`gateway.ts`）→ **122/1973**（+1 文件 +3 用例，见 §2.7i））；第 25 件（**DSH 安装位置探测的三条候选 ＋ 失败终态**：`status.ts` **三面全满**）→ **122/1980**（同文件 +7 用例，见 §2.7j））；第 26 件（**面 B 的 DSH BrowserAuth cookie 注入面**：`gateway.ts` 的接线）→ **123/1984**（+1 文件 +4 用例，见 §2.7k））；第 27 件（**面 B 的装配与生命周期面**：`sync()` 四态）→ **124/1988**（+1 文件 +4 用例，见 §2.7l））；第 28 件（**`acp-http.ts` 的门控／路由／入参边界面**）→ **124/2003**（同文件 +15 用例，见 §2.7m））；第 29 件（**`wake-registry.ts` 的读面容错／写面失败／结案清理**）→ **124/2018**（同文件 +15 用例，见 §2.7n））；第 30 件（**`unattended-seam.ts` 的装配面／守卫面／清理面**）→ **124/2029**（同文件 +11 用例，见 §2.7o）；第 31 件（**`api.ts` 的 `resolveWorkspace` 默认箭头**）→ **124/2031**（同文件 +2 用例，见 §2.7p））；第 32 件（**`tools/*` 的 `output.render` 通路**，9 文件一次触达）→ **125/2049**（+1 文件 +18 用例，见 §2.7q））；第 33 件（**`tools/*` 的 `execute` 通路**，5 个 `execute` ＋ `handyman.parseJobs`）→ **126/2062**（+1 文件 +13 用例，见 §2.7r））；第 34 件（**面规格的意图读取通路**：`skiffDebugSpec` 经 `faceEnabled` ＋ **产出 §3-8 第 18 行的结构发现**）→ **126/2065**（**同文件** +3 用例，见 §2.7s））
+### 2.7 测试面（**126 文件 / 2065 用例** —— 锚定 2026-09-25 **④ 第 1 步 `58b2891`** 时实测为 108/1699；其后 ⑤ 五件各加一批：`50ad1f3` → 109/1715，`ae195a7` → 110/1733，`e834e17` → 111/1756，`a5815c6` → 112/1767，`58d58b2` → **113/1799**；第 6 件（gateway 语义化）→ **113/1801**（同文件 +2）；第 7 件（lazy 守卫 ＋ 台账复核）→ **114/1807**（+1 文件 +6 用例）；第 8 件（**HTTP 对外面 `api.ts`**）→ **115/1816**（+1 文件 +9 用例）；第 9 件（同面补齐其余 5 条路由）→ **115/1822**（同文件 +6）；第 10 件（**破坏性端点** session-cleanup POST）→ **115/1826**（同文件 +4）；第 11 件（weixin 三个写动作）→ **115/1830**（同文件 +4）；第 12 件（**gateway 装配链**：登录面 ＋ 反代面）→ **115/1842**（同文件 +12，分两笔：`82d0dcf` 后为 1835，`a936d75` 后为 1842）；第 13 件（**文件发送三步链**）→ **116/1854**（+1 文件 +12 用例）；第 14 件（**container_git 远程流程 ＋ 失败注入**）→ **117/1866**（+1 文件 +12 用例）；第 15 件（**微信扫码登录全链 ＋ 假 iLink 后端**）→ **118/1876**（+1 文件 +10 用例，见 §2.7a）；第 16 件（**§3-9 #10 的语义孪生 ＋ 台账复核**）→ **118/1879**（同文件 +3）；第 17 件（**`api.ts` 错误与边界分支批**）→ **118/1887**（同文件 +8，见 §2.7b）；第 18 件（**残余 catch 与尾部支线**）→ **118/1893**（两文件 +6，见 §2.7c）；第 19 件（**MSM 管理面 ＋ 安全边界**：`msm-ops.ts`）→ **119/1923**（+1 文件 +30 用例，见 §2.7d）；第 20 件（**打回闸门缝的边界与失败路径**：`output-guard-seam.ts`）→ **119/1931**（同文件 +8 用例，见 §2.7e））；第 21 件（**`container_fs` 的守卫面与路径校验**：`fs-ops.ts`）→ **120/1951**（+1 文件 +20 用例，见 §2.7f））；第 22 件（**超限重建的执行面与失败面**：`rebuild.ts`）→ **121/1962**（+1 文件 +11 用例，见 §2.7g））；第 23 件（**重建第二片 ＋ 三处「疑不可达」证伪**：`rebuild.ts` **三面全满**）→ **121/1970**（同文件 +8 用例，见 §2.7h））；第 24 件（**面 B 的 WS 反代残余面**：`gateway.ts`）→ **122/1973**（+1 文件 +3 用例，见 §2.7i））；第 25 件（**DSH 安装位置探测的三条候选 ＋ 失败终态**：`status.ts` **三面全满**）→ **122/1980**（同文件 +7 用例，见 §2.7j））；第 26 件（**面 B 的 DSH BrowserAuth cookie 注入面**：`gateway.ts` 的接线）→ **123/1984**（+1 文件 +4 用例，见 §2.7k））；第 27 件（**面 B 的装配与生命周期面**：`sync()` 四态）→ **124/1988**（+1 文件 +4 用例，见 §2.7l））；第 28 件（**`acp-http.ts` 的门控／路由／入参边界面**）→ **124/2003**（同文件 +15 用例，见 §2.7m））；第 29 件（**`wake-registry.ts` 的读面容错／写面失败／结案清理**）→ **124/2018**（同文件 +15 用例，见 §2.7n））；第 30 件（**`unattended-seam.ts` 的装配面／守卫面／清理面**）→ **124/2029**（同文件 +11 用例，见 §2.7o）；第 31 件（**`api.ts` 的 `resolveWorkspace` 默认箭头**）→ **124/2031**（同文件 +2 用例，见 §2.7p））；第 32 件（**`tools/*` 的 `output.render` 通路**，9 文件一次触达）→ **125/2049**（+1 文件 +18 用例，见 §2.7q））；第 33 件（**`tools/*` 的 `execute` 通路**，5 个 `execute` ＋ `cheap-worker.parseJobs`）→ **126/2062**（+1 文件 +13 用例，见 §2.7r））；第 34 件（**面规格的意图读取通路**：`skiffDebugSpec` 经 `faceEnabled` ＋ **产出 §3-8 第 18 行的结构发现**）→ **126/2065**（**同文件** +3 用例，见 §2.7s））
 
 | 维度 | 读数 |
 |---|---|
@@ -231,7 +231,7 @@
 | **走生产入口（`import { apply }`）** | **仅 3 个**：`register` / `config-volatile` / `skiff-startup-retry` |
 | 真机探针（依赖真宿主/真文档） | 2 个：`host/deepseek-vision-probe` / `-verify`（均自述诚实边界） |
 
-**分层现状**：主体是「**真 fs（`mkdtempSync` 出临时 CCC）＋ 替身宿主包**」的集成测试；**纯函数单测占比很小**（十余个小文件：`accounts-api`/`file-fallback-api`/`totp`/`ports`/`time`/`status`/`message-source`/`skills-discovery`/`handyman-preset`/`praxis` 等）；**契约/类型钉**另有一簇（`host/type-contract` 明示"真正的断言发生在编译期"）。
+**分层现状**：主体是「**真 fs（`mkdtempSync` 出临时 CCC）＋ 替身宿主包**」的集成测试；**纯函数单测占比很小**（十余个小文件：`accounts-api`/`file-fallback-api`/`totp`/`ports`/`time`/`status`/`message-source`/`skills-discovery`/`cheap-worker-preset`/`praxis` 等）；**契约/类型钉**另有一簇（`host/type-contract` 明示"真正的断言发生在编译期"）。
 
 #### 2.7a ✅ ⑤ 第 15 件：微信扫码登录全链 ＋ **假 iLink 后端**（2026-09-25 17:4x）—— 收掉一条**明文登记的边界**
 
@@ -255,7 +255,7 @@
 | 覆盖的簇 | 判据要点（都看**盘上/ wire 读数**，不看响应自述） |
 |---|---|
 | `resolveWorkspace` 两条真路径 | `?sessionId=` ⇒ 取会话 `header.cwd`（**首选**）；无 sessionId ⇒ **遍历 live 会话**挑出能解析成 CCC 的 cwd；＋负控（非 CCC 的 cwd **不被采用**） |
-| `/serenity/handymen` | `workspace` 指向真 CCC ⇒ 走 `listActiveHandymen(root)` 分支（既有用例只测了"无 CCC ⇒ 空表"） |
+| `/serenity/cheap-workers` | `workspace` 指向真 CCC ⇒ 走 `listActiveCheapWorkers(root)` 分支（既有用例只测了"无 CCC ⇒ 空表"） |
 | `/serenity/status` POST | 解析不到 CCC ⇒ **404** ＋ **盘上零改动**（负控：`.serenity-safe-on` 不得出现）；非 GET/POST ⇒ 405 |
 | 两条上传端点 | 🔴 **方法检查排在守卫之前**（GET **不带** UI 头仍应是 **405** 而不是 403 —— 顺序本身是契约）＋ 无 CCC ⇒ 404 ＋ **盘上无 `_tmp/` 落盘** |
 | `/serenity/weixin` GET **带账号** | `bound` 按 localstore 凭据**两态**（有/无 token）＋ 脱敏强化（**token 值本身**不出现在 wire） |
@@ -275,7 +275,7 @@
 
 | 故障形态 | 覆盖到的分支 | 读数 |
 |---|---|---|
-| **宿主服务读取抛错**（cordis Proxy 对未声明服务确实会抛）—— `sessions.get` ／ `sessions.list` | `handymen` ／ `cccs` 的 catch ⇒ 400；**`session-cleanup` 的 catch** ⇒ 400（该处 `sessions.list()` 是**裸调用**，不被收口层吞） | 三条 catch 各自 `error` 文案逐字含故障串 |
+| **宿主服务读取抛错**（cordis Proxy 对未声明服务确实会抛）—— `sessions.get` ／ `sessions.list` | `cheapWorkers` ／ `cccs` 的 catch ⇒ 400；**`session-cleanup` 的 catch** ⇒ 400（该处 `sessions.list()` 是**裸调用**，不被收口层吞） | 三条 catch 各自 `error` 文案逐字含故障串 |
 | **请求体不是合法 JSON**（面板发坏包） | `config PUT` ／ `public-ask PUT` 的 catch ⇒ 400 | — |
 | **CCC 布局被写坏**（`.opencode` 被占成一个普通文件） | **`weixin /login` 的 catch**（confirmed 落盘时抛）⇒ 400，**不是崩** | 落在 `api-weixin-login.test.ts`（那里才有假 iLink 后端） |
 | 服务可用性降级（非异常） | `config GET` 的 `workspaceRegistry.list()` 抛错 ⇒ **仍 200 ＋ `knownWorkspaces: []`**（面板显示"暂无可选工作区"，不是整页失败） | — |
@@ -660,7 +660,7 @@
 ② 🔴 **本件刻意不用 `vi.mock('@deepseek-ai/dsh-tools')`**（`acc-diag.test.ts` 用的是 identity 桩 `defineTool: (o) => o`）—— 走**真的 `defineTool`** ⇒ 测到的是**产线那个包装**，不是替身。
 🔵 **同批的自证**：测试首条用例先钉"**9 个工具对象都真的暴露 `output.render`**"，并断言 `TOOLS` 长度 = 9（**扫描域自证** ⇒ 防"扫了零个 ⇒ 永远绿"，同 §3-9 #7 的写法）。
 
-🔵 **9 个靶的构造分两族**（本件要处理的实际差异）：**模块级常量** `praxisTool` ／ `ccFsTool` ／ `gitTool` ／ `localstoreTool`；**工厂** `createKitTool(ctx)` ／ `createContainerAdminTool(ctx)` ／ `createImBridgeTool()`（**无 ctx**）／ `createHandymanTool(ctx)` ／ `createAccDiagTool(ctx)`。🔵 **实测：5 个工厂在"构造"时都不碰 `ctx`**（`ctx` 只在 `execute` 体内被用）⇒ 传一个空壳即可；`ctx` 的类型**从工厂形参派生**（`Parameters<typeof createKitTool>[0]`），**不额外 import `cordis` 的类型**。🔵 **`args` 传什么是无所谓的** —— 9 个 render 闭包**全部忽略第一个形参**（`(_args, value)`，或名为 `args` 但体内只读 `value`）。
+🔵 **9 个靶的构造分两族**（本件要处理的实际差异）：**模块级常量** `praxisTool` ／ `ccFsTool` ／ `gitTool` ／ `localstoreTool`；**工厂** `createKitTool(ctx)` ／ `createContainerAdminTool(ctx)` ／ `createImBridgeTool()`（**无 ctx**）／ `createCheapWorkerTool(ctx)` ／ `createAccDiagTool(ctx)`。🔵 **实测：5 个工厂在"构造"时都不碰 `ctx`**（`ctx` 只在 `execute` 体内被用）⇒ 传一个空壳即可；`ctx` 的类型**从工厂形参派生**（`Parameters<typeof createKitTool>[0]`），**不额外 import `cordis` 的类型**。🔵 **`args` 传什么是无所谓的** —— 9 个 render 闭包**全部忽略第一个形参**（`(_args, value)`，或名为 `args` 但体内只读 `value`）。
 
 | 用例 | 形态与判据 |
 |---|---|
@@ -673,24 +673,24 @@
 
 **读数（锚定 2026-09-25 19:25 那一跑）**：
 - 🔴 **机械判据（本件的直接验收）**：`coverage/src/**/*.html` 的 **`fstat-no` = 27 处**（改前 44）——🆕 **`44 → 27` 是本件开工前"预登记"的预测值，实测逐字命中**（同 §2.7i/o 家族：预测可证伪才算判据）。
-- **A 类**：**23 处 → 6 处**（亦为预登记值，命中）。残余 = **5 个 `execute`**（`cc-fs`／`git`／`kit`／`localstore`／`im-bridge`）＋ **`handyman.parseJobs`**（它只在 `jobs` 多任务编排路径被调用 ⇒ 归"execute 面"那件，见下）。
-- **9 文件函数面**：`praxis` ／ `acc-diag` ／ `container-admin` **→ 100%**；`cc-fs` ／ `git` ／ `localstore` → **66.66%**（2/3）；`kit` ／ `im-bridge` → **75%**（3/4）；`handyman` → **90.9%**（10/11）。⇒ 每处**恰余 1 个未执行函数**，且都恰是上面点名的那一个。
+- **A 类**：**23 处 → 6 处**（亦为预登记值，命中）。残余 = **5 个 `execute`**（`cc-fs`／`git`／`kit`／`localstore`／`im-bridge`）＋ **`cheap-worker.parseJobs`**（它只在 `jobs` 多任务编排路径被调用 ⇒ 归"execute 面"那件，见下）。
+- **9 文件函数面**：`praxis` ／ `acc-diag` ／ `container-admin` **→ 100%**；`cc-fs` ／ `git` ／ `localstore` → **66.66%**（2/3）；`kit` ／ `im-bridge` → **75%**（3/4）；`cheap-worker` → **90.9%**（10/11）。⇒ 每处**恰余 1 个未执行函数**，且都恰是上面点名的那一个。
 - **全仓**：语句 **96.59% → 96.73%**（24937 → **24971/25815**，**分母不变**）；分支 **86.78% → 86.88%**（5137/**5919** → 5173/**5954**，🔵 分母随执行而变，§2.7e 系列）；函数 **95.18% → 97.04%**（869 → **886/913**）——🔴 **`+17` 恰等于"本件覆盖的 17 处"**（8 文件各 2 处 ＋ `acc-diag` 1 处），**函数面这一对账是本件最硬的一条交叉验证**。
 - **125 文件 / 2049 用例**（+1 文件 +18 用例；**改前预登记为 2049 ⇒ 命中**）。
 - 门禁：typecheck ✅ ／ test ✅ ／ coverage ✅ exit 0（`src/**` 零改动 ⇒ build ／ pack-check 不强制）。
 
 🔵 **本件顺带查明（另一处"残余的性质"，供下一件）**：`container-admin.ts` 残余 `cbranch-no` **3 条，全在 `role` 域的 `execute`**（`gate.reject` 抛出 ／ `case 'apply'` ／ `default` 抛出）——**不在 render 面** ⇒ 证明本件把该文件的 render 面**真的做满了**，残余属"execute 面"那件。
 
-⏭️ **下一件（第 33 件）= 同族的"execute 面"**：5 个 `execute` ＋ `handyman.parseJobs`。🔴 **风险面与 render 面不同**（要吃各自的 `ctx`/`exec` 夹具 ⇒ 正是 §3-9 #7 的 **fake ctx 盲区**所在）⇒ **必须单独一件、单独判据**，不可与本件混做。
+⏭️ **下一件（第 33 件）= 同族的"execute 面"**：5 个 `execute` ＋ `cheap-worker.parseJobs`。🔴 **风险面与 render 面不同**（要吃各自的 `ctx`/`exec` 夹具 ⇒ 正是 §3-9 #7 的 **fake ctx 盲区**所在）⇒ **必须单独一件、单独判据**，不可与本件混做。
 
 ---
 
-#### 2.7r ✅ ⑤ 第 33 件：**`tools/*` 的 `execute` 通路**（5 个 `execute` ＋ `handyman.parseJobs`，2026-09-25 19:3x）—— 函数面 **+6**，`fstat-no` **27 → 21**；🔴 **`src/tools/` 函数面 60/60 全满**
+#### 2.7r ✅ ⑤ 第 33 件：**`tools/*` 的 `execute` 通路**（5 个 `execute` ＋ `cheap-worker.parseJobs`，2026-09-25 19:3x）—— 函数面 **+6**，`fstat-no` **27 → 21**；🔴 **`src/tools/` 函数面 60/60 全满**
 
 **靶** = §3-9b 复扫后的**残余 A 类**（6 处 / 6 文件）—— 即 §2.7q 点名留给本件的那 6 处。🔵 本件与 §2.7q 的**唯一分工判据**：`render` 面**不吃夹具**（`args` 随便传），`execute` 面**要吃 `ctx`/`exec`**。
 **新增** `tests/tools-execute-face.test.ts`（**+1 文件 / 13 用例**）。
 
-🔴 **夹具纪律（本件最易出错之处）**：`exec` 一律用**真值形态** —— `{agent:{session:{header:{cwd}}}}`（`cccRootForExec` 读的就是这条链），`cwd` 指向**临时 CCC**；⚠️ **`exec` 必须带 `cwd`**（否则回落 `process.cwd()`，工具会去**跑测试的那个真 CCC 根**里找夹具 —— 同 §2.7e 的 `trajectory-tool` 教训：**症状与"逻辑错"不可区分**）。三个夹具：`ccc`（有 `.serenity` ＋ `handyman` 配置）／`outside`（**无** `.serenity`）／`gitCcc`（有 `.serenity` ＋ 真 `git init`）。
+🔴 **夹具纪律（本件最易出错之处）**：`exec` 一律用**真值形态** —— `{agent:{session:{header:{cwd}}}}`（`cccRootForExec` 读的就是这条链），`cwd` 指向**临时 CCC**；⚠️ **`exec` 必须带 `cwd`**（否则回落 `process.cwd()`，工具会去**跑测试的那个真 CCC 根**里找夹具 —— 同 §2.7e 的 `trajectory-tool` 教训：**症状与"逻辑错"不可区分**）。三个夹具：`ccc`（有 `.serenity` ＋ `cheap-worker` 配置）／`outside`（**无** `.serenity`）／`gitCcc`（有 `.serenity` ＋ 真 `git init`）。
 
 🔴 **本件的核心产出 = 「无 CCC」时三种不同政策并排钉住**（此前从未被执行过 ⇒ 从未被钉住；三者是**同一个问题的三种设计选择**，任一处被改成另一种，本组先红）：
 
@@ -701,7 +701,7 @@
 | `im-bridge` | **不抛** ⇒ **结构化** `{ok:false, code:'CCC_UNRESOLVED'}` | 稳定错误码 ＋ 稳定语义 |
 
 **其余用例（在 CCC 内的正常面）**：`container_fs root` ⇒ 返回值**逐字等于夹具目录**（最强形态：不是"有个 root 字段"，而是"根解析结果 = 我造的那个目录"）｜`container_git status` ⇒ **真 git ＋ 真解析**（见下方首跑红）｜`dashboard time` ⇒ `epoch_ms` 与 `Date.now()` 相差 <5s（**正控式**：常量返回值也能让"字段存在"变绿）｜`localstore list` ⇒ `{scope:'credential', keys:[]}`（**空库是真实初态**）｜`im-bridge` 未知通道 ⇒ `CHANNEL_UNKNOWN` 且提示含通道名。
-**handyman 三态**：数组项缺 `label` ⇒ `parseJobs` 返回 null ⇒ **响亮抛错**（且**没有任何子代理被起**）｜合法 jobs 但**超 `maxParallel`** ⇒ 抛上限错误（夹具把 `maxParallel` 调成 1 ⇒ **不需要起任何子代理**就能走到这条校验）｜🔴 **登记一条不可达边界**（见下）。
+**cheap-worker 三态**：数组项缺 `label` ⇒ `parseJobs` 返回 null ⇒ **响亮抛错**（且**没有任何子代理被起**）｜合法 jobs 但**超 `maxParallel`** ⇒ 抛上限错误（夹具把 `maxParallel` 调成 1 ⇒ **不需要起任何子代理**就能走到这条校验）｜🔴 **登记一条不可达边界**（见下）。
 **契约面一条**：非法 `enum` ⇒ 抛 `ToolArgsError` ——🔵 这条是"**本件用真 wrapper 而非 identity 桩**"的直接回报（桩掉 `defineTool` 就没有这层校验），与 §2.7q 的选择一致。
 
 🔴 **登记一条"经工具面不可达"（本件把散文变成了机械读数）**：`parseJobs` 首行是 `if (!Array.isArray(raw) || raw.length === 0) return null`，**但**工具面声明 `jobs: { type: 'array' }` ⇒ 真 wrapper **在执行前**就按 schema 拒掉非数组 ⇒ 该支线**经工具面不可达**（`parseJobs` 未导出、唯一调用点就在本 `execute` 内）⇒ **刻意不硬凑**（house rule：不得把"从不发生"固化成"期望形态"）。✅ 本件用一条**正控**把它钉成读数：喂 `jobs: 'nope'` ⇒ 得到的是 `ToolArgsError`（**不是**那条 `parseJobs` 错误）⇒ 不可达性**可复现**。
@@ -942,7 +942,7 @@
 ⇒ 新增 `tests/seams/context-register.test.ts`（**16 用例**，按 L2 装配测试放 `tests/seams/`）：接线开关 ／ 播种幂等 ／ skiff 旁路 ／ **重启恢复链（正负控成对）** ／ **「context-only 必须 next() 委托」回归钉 ＋ 消息顺序**。提交 **`50ad1f3`**；test **1699 → 1715**。
 
 ✅ **2026-09-25 进展（第 2 件已补）**：**`registerBootstrap` 的四条缝处理器体此前无任何测试调用** —— grep 实证**全仓只有 `src/index.ts` 调它**，而 `tests/bootstrap.test.ts` 只测纯函数（设置解析／晋升 tracker）⇒ 四条处理器内的**分支逻辑从未被执行**。
-⇒ 新增 `tests/seams/bootstrap-register.test.ts`（**18 用例**，L2 装配测试同放 `tests/seams/`）：**接线**（4 条缝各 1 个 handler）｜**`system-prompt/assemble` 首锚「目录窄化」**（`boundary<0` ⇒ **0 工具**；非 CCC／恒晋升／已晋升 ⇒ 完整目录；`boundary≥0` ⇒ 窄化到 `compactionTools`；**缺一 ⇒ 降级完整目录**；`tools` 非数组 ⇒ 原样）｜**`agent/pre-step` 首锚「剥离注入上下文」**（剥 `skill-catalog`／`agent-instructions`；无抑制来源 ⇒ **`toBe` 身份断言**返回同一对象；已晋升／非 CCC／`kind=reject`／`messages` 非数组 ⇒ 原样）｜**`agent/inbox/inserted` 锚定轮注入**（**逆序 prepend**；已有 `user/message` 历史 ⇒ 不重锚；handyman／skiff ⇒ 不锚定；`ACC_MESSAGE_KIND` ⇒ 不递归）。提交 **`ae195a7`**；test **1715 → 1733**（+1 文件 +18 用例）。
+⇒ 新增 `tests/seams/bootstrap-register.test.ts`（**18 用例**，L2 装配测试同放 `tests/seams/`）：**接线**（4 条缝各 1 个 handler）｜**`system-prompt/assemble` 首锚「目录窄化」**（`boundary<0` ⇒ **0 工具**；非 CCC／恒晋升／已晋升 ⇒ 完整目录；`boundary≥0` ⇒ 窄化到 `compactionTools`；**缺一 ⇒ 降级完整目录**；`tools` 非数组 ⇒ 原样）｜**`agent/pre-step` 首锚「剥离注入上下文」**（剥 `skill-catalog`／`agent-instructions`；无抑制来源 ⇒ **`toBe` 身份断言**返回同一对象；已晋升／非 CCC／`kind=reject`／`messages` 非数组 ⇒ 原样）｜**`agent/inbox/inserted` 锚定轮注入**（**逆序 prepend**；已有 `user/message` 历史 ⇒ 不重锚；cheap-worker／skiff ⇒ 不锚定；`ACC_MESSAGE_KIND` ⇒ 不递归）。提交 **`ae195a7`**；test **1715 → 1733**（+1 文件 +18 用例）。
 🔵 **"非空洞"的旁证（就写在 coverage 的 stderr 里，可直接引用）**：`bootstrap: expected compaction tools missing=["todo_write"] — bootstrap disabled, full catalog exposed` ⇒ **降级分支真被执行**；`bootstrap: anchor turns injected: 2 条` ⇒ **注入路径真被执行**，并顺带证实 `DEFAULT_ANCHOR_MESSAGES.length === 2`。⚠️ **诚实边界**：本件**不覆盖** `if (SETTINGS.zeroTools)` 的 else 分支（它在产线不可达，见 **§3-8 第 6 行**）。
 🔵 **本件新得的判据**：🔴 **不要凭猜写常量字面量** —— 本件原先把 `ACC_MESSAGE_KIND` 猜成 `'serenity-bootstrap-anchor'`，**grep 实测 = `'plugin:dsh-serenity-hooks'`** ⇒ 已改为 **import 真常量**（不硬编码）。**同族判据**：凡"我以为是这个值"的断言，**先 grep 真值再写**。
 
@@ -973,12 +973,12 @@
 
 🔴 **2026-09-25 校正（第 8 件的实测）**：上面那句只对**当时那五个靶**成立 —— 同批复查覆盖率报告后发现**更大的缺口根本不在那五个靶里**（详见下方「第 8 件」）。
 ✅ **2026-09-25 进展（第 8 件已补：HTTP 对外面 —— 补的是**最薄的一块**）**：**`src/api.ts` 的 `registerStatusApi`（9 条 `/serenity/*` 路由，约 530 行）此前从未被执行**，连同 6 个私有助手（`readBody`／`sendJson`／`senderIsWebUi`／`requireWebUi`／`resolveWorkspace`／`requireCcc`）**全是零执行**。🔴 **为什么覆盖门禁没拦住**：门禁只要求"**测试源码里 import 过它**"（= 本节第 5 行的缺口形态）—— `accounts-api.test.ts` 提过 `api.ts` ⇒ 判"已覆盖"，而**77% 的语句从未运行**（本件起点实测：**23.55% 语句**）。
-⇒ 新增 **`tests/api-status-api.test.ts`（9 用例；真 listener ＋ 真 HTTP 往返 ＋ 真 CCC 夹具）**：**接线自证**（9 条路由真注册 ＋ 全在 `/serenity/` 前缀 ＋ 无重复）｜handymen GET/405｜status GET（CCC 内 `root=<ccc>`／CCC 外 `root: null` 的**降级不是报错**）｜🔴 **safe-mode 正负成对**（无 WebUI 头 ⇒ 403 **且标记文件绝不出现**；带头 ⇒ 200 **且 `.serenity-safe-on` 真的落盘**，开关双向都验）｜image-upload（403／**落盘实证**／类型白名单 400）｜file-upload（**可执行扩展名 400 ＋ 盘上无文件**，并配正控）｜未知路径不接管。
+⇒ 新增 **`tests/api-status-api.test.ts`（9 用例；真 listener ＋ 真 HTTP 往返 ＋ 真 CCC 夹具）**：**接线自证**（9 条路由真注册 ＋ 全在 `/serenity/` 前缀 ＋ 无重复）｜cheapWorkers GET/405｜status GET（CCC 内 `root=<ccc>`／CCC 外 `root: null` 的**降级不是报错**）｜🔴 **safe-mode 正负成对**（无 WebUI 头 ⇒ 403 **且标记文件绝不出现**；带头 ⇒ 200 **且 `.serenity-safe-on` 真的落盘**，开关双向都验）｜image-upload（403／**落盘实证**／类型白名单 400）｜file-upload（**可执行扩展名 400 ＋ 盘上无文件**，并配正控）｜未知路径不接管。
 **读数（同一 743 语句分母，可对比）**：`api.ts` **23.55% → 51.14%**（175 → 380 条语句，**+205**）；全仓语句 **92.07% → 92.86%**。test **1807 → 1816**（+1 文件 +9 用例）。
 🆕 🔴 **本件顺带测到一条现状缺陷（已登记待裁）**：超 64KB 的 POST 体 ⇒ `readBody` `reject` **并 `req.destroy()`** ⇒ socket 被销毁 ⇒ handler 随后那句 `sendJson(res, 400, {error:'body too large'})` **写不出去** ⇒ 客户端看到的是 **ECONNRESET**，而**不是**预期的 400 JSON ⇒ **该错误分支在实践里不可达**。（安全性质仍成立：硬断**确实拦住了动作**，已用负控钉住。）处置 = **(a)** 改实现（先排空再回 400）／**(b)** 改判据（承认"硬断"是刻意的 DoS 防护）⇒ **待 owner 一句话**。
 🔵 **顺带实证了 §3-1 那处登记残留（裸 `ctx.get`）的失败模式差异**：夹具**不提供** `ctx.get` 时，status 端点因那处裸调用直接抛 ⇒ 被 catch 吞成 **400（整端点不可用）**；而走收口层（`hostService`，异常吞掉返回 undefined）本应**降级为 `codeRuntime: null`**。⇒ **"唯一读取入口"欠账不只是整洁问题，它决定"降级"还是"全挂"。**
 
-✅ **2026-09-25 进展（第 9 件：把这块 HTTP 面补齐 —— 其余 5 条路由）**：第 8 件只覆盖了 `status` ／ `handymen` ／ `image-upload` ／ `file-upload`，本轮补 **`config` ／ `cccs` ／ `public-ask` ／ `weixin` ／ `session-cleanup`**（同文件 +6 用例）。
+✅ **2026-09-25 进展（第 9 件：把这块 HTTP 面补齐 —— 其余 5 条路由）**：第 8 件只覆盖了 `status` ／ `cheapWorkers` ／ `image-upload` ／ `file-upload`，本轮补 **`config` ／ `cccs` ／ `public-ask` ／ `weixin` ／ `session-cleanup`**（同文件 +6 用例）。
 🔴 **两条纪律（写测试时就要定）**：① **写操作只落临时全局配置** —— `/serenity/config` 的 PUT 与 public-ask 的 key 轮换**都会写全局配置**（`globalConfigPath()` 认 `SERENITY_HOOKS_CONFIG`）⇒ 夹具把它指到临时文件，**绝不碰真机配置**；② **破坏性动作不测** —— `session-cleanup` 只验 **GET 的 dryRun 预览**（POST 会**真删**会话，本轮不动）。
 关键断言：PUT 配置 ⇒ **文件真落盘**（读到 `tester`）**且明文口令既不上 wire 也不落盘**（回包不含明文、盘上是 hash）｜public-ask **rotate 真换 key**（新 ≠ 旧，且再 GET 拿到的是新 key ⇒ 不是内存态幻觉）＋ 非法 action ⇒ 400｜weixin 三道门（无头 403 ／ 缺 `ccc` ⇒ `missing ccc param` ／ 非 CCC ⇒ `no CCC found from:`）＋ **脱敏不变量**（body 里不出现 `token`）｜cccs ⇒ 数组 ＋ POST 405｜cleanup ⇒ `dryRun: true` 且 `candidates.length === count`。
 **读数（同一 743 语句分母）**：`api.ts` **51.14% → 70.12%**（380 → 521 条，**+141**）｜全仓语句 **92.86% → 93.43%**。test **1816 → 1822**。
@@ -1034,9 +1034,9 @@
 
 | 类 | 文件数 / 处数 | 形态 | 判读 |
 |---|---|---|---|
-| **A · `tools/*` 的工具面**（render ＋ execute） | **9 文件 / 23 处** ⇒ ✅ **6 / 6** ⇒ ✅ **0 / 0** | render 面：`renderText()` ＋ `output.render`（`(_args, value) => renderText(value)`）**恒缺**；execute 面：`execute` 缺 于 `cc-fs`／`git`／`kit`／`localstore`／`im-bridge`，`parseJobs` 缺于 `handyman` | ✅🔴 **两类已被 §2.7q ＋ §2.7r 全部赎清（0 处）** ⇒ **`src/tools/` 函数面 60/60 = 100%，整个工具面已无"零执行函数"**。🔵 **方法学产出**：这个"9 文件一次触达"的形态，**两件就清完了一整类**（而不是 9 件）—— 挑靶时**先看"形态是否同一"比先看"文件重不重要"划算得多** |
+| **A · `tools/*` 的工具面**（render ＋ execute） | **9 文件 / 23 处** ⇒ ✅ **6 / 6** ⇒ ✅ **0 / 0** | render 面：`renderText()` ＋ `output.render`（`(_args, value) => renderText(value)`）**恒缺**；execute 面：`execute` 缺 于 `cc-fs`／`git`／`kit`／`localstore`／`im-bridge`，`parseJobs` 缺于 `cheap-worker` | ✅🔴 **两类已被 §2.7q ＋ §2.7r 全部赎清（0 处）** ⇒ **`src/tools/` 函数面 60/60 = 100%，整个工具面已无"零执行函数"**。🔵 **方法学产出**：这个"9 文件一次触达"的形态，**两件就清完了一整类**（而不是 9 件）—— 挑靶时**先看"形态是否同一"比先看"文件重不重要"划算得多** |
 | **B · `readSimpleSettings().enabled` 闭包** | 2 文件 / 2 处 ⇒ ✅ **1 / 1** | `enabled: () => readSimpleSettings().<x>Enabled`（`gateway.ts` ／ `skiff-debug.ts`） | 🔴 **本类被 §2.7s 更正过一次，结论比"形态同一"细**：两处**表面同形、可达性不同**。`skiff-debug` 那处有 spec 构造函数（`skiffDebugSpec`）⇒ 可按 §2.7m 的形态覆盖（**已赎**）；**`gateway` 那处是内联字面量、无 spec 构造函数 ⇒ 构造上不可达** ⇒ **已移出 ⑤ 靶单、移入 §3-8 第 18 行**（② 第 2 批待裁），**不再计为"待赎"**。🔵 **教训形态**：**"形态同一"要连"对象能不能被取到"一起判** —— 同形的两处可能在**可达性**上是两档 |
-| **C · 单点杂项** | 12 文件 / 19 处 ⇒ **逐条赎清中（已完成 36/37/38 + 40/41/42 六件）** | 🔴 **本行的"优先子集"已于 2026-09-25 作废** —— 原文写「`seams/guards` 那 4 处皆带 `cstat-no` ⇒ 最可能是真靶」，而**它们早在 §2.7 第 35 件（`54a4c2c`）就被赎清了**（`guards.ts` 报告实测 `fstat-no` **零命中**）⇒ 本表当时**没跟着更新**（陈旧读数）。<br>🔵 **其余同一教训**：`seams/system-prompt` 的 `text` 回调（第 36 件）、`host/storage-domain` 的 `parse`／`safeParse`（第 37 件）、`trajectory-ops` 的 `resolveSessionByTitle`（第 38 件）**也都在本行，且都已赎清**；`today` 则**改判为死代码**（§3-8 第 19 行）。<br>🔴 **本行的教训（写下来）**：**这张"下一靶"表是快照不是不变量**，而它**没有自动更新机制** ⇒ 用它挑靶前**必须先跑一次 §3-9b 复扫**（`grep -c fstat-no coverage/src/**/*.html`），否则会照着**已赎清的旧靶**开工。<br>⏭️ **仍待赎（本行余项，逐条先证可达性）**：`weixin-api.currentFetch` 默认箭头(×2，**注入点本身，不该赎**) ／ `face-host.permanentOnError` ／ `gateway-dsh-auth.end` ／ `skiff-core`（`isResumeFallbackError` ＋ `dispose`，**已判死代码／不可达** ⇒ §3-8 第 20/21 行）／ `msm-ops` 的 Windows bun 路径箭头。<br>✅ **2026-09-25 复扫后新赎三件（第 40/41/42，见 §3-9c）**：`handyman-ops.writeFailedStatus` ／ `web-fetch-provider.lookupAll` ／ `unattended-ops.outboundSendRoots`。🔵 **机械佐证**：复扫 **10 处 / 8 文件 → 6 处 / 5 文件**（开工前 → 收尾后），函数面 **906/912（99.34%）**。 |
+| **C · 单点杂项** | 12 文件 / 19 处 ⇒ **逐条赎清中（已完成 36/37/38 + 40/41/42 六件）** | 🔴 **本行的"优先子集"已于 2026-09-25 作废** —— 原文写「`seams/guards` 那 4 处皆带 `cstat-no` ⇒ 最可能是真靶」，而**它们早在 §2.7 第 35 件（`54a4c2c`）就被赎清了**（`guards.ts` 报告实测 `fstat-no` **零命中**）⇒ 本表当时**没跟着更新**（陈旧读数）。<br>🔵 **其余同一教训**：`seams/system-prompt` 的 `text` 回调（第 36 件）、`host/storage-domain` 的 `parse`／`safeParse`（第 37 件）、`trajectory-ops` 的 `resolveSessionByTitle`（第 38 件）**也都在本行，且都已赎清**；`today` 则**改判为死代码**（§3-8 第 19 行）。<br>🔴 **本行的教训（写下来）**：**这张"下一靶"表是快照不是不变量**，而它**没有自动更新机制** ⇒ 用它挑靶前**必须先跑一次 §3-9b 复扫**（`grep -c fstat-no coverage/src/**/*.html`），否则会照着**已赎清的旧靶**开工。<br>⏭️ **仍待赎（本行余项，逐条先证可达性）**：`weixin-api.currentFetch` 默认箭头(×2，**注入点本身，不该赎**) ／ `face-host.permanentOnError` ／ `gateway-dsh-auth.end` ／ `skiff-core`（`isResumeFallbackError` ＋ `dispose`，**已判死代码／不可达** ⇒ §3-8 第 20/21 行）／ `msm-ops` 的 Windows bun 路径箭头。<br>✅ **2026-09-25 复扫后新赎三件（第 40/41/42，见 §3-9c）**：`cheap-worker-ops.writeFailedStatus` ／ `web-fetch-provider.lookupAll` ／ `unattended-ops.outboundSendRoots`。🔵 **机械佐证**：复扫 **10 处 / 8 文件 → 6 处 / 5 文件**（开工前 → 收尾后），函数面 **906/912（99.34%）**。 |
 
 🔴 **两条读数纪律（本扫顺带实证）**：
 1. **`fstat-no` 与 `cstat-no` 要分开数、分开用** —— 只有前者才回答"**哪个函数从没跑过**"；首扫 44 处 `fstat-no`，其中**多处在报告里同时带 `cstat-no`**（= 整个函数连同语句一起没跑），但**也有只带 `fstat-no` 的**（函数没进，但其所在行被别的东西跑过）。🔵 **§2.7s 是这条最干净的一次实证**：那一件**语句面一字未动**（25014/25815），**只有函数面 +1**。
@@ -1049,7 +1049,7 @@
 
 | 件 | 靶 | 可达性取证（**动手前**） | 残余的性质 | 结果 |
 |---|---|---|---|---|
-| **40** | `handyman-ops.writeFailedStatus` | 🟢 **有活调用点**：`src/tools/handyman.ts` 的保险阀终止分支（`finishReason !== 'done'` ⇒ `max_rounds` ／ `restart_exceeded`） | **失败面**（挑靶四条里最值钱一档） | ✅ 3 用例：无既有进度 ⇒ 文档化兜底（`done=true`／`status=failed`／`round 0`／`model ''`）；**有既有进度 ⇒ 保留 round／model／lastResponse**（不抹掉"做到哪了"）；目录不存在也能落盘 ＋ label 脱敏 |
+| **40** | `cheap-worker-ops.writeFailedStatus` | 🟢 **有活调用点**：`src/tools/cheap-worker.ts` 的保险阀终止分支（`finishReason !== 'done'` ⇒ `max_rounds` ／ `restart_exceeded`） | **失败面**（挑靶四条里最值钱一档） | ✅ 3 用例：无既有进度 ⇒ 文档化兜底（`done=true`／`status=failed`／`round 0`／`model ''`）；**有既有进度 ⇒ 保留 round／model／lastResponse**（不抹掉"做到哪了"）；目录不存在也能落盘 ＋ label 脱敏 |
 | **41** | `web-fetch-provider.lookupAll` | 🟢 **主路径**：`resolveAllowedAddresses` 在**非 IP 字面量**时无条件调它 —— 而生产里 `web_fetch` 传的**正是域名** | **真 DNS 路径** ＋ **唯一同时带 `cstat-no` 的残余** | ✅ 8 用例（mock `node:dns/promises`）：映射／私网拒绝／**DNS 重绑定混合集整体拒绝**／fake-ip 放行／空结果／**前置 abort 不发起查询**／解析中 abort 竞速／**abort 后 lookup 才失败不产生 unhandled rejection** |
 | **42** | `unattended-ops.outboundSendRoots` | 🟡 **导出且零调用点**，但**自述用途 = 「诊断 / 测试用」** | **活契约占位**（与第 19 行 `today` **不同档**：`today` 零调用 ∧ 无用途声明 ⇒ 死代码；本例**有文档化用途** ⇒ **钉住不删**） | ✅ 1 用例：报出有记录的 CCC；空根不入表（与 `hasOutboundSendSince` 同口径）；**只读视图**（调用它不改变表大小） |
 
@@ -1063,10 +1063,10 @@
 | 1 | **客户端半零行为测试** | 8 个 `.tsx` ＋ 4 个 `.css` **无任何行为/渲染测试**；根因可判定 = 两份 vitest 配置 `environment: 'node'` 且 `devDependencies` **无 jsdom** ⇒ 客户端半在测试面上**不可执行** |
 | 2 | **客户端半不在覆盖率门禁内** | `hooks/vitest.config.ts` 的 `coverage.exclude` 含 `src/client/**`（阈值 statements 60 / branches 55 / functions 55 / lines 60） |
 | 3 | **槽位装配无门禁看护** | `client/index.ts` 的 3 次 `slots.register` ＋ `configForms.whileServed` 无测试；且 `coverage-gate.test.ts` 的过滤条件 `.filter(rel => !rel.includes('client/'))` 把整个 `client/` 排除 |
-| 4 | ~~**白名单残留项**：`coverage-gate` 的 `INDIRECT_COVERED` 含 `autopilot-trajectory.ts`~~ ⇒ 🔴 **2026-09-25 复核：原判已陈旧、本行销账** | **实测** `INDIRECT_COVERED` = **12 项**（`gateway-auth` / `gateway-proxy` / `cc-fs` / `git` / `kit` / `msm` / `handyman` / `localstore` / `trajectory` / `cce` / `eap` / `neat`），**不含** `autopilot-trajectory.ts`⇒ 该残留已在某轮被清掉，**无需再动**（判据 = 读 `coverage-gate.ts` 的常量表，不是读本行） |
+| 4 | ~~**白名单残留项**：`coverage-gate` 的 `INDIRECT_COVERED` 含 `autopilot-trajectory.ts`~~ ⇒ 🔴 **2026-09-25 复核：原判已陈旧、本行销账** | **实测** `INDIRECT_COVERED` = **12 项**（`gateway-auth` / `gateway-proxy` / `cc-fs` / `git` / `kit` / `msm` / `cheap-worker` / `localstore` / `trajectory` / `cce` / `eap` / `neat`），**不含** `autopilot-trajectory.ts`⇒ 该残留已在某轮被清掉，**无需再动**（判据 = 读 `coverage-gate.ts` 的常量表，不是读本行） |
 | 5 | 🔴 **缺口形态 = "未被真正执行"，不是"未被提及"** | `coverage-gate.test.ts` 用正则 `['"][^'"]*\/mod\.js['"]` 在**测试源码文本**里匹配 import 字符串 ⇒ **"提到即算覆盖"**。本仓**不存在门禁意义上裸奔的模块**（这一区别决定第 ⑤ 项该怎么补） |
 | 6 | **只有 3 个测试走生产入口** | `register` / `config-volatile` / `skiff-startup-retry` 才 `import { apply } from '../src/index.ts'` |
-| 7 | 🔴 **fake ctx 的已知盲区（有真实先例）** | 真宿主 cordis 的 `Context` 是 **Proxy**：访问**未在 `inject` 声明**的服务名会**抛错**，而普通对象 ctx 只返回 `undefined` ⇒ v1.31.3 handyman foreground **真机报** `cannot get property "subagents" without inject`，而"**全部 fake ctx 单测都是绿的**"（证据 = 同仓 `host/cordis-access.test.ts` 注释）<br>🆕 ✅ **2026-09-25 补一条机械守卫（在调用点也有保护力）**：新增 **`tests/host/lazy-service-access.test.ts`** —— **lazy 服务不得被直接属性读**（名单**从 `HOST_SERVICES` 派生、不手抄**；🔴 **先剥注释与字符串字面量**再匹配，防"docstring 里的 `ctx.subagents`"造出假阳性 —— CCC 侧 `hasCliEntry()` 就踩过同款坑）。含**三条正控**：① 真实属性读能被抓 ② 注释/串里的不算 ③ **真实文件双面控**（`tools/handyman.ts` 原文含 `ctx.subagents`、剥后必须为空）＋ **扫描域自证**（文件数 > 50 且被排除的 `access.ts` 确实在域内）⇒ 防"扫了零个文件 ⇒ 永远绿" |
+| 7 | 🔴 **fake ctx 的已知盲区（有真实先例）** | 真宿主 cordis 的 `Context` 是 **Proxy**：访问**未在 `inject` 声明**的服务名会**抛错**，而普通对象 ctx 只返回 `undefined` ⇒ v1.31.3 cheap-worker foreground **真机报** `cannot get property "subagents" without inject`，而"**全部 fake ctx 单测都是绿的**"（证据 = 同仓 `host/cordis-access.test.ts` 注释）<br>🆕 ✅ **2026-09-25 补一条机械守卫（在调用点也有保护力）**：新增 **`tests/host/lazy-service-access.test.ts`** —— **lazy 服务不得被直接属性读**（名单**从 `HOST_SERVICES` 派生、不手抄**；🔴 **先剥注释与字符串字面量**再匹配，防"docstring 里的 `ctx.subagents`"造出假阳性 —— CCC 侧 `hasCliEntry()` 就踩过同款坑）。含**三条正控**：① 真实属性读能被抓 ② 注释/串里的不算 ③ **真实文件双面控**（`tools/cheap-worker.ts` 原文含 `ctx.subagents`、剥后必须为空）＋ **扫描域自证**（文件数 > 50 且被排除的 `access.ts` 确实在域内）⇒ 防"扫了零个文件 ⇒ 永远绿" |
 | 8 | **唯一的真宿主访问层测试可整体 skip** | `host/cordis-access.test.ts` 用宿主真实 cordis（peer-only，本仓不安装）；"一个都找不到时（CI runner 未装 DSH 宿主）**整体 skip**" |
 | 9 | ~~**行为证据指向不存在的落点**~~ ⇒ 🔴 **2026-09-25 复核：表述失真（结论改了）** | `ui-probe/` **存在**，只是**不在本插件仓** —— 它在 **CCC（宁静号仓）**：`AGENT_SESSIONS/2026-08-24--S142--dsh-serenity-plugin 长期维护/ui-probe/`（`measure.mjs`（测量唯一真相源）／`probe.mjs`／`verify.mjs`／`mock-probe.mjs`／`chain.mjs`／`explore.mjs`／`launch-cdp.sh` ＋ `artifacts/` 真机读数）。⇒ **真问题 = 指针不可解析**（注释用**仓内相对路径**写法 ⇒ 读的人在本仓找不到，会被误读成"指向已删目录"）——**已修**：`client-popover-clip-guard.test.ts` 注释改为写明**仓分离**与真实位置 |
 | 10 | 行为测试内夹源码文本断言 | `gateway` L465-499 ／ `trajectory-bound` L307/319/475 ／ `trajectory-skills` L300-328（读 `src/**` 文本）⇒ 属于"接线钉"，不构成行为证据<br>🆕 **2026-09-25：`gateway` 那组已配语义孪生** —— 新增 **v1.22.3 语义化**（真 listener ＋ 真 socket 硬断 RST ＋ 真上游）：**进程不崩 ＋ 中断后网关仍可用**。🔴 **顺带产出一条发现**（见下方"第 6 件"）⇒ `gateway` 的字符串钉**保留**（互补：钉管"实现还在"，语义组管"崩没崩"）<br>🆕 **2026-09-25 复核（⑤ 第 16 件）——三处分档，**其中两处原判已陈旧**：<br>　· `trajectory-bound` **两处**（L307 的"`use` 不再自己发起退休"／L319 的"退休判据在 `appendBound`"）⇒ ✅ **已有语义孪生**：同文件 **D69 组**走**生产路径 `appendBound`** 断言"自己不被退休 ＋ 同轨迹其它条被退休 ＋ 可用绑定恰好只剩自己"（F1 正控）、`rebuild` 换代（F2）、`create`、共用 `at`；而另一半点（`pruneMissingBindings` ＋ `out.prunedBindings` 回报）由 `trajectory-tool.test.ts` 的**真 `use` 路径**两态钉住（悬空 ⇒ 回报 ／ 宿主日志面不可读 ⇒ fail-closed 不剪）。⇒ **本行原判作废**，两枚钉保留（互补：钉管"调用点没被改回去"，语义组管"参数对、结果对"）。<br>　· `trajectory-skills` **一处**（SEP 符号 ＋ 散文残留 = 0）⇒ 🔴 **确实只有源码文本级**（那两枚钉读 `src/**`）—— 而 §7 记录的**真实漏网形态恰在这一层**："符号没了、散文还在"（C1 只钉符号名，面向模型的 toolsBlock 文案里仍留 `session-extension`）。✅ **本件已补语义孪生**：扫**渲染输出**（`serenitySystemPrompt` 的真注入正文 ＋ 注入器**自产**的三条 notice 文案），＋ **读数器自证**（同一词表喂含词样本必须命中）。⚠️ **边界**：只适用**ACC 自产文案**——CCC 自己的 SKILL.md／历史沿革里的合法提及**不在**扫描域（夹具无入口 skill，故正文＝纯 ACC 块）。⇒ 源码钉**保留**（互补：钉管"仓库没人写回去"，语义组管"模型收到的那段字里没有"） |

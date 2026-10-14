@@ -78,7 +78,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     mkdirSync(join(d, '.opencode'), { recursive: true })
     writeFileSync(join(d, '.serenity'), 'test')
     writeFileSync(join(d, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, accounts: [{ accountId: 'wechat-1' }], routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -298,7 +298,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     const a = makeCcc('tok-a')
     // 把目标 CCC 的 weixin 段整体关掉（甚至删掉）——机器级模式**照样投得到**
     writeFileSync(join(a, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: false },
     }))

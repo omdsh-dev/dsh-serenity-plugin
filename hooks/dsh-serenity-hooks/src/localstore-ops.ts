@@ -14,7 +14,7 @@
  * 存储结构（JSON 顶层分节）：
  *   { "credentials": { "HOME_GITLAB_TOKEN": "xxx" }, "<config节>": { "<key>": "v" } }
  *   credentials 为保留节（credential 命名空间，key 大写蛇形）；其余节归 config 命名空间
- *   （path = section.key，如 handyman.models）。
+ *   （path = section.key，如 cheap-worker.models）。
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -149,7 +149,7 @@ function assertCredentialKey(key: string): void {
 function assertConfigPath(path: string): { section: string; key: string } {
   const idx = path.indexOf('.')
   if (idx <= 0 || idx === path.length - 1) {
-    throw new Error(`config path "${path}" must be section.key (e.g. handyman.models)`)
+    throw new Error(`config path "${path}" must be section.key (e.g. cheap-worker.models)`)
   }
   const section = path.slice(0, idx)
   const key = path.slice(idx + 1)
@@ -245,7 +245,7 @@ export function docText(root: string): string {
     '  "credentials": {',
     '    "HOME_GITLAB_TOKEN": "xxx"',
     '  },',
-    '  "handyman": {',
+    '  "cheap-worker": {',
     '    "models": ["minimax-cn-coding-plan/MiniMax-M3"]',
     '  }',
     '}',
@@ -254,7 +254,7 @@ export function docText(root: string): string {
     '',
     '## Key conventions',
     '- credential key: ^[A-Z][A-Z0-9_]*$ (e.g. HOME_GITLAB_TOKEN)',
-    '- config path: section.key (section ^[a-z][a-z0-9-]*$, key lowerCamel ^[a-z][a-zA-Z0-9_]*$, e.g. handyman.models)',
+    '- config path: section.key (section ^[a-z][a-z0-9-]*$, key lowerCamel ^[a-z][a-zA-Z0-9_]*$, e.g. cheap-worker.models)',
     '',
     '## Reading (agents may use fs tools directly)',
     `- Read ${path} with the read tool → JSON.parse`,

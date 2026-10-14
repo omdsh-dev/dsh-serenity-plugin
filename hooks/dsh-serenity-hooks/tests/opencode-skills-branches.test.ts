@@ -5,7 +5,7 @@
  * 按 ⑤ 换挡后的入口「**按分支覆盖率排序**」复扫 `coverage/src/**` ⇒
  * `seams/opencode-skills.ts` = 分支 **77.77%（14/18）**，是 `src/**` 中**最低的未被做过**的文件
  * （43~49 已做完：`diag-ops` ／ `compact` ／ `lifecycle` ／ `seams/context` ／ `weixin-hook` ／
- *  `wake-scheduler` ／ `tools/handyman`）。🔵 **它的形态很特殊**：**语句已 100%（65/65）、函数 3/3** ——
+ *  `wake-scheduler` ／ `tools/cheap-worker`）。🔵 **它的形态很特殊**：**语句已 100%（65/65）、函数 3/3** ——
  * 也就是说**每一行都跑过**，但**四条分支的另一侧从没走过**。这种"语句满分、分支缺口"正是
  * ⑤ 换挡（从"补零执行函数"转向"语义深度／分支覆盖"）要抓的对象。
  *

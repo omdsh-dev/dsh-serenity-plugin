@@ -118,7 +118,7 @@ OpenClaw 官方支持 **ACP agents**（docs2.openclaw.ai/tools/acp-agents）：O
 
 ### 场景①：单独部署问答助手（带 Loop 约束）
 
-"Loop 约束"解读：问答助手的**行为约束**——知识域限定、只读工具面（read/grep/知识查询）、输出风格、自主循环到完成（与 handyman 的 stop-token 语义同源）。
+"Loop 约束"解读：问答助手的**行为约束**——知识域限定、只读工具面（read/grep/知识查询）、输出风格、自主循环到完成（与 cheap-worker 的 stop-token 语义同源）。
 
 部署形态选项：
 - **A1**：独立 dsh 进程 + 官方/第三方 ACP server（fresh agent per session，persona 定制知识问答）

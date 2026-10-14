@@ -17,7 +17,7 @@ export type { SkiffRoleConfig }
 /** Skiff agent 会话 id 前缀（agents.create 生成；seams 旁路/白名单判定用） */
 export const SKIFF_SESSION_PREFIX = 'skiff-'
 
-/** 判定 sessionId 是否为 Skiff 会话（仿 handyman- 前缀排除模式） */
+/** 判定 sessionId 是否为 Skiff 会话（仿 cheap-worker- 前缀排除模式） */
 export function isSkiffSessionId(sessionId: string | undefined): boolean {
   return typeof sessionId === 'string' && sessionId.startsWith(SKIFF_SESSION_PREFIX)
 }

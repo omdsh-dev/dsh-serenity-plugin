@@ -72,7 +72,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'agents',
     access: 'injected',
     members: [{ name: 'create', kind: 'function' }, { name: 'get', kind: 'function' }],
-    impact: 'skiff/handyman 无法创建或复用 agent',
+    impact: 'skiff/cheap-worker 无法创建或复用 agent',
     required: true,
   },
   {
@@ -158,7 +158,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'agentLoop',
     access: 'injected',
     members: [],
-    impact: 'handyman worker agent 无法装配 preset',
+    impact: 'cheap-worker worker agent 无法装配 preset',
     required: false,
   },
   {
@@ -166,7 +166,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'subagents',
     access: 'lazy',
     members: [{ name: 'start', kind: 'function' }],
-    impact: 'handyman foreground 模式不可用（响亮报错，不影响 background 模式）',
+    impact: 'cheap-worker foreground 模式不可用（响亮报错，不影响 background 模式）',
     required: false,
   },
   {
@@ -293,7 +293,7 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'agent/created', site: 'seams/context.ts, gateway.ts, cro-turns.ts, index.ts', impact: 'ACC 身份播种失效（identity + 工具可见性/restrict 不播种）', required: true },
   { name: 'agent/pre-step', site: 'seams/context.ts, seams/bootstrap.ts', impact: '上下文注入/首轮锚定失效', required: true },
   { name: 'agent/turn-stopping', site: 'rebuild.ts, output-guard-seam.ts', impact: 'rebuild 不执行 / 输出守卫失效', required: true },
-  { name: 'agent/status', site: 'skiff-core.ts, tools/handyman.ts', impact: '等待空闲逻辑失效', required: false },
+  { name: 'agent/status', site: 'skiff-core.ts, tools/cheap-worker.ts', impact: '等待空闲逻辑失效', required: false },
   { name: 'agent/inbox/inserted', site: 'seams/bootstrap.ts', impact: 'first-anchor 锚定失效', required: false },
   { name: 'agent/inbox/claimed', site: 'unattended-seam.ts', impact: '无人值守代理误判「本轮由用户发起」（判据失真 ⇒ 该动的不动 / 不该动的动）', required: false },
   { name: 'agent/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },

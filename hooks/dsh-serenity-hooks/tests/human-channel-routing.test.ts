@@ -277,7 +277,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
   /** CCC 配置：skiff 有 `qa` 角色；`weixin` 段按需给 routes */
   function writeConfig(weixin: unknown): void {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin,
     }))

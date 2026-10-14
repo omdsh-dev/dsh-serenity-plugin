@@ -1,14 +1,14 @@
 /**
- * handyman.ts — handyman（杂工）真实 DSH 工具（v1.24.0：loop 牛马 → handyman 杂工）
+ * cheap-worker.ts — cheap-worker（杂工）真实 DSH 工具（v1.24.0：loop 牛马 → cheap-worker 杂工）
  *
  * 用户需求（S142 拍板）：
  *   - **同步**（用户明确：这个事一般不会异步——工具阻塞到完成）
- *   - **指定模型**（CCC 白名单内——handyman.models，未配置报错）
+ *   - **指定模型**（CCC 白名单内——cheap-worker.models，未配置报错）
  *   - **自主循环到完成**（stop-token 唯一完成判据，对齐 osp loop）
  *   - **内部递归同样低能 subagent**（worker 工具面含 subagent，DSH 原生模型继承）
  *   - **workflow 能力**（jobs 编排：主 agent 一次并行多个杂工，maxParallel 默认 10）
- *   - **worker 不含 handyman 本身**（递归编排归主 agent，防无限嵌套）
- *   - **不兼容旧 loop 进度文件**（仅 handyman- 前缀）
+ *   - **worker 不含 cheap-worker 本身**（递归编排归主 agent，防无限嵌套）
+ *   - **不兼容旧 loop 进度文件**（仅 cheap-worker- 前缀）
  *
  * 机制：ctx.agents.create()（带 setup 钩子）创建专用 agent（进程内），
  * 每轮 followup → agent/status idle → 读 session.events 响应 → 写进度 → stop token 检查 →
@@ -16,7 +16,7 @@
  * （重启计数，≤100），同一轮重试。工厂模式：apply 时闭包捕获插件 ctx（工具 execute 无 ctx 参数）。
  *
  * preset 继承 + 工具收窄：setup 钩子里对子 agent 执行 agentPresets.composeFrom（对齐
- * subagent 先例）+ tools.restrict deny handyman（worker 内部看不到 handyman 工具）。
+ * subagent 先例）+ tools.restrict deny cheap-worker（worker 内部看不到 cheap-worker 工具）。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -30,13 +30,13 @@ import type {} from '@deepseek-ai/dsh-agent-loop'
 import type {} from '@deepseek-ai/dsh-agent-preset-registry'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { randomUUID } from 'node:crypto'
-import { loadSerenityConfig, readHandymanConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
+import { loadSerenityConfig, readCheapWorkerConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
-import { handymanPresetInheritance } from '../handyman-preset-inherit.js'
+import { cheapWorkerPresetInheritance } from '../cheap-worker-preset-inherit.js'
 import {
   buildRoundPrompt,
-  HANDYMAN_GUIDE,
-  handymanProgressPaths,
+  CHEAP_WORKER_GUIDE,
+  cheapWorkerProgressPaths,
   newStopToken,
   providerAvailabilityError,
   readProgress,
@@ -44,7 +44,7 @@ import {
   splitModel,
   writeFailedStatus,
   writeProgress,
-} from '../handyman-ops.js'
+} from '../cheap-worker-ops.js'
 import type { JsonValue } from '../json.js'
 import { PLUGIN_SOURCE } from '../message-source.js'
 import { waitAgentIdle } from '../agent-idle.js'
@@ -79,15 +79,15 @@ function lastAssistantText(agent: Agent): string {
 }
 
 /** 非正常停止时重启 agent 的次数上限（防死循环保险阀）：对话轮次有上限，重启有上限 */
-const HANDYMAN_MAX_RESTARTS = 100
+const CHEAP_WORKER_MAX_RESTARTS = 100
 
-interface HandymanJob {
+interface CheapWorkerJob {
   task: string
   label: string
   model?: string
 }
 
-interface HandymanJobResult {
+interface CheapWorkerJobResult {
   label: string
   done: boolean
   rounds: number
@@ -99,8 +99,8 @@ interface HandymanJobResult {
 }
 
 /** 运行时解析 jobs 参数（DSH schema 不支持 object items 的 required/校验 → 手工校验类型） */
-function parseJobs(raw: unknown): HandymanJob[] | null {  if (!Array.isArray(raw) || raw.length === 0) return null
-  const jobs: HandymanJob[] = []
+function parseJobs(raw: unknown): CheapWorkerJob[] | null {  if (!Array.isArray(raw) || raw.length === 0) return null
+  const jobs: CheapWorkerJob[] = []
   for (const item of raw) {
     if (typeof item !== 'object' || item === null) return null
     const rec = item as Record<string, unknown>
@@ -111,13 +111,13 @@ function parseJobs(raw: unknown): HandymanJob[] | null {  if (!Array.isArray(raw
 }
 
 /**
- * 🔴 **foreground 并行上限 = 10**（owner 2026-09-29 具名令：「这个版本顺手帮我把 handyman 并行度从 5 调整成 10」；
+ * 🔴 **foreground 并行上限 = 10**（owner 2026-09-29 具名令：「这个版本顺手帮我把 cheap-worker 并行度从 5 调整成 10」；
  * 原值 5 出自 owner 2026-09-27 的具名令「最大 5；就当是支持自定模型的 subagent 用了，急需」）。
  *
  * 为什么是**硬编码**而不是又一个配置键：owner 两次都是**直接给数**（同 `REBUILD-TODO` 那次的裁决口径
  * —— 设定项能不加就不加，见 S142 的「可砍设定项」）。若将来还要调，仍按具名令改这个常量。
  *
- * 为什么 foreground 仍与 background 分开（后台 = `handyman.maxParallel`，缺省 **10**）：**foreground 会占住
+ * 为什么 foreground 仍与 background 分开（后台 = `cheap-worker.maxParallel`，缺省 **10**）：**foreground 会占住
  * 主 agent 的这一轮**（调用方在等结果），并发越高越容易把宿主的并发面与用量推上去。
  * ⚠️ 现在两档**数值相等但语义不同**（前台 = 占住本轮 ／ 后台 = 不占）⇒ **刻意不合并成一个常量**：
  * 合并会让"哪天要给前台单独降档"变成一次语义手术。
@@ -141,10 +141,10 @@ function parseForegroundJobs(raw: unknown): Array<{ task: string; label?: string
   return jobs
 }
 
-// ── v1.31.3 foreground 模式：一次前台串行委派（用户裁决：handyman 双模式）──
+// ── v1.31.3 foreground 模式：一次前台串行委派（用户裁决：cheap-worker 双模式）──
 
 /** foreground 模式结果（一次调用一次结果；无循环、无进度文件） */
-interface HandymanForegroundResult {
+interface CheapWorkerForegroundResult {
   mode: 'foreground'
   done: boolean
   model: string
@@ -229,13 +229,13 @@ async function runForegroundJob(
     parent: unknown
     signal?: AbortSignal
   },
-): Promise<HandymanForegroundResult> {
+): Promise<CheapWorkerForegroundResult> {
   const { task, label, model, models, parent, signal } = opts
   requireWhitelistedModel(model, models)
   const subagents = hostSubagents(ctx)
   if (!subagents?.start) {
     throw new Error(
-      'handyman foreground: host subagents service unavailable — neither ctx.subagents nor '
+      'cheap-worker foreground: host subagents service unavailable — neither ctx.subagents nor '
       + 'ctx.get("subagents") yielded a start() function. Check `dashboard health` (host-contract '
       + 'section, service "subagents"); mode="background" does not need this service and still works.',
     )
@@ -253,8 +253,8 @@ async function runForegroundJob(
     parent,
     signal: signal ?? new AbortController().signal,
     agentOptions: { ...(provider === undefined ? {} : { provider }), model: modelName },
-    // 递归防护：子 agent 不再持有 handyman（对齐 background 的 tools.restrict deny）
-    toolFilter: { deny: ['handyman'] },
+    // 递归防护：子 agent 不再持有 cheap-worker（对齐 background 的 tools.restrict deny）
+    toolFilter: { deny: ['cheap-worker'] },
   })) as SubagentRunLike
   try {
     const result = run.result === undefined ? {} : await run.result
@@ -277,14 +277,14 @@ async function runForegroundJob(
 }
 
 /**
- * 驱动单个 handyman worker：创建 agent → while 循环（stop-token 完成判据）→ dispose。
+ * 驱动单个 cheap-worker worker：创建 agent → while 循环（stop-token 完成判据）→ dispose。
  * 同步阻塞直到完成/保险阀。jobs 编排时多个 worker 并行（Promise.all）。
  */
-async function runHandymanJob(
+async function runCheapWorkerJob(
   ctx: Context,
   opts: {
     root: string
-    job: HandymanJob
+    job: CheapWorkerJob
     defaultModel: string
     models: string[]
     maxRounds: number
@@ -292,7 +292,7 @@ async function runHandymanJob(
     parentCtx?: Context
     session?: string
   },
-): Promise<HandymanJobResult> {
+): Promise<CheapWorkerJobResult> {
   const { root, job, defaultModel, models, maxRounds, parentSession, parentCtx, session } = opts
   const label = job.label
   const model = job.model ?? defaultModel
@@ -308,15 +308,15 @@ async function runHandymanJob(
   // 续跑：从进度文件的下一轮开始（对话轮号仅用于进度记录/续跑）
   const startRound = progress ? progress.round + 1 : 1
 
-  const inherited = handymanPresetInheritance(parentCtx)
-  if (!ctx.agents) throw new Error('handyman: ctx.agents unavailable')
+  const inherited = cheapWorkerPresetInheritance(parentCtx)
+  if (!ctx.agents) throw new Error('cheap-worker: ctx.agents unavailable')
 
   // definite-assignment 断言：spawnAgent 在 try 前必被 await 赋值；
   // 循环内异常重启路径也会先 dispose 旧 handle 再重新 spawn
   let handle!: AgentHandle
   let workerAgent!: Agent
   const spawnAgent = async (): Promise<void> => {
-    const sessionId = `handyman-${label}-${randomUUID()}` as SessionId
+    const sessionId = `cheap-worker-${label}-${randomUUID()}` as SessionId
     handle = await ctx.agents.create({
       sessionId,
       meta: {
@@ -356,9 +356,9 @@ async function runHandymanJob(
         await waitAgentIdle(ctx, workerAgent)
         lastResponse = lastAssistantText(workerAgent)
       } catch {
-        // 非正常停止：重启 agent（≤ HANDYMAN_MAX_RESTARTS 次）后重试同一轮，不消耗对话轮号
+        // 非正常停止：重启 agent（≤ CHEAP_WORKER_MAX_RESTARTS 次）后重试同一轮，不消耗对话轮号
         restarts++
-        if (restarts > HANDYMAN_MAX_RESTARTS) {
+        if (restarts > CHEAP_WORKER_MAX_RESTARTS) {
           finishReason = 'restart_exceeded'
           break
         }
@@ -385,7 +385,7 @@ async function runHandymanJob(
         errorCode: finishReason,
         errorMessage: finishReason === 'max_rounds'
           ? `Reached ${maxRounds} rounds without completion — resume with same label to continue.`
-          : `Agent restarted ${HANDYMAN_MAX_RESTARTS} times without progress — resume with same label to continue.`,
+          : `Agent restarted ${CHEAP_WORKER_MAX_RESTARTS} times without progress — resume with same label to continue.`,
       })
     }
   } finally {
@@ -393,7 +393,7 @@ async function runHandymanJob(
     await handle.dispose().catch(() => { /* worker agent 清理失败不阻断工具返回 */ })
   }
 
-  const { json } = handymanProgressPaths(root, label)
+  const { json } = cheapWorkerProgressPaths(root, label)
   return {
     label,
     done,
@@ -406,40 +406,40 @@ async function runHandymanJob(
   }
 }
 
-/** 创建 handyman 工具（闭包捕获插件 ctx → 可访问 ctx.agents） */
-export function createHandymanTool(ctx: Context): ToolDefinition {
+/** 创建 cheap-worker 工具（闭包捕获插件 ctx → 可访问 ctx.agents） */
+export function createCheapWorkerTool(ctx: Context): ToolDefinition {
   return defineTool({
-    name: 'handyman',
+    name: 'cheap-worker',
     description:
-      'The handyman (杂工): delegate work to a worker agent on a CCC-configured model. Two modes (v1.31.3).\n' +
+      'The cheap-worker (杂工): delegate work to a worker agent on a CCC-configured model. Two modes (v1.31.3).\n' +
       'Mode "foreground" (DEFAULT): one serial child agent runs the task once and returns its final text — ' +
       'no loop, no completion-code validation, no progress file; use it for one-shot serial delegation ' +
-      '(e.g. per-case testers that just gather evidence). Usage: handyman(task, [label], [model]).\n' +
+      '(e.g. per-case testers that just gather evidence). Usage: cheap-worker(task, [label], [model]).\n' +
       'Mode "background": the loop-validated worker — internal hard while-loop whose ONLY completion condition ' +
       'is the worker echoing this round\'s random completion code (stop token, prevents low-intelligence models ' +
       'from finishing early), round cap (default 100, resumable), automatic restart on abnormal stop (≤100), ' +
-      'progress file AGENT_SESSIONS/handyman-<label>.md/.json (same label resumes), and parallel jobs ' +
-      '(handyman.maxParallel, default 10). Usage: handyman(mode="background", task, label, [model]) or ' +
-      'handyman(mode="background", jobs=[{task,label,model?},...]).\n' +
+      'progress file AGENT_SESSIONS/cheap-worker-<label>.md/.json (same label resumes), and parallel jobs ' +
+      '(cheap-worker.maxParallel, default 10). Usage: cheap-worker(mode="background", task, label, [model]) or ' +
+      'cheap-worker(mode="background", jobs=[{task,label,model?},...]).\n' +
       'Choosing: need exactly one result back now → foreground; need anti-early-finish guarantees or resumability ' +
       '→ background; need N results back now (parallel, per-job model) → foreground with jobs (cap 10).\n' +
-      'Model: only models whitelisted in .opencode/serenity.json "handyman.models" (missing config = error); ' +
-      'default reads handyman.defaultModel. Both modes share the same whitelist and default.\n' +
+      'Model: only models whitelisted in .opencode/serenity.json "cheap-worker.models" (missing config = error); ' +
+      'default reads cheap-worker.defaultModel. Both modes share the same whitelist and default.\n' +
       'Provider check: the whitelist lives in the CCC (it travels with the repo) while provider adapters are ' +
       'registered per machine by the host — so before spawning, the provider of the resolved model is verified ' +
       'against the adapters present on THIS machine. If it is missing you get the available providers plus the ' +
       'exact fix (foreground: in `diagnostic`; background: thrown), never an opaque failure.\n' +
-      'Recursion: a worker\'s tool set excludes handyman itself (orchestration belongs to the main agent).\n' +
-      'Guide: handyman(guide=true) prints the scale-up usage guide.',
+      'Recursion: a worker\'s tool set excludes cheap-worker itself (orchestration belongs to the main agent).\n' +
+      'Guide: cheap-worker(guide=true) prints the scale-up usage guide.',
     parameters: {
       mode: { type: 'string', description: 'Delegation mode: "foreground" (default — child agent(s) run once and return their final text; accepts `jobs` for parallel fan-out, cap 10) or "background" (loop-validated worker with completion-code check, round cap, auto-restart, progress file, parallel jobs)' },
       task: { type: 'string', description: 'The task goal to complete (required in both modes; foreground needs a self-contained prompt — the child does not share this conversation)' },
       label: { type: 'string', description: 'Task label (background: 1-50 chars, names the progress file; foreground: optional child display name)' },
       session: { type: 'string', description: 'Work session S### (context hint, progress reference)' },
-      model: { type: 'string', description: 'provider/model — must be in the CCC whitelist handyman.models; default reads handyman.defaultModel' },
+      model: { type: 'string', description: 'provider/model — must be in the CCC whitelist cheap-worker.models; default reads cheap-worker.defaultModel' },
       jobs: {
         type: 'array',
-        description: 'Multi-job orchestration (workflow capability): [{task, label?, model?}, ...] — runs jobs in parallel. Cap: foreground 10 (fixed) / background handyman.maxParallel (default 10). Results keep the order you passed them in.',
+        description: 'Multi-job orchestration (workflow capability): [{task, label?, model?}, ...] — runs jobs in parallel. Cap: foreground 10 (fixed) / background cheap-worker.maxParallel (default 10). Results keep the order you passed them in.',
         items: {
           type: 'object',
           properties: {
@@ -459,7 +459,7 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
     async execute(args, exec): Promise<JsonValue> {
       // guide 子命令：输出规模化使用指引（不创建 agent，不需要 CCC/model）
       if (args.guide) {
-        return { guide: HANDYMAN_GUIDE }
+        return { guide: CHEAP_WORKER_GUIDE }
       }
       // v1.31.4：前台委派的「发起方」是**调用形态**前提，先于 CCC 解析检查。
       // 为什么顺序重要（R↓，CI 实证）：`cccRootForExec` 在无 `exec.agent` 时回落
@@ -467,24 +467,24 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
       // 祖先链无 `.serenity`）→ 原顺序先抛 `No CCC found`，把真正的错误原因盖掉，
       // 也让用例依赖"运行目录恰好在某个 CCC 里"。
       if ((args.mode ?? 'foreground') === 'foreground' && !exec.agent) {
-        throw new Error('handyman foreground: requires a calling agent (exec.agent was undefined)')
+        throw new Error('cheap-worker foreground: requires a calling agent (exec.agent was undefined)')
       }
 
       const root = cccRootForExec(exec)
       if (!root) throw new Error(NO_CCC_FROM_AGENT_CWD)
 
-      const hc = readHandymanConfig(root, DEFAULT_SERENITY_CONFIG_PATHS)
+      const hc = readCheapWorkerConfig(root, DEFAULT_SERENITY_CONFIG_PATHS)
       if (hc === null) {
         throw new Error(
-          'handyman requires a model whitelist: configure .opencode/serenity.json "handyman.models" ' +
-            '(e.g. {"handyman": {"models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3"}})',
+          'cheap-worker requires a model whitelist: configure .opencode/serenity.json "cheap-worker.models" ' +
+            '(e.g. {"cheap-worker": {"models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3"}})',
         )
       }
 
       // ── 模式分派（v1.31.3，用户裁决）：缺省 foreground；background = 既有循环校验实现 ──
       const mode = args.mode === 'background' ? 'background' : 'foreground'
       if (args.mode !== undefined && args.mode !== 'background' && args.mode !== 'foreground') {
-        throw new Error('handyman: mode must be "foreground" (default) or "background"')
+        throw new Error('cheap-worker: mode must be "foreground" (default) or "background"')
       }
       if (mode === 'foreground') {
         // 🆕 2026-09-27（owner 具名令）：foreground **也允许 jobs**（并行 ≤5）——
@@ -492,11 +492,11 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
         //    与 background 的差别：**label 可选**、**不循环/不校验完成码/不写进度文件**、上限 10。
         if (args.jobs !== undefined) {
           const jobs = parseForegroundJobs(args.jobs)
-          if (jobs === null) throw new Error('handyman foreground: jobs must be [{task, label?, model?}, ...] (every job requires a non-empty task)')
+          if (jobs === null) throw new Error('cheap-worker foreground: jobs must be [{task, label?, model?}, ...] (every job requires a non-empty task)')
           if (jobs.length > FOREGROUND_MAX_PARALLEL) {
             throw new Error(
-              `handyman foreground: ${jobs.length} jobs exceed the foreground parallel cap ${FOREGROUND_MAX_PARALLEL}`
-                + ' (split into batches, or use mode="background" whose cap is handyman.maxParallel)',
+              `cheap-worker foreground: ${jobs.length} jobs exceed the foreground parallel cap ${FOREGROUND_MAX_PARALLEL}`
+                + ' (split into batches, or use mode="background" whose cap is cheap-worker.maxParallel)',
             )
           }
           const results = await Promise.all(
@@ -516,7 +516,7 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
             jobs: results,
             usage: {
               how: `foreground parallel mode starts ${results.length} child agents at once through the host delegation service (ctx.subagents.start "spawn"), awaits all of them, and returns each child's final text. No loop, no completion-code validation, no progress file. Cap = ${FOREGROUND_MAX_PARALLEL}.`,
-              model: 'restricted to the CCC whitelist handyman.models; per-job model overrides the call-level model; default reads handyman.defaultModel',
+              model: 'restricted to the CCC whitelist cheap-worker.models; per-job model overrides the call-level model; default reads cheap-worker.defaultModel',
               next: done
                 ? 'All children completed; use each job\'s output directly (results are in the same order as the jobs you passed)'
                 : 'Some children did not complete — inspect each job\'s diagnostic/output (results keep the order you passed); for anti-early-finish guarantees use mode="background"',
@@ -524,7 +524,7 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
           } as unknown as JsonValue
         }
         if (typeof args.task !== 'string' || args.task.trim() === '') {
-          throw new Error('handyman foreground: task is required (and must be self-contained — the child does not share this conversation)')
+          throw new Error('cheap-worker foreground: task is required (and must be self-contained — the child does not share this conversation)')
         }
         const model = typeof args.model === 'string' && args.model !== '' ? args.model : hc.defaultModel
         const res = await runForegroundJob(ctx, {
@@ -539,7 +539,7 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
           ...res,
           usage: {
             how: 'foreground mode starts ONE serial child agent through the host delegation service (ctx.subagents.start "spawn") with the CCC-configured model; it awaits the run and returns the child\'s final text. No loop, no completion-code validation, no progress file.',
-            model: 'restricted to the CCC whitelist handyman.models; default reads handyman.defaultModel',
+            model: 'restricted to the CCC whitelist cheap-worker.models; default reads cheap-worker.defaultModel',
             next: res.done
               ? 'Child completed; use its output directly'
               : `Child did not complete (stopReason=${res.stopReason}); inspect diagnostic/output and decide whether to retry, switch model, or use mode="background"`,
@@ -547,36 +547,36 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
         } as unknown as JsonValue
       }
 
-      const jobs: HandymanJob[] = args.jobs !== undefined
+      const jobs: CheapWorkerJob[] = args.jobs !== undefined
         ? (() => {
             const parsed = parseJobs(args.jobs)
-            if (parsed === null) throw new Error('handyman: jobs must be [{task, label, model?}, ...] (every job requires task and label)')
+            if (parsed === null) throw new Error('cheap-worker: jobs must be [{task, label, model?}, ...] (every job requires task and label)')
             return parsed
           })()
         : (() => {
             if (typeof args.task !== 'string' || typeof args.label !== 'string') {
-              throw new Error('handyman: task and label are required (single-job mode)')
+              throw new Error('cheap-worker: task and label are required (single-job mode)')
             }
             // 🔴 修复（S142 2026-09-25 实测）：**单 job 后台模式此前丢弃 `model` 参数** —— 只构造了
-            // `{task,label}`，于是 `runHandymanJob` 回落 `hc.defaultModel` ⇒ 调用方指定的模型被
+            // `{task,label}`，于是 `runCheapWorkerJob` 回落 `hc.defaultModel` ⇒ 调用方指定的模型被
             // **静默忽略**（实测：传 `probe-no-adapter/ProbeModel`，实际跑的是 `defaultModel`）。
             // 与 `jobs` 路径（`parseJobs` 带上 model）**不对称**。这正是"换台机器起不来"的成因：
             // CCC 的 `defaultModel` 随 git 走，而 provider 由**每台机器的宿主**注册。
             return [{ task: args.task, label: args.label, ...(typeof args.model === 'string' && args.model !== '' ? { model: args.model } : {}) }]
           })()
-      if (jobs.length === 0) throw new Error('handyman: no jobs provided')
+      if (jobs.length === 0) throw new Error('cheap-worker: no jobs provided')
       if (jobs.length > hc.maxParallel) {
-        throw new Error(`handyman: ${jobs.length} jobs exceed maxParallel ${hc.maxParallel} (configure handyman.maxParallel to raise)`)
+        throw new Error(`cheap-worker: ${jobs.length} jobs exceed maxParallel ${hc.maxParallel} (configure cheap-worker.maxParallel to raise)`)
       }
       if (jobs.some((j) => !j.task || !j.label)) {
-        throw new Error('handyman: every job requires task and label')
+        throw new Error('cheap-worker: every job requires task and label')
       }
 
       const parentCtx = exec.agent?.ctx
       const parentSession = (exec.agent?.session as { id?: string } | undefined)?.id
 
       // 同步阻塞：单任务直接跑；多任务并行（Promise.all）后汇总返回
-      const results = await Promise.all(jobs.map((job) => runHandymanJob(ctx, {
+      const results = await Promise.all(jobs.map((job) => runCheapWorkerJob(ctx, {
         root,
         job,
         defaultModel: hc.defaultModel,
@@ -591,9 +591,9 @@ export function createHandymanTool(ctx: Context): ToolDefinition {
         done: results.every((r) => r.done),
         jobs: results.map((r) => ({ ...r })) as unknown as JsonValue,
         usage: {
-          how: 'handyman drives each worker agent round by round via an internal hard while-loop; the worker terminates by echoing the random completion code; round cap (default 100, osp fail-safe), automatic restart on abnormal stop (≤100 times); model restricted to the CCC whitelist handyman.models',
-          progress: 'Progress in AGENT_SESSIONS/handyman-<label>.md and .json; calling handyman again with the same label resumes from the next round (no redo)',
-          constraints: 'handyman workers carry full Serenity constraints (ACC identity / entry-skill system prompt / guards / trajectory-steward); workers include the subagent tool (same-model inheritance) but NOT handyman itself',
+          how: 'cheap-worker drives each worker agent round by round via an internal hard while-loop; the worker terminates by echoing the random completion code; round cap (default 100, osp fail-safe), automatic restart on abnormal stop (≤100 times); model restricted to the CCC whitelist cheap-worker.models',
+          progress: 'Progress in AGENT_SESSIONS/cheap-worker-<label>.md and .json; calling cheap-worker again with the same label resumes from the next round (no redo)',
+          constraints: 'cheap-worker workers carry full Serenity constraints (ACC identity / entry-skill system prompt / guards / trajectory-steward); workers include the subagent tool (same-model inheritance) but NOT cheap-worker itself',
           next: results.every((r) => r.done)
             ? 'All jobs completed; check the progress files to wrap up'
             : 'Some jobs incomplete (max_rounds / restart_exceeded fail-safe); resume with the same labels',

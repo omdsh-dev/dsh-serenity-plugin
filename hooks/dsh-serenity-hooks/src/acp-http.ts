@@ -32,7 +32,7 @@ import { readSkiffRoles } from './skiff-role.js'
 import { renderSkiffMarkdown, jscSafeJsonText } from './skiff-debug.js'
 import { readSimpleSettings } from './settings-section.js'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo } from './skiff-core.js'
-import { readHandymanConfig, findSerenityRoot } from './ccc.js'
+import { readCheapWorkerConfig, findSerenityRoot } from './ccc.js'
 import { listCccs, cccRootForCwd, type CccEntry } from './ccc-roots.js'
 // C4 块 A：listener 生命周期归面宿主（本面=面 E，端口语义见 ports.ts 的 FACE_PORTS.acpHttp）
 import { faceActive, facePort, startFace, stopFace, type FaceSpec } from './face-host.js'
@@ -326,7 +326,7 @@ async function handleAskParsed(
     // 不匹配/不可恢复 → 静默新建（问答页对普通用户友好，不暴露 400 细节）
   }
   if (!agent) {
-    const hc = readHandymanConfig(root)
+    const hc = readCheapWorkerConfig(root)
     const ref = await createSkiffAgent(ctx, root, effectiveRole, effectiveCfg, hc?.defaultModel)
     agent = ref.agent
   }

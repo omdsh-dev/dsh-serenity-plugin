@@ -31,7 +31,7 @@
  *    本件要的是**函数面**（`fstat-no` 归零），进入函数即可，**不需要把不可达支线填满**。
  *
  * ⚠️ **本件不覆盖**（留给"execute 面"那件）：`cc-fs`／`git`／`kit`／`localstore`／`im-bridge`
- *    的 `execute`，以及 `handyman` 的 `parseJobs`（后者只在 `jobs` 多任务编排路径里被调用，
+ *    的 `execute`，以及 `cheap-worker` 的 `parseJobs`（后者只在 `jobs` 多任务编排路径里被调用，
  *    与本件不同风险面 —— 它要起子代理）。
  */
 
@@ -44,7 +44,7 @@ import { localstoreTool } from '../src/tools/localstore.js'
 import { createKitTool } from '../src/tools/kit.js'
 import { createContainerAdminTool } from '../src/tools/container-admin.js'
 import { createImBridgeTool } from '../src/tools/im-bridge.js'
-import { createHandymanTool } from '../src/tools/handyman.js'
+import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
 import { createAccDiagTool } from '../src/tools/acc-diag.js'
 import { createOntologyTool } from '../src/tools/ontology-eng.js'
 
@@ -95,7 +95,7 @@ const TOOLS: Array<{ label: string; schema: 'string' | 'json'; make: () => unkno
   { label: 'dashboard（kit）', schema: 'json', make: () => createKitTool(ctx) },
   { label: 'container_admin', schema: 'json', make: () => createContainerAdminTool(ctx) },
   { label: 'im-bridge', schema: 'json', make: () => createImBridgeTool() },
-  { label: 'handyman', schema: 'json', make: () => createHandymanTool(ctx) },
+  { label: 'cheap-worker', schema: 'json', make: () => createCheapWorkerTool(ctx) },
   { label: 'acc-diag', schema: 'json', make: () => createAccDiagTool(ctx) },
   // v1.52（D121）：本体工程引擎。**schema 刻意是 string 而非 json** —— 引擎报告是多行 Markdown 式，
   // 走 json 会被 `JSON.stringify` 把换行转义成 `\n`（模型读到的是一坨转义串）。见 `ontology-eng.ts` 的 receiptOf。

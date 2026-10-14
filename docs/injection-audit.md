@@ -83,7 +83,7 @@ identityBlock 末尾写：
 > `Additional MSMs registered by this CCC are available — call msm("<name>") to execute or discover them (see the "Serenity Tools" heading below).`
 
 **问题**：它把 MSM 能力**指到 toolsBlock 的工具清单标题**上 —— 但 toolsBlock 里列的是
-**ACC 内置工具**（`container_fs` / `msm` / `handyman`…），**MSM 是 CCC 注册的另一层**（84 个），
+**ACC 内置工具**（`container_fs` / `msm` / `cheap-worker`…），**MSM 是 CCC 注册的另一层**（84 个），
 两者不是一回事。⇒ **对 LLM 是干扰**（把一个东西指到另一个东西的名字下）。
 
 **建议**：改写该行，指向 `msm()`（无参目录）而不是 `"Serenity Tools"` 标题。
@@ -173,7 +173,7 @@ D1 属 ACC 文案改动（需发版）。⇒ 建议**攒一批再发**，不必�
 
 | # | 上文写的 | 实测 | 影响 |
 |---|---|---|---|
-| 1 | 把 **handyman 默认模型名**的注入点记为 `identityBlock`（每轮装配的系统提示词块） | **错**。注入点**只有一处** = `src/seams/context.ts` 的 `accIdentityText()` —— 那是**对话消息流侧的身份锚点**（`agent/session-start` 播种 + 每次压缩后重注入；实测全文仅 320 chars，即本表第 9 行）。`identityBlock` 是**另一层**（`system-prompt.ts:67`，每轮装配）。**两者不可混为一谈** | 已按正确位置删注入（见 5.2 G）；`identityBlock` **一字未动** |
+| 1 | 把 **cheap-worker 默认模型名**的注入点记为 `identityBlock`（每轮装配的系统提示词块） | **错**。注入点**只有一处** = `src/seams/context.ts` 的 `accIdentityText()` —— 那是**对话消息流侧的身份锚点**（`agent/session-start` 播种 + 每次压缩后重注入；实测全文仅 320 chars，即本表第 9 行）。`identityBlock` 是**另一层**（`system-prompt.ts:67`，每轮装配）。**两者不可混为一谈** | 已按正确位置删注入（见 5.2 G）；`identityBlock` **一字未动** |
 | 2 | 候选 D 建议 **D1：只删每条末尾的 `Verdict:` 句**（"Verdict 是判词的应用示例，非约束本体"） | **判断错误，建议作废**。所有者裁定：**D 不动**（"metaphor 我要求保留"）。理由：`Verdict` **就是机械约束本体**（"Verdict: disorganized output = debris in the hold" 正是那条不变量本身），不是它的示例 ⇒ 删了等于把约束降级成隐喻散文 | D **未做**；D2/D3 亦未做 |
 
 ### 5.2 所有者裁决（逐条）与实施状态
@@ -186,7 +186,7 @@ D1 属 ACC 文案改动（需发版）。⇒ 建议**攒一批再发**，不必�
 | **D** | `metaphorBlock` | **不动**（见 5.1-2） | ✅ 未动 |
 | **E** | `toolsBlock` 的 `MSM call` 四行 | **未提** ⇒ 视为暂不动（"先测再砍"未获授权） | ⏸ 待裁 |
 | **F** | `cceBlock` | **未提** ⇒ 暂不动 | ⏸ 待裁 |
-| **G** 🆕 | **handyman 模型名不该注入**（所有者："总是被注入，这个 LLM 不关注的，需要删掉"） | 新增并要求删 | ✅ **已实施**：`context.ts` 删 `- handyman default model: <model>` 行 + 连带删只为它存在的 `defaultModel` 读取；`context.test.ts` 由"应含"**反转**为"不得含"（`not.toContain('mock-model')`）。**机制与面板保留**（`handyman.ts:213/461` 自己读配置选模型，不经 LLM；`status.ts:85` 喂面板给人看） |
+| **G** 🆕 | **cheap-worker 模型名不该注入**（所有者："总是被注入，这个 LLM 不关注的，需要删掉"） | 新增并要求删 | ✅ **已实施**：`context.ts` 删 `- cheap-worker default model: <model>` 行 + 连带删只为它存在的 `defaultModel` 读取；`context.test.ts` 由"应含"**反转**为"不得含"（`not.toContain('mock-model')`）。**机制与面板保留**（`cheap-worker.ts:213/461` 自己读配置选模型，不经 LLM；`status.ts:85` 喂面板给人看） |
 
 **提交**：插件仓 `9847664`（5 文件，**显式路径暂存**，未 push —— 等 D14 发版令）｜门禁（自跑）：`typecheck` 双面 ✓ / `test` **90 files / 1312 tests** ✓。
 

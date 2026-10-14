@@ -293,7 +293,7 @@ CRO 是**逐轨迹**生效（文件在不在），而看门狗要判"**哪些轨
 | 既有实例 | 形态 |
 |---|---|
 | `container_admin msm guide` | 工具的一个 action，输出手册正文 |
-| `handyman(guide=true)` | 工具的一个参数，输出使用指南 |
+| `cheap-worker(guide=true)` | 工具的一个参数，输出使用指南 |
 
 ⇒ **CRO 的指南**：随实现交付，**入口形如 `container_admin ... guide` 或工具自描述面**（**具体挂哪，§9 待裁 #5**）。
 

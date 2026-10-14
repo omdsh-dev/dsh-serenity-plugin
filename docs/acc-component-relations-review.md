@@ -29,7 +29,7 @@
 
 ### 1.1 工具面（11，2 个条件可见）
 
-`container_fs` ｜ `container_trajectory` ｜ `dashboard` ｜ `container_git` ｜ `msm` ｜ `praxis` ｜ `handyman` ｜ `localstore` ｜ `container_admin` ｜ `im-bridge`（条件）｜ `acc-diag`（专属）
+`container_fs` ｜ `container_trajectory` ｜ `dashboard` ｜ `container_git` ｜ `msm` ｜ `praxis` ｜ `cheap-worker` ｜ `localstore` ｜ `container_admin` ｜ `im-bridge`（条件）｜ `acc-diag`（专属）
 
 ### 1.2 拦截缝（9）
 
@@ -44,7 +44,7 @@ guards ｜ keeper ｜ context（Induction 注入）｜ system-prompt（入口 sk
 | 轨迹时间 | `wake-registry.ts` / `wake-scheduler.ts` / `autopilot-trajectory.ts` / `autopilot-script.ts` | **两条时钟**（一次性 / 周期） |
 | 知识 | `praxis` / `seams/system-prompt` / `seams/context` / `seams/opencode-skills` / `skills-discovery` / `skills/opencode-scan` | 提示词骨架 + Induction + skill 发现 |
 | MSM | `msm-ops.ts` + `tools/msm.ts` + `tools/container-admin.ts`（msm 域） | 注册表 + 执行 + 管理面 |
-| 船员 | `skiff-role` / `skiff-registry` / `skiff-core` / `handyman-ops` / `handyman-preset-inherit` | 认知子集角色 + 编排 |
+| 船员 | `skiff-role` / `skiff-registry` / `skiff-core` / `cheap-worker-ops` / `cheap-worker-preset-inherit` | 认知子集角色 + 编排 |
 | 外部载体 | `skiff-debug`(3099) / `acp-core`+`acp-http`(3100) / `gateway*`(3081) / `weixin-*`(3082) / `im-bridge`+`im-weixin` | 4 条独立 HTTP 面 + IM 通道 |
 | 守卫 | `output-guard` + `output-guard-seam` / `weixin-output-guard` / `seams/guards` | 对外面敏感词 / 手动输出闸门 / 路径与可见性 |
 | 观察 | `status.ts` / `api.ts` / `kit-ops`（dashboard health）/ `diag-ops`（`acc-diag`） | **四处观察面** |
@@ -265,5 +265,5 @@ guards ｜ keeper ｜ context（Induction 注入）｜ system-prompt（入口 sk
 - **未动任何代码**（本文件是讨论稿）。
 - **未核实** 另外两个 CCC 是否使用 SEP（它们在**本容器路径之外**，P3 边界；`session-tool` 的 adoption 只在本 CCC 实测为零）。
 - **未穷尽**零引用导出（只抽验了两处，已注明）。
-- **未评估** `handyman-preset-inherit` / `agent-idle` / `skills-discovery` 等模块的去留（需要 §C3 的机械扫描结论再谈）。
+- **未评估** `cheap-worker-preset-inherit` / `agent-idle` / `skills-discovery` 等模块的去留（需要 §C3 的机械扫描结论再谈）。
 - **未改**任何既有裁决（D58/D59/D60/D61 均按原文引用；C6 只提出"情形是否变了"，不下结论）。

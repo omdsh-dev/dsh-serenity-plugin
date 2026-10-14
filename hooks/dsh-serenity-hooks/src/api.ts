@@ -4,7 +4,7 @@
  * 路由：
  *   GET  /serenity/status            ?workspace=<路径>  → 状态（root/accVersion/safeModeOn/...）
  *   POST /serenity/status            { workspace, on }  → 切换安全模式（WebUI 专属头）
- *   GET  /serenity/handymen          → handyman 运行状态（v1.24.0：loop → handyman）
+ *   GET  /serenity/cheap-workers          → cheap-worker 运行状态（v1.24.0：loop → cheap-worker）
  *   POST /serenity/image-upload      { workspace?, mediaType, data(base64) } → 图片写 _tmp/images_from_user/（client 专属）
  *
  * 经 ctx.webServer（webserver 服务，公开版由 httpServer 改名）注册；客户端与服务器同源，调用无信任围栏问题。
@@ -22,14 +22,14 @@ import { getStatus, setSafeMode } from './status.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 // C2（CCC 发现面归一）：L1 单根解析 / L2 枚举一律问 ccc-roots（本文件不再自写上溯包裹）
 import { cccRootForCwd, listCccs } from './ccc-roots.js'
-import { listActiveHandymen } from './handyman-ops.js'
+import { listActiveCheapWorkers } from './cheap-worker-ops.js'
 import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey, rotatePublicAskKey, projectKnownWorkspaces } from './config-ops.js'
 // C4 块 B：端口取值只从集中端口表取（原处硬写 3100 回退）
 import { ACP_HTTP_PORT } from './ports.js'
 import { isoLocal, localFileStamp } from './time.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
-const HANDYMEN_PATH = '/serenity/handymen'
+const CHEAP_WORKERS_PATH = '/serenity/cheap-workers'
 const UPLOAD_PATH = '/serenity/image-upload'
 const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
@@ -205,10 +205,10 @@ function resolveWorkspace(ctx: Context, params: { sessionId?: string; workspace?
 export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}): void {
   const configPaths = opts.configPaths ?? DEFAULT_SERENITY_CONFIG_PATHS
 
-  // /serenity/handymen：handyman 运行状态（WebUI 等待界面数据源；进度文件摘要，不依赖工具执行上下文）
+  // /serenity/cheap-workers：cheap-worker 运行状态（WebUI 等待界面数据源；进度文件摘要，不依赖工具执行上下文）
   ctx.webServer.register({
     kind: 'exact',
-    path: HANDYMEN_PATH,
+    path: CHEAP_WORKERS_PATH,
     handler: async (req: IncomingMessage, res: ServerResponse) => {
       try {
         if (req.method !== 'GET') {
@@ -219,10 +219,10 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
         const root = cccRootForCwd(workspace)
         if (!root) {
-          sendJson(res, 200, { handymen: [] })
+          sendJson(res, 200, { cheapWorkers: [] })
           return
         }
-        sendJson(res, 200, { handymen: listActiveHandymen(root) })
+        sendJson(res, 200, { cheapWorkers: listActiveCheapWorkers(root) })
       } catch (err: any) {
         sendJson(res, 400, { error: err.message ?? String(err) })
       }

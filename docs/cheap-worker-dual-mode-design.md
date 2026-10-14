@@ -1,27 +1,27 @@
-# handyman 双模式（background / foreground）—— 方案设计 v0.3（ACC 自实现）
+# cheap-worker 双模式（background / foreground）—— 方案设计 v0.3（ACC 自实现）
 
 - **需求方**：某 CCC 的某角色 Bot 体系（2026-09-09）——「ACC subagent 工具支持按角色指定模型」
 - **设计方**：S142（dsp 维护会话）· 2026-09-09
 - **用户裁决链（R↓）**：
   1. 「dsh 有配置但没放开估计是有原因的，我们要在 ACC 层去自动实现才行；所以我主要考虑 B 面」→ **放弃宿主设置路线**
   2. 「实际上具体的 CCC 总是会指定低成本模型，所以只要有个 subagent 机制可以使用低成本模型就好」→ **目标收窄为：一个能用低成本模型的委派机制**
-  3. 「名字上我们都叫 handyman 吧，分为 background 和非 background 两种，前者是旧的自带循环校验的实现，后者是我们本次所需的简单实现」→ **不新增工具；`handyman` 加模式维度**
+  3. 「名字上我们都叫 cheap-worker 吧，分为 background 和非 background 两种，前者是旧的自带循环校验的实现，后者是我们本次所需的简单实现」→ **不新增工具；`cheap-worker` 加模式维度**
 - **状态**：待审核（Q1~Q4 见 §7）；**未动代码**
 
 ---
 
 ## 1. 形态（E↑）
 
-**工具名不变（`handyman`），新增 `mode` 参数，工具面 11 保持不变**：
+**工具名不变（`cheap-worker`），新增 `mode` 参数，工具面 11 保持不变**：
 
 ```
-handyman(mode?, task?, label?, model?, jobs?, session?, guide?)
+cheap-worker(mode?, task?, label?, model?, jobs?, session?, guide?)
   mode = "background"（缺省，旧实现，向后兼容） | "foreground"（新，本次所需）
 ```
 
 | 模式 | 实现 | 语义 | 适用 |
 |------|------|------|------|
-| **background**（缺省） | **既有实现，一行不改**：`ctx.agents.create` + 内部 while 硬循环 + 随机完成码（stop-token）判据 + 轮次上限（默认 100）+ 异常自动重启（≤100）+ 进度文件 `AGENT_SESSIONS/handyman-<label>.md/.json` + `jobs` 并行（`maxParallel` 默认 10） | "自带循环校验的杂工"：抗低智模型提前收工，适合长任务/无人值守 | 大规模扫描、多 job 并行、可续跑 |
+| **background**（缺省） | **既有实现，一行不改**：`ctx.agents.create` + 内部 while 硬循环 + 随机完成码（stop-token）判据 + 轮次上限（默认 100）+ 异常自动重启（≤100）+ 进度文件 `AGENT_SESSIONS/cheap-worker-<label>.md/.json` + `jobs` 并行（`maxParallel` 默认 10） | "自带循环校验的杂工"：抗低智模型提前收工，适合长任务/无人值守 | 大规模扫描、多 job 并行、可续跑 |
 | **foreground**（新） | **本次新增，最小实现**：`ctx.subagents.start('spawn', {…})` → `await run.result` → `await run.dispose()` → 返回子 agent 最终文本 | "一次前台串行委派"：不循环、不校验、不写进度文件 | **E2E 的 T 层**（77 例逐个串行、用低成本模型、只采证据） |
 
 **为什么 foreground 走 `ctx.subagents.start` 而不是沿用 `ctx.agents.create`**（R↓）：
@@ -38,12 +38,12 @@ handyman(mode?, task?, label?, model?, jobs?, session?, guide?)
 | `mode` | — | ✓ | `"background"`（缺省）/ `"foreground"`；缺省=旧行为（零影响） |
 | `task` | ✓（单任务） | ✓ | 任务描述（foreground 要求自包含：子 agent 不共享本会话上下文） |
 | `label` | ✓（进度文件名） | 可选（子会话显示名） | foreground 不写进度文件 |
-| `model` | ✓ | ✓ | `provider/model`，**必须 ∈ CCC `handyman.models`**；缺省 = `handyman.defaultModel` |
+| `model` | ✓ | ✓ | `provider/model`，**必须 ∈ CCC `cheap-worker.models`**；缺省 = `cheap-worker.defaultModel` |
 | `jobs` | ✓ | ✗ | foreground 只接受单个 `task`（多任务请循环调用或走 background） |
 | `session` | ✓ | ✗ | 进度上下文提示（仅 background 有进度文件） |
 | `guide` | ✓ | ✓ | 打印使用指引（不创建 agent） |
 
-> **零新增配置**：模型池与缺省模型**沿用既有 `handyman.models` / `handyman.defaultModel`**——CCC 只维护一处"低成本模型池"（这正是"具体的 CCC 总是会指定低成本模型"的直接落地）。
+> **零新增配置**：模型池与缺省模型**沿用既有 `cheap-worker.models` / `cheap-worker.defaultModel`**——CCC 只维护一处"低成本模型池"（这正是"具体的 CCC 总是会指定低成本模型"的直接落地）。
 
 ---
 
@@ -58,7 +58,7 @@ const run = await ctx.subagents.start('spawn', {
   parent: exec.agent,                           // 委派归属（深度/谱系由此派生）
   signal: exec.signal,                          // 取消通道（与原生工具同源）
   agentOptions: { provider, model },            // ← 低成本模型
-  toolFilter: { deny: ['handyman'] },           // 递归防护（见 3.3）
+  toolFilter: { deny: ['cheap-worker'] },           // 递归防护（见 3.3）
 })
 const result = await run.result                 // SubagentResult
 await run.dispose()                             // 幂等，必调
@@ -76,11 +76,11 @@ await run.dispose()                             // 幂等，必调
 
 ### 3.3 递归防护
 
-background 模式靠 `handymanPresetInheritance` 在子 scope `tools.restrict({ deny: ['handyman'] })`；foreground 用 spawn 的 `toolFilter` 能力做同一件事：`toolFilter: { deny: ['handyman'] }`——**编排归主 agent**，子 agent 不能自己再开杂工。
+background 模式靠 `cheapWorkerPresetInheritance` 在子 scope `tools.restrict({ deny: ['cheap-worker'] })`；foreground 用 spawn 的 `toolFilter` 能力做同一件事：`toolFilter: { deny: ['cheap-worker'] }`——**编排归主 agent**，子 agent 不能自己再开杂工。
 
 ### 3.4 不写进度文件 / 不建工作台
 
-foreground 是"一次调用一次结果"，不产生 `AGENT_SESSIONS/handyman-<label>.*`；子会话是 `origin=subagent` 的临时身份，不建 SESSION 工作台（对齐 v1.30.9 的"临时身份不建工作台"修复）。
+foreground 是"一次调用一次结果"，不产生 `AGENT_SESSIONS/cheap-worker-<label>.*`；子会话是 `origin=subagent` 的临时身份，不建 SESSION 工作台（对齐 v1.30.9 的"临时身份不建工作台"修复）。
 
 ---
 
@@ -101,17 +101,17 @@ foreground 是"一次调用一次结果"，不产生 `AGENT_SESSIONS/handyman-<l
 
 | 文件 | 改动 |
 |------|------|
-| `src/tools/handyman.ts` | 新增 `mode` 参数 + 分支：`foreground` → 新 `runForegroundJob()`（`ctx.subagents.start` 路径）；`background` 原逻辑零改动；description 写清两模式与选择判据 |
+| `src/tools/cheap-worker.ts` | 新增 `mode` 参数 + 分支：`foreground` → 新 `runForegroundJob()`（`ctx.subagents.start` 路径）；`background` 原逻辑零改动；description 写清两模式与选择判据 |
 | `src/host/contract.ts` | 服务表新增 `subagents`（lazy，`required: false`；成员 `start`）→ hostContract 检查数 34 → 35 |
-| `src/handyman-ops.ts` | 复用既有 `readHandymanConfig` / `splitModel` / `requireWhitelistedModel`（无新配置段） |
-| 文档 | `msm-ops` CCC_CONFIG_REFERENCE handyman 段补两模式说明 + README 中英 + 维护 skill + CHANGELOG |
+| `src/cheap-worker-ops.ts` | 复用既有 `readCheapWorkerConfig` / `splitModel` / `requireWhitelistedModel`（无新配置段） |
+| 文档 | `msm-ops` CCC_CONFIG_REFERENCE cheap-worker 段补两模式说明 + README 中英 + 维护 skill + CHANGELOG |
 | 工具面 | **11 不变**（无声明面三处同步问题；`invariant.ts` / `dsh.plugin.json` / description 均无需改工具清单） |
 | 版本 | **v1.32.0**（新能力，工具数不变 → 仍属 minor） |
 
 ### 测试
 
 - `mode` 缺省 = background（向后兼容，现有用例零改动）
-- foreground 路径（fake `ctx.subagents`）：断言 `agentOptions.{provider,model}`、`parent`、`signal`、`toolFilter.deny=['handyman']` 传递；`dispose()` 被调；返回形状含 `output`/`model`/`stopReason`
+- foreground 路径（fake `ctx.subagents`）：断言 `agentOptions.{provider,model}`、`parent`、`signal`、`toolFilter.deny=['cheap-worker']` 传递；`dispose()` 被调；返回形状含 `output`/`model`/`stopReason`
 - 失败矩阵：stopReason 非 completed → errored + diagnostic；模型不在白名单 → 拒绝；`ctx.subagents` 缺失 → 响亮报错
 - 两模式共享模型解析（白名单/缺省）的对照用例
 
@@ -123,7 +123,7 @@ foreground 是"一次调用一次结果"，不产生 `AGENT_SESSIONS/handyman-<l
 |------|------|
 | 一个工具两套语义 → 模型误用（该 foreground 却用 background，或反之） | description 首行给**选择判据**："要一次串行结果 → foreground；要抗提前收工/并行/可续跑 → background"；参数矩阵写进 guide |
 | 低成本模型遵循度低 | foreground 只做"一次委派"，不依赖模型自评完成（这正是 background 循环校验存在的原因）；失败以 errored 结果暴露 |
-| 子 agent 与原生 `subagent` 职责重叠 | 文档明确：原生 `subagent` = 继承父模型；`handyman` = CCC 配置的模型（低成本池） |
+| 子 agent 与原生 `subagent` 职责重叠 | 文档明确：原生 `subagent` = 继承父模型；`cheap-worker` = CCC 配置的模型（低成本池） |
 | `subagents` 服务在旧宿主缺失 | hostContract 标记为 lazy/非必需 + 调用时响亮报错 |
 | **读取 lazy 服务的姿势**（v1.31.4 实证补入） | 直接属性读 `ctx.subagents` 在真实 cordis 下**抛错**（未声明 `inject` 的服务名走 fiber 链查找，找不到即 throw）→ 必须走 `ctx.get`（见 §9） |
 
@@ -145,13 +145,13 @@ foreground 是"一次调用一次结果"，不产生 `AGENT_SESSIONS/handyman-<l
 - `…/dsh-subagent/lib/types/types.d.ts`：`SubagentStartRequest`（`agentOptions` / `toolFilter` / `maxDepth`）、`SubagentRun`（`result` / `dispose`）、`SubagentResult`（`output` / `diagnostic` / `stopReason`）
 - `…/dsh-subagent-spawn-in-process/lib/index.js`：`capabilities = { agentOptions: true, toolFilter: true, … }`
 - `…/dsh-tool-subagent/lib/index.js`：前台 run 的 settle/dispose 范式（本方案同构）
-- 本仓先例：`src/tools/handyman.ts`（background 实现）、`src/handyman-preset-inherit.ts`（递归防护）
+- 本仓先例：`src/tools/cheap-worker.ts`（background 实现）、`src/cheap-worker-preset-inherit.ts`（递归防护）
 
 ---
 
 ## 9. v1.31.4 修复记录（foreground 真机缺陷，R↓）
 
-**现象**：`handyman(mode="foreground", …)` → `cannot get property "subagents" without inject`（background 不受影响）。
+**现象**：`cheap-worker(mode="foreground", …)` → `cannot get property "subagents" without inject`（background 不受影响）。
 
 **根因**：cordis 的 Context 是 Proxy——`ReflectService.handler.get` 对**未经 `inject` 声明**的服务名
 沿 fiber 链查找，找不到时**抛错**而非返回 `undefined`。`hostInjected` 此前先做**无保护的直接属性读**，

@@ -273,7 +273,7 @@ describe('localstore 退化面：`.gitignore` 写入的两个分支（`:79`/`:84
 
 describe('localstore 退化面：config path 校验的**三段**（既有用例只打到两段）', () => {
   it('🔴 `:156` **节名非法**（大写/下划线/数字开头）⇒ 抛 section 规范错', () => {
-    // 🔴 既有用例只测了 `badpath`（无点）与 `handyman.BadKey`（key 非法）
+    // 🔴 既有用例只测了 `badpath`（无点）与 `cheap-worker.BadKey`（key 非法）
     // ⇒ **节名那一条守卫（`:156`）从未被执行**：把 `.test(section)` 误删，
     //    用户能建出 `Bad-Section.key` 这种节名，而既有测试全绿
     for (const bad of ['BadSection.k', 'with_underscore.k', '9num.k']) {

@@ -122,14 +122,14 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                           与 praxis ontology 的分工 = 那个是**方法文本**、这个是**能跑的那个**）
   ③ 工具与执行        → container_fs（容器文件系统 15 子命令）/ container_git（git）/ dashboard（health 含注册表检查/time/wait）
                          acc_msm 已并入 msm（执行+发现）与 container_admin（管理）——msm("<name>", ["<args>"])；inspect=true 查用法
-                         handyman（杂工 agent 编排——guide 子命令：handyman guide）
+                         cheap-worker（杂工 agent 编排——guide 子命令：cheap-worker guide）
                          专属工具（**默认对所有 CCC 隐藏**，只有在自己 exclusiveTools 里点名的 CCC 可见）→ acc-diag（运行态诊断）
   ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
                          ACP（程序化 JSON-RPC 3100）/ Skiff 问答页（公网 ask）——面板「外部能力」组
   ⑤ 自主与接入        → container_trajectory send-now（跨轨迹的**即时**递送，**不排队**：live 目标在跑就当场注入当前轮、空闲则立即起轮；非 live 冷载入——等效于直接 wake；**有同步回执**）
                          container_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
-  ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：handyman/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin/**exclusiveTools**）
+  ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：cheap-worker/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin/**exclusiveTools**）
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
                          CCC 级开关：exclusiveTools（声明专属工具）/ safeMode.blacklist（写路径黑名单）
@@ -199,24 +199,24 @@ const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═══
 CCC-level features are configured in .opencode/serenity.json.
 Below are all available configuration sections.
 
-── 1. handyman.models ──
-handyman（杂工）工具可用模型白名单（provider/model 列表）；未配置时 handyman 报错要求配置。
-缺省模型 = models[0]（可用 handyman.defaultModel 指定，必须 ∈ models）。
-**CCC 应把该白名单指向低成本模型**——handyman 是批量执行通道（v1.31.3 双模式共用同一白名单）。
+── 1. cheap-worker.models ──
+cheap-worker（杂工）工具可用模型白名单（provider/model 列表）；未配置时 cheap-worker 报错要求配置。
+缺省模型 = models[0]（可用 cheap-worker.defaultModel 指定，必须 ∈ models）。
+**CCC 应把该白名单指向低成本模型**——cheap-worker 是批量执行通道（v1.31.3 双模式共用同一白名单）。
 
   Modes（v1.31.3，缺省 foreground）:
     mode="foreground"（缺省）：一次前台串行委派（宿主委派服务 ctx.subagents.start("spawn") +
       agentOptions 注入模型）——不循环、不校验完成码、不写进度文件；返回子 agent 最终文本。
       适合"一次调用一次结果"（逐用例回归、单次转换）。
     mode="background"：既有循环校验实现（内部 while 硬循环 + 随机完成码唯一判据 + 轮次上限
-      默认 100 可续跑 + 异常自动重启 ≤100 + 进度文件 AGENT_SESSIONS/handyman-<label>.md/.json +
+      默认 100 可续跑 + 异常自动重启 ≤100 + 进度文件 AGENT_SESSIONS/cheap-worker-<label>.md/.json +
       jobs 并行 maxParallel 默认 10）。适合长任务/无人值守/需抗提前收工。
 
   Config:
-    { "handyman": { "models": ["provider/model-name"] } }
+    { "cheap-worker": { "models": ["provider/model-name"] } }
 
   Example:
-    { "handyman": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3", "maxRounds": 100, "maxParallel": 10 } }
+    { "cheap-worker": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3", "maxRounds": 100, "maxParallel": 10 } }
 
 ── 2. sessionKeeper.threshold / sessionKeeper.sessionMdMaxKB ──
 trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积分阈值（非 headless 主 agent）。

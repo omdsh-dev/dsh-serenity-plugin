@@ -27,7 +27,7 @@ const SKIP_CLIENT_SUFFIX = ['.tsx', '.css']
 /**
  * 显式间接覆盖白名单（模块无测试直接 import，但经宿主模块被测试执行——覆盖率实证见 coverage 报告）：
  *  - gateway-auth / gateway-proxy：gateway.ts import 它们 → gateway.test.ts 执行（auth 94.7% / proxy 100%）
- *  - tools/* 薄壳（cc-fs/git/kit/msm/handyman/localstore/trajectory/cce/eap/neat）：
+ *  - tools/* 薄壳（cc-fs/git/kit/msm/cheap-worker/localstore/trajectory/cce/eap/neat）：
  *    纯 defineTool 注册壳或知识内容源（cce/eap/neat 供 praxis import），逻辑在 ops 层
  *    （fs-ops/git-ops/... 已被各自测试覆盖）；存在性/注册契约由 register.test.ts
  *    （apply 注册 11 工具断言，import index.ts 全链）保障；praxis 有独立镜像测试
@@ -40,7 +40,7 @@ const INDIRECT_COVERED = new Set([
   'git.ts',
   'kit.ts',
   'msm.ts',
-  'handyman.ts',
+  'cheap-worker.ts',
   'localstore.ts',
   'trajectory.ts',
   'cce.ts',

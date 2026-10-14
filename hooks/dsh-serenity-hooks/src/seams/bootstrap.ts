@@ -158,14 +158,14 @@ export function createEpochPromotion(
       if (agent === undefined) return { boundary: -1, promoted: true }
       const session = (agent as { session?: unknown }).session
       if (session === undefined) return { boundary: -1, promoted: true }
-      // handyman worker（sessionId 固定 `handyman-` 前缀，tools/handyman.ts 生成）：autonomous 程序化
+      // cheap-worker worker（sessionId 固定 `cheap-worker-` 前缀，tools/cheap-worker.ts 生成）：autonomous 程序化
       // worker，需从第 1 轮起就持有完整工具目录 + 完整 ACC 系统提示词（DCP/标准层）。
       // 它经 ctx.agents.create 直接创建（非 DSH delegation 路径），delegationDepth 为 0，
-      // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故显式按 `handyman-` 前缀判 promoted，
-      // 与 context.ts shouldAutoRestore 的 `handyman-` 约定保持一致。
-      // F4 Skiff（`skiff-` 前缀）：角色 CCC 提示词全替换，无需 whoami 锚定轮——恒 promoted（同 handyman）。
+      // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故显式按 `cheap-worker-` 前缀判 promoted，
+      // 与 context.ts shouldAutoRestore 的 `cheap-worker-` 约定保持一致。
+      // F4 Skiff（`skiff-` 前缀）：角色 CCC 提示词全替换，无需 whoami 锚定轮——恒 promoted（同 cheap-worker）。
       const loopSid = (session as { id?: string }).id
-      if (typeof loopSid === 'string' && (loopSid.startsWith('handyman-') || isSkiffSessionId(loopSid))) return { boundary: -1, promoted: true }
+      if (typeof loopSid === 'string' && (loopSid.startsWith('cheap-worker-') || isSkiffSessionId(loopSid))) return { boundary: -1, promoted: true }
       // 子 agent（delegationDepth > 0）恒为完整目录（anchored 语义）
       const header = (session as { header?: { delegationDepth?: number } }).header
       if ((header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
@@ -285,11 +285,11 @@ export function registerBootstrap(ctx: Context): void {
       const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; id?: string } | undefined
       const depth = session?.header?.delegationDepth ?? 0
       const sid = typeof session?.id === 'string' ? session.id : undefined
-      // handyman worker（sessionId `handyman-` 前缀）：autonomous worker，不需要 whoami 锚定轮
-      // （锚定轮消耗 2 轮 + 0 工具，浪费；handyman worker 已通过 systemPrompt.section 获得 ACC 5 块）。
+      // cheap-worker worker（sessionId `cheap-worker-` 前缀）：autonomous worker，不需要 whoami 锚定轮
+      // （锚定轮消耗 2 轮 + 0 工具，浪费；cheap-worker worker 已通过 systemPrompt.section 获得 ACC 5 块）。
       // F4 Skiff（`skiff-` 前缀）：角色 CCC 提示词全替换，同样不需要锚定轮（旁路）。
-      // 与 createEpochPromotion.status 的 `handyman-` 恒 promoted 判定保持一致。
-      if (sid !== undefined && (sid.startsWith('handyman-') || isSkiffSessionId(sid))) return
+      // 与 createEpochPromotion.status 的 `cheap-worker-` 恒 promoted 判定保持一致。
+      if (sid !== undefined && (sid.startsWith('cheap-worker-') || isSkiffSessionId(sid))) return
       if (depth === 0) {
         // v1.28.1：sessionEvents() 统一读取——rc.1 起 Session 无 .events 属性（snapshotEvents()），
         // 裸读 .events 恒 undefined → `!undefined` 恒 true → **有历史也永不跳过 → 每条消息都重插锚定**。

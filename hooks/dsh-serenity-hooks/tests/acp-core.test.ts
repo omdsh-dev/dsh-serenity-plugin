@@ -56,7 +56,7 @@ beforeEach(() => {
   mkdirSync(join(dir, '.opencode'), { recursive: true })
   writeFileSync(
     join(dir, '.opencode', 'serenity.json'),
-    JSON.stringify({ handyman: { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
+    JSON.stringify({ 'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
   )
   // 默认：ACP 开 / 问答页关（JSON-RPC 测试主面；问答页用例单独覆盖）
   __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpEnabled: true }))
@@ -765,7 +765,7 @@ describe('acp-http: 门控 / 路由 / 入参边界面（⑤ 第 28 件）', () =
       mkdirSync(join(other, '.opencode'), { recursive: true })
       writeFileSync(
         join(other, '.opencode', 'serenity.json'),
-        JSON.stringify({ handyman: { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
+        JSON.stringify({ 'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
       )
 
       const byName = await httpPost(port, { key, name: basenameOf(dir), question: 'hi' }, '/ask')

@@ -8,10 +8,10 @@
  *  - 点击 → **自绘 popover**（340px 右上角卡片，外点 / Escape 关闭）——替代官方 Modal
  * 面板只承载**状态展示**（v1.22 归属原则：账号密码等 plugin 配置在 DSH 设置面板
  * 「Serenity」页设定，本面板不再承载配置表单）：
- *  - 运行环境：CCC / Handyman 模型 / 守卫
+ *  - 运行环境：CCC / CheapWorker 模型 / 守卫
  *  - 安全模式：大开关（唯一可操作项，用户能力）
- *  - Handyman 运行：运行列表 + 详情折叠
- * 数据经同源 HTTP /serenity/status + /serenity/handymen（插件服务端路由）。
+ *  - CheapWorker 运行：运行列表 + 详情折叠
+ * 数据经同源 HTTP /serenity/status + /serenity/cheap-workers（插件服务端路由）。
  *
  * 槽：conversation.session.header.actions（官方既有槽，list）
  */
@@ -50,11 +50,11 @@ interface SerenityStatus {
   safeModeOn: boolean
   blacklist: string[]
   threshold: number | null
-  handymanModel: string | null
+  cheapWorkerModel: string | null
 }
 
-/** handyman 运行状态（/serenity/handymen 数据源；WebUI 等待界面） */
-interface HandymanRunInfo {
+/** cheap-worker 运行状态（/serenity/cheap-workers 数据源；WebUI 等待界面） */
+interface CheapWorkerRunInfo {
   label: string
   round: number
   done: boolean
@@ -64,7 +64,7 @@ interface HandymanRunInfo {
 }
 
 const API = '/serenity/status'
-const HANDYMEN_API = '/serenity/handymen'
+const CHEAP_WORKERS_API = '/serenity/cheap-workers'
 
 /** 盾牌 SVG（v1.24.5 校准：fill=none 纯描边；ON=绿 emerald / OFF=灰 label-secondary 由状态类控制） */
 const SHIELD_SVG = (
@@ -95,8 +95,8 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
-  const [handymen, setHandymen] = useState<HandymanRunInfo[]>([])
-  const [handymenOpen, setHandymenOpen] = useState(false)
+  const [cheapWorkers, setCheapWorkers] = useState<CheapWorkerRunInfo[]>([])
+  const [cheapWorkersOpen, setCheapWorkersOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   // v1.39.1：popover 改 `position:fixed` 后的视口坐标（null = 尚未测量，此时渲染在屏外）
@@ -118,18 +118,18 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     void refresh()
   }, [refresh])
 
-  // 弹层打开时轮询 handyman 运行状态（约 3s 刷新；进度文件驱动）
+  // 弹层打开时轮询 cheap-worker 运行状态（约 3s 刷新；进度文件驱动）
   useEffect(() => {
     if (!open) return
     let alive = true
     const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
     const tick = async (): Promise<void> => {
       try {
-        const r = await fetch(`${HANDYMEN_API}${qs}`, { headers: { accept: 'application/json' } })
-        const data = (await r.json()) as { handymen?: HandymanRunInfo[] }
-        if (alive) setHandymen(data.handymen ?? [])
+        const r = await fetch(`${CHEAP_WORKERS_API}${qs}`, { headers: { accept: 'application/json' } })
+        const data = (await r.json()) as { cheapWorkers?: CheapWorkerRunInfo[] }
+        if (alive) setCheapWorkers(data.cheapWorkers ?? [])
       } catch {
-        if (alive) setHandymen([])
+        if (alive) setCheapWorkers([])
       }
     }
     void tick()
@@ -219,7 +219,7 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   }
 
   const inCcc = status.root !== null
-  const runningHandymen = handymen.filter((l) => !l.done)
+  const runningCheapWorkers = cheapWorkers.filter((l) => !l.done)
 
   return (
     <div className={cx('sp-root')} ref={rootRef}>
@@ -291,9 +291,9 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       <span className={cx('sp-value')} title={status.root ?? undefined}>{status.root}</span>
                     </div>
                     <div className={cx('sp-row')}>
-                      <span className={cx('sp-label')}>Handyman 模型</span>
-                      <span className={cx('sp-value')} title={status.handymanModel ? `handyman.models: ${status.handymanModel}` : undefined}>
-                        {status.handymanModel ?? '未配置'}
+                      <span className={cx('sp-label')}>CheapWorker 模型</span>
+                      <span className={cx('sp-value')} title={status.cheapWorkerModel ? `cheap-worker.models: ${status.cheapWorkerModel}` : undefined}>
+                        {status.cheapWorkerModel ?? '未配置'}
                       </span>
                     </div>
                     <div className={cx('sp-row')}>
@@ -324,17 +324,17 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                   </div>
                 </div>
 
-                {/* ── 分组：Handyman 运行 ── */}
+                {/* ── 分组：CheapWorker 运行 ── */}
                 <div className={cx('sp-group')}>
                   <div className={cx('sp-groupHead')}>
-                    <h3 className={cx('sp-groupTitle')}>Handyman 运行</h3>
-                    {handymen.length > 0 && (
+                    <h3 className={cx('sp-groupTitle')}>CheapWorker 运行</h3>
+                    {cheapWorkers.length > 0 && (
                       <button
                         type="button"
-                        className={cx('sp-handymenToggle')}
-                        onClick={() => setHandymenOpen((v) => !v)}
+                        className={cx('sp-cheapWorkersToggle')}
+                        onClick={() => setCheapWorkersOpen((v) => !v)}
                       >
-                        {handymenOpen ? '收起' : '详情'}
+                        {cheapWorkersOpen ? '收起' : '详情'}
                       </button>
                     )}
                   </div>
@@ -342,28 +342,28 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                     <div className={cx('sp-row')}>
                       <span className={cx('sp-label')}>状态</span>
                       <span className={cx('sp-value')}>
-                        {runningHandymen.length > 0
-                          ? `运行中 ${runningHandymen.length}${handymen.length > 0 ? ` / 共 ${handymen.length}` : ''}`
-                          : '无运行中 handyman'}
+                        {runningCheapWorkers.length > 0
+                          ? `运行中 ${runningCheapWorkers.length}${cheapWorkers.length > 0 ? ` / 共 ${cheapWorkers.length}` : ''}`
+                          : '无运行中 cheap-worker'}
                       </span>
                     </div>
                   </div>
-                  {handymenOpen && (
-                    <div className={cx('sp-handymenList')}>
-                      {handymen.slice(0, 3).map((l) => (
-                        <div key={l.label} className={cx('sp-handymanItem')}>
-                          <div className={cx('sp-handymanHead')}>
-                            <span className={cx('sp-handymanLabel')} title={l.label}>{l.label}</span>
-                            <span className={cx('sp-handymanRound')}>{l.done ? '✓ 完成' : `R${l.round}`}</span>
-                            <span className={cx('sp-handymanTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
+                  {cheapWorkersOpen && (
+                    <div className={cx('sp-cheapWorkersList')}>
+                      {cheapWorkers.slice(0, 3).map((l) => (
+                        <div key={l.label} className={cx('sp-cheapWorkerItem')}>
+                          <div className={cx('sp-cheapWorkerHead')}>
+                            <span className={cx('sp-cheapWorkerLabel')} title={l.label}>{l.label}</span>
+                            <span className={cx('sp-cheapWorkerRound')}>{l.done ? '✓ 完成' : `R${l.round}`}</span>
+                            <span className={cx('sp-cheapWorkerTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
                           </div>
-                          <div className={cx('sp-handymanResp')} title={l.lastResponse}>
+                          <div className={cx('sp-cheapWorkerResp')} title={l.lastResponse}>
                             {l.lastResponse.slice(0, 80) || (l.done ? '已完成' : '（等待首轮响应）')}
                           </div>
                         </div>
                       ))}
-                      {handymen.length > 3 && (
-                        <div className={cx('sp-handymenMore')}>… 共 {handymen.length} 个 handyman（其余见等待界面）</div>
+                      {cheapWorkers.length > 3 && (
+                        <div className={cx('sp-cheapWorkersMore')}>… 共 {cheapWorkers.length} 个 cheap-worker（其余见等待界面）</div>
                       )}
                     </div>
                   )}

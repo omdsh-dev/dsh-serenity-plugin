@@ -75,7 +75,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `container_git` | Git: status / commit / push / log / pull / diff | Commit and push; it never force-pushes on its own |
 | `msm` | The execution entry for small tools: `msm("name", ["args"])`; partial names return candidates; `inspect=true` shows usage | Calling any registered tool in the workspace |
 | `praxis` | Injects one of three "ways of working" on demand: output self-check (eap), design alignment (neat), cognitive continuity (cce) | When precision is required, or alignment before building |
-| `handyman` | A low-cost worker model executes the task. **Default mode (foreground)** = one serial delegation that returns its result; **background mode** = rounds until done (completion-code check / round cap / auto-restart / progress file), and several jobs in parallel | Bulk, repetitive work (scanning dozens of skills, per-case regression) |
+| `cheap-worker` | A low-cost worker model executes the task. **Default mode (foreground)** = one serial delegation that returns its result; **background mode** = rounds until done (completion-code check / round cap / auto-restart / progress file), and several jobs in parallel | Bulk, repetitive work (scanning dozens of skills, per-case regression) |
 | `localstore` | Stores secrets and settings (credential and config namespaces) | API keys and passwords in one place, outside git |
 | `container_admin` | The maintenance bay: manage sub-roles, manage the small-tool registry, view all configuration | Defining a sub-role, registering a new small tool, changing configuration |
 | `im-bridge` | Message an IM contact (WeChat today): send text, send a file, list configured recipients, check channel health. Every successful send is recorded in the workspace log | When the AI must message family/colleagues proactively (see §6.6). **It appears only when this workspace has the WeChat bridge configured**, and it can message from this workspace only |
@@ -384,7 +384,7 @@ pnpm build              # bundle (lib/index.js + client.js)
 | Runs on | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no shared source, same standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, platform-independent text aligned byte-for-byte |
-| Tools | msm / container_fs / logbook … | container_fs / container_trajectory / dashboard / container_git / msm / praxis / handyman / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
+| Tools | msm / container_fs / logbook … | container_fs / container_trajectory / dashboard / container_git / msm / praxis / cheap-worker / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
 
 **A workspace can switch runtimes at any time**: the `.serenity` marker, `.opencode/skills/`, configuration, and `AGENT_SESSIONS/` formats are identical.
 Only the platform layer differs (tool names, injection channel), and the constraints the AI receives stay the same.

@@ -21,7 +21,7 @@ import type { Context } from 'cordis'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { readHandymanConfig } from './ccc.js'
+import { readCheapWorkerConfig } from './ccc.js'
 // P0-2（方案 §2.6）：机器级归属判定（一账号一 poller）—— 机制在 human-channel.ts，本文件只接线
 // P0-3（方案 §11.4）：订阅表 ＋ 路由 ＋ 机器级留痕 —— 同上，机制在 human-channel.ts
 import {
@@ -391,7 +391,7 @@ export async function handleIncoming(
   try {
     const sessionId = weixinSessionIdFor(fromUserId)
     const existing = getSkiffAgent(sessionId)
-    const hc = readHandymanConfig(root)
+    const hc = readCheapWorkerConfig(root)
     // v1.30.4：existing（进程内/重启后 live 复用）路径也走 ensureSkiffSession——
     // create 路径由 createSkiffAgent 内 ensure；live/老 agent 快路径此前跳过 → 未绑定/未注入。
     if (existing) {

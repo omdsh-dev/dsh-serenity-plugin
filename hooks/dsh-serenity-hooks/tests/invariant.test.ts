@@ -14,7 +14,7 @@ describe('invariant: 清单与注册工具一致性', () => {
       JSON.stringify({
         id: 'x',
         contributes: {
-          tools: ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'handyman', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology', 'serenity-skill-creator'],
+          tools: ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology', 'serenity-skill-creator'],
         },
       }),
     )

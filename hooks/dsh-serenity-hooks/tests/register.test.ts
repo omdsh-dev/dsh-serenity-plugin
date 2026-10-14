@@ -155,7 +155,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('container_git')
     expect(names).toContain('msm')
     expect(names).toContain('praxis')
-    expect(names).toContain('handyman')
+    expect(names).toContain('cheap-worker')
     expect(names).toContain('localstore')
     expect(names).toContain('container_admin')
     expect(names).toContain('container_trajectory')

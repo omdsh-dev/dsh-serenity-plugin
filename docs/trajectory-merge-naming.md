@@ -97,7 +97,7 @@
 
 | 动作 | 建议 | 理由 |
 |------|------|------|
-| `auto-doc` / `auto-guide` / `logbook-hook-guide` | **移出工具面**（改由 ACC 文档 + skill 承载），或降为**布尔参数** `guide: true`（`handyman(guide=true)` 有先例） | 三者均为"文档展示类"，不属动作；留在 enum 里只增选择成本 |
+| `auto-doc` / `auto-guide` / `logbook-hook-guide` | **移出工具面**（改由 ACC 文档 + skill 承载），或降为**布尔参数** `guide: true`（`cheap-worker(guide=true)` 有先例） | 三者均为"文档展示类"，不属动作；留在 enum 里只增选择成本 |
 | `auto-init` | 移出（低频；配置模板可进文档） | 一次性动作 |
 | `logbook-health` 与 `logbook-qa` | **两者都留** | 判据不同：health = 结构异常（stale/drift/ghost）；qa = 事实核对 |
 | `logbook-summary` 与 `logbook-list` | 保留（描述里写明分工：list = 清单+状态码；summary = 仪表盘） | 重叠但视角不同 |

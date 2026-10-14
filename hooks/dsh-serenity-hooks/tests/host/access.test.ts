@@ -58,7 +58,7 @@ describe('host/access: 通用读取', () => {
    * v1.31.4 回归（S142）：cordis 的 Context 是 Proxy，对**未经 inject 声明**的服务名
    * 直接属性读会**抛错**（`cannot get property "<name>" without inject`），不是返回
    * undefined。此处用"属性读抛错"的替身钉死该契约——否则本模块的回落分支永不执行，
-   * 异常直接逃逸（v1.31.3 handyman foreground 真机报错即此）。
+   * 异常直接逃逸（v1.31.3 cheap-worker foreground 真机报错即此）。
    * 权威用例（真实 cordis 兄弟拓扑）见 tests/host/cordis-access.test.ts。
    */
   it('hostInjected：属性读抛错（cordis 未声明 inject 形态）→ 吞掉并回落 ctx.get', () => {

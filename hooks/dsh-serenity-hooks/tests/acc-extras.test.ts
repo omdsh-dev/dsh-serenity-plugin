@@ -68,7 +68,7 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     expect(r.catalog).toContain('container_trajectory')
     expect(r.catalog).toContain('msm("<name>"')
     expect(r.catalog).toContain('weixin-doctor')
-    expect(r.catalog).toContain('handyman')
+    expect(r.catalog).toContain('cheap-worker')
     // 单一真相源声明
     expect(r.catalog).toContain('guides live with their feature')
     expect(r.catalog).toContain('only points')

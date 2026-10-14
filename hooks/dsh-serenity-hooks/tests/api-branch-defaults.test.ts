@@ -191,13 +191,13 @@ describe('src/api.ts 族 ②：`req.url` 缺失 ⇒ 回落 `/`（不是崩）', 
         expect(api.routes, `未注册：${p}`).toContain(p)
       }
 
-      // ── ① /serenity/handymen：url 缺失 ⇒ workspace 参数读不到 ⇒ 回落 process.cwd() ──
-      // 🔴 **本仓的 cwd 就在真 CCC 里** ⇒ `listActiveHandymen(root)` 会去读**真的**
-      //    `AGENT_SESSIONS/handyman-*.json` —— 拿它判"空表"是**环境依赖的假断言**
+      // ── ① /serenity/cheap-workers：url 缺失 ⇒ workspace 参数读不到 ⇒ 回落 process.cwd() ──
+      // 🔴 **本仓的 cwd 就在真 CCC 里** ⇒ `listActiveCheapWorkers(root)` 会去读**真的**
+      //    `AGENT_SESSIONS/cheap-worker-*.json` —— 拿它判"空表"是**环境依赖的假断言**
       //    （首跑实测：读出一堆真实进度文件）。⇒ 判据只钉**降级语义**（不崩、仍是那个端点）。
-      const handymen = await raw({ port: api.port, method: 'GET', path: '/serenity/handymen' })
-      expect(handymen.status, 'url 缺失不得让 handymen 崩').toBe(200)
-      expect(Array.isArray(jsonBody(handymen).handymen), '仍必须是 handymen 端点的形状').toBe(true)
+      const cheapWorkers = await raw({ port: api.port, method: 'GET', path: '/serenity/cheap-workers' })
+      expect(cheapWorkers.status, 'url 缺失不得让 cheapWorkers 崩').toBe(200)
+      expect(Array.isArray(jsonBody(cheapWorkers).cheapWorkers), '仍必须是 cheapWorkers 端点的形状').toBe(true)
 
       // 🔴 **承重判据（本族的关键）**：`req.url` 缺失时 `?? '/'` 必须**真被求值**。
       //    只看"没崩"是**弱测试** —— 变异实测：把 `?? '/'` 删成 `req.url as string`
@@ -262,15 +262,15 @@ describe('src/api.ts 族 ②：`req.url` 缺失 ⇒ 回落 `/`（不是崩）', 
 
     // 判别性对照：**url 真在场**（不打掉）＋ workspace 指向空的临时 CCC ⇒ 真「空表」
     // ⚠️ 这条**不能**复用上面的 `beforeHandlers`（url 被打掉 ⇒ query 读不到 ⇒ workspace 无效 ⇒
-    //    端点会回落到 `process.cwd()`，而那正是**真 CCC**、里面有真的 handyman 进度文件）。
+    //    端点会回落到 `process.cwd()`，而那正是**真 CCC**、里面有真的 cheap-worker 进度文件）。
     const scoped = await bootApi()
     try {
       const res = await raw({
         port: scoped.port, method: 'GET',
-        path: `/serenity/handymen?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS,
+        path: `/serenity/cheap-workers?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS,
       })
       expect(res.status).toBe(200)
-      expect(jsonBody(res).handymen, '空 CCC 无进度文件 ⇒ 空表（与上一条的真 CCC 读数成对照）').toEqual([])
+      expect(jsonBody(res).cheapWorkers, '空 CCC 无进度文件 ⇒ 空表（与上一条的真 CCC 读数成对照）').toEqual([])
     } finally {
       await scoped.close()
     }

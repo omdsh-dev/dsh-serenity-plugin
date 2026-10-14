@@ -1,7 +1,7 @@
 /**
  * cordis-access.test.ts — 宿主访问层的**真实 cordis** 回归用例（v1.31.4）
  *
- * 为什么必须用真 cordis（R↓，教训）：v1.31.3 的 handyman foreground 在真机上报
+ * 为什么必须用真 cordis（R↓，教训）：v1.31.3 的 cheap-worker foreground 在真机上报
  * `cannot get property "subagents" without inject`，而**全部 fake ctx 单测都是绿的**——
  * 因为 `tests/host/access.test.ts` 里的 ctx 是普通对象（`{ get: ... }`），属性读只是
  * 返回 undefined；真实 cordis 的 Context 是 Proxy，`ReflectService.handler.get`

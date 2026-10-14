@@ -100,7 +100,7 @@ type _SessionTitleRename = Expect<Extends<HostContext['sessionTitle']['rename'],
 /** 工作区白名单下拉（`api.ts:334`、`skiff-debug.ts:90`——读 `path`/`title`） */
 type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry']['list']>, readonly unknown[]>>
 
-/** handyman foreground 委派（`tools/handyman.ts:171`——`start('spawn', request)`） */
+/** cheap-worker foreground 委派（`tools/cheap-worker.ts:171`——`start('spawn', request)`） */
 type _SubagentsStart = Expect<Extends<HostContext['subagents']['start'], (name: string, request: never) => Promise<unknown>>>
 
 /** 设置面板（v0.1.7 起 = `SettingsForms`）：本插件用 `configure` 关掉自动生成页；
@@ -183,7 +183,7 @@ type _AgentInboxPrepend = Expect<Extends<HostAgent['inbox']['prepend'], (target:
 /** `agent.session.header.cwd` —— 工具工作目录解析 */
 type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], string | undefined>>
 /**
- * `agent.status === 'idle'` —— 等待空闲（`agent-idle.ts:65`，handyman 的完成判据）。
+ * `agent.status === 'idle'` —— 等待空闲（`agent-idle.ts:65`，cheap-worker 的完成判据）。
  * 注：`status` 是可变属性（非方法），断言其**可读**且类型覆盖 'idle'。
  */
 type _AgentStatus = Expect<Extends<HostAgent['status'], string>>

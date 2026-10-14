@@ -1,7 +1,7 @@
 /**
  * status.ts — 状态与安全模式操作（纯逻辑，零 DSH 依赖，可独立单测）
  *
- * WebUI 停靠栏的数据源：ACC 版本 / CCC 根 / safe-mode 状态 / 黑名单 / keeper 阈值 / handyman 模型。
+ * WebUI 停靠栏的数据源：ACC 版本 / CCC 根 / safe-mode 状态 / 黑名单 / keeper 阈值 / cheap-worker 模型。
  * setSafeMode 直接读写 .serenity-safe-on 标记（守卫实时读取，写即生效）。
  */
 
@@ -12,7 +12,7 @@ import {
   isSafeModeOn,
   readBlacklist,
   loadSerenityConfig,
-  readHandymanConfig,
+  readCheapWorkerConfig,
   SAFE_MODE_MARKER,
   DEFAULT_SERENITY_CONFIG_PATHS,
 } from './ccc.js'
@@ -112,7 +112,7 @@ interface SerenityStatus {
   /** 黑名单条目（string 或 {pattern, message}，对齐 osp） */
   blacklist: { pattern: string; message?: string }[]
   threshold: number | null
-  handymanModel: string | null
+  cheapWorkerModel: string | null
   restrict: {
     lastKey: string | null
     lastAttemptAt: string | null
@@ -133,7 +133,7 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     nodeVersion: process.version,
   }
   if (!root) {
-    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, handymanModel: null, restrict }
+    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, cheapWorkerModel: null, restrict }
   }
   const cfg = loadSerenityConfig(root, configPaths)
   return {
@@ -142,7 +142,7 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     safeModeOn: isSafeModeOn(root),
     blacklist: readBlacklist(root, configPaths),
     threshold: cfg.sessionKeeper?.threshold ?? null,
-    handymanModel: readHandymanConfig(root, configPaths)?.defaultModel ?? null,
+    cheapWorkerModel: readCheapWorkerConfig(root, configPaths)?.defaultModel ?? null,
     restrict,
   }
 }

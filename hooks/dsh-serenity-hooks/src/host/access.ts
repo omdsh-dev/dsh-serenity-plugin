@@ -121,7 +121,7 @@ export function hostWeb(ctx: unknown): HostWeb | undefined {
 }
 
 /**
- * `ctx.subagents`（lazy；v1.31.3：handyman foreground 模式的委派正门）。
+ * `ctx.subagents`（lazy；v1.31.3：cheap-worker foreground 模式的委派正门）。
  *
  * 形状对照宿主 rc.1：`SubagentRuntime.start(name, request)` → `SubagentRun`
  * （`result` / `dispose` / `id`）。本模块只做形状收口；语义与错误处理归调用方。
@@ -138,7 +138,7 @@ export function hostSubagents(ctx: unknown): HostSubagents | undefined {
 }
 
 /**
- * `ctx.llm`（`LlmRuntime`；v1.48：handyman 的 **provider 预检**取证面）。
+ * `ctx.llm`（`LlmRuntime`；v1.48：cheap-worker 的 **provider 预检**取证面）。
  *
  * 形状对照宿主 rc.2（`@deepseek-ai/dsh-llm`）：
  *   · `listProviders()` → `{ id, name }[]` —— **有 adapter** 的路由（"本机真能用"）

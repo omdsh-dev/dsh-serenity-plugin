@@ -97,7 +97,7 @@
 
 ### 3.3 留（一行为不动）
 
-`wake-scheduler.ts`（逻辑）｜`wake-registry.ts`｜`trajectory-ops.ts`｜`trajectory-bound.ts`｜`ccc-roots.ts`｜`clock-runtime.ts`（除 import）｜`container-status.ts` 的 wake/wakes 半边｜`tools/trajectory.ts`（`container_trajectory`）｜skiff/msm/praxis/handyman/localstore/im-bridge 全家
+`wake-scheduler.ts`（逻辑）｜`wake-registry.ts`｜`trajectory-ops.ts`｜`trajectory-bound.ts`｜`ccc-roots.ts`｜`clock-runtime.ts`（除 import）｜`container-status.ts` 的 wake/wakes 半边｜`tools/trajectory.ts`（`container_trajectory`）｜skiff/msm/praxis/cheap-worker/localstore/im-bridge 全家
 
 ### 3.4 文档涟漪（**2026-09-15 补记：初版 v1.0 漏记，实读后补全**）
 

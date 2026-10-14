@@ -52,7 +52,7 @@
 `trajectory-assistant-design` / `trajectory-assistant-plan` ｜ `acc-autopilot-retirement` /
 `acc-component-relations-review` / `acc-component-relations-current-state` / `acc-tool-naming-rework` /
 `acc-tool-merge-and-msm-entry-rework` ｜ `autopilot-trajectory` / `autopilot-trajectory-design` /
-`rebuild-focus-note-and-autopilot-bound-wake` ｜ `handyman-design` / `handyman-dual-mode-design` ｜
+`rebuild-focus-note-and-autopilot-bound-wake` ｜ `cheap-worker-design` / `cheap-worker-dual-mode-design` ｜
 `cro-wake-log-design` / `im-bridge-redesign` ｜ `deepseek-multimodal-patch-design` / `web-fetch-fakeip-design` /
 `advanced-settings-design` / `dsh-serenity-hooks-design` ｜ `session-binding-persist-plan` ｜
 `three-improvements-design` / `testability-architecture-plan` ｜ `LOOP-DESIGN`
@@ -72,7 +72,7 @@
 
 **全部 81 个条目都过了一遍**三条判据；**14 件满足**（已搬）。其余 **67 件至少有一条不满足**，主因两类：
 ① **唯一记录**（"已实现的功能设计"／研究／审计 —— **没有被更新的同类件取代**，如 `skiff-*`、`weixin-*`、
-`trajectory-*`、`handyman-*` 诸件：它们记录的是**当时为什么这么设计**，属认知资产）；
+`trajectory-*`、`cheap-worker-*` 诸件：它们记录的是**当时为什么这么设计**，属认知资产）；
 ② **仍是活引用**（契约面 ／ 被现行件引用 ／ 被代码注释点名）。
 ⚠️ **一个刻意的边界**：① 那 25 件"**已实现的功能设计**"**按本文件的判据不搬**（没被取代），
 但若口径改成"**功能已上线 ⇒ 设计稿使命完成**"，它们即**最大的一批候选** —— 那是**口径裁决**，

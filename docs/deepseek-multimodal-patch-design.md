@@ -254,7 +254,7 @@ type Action =
 
 ### 5.2 开关的落点与默认值
 
-**落点**：`.opencode/serenity.json` 的 `visionPatch.enabled`（CCC 级，与既有 `trajectory.*` / `handyman.*` 同族）。
+**落点**：`.opencode/serenity.json` 的 `visionPatch.enabled`（CCC 级，与既有 `trajectory.*` / `cheap-worker.*` 同族）。
 
 **默认值**：🔴 **待裁（§8-1）**。两个选项：
 - **(默认开)**：owner「临时的我允许」⇒ 意图明确是"要它工作"；开箱即用；

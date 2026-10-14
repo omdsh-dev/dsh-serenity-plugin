@@ -34,7 +34,7 @@
 | 5 | `praxis` | eap + neat + cce | 可实践理论注入（section: eap/neat/cce） | Engineering Drawings |
 | 6 | `logbook` | session + session_rebuild | 会话全周期 + rebuild | The Logbook / Theseus |
 | 7 | `dashboard` | acc_kit | health/time/wait（普适观测） | 舰桥仪表盘（随时可看） |
-| 8 | `handyman` | handyman | 杂工编排 | Crew Rotation |
+| 8 | `cheap-worker` | cheap-worker | 杂工编排 | Crew Rotation |
 | 9 | `localstore` | localstore | 凭据/配置存储 | 保留（敏感清晰） |
 | 10 | `autopilot-trajectory` | 同 | 自主巡航 | 保留（产品名） |
 
@@ -51,7 +51,7 @@
 观测面（仪表）         dashboard（health/time/wait——随时看，无副作用）
 理论面（Drawings）     praxis（eap/neat/cce——注入认知法则）
 轨迹面（Voyage）       logbook（会话/重建/归档）
-协作面（Crew）         handyman（杂工） · skiff_admin 已入 container_admin
+协作面（Crew）         cheap-worker（杂工） · skiff_admin 已入 container_admin
 存储面                localstore（凭据）
 自主面                autopilot-trajectory
 ```

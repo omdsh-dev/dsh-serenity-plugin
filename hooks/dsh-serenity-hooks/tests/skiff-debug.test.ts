@@ -269,11 +269,11 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
   })
 
   it('POST /ask 会话延续：新建（continued:false）→ 同会话追问（continued:true）→ 全量轨迹（v1.25.10）', async () => {
-    // 角色配置（handyman.defaultModel 供 createSkiffAgent）
+    // 角色配置（cheap-worker.defaultModel 供 createSkiffAgent）
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ handyman: { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
+      JSON.stringify({ 'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
     )
     // fake ctx：agents.create 产生带 followup 的 fake agent（events 可累积）；
     // on 注册时立即触发 idle（waitIdle 同步 resolve，skiff-core 测试同款）

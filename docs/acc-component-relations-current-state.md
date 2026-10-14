@@ -43,7 +43,7 @@
 | R4 | `bindingsPathFor` | `trajectory-bound.ts:63` | `session.header.cwd` → 根 | `.bindings.json` 路径 | **绑定持久化的唯一入口** |
 | R5 | mdPath → root | `autopilot-trajectory.ts:488`/`559` | **把 `SESSION.md` 的**文件路径**当目录上溯** | 根 | 唤起时限定同 CCC 找 agent |
 | R6 | `resolveSerenityRootFor` | `rebuild.ts:493` | 会话/路径 | 根 | **失败时返回假根 `process.cwd()`** |
-| **R7** | 工具入口 `agentCwd + findSerenityRoot` | **同一份代码复制 10 份** | — | 根 | `tools/{cc-fs:52, git:38, msm:105, localstore:44, trajectory:374, kit:38, container-admin:102, handyman:395, acc-diag:51, im-bridge:60}` |
+| **R7** | 工具入口 `agentCwd + findSerenityRoot` | **同一份代码复制 10 份** | — | 根 | `tools/{cc-fs:52, git:38, msm:105, localstore:44, trajectory:374, kit:38, container-admin:102, cheap-worker:395, acc-diag:51, im-bridge:60}` |
 | **R8** | seam 层 | **13 文件 24 点** | — | 根 | `context` / `keeper` / `compact` / `guards` / `system-prompt` / `bootstrap` / `env` / `opencode-skills` / `output-guard-seam` / `status` / `gateway` / `skiff-debug` / `api` |
 | R9 | `requireCcc` | `api.ts:800` | 入参（**信任**） | 校验 + 上溯 | — |
 | R10 | `matchCcc` | `weixin-send-api.ts:112` | 路径 / 目录名 / `.serenity` 名 | 根 | **同名报错不猜** |
@@ -90,7 +90,7 @@
 | C4 | **HTTP 面静默降级** | `api.ts:194-198` / `375` / `466-469` / `495-498` | 返回空 / 404 / `status:null` ⇒ **前端无法区分"没有"与"没解析到"** |
 | C5 | `discoverCccs` 三层回退 | `skiff-debug.ts:81` | 回退本身即补偿 |
 | C6 | 绑定落盘 | `trajectory-bound.ts:198` | 根缺失 ⇒ **返回 false 不重试** ⇒ 冷唤醒报"无绑定会话记录"（`wake-scheduler.ts:177`） |
-| C7 | 工具/seam 回落 | 各处 | `?? process.cwd()`（副作用见 `handyman.ts:387-393`，靠调换检查顺序规避） |
+| C7 | 工具/seam 回落 | 各处 | `?? process.cwd()`（副作用见 `cheap-worker.ts:387-393`，靠调换检查顺序规避） |
 | C8 | rebuild 诊断 | `rebuild.ts` | 落进 `process.cwd()` |
 | C9 | 脚本层 | 脚本 | `SERENITY_ROOT` 环境注入 + `--ccc` **手工指定** |
 
@@ -107,7 +107,7 @@
 
 ### 1.8 已明确**排除**（防把清单报大）
 
-`session-cleanup.sessionsRootDir`（**DSH 会话根 ≠ CCC 根**）｜`findGitRoot`｜`readCccName` 的委托导出（`msm-ops:53` / `kit-ops:33`）｜所有**接受 root 参数**的 ops 模块（`kit-ops` / `handyman-ops` / `msm-ops` / `fs-ops` / `git-ops` / `trajectory-ops` / `wake-registry` / `skiff-core` / `weixin-hook` / `runImBridge`）｜`client/*.tsx`（消费 `/serenity/cccs`）｜`config-ops knownWorkspaces`｜`getLastActiveSessionInfo`（**轨迹非根**）。
+`session-cleanup.sessionsRootDir`（**DSH 会话根 ≠ CCC 根**）｜`findGitRoot`｜`readCccName` 的委托导出（`msm-ops:53` / `kit-ops:33`）｜所有**接受 root 参数**的 ops 模块（`kit-ops` / `cheap-worker-ops` / `msm-ops` / `fs-ops` / `git-ops` / `trajectory-ops` / `wake-registry` / `skiff-core` / `weixin-hook` / `runImBridge`）｜`client/*.tsx`（消费 `/serenity/cccs`）｜`config-ops knownWorkspaces`｜`getLastActiveSessionInfo`（**轨迹非根**）。
 
 ### 1.9 范围边界（诚实）
 

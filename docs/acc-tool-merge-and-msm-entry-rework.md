@@ -31,7 +31,7 @@
 | `eap` | EAP 框架 | 极小 | 知识 | 低 |
 | `neat` | Neat 协议 | 极小 | 知识 | 低 |
 | `cce` | CCE 框架 | 极小 | 知识 | 低 |
-| `handyman` | 杂工 agent | 大 | agent 编排 | 低 |
+| `cheap-worker` | 杂工 agent | 大 | agent 编排 | 低 |
 | `session_rebuild` | 超限重建 | 小（2 参） | 会话轨迹 | 低（关键路径） |
 | `localstore` | 凭据/配置 | 小 | 配置 | 低 |
 | `skiff_admin` | Skiff 角色 | 小 | 对外角色 | 低 |
@@ -116,7 +116,7 @@ msm(<name: string>, <args: string[]>, <inspect?: boolean>)
 | acc_kit 并入？ | — | — | acc_kit 高频自检，保留独立 |
 | session + session_rebuild → session 内加 rebuild action | session 9+1 子命令 | 消灭 1 工具头 | 中（session_rebuild 是关键路径，独立工具名更醒目；合并后 description 要保证 rebuild 可发现） |
 | cc_fs + cc_git → `cc_fs` 加 git？ | — | — | 语义域不同（文件 vs git），不建议 |
-| handyman/skiff_admin/autopilot 独立保留 | — | — | 低频但大 schema，合并收益小破坏大 |
+| cheap-worker/skiff_admin/autopilot 独立保留 | — | — | 低频但大 schema，合并收益小破坏大 |
 
 **收益估算**：eap/neat/cce 三个小头 ≈ 3×~50 tok 描述 + 参数 = ~150-200 tok/轮 → 与 D12 判断一致的"小头"。真正大头是 **acc_msm 的 8 action enum + 8 参数 + description**（~300-400 tok）——R2 入口重构顺带瘦身（主入口变 3 参数）反而省更多。
 

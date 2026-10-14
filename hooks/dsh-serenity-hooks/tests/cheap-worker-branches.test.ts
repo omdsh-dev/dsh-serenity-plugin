@@ -1,9 +1,9 @@
 /**
- * handyman-branches.test.ts — `tools/handyman.ts` 的**守卫面与保险阀**（⑤ 第 49 件，2026-09-25）
+ * cheap-worker-branches.test.ts — `tools/cheap-worker.ts` 的**守卫面与保险阀**（⑤ 第 49 件，2026-09-25）
  *
  * ── 挑靶依据（机械，不是叙述）───────────────────────────────────────────────
  * 按 ⑤ 换挡后的入口「**按分支覆盖率排序**」复扫 `coverage/src/**` ⇒
- * `tools/handyman.ts` = 分支 **76.42%（107/140）**，是 `src/**` 中**最低的未被做过**的文件
+ * `tools/cheap-worker.ts` = 分支 **76.42%（107/140）**，是 `src/**` 中**最低的未被做过**的文件
  * （43 `diag-ops` ／ 44 `compact` ／ 45 `lifecycle` ／ 46 `seams/context` ／ 47 `weixin-hook` ／
  *  48 `wake-scheduler` 已做完）。语句 92.96%（502/540）、函数 11/11。
  *
@@ -15,13 +15,13 @@
  *   只读 `data-value` 那一列会**张冠李戴**（表格是 `<tr>` 组织，数值列本身不带文件身份）。
  *
  * ── 🔴 为何这些分支从未被走过（本件的核心发现）──────────────────────────────
- * 未覆盖的分支集中在**两类**，而既有 `handyman-foreground.test.ts`（314 行）虽已覆盖
+ * 未覆盖的分支集中在**两类**，而既有 `cheap-worker-foreground.test.ts`（314 行）虽已覆盖
  * 前台正路与三类拒绝，**这两类都不是它的对象**：
  *
  *  **(甲) 参数校验的"拒绝面"**（`:443`/`:446`/`:455`/`:503`/`:507`…）：既有用例只测了
  *        前台的三类拒绝（白名单／服务缺失／传 jobs）。**后台路径**的校验分支
  *        （`jobs` 形状非法、单 job 缺 task/label、超 maxParallel、`ctx.agents` 缺席、
- *        无 CCC 根、无 handyman 配置）**一次都没跑过** ⇒ 把某条 `throw` 误删／条件写反，
+ *        无 CCC 根、无 cheap-worker 配置）**一次都没跑过** ⇒ 把某条 `throw` 误删／条件写反，
  *        **没有任何测试会红**，而它们正是"配置错了要**响亮报错**而不是静默跑错"的判据。
  *
  *  **(乙) 两条保险阀 ＋ 一条"不判定"哲学**（`:317`/`:330` ＋ `:155~:174`）：
@@ -35,7 +35,7 @@
  * 逐处清单（源码行 = 本件写作时的锚；**行号只作"某版本的实测读数"**）：
  *   A 类（参数校验拒绝面）
  *     A1 :443 无 CCC 根 ⇒ `NO_CCC_FROM_AGENT_CWD`
- *     A2 :446 无 handyman 配置 ⇒ 报错含**可照抄的配置样例**
+ *     A2 :446 无 cheap-worker 配置 ⇒ 报错含**可照抄的配置样例**
  *     A3 :455 非法 mode ⇒ 拒绝（且**不得**被前面的分支吞掉）
  *     A4 :489 `jobs` 形状非法（非数组／空数组／元素非对象／缺 task 或 label）⇒ 拒绝
  *     A5 :494 单 job 缺 task 或 label ⇒ 拒绝
@@ -77,8 +77,8 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { createHandymanTool } from '../src/tools/handyman.js'
-import { handymanProgressPaths } from '../src/handyman-ops.js'
+import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
+import { cheapWorkerProgressPaths } from '../src/cheap-worker-ops.js'
 
 let dir = ''
 
@@ -88,7 +88,7 @@ function writeCcc(models: string[], defaultModel?: string, extra: Record<string,
   writeFileSync(join(dir, '.serenity'), 'home-serenity\n', 'utf-8')
   writeFileSync(
     join(dir, '.opencode', 'serenity.json'),
-    JSON.stringify({ handyman: { models, ...(defaultModel === undefined ? {} : { defaultModel }), ...extra } }),
+    JSON.stringify({ 'cheap-worker': { models, ...(defaultModel === undefined ? {} : { defaultModel }), ...extra } }),
     'utf-8',
   )
 }
@@ -113,7 +113,7 @@ function fakeAgents(opts: { roundsBeforeDone?: number; throwEveryRound?: boolean
           round += 1
           if (opts.throwEveryRound) throw new Error('followup boom (injected)')
           const text = (message?.content ?? []).map((b) => b.text ?? '').join('')
-          const token = /SERENITY_HANDYMAN_DONE_[0-9a-f]+/.exec(text)?.[0] ?? ''
+          const token = /SERENITY_CHEAP_WORKER_DONE_[0-9a-f]+/.exec(text)?.[0] ?? ''
           const reached = round >= (opts.roundsBeforeDone ?? 1)
           // 未达阈值 ⇒ 回一段**不含完成码**的文本（逼出"继续下一轮"）；达成 ⇒ 回显完成码
           events = [{
@@ -156,7 +156,7 @@ function fakeLlm(opts: {
 }
 
 function tool() {
-  return createHandymanTool({} as never) as unknown as {
+  return createCheapWorkerTool({} as never) as unknown as {
     execute: (args: Record<string, unknown>, exec: unknown) => Promise<Record<string, unknown>>
   }
 }
@@ -167,13 +167,13 @@ function execIn(dirName = dir) {
 
 /** 读失败状态文件（保险阀必须留下它 —— "可续跑"的前提） */
 function readFailedJson(label: string): Record<string, unknown> | null {
-  const { json } = handymanProgressPaths(dir, label)
+  const { json } = cheapWorkerProgressPaths(dir, label)
   if (!existsSync(json)) return null
   return JSON.parse(readFileSync(json, 'utf-8')) as Record<string, unknown>
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'handyman-br-'))
+  dir = mkdtempSync(join(tmpdir(), 'cheap-worker-br-'))
   writeCcc(['minimax-cn-coding-plan/MiniMax-M3'], 'minimax-cn-coding-plan/MiniMax-M3')
 })
 
@@ -184,10 +184,10 @@ afterEach(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 // A 类 — 参数校验的拒绝面（"配置错了要响亮报错，不是静默跑错"）
 // ─────────────────────────────────────────────────────────────────────────────
-describe('handyman 分支面: A 参数校验拒绝面', () => {
+describe('cheap-worker 分支面: A 参数校验拒绝面', () => {
   it('🔴 A1：无 CCC 根 ⇒ 报 NO_CCC_FROM_AGENT_CWD（不静默回落 cwd）', async () => {
     // 真故障形态：cwd 指向一个**祖先链上没有 `.serenity`** 的目录
-    const bare = mkdtempSync(join(tmpdir(), 'handyman-noccc-'))
+    const bare = mkdtempSync(join(tmpdir(), 'cheap-worker-noccc-'))
     try {
       await expect(
         tool().execute({ mode: 'background', task: 't', label: 'l' }, execIn(bare)),
@@ -197,14 +197,14 @@ describe('handyman 分支面: A 参数校验拒绝面', () => {
     }
   })
 
-  it('🔴 A2：无 handyman 配置 ⇒ 报错含**可照抄的配置样例**（不是干巴巴一句"缺配置"）', async () => {
+  it('🔴 A2：无 cheap-worker 配置 ⇒ 报错含**可照抄的配置样例**（不是干巴巴一句"缺配置"）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({}), 'utf-8')
     const p = tool().execute({ mode: 'background', task: 't', label: 'l' }, execIn())
     await expect(p).rejects.toThrow(/whitelist/)
     // 🔴 断言"可执行性"：文案里要有真实的键名与样例，否则调用方（LLM）无法自我修正
     await expect(
       tool().execute({ mode: 'background', task: 't', label: 'l' }, execIn()),
-    ).rejects.toThrow(/handyman/)
+    ).rejects.toThrow(/cheap-worker/)
   })
 
   it('🔴 A3：非法 mode ⇒ 拒绝（不得被缺省值吞掉）', async () => {
@@ -252,9 +252,9 @@ describe('handyman 分支面: A 参数校验拒绝面', () => {
   })
 
   it('🔴 A6/direct：`ctx.agents` 缺席 ⇒ 响亮报错（不静默空跑）', async () => {
-    // 单 job 后台模式：ctx 无 agents 属性 ⇒ runHandymanJob 里 `if (!ctx.agents)` 真侧
+    // 单 job 后台模式：ctx 无 agents 属性 ⇒ runCheapWorkerJob 里 `if (!ctx.agents)` 真侧
     const ctxNoAgents = { get: () => undefined } as never
-    const t = createHandymanTool(ctxNoAgents) as unknown as {
+    const t = createCheapWorkerTool(ctxNoAgents) as unknown as {
       execute: (a: Record<string, unknown>, e: unknown) => Promise<Record<string, unknown>>
     }
     await expect(
@@ -266,10 +266,10 @@ describe('handyman 分支面: A 参数校验拒绝面', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 // B 类 — 两条保险阀 ＋ "不判定"哲学（本件主靶）
 // ─────────────────────────────────────────────────────────────────────────────
-describe('handyman 分支面: B 保险阀与不判定', () => {
+describe('cheap-worker 分支面: B 保险阀与不判定', () => {
   /** 用指定 ctx 造工具（**不是** `tool()` —— 那个闭包捕获的是空 ctx） */
   function toolWith(ctx: unknown) {
-    return createHandymanTool(ctx as never) as unknown as {
+    return createCheapWorkerTool(ctx as never) as unknown as {
       execute: (a: Record<string, unknown>, e: unknown) => Promise<Record<string, unknown>>
     }
   }
@@ -337,7 +337,7 @@ describe('handyman 分支面: B 保险阀与不判定', () => {
     const { runtime } = fakeAgents()
     // 形状不符 = 旧宿主形态 ⇒ 必须保持旧行为（"增强不得变成新失败源"）
     const ctx = ctxForBackground(runtime, fakeLlm({ registered: { not: 'an-array' } }))
-    const t = createHandymanTool(ctx) as unknown as {
+    const t = createCheapWorkerTool(ctx) as unknown as {
       execute: (a: Record<string, unknown>, e: unknown) => Promise<Record<string, unknown>>
     }
     const res = await t.execute({ mode: 'background', task: 't', label: 'shape' }, execIn()) as { jobs: Array<Record<string, unknown>> }
@@ -348,7 +348,7 @@ describe('handyman 分支面: B 保险阀与不判定', () => {
   it('🔴 B4：`listProviders` **真抛** ⇒ 预检**放行**（读取失败 ≠ 服务缺失）', async () => {
     const { runtime } = fakeAgents()
     const ctx = ctxForBackground(runtime, fakeLlm({ throwOnList: true }))
-    const t = createHandymanTool(ctx) as unknown as {
+    const t = createCheapWorkerTool(ctx) as unknown as {
       execute: (a: Record<string, unknown>, e: unknown) => Promise<Record<string, unknown>>
     }
     const res = await t.execute({ mode: 'background', task: 't', label: 'threw' }, execIn()) as { jobs: Array<Record<string, unknown>> }
@@ -363,7 +363,7 @@ describe('handyman 分支面: B 保险阀与不判定', () => {
       listConfigurableProviders: () => { throw new Error('declared boom (injected)') },
     }
     const ctx = ctxForBackground(runtime, llm)
-    const t = createHandymanTool(ctx) as unknown as {
+    const t = createCheapWorkerTool(ctx) as unknown as {
       execute: (a: Record<string, unknown>, e: unknown) => Promise<Record<string, unknown>>
     }
     // 🔴 语义：**声明面读不到 ≠ 判定不了** —— 判定基于 registered，声明面只贡献"建议段"。
@@ -376,7 +376,7 @@ describe('handyman 分支面: B 保险阀与不判定', () => {
   it('✅ 对照：`llm` 服务整体缺席 ⇒ 预检放行（"无该服务"与"读失败"同档）', async () => {
     const { runtime } = fakeAgents()
     const ctx = ctxForBackground(runtime, undefined)
-    const t = createHandymanTool(ctx) as unknown as {
+    const t = createCheapWorkerTool(ctx) as unknown as {
       execute: (a: Record<string, unknown>, e: unknown) => Promise<Record<string, unknown>>
     }
     const res = await t.execute({ mode: 'background', task: 't', label: 'nollm' }, execIn()) as { jobs: Array<Record<string, unknown>> }

@@ -119,10 +119,10 @@ describe('registerBootstrap: system-prompt/assemble —— 首锚目录窄化', 
     expect(out.tools).toHaveLength(fullCatalog().length)
   })
 
-  it('handyman/skiff 会话**恒晋升** ⇒ 原样返回完整目录（无锚定轮）', async () => {
+  it('cheap-worker/skiff 会话**恒晋升** ⇒ 原样返回完整目录（无锚定轮）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    for (const id of ['handyman-worker-1', 'skiff-qa-boot-1']) {
+    for (const id of ['cheap-worker-worker-1', 'skiff-qa-boot-1']) {
       const out = (await assemble(ctx, fakeAgent(id, { header: { cwd: dir } }), fullCatalog())) as { tools: unknown[] }
       expect(out.tools, id).toHaveLength(fullCatalog().length)
     }
@@ -206,12 +206,12 @@ describe('registerBootstrap: agent/pre-step —— 首锚剥离注入上下文',
     expect(out).toBe(decision) // 身份相同 ⇒ 证明走的是 early-return 而非重建
   })
 
-  it('已晋升（handyman/skiff 恒晋升）⇒ 原样返回，不剥离', async () => {
+  it('已晋升（cheap-worker/skiff 恒晋升）⇒ 原样返回，不剥离', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     const decision = { kind: 'enter', messages: [msg('skill-catalog')] }
 
-    const out = await preStep(ctx, fakeAgent('handyman-worker-2', { header: { cwd: dir } }), decision)
+    const out = await preStep(ctx, fakeAgent('cheap-worker-worker-2', { header: { cwd: dir } }), decision)
     expect(out).toBe(decision)
   })
 
@@ -286,10 +286,10 @@ describe('registerBootstrap: agent/inbox/inserted —— 锚定轮注入', () =>
     expect(prepends).toHaveLength(0)
   })
 
-  it('handyman / skiff 会话 ⇒ 不锚定（autonomous worker 与角色会话不需锚定轮）', async () => {
+  it('cheap-worker / skiff 会话 ⇒ 不锚定（autonomous worker 与角色会话不需锚定轮）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    for (const id of ['handyman-worker-3', 'skiff-qa-boot-2']) {
+    for (const id of ['cheap-worker-worker-3', 'skiff-qa-boot-2']) {
       const { agent, prepends } = inboxAgent(id, { header: { cwd: dir }, events: [] })
       await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
       expect(prepends, id).toHaveLength(0)

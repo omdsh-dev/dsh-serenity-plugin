@@ -535,7 +535,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('路由命中 → session/new + prompt → 回复回写（md→plain）', async () => {
     // 配置：enabled + 路由 * → qa
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -573,7 +573,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.16 autoReplyWithLastMessage=false → 桥不回发最终文本 + 每轮末尾注入机制标记（措辞归 CCC）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, autoReplyWithLastMessage: false, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -643,7 +643,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.17 fallbackOnNoSend=true + 闸门已装配 + 本轮未发送 → 桥兜底转发最终文本（source=reply-fallback）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, autoReplyWithLastMessage: false, fallbackOnNoSend: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -685,7 +685,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.17 fallbackOnNoSend 缺省（false）→ 不兜底（严格静默，向后兼容）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, autoReplyWithLastMessage: false, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -713,7 +713,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.10 autoReplyWithLastMessage=true（显式）→ 仍自动回发（开关对照）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, autoReplyWithLastMessage: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -739,7 +739,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   })
 
   it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -765,7 +765,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('重启后会话已 live（DSH 恢复）→ live 复用直接回答，无"新对话"通知（v1.27.3 修复）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -795,7 +795,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('图片消息 → CDN 下载解密 → 落盘 _tmp/weixin-inbound → question 注入路径 → 回复（媒体接收）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -835,7 +835,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('文件消息 → 落盘（净化文件名）+ 注入存在性（无加密原样保存）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -867,7 +867,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('媒体下载失败 → 降级注入"下载失败"进对话（不静默）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -896,7 +896,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('媒体超 20MB → 降级注入"大小限制"进对话（不落盘）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -949,7 +949,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('语音消息（带服务端转写 voice_item.text）→ 按文本处理并回复', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -1000,7 +1000,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('正在输入：处理前 sendtyping 1，处理后 0（getconfig ticket 缓存一次）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -1030,7 +1030,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.27.13 消息 hook：incoming + outgoing 双向触发（runner 捕获事件，不含凭据）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -1078,7 +1078,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.27.13 消息 hook：hook 失败不阻断微信桥（旁路容忍 H3）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
     }))
@@ -1107,7 +1107,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.13：工作台纪律单一注入点——挂 skiff 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'container_trajectory', 'msm'], trajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '某角色' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
     }))
@@ -1154,7 +1154,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.13：agent 无 systemPrompt 段 → 降级 question 前缀注入（约束必须在场）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      handyman: { models: ['p/m'], defaultModel: 'p/m' },
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       skiff: { roles: { zc: { msms: [], tools: ['read', 'container_trajectory', 'msm'], trajectory: { session: true }, systemPrompt: '某角色' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
     }))

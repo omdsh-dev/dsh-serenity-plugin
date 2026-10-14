@@ -118,8 +118,8 @@ describe('宿主 lazy 服务：只有 access.ts 能直接碰（v1.31.3 成因的
     expect(findDirectReads(stripNoise(sample), LAZY_NAMES)).toEqual([])
   })
 
-  it('🔴 正控 ③（**真实文件**上的双面控）：handyman.ts 原文含 `ctx.subagents`，剥后必须为空', () => {
-    const target = 'tools/handyman.ts'
+  it('🔴 正控 ③（**真实文件**上的双面控）：cheap-worker.ts 原文含 `ctx.subagents`，剥后必须为空', () => {
+    const target = 'tools/cheap-worker.ts'
     const raw = readFileSync(join(SRC_DIR, target), 'utf-8')
     expect(raw).toContain('ctx.subagents') // 前提：这份文件**确实**含该形态（否则本控什么都没证明）
     expect(findDirectReads(stripNoise(raw), LAZY_NAMES)).toEqual([]) // 结论：它只在注释里 ⇒ 不抓

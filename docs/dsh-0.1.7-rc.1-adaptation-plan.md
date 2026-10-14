@@ -82,7 +82,7 @@
 
 - **证据**：0.1.7 无此包目录（正控：旧名**只**以 npm tarball URL 形式残留在 `scripts/dependency-catalog/package-lock.json:814`）；新声明 `packages/preset/agent-preset-registry/src/index.ts:24-27`。
 - **✅ 关键澄清**：**服务名仍叫 `agentPresets`**，且 **`composeFrom(ctx, parent)` 签名不变**（新 `:275-291` vs 旧 `dsh-agent-presets/lib/types/index.d.ts:231`，仅参数名不同）⇒ **调用点零改动**。
-- **我方落点**：`src/tools/handyman.ts:30`（纯类型 import）｜`package.json:59`（peer）`:88`（optional meta）`:102`（devDep）｜`tsconfig.json:30`（paths）｜`pnpm-workspace.yaml:9`。
+- **我方落点**：`src/tools/cheap-worker.ts:30`（纯类型 import）｜`package.json:59`（peer）`:88`（optional meta）`:102`（devDep）｜`tsconfig.json:30`（paths）｜`pnpm-workspace.yaml:9`。
 - **影响档**：**编译期 `module-not-found`**（这正是 `typecheck-host` fail-closed 报的那 **1 条缺失路径**）；运行期为降级（两处调用都是 `ctx.get(...)` 可选读取 ＋ 显式回退 ⇒ 症状是**丢掉 preset 继承**，不崩）。
 - **迁移**：**只改包标识**（import / peer / devDep / paths / workspace 五处同批），`ctx.agentPresets` 与 `composeFrom` 调用**一行不动**。
 

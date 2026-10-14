@@ -99,9 +99,9 @@ export function readCccName(root: string): string | null {
 // ── 配置（.opencode/serenity.json 规范位置 / .dsh/serenity.json 回退）──
 
 interface SerenityConfig {
-  /** handyman（杂工）配置：模型白名单（v1.24.0 取代 loop） */
-  handyman?: {
-    /** 可用模型白名单（provider/model 列表）——handyman 只能使用其中模型（用户拍板：CCC 配置控制） */
+  /** cheap-worker（杂工）配置：模型白名单（v1.24.0 取代 loop） */
+  'cheap-worker'?: {
+    /** 可用模型白名单（provider/model 列表）——cheap-worker 只能使用其中模型（用户拍板：CCC 配置控制） */
     models?: string[];
     /** 缺省模型（必须 ∈ models） */
     defaultModel?: string;
@@ -356,26 +356,26 @@ export interface SkiffRoleConfig {
 }
 
 /**
- * 解析 handyman 配置（v1.24.0：取代 loop.defaultModel；不兼容旧 loop 配置——用户拍板）。
+ * 解析 cheap-worker 配置（v1.24.0：取代 loop.defaultModel；不兼容旧 loop 配置——用户拍板）。
  * @returns 白名单 + 缺省模型 + 上限；models 未配置返回 null（工具应报错要求配置）
  */
-export function readHandymanConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): {
+export function readCheapWorkerConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): {
   models: string[]
   defaultModel: string
   maxRounds: number
   maxParallel: number
 } | null {
   const cfg = loadSerenityConfig(root, paths)
-  const models = cfg.handyman?.models
+  const models = cfg['cheap-worker']?.models
   if (!Array.isArray(models) || models.length === 0) return null
   const clean = models.map((m) => m.trim()).filter(Boolean)
   if (clean.length === 0) return null
-  const defaultModel = cfg.handyman?.defaultModel?.trim()
+  const defaultModel = cfg['cheap-worker']?.defaultModel?.trim()
   return {
     models: clean,
     defaultModel: defaultModel !== undefined && clean.includes(defaultModel) ? defaultModel : clean[0]!,
-    maxRounds: cfg.handyman?.maxRounds ?? 100,
-    maxParallel: cfg.handyman?.maxParallel ?? 10,
+    maxRounds: cfg['cheap-worker']?.maxRounds ?? 100,
+    maxParallel: cfg['cheap-worker']?.maxParallel ?? 10,
   }
 }
 
@@ -395,7 +395,7 @@ export function readUtf8(path: string): string {
 
 /**
  * 已告警过的损坏配置路径（进程级去重：同一坏文件不刷屏，但绝不静默）。
- * S142 review F-07：此前损坏 → 静默返回 `{}`——安全模式黑名单/handyman 白名单/skiff 角色
+ * S142 review F-07：此前损坏 → 静默返回 `{}`——安全模式黑名单/cheap-worker 白名单/skiff 角色
  * 全部**无声失效**（用户以为配了，实际没配）。守卫的输入失败必须响亮。
  */
 const warnedBrokenConfigs = new Set<string>()
@@ -421,7 +421,7 @@ export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SEREN
       if (!warnedBrokenConfigs.has(p)) {
         warnedBrokenConfigs.add(p);
         console.warn(
-          `[serenity-hooks] ✗ CCC 配置解析失败，已按空配置继续（该 CCC 的安全模式黑名单/handyman 白名单/skiff 角色等全部失效，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
+          `[serenity-hooks] ✗ CCC 配置解析失败，已按空配置继续（该 CCC 的安全模式黑名单/cheap-worker 白名单/skiff 角色等全部失效，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
         );
       }
       return {};

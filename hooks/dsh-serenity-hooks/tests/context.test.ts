@@ -29,17 +29,17 @@ describe('context: ACC 身份文本', () => {
     expect(t).toContain('[ACC] Serenity cognitive container active')
   })
 
-  // 🔴 2026-09-16（S142 §0e-G，所有者令）：**不再**注入 handyman 默认模型。
-  //    判据（R↓）：模型名对 LLM 不构成可执行动作——调 handyman 时不由它选模型
-  //    （默认值由 `handyman.ts` 自己读配置决定），拿到名字也无法据此决策 ⇒ 纯噪音。
+  // 🔴 2026-09-16（S142 §0e-G，所有者令）：**不再**注入 cheap-worker 默认模型。
+  //    判据（R↓）：模型名对 LLM 不构成可执行动作——调 cheap-worker 时不由它选模型
+  //    （默认值由 `cheap-worker.ts` 自己读配置决定），拿到名字也无法据此决策 ⇒ 纯噪音。
   //    ⚠️ 机制与面板**未受影响**（`status.ts` 仍把它喂给 WebUI 面板，那是给人看的）。
   //    本用例由「应包含 mock-model」**反转为「不得包含」**——留下回归钉，防它悄悄回来。
-  it('不注入 handyman 默认模型（§0e-G 反转钉）', () => {
+  it('不注入 cheap-worker 默认模型（§0e-G 反转钉）', () => {
     mkdirSync(join(dir, '.opencode'))
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ handyman: { models: ['mock-model'], defaultModel: 'mock-model' } }))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ 'cheap-worker': { models: ['mock-model'], defaultModel: 'mock-model' } }))
     const t = accIdentityText(dir)
     expect(t).not.toContain('mock-model')
-    expect(t).not.toContain('handyman default model')
+    expect(t).not.toContain('cheap-worker default model')
     // 身份锚点的既有内容不受影响（CCC 根 / 约束 / 知识指引仍在）
     expect(t).toContain(dir)
     expect(t).toContain('[ACC] Serenity cognitive container active')
@@ -67,8 +67,8 @@ describe('context: 重启自动恢复的根会话判定（shouldAutoRestore）',
     expect(shouldAutoRestore(fakeAgent({ id: 'child-2', header: { parentSession: 'main-session-abc' } }))).toBe(false)
   })
 
-  it('handyman 杂工（id 以 handyman- 开头）→ 不恢复', () => {
-    expect(shouldAutoRestore(fakeAgent({ id: 'handyman-sqc-scan-1234' }))).toBe(false)
+  it('cheap-worker 杂工（id 以 cheap-worker- 开头）→ 不恢复', () => {
+    expect(shouldAutoRestore(fakeAgent({ id: 'cheap-worker-sqc-scan-1234' }))).toBe(false)
   })
 
   it('Skiff 会话（id 以 skiff- 开头）→ 不恢复（完全独立，F4b 旁路）', () => {
@@ -103,9 +103,9 @@ describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复�
     expect(shouldRestoreActive(fakeAgent(session))).toBe(false)
   })
 
-  it('subagent / handyman（有历史但非根会话）→ 不恢复', () => {
+  it('subagent / cheap-worker（有历史但非根会话）→ 不恢复', () => {
     expect(shouldRestoreActive(fakeAgent({ id: 'child-1', header: { origin: 'subagent' }, events: [{ type: 'user/message' }] }))).toBe(false)
-    expect(shouldRestoreActive(fakeAgent({ id: 'handyman-x-1', events: [{ type: 'user/message' }] }))).toBe(false)
+    expect(shouldRestoreActive(fakeAgent({ id: 'cheap-worker-x-1', events: [{ type: 'user/message' }] }))).toBe(false)
   })
 
   it('Skiff 会话（有历史但独立）→ 不恢复（F4b 旁路）', () => {

@@ -9,7 +9,7 @@
  */
 
 import type { JsonValue } from '../json.js'
-import { readHandymanConfig } from '../ccc.js'
+import { readCheapWorkerConfig } from '../ccc.js'
 import { readSkiffRoles, resolveRoleSystemPrompt, systemPromptSource } from '../skiff-role.js'
 import { loadMsmEntries } from '../msm-ops.js'
 
@@ -23,7 +23,7 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
 ── 角色配置 schema ──
   { "skiff": { "roles": {
       "<role-name>": {
-        "model": "provider/model",             // 角色模型（CCC 直接指定，无白名单校验；缺省回退 handyman.defaultModel）
+        "model": "provider/model",             // 角色模型（CCC 直接指定，无白名单校验；缺省回退 cheap-worker.defaultModel）
         "msms": ["msm-a", "msm-b"],            // MSM 白名单（独立）：msm 工具只能执行这些；register/deregister 必拒
         "tools": ["read","grep","glob",...],   // 非 MSM 工具白名单（独立）：白名单外工具一律不可用（guard 强制）
         "trajectory": { "session": false, "keeper": false, "rebuild": false },  // 轨迹纪律子集（缺省全关 = 完全独立）
@@ -68,7 +68,7 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
   「新对话」按钮开新会话；进程重启后旧会话不可续（WebUI 仍可见历史）
   注意：skill 加载对 skiff **恒可用**（不设白名单——读知识面，无写能力）`
 
-/** 校验当前 CCC 的 skiff 配置：roles schema 合法 / msms 均已注册 / model ∈ handyman.models / systemPrompt 非空 */
+/** 校验当前 CCC 的 skiff 配置：roles schema 合法 / msms 均已注册 / model ∈ cheap-worker.models / systemPrompt 非空 */
 export function validateSkiffConfig(root: string): JsonValue {
   const roles = readSkiffRoles(root)
   const issues: string[] = []
@@ -76,7 +76,7 @@ export function validateSkiffConfig(root: string): JsonValue {
     return { ok: true, issues: [], roleCount: 0, note: 'no skiff roles defined (skiff disabled — zero impact)' }
   }
   const registered = new Set(loadMsmEntries(root).map((e) => e.name))
-  const hc = readHandymanConfig(root)
+  const hc = readCheapWorkerConfig(root)
   const allowedModels = hc ? new Set(hc.models) : null
   for (const [name, role] of roles) {
     // v1.25.10：systemPrompt 来源解析——systemPromptFile（推荐）缺失/逃逸 → issue；
@@ -92,7 +92,7 @@ export function validateSkiffConfig(root: string): JsonValue {
       if (!registered.has(m)) issues.push(`role "${name}": msms "${m}" is not registered in mech-registry.json`)
     }
     if (role.model && allowedModels && !allowedModels.has(role.model)) {
-      issues.push(`role "${name}": model "${role.model}" not in handyman.models (${[...allowedModels].join(', ') || '(none)'})`)
+      issues.push(`role "${name}": model "${role.model}" not in cheap-worker.models (${[...allowedModels].join(', ') || '(none)'})`)
     }
   }
   return { ok: issues.length === 0, issues, roleCount: roles.size }
@@ -106,7 +106,7 @@ export function listSkiffRoles(root: string): JsonValue {
   }
   const items = [...roles.entries()].map(([name, role]) => ({
     name,
-    model: role.model ?? '(handyman default)',
+    model: role.model ?? '(cheap-worker default)',
     msms: role.msms ?? [],
     tools: role.tools ?? [],
     trajectory: {

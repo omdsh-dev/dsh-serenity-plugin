@@ -10,10 +10,10 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { createHandymanTool } from '../src/tools/handyman.js'
+import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
 
 /**
- * handyman foreground 模式（v1.31.3，S142 用户裁决：handyman 双模式）。
+ * cheap-worker foreground 模式（v1.31.3，S142 用户裁决：cheap-worker 双模式）。
  *
  * 覆盖：缺省模式 / 委派请求形状（agentOptions·parent·signal·toolFilter）/ 结果映射
  * （completed vs 非 completed）/ dispose 必调 / 三类拒绝（白名单·服务缺失·foreground 传 jobs）。
@@ -21,7 +21,7 @@ import { createHandymanTool } from '../src/tools/handyman.js'
  */
 
 let dir = ''
-const TOOL = createHandymanTool({} as never) as unknown as {
+const TOOL = createCheapWorkerTool({} as never) as unknown as {
   execute: (args: Record<string, unknown>, exec: unknown) => Promise<Record<string, unknown>>
 }
 
@@ -31,7 +31,7 @@ function writeCcc(models: string[], defaultModel?: string): void {
   writeFileSync(join(dir, '.serenity'), 'home-serenity\n', 'utf-8')
   writeFileSync(
     join(dir, '.opencode', 'serenity.json'),
-    JSON.stringify({ handyman: { models, ...(defaultModel === undefined ? {} : { defaultModel }) } }),
+    JSON.stringify({ 'cheap-worker': { models, ...(defaultModel === undefined ? {} : { defaultModel }) } }),
     'utf-8',
   )
 }
@@ -97,7 +97,7 @@ function fakeAgents() {
         session: { id: options.sessionId, snapshotEvents: () => events },
         followup: (message: { content?: Array<{ text?: string }> }) => {
           const text = (message?.content ?? []).map((b) => b.text ?? '').join('')
-          const token = /SERENITY_HANDYMAN_DONE_[0-9a-f]+/.exec(text)?.[0] ?? ''
+          const token = /SERENITY_CHEAP_WORKER_DONE_[0-9a-f]+/.exec(text)?.[0] ?? ''
           events = [{
             type: 'assistant/message',
             data: { message: { content: [{ type: 'text', text: `done ${token}` }] } },
@@ -110,7 +110,7 @@ function fakeAgents() {
   return { runtime, created }
 }
 
-/** ctx（background）：`ctx.agents` 为**属性**（runHandymanJob 直接读属性），llm 走 `ctx.get` */
+/** ctx（background）：`ctx.agents` 为**属性**（runCheapWorkerJob 直接读属性），llm 走 `ctx.get` */
 function ctxForBackground(agentsRuntime: unknown, llm?: unknown) {
   return {
     agents: agentsRuntime,
@@ -119,7 +119,7 @@ function ctxForBackground(agentsRuntime: unknown, llm?: unknown) {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'handyman-fg-'))
+  dir = mkdtempSync(join(tmpdir(), 'cheap-worker-fg-'))
   writeCcc(['minimax-cn-coding-plan/MiniMax-M3'], 'minimax-cn-coding-plan/MiniMax-M3')
 })
 
@@ -127,10 +127,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe('handyman foreground（缺省模式：一次前台串行委派）', () => {
+describe('cheap-worker foreground（缺省模式：一次前台串行委派）', () => {
   it('缺省（不传 mode）走 foreground：委派请求形状正确 + 结果映射 + dispose', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute(
       { task: '跑 T-01 用例并回报证据', label: 'T-01' },
       execIn(),
@@ -145,8 +145,8 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
     // 委派归属 + 取消通道
     expect(req.parent).toEqual({ session: { header: { cwd: dir } } })
     expect(req.signal).toBeInstanceOf(AbortSignal)
-    // 递归防护：子 agent 不再持有 handyman
-    expect(req.toolFilter).toEqual({ deny: ['handyman'] })
+    // 递归防护：子 agent 不再持有 cheap-worker
+    expect(req.toolFilter).toEqual({ deny: ['cheap-worker'] })
     // 结果映射
     expect(out.mode).toBe('foreground')
     expect(out.done).toBe(true)
@@ -160,7 +160,7 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
   it('显式 mode="foreground" 与缺省等价；model 参数覆盖缺省模型', async () => {
     writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'], 'minimax-cn-coding-plan/MiniMax-M3')
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await tool.execute({ mode: 'foreground', task: 'x', model: 'deepseek-official/deepseek-v4-flash' }, execIn())
     expect(fake.calls[0].request.agentOptions).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
   })
@@ -168,14 +168,14 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
   it('model 无 provider 前缀 → agentOptions 只带 model（不产生空 provider 键）', async () => {
     writeCcc(['MiniMax-M3'], 'MiniMax-M3')
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await tool.execute({ task: 'x' }, execIn())
     expect(fake.calls[0].request.agentOptions).toEqual({ model: 'MiniMax-M3' })
   })
 
   it('stopReason 非 completed → done=false + 带 diagnostic（不静默假装成功）+ 仍 dispose', async () => {
     const fake = fakeSubagents({ output: [{ type: 'text', text: '部分产出' }], stopReason: 'error', diagnostic: 'model unavailable' })
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute({ task: 'x' }, execIn())
     expect(out.done).toBe(false)
     expect(out.stopReason).toBe('error')
@@ -186,13 +186,13 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
 
   it('模型不在白名单 → 拒绝且不调用委派（错误含可用白名单）', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
-    await expect(tool.execute({ task: 'x', model: 'other/model' }, execIn())).rejects.toThrow(/whitelist|handyman\.models/)
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    await expect(tool.execute({ task: 'x', model: 'other/model' }, execIn())).rejects.toThrow(/whitelist|cheap-worker\.models/)
     expect(fake.calls).toHaveLength(0)
   })
 
   it('宿主 subagents 服务缺失 → 响亮报错并指引 background 模式', async () => {
-    const tool = createHandymanTool(ctxWith(undefined) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(undefined) as never) as unknown as typeof TOOL
     await expect(tool.execute({ task: 'x' }, execIn())).rejects.toThrow(/subagents service unavailable/)
     await expect(tool.execute({ task: 'x' }, execIn())).rejects.toThrow(/mode="background"/)
   })
@@ -205,7 +205,7 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
    */
   it('🔴 foreground + jobs ⇒ 真并行扇出：每个 job 各起一个子 agent，结果**保持传入顺序**', async () => {
     const fake = fakeSubagents({ output: [{ type: 'text', text: 'R' }], stopReason: 'completed' })
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute(
       {
         jobs: [
@@ -232,7 +232,7 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
       'minimax-cn-coding-plan/MiniMax-M3',
     )
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await tool.execute(
       {
         model: 'minimax-cn-coding-plan/MiniMax-M3',
@@ -247,7 +247,7 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
 
   it('🔴 超过前台并行上限 10 ⇒ 拒绝且**一个子 agent 都不起**（含 cap 文案）', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const jobs = Array.from({ length: 11 }, (_, i) => ({ task: `t${i}` }))
     await expect(tool.execute({ jobs }, execIn())).rejects.toThrow(/exceed the foreground parallel cap 10/)
     expect(fake.calls).toHaveLength(0) // ← 关键：拒绝发生在创建之前
@@ -255,7 +255,7 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
 
   it('非法 jobs（非数组 / 空 / 缺 task）⇒ 拒绝', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await expect(tool.execute({ jobs: 'nope' }, execIn())).rejects.toThrow(/jobs must be/)
     await expect(tool.execute({ jobs: [] }, execIn())).rejects.toThrow(/jobs must be/)
     await expect(tool.execute({ jobs: [{ label: 'no-task' }] }, execIn())).rejects.toThrow(/jobs must be/)
@@ -264,7 +264,7 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
 
   it('正控：不传 jobs ⇒ 单任务路径逐字不变（一次委派、一个结果）', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute({ task: 'solo' }, execIn())
     expect(fake.calls).toHaveLength(1)
     expect(out.mode).toBe('foreground')
@@ -273,20 +273,20 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
 
   it('task 缺失 / 非法 mode → 拒绝', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await expect(tool.execute({}, execIn())).rejects.toThrow(/task is required/)
     await expect(tool.execute({ task: 'x', mode: 'nope' }, execIn())).rejects.toThrow(/mode must be/)
   })
 
   it('无 exec.agent → 拒绝（委派必须有发起方）', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await expect(tool.execute({ task: 'x' }, { signal: new AbortController().signal })).rejects.toThrow(/calling agent/)
   })
 
   it('guide 不创建 agent（两模式表格在场）', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute({ guide: true }, execIn())
     expect(String(out.guide)).toContain('Two modes (v1.31.3; default = foreground)')
     expect(fake.calls).toHaveLength(0)
@@ -299,11 +299,11 @@ describe('handyman foreground（缺省模式：一次前台串行委派）', () 
  * 本组 pin：① 缺失时**不创建注定失败的子 agent** 且把可执行原因写进 `diagnostic`；
  * ② 有 adapter 时**不误伤**（正控）；③ 取证面不可读时**放行**（增强不得变成新失败源）。
  */
-describe('handyman provider 预检（把沉默的失败变成可执行的错误）', () => {
+describe('cheap-worker provider 预检（把沉默的失败变成可执行的错误）', () => {
   it('本机没有该 provider 的 adapter ⇒ 不委派 + diagnostic 带完整可执行信息', async () => {
     writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'probe-no-adapter/ProbeModel'], 'minimax-cn-coding-plan/MiniMax-M3')
     const fake = fakeSubagents()
-    const tool = createHandymanTool(
+    const tool = createCheapWorkerTool(
       ctxWithLlm(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan', name: 'MiniMax CN' }] })) as never,
     ) as unknown as typeof TOOL
     const out = await tool.execute({ task: 'x', model: 'probe-no-adapter/ProbeModel' }, execIn())
@@ -314,14 +314,14 @@ describe('handyman provider 预检（把沉默的失败变成可执行的错误�
     expect(d).toContain('probe-no-adapter')
     expect(d).toContain('Available on this machine')
     expect(d).toContain('minimax-cn-coding-plan')
-    expect(d).toContain('handyman.models')
+    expect(d).toContain('cheap-worker.models')
     expect(d).toContain('Do not retry unchanged')
     expect(fake.calls).toHaveLength(0)   // 🔴 关键：不为注定失败的模型创建子 agent
   })
 
   it('正控：provider 本机有 adapter ⇒ 照常委派（预检不误伤）', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(
+    const tool = createCheapWorkerTool(
       ctxWithLlm(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan' }] })) as never,
     ) as unknown as typeof TOOL
     const out = await tool.execute({ task: 'x' }, execIn())
@@ -331,7 +331,7 @@ describe('handyman provider 预检（把沉默的失败变成可执行的错误�
 
   it('llm 取证面不可读（旧宿主 / 无该服务）⇒ 预检放行，保持旧行为', async () => {
     const fake = fakeSubagents()
-    const tool = createHandymanTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute({ task: 'x' }, execIn())
     expect(out.done).toBe(true)
     expect(fake.calls).toHaveLength(1)
@@ -340,14 +340,14 @@ describe('handyman provider 预检（把沉默的失败变成可执行的错误�
 
 /**
  * 🔴 后台**单 job** 的 `model` 透传（v1.48 修复的真因）：此前只构造 `{task,label}` ⇒
- * `runHandymanJob` 回落 `defaultModel`，**调用方指定的模型被静默忽略**。实测形态：传
+ * `runCheapWorkerJob` 回落 `defaultModel`，**调用方指定的模型被静默忽略**。实测形态：传
  * `probe-no-adapter/ProbeModel`，实际跑 `defaultModel` ⇒ 在 provider 不同的机器上必然起不来。
  */
-describe('handyman background 单 job 的 model 透传（真因修复）', () => {
+describe('cheap-worker background 单 job 的 model 透传（真因修复）', () => {
   it('🔴 显式 model 必须进 agentOptions（不再静默回退 defaultModel）', async () => {
     writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'], 'minimax-cn-coding-plan/MiniMax-M3')
     const fake = fakeAgents()
-    const tool = createHandymanTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute(
       { mode: 'background', task: 'x', label: 'bg-1', model: 'deepseek-official/deepseek-v4-flash' },
       execIn(),
@@ -361,7 +361,7 @@ describe('handyman background 单 job 的 model 透传（真因修复）', () =>
 
   it('不传 model ⇒ 仍用 defaultModel（缺省路径行为不变）', async () => {
     const fake = fakeAgents()
-    const tool = createHandymanTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
+    const tool = createCheapWorkerTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute({ mode: 'background', task: 'x', label: 'bg-2' }, execIn())
     expect(fake.created[0].agentOptions).toEqual({ provider: 'minimax-cn-coding-plan', model: 'MiniMax-M3' })
     const jobs = out.jobs as Array<Record<string, unknown>>
@@ -371,7 +371,7 @@ describe('handyman background 单 job 的 model 透传（真因修复）', () =>
   it('后台遇缺失 provider ⇒ 抛可执行错误，且**未创建 worker**', async () => {
     writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'probe-no-adapter/ProbeModel'], 'minimax-cn-coding-plan/MiniMax-M3')
     const fake = fakeAgents()
-    const tool = createHandymanTool(
+    const tool = createCheapWorkerTool(
       ctxForBackground(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan' }] })) as never,
     ) as unknown as typeof TOOL
     await expect(

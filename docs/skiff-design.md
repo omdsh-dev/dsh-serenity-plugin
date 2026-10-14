@@ -3,7 +3,7 @@
 > 状态：设计定稿（2026-08-28，S142 用户逐轮拍板；命名 **Skiff（舢板）**——用户从隐喻候选选中）
 > 性质：dsh-serenity-plugin F4 功能组——把 CCC 的认知能力通过 ACP 协议暴露为**可配置子集角色**
 > 前置调研：`docs/knowledge-ccc-release-research.md`（ACP 生态/IM 桥/OpenClaw 资产）
-> 关联：F1 双端口网关（传输面参考）、handyman（agent 创建参考）、guards（工具面机制参考）
+> 关联：F1 双端口网关（传输面参考）、cheap-worker（agent 创建参考）、guards（工具面机制参考）
 
 ---
 
@@ -96,7 +96,7 @@
 ### 3.1 会话核心（v1.25.0）
 
 - 每个问答会话 → `ctx.agents.create({ sessionId: 'skiff-<role>-<uuid>', agentOptions: { provider, model: role.model }, cwd: CCC root })`——**标准 DSH agent**，跑 DSH agent-loop（模型自主循环调用工具直到 turn 结束）
-- 驱动：`agent.followup(createUserMessage(...))` → 等 idle → 读 `session.events` 取 committed 答案（handyman 同款已验证模式）
+- 驱动：`agent.followup(createUserMessage(...))` → 等 idle → 读 `session.events` 取 committed 答案（cheap-worker 同款已验证模式）
 - **轨迹可读**：`session.events` 是 append-only 完整日志（user/assistant/tool 消息 + 工具调用 + 工具结果）——调试页直接渲染，与 dsh WebUI 同源数据
 - cancel → interrupt；连接/页面关闭释放会话
 
@@ -156,7 +156,7 @@
 
 | 白名单 | 管什么 | 强制点 |
 |--------|--------|--------|
-| `tools` | 非 MSM 工具（平台 read/write/edit/glob/grep/... + ACC cc_fs/session/cc_git/acc_kit/eap/neat/cce/handyman/session_rebuild/localstore） | **guard 角色白名单规则**（§4.3）：角色 agent 的工具不在 `tools` → deny |
+| `tools` | 非 MSM 工具（平台 read/write/edit/glob/grep/... + ACC cc_fs/session/cc_git/acc_kit/eap/neat/cce/cheap-worker/session_rebuild/localstore） | **guard 角色白名单规则**（§4.3）：角色 agent 的工具不在 `tools` → deny |
 | `msms` | 注册 MSM 的执行面 | **acc_msm 内校验**（§4.4）：exec 非白名单 MSM → 拒绝；register/deregister 必拒；msm_list 白名单过滤显示 |
 
 **通道规则**：
@@ -206,12 +206,12 @@ No other tools are available. Your capability boundary is this surface.
 | rebuild 压力检测 | **旁路** | 旁路 | 开启 |
 | session 工具 | 不可见（不在 tools） | 角色配置可暴露 | — |
 
-- 实现：`isSkiffSession(sessionId)` 共享判定（仿 `handyman-` 前缀排除模式）+ 角色轨迹配置查询；seams 各自检查
+- 实现：`isSkiffSession(sessionId)` 共享判定（仿 `cheap-worker-` 前缀排除模式）+ 角色轨迹配置查询；seams 各自检查
 
 ### 4.6 角色模型（用户拍板 2026-08-28：无白名单，CCC 直接指定）
 
 - per-role `model`（provider/model）——**CCC 直接指定**，不做白名单校验（模型不需要白名单）
-- 缺省（未配 model）回退 CCC 配置默认（handyman.defaultModel 或配置项）
+- 缺省（未配 model）回退 CCC 配置默认（cheap-worker.defaultModel 或配置项）
 
 ### 4.7 skiff_admin 工具（教 CCC 如何定义 skiff，用户拍板 2026-08-28）
 
@@ -220,7 +220,7 @@ No other tools are available. Your capability boundary is this surface.
 | 子命令 | 内容 |
 |--------|------|
 | `guide` | **定义教程**（核心）：skiff 概念（全知全能轨迹子集）/ 角色配置 schema / 认知 MSM 写法（读知识/操作能力示例）/ 双白名单语义（tools+msms）/ 轨迹纪律子集 / tracking / 基础提示词 + CCC 定义段拼接 / 示例角色（qa-readonly、code-review） |
-| `validate` | 校验当前 CCC 的 `skiff` 配置：roles schema 合法 / msms 均已注册 / model ∈ handyman.models / systemPrompt 非空——输出问题清单 |
+| `validate` | 校验当前 CCC 的 `skiff` 配置：roles schema 合法 / msms 均已注册 / model ∈ cheap-worker.models / systemPrompt 非空——输出问题清单 |
 | `list` | 列出当前 CCC 已定义角色（名 / 模型 / msms / tools / 轨迹纪律摘要） |
 
 - 注册：invariant REGISTERED_TOOLS 11 → 12；系统提示词 accBlock 工具清单 + 1 行；README/skill 文档同步
@@ -279,4 +279,4 @@ No other tools are available. Your capability boundary is this surface.
 - `docs/knowledge-ccc-release-research.md`（前置调研：ACP 生态 / IM 桥 / OpenClaw 资产）
 - DSH 官方 ACP：packages/acp + examples/acp-agent（dsh-harness-public @ b150a551）
 - [ACP v1 协议](https://agentclientprotocol.com)
-- guards.ts（工具面瀑布 + 终局 guard 模式）/ tools/handyman.ts（agents.create + followup 模式）/ handyman-preset-inherit.ts（工具面收窄模式）
+- guards.ts（工具面瀑布 + 终局 guard 模式）/ tools/cheap-worker.ts（agents.create + followup 模式）/ cheap-worker-preset-inherit.ts（工具面收窄模式）

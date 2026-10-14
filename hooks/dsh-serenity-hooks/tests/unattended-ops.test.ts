@@ -153,11 +153,11 @@ describe('unattended: 结构化消息（四选一）', () => {
 })
 
 describe('unattended: 会话资格（外部面/桥写死不许开）', () => {
-  it('skiff-（含微信桥会话）/ acp- / handyman- ⇒ 排除；rebuild- 与普通会话**不排除**', () => {
+  it('skiff-（含微信桥会话）/ acp- / cheap-worker- ⇒ 排除；rebuild- 与普通会话**不排除**', () => {
     expect(isProxyExcludedSessionId('skiff-weixin-abc')).toBe(true)
     expect(isProxyExcludedSessionId('skiff-qa')).toBe(true)
     expect(isProxyExcludedSessionId('acp-1234')).toBe(true)
-    expect(isProxyExcludedSessionId('handyman-worker-1')).toBe(true)
+    expect(isProxyExcludedSessionId('cheap-worker-worker-1')).toBe(true)
     expect(isProxyExcludedSessionId('rebuild-abc')).toBe(false)
     expect(isProxyExcludedSessionId('dsh-main-1')).toBe(false)
     expect(isProxyExcludedSessionId('')).toBe(true)

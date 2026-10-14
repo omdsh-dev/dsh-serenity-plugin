@@ -22,7 +22,7 @@
 
 > **`container_<X>` = 掌管本容器自身之 X 的工具**（`container_fs` / `container_git` / `container_trajectory` / `container_admin`）。
 > 前缀 `container` 表**作用域（在本容器内）**，**不表**"与容器平级"。
-> 非容器族工具的主语不是容器结构（`msm` 执行技能 / `praxis` 注入知识 / `handyman` 编排 / `dashboard` 仪表 / `localstore` 凭据）。
+> 非容器族工具的主语不是容器结构（`msm` 执行技能 / `praxis` 注入知识 / `cheap-worker` 编排 / `dashboard` 仪表 / `localstore` 凭据）。
 
 **规则出处**（一手，早于本次）：`serenity-acc-specs/docs/acc-story.md:222`「命名继承背景：cc_xx → container_xx（工具命名继承 ACC/CCC 背景，甚至 metaphor）」；`dsh-serenity-plugin/docs/acc-tool-naming-rework.md:14` 引用户原话「背景已交代 ACC/CCC，工具命名继承背景」。
 
