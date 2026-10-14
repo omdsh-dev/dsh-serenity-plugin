@@ -89,7 +89,7 @@
 | `tests/` | `register.test`（effect 数）/ `invariant`（工具名集合）/ 各工具名断言 + 新老名字对照用例 |
 
 **CCC 侧（措辞，同批做，不需发版）**：
-`.opencode/skiff/zhaocai.md`（4 处）｜`.opencode/skills/home-serenity/SKILL.md`（路由表）｜`.opencode/skills/home-serenity/references/acc-ccc-boundary.md`｜`.opencode/skills/dsh-serenity-plugin-development/SKILL.md`（维护文档）｜`.dsh/skills/acc-session/SKILL.md`（装机副本，重装即更新）
+`.opencode/skiff/<role>.md`（4 处）｜`.opencode/skills/home-serenity/SKILL.md`（路由表）｜`.opencode/skills/home-serenity/references/acc-ccc-boundary.md`｜`.opencode/skills/dsh-serenity-plugin-development/SKILL.md`（维护文档）｜`.dsh/skills/acc-session/SKILL.md`（装机副本，重装即更新）
 
 **明确不动**（沿 D46「内部文件名不改」）：`session-ops.ts` / `session.ts` / `rebuild.ts` / `wake-registry.ts` / `wake-scheduler.ts` 等**实现文件名**；`.bindings.json` / `wake-registry.json` **数据文件名**。
 

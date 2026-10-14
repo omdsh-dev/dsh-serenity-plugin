@@ -16,10 +16,9 @@
  *   ③ 独立路由 ⇒ **惰性加载**（只在卡片展开时请求一次）+ 可长缓存，关闭 iframe 即卸载，
  *      WebGL 上下文随之释放。
  *
- * 来历（R↓）：作品由 **tiangong-serenity**（另一个 Serenity CCC）赠予；**本仓库只携带
- * 构建产物**，源与构建脚本住在 CCC 侧 `AGENT_SESSIONS/…S142…/serenity-voyage-animation/`
- * （详见 `assets/README.md`）。内容已于 S142 重播为宁静号自己的技能/公理/MSM/本体词元
- * 与实测容器规模数字。
+ * 来历（R↓）：作品由**另一个 Serenity CCC 实例**赠予；**本仓库只携带
+ * 构建产物**，源与构建脚本住在该实例侧（详见 `assets/README.md`）。内容已重播为宁静号自己的
+ * 技能/公理/MSM/本体词元与实测容器规模数字。
  */
 
 import type { Context } from 'cordis'

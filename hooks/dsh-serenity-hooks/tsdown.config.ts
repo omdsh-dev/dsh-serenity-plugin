@@ -9,10 +9,14 @@
  *  - CSS：普通 .css 经内联插件注入 <style data-sp-css>（零依赖，无需 lightningcss）。
  */
 import { readFileSync } from 'node:fs'
-import { dirname, resolve as resolvePath } from 'node:path'
+import { dirname, resolve as resolvePath, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { UserConfig } from 'tsdown'
 
 const PLUGIN_ID = '@shgroup/dsh-serenity-hooks'
+
+/** 本包根目录（tsdown.config.ts 所在处）—— CSS 虚拟 id 相对化的基准 */
+const PKG_ROOT = dirname(fileURLToPath(import.meta.url))
 
 /** web shell 冻结模块表中的平台模块（external，不打包） */
 const PLATFORM_MODULES = [
@@ -84,18 +88,22 @@ export default [
           if (!source.endsWith('.css')) return null
           if (!importer) throw new Error(`css-inline: cannot resolve "${source}" without an importer`)
           const abs = resolvePath(dirname(importer), source)
-          return CSS_VIRTUAL_PREFIX + abs.replace(/\.css$/, '')
+          // 🔴 虚拟 id 必须**相对化**：绝对路径会被 rolldown 写进产物的 `//#region \0sp-css:<abs>`
+          // 注释里 ⇒ **构建机绝对路径随 npm 包发布**（2026-10-14 隐私核查实测 6 处）。
+          // 相对仓库根 ⇒ 注释里只剩 `src/client/...`，无用户名、无私有目录结构。
+          return CSS_VIRTUAL_PREFIX + relative(PKG_ROOT, abs).replace(/\.css$/, '')
         },
         load(virtualId: string) {
           if (!virtualId.startsWith(CSS_VIRTUAL_PREFIX)) return null
-          const file = virtualId.slice(CSS_VIRTUAL_PREFIX.length) + '.css'
+          const rel = virtualId.slice(CSS_VIRTUAL_PREFIX.length)
+          const file = resolvePath(PKG_ROOT, rel + '.css')
           this.addWatchFile(file)
           const css = readFileSync(file, 'utf-8')
           // v1.23.2 修复：每个 CSS 用**文件名唯一 marker**（`data-sp-css="<basename>"`）——
           // 旧实现所有 CSS 共用 `style[data-sp-css]`：第一个注入后创建该 style，
           // 后续 CSS 的幂等判断（querySelector 非 null）全部跳过 → 面板只剩第一个 CSS
           // 生效（"网页丢失资源"外观，S142 用户反馈）。按文件独立 marker 后各自注入。
-          const id = file.split(/[\\/]/).pop()?.replace(/\.css$/, '') ?? 'sp'
+          const id = rel.split(/[\\/]/).pop()?.replace(/\.css$/, '') ?? 'sp'
           const marker = `style[data-sp-css="${id}"]`
           return [
             `const css = ${JSON.stringify(css)};`,

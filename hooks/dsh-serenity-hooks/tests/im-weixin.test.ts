@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -33,7 +33,7 @@ vi.mock('../src/weixin-hook.js', () => ({
   buildOutgoingHookEvent: (...a: unknown[]) => buildOutgoingHookEvent(...a),
 }))
 
-const { weixinChannel, WEIXIN_ALIAS_MAP } = await import('../src/im-weixin.js')
+const { weixinChannel, weixinAliasMap } = await import('../src/im-weixin.js')
 
 let dir = ''
 
@@ -45,6 +45,9 @@ function setupCcc(weixin: Record<string, unknown>, credentials: Record<string, s
     writeFileSync(join(dir, 'localstore.json'), JSON.stringify({ credentials }, null, 2))
   }
 }
+
+/** 该 CCC 的别名表（形如 { user-a: 'WEIXIN_USER_A' }）——测试夹具统一用中性名 */
+const ALIASES = { 'user-a': 'WEIXIN_USER_A', 'user-b': 'WEIXIN_USER_B' }
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'im-weixin-'))
@@ -78,26 +81,39 @@ describe('im-weixin: 通道身份与可见性判据', () => {
   })
 })
 
-describe('im-weixin: 别名解析（数据填值归 ACC，D23）', () => {
-  it('别名表：yh / danica / xiaowang → localstore 凭据键', () => {
-    expect(WEIXIN_ALIAS_MAP['yh']).toBe('WEIXIN_USER_YH')
-    expect(WEIXIN_ALIAS_MAP['danica']).toBe('WEIXIN_USER_DANICA')
-    expect(WEIXIN_ALIAS_MAP['xiaowang']).toBe('WEIXIN_USER_DANICA')
+describe('im-weixin: 别名解析（别名归 CCC 配置，D23 / v1.56.10）', () => {
+  it('🔴 ACC 源码不含任何具体别名（隐私核查：别名随包发布过）', () => {
+    // 未配置 ⇒ 别名表为空（ACC 不认识任何名字）
+    setupCcc({ enabled: true })
+    expect(weixinAliasMap(dir)).toEqual({})
+    expect(weixinChannel.listUsers(dir)).toEqual([])
+    // 源码面：别名只在 CCC 配置里出现
+    const src = readFileSync(new URL('../src/im-weixin.ts', import.meta.url), 'utf-8')
+    for (const person of ['user-b', 'user-a', 'user-c']) {
+      expect(src.toLowerCase()).not.toContain(`'${person}'`)
+    }
   })
 
-  it('已配置别名 → 解析为该 CCC 的 iLink id；大小写不敏感', () => {
-    setupCcc({ enabled: true }, { WEIXIN_USER_YH: 'yh@im.wechat' })
-    expect(weixinChannel.resolveUser(dir, 'yh')).toEqual({ alias: 'yh', id: 'yh@im.wechat' })
-    expect(weixinChannel.resolveUser(dir, 'YH')).toEqual({ alias: 'yh', id: 'yh@im.wechat' })
+  it('CCC 配了别名 → 解析为该 CCC 的 iLink id；大小写不敏感', () => {
+    setupCcc({ enabled: true, aliases: ALIASES }, { WEIXIN_USER_A: 'a@im.wechat' })
+    expect(weixinChannel.resolveUser(dir, 'user-a')).toEqual({ alias: 'user-a', id: 'a@im.wechat' })
+    expect(weixinChannel.resolveUser(dir, 'USER-A')).toEqual({ alias: 'user-a', id: 'a@im.wechat' })
   })
 
   it('别名存在但凭据缺失 → null（不猜测、不回落）', () => {
-    setupCcc({ enabled: true })
-    expect(weixinChannel.resolveUser(dir, 'yh')).toBeNull()
+    setupCcc({ enabled: true, aliases: ALIASES })
+    expect(weixinChannel.resolveUser(dir, 'user-a')).toBeNull()
+  })
+
+  it('非法别名表项被清洗（空键 / 非字符串值 / 数组）', () => {
+    setupCcc({ enabled: true, aliases: { '': 'X', ' user-c ': ' WEIXIN_USER_C ', bad: 42 } })
+    expect(weixinAliasMap(dir)).toEqual({ 'user-c': 'WEIXIN_USER_C' })
+    setupCcc({ enabled: true, aliases: ['nope'] })
+    expect(weixinAliasMap(dir)).toEqual({})
   })
 
   it('裸 iLink id（含 @）直接透传；空串/未知别名 → null', () => {
-    setupCcc({ enabled: true })
+    setupCcc({ enabled: true, aliases: ALIASES })
     expect(weixinChannel.resolveUser(dir, 'u@im.wechat')).toEqual({ alias: 'u@im.wechat', id: 'u@im.wechat' })
     expect(weixinChannel.resolveUser(dir, '')).toBeNull()
     expect(weixinChannel.resolveUser(dir, '   ')).toBeNull()
@@ -105,12 +121,11 @@ describe('im-weixin: 别名解析（数据填值归 ACC，D23）', () => {
   })
 
   it('listUsers 只列有凭据的别名', () => {
-    setupCcc({ enabled: true }, { WEIXIN_USER_YH: 'yh@im.wechat', WEIXIN_USER_DANICA: 'd@im.wechat' })
+    setupCcc({ enabled: true, aliases: ALIASES }, { WEIXIN_USER_A: 'a@im.wechat', WEIXIN_USER_B: 'b@im.wechat' })
     const users = weixinChannel.listUsers(dir)
     expect(users).toEqual([
-      { alias: 'yh', id: 'yh@im.wechat' },
-      { alias: 'danica', id: 'd@im.wechat' },
-      { alias: 'xiaowang', id: 'd@im.wechat' },
+      { alias: 'user-a', id: 'a@im.wechat' },
+      { alias: 'user-b', id: 'b@im.wechat' },
     ])
   })
 })
@@ -121,7 +136,7 @@ describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
       enabled: true,
       autoReplyWithLastMessage: false,
       fallbackOnNoSend: true,
-      routes: [{ user: '*', role: 'zhaocai' }],
+      routes: [{ user: '*', role: 'my-role' }],
     })
     weixinBridgeStatus.mockReturnValue([
       { ccc: dir, accounts: [{ accountId: 'wechat-1', lastPollAt: 123, lastError: 'boom' }] },
@@ -132,7 +147,7 @@ describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
       enabled: true,
       autoReplyWithLastMessage: false,
       fallbackOnNoSend: true,
-      routes: [{ user: '*', role: 'zhaocai' }],
+      routes: [{ user: '*', role: 'my-role' }],
       accounts: [{ accountId: 'wechat-1', lastPollAt: 123, lastError: 'boom' }],
     })
     expect(JSON.parse(JSON.stringify(status))).toEqual(status)
@@ -161,9 +176,9 @@ describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
 describe('im-weixin: send（复用 sendProactiveText 唯一发送实现）', () => {
   it('成功 → 透传账号/会话/角色；参数只传 root/userId/text/account', async () => {
     setupCcc({ enabled: true })
-    sendProactiveText.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im', sessionId: 'skiff-1', role: 'zhaocai' })
+    sendProactiveText.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im', sessionId: 'skiff-1', role: 'my-role' })
     const r = await weixinChannel.send({ root: dir, userId: 'u@im', text: 'hi', accountId: 'wechat-1' })
-    expect(r).toEqual({ accountId: 'wechat-1', userId: 'u@im', sessionId: 'skiff-1', role: 'zhaocai' })
+    expect(r).toEqual({ accountId: 'wechat-1', userId: 'u@im', sessionId: 'skiff-1', role: 'my-role' })
     expect(sendProactiveText).toHaveBeenCalledWith({ root: dir, toUserId: 'u@im', text: 'hi', accountId: 'wechat-1' })
   })
 
@@ -218,13 +233,13 @@ describe('im-weixin: sendFile（协议层归 ACC，记录走同一 hook）', () 
   })
 
   it('配置了 hook → 触发 outgoing 记录（source=proactive + file 元数据 + 该用户固定会话）', async () => {
-    setupCcc({ enabled: true, hook: 'scripts/hook.ts', routes: [{ user: 'u@im', role: 'zhaocai' }] })
+    setupCcc({ enabled: true, hook: 'scripts/hook.ts', routes: [{ user: 'u@im', role: 'my-role' }] })
     await weixinChannel.sendFile!({ root: dir, userId: 'u@im', data: Buffer.from('hi'), fileName: 'note.txt', caption: '看这个' })
     expect(buildOutgoingHookEvent).toHaveBeenCalledWith(expect.objectContaining({
       cccRoot: dir,
       accountId: 'wechat-1',
       userId: 'u@im',
-      role: 'zhaocai',
+      role: 'my-role',
       source: 'proactive',
       reply: '[文件] note.txt — 看这个',
       file: { name: 'note.txt', size: 5, caption: '看这个' },

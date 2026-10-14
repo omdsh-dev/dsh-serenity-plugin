@@ -25,13 +25,15 @@ import { buildCroSnapshot, type CroSnapshotInput } from './cro.js'
 /**
  * 样例快照输入 —— **代表性数据**（不是真实某条轨迹的现状）。
  *
- * 取值刻意让它能演示所有者举的 S185 场景（天亮/有人/非高峰 + 已在干活 + 日志过大）。
+ * 取值刻意让它能演示所有者举的"天亮/有人/非高峰 + 已在干活 + 日志过大"场景。
+ * 🔒 **路径与轨迹名一律用中性占位**（`/home/user/workspace`、`<S###>` 式示例），
+ * 不写任何真实机器路径或私有会话名 —— 本文件随 npm 包发布（2026-10-14 隐私核查）。
  */
 export const CRO_SAMPLE_SNAPSHOT_INPUT: CroSnapshotInput = {
-  dirName: '2026-09-13--S185--desk-camera',
-  cccRoot: '/home/yh/home/home-serenity',
+  dirName: '2026-01-01--S001--example-trajectory',
+  cccRoot: '/home/user/workspace',
   nowMs: 1_789_800_000_000,
-  sessionMdPath: '/home/yh/home/home-serenity/AGENT_SESSIONS/2026-09-13--S185--desk-camera/SESSION.md',
+  sessionMdPath: '/home/user/workspace/AGENT_SESSIONS/2026-01-01--S001--example-trajectory/SESSION.md',
   sessionMdBytes: 182_000,
   sessionMdMtimeMs: 1_789_799_000_000,
   references: [
@@ -41,7 +43,7 @@ export const CRO_SAMPLE_SNAPSHOT_INPUT: CroSnapshotInput = {
   boundSessionIds: ['session-adccc461-9f32-4d9a-a688-9da81fa1ca35'],
   liveSessionIds: ['session-adccc461-9f32-4d9a-a688-9da81fa1ca35'],
   runningSessionIds: [],
-  pendingWakes: [{ id: 'w-20260919-0900-aaaa', at: '2026-09-19T09:30:00+08:00', createdAt: '2026-09-19T07:00:00+08:00', createdBy: 'S185' }],
+  pendingWakes: [{ id: 'w-20260101-0900-aaaa', at: '2026-01-01T09:30:00+08:00', createdAt: '2026-01-01T07:00:00+08:00', createdBy: 'S001' }],
   scheduler: { armed: true, enabled: true, ticks: 128, lastSkipReason: null },
 }
 

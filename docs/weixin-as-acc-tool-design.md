@@ -60,7 +60,7 @@
 {
   "channel": "weixin",                        // 必填。当前唯一实现；未来 telegram / wecom / ...
   "action":  "send" | "send-file" | "users" | "status",   // 必填
-  "user":    "<别名 yh|danica 或通道内用户 id>",  // send / send-file 必填
+  "user":    "<别名 user-b|user-a 或通道内用户 id>",  // send / send-file 必填
   "text":    "<纯文本 ≤4000 字>",                // send 必填
   "file":    "<CCC 内相对路径>",                 // send-file 必填
   "caption": "<可选说明>",                       // send-file 可选
@@ -109,8 +109,8 @@ apply()
 | `.opencode/skills/home-serenity/scripts/weixin-send.ts` | **删除**（689 行；能力已迁 ACC） |
 | `mech-registry.json` 的 `weixin-send` 条目 | `container_admin msm deregister` |
 | `.opencode/skills/home-serenity/scripts/weixin-doctor.ts` guide §7 | 改写：主动发送 = `im-bridge` 工具；非 agent 脚本走 loopback HTTP（见 Q1） |
-| `.opencode/skiff/zhaocai.md` §0/§3/§4 | 调用示例改 `im-bridge({channel:"weixin", action:"send", …})`；白名单说明同步（**措辞仍归 CCC**） |
-| `.opencode/serenity.json` | `skiff.roles.zhaocai.tools` 加 `im-bridge`、`msms` 移除 `weixin-send`；autopilot `topPrompt` 里的 `msm("weixin-send", …)` 改工具形态 |
+| `.opencode/skiff/<role>.md` §0/§3/§4 | 调用示例改 `im-bridge({channel:"weixin", action:"send", …})`；白名单说明同步（**措辞仍归 CCC**） |
+| `.opencode/serenity.json` | `skiff.roles.my-role.tools` 加 `im-bridge`、`msms` 移除 `weixin-send`；autopilot `topPrompt` 里的 `msm("weixin-send", …)` 改工具形态 |
 | ACC 手动输出标记（S9） | 文本改为 `im-bridge({channel:"weixin", action:"send", user:"<id>", text:"<回复>"})` |
 
 ### 4.5 收益与风险
@@ -122,7 +122,7 @@ apply()
 | 风险 | 对策 |
 |------|------|
 | 工具面 10→11 | 仅对已配置通道的 CCC 生效；未配置 CCC 仍是 10（R6） |
-| 删 MSM 破坏既有调用者 | 同一变更内更新：zhaocai.md / serenity.json topPrompt / weixin-doctor guide / registry；grep 全仓零残留为验收条件 |
+| 删 MSM 破坏既有调用者 | 同一变更内更新：<role>.md / serenity.json topPrompt / weixin-doctor guide / registry；grep 全仓零残留为验收条件 |
 | `restrict` 名字未知抛错（S7） | 注册在先、限制在后；失败不阻断装配 |
 | send-file 迁移引入回归 | 保留原 MSM 的 AES/上传实现语义（逐行对照移植 + 真机实测一条文件） |
 | 跨 CCC 发送能力消失（R4） | 明确不在能力面；确有需求时由 CCC 脚本走 loopback HTTP（Q1） |
@@ -138,7 +138,7 @@ apply()
 | 工具执行 | `send` → `sendProactiveText` 调用与返回结构；`users` 列别名；`status` 健康；`send-file` 上传（mock iLink） |
 | 记录 | 工具发送后 outgoing hook `source:'proactive'`；send-file 带 `file` 元数据 |
 | 闸门 | `im-bridge` 成功发送计入"已发送"（不打回） |
-| 端到端（真机） | ① 招财用工具发一条（`source:'proactive'`）② 不调用时 v1.30.17 兜底仍生效（`source:'reply-fallback'`）③ 真发一个文件 |
+| 端到端（真机） | ① 某角色用工具发一条（`source:'proactive'`）② 不调用时 v1.30.17 兜底仍生效（`source:'reply-fallback'`）③ 真发一个文件 |
 | 迁移验收 | `grep -r "weixin-send" ` 在 CCC 仓零残留（除历史 SESSION 记录） |
 
 ---
@@ -148,7 +148,7 @@ apply()
 1. ACC：`im-bridge.ts`（注册表+可见性）+ `im-weixin.ts`（通道实现，含 send-file 移植）+ `tools/im-bridge.ts`
 2. ACC：context.ts 同步点接入 + 闸门/标记/hook 适配
 3. 测试全绿 + typecheck/build
-4. CCC：删 MSM + deregister + zhaocai.md + serenity.json + weixin-doctor guide
+4. CCC：删 MSM + deregister + <role>.md + serenity.json + weixin-doctor guide
 5. 文档：README（工具表 10→11 + 条件可见说明）/ msm-ops / skill / CHANGELOG + bump **v1.31.0**
 6. 发布链（publish + 三推 + deploy + restart-web）→ 真机验证
 7. specs：工具最小公共集 10→11 + IM 家族语义（Q2）

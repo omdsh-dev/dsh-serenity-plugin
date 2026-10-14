@@ -1001,7 +1001,7 @@
 **读数（同一 679 语句分母）**：`gateway.ts` **75.69% → 90.86%**（514 → 617 条，**+103**；分支 **39.5% → 70.49%**）｜全仓语句 **93.77% → 94.24%**｜test **1830 → 1835**。
 🔴 **仍刻意不测（诚实边界）**：`readBody` 的**超限分支**（> 128 KB 请求体）—— 它 `reject` 之后紧跟 `req.destroy()` ⇒ 客户端大概率见 **ECONNRESET** 而非那个 400（与 `api.ts` 同款的登记待裁项）；在夹具里断言"400"会把假期望固化。
 
-✅ **2026-09-25 进展（第 13 件：**文件发送三步链** —— `weixin-api.ts` 的 `sendFileMessage`）**：该函数在覆盖率报告里**整段 `fstat-no`**（连它私有的 `padTo16` 一起）—— 而它是 **`im-bridge send-file` 的落地实现**（v1.31.0 从 CCC MSM 迁入 ACC）⇒ "让招财发个文件"这条真实链路的最后一公里此前**从未被执行过**。新增 `tests/weixin-file-send.test.ts`（**+1 文件 / 12 用例**，零网络：走模块自带的 `__setWeixinFetchForTest` 注入点）。
+✅ **2026-09-25 进展（第 13 件：**文件发送三步链** —— `weixin-api.ts` 的 `sendFileMessage`）**：该函数在覆盖率报告里**整段 `fstat-no`**（连它私有的 `padTo16` 一起）—— 而它是 **`im-bridge send-file` 的落地实现**（v1.31.0 从 CCC MSM 迁入 ACC）⇒ "让某角色发个文件"这条真实链路的最后一公里此前**从未被执行过**。新增 `tests/weixin-file-send.test.ts`（**+1 文件 / 12 用例**，零网络：走模块自带的 `__setWeixinFetchForTest` 注入点）。
 - 🔴 **判据一：验算法，不验"函数被调用"** —— CDN 上传体必须是 **AES-128-ECB（无 IV）** 密文：用例用**上传请求自己报出的 `aeskey`** 解密回去，与原文**逐字节比对**；并配 **正控**（拿同一把 key 去解一段**明文**，必须"不相等或抛"）⇒ 否则"解密后相等"可能在 AES 变成恒等变换时**永远绿**。
 - **三步链逐字段钉**：`getuploadurl`（`media_type:3` ／ `rawsize` ／ `rawfilemd5`=md5 ／ `filesize`=16 对齐 ／ `no_need_thumb` ／ `filekey` 形状 ／ `aeskey`=32 hex）⇒ **`padTo16` 三态**（5→16 ／ 16→16 ／ 17→32）｜CDN 上传（`application/octet-stream`，密文长度 16 对齐）｜`sendmessage`（BOT/FINISH ／ `item.type=4` FILE ／ `client_id` 形状 ／ `aes_key` = **base64(hex 串)** —— 解码回去应得到那串 hex ／ `md5`/`len`/`file_name` 与上传步骤一致）。
 - **两来源优先级**：响应头 `x-encrypted-param` 优先；缺失时回退响应体 JSON 的 `encrypted_query_param`｜**`upload_full_url` 缺失**时用 CDN 基址 ＋ `upload_param`/`filekey` 组装（并**逐个 encode**）。
@@ -1130,7 +1130,7 @@
 
 > 🔵 **V9 家族为什么必须新增（判据纪律）**：**"缝被走到" ≠ "功能可用"** —— V5/V7b 在**没有任何模型凭据**的容器里**照样全绿**，而那时**每条真实轮次都以 `MISSING_CREDENTIAL` 结束** ⇒ 旧判据集**结构性回答不了** owner 的问题（"装完能不能真的用"）。V9 家族把三件事拆成三档（**收束** / **模型身份** / **零凭据错误**）＋ V9d 补**装配面**旁证。EXPECT 可用 `EXPECT_PROVIDER` / `EXPECT_MODEL` 覆盖（默认 `minimax-bench` / `MiniMax-M3`）。
 
-**192.168.1.4 实测状态（锚定 2026-09-25 16:1x，读数器 = `bench-docker list`）**：**新容器** `dsh-bench-r20260925-1614-4eb2` running（镜像 **`dsh-bench:0.1.7-rc.2`**，1.04 GB —— **第 ⑥ 项实测的载体**，证据见 §2.9 对账表）｜**旧容器** `dsh-bench-mb3` 仍在 running（镜像 `dsh-bench:0.1.7-rc.1`，1.08 GB，起动 **2026-09-24 02:23 +08:00**）｜两镜像并存｜远端磁盘 `/` 489G ／ 已用 360G ／ **可用 109G（77%）**。
+**192.0.2.4 实测状态（锚定 2026-09-25 16:1x，读数器 = `bench-docker list`）**：**新容器** `dsh-bench-r20260925-1614-4eb2` running（镜像 **`dsh-bench:0.1.7-rc.2`**，1.04 GB —— **第 ⑥ 项实测的载体**，证据见 §2.9 对账表）｜**旧容器** `dsh-bench-mb3` 仍在 running（镜像 `dsh-bench:0.1.7-rc.1`，1.08 GB，起动 **2026-09-24 02:23 +08:00**）｜两镜像并存｜远端磁盘 `/` 489G ／ 已用 360G ／ **可用 109G（77%）**。
 （**历史读数**，锚定 2026-09-25 15:31，勿当前值用）：当时只见 `dsh-bench-mb3`（重启 0 次，`ExitCode 0`，≈37h）｜`PortBindings {}`（3080 **仅 EXPOSE**，未发布）｜挂载 `/opt/dsh-bench/dist:/ccc/dist:ro`（⇒ 该容器是 **tarball 模式**起的）｜`RestartPolicy no`。
 **🔵 最新读数（锚定 2026-09-25 18:1x，读数器 = `bench-docker list`）**：**containers 段为空**（`mb3` ／ `1614-4eb2` ／ `1704-2565` ／ `1717-71ff` 已全部 `down`，见 §2.8e）｜镜像 `dsh-bench:0.1.7-rc.2`（1.71GB）在｜远端磁盘 **489G ／ 已用 363G ／ 可用 107G（78%）**。⚠️ 上述"两镜像并存"已不成立（rc.1 镜像随 mb3 一起清掉）。
 
@@ -1158,11 +1158,11 @@
 - ⇒ 最终 V8b 改判「**页面真渲染 ＋ 我方模块真被浏览器请求**」（**严格强于 V8** 的"profile 里有文件"），并把 verify 行的标签同步改名，避免**过度声称**。
 - ✅ **V8c 已交付**（2026-09-25 17:4x，见 **§2.8d**）：容器内起 chromium 带 `--remote-debugging-port` ＋ Node 内建 `WebSocket` 说 CDP，**真点开设置面板**后断言元素级渲染 —— 这是"A19 同类缺陷的完整机械守卫"。
 
-🔵 **两条环境读数（同批实测，勿重复踩）**：① **`--virtual-time-budget` 会让 `--dump-dom` 永不返回**（被 60s 超时杀 ⇒ 表现为"chromium 起不来"＝**读数器失败被误读成被测对象失败**）⇒ 改用 chromium 自己的 `--timeout`；② **测试台宿主端口从本机连不上**（实测 `192.168.1.4:80` = 200、临时发布的 `:18080` **被拒**，服务器上也没有浏览器）⇒ 真浏览器取证走**容器内**最稳。
+🔵 **两条环境读数（同批实测，勿重复踩）**：① **`--virtual-time-budget` 会让 `--dump-dom` 永不返回**（被 60s 超时杀 ⇒ 表现为"chromium 起不来"＝**读数器失败被误读成被测对象失败**）⇒ 改用 chromium 自己的 `--timeout`；② **测试台宿主端口从本机连不上**（实测 `192.0.2.4:80` = 200、临时发布的 `:18080` **被拒**，服务器上也没有浏览器）⇒ 真浏览器取证走**容器内**最稳。
 
 #### 2.8b 🔴 修正：`down` 的磁盘警告曾是**写死的旧读数**（读数器撒谎，已修）
 
-**事实**（2026-09-25 17:0x 实测）：每次 `down` 都打印「⚠️ 192.168.1.4 的 / 只剩 **~18 GB** ⇒ 用完即清是本台的常态」，而**同一时刻**：`bench-docker list` 读 `df` = **108G 可用（77%）**、主机 `docker system df` = images 33.74GB（reclaimable 11.13GB）／build cache 22.36GB（reclaimable 0.8GB）／containers 3.835GB ⇒ **三个独立读数一致，那行警告是假的**。
+**事实**（2026-09-25 17:0x 实测）：每次 `down` 都打印「⚠️ 192.0.2.4 的 / 只剩 **~18 GB** ⇒ 用完即清是本台的常态」，而**同一时刻**：`bench-docker list` 读 `df` = **108G 可用（77%）**、主机 `docker system df` = images 33.74GB（reclaimable 11.13GB）／build cache 22.36GB（reclaimable 0.8GB）／containers 3.835GB ⇒ **三个独立读数一致，那行警告是假的**。
 **根因**：那句是**某次真实读数被写死成字符串**（§4.2-㉞ 家族：把"写下即变"的值当成了常显警告）—— 不是解析错误。
 **修正（CCC 侧 `bench-docker.ts` 的 `cmdDown`）**：改为在**同一次 ssh 往返**里取实时 `df -h /`（零额外开销），并把提示改成中性表述。
 **验收判据（可重跑）**：`msm("bench-docker", ["down", "<任一容器>", "--keep-image"])` 的输出必须含 `--- disk（清理后实时）` 行且数值与 `list` 一致；**不得**再出现"只剩 ~18 GB"字样。

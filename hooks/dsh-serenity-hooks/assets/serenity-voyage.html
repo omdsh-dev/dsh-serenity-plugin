@@ -1098,10 +1098,9 @@ function makeCodeSlabTex(name) {
   g.x.fillRect(24, 72, W2 - 48, 3);
   return mkTex(g.c, true);
 }
-// 🔴 2026-09-15 S142 内容扫尾：原为 ['SERENITY','03-K64','认知星空','TIANGONG','宁静号']——
-// **`TIANGONG` 是另一个容器（tiangong-serenity）的名字**，属"他们的内容"第 3 处。
-// 我上一轮的残留验收把它漏了：grep 用了小写 `tiangong`，而这里是全大写 ⇒ 判据覆盖面失守
-// （同 §12.25 那次"漏相对导入形态"的教训）。已改为我们自己的容器名，验收改用 `grep -i`。
+// 🔴 内容扫尾留档：原铭牌词表里有一项是**赠予方的容器名**，属"他们的内容"。
+// 上一轮残留验收漏过它（grep 用了小写而此处是全大写 ⇒ 判据覆盖面失守）。
+// 已改为我们自己的容器名，验收改用 `grep -i`（大小写不敏感，判据才成立）。
 var SLAB_NAMES = ['SERENITY', '03-K64', 'HOME-SERENITY', '认知星空', '宁静号'];
 var slabTexes = SLAB_NAMES.map(makeCodeSlabTex);
 

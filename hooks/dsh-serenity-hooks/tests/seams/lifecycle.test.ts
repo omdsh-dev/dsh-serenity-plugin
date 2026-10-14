@@ -71,13 +71,13 @@ describe('seams/lifecycle: sessionIdOf', () => {
 
 describe('seams/lifecycle: cleanupSessionState', () => {
   it('清 skiff 注册表 + 活跃 SESSION 作用域（幂等）', () => {
-    registerSkiffSession('skiff-lifecycle-1', 'zhaocai', '/ccc', fakeAgent)
+    registerSkiffSession('skiff-lifecycle-1', 'my-role', '/ccc', fakeAgent)
     setActiveSessionInfo('skiff-lifecycle-1', {
       sessionId: 'S999',
       dirName: 'x',
       mdPath: '/ccc/AGENT_SESSIONS/x/SESSION.md',
     })
-    expect(skiffSessionInfo('skiff-lifecycle-1')).toEqual({ role: 'zhaocai', ccc: '/ccc' })
+    expect(skiffSessionInfo('skiff-lifecycle-1')).toEqual({ role: 'my-role', ccc: '/ccc' })
     expect(getActiveSessionInfo('skiff-lifecycle-1')).not.toBeNull()
 
     cleanupSessionState('skiff-lifecycle-1')
@@ -118,11 +118,11 @@ describe('seams/lifecycle: registerLifecycle', () => {
     expect(names).toContain('session/disposed')
     expect(ctx.effect).toHaveBeenCalledTimes(1)
 
-    registerSkiffSession('skiff-lifecycle-2', 'zhaocai', '/ccc', fakeAgent)
+    registerSkiffSession('skiff-lifecycle-2', 'my-role', '/ccc', fakeAgent)
     ctx.emit('agent/disposed', { agent: { session: { id: 'skiff-lifecycle-2' } } })
     expect(skiffSessionInfo('skiff-lifecycle-2')).toBeNull()
 
-    registerSkiffSession('skiff-lifecycle-3', 'zhaocai', '/ccc', fakeAgent)
+    registerSkiffSession('skiff-lifecycle-3', 'my-role', '/ccc', fakeAgent)
     ctx.emit('session/disposed', { id: 'skiff-lifecycle-3' })
     expect(skiffSessionInfo('skiff-lifecycle-3')).toBeNull()
   })

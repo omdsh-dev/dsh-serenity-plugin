@@ -2,7 +2,7 @@
 
 > 状态：**已拍板，实现中**（2026-09-07，S142）
 > v0.2 → v0.3：粒度确认 per skiff 会话（微信按用户各自 SESSION）+ 命名拍板（只编号）
-> 用户拍板全录：① zhaocai +write/edit ② keeper 开（机制的一部分）③ 新建专属 SESSION（不延续 S159）④ 多微信用户 = 各自 SESSION ⑤ 命名只编号
+> 用户拍板全录：① 某角色 +write/edit ② keeper 开（机制的一部分）③ 新建专属 SESSION（不延续 S159）④ 多微信用户 = 各自 SESSION ⑤ 命名只编号（角色名已脱敏）
 
 ---
 
@@ -16,7 +16,7 @@
 ## 1. 需求
 
 1. skiff 角色配 `trajectory.session=true` → 该角色 skiff 会话自动获得专属 SESSION（自动创建/自动管理，用户不关心编号）
-2. **按 skiff 会话（= 微信用户）各自建**——yh/Danica 同路由 zhaocai 但各自 SESSION，scope 天然隔离，永不并行写同一份
+2. **按 skiff 会话（= 微信用户）各自建**——user-b/user-a 同路由该角色但各自 SESSION，scope 天然隔离，永不并行写同一份
 3. 绑定的 skiff 完整使用 SESSION 机制：SESSION.md 读写（write/edit 白名单）、logbook use/show/rebuild/close、keeper（按 trajectory 门控）——与主舱同语义
 4. 绑定随会话持久化（重启恢复记得）；无 session 能力 skiff 现状不变
 
@@ -92,10 +92,10 @@ Your trajectory workspace SESSION.md: <mdPath>
 - 注入 agent 上下文（systemPrompt），**不进用户可见对话**（微信面干净）
 - 模型知道路径 → read/写/rebuild 自然工作
 
-## 3. 权限扩展（zhaocai CCC 配置）
+## 3. 权限扩展（某角色 CCC 配置）
 
 ```jsonc
-"zhaocai": {
+"my-role": {
   "trajectory": { "session": true, "keeper": true, "rebuild": true },
   "tools": [
     "read", "grep", "glob", "web_search",
@@ -106,7 +106,7 @@ Your trajectory workspace SESSION.md: <mdPath>
 }
 ```
 - keeper 开 = 计分提醒/rebuild 压力检测注入上下文（机制的一部分）
-- zhaocai.md 提示词更新：专属 SESSION 自动创建说明 + 工作台纪律（SESSION.md 归自己维护）+ logbook rebuild 用法
+- <role>.md 提示词更新：专属 SESSION 自动创建说明 + 工作台纪律（SESSION.md 归自己维护）+ logbook rebuild 用法
 
 ## 4. 改动文件清单
 
@@ -115,8 +115,8 @@ Your trajectory workspace SESSION.md: <mdPath>
 | `src/skiff-core.ts` | `ensureSkiffSession` + createSkiffAgent 调用 + systemPrompt 注入工作台路径 |
 | `src/skiff-role.ts` | （如需要）SESSION.md 路径定位辅助 |
 | tests | skiff-core：启 session 首建/有 bound 恢复/未启零变化/幂等/两用户隔离 |
-| `.opencode/serenity.json`（CCC） | zhaocai tools +write/edit + keeper:true |
-| `.opencode/skiff/zhaocai.md`（CCC） | 工作台纪律段更新 |
+| `.opencode/serenity.json`（CCC） | 某角色 tools +write/edit + keeper:true |
+| `.opencode/skiff/<role>.md`（CCC） | 工作台纪律段更新 |
 | CHANGELOG.md | v1.30.3 段 |
 
 **零改动**：session-ops/rebuild.ts（resolveSessionMdPath 已走 getActiveSessionInfo）/guards.ts/context/bootstrap/compact
@@ -125,7 +125,7 @@ Your trajectory workspace SESSION.md: <mdPath>
 
 | 用例 | 断言 |
 |------|------|
-| trajectory.session=true + 无 bound → createSkiffAgent 自动建 | AGENT_SESSIONS/ 新增 `<date>--S###--zhaocai skiff/` 含 SESSION.md + getActiveSessionInfo 命中 + appendBound create |
+| trajectory.session=true + 无 bound → createSkiffAgent 自动建 | AGENT_SESSIONS/ 新增 `<date>--S###--<role> skiff/` 含 SESSION.md + getActiveSessionInfo 命中 + appendBound create |
 | 有 bound（重启 resume）→ 恢复 | 复用既有 mdPath 不新建 |
 | session=false → 零变化 | 无创建/无 bound/无激活 |
 | 幂等（同 agent 多轮） | 只建一次 |
@@ -135,7 +135,7 @@ Your trajectory workspace SESSION.md: <mdPath>
 
 ## 6. 迁移（S159 处置）
 
-用户拍板：**新建专属 SESSION，不延续 S159**。zhaocai 微信会话旧 bound 指向 S159——新机制首次运行时：
+用户拍板：**新建专属 SESSION，不延续 S159**。某角色微信会话旧 bound 指向 S159——新机制首次运行时：
 - readLastBound 读到 S159（旧手工 use 的）→ **不恢复**（S159 是 workaround 产物，退役）
 - 判定"已有专属 bound"不能只看 readLastBound 非空——需识别**是否本机制自动建的**（note='auto-created' 标记）
 
@@ -149,7 +149,7 @@ if (lastBound?.note?.startsWith('auto-created') && existsSync(lastBound.mdPath))
 }
 ```
 
-S159 目录保留（历史参考），不再被 zhaocai 自动使用。
+S159 目录保留（历史参考），不再被该角色自动使用。
 
 ## 7. 参考
 

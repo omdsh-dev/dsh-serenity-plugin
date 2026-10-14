@@ -29,8 +29,8 @@ function fakeChannel(overrides: Partial<ImChannel> = {}): ImChannel {
   return {
     id: 'fake',
     isEnabled: () => true,
-    resolveUser: (_root, input) => (input === 'yh' ? { alias: 'yh', id: 'u@im' } : null),
-    listUsers: () => [{ alias: 'yh', id: 'u@im' }],
+    resolveUser: (_root, input) => (input === 'user-b' ? { alias: 'user-b', id: 'u@im' } : null),
+    listUsers: () => [{ alias: 'user-b', id: 'u@im' }],
     send: async (input) => ({
       accountId: 'acc-1',
       userId: input.userId,
@@ -86,7 +86,7 @@ describe('im-bridge: 通道注册表', () => {
 
 describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
   it('缺 channel → CHANNEL_REQUIRED（含可行动提示）', async () => {
-    const r = await runImBridge(dir, { action: 'send', user: 'yh', text: 'hi' })
+    const r = await runImBridge(dir, { action: 'send', user: 'user-b', text: 'hi' })
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.code).toBe('CHANNEL_REQUIRED')
@@ -96,7 +96,7 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
 
   it('未知 channel → CHANNEL_UNKNOWN（提示已注册通道）', async () => {
     registerImChannel(fakeChannel())
-    const r = await runImBridge(dir, { channel: 'nope', action: 'send', user: 'yh', text: 'hi' })
+    const r = await runImBridge(dir, { channel: 'nope', action: 'send', user: 'user-b', text: 'hi' })
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.code).toBe('CHANNEL_UNKNOWN')
@@ -106,7 +106,7 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
 
   it('通道未配置（isEnabled=false）→ CHANNEL_NOT_CONFIGURED', async () => {
     registerImChannel(fakeChannel({ isEnabled: () => false }))
-    const r = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'yh', text: 'hi' })
+    const r = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'user-b', text: 'hi' })
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.code).toBe('CHANNEL_NOT_CONFIGURED')
@@ -128,7 +128,7 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
     registerImChannel(fakeChannel())
     const users = await runImBridge(dir, { channel: 'fake', action: 'users' })
     expect(users.ok).toBe(true)
-    if (users.ok) expect(users.detail).toEqual({ users: [{ alias: 'yh', id: 'u@im' }] })
+    if (users.ok) expect(users.detail).toEqual({ users: [{ alias: 'user-b', id: 'u@im' }] })
     const status = await runImBridge(dir, { channel: 'fake', action: 'status' })
     expect(status.ok).toBe(true)
     if (status.ok) expect(status.detail).toMatchObject({ enabled: true })
@@ -140,11 +140,11 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
     expect(noUser.ok).toBe(false)
     if (!noUser.ok) expect(noUser.code).toBe('USER_REQUIRED')
 
-    const noText = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'yh' })
+    const noText = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'user-b' })
     expect(noText.ok).toBe(false)
     if (!noText.ok) expect(noText.code).toBe('TEXT_REQUIRED')
 
-    const tooLong = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'yh', text: 'x'.repeat(IM_SEND_MAX_TEXT + 1) })
+    const tooLong = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'user-b', text: 'x'.repeat(IM_SEND_MAX_TEXT + 1) })
     expect(tooLong.ok).toBe(false)
     if (!tooLong.ok) expect(tooLong.code).toBe('TEXT_TOO_LONG')
 
@@ -158,18 +158,18 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
 
   it('send 成功 → 返回账号/用户/会话/角色 + 别名回显', async () => {
     registerImChannel(fakeChannel())
-    const r = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'yh', text: 'hi' })
+    const r = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'user-b', text: 'hi' })
     expect(r.ok).toBe(true)
     if (r.ok) {
       expect(r.channel).toBe('fake')
       expect(r.action).toBe('send')
-      expect(r.detail).toMatchObject({ accountId: 'acc-1', userId: 'u@im', sessionId: 'skiff-fake', role: 'tester', user: 'yh' })
+      expect(r.detail).toMatchObject({ accountId: 'acc-1', userId: 'u@im', sessionId: 'skiff-fake', role: 'tester', user: 'user-b' })
     }
   })
 
   it('通道发送抛错 → SEND_FAILED（不向上抛，工具面统一渲染）', async () => {
     registerImChannel(fakeChannel({ send: async () => { throw new Error('ACCOUNT_NOT_BOUND: no token') } }))
-    const r = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'yh', text: 'hi' })
+    const r = await runImBridge(dir, { channel: 'fake', action: 'send', user: 'user-b', text: 'hi' })
     expect(r.ok).toBe(false)
     if (!r.ok) {
       expect(r.code).toBe('SEND_FAILED')
@@ -179,7 +179,7 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
 
   it('send-file 未实现 → ACTION_UNSUPPORTED；缺 user/file → 各自稳定码', async () => {
     registerImChannel(fakeChannel({ sendFile: undefined }))
-    const unsupported = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'yh', file: 'a.txt' })
+    const unsupported = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'user-b', file: 'a.txt' })
     expect(unsupported.ok).toBe(false)
     if (!unsupported.ok) expect(unsupported.code).toBe('ACTION_UNSUPPORTED')
 
@@ -188,7 +188,7 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
     expect(noUser.ok).toBe(false)
     if (!noUser.ok) expect(noUser.code).toBe('USER_REQUIRED')
 
-    const noFile = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'yh' })
+    const noFile = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'user-b' })
     expect(noFile.ok).toBe(false)
     if (!noFile.ok) expect(noFile.code).toBe('FILE_REQUIRED')
   })
@@ -197,14 +197,14 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
     const sent: unknown[] = []
     registerImChannel(fakeChannel({ sendFile: async (input) => { sent.push(input); return { fileName: input.fileName, size: input.data.length } } }))
 
-    const escape = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'yh', file: '../../etc/passwd' })
+    const escape = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'user-b', file: '../../etc/passwd' })
     expect(escape.ok).toBe(false)
     if (!escape.ok) {
       expect(escape.code).toBe('FILE_ESCAPE')
       expect(escape.remediation).toContain('inside this CCC')
     }
 
-    const missing = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'yh', file: 'nope.txt' })
+    const missing = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'user-b', file: 'nope.txt' })
     expect(missing.ok).toBe(false)
     if (!missing.ok) expect(missing.code).toBe('FILE_NOT_FOUND')
 
@@ -213,7 +213,7 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
     writeFileSync(big, '')
     const { truncateSync } = await import('node:fs')
     truncateSync(big, IM_FILE_MAX_BYTES + 1)
-    const tooLarge = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'yh', file: 'big.bin' })
+    const tooLarge = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'user-b', file: 'big.bin' })
     expect(tooLarge.ok).toBe(false)
     if (!tooLarge.ok) expect(tooLarge.code).toBe('FILE_TOO_LARGE')
 
@@ -223,16 +223,16 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
   it('send-file 成功 → 传文件名/字节数/caption（相对路径以 CCC 根解析）', async () => {
     writeFileSync(join(dir, 'note.txt'), 'hello')
     registerImChannel(fakeChannel())
-    const r = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'yh', file: 'note.txt', caption: '看这个' })
+    const r = await runImBridge(dir, { channel: 'fake', action: 'send-file', user: 'user-b', file: 'note.txt', caption: '看这个' })
     expect(r.ok).toBe(true)
-    if (r.ok) expect(r.detail).toMatchObject({ fileName: 'note.txt', size: 5, user: 'yh' })
+    if (r.ok) expect(r.detail).toMatchObject({ fileName: 'note.txt', size: 5, user: 'user-b' })
   })
 
   it('日志/工具消费面：错误码稳定（同一失败重复调用码不变）', async () => {
     registerImChannel(fakeChannel({ isEnabled: () => false }))
     const codes = await Promise.all([
-      runImBridge(dir, { channel: 'fake', action: 'send', user: 'yh', text: 'a' }),
-      runImBridge(dir, { channel: 'fake', action: 'send', user: 'yh', text: 'b' }),
+      runImBridge(dir, { channel: 'fake', action: 'send', user: 'user-b', text: 'a' }),
+      runImBridge(dir, { channel: 'fake', action: 'send', user: 'user-b', text: 'b' }),
     ])
     expect(codes.map((c) => (c.ok ? 'ok' : c.code))).toEqual(['CHANNEL_NOT_CONFIGURED', 'CHANNEL_NOT_CONFIGURED'])
   })

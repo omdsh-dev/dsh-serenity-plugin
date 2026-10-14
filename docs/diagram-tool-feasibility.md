@@ -196,7 +196,7 @@ Serenity 设置页一个 Group（客户端的 `SettingsSection.tsx`）。
 
 三路并行只读调研（2026-09-29，S142），全部给到 `file:line`：
 ① **宿主默认包集**（`dsh-serenity-plugin/_tmp/host-0.2.0-rc.1/`）—— 图/uI 通路与插槽面
-② **本机 live 安装**（`/home/yh/.npm-global/lib/node_modules/@deepseek-ai/dsh/`，经 `sys curl file://` 读）—— 补上 0.2.0 缺的两个包
+② **本机 live 安装**（`<家目录>/.npm-global/lib/node_modules/@deepseek-ai/dsh/`，经 `sys curl file://` 读）—— 补上 0.2.0 缺的两个包
 ③ **本机系统面**（`sys ls` / `sys curl` registry）—— 光栅化能力清点
 
 ---

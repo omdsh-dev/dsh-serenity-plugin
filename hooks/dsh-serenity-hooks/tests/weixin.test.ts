@@ -1108,7 +1108,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.13：工作台纪律单一注入点——挂 skiff 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'container_trajectory', 'msm'], trajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '招财' } } },
+      skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'container_trajectory', 'msm'], trajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '某角色' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -1155,7 +1155,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.13：agent 无 systemPrompt 段 → 降级 question 前缀注入（约束必须在场）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       handyman: { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { zc: { msms: [], tools: ['read', 'container_trajectory', 'msm'], trajectory: { session: true }, systemPrompt: '招财' } } },
+      skiff: { roles: { zc: { msms: [], tools: ['read', 'container_trajectory', 'msm'], trajectory: { session: true }, systemPrompt: '某角色' } } },
       weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
     }))
     __setWeixinFetchForTest(async (input) => {
@@ -1197,7 +1197,7 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
         enabled: true,
         hook: 'scripts/hook.js',
         accounts: [{ accountId: 'wechat-1' }, { accountId: 'wechat-2' }],
-        routes: [{ user: '*', role: 'zhaocai' }],
+        routes: [{ user: '*', role: 'my-role' }],
       },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })
@@ -1211,7 +1211,7 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
 
     const { sendProactiveText } = await import('../src/weixin-bridge.js')
     const r = await sendProactiveText({ root: dir, toUserId: 'u1@im.wechat', text: '**报告**已生成' })
-    expect(r).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u1@im.wechat', sessionId: weixinSessionIdFor('u1@im.wechat'), role: 'zhaocai' })
+    expect(r).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u1@im.wechat', sessionId: weixinSessionIdFor('u1@im.wechat'), role: 'my-role' })
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ to: 'u1@im.wechat', text: '报告已生成' }) // md→plain
     expect(sent[0]!.contextToken).toBeUndefined() // 主动消息不带 context_token
@@ -1222,7 +1222,7 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: weixinSessionIdFor('u1@im.wechat'),
-      role: 'zhaocai',
+      role: 'my-role',
       reply: '报告已生成',
     })
   })
@@ -1232,7 +1232,7 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
       weixin: {
         enabled: true,
         accounts: [{ accountId: 'wechat-1' }, { accountId: 'wechat-2' }],
-        routes: [{ user: 'someone-else@im.wechat', role: 'zhaocai' }],
+        routes: [{ user: 'someone-else@im.wechat', role: 'my-role' }],
       },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })

@@ -1,5 +1,5 @@
 /**
- * 2026-09-26（owner 追加令 D92 ／ tiangong-serenity 报障）：`container_git` 的「提交—推送耦合」
+ * 2026-09-26（owner 追加令 D92 ／ other-serenity 报障）：`container_git` 的「提交—推送耦合」
  * ＋ **push 假成功** 的回归测试。
  *
  * 背景（两条独立缺陷，本文件逐条钉住）：
@@ -163,7 +163,7 @@ describe('P3 — status 报「本地领先未推送」笔数（残余可见面�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-describe('🔴 B 回归（tiangong-serenity 报障）— push 超时被杀 ⇒ **绝不报成功**', () => {
+describe('🔴 B 回归（other-serenity 报障）— push 超时被杀 ⇒ **绝不报成功**', () => {
   it('真超时（PATH 假 git 让 push 挂住）⇒ [TIMEOUT] ＋ 未确认 ＋ 核验指令，**且不含成功字样**', () => {
     const shimDir = tmp('fake-git-')
     const shim = join(shimDir, 'git')

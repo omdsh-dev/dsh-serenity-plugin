@@ -19,13 +19,18 @@ import { invokeWeixinHook, buildOutgoingHookEvent } from './weixin-hook.js'
 import type { ImChannel, ImUserEntry, ImJson } from './im-bridge.js'
 
 /**
- * 别名 → CCC localstore 凭据键（与 v1.30.9 CCC MSM 逐字一致，迁移零认知成本）。
- * 别名解析属"数据填值"，归 ACC（D23）。
+ * 解析该 CCC 的别名表（v1.56.10）。
+ *
+ * 🔴 **为什么不再硬编码**（2026-10-14 隐私核查）：别名是**使用者自己的称呼**，属 CCC 的数据
+ * （D23：加一个别名不该要发版）。此前硬编码在 ACC 源码 ⇒ **这些称呼随 npm 包公开发布**。
+ * 现在别名**只**来自该 CCC 的 `.opencode/serenity.json` → `weixin.aliases`；
+ * ACC 不认识任何具体名字。未配置 ⇒ `{}`（此时只能用裸 iLink 用户 id）。
+ *
+ * ⚠️ **迁移**：升级前用过别名的部署，需把原表补进自己的 CCC 配置，否则别名解析不到
+ * （见 CHANGELOG v1.56.10 的迁移段；裸 `xxx@im.wechat` 形式始终可用）。
  */
-export const WEIXIN_ALIAS_MAP: Record<string, string> = {
-  yh: 'WEIXIN_USER_YH',
-  danica: 'WEIXIN_USER_DANICA',
-  xiaowang: 'WEIXIN_USER_DANICA',
+export function weixinAliasMap(root: string): Record<string, string> {
+  return readWeixinSettings(root).aliases ?? {}
 }
 
 /** 读该 CCC 的一个凭据值（空/缺失 → null） */
@@ -55,7 +60,7 @@ export const weixinChannel: ImChannel = {
     const raw = input.trim()
     if (raw === '') return null
     const alias = raw.toLowerCase()
-    const key = WEIXIN_ALIAS_MAP[alias]
+    const key = weixinAliasMap(root)[alias]
     if (key) {
       const id = credentialValue(root, key)
       return id ? { alias, id } : null
@@ -67,7 +72,7 @@ export const weixinChannel: ImChannel = {
 
   listUsers(root: string): ImUserEntry[] {
     const out: ImUserEntry[] = []
-    for (const [alias, key] of Object.entries(WEIXIN_ALIAS_MAP)) {
+    for (const [alias, key] of Object.entries(weixinAliasMap(root))) {
       const id = credentialValue(root, key)
       if (id) out.push({ alias, id })
     }

@@ -37,12 +37,12 @@ export function createImBridgeTool() {
       + 'It is hidden entirely when this container has no IM channel configured. '
       + `Channels: ${imChannelIds().join(', ') || '(none registered)'}. `
       + 'Actions: send (text) / send-file (a file inside this container) / users (list configured recipients) / status (channel health). '
-      + 'user accepts a configured alias (e.g. yh, danica) or a raw channel user id. '
+      + 'user accepts a configured alias (e.g. user-a, user-b) or a raw channel user id. '
       + 'Failures return a stable code plus a remediation hint.',
     parameters: {
       channel: { type: 'string', description: `IM channel id (e.g. "weixin"); available: ${imChannelIds().join(', ') || '(none)'}` , required: true },
       action: { type: 'string', enum: [...ACTIONS], required: true, description: 'send / send-file / users / status' },
-      user: { type: 'string', description: 'Recipient: configured alias (yh, danica) or raw channel user id (send / send-file)' },
+      user: { type: 'string', description: 'Recipient: configured alias (user-a, user-b) or raw channel user id (send / send-file)' },
       text: { type: 'string', description: 'Message text, plain text only (send)' },
       file: { type: 'string', description: 'File path inside this container, relative to the container root (send-file)' },
       caption: { type: 'string', description: 'Optional caption sent as a separate message (send-file)' },

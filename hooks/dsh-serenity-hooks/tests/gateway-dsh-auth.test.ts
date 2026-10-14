@@ -77,10 +77,10 @@ describe('exchangeDshCookie：经 connection 官方通道内存换取（token �
         return false
       },
     }
-    const cookie = exchangeDshCookie(connection, '192.168.1.31:3081')
+    const cookie = exchangeDshCookie(connection, '192.0.2.31:3081')
     expect(cookie).toBe('dsh-auth-c=v1.c.d')
-    expect(seen.baseUrl).toBe('http://192.168.1.31:3081')
-    expect(seen.host).toBe('192.168.1.31:3081')
+    expect(seen.baseUrl).toBe('http://192.0.2.31:3081')
+    expect(seen.host).toBe('192.0.2.31:3081')
   })
 
   it('token 不匹配/无 token → undefined', () => {

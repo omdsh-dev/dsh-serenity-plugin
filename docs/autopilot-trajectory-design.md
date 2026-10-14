@@ -43,7 +43,7 @@
 | 现名 | 目标 | 注意 |
 |------|------|------|
 | 机制名 autotrajectory | **Autopilot Trajectory** | 全链路（代码/文档/面板/工具） |
-| 配置键 `.opencode/serenity.json autotrajectory` 段 | `autopilotTrajectory`（或兼容双读） | **pangu-serenity 已配置实验**——迁移需兼容旧键或一次性迁移 |
+| 配置键 `.opencode/serenity.json autotrajectory` 段 | `autopilotTrajectory`（或兼容双读） | **其他 CCC 已配置实验**——迁移需兼容旧键或一次性迁移 |
 | 工具 `autotrajectory-exp`（第 13 工具） | 新名（实验工具升级为正式工具） | 实验包随 npm 分发过——向后兼容 |
 | 会话标志 `--auto` 目录后缀 | 评估保留/改名（`--auto` 简短，可能保留） | S060--auto 已有历史会话 |
 | specs 仓 `self-sustaining-trajectory-hypothesis.md` | 命名同步 | 理论文档跨仓一致 |

@@ -162,8 +162,8 @@ const migratedRoots = new Set<string>()
  * **按 CCC 惰性补迁移**（§0L 修正，S142 2026-09-19）。
  *
  * 🔴 为什么需要它（实测缺陷，R↓）：
- * 装载期那次迁移用的是 `process.cwd()` —— 而 dsh **服务进程的 cwd 是 `/home/yh`**，
- * **不是 CCC 根**（实测 `acc-diag`：`进程 cwd: /home/yh ｜ 进程 CCC: （无）`）。
+ * 装载期那次迁移用的是 `process.cwd()` —— 而 dsh **服务进程的 cwd 是用户家目录**，
+ * **不是 CCC 根**（实测 `acc-diag`：`进程 cwd: <家目录> ｜ 进程 CCC: （无）`）。
  * ⇒ 迁移读的是一个**不存在的文件**，静默迁移 0 条
  * （症状：发布后 `~/.dsh/storages/serenity_bindings.json` **没出现**）。
  *

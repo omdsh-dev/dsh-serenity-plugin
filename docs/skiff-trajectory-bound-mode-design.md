@@ -26,18 +26,18 @@
 S158 §B + S159（2026-09-07 用户拍板）已手工开 rebuild：
 
 ```jsonc
-// .opencode/serenity.json skiff.roles.zhaocai（当前态）
-"zhaocai": {
+// .opencode/serenity.json skiff.roles.my-role（当前态）
+"my-role": {
   "tools": ["read", "grep", "glob", "web_search", "logbook", "msm"],
   "trajectory": { "session": true, "keeper": false, "rebuild": true },
   ...
 }
-// + 专属 SESSION：AGENT_SESSIONS/2026-09-06--S159--zhaocai 独立轨迹/SESSION.md
+// + 专属 SESSION：AGENT_SESSIONS/2026-09-06--S159--<role> 独立轨迹/SESSION.md
 ```
 
 **workaround 痛点**：
 1. **每次 rebuild 前需先 `logbook use S159` 激活**（无持久绑定 → 每次靠 LLM 自觉先 use；忘记则 rebuild 定位回退 `findLatestActiveSessionMd` → 劫持主舱最新会话如 S142）
-2. **手工维护专属 SESSION**：S159 目录手工建、手工维护"归属招财"约定；skiff 创建/延续时无机制保证绑定
+2. **手工维护专属 SESSION**：S159 目录手工建、手工维护"归属某角色"约定；skiff 创建/延续时无机制保证绑定
 3. **主舱 agent 可误用 S159**：S159 在 AGENT_SESSIONS/ 里对所有 agent 可见，无"归属"机械约束
 4. **机制与语义分裂**：`trajectory.session/keeper/rebuild` 只是"纪律参与开关"，不含"绑定哪个 trajectory"——绑定关系无载体
 
@@ -116,8 +116,8 @@ skiff-design.md §9 Q2 已承认缺口：
 **在角色配置加一个绑定声明字段**，skiff 会话创建时自动绑定。
 
 ```jsonc
-// .opencode/serenity.json skiff.roles.zhaocai（扩展后）
-"zhaocai": {
+// .opencode/serenity.json skiff.roles.my-role（扩展后）
+"my-role": {
   "model": "minimax-cn-coding-plan/MiniMax-M3",
   "msms": [...],
   "tools": ["read", "grep", "glob", "web_search", "logbook", "msm"],
@@ -125,9 +125,9 @@ skiff-design.md §9 Q2 已承认缺口：
     "session": true,
     "keeper": false,
     "rebuild": true,
-    "boundDir": "2026-09-06--S159--zhaocai 独立轨迹"   // ← 新增：绑定的轨迹目录
+    "boundDir": "2026-09-06--S159--<role> 独立轨迹"   // ← 新增：绑定的轨迹目录
   },
-  "systemPromptFile": ".opencode/skiff/zhaocai.md"
+  "systemPromptFile": ".opencode/skiff/<role>.md"
 }
 ```
 
@@ -150,7 +150,7 @@ skiff-design.md §9 Q2 已承认缺口：
 
 ```jsonc
 // weixin route 扩展
-"routes": [{ "user": "*", "role": "zhaocai", "trajectory": "2026-09-06--S159--zhaocai 独立轨迹" }]
+"routes": [{ "user": "*", "role": "my-role", "trajectory": "2026-09-06--S159--<role> 独立轨迹" }]
 // 或 ACP session/new 带 trajectory 参数
 { ccc, role, trajectory?: "S159", sessionId? }
 ```
@@ -174,13 +174,13 @@ skiff-design.md §9 Q2 已承认缺口：
 ## 5. 推荐与理由
 
 **推荐 A（最小机制面）**，理由：
-1. **贴合用户当下需求**：微信桥 zhaocai 绑定专属轨迹（S159），让 rebuild 可靠——A 恰好解决，不引入未验证的复杂
+1. **贴合用户当下需求**：微信桥某角色绑定专属轨迹（S159），让 rebuild 可靠——A 恰好解决，不引入未验证的复杂
 2. **复用成熟机制**：session-bound 事件（v1.29.1）正是为此设计的——"权威绑定 = 会话日志最后一条 bound"，只是 skiff 从未 append。A 是**补上缺失的接线**
 3. **一处改动全入口受益**：createSkiffAgent 是微信桥/ACP/调试页统一入口——绑定逻辑放这里，三个入口全自动
 4. **保持子集哲学**：A 不改变"skiff = 能力子集"——只加"子集有家（轨迹）"。能力面（tools/msms）仍 CCC 控
 5. **C 可作为 A 的后续演进**：A 落地验证后，若需"模式一等化"再升 C（mode 字段 = boundDir 的泛化）
 
-**A 的取舍**：角色单轨迹绑定（一角色一轨迹）——对家庭场景（zhaocai 一个助手一条轨迹）完全够用；多用户各自轨迹需求出现时升 B 的路由级或 C 的 mode。
+**A 的取舍**：角色单轨迹绑定（一角色一轨迹）——对家庭场景（该角色一个助手一条轨迹）完全够用；多用户各自轨迹需求出现时升 B 的路由级或 C 的 mode。
 
 ---
 
@@ -194,7 +194,7 @@ skiff-design.md §9 Q2 已承认缺口：
   "session": true,     // 既有：会话纪律参与（use/list 可见）
   "keeper": false,     // 既有：计分提醒
   "rebuild": true,     // 既有：压力检测
-  "boundDir": "2026-09-06--S159--zhaocai 独立轨迹"  // 新：绑定轨迹目录（编码无关，完整目录名）
+  "boundDir": "2026-09-06--S159--<role> 独立轨迹"  // 新：绑定轨迹目录（编码无关，完整目录名）
 }
 ```
 
@@ -259,9 +259,9 @@ if (bound) {
 
 新机制落地后：
 - S159 目录**保留**（轨迹身体不动，Ship of Theseus）
-- zhaocai 角色配置：trajectory 加 `boundDir: "2026-09-06--S159--zhaocai 独立轨迹"`
+- 某角色配置：trajectory 加 `boundDir: "2026-09-06--S159--<role> 独立轨迹"`
 - 既有 skiff-weixin-* 会话：下次 resume 时自动 reconcile 绑定（6.3 ②）
-- zhaocai.md 提示词段简化（不再需要"先 use S159 再 rebuild"的手工纪律——机制自动绑定）
+- <role>.md 提示词段简化（不再需要"先 use S159 再 rebuild"的手工纪律——机制自动绑定）
 
 ### 6.7 测试
 
@@ -284,7 +284,7 @@ if (bound) {
 | 不改 skiff 系统提示词为 ACC 全量注入 | bound 模式仍是子集——只加 Session 块轨迹上下文，不注入身份/工具全量（保持外部面纯净） |
 | 不做多轨迹/多用户各自轨迹（一角色一轨迹） | 家庭场景单助手单轨迹；未来需要时路由级（B）或 mode 一等化（C） |
 | 不扩大能力面 | bound 只解决"轨迹身体 + rebuild 定位"，不自动加写权限（tools/msms 仍 CCC 控） |
-| 不做 keeper 默认开启 | 保持现状（zhaocai keeper:false 不被计分打扰）；bound 会话的 keeper 参与仍按 role.trajectory.keeper |
+| 不做 keeper 默认开启 | 保持现状（某角色 keeper:false 不被计分打扰）；bound 会话的 keeper 参与仍按 role.trajectory.keeper |
 | 不改 osp | dsp 侧设计；specs 待验证后决定是否升标准 |
 
 ---
@@ -305,5 +305,5 @@ if (bound) {
 - `docs/skiff-design.md`（F4 总设计，§9 Q2 承认缺口）
 - `docs/weixin-bridge-design.md`（W2 固定会话延续）
 - `docs/session-binding-hardening-research.md` + `docs/session-binding-persist-plan.md`（v1.29.1 bound 机制）
-- `AGENT_SESSIONS/2026-09-06--S158--招财权限扩展研究/SESSION.md`（§B 手工 workaround 全记录）
-- `AGENT_SESSIONS/2026-09-06--S159--zhaocai 独立轨迹/SESSION.md`（现有专属轨迹）
+- `AGENT_SESSIONS/2026-09-06--S158--<角色名>权限扩展研究/SESSION.md`（§B 手工 workaround 全记录；🔒 目录名中的角色名已脱敏，轨迹号 `S158` 可查）
+- `AGENT_SESSIONS/2026-09-06--S159--<role> 独立轨迹/SESSION.md`（现有专属轨迹）

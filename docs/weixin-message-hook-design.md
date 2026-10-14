@@ -61,7 +61,7 @@
   "accountId": "wechat-1",        // 接收账号
   "userId": "userA@im.wechat",    // 发送者（from_user_id）
   "sessionId": "skiff-weixin-xxx",// 固定会话 id（同用户长期同一）
-  "role": "zhaocai",              // 路由命中的 skiff role
+  "role": "my-role",              // 路由命中的 skiff role
   "message": {
     "text": "你好",               // 文本（含语音服务端转写）；无文本 → null
     "media": [                    // 媒体（图片/文件）；无 → []
@@ -78,7 +78,7 @@
   "accountId": "wechat-1",
   "userId": "userA@im.wechat",
   "sessionId": "skiff-weixin-xxx",
-  "role": "zhaocai",
+  "role": "my-role",
   "reply": "（已记录，回复文本，已剥离 think）"
 }
 ```

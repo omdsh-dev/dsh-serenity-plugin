@@ -16,7 +16,7 @@ import {
 
 describe('accounts-api: totpQrSvg（v1.24.6 二维码绑定）', () => {
   it('生成合法 SVG：含 otpauth URI 数据的二维码（xmlns + path 模块）', () => {
-    const svg = totpQrSvg('MZXW6YTB', 'yh@serenity')
+    const svg = totpQrSvg('MZXW6YTB', 'user-b@serenity')
     expect(svg).toContain('<svg')
     expect(svg).toContain('xmlns=')
     expect(svg).toContain('path')
@@ -24,50 +24,50 @@ describe('accounts-api: totpQrSvg（v1.24.6 二维码绑定）', () => {
   })
 
   it('同一 secret 输出稳定（二维码可复现）', () => {
-    const a = totpQrSvg('MZXW6YTB', 'yh@serenity')
-    const b = totpQrSvg('MZXW6YTB', 'yh@serenity')
+    const a = totpQrSvg('MZXW6YTB', 'user-b@serenity')
+    const b = totpQrSvg('MZXW6YTB', 'user-b@serenity')
     expect(a).toBe(b)
   })
 
   it('不同 secret 输出不同（二维码随 secret 变化）', () => {
-    expect(totpQrSvg('MZXW6YTB', 'yh@serenity')).not.toBe(totpQrSvg('GEZDGNBV', 'yh@serenity'))
+    expect(totpQrSvg('MZXW6YTB', 'user-b@serenity')).not.toBe(totpQrSvg('GEZDGNBV', 'user-b@serenity'))
   })
 })
 
 describe('accounts-api: draft 转换（纯逻辑）', () => {
-  const wire: WireAccount = { id: 'a1', user: 'yh', hasPassword: true, hasTotp: true }
+  const wire: WireAccount = { id: 'a1', user: 'user-b', hasPassword: true, hasTotp: true }
 
   it('wire → draft（pass 空 + isNew=false + hasPassword/hasTotp 透传 + totpState=none）', () => {
     const d = accountDraftFromWire(wire)
     expect(d).toEqual({
-      id: 'a1', user: 'yh', pass: '', isNew: false,
+      id: 'a1', user: 'user-b', pass: '', isNew: false,
       hasPassword: true, hasTotp: true, totpState: 'none',
     })
   })
 
   it('draft → wire（带 pass 字段；无 TOTP 操作时不带 totp 字段）', () => {
     const d: AccountDraft = {
-      id: 'a1', user: 'yh', pass: 'newpw', isNew: false,
+      id: 'a1', user: 'user-b', pass: 'newpw', isNew: false,
       hasPassword: true, hasTotp: false, totpState: 'none',
     }
-    expect(accountToWire(d)).toEqual({ id: 'a1', user: 'yh', pass: 'newpw' })
+    expect(accountToWire(d)).toEqual({ id: 'a1', user: 'user-b', pass: 'newpw' })
   })
 
   it('draft → wire（pending 绑定 → 带 totpSecret；无确认码）', () => {
     const d: AccountDraft = {
-      id: 'a1', user: 'yh', pass: '', isNew: false,
+      id: 'a1', user: 'user-b', pass: '', isNew: false,
       hasPassword: true, hasTotp: false, totpState: 'pending',
       totpSecret: 'MZXW6YTB',
     }
-    expect(accountToWire(d)).toEqual({ id: 'a1', user: 'yh', pass: '', totpSecret: 'MZXW6YTB' })
+    expect(accountToWire(d)).toEqual({ id: 'a1', user: 'user-b', pass: '', totpSecret: 'MZXW6YTB' })
   })
 
   it('draft → wire（clear 解绑 → 带 totpReset）', () => {
     const d: AccountDraft = {
-      id: 'a1', user: 'yh', pass: '', isNew: false,
+      id: 'a1', user: 'user-b', pass: '', isNew: false,
       hasPassword: true, hasTotp: true, totpState: 'clear',
     }
-    expect(accountToWire(d)).toEqual({ id: 'a1', user: 'yh', pass: '', totpReset: true })
+    expect(accountToWire(d)).toEqual({ id: 'a1', user: 'user-b', pass: '', totpReset: true })
   })
 
   it('newAccountId 唯一且非空', () => {
@@ -78,7 +78,7 @@ describe('accounts-api: draft 转换（纯逻辑）', () => {
 
 describe('accounts-api: validateDraft（校验）', () => {
   const base = (over: Partial<AccountDraft>): AccountDraft => ({
-    id: 'a', user: 'yh', pass: '', isNew: false,
+    id: 'a', user: 'user-b', pass: '', isNew: false,
     hasPassword: true, hasTotp: false, totpState: 'none', ...over,
   })
 
@@ -111,7 +111,7 @@ describe('accounts-api: TOTP secret / otpauth URI（v1.22.4）', () => {
   })
 
   it('otpauthUriClient：标准格式', () => {
-    const uri = otpauthUriClient('MZXW6YTB', 'yh@serenity', 'Serenity Home')
+    const uri = otpauthUriClient('MZXW6YTB', 'user-b@serenity', 'Serenity Home')
     expect(uri).toContain('otpauth://totp/')
     expect(uri).toContain('secret=MZXW6YTB')
     expect(uri).toContain('issuer=Serenity')
@@ -143,12 +143,12 @@ describe('accounts-api: fetchWorkspaces / fetchConfig（v1.28.0 适配 0.1.2-rc.
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       calledPath = typeof input === 'string' ? input : input instanceof URL ? input.pathname : (input as Request).url
       return new Response(JSON.stringify(cfgResponse([
-        { path: '/home/yh/home/home-serenity', title: 'home-serenity' },
+        { path: '/home/user/workspace', title: 'home-serenity' },
       ])), { status: 200, headers: { 'content-type': 'application/json' } })
     }) as typeof fetch
 
     const workspaces = await fetchWorkspaces()
-    expect(workspaces).toEqual([{ path: '/home/yh/home/home-serenity', title: 'home-serenity' }])
+    expect(workspaces).toEqual([{ path: '/home/user/workspace', title: 'home-serenity' }])
     // 走 gateway 自有配置接口（非 DSH RPC workspace.list）
     expect(calledPath).toContain('/serenity/config')
   })

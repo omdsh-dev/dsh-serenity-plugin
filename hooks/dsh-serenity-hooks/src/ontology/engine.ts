@@ -2667,7 +2667,7 @@ function cmdCompliance(args: string[]): void {
          *
          * 2026-09-14 S188 修（缺陷④）：旧实现把 `skillDependsOn(A, B)` 的两端都收进 targets，
          * 于是按生成指引逐 target 审会得到一半**方向错误的伪 Fail**（如"home-memory 未声明
-         * 依赖 zhaocai-memory"——B 端根本不欠任何声明）。同时修缺陷⑤：合取式
+         * 依赖 `roleX-memory`"——B 端根本不欠任何声明）。同时修缺陷⑤：合取式
          * （`dependsOn(X,A) and dependsOn(X,B)`）里 X 出现两次，旧实现不去重。
          */
         function findDependsOnDeclarers(node: ExprNode | null): string[] {

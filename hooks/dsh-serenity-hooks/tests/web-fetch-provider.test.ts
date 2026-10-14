@@ -65,7 +65,7 @@ describe('v1.30.12 web fetch 地址判据', () => {
       '10.0.0.1',
       '172.16.0.1',
       '172.31.255.254',
-      '192.168.1.4',
+      '192.0.2.4',
       '169.254.169.254',
       '100.64.0.1',
       '0.0.0.0',
@@ -87,7 +87,7 @@ describe('v1.30.12 web fetch 地址判据', () => {
     expect(isPublicV6('fc00::1')).toBe(false)
     expect(isPublicV6('ff02::1')).toBe(false)
     expect(isPublicV6('::ffff:1.1.1.1')).toBe(true)
-    expect(isPublicV6('::ffff:192.168.1.4')).toBe(false)
+    expect(isPublicV6('::ffff:192.0.2.4')).toBe(false)
     expect(isPublicV6('::ffff:198.18.1.85')).toBe(false) // mapped 只看内嵌 IPv4，不做 fake-ip 放行
   })
 
@@ -110,7 +110,7 @@ describe('v1.30.12 web fetch 地址判据', () => {
   })
 
   it('resolver：任一地址不合法 → 整体拒绝（WEB_BLOCKED_URL）', async () => {
-    await expect(resolveAllowedAddresses('192.168.1.4', new AbortController().signal)).rejects.toMatchObject({
+    await expect(resolveAllowedAddresses('192.0.2.4', new AbortController().signal)).rejects.toMatchObject({
       code: 'WEB_BLOCKED_URL',
     })
     await expect(resolveAllowedAddresses('127.0.0.1', new AbortController().signal)).rejects.toThrow(/non-public/)
@@ -121,7 +121,7 @@ describe('v1.30.12 web fetch 地址判据', () => {
  * 🔴 域名解析分支（`lookupAll`）—— ⑤ 第 41 件，S142 2026-09-25。
  *
  * **为何此前零执行**：本文件所有既有 resolver 用例都传 **IP 字面量**
- * （`1.1.1.1` / `[2606:4700::1111]` / `198.18.1.85` / `192.168.1.4` / `127.0.0.1`）
+ * （`1.1.1.1` / `[2606:4700::1111]` / `198.18.1.85` / `192.0.2.4` / `127.0.0.1`）
  * ⇒ `resolveAllowedAddresses` 里 `isIP(bare) !== 0` ⇒ **直接走 else，从不进 `lookupAll`**。
  * 这是本仓唯一**同时带 `fstat-no` 与 `cstat-no`** 的残余（其余残余只带 `fstat-no`）。
  *
@@ -145,7 +145,7 @@ describe('v1.30.12 resolver 域名分支（lookupAll：本模块唯一带 cstat-
   })
 
   it('域名解析到私网 ⇒ 仍被拒（放宽的只是 fake-ip，不是全部私网）', async () => {
-    lookupMock.mockResolvedValueOnce([{ address: '192.168.1.4', family: 4 }])
+    lookupMock.mockResolvedValueOnce([{ address: '192.0.2.4', family: 4 }])
     await expect(resolveAllowedAddresses('evil.example.com', new AbortController().signal)).rejects.toMatchObject({
       code: 'WEB_BLOCKED_URL',
     })

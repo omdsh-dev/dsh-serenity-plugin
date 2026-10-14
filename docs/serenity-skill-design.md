@@ -261,7 +261,7 @@ Load referenced resources only as needed.        ← 🔴 宿主明说「按需�
    （这是本设计 v0.2 的原文，**是实现期查出来的错**，留此一行做墓碑。）
    ⇒ **相对路径不靠人肉推**：由 creator 的 `create` **从 skill 目录算到顶层 skill 的
    `references/serenity-skills-ontology.ttl`**（ACC 知道 CCC 根与顶层 skill 名）。
-   ⚠️ 上例的 `home-serenity` 是**本 CCC 的顶层 skill 名**；别的 CCC（如 `tiangong-serenity`）按同规则由 `create` 算。
+   ⚠️ 上例的 `home-serenity` 是**本 CCC 的顶层 skill 名**；别的 CCC（如 `另一个 CCC`）按同规则由 `create` 算。
 
 ### 5.3 声明面（把预留口暴露给宿主，零成本）
 

@@ -44,7 +44,7 @@ const incomingBase = {
   accountId: 'wechat-1',
   userId: 'u1@im.wechat',
   sessionId: 'skiff-weixin-abc123',
-  role: 'zhaocai',
+  role: 'my-role',
   text: '你好',
   media: [{ kind: 'image' as const, relPath: '_tmp/weixin-inbound/h1/img_x.jpg' }],
 }
@@ -57,7 +57,7 @@ describe('weixin-hook: 事件构造（schema）', () => {
     expect(ev.accountId).toBe('wechat-1')
     expect(ev.userId).toBe('u1@im.wechat')
     expect(ev.sessionId).toBe('skiff-weixin-abc123')
-    expect(ev.role).toBe('zhaocai')
+    expect(ev.role).toBe('my-role')
     expect(ev.ts).toBeGreaterThan(0)
     expect(ev.message.text).toBe('你好')
     expect(ev.message.media).toEqual([{ kind: 'image', relPath: '_tmp/weixin-inbound/h1/img_x.jpg' }])
@@ -75,7 +75,7 @@ describe('weixin-hook: 事件构造（schema）', () => {
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: '好的，已记录',
     })
     expect(ev.event).toBe('outgoing')
@@ -89,7 +89,7 @@ describe('weixin-hook: 事件构造（schema）', () => {
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: 'x',
     }))
     for (const json of [incoming, outgoing]) {
@@ -164,7 +164,7 @@ describe('weixin-hook: runner 注入', () => {
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: 'x',
     })
     await invokeWeixinHook(dir, 'hook.js', ev)

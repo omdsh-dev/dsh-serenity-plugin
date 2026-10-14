@@ -65,7 +65,7 @@
 > **📌 E1 的两点补充（2026-09-15 补，读码实测）**
 > 1. **E1 是三处里唯一"不依赖 live 会话"的**：其 ① `workspaceRegistry`（注释原文：持久化——**所有工作目录即使无 live 会话**）② `sessionPersistence`（注释原文：**覆盖所有历史会话工作目录**）。出处写在注释里：**所有者 2026-08-29 的要求**。该函数已接到 `/serenity/cccs`（`api.ts:362-379`）并被**设置面板 CCC 选择器**消费（`SettingsSection.tsx:627-652`）。
 > 2. ⚠️ **但三层是"短路"而非"并集"**：`:100` 与 `:109` 均为 `if (roots.length === 0)` ⇒ **第一层给出任意一条，后两层整个不跑** ⇒ **该函数返回的名单可能不全**。任何"把它当权威集合"的用法都受影响。
-> 3. **现场可复现的证据**：`acc-diag` 实测 autopilot CCC = **3 个**（live 派生），而脚本侧（扫 `/home/yh` 两层）能列出 **`sh-serenity`** ⇒ 同一件事两套来源给出**不同集合**。实测本机共 **4 个 CCC**：`/home/yh/home/home-serenity`、`/home/yh/zy/pangu-serenity`、`/home/yh/zy/tiangong-serenity`、`/home/yh/shgroup/sh-serenity`（**分属三个不同父目录**；最后一个未配 autopilot）。
+> 3. **现场可复现的证据**：`acc-diag` 实测 autopilot CCC = **3 个**（live 派生），而脚本侧（扫 `<家目录>` 两层）能列出 **`另一个 CCC`** ⇒ 同一件事两套来源给出**不同集合**。实测本机共 **4 个 CCC**：`<CCC 根 A>`、`<CCC 根 B>`、`<CCC 根 C>`、`<CCC 根 D>`（**分属三个不同父目录**；最后一个未配 autopilot）。
 
 ### 1.4 L3：CCC 名解析（2 处，含一处**潜在静默分歧**）
 
@@ -78,7 +78,7 @@
 
 ### 1.5 范围外 1 处（独门算法）
 
-`experiments/autopilot-trajectory/scripts/autopilot-trajectory.ts`：`:77 findRoot`（`SERENITY_ROOT` 优先 → cwd 上溯）+ **`:496 collectCccs` 递归扫描 `/home/yh` 两层找 `.serenity`**——**全仓独此一份算法**；另有 `--ccc` 手工指定。
+`experiments/autopilot-trajectory/scripts/autopilot-trajectory.ts`：`:77 findRoot`（`SERENITY_ROOT` 优先 → cwd 上溯）+ **`:496 collectCccs` 递归扫描 `<CCC 根>` 两层找 `.serenity`**——**全仓独此一份算法**；另有 `--ccc` 手工指定。
 
 ### 1.6 补偿点：**根缺失 ⇒ 代码多做了什么**（全部有留档）
 

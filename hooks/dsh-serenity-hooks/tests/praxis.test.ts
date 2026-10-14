@@ -81,7 +81,7 @@ describe('praxis（v1.30：eap/neat/cce 三合一；v1.51.5 增 ontology）', ()
   })
 
   it('🔴 内容纪律：本体方法群不得出现任何具体 CCC 的名字（D23——机制与措辞归 ACC、数据归 CCC）', () => {
-    for (const name of ['home-serenity', 'tiangong', 'pangu-serenity', 'sh-serenity', 'tg-ontology', 'home-ontology']) {
+    for (const name of ['home-serenity', 'other-serenity', 'another-serenity', 'third-serenity', 'other-ontology', 'home-ontology']) {
       expect(ONTOLOGY_CONTENT).not.toContain(name)
     }
   })

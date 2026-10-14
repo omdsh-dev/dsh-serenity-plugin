@@ -29,7 +29,7 @@
 - **⑤a 单级化**：`msm-ops.ts` findRegistries/registryPathFor **只读写 `.opencode/skills/<cccName>/references/mech-registry.json`**（cccName=.serenity 首行），skill 只进 entry 字段；废弃历史分散 skill 注册表（register --skill 曾写各自目录）+ root 级兜底
 - **⑤b 写保护**：`seams/guards.ts` `isProtectedRegistryRel`（**写 deny 读 allow**——R6 与 localstore 读 deny 语义区分：注册表是结构核心不是秘密，需被 output-guard/skiff-admin 读取建 MSM 词表）；`fs-ops.ts` validateWritePath 保护改指 cccName 聚合档 + root 级（分散残留放行可删迁移）；acc_msm register/deregister 内部 writeRegistry 天然豁免
 - **⑤c 健康检查**：`kit-ops.ts` `checkRegistryHealth` 入 **acc_kit health 的 registry 段**——parse（剥 BOM）/顶层 wrapper 结构/每 entry 字段类型/name 唯一/path 根内+脚本存在；**坏不抛错**（坏表 → ok:false + issues + git 恢复指引——register/deregister 精提交历史可 `git checkout -- <registry>` 恢复）；用户拍板：只输出指引不内置 --restore
-- CCC 数据：home-serenity 聚合档并入 6 分散 entry（mail-tool/memory-tool/movie-search/home-diag/session-log-tool/h3-pipeline → 67 entries 总）；分散文件保留（用户拍板——新代码不读，无害残留）；其他 CCC（pangu/tiangong/sh）单级化后各自需手工并入自身 cccName 聚合档（待办）
+- CCC 数据：home-serenity 聚合档并入 6 分散 entry（mail-tool/memory-tool/movie-search/home-diag/session-log-tool/h3-pipeline → 67 entries 总）；分散文件保留（用户拍板——新代码不读，无害残留）；其他 CCC（多个 `*-serenity` 实例）单级化后各自需手工并入自身 cccName 聚合档（待办）
 
 ### review 修复批（第一轮：P1 + P2-2~P2-5 + P3 五项，独立 review 后修复）
 - **P1 单级化死锁**：root 级注册表解除写保护（废弃形态死锁——不被读又不可删/迁移）；**P2-1 平台大小写统一**（win32 不敏感/posix 敏感——Linux 大写 CCC 名不得误放行）

@@ -407,7 +407,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
                 <span className="ss-help">
                   <button type="button" className="ss-helpMark" aria-label="路由表帮助">?</button>
                   <span className="ss-helpTip">{'路由表：微信用户 → skiff 角色映射\n' +
-                    '· 格式：[{"user": "xxx@im.wechat", "role": "zhaocai"}, ...]\n' +
+                    '· 格式：[{"user": "xxx@im.wechat", "role": "my-role"}, ...]\n' +
                     '· user = 微信用户 ID（from_user_id）；`*` = 通配兜底\n' +
                     '· role = 该 CCC 已定义的 skiff.roles 角色名\n' +
                     '· 未命中路由的用户不回复（不暴露机器人）'}

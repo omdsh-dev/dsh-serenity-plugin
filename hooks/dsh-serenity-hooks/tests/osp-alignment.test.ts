@@ -155,7 +155,7 @@ const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
 ].join('\n')
 
 /** 建立含顶层 skill 的 CCC */
-function setupCccWithSkill(skillName = 'tg-serenity', skillBody = '顶层入口原文内容'): void {
+function setupCccWithSkill(skillName = 'other-serenity', skillBody = '顶层入口原文内容'): void {
   writeFileSync(join(dir, '.serenity'), skillName)
   mkdirSync(join(dir, '.opencode', 'skills', skillName), { recursive: true })
   writeFileSync(join(dir, '.opencode', 'skills', skillName, 'SKILL.md'), `---\nname: ${skillName}\ndescription: 系统入口\n---\n${skillBody}`)
@@ -214,13 +214,13 @@ describe('dsp 领先：Session 块（v1.23.0 载体关系 + steward 预声明；
 
 describe('osp 对齐：SKILL 全文原文直推 + 装配结构', () => {
   it('entrySkillSectionText() 原文直推（含 frontmatter，无包裹头）', () => {
-    setupCccWithSkill('tg-serenity', '顶层入口原文内容')
+    setupCccWithSkill('other-serenity', '顶层入口原文内容')
     const text = entrySkillSectionText(dir)
-    expect(text).toBe('---\nname: tg-serenity\ndescription: 系统入口\n---\n顶层入口原文内容')
+    expect(text).toBe('---\nname: other-serenity\ndescription: 系统入口\n---\n顶层入口原文内容')
   })
 
   it('serenitySystemPrompt() 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL→Tools→Session，无 --- 分隔线（需求③ Tools 放 SKILL 后 Session 前）', () => {
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const dirName = '2026-08-13--S126--dsh-serenity-public-beta-adapt'
     mkdirSync(join(dir, 'AGENT_SESSIONS', dirName), { recursive: true })
     writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md'), '# test')

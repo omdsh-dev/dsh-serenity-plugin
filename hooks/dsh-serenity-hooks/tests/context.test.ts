@@ -116,9 +116,9 @@ describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复�
 describe('context: ACC 注入消息（S134 去重：对话流只含简短身份锚点）', () => {
   it('accMessage 只含简短头——不含完整系统提示词 5 块 / SKILL 原文（由系统提示词层注入）', () => {
     // .serenity 记号 = 顶层入口 skill 名（对齐真实 CCC 约定）
-    writeFileSync(join(dir, '.serenity'), 'tg-serenity')
-    mkdirSync(join(dir, '.opencode', 'skills', 'tg-serenity'), { recursive: true })
-    writeFileSync(join(dir, '.opencode', 'skills', 'tg-serenity', 'SKILL.md'), '---\nname: tg-serenity\n---\n顶层入口原文内容')
+    writeFileSync(join(dir, '.serenity'), 'other-serenity')
+    mkdirSync(join(dir, '.opencode', 'skills', 'other-serenity'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'skills', 'other-serenity', 'SKILL.md'), '---\nname: other-serenity\n---\n顶层入口原文内容')
 
     const msg = accMessage(dir, ['.opencode/serenity.json'], 30000) as { content: Array<{ text: string }> }
     const text = msg.content[0].text
@@ -134,7 +134,7 @@ describe('context: ACC 注入消息（S134 去重：对话流只含简短身份�
   })
 
   it('Session 块由系统提示词层注入（sessionBlock 独立验证见 osp-alignment；accMessage 不含 Session）', () => {
-    writeFileSync(join(dir, '.serenity'), 'tg-serenity')
+    writeFileSync(join(dir, '.serenity'), 'other-serenity')
     const dirName = '2026-08-14--S127--scope-a'
     mkdirSync(join(dir, 'AGENT_SESSIONS', dirName), { recursive: true })
     writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md'), '# test')

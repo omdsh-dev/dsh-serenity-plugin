@@ -47,7 +47,7 @@
   3. Execute:        acc_msm exec <name> <args...>
   ```
   → **三步才完成一次执行**。每次都是独立 tool-call round-trip → LLM 上下文膨胀 + 延迟。
-- 实际 CCC 注册 MSM 规模：home-serenity ~75 个 + pangu ~90 个（每家 CCC 各自注册）——list 输出极长，每次发现成本高
+- 实际 CCC 注册 MSM 规模：home-serenity ~75 个 + 另一个 CCC ~90 个（每家 CCC 各自注册）——list 输出极长，每次发现成本高
 
 ### 2.3 历史决策 D12（SESSION.md §5，2026-08-27 工具精简作罢）
 

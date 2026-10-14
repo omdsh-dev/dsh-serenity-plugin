@@ -183,7 +183,7 @@ POST 回调（加密 XML）
     "tokenRef": "WECOM_TOKEN",         // localstore 凭据引用（回调 token 验签）
     "aesKeyRef": "WECOM_AES_KEY",      // localstore 凭据引用（43 字符 EncodingAESKey）
     "route": {                         // 发送者 → (ccc, role) 映射（首版仅个人）
-      "user:zhangsan": { "ccc": "/home/yh/home/home-serenity", "role": "qa" }
+      "user:zhangsan": { "ccc": "<CCC 根>", "role": "qa" }
       // "chat:GROUPID1": ...  ← 群聊留待后续（用户拍板：先不支持群聊）
     },
     "callbackPath": "/wecom/callback"  // 回调路径（联调时经隧道/反向代理暴露）

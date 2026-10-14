@@ -14,7 +14,7 @@ import {
  *
  * 两类判据：
  *  ① **资产面**——文件在位、可读、且**内容是我们的**（把"外来内容"这条判据钉进 CI：
- *     上一轮我正是靠人工 grep 漏掉了全大写的 `TIANGONG`，判据必须自动化且**大小写不敏感**）；
+ *     上一轮我正是靠人工 grep 漏掉了**全大写写法的外来铭牌字样**，判据必须自动化且**大小写不敏感**）；
  *  ② **路由面**——注册形态 + 三种响应（200 正文/405 方法/500 资产缺失）。
  */
 
@@ -78,7 +78,7 @@ describe('voyage-page：资产面（ACC 层静态资产）', () => {
       .split('\n')
       .filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*') && !l.trim().startsWith('/*'))
       .join('\n')
-    for (const foreign of ['tg-serenity', "'tg-", 'tiangong', 'choerodon', 'archery', 'snowflake-id', 'AX-SESSION-FIRST']) {
+    for (const foreign of ['other-serenity', "'other-", 'other-container', 'choerodon', 'archery', 'snowflake-id', 'AX-SESSION-FIRST']) {
       expect(rendered.toLowerCase()).not.toContain(foreign.toLowerCase())
     }
   })

@@ -135,7 +135,7 @@ export function resolveSkiffKind(role: SkiffRoleConfig | undefined, hasStableId:
  *
  * 为什么是函数而不是字符串（R↓）：旧实现 `createSkiffAgent` 在创建时把
  * `resolveRoleSystemPrompt(...)` 的结果**快照**进系统提示词段闭包 → CCC 改了
- * `zhaocai.md` 必须重启 dsh web 才生效（本轮实证：改完 18KB 提示词，live agent 仍用旧文本）。
+ * `<role>.md` 必须重启 dsh web 才生效（本轮实证：改完 18KB 提示词，live agent 仍用旧文本）。
  * 现形态返回一个读取函数，由系统提示词段的 `text()` **每轮调用**：
  *   - `systemPromptFile`：按 **mtime + size** 缓存重读（命中缓存零 IO；未变不解析）
  *     → 改文件即生效，**无需重启**；变更时打一行 info 日志（可观测，便于确认热更生效）

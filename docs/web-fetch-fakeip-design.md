@@ -91,4 +91,4 @@ new HttpFetchProvider(limits, resolveAddresses)   // limits: HttpFetchLimits
 
 - 只放宽"地址可达性"一条；URL 校验、同源重定向、配额、二进制拒绝**仍由宿主实现执行**。
 - 若 CCC 使用非默认 `fake-ip-range`（如 `240.0.0.0/4`），需同步 `FAKE_IP_OCTET_*` 常量。
-- 内网服务（如 `192.168.1.x`）**仍然拒绝**——`web_fetch` 不用于抓内网；内网访问走 `ssh-connect` / CCC 自己的 MSM。
+- 内网服务（如 `192.0.2.x`）**仍然拒绝**——`web_fetch` 不用于抓内网；内网访问走 `ssh-connect` / CCC 自己的 MSM。

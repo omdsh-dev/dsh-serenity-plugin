@@ -3,7 +3,7 @@
  *
  * 形态（用户拍板 A2）：**独立监听器，只绑 127.0.0.1**（默认 3082，plugin 全局配置 weixinApi）。
  * 为什么不挂在主 webServer(3080) 上：3080 会被 3081 公网网关原样反代（含全部请求头），
- * 而 3081 的登录态属于"家庭账号"——一旦挂上去，任何已登录的外部用户都能冒充 bot 发消息。
+ * 而 3081 的登录态属于"对外账号"——一旦挂上去，任何已登录的外部用户都能冒充 bot 发消息。
  * 独立 loopback 监听器则**不经网关、公网不可达**，因此不做共享密钥；仍校验来源地址。
  *
  * 调用者 = **非 agent 的调用者**（外部脚本/集成/运维）。**agent 侧已不走这里**：v1.31.0 起
@@ -86,7 +86,7 @@ export function parseSendRequest(body: unknown): ParseResult {
     return { ok: false, error: 'missing "user"', remediation: 'user = iLink from_user_id（形如 xxx@im.wechat）；别名解析归调用方' }
   }
   if (!user.includes('@')) {
-    return { ok: false, error: `invalid "user": ${user}`, remediation: '需为 iLink from_user_id（含 @）；别名（yh/danica）请在调用方解析' }
+    return { ok: false, error: `invalid "user": ${user}`, remediation: '需为 iLink from_user_id（含 @）；别名请在调用方解析' }
   }
   const text = typeof o.text === 'string' ? o.text.trim() : ''
   if (text === '') {

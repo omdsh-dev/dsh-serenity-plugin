@@ -110,9 +110,9 @@
 
 ```
 (账号, 用户) → (CCC, 角色)
-   wechat-1, yh      → home-serenity / zhaocai
-   wechat-1, danica  → home-serenity / zhaocai
-   wechat-1, <某人>   → tiangong-serenity / <某角色>      ← 一个账号可落到不同 CCC
+   wechat-1, user-b  → home-serenity / my-role
+   wechat-1, user-a  → home-serenity / my-role
+   wechat-1, <某人>   → 另一个 CCC / <某角色>      ← 一个账号可落到不同 CCC
 ```
 
 - 🔴 **不得推断**（owner 更正）：**"有没有 skiff 角色" ≠ "订阅"** —— skiff 用途很多，不能因为建了个 skiff 就被接上微信

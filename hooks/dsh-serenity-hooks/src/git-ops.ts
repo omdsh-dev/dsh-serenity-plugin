@@ -11,7 +11,7 @@
  *   - diff：git diff [--cached] [<ref>] [-- <path>]
  * 保留 dsp 增强：localstore git 合规联动（S134：deny 且 .gitignore 未覆盖 → status 提示 / commit 拒绝）。
  *
- * 🔴 2026-09-26 修（tiangong-serenity 报障）：**push 曾把"超时被杀"报成成功**。
+ * 🔴 2026-09-26 修（由另一个 CCC 实例报障）：**push 曾把"超时被杀"报成成功**。
  *   机制（**实测**，非推断）：`spawnSync` 超时**不设 `err.killed`**（实测 `code=ETIMEDOUT` /
  *   `signal=SIGTERM` / `status=null` / `stderr` 长度 0），而 `execFileSync` **成功时丢弃 stderr**；
  *   于是"超时被杀"与"真成功"都交出 `{stdout:'', stderr:''}` —— 旧判据 `if (!stderr) → 成功`
@@ -48,7 +48,7 @@ interface GitArgs {
 
 /** 本地动作超时（ms） */
 const DEFAULT_LOCAL_TIMEOUT_MS = 30_000
-/** 网络动作（fetch/push/pull）超时（ms）——大体量推送可能远超 30s（tiangong 实例：>60s） */
+/** 网络动作（fetch/push/pull）超时（ms）——大体量推送可能远超 30s（实测某实例 >60s） */
 const DEFAULT_NET_TIMEOUT_MS = 180_000
 
 /**

@@ -365,7 +365,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
         "autoReplyWithLastMessage": true,
         "fallbackOnNoSend": false,
         "accounts": [{ "accountId": "wechat-1", "name": "家庭助手", "enabled": true }],
-        "routes": [{ "user": "*", "role": "zhaocai" }]
+        "routes": [{ "user": "*", "role": "my-role" }]
       } }
 
   ▸ weixin.hook（消息记录 hook，v1.27.13）：
@@ -388,7 +388,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
   事件 schema（**不含任何会话凭据**——context_token/bot_token/token/aes_key 均不出现）：
     { "event": "incoming", "ts": 1788359941488, "cccRoot": "/path/ccc",
       "accountId": "wechat-1", "userId": "u1@im.wechat",
-      "sessionId": "skiff-weixin-xxx", "role": "zhaocai",
+      "sessionId": "skiff-weixin-xxx", "role": "my-role",
       "message": { "text": "你好", "media": [{ "kind": "image", "relPath": "_tmp/weixin-inbound/<hash>/img_x.jpg" }] } }
     { "event": "outgoing", "ts": ..., "cccRoot": ..., "accountId": ...,
       "userId": ..., "sessionId": ..., "role": ...,

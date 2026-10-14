@@ -831,19 +831,19 @@ describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
   })
 })
 
-describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
-  // 复刻 .opencode/serenity.json zhaocai 角色（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory，
+describe('guards: Skiff 角色白名单——真实 my-role 配置形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
+  // 复刻 .opencode/serenity.json my-role 角色（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory，
   // v1.34 工具名硬切为 container_trajectory）：
   // tools 含 msm/container_trajectory + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
   // 而 read/web_search 通。此测试钉死逻辑层：该配置形态下 decideGuard 必须放行
   // msm/container_trajectory/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
-  const ZHAOCAI_MSMS = [
+  const MY_ROLE_MSMS = [
     'anysearch', 'web-search', 'memory-tool', 'mail-tool', 'vlm-describe',
     'eap-analyzer', 'qbit', 'session-log-tool', 'movie-search', 'home-diag',
     'bill-analyzer', 'mortgage-rate-compare', 'sheet-parser', 'pdf-extract',
     'archive-extract', 'profile-tool', 'weixin-send', 'autopilot-todo', 'subscription-tool',
   ]
-  const ZC_ID = 'skiff-weixin-74b2a0609d13657b'
+  const ZC_ID = 'skiff-weixin-0123456789abcdef'
 
   beforeEach(() => {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
@@ -852,9 +852,9 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
       JSON.stringify({
         skiff: {
           roles: {
-            zhaocai: {
+            'my-role': {
               model: 'minimax-cn-coding-plan/MiniMax-M3',
-              msms: ZHAOCAI_MSMS,
+              msms: MY_ROLE_MSMS,
               tools: ['read', 'grep', 'glob', 'web_search', 'container_trajectory', 'msm'],
               trajectory: { session: true, keeper: false, rebuild: true },
               systemPromptFile: '.opencode/skiff/zhaocai.md',
@@ -863,20 +863,20 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
         },
       }),
     )
-    registerSkiffSession(ZC_ID, 'zhaocai', dir)
+    registerSkiffSession(ZC_ID, 'my-role', dir)
   })
 
   afterEach(() => {
     unregisterSkiffSession(ZC_ID)
   })
 
-  it('zhaocai 形态：白名单内工具全放行（read/web_search/container_trajectory/msm）', () => {
+  it('my-role 形态：白名单内工具全放行（read/web_search/container_trajectory/msm）', () => {
     for (const tool of ['read', 'grep', 'glob', 'web_search', 'container_trajectory', 'msm']) {
       expect(decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID })).kind, `tool ${tool} 应 allow`).toBe('allow')
     }
   })
 
-  it('zhaocai 形态：白名单外工具 deny（write/bash 等）', () => {
+  it('my-role 形态：白名单外工具 deny（write/bash 等）', () => {
     for (const tool of ['write', 'edit', 'bash', 'container_fs', 'handyman', 'container_admin', 'dashboard', 'praxis']) {
       const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID }))
       expect(d.kind, `tool ${tool} 应 deny`).toBe('deny')
@@ -884,16 +884,16 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
     }
   })
 
-  it('zhaocai 形态：msms 非空 → msm 工具本身放行（roleToolWhitelist msm 通道）', () => {
+  it('my-role 形态：msms 非空 → msm 工具本身放行（roleToolWhitelist msm 通道）', () => {
     // 关键回归：即使 tools 不含 msm，msms 非空也必须放行 msm（roleToolWhitelist 自动加 msm）
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
       JSON.stringify({
-        skiff: { roles: { zhaocai: { msms: ZHAOCAI_MSMS, tools: ['read'] } } },
+        skiff: { roles: { 'my-role': { msms: MY_ROLE_MSMS, tools: ['read'] } } },
       }),
     )
-    registerSkiffSession('skiff-weixin-zc2', 'zhaocai', dir)
+    registerSkiffSession('skiff-weixin-zc2', 'my-role', dir)
     try {
       expect(decideGuard(base({ root: dir, toolName: 'msm', skiffSessionId: 'skiff-weixin-zc2' })).kind).toBe('allow')
     } finally {
@@ -902,9 +902,9 @@ describe('guards: Skiff 角色白名单——真实 zhaocai 配置形态（S142 
   })
 
   it('v1.30.2 回归：模型把 MSM 名当直接工具调 → 明确指引经 msm()（非泛化"未授权"）', () => {
-    // 用户 bug（S142）：zhaocai 调 memory-tool 等得到 "tool not allowed in this skiff role" →
+    // 用户 bug（S142）：my-role 调 memory-tool 等得到 "tool not allowed in this skiff role" →
     // 误导成"没权限"。根因 = 把 MSM 名当直接工具调用。修复 = deny 消息给出 msm() 通道指引。
-    for (const msmName of ZHAOCAI_MSMS) {
+    for (const msmName of MY_ROLE_MSMS) {
       const d = decideGuard(base({ root: dir, toolName: msmName, skiffSessionId: ZC_ID }))
       expect(d.kind, `直接调 ${msmName} 应 deny`).toBe('deny')
       // 明确说这是 MSM + 给调用法（可行动规避指引），不说"not allowed in this skiff role"

@@ -366,8 +366,8 @@ export function apply(ctx: Context, config: Config): void {
   // 形态 = **域优先 + 文件兜底 + 双写**（向前兼容：域不可用/未迁移时行为与升级前逐字一致）。
   // 全程 **fire-and-forget + 永不抛错**：装载期开域失败不得成为启动单点（同契约探针口径）。
   //
-  // ⚠️ **迁移不在这里做**（实测修正，R↓）：dsh 服务进程的 cwd 是 `/home/yh`，**不是 CCC 根**
-  // （`acc-diag` 实测：`进程 cwd: /home/yh ｜ 进程 CCC: （无）`）⇒ 装载期按 cwd 迁移会读到
+  // ⚠️ **迁移不在这里做**（实测修正，R↓）：dsh 服务进程的 cwd 是**用户家目录**，**不是 CCC 根**
+  // （`acc-diag` 实测：`进程 cwd: <家目录> ｜ 进程 CCC: （无）`）⇒ 装载期按 cwd 迁移会读到
   // 一个不存在的文件、静默迁移 0 条（首版发布的实测症状）。迁移改由
   // `bindingsPathFor` 惰性触发（`ensureBindingsMigrated`）——那里才稳定拿得到 CCC 根。
   void (async () => {

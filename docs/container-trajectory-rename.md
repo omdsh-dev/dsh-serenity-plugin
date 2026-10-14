@@ -50,7 +50,7 @@
 
 ## 4. 硬约束（**同批，不可拆**）
 
-1. 🔴 **`tools.restrict` 按工具名字符串** ⇒ skiff 角色白名单（`.opencode/serenity.json` 的 `skiff.roles.zhaocai.tools` + `.opencode/skiff/zhaocai.md`）**必须与 ACC 同批改**，否则**招财静默失去该工具**（v1.33 `logbook→trajectory` 已发生过同型问题）。
+1. 🔴 **`tools.restrict` 按工具名字符串** ⇒ skiff 角色白名单（`.opencode/serenity.json` 的 `skiff.roles.my-role.tools` + `.opencode/skiff/<role>.md`）**必须与 ACC 同批改**，否则**某角色静默失去该工具**（v1.33 `logbook→trajectory` 已发生过同型问题）。
 2. 🔴 **工具名的每一处"命令形态"提及都是可执行指令**（keeper 提醒里写 `trajectory rebuild`，LLM 依此调用会失败）⇒ 必须全量扫描。
 3. **specs 在**本 trajectory（S142）**内改**（用户裁决，取代原 M6"另开会话"）。
 4. **osp 不动**（其工具面是 `logbook`，属另一运行时，遵循 §1 边界）。
@@ -61,7 +61,7 @@
 |---|---|---|
 | 插件源码 | 13 文件 / 27 处 | keeper ×2（超限强制提醒）｜`rebuild.ts` ×3（报错引导）｜`seams/system-prompt.ts`（toolsBlock）｜`invariant.ts`｜`dsh.plugin.json`｜`client/SettingsSection.tsx` ×4｜`skiff-core.ts` ×2｜`msm-ops.ts` ×3｜`wake-scheduler.ts`（诊断文案）｜`tools/skiff-admin.ts`（角色示例）｜`settings-section.ts`（注释）｜`tools/session.ts`（注册点） |
 | 随包/文档 | 模板 ×3 ｜ README ×2 ｜ `docs/trajectory-scheduling.md` ｜ `docs/trajectory-wake-registry-design.md` | 历史记录（CHANGELOG / `docs/review/*` / `acc-tool-naming-rework.md`）**按纪律不改** |
-| CCC 侧 | 4+ 文件 / 16 处 | `.opencode/serenity.json`（白名单）｜`.opencode/skiff/zhaocai.md` ×4｜`home-serenity/SKILL.md` ×3｜`acc-ccc-boundary.md` ×2｜`.dsh/skills/*` 装机副本 ×3｜维护 skill（大） |
+| CCC 侧 | 4+ 文件 / 16 处 | `.opencode/serenity.json`（白名单）｜`.opencode/skiff/<role>.md` ×4｜`home-serenity/SKILL.md` ×3｜`acc-ccc-boundary.md` ×2｜`.dsh/skills/*` 装机副本 ×3｜维护 skill（大） |
 | specs | §4 契约表 + §4.4 对照表 + story/README 命名节 | 名 + 判据一并写入 |
 
 ## 6. 实施分段（每段留绿）
@@ -70,7 +70,7 @@
 |---|------|------|
 | **P1 接口归一** | 工具注册名 / `invariant.ts` / `dsh.plugin.json` / toolsBlock / 三个文件改名 + 全量 import 修正 | `typecheck` 双面绿 |
 | **P2 涟漪** | keeper ×2 / rebuild 引导 / skiff-core 提示词 / 面板 4 处 / msm-ops 手册 / wake-scheduler 文案 / skiff-admin 示例 | 命令形态 0 残留（grep 判据） |
-| **P3 CCC 侧同批** | `serenity.json` 白名单 + `zhaocai.md` + `home-serenity/SKILL.md` + `acc-ccc-boundary.md` + `.dsh/skills` 副本 | 白名单与 ACC 一致（**同步判据 = 工具名逐字相等**） |
+| **P3 CCC 侧同批** | `serenity.json` 白名单 + `<role>.md` + `home-serenity/SKILL.md` + `acc-ccc-boundary.md` + `.dsh/skills` 副本 | 白名单与 ACC 一致（**同步判据 = 工具名逐字相等**） |
 | **P4 文档** | 模板 ×3 / README ×2 / docs ×2 / 维护 skill（发布时改） | grep 判据 |
 | **P5 specs** | §4 契约名 + 判据（`container_<X>` 作用域规则）| specs 内 grep |
 | **P6 门禁** | `typecheck` 双面 / `test` / `build` / `pack-check` / `readme-sync` | 全绿 |

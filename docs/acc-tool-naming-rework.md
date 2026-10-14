@@ -118,4 +118,4 @@ msm(name: string, args: string[], inspect?: boolean)
 
 1. 工具命名表（§2）是否照此实施
 2. 兼容策略 A（硬切）还是 B（双名过渡）
-3. 版本节奏：全量一次改（v1.30.0 大版）？涉及所有 CCC 的 skill 引用同步（pangu/tiangong 等也有 ACC）
+3. 版本节奏：全量一次改（v1.30.0 大版）？涉及所有 CCC 的 skill 引用同步（其他 CCC 也有 ACC）

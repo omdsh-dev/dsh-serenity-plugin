@@ -130,7 +130,7 @@ const incomingBase = {
   accountId: 'wechat-1',
   userId: 'u1@im.wechat',
   sessionId: 'skiff-weixin-abc123',
-  role: 'zhaocai',
+  role: 'my-role',
   text: '你好',
   media: [],
 }
@@ -155,7 +155,7 @@ describe('weixin-hook 分支面: B1 outgoing 事件的 file 字段三元', () =>
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: '文件已发',
       file: { name: '报告.pdf', size: 12345, caption: '这是附件' },
     })
@@ -168,7 +168,7 @@ describe('weixin-hook 分支面: B1 outgoing 事件的 file 字段三元', () =>
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: '纯文本',
     })
     // 🔴 断言"键不存在"而不是"值为 undefined" —— 三元展开的语义就在这里
@@ -182,7 +182,7 @@ describe('weixin-hook 分支面: B1 outgoing 事件的 file 字段三元', () =>
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: '附件',
       file: { name: 'a.txt', size: 1 },
     })
@@ -316,7 +316,7 @@ describe('weixin-hook 分支面: 判别联合未漂移', () => {
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: 'x',
       source: 'proactive',
     })
@@ -331,7 +331,7 @@ describe('weixin-hook 分支面: 判别联合未漂移', () => {
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
-      role: 'zhaocai',
+      role: 'my-role',
       reply: 'x',
       source: 'reply',
     })

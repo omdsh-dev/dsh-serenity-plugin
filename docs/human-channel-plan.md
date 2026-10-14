@@ -57,7 +57,7 @@ humanChannel: {
       userId: '…' }
   ],
   subscriptions: [
-    { account: 'wechat-1', user: 'yh', ccc: 'home-serenity', role: 'zhaocai' }
+    { account: 'wechat-1', user: 'user-b', ccc: 'home-serenity', role: 'my-role' }
   ],
   relay: { ccc: 'home-serenity' },   // 🔴 唯一；人设；CCC 不得自声明
   sending: { allow: ['*'] }          // 哪些 CCC 可以"发给人"（§3.4 待确认）
@@ -128,7 +128,7 @@ humanChannel: {
 ### 3.3 跨 CCC：主控 → 别的 CCC（**投递/唤起**）
 
 ```
-主控 CCC 的 agent 调 im-bridge dispatch(target='tiangong-serenity/S185', text, at?)
+主控 CCC 的 agent 调 im-bridge dispatch(target='另一个 CCC/S185', text, at?)
    → 主控闸校验（本 CCC == relay？）
    → 目标 CCC 的**唤醒表**写一条（wake entry）
    → 目标 CCC 的调度器（每 5min tick）投递

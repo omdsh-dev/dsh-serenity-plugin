@@ -20,8 +20,8 @@ import { ACC_VERSION } from '../src/constants.js'
 
 let dir: string
 
-/** 建立 CCC：.serenity 记号 = tg-serenity（仿 tiangong-serenity），含顶层 skill */
-function setupCccWithSkill(skillName = 'tg-serenity', skillBody = '顶层入口原文内容'): void {
+/** 建立 CCC：.serenity 记号 = other-serenity（仿其他 *-serenity 实例），含顶层 skill */
+function setupCccWithSkill(skillName = 'other-serenity', skillBody = '顶层入口原文内容'): void {
   writeFileSync(join(dir, '.serenity'), skillName)
   mkdirSync(join(dir, '.opencode', 'skills', skillName), { recursive: true })
   writeFileSync(join(dir, '.opencode', 'skills', skillName, 'SKILL.md'), `---\nname: ${skillName}\ndescription: 系统入口\n---\n${skillBody}`)
@@ -41,12 +41,12 @@ describe('system-prompt: 入口 skill 发现（.serenity 记号 = 顶层入口�
     expect(entrySkillSectionText(dir)).toBe('')
   })
 
-  it('按 .serenity 记号内容发现顶层 skill（tg-serenity）', () => {
-    setupCccWithSkill('tg-serenity')
+  it('按 .serenity 记号内容发现顶层 skill（other-serenity）', () => {
+    setupCccWithSkill('other-serenity')
     const text = entrySkillSectionText(dir)
     // 对齐 osp：注入 SKILL.md 原文（含 frontmatter），无包裹头
     expect(text).toContain('顶层入口原文内容')
-    expect(text).toContain('---\nname: tg-serenity')
+    expect(text).toContain('---\nname: other-serenity')
     expect(text).not.toContain('# CCC 入口技能')
   })
 
@@ -63,7 +63,7 @@ describe('system-prompt: 入口 skill 发现（.serenity 记号 = 顶层入口�
 
 describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Principles→CCE→EAP→SKILL→Tools→Session）', () => {
   it('serenitySystemPrompt 含 ACC/Metaphor/Principles/CCE/EAP/SKILL 全文', () => {
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const text = serenitySystemPrompt(dir)
     expect(text).toContain('=== Serenity ACC ===')
     expect(text).toContain('=== Serenity Metaphor ===')
@@ -162,7 +162,7 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     expect((captured!.text as (c: unknown) => string)(ctxNoCcc)).toBe('')
 
     // CCC cwd → 完整注入（ACC + CCE + Constraints + skill 全文）
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const ctxCcc = { agent: { session: { header: { cwd: join(dir, 'sub') } } } }
     const text = (captured!.text as (c: unknown) => string)(ctxCcc)
     expect(text).toContain('=== Serenity ACC ===')
@@ -182,7 +182,7 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
       },
     }
     registerEntrySkillSectionGlobal(fakeCtx as never)
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const ctxSkiff = { agent: { session: { id: 'skiff-qa-readonly-uuid', header: { cwd: dir } } } }
     expect((captured!.text as (c: unknown) => string)(ctxSkiff)).toBe('')
     // 对照：普通会话仍注入
@@ -238,7 +238,7 @@ describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第
   }
 
   it('注册形态：section 名 serenity-entry / order -50 / 首次返回 true', () => {
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const { agent, captured } = fakeAgent('sp-scoped-form-1', dir)
     const ok = registerEntrySkillSection(agent as never, dir)
     expect(ok).toBe(true)
@@ -248,7 +248,7 @@ describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第
   })
 
   it('🔴 幂等闸（本变体独有）：同 session id 第二次调用 ⇒ false，且**不重复注册**', () => {
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const first = fakeAgent('sp-scoped-idem-2', dir)
     expect(registerEntrySkillSection(first.agent as never, dir)).toBe(true)
     const callsAfterFirst = first.captured()
@@ -263,7 +263,7 @@ describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第
   })
 
   it('text 回调：CCC cwd ⇒ 完整注入；非 CCC ⇒ 空（scoped 版闭包持有 root，不读 context.agent.cwd）', () => {
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const { agent, captured } = fakeAgent('sp-scoped-text-3', dir)
     registerEntrySkillSection(agent as never, dir)
     const text = captured()!.text
@@ -277,7 +277,7 @@ describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第
   })
 
   it('🔴 scope 取自 agent.session.id：`skiff-` 前缀 ⇒ 空（角色提示词全替换的兜底闸）', () => {
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const { agent, captured } = fakeAgent('skiff-qa-readonly-probe-4', dir)
     registerEntrySkillSection(agent as never, dir)
     expect(captured()!.text({})).toBe('')
@@ -310,7 +310,7 @@ describe('system-prompt: EAP 块（S131 P1-6 扩展）', () => {
   })
 
   it('serenitySystemPrompt 块序 ACC→Metaphor→Principles→CCE→EAP→SKILL→Tools→Session（需求③）', () => {
-    setupCccWithSkill('tg-serenity')
+    setupCccWithSkill('other-serenity')
     const text = serenitySystemPrompt(dir)
     const acc = text.indexOf('=== Serenity ACC ===')
     const meta = text.indexOf('=== Serenity Metaphor ===')

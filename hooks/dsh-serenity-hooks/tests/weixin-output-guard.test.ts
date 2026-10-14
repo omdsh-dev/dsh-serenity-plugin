@@ -19,8 +19,8 @@ import {
   __resetWeixinOutputGuardForTest,
 } from '../src/weixin-output-guard.js'
 
-const SESSION = 'skiff-weixin-74b2a0609d13657b'
-const MANUAL = { root: '/ccc/home-serenity', accountId: 'wechat-1', userId: 'u@im.wechat', role: 'zhaocai' }
+const SESSION = 'skiff-weixin-0123456789abcdef'
+const MANUAL = { root: '/ccc/home-serenity', accountId: 'wechat-1', userId: 'u@im.wechat', role: 'my-role' }
 
 /** 成功的 im-bridge 调用（v1.31.0 主形态：ACC 工具，channel=weixin + action=send/send-file） */
 function sendExec(sessionId = SESSION, args: Record<string, unknown> = {}, action = 'send') {

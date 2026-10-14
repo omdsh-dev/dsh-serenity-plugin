@@ -130,7 +130,7 @@ CCC 因此把纪律改成 **`sys git -C <根> commit -m <msg> -- <显式路径>`
 
 ## 8. 追加修法：`push` 的**假成功**（外部报障 → 代码级取证 → 修）
 
-### 8.1 报障（tiangong-serenity，2026-09-26 07:30~07:50）
+### 8.1 报障（另一个 CCC，2026-09-26 07:30~07:50）
 
 > `container_git push` **在 `git push` 尚未完成时就返回 `Pushed to origin/<branch>`**；
 > **3/3 次返回成功，3/3 次远程 ref 未变**。真跑 `git push` 需 > 60 秒（4,921 文件 + 沙箱拒写 `known_hosts`）。

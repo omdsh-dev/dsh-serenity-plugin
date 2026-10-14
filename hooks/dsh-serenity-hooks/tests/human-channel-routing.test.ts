@@ -72,56 +72,56 @@ function sub(account?: string, user?: string, ccc?: string, role?: string) {
 
 describe('human-channel: 订阅表查询（lookupSubscription）', () => {
   it('精确匹配 `(账号, 用户)` ⇒ 命中该行', () => {
-    const r = lookupSubscription([sub('wechat-1', 'yh', 'home-serenity', 'zhaocai')], 'wechat-1', 'yh')
-    expect(r.hit).toEqual({ account: 'wechat-1', user: 'yh', ccc: 'home-serenity', role: 'zhaocai' })
+    const r = lookupSubscription([sub('wechat-1', 'user-b', 'home-serenity', 'my-role')], 'wechat-1', 'user-b')
+    expect(r.hit).toEqual({ account: 'wechat-1', user: 'user-b', ccc: 'home-serenity', role: 'my-role' })
     expect(r.defects).toEqual([])
     expect(r.usable).toBe(1)
   })
 
   it('🔴 `user` 的 `*` 兜底：无精确行时命中通配行（**存量 CCC 级 `routes` 用的就是它**）', () => {
-    // 保留 `*` 是**有意的**：P0-4 迁移要把 `{user:'*', role:'zhaocai'}` 逐字平移过来，
+    // 保留 `*` 是**有意的**：P0-4 迁移要把 `{user:'*', role:'my-role'}` 逐字平移过来，
     // 否则"迁移"会悄悄改变行为。
-    const r = lookupSubscription([sub('wechat-1', '*', 'home-serenity', 'zhaocai')], 'wechat-1', 'someone-else')
-    expect(r.hit?.role).toBe('zhaocai')
+    const r = lookupSubscription([sub('wechat-1', '*', 'home-serenity', 'my-role')], 'wechat-1', 'someone-else')
+    expect(r.hit?.role).toBe('my-role')
   })
 
   it('🔴 精确优先于通配（顺序写反会让所有人被通配吃掉）', () => {
     const r = lookupSubscription([
       sub('wechat-1', '*', 'ccc-wild', 'wild-role'),
-      sub('wechat-1', 'yh', 'ccc-exact', 'exact-role'),
-    ], 'wechat-1', 'yh')
+      sub('wechat-1', 'user-b', 'ccc-exact', 'exact-role'),
+    ], 'wechat-1', 'user-b')
     expect(r.hit?.ccc).toBe('ccc-exact')
   })
 
   it('🔴 `account` **不设通配**：写别的账号的行不匹配（账号是显式身份，不是模式）', () => {
-    const r = lookupSubscription([sub('*', 'yh', 'ccc', 'role')], 'wechat-1', 'yh')
+    const r = lookupSubscription([sub('*', 'user-b', 'ccc', 'role')], 'wechat-1', 'user-b')
     expect(r.hit).toBeNull()
     // 而且它是一条**完好**行（不是残缺）⇒ 未命中就是"表里没有你"
     expect(r.usable).toBe(1)
   })
 
   it('缺字段 ⇒ 进 `defects` 且**不进** `usable`（残缺行不可能被命中）', () => {
-    const r = lookupSubscription([sub('wechat-1', 'yh', undefined, 'zhaocai')], 'wechat-1', 'yh')
+    const r = lookupSubscription([sub('wechat-1', 'user-b', undefined, 'my-role')], 'wechat-1', 'user-b')
     expect(r.hit).toBeNull()
     expect(r.usable).toBe(0)
     expect(r.defects).toHaveLength(1)
     expect(r.defects[0]!.index).toBe(0)
     expect(r.defects[0]!.missing).toEqual(['ccc'])
     // 已有字段要**留下来**（人得认得出是哪一行）
-    expect(r.defects[0]!.present).toEqual({ account: 'wechat-1', user: 'yh', role: 'zhaocai' })
+    expect(r.defects[0]!.present).toEqual({ account: 'wechat-1', user: 'user-b', role: 'my-role' })
   })
 
   it('🔴 空白串 = "没填"（面板空文本框写空串）—— 与"缺这个键"同义', () => {
-    const r = lookupSubscription([sub('wechat-1', 'yh', '   ', 'zhaocai')], 'wechat-1', 'yh')
+    const r = lookupSubscription([sub('wechat-1', 'user-b', '   ', 'my-role')], 'wechat-1', 'user-b')
     expect(r.defects[0]!.missing).toEqual(['ccc'])
   })
 
   it('🔴🔴 残缺**独立于是否命中**：命中一条完好行，**不掩盖**另一行的笔误', () => {
     // 只测"残缺 ⇒ 报"会漏掉这一半：命中之后如果 `continue`/`return` 早了，笔误就永远没人改。
     const r = lookupSubscription([
-      sub('wechat-1', 'yh', 'ccc-good', 'role-good'),
+      sub('wechat-1', 'user-b', 'ccc-good', 'role-good'),
       sub('wechat-1', undefined, 'ccc-bad', 'role-bad'), // ← 缺 user
-    ], 'wechat-1', 'yh')
+    ], 'wechat-1', 'user-b')
     expect(r.hit?.ccc).toBe('ccc-good') // 命中了
     expect(r.defects).toHaveLength(1) // 但残缺仍然报出来
     expect(r.defects[0]!.index).toBe(1)
@@ -129,7 +129,7 @@ describe('human-channel: 订阅表查询（lookupSubscription）', () => {
   })
 
   it('表为空 ⇒ 三项都空（不是"未命中"，调用方据此区分两档）', () => {
-    const r = lookupSubscription([], 'wechat-1', 'yh')
+    const r = lookupSubscription([], 'wechat-1', 'user-b')
     expect(r.hit).toBeNull()
     expect(r.defects).toEqual([])
     expect(r.usable).toBe(0)
@@ -143,9 +143,9 @@ describe('human-channel: 订阅表查询（lookupSubscription）', () => {
 describe('human-channel: 入站路由决策（planInboundRoute）', () => {
   it('订阅命中 ⇒ `source: machine`（**不看**回退，即使回退也在场）', () => {
     const p = planInboundRoute({
-      subscriptions: [sub('wechat-1', 'yh', 'ccc-A', 'role-A')],
+      subscriptions: [sub('wechat-1', 'user-b', 'ccc-A', 'role-A')],
       account: 'wechat-1',
-      user: 'yh',
+      user: 'user-b',
       fallback: { ccc: '/ccc-B', role: 'role-B' },
     })
     expect(p.target).toEqual({ ccc: 'ccc-A', role: 'role-A' })
@@ -157,7 +157,7 @@ describe('human-channel: 入站路由决策（planInboundRoute）', () => {
     const p = planInboundRoute({
       subscriptions: [sub('wechat-1', 'someone', 'ccc-A', 'role-A')],
       account: 'wechat-1',
-      user: 'yh',
+      user: 'user-b',
       fallback: { ccc: '/ccc-B', role: 'role-B' },
     })
     expect(p.target).toEqual({ ccc: '/ccc-B', role: 'role-B' })
@@ -169,7 +169,7 @@ describe('human-channel: 入站路由决策（planInboundRoute）', () => {
     const p = planInboundRoute({
       subscriptions: [sub('wechat-1', 'someone', 'ccc-A', 'role-A')],
       account: 'wechat-1',
-      user: 'yh',
+      user: 'user-b',
     })
     expect(p.target).toBeNull()
     expect(p.source).toBeNull()
@@ -177,17 +177,17 @@ describe('human-channel: 入站路由决策（planInboundRoute）', () => {
   })
 
   it('🔴 两档未命中的**措辞不同**（排查方向不同：表没建 vs 表里没你）', () => {
-    const empty = planInboundRoute({ subscriptions: [], account: 'wechat-1', user: 'yh' })
+    const empty = planInboundRoute({ subscriptions: [], account: 'wechat-1', user: 'user-b' })
     expect(empty.skipReason).toBe('no-subscription')
-    const nonEmpty = planInboundRoute({ subscriptions: [sub('wechat-1', 'other', 'c', 'r')], account: 'wechat-1', user: 'yh' })
+    const nonEmpty = planInboundRoute({ subscriptions: [sub('wechat-1', 'other', 'c', 'r')], account: 'wechat-1', user: 'user-b' })
     expect(nonEmpty.skipReason).toBe('no-match')
   })
 
   it('残缺行**穿透**决策层（命中与否都带出来）', () => {
     const p = planInboundRoute({
-      subscriptions: [sub('wechat-1', 'yh', 'ccc-A', 'role-A'), sub('wechat-1', 'yh', undefined, 'r')],
+      subscriptions: [sub('wechat-1', 'user-b', 'ccc-A', 'role-A'), sub('wechat-1', 'user-b', undefined, 'r')],
       account: 'wechat-1',
-      user: 'yh',
+      user: 'user-b',
       fallback: { ccc: '/b', role: 'r' },
     })
     expect(p.source).toBe('machine')

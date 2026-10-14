@@ -106,7 +106,7 @@ describe('human-channel: 机器级 schema（P0-1）', () => {
     const resolved = Config({
       humanChannel: {
         accounts: [{ id: 'wechat-1', channel: 'weixin', token: 't', userId: 'u@im.wechat' }],
-        subscriptions: [{ account: 'wechat-1', user: 'yh', ccc: 'home-serenity', role: 'zhaocai' }],
+        subscriptions: [{ account: 'wechat-1', user: 'user-b', ccc: 'home-serenity', role: 'my-role' }],
         relay: { ccc: 'home-serenity' },
       },
     })
@@ -114,7 +114,7 @@ describe('human-channel: 机器级 schema（P0-1）', () => {
     expect(h?.accounts).toHaveLength(1)
     expect(h?.accounts?.[0]?.id).toBe('wechat-1')
     expect(h?.accounts?.[0]?.enabled).toBe(true)
-    expect(h?.subscriptions?.[0]?.role).toBe('zhaocai')
+    expect(h?.subscriptions?.[0]?.role).toBe('my-role')
     expect(h?.relay?.ccc).toBe('home-serenity')
     // 未给的子段仍被物化出缺省（实测形态，见本 describe 首条）—— 与读取面的缺省**同值**
     expect(h?.sending?.allow).toEqual(['*'])
@@ -181,8 +181,8 @@ describe('human-channel: 投影（settings-section；P0-1）', () => {
     const legacy = {
       weixin: {
         enabled: true,
-        accounts: [{ accountId: 'wechat-1', name: '家庭招财', enabled: true }],
-        routes: [{ user: 'yh', role: 'zhaocai' }],
+        accounts: [{ accountId: 'wechat-1', name: '家庭助手', enabled: true }],
+        routes: [{ user: 'user-b', role: 'my-role' }],
       },
     }
     expect(humanChannelSettingsFromConfig(legacy as never)).toEqual(defaultHumanChannelSettings())
@@ -190,7 +190,7 @@ describe('human-channel: 投影（settings-section；P0-1）', () => {
     // 正控（排除"投影压根不看入参"这一类瞎法）：同一份数据按**新键的拼写**放进来 ⇒ 投影真的变
     const modern = {
       accounts: [{ id: 'wechat-1', channel: 'weixin', token: 't', userId: 'u' }],
-      subscriptions: [{ account: 'wechat-1', user: 'yh', ccc: 'home-serenity', role: 'zhaocai' }],
+      subscriptions: [{ account: 'wechat-1', user: 'user-b', ccc: 'home-serenity', role: 'my-role' }],
       relay: { ccc: 'home-serenity' },
     }
     const out = humanChannelSettingsFromConfig(modern)
@@ -201,7 +201,7 @@ describe('human-channel: 投影（settings-section；P0-1）', () => {
   })
 
   it('旧键忽略在**读取入口**上同样成立（`Config` 顶层有旧键 ⇒ 入口输出不受影响；含正控）', () => {
-    const legacy = { weixin: { enabled: true, routes: [{ user: 'yh', role: 'zhaocai' }] } }
+    const legacy = { weixin: { enabled: true, routes: [{ user: 'user-b', role: 'my-role' }] } }
     expect(simpleSettingsFromConfig(legacy as never).humanChannel).toEqual(defaultHumanChannelSettings())
     // 正控（同一条入口）：把同一份数据挂到 `humanChannel` 上 ⇒ 入口输出**真的变**
     // —— 否则上面那条只证明"这个入口对任何入参都返回缺省"（= 空断言）
@@ -233,7 +233,7 @@ describe('human-channel: 旧 CCC 侧读取面的时点钉（P0-1 不退役它）
         weixin: {
           enabled: true,
           accounts: [{ accountId: 'wechat-1' }],
-          routes: [{ user: 'yh', role: 'zhaocai' }],
+          routes: [{ user: 'user-b', role: 'my-role' }],
         },
       }),
     )
@@ -242,7 +242,7 @@ describe('human-channel: 旧 CCC 侧读取面的时点钉（P0-1 不退役它）
     expect(w.accounts).toHaveLength(1)
     expect(w.accounts?.[0]?.accountId).toBe('wechat-1')
     expect(w.accounts?.[0]?.enabled).toBe(true)
-    expect(w.routes).toEqual([{ user: 'yh', role: 'zhaocai' }])
+    expect(w.routes).toEqual([{ user: 'user-b', role: 'my-role' }])
 
     // 对照：同一时刻，**机器级**投影对这份 CCC 文件一无所知（它只吃插件 Config）
     expect(simpleSettingsFromConfig({}).humanChannel).toEqual(defaultHumanChannelSettings())

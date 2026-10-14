@@ -81,17 +81,17 @@ afterEach(() => {
 
 describe('F1: verifyGatewayLogin（账号验证）', () => {
   const accounts = [
-    { user: 'yh', passHash: hashPassword('secret-1') },
-    { user: 'danica', passHash: hashPassword('pw2') },
+    { user: 'user-b', passHash: hashPassword('secret-1') },
+    { user: 'user-a', passHash: hashPassword('pw2') },
   ]
 
   it('正确账号密码 → true', () => {
-    expect(verifyGatewayLogin(accounts, 'yh', 'secret-1')).toBe(true)
-    expect(verifyGatewayLogin(accounts, 'danica', 'pw2')).toBe(true)
+    expect(verifyGatewayLogin(accounts, 'user-b', 'secret-1')).toBe(true)
+    expect(verifyGatewayLogin(accounts, 'user-a', 'pw2')).toBe(true)
   })
 
   it('错误密码 → false', () => {
-    expect(verifyGatewayLogin(accounts, 'yh', 'wrong')).toBe(false)
+    expect(verifyGatewayLogin(accounts, 'user-b', 'wrong')).toBe(false)
   })
 
   it('未知账号 → false', () => {
@@ -99,16 +99,16 @@ describe('F1: verifyGatewayLogin（账号验证）', () => {
   })
 
   it('空账号列表 → 全 false', () => {
-    expect(verifyGatewayLogin([], 'yh', 'secret-1')).toBe(false)
+    expect(verifyGatewayLogin([], 'user-b', 'secret-1')).toBe(false)
   })
 })
 
 describe('F1: token（颁发/校验/登出，v1.22.4 会话化）', () => {
   it('颁发后有效（返回会话含 user）', () => {
-    const t = issueToken('yh')
+    const t = issueToken('user-b')
     const s = validateToken(t)
     expect(s).toBeDefined()
-    expect(s?.user).toBe('yh')
+    expect(s?.user).toBe('user-b')
   })
 
   it('未颁发/空/乱值 → undefined', () => {
@@ -118,7 +118,7 @@ describe('F1: token（颁发/校验/登出，v1.22.4 会话化）', () => {
   })
 
   it('revokeToken：吊销后无效', () => {
-    const t = issueToken('yh')
+    const t = issueToken('user-b')
     expect(validateToken(t)).toBeDefined()
     expect(revokeToken(t)).toBe(true)
     expect(validateToken(t)).toBeUndefined()
@@ -130,7 +130,7 @@ describe('F1: token（颁发/校验/登出，v1.22.4 会话化）', () => {
     try {
       let now = 1_000_000
       Date.now = () => now
-      const t = issueToken('yh')
+      const t = issueToken('user-b')
       expect(validateToken(t)).toBeDefined()
       // 跳到 25h 后（无中间校验 → lastActiveAt 未被续期）
       now += 25 * 60 * 60 * 1000
@@ -145,7 +145,7 @@ describe('F1: token（颁发/校验/登出，v1.22.4 会话化）', () => {
     try {
       let now = 1_000_000
       Date.now = () => now
-      const t = issueToken('yh')
+      const t = issueToken('user-b')
       // 连续活动（每次间隔 <24h）→ 永不自然过期
       for (let i = 0; i < 3; i++) {
         now += 23 * 60 * 60 * 1000
@@ -235,13 +235,13 @@ describe('v1.22.4: CSRF（双提交 + Origin）', () => {
   })
 
   it('originAllowed：同源 / 主端口 loopback 允许；跨源拒绝', () => {
-    expect(originAllowed('http://192.168.1.31:3081', '192.168.1.31:3081', 3080)).toBe(true)
-    expect(originAllowed('http://127.0.0.1:3080', '192.168.1.31:3081', 3080)).toBe(true)
-    expect(originAllowed('http://localhost:3080', '192.168.1.31:3081', 3080)).toBe(true)
-    expect(originAllowed('http://evil.example.com', '192.168.1.31:3081', 3080)).toBe(false)
-    expect(originAllowed('not-a-url', '192.168.1.31:3081', 3080)).toBe(false)
+    expect(originAllowed('http://192.0.2.31:3081', '192.0.2.31:3081', 3080)).toBe(true)
+    expect(originAllowed('http://127.0.0.1:3080', '192.0.2.31:3081', 3080)).toBe(true)
+    expect(originAllowed('http://localhost:3080', '192.0.2.31:3081', 3080)).toBe(true)
+    expect(originAllowed('http://evil.example.com', '192.0.2.31:3081', 3080)).toBe(false)
+    expect(originAllowed('not-a-url', '192.0.2.31:3081', 3080)).toBe(false)
     // 无 Origin（curl/非浏览器）→ 放行（CSRF cookie 兜底）
-    expect(originAllowed(undefined, '192.168.1.31:3081', 3080)).toBe(true)
+    expect(originAllowed(undefined, '192.0.2.31:3081', 3080)).toBe(true)
   })
 
   it('csrfFromRequest：头优先，表单兜底', () => {
@@ -345,8 +345,8 @@ describe('v1.22: workspace 白名单过滤', () => {
       ok: true,
       value: {
         items: [
-          { workspaceId: 'w1', path: '/home/yh/home/home-serenity', title: 'serenity' },
-          { workspaceId: 'w2', path: '/home/yh/other', title: 'other' },
+          { workspaceId: 'w1', path: '/home/user/workspace', title: 'serenity' },
+          { workspaceId: 'w2', path: '/home/user/other', title: 'other' },
           { workspaceId: 'w3', path: '/data/x', title: 'x' },
         ],
         archivedSessionIds: [],
@@ -359,17 +359,17 @@ describe('v1.22: workspace 白名单过滤', () => {
   })
 
   it('前缀匹配过滤 items（保留匹配路径）', () => {
-    const out = JSON.parse(filterWorkspaceList(listBody, ['/home/yh/home'])) as {
+    const out = JSON.parse(filterWorkspaceList(listBody, ['/home/user/workspace'])) as {
       result: { value: { items: Array<{ path: string }> } }
     }
-    expect(out.result.value.items.map((i) => i.path)).toEqual(['/home/yh/home/home-serenity'])
+    expect(out.result.value.items.map((i) => i.path)).toEqual(['/home/user/workspace'])
   })
 
   it('多前缀并集', () => {
-    const out = JSON.parse(filterWorkspaceList(listBody, ['/home/yh/home', '/data'])) as {
+    const out = JSON.parse(filterWorkspaceList(listBody, ['/home/user/workspace', '/data'])) as {
       result: { value: { items: Array<{ path: string }> } }
     }
-    expect(out.result.value.items.map((i) => i.path)).toEqual(['/home/yh/home/home-serenity', '/data/x'])
+    expect(out.result.value.items.map((i) => i.path)).toEqual(['/home/user/workspace', '/data/x'])
   })
 
   it('非 ok / 非 JSON → 原样透传', () => {
@@ -386,9 +386,9 @@ describe('v1.22: workspace.create 白名单校验', () => {
   })
 
   it('前缀匹配 → 允许；不匹配 → 拒绝', () => {
-    expect(workspaceAllowed(['/home/yh/home'], '/home/yh/home/home-serenity')).toBe(true)
-    expect(workspaceAllowed(['/home/yh/home'], '/home/yh/other')).toBe(false)
-    expect(workspaceAllowed(['/home/yh/home'], undefined)).toBe(false)
+    expect(workspaceAllowed(['/home/user/workspace'], '/home/user/workspace')).toBe(true)
+    expect(workspaceAllowed(['/home/user/workspace'], '/home/user/other')).toBe(false)
+    expect(workspaceAllowed(['/home/user/workspace'], undefined)).toBe(false)
   })
 
   it('拒绝响应为合法 RPC error（code=forbidden）', () => {
@@ -418,13 +418,13 @@ describe('v1.30.6: workspace 创建端点与信封按宿主 rc.1 修正（F-03�
       type: 'client-request',
       rpcId: 'r1',
       method: 'workspace/create',
-      payload: { args: { path: '/home/yh/home/home-serenity' } },
+      payload: { args: { path: '/home/user/workspace' } },
     })
-    expect(parseWorkspaceCreateBody(body)).toEqual({ rpcId: 'r1', path: '/home/yh/home/home-serenity' })
+    expect(parseWorkspaceCreateBody(body)).toEqual({ rpcId: 'r1', path: '/home/user/workspace' })
     // 白名单据此拒绝白名单外路径
-    expect(workspaceAllowed(['/home/yh/home'], parseWorkspaceCreateBody(body).path)).toBe(true)
+    expect(workspaceAllowed(['/home/user/workspace'], parseWorkspaceCreateBody(body).path)).toBe(true)
     const outside = JSON.stringify({ rpcId: 'r2', payload: { args: { path: '/tmp/evil' } } })
-    expect(workspaceAllowed(['/home/yh/home'], parseWorkspaceCreateBody(outside).path)).toBe(false)
+    expect(workspaceAllowed(['/home/user/workspace'], parseWorkspaceCreateBody(outside).path)).toBe(false)
   })
 
   it('旧宿主信封 payload.path 仍兼容；缺路径/坏 JSON → path undefined（白名单非空即拒绝）', () => {
@@ -433,14 +433,14 @@ describe('v1.30.6: workspace 创建端点与信封按宿主 rc.1 修正（F-03�
     expect(parseWorkspaceCreateBody(JSON.stringify({ rpcId: 'r4', payload: { args: {} } })))
       .toEqual({ rpcId: 'r4' })
     expect(parseWorkspaceCreateBody('not-json')).toEqual({ rpcId: 'unknown' })
-    expect(workspaceAllowed(['/home/yh/home'], undefined)).toBe(false)
+    expect(workspaceAllowed(['/home/user/workspace'], undefined)).toBe(false)
   })
 })
 
 describe('v1.22.1: 信任栅栏修复（Origin 与 Host 同源）', () => {
   it('反代头：Host + Origin 都改写为 loopback 主端口', () => {
     const headers = buildProxyHeaders(
-      { host: '192.168.1.31:3081', origin: 'http://192.168.1.31:3081', cookie: 'a=b' },
+      { host: '192.0.2.31:3081', origin: 'http://192.0.2.31:3081', cookie: 'a=b' },
       3080,
     )
     expect(headers.host).toBe('127.0.0.1:3080')
@@ -454,10 +454,10 @@ describe('v1.22.1: 信任栅栏修复（Origin 与 Host 同源）', () => {
   })
 
   it('信任栅栏等价性：Origin.host === Host（DSH isTrustedApiRequest 判定条件）', () => {
-    const headers = buildProxyHeaders({ host: '192.168.1.31:3081', origin: 'http://192.168.1.31:3081' }, 3080)
+    const headers = buildProxyHeaders({ host: '192.0.2.31:3081', origin: 'http://192.0.2.31:3081' }, 3080)
     const originHost = new URL(String(headers.origin)).host
     const hostValue = String(headers.host)
-    expect(originHost).toBe(hostValue) // 修复前 origin=192.168.1.31:3081 ≠ 127.0.0.1:3080 → 403
+    expect(originHost).toBe(hostValue) // 修复前 origin=192.0.2.31:3081 ≠ 127.0.0.1:3080 → 403
   })
 })
 
@@ -1366,7 +1366,7 @@ describe('面 B 集成：HTML 注入反代（含 gzip 白屏根因）/ workspace
   it('⑤ allowWorkspaceCreate=false → 403（禁建文案 ＋ rpcId 回显），且**不转发**给上游', async () => {
     const h = await bootProxy({ allowWorkspaceCreate: false })
     try {
-      const res = await postCreate(h, createBody('r-deny', '/home/yh/home/proj'))
+      const res = await postCreate(h, createBody('r-deny', '/home/user/proj'))
       expect(res.status).toBe(403)
       const parsed = JSON.parse(res.body) as { rpcId: string; result: { ok: boolean; error: { code: string; message: string } } }
       expect(parsed.rpcId).toBe('r-deny')
@@ -1380,7 +1380,7 @@ describe('面 B 集成：HTML 注入反代（含 gzip 白屏根因）/ workspace
   }, 20_000)
 
   it('⑥ 白名单外的路径 → 403（allowlist 文案）；**同夹具的白名单内路径必须 200**（正控）', async () => {
-    const h = await bootProxy({ workspaces: ['/home/yh/home'] })
+    const h = await bootProxy({ workspaces: ['/home/user/workspace'] })
     try {
       const denied = await postCreate(h, createBody('r-out', '/tmp/evil'))
       expect(denied.status).toBe(403)
@@ -1389,7 +1389,7 @@ describe('面 B 集成：HTML 注入反代（含 gzip 白屏根因）/ workspace
       expect(denied.body).not.toContain('echoedLength')
 
       // 🔴 正控：同一夹具、同一条端点，换成白名单内路径 ⇒ 真转发（否则上面那条 403 可能只是夹具坏）
-      const body = createBody('r-in', '/home/yh/home/proj')
+      const body = createBody('r-in', '/home/user/workspace/proj')
       const allowed = await postCreate(h, body)
       expect(allowed.status).toBe(200)
       const echoed = JSON.parse(allowed.body) as { echoedLength: number; method: string }

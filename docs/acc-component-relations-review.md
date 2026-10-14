@@ -87,7 +87,7 @@ guards ｜ keeper ｜ context（Induction 注入）｜ system-prompt（入口 sk
 **证据（adoption）**
 
 - **本 CCC 的 `mech-registry.json` 里没有 `session-tool` 条目** ⇒ SEP 机制在**我们自己身上零使用**。
-- 诚实边界：pangu/tiangong 两个 CCC 的 registry 在本容器**路径之外**（P3 边界），本轮**未能核实**；若它们也没用，此机制即"零用户"。
+- 诚实边界：另外两个 CCC 的 registry 在本容器**路径之外**（P3 边界），本轮**未能核实**；若它们也没用，此机制即"零用户"。
 
 **用户提案的形态（我读作两条，可分开裁）**
 
@@ -263,7 +263,7 @@ guards ｜ keeper ｜ context（Induction 注入）｜ system-prompt（入口 sk
 ## 6. 本轮**未**做的事（诚实边界）
 
 - **未动任何代码**（本文件是讨论稿）。
-- **未核实** pangu / tiangong 两个 CCC 是否使用 SEP（它们在**本容器路径之外**，P3 边界；`session-tool` 的 adoption 只在本 CCC 实测为零）。
+- **未核实** 另外两个 CCC 是否使用 SEP（它们在**本容器路径之外**，P3 边界；`session-tool` 的 adoption 只在本 CCC 实测为零）。
 - **未穷尽**零引用导出（只抽验了两处，已注明）。
 - **未评估** `handyman-preset-inherit` / `agent-idle` / `skills-discovery` 等模块的去留（需要 §C3 的机械扫描结论再谈）。
 - **未改**任何既有裁决（D58/D59/D60/D61 均按原文引用；C6 只提出"情形是否变了"，不下结论）。

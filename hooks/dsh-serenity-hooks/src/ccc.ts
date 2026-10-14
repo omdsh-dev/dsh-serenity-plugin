@@ -158,7 +158,7 @@ interface SerenityConfig {
    * 多 CCC 独立（v1.27.4）：每 CCC 自己的配置，时钟遍历所有 live+enabled CCC 各自唤起。
    */
   autopilotTrajectory?: AutopilotTrajectorySettings;
-  /** 旧键兼容（正式化前存量 CCC，如 pangu——新键 autopilotTrajectory 优先，旧键回退） */
+  /** 旧键兼容（正式化前存量 CCC——新键 autopilotTrajectory 优先，旧键回退） */
   autotrajectory?: AutopilotTrajectorySettings;
   /**
    * trajectory 族配置（D58，S142 2026-09-13）：`trajectory` 是一等概念，
@@ -254,6 +254,15 @@ export interface WeixinSettings {
   /** 消息路由：微信用户 → 该 CCC 的 skiff role（不绑定具体 role——用户自选） */
   routes?: WeixinRouteConfig[];
   /**
+   * 用户别名表（v1.56.10）：`{ "<别名>": "<localstore 凭据键>" }`。
+   *
+   * 🔴 **为什么搬到这里**（2026-10-14 隐私核查）：别名（家人称呼）**是 CCC 的数据，不是 ACC 的机制**
+   * ——按 D23 归属判据「改它要不要发版」：加一个家人别名**不该**要动插件源码并发版。
+   * 此前别名硬编码在 ACC 源码里，导致**家人称呼随 npm 包公开发布**。
+   * 归位后 ACC 不认识任何具体人名；别名由各 CCC 自配（留空 = 只用裸 iLink 用户 id）。
+   */
+  aliases?: Record<string, string>;
+  /**
    * 消息记录 hook（v1.27.13，用户"微信桥所有消息记录，支持 hook，CCC 自写持久性保存"）：
    * 相对 CCC 根的脚本路径——微信桥每收/发一条消息触发一次（事件 JSON 经 stdin 传入，
    * 脚本自行持久化：写文件/入库/推远端全归 CCC）。未配置 → 零变化（不触发）。
@@ -296,7 +305,7 @@ export interface WeixinSettings {
 export interface WeixinAccountConfig {
   /** 本地唯一键（如 wechat-1；localstore 凭据键 weixin.accounts.<accountId>.*） */
   accountId: string;
-  /** 展示名（可选；如"家庭招财"） */
+  /** 展示名（可选；如"家庭助手"） */
   name?: string;
   /** 该账号轮询开关（缺省 true） */
   enabled?: boolean;

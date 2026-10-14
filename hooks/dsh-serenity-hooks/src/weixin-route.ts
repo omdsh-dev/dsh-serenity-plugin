@@ -73,10 +73,27 @@ export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SEREN
             .filter((r): r is WeixinRouteConfig =>
               typeof r === 'object' && r !== null && typeof r.user === 'string' && r.user !== '' && typeof r.role === 'string' && r.role !== '')
         : [],
+      aliases: readAliases(w),
     }
   } catch {
     return { enabled: false, accounts: [], routes: [] }
   }
+}
+
+/**
+ * 别名表清洗（v1.56.10）：键归一为小写、值必须是非空字符串；非法项静默丢弃。
+ * 空/缺省 → `{}`（此时别名解析不可用，只能用裸 iLink 用户 id）。
+ */
+function readAliases(w: { aliases?: unknown }): Record<string, string> {
+  const raw = w.aliases
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const alias = k.trim().toLowerCase()
+    if (alias === '' || typeof v !== 'string' || v.trim() === '') continue
+    out[alias] = v.trim()
+  }
+  return out
 }
 
 /** 账号凭据（localstore credential scope；baseUrl 缺省 = 官方默认） */

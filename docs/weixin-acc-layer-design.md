@@ -42,9 +42,9 @@
 ### 3.1 🔴 「传话员 skiff」**不能自己跨 CCC** —— 它只能"下指令"
 
 Skiff 是**某个 CCC 的认知子集**（D15–D22），它的**文件边界就是那个 CCC 的根**（RR5 路径隔离，机械阻断）。
-⇒ 让 relay skiff "自己去读 tiangong-serenity 的 SESSION"**在结构上做不到**（不是权限不够，是**它不具备跨 CCC 的视野**）。
+⇒ 让 relay skiff "自己去读另一个 CCC 的 SESSION"**在结构上做不到**（不是权限不够，是**它不具备跨 CCC 的视野**）。
 
-**正确形态**：relay skiff **下指令**（"查一下 tiangong-serenity 的 S185"），**ACC 执行** ——
+**正确形态**：relay skiff **下指令**（"查一下另一个 CCC 的 S185"），**ACC 执行** ——
 ACC 本来就是机器级的（读数 1／2 已证），它看得见所有 CCC。
 
 ⇒ 因此所需的**不是"skiff 能跨"，而是"ACC 多两个跨根动作"**。
@@ -157,7 +157,7 @@ ACC 本来就是机器级的（读数 1／2 已证），它看得见所有 CCC�
 | 账号 ／ 凭据 ／ 轮询 ／ 媒体 ／ 落盘 | CCC `serenity.json` ＋ `localstore.json` | **ACC（机器级）** |
 | 路由表（人 → CCC:角色） | 每 CCC `weixin.routes` | **ACC（机器级）** |
 | **主控指定** | — | **ACC（机器级，人设）** |
-| **skiff 角色定义**（`zhaocai.md` 的措辞） | CCC `.opencode/skiff/` | 🔴 **仍归 CCC**（措辞归 CCC —— D23） |
+| **skiff 角色定义**（`<role>.md` 的措辞） | CCC `.opencode/skiff/` | 🔴 **仍归 CCC**（措辞归 CCC —— D23） |
 | **订阅 ／ 路由 ／ 绑定**（谁接哪个账号的哪些人 ／ 落到哪个 CCC 的哪个角色） | 每 CCC `weixin.routes` | 🔴 **合并成一张机器级显式表** `(账号, 用户) → (CCC, 角色)` —— **不得由"有没有 skiff 角色"推断**（owner 2026-09-26 更正，见 §8.6） |
 
 ⇒ **净效果**：CCC 的 `serenity.json` 里 **`weixin.*` 整块消失**；

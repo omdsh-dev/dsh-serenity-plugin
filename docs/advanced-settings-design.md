@@ -76,7 +76,7 @@ serenity-hooks:
       "host": "0.0.0.0",
       "port": 3081,
       "accounts": [
-        { "id": "a1", "user": "yh", "passHash": "<scrypt hash>" }
+        { "id": "a1", "user": "user-b", "passHash": "<scrypt hash>" }
       ]
     }
   }

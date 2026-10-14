@@ -87,7 +87,7 @@ describe('TOTP: 校验与窗口', () => {
 
 describe('TOTP: otpauth URI', () => {
   it('标准格式（issuer/label/secret/period）', () => {
-    const uri = otpauthUri('MZXW6YTB', 'yh@serenity-home', 'Serenity Home')
+    const uri = otpauthUri('MZXW6YTB', 'user-b@serenity-home', 'Serenity Home')
     expect(uri).toContain('otpauth://totp/')
     expect(uri).toContain('secret=MZXW6YTB')
     expect(uri).toContain('issuer=Serenity')

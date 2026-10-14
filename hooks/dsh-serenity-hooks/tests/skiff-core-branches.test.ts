@@ -377,13 +377,13 @@ describe('skiff-core: ensureSkiffSession 的退化形态', () => {
   it('🔴 C1：`persistent=false`（临时身份）⇒ null，**不建工作台**（v1.30.9 "SESSION 爆炸"根治）', () => {
     // `:189` 的 `if (!persistent) return null`
     const agent = { session: { id: 'tmp-1', header: { id: 'tmp-1', cwd: dir }, events: [], append: () => {} } }
-    expect(ensureSkiffSession(dir, agent as never, 'zhaocai', sessionRole() as never, false)).toBeNull()
+    expect(ensureSkiffSession(dir, agent as never, 'my-role', sessionRole() as never, false)).toBeNull()
   })
 
   it('🔴 C2：角色未开 session 能力 ⇒ null（现状零变化）', () => {
     // `:187` 的 `if (!trajectorySubset(role).session) return null`
     const agent = { session: { id: 'x', header: { id: 'x', cwd: dir }, events: [], append: () => {} } }
-    expect(ensureSkiffSession(dir, agent as never, 'zhaocai', { msms: [], tools: ['read'] } as never)).toBeNull()
+    expect(ensureSkiffSession(dir, agent as never, 'my-role', { msms: [], tools: ['read'] } as never)).toBeNull()
   })
 
   it('🔴 C3：session 无 `id` ⇒ scope 回落 `agent.id`（而非字面量 "undefined"）', () => {
@@ -393,14 +393,14 @@ describe('skiff-core: ensureSkiffSession 的退化形态', () => {
       session: { header: { id: 'h', cwd: dir }, events: [], append: () => {} }, // ← 无 session.id
     }
     // 能走通（建工作台）即证明 scope 不是 "undefined"——否则下游会按错的 scope 记绑定
-    const mdPath = ensureSkiffSession(dir, agent as never, 'zhaocai', sessionRole() as never)
+    const mdPath = ensureSkiffSession(dir, agent as never, 'my-role', sessionRole() as never)
     expect(mdPath).not.toBeNull()
     expect(mdPath).toContain('SESSION.md')
   })
 
   it('C4（正控）：session 有 id 时正常建工作台 ⇒ 与 C3 成对', () => {
     const agent = { session: { id: 'real-scope', header: { id: 'real-scope', cwd: dir }, events: [], append: () => {} } }
-    const mdPath = ensureSkiffSession(dir, agent as never, 'zhaocai', sessionRole() as never)
+    const mdPath = ensureSkiffSession(dir, agent as never, 'my-role', sessionRole() as never)
     expect(mdPath).not.toBeNull()
   })
 })
@@ -442,7 +442,7 @@ describe('skiff-core: workspaceTrajectoryLine 的内容契约', () => {
   it('🔴 E1：含 SESSION.md 路径 ＋ 「不点名具体写入工具」纪律（v1.30.13 的 ACC/CCC 归属二分）', () => {
     const line = workspaceTrajectoryLine('/some/path/SESSION.md')
     expect(line).toContain('/some/path/SESSION.md')
-    // v1.30.13 的关键修正：**不得**写死 write/edit（zhaocai 白名单已移除它们）
+    // v1.30.13 的关键修正：**不得**写死 write/edit（my-role 白名单已移除它们）
     expect(line).not.toContain('with write/edit')
     expect(line).toContain('never assume')
     // 七段固定格式清单必须在场（与 D88 的格式契约同源）

@@ -1,3 +1,107 @@
+## v1.56.10 — 2026-10-14（**公开面隐私清理** ＋ **机械防线**）
+
+**性质**：一次**内容清理** ＋ 一条**新增门禁判据**；除别名解析来源外无行为改动。**来源**：owner 令 ——
+「我发现本插件的源代码里很多文档和注释交代了我们自己的故事，这可能有隐私泄露风险，是没有必要的，全面核查并清理」。
+
+### 一、为什么这一项比以往的清理都重
+
+本仓库有**两个互相独立的公开面**，而此前把"内部资料"当成了默认状态：
+
+| 面 | 包含什么 | 取证 |
+|---|---|---|
+| **A. npm tarball** | `files[]` 所列，任何人 `npm i` 即得 | **139 文件**；`npm view` ⇒ `public` |
+| **B. 公开 GitHub 仓** | **所有 tracked 文件**（含 `docs/` ／ `tests/` ／ `src/` ／ `bench/` ／ `CHANGELOG.md`） | `git ls-files`；仓库 `visibility: public` |
+
+🔵 **由此确立一条边界**：`docs/`、`tests/`、`src/` 虽然**不进 npm 包**，仍**在 GitHub 上公开可读** ——
+"不进包"**不等于**"不公开"。此前按后者假设行事，是本轮多数命中的成因。
+
+### 二、清掉什么（六类标识性事实）
+
+| 类 | 形态 | 处置 |
+|---|---|---|
+| 绝对路径 | 构建机 `/<用户家目录>/…`（**曾随包发布 6 处**）｜他人 macOS `/Users/<真名>/…` | `<CCC 根>`；构建配置层面根治（见下） |
+| 内网真地址 | `192.168.1.x` 各设备 | `192.0.2.x`（RFC 5737 文档专用段）或 `<测试服务器>` |
+| 家人与角色称呼 | 家人名 ／ 家人侧角色名 | `用户 A`／`用户 B`；示例用 `my-role`／`<role>` |
+| 其他私有 CCC 实例名 | 若干同机私有容器名 | `另一个 CCC` |
+| 内网拓扑与机器读数 | 容器名、磁盘读数、私有路径 | 通用占位 |
+| 「我们的故事」叙述 | 迁移史、家庭事务叙述 | 改写为通用表述（**删私事、留工程知识**） |
+
+🔴 **清理判据（本轮最关键的分辨）**：去的是**能指向具体的人／机器／私有系统**的标识性事实；
+**设计 rationale（为什么选 A 不选 B、判据、被否项、失败教训）一律保留** —— 对外部读者
+**同样是有效工程知识**，删它等于毁掉文档的价值。⇒ 本轮一律**改写而非删除**。
+
+### 三、两处治本（不是改文案，是改结构）
+
+**① 构建配置：CSS 虚拟模块 id 绝对路径 → 相对包根。**
+`tsdown.config.ts` 此前把 CSS 文件的**绝对路径**当虚拟模块 id（`CSS_VIRTUAL_PREFIX + abs`），
+而 rolldown 会把它原样写进产物的 `//#region` 注释 ⇒ **构建机绝对路径随 npm 包发布**。
+改为相对包根构造（`relative(PKG_ROOT, abs)`）后，注释里只剩 `src/client/…`。
+🔵 **判据**：产物中绝对路径 **6 处 → 0 处**，且 CSS 内联 marker（`data-sp-css="…"`）
+**逐个保留** ⇒ 行为零改变，只去路径。
+
+**② 别名表按「机制／数据」归属判据归位（`WEIXIN_ALIAS_MAP` 从源码移除）。**
+别名（使用者的称呼）**属 CCC 的数据，不是 ACC 的机制** —— 判据是「加一个别名要不要发版」：
+此前要（硬编码在 `src/`）⇒ 这些称呼**长期随 npm 包公开发布**。
+现改为只从各 CCC 的 `.opencode/serenity.json` → **`weixin.aliases`** 读取；
+本插件源码不再含任何具体人名。
+
+> 🔴 **迁移（对既有部署是一次行为变更）**
+>
+> 升级前依赖内置别名的部署，**需把原别名表补进自己的 CCC 配置**，否则别名解析不到：
+>
+> ```jsonc
+> // <CCC 根>/.opencode/serenity.json
+> { "weixin": { "aliases": { "<别名>": "WEIXIN_USER_<X>" } } }
+> ```
+>
+> `im-bridge` 的 `user` 参数**两种形式始终可用**：配置过的别名，或**裸 iLink 用户 id**
+> （`xxxxx@im.wechat`）。未配置 `aliases` ⇒ 别名表为空 `{}`，仅裸 id 可用。
+
+### 四、机械防线（治本 —— 防它再长回来）
+
+只做一次清理**会再漂**（本仓已多次实测"声明没被读"）。新增 **`tests/privacy-scan.test.ts`**：
+把一组**否定性判据**钉进门禁，命中即红。**这是结构性保证，不是策略。**
+
+- **8 条规则**：绝对路径（家目录 ／ macOS `/Users/<真名>/`）｜IDE 工程路径痕迹 ｜
+  内网真地址 ｜ 家人名 ｜ 私有 CCC 名（带前缀形与裸形）｜ 家人侧角色名。
+- **扫描域**：**实际发布清单**（`npm pack --dry-run --json`，不手抄）＋ `src/` ＋ `docs/`（**含非 `.md` 文件**）＋
+  `bench/` ＋ `scripts/` ＋ `tests/` ＋ 两份仓根 README ＋ `CHANGELOG.md`。
+  🔴 **唯一豁免面 = 本文件自身** —— 扫描器**必须**写出它要找的字面量与正控，否则无法自证"能看见"；
+  属**结构性必要**的豁免，与"历史区不改"那类**可消除**的例外不同。
+- 🔴 **每条规则各配正控 ＋ 反控**（如 `192.0.2.4` ／ 本包名 `dsh-serenity` ／ 示例容器名**必须不命中**），
+  防"规则写错 ⇒ 永远 0 命中"被读成"干净"；并按 **id 取名**而非下标引用规则
+  （下标会随规则重排而错位，本文件已踩过一次）。
+- 🔴 **真做了负控实验**：塞入含多类违规串的临时文件 ⇒ 用例当场变红并逐条给出
+  `文件:行号:内容`；删掉探针 ⇒ 全绿。⇒ **判据确实在扫，不是"检查不到"。**
+
+### 五、本轮新立的三条判据（供后续复用）
+
+1. 🔴 **判据的完备性上限 = 想到了哪些形态。** 本轮最初的判据只盯家目录绝对路径，
+   因而**漏掉另一类绝对路径** —— 他人 macOS 路径（`/Users/<真名>/`，**比家目录路径更敏感**：
+   前者是账号名，后者是**第三人真名**）。扩到 8 条规则后**第一次跑就抓到一处随包发布的漏网**。
+2. 🔴 **同一实体的两种拼写必须同档处置。** 曾裁「英文键名保留、中文称呼清理」⇒ **自相矛盾**
+   （只清中文等于没清）。**只看拼写、没看指称**是错的。
+3. 🔴 **判据过激与判据不足是两类缺陷，都要防。** 角色名规则过宽时会命中**本仓公开内容**
+   （已注册的 skill 名、配置文件名）⇒ 须收窄为带负向断言的形态，并在反控里固定下来。
+
+### 六、不可逆面（如实告知，清理**不能**覆盖）
+
+| 面 | 为什么不可逆 | 本轮处置 |
+|---|---|---|
+| **npm 历史版本** | npm **不允许改已发布版本的内容**，撤回窗口亦已过期 | ❌ 只能依靠**新版本**；**已发布版本永久可下载** |
+| **git 历史** | 每个历史 commit 都含旧内容，`git log -p` 可读 | 重写需 `filter-repo`，**会打断全部克隆与 tag** ⇒ 本轮**不做**，另议 |
+
+⇒ **清理的收益**是「**今后**下载／克隆的人拿到的是干净的」；**已下载者**手中的旧副本**不受影响**。
+
+### 七、读数（可复算）
+
+**六项门禁全绿**：`typecheck` ／ `typecheck-host 0.2.0-rc.2` ／ 全量 `test` ／
+`coverage` ／ `build` ／ `pack-check`（139 文件）。
+**改动面**：`docs/` ／ `tests/` ／ `src/` ／ `assets/` ／ `bench/` ／ `CHANGELOG` 共 80 余个 tracked 文件，
+外加新增 1 份门禁用例（`privacy-scan.test.ts`）。
+**判据**：`privacy-scan` 对**两个公开面**逐模式扫描 ⇒ **8 类规则 0 命中**
+（扫描域含 `lib/`＋`assets/`＋包内 README ／ `src/` ／ `docs/` ／ `bench/` ／ `scripts/` ／ `tests/` ／ `CHANGELOG`）。
+
 ## v1.56.9 — 2026-10-14（**更正一处动机叙述失真** —— 「骗取额度」→「接口边界」）
 
 **性质**：一次**表述更正**，无行为改动。**来源**：owner 2026-10-14 裁——
@@ -1063,8 +1167,8 @@ stdout** 固化成断言；搬迁后的引擎必须**逐字**重现（`exit 1` �
 ### 二、🔴 边界（D23：机制与措辞归 ACC、数据与纪律归 CCC）
 
 - **只要手册**：本版**不**搬任何业务/领域模型（`.ttl`）、**不**搬建模引擎、**不**搬概念查询网关、**不**搬清单。
-- **ACC 里不出现任何 CCC 的名字** ⇒ 新增一条**回归钉**（`tests/praxis.test.ts`）：断言本体内容不含
-  `home-serenity`／`tiangong`／`pangu-serenity`／`sh-serenity`／`tg-ontology`／`home-ontology`。
+- **ACC 里不出现任何 CCC 的名字** ⇒ 新增一条**回归钉**（`tests/praxis.test.ts`）：
+  **本体正文不得出现任何真实 CCC 名／入口 skill 名**。
 - **判据群是方法的「标准编号」**：容器**不必**有同名引擎也能照它工作；模型语料与具体公理内容留各 CCC。
 
 ### 三、落点（零新增机制）
@@ -1623,7 +1727,7 @@ build **201817 B** ／ pack-check **118 文件**。
 ## v1.48.2 — 2026-09-26（**`container_git`：提交与推送不再分家 ＋ 修「push 回成功而远程未变」的假成功**）
 
 **来源**：owner 2026-09-26 追加要求「`container_git` commit 和 push 是分离的，导致 CC 常常只 commit 没有 push」；
-同批并入 **tiangong-serenity 的报障**（`container_git push` 连续 3 次回成功，远程 ref **3/3 未变**）。设计件 = `docs/git-commit-push-coupling-design.md`。
+同批并入 **另一个 CCC 的报障**（`container_git push` 连续 3 次回成功，远程 ref **3/3 未变**）。设计件 = `docs/git-commit-push-coupling-design.md`。
 
 > 🔴 **两个问题在根上是同一个**：工具面**无法区分「做到了」与「没做到」**。
 > ① `commit` 的终点是**本地对象库**（push 另一步）⇒ 半途与完成**同形**；实测本仓有 **6h11m** 的未推送窗口。
@@ -2627,8 +2731,8 @@ input: declaredInput(entry.input) ?? base?.input ?? [...request.defaultInput]
 v1.40.0 上线后 `~/.dsh/storages/` 里**没有**出现 `serenity_bindings.json` ——
 即"绑定迁入宿主存储域"这一功能**实际没有生效**。
 
-**根因**：装载期那次迁移用 `process.cwd()` 当 CCC 根。而 dsh **服务进程的 cwd 是 `/home/yh`**，
-**不是 CCC 根**（`acc-diag` 实测：`进程 cwd: /home/yh ｜ 进程 CCC: （无）`）
+**根因**：装载期那次迁移用 `process.cwd()` 当 CCC 根。而 dsh **服务进程的 cwd 是用户家目录**，
+**不是 CCC 根**（`acc-diag` 实测：`进程 cwd: <家目录> ｜ 进程 CCC: （无）`）
 ⇒ 迁移读的是一个**不存在的文件**，**静默迁移 0 条**。
 
 ### 修复
@@ -3106,7 +3210,7 @@ v1.36.0 记的「0.75 是不透明度与可读性之间的**真实取舍**，不
 | 路由 | 新 `src/voyage-page.ts` → `GET /serenity/voyage`（exact；静态 HTML，懒加载、零 client bundle 增长） |
 | 客户端 | `SafeModePanel.tsx` + `.css`：`sp-pop`（340px CCC 卡片）内加背景层 `<iframe>`（**仅展开时挂载** ⇒ 关闭即卸载、WebGL 上下文随之销毁）；卡片半透明 0.75 + iframe `blur(1.2px)` |
 | 出包 | `package.json` → `files` 加三项；`dsh-develop pack-check` → `required` 加资产硬断言（防"漏资产"复发，同 v1.26.15 事故形态） |
-| 内容判据 | `tests/voyage-page.test.ts` 10 例，把"**不得含外来容器内容**"钉进 CI（**大小写不敏感**——上一轮人工 grep 正是因大小写漏掉全大写 `TIANGONG`） |
+| 内容判据 | `tests/voyage-page.test.ts` 10 例，把"**不得含外来容器内容**"钉进 CI（**大小写不敏感**——上一轮人工 grep 正是因大小写漏掉全大写的一个 CCC 名） |
 | 门禁 | typecheck ✓ / test **90 files 1311** ✓ / build ✓ / pack-check **109 文件** ✓ |
 
 ⚠️ **观感取舍（非可调没的参数）**：340px 卡片 + 密排小字的双约束下，"动画看得清"与"文字全干净"互相挤压；取 0.75 + blur 1.2px 为中值。两个旋钮 = 卡片底不透明度、iframe blur；改则 `SafeModePanel.css` 与 `card-mock.html` **必须同批改**。
@@ -3486,7 +3590,7 @@ CCC 键 `autopilotTrajectory` → **`trajectory.autopilot`**（旧键 `autopilot
 
 ### ⑤ 审计字段缺陷修复（^ 本轮实测发现）
 
-`wake-add` 的 `createdBy` 原取**全局** `lastActive` 指针（= 进程内最近被激活的 trajectory），与调用者无关 ⇒ 实测 **S142 登记被误记为 `S060`**（那是**另一个 CCC** pangu-serenity 的 autopilot 轨迹）——**误归因跨了 CCC 边界**。D60 用「可审计」替代入口栅 ⇒ 审计失真即替代控制失效。**修复**：`session-bound.ts` 新增 `resolveSessionTrajectoryLabel(session, scope)`——**持久 bound（权威）→ 本会话内存激活 → 全局指针仅兜底**；5 条回归用例钉住"以调用方自己为准"。
+`wake-add` 的 `createdBy` 原取**全局** `lastActive` 指针（= 进程内最近被激活的 trajectory），与调用者无关 ⇒ 实测 **S142 登记被误记为 `S060`**（那是**另一个 CCC** 的 autopilot 轨迹）——**误归因跨了 CCC 边界**。D60 用「可审计」替代入口栅 ⇒ 审计失真即替代控制失效。**修复**：`session-bound.ts` 新增 `resolveSessionTrajectoryLabel(session, scope)`——**持久 bound（权威）→ 本会话内存激活 → 全局指针仅兜底**；5 条回归用例钉住"以调用方自己为准"。
 
 ### 门禁与验收
 
@@ -4316,7 +4420,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 | `src/im-weixin.ts` | 微信通道：判据 / 别名解析 / 发送 / 记录 | 协议与记录复用桥，不重写 |
 
 ### 实现
-- `src/im-weixin.ts`（新）：`isEnabled` = `weixin.enabled`；`resolveUser` / `listUsers`（`WEIXIN_USER_YH/DANICA/XIAOWANG`，
+- `src/im-weixin.ts`（新）：`isEnabled` = `weixin.enabled`；`resolveUser` / `listUsers`（`WEIXIN_USER_B/USER_A/USER_A`，
   与旧 MSM 逐字一致 → 迁移零认知成本）；`send` → `sendProactiveText`；`sendFile` → `resolveWeixinAccount` +
   `sendFileMessage` + caption 文本 + 同一 outgoing hook（`source: 'proactive'` + `file` 元数据）；`status` 显式映射
   JSON 安全形状（`undefined` 字段用条件展开剔除）
@@ -4333,8 +4437,8 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 
 ### 退役 CCC 侧 MSM（P1 迁移）
 - 删除 `.opencode/skills/home-serenity/scripts/weixin-send.ts`（492 行）+ `container_admin msm deregister weixin-send`
-- CCC 配置：`skiff.roles.zhaocai.tools` + `im-bridge`、`msms` − `weixin-send`；autopilot `topPrompt` 改工具形态
-- CCC 提示词与指南：`.opencode/skiff/zhaocai.md` 全量改 `im-bridge` 形态（含"无 ccc 参数、只能操作本会话 CCC"）；
+- CCC 配置：`skiff.roles.<role>.tools` + `im-bridge`、`msms` − `weixin-send`；autopilot `topPrompt` 改工具形态
+- CCC 提示词与指南：`.opencode/skiff/<role>.md` 全量改 `im-bridge` 形态（含"无 ccc 参数、只能操作本会话 CCC"）；
   `weixin-doctor guide` §7 重写（工具形态 / 可见性 / 错误码 / 旧通道退役说明）
 
 ### 测试（73 files / 1050 → **75 files / 1096**）
@@ -4387,7 +4491,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 - dsp `msm-ops.ts` CCC_CONFIG_REFERENCE §8：新增 `weixin.fallbackOnNoSend` 段（三态速查 + 前置条件 + 实证）
   + outgoing 事件 schema 的 `source` 补 `reply-fallback`
 - CCC `weixin-doctor guide` §5/§7：事件 `source` 三值 + 新增「兜底：不让消息丢掉（v1.30.17）」段
-- CCC 侧 `.opencode/serenity.json`：home-serenity 开 `fallbackOnNoSend: true`（招财用）
+- CCC 侧 `.opencode/serenity.json`：home-serenity 开 `fallbackOnNoSend: true`（家庭助手用）
 
 ### 验证
 - 新 `manualOutputFallbackNeeded` 矩阵 **6 断言**（开启+未发送 → 兜底；已发送 → 不重复；缺省/显式 false → 静默；
@@ -4441,7 +4545,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
   - **顺带修复过期锁文件**：`hooks/dsh-serenity-hooks/pnpm-lock.yaml` 与 package.json 不一致
     （18 个 peer 只在 package.json）→ `pnpm install --lockfile-only` 重新生成（68 KB → 122 KB）。
 - **测试可移植性修复**：`weixin-send-api.test.ts` 的 `matchCcc` 用例写死开发机 CCC 路径
-  （`/home/yh/home/home-serenity`）→ CI 上 `no CCC found from path` 失败；改为**自建临时 CCC**
+  → CI 上 `no CCC found from path` 失败；改为**自建临时 CCC**
   （`mkdtemp` + `.serenity` + afterEach 清理），任何机器/CI 都可复现。
 - **防重复收集**：根 `vitest.config.ts` 加 `exclude`（`.pnpm-store` 在 hooks 目录内，其 projects
   缓存带一份项目文件副本 → `hooks/**/tests/**` 会把同一测试收集两次，实证固定端口 3182 假 EADDRINUSE）。
@@ -4454,7 +4558,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 ### 方案 A：角色提示词热更新（长期型）
 - **新 `createRolePromptReader(root, role)`**（`skiff-role.ts`）——返回**读取函数**而非字符串：`systemPromptFile` 按 **mtime + size** 缓存重读（命中零 IO），**改文件即生效、无需重启**；变更时打一行 `↻ skiff 角色提示词已热重载`（可观测）；读取失败**沿用上次成功内容**（绝不返回空——空提示词会让角色失去人格与纪律）并告警一次；路径逃逸 → 空读取器 + 告警（不阻断装配）
 - **`createSkiffAgent`**：角色段改为动态 `text: () => [基础段, rolePrompt()]`——persistent 型每次组装重读文件；temporary 型保留**创建时快照**（用户："临时的不绑定会话，提示词注入一次"）
-- **为什么不是"每轮注入用户消息"（R↓）**：zhaocai.md 原 18.2 KB（≈6k–9k tokens）→ 每消息注入 = 一天 50 条约 300k–450k tokens；而"改文件即生效 + 每轮在场"用**动态系统提示词段**即可达成（系统提示词本就每轮发送，零额外消息 token）。用户确认采纳方案 A。
+- **为什么不是"每轮注入用户消息"（R↓）**：`<role>.md` 原 18.2 KB（≈6k–9k tokens）→ 每消息注入 = 一天 50 条约 300k–450k tokens；而"改文件即生效 + 每轮在场"用**动态系统提示词段**即可达成（系统提示词本就每轮发送，零额外消息 token）。用户确认采纳方案 A。
 
 ### 类型二分（显式 + 隐式兜底）
 - `SkiffRoleConfig.kind?: 'temporary' | 'persistent'`（`ccc.ts`）+ `resolveSkiffKind(role, hasStableId)`（`skiff-role.ts`）：**显式优先**，缺省按"调用方是否传稳定 sessionId"推断（微信桥传固定 id → persistent；ACP/调试页随机 id → temporary）→ 存量配置零迁移；非法值回落推断
@@ -4475,8 +4579,8 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 ### 实证（v1.30.13 重启日志 `/tmp/dsh-web-restart-v1.30.13.log`）
 ```
 [serenity-hooks] ✗ Skiff 调试服务未启动：无法定位 CCC root（…）——已排入退避重试
-[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:3099（默认 CCC: /home/yh/home/home-serenity，WebUI: 3080）
-[serenity-hooks] ✓ Skiff 调试服务已启动（重试 1 次后定位到 CCC root: /home/yh/home/home-serenity）
+[serenity-hooks] ✓ Skiff 调试问答页: http://127.0.0.1:3099（默认 CCC: <CCC 根>，WebUI: 3080）
+[serenity-hooks] ✓ Skiff 调试服务已启动（重试 1 次后定位到 CCC root: <CCC 根>）
 [serenity-hooks] ✗ Skiff 调试服务启动失败: listen EADDRINUSE: address already in use 127.0.0.1:3099   ← 本次修复
 ```
 → **D1 修复确认有效**（3099 起得来，退避重试路径实证）；但**重试定时器与"会话就绪"事件几乎同时到达** → 两次 `sync()` 都看到 `started === false` → 发起两次启动（第一次绑定成功、第二次 `EADDRINUSE` 刷错误日志）。
@@ -4491,15 +4595,15 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 
 ## v1.30.13 — 2026-09-08（会话锚定准确性 D1/D4/D5 + 微信桥注入去重，S142）
 
-**Scope:** 用户要求"**我主要是要求微信桥 + skiff 的会话锚定要准确**"——诊断出 D1~D6 六项（全实证，见 S142 §8），本轮修复其中三项（D4/D5/D1）+ 用户当轮新增需求"微信桥注入与 skiff 注入重复，注入内容直接取 skiff 的"。D2（zhaocai 轨迹归属）待用户拍板，D3/D6 随 D4 一并收口。
+**Scope:** 用户要求"**我主要是要求微信桥 + skiff 的会话锚定要准确**"——诊断出 D1~D6 六项（全实证，见 S142 §8），本轮修复其中三项（D4/D5/D1）+ 用户当轮新增需求"微信桥注入与 skiff 注入重复，注入内容直接取 skiff 的"。D2（某角色轨迹归属）待用户拍板，D3/D6 随 D4 一并收口。
 
 ### D4 会话锚定（核心）：`resolveSessionMdPath` 加权威绑定候选 + 去掉跨轨迹兜底
 - **候选链改为**：① 内存活跃（本进程 `logbook use`）→ ② events 的 `[SESSION CONTEXT]`（重启后恢复）→ **②b `readLastBound(session).mdPath`（`AGENT_SESSIONS/.bindings.json` 权威绑定，新增）** → ③ surface 首条重建锚点
-- **删除原 ④ `findLatestActiveSessionMd`（AGENT_SESSIONS 全局最新未完成会话）**。理由（R↓）：④ 是**跨轨迹猜测**——①②③全空时会把 rebuild 静默接到另一个会话（临时 skiff 会话 persistent=false、重启后首条消息前、Danica 新会话都命中该形态），"接错轨迹"比"重建失败"危险得多（错误轨迹被继续写入 + 正确轨迹静默丢失）。备选（④ 仅在"确无绑定"时兜底）同样会接错，不采纳
+- **删除原 ④ `findLatestActiveSessionMd`（AGENT_SESSIONS 全局最新未完成会话）**。理由（R↓）：④ 是**跨轨迹猜测**——①②③全空时会把 rebuild 静默接到另一个会话（临时 skiff 会话 persistent=false、重启后首条消息前、user-a 新会话都命中该形态），"接错轨迹"比"重建失败"危险得多（错误轨迹被继续写入 + 正确轨迹静默丢失）。备选（④ 仅在"确无绑定"时兜底）同样会接错，不采纳
 - **失败即响亮**：全部候选失败 → 返回 null → `queueRebuild` 抛错并**逐项列出已查过的四个面** + 引导 `logbook use <S###> --summary <…>`
 
 ### D5 注入纪律与能力面一致：`workspaceTrajectoryLine` 不再点名 `write/edit`
-- 旧文案 "Record … INTO this SESSION.md **with write/edit**"——而 zhaocai 角色白名单已移除 write/edit（写能力收归 CCC 的 `session-write` MSM）→ 指令指向它没有的工具
+- 旧文案 "Record … INTO this SESSION.md **with write/edit**"——而某角色白名单已移除 write/edit（写能力收归 CCC 的 `session-write` MSM）→ 指令指向它没有的工具
 - 现文案：`using the write channel your role is actually granted … never assume a specific write tool exists; if none is granted, report that instead of pretending to write`
 - **不写任何 CCC MSM 名**（ACC 源码不绑定某个 CCC 的注册表——归属二分；具体通道由 CCC 角色配置与角色提示词决定）
 
@@ -4607,7 +4711,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 
 ## v1.30.9 — 2026-09-08（微信主动发送通道 + skiff 工作台两条缺陷根治，S142）
 
-**Scope:** 用户需求「微信桥希望能支持被调用发消息给指定用户，允许 CCC 自己做个 MSM 来发消息、同时能被记录，但又不希望新增 ACC 层 tool」（拍板 A2：专用 loopback 监听、ccc 必填、不做密钥）+ 用户报「zhaocai skiff SESSION 爆炸」根治。
+**Scope:** 用户需求「微信桥希望能支持被调用发消息给指定用户，允许 CCC 自己做个 MSM 来发消息、同时能被记录，但又不希望新增 ACC 层 tool」（拍板 A2：专用 loopback 监听、ccc 必填、不做密钥）+ 用户报「某角色的 skiff SESSION 爆炸」根治。
 
 ### 微信主动发送通道（零新增工具）
 - **`weixinApi` 配置**（`config-ops.ts`）：`{ enabled: true, port: 3082 }`——默认启用；`port: 0` 或 `enabled: false` 关闭（defaults/merge/update 三处）
@@ -4621,8 +4725,8 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 - **顺带修复既有缺陷（P1，测试抓到）**：`weixin-api.apiPost` 只判 HTTP 状态 → iLink 在 **HTTP 200** 里用 `ret/errcode != 0` 表达失败（如 `{ret:1,errmsg:"denied"}`）被当成功 → **回复路径也会为一条从未送达的消息触发 outgoing 记录**（与 bridge 注释「发送失败不记录」矛盾）；新增 `assertIlinkOk(endpoint, rawText)` 用于 `sendTextMessage`
 - **测试**：新 `tests/weixin-send-api.test.ts` **16 用例**（校验/loopback/CCC 解析/状态码映射/真实 loopback 往返/生命周期热同步）+ `weixin.test.ts` 新增 `sendProactiveText` 3 用例（含 5 条失败路径）
 
-### skiff 工作台两条缺陷根治（用户报「zhaocai skiff SESSION 爆炸」）
-- **根因（实证链）**：真实会话日志 `~/.dsh/sessions/--…--/skiff-weixin-74b2a0609d13657b/session.jsonl.zstd` **12302 行中 `serenity/bound` 出现 0 次**——v1.29.1~v1.30.5 的绑定写在**宿主不落盘**的自定义事件上（F-01 同源）→ 每条消息 `readLastBound` 恒 null → `ensureSkiffSession` 每次都新建；消息 ts 与 SESSION 目录 mtime **逐条同刻对应**（09-08 四条消息 → S169~S172 四个目录）；v1.30.4 起 `existing` 快路径也调 ensure → **每条消息一个 SESSION**
+### skiff 工作台两条缺陷根治（用户报「某角色的 skiff SESSION 爆炸」）
+- **根因（实证链）**：真实会话日志 `~/.dsh/sessions/--…--/skiff-weixin-<用户哈希>/session.jsonl.zstd` **12302 行中 `serenity/bound` 出现 0 次**——v1.29.1~v1.30.5 的绑定写在**宿主不落盘**的自定义事件上（F-01 同源）→ 每条消息 `readLastBound` 恒 null → `ensureSkiffSession` 每次都新建；消息 ts 与 SESSION 目录 mtime **逐条同刻对应**（09-08 四条消息 → S169~S172 四个目录）；v1.30.4 起 `existing` 快路径也调 ensure → **每条消息一个 SESSION**
 - **修复 ①：临时身份不建工作台**——`ensureSkiffSession(..., persistent)`：`createSkiffAgent` 传 `sessionId !== undefined`（微信桥 = 固定 id → 建；ACP/调试页/问答页 = 随机 id → 不建）。此前**每次临时问答都留一个永久空 SESSION 目录**（无界熵增，与「skiff 本质是临时会话机制」的模型冲突）
 - **修复 ②：内存活跃自愈**——判定链新增 ②b：绑定文件失效时按 scope 复用内存活跃 SESSION 并**补写绑定**（`action: 'reconcile'`）——绑定持久化再失效也不会放大成「每条消息一个 SESSION」
 - **回归测试 +5**：跨消息形态（新 agent 空 events + 既有 `.bindings.json` → 恢复不新建）/ 绑定文件被删后自愈补写 / 临时身份零创建 / `createSkiffAgent` 集成（固定 id 建、随机 id 不建）
@@ -4638,7 +4742,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 
 ### 验证
 - **70 files / 990 tests 全绿**（963 → 990）+ typecheck 双面 ✓ + build ✓
-- **端到端实测（S142，2026-09-08，真实 bridge + 真实 CCC MSM 子进程）**：缺 `--ccc` → `MISSING_CCC` 拒绝（exit 1）✓；`--ccc <CCC> --user yh` → 消息真实送达微信 ✓；`_weixin-logs/2026-09-08.jsonl` 出现 `{"event":"outgoing","source":"proactive","role":"zhaocai","sessionId":"skiff-weixin-74b2a0609d13657b",...}` ✓（与对话回复同源、同一轨迹）
+- **端到端实测（S142，2026-09-08，真实 bridge + 真实 CCC MSM 子进程）**：缺 `--ccc` → `MISSING_CCC` 拒绝（exit 1）✓；`--ccc <CCC> --user user-b` → 消息真实送达微信 ✓；`_weixin-logs/2026-09-08.jsonl` 出现 `{"event":"outgoing","source":"proactive","role":"<role>","sessionId":"skiff-weixin-<用户哈希>",...}` ✓（与对话回复同源、同一轨迹）
 - **⏸ 未发布**：bump/publish 待用户显式指令（D14）
 
 ## v1.30.8 — 2026-09-08（review 修复轮 2b：宿主访问收口 + 生命周期/竞速 + 失败策略，S142）
@@ -4745,7 +4849,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 ### 根因（R↓）
 - v1.30.3 ensure 后只注入一行 `SESSION.md: <path>`——**只给了信息没给约束**，LLM 不会主动用
 - 微信桥 `existing` 命中（重启后 live 复用）走**快路径跳过 createSkiffAgent** → 连 systemPrompt 注入都不发生 → 老 agent 完全无感知
-- 约束放 zhaocai.md（CCC 人格）优先级低 + 老 agent 快照旧
+- 约束放 `<role>.md`（CCC 人格）优先级低 + 老 agent 快照旧
 
 ### 修复
 - `skiff-core.ts` `workspaceTrajectoryLine` 升级为**完整工作台纪律块**：AUTO-BOUND（无需 use）+ SESSION.md 路径 + 4 条纪律（持久记忆载体/写进度/rebuild 自动续接/不暴露路径）——信息 + 约束 + 动作指引
@@ -4762,10 +4866,10 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 
 ## v1.30.3 — 2026-09-07（Skiff 专属 SESSION：自动创建/按用户隔离，SESSION 机制零特调，S142 用户拍板）
 
-**Scope:** 微信桥 zhaocai 绑定后变成**永久性会话**，但 skiff 原设计是临时会话（无 SESSION 轨迹）——机制错配。用户拍板方向：绑定的 skiff = **权限受限的普通 agent + 自动拥有的专属工作台**；SESSION 机制（logbook create/use/rebuild + SESSION.md 读写）**不因 skiff 有任何调整**。方案 `docs/skiff-bound-trajectory-design.md` v0.3 FINAL。
+**Scope:** 微信桥某角色绑定后变成**永久性会话**，但 skiff 原设计是临时会话（无 SESSION 轨迹）——机制错配。用户拍板方向：绑定的 skiff = **权限受限的普通 agent + 自动拥有的专属工作台**；SESSION 机制（logbook create/use/rebuild + SESSION.md 读写）**不因 skiff 有任何调整**。方案 `docs/skiff-bound-trajectory-design.md` v0.3 FINAL。
 
 ### 用户拍板全录（R↓）
-① zhaocai tools +write/edit（SESSION.md 读写最简通道）② keeper 开（机制的一部分）③ 新建专属 SESSION（**不延续 S159** workaround）④ **多微信用户 = 各自 SESSION**（微信桥按用户派生固定 skiff 会话 id → scope 天然隔离，永不共享同一份）⑤ SESSION 命名只编号（用户不关心是谁）
+① 某角色 tools +write/edit（SESSION.md 读写最简通道）② keeper 开（机制的一部分）③ 新建专属 SESSION（**不延续 S159** workaround）④ **多微信用户 = 各自 SESSION**（微信桥按用户派生固定 skiff 会话 id → scope 天然隔离，永不共享同一份）⑤ SESSION 命名只编号（用户不关心是谁）
 
 ### 实现
 - `src/skiff-core.ts` 新增 **`ensureSkiffSession`**（懒绑定 + 幂等，per skiff 会话）：
@@ -4785,15 +4889,15 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 
 ## v1.30.2 — 2026-09-07（Skiff MSM 调用报错语义化——"格式错"而非"没权限"，S142 用户 bug）
 
-**Scope:** 微信桥 zhaocai 调用 memory-tool 等全部报 "tool not allowed in this skiff role"，用户实测为全拒 → 深挖破案：**模型把 MSM 名（memory-tool/anysearch 等）当直接工具调用**（不走 `msm()` 单入口），工具名不在 tools 白名单（白名单只有 msm 执行器）→ 守卫泛化拒绝 → 误导成"没权限"（read 通是因为 read 在 tools 白名单）。
+**Scope:** 微信桥某角色调用 memory-tool 等全部报 "tool not allowed in this skiff role"，用户实测为全拒 → 深挖破案：**模型把 MSM 名（memory-tool/anysearch 等）当直接工具调用**（不走 `msm()` 单入口），工具名不在 tools 白名单（白名单只有 msm 执行器）→ 守卫泛化拒绝 → 误导成"没权限"（read 通是因为 read 在 tools 白名单）。
 
 ### 根因链（R↓）
-1. Skiff 角色双白名单：`tools`（直接工具）+ `msms`（经 msm 单入口的 MSM 面）。zhaocai 配置 tools 含 read/grep/glob/web_search/logbook/msm + msms 19 项——**配置正确**。
+1. Skiff 角色双白名单：`tools`（直接工具）+ `msms`（经 msm 单入口的 MSM 面）。某角色配置 tools 含 read/grep/glob/web_search/logbook/msm + msms 19 项——**配置正确**。
 2. 模型调用形态错误：把 `memory-tool` 等 **MSM 名**当作**直接工具名**调用（旧 acc_msm 时代直觉残留 / LLM 对工具面误判）→ guards `decideGuard` skiff 分支：`roleToolWhitelist` 不含该名 → 泛化 deny。
 3. 泛化 deny 消息 "tool not allowed in this skiff role" **无规避指引** → 模型无法自我纠正，反复误判为权限问题。
 
 ### 排除链实证（逻辑无 bug）
-- 补 3 个真实 zhaocai 形态回归测试（6 tools + 19 msms）：msm/logbook/read 全 allow、白名单外 deny → guards 47/47 绿
+- 补 3 个真实角色形态回归测试（6 tools + 19 msms）：msm/logbook/read 全 allow、白名单外 deny → guards 47/47 绿
 - 全量 62/898 tests 全绿 → 纯 decideGuard 逻辑正确
 - diag-live 实证 skiff 会话 cwd 指向正确 CCC 根；container_admin role list + dashboard health 实证磁盘配置为 6-tool 形态 → 运行时 root/role 解析无问题
 
@@ -5040,7 +5144,7 @@ ACC 侧有发送机制（`sendProactiveText` + outgoing hook），CCC 侧又有�
 - **⑤a 单级化**：`msm-ops.ts` findRegistries/registryPathFor **只读写 `.opencode/skills/<cccName>/references/mech-registry.json`**（cccName=.serenity 首行），skill 只进 entry 字段；废弃历史分散 skill 注册表（register --skill 曾写各自目录）+ root 级兜底
 - **⑤b 写保护**：`seams/guards.ts` `isProtectedRegistryRel`（**写 deny 读 allow**——R6 与 localstore 读 deny 语义区分：注册表是结构核心不是秘密，需被 output-guard/skiff-admin 读取建 MSM 词表）；`fs-ops.ts` validateWritePath 保护改指 cccName 聚合档 + root 级（分散残留放行可删迁移）；acc_msm register/deregister 内部 writeRegistry 天然豁免
 - **⑤c 健康检查**：`kit-ops.ts` `checkRegistryHealth` 入 **acc_kit health 的 registry 段**——parse（剥 BOM）/顶层 wrapper 结构/每 entry 字段类型/name 唯一/path 根内+脚本存在；**坏不抛错**（坏表 → ok:false + issues + git 恢复指引——register/deregister 精提交历史可 `git checkout -- <registry>` 恢复）；用户拍板：只输出指引不内置 --restore
-- CCC 数据：home-serenity 聚合档并入 6 分散 entry（mail-tool/memory-tool/movie-search/home-diag/session-log-tool/h3-pipeline → 67 entries 总）；分散文件保留（用户拍板——新代码不读，无害残留）；其他 CCC（pangu/tiangong/sh）单级化后各自需手工并入自身 cccName 聚合档（待办）
+- CCC 数据：home-serenity 聚合档并入 6 分散 entry（mail-tool/memory-tool/movie-search/home-diag/session-log-tool/h3-pipeline → 67 entries 总）；分散文件保留（用户拍板——新代码不读，无害残留）；其他 CCC（各 CCC 各自命名）单级化后各自需手工并入自身 cccName 聚合档（待办）
 
 ### review 修复批（第一轮：P1 + P2-2~P2-5 + P3 五项，独立 review 后修复）
 - **P1 单级化死锁**：root 级注册表解除写保护（废弃形态死锁——不被读又不可删/迁移）；**P2-1 平台大小写统一**（win32 不敏感/posix 敏感——Linux 大写 CCC 名不得误放行）
@@ -5296,7 +5400,7 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 
 ## v1.27.0 — 2026-08-31（微信桥 F4c-3：CCC 级 iLink 接入，S142 用户拍板）
 
-**Scope:** 用户 "dsp 能否接入微信的扫码协议，考虑多用户接入招财 role"——skiff 强化后支持微信扫码接入 → 代替 openclaw（招财平台）的微信接入面。协议实证（裸调 get_bot_qrcode 无需 OpenClaw）+ 用户七项裁决后实现。**架构决策**：配置归 **CCC**（dsh 一进程多 CCC，每个 CCC 独立对接微信桥）——结构/路由/开关进 `.opencode/serenity.json`，**bot_token 凭据进 CCC localstore**（credential scope）；ACC 不绑定具体 role（路由 user → role 用户自选）；管理面 = **CCC 面板**（显式 CCC 选择器——WebUI 顶层全局，配置写入必须显式）；不做 agent 侧管理工具。
+**Scope:** 用户 "dsp 能否接入微信的扫码协议，考虑多用户接入某角色 role"——skiff 强化后支持微信扫码接入 → 代替 openclaw（家庭助手平台）的微信接入面。协议实证（裸调 get_bot_qrcode 无需 OpenClaw）+ 用户七项裁决后实现。**架构决策**：配置归 **CCC**（dsh 一进程多 CCC，每个 CCC 独立对接微信桥）——结构/路由/开关进 `.opencode/serenity.json`，**bot_token 凭据进 CCC localstore**（credential scope）；ACC 不绑定具体 role（路由 user → role 用户自选）；管理面 = **CCC 面板**（显式 CCC 选择器——WebUI 顶层全局，配置写入必须显式）；不做 agent 侧管理工具。
 
 ### 变更
 - **`src/weixin-api.ts`（新）**：iLink Bot API 纯 fetch 客户端（零依赖）——fetchQRCode（裸调无凭据可取码）/ pollQRStatus（wait/scaned/confirmed/expired + bot_token）/ getUpdates（35s 长轮询 + get_updates_buf 游标）/ sendTextMessage（BOT/FINISH + context_token 回带 + **md→plain 内置**）/ markdownToPlainText（代码块/图片/链接/表格/标题/粗斜体/删除线 7 类）；`__setWeixinFetchForTest` 测试注入
@@ -5349,14 +5453,14 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 
 ## v1.26.15 — 2026-08-31（自主轨迹三连修复：立即唤起 / 面板解析 / 时钟定时器，S142 实测驱动）
 
-**Scope:** 用户在 pangu-serenity 实测 v1.26.14 后三轮反馈：① "点唤起也没用，未唤起，排查"；② "实验状态检测不到pangu了，排查访问不到写个msm来排查"；③ "手动唤起执行正常，时钟唤起不工作，排查原因"。三个根因全部实证定位 + 修复 + 进程内诊断工具。**本机 deploy 已生效；npm 1.26.14 未含本版（发布补全）**。
+**Scope:** 用户在另一个 CCC 实测 v1.26.14 后三轮反馈：① "点唤起也没用，未唤起，排查"；② "实验状态检测不到那一台了，排查访问不到写个msm来排查"；③ "手动唤起执行正常，时钟唤起不工作，排查原因"。三个根因全部实证定位 + 修复 + 进程内诊断工具。**本机 deploy 已生效；npm 1.26.14 未含本版（发布补全）**。
 
 ### 修复 1：立即唤起不生效——resolveTargetAgent 匹配不存在的 `s.title`
 - **根因**：`resolveTargetAgent` 遍历 `ctx.sessions.list()` 匹配 `s.title`——但 dsh `session.list` wire schema（及 Session 对象）**均无 title 字段**（只有 sessionId/cwd/agentPreset），匹配永远失败 → "目标会话 agent 不可得"
 - **修复（`src/autotrajectory.ts`）**：标题实际存在 session log 的 `session/title` 事件（latest-wins）——新增 `readSessionTitle(session)` 从 `session.events` 提取标题（rebuild 同款 events 读取模式）+ **cwd 归属校验**（同实例多 CCC 时只匹配目标 SESSION 所在 CCC 的会话；targetRoot 可解析→CCC 根比较，不可解析→路径祖先兜底）+ `diagnoseTargetUnavailable` 区分失败原因（"目标 CCC 内无 live 会话 / 标题均不匹配 / agent 未加载"——面板/日志可直接行动）
 
 ### 修复 2：面板检测不到实验 CCC——无参 GET 解析到当前维护会话 CCC
-- **根因**：面板 fetch 无 workspace 参数 → `resolveWorkspace` 解析到第一个 live 会话（home-serenity，configured:false）→ 显示"未配置"，用户实验 CCC（pangu）检测不到
+- **根因**：面板 fetch 无 workspace 参数 → `resolveWorkspace` 解析到第一个 live 会话（home-serenity，configured:false）→ 显示"未配置"，用户实验 CCC（另一个 CCC）检测不到
 - **修复（`src/autotrajectory.ts` + `src/api.ts`）**：新增 `resolveAutoTrajectoryCcc(ctx)`（**优先「配置了 autotrajectory 的 live CCC」**：enabled 优先，其次 configured）；api GET/POST 无 workspace/sessionId 参数时用它（面板显示与唤起目标一致——显示什么就唤起什么）
 - **新增 `diag-live` 进程内诊断（`src/tools/autotrajectory-exp.ts` 改造）**：工具改闭包捕获 ctx（`createAutoTrajectoryExpTool(ctx)`，rebuild 同款）——`diagLive(ctx)` 输出 live 会话清单（id/cwd/ccc/标题）+ 各实验 CCC 状态（配置/目标/agent 定位/诊断）+ 面板解析目标；**脚本 diag 是独立进程看不到运行时，diag-live 在插件进程内能看到 sessions/agents**
 
@@ -5370,7 +5474,7 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 
 ## v1.26.14 — 2026-08-30（自主轨迹面板状态 + 立即唤起按钮 + diag 扫描扩大，S142 调试闭环）
 
-**Scope:** 用户两连发：① "给CCC的面板加个状态来看情况"（自主轨迹实验状态可视化）；② 状态通过后 "加个立即唤起按钮，方便调试"（手动触发一轮唤起）。另：diag 无参扫描此前只覆盖 `/home/yh/home` + `/home/yh/our-home`，用户实验 CCC（pangu-serenity，`/home/yh/zy/`）扫不到——扩大为递归扫描 `/home/yh` 两层。
+**Scope:** 用户两连发：① "给CCC的面板加个状态来看情况"（自主轨迹实验状态可视化）；② 状态通过后 "加个立即唤起按钮，方便调试"（手动触发一轮唤起）。另：diag 无参扫描此前只覆盖两个固定父目录，用户实验 CCC（位于另一个父目录）扫不到——扩大为递归扫描两层。
 
 ### 变更
 - **`src/autotrajectory.ts` `getAutoTrajectoryStatus(root)`（新，面板数据源）**：纯逻辑状态函数（可单测）——configured/enabled/intervalHours/biasProvider/session/avoidWakeHours + 目标会话（dirName/--auto 标志/空闲小时/当前可唤起判定）+ 当前北京小时/窗口允许；不运行偏见脚本（运行验证走 autotrajectory-exp random）
@@ -5380,8 +5484,8 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 - **`src/api.ts` `POST /serenity/autotrajectory {action:'wake'}`（新端点）**：手动立即唤起（`performAutoTrajectoryWake(force:true)`）；**x-serenity-ui 头限定**（agent 不可自行唤起自己——防实验循环自激）；未配置 → 400
 - **`src/client/SettingsSection.tsx` 「自主轨迹」只读区块（新）**：实验状态/目标会话（含 --auto 标志与空闲时长）/唤起窗口（北京小时 + 高峰避开）/偏见提供者名 + **「立即唤起」按钮**（enabled + 目标就绪时可用；点击 POST wake，显示执行结果 detail；完成后刷新状态）
 - **`src/client/SettingsSection.css`**：`ss-wakeBtn` 按钮样式（官方 button 语言，hover 绿色提示）
-- **`src/tools/autotrajectory-exp.ts`**：描述版本号 v1.26.13→v1.26.14 + diag 扫描说明更新（递归扫描 /home/yh 两层）
-- **`experiments/autotrajectory/scripts/autotrajectory-exp.ts` diag 扫描扩大（dsp + specs 同源）**：弃固定双 base 一层扫描，改 **`collectCccs` 递归收集 .serenity 目录**（跳过隐藏目录，maxDepth 2 层，base `/home/yh`）——覆盖 `/home/yh/home/*`、`/home/yh/our-home/*` 及任意实验 CCC 位置（pangu-serenity/tiangong-serenity/sh-serenity 等）；脚本头注释补 diag + 面板说明
+- **`src/tools/autotrajectory-exp.ts`**：描述版本号 v1.26.13→v1.26.14 + diag 扫描说明更新（递归扫描两层）
+- **`experiments/autotrajectory/scripts/autotrajectory-exp.ts` diag 扫描扩大（dsp + specs 同源）**：弃固定双 base 一层扫描，改 **`collectCccs` 递归收集 .serenity 目录**（跳过隐藏目录，maxDepth 2 层，base = 家目录）——覆盖任意实验 CCC 位置（多个 `*-serenity` 实例）；脚本头注释补 diag + 面板说明
 
 ### 测试
 - **autotrajectory.test +11**：getAutoTrajectoryStatus——未配置/已配置未启用/启用+会话命中(--auto/空闲/可唤起)/启用+未命中；performAutoTrajectoryWake——force=true 跳过窗口间隔注入成功 / force=false 间隔不足拒绝 / 未启用拒绝 / 无 --auto 标志拒绝 / 偏见脚本缺失拒绝 / agent 不可得拒绝
@@ -5831,7 +5935,7 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 
 ## v1.24.9 — 2026-08-27（CSRF 登录死循环根治：服务端 token 集合 + 失败页注入，S142 用户实测 debug）
 
-**Scope:** v1.24.8 后仍失败——用户要求 debug。运行日志实证（dsh-crash-investigate logs）：`登录拒绝（CSRF 校验失败）：user=admin ip=192.168.1.232 cookieSecure=off cookieCsrf=present formCsrf=present`（×3）交替 `formCsrf=missing`（×3）。**根因双链闭合**：① 每次 GET 登录页生成新 token **覆盖 cookie**——多标签页/刷新后，早先打开的标签携带旧 form token 提交时与最新 cookie **不匹配**（present/present 死循环）；② 登录失败路径 `loginPageHtml(msg)` **不传 csrf** → 失败页无 csrf 字段 → 重试时 formCsrf=missing（恶性循环）。
+**Scope:** v1.24.8 后仍失败——用户要求 debug。运行日志实证（dsh-crash-investigate logs）：`登录拒绝（CSRF 校验失败）：user=admin ip=192.0.2.232 cookieSecure=off cookieCsrf=present formCsrf=present`（×3）交替 `formCsrf=missing`（×3）。**根因双链闭合**：① 每次 GET 登录页生成新 token **覆盖 cookie**——多标签页/刷新后，早先打开的标签携带旧 form token 提交时与最新 cookie **不匹配**（present/present 死循环）；② 登录失败路径 `loginPageHtml(msg)` **不传 csrf** → 失败页无 csrf 字段 → 重试时 formCsrf=missing（恶性循环）。
 
 ### 变更
 - **CSRF token 服务端集合**（gateway-auth.ts）：`newCsrfToken()` 生成的 token 存入内存集合（TTL 10min，上限 50 自动清理）；新增 `isCsrfValid(token)`——提交时 form/cookie token **只要 ∈ 集合即有效**（多标签各自 GET 生成的 token 都接受，不再因 cookie 被最新 GET 覆盖而拒绝旧标签提交）；安全不变（token 随机 256-bit + 集合短期有效，跨站无法猜测/读取）
@@ -6358,7 +6462,7 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 
 **测试：** 全量通过（阶段机 + 协议默认值）→ typecheck ✓
 
-**Scope:** v1.19.3 的轮次兜底数 `assistant/message` 事件，但 responses API（opencode-go-responses/muse-spark）下该事件在 assemble 时可能延迟/缺失 → 兜底计数失效 → 首轮锚定后仍不晋升 → 工具仍被裁空（用户实测 tiangong-serenity 会话 turn 4 仍无 ACC 工具）。
+**Scope:** v1.19.3 的轮次兜底数 `assistant/message` 事件，但 responses API（opencode-go-responses/muse-spark）下该事件在 assemble 时可能延迟/缺失 → 兜底计数失效 → 首轮锚定后仍不晋升 → 工具仍被裁空（用户实测另一个 CCC 会话 turn 4 仍无 ACC 工具）。
 
 ### 修复
 - `seams/bootstrap.ts` `createEpochPromotion` 兜底计数：`assistant/message` → **`step/start`**（平台稳定事件，responses/completions 都触发；JSONL 实证存在）
@@ -6447,7 +6551,7 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 
 ## v1.18.5 — 2026-08-15（黑名单/治理文件保护只拦写操作——读操作不误伤，对齐 osp）
 
-**Scope:** 用户报告"读操作也被拦截了"——REPOSITORIES/ 下的 repo（天工开发流程只读参考源黑名单，对象条目自定义 message）连 **read** 都被拦。根因：dsp 的 `decideGuard` 对**所有带路径参数的工具**（含读）都检查黑名单/治理文件；而 osp 的 permission-guards 只在 `write/edit` 时查黑名单（读操作放行）。
+**Scope:** 用户报告"读操作也被拦截了"——REPOSITORIES/ 下的 repo（另一个 CCC 的开发流程只读参考源黑名单，对象条目自定义 message）连 **read** 都被拦。根因：dsp 的 `decideGuard` 对**所有带路径参数的工具**（含读）都检查黑名单/治理文件；而 osp 的 permission-guards 只在 `write/edit` 时查黑名单（读操作放行）。
 
 ### 修复（对齐 osp permission-guards）
 - `guards.ts decideGuard`：**黑名单 + 治理文件保护仅在写类工具**（write/edit/str_replace_editor/cc_fs/bash/append/touch）时检查；**读操作**（read/glob/grep 等）只做路径越界检查（安全必需），不再被黑名单/治理文件误伤
@@ -6986,19 +7090,19 @@ v1.27.9 全局开关 `autopilotEnabled` 只在**插件 apply 时 + session/creat
 
 - **context.ts**：`accMessage` 改为完整注入 = 简短身份头 + `serenitySystemPrompt(root)`（ACC 5 块 + CCC 顶层 skill 原文，对齐 osp system.transform）；导出供 compact.ts 复用
 - **compact.ts**：复用 context.ts 的 `accMessage`（单一真相源，压缩重注入同样完整）
-- **tests/context.test.ts**：+1 用例（accMessage 含简短头 + ACC/CCE/Constraints 块 + .serenity 记号发现的 tg-serenity 原文）
+- **tests/context.test.ts**：+1 用例（accMessage 含简短头 + ACC/CCE/Constraints 块 + .serenity 记号发现的另一 CCC 入口 skill 原文）
 
 **测试：** 175/175
 
 ## v1.15.6 — 2026-08-09（系统提示词完整注入：5 块对齐 osp + .serenity 记号发现）
 
-**Scope:** 用户指出：① 注入内容必须**完全参考 opencode-serenity-plugin**（不得有误差）；② CCC 的根提示词位置记录在 **`.serenity` 记号文件**中（内容 = 顶层入口 skill 名，如 tiangong-serenity 的 `.serenity` = `tg-serenity`）。
+**Scope:** 用户指出：① 注入内容必须**完全参考 opencode-serenity-plugin**（不得有误差）；② CCC 的根提示词位置记录在 **`.serenity` 记号文件**中（内容 = 顶层入口 skill 名，如某 CCC 的 `.serenity` = 该 CCC 的入口 skill 名）。
 
-**根因：** findEntrySkills 硬编码 `home-serenity`/`acc-serenity` 名字，无法发现 tiangong-serenity 的 `tg-serenity`；且只注入 SKILL 全文，缺 ACC/CCE/Constraints/Session 块。
+**根因：** findEntrySkills 硬编码 `home-serenity`/`acc-serenity` 名字，无法发现**命名不同**的 CCC 的入口 skill；且只注入 SKILL 全文，缺 ACC/CCE/Constraints/Session 块。
 
 **主要变化：**
 
-- **skills-discovery.ts**：入口发现改为——① **`.serenity` 记号文件内容 = 顶层入口 skill 名**（最高优先，权威语义）；② `.dsh/entry-skill` 指针兼容；③ 自动扫描 `.opencode/skills/*-serenity`；④ 自动扫描 `.dsh/skills/*-serenity`。任何 CCC（home-serenity/tg-serenity/pangu-serenity）自动发现
+- **skills-discovery.ts**：入口发现改为——① **`.serenity` 记号文件内容 = 顶层入口 skill 名**（最高优先，权威语义）；② `.dsh/entry-skill` 指针兼容；③ 自动扫描 `.opencode/skills/*-serenity`；④ 自动扫描 `.dsh/skills/*-serenity`。任何 CCC（`home-serenity` / `*-serenity`）自动发现
 - **system-prompt.ts**：完整 **5 块注入，逐字对齐 osp compacting.ts system.transform**：
   1. `=== Serenity ACC ===`（ACC 身份 + CCC/Root + 9 工具清单）
   2. `=== Serenity CCE ===`（CCE 5 行为约束 + H_op，逐字）

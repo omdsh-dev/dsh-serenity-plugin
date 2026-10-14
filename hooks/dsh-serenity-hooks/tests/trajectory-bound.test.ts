@@ -77,9 +77,9 @@ describe('trajectory-bound: appendBound（文件持久化）', () => {
   it('不同会话各自独立记录（scope 隔离）', () => {
     const a = makeSession('sess-a')
     const b = makeSession('sess-b')
-    appendBound(a, 'activate', { dirName: '2026-09-07--S160--zhaocai skiff', mdPath: '/r/A/SESSION.md' })
+    appendBound(a, 'activate', { dirName: '2026-09-07--S160--my-role skiff', mdPath: '/r/A/SESSION.md' })
     appendBound(b, 'activate', { dirName: '2026-09-05--S142--dsp', mdPath: '/r/B/SESSION.md' })
-    expect(readLastBound(a)?.dirName).toBe('2026-09-07--S160--zhaocai skiff')
+    expect(readLastBound(a)?.dirName).toBe('2026-09-07--S160--my-role skiff')
     expect(readLastBound(b)?.dirName).toBe('2026-09-05--S142--dsp')
   })
 })
@@ -811,8 +811,8 @@ describe('trajectory-bound: D69「只留一条」（域路径）', () => {
 /**
  * 🔴 **惰性补迁移**（§0L 修正，S142 2026-09-19）——修复一个**发布后实测**才暴露的缺陷。
  *
- * 首版把迁移放在装载期、用 `process.cwd()` 当 CCC 根。而 dsh **服务进程的 cwd 是 `/home/yh`**
- * （`acc-diag` 实测：`进程 cwd: /home/yh ｜ 进程 CCC: （无）`）⇒ 迁移读到不存在的文件，
+ * 首版把迁移放在装载期、用 `process.cwd()` 当 CCC 根。而 dsh **服务进程的 cwd 是 `/home/user`**
+ * （`acc-diag` 实测：`进程 cwd: /home/user ｜ 进程 CCC: （无）`）⇒ 迁移读到不存在的文件，
  * **静默迁移 0 条**：v1.40.0 发布重启后 `~/.dsh/storages/serenity_bindings.json` **没出现**。
  *
  * 判据：**任何一次能定位 CCC 根的绑定读写，都应顺带把该 CCC 的历史绑定补灌进域**。

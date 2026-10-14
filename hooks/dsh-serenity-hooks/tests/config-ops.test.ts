@@ -84,17 +84,17 @@ describe('读写（plugin 全局文件）', () => {
 
   it('写 → 读 往返一致；文件权限 0600', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: hashPassword('pw') }]
     writeAdvancedSettings(s)
 
     const raw = JSON.parse(readFileSync(globalConfigPath(), 'utf-8'))
-    expect(raw.gateway.accounts[0].user).toBe('yh')
+    expect(raw.gateway.accounts[0].user).toBe('user-b')
     // 全局文件是完整配置对象（无外层节包装）
     expect(raw[ADVANCED_SECTION]).toBeUndefined()
 
     const back = readAdvancedSettings()
     expect(back.gateway.accounts).toHaveLength(1)
-    expect(back.gateway.accounts[0]!.user).toBe('yh')
+    expect(back.gateway.accounts[0]!.user).toBe('user-b')
     expect(verifyPassword('pw', back.gateway.accounts[0]!.passHash)).toBe(true)
   })
 
@@ -144,7 +144,7 @@ describe('migrateLegacyLocalstore（v1.21.x → v1.22 一次性迁移）', () =>
 describe('updateAdvancedSettings（部分更新）', () => {
   it('gateway 部分 patch 保留 accounts；accounts 未传不覆盖', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: 'h1' }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: 'h1' }]
     writeAdvancedSettings(s)
 
     const next = updateAdvancedSettings({ gateway: { enabled: true } })
@@ -171,11 +171,11 @@ describe('toWire（hash 永不落 wire）', () => {
   it('剥离 passHash → hasPassword 布尔', () => {
     const s = defaultAdvancedSettings()
     s.gateway.accounts = [
-      { id: 'a1', user: 'yh', passHash: hashPassword('pw') },
+      { id: 'a1', user: 'user-b', passHash: hashPassword('pw') },
       { id: 'a2', user: 'd', passHash: '' },
     ]
     const w = toWire(s)
-    expect(w.gateway.accounts[0]).toEqual({ id: 'a1', user: 'yh', hasPassword: true, hasTotp: false })
+    expect(w.gateway.accounts[0]).toEqual({ id: 'a1', user: 'user-b', hasPassword: true, hasTotp: false })
     expect(w.gateway.accounts[1]).toEqual({ id: 'a2', user: 'd', hasPassword: false, hasTotp: false })
     expect(JSON.stringify(w)).not.toContain('passHash')
     expect(JSON.stringify(w)).not.toContain('pw')
@@ -196,11 +196,11 @@ describe('projectKnownWorkspaces（v1.28.0 适配 0.1.2-rc.1 A2 A′：host work
 
   it('白名单前缀 → 只保留匹配项', () => {
     const out = projectKnownWorkspaces([
-      { path: '/home/yh/home/home-serenity', title: 'home-serenity' },
-      { path: '/home/yh/zy/pangu-serenity', title: 'pangu' },
+      { path: '/home/user/workspace', title: 'home-serenity' },
+      { path: '/home/user/other-serenity', title: 'other-serenity' },
       { path: '/data/x', title: 'data-x' },
-    ], ['/home/yh/home'])
-    expect(out.map((w) => w.path)).toEqual(['/home/yh/home/home-serenity'])
+    ], ['/home/user/workspace'])
+    expect(out.map((w) => w.path)).toEqual(['/home/user/workspace'])
   })
 
   it('空输入 → 空数组', () => {
@@ -212,7 +212,7 @@ describe('applyWirePatch（wire → 持久化）', () => {
   it('新账号必带 pass → hash 落库', () => {
     const next = applyWirePatch({
       gateway: {
-        accounts: [{ id: 'a1', user: 'yh', pass: 'newpw' }],
+        accounts: [{ id: 'a1', user: 'user-b', pass: 'newpw' }],
       },
     })
     expect(next.gateway.accounts).toHaveLength(1)
@@ -223,38 +223,38 @@ describe('applyWirePatch（wire → 持久化）', () => {
   it('新账号无 pass 且无现有 hash → 抛错', () => {
     expect(() =>
       applyWirePatch({
-        gateway: { accounts: [{ id: 'a1', user: 'yh' }] },
+        gateway: { accounts: [{ id: 'a1', user: 'user-b' }] },
       }),
     ).toThrow(/must set a password/)
   })
 
   it('既有账号 pass 空 → 保留原 hash', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('orig') }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: hashPassword('orig') }]
     writeAdvancedSettings(s)
 
     const next = applyWirePatch({
-      gateway: { accounts: [{ id: 'a1', user: 'yh', pass: '' }] },
+      gateway: { accounts: [{ id: 'a1', user: 'user-b', pass: '' }] },
     })
     expect(verifyPassword('orig', next.gateway.accounts[0]!.passHash)).toBe(true)
   })
 
   it('既有账号带新 pass → 更新 hash（可改名）', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('orig') }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: hashPassword('orig') }]
     writeAdvancedSettings(s)
 
     const next = applyWirePatch({
-      gateway: { accounts: [{ id: 'a1', user: 'yh-new', pass: 'newpw' }] },
+      gateway: { accounts: [{ id: 'a1', user: 'user-b-new', pass: 'newpw' }] },
     })
-    expect(next.gateway.accounts[0]!.user).toBe('yh-new')
+    expect(next.gateway.accounts[0]!.user).toBe('user-b-new')
     expect(verifyPassword('newpw', next.gateway.accounts[0]!.passHash)).toBe(true)
     expect(verifyPassword('orig', next.gateway.accounts[0]!.passHash)).toBe(false)
   })
 
   it('删除账号（数组整体替换）', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: 'h1' }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: 'h1' }]
     writeAdvancedSettings(s)
 
     const next = applyWirePatch({ gateway: { accounts: [] } })
@@ -263,40 +263,40 @@ describe('applyWirePatch（wire → 持久化）', () => {
 
   it('v1.24.7 TOTP：totpSecret 非空 → 直接绑定（无确认码）；wire 不回传 secret', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: hashPassword('pw') }]
     writeAdvancedSettings(s)
 
     const secret = generateTotpSecret()
     const next = applyWirePatch({
-      gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: secret }] },
+      gateway: { accounts: [{ id: 'a1', user: 'user-b', totpSecret: secret }] },
     })
     expect(next.gateway.accounts[0]!.totpSecret).toBe(secret)
     // wire 形态只有 hasTotp 布尔
     const w = toWire(next)
-    expect(w.gateway.accounts[0]).toEqual({ id: 'a1', user: 'yh', hasPassword: true, hasTotp: true })
+    expect(w.gateway.accounts[0]).toEqual({ id: 'a1', user: 'user-b', hasPassword: true, hasTotp: true })
     expect(JSON.stringify(w)).not.toContain(secret)
     expect(JSON.stringify(w)).not.toContain('totpSecret')
   })
 
   it('v1.24.7 TOTP：非法 base32 secret → 拒绝绑定', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw') }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: hashPassword('pw') }]
     writeAdvancedSettings(s)
 
     expect(() =>
       applyWirePatch({
-        gateway: { accounts: [{ id: 'a1', user: 'yh', totpSecret: 'NOT-BASE32!!' }] },
+        gateway: { accounts: [{ id: 'a1', user: 'user-b', totpSecret: 'NOT-BASE32!!' }] },
       }),
     ).toThrow(/not valid base32/)
   })
 
   it('v1.22.4 TOTP：totpReset=true → 清除绑定', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw'), totpSecret: 'MZXW6YTB' }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: hashPassword('pw'), totpSecret: 'MZXW6YTB' }]
     writeAdvancedSettings(s)
 
     const next = applyWirePatch({
-      gateway: { accounts: [{ id: 'a1', user: 'yh', totpReset: true }] },
+      gateway: { accounts: [{ id: 'a1', user: 'user-b', totpReset: true }] },
     })
     expect(next.gateway.accounts[0]!.totpSecret).toBeUndefined()
     expect(toWire(next).gateway.accounts[0]!.hasTotp).toBe(false)
@@ -304,10 +304,10 @@ describe('applyWirePatch（wire → 持久化）', () => {
 
   it('v1.22.4 TOTP：未传 totpSecret/totpReset → 保留现有绑定', () => {
     const s = defaultAdvancedSettings()
-    s.gateway.accounts = [{ id: 'a1', user: 'yh', passHash: hashPassword('pw'), totpSecret: 'KEEP' }]
+    s.gateway.accounts = [{ id: 'a1', user: 'user-b', passHash: hashPassword('pw'), totpSecret: 'KEEP' }]
     writeAdvancedSettings(s)
 
-    const next = applyWirePatch({ gateway: { accounts: [{ id: 'a1', user: 'yh' }] } })
+    const next = applyWirePatch({ gateway: { accounts: [{ id: 'a1', user: 'user-b' }] } })
     expect(next.gateway.accounts[0]!.totpSecret).toBe('KEEP')
   })
 
@@ -330,12 +330,12 @@ describe('applyWirePatch（wire → 持久化）', () => {
 
   it('工作区白名单 patch：写入/过滤空串/缺省保留', () => {
     const next = applyWirePatch({
-      gateway: { workspaces: ['/home/yh/home', '', '/data'] },
+      gateway: { workspaces: ['/home/user/workspace', '', '/data'] },
     })
-    expect(next.gateway.workspaces).toEqual(['/home/yh/home', '/data']) // 空串过滤
+    expect(next.gateway.workspaces).toEqual(['/home/user/workspace', '/data']) // 空串过滤
     // 未传 workspaces → 保留现有
     const keep = applyWirePatch({ gateway: { port: 9999 } })
-    expect(keep.gateway.workspaces).toEqual(['/home/yh/home', '/data'])
+    expect(keep.gateway.workspaces).toEqual(['/home/user/workspace', '/data'])
   })
 
   it('review P2-3：wire rebuild patch 被忽略（简单配置单源——不再经高级 wire 改 rebuild）', () => {

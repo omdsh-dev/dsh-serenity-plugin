@@ -120,7 +120,7 @@ describe('weixin-send-api: 纯校验', () => {
   })
 
   it('parseSendRequest：user 必须是 iLink id（别名不在此层解析）', () => {
-    const r = parseSendRequest({ ccc: 'x', user: 'yh', text: 't' })
+    const r = parseSendRequest({ ccc: 'x', user: 'user-b', text: 't' })
     expect(r.ok).toBe(false)
     expect(r.ok === false && r.remediation).toContain('别名')
   })
@@ -140,26 +140,27 @@ describe('weixin-send-api: 纯校验', () => {
     expect(isLoopbackAddress('127.0.0.1')).toBe(true)
     expect(isLoopbackAddress('::1')).toBe(true)
     expect(isLoopbackAddress('::ffff:127.0.0.1')).toBe(true)
-    expect(isLoopbackAddress('192.168.1.5')).toBe(false)
+    expect(isLoopbackAddress('192.0.2.5')).toBe(false)
     expect(isLoopbackAddress(undefined)).toBe(false)
     expect(isLoopbackAddress('')).toBe(false)
   })
 
   it('matchCcc：绝对路径 / 目录名 / .serenity 名 / 大小写不敏感', () => {
     // 绝对路径分支会**读文件系统**找 `.serenity`（findSerenityRoot）——不能写死开发机
-    // 的 CCC 路径（v1.30.16：CI run #16 实证 `no CCC found from path: /home/yh/home/home-serenity`）。
+    // 的 CCC 路径（v1.30.16：CI run #16 实证 `no CCC found from path: /home/user/workspace`）。
     // 自建临时 CCC：任何机器/CI 上都可复现（S↑ 不依赖隐式环境）。
     const ccc = realpathSync(mkdtempSync(join(tmpdir(), 'weixin-send-ccc-')))
     writeFileSync(join(ccc, '.serenity'), 'home-serenity')
     tempCccDirs.push(ccc)
     const cands: CccCandidate[] = [
       { root: ccc, dirName: basename(ccc), cccName: 'home-serenity' },
-      { root: '/home/yh/lab/pangu', dirName: 'pangu', cccName: 'pangu-serenity' },
+      { root: '/home/user/other', dirName: 'other', cccName: 'other-serenity' },
     ]
     expect(matchCcc(ccc, cands)).toEqual({ ok: true, root: ccc })
     expect(matchCcc(basename(ccc), cands)).toEqual({ ok: true, root: ccc })
     expect(matchCcc('HOME-SERENITY', cands)).toEqual({ ok: true, root: ccc })
-    expect(matchCcc('pangu', cands)).toEqual({ ok: true, root: '/home/yh/lab/pangu' })
+    // 目录名分支：dirName='other' ≠ cccName='other-serenity' ⇒ 命中**只能**来自 dirName
+    expect(matchCcc('other', cands)).toEqual({ ok: true, root: '/home/user/other' })
   })
 
   it('matchCcc：未知 / 歧义 / 路径无 CCC → 报错带候选', () => {
@@ -183,7 +184,7 @@ describe('weixin-send-api: 纯校验', () => {
 describe('weixin-send-api: 请求处理', () => {
   it('非 loopback 来源 → 403', async () => {
     const { res, out } = fakeRes()
-    await handleWeixinSendRequest({} as never, fakeReq({ remoteAddress: '192.168.1.5' }) as never, res)
+    await handleWeixinSendRequest({} as never, fakeReq({ remoteAddress: '192.0.2.5' }) as never, res)
     expect(out.status).toBe(403)
     expect(out.body).toMatchObject({ code: 'FORBIDDEN' })
   })
@@ -226,11 +227,11 @@ describe('weixin-send-api: 请求处理', () => {
 
   it('成功 → 200 + accountId/userId/sessionId/role（透传桥结果）', async () => {
     discoverMock.mockResolvedValue([{ root: '/ccc/a', name: 'a', roles: [] }])
-    sendMock.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im.wechat', sessionId: 'skiff-weixin-x', role: 'zhaocai' })
+    sendMock.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im.wechat', sessionId: 'skiff-weixin-x', role: 'my-role' })
     const { res, out } = fakeRes()
     await handleWeixinSendRequest({} as never, fakeReq({ body: JSON.stringify({ ccc: 'a', user: 'u@im.wechat', text: 't' }) }) as never, res)
     expect(out.status).toBe(200)
-    expect(out.body).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u@im.wechat', sessionId: 'skiff-weixin-x', role: 'zhaocai' })
+    expect(out.body).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u@im.wechat', sessionId: 'skiff-weixin-x', role: 'my-role' })
     expect(sendMock).toHaveBeenCalledWith({ root: '/ccc/a', toUserId: 'u@im.wechat', text: 't' })
   })
 

@@ -77,7 +77,7 @@ const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
  * 注入 agent 系统提示词（用户对话面不可见）。
  *
  * v1.30.13（S142 诊断 D5）：写入纪律**不点名具体工具**。旧文案写死 "with write/edit"，
- * 而 zhaocai 角色的工具白名单已移除 write/edit（写能力收归 CCC 的 session-write MSM）
+ * 而某角色的工具白名单已移除 write/edit（写能力收归 CCC 的 session-write MSM）
  * → 指令指向它根本没有的工具（注入纪律与能力面矛盾，模型只能猜）。
  * 现文案改为「用本角色被授权的写入通道」——ACC 只声明义务（写进工作台），
  * 具体通道由 CCC 的角色配置与角色提示词决定（ACC/CCC 归属二分；也不把某个 CCC 的

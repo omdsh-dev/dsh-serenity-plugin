@@ -105,7 +105,11 @@ describe('CRO 指南: 样例快照 = 派生（🔴 单真相源纪律）', () =>
       expect(snap[group], `缺字段组：${group}`).toBeTypeOf('object')
     }
     expect(getPath(snap, 'identity.dirName')).toBe(CRO_SAMPLE_SNAPSHOT_INPUT.dirName)
-    expect(getPath(snap, 'identity.code')).toBe('S185')
+    // 🔒 不写死轨迹号：从样例 dirName **派生**（否则样例一改中性占位，本断言就成假红；
+    //    且写死真轨迹号＝把私有会话号带进随包测试 —— 2026-10-14 隐私核查）
+    const expectedCode = /--(S\d+)--/.exec(CRO_SAMPLE_SNAPSHOT_INPUT.dirName)?.[1]
+    expect(expectedCode).toBeDefined()
+    expect(getPath(snap, 'identity.code')).toBe(expectedCode)
     expect(getPath(snap, 'time.nowMs')).toBe(CRO_SAMPLE_SNAPSHOT_INPUT.nowMs)
   })
 
