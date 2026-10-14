@@ -102,17 +102,17 @@ describe('ccc: 配置', () => {
     expect(readCheapWorkerConfig(dir)).toBeNull()
   })
 
-  it('readCheapWorkerConfig：白名单解析 + defaultModel 缺省 models[0] + 上限默认', () => {
+  it('readCheapWorkerConfig：白名单解析 + defaultModel 缺省 models[0]', () => {
     mkdirSync(join(dir, '.opencode'))
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ 'cheap-worker': { models: ['a/one', 'b/two'], maxParallel: 4 } }),
+      // 🔴 2026-10-14：`maxParallel`／`maxRounds` 已随 background 模式退场 —— 这里**故意留着**，
+      //    钉的是"旧配置里带它们不报错、也不再出现在返回形状里"（宽松解析 + 契约收窄）。
+      JSON.stringify({ 'cheap-worker': { models: ['a/one', 'b/two'], maxParallel: 4, maxRounds: 7 } }),
     )
     expect(readCheapWorkerConfig(dir)).toEqual({
       models: ['a/one', 'b/two'],
       defaultModel: 'a/one',
-      maxRounds: 100,
-      maxParallel: 4,
     })
   })
 

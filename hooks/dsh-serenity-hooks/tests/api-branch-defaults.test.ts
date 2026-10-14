@@ -183,21 +183,19 @@ afterEach(() => {
 describe('src/api.ts 族 ②：`req.url` 缺失 ⇒ 回落 `/`（不是崩）', () => {
   const jsonBody = (r: RawRes): any => JSON.parse(r.body)
 
-  it('🔴 7 条路由在 `req.url === undefined` 下**仍各自应答**（不是 500），且默认值真生效', async () => {
+  it('🔴 6 条路由在 `req.url === undefined` 下**仍各自应答**（不是 500），且默认值真生效', async () => {
     const api = await bootApi({ beforeHandlers: (req) => { req.url = undefined as never } })
     try {
-      // 接线自证（正控）：同一夹具下路由确实都注册了 —— 防止"全都 404 也算 7 条通过"
+      // 接线自证（正控）：同一夹具下路由确实都注册了 —— 防止"全都 404 也算 6 条通过"
       for (const p of ['/serenity/config', '/serenity/cccs', '/serenity/public-ask', '/serenity/weixin', '/serenity/session-cleanup', '/serenity/status']) {
         expect(api.routes, `未注册：${p}`).toContain(p)
       }
 
-      // ── ① /serenity/cheap-workers：url 缺失 ⇒ workspace 参数读不到 ⇒ 回落 process.cwd() ──
-      // 🔴 **本仓的 cwd 就在真 CCC 里** ⇒ `listActiveCheapWorkers(root)` 会去读**真的**
-      //    `AGENT_SESSIONS/cheap-worker-*.json` —— 拿它判"空表"是**环境依赖的假断言**
-      //    （首跑实测：读出一堆真实进度文件）。⇒ 判据只钉**降级语义**（不崩、仍是那个端点）。
+      // ── ① 🔴 2026-10-14：`/serenity/cheap-workers` 已随 background 模式退场。
+      //    url 缺失下的旧判据（"降级为 200 + 空表"）随之失效 ⇒ 改钉**它确实不在了**：
+      //    这里必须是 404（而不是 200）—— 这正是"死端点最难看出的形态"（200 + 空表看着很正常）。
       const cheapWorkers = await raw({ port: api.port, method: 'GET', path: '/serenity/cheap-workers' })
-      expect(cheapWorkers.status, 'url 缺失不得让 cheapWorkers 崩').toBe(200)
-      expect(Array.isArray(jsonBody(cheapWorkers).cheapWorkers), '仍必须是 cheapWorkers 端点的形状').toBe(true)
+      expect(cheapWorkers.status, '已退场的端点不得再应答').toBe(404)
 
       // 🔴 **承重判据（本族的关键）**：`req.url` 缺失时 `?? '/'` 必须**真被求值**。
       //    只看"没崩"是**弱测试** —— 变异实测：把 `?? '/'` 删成 `req.url as string`
@@ -260,17 +258,20 @@ describe('src/api.ts 族 ②：`req.url` 缺失 ⇒ 回落 `/`（不是崩）', 
       await api.close()
     }
 
-    // 判别性对照：**url 真在场**（不打掉）＋ workspace 指向空的临时 CCC ⇒ 真「空表」
-    // ⚠️ 这条**不能**复用上面的 `beforeHandlers`（url 被打掉 ⇒ query 读不到 ⇒ workspace 无效 ⇒
-    //    端点会回落到 `process.cwd()`，而那正是**真 CCC**、里面有真的 cheap-worker 进度文件）。
+    // 判别性对照：**url 真在场**（不打掉）＋ workspace 指向这个临时 CCC ⇒ 真枚举到**它自己**
+    // ⚠️ 这条**不能**复用上面的 `beforeHandlers`（url 被打掉 ⇒ query 读不到）。
+    // 🔴 2026-10-14：改用 `cccs` 端点承担这条对照 —— 原用的 `cheap-workers` 已随 background 退场
+    //    （它现在恒 404）。判据也顺势改准：`cccs` 枚举的是**存在的 CCC**，所以传 workspace=<ccc>
+    //    应恰好得到**这一个**（名字 = 目录名）—— 这比"空表"更能证明"query 真被用上了"。
     const scoped = await bootApi()
     try {
       const res = await raw({
         port: scoped.port, method: 'GET',
-        path: `/serenity/cheap-workers?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS,
+        path: `/serenity/cccs?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS,
       })
       expect(res.status).toBe(200)
-      expect(jsonBody(res).cheapWorkers, '空 CCC 无进度文件 ⇒ 空表（与上一条的真 CCC 读数成对照）').toEqual([])
+      const list = jsonBody(res).cccs as Array<{ root: string }>
+      expect(list.map((c) => c.root), 'query 生效 ⇒ 恰好枚举到传入的那个 CCC').toEqual([ccc])
     } finally {
       await scoped.close()
     }

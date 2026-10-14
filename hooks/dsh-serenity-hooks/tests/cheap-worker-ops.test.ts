@@ -1,8 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { buildRoundPrompt, cheapWorkerProgressPaths, CHEAP_WORKER_GUIDE, listActiveCheapWorkers, newStopToken, providerAvailabilityError, readProgress, requireWhitelistedModel, sanitizeLabel, splitModel, writeFailedStatus, writeProgress } from '../src/cheap-worker-ops.js'
+import { CHEAP_WORKER_GUIDE, providerAvailabilityError, requireWhitelistedModel, splitModel } from '../src/cheap-worker-ops.js'
+
+/**
+ * cheap-worker-ops（纯逻辑层）。
+ *
+ * 🔴 2026-10-14（owner 令「删除后台运行能力」）：本模块的**多数导出已随 background 退场** ——
+ * 进度文件（`writeProgress`／`readProgress`／`writeFailedStatus`／`cheapWorkerProgressPaths`／
+ * `sanitizeLabel`／`listActiveCheapWorkers`）／stop token（`newStopToken`）／轮次 prompt
+ * （`buildRoundPrompt`）**全部删除**。它们的用例是**跟着实现一起退场**的（不是"回归"），
+ * 因此本文件从 268 行缩到只覆盖**现存契约**：模型串解析 ／ 白名单校验 ／ provider 可用性判读 ／ 指引文本。
+ */
 
 let dir: string
 
@@ -15,99 +25,10 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe('cheap-worker-ops: 进度读写（续跑）', () => {
-  it('writeProgress 写 md + json；readProgress 读回', () => {
-    writeProgress(dir, 'scan', { round: 3, done: false, label: 'scan', model: 'minimax-cn-coding-plan/MiniMax-M3', updated: 't', lastResponse: '做了 X' })
-    const { md, json } = cheapWorkerProgressPaths(dir, 'scan')
-    expect(existsSync(md)).toBe(true)
-    expect(existsSync(json)).toBe(true)
-    const p = readProgress(dir, 'scan')
-    expect(p!.round).toBe(3)
-    expect(p!.lastResponse).toContain('X')
-    expect(readFileSync(json, 'utf-8')).toContain('MiniMax-M3')
-    // v1.24.0：文件名为 cheap-worker- 前缀（不兼容旧 loop-）
-    expect(json).toContain('cheap-worker-scan.json')
-  })
-
-  it('无进度返回 null', () => {
-    expect(readProgress(dir, 'nope')).toBeNull()
-  })
-})
-
-/**
- * writeFailedStatus（⑤ 第 40 件，S142 2026-09-25）—— 本模块最后一个未执行函数。
- *
- * 可达性取证：**有活调用点** = `src/tools/cheap-worker.ts` 保险阀终止分支
- * （`finishReason !== 'done'` ⇒ `max_rounds` ／ `restart_exceeded`），非死代码。
- * 残余性质 = **失败面**（不是防御性 `??`）⇒ 属挑靶四条里最值钱的一档。
- */
-describe('cheap-worker-ops: 失败状态落盘（writeFailedStatus，对齐 osp）', () => {
-  it('无既有进度 ⇒ 用文档化默认值落盘：done=true / status=failed / round 0', () => {
-    writeFailedStatus(dir, 'boom', { errorCode: 'max_rounds', errorMessage: 'Reached 100 rounds' })
-    const { json } = cheapWorkerProgressPaths(dir, 'boom')
-    expect(existsSync(json)).toBe(true)
-    const raw = JSON.parse(readFileSync(json, 'utf-8'))
-    expect(raw.status).toBe('failed')
-    // 失败即终态：`done=true` 让续跑者一眼看出"别再等它了"（对齐 osp writeFailedStatus）
-    expect(raw.done).toBe(true)
-    expect(raw.errorCode).toBe('max_rounds')
-    expect(raw.errorMessage).toBe('Reached 100 rounds')
-    // 无既有进度时的文档化兜底（不是抛错、也不是 undefined）
-    expect(raw.round).toBe(0)
-    expect(raw.model).toBe('')
-    expect(raw.lastResponse).toBe('')
-    expect(raw.label).toBe('boom')
-    expect(typeof raw.updated).toBe('string')
-  })
-
-  it('有既有进度 ⇒ 保留 round / model / lastResponse（只覆盖状态面，不抹掉历史）', () => {
-    writeProgress(dir, 'keep', {
-      round: 7,
-      done: false,
-      label: 'keep',
-      model: 'minimax-cn-coding-plan/MiniMax-M3',
-      updated: 't',
-      lastResponse: '已处理 7 轮，剩 X',
-    })
-    writeFailedStatus(dir, 'keep', { errorCode: 'restart_exceeded' })
-    const p = readProgress(dir, 'keep')!
-    // 历史读数必须留存 —— 否则"失败"会把"做到哪了"一起抹掉，后续续跑失去依据
-    expect(p.round).toBe(7)
-    expect(p.model).toBe('minimax-cn-coding-plan/MiniMax-M3')
-    expect(p.lastResponse).toContain('剩 X')
-    // 状态面被失败覆盖
-    expect(p.status).toBe('failed')
-    expect(p.done).toBe(true)
-    expect(p.errorCode).toBe('restart_exceeded')
-    // errorMessage 可选：不给就是 undefined（不是空串占位）
-    expect(p.errorMessage).toBeUndefined()
-  })
-
-  it('目录不存在也能落盘（mkdirSync recursive）；label 走脱敏', () => {
-    const fresh = mkdtempSync(join(tmpdir(), 'cheap-worker-fresh-'))
-    rmSync(join(fresh, 'AGENT_SESSIONS'), { recursive: true, force: true })
-    try {
-      writeFailedStatus(fresh, 'a:b/c', { errorCode: 'max_rounds' })
-      const { json } = cheapWorkerProgressPaths(fresh, 'a:b/c')
-      expect(json).toContain('cheap-worker-a-b-c.json')
-      expect(JSON.parse(readFileSync(json, 'utf-8')).errorCode).toBe('max_rounds')
-    } finally {
-      rmSync(fresh, { recursive: true, force: true })
-    }
-  })
-})
-
-describe('cheap-worker-ops: 模型解析 / stop token / 白名单（v1.24.0）', () => {
+describe('cheap-worker-ops: 模型串解析 / 白名单', () => {
   it('splitModel：provider/model 与 model-only', () => {
     expect(splitModel('minimax-cn-coding-plan/MiniMax-M3')).toEqual({ provider: 'minimax-cn-coding-plan', model: 'MiniMax-M3' })
     expect(splitModel('deepseek-v4-flash')).toEqual({ provider: undefined, model: 'deepseek-v4-flash' })
-  })
-
-  it('stop token 唯一且长', () => {
-    const a = newStopToken()
-    const b = newStopToken()
-    expect(a).not.toBe(b)
-    expect(a.startsWith('SERENITY_CHEAP_WORKER_DONE_')).toBe(true)
   })
 
   it('requireWhitelistedModel：白名单内通过；白名单外抛错（提示配置 cheap-worker.models）', () => {
@@ -117,89 +38,51 @@ describe('cheap-worker-ops: 模型解析 / stop token / 白名单（v1.24.0）',
     )
     expect(() => requireWhitelistedModel('other/model', ['minimax-cn-coding-plan/MiniMax-M3'])).toThrow(/cheap-worker\.models/)
   })
-})
 
-describe('cheap-worker-ops: 轮次 prompt', () => {
-  it('第一轮 vs 续跑轮（不重做）', () => {
-    const base = { root: dir, session: 'S101', label: 'scan', round: 2, stopToken: 'TOK' }
-    const first = buildRoundPrompt({ ...base, progress: null })
-    expect(first).toContain('round 2')
-    expect(first).toContain('first round')
-    const resume = buildRoundPrompt({ ...base, progress: { round: 1, done: false, label: 'scan', model: 'm', updated: 't', lastResponse: '已扫描 10 个' } })
-    expect(resume).toContain('never redo completed work')
-    expect(resume).toContain('TOK')
-  })
-
-  it('prompt EAP 化：固定详尽结构 + 阅读/文字编写类加载 eap 指令（v1.23.0 英化）', () => {
-    const p = buildRoundPrompt({ root: dir, label: 'docs', round: 1, stopToken: 'TOK', task: '阅读整理文档' })
-    expect(p).toContain('## Work rules (fixed every round, must follow)')
-    expect(p).toContain('reading/curating or text-writing work')
-    expect(p).toContain('load eap (acc-eap skill)')
-    expect(p).toContain('E↑ Explicit')
-    expect(p).toContain('R↓ Reconstructable')
-    expect(p).toContain('S↑ Stable')
-    expect(p).toContain('## Per-round report (fixed format, answer each item)')
-    expect(p).toContain('output only TOK')
+  /**
+   * 🔴 2026-10-14 负控：模型**不再可由调用方指定** ⇒ 模块层面**不得**再导出任何"按名字取模型"的能力。
+   * 这条钉的是"删除"本身（若将来有人把 per-call model 加回来，此处会红）。
+   */
+  it('🔴 反向钉：本模块不再导出 background 时代的任何符号', async () => {
+    const mod = await import('../src/cheap-worker-ops.js')
+    for (const gone of [
+      'newStopToken', 'buildRoundPrompt', 'readProgress', 'writeProgress', 'writeFailedStatus',
+      'cheapWorkerProgressPaths', 'sanitizeLabel', 'listActiveCheapWorkers',
+    ]) {
+      expect(Object.keys(mod), `已删除的导出不得复活：${gone}`).not.toContain(gone)
+    }
   })
 })
 
-describe('cheap-worker-ops: guide 指引 + 运行状态列表（WebUI 等待界面数据源）', () => {
-  it('CHEAP_WORKER_GUIDE 含 eap 要求 / 白名单 / jobs 并行 / 提示词规范 + 双模式（v1.31.3）', () => {
+describe('cheap-worker-ops: guide 指引（现只有前台形态）', () => {
+  it('含 eap 要求 / 单任务与并行两栏 / cap 10 / 提示词规范', () => {
     expect(CHEAP_WORKER_GUIDE).toContain('load eap and design the plan')
     expect(CHEAP_WORKER_GUIDE).toContain('Task decomposition (E↑ Explicit)')
-    expect(CHEAP_WORKER_GUIDE).toContain('Model whitelist (CCC-configured, mandatory)')
     expect(CHEAP_WORKER_GUIDE).toContain('cheap-worker.models')
-    // 2026-09-27（owner 具名令）：并行不再只属 background —— 前台也扇出
-    // 🆕 2026-09-29（owner 具名令）：前台上限 5 → 10（数值变了、语义没变；断言随之更新）
-    expect(CHEAP_WORKER_GUIDE).toContain('Parallel strategy (both modes)')
-    expect(CHEAP_WORKER_GUIDE).toContain('cap 10 (fixed)')
+    expect(CHEAP_WORKER_GUIDE).toContain('Parallel strategy')
+    expect(CHEAP_WORKER_GUIDE).toContain('10 (fixed, hardcoded)')
     expect(CHEAP_WORKER_GUIDE).toContain('cheap-worker-internal agent is also required to load eap')
-    expect(CHEAP_WORKER_GUIDE).toContain('the only completion condition = the worker echoes')
-    // v1.31.3 双模式：缺省 foreground / background 循环校验 / 选择判据
-    expect(CHEAP_WORKER_GUIDE).toContain('Two modes (v1.31.3; default = foreground)')
-    expect(CHEAP_WORKER_GUIDE).toContain('foreground (default)')
-    expect(CHEAP_WORKER_GUIDE).toContain('ctx.subagents.start("spawn")')
     expect(CHEAP_WORKER_GUIDE).toContain('LOW-COST models')
   })
 
-  it('listActiveCheapWorkers 列出进度文件（按 updated 倒序；坏文件跳过）', () => {
-    expect(listActiveCheapWorkers(dir)).toEqual([])
-    mkdirSync(join(dir, 'AGENT_SESSIONS'), { recursive: true })
-    // 直接写控制 updated 的进度文件（writeProgress 用实时时间戳，排序不可控）
-    writeFileSync(
-      join(dir, 'AGENT_SESSIONS', 'cheap-worker-a.json'),
-      JSON.stringify({ round: 2, done: true, label: 'a', model: 'm2', updated: '2026-08-14T10:00:02.000Z', lastResponse: '做 A' }),
-      'utf-8',
-    )
-    writeFileSync(
-      join(dir, 'AGENT_SESSIONS', 'cheap-worker-b.json'),
-      JSON.stringify({ round: 1, done: false, label: 'b', model: 'm1', updated: '2026-08-14T10:00:01.000Z', lastResponse: '做 B' }),
-      'utf-8',
-    )
-    // 旧 loop- 进度文件不列入（v1.24.0 不兼容）
-    writeFileSync(join(dir, 'AGENT_SESSIONS', 'loop-old.json'), JSON.stringify({ round: 9, done: false, label: 'old', model: 'm', updated: '2026-08-14T10:00:03.000Z', lastResponse: '旧' }), 'utf-8')
-    writeFileSync(join(dir, 'AGENT_SESSIONS', 'cheap-worker-broken.json'), '{ bad', 'utf-8')
-    const cheapWorkers = listActiveCheapWorkers(dir)
-    expect(cheapWorkers).toHaveLength(2)
-    expect(cheapWorkers[0]!.label).toBe('a') // updated 更新在前
-    expect(cheapWorkers[1]!.label).toBe('b')
-    expect(cheapWorkers[0]!.done).toBe(true)
-    expect(cheapWorkers[1]!.done).toBe(false)
-  })
-
-  it('sanitizeLabel 脱敏 Windows 非法字符（审计问题 17）', () => {
-    expect(sanitizeLabel('sqc: scan/v2')).toBe('sqc- scan-v2')
-    expect(sanitizeLabel('ok label')).toBe('ok label')
-    expect(sanitizeLabel('a?b*c:d')).toBe('a-b-c-d')
-    expect(sanitizeLabel('a.b.')).toBe('a.b')
-    expect(sanitizeLabel('x'.repeat(80))).toHaveLength(50)
-    // 按码点截断（审计问题 24）：代理对不切散，无 U+FFFD（toHaveLength 按 UTF-16 单位，emoji 双单位 → 用 [...str] 数码点）
-    expect(sanitizeLabel('a'.repeat(49) + '🎉' + 'b')).toBe('a'.repeat(49) + '🎉')
-    expect([...sanitizeLabel('🎉'.repeat(60))]).toHaveLength(50)
-    expect(sanitizeLabel('🎉'.repeat(60))).not.toContain('\uFFFD')
-    // cheapWorkerProgressPaths 用清洗后的 label
-    const p = cheapWorkerProgressPaths(dir, 'a:b/c')
-    expect(p.json).toContain('cheap-worker-a-b-c.json')
+  /**
+   * 🔴 2026-10-14（owner 令删 background）：指引里**不得**再把双模式／循环校验／进度文件**当作选项**介绍
+   * —— 否则模型会去用一个已不存在的模式（这正是"文档声称的实现形态"必须回代码取证的那条）。
+   *
+   * ⚠️ 措辞判据（自纠一次）：**不能**直接 `not.toContain('background')` —— 现行文案里有一句
+   * **否定式**表述（"no unattended/background run"），那是**如实说明它不存在**，恰恰该保留。
+   * 所以要钉的是"**把它当选项推销**"的形态，而不是这个词本身。
+   */
+  it('🔴 反向钉：不得再把 background 当选项推销（否定式说明可以）', () => {
+    expect(CHEAP_WORKER_GUIDE).not.toContain('Two modes')
+    expect(CHEAP_WORKER_GUIDE).not.toContain('mode="background"')
+    expect(CHEAP_WORKER_GUIDE).not.toMatch(/\|\s*background\s*\|/)          // 对照表里不得有 background 列
+    expect(CHEAP_WORKER_GUIDE).not.toContain('resume with the same label')  // 续跑承诺已不存在
+    expect(CHEAP_WORKER_GUIDE).not.toContain('stop token')
+    expect(CHEAP_WORKER_GUIDE).not.toContain('AGENT_SESSIONS/cheap-worker-') // 进度文件路径
+    // 正面表述必须在场（否则"删干净"可以靠整段清空来骗过上面的否定断言）
+    expect(CHEAP_WORKER_GUIDE).toContain('no loop, no completion code, no progress')
+    expect(CHEAP_WORKER_GUIDE).toContain('the caller cannot pass one')
   })
 })
 

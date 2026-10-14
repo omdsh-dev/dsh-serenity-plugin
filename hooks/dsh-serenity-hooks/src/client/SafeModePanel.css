@@ -421,84 +421,8 @@
   color: var(--dsw-alias-label-tertiary);
 }
 
-/* cheap-worker 运行状态区块 */
-
-.sp-cheapWorkersToggle {
-  flex: none;
-  padding: 2px 10px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-secondary);
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.sp-cheapWorkersToggle:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-.sp-cheapWorkersList {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-top: 2px;
-}
-
-.sp-cheapWorkerItem {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 8px;
-  min-width: 0;
-}
-
-.sp-cheapWorkerHead {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-}
-
-.sp-cheapWorkerLabel {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-primary);
-}
-
-.sp-cheapWorkerRound {
-  flex: none;
-  font-size: 11px;
-  color: var(--dsw-alias-label-dimmed);
-}
-
-.sp-cheapWorkerTime {
-  flex: none;
-  font-size: 11px;
-  color: var(--dsw-alias-label-dimmed);
-}
-
-.sp-cheapWorkerResp {
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sp-cheapWorkersMore {
-  font-size: 11px;
-  color: var(--dsw-alias-label-dimmed);
-  padding: 4px 12px;
-}
+/* 🔴 2026-10-14：`.sp-cheapWorkers*` / `.sp-cheapWorker*` 样式区块已随 background 模式删除
+   —— 那是「运行中 cheap-worker」列表（进度文件驱动）的样式，而进度文件不再有生产者。 */
 
 /* 底部提示（配置入口引导） */
 .sp-hint {

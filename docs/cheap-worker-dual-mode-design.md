@@ -1,5 +1,12 @@
 # cheap-worker 双模式（background / foreground）—— 方案设计 v0.3（ACC 自实现）
 
+> 🔴 **本文是历史设计记录，不是现状**（2026-10-14 起）。owner 于 2026-10-14 令「**删除后台运行能力**」⇒
+> **background 整条退场**（轮次循环 ／ stop-token 完成码 ／ 进度文件 ／ 重启计数 ／ `maxRounds`／`maxParallel`），
+> 现存只有 **foreground 一种形态**；`model` 参数亦已移除（模型一律读 CCC 配置）。
+> **现在的行为**以 `src/tools/cheap-worker.ts` 与包根 `CHANGELOG.md` 为准。本文**刻意保留当时的理由与否决项**
+> （docs/README.md ③：功能设计件是"当时为什么这么设计"的认知资产，不追改）。
+> 🔵 **不并入 `cheap-worker-design.md`**：两文各记一个阶段的取舍，合并会销毁其中一段决策链，且零功能收益。
+
 - **需求方**：某 CCC 的某角色 Bot 体系（2026-09-09）——「ACC subagent 工具支持按角色指定模型」
 - **设计方**：S142（dsp 维护会话）· 2026-09-09
 - **用户裁决链（R↓）**：

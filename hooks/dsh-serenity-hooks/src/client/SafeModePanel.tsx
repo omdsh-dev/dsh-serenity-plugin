@@ -53,18 +53,7 @@ interface SerenityStatus {
   cheapWorkerModel: string | null
 }
 
-/** cheap-worker 运行状态（/serenity/cheap-workers 数据源；WebUI 等待界面） */
-interface CheapWorkerRunInfo {
-  label: string
-  round: number
-  done: boolean
-  model: string
-  updated: string
-  lastResponse: string
-}
-
 const API = '/serenity/status'
-const CHEAP_WORKERS_API = '/serenity/cheap-workers'
 
 /** 盾牌 SVG（v1.24.5 校准：fill=none 纯描边；ON=绿 emerald / OFF=灰 label-secondary 由状态类控制） */
 const SHIELD_SVG = (
@@ -95,8 +84,6 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   const [busy, setBusy] = useState(false)
   const [open, setOpen] = useState(false)
-  const [cheapWorkers, setCheapWorkers] = useState<CheapWorkerRunInfo[]>([])
-  const [cheapWorkersOpen, setCheapWorkersOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   // v1.39.1：popover 改 `position:fixed` 后的视口坐标（null = 尚未测量，此时渲染在屏外）
@@ -117,28 +104,6 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   useEffect(() => {
     void refresh()
   }, [refresh])
-
-  // 弹层打开时轮询 cheap-worker 运行状态（约 3s 刷新；进度文件驱动）
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
-    const tick = async (): Promise<void> => {
-      try {
-        const r = await fetch(`${CHEAP_WORKERS_API}${qs}`, { headers: { accept: 'application/json' } })
-        const data = (await r.json()) as { cheapWorkers?: CheapWorkerRunInfo[] }
-        if (alive) setCheapWorkers(data.cheapWorkers ?? [])
-      } catch {
-        if (alive) setCheapWorkers([])
-      }
-    }
-    void tick()
-    const timer = setInterval(() => void tick(), 3000)
-    return () => {
-      alive = false
-      clearInterval(timer)
-    }
-  }, [open, sessionId])
 
   // 自绘 popover：外点 / Escape 关闭
   useEffect(() => {
@@ -219,7 +184,6 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   }
 
   const inCcc = status.root !== null
-  const runningCheapWorkers = cheapWorkers.filter((l) => !l.done)
 
   return (
     <div className={cx('sp-root')} ref={rootRef}>
@@ -322,51 +286,6 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       {status.safeModeOn ? '写工具已隐藏，无人值守安全航行' : '写工具可用（点击开启）'}
                     </span>
                   </div>
-                </div>
-
-                {/* ── 分组：CheapWorker 运行 ── */}
-                <div className={cx('sp-group')}>
-                  <div className={cx('sp-groupHead')}>
-                    <h3 className={cx('sp-groupTitle')}>CheapWorker 运行</h3>
-                    {cheapWorkers.length > 0 && (
-                      <button
-                        type="button"
-                        className={cx('sp-cheapWorkersToggle')}
-                        onClick={() => setCheapWorkersOpen((v) => !v)}
-                      >
-                        {cheapWorkersOpen ? '收起' : '详情'}
-                      </button>
-                    )}
-                  </div>
-                  <div className={cx('sp-rows')}>
-                    <div className={cx('sp-row')}>
-                      <span className={cx('sp-label')}>状态</span>
-                      <span className={cx('sp-value')}>
-                        {runningCheapWorkers.length > 0
-                          ? `运行中 ${runningCheapWorkers.length}${cheapWorkers.length > 0 ? ` / 共 ${cheapWorkers.length}` : ''}`
-                          : '无运行中 cheap-worker'}
-                      </span>
-                    </div>
-                  </div>
-                  {cheapWorkersOpen && (
-                    <div className={cx('sp-cheapWorkersList')}>
-                      {cheapWorkers.slice(0, 3).map((l) => (
-                        <div key={l.label} className={cx('sp-cheapWorkerItem')}>
-                          <div className={cx('sp-cheapWorkerHead')}>
-                            <span className={cx('sp-cheapWorkerLabel')} title={l.label}>{l.label}</span>
-                            <span className={cx('sp-cheapWorkerRound')}>{l.done ? '✓ 完成' : `R${l.round}`}</span>
-                            <span className={cx('sp-cheapWorkerTime')}>{new Date(l.updated).toLocaleTimeString()}</span>
-                          </div>
-                          <div className={cx('sp-cheapWorkerResp')} title={l.lastResponse}>
-                            {l.lastResponse.slice(0, 80) || (l.done ? '已完成' : '（等待首轮响应）')}
-                          </div>
-                        </div>
-                      ))}
-                      {cheapWorkers.length > 3 && (
-                        <div className={cx('sp-cheapWorkersMore')}>… 共 {cheapWorkers.length} 个 cheap-worker（其余见等待界面）</div>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* ── 提示：配置在 DSH 设置面板 ── */}

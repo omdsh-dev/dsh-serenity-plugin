@@ -122,7 +122,7 @@
 | **宿主补丁 / provider** | `deepseek-vision-patch.ts`(L2) / `opencode-provider.ts`(L2) / `web-fetch-provider.ts`(L2) | 给 deepseek 路由补 image 输入；opencode 路由自动补头/建路由；fetch 地址白名单解析器（放行 fake-ip 段） | 无（宿主 settings / provider 补丁） | ✅ 各自 |
 | **面宿主** | `face-host.ts`(L2) | 对外面 listener 的**唯一启停真相源**（`startFace`/`stopFace`/`FaceSpec`） | 无（绑各面端口） | ✅ `face-host` |
 | **配置与设置** | `config-ops.ts`(L2) / `settings-section.ts`(L2) / `localstore-ops.ts`(L2) | 插件**全局**配置读写；宿主设置面板 ns=`serenity-hooks`；CCC localstore 读写 ＋ git 策略 | 文件：`~/.dsh/serenity-hooks.json` ／ CCC `localstore.json` | ✅ `config-ops` / `settings-section` / `localstore` |
-| **工具后端（`*-ops`）** | `git-ops.ts` / `fs-ops.ts` / `kit-ops.ts` / `container-status.ts` / `cheap-worker-ops.ts` / `cheap-worker-preset-inherit.ts`（均 L2） | 各工具的实现后端；`container-status` = CCC 身份/三原则/注册表两判据/时钟；`cheap-worker-ops` = 杂工进度/提示词/白名单判定 | 无（工具后端）／文件 | ✅ `ops` / `fs-ops` / `container-status` / `cheap-worker-ops` / `cheap-worker-preset` |
+| **工具后端（`*-ops`）** | `git-ops.ts` / `fs-ops.ts` / `kit-ops.ts` / `container-status.ts` / `cheap-worker-ops.ts` / `cheap-worker-preset-inherit.ts`（均 L2） | 各工具的实现后端；`container-status` = CCC 身份/三原则/注册表两判据/时钟；`cheap-worker-ops` = 模型串解析/白名单校验/provider 可用性判读（**进度文件与提示词已随 background 退场**） | 无（工具后端）／文件 | ✅ `ops` / `fs-ops` / `container-status` / `cheap-worker-ops` / `cheap-worker-preset` |
 | **发现与消息** | `skills-discovery.ts`(L2) / `message-source.ts`(L1) | 入口 skill/`SKILL.md` 发现与截断；ACC 注入消息 `kind` 的**单一真相源** | 文件 ／ 无 | ✅ 各自 |
 
 #### 2.3.1 外露面总表（`ports.ts:FACE_PORTS`）
@@ -153,7 +153,7 @@
 | 文件 | 工具名 | 一句话职责 | 可见性条件 | 被测 |
 |---|---|---|---|---|
 | `tools/trajectory.ts` | `container_trajectory` | 轨迹生命周期（list/show/create/use/rebuild）＋ 跨轨迹投递（send-now/send-later）＋ CRO 指南 | 总是可见 | ✅ `cro-guide` / `session-title`（直接 import） |
-| `tools/cheap-worker.ts` | `cheap-worker` | 委派 worker agent（foreground / background 双模式） | 总是可见；`model` 须在 CCC `cheap-worker.models` 白名单 | ✅ `cheap-worker-foreground` |
+| `tools/cheap-worker.ts` | `cheap-worker` | 委派 worker agent（**一次前台委派**；无循环／无完成码／无进度文件） | 总是可见；模型一律读 CCC `cheap-worker.models`（**无 `model` 参数**） | ✅ `cheap-worker-foreground` |
 | `tools/cc-fs.ts` | `container_fs` | 容器文件系统 15 子命令（路径逃逸自动阻断） | 总是可见 | ⚠️ 无镜像测试（INDIRECT_COVERED ＋ `fs-ops.test`） |
 | `tools/git.ts` | `container_git` | CCC git status/commit/push/log/pull/diff | 总是可见 | ⚠️ 无镜像测试（INDIRECT_COVERED ＋ `ops.test`） |
 | `tools/msm.ts` | `msm` | 执行/发现已注册 MSM（单入口 ＋ 模糊候选） | 总是可见；skiff 角色另受 `msms` 白名单门控 | ⚠️ 无镜像测试（INDIRECT_COVERED） |
@@ -172,7 +172,7 @@
 - **顺序约束**：`registerImChannel(weixinChannel)` 必须早于工具装配 —— `createImBridgeTool()` 的 description 读 `imChannelIds()`。
 - **清单三处一致（单一真相源）**：`src/invariant.ts:REGISTERED_TOOLS` ＋ `dsh.plugin.json` 的 `contributes.tools` 双列 **13** 名，由 `verifyToolConsistency()` 校验；`tests/register.test.ts` 断言 `register` 被调 **12** 次（`diagram` 关着的缺省态；开着则 13）。
 - **条件可见的统一实现**：`agent.ctx.tools.restrict({ deny: [...] })`（**从模型清单移除**，不是"看得到但被拒"），调用点全在 `seams/context.ts`（会话就绪 ＋ pre-step）：`im-bridge` ← `syncImBridgeVisibility`（判据 `hasEnabledImChannel`）／ `acc-diag` ← `syncExclusiveToolsVisibility`（判据 `EXCLUSIVE_TOOL_NAMES` ＋ `ccc.ts:readExclusiveTools`，fail-closed）。全体工具另受 `syncSafeModeRestriction`（`SAFE_MODE_DENY_TOOLS = ['bash']`）与 skiff 角色双白名单（pre-execute guard）两道 restrict。
-- **工具 → 实现**（薄壳证据）：`acc-diag`→`diag-ops:runAccDiag`｜`cc-fs`→`fs-ops:runCcFs`｜`git`→`git-ops:runGit`｜`kit`→`kit-ops:runKit`｜`localstore`→`localstore-ops:runLocalStore`｜`ontology`→`ontology/engine:runOntologyCli`（**同步**、纯 node 内建依赖）｜`msm`/`container_admin`→`msm-ops:runMsm(Async)`｜`cheap-worker`→`cheap-worker-ops:*` ＋ `host/access:hostSubagents` ＋ `agent-idle:waitAgentIdle`｜`im-bridge`→`im-bridge:runImBridge`｜`trajectory`→`trajectory-ops:*` ＋ `rebuild:queueRebuild`（**动态 import**）＋ `wake-registry:addWake` ＋ `wake-scheduler:sendToTrajectory` ＋ `trajectory-bound:*`。
+- **工具 → 实现**（薄壳证据）：`acc-diag`→`diag-ops:runAccDiag`｜`cc-fs`→`fs-ops:runCcFs`｜`git`→`git-ops:runGit`｜`kit`→`kit-ops:runKit`｜`localstore`→`localstore-ops:runLocalStore`｜`ontology`→`ontology/engine:runOntologyCli`（**同步**、纯 node 内建依赖）｜`msm`/`container_admin`→`msm-ops:runMsm(Async)`｜`cheap-worker`→`cheap-worker-ops:*` ＋ `host/access:hostSubagents`｜`im-bridge`→`im-bridge:runImBridge`｜`trajectory`→`trajectory-ops:*` ＋ `rebuild:queueRebuild`（**动态 import**）＋ `wake-registry:addWake` ＋ `wake-scheduler:sendToTrajectory` ＋ `trajectory-bound:*`。
 
 ### 2.5 L1 · 轨迹／会话／唤醒核心域（18 个文件）
 
@@ -701,7 +701,7 @@
 | `im-bridge` | **不抛** ⇒ **结构化** `{ok:false, code:'CCC_UNRESOLVED'}` | 稳定错误码 ＋ 稳定语义 |
 
 **其余用例（在 CCC 内的正常面）**：`container_fs root` ⇒ 返回值**逐字等于夹具目录**（最强形态：不是"有个 root 字段"，而是"根解析结果 = 我造的那个目录"）｜`container_git status` ⇒ **真 git ＋ 真解析**（见下方首跑红）｜`dashboard time` ⇒ `epoch_ms` 与 `Date.now()` 相差 <5s（**正控式**：常量返回值也能让"字段存在"变绿）｜`localstore list` ⇒ `{scope:'credential', keys:[]}`（**空库是真实初态**）｜`im-bridge` 未知通道 ⇒ `CHANNEL_UNKNOWN` 且提示含通道名。
-**cheap-worker 三态**：数组项缺 `label` ⇒ `parseJobs` 返回 null ⇒ **响亮抛错**（且**没有任何子代理被起**）｜合法 jobs 但**超 `maxParallel`** ⇒ 抛上限错误（夹具把 `maxParallel` 调成 1 ⇒ **不需要起任何子代理**就能走到这条校验）｜🔴 **登记一条不可达边界**（见下）。
+**cheap-worker 现只有前台一态**（2026-10-14：background 整条退场）：`jobs` 非法（非数组／空／项缺 `task`）⇒ `parseForegroundJobs` 返回 null ⇒ **响亮抛错**（且**没有任何子代理被起**）｜合法 jobs 但**超前台硬上限 10** ⇒ 抛上限错误（**不需要起任何子代理**就能走到这条校验）。🔴 **登记**（见下）。
 **契约面一条**：非法 `enum` ⇒ 抛 `ToolArgsError` ——🔵 这条是"**本件用真 wrapper 而非 identity 桩**"的直接回报（桩掉 `defineTool` 就没有这层校验），与 §2.7q 的选择一致。
 
 🔴 **登记一条"经工具面不可达"（本件把散文变成了机械读数）**：`parseJobs` 首行是 `if (!Array.isArray(raw) || raw.length === 0) return null`，**但**工具面声明 `jobs: { type: 'array' }` ⇒ 真 wrapper **在执行前**就按 schema 拒掉非数组 ⇒ 该支线**经工具面不可达**（`parseJobs` 未导出、唯一调用点就在本 `execute` 内）⇒ **刻意不硬凑**（house rule：不得把"从不发生"固化成"期望形态"）。✅ 本件用一条**正控**把它钉成读数：喂 `jobs: 'nope'` ⇒ 得到的是 `ToolArgsError`（**不是**那条 `parseJobs` 错误）⇒ 不可达性**可复现**。

@@ -1,96 +1,10 @@
 /**
  * cheap-worker-ops.ts — cheap-worker（杂工）纯逻辑层（零 DSH 依赖，可独立单测）
  *
- * v1.24.0：loop（牛马）→ cheap-worker（杂工）重命名。语义对齐 osp loop：
- * 进度文件（cheap-worker-<label>.md/.json）、续跑、轮次 prompt 结构、stop token。
- * 不兼容旧 loop- 进度文件（用户拍板：仅新 cheap-worker- 前缀）。
+ * 🆕 2026-10-14（owner 令「删除后台运行能力」）：**进度文件 / stop token / 轮次循环**整族已退场 ——
+ * 它们**只**服务于 background 模式。本模块现存 = 前台委派真正需要的三件：
+ * 模型串解析 ／ 白名单校验 ／ provider 可用性判读（＋ 使用指引文本）。
  */
-
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { randomBytes } from 'node:crypto'
-import { isoLocal } from './time.js'
-
-interface CheapWorkerProgress {
-  round: number
-  done: boolean
-  label: string
-  model: string
-  updated: string
-  lastResponse: string
-  /** 对齐 osp writeFailedStatus：failed 时 done=true + status=failed + errorCode */
-  status?: 'running' | 'done' | 'failed'
-  errorCode?: string
-  errorMessage?: string
-}
-
-/** label 脱敏（Windows 审计问题 17）：非法字符 → '-'，去尾点/空格，限长（按码点截断，修复代理对切散 U+FFFD） */
-export function sanitizeLabel(label: string): string {
-  return [...label
-    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
-    .replace(/[ .]+$/g, '')]
-    .slice(0, 50)
-    .join('')
-}
-
-export function cheapWorkerProgressPaths(root: string, label: string): { md: string; json: string } {
-  const dir = join(root, 'AGENT_SESSIONS')
-  const safe = sanitizeLabel(label)
-  return { md: join(dir, `cheap-worker-${safe}.md`), json: join(dir, `cheap-worker-${safe}.json`) }
-}
-
-/** 读取进度（续跑）；无文件返回 round 0 */
-export function readProgress(root: string, label: string): CheapWorkerProgress | null {
-  const { json } = cheapWorkerProgressPaths(root, label)
-  if (!existsSync(json)) return null
-  try {
-    return JSON.parse(readFileSync(json, 'utf-8')) as CheapWorkerProgress
-  } catch {
-    return null
-  }
-}
-
-export function writeProgress(root: string, label: string, p: CheapWorkerProgress): void {
-  const { md, json } = cheapWorkerProgressPaths(root, label)
-  mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
-  writeFileSync(
-    json,
-    JSON.stringify({ ...p, status: p.status ?? 'running', updated: isoLocal() }, null, 2) + '\n',
-    'utf-8',
-  )
-  const lines = [`# cheap-worker: ${label}`, `- Model: ${p.model}`, `- Round: ${p.round}`, `- Done: ${p.done}`, '', `## Latest response`, '', p.lastResponse, '']
-  writeFileSync(md, lines.join('\n'), 'utf-8')
-}
-
-/** 失败状态落盘（对齐 osp writeFailedStatus：done=true / status=failed / errorCode） */
-export function writeFailedStatus(root: string, label: string, info: { errorCode: string; errorMessage?: string }): void {
-  const { json } = cheapWorkerProgressPaths(root, label)
-  mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
-  const prev = readProgress(root, label)
-  writeFileSync(
-    json,
-    JSON.stringify(
-      {
-        round: prev?.round ?? 0,
-        done: true,
-        label,
-        model: prev?.model ?? '',
-        status: 'failed',
-        errorCode: info.errorCode,
-        errorMessage: info.errorMessage,
-        updated: isoLocal(),
-        lastResponse: prev?.lastResponse ?? '',
-      },
-      null,
-      2,
-    ) + '\n',
-    'utf-8',
-  )
-}
-
-export function newStopToken(): string {
-  return `SERENITY_CHEAP_WORKER_DONE_${randomBytes(8).toString('hex')}`
-}
 
 /** 解析 model 字符串（provider/model）→ {provider, model}；无 / 视为 model-only */
 export function splitModel(model: string): { provider: string | undefined; model: string } {
@@ -178,85 +92,46 @@ export function providerAvailabilityError(
   ].join('\n')
 }
 
-/** 轮次 prompt（对齐老 loop 结构：回顾进度 → 自由工作 → 汇报；S134 EAP 化：固定详尽） */
-export function buildRoundPrompt(opts: {
-  root: string
-  session?: string
-  label: string
-  round: number
-  stopToken: string
-  progress?: CheapWorkerProgress | null
-  task?: string
-}): string {
-  const { root, session, label, round, stopToken, progress, task } = opts
-  const resumeNote =
-    progress && progress.round > 0
-      ? `Previous round (round ${progress.round}) completed: ${progress.lastResponse.slice(0, 300)}\nAlways continue from where you left off; never redo completed work.`
-      : 'This is the first round.'
-  const sessionNote = session ? `Work session: ${session} (progress recorded in AGENT_SESSIONS/${session}/SESSION.md)` : ''
-  const taskNote = task ? `Task: ${task}` : `Task: follow the work corresponding to label "${label}" (if a work session exists, read SESSION.md first to clarify the goal)`
-  return `# ${label} — cheap-worker round ${round}
-
-CCC root: ${root}
-${sessionNote}
-${taskNote}
-${resumeNote}
-
-## Work rules (fixed every round, must follow)
-1. Work freely within this round: read files, modify code, execute commands — use every means to advance the task.
-2. If this task is **reading/curating or text-writing work** (extracting from files, summarizing, writing docs, generating text, etc.),
-   first load eap (acc-eap skill) and organize output per the EAP standard:
-   - E↑ Explicit: entities/variables clearly defined, relationships with direction and cardinality, boundaries drawn, no ambiguous words
-   - R↓ Reconstructable: key conclusions record sources and reasoning, rebuildable by later agents
-   - S↑ Stable: output structure regenerates repeatably, no reliance on implicit context
-3. Reports must be concrete and verifiable — no filler.
-
-## Per-round report (fixed format, answer each item)
-1. What was done this round (concrete)
-2. Next-step plan
-3. Whether the task is complete (if complete, output only ${stopToken})
-
-If the task is complete, output only ${stopToken}.`
-}
-
 /**
- * cheap-worker 规模化使用指引（guide 子命令输出；S134 继承 + v1.24.0 更新）：
- * 使用 cheap-worker 前必须先加载 eap 设计方案；并行策略（jobs 编排）；提示词规范（详尽固定 EAP）；
- * 阅读/文字编写类 cheap-worker 内部也加载 eap。
+ * cheap-worker 规模化使用指引（guide 子命令输出）。
+ *
+ * 🆕 2026-10-14：**双模式段已整段退场**（owner 令「删除后台运行能力」）。本指引只描述现行机制：
+ * 前台委派（单任务）／前台并行扇出（jobs）／白名单与 provider 预检。
  */
 export const CHEAP_WORKER_GUIDE = `# cheap-worker — Scale-Up Usage Guide (guide)
 
-## Two modes (v1.31.3; default = foreground)
-| | foreground (default) | background |
+## What it is
+One delegation primitive: **foreground spawn**. The host starts child agent(s) through its delegation
+service, awaits them, and returns their final text. There is no loop, no completion code, no progress
+file, and no unattended/background run.
+
+| | single | parallel (jobs) |
 |---|---|---|
-| What | child agent(s) run the task ONCE and return their final text (jobs=[...] ⇒ parallel, cap 10) | loop-validated worker: hard while-loop + random completion code |
-| Use when | you need result(s) back now (per-case testers, single conversions, parallel fan-out) | long/unattended work needing anti-early-finish, resumability, or parallel jobs |
-| Loop / validation | none | stop-token is the ONLY completion condition; round cap (default 100); auto-restart (≤100) |
-| Progress file | none | AGENT_SESSIONS/cheap-worker-<label>.md/.json (same label resumes) |
-| Parallel jobs | **yes** — jobs=[{task,label?,model?},...], **cap 10 (fixed)** | yes (jobs=[...], cheap-worker.maxParallel default 10) |
-| Mechanism | host delegation service ctx.subagents.start("spawn") + agentOptions | ctx.agents.create + internal while-loop |
-| Model source | CCC cheap-worker.models whitelist (same for both) | same |
+| Call | cheap-worker(task, [label]) | cheap-worker(jobs=[{task, label?}, ...]) |
+| Behaviour | one child runs the task once | all children start at once, results keep your order |
+| Cap | — | **10 (fixed, hardcoded)** |
+| Model | CCC config (single source) | same |
 
 ## ⚠️ Before using: load eap and design the plan
 Before calling cheap-worker, load eap (acc-eap skill) and design the "scale-up cheap-worker plan" based on the EAP framework.
 
 ### 1. Task decomposition (E↑ Explicit)
 - Split large tasks into explicit subtasks: each subtask defines goal / input / boundaries (what to do, what not to do) / acceptance criteria
-- Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel (both modes)
+- Make dependencies explicit: dependent tasks run serially, independent ones can run in parallel via \`jobs\`
 
 ### 2. Prompt design (cheap-worker's task parameter)
 - task must be detailed, fixed, and EAP-compliant: clear goal, drawn boundaries, decidable acceptance criteria
-- foreground mode: the child does NOT share your conversation — restate everything it needs in task
+- the child does NOT share your conversation — restate everything it needs in task
 - Anti-example "handle this file" — ambiguous; good example "read <path>, extract all rows of the「关键决策」table,
   output a JSON array (fields id/conclusion/evidence), do not modify the original file"
 - Reading/curating or text-writing work (extracting from files, summarizing, writing docs, generating text, etc.):
   the cheap-worker-internal agent is also required to load eap and organize output per the EAP standard
 
-### 3. Model whitelist (CCC-configured, mandatory)
-- cheap-worker only uses models listed in .opencode/serenity.json "cheap-worker.models" — never arbitrary models
+### 3. Model (CCC-configured, not selectable per call)
+- The model is read from .opencode/serenity.json "cheap-worker.models" — **the caller cannot pass one**
+  (there is no "model" parameter). "cheap-worker.defaultModel" names which entry is used; it falls back to models[0].
 - The CCC is expected to point this whitelist at LOW-COST models: cheap-worker is the bulk-execution channel
-- background mode: recursive subagents inside a worker inherit the worker's model automatically (DSH native)
-- foreground mode: the child is started through the host delegation service with the resolved model
+- A child's own recursive subagents inherit the child's model automatically (DSH native)
 
 ### 3b. 🔴 Provider availability (per-machine — the whitelist is NOT enough)
 - The whitelist lives in the **CCC** ("serenity.json", it **travels with the repository**), but provider
@@ -265,65 +140,17 @@ Before calling cheap-worker, load eap (acc-eap skill) and design the "scale-up c
 - Before spawning, cheap-worker verifies the provider of the resolved model against the adapters registered
   **on this machine**; if it is missing it reports the requested model, where it is configured, **the
   providers that ARE available here**, any declared-but-dormant route (with its settings namespace), and the
-  exact fix — foreground puts this in "diagnostic", background throws it.
+  exact fix — delivered in the result's "diagnostic" field (never an opaque failure, never a created child).
 - ⇒ If you see "has no adapter registered on this machine": edit ".opencode/serenity.json" "cheap-worker.models"
   (and "cheap-worker.defaultModel") to a provider listed as available, or activate/register the provider on this
   machine. **Do not retry the same call unchanged** — it fails identically.
 
-### 4. Parallel strategy (both modes)
-- Independent subtasks can run in parallel:
-  · **foreground** — cheap-worker(jobs=[{task,label?,model?},...]) ⇒ fan-out of custom-model subagents, **cap 10**,
-    results come back **in the order you passed them** (label is only a display name here; per-job "model" allowed)
-  · **background** — cheap-worker(mode="background", jobs=[...]): each job gets its own label + task + stop token + progress file
-- Concurrency safety guaranteed: unique sessionId (cheap-worker-<label>-<uuid>), progress files isolated per label
-  (AGENT_SESSIONS/cheap-worker-<label>.json) — same label resumes, different labels never interfere
-- Parallel cap: **foreground 10 (fixed)** / background cheap-worker.maxParallel (default 10 — cheap models are cheap)
-- Aggregation: foreground returns all outputs in one result; background: after each parallel job produces progress, the main agent merges (or spawns one aggregation cheap-worker)
-- For programmable pipeline/phase orchestration at scale, use the platform's workflow tool instead
+### 4. Parallel strategy
+- Independent subtasks: cheap-worker(jobs=[{task,label?},...]) ⇒ fan-out, **cap 10**, results come back
+  **in the order you passed them** (label is only a display name).
+- For programmable pipeline/phase orchestration at scale, use the platform's workflow tool instead.
 
 ## Completion criteria
-- foreground: the child's run settles; done=true only when stopReason="completed" (otherwise read diagnostic)
-- background (osp loop standard): the only completion condition = the worker echoes this round's random verification
-  code (stop token); dialogue round cap (default 100, osp fail-safe, forced stop beyond the cap, resumable);
-  automatic restart on abnormal agent stop (≤100 restarts, anti-infinite-loop)
-
-## Waiting UI
-- The WebUI session-header Serenity detail card shows running background cheapWorkers's progress
-  (label / round / last response), one line per parallel job, ~3s refresh (foreground mode writes no progress)
+- The child's run settles; done=true only when stopReason="completed" — otherwise read "diagnostic"
+  (and "output" for whatever partial text was produced).
 `
-
-/** cheap-worker 运行状态（进度文件摘要；WebUI 等待界面数据源） */
-interface CheapWorkerRunInfo {
-  label: string
-  round: number
-  done: boolean
-  model: string
-  updated: string
-  lastResponse: string
-}
-
-/** 列出 AGENT_SESSIONS/cheap-worker-*.json 的全部进度（按 updated 倒序；坏文件跳过） */
-export function listActiveCheapWorkers(root: string): CheapWorkerRunInfo[] {
-  const dir = join(root, 'AGENT_SESSIONS')
-  if (!existsSync(dir)) return []
-  const out: CheapWorkerRunInfo[] = []
-  for (const entry of readdirSync(dir)) {
-    if (!entry.startsWith('cheap-worker-') || !entry.endsWith('.json')) continue
-    try {
-      const data = JSON.parse(readFileSync(join(dir, entry), 'utf-8')) as CheapWorkerRunInfo
-      if (typeof data.label !== 'string' || typeof data.round !== 'number') continue
-      out.push({
-        label: data.label,
-        round: data.round,
-        done: data.done === true,
-        model: typeof data.model === 'string' ? data.model : '',
-        updated: typeof data.updated === 'string' ? data.updated : '',
-        lastResponse: typeof data.lastResponse === 'string' ? data.lastResponse : '',
-      })
-    } catch {
-      /* 坏进度文件跳过 */
-    }
-  }
-  out.sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated))
-  return out
-}

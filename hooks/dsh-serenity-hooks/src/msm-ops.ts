@@ -202,21 +202,24 @@ Below are all available configuration sections.
 ── 1. cheap-worker.models ──
 cheap-worker（杂工）工具可用模型白名单（provider/model 列表）；未配置时 cheap-worker 报错要求配置。
 缺省模型 = models[0]（可用 cheap-worker.defaultModel 指定，必须 ∈ models）。
-**CCC 应把该白名单指向低成本模型**——cheap-worker 是批量执行通道（v1.31.3 双模式共用同一白名单）。
+**CCC 应把该白名单指向低成本模型**——cheap-worker 是批量执行通道。
+🔴 模型**不可由调用方指定**（工具无 model 参数）⇒ 本白名单是模型选择的唯一来源。
 
-  Modes（v1.31.3，缺省 foreground）:
-    mode="foreground"（缺省）：一次前台串行委派（宿主委派服务 ctx.subagents.start("spawn") +
+  Behaviour（2026-10-14：background 模式已删除，只剩前台委派）:
+    cheap-worker(task, [label])：一次前台委派（宿主委派服务 ctx.subagents.start("spawn") +
       agentOptions 注入模型）——不循环、不校验完成码、不写进度文件；返回子 agent 最终文本。
-      适合"一次调用一次结果"（逐用例回归、单次转换）。
-    mode="background"：既有循环校验实现（内部 while 硬循环 + 随机完成码唯一判据 + 轮次上限
-      默认 100 可续跑 + 异常自动重启 ≤100 + 进度文件 AGENT_SESSIONS/cheap-worker-<label>.md/.json +
-      jobs 并行 maxParallel 默认 10）。适合长任务/无人值守/需抗提前收工。
+    cheap-worker(jobs=[{task,label?},...])：并行扇出，上限 10（硬编码），结果保持传入顺序。
+    ⇒ **无 background 模式、无进度文件、无续跑**（owner 2026-10-14 令「删除后台运行能力」）。
+
+  Old key（兼容）:
+    读不到 "cheap-worker" 时**回落到旧键 "handyman"**（同形状：models / defaultModel）。
+    旧键里的 "maxRounds"／"maxParallel" 已随 background 退场，留着无害但不再生效。
 
   Config:
     { "cheap-worker": { "models": ["provider/model-name"] } }
 
   Example:
-    { "cheap-worker": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3", "maxRounds": 100, "maxParallel": 10 } }
+    { "cheap-worker": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3" } }
 
 ── 2. sessionKeeper.threshold / sessionKeeper.sessionMdMaxKB ──
 trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积分阈值（非 headless 主 agent）。

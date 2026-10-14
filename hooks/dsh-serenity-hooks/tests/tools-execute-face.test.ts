@@ -237,35 +237,35 @@ describe('tools/*：`execute` 通路（⑤ 第 33 件）', () => {
   })
 
   // ───────────────────────────────────────────────────────────────────────────
-  // D. cheap-worker：`jobs` 编排前的解析与上限校验（parseJobs —— 此前零执行）
+  // D. cheap-worker：`jobs` 编排前的解析与上限校验
+  // 🔴 2026-10-14：原用例走的是 background 路径（`parseJobs` ＋ `maxParallel`），
+  //    那半已随 owner「删除后台运行能力」退场 ⇒ 改钉**现存**的 jobs 校验（前台扇出）。
   // ───────────────────────────────────────────────────────────────────────────
 
-  describe('D · cheap-worker 的 `parseJobs` 与上限校验', () => {
+  describe('D · cheap-worker 的 jobs 校验与上限', () => {
     const cheapWorker = () => execOf(createCheapWorkerTool(ctx), 'cheap-worker')
 
-    it('数组项缺 label ⇒ parseJobs 返回 null ⇒ **响亮抛错**（且没有任何子代理被起）', async () => {
+    it('数组项缺 task ⇒ **响亮抛错**（且没有任何子代理被起）', async () => {
       await expect(
-        cheapWorker().execute({ mode: 'background', jobs: [{ task: 't' }] }, execIn(ccc)),
-      ).rejects.toThrow('jobs must be [{task, label, model?}, ...]')
+        cheapWorker().execute({ jobs: [{ label: 'only-label' }] }, execIn(ccc)),
+      ).rejects.toThrow('jobs must be [{task, label?}, ...]')
     })
 
-    it('合法 jobs 但**超过 maxParallel** ⇒ 抛上限错误（夹具把 maxParallel 调成 1）', async () => {
+    it('合法 jobs 但**超过并行上限 10** ⇒ 抛上限错误', async () => {
+      const jobs = Array.from({ length: 11 }, (_, n) => ({ task: `t${n}`, label: `l${n}` }))
       await expect(
-        cheapWorker().execute(
-          { mode: 'background', jobs: [{ task: 'a', label: 'a' }, { task: 'b', label: 'b' }] },
-          execIn(ccc),
-        ),
-      ).rejects.toThrow('2 jobs exceed maxParallel 1')
+        cheapWorker().execute({ jobs }, execIn(ccc)),
+      ).rejects.toThrow('11 jobs exceed the parallel cap 10')
     })
 
-    it('🔴 登记一条**不可达边界**：非数组 `jobs` 到不了 parseJobs —— wrapper 先以 ToolArgsError 拒绝', async () => {
-      // parseJobs 的首行是 `if (!Array.isArray(raw) || raw.length === 0) return null`。
+    it('🔴 登记一条**不可达边界**：非数组 `jobs` 到不了 parseForegroundJobs —— wrapper 先以 ToolArgsError 拒绝', async () => {
+      // parseForegroundJobs 的首行是 `if (!Array.isArray(raw) || raw.length === 0) return null`。
       // 但工具面声明 `jobs: { type: 'array' }` ⇒ 真 wrapper 在执行前就按 schema 拒掉非数组。
-      // ⇒ 该支线**经工具面不可达**（它只在"有人绕过工具面直接调 parseJobs"时才可能命中，
-      //    而 parseJobs 未导出、唯一调用点就在本 execute 内）。
+      // ⇒ 该支线**经工具面不可达**（它只在"有人绕过工具面直接调它"时才可能命中，
+      //    而该函数未导出、唯一调用点就在本 execute 内）。
       // 🔵 本用例把这条"不可达"**变成机械读数**，而不是写在散文里（house rule：别把"从不发生"固化成期望形态）。
       await expect(
-        cheapWorker().execute({ mode: 'background', jobs: 'nope' }, execIn(ccc)),
+        cheapWorker().execute({ jobs: 'nope' }, execIn(ccc)),
       ).rejects.toBeInstanceOf(ToolArgsError)
     })
   })

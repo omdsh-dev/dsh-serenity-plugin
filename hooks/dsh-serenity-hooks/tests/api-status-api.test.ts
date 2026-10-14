@@ -192,12 +192,13 @@ afterEach(() => {
 })
 
 describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
-  it('🔴 接线自证：9 条 `/serenity/*` 路由真被注册，且全部落在 `/serenity/` 前缀下', () => {
+  it('🔴 接线自证：8 条 `/serenity/*` 路由真被注册，且全部落在 `/serenity/` 前缀下', () => {
     return bootApi().then(async (api) => {
       try {
+        // 🔴 2026-10-14：`/serenity/cheap-workers` 已随 background 模式删除（它是**进度文件**的读口，
+        //    而进度文件不再有生产者）⇒ 期望值从 9 条降为 8 条。**该路径必须不再被注册**（见下一条否定断言）。
         const expected = [
           '/serenity/status',
-          '/serenity/cheap-workers',
           '/serenity/image-upload',
           '/serenity/file-upload',
           '/serenity/config',
@@ -207,6 +208,8 @@ describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
           '/serenity/session-cleanup',
         ]
         for (const p of expected) expect(api.routes, `未注册：${p}`).toContain(p)
+        // 🔴 否定面：退场端点不得残留（否则前端会拿到一个"永远空表"的假读数）
+        expect(api.routes, '已删除的端点不得复活').not.toContain('/serenity/cheap-workers')
         // 不变式：这个面**只碰**自己的命名空间（不许顺手抢别的路径）
         for (const p of api.routes) expect(p.startsWith('/serenity/'), `越界路径：${p}`).toBe(true)
         expect(new Set(api.routes).size, '路径重复注册').toBe(api.routes.length)
@@ -216,16 +219,14 @@ describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
     })
   })
 
-  it('/serenity/cheap-workers：GET（无 CCC ⇒ 空表）／POST ⇒ 405', async () => {
+  it('🔴 /serenity/cheap-workers 已退场：GET 与 POST 都走 404（不是"空表"）', async () => {
     const api = await bootApi()
     try {
-      const empty = await raw({ port: api.port, method: 'GET', path: `/serenity/cheap-workers?workspace=${encodeURIComponent(plain)}` })
-      expect(empty.status).toBe(200)
-      expect(JSON.parse(empty.body)).toEqual({ cheapWorkers: [] })
-
-      const wrong = await raw({ port: api.port, method: 'POST', path: '/serenity/cheap-workers' })
-      expect(wrong.status).toBe(405)
-      expect(JSON.parse(wrong.body)).toEqual({ error: 'method not allowed' })
+      // 判据刻意选 404 而非"200 + 空表"：后者**看起来正常**，正是死端点最难发现之处。
+      const g = await raw({ port: api.port, method: 'GET', path: `/serenity/cheap-workers?workspace=${encodeURIComponent(plain)}` })
+      expect(g.status).toBe(404)
+      const p = await raw({ port: api.port, method: 'POST', path: '/serenity/cheap-workers' })
+      expect(p.status).toBe(404)
     } finally {
       await api.close()
     }
@@ -835,12 +836,12 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
     }
   })
 
-  it('🔴 `cheapWorkers`：workspace 指向真 CCC ⇒ 走 `listActiveCheapWorkers(root)` 分支（既有用例只测了"无 CCC ⇒ 空表"）', async () => {
+  it('🔴 `cccs`：workspace 指向真 CCC ⇒ 走真枚举分支（既有用例只测了"无 CCC ⇒ 空表"）', async () => {
     const api = await bootApi()
     try {
-      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/cheap-workers?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
+      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/cccs?workspace=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
       expect(res.status).toBe(200)
-      expect(jsonBody(res).cheapWorkers).toEqual([]) // 无进度文件 ⇒ 空数组，但**走的是 root 分支**
+      expect(Array.isArray(jsonBody(res).cccs)).toBe(true)
     } finally {
       await api.close()
     }
@@ -979,14 +980,15 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
 describe('src/api.ts：残余 catch 与尾部支线（⑤ 第 18 件）', () => {
   const jsonBody = (r: RawRes): any => JSON.parse(r.body)
 
-  it('🔴 宿主服务读取抛错 ⇒ `cheapWorkers` ／ `cccs` 各自的 catch 回 400（不是 500、不是崩）', async () => {
+  it('🔴 宿主服务读取抛错 ⇒ `cccs` 的 catch 回 400（不是 500、不是崩）', async () => {
     const api = await bootApi({ sessionGetThrows: true })
     try {
-      for (const path of ['/serenity/cheap-workers', '/serenity/cccs']) {
-        const res = await raw({ port: api.port, method: 'GET', path: `${path}?sessionId=s-1`, headers: UI_HEADERS })
-        expect(res.status, `${path} 应把异常收敛成 400`).toBe(400)
-        expect(String(jsonBody(res).error)).toContain('sessions.get boom')
-      }
+      // 🔴 2026-10-14：原用例同时覆盖 `cheapWorkers` 与 `cccs`；前者已退场 ⇒ 只剩后者。
+      //    （那条端点现在直接 404，走不到 catch —— 见"接线自证"组的否定断言。）
+      const path = '/serenity/cccs'
+      const res = await raw({ port: api.port, method: 'GET', path: `${path}?sessionId=s-1`, headers: UI_HEADERS })
+      expect(res.status, `${path} 应把异常收敛成 400`).toBe(400)
+      expect(String(jsonBody(res).error)).toContain('sessions.get boom')
     } finally {
       await api.close()
     }

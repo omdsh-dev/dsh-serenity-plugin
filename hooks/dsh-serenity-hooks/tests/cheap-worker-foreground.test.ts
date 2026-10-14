@@ -11,13 +11,19 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 }))
 
 import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
+import { readCheapWorkerConfig } from '../src/ccc.js'
 
 /**
- * cheap-worker foreground 模式（v1.31.3，S142 用户裁决：cheap-worker 双模式）。
+ * cheap-worker（前台委派）。
  *
- * 覆盖：缺省模式 / 委派请求形状（agentOptions·parent·signal·toolFilter）/ 结果映射
- * （completed vs 非 completed）/ dispose 必调 / 三类拒绝（白名单·服务缺失·foreground 传 jobs）。
- * background 路径不在本文件（需 ctx.agents 全链路，属既有实现，未改动）。
+ * 🆕 2026-10-14（owner 两条令）：
+ *  ① 「不允许指定模型，只读取配置」⇒ **没有 `model` 参数**，模型一律来自 CCC 配置；
+ *  ② 「删除后台运行能力」⇒ background 模式（循环／完成码／进度文件／重启／并行 jobs 那半）已退场，
+ *     本文件随之删掉全部 background 用例（`fakeAgents` / `ctxForBackground` 夹具一并删除
+ *     —— 那是**跟着实现一起退场**的断言，不是回归）。
+ *
+ * 现存契约：单任务委派 / 并行扇出（jobs，cap 10）/ 结果映射 / dispose / 三类拒绝
+ * （白名单 · 服务缺失 · 参数非法）/ provider 预检（正控 + 反控 + 取证面不可读时放行）。
  */
 
 let dir = ''
@@ -82,42 +88,6 @@ function ctxWithLlm(subagentsRuntime: unknown, llm: unknown) {
   } as never
 }
 
-/**
- * 替身 agents 服务（**background 路径**）：记录 `create` 参数；worker 从**本轮 prompt** 里取出
- * stop token 回显 ⇒ **1 轮即完成**（确定性，不依赖真实模型）。
- */
-function fakeAgents() {
-  const created: Record<string, unknown>[] = []
-  const runtime = {
-    create: async (options: Record<string, unknown>) => {
-      created.push(options)
-      let events: unknown[] = []
-      const agent = {
-        status: 'idle',
-        session: { id: options.sessionId, snapshotEvents: () => events },
-        followup: (message: { content?: Array<{ text?: string }> }) => {
-          const text = (message?.content ?? []).map((b) => b.text ?? '').join('')
-          const token = /SERENITY_CHEAP_WORKER_DONE_[0-9a-f]+/.exec(text)?.[0] ?? ''
-          events = [{
-            type: 'assistant/message',
-            data: { message: { content: [{ type: 'text', text: `done ${token}` }] } },
-          }]
-        },
-      }
-      return { agent, dispose: async () => {} }
-    },
-  }
-  return { runtime, created }
-}
-
-/** ctx（background）：`ctx.agents` 为**属性**（runCheapWorkerJob 直接读属性），llm 走 `ctx.get` */
-function ctxForBackground(agentsRuntime: unknown, llm?: unknown) {
-  return {
-    agents: agentsRuntime,
-    get: (name: string) => (name === 'agents' ? agentsRuntime : name === 'llm' ? llm : undefined),
-  } as never
-}
-
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'cheap-worker-fg-'))
   writeCcc(['minimax-cn-coding-plan/MiniMax-M3'], 'minimax-cn-coding-plan/MiniMax-M3')
@@ -127,8 +97,8 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
 
-describe('cheap-worker foreground（缺省模式：一次前台串行委派）', () => {
-  it('缺省（不传 mode）走 foreground：委派请求形状正确 + 结果映射 + dispose', async () => {
+describe('cheap-worker（一次前台串行委派）', () => {
+  it('委派请求形状正确 + 结果映射 + dispose', async () => {
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute(
@@ -140,7 +110,7 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
     expect(fake.calls[0].name).toBe('spawn')
     expect(req.label).toBe('T-01')
     expect(req.prompt).toEqual([{ type: 'text', text: '跑 T-01 用例并回报证据' }])
-    // 模型经 agentOptions 注入（不依赖宿主未放开的模型选择设置）
+    // 模型经 agentOptions 注入（不依赖宿主未放开的模型选择设置）；值来自 CCC 配置
     expect(req.agentOptions).toEqual({ provider: 'minimax-cn-coding-plan', model: 'MiniMax-M3' })
     // 委派归属 + 取消通道
     expect(req.parent).toEqual({ session: { header: { cwd: dir } } })
@@ -157,12 +127,29 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
     expect(fake.disposed()).toBe(1)
   })
 
-  it('显式 mode="foreground" 与缺省等价；model 参数覆盖缺省模型', async () => {
+  /**
+   * 🔴 2026-10-14（owner：「不允许指定模型，只读取配置」）：`model` 参数**已不存在**。
+   * 双面钉：① 传了它**不生效**（走配置，不是被静默采用）；② schema 里**没有**它。
+   */
+  it('🔴 传 model 参数不生效：模型仍取自 CCC 配置（且 schema 无此参数）', async () => {
     writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'], 'minimax-cn-coding-plan/MiniMax-M3')
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
-    await tool.execute({ mode: 'foreground', task: 'x', model: 'deepseek-official/deepseek-v4-flash' }, execIn())
-    expect(fake.calls[0].request.agentOptions).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
+    await tool.execute({ task: 'x', model: 'deepseek-official/deepseek-v4-flash' }, execIn())
+    // 用了配置里的 defaultModel，**不是**传入的那个
+    expect(fake.calls[0].request.agentOptions).toEqual({ provider: 'minimax-cn-coding-plan', model: 'MiniMax-M3' })
+    // schema 面：参数表里不得再有 model
+    const schema = (TOOL as unknown as { parameters: Record<string, unknown> }).parameters
+    expect(Object.keys(schema)).not.toContain('model')
+    expect(Object.keys(schema)).toEqual(expect.arrayContaining(['task', 'label', 'jobs', 'guide']))
+  })
+
+  it('defaultModel 指向白名单外 ⇒ 回落 models[0]（配置层的既有契约）', async () => {
+    writeCcc(['a/one', 'b/two'], 'c/not-listed')
+    const fake = fakeSubagents()
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    await tool.execute({ task: 'x' }, execIn())
+    expect(fake.calls[0].request.agentOptions).toEqual({ provider: 'a', model: 'one' })
   })
 
   it('model 无 provider 前缀 → agentOptions 只带 model（不产生空 provider 键）', async () => {
@@ -184,26 +171,13 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
     expect(fake.disposed()).toBe(1)
   })
 
-  it('模型不在白名单 → 拒绝且不调用委派（错误含可用白名单）', async () => {
-    const fake = fakeSubagents()
-    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
-    await expect(tool.execute({ task: 'x', model: 'other/model' }, execIn())).rejects.toThrow(/whitelist|cheap-worker\.models/)
-    expect(fake.calls).toHaveLength(0)
-  })
-
-  it('宿主 subagents 服务缺失 → 响亮报错并指引 background 模式', async () => {
+  it('宿主 subagents 服务缺失 → 响亮报错（并指引 dashboard health）', async () => {
     const tool = createCheapWorkerTool(ctxWith(undefined) as never) as unknown as typeof TOOL
     await expect(tool.execute({ task: 'x' }, execIn())).rejects.toThrow(/subagents service unavailable/)
-    await expect(tool.execute({ task: 'x' }, execIn())).rejects.toThrow(/mode="background"/)
+    await expect(tool.execute({ task: 'x' }, execIn())).rejects.toThrow(/dashboard health/)
   })
 
-  /**
-   * 🆕 2026-09-27（owner 具名令）：foreground **也允许 jobs**（并行 ≤5）——
-   * 「就当是支持自定模型的 subagent 用了，急需」。
-   * ⚠️ 本条**取代**旧的「foreground 传 jobs → 拒绝（background-only）」用例：那是**有意的行为变更**，
-   * 不是回归（旧断言已随实现一起退场）。
-   */
-  it('🔴 foreground + jobs ⇒ 真并行扇出：每个 job 各起一个子 agent，结果**保持传入顺序**', async () => {
+  it('🔴 并行扇出：每个 job 各起一个子 agent，结果**保持传入顺序**', async () => {
     const fake = fakeSubagents({ output: [{ type: 'text', text: 'R' }], stopReason: 'completed' })
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute(
@@ -211,7 +185,7 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
         jobs: [
           { task: 'a', label: 'A' },
           { task: 'b', label: 'B' },
-          { task: 'c' }, // label 可选（前台 label 只是显示名）
+          { task: 'c' }, // label 可选（只是显示名）
         ],
       },
       execIn(),
@@ -226,30 +200,24 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
     expect(jobs.map((j) => j.output)).toEqual(['R', 'R', 'R'])
   })
 
-  it('🔴 per-job model 覆盖调用级 model（"支持自定模型的 subagent"的字面含义）', async () => {
-    writeCcc(
-      ['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'],
-      'minimax-cn-coding-plan/MiniMax-M3',
-    )
+  it('🔴 并行扇出：每个 job 都用 CCC 配置的同一个模型（无 per-job 覆盖）', async () => {
+    writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'], 'minimax-cn-coding-plan/MiniMax-M3')
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await tool.execute(
-      {
-        model: 'minimax-cn-coding-plan/MiniMax-M3',
-        jobs: [{ task: 'a', model: 'deepseek-official/deepseek-v4-flash' }, { task: 'b' }],
-      },
+      { jobs: [{ task: 'a', model: 'deepseek-official/deepseek-v4-flash' }, { task: 'b' }] },
       execIn(),
     )
-    expect((fake.calls[0]?.request.agentOptions as Record<string, unknown>).model).toBe('deepseek-v4-flash')
-    // 正控：没给 per-job model 的那个走调用级 model（不是"全都用第一个 job 的模型"）
+    // 传进 job 的 model 被忽略 —— 两个子 agent 都用配置里的 defaultModel
+    expect((fake.calls[0]?.request.agentOptions as Record<string, unknown>).model).toBe('MiniMax-M3')
     expect((fake.calls[1]?.request.agentOptions as Record<string, unknown>).model).toBe('MiniMax-M3')
   })
 
-  it('🔴 超过前台并行上限 10 ⇒ 拒绝且**一个子 agent 都不起**（含 cap 文案）', async () => {
+  it('🔴 超过并行上限 10 ⇒ 拒绝且**一个子 agent 都不起**（含 cap 文案）', async () => {
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const jobs = Array.from({ length: 11 }, (_, i) => ({ task: `t${i}` }))
-    await expect(tool.execute({ jobs }, execIn())).rejects.toThrow(/exceed the foreground parallel cap 10/)
+    await expect(tool.execute({ jobs }, execIn())).rejects.toThrow(/exceed the parallel cap 10/)
     expect(fake.calls).toHaveLength(0) // ← 关键：拒绝发生在创建之前
   })
 
@@ -262,7 +230,7 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
     expect(fake.calls).toHaveLength(0)
   })
 
-  it('正控：不传 jobs ⇒ 单任务路径逐字不变（一次委派、一个结果）', async () => {
+  it('正控：不传 jobs ⇒ 单任务路径产出单一结果（不产出 jobs 数组）', async () => {
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute({ task: 'solo' }, execIn())
@@ -271,11 +239,25 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
     expect(out.jobs).toBeUndefined() // ← 单任务路径**不**产出 jobs 数组（形状未被污染）
   })
 
-  it('task 缺失 / 非法 mode → 拒绝', async () => {
+  it('task 缺失 / 空串 ⇒ 拒绝', async () => {
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     await expect(tool.execute({}, execIn())).rejects.toThrow(/task is required/)
-    await expect(tool.execute({ task: 'x', mode: 'nope' }, execIn())).rejects.toThrow(/mode must be/)
+    await expect(tool.execute({ task: '   ' }, execIn())).rejects.toThrow(/task is required/)
+  })
+
+  /**
+   * 🔴 `mode` 参数已随 background 退场 ⇒ 传任何 mode 都**不再被识别**（既不是错误、也不改变行为）。
+   * 这里钉的是"它不再是契约的一部分"：传旧值仍走单任务前台路径。
+   */
+  it('🔴 mode 参数已退场：传旧值不报错、也不改变前台行为', async () => {
+    const fake = fakeSubagents()
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const out = await tool.execute({ task: 'x', mode: 'background', label: 'bg-1' }, execIn())
+    expect(out.mode).toBe('foreground')
+    expect(fake.calls).toHaveLength(1)
+    const schema = (TOOL as unknown as { parameters: Record<string, unknown> }).parameters
+    expect(Object.keys(schema)).not.toContain('mode')
   })
 
   it('无 exec.agent → 拒绝（委派必须有发起方）', async () => {
@@ -284,11 +266,29 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
     await expect(tool.execute({ task: 'x' }, { signal: new AbortController().signal })).rejects.toThrow(/calling agent/)
   })
 
-  it('guide 不创建 agent（两模式表格在场）', async () => {
+  it('无 CCC 配置（无白名单）⇒ 报错含可照抄的配置样例', async () => {
+    const bare = mkdtempSync(join(tmpdir(), 'cheap-worker-nocfg-'))
+    try {
+      mkdirSync(join(bare, '.opencode'), { recursive: true })
+      writeFileSync(join(bare, '.serenity'), 'x\n', 'utf-8')
+      writeFileSync(join(bare, '.opencode', 'serenity.json'), JSON.stringify({}), 'utf-8')
+      const fake = fakeSubagents()
+      const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+      await expect(
+        tool.execute({ task: 'x' }, { agent: { session: { header: { cwd: bare } } }, signal: new AbortController().signal }),
+      ).rejects.toThrow(/requires a model whitelist/)
+      expect(fake.calls).toHaveLength(0)
+    } finally {
+      rmSync(bare, { recursive: true, force: true })
+    }
+  })
+
+  it('guide 不创建 agent（表格在场，且不再宣传双模式）', async () => {
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
     const out = await tool.execute({ guide: true }, execIn())
-    expect(String(out.guide)).toContain('Two modes (v1.31.3; default = foreground)')
+    expect(String(out.guide)).toContain('Scale-Up Usage Guide')
+    expect(String(out.guide)).not.toContain('Two modes')
     expect(fake.calls).toHaveLength(0)
   })
 })
@@ -301,12 +301,15 @@ describe('cheap-worker foreground（缺省模式：一次前台串行委派）',
  */
 describe('cheap-worker provider 预检（把沉默的失败变成可执行的错误）', () => {
   it('本机没有该 provider 的 adapter ⇒ 不委派 + diagnostic 带完整可执行信息', async () => {
-    writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'probe-no-adapter/ProbeModel'], 'minimax-cn-coding-plan/MiniMax-M3')
+    // 🔴 关键：缺 provider 的那个模型必须是**配置里的 defaultModel**（模型不再由调用方指定，
+    //    所以"请求一个本机没有的 provider"只能经配置达成）。它同时必须在白名单内，
+    //    否则会先回落 models[0]（那正是本条曾红的原因）。
+    writeCcc(['probe-no-adapter/ProbeModel'], 'probe-no-adapter/ProbeModel')
     const fake = fakeSubagents()
     const tool = createCheapWorkerTool(
       ctxWithLlm(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan', name: 'MiniMax CN' }] })) as never,
     ) as unknown as typeof TOOL
-    const out = await tool.execute({ task: 'x', model: 'probe-no-adapter/ProbeModel' }, execIn())
+    const out = await tool.execute({ task: 'x' }, execIn())
     expect(out.done).toBe(false)
     expect(out.stopReason).toBe('error')
     const d = String(out.diagnostic)
@@ -339,44 +342,55 @@ describe('cheap-worker provider 预检（把沉默的失败变成可执行的错
 })
 
 /**
- * 🔴 后台**单 job** 的 `model` 透传（v1.48 修复的真因）：此前只构造 `{task,label}` ⇒
- * `runCheapWorkerJob` 回落 `defaultModel`，**调用方指定的模型被静默忽略**。实测形态：传
- * `probe-no-adapter/ProbeModel`，实际跑 `defaultModel` ⇒ 在 provider 不同的机器上必然起不来。
+ * 🆕 2026-10-14（owner 令「配置兼容旧配置 key」）：读新键 `cheap-worker`，**读不到时回落旧键 `handyman`**。
+ * 这条在**真实 CCC**上是现役路径 —— 本容器的 `.opencode/serenity.json` **此刻仍写着 `handyman`**。
  */
-describe('cheap-worker background 单 job 的 model 透传（真因修复）', () => {
-  it('🔴 显式 model 必须进 agentOptions（不再静默回退 defaultModel）', async () => {
-    writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'deepseek-official/deepseek-v4-flash'], 'minimax-cn-coding-plan/MiniMax-M3')
-    const fake = fakeAgents()
-    const tool = createCheapWorkerTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
-    const out = await tool.execute(
-      { mode: 'background', task: 'x', label: 'bg-1', model: 'deepseek-official/deepseek-v4-flash' },
-      execIn(),
-    )
-    expect(fake.created).toHaveLength(1)
-    expect(fake.created[0].agentOptions).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-flash' })
-    const jobs = out.jobs as Array<Record<string, unknown>>
-    expect(jobs[0].model).toBe('deepseek-official/deepseek-v4-flash')
-    expect(jobs[0].done).toBe(true)
+describe('cheap-worker 配置：新键优先 ＋ 旧键回落（owner 令）', () => {
+  function writeRaw(cfg: unknown): void {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    mkdirSync(join(dir, '.dsh'), { recursive: true })
+    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify(cfg), 'utf-8')
+  }
+
+  it('只有旧键 handyman ⇒ 照常读到（回落生效）', () => {
+    writeRaw({ handyman: { models: ['a/one', 'b/two'], defaultModel: 'b/two' } })
+    expect(readCheapWorkerConfig(dir, ['.dsh/serenity.json'])).toEqual({ models: ['a/one', 'b/two'], defaultModel: 'b/two' })
   })
 
-  it('不传 model ⇒ 仍用 defaultModel（缺省路径行为不变）', async () => {
-    const fake = fakeAgents()
-    const tool = createCheapWorkerTool(ctxForBackground(fake.runtime) as never) as unknown as typeof TOOL
-    const out = await tool.execute({ mode: 'background', task: 'x', label: 'bg-2' }, execIn())
-    expect(fake.created[0].agentOptions).toEqual({ provider: 'minimax-cn-coding-plan', model: 'MiniMax-M3' })
-    const jobs = out.jobs as Array<Record<string, unknown>>
-    expect(jobs[0].model).toBe('minimax-cn-coding-plan/MiniMax-M3')
+  it('只有新键 cheap-worker ⇒ 正常读到', () => {
+    writeRaw({ 'cheap-worker': { models: ['c/three'] } })
+    expect(readCheapWorkerConfig(dir, ['.dsh/serenity.json'])).toEqual({ models: ['c/three'], defaultModel: 'c/three' })
   })
 
-  it('后台遇缺失 provider ⇒ 抛可执行错误，且**未创建 worker**', async () => {
-    writeCcc(['minimax-cn-coding-plan/MiniMax-M3', 'probe-no-adapter/ProbeModel'], 'minimax-cn-coding-plan/MiniMax-M3')
-    const fake = fakeAgents()
-    const tool = createCheapWorkerTool(
-      ctxForBackground(fake.runtime, fakeLlm({ registered: [{ id: 'minimax-cn-coding-plan' }] })) as never,
-    ) as unknown as typeof TOOL
-    await expect(
-      tool.execute({ mode: 'background', task: 'x', label: 'bg-3', model: 'probe-no-adapter/ProbeModel' }, execIn()),
-    ).rejects.toThrow(/no adapter registered on this machine/)
-    expect(fake.created).toHaveLength(0)
+  it('🔴 两键都在 ⇒ **新键胜出**（回落只在读不到时发生）', () => {
+    writeRaw({
+      'cheap-worker': { models: ['new/model'] },
+      handyman: { models: ['old/model'], defaultModel: 'old/model' },
+    })
+    const got = readCheapWorkerConfig(dir, ['.dsh/serenity.json'])!
+    expect(got.models).toEqual(['new/model'])
+    expect(got.defaultModel).toBe('new/model')
+  })
+
+  it('🔴 新键存在但 models 无效（空数组 / 非数组）⇒ 视同"读不到"，回落旧键', () => {
+    writeRaw({ 'cheap-worker': { models: [] }, handyman: { models: ['old/model'] } })
+    expect(readCheapWorkerConfig(dir, ['.dsh/serenity.json'])!.models).toEqual(['old/model'])
+    writeRaw({ 'cheap-worker': { models: 'nope' }, handyman: { models: ['old/model'] } })
+    expect(readCheapWorkerConfig(dir, ['.dsh/serenity.json'])!.models).toEqual(['old/model'])
+  })
+
+  it('两键都无效 ⇒ null（工具报错要求配置）', () => {
+    writeRaw({ 'cheap-worker': {}, handyman: { models: [] } })
+    expect(readCheapWorkerConfig(dir, ['.dsh/serenity.json'])).toBeNull()
+    writeRaw({})
+    expect(readCheapWorkerConfig(dir, ['.dsh/serenity.json'])).toBeNull()
+  })
+
+  it('旧键里的 maxRounds / maxParallel 留着无害（已随 background 退场，不再被读）', () => {
+    writeRaw({ handyman: { models: ['a/one'], maxRounds: 100, maxParallel: 10 } })
+    const got = readCheapWorkerConfig(dir, ['.dsh/serenity.json'])
+    expect(got).toEqual({ models: ['a/one'], defaultModel: 'a/one' })
+    // 返回形状里**不含**这两个键 —— 它们不是现行契约
+    expect(Object.keys(got!)).toEqual(['models', 'defaultModel'])
   })
 })

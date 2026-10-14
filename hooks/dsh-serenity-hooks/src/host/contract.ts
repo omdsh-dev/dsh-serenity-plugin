@@ -166,7 +166,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'subagents',
     access: 'lazy',
     members: [{ name: 'start', kind: 'function' }],
-    impact: 'cheap-worker foreground 模式不可用（响亮报错，不影响 background 模式）',
+    impact: 'cheap-worker 委派不可用（前台委派的正门，响亮报错）',
     required: false,
   },
   {

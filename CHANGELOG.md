@@ -1,3 +1,80 @@
+## v1.57.0 — 2026-10-14（**`handyman` → `cheap-worker` 改名 ＋ 移除 `model` 参数 ＋ 删除后台运行能力**）
+
+**性质**：**行为变更**（工具名 ／ 参数面 ／ 运行形态三者同改）。**来源**：owner 两条令 ——
+「dsp 做个小改动，handyman 更名为 cheap-worker，机制不变，不允许指定模型，只读取配置」
+＋「配置兼容旧配置 key，但整条链路和相关名称都要变，**删除后台运行能力**」。
+
+### 一、四件改动
+
+| # | 改动 | 形态 |
+|---|---|---|
+| ① | **改名 `handyman` → `cheap-worker`** | **98 文件**，**666 增 / 666 删**（**逐字相等 = 纯改名**的机械证据）。工具名、`src/` 模块名（`cheap-worker.ts` / `cheap-worker-ops.ts` / `cheap-worker-preset-inherit.ts`）、测试文件名、README 表、面板文案、CSS 类名全量同步 |
+| ② | **移除 `model` 参数** | 模型**一律**读 CCC 配置 `cheap-worker.models` / `cheap-worker.defaultModel` ⇒ **调用方无法指定模型**（含 `jobs` 内的 per-job `model`）。双面钉：传了不生效 ＋ schema 里没有 |
+| ③ | **删除后台运行能力** | `background` 整条垂直面退场，见 §二 |
+| ④ | **配置兼容旧键** | `src/ccc.ts` 抽 `pickModelSection()`：**新键 `cheap-worker` 优先，读不到回落旧键 `handyman`**（两键**同一套判据**） |
+
+### 二、③ 删掉的实现面（逐条清单）
+
+`runCheapWorkerJob` 整个函数 ／ `mode` 参数 ／ `parseJobs` ／ 轮次 `while` 循环 ／
+随机完成码（stop-token）判据 ／ 异常自动重启计数（≤100）／ 进度文件五函数
+（`writeProgress` / `readProgress` / `writeFailedStatus` / `cheapWorkerProgressPaths` / `sanitizeLabel`）／
+`newStopToken` ／ `buildRoundPrompt` ／ `listActiveCheapWorkers` ＋ `CheapWorkerProgress` 接口 ／
+`CHEAP_WORKER_MAX_RESTARTS` ／ 配置键 `maxRounds` / `maxParallel` ／
+`GET /serenity/cheap-workers` 路由（连 `CHEAP_WORKERS_PATH`）／
+`SafeModePanel` 的「CheapWorker 运行」整块 ＋ 3 秒轮询 `useEffect` ＋ `.sp-cheapWorker*` CSS 块。
+
+🔴 **死端点按 404 而非 200＋空表处置** —— 后者**看着正常**，正是死端点最难发现之处。
+
+### 三、现存形态（唯一一种）
+
+```
+cheap-worker(task, [label])                      # 一次前台串行委派
+cheap-worker(jobs=[{task, label?}, ...])         # 并行扇出，上限 10（硬编码）
+cheap-worker(guide=true)                         # 使用指引
+```
+走宿主**委派正门** `ctx.subagents.start('spawn', …)`：深度上限、子 agent 所有权、
+`subagent/start|end` 事件、`dispose()` 收尾**全部沿用宿主实现**；模型经 `agentOptions` 注入。
+**不循环、不校验完成码、不写进度文件、不可续跑。**
+
+### 四、迁移（对既有部署是一次行为变更）
+
+1. **配置**：新键 `cheap-worker` 优先；**旧键 `handyman` 会被自动回落读取**（无需改动即可升级）。
+   旧键里的 `maxRounds` / `maxParallel` **留着无害**（宽松解析，只是不再被读）。
+2. **调用**：旧的 `mode="background"` 与 `model=` 参数**已不存在**；
+   `model` 传了也**不生效**（模型由 CCC 配置决定）。
+3. **进度文件**：`AGENT_SESSIONS/cheap-worker-<label>.md/.json` 不再生成，**旧文件不自动清理**（可手工删除）。
+
+### 五、两条判据（本版新增，供后续复用）
+
+1. 🔴 **批量改名必须"词形感知"，且 `forbid` 事后核查不可省。**
+   上一轮用纯 `split/join` 一刀切 ⇒ 当场翻车：产出 `CHEAP_WORKERProgressPaths` /
+   `cheap-workerProgressPaths` / 接口键 `cheap-worker?:` 这类**非法标识符**（`typecheck` 立刻红）。
+   **根因**：同一个词在源码里扮**多个角色**（① 词元/路径/kebab ② 标识符片段/camelCase
+   ③ **裸标识符位**），**纯文字替换在结构上分不开**。
+   ⇒ 规则须**有序**（先 `handyman(?=[A-Z]) → cheapWorker`，再 `\bhandyman\b → cheap-worker`）；
+   **预演报得出"命中数"，但报不出"替换后是否仍是合法标识符"** ⇒ 必须配 `forbid` 事后核查。
+   `forbid` **第一版就当场拦下一次**（复数映射过宽），拒绝落盘后才改规则。
+2. 🔴 **`typecheck` 绿不能证明测试文件是合法 TS。**
+   本轮 `typecheck` 全绿而 `test` 红：`tests/` 里有个**裸标识符位**的 `const handyman = () => …`
+   —— `tsconfig.json` 的 `include` 是 `["src"]` ⇒ **`tests/` 从不进 tsc program**，
+   只有 `test` 的 esbuild 编译它。⇒ **改名类改动必须跑 `test`。**
+
+### 六、读数（可复算）
+
+**六项门禁全绿**：`typecheck` ／ `typecheck-host 0.2.0-rc.2`（node ／ client）／ 全量 `test` ／
+`coverage` ／ `build` ／ `pack-check`（139 文件）。
+
+🔴 **一处"文档声称的实现形态"漂移（门禁抓不到，靠真读发现）**：注入的 toolsBlock
+（`seams/system-prompt.ts`）此前仍在向模型**宣传已删除的** `mode="background"` 与 per-job model。
+**没有任何测试钉该字面量** ⇒ 与 v1.56.7 同形：**必须真读回，不能凭"全绿"结案**。已改。
+
+### 七、附带说明
+
+- **改名后仍含 `handyman` 的三处是刻意保留，不是漏**：`CHANGELOG.md`（历史记录＝冻结事实）／
+  `docs/_archive/**`（归档审查件）／ 包内 `README.md`（由 `readme-sync` 机械生成，勿手改）。
+- **兼容码是一处有意的残留**：`src/ccc.ts` 的 `handyman?: { ... }` 类型与回落分支
+  —— 那是 **④ 的现役机制**，不是旧名遗漏。
+
 ## v1.56.10 — 2026-10-14（**公开面隐私清理** ＋ **机械防线**）
 
 **性质**：一次**内容清理** ＋ 一条**新增门禁判据**；除别名解析来源外无行为改动。**来源**：owner 令 ——

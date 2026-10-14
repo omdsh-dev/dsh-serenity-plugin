@@ -1,5 +1,13 @@
 # cheap-worker（杂工）设计方案 — dsh-serenity-plugin v1.24.0
 
+> 🔴 **本文是历史设计记录，不是现状**（2026-10-14 起）。owner 于 2026-10-14 令「**删除后台运行能力**」⇒
+> 本文设计的**自主循环到完成**（stop-token 完成码 ／ 进度文件续跑 ／ `maxRounds` 保险阀 ／ 异常重启 ≤100 ／
+> `jobs` 的 `maxParallel`）**已整条删除**；`model` 参数亦已移除（模型一律读 CCC 配置
+> `cheap-worker.models` / `cheap-worker.defaultModel` 的单一真相源）。
+> 工具名仍为 `cheap-worker`，现存形态 = **一次前台串行委派**（＋ `jobs` 并行扇出）。
+> **现在的行为**以 `src/tools/cheap-worker.ts` 与包根 `CHANGELOG.md` 为准；本文保留**当时的理由**。
+> 🔵 另一阶段的记录见 `cheap-worker-dual-mode-design.md`（**两份不合并**，各记一段决策链）。
+
 > 状态：**方案待用户确认**（S142，2026-08-27）
 > 背景：loop（牛马）在 DSH 的存留问题调研——用户明确需求：**同步**的自主递归 worker（指定模型 → 内部再派同样低能的 subagent → 完成大量工作），模型**必须 CCC 白名单可控**，完成标准对齐 osp loop。命名用户拍板 **cheap-worker（杂工）**。
 

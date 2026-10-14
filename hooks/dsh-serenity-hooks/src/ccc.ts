@@ -99,15 +99,22 @@ export function readCccName(root: string): string | null {
 // ── 配置（.opencode/serenity.json 规范位置 / .dsh/serenity.json 回退）──
 
 interface SerenityConfig {
-  /** cheap-worker（杂工）配置：模型白名单（v1.24.0 取代 loop） */
+  /** cheap-worker（杂工）配置：模型白名单（v1.24.0 取代 loop；2026-10-14 取代 handyman） */
   'cheap-worker'?: {
     /** 可用模型白名单（provider/model 列表）——cheap-worker 只能使用其中模型（用户拍板：CCC 配置控制） */
     models?: string[];
     /** 缺省模型（必须 ∈ models） */
     defaultModel?: string;
-    /** 对话轮次上限（保险阀，缺省 100） */
+  };
+  /**
+   * 🔴 **旧键（历史名）**：2026-10-14 起本插件读 `cheap-worker`，**读不到时回落到这里**
+   * （owner 令「配置兼容旧配置 key」）。仍可含 `maxRounds`／`maxParallel` —— 那两个键已随
+   * background 模式退场，**不再被读取**，但**留在文件里不会报错**（宽松解析，见 loadSerenityConfig）。
+   */
+  handyman?: {
+    models?: string[];
+    defaultModel?: string;
     maxRounds?: number;
-    /** jobs 编排并行上限（缺省 10——便宜模型便宜） */
     maxParallel?: number;
   };
   sessionKeeper?: {
@@ -356,27 +363,46 @@ export interface SkiffRoleConfig {
 }
 
 /**
- * 解析 cheap-worker 配置（v1.24.0：取代 loop.defaultModel；不兼容旧 loop 配置——用户拍板）。
- * @returns 白名单 + 缺省模型 + 上限；models 未配置返回 null（工具应报错要求配置）
+ * 解析 cheap-worker 配置。
+ *
+ * 🔴 **键的优先级（2026-10-14，owner 令「配置兼容旧配置 key」）**：
+ *   ① 新键 `cheap-worker`；② **读不到（键缺失或 models 非有效数组）⇒ 回落旧键 `handyman`**。
+ *   「读不到」的判据是**同一套**（models 必须是至少含一个非空字符串的数组）—— 这样"新键存在但写错了"
+ *   与"没写新键"行为一致，都不会静默走一个空白名单。
+ *
+ * ⚠️ `maxRounds`／`maxParallel` 已随 background 模式退场，**不再被本函数读取**（旧配置里留着无害）。
+ *
+ * @returns 白名单 + 缺省模型；两处都取不到 models 时返回 null（工具应报错要求配置）
  */
 export function readCheapWorkerConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): {
   models: string[]
   defaultModel: string
-  maxRounds: number
-  maxParallel: number
 } | null {
   const cfg = loadSerenityConfig(root, paths)
-  const models = cfg['cheap-worker']?.models
-  if (!Array.isArray(models) || models.length === 0) return null
-  const clean = models.map((m) => m.trim()).filter(Boolean)
+  // 新键优先，旧键回落（判据同构：都要"至少一个非空字符串"才算数）
+  const section = pickModelSection(cfg['cheap-worker']) ?? pickModelSection(cfg.handyman) ?? null
+  if (section === null) return null
+  const clean = section.models!.map((m) => m.trim()).filter(Boolean)
   if (clean.length === 0) return null
-  const defaultModel = cfg['cheap-worker']?.defaultModel?.trim()
+  const defaultModel = section.defaultModel?.trim()
   return {
     models: clean,
     defaultModel: defaultModel !== undefined && clean.includes(defaultModel) ? defaultModel : clean[0]!,
-    maxRounds: cfg['cheap-worker']?.maxRounds ?? 100,
-    maxParallel: cfg['cheap-worker']?.maxParallel ?? 10,
   }
+}
+
+/**
+ * 从一段配置里取出可用的模型白名单段；不满足「models = 至少一个非空字符串的数组」⇒ `null`。
+ * 抽成函数是为了让**新键与旧键走同一套判据**（不同判据会让"回落"产生两类行为差异）。
+ */
+function pickModelSection(
+  section: { models?: string[]; defaultModel?: string } | undefined | null,
+): { models?: string[]; defaultModel?: string } | null {
+  if (section === undefined || section === null) return null
+  const models = section.models
+  if (!Array.isArray(models) || models.length === 0) return null
+  if (models.every((m) => typeof m !== 'string' || m.trim() === '')) return null
+  return section
 }
 
 /**
