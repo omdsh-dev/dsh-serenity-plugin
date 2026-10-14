@@ -131,8 +131,9 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 
 - **只管"会话族"的头**：`x-opencode-session` / `X-Session-ID` / `x-opencode-client` / `x-opencode-project`。
   前两个名字是**同一个值的两个别名**——写了其中一个，即以**该值**补上另一个，不会出现两个互相冲突的会话 id
-- **不冒充 opencode 官方客户端**：`X-Title` / `HTTP-Referer` 这类"身份头"只在免费档的滥用判别里起作用，
-  插件不注入（代使用者骗取额度不是本插件该做的事，付费面本来也不需要它们）；`User-Agent` 是 DSH 的保留名，想注也注不了
+- **注入范围以接口要求为界**：`/zen/go` 缺会话族头即返回 400，故补齐；
+  `X-Title` / `HTTP-Referer` 属客户端身份头，不在接口要求之内，故不注入。
+  `User-Agent` 是 DSH 的保留名，想注也注不了
 - **会话标识是固定的**（`dsh-serenity`）：DSH 的请求头在路由解析时一次算好，只能给静态值。
   优势是同一台机器的请求稳定落同一个上游（对缓存友好）；代价是无法做到"按会话分区"
 - **写入的是使用者自己的文件**：写入 DSH 的 settings（`llm-pi-ai.providers.<路由>.headers`），随时可改可删。

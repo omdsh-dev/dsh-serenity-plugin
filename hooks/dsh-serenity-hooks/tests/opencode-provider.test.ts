@@ -175,7 +175,7 @@ describe('opencode-provider: 计划（纯函数）', () => {
     expect(opencodeRouteHeaders()['X-Session-ID']).toBe(OPENCODE_SESSION_ID)
   })
 
-  it('不注入身份族与 UA：不冒充 OpenCode 客户端（免费档滥用判别不归本插件管）', () => {
+  it('不注入身份族与 UA：注入范围以接口要求为界（身份头不属 /zen/go 的要求）', () => {
     for (const forbidden of ['X-Title', 'HTTP-Referer', 'User-Agent', 'user-agent']) {
       expect(Object.keys(HEADERS)).not.toContain(forbidden)
     }

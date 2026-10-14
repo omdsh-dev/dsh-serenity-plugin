@@ -308,7 +308,7 @@ dsh-develop typecheck-host <version>
 | `X-Title` | `opencode` | 客户端身份（**免费档判别**） | hermes #106495 |
 | `User-Agent` | `opencode/<ver>` | **仅免费档判别**；付费路径不需要 | hermes #106495（**DSH 保留，不可覆盖**）；pi 维护者明确"不含 UA 改动" |
 
-> **与初版判断的关系**：in-flight 里那份"归档 opencode 源码同类网关注入形态"的清单（`X-Title: opencode` / `HTTP-Referer: https://opencode.ai/`）**是对的**——它们是 OpenCode 客户端实际发的身份头。当初无法确定"究竟哪个"，现在答案是**"两族都要，按档位分层"**：会话族（`x-opencode-*`）保路由，身份族（`X-Title`/`HTTP-Referer`/UA）过免费档判别。
+> **与初版判断的关系**：in-flight 里那份"归档 opencode 源码同类网关注入形态"的清单（`X-Title: opencode` / `HTTP-Referer: https://opencode.ai/`）**是对的**——它们是 OpenCode 客户端实际发的身份头。当初无法确定"究竟哪个"，现在答案是**"两族按接口要求分层"**：会话族（`x-opencode-*`）是 `/zen/go` 路由的**接口要求**，注入；身份族（`X-Title`/`HTTP-Referer`/UA）**不在接口要求之内**，不注入。
 
 ### 7.3 证据链（源码级 + 上游 issue 级）
 
@@ -380,7 +380,7 @@ dsh-develop typecheck-host <version>
 | 注入通道 = `llm-pi-ai.providers.<route>.headers` | `ctx.settings.update('llm-pi-ai', patch)`——`dsh-settings` 官方写入面（深合并 + 先校验后落盘）。**不用** `cordis.patch.yml`：宿主 patch 是 config 整体替换，会冲掉部署方别的 provider |
 | §7.2 的**会话族**（`x-opencode-session`/`X-Session-ID`/`x-opencode-client`/`x-opencode-project`） | 自动注入；**L1** 补已有路由的缺失键（不覆盖用户值、头名大小写不敏感）、**L2** 环境有 `OPENCODE_API_KEY` 且无 opencode 路由时建 `opencode-go` |
 | §7.4-① 静态值局限 | 会话 id 用常量 `dsh-serenity`（随机值 = 每次启动换亲和键 = 缓存永不命中） |
-| §7.2 的**身份族**（`X-Title`/`HTTP-Referer`） | **不注入**——只在免费档滥用判别中起作用，属冒充官方客户端绕限额；用户选的是付费面 |
+| §7.2 的**身份族**（`X-Title`/`HTTP-Referer`） | **不注入**——它们是客户端身份头，**不在 `/zen/go` 的接口要求之内**（该端点只校验会话族）；注入范围以接口要求为界。其作用面是免费档滥用判别，用户选的是付费面 |
 | §7.4-② 免费档不可解（UA 是保留名） | 保持不可解，不尝试绕过 |
 
 > 装配按 skiff 先例做三层触发（apply 立即试 / 命名空间未注册则退避重试 / `settings/updated` 复评），

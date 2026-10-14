@@ -125,9 +125,9 @@ the `/zen/go` endpoint answers **400** outright. **The plugin configures this on
 - **Only the "session family" of headers**: `x-opencode-session` / `X-Session-ID` / `x-opencode-client` /
   `x-opencode-project`. The first two are **two alias names for the same value** — write either one and the plugin
   fills in the other with **that value**, so two conflicting session ids cannot arise
-- **No impersonation of the official opencode client**: identity headers such as `X-Title` / `HTTP-Referer` only
-  matter for the free tier's abuse detection, so the plugin does not inject them (padding quota by impersonating
-  another client is not this plugin's function, and the paid endpoint does not need them anyway).
+- **Injection scope is bounded by what the endpoint requires**: `/zen/go` returns **400** when the session-family
+  headers are missing, so they are supplied; `X-Title` / `HTTP-Referer` are client identity headers and are not
+  required by the endpoint, so they are not injected.
   `User-Agent` is a reserved name in DSH and cannot be overridden
 - **The session id is a fixed value** (`dsh-serenity`): DSH resolves request headers once, at route-resolution
   time, so a static value is the only option. The upside is that requests from one machine land on a stable

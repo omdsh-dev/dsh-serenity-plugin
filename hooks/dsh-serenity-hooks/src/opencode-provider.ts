@@ -45,8 +45,10 @@
  * - 注入：`x-opencode-session` / `X-Session-ID`（同一个稳定的本机安装标识）、
  *   `x-opencode-client: dsh`、`x-opencode-project: global`
  *   （证据：Trae 的 Go 面代理注入的正是这一族，且该项目 README 明列 "dsh 亲测有效"）
- * - **不注入** `X-Title: opencode` / `HTTP-Referer: https://opencode.ai/` —— 那是**冒充 OpenCode 客户端**，
- *   只在免费档的**滥用判别**中起作用（hermes #106495 实证）。冒充他人客户端去绕限额不是本插件该做的事。
+ * - **不注入** `X-Title: opencode` / `HTTP-Referer: https://opencode.ai/` —— 它们是**客户端身份头**，
+ *   不在 `/zen/go` 的接口要求之内（该端点只校验会话族，见本文件开头：缺 `x-opencode-session` 才 400）。
+ *   注入范围**以接口要求为界**：要求什么补什么，不要求的一律不补。
+ *   身份头的作用面是**免费档的滥用判别**（hermes #106495 实证），付费路径本就不需要它们。
  * - **不注入** `User-Agent` —— 它是 `@deepseek-ai/dsh-llm` 的 attribution 保留名
  *   （`APP_IDENTITY` 无配置缝），宿主层面就不可覆盖。
  * - **不注入** `x-opencode-request` —— 它的语义是"会话内递增"（`msg_1`/`msg_2`…），
