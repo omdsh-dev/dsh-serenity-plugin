@@ -291,7 +291,13 @@ describe('weixin-send-api: 监听器生命周期', () => {
 
     writeFileSync(join(dir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: true, port: cfgPort } }))
     handlers.get('serenity/config-updated')?.()
-    await vi.waitFor(() => expect(weixinSendEndpoint()).toBe(`http://127.0.0.1:${cfgPort}`))
+    // 🔴 v1.56.10 修 flake（第二次发作，见 S142 SESSION 观察项）：
+    //   即使端口是"预留后释放"的，释放与重新绑定之间仍有窗口 —— 别的进程/测试可抢到它。
+    //   此时面宿主会打印「端口被占用 → 1000ms 后重试」，**而 `vi.waitFor` 的缺省 timeout 也正好是
+    //   1000ms** ⇒ 重试永远赶不上等待窗口 ⇒ 偶发红（实测报 `expected null to be 'http://127.0.0.1:44481'`）。
+    //   ⇒ 判据：等待预算必须 **> 面自身的重试间隔**，否则用例在结构上不可能通过那条重试路径。
+    //   取 10s：覆盖面宿主 10×1s 的重试预算。
+    await vi.waitFor(() => expect(weixinSendEndpoint()).toBe(`http://127.0.0.1:${cfgPort}`), { timeout: 10_000 })
 
     writeFileSync(join(dir, 'serenity-hooks.json'), JSON.stringify({ weixinApi: { enabled: false, port: cfgPort } }))
     handlers.get('serenity/settings-changed')?.()
