@@ -417,11 +417,14 @@ describe('skiff-debug: renderSkiffMarkdown 服务端渲染（v1.25.9 marked）',
 //
 // 挑靶依据 = §3-9b 的 B 类（`readSimpleSettings().enabled` 闭包）。**形态与 §2.7m 的 acp 那条同构**
 // （`const spec = xxxSpec(...); expect(faceEnabled(spec))` 三态），本件沿用同一写法。
+// ⚠️ 2026-10-15：§2.7m 那件的对象（`acp-http.ts`）已随面 E 退役删除 ⇒ **该先例只剩本文记载**；
+//    本件自身的形态与判据不受影响（它钉的是 `skiff-debug` 那一面）。
 //
 // 🔴 **本件同时产出并登记一条结构性发现（见地图 §3-8 与 §2.7s）**：
-//    `FaceSpec.enabled` 是**类型上的必填字段** ⇒ **四个面都写了**（`weixin` / `acp-http` / `gateway` / `skiff-debug`），
+//    `FaceSpec.enabled` 是**类型上的必填字段** ⇒ **各面都写了**（`weixin` / `gateway` / `skiff-debug`，
+//    ⚠️ 原还有第四个 `acp-http`，已随面 E 退役删除），
 //    但全仓**只有一个读者**：`faceEnabled`（`face-host.ts`），**且只有一处调用点**（`weixin-send-api.ts`）。
-//    ⇒ `gateway` ／ `acp-http` ／ `skiff-debug` 三处的声明**当前无人读取**。
+//    ⇒ `gateway` ／ `skiff-debug` 两处的声明**当前无人读取**。
 //    ⚠️ 其中 **`gateway` 连被"以同一形态"取到都不可能** —— 它的 spec 是 `startFace({...})` 里的**内联字面量**，
 //    该模块**没有 spec 构造函数**（`gateway.ts` 的唯一导出是 `registerGateway`）⇒ 对象从不外泄 ⇒
 //    既谈不上被 `faceEnabled` 读，也无法在测试里按 §2.7m 的形态取到（**构造上不可达**）。

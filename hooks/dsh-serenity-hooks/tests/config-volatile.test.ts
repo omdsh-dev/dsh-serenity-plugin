@@ -1,5 +1,5 @@
 /**
- * config-volatile.test.ts — 面板层十键**必须**标 `.volatile()`（v1.47.2）
+ * config-volatile.test.ts — 面板层各键**必须**标 `.volatile()`（v1.47.2）
  *
  * ## 为什么值得一条机械 pin（"静默失效"家族的又一员）
  *
@@ -37,17 +37,16 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
 
 import { Config } from '../src/index.ts'
 
-/** 设置面板层（扁平键）——**用户能在界面上改的十个字段**（= 必须 volatile 的那批）
+/** 设置面板层（扁平键）——**用户能在界面上改的字段**（= 必须 volatile 的那批）
  *  🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）⇒ 十个 → 九个
- *  🔴 v1.51（D104）：新增 `diagramEnabled`（图工具总闸，缺省关）⇒ 九个 → 十个 */
+ *  🔴 v1.51（D104）：新增 `diagramEnabled`（图工具总闸，缺省关）⇒ 九个 → 十个
+ *  🔴 2026-10-15：面 E 退役 ⇒ `acpEnabled` / `acpHttpPort` / `publicAskEnabled` 三个面板键删除
+ *     （owner 裁「砍掉外部问答」）⇒ 十个 → **七个**。 */
 const PANEL_KEYS = [
   'gatewayEnabled',
   'rebuildThresholdK',
   'skiffEnabled',
   'skiffDebugPort',
-  'acpEnabled',
-  'acpHttpPort',
-  'publicAskEnabled',
   'croEnabled',
   'unattendedEnabled',
   'diagramEnabled',
@@ -55,16 +54,17 @@ const PANEL_KEYS = [
 
 /** 部署层（嵌套段）——**不是**用户可改字段，与面板层是同一份数据的两种拼写
  *  🔴 v1.51（D104）：新增 `diagram`（缺省关）。**它必须在这里被钉住"不标 volatile"**：
- *  同义键两端都标 ⇒ 面板出现两个互相打架的控件。 */
-const DEPLOY_KEYS = ['gateway', 'rebuild', 'skiff', 'acp', 'diagram'] as const
+ *  同义键两端都标 ⇒ 面板出现两个互相打架的控件。
+ *  🔴 2026-10-15：面 E 退役 ⇒ `acp` 嵌套段删除。 */
+const DEPLOY_KEYS = ['gateway', 'rebuild', 'skiff', 'diagram'] as const
 
 /** 取 schema 字典里的一个字段（`z.object` 的 dict；读不到 ⇒ undefined） */
 function field(key: string) {
   return Config.dict?.[key]
 }
 
-describe('config-volatile: 设置面板层十键必须标 .volatile()（0.1.7 硬约定）', () => {
-  it('🔴 十键都在 schema 里，且 meta.volatile === true（一条不标 ⇒ 整个设置面板消失）', () => {
+describe('config-volatile: 设置面板层各键必须标 .volatile()（0.1.7 硬约定）', () => {
+  it('🔴 各键都在 schema 里，且 meta.volatile === true（一条不标 ⇒ 整个设置面板消失）', () => {
     const offenders: string[] = []
     for (const key of PANEL_KEYS) {
       const f = field(key)
@@ -74,7 +74,7 @@ describe('config-volatile: 设置面板层十键必须标 .volatile()（0.1.7 �
     expect(offenders, `以下面板键未标 .volatile()：${offenders.join(', ')}`).toEqual([])
   })
 
-  it('schema 的 volatile 字段集**恰等于**十键（多一个少一个都会改变面板渲染）', () => {
+  it('schema 的 volatile 字段集**恰等于**面板键（多一个少一个都会改变面板渲染）', () => {
     const volatileKeys = Object.entries(Config.dict ?? {})
       .filter(([, schema]) => schema.meta.volatile === true)
       .map(([key]) => key)
@@ -93,7 +93,7 @@ describe('config-volatile: 设置面板层十键必须标 .volatile()（0.1.7 �
     }
   })
 
-  it('🔴 十键**不得**带 `.required()` / `.default()`（"未设置"必须可观测；带默认值 ⇒ 部署层被无声压死）', () => {
+  it('🔴 各键**不得**带 `.required()` / `.default()`（"未设置"必须可观测；带默认值 ⇒ 部署层被无声压死）', () => {
     for (const key of PANEL_KEYS) {
       const meta = field(key)?.meta
       expect(meta?.required, `${key} 不该 required：面板字段非必填，required 会把"没设过"变成报错`).toBeFalsy()

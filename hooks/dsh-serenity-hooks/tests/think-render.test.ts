@@ -6,7 +6,8 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
-// 与 acp-core.test 同款：skiff-debug → skiff-core → dsh-llm 依赖链在测试环境需 mock
+// 与 skiff-debug.test 同款：skiff-debug → skiff-core → dsh-llm 依赖链在测试环境需 mock
+// （原注写「与 acp-core.test 同款」，2026-10-15 更正：被对齐的那份已随面 E 退役删除）
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))

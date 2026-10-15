@@ -21,8 +21,8 @@
  * （默认值）、settings-section（面板默认）、index（Config 默认）都可安全引用而不引入依赖环。
  */
 
-/** 面标识（五个对外面；A 由宿主监听，B/C/D/E 由本插件监听） */
-export type FaceId = 'main' | 'gateway' | 'weixinSend' | 'skiffDebug' | 'acpHttp'
+/** 面标识（四个对外面；A 由宿主监听，B/C/D 由本插件监听） */
+export type FaceId = 'main' | 'gateway' | 'weixinSend' | 'skiffDebug'
 
 /** 一个面的端口语义 */
 export interface PortSpec {
@@ -39,7 +39,7 @@ export interface PortSpec {
 /**
  * 集中端口表。
  * A=宿主主面（插件不监听）/ B=网关（可配，默认关）/ C=微信发送（默认开，仅 loopback）
- * / D=Skiff 调试（默认关）/ E=ACP+问答（默认关）。
+ * / D=Skiff 调试（默认关）。
  */
 export const FACE_PORTS: Readonly<Record<FaceId, PortSpec>> = {
   main: {
@@ -66,12 +66,6 @@ export const FACE_PORTS: Readonly<Record<FaceId, PortSpec>> = {
     defaultEnabled: false,
     meaning: 'Skiff 调试问答面（人工调试子角色；无认证，仅靠 loopback）',
   },
-  acpHttp: {
-    port: 3100,
-    host: '127.0.0.1',
-    defaultEnabled: false,
-    meaning: 'ACP JSON-RPC + 对外问答面（外部程序 + key 认证的问答页共用一 listener）',
-  },
 }
 
 /** 宿主主 WebUI 端口（面 A：插件**不监听**，只读取；`readWebPort` 的回退值） */
@@ -82,15 +76,15 @@ export const GATEWAY_PORT: number = FACE_PORTS.gateway.port
 export const WEIXIN_SEND_PORT: number = FACE_PORTS.weixinSend.port
 /** Skiff 调试页端口默认值（面 D） */
 export const SKIFF_DEBUG_PORT: number = FACE_PORTS.skiffDebug.port
-/** ACP / 对外问答端口默认值（面 E） */
-export const ACP_HTTP_PORT: number = FACE_PORTS.acpHttp.port
 
 /**
  * **机制端口**词表（output-guard 用：agent 在**用户可见输出**里提及内部端口即打回）。
  *
  * 由 {@link FACE_PORTS} 机械派生 ⇒ 与面清单**永不漂移**。
  * ⚠️ 修复记录（C4 块 B，2026-09-15）：旧常量硬写 `['3080','3081','3099','3100']`
- * ——**漏 3082**（微信发送面，默认开）⇒ 守卫拦不住"3082"这类提及。现由表派生，五面齐全。
+ * ——**漏 3082**（微信发送面，默认开）⇒ 守卫拦不住"3082"这类提及。现由表派生，四面齐全。
+ * ⚠️ 面变更记录（2026-10-15）：**面 E（3100 ACP/问答）已整体退役**（owner 裁「砍掉外部问答」）
+ * ⇒ 本词表随之少一项，**无需另改**（这正是"派生而非手抄"的收益）。
  */
 export const MECHANISM_PORTS: readonly string[] = (Object.keys(FACE_PORTS) as FaceId[])
   .map((id) => String(FACE_PORTS[id].port))

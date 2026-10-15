@@ -35,7 +35,9 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 }))
 
 // skiff-core 依赖 @deepseek-ai/dsh-session 类型（运行时擦除）——无需 mock；
-// acp-core → skiff-core 链在 handleIncoming 集成测试中用 fake ctx 走 createSkiffAgent 的轻路径
+// createSkiffAgent 链在 handleIncoming 集成测试中用 fake ctx 走轻路径
+// （原注释写「acp-core → skiff-core 链」，2026-10-15 更正：**本链从不经过 acp-core**——
+//  桥 import 的是 skiff-core；acp-core 已随面 E 退役删除）
 
 import {
   fetchQRCode,
@@ -440,7 +442,8 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
 })
 
 describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () => {
-  /** fake ctx（对齐 acp-core.test fakeCtx）：agents.create/resume 产生带 followup 的 fake agent；
+  /** fake ctx（原地演化自 skiff-core 侧的 fakeCtx；原注「对齐 acp-core.test fakeCtx」已失效——
+   *  该文件 2026-10-15 随面 E 退役删除）：agents.create/resume 产生带 followup 的 fake agent；
    *  on 立即触发 idle（waitIdle 立即返回）；followup 推入 user + assistant 答案事件。
    *  resumeMode: 'create'（resume 缺失→恒 create 路径）/ 'resume'（resume 命中历史恢复）/ 'not-found'（首次）
    *  / 'live'（v1.27.3：重启后 DSH 恢复 live——resume/create 均抛错，get 返回 live agent） */

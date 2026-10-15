@@ -1,3 +1,59 @@
+## v1.57.1 — 2026-10-15（**砍掉自造 ACP 面（面 E）**）
+
+**性质**：**行为变更**（对外面减少一个 ／ 面板减少三个键 ／ 一个配置节退场）。**来源**：owner 令 ——
+「我同意方案，先砍掉发一版」＋（前置调研）「砍掉外部问答，并调研更好的承载方式」。
+**判据与代价**见 S142 的调研件 `2026-10-14T2255-…-external-ask-retirement-and-acp-research.md`。
+
+### 一、为什么砍
+
+本插件的「ACP」**不是官方 ACP**：没有官方 SDK，传输是**自造 HTTP ＋ 自造 HTML 问答页**，
+协议面也落后（无 `session/resume`、无 `list`/`config`/`update`）⇒ 它是一个**没有客户端生态的私有外壳**。
+而官方件**已发布且与本机宿主同档**（`@deepseek-ai/dsh-acp@0.2.0-rc.2`）⇒ 外部接入改走官方。
+当年自研**不是错的**（那时官方件未发布，且插件进程模型确实与 stdio 冲突）；**是那条理由今天不成立了**。
+
+### 二、删除的实现面（逐条）
+
+| 类 | 内容 |
+|---|---|
+| **源码（两份整删）** | `src/acp-core.ts`（AcpServer ＋ `dispatchRpc` ＋ JSON-RPC 类型）／`src/acp-http.ts`（HTTP listener ＋ 5 个 HTML 生成函数 ＋ key 认证 ＋ IP 失败锁定调用） |
+| **客户端** | `src/client/PublicAskEditor.tsx`（整份）＋ `SettingsSection.tsx` 的两行 RowCard（「ACP JSON-RPC」／「Skiff 问答页」）＋ 相关 state |
+| **装配** | `index.ts` 的 `registerAcp()` 整函数 ＋ import ＋ `acp` 部署段 schema ＋ 三个 volatile 键 |
+| **端口** | `ports.ts` 的 `acpHttp` 面 ＋ `ACP_HTTP_PORT`（⇒ `MECHANISM_PORTS` 由表机械派生，**自动少一项**） |
+| **配置链** | `config-ops.ts` 的 `PublicAskSettings` ／ `AdvancedSettings.publicAsk` ／ wire 层 ／ `ensurePublicAskKey` ／ `verifyPublicAskKey` ／ `rotatePublicAskKey` ／ `resetPublicAskIpFail` ／ `isPublicAskIpLocked` ／ `recordPublicAskFail` ＋ 三个 `PUBLIC_ASK_*` 常量 |
+| **路由** | `api.ts` 的 `/serenity/public-ask`（GET 取 key/地址 ＋ PUT 轮换） |
+| **设置面** | `settings-section.ts` 的三个键（`acpEnabled`/`acpHttpPort`/`publicAskEnabled`）＋ 读取链 ＋ 部署段 |
+| **测试** | `tests/acp-core.test.ts`（整份，含 F4d 端点面约 30 例）＋ 7 份文件里的散点断言 |
+
+### 三、迁移（对既有部署是一次行为变更）
+
+1. **端口 3100 不再监听**；把它暴露到公网的那些入口（隧道 ingress 等）**会变 404**，须自行撤销或改指。
+2. **配置残留无害**：旧 `settings.yaml` 里的 `acpEnabled` / `acpHttpPort` / `publicAskEnabled` / `acp.*`，
+   以及 `~/.dsh/serenity-hooks.json` 里的 `publicAsk` 节，**一律静默忽略**（schemastery 非 strict；
+   `mergeWithDefaults` 不再读它）——**不需要手工清理**。
+3. **问答页 key 随之作废**（该 key 只服务于已删除的问答端点）。
+
+### 四、替代路径
+
+`dsh --profile acp`（宿主自带的官方 ACP server：**纯 stdio、零认证**，首次运行自动建 profile）＋
+任一现成 ACP 客户端（编辑器如 Zed / JetBrains；手机端如 Agmente / ACP UI）。
+**认证与暴露范围由接入层决定**（隧道 / 反代 / Cloudflare Access）——官方 server 自身不做认证、也无内建 WebSocket。
+
+### 五、同批的注释与文档更正（非删除）
+
+- 🔴 **`weixin-bridge.ts` 的一处陈旧注释**：原文称"消息 → **AcpServer 直调**（…acp-core 传输无关设计）"
+  —— 实测 `git grep`：该文件**从不 import `acp-core`**，而 `acp-core` 的消费者**自始至终只有两个**
+  （`acp-http.ts` ＋ 其测试）⇒ 那句是**设计意图的误记**，不是依赖关系。已更正并附判据。
+- 🔴 **`acp-` 会话前缀是从无生产者的孤儿**（登记，**本批不改行为**）：历史 `acp-core.ts` 建会话走
+  `createSkiffAgent` ⇒ id = `` `skiff-${role}-${uuid}` `` ⇒ `acp-` 从不出现。涉 2 处运行时判据
+  （`output-guard-seam.ts` / `unattended-ops.ts`），已就地加注说明"是死判据、为何不擅自删"。
+- 模块地图、组件关系表、README 的对外入口表与问答页章节：**改为记录退役 ＋ 指向官方路径**（原文保留可追溯）。
+- `docs/acp-wecom-design.md`：加**「已退役」抬头**（历史设计记录，**不删** —— 它解释当年为何自研）。
+
+### 六、门禁
+
+typecheck ／ typecheck-host ／ **168 files · 2762 tests** ／ coverage ／ build ／ pack-check 六项全绿。
+⚠️ **用例数下降属预期**：删掉的面自带约 60 例（含整份 `acp-core.test.ts`）。
+
 ## v1.57.0 — 2026-10-14（**`handyman` → `cheap-worker` 改名 ＋ 移除 `model` 参数 ＋ 删除后台运行能力**）
 
 **性质**：**行为变更**（工具名 ／ 参数面 ／ 运行形态三者同改）。**来源**：owner 两条令 ——

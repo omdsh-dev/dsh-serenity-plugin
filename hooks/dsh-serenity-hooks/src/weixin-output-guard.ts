@@ -131,7 +131,7 @@ export function __resetWeixinOutputGuardForTest(): void {
 
 /**
  * 装配闸门（index.ts apply 调用）。
- * 只对**已登记的手动模式会话**生效——其他会话（主舱/其他 skiff/ACP 临时会话）零干预。
+ * 只对**已登记的手动模式会话**生效——其他会话（主舱/其他 skiff 会话）零干预。
  */
 export function registerWeixinOutputGuard(ctx: Context): void {
   // ① 观察工具调用：本轮是否真的发过

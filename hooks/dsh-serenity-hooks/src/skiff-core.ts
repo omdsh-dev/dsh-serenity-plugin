@@ -26,7 +26,7 @@ import { waitAgentIdle } from './agent-idle.js'
 import { registerTrajectorySkillSection } from './seams/system-prompt.js'
 import { PLUGIN_SOURCE } from './message-source.js'
 
-// ── 会话注册表（sessionId → role + agent；ACP/调试页会话映射，页面/连接关闭时清理）──
+// ── 会话注册表（sessionId → role + agent；调试页会话映射，页面/连接关闭时清理）──
 // 角色名 + CCC 根存 skiff-registry（零依赖，guards 等 seams 可安全查询；v1.25.10 起
 // 值含 ccc——追问延续时校验 (role, ccc) 绑定）；agent 句柄存本模块
 
@@ -164,7 +164,7 @@ export function ensureWorkspacePromptSection(agent: Agent, scope: string): boole
  *
  * 判定链：
  * ⓪ **临时身份不建工作台**（v1.30.9，S142 用户报"SESSION 爆炸"根治）：`persistent=false`
- *    （ACP/调试页/问答页等**无固定会话 id**的临时 agent）→ null。理由（R↓）：这些 agent 每次
+ *    （调试页等**无固定会话 id**的临时 agent）→ null。理由（R↓）：这些 agent 每次
  *    调用都是新 id、无身份延续，为其建 SESSION = 每次问答留一个永久空目录（无界熵增）；
  *    用户模型「skiff 本质是临时会话机制」——工作台属于**持久身份**，不属于单次调用。
  * ① 角色未启用 session 能力（trajectory.session !== true）→ null（现状零变化）
@@ -251,10 +251,10 @@ const SKIFF_PRESET = 'standard'
  * 指定 sessionId 且磁盘已有持久化 log → `ctx.agents.resume`（DSH 持久化语义：
  * sessionId 即身份，已持久化会话必须 resume——历史 + turn 续号延续，同用户长期记忆保留）；
  * 无 log（首次）/持久化未配置 → `ctx.agents.create`（新建）。不指定 sessionId →
- * 随机 id 恒 create（ACP/调试页默认路径）。
+ * 随机 id 恒 create（调试页默认路径）。
  *
  * @param sessionId 指定会话 id（可选；微信桥等外部面用固定 id 实现用户↔会话长期映射——
- *   不传则随机生成 skiff-<role>-<uuid>，ACP/调试页默认路径）
+ *   不传则随机生成 skiff-<role>-<uuid>，调试页默认路径）
  */
 export async function createSkiffAgent(
   ctx: Context,
@@ -532,8 +532,9 @@ function truncate(s: string, n: number): string {
  * 提问一轮：followup → 等 idle → 读答案 + 轨迹。
  * @param eventsStart 轨迹起点：显式传 0 = 全量轨迹（会话追问时页面重绘完整时间线，
  *   v1.25.10 用户拍板）；不传（undefined）= 本轮增量（followup 前 events 之后）
- * @param options.includeTrajectory 是否计算轨迹（v1.26.10：**3100 对外只提供问答**——
- *   公开问答页 / ACP JSON-RPC 不返回 trajectory，传 false 跳过计算；3099 调试页默认 true 保留）
+ * @param options.includeTrajectory 是否计算轨迹（v1.26.10 起供**对外面**传 false 跳过计算——
+ *   原消费方 = 3100 公开问答页 / ACP JSON-RPC，**该面已于 2026-10-15 退役** ⇒ 现无生产调用方传 false；
+ *   3099 调试页默认 true 保留）
  */
 export async function askSkiff(
   ctx: Context,

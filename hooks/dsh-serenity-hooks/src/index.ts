@@ -38,7 +38,7 @@ import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { cccRootForCwd, listCccs } from './ccc-roots.js'
 // C4 块 B：端口只从集中端口表取（默认值不再散写）
-import { ACP_HTTP_PORT, MAIN_WEB_PORT, SKIFF_DEBUG_PORT } from './ports.js'
+import { MAIN_WEB_PORT, SKIFF_DEBUG_PORT } from './ports.js'
 import { hostSessions, hostWebServer } from './host/access.js'
 import { hostContractReport, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './status.js'
@@ -50,7 +50,6 @@ import { registerOutputGuardHook } from './output-guard-seam.js'
 import { registerUnattendedSeam } from './unattended-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
-import { startAcpHttpServer, stopAcpHttpServer, acpHttpActive } from './acp-http.js'
 import { registerWakeScheduler } from './wake-scheduler.js'
 import { registerCroTurnTracking } from './cro-turns.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
@@ -183,8 +182,6 @@ export interface Config {
   rebuild?: { enabled?: boolean; thresholdK?: number }
   /** F4 Skiff（实验性）：调试服务启停（entry 默认值，运行时经 DSH settings） */
   skiff?: { enabled?: boolean; debugPort?: number }
-  /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（entry 默认值，运行时经 DSH settings） */
-  acp?: { enabled?: boolean; httpPort?: number }
   /** v1.30.12 web_fetch provider 接管（fake-ip / TUN 网络：宿主内置 provider 判「非公网」恒拒） */
   webFetch?: { enabled?: boolean }
   /**
@@ -226,12 +223,6 @@ export interface Config {
   skiffEnabled?: Volatile<boolean | undefined>
   /** F4 Skiff 调试端口（面板层；部署层同义键 = `skiff.debugPort`） */
   skiffDebugPort?: Volatile<number | undefined>
-  /** F4c ACP HTTP 端点总开关（面板层；部署层同义键 = `acp.enabled`） */
-  acpEnabled?: Volatile<boolean | undefined>
-  /** F4c ACP HTTP 端口（面板层；部署层同义键 = `acp.httpPort`） */
-  acpHttpPort?: Volatile<number | undefined>
-  /** F4d 建议问答页总开关（面板层；无部署层同义键） */
-  publicAskEnabled?: Volatile<boolean | undefined>
   /** CRO（轨迹自编程唤起）总闸（面板层；无部署层同义键；缺省开） */
   croEnabled?: Volatile<boolean | undefined>
   /** 无人值守代理回复总闸（面板层；无部署层同义键；缺省关） */
@@ -295,7 +286,6 @@ export const Config = z.object({
   // 同族先例 = `wakeSchedulerEnabled`（2026-09-21 砍掉，旧键静默忽略）。
   rebuild: z.object({ thresholdK: z.number().min(50).max(4000).default(400) }),
   skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(SKIFF_DEBUG_PORT) }),
-  acp: z.object({ enabled: z.boolean().default(false), httpPort: z.number().min(1024).max(65535).default(ACP_HTTP_PORT) }),
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
@@ -333,9 +323,6 @@ export const Config = z.object({
   rebuildThresholdK: z.number().min(50).max(4000).volatile(),
   skiffEnabled: z.boolean().volatile(),
   skiffDebugPort: z.number().min(1024).max(65535).volatile(),
-  acpEnabled: z.boolean().volatile(),
-  acpHttpPort: z.number().min(1024).max(65535).volatile(),
-  publicAskEnabled: z.boolean().volatile(),
   croEnabled: z.boolean().volatile(),
   unattendedEnabled: z.boolean().volatile(),
   // D104（2026-09-29 owner 具名令）：diagram 工具总闸（面板层；**缺省关**）。第十号面板键——
@@ -435,7 +422,7 @@ export function apply(ctx: Context, config: Config): void {
   registerSettingsSection(ctx, config)
   // D104（2026-09-29 owner 具名令）：diagram 工具 —— agent 给一段标签格式源码，进程内光栅化成
   // PNG（**不借浏览器**）并让图进对话。实验性 demo ⇒ **缺省关**；关时**不注册**
-  // （工具不进模型工具清单 ⇒ 零 token、不会被误调），同 skiff／acp 的"未开启零资源占用"口径。
+  // （工具不进模型工具清单 ⇒ 零 token、不会被误调），同 skiff 的"未开启零资源占用"口径。
   // 🔴 **本行必须在 `registerSettingsSection` 之后**：开关经 `readSimpleSettings()` 读（唯一读取入口），
   //    而那个源是在 registerSettingsSection 里才接上的（早读 = 恒读到内建缺省 = 开关永远无效）。
   // 🔴 面板拨开关**无需**额外热同步订阅：宿主 `fiber.update()` 的语义 = 校验新 config 后 **restart 本插件**
@@ -471,9 +458,13 @@ export function apply(ctx: Context, config: Config): void {
   // F4 Skiff（v1.25.0 实验性）：调试问答页装配——人工开关（settings skiffEnabled）→
   // 启动/停止 node:http 调试服务；角色定义归 CCC（skiff.roles）；未开启零资源占用
   registerSkiff(ctx)
-  // F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点装配——人工开关（settings acpEnabled）→
-  // 启动/停止；session/new 支持 {ccc, role, sessionId?}（复用 skiff 核心 + 会话延续）
-  registerAcp(ctx)
+  // F4c ACP / F4d 建议问答页（v1.26.0 实验性，**2026-10-15 owner 裁「砍掉外部问答」⇒ 整面退役**）：
+  // `acp-core.ts` / `acp-http.ts` / `PublicAskEditor.tsx` 连同本处装配、面板键与配置链**一并删除**。
+  // 旧配置里若残留 `acpEnabled`/`acpHttpPort`/`publicAskEnabled`/`acp.*`/`publicAsk.*`
+  // ⇒ **静默忽略**（同 `rebuildEnabled`／`wakeSchedulerEnabled` 的处置；schemastery 非 strict）。
+  // 🔴 退役理由与替代路径：本仓"ACP"当年是**自造 HTTP＋HTML**（无官方 SDK、无生态），而官方
+  // `@deepseek-ai/dsh-acp` 现已发布且与本机宿主同档 ⇒ 外部接入改走**官方 ACP ＋ 现成客户端**。
+  // 判据与代价（失去"按角色提问"）见 S142 `2026-10-14T2255-…-external-ask-retirement-and-acp-research.md`。
   // Autopilot Trajectory（ACC 周期自唤醒，v1.26.12 实验 → v1.27.4 正式化）已于 2026-09-15
   // 整段退场（所有者裁决 (a)）——ACC 不再提供周期自唤醒：机制/时钟/`container_admin autopilot`
   // 域/面板区块全部删除。CCC 侧的自主巡航改走 `msm autopilot-round`（S151 自管理链，
@@ -506,7 +497,7 @@ export function apply(ctx: Context, config: Config): void {
   // CCC 管内容"边界一致。
   registerWeixinOutputGuard(ctx)
   // review F-08（v1.30.8）：生命周期——agent/session 销毁清理 per-会话状态 +
-  // 插件卸载/HMR 停掉自起资源（skiff 调试页/ACP/微信桥；否则端口占用与重复轮询）
+  // 插件卸载/HMR 停掉自起资源（skiff 调试页/微信桥；否则端口占用与重复轮询）
   registerLifecycle(ctx)
   // v1.30.12（S142 用户拍板 L3）：web_fetch provider 接管——fake-ip 网络下宿主内置
   // provider（web-fetch-http）把 198.18.0.0/15 判为「非公网」恒拒；本插件用同一
@@ -546,7 +537,7 @@ export function apply(ctx: Context, config: Config): void {
  *   ① 听宿主的**真事件** `settings/document-updated`（ns = 我们那张设置页）——顺带说明为什么不用
  *      我们自己的 `serenity/settings-changed`：那个事件**全仓没有任何 `emit` 点**（只有 `ctx.on` 侧
  *      在用）＝**死通道**，照着它接线等于接了个永远不响的铃；
- *   ② 兜底再挂 `agent/created` ／ `session/created`（与 skiff／acp 同款做法，那两条在实测里确实会 fire）
+ *   ② 兜底再挂 `agent/created` ／ `session/created`（与 skiff 同款做法，那两条在实测里确实会 fire）
  *      —— 宿主事件面若换名，至少还有这一条能自愈；
  *   ③ 启动时同步一次（apply 时按当前配置定初始态）。
  * 🔴 **关的时候要注销**（不是"留着但不响应"）：与"关时不注册"同一口径 —— 工具不出现在模型清单里。
@@ -603,7 +594,8 @@ function registerDiagramTool(ctx: Context): void {
  * 同步一次——此刻通常还没有 live 会话，进程 cwd（服务启动目录）也不在 CCC 内 →
  * `resolveSkiffRoot` 返回 null → 打印一行警告后**永不重试**（实证：重启日志
  * `✗ Skiff 调试服务未启动：无法定位 CCC root`，`ss -ltn` 无 3099；同批 ACP 因容忍
- * `root ?? undefined` 而正常启动）。
+ * `root ?? undefined` 而正常启动 —— ⚠️ **该对照已随面 E 退役而失效**（2026-10-15），
+ * 但本条记录的**病因与修法不受影响**（Skiff 侧仍是"首次未定位 → 曾永不重试"）。
  *
  * v1.30.14（重启日志实证后的收敛）：**并发启动守卫** + 首次未定位降级为信息级日志。
  *  - 实证（v1.30.13 重启日志）：定时触发与"会话就绪"事件几乎同时到达 → 两次 sync 都
@@ -756,39 +748,4 @@ function readWebPort(ctx: Context): number {
   } catch {
     return MAIN_WEB_PORT
   }
-}
-
-/**
- * F4c ACP HTTP + F4d 建议问答页装配（v1.26.x 实验性）：启停 = 人工（设置面板
- * 「Serenity」页 ACP / 问答页开关，settings 持久化）。任一面开启即启动服务
- * （同一端口：POST / = JSON-RPC 需 acpEnabled；GET / + /ask = 问答页需 publicAskEnabled）。
- * 会话创建/延续走 acp-core → skiff-core；仅监听 127.0.0.1；未开启零资源占用。
- */
-function registerAcp(ctx: Context): void {
-  // async：`resolveSkiffRoot` 因第 ④ 档（ccc-roots 枚举）改为异步（C2）
-  const sync = async (): Promise<void> => {
-    const s = readSimpleSettings()
-    const anyFace = s.acpEnabled || s.publicAskEnabled
-    if (anyFace && !acpHttpActive()) {
-      // ACP 面容忍 root 缺席（`root ?? undefined`，绑不上也只是不问 CCC）——与 Skiff 面不同。
-      // C4 块 A：**不再自持 `started` 标志**——"面是否在监听"的真值源是 face-host 的
-      // active 表（`acpHttpActive()`）；并发触发由面宿主的在飞合并兜住（同一面只 bind 一次）。
-      const root = await resolveSkiffRoot(ctx)
-      return startAcpHttpServer(ctx, s.acpHttpPort, root ?? undefined)
-        .catch((err) => {
-          console.error(`[serenity-hooks] ✗ ACP HTTP 服务启动失败: ${String((err as Error)?.message ?? err)}`)
-        })
-    } else if (!anyFace && acpHttpActive()) {
-      stopAcpHttpServer()
-    }
-  }
-  try {
-    ctx.on('serenity/settings-changed', () => {
-      void sync()
-    })
-  } catch {
-    /* 事件通道缺失不阻断（启动时 sync 仍执行） */
-  }
-  // 启动时同步一次（settings.yaml 持久化 acpEnabled/publicAskEnabled=true → 重启后自动恢复）
-  void sync()
 }

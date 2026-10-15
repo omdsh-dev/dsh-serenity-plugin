@@ -3,14 +3,16 @@
  *
  * ## 现状 → 本模块要收掉什么（取证：`…/acc-c4c5-current-state.md` §①/§③ 3.1）
  *
- * 插件自己 spawn 了**四个** node:http 监听器（B 3081 网关 / C 3082 微信发送 / D 3099 Skiff 调试
- * / E 3100 ACP+问答）。此前四处各写一份同款样板：`createServer` + `server.once('error')` +
+ * 插件自己 spawn 了**三个** node:http 监听器（B 3081 网关 / C 3082 微信发送 / D 3099 Skiff 调试）。
+ * ⚠️ **2026-10-15 变更**：原为四个（含 **E 3100 ACP+问答**），E 已随 owner「砍掉外部问答」令**整面退役**
+ * ⇒ 仍保有面 B/C/D 三个；本段保留"当年是四个"的记述，因为下方"两套拆卸"的病史由它解释。
+ * 此前四处各写一份同款样板：`createServer` + `server.once('error')` +
  * `listen(port, host)` + 模块级 `active` 变量 + `close()`；拆卸也分裂成**两套**——
  * `seams/lifecycle.ts` 有一个聚合 disposer，而 `gateway.ts` 与 `weixin-send-api.ts`
  * **各自另注册**一个（D/E 干脆没有自己的 disposer）。
  *
  * 本模块把"listener 生命周期"收成一处：**active 表 + 统一 listen/close + 统一错误与端口占用
- * 处理**。四个面各自只提供 `{ name, port, host, enabled, handler }`。
+ * 处理**。各面各自只提供 `{ name, port, host, enabled, handler }`。
  *
  * ## 🔴 共享的是「生命周期与样板」，**绝不是**「路由 / 监听器 / 鉴权」
  *
@@ -18,12 +20,12 @@
  *   · **A ↔ C 解耦**（`weixin-send-api.ts:4-7`）：3080 会被 3081 原样反代（连请求头），
  *     把 3082 的端点挂到 3080 上 = 已登录的外部家庭账号即可冒充 bot 发消息
  *     ⇒ 本模块**不提供**"把面挂到别的面"的能力，也不共享路由表；
- *   · **E ↔ D** 共用会话核心（acp-core → skiff-core）但各自独立 listener + 独立路由/HTML；
+ *   · （原 **E ↔ D** 共用会话核心但各自独立 listener 一条，**随 E 退役删除**）；
  *   · **B 是 A 的代理宿主**（把请求打到 `127.0.0.1:<主端口>`），不是另一个路由面。
  *
  * ## 面 A（3080）不在本模块之列
  * 它是**宿主 DSH 主 WebUI**，插件只往上挂 `/serenity/*` 路由（`ctx.webServer.register`），
- * **插件不起这个 listener** ⇒ 面宿主只持有 B/C/D/E 四个自起面。
+ * **插件不起这个 listener** ⇒ 面宿主只持有 B/C/D 三个自起面。
  *
  * ## 两个入口的分工（这是本模块唯一的"抽象决策"，别混）
  *   · {@link startFace} —— **机械启动**：把一个 handler 绑到 `host:port` 上。同名面若已在监听，

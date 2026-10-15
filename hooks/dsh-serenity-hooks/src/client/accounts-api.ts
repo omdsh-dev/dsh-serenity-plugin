@@ -32,10 +32,6 @@ export interface WireConfig {
     totpEnabled: boolean
   }
   persona: { mode: string; overrideText: string }
-  publicAsk: {
-    /** 开放容器白名单（v1.26.2：容器名数组；空 = 全部开放） */
-    allowed: string[]
-  }
 }
 
 /**
@@ -195,7 +191,7 @@ export async function fetchConfig(): Promise<ConfigResponse | null> {
   return { config: body.config ?? null, knownWorkspaces: body.knownWorkspaces ?? [] }
 }
 
-/** PUT 配置（账号 patch + 工作区白名单 + persona 彩蛋 + 开放容器白名单）→ 返回保存后的 wire */
+/** PUT 配置（账号 patch + 工作区白名单 + persona 彩蛋）→ 返回保存后的 wire */
 export async function saveConfig(
   patch: {
     gateway?: {
@@ -208,7 +204,6 @@ export async function saveConfig(
       totpEnabled?: boolean
     }
     persona?: { mode?: string; overrideText?: string }
-    publicAsk?: { allowed?: string[] }
   },
 ): Promise<WireConfig | null> {
   const res = await fetch(CONFIG_PATH, {

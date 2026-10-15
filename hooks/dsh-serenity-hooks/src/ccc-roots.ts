@@ -85,7 +85,8 @@ export const NO_CCC_FROM_AGENT_CWD = 'No CCC found: no .serenity file from agent
 
 // ── L2：全量枚举（本机有哪些 CCC）──
 
-/** 候选 CCC 条目（调试页 CCC 切换器 / 微信桥 / ACP 问答页 / `/serenity/cccs` 共用数据形状） */
+/** 候选 CCC 条目（调试页 CCC 切换器 / 微信桥 / `/serenity/cccs` 共用数据形状）
+ *  ⚠️ 2026-10-15：原同批还有「ACP 问答页」，其面已退役 ⇒ 消费方少一个（形状不变）。 */
 export interface CccEntry {
   /** CCC 根（绝对路径） */
   root: string

@@ -197,19 +197,21 @@ describe('src/api.ts：HTTP 对外面（真 listener ＋ 真往返）', () => {
       try {
         // 🔴 2026-10-14：`/serenity/cheap-workers` 已随 background 模式删除（它是**进度文件**的读口，
         //    而进度文件不再有生产者）⇒ 期望值从 9 条降为 8 条。**该路径必须不再被注册**（见下一条否定断言）。
+        // 🔴 2026-10-15：`/serenity/public-ask` 已随**面 E 退役**删除（owner 裁「砍掉外部问答」）
+        //    ⇒ 期望值 8 → **7** 条。同样**必须不再注册**（见下面第二条否定断言）。
         const expected = [
           '/serenity/status',
           '/serenity/image-upload',
           '/serenity/file-upload',
           '/serenity/config',
           '/serenity/cccs',
-          '/serenity/public-ask',
           '/serenity/weixin',
           '/serenity/session-cleanup',
         ]
         for (const p of expected) expect(api.routes, `未注册：${p}`).toContain(p)
         // 🔴 否定面：退场端点不得残留（否则前端会拿到一个"永远空表"的假读数）
         expect(api.routes, '已删除的端点不得复活').not.toContain('/serenity/cheap-workers')
+        expect(api.routes, '面 E 退役后 public-ask 不得复活').not.toContain('/serenity/public-ask')
         // 不变式：这个面**只碰**自己的命名空间（不许顺手抢别的路径）
         for (const p of api.routes) expect(p.startsWith('/serenity/'), `越界路径：${p}`).toBe(true)
         expect(new Set(api.routes).size, '路径重复注册').toBe(api.routes.length)
@@ -474,45 +476,22 @@ describe('src/api.ts：其余路由（config ／ cccs ／ public-ask ／ weixin 
     }
   })
 
-  it('🔴 /serenity/public-ask：无头 ⇒ 403；GET ⇒ 200；rotate **真换 key**（旧 key 立即失效）；非法 action ⇒ 400', async () => {
+  it('🔴 /serenity/public-ask 已随面 E 退役：GET 与 PUT 都走 404（不是"空配置"）', async () => {
     const api = await bootApi()
     try {
-      const denied = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask' })
-      expect(denied.status).toBe(403)
-      expect(JSON.parse(denied.body)).toEqual({ error: '仅限 WebUI（key 属敏感凭据）' })
+      // 判据刻意选 404 而非"403/200 + 空表"：后者**看起来正常**，正是死端点最难发现之处
+      // （与本文件里 `/serenity/cheap-workers` 那条同款判据，2026-10-15）。
+      const got = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
+      expect(got.status, '已退役的端点不得再应答').toBe(404)
 
-      const before = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
-      expect(before.status).toBe(200)
-      const b = JSON.parse(before.body) as { key: string; urls: unknown[]; listUrl: string }
-      expect(b.key).not.toBe('')
-      expect(Array.isArray(b.urls)).toBe(true)
-      expect(b.listUrl).toContain('/')
-
-      const rotated = await raw({
+      const put = await raw({
         port: api.port,
         method: 'PUT',
         path: '/serenity/public-ask',
         headers: UI_HEADERS,
         body: JSON.stringify({ action: 'rotate' }),
       })
-      expect(rotated.status).toBe(200)
-      const newKey = (JSON.parse(rotated.body) as { key: string }).key
-      expect(newKey).not.toBe('')
-      expect(newKey, 'rotate 必须换成**新** key（旧 key 立即失效）').not.toBe(b.key)
-
-      // 再 GET 一次：盘上生效的是新 key（不是内存态幻觉）
-      const after = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
-      expect((JSON.parse(after.body) as { key: string }).key).toBe(newKey)
-
-      const bad = await raw({
-        port: api.port,
-        method: 'PUT',
-        path: '/serenity/public-ask',
-        headers: UI_HEADERS,
-        body: JSON.stringify({ action: 'nope' }),
-      })
-      expect(bad.status).toBe(400)
-      expect(JSON.parse(bad.body)).toEqual({ error: 'unsupported action (expected "rotate")' })
+      expect(put.status, '已退役的端点不得再应答（PUT）').toBe(404)
     } finally {
       await api.close()
     }
@@ -1006,26 +985,27 @@ describe('src/api.ts：残余 catch 与尾部支线（⑤ 第 18 件）', () => 
     }
   })
 
-  it('🔴 坏 JSON 请求体 ⇒ `config PUT` ／ `public-ask PUT` 各自的 catch 回 400（面板发坏包的真实形态）', async () => {
+  it('🔴 坏 JSON 请求体 ⇒ `config PUT` 的 catch 回 400（面板发坏包的真实形态）', async () => {
     const api = await bootApi()
     try {
       const cfg = await raw({ port: api.port, method: 'PUT', path: '/serenity/config', headers: UI_HEADERS, body: '{ not json' })
       expect(cfg.status).toBe(400)
       expect(String(jsonBody(cfg).error)).toMatch(/JSON|Unexpected/i)
 
-      const ask = await raw({ port: api.port, method: 'PUT', path: '/serenity/public-ask', headers: UI_HEADERS, body: '{ not json' })
-      expect(ask.status).toBe(400)
+      // ⚠️ 2026-10-15：原同批还测 `public-ask PUT` 的 catch；该端点已随面 E 退役 ⇒
+      //    它现在**由路由层 404 拦下、根本进不到 catch**（见上面的退役专项用例）。
+      const retired = await raw({ port: api.port, method: 'PUT', path: '/serenity/public-ask', headers: UI_HEADERS, body: '{ not json' })
+      expect(retired.status, '退役端点不得进入任何 handler').toBe(404)
     } finally {
       await api.close()
     }
   })
 
-  it('🔴 `public-ask`：非 PUT/GET ⇒ 405（此前只测了 PUT 的两态与 GET）', async () => {
+  it('🔴 `public-ask` 已退役：任意方法（POST）⇒ 404（路由层拦下，不再有 405 语义）', async () => {
     const api = await bootApi()
     try {
       const res = await raw({ port: api.port, method: 'POST', path: '/serenity/public-ask', headers: UI_HEADERS, body: '{}' })
-      expect(res.status).toBe(405)
-      expect(jsonBody(res).error).toBe('method not allowed')
+      expect(res.status).toBe(404)
     } finally {
       await api.close()
     }

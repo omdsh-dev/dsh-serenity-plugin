@@ -145,7 +145,7 @@ describe('seams/lifecycle: registerLifecycle', () => {
     expect(warn.mock.calls.some((c) => String(c[0]).includes('资源拆卸未装配'))).toBe(true)
   })
 
-  it('卸载时停掉自起资源（skiff 调试页/ACP/微信桥停止函数被调用且不抛错）', () => {
+  it('卸载时停掉自起资源（skiff 调试页/微信桥停止函数被调用且不抛错）', () => {
     const ctx = fakeCtx()
     registerLifecycle(ctx as never)
     expect(() => ctx.disposeAll()).not.toThrow()

@@ -120,7 +120,7 @@ export function systemPromptSource(role: SkiffRoleConfig | undefined): 'file' | 
  * 角色类型（v1.30.15，S142 用户拍板）：
  * - 显式 `role.kind` 优先（`temporary` / `persistent`）
  * - 缺省 = 隐式推断：调用方给出**稳定 sessionId** → persistent；否则 temporary
- *   （存量配置零迁移；微信桥传固定会话 id → persistent，ACP/调试页随机 id → temporary）
+ *   （存量配置零迁移；微信桥传固定会话 id → persistent，调试页随机 id → temporary）
  */
 type SkiffKind = 'temporary' | 'persistent'
 

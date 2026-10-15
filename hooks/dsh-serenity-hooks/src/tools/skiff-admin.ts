@@ -56,11 +56,10 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
 
 ── 运行 ──
   调试：设置面板「Serenity」页 Skiff 区块开启 → http://127.0.0.1:<debugPort> 问答页实测
-  ACP 程序化面（v1.26.0）：设置面板「ACP」区块开启 → HTTP JSON-RPC 端点（默认 3100）——
-    POST /  {jsonrpc, id, method, params}
-    session/new {ccc, role, sessionId?}  → 创建/延续会话（sessionId 可选=进程内追问）
-    session/prompt {sessionId, question} → {answer, trajectory}
-    session/cancel / session/close / session/list / request_permission（恒 allow）
+  🔴 外部程序化接入（2026-10-15 起改走官方）：本插件自造的 ACP 面（HTTP JSON-RPC 3100 ／
+    建议问答页）**已整体退役**（owner 裁「砍掉外部问答」）。现在要程序化/远程接入，走宿主
+    自带的官方 ACP server：dsh --profile acp（纯 stdio、零认证）＋ 任一 ACP 客户端
+    （手机端如 Agmente / ACP UI）经隧道接入。详见 S142 的接入指南文档。
   启停 = 人工（设置面板开关，不随插件加载自动启动）；未开启零资源占用
   生效机制：角色配置**实时读取**（改 .opencode/serenity.json → 刷新调试页即生效）；
   改配置后用 container_admin role apply 做显式校验 + 应用确认（绑定 CCC + 角色清单）

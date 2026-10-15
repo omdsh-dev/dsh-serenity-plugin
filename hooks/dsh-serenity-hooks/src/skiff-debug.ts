@@ -11,8 +11,9 @@
  * 下拉列出全部候选（live 会话 cwd 上溯 .serenity 去重 + 默认绑定 root 兜底），
  * 切换后角色下拉联动（各 CCC 的 skiff.roles 实时读取），提问按所选 CCC 创建 agent。
  *
- * 与 ACP stdio 协议（F4c 后续）共用同一会话核心（createSkiffAgent + askSkiff），
- * 协议层后加不返工。轨迹 = session.events 结构化返回（与 dsh WebUI 同源数据），
+ * 与 skiff 会话核心（createSkiffAgent + askSkiff）直接共用同一实现；
+ * （原「与 ACP stdio 协议（F4c 后续）共用同一会话核心」一句已随面 E 退役删除，2026-10-15）
+ * 轨迹 = session.events 结构化返回（与 dsh WebUI 同源数据），
  * 页面 JS 渲染成对话时间线；同时保留原生 WebUI 会话链接供完整交互。
  *
  * 实验性质：未开启时零资源占用（无监听、无 agent 创建）。
@@ -265,8 +266,8 @@ function escapeHtml(s: string): string {
  * 在 JSON **文本层**把它们替换为 `\uXXXX` 转义序列：JSON.parse 后语义完全一致（还原原字符），
  * 且 JSC 正则看到的是常规 ASCII 转义（与 JSON.stringify 对控制字符的输出同形态，安全）。
  *
- * 3100 问答页客户端 `await res.json()`（acp-http.ts）与页面内嵌 JSON（skiff-debug/acp-http）
- * 均需此兼容层——iOS Safari 用户实测"复杂回答"触发。
+ * 3099 调试页客户端 `await res.json()` 与页面内嵌 JSON 均需此兼容层
+ * ——iOS Safari 用户实测"复杂回答"触发。（原同批还列了 3100 问答页，该面已退役，2026-10-15）
  *
  * @param jsonText JSON.stringify 的输出文本；原地等价替换，返回 JSC 安全文本
  */

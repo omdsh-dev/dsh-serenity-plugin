@@ -133,7 +133,7 @@ describe('accounts-api: fetchWorkspaces / fetchConfig（v1.28.0 适配 0.1.2-rc.
         cookieSecure: false, allowWorkspaceCreate: true, totpEnabled: false,
       },
       persona: { mode: '', overrideText: '' },
-      publicAsk: { allowed: [] },
+      // 2026-10-15：原 `publicAsk: { allowed: [] }` 已随面 E 退役删除（wire 形态不再含该节）
     },
     knownWorkspaces,
   })

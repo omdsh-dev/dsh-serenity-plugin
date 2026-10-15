@@ -77,9 +77,10 @@ describe('读写（plugin 全局文件）', () => {
     expect(s.gateway.accounts).toEqual([])
     expect(s.gateway.workspaces).toEqual([])
     expect(s.persona.mode).toBe('')
-    expect(s.publicAsk.allowed).toEqual([])
     // review P2-3：高级配置已无 rebuild（rebuild 归简单配置 settings.yaml）——死双胞胎删除
     expect((s as unknown as Record<string, unknown>).rebuild).toBeUndefined()
+    // 🔴 2026-10-15：面 E 退役 ⇒ 高级配置里**不再有** publicAsk 节（owner 裁「砍掉外部问答」）
+    expect((s as unknown as Record<string, unknown>).publicAsk).toBeUndefined()
   })
 
   it('写 → 读 往返一致；文件权限 0600', () => {

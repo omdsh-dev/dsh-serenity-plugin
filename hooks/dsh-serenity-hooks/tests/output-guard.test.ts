@@ -106,17 +106,22 @@ describe('output-guard: 检测（detectSensitive）', () => {
 
   it('回答含内部端口 → 命中（分类 port，v1.26.11）', () => {
     const t = buildSensitiveTable(dir)
-    expect(detectSensitive('端口 3100 提供服务', t)).toContainEqual({ word: '3100', category: 'port' })
+    // ⚠️ 2026-10-15：原用 3100 举例，该面（面 E）已退役 ⇒ 改用仍在役的 3099（Skiff 调试面）。
+    //    判据不变：在役内部端口出现在用户可见输出里必须被打回。
+    expect(detectSensitive('端口 3099 提供服务', t)).toContainEqual({ word: '3099', category: 'port' })
   })
 
   it('🔴 C4 块 B 缺陷修复：3082（微信发送面，默认开）也在守卫端口集合内', () => {
     // 修复前 MECHANISM_PORTS 硬写 ['3080','3081','3099','3100']——漏 3082 ⇒ 提 3082 不被打回。
-    // 现由集中端口表派生（ports.ts），本断言钉住"守卫端口集合 = 五面端口"。
+    // 现由集中端口表派生（ports.ts），本断言钉住"守卫端口集合 = 各面端口"。
+    // ⚠️ 2026-10-15：面 E（3100）退役 ⇒ 期望集合由五项改四项；3082 那条**判据不变**（它是本用例的主题）。
     const t = buildSensitiveTable(dir)
-    for (const port of ['3080', '3081', '3082', '3099', '3100']) {
+    for (const port of ['3080', '3081', '3082', '3099']) {
       expect(t.portWords, `守卫端口词表缺 ${port}`).toContain(port)
       expect(detectSensitive(`服务监听在 ${port}`, t), `${port} 未被守卫识别`).toContainEqual({ word: port, category: 'port' })
     }
+    // 负控：已退役的 3100 不该再被当内部端口（否则守的是个不存在的面）
+    expect(t.portWords, '已退役的 3100 仍在守卫词表里').not.toContain('3100')
   })
 
   it('空文本 → 无命中', () => {
@@ -232,7 +237,11 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
     expect(f.steers).toEqual([])
   })
 
-  it('ACP 会话（acp- 前缀）→ 检测（外部程序化面）', () => {
+  it('🔴 `acp-` 前缀会话仍被判为外部面（**死判据但契约仍在**，2026-10-15 面 E 退役后仍钉）', () => {
+    // ⚠️ 该前缀**从无生产者**（历史 acp-core 建的是 skiff- 前缀会话），面 E 退役后更不会出现。
+    //    本用例**刻意保留**：它钉的是 isExternalFaceSession 的**契约**（前缀命中即算外部面），
+    //    而非"某处真的会产生这种 id"。若将来裁掉该分支（见 §当前状态「观察」的孤儿项），
+    //    本用例应**同批删除**——它正是那条待裁项的机械锚点。
     const f = fakeCtx('acp-session-uuid')
     registerOutputGuardHook(f.ctx as never)
     f.agent.session.events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'vlm-describe 输出' }] } } })

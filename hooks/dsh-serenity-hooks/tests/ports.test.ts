@@ -6,7 +6,6 @@ import {
   GATEWAY_PORT,
   WEIXIN_SEND_PORT,
   SKIFF_DEBUG_PORT,
-  ACP_HTTP_PORT,
   type FaceId,
 } from '../src/ports.js'
 
@@ -15,20 +14,24 @@ import {
  *
  * 起因（现状取证 §③ 3.2-8）：端口此前散在 4 处默认值，而 output-guard 另抄了一份
  * **机制端口词表**——那份词表**漏了 3082**（微信发送面，**默认开**）⇒ 守卫拦不住
- * agent 在用户可见输出里提及 3082。本文件钉住"表是唯一真相源 + 五面齐全"。
+ * agent 在用户可见输出里提及 3082。本文件钉住"表是唯一真相源 + 各面齐全"。
+ *
+ * 🔴 **面数变更（2026-10-15）**：**面 E（3100 ACP/问答）已整体退役**（owner 裁「砍掉外部问答」）
+ * ⇒ 五面 → **四面**。本文件由「五面」改为「四面」，并**保留** 3082 那条缺陷回归钉。
+ * ⚠️ 注意：退役后词表**又变回 4 项**，但**那不是旧缺陷形态**（旧缺陷 = 4 项里**缺 3082 却含 3100**）
+ * —— 故下面的回归钉改为**逐项判据**而非"项数不等于 4"，否则会红一个语义完全正确的状态。
  */
 
-/** §① 表 A：五个对外面的端口（取证文件 acc-c4c5-current-state.md） */
+/** §① 表 A：各对外面的端口（取证文件 acc-c4c5-current-state.md；面 E 已于 2026-10-15 退役） */
 const EXPECTED: Record<FaceId, number> = {
   main: 3080,
   gateway: 3081,
   weixinSend: 3082,
   skiffDebug: 3099,
-  acpHttp: 3100,
 }
 
-describe('ports: 集中端口表（五面语义）', () => {
-  it('五个面齐全，端口号与取证表一致', () => {
+describe('ports: 集中端口表（四面语义）', () => {
+  it('四个面齐全，端口号与取证表一致', () => {
     expect(Object.keys(FACE_PORTS).sort()).toEqual(Object.keys(EXPECTED).sort())
     for (const [id, port] of Object.entries(EXPECTED) as Array<[FaceId, number]>) {
       expect(FACE_PORTS[id].port, `${id} 端口`).toBe(port)
@@ -36,28 +39,30 @@ describe('ports: 集中端口表（五面语义）', () => {
     }
   })
 
-  it('监听地址按现状钉住（不变量：C/D/E loopback、B 0.0.0.0、A 由宿主决定）', () => {
+  it('监听地址按现状钉住（不变量：C/D loopback、B 0.0.0.0、A 由宿主决定）', () => {
     expect(FACE_PORTS.main.host).toBeNull() // 面 A 插件**不监听**（只挂路由）
     expect(FACE_PORTS.gateway.host).toBe('0.0.0.0') // 面 B 需外部可达
     expect(FACE_PORTS.weixinSend.host).toBe('127.0.0.1')
     expect(FACE_PORTS.skiffDebug.host).toBe('127.0.0.1')
-    expect(FACE_PORTS.acpHttp.host).toBe('127.0.0.1')
   })
 
-  it('默认开关状态按现状钉住（不变量：C 默认开；B/D/E 默认关）', () => {
+  it('默认开关状态按现状钉住（不变量：C 默认开；B/D 默认关）', () => {
     expect(FACE_PORTS.main.defaultEnabled).toBe(true) // 随 DSH 常开
     expect(FACE_PORTS.gateway.defaultEnabled).toBe(false)
     expect(FACE_PORTS.weixinSend.defaultEnabled).toBe(true)
     expect(FACE_PORTS.skiffDebug.defaultEnabled).toBe(false)
-    expect(FACE_PORTS.acpHttp.defaultEnabled).toBe(false)
   })
 
-  it('派生常量与表一致（默认值不再散写：config-ops / settings-section / index / api 都取这里）', () => {
+  it('派生常量与表一致（默认值不再散写：config-ops / settings-section / index 都取这里）', () => {
     expect(MAIN_WEB_PORT).toBe(FACE_PORTS.main.port)
     expect(GATEWAY_PORT).toBe(FACE_PORTS.gateway.port)
     expect(WEIXIN_SEND_PORT).toBe(FACE_PORTS.weixinSend.port)
     expect(SKIFF_DEBUG_PORT).toBe(FACE_PORTS.skiffDebug.port)
-    expect(ACP_HTTP_PORT).toBe(FACE_PORTS.acpHttp.port)
+  })
+
+  it('🔴 面 E 已退役：表中不得再有 3100（否则"砍掉外部问答"只砍了一半）', () => {
+    const ports = (Object.values(FACE_PORTS) as Array<{ port: number }>).map((s) => s.port)
+    expect(ports, '3100 仍留在端口表里').not.toContain(3100)
   })
 })
 
@@ -71,12 +76,12 @@ describe('ports: MECHANISM_PORTS 由表派生（🔴 3082 缺陷修复回归钉�
     expect(MECHANISM_PORTS).toContain('3082')
   })
 
-  it('旧的硬写四元组不再成立（回归钉：缺陷形态不得回来）', () => {
+  it('🔴 旧缺陷形态不得回来：**缺 3082 的那份硬写词表**（含 3100）与现值不同', () => {
+    // 旧缺陷形态逐字 = 当年硬写的四元组：3080/3081/3099/3100（**缺 3082**）。
     const defective = ['3080', '3081', '3099', '3100']
     expect([...MECHANISM_PORTS].sort()).not.toEqual([...defective].sort())
-    // 且五个面端口一个不少
-    for (const p of ['3080', '3081', '3082', '3099', '3100']) {
-      expect(MECHANISM_PORTS, `机制端口缺 ${p}`).toContain(p)
-    }
+    // 逐项判据：现值必须含 3082（缺陷的判别点），且不得含已退役的 3100
+    expect(MECHANISM_PORTS).toContain('3082')
+    expect(MECHANISM_PORTS).not.toContain('3100')
   })
 })

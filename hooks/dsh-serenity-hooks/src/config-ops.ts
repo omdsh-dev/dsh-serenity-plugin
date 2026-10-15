@@ -65,15 +65,9 @@ interface PersonaSettings {
   overrideText: string
 }
 
-/** F4d 建议问答页（v1.26.1，S142 用户：按认知容器暴露问答页供他人验证）：
- * 与 ACP HTTP 共用 3100 端口；key 首次启用自动生成（plugin 全局文件固定），无 key 不工作。
- * v1.26.2：按容器权限控制——allowed 白名单（容器名）；空 = 全部开放（向后兼容 v1.26.1 全局开放） */
-interface PublicAskSettings {
-  /** 访问 key（空 = 未生成；首次启用时 ensurePublicAskKey 自动生成随机 key 写回固定） */
-  key: string
-  /** 开放容器白名单（CCC 目录名，如 home-serenity）；空数组 = 全部容器开放 */
-  allowed: string[]
-}
+/** F4d 建议问答页（v1.26.1）**已于 2026-10-15 整面退役**（owner 裁「砍掉外部问答」）
+ * ⇒ 原 `PublicAskSettings`（key ＋ 容器白名单）连同 `AdvancedSettings.publicAsk` 一并删除。
+ * 旧配置文件残留 `publicAsk` 节 ⇒ **静默忽略**（`mergeWithDefaults` 不再读它，幂等安全）。 */
 
 /**
  * 高级设定全量（~/.dsh/serenity-hooks.json 持久化形态；passHash 含 hash）。
@@ -85,7 +79,6 @@ interface PublicAskSettings {
 interface AdvancedSettings {
   gateway: GatewaySettings
   persona: PersonaSettings
-  publicAsk: PublicAskSettings
   /** 主动发送入口（v1.30.9）：**只绑 127.0.0.1** 的独立监听器——CCC 的 MSM 用它发消息给指定用户 */
   weixinApi: WeixinApiSettings
 }
@@ -115,10 +108,6 @@ export function defaultAdvancedSettings(): AdvancedSettings {
     persona: {
       mode: '',
       overrideText: '',
-    },
-    publicAsk: {
-      key: '',
-      allowed: [],
     },
     weixinApi: {
       enabled: true,
@@ -184,7 +173,6 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
   const o = raw as Partial<AdvancedSettings>
   const gateway = (o.gateway ?? {}) as Partial<GatewaySettings>
   const persona = (o.persona ?? {}) as Partial<PersonaSettings>
-  const publicAsk = (o.publicAsk ?? {}) as Partial<PublicAskSettings>
   const weixinApi = (o.weixinApi ?? {}) as Partial<WeixinApiSettings>
   return {
     gateway: {
@@ -214,12 +202,6 @@ function mergeWithDefaults(raw: unknown): AdvancedSettings {
     persona: {
       mode: typeof persona.mode === 'string' ? persona.mode : def.persona.mode,
       overrideText: typeof persona.overrideText === 'string' ? persona.overrideText : def.persona.overrideText,
-    },
-    publicAsk: {
-      key: typeof publicAsk.key === 'string' ? publicAsk.key : def.publicAsk.key,
-      allowed: Array.isArray(publicAsk.allowed)
-        ? publicAsk.allowed.filter((n): n is string => typeof n === 'string' && n !== '')
-        : def.publicAsk.allowed,
     },
     weixinApi: {
       enabled: typeof weixinApi.enabled === 'boolean' ? weixinApi.enabled : def.weixinApi.enabled,
@@ -275,14 +257,6 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
         overrideText: typeof ps.overrideText === 'string' ? ps.overrideText : current.persona.overrideText,
       }
       : current.persona,
-    publicAsk: patch.publicAsk !== undefined
-      ? {
-        key: typeof patch.publicAsk.key === 'string' ? patch.publicAsk.key : current.publicAsk.key,
-        allowed: Array.isArray(patch.publicAsk.allowed)
-          ? patch.publicAsk.allowed.filter((n): n is string => typeof n === 'string' && n !== '')
-          : current.publicAsk.allowed,
-      }
-      : current.publicAsk,
     weixinApi: patch.weixinApi !== undefined
       ? {
         enabled: typeof patch.weixinApi.enabled === 'boolean' ? patch.weixinApi.enabled : current.weixinApi.enabled,
@@ -296,96 +270,11 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
   return next
 }
 
-// ── F4d 建议问答页访问 key（v1.26.1，S142 用户：key 随机生成后固定，配置时生成）──
-
-/**
- * 确保问答页访问 key 存在（首次启用自动生成 + 写回固定，用户拍板"配置时生成"）：
- * 读取全局配置 publicAsk.key；为空 → 生成 32 字节随机 hex（64 字符）→ 写回持久化。
- * @returns 当前固定 key（已生成则返回既有值——**幂等**，不会覆盖用户手改的 key）
- */
-export function ensurePublicAskKey(): string {
-  const current = readAdvancedSettings()
-  if (current.publicAsk.key !== '') return current.publicAsk.key
-  const key = randomBytes(32).toString('hex')
-  updateAdvancedSettings({ publicAsk: { key, allowed: current.publicAsk.allowed } })
-  return key
-}
-
-/** 校验问答页访问 key（timing-safe；key 未生成 → 恒 false——没有 key 不工作） */
-export function verifyPublicAskKey(provided: string | undefined): boolean {
-  const expected = readAdvancedSettings().publicAsk.key
-  if (!expected || typeof provided !== 'string' || provided === '') return false
-  const a = Buffer.from(provided)
-  const b = Buffer.from(expected)
-  return a.length === b.length && timingSafeEqual(a, b)
-}
-
-/**
- * 轮换问答页访问 key（v1.26.5，S142 用户：公网开放 + 不好说要换 key 呢）：
- * 生成新 32 字节随机 hex（64 字符）→ 覆盖写回（**强制替换**——旧 key 立即失效）。
- * @returns 新 key（面板展示给管理员，重新分享给使用者）
- */
-export function rotatePublicAskKey(): string {
-  const current = readAdvancedSettings()
-  const key = randomBytes(32).toString('hex')
-  updateAdvancedSettings({ publicAsk: { key, allowed: current.publicAsk.allowed } })
-  return key
-}
-
-// ── 公网 key 失败锁定（v1.26.5，S142 用户：key 校验必须可靠 + 开放公网）──
-// 按 **IP** 记录失败（key 是全局单值，按 IP 锁定不误伤其他用户；攻击者换 IP 需换出口）。
-// 复用 gateway-auth 的指数退避模式（5 次失败 → 15min → 30min → … 上限 4h）。
-
-/** 失败锁定阈值（连续失败次数） */
-const PUBLIC_ASK_FAIL_THRESHOLD = 5
-/** 首次锁定基础时长（指数退避底数） */
-const PUBLIC_ASK_LOCK_BASE_MS = 15 * 60 * 1000
-/** 锁定上限 */
-const PUBLIC_ASK_LOCK_MAX_MS = 4 * 60 * 60 * 1000
-
-interface IpFailState {
-  count: number
-  lockedUntil: number
-  lockRound: number
-}
-
-const ipFailStates = new Map<string, IpFailState>()
-
-/** 重置 IP 失败状态（测试/管理员解封） */
-export function resetPublicAskIpFail(ip: string): void {
-  ipFailStates.delete(ip)
-}
-
-/** IP 当前是否锁定（到期自动解锁） */
-export function isPublicAskIpLocked(ip: string): boolean {
-  const st = ipFailStates.get(ip)
-  if (!st || st.lockedUntil === 0) return false
-  if (Date.now() >= st.lockedUntil) {
-    st.lockedUntil = 0
-    st.count = 0
-    return false
-  }
-  return true
-}
-
-/** 记录一次 key 校验失败；达到阈值 → 锁定（指数退避）。返回锁定剩余毫秒（0 = 未锁定） */
-export function recordPublicAskFail(ip: string): number {
-  let st = ipFailStates.get(ip)
-  if (!st) {
-    st = { count: 0, lockedUntil: 0, lockRound: 0 }
-    ipFailStates.set(ip, st)
-  }
-  if (st.lockedUntil > 0 && Date.now() < st.lockedUntil) return st.lockedUntil - Date.now()
-  st.count += 1
-  if (st.count >= PUBLIC_ASK_FAIL_THRESHOLD) {
-    const base = PUBLIC_ASK_LOCK_BASE_MS * (2 ** st.lockRound)
-    st.lockedUntil = Date.now() + Math.min(base, PUBLIC_ASK_LOCK_MAX_MS)
-    st.lockRound += 1
-    st.count = 0
-    return st.lockedUntil - Date.now()
-  }
-  return 0
-}
+// ── F4d 建议问答页访问 key／IP 失败锁定（v1.26.1／v1.26.5）**已于 2026-10-15 整面退役** ──
+// 随之删除：`ensurePublicAskKey` / `verifyPublicAskKey` / `rotatePublicAskKey` /
+// `resetPublicAskIpFail` / `isPublicAskIpLocked` / `recordPublicAskFail` 与 `ipFailStates`
+// ＋ 三个 `PUBLIC_ASK_*` 常量（owner 裁「砍掉外部问答」；替代路径 = 官方 ACP ＋ 隧道/Access 层认证）。
+// 🔴 **边界（别误删）**：**网关自己的**密码失败锁定（`gateway-auth.ts`）**不受影响**，仍在用。
 
 /**
  * 一次性迁移（v1.21.x → v1.22）：旧版把 `serenityAdvanced` 存在 CCC localstore.json；
@@ -427,10 +316,6 @@ interface AdvancedSettingsWire {
     totpEnabled: boolean
   }
   persona: PersonaSettings
-  publicAsk: {
-    /** 开放容器白名单（v1.26.2：容器名数组；空 = 全部开放） */
-    allowed: string[]
-  }
 }
 
 /** 持久化 → wire（剥离 passHash/totpSecret；只留布尔） */
@@ -452,9 +337,6 @@ export function toWire(settings: AdvancedSettings): AdvancedSettingsWire {
       totpEnabled: settings.gateway.totpEnabled,
     },
     persona: settings.persona,
-    publicAsk: {
-      allowed: [...settings.publicAsk.allowed],
-    },
   }
 }
 
@@ -539,11 +421,6 @@ export function applyWirePatch(wire: Partial<AdvancedSettingsWire>): AdvancedSet
     if (typeof wire.persona.mode === 'string') psPatch.mode = wire.persona.mode
     if (typeof wire.persona.overrideText === 'string') psPatch.overrideText = wire.persona.overrideText
     patch.persona = psPatch
-  }
-  if (wire.publicAsk !== undefined && Array.isArray(wire.publicAsk.allowed)) {
-    const paPatch: PublicAskSettings = { ...current.publicAsk }
-    paPatch.allowed = wire.publicAsk.allowed.filter((n): n is string => typeof n === 'string' && n !== '')
-    patch.publicAsk = paPatch
   }
   return updateAdvancedSettings(patch)
 }

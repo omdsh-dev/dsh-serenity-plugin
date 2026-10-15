@@ -50,7 +50,9 @@ describe('skiff 角色逻辑（skiff-admin.ts——v1.30 起归 container_admin 
     expect(SKIFF_GUIDE).toContain('qa-readonly')
     expect(SKIFF_GUIDE).toContain('code-review')
     expect(SKIFF_GUIDE).toContain('debugPort')
+    // 🆕 2026-10-15：面 E 退役 ⇒ guide 里那一节改为指向**官方 ACP**（仍在，故 'ACP' 仍须命中）
     expect(SKIFF_GUIDE).toContain('ACP')
+    expect(SKIFF_GUIDE).toContain('dsh --profile acp')
   })
 })
 

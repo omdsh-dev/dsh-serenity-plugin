@@ -8,7 +8,9 @@
  * 页面结构（官方 settings 设计语言：section > title + intro + 分组(groupTitle) + rowCard）：
  *  - 访问：双端口网关开关（展开 → 完整外部访问编辑器：监听/账号/白名单/TOTP）
  *  - 上下文：超限重建开关（展开 → 阈值 + 机制说明）
- *  - 外部能力：Skiff/ACP/问答页各开关（展开 → help 说明 + 各自编辑器）
+ *  - 外部能力：Skiff 开关（展开 → help 说明 + 各自编辑器）
+ *    🔴 2026-10-15：原「ACP JSON-RPC」与「Skiff 问答页」两行已随面 E 退役整组删除
+ *    （owner 裁「砍掉外部问答」；外部接入改走官方 `dsh --profile acp` ＋ 现成客户端）。
  *  - 彩蛋模式 / 微信桥：独立配置块（无顶层 plugin 开关，保留折叠）
  * v1.29（需求② 开关与详设合一）：RowCard 可展开——整行点击 → 行内内联详设；
  *   原 hover「?」浮层 help 改行内 detail intro（常显可达）；重型编辑器挂所属开关行下。
@@ -31,7 +33,6 @@ import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-
 import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
-import { PublicAskEditor } from './PublicAskEditor.js'
 import { WeixinBridgeEditor } from './WeixinBridgeEditor.js'
 import './SettingsSection.css'
 
@@ -43,11 +44,6 @@ export interface SerenitySimpleWire {
   /** F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务启停 + 端口 */
   skiffEnabled?: boolean
   skiffDebugPort?: number
-  /** F4c ACP（v1.26.0 实验性）：HTTP JSON-RPC 端点启停 + 端口 */
-  acpEnabled?: boolean
-  acpHttpPort?: number
-  /** F4d 建议问答页（v1.26.1 实验性）：按认知容器暴露问答页供他人验证（key 认证） */
-  publicAskEnabled?: boolean
   /** **CRO（轨迹自编程唤起）总闸**（缺省开；只关 CRO 阶段，投递照常） */
   croEnabled?: boolean
   /** **无人值守代理回复总开关**（2026-09-23 新增）：会话被 LLM 主动停下且无人应答时，
@@ -186,18 +182,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const setSkiffPort = (v: number): void => {
     set('skiffDebugPort', Math.min(65535, Math.max(1024, Math.round(v))))
   }
-  const setAcpPort = (v: number): void => {
-    set('acpHttpPort', Math.min(65535, Math.max(1024, Math.round(v))))
-  }
 
   const gatewayOn = value?.gatewayEnabled ?? false
   // v1.49.0：`rebuildOn` 已随总开关一起砍掉（超限重建恒开，面板不再有该 Toggle）
   const thresholdK = value?.rebuildThresholdK ?? 400
   const skiffOn = value?.skiffEnabled ?? false
   const skiffPort = value?.skiffDebugPort ?? 3099
-  const acpOn = value?.acpEnabled ?? false
-  const acpPort = value?.acpHttpPort ?? 3100
-  const publicAskOn = value?.publicAskEnabled ?? false
   const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
   const unattendedOn = value?.unattendedEnabled ?? false // 缺省关（与 schema 一致）
   const diagramOn = value?.diagramEnabled ?? false // 缺省关（与 schema 一致；D104）
@@ -206,8 +196,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openGateway, setOpenGateway] = useState(false)
   const [openRebuild, setOpenRebuild] = useState(false)
   const [openSkiff, setOpenSkiff] = useState(false)
-  const [openAcp, setOpenAcp] = useState(false)
-  const [openPublicAsk, setOpenPublicAsk] = useState(false)
   const [openCro, setOpenCro] = useState(false)
   const [openUnattended, setOpenUnattended] = useState(false)
   const [openDiagram, setOpenDiagram] = useState(false)
@@ -349,60 +337,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                 '· 使用：配置 CCC 的 skiff.roles 角色后，可经此页以角色身份问答\n' +
                 '· 实验性：人工启停，默认关闭；对外问答请用「Skiff 问答页」'}
               </p>
-            }
-          />
-        </li>
-        <li>
-          <RowCard
-            title="ACP JSON-RPC"
-            desc="程序化调用 Skiff 角色（端口 3100，实验性，127.0.0.1）"
-            expandable
-            open={openAcp}
-            onToggle={setOpenAcp}
-            control={
-              <span className="ss-switchRow">
-                <Toggle checked={acpOn} onChange={(on) => toggle('acpEnabled', on)} />
-                <input
-                  className="ss-portInput"
-                  type="number"
-                  min={1024}
-                  max={65535}
-                  value={acpPort}
-                  disabled={!acpOn && !publicAskOn}
-                  title="ACP + Skiff 问答共用端口（默认 3100）"
-                  onChange={(e) => setAcpPort(Number(e.target.value))}
-                />
-              </span>
-            }
-            detail={
-              <p className="ss-detailIntro">{'ACP（Agent Client Protocol）HTTP JSON-RPC 端点（端口 3100）：\n' +
-                '· 作用：程序化调用 Skiff 角色（指定 CCC + 角色 + 会话）\n' +
-                '· 形态：HTTP JSON-RPC 服务，仅监听 127.0.0.1（本地）\n' +
-                '· 场景：IM 桥（如微信桥）、脚本、自动化接线\n' +
-                '· 实验性：人工启停，默认关闭；与「Skiff 问答页」共用端口'}
-              </p>
-            }
-          />
-        </li>
-        <li>
-          <RowCard
-            title="Skiff 问答页"
-            desc="按认知容器暴露问答页（端口 3100，需 key）"
-            expandable
-            open={openPublicAsk}
-            onToggle={setOpenPublicAsk}
-            control={<Toggle checked={publicAskOn} onChange={(on) => toggle('publicAskEnabled', on)} />}
-            detail={
-              <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'Skiff 问答页（对外问答，端口 3100，key 认证）：\n' +
-                  '· 作用：让外部用户在浏览器中与指定 CCC 的 Skiff 角色对话\n' +
-                  '· 认证：访问 key（首次开启自动生成）\n' +
-                  '· 授权：开放容器白名单（未选 = 全部开放）\n' +
-                  '· 外部接入：需经部署方自选方案暴露（隧道/反代/端口映射）\n' +
-                  '· 安全：key 可轮换（旧 key 立即失效）'}
-                </p>
-                <PublicAskEditor publicAskOn={publicAskOn} />
-              </div>
             }
           />
         </li>

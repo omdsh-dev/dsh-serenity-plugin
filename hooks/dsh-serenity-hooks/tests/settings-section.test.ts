@@ -36,22 +36,36 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / acp off 3100 / CRO **on**）', () => {
+  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / CRO **on**）', () => {
     const d = simpleSettingsFromConfig({})
     expect(d).toEqual({
       gatewayEnabled: false,
       rebuildThresholdK: 400,
       skiffEnabled: false,
       skiffDebugPort: 3099,
-      acpEnabled: false,
-      acpHttpPort: 3100,
-      publicAskEnabled: false,
       croEnabled: true,
       unattendedEnabled: false,
       diagramEnabled: false,
       // 2026-09-26（P0-1）：机器级 human-channel 搭本结构出（读取入口唯一）；缺省见 human-channel-config.test.ts
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
+  })
+
+  it('🔴 2026-10-15 面 E 退役回归钉：结构里**不再有** acp 三键（旧配置残留也不进结构）', () => {
+    // owner 裁「砍掉外部问答」⇒ 扁平键与嵌套 `acp.*` 双双退场（同 `rebuildEnabled` 的处置）。
+    // 用"键在不在"断言（而非 toBeUndefined）——契约是**无该键**，不是"值为 undefined"。
+    for (const key of ['acpEnabled', 'acpHttpPort', 'publicAskEnabled']) {
+      expect(key in simpleSettingsFromConfig({}), `${key} 仍在结构里`).toBe(false)
+    }
+    const stale = simpleSettingsFromConfig({
+      acpEnabled: true,
+      acpHttpPort: 4100,
+      publicAskEnabled: true,
+      acp: { enabled: true, httpPort: 4100 },
+    } as never)
+    for (const key of ['acpEnabled', 'acpHttpPort', 'publicAskEnabled']) {
+      expect(key in stale, `${key} 被旧配置复活了`).toBe(false)
+    }
   })
 
   it('🔴 v1.49.0 砍闸回归钉：简单配置里**不再有** rebuildEnabled（旧配置残留该键也不进结构）', () => {
@@ -69,16 +83,12 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       gateway: { enabled: true },
       rebuild: { thresholdK: 500 },
       skiff: { enabled: true, debugPort: 4000 },
-      acp: { enabled: true, httpPort: 4100 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
       rebuildThresholdK: 500,
       skiffEnabled: true,
       skiffDebugPort: 4000,
-      acpEnabled: true,
-      acpHttpPort: 4100,
-      publicAskEnabled: false,
       croEnabled: true,
       unattendedEnabled: false,
       diagramEnabled: false,
@@ -103,9 +113,8 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(d.gatewayEnabled).toBe(false)
   })
 
-  it('三个纯面板层开关（问答页 / CRO / 无人值守）只经扁平键', () => {
-    const d = simpleSettingsFromConfig({ publicAskEnabled: true, croEnabled: false, unattendedEnabled: true })
-    expect(d.publicAskEnabled).toBe(true)
+  it('两个纯面板层开关（CRO / 无人值守）只经扁平键', () => {
+    const d = simpleSettingsFromConfig({ croEnabled: false, unattendedEnabled: true })
     expect(d.croEnabled).toBe(false)
     expect(d.unattendedEnabled).toBe(true)
   })
@@ -148,13 +157,15 @@ describe('settings-section: volatile 包装解包（v1.47.2）', () => {
     expect(unwrapVolatile(ref<boolean | undefined>(undefined))).toBeUndefined()
   })
 
-  it('🔴 回归（正控）：四个"未设置"的包装**不得**让开关被打开 —— 结果必须与全缺省逐字相同', () => {
+  it('🔴 回归（正控）：多个"未设置"的包装**不得**让开关被打开 —— 结果必须与全缺省逐字相同', () => {
     // 修复前形态：包装对象恒真 ⇒ `config.gatewayEnabled ?? …` 直接短路 ⇒ 开关被无意打开
+    // ⚠️ 2026-10-15：原含 `acpEnabled` / `publicAskEnabled` 两条，随面 E 退役删除；
+    //    本用例的**判据不变**（未设置的包装必须让位给缺省），仍由余下键承担。
     const d = simpleSettingsFromConfig({
       gatewayEnabled: ref<boolean | undefined>(undefined),
       skiffEnabled: ref<boolean | undefined>(undefined),
-      acpEnabled: ref<boolean | undefined>(undefined),
-      publicAskEnabled: ref<boolean | undefined>(undefined),
+      croEnabled: ref<boolean | undefined>(undefined),
+      unattendedEnabled: ref<boolean | undefined>(undefined),
     })
     expect(d).toEqual(defaultSimpleSettings())
   })

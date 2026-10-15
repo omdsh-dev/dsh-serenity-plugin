@@ -321,8 +321,9 @@ describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id c
    * 1. `dispose` 是 **`AgentHandle` 上的成员**，而 `createSkiffAgent` 的返回类型 `SkiffAgentRef`
    *    只挑出 `{ handle, agent, sessionId, resumed }` ⇒ **`liveReuseRef` 造的那个 dispose 只挂在
    *    内层 handle 上**，外层**不转发**它的 `dispose`（外层是 `handle: AgentHandle` 整个带出去的）。
-   * 2. **全仓零调用**：`ref.handle.dispose()` 在 `src/**` 无命中（调用方 `acp-core` / `weixin-bridge` /
-   *    `acp-http` / `skiff-debug` 都只读 `agent` 与 `handle` 的其它成员）。
+   * 2. **全仓零调用**：`ref.handle.dispose()` 在 `src/**` 无命中（调用方 `weixin-bridge` /
+   *    `skiff-debug` 都只读 `agent` 与 `handle` 的其它成员；⚠️ 原列的 `acp-core` / `acp-http`
+   *    两个调用方已随面 E 退役删除，2026-10-15 —— **结论不变且更强**：调用方更少了）。
    * ⇒ 结论：**该箭头在当前调用图里不可达**（不是"还没走到"）。它存在的意义是"满足 `AgentHandle`
    * 的必填成员"，而**没有任何调用方会执行它** —— 与 §3-8 第 19／20 行（`today` /
    * `isResumeFallbackError`）同族：**`fstat-no` 榜上混着死代码**。

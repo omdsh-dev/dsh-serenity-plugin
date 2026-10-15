@@ -3,8 +3,15 @@
  *
  * **CCC 级**：dsh 一个进程含多个 CCC，每个 CCC 独立对接微信桥（S142 用户拍板）——
  * 扫描 live CCC → 每 CCC 读 weixin 配置（enabled + accounts + routes）→
- * 启动该 CCC 该账号的 iLink 轮询循环。消息 → weixin-route 路由 → AcpServer 直调
- * （session/new + session/prompt，同进程不经网络——acp-core 传输无关设计）。
+ * 启动该 CCC 该账号的 iLink 轮询循环。消息 → weixin-route 路由 → skiff 核心直调
+ * （session/new + session/prompt，同进程不经网络）。
+ *
+ * 🔴 **一处陈旧注释的更正（2026-10-15，随面 E 退役一并核实）**：本行原写「→ **AcpServer 直调**
+ * （…——acp-core 传输无关设计）」。**该描述从来不是事实** —— 实测 grep 全仓：本文件**从不**
+ * `import acp-core`（它 import 的是 `skiff-core` / `skiff-role` / `weixin-*`），
+ * 而 `acp-core` 的消费者**自始至终只有两个**（`acp-http.ts` ＋ 其测试）。
+ * ⇒ 当年那句是**设计意图的误记**，不是依赖关系；面 E 退役后它更是彻底失效。
+ * 🔵 判据复述：**注释里的"设计意图"不能当依赖判据**，必须 grep import。
  *
  * 实验性质：未配置/未启用 → 完全不启动（零资源占用）。配置变化（面板写入）
  * → 热重建受影响 CCC 的桥（对齐 gateway 热重建模式）。

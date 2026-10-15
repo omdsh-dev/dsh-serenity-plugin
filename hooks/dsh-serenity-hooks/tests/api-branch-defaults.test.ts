@@ -25,7 +25,7 @@
  * |---|---|---|---|
  * | ① | `err.message ?? String(err)` | **11** | 🟡 可达（抛非 Error 才走右侧）—— 本件**只挑 1 个端点钉住该族** |
  * | ② | `new URL(req.url ?? '/', …)` | **7** | ✅ **实测可达** —— 真 `IncomingMessage` 的 `url` **是可写属性**（探针实测 `urlWritable=true`） |
- * | ③ | 设置/配置缺键兜底（`?? []` ／ `?? ACP_HTTP_PORT` ／ `?? false`） | **9** | ✅ 可达（写一份**缺键**配置） |
+ * | ③ | 设置/配置缺键兜底（`?? []` ／ `?? false`） | **🔴 原 9 处 → 现 7 处**（2026-10-15：面 E 退役，`?? ACP_HTTP_PORT` / `?? false`(publicAsk) 两处随端点删除） | ✅ 可达（写一份**缺键**配置） |
  * | ④ | 入参/取值兜底（`?? ''` ／ `? : 30` ／ `=== undefined ? …` ／ `?? 'wait'`） | **7** | 🟡 其中 3 处可达（**已在本件覆盖**）、2 处不可达（另一条替身在跑）、1 处取到后会打到真网络、1 处属既有登记 |
  * | ⑤ | `EXT_BY_MEDIA[… ] ?? 'img'` ／ `name.split(…).pop() ?? ''` | **2** | 🔴 **两处都构造上不可达**（各有一个**支配性前置守卫**）⇒ **如实登记，不涂绿** |
  *
@@ -183,11 +183,12 @@ afterEach(() => {
 describe('src/api.ts 族 ②：`req.url` 缺失 ⇒ 回落 `/`（不是崩）', () => {
   const jsonBody = (r: RawRes): any => JSON.parse(r.body)
 
-  it('🔴 6 条路由在 `req.url === undefined` 下**仍各自应答**（不是 500），且默认值真生效', async () => {
+  it('🔴 5 条路由在 `req.url === undefined` 下**仍各自应答**（不是 500），且默认值真生效', async () => {
     const api = await bootApi({ beforeHandlers: (req) => { req.url = undefined as never } })
     try {
       // 接线自证（正控）：同一夹具下路由确实都注册了 —— 防止"全都 404 也算 6 条通过"
-      for (const p of ['/serenity/config', '/serenity/cccs', '/serenity/public-ask', '/serenity/weixin', '/serenity/session-cleanup', '/serenity/status']) {
+      // 🔴 2026-10-15：面 E 退役 ⇒ `/serenity/public-ask` 从该清单移除（6 → 5 条）。
+      for (const p of ['/serenity/config', '/serenity/cccs', '/serenity/weixin', '/serenity/session-cleanup', '/serenity/status']) {
         expect(api.routes, `未注册：${p}`).toContain(p)
       }
 
@@ -221,10 +222,11 @@ describe('src/api.ts 族 ②：`req.url` 缺失 ⇒ 回落 `/`（不是崩）', 
       expect(cccs.status).toBe(200)
       expect(Array.isArray(jsonBody(cccs).cccs)).toBe(true)
 
-      // ── ⑤ /serenity/public-ask：url 缺失 ⇒ 取不到任何 query；仍 200（key 走 ensurePublicAskKey） ──
+      // ── ⑤ 🔴 2026-10-15：原为 `/serenity/public-ask`（"url 缺失 ⇒ 取不到 query，仍 200"）。
+      //    该端点已随**面 E 退役**（owner 裁「砍掉外部问答」）⇒ 该支线的对象不存在了。
+      //    改为**就地钉住退役事实**：url 缺失也必须是 404（与 `/serenity/cheap-workers` 同款判据）。
       const publicAsk = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
-      expect(publicAsk.status).toBe(200)
-      expect(jsonBody(publicAsk).key).not.toBe('')
+      expect(publicAsk.status, '已退役的端点不得再应答（url 缺失下也一样）').toBe(404)
 
       // ── ⑥ /serenity/weixin：url 缺失 ⇒ ccc 参数空 ⇒ **400 missing ccc param**（判据边界的正控方向） ──
       const weixin = await raw({ port: api.port, method: 'GET', path: '/serenity/weixin', headers: UI_HEADERS })
@@ -296,9 +298,11 @@ describe('src/api.ts 族 ②：`req.url` 缺失 ⇒ 回落 `/`（不是崩）', 
 })
 
 /**
- * 族 ③：**设置/配置缺键兜底**（9 处）。
+ * 族 ③：**设置/配置缺键兜底**（原 9 处；2026-10-15 面 E 退役 ⇒ 7 处）。
  * 既有用例把配置**写成完整形态**（`writeCccConfig({ weixin: {...} })`、`SERENITY_HOOKS_CONFIG` 有值），
- * 因此这些 `?? []` ／ `?? false` ／ `?? ACP_HTTP_PORT` 的**右侧从来没有被求值过**。
+ * 因此这些 `?? []` ／ `?? false` 的**右侧从来没有被求值过**。
+ * ⚠️ 原同族还有 `?? ACP_HTTP_PORT` 一处（`/serenity/public-ask`），该端点已随面 E 删除
+ *   ⇒ 那处的用例改为**钉住端点确已不存在**（见下），兜底本身无从测起。
  * 🔴 它们的共同语义是「**配置缺这一段时，端点回一个可用的默认，而不是 500**」—— 面板新装即此形态。
  */
 describe('src/api.ts 族 ③：配置/设置缺键 ⇒ 兜底默认（不是 500）', () => {
@@ -338,11 +342,14 @@ describe('src/api.ts 族 ③：配置/设置缺键 ⇒ 兜底默认（不是 500
     }
   })
 
-  it('🔴 public-ask：设置源**缺两个键** ⇒ `acpHttpPort` / `publicAskEnabled` 走兜底（:431/:435）', async () => {
-    // 🔴 关键：部分缺键（其余键仍在）—— 这样 `readSimpleSettings()` 走的仍是注入源，
-    //    而这两个键被刻意抽掉 ⇒ 只有 `?? ACP_HTTP_PORT` / `?? false` 的右侧能让端点回出可读值。
+  it('🔴 public-ask 已随面 E 退役：设置源**缺键**也回 404（不再有"兜底默认"这条支线）', async () => {
+    // 🔴 2026-10-15：原用例（"缺 `acpHttpPort` / `publicAskEnabled` ⇒ 走兜底"）的对象已整面退役
+    //    （owner 裁「砍掉外部问答」）⇒ **该支线在结构上不再存在**，故改为钉"它确实不在了"。
+    //    判据刻意选 404 而非"200 + 空配置"：后者**看起来正常**，正是死端点最难发现之处
+    //    （与上面 `/serenity/cheap-workers` 那条同款判据）。
     const full = defaultSimpleSettings()
     const partial = { ...full } as Record<string, unknown>
+    // 仍然刻意抽掉两个历史键：即便旧配置残留它们，也不得让该端点复活
     delete partial.acpHttpPort
     delete partial.publicAskEnabled
     __setSimpleSourceForTest(() => partial as never)
@@ -350,30 +357,18 @@ describe('src/api.ts 族 ③：配置/设置缺键 ⇒ 兜底默认（不是 500
     const api = await bootApi()
     try {
       const res = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
-      expect(res.status, '缺键不得让 public-ask 崩成 400').toBe(200)
-      const body = jsonBody(res) as { port: number; enabled: boolean; urls: unknown[]; key: string }
-      // ① `?? ACP_HTTP_PORT`：兜底值必须是那个集中端口常量，且**不得是 undefined**（否则 base URL 变成 "undefined"）
-      expect(typeof body.port).toBe('number')
-      expect(body.port).toBeGreaterThan(0)
-      // ② `?? false`：缺键 ⇒ 严格静默（**不是** undefined、**不是** true）
-      expect(body.enabled, '缺键的默认必须是 false 而不是 undefined/true').toBe(false)
-      // 污染检查：URL 里不得出现字面量 undefined（那是"兜底没生效"的典型病灶）
-      expect(JSON.stringify(body)).not.toContain('undefined')
+      expect(res.status, '已退役的端点不得再应答（无论设置源缺不缺键）').toBe(404)
     } finally {
       await api.close()
     }
   })
 
-  it('🔴 判别性对照：设置源**键齐全** ⇒ 两侧都不走兜底（证明上一条的读数来自缺键）', async () => {
-    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpHttpPort: 3921, publicAskEnabled: true }))
+  it('🔴 判别性对照：设置源**键齐全**（含历史 acp 键）⇒ 端点同样 404（证明上一条与键无关）', async () => {
+    __setSimpleSourceForTest(() => ({ ...defaultSimpleSettings(), acpHttpPort: 3921, publicAskEnabled: true } as never))
     const api = await bootApi()
     try {
       const res = await raw({ port: api.port, method: 'GET', path: '/serenity/public-ask', headers: UI_HEADERS })
-      expect(res.status).toBe(200)
-      const body = jsonBody(res) as { port: number; enabled: boolean; listUrl: string }
-      expect(body.port, '键在 ⇒ 用配置值而**不是**兜底常量').toBe(3921)
-      expect(body.enabled, '键在 ⇒ 用配置值而**不是**兜底 false').toBe(true)
-      expect(body.listUrl).toContain('3921')
+      expect(res.status, '旧键残留**不得**让退役端点复活').toBe(404)
     } finally {
       await api.close()
     }

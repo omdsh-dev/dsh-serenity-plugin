@@ -114,7 +114,7 @@
 | 子域 | 文件（层） | 一句话职责 | 对外形态 | 被测 |
 |---|---|---|---|---|
 | **网关（面 B）** | `gateway.ts`(L2) / `gateway-auth.ts`(L1) / `gateway-dsh-auth.ts`(L2) / `gateway-proxy.ts`(L2) | 双端口网关装配（登录页 ＋ 反代宿主主面 ＋ WS）；认证纯逻辑（会话/锁定/CSRF）；换取宿主的 `dsh-auth` cookie；反代辅助（polyfill/头部/workspace 过滤） | HTTP **3081**（`0.0.0.0`） | ✅ `gateway` / `gateway-dsh-auth` |
-| **ACP（面 E）** | `acp-core.ts`(L1) / `acp-http.ts`(L3) | ACP JSON-RPC 服务端 ＋ 问答页 listener；建会话委托 `skiff-core` | HTTP **3100**（`127.0.0.1`） | ✅ `acp-core` |
+| ~~**ACP（面 E）**~~ 🔴 **已退役（2026-10-15）** | ~~`acp-core.ts`(L1) / `acp-http.ts`(L3)~~ | 🔴 **两份文件已随面 E 整体删除**（owner 裁「砍掉外部问答」；替代路径 = 官方 `dsh --profile acp` ＋ 现成 ACP 客户端）。**本行保留仅为历史坐标**——下文凡提到面 E／3100 者，均按"已删"读 | ~~HTTP **3100**~~ | ~~`acp-core`~~ |
 | **微信（面 C ＋ 出站）** | `weixin-api.ts`(L2) / `weixin-bridge.ts`(L2) / `weixin-hook.ts`(L2) / `weixin-route.ts`(L2) / `weixin-send-api.ts`(L3) / `weixin-send-endpoint.ts`(L2) / `weixin-output-guard.ts`(L2) | iLink 协议底座 ＋ 媒体解密；桥（轮询/入站分发/主动发送）；事件 hook；配置与凭据读写；主动发送 HTTP 面；进程内 endpoint 槽；输出闸门（未发送即打回） | HTTP **3082**（`127.0.0.1`）／出站 HTTPS | ✅ `weixin` / `weixin-hook` / `weixin-send-api` / `weixin-output-guard` |
 | **IM 抽象** | `im-bridge.ts`(L2) / `im-weixin.ts`(L2) | IM 通道注册表 ＋ 统一发送后端；`weixin` 的 `ImChannel` 实现 | 无（工具后端） | ✅ `im-bridge` / `im-weixin` |
 | **输出守卫** | `output-guard.ts`(L1) / `output-guard-seam.ts`(L2) | 敏感词表/检测/打回文案；输出守卫钩子 ＋ `lastAssistantText` | 无（钩子） | ✅ `output-guard` |
@@ -133,15 +133,15 @@
 | **B gateway** | 3081 / `0.0.0.0` | HTTP 反代 ＋ 登录页 | `readSimpleSettings().gatewayEnabled`（默认 **false**） | `gateway.ts:registerGateway` → `startFace('gateway')` |
 | **C weixinSend** | 3082 / `127.0.0.1` | HTTP `POST /send` | `readAdvancedSettings().weixinApi.{enabled,port}`（默认 **true**） | `weixin-send-api.ts:registerWeixinSendApi` |
 | **D skiffDebug** | 3099 / `127.0.0.1` | HTTP 问答页 | `readSimpleSettings().skiffEnabled`（默认 **false**） | `index.ts:registerSkiff` → `skiff-debug.ts:startSkiffDebugServer` |
-| **E acpHttp** | 3100 / `127.0.0.1` | HTTP JSON-RPC ＋ 问答页 | `acpEnabled \|\| publicAskEnabled`（默认 **false**） | `index.ts:registerAcp` → `acp-http.ts:startAcpHttpServer` |
+| **E acpHttp** 🔴 **已退役** | ~~3100~~ | ~~HTTP JSON-RPC ＋ 问答页~~ | 🔴 **面已删（2026-10-15）**；端口词表亦随之少一项（`ports.ts` 由表派生，自动收敛） | ~~`index.ts:registerAcp` → `acp-http.ts`~~ |
 | 微信出站 | iLink `baseUrl` | HTTPS | 凭据 `WEIXIN_<ID>_{TOKEN,BASEURL,USERID}` | `weixin-api.ts`（`weixin-bridge` 调用） |
 
 #### 2.3.2 配置读取面（**归属判据的取证**，I3）
 
 | 读的地方 | 来源 | 键 |
 |---|---|---|
-| `config-ops.ts:readAdvancedSettings()` | 宿主全局 `~/.dsh/serenity-hooks.json`（节 `serenityAdvanced`） | `gateway.{enabled,host,port,accounts,workspaces,cookieSecure,allowWorkspaceCreate,totpEnabled}`、`publicAsk.{key,allowed}`、`weixinApi.{enabled,port}`、`persona` |
-| `settings-section.ts:readSimpleSettings()` | 本插件 fiber **Config**（经宿主 settings 面板 `ns=serenity-hooks`） | `gatewayEnabled`/`rebuildThresholdK`/`skiffEnabled`/`skiffDebugPort`/`acpEnabled`/`acpHttpPort`/`publicAskEnabled`/`croEnabled`/`unattendedEnabled`（旧嵌套形态 `gateway.enabled`、`skiff.debugPort`、`acp.httpPort` **亦收**）。🔴 **v1.49.0 起 `rebuildEnabled` 已砍掉**（超限重建恒开、无总闸） |
+| `config-ops.ts:readAdvancedSettings()` | 宿主全局 `~/.dsh/serenity-hooks.json`（节 `serenityAdvanced`） | `gateway.{enabled,host,port,accounts,workspaces,cookieSecure,allowWorkspaceCreate,totpEnabled}`、`weixinApi.{enabled,port}`、`persona`。🔴 **2026-10-15：原 `publicAsk.{key,allowed}` 已随面 E 退役删除**（旧文件残留该节被 `mergeWithDefaults` 静默忽略） |
+| `settings-section.ts:readSimpleSettings()` | 本插件 fiber **Config**（经宿主 settings 面板 `ns=serenity-hooks`） | `gatewayEnabled`/`rebuildThresholdK`/`skiffEnabled`/`skiffDebugPort`/`croEnabled`/`unattendedEnabled`/`diagramEnabled`（旧嵌套形态 `gateway.enabled`、`skiff.debugPort` **亦收**）。🔴 **v1.49.0 起 `rebuildEnabled` 已砍掉**（超限重建恒开、无总闸）；🔴 **2026-10-15 起 `acpEnabled`/`acpHttpPort`/`publicAskEnabled` 及嵌套段 `acp.*` 随面 E 一并删除** |
 | `weixin-route.ts` / `skiff-role.ts` | **CCC** `.opencode/serenity.json` | `weixin.*`、`skiff.roles` |
 | `localstore-ops.ts` / `weixin-route.ts` / `im-weixin.ts` | **CCC** `localstore.json`（节 `credential`\|`config`） | `WEIXIN_<ID>_*`、`localstore.gitTrack` |
 | 不读配置（纯常量/机制） | — | `message-source` / `output-guard(.|seam)` / `face-host` / `ports` |

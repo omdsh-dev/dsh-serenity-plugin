@@ -1,5 +1,14 @@
 # ACP 能力 + 企业微信机器人对接 — 初版方案（F4c，S142）
 
+> 🔴🔴 **本文所述的自造 ACP 面已整体退役（2026-10-15，owner 裁「砍掉外部问答」）**。
+> 本文是**历史设计记录**，保留原文不删（它解释了当年为何自研）；但**其中描述的机制今天已不存在**：
+> `acp-core.ts` / `acp-http.ts` 两份文件、3100 面、`acpEnabled`/`acpHttpPort`/`publicAskEnabled`
+> 三个面板键、`publicAsk` 配置节、`PublicAskEditor.tsx` 与相关测试**均已删除**。
+> **替代路径** = 宿主自带的官方 ACP server（`dsh --profile acp`，纯 stdio、零认证）＋ 任一现成
+> ACP 客户端，认证落在接入层（隧道 / 反代 / Cloudflare Access）。判据与代价见 S142 的调研件
+> `2026-10-14T2255-…-external-ask-retirement-and-acp-research.md`。
+> 🔵 **读本文时请按"当时的设计"读，不要按"现在的实现"读**。
+
 > 状态：**方案修订中（2026-08-29，S142 用户碰壁——自建应用需可信域名核对 IP；转向智能机器人长连接调研）**
 > 性质：dsh-serenity-plugin Skiff（F4）第三期——ACP 协议层 + IM 对接
 > 前置调研：`docs/knowledge-ccc-release-research.md`（ACP 生态/IM 桥/OpenClaw 资产）、`docs/skiff-design.md`（F4 总设计，F4c 规划）

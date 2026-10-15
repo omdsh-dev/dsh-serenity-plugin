@@ -45,7 +45,7 @@
 import type { Context, Volatile } from 'cordis'
 import { hostSettings } from './host/access.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
-import { ACP_HTTP_PORT, SKIFF_DEBUG_PORT } from './ports.js'
+import { SKIFF_DEBUG_PORT } from './ports.js'
 
 /**
  * 面板层布尔键的**两种来法**（v1.47.2）：
@@ -65,8 +65,7 @@ interface SimpleConfigFragment {
   rebuild?: { thresholdK?: number }
   /** F4 Skiff（实验性）：调试服务启停（人工） */
   skiff?: { enabled?: boolean; debugPort?: number }
-  /** F4c ACP（实验性）：HTTP JSON-RPC 端点启停（人工） */
-  acp?: { enabled?: boolean; httpPort?: number }
+  /** F4 Skiff（实验性）：调试服务启停（人工） */
   /** diagram（实验性 demo；2026-09-29 owner 具名令 D104）：标签源码 → 进程内出图（不借浏览器） */
   diagram?: { enabled?: boolean }
   /** human-channel（人机信道；**机器级**；2026-09-26 owner 定案）：账号 ／ 订阅表 ／ 主控 ／ 出站白名单 */
@@ -77,9 +76,6 @@ interface SimpleConfigFragment {
   rebuildThresholdK?: PanelNumber
   skiffEnabled?: PanelBoolean
   skiffDebugPort?: PanelNumber
-  acpEnabled?: PanelBoolean
-  acpHttpPort?: PanelNumber
-  publicAskEnabled?: PanelBoolean
   croEnabled?: PanelBoolean
   unattendedEnabled?: PanelBoolean
   diagramEnabled?: PanelBoolean
@@ -105,12 +101,9 @@ interface SerenitySimpleSettings {
   skiffEnabled: boolean
   /** F4 Skiff 调试端口（默认 3099，仅 127.0.0.1） */
   skiffDebugPort: number
-  /** F4c ACP HTTP JSON-RPC 端点总开关（实验性；默认关） */
-  acpEnabled: boolean
-  /** F4c ACP HTTP 端口（默认 3100，仅 127.0.0.1） */
-  acpHttpPort: number
-  /** F4d 建议问答页总开关（实验性；默认关——按认知容器暴露问答页，key 认证） */
-  publicAskEnabled: boolean
+  // 🔴 2026-10-15（owner 裁「砍掉外部问答」）：面 E 三个键（`acpEnabled`／`acpHttpPort`／
+  // `publicAskEnabled`）**已整组退役** —— 自造 ACP 面被官方 `dsh --profile acp` ＋ 现成客户端取代。
+  // 旧配置残留这些键 ⇒ **静默忽略**（schemastery 非 strict，同 `rebuildEnabled` 的处置）。
   /** **CRO（轨迹自编程唤起）总开关**（2026-09-21 所有者令新增；**缺省开**）。
    *
    *  CRO = 轨迹目录下放一个 `continuous-re-occurrence.ts`，由 ACC 的 5min tick spawn，
@@ -135,7 +128,7 @@ interface SerenitySimpleSettings {
    *  `parseDsl → renderDsl（SVG ＋ 四项体检）→ resvg-wasm 光栅化（内置字体）→ PNG`，
    *  产物落 CCC `_tmp/diagram/` 且**图片块进对话**（**不借浏览器、不截图**）。
    *  **缺省关**：owner 口中的"demo 功能" ⇒ 关时**不注册**（工具不进模型工具清单：
-   *  零 token、不会被误调），同 `skiff`／`acp` 的"未开启零资源占用"口径。
+   *  零 token、不会被误调），同 `skiff` 的"未开启零资源占用"口径。
    *  依赖面：随包分发 3.8 MB 内置字体（`assets/diagram/`，wasm 对系统字体不可见）。 */
   diagramEnabled: boolean
   /** **human-channel（人机信道）机器级配置**（2026-09-26 owner 定案；P0-1 立 schema ＋ 投影）。
@@ -152,9 +145,6 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     rebuildThresholdK: 400,
     skiffEnabled: false,
     skiffDebugPort: SKIFF_DEBUG_PORT,
-    acpEnabled: false,
-    acpHttpPort: ACP_HTTP_PORT,
-    publicAskEnabled: false,
     croEnabled: true,
     unattendedEnabled: false,
     diagramEnabled: false,
@@ -177,7 +167,7 @@ interface VolatileRef<T> {
  *    `meta.volatile` **无条件**包 `createVolatile(value)`，且该分支排在"缺省值回退"那一段
  *    **之前** ⇒ **"用户没设过"的字段也是恒真对象**（`.get()` 返回 `undefined`），**不是 `undefined`**。
  *
- * ⇒ 若这里不解包，下面十行的 `??` 链会**短路在这层包装上** ⇒ 网关 / Skiff / ACP 会被
+ * ⇒ 若这里不解包，下面十行的 `??` 链会**短路在这层包装上** ⇒ 网关 / Skiff 会被
  * **无意打开**（比"面板不显示"更坏：静默改变对外暴露面）。
  *
  * ## 为什么用结构判定
@@ -312,9 +302,8 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
     rebuildThresholdK: unwrapVolatile(config.rebuildThresholdK) ?? config.rebuild?.thresholdK ?? d.rebuildThresholdK,
     skiffEnabled: unwrapVolatile(config.skiffEnabled) ?? config.skiff?.enabled ?? d.skiffEnabled,
     skiffDebugPort: unwrapVolatile(config.skiffDebugPort) ?? config.skiff?.debugPort ?? d.skiffDebugPort,
-    acpEnabled: unwrapVolatile(config.acpEnabled) ?? config.acp?.enabled ?? d.acpEnabled,
-    acpHttpPort: unwrapVolatile(config.acpHttpPort) ?? config.acp?.httpPort ?? d.acpHttpPort,
-    publicAskEnabled: unwrapVolatile(config.publicAskEnabled) ?? d.publicAskEnabled,
+    // 🔴 2026-10-15：面 E 三个键（`acpEnabled`／`acpHttpPort`／`publicAskEnabled`）**已整组退役**，
+    // 不再进本结构（旧配置残留 ⇒ 静默忽略，无人读）。
     croEnabled: unwrapVolatile(config.croEnabled) ?? d.croEnabled,
     unattendedEnabled: unwrapVolatile(config.unattendedEnabled) ?? d.unattendedEnabled,
     diagramEnabled: unwrapVolatile(config.diagramEnabled) ?? config.diagram?.enabled ?? d.diagramEnabled,

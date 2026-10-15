@@ -10,9 +10,9 @@
  *    `core/session/src/index.ts:62`），长跑进程里这些 Map 只增不减——且 `waitIdle`
  *    在 agent 先被销毁时永不结算。
  *
- * ② **插件卸载/HMR/profile 重载 → 停掉自起的监听器与轮询器**。skiff 调试页、ACP
- *    HTTP 端点、微信桥轮询都是 dsp 自己起的资源；此前没有 `ctx.effect` 拆卸，
- *    卸载后端口仍被占用（EADDRINUSE）、轮询器重复启动。
+ * ② **插件卸载/HMR/profile 重载 → 停掉自起的监听器与轮询器**。skiff 调试页、微信桥轮询
+ *    都是 dsp 自己起的资源（⚠️ 2026-10-15：原同批还有 ACP HTTP 端点，该面已退役）；
+ *    此前没有 `ctx.effect` 拆卸，卸载后端口仍被占用（EADDRINUSE）、轮询器重复启动。
  *
  * 设计约束：清理与拆卸**一律吞掉异常**——生命周期回调里抛错会影响宿主的销毁流程
  * （宿主对 `session/disposed` 监听器异常是"contained"语义，但没必要制造噪音）。
@@ -127,5 +127,5 @@ export function registerLifecycle(ctx: Context): void {
   // ctx.effect 是 cordis Context 成员（宿主 rc.1 全量使用，如 core/tools/src/index.ts:943）——
   // 但**不可假定存在**：apply 抛错 = 整个 dsh 启动失败（app-boot "plugin(s) failed to load"），
   // 且测试替身/极旧宿主可能没有。缺失 → 响亮降级（registerDisposer 内记录）。
-  registerDisposer(ctx, 'self-started resources (gateway/weixin/skiff-debug/acp faces + weixin bridges)', disposeAll)
+  registerDisposer(ctx, 'self-started resources (gateway/weixin/skiff-debug faces + weixin bridges)', disposeAll)
 }

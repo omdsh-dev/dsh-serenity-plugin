@@ -21,9 +21,7 @@ import { getStatus, setSafeMode } from './status.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 // C2（CCC 发现面归一）：L1 单根解析 / L2 枚举一律问 ccc-roots（本文件不再自写上溯包裹）
 import { cccRootForCwd, listCccs } from './ccc-roots.js'
-import { readAdvancedSettings, toWire, applyWirePatch, ensurePublicAskKey, rotatePublicAskKey, projectKnownWorkspaces } from './config-ops.js'
-// C4 块 B：端口取值只从集中端口表取（原处硬写 3100 回退）
-import { ACP_HTTP_PORT } from './ports.js'
+import { readAdvancedSettings, toWire, applyWirePatch, projectKnownWorkspaces } from './config-ops.js'
 import { isoLocal, localFileStamp } from './time.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
@@ -31,7 +29,6 @@ const UPLOAD_PATH = '/serenity/image-upload'
 const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
 const CCCS_PATH = '/serenity/cccs'
-const PUBLIC_ASK_PATH = '/serenity/public-ask'
 const WEIXIN_PATH = '/serenity/weixin'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
@@ -350,8 +347,9 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     },
   })
 
-  // /serenity/cccs：候选认知容器列表（v1.26.2 设置面板「开放容器」白名单选择的数据源；
-  // 只读；与 skiff 调试页/微信桥/ACP 问答页**同一** listCccs——工作区注册表 ∪ 持久化会话 ∪ live）
+  // /serenity/cccs：候选认知容器列表（v1.26.2；**原**为设置面板「开放容器」白名单选择的数据源——
+  // 该面板区已随面 E 退役，2026-10-15；本端点本身保留，仍是 CCC 枚举的只读口）
+  // 只读；与 skiff 调试页/微信桥**同一** listCccs——工作区注册表 ∪ 持久化会话 ∪ live）
   ctx.webServer.register({
     kind: 'exact',
     path: CCCS_PATH,
@@ -374,53 +372,11 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     },
   })
 
-  // /serenity/public-ask：建议问答页配置信息（v1.26.2 用户：配置处需能获取 key 和地址）
-  // GET → { enabled, port, key, allowed, urls }（x-serenity-ui 头限定 WebUI；key 仅管理员可见）
-  // PUT { action: 'rotate' } → 轮换 key（v1.26.5 用户：不好说要换 key 呢——生成新 key 旧 key 立即失效）
-  ctx.webServer.register({
-    kind: 'exact',
-    path: PUBLIC_ASK_PATH,
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        if (!requireWebUi(req, res, '仅限 WebUI（key 属敏感凭据）')) return
-        if (req.method === 'PUT') {
-          const raw = await readBody(req, 16 * 1024)
-          const body = JSON.parse(raw) as { action?: string }
-          if (body.action !== 'rotate') {
-            sendJson(res, 400, { error: 'unsupported action (expected "rotate")' })
-            return
-          }
-          const newKey = rotatePublicAskKey()
-          sendJson(res, 200, { key: newKey })
-          return
-        }
-        if (req.method !== 'GET') {
-          sendJson(res, 405, { error: 'method not allowed' })
-          return
-        }
-        const settings = readAdvancedSettings()
-        // 动态 import：readSimpleSettings 依赖 settings-section（schemastery peerDep）——
-        // 保持 api.ts 静态链纯净（仅本端点触发时加载）
-        const { readSimpleSettings } = await import('./settings-section.js')
-        const simple = readSimpleSettings()
-        const allowed = settings.publicAsk.allowed
-        // 地址：单容器页 /c/<name>（开放容器）+ 列表页 /
-        const port = simple.acpHttpPort ?? ACP_HTTP_PORT
-        const base = `http://127.0.0.1:${port}`
-        const containerUrls = allowed.map((name) => ({ name, url: `${base}/c/${encodeURIComponent(name)}` }))
-        sendJson(res, 200, {
-          enabled: simple.publicAskEnabled ?? false,
-          port,
-          key: ensurePublicAskKey(),
-          allowed,
-          urls: containerUrls,
-          listUrl: `${base}/`,
-        })
-      } catch (err: any) {
-        sendJson(res, 400, { error: err.message ?? String(err) })
-      }
-    },
-  })
+  // 原 `/serenity/public-ask` 端点（建议问答页配置信息：GET key/地址/白名单、PUT 轮换 key）已随
+  // **面 E 整体退役**删除（2026-10-15，owner 裁「砍掉外部问答」）。它的唯一消费方是设置面板的
+  // 「ACP / 建议问答」区块 + `PublicAskEditor.tsx`，两者同批删除。
+  // 替代路径 = 官方 `dsh --profile acp`（纯 stdio、零认证）＋ 隧道/Cloudflare Access 层认证，
+  // 因此**不再需要**由本插件发放 key——认证的落点从"应用层 key"移到"隧道接入层"。
 
   // 原 `/serenity/trajectory` 端点（Autopilot Trajectory 状态 + 唤醒注册表 + 手动立即唤起）已随
   // ACC 侧 autopilot 退场整体删除（2026-09-15）：它的两个半边——`status`（autopilot 状态）与
