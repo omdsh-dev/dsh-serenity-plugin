@@ -28,9 +28,10 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { hostname } from 'node:os'
 import { findSession, sessionsRoot } from './trajectory-ops.js'
 import { listBoundSessionIds } from './trajectory-bound.js'
-import { evaluateCro, listCroTrajectories, readCroSnapshotInput, renderCroOutcome } from './cro.js'
+import { evaluateCro, listCroTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from './cro.js'
 import { runningCarriersOf } from './cro-turns.js'
 import { appendCroWakeLog } from './cro-log.js'
 import { hostAgents, hostService } from './host/access.js'
@@ -525,11 +526,28 @@ async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], lo
   const s = wakeSchedulerState()
   const scheduler = { armed: s.armed, enabled: s.enabled, ticks: s.ticks, lastSkipReason: s.lastSkipReason }
   const agents = hostAgents(ctx)
+  // 🔴 机器绑定（所有者令 2026-10-15「**CRO 必须指定绑定机器，否则不运行，唤醒器 检查这个**」）
+  //    语义 = **只许这一台（白名单）＋ fail-closed**；键 = **机器名**（owner 裁「用 hostname 吧」）。
+  //    取值**一次**（非每轨迹一次）—— 本进程的机器名在本次 tick 内不会变，且 `hostname()` 有系统调用成本。
+  //    ⚠️ 判定本身在 `resolveCroHostBinding`；此处只负责取本机名与计数。
+  const selfHost = safeHostname()
+  let hostSkips = 0
   let wakes = 0
   let quiet = 0
   let skips = 0
   for (const dirName of dirs) {
     try {
+      // 🔴 绑定门**在一切读数之前**：不是本机的轨迹，连快照都不必装配
+      //    （既省掉 O(N) 次 stat，也避免"读了一堆再用不上"的浪费）。
+      const verdict = resolveCroHostBinding(root, dirName, selfHost)
+      if (!verdict.allowed) {
+        hostSkips += 1
+        // 🔴 逐条必须留痕，且**"没绑"与"绑给别人"文案必须分开** ——
+        //    2026-10-15 的 `send-now` 事故就是"文案相同、原因不同"害排查指错方向
+        //    （S142 §日志 续 129 / D134）。绑定这一层不许再造同一个坑。
+        log.push(`· ${root}: ${dirName}: CRO 机器绑定未通过（${verdict.code}）：${verdict.detail}`)
+        continue
+      }
       const bound = listBoundSessionIds(root, dirName)
       // 🔴 `running ≠ live`（设计 §3.2）：running 来自 `cro-turns` 的事件夹取 + TTL 兜底
       const running = runningCarriersOf(bound, nowMs)
@@ -579,7 +597,23 @@ async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], lo
       log.push(`· ${root}: ${dirName}: CRO 内部异常（已忽略，不影响既有链路）: ${String((err as Error)?.message ?? err)}`)
     }
   }
-  log.push(`· ${root}: CRO 评估 ${dirs.length} 条（唤起 ${wakes}，不唤起 ${quiet}，跳过 ${skips}）`)
+  log.push(`· ${root}: CRO 评估 ${dirs.length} 条（唤起 ${wakes}，不唤起 ${quiet}，跳过 ${skips}${hostSkips > 0 ? `，非本机绑定 ${hostSkips}` : ''}）`)
+}
+
+/**
+ * 取本机机器名（**永不抛**）。
+ *
+ * `os.hostname()` 理论上可能抛（极少数环境）⇒ 这里兜底成空串。
+ * ⚠️ **空串的后果是"全部不通过"**（`bound === self` 永不成立）⇒ 即 **fail-closed**，
+ * 与所有者裁定同向（宁可都不跑，也不会"名字取不到就随便跑"）。
+ * @returns 本机机器名；取不到 ⇒ `''`
+ */
+function safeHostname(): string {
+  try {
+    return hostname()
+  } catch {
+    return ''
+  }
 }
 
 /** 一次调度 tick：遍历已知 CCC → 到期项串行投递 / 超窗项置 missed；返回人读摘要 */

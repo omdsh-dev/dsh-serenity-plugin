@@ -45,7 +45,7 @@
  */
 
 import { spawn } from 'node:child_process'
-import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { resolveInside } from './ccc.js'
 import { sessionsRoot } from './trajectory-ops.js'
@@ -54,11 +54,23 @@ import { isoLocal } from './time.js'
 /** 入口文件名（**全写**，所有者令 2026-09-19；不改缩写） */
 export const CRO_FILENAME = 'continuous-re-occurrence.ts'
 
+/**
+ * 机器绑定文件名（**全写**，与 `CRO_FILENAME` 同风格）。
+ *
+ * 🔴 **它随 CCC git 走是设计意图，不是缺陷**：
+ * 绑定声明必须跟着**轨迹**走，才能在第二台机器上被读到、并被判为"不是我的"。
+ * （这正是机器绑定的整个目的 —— 见 `resolveCroHostBinding` 的头注。）
+ */
+export const CRO_HOST_FILENAME = 'cro-host-binding'
+
 /** 硬超时（沿用 `biasProvider` 先例的 60s；设计 §5 情形 2） */
 export const CRO_TIMEOUT_MS = 60_000
 
 /** stdout 上限（防一个坏程序把日志撑爆；沿用 hook 截断思路） */
 const CRO_STDOUT_MAX = 64 * 1024
+
+/** 绑定文件体积上限（它只是个机器名 ⇒ 超过这个数一定是写错了，不读） */
+const CRO_HOST_FILE_MAX = 1_024
 
 /** SESSION.md 文件名（与 `trajectory-ops.ts` 同值；此处本地常量避免反向依赖） */
 const SESSION_MD = 'SESSION.md'
@@ -279,6 +291,166 @@ export function isCroEnabled(root: string, dirName: string): boolean {
   } catch {
     return false // 路径逃逸 ⇒ 视为未启用（不抛）
   }
+}
+
+/**
+ * 机器绑定判定结果（**永不抛**）。
+ *
+ * 三态而非布尔：**「没绑」与「绑给别人」必须分得开**（见下"为什么三态"）。
+ */
+export interface CroHostVerdict {
+  /** 这台机器可以跑吗（唯一决定投递与否的字段） */
+  allowed: boolean
+  /** 绑定文件里写的机器名（未绑/读不到 ⇒ `null`） */
+  bound: string | null
+  /** 本机机器名 */
+  self: string
+  /**
+   * 机器可读的判定原因（稳定码，供测试与日志断言）。
+   * · `bound-to-self` —— 已绑且是本机 ⇒ 跑
+   * · `not-bound` —— **没有绑定文件**（或文件是空的）⇒ **不跑**（fail-closed）
+   * · `bound-to-other` —— 绑给了别的机器 ⇒ 不跑
+   * · `read-error` —— 文件在但读不了 ⇒ 不跑（fail-closed）
+   */
+  code: 'bound-to-self' | 'not-bound' | 'bound-to-other' | 'read-error'
+  /** 人读说明（进 tick 日志） */
+  detail: string
+}
+
+/**
+ * 解析机器绑定 —— 「**这条轨迹由哪台机器负责自唤醒**」（所有者令 2026-10-15）。
+ *
+ * ## 所有者裁定的语义（逐字，D135）
+ *
+ * 「**CRO 必须指定绑定机器，否则不运行，唤醒器 检查这个**」⇒ 三条同时成立：
+ * ① **只许这一台**（白名单，不是"排除这一台"）；
+ * ② **fail-closed** —— **没绑 = 不跑**（不是"没绑 = 随便跑"）；
+ * ③ **检查者在唤醒器**（本函数由 `runCroPhase` 调用，不是程序自己判）。
+ *
+ * ## 绑定键 = 机器名（所有者 2026-10-15 裁「用 hostname 吧，比较合理」）
+ *
+ * ⚠️ **已接受的取舍**：本机机器名是 QEMU 机型派生的默认形
+ * （`yh-Standard-PC-Q35-ICH9-2009`）⇒ 同法新建的同名用户 VM 会取到同一个名字。
+ * 所有者 2026-10-15 明确「**不改名，家里就这几台机器没必要**」⇒ **风险由所有者接受**。
+ *
+ * ## 🔴 为什么必须是三态，「没绑」不能并进「绑给别人」
+ *
+ * 2026-10-15 已发生过**同族事故**：`send-now` 失败时报的是「无绑定会话记录」，
+ * 而真因是"那条轨迹不可寻址"—— **文案相同、原因不同**，害得排查方向错了一次
+ * （S142 §日志 续 129 / D134）。
+ * ⇒ 绑定这一层**不许再造同样的坑**：「你没绑」与「你绑给了别人」是**两件不同的事**，
+ *   日志必须分开写 —— 否则将来"为什么这条轨迹不跑了"会又一次指错方向。
+ *
+ * ## 文件形态（刻意的极简）
+ *
+ * · 位置 = `<轨迹目录>/cro-host-binding`（与 CRO 程序**同级**）
+ * · 内容 = **一行机器名**（首尾空白裁掉；只取第一行有效内容）
+ * · 不用 JSON —— 它只有一个值，JSON 只会多一种写错的方式
+ * · 支持 `#` 注释行与空行（方便人写、方便留痕）
+ *
+ * 🔴 **它必须随 git 入库**（不是"运行态"）：绑定声明要**跟着轨迹走到第二台机器**，
+ *   在那里被判成「绑给了别人」而**正确地不跑** —— 那就是本机制在工作。
+ *   ⇒ ⛔ **不要把它加进 `.gitignore`**（那会让第二台机器读到"没绑"而同样不跑，
+ *   表面上结果一样，但**判据从"明确绑给别人"退化成"什么都没说"**，失去可诊断性）。
+ *
+ * ## 为什么读文件而不是读快照字段
+ *
+ * 快照（`CroSnapshot`）是喂给**程序**的；而本判定发生在**程序被 spawn 之前**
+ * —— 程序还没跑，没有快照可读。⇒ 只能读文件。（这也是"机制属 ACC"的体现：
+ * ACC 在调用用户程序前先判定自己该不该调用。）
+ *
+ * @param root CCC 根
+ * @param dirName 轨迹目录名
+ * @param selfHost 本机机器名（**注入** ⇒ 可测；生产调用方传 `hostname()`）
+ * @returns 判定结果（**永不抛** —— 旁路容忍铁律）
+ */
+export function resolveCroHostBinding(root: string, dirName: string, selfHost: string): CroHostVerdict {
+  const self = String(selfHost ?? '').trim()
+  let fileAbs: string
+  try {
+    fileAbs = resolveInside(root, join('AGENT_SESSIONS', dirName, CRO_HOST_FILENAME))
+  } catch (err) {
+    // 路径逃逸 ⇒ 视为"没绑"（不跑）。**不抛**：本函数跑在 tick 内。
+    return {
+      allowed: false,
+      bound: null,
+      self,
+      code: 'read-error',
+      detail: `绑定文件路径非法（已忽略）：${String((err as Error)?.message ?? err)}`,
+    }
+  }
+
+  let raw: string
+  try {
+    if (!existsSync(fileAbs)) {
+      return {
+        allowed: false,
+        bound: null,
+        self,
+        code: 'not-bound',
+        detail: `未绑定机器（缺 ${CRO_HOST_FILENAME}）⇒ 按"必须指定"不运行`,
+      }
+    }
+    const st = statSync(fileAbs)
+    if (st.size > CRO_HOST_FILE_MAX) {
+      return {
+        allowed: false,
+        bound: null,
+        self,
+        code: 'read-error',
+        detail: `绑定文件过大（${st.size} B > ${CRO_HOST_FILE_MAX} B）⇒ 判为写错，不运行`,
+      }
+    }
+    raw = readFileSync(fileAbs, 'utf-8')
+  } catch (err) {
+    return {
+      allowed: false,
+      bound: null,
+      self,
+      code: 'read-error',
+      detail: `绑定文件读取失败 ⇒ 不运行：${String((err as Error)?.message ?? err)}`,
+    }
+  }
+
+  const bound = parseCroHostBinding(raw)
+  if (bound === null) {
+    return {
+      allowed: false,
+      bound: null,
+      self,
+      code: 'not-bound',
+      detail: `绑定文件为空（只有注释/空行）⇒ 按"必须指定"不运行`,
+    }
+  }
+  if (bound === self) {
+    return { allowed: true, bound, self, code: 'bound-to-self', detail: `已绑定本机（${bound}）` }
+  }
+  return {
+    allowed: false,
+    bound,
+    self,
+    code: 'bound-to-other',
+    detail: `绑定给别的机器（绑定=${bound}，本机=${self}）⇒ 本机不运行`,
+  }
+}
+
+/**
+ * 解析绑定文件正文 ⇒ 机器名（取不到 ⇒ `null`）。
+ *
+ * 规则（刻意宽松：**只认一行，其余都当注释**）：
+ * · 逐行扫；跳过空行与 `#` 开头的行；
+ * · **第一条有效行** = 机器名（裁首尾空白）；
+ * · 无有效行 ⇒ `null`。
+ * @param raw 文件正文
+ * @returns 机器名；无有效内容 ⇒ `null`
+ */
+export function parseCroHostBinding(raw: string): string | null {
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    const t = line.trim()
+    if (t === '' || t.startsWith('#')) continue
+    return t
+  }
+  return null
 }
 
 /**

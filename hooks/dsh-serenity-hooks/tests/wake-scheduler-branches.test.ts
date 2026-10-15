@@ -128,6 +128,8 @@ import {
   wakeRegistryPath,
 } from '../src/wake-registry.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { hostname } from 'node:os'
+import { CRO_HOST_FILENAME } from '../src/cro.js'
 
 const DIR_NAME = '2026-09-13--S999--sched-target--auto'
 const BOUND_ID = 'sess-sched-1'
@@ -151,6 +153,20 @@ function writeBinding(sessionId: string, dirName = DIR_NAME, at = Date.now()): v
     at,
   }
   writeFileSync(path, JSON.stringify({ version: 1, sessions }), 'utf-8')
+}
+
+/**
+ * 写 CRO **机器绑定**声明（所有者令 2026-10-15，D135）。
+ *
+ * ⚠️ **默认值 = 本机真机器名**：这些用例测的是**别的分支**（流水写入失败 / 内部异常…），
+ * 必须让机器绑定门**通过**才能走到靶子 —— 否则测的就变成门本身了
+ * （那会让"门挡住了"与"靶子坏了"看起来一样，是典型的假红）。
+ * 要测门本身的用例，传 `host` 显式覆盖。
+ */
+function writeCroHostBinding(host: string = hostname(), dirName = DIR_NAME): void {
+  const dir = join(root, 'AGENT_SESSIONS', dirName)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, CRO_HOST_FILENAME), `${host}\n`, 'utf-8')
 }
 
 /** 造一个可观测 agent：记录 followup / steer 各被调了几次 */
@@ -346,6 +362,7 @@ describe('wake-scheduler 分支面: B CRO 与容错兜底', () => {
   it('🔴 B6：**注册表读坏 ⇒ 以空表继续 CRO 阶段**（不连带停掉 CRO，设计 §6.2）', async () => {
     writeSessionDir()
     writeBinding(BOUND_ID)
+    writeCroHostBinding() // 让本用例真走到 CRO 阶段（而不是停在绑定门）
     const { agent } = makeAgent(BOUND_ID)
     // 真故障形态：把注册表文件写成**非法 JSON**
     mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
@@ -362,6 +379,7 @@ describe('wake-scheduler 分支面: B CRO 与容错兜底', () => {
   it('🔴 B3：CRO 流水写入失败 ⇒ 只记一行，**投递结论不受影响**', async () => {
     writeSessionDir()
     writeBinding(BOUND_ID)
+    writeCroHostBinding() // 🔴 必须先过机器绑定门，否则测的是门不是靶子
     const { agent } = makeAgent(BOUND_ID)
     croState.dirs = [DIR_NAME]
     croState.behavior = 'wake'
@@ -376,6 +394,7 @@ describe('wake-scheduler 分支面: B CRO 与容错兜底', () => {
   it('🔴 B4：单条轨迹 CRO 内部异常 ⇒ 计入跳过，**不影响既有链路**', async () => {
     writeSessionDir()
     writeBinding(BOUND_ID)
+    writeCroHostBinding() // 🔴 同上：靶子是"内部异常"，不是"门"
     const { agent } = makeAgent(BOUND_ID)
     croState.dirs = [DIR_NAME]
     croState.behavior = 'throw'
@@ -386,8 +405,73 @@ describe('wake-scheduler 分支面: B CRO 与容错兜底', () => {
     expect(text).toContain('CRO 评估 1 条')
   })
 
-  it('🔴 B7：投递**真失败** ⇒ 条目退回 pending ＋ attempts+1 ＋ 留原因（不删 = 不静默丢唤醒）', async () => {
+  it('🔴 B8（机器绑定）：**没绑 ⇒ 不跑**，且逐条留痕、既有投递照常', async () => {
     writeSessionDir()
+    writeBinding(BOUND_ID)
+    // ⛔ 刻意**不写**绑定文件 —— 这正是"必须指定"的负控
+    const { agent, calls } = makeAgent(BOUND_ID)
+    croState.dirs = [DIR_NAME]
+    croState.behavior = 'wake' // 若门失效，本 tick 会真的唤起
+    // 放一条真到期的唤醒条目 ⇒ 用来证明"门只管 CRO，不管投递面"这条边界
+    addWake(root, { target: DIR_NAME, at: new Date(Date.now() - 1000).toISOString(), message: 'x', createdBy: 'test' })
+    const log = await runOneTick(makeCtx((id) => (id === BOUND_ID ? agent : undefined)))
+    const text = log.join('\n')
+    expect(text).toContain('CRO 机器绑定未通过')
+    expect(text).toContain('not-bound') // 🔴 稳定码，供机械比对
+    expect(text).toContain('非本机绑定 1')
+    // ① 没有 CRO 唤起（门挡住了）——⚠️ tick 日志不渲染 prompt，故断言"唤起"这一事件本身
+    expect(text).not.toContain('CRO 唤起')
+    // ② 但**既有链路不受影响**：机器绑定只管 CRO，不管投递面（设计边界）
+    expect(calls.followup).toBe(1)
+  })
+
+  it('🔴 B9（机器绑定）：**绑给别的机器 ⇒ 本机不跑**（这正是 owner 要的效果）', async () => {
+    writeSessionDir()
+    writeBinding(BOUND_ID)
+    writeCroHostBinding('some-other-machine') // 明确绑给别人
+    const { agent, calls } = makeAgent(BOUND_ID)
+    croState.dirs = [DIR_NAME]
+    croState.behavior = 'wake'
+    addWake(root, { target: DIR_NAME, at: new Date(Date.now() - 1000).toISOString(), message: 'x', createdBy: 'test' })
+    const log = await runOneTick(makeCtx((id) => (id === BOUND_ID ? agent : undefined)))
+    const text = log.join('\n')
+    expect(text).toContain('CRO 机器绑定未通过')
+    expect(text).toContain('bound-to-other')
+    // 🔴 两个名字都印出来 ⇒ 排查时一眼看出"绑给了谁、我是谁"
+    expect(text).toContain('some-other-machine')
+    expect(text).not.toContain('CRO 唤起')
+    expect(calls.followup).toBe(1)
+  })
+
+  it('🔴 B10（机器绑定）：**绑给本机 ⇒ 照常唤起**（正控：门不是"一律挡住"）', async () => {
+    writeSessionDir()
+    writeBinding(BOUND_ID)
+    writeCroHostBinding() // 本机真名
+    const { agent } = makeAgent(BOUND_ID)
+    croState.dirs = [DIR_NAME]
+    croState.behavior = 'wake'
+    const log = await runOneTick(makeCtx((id) => (id === BOUND_ID ? agent : undefined)))
+    const text = log.join('\n')
+    // 🔴 正控的必要性：只有负控会掩盖"门把一切都挡了"这种过宽缺陷
+    expect(text).toContain('CRO 唤起')
+    expect(text).toContain('已投递')
+    expect(text).not.toContain('CRO 机器绑定未通过')
+  })
+
+  it('🆕 B11（机器绑定）：门在**装配快照之前** ⇒ 非本机轨迹不产生评估计数', async () => {
+    writeSessionDir()
+    writeBinding(BOUND_ID)
+    writeCroHostBinding('another-machine')
+    const { agent } = makeAgent(BOUND_ID)
+    croState.dirs = [DIR_NAME]
+    croState.behavior = 'no-wake'
+    const log = await runOneTick(makeCtx((id) => (id === BOUND_ID ? agent : undefined)))
+    const text = log.join('\n')
+    // 计数口径：该条算进"非本机绑定"，**不算**进"跳过"（跳过 = 异常那一档）
+    expect(text).toContain('CRO 评估 1 条（唤起 0，不唤起 0，跳过 0，非本机绑定 1）')
+  })
+
+  it('🔴 B7：投递**真失败** ⇒ 条目退回 pending ＋ attempts+1 ＋ 留原因（不删 = 不静默丢唤醒）', async () => {    writeSessionDir()
     writeBinding(BOUND_ID)
     // ⚠️ 真故障形态要选**对**：本用例第一版只给"有绑定 + 无 live + 无 sessionController"，
     //    那命中的是 **notReady（环境未就绪）** 那条分支（`:629`），它**正确地**不计失败 ——

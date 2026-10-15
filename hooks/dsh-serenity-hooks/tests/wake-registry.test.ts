@@ -12,6 +12,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { hostname } from 'node:os'
 import { join } from 'node:path'
 import {
   addWake,
@@ -29,7 +30,7 @@ import {
   type WakeEntry,
 } from '../src/wake-registry.js'
 import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
-import { CRO_FILENAME } from '../src/cro.js'
+import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/cro.js'
 import { croWakeLogPath } from '../src/cro-log.js'
 import { __resetCroTurnsForTest } from '../src/cro-turns.js'
 import { existsSync, readFileSync } from 'node:fs'
@@ -81,6 +82,21 @@ async function waitFor(pred: () => boolean, ms = 8_000): Promise<void> {
 /** 往轨迹目录里写一份 CRO 程序（`continuous-re-occurrence.ts` = 启用判据） */
 function writeCro(dirName: string, source: string): void {
   writeFileSync(join(root, 'AGENT_SESSIONS', dirName, CRO_FILENAME), source, 'utf-8')
+}
+
+/**
+ * 往轨迹目录里写**机器绑定**声明（owner 令 2026-10-15，D135）。
+ *
+ * 🔴 **本组用例（CRO 与调度器集成）测的是投递/流水/铁律，不是绑定门** ⇒
+ * 它们**必须先过门**才走得到靶子。缺这一步会得到**误导性的红**：
+ * 看起来像"投递坏了"，其实是"门把这条轨迹挡了"（本轮实测踩到，5 例同族）。
+ * ⇒ 判据：**凡要让 CRO 真跑起来的用例，都要先声明绑定**。
+ * @param host 绑给谁；缺省 = 本机真机器名（即"允许本机跑"）
+ */
+function writeCroHostBinding(host: string = hostname(), dirName = DIR_NAME): void {
+  const dir = join(root, 'AGENT_SESSIONS', dirName)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, CRO_HOST_FILENAME), `${host}\n`, 'utf-8')
 }
 
 /** 一份"吐固定决策"的 CRO 程序（**纯 JS 写在 .ts 里**：多 runner 下都能跑，同 `cro.test.ts` 手法） */
@@ -671,6 +687,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeSessionDir()
     writeBinding('sess-live')
     writeCro(DIR_NAME, "throw new Error('cro boom')\n") // 🔴 半成品：跑起来就报错
+    writeCroHostBinding() // 机器绑定门：本用例测铁律 ⇒ 先过门（否则测的是门）
     const added = addWake(root, { target: DIR_NAME, at: '+5m', message: '到点干活', createdBy: 'S142', nowMs: Date.now() })
     expect(added.ok).toBe(true)
     if (!added.ok) return
@@ -700,6 +717,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeBinding('sess-live')
     // reason 里回填 `dir=o.identity.dirName` ⇒ 若 stdin 没送到，这一条就取不到值
     writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"你的 SESSION.md 已很大，请先压缩再继续。"}'))
+    writeCroHostBinding()
     const sent: string[] = []
     registerWakeScheduler(croCtx(sent) as never)
     await waitFor(() => sent.length > 0)
@@ -715,6 +733,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeSessionDir()
     writeBinding('sess-live')
     writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"该干活了"}'))
+    writeCroHostBinding()
     // 一条**未到期**的在办条目：它是"表内容"的对照物（既不该被 CRO 清掉，也不该被 CRO 补写）
     const keep = addWake(root, { target: DIR_NAME, at: '+5m', message: '稍后再干', createdBy: 'S142', nowMs: Date.now() })
     expect(keep.ok).toBe(true)
@@ -734,6 +753,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeSessionDir()
     writeBinding('sess-live')
     writeCro(DIR_NAME, croProgram('{"wake":false,"reason":"天还没亮"}'))
+    writeCroHostBinding()
     const sent: string[] = []
     registerWakeScheduler(croCtx(sent) as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 8_000)
@@ -775,6 +795,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeSessionDir()
     writeBinding('sess-live')
     writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"该整理日志了","reason":"心跳到点"}'))
+    writeCroHostBinding()
     const sent: string[] = []
     registerWakeScheduler(croCtx(sent) as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
@@ -797,6 +818,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeSessionDir()
     writeBinding('sess-live')
     writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"叫我"}'))
+    writeCroHostBinding()
     registerWakeScheduler(croCtxThrowOnDeliver() as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
     const path = croWakeLogPath(root, DIR_NAME)
@@ -814,6 +836,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeSessionDir()
     writeBinding('sess-live')
     writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"叫我"}'))
+    writeCroHostBinding()
     registerWakeScheduler(croCtxNoTarget() as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
     // tick 日志里看得到"投递未成功"，但**流水档不该出现**（它不是一次投递失败）
@@ -827,6 +850,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeSessionDir()
     writeBinding('sess-live')
     writeCro(DIR_NAME, croProgram('{"wake":false,"reason":"没事"}'))
+    writeCroHostBinding()
     const sent: string[] = []
     registerWakeScheduler(croCtx(sent) as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
