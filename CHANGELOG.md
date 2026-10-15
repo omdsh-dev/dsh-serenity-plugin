@@ -1,3 +1,56 @@
+## v1.57.2 — 2026-10-15（**`praxis eap` 从「简易说明」换成 EAP 论文全文**）
+
+**性质**：**内容源替换**（工具名、参数、返回类型均不变；改的是 `praxis eap` 返回什么）。
+**来源**：owner 令 ——「发现个问题，要修掉，praxis · eap 放的不是 eap 完整论文全文而是简易说明，
+这是不行的，要求改成全文，完成你手头工作和这个后，发布新的版本并本地安装」。
+
+### 一、缺陷的准确形态
+
+`praxis` 的 `section=eap` 返回的是一份**约 1.5 KB 的简化摘要**（三变量表 ＋ 一张七项自检清单
+＋ 一句 ACC 关系说明），而该分支的**用途是注入 EAP 论文本身**。⇒ 模型按提示词里的
+`praxis eap` 去取"认知质量框架"时，拿到的是**一份二手摘要**，且它与论文的措辞并不一致。
+
+🔴 **一处必须先知道的分辨**：摘要里有两个串（`EAP Cognitive Quality Framework`、
+`Pre-Output Self-Check Checklist`）与一个变量名写法（`E↑ Explicitness`）
+**在论文全文中逐字不存在** —— 它们是当年写摘要时**自造的**。
+旧测试钉的正是这三个串 ⇒ 本版**必须同时改锚**（见 §三）。
+
+### 二、实现路径（**不把 58 KB 塞进 TS 模板字符串**）
+
+| 面 | 改法 |
+|---|---|
+| 正文载体 | **随包资产** `assets/eap-paper.md`（**逐字**来自上游论文，492 行 ／ 58 723 B ／ 6 章 ＋ 附录） |
+| 读取 | `src/tools/eap.ts` 改为 `loadEapPaper()`（**进程内缓存一次**，同 `voyage-page.ts` 的既有先例） |
+| 定位 | 包根 = **向上找含 `package.json` 的那一级**（同 `diagram/rasterize.ts`）—— 开发态 `src/tools/` 与发布态 `lib/tools/` **都要成立** |
+| 路由 | `praxis.ts` **只路由**，不内嵌任何正文（单一真相源在资产里） |
+| 缺资产 | **响亮抛错**（带解析到的绝对路径），**不返回空串、不降级回摘要** —— 那种降级会把"资产缺失"伪装成"调用成功" |
+| 许可证 | `assets/eap-paper-LICENSE.txt`（上游 MIT；同 `assets/diagram/*.ttf` 的既有做法） |
+
+🔴 **为什么不用模板字符串**：论文里有 **4 处 ```mermaid 代码围栏**，塞进模板字符串要转义反引号
+—— 本容器为此**已踩过四次**。
+
+### 三、测试锚的更换（本版的第二件事）
+
+| 文件 | 原锚（论文里**不存在**） | 新锚（论文里逐字存在） |
+|---|---|---|
+| `tests/praxis.test.ts` | `EAP Cognitive Quality Framework` ／ `E↑ Explicitness` | `# Explicit Abstraction Principle (EAP)` ／ `### 2.4 核心变量…` ／ `### 2.5 EAP原则：E↑、R↓、S↑` ／ `## 6. EAP的逻辑证明` |
+| `tests/acc-extras.test.ts` | `E↑ Explicitness` ／ `Pre-Output Self-Check Checklist` ／ `Self-Check` | 首章 ＋ **尾章（附录）** ＋ 篇幅判据；并新增**保真回归钉**：那三个自造串**不得再出现** |
+
+🔵 **一条当场踩到的读数纪律**：篇幅断言首版写成 `paper.length > 50_000` ⇒ **当场红**（实测 25 547）。
+根因 = **论文以中文为主，1 汉字 3 字节但只占 1~2 个 UTF-16 码元** ⇒ 拿 `.length` 当"篇幅"会少读一半。
+已改为**按字节**（`Buffer.byteLength`）并**把两个分母都写进注释**（58 723 B ／ 25 547 字符）。
+
+### 四、发布链同步（漏了 = 包缺文件）
+
+`package.json` 的 `files` ＋ `scripts/dsh-develop.ts` 的**两处** `required`
+（`verifyTarball` 与 `deploy` 各一份）同批加入 `assets/eap-paper.md` 与许可证
+—— 同 v1.26.15 事故形态（`files` 白名单漏运行时必需文件）。
+
+### 五、门禁
+
+`typecheck` ／ `test`（168 files · 2765 tests）／ `coverage` ／ `build` ／ `pack-check` 全绿；
+`typecheck-host` 见发布记录。
+
 ## v1.57.1 — 2026-10-15（**砍掉自造 ACP 面（面 E）**）
 
 **性质**：**行为变更**（对外面减少一个 ／ 面板减少三个键 ／ 一个配置节退场）。**来源**：owner 令 ——

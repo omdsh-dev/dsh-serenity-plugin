@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { runMsm, MSM_GUIDE, MSM_ACTIONS } from '../src/msm-ops.js'
-import { EAP_CONTENT } from '../src/tools/eap.js'
+import { EAP_PAPER_ASSET, eapPaperPath, loadEapPaper, resetEapCache } from '../src/tools/eap.js'
 import { CCE_CONTENT } from '../src/tools/cce.js'
 import { NEAT_CONTENT } from '../src/tools/neat.js'
 import { resolveSerenityEnv } from '../src/seams/env.js'
@@ -115,11 +115,36 @@ describe('msm: guide + 协议 flag + path-arg', () => {
   })
 })
 
-describe('eap/neat 内容常量', () => {
-  it('EAP 完整框架含三变量与自检清单（v1.23.0 英化）', () => {
-    expect(EAP_CONTENT).toContain('E↑ Explicitness')
-    expect(EAP_CONTENT).toContain('Pre-Output Self-Check Checklist')
-    expect(EAP_CONTENT).toContain('Self-Check')
+describe('eap/neat 内容源', () => {
+  it('EAP 正文 = 随包论文全文（资产在位、可读、且是全文）', () => {
+    resetEapCache()
+    const paper = loadEapPaper()
+    // 资产路径解析到包根下的 assets/（不是 src/assets/ —— 那正是"层级算错"的故障形态）
+    expect(eapPaperPath().endsWith(EAP_PAPER_ASSET)).toBe(true)
+    // 全文而非节选：首章 ＋ 尾章（附录）都在
+    expect(paper).toContain('# Explicit Abstraction Principle (EAP)')
+    expect(paper).toContain('## 1. 引言：前置抽象的无穷性')
+    expect(paper).toContain('## 附录：EAP的公理化可能性（可选）')
+    // 🔴 篇幅判据必须**按字节**（论文以中文为主：1 汉字 = 3 字节 UTF-8，但只占 1~2 个
+    //    UTF-16 码元 ⇒ 拿 `.length` 当"篇幅"会少读一半 —— 我首版正是这么错的）。
+    //    分母 = 资产实测：58 723 B ／ 25 547 字符（旧「简易说明」约 1.5 KB）。
+    expect(Buffer.byteLength(paper, 'utf-8')).toBeGreaterThan(50_000)
+    expect(paper.length).toBeGreaterThan(20_000)
+  })
+
+  it('🔴 保真：当年「简易说明」自造的三个串**不得**再出现在 EAP 正文里', () => {
+    // 这三个串在**真论文里逐字不存在**（它们是写简易说明时自造的）——
+    // 它们回来 ⇒ 说明有人又把那份简易说明抄了回来（本缺陷的复发形态）。
+    const paper = loadEapPaper()
+    expect(paper).not.toContain('EAP Cognitive Quality Framework')
+    expect(paper).not.toContain('E↑ Explicitness')
+    expect(paper).not.toContain('Pre-Output Self-Check Checklist')
+  })
+
+  it('读一次即缓存；显式传入不存在的路径 → 抛错（不静默返回空）', () => {
+    resetEapCache()
+    expect(loadEapPaper()).toBe(loadEapPaper())
+    expect(() => loadEapPaper('/nonexistent/eap-paper.md')).toThrow()
   })
 
   it('Neat 完整协议含四铁律与五层（v1.23.0 英化）', () => {

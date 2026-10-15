@@ -7,21 +7,39 @@
  * Metaphor 映射：Engineering Drawings（图纸 = 可实践理论的编码，第 3 条隐喻）。
  *
  * section 参数渐进披露：不传 = 返回精简目录；传 = 返回对应框架全文/章节。
- * 每个框架一个内容文件（单一真相源）：eap.ts / neat.ts / cce.ts / ontology.ts。
+ * 每个框架一个内容源（单一真相源）：neat.ts / cce.ts / ontology.ts；
+ * 🔴 **eap 的内容源是随包资产 `assets/eap-paper.md`**（论文全文，58 KB）——
+ *    读它在 `tools/eap.ts`（本文件只路由，不内嵌任何正文；见该文件的成因注释）。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
-/** 知识源：与各原工具内容保持一致（单一真相源——eap/neat/cce 各自源文件已并入此处） */
-import { EAP_CONTENT } from './eap.js'
+/** 知识源：与各原工具内容保持一致（单一真相源——neat/cce/ontology 各自源文件已并入此处） */
+import { EAP_PAPER_ASSET, eapPaperPath, loadEapPaper } from './eap.js'
 import { NEAT_CONTENT } from './neat.js'
 import { CCE_CONTENT } from './cce.js'
 import { ONTOLOGY_CONTENT } from './ontology.js'
 
+/**
+ * 读 EAP 论文全文。
+ *
+ * 🔴 **绝不降级**：缺资产时抛错（带解析到的绝对路径），不返回空串、不退回"简易说明"——
+ * 那种降级会把"资产缺失"伪装成"调用成功"，而本工具的全部价值就是那份正文
+ * （这正是 2026-10-15 owner 令要修的缺陷形态）。
+ */
+function eapPaper(): string {
+  try {
+    return loadEapPaper()
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`EAP paper asset unavailable (${EAP_PAPER_ASSET}): ${msg} — resolved: ${eapPaperPath()}`)
+  }
+}
+
 /** 框架清单（无参调用时返回的精简目录） */
 export const PRAXIS_INDEX = `praxis — 可实践理论注入（认知框架，按需加载）
-选择框架：praxis eap（认知质量——E↑/R↓/S↑ 三变量 + 输出前自检）
+选择框架：praxis eap（认知质量——EAP 论文全文）
           praxis neat（Neat 协作协议——小步对齐/显式决策/文档驱动）
           praxis cce（认知连续性工程——容器 5 行为约束 + H_op 操作熵）
           praxis ontology（本体论工程方法群——触发/编码/四组判据 M·L·D·V/OEPE 循环/公理/反模式）
@@ -37,7 +55,9 @@ export const praxisTool = defineTool({
   name: 'praxis',
   description:
     'Praxis — actionable theory injection (cognitive frameworks, loaded on demand): ' +
-    'eap (cognitive quality: E↑ explicitness / R↓ reconstructability / S↑ stability + self-check checklist) / ' +
+    'eap (the EXPLICIT ABSTRACTION PRINCIPLE — the full paper: motivation, definitions, ' +
+    'the three variables E↑/R↓/S↑, language-as-interface, empirical cases, theoretical ' +
+    'corollaries, formal proof) / ' +
     'neat (Neat design collaboration protocol: small-step alignment, explicit decisions, document-driven) / ' +
     'cce (Cognitive Continuity Engineering: container identity/accessibility/evolution under bounded resources) / ' +
     'ontology (ontology engineering method family: when to model, Turtle encoding, four judgement sets ' +
@@ -56,7 +76,7 @@ export const praxisTool = defineTool({
     render: (_args, value) => renderText(value),
   },
   async execute(args) {
-    if (args.section === 'eap') return EAP_CONTENT
+    if (args.section === 'eap') return eapPaper()
     if (args.section === 'neat') return NEAT_CONTENT
     if (args.section === 'cce') return CCE_CONTENT
     if (args.section === 'ontology') return ONTOLOGY_CONTENT

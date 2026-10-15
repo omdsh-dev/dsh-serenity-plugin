@@ -30,11 +30,29 @@ describe('praxis（v1.30：eap/neat/cce 三合一；v1.51.5 增 ontology）', ()
     expect(String(v)).toContain('ontology')
   })
 
-  it('section=eap → 返回 EAP 框架内容（E↑/R↓/S↑）', async () => {
+  it('section=eap → 返回 EAP 论文全文（锚点取论文里**真实存在**的章节）', async () => {
     const v = await (praxisTool as { execute: (a: unknown) => Promise<unknown> }).execute({ section: 'eap' })
-    expect(String(v)).toContain('EAP Cognitive Quality Framework')
-    expect(String(v)).toContain('E↑ Explicitness')
-    expect(String(v)).toContain('R↓ Reconstructability')
+    const s = String(v)
+    // 🔴 锚点判据（2026-10-15，S142 续 125）：这里钉的必须是**论文里逐字存在**的串。
+    //    换全文前的旧断言钉的是 `EAP Cognitive Quality Framework` / `E↑ Explicitness` /
+    //    `Pre-Output Self-Check Checklist` —— 三个都是当年写「简易说明」时**自造的**
+    //    （全文 grep 0 命中）⇒ 换全文后它们当场变红。见 `tests/eap-paper.test.ts` 的保真钉。
+    expect(s).toContain('# Explicit Abstraction Principle (EAP)')
+    expect(s).toContain('## 1. 引言：前置抽象的无穷性')
+    expect(s).toContain('### 2.4 核心变量：显式度(E)、重建成本(R)、稳定性(S)')
+    expect(s).toContain('### 2.5 EAP原则：E↑、R↓、S↑')
+    expect(s).toContain('## 6. EAP的逻辑证明')
+    expect(s).toContain('显式度（Explicitness Degree，E）')
+  })
+
+  it('section=eap → 返回的是**论文全文**而非节选（首尾两章都在场）', async () => {
+    const v = await (praxisTool as { execute: (a: unknown) => Promise<unknown> }).execute({ section: 'eap' })
+    const s = String(v)
+    // 尾章（附录）也在场 ⇒ 证明不是只截了开头的"摘要式"内容
+    expect(s).toContain('## 附录：EAP的公理化可能性（可选）')
+    // 篇幅量级判据（**按字节** —— 论文以中文为主，1 汉字 = 3 字节但只占 1~2 个 UTF-16 码元，
+    // 拿 `.length` 当篇幅会少读一半。分母 = 资产实测 58 723 B ／ 25 547 字符）。
+    expect(Buffer.byteLength(s, 'utf-8')).toBeGreaterThan(50_000)
   })
 
   it('section=neat → 返回 Neat 协议内容（四铁律/五层）', async () => {

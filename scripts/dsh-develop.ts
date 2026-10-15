@@ -586,6 +586,11 @@ function verifyTarball(): void {
   const required = [
     'lib/index.js', 'lib/client.js', 'lib/invariant.js',
     'assets/serenity-voyage.html',
+    // v1.57.2（S142 续 125）：`praxis eap` 的正文改为**随包论文全文** ⇒ `tools/eap.ts` 在
+    //    运行时读它；漏了 ⇒ `praxis eap` 抛「paper asset unavailable」（同族的又一次
+    //    "files 白名单漏运行时必需文件"，形态见 v1.26.15）。许可证同属必须随包分发（MIT）。
+    'assets/eap-paper.md',
+    'assets/eap-paper-LICENSE.txt',
     'assets/diagram/DroidSansFallbackFull.ttf',
     'assets/diagram/LICENSE-Apache-2.0.txt',
     // v1.51.1：补拉丁字型（CJK 字型**不含拉丁** ⇒ 只带一个时英文字母全渲染成方框）
@@ -1281,7 +1286,7 @@ function publishFileList(): string[] {
   const bad = files.filter((f) => f.startsWith('/') || f.split('/').includes('..'))
   if (bad.length > 0) fail(`deploy: 发布物清单含非法路径（${bad.join(', ')}）——中止`, 2)
   // 🔴 前置断言：**先证清单非空且含双 bundle，再动任何文件**（与 verifyTarball 的 required 同源）。
-  const required = ['lib/index.js', 'lib/client.js', 'lib/invariant.js', 'assets/serenity-voyage.html']
+  const required = ['lib/index.js', 'lib/client.js', 'lib/invariant.js', 'assets/serenity-voyage.html', 'assets/eap-paper.md']
   const missing = required.filter((f) => !files.includes(f))
   if (missing.length > 0) {
     fail(`deploy: 发布物清单缺必需文件（${missing.join(', ')}）——疑 pack 时 prepare 被触发、--ignore-scripts 未生效，中止`, 2)
