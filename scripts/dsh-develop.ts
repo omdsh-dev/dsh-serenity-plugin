@@ -319,18 +319,13 @@ function cmdCommit(message?: string): void {
 }
 
 function cmdPush(): void {
-  // origin 已指向 GitHub 公开仓库（与 github 远程同 URL；v1.16.0 起 GitHub 为主远程）。
-  // 推送走 GIT_SSH_GITHUB（id_rsa_github + SSH-over-443）。
-  const r = run('git', ['push', 'origin', 'HEAD'], {
-    cwd: REPO_ROOT,
-    quiet: true,
-    env: { GIT_SSH_COMMAND: GIT_SSH_GITHUB },
-  })
-  if (r.status !== 0) {
-    console.error(r.stdout + r.stderr)
-    fail(`git push 失败 (exit ${r.status})`, 2)
-  }
-  console.log(`[dsh-develop] ✓ pushed to origin (GitHub)`)
+  // 2026-10-16（S142 续 153）：本命令**原先只推 `origin`**，而 `omdsh` 镜像**只由 `github-push` 推**
+  //   ⇒ 任何走 `push` 的提交都会把**镜像静默落下一整版**（实测**两次**：v1.58.1、v1.58.2 —— 两次都是
+  //   「本地与 github 看起来一切正常，只有 omdsh 停在上一个版本」）。
+  //   改法是**委托** `cmdGithubPush()` —— 两个入口共用同一份"该推哪些远端"的实现（**单真相源**），
+  //   不再依赖"记得要用 github-push"这种**靠自觉**的纪律（本轨已反复实测：靠自觉的纪律会静默失效）。
+  //   `github` 与 `origin` 是**同一 URL 的两个名**（`git remote -v` 逐字）⇒ 换名推送对主仓无影响。
+  cmdGithubPush()
 }
 
 /** omdsh-dev 组织镜像 remote（v1.24.9：dsp 同步到 omdsh-dev 组织增加曝光） */
