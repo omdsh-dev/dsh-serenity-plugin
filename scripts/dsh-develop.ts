@@ -1418,6 +1418,13 @@ function cmdDeploy(opts: { listCopySet?: boolean } = {}): void {
   //   （`dsh plugin add` 会连依赖一起装，见 `cmdNpmInstall`），那条路不需要本 shim。
   const runtimeDepShims: Record<string, string> = {
     '@resvg/resvg-wasm': join(HOOKS_DIR, 'node_modules', '@resvg', 'resvg-wasm'),
+    // 🔴 2026-10-16（面 E）：`ws` 是**面 E 的新运行时依赖**（`dependencies`，不由宿主提供）。
+    //    —— 它与 `@resvg/resvg-wasm` **同类**（运行时依赖 shim），故**加在这一张表里**，不是 peer 那张。
+    //    ⚠️ 面 E **默认关** ⇒ 不加它时症状会**更隐蔽**：deploy 预检不会红，
+    //    直到有人拨开开关、连进来的那一刻才 `ERR_MODULE_NOT_FOUND: Cannot find package 'ws'`
+    //    —— 而这正是 W4「干净 profile 真装一次」要拦的东西。
+    //    ⚠️ 注意 `@deepseek-ai/dsh-acp` **不在此表**：它是**宿主提供的包** ⇒ 走上面的 **peer shim**（两表不许合并，D107）。
+    'ws': join(HOOKS_DIR, 'node_modules', 'ws'),
   }
   for (const dst of [...targets.map((nm) => join(nm, '@shgroup', 'dsh-serenity-hooks')),
     ...profileTargets]) {

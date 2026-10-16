@@ -36,7 +36,7 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / CRO **on**）', () => {
+  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / CRO **on** / ACP 面 off 3200）', () => {
     const d = simpleSettingsFromConfig({})
     expect(d).toEqual({
       gatewayEnabled: false,
@@ -46,6 +46,9 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       croEnabled: true,
       unattendedEnabled: false,
       diagramEnabled: false,
+      // 2026-10-16 新面 E（官方 ACP）：**缺省关** ＋ 端口 3200（`FACE_PORTS.acp`，非硬写）
+      acpFaceEnabled: false,
+      acpFacePort: 3200,
       // 2026-09-26（P0-1）：机器级 human-channel 搭本结构出（读取入口唯一）；缺省见 human-channel-config.test.ts
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
@@ -83,6 +86,7 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       gateway: { enabled: true },
       rebuild: { thresholdK: 500 },
       skiff: { enabled: true, debugPort: 4000 },
+      acpFace: { enabled: true, port: 3300 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
@@ -92,6 +96,9 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       croEnabled: true,
       unattendedEnabled: false,
       diagramEnabled: false,
+      // 2026-10-16：面 E 的部署段同义键 = `acpFace`（与旧面 E 的 `acp` **刻意不同名**）
+      acpFaceEnabled: true,
+      acpFacePort: 3300,
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
   })

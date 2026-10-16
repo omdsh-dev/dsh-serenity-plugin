@@ -45,7 +45,7 @@
 import type { Context, Volatile } from 'cordis'
 import { hostSettings } from './host/access.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
-import { SKIFF_DEBUG_PORT } from './ports.js'
+import { SKIFF_DEBUG_PORT, ACP_PORT } from './ports.js'
 
 /**
  * 面板层布尔键的**两种来法**（v1.47.2）：
@@ -68,6 +68,10 @@ interface SimpleConfigFragment {
   /** F4 Skiff（实验性）：调试服务启停（人工） */
   /** diagram（实验性 demo；2026-09-29 owner 具名令 D104）：标签源码 → 进程内出图（不借浏览器） */
   diagram?: { enabled?: boolean }
+  /** 🔴 面 E（官方 ACP，2026-10-16 owner 令「跑在 dsh web 进程内」）：部署层嵌套段。
+   *  ⚠️ **键名刻意不用 `acp.*`** —— 旧面 E 退役时 `acp.*` 是**被静默忽略**的遗留名，
+   *  复用会让"当年那份旧配置"在新面上复活（判据：退役 ≠ 删名，名字仍需保留为"无人读"）。 */
+  acpFace?: { enabled?: boolean; port?: number }
   /** human-channel（人机信道；**机器级**；2026-09-26 owner 定案）：账号 ／ 订阅表 ／ 主控 ／ 出站白名单 */
   humanChannel?: HumanChannelConfigFragment
   // ── 面板层（扁平键；无默认值 ⇒ "未设置"可观测；**0.1.7 起运行期是 `Volatile<T>` 包装**）──
@@ -79,6 +83,9 @@ interface SimpleConfigFragment {
   croEnabled?: PanelBoolean
   unattendedEnabled?: PanelBoolean
   diagramEnabled?: PanelBoolean
+  /** 🔴 面 E（官方 ACP，2026-10-16）：开关 ＋ 端口（面板层扁平键） */
+  acpFaceEnabled?: PanelBoolean
+  acpFacePort?: PanelNumber
 }
 
 /**
@@ -131,6 +138,18 @@ interface SerenitySimpleSettings {
    *  零 token、不会被误调），同 `skiff` 的"未开启零资源占用"口径。
    *  依赖面：随包分发 3.8 MB 内置字体（`assets/diagram/`，wasm 对系统字体不可见）。 */
   diagramEnabled: boolean
+  /** 🔴 **面 E：官方 ACP 总开关**（2026-10-16 owner 令「跑在 dsh web 进程内」；**缺省关**）。
+   *
+   *  开启后：ACC 在自己进程里起一个 **ACP 服务面**（面宿主统一建 listener），
+   *  标准 ACP 客户端（Agmente 等）经 WebSocket 登入本 CCC —— **不另起进程、不需 stdio 桥**。
+   *  **缺省关**：① 它把本 CCC 开给外部客户端；② ⚠️ **ACP 协议本身无认证**（`dsh-acp` 的
+   *  `authenticate` 恒成功），而本面按 owner 裁决绑 **`0.0.0.0`** ⇒ **开之前必须有外部接入层
+   *  兜底**（现为 Cloudflare Access）。缺省关 = "不配就没有暴露面"。
+   *  ⚠️ **与已退役的旧面 E（3100 自造问答面）无关**：本面是**官方** `@deepseek-ai/dsh-acp`。
+   *  实测（P0′，8/8）见 S142 `2026-10-16T0745-…-p0prime-inproc-findings.md`。 */
+  acpFaceEnabled: boolean
+  /** 面 E 端口（默认 3200；避开 3080/3081/3082/3099 与已退役的 3100） */
+  acpFacePort: number
   /** **human-channel（人机信道）机器级配置**（2026-09-26 owner 定案；P0-1 立 schema ＋ 投影）。
    *  三张表（账号 ／ 订阅 ／ 主控）＋ 出站白名单；**跨 CCC** ⇒ 归机器级，CCC 侧 `weixin.*` 随之退役
    *  （退役动作在 P0-2~P0-4；本版**只立机器级面**，旧面照旧）。缺省与归一规则见
@@ -148,6 +167,8 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     croEnabled: true,
     unattendedEnabled: false,
     diagramEnabled: false,
+    acpFaceEnabled: false,
+    acpFacePort: ACP_PORT,
     humanChannel: defaultHumanChannelSettings(),
   }
 }
@@ -307,6 +328,9 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
     croEnabled: unwrapVolatile(config.croEnabled) ?? d.croEnabled,
     unattendedEnabled: unwrapVolatile(config.unattendedEnabled) ?? d.unattendedEnabled,
     diagramEnabled: unwrapVolatile(config.diagramEnabled) ?? config.diagram?.enabled ?? d.diagramEnabled,
+    // 🔴 面 E（官方 ACP，2026-10-16）：**新键 `acpFace*`**，与已退役的 `acp*` 刻意不同名（见类型处注释）
+    acpFaceEnabled: unwrapVolatile(config.acpFaceEnabled) ?? config.acpFace?.enabled ?? d.acpFaceEnabled,
+    acpFacePort: unwrapVolatile(config.acpFacePort) ?? config.acpFace?.port ?? d.acpFacePort,
     // human-channel（机器级）：结构化表**不经 volatile**（volatile 是面板层开关的约定）
     humanChannel: humanChannelSettingsFromConfig(config.humanChannel),
   }

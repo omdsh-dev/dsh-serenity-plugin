@@ -77,7 +77,19 @@
       "cordis": ["node_modules/@deepseek-ai/cordis"],
       "@deepseek-ai/cordis": ["node_modules/@deepseek-ai/cordis"],
       "schemastery": ["node_modules/@deepseek-ai/schemastery"],
-      "@deepseek-ai/schemastery": ["node_modules/@deepseek-ai/schemastery"]
+      "@deepseek-ai/schemastery": ["node_modules/@deepseek-ai/schemastery"],
+      // ── 面 E（官方 ACP 面，2026-10-16）────────────────────────────────────────────
+      // 面 E 的两个真依赖在这里分档落位（**只有一个是 paths 条目**）：
+      //   · `dsh-acp` —— **宿主提供的包**（与 dsh-tools/dsh-llm 同族，走 peer shim），
+      //     本仓只做类型基准 ⇒ 钉【最低档】`0.1.7-rc.1`（与上面那批同版本，**该版本已有 `stream` 覆盖口**，
+      //     已逐字核对 `lib/types/index.d.ts`）；高档由 `typecheck-host 0.2.0-rc.2` 单独验。
+      //   · `ws` —— **不由宿主提供**（属运行时依赖，走 runtime dep shim）；
+      //     它**不自带类型** ⇒ `@types/ws` 必须在场，否则 `import('ws')` 回落成 any（假绿）。
+      // 🔴 **`ws` 刻意不给 `paths` 条目**（2026-10-16 实测判定）：给 `"ws": ["node_modules/ws"]`
+      //    会让 tsc 解析到**那个 JS 包**（无声明）⇒ `TS7016 Could not find a declaration file`。
+      //    它靠 Node 的常规 `@types/ws` 机制解析（与 `react`／`marked` 等 devDep 同一形态，
+      //    那些也都没有 paths 条目）；且它**与宿主版本无关** ⇒ 在 `typecheck-host` 下无需被改写。
+      "@deepseek-ai/dsh-acp": ["node_modules/@deepseek-ai/dsh-acp"]
     }
   },
   "include": ["src"],
