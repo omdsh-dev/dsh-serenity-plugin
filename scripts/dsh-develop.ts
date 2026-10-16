@@ -246,6 +246,41 @@ function cmdBuild(): void {
     ? `${statSync(join(HOOKS_DIR, 'lib', 'client.js')).size} B`
     : 'N/A'
   console.log(`[dsh-develop] ✓ 构建完成（lib/index.js + lib/client.js ${clientSize}）`)
+
+  // 🔴 2026-10-16（S142 续 147）：**必须补第二半** —— `tsc --emitDeclarationOnly`。
+  //
+  // 为什么（R↓，实测事故形态）：本函数此前只跑 `tsdown`，而 **`tsdown.config.ts` 两个 entry
+  // 都是 `dts: false`**，Node entry 还带 **`clean: true`** ⇒ **每跑一次 build 就先清空 `lib/`、
+  // 只写回 `.js`** ⇒ `lib/*.d.ts` **必然消失，且永不自行回来**。
+  //
+  // ⇒ 后果不是"coverage 红了"这一条，而是**发布物缺类型**：
+  //   `package.json` 声明的 `types: ./lib/index.d.ts` 与 `files[]` 的 `lib/*.d.ts`
+  //   在包内**指向不存在**；而 `verifyTarball()` 的动态核对**只过滤 `.js`**
+  //   （`missingLibJs`，见下）⇒ **类型缺失不被任何门捕获**。
+  //
+  // ⇒ 与 `package.json` 的 `build` 脚本**逐字对齐**（`tsdown … && tsc -p tsconfig.json --emitDeclarationOnly`）：
+  //   两条链必须同一条，否则"我本地绿的"与"发布出去的"是两个东西（同族判据：判据 = 仓库实际状态）。
+  const tscBin = join(REPO_ROOT, 'node_modules', '.bin', 'tsc')
+  const dts = run(tscBin, ['-p', 'tsconfig.json', '--emitDeclarationOnly'], { cwd: HOOKS_DIR, quiet: true })
+  if (dts.status !== 0) {
+    console.error(dts.stdout + dts.stderr)
+    fail(`tsc --emitDeclarationOnly 失败 (exit ${dts.status})——lib/*.d.ts 未产出，中止（不发布缺类型的包）`, 2)
+  }
+  // 自证：清点产物，别只说"跑过了"（判据 = 盘上的文件，不是命令的退出码）
+  // 🔴 **扫描域必须与 `verifyTarball()` 同口径 = 递归全树**（它报的是 `lib/**/*.d.ts`）。
+  //    只数顶层会得到 68，而 tarball 报 111 ⇒ 两个数看着"对不上"，正是"扫描域 ≠ 判据真实边界"
+  //    那族坑（新写读数器必须自证扫描域）。这里手动递归，不依赖 `readdirSync(…,{recursive})`
+  //    的运行时版本支持（本脚本由 bun 直接跑，特性面不假设）。
+  const countDts = (dir: string): number => readdirSync(dir, { withFileTypes: true })
+    .reduce((n, e) => n + (e.isDirectory()
+      ? countDts(join(dir, e.name))
+      : (e.name.endsWith('.d.ts') ? 1 : 0)), 0)
+  const dtsCount = countDts(join(HOOKS_DIR, 'lib'))
+  if (dtsCount === 0) {
+    fail('构建后 lib/ 仍无 .d.ts —— 类型产物未落地，中止', 2)
+  }
+  const jsCount = readdirSync(join(HOOKS_DIR, 'lib')).filter((f) => f.endsWith('.js')).length
+  console.log(`[dsh-develop] ✓ 类型声明已产出（lib/**/*.d.ts ${dtsCount} 个；顶层 js ${jsCount} 个）`)
 }
 
 function readlinkSafe(p: string): string {

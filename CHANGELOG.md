@@ -1,4 +1,110 @@
-## v1.58.0 — 2026-10-15（**CRO 机器绑定：必须指定，否则不运行**）
+## v1.58.1 — 2026-10-16（**面 E（官方 ACP 面）：手机端第一条消息必失败的缺陷已修**）
+
+**性质**：**缺陷修复**（面 E 是**缺省关**的新面；关着时插件行为与此前**完全一致**）。
+**来源**：owner 令 ——「**用 <测试服务器> 里的 docker 容器去测试，测试可以用模型来测功能的完好和正常**」。
+（🔒 引文中的地址已脱敏为 `<测试服务器>` —— 与 `bench/README.md` 的处置同源：**公开面不写内网地址**。）
+
+### 一、修的是什么（**这个缺陷会让手机端第一条消息必然失败**）
+
+面 E 建的 ACP 会话**拿不到模型** ⇒ 第一条 `session/prompt` 必失败，逐字：
+
+    Internal error: turn failed: prompt variable "{{model}}" has no value
+                   for this assembly (section "deployment:persona-prefix")
+
+**根因**（读上游源码定位）：`dsh-acp/lib/index.js` 的 `agentOptions(config)` **只在字段非 `undefined` 时才带上**：
+
+```js
+...config.provider !== void 0 ? { provider: config.provider } : {},
+...config.model    !== void 0 ? { model: config.model }    : {}
+```
+
+我们此前**裸传** `provider: undefined, model: undefined`（读的是环境变量 `SERENITY_ACP_PROVIDER/MODEL`，默认未设）
+⇒ agent **真的没有模型**（不是"回落到默认"）。
+
+### 二、🔴 为什么单测与门禁都抓不到它
+
+`typecheck` ✓ ／ **2812 条单测** ✓ ／ `deploy` 预检 ✓ —— **全绿**。
+而**网页端不中招**（它经 `agent-default-model` 层拿到默认值）⇒ **只有 ACP 这条入口坏**。
+⇒ 症状是「**手机上第一条消息必失败，而本机怎么试都正常**」，属"配置缺省 × 上游条件省略"的**运行时合成形态**，
+**静态面结构性地看不见** —— 只有"干净容器 ＋ 真模型跑一轮"能抓到它。
+
+### 三、修法（读宿主权威出处，不另造真相源）
+
+宿主暴露服务 `ctx.agentDefaultModel.currentSelection()`，其契约逐字写着
+*"Default model selection for Agents created **without an explicit model**"*
+⇒ 这正是"没显式指定时该用什么"的权威出处。新增 `resolveAcpSelection(ctx)`：
+
+- **优先级**：显式环境变量（须 `provider` 与 `model` **成对**）＞ 宿主默认；
+- 🔴 **读取走 `hostInjected`**（不是裸属性读）：cordis 对**未声明 `inject`** 的服务名直接属性读会**抛错**，
+  异常逃逸 ⇒ "先直读、失败回落"的写法**永远走不到回落分支**（v1.31.4 既有实证）；
+- 该服务**刻意不进 `inject`**：它是**可选**的（缺失时退回旧行为），进 `inject` 会把"可选"变"必需"
+  ⇒ 服务缺失则**整个 fiber 挂起**（可选面不得拖垮插件装载）；
+- 解析**在每连接时做一次**：宿主默认模型是可变的（`agent-default-model` 的 Config 是 `volatile`），
+  而 ACP 的 `apply` 本就是"一条连接一个实例"。
+
+### 四、验证（判据 = 隔离根因的对照实验，不是"改完好了"）
+
+| 条件 | 修前 | 修后 |
+|---|---|---|
+| **零环境变量**（原必失败条件） | ❌ 上引逐字 | ✅ **5/5 全绿**（含模型逐字复述） |
+| 设了环境变量 | ✅ 5/5 | ✅ 5/5 |
+| 对照组：网页端同一条 prompt | ✅ 通过 | ✅ 通过 |
+
+### 五、面 E 是什么（本版顺带把 W1~W3 一并交付）
+
+官方 `@deepseek-ai/dsh-acp` 挂进**本进程**（`dsh web` 那条 Cordis 树），让标准 ACP 客户端（Agmente 等）
+经 **WebSocket** 登入本 CCC。三条设计取舍（详见 `src/acp-face.ts` 文件头）：
+
+1. **自持面**（`face-host` 自己的 listener ＋ 自挂 `'upgrade'`），**不借**宿主 `webServer.registerUpgrade`
+   ⇒ 少动一处宿主缝，且与既有三个面同范式、端口独立、拆卸免费；
+2. **不走 `AcpServer`** 而直接调 `dsh-acp` 的 `apply`（前者要一个它不导出的 connector）；
+3. 依赖走**动态 `await import()`**：面**缺省关** ⇒ 关时不加载，缺失时给**可诊断错误**，不让可选面拖垮插件。
+
+⚠️ **安全前提（不许含混）**：本面绑 `0.0.0.0` 而 **ACP 协议本身不做认证**（`dsh-acp` 的 `authenticate` 恒成功）
+⇒ **必须由外部接入层（现为 Cloudflare Access）兜底**。⛔「隧道不归 ACC 管」成立，
+但「因此不需要认证层」**不成立** —— 该前提在源码注释、启动日志与 `status().authNote` **三处**显式写着。
+
+### 六、测试
+
+- **单测**：`tests/acp-face.test.ts` **24 例**（端口表契约／426／真 WS 101 握手／开关起停四态／
+  **模型解析五态**／静态钉），含**变异探针**：把 `currentSelection` 分支改成恒假 ⇒ **2 例红**，
+  且红出的正是**旧缺陷形态**（`{provider: undefined, model: undefined}`）
+  ⇒ 回归钉真能钉住它。全量 `test` = **170 文件 / 2818 例**。
+- **容器端到端**（`bench/`，判据 V17~V21）：真实 `dsh web` ＋ 真模型 ⇒ **全 PASS**，
+  其中 V20 = WS101 → ACP `initialize` → `session/new` → `prompt` → **模型正文逐字复述**
+  （判据取**内容级**，不是"RPC 没报错"——前者才是本轨 D138 立的规矩）。
+
+### 七、同版顺带修的第二个缺陷：**发布物会缺类型**（`.d.ts` 被构建清掉且不回来）
+
+**性质**：**缺陷修复**（影响发布链，不影响运行时代码路径）。
+**怎么发现的**：走发布链时 `coverage` 的隐私自检红 —— `expected 27 to be greater than 100`
+（它扫的是 `npm pack` 口径的**发布面**，而 `package.json` 的 `files[]` 列了 `lib/*.d.ts`）。
+
+**根因（读码 ＋ 两条实测，非推断）**：**MSM 的 `build` 与 `package.json` 的 `build` 不是同一条链**。
+
+| | 内容 |
+|---|---|
+| `package.json` 的 `build` | `tsdown … **&& tsc -p tsconfig.json --emitDeclarationOnly**`（两半） |
+| **MSM `cmdBuild()`** | `typecheck` ＋ `tsdown` **而已 —— 缺后半** |
+
+而 `tsdown.config.ts` 两个 entry 都是 `dts: false`，Node entry 还带 **`clean: true`**
+⇒ **MSM `build` 每跑一次就先清空 `lib/`、只写回 `.js`** ⇒ `lib/*.d.ts` **必然消失，且永不自行回来**。
+
+**为什么门禁抓不到它**：`verifyTarball()` 的动态核对**只过滤 `.js`**（`missingLibJs`）
+⇒ **类型缺失不被任何门捕获**；而 `coverage` 是**唯一**会红的那道 —— 它的红因（隐私自检阈值）
+与真因（发布面缩水）**相隔一层**，从报错文案看不出根因。
+
+⚠️ **若按症状修就会修错**：把 `coverage` 排到 `build` 之后只会让它**稳定地**红（`.d.ts` 不会回来）。
+
+**修法**：`cmdBuild()` 补 `tsc -p tsconfig.json --emitDeclarationOnly`，与 `package.json` 逐字对齐；
+并在构建后**自证清点**（`lib/**/*.d.ts` 为 0 即中止）—— 判据取**盘上的文件**，不是命令的退出码。
+
+**验证**：`build` ⇒ `lib/**/*.d.ts 111 个`；`coverage` **转绿**；`pack-check` **138 文件 / `.d.ts` 111 个**
+（回到既有的 138 基线）。
+
+---
+
+
 
 **性质**：**新机制**（新增一道门；`croEnabled` 总闸与既有投递面**行为不变**）。
 **来源**：owner 令 ——「**CRO 必须指定绑定机器，否则不运行，唤醒器 检查这个**」＋「用 hostname 吧，比较合理」
