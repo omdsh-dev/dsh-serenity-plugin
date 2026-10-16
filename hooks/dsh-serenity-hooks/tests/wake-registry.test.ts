@@ -30,6 +30,7 @@ import {
   type WakeEntry,
 } from '../src/wake-registry.js'
 import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+import { listBoundSessionIds } from '../src/trajectory-bound.js'
 import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/cro.js'
 import { croWakeLogPath } from '../src/cro-log.js'
 import { __resetCroTurnsForTest } from '../src/cro-turns.js'
@@ -391,12 +392,89 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     expect(res.detail).toContain('sessionController')
   })
 
-  it('无绑定记录 ⇒ 报错说明需先 container_trajectory use', async () => {
+  it('无绑定记录 + create 可用 ⇒ **不再报错**，改为自动创建（语义已变，见 🆕 组）', async () => {
     writeSessionDir()
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
     const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(false)
-    expect(res.detail).toContain('.bindings.json')
+    // ⚠️ 2026-10-16 起：无绑定**本身**不再是终局错误（`send-now` 会去建载体）；
+    //    此处 `get()` 全缺 ⇒ 连 sessionController 都没有 ⇒ 仍报错，但**文案改指向 create 不可用**，
+    //    且**照旧告诉调用方 `use` 是另一条路**（不把"没有"说成"做不到"）。
+    expect(res.detail).toContain('sessionController.create')
+    expect(res.detail).toContain('use')
+  })
+
+  // ── 🆕 2026-10-16（owner 令）：目标**没有活跃 dsh 会话** ⇒ 就地创建并注入 ──
+  // 触发条件 = 「无绑定记录」（`.bindings.json` 里一条都没有）——这是**结构性判据**
+  // （`acquireWakeAgent` 直接标出的 `noBinding`），**不是**匹配错误文案（见 D131 的教训）。
+  it('🆕 无绑定 ⇒ **自动创建会话并绑定**，然后照常投递（正文里带"已自动创建"）', async () => {
+    writeSessionDir()
+    // 🔴 夹具补齐（本用例特有）：`appendBound` 靠 `cccRootForCwd` 上溯 `.serenity` 定位 CCC 根，
+    //    而这些用例的 root 原本只是个裸 tmpdir（其余用例都直接手写 `.bindings.json`，绕开了这一步）。
+    //    本用例要让**产品代码自己**去写绑定 ⇒ 夹具必须长成**真 CCC 的样子**（生产里 root 就是 CCC）。
+    writeFileSync(join(root, '.serenity'), 'wake-test\n')
+    const sent: string[] = []
+    const madeAgent = { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } }
+    let created: { cwd?: string } | null = null
+    let resolvedId: string | null = null
+    const ctx = {
+      agents: { get: () => undefined },
+      get: (name: string) => (name === 'sessionController'
+        ? {
+            create: async (req: { cwd?: string }) => { created = req; return { sessionId: 'sess-created' } },
+            resolveAgent: async (id: string) => { resolvedId = id; return { agent: madeAgent } },
+          }
+        : undefined),
+    }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
+    expect(res.ok).toBe(true)
+    // ① 创建用的是 **CCC 根**（不是轨迹目录——那会让会话落进另一个 CCC）
+    expect(created).toEqual({ cwd: root })
+    // ② 拿 agent 走的是刚建出来的那个 id
+    expect(resolvedId).toBe('sess-created')
+    // ③ 绑定**真写进去了**（否则下一条消息还是找不到它 = "建了但永远用不上"）
+    expect(listBoundSessionIds(root, DIR_NAME)).toContain('sess-created')
+    // ④ 回执里明说"自动创建"，且正文照常送达
+    expect(res.detail).toContain('auto-create(sess-created')
+    expect(sent).toHaveLength(1)
+    expect(sent[0]).toContain('给从未激活的轨迹')
+  })
+
+  it('🆕 无绑定但 sessionController.create 缺席 ⇒ 报错（不静默、不误报成功）', async () => {
+    writeSessionDir()
+    const ctx = { agents: { get: () => undefined }, get: () => undefined }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('sessionController.create')
+  })
+
+  it('🆕 create 抛错 ⇒ 报错带原因（不静默吞掉）', async () => {
+    writeSessionDir()
+    const ctx = {
+      agents: { get: () => undefined },
+      get: () => ({ create: async () => { throw new Error('db locked') } }),
+    }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    expect(res.ok).toBe(false)
+    expect(res.detail).toContain('就地创建会话失败')
+    expect(res.detail).toContain('db locked')
+  })
+
+  it('🔴 反侧：**有绑定但冷载入失败** ⇒ 不建新会话（那不是"没载体"，是"载体此刻取不到"）', async () => {
+    writeSessionDir()
+    writeBinding('sess-cold')
+    let createCalled = false
+    const ctx = {
+      agents: { get: () => undefined },
+      get: () => ({
+        create: async () => { createCalled = true; return { sessionId: 'x' } },
+        resolveAgent: async () => { throw new Error('load boom') },
+      }),
+    }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    expect(res.ok).toBe(false)
+    expect(createCalled).toBe(false)
+    expect(res.detail).toContain('冷会话载入失败')
   })
 
   it('目标未命中 ⇒ 报错', async () => {

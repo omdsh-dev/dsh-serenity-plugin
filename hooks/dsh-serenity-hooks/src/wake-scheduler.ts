@@ -30,7 +30,7 @@ import { basename, join } from 'node:path'
 import { existsSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { findSession, sessionsRoot } from './trajectory-ops.js'
-import { listBoundSessionIds } from './trajectory-bound.js'
+import { listBoundSessionIds, appendBound } from './trajectory-bound.js'
 import { evaluateCro, listCroTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from './cro.js'
 import { runningCarriersOf } from './cro-turns.js'
 import { appendCroWakeLog } from './cro-log.js'
@@ -75,6 +75,14 @@ import { PLUGIN_SOURCE } from './message-source.js'
 /** 宿主 sessionController 的最小形态（`resolveAgent`：live 优先，否则 resume） */
 interface HostSessionController {
   resolveAgent?: (sessionId: string) => Promise<{ agent?: Agent; error?: unknown }>
+  /**
+   * 🆕 `send-now` 的「无活跃 dsh 会话 ⇒ 就地建一条」通路。
+   *
+   * 语义逐字取自宿主 `.d.ts`：*"Create or idempotently adopt one ordinary Session."*
+   * —— **idempotently adopt** 是关键：同一 `sessionId` 重复调用**不会**建出第二条，
+   * 且会把已有的那条 adopt 进来 ⇒ 本路径天然可重入，不必自造"先查再建"的竞态窗口。
+   */
+  create?: (request: { cwd?: string; sessionId?: string; agentPreset?: string }) => Promise<{ sessionId?: string; agentPreset?: string }>
 }
 
 /** 投递结果（写回条目的 lastResult；人读） */
@@ -205,7 +213,7 @@ async function acquireWakeAgent(
   ctx: unknown,
   root: string,
   dirName: string,
-): Promise<{ agent: Agent; how: string } | { error: string; notReady?: boolean }> {
+): Promise<{ agent: Agent; how: string } | { error: string; notReady?: boolean; noBinding?: boolean }> {
   const agents = hostAgents(ctx)
   const ids = listBoundSessionIds(root, dirName)
   for (const id of ids) {
@@ -236,7 +244,13 @@ async function acquireWakeAgent(
       return { error: `冷会话载入失败（${id}）: ${String((err as Error)?.message ?? err)}` }
     }
   }
-  return { error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 container_trajectory use 激活过` }
+  return {
+    error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 container_trajectory use 激活过`,
+    // 🆕 结构化判别符（2026-10-16，owner 令）：**不靠匹配错误文案**来分流。
+    //    文案会漂（本仓已多次因"靠一句话给状态命名"翻车，见 D131），而"这条轨迹
+    //    在绑定表里一条记录都没有"是一个**明确的判据结果** ⇒ 必须由产生它的地方显式标出。
+    noBinding: true,
+  }
 }
 
 /** 唤醒消息（唤起即投递正文：身份锚定 + 唤醒信息 + 任务） */
@@ -349,8 +363,32 @@ export async function sendToTrajectory(
 ): Promise<WakeDeliveryResult> {
   const t = resolveWakeTarget(root, target)
   if (!t) return { ok: false, detail: `目标 trajectory 未命中（${target}）` }
-  const acquired = await acquireWakeAgent(ctx, root, t.dirName)
-  if ('error' in acquired) return { ok: false, detail: acquired.error }
+  let acquired = await acquireWakeAgent(ctx, root, t.dirName)
+  let createdNote = ''
+  if ('error' in acquired) {
+    // 🆕 2026-10-16（owner 令，S142）：「目标没有活跃 dsh 会话 ⇒ 直接创建并注入」。
+    //
+    // 🔴 **为什么只给 `send-now` 开这条路（`send-later` 不开）**：
+    //   两者的**语义不同**，因而对"目标不存在"的正当反应也不同 ——
+    //   · `send-now` 是**主动递话**：发起者此刻就想让这条轨迹动起来。若目标从未被 `use` 过
+    //     （`.bindings.json` 里一条记录都没有），**没有载体**正是它的常态，而不是错误。
+    //     此时"建一条再投"是**完成用户意图**；报错等于把"你得先手动 use"的负担丢回发起者。
+    //   · `send-later` 是**预约**：预约的语义前提是"那条轨迹**已经**存在且会被唤醒"。
+    //     给一条**从未存在过**的轨迹预约定时消息，通常意味着**写错了名字** ——
+    //     此时创建载体反而**掩盖**这个错误（用户以为排上了，其实指向一条空轨迹）。
+    //     ⇒ ⛔ **本路径刻意不接进 `deliverWake`**（那是 `send-later` 的通路）。
+    //
+    // ⚠️ **本路径只在"无绑定记录"这一种情形下启用**：其余 error（含 `notReady` 环境未就绪、
+    //    冷载入失败）**一律照原样返回** —— 那些不是"没载体"，而是"载体此刻取不到"，
+    //    建新载体既解决不了问题、还会**制造第二条**（与"只留一条"冲突）。
+    if (!acquired.notReady && acquired.noBinding === true) {
+      acquired = await createAndBindTarget(ctx, root, t.dirName)
+      if ('error' in acquired) return { ok: false, detail: acquired.error }
+      createdNote = `；目标原本无活跃 dsh 会话 ⇒ **已自动创建并绑定**一条（${acquired.how}）`
+    } else {
+      return { ok: false, detail: acquired.error }
+    }
+  }
   const agent = acquired.agent
   const make = (): ReturnType<typeof createUserMessage> =>
     createUserMessage({ content: [{ type: 'text', text: buildSendText(t, message, sender) }], source: PLUGIN_SOURCE })
@@ -363,11 +401,11 @@ export async function sendToTrajectory(
     } catch (err) {
       return { ok: false, detail: `投递失败（${acquired.how}）: ${String((err as Error)?.message ?? err)}` }
     }
-    return { ok: true, detail: `已即时投递 ${t.dirName}（${acquired.how}；目标空闲 ⇒ followup 立即起轮）` }
+    return { ok: true, detail: `已即时投递 ${t.dirName}（${acquired.how}；目标空闲 ⇒ followup 立即起轮）${createdNote}` }
   }
   try {
     agent.steer(make())
-    return { ok: true, detail: `已即时注入 ${t.dirName}（${acquired.how}；目标在跑 ⇒ steer 当场注入当前轮）` }
+    return { ok: true, detail: `已即时注入 ${t.dirName}（${acquired.how}；目标在跑 ⇒ steer 当场注入当前轮）${createdNote}` }
   } catch (err) {
     // fail-safe：宁可排队，不可静默丢消息
     try {
@@ -380,9 +418,74 @@ export async function sendToTrajectory(
     }
     return {
       ok: true,
-      detail: `已投递 ${t.dirName}（${acquired.how}；steer 不可用 ⇒ 退回 followup）: ${String((err as Error)?.message ?? err)}`,
+      detail: `已投递 ${t.dirName}（${acquired.how}；steer 不可用 ⇒ 退回 followup）: ${String((err as Error)?.message ?? err)}${createdNote}`,
     }
   }
+}
+
+/**
+ * 🆕 **给一条「从未被激活过」的轨迹就地建一条 dsh 会话并绑定它**（2026-10-16 owner 令，S142）。
+ *
+ * 何时用：**只有** `send-now` 在 `acquireWakeAgent` 报「无绑定会话记录」时（见该处的判据说明）。
+ *
+ * 三步（顺序不可换）：
+ *   ① `sessionController.create({ cwd: root })` —— 宿主原语，**idempotently adopt**
+ *      ⇒ 重复调用不会建出第二条（不必自造"先查再建"的竞态窗口）。
+ *   ② `resolveAgent(sessionId)` —— 拿到**真 agent**。`create` 只返回 id，不给 agent。
+ *   ③ `appendBound(...)` —— 落绑定。**必须由本函数写**：`listBoundSessionIds` 是
+ *      `acquireWakeAgent` 的唯一选人依据，不写绑定则下一条消息**还是**找不到它
+ *      （那就成了"建了但永远用不上"，比不建更坏）。
+ *
+ * 🔴 **为什么用 `cwd: root` 而不是目标的目录**：会话的 cwd 决定它落在哪个 CCC
+ *    （`cccRootForCwd` 上溯 `.serenity`）。目标轨迹本就住在该 CCC 的 `AGENT_SESSIONS/` 下
+ *    ⇒ 传 CCC 根才让它**进同一个 CCC**；传轨迹目录会让它变成一个**不同 CCC**的会话。
+ *
+ * @returns 命中返回 agent 与取得方式；任一步失败返回**带原因**的 error（不静默、不误报成功）
+ */
+async function createAndBindTarget(
+  ctx: unknown,
+  root: string,
+  dirName: string,
+): Promise<{ agent: Agent; how: string } | { error: string; notReady?: boolean }> {
+  const sc = hostService<HostSessionController>(ctx, 'sessionController')
+  const create = sc?.create
+  if (typeof create !== 'function') {
+    return {
+      error:
+        `目标无活跃 dsh 会话，且 sessionController.create 不可用（绑定 id: 无）` +
+        `——无法就地创建载体；请先对该轨迹执行一次 container_trajectory use`,
+      notReady: true,
+    }
+  }
+  let sessionId = ''
+  try {
+    const out = await create.call(sc, { cwd: root })
+    sessionId = String(out?.sessionId ?? '')
+  } catch (err) {
+    return { error: `就地创建会话失败（${dirName}）: ${String((err as Error)?.message ?? err)}` }
+  }
+  if (!sessionId) return { error: `就地创建会话未返回 sessionId（${dirName}）` }
+  // ② 取 agent（create 只给 id；真 agent 要再解析一次，与冷载入同一条通路）
+  const resolved = sc?.resolveAgent
+  if (typeof resolved !== 'function') {
+    return { error: `会话已建（${sessionId}）但 sessionController.resolveAgent 不可用`, notReady: true }
+  }
+  let agent: Agent | undefined
+  try {
+    const out = await resolved.call(sc, sessionId)
+    agent = out?.agent
+    if (!agent) return { error: `会话已建（${sessionId}）但 resolveAgent 未返回 agent: ${String(out?.error ?? '未知原因')}` }
+  } catch (err) {
+    return { error: `会话已建（${sessionId}）但载入失败: ${String((err as Error)?.message ?? err)}` }
+  }
+  // ③ 落绑定（`appendBound` 需要 `header.id` + `header.cwd`，故此处构造同形对象）
+  const bound = appendBound(
+    { header: { id: sessionId, cwd: root } },
+    'activate',
+    { dirName, mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'), note: 'auto-created by send-now' },
+  )
+  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'})`
+  return { agent, how }
 }
 
 /**

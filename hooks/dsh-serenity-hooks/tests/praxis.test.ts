@@ -55,6 +55,24 @@ describe('praxis（v1.30：eap/neat/cce 三合一；v1.51.5 增 ontology）', ()
     expect(Buffer.byteLength(s, 'utf-8')).toBeGreaterThan(50_000)
   })
 
+  it('🆕 第 7 章（通用技能规范：五层压缩层级）在全文里，且位于第 6 章之后、附录之前', async () => {
+    const v = await (praxisTool as { execute: (a: unknown) => Promise<unknown> }).execute({ section: 'eap' })
+    const s = String(v)
+    // 锚点照旧取**论文里逐字存在**的串（2026-10-16 S142 补章；owner 交来 eap-universal-abstraction 规范）
+    const ch7 = '## 7. EAP作为通用技能规范：五层压缩层级与Neat反向约束协议'
+    expect(s).toContain(ch7)
+    expect(s).toContain('Tier 5 表面与产物层')
+    expect(s).toContain('The Law of Adjacent Layer Transitions')
+    expect(s).toContain('第3步：结构性征询（高杠杆提问）')
+    // 次序判据：7 在 6 之后、附录之前（章序漂了 ⇒ 这里的相对位置会当场红）
+    const i6 = s.indexOf('## 6. EAP的逻辑证明')
+    const i7 = s.indexOf(ch7)
+    const iApp = s.indexOf('## 附录：EAP的公理化可能性（可选）')
+    expect(i6).toBeGreaterThan(-1)
+    expect(i7).toBeGreaterThan(i6)
+    expect(iApp).toBeGreaterThan(i7)
+  })
+
   it('section=neat → 返回 Neat 协议内容（四铁律/五层）', async () => {
     const v = await (praxisTool as { execute: (a: unknown) => Promise<unknown> }).execute({ section: 'neat' })
     expect(String(v)).toContain('Neat Design Collaboration Protocol')

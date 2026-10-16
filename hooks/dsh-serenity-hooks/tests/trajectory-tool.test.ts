@@ -177,16 +177,44 @@ describe('container_trajectory：create', () => {
 
   it('issue 会话豁免 summary（编号固定派生、无概括语义）', async () => {
     await run({ action: 'create', issue: 'apaas-1' })
-    // 真建了目录 + 写了 create 审计绑定（绑定不改当前载体）
+    // 真建了目录 + 写了绑定。🆕 2026-10-16（owner 令）：**无绑定 ⇒ 自动激活**（故 action=activate，不再是 create）
     expect(existsSync(join(ccc, BINDINGS_REL_PATH))).toBe(true)
-    expect(bindings().sessions['dsh-1']?.action).toBe('create')
-    expect(bindings().sessions['dsh-1']?.note).toContain('binding unchanged until explicit use')
+    expect(bindings().sessions['dsh-1']?.action).toBe('activate')
+    expect(bindings().sessions['dsh-1']?.note).toContain('auto-activated on create (no prior binding)')
   })
 
   it('desc + summary ⇒ 真建目录，目录名含日期与 desc 片段', async () => {
     await run({ action: 'create', desc: 'hello world', summary: '概' })
     const dirs = readdirSync(join(ccc, 'AGENT_SESSIONS'))
     expect(dirs.some((d) => d.includes('hello'))).toBe(true)
+  })
+
+  // ── 🆕 2026-10-16（owner 令）：create 的分支语义由「有无绑定」决定 ──
+  // 两条路径**互为对照**：同样的 create，只因"当前有没有绑定"而行为不同。
+  it('🆕 路径①：**无绑定** ⇒ 直接激活（写 activate 绑定 + 正文告知已自动激活）', async () => {
+    writeSession(A_DIR)
+    const out = (await run({ action: 'create', desc: 'fresh', summary: '概' })) as string
+    expect(out).toContain('已自动激活')
+    expect(out).toContain('此前**无绑定**')
+    const rec = bindings().sessions['dsh-1']
+    expect(rec?.action).toBe('activate')
+    expect(rec?.note).toContain('auto-activated on create (no prior binding)')
+    // 绑定指向**新**轨迹（不是 A_DIR）
+    expect(rec?.dirName).toContain('fresh')
+  })
+
+  it('🆕 路径②：**已有绑定** ⇒ 只建不夺（绑定仍指原轨迹）+ 提示用 send-now 激活', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'use', name: 'S900', summary: '概' }) // 先建立绑定
+    const before = bindings().sessions['dsh-1']?.dirName
+    expect(before).toBe(A_DIR)
+
+    const out = (await run({ action: 'create', desc: 'later-work', summary: '概' })) as string
+    expect(out).toContain('未')
+    expect(out).toContain('send-now')
+    expect(out).toContain(before as string) // 正文点名当前绑定是谁
+    // 🔴 核心断言：**绑定没被夺走**（这正是 U6 要保的行为，不能被本次改动破坏）
+    expect(bindings().sessions['dsh-1']?.dirName).toBe(A_DIR)
   })
 })
 

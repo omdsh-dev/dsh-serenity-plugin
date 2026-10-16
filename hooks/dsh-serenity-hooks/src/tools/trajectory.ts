@@ -222,36 +222,74 @@ function renderText(value: unknown): ContentBlock[] {
 export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
   name: 'container_trajectory',
-  description:
-    'Trajectory (AGENT_SESSIONS/ — the persistent body of a trajectory; the dsh conversation is only its rebuildable carrier). ' +
-    'Lifecycle + delivery: list (inventory with stats and anomaly marks) / show (read one SESSION.md) / create / use (activate for this conversation, with inline integrity check) / rebuild (clear-and-rebuild the current conversation in place, Ship of Theseus) / send-now (deliver ONE message to a trajectory RIGHT NOW — live: injected immediately; not live: cold-resumed, i.e. equivalent to a direct wake; returns a synchronous receipt) / send-later (schedule ONE message to any trajectory at a future instant — fire-and-forget: no receipt, no recall, no panel) / cro-guide (the CRO programming guide: how to give THIS trajectory its own program that decides when it should be woken). ' +
-    'create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars). ' +
-    'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound trajectory. ' +
-    'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self). ' +
-    'send-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message. ' +
-    'send-now requires target + message. It delivers IMMEDIATELY (never queued behind the current turn): a busy target is steered mid-turn so it reads the message in the CURRENT turn, and an idle target starts a turn right away. Its receipt means the message was injected into the target (it does NOT mean the target ran or replied). ' +
+  // 🔴 本描述按 **EAP 五层**组织（owner 令 2026-10-16：「这个 tool 的 description 也用 eap 修订一遍」）。
+  //    为什么用**数组 join** 而不是一长串 `+`：每个元素 = **一个层**，层的边界在源码里可见；
+  //    旧写法把身份/动作/参数平铺成一条流水，读的人必须自己重建结构（低 E）。
+  //    ⚠️ 相邻字符串字面量在 JS 里**不会**自动拼接（那不是 JS 语法）——必须显式 join 或 `+`。
+  description: [
+    // ── Tier 1 · 公理与边界：这是什么、**什么不是** ──
+    'container_trajectory — one trajectory: its persistent body (SESSION.md) + its timeline.',
+    'A trajectory is NOT the conversation: SESSION.md is the durable body and never moves;',
+    'the dsh conversation is only its rebuildable carrier (Ship of Theseus — the carrier is replaced, the trajectory continues).',
+    // ── Tier 2 · 本体：动作按**效果**分三组（分组本身就是契约：一眼看出"这个动作改不改我的绑定"）──
+    'ACTIONS, grouped by EFFECT (read the grouping before picking one):',
+    '(A) LIFECYCLE — changes which trajectory THIS conversation is bound to:',
+    'list (inventory + stats + anomaly marks) / show (read one SESSION.md) / create (make a NEW trajectory) /',
+    'use (bind THIS conversation to an existing trajectory; inline integrity check — silent when fine, problems reported as hints, never errors) /',
+    'rebuild (clear-and-rebuild THIS conversation in place).',
+    '(B) DELIVERY — sends ONE message to ANOTHER trajectory; your own binding is unchanged:',
+    'send-now (deliver RIGHT NOW) / send-later (deliver at ONE future instant).',
+    '(C) REFERENCE — cro-guide (how to give THIS trajectory its own program that decides when it should be woken).',
+    // ── Tier 3 · 拓扑：动作之间的关系 = 选择规则（旧文案只列了"做什么"，没说"该选哪个"）──
+    'HOW TO CHOOSE (a rule, not a guess):',
+    'not yet bound + starting new work ⇒ create — with no prior binding it activates immediately, so the new trajectory has a carrier at once.',
+    'already bound + recording a separate future line ⇒ create — it does NOT steal your binding (you stay on the current trajectory);',
+    'activate the new one when you want it by sending it a message.',
+    'want THIS conversation to move to another trajectory ⇒ use (refuses when it would orphan the current binding; --force overrides).',
+    'want to poke another trajectory ⇒ send-now. Its target needs NO prior setup:',
+    'if the target has no live dsh session, one is created and bound automatically, and your message is injected into it.',
+    // ── Tier 4 · 动力学与语义边界：回执**证明了什么、没证明什么** ──
+    'RECEIPTS (read no more than is written): send-now returns a synchronous receipt meaning exactly "injected / turn started" —',
+    'NEVER "the target ran or replied"; to prove the target actually moved, read its SESSION.md.',
+    'It never queues behind the current turn: a busy target is steered mid-turn (read in the CURRENT turn), an idle target starts a turn at once.',
+    'send-later is fire-and-forget by design: no receipt, no recall, no panel.',
+    'ASYMMETRY (deliberate — the two differ in whether a missing target is normal): send-now creates a target on demand,',
+    'because sending to a never-used trajectory is a legitimate intent; send-later does NOT,',
+    'because scheduling for a trajectory that has never existed is almost always a mistyped name — auto-creating would hide that error behind an empty trajectory.',
+    // ── Tier 5 · 表面：逐参数前置条件 ──
+    'PARAMETERS: create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars).',
+    'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound trajectory.',
+    'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self).',
+    'send-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message.',
+    'send-now requires target + message.',
     'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
+  ].join(' '),
   parameters: {
     action: {
       type: 'string',
       enum: [...TRAJECTORY_ACTIONS],
       required: true,
-      description:
-        'Subcommand: list (inventory + stats + anomaly marks) / show (S### or dir name or fuzzy keyword) / create (--desc or --issue) / ' +
-        'use (activate context; inline integrity check — pass silent, problems reported as hints, not errors) / ' +
-        'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note) / ' +
-        'send-now (deliver one message RIGHT NOW: live target injected immediately, non-live cold-resumed like a direct wake; returns a synchronous receipt) / ' +
-        'send-later (one future instant + one message, delivered to target trajectory) / ' +
-        'cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot)',
+      description: [
+        'Subcommand — grouped by effect.',
+        'LIFECYCLE (changes THIS conversation\'s binding):',
+        'list (inventory + stats + anomaly marks) / show (S### or dir name or fuzzy keyword) /',
+        'create (new trajectory; activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
+        'use (activate context for THIS conversation; inline integrity check — pass silent, problems reported as hints, not errors) /',
+        'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note).',
+        'DELIVERY (sends one message to ANOTHER trajectory; your binding is unchanged):',
+        'send-now (deliver RIGHT NOW; the target needs no prior setup — if it has no live session, one is created and bound automatically) /',
+        'send-later (one future instant + one message; fire-and-forget, and it does NOT auto-create a target).',
+        'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot)',
+      ].join(' '),
     },
     name: { type: 'string', description: 'show/use session identifier (S### or dir name or keyword)' },
     note: { type: 'string', description: 'rebuild: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
-    desc: { type: 'string', description: 'create short description (any language, ≤5 words; mutually exclusive with issue)' },
-    issue: { type: 'string', description: 'create ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
-    goal: { type: 'string', description: 'create one-sentence goal (optional)' },
+    desc: { type: 'string', description: 'create: short description (any language, ≤5 words; mutually exclusive with issue)' },
+    issue: { type: 'string', description: 'create: ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
+    goal: { type: 'string', description: 'create: one-sentence goal (optional)' },
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
     force: { type: 'boolean', description: 'use: allow switching away from the currently-bound trajectory (binding guard override)' },
-    dryRun: { type: 'boolean', description: 'create preview mode (no actual changes)' },
+    dryRun: { type: 'boolean', description: 'create: preview mode (no actual changes)' },
     target: { type: 'string', description: 'send-later/send-now: target trajectory (S### or AGENT_SESSIONS directory name)' },
     at: { type: 'string', description: 'send-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
     message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target trajectory' },
@@ -290,22 +328,52 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
           dryRun: isDryRun,
         })
         const message = result.message
-        // U6（方案 v1.0）：create 保留当前绑定——不再 rename 当前 dsh 会话为新目录
-        // （v1.25.11 旧行为：create 后立即改名夺绑定——长会话中途误 create 即被夺走）。
-        // 新会话仅在后续显式 `session use` 时才绑定；此处只 append create bound 审计记录。
-        if (!isDryRun) {
-          appendBound(
-            agentDshSession(exec),
-            'create',
-            {
-              dirName: result.dirName,
-              mdPath: join(result.sessionPath, 'SESSION.md'),
-              sessionId: result.sessionId,
-              note: 'created (binding unchanged until explicit use)',
-            },
-          )
+        if (isDryRun) return message
+
+        // 🆕 2026-10-16（owner 令，S142）：**create 的分支语义由"有无绑定"决定**。
+        //
+        // 🔴 **为什么必须分开**（这是两条不同的意图，此前被同一个动作混在一起）：
+        //   · **无绑定** ⇒ 调用方开着一条尚未归属任何轨迹的会话，`create` 的意图**就是**"从这里开始"。
+        //     若仍只建不绑，调用方**必须再敲一次 `use`**，否则新轨迹没有任何载体
+        //     ⇒ 后续 `send-now`/唤醒全部报"无绑定会话记录"（本仓已实测过同族形态）。
+        //   · **已有绑定** ⇒ 调用方**正在**某条轨迹上工作，`create` 多半是"顺手记一件将来的事"。
+        //     此时若夺走绑定，**当前轨迹被静默抛弃**（v1.25.11 旧行为正是如此，故 U6 收回）。
+        //
+        // ⇒ 判据 = `currentBoundDirName`（**持久化 bound 优先**，无则回落内存 active）。
+        const scope = agentScope(exec)
+        const priorBound = currentBoundDirName(exec, scope)
+
+        if (priorBound === null) {
+          // ── 路径①：无绑定 ⇒ 直接激活（等价于紧接着调了一次 `use`）──
+          // 复用 `useSession` 而非自己写绑定：它同时做三件必须一起做的事
+          //   （写内存激活态 / 产出 SESSION CONTEXT 文本 / 给出 dirName+mdPath），
+          // 自己拼一遍就是**第二份会漂的实现**（单真相源纪律）。
+          const active = useSession(root, result.dirName, scope)
+          const info = getActiveSessionInfo(scope)
+          if (info) renameDshSessionForActive(ctx, exec, info, args.summary)
+          const dsh = agentDshSession(exec)
+          if (dsh && info) {
+            appendBound(dsh, 'activate', {
+              dirName: info.dirName,
+              mdPath: info.mdPath,
+              sessionId: info.sessionId,
+              note: 'auto-activated on create (no prior binding)',
+            })
+          }
+          return [
+            message,
+            `✓ 已自动激活（此前**无绑定**）：${active.dir} —— 后续工作写回该轨迹的 SESSION.md。`,
+            `  （判据：create 前无任何绑定 ⇒ 激活；有绑定则只建不夺，见下。）`,
+          ].join('\n')
         }
-        return message
+
+        // ── 路径②：已有绑定 ⇒ 只建不夺 ＋ 显式告知"怎么激活它"──
+        return [
+          message,
+          `⚠ 本轨迹【未】被激活 —— 当前已绑定 ${priorBound}，保绑定优先（不夺走你正在用的轨迹）。`,
+          `  要激活它（并在它名下开一条会话）：用 container_trajectory send-now 向 ${result.dirName} 投一条消息 ——`,
+          `  目标若没有活跃 dsh 会话，会自动创建一条并把「使用提示词 ＋ 你的消息」一并注入。`,
+        ].join('\n')
       }
       case 'use': {
         if (!args.name) throw new Error('use requires name (S### or directory name)')
