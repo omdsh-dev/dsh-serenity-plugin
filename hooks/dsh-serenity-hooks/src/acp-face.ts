@@ -58,6 +58,7 @@ import type { Duplex } from 'node:stream'
 import type { AcpConfig } from '@deepseek-ai/dsh-acp'
 import type { WebSocket, WebSocketServer } from 'ws'
 import { startFace, faceActive, facePort, stopFace, type FaceHandle } from './face-host.js'
+import { hostInjected } from './host/access.js'
 import { FACE_PORTS } from './ports.js'
 import { readSimpleSettings, SERENITY_SETTINGS_NS } from './settings-section.js'
 
@@ -75,6 +76,16 @@ const ACP_HOST = FACE_PORTS.acp.host ?? '127.0.0.1'
  *    不是"我们觉得它需要什么"。⇒ 它升版改了 `inject`，这里要跟着改（列为**跨版本注意点**）。
  */
 const ACP_REQUIRED_SERVICES = ['agents', 'llm', 'sessionPersistence', 'sessions'] as const
+
+/**
+ * 额外**读取**的服务（`agentDefaultModel`）—— 与上面那份 `inject` **分开**，理由：
+ * ① 那份是**照抄 `dsh-acp` 自己的 `inject`**（少一个就在它内部抛错），**不该混入我们的需求**；
+ * ② 本项是**可选**的（服务缺失时退回旧行为，见 `resolveAcpSelection`）⇒ 让它进 `inject`
+ *    会把"可选"变成"必需"（服务缺失 ⇒ 整个 fiber 挂起）。
+ * ⚠️ 我们自己的插件 `inject` 里**也没有** `agentDefaultModel`（那是宿主选择面，不是我们的依赖）
+ *    ⇒ 这里**用可选读取**（`ctx.get?.(...)` 语义），**不靠 inject**。
+ */
+const ACP_OPTIONAL_SERVICES = ['agentDefaultModel'] as const
 
 export function acpFaceActive(): boolean {
   return faceActive(FACE_ACP)
@@ -316,10 +327,14 @@ export async function startAcpFace(ctx: Context): Promise<FaceHandle> {
             // `scoped` 收窄成真 `Context`：`dshAcp.apply` 要的就是它 ——
             // 这是 D111 那行 `import type` 逼出来的（手写形状下它是 `unknown`，检查被绕开）。
             apply: (scoped: Context) => {
+              // 🔴 模型解析必须**在每连接时**做（而不是启动时缓存）：宿主默认模型是
+              // **可变的**（`agent-default-model` 的 Config 是 `volatile` —— 用户在界面上换模型就变），
+              // 而 ACP 的 `apply` 是"一连接一实例"⇒ 每连接解析一次正合适。
+              const sel = resolveAcpSelection(scoped)
               dshAcp.apply(scoped, {
                 stream,
-                provider: readAcpProvider(),
-                model: readAcpModel(),
+                provider: sel.provider,
+                model: sel.model,
               })
             },
           })
@@ -392,6 +407,65 @@ function readAcpProvider(): string | undefined {
 /** ACP 会话用的 model（同上） */
 function readAcpModel(): string | undefined {
   return process.env.SERENITY_ACP_MODEL || undefined
+}
+
+/**
+ * 解析 ACP 会话该用的 `{provider, model}`。
+ *
+ * ## 🔴 为什么必须有这个函数（2026-10-16 容器实测抓出的**真缺陷**）
+ *
+ * 早先我们是**裸传** `provider: readAcpProvider(), model: readAcpModel()` —— 而它们读的是
+ * **环境变量**，默认**未设** ⇒ 传下去就是 `undefined`。后果**不是"用默认模型"**：
+ * 上游 `dsh-acp` 的 `agentOptions()`（`lib/index.js:1356-1361`）**只在字段非 undefined 时才带上**：
+ * ```js
+ * ...config.provider !== void 0 ? { provider: config.provider } : {},
+ * ...config.model    !== void 0 ? { model: config.model }    : {}
+ * ```
+ * ⇒ **我们传 undefined，agent 就真的没有模型** ⇒ 第一条 `session/prompt` 必失败，逐字报：
+ * `Internal error: turn failed: prompt variable "{{model}}" has no value for this assembly
+ *  (section "deployment:persona-prefix")`。
+ *
+ * ⚠️ **网页端不中招**（它经 `agent-default-model` 层拿到默认值）⇒ **只有 ACP 这条入口坏** ——
+ * 也就是说：**手机上第一条消息必然失败，而本机怎么试都正常**。
+ * 🔴 这个缺陷 **typecheck ／ 2812 条单测 ／ deploy 预检 全绿**（它是运行时合成形态，
+ * 静态面结构性地看不见）⇒ **只有"容器 ＋ 真模型"那一跑能抓到它**。
+ *
+ * ## 修法 = **读宿主自己的默认模型服务**（不另造真相源）
+ *
+ * 宿主暴露服务 `ctx.agentDefaultModel.currentSelection()`，其契约逐字写着
+ * *"Default model selection for Agents created **without an explicit model**"*
+ * （`dsh-agent-default-model/lib/types/index.d.ts`）—— 这正是"没显式指定时该用什么"的**权威出处**。
+ * ⇒ 我们只是**把它转交给 ACP**，不引入第二套缺省。
+ *
+ * 优先级（**显式 > 宿主默认**）：`SERENITY_ACP_PROVIDER/MODEL` 环境变量（调试用）＞ 宿主默认。
+ * ⚠️ **一处如实标注的弱化**：这里**不打日志**（每次连接都解析一次，打日志会刷屏）；
+ * 若宿主服务缺失，**退回"两个都 undefined"＝旧行为**（即那条已知会失败的形态）——
+ * 而不是静默编一个模型。⇒ 副作用是"没有默认模型时仍会失败"，但那**与宿主自身缺配置时的行为一致**。
+ *
+ * 🔵 **公开导出**（而非模块私有）：它是一个**纯函数 ＋ 有独立契约**的单元（本仓同类先例 =
+ * `host/access.ts` 的一组读取器），且**那个真缺陷正是在它这一层**（裸传 undefined）——
+ * 回归钉必须能**直接钉住它**，而不是隔着 WS 握手去间接观察（那样测不出"取到了什么"）。
+ */
+export function resolveAcpSelection(ctx: Context): { provider?: string; model?: string } {
+  const envProvider = readAcpProvider()
+  const envModel = readAcpModel()
+  // 显式给了（且成对）⇒ 用它；只给一半视为不完整，继续走宿主默认
+  if (envProvider && envModel) return { provider: envProvider, model: envModel }
+
+  try {
+    // 🔴 必须走 `hostInjected`（**不是**裸属性读）：本仓 v1.31.4 实证 —— 真实 cordis 的
+    //    Context 是 Proxy，对**未经 `inject` 声明**的服务名直接属性读会**抛错**
+    //    （`cannot get property "<name>" without inject`），异常会逃逸 ⇒ 静默回落永远走不到。
+    //    而 `agentDefaultModel` 正是"我们**没**声明 inject"的（见 ACP_OPTIONAL_SERVICES 注释）。
+    const svc = hostInjected<{
+      currentSelection?: () => { provider?: string; model?: string } | undefined
+    }>(ctx, 'agentDefaultModel')
+    const sel = svc?.currentSelection?.()
+    if (sel?.provider && sel?.model) return { provider: sel.provider, model: sel.model }
+  } catch {
+    /* 服务缺失/契约变化 ⇒ 退回旧行为（不抛：本面是可选面，不得拖垮插件） */
+  }
+  return { provider: envProvider, model: envModel }
 }
 
 /**

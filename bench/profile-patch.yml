@@ -58,3 +58,12 @@
   name: "@shgroup/dsh-serenity-hooks"
   config:
     diagramEnabled: true
+    # ── 第四条目（2026-10-16）：把**面 E（官方 ACP）打开** ──────────────────────
+    # 为什么必须在这里开（而不是等容器里的模型去拨面板）：面 E 是**缺省关**的面，
+    # 关时 `registerAcpFace` 的 sync 直接 return ⇒ 容器里**根本没有监听器** ⇒ A1~A5 全组无从谈起。
+    # 🔴 **键名是 `acpFaceEnabled`，不是 `acpEnabled`** —— 后者是**已退役旧面 E（3100）**的名字，
+    #    现被静默忽略（本仓 `tests/config-volatile.test.ts` 有独立的"旧名不得复活"回归钉）。
+    #    写错键名的症状 = 面永远起不来，而**没有任何报错**（只会在 A1 红，且原因看起来像"代码坏了"）。
+    # 🔴 本面绑 `0.0.0.0`（端口表 `FACE_PORTS.acp.host`，owner Q3 裁决）—— 在**容器里**这没有暴露问题
+    #    （容器网络隔离），这也正是"面 E 的生产形态只能在测试台里验"的原因。
+    acpFaceEnabled: true

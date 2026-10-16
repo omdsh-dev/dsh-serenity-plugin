@@ -64,6 +64,10 @@ COPY v8-client-check.mjs /usr/local/bin/v8-client-check.mjs
 COPY v8b-browser-check.mjs /usr/local/bin/v8b-browser-check.mjs
 # V8c 探针（**元素级**证据：容器内起 chromium＋CDP，点开设置面板后 querySelector 断言我方 UI）
 COPY v8c-cdp-panel-check.mjs /usr/local/bin/v8c-cdp-panel-check.mjs
+# 🆕 V20 探针（**面 E / 官方 ACP 端到端**）：真 WS 101 → ACP initialize → session/new →
+#    session/prompt → **断言模型正文逐字复述**（内容级，不是"RPC 没报错"）。
+#    ⚠️ 它 import 容器内宿主自带的 ws（`/root/.dsh/profiles/node_modules/ws`）—— 与面 E 同源。
+COPY acp-face-check.mjs /usr/local/bin/acp-face-check.mjs
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh
 
 WORKDIR /ccc

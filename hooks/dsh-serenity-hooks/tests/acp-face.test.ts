@@ -34,6 +34,7 @@ import {
   acpFaceEnabled,
   acpFaceStatus,
   registerAcpFace,
+  resolveAcpSelection,
 } from '../src/acp-face.js'
 import { stopAllFaces } from '../src/face-host.js'
 import { FACE_PORTS } from '../src/ports.js'
@@ -245,11 +246,81 @@ describe('🔴 面 E 接线（W3）：开关真能起停 —— 本轮实测的�
       on: (name: string) => { registered.push(name) },
     }
     registerAcpFace(ctx as never)
-    // 真事件在场（v1.51.1 实测：面板拨开关只改配置、不重跑 apply ⇒ 必须靠事件）
+    // 真事件在场（v1.51.1 实测：面板拨配置不重跑 apply ⇒ 必须靠事件）
     expect(registered).toContain('settings/document-updated')
     // 兜底两条也在
     expect(registered).toContain('agent/created')
     expect(registered).toContain('session/created')
+  })
+})
+
+describe('🔴 面 E 的模型解析（2026-10-16 容器实测抓出的真缺陷的回归钉）', () => {
+  /**
+   * 缺陷回顾（本组的由来，别删）：我们曾**裸传** `provider: undefined, model: undefined`
+   * ⇒ 上游 `dsh-acp` 的 `agentOptions()` 在字段 undefined 时**整个省掉**该键
+   * ⇒ agent 真的没有模型 ⇒ 第一条 prompt 必失败（`{{model}} has no value`）。
+   * ⚠️ 它 **typecheck ／ 2812 条单测 ／ deploy 预检全绿**，只有容器里的真模型那一跑能抓到。
+   * ⇒ 本组钉住"缺省时**必须**从宿主默认模型服务取"，防它再退化回 undefined。
+   */
+  const OLD = { SERENITY_ACP_PROVIDER: process.env.SERENITY_ACP_PROVIDER, SERENITY_ACP_MODEL: process.env.SERENITY_ACP_MODEL }
+  afterEach(() => {
+    // 环境变量是**进程级**的 ⇒ 必须复位（否则跨用例泄漏，本仓既有纪律）
+    if (OLD.SERENITY_ACP_PROVIDER === undefined) delete process.env.SERENITY_ACP_PROVIDER
+    else process.env.SERENITY_ACP_PROVIDER = OLD.SERENITY_ACP_PROVIDER
+    if (OLD.SERENITY_ACP_MODEL === undefined) delete process.env.SERENITY_ACP_MODEL
+    else process.env.SERENITY_ACP_MODEL = OLD.SERENITY_ACP_MODEL
+  })
+
+  it('🔴 环境变量未设 ⇒ 从 `ctx.agentDefaultModel.currentSelection()` 取（**不许**给出 undefined）', () => {
+    delete process.env.SERENITY_ACP_PROVIDER
+    delete process.env.SERENITY_ACP_MODEL
+    const sel = resolveAcpSelection({
+      get: (n: string) => (n === 'agentDefaultModel'
+        ? { currentSelection: () => ({ provider: 'host-default-p', model: 'host-default-m' }) }
+        : undefined),
+    } as never)
+    // 这条断言就是那个缺陷的回归钉：旧实现下两个字段都是 undefined
+    expect(sel).toEqual({ provider: 'host-default-p', model: 'host-default-m' })
+  })
+
+  it('显式环境变量优先于宿主默认（**显式 > 缺省**）', () => {
+    process.env.SERENITY_ACP_PROVIDER = 'env-p'
+    process.env.SERENITY_ACP_MODEL = 'env-m'
+    const sel = resolveAcpSelection({
+      get: () => ({ currentSelection: () => ({ provider: 'host-p', model: 'host-m' }) }),
+    } as never)
+    expect(sel).toEqual({ provider: 'env-p', model: 'env-m' })
+  })
+
+  it('宿主默认服务缺失 ⇒ 退回旧行为（两个 undefined），**不抛**', () => {
+    delete process.env.SERENITY_ACP_PROVIDER
+    delete process.env.SERENITY_ACP_MODEL
+    const sel = resolveAcpSelection({ get: () => undefined } as never)
+    expect(sel).toEqual({ provider: undefined, model: undefined })
+  })
+
+  it('🔴 宿主服务读取**抛错**时也不炸（cordis 对未声明 inject 的服务名会抛 —— 本仓 v1.31.4 实证）', () => {
+    delete process.env.SERENITY_ACP_PROVIDER
+    delete process.env.SERENITY_ACP_MODEL
+    const sel = resolveAcpSelection({
+      get: () => { throw new Error('cannot get property "agentDefaultModel" without inject') },
+    } as never)
+    expect(sel).toEqual({ provider: undefined, model: undefined })
+  })
+
+  it('只给一半环境变量（provider 有、model 无）⇒ 视为不完整，继续走宿主默认', () => {
+    process.env.SERENITY_ACP_PROVIDER = 'env-p'
+    delete process.env.SERENITY_ACP_MODEL
+    const sel = resolveAcpSelection({
+      get: () => ({ currentSelection: () => ({ provider: 'host-p', model: 'host-m' }) }),
+    } as never)
+    expect(sel).toEqual({ provider: 'host-p', model: 'host-m' })
+  })
+
+  it('🔴 静态钉：接线处**不许**再裸传 `readAcpProvider()`（防回退到缺陷形态）', async () => {
+    const code = stripComments(await readSrc('acp-face.ts'))
+    expect(code).not.toContain('provider: readAcpProvider()')
+    expect(code).toContain('resolveAcpSelection(')
   })
 })
 

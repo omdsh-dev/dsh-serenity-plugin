@@ -347,6 +347,95 @@ else
     "读不到 $DIAG_CLIENT（插件没装进 profile？）"
 fi
 
+# ── V17~V21 🔴 面 E（官方 ACP 面）在**真实宿主进程内**端到端可用（2026-10-16）──
+# 为什么这一组必须存在（R↓）：面 E 是**缺省关**的对外面，而"默认关"的代码**没有任何日常路径会碰到它**
+#   ⇒ 它坏掉的形态是**静默**的。本轮实测就抓到一次：`startAcpFace` 写好了却**没有任何调用点**
+#   （W3 未接线）⇒ 拨开关**永远起不来**，而 typecheck 与全部单测**全绿**。
+#   ⇒ 单测能验"函数对不对"，**验不了**"开关落地 → 监听器起来 → 真能握手 → 模型真答完"这条链。
+#
+# 🔵 判据形态**全部取自实测样本**（2026-10-16 本机 `ss -ltnp` ＋ `alive` 读数），不是猜的：
+#   · 监听     = `ss -ltnp` 里出现 `:3200`（本面端口取自集中端口表 `FACE_PORTS.acp`）
+#   · 启动痕迹 = 宿主日志里 `✓ 面 E（官方 ACP）`（`acp-face.ts` 的启动行，**只有真起来才打**）
+#   · 握手     = 真实 WS 客户端能完成 101（**强证据**：只判"端口在听"是弱证据 ——
+#                 端口开着而 `'upgrade'` 没接上也满足它）
+#   · 协议     = ACP `initialize` 拿回 `agentInfo`（这才证明对面是**真 ACP**，不是任意 WS 端点）
+#   · 模型     = `session/new` 拿到 sessionId ＋ `session/prompt` 收束（端到端真答完）
+#
+# ⚠️ **与 `acp-selftest` 的分工（别混）**：那件验的是 **stdio 那条路**（起 `dsh --profile acp` ＋ 桥，
+#    跑在远端 docker，**不在本进程**）；本组验的是 **web 进程内**那条路（`dsh web` ＋ 本插件自持面）
+#    —— 这正是 owner 2026-10-15 裁定的目标形态（D136/D137），也是**产品形态**。
+#    两条路**互补不重叠**，故判据不重复。
+ACP_PORT_EXPECT=${ACP_PORT_EXPECT:-3200}
+acp_face_on=$(grep -c 'acpFaceEnabled: true' /root/.dsh/profiles/web/cordis.patch.yml 2>/dev/null || true)
+
+# V17 装配面：开关真的落到了部署层（少它则面根本不注册 ⇒ 后面全组无从谈起）
+check V17 "面 E 开关落在部署层（profile patch 含 acpFaceEnabled: true）" \
+  "$([ "${acp_face_on:-0}" -gt 0 ] && echo 0 || echo 1)" \
+  "命中 ${acp_face_on:-0} 处（⚠️ 键名须是 acpFaceEnabled；写成旧名 acpEnabled 会**静默无效**）"
+
+# V18 🔴 面**真的在监听**（端口级证据；也是 owner「0.0.0.0 监听」那条裁决的机械落点）
+# ⚠️ **实测纠正（2026-10-16 首跑）**：首版用 `ss -ltn` —— 而 `node:22-bookworm-slim` 镜像里
+#    **没有 `ss`**（`bash: ss: command not found`）⇒ 该判据会**恒报 FAIL**，
+#    而症状看起来像"面没起来"（**读数器坏了被误读成被测对象坏了** —— 本轨高频坑，这次又踩）。
+#    ⇒ 改用 **node 自带 `net` 做一次真连接**（node 必然在场，且"能连上"比"表里有行"更接近语义）。
+if command -v node >/dev/null 2>&1; then
+  acp_conn=$(node -e "
+    const s=require('net').connect(${ACP_PORT_EXPECT},'127.0.0.1');
+    s.on('connect',()=>{console.log('OPEN');s.destroy();process.exit(0)});
+    s.on('error',e=>{console.log(e.code||'ERR');process.exit(0)});
+    setTimeout(()=>{console.log('TIMEOUT');process.exit(0)},4000);
+  " 2>&1 | tail -1)
+else
+  acp_conn="NO_NODE"
+fi
+check V18 "面 E 真的在监听 :${ACP_PORT_EXPECT}（真连接探测，非查表）" \
+  "$([ "${acp_conn:-}" = "OPEN" ] && echo 0 || echo 1)" \
+  "连接读数 = ${acp_conn:-<空>}（OPEN=在听；ECONNREFUSED=没起）"
+
+# V19 启动痕迹（**只有真起来才打**的自证行 —— 它能把"没监听"分成"没起"与"起了但绑不上"两档）
+acp_boot=$(grep -c '面 E（官方 ACP）' "$web" 2>/dev/null || true)
+acp_err=$(grep -c '面 E（官方 ACP）启动失败' "$web" 2>/dev/null || true)
+check V19 "宿主日志有面 E 启动自证行（且无启动失败）" \
+  "$([ "${acp_boot:-0}" -gt 0 ] && [ "${acp_err:-0}" -eq 0 ] && echo 0 || echo 1)" \
+  "启动行 ${acp_boot:-0} 条 / 失败 ${acp_err:-0} 条"
+
+# V20 🔴 **端到端一条真链**（本组最强的一条）：WS 101 → ACP initialize → session/new →
+#     session/prompt → **模型正文逐字复述**。
+# 为什么要一整条而不是拆成四小条：**中途每一格都可能"没报错但内容没到"**（D138 那族假阳：
+#   `followup()` 静默接受、`stopReason=end_turn` 正常返回，而内容根本没到）⇒
+#   拆开判会让"走到第 3 步"看起来像"快成了"，而实际上**第 4 步才是判据**。
+# ⇒ 由 `acp-face-check.mjs` 一次跑完并断言**内容**；本条只读它的结论。
+ACP_PROBE=/usr/local/bin/acp-face-check.mjs
+if [ -f "$ACP_PROBE" ]; then
+  acp_out=$(ACP_PORT="$ACP_PORT_EXPECT" node "$ACP_PROBE" 2>&1)
+  acp_rc=$?
+  acp_json=$(printf '%s' "$acp_out" | grep -m1 '^ACP_RESULT=' | cut -d= -f2-)
+  acp_ok=$(printf '%s' "$acp_json" | grep -c '"okCount"' || true)
+  acp_content=$(printf '%s' "$acp_out" | grep -c 'model_content => OK' || true)
+  acp_phases=$(printf '%s' "$acp_out" | grep -c '^\[phase\]' || true)
+  shift_detail=$(printf '%s' "$acp_out" | grep '^\[phase\]' | tr '\n' ';' | cut -c1-300)
+  check V20 "面 E 端到端：WS101 → ACP initialize → session/new → prompt → **模型正文逐字复述**" \
+    "$([ "$acp_rc" = "0" ] && [ "${acp_content:-0}" -gt 0 ] && echo 0 || echo 1)" \
+    "exit=${acp_rc} 相位=${acp_phases} 内容级断言命中=${acp_content} ｜ ${shift_detail}"
+else
+  check V20 "面 E 端到端（探针缺失）" 1 \
+    "无 $ACP_PROBE ⇒ `bench-docker vpush` 没推它（或镜像未重建）"
+fi
+
+# V21 面的**安全前提**必须随状态下发（不许"看到 3200 在听就以为它是安全的"）
+# `acpFaceStatus().authNote` 是源码里那条前提的运行时出口；容器里没有跨进程读它的路，
+# ⇒ 判据退化为**静态取证**：状态出口的文案确实带"无认证 ＋ 靠 Access 兜底"。
+# ⚠️ **实测纠正（2026-10-16 首跑）**：首版只 grep `lib/index.js` ⇒ **FAILL（0 处）**，
+#    而真相是**打包把这段拆进了带哈希的 chunk**（`lib/settings-section-<hash>.js`）——
+#    `index.js` 里根本没有那个串。**读数器扫错了域**（本轨高频坑：否定性结论的可信度上限 = 扫描域）。
+#    ⇒ 改为扫**整个 lib/ 目录**（发布物的真实边界），而不是某一个文件。
+ACPDIR=/root/.dsh/profiles/web/node_modules/@shgroup/dsh-serenity-hooks/lib
+acp_src=$(grep -rc '不做认证' "$ACPDIR" 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')
+acp_auth=$(grep -rc 'Access' "$ACPDIR" 2>/dev/null | awk -F: '{s+=$2} END{print s+0}')
+check V21 "面 E 的**安全前提**在产物里（authNote 逐字含「不做认证」＋「Access」）" \
+  "$([ "${acp_src:-0}" -gt 0 ] && [ "${acp_auth:-0}" -gt 0 ] && echo 0 || echo 1)" \
+  "「不做认证」${acp_src:-0} 处 / 「Access」${acp_auth:-0} 处（扫整个 lib/ —— 打包会把它拆进带哈希的 chunk）"
+
 # ── 汇总 ──
 echo "═══ 运行态验收（宿主 ${EXPECT_DSH:-?} ／ 期望 ACC ${EXPECT_ACC:-?}）═══"
 for r in "${ROWS[@]}"; do IFS='|' read -r st_ id label extra <<<"$r"; printf '%-4s %-4s %-42s %s\n' "$st_" "$id" "$label" "$extra"; done
