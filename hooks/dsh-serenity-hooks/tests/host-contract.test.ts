@@ -114,6 +114,42 @@ describe('host-contract: 探针（服务与成员）', () => {
     const broken = probeHostContract({}, IN_RANGE_HOST)
     expect(summarizeHostContract(broken)).toContain('BROKEN')
   })
+
+  // ── 🔴 `anyOf` 族：宿主改名后不得报假故障（v1.61，S151 2026-10-17 报告）──
+  //
+  // 背景（真实事故形态）：宿主 0.2.1-rc.*+ 把子代理正门从 `start` 改成
+  // `startActivation`，旧名只作回退。契约当时把 `start` 钉成"必须有" ⇒
+  // **每次 health 都印一句具体但虚假的「cheap-worker 委派不可用」**，
+  // 而 S151 实测 cheap-worker 真跑正常。⇒ 这三条钉住"同族任一可用即通过"。
+
+  it('🔴 anyOf：只有 startActivation（新宿主）⇒ 不报 subagents 故障', () => {
+    const ctx = completeHost()
+    const sub = (ctx.get as (n: string) => unknown)('subagents') as Record<string, unknown>
+    delete sub.start // 模拟 0.2.1-rc.*+：旧名没了
+    const report = probeHostContract(ctx, IN_RANGE_HOST)
+    expect(report.issues.filter((i) => i.id.startsWith('subagents'))).toEqual([])
+  })
+
+  it('🔴 anyOf：只有 start（旧宿主）⇒ 同样不报故障（双向都算）', () => {
+    const ctx = completeHost()
+    const sub = (ctx.get as (n: string) => unknown)('subagents') as Record<string, unknown>
+    delete sub.startActivation // 模拟 0.1.7-rc.* / 0.2.0-rc.*：新名还没来
+    const report = probeHostContract(ctx, IN_RANGE_HOST)
+    expect(report.issues.filter((i) => i.id.startsWith('subagents'))).toEqual([])
+  })
+
+  it('🔴 anyOf 反向钉（防"永远绿"）：两个名字都缺 ⇒ 必须报故障，且 detail 点名整族', () => {
+    const ctx = completeHost()
+    const sub = (ctx.get as (n: string) => unknown)('subagents') as Record<string, unknown>
+    delete sub.start
+    delete sub.startActivation
+    const report = probeHostContract(ctx, IN_RANGE_HOST)
+    const issue = report.issues.find((i) => i.id.startsWith('subagents'))
+    expect(issue).toBeDefined()
+    // detail 必须同时点出**两个**候选名 —— 只报一个会把读者再次引向错方向
+    expect(issue?.detail).toContain('startActivation')
+    expect(issue?.detail).toContain('start')
+  })
 })
 
 describe('host-contract: 宿主版本范围', () => {

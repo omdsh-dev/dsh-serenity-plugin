@@ -28,6 +28,17 @@ type HostAccess = 'injected' | 'lazy'
 interface HostMember {
   name: string
   kind: 'function' | 'value'
+  /**
+   * 成员所属的「互斥族」标签（可选）。**同族成员满足任一即可**。
+   *
+   * 🔴 为什么需要（v1.61，S151 2026-10-17 报告）：
+   *   宿主会**给同一个能力改名**并保留旧名作回退。`subagents` 就是实例：
+   *   `0.2.1-rc.*+` 的正门叫 `startActivation`，`start` 仅作旧宿主回退
+   *   （`tools/cheap-worker.ts` 的 `resolveSubagentStarter()` 是**双路**的）。
+   *   若契约把某一个具体名字钉成"必须有"，宿主改名后 ⇒ **探针报假故障，而功能是好的**。
+   *   ⇒ 判据必须是「**这一族里至少有一个能用**」，不是「这个名字必须在」。
+   */
+  anyOf?: string
 }
 
 interface HostServiceContract {
@@ -165,7 +176,17 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     id: 'subagents',
     name: 'subagents',
     access: 'lazy',
-    members: [{ name: 'start', kind: 'function' }],
+    // 🔴 v1.61（S151 2026-10-17 报告 + 本轨复核）：**两个名字是同一能力的双路实现**。
+    //   宿主 `0.2.1-rc.*+`：正门 = `startActivation(spec)`；`start(name, request)` 只在
+    //   旧宿主（`0.1.7-rc.*` / `0.2.0-rc.*`）存在。产品侧 `resolveSubagentStarter()`
+    //   本来就是"先新后旧"选路 ⇒ **只要有一个在，委派就能用**。
+    //   ⚠️ 此前只钉 `start` ⇒ 每次 health 都印一句**具体但虚假**的
+    //   「cheap-worker 委派不可用」，而实测 cheap-worker 真跑正常。
+    //   ⇒ 具体 ≠ 准确：过期探针的误导性正来自它"说得太像真的"。
+    members: [
+      { name: 'startActivation', kind: 'function', anyOf: 'spawn-starter' },
+      { name: 'start', kind: 'function', anyOf: 'spawn-starter' },
+    ],
     impact: 'cheap-worker 委派不可用（前台委派的正门，响亮报错）',
     required: false,
   },
@@ -467,6 +488,24 @@ export function probeHostContract(ctx: unknown, hostVersion: string | null = nul
       const actual = (value as Record<string, unknown>)[member.name]
       const ok = member.kind === 'function' ? typeof actual === 'function' : actual !== undefined
       if (!ok) {
+        // 🔴 `anyOf` 族：**同族任一可用即算通过**（宿主改名的双路实现，见 HostMember.anyOf）
+        if (member.anyOf !== undefined) {
+          const siblings = svc.members.filter((m) => m.anyOf === member.anyOf)
+          const anyOk = siblings.some((m) => {
+            const v = (value as Record<string, unknown>)[m.name]
+            return m.kind === 'function' ? typeof v === 'function' : v !== undefined
+          })
+          if (anyOk) continue
+          issues.push({
+            id: `${svc.id}.${member.anyOf}`,
+            kind: 'member',
+            detail: `service "${svc.name}" is missing every ${member.kind} of "${member.anyOf}" `
+              + `(${siblings.map((m) => m.name).join(' | ')})`,
+            impact: svc.impact,
+            required: svc.required,
+          })
+          continue
+        }
         issues.push({
           id: `${svc.id}.${member.name}`,
           kind: 'member',

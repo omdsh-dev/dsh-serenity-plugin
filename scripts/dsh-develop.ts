@@ -214,19 +214,63 @@ function cmdTest(filter?: string): void {
 
 /** coverage：vitest --coverage（v1.28.0 可测试可验证——coverage 阈值门禁见 hooks vitest.config.ts）。
  *  从 HOOKS_DIR 运行：coverage-v8 装在 hooks 自身 node_modules（根 node_modules 无），
- *  且 hooks/vitest.config.ts 定义 coverage 范围 = hooks src。 */
+ *  且 hooks/vitest.config.ts 定义 coverage 范围 = hooks src。
+ *
+ *  🔴 2026-10-17（S142 续 181，owner 令「只输出不通过的」）：
+ *  此前**不 quiet** ⇒ `r.stdout` 收下全部 vitest 输出（含每个 describe 的 stdout/stderr
+ *  捕获块），实测单次回执 **≈160 KB**，把真正要看的两行（汇总 + 阈值）埋在中间。
+ *  ⇒ 改为 `quiet: true` **只留摘要**；失败时才把**筛选过的**失败行打出来。
+ *  ⚠️ **不是"少报"**：判据仍是 exit code（唯一权威）；这里只是把"全绿时的噪音"去掉，
+ *  失败时反而比原先**更聚焦**（只印 FAIL 段，不再夹着几千行 stderr 捕获）。 */
 function cmdCoverage(): void {
   if (!existsSync(join(HOOKS_DIR, 'tests'))) {
     fail(`hooks 测试目录缺失`, 2)
   }
-  const r = run(join(HOOKS_DIR, 'node_modules', '.bin', 'vitest'), ['run', '--coverage'], { cwd: HOOKS_DIR })
+  const r = run(join(HOOKS_DIR, 'node_modules', '.bin', 'vitest'), ['run', '--coverage'], { cwd: HOOKS_DIR, quiet: true })
+  const combined = `${r.stdout}\n${r.stderr}`
+
   if (r.status !== 0) {
-    console.error(r.stdout + r.stderr)
+    // 只印"不通过"的那些行。
+    // 🔴 为什么不能只靠 `quiet`：vitest 把**每个用例的 stdout/stderr 捕获**直接写进
+    //   真实 stderr 流（不是 stdout），`quiet` 只挡 stdout ⇒ 实测仍会灌进几千行
+    //   `[serenity-hooks] ✗ …` 噪声，把 FAIL 段埋掉。
+    // ⇒ 用**白名单**（只留 FAIL 块与断言差异），而不是黑名单（永远漏一种噪声）。
+    const lines = combined.split('\n')
+    const kept: string[] = []
+    let inFailBlock = false
+    for (const line of lines) {
+      // FAIL 段起点：` FAIL <file>` / ` ❯ <file> (n tests | m failed)`
+      //               或覆盖率门禁标题
+      if (/^\s*(FAIL\s|❯\s.*\|\s*\d+\s+failed|.*Failed Tests.*|.*ERROR:\s*Coverage)/.test(line)) {
+        inFailBlock = true
+      }
+      // 失败块结束：下一条顶层进度行（✓ 文件 / Test Files 汇总）之后不再收
+      if (/^\s*(✓|Test Files|Tests)\s/.test(line) && inFailBlock) {
+        // 汇总行本身有用 → 留；但退出失败块
+        if (/^\s*(Test Files|Tests)\s/.test(line)) kept.push(line)
+        inFailBlock = false
+        continue
+      }
+      if (!inFailBlock) continue
+      // 块内继续过滤：拖尾的插件告警不属于失败证据
+      if (/^\s*\[serenity-hooks\]/.test(line)) continue
+      if (/^\s*\[dsh-develop\]/.test(line)) continue
+      kept.push(line)
+    }
+    const MAX = 120
+    const shown = kept.slice(0, MAX)
+    if (shown.length > 0) console.error(shown.join('\n').trimEnd())
+    if (kept.length > MAX) console.error(`… 另有 ${kept.length - MAX} 行失败输出已省略（看 hooks/dsh-serenity-hooks/coverage/ 或重跑单文件）`)
     fail(`vitest --coverage 失败 (exit ${r.status})——覆盖率低于阈值或测试失败，见 hooks/vitest.config.ts thresholds`, 2)
   }
-  // 汇总行（vitest coverage 文本报告在 stdout 尾部）
+
+  // 全绿时只留两行：用例汇总 + 覆盖率门禁结论
   const m = r.stdout.match(/Test Files\s+(\d+) passed[\s\S]*?Tests\s+(\d+) passed/)
-  console.log(m ? `[dsh-develop] ✓ 测试通过 (${m[1]} files / ${m[2]} tests) + coverage 报告（hooks/dsh-serenity-hooks/coverage/）` : '[dsh-develop] ✓ 测试通过 + coverage 报告')
+  console.log(m ? `[dsh-develop] ✓ 测试通过 (${m[1]} files / ${m[2]} tests)` : '[dsh-develop] ✓ 测试通过')
+  // 覆盖率总表（vitest 的 "All files" 行）——有就印，没有不编
+  const allRow = r.stdout.split('\n').find((l) => /^All files\s*\|/.test(l.trim()) || /^\s*All files\s/.test(l))
+  if (allRow) console.log(`[dsh-develop]   ${allRow.trim()}`)
+  console.log('[dsh-develop] ✓ coverage 门禁通过（报告：hooks/dsh-serenity-hooks/coverage/）')
 }
 
 function cmdBuild(): void {

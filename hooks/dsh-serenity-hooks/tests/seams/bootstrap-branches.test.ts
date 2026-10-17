@@ -66,7 +66,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { registerBootstrap, createEpochPromotion, hasUserMessageHistory } from '../../src/seams/bootstrap.js'
+import { registerBootstrap, createEpochPromotion, hasUserMessageHistory, DEFAULT_COMPACTION_TOOLS } from '../../src/seams/bootstrap.js'
 import { ACC_MESSAGE_KIND } from '../../src/message-source.js'
 
 type Handler = (...args: unknown[]) => unknown
@@ -279,16 +279,22 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
     registerBootstrap(ctx as never)
     const h = first(ctx, 'agent/inbox/inserted')
     let n = 0
+    const appended = () => n
     const agent = {
-      session: { id: 'sub-1', header: { cwd: dir, delegationDepth: 1 } },
-      inbox: { prepend: () => { n += 1 } },
+      session: {
+        id: 'sub-1',
+        header: { cwd: dir, delegationDepth: 1 },
+        // v1.60：新实现写 session.append（替身须与真身同形——本轨既有判据）
+        append: () => { n += 1; return { seq: n } },
+      },
+      options: { provider: 'p', model: 'm' },
     }
     h({ agent, message: { source: { kind: 'user' } } })
-    const afterFirst = n
+    const afterFirst = appended()
     // 🔴 子 agent 的判据是「**进程内只锚定一次**」（`anchoredSessions` Set），
     //    **不是**根会话那套"看有没有 user/message 历史" ⇒ 第二条消息**不得**再锚定。
     h({ agent, message: { source: { kind: 'user' } } })
-    expect(n).toBe(afterFirst) // 第二次没有新增
+    expect(appended()).toBe(afterFirst) // 第二次没有新增
     expect(afterFirst).toBeGreaterThan(0) // 首次确实锚定了（正控意味）
   })
 
@@ -297,8 +303,9 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
     registerBootstrap(ctx as never)
     let n = 0
     const agent = {
-      session: { id: 777, header: { cwd: dir } }, // id 非字符串
-      inbox: { prepend: () => { n += 1 } },
+      // v1.60：id 非字符串 + 写 session.append
+      session: { id: 777, header: { cwd: dir }, append: () => { n += 1; return { seq: n } } },
+      options: { provider: 'p', model: 'm' },
     }
     first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
     // 🔴 语义：sid 取不到 ⇒ ① 不写 `anchoredSessions` ② 仍走 depth===0 的"无历史即锚定"
@@ -373,11 +380,24 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
   it('正控（B8 对照）：形态完整时 assemble 真窄化 ⇒ 证明上面不是"永远原样返回"', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const tools = [{ name: 'read' }, { name: 'grep' }]
-    const agent = { session: { id: 'narrow-1', header: { cwd: dir }, snapshotEvents: () => [] } }
+    // 🔴 靶子的选择随 v1.60 语义变化而换：boundary < 0（真·首请求）现在是**完整目录**
+    //    （取消断点是本次改动的目的）⇒ 它不再是"会窄化"的靶子。
+    //    v1.60 下**唯一会真窄化**的分支 = compaction 之后（boundary ≥ 0、尚未重新晋升），
+    //    语义 = 「压缩后继续任务」的工作集（compactionTools）。
+    //    ⇒ 用这个靶子证明"处理体确实动手"，语义没变。
+    const tools = [...DEFAULT_COMPACTION_TOOLS, 'unrelated_tool'].map((name) => ({ name }))
+    const agent = {
+      session: {
+        id: 'narrow-1',
+        header: { cwd: dir },
+        snapshotEvents: () => [{ type: 'compaction/end', seq: 5 }], // boundary 5、未重新晋升
+      },
+    }
     const asm = await assemble(ctx, agent, tools)
-    // 未晋升 + zeroTools + boundary < 0 ⇒ 首请求 **0 工具**
-    expect((asm as { tools: unknown[] }).tools).toEqual([])
+    const names = ((asm as { tools: Array<{ name: string }> }).tools).map((t) => t.name)
+    // 白名单外的 `unrelated_tool` **必须**被裁掉 ⇒ 证明不是恒原样返回
+    expect(names).not.toContain('unrelated_tool')
+    expect(names.length).toBeLessThan(tools.length)
   })
 })
 

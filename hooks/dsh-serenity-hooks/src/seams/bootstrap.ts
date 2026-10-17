@@ -78,6 +78,105 @@ export function hasUserMessageHistory(session: unknown): boolean {
   return sessionEvents(session).some((event) => (event as { type?: string }).type === 'user/message')
 }
 
+// ── 锚定历史「造」而非「跑」（v1.60，owner 令 2026-10-17）──
+
+/** 造出来的 assistant 回复正文。锚定轮要求"只回确认、不做事"。 */
+const ANCHOR_ACK_TEXT = 'acknowledge'
+
+/** 占位 system 文本：宿主 `SystemPromptProjection.project()` 会把它**原地 replace** 成真提示词。 */
+const ANCHOR_SYSTEM_PLACEHOLDER = '<!-- serenity:anchor-placeholder -->'
+
+/**
+ * 把两轮 first-anchor 对话**直接写进会话日志**，取代原来的「真跑两轮」。
+ *
+ * ## 为什么可以这样（三条取证，全部打在真 `@deepseek-ai/dsh-session` 上）
+ *
+ * 1. **system 必须是 surface node 0**，而 `agent/pre-step` 跑在宿主提交 system **之前**
+ *    ⇒ 若直接写 [anchor…]，system 会被追加到**末尾**（实测：`systemAtIndex: 4`，
+ *    且**不报错**、静默走偏）。解法 = **先写一条占位 system**：宿主随后看到 node0
+ *    已有 system 且文本不同 ⇒ 走 `replace(head)` 换成真提示词，锚定历史原样留在其后。
+ * 2. **`contentGeneration` 只在 replace 时涨，append 不涨**；而 `buildRequest()`
+ *    取 generation 快照**晚于** `systemPrompt.project()` ⇒ 那次 replace 不会被
+ *    误判成「系列断裂」（不会误触发 `startsSeries`）。
+ * 3. **造出来的 `assistant/message` 合法**：`stream: []` 通过校验；整段历史之后
+ *    仍可被 compaction 的 `surfaceOp: replace` 整体覆盖（不炸）。
+ *
+ * ## ⚠️ 为什么不发 turn/start、turn/end
+ *
+ * 宿主的 turn 计数是**构造时缓存**的：`phase.lastTurn` 在本钩子触发前已读定（0），
+ * 之后 `turn()` 恒用 `phase.turn + 1`。我们若自己发 `turn/start{1}{2}`，宿主随后
+ * 仍会再发一条 `turn/start{1}` ⇒ **重复编号 ∧ 两个 turn 同时开着**。
+ * ⇒ 只给消息打 **turn 标签**（模型可见顺序不依赖 turn 事件，`deriveMessages` 只看
+ * surface 节点），**不碰宿主的 turn 账本**。
+ *
+ * @param session 会话（需有 append）
+ * @param provider 当前路由 provider（写入 assistant 消息来源）
+ * @param model 当前模型 id
+ * @returns 是否成功写入
+ */
+export function appendAnchorHistory(
+  session: unknown,
+  provider: string,
+  model: string,
+  anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
+): boolean {
+  const target = session as {
+    append?: (type: string, data: unknown, opts?: unknown) => { seq?: number }
+  } | undefined
+  if (typeof target?.append !== 'function') return false
+  const append = target.append.bind(target)
+  const rid = (prefix: string): string =>
+    `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+
+  // ① 占位 system —— 抢占 surface node 0，宿主随后原地替换成真提示词
+  append(
+    'system/message',
+    {
+      turn: 1,
+      step: 1,
+      message: {
+        id: rid('anchor-system'),
+        role: 'system',
+        content: [{ type: 'text', text: ANCHOR_SYSTEM_PLACEHOLDER }],
+        source: { kind: 'system-prompt' },
+      },
+    },
+    { surfaceOp: 'append' },
+  )
+
+  // ② 两轮锚定对话（owner 令「搞两个」＝ 两条独立 turn 标签）
+  for (let i = 0; i < anchorMessages.length; i++) {
+    const turn = i + 1
+    append(
+      'user/message',
+      {
+        id: rid(`anchor-user-${turn}`),
+        role: 'user',
+        content: [{ type: 'text', text: anchorMessages[i] }],
+        source: { kind: 'user' },
+      },
+      { surfaceOp: 'append' },
+    )
+    append(
+      'assistant/message',
+      {
+        turn,
+        step: 1,
+        message: {
+          id: rid(`anchor-assistant-${turn}`),
+          role: 'assistant',
+          content: [{ type: 'text', text: ANCHOR_ACK_TEXT }],
+          source: { kind: 'model', provider, model },
+        },
+        // stream 是宿主必填字段；空数组通过校验（探针 P3 实测）
+        stream: [],
+      },
+      { surfaceOp: 'append' },
+    )
+  }
+  return true
+}
+
 // ── 阶段机（等价 anchored compaction-epoch.mjs createEpochPromotion）──
 
 interface PromotionStatus {
@@ -206,9 +305,16 @@ const PROMOTE_EVENTS: Record<'tool-call' | 'assistant-message' | 'either', Set<'
   either: new Set(['tool/call', 'assistant/message']),
 }
 
-/** 协议固有 bootstrap 设置：zeroTools=true（首请求 0 工具纯文字锚定轮）、
- *  晋升信号仅 assistant/message（对齐 zero-anchored-standard）、
- *  requiredSignals = 锚定轮数（2 条消息 → 2 条回复后晋升）。无参——零配置面。 */
+/** 协议固有 bootstrap 设置：**zeroTools=false**（v1.60 起）。
+ *
+ * 🔴 **为什么从 true 改成 false**（owner 令 2026-10-17，造历史取代真跑）：
+ *   锚定历史现在**直接写进日志**，因此 `assistant/message` 晋升信号在首请求前
+ *   就已满足 ⇒ `boundary < 0` 分支实际不可达。但**不能依赖"恰好满足"这个副作用**：
+ *   若哪天锚定历史没写成（例如非 CCC 会话/异常降级），`zeroTools: true` 会退回到
+ *   「首请求 0 工具」，那是**另一种**退化。显式关掉 ⇒ 任何情况下首请求都拿完整目录。
+ *
+ * ⚠️ 这意味着 `bootstrapTools` 窄化也随之失效 —— 它的作用本来就是"首请求窄目录"，
+ *   而造历史的目的正是**取消这个断点**。保留字段只为不破坏旧测试的引用面。 */
 export function resolveBootstrapSettings(): BootstrapSettings {
   return {
     bootstrapTools: [...DEFAULT_BOOTSTRAP_TOOLS],
@@ -217,7 +323,7 @@ export function resolveBootstrapSettings(): BootstrapSettings {
     suppressedSources: new Set(DEFAULT_SUPPRESSED_SOURCES),
     compactionTools: [...DEFAULT_COMPACTION_TOOLS],
     anchorMessages: [...DEFAULT_ANCHOR_MESSAGES],
-    zeroTools: true,
+    zeroTools: false,
   }
 }
 
@@ -300,19 +406,24 @@ export function registerBootstrap(ctx: Context): void {
       }
       // 插件来源消息不递归锚定（含我们自己的锚定消息）
       if ((message as { source?: { kind?: string } })?.source?.kind === ACC_MESSAGE_KIND) return
-      const inbox = (agent as { inbox?: { prepend?: (queue: string, msg: unknown) => void } }).inbox
-      if (!inbox?.prepend) return
-      // 逆序 prepend（prepend 插到队首）：最终队列 = [anchorMessages[0], ..., anchorMessages[n-1], 真实消息]
-      for (let i = SETTINGS.anchorMessages.length - 1; i >= 0; i--) {
-        inbox.prepend('next-turn', {
-          id: `bootstrap-anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
-          role: 'user',
-          content: [{ type: 'text', text: SETTINGS.anchorMessages[i] }],
-          source: { kind: ACC_MESSAGE_KIND, form: 'notice', summary: 'bootstrap anchor turn' },
-        })
-      }
-      if (sid !== undefined) anchoredSessions.add(sid)
-      warnOnce(`anchor turns injected: ${SETTINGS.anchorMessages.length} 条（${SETTINGS.anchorMessages[0]!.slice(0, 40)}…）`)
+      // 🆕 v1.60：**造历史**取代「真跑两轮」（owner 令 2026-10-17）。
+      //   旧做法 = 往 next-turn 队列 prepend 2 条锚定消息 ⇒ 模型要真跑 2 个往返
+      //   （2 次模型调用 + 2 个 turn），只为让"它认为自己已同意过"。
+      //   新做法 = 一次性把 [占位 system, anchor1, ack1, anchor2, ack2] 写进日志：
+      //     · 语言学效果不变（模型读到的仍是同样的历史）
+      //     · 首请求即 full tools（晋升判据立刻满足，工具断点消失）
+      //     · 只剩 1 次真实往返
+      //   时机必须在这里（`agent/inbox/inserted` 早于 turn 开立与 system 装配），
+      //   详见 appendAnchorHistory 的取值与坑。
+      const route = (agent as { options?: { provider?: string; model?: string } }).options
+      const wrote = appendAnchorHistory(
+        session,
+        typeof route?.provider === 'string' ? route.provider : 'unknown',
+        typeof route?.model === 'string' ? route.model : 'unknown',
+      )
+      if (wrote && sid !== undefined) anchoredSessions.add(sid)
+      if (wrote) warnOnce(`anchor history fabricated: ${SETTINGS.anchorMessages.length} 轮（不再真跑）`)
+      return
     } catch {
       /* 锚定注入失败不阻断（会话正常处理） */
     }
@@ -360,13 +471,20 @@ export function registerBootstrap(ctx: Context): void {
           tools: tools.filter((tool) => typeof tool.name === 'string' && keep.has(tool.name)),
         } as PromptAssembly
       }
-      // Anchored 变体：bootstrap 集 + compaction 后 compactionTools（中途任务继续）
-      const keep = new Set<string>(SETTINGS.bootstrapTools)
-      if (status.boundary >= 0) for (const toolName of SETTINGS.compactionTools) keep.add(toolName)
+      // Anchored 变体（v1.60：锚定历史改为"造"进日志）
+      // 🔴 **语义已变，必须读**：锚定历史直接写进会话 ⇒ 首请求时晋升信号已满足 ⇒
+      //   normal 路径根本到不了这里。真正会到这儿的只有 **compaction/end 之后**
+      //   （boundary ≥ 0、signalCount 被清零）⇒ 那正是"压缩后继续任务"的场景，
+      //   仍应收窄到 compactionTools（**不放宽**这一档，否则压缩后工具面突变
+      //   又造出一次 cache 断点）。
+      //   boundary < 0（真·首请求且**没有**造出历史，例如锚定被跳过）⇒ 给完整目录：
+      //   此时若再收窄到 5 个工具，等于把"空→满"的断点换成"窄→满"的断点，白改。
+      if (status.boundary < 0) return assembled
+      const keep = new Set<string>(SETTINGS.compactionTools)
       const missing = [...keep].filter((name) => !available.has(name))
       if (missing.length > 0) {
         // 工具缺失：降级完整目录 + 一次性告警（组合漂移不锁死会话）
-        warnOnce(`expected bootstrap tools missing=${JSON.stringify(missing)} — bootstrap disabled, full catalog exposed`)
+        warnOnce(`expected compaction tools missing=${JSON.stringify(missing)} — bootstrap disabled, full catalog exposed`)
         return assembled
       }
       return {
