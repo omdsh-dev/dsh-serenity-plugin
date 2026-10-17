@@ -71,6 +71,24 @@ describe('voyage-page：资产面（ACC 层静态资产）', () => {
     expect(html).toContain('var WORDS = [')
   })
 
+  /**
+   * 🔴 v4（S216 交接）：加两条"效果层真的在产物里"的判据。
+   *
+   * 为什么必须加（R↓）：那套渲染的失败模式**几乎全是"页面不报错、断言全绿、效果完全没有"** ——
+   * 交接方实测三例：`emissiveIntensity` 默认 1.0 导致阴影全没了／RenderTarget 默认
+   * UnsignedByte 导致 bloom 提不出高光／构图灯写死世界坐标导致换侧即平光。
+   * ⇒ 至少把「后期管线在不在」与「投影开没开」变成**机械可核**，
+   *   否则我们连"这两层被误删了"都不会知道。
+   *
+   * ⚠️ 边界：这两条只证明**代码在**，**证明不了画面对** ——
+   *   光/阴影/贴图是否真的生效**必须真机看**（交接单第七节）。
+   */
+  it('v4：后期管线与投影在产物里（效果层被整段删掉时这里会红）', () => {
+    const html = loadVoyageHtml()
+    expect(html).toContain('var PostFX = (function')
+    expect(html).toContain('shadowMap.enabled')
+  })
+
   it('🔒 内容判据：渲染内容里不得出现「另一个容器」的痕迹（大小写不敏感）', () => {
     const html = loadVoyageHtml()
     // 注释里允许出现（那是留档说明），判据只针对**渲染内容**：逐行排除纯注释行
