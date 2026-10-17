@@ -52,6 +52,12 @@ export interface SerenitySimpleWire {
   /** **diagram 工具总开关**（2026-09-29 owner 具名令 D104）：agent 给一段标签式源码，
    *  进程内光栅化成 PNG 并贴进对话（**不借浏览器**；实验性 demo，缺省**关**） */
   diagramEnabled?: boolean
+  /** 🔴 **面 E：官方 ACP 面总开关**（2026-10-17 owner 令；**缺省关**）。
+   *  ⚠️ 它只管"端口开不开"；**哪个 CCC 用 ACP 通道**在该 CCC 的 `im.channel` 里配
+   *  （归属判据 D23：通道选择 = CCC 的数据）。 */
+  acpFaceEnabled?: boolean
+  /** 面 E 端口（缺省 3200；避开 3080/3081/3082/3099） */
+  acpFacePort?: number
 }
 
 /** 本 section 的注入面（apply 闭包提供表单源与写回调；组件**不含**任何订阅机制） */
@@ -191,6 +197,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
   const unattendedOn = value?.unattendedEnabled ?? false // 缺省关（与 schema 一致）
   const diagramOn = value?.diagramEnabled ?? false // 缺省关（与 schema 一致；D104）
+  const acpFaceOn = value?.acpFaceEnabled ?? false // 缺省关（与 schema 一致；安全：协议无认证）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
   const [openGateway, setOpenGateway] = useState(false)
@@ -199,6 +206,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openCro, setOpenCro] = useState(false)
   const [openUnattended, setOpenUnattended] = useState(false)
   const [openDiagram, setOpenDiagram] = useState(false)
+  const [openAcpFace, setOpenAcpFace] = useState(false)
 
   return (
     <div className="ss-section">
@@ -369,6 +377,31 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       {/* 工具（D104，2026-09-29 owner 具名令）：图（diagram）—— 实验性 demo，默认关；
           关时工具**根本不注册**（模型看不到它），开时 agent 给源码即出图 */}
       <Group title="工具">
+        <li>
+          <RowCard
+            title="ACP 面（官方 ACP，端口 3200）"
+            desc="让标准 ACP 客户端（如 Agmente）连进本机；每 CCC 一枚 token 把关（默认关）"
+            expandable
+            open={openAcpFace}
+            onToggle={setOpenAcpFace}
+            control={<Toggle checked={acpFaceOn} onChange={(on) => toggle('acpFaceEnabled', on)} />}
+            detail={
+              <div className="ss-detailStack">
+                <p className="ss-detailIntro">{'ACP 面（面 E，2026-10-17 owner 令）\n' +
+                  '· 作用：把**官方** @deepseek-ai/dsh-acp 挂进本进程，标准 ACP 客户端经 WebSocket 登入本机\n' +
+                  '· 与「微信桥」的关系：两者是**入站通道的两个实现**，每个 CCC 二选一（在各自的\n' +
+                  '  .opencode/serenity.json 里配 im.channel）。本开关只管**端口开不开**，不管哪个 CCC 用哪条\n' +
+                  '· 🔴 认证：本面绑 0.0.0.0 且 ACP 协议自身**不做认证** ⇒ 由 ACC 在握手前用\n' +
+                  '  **每 CCC 一枚 token**（localstore 键 IM_ACP_TOKEN）把关；没配 token 的 CCC 一律连不上\n' +
+                  '· 怎么用：① 在目标 CCC 配 im.channel=acp ＋ im.acp.role=<角色名> ② 生成 token\n' +
+                  '  ③ 客户端连 ws://<本机IP>:3200，带 Authorization: Bearer <token> 或 ?token=<token>\n' +
+                  '· ⚠️ 明文 ws:// ⇒ 局域网内可抓包；**上公网必须走 wss ＋ Cloudflare Access**\n' +
+                  '· 协议无认证这一条由 ACC 补齐：未过 token 闸的连接**根本升不上来**（不是"升上来再拒"）'}
+                </p>
+              </div>
+            }
+          />
+        </li>
         <li>
           <RowCard
             title="图（diagram）"

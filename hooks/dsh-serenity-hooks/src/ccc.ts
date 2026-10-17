@@ -205,6 +205,16 @@ interface SerenityConfig {
    */
   weixin?: WeixinSettings;
   /**
+   * IM 通道选择（v1.59.0，owner 2026-10-17 令）：
+   * 「将微信桥升级为 IM 桥，每个 CCC 可以选择微信实现或 ACP 实现，微信实现保留不变向前兼容，
+   *  ACP 实现就可以暴露端口并绑定 skiff，并且要随即生成认证用的 token」。
+   *
+   * 🔴 **缺省 = weixin**（未配置的 CCC 行为与今天**逐字相同**）⇒ 向前兼容由**缺省值**保证，
+   *    不靠代码分支。选 `acp` 时该 CCC 的入站改走 ACP 面（面 E，端口 3200）；
+   *    其 `weixin.*` 段**保留**（向前兼容），但**不再驱动入站**；出站 `im-bridge` 不受影响。
+   */
+  im?: ImSettings;
+  /**
    * 专属工具声明（v1.33，S142 §32.11）：**ACC 注册但默认对所有 CCC 隐藏**的工具，
    * 只有在自己这里声明的 CCC 可见（例：`["acc-diag"]` = ACC 负责人的运行态诊断）。
    *
@@ -306,6 +316,38 @@ export interface WeixinSettings {
    * agent 只要自己发过（哪怕只发一条），桥就不兜底——输出权仍在 agent。
    */
   fallbackOnNoSend?: boolean;
+}
+
+/**
+ * IM 通道选择（CCC 级；v1.59.0，owner 2026-10-17 令）。
+ *
+ * 归属判据（D23「改它要不要发版」）：**选哪个通道、绑哪个角色 = CCC 的数据** ⇒ 归此处；
+ * **怎么校验 token、怎么把 ACP 会话套上角色 = 机制** ⇒ 归 ACC 源码。
+ */
+export interface ImSettings {
+  /**
+   * 入站通道选择。`"weixin"`（**缺省**，＝现状）｜ `"acp"`。
+   *
+   * 🔴 **缺省值即向前兼容**：不写这一项（或整个 `im` 段不存在）的 CCC，行为与升级前逐字相同。
+   * ⚠️ **只影响入站**（谁来驱动本 CCC 的 agent）；**出站**（`im-bridge` 工具发送）不受本项影响。
+   */
+  channel?: 'weixin' | 'acp';
+  /** ACP 通道参数（仅 `channel: "acp"` 时有意义） */
+  acp?: ImAcpSettings;
+}
+
+/** ACP 通道参数（CCC 级） */
+export interface ImAcpSettings {
+  /**
+   * 绑定的 skiff 角色名（**必须 ∈ 本 CCC 的 `skiff.roles`**）。
+   * 缺省 / 角色不存在 ⇒ **连接被拒**（fail-closed：宁可连不上，不可给出一个无身份、无约束的裸 agent）。
+   */
+  role?: string;
+  /**
+   * 该 CCC 的 ACP 面开关（**与 `channel: "acp"` 是「与」关系**：两者都真才算启用）。
+   * 缺省 false。
+   */
+  enabled?: boolean;
 }
 
 /** 微信桥账号配置（serenity.json 内；凭据部分在 localstore） */

@@ -61,9 +61,176 @@ import { startFace, faceActive, facePort, stopFace, type FaceHandle } from './fa
 import { hostInjected } from './host/access.js'
 import { FACE_PORTS } from './ports.js'
 import { readSimpleSettings, SERENITY_SETTINGS_NS } from './settings-section.js'
+import { extractToken, resolveTokenOwner, acpRoleFor, listAcpRoots, cwdInsideRoot, readAcpToken, ensureAcpToken, tokenFingerprint, acpChannelEnabled as acpChannelEnabledForToken } from './acp-auth.js'
+import { listCccs } from './ccc-roots.js'
+import { readSkiffRoles, createRolePromptReader, buildSkiffBasePrompt } from './skiff-role.js'
 
 /** 面名（面宿主幂等键；与 FACE_PORTS 的 id 同名，便于对账） */
 const FACE_ACP = 'acp'
+
+/**
+ * 🔴 认证判决（v1.59.0）。
+ *
+ * `ok: false` 的 `reason` 会**同时**出现在：① 401 响应体 ② console 告警 ③ `status().errors`
+ * —— 三处都写**同一句**（可复算，不靠印象），且**按信息量从大到小**给因：
+ * 先区分"根本没带 token"与"带了但不对"，再区分"是哪个 CCC 层的问题"。
+ */
+type AcpAuthVerdict =
+  | { ok: true; root: string; role: string }
+  | { ok: false; reason: string }
+
+/**
+ * 校验一次 upgrade 请求（**只读**：不改任何状态）。
+ *
+ * 判据链（任一环失败即拒，fail-closed）：候选 token 缺失 ⇒ 不匹配任何 CCC ⇒
+ * 该 CCC 未启用 ACP 通道 ⇒ 该 CCC 未配角色。最后一环尤其重要：**没有角色的 ACP 会话
+ * 等于一个无身份、无约束的裸 agent** ⇒ 宁可连不上。
+ */
+function authorizeUpgrade(req: IncomingMessage): AcpAuthVerdict {
+  const candidate = extractToken(req.headers as Record<string, unknown>, req.url)
+  if (!candidate) return { ok: false, reason: '未携带 token（用 Authorization: Bearer <t> 或 ?token=<t>）' }
+  const roots = acpRoots
+  if (roots.length === 0) return { ok: false, reason: '本机没有任何启用了 ACP 通道的 CCC' }
+  // 先判"token 认不认"（与"CCC 没配好"分开报，否则排障时会被误导到错的方向）
+  const owner = resolveTokenOwner(candidate, roots)
+  if (!owner) return { ok: false, reason: 'token 不匹配任何已启用 ACP 通道的 CCC' }
+  const role = acpRoleFor(owner)
+  if (!role) return { ok: false, reason: `CCC（${owner}）未配置 im.acp.role` }
+  return { ok: true, root: owner, role }
+}
+
+/**
+ * 归属候选 CCC 的**同步**缓存。
+ *
+ * 🔴 为什么缓存而非每次现算：`listCccs()` 是 **async**（要读 workspace registry ＋
+ *    `sessionPersistence`），而 `'upgrade'` 回调是**同步**的 ⇒ 不能在那里 await。
+ * ⇒ 启动时算一次 ＋ 配置变更时刷新；这是**准入名单**，宁可用稍旧的名单（新 CCC 多等一次
+ *    配置事件即可生效），也不让 upgrade 挂起。
+ */
+let acpRoots: string[] = []
+
+/** 刷新准入名单（**只收启用了 ACP 通道且已生成 token 的 CCC**）。返回新名单长度。 */
+export async function refreshAcpRoots(ctx: Context): Promise<number> {
+  try {
+    const entries = await listCccs(ctx)
+    const all = entries.map((e) => e.root)
+    // 🔴 owner 令「**随即生成**认证用的 token」：凡启用了 ACP 通道的 CCC，若还没有 token，
+    //    在这里**当场生成一枚**（幂等：已有则原样返回，不轮换）⇒ owner 配完 `im.channel=acp`
+    //    即得一枚可用 token，**不必**再手敲任何命令去造它。
+    //    ⚠️ 生成是**写 localstore** —— 只在"该 CCC 确实启用了 ACP"时发生（未启用的 CCC 一个字节都不动）。
+    for (const root of all) {
+      try {
+        if (acpChannelEnabledForToken(root) && !readAcpToken(root)) {
+          const token = ensureAcpToken(root)
+          console.log(`[serenity-hooks] ✓ 面 E：已为 CCC 生成 ACP token（${root}，指纹 ${tokenFingerprint(token)}）`)
+        }
+      } catch (err) {
+        console.warn(`[serenity-hooks] 面 E：为 CCC 生成 token 失败（${root}）: ${String((err as Error)?.message ?? err)}`)
+      }
+    }
+    acpRoots = listAcpRoots(all)
+  } catch (err) {
+    // 枚举失败 ⇒ 名单清空（fail-closed：不保留旧名单，避免"CCC 已被移除但仍放行"）
+    acpRoots = []
+    console.warn(`[serenity-hooks] 面 E：CCC 准入名单刷新失败（已清空，连接将被拒）: ${String((err as Error)?.message ?? err)}`)
+  }
+  return acpRoots.length
+}
+
+/** 当前准入名单（诊断用只读快照） */
+export function acpRootsSnapshot(): readonly string[] {
+  return acpRoots
+}
+
+/**
+ * 测试注入钩子（**生产零调用**）：直接置准入名单。
+ *
+ * ⚠️ 为什么需要：`refreshAcpRoots()` 依赖 `listCccs(ctx)`（要真 CCC 环境）。
+ *    而认证闸本身是**纯逻辑**，测试要能单独驱动它 —— 否则"闸真的拦得住吗"这件事
+ *    只能靠集成环境验，而集成环境恰恰是最不容易跑的那种。
+ */
+export function __setAcpRootsForTest(roots: readonly string[] | null): void {
+  acpRoots = roots ? [...roots] : []
+}
+
+/**
+ * 把**本连接归属的 CCC 角色**套到该连接创建的 agent 上（v1.59.0）。
+ *
+ * ## 🔴 为什么是"认领"而不是"直接挂"
+ *
+ * 理想形态是：在本连接的 scoped fiber 里监听 `session/created`，**只**收到本连接建的会话。
+ * 但那条路依赖一个**我没有实测过的**引擎行为 —— cordis 的 `EventsService.dispatch()` 只在
+ * **派发方设了 `Context.filter`** 时才按 ctx 过滤（读 `@deepseek-ai/cordis/src/events.ts`
+ * 的 `.filter(hook => hook.global || !filter || filter.call(thisArg, hook.ctx))`）。
+ * ⇒ 若宿主派发 `session/created` 时**没设**过滤器，本监听器会**收到全进程**的会话
+ * （网页端、别的轨迹、别的连接），**套错角色**。
+ *
+ * 🔴 **D119 纪律**：不许照源码的"意图"断言引擎行为 ⇒ 本实现**不赌**那条语义，
+ * 改用**认领制**（两条过滤都可以自证，不依赖 filter）：
+ *   ① **cwd 必须落在本连接归属的 CCC 内**（token 已定 CCC ⇒ 越界会话直接跳过）；
+ *   ② **同一会话只被认领一次**（`claimed` 集合；先到先得 ⇒ 不会被另一条连接的监听器抢走）。
+ *
+ * ⚠️ **残余风险（如实标注）**：若**同一 CCC** 同时有网页端会话与 ACP 会话在创建，
+ *   本函数可能把网页端那个会话也认领了（两者 cwd 都在该 CCC 内）。⇒ 判据是"cwd ＋ 先到先得"，
+ *   **不是"确属本连接"**。⚠️ **这一格必须由探针实测**（见 REBUILD-TODO 的待办）；
+ *   未实测前**不得**声称"只套本连接的会话"。
+ *
+ * 失败语义：全程不抛（本面是可选面）——角色挂不上只记日志，不阻断 ACP 接线。
+ */
+function bindRoleToConnScopedAgent(scoped: Context, root: string, roleName: string): void {
+  try {
+    const role = readSkiffRoles(root).get(roleName)
+    if (!role) {
+      console.warn(`[serenity-hooks] 面 E：CCC（${root}）未定义 skiff 角色 "${roleName}" ⇒ 本连接不注入角色`)
+      return
+    }
+    // persistent 型角色：每轮动态重读提示词文件（改文件即生效，无需重连）——与微信桥同源
+    const rolePrompt = createRolePromptReader(root, role)
+    const claimed = new Set<string>()
+    const onCreated = (session: { header?: { id?: string; cwd?: string } }): void => {
+      try {
+        const id = session?.header?.id
+        const cwd = session?.header?.cwd
+        if (!id || !cwd) return
+        if (claimed.has(id)) return
+        if (!cwdInsideRoot(cwd, root)) return // 越界（不属于本连接的 CCC）⇒ 不认领
+        // 角色提示词段（与 skiff-core 的 `serenity-skiff` 同形：order -60，动态求值）
+        const target = resolveAgentById(scoped, id)
+        if (!target) return
+        target.ctx.systemPrompt.section({
+          name: 'serenity-skiff',
+          order: -60,
+          text: () => [buildSkiffBasePrompt(roleName, role), rolePrompt()].filter(Boolean).join('\n'),
+        })
+        claimed.add(id)
+        console.log(`[serenity-hooks] ✓ 面 E：会话 ${id} 已绑定角色 "${roleName}"（CCC=${root}）`)
+      } catch (err) {
+        console.warn(`[serenity-hooks] 面 E：角色注入失败（不影响会话）: ${String((err as Error)?.message ?? err)}`)
+      }
+    }
+    for (const eventName of ['session/created', 'agent/created'] as const) {
+      try {
+        scoped.on(eventName, onCreated as never)
+      } catch {
+        /* 事件通道缺失不阻断 */
+      }
+    }
+  } catch (err) {
+    console.warn(`[serenity-hooks] 面 E：角色绑定装配失败: ${String((err as Error)?.message ?? err)}`)
+  }
+}
+
+/** 按会话 id 取 live agent（只读；取不到返回 undefined） */
+function resolveAgentById(scoped: Context, sessionId: string): { ctx: { systemPrompt: { section: (s: { name: string; order?: number; text: () => string }) => unknown } } } | undefined {
+  try {
+    const agents = hostInjected<{ get?: (id: string) => unknown }>(scoped, 'agents')
+    const agent = agents?.get?.(sessionId) as { ctx?: { systemPrompt?: { section?: unknown } } } | undefined
+    if (!agent?.ctx?.systemPrompt || typeof agent.ctx.systemPrompt.section !== 'function') return undefined
+    return agent as never
+  } catch {
+    return undefined
+  }
+}
 
 /** 本面绑定的地址（取自集中端口表 —— **单一真相源**，不在本文件硬写） */
 const ACP_HOST = FACE_PORTS.acp.host ?? '127.0.0.1'
@@ -205,13 +372,15 @@ interface AcpFaceState {
   wss: WebSocketServer | null
   connections: number
   applied: number
+  /** 🔴 被认证闸拒掉的连接数（v1.59.0；与 `connections` 分开，否则"有人在敲门"会被读成"已服务") */
+  rejected: number
   lastErrors: AcpConnStat[]
   /** 每连接一次 `apply` 的析构集合（`dsh-acp` 的 `apply` 会注册 `ctx.on` ⇒ 需可回收） */
   disposers: Array<() => void>
 }
 
 function newState(): AcpFaceState {
-  return { handle: null, wss: null, connections: 0, applied: 0, lastErrors: [], disposers: [] }
+  return { handle: null, wss: null, connections: 0, applied: 0, rejected: 0, lastErrors: [], disposers: [] }
 }
 
 /** 当前面状态（供 `status()` / 诊断读；无监听时 `handle` 为 null） */
@@ -228,8 +397,12 @@ export interface AcpFaceStatus {
   enabled: boolean
   connections: number
   applied: number
+  /** 🔴 被认证闸拒掉的连接数（v1.59.0）：它 > 0 说明**有人在敲门或 token 配错了** */
+  rejected: number
+  /** 当前准入的 CCC 数（启用了 ACP 通道 ＋ 已生成 token） */
+  authorizedCccs: number
   errors: Array<{ at: number; applied: boolean; error?: string }>
-  /** 🔴 本面**没有内建认证** —— 这条随状态一起出，避免"看到 active 就以为它是安全的" */
+  /** 🔴 认证状态一句话（v1.59.0 取代原"本面无认证"） */
   authNote: string
 }
 
@@ -241,8 +414,12 @@ export function acpFaceStatus(): AcpFaceStatus {
     enabled: acpFaceEnabled(),
     connections: state.connections,
     applied: state.applied,
+    rejected: state.rejected,
+    authorizedCccs: acpRoots.length,
     errors: [...state.lastErrors],
-    authNote: 'ACP 协议本身不做认证；本面绑定 ' + ACP_HOST + ' ⇒ 必须由外部接入层（Access）兜底',
+    authNote:
+      'ACP 协议本身不做认证；本面在 WS upgrade 层以 **每 CCC 一枚 token**（localstore 键 ' +
+      'IM_ACP_TOKEN）把关，未过闸的连接升不上来。⚠️ 明文 ws:// ⇒ 局域网内可抓包；上公网必须走 wss ＋ Access。',
   }
 }
 
@@ -298,9 +475,43 @@ export async function startAcpFace(ctx: Context): Promise<FaceHandle> {
   // ② 在**自己的** server 上挂 upgrade（本模块的核心设计决策；先例 = gateway.ts:454）
   handle.server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     local.connections += 1
+
+    // 🔴 ③ 认证闸（v1.59.0，owner 2026-10-17 令「随即生成认证用的 token」）：
+    //    **必须在 handleUpgrade 之前** —— 未过闸的连接**根本升不上来**（不是"升上来再拒"）。
+    //    判据：token 无效 ／ CCC 未启用 ACP ／ 角色未配置 ⇒ 401 ＋ destroy，一次都不进 ACP。
+    //    ⚠️ 为什么在这里而不在 ACP 协议层：`dsh-acp` 的 authenticate() 恒成功且无认证缝
+    //      （见文件头「安全边界」与 `acp-auth.ts` 的架构决策）。
+    const verdict = authorizeUpgrade(req)
+    if (!verdict.ok) {
+      local.rejected += 1
+      local.lastErrors.push({ at: Date.now(), applied: false, error: `auth: ${verdict.reason}` })
+      if (local.lastErrors.length > MAX_ERR_KEEP) local.lastErrors.shift()
+      try {
+        socket.write(
+          'HTTP/1.1 401 Unauthorized\r\n' +
+            'content-type: text/plain; charset=utf-8\r\n' +
+            'connection: close\r\n' +
+            '\r\n' +
+            `ACP 面：认证失败（${verdict.reason}）。请在该 CCC 的 localstore 生成并使用 IM_ACP_TOKEN。\n`,
+        )
+      } catch {
+        /* socket 已断 */
+      }
+      try {
+        socket.destroy()
+      } catch {
+        /* 已销毁 */
+      }
+      console.warn(`[serenity-hooks] ✗ 面 E：拒绝一条连接（${verdict.reason}）`)
+      return
+    }
+
     try {
       wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
         try {
+          // 该连接**归属的 CCC 与角色**（token 反查所得，服务端权威）
+          const connRoot = verdict.root
+          const connRole = verdict.role
           const stream = wsToAcpStream(ws, (line) => {
             console.log(`[serenity-hooks] 面 E：丢弃一条非 JSON 帧（前 120 字）: ${line}`)
           })
@@ -331,6 +542,12 @@ export async function startAcpFace(ctx: Context): Promise<FaceHandle> {
               // **可变的**（`agent-default-model` 的 Config 是 `volatile` —— 用户在界面上换模型就变），
               // 而 ACP 的 `apply` 是"一连接一实例"⇒ 每连接解析一次正合适。
               const sel = resolveAcpSelection(scoped)
+              // 🔴 v1.59.0：**绑 skiff 角色**（owner 令「ACP 实现就可以暴露端口并绑定 skiff」）。
+              //    本连接**已由 token 确定**归属的 CCC 与角色（`connRoot`/`connRole`）⇒
+              //    把该 CCC 的角色提示词套到本连接创建的 agent 上。
+              //    ⚠️ 接线方式与微信桥「existing 路径」同源（`skiff-core` 的 section 注入），
+              //      不接管 `dsh-acp` 的建会话（它不导出 connector —— P0′ 已实测此路不通）。
+              bindRoleToConnScopedAgent(scoped, connRoot, connRole)
               dshAcp.apply(scoped, {
                 stream,
                 provider: sel.provider,
@@ -514,5 +731,20 @@ export function registerAcpFace(ctx: Context): void {
       /* 同上 */
     }
   }
+  // 🔴 v1.59.0：准入名单（哪些 CCC 启用了 ACP 通道）**必须先算出来** —— 认证闸是同步的，
+  //    名单为空 ⇒ 所有连接一律 401（fail-closed）。配置变更时同步刷新（新增 CCC 无需重启）。
+  const refresh = (): void => {
+    void refreshAcpRoots(ctx).then((n) => {
+      console.log(`[serenity-hooks] 面 E：CCC 准入名单已刷新（${n} 个 CCC 启用 ACP 通道）`)
+    })
+  }
+  try {
+    ctx.on('settings/document-updated', (ns: unknown) => {
+      if (String(ns) === SERENITY_SETTINGS_NS) refresh()
+    })
+  } catch {
+    /* 同上 */
+  }
+  refresh()
   sync()
 }

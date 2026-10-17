@@ -135,6 +135,18 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(simpleSettingsFromConfig({ diagram: { enabled: true }, diagramEnabled: false }).diagramEnabled).toBe(false)
   })
 
+  it('🆕 面 E acpFace：面板层 > 部署层，且两端都缺省**关**（安全：协议无认证）', () => {
+    expect(simpleSettingsFromConfig({}).acpFaceEnabled).toBe(false) // 缺省关
+    expect(simpleSettingsFromConfig({ acpFace: { enabled: true } }).acpFaceEnabled).toBe(true) // 部署层
+    // 面板层为真 ⇒ 压过部署层的 false
+    expect(simpleSettingsFromConfig({ acpFace: { enabled: false }, acpFaceEnabled: true }).acpFaceEnabled).toBe(true)
+    // 面板层为假 ⇒ 压过部署层的 true（两个方向都钉）
+    expect(simpleSettingsFromConfig({ acpFace: { enabled: true }, acpFaceEnabled: false }).acpFaceEnabled).toBe(false)
+    // 端口：缺省 3200，部署层可覆盖
+    expect(simpleSettingsFromConfig({}).acpFacePort).toBe(3200)
+    expect(simpleSettingsFromConfig({ acpFace: { port: 3300 } }).acpFacePort).toBe(3300)
+  })
+
   it('defaultSimpleSettings 与空 Config 一致', () => {
     expect(defaultSimpleSettings()).toEqual(simpleSettingsFromConfig({}))
   })

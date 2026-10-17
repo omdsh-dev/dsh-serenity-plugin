@@ -24,6 +24,9 @@
  */
 import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { request } from 'node:http'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { WebSocket } from 'ws'
 
 import {
@@ -35,10 +38,34 @@ import {
   acpFaceStatus,
   registerAcpFace,
   resolveAcpSelection,
+  __setAcpRootsForTest,
 } from '../src/acp-face.js'
 import { stopAllFaces } from '../src/face-host.js'
 import { FACE_PORTS } from '../src/ports.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { ensureAcpToken, readAcpToken } from '../src/acp-auth.js'
+
+/**
+ * 造一个"已启用 ACP 通道"的临时 CCC（真文件树，不是 mock）。
+ *
+ * 🔴 **为什么用真文件**（而不是替身）：认证闸的判据链读的是**真配置 ＋ 真 localstore**
+ * （`loadSerenityConfig` ／ `getEntry`）—— 替身会把"配置读法"这一环整段绕过去，
+ * 而那正是要验的东西（同族：`59` 号桩"自造夹具只能证明按我假设的形态能跑"）。
+ */
+function makeAcpCcc(): string {
+  const root = mkdtempSync(join(tmpdir(), 'acp-ccc-'))
+  mkdirSync(join(root, '.opencode'), { recursive: true })
+  writeFileSync(join(root, '.serenity'), '')
+  writeFileSync(
+    join(root, '.opencode', 'serenity.json'),
+    JSON.stringify({
+      im: { channel: 'acp', acp: { enabled: true, role: 'tester' } },
+      skiff: { roles: { tester: { systemPrompt: '你是测试角色。' } } },
+    }),
+  )
+  ensureAcpToken(root) // 生成 token（落该 CCC 的 localstore）
+  return root
+}
 
 /** 读一次 HTTP 状态码（本面只回 426 短句） */
 function httpStatus(port: number, path = '/'): Promise<{ status: number; body: string }> {
@@ -152,12 +179,28 @@ describe('面 E：真实 listener ＋ 真实 HTTP 往返（426 Upgrade Required�
 })
 
 describe('🔴 面 E：真实 WebSocket 升级（本件最强的证据）', () => {
-  it('真 WS 客户端能完成 101 握手 ⇒ `\'upgrade\'` 确实接上了（不是"端口开着"而已）', async () => {
+  // 🔴 v1.59.0：面 E 现在有**认证闸**（owner 令「随即生成认证用的 token」）⇒
+  //    握手测试必须先造一个"已启用 ACP 通道 ＋ 有 token ＋ 有角色"的 CCC。
+  //    ⚠️ 这两例改写前是"裸连即 101" —— 那个契约**已作废**（裸连现在必须 401）。
+  let ccc: string
+  beforeEach(() => {
+    ccc = makeAcpCcc()
+    __setAcpRootsForTest([ccc])
+  })
+  afterEach(() => {
+    __setAcpRootsForTest(null)
+    try { rmSync(ccc, { recursive: true, force: true }) } catch { /* 已清 */ }
+  })
+
+  it("真 WS 客户端（带对 token）能完成 101 握手 ⇒ `'upgrade'` 确实接上了（不是\"端口开着\"而已）", async () => {
     enableAcpFace()
     const handle = await startAcpFace({} as never)
+    const token = readAcpToken(ccc)!
 
     const outcome = await new Promise<{ opened: boolean; err?: string }>((resolve) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/acp`)
+      const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/acp`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
       let settled = false
       const done = (v: { opened: boolean; err?: string }): void => {
         if (settled) return
@@ -182,9 +225,12 @@ describe('🔴 面 E：真实 WebSocket 升级（本件最强的证据）', () =
   it('🔴 空 ctx（无 `ctx.plugin`）⇒ 接线失败但**不泄成连接重置**，且记一条可读错误', async () => {
     enableAcpFace()
     const handle = await startAcpFace({} as never)
+    const token = readAcpToken(ccc)!
 
     const closed = await new Promise<{ code: number }>((resolve) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/acp`)
+      const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/acp`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
       ws.on('close', (code: number) => resolve({ code }))
       ws.on('error', () => { /* close 紧随其后 */ })
       setTimeout(() => resolve({ code: -1 }), 2000)
@@ -197,6 +243,71 @@ describe('🔴 面 E：真实 WebSocket 升级（本件最强的证据）', () =
     expect(errs.length).toBeGreaterThan(0)
     expect(errs[errs.length - 1]?.applied).toBe(false)
     expect(acpFaceStatus().connections).toBeGreaterThan(0)
+  })
+})
+
+describe('🔴 面 E 认证闸（v1.59.0，owner 令「随即生成认证用的 token」）', () => {
+  let ccc: string
+  beforeEach(() => {
+    ccc = makeAcpCcc()
+    __setAcpRootsForTest([ccc])
+  })
+  afterEach(() => {
+    __setAcpRootsForTest(null)
+    try { rmSync(ccc, { recursive: true, force: true }) } catch { /* 已清 */ }
+  })
+
+  /** 连一次，返回握手结果（不抛） */
+  async function tryConnect(port: number, url: string): Promise<{ opened: boolean; status?: number; err?: string }> {
+    return new Promise((resolve) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}${url}`)
+      let settled = false
+      const done = (v: { opened: boolean; status?: number; err?: string }): void => {
+        if (settled) return
+        settled = true
+        resolve(v)
+      }
+      ws.on('open', () => { done({ opened: true }); ws.close() })
+      ws.on('unexpected-response', (_req, res) => done({ opened: false, status: res.statusCode }))
+      ws.on('error', (e: Error) => done({ opened: false, err: e.message }))
+      setTimeout(() => done({ opened: false, err: 'timeout' }), 2000)
+    })
+  }
+
+  it('🔴 不带 token ⇒ **401**，且连接根本不升上来（本件的核心判据）', async () => {
+    enableAcpFace()
+    const handle = await startAcpFace({} as never)
+    const r = await tryConnect(handle.port, '/acp')
+    expect(r.opened).toBe(false)
+    expect(r.status).toBe(401)
+    // 拒掉的连接**单独计数**（否则"有人在敲门"会被读成"已服务"）
+    expect(acpFaceStatus().rejected).toBeGreaterThan(0)
+  })
+
+  it('🔴 带**错** token ⇒ 401（不是"带了就放行"）', async () => {
+    enableAcpFace()
+    const handle = await startAcpFace({} as never)
+    const r = await tryConnect(handle.port, '/acp?token=deadbeefdeadbeef')
+    expect(r.opened).toBe(false)
+    expect(r.status).toBe(401)
+  })
+
+  it('🔴 带**对** token（查询串形态）⇒ 101（正控：证明拒的是 token 而不是"一律拒"）', async () => {
+    enableAcpFace()
+    const handle = await startAcpFace({} as never)
+    const token = readAcpToken(ccc)!
+    const r = await tryConnect(handle.port, `/acp?token=${token}`)
+    expect(r.opened).toBe(true)
+  })
+
+  it('🔴 名单外的 CCC（未启用 ACP 通道）⇒ 401：token 对也不放行', async () => {
+    enableAcpFace()
+    const handle = await startAcpFace({} as never)
+    const token = readAcpToken(ccc)!
+    __setAcpRootsForTest([]) // 模拟"该 CCC 未启用 ACP 通道"
+    const r = await tryConnect(handle.port, `/acp?token=${token}`)
+    expect(r.opened).toBe(false)
+    expect(r.status).toBe(401)
   })
 })
 
