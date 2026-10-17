@@ -7,7 +7,6 @@ import {
   DEFAULT_COMPACTION_TOOLS,
   DEFAULT_ANCHOR_MESSAGES,
   hasUserMessageHistory,
-  appendAnchorHistory,
 } from '../src/seams/bootstrap.js'
 
 /** 构造最小 agent（子 agent 模拟） */
@@ -192,7 +191,8 @@ describe('bootstrap: hasUserMessageHistory（v1.28.1 根会话重锚判定——
 })
 
 describe('bootstrap: resolveBootstrapSettings 协议固有默认值（零配置面，S142）', () => {
-  it('无参返回唯一固化设置：zeroTools=false（v1.60 造历史后不再需要 0 工具首请求）+ 两条协议锚定消息', () => {    const s = resolveBootstrapSettings()
+  it('无参返回唯一固化设置：zeroTools + 两条协议锚定消息', () => {
+    const s = resolveBootstrapSettings()
     expect(s.bootstrapTools).toEqual(DEFAULT_BOOTSTRAP_TOOLS)
     expect(s.promoteEvents.has('assistant/message')).toBe(true)
     expect(s.promoteEvents.has('tool/call')).toBe(false) // zeroTools 变体：仅 assistant/message
@@ -201,9 +201,7 @@ describe('bootstrap: resolveBootstrapSettings 协议固有默认值（零配置�
     expect(s.anchorMessages).toEqual(DEFAULT_ANCHOR_MESSAGES)
     expect(s.anchorMessages).toHaveLength(2)
     expect(s.requiredSignals).toBe(2) // 两轮锚定：每条回复计一次，第 2 条回复后晋升
-    // v1.60（owner 令 2026-10-17）：锚定历史改为**直接造进日志** ⇒ 晋升信号在首请求前
-    // 已满足 ⇒ 不再需要「首请求 0 工具」。显式关掉，避免依赖"恰好满足"这个副作用。
-    expect(s.zeroTools).toBe(false)
+    expect(s.zeroTools).toBe(true)
   })
 
   it('协议锚定消息内容不可配置：含 ACC 身份 + acknowledge 要求（S142 用户确认固化）', () => {
@@ -216,80 +214,5 @@ describe('bootstrap: resolveBootstrapSettings 协议固有默认值（零配置�
     expect(second).toContain('Before we proceed, align on how we work')
     expect(second).toContain('SESSION.md')
     expect(second).toContain('Please simply reply "acknowledge" — no action needed.')
-  })
-})
-
-// ── 回归钉：锚定历史「造」而非「跑」（v1.60，owner 令 2026-10-17）──────────────
-//
-// 🔴 这组用例钉的是**行为契约**，不是实现细节：若有人把它改回"往 inbox prepend
-//    两条消息、让模型真跑两轮"，下面第 1 条就会红（append 次数对不上），
-//    第 2 条也会红（没有占位 system ⇒ 宿主会把 system 追加到末尾，与 P2 实测同形）。
-
-describe('bootstrap: appendAnchorHistory —— 造历史而非真跑', () => {
-  /** 记录 append 调用（替身与真身同形：session.append(type, data, opts)） */
-  function recorder(): {
-    session: { append: (t: string, d: unknown, o?: unknown) => { seq: number } }
-    calls: Array<{ type: string; data: Record<string, unknown>; opts: Record<string, unknown> }>
-  } {
-    const calls: Array<{ type: string; data: Record<string, unknown>; opts: Record<string, unknown> }> = []
-    return {
-      calls,
-      session: {
-        append: (type: string, data: unknown, opts?: unknown) => {
-          calls.push({ type, data: data as Record<string, unknown>, opts: (opts ?? {}) as Record<string, unknown> })
-          return { seq: calls.length }
-        },
-      },
-    }
-  }
-
-  it('写入 1 条占位 system + 两轮 (user, assistant)，共 5 条，且全部 surfaceOp=append', () => {
-    const { session, calls } = recorder()
-    expect(appendAnchorHistory(session, 'prov-x', 'model-y')).toBe(true)
-
-    expect(calls.map((c) => c.type)).toEqual([
-      'system/message',
-      'user/message', 'assistant/message',
-      'user/message', 'assistant/message',
-    ])
-    // 全部走 append（不是 replace）—— replace 会让 contentGeneration 涨，本轨已验它无害，
-    // 但**没有理由**在这里制造它。
-    expect(calls.every((c) => c.opts.surfaceOp === 'append')).toBe(true)
-  })
-
-  it('🔴 占位 system 必须**先**写：它是 surface node 0 的唯一保证', () => {
-    const { session, calls } = recorder()
-    appendAnchorHistory(session, 'p', 'm')
-    // 顺序判据：第一条必须是 system/message。若被挪到后面，宿主会把真 system
-    // 追加到末尾（探针 P2 实测：systemAtIndex=4，且**不报错**）。
-    expect(calls[0]!.type).toBe('system/message')
-  })
-
-  it('两条锚定消息按正序写入，assistant 回复固定为 acknowledge', () => {
-    const { session, calls } = recorder()
-    appendAnchorHistory(session, 'p', 'm')
-    const userTexts = calls
-      .filter((c) => c.type === 'user/message')
-      .map((c) => (c.data.content as Array<{ text: string }>)[0]!.text)
-    expect(userTexts).toEqual([...DEFAULT_ANCHOR_MESSAGES])
-
-    const assistants = calls.filter((c) => c.type === 'assistant/message')
-    expect(assistants.map((c) => (c.data.message as { content: Array<{ text: string }> }).content[0]!.text))
-      .toEqual(['acknowledge', 'acknowledge'])
-    // stream 是宿主必填字段；空数组通过校验（探针 P3）
-    expect(assistants.every((c) => Array.isArray((c.data as { stream?: unknown }).stream))).toBe(true)
-  })
-
-  it('两轮各打独立的 turn 标签（owner 令「搞两个」）', () => {
-    const { session, calls } = recorder()
-    appendAnchorHistory(session, 'p', 'm')
-    const assistants = calls.filter((c) => c.type === 'assistant/message')
-    expect(assistants.map((c) => (c.data as { turn?: number }).turn)).toEqual([1, 2])
-  })
-
-  it('无 append 能力的 session ⇒ 返回 false，不抛（降级不阻断会话）', () => {
-    expect(appendAnchorHistory(undefined, 'p', 'm')).toBe(false)
-    expect(appendAnchorHistory({}, 'p', 'm')).toBe(false)
-    expect(appendAnchorHistory({ append: 123 }, 'p', 'm')).toBe(false)
   })
 })

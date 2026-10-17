@@ -1,3 +1,61 @@
+## v1.61.1 — 2026-10-17（🔴 **回退 v1.61.0 的「造历史」：它把新会话的系统提示词推到了对话末尾**）
+
+**性质**：**紧急回退**。**来源**：owner 实测报告 ——
+> 「有 bug，我新建的会话重新进入后会被覆盖空掉，旧会话好像没问题」
+
+### 一、故障
+
+v1.61.0 造历史时写的**占位 system 没有被宿主替换**，真系统提示词走的是 `append` ⇒
+surface 上**同时存在两个 system 节点**：
+
+```
+seq 5   system = "<!-- serenity:anchor-placeholder -->"   ← 占位，原样留着
+seq 15  system = "You are an AI agent powered by …"       ← 真提示词，append 到末尾
+```
+
+⇒ 模型看到的序列变成 `[空占位, anchor1, ack1, anchor2, ack2, 真 system]` ——
+**系统提示词排在对话末尾，开头挂着一个空占位**。新会话因此"被吃掉"。
+
+### 二、根因（读宿主源码取证）
+
+`SystemPromptProjection.project()` 的分支条件是：
+
+```js
+if (!input.inHistory || input.startsSeries || rendered.length === 0) → replace(head)
+else → append
+```
+
+我们的模型路由声明支持 **`in-history`**（可在任意位置读最新 system）⇒ 第一个条件为假；
+而 **`append` 不涨 `contentGeneration`** ⇒ `startsSeries` 也为假 ⇒ **走 append 分支**。
+
+🔴 **我的探针漏的正是这一格**：只验了默认路径（`inHistory` 假 ⇒ replace），
+**没验 `inHistory === true`** —— 而后者恰好是线上真实路由。
+
+### 三、为什么测试没抓住（两条判据，比修复本身更值钱）
+
+1. 🔴 **探针必须覆盖【每条分支】，不是"主路径能过"**。
+   被我漏掉的那条分支，恰好是线上唯一走的那条。
+2. 🔴 **凡"依赖宿主内部决策"的改动，替身测试不足以证明，必须在真宿主上跑一次**。
+   172 文件 / 2915 例全绿，因为测试里的 `session.append` 是替身，**根本不跑宿主的 `project()`**。
+
+> 这与本轨既有判据「选路正确 ≠ 调用能成」**同族** ——
+> 这次是「**分支选对 ≠ 分支走对**」。
+
+### 四、处置
+
+`bootstrap.ts` ＋ 三个测试文件 `git checkout 3e58b47 --` **整体还原到 v1.59.5 行为**。
+**保留**两项与本事故无关的已验证修复：
+- `hostContract` 的 `anyOf` 族语义（`subagents` 改名后不再报假故障）
+- `dsh-develop coverage` 只输出不通过的
+
+回退后 `coverage` **170 文件 / 2897 例全绿**（行 95.09%）。
+
+### 五、后续
+
+「造历史」方案**不是被证伪，是被证明我验得不够** —— 要重启它，必须先回答：
+**在 `in-history` 路由下，如何让占位 system 被正确替换（或干脆不写占位）**。
+在此之前该方案保持关闭。
+
 ## v1.61.0 — 2026-10-17（**first-anchor 改为「造历史」：取消两轮空跑；附修两处工具缺陷**）
 
 **性质**：**行为变更**。**来源**：owner 令 ——

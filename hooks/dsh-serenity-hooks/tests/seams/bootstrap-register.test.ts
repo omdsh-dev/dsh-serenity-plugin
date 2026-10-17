@@ -101,15 +101,13 @@ describe('registerBootstrap: system-prompt/assemble —— 首锚目录窄化', 
     { name: 'todo_write' }, { name: 'unrelated_tool' },
   ]
 
-  it('CCC 内、未晋升、boundary < 0 ⇒ v1.60 起**不再清空目录**（造历史取代真跑，断点消失）', async () => {
+  it('CCC 内、未晋升、boundary < 0 ⇒ **首请求 0 工具**（纯文字锚定轮）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     const agent = fakeAgent('main-boot-1', { header: { cwd: dir } }) // 无 events ⇒ boundary -1
 
     const out = (await assemble(ctx, agent, fullCatalog())) as { tools: unknown[] }
-    // v1.60（owner 令 2026-10-17）：锚定历史直接造进日志 ⇒ 晋升信号首请求前已满足 ⇒
-    // zeroTools 关掉 ⇒ 首请求即拿**完整目录**（这正是取消「空→满」缓存断点的手段）。
-    expect(out.tools).toEqual(fullCatalog())
+    expect(out.tools).toEqual([]) // zeroTools + 首锚轮 ⇒ 目录清空
   })
 
   it('非 CCC（cwd 无 .serenity）⇒ 原样返回完整目录', async () => {
@@ -245,80 +243,63 @@ describe('registerBootstrap: agent/pre-step —— 首锚剥离注入上下文',
   })
 })
 
-// ── agent/inbox/inserted：锚定历史「造」而非「跑」（v1.60）────────────────
+// ── agent/inbox/inserted：锚定轮注入 ────────────────────────────────────────
 
-describe('registerBootstrap: agent/inbox/inserted —— 锚定历史写入', () => {
-  /** 替身与真身同形：新实现写的是 `session.append`（不是 inbox.prepend）。 */
-  function inboxAgent(id: string, extra: Record<string, unknown> = {}): {
-    agent: Record<string, unknown>
-    appended: Array<{ type: string; text: string }>
-  } {
-    const appended: Array<{ type: string; text: string }> = []
+describe('registerBootstrap: agent/inbox/inserted —— 锚定轮注入', () => {
+  function inboxAgent(id: string, extra: Record<string, unknown> = {}): { agent: Record<string, unknown>; prepends: Array<{ queue: string; text: string }> } {
+    const prepends: Array<{ queue: string; text: string }> = []
     const agent = {
-      session: {
-        id,
-        ...extra,
-        append: (type: string, data: unknown) => {
-          const d = data as { message?: { content?: Array<{ text?: string }> }; content?: Array<{ text?: string }> }
-          const blocks = d.message?.content ?? d.content ?? []
-          appended.push({ type, text: blocks[0]?.text ?? '' })
-          return { seq: appended.length }
+      session: { id, ...extra },
+      inbox: {
+        prepend: (queue: string, m: unknown) => {
+          const text = (m as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? ''
+          prepends.push({ queue, text })
         },
       },
-      options: { provider: 'test-provider', model: 'test-model' },
-      inbox: { prepend: () => { throw new Error('v1.60 起不再走 inbox.prepend') } },
     }
-    return { agent, appended }
+    return { agent, prepends }
   }
 
-  it('新根会话首条用户消息 ⇒ 一次性写入 [占位 system, user1, assistant1, user2, assistant2]', async () => {
+  it('新根会话首条用户消息 ⇒ 按**逆序** prepend 锚定消息（最终队列 = 锚定消息顺序 + 真实消息）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, appended } = inboxAgent('main-boot-12', { header: { cwd: dir }, events: [] })
+    const { agent, prepends } = inboxAgent('main-boot-12', { header: { cwd: dir }, events: [] })
 
     await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
 
-    // 1 条占位 system + 2 轮 × (user + assistant)
-    expect(appended.map((a) => a.type)).toEqual([
-      'system/message',
-      'user/message', 'assistant/message',
-      'user/message', 'assistant/message',
-    ])
-    // 两条锚定消息按**正序**落位（不再是逆序 prepend）
-    expect(appended.filter((a) => a.type === 'user/message').map((a) => a.text))
-      .toEqual([...DEFAULT_ANCHOR_MESSAGES])
-    // 造出的 assistant 回复正文
-    expect(appended.filter((a) => a.type === 'assistant/message').map((a) => a.text))
-      .toEqual(['acknowledge', 'acknowledge'])
+    expect(prepends).toHaveLength(DEFAULT_ANCHOR_MESSAGES.length)
+    expect(prepends.every((p) => p.queue === 'next-turn')).toBe(true)
+    // 逆序 prepend ⇒ 记录到的调用顺序是倒过来的
+    expect(prepends.map((p) => p.text)).toEqual([...DEFAULT_ANCHOR_MESSAGES].reverse())
   })
 
   it('已有 user/message 历史 ⇒ 不锚定（resume/续跑不重锚）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, appended } = inboxAgent('main-boot-13', {
+    const { agent, prepends } = inboxAgent('main-boot-13', {
       header: { cwd: dir },
       events: [{ type: 'user/message' }],
     })
 
     await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
 
-    expect(appended).toHaveLength(0)
+    expect(prepends).toHaveLength(0)
   })
 
   it('cheap-worker / skiff 会话 ⇒ 不锚定（autonomous worker 与角色会话不需锚定轮）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     for (const id of ['cheap-worker-worker-3', 'skiff-qa-boot-2']) {
-      const { agent, appended } = inboxAgent(id, { header: { cwd: dir }, events: [] })
+      const { agent, prepends } = inboxAgent(id, { header: { cwd: dir }, events: [] })
       await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
-      expect(appended, id).toHaveLength(0)
+      expect(prepends, id).toHaveLength(0)
     }
   })
 
   it('插件来源消息（ACC_MESSAGE_KIND）⇒ 不递归锚定', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, appended } = inboxAgent('main-boot-14', { header: { cwd: dir }, events: [] })
+    const { agent, prepends } = inboxAgent('main-boot-14', { header: { cwd: dir }, events: [] })
 
     // 用 ACC_MESSAGE_KIND 的**真值**（不从源码注释猜）：插件来源消息不得递归锚定
     await first(ctx, 'agent/inbox/inserted')({
@@ -326,6 +307,6 @@ describe('registerBootstrap: agent/inbox/inserted —— 锚定历史写入', ()
       message: { source: { kind: ACC_MESSAGE_KIND } },
     })
 
-    expect(appended).toHaveLength(0)
+    expect(prepends).toHaveLength(0)
   })
 })
