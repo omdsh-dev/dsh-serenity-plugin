@@ -32,6 +32,7 @@ import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
+import { AcpAccountsEditor } from './AcpAccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
 import { WeixinBridgeEditor } from './WeixinBridgeEditor.js'
 import './SettingsSection.css'
@@ -392,12 +393,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
                   '· 与「微信桥」的关系：两者是**入站通道的两个实现**，每个 CCC 二选一（在各自的\n' +
                   '  .opencode/serenity.json 里配 im.channel）。本开关只管**端口开不开**，不管哪个 CCC 用哪条\n' +
                   '· 🔴 认证：本面绑 0.0.0.0 且 ACP 协议自身**不做认证** ⇒ 由 ACC 在握手前用\n' +
-                  '  **每 CCC 一枚 token**（localstore 键 IM_ACP_TOKEN）把关；没配 token 的 CCC 一律连不上\n' +
-                  '· 怎么用：① 在目标 CCC 配 im.channel=acp ＋ im.acp.role=<角色名> ② 生成 token\n' +
-                  '  ③ 客户端连 ws://<本机IP>:3200，带 Authorization: Bearer <token> 或 ?token=<token>\n' +
+                  '  **每账户一枚 token**（localstore 键 IM_ACP_TOKEN_<账户ID>）把关；没配账户的 CCC 一律连不上\n' +
+                  '· 账户台账在**下面那张表**里管（加设备／看指纹／轮换／删除），不必改 JSON 或手敲命令\n' +
                   '· ⚠️ 明文 ws:// ⇒ 局域网内可抓包；**上公网必须走 wss ＋ Cloudflare Access**\n' +
                   '· 协议无认证这一条由 ACC 补齐：未过 token 闸的连接**根本升不上来**（不是"升上来再拒"）'}
                 </p>
+                <AcpAccountsEditor />
               </div>
             }
           />

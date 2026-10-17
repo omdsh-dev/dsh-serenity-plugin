@@ -339,15 +339,39 @@ export interface ImSettings {
 /** ACP 通道参数（CCC 级） */
 export interface ImAcpSettings {
   /**
-   * 绑定的 skiff 角色名（**必须 ∈ 本 CCC 的 `skiff.roles`**）。
-   * 缺省 / 角色不存在 ⇒ **连接被拒**（fail-closed：宁可连不上，不可给出一个无身份、无约束的裸 agent）。
-   */
-  role?: string;
-  /**
    * 该 CCC 的 ACP 面开关（**与 `channel: "acp"` 是「与」关系**：两者都真才算启用）。
    * 缺省 false。
    */
   enabled?: boolean;
+  /**
+   * **账户声明 —— 必填**（v1.59.1，owner 2026-10-17 令「token 生成和 skiff 绑定都做配置上」）。
+   *
+   * 🔴 **声明式，照 `weixin.accounts[]` 的形态**：结构（账户与角色）放本文件，
+   *    凭据（token）由 `accountId` 派生键 `IM_ACP_TOKEN_<ACCOUNT_ID>` 落 localstore。
+   *
+   * 判据（关键）：**配置是真相源，localstore 只是它的派生凭据**。
+   *   声明了账户却还没有 token ⇒ **下次判定前当场生成**（不依赖启动那一次）。
+   *   撤销账户 ⇒ 该账户的 token **不再被接受**（即使 localstore 里还留着，也只是死键）。
+   *
+   * ⚠️ **没有简写退回**：不写本项 ⇒ **一个账户都没有 ⇒ 谁都认证不了**。
+   *    刻意如此 —— 多一条永不生效的简写分支，只会把"配置写错了"伪装成"用了简写"。
+   */
+  accounts?: ImAcpAccount[];
+}
+
+/** ACP 账户声明（一台客户端一条；形状对齐 `weixin.accounts[]`） */
+export interface ImAcpAccount {
+  /**
+   * 本地唯一键（如 `agmente-phone`；凭据键 `IM_ACP_TOKEN_<ACCOUNT_ID>`）。
+   * ⚠️ 归一为 **UPPER_SNAKE**（`agmente-phone` → `AGMENTE_PHONE`），与微信桥同规则。
+   */
+  accountId: string;
+  /** 该账户绑定的 skiff 角色名（**必须 ∈ `skiff.roles`**；缺省 ＝ 拒绝该账户） */
+  role?: string;
+  /** 该账户开关（缺省 true）——撤一台设备用它，不必删条目 */
+  enabled?: boolean;
+  /** 展示名（可选，仅用于诊断面） */
+  name?: string;
 }
 
 /** 微信桥账号配置（serenity.json 内；凭据部分在 localstore） */

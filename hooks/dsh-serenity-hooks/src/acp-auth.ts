@@ -36,26 +36,44 @@
  */
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { dirname, join, relative, isAbsolute, resolve as resolvePath } from 'node:path'
-import { readStore, writeEntry, getEntry } from './localstore-ops.js'
-import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type ImSettings, type ImAcpSettings } from './ccc.js'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join, relative, isAbsolute, resolve, resolve as resolvePath } from 'node:path'
+import { readStore, writeEntry, getEntry, unsetEntry } from './localstore-ops.js'
+import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type ImSettings, type ImAcpSettings, type ImAcpAccount } from './ccc.js'
 
-/** localstore 凭据键（credential scope ⇒ UPPER_SNAKE） */
-export const ACP_TOKEN_KEY = 'IM_ACP_TOKEN'
+/** 多账户凭据键前缀（`IM_ACP_TOKEN_<ACCOUNT_ID>`；与微信桥 `WEIXIN_<ID>_<FIELD>` 同构） */
+const ACP_TOKEN_PREFIX = 'IM_ACP_TOKEN_'
+
+/**
+ * `accountId` → UPPER_SNAKE 片段（`agmente-phone` → `AGMENTE_PHONE`）。
+ *
+ * 🔴 **与 `weixin-route.ts` 的 `accountKeyPart` 逐字同规则** —— 刻意复制而非共享：
+ *    两者属不同子域（微信 vs ACP），共享会让"改微信键规则"意外改掉 ACP 的既有凭据键，
+ *    而凭据键**改一次就等于全体客户端掉线**。⇒ 用"同规则的两份"换"互不牵连"。
+ */
+function accountKeyPart(accountId: string): string {
+  return accountId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+}
+
+/** 该账户的凭据键（`IM_ACP_TOKEN_<ACCOUNT_ID>`）；`accountId` 必填 */
+export function acpTokenKeyFor(accountId: string): string {
+  return `${ACP_TOKEN_PREFIX}${accountKeyPart(accountId)}`
+}
 
 /** token 字节数（32 B = 256 bit；hex 后 64 字符） */
 const TOKEN_BYTES = 32
 
 /**
- * 该 CCC 的 ACP token（**读**；不存在返回 null）。
+ * 该**账户**的 ACP token（**读**；不存在返回 null）。
  *
- * 🔴 **不自动生成** —— 生成是**写操作**，只在 owner/面板显式要求时做
- * （`ensureAcpToken`）。读路径永远无副作用：否则每次启动都会改 localstore。
+ * 🔴 **不自动生成** —— 生成是**写操作**，只在显式要求时做（`ensureAcpToken`）。
+ *    读路径永远无副作用：否则每次判定都会改 localstore。
+ *
+ * @param accountId 账户键（必填 —— 凭据按账户分离，没有"CCC 默认 token"这回事）
  */
-export function readAcpToken(root: string): string | null {
+export function readAcpToken(root: string, accountId: string): string | null {
   try {
-    const value = getEntry(root, 'credential', ACP_TOKEN_KEY)
+    const value = getEntry(root, 'credential', acpTokenKeyFor(accountId))
     return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
   } catch {
     return null
@@ -67,19 +85,24 @@ export function readAcpToken(root: string): string | null {
  *
  * ⚠️ **幂等**：已有 token 时**原样返回**（不轮换）—— 轮换会让在用的客户端立刻断线，
  *    必须是一次显式动作（`resetAcpToken`）。
+ *
+ * @param accountId 多账户时指明哪个账户；省略 ＝ 单账户简写键
  */
-export function ensureAcpToken(root: string): string {
-  const existing = readAcpToken(root)
+export function ensureAcpToken(root: string, accountId: string): string {
+  const existing = readAcpToken(root, accountId)
   if (existing) return existing
   const token = randomBytes(TOKEN_BYTES).toString('hex')
-  writeEntry(root, 'credential', ACP_TOKEN_KEY, token)
+  writeEntry(root, 'credential', acpTokenKeyFor(accountId), token)
   return token
 }
 
-/** 轮换 token（显式动作；返回新值）。旧 token 立即失效。 */
-export function resetAcpToken(root: string): string {
+/**
+ * 轮换 token（显式动作；返回新值）。旧 token 立即失效。
+ * @param accountId 账户键
+ */
+export function resetAcpToken(root: string, accountId: string): string {
   const token = randomBytes(TOKEN_BYTES).toString('hex')
-  writeEntry(root, 'credential', ACP_TOKEN_KEY, token)
+  writeEntry(root, 'credential', acpTokenKeyFor(accountId), token)
   return token
 }
 
@@ -94,14 +117,6 @@ export function safeEqual(a: string, b: string): boolean {
   const bufB = Buffer.from(b, 'utf8')
   if (bufA.length !== bufB.length) return false
   return timingSafeEqual(bufA, bufB)
-}
-
-/** 一枚 token 的归属（用于"谁拥有这个 token"的反查与排重） */
-interface TokenOwner {
-  root: string
-  token: string
-  /** token 的 SHA-256（**日志与诊断里只出现它**，绝不出现 token 明文） */
-  fingerprint: string
 }
 
 /** token 指纹（诊断面用；不可逆） */
@@ -137,32 +152,122 @@ export function extractToken(headers: Record<string, unknown>, url: string | und
 }
 
 /**
- * 校验一枚候选 token，返回它归属的 CCC 根（**未命中返回 null**）。
+ * 一个"可接受 token 的账户"——**认证闸真正比对的单元**。
+ *
+ * 🔴 v1.59.1 的关键抽象变更：原先是"CCC ↔ 一枚 token"，现在是
+ *    **"（CCC, 账户）↔ 一枚 token ↔ 一个角色"**。同一个 CCC 可以有多个账户
+ *    （一台手机、一个脚本各一枚），彼此**互不影响**：撤一个不动另一个。
+ */
+export interface AcpAccount {
+  /** 归属 CCC 根 */
+  root: string
+  /** 账户键（单账户简写 ⇒ `''`） */
+  accountId: string
+  /** 凭据键（localstore） */
+  tokenKey: string
+  /** 该账户的 token（**读时现取**；不缓存） */
+  token: string
+  /** 该账户绑定的 skiff 角色名 */
+  role: string
+}
+
+/**
+ * 把该 CCC 的配置**展开成账户列表**（读时现算，**无快照**）。
+ *
+ * 🔴 **`im.acp.accounts` 是必填项** —— 没有它就没有账户，**一个都认证不了**。
+ *    刻意**不提供**"单账户简写"退回路径（v1.59.1）：那会多出一条永不生效的分支，
+ *    而它的唯一作用是把"配置写错了"伪装成"用了简写"。
+ *
+ * 判据（三条都由调用方以 fail-closed 消费）：
+ *  - `enabled !== false`（缺省 true）
+ *  - `role` 非空（空 ⇒ 该账户**不出现**在列表里 ⇒ 必然登录失败）
+ *  - token 存在（不存在 ⇒ 同样不出现）
+ *
+ * ⚠️ 本函数**纯读，绝不生成 token** —— 生成是写操作，归 `ensureAcpChannelTokens`。
+ *    这样 upgrade 路径可以随时现算而不冒"每次连接都写 localstore"的风险。
+ */
+export function expandAcpAccounts(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): AcpAccount[] {
+  const im = readImSettings(root, paths)
+  if (im.channel !== 'acp' || im.acp.enabled !== true) return []
+
+  const declared = Array.isArray(im.acp.accounts) ? im.acp.accounts : []
+  const out: AcpAccount[] = []
+  for (const a of declared) {
+    if (typeof a !== 'object' || a === null) continue
+    if (a.enabled === false) continue
+    const accountId = typeof a.accountId === 'string' ? a.accountId.trim() : ''
+    if (accountId === '') continue // 账户必须具名（凭据键由它派生）
+    const role = typeof a.role === 'string' ? a.role.trim() : ''
+    if (role === '') continue // 无角色 ⇒ 不给一个无身份的 agent（fail-closed）
+    const token = readAcpToken(root, accountId)
+    if (!token) continue // 未生成 ⇒ 该账户此刻不可用（生成归 ensureAcpChannelTokens）
+    out.push({ root, accountId, tokenKey: acpTokenKeyFor(accountId), token, role })
+  }
+  return out
+}
+
+/**
+ * **让配置里声明的账户都拥有 token**（写操作；幂等；由装配层与配置变更时调用）。
+ *
+ * 🔴 owner 令「**随即生成**认证用的 token」的落地点。与 v1.59.0 的差别：
+ *    那时只在**启动**时跑一次 ⇒ 加一台设备要重启；现在**任何一次判定前都可以跑**，
+ *    且撤账户后不会被"复活"（只对**当前声明里**的账户生成）。
+ *
+ * @returns 本次**新生成**的账户键列表（已存在的原样返回，不轮换）
+ */
+export function ensureAcpChannelTokens(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
+  const im = readImSettings(root, paths)
+  if (im.channel !== 'acp' || im.acp.enabled !== true) return []
+
+  const declared = Array.isArray(im.acp.accounts) ? im.acp.accounts : []
+  const created: string[] = []
+  for (const a of declared) {
+    if (typeof a !== 'object' || a === null) continue
+    if (a.enabled === false) continue
+    const accountId = typeof a.accountId === 'string' ? a.accountId.trim() : ''
+    if (accountId === '') continue
+    try {
+      if (!readAcpToken(root, accountId)) {
+        ensureAcpToken(root, accountId)
+        created.push(accountId)
+      }
+    } catch {
+      /* 写失败不抛：本面是可选面；失败会表现为"该账户连不上"，由诊断面报 */
+    }
+  }
+  return created
+}
+
+/**
+ * 校验一枚候选 token，返回它归属的**账户**（未命中返回 null）。
  *
  * @param candidate 客户端出示的 token
  * @param roots 候选 CCC 根集合（由调用方枚举——本模块不认识"CCC 在哪"）
  */
-export function resolveTokenOwner(candidate: string, roots: readonly string[]): string | null {
+export function resolveTokenAccount(
+  candidate: string,
+  roots: readonly string[],
+  paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS,
+): AcpAccount | null {
   if (!candidate) return null
   for (const root of roots) {
-    const token = readAcpToken(root)
-    if (token && safeEqual(candidate, token)) return root
+    for (const acct of expandAcpAccounts(root, paths)) {
+      if (safeEqual(candidate, acct.token)) return acct
+    }
   }
   return null
 }
 
 /**
- * 枚举**启用了 ACP 通道**的 CCC（供 `resolveTokenOwner` 用）。
+ * 枚举**有可用 ACP 账户**的 CCC（供准入名单用）。
  *
- * 判据（与装配层同源，见 `acpChannelEnabled`）：`im.channel === 'acp'` ∧ `im.acp.enabled === true`
- * ∧ token 已生成。⚠️ 三者**缺一即不算**（fail-closed：宁可连不上，不可放行一个半配置的通道）。
+ * 判据：`im.channel === 'acp'` ∧ `im.acp.enabled === true` ∧ **至少一个账户有 token 且配了角色**。
+ * ⚠️ 缺一即不算（fail-closed：宁可连不上，不可放行一个半配置的通道）。
  */
 export function listAcpRoots(roots: readonly string[], paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
   const out: string[] = []
   for (const root of roots) {
-    if (!acpChannelEnabled(root, paths)) continue
-    if (!readAcpToken(root)) continue // 未生成 token ⇒ 本 CCC 的 ACP 面不可用（fail-closed）
-    out.push(root)
+    if (expandAcpAccounts(root, paths).length > 0) out.push(root)
   }
   return out
 }
@@ -194,12 +299,6 @@ export function acpChannelEnabled(root: string, paths: string[] = DEFAULT_SERENI
   return im.channel === 'acp' && im.acp.enabled === true
 }
 
-/** 该 CCC 绑定的 skiff 角色名（未配置 ⇒ null） */
-export function acpRoleFor(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string | null {
-  const role = readImSettings(root, paths).acp.role
-  return typeof role === 'string' && role.trim() !== '' ? role.trim() : null
-}
-
 /**
  * 客户端 `session/new` 传来的 `cwd` 是否落在该 token 归属的 CCC 内。
  *
@@ -216,42 +315,70 @@ export function cwdInsideRoot(cwd: string, root: string): boolean {
 }
 
 /**
- * 一次性解析：候选 token → 归属 CCC ＋ 该 CCC 的角色。
+ * 一次性解析：候选 token → 归属 **账户**（含 CCC 根、账户键、角色）。
  *
- * @returns `{ root, role }`；token 无效 ／ CCC 未启用 ACP ／ 角色未配置 → null（**调用方一律拒绝连接**）
+ * @returns 账户；token 无效 ／ 通道未启用 ／ 无角色 → null（**调用方一律拒绝连接**）
  */
 export function authorizeAcpConnection(
   candidate: string | null,
   roots: readonly string[],
   paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS,
-): { root: string; role: string } | null {
+): AcpAccount | null {
   if (!candidate) return null
-  const root = resolveTokenOwner(candidate, listAcpRoots(roots, paths))
-  if (!root) return null
-  const role = acpRoleFor(root, paths)
-  if (!role) return null // fail-closed：没有角色 ⇒ 不给一个无身份的 agent
-  return { root, role }
+  return resolveTokenAccount(candidate, listAcpRoots(roots, paths), paths)
 }
 
 // ── 内部：给单测/诊断用的只读快照 ───────────────────────────────────────────────
+
+/** 单个账户的对外可见形态（**绝不含 token 明文**） */
+export interface AcpAccountStatus {
+  accountId: string
+  name: string | null
+  role: string | null
+  enabled: boolean
+  hasToken: boolean
+  tokenFingerprint: string | null
+  /** 该账户此刻**能不能被认证闸接受**（三条判据全真） */
+  usable: boolean
+  /** 不能用的原因（能用 ⇒ null）—— 直接指向该改哪个字段 */
+  blockedBy: string | null
+}
 
 /** 该 CCC 的 ACP 通道对外**可见形态**（诊断面用；**绝不含 token 明文**） */
 export function acpChannelStatus(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): {
   channel: 'weixin' | 'acp'
   enabled: boolean
-  role: string | null
-  hasToken: boolean
-  tokenFingerprint: string | null
+  accounts: AcpAccountStatus[]
 } {
   const im = readImSettings(root, paths)
-  const token = readAcpToken(root)
-  return {
-    channel: im.channel,
-    enabled: acpChannelEnabled(root, paths),
-    role: acpRoleFor(root, paths),
-    hasToken: token !== null,
-    tokenFingerprint: token ? tokenFingerprint(token) : null,
+  const declared = Array.isArray(im.acp.accounts) ? im.acp.accounts : []
+  const usable = new Set(expandAcpAccounts(root, paths).map((a) => a.accountId))
+
+  const accounts: AcpAccountStatus[] = []
+  for (const a of declared) {
+    if (typeof a !== 'object' || a === null) continue
+    const accountId = typeof a.accountId === 'string' ? a.accountId.trim() : ''
+    if (accountId === '') continue
+    const role = typeof a.role === 'string' && a.role.trim() !== '' ? a.role.trim() : null
+    const token = readAcpToken(root, accountId)
+    const enabled = a.enabled !== false
+    let blockedBy: string | null = null
+    if (!enabled) blockedBy = '该账户 enabled=false'
+    else if (!role) blockedBy = '未配 role'
+    else if (!token) blockedBy = '尚无 token（保存配置后自动生成）'
+    accounts.push({
+      accountId,
+      name: typeof a.name === 'string' && a.name.trim() !== '' ? a.name.trim() : null,
+      role,
+      enabled,
+      hasToken: token !== null,
+      tokenFingerprint: token ? tokenFingerprint(token) : null,
+      usable: usable.has(accountId),
+      blockedBy,
+    })
   }
+
+  return { channel: im.channel, enabled: acpChannelEnabled(root, paths), accounts }
 }
 
 /** 只读：该 CCC 的 localstore 是否存在（避免对不存在的 CCC 白跑 token 反查） */
@@ -280,33 +407,132 @@ export function looksLikeCcc(root: string): boolean {
   }
 }
 
-/** 排重后的 token 归属表（诊断用；同一 token 出现在两个 CCC ⇒ 响亮暴露，不静默取第一个） */
+/** 排重后的 token 归属表（诊断用；同一 token 出现在两个账户 ⇒ 响亮暴露，不静默取第一个） */
 export function tokenOwnerAudit(roots: readonly string[]): {
-  owners: TokenOwner[]
-  duplicates: Array<{ fingerprint: string; roots: string[] }>
+  owners: Array<{ root: string; accountId: string; fingerprint: string }>
+  duplicates: Array<{ fingerprint: string; owners: string[] }>
 } {
-  const owners: TokenOwner[] = []
+  const owners: Array<{ root: string; accountId: string; fingerprint: string }> = []
   const byToken = new Map<string, string[]>()
   for (const root of roots) {
-    const token = readAcpToken(root)
-    if (!token) continue
-    owners.push({ root, token, fingerprint: tokenFingerprint(token) })
-    const list = byToken.get(token) ?? []
-    list.push(root)
-    byToken.set(token, list)
+    for (const acct of expandAcpAccounts(root)) {
+      const label = `${root}#${acct.accountId}`
+      owners.push({ root, accountId: acct.accountId, fingerprint: tokenFingerprint(acct.token) })
+      const list = byToken.get(acct.token) ?? []
+      list.push(label)
+      byToken.set(acct.token, list)
+    }
   }
   const duplicates = [...byToken.entries()]
-    .filter(([, rs]) => rs.length > 1)
-    .map(([t, rs]) => ({ fingerprint: tokenFingerprint(t), roots: rs }))
+    .filter(([, ls]) => ls.length > 1)
+    .map(([t, ls]) => ({ fingerprint: tokenFingerprint(t), owners: ls }))
   return { owners, duplicates }
 }
 
-/** 测试辅助：读 store 里该键的原始值（绕开 getEntry 的归一） */
-export function __rawTokenForTest(root: string): string | undefined {
+/** 测试辅助：读 store 里该账户键的原始值（绕开 getEntry 的归一） */
+export function __rawTokenForTest(root: string, accountId: string): string | undefined {
   try {
     const store = readStore(root, 'credential') as Record<string, string>
-    return store[ACP_TOKEN_KEY]
+    return store[acpTokenKeyFor(accountId)]
   } catch {
     return undefined
   }
+}
+
+// ── CCC 配置写入（面板保存；serenity.json 的 `im.acp.accounts` 部分）──────────────
+
+/**
+ * 读取 serenity.json 原文（不存在 → 空对象）。
+ *
+ * ⚠️ 与 `weixin-route.ts` 的同名函数**刻意各写一份**：两者写的是**不同段**
+ * （`weixin` vs `im.acp.accounts`），共用一个会在"某天只想改其中一段"时
+ * 意外把另一段也重写一遍。同规则两份 > 一个会互相牵连的共用件。
+ */
+function readRawConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): Record<string, unknown> {
+  for (const candidate of paths) {
+    const p = resolve(root, candidate)
+    if (existsSync(p)) {
+      try {
+        const v = JSON.parse(readFileSync(p, 'utf-8').replace(/^\uFEFF/, '')) as unknown
+        if (v && typeof v === 'object' && !Array.isArray(v)) return v as Record<string, unknown>
+      } catch {
+        return {}
+      }
+    }
+  }
+  return {}
+}
+
+/**
+ * 写回 `im.acp.accounts`（保留文件里其余所有字段）。
+ *
+ * 🔴 **只碰这一个键**：`im.channel` / `im.acp.enabled` 归面板总开关与人工配置，
+ *    本函数不越权改它们（否则"加一台设备"会顺手把通道开关也改了）。
+ */
+export function saveAcpAccounts(
+  root: string,
+  accounts: ImAcpAccount[],
+  paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS,
+): ImAcpAccount[] {
+  const target = resolve(root, paths[0] ?? '.opencode/serenity.json')
+  const raw = readRawConfig(root, paths)
+  const im = (raw.im && typeof raw.im === 'object' ? raw.im : {}) as Record<string, unknown>
+  const acp = (im.acp && typeof im.acp === 'object' ? im.acp : {}) as Record<string, unknown>
+  acp.accounts = accounts
+  im.acp = acp
+  raw.im = im
+  const dir = resolve(target, '..')
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+  writeFileSync(target, JSON.stringify(raw, null, 2) + '\n', 'utf-8')
+  return accounts
+}
+
+/**
+ * 规范化一条账户声明（面板传入的任意形状 → 合法声明；非法 ⇒ null）。
+ *
+ * 🔴 返回类型里 `role` 是**必填**（不是 `ImAcpAccount` 的可选形态）——
+ *    本函数的契约就是"要么给一个角色齐备的账户，要么给 null"。
+ *    这样调用方**不必再判一次** `role` 有没有（那正是会漂的第二处判据）。
+ */
+export function normalizeAcpAccount(input: unknown): (ImAcpAccount & { accountId: string; role: string }) | null {
+  if (typeof input !== 'object' || input === null) return null
+  const a = input as Record<string, unknown>
+  const accountId = typeof a.accountId === 'string' ? a.accountId.trim() : ''
+  if (accountId === '') return null
+  const role = typeof a.role === 'string' ? a.role.trim() : ''
+  if (role === '') return null
+  const out: ImAcpAccount & { accountId: string; role: string } = { accountId, role }
+  if (typeof a.name === 'string' && a.name.trim() !== '') out.name = a.name.trim()
+  if (a.enabled === false) out.enabled = false
+  return out
+}
+
+/** 增／改一条账户（按 accountId 定位；写入后返回全表） */
+export function upsertAcpAccount(
+  root: string,
+  account: ImAcpAccount,
+  paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS,
+): ImAcpAccount[] {
+  const current = readImSettings(root, paths).acp.accounts ?? []
+  const list = [...current]
+  const idx = list.findIndex((a) => a.accountId === account.accountId)
+  if (idx >= 0) list[idx] = { ...list[idx], ...account }
+  else list.push(account)
+  return saveAcpAccounts(root, list, paths)
+}
+
+/** 删一条账户（**同时清掉它的 token**，避免留死键） */
+export function removeAcpAccount(
+  root: string,
+  accountId: string,
+  paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS,
+): ImAcpAccount[] {
+  const current = readImSettings(root, paths).acp.accounts ?? []
+  const next = saveAcpAccounts(root, current.filter((a) => a.accountId !== accountId), paths)
+  try {
+    unsetEntry(root, 'credential', acpTokenKeyFor(accountId))
+  } catch {
+    /* 键本就不存在 ⇒ 无事 */
+  }
+  return next
 }

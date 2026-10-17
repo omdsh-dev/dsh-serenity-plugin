@@ -410,6 +410,43 @@
   gap: 8px;
 }
 
+/* ── v1.59.2 ACP 账户台账表（owner 2026-10-17：「面板里只放个开关不放具体的条目吗？」）
+ *
+ * 用**表格**而不是卡片列表：台账天生是"一行一条、列对齐可比"的数据
+ * （账户 ／ 角色 ／ 状态 ／ token 指纹），卡片会把可比性拆散。
+ * 窄屏靠横向滚动兜底——不折行，折行后"哪一格对应哪一列"就看不出来了。 */
+.ss-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  overflow-x: auto;
+  display: block;
+}
+
+.ss-table th,
+.ss-table td {
+  padding: 4px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--dsw-alias-border-l2);
+  white-space: nowrap;
+}
+
+.ss-table th {
+  color: var(--dsw-alias-label-tertiary);
+  font-weight: 600;
+}
+
+.ss-table td code {
+  font-size: 11px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.12));
+}
+
+.ss-table button {
+  margin-left: 4px;
+}
+
 /* ── v1.27.6 「?」帮助浮层（hover/焦点显示三行以上严谨说明）── */
 .ss-help {
   position: relative;

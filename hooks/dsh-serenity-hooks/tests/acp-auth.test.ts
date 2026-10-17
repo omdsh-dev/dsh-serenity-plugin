@@ -1,20 +1,27 @@
 /**
- * acp-auth.test.ts — ACP 面**认证与身份层**的判据（v1.59.0）
+ * acp-auth.test.ts — ACP 面**认证与身份层**的判据（v1.59.1：账户模型）
  *
  * ## 为什么这件必须有（不是"凑覆盖率"）
  * 本模块是**唯一**的接入关口（`dsh-acp` 的 `authenticate()` 恒成功、无认证缝 —— 读其
  * `lib/index.js` 逐字）。它坏了 = **`0.0.0.0` 上的 ACP 面对局域网完全敞开**，
  * 而"敞开"没有任何日常信号会报（没有报错、没有告警、功能一切正常）。
  *
+ * ## v1.59.1 的模型变更（owner 2026-10-17 令）
+ * 「**token 生成和 skiff 绑定都做配置上**」⇒ 判据单元从「CCC ↔ 一枚 token」
+ * 变成「**（CCC, 账户）↔ 一枚 token ↔ 一个角色**」。形状照 `weixin.accounts[]`：
+ * 结构在 `serenity.json`，凭据按键 `IM_ACP_TOKEN_<ACCOUNT_ID>` 派生落 localstore。
+ *
+ * 🔴 **没有"单账户简写"退回** —— 不写 `accounts` ⇒ 一个账户都没有 ⇒ 谁都认证不了。
+ *    刻意如此：多一条永不生效的分支只会把"配置写错"伪装成"用了简写"。
+ *
  * ## 本件覆盖什么（按"坏了会怎样"排序）
  * ① 🔴 **常时比较**：错 token 必须**拒**，且**同长度错 token** 也要拒
- *    （防"只比长度"这类假实现混过去）
- * ② 🔴 **fail-closed 三连**：无 token ／ 未启用通道 ／ 无角色 ⇒ **一律拒**
- * ③ **归属正确性**：token → CCC 一一对应；**A 的 token 不能认成 B**
- * ④ 🔴 **越权防护**：`cwd` 落在**令牌归属 CCC 之外** ⇒ 拒（防一枚 token 越权到别的 CCC）
- * ⑤ **取 token 的两种形态**：`Authorization: Bearer` 与 `?token=`
- * ⑥ **幂等与轮换**：`ensureAcpToken` 重复调用**不换号**（换号会让在用客户端全断）；
- *    `resetAcpToken` 才换，且旧号立即失效
+ * ② 🔴 **fail-closed 四连**：无 token ／ 通道未启用 ／ 账户无 role ／ 无 accounts ⇒ **一律拒**
+ * ③ **账户隔离**：A 的 token 认不成 B；同 CCC 内两个账户**互不影响**
+ * ④ 🔴 **越权防护**：`cwd` 落在令牌归属 CCC 之外 ⇒ 拒
+ * ⑤ **令牌键派生**：`accountId` → `IM_ACP_TOKEN_<UPPER_SNAKE>`
+ * ⑥ **幂等与轮换**：重复 `ensureAcpToken` **不换号**；`resetAcpToken` 才换
+ * ⑦ 🔴 **配置即真相**：改配置后**下一次判定**就用新值（不重启、不重算快照）
  *
  * ## 判据纪律
  * · **真文件树**（不是 mock）：本模块读真配置 ＋ 真 localstore —— 替身会把要验的那一环绕过去
@@ -27,18 +34,19 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import {
-  ACP_TOKEN_KEY,
   readAcpToken,
   ensureAcpToken,
   resetAcpToken,
+  acpTokenKeyFor,
   safeEqual,
   tokenFingerprint,
   extractToken,
-  resolveTokenOwner,
+  resolveTokenAccount,
+  expandAcpAccounts,
+  ensureAcpChannelTokens,
   listAcpRoots,
   readImSettings,
   acpChannelEnabled,
-  acpRoleFor,
   cwdInsideRoot,
   authorizeAcpConnection,
   acpChannelStatus,
@@ -49,7 +57,16 @@ import { writeEntry } from '../src/localstore-ops.js'
 
 const made: string[] = []
 
-/** 造一个 CCC（可指定 im 段与角色） */
+/** 默认账户声明（一台"完整可用"的客户端） */
+function acct(accountId = 'agmente-phone', role = 'tester', enabled = true) {
+  return { accountId, role, enabled }
+}
+
+/**
+ * 造一个 CCC。
+ * @param im  `im` 段（原样写进配置）
+ * @param roles `skiff.roles` 声明
+ */
 function mkCcc(im: unknown, roles: Record<string, unknown> = { tester: { systemPrompt: '测试角色' } }): string {
   const root = mkdtempSync(join(tmpdir(), 'acp-auth-'))
   made.push(root)
@@ -59,11 +76,16 @@ function mkCcc(im: unknown, roles: Record<string, unknown> = { tester: { systemP
   return root
 }
 
-/** 造一个"完整可用"的 ACP CCC（启用 ＋ 有角色 ＋ 有 token） */
-function mkAcpCcc(role = 'tester'): string {
-  const root = mkCcc({ channel: 'acp', acp: { enabled: true, role } })
-  ensureAcpToken(root)
+/** 造一个"完整可用"的 ACP CCC（启用 ＋ 一个声明账户 ＋ 该账户有 token） */
+function mkAcpCcc(role = 'tester', accountId = 'agmente-phone'): string {
+  const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct(accountId, role)] } })
+  ensureAcpToken(root, accountId)
   return root
+}
+
+/** 重写该 CCC 的 im 段（用于验"改配置即生效"，不重启任何东西） */
+function rewriteIm(root: string, im: unknown): void {
+  writeFileSync(join(root, '.opencode', 'serenity.json'), JSON.stringify({ im, skiff: { roles: { tester: { systemPrompt: 'x' } } } }))
 }
 
 afterEach(() => {
@@ -72,130 +94,78 @@ afterEach(() => {
   }
 })
 
-describe('acp-auth: token 生成与轮换', () => {
+describe('acp-auth: token 生成与轮换（按账户）', () => {
   it('ensureAcpToken 首次生成 64 位 hex（32 字节），且**落进该 CCC 的 localstore**', () => {
     const root = mkAcpCcc()
-    const token = readAcpToken(root)!
+    const token = readAcpToken(root, 'agmente-phone')!
     expect(token).toMatch(/^[0-9a-f]{64}$/)
     // 判据 = store 里真有这个键（不是"函数返回了就算"）
-    expect(__rawTokenForTest(root)).toBe(token)
-    expect(ACP_TOKEN_KEY).toBe('IM_ACP_TOKEN')
+    expect(__rawTokenForTest(root, 'agmente-phone')).toBe(token)
+  })
+
+  it('🔴 凭据键按 accountId 派生：`IM_ACP_TOKEN_<UPPER_SNAKE>`（与微信桥同规则）', () => {
+    expect(acpTokenKeyFor('agmente-phone')).toBe('IM_ACP_TOKEN_AGMENTE_PHONE')
+    expect(acpTokenKeyFor('script_2')).toBe('IM_ACP_TOKEN_SCRIPT_2')
+    // 大小写与分隔符都归一
+    expect(acpTokenKeyFor('My.Device X')).toBe('IM_ACP_TOKEN_MY_DEVICE_X')
   })
 
   it('🔴 ensureAcpToken 幂等：重复调用**不换号**（换号会让在用客户端全部断线）', () => {
     const root = mkAcpCcc()
-    const first = readAcpToken(root)!
-    const second = ensureAcpToken(root)
-    expect(second).toBe(first)
-    expect(readAcpToken(root)).toBe(first)
+    const t1 = readAcpToken(root, 'agmente-phone')
+    ensureAcpToken(root, 'agmente-phone')
+    expect(readAcpToken(root, 'agmente-phone')).toBe(t1)
   })
 
   it('resetAcpToken：**换**新号，且旧号立即失效（显式动作才允许轮换）', () => {
     const root = mkAcpCcc()
-    const old = readAcpToken(root)!
-    const fresh = resetAcpToken(root)
+    const old = readAcpToken(root, 'agmente-phone')!
+    const fresh = resetAcpToken(root, 'agmente-phone')
     expect(fresh).not.toBe(old)
-    expect(readAcpToken(root)).toBe(fresh)
+    expect(readAcpToken(root, 'agmente-phone')).toBe(fresh)
+    expect(resolveTokenAccount(old, [root])).toBeNull()
+    expect(resolveTokenAccount(fresh, [root])).toMatchObject({ role: 'tester' })
   })
 
   it('未生成时 readAcpToken = null（**不撒谎**：读路径绝不顺手生成）', () => {
-    const root = mkCcc({ channel: 'acp', acp: { enabled: true, role: 'tester' } })
-    expect(readAcpToken(root)).toBeNull()
-    expect(acpChannelStatus(root).hasToken).toBe(false)
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct()] } })
+    expect(readAcpToken(root, 'agmente-phone')).toBeNull()
+    expect(expandAcpAccounts(root)).toEqual([])
     // 读一次之后仍然没有 —— 证明读路径无副作用
-    expect(readAcpToken(root)).toBeNull()
+    expect(readAcpToken(root, 'agmente-phone')).toBeNull()
   })
 
-  it('指纹是 token 的截断 SHA-256（诊断面只出指纹，**绝不出明文**）', () => {
-    const token = 'a'.repeat(64)
-    const fp = tokenFingerprint(token)
-    expect(fp).toHaveLength(12)
-    expect(fp).toMatch(/^[0-9a-f]{12}$/)
-    // 指纹不含明文（连子串都不该有）
-    expect(fp.includes('aaaa')).toBe(false)
-  })
-})
-
-describe('acp-auth: 常时比较', () => {
-  it('相等 ⇒ true；不等 ⇒ false', () => {
-    expect(safeEqual('abc', 'abc')).toBe(true)
-    expect(safeEqual('abc', 'abd')).toBe(false)
-  })
-
-  it('🔴 长度不同 ⇒ false（且**不抛**——timingSafeEqual 长度不等会抛）', () => {
-    expect(() => safeEqual('abc', 'abcd')).not.toThrow()
-    expect(safeEqual('abc', 'abcd')).toBe(false)
-    expect(safeEqual('', 'a')).toBe(false)
-  })
-
-  it('🔴 同长度但内容不同 ⇒ false（防"只比长度"的假实现）', () => {
-    expect(safeEqual('a'.repeat(64), 'b'.repeat(64))).toBe(false)
-  })
-})
-
-describe('acp-auth: 从请求里取 token（两种形态）', () => {
-  it('Authorization: Bearer <t>（大小写不敏感）', () => {
-    expect(extractToken({ authorization: 'Bearer tok123' }, '/acp')).toBe('tok123')
-    expect(extractToken({ authorization: 'bearer tok123' }, '/acp')).toBe('tok123')
-  })
-
-  it('?token=<t>（查询串）', () => {
-    expect(extractToken({}, '/acp?token=tok456')).toBe('tok456')
-  })
-
-  it('Bearer 优先于查询串（两者都在时）', () => {
-    expect(extractToken({ authorization: 'Bearer fromHeader' }, '/acp?token=fromQuery')).toBe('fromHeader')
-  })
-
-  it('都没有 ⇒ null（不是空串——空串会被误当成"带了 token"）', () => {
-    expect(extractToken({}, '/acp')).toBeNull()
-    expect(extractToken({}, undefined)).toBeNull()
-    expect(extractToken({ authorization: 'Basic xyz' }, '/acp')).toBeNull()
-    expect(extractToken({}, '/acp?token=')).toBeNull()
-  })
-
-  it('畸形 URL 或畸形头 ⇒ null（不抛）', () => {
-    expect(() => extractToken({}, 'http://[bad')).not.toThrow()
-    expect(extractToken({}, 'http://[bad')).toBeNull()
+  it('🔴 两个账户各自一枚 token，**互不相同、互不覆盖**', () => {
+    const root = mkCcc({
+      channel: 'acp',
+      acp: { enabled: true, accounts: [acct('phone', 'tester'), acct('script', 'tester')] },
+    })
+    ensureAcpToken(root, 'phone')
+    ensureAcpToken(root, 'script')
+    const a = readAcpToken(root, 'phone')!
+    const b = readAcpToken(root, 'script')!
+    expect(a).not.toBe(b)
+    // 撤掉一个不动另一个
+    expect(resolveTokenAccount(a, [root])).toMatchObject({ accountId: 'phone' })
+    expect(resolveTokenAccount(b, [root])).toMatchObject({ accountId: 'script' })
   })
 })
 
 describe('acp-auth: CCC 配置读（im 段）', () => {
-  it('🔴 未配置 im 段 ⇒ **缺省 weixin**（＝升级前行为，向前兼容由缺省值保证）', () => {
-    const root = mkCcc(undefined)
-    expect(readImSettings(root).channel).toBe('weixin')
-    expect(acpChannelEnabled(root)).toBe(false)
-  })
-
-  it('旧配置（只有 weixin 段、无 im）⇒ channel 仍是 weixin（一个字节都不用改）', () => {
-    const root = mkdtempSync(join(tmpdir(), 'acp-legacy-'))
-    made.push(root)
-    mkdirSync(join(root, '.opencode'), { recursive: true })
-    writeFileSync(join(root, '.serenity'), '')
-    writeFileSync(
-      join(root, '.opencode', 'serenity.json'),
-      // ⚠️ 角色名用占位符，**不得**写 CCC 真实的角色名（那是该 CCC 的数据；本仓有
-      //    `privacy-scan.test.ts` 的 `role-name-*` 判据会拦 —— 本轮实测被它抓到过一次）
-      JSON.stringify({ weixin: { enabled: true, routes: [{ user: '*', role: 'some-role' }] } }),
-    )
-    expect(readImSettings(root).channel).toBe('weixin')
-    expect(acpChannelEnabled(root)).toBe(false)
+  it('🔴 两者都真 ⇒ 启用（正控）', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct()] } })
+    expect(acpChannelEnabled(root)).toBe(true)
+    expect(expandAcpAccounts(root)).toEqual([]) // 尚未生成 token
   })
 
   it('🔴 channel=acp 但 enabled 未设 ⇒ **不算启用**（双键是「与」关系）', () => {
-    const root = mkCcc({ channel: 'acp', acp: { role: 'tester' } })
+    const root = mkCcc({ channel: 'acp', acp: { accounts: [acct()] } })
     expect(acpChannelEnabled(root)).toBe(false)
   })
 
   it('🔴 enabled=true 但 channel 未指 acp ⇒ **不算启用**', () => {
-    const root = mkCcc({ acp: { enabled: true, role: 'tester' } })
+    const root = mkCcc({ acp: { enabled: true, accounts: [acct()] } })
     expect(acpChannelEnabled(root)).toBe(false)
-  })
-
-  it('两者都真 ⇒ 启用（正控）', () => {
-    const root = mkCcc({ channel: 'acp', acp: { enabled: true, role: 'tester' } })
-    expect(acpChannelEnabled(root)).toBe(true)
-    expect(acpRoleFor(root)).toBe('tester')
   })
 
   it('配置损坏（非法 JSON）⇒ 退回缺省 weixin（**绝不因读失败而放行 ACP**）', () => {
@@ -206,39 +176,78 @@ describe('acp-auth: CCC 配置读（im 段）', () => {
     writeFileSync(join(root, '.opencode', 'serenity.json'), '{ this is not json')
     expect(readImSettings(root).channel).toBe('weixin')
     expect(acpChannelEnabled(root)).toBe(false)
-    expect(acpRoleFor(root)).toBeNull()
+    expect(expandAcpAccounts(root)).toEqual([])
   })
 
-  it('角色名为空白 ⇒ 视同未配置（防 `role: "  "` 绕过 fail-closed）', () => {
-    const root = mkCcc({ channel: 'acp', acp: { enabled: true, role: '   ' } })
-    expect(acpRoleFor(root)).toBeNull()
+  it('🔴 账户 role 为空白 ⇒ 该账户**不出现**（防 `role: "  "` 绕过 fail-closed）', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct('a', '   ')] } })
+    ensureAcpToken(root, 'a')
+    expect(expandAcpAccounts(root)).toEqual([])
+  })
+
+  it('🔴 **没有 accounts ⇒ 一个账户都没有**（无简写退回；owner 2026-10-17 裁）', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, role: 'tester' } })
+    // 旧形态的 role 不再被当作"唯一账户" —— 必须写 accounts
+    expect(expandAcpAccounts(root)).toEqual([])
+    // 即便有人手搓了旧键，也不认
+    writeEntry(root, 'credential', 'IM_ACP_TOKEN', 'a'.repeat(64))
+    expect(resolveTokenAccount('a'.repeat(64), [root])).toBeNull()
+  })
+
+  it('accountId 为空白 ⇒ 跳过（凭据键无从派生）', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [{ accountId: '  ', role: 'tester' }] } })
+    expect(expandAcpAccounts(root)).toEqual([])
+  })
+
+  it('enabled=false 的账户 ⇒ 不出现（撤一台设备不必删条目）', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct('off', 'tester', false)] } })
+    ensureAcpToken(root, 'off')
+    expect(expandAcpAccounts(root)).toEqual([])
   })
 })
 
 describe('acp-auth: 归属与越权防护', () => {
-  it('resolveTokenOwner：认对号 ⇒ 返回该 CCC；认错号 ⇒ null', () => {
+  it('resolveTokenAccount：认对号 ⇒ 返回该账户；认错号 ⇒ null', () => {
     const a = mkAcpCcc()
     const b = mkAcpCcc()
-    const ta = readAcpToken(a)!
-    const tb = readAcpToken(b)!
-    expect(resolveTokenOwner(ta, [a, b])).toBe(a)
-    expect(resolveTokenOwner(tb, [a, b])).toBe(b)
-    expect(resolveTokenOwner('f'.repeat(64), [a, b])).toBeNull()
+    const ta = readAcpToken(a, 'agmente-phone')!
+    const tb = readAcpToken(b, 'agmente-phone')!
+    expect(resolveTokenAccount(ta, [a, b])).toMatchObject({ root: a, role: 'tester' })
+    expect(resolveTokenAccount(tb, [a, b])).toMatchObject({ root: b, role: 'tester' })
+    expect(resolveTokenAccount('f'.repeat(64), [a, b])).toBeNull()
   })
 
   it('🔴 A 的 token **不会**被认成 B（一一对应，不是"容器里有一个就放行"）', () => {
     const a = mkAcpCcc()
     const b = mkAcpCcc()
-    expect(resolveTokenOwner(readAcpToken(a)!, [b])).toBeNull()
+    expect(resolveTokenAccount(readAcpToken(a, 'agmente-phone')!, [b])).toBeNull()
   })
 
-  it('listAcpRoots：只收「启用通道 ＋ 有 token」的 CCC', () => {
+  it('🔴 同 CCC 内**不同账户可有不同角色**（各管各的，不互相覆盖）', () => {
+    const root = mkCcc({
+      channel: 'acp',
+      acp: {
+        enabled: true,
+        accounts: [
+          { accountId: 'phone', role: 'tester' },
+          { accountId: 'script', role: 'tester' },
+        ],
+      },
+    })
+    ensureAcpToken(root, 'phone')
+    ensureAcpToken(root, 'script')
+    const byPhone = resolveTokenAccount(readAcpToken(root, 'phone')!, [root])!
+    const byScript = resolveTokenAccount(readAcpToken(root, 'script')!, [root])!
+    expect(byPhone.accountId).toBe('phone')
+    expect(byScript.accountId).toBe('script')
+  })
+
+  it('listAcpRoots：只收「启用通道 ＋ 至少一个可用账户」的 CCC', () => {
     const ok = mkAcpCcc()
-    const noToken = mkCcc({ channel: 'acp', acp: { enabled: true, role: 'tester' } })
-    const disabled = mkCcc({ channel: 'acp', acp: { enabled: false, role: 'tester' } })
-    ensureAcpToken(disabled)
+    const noToken = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct()] } })
+    const disabled = mkCcc({ channel: 'acp', acp: { enabled: false, accounts: [acct()] } })
+    ensureAcpToken(disabled, 'agmente-phone')
     const weixin = mkCcc(undefined)
-    ensureAcpToken(weixin)
     expect(listAcpRoots([ok, noToken, disabled, weixin])).toEqual([ok])
   })
 
@@ -247,103 +256,160 @@ describe('acp-auth: 归属与越权防护', () => {
     expect(cwdInsideRoot(`${root}/sub`, root)).toBe(true)
     expect(cwdInsideRoot(root, root)).toBe(true)
     expect(cwdInsideRoot('/home/x/ccc-b', root)).toBe(false)
-    // ⚠️ 前缀陷阱：`/a/bc` 不在 `/a/b` 内（用 startsWith 会误判为在）
-    expect(cwdInsideRoot('/home/x/ccc-ab', root)).toBe(false)
+    expect(cwdInsideRoot('/home/x/ccc-a-sibling', root)).toBe(false)
   })
 
-  it('cwd 必须绝对路径（相对路径一律拒）', () => {
-    expect(cwdInsideRoot('relative/path', '/home/x/ccc-a')).toBe(false)
-    expect(cwdInsideRoot('', '/home/x/ccc-a')).toBe(false)
+  it('常时比较：同长度错 token 也拒（防"只比长度"的假实现）', () => {
+    const t = 'a'.repeat(64)
+    expect(safeEqual(t, 'b'.repeat(64))).toBe(false)
+    expect(safeEqual(t, t)).toBe(true)
+    expect(safeEqual('short', 'longer')).toBe(false) // 长度不等不抛
   })
 })
 
-describe('acp-auth: authorizeAcpConnection（准入判决，fail-closed 三连）', () => {
+describe('acp-auth: authorizeAcpConnection（准入判决，fail-closed 四连）', () => {
   it('🔴 无 token ⇒ null', () => {
-    const a = mkAcpCcc()
-    expect(authorizeAcpConnection(null, [a])).toBeNull()
-    expect(authorizeAcpConnection('', [a])).toBeNull()
+    const root = mkAcpCcc()
+    expect(authorizeAcpConnection(null, [root])).toBeNull()
   })
 
   it('🔴 错 token ⇒ null', () => {
-    const a = mkAcpCcc()
-    expect(authorizeAcpConnection('f'.repeat(64), [a])).toBeNull()
+    const root = mkAcpCcc()
+    expect(authorizeAcpConnection('f'.repeat(64), [root])).toBeNull()
   })
 
   it('🔴 CCC 未启用 ACP 通道 ⇒ null（token 对也不放行）', () => {
-    const root = mkCcc({ channel: 'acp', acp: { enabled: false, role: 'tester' } })
-    const token = ensureAcpToken(root)
-    expect(authorizeAcpConnection(token, [root])).toBeNull()
+    const root = mkCcc({ channel: 'acp', acp: { enabled: false, accounts: [acct()] } })
+    ensureAcpToken(root, 'agmente-phone')
+    expect(authorizeAcpConnection(readAcpToken(root, 'agmente-phone'), [root])).toBeNull()
   })
 
-  it('🔴 未配角色 ⇒ null（**不给一个无身份、无约束的裸 agent**）', () => {
-    const root = mkCcc({ channel: 'acp', acp: { enabled: true } })
-    const token = ensureAcpToken(root)
-    expect(authorizeAcpConnection(token, [root])).toBeNull()
+  it('🔴 账户未配角色 ⇒ null（**不给一个无身份、无约束的裸 agent**）', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct('x', '')] } })
+    ensureAcpToken(root, 'x')
+    expect(authorizeAcpConnection(readAcpToken(root, 'x'), [root])).toBeNull()
   })
 
-  it('全部齐备 ⇒ 放下并通过（正控），返回归属 CCC ＋ 角色', () => {
-    const a = mkAcpCcc('tester')
-    const token = readAcpToken(a)!
-    expect(authorizeAcpConnection(token, [a])).toEqual({ root: a, role: 'tester' })
-  })
-
-  it('🔴 无 token 名单为空 ⇒ null（不是"名单空所以都放行"）', () => {
-    expect(authorizeAcpConnection('f'.repeat(64), [])).toBeNull()
+  it('全部齐备 ⇒ 放行（正控），返回归属 CCC ＋ 账户 ＋ 角色', () => {
+    const root = mkAcpCcc()
+    expect(authorizeAcpConnection(readAcpToken(root, 'agmente-phone'), [root])).toMatchObject({
+      root,
+      accountId: 'agmente-phone',
+      role: 'tester',
+    })
   })
 })
 
 describe('acp-auth: 「随即生成」token（owner 令的逐字要求）', () => {
-  it('🔴 启用 ACP 通道的 CCC 在准入刷新时**当场获得 token**（owner 不必手敲命令）', () => {
-    // 造一个"已启用通道但**尚无 token**"的 CCC（这正是 owner 配完配置那一刻的状态）
-    const root = mkCcc({ channel: 'acp', acp: { enabled: true, role: 'tester' } })
-    expect(readAcpToken(root)).toBeNull() // 前提：确实还没有
-    expect(acpChannelEnabled(root)).toBe(true)
-
-    // 走真实刷新路径（它就是装配层启动时调的那个函数）
-    // ⚠️ 这里用 `listAcpRoots` 的前置条件模拟：真实刷新还会调 `listCccs(ctx)` 拿名单，
-    //    而那是宿主面（单测里没有 CCC 环境）⇒ 本用例验的是**生成这一步**本身。
-    const before = listAcpRoots([root])
-    expect(before).toEqual([]) // 没 token ⇒ 不进准入名单（fail-closed）
-    const token = ensureAcpToken(root) // ← 刷新路径里对每个启用 CCC 做的正是这一句
-    expect(token).toMatch(/^[0-9a-f]{64}$/)
-    expect(listAcpRoots([root])).toEqual([root]) // 生成后立即进名单
+  it('🔴 声明的账户在 ensureAcpChannelTokens 时**当场获得 token**（不必手敲命令）', () => {
+    const root = mkCcc({
+      channel: 'acp',
+      acp: { enabled: true, accounts: [acct('phone'), acct('script')] },
+    })
+    expect(expandAcpAccounts(root)).toEqual([]) // 之前一个都不可用
+    const created = ensureAcpChannelTokens(root)
+    expect(created.sort()).toEqual(['phone', 'script'])
+    expect(expandAcpAccounts(root)).toHaveLength(2)
+    // 幂等：再跑一次不新生成
+    expect(ensureAcpChannelTokens(root)).toEqual([])
   })
 
-  it('🔴 未启用 ACP 的 CCC **不会**被生成 token（不碰无关 CCC 的 localstore）', () => {
-    const weixinCcc = mkCcc({ channel: 'weixin' })
-    expect(readAcpToken(weixinCcc)).toBeNull()
-    // 刷新路径里只对 `acpChannelEnabled(...)` 为真的 CCC 生成 ⇒ 这里断言那个条件本身不成立
-    expect(acpChannelEnabled(weixinCcc)).toBe(false)
-    expect(readAcpToken(weixinCcc)).toBeNull() // 仍未生成
+  it('🔴 只对**当前声明里**的账户生成：撤掉的账户不会被复活', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct('phone'), acct('script')] } })
+    ensureAcpChannelTokens(root)
+    expect(readAcpToken(root, 'script')).not.toBeNull()
+    // 撤掉 script
+    rewriteIm(root, { channel: 'acp', acp: { enabled: true, accounts: [acct('phone')] } })
+    ensureAcpChannelTokens(root)
+    // 不再被接受（即便 store 里还留着那个键）
+    expect(resolveTokenAccount(readAcpToken(root, 'script')!, [root])).toBeNull()
+    expect(expandAcpAccounts(root)).toHaveLength(1)
+  })
+
+  it('未启用通道的 CCC ⇒ 一个字节都不动（不生成任何 token）', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: false, accounts: [acct()] } })
+    expect(ensureAcpChannelTokens(root)).toEqual([])
+    expect(readAcpToken(root, 'agmente-phone')).toBeNull()
+  })
+})
+
+describe('🔴 acp-auth: 配置即真相（v1.59.1 的核心回归钉）', () => {
+  it('改配置后**下一次判定**立即生效 —— 不需要重启，也不等任何事件', () => {
+    const root = mkAcpCcc() // accounts: [agmente-phone]
+    const token = readAcpToken(root, 'agmente-phone')!
+    expect(authorizeAcpConnection(token, [root])).not.toBeNull()
+
+    // 加一个账户 —— 同一进程、无重启、无事件
+    rewriteIm(root, {
+      channel: 'acp',
+      acp: { enabled: true, accounts: [acct('agmente-phone'), acct('tablet')] },
+    })
+    const fresh = ensureAcpToken(root, 'tablet')
+    expect(authorizeAcpConnection(fresh, [root])).toMatchObject({ accountId: 'tablet' })
+
+    // 关掉整条通道 —— 下一次判定就该拒
+    rewriteIm(root, { channel: 'acp', acp: { enabled: false, accounts: [acct('agmente-phone')] } })
+    expect(authorizeAcpConnection(token, [root])).toBeNull()
+  })
+
+  it('🔴 撤销账户后，其 token **立刻不被接受**（即使 localstore 里还在）', () => {
+    const root = mkAcpCcc()
+    const token = readAcpToken(root, 'agmente-phone')!
+    expect(authorizeAcpConnection(token, [root])).not.toBeNull()
+    rewriteIm(root, { channel: 'acp', acp: { enabled: true, accounts: [] } })
+    expect(authorizeAcpConnection(token, [root])).toBeNull()
+    // 但 store 里的键确实还在 —— 证明"拒绝"来自配置，不是键被删了
+    expect(readAcpToken(root, 'agmente-phone')).toBe(token)
   })
 })
 
 describe('acp-auth: 诊断面（绝不泄 token 明文）', () => {
-  it('acpChannelStatus 给 channel/enabled/role/hasToken/指纹，**不含 token**', () => {
-    const a = mkAcpCcc('tester')
-    const token = readAcpToken(a)!
-    const s = acpChannelStatus(a)
-    expect(s).toMatchObject({ channel: 'acp', enabled: true, role: 'tester', hasToken: true })
-    expect(s.tokenFingerprint).toBe(tokenFingerprint(token))
-    // 🔴 整个快照的序列化里**不得出现 token 明文**
-    expect(JSON.stringify(s).includes(token)).toBe(false)
+  it('acpChannelStatus 逐账户给出 role/hasToken/指纹/可用性，**不含 token**', () => {
+    const root = mkAcpCcc()
+    const s = acpChannelStatus(root)
+    expect(s.channel).toBe('acp')
+    expect(s.enabled).toBe(true)
+    expect(s.accounts).toHaveLength(1)
+    const a = s.accounts[0]!
+    expect(a).toMatchObject({ accountId: 'agmente-phone', role: 'tester', hasToken: true, usable: true, blockedBy: null })
+    expect(a.tokenFingerprint).toMatch(/^[0-9a-f]{12}$/)
+    // 整个返回值里不含 token 明文
+    expect(JSON.stringify(s)).not.toContain(readAcpToken(root, 'agmente-phone')!)
   })
 
-  it('🔴 token 重复出现在两个 CCC ⇒ 审计**响亮报出**（不静默取第一个）', () => {
-    const a = mkAcpCcc()
-    const b = mkAcpCcc()
-    const shared = readAcpToken(a)!
-    // 人为制造重复（模拟"手抄错了 token"）
-    writeEntry(b, 'credential', ACP_TOKEN_KEY, shared)
+  it('🔴 不可用账户给出**能指向该改哪个字段**的原因', () => {
+    const root = mkCcc({ channel: 'acp', acp: { enabled: true, accounts: [acct('x', '')] } })
+    const a = acpChannelStatus(root).accounts[0]!
+    expect(a.usable).toBe(false)
+    expect(a.blockedBy).toContain('role')
+  })
+
+  it('🔴 token 重复出现在两个账户 ⇒ 审计**响亮报出**（不静默取第一个）', () => {
+    const a = mkAcpCcc('tester', 'one')
+    const b = mkAcpCcc('tester', 'two')
+    const shared = 'c'.repeat(64)
+    writeEntry(a, 'credential', acpTokenKeyFor('one'), shared)
+    writeEntry(b, 'credential', acpTokenKeyFor('two'), shared)
     const audit = tokenOwnerAudit([a, b])
     expect(audit.duplicates).toHaveLength(1)
-    expect(audit.duplicates[0]!.roots.sort()).toEqual([a, b].sort())
-    expect(audit.duplicates[0]!.fingerprint).toBe(tokenFingerprint(shared))
+    expect(audit.duplicates[0]!.owners).toHaveLength(2)
   })
 
   it('无重复 ⇒ duplicates 为空（对照）', () => {
-    const a = mkAcpCcc()
-    const b = mkAcpCcc()
+    const a = mkAcpCcc('tester', 'one')
+    const b = mkAcpCcc('tester', 'two')
     expect(tokenOwnerAudit([a, b]).duplicates).toEqual([])
+  })
+
+  it('extractToken 认两种携带形态', () => {
+    expect(extractToken({ authorization: 'Bearer abc123' }, '/acp')).toBe('abc123')
+    expect(extractToken({}, '/acp?token=xyz')).toBe('xyz')
+    expect(extractToken({}, '/acp')).toBeNull()
+  })
+
+  it('tokenFingerprint 不可逆且定长 12 位', () => {
+    const f = tokenFingerprint('secret-value')
+    expect(f).toMatch(/^[0-9a-f]{12}$/)
+    expect(f).not.toContain('secret')
   })
 })

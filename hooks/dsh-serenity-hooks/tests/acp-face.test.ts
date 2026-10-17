@@ -26,7 +26,7 @@ import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { request } from 'node:http'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, isAbsolute } from 'node:path'
 import { WebSocket } from 'ws'
 
 import {
@@ -38,6 +38,7 @@ import {
   acpFaceStatus,
   registerAcpFace,
   resolveAcpSelection,
+  normalizeClientCwd,
   __setAcpRootsForTest,
 } from '../src/acp-face.js'
 import { stopAllFaces } from '../src/face-host.js'
@@ -52,18 +53,18 @@ import { ensureAcpToken, readAcpToken } from '../src/acp-auth.js'
  * （`loadSerenityConfig` ／ `getEntry`）—— 替身会把"配置读法"这一环整段绕过去，
  * 而那正是要验的东西（同族：`59` 号桩"自造夹具只能证明按我假设的形态能跑"）。
  */
-function makeAcpCcc(): string {
+function makeAcpCcc(accountId = 'agmente-phone', role = 'tester'): string {
   const root = mkdtempSync(join(tmpdir(), 'acp-ccc-'))
   mkdirSync(join(root, '.opencode'), { recursive: true })
   writeFileSync(join(root, '.serenity'), '')
   writeFileSync(
     join(root, '.opencode', 'serenity.json'),
     JSON.stringify({
-      im: { channel: 'acp', acp: { enabled: true, role: 'tester' } },
+      im: { channel: 'acp', acp: { enabled: true, accounts: [{ accountId, role }] } },
       skiff: { roles: { tester: { systemPrompt: '你是测试角色。' } } },
     }),
   )
-  ensureAcpToken(root) // 生成 token（落该 CCC 的 localstore）
+  ensureAcpToken(root, accountId) // 生成 token（落该 CCC 的 localstore）
   return root
 }
 
@@ -195,7 +196,7 @@ describe('🔴 面 E：真实 WebSocket 升级（本件最强的证据）', () =
   it("真 WS 客户端（带对 token）能完成 101 握手 ⇒ `'upgrade'` 确实接上了（不是\"端口开着\"而已）", async () => {
     enableAcpFace()
     const handle = await startAcpFace({} as never)
-    const token = readAcpToken(ccc)!
+    const token = readAcpToken(ccc, 'agmente-phone')!
 
     const outcome = await new Promise<{ opened: boolean; err?: string }>((resolve) => {
       const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/acp`, {
@@ -225,7 +226,7 @@ describe('🔴 面 E：真实 WebSocket 升级（本件最强的证据）', () =
   it('🔴 空 ctx（无 `ctx.plugin`）⇒ 接线失败但**不泄成连接重置**，且记一条可读错误', async () => {
     enableAcpFace()
     const handle = await startAcpFace({} as never)
-    const token = readAcpToken(ccc)!
+    const token = readAcpToken(ccc, 'agmente-phone')!
 
     const closed = await new Promise<{ code: number }>((resolve) => {
       const ws = new WebSocket(`ws://127.0.0.1:${handle.port}/acp`, {
@@ -295,7 +296,7 @@ describe('🔴 面 E 认证闸（v1.59.0，owner 令「随即生成认证用的 
   it('🔴 带**对** token（查询串形态）⇒ 101（正控：证明拒的是 token 而不是"一律拒"）', async () => {
     enableAcpFace()
     const handle = await startAcpFace({} as never)
-    const token = readAcpToken(ccc)!
+    const token = readAcpToken(ccc, 'agmente-phone')!
     const r = await tryConnect(handle.port, `/acp?token=${token}`)
     expect(r.opened).toBe(true)
   })
@@ -303,7 +304,7 @@ describe('🔴 面 E 认证闸（v1.59.0，owner 令「随即生成认证用的 
   it('🔴 名单外的 CCC（未启用 ACP 通道）⇒ 401：token 对也不放行', async () => {
     enableAcpFace()
     const handle = await startAcpFace({} as never)
-    const token = readAcpToken(ccc)!
+    const token = readAcpToken(ccc, 'agmente-phone')!
     __setAcpRootsForTest([]) // 模拟"该 CCC 未启用 ACP 通道"
     const r = await tryConnect(handle.port, `/acp?token=${token}`)
     expect(r.opened).toBe(false)
@@ -468,5 +469,61 @@ describe('面 E：设计前提的静态钉（设计 §2 / §3）', () => {
     expect(code).toContain('stopFace(FACE_ACP)')
     // 且**不再**有那个自造替身（它正是静默的来源）
     expect(code).not.toContain('faceStop')
+  })
+})
+
+/**
+ * 🔴 v1.59.2（owner 2026-10-17 令：「working directory 能改成让我填 ccc 目录名就可以吗？」）
+ *
+ * ## 这件在防什么
+ * 宿主 `dsh-acp` **硬性**要求 `cwd` 是绝对路径（`validateWorkspaceParams` 里的
+ * `if (!isAbsolute(params.cwd)) throw invalidParams(...)`）。而连接归属哪个 CCC
+ * **已经由 token 决定了**（服务端权威）⇒ 让用户再手打一遍绝对路径是**同一信息说两遍**，
+ * 且那第二遍正是最容易打错的一遍。
+ *
+ * ⚠️ **不改宿主**（D4 零改 DSH）：归一化只发生在**我们自己的缝**（WS 帧 → ACP Stream）。
+ *
+ * ## 为什么"归一化"不能顺手把越权也判了
+ * 越权判据必须只有一处（`cwdInsideRoot`，它还管角色认领）。在这里再判一次 =
+ * **两份会漂的实现**。⇒ 本件的反侧用例钉住"绝对但在根外 ⇒ **原样透传**，不在这里拒"。
+ */
+describe('🔴 v1.59.2 cwd 归一化：客户端可只填 CCC 目录名', () => {
+  // ⚠️ **中性路径**：本仓是公开的（B 面 = GitHub public），隐私扫描会拦真实家目录
+  const CCC = '/srv/ccc-root'
+
+  it('🔴 非绝对（目录名 ／ 单字符 ／ 相对路径）⇒ 落到该 CCC 根', () => {
+    expect(normalizeClientCwd('serenity', CCC)).toBe(CCC)
+    expect(normalizeClientCwd('home-serenity', CCC)).toBe(CCC)
+    expect(normalizeClientCwd('a', CCC)).toBe(CCC) // 用户实际就是这么填的
+    expect(normalizeClientCwd('.', CCC)).toBe(CCC)
+    expect(normalizeClientCwd('../other', CCC)).toBe(CCC) // 相对路径一律不猜
+  })
+
+  it('🔴 空 ／ 非字符串 ／ 空白 ⇒ 落到该 CCC 根（不是抛错、更不是保持 undefined）', () => {
+    expect(normalizeClientCwd('', CCC)).toBe(CCC)
+    expect(normalizeClientCwd('   ', CCC)).toBe(CCC)
+    expect(normalizeClientCwd(undefined, CCC)).toBe(CCC)
+    expect(normalizeClientCwd(null, CCC)).toBe(CCC)
+    expect(normalizeClientCwd(42, CCC)).toBe(CCC)
+  })
+
+  it('正控：已经是绝对路径 ⇒ **原样**（不擅自改写用户明确给的值）', () => {
+    expect(normalizeClientCwd(CCC, CCC)).toBe(CCC)
+    expect(normalizeClientCwd(`${CCC}/AGENT_SESSIONS`, CCC)).toBe(`${CCC}/AGENT_SESSIONS`)
+  })
+
+  it('🔴 反侧：绝对但在 CCC 之外 ⇒ **原样透传**，不在这里拒', () => {
+    // 为什么不在这里拒：越权判据只允许有一处（cwdInsideRoot）。
+    // 若这里也拒一次，两处会漂 —— 改了一处另一处仍是旧的，而**没有任何门会报**。
+    expect(normalizeClientCwd('/etc', CCC)).toBe('/etc')
+    expect(normalizeClientCwd('/srv/other-ccc', CCC)).toBe('/srv/other-ccc')
+  })
+
+  it('两侧配平：归一化后的值**一定**满足宿主的 isAbsolute 前提', () => {
+    const inputs = ['serenity', 'a', '.', '', '   ', undefined, null, '/etc', CCC]
+    for (const raw of inputs) {
+      const out = normalizeClientCwd(raw, CCC)
+      expect(isAbsolute(out), `输入 ${String(raw)} 归一化后仍非绝对：${out}`).toBe(true)
+    }
   })
 })

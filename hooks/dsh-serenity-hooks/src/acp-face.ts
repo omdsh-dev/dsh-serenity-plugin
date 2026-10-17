@@ -50,6 +50,7 @@
 import type { Context } from 'cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Duplex } from 'node:stream'
+import { isAbsolute } from 'node:path'
 // 🔴 D111「接真契约三件齐」之③ —— **一行真 `import type`**（devDep ＋ `paths` ＋ 本行）。
 //    ⚠️ 它**不是装饰**：`AcpConfig` 就是 `dsh-acp` 的**真**配置契约（含那个 `stream?` 覆盖口）。
 //    若我们照抄一份手写接口，它升版把 `stream` 去掉时**不会有任何编译信号**（正是 D119 那族）。
@@ -61,7 +62,7 @@ import { startFace, faceActive, facePort, stopFace, type FaceHandle } from './fa
 import { hostInjected } from './host/access.js'
 import { FACE_PORTS } from './ports.js'
 import { readSimpleSettings, SERENITY_SETTINGS_NS } from './settings-section.js'
-import { extractToken, resolveTokenOwner, acpRoleFor, listAcpRoots, cwdInsideRoot, readAcpToken, ensureAcpToken, tokenFingerprint, acpChannelEnabled as acpChannelEnabledForToken } from './acp-auth.js'
+import { extractToken, resolveTokenAccount, listAcpRoots, cwdInsideRoot, ensureAcpChannelTokens } from './acp-auth.js'
 import { listCccs } from './ccc-roots.js'
 import { readSkiffRoles, createRolePromptReader, buildSkiffBasePrompt } from './skiff-role.js'
 
@@ -76,7 +77,7 @@ const FACE_ACP = 'acp'
  * 先区分"根本没带 token"与"带了但不对"，再区分"是哪个 CCC 层的问题"。
  */
 type AcpAuthVerdict =
-  | { ok: true; root: string; role: string }
+  | { ok: true; root: string; role: string; accountId: string }
   | { ok: false; reason: string }
 
 /**
@@ -89,68 +90,95 @@ type AcpAuthVerdict =
 function authorizeUpgrade(req: IncomingMessage): AcpAuthVerdict {
   const candidate = extractToken(req.headers as Record<string, unknown>, req.url)
   if (!candidate) return { ok: false, reason: '未携带 token（用 Authorization: Bearer <t> 或 ?token=<t>）' }
-  const roots = acpRoots
+  // 🔴 v1.59.1：**不再读快照**，每次判定现算（`expandAcpAccounts` 只读配置 ＋ localstore）。
+  //    原先 `acpRoots` 是模块级快照，只由「宿主 settings 事件 ＋ 启动那次」刷新，
+  //    而 `im.channel` 在 **CCC 自己的** `.opencode/serenity.json` 里 —— 那个文件
+  //    **从不在** `settings/document-updated` 的事件面上 ⇒ 改配置永远不触发刷新，
+  //    **只能重启宿主**。owner 判「这是设计缺陷」，实测代价 = 每加一台设备都要重启。
+  //    ⇒ 判据：**准入名单必须与被读的那个文件同源现算**，否则就是一份会漂的缓存。
+  const roots = knownAcpRoots()
   if (roots.length === 0) return { ok: false, reason: '本机没有任何启用了 ACP 通道的 CCC' }
   // 先判"token 认不认"（与"CCC 没配好"分开报，否则排障时会被误导到错的方向）
-  const owner = resolveTokenOwner(candidate, roots)
-  if (!owner) return { ok: false, reason: 'token 不匹配任何已启用 ACP 通道的 CCC' }
-  const role = acpRoleFor(owner)
-  if (!role) return { ok: false, reason: `CCC（${owner}）未配置 im.acp.role` }
-  return { ok: true, root: owner, role }
+  const acct = resolveTokenAccount(candidate, roots)
+  if (!acct) return { ok: false, reason: 'token 不匹配任何已声明账户的 ACP 通道' }
+  const role = acct.role
+  if (!role) return { ok: false, reason: `CCC（${acct.root}）账户 ${acct.accountId} 未配 im.acp.accounts[].role` }
+  return { ok: true, root: acct.root, role, accountId: acct.accountId }
 }
 
 /**
- * 归属候选 CCC 的**同步**缓存。
+ * CCC 根候选的来源（**只要根，不判配置**）。
  *
- * 🔴 为什么缓存而非每次现算：`listCccs()` 是 **async**（要读 workspace registry ＋
- *    `sessionPersistence`），而 `'upgrade'` 回调是**同步**的 ⇒ 不能在那里 await。
- * ⇒ 启动时算一次 ＋ 配置变更时刷新；这是**准入名单**，宁可用稍旧的名单（新 CCC 多等一次
- *    配置事件即可生效），也不让 upgrade 挂起。
+ * 🔴 v1.59.1 分层变更：**这份名单是"本机有哪些 CCC"，不是"谁能连 ACP"**。
+ *    "谁能连"由 `expandAcpAccounts` 现算（读各 CCC 的 serenity.json ＋ localstore）。
+ *    ⇒ 缓存失效的代价从"配错权限"降为"多看/少看一个候选根"，**不再是安全问题**。
  */
-let acpRoots: string[] = []
+let knownRoots: string[] = []
 
-/** 刷新准入名单（**只收启用了 ACP 通道且已生成 token 的 CCC**）。返回新名单长度。 */
+/**
+ * 准入名单的现算入口（v1.59.1）。
+ *
+ * 顺序：**先用已知根**（免 async）→ 逐个 `expandAcpAccounts` 现读配置。
+ * 未知根时退回上次枚举的结果（可能稍旧，但只影响"会不会去问它"，不影响是否放行）。
+ *
+ * ⚠️ 这里是**同步**的（upgrade 回调用）⇒ 不 await、不扫盘。
+ */
+function knownAcpRoots(): string[] {
+  return listAcpRoots(knownRoots)
+}
+
+/**
+ * 刷新"本机有哪些 CCC"（async，枚举宿主三来源）。
+ *
+ * 🔴 **失败必须响亮**：v1.59.0 这里是 `void refresh(...)` 且没有 catch ——
+ *    枚举失败会让名单清空 ⇒ **所有连接一律 401**，而现场只有一行 stdout 看不到的日志。
+ *    这正是本轨记过的「调用没报错 ≠ 已验证」。
+ *
+ * @returns 本次枚举到的根数（0 ＝ 一个都没发现，日志会说为什么）
+ */
 export async function refreshAcpRoots(ctx: Context): Promise<number> {
   try {
     const entries = await listCccs(ctx)
-    const all = entries.map((e) => e.root)
-    // 🔴 owner 令「**随即生成**认证用的 token」：凡启用了 ACP 通道的 CCC，若还没有 token，
-    //    在这里**当场生成一枚**（幂等：已有则原样返回，不轮换）⇒ owner 配完 `im.channel=acp`
-    //    即得一枚可用 token，**不必**再手敲任何命令去造它。
-    //    ⚠️ 生成是**写 localstore** —— 只在"该 CCC 确实启用了 ACP"时发生（未启用的 CCC 一个字节都不动）。
-    for (const root of all) {
+    knownRoots = entries.map((e) => e.root)
+    // owner 令「随即生成认证用的 token」：对**已声明**的账户补齐 token（幂等，不轮换）。
+    let created = 0
+    for (const root of knownRoots) {
       try {
-        if (acpChannelEnabledForToken(root) && !readAcpToken(root)) {
-          const token = ensureAcpToken(root)
-          console.log(`[serenity-hooks] ✓ 面 E：已为 CCC 生成 ACP token（${root}，指纹 ${tokenFingerprint(token)}）`)
-        }
+        created += ensureAcpChannelTokens(root).length
       } catch (err) {
-        console.warn(`[serenity-hooks] 面 E：为 CCC 生成 token 失败（${root}）: ${String((err as Error)?.message ?? err)}`)
+        console.warn(`[serenity-hooks] 面 E：为 CCC（${root}）生成 token 失败: ${String((err as Error)?.message ?? err)}`)
       }
     }
-    acpRoots = listAcpRoots(all)
+    if (created > 0) console.log(`[serenity-hooks] ✓ 面 E：已为 ${created} 个 ACP 账户生成 token`)
+    return knownRoots.length
   } catch (err) {
-    // 枚举失败 ⇒ 名单清空（fail-closed：不保留旧名单，避免"CCC 已被移除但仍放行"）
-    acpRoots = []
-    console.warn(`[serenity-hooks] 面 E：CCC 准入名单刷新失败（已清空，连接将被拒）: ${String((err as Error)?.message ?? err)}`)
+    // 枚举失败 ⇒ 清空候选（fail-closed），但**响亮**记录原因，供 acpFaceStatus 读取。
+    knownRoots = []
+    const msg = `面 E：CCC 枚举失败（准入名单将为空，所有连接会被拒）: ${String((err as Error)?.message ?? err)}`
+    console.warn(`[serenity-hooks] ${msg}`)
+    state.lastErrors.push({ at: Date.now(), applied: false, error: msg })
+    if (state.lastErrors.length > MAX_ERR_KEEP) state.lastErrors.shift()
+    return 0
   }
-  return acpRoots.length
 }
 
-/** 当前准入名单（诊断用只读快照） */
+/** 当前准入名单（诊断用只读快照；**现算**，不是缓存值） */
 export function acpRootsSnapshot(): readonly string[] {
-  return acpRoots
+  return knownAcpRoots()
 }
 
 /**
- * 测试注入钩子（**生产零调用**）：直接置准入名单。
+ * 测试注入钩子（**生产零调用**）：直接置"本机有哪些 CCC 候选根"。
  *
  * ⚠️ 为什么需要：`refreshAcpRoots()` 依赖 `listCccs(ctx)`（要真 CCC 环境）。
  *    而认证闸本身是**纯逻辑**，测试要能单独驱动它 —— 否则"闸真的拦得住吗"这件事
  *    只能靠集成环境验，而集成环境恰恰是最不容易跑的那种。
+ *
+ * 🔴 v1.59.1：**置的是候选根，不是"放行名单"** —— 每个根会不会被放行，
+ *    仍由它自己的 `serenity.json` ＋ localstore **现算**决定（测试照样要走真配置）。
  */
 export function __setAcpRootsForTest(roots: readonly string[] | null): void {
-  acpRoots = roots ? [...roots] : []
+  knownRoots = roots ? [...roots] : []
 }
 
 /**
@@ -303,13 +331,53 @@ type WsServerCtor = new (options: { noServer: boolean }) => WebSocketServer
 type AcpStream = NonNullable<AcpConfig['stream']>
 
 /**
+ * 把客户端给的 `cwd` 归一化成宿主要求的**绝对路径**（v1.59.2）。
+ *
+ * ## 为什么需要
+ * 宿主 `dsh-acp` 在每次 `session/new` 都有这一行（`lib/index.js` 逐字）：
+ * ```js
+ * if (!isAbsolute(params.cwd)) throw invalidParams(`cwd must be an absolute path: ${params.cwd}`)
+ * ```
+ * 而**连接归属哪个 CCC 已由 token 决定**（服务端权威）⇒ 让用户再手打一遍绝对路径
+ * 是**同一个信息说两遍**，且那第二遍正是最容易打错的一遍。
+ *
+ * ## 规则（唯一一条）
+ * **非绝对路径 ⇒ 一律解释为「本连接归属 CCC 的根」**。
+ *
+ * | 客户端填 | 送宿主 |
+ * |---|---|
+ * | `serenity` / `a` / `.` / 空 | `/…/home-serenity`（该 token 的 CCC 根） |
+ * | `/…/home-serenity`（已绝对且在根内） | 原样 |
+ * | `/…/home-serenity/sub` | 原样（仍在根内） |
+ * | `/etc`（绝对但在根外） | **原样透传，交给 `cwdInsideRoot` 拒** |
+ *
+ * 🔴 **最后一行为什么不在这里直接拒**：越权判据必须**只有一处**（`cwdInsideRoot`，
+ * 它也管着角色认领），在这里再判一次就是**两份会漂的实现**。归一化只负责"把非绝对变成绝对"。
+ *
+ * @param raw 客户端原样给的 `cwd`（可能是 `undefined`）
+ * @param cccRoot 本连接归属的 CCC 根
+ */
+export function normalizeClientCwd(raw: unknown, cccRoot: string): string {
+  const value = typeof raw === 'string' ? raw.trim() : ''
+  // 空 ／ 非绝对 ⇒ 一律落到 CCC 根（"就是那个 CCC"，不必再问）
+  if (value === '' || !isAbsolute(value)) return cccRoot
+  return value
+}
+
+/**
  * 把一条裸 WS socket 适配成 ACP `Stream`。
  *
  * 🔴 与官方 `ndJsonStream` **同语义**：我们自己做「消息 ↔ 文本帧」的分帧（按行）。
  *    实测注意（P0′）：`dsh-acp` 写出的每条消息**自带换行**，客户端同样 ⇒ 按行切分即正确。
  *    ⚠️ **空行要丢**；**非 JSON 帧要容忍**（桥/客户端可能插入控制帧）。
+ *
+ * 🔴 v1.59.2：**入站消息在这里做一次 `cwd` 归一化**（见 {@link normalizeClientCwd}）。
+ *    为什么是这里：`session/new` 与 `session/resume` 都带 `cwd`，而这是**唯一**能同时
+ *    拦到两者、且属于我们自己的缝（再往下就进 `dsh-acp` 了，那里改了就是改宿主）。
+ *
+ * @param cccRoot 本连接归属的 CCC 根（token 反查所得）
  */
-function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void): AcpStream {
+function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void, cccRoot: string): AcpStream {
   const readable = new ReadableStream<unknown>({
     start(controller) {
       let buf = ''
@@ -322,12 +390,15 @@ function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void): AcpStream
           const line = buf.slice(0, i)
           buf = buf.slice(i + 1)
           if (!line.trim()) continue
+          let msg: unknown
           try {
-            controller.enqueue(JSON.parse(line))
+            msg = JSON.parse(line)
           } catch {
             // 非 JSON 帧：记一条（对本面是"别人的噪音"），不中断本流
             onWarn(line.slice(0, 120))
+            continue
           }
+          controller.enqueue(normalizeInboundCwd(msg, cccRoot))
         }
       })
       ws.on('close', () => {
@@ -355,6 +426,22 @@ function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void): AcpStream
   // 而我们这里的分帧口径就是"按行 JSON.parse ⇒ 消息"（与官方 `ndJsonStream` 同语义）
   // ⇒ 形状一致，差异只在 `unknown` 与 `AnyMessage` 的**静态**标注上。
   return { readable, writable } as AcpStream
+}
+
+/**
+ * 若这条消息带 `params.cwd`，就地归一化（**只动 `session/new` / `session/resume`**）。
+ *
+ * 🔴 判据 = **有 `params.cwd` 就归一化**，不按 method 白名单挑：
+ *    带 `cwd` 的方法只有那两个，而白名单一旦漏项就会**静默退回旧行为**（最难查的一类）。
+ */
+function normalizeInboundCwd(msg: unknown, cccRoot: string): unknown {
+  if (typeof msg !== 'object' || msg === null) return msg
+  const m = msg as { params?: { cwd?: unknown } }
+  if (typeof m.params !== 'object' || m.params === null) return msg
+  if (!('cwd' in m.params)) return msg
+  const normalized = normalizeClientCwd(m.params.cwd, cccRoot)
+  // 不就地改原对象（它来自 JSON.parse，理论上是我们的，但改副本更安全、也更易测）
+  return { ...msg, params: { ...m.params, cwd: normalized } }
 }
 
 /** 一条连接的应用结果（诊断用） */
@@ -407,6 +494,7 @@ export interface AcpFaceStatus {
 }
 
 export function acpFaceStatus(): AcpFaceStatus {
+  const roots = knownAcpRoots()
   return {
     active: acpFaceActive(),
     port: acpFacePort(),
@@ -415,11 +503,12 @@ export function acpFaceStatus(): AcpFaceStatus {
     connections: state.connections,
     applied: state.applied,
     rejected: state.rejected,
-    authorizedCccs: acpRoots.length,
+    authorizedCccs: roots.length,
     errors: [...state.lastErrors],
     authNote:
-      'ACP 协议本身不做认证；本面在 WS upgrade 层以 **每 CCC 一枚 token**（localstore 键 ' +
-      'IM_ACP_TOKEN）把关，未过闸的连接升不上来。⚠️ 明文 ws:// ⇒ 局域网内可抓包；上公网必须走 wss ＋ Access。',
+      'ACP 协议本身不做认证；本面在 WS upgrade 层以 **每账户一枚 token**（localstore 键 ' +
+      'IM_ACP_TOKEN_<ACCOUNT_ID>）把关，未过闸的连接升不上来。名单**每次连接现算**（改配置即生效，无需重启）。' +
+      '⚠️ 明文 ws:// ⇒ 局域网内可抓包；上公网必须走 wss ＋ Access。',
   }
 }
 
@@ -514,7 +603,7 @@ export async function startAcpFace(ctx: Context): Promise<FaceHandle> {
           const connRole = verdict.role
           const stream = wsToAcpStream(ws, (line) => {
             console.log(`[serenity-hooks] 面 E：丢弃一条非 JSON 帧（前 120 字）: ${line}`)
-          })
+          }, connRoot)
           // 🔴 关键接线（第一版**实测失败**过，故注释在此钉死）：
           //
           //   起初我直接 `dshAcp.apply(ctx, {stream})`，报逐字：
@@ -731,11 +820,13 @@ export function registerAcpFace(ctx: Context): void {
       /* 同上 */
     }
   }
-  // 🔴 v1.59.0：准入名单（哪些 CCC 启用了 ACP 通道）**必须先算出来** —— 认证闸是同步的，
-  //    名单为空 ⇒ 所有连接一律 401（fail-closed）。配置变更时同步刷新（新增 CCC 无需重启）。
+  // 🔴 v1.59.1：刷新"本机有哪些 CCC 候选根"（只影响"会不会去问它"，不影响是否放行）。
+  //    ⚠️ 这个刷新**不再是权限的正确性来源** —— 放行与否由每次连接现算配置决定。
+  //    所以即使这里漏了一次（例如新 CCC 尚未被枚举到），代价也只是"暂不认它"，
+  //    而**不是**"配了却要重启"。失败要响亮（见 refreshAcpRoots 的 catch）。
   const refresh = (): void => {
     void refreshAcpRoots(ctx).then((n) => {
-      console.log(`[serenity-hooks] 面 E：CCC 准入名单已刷新（${n} 个 CCC 启用 ACP 通道）`)
+      console.log(`[serenity-hooks] 面 E：CCC 候选根已枚举（${n} 个）`)
     })
   }
   try {
