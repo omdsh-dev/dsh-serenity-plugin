@@ -440,6 +440,93 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     expect(sent[0]).toContain('给从未激活的轨迹')
   })
 
+  /**
+   * 🔴 **2026-10-17 缺陷（owner 报「目标没有活跃会话时，新建的会话工作区绑定不正确」）**
+   *
+   * 根因（宿主源码取证，**不是推断**）：
+   *   `sessionController.create()` 的 `attachSession` **只在 `workspaceId` 分支里执行** ——
+   *   `dsh-api-session-controller/lib/index.js` 的 `create()` 中：
+   *     · `if (request.workspaceId !== void 0) { workspace = ...get(id) ... }`
+   *     · `const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd`
+   *     · `if (workspace !== void 0) { await workspace.attachSession(sessionId) }`  ← **只有这条分支挂工作区**
+   *   ⇒ 我们传的是 `{ cwd: root }`（无 `workspaceId`）⇒ 会话**建出来了但从不登记进任何工作区**。
+   *
+   * 现场实证（本机真实数据）：`send-now` 自动建出的那条会话
+   *   （note = `auto-created by send-now`）的 header `cwd` 确实指向某个 CCC 根，
+   *   **却不在**该工作区的 `sessionIds` 里
+   *   （同 CCC 的另外两条会话都在）⇒ UI 里它不属于那个工作区。
+   *
+   * 判据（本项目既有纪律「判据必须能被独立印证」）：**建完之后必须显式 `attachSession`**，
+   *   且**按 cwd 找对工作区**（不能拿到第一个就挂）。
+   */
+  it('🔴 无绑定 ⇒ 自动建会话**必须挂进 cwd 所属的工作区**（缺陷：只建不挂 ⇒ UI 里它不属于任何工作区）', async () => {
+    writeSessionDir()
+    writeFileSync(join(root, '.serenity'), 'wake-test\n')
+    const attached: Array<{ ws: string; sessionId: string }> = []
+    const madeAgent = { followup: () => {} }
+    const wsHome = {
+      id: 'ws-home',
+      path: root,
+      sessionIds: ['sess-existing'],
+      attachSession: async (sessionId: string) => { attached.push({ ws: 'ws-home', sessionId }) },
+    }
+    // 干扰项：**另一个工作区**排在前面。若实现"拿第一个就挂"，会挂错到这里。
+    const wsOther = {
+      id: 'ws-other',
+      path: '/somewhere/else',
+      sessionIds: [],
+      attachSession: async (sessionId: string) => { attached.push({ ws: 'ws-other', sessionId }) },
+    }
+    const ctx = {
+      agents: { get: () => undefined },
+      get: (name: string) => {
+        if (name === 'sessionController') {
+          return {
+            create: async () => ({ sessionId: 'sess-created' }),
+            resolveAgent: async () => ({ agent: madeAgent }),
+          }
+        }
+        if (name === 'workspaceRegistry') return { list: () => [wsOther, wsHome] }
+        return undefined
+      },
+    }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
+    expect(res.ok).toBe(true)
+    // ① 必须挂了，且只挂一次
+    expect(attached).toEqual([{ ws: 'ws-home', sessionId: 'sess-created' }])
+    // ② 绝不能挂到别的工作区
+    expect(attached.some((a) => a.ws === 'ws-other')).toBe(false)
+  })
+
+  it('🔴 工作区挂载失败 ⇒ **不吞**：回执里明说（建会话本身成功，绑定也成功，但那一条要报出来）', async () => {
+    writeSessionDir()
+    writeFileSync(join(root, '.serenity'), 'wake-test\n')
+    const madeAgent = { followup: () => {} }
+    const wsHome = {
+      id: 'ws-home',
+      path: root,
+      sessionIds: [],
+      attachSession: async () => { throw new Error('workspace store locked') },
+    }
+    const ctx = {
+      agents: { get: () => undefined },
+      get: (name: string) => {
+        if (name === 'sessionController') {
+          return {
+            create: async () => ({ sessionId: 'sess-created' }),
+            resolveAgent: async () => ({ agent: madeAgent }),
+          }
+        }
+        if (name === 'workspaceRegistry') return { list: () => [wsHome] }
+        return undefined
+      },
+    }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    // 消息照常投递（工作区挂载是"锦上添花"，不是投递前提）——但必须如实报出
+    expect(res.ok).toBe(true)
+    expect(res.detail).toContain('workspace store locked')
+  })
+
   it('🆕 无绑定但 sessionController.create 缺席 ⇒ 报错（不静默、不误报成功）', async () => {
     writeSessionDir()
     const ctx = { agents: { get: () => undefined }, get: () => undefined }

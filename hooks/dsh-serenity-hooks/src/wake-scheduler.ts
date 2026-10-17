@@ -27,7 +27,7 @@
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
-import { existsSync } from 'node:fs'
+import { existsSync, realpathSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { findSession, sessionsRoot } from './trajectory-ops.js'
 import { listBoundSessionIds, appendBound } from './trajectory-bound.js'
@@ -484,8 +484,99 @@ async function createAndBindTarget(
     'activate',
     { dirName, mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'), note: 'auto-created by send-now' },
   )
-  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'})`
+  // ④ 🔴 **把会话挂进它所属的工作区**（2026-10-17 修缺陷：owner 报「新建的会话工作区绑定不正确」）
+  const wsNote = await attachToWorkspace(ctx, root, sessionId)
+  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'}${wsNote})`
   return { agent, how }
+}
+
+/**
+ * 把刚建的会话挂进 **cwd 所属的那个工作区**（2026-10-17 缺陷修复）。
+ *
+ * 🔴 **为什么必须我们自己做（宿主源码取证，不是推断）**：
+ *   `sessionController.create()` 里 `attachSession` **只在 `workspaceId` 分支执行** ——
+ *   `dsh-api-session-controller/lib/index.js` 的 `create()`：
+ *     ```
+ *     if (request.workspaceId !== void 0) workspace = registry.get(request.workspaceId)
+ *     const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+ *     ...
+ *     if (workspace !== void 0) await workspace.attachSession(sessionId)   // ← 只有这条分支挂工作区
+ *     ```
+ *   我们传的是 `{ cwd }`（**必须如此**：`workspaceId` 与 `cwd` 互斥，而工作区 id 是宿主的内部 uuid，
+ *   我们又得按"这条轨迹住在哪个 CCC"来建会话）⇒ **建出来的会话从不登记进任何工作区**。
+ *
+ * 🔴 **症状（现场实证，本机真实数据）**：`send-now` 自动建出的那条会话
+ *   （`note` = `auto-created by send-now`）header `cwd` 确实是某个 CCC 根，
+ *   **却不在**该工作区的 `sessionIds` 里
+ *   （同一个 CCC 的另外两条会话都在）⇒ WebUI 里它不属于那个工作区。
+ *
+ * 🔴 **为什么按 `path` 找而不是"拿第一个"**：多个 CCC 并存（本机实有 5 个工作区）
+ *   ⇒ 拿第一个必然挂错。判据 = `workspace.path === root`（宿主 `Workspace.path` 是
+ *   **realpath 规范化**后的规范路径；`root` 已是 `cccRootForCwd` 上溯出来的真实目录，
+ *   两侧同一来源，故可直接比）。
+ *
+ * ⚠️ **失败不阻断投递**：工作区归属影响的是"在 WebUI 里归哪个工作区"，
+ *   而消息投递已经完成 ⇒ 把原因**如实写进回执**，不吞、也不把成功改成失败。
+ *
+ * @param ctx 插件上下文
+ * @param root CCC 根（= 该会话的 cwd）
+ * @param sessionId 刚建出来的会话 id
+ * @returns 追加到回执里的短注记（成功/跳过为空串，失败带原因）
+ */
+async function attachToWorkspace(ctx: unknown, root: string, sessionId: string): Promise<string> {
+  const reg = hostService<{
+    list?: () => Array<{ id?: string; path?: string; sessionIds?: readonly string[]; attachSession?: (id: string) => Promise<void> }>
+  }>(ctx, 'workspaceRegistry')
+  if (typeof reg?.list !== 'function') return ', ⚠️ 工作区未挂载（workspaceRegistry 不可用）'
+  let workspaces: ReturnType<NonNullable<typeof reg.list>> = []
+  try {
+    workspaces = reg.list() ?? []
+  } catch (err) {
+    return `, ⚠️ 工作区未挂载（list 失败: ${String((err as Error)?.message ?? err)}）`
+  }
+  const match = findWorkspaceByPath(workspaces, root)
+  // 没有登记该目录的工作区是**正常状态**（宿主只为见过的目录建工作区）⇒ 不是错误
+  if (match === undefined) return ''
+  if (typeof match.attachSession !== 'function') return ', ⚠️ 工作区未挂载（attachSession 不可用）'
+  // 幂等：已经在册 ⇒ 不必再写（宿主 attachSession 本身也幂等，这里只是省一次写）
+  if (Array.isArray(match.sessionIds) && match.sessionIds.includes(sessionId)) return ''
+  try {
+    await match.attachSession(sessionId)
+    return ', workspace-attached'
+  } catch (err) {
+    // 🔴 不吞：回执里如实报出（现场缺陷正是"静默不挂"）
+    return `, ⚠️ 工作区挂载失败: ${String((err as Error)?.message ?? err)}`
+  }
+}
+
+/**
+ * 在 `workspaceRegistry.list()` 里找 **path 等于该 CCC 根** 的那一个。
+ *
+ * 🔴 **为什么要 realpath 归一（不是画蛇添足）**：宿主的 `Workspace.path` 是
+ *   **`fs.realpath` 规范化**过的（`entity.d.ts` 逐字：*"Canonical directory path: the
+ *   `fs.realpath` of the path given at create time (trailing slashes, `..`, and symlinks
+ *   all resolved)"*）。而 `root` 来自 `cccRootForCwd` 的上溯——**上溯用的是字面路径**。
+ *   ⇒ 当 CCC 根是一个**符号链接**（部署上常见：家目录/项目目录被链到别处），
+ *   两侧**逐字不等**，只比字符串会**挂错或挂不上**。
+ *
+ * ⚠️ 归一失败（路径不存在等）时**回落字面比较** —— 不改既有语义，只是多给一次机会。
+ *
+ * @param workspaces registry.list() 的返回
+ * @param root CCC 根
+ * @returns 命中的工作区，无则 undefined
+ */
+function findWorkspaceByPath<T extends { path?: string }>(workspaces: readonly T[], root: string): T | undefined {
+  const direct = workspaces.find((ws) => ws?.path === root)
+  if (direct !== undefined) return direct
+  const canonical = (p: string): string => {
+    try {
+      return realpathSync(p)
+    } catch {
+      return p
+    }
+  }
+  const want = canonical(root)
+  return workspaces.find((ws) => typeof ws?.path === 'string' && canonical(ws.path) === want)
 }
 
 /**

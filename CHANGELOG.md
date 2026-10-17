@@ -1,3 +1,67 @@
+## v1.62.1 — 2026-10-17（🔧 **修 `send-now` 冷建会话：工作区绑定不正确 ＋ 首轮工具面为空**）
+
+**性质**：缺陷修复。**来源**：owner 实测报告 ——
+> 「trajectory send-now 发现 trajectory 没有活跃会话时，新建的会话工作不正常，且工作区绑定不正确」
+
+### 一、工作区绑定不正确（宿主源码取证，**不是推断**）
+
+`sessionController.create()` 的 **`attachSession` 只在 `workspaceId` 分支执行**：
+
+```js
+// dsh-api-session-controller/lib/index.js 的 create()
+if (request.workspaceId !== void 0) workspace = registry.get(request.workspaceId)
+const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+...
+if (workspace !== void 0) await workspace.attachSession(sessionId)   // ← 只有这条分支挂工作区
+```
+
+而 `createAndBindTarget()` 传的是 `{ cwd: root }`（**必须如此**：`workspaceId` 与 `cwd` 互斥，
+且我们得按"轨迹住在哪个 CCC"建会话）⇒ **建出来的会话从不登记进任何工作区**。
+
+**现场实证**：`send-now` 自动建出的那条会话（`note` = `auto-created by send-now`）
+header `cwd` 确实指向某个 CCC 根，**却不在**该工作区的 `sessionIds` 里
+（同 CCC 的另外两条会话都在）⇒ WebUI 里它不属于那个工作区。
+
+**修法**：`createAndBindTarget()` 在建会话后补一步 `attachToWorkspace()` ——
+按 **`workspace.path` 等于该 CCC 根**找对工作区（**不拿第一个**：多 CCC 并存时必挂错），
+找到才 `attachSession`。
+
+🔴 **为什么要 realpath 归一**：宿主 `Workspace.path` 是 `fs.realpath` 规范化过的
+（`entity.d.ts` 逐字：*"Canonical directory path: the `fs.realpath` of the path given at
+create time (trailing slashes, `..`, and symlinks all resolved)"*），而 `root` 来自
+`cccRootForCwd` 的**字面路径上溯** ⇒ 符号链接场景两侧逐字不等，只比字符串会挂错或挂不上。
+
+⚠️ **失败不阻断投递**：工作区归属影响的是"WebUI 里归哪个工作区"，消息投递已完成
+⇒ 原因**如实写进回执**，不吞、也不把成功改成失败。
+
+### 二、新建会话「工作不正常」= 首轮工具面为空（v1.62.0 已修）
+
+同一现场日志（`~/.dsh/sessions/`）里，问题会话的 turn 1 把工具调用**写成了正文里的
+DSML 字面量**，模型自述 *"my previous attempts produced no visible output"*；
+`tool-addition` 直到 **turn 3** 才出现。
+
+根因是 v1.61.1 的 `zeroTools: true`（首请求 **0 工具**）：锚定只有 2 轮、
+晋升信号只认 `assistant/message`、兜底要 `step/start` ≥ 3 ⇒ 前两轮无工具可用。
+
+✅ **这一半已由 v1.62.0 修掉**（`zeroTools: false`，且 `boundary < 0` 直接给完整目录）。
+本版不重复改，但**把判据写进 CHANGELOG** 供追溯：冷建会话与 UI 建会话的
+**首个 turn 都必须拿到完整工具面**。
+
+### 三、顺带记一条「判据」教训
+
+原单测里写着 `expect(created).toEqual({ cwd: root })` —— 它**只证明我们传了什么**，
+**证明不了宿主拿这个参数做了什么**。⇒ 断言"参数传对了"不等于断言"效果达成了"；
+后者的判据必须落到**副作用**上（这里是 `attachSession` 真的被调用）。
+
+### 四、验证
+
+- 新增 2 例（`tests/wake-registry.test.ts`）：① 必须挂进 cwd 所属工作区，**且挂对**
+  （夹具刻意放了另一个工作区在前，拿第一个就挂错）；② 挂载失败**不吞**、回执带原因。
+- 门禁：`test` 172 文件 / **2920 例** ✓｜`coverage` 95.07% ✓｜`typecheck` ＋
+  `typecheck-host 0.2.1-rc.2` 双半 ✓｜`build` ✓（112 `.d.ts`）｜`pack-check` ✓（140 文件）。
+- 🔴 **隐私扫描（`privacy-scan`）在首轮把我们自己的注释打红了**（注释里带了真实家目录路径
+  与私有 CCC 名）⇒ 按判据去路径化后转绿。**发布面写注释也要过隐私门。**
+
 ## v1.62.0 — 2026-10-17（🟢 **「造历史」修好了 —— 真因是 v4 格式校验，不是提示词位置**）
 
 **性质**：修复 v1.61.1 回退掉的「造历史」功能。**验证方式**：容器内跑真实轮次 → **重启宿主 → 重新进入该会话**。
