@@ -483,6 +483,40 @@ else
   done
 fi
 
+# ── V23 🆕 **`send-now` 冷建会话的「工作区归属」判据**（v1.62.1 缺陷的直接产物）──
+# 为什么必须单列一条（R↓）：那个缺陷的**单测是绿的** —— 但单测用的是**替身 ctx**
+#   （假 `workspaceRegistry.list()` / 假 `attachSession()`）⇒ 它只证明"我们**调用**了"，
+#   证明不了"宿主**真的**把会话登记进了工作区"。
+#   🔴 这正是本轨的判据 **「参数传对了 ≠ 效果达成了」**：断言入参是弱断言，
+#      后者的最硬判据是**宿主自己的持久化存储**（`$DSH_HOME/storages/workspace.json`）。
+#
+# 判据（由 v23-workspace-attach-check.mjs 一次跑完，本处只读结论）：
+#   V23   工作区存储可读且结构合法（读数器自证）
+#   V23b  每个 cwd 落在某工作区的会话，都在该工作区 `sessionIds` 里（缺陷的**一般形态**）
+#   V23c  `send-now` 冷建的会话必须挂上（缺陷的**具体形态**；缺前提时**报红不假绿**）
+V23_PROBE=/usr/local/bin/v23-workspace-attach-check.mjs
+if [ -f "$V23_PROBE" ]; then
+  v23out=$(node "$V23_PROBE" 2>&1)
+  v23rc=$?
+  for id_ in V23 V23b V23c; do
+    line=$(printf '%s\n' "$v23out" | grep -E "^PASS $id_ |^FAIL $id_ " | head -1)
+    if [ -z "$line" ]; then
+      check "$id_" "工作区归属（$id_ 未产出结论）" 1 "探针没给这条判据的结论"
+    else
+      st_=$(printf '%s' "$line" | cut -d' ' -f1)
+      lab_=$(printf '%s' "$line" | cut -d' ' -f3-)
+      [ "$st_" = "PASS" ] && check "$id_" "$lab_" 0 || check "$id_" "$lab_" 1
+    fi
+  done
+  if [ "$v23rc" != "0" ]; then
+    printf '%s\n' "$v23out" | grep -E '^FAIL ' | sed 's/^/      /'
+  fi
+else
+  for id_ in V23 V23b V23c; do
+    check "$id_" "工作区归属（探针不在）" 1 "无 $V23_PROBE ⇒ 先 bench-docker vpush"
+  done
+fi
+
 # ── 汇总 ──
 echo "═══ 运行态验收（宿主 ${EXPECT_DSH:-?} ／ 期望 ACC ${EXPECT_ACC:-?}）═══"
 for r in "${ROWS[@]}"; do IFS='|' read -r st_ id label extra <<<"$r"; printf '%-4s %-4s %-42s %s\n' "$st_" "$id" "$label" "$extra"; done
