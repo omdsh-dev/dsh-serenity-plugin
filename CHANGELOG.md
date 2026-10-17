@@ -1,4 +1,51 @@
-## v1.61.1 — 2026-10-17（🔴 **回退 v1.61.0 的「造历史」：它把新会话的系统提示词推到了对话末尾**）
+## v1.62.0 — 2026-10-17（🟢 **「造历史」修好了 —— 真因是 v4 格式校验，不是提示词位置**）
+
+**性质**：修复 v1.61.1 回退掉的「造历史」功能。**验证方式**：容器内跑真实轮次 → **重启宿主 → 重新进入该会话**。
+
+### 一、先更正 v1.61.1 的根因判定（🔴 **那条是错的**）
+
+v1.61.1 把故障写成「占位 system 未被替换 ⇒ 双 system ⇒ 提示词排到末尾」。**用宿主自己的读数器实测，这个判定不成立**：
+
+- 事故会话（`afd98269` / `accde961`）的 `seq15` 逐字是 `"surfaceOp":{"op":"replace",...}` —— **是 replace，不是 append**；
+- 用宿主自己的 `foldSurface()` 投影，surface 上**只有 1 个 system、且就在首位**。
+
+⇒ 真故障与「提示词位置」无关。**改判据**：不再自己复刻 fold 语义，**直接调宿主自带函数**。
+
+### 二、真因与三个缺陷（每个都只在"重启后重进会话"时暴露）
+
+宿主 v4 格式校验（`dsh-session-format-v3-to-v4`）对**写入会话日志的事件**有一组硬约束：
+
+| # | 缺陷 | 宿主报错 | 修法 |
+|---|---|---|---|
+| 1 | 代写 `system/message` / `assistant/message` | `does not match an open turn and step` | **只写 `user/message`**（二者在 `STEP_EVENT_TYPES` 里 ⇒ 必须过 `requireStep`，而锚定写入时 turn/step 都还没打开） |
+| 2 | 锚定写在宿主 system 之前 | `requires a protected first surface head` | 触发时机改为**看到 `system/message` 之后** |
+| 3 | 在 `session/event` 回调里直接 append | `session append cannot reenter`（**被双重 try/catch 吞掉 ⇒ 零报错、锚定静默不发生**） | 用 `setTimeout(0)` 推到发布完成之后 |
+
+**另有一条判据本身错了**：防重不能查 `hasUserMessageHistory` —— 锚定跑在 `setTimeout(0)` 之后，那时真人 prompt 已写入 ⇒ 恒真 ⇒ 永不锚定。改用 `hasAssistantHistory`（首轮 ⇔ 还没有 `assistant/message`）。
+
+### 三、行为变化
+
+- 锚定历史 = **2 条 `user/message`**（不再伪造模型自己的 `acknowledge` 回复）。
+- `zeroTools: true → false`：首请求即完整工具目录（锚定后晋升信号不再于首请求前满足）。
+- `boundary < 0`（真·首请求）**直接给完整目录**；compaction 之后仍收窄到 `compactionTools`。
+
+### 四、验证
+
+- **容器（`mb7`，本地 tarball ＋ 宿主 0.2.1-rc.2）**：锚定真触发；**重启宿主后重新进入该会话 `ok:true`**；
+  宿主自己的 `foldSurface()` ＋ `assertReleasedV4Relationships()` **两者皆 OK**，roles = `[system, user×6, assistant]`。
+- **新判据 V22/V22b/V22c**（`bench/v22-system-head-check.mjs`）：判「**日志能否被宿主重放**」，直接调宿主函数。
+  正控 3/3 PASS；**负控两种真实故障形态都被抓到**（exit 1）。
+- 门禁：`test` 172 文件 / 2918 例 ✓｜`coverage` ✓｜`typecheck` ＋ `typecheck-host` 双半 ✓｜`build` ✓（112 `.d.ts`）｜`pack-check` ✓（140 文件）。
+
+### 五、顺带修
+
+- `bench/verify.sh` 的 V5b/V7b 仍查旧串 `anchor turns injected` ⇒ 功能改名后**恒红**（而那与"真的没跑轮次"在读数上不可分）。改为两个串**都认**。
+- **声明面四处停在"双档"**（v1.59.3 加第三档时漏改）：两份 `description`（`package.json` / `dsh.plugin.json`）＋ 两份 README 的首段与「前置」行，均写 `^0.1.7-rc.1 || ^0.2.0-rc.1`。而 `peerDependencies` 与 `VERIFIED_HOST_BANDS` 早已是**三档**（含 `^0.2.1-rc.1`）⇒ 同批改为三档。
+  🔴 这条是 SESSION.md 里「下次任何 bump 时同批改掉」的兑现；**判据**：`tests/compliance.test.ts` ＋ `tests/host-manifest.test.ts` 钉住的是 peer 串，**钉不住散文** ⇒ 散文滞后不报错，只能靠这条顺带修。
+
+## v1.61.1 — 2026-10-17（🔴 **回退 v1.61.0 的「造历史」**）
+
+> ⚠️ **本版的根因判定已被 v1.62.0 推翻**（真因是 v4 格式校验，不是"双 system/提示词位置"）。保留原文供追溯。
 
 **性质**：**紧急回退**。**来源**：owner 实测报告 ——
 > 「有 bug，我新建的会话重新进入后会被覆盖空掉，旧会话好像没问题」

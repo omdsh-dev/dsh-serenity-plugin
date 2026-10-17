@@ -3,8 +3,8 @@
 > **一句话**：本插件为 AI 指定一个普通目录作为其工作区，
 > AI 在其中工作时即获得**记忆、纪律、工具和边界**——中途更换模型、重启电脑、次日再来，均可继续。
 >
-> 适配 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）的**两条发布线**：
-> `0.1.7-rc.1` 与 `0.2.0-rc.1`（声明为 `^0.1.7-rc.1 || ^0.2.0-rc.1`，双档并行支持）。
+> 适配 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（下称 DSH）的**三条发布线**：
+> `0.1.7-rc.1` ／ `0.2.0-rc.1` ／ `0.2.1-rc.1`（声明为 `^0.1.7-rc.1 || ^0.2.0-rc.1 || ^0.2.1-rc.1`，三档并行支持）。
 > 设计动机（为何称"认知容器"）见 [docs/cognitive-container-theory.md](docs/cognitive-container-theory.md)；本 README 只述**能做什么、怎么用**。
 
 **术语定义**（后文沿用下列术语，不再重复解释）：
@@ -444,5 +444,5 @@ pnpm build              # 打包（lib/index.js + client.js）
 
 MIT（见 [LICENSE](LICENSE)）
 
-> **前置**：DSH `^0.1.7-rc.1 || ^0.2.0-rc.1`（双档）｜ Node ≥ 20 或 bun。
+> **前置**：DSH `^0.1.7-rc.1 || ^0.2.0-rc.1 || ^0.2.1-rc.1`（三档）｜ Node ≥ 20 或 bun。
 > **当前版本 / 工具数 / 测试规模**均不写死在此 —— 版本看 [CHANGELOG.md](CHANGELOG.md)，运行态看设置面板与 `dashboard health`。

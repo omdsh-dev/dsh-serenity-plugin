@@ -165,17 +165,31 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
   })
 })
 
-describe('bootstrap: hasUserMessageHistory（v1.28.1 根会话重锚判定——0.1.2-rc.1 适配回归）', () => {
-  it('有 user/message 事件 → true（resume/续跑不重锚）', () => {
-    const session = mkSession('resume', [ev('user/message', 1), ev('assistant/message', 2)])
+describe('bootstrap: hasUserMessageHistory（v1.28.1 根会话重锚判定；v1.62 收紧到真人）', () => {
+  /** 真人说的 user/message（`source.kind === 'user'`） */
+  const human = (seq = 1) => ({ type: 'user/message', seq, data: { source: { kind: 'user' } } })
+
+  it('有**真人** user/message 事件 → true（resume/续跑不重锚）', () => {
+    const session = mkSession('resume', [human(1), ev('assistant/message', 2)])
     expect(hasUserMessageHistory(session)).toBe(true)
   })
 
   it('snapshotEvents() 形态同样生效（rc.1 Session 无 .events 属性——bug 2 根因回归）', () => {
-    const events = [{ type: 'user/message', seq: 1 }]
-    const session = { id: 'resume-snap', header: {}, snapshotEvents: () => events }
+    const session = { id: 'resume-snap', header: {}, snapshotEvents: () => [human(1)] }
     // 旧实现裸读 .events → undefined → 误判"无历史"→ 每条消息都重插锚定（bug 2）
     expect(hasUserMessageHistory(session)).toBe(true)
+  })
+
+  it('🔴 v1.62：宿主注入的 user/message（runtime-context / plugin / time-context）**不算**历史', () => {
+    // 为什么重要：宿主在为每条会话自动写一批 `source.kind !== 'user'` 的 user 消息
+    // （ACC 横幅 `plugin:*`、`runtime-context`、`time-context`、`skill-catalog`…）。
+    // 若把它们算作"历史"，本判定在**首轮就已经为真** ⇒ 锚定永不触发（实测静默失效）。
+    const injected = [
+      { type: 'user/message', seq: 1, data: { source: { kind: 'plugin:dsh-serenity-hooks' } } },
+      { type: 'user/message', seq: 2, data: { source: { kind: 'runtime-context' } } },
+      { type: 'user/message', seq: 3, data: { source: { kind: 'time-context' } } },
+    ]
+    expect(hasUserMessageHistory({ id: 'inj', header: {}, snapshotEvents: () => injected })).toBe(false)
   })
 
   it('无 user/message（仅 assistant/工具事件）→ false（仍首轮锚定）', () => {
@@ -201,7 +215,16 @@ describe('bootstrap: resolveBootstrapSettings 协议固有默认值（零配置�
     expect(s.anchorMessages).toEqual(DEFAULT_ANCHOR_MESSAGES)
     expect(s.anchorMessages).toHaveLength(2)
     expect(s.requiredSignals).toBe(2) // 两轮锚定：每条回复计一次，第 2 条回复后晋升
-    expect(s.zeroTools).toBe(true)
+    expect(s.zeroTools).toBe(false) // v1.62 / D140：锚定历史只造 user 消息 ⇒ 首请求须给完整目录
+  })
+
+  it('协议固有设置（v1.62 / D140）：zeroTools=false 是**结构性要求**，不是调参', () => {
+    const s = resolveBootstrapSettings()
+    // 🔴 为什么必须是 false：v1.62 起锚定历史**只造 `user/message`**（不再伪造 assistant）。
+    //    ⇒ 首请求时晋升信号**尚未满足** ⇒ 若 zeroTools=true，首请求会真的退化成「0 工具」，
+    //    模型看不到任何 ACC 工具。而伪造 assistant 是**结构性非法**的（宿主 v4 `requireStep`）。
+    //    详见 appendAnchorHistory 头注释与 D140。
+    expect(s.zeroTools).toBe(false)
   })
 
   it('协议锚定消息内容不可配置：含 ACC 身份 + acknowledge 要求（S142 用户确认固化）', () => {

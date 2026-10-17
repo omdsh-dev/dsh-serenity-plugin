@@ -233,14 +233,13 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
     const decision = { kind: 'enter', messages: [{ source: { kind: 'skill-catalog' } }] }
     const pre = await preStep(ctx, { session: { header: { cwd: 123 } } }, decision)
     expect(pre).toBe(decision)
-    // ③ inbox：无 agent 上的 session.header.cwd ⇒ 不注入任何 prepend
-    const prepends: unknown[] = []
+    // ③ inbox：无 agent 上的 session.header.cwd ⇒ 不写入任何锚定历史
+    const appends: unknown[] = []
     const inboxAgent = {
-      session: { id: 'x', header: {} },
-      inbox: { prepend: (q: string, m: unknown) => prepends.push({ q, m }) },
+      session: { id: 'x', header: {}, append: (t: string, d: unknown) => appends.push({ t, d }) },
     }
     first(ctx, 'agent/inbox/inserted')({ agent: inboxAgent, message: { source: { kind: 'user' } } })
-    expect(prepends).toHaveLength(0)
+    expect(appends).toHaveLength(0)
   })
 
   it('🔴 B2：`session/event` 的 root 解析不到 ⇒ 早退（不抛、不建 tracker）', () => {
@@ -252,59 +251,81 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
     expect(() => h({ header: { cwd: outside } }, { type: 'assistant/message', seq: 1 })).not.toThrow()
   })
 
-  it('🔴 B5：`inbox.prepend` **缺席** ⇒ 早退（不抛，会话正常处理）', async () => {
+  it('🔴 B5：会话**无 append** ⇒ 早退（不抛，会话正常处理）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const agent = { session: { id: 'no-inbox', header: { cwd: dir } } } // 无 inbox
+    const agent = { session: { id: 'no-append', header: { cwd: dir } } } // 无 append
     expect(() =>
       first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } }),
     ).not.toThrow()
   })
 
-  it('🔴 B6：注入体**真抛**（`prepend` 抛）⇒ 吞掉，**不阻断会话**', () => {
+  it('🔴 B6：注入体**真抛**（`append` 抛）⇒ 吞掉，**不阻断会话**', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     const agent = {
-      session: { id: 'throw-inbox', header: { cwd: dir } },
-      inbox: { prepend: () => { throw new Error('prepend boom (injected)') } },
+      session: {
+        id: 'throw-append',
+        header: { cwd: dir },
+        append: () => { throw new Error('append boom (injected)') },
+      },
     }
-    // 🔴 断言方向：**不抛出去**（锚定注入失败不阻断会话 —— 文件头 :15 的承诺）
+    // 🔴 断言方向：**不抛出去**（锚定注入失败不阻断会话 —— 文件头的承诺）
     expect(() =>
       first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } }),
     ).not.toThrow()
   })
 
-  it('🔴 B4：**子 agent（delegationDepth > 0）** ⇒ 用 `anchoredSessions` 防重（只锚定一次）', () => {
+  /** 让出一拍：锚定走 `setTimeout(0)`（避开宿主 append 不可重入） */
+  const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it('🔴 B4：**子 agent（delegationDepth > 0）** ⇒ 用 `anchoredSessions` 防重（只锚定一次）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const h = first(ctx, 'agent/inbox/inserted')
+    const h = first(ctx, 'session/event')
     let n = 0
-    const agent = {
-      session: { id: 'sub-1', header: { cwd: dir, delegationDepth: 1 } },
-      inbox: { prepend: () => { n += 1 } },
-    }
-    h({ agent, message: { source: { kind: 'user' } } })
+    const session = { id: 'sub-1', header: { cwd: dir, delegationDepth: 1 }, append: () => { n += 1 } }
+    // 触发时机 = 宿主提交第一条 `system/message` 之后（D140-B）
+    h(session, { type: 'system/message', seq: 1 })
+    await tick()
     const afterFirst = n
-    // 🔴 子 agent 的判据是「**进程内只锚定一次**」（`anchoredSessions` Set），
-    //    **不是**根会话那套"看有没有 user/message 历史" ⇒ 第二条消息**不得**再锚定。
-    h({ agent, message: { source: { kind: 'user' } } })
+    h(session, { type: 'system/message', seq: 2 })
+    await tick()
     expect(n).toBe(afterFirst) // 第二次没有新增
     expect(afterFirst).toBeGreaterThan(0) // 首次确实锚定了（正控意味）
   })
 
-  it('🔴 B3：`session.id` **非字符串** ⇒ `sid = undefined`（仍按根会话路径锚定）', () => {
+  it('🔴 B3：`session.id` **非字符串** ⇒ `sid = undefined`（仍按根会话路径锚定）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     let n = 0
-    const agent = {
-      session: { id: 777, header: { cwd: dir } }, // id 非字符串
-      inbox: { prepend: () => { n += 1 } },
-    }
-    first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
+    const session = { id: 777, header: { cwd: dir }, append: () => { n += 1 } }
+    first(ctx, 'session/event')(session, { type: 'system/message', seq: 1 })
+    await tick()
     // 🔴 语义：sid 取不到 ⇒ ① 不写 `anchoredSessions` ② 仍走 depth===0 的"无历史即锚定"
-    //    ⇒ **确实锚定了**（不被 id 非串这件事挡住）。若把判据写成"必须有 sid 才锚定"，
-    //    这条会红 —— 那正是一处语义变更。
+    //    ⇒ **确实锚定了**（不被 id 非串这件事挡住）。
     expect(n).toBeGreaterThan(0)
+  })
+
+  it('🔴 B9（v1.62 / D140）：**只写 `user/message`** —— 绝不代写 system／assistant', async () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const calls: Array<{ type: string; data: unknown }> = []
+    const session = {
+      id: 'shape-1',
+      header: { cwd: dir },
+      append: (type: string, data: unknown) => { calls.push({ type, data }); return { seq: calls.length } },
+    }
+    first(ctx, 'session/event')(session, { type: 'system/message', seq: 1 })
+    await tick()
+    // 🔴 宿主 v4 校验：`system/message` 与 `assistant/message` 必须落在已打开的 turn+step 内
+    //    （`STEP_EVENT_TYPES` ⇒ `requireStep`），而锚定写入时 turn/step **都还没打开**。
+    //    代写它们 ⇒ 首轮正常、**重新进入会话即 corrupt**（v1.61.0 事故）。
+    expect(calls.length).toBeGreaterThan(0)
+    expect(calls.every((c) => c.type === 'user/message')).toBe(true)
+    for (const c of calls) {
+      expect((c.data as { source?: { kind?: string } }).source?.kind).toBe('user')
+    }
   })
 
   it('🔴 B7：`warnOnce` **只喊一次**（第二次不得再写日志）', async () => {
@@ -370,14 +391,26 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
     expect((pre as { messages: unknown[] }).messages).toHaveLength(2)
   })
 
-  it('正控（B8 对照）：形态完整时 assemble 真窄化 ⇒ 证明上面不是"永远原样返回"', async () => {
+  it('正控（B8 对照）：形态完整时 assemble 仍会窄化（compaction 后那一档）⇒ 证明上面不是"永远原样返回"', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const tools = [{ name: 'read' }, { name: 'grep' }]
-    const agent = { session: { id: 'narrow-1', header: { cwd: dir }, snapshotEvents: () => [] } }
-    const asm = await assemble(ctx, agent, tools)
-    // 未晋升 + zeroTools + boundary < 0 ⇒ 首请求 **0 工具**
-    expect((asm as { tools: unknown[] }).tools).toEqual([])
+    // 🔴 输入必须**满足前提**：compactionTools 里的工具必须**全都在目录里**，
+    //    否则会走"工具缺失 ⇒ 降级完整目录"那条分支 —— 那会让本正控变成测另一条路。
+    //    （这正是本轨既有判据「判据报红先证我喂给它的输入满足前提」的又一次适用。）
+    const tools = [
+      { name: 'read' }, { name: 'write' }, { name: 'edit' }, { name: 'glob' },
+      { name: 'grep' }, { name: 'todo_write' }, { name: 'unrelated_tool' },
+    ]
+    const agent = { session: { id: 'narrow-2', header: { cwd: dir }, snapshotEvents: () => [] } }
+    // 🔴 正控的靶换了（v1.62 / D140）：`boundary < 0` 现在**直接给完整目录**（取消首请求断点），
+    //    所以"真窄化"只发生在 **compaction 之后**那一档。
+    // ⚠️ 时序（实测踩到）：`observe()` 在 `state.get(sid)` 为空时**早退**（不建状态）
+    //    ⇒ 必须**先 assemble 一次**让 `status()` 建好该会话的状态，`compaction/end` 才生效。
+    await assemble(ctx, agent, tools) // ① 建状态
+    first(ctx, 'session/event')({ header: { cwd: dir }, id: 'narrow-2' }, { type: 'compaction/end', seq: 10 }) // ② 造 boundary ≥ 0
+    const asm = await assemble(ctx, agent, tools) // ③ 才看得到窄化
+    // compaction 后仍收窄到 bootstrapTools+compactionTools ⇒ `unrelated_tool` 被剔掉
+    expect((asm as { tools: Array<{ name: string }> }).tools.map((t) => t.name)).not.toContain('unrelated_tool')
   })
 })
 
@@ -396,10 +429,15 @@ describe('bootstrap 分支面: hasUserMessageHistory 退化输入', () => {
     expect(hasUserMessageHistory({ snapshotEvents: 'not-a-function' })).toBe(false)
   })
 
-  it('正控：含 user/message ⇒ true', () => {
+  it('正控：含**真人** user/message ⇒ true（v1.62：须带 source.kind=user）', () => {
     expect(
-      hasUserMessageHistory({ snapshotEvents: () => [{ type: 'user/message' }] }),
+      hasUserMessageHistory({ snapshotEvents: () => [{ type: 'user/message', data: { source: { kind: 'user' } } }] }),
     ).toBe(true)
+  })
+
+  it('🔴 v1.62：缺 source 的 user/message ⇒ false（宿主注入的那批不算"人说过话"）', () => {
+    // 宁可在形状缺失时判"没说过"（⇒ 重锚一次），也不要因形状缺失而漏判 ⇒ 锚定永不触发
+    expect(hasUserMessageHistory({ snapshotEvents: () => [{ type: 'user/message' }] })).toBe(false)
   })
 
   /**

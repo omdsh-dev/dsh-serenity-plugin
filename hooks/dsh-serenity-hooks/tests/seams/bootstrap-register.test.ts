@@ -101,13 +101,15 @@ describe('registerBootstrap: system-prompt/assemble —— 首锚目录窄化', 
     { name: 'todo_write' }, { name: 'unrelated_tool' },
   ]
 
-  it('CCC 内、未晋升、boundary < 0 ⇒ **首请求 0 工具**（纯文字锚定轮）', async () => {
+  it('CCC 内、未晋升、boundary < 0 ⇒ **完整目录**（v1.62 / D140：首请求不再收窄）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     const agent = fakeAgent('main-boot-1', { header: { cwd: dir } }) // 无 events ⇒ boundary -1
 
     const out = (await assemble(ctx, agent, fullCatalog())) as { tools: unknown[] }
-    expect(out.tools).toEqual([]) // zeroTools + 首锚轮 ⇒ 目录清空
+    // 🔴 断言语义变更（v1.62）：锚定历史只造 user 消息 ⇒ 首请求时晋升信号尚未满足，
+    //    而**目的正是取消那个工具断点** ⇒ 若仍收窄成 5 个工具，只是把「空→满」换成「窄→满」，白改。
+    expect(out.tools).toHaveLength(fullCatalog().length)
   })
 
   it('非 CCC（cwd 无 .serenity）⇒ 原样返回完整目录', async () => {
@@ -243,70 +245,97 @@ describe('registerBootstrap: agent/pre-step —— 首锚剥离注入上下文',
   })
 })
 
-// ── agent/inbox/inserted：锚定轮注入 ────────────────────────────────────────
+// ── session/event(system/message)：锚定历史（造，而非真跑）──────────────────
 
-describe('registerBootstrap: agent/inbox/inserted —— 锚定轮注入', () => {
-  function inboxAgent(id: string, extra: Record<string, unknown> = {}): { agent: Record<string, unknown>; prepends: Array<{ queue: string; text: string }> } {
-    const prepends: Array<{ queue: string; text: string }> = []
+describe('registerBootstrap: session/event —— 锚定历史（造，而非真跑）', () => {
+  function inboxAgent(id: string, extra: Record<string, unknown> = {}): { agent: Record<string, unknown>; appends: Array<{ type: string; text: string }> } {
+    const appends: Array<{ type: string; text: string }> = []
     const agent = {
-      session: { id, ...extra },
-      inbox: {
-        prepend: (queue: string, m: unknown) => {
-          const text = (m as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? ''
-          prepends.push({ queue, text })
+      session: {
+        id,
+        ...extra,
+        append: (type: string, data: unknown) => {
+          const text = (data as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? ''
+          appends.push({ type, text })
+          return { seq: appends.length }
         },
       },
     }
-    return { agent, prepends }
+    return { agent, appends }
+  }
+  /** 触发锚定的唯一合法时机：宿主已提交该会话第一条 `system/message`。
+   *  🔴 锚定走 `setTimeout(0)`（避开宿主"append 不可重入"）⇒ 必须**让出一拍**再断言。 */
+  const fireSystem = async (ctx: FakeCtx, session: unknown) => {
+    first(ctx, 'session/event')(session, { type: 'system/message', seq: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 0))
   }
 
-  it('新根会话首条用户消息 ⇒ 按**逆序** prepend 锚定消息（最终队列 = 锚定消息顺序 + 真实消息）', async () => {
+  it('宿主提交 system/message 之后 ⇒ 按**正序**写入锚定 `user/message`（v1.62 / D140）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, prepends } = inboxAgent('main-boot-12', { header: { cwd: dir }, events: [] })
+    const { agent, appends } = inboxAgent('main-boot-12', { header: { cwd: dir }, events: [] })
 
-    await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
+    await fireSystem(ctx, agent.session)
 
-    expect(prepends).toHaveLength(DEFAULT_ANCHOR_MESSAGES.length)
-    expect(prepends.every((p) => p.queue === 'next-turn')).toBe(true)
-    // 逆序 prepend ⇒ 记录到的调用顺序是倒过来的
-    expect(prepends.map((p) => p.text)).toEqual([...DEFAULT_ANCHOR_MESSAGES].reverse())
+    expect(appends).toHaveLength(DEFAULT_ANCHOR_MESSAGES.length)
+    // 🔴 形状约束（D140-A，宿主 v4 校验的硬要求）：**只能是 `user/message`**。
+    //    `system/message` 与 `assistant/message` 都在 `STEP_EVENT_TYPES` 里 ⇒ 必须过 `requireStep`
+    //    （turn/step 精确匹配当前打开的），而锚定写入时 turn/step **都还没打开**
+    //    ⇒ 代写它们 = 首轮正常、**重新进入会话即 corrupt**（v1.61.0 事故的根因）。
+    expect(appends.every((a) => a.type === 'user/message')).toBe(true)
+    // 正序：日志里就是模型看到的顺序（不再是"逆序 prepend 到队列"）
+    expect(appends.map((a) => a.text)).toEqual([...DEFAULT_ANCHOR_MESSAGES])
   })
 
-  it('已有 user/message 历史 ⇒ 不锚定（resume/续跑不重锚）', async () => {
+  it('🔴 时机约束（D140-B）：`agent/inbox/inserted` **不得**写锚定历史', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, prepends } = inboxAgent('main-boot-13', {
+    const { agent, appends } = inboxAgent('main-boot-timing', { header: { cwd: dir }, events: [] })
+    // 这个时机太早：宿主的 `system/message` 还没提交。若在此写 user 消息，
+    // surface 首节点就变成 user ⇒ 重放抛
+    // `system/message requires a protected first surface head` ⇒ 会话 corrupt。
+    // ⇒ 这就是"第一次修复后仍然翻车"的第二个缺陷（单测全绿、首轮正常，只有重进才暴露）。
+    await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
+    expect(appends).toHaveLength(0)
+    // 正控：同一会话在 system/message 到达后**确实**会写 ⇒ 证明上面不是"永远不写"
+    await fireSystem(ctx, agent.session)
+    expect(appends.length).toBeGreaterThan(0)
+  })
+
+  it('已有**模型回复**的会话 ⇒ 不锚定（已非首轮）', async () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const { agent, appends } = inboxAgent('main-boot-13', {
       header: { cwd: dir },
-      events: [{ type: 'user/message' }],
+      // 🔴 v1.62：锚定的形状判据 = 「还没有 assistant/message」（= 仍是首轮）。
+      //    ⛔ 不能用 user/message 历史判：锚定跑在 setTimeout(0) 之后，那时真人 prompt 已写入。
+      events: [{ type: 'assistant/message', seq: 1 }],
     })
 
-    await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
+    await fireSystem(ctx, agent.session)
 
-    expect(prepends).toHaveLength(0)
+    expect(appends).toHaveLength(0)
   })
 
   it('cheap-worker / skiff 会话 ⇒ 不锚定（autonomous worker 与角色会话不需锚定轮）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     for (const id of ['cheap-worker-worker-3', 'skiff-qa-boot-2']) {
-      const { agent, prepends } = inboxAgent(id, { header: { cwd: dir }, events: [] })
-      await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
-      expect(prepends, id).toHaveLength(0)
+      const { agent, appends } = inboxAgent(id, { header: { cwd: dir }, events: [] })
+      await fireSystem(ctx, agent.session)
+      expect(appends, id).toHaveLength(0)
     }
   })
 
-  it('插件来源消息（ACC_MESSAGE_KIND）⇒ 不递归锚定', async () => {
+  it('幂等：同一条会话的第二次 system/message ⇒ 不再重复造历史', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, prepends } = inboxAgent('main-boot-14', { header: { cwd: dir }, events: [] })
-
-    // 用 ACC_MESSAGE_KIND 的**真值**（不从源码注释猜）：插件来源消息不得递归锚定
-    await first(ctx, 'agent/inbox/inserted')({
-      agent,
-      message: { source: { kind: ACC_MESSAGE_KIND } },
-    })
-
-    expect(prepends).toHaveLength(0)
+    const { agent, appends } = inboxAgent('main-boot-idem', { header: { cwd: dir }, events: [] })
+    await fireSystem(ctx, agent.session)
+    const afterFirst = appends.length
+    await fireSystem(ctx, agent.session)
+    // 每轮 system 都会更新（contentGeneration/replace），但**锚定历史只造一次**
+    expect(appends.length).toBe(afterFirst)
+    expect(afterFirst).toBe(DEFAULT_ANCHOR_MESSAGES.length)
   })
 })

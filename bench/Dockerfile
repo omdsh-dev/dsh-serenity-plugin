@@ -68,6 +68,11 @@ COPY v8c-cdp-panel-check.mjs /usr/local/bin/v8c-cdp-panel-check.mjs
 #    session/prompt → **断言模型正文逐字复述**（内容级，不是"RPC 没报错"）。
 #    ⚠️ 它 import 容器内宿主自带的 ws（`/root/.dsh/profiles/node_modules/ws`）—— 与面 E 同源。
 COPY acp-face-check.mjs /usr/local/bin/acp-face-check.mjs
+# 🆕 V22 探针（**系统提示词的位置判据**）：按 surface 顺序重建 role 序列，
+#    断言「首节点是 system ∧ system 恰 1 个 ∧ 无占位残留」。
+#    🔴 它是 2026-10-17 v1.61.0 事故的直接产物：那次全部既有判据都绿，
+#    而 surface 上多了一个空占位 system ⇒ 模型被误导。**只有按序读 surface 才看得见**。
+COPY v22-system-head-check.mjs /usr/local/bin/v22-system-head-check.mjs
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh
 
 WORKDIR /ccc

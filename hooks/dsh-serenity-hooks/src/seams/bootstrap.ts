@@ -75,7 +75,102 @@ export const DEFAULT_ANCHOR_MESSAGES: string[] = [
  * 统一经 sessionEvents() 读取（snapshotEvents() 优先，.events 兜底）。
  */
 export function hasUserMessageHistory(session: unknown): boolean {
-  return sessionEvents(session).some((event) => (event as { type?: string }).type === 'user/message')
+  return sessionEvents(session).some((event) => {
+    const e = event as { type?: string; data?: { source?: { kind?: string } } }
+    if (e.type !== 'user/message') return false
+    // 🔴 v1.62：只认**真人**说过话（`source.kind === 'user'`）。
+    //    宿主自己会写一批 `user/message`：ACC 横幅（`plugin:*`）、`runtime-context`、
+    //    `time-context`、`skill-catalog`… ⇒ 若把它们也算作"历史"，本判定在**首轮就已经为真**，
+    //    锚定永不触发（实测：v1.62 首版正是这样静默失效的 —— 会话里 4 条 user 消息，
+    //    其中只有 1 条 `kind=user` 是真人说的 `hi`，而它在 system 之后才写）。
+    //    ⚠️ 缺 `source` 的条目按"不是真人"处理（宁可重锚一次，也不因形状缺失而漏判）。
+    return e.data?.source?.kind === 'user'
+  })
+}
+
+/**
+ * 会话里是否已有模型回复（= 已经不是首轮）。
+ *
+ * 🔴 这是锚定的**形状判据**（v1.62）：锚定只能在**首轮**造。
+ *    ⛔ 不能用 `hasUserMessageHistory`：宿主在 system 之后、真人 prompt 之前就写了
+ *    ACC 横幅，而锚定实际执行点（`setTimeout(0)`）更晚 ⇒ 真人历史**必然已存在** ⇒ 恒真。
+ *    而 `assistant/message` 只在**模型真的答过一轮之后**才出现 ⇒ 它在首轮时必然为空。
+ */
+export function hasAssistantHistory(session: unknown): boolean {
+  return sessionEvents(session).some((event) => (event as { type?: string }).type === 'assistant/message')
+}
+
+// ── 锚定历史「造」而非「跑」（v1.62，D140）──
+
+/**
+ * 把 first-anchor 的锚定话语**直接写进会话日志**，取代「真跑两轮」。
+ *
+ * ## 🔴 两条硬约束（宿主 v4 格式校验器，实测逐条踩过）
+ *
+ * **约束 A — 只能写 `user/message`**：`system/message` 与 `assistant/message` 都在
+ *   `STEP_EVENT_TYPES` 里 ⇒ 必须过 `requireStep()`（`data.turn`/`data.step` 精确匹配
+ *   **当前打开的** turn 与 step，且为 null 时同样拒绝）。而本函数在 `agent/pre-step`
+ *   前后被调用时 **turn/step 都还没打开**（`turn/start` 在 preStep 之前，`step/start`
+ *   在 preStep 之后）⇒ 代写它们**结构性非法**。
+ *   ⚠️ 症状：写通道不校验 ⇒ **首轮正常**；**重新进入**时重放才抛
+ *   `system/message does not match an open turn and step` ⇒ 会话 corrupt、界面空白。
+ *   ⇒ **v1.60 那版「先写占位 system 等宿主 replace」的整套方案因此作废**。
+ *
+ * **约束 B — 必须写在宿主提交 `system/message` 之后**：格式层有 `protectedHead`
+ *   机制 —— `foldSurface()` 里 `system/message` 若在 **surface 非空且尚无 protectedHead**
+ *   时到来，直接抛 `system/message requires a protected first surface head`。
+ *   也就是说：**surface 的第一个节点必须是 system**。
+ *   ⇒ 若我们先写 user 消息，宿主随后的 system 就落不到首位 ⇒ 重放同样判 corrupt。
+ *   ⚠️ 这条是**第一次修复后仍然翻车**的原因（同一会话、不同报错），
+ *   判据仍是「重启宿主后重新进入该会话」。
+ *
+ * ⇒ 因此调用时机 = **`session/event` 里看到该会话第一条 `system/message` 之后**（见下方注册处），
+ *   而不是 `agent/inbox/inserted`（那太早）。
+ *
+ * ## 为什么去掉 assistant 那半不损失什么
+ *
+ * 锚定话语的**唯一目的**是让模型认为自己已经同意过协作协议。
+ * 保留 **2 条 `user/message`** 即可达成；丢掉的只是"模型自己的 ack 回复"——
+ * 而那原本也是**我们伪造的**，不是模型真说过的。
+ *
+ * ## 判据（改这个函数前后都必须跑）
+ *
+ * ① 单测钉形状（只许 user/message）；
+ * ② **容器内真跑一轮 → 重启宿主 → 重新进入该会话** —— 只有这条路能证明日志合法
+ *   （前两次修复都是"单测全绿 + 首轮正常"却仍然 corrupt）。
+ * ③ 直接调宿主自己的 `assertReleasedV4Relationships()` 判形状，**不要自写复刻**。
+ *
+ * @param session 会话（需有 append）
+ * @param anchorMessages 锚定话语序列（缺省协议固有两条）
+ * @returns 是否成功写入
+ */
+export function appendAnchorHistory(
+  session: unknown,
+  anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
+): boolean {
+  const target = session as {
+    append?: (type: string, data: unknown, opts?: unknown) => { seq?: number }
+  } | undefined
+  if (typeof target?.append !== 'function') return false
+  const append = target.append.bind(target)
+  const rid = (prefix: string): string => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  try {
+    for (let i = 0; i < anchorMessages.length; i++) {
+      append(
+        'user/message',
+        {
+          id: rid(`anchor-user-${i + 1}`),
+          role: 'user',
+          content: [{ type: 'text', text: anchorMessages[i] }],
+          source: { kind: 'user' },
+        },
+        { surfaceOp: 'append' },
+      )
+    }
+    return anchorMessages.length > 0
+  } catch {
+    return false
+  }
 }
 
 // ── 阶段机（等价 anchored compaction-epoch.mjs createEpochPromotion）──
@@ -206,9 +301,18 @@ const PROMOTE_EVENTS: Record<'tool-call' | 'assistant-message' | 'either', Set<'
   either: new Set(['tool/call', 'assistant/message']),
 }
 
-/** 协议固有 bootstrap 设置：zeroTools=true（首请求 0 工具纯文字锚定轮）、
- *  晋升信号仅 assistant/message（对齐 zero-anchored-standard）、
- *  requiredSignals = 锚定轮数（2 条消息 → 2 条回复后晋升）。无参——零配置面。 */
+/** 协议固有 bootstrap 设置（v1.62 / D140）。
+ *
+ * 🔴 **zeroTools 必须为 false**：v1.62 起锚定历史**只造 `user/message`**（不含伪造的
+ *   `assistant/message`）⇒ **首请求时晋升信号尚未满足** ⇒ 若仍 `zeroTools: true`，
+ *   首请求会真的退化成「0 工具」，模型看不到任何 ACC 工具。
+ *
+ * 🔴 **为什么不改回去伪造一条 assistant**：宿主 v4 校验要求 `assistant/message` 落在
+ *   已打开的 turn+step 内（见 `appendAnchorHistory` 头注释），而锚定写入时 turn/step
+ *   都还没打开 ⇒ 伪造它**结构性非法**，代价是「重新进入会话即 corrupt」。
+ *
+ * ⇒ 取舍：**首请求就给完整工具目录**（放弃「首请求窄目录」这个 cache 断点优化），
+ *   换来**日志合法**。`bootstrapTools` 因此只是历史字段，`boundary < 0` 分支已让位。 */
 export function resolveBootstrapSettings(): BootstrapSettings {
   return {
     bootstrapTools: [...DEFAULT_BOOTSTRAP_TOOLS],
@@ -217,7 +321,7 @@ export function resolveBootstrapSettings(): BootstrapSettings {
     suppressedSources: new Set(DEFAULT_SUPPRESSED_SOURCES),
     compactionTools: [...DEFAULT_COMPACTION_TOOLS],
     anchorMessages: [...DEFAULT_ANCHOR_MESSAGES],
-    zeroTools: true,
+    zeroTools: false,
   }
 }
 
@@ -259,6 +363,7 @@ export function registerBootstrap(ctx: Context): void {
   }
 
   // session/event 观察：按 session 所属 CCC root 路由到对应 tracker（晋升状态按 root 隔离）
+  // 🆕 v1.62（D140）：**锚定历史也在这里造** —— 时机是本函数最关键的参数，见下。
   ctx.on('session/event', (session, event) => {
     try {
       const cwd = (session as { header?: { cwd?: string } } | undefined)?.header?.cwd
@@ -266,55 +371,72 @@ export function registerBootstrap(ctx: Context): void {
       const root = cccRootForCwd(cwd)
       if (!root) return
       trackerFor(root).observe(session, event)
+      // 🔴 **必须是 `system/message` 之后**（宿主 v4 的 `protectedHead` 硬约束）：
+      //    `foldSurface()` 里 `system/message` 若在 **surface 非空且尚无 protectedHead** 时到来，
+      //    直接抛 `system/message requires a protected first surface head`
+      //    ⇒ **surface 的第一个节点必须是 system**。
+      //    ⇒ 若我们在 `agent/inbox/inserted`（太早，system 还没提交）就写 user 消息，
+      //      宿主随后的 system 落不到首位 ⇒ **重放即 corrupt**。
+      //    🔵 这条正是"第一次修复后仍然翻车"的第二个缺陷 —— 单测全绿、首轮正常，
+      //      只有**重启宿主后重新进入该会话**才暴露。
+      if (event.type === 'system/message') {
+        // 🔴 **不能在 `session/event` 回调里直接 append**（第三个缺陷，2026-10-17 容器实测）：
+        //    宿主的 `publicationEntry()` 会抛 `session append cannot reenter while another
+        //    append is being published` —— 此刻它**正在**发布这条 `system/message`。
+        //    而该异常会被本回调的 `try/catch` 与宿主的 per-listener containment **双重吞掉**
+        //    ⇒ 症状是"首轮完全正常，但锚定就是没发生"，**没有任何报错**。
+        //    ⇒ 用 setTimeout(0) 把写入推到**发布完成之后**的下一拍（同一个 Node 事件循环）
+        setTimeout(() => {
+          try {
+            maybeAnchor(session, root)
+          } catch {
+            /* 锚定失败不阻断会话 */
+          }
+        }, 0)
+      }
     } catch {
       /* 观察失败不阻断 */
     }
   })
 
-  // 首轮锚定注入（对齐 whoami-turn.mjs）：新会话第一条真实用户消息到达时，
-  // 把锚定消息 prepend 到 next-turn 队列——dsh 每轮只消费一条 next-turn 消息，
-  // 因此锚定轮依次消费（v4 多轮递进：每条锚定消息一轮，0 工具纯文字回复），
-  // 最后一条锚定回复后晋升，真实用户消息随后被处理（完整工具已解锁）。
+  /** 造锚定历史（幂等；防重靠 `anchoredSessions`）。 */
+  const maybeAnchor = (session: unknown, _root: string): void => {
+    const s = session as { header?: { delegationDepth?: number }; id?: string } | undefined
+    const depth = s?.header?.delegationDepth ?? 0
+    const sid = typeof s?.id === 'string' ? s.id : undefined
+    if (sid !== undefined && anchoredSessions.has(sid)) return
+    // cheap-worker worker / Skiff：autonomous 与角色会话不需要锚定（同 apply 侧判定）
+    if (sid !== undefined && (sid.startsWith('cheap-worker-') || isSkiffSessionId(sid))) return
+    // 🔴 **不要用 `hasUserMessageHistory` 当防重判据**（v1.62 实测踩到）：
+    //    本函数跑在 `setTimeout(0)` 之后，而那一刻**真人消息已经写进日志了**
+    //    （宿主的顺序是 system → ACC 横幅 → 真人 prompt → runtime-context …）
+    //    ⇒ 若在这里查历史，它**恒为真** ⇒ 锚定永不触发（且**没有任何报错**）。
+    //    防重改用进程内 `anchoredSessions`；"resume/续跑不重锚"由**更早**的
+    //    `agent/inbox/inserted` 那条路径负责（那里能看到"是否已有真人历史"）。
+    //    形状判据：只有**首轮**才锚 —— 即该会话还没有任何 `assistant/message`。
+    if (hasAssistantHistory(session)) return
+    void depth
+    const wrote = appendAnchorHistory(session, SETTINGS.anchorMessages)
+    if (wrote && sid !== undefined) anchoredSessions.add(sid)
+    if (wrote) warnOnce(`anchor history fabricated: ${SETTINGS.anchorMessages.length} 条 user 消息（不再真跑）`)
+  }
+
+  // 首轮锚定（v1.62 起**不再**在这里写历史 —— 见上面 `session/event` 的 `system/message` 分支）。
+  // 本订阅保留用于：判定「是否该锚定」的**早期信号**（不改日志），以及未来的旁路需求。
   ctx.on('agent/inbox/inserted', ({ agent, message }) => {
     try {
       const root = agentRoot(agent)
       if (!root) return
-      // 锚定判定（v1.18.6：workflow subagent 也锚定——用户要求）：
-      //   - 根会话（delegationDepth 0）：无历史 user/message 才锚定（resume 不重锚）
-      //   - 子 agent（workflow subagent 等）：进程内只锚定一次（anchoredSessions Set）
       const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; id?: string } | undefined
-      const depth = session?.header?.delegationDepth ?? 0
       const sid = typeof session?.id === 'string' ? session.id : undefined
-      // cheap-worker worker（sessionId `cheap-worker-` 前缀）：autonomous worker，不需要 whoami 锚定轮
-      // （锚定轮消耗 2 轮 + 0 工具，浪费；cheap-worker worker 已通过 systemPrompt.section 获得 ACC 5 块）。
-      // F4 Skiff（`skiff-` 前缀）：角色 CCC 提示词全替换，同样不需要锚定轮（旁路）。
-      // 与 createEpochPromotion.status 的 `cheap-worker-` 恒 promoted 判定保持一致。
       if (sid !== undefined && (sid.startsWith('cheap-worker-') || isSkiffSessionId(sid))) return
-      if (depth === 0) {
-        // v1.28.1：sessionEvents() 统一读取——rc.1 起 Session 无 .events 属性（snapshotEvents()），
-        // 裸读 .events 恒 undefined → `!undefined` 恒 true → **有历史也永不跳过 → 每条消息都重插锚定**。
-        // 本判定 = 会话是否已有真实用户消息（resume/续跑不重锚）。
-        if (hasUserMessageHistory(session)) return
-      } else {
-        if (sid !== undefined && anchoredSessions.has(sid)) return
-      }
-      // 插件来源消息不递归锚定（含我们自己的锚定消息）
       if ((message as { source?: { kind?: string } })?.source?.kind === ACC_MESSAGE_KIND) return
-      const inbox = (agent as { inbox?: { prepend?: (queue: string, msg: unknown) => void } }).inbox
-      if (!inbox?.prepend) return
-      // 逆序 prepend（prepend 插到队首）：最终队列 = [anchorMessages[0], ..., anchorMessages[n-1], 真实消息]
-      for (let i = SETTINGS.anchorMessages.length - 1; i >= 0; i--) {
-        inbox.prepend('next-turn', {
-          id: `bootstrap-anchor-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
-          role: 'user',
-          content: [{ type: 'text', text: SETTINGS.anchorMessages[i] }],
-          source: { kind: ACC_MESSAGE_KIND, form: 'notice', summary: 'bootstrap anchor turn' },
-        })
-      }
-      if (sid !== undefined) anchoredSessions.add(sid)
-      warnOnce(`anchor turns injected: ${SETTINGS.anchorMessages.length} 条（${SETTINGS.anchorMessages[0]!.slice(0, 40)}…）`)
+      // ⚠️ **不要在这里写锚定历史**：此刻宿主的 `system/message` 还没提交，
+      //    先写 user 消息会把 surface 首节点让给 user ⇒ 重放抛
+      //    `system/message requires a protected first surface head`（见头注释约束 B）。
+      void session
     } catch {
-      /* 锚定注入失败不阻断（会话正常处理） */
+      /* 不阻断 */
     }
   })
 
@@ -361,8 +483,14 @@ export function registerBootstrap(ctx: Context): void {
         } as PromptAssembly
       }
       // Anchored 变体：bootstrap 集 + compaction 后 compactionTools（中途任务继续）
+      // 🆕 v1.62（D140）：`boundary < 0`（真·首请求）**直接给完整目录**。
+      //   为什么：锚定历史现在只造 user 消息 ⇒ 首请求时**晋升信号尚未满足** ⇒ 会落进窄目录分支；
+      //   而我们的目的正是**取消那个断点**，若仍收窄成 5 个工具，等于把「空→满」的断点换成
+      //   「窄→满」的断点，白改一场。compaction 之后（boundary ≥ 0）仍收窄 —— 那是**另一档**
+      //   （压缩后继续任务），不放宽，否则压缩后工具面突变又造一次 cache 断点。
+      if (status.boundary < 0) return assembled
       const keep = new Set<string>(SETTINGS.bootstrapTools)
-      if (status.boundary >= 0) for (const toolName of SETTINGS.compactionTools) keep.add(toolName)
+      for (const toolName of SETTINGS.compactionTools) keep.add(toolName)
       const missing = [...keep].filter((name) => !available.has(name))
       if (missing.length > 0) {
         // 工具缺失：降级完整目录 + 一次性告警（组合漂移不锁死会话）

@@ -117,23 +117,27 @@ else
     "🔴 **读数器缺失**（镜像里没有 zstd CLI）⇒ 无法读会话日志；**这不等于没播种**（见 Dockerfile 注释）"
 fi
 # 🔵 与 V5 配对：**宿主是否真的创建过 agent** —— `agent/created` 的宿主侧同源痕迹
-prompted=$(grep -c 'bootstrap: anchor turns injected' "$web" 2>/dev/null || true)
+# 🔴 v1.62（D140）判据同步：锚定从「真跑两轮」改为「造历史」⇒ 自证行改名为
+#    `anchor history fabricated`。⛔ 仍用旧串 `anchor turns injected` 会让两条判据**恒红**
+#    （而那与"真的没跑轮次"在读数上不可分 —— 本轨既有判据：读数器先自证）。
+#    兼容：两个串**都认**（旧版本的日志仍可判绿）。
+prompted=$(( $(grep -c 'bootstrap: anchor history fabricated' "$web" 2>/dev/null || true) + $(grep -c 'bootstrap: anchor turns injected' "$web" 2>/dev/null || true) ))
 check V5b "宿主真的创建过 agent（轮次缝被走到）" \
   "$([ "${prompted:-0}" -gt 0 ] && echo 0 || echo 1)" \
-  "锚点注入痕迹 ${prompted:-0} 条（0 = 容器内**没有任何真实用户轮** ⇒ 先跑 bench-docker turn）"
+  "锚定痕迹 ${prompted:-0} 条（0 = 容器内**没有任何真实用户轮** ⇒ 先跑 bench-docker turn）"
 
 # ── V7 🔴 运行期「我们真的被宿主调用了」证据（与 V5 配对，**本轮新增**）──
 # 为什么需要它：V5 判的是"播种内容对不对"，而它依赖一整条真实轮次；V7 判的是
 # **"宿主的运行期调用链真的走到我们的缝里了吗"** —— 这一条**不依赖模型**（缝在模型调用之前跑）。
 # 判据 = 三个**只有真被调用才会打印**的 host 侧痕迹：
-#   · `anchor turns injected`（`seams/bootstrap.ts`，首个真实轮次时注入锚点）
+#   · `anchor history fabricated`（`seams/bootstrap.ts`，首个真实轮次时造锚定历史；v1.62 改名）
 #   · 全局入口 skill section 注册 / 唤醒调度器启动（装配面）
 seam_skill=$(grep -c '全局入口 skill section 已注册' "$web" 2>/dev/null || true)
 seam_wake=$(grep -c 'trajectory 唤醒调度器启动' "$web" 2>/dev/null || true)
 seam_ok=$([ "${seam_skill:-0}" -gt 0 ] && [ "${seam_wake:-0}" -gt 0 ] && echo 0 || echo 1)
 check V7 "我们的缝在宿主运行期真被调用（装配面 ≥2 条自证行）" "$seam_ok" \
   "入口 skill ${seam_skill:-0} 行 / 唤醒调度器 ${seam_wake:-0} 行 / 锚点注入 ${prompted:-0} 行"
-check V7b "首个真实轮次走到了 bootstrap 缝（锚点已注入会话）" \
+check V7b "首个真实轮次走到了 bootstrap 缝（锚定历史已造）" \
   "$([ "${prompted:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${prompted:-0} 条"
 
 # ── V6 设置面板（B1：0.1.7 换了模型 ⇒ 装错就整页不出现）──
@@ -435,6 +439,49 @@ acp_auth=$(grep -rc 'Access' "$ACPDIR" 2>/dev/null | awk -F: '{s+=$2} END{print 
 check V21 "面 E 的**安全前提**在产物里（authNote 逐字含「不做认证」＋「Access」）" \
   "$([ "${acp_src:-0}" -gt 0 ] && [ "${acp_auth:-0}" -gt 0 ] && echo 0 || echo 1)" \
   "「不做认证」${acp_src:-0} 处 / 「Access」${acp_auth:-0} 处（扫整个 lib/ —— 打包会把它拆进带哈希的 chunk）"
+
+# ── V22 🆕 **系统提示词的位置判据**（2026-10-17 v1.61.0 事故的直接产物）──
+# 为什么必须单列一条（R↓，这不是"多一条检查"）：
+#   v1.61.0 的事故里**全部既有判据都是绿的** —— V5（横幅在不在）绿、V9（轮次收束）绿、
+#   2915 条单测全绿。而真实故障是 **surface 上出现了两个 system 节点**：
+#   第一个是空占位，真提示词被 `append` 到了**对话末尾** ⇒ 模型看到
+#   `[空占位, anchor1, ack1, anchor2, ack2, 真 system]`。**不产生任何报错**。
+#   ⇒ V5 判「内容进了会话」，V22 判「**它排在对的位置**」—— 两者互补，缺一即盲。
+#
+# 判据（由 v22-system-head-check.mjs 一次跑完，本处只读结论）：
+#   V22  首节点是 system（且非空）
+#   V22b system 节点**恰为 1 个**（>1 = 双 system，正是事故形态）
+#   V22c 无占位残留文本（`anchor-placeholder` 等）
+V22_PROBE=/usr/local/bin/v22-system-head-check.mjs
+if [ -f "$V22_PROBE" ]; then
+  if command -v zstd >/dev/null 2>&1; then
+    v22out=$(node "$V22_PROBE" 2>&1)
+    v22rc=$?
+    # 🔴 逐条登记（**不用 `| while`**：管道会进子 shell，`check` 的计数带不回来 ——
+    #    这是 shell 常识，但踩了就是"三条判据在表上凭空消失"）
+    for id_ in V22 V22b V22c; do
+      line=$(printf '%s\n' "$v22out" | grep -E "^PASS $id_ |^FAIL $id_ " | head -1)
+      if [ -z "$line" ]; then
+        check "$id_" "系统提示词位置（$id_ 未产出结论）" 1 "探针没给这条判据的结论"
+      else
+        st_=$(printf '%s' "$line" | cut -d' ' -f1)
+        lab_=$(printf '%s' "$line" | cut -d' ' -f3-)
+        [ "$st_" = "PASS" ] && check "$id_" "$lab_" 0 || check "$id_" "$lab_" 1
+      fi
+    done
+    if [ "$v22rc" != "0" ]; then
+      printf '%s\n' "$v22out" | grep -E '反例样本|roles=' | sed 's/^/      /'
+    fi
+  else
+    for id_ in V22 V22b V22c; do
+      check "$id_" "系统提示词位置（读数器缺失）" 1 "🔴 镜像里没有 zstd CLI ⇒ 读不到会话日志"
+    done
+  fi
+else
+  for id_ in V22 V22b V22c; do
+    check "$id_" "系统提示词位置（探针不在）" 1 "无 $V22_PROBE ⇒ 先 bench-docker vpush"
+  done
+fi
 
 # ── 汇总 ──
 echo "═══ 运行态验收（宿主 ${EXPECT_DSH:-?} ／ 期望 ACC ${EXPECT_ACC:-?}）═══"
