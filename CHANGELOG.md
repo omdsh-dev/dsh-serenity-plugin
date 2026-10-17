@@ -1,3 +1,78 @@
+## v1.61.0 — 2026-10-17（**first-anchor 改为「造历史」：取消两轮空跑；附修两处工具缺陷**）
+
+**性质**：**行为变更**。**来源**：owner 令 ——
+> 「实现一把！」（对象 = 上一轮讨论定下的方案：把两轮锚定对话直接造出来，而不是真跑）
+
+### 一、改了什么
+
+**此前**：新会话首条用户消息到达时，把两条锚定消息 `prepend` 进 `next-turn` 队列，
+模型**真跑两轮**（每条一轮、0 工具、只回 `acknowledge`），第三轮才处理真实消息。
+
+**现在**：一次性把 **5 条消息直接写进会话日志**：
+
+```
+[占位 system/message] [user: anchor-1] [assistant: "acknowledge"]
+                      [user: anchor-2] [assistant: "acknowledge"]
+```
+
+随后宿主自己把占位 system **原地替换**成真提示词。真实用户消息成为第 6 条。
+
+**净效果**：首请求即拿**完整工具目录** ＋ 锚定话语仍在历史里 ＋ **只剩 1 次真实往返**
+（原为 2 次模型调用 + 2 个 turn）。
+
+### 二、三条机制读数（全部打在真 `@deepseek-ai/dsh-session` 上，不是仿真）
+
+1. 🔴 **必须先写占位 system**：`agent/pre-step` 跑在宿主提交 system **之前**。
+   若直接写锚定历史，system 会被追加到**末尾**（实测 `systemAtIndex: 4`，**且不报错**——静默走偏）。
+   而宿主 `SystemPromptProjection.project()` 见 node0 已有 system 且文本不同 ⇒
+   **原地 `replace`** 成真提示词 ⇒ 占位被天然换掉，锚定历史原样留在其后。
+2. ✅ **不会误触发 `startsSeries`**：`surface.contentGeneration` **只在 `replace` 时自增**（`append` 不自增），
+   而 `buildRequest()` 取 generation 快照**晚于** `systemPrompt.project()` 那次 replace ⇒ 差值不计入。
+   （这一条原本被判为"最大风险"，实测不成立。）
+3. ✅ **造出来的 `assistant/message` 合法**：`stream: []` 通过校验；
+   整段历史之后仍可被 compaction 的 `surfaceOp: replace` 整体覆盖（不炸）。
+
+### 三、⚠️ turn 账本刻意未动（重要）
+
+owner 要求「搞两个」（两条独立 turn）。但宿主的 turn 计数是**构造时缓存**的：
+`phase.lastTurn` 在本钩子触发前已读定（0），之后 `turn()` 恒用 `phase.turn + 1`。
+⇒ 若我们自己发 `turn/start{1}` / `turn/start{2}`，宿主随后仍会再发一条 `turn/start{1}`
+⇒ **重复编号 ∧ 两个 turn 同时开着**。
+
+⇒ 只给消息打 **turn 标签**（模型可见顺序不依赖 turn 事件，`deriveMessages` 只看 surface 节点），
+**不碰宿主的 turn 账本**。
+
+### 四、`zeroTools` 由 true 改为 false
+
+锚定历史写进日志后，`assistant/message` 晋升信号在**首请求前**已满足 ⇒ `boundary < 0` 分支实际不可达。
+但**不能依赖"恰好满足"这个副作用**：若哪天锚定历史没写成（非 CCC / 异常降级），
+`zeroTools: true` 会退回「首请求 0 工具」——那是**另一种**退化。⇒ 显式关掉。
+
+配套：`assemble` 侧 `boundary < 0` ⇒ **给完整目录**（否则只是把「空→满」的断点换成「窄→满」，白改）；
+`boundary ≥ 0`（压缩后）仍收窄到 `compactionTools`，保持「压缩后继续任务」语义。
+
+### 五、测试
+
+- 6 条既有用例按新语义改写（**全部是设计变更，无一是意外缺陷**）。
+- 新增 **5 条回归钉**锁 `appendAnchorHistory` 契约（含"占位 system 必须最先写"这条顺序钉）。
+- 门禁：`test` **172 文件 / 2915 例** ✓｜`typecheck` ✓｜`coverage` ✓（行 **95.1%**）｜
+  `build` ✓（112 `.d.ts`）｜`pack-check` ✓（140 文件）。
+
+### 六、顺带修两处工具缺陷
+
+1. 🔴 **`dsh-develop coverage` 回执 160 KB → 3 行**：此前未设 `quiet` ⇒ 收下全部 vitest 输出
+   （含每个用例的 stdout/stderr 捕获），把真正要看的两行埋在中间。改为**只输出不通过的**：
+   全绿 3 行；失败只印 FAIL 块。
+   ⚠️ **实测结论**：`quiet: true` **只挡 stdout**，而 vitest 把用例捕获写进**真实 stderr**
+   ⇒ 必须靠**白名单列表过滤**（黑名单永远漏一种噪音）。
+2. 🔴 **`hostContract` 的 `subagents.start` 假故障**（S151 2026-10-17 报告 + 本方复核）：
+   宿主 `0.2.1-rc.*+` 正门已改为 `startActivation`，`start` 仅作旧宿主回退
+   （产品侧 `resolveSubagentStarter()` 本就是双路选路）。而契约把 `start` 钉成"必须有"
+   ⇒ **每次 health 都印一句具体但虚假的**「cheap-worker 委派不可用」，实测 cheap-worker 真跑正常。
+   ⇒ 引入 `anyOf` **族语义**（同族任一成员可用即通过），`detail` 会点名整族
+   ⇒ 3 条钉 ＋ **变异对照**（把族内判断改坏 ⇒ 2 条红，证明不是假绿）。
+   🔵 **判据沉淀**：**具体 ≠ 准确** —— 一条过期探针的误导性正来自它"说得太像真的"。
+
 ## v1.59.5 — 2026-10-17（**CCC 内屏蔽宿主自带定时器工具（`schedule_*`）—— 与 CRO/唤醒注册表冲突**）
 
 **性质**：**行为新增（隐藏）**。**来源**：owner 逐字 ——
