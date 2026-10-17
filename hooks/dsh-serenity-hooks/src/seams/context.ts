@@ -22,7 +22,7 @@ import { cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection, registerTrajectorySkillSection } from './system-prompt.js'
-import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility } from './guards.js'
+import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory-ops.js'
 import { readLastBound, appendBound } from '../trajectory-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -235,6 +235,12 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     } catch {
       /* 同上：可见性失败不阻断播种 */
     }
+    try {
+      // 🆕 v1.59.5：宿主自带定时器工具（schedule_*）——**在 CCC 内**屏蔽，防与 CRO/唤醒注册表冲突
+      syncHostScheduleToolHiding(agent, root)
+    } catch {
+      /* 同上：可见性失败不阻断播种 */
+    }
   }
 
   // agent/created：serial 事件（监听器被 await、抛错会使创建失败）⇒ CCC 内新会话播种。
@@ -285,6 +291,12 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         try {
           // v1.33：专属工具条件可见（未在本 CCC 的 exclusiveTools 里声明 → 从工具清单移除）
           syncExclusiveToolsVisibility(agent, root)
+        } catch {
+          /* 同上：可见性失败不阻断 step */
+        }
+        try {
+          // 🆕 v1.59.5：宿主自带定时器工具（schedule_*）——**在 CCC 内**屏蔽，防与 CRO/唤醒注册表冲突
+          syncHostScheduleToolHiding(agent, root)
         } catch {
           /* 同上：可见性失败不阻断 step */
         }

@@ -15,6 +15,9 @@ import {
   syncCccToolVisibility,
   forgetNonCccToolVisibility,
   getNonCccHiddenDiagnostics,
+  syncHostScheduleToolHiding,
+  forgetHostScheduleToolHiding,
+  getHostScheduleHiddenDiagnostics,
 } from '../src/seams/guards.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im-bridge.js'
@@ -995,5 +998,100 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
     } finally {
       rmSync(otherDir, { recursive: true, force: true })
     }
+  })
+})
+
+/**
+ * 🆕 v1.59.5（owner 令 2026-10-17）：「宿主 0.2.1-rc.2 新增的调度工具与 CRO 冲突，
+ * 要求在宁静号激活情况下屏蔽掉」。
+ *
+ * 判据（三条，缺一则这个屏蔽可能是假的）：
+ *  ① **CCC 内必须屏蔽**那 4 个宿主定时器工具；
+ *  ② **非 CCC 不屏蔽**（那是宿主的正常能力，owner 只要求"宁静号激活时"）；
+ *  ③ **某个名字不在册时不得连累其余** —— 宿主 `restrict` 对未知名字会让**整次调用失败**，
+ *     若整批发就会"一个都没藏住、只有一行 log" ⇒ 缺陷静默。这条是**防御性**的，也是本族的真风险。
+ */
+describe('guards: CCC 内屏蔽宿主自带定时器工具（v1.59.5，防与 CRO/唤醒注册表冲突）', () => {
+  /** 替身 agent：可模拟"某些工具名不在册"（restrict 对未知名字整次失败） */
+  function mkAgent(id: string, opts: { unknownNames?: string[] } = {}) {
+    const restrictCalls: { deny?: string[] }[] = []
+    const disposed: string[] = []
+    const unknown = new Set(opts.unknownNames ?? [])
+    const agent = {
+      session: { id },
+      ctx: {
+        tools: {
+          restrict: (f: { deny?: string[] }) => {
+            // 与宿主契约同形：deny 里含未注册名 ⇒ **整次抛**（不是"忽略那一个"）
+            if ((f.deny ?? []).some((n) => unknown.has(n))) throw new Error('unknown tool name in filter')
+            restrictCalls.push(f)
+            return () => { disposed.push('disposed') }
+          },
+        },
+      },
+    } as any
+    return { agent, restrictCalls, disposed }
+  }
+
+  const EXPECTED = ['schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete']
+
+  it('① CCC 内 ⇒ 4 个宿主定时器工具逐个被 deny（不是整批一次）', () => {
+    const { agent, restrictCalls } = mkAgent('s-sched-a')
+    try {
+      syncHostScheduleToolHiding(agent, dir)
+      // 逐个发：每个 deny 只含一个名字（这样任何一个名字不成立都不会连累其余）
+      expect(restrictCalls.map((c) => c.deny)).toEqual(EXPECTED.map((n) => [n]))
+      expect(getHostScheduleHiddenDiagnostics().hidden).toEqual(
+        EXPECTED.map((n) => `s-sched-a::${n}`),
+      )
+    } finally {
+      // 🔴 **必须 finally**：本模块的状态是**模块级 Map**（按 sessionId 索引），
+      //   断言一旦失败就跳过清理 ⇒ 残留状态会**污染后面所有用例**
+      //   （本轮变异对照时真的发生了：① 挂掉后 ⑤ 读到 8 条而不是 4 条）。
+      forgetHostScheduleToolHiding('s-sched-a')
+    }
+  })
+
+  it('② 非 CCC（root === null）⇒ 一次 restrict 都不发（那是宿主的正常能力）', () => {
+    const { agent, restrictCalls } = mkAgent('s-sched-b')
+    syncHostScheduleToolHiding(agent, null)
+    expect(restrictCalls).toHaveLength(0)
+    expect(getHostScheduleHiddenDiagnostics().hidden).not.toContain('s-sched-b::schedule_create')
+  })
+
+  it('③ 某个名字不在册 ⇒ 只跳过它，其余三个仍被藏住（不整批失败）', () => {
+    const { agent, restrictCalls } = mkAgent('s-sched-c', { unknownNames: ['schedule_update'] })
+    try {
+      expect(() => syncHostScheduleToolHiding(agent, dir)).not.toThrow()
+      const denied = restrictCalls.map((c) => c.deny?.[0])
+      expect(denied).toEqual(['schedule_create', 'schedule_list', 'schedule_delete'])
+      expect(denied).not.toContain('schedule_update')
+    } finally {
+      forgetHostScheduleToolHiding('s-sched-c')
+    }
+  })
+
+  it('幂等：重复同步不重复 restrict', () => {
+    const { agent, restrictCalls } = mkAgent('s-sched-d')
+    try {
+      syncHostScheduleToolHiding(agent, dir)
+      syncHostScheduleToolHiding(agent, dir)
+      expect(restrictCalls).toHaveLength(4)
+    } finally {
+      forgetHostScheduleToolHiding('s-sched-d')
+    }
+  })
+
+  it('会话销毁清理：解除隐藏并清状态（防 per-会话 Map 无界增长），且幂等', () => {
+    const { agent, disposed } = mkAgent('s-sched-e')
+    syncHostScheduleToolHiding(agent, dir)
+    // 🔴 断言**本会话前缀**的条数（不是全局条数）：全局读数会被其它用例的残留影响
+    const mine = () => getHostScheduleHiddenDiagnostics().hidden.filter((k) => k.startsWith('s-sched-e::'))
+    expect(mine()).toHaveLength(4)
+    forgetHostScheduleToolHiding('s-sched-e')
+    expect(disposed).toHaveLength(4)
+    expect(mine()).toHaveLength(0)
+    forgetHostScheduleToolHiding('s-sched-e') // 幂等
+    expect(disposed).toHaveLength(4)
   })
 })

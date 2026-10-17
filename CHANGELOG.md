@@ -1,3 +1,53 @@
+## v1.59.5 — 2026-10-17（**CCC 内屏蔽宿主自带定时器工具（`schedule_*`）—— 与 CRO/唤醒注册表冲突**）
+
+**性质**：**行为新增（隐藏）**。**来源**：owner 逐字 ——
+> 「发现 0.2.1-rc2 新增了几个调度用的 tool，这和 CRO 冲突，要求在宁静号激活情况下屏蔽掉」
+
+### 一、屏蔽什么
+
+宿主 `dsh-tool-schedule`（`0.2.1-rc.2` 起随宿主出厂）注册 **4 个模型可见工具**：
+`schedule_create` ／ `schedule_list` ／ `schedule_update` ／ `schedule_delete`。
+名字逐一取自该包 `lib/index.js` 的 `defineTool({ name: … })`，**不是猜的**。
+
+### 二、为什么必须屏蔽（三个具体问题，不是"功能重复"这种审美问题）
+
+宁静号的唤醒/巡航走的是**另一套**：`container_trajectory send-later` → 落 CCC 的
+`AGENT_SESSIONS/wake-registry.json` → **中心调度器 5min tick 统一投递**（D58）。两套并存会：
+
+1. **两处真相源** —— 宿主的 schedule 状态在宿主域、我们的在 CCC 文件里，**谁在跑说不清**；
+2. **CRO 判据失真** —— CRO 程序读 `wake-registry.json`，宿主定时器触发的唤起**它看不见**
+   ⇒ 巡检与记账全部遗漏（同族教训：CRO 判据必须与"它读的那个文件"同源）；
+3. **安静失败** —— 模型可能顺手用 `schedule_create` 排一个唤醒，**它不在任何人的账本里**。
+
+### 三、边界（owner 原话就限定在"宁静号激活"时）
+
+- **在 CCC 内** ⇒ 这 4 个工具从模型清单**移除**；
+- **非 CCC** ⇒ **一次 `restrict` 都不发**（那是宿主的正常能力，不管）。
+
+### 四、实现要点（两处防御，各有先例）
+
+1. 🔴 **逐个名字单独发 `restrict`，绝不整批**：宿主契约逐字 *"Empty filters, unknown names … fail"*
+   ⇒ 整批里只要有一个名字**不在册**（宿主版本裁剪 / 没装该 tool 包），**整次调用失败** ⇒
+   一个都没藏住、只有一行 log ⇒ **缺陷静默**。逐发之后，缺席的名字只跳过它自己。
+   （同族先例：`hideAllFor` 的两档尝试。）
+2. **失败不逐条告警**：某个名字不在册会随宿主版本**常态发生**，逐条 `error` 会在每个 CCC 会话刷假警报。
+
+**接缝**：`seams/guards.ts` 新增 `syncHostScheduleToolHiding` / `forgetHostScheduleToolHiding` /
+`getHostScheduleHiddenDiagnostics`；接线两处（会话就绪 ＋ `agent/pre-step` 每步同步），
+清理挂 `lifecycle`（防 per-会话 Map 无界增长）。
+
+### 五、测试（5 条，含两类防御）
+
+① CCC 内 4 个工具逐个被 deny ② 非 CCC 一次都不发 ③ **某个名字不在册时只跳过它、其余三个仍藏住**（防御 1）
+④ 幂等 ⑤ 销毁清理＋幂等。
+🔴 **变异对照已验证**：把 `deny: [tool]` 改成 `deny: [tool, 'MUTATION_PROBE']` ⇒ **用例 ① 立刻红**。
+⚠️ 该次对照还**顺带暴露了一条测试缺陷**：用例 ① 原先没有 `try/finally`，失败后残留模块级状态污染了用例 ⑤
+⇒ 已给 ①③④ 全部加 `finally`，并把 ⑤ 的断言从"全局条数"改成"**本会话前缀**条数"（全局读数会被其它用例影响）。
+
+### 六、门禁
+
+`typecheck` ✓ ／ `test` **172 文件 / 2910 例** ✓（较 v1.59.4 的 2905 **+5**，正是上面这 5 条）／ `pack-check` ✓。
+
 ## v1.59.4 — 2026-10-17（🔴 **真机缺陷修复：`startActivation` 裸调丢 `this` ⇒ cheap-worker 在新宿主上完全不可用**）
 
 **性质**：**热修**（v1.59.3 的两个缺陷都是**真机升级 0.2.1-rc.2 后才暴露**的）。**前置**：owner 令「升级本机 dsh 到 0.2.1-rc.2」。

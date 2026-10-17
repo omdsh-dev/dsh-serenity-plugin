@@ -428,6 +428,85 @@ export function forgetImBridgeVisibility(sessionId: string): void {
   imBridgeRestrictions.delete(sessionId)
 }
 
+// ── 🆕 宿主自带「定时器」工具在 CCC 内屏蔽（v1.59.5，owner 令 2026-10-17）──
+
+/**
+ * 宿主 `dsh-tool-schedule` 注册的 4 个模型可见工具名（**逐字**，来自该包 `lib/index.js` 的
+ * `defineTool({ name: … })`：`schedule_create` / `schedule_list` / `schedule_update` / `schedule_delete`）。
+ *
+ * 🔴 **为什么要在 CCC 内屏蔽（owner 原话：「这和 CRO 冲突，要求在宁静号激活情况下屏蔽掉」）**：
+ * 宿主从 `0.2.1-rc.2` 起自带一套**模型可见的定时器工具**（`ctx.schedule` 服务 + 这 4 个工具）。
+ * 而宁静号的唤醒/巡航走的是**另一套**机制：`container_trajectory send-later` → 落 CCC 的
+ * `AGENT_SESSIONS/wake-registry.json` → 由**中心调度器 5min tick 统一投递**（D58）。
+ * 两套并存会产生**三个具体问题**（不是"重复功能"这种审美问题）：
+ *  ① **两处真相源**：宿主的 schedule 状态在宿主域、我们的在 CCC 文件里，**谁在跑说不清**；
+ *  ② **CRO 判据失真**：CRO 程序读的是 `wake-registry.json`，宿主定时器触发的唤起**它看不见**
+ *     ⇒ 巡检/记账全部遗漏（本轨已有同族教训：「CRO 只在 `wake===true` 时算」那条被推翻）；
+ *  ③ **安静失败**：模型可能顺手用 `schedule_create` 排一个唤醒，**它不在任何人的账本里**。
+ * ⇒ 故**在 CCC 内隐藏**（从模型清单移除），非 CCC 会话**不受影响**（那是宿主的正常能力）。
+ *
+ * ⚠️ **一处必须防的坑**（与 `hideAllFor` 同族）：宿主 `restrict` 对**未注册的名字**会让**整次调用失败**
+ * （`dsh-tools` 契约逐字："Empty filters, unknown names … fail"）。
+ * 这 4 个名字是否在册取决于**宿主是否装了该 tool 包**（不同宿主版本/裁剪可能没有）
+ * ⇒ 所以**逐个名字单独发 restrict**，某个失败就跳过那个，**绝不整批发**
+ * （整批发一旦撞到缺名的宿主 ⇒ 一个都不隐藏 + 只有一行 log ⇒ 缺陷静默）。
+ */
+const HOST_SCHEDULE_TOOL_NAMES = [
+  'schedule_create',
+  'schedule_list',
+  'schedule_update',
+  'schedule_delete',
+] as const
+
+/** `${sessionId}::${toolName}` → restrict disposer（逐工具，便于某个名字不成立时单独跳过） */
+const hostScheduleRestrictions = new Map<string, () => void>()
+
+/** 诊断面：本会话已屏蔽的宿主定时器工具（排查"工具为什么不见了"） */
+export function getHostScheduleHiddenDiagnostics(): { hidden: string[] } {
+  return { hidden: [...hostScheduleRestrictions.keys()] }
+}
+
+/**
+ * 在 **CCC 内**屏蔽宿主自带的定时器工具（v1.59.5）。
+ *
+ * 判据 = **会话是否落在某个 CCC 内**（`root !== null`）——与 `syncCccToolVisibility` 互补：
+ * 那个管"不在 CCC ⇒ 隐藏**我们自己的**全部工具"，本函数管"**在** CCC ⇒ 隐藏**宿主的**定时器工具"。
+ *
+ * 幂等；失败不阻断 step（最坏 = 那一个工具仍可见，但那只是"宿主的正常能力没被藏起来"，
+ * 不会让会话坏掉）。逐个名字独立发 restrict ⇒ 任何一个名字不在册都不会连累其余三个。
+ *
+ * @param agent 目标会话
+ * @param root  该会话的 CCC 根；`null` ⇒ 非 CCC ⇒ **不动**（宿主的定时器在别处是正常能力）
+ */
+export function syncHostScheduleToolHiding(agent: Agent, root: string | null): void {
+  if (root === null) return
+  const sessionId = (agent.session as { id?: string }).id ?? 'global'
+  for (const tool of HOST_SCHEDULE_TOOL_NAMES) {
+    const key = `${sessionId}::${tool}`
+    if (hostScheduleRestrictions.has(key)) continue
+    try {
+      hostScheduleRestrictions.set(key, agent.ctx.tools.restrict({ deny: [tool] }))
+    } catch {
+      // 该名字不在册（宿主没装那个工具包 / 被裁剪）⇒ 跳过它，**不影响其余三个**
+      // 刻意不逐条告警：这会随宿主版本常态发生，逐条 error 会在每个 CCC 会话上刷假警报。
+    }
+  }
+}
+
+/** 会话销毁清理（lifecycle 调用；按 `${sessionId}::` 前缀回收） */
+export function forgetHostScheduleToolHiding(sessionId: string): void {
+  const prefix = `${sessionId}::`
+  for (const [key, dispose] of [...hostScheduleRestrictions]) {
+    if (!key.startsWith(prefix)) continue
+    try {
+      dispose()
+    } catch {
+      /* disposer 已失效 */
+    }
+    hostScheduleRestrictions.delete(key)
+  }
+}
+
 // ── 专属工具条件可见（v1.33，S142 §32.11）──
 
 /**

@@ -380,7 +380,7 @@ export function createCheapWorkerTool(ctx: Context): ToolDefinition {
           done,
           jobs: results,
           usage: {
-            how: `foreground parallel mode starts ${results.length} child agents at once through the host delegation service (ctx.subagents.start "spawn"), awaits all of them, and returns each child's final text. No loop, no completion-code validation, no progress file. Cap = ${FOREGROUND_MAX_PARALLEL}.`,
+            how: `foreground parallel mode starts ${results.length} child agents at once through the host delegation service (ctx.subagents.startActivation on 0.2.1-rc.*+, falling back to ctx.subagents.start "spawn" on older hosts), awaits all of them, and returns each child's final text. No loop, no completion-code validation, no progress file. Cap = ${FOREGROUND_MAX_PARALLEL}.`,
             model: 'NOT selectable per call — resolved from the CCC config cheap-worker.models (cheap-worker.defaultModel, else models[0])',
             next: done
               ? 'All children completed; use each job\'s output directly (results are in the same order as the jobs you passed)'
@@ -404,7 +404,11 @@ export function createCheapWorkerTool(ctx: Context): ToolDefinition {
       return {
         ...res,
         usage: {
-          how: 'foreground mode starts ONE serial child agent through the host delegation service (ctx.subagents.start "spawn") with the CCC-configured model; it awaits the run and returns the child\'s final text. No loop, no completion-code validation, no progress file.',
+          // 🔴 2026-10-17（v1.59.4）：原文只写 `ctx.subagents.start`（旧接口名）。
+          //   实际是**双路**（新宿主走 `startActivation`，旧宿主才走 `start`）⇒ 只写一个名字
+          //   会让读者以为"这版用的是那个已经不存在的接口"。按本版同批修的判据
+          //   （**工具说的话必须与事实一致**）改成中性表述，两个名字都点出。
+          how: 'foreground mode starts ONE serial child agent through the host delegation service (ctx.subagents.startActivation on 0.2.1-rc.*+, falling back to ctx.subagents.start "spawn" on older hosts) with the CCC-configured model; it awaits the run and returns the child\'s final text. No loop, no completion-code validation, no progress file.',
           model: 'NOT selectable per call — resolved from the CCC config cheap-worker.models (cheap-worker.defaultModel, else models[0])',
           next: res.done
             ? 'Child completed; use its output directly'
