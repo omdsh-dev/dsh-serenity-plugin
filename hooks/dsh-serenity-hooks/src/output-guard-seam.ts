@@ -38,8 +38,10 @@ function isExternalFaceSession(sessionId: string | undefined): boolean {
 }
 
 /** 读会话最后一个 assistant/message 文本（skiff-core 同款）
- *  **2026-09-23（S142 D77）起导出**：`unattended-seam.ts` 复用同一读法（本容器纪律：
- *  「同一读法只留一份」——两份 `lastAssistantText` 会在宿主改事件形状时**只修一处**）。
+ *  **v1.63.3 起唯一的导出理由消失**：原导出是给 `unattended-seam.ts` 复用的（D77），
+ *  该文件已随无人值守功能整条退役 ⇒ 现只有本模块自己用（`isLeak` 的调用点）。
+ *  ⚠️ 保持 `export` 无害（它有测试覆盖，且将来"同一读法只留一份"的纪律仍成立），
+ *  但**不要**再写成"为了 X 复用才导出"——那个 X 不存在了。
  *  **v1.27.7：剥离 think 块再检测**（用户："不检查think内容（因为不输出）"）——
  *  ` think…` 是模型思考过程，不进入用户可见输出；敏感词检测只针对**最终呈现文本**，
  *  否则 think 内提及内部机制词（思考过程必然推演机制）会误打回。复用 stripThink

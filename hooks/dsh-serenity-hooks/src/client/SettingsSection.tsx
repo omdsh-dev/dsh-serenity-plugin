@@ -7,7 +7,6 @@
  * 页面结构（官方 settings 设计语言：section > title + intro + 分组 + 行卡）：
  *  - 访问：双端口网关（展开 → 监听/账号/白名单/TOTP）
  *  - 上下文：超限重建（展开 → 阈值）
- *  - 无人值守：代理回复（展开 → 收束规则与边界）
  *  - 外部能力：Skiff 调试（展开 → 说明）｜CRO（展开 → 说明）
  *  - 工具：ACP 面（展开 → 账户台账）｜图 diagram（展开 → 说明）
  *  - 折叠块：彩蛋模式 ／ 微信桥 ／ 会话清理
@@ -43,9 +42,6 @@ export interface SerenitySimpleWire {
   skiffDebugPort?: number
   /** CRO（轨迹自编程唤起）总闸（缺省开；只关 CRO 阶段，投递照常） */
   croEnabled?: boolean
-  /** 无人值守代理回复总开关：会话被模型主动停下且无人应答时，由 ACC 注入一次
-   *  「代理用户」的结构化回复，以验证码作合法收束判据（缺省关） */
-  unattendedEnabled?: boolean
   /** diagram 工具总开关：agent 给一段标签式源码，进程内光栅化成 PNG 并贴进对话
    *  （不借浏览器；实验性 demo，缺省关） */
   diagramEnabled?: boolean
@@ -192,7 +188,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const skiffOn = value?.skiffEnabled ?? false
   const skiffPort = value?.skiffDebugPort ?? 3099
   const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
-  const unattendedOn = value?.unattendedEnabled ?? false // 缺省关（与 schema 一致）
   const diagramOn = value?.diagramEnabled ?? false // 缺省关（与 schema 一致；D104）
   const acpFaceOn = value?.acpFaceEnabled ?? false // 缺省关（与 schema 一致；安全：协议无认证）
 
@@ -201,7 +196,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openRebuild, setOpenRebuild] = useState(false)
   const [openSkiff, setOpenSkiff] = useState(false)
   const [openCro, setOpenCro] = useState(false)
-  const [openUnattended, setOpenUnattended] = useState(false)
   const [openDiagram, setOpenDiagram] = useState(false)
   const [openAcpFace, setOpenAcpFace] = useState(false)
 
@@ -276,29 +270,8 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         </li>
       </Group>
 
-      {/* 外部能力开关组（v1.27.5 紧凑化；v1.29 需求②：每行可展开——help 入 detail intro） */}
-      <Group title="无人值守">
-        <li>
-          <RowCard
-            title="无人值守代理回复"
-            desc="你走开后，会话被模型停下且无人应答时，由 ACC 代你回一句让它自己收束（默认关）"
-            expandable
-            open={openUnattended}
-            onToggle={setOpenUnattended}
-            control={<Toggle checked={unattendedOn} onChange={(on) => toggle('unattendedEnabled', on)} />}
-            detail={
-              <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'你走开时，模型停下来又没人接话，会话就挂住；此机制代你回一句让它自己收束。\n' +
-                  '· 收束：每轮给一个验证码，只有四种明确收束才放过 —— 干完了 ／ 已通知并停下等你 ／ 需确认但可自决（按最保守可逆的做并记理由）／ 撞上不可代批的事（立刻停并写待办）\n' +
-                  '· 身份：代理消息自报「无人值守代理 · 非本人」，不会被当成你说的话\n' +
-                  '· 不适用：有 CRO 唤醒程序的轨迹、对外面与微信桥会话、子代理会话\n' +
-                  '· 默认关：它把「人」从回路里拿掉，失败是静默的 —— 只在要离开时才开'}
-                </p>
-              </div>
-            }
-          />
-        </li>
-      </Group>
+      {/* 🔴 v1.63.3：原「无人值守」整组已删除（owner 2026-10-18 裁「砍掉无人值守功能，
+          整个砍掉，已经证实没意义了」）。该组只有一行「无人值守代理回复」，机制已整条退役。 */}
 
       <Group title="外部能力">
         <li>

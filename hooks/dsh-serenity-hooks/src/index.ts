@@ -47,7 +47,6 @@ import { registerSettingsSection, readSimpleSettings, SERENITY_SETTINGS_NS } fro
 import { registerGateway } from './gateway.js'
 import { registerRebuildTurnHook } from './rebuild.js'
 import { registerOutputGuardHook } from './output-guard-seam.js'
-import { registerUnattendedSeam } from './unattended-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
 import { registerWakeScheduler } from './wake-scheduler.js'
@@ -226,8 +225,9 @@ export interface Config {
   skiffDebugPort?: Volatile<number | undefined>
   /** CRO（轨迹自编程唤起）总闸（面板层；无部署层同义键；缺省开） */
   croEnabled?: Volatile<boolean | undefined>
-  /** 无人值守代理回复总闸（面板层；无部署层同义键；缺省关） */
-  unattendedEnabled?: Volatile<boolean | undefined>
+  // 🔴 v1.63.3（owner 2026-10-18 裁「砍掉无人值守功能，整个砍掉，已经证实没意义了」）：
+  //    `unattendedEnabled` 的**声明也删掉**（不只删 schema）—— 该功能已整条退役、**无任何读取方**。
+  //    旧配置残留该键 ⇒ **静默忽略**（schemastery 非 strict，同 `rebuildEnabled` / `wakeSchedulerEnabled` 的处置）。
   /** **diagram 工具总闸**（面板层；部署层同义键 = `diagram.enabled`；缺省关；D104） */
   diagramEnabled?: Volatile<boolean | undefined>
   /**
@@ -337,7 +337,8 @@ export const Config = z.object({
   skiffEnabled: z.boolean().volatile(),
   skiffDebugPort: z.number().min(1024).max(65535).volatile(),
   croEnabled: z.boolean().volatile(),
-  unattendedEnabled: z.boolean().volatile(),
+  // 🔴 v1.63.3：`unattendedEnabled` **已砍掉**（无人值守功能整条退役；owner 判「已经证实没意义」）。
+  // 旧配置残留该键 ⇒ 静默忽略（同 `rebuildEnabled` / `wakeSchedulerEnabled` 的处置）。
   // D104（2026-09-29 owner 具名令）：diagram 工具总闸（面板层；**缺省关**）。第十号面板键——
   // 与 `config-volatile.test.ts` 的 PANEL_KEYS / DEPLOY_KEYS 两张表**必须同步**（少一处那条 pin 就红）。
   diagramEnabled: z.boolean().volatile(),
@@ -457,13 +458,6 @@ export function apply(ctx: Context, config: Config): void {
   registerRebuildTurnHook(ctx)
   // v1.26.3 输出守卫：最终输出敏感词检测 + steer 打回重生成（凭据/机制/MSM 名不泄露给用户）
   registerOutputGuardHook(ctx)
-  // 🔵 2026-09-23（S142 D77，owner 令「我需要的是一个机制」）：**无人值守代理回复**——
-  // CCC 主会话**被 LLM 主动停止**且无人应答时，注入一次「**代理用户**」的结构化回复（四选一），
-  // 以**每轮新生成的验证码（nonce）**作「合法收束」判据：**未回码 ⇒ 继续（≤轮上限），回码 ⇒ 放过**。
-  // 总闸 = settings `unattendedEnabled`（**缺省关**；开关落点 = Serenity 全局面板「无人值守」组）。
-  // 口径 = **窄**（单一续驱者：只排除**有 CRO 程序**的轨迹；自排绳不再排除，退化为长周期保险丝）；
-  // 外部面/桥/worker 会话**写死不许开**（替家人说话 = 冒充）。机制层见 `unattended-ops.ts`。
-  registerUnattendedSeam(ctx)
   // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createTrajectoryTool 内实现，
   // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {

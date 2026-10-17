@@ -44,7 +44,6 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       skiffEnabled: false,
       skiffDebugPort: 3099,
       croEnabled: true,
-      unattendedEnabled: false,
       diagramEnabled: false,
       // 2026-10-16 新面 E（官方 ACP）：**缺省关** ＋ 端口 3200（`FACE_PORTS.acp`，非硬写）
       acpFaceEnabled: false,
@@ -94,7 +93,6 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       skiffEnabled: true,
       skiffDebugPort: 4000,
       croEnabled: true,
-      unattendedEnabled: false,
       diagramEnabled: false,
       // 2026-10-16：面 E 的部署段同义键 = `acpFace`（与旧面 E 的 `acp` **刻意不同名**）
       acpFaceEnabled: true,
@@ -120,10 +118,17 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(d.gatewayEnabled).toBe(false)
   })
 
-  it('两个纯面板层开关（CRO / 无人值守）只经扁平键', () => {
-    const d = simpleSettingsFromConfig({ croEnabled: false, unattendedEnabled: true })
+  it('CRO 是纯面板层开关，只经扁平键', () => {
+    const d = simpleSettingsFromConfig({ croEnabled: false })
     expect(d.croEnabled).toBe(false)
-    expect(d.unattendedEnabled).toBe(true)
+  })
+
+  it('🔴 v1.63.3 砍无人值守回归钉：简单配置里**不再有** unattendedEnabled（旧配置残留也不进结构）', () => {
+    // owner 2026-10-18 裁「砍掉无人值守功能，整个砍掉，已经证实没意义了」⇒ 机制层 + 拦截缝 +
+    // 面板键 + 出站账本一并退役。用"键在不在"断言（而非 toBeUndefined）——契约是**无该键**。
+    expect('unattendedEnabled' in simpleSettingsFromConfig({})).toBe(false)
+    const stale = simpleSettingsFromConfig({ unattendedEnabled: true } as never)
+    expect('unattendedEnabled' in stale).toBe(false)
   })
 
   it('🆕 D104 diagram：面板层 > 部署层，且两端都缺省**关**（两个方向都钉）', () => {
@@ -179,12 +184,12 @@ describe('settings-section: volatile 包装解包（v1.47.2）', () => {
   it('🔴 回归（正控）：多个"未设置"的包装**不得**让开关被打开 —— 结果必须与全缺省逐字相同', () => {
     // 修复前形态：包装对象恒真 ⇒ `config.gatewayEnabled ?? …` 直接短路 ⇒ 开关被无意打开
     // ⚠️ 2026-10-15：原含 `acpEnabled` / `publicAskEnabled` 两条，随面 E 退役删除；
-    //    本用例的**判据不变**（未设置的包装必须让位给缺省），仍由余下键承担。
+    //    2026-10-18：再删 `unattendedEnabled`（无人值守整条退役）——本用例的**判据不变**
+    //    （未设置的包装必须让位给缺省），仍由余下三个键承担。
     const d = simpleSettingsFromConfig({
       gatewayEnabled: ref<boolean | undefined>(undefined),
       skiffEnabled: ref<boolean | undefined>(undefined),
       croEnabled: ref<boolean | undefined>(undefined),
-      unattendedEnabled: ref<boolean | undefined>(undefined),
     })
     expect(d).toEqual(defaultSimpleSettings())
   })

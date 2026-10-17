@@ -39,7 +39,8 @@
 
 [`bindings-json-retirement-reconciliation.md`](./bindings-json-retirement-reconciliation.md)（**A7** 三形态待裁）·
 [`deadcode-batch2-ruling.md`](./deadcode-batch2-ruling.md)（**②第 2 批**逐条裁决清单）·
-[`unattended-proxy-design.md`](./unattended-proxy-design.md)（**D77** 未发布实现）·
+[`unattended-proxy-design.md`](./unattended-proxy-design.md)（**D77；🔴 功能已于 2026-10-18 整条退役**
+—— owner 判「已经证实没意义」，本件**降级为历史留档**，不再描述现行能力）·
 [`git-commit-push-coupling-design.md`](./git-commit-push-coupling-design.md)（**D92** 交付物；P3b/B4 未做）·
 [`rebuild-todo-design.md`](./rebuild-todo-design.md)（**D93**）· [`injection-audit.md`](./injection-audit.md)（注入面审计）
 

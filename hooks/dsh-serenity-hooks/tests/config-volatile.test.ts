@@ -46,14 +46,16 @@ import { Config } from '../src/index.ts'
  *     ⇒ 新增 `acpFaceEnabled` / `acpFacePort` ⇒ 七个 → **九个**。
  *     ⚠️ **键名带 `Face` 是有意的**：`acpEnabled`/`acpHttpPort` 是**旧面 E** 的名字、现被静默忽略；
  *     复用会让旧配置在新面上复活（判据：**退役要连名字一起守**）。
- *     本表**不含**旧名是**判据的一部分**（下一节有条专门的回归钉）。 */
+ *     本表**不含**旧名是**判据的一部分**（下一节有条专门的回归钉）。
+ *  🔴 2026-10-18（v1.63.3）：**无人值守整条退役**（owner 裁「已经证实没意义了」）⇒ `unattendedEnabled`
+ *     删除 ⇒ 九个 → **八个**。⚠️ 同批消失的还有 `unattended-ops.ts` / `unattended-seam.ts` 与
+ *     那两个测试文件 ⇒ 本表少一格**是预期**，不是漏登记。 */
 const PANEL_KEYS = [
   'gatewayEnabled',
   'rebuildThresholdK',
   'skiffEnabled',
   'skiffDebugPort',
   'croEnabled',
-  'unattendedEnabled',
   'diagramEnabled',
   'acpFaceEnabled',
   'acpFacePort',

@@ -1,3 +1,54 @@
+## v1.64.0 — 2026-10-18（🔴 **无人值守代理回复整条退役** —— owner 判「已经证实没意义」）
+
+**性质**：**功能移除**（不是关开关，是代码不存在了）。**来源**：owner 直接令 ——
+> 「很好，新调整，砍掉无人值守功能，整个砍掉，已经证实没意义了」
+
+这是对 **D77**（2026-09-23「我需要的是一个机制」）的**整体推翻**。当年实现它是为了让
+"用户走开后会话停下、没人接话"这件事有个兜底；实测结论是：**那一步的问题多于收益**。
+
+### 一、删了什么（逐项，可复算）
+
+| # | 对象 | 说明 |
+|---|---|---|
+| 1 | `src/unattended-ops.ts` | 机制层（nonce ／ 结构化消息 ／ 纯函数判定 ／ 轮次上限 ／ 出站账本 ／ 流水） |
+| 2 | `src/unattended-seam.ts` | 拦截缝（`agent/inbox/claimed` ＋ `agent/turn-stopping` ＋ disposer） |
+| 3 | `tests/unattended-ops.test.ts` ／ `tests/unattended-seam.test.ts` | 两个专属镜像测试 |
+| 4 | `unattendedEnabled`（三处） | `index.ts` 的 Config 声明 ＋ schema、`settings-section.ts` 的两处 |
+| 5 | 面板「无人值守」整组 | `SettingsSection.tsx` 的那一行 RowCard ＋ 两个 state／derived |
+| 6 | `diag-ops.ts` 的「无人值守闸=」 | 诊断面那一行（该判据随机制一起失去信息量） |
+| 7 | `agent/inbox/claimed`（三处登记） | `HOST_EVENT_NAMES` ／ `HOST_EVENTS` ／ `type-contract.ts` 的字段钉 |
+| 8 | **出站发送账本** | `noteOutboundSend` 的**唯一消费者就是本机制的"假完成核验"** ⇒ `im-bridge.ts` 两处记账点同删 |
+| 9 | `docs/unattended-proxy-design.md` | **不删**，但**降级为历史留档**并加退役抬头（设计文档记录历史，不是能力） |
+
+### 二、🔴 判据：删除必须"顺着消费者的方向删到底"
+
+**为什么第 8 项要单独说**：`noteOutboundSend` 长在 `im-bridge.ts`（IM 发送的通用路径）上，
+看起来像"基础设施"，但 grep 消费者只有一处 —— **本机制的"假完成核验"**（设计 §7：
+"声称已通知用户"必须真有发送记录）。⇒ 机制没了，账本就是**只写不读的死表**。
+
+**同族的另一半**：`agent/inbox/claimed` 在 `host/contract.ts` 里登记着，
+`impact` 写的是"无人值守代理误判…" ⇒ 订阅方没了，这行登记就是**假的契约面**。
+🔴 **但它与"删功能"不同档**：宿主**照常发**该事件，我们只是不再订阅 ⇒
+注释里写明「本清单 = *我们订阅的*，不是宿主的全量事件表」，避免后人误读成"宿主删了这个事件"。
+
+### 三、配置兼容
+
+`unattendedEnabled` 旧值残留在 `settings.yaml` ⇒ **静默忽略**（schemastery 非 strict，
+与 `rebuildEnabled` ／ `wakeSchedulerEnabled` ／ 旧面 E 三键的处置一致）。
+**不写迁移**：没人读它了，迁移只会制造"好像还有这个功能"的错觉。
+
+### 四、回归钉（删掉的东西要能证明"没偷偷回来"）
+
+- `register.test.ts`：拆卸清单 `6 → 5`，并新增**反向断言** `not.toContain('unattended proxy')`
+- `settings-section.test.ts`：新增「结构里不再有 `unattendedEnabled`」＋ 旧配置残留也不进结构
+- `config-volatile.test.ts`：`PANEL_KEYS` 九个 → **八个**
+
+### 五、验证
+
+`typecheck` ✓ ｜ `typecheck-host 0.2.1-rc.2` 双半 ✓ ｜ `test` **170 文件 / 2860 例** ✓
+（原 172/2922 ⇒ 少 2 文件 62 例，正是两个退役测试文件）｜`coverage` 95.0% ✓ ｜
+`build` ✓（**110** 个 `.d.ts`，原 112）｜`pack-check` ✓（**138** 文件，原 140）。
+
 ## v1.63.2 — 2026-10-18（🧹 **全部界面文案按 EAP 修订 ＋ 排版四项结构性缺陷**）
 
 **性质**：文字与版式层修订，**不改任何机制**。**来源**：owner 令 ——

@@ -294,7 +294,9 @@ export const HOST_EVENT_NAMES = [
   'agent/turn-stopping',
   'agent/status',
   'agent/inbox/inserted',
-  'agent/inbox/claimed',
+  // 🔴 v1.63.3：`agent/inbox/claimed` 已移出 —— 唯一订阅方（`unattended-seam.ts`）随无人值守功能
+  // 整条退役。⚠️ **不是"该事件不存在了"**：宿主照常发它，只是 dsp 不再关心（本清单 = *我们订阅的*，
+  // 不是宿主的全量事件表）。将来谁要再订阅，须同批加回这里 ＋ HOST_EVENTS ＋ type-contract 的字段钉。
   'agent/disposed',
   'session/event',
   'session/created',
@@ -316,7 +318,6 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'agent/turn-stopping', site: 'rebuild.ts, output-guard-seam.ts', impact: 'rebuild 不执行 / 输出守卫失效', required: true },
   { name: 'agent/status', site: 'skiff-core.ts, tools/cheap-worker.ts', impact: '等待空闲逻辑失效', required: false },
   { name: 'agent/inbox/inserted', site: 'seams/bootstrap.ts', impact: 'first-anchor 锚定失效', required: false },
-  { name: 'agent/inbox/claimed', site: 'unattended-seam.ts', impact: '无人值守代理误判「本轮由用户发起」（判据失真 ⇒ 该动的不动 / 不该动的动）', required: false },
   { name: 'agent/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
   { name: 'session/event', site: 'seams/compact.ts, seams/bootstrap.ts', impact: '压缩后重注入/晋升状态失效', required: false },
   { name: 'session/created', site: 'weixin-bridge.ts', impact: '定时器/桥同步失效', required: false },

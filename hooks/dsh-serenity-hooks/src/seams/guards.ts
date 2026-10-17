@@ -589,7 +589,7 @@ export function forgetExclusiveToolsVisibility(sessionId: string): void {
  *
  * 🔴 **为什么需要它（缺陷根因）**：工具是 `apply()` 里 `ctx.tools.register(...)` 注册到**宿主级**的
  * ⇒ 它们出现在**每一个**会话的工具清单里，**与会话 cwd 无关**。其余各缝（身份注入 ／ guards ／
- * keeper ／ output-guard ／ unattended ／ bootstrap）都已有 `if (!root) return` 这道门，
+ * keeper ／ output-guard ／ bootstrap）都已有 `if (!root) return` 这道门，
  * **唯独"工具可见性"这一层没有** ⇒ 在非 CCC 目录开会话时，模型仍看得见这 14 个工具，
  * 于是会去调 —— 调了才抛 `No CCC found`。**那是运行时报错，不是事先不可见**。
  *

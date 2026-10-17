@@ -345,7 +345,7 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 
 | 层 | 位置 | 放什么 |
 |---|---|---|
-| DSH 原生设置 | DSH 的 settings.yaml（即设置面板那几项） | 开关与阈值：网关总开关、重建阈值、子角色开关与调试端口、**CRO 总闸（`croEnabled`，默认为开）**、**无人值守代理回复（`unattendedEnabled`，默认为关）**、**图工具总闸（默认关）** |
+| DSH 原生设置 | DSH 的 settings.yaml（即设置面板那几项） | 开关与阈值：网关总开关、重建阈值、子角色开关与调试端口、**CRO 总闸（`croEnabled`，默认为开）**、**图工具总闸（默认关）**、**官方 ACP 面（`acpFaceEnabled`，默认关）** |
 | 插件全局文件 | `~/.dsh/serenity-hooks.json`（权限 0600） | 网关账号（scrypt + TOTP）、监听地址与端口、工作区白名单、cookie 安全开关 |
 | 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**轨迹级 skill 供给（`trajectory.skills`）**、微信（账号/路由/开关） |
 | 工作区凭据 | `localstore.json` | 密钥与本地偏好；微信机器人 token 也在这一层 |

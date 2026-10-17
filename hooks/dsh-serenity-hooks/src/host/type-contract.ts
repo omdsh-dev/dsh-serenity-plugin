@@ -232,10 +232,6 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 type _EvStatus = Expect<Extends<Parameters<Events['agent/status']>[0], { agent: unknown; status: string }>>
 /** `agent/inbox/inserted`：dsp 读 `payload.agent` / `payload.message`（`seams/bootstrap.ts`） */
 type _EvInbox = Expect<Extends<Parameters<Events['agent/inbox/inserted']>[0], { agent: unknown; message: unknown }>>
-/** `agent/inbox/claimed`：无人值守代理读 `payload.agent` / `payload.message.source.kind` / `payload.turn`
- *  （`unattended-seam.ts`）——**这三个字段是「本轮是否由真实用户发起」的唯一判据**，
- *  任一改名 ⇒ 判据失真且**静默**（该动的不动 / 不该动的动），故在此钉住。 */
-type _EvInboxClaimed = Expect<Extends<Parameters<Events['agent/inbox/claimed']>[0], { agent: unknown; message: { source?: { kind?: string } }; turn: number }>>
 /** `agent/created`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种 · `cro-turns.ts` 标"在跑" ·
  *  `index.ts` 反应式同步）。⚠️ **v0.1.7 起该事件 `@mode = serial`**（监听器被 await、抛错会使
  *  创建失败 ⇒ 我方处理函数必须快速返回且不得抛；此处只钉字段，模式由实现纪律守） */

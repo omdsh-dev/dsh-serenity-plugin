@@ -14,8 +14,9 @@
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯，第 62 件的教训）
  * 本件**同时** grep 了文件名与**符号**（`src/cro.js` 的 import 点）⇒ 找到四处：
- * `cro.test.ts`（420 行，主）／`cro-guide.test.ts`／`wake-registry.test.ts`／
- * `unattended-seam.test.ts`（后三者只取常量或 mock）。
+ * `cro.test.ts`（420 行，主）／`cro-guide.test.ts`／`wake-registry.test.ts`。
+ * 🔴 v1.63.3 更正：原列第四处 `unattended-seam.test.ts` 已随无人值守功能整条退役删除
+ * （它当年只取常量或 mock，对本件无影响）。
  * `cro.test.ts` 文件头已逐条自述其覆盖面：§2 位置形态 ／ §3 快照装配 ／
  * §4 输出解析**全部边界** ／ §5 四态 ／ 真实 spawn（成功／非 0／超时／ENOENT）。
  * ⇒ 本件**不重做**其中任何一条。

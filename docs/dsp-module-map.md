@@ -41,7 +41,7 @@
 | `host/contract.ts` | L0 | 宿主**服务/事件/版本契约表** ＋ 运行期探针 ＋ 版本判定 | `cordis` 的 `Events` 类型；`host/access.ts` | `index.ts`（装载期告警）、`container-status.ts`（health） | ✅ `host-contract` / `cordis-access` / `storage-domain` / `container-status` / `cro-turns` |
 | `host/type-contract.ts` | L0 | **编译期类型闸门**：用宿主真类型反证我们的形状假设（17 条空 import ＋ 断言符号） | `cordis` ＋ 17 个 `import type {}` | **无运行时导出**；消费方 = `tsc` | ✅ `host/type-contract`（副作用导入 ＋ 镜像门禁） |
 | `host/access.ts` | L0 | **宿主服务读取唯一收口**（读不到一律 `undefined`，不抛） | `ctx` 结构化读取（**零宿主 import**） | **19 个 src 文件**（gateway/api/rebuild/ccc-roots/skiff-core/tools…） | ✅ `host/access` / `host/cordis-access`（真 cordis） |
-| `host/effect.ts` | L0 | 资源拆卸登记；缺 `ctx.effect` 时**响亮降级** | 宿主 `ctx.effect`（最小结构） | `seams/lifecycle`、`wake-scheduler`、`opencode-provider`、`deepseek-vision-patch`、`unattended-seam`、`cro-turns`（6 处） | ✅ `host/effect` |
+| `host/effect.ts` | L0 | 资源拆卸登记；缺 `ctx.effect` 时**响亮降级** | 宿主 `ctx.effect`（最小结构） | `seams/lifecycle`、`wake-scheduler`、`opencode-provider`、`deepseek-vision-patch`、`cro-turns`（**5 处**；🔴 `unattended-seam` 随无人值守退役 ⇒ **6 → 5**，v1.63.3） | ✅ `host/effect` |
 | `host/storage-domain.ts` | L0 | 宿主**存储域**上的「会话 ↔ 轨迹」绑定表（§0L） | `host/access` → 宿主服务 `storageDomain`（**lazy**） | `index.ts`（openBindingDomain）、`trajectory-bound.ts`（type） | ✅ `host/storage-domain`（真 `defineDomain`） |
 
 **衔接面的 12 条事实**（供"改衔接面"时对照，细节见约束文档 §2）：
@@ -141,7 +141,7 @@
 | 读的地方 | 来源 | 键 |
 |---|---|---|
 | `config-ops.ts:readAdvancedSettings()` | 宿主全局 `~/.dsh/serenity-hooks.json`（节 `serenityAdvanced`） | `gateway.{enabled,host,port,accounts,workspaces,cookieSecure,allowWorkspaceCreate,totpEnabled}`、`weixinApi.{enabled,port}`、`persona`。🔴 **2026-10-15：原 `publicAsk.{key,allowed}` 已随面 E 退役删除**（旧文件残留该节被 `mergeWithDefaults` 静默忽略） |
-| `settings-section.ts:readSimpleSettings()` | 本插件 fiber **Config**（经宿主 settings 面板 `ns=serenity-hooks`） | `gatewayEnabled`/`rebuildThresholdK`/`skiffEnabled`/`skiffDebugPort`/`croEnabled`/`unattendedEnabled`/`diagramEnabled`（旧嵌套形态 `gateway.enabled`、`skiff.debugPort` **亦收**）。🔴 **v1.49.0 起 `rebuildEnabled` 已砍掉**（超限重建恒开、无总闸）；🔴 **2026-10-15 起 `acpEnabled`/`acpHttpPort`/`publicAskEnabled` 及嵌套段 `acp.*` 随面 E 一并删除** |
+| `settings-section.ts:readSimpleSettings()` | 本插件 fiber **Config**（经宿主 settings 面板 `ns=serenity-hooks`） | `gatewayEnabled`/`rebuildThresholdK`/`skiffEnabled`/`skiffDebugPort`/`croEnabled`/`diagramEnabled`/`acpFaceEnabled`/`acpFacePort`（旧嵌套形态 `gateway.enabled`、`skiff.debugPort`、`diagram.enabled`、`acpFace.*` **亦收**）。🔴 **v1.49.0 起 `rebuildEnabled` 已砍掉**（超限重建恒开、无总闸）；🔴 **2026-10-15 起 `acpEnabled`/`acpHttpPort`/`publicAskEnabled` 及嵌套段 `acp.*` 随旧面 E 一并删除**；🔴 **2026-10-18 起 `unattendedEnabled` 随无人值守整条退役删除**（v1.63.3） |
 | `weixin-route.ts` / `skiff-role.ts` | **CCC** `.opencode/serenity.json` | `weixin.*`、`skiff.roles` |
 | `localstore-ops.ts` / `weixin-route.ts` / `im-weixin.ts` | **CCC** `localstore.json`（节 `credential`\|`config`） | `WEIXIN_<ID>_*`、`localstore.gitTrack` |
 | 不读配置（纯常量/机制） | — | `message-source` / `output-guard(.|seam)` / `face-host` / `ports` |

@@ -258,18 +258,20 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     //    ——「是否正在跑轮次」是**进程级内存表**，载体销毁必须清项（该模块的头号风险
     //    就是本容器栽过 5 次的"只增不清"）⇒ **必须在拆卸时清表**，故计入本清单。
     //    ⇒ 4 → 5。
-    // ⚠️ 2026-09-23（无人值守代理回复，S142 D77）：新增 `unattended proxy`
-    //    ——同样是**进程级内存表**（代理段 + 用户轮次 + 出站发送账本），载体销毁/卸载必须清
-    //    ⇒ **必须在拆卸时清表**，故计入本清单 ⇒ 5 → 6。
+    // ⚠️ 2026-09-23（无人值守代理回复，S142 D77）：原新增 `unattended proxy` ⇒ 5 → 6。
+    // 🔴 2026-10-18（v1.63.3，owner 裁「砍掉无人值守功能，整个砍掉」）：该缝整条退役
+    //    ⇒ 拆卸清单少一项 ⇒ **6 → 5**。它的"进程级内存表"（代理段 + 用户轮次 + 出站账本）
+    //    随模块一起消失 ⇒ 不再是拆卸对象。
     const labels = effect.mock.calls.map((c) => String(c[1]))
-    expect(labels).toHaveLength(6)
+    expect(labels).toHaveLength(5)
     expect(labels.join('|')).not.toContain('autopilot')
     expect(labels.join('|')).toContain('trajectory 唤醒调度器')
     expect(labels.join('|')).toContain('self-started resources')
     expect(labels.join('|')).toContain('opencode provider auto-config retry timer')
     expect(labels.join('|')).toContain('deepseek vision patch retry timer')
     expect(labels.join('|')).toContain('cro turn tracking')
-    expect(labels.join('|')).toContain('unattended proxy')
+    // 退役回归钉：无人值守代理缝不得再被装配（删了就不要再悄悄回来）
+    expect(labels.join('|')).not.toContain('unattended proxy')
     // 退避重试定时器不得再出现（回归钉：删了就不要再悄悄回来）
     expect(labels.join('|')).not.toContain('skiff root retry timer')
     // C4 块 A 回归钉：两处自带 listener disposer 已被单点取代

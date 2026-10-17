@@ -106,7 +106,8 @@ describe('v1.23.3 重建提醒：不做节流（每轮都催）+ 连续 3 轮升
     // 需求①：注入简单配置源（低 K 阈值 8 → 9000 ≥ 8000 恒触发）
     // v1.49.0：`rebuildEnabled` 已砍掉 ⇒ 提醒恒开，本夹具不再需要那个键
     // 2026-10-15：面 E 退役 ⇒ `acpEnabled`/`acpHttpPort`/`publicAskEnabled` 三个键同批删除（本夹具不再列）
-    __setSimpleSourceForTest(() => ({ gatewayEnabled: false, rebuildThresholdK: 8, skiffEnabled: false, skiffDebugPort: 3099, croEnabled: true, unattendedEnabled: false }))
+    // 2026-10-18（v1.63.3）：无人值守退役 ⇒ `unattendedEnabled` 同批删除（本夹具不再列）
+    __setSimpleSourceForTest(() => ({ gatewayEnabled: false, rebuildThresholdK: 8, skiffEnabled: false, skiffDebugPort: 3099, croEnabled: true }))
     return { listener: captured }
   }
 

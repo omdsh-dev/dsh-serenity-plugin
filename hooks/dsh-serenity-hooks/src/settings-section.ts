@@ -81,7 +81,7 @@ interface SimpleConfigFragment {
   skiffEnabled?: PanelBoolean
   skiffDebugPort?: PanelNumber
   croEnabled?: PanelBoolean
-  unattendedEnabled?: PanelBoolean
+  // 🔴 v1.63.3：`unattendedEnabled` 面板键已砍掉（无人值守功能整条退役；owner 2026-10-18 裁决）
   diagramEnabled?: PanelBoolean
   /** 🔴 面 E（官方 ACP，2026-10-16）：开关 ＋ 端口（面板层扁平键） */
   acpFaceEnabled?: PanelBoolean
@@ -120,15 +120,11 @@ interface SerenitySimpleSettings {
    *  **只关 CRO 阶段**：`send-later` / `send-now` / 唤醒表投递**照常**。
    *  ⚠️ 与它**同时废止**的键：`wakeSchedulerEnabled`（唤醒调度器现恒开、无闸；旧键静默忽略）。 */
   croEnabled: boolean
-  /** **无人值守代理回复（unattended proxy）总开关**（2026-09-23 所有者令新增；**缺省关**）。
-   *
-   *  开启后：CCC 会话**被 LLM 主动停止**且无人应答时，ACC 注入一次**代理用户的结构化回复**，
-   *  以**验证码（nonce）**作「合法收束」判据 —— **未回码 ⇒ 继续，回码 ⇒ 放过**。
-   *  **缺省关**：它把**人**从回路里拿掉（失败模式是静默的）。
-   *  **排除面**：仅有 CRO 程序的轨迹不适用（所有者 2026-09-23 裁决：口径由"宽"改"窄"
-   *  —— 原"任何自排唤醒都排除"会让本机制永远够不着靠续接绳活着的维护会话；改窄后
-   *  **自排绳不再排除**，绳退化为**长周期保险丝**）。设计全文见 S142 的 **D77**。 */
-  unattendedEnabled: boolean
+  // 🔴 v1.63.3（owner 2026-10-18 裁「砍掉无人值守功能，整个砍掉，已经证实没意义了」）：
+  //    原 `unattendedEnabled`（无人值守代理回复，D77）**已整条退役** —— 机制层 `unattended-ops.ts`
+  //    与其拦截缝 `unattended-seam.ts` 一并删除。⚠️ **与它同批消失的还有**：出站发送账本
+  //    （`noteOutboundSend` 的唯一消费者就是它的"假完成核验"）、`agent/inbox/claimed` 订阅、
+  //    面板「无人值守」组。旧配置残留该键 ⇒ 静默忽略。
   /** **diagram 工具总开关**（2026-09-29 owner 具名令 **D104**；**缺省关**）。
    *
    *  开启后：ACC 注册 `diagram` 工具 —— agent **直接给一段标签格式源码**，进程内
@@ -165,7 +161,6 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
     skiffEnabled: false,
     skiffDebugPort: SKIFF_DEBUG_PORT,
     croEnabled: true,
-    unattendedEnabled: false,
     diagramEnabled: false,
     acpFaceEnabled: false,
     acpFacePort: ACP_PORT,
@@ -326,7 +321,7 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
     // 🔴 2026-10-15：面 E 三个键（`acpEnabled`／`acpHttpPort`／`publicAskEnabled`）**已整组退役**，
     // 不再进本结构（旧配置残留 ⇒ 静默忽略，无人读）。
     croEnabled: unwrapVolatile(config.croEnabled) ?? d.croEnabled,
-    unattendedEnabled: unwrapVolatile(config.unattendedEnabled) ?? d.unattendedEnabled,
+    // 🔴 v1.63.3：`unattendedEnabled` 已砍掉（无人值守功能整条退役）⇒ 不进本结构、无人读。
     diagramEnabled: unwrapVolatile(config.diagramEnabled) ?? config.diagram?.enabled ?? d.diagramEnabled,
     // 🔴 面 E（官方 ACP，2026-10-16）：**新键 `acpFace*`**，与已退役的 `acp*` 刻意不同名（见类型处注释）
     acpFaceEnabled: unwrapVolatile(config.acpFaceEnabled) ?? config.acpFace?.enabled ?? d.acpFaceEnabled,
