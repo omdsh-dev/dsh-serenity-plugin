@@ -141,7 +141,7 @@ export function skiffDebugPage(cccs: CccEntry[], defaultRoot: string, webPort: n
 <body>
 <main>
   <h1>Skiff Debug</h1>
-  <div class="sub">宁静号 trajectory 子集角色问答页（v1.25.10 实验性）— 多 CCC 可切换，同会话可追问（新对话按钮开新会话），回答 marked 服务端渲染 + think 折叠</div>
+  <div class="sub">宁静号轨迹的子集角色问答页（实验性）。可切换 CCC；同一会话可追问，点「新对话」另起一条；回答在服务端渲染，think 块折叠。</div>
   <div class="ccc" id="cccBadge"></div>
   <div class="sessionbar">
     <span id="sessionBadge" class="session-badge muted">（新会话）</span>

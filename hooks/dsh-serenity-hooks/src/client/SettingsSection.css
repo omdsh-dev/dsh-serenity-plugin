@@ -211,17 +211,6 @@
   cursor: default;
 }
 
-/* 阈值行（滑块 + 值） */
-.ss-threshold {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.ss-threshold input[type='range'] {
-  width: 160px;
-}
-
 /* Skiff 调试端口输入（number；关闭时跟随 disabled 半透明） */
 .ss-portInput {
   width: 96px;
@@ -238,15 +227,6 @@
 .ss-portInput:disabled {
   opacity: 0.4;
   cursor: default;
-}
-
-.ss-value {
-  min-width: 40px;
-  font-variant-numeric: tabular-nums;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--dsw-alias-label-primary);
-  text-align: right;
 }
 
 /* 自主轨迹「立即唤起」按钮（v1.26.14 调试语义；官方 button 语言：primary 弱化） */
@@ -274,27 +254,7 @@
   cursor: default;
 }
 
-/* 底部帮助行 */
-.ss-hint {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-
-/* 降级提示 */
-.ss-degrade {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-warn-label);
-  word-break: break-word;
-  overflow-wrap: anywhere;
-}
-
-/* 错误提示（v1.29 会话清理等） */
+/* 错误提示（会话清理等） */
 .ss-error {
   margin: 0;
   font-size: 12px;
@@ -364,71 +324,82 @@
   border-top: 1px solid var(--dsw-alias-border-l1);
 }
 
-/* ── v1.27.5 紧凑化：只读定义列表（dl/dt/dd 2 列网格）── */
-.ss-defList {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px 20px;
-  margin: 0;
-  width: 100%;
-  min-width: 0;
-}
-
-.ss-defItem {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  min-width: 0;
-}
-
-.ss-defTerm {
-  font-size: 11px;
-  line-height: 16px;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  color: var(--dsw-alias-label-tertiary);
-}
-
-.ss-defValue {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-label-primary);
-  word-break: break-word;
-  overflow-wrap: anywhere;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* ── v1.27.5 紧凑化：开关 + 端口内联行 ── */
+/* ── 开关 + 端口内联行 ── */
 .ss-switchRow {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-/* ── v1.59.1 ACP 账户台账表（owner 2026-10-17：「面板里只放个开关不放具体的条目吗？」）
+/* 同一行放不下时换行（ACP 新增账户那行有四个控件） */
+.ss-switchRowWrap {
+  flex-wrap: wrap;
+}
+
+/* 行内字段名（与 .ss-rowName 同一语域，但不吃行高） */
+.ss-fieldLabel {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-secondary);
+  white-space: nowrap;
+}
+
+/* 行内文本输入（与 .ss-portInput 同款外观，宽度随内容） */
+.ss-textInput {
+  flex: 1 1 140px;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 13px;
+}
+
+.ss-textInput::placeholder {
+  color: var(--dsw-alias-label-dimmed);
+}
+
+/* 明文 token 展示块（等宽、可整体选中、长串折行） */
+.ss-tokenBox {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-family: var(--ds-font-family-code);
+  font-size: 12px;
+  line-height: 18px;
+  word-break: break-all;
+  user-select: all;
+}
+
+/* ── ACP 账户台账表（owner 2026-10-17：「面板里只放个开关不放具体的条目吗？」）
  *
- * 用**表格**而不是卡片列表：台账天生是"一行一条、列对齐可比"的数据
+ * 用表格而不是卡片列表：台账天生是「一行一条、列对齐可比」的数据
  * （账户 ／ 角色 ／ 状态 ／ token 指纹），卡片会把可比性拆散。
- * 窄屏靠横向滚动兜底——不折行，折行后"哪一格对应哪一列"就看不出来了。 */
+ * 🔴 横向滚动必须挂在外层容器上：给 `<table>` 本身加 `display:block` 会连带丢掉
+ *    `border-collapse`（表格边框塌陷失效），故表格保持 `display:table`，由 .ss-tableWrap 兜滚动。 */
+.ss-tableWrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .ss-table {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
-  overflow-x: auto;
-  display: block;
 }
 
 .ss-table th,
 .ss-table td {
-  padding: 4px 8px;
+  padding: 6px 10px;
   text-align: left;
   border-bottom: 1px solid var(--dsw-alias-border-l2);
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .ss-table th {
@@ -445,6 +416,10 @@
 
 .ss-table button {
   margin-left: 4px;
+}
+
+.ss-table button:first-child {
+  margin-left: 0;
 }
 
 /* ── v1.27.6 「?」帮助浮层（hover/焦点显示三行以上严谨说明）── */
@@ -612,4 +587,42 @@
   line-height: 18px;
   font-family: var(--ds-font-family-code);
   resize: vertical;
+}
+
+/* ── 窄屏（面板被塞进窄栏或手机浏览器）────────────────────────────────────
+ * 排版问题只有一个根因：`.ss-rowCard` 是「左文本 ＋ 右控件」的两列 flex，
+ * 而控件里有端口输入（96px）／开关（40px）／端口＋开关（150px）三档。
+ * 窄到放不下时，flex 会先压文字（`min-width: 0` 已开）⇒ 标题被挤成一列竖排字。
+ * 处理：窄屏把控件落到第二行（左对齐），文字保住整行宽。 */
+@media (max-width: 560px) {
+  .ss-rowCard {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ss-rowControl {
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  /* 行内说明在窄屏不必截断：整行宽足够，截断反而藏信息 */
+  .ss-rowDesc {
+    -webkit-line-clamp: unset;
+    display: block;
+  }
+
+  /* 详情区与折叠头在窄屏收紧内边距（横向像素更值钱） */
+  .ss-rowDetail,
+  .ss-collapseBody {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .ss-switchRowWrap {
+    gap: 6px;
+  }
+
+  .ss-textInput {
+    flex-basis: 100%;
+  }
 }

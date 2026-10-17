@@ -192,7 +192,7 @@ export function AccountsEditor(props: AccountsEditorProps): React.JSX.Element {
           </label>
           <label className="ae-check">
             <input type="checkbox" checked={totpEnabled} onChange={(e) => setTotpEnabled(e.target.checked)} />
-            <span>启用 Authenticator 登录（v1.24.6 二选一：开启后绑定验证器的账号可用密码 或 6 位验证码任一登录；关闭时 TOTP 完全禁用，仅密码）</span>
+            <span>启用 Authenticator 登录（开启后，已绑定验证器的账号可用密码 或 6 位验证码任一登录；关闭则完全禁用 TOTP，仅密码）</span>
           </label>
         </div>
       </details>

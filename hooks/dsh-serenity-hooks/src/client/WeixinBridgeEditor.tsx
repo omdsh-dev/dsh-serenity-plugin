@@ -260,11 +260,11 @@ export function WeixinBridgeEditor(): React.JSX.Element {
             <span className="ss-rowDesc">选择要配置微信桥的认知容器</span>
             <span className="ss-help">
               <button type="button" className="ss-helpMark" aria-label="目标 CCC 帮助">?</button>
-              <span className="ss-helpTip">{'微信桥是 CCC 级配置：\n' +
-                '· dsh 一个进程可挂载多个 CCC，每个 CCC 独立对接微信桥\n' +
-                '· 下拉选择要配置的认知容器（显式，非当前活跃会话）\n' +
-                '· 各 CCC 有自己的账号、路由、开关——互不影响\n' +
-                '· 切换 CCC 后自动加载该 CCC 的微信桥配置'}
+              <span className="ss-helpTip">{'微信桥是 CCC 级配置。\n' +
+                '· 一个 dsh 进程可挂多个 CCC，各自独立对接微信桥\n' +
+                '· 在这里显式选择目标，不跟随当前会话\n' +
+                '· 各 CCC 的账号、路由、开关互不影响\n' +
+                '· 切换后自动加载该 CCC 的配置'}
               </span>
             </span>
           </div>
@@ -307,11 +307,11 @@ export function WeixinBridgeEditor(): React.JSX.Element {
                 </span>
                 <span className="ss-help">
                   <button type="button" className="ss-helpMark" aria-label="微信桥总开关帮助">?</button>
-                  <span className="ss-helpTip">{'微信桥总开关：\n' +
-                    '· 启用后该 CCC 的微信桥开始轮询（35s 长轮询收消息）\n' +
-                    '· 前置条件：至少一个已扫码绑定的微信账号（有凭据）\n' +
-                    '· 账号列表：每账号独立轮询；✓=已绑定凭据，✗=未绑定\n' +
-                    '· 关闭 = 停止全部轮询（零资源占用）'}
+                  <span className="ss-helpTip">{'微信桥总开关。\n' +
+                    '· 开启后该 CCC 开始长轮询收消息（35s）\n' +
+                    '· 前置：至少一个已扫码绑定的账号\n' +
+                    '· 每账号独立轮询；✓ = 已绑定凭据，✗ = 未绑定\n' +
+                    '· 关闭 = 停止全部轮询，零资源占用'}
                   </span>
                 </span>
               </div>
@@ -361,11 +361,11 @@ export function WeixinBridgeEditor(): React.JSX.Element {
                 </span>
                 <span className="ss-help">
                   <button type="button" className="ss-helpMark" aria-label="扫码绑定帮助">?</button>
-                  <span className="ss-helpTip">{'扫码绑定微信账号：\n' +
-                    '· 原理：腾讯 iLink 开放协议——个人微信 Bot API\n' +
+                  <span className="ss-helpTip">{'扫码绑定微信账号。\n' +
+                    '· 走腾讯 iLink 开放协议（个人微信 Bot API）\n' +
                     '· 步骤：生成二维码 → 手机微信「扫一扫」→ 手机上确认\n' +
-                    '· 每次扫码绑定一个新账号（可多账号，独立轮询）\n' +
-                    '· 二维码 5 分钟有效；无需 OpenClaw/平台审核'}
+                    '· 每扫一次绑定一个新账号，可多账号，各自独立轮询\n' +
+                    '· 二维码 5 分钟有效；不需要平台审核'}
                   </span>
                 </span>
               </div>
@@ -406,7 +406,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
                 <span className="ss-rowDesc">微信用户 → skiff 角色（`*` 通配兜底）</span>
                 <span className="ss-help">
                   <button type="button" className="ss-helpMark" aria-label="路由表帮助">?</button>
-                  <span className="ss-helpTip">{'路由表：微信用户 → skiff 角色映射\n' +
+                  <span className="ss-helpTip">{'路由表：微信用户 → skiff 角色映射。\n' +
                     '· 格式：[{"user": "xxx@im.wechat", "role": "my-role"}, ...]\n' +
                     '· user = 微信用户 ID（from_user_id）；`*` = 通配兜底\n' +
                     '· role = 该 CCC 已定义的 skiff.roles 角色名\n' +

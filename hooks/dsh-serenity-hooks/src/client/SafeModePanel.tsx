@@ -283,14 +283,14 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       safe-mode {status.safeModeOn ? 'ON' : 'OFF'}
                     </button>
                     <span className={cx('sp-toggleDesc')}>
-                      {status.safeModeOn ? '写工具已隐藏，无人值守安全航行' : '写工具可用（点击开启）'}
+                      {status.safeModeOn ? '写工具已隐藏，可无人值守运行' : '写工具可用（点击开启）'}
                     </span>
                   </div>
                 </div>
 
                 {/* ── 提示：配置在 DSH 设置面板 ── */}
                 <p className={cx('sp-hint')}>
-                  💡 开关/阈值/账号/工作区白名单请在 <strong>设置 → Serenity</strong> 中配置。
+                  💡 开关 / 阈值 / 账号 / 白名单在 <strong>设置 → Serenity</strong> 里配。
                 </p>
               </>
             ) : (

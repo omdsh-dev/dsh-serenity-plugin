@@ -1,29 +1,25 @@
 /**
- * SettingsSection.tsx — dsh 原生设置面板的 serenity-hooks 配置页（v1.22 重构）
+ * SettingsSection.tsx — dsh 原生设置面板的 serenity-hooks 配置页
  *
- * 归属原则（v1.22 用户拍板）：**plugin 是全局的，CCC 是具体的**——
- * 账号密码/开关/阈值/工作区白名单都是 **plugin 级配置**，统一在 DSH 设置面板
- * （plugin 层）设定；CCC 状态栏面板（SafeModePanel）只展示状态。
+ * 归属原则（D23）：**plugin 是全局的，CCC 是具体的** —— 账号/开关/阈值/工作区白名单都是
+ * plugin 级配置，统一在本页设定；CCC 状态栏面板（SafeModePanel）只展示状态。
  *
- * 页面结构（官方 settings 设计语言：section > title + intro + 分组(groupTitle) + rowCard）：
- *  - 访问：双端口网关开关（展开 → 完整外部访问编辑器：监听/账号/白名单/TOTP）
- *  - 上下文：超限重建开关（展开 → 阈值 + 机制说明）
- *  - 外部能力：Skiff 开关（展开 → help 说明 + 各自编辑器）
- *    🔴 2026-10-15：原「ACP JSON-RPC」与「Skiff 问答页」两行已随面 E 退役整组删除
- *    （owner 裁「砍掉外部问答」；外部接入改走官方 `dsh --profile acp` ＋ 现成客户端）。
- *  - 彩蛋模式 / 微信桥：独立配置块（无顶层 plugin 开关，保留折叠）
- * v1.29（需求② 开关与详设合一）：RowCard 可展开——整行点击 → 行内内联详设；
- *   原 hover「?」浮层 help 改行内 detail intro（常显可达）；重型编辑器挂所属开关行下。
+ * 页面结构（官方 settings 设计语言：section > title + intro + 分组 + 行卡）：
+ *  - 访问：双端口网关（展开 → 监听/账号/白名单/TOTP）
+ *  - 上下文：超限重建（展开 → 阈值）
+ *  - 无人值守：代理回复（展开 → 收束规则与边界）
+ *  - 外部能力：Skiff 调试（展开 → 说明）｜CRO（展开 → 说明）
+ *  - 工具：ACP 面（展开 → 账户台账）｜图 diagram（展开 → 说明）
+ *  - 折叠块：彩蛋模式 ／ 微信桥 ／ 会话清理
+ * 行卡可展开：点整行 → 行内详设（开关与详设合一）；重型编辑器挂所属开关行下。
  *
  * 数据通道（双层）：
- *  - 简单配置：`ctx.configForms.get('serenity-hooks')`（**v1.47 / 0.1.7-rc.1 A 案**）——
- *    0.1.7 起设置页由「profile 条目 Config」投影成表单，命名空间 = 条目 id（= 旧 settings.yaml 段名）；
- *    旧版 `ctx.settingsScope.bind({ namespace })` 通道**已随 0.1.7 移除**。
+ *  - 简单配置：`ctx.configForms.get('serenity-hooks')` —— 0.1.7 起设置页由「profile 条目
+ *    Config」投影成表单，命名空间 = 条目 id；旧 `settingsScope.bind` 通道已随 0.1.7 移除。
  *  - 复杂配置（账号/白名单）：同源 HTTP /serenity/config（accounts-api.ts，服务端 scrypt hash）
  *
- * 降级守卫：**v1.47 起由 host 侧承担** —— `configForms.whileServed([ns], …)` 只在宿主
- * serve 该命名空间时才注册本页（没 serve 就整页不出现），比旧版"页内一句降级提示"更干净。
- * 因此本组件**不再有** `status === 'unavailable'` 分支。
+ * 降级守卫由 host 侧承担：`configForms.whileServed([ns], …)` 只在宿主 serve 该命名空间时
+ * 注册本页（没 serve 就整页不出现）⇒ 本组件没有 `status === 'unavailable'` 分支。
  */
 
 import type {} from '@deepseek-ai/dsh-client-ui-settings'
@@ -42,26 +38,25 @@ export interface SerenitySimpleWire {
   gatewayEnabled?: boolean
   // 🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
   rebuildThresholdK?: number
-  /** F4 Skiff（v1.25.0 实验性）：认知子集角色调试服务启停 + 端口 */
+  /** Skiff（实验性）：认知子集角色调试服务启停 + 端口 */
   skiffEnabled?: boolean
   skiffDebugPort?: number
-  /** **CRO（轨迹自编程唤起）总闸**（缺省开；只关 CRO 阶段，投递照常） */
+  /** CRO（轨迹自编程唤起）总闸（缺省开；只关 CRO 阶段，投递照常） */
   croEnabled?: boolean
-  /** **无人值守代理回复总开关**（2026-09-23 新增）：会话被 LLM 主动停下且无人应答时，
-   *  由 ACC 注入一次"代理用户"的结构化回复，以验证码作合法收束判据（缺省**关**） */
+  /** 无人值守代理回复总开关：会话被模型主动停下且无人应答时，由 ACC 注入一次
+   *  「代理用户」的结构化回复，以验证码作合法收束判据（缺省关） */
   unattendedEnabled?: boolean
-  /** **diagram 工具总开关**（2026-09-29 owner 具名令 D104）：agent 给一段标签式源码，
-   *  进程内光栅化成 PNG 并贴进对话（**不借浏览器**；实验性 demo，缺省**关**） */
+  /** diagram 工具总开关：agent 给一段标签式源码，进程内光栅化成 PNG 并贴进对话
+   *  （不借浏览器；实验性 demo，缺省关） */
   diagramEnabled?: boolean
-  /** 🔴 **面 E：官方 ACP 面总开关**（2026-10-17 owner 令；**缺省关**）。
-   *  ⚠️ 它只管"端口开不开"；**哪个 CCC 用 ACP 通道**在该 CCC 的 `im.channel` 里配
-   *  （归属判据 D23：通道选择 = CCC 的数据）。 */
+  /** 面 E：官方 ACP 面总开关（缺省关）。
+   *  ⚠️ 它只管「端口开不开」；哪个 CCC 用 ACP 通道在该 CCC 的 `im.channel` 里配（D23）。 */
   acpFaceEnabled?: boolean
   /** 面 E 端口（缺省 3200；避开 3080/3081/3082/3099） */
   acpFacePort?: number
 }
 
-/** 本 section 的注入面（apply 闭包提供表单源与写回调；组件**不含**任何订阅机制） */
+/** 本 section 的注入面（apply 闭包提供表单源与写回调；组件不含任何订阅机制） */
 export interface SettingsSectionInjected {
   /** 表单快照源（渲染器绑成 `useSerenitySettings` 选择器 hook） */
   hooks: { serenitySettings: ConfigForm<SerenitySimpleWire> }
@@ -83,24 +78,22 @@ function Toggle(props: { checked: boolean; disabled?: boolean; onChange: (on: bo
 }
 
 /** 一个配置行卡（官方 rowCard：标题+说明 左列 / 控件右置）
- *  help：可选——desc 下方渲染「?」帮助浮层（hover/焦点显示三行以上严谨说明）
- *  expandable：可选——整行点击展开 detail 内联详设（需求②：开关与详设合一）。
- *    点击行（标题/desc 区）toggle 展开态；detail 渲染在行内下方（含 help 内容 +
- *    该功能全部配置项/重型编辑器）。展开时行头右置 ▾ 指示。 */
+ *  help：可选——desc 下方渲染「?」帮助浮层（三行以上说明；仅不可展开的行用）
+ *  expandable：可选——整行点击展开 detail 内联详设（开关与详设合一）。
+ *    点击行（标题/desc 区）toggle 展开态；detail 渲染在行内下方（含该功能全部配置项/重型编辑器）。
+ *    展开态由标题右侧 ▸/▾ 指示。 */
 function RowCard(props: {
   title: string
   desc: string
-  /** 右置控件；**可选** —— v1.49.0 起有"恒开、无开关"的行（如超限重建：总闸已砍） */
+  /** 右置控件；**可选** —— 有"恒开、无开关"的行（如超限重建） */
   control?: React.ReactNode
   help?: string
   expandable?: boolean
   /** 受控展开态（外部持有 state 时）；缺省内部自管理 */
   open?: boolean
   onToggle?: (open: boolean) => void
-  /** 展开后渲染的内联详设（需求②）——help 文本 + 配置编辑器 */
+  /** 展开后渲染的内联详设——配置说明 + 配置编辑器 */
   detail?: React.ReactNode
-  /** 展开态标题右置提示（如 "配置"/"详情"） */
-  expandHint?: string
 }): React.JSX.Element {
   const { title, desc, control, help, expandable, detail } = props
   const isControlled = props.open !== undefined
@@ -120,9 +113,12 @@ function RowCard(props: {
         onKeyDown={(e) => { if (expandable && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggle() } }}>
         <span className="ss-rowName">
           {title}
-          {expandable && <span className="ss-expandMark" aria-hidden>{open ? '▾' : '▸'}</span>}
+          {/* 方向只由 CSS 旋转给出（.ss-expanded 里 rotate 90°）——
+              字符本身固定 ▸，否则"▾ ＋ 再转 90°"会转成指右的怪符号 */}
+          {expandable && <span className="ss-expandMark" aria-hidden>▸</span>}
         </span>
-        <span className="ss-rowDesc">{desc}</span>
+        {/* desc 最多显示两行（紧凑）；截断时靠 title 给出全文，否则用户看不到后半句 */}
+        <span className="ss-rowDesc" title={desc}>{desc}</span>
         {help && !expandable && (
           <span className="ss-help">
             <button type="button" className="ss-helpMark" aria-label={`${title} 帮助`}>?</button>
@@ -213,7 +209,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
     <div className="ss-section">
       <h2 className="ss-title">Serenity</h2>
       <p className="ss-intro">
-        宁静号的 plugin 级配置（全局生效，不依赖具体 CCC）。点击任一行展开该功能的详细设定；改动即时保存。
+        插件级配置，全局生效，不依赖具体 CCC。点任一行展开设定；改动即时保存。
       </p>
 
       <Group title="访问">
@@ -224,15 +220,13 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             expandable
             open={openGateway}
             onToggle={setOpenGateway}
-            expandHint="配置"
             control={<Toggle checked={gatewayOn} onChange={(on) => toggle('gatewayEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'双端口网关（端口 3081）让外网/局域网用户经登录页访问本 DSH Web UI：\n' +
-                  '· 适用范围：跨网络访问（本机默认端口 3080 仅监听本机）\n' +
-                  '· 安全：登录账号 + 可选 TOTP 第二因素\n' +
-                  '· 工作区白名单：登录后仅白名单内工作区可见（可留空=全部）\n' +
-                  '· 变更立即生效（热重建，无需重启）'}
+                <p className="ss-detailIntro">{'在 3081 端口另起一个监听，让外网／局域网经登录页访问本机 Web UI（3080 只监听本机）。\n' +
+                  '· 登录：账号密码 ＋ 可选 TOTP 第二因素\n' +
+                  '· 白名单：登录后只看到名单内的工作区（留空 = 全部）\n' +
+                  '· 改完立即生效，不用重启'}
                 </p>
                 <AccountsEditor gatewayOn={gatewayOn} />
               </div>
@@ -249,24 +243,20 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             expandable
             open={openRebuild}
             onToggle={setOpenRebuild}
-            expandHint="配置"
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'上下文超限自动重建（container_trajectory rebuild，v1.33 起 logbook 并入 trajectory）：\n' +
-                  '· 机制：agent 上下文占用达到阈值时，由 LLM 主动调用重建\n' +
-                  '· 语义：完全丢弃当前 dsh 会话 + 自动新建 + 注入「继续原 SESSION 的工作」\n' +
-                  '· 效果：SESSION.md 原位不动，认知轨迹延续，上下文归零\n' +
-                  '· 无总开关（v1.49.0 砍掉）：长期验证下它已能很好地代替上下文压缩；\n' +
-                  '  要调敏感度就改下面的阈值'}
+                <p className="ss-detailIntro">{'上下文占用到阈值时，由模型调用 container_trajectory rebuild 原地清空重建。\n' +
+                  '· 语义：丢弃当前会话 → 新建 → 注入「继续原 SESSION 的工作」\n' +
+                  '· SESSION.md 原位不动，轨迹延续，上下文归零\n' +
+                  '· 恒开、无总闸；要调敏感度只改下面的阈值'}
                 </p>
                 <RowCard
                   title="重建阈值"
-                  desc="上下文占用达到该 K 数值时提示（单位 K token，默认 400）"
-                  help={'重建触发阈值（需求①：K 数值，默认 400K，范围 50~4000K）：\n' +
-                    '· 含义：上下文 projected tokens 达到 thresholdK × 1000 时触发提醒\n' +
-                    '· 纯绝对数值（不再依赖窗口比例）\n' +
-                    '· 迁移：旧版 0~1 比例（settings.yaml rebuildThreshold）已废弃被忽略\n' +
-                    '· 调低更早触发 / 调高更晚触发（v1.49.0 起无总开关，它恒生效）'}
+                  desc="上下文占用到该值（K token，默认 400）时提示重建"
+                  help={'重建触发阈值（K token，默认 400，范围 50~4000）：\n' +
+                    '· 上下文 projected tokens ≥ 阈值 × 1000 时提示\n' +
+                    '· 绝对数值，与窗口大小无关\n' +
+                    '· 调低更早触发，调高更晚触发'}
                   control={
                     <input
                       className="ss-portInput"
@@ -298,17 +288,11 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             control={<Toggle checked={unattendedOn} onChange={(on) => toggle('unattendedEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'无人值守代理回复（unattended proxy）\n' +
-                  '· 作用：你发完任务就走开，模型干一段停下来又没人接话 ⇒ 会话就挂住了；\n' +
-                  '  本机制由 ACC 注入一条“代理用户”的结构化回复，让它自己接着干\n' +
-                  '· 收束方式：每轮给一个验证码；只有四种明确收束才放过 —— 干完了 / 已通知你并停下等你 /\n' +
-                  '  需确认但可自决（按最保守可逆的做并记理由）/ 撞上“不可代批”的事（立刻停并写待办）\n' +
-                  '· 身份：代理消息会自报“无人值守代理 · 非本人”，不会被当成你说的话\n' +
-                  '· 不适用：有 CRO 自编程唤起程序的轨迹（它自己会叫自己）、对外面与微信桥会话、子代理会话\n' +
-                  '· 默认关：它把“人”从回路里拿掉，失败是静默的 ⇒ 只在你要离开时才开\n' +
-                  '· 配套：你自己用 send-later 给自己排的“定时叫醒”（现在约每 2 小时一次）会改成“很久才叫一次”（6–12 小时）；\n' +
-                  '  平时“接着干”的活交给本机制 —— ⚠️ 只在本机制上线之后才这么改，否则中间会出现没人管的空档\n' +
-                  '· 本版现状：机制已实现（开关 ＋ 注入行为 ＋ 流水）；⚠️ 尚未部署 ⇒ 现在拨开关不会生效，等发布后生效'}
+                <p className="ss-detailIntro">{'你走开时，模型停下来又没人接话，会话就挂住；此机制代你回一句让它自己收束。\n' +
+                  '· 收束：每轮给一个验证码，只有四种明确收束才放过 —— 干完了 ／ 已通知并停下等你 ／ 需确认但可自决（按最保守可逆的做并记理由）／ 撞上不可代批的事（立刻停并写待办）\n' +
+                  '· 身份：代理消息自报「无人值守代理 · 非本人」，不会被当成你说的话\n' +
+                  '· 不适用：有 CRO 唤醒程序的轨迹、对外面与微信桥会话、子代理会话\n' +
+                  '· 默认关：它把「人」从回路里拿掉，失败是静默的 —— 只在要离开时才开'}
                 </p>
               </div>
             }
@@ -320,7 +304,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="Skiff 调试"
-            desc="Skiff 认知子集问答页（端口 3099，实验性，127.0.0.1）"
+            desc="Skiff 认知子集问答页（默认 3099，仅本机，实验性）"
             expandable
             open={openSkiff}
             onToggle={setOpenSkiff}
@@ -340,11 +324,10 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
               </span>
             }
             detail={
-              <p className="ss-detailIntro">{'Skiff 认知子集角色调试服务（端口 3099）：\n' +
-                '· 概念：Skiff = 完整宁静号 trajectory 的任意子集（认知子集角色）\n' +
-                '· 服务：角色问答页（调试用），仅监听 127.0.0.1（本地）\n' +
-                '· 使用：配置 CCC 的 skiff.roles 角色后，可经此页以角色身份问答\n' +
-                '· 实验性：人工启停，默认关闭；对外问答请用「Skiff 问答页」'}
+              <p className="ss-detailIntro">{'Skiff 认知子集角色的问答页，仅监听 127.0.0.1。\n' +
+                '· Skiff = 完整轨迹的任意子集（认知子集角色）\n' +
+                '· 先在 CCC 的 skiff.roles 里配角色，再用此页以角色身份问答\n' +
+                '· 实验性，人工启停，默认关'}
               </p>
             }
           />
@@ -359,15 +342,10 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             control={<Toggle checked={croOn} onChange={(on) => toggle('croEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'CRO = Continuous Re-Occurrence（轨迹自编程唤起）。\n' +
-                  '· 作用：轨迹目录下放一个 continuous-re-occurrence.ts，ACC 的 5min tick 会 spawn 它，\n' +
-                  '  由这段程序自己决定“要不要唤、何时唤、唤起时说什么”\n' +
-                  '· 怎么启用：程序文件在即启用（无需在此配置）；本开关是**总闸**\n' +
-                  '· 关掉它的后果：**只有 CRO 阶段停跑** —— 定时唤醒（send-later）、即时投递（send-now）\n' +
-                  '  与唤醒表投递**照常工作**\n' +
-                  '· 默认开：已在生产稳定运行，且“没有程序文件的轨迹”本来就不参与（默认存在感为零）\n' +
-                  '· 与它同时废止的开关：原“唤醒调度器”闸（2026-09-21 所有者令砍掉）——\n' +
-                  '  唤醒调度器现**恒开**，不再有可被误关的开关'}
+                <p className="ss-detailIntro">{'轨迹目录下放一个 continuous-re-occurrence.ts，调度器每 5 分钟跑它一次，由这段程序决定要不要唤、何时唤、唤的时候说什么。\n' +
+                  '· 程序文件在即启用，不必在此配置；本开关只是总闸\n' +
+                  '· 关掉只停 CRO 阶段：定时唤醒（send-later）、即时投递（send-now）与唤醒表投递照常\n' +
+                  '· 没有程序文件的轨迹本来就不参与'}
                 </p>
               </div>
             }
@@ -380,23 +358,19 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       <Group title="工具">
         <li>
           <RowCard
-            title="ACP 面（官方 ACP，端口 3200）"
-            desc="让标准 ACP 客户端（如 Agmente）连进本机；每 CCC 一枚 token 把关（默认关）"
+            title="ACP 面（官方 ACP，默认 3200）"
+            desc="让标准 ACP 客户端（如 Agmente）连进本机；每账户一枚 token 把关（默认关）"
             expandable
             open={openAcpFace}
             onToggle={setOpenAcpFace}
             control={<Toggle checked={acpFaceOn} onChange={(on) => toggle('acpFaceEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'ACP 面（面 E，2026-10-17 owner 令）\n' +
-                  '· 作用：把**官方** @deepseek-ai/dsh-acp 挂进本进程，标准 ACP 客户端经 WebSocket 登入本机\n' +
-                  '· 与「微信桥」的关系：两者是**入站通道的两个实现**，每个 CCC 二选一（在各自的\n' +
-                  '  .opencode/serenity.json 里配 im.channel）。本开关只管**端口开不开**，不管哪个 CCC 用哪条\n' +
-                  '· 🔴 认证：本面绑 0.0.0.0 且 ACP 协议自身**不做认证** ⇒ 由 ACC 在握手前用\n' +
-                  '  **每账户一枚 token**（localstore 键 IM_ACP_TOKEN_<账户ID>）把关；没配账户的 CCC 一律连不上\n' +
-                  '· 账户台账在**下面那张表**里管（加设备／看指纹／轮换／删除），不必改 JSON 或手敲命令\n' +
-                  '· ⚠️ 明文 ws:// ⇒ 局域网内可抓包；**上公网必须走 wss ＋ Cloudflare Access**\n' +
-                  '· 协议无认证这一条由 ACC 补齐：未过 token 闸的连接**根本升不上来**（不是"升上来再拒"）'}
+                <p className="ss-detailIntro">{'把官方 @deepseek-ai/dsh-acp 挂进本进程，标准 ACP 客户端经 WebSocket 登入本机。\n' +
+                  '· 与微信桥的关系：两者是入站通道的两个实现，每个 CCC 二选一（在 CCC 的 .opencode/serenity.json 里配 im.channel）。本开关只管端口开不开\n' +
+                  '· 🔴 认证：本面绑 0.0.0.0，而 ACP 协议本身不做认证 ⇒ 由 ACC 在握手前用每账户一枚 token（localstore 键 IM_ACP_TOKEN_<账户ID>）把关；没配账户的 CCC 一律连不上\n' +
+                  '· 账户在下面那张表里管（加设备／看指纹／轮换／删除），不必改 JSON 或手敲命令\n' +
+                  '· ⚠️ 明文 ws:// ⇒ 局域网内可抓包；上公网必须走 wss ＋ Cloudflare Access'}
                 </p>
                 <AcpAccountsEditor />
               </div>
@@ -413,24 +387,19 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
             control={<Toggle checked={diagramOn} onChange={(on) => toggle('diagramEnabled', on)} />}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'图（diagram 工具）\n' +
-                  '· 作用：agent 给一段**标签式源码**（<diagram> 根 ＋ <rect>/<arrow>/<text>/<color>/<legend>），\n' +
-                  '  由 ACC **在进程内**画成图并贴进对话 —— 不启浏览器、不截图\n' +
-                  '· 产物：图进对话记录（可回看、可被后续轮次引用、可转微信）；同时落两份文件在容器的\n' +
-                  '  _tmp/diagram/（.svg 可读可改 ／ .png 是进对话的那份）\n' +
-                  '· 自带体检：重叠块 ／ 标签溢出 ／ 悬空端点 ／ 线压字，四条**只告警不拦图**；\n' +
-                  '  写错的图元被跳过并逐条报错，其余照画\n' +
-                  '· 中文能画：字体**随插件内置**（约 3.8 MB）—— 光栅化引擎看不见系统字体，只能喂内置的\n' +
-                  '· 默认关：它是 owner 要的 demo 功能；**关着的时候工具根本不注册**（模型看不到它，不占上下文）\n' +
-                  '· 图要贴进对话有个前提：**当前模型路由要声明收图像输入**。没声明时图照样画、照样落盘，\n' +
-                  '  回执里写明原因并给路径（同「读图」工具的门）'}
+                <p className="ss-detailIntro">{'agent 给一段标签式源码（<diagram> 根 ＋ <rect>/<arrow>/<text>/<color>/<legend>），由 ACC 在进程内画成图并贴进对话 —— 不启浏览器、不截图。\n' +
+                  '· 产物：图进对话记录（可回看、可被后续轮次引用、可转微信）；另落两份文件在 CCC 的 _tmp/diagram/（.svg 可读可改 ／ .png 是进对话的那份）\n' +
+                  '· 自带体检：重叠块 ／ 标签溢出 ／ 悬空端点 ／ 线压字，四条只告警不拦图；写错的图元被跳过并逐条报错，其余照画\n' +
+                  '· 字体随插件内置（约 3.8 MB），因为光栅化引擎看不见系统字体\n' +
+                  '· 默认关；关着时工具根本不注册（模型看不到它，不占上下文）\n' +
+                  '· 前提：当前模型路由要声明收图像输入。没声明时图照样画、照样落盘，回执里写明原因并给路径'}
                 </p>
               </div>
             }
           />
         </li>
       </Group>
-      <Collapse title="彩蛋模式" desc="persona 输出风格（默认关闭）">
+      <Collapse title="彩蛋模式" desc="替换输出风格提示词（默认关闭）">
         <PersonaEditor />
       </Collapse>
 
@@ -441,7 +410,7 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       </Collapse>
 
       {/* 旧会话清理（v1.29 需求③）：DSH 平台会话（对话历史）手动清理——lastActive 基准 + 物理删 */}
-      <Collapse title="会话清理" desc="删除指定天数前无活动的 DSH 会话（手动，物理删不可恢复）">
+      <Collapse title="会话清理" desc="删除 N 天前无活动的 DSH 会话（手动，不可恢复）">
         <SessionCleanupBlock />
       </Collapse>
     </div>
@@ -518,11 +487,10 @@ function SessionCleanupBlock(): React.JSX.Element {
       <RowCard
         title="删除前无活动天数"
         desc="删除最后活动早于该天数的 DSH 会话（默认 30）"
-        help={'会话清理阈值（v1.29，S142 用户拍板 lastActive 基准）：\n' +
-          '· 含义：删除「最后活动早于 N 天前」的 DSH 平台会话（对话历史）\n' +
+        help={'删除「最后活动早于 N 天前」的 DSH 会话（对话历史）。\n' +
           '· lastActive = 会话日志文件最后写入时间（日志只追加，mtime 可靠）\n' +
-          '· live 保护：正在运行的会话绝不删除（服务端强制跳过）\n' +
-          '· 物理删不可恢复——先「预览」确认列表再执行'}
+          '· 正在运行的会话不会被删（服务端强制跳过）\n' +
+          '· 物理删除不可恢复 —— 先「预览」核列表再执行'}
         control={
           <input
             className="ss-portInput"

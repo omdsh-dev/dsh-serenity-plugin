@@ -350,8 +350,11 @@
 }
 
 .sp-label {
+  /* 🔴 曾写死 `width: 76px` ⇒ 「CheapWorker 模型」这类长标签会**溢出到数值上**
+     （nowrap ＋ 定宽 ⇒ 文字直接压过去，不换行也不报错）。
+     改 `min-width`：短标签仍在同一列对齐，长标签自己撑开，绝不压数值。 */
   flex: none;
-  width: 76px;
+  min-width: 76px;
   font-size: 12px;
   font-weight: 500;
   color: var(--dsw-alias-label-secondary);

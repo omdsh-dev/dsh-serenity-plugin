@@ -175,17 +175,16 @@ export function AcpAccountsEditor(): React.JSX.Element {
     <div className="ss-detailStack">
       <div className="ss-detailIntro">
         {'ACP 账户台账（每台客户端一条：一枚 token ↔ 一个角色）\n' +
-          '· 连接归属哪个 CCC 由 **token** 决定（服务端权威），不看客户端填什么\n' +
-          '· 加一台设备 = 这里加一条 ⇒ **token 随即自动生成**，保存后当场显示一次，抄进客户端即可\n' +
-          '· 客户端地址：ws://<本机IP>:3200  ＋ Authorization: Bearer <token>（或用 ?token=<token>）\n' +
-          '  working directory 也可以只填目录名 —— ACC 会按 token 归属自动归到该 CCC 根\n' +
-          '· 「轮换」会让**在用的那台立刻断线** ⇒ 只在怀疑泄露时按；「删除」连带删 token，不可逆'}
+          '· 连接归属哪个 CCC 由 token 决定（服务端权威），不看客户端填什么\n' +
+          '· 加一台设备 = 这里加一条 ⇒ token 随即生成，保存后当场显示一次，抄进客户端即可\n' +
+          '· 客户端地址：ws://<本机IP>:3200 ＋ Authorization: Bearer <token>（或用 ?token=<token>）；working directory 可以只填目录名 —— ACC 会按 token 归属自动归到该 CCC 根\n' +
+          '· 「轮换」会让在用的那台立刻断线 ⇒ 只在怀疑泄露时按；「删除」连带删 token，不可逆'}
       </div>
 
       {/* ── CCC 选择器（ACP 账户是 CCC 级数据；显式选，不猜）── */}
       <div className="ss-switchRow">
-        <span>目标 CCC</span>
-        <select value={selectedRoot} onChange={(e) => setSelectedRoot(e.target.value)}>
+        <span className="ss-fieldLabel">目标 CCC</span>
+        <select className="ss-select" value={selectedRoot} onChange={(e) => setSelectedRoot(e.target.value)}>
           {cccs.length === 0 && <option value="">（未发现 CCC）</option>}
           {cccs.map((c) => (
             <option key={c.root} value={c.root}>{c.name}</option>
@@ -193,58 +192,60 @@ export function AcpAccountsEditor(): React.JSX.Element {
         </select>
       </div>
 
-      {loadError && <p className="ss-detailIntro">{`读取失败：${loadError}`}</p>}
+      {loadError && <p className="ss-error">{`读取失败：${loadError}`}</p>}
 
       {status && (
         <p className="ss-detailIntro">
           {`通道：${status.channel}${status.channel === 'acp' ? '' : '（未选 ACP ⇒ 账户不生效）'} ／ 面开关：${status.enabled ? '开' : '关'}` +
             `\n可用账户：${status.accounts.filter((a) => a.usable).length} / ${status.accounts.length}` +
-            '\n每个可用账户在客户端里**只看到自己那一条对话**（第一次发消息时建立，之后一直用它）。'}
+            '\n每个可用账户在客户端里只看到自己那一条对话（第一次发消息时建立，之后一直用它）。'}
         </p>
       )}
 
       {/* ── 账户表 ── */}
       {status && status.accounts.length > 0 && (
-        <table className="ss-table">
-          <thead>
-            <tr>
-              <th>账户</th>
-              <th>角色</th>
-              <th>状态</th>
-              <th>对话</th>
-              <th>token</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {status.accounts.map((a) => (
-              <tr key={a.accountId}>
-                <td>
-                  <code>{a.accountId}</code>
-                  {a.name ? ` · ${a.name}` : ''}
-                </td>
-                <td>{a.role ?? '—'}</td>
-                <td>{a.usable ? '✅ 可用' : `⚠️ ${a.blockedBy ?? '不可用'}`}</td>
-                {/* 会话 id **不是秘密** ⇒ 明示（排障时要能回答"这台手机钉的是哪条"） */}
-                <td title={a.mainSession ?? undefined}>
-                  {a.mainSession ? `…${a.mainSession.slice(-8)}` : '（还没建，客户端发第一条消息时建立）'}
-                </td>
-                <td>{a.hasToken ? `…${a.tokenFingerprint ?? ''}` : '（无）'}</td>
-                <td>
-                  <button type="button" disabled={busy} onClick={() => void rotate(a.accountId)}>轮换</button>
-                  {confirmRemove === a.accountId ? (
-                    <>
-                      <button type="button" disabled={busy} onClick={() => void remove(a.accountId)}>确认删除</button>
-                      <button type="button" onClick={() => setConfirmRemove(null)}>取消</button>
-                    </>
-                  ) : (
-                    <button type="button" disabled={busy} onClick={() => setConfirmRemove(a.accountId)}>删除</button>
-                  )}
-                </td>
+        <div className="ss-tableWrap">
+          <table className="ss-table">
+            <thead>
+              <tr>
+                <th>账户</th>
+                <th>角色</th>
+                <th>状态</th>
+                <th>对话</th>
+                <th>token</th>
+                <th />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {status.accounts.map((a) => (
+                <tr key={a.accountId}>
+                  <td>
+                    <code>{a.accountId}</code>
+                    {a.name ? ` · ${a.name}` : ''}
+                  </td>
+                  <td>{a.role ?? '—'}</td>
+                  <td>{a.usable ? '✅ 可用' : `⚠️ ${a.blockedBy ?? '不可用'}`}</td>
+                  {/* 会话 id 不是秘密 ⇒ 明示（排障时要能回答"这台手机钉的是哪条"） */}
+                  <td title={a.mainSession ?? undefined}>
+                    {a.mainSession ? `…${a.mainSession.slice(-8)}` : '（还没建，客户端发第一条消息时建立）'}
+                  </td>
+                  <td>{a.hasToken ? `…${a.tokenFingerprint ?? ''}` : '（无）'}</td>
+                  <td>
+                    <button type="button" disabled={busy} onClick={() => void rotate(a.accountId)}>轮换</button>
+                    {confirmRemove === a.accountId ? (
+                      <>
+                        <button type="button" disabled={busy} onClick={() => void remove(a.accountId)}>确认删除</button>
+                        <button type="button" onClick={() => setConfirmRemove(null)}>取消</button>
+                      </>
+                    ) : (
+                      <button type="button" disabled={busy} onClick={() => setConfirmRemove(a.accountId)}>删除</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {status && status.accounts.length === 0 && (
@@ -252,14 +253,16 @@ export function AcpAccountsEditor(): React.JSX.Element {
       )}
 
       {/* ── 新增账户 ── */}
-      <div className="ss-switchRow">
-        <span>新增账户</span>
+      <div className="ss-switchRow ss-switchRowWrap">
+        <span className="ss-fieldLabel">新增账户</span>
         <input
+          className="ss-textInput"
           placeholder="账户 ID（如 agmente-phone）"
           value={draft.accountId}
           onChange={(e) => setDraft({ ...draft, accountId: e.target.value })}
         />
         <input
+          className="ss-textInput"
           placeholder="角色（必须是本 CCC 已有的）"
           value={draft.role}
           onChange={(e) => setDraft({ ...draft, role: e.target.value })}
@@ -269,23 +272,26 @@ export function AcpAccountsEditor(): React.JSX.Element {
           {rolesForSelected.map((r) => <option key={r} value={r} />)}
         </datalist>
         <input
+          className="ss-textInput"
           placeholder="显示名（可选）"
           value={draft.name}
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
         />
-        <button type="button" disabled={busy || !selectedRoot} onClick={() => void addAccount()}>保存并生成 token</button>
+        <button type="button" className="ss-wakeBtn" disabled={busy || !selectedRoot} onClick={() => void addAccount()}>保存并生成 token</button>
       </div>
 
-      {error && <p className="ss-detailIntro">{`⚠️ ${error}`}</p>}
+      {error && <p className="ss-error">{`⚠️ ${error}`}</p>}
 
       {/* ── 刚生成 ／ 刚轮换的明文 token（唯一出现明文的地方）── */}
       {freshToken && (
         <div className="ss-detailStack">
           <p className="ss-detailIntro">
-            {`🔑 ${freshToken.accountId} 的 token（**只显示这一次**，复制进客户端）\n记得随客户端配置一起保存。`}
+            {`🔑 ${freshToken.accountId} 的 token（只显示这一次，复制进客户端）\n记得随客户端配置一起保存。`}
           </p>
-          <code style={{ wordBreak: 'break-all', userSelect: 'all' }}>{freshToken.token}</code>
-          <button type="button" onClick={() => setFreshToken(null)}>我已抄走，隐藏</button>
+          <code className="ss-tokenBox">{freshToken.token}</code>
+          <div className="ss-switchRow">
+            <button type="button" className="ss-wakeBtn" onClick={() => setFreshToken(null)}>我已抄走，隐藏</button>
+          </div>
         </div>
       )}
     </div>
