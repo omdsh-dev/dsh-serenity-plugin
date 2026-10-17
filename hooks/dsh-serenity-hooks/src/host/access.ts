@@ -123,14 +123,27 @@ export function hostWeb(ctx: unknown): HostWeb | undefined {
 /**
  * `ctx.subagents`（lazy；v1.31.3：cheap-worker foreground 模式的委派正门）。
  *
- * 形状对照宿主 rc.1：`SubagentRuntime.start(name, request)` → `SubagentRun`
- * （`result` / `dispose` / `id`）。本模块只做形状收口；语义与错误处理归调用方。
+ * 🔴 **形状对照宿主 `0.2.1-rc.1`（v1.59.3 适配）**：旧成员 `start(name, request)` **已消失**，
+ *    改由 `startActivation(spec)` 承担（实名由 `spec.provider` 指定，我们仍传 `'spawn'`）。
+ *    - 旧：`start(name: string, request: SubagentStartRequest): Promise<SubagentRun>`
+ *    - 新：`startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>`（两个重载）
+ *    实测依据（**类型面与运行时都核过**，不是只看一边）：
+ *      `_tmp/host-0.2.1-rc.1/…/dsh-subagent/lib/types/index.d.ts:135,145` ＋
+ *      同包 `lib/index.js` 里**只有** `async startActivation(spec)`。
+ *  ⚠️ **两个方法都保留为可选**：本仓仍声明支持 `0.1.7-rc.1` 双档（`VERIFIED_HOST_BANDS`），
+ *    而 0.1.7 那代同样只有 `start` —— **删掉 `start` 会让旧档在类型面说谎**。
+ *    调用方按"先新后旧"选用，见 `cheap-worker.ts` 的 `resolveSubagentStarter()`。
+ *
+ * 本模块只做形状收口；语义与错误处理归调用方。
  *
  * 注（v1.31.4）：本服务**不在** dsp 的 `inject` 列表内，因此走 `hostInjected` 的
  * 回落分支（`ctx.get`）——见 `hostInjected` 的 v1.31.4 说明与真实 cordis 用例。
  */
 interface HostSubagents {
+  /** 宿主 `0.1.7-rc.*` / `0.2.0-rc.*`（旧形态；0.2.1-rc.1 起已移除） */
   start?: (name: string, request: unknown) => Promise<unknown>
+  /** 宿主 `0.2.1-rc.1+`（新形态；`spec.provider` 即旧 `name`） */
+  startActivation?: (spec: unknown) => Promise<unknown>
 }
 
 export function hostSubagents(ctx: unknown): HostSubagents | undefined {

@@ -100,8 +100,26 @@ type _SessionTitleRename = Expect<Extends<HostContext['sessionTitle']['rename'],
 /** 工作区白名单下拉（`api.ts:334`、`skiff-debug.ts:90`——读 `path`/`title`） */
 type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry']['list']>, readonly unknown[]>>
 
-/** cheap-worker foreground 委派（`tools/cheap-worker.ts:171`——`start('spawn', request)`） */
-type _SubagentsStart = Expect<Extends<HostContext['subagents']['start'], (name: string, request: never) => Promise<unknown>>>
+/**
+ * cheap-worker foreground 委派（`tools/cheap-worker.ts` 的 `resolveSubagentStarter()`）。
+ *
+ * 🔴 **v1.59.3 适配（0.2.1-rc.1）的关键教训**：宿主在两个档上给的成员**不同名** ——
+ *   · `0.1.7-rc.*` / `0.2.0-rc.*`：只有 `start(name, request)`
+ *   · `0.2.1-rc.1+`：只有 `startActivation(spec)`（`start` 类型与运行时**同时**消失）
+ *
+ * ⚠️ 本文件是**对"当前安装宿主"的契约钉**（`paths` 指本机 `node_modules`，见 `50-workflow.md` §8.6⑭），
+ *   而本仓**同时声明支持两档** ⇒ **不能只钉其中一个成员**，否则另一档下 `typecheck` 必红。
+ *   （实测踩过：只钉 `startActivation` ⇒ 本机 0.2.0-rc.2 上 `typecheck` 立刻红。）
+ *
+ * ⇒ 判据写成 **"至少有一个"**：两档各钉一条，用条件类型把它们合成一个"存在性"断言。
+ *   真正的"该用哪个"由运行期 `resolveSubagentStarter()` 决定（先新后旧），类型层只保证
+ *   **这两个名字里至少有一个真的存在** —— 那正是我们依赖的东西。
+ */
+type _SubagentsHasStarter =
+  HostContext['subagents'] extends { startActivation: (...args: never[]) => unknown } ? true
+  : HostContext['subagents'] extends { start: (...args: never[]) => unknown } ? true
+  : false
+type _SubagentsStarterPresent = Expect<_SubagentsHasStarter>
 
 /** 设置面板（v0.1.7 起 = `SettingsForms`）：本插件用 `configure` 关掉自动生成页；
  *  `update`/`describe` 供诊断与将来的写入面（`settings-section.ts`） */
@@ -117,7 +135,18 @@ type _WebRegisterFetchProvider = Expect<Extends<Ret<HostContext['web']['register
 
 /** 状态接口/网关端口发现（`api.ts`、`gateway.ts`） */
 type _WebServerRegister = Expect<Extends<Ret<HostContext['webServer']['register']>, unknown>>
-type _WebServerPort = Expect<Extends<HostContext['webServer']['port'], number>>
+/**
+ * 🔴 **v1.59.3 适配（0.2.1-rc.1）**：宿主把这个 getter **放宽**成 `number | undefined`
+ * （逐字 `get port(): number | undefined`；0.2.0-rc.2 时是 `number`）。
+ *
+ * 语义依据（宿主注释逐字）：*"The listening port … or `undefined` before `listen` binds."*
+ * ⇒ **不是**宿主退化，而是它**如实**了 —— 监听未绑定时确实没有端口。
+ *
+ * ⚠️ 我们**已有的消费处都自带判空**（实测：`gateway.ts:588` 的 `if (!webServer?.port) return`
+ * 已在窄化作用域内覆盖 593/611/622/630；`index.ts:773` 用 `typeof ws?.port === 'number'` 回落常量）
+ * ⇒ **本处只改类型钉，不需要改任何消费代码**。这与适配方案 §A4 的初判一致。
+ */
+type _WebServerPort = Expect<Extends<HostContext['webServer']['port'], number | undefined>>
 
 // ─────────────────────────────────────────────────────────────
 // ③ dsp 真正**读取的形状**（这一类才是静默失效的重灾区）

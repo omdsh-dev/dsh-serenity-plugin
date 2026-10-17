@@ -148,8 +148,14 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     //   又会把本机在跑的 `0.1.7-rc.2` 堵死 ⇒ 双档是唯一两全写法。
     //   ⚠️ 本处**刻意保留字面量**（不 import `contract.ts` 的常量）：本文件的职责是查**发布物形状**，
     //   与源码常量同串的一致性由 `tests/host-contract.test.ts` 的跨文件对账用例负责。
+    //
+    // 🆕 **v1.59.3（0.2.1-rc.1 适配）**：加第三档 `^0.2.1-rc.1`。
+    //   为什么必须加（实测依据）：npm 的 `^0.2.0-rc.1` 对**预发布**只放行**同一
+    //   `major.minor.patch`** 的 prerelease ⇒ **`0.2.1-rc.1` 不满足它** ⇒ 宿主门拒装
+    //   （D98 同族：上一轮就是它导致整包拒绝安装并回滚）。
+    //   逐字字面量在此同步；跨文件一致性仍由 host-contract.test.ts 负责。
     for (const [name, range] of dshPeers) {
-      expect(range, `${name} 与 peer 范围不一致`).toBe('^0.1.7-rc.1 || ^0.2.0-rc.1')
+      expect(range, `${name} 与 peer 范围不一致`).toBe('^0.1.7-rc.1 || ^0.2.0-rc.1 || ^0.2.1-rc.1')
     }
   })
 })

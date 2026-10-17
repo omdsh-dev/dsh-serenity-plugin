@@ -42,7 +42,7 @@ function writeCcc(models: string[], defaultModel?: string): void {
   )
 }
 
-/** 替身 subagents 服务：记录请求 + 返回可配的 run 句柄 */
+/** 替身 subagents 服务：记录请求 + 返回可配的 run 句柄（**旧档形态**：只有 `start`） */
 function fakeSubagents(result: Record<string, unknown> = { output: [{ type: 'text', text: 'T-01 OK' }], stopReason: 'completed' }) {
   const calls: { name: string; request: Record<string, unknown> }[] = []
   let disposed = 0
@@ -57,6 +57,29 @@ function fakeSubagents(result: Record<string, unknown> = { output: [{ type: 'tex
     },
   }
   return { runtime, calls, disposed: () => disposed }
+}
+
+/**
+ * 替身 subagents 服务 —— **新档形态（0.2.1-rc.1+）**：只有 `startActivation`。
+ *
+ * 🔴 为什么必须单独造一个（v1.59.3）：旧档与新档**成员不同名**（`start` vs `startActivation`），
+ *   用一个替身兼两种形态就测不出"我们真的走了新路径"。本替身记录的是 **spec**，
+ *   与旧档记录的 `(name, request)` 形状不同 —— 这正是要被测出来的差异。
+ */
+function fakeSubagentsNew(result: Record<string, unknown> = { output: [{ type: 'text', text: 'NEW OK' }], stopReason: 'completed' }) {
+  const specs: Record<string, unknown>[] = []
+  let disposed = 0
+  const runtime = {
+    startActivation: async (spec: unknown) => {
+      specs.push(spec as Record<string, unknown>)
+      return {
+        childId: 'child-session-new',
+        result: Promise.resolve(result),
+        dispose: async () => { disposed++ },
+      }
+    },
+  }
+  return { runtime, specs, disposed: () => disposed }
 }
 
 function ctxWith(runtime: unknown) {
@@ -115,7 +138,11 @@ describe('cheap-worker（一次前台串行委派）', () => {
     // 委派归属 + 取消通道
     expect(req.parent).toEqual({ session: { header: { cwd: dir } } })
     expect(req.signal).toBeInstanceOf(AbortSignal)
-    // 递归防护：子 agent 不再持有 cheap-worker
+    // 🔴 **递归防护（旧档路径，v1.59.3 起语义收窄）**：
+    //    旧档（0.1.7-rc.* / 0.2.0-rc.*）的 `SubagentStartRequest` **仍有** `toolFilter`
+    //    ⇒ 我们照旧传，子 agent 拿不到 cheap-worker。
+    //    ⚠️ **但新档（0.2.1-rc.1+）不行** —— 见下一个用例 `startActivation` 的断言与注释。
+    //    ⇒ 本行断言的是**旧档行为**；不要把它读成"递归防护在所有宿主上都成立"。
     expect(req.toolFilter).toEqual({ deny: ['cheap-worker'] })
     // 结果映射
     expect(out.mode).toBe('foreground')
@@ -125,6 +152,73 @@ describe('cheap-worker（一次前台串行委派）', () => {
     expect(out.output).toBe('T-01 OK')
     expect(out.childId).toBe('child-session-1')
     expect(fake.disposed()).toBe(1)
+  })
+
+  /**
+   * 🔴🔴 **v1.59.3（0.2.1-rc.1 适配）—— 新档路径与 A7「已知退化」的如实钉**
+   *
+   * ## 这组在防什么
+   * 宿主 `0.2.1-rc.1` **移除**了 `start(name, request)`，改由 `startActivation(spec)` 承担。
+   * 我们新增了 `resolveSubagentStarter()`（先新后旧）。本组钉住三件事：
+   *  ① **新档真的被走到**（不是"旧档还能跑"就算过关）；
+   *  ② spec 的形状对（`provider:'spawn'` / `request.*` 三件 / `delivery:'caller'`）；
+   *  ③ 🔴 **A7 的已知退化被如实记录**：新档**传不出** `toolFilter`
+   *     ⇒ 子 agent **不再**被自动去权。
+   *
+   * ## ⛔ 为什么 ③ 不是"放宽断言"
+   * 它**没有**把旧断言改松；它**新增**了一条断言，内容是**"这里确实少了一层防护"**。
+   * 差别在于：放宽 = 假装原来的能力还在；如实 = 明确写出**它不在**，并让这条断言**在退化恢复时变红**
+   * （届时必须主动改它，而不是被静默通过）。
+   */
+  it('🔴 新档（startActivation）：spec 形状正确，且**如实断言 toolFilter 传不出去**（A7 已知退化）', async () => {
+    const fake = fakeSubagentsNew()
+    const tool = createCheapWorkerTool(ctxWith(fake.runtime) as never) as unknown as typeof TOOL
+    const out = await tool.execute({ task: '跑 T-02', label: 'T-02' }, execIn())
+
+    expect(fake.specs).toHaveLength(1)
+    const spec = fake.specs[0]!
+    // ① 新档被走到 + provider 名不变
+    expect(spec.provider).toBe('spawn')
+    // ② `label` 在旧 request 里存在，在新 spec 里**升到顶层且必填**
+    expect(spec.label).toBe('T-02')
+    // ③ `delivery:'caller'` —— 我们只要结果、不通知模型（与旧 start 的语义对齐）
+    expect(spec.delivery).toBe('caller')
+    // ④ 原有的三件搬进 `request` 子对象；⚠️ `signal` **留在顶层**（宿主 spec 就是这么切的）
+    const request = spec.request as Record<string, unknown>
+    expect(request.prompt).toEqual([{ type: 'text', text: '跑 T-02' }])
+    expect(request.agentOptions).toEqual({ provider: 'minimax-cn-coding-plan', model: 'MiniMax-M3' })
+    expect(request.parent).toEqual({ session: { header: { cwd: dir } } })
+    expect(spec.signal).toBeInstanceOf(AbortSignal)
+    //    ⚠️ 两侧配平：`signal` **不得**同时出现在 request 里（否则等于同一个语义说两遍）
+    expect(request).not.toHaveProperty('signal')
+
+    // 🔴 ⑤ **A7 如实钉**：新档**没有** `toolFilter` 通路（宿主的 `SubagentStartRequest` 已无该字段）
+    //    ⇒ 我们**不发**它（发了也会被宿主静默忽略 —— 那比不发更糟：看起来像做了防护）。
+    expect(spec).not.toHaveProperty('toolFilter')
+    expect(request).not.toHaveProperty('toolFilter')
+    //    ⚠️ **这条断言的含义**：新宿主上子 agent **会重新持有 cheap-worker**（可再委派）。
+    //    若日后接入 Agent Preset 把防护补回来，**本断言会红** —— 那是**应该**的：
+    //    改它的人必须显式把"防护回来了"写进这里，而不是让它静默翻转。
+
+    // ⑥ 结果映射（新形态身份字段是 `childId`，不是 `id`）
+    expect(out.childId).toBe('child-session-new')
+    expect(out.output).toBe('NEW OK')
+    expect(fake.disposed()).toBe(1)
+  })
+
+  it('🔴 两档都不存在 ⇒ 抛**可诊断**的错（点名两个成员名，不误报成"服务不可用"）', async () => {
+    const tool = createCheapWorkerTool(ctxWith({}) as never) as unknown as typeof TOOL
+    await expect(tool.execute({ task: 'x' }, execIn())).rejects.toThrow(/startActivation[\s\S]*start/)
+  })
+
+  it('🔴 新档优先于旧档（两成员同时在时走 startActivation —— 升版期间不得回退到旧路径）', async () => {
+    const newFake = fakeSubagentsNew()
+    const oldFake = fakeSubagents()
+    const both = { ...oldFake.runtime, ...newFake.runtime }
+    const tool = createCheapWorkerTool(ctxWith(both) as never) as unknown as typeof TOOL
+    await tool.execute({ task: 'x' }, execIn())
+    expect(newFake.specs).toHaveLength(1)
+    expect(oldFake.calls).toHaveLength(0)
   })
 
   /**

@@ -75,11 +75,68 @@ interface CheapWorkerForegroundResult {
   diagnostic?: string
 }
 
-/** 宿主 `ctx.subagents.start()` 返回句柄的最小形状（不直接依赖宿主类型） */
+/** 宿主委派返回句柄的最小形状（不直接依赖宿主类型）。新旧形态**同形**，故一个接口够用：
+ *  旧 `SubagentRun` = `{id, result, dispose}`；新 `SubagentActivation` = `{childId, result, dispose}`。 */
 interface SubagentRunLike {
+  /** 旧形态的 id */
   id?: string
+  /** 新形态（0.2.1-rc.1 起）的稳定身份 —— 与 `id` **不同名、同义** */
+  childId?: string
   result?: Promise<{ output?: unknown; diagnostic?: unknown; stopReason?: unknown }>
   dispose?: () => Promise<void>
+}
+
+/**
+ * 选出一个可用的"启动子 agent"函数（**先新后旧**）。
+ *
+ * 🔴 **为什么需要这一层**（v1.59.3 适配，2026-10-17）：
+ *   宿主 `0.2.1-rc.1` **移除了** `SubagentRuntime.start(name, request)`，改由
+ *   `startActivation(spec)` 承担；而 `0.1.7-rc.*` / `0.2.0-rc.*` **只有** `start`。
+ *   本仓仍声明支持双档（`VERIFIED_HOST_BANDS`）⇒ **不能只留一边**。
+ *
+ * 形状差异（逐字取自两端 `.d.ts`）：
+ *   · 旧：`start('spawn', {label?, prompt, parent, signal, agentOptions, toolFilter})`
+ *   · 新：`startActivation({provider:'spawn', label, request:{prompt, parent, agentOptions}, signal, delivery})`
+ *     —— 注意 `label` 在新 spec 里是**必填**（`readonly label: string`），故这里补默认值。
+ *
+ * @returns 一个统一签名的启动器；两者都不存在 ⇒ `undefined`（由调用方报**可诊断**的错）
+ */
+function resolveSubagentStarter(
+  subagents: { start?: unknown; startActivation?: unknown },
+): ((request: { label: string; prompt: unknown[]; parent: unknown; signal: AbortSignal; agentOptions: Record<string, unknown>; cwd?: string }) => Promise<unknown>) | undefined {
+  if (typeof subagents.startActivation === 'function') {
+    const fn = subagents.startActivation as (spec: unknown) => Promise<unknown>
+    return (req) => fn({
+      provider: 'spawn',
+      // 新 spec 的 `label` 必填；我们对外仍允许不传 ⇒ 退化成任务首行（人在子会话列表里能认出）
+      label: req.label,
+      request: {
+        prompt: req.prompt,
+        parent: req.parent,
+        agentOptions: req.agentOptions,
+        ...(req.cwd === undefined ? {} : { cwd: req.cwd }),
+      },
+      signal: req.signal,
+      // 🔴 `caller` = 只把结果返回给调用方、**不通知模型** —— 正是 cheap-worker 的语义
+      //    （spec 注释逐字：Parent delivery notifies the model; caller delivery only returns the result）
+      delivery: 'caller',
+    })
+  }
+  if (typeof subagents.start === 'function') {
+    const fn = subagents.start as (name: string, request: unknown) => Promise<unknown>
+    return (req) => fn('spawn', {
+      label: req.label,
+      prompt: req.prompt,
+      parent: req.parent,
+      signal: req.signal,
+      agentOptions: req.agentOptions,
+      // 🔴 **旧档仍传 `toolFilter`**：它的 `SubagentStartRequest` 有这个字段
+      //    ⇒ 递归防护在旧档上**照旧成立**（不要因为新档做不到就把旧档的能力一起丢掉）。
+      toolFilter: { deny: ['cheap-worker'] },
+      ...(req.cwd === undefined ? {} : { cwd: req.cwd }),
+    })
+  }
+  return undefined
 }
 
 /** 拼接 SubagentResult.output（ContentBlock[]）中的文本块 */
@@ -90,6 +147,19 @@ function subagentOutputText(output: unknown): string {
     .filter((b) => b.type === 'text' && typeof b.text === 'string')
     .map((b) => b.text as string)
     .join('')
+}
+
+/**
+ * 任务首行 → 子会话 label（截断）。
+ *
+ * 🔴 为什么必须有一个：新宿主 `SubagentActivationSpec.label` 是**必填**（`readonly label: string`），
+ *   而我们对外把 `label` 当可选参数 ⇒ 缺省时必须自己造一个，否则 spec 不合法。
+ *   取任务首行而不是空串：子会话在列表里要能被人认出来（空串等于没有标识）。
+ */
+function firstLineLabel(task: string): string {
+  const line = task.split(/\r?\n/)[0]?.trim() ?? ''
+  const clipped = line.length > 60 ? `${line.slice(0, 60)}…` : line
+  return clipped === '' ? 'task' : clipped
 }
 
 /**
@@ -153,11 +223,14 @@ async function runForegroundJob(
   const { task, label, model, models, parent, signal } = opts
   requireWhitelistedModel(model, models)
   const subagents = hostSubagents(ctx)
-  if (!subagents?.start) {
+  // 🔴 A3（v1.59.3）：守卫必须判**两个成员**。宿主 0.2.1-rc.1 移除了 `start`，只留 `startActivation`
+  //    ⇒ 只判 `start` 会让守卫**恒真**，并把"成员改名了"误报成"服务不可用"（排障被引向错方向）。
+  const starter = subagents === undefined ? undefined : resolveSubagentStarter(subagents)
+  if (starter === undefined) {
     throw new Error(
-      'cheap-worker: host subagents service unavailable — neither ctx.subagents nor '
-      + 'ctx.get("subagents") yielded a start() function. Check `dashboard health` (host-contract '
-      + 'section, service "subagents").',
+      'cheap-worker: host subagents service unavailable — neither ctx.subagents.startActivation (0.2.1-rc.1+) '
+      + 'nor ctx.subagents.start (0.1.7-rc.* / 0.2.0-rc.*) yielded a starter function. Check `dashboard health` '
+      + '(host-contract section, service "subagents").',
     )
   }
   // 🔴 provider 预检（v1.48）：本机没有该 provider 的 adapter ⇒ **不创建注定失败的子 agent**，
@@ -167,14 +240,25 @@ async function runForegroundJob(
     return { mode: 'foreground', done: false, model, stopReason: 'error', output: '', diagnostic: preflight }
   }
   const { provider, model: modelName } = splitModel(model)
-  const run = (await subagents.start('spawn', {
-    ...(label === undefined ? {} : { label }),
+  const run = (await starter({
+    // 新 spec 的 `label` 必填 ⇒ 不传时用任务首行（截断），保证子会话可辨识
+    label: label ?? firstLineLabel(task),
     prompt: [{ type: 'text', text: task }],
     parent,
     signal: signal ?? new AbortController().signal,
     agentOptions: { ...(provider === undefined ? {} : { provider }), model: modelName },
-    // 递归防护：子 agent 不再持有 cheap-worker（编排归主 agent）
-    toolFilter: { deny: ['cheap-worker'] },
+    // 🔴 A7（v1.59.3，**已知退化，如实记录**）：递归防护 `toolFilter: { deny: ['cheap-worker'] }`
+    //    **在 0.2.1-rc.1 上不再可经此路传入** —— 实测取证（`dsh-subagent/lib/index.js`）：
+    //      · `startLocal()` 的 `composition: { agentPreset: request.agentPreset }`（新建路径**只有** agentPreset）
+    //      · `composition.toolFilter` 只在 **cold-resume** 分支由**持久化描述符**带入（:2180）
+    //      · `SubagentStartRequest`（types.d.ts:127-174）已**无** `toolFilter` 字段
+    //    ⇒ 调用方无法在"新建"时收窄子 agent 的工具面；官方替代 = **Agent Preset**
+    //    （`tool-subagent` 的报错文案逐字：configure persona and tool plugins in an Agent Preset
+    //      and select it with agentPreset (spawn only)）。
+    //    ⚠️ **本轮不硬做 preset**：我们的插件在**插件层**，而 preset 的 `plugins` 是 **profile 层
+    //    Cordis 树声明**（`PresetDefinition.plugins: EntryOptions[]`）⇒ 那是另一件事，须 owner 裁决。
+    //    ⇒ **现状 = 新宿主上子 agent 会重新持有 cheap-worker**（可再委派），**不报错、无日志**。
+    //      已报 S215；底线是**不假装它还在**。
   })) as SubagentRunLike
   try {
     const result = run.result === undefined ? {} : await run.result
@@ -185,7 +269,8 @@ async function runForegroundJob(
       model,
       stopReason,
       output: subagentOutputText(result.output),
-      ...(typeof run.id === 'string' ? { childId: run.id } : {}),
+      // 新旧形态身份字段名不同：旧 `id` ／ 新 `childId`（同义）⇒ 两边都认
+      ...(typeof (run.childId ?? run.id) === 'string' ? { childId: run.childId ?? run.id } : {}),
       ...(typeof result.diagnostic === 'string' && result.diagnostic !== ''
         ? { diagnostic: result.diagnostic }
         : {}),

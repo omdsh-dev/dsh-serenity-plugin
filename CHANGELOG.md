@@ -1,3 +1,72 @@
+## v1.59.3 — 2026-10-17（**0.2.1-rc.1 适配：`start` → `startActivation`；含一条如实记录的退化**）
+
+**性质**：**宿主兼容适配**（两类真断裂 ＋ 一条**静默退化**）。**前置**：owner 令「全做 完成后要在docker进行安装运行测试」。
+
+### 一、🔴 破坏性变更：`SubagentRuntime.start()` 消失
+
+宿主 `0.2.1-rc.1` **移除**了 `start(name, request)`，改由 `startActivation(spec)` 承担。
+**类型面与运行时同时消失**（实测：`typeof proto.start === 'undefined'`，`typeof proto.startActivation === 'function'`）。
+
+| 处 | 改法 |
+|---|---|
+| `src/host/access.ts` | `HostSubagents` **同时声明两者**（皆可选）——本仓仍支持 `0.1.7-rc.*`／`0.2.0-rc.*`，那些档**只有** `start`，删掉会让旧档在类型面说谎 |
+| `src/tools/cheap-worker.ts` | 新增 `resolveSubagentStarter()`：**先新后旧**选一个启动器；旧档**照旧传** `toolFilter`（否则把旧档的能力一起丢掉） |
+| `src/tools/cheap-worker.ts` | 守卫改判**两个成员**：只判 `start` 会让守卫**恒真**，并把"成员改名了"误报成"服务不可用"（排障被引向错方向） |
+| `src/host/type-contract.ts` | 钉改成**"两个名字至少有一个存在"**的条件类型 —— ⚠️ 本文件是**对当前安装宿主**的契约钉，只钉新成员会让本机 `typecheck` 立刻红 |
+
+🔴 **新宿主上旧代码的失效表象**（实测）：`TypeError: subagents.start is not a function` —— **响亮**，不是静默。
+🔵 **`label` 在新 spec 里是必填**（`readonly label: string`），而我们对外当可选 ⇒ 新增 `firstLineLabel()` 兜底（取任务首行，最长 60 字），保证子会话在列表里能被人认出来。
+🔵 **身份字段改名**：旧 `SubagentRun.id` → 新 `SubagentActivation.childId`（同义）⇒ 读结果时两边都认。
+
+### 二、`webServer.port` 放宽为 `number | undefined`
+
+宿主逐字 `get port(): number | undefined`（0.2.0-rc.2 时是 `number`），注释说明是
+*"or `undefined` before `listen` binds"* ⇒ **宿主如实了，不是退化**。
+⚠️ **消费处无需改**（实测）：`gateway.ts` 的 `if (!webServer?.port) return` 已在窄化作用域内覆盖后续全部读取；
+`index.ts` 用 `typeof ws?.port === 'number'` 回落常量。⇒ 只改类型钉。
+
+### 三、🔴🔴 **如实记录的退化**：新宿主上递归防护失效（A7）
+
+`cheap-worker` 原本传 `toolFilter: { deny: ['cheap-worker'] }` 让子 agent 不再持有自己。
+**在 0.2.1-rc.1 上这条路断了**（实测三重取证）：
+- `startActivation` 的**源码**不含 `toolFilter`（`/toolFilter/.test(fn.toString()) === false`）
+- 整个 `dsh-subagent/lib/types/types.d.ts` 里 **`toolFilter` 出现 0 次**
+- 建新会话路径的 `composition: { agentPreset: request.agentPreset }` —— **只有** agentPreset；
+  `composition.toolFilter` 只在 **cold-resume** 由**持久化描述符**带入
+
+⇒ **官方替代 = Agent Preset**（`tool-subagent` 报错文案逐字：*configure persona and tool plugins in an Agent Preset and select it with agentPreset (spawn only)*）。
+⚠️ **本轮不硬做 preset**：我们在**插件层**，而 preset 的 `plugins` 是 **profile 层 Cordis 树声明**（`PresetDefinition.plugins: EntryOptions[]`）—— 那是另一件事，须 owner 裁决。
+
+🔴 **现状（必须让人知道，⛔ 不许假装它还在）**：新宿主上**子 agent 会重新持有 `cheap-worker`**（可再委派），
+**不报错、无日志、类型层看不见**。已在代码注释、CHANGELOG 与一条**如实断言**的测试里写明。
+
+### 四、声明面：`VERIFIED_HOST_BANDS` 增第三档 ＋ peer 串同步
+
+- `VERIFIED_HOST_BANDS` 从两档增为三档（`^0.2.1-rc.1`），**前两档原样保留**（加档不是收窄）。
+- `package.json` 的 **16 处** dsh-* peer 串同步加上 `|| ^0.2.1-rc.1`。
+  🔴 **理由必须写准**（我第一版判断错了，实测后更正）：**不是**"否则装不上" —— 宿主判据
+  `dsh-app-boot` 的 `satisfies()` 逐字带 `{ includePrerelease: true }`，**旧范围本来就能放行 `0.2.1-rc.1`**。
+  真正理由是：让**声明面与档表第三档对齐**，且未来若宿主收紧预发布语义时不会漏。
+
+### 五、Docker 实测（在测试服务器，⛔ 不碰生产 CCC）
+
+| 形态 | 判据 | 读数 |
+|---|---|---|
+| **一 · 装得上否** | 官方 `evaluatePluginCompatibility` 对**真 manifest** 于**真宿主 0.2.1-rc.1** | **PASS**（旧范围对照亦 PASS，与 §四 更正一致） |
+| **反向对照** | 故意写 `^0.0.1` | **REJECT**（exit=1）⇒ 判据不是恒绿 |
+| **二 · 静默（A7）** | 读 `SubagentRuntime.prototype` 与类型面 | `hasStart=false`／`hasStartActivation=true`／`types.d.ts` 中 `toolFilter` **0 次** ⇒ **退化确证** |
+| **A2 响亮路径** | 旧成员在真宿主上的行为 | `typeof start === 'undefined'` ⇒ 旧代码得 `TypeError`（**响亮**，非静默） |
+| **我们的选路** | 复刻 `resolveSubagentStarter` 判定 | 选 `startActivation` ⇒ **YES** |
+
+### 六、门禁
+
+`typecheck` ／ **`typecheck-host 0.2.1-rc.1` 双半全绿**（node 106 文件 ／ client 177 文件）／
+`test`（172 文件 ／ **2903 例**）／ `coverage` ／ `build`（112 `.d.ts`）／ `pack-check`（140 文件）全绿。
+新增 **3 例**：新档 spec 形状 ＋ **A7 如实断言** ＋ 两档都不存在时的可诊断错误 ＋ 新档优先于旧档。
+
+🔴 **`type-contract.ts` 那条钉做了变异对照**：故意把两个成员名写错 ⇒ 报 `TS2344 Type 'false' does not satisfy 'true'`
+⇒ **证明它不是假绿**（这是本轨「判据本身要先证明不瞎」的又一次应用）。
+
 ## v1.59.2 — 2026-10-17（**ACP：每账户固定一条长期对话**）
 
 **性质**：**功能新增**（补上 owner 选定的形态）。**前置**：v1.59.1 已让每个 ACP 账户各自握一枚 token、

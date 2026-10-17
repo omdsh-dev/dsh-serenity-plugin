@@ -327,10 +327,19 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
  *  - ⇒ 双档是**唯一不把本机宿主堵死的写法**（两档在真 semver 下均 PASS）。
  * 档上界取 `<0.2.0` / `<0.3.0`（即 `^0.2.0-rc.1` 的 caret 上界）：第二档同时覆盖
  * `0.2.0` 正式版与后续 `0.2.0-rc.N`。
+ *
+ * 🆕 **第三档 `^0.2.1-rc.1`（v1.59.3 适配，2026-10-17）** —— 为什么非加不可：
+ *  - npm 的 `^0.2.0-rc.1` 对**预发布**只放行**同一 `major.minor.patch`** 的 prerelease
+ *    ⇒ **`0.2.1-rc.1` 不满足它**（patch 位不同）⇒ 宿主门会**整包拒绝安装**（D98 同族）。
+ *  - 而第二档的 `ceiling: '0.3.0'` 本来就"包含" 0.2.1 —— 那是**我们自己的手写比较器**的语义；
+ *    两个判据（真 semver 门 vs 手写区间）在这里**给出相反答案**，故必须把第三档显式写出来，
+ *    让**派生串**（{@link REQUIRED_HOST_RANGE}）里真的出现 `^0.2.1-rc.1`。
+ *  ⚠️ **加档不是收窄**：前两档原样保留（0.1.7 / 0.2.0 两代仍被声明支持）。
  */
 export const VERIFIED_HOST_BANDS: readonly { floor: string; ceiling: string }[] = [
   { floor: '0.1.7-rc.1', ceiling: '0.2.0' },
   { floor: '0.2.0-rc.1', ceiling: '0.3.0' },
+  { floor: '0.2.1-rc.1', ceiling: '0.3.0' },
 ]
 
 /**
