@@ -124,6 +124,56 @@ export function tokenFingerprint(token: string): string {
   return createHash('sha256').update(token).digest('hex').slice(0, 12)
 }
 
+// ── 每账户的「主会话」（v1.59.2；owner 令「每个 ACP 账户 = 与该账户角色的一个长期对话」）───
+
+/** 主会话键前缀（`IM_ACP_SESSION_<ACCOUNT_ID>`；与 `IM_ACP_TOKEN_<ACCOUNT_ID>` 同族同规则） */
+const ACP_SESSION_PREFIX = 'IM_ACP_SESSION_'
+
+/**
+ * 该账户的**主会话**键（`IM_ACP_SESSION_<ACCOUNT_ID>`）。
+ *
+ * 🔴 为什么放在 **credential** 节而不是 config 节：它跟 token 一样是**每账户一值的键控数据**
+ *    （键由 `accountId` 派生、随账户生命周期存亡）。放 config 节要另造一层 `section.key`
+ *    结构，而这一层的唯一读者就是本模块 ⇒ 多一层结构 = 多一处会漂的形状。
+ *
+ * ⚠️ 它**不是凭据**（会话 id 不是秘密）—— 共享 credential 节只是为了复用它既有的
+ *    「按 accountId 派生键 ＋ 删账户时一并清理」这套语义，不引入第二套键规则。
+ */
+export function acpSessionKeyFor(accountId: string): string {
+  return `${ACP_SESSION_PREFIX}${accountKeyPart(accountId)}`
+}
+
+/**
+ * 读该账户的主会话 id（不存在 ⇒ `null`）。
+ *
+ * 🔴 **读路径无副作用**（与 `readAcpToken` 同纪律）：不存在的含义是「这个账户还没有主会话」，
+ *    而那时的正确行为是**让 App 去建**（`session/list` 回空数组），不是替它编一个。
+ */
+export function readAcpMainSession(root: string, accountId: string): string | null {
+  try {
+    const value = getEntry(root, 'credential', acpSessionKeyFor(accountId))
+    return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+  } catch {
+    // store 读失败／键非法 ⇒ 当作"还没有"。⛔ 绝不因此回退到"列出全部会话"。
+    return null
+  }
+}
+
+/**
+ * 记下该账户的主会话 id（**写操作**；由 `session/new` 的出站响应触发）。
+ *
+ * 🔴 **后写覆盖先写**（last-wins）：owner 要的是"一条长期对话"，而"再建一条"是用户
+ *    在 App 里显式点「新对话」的结果 ⇒ 那时他要的就是**新的那条**。
+ *    ⛔ **被否的两种做法**：① 已有主会话就拒建（用户会看到"点了没反应"）；
+ *    ② 把 `session/new` 改写成 `session/resume`（响应形状不同，要让客户端认一条
+ *    **不存在于协议里**的响应 —— 那是拿协议兼容性换一个我们本来就有的语义）。
+ */
+export function writeAcpMainSession(root: string, accountId: string, sessionId: string): void {
+  const id = String(sessionId ?? '').trim()
+  if (id === '') return
+  writeEntry(root, 'credential', acpSessionKeyFor(accountId), id)
+}
+
 /**
  * 从一次 HTTP upgrade 请求里取出候选 token。
  *
@@ -338,6 +388,13 @@ export interface AcpAccountStatus {
   enabled: boolean
   hasToken: boolean
   tokenFingerprint: string | null
+  /**
+   * 该账户的**主会话** id（owner「每账户固定一条长期对话」的那一条；`null` = 还没建）。
+   *
+   * 🔴 会话 id **不是秘密**，故这里给明文（与 token 不同）—— 它的用途是**可诊断**：
+   *    面板/排障时要能回答"这台手机此刻钉的是哪条对话"，否则出问题时只能靠猜。
+   */
+  mainSession: string | null
   /** 该账户此刻**能不能被认证闸接受**（三条判据全真） */
   usable: boolean
   /** 不能用的原因（能用 ⇒ null）—— 直接指向该改哪个字段 */
@@ -373,6 +430,7 @@ export function acpChannelStatus(root: string, paths: string[] = DEFAULT_SERENIT
       enabled,
       hasToken: token !== null,
       tokenFingerprint: token ? tokenFingerprint(token) : null,
+      mainSession: readAcpMainSession(root, accountId),
       usable: usable.has(accountId),
       blockedBy,
     })
@@ -521,7 +579,13 @@ export function upsertAcpAccount(
   return saveAcpAccounts(root, list, paths)
 }
 
-/** 删一条账户（**同时清掉它的 token**，避免留死键） */
+/**
+ * 删一条账户（**同时清掉它的 token ＋ 主会话**，避免留死键）。
+ *
+ * 🔴 主会话键**必须一起清**：否则日后用同一个 `accountId` 重建账户时，它会**静默继承**
+ *    那条旧会话 —— 而那条会话的 cwd／角色都是上一代账户的。这个失效**没有任何信号**
+ *    （列表上它看着就是一条正常会话）。
+ */
 export function removeAcpAccount(
   root: string,
   accountId: string,
@@ -529,10 +593,12 @@ export function removeAcpAccount(
 ): ImAcpAccount[] {
   const current = readImSettings(root, paths).acp.accounts ?? []
   const next = saveAcpAccounts(root, current.filter((a) => a.accountId !== accountId), paths)
-  try {
-    unsetEntry(root, 'credential', acpTokenKeyFor(accountId))
-  } catch {
-    /* 键本就不存在 ⇒ 无事 */
+  for (const key of [acpTokenKeyFor(accountId), acpSessionKeyFor(accountId)]) {
+    try {
+      unsetEntry(root, 'credential', key)
+    } catch {
+      /* 键本就不存在 ⇒ 无事 */
+    }
   }
   return next
 }

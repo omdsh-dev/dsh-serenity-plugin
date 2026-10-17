@@ -30,7 +30,7 @@ const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
 const CCCS_PATH = '/serenity/cccs'
 const WEIXIN_PATH = '/serenity/weixin'
-/** 🔴 v1.59.2：ACP 账户台账（面板数据面；形状照 `/serenity/weixin`） */
+/** 🔴 v1.59.1：ACP 账户台账（面板数据面；形状照 `/serenity/weixin`） */
 const ACP_PATH = '/serenity/acp'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
@@ -656,7 +656,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
     },
   })
 
-  // 🔴 v1.59.2：ACP 账户台账（面板数据面；owner 2026-10-17 令「面板里也放账户」）
+  // 🔴 v1.59.1：ACP 账户台账（面板数据面；owner 2026-10-17 令「面板里也放账户」）
   registerAcpAccountsApi(ctx)
 }
 
@@ -680,7 +680,7 @@ function requireCcc(root: string | undefined): { ok: true; root: string } | { ok
   return { ok: true, root: serenityRoot }
 }
 
-// ── ACP 账户台账（v1.59.2，owner 2026-10-17 令「面板里也放账户」）────────────────
+// ── ACP 账户台账（v1.59.1，owner 2026-10-17 令「面板里也放账户」）────────────────
 //
 // GET  ?ccc=<root>                     → { channel, enabled, accounts[]（脱敏）, roots[] }
 // POST { ccc, action: 'upsert', account: { accountId, role, name?, enabled? } }

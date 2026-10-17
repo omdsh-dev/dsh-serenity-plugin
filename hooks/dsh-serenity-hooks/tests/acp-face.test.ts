@@ -39,12 +39,15 @@ import {
   registerAcpFace,
   resolveAcpSelection,
   normalizeClientCwd,
+  createAcpSessionPin,
+  recordAcpPending,
+  rewriteAcpResponse,
   __setAcpRootsForTest,
 } from '../src/acp-face.js'
 import { stopAllFaces } from '../src/face-host.js'
 import { FACE_PORTS } from '../src/ports.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
-import { ensureAcpToken, readAcpToken } from '../src/acp-auth.js'
+import { ensureAcpToken, readAcpToken, readAcpMainSession, upsertAcpAccount } from '../src/acp-auth.js'
 
 /**
  * 造一个"已启用 ACP 通道"的临时 CCC（真文件树，不是 mock）。
@@ -473,7 +476,7 @@ describe('面 E：设计前提的静态钉（设计 §2 / §3）', () => {
 })
 
 /**
- * 🔴 v1.59.2（owner 2026-10-17 令：「working directory 能改成让我填 ccc 目录名就可以吗？」）
+ * 🔴 v1.59.1（owner 2026-10-17 令：「working directory 能改成让我填 ccc 目录名就可以吗？」）
  *
  * ## 这件在防什么
  * 宿主 `dsh-acp` **硬性**要求 `cwd` 是绝对路径（`validateWorkspaceParams` 里的
@@ -487,7 +490,7 @@ describe('面 E：设计前提的静态钉（设计 §2 / §3）', () => {
  * 越权判据必须只有一处（`cwdInsideRoot`，它还管角色认领）。在这里再判一次 =
  * **两份会漂的实现**。⇒ 本件的反侧用例钉住"绝对但在根外 ⇒ **原样透传**，不在这里拒"。
  */
-describe('🔴 v1.59.2 cwd 归一化：客户端可只填 CCC 目录名', () => {
+describe('🔴 v1.59.1 cwd 归一化：客户端可只填 CCC 目录名', () => {
   // ⚠️ **中性路径**：本仓是公开的（B 面 = GitHub public），隐私扫描会拦真实家目录
   const CCC = '/srv/ccc-root'
 
@@ -525,5 +528,186 @@ describe('🔴 v1.59.2 cwd 归一化：客户端可只填 CCC 目录名', () => 
       const out = normalizeClientCwd(raw, CCC)
       expect(isAbsolute(out), `输入 ${String(raw)} 归一化后仍非绝对：${out}`).toBe(true)
     }
+  })
+})
+
+/**
+ * 🔴 v1.59.2 —— owner 逐字裁决：「**每个 ACP 账户 = 与该账户角色的一个长期对话**」。
+ *
+ * 原话：「我只是希望用 ACP 和指定的会话来进行通信 …… 我只想和指定 skiff 通信」
+ * （当时 App 列表里冒出 23 条别的 CCC 的会话，全部显示为 UNKNOWN ／ New Chat）。
+ *
+ * ## 本组在防什么
+ * 宿主 `dsh-acp` 的 `listSessions` 是**存量全列**，且 `SessionInfo` 只有 `{sessionId, cwd}`
+ * （**协议里没有 title**）⇒ 靠标题认"我那条"不可靠；D4 零改宿主 ⇒ 只能出站改写。
+ *
+ * ⚠️ 这里用**真 localstore 落盘**（`makeAcpCcc`）而不是替身：主会话是**跨连接**的真相，
+ * 换成内存替身就把"它真的落盘了"这一环整段绕过去了。
+ */
+describe('🔴 v1.59.2 每账户固定一条长期对话（出站改写）', () => {
+  // ⚠️ 中性路径（本仓公开，隐私扫描会拦真实家目录）
+  const CCC = '/srv/ccc-root'
+  const ACCT = 'agmente-phone'
+
+  /** 造一个真 CCC ＋ 返回该账户的钉住状态 */
+  function pinOnRealCcc(): { root: string; pin: ReturnType<typeof createAcpSessionPin> } {
+    const root = makeAcpCcc(ACCT)
+    return { root, pin: createAcpSessionPin(root, ACCT) }
+  }
+
+  /** 造一条"请求 ＋ 响应"对（走真记账路径，不手搓 pending） */
+  function askAndAnswer(
+    pin: ReturnType<typeof createAcpSessionPin>,
+    id: number | string,
+    method: string,
+    result: unknown,
+  ): unknown {
+    recordAcpPending(pin, { jsonrpc: '2.0', id, method, params: {} })
+    return rewriteAcpResponse(pin, { jsonrpc: '2.0', id, result })
+  }
+
+  it('🔴 记账只认「既有 id 又有 method」的请求：响应与通知都不记账', () => {
+    const pin = createAcpSessionPin(CCC, ACCT)
+    recordAcpPending(pin, { id: 1, method: 'session/list' }) // 请求 ⇒ 记
+    recordAcpPending(pin, { id: 1, result: {} }) // 响应 ⇒ 不记（无 method）
+    recordAcpPending(pin, { method: 'session/cancel' }) // 通知 ⇒ 不记（无 id）
+    recordAcpPending(pin, { id: null, method: 'session/list' }) // id=null ⇒ 不记
+    expect(pin.pending.size).toBe(1)
+    expect(pin.pending.get('number:1')).toBe('session/list')
+  })
+
+  it('🔴 `id` 的数字与字符串**不串号**（JSON-RPC 允许两者）', () => {
+    const pin = createAcpSessionPin(CCC, ACCT)
+    recordAcpPending(pin, { id: 1, method: 'session/list' })
+    recordAcpPending(pin, { id: '1', method: 'session/new' })
+    expect(pin.pending.get('number:1')).toBe('session/list')
+    expect(pin.pending.get('string:1')).toBe('session/new')
+  })
+
+  it('🔴 没有主会话 ⇒ `session/list` 回**空数组**（⛔ 绝不回退成全量列表）', () => {
+    const { pin } = pinOnRealCcc()
+    const out = askAndAnswer(pin, 1, 'session/list', {
+      sessions: [{ sessionId: 'other-1', cwd: CCC }, { sessionId: 'other-2', cwd: CCC }],
+    }) as { result: { sessions: unknown[] } }
+    // 回退到全量正是 owner 说「23 个对我没什么用」的那个东西
+    expect(out.result.sessions).toEqual([])
+  })
+
+  it('🔴 `session/new` 的返回值被记为该账户的主会话（跨连接可读回）', () => {
+    const { root, pin } = pinOnRealCcc()
+    const out = askAndAnswer(pin, 2, 'session/new', { sessionId: 'sess-main', configOptions: [] })
+    // 响应**原样**给客户端（不许吞字段）
+    expect(out).toEqual({ jsonrpc: '2.0', id: 2, result: { sessionId: 'sess-main', configOptions: [] } })
+    // 判据：真落盘（新开一次读，不经本连接内存）
+    expect(readAcpMainSession(root, ACCT)).toBe('sess-main')
+  })
+
+  it('🔴 有主会话 ⇒ `session/list` **只剩那一条**，其余全丢', () => {
+    const { pin } = pinOnRealCcc()
+    askAndAnswer(pin, 1, 'session/new', { sessionId: 'sess-main' })
+    const out = askAndAnswer(pin, 2, 'session/list', {
+      sessions: [
+        { sessionId: 'sess-main', cwd: CCC, title: '宁静号' },
+        { sessionId: 'other-1', cwd: CCC },
+        { sessionId: 'other-2', cwd: '/elsewhere' },
+      ],
+    }) as { result: { sessions: unknown[] } }
+    expect(out.result.sessions).toHaveLength(1)
+    // 命中时**原样保留宿主给的那条**（可能带 title/updatedAt，不许我们自己重造丢掉）
+    expect(out.result.sessions[0]).toEqual({ sessionId: 'sess-main', cwd: CCC, title: '宁静号' })
+  })
+
+  it('🔴 列表里**暂不存在**主会话时仍然回它（宿主会跳过本进程已活跃的会话）', () => {
+    // 根因取证：`dsh-acp` 的 listSessions 有这一条
+    //   `if (sessions.has(header.id) || activating.has(header.id) || ctx.sessions.get(header.id) !== void 0 …) return`
+    // ⇒ 刚建完就列表的**同一条连接**必然看不到它。回空数组会让用户以为
+    //   "刚聊的对话消失了"并再建一条 —— 那正是本功能要消灭的。
+    const { root, pin } = pinOnRealCcc()
+    askAndAnswer(pin, 1, 'session/new', { sessionId: 'sess-fresh' })
+    const out = askAndAnswer(pin, 2, 'session/list', { sessions: [] }) as { result: { sessions: Array<{ sessionId: string; cwd: string }> } }
+    // 合成值里的 `cwd` = **本连接归属的 CCC 根**（正是当初 `normalizeClientCwd` 钉的那一个）
+    expect(out.result.sessions).toEqual([{ sessionId: 'sess-fresh', cwd: root }])
+  })
+
+  it('🔴 `nextCursor` 一律丢掉（收窄到一条后分页游标失去意义）', () => {
+    const { pin } = pinOnRealCcc()
+    askAndAnswer(pin, 1, 'session/new', { sessionId: 'sess-main' })
+    const out = askAndAnswer(pin, 2, 'session/list', {
+      sessions: [{ sessionId: 'sess-main', cwd: CCC }],
+      nextCursor: 'abc123',
+    }) as { result: Record<string, unknown> }
+    expect(out.result).not.toHaveProperty('nextCursor')
+  })
+
+  it('🔴 失败的 `session/new`（带 error）**不**记主会话（错误响应不是"建成了"）', () => {
+    const { root, pin } = pinOnRealCcc()
+    recordAcpPending(pin, { id: 3, method: 'session/new' })
+    const out = rewriteAcpResponse(pin, { jsonrpc: '2.0', id: 3, error: { code: -32602, message: 'cwd must be an absolute path' } })
+    expect(out).toEqual({ jsonrpc: '2.0', id: 3, error: { code: -32602, message: 'cwd must be an absolute path' } })
+    expect(readAcpMainSession(root, ACCT)).toBeNull()
+  })
+
+  it('🔴 不碰我们不关心的消息：通知、别人的响应、其它方法一律原样', () => {
+    const pin = createAcpSessionPin(CCC, ACCT)
+    // 通知（有 method 无 id）
+    const note = { jsonrpc: '2.0', method: 'session/update', params: { sessionId: 'x' } }
+    expect(rewriteAcpResponse(pin, note)).toBe(note)
+    // 账上没有的 id
+    const stranger = { jsonrpc: '2.0', id: 99, result: { anything: true } }
+    expect(rewriteAcpResponse(pin, stranger)).toBe(stranger)
+    // 别的方法（例如 session/prompt）—— 记账了，但不在改写名单
+    const prompt = askAndAnswer(pin, 1, 'session/prompt', { stopReason: 'end_turn' })
+    expect(prompt).toEqual({ jsonrpc: '2.0', id: 1, result: { stopReason: 'end_turn' } })
+  })
+
+  it('🔴 两个账户各钉各的主会话（同一台机器上的两条连接互不串）', () => {
+    const root = makeAcpCcc('phone')
+    upsertAcpAccount(root, { accountId: 'script', role: 'tester' })
+    const phonePin = createAcpSessionPin(root, 'phone')
+    const scriptPin = createAcpSessionPin(root, 'script')
+    askAndAnswer(phonePin, 1, 'session/new', { sessionId: 'sess-phone' })
+    askAndAnswer(scriptPin, 1, 'session/new', { sessionId: 'sess-script' })
+
+    const listFor = (pin: ReturnType<typeof createAcpSessionPin>): unknown[] =>
+      (askAndAnswer(pin, 2, 'session/list', {
+        sessions: [{ sessionId: 'sess-phone', cwd: root }, { sessionId: 'sess-script', cwd: root }],
+      }) as { result: { sessions: unknown[] } }).result.sessions
+    expect(listFor(phonePin)).toEqual([{ sessionId: 'sess-phone', cwd: root }])
+    expect(listFor(scriptPin)).toEqual([{ sessionId: 'sess-script', cwd: root }])
+  })
+
+  it('🔴 主会话不随连接消失而丢（新连接读得到同一把会话 ⇒ "长期对话"成立）', () => {
+    const { root } = pinOnRealCcc()
+    const firstConn = createAcpSessionPin(root, ACCT)
+    askAndAnswer(firstConn, 1, 'session/new', { sessionId: 'sess-persist' })
+    // 模拟重连：新 pin、空 pending，**同一条 localstore**
+    const secondConn = createAcpSessionPin(root, ACCT)
+    const out = askAndAnswer(secondConn, 1, 'session/list', { sessions: [{ sessionId: 'sess-persist', cwd: root }] }) as {
+      result: { sessions: Array<{ sessionId: string }> }
+    }
+    expect(out.result.sessions.map((s) => s.sessionId)).toEqual(['sess-persist'])
+  })
+
+  it('记账有上限（客户端只发不收也不会把内存撑大），且**丢旧不丢新**', () => {
+    const pin = createAcpSessionPin(CCC, ACCT)
+    for (let i = 0; i < 400; i += 1) recordAcpPending(pin, { id: i, method: 'session/prompt' })
+    expect(pin.pending.size).toBeLessThanOrEqual(256)
+    // 最新的那条一定还在（正在等着的可能就是它）
+    expect(pin.pending.get('number:399')).toBe('session/prompt')
+    // 最早的那条已被淘汰
+    expect(pin.pending.has('number:0')).toBe(false)
+  })
+
+  it('🔴 静态钉：出站 writable **不再纯透传**（否则整条功能静默失效 —— 纯逻辑测试全绿也发现不了）', async () => {
+    const code = stripComments(await readSrc('acp-face.ts'))
+    // 纯逻辑的 10 条用例证明不了"它被接上了"：缝里若还是 `ws.send(JSON.stringify(msg))`，
+    // 那些用例照样全绿，而线上一条都不生效。⇒ 这一条钉的是**接线**，不是逻辑。
+    expect(code).toContain('rewriteAcpResponse(pin, msg)')
+    expect(code).toContain('recordAcpPending(pin, msg)')
+    // 且 pin 带着账户：主会话是按账户存的，少了它就会所有账户共用一条
+    expect(code).toContain('createAcpSessionPin(cccRoot, accountId)')
+    // 连接归属的账户必须真的从认证判决传下去
+    expect(code).toContain('wsToAcpStream(ws,')
+    expect(code).toContain('connAccount')
   })
 })

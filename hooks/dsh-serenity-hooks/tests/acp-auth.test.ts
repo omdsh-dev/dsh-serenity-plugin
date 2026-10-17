@@ -52,8 +52,13 @@ import {
   acpChannelStatus,
   tokenOwnerAudit,
   __rawTokenForTest,
+  acpSessionKeyFor,
+  readAcpMainSession,
+  writeAcpMainSession,
+  removeAcpAccount,
+  upsertAcpAccount,
 } from '../src/acp-auth.js'
-import { writeEntry } from '../src/localstore-ops.js'
+import { writeEntry, readStore } from '../src/localstore-ops.js'
 
 const made: string[] = []
 
@@ -411,5 +416,100 @@ describe('acp-auth: 诊断面（绝不泄 token 明文）', () => {
     const f = tokenFingerprint('secret-value')
     expect(f).toMatch(/^[0-9a-f]{12}$/)
     expect(f).not.toContain('secret')
+  })
+})
+
+/**
+ * 🔴 v1.59.2 —— owner「**每个 ACP 账户 = 与该账户角色的一个长期对话**」的存储层判据。
+ *
+ * ## 这件在防什么
+ * 主会话 id 是**跨连接**的唯一真相（连接会断、进程会重启，而"那条对话"必须还在）。
+ * 它落在一个**会被删账户清掉**的键上，因此这里同时钉两条容易被忽略的性质：
+ *   ① 读路径**无副作用**（不存在就是不存在，不顺手编一个）；
+ *   ② **删账户必须连主会话一起清** —— 否则同一 `accountId` 重开会**静默继承上一代的会话**，
+ *      而那个失效**没有任何信号**（列表上它就是一条正常会话）。
+ */
+describe('🔴 acp-auth: 每账户主会话（v1.59.2）', () => {
+  it('键按 accountId 派生，与 token 键**同规则不同前缀**', () => {
+    expect(acpSessionKeyFor('agmente-phone')).toBe('IM_ACP_SESSION_AGMENTE_PHONE')
+    expect(acpSessionKeyFor('My.Device X')).toBe('IM_ACP_SESSION_MY_DEVICE_X')
+    // 与 token 键共享同一套归一（否则两个键会对同一个账户算成两个名字）
+    expect(acpSessionKeyFor('a-b').slice('IM_ACP_SESSION_'.length))
+      .toBe(acpTokenKeyFor('a-b').slice('IM_ACP_TOKEN_'.length))
+  })
+
+  it('🔴 未记录 ⇒ null（读路径**绝不**顺手写一个）', () => {
+    const root = mkAcpCcc()
+    expect(readAcpMainSession(root, 'agmente-phone')).toBeNull()
+    // 连读两次仍然没有 —— 证明读没有副作用
+    expect(readAcpMainSession(root, 'agmente-phone')).toBeNull()
+  })
+
+  it('写入后可读回；**落的是真 localstore 键**（不是内存）', () => {
+    const root = mkAcpCcc()
+    writeAcpMainSession(root, 'agmente-phone', 'sess-abc')
+    expect(readAcpMainSession(root, 'agmente-phone')).toBe('sess-abc')
+    // 判据：换成"另开一次读"也不依赖进程内缓存 —— 直接读 store
+    expect(readStore(root, 'credential')['IM_ACP_SESSION_AGMENTE_PHONE']).toBe('sess-abc')
+  })
+
+  it('🔴 后写覆盖先写（用户显式点「新对话」时，他要的就是新的那条）', () => {
+    const root = mkAcpCcc()
+    writeAcpMainSession(root, 'agmente-phone', 'first')
+    writeAcpMainSession(root, 'agmente-phone', 'second')
+    expect(readAcpMainSession(root, 'agmente-phone')).toBe('second')
+  })
+
+  it('空值／空白不写入（否则主会话会变成一个空字符串，比 null 更难判）', () => {
+    const root = mkAcpCcc()
+    writeAcpMainSession(root, 'agmente-phone', '   ')
+    expect(readAcpMainSession(root, 'agmente-phone')).toBeNull()
+    writeAcpMainSession(root, 'agmente-phone', '')
+    expect(readAcpMainSession(root, 'agmente-phone')).toBeNull()
+  })
+
+  it('两个账户的主会话**互不覆盖**（同 CCC 内一台手机一条）', () => {
+    const root = mkAcpCcc('tester', 'phone')
+    upsertAcpAccount(root, { accountId: 'script', role: 'tester' })
+    writeAcpMainSession(root, 'phone', 'sess-phone')
+    writeAcpMainSession(root, 'script', 'sess-script')
+    expect(readAcpMainSession(root, 'phone')).toBe('sess-phone')
+    expect(readAcpMainSession(root, 'script')).toBe('sess-script')
+  })
+
+  it('🔴 删账户会**一并清掉**主会话（否则同 id 重开会静默继承上一代会话）', () => {
+    const root = mkAcpCcc()
+    writeAcpMainSession(root, 'agmente-phone', 'sess-old')
+    removeAcpAccount(root, 'agmente-phone')
+    expect(readAcpMainSession(root, 'agmente-phone')).toBeNull()
+    // 对照：token 也一起清了（两者同族同纪律）
+    expect(readAcpToken(root, 'agmente-phone')).toBeNull()
+  })
+
+  it('删账户不影响**别的**账户的主会话', () => {
+    const root = mkAcpCcc('tester', 'phone')
+    upsertAcpAccount(root, { accountId: 'script', role: 'tester' })
+    writeAcpMainSession(root, 'phone', 'sess-phone')
+    writeAcpMainSession(root, 'script', 'sess-script')
+    removeAcpAccount(root, 'script')
+    expect(readAcpMainSession(root, 'phone')).toBe('sess-phone')
+    expect(readAcpMainSession(root, 'script')).toBeNull()
+  })
+
+  it('🔴 诊断面能看到"这台设备钉的是哪条对话"（否则出问题只能靠猜）', () => {
+    const root = mkAcpCcc()
+    // 还没有主会话 ⇒ 明确 null（不是 undefined、不是空串）
+    expect(acpChannelStatus(root).accounts[0]!.mainSession).toBeNull()
+    writeAcpMainSession(root, 'agmente-phone', 'sess-visible')
+    expect(acpChannelStatus(root).accounts[0]!.mainSession).toBe('sess-visible')
+  })
+
+  it('会话 id 不是秘密 ⇒ 诊断面给明文（与 token 的指纹口径**刻意不同**）', () => {
+    const root = mkAcpCcc()
+    writeAcpMainSession(root, 'agmente-phone', 'sess-plain')
+    const a = acpChannelStatus(root).accounts[0]!
+    expect(a.mainSession).toBe('sess-plain')
+    // 对照：token 在这同一个返回值里仍然只有指纹
+    expect(JSON.stringify(a)).not.toContain(readAcpToken(root, 'agmente-phone')!)
   })
 })

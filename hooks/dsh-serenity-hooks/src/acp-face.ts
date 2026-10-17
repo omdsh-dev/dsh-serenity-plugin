@@ -62,7 +62,7 @@ import { startFace, faceActive, facePort, stopFace, type FaceHandle } from './fa
 import { hostInjected } from './host/access.js'
 import { FACE_PORTS } from './ports.js'
 import { readSimpleSettings, SERENITY_SETTINGS_NS } from './settings-section.js'
-import { extractToken, resolveTokenAccount, listAcpRoots, cwdInsideRoot, ensureAcpChannelTokens } from './acp-auth.js'
+import { extractToken, resolveTokenAccount, listAcpRoots, cwdInsideRoot, ensureAcpChannelTokens, readAcpMainSession, writeAcpMainSession } from './acp-auth.js'
 import { listCccs } from './ccc-roots.js'
 import { readSkiffRoles, createRolePromptReader, buildSkiffBasePrompt } from './skiff-role.js'
 
@@ -331,7 +331,7 @@ type WsServerCtor = new (options: { noServer: boolean }) => WebSocketServer
 type AcpStream = NonNullable<AcpConfig['stream']>
 
 /**
- * 把客户端给的 `cwd` 归一化成宿主要求的**绝对路径**（v1.59.2）。
+ * 把客户端给的 `cwd` 归一化成宿主要求的**绝对路径**（v1.59.1）。
  *
  * ## 为什么需要
  * 宿主 `dsh-acp` 在每次 `session/new` 都有这一行（`lib/index.js` 逐字）：
@@ -371,13 +371,20 @@ export function normalizeClientCwd(raw: unknown, cccRoot: string): string {
  *    实测注意（P0′）：`dsh-acp` 写出的每条消息**自带换行**，客户端同样 ⇒ 按行切分即正确。
  *    ⚠️ **空行要丢**；**非 JSON 帧要容忍**（桥/客户端可能插入控制帧）。
  *
- * 🔴 v1.59.2：**入站消息在这里做一次 `cwd` 归一化**（见 {@link normalizeClientCwd}）。
+ * 🔴 v1.59.1：**入站消息在这里做一次 `cwd` 归一化**（见 {@link normalizeClientCwd}）。
  *    为什么是这里：`session/new` 与 `session/resume` 都带 `cwd`，而这是**唯一**能同时
  *    拦到两者、且属于我们自己的缝（再往下就进 `dsh-acp` 了，那里改了就是改宿主）。
  *
+ * 🔴 v1.59.2：这条缝同时承担 **owner「每账户固定一条长期对话」** 的双向改写 ——
+ *    入站 `recordAcpPending`（记 id→method）＋ 出站 `rewriteAcpResponse`（收窄 list ／ 记 new）。
+ *    ⚠️ 两件事都必须在**同一个** `ws` 上做：`pending` 是**每条连接一份**的，
+ *    拆到两处会让它失去"这条连接上请求与响应配对"这个唯一用途。
+ *
  * @param cccRoot 本连接归属的 CCC 根（token 反查所得）
+ * @param accountId 本连接归属的账户键（主会话键由它派生）
  */
-function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void, cccRoot: string): AcpStream {
+function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void, cccRoot: string, accountId: string): AcpStream {
+  const pin = createAcpSessionPin(cccRoot, accountId)
   const readable = new ReadableStream<unknown>({
     start(controller) {
       let buf = ''
@@ -398,6 +405,10 @@ function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void, cccRoot: s
             onWarn(line.slice(0, 120))
             continue
           }
+          // 先记账（找的是 `method`），再归一化（改的是 `params.cwd`）——**顺序不能反**：
+          // 记账只认请求的 `method`，归一化只认白名单方法的 `params`，两者互不依赖，
+          // 但先记能保证"任何被归一化的请求都已被记账"。
+          recordAcpPending(pin, msg)
           controller.enqueue(normalizeInboundCwd(msg, cccRoot))
         }
       })
@@ -419,7 +430,8 @@ function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void, cccRoot: s
   })
   const writable = new WritableStream<unknown>({
     write(msg) {
-      ws.send(`${JSON.stringify(msg)}\n`)
+      // 🔴 owner「每账户固定一条」的**落点**：出站这一行原来是纯透传。
+      ws.send(`${JSON.stringify(rewriteAcpResponse(pin, msg))}\n`)
     },
   })
   // 断言的理由：`Stream` 的元素类型是官方的 `AnyMessage`（JSON-RPC 消息联合体），
@@ -429,19 +441,167 @@ function wsToAcpStream(ws: WebSocket, onWarn: (line: string) => void, cccRoot: s
 }
 
 /**
- * 若这条消息带 `params.cwd`，就地归一化（**只动 `session/new` / `session/resume`**）。
+ * 需要把 `cwd` 钉到本连接 CCC 根的方法（**必须逐个列出**）。
  *
- * 🔴 判据 = **有 `params.cwd` 就归一化**，不按 method 白名单挑：
- *    带 `cwd` 的方法只有那两个，而白名单一旦漏项就会**静默退回旧行为**（最难查的一类）。
+ * 🔴 **v1.59.1 的第一版判据错了**：只判「params 里有没有 `cwd`」⇒ 漏掉 `session/list`。
+ *    宿主 `listSessions` 的过滤是
+ *    `if (params.cwd !== void 0 && !sameDirectory(header.cwd, params.cwd)) return`
+ *    —— **不给 cwd 就返回全机器所有会话**。实测后果：手机 App 列表里冒出
+ *    23 条别的 CCC 的会话，全部显示为 `UNKNOWN` ／ `New Chat`
+ *    （owner：「**我需要是指定CCC的，不然没办法用**」）。
+ * ⇒ 🆕 **判据：凡"应当被 CCC 收窄"的读接口，都必须把 `cwd` 钉成 CCC 根，不能依赖客户端传** ——
+ *    token 已经定了 CCC，让客户端再声明一次既冗余、又可以被静默漏掉。
+ */
+const CWD_PINNED_METHODS = new Set(['session/new', 'session/resume', 'session/list'])
+
+/**
+ * 把一条入站消息的 `cwd` 归一化（**含"没给就补上"**）。
+ *
+ * | 情形 | 结果 |
+ * |---|---|
+ * | 方法不在 {@link CWD_PINNED_METHODS} | 原样（不碰别的消息） |
+ * | 给了非绝对路径（`serenity` ／ `a` ／ 空串） | → 本连接 CCC 根 |
+ * | 给了绝对路径 | 原样（越界由 `cwdInsideRoot` 拒） |
+ * | **压根没给**（`session/list` 常见） | **→ 本连接 CCC 根**（否则列出全机器） |
  */
 function normalizeInboundCwd(msg: unknown, cccRoot: string): unknown {
   if (typeof msg !== 'object' || msg === null) return msg
-  const m = msg as { params?: { cwd?: unknown } }
-  if (typeof m.params !== 'object' || m.params === null) return msg
-  if (!('cwd' in m.params)) return msg
-  const normalized = normalizeClientCwd(m.params.cwd, cccRoot)
+  const m = msg as { method?: unknown; params?: unknown }
+  if (typeof m.method !== 'string' || !CWD_PINNED_METHODS.has(m.method)) return msg
+  const params = (typeof m.params === 'object' && m.params !== null ? m.params : {}) as { cwd?: unknown }
   // 不就地改原对象（它来自 JSON.parse，理论上是我们的，但改副本更安全、也更易测）
-  return { ...msg, params: { ...m.params, cwd: normalized } }
+  return { ...msg, params: { ...params, cwd: normalizeClientCwd(params.cwd, cccRoot) } }
+}
+
+// ── 「每账户固定一条长期对话」（v1.59.2；owner 逐字裁决）─────────────────────────────
+//
+// owner 原话：「我只是希望用 ACP 和指定的会话来进行通信 …… 我只想和指定 skiff 通信」
+// ⇒ 选定形态：**每个 ACP 账户 = 与该账户角色绑定的一个长期对话**（角色由 `im.acp.accounts[].role` 定）。
+//
+// ## 为什么必须在**这条缝**里做（而不是改宿主）
+//
+// 宿主 `dsh-acp` 的 `listSessions` 是**存量全列**（`lib/index.js` 逐字：
+// `const listed = await persistence.list({ signal })`，仅按 `cwd` 过滤 ＋ 分页），
+// 而 `SessionInfo` 只有 `{sessionId, cwd}`（**协议里没有 title**，`_meta` 是唯一扩展位，
+// 客户端读不读不由我们定）⇒ **靠标题做"我的那条"不可靠**。D4 零改宿主
+// ⇒ 只能在"我们自己的缝"（WS 帧 ↔ ACP Stream）做**出站改写**。
+//
+// ## 🔴 出站改写的核心难点：响应里只有 `id`，没有方法名
+//
+// ACP 的响应是 `{id, result}` / `{id, error}` —— **它不说自己回答的是哪个请求**。
+// 而"要不要改写"完全取决于那个方法（`session/list` 要收窄、`session/new` 要记录）。
+// ⇒ 唯一解：**入站时记账**（`pending: id → method`），出站时**凭 id 反查**。
+// ⛔ 被否：按响应形状猜方法（`{sessions}` 猜 list）—— 那是把"形状巧合"当契约，
+//    上游加一个同样带 `sessions` 的响应就静默改错。
+
+/**
+ * 一条连接的**会话钉住**状态（owner「每账户固定一条」的执行单元）。
+ *
+ * 生命周期 = 一条 WS 连接。⚠️ **跨连接的真相在 localstore**（`IM_ACP_SESSION_<ACCOUNT_ID>`）；
+ * 本结构只是"这条连接上，请求 id 对应哪个方法"的记账 + 那两个方法的处理口径。
+ */
+interface AcpSessionPin {
+  /** 本连接归属的 CCC 根（合成 `SessionInfo.cwd` 时用 —— 那也是我们当初钉的值） */
+  root: string
+  /** 本连接归属的账户（主会话键由它派生） */
+  accountId: string
+  /** 在飞的请求：`id` → 方法名（**出站改写唯一的方法来源**） */
+  pending: Map<string, string>
+}
+
+/** 请求 id 的 Map 键（区分 `1` 与 `"1"` —— JSON-RPC 允许两者，混用也不该串号） */
+function requestIdKey(id: unknown): string {
+  return `${typeof id}:${String(id)}`
+}
+
+/** 记账上限（防"客户端发一堆请求又从不收响应"把内存撑大） */
+const MAX_PENDING = 256
+
+/** 建一条连接的钉住状态 */
+export function createAcpSessionPin(root: string, accountId: string): AcpSessionPin {
+  return { root, accountId, pending: new Map() }
+}
+
+/**
+ * 入站记账：把"这条请求的方法"记住，供出站按 `id` 反查。
+ *
+ * 判据：**既要有 `id`，又要有 `method`** —— 只满足一个的是响应（`id` 无 `method`）
+ * 或通知（`method` 无 `id`）⇒ 与我们无关，不记。
+ */
+export function recordAcpPending(pin: AcpSessionPin, msg: unknown): void {
+  if (typeof msg !== 'object' || msg === null) return
+  const m = msg as { id?: unknown; method?: unknown }
+  if (m.id === undefined || m.id === null) return
+  if (typeof m.method !== 'string') return
+  const key = requestIdKey(m.id)
+  pin.pending.set(key, m.method)
+  // 溢出时丢最旧的（Map 保序）——**丢旧不丢新**：新请求更可能是"正在等着的那个"
+  while (pin.pending.size > MAX_PENDING) {
+    const oldest = pin.pending.keys().next()
+    if (oldest.done) break
+    pin.pending.delete(oldest.value)
+  }
+}
+
+/**
+ * 出站改写（本功能的落点）。返回**要发给客户端的那条消息**。
+ *
+ * | 原响应 | 改写后 |
+ * |---|---|
+ * | `session/list` | `{sessions:[该账户那一条]}`；**没有主会话 ⇒ `{sessions:[]}`** |
+ * | `session/new` | 原样，**同时**把 `result.sessionId` 记为该账户的主会话 |
+ * | 其余（含所有 error 响应、所有通知） | 原样 |
+ *
+ * 🔴 **没有主会话时回空数组，绝不回退成全量列表** —— 退回去正是 owner 说
+ *    「23 个对我没什么用」的那个东西。空数组会让 App 引导用户新建，而新建即建立主会话。
+ *
+ * 🔴 `nextCursor` **一律丢掉**：收窄到一条之后，分页游标失去意义；
+ *    留着它会让客户端继续翻页（而后续页仍会被收窄成同一条 ⇒ 前端可能出现重复项）。
+ */
+export function rewriteAcpResponse(pin: AcpSessionPin, msg: unknown): unknown {
+  if (typeof msg !== 'object' || msg === null) return msg
+  const m = msg as { id?: unknown; method?: unknown; result?: unknown; error?: unknown }
+  if (m.method !== undefined) return msg // 通知（`session/update` 等）：不碰
+  const method = m.id === undefined || m.id === null ? undefined : pin.pending.get(requestIdKey(m.id))
+  if (method === undefined) return msg // 账上没有 ⇒ 不是我们关心的请求
+  if (m.error !== undefined) return msg // 失败的请求不记主会话、不收窄列表
+
+  if (method === 'session/new') {
+    const sessionId = (m.result as { sessionId?: unknown } | undefined)?.sessionId
+    if (typeof sessionId === 'string' && sessionId.trim() !== '') {
+      try {
+        writeAcpMainSession(pin.root, pin.accountId, sessionId)
+      } catch (err) {
+        // 写失败**不改写响应**：会话已经建好了，客户端该拿到它。
+        // ⚠️ 但必须响亮 —— 否则表现是"每次重连都多一条会话"，且无人知道为什么。
+        console.warn(
+          `[serenity-hooks] ⚠ 面 E：记录主会话失败（CCC=${pin.root} 账户=${pin.accountId}）: ${String((err as Error)?.message ?? err)}`,
+        )
+      }
+    }
+    return msg
+  }
+
+  if (method === 'session/list') {
+    const pinned = readAcpMainSession(pin.root, pin.accountId)
+    if (!pinned) return { ...m, result: { sessions: [] } }
+    const list = (m.result as { sessions?: unknown } | undefined)?.sessions
+    const hit = Array.isArray(list)
+      ? list.find((s) => (s as { sessionId?: unknown } | null)?.sessionId === pinned)
+      : undefined
+    // 命中就**原样保留宿主给的那条**（它可能带 title/updatedAt）；未命中则合成最小形态。
+    //
+    // 🔴 **为什么"未命中"不等于"没有"**：宿主 `listSessions` 会**跳过本进程内已活跃的会话**
+    //    （其 `sessions.has(header.id) || activating.has(...) || ctx.sessions.get(...)` 那条 return）
+    //    ⇒ 刚建完就列表的同一条连接**必然看不到它**。若这里回空数组，用户会看到
+    //    "刚聊的对话消失了"并可再建一条 —— 那正是要消灭的东西。
+    //    合成值不是编造：`{sessionId, cwd}` 两项都是**我们当初自己钉的**
+    //    （`cwd` 由 `normalizeClientCwd` 钉成 `pin.root`），而 `SessionInfo` 只要求这两项。
+    const sessions = hit !== undefined ? [hit] : [{ sessionId: pinned, cwd: pin.root }]
+    return { ...m, result: { sessions } }
+  }
+
+  return msg
 }
 
 /** 一条连接的应用结果（诊断用） */
@@ -601,9 +761,10 @@ export async function startAcpFace(ctx: Context): Promise<FaceHandle> {
           // 该连接**归属的 CCC 与角色**（token 反查所得，服务端权威）
           const connRoot = verdict.root
           const connRole = verdict.role
+          const connAccount = verdict.accountId
           const stream = wsToAcpStream(ws, (line) => {
             console.log(`[serenity-hooks] 面 E：丢弃一条非 JSON 帧（前 120 字）: ${line}`)
-          }, connRoot)
+          }, connRoot, connAccount)
           // 🔴 关键接线（第一版**实测失败**过，故注释在此钉死）：
           //
           //   起初我直接 `dshAcp.apply(ctx, {stream})`，报逐字：

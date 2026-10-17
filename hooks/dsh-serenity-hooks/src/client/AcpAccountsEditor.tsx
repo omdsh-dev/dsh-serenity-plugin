@@ -1,5 +1,5 @@
 /**
- * AcpAccountsEditor.tsx — 「ACP 账户台账」配置区块（v1.59.2，owner 2026-10-17 令）
+ * AcpAccountsEditor.tsx — 「ACP 账户台账」配置区块（v1.59.1，owner 2026-10-17 令）
  *
  * ## 为什么要有它
  * owner 原话：「**面板里只放个开关不放具体的条目吗？**」
@@ -36,6 +36,8 @@ interface AcpAccountStatus {
   enabled: boolean
   hasToken: boolean
   tokenFingerprint: string | null
+  /** 该账户钉住的**主会话**（owner「每账户固定一条长期对话」；null = 还没建） */
+  mainSession: string | null
   usable: boolean
   blockedBy: string | null
 }
@@ -196,7 +198,8 @@ export function AcpAccountsEditor(): React.JSX.Element {
       {status && (
         <p className="ss-detailIntro">
           {`通道：${status.channel}${status.channel === 'acp' ? '' : '（未选 ACP ⇒ 账户不生效）'} ／ 面开关：${status.enabled ? '开' : '关'}` +
-            `\n可用账户：${status.accounts.filter((a) => a.usable).length} / ${status.accounts.length}`}
+            `\n可用账户：${status.accounts.filter((a) => a.usable).length} / ${status.accounts.length}` +
+            '\n每个可用账户在客户端里**只看到自己那一条对话**（第一次发消息时建立，之后一直用它）。'}
         </p>
       )}
 
@@ -208,6 +211,7 @@ export function AcpAccountsEditor(): React.JSX.Element {
               <th>账户</th>
               <th>角色</th>
               <th>状态</th>
+              <th>对话</th>
               <th>token</th>
               <th />
             </tr>
@@ -221,6 +225,10 @@ export function AcpAccountsEditor(): React.JSX.Element {
                 </td>
                 <td>{a.role ?? '—'}</td>
                 <td>{a.usable ? '✅ 可用' : `⚠️ ${a.blockedBy ?? '不可用'}`}</td>
+                {/* 会话 id **不是秘密** ⇒ 明示（排障时要能回答"这台手机钉的是哪条"） */}
+                <td title={a.mainSession ?? undefined}>
+                  {a.mainSession ? `…${a.mainSession.slice(-8)}` : '（还没建，客户端发第一条消息时建立）'}
+                </td>
                 <td>{a.hasToken ? `…${a.tokenFingerprint ?? ''}` : '（无）'}</td>
                 <td>
                   <button type="button" disabled={busy} onClick={() => void rotate(a.accountId)}>轮换</button>
