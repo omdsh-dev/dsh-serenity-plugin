@@ -70,13 +70,27 @@ function fakeSubagentsNew(result: Record<string, unknown> = { output: [{ type: '
   const specs: Record<string, unknown>[] = []
   let disposed = 0
   const runtime = {
-    startActivation: async (spec: unknown) => {
+    // 🔴 2026-10-17（S142）：替身**必须是方法简写**，且**真读一次 `this`** ——
+    //   旧版替身是**箭头函数**，天然免疫 `this` 丢失 ⇒ 让真机上必然会炸的缺陷（裸调方法）在测试里**完全隐形**。
+    //   这不是"替身写得不真实"，而是**替身把关键契约（宿主实现依赖 `this`）抹掉了**。
+    //   形态与真宿主对齐：`async startActivation(spec) { const p = this.expectProvider(spec.provider); … }`
+    async startActivation(this: { expectProvider?: (n: string) => unknown }, spec: unknown) {
+      // 与宿主同形的自检：若 `this` 丢失，这里就抛（≈ 宿主那句 Cannot read properties of undefined）
+      if (this?.expectProvider === undefined) {
+        throw new TypeError("Cannot read properties of undefined (reading 'expectProvider')")
+      }
+      this.expectProvider((spec as { provider?: string }).provider ?? '')
       specs.push(spec as Record<string, unknown>)
       return {
         childId: 'child-session-new',
         result: Promise.resolve(result),
         dispose: async () => { disposed++ },
       }
+    },
+    /** 与宿主 `expectProvider` 同形的最小实现（仅用于让上面那句自检有对象） */
+    expectProvider(name: string): unknown {
+      if (name !== 'spawn') throw new Error(`no subagent provider registered for "${name}"`)
+      return this
     },
   }
   return { runtime, specs, disposed: () => disposed }

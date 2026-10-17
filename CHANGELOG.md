@@ -1,3 +1,51 @@
+## v1.59.4 — 2026-10-17（🔴 **真机缺陷修复：`startActivation` 裸调丢 `this` ⇒ cheap-worker 在新宿主上完全不可用**）
+
+**性质**：**热修**（v1.59.3 的两个缺陷都是**真机升级 0.2.1-rc.2 后才暴露**的）。**前置**：owner 令「升级本机 dsh 到 0.2.1-rc.2」。
+
+### 一、🔴🔴 头号缺陷：`startActivation` 被裸调 ⇒ 丢 `this` ⇒ 委派必挂
+
+**现象**（升级后第一次真调）：`Cannot read properties of undefined (reading 'expectProvider')`
+
+**根因**（读宿主实现逐字）：
+```js
+async startActivation(spec) {
+  const provider = this.expectProvider(spec.provider);   // ← 依赖 this
+  …
+}
+```
+而 v1.59.3 的写法是 `const fn = subagents.startActivation; fn(spec)` —— **方法被取出后裸调，`this` 丢失**。
+
+**为什么 v1.59.3 的门禁一条都没报**：
+- **类型面**：`startActivation` 的签名里 `this` 是隐式的，`tsc` 不检查（`noImplicitThis` 不覆盖这种调用形态）。
+- **测试面**：`fakeSubagentsNew` 用的是**箭头函数** —— 天然免疫 `this` 丢失 ⇒ 缺陷在测试里**完全隐形**。
+- **Docker 实测**：v1.59.3 那轮验的是「成员存在 ＋ 选路正确」，**没有真调一次**。
+  ⇒ 本轨判据的又一次印证：**「选路正确」≠「调用能成」**；**「调用没报错」≠「内容到了」**（这次连"没报错"都是靠替身假出来的）。
+
+**修法**：`fn.call(subagents, spec)` —— 保留接收者。
+**回归钉**（关键）：把替身从箭头函数改成**方法简写**，并在里面**真读一次 `this`**（与宿主同形地抛）。
+⇒ **变异对照已验证**：把 `fn.call(subagents, …)` 改回 `fn.call(fn, …)` ⇒ **2 条用例立刻红**，错误签名与真机逐字一致。
+
+### 二、宿主契约如实新增一条 issue（**不是缺陷，是记录真相**）
+
+升级后 `dashboard health` 的 `hostContract.issues` 出现 **1 条**（基线是 `[]`）：
+`subagents.start` is missing function "start"（`required: false`）
+⇒ 新宿主**确实没有** `start` 了（实测：`startActivation` 在、`start` 0 命中）。契约表如实记录了这件事。
+🔵 **`required: false` 的语义**：它是**能力面退化记录**，不是安装门（`ok` 仍为 `true`）。**不要据此判升级失败**。
+
+### 三、档表：同一 prerelease 线的后续 rc 必须放行（新增钉）
+
+我们档表写 `^0.2.1-rc.1`，而 **npm 的 pre-release 语义下它不放行 `0.2.1-rc.2`**（prerelease 标识须相同）；
+但**我们自己的判定是 `compareSemver` 的纯区间比较**（`floor ≤ v < ceiling`，**不看 prerelease 标识**）⇒ rc.2 **天然在档内**。
+⇒ 两种语义会给出**相反答案**，而原测试只验"每档 floor 通过"，**恰好盖不到 rc.2 这一格**。
+✅ 已补钉：同 rc 线后续 rc（`rc.N+1` / `rc.N+2`）必须放行 ＋ **两条真越界正控**（`0.4.0` 高于所有 ceiling／`0.0.1-rc.1` 低于所有 floor）。
+⚠️ 第一版正控我写的是 `0.3.0-rc.1` —— **它其实在档内**（预发布低于同版本正式版 ⇒ 落在 `[…, 0.3.0)`）⇒ **是我给错输入，不是判据坏了**。
+
+### 四、门禁
+
+`typecheck` ✓ ／ `test` **172 文件 / 2905 例** ✓（较 v1.59.3 的 2903 **+2**：一条档表钉 ＋ 替身改造后仍然通过的两条新档用例）／
+`pack-check` ✓ **140 文件**。
+🔴 `typecheck-scripts` 仍 3 条 —— 已用**对照组**（stash 掉改动后重跑）证明是**存量** `@types/node` 假阳。
+
 ## v1.59.3 — 2026-10-17（**0.2.1-rc.1 适配：`start` → `startActivation`；含一条如实记录的退化**）
 
 **性质**：**宿主兼容适配**（两类真断裂 ＋ 一条**静默退化**）。**前置**：owner 令「全做 完成后要在docker进行安装运行测试」。

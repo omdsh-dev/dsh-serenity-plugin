@@ -174,6 +174,40 @@ describe('host-contract: 宿主版本范围', () => {
     }
   })
 
+  it('🔴 同一条 prerelease 线上的**后续 rc 也必须放行**（2026-10-17 实况：rc.1 → rc.2）', () => {
+    // 为什么必须单列（本轮实测逼出的一格盲区）：
+    //   档表写的是 `^0.2.1-rc.1`。**npm 的 pre-release 语义下，`^0.2.1-rc.1` 不放行 `0.2.1-rc.2`**
+    //   （`^x.y.z-prerelease` 只匹配**同一 [major,minor,patch] 且 prerelease 标识相同**的版本）。
+    //   而 dsh 官方**每几天就发一个新 rc**（rc.1 → rc.2 只隔数小时）⇒ 若判据只认档表下限那一串，
+    //   每次官方发新 rc 我们都要**改档表 + 发版**，否则运行期自检报"越界"。
+    //   本仓的实际判定是 **`compareSemver` 的纯区间比较**（floor ≤ v < ceiling，**不看 prerelease 标识**），
+    //   ⇒ rc.2 天然落在第三档内。**这两种语义的差异必须被钉住**，否则有人"按 npm 语义收紧"就会
+    //   把一整个后续 rc 线判成越界（而且是静默的：只有自检会红，装机不受影响）。
+    const sameLine = VERIFIED_HOST_BANDS.filter((b) => b.floor.includes('-rc.'))
+    expect(sameLine.length, '至少应有一档是 rc 线（否则本钉失去对象）').toBeGreaterThan(0)
+    for (const band of sameLine) {
+      // 把 floor 的 `rc.N` 抬成 `rc.N+1`（及 rc.N+2），断言仍在范围内
+      const m = /^(.*-rc\.)(\d+)$/.exec(band.floor)
+      if (!m) continue
+      const head = m[1]!
+      const n = Number(m[2])
+      for (const bump of [1, 2]) {
+        const nextRc = `${head}${n + bump}`
+        expect(
+          checkHostVersion(nextRc).ok,
+          `${nextRc} 应被放行（同一 prerelease 线的后续 rc；本仓判据是区间比较，不是 npm 的 ^ 语义）`,
+        ).toBe(true)
+      }
+    }
+    // 正控：**真正越界的坐标不得被放行**（防止上面那条把"什么都放行"写成假绿）。
+    // 🔴 本行第一版我写的是 `0.3.0-rc.1`，**它其实在档内** —— `compareSemver` 判 `0.3.0-rc.1 < 0.3.0`
+    //   （预发布低于同版本正式版）⇒ 落在第二/三档 `[…, 0.3.0)` 内。那是我给错了输入，不是判据坏了
+    //   （本轨既有判据："判据报红先证我喂给它的输入满足前提"）。
+    //   真正越界的是 **0.4.0**（高于所有档的 ceiling）与 **0.0.1-rc.1**（低于所有档的 floor）。
+    expect(checkHostVersion('0.4.0').ok, '0.4.0 高于所有档 ceiling，应拒').toBe(false)
+    expect(checkHostVersion('0.0.1-rc.1').ok, '0.0.1-rc.1 低于所有档 floor，应拒').toBe(false)
+  })
+
   it('🔴 跨文件对账：REQUIRED_HOST_RANGE 与 package.json 的 dsh-* peer 范围逐字同串', () => {
     // 为什么必须机械化（R↓）：这个串**就是宿主门拿去跑 `semver.satisfies` 的那一个串**
     // （`@deepseek-ai/dsh-app-boot:evaluatePluginCompatibility`；它**只检查** `@deepseek-ai/dsh` /

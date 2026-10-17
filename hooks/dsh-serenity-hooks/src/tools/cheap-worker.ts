@@ -105,8 +105,16 @@ function resolveSubagentStarter(
   subagents: { start?: unknown; startActivation?: unknown },
 ): ((request: { label: string; prompt: unknown[]; parent: unknown; signal: AbortSignal; agentOptions: Record<string, unknown>; cwd?: string }) => Promise<unknown>) | undefined {
   if (typeof subagents.startActivation === 'function') {
-    const fn = subagents.startActivation as (spec: unknown) => Promise<unknown>
-    return (req) => fn({
+    // 🔴🔴 2026-10-17（S142 · **升级 0.2.1-rc.2 后真机炸出的缺陷**）：
+    //   这里**不能**把方法取出来再裸调（`const fn = subagents.startActivation; fn(spec)`）——
+    //   宿主实现是 `async startActivation(spec) { const provider = this.expectProvider(spec.provider); … }`
+    //   ⇒ **裸调会丢 `this`** ⇒ 运行时报 `Cannot read properties of undefined (reading 'expectProvider')`。
+    //   为什么此前没暴露：旧接口 `start()` 是**闭包实现**、不依赖 `this`；而 v1.59.3 的 Docker 实测
+    //   只验证了"新宿主上成员存在且能选路"，**没有真调一次** ⇒ 这正是本轨那条
+    //   「'调用没报错' ≠ '内容到了'」的反面：**"选路正确" ≠ "调用能成"**。
+    //   ⇒ 修法：**保留接收者**，用 `.call(subagents, spec)`。
+    const fn = subagents.startActivation as (this: unknown, spec: unknown) => Promise<unknown>
+    return (req) => fn.call(subagents, {
       provider: 'spawn',
       // 新 spec 的 `label` 必填；我们对外仍允许不传 ⇒ 退化成任务首行（人在子会话列表里能认出）
       label: req.label,
