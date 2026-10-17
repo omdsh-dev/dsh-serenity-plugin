@@ -1,3 +1,77 @@
+## v1.63.2 — 2026-10-18（🧹 **全部界面文案按 EAP 修订 ＋ 排版四项结构性缺陷**）
+
+**性质**：文字与版式层修订，**不改任何机制**。**来源**：owner 令 ——
+> 「我们 ACC 提供的各类界面，控制面板，其文字叙述进行优化，加载 eap 都修订下，
+> 很多地方啰啰嗦嗦；排版布局也检查一遍并优化。」
+
+### 一、判据（本次全部改动的裁决口径）
+
+EAP 7.6 逐字：「拐弯抹角通常不是文风问题，而是**把 R 推给读者**」。
+⇒ 界面文案里最该删的不是长句，是**历史叙述** —— 很多 detail 写的是给维护者看的
+（为什么当初这么做 / 哪版改的 / 被否了什么），而界面是写给使用者的。
+
+**判据：这条信息能不能帮用户决定下一步怎么做。** 不能就删，历史归 CHANGELOG。
+
+🔴 **但别走向另一头**：界面不是规格表，要**短句、动词开头、一句一件事**
+（home-rhetoric 房规 R7：先分清"文字层"还是"版式层"，两层工作量差一个量级）。
+**被否**：逐句压缩字数 —— 那会切掉技术事实（端口/默认值/安全前提），是 E↓ 不是 R↓。
+
+### 二、文案面
+
+`src/client/SettingsSection.tsx`：页头 intro ＋ 网关／超限重建／重建阈值／无人值守／
+Skiff／CRO／ACP 面／图／会话清理共 9 处 detail 与 help 全部重写。删掉的典型历史片段：
+「v1.33 起 logbook 并入 trajectory」「v1.49.0 砍掉总开关」「2026-09-17 owner 令」
+「与它同时废止的开关：原唤醒调度器闸（2026-09-21 所有者令砍掉）」，
+以及一句**已过期**的「本版现状：机制已实现；尚未部署 ⇒ 现在拨开关不会生效」。
+
+`src/client/AcpAccountsEditor.tsx`：台账说明压行（7 行 → 5 条），删「面 E」「owner 令」等内部代号。
+`src/client/WeixinBridgeEditor.tsx`：四个 help 浮层改写；删「无需 OpenClaw/平台审核」
+（OpenClaw 已退役，拿它作对照只会让读者困惑）。
+`src/client/SafeModePanel.tsx` / `AccountsEditor.tsx`：胶囊 tooltip、安全模式说明、配置入口提示、
+TOTP 与 Secure Cookie 勾选项 —— 去掉版本号与「v1.24.6 二选一」这类版本叙述。
+`src/skiff-debug.ts` / `src/gateway-auth.ts`：两张独立页面正文（调试页子标题、登录页 hint）同批修订。
+
+### 三、🔴 顺带纠正三处失效内容（同一根因）
+
+| # | 位置 | 原文 | 事实 |
+|---|---|---|---|
+| 1 | Skiff detail 末句 | 「对外问答请用「Skiff 问答页」」 | 该面 **v1.57.1 已整组退役** ⇒ 指向不存在的东西 |
+| 2 | ACP 面 desc | 「每 CCC 一枚 token」 | 实现与账户台账都是**每账户一枚**（`IM_ACP_TOKEN_<账户ID>`） |
+| 3 | 两份 `description`（`package.json` ＋ `dsh.plugin.json`） | 「…/子角色/**对外问答页**/…」 | 同上已退役；改为「官方 ACP 面」 |
+
+🔴 **判据**：界面文案与声明面散文里的**引用与口径会随别的功能退役而失效，且零机械信号**
+—— `privacy-scan` 不管语义，单测只测行为，**门禁全绿也抓不到**（登记为 D151）。
+
+### 四、排版面：查出的是四项结构性缺陷，不是间距
+
+| # | 缺陷 | 症状 | 修法 |
+|---|---|---|---|
+| 1 | `.sp-label` 写死 `width: 76px` ＋ `nowrap` | 「CheapWorker 模型」**压到数值上**，不报错 | 改 `min-width`：短标签仍对齐，长标签自己撑开 |
+| 2 | `.ss-table` 用 `display:block` 换横向滚动 | 一并**丢掉 `border-collapse`**（表格边框塌陷失效） | 由外层 `.ss-tableWrap` 兜滚动，表格保持 `display:table` |
+| 3 | 展开标记**字符在 ▾/▸ 切换 ＋ 又按 `rotate(90deg)` 转** | 展开态渲染成**指右的怪符号** | 字符固定 `▸`，方向只由 CSS 旋转给出 |
+| 4 | ACP 台账那行控件**没穿设计语言** | 四个 input/select/button 是裸原生样式，其余面板全走 `ss-*` | 补 `.ss-fieldLabel` / `.ss-textInput` / `.ss-tokenBox` / `.ss-switchRowWrap`；token 块去掉行内 `style` |
+
+另补两处：
+- **窄屏断点**（`@media (max-width: 560px)`）：`rowCard` 是「左文本 ＋ 右控件」两列，控件最宽 150px；
+  窄于此 flex 会先压文字 ⇒ 标题被挤成竖排字。处理 = 控件落到第二行左对齐、desc 取消截断、详情区收紧内边距。
+- **desc 截断出口**：两行截断后用户看不到后半句 ⇒ 加 `title={desc}`。
+
+### 五、熵减：删掉 17 组零引用选择器
+
+`PublicAskEditor` 已于 v1.57.1 退役，其 `.ae-chips` / `.ae-chip*` / `.ae-saved` / `.ae-err` /
+`.ae-key` / `.ae-copy*` / `.ae-rotate*` / `.ae-rows` / `.ae-labelDim` 共 9 组零引用；
+`SettingsSection.css` 的 `.ss-threshold` / `.ss-value` / `.ss-hint` / `.ss-degrade` /
+`.ss-defList` / `.ss-defItem` / `.ss-defTerm` / `.ss-defValue` 8 组同样零引用。
+**判据：保留无人引用的选择器 = 熵，不是"留着也许有用"** —— 删前逐组 grep 确认。
+
+### 六、验证
+
+`typecheck` ✓ ｜ `typecheck-host 0.2.1-rc.2` 双半 ✓ ｜ `test` 172 文件 / **2922 例** ✓ ｜
+`coverage` 95.1% ✓ ｜ `build` ✓（112 `.d.ts`，client bundle 已重打）｜ `pack-check` ✓（140 文件）。
+
+🔵 **画面观感须真机核**（agent 不声称已验收）：① 长标签不压数值；② 展开标记展开后指向下；
+③ 窄窗口里标题不被挤成竖排；④ ACP 台账那行的输入框有边框。
+
 ## v1.63.1 — 2026-10-18（🔴 **`send-now` 冷建会话：改成和用户操作**完全同一个调用形态**）
 
 **性质**：根治。**来源**：owner 复测仍未正常唤起，并给出方向 ——
