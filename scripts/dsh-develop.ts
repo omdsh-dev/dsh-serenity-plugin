@@ -1708,6 +1708,104 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
  *
  * 用法: dsh-develop host-upgrade <version|dist-tag> [--registry <url>] [--dry-run]
  */
+// ── host-probe（2026-10-17，升级适配标准流程 §5.0 的第 1、2 步机械化）──
+//
+// 为什么有它：流程第 1 步（触发）与第 2 步（基线核实）此前全靠人肉，而这两步恰好
+// 是**本轨最容易犯错的**两处 —— ① 只查 `latest` 就断言"没有新版"（rc 常常只在 `next`）；
+// ② 拿 README / 发行说明当"这个版本可下载"的证据（那是两类不同的事实）。
+//
+// 本命令把这两步变成一次可复跑、可读数的检查：
+//   ① 打印 dist-tags **全量**（latest / next / alpha / …），并把**非 latest 的更高版本**标出来
+//   ② 对本机现值与"候选新版本"各自核一次 tarball 可达性（http_code）——**这才是"可下载"的证据**
+//   ③ 给出下一步该跑的那条命令（host-fetch <ver>）
+//
+// ⚠️ 它**不判断"要不要升级"**（那是人判）；它只负责把"有没有新版 / 能不能下载"变成读数。
+
+/**
+ * 读 dist-tags（走 `curl`；本仓 `sys` 白名单与运行 `run()` 都可调 curl）。
+ * @returns 标签 → 版本映射；失败返回 null（**不静默伪装成空**）
+ */
+function readDshDistTags(registry: string): Record<string, string> | null {
+  const url = `${registry.replace(/\/$/, '')}/@deepseek-ai%2Fdsh`
+  const r = run('curl', ['-s', url], { cwd: SCRIPTS_DIR, quiet: true })
+  if (r.status !== 0 || !r.stdout.trim()) return null
+  try {
+    const doc = JSON.parse(r.stdout) as { 'dist-tags'?: Record<string, string> }
+    return doc['dist-tags'] ?? null
+  } catch {
+    return null
+  }
+}
+
+/** 核一个版本的 tarball 是否真能下载（HTTP 状态码 = 唯一判据） */
+function probeTarballCode(registry: string, version: string): string {
+  const url = `${registry.replace(/\/$/, '')}/@deepseek-ai/dsh/-/dsh-${version}.tgz`
+  const r = run('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', url], { cwd: SCRIPTS_DIR, quiet: true })
+  return (r.stdout.trim() || '(无响应)')
+}
+
+/** 最小版本比较（与 host/contract.ts 的 compareSemver 同规则；此处只管"谁更新"） */
+function cmpVer(a: string, b: string): number {
+  const parse = (v: string): [number, number, number, string] => {
+    const m = /^(\d+)\.(\d+)\.(\d+)(?:-(.*))?$/.exec(v.trim())
+    return m ? [Number(m[1]), Number(m[2]), Number(m[3]), m[4] ?? ''] : [0, 0, 0, '']
+  }
+  const pa = parse(a)
+  const pb = parse(b)
+  for (let i = 0; i < 3; i++) {
+    if (pa[i] !== pb[i]) return (pa[i] as number) < (pb[i] as number) ? -1 : 1
+  }
+  if (pa[3] === pb[3]) return 0
+  if (pa[3] === '') return 1
+  if (pb[3] === '') return -1
+  return pa[3] < pb[3] ? -1 : 1
+}
+
+function cmdHostProbe(argv: string[]): void {
+  let registry = 'https://registry.npmjs.org/'
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i] as string
+    if (a === '--registry') { registry = argv[++i] ?? registry; continue }
+    if (a.startsWith('--registry=')) { registry = a.slice('--registry='.length); continue }
+  }
+  const installedJson = join(HOME_DIR, '.npm-global', 'lib', 'node_modules', '@deepseek-ai', 'dsh', 'package.json')
+  const current = existsSync(installedJson) ? String(readJson(installedJson).version ?? '?') : '(未安装)'
+  console.log(`[dsh-develop] host-probe ｜ 源: ${registry}`)
+  console.log(`[dsh-develop] 本机现值: ${current}`)
+
+  const tags = readDshDistTags(registry)
+  if (tags === null) {
+    fail(`读不到 @deepseek-ai/dsh 的 dist-tags（源不可达或响应非 JSON）`, 2)
+  }
+  // 🔴 全量打印 —— 这正是本命令存在的理由：rc 常常只在 next/alpha 上
+  console.log('[dsh-develop] dist-tags（**全量**，不是只 latest）:')
+  for (const [tag, ver] of Object.entries(tags)) console.log(`    ${tag.padEnd(8)} → ${ver}`)
+
+  const latest = tags['latest']
+  // 候选 = 所有标签里**比 latest 更新**的版本（含 latest 本身）
+  const candidates = [...new Set(Object.values(tags))]
+    .filter((v) => latest === undefined || cmpVer(v, latest) >= 0)
+    .sort((a, b) => cmpVer(b, a))
+  const newest = candidates[0] ?? latest ?? ''
+
+  if (latest !== undefined && newest !== '' && cmpVer(newest, latest) > 0) {
+    const ownerTags = Object.entries(tags).filter(([, v]) => cmpVer(v, latest) > 0).map(([t]) => t)
+    console.log(`[dsh-develop] 🔴 检出比 latest 更新的版本: ${newest}（在 ${ownerTags.join(' / ')} 标签上）`)
+  } else {
+    console.log(`[dsh-develop] 最新可见版本 = ${latest ?? '(无)'}（无更高标签）`)
+  }
+
+  // 🔴 "可下载"的唯一判据：HTTP 状态码。⛔ 不用 release notes / README 代替
+  console.log('[dsh-develop] tarball 可达性（这才是"可下载"的证据）:')
+  for (const v of [current, newest].filter((v) => v !== '' && v !== '(未安装)')) {
+    console.log(`    ${v.padEnd(14)} → ${probeTarballCode(registry, v)}`)
+  }
+  console.log('')
+  console.log(`[dsh-develop] 下一步（若决定适配）: dsh-develop host-fetch ${newest}`)
+  console.log(`[dsh-develop]                             dsh-develop typecheck-host ${newest}`)
+  console.log('[dsh-develop] 流程与禁止项: skill dsh-serenity-plugin-development → references/20-host-compat.md §5.0')
+}
+
 function cmdHostUpgrade(argv: string[]): void {
   let registry = 'https://registry.npmjs.org/'
   let dryRun = false
@@ -2570,10 +2668,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
       case 'read-dsh': cmdReadDsh(rest[0], rest[1], rest[2]); break
       case 'host-fetch': cmdHostFetch(rest[0], rest.slice(1)); break
+      case 'host-probe': cmdHostProbe(rest); break
       case 'dump-config': cmdDumpConfig(rest[0]); break
       case '--list':
       case 'list':
-        console.log('typecheck | typecheck-scripts | typecheck-cli（🔴 已退役） | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy [--list-copy-set] | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]] [--list]')
+        console.log('typecheck | typecheck-scripts | typecheck-cli（🔴 已退役） | typecheck-host <ver> | test [--filter] | coverage | build | status | commit <msg> | push | version | bump <ver> | deploy [--list-copy-set] | npm-install [<profile>] [<version>] [<registry>] | restart-web | host-probe [--registry <url>] | host-upgrade <ver|tag> [--registry <url>] [--dry-run] | session-doctor [--root <dir>] [--session <id>] [--json] [--deep] [--limit <n>] | session-repair [--root <dir>] [--session <id,...>] [--apply] [--backup-dir <dir>] [--min-age-min <n>] [--force] [--probe] [--json] | diag（🔴 已退役） | squash-history [<msg>] | github-push [--force] | pack-check | readme-sync | publish | inspect-dsh <pattern> | host-fetch <ver> [pkg[@ver]] [--list]')
         break
       case '--schema': {
         const target = rest[0] ?? 'dsh-develop'
