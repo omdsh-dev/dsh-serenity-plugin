@@ -178,3 +178,51 @@ test('typecheck-cli 已退役：恒 exit 2 且印路牌（不再是一道会跑�
   expect(r.status).toBe(2)
   expect(r.stdout).toContain('已退役')
 })
+
+/**
+ * 🔴 回归钉（2026-10-17，A65 修复）：**"说反话"的处置文案不得复现**。
+ *
+ * 钉的是什么：本仓曾有三处「处置建议」把**未经取证的断言**当事实印出来 ——
+ *   ① `cmdNpmInstall` 的失败收尾逐字写「packument 已含 <ver>」，而**那个分支根本没查过 packument**
+ *      （实测反证：那一刻权威读数是 `no`）⇒ 照它信会得出「已上架、是安装端坏了」的**反向结论**。已发作 3 次。
+ *   ② 装机核对分支写「pnpm 报了成功」＋「原因多半是…」，而该分支**也覆盖 pnpm 报错的情况**。
+ *   ③ 「落后者属传播延迟」把"滞后"与"边缘负缓存"混成一个名称。
+ *
+ * 判据形态（同上方退役钉：**反向钉 + 正控**）：
+ *   - 反向：那三句**旧文案不得再出现**（回来就报警）；
+ *   - 正控：**新文案必须在场**（否则"旧的不在"可能只是文件没读到 / 路径错了 —— 无法自证的假绿）。
+ *
+ * ⚠️ 为什么必须是**静态钉**：这三处都在 `console.log/fail` 的**字符串**里，
+ *   而现有测试（`dsh-develop.test.ts` 只覆盖版本读取/一致性/bump）**跑不到它们** ——
+ *   "纯逻辑用例全绿"证明不了"这句话印对了"（v1.59.2 那条同族教训）。
+ */
+test('A65：处置文案里不得再出现未经取证的断言（反向钉 ＋ 正控）', () => {
+  const src = readFileSync(join(SCRIPTS_DIR, 'dsh-develop.ts'), 'utf-8')
+
+  // 🔴 **必须先剥注释再断言**：这次的修复本身就在注释里**逐字引用了旧文案**（为了说明"原来错在哪"）。
+  //   若不剥注释，反向钉会把**解释这条修复的注释**当成"旧文案复现" ⇒ 假红。
+  //   （这个假红本轮真的发生了 —— 它同时证明这条钉确实通电，见下方正控。）
+  //   剥法：整行注释 `//…` + 块注释 `/* … */`（含跨行）。
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\s\/\/.*$/gm, '')
+
+  // 反向钉：三处旧文案，逐字不得复现（**在可执行代码里**）
+  const banned = [
+    'packument 已含 ${target}',
+    '这不是"装不上"——pnpm 报了成功',
+    '落后者属**传播延迟**',
+  ]
+  for (const s of banned) {
+    expect(code.includes(s), `旧文案在代码里复现了（应已改成"当场取读数再断言"）：${s}`).toBe(false)
+  }
+
+  // 正控：新文案必须在场 —— 证明上面那组"不存在"不是因为读错文件/剥过头
+  expect(code).toContain('实测读数（当场查，非推测）：packument 含')
+  expect(code).toContain('packumentHasVersion(target)')
+  expect(code).toContain('落后者属**滞后**')
+  // 正控之二：**剥注释没有把代码也剥没**（否则上面三条"不含"会变成无法自证的假绿）
+  expect(code).toContain('function cmdNpmInstall')
+  expect(code).toContain('function currentVersion')
+})

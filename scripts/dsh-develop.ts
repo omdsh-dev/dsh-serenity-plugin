@@ -565,8 +565,12 @@ function verifyPublished(version: string, npmOutput: string): void {
   if (anyFresh) {
     console.log(`[dsh-develop] ✓ 落地核对：**上架成立**（三个读数任一为真）— ${version}`)
     console.log(`   读数：record=${last.record} ／ tarball=${last.tarball} ／ packument.has=${pk.has}（${pk.detail}）`)
-    console.log('   落后者属**传播延迟**（三者各自独立滞后：v1.51.6 是 packument 先到，v1.52.0 是 record 先到）'
+    console.log(`   落后者属**滞后**（三者各自独立滞后：v1.51.6 是 packument 先到，v1.52.0 是 record 先到）`
       + ' ⇒ 若此刻装不上，等几分钟再试；`npm-install` 自带传播重试')
+    // 🔴 2026-10-17（S142 · A65-P3 修复）：原文案把这句统称「传播延迟」。
+    //   但此刻 **至少一个读数为真** ⇒ 落后的那个更可能是**边缘负缓存**，也可能是**各面刷新节奏不同**。
+    //   两者处置相同（等），**但名称不同** —— 而"命名状态"正是本轨判据禁止在无区分读数时做的事
+    //   （D131 / 续 162：吻合度不是区分度）。改用中性词「滞后」，不再断言成因。
     return
   }
   if (reported) {
@@ -1646,9 +1650,19 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
     }
     if (attempt >= TARBALL_WAIT_ATTEMPTS) {
       console.error(out)
+      // 🔴 2026-10-17（S142 · A65-P1 修复）：**这里曾写死一句「packument 已含 ${target}」** ——
+      //   而该分支**根本没有查过 packument**（它只由 pnpm 的两个错误码触发）。
+      //   实测反证：2026-10-17 报同一句话时，权威读数逐字是 `no`（latest 仍 1.59.2）
+      //   ⇒ 照它信会得出「已上架、是安装端坏了」这个**反向结论**。已发作 3 次。
+      //   修法（判据：**要印的处置建议，其状态断言必须当场取读数**）：先真查一次，再据实印。
+      const pk = packumentHasVersion(target)
+      const landed = pk.has
       fail(`dsh plugin add 失败 (exit ${r.status})：tarball 仍取不到 —— 已等 ${attempt} 轮 × 60s。\n`
-        + `  这是**传播延迟**（不是发布未成功）：packument 已含 ${target}。\n`
-        + `  处置：等几分钟后重跑 \`dsh-develop npm-install\`（或 publish-landed 复核）。`, 2)
+        + `  实测读数（当场查，非推测）：packument 含 ${target} = **${landed ? 'yes' : 'no'}**（${pk.detail}）\n`
+        + (landed
+          ? `  ⇒ 包已上架但 tarball 取不到 ⇒ **传播延迟／边缘负缓存**。处置：等几分钟后重跑 \`dsh-develop npm-install\`。\n`
+          : `  ⇒ 🔴 **该版本此刻还不在 registry 的权威面上** —— 这**不等于**"发布失败"（三读数可滞后，实测有慢到 ≈10 小时的样本）。\n`
+            + `  ⇒ 处置：**不要重跑 publish**（同版本只会 409）。先用 \`msm("npm-registry-doctor", ["status", "${target}"])\` 取权威读数；仍为档② ⇒ 继续等。\n`), 2)
     }
     const shape = /ERR_PNPM_NO_MATCHING_VERSION/.test(out) ? 'ERR_PNPM_NO_MATCHING_VERSION' : 'ERR_PNPM_FETCH_404'
     console.log(`[dsh-develop] ⏳ 尚未传播（第 ${attempt}/${TARBALL_WAIT_ATTEMPTS} 轮；60s 后重试）`
@@ -1677,13 +1691,22 @@ function cmdNpmInstall(profile = 'web', version?: string, registry?: string): vo
   } else if (installed !== target) {
     // 处置按"该装哪个"给，不按 target 复读（target 可能就是错的那个）：
     // 本仓 package.json 与 target 不等 ⇒ 该装的是本仓那个版本；相等 ⇒ 只能等传播。
+    // 🔴 2026-10-17（S142 · A65-P2 修复）：**原文案有两处未经取证的断言**：
+    //   ① 「这不是"装不上"——pnpm 报了成功」—— 但该分支**也覆盖"pnpm 报错而旧副本还在"**，
+    //      那种情况下 pnpm 并没有报成功 ⇒ 这句话在部分路径上是**假的**。
+    //   ② 「原因**多半是** registry 侧还没传播到」—— 用一个"多半是"把单一成因写成结论，
+    //      而**该分支从未查过 dist-tag 现值** ⇒ 真因可能是"显式版本给错"。
+    //   修法（判据同 P1：状态断言必须当场取读数）：先查 packument 的 latest，再据实分诊。
     const want = currentVersion().pkg
+    const pk = packumentHasVersion(target)
     const remedy = want !== '' && want !== target
       ? `用**显式版本**重跑（该路径自带传播重试）—— \`dsh-develop npm-install ${profile} ${want}\``
       : `registry 侧尚未传播到位：等 2~5 分钟后重跑 \`dsh-develop npm-install ${profile} ${target}\``
     fail(`装机核对失败：目标是 ${target}，而装机副本是 ${installed}。\n`
-      + `  这不是"装不上"——pnpm 报了成功，只是**装上了另一个版本**。\n`
-      + `  原因多半是 registry 侧还没传播到（dist-tag \`latest\` 或内网 Nexus 的 packument 缓存仍是上一版）。\n`
+      + `  实测读数（当场查）：packument 含 ${target} = **${pk.has ? 'yes' : 'no'}**（${pk.detail}）\n`
+      + (pk.has
+        ? `  ⇒ 包已在 registry 上，但装进来的不是它 ⇒ 多半是 **dist-tag / 缓存仍指向旧版**，或**显式版本给错**。\n`
+        : `  ⇒ 该版本此刻还不在 registry 的权威面上 ⇒ **传播未到位**（不是"装不上"，也不是"发布失败"）。\n`)
       + `  处置：${remedy}。`, 2)
   } else {
     console.log(`[dsh-develop] ✓ 装机核对：装机副本版本 = ${installed}`)
