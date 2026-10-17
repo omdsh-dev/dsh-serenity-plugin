@@ -592,7 +592,14 @@ function verifyTarball(): void {
   // 发布前核对 tarball 内容：npm publish 会自动运行 prepare（只构建 Node 半的 prepare
   // 曾清掉 lib/client.js → 发布包缺 client.js，DSH web 激活抛 MissingClientBundleError）。
   // 用 npm pack --dry-run --json 机械断言 Node 半 + client 半都在包内。
-  const dry = run('npm', ['pack', '--dry-run', '--json'], {
+  //
+  // 🔴 `--ignore-scripts` 同 `publishFileList`（本文件 1290 行的硬约束），**同样适用本函数**：
+  //    不带它则 pack 会跑 `prepare` ⇒ **清掉 lib/client.js 且重建整个 lib/**。
+  //    ⚠️ 2026-10-17 实测后果（本行是那次修复）：`coverage` 由 vitest **并行 worker** 跑，
+  //    `privacy-scan.test.ts` 也在测里跑 `npm pack --dry-run` ⇒ 两个 pack 同时在**重建中的 lib/** 上取树，
+  //    读到**残缺快照**（实测两次分别 27 / 36 文件，而真值 139）⇒ 一条**稳定的假红**。
+  //    ⇒ 判据：**凡"读发布物清单"的调用，一律带 `--ignore-scripts`**（三处统一，不许各写各的）。
+  const dry = run('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
     cwd: HOOKS_DIR,
     quiet: true,
     env: { npm_config_cache: cache, NPM_CONFIG_CACHE: cache },

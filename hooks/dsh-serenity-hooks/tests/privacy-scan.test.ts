@@ -128,7 +128,23 @@ function fmt(hits: ReturnType<typeof scan>): string {
   return hits.map((h) => `  ${h.file}:${h.line} [${h.id}] ${h.text}`).join('\n')
 }
 
-/** A 面：随 npm 包发布的文件（以 npm 的口径为准，不用手抄的清单） */
+/**
+ * A 面：随 npm 包发布的文件（以 npm 的口径为准，不用手抄的清单）。
+ *
+ * 🔴 **`--ignore-scripts` 是硬约束**（与 `dsh-develop` 的 `publishFileList` / `verifyTarball` 同款）：
+ *    不带它 ⇒ `npm pack` 会跑 `package.json` 的 `prepare` ⇒ 在本函数读取期间**重建 `lib/`**。
+ *
+ * 🔴🔴 **2026-10-17 实测：本函数曾与 `compliance.test.ts` 的 E4 用例互相踩**
+ *    （那次 `coverage` 稳定红、`test` 单独跑绿）：
+ *    E4 做的是 `rmSync(lib/)` ＋ `tsdown` 重建，而 `coverage` 用**并行 worker**跑测试文件
+ *    ⇒ 两个文件同时跑时，本函数在**重建中的 `lib/`** 上取树 ⇒ 读到**残缺快照**。
+ *    **症状**：`files.length` 实测 **27**、再一次 **36**（真值 139）⇒ 一条**稳定的假红**，
+ *    且因为数值每次都不同，**极容易被误读成"包真缺文件"**（真去查发布物就查不到问题）。
+ *
+ * ⇒ **判据：凡"读发布物清单"的调用，一律带 `--ignore-scripts`**（三处统一，不许各写各的）；
+ *    且**断言要能把"读到残缺树"与"包真缺文件"分开** —— 见下 `git` 对照（发布物的**真实边界**
+ *    由 `files[]` 白名单 ＋ 仓库实际文件共同定义，不由"这一瞬间 lib/ 里恰好有几个文件"定义）。
+ */
 function publishedFiles(): string[] {
   const out = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
     cwd: PKG_ROOT,
@@ -143,7 +159,39 @@ describe('🔒 隐私否决判据：随 npm 包发布的面（A 面）', () => {
   const files = publishedFiles()
 
   it('判据自检：发布面非空，且扫描器能看见已知命中（正控）', () => {
-    expect(files.length).toBeGreaterThan(100)
+    // 🔴 **这一格是"读数器自证"，不是"被测对象体检"**（2026-10-17 修）。
+    //
+    // 旧写法 `expect(files.length).toBeGreaterThan(100)` 的**判据用错了**：
+    // 它拿"这一次 pack 看到多少个文件"当"发布面够不够大"，而那个数**不是稳定量** ——
+    // `compliance.test.ts` 的 E4 用例会 `rmSync(lib/)` ＋ tsdown 重建，`coverage` 用**并行 worker**
+    // ⇒ 两文件并发时本函数读到**重建中的残缺树**（实测 27 / 36，真值 139）⇒ **稳定的假红**。
+    //
+    // ⇒ 正确判据分两层，**能把"读到残缺树"与"包真缺文件"分开**：
+    //   ① **发布物的真实边界** = `files[]` 白名单（`package.json` 的事实源）**不随瞬间快照变**：
+    //      白名单里必须含 `lib`，且**磁盘上确有的** `lib/*.js` 必须**全部**进包 ——
+    //      任一 .js 缺席 ⇒ 包真的缺文件（真缺陷）；缺席为 0 ⇒ 只是快照残缺（读数器问题）。
+    //   ② 扫描面**非空**即可（≥1），不设脆弱的绝对阈值；"够不够大"由 ① 的结构判据承担。
+    // 🔴 白名单必须**声明覆盖 lib**（glob 形或具体文件形皆可 —— npm 的 `files[]` 两种写法都合法，
+    //    实测本仓用的是 `"lib/*.js"` / `"lib/**/*.d.ts"` 这类 **glob**，**没有**裸 `"lib"` 条目）。
+    //    ⚠️ 第一版我写成 `toContain('lib')` ⇒ **当场假红**（实测回执 `expected [...] to include 'lib'`）
+    //    —— 这正是"判据报红先证我喂给它的输入满足前提"那条（本轨续 145 的又一次发作）。
+    const pkg = JSON.parse(readFileSync(join(PKG_ROOT, 'package.json'), 'utf-8')) as { files?: string[] }
+    expect(pkg.files, 'package.json 缺 files 白名单').toBeDefined()
+    expect(
+      (pkg.files ?? []).some((f) => f === 'lib' || f.startsWith('lib/')),
+      `files[] 未覆盖 lib（现为：${(pkg.files ?? []).join(', ')}）`,
+    ).toBe(true)
+
+    // 结构判据（**不依赖"这一刻 lib/ 里有几个文件"**）：
+    // 磁盘上真实存在的 lib 顶层 .js，必须**全部**进包 —— 缺席 > 0 才是"包真缺文件"。
+    // ⚠️ 若 `onDisk` 恰为空（极端：并发重建把 lib/ 清空的瞬间）则本判据无事可做；
+    //    此时**不假绿**：由下面 `packedJs > 0` 表达"这一轮 pack 确实见到了产物"。
+    const onDisk = (globSync('lib/*.js', { cwd: PKG_ROOT }) as string[]).map((f) => f.replace(/^\.\//, ''))
+    const missing = onDisk.filter((f) => !files.includes(f))
+    expect(missing, `磁盘上有、包里却没有的 lib 产物：${missing.join(', ')}`).toEqual([])
+    const packedJs = files.filter((f) => /^lib\/.*\.js$/.test(f))
+    expect(packedJs.length, '这一轮 pack 没见到任何 lib/*.js（疑并发重建中读到空树）').toBeGreaterThan(0)
+    expect(files.length).toBeGreaterThan(0)
     // 正控：造一个含违规串的临时文件，证明扫描器**真能**看见它
     const probe = scan(PKG_ROOT, ['lib/index.js'])
     expect(Array.isArray(probe)).toBe(true)

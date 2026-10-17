@@ -1,3 +1,91 @@
+## v1.59.0 — 2026-10-17（**IM 桥：每 CCC 可选微信 ／ ACP 通道 ＋ token 认证 ＋ 绑 skiff 角色**）
+
+**性质**：**功能新增**（面 E 产品化）＋ **一处安全能力补全**（面 E 从"无认证"变为"token 把关"）。
+**来源**：owner 令（逐字）——「将微信桥升级为 IM 桥，每个 CCC 可以选择微信实现或 ACP 实现，
+微信实现保留不变向前兼容，ACP 实现就可以暴露端口并绑定 skiff，并且要随即生成认证用的 token」。
+
+🔴 **本版要解决的是一次真实交付缺陷**：面 E 的代码（518 行）与测试此前**全在且全绿**，
+但**没有任何地方能打开它**（设置面板的 wire 只有 7 个键，无 `acpFaceEnabled`；配置侧也没有 CCC 层入口）。
+⇒ **"全绿但用户拿不到"**：既有的全部机械判据都在测"面能不能跑"，**没有一条测"用户够不够得着"**。
+
+### 一、新增 `acp-auth.ts`：认证 ＋ 身份层
+
+- **一面多 token**（**不是**每个 CCC 一个端口）：`token → CCC` 一一对应，而 `cwd` 是**客户端自述的**
+  ⇒ **用 token 定 CCC 比用 cwd 定 CCC 强**（前者服务端权威）。端口固定 3200，复用现有单实例面宿主。
+- token = 32 字节随机（64 hex），落**该 CCC 的 `localstore.json`**（credential 节，键 `IM_ACP_TOKEN`）。
+- `safeEqual` **常时比较**（长度不等先返 false —— `timingSafeEqual` 长度不等会抛）。
+- **fail-closed 四连**（任一不满足即拒，**关掉的是"连接"不是"功能"**）：
+  ① 未携带 token ② token 不匹配任何已启用 ACP 的 CCC ③ 该 CCC 未启用 ACP 通道 ④ **该 CCC 未配角色**
+  （第 ④ 条尤其重要：**宁可连不上，也不给出一个无身份、无约束的裸 agent**）。
+- `cwdInsideRoot` 用 `relative()` 而非 `startsWith`（后者会把 `/a/bc` 误判为在 `/a/b` 内）。
+
+### 二、`acp-face.ts`：认证闸 ＋ 角色绑定
+
+- **认证放在 WS upgrade 层、`handleUpgrade` 之前** —— 未过闸的连接**根本升不上来**
+  （不是"升上来再拒"）；失败即 `401` ＋ 销毁 socket，并**单独计数**（`status().rejected`：
+  否则"有人在敲门"会被读成"已服务"）。
+  🔴 **为什么不在 ACP 协议层**：`dsh-acp` 的 `authenticate()` **恒成功**且 `authMethods: []`，
+  且它**不导出**可替换的认证缝 ⇒ 改协议层要重写它全部接线；而 HTTP server 是**我们自己**的。
+- token 两种携带方式都认：`Authorization: Bearer <t>` ／ `?token=<t>`。
+- 🔴 **"随即生成"**：准入名单刷新时，对每个"已启用 ACP 通道但尚无 token"的 CCC **当场生成一枚**
+  （幂等：已有则原样返回**不轮换** —— 轮换会让在用的客户端立刻断线；未启用 ACP 的 CCC **一个字节都不碰**）。
+- **绑 skiff 角色**：连接建立时由 token 确定归属 CCC 与角色名 ⇒ 按 `session/created` **认领**该 CCC 内的会话，
+  注入角色提示词段（与 `skiff-core` 的 `serenity-skiff` 同形：order −60，动态求值 ⇒ 改提示词文件即生效）。
+  🔴 **一处刻意的保守取舍（如实记录）**：理想形态是"在每连接的 scoped fiber 里监听，
+  只收到本连接建的会话"，但读 cordis `events.ts` 的 `dispatch()` 得知
+  **它只在派发方设了 `Context.filter` 时才按 ctx 过滤** ⇒ 该语义**未实测**。
+  照源码的"意图"断言引擎行为是明令禁止的（本仓 D119）⇒ 改用**认领制**：
+  **cwd 必须落在本连接归属的 CCC 内** ＋ **同一会话只认领一次**（两条过滤都能自证，不依赖那条未验证的语义）。
+  ⚠️ **残余风险（未实测，不声称已解决）**：同一 CCC 内**网页端会话与 ACP 会话同时创建**时，
+  可能把网页端那个也认领了（判据是 cwd ＋ 先到先得，**不是"确属本连接"**）⇒ 待探针实测。
+
+### 三、`ccc.ts`：CCC 级通道选择器
+
+`.opencode/serenity.json` 新增（**不动现有 `weixin.*` 一个字节**）：
+
+```jsonc
+{
+  "im": {
+    "channel": "weixin",          // "weixin"（缺省）| "acp"
+    "acp": { "enabled": true, "role": "<本 CCC 的 skiff 角色名>" }
+  }
+}
+```
+
+- 🔴 **缺省即向前兼容**：不写这一项（或整个 `im` 段不存在）的 CCC，**行为与升级前逐字相同** ——
+  兼容由**缺省值**保证，不靠代码分支。
+- `channel` 与 `enabled` 是**「与」关系**：两者都真才算启用（让使用者能"选好 ACP 但暂时关着"，与既有各面范式一致）。
+- **只影响入站**（谁来驱动本 CCC 的 agent）；**出站**（`im-bridge` 工具发送）不受影响，**微信实现零改动**。
+- ⚠️ **本版未把入站抽成通道接口**：`ImChannel` 抽象**早已存在**，但它**只覆盖出站**；
+  把入站（48.9 KB 的 `weixin-bridge`）也接口化是**独立的大工程**，且与本令要的能力无关 ⇒ 单列，不在本版。
+
+### 四、设置面板：补上够不着的那一行
+
+- `SerenitySimpleWire` 增 `acpFaceEnabled` / `acpFacePort`；工具组新增「ACP 面」行
+  （开关 ＋ 详设写明：无认证前提 ／ 怎么配 CCC ／ 怎么带 token ／ **明文 `ws://` 的边界**）。
+- 🆕 **新测试件 `tests/settings-section-panel.test.ts`** —— 它钉的**不是"面能不能跑"，而是"那一行在不在"**
+  （wire 有该键 ／ 有绑到它的 Toggle ／ 有 title 含 ACP 的 `RowCard` ／ 详设写了"无认证"）。
+  ⇒ **正是这次翻车的那一格**。
+
+### 五、测试
+
+`tests/acp-auth.test.ts`（新，36 例）：常时比较 ／ fail-closed 四连 ／ 归属一一对应 ／
+`cwd` 越权防护 ／ 两种 token 形态 ／ 幂等与轮换 ／「随即生成」／ **诊断面绝不泄 token 明文** ／ 重复 token 审计。
+`tests/acp-face.test.ts`：认证闸四例（无 token 401 ／ 错 token 401 ／ **对 token 101 正控** ／ 名单外 CCC 拒）；
+⚠️ **原两例"裸连即 101"的契约已作废**（裸连现在必须 401）。
+`tests/settings-section.test.ts`：`acpFace` 面板层 > 部署层，两端缺省关（**两个方向都钉**）。
+
+### 六、安全边界（不许含混）
+
+1. **ACP 协议本身不做认证** ⇒ 本版新增的 token 闸是**唯一**关口。
+2. 面绑 `0.0.0.0` ⇒ 局域网内任何设备可达；**token 是唯一阻挡**。
+3. 🔴 **明文传输**：`ws://` 不经 TLS ⇒ 同网段抓包可见 token。
+   **局域网自测可接受**；**上公网必须走 `wss` ＋ Cloudflare Access**。
+
+### 七、门禁
+
+typecheck ／ coverage ／ build（112 `.d.ts`）／ pack-check（139 文件）全绿。
+
 ## v1.58.2 — 2026-10-16（**EAP 补通用技能规范章 ＋ `container_trajectory` 两处行为改进 ＋ 描述按 EAP 重写**）
 
 **性质**：**行为变更**（`create` 的绑定语义按"有无绑定"分岔；`send-now` 新增自动创建载体）＋ **内容新增**（论文补章）。

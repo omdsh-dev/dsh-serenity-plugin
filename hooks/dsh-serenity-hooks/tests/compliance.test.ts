@@ -76,15 +76,34 @@ describe('DSH plugin 合规门禁（v1.15）', () => {
     // 回归门禁：v1.16.0/1.16.1 的 prepare 只构建 Node 半（clean:true 清掉 client.js），
     // 导致 npm publish 的 tarball 缺 lib/client.js → DSH web 激活抛 MissingClientBundleError。
     // prepare 必须复用完整双 bundle 配置（tsdown.config.ts）。
+    //
+    // 🔴🔴 **2026-10-17：本用例改为构建到【临时 outDir】，不再 `rmSync` 仓库的 `lib/`**
+    //    —— 原因是它**污染了同一进程里别的测试的读数面**（实测的稳定假红）：
+    //      · `privacy-scan.test.ts` 的 A 面判据读的是 `npm pack` 扫出来的**真实 `lib/`**；
+    //      · `vitest` 在 `coverage` 下用**并行 worker**跑各测试文件；
+    //      · 本用例原先 `rmSync(lib/)` 再 tsdown 重建 ⇒ 两者并发时，`privacy-scan`
+    //        读到**重建中的残缺树**（实测 27 / 36 个文件，真值 139）
+    //        ⇒ 报成"发布面为空"⇒ **一条与代码无关、每次数值还不同的假红**。
+    //    ⇒ 判据（本仓通用）：**凡会改写「别人正在读的共享目录」的测试，必须写到私有 outDir**。
+    //      `--out-dir` 只影响产物落点，**不动** `tsdown.config.ts` 的语义
+    //      （F5 另有用例钉"prepare 配置 = 完整双 bundle"，那条读的是**配置文件**，不受本改动影响）。
     const staging = resolve(process.env.HOME ?? '', '.dsh', 'source', 'current')
     const tsdownBin = join(staging, 'node_modules', '.bin', 'tsdown')
     if (!existsSync(tsdownBin)) return // 无 staging checkout（如 CI）→ 自跳过，对齐 G1
-    const libDir = join(HOOKS_DIR, 'lib')
-    rmSync(libDir, { recursive: true, force: true })
-    execFileSync(tsdownBin, ['-c', 'tsdown.prepare.config.ts'], { cwd: HOOKS_DIR, encoding: 'utf-8' })
-    expect(existsSync(join(libDir, 'index.js'))).toBe(true)
-    expect(existsSync(join(libDir, 'invariant.js'))).toBe(true)
-    expect(existsSync(join(libDir, 'client.js'))).toBe(true)
+    const outDir = join(HOOKS_DIR, '.tmp-e4-out')
+    rmSync(outDir, { recursive: true, force: true })
+    try {
+      execFileSync(tsdownBin, ['-c', 'tsdown.prepare.config.ts', '--out-dir', '.tmp-e4-out'], {
+        cwd: HOOKS_DIR,
+        encoding: 'utf-8',
+      })
+      expect(existsSync(join(outDir, 'index.js'))).toBe(true)
+      expect(existsSync(join(outDir, 'invariant.js'))).toBe(true)
+      expect(existsSync(join(outDir, 'client.js'))).toBe(true)
+    } finally {
+      // 清理私有产物（无论成败），不在仓里留垃圾
+      rmSync(outDir, { recursive: true, force: true })
+    }
   })
 
   it('F5: prepare 配置复用完整双 bundle（单一真相源，防 Node-only 漂移）', () => {
