@@ -1,3 +1,68 @@
+## v1.63.1 — 2026-10-18（🔴 **`send-now` 冷建会话：改成和用户操作**完全同一个调用形态**）
+
+**性质**：根治。**来源**：owner 复测仍未正常唤起，并给出方向 ——
+> 「应当和用户操作唤起的会话完全一样才行，我记得我们 skiff 成功的做过这样的事情」
+
+### 一、我上一版错在哪（v1.62.1 只治了症状）
+
+v1.62.1 传的是 `{ cwd: root }`，**建完再自己补** `attachSession()` 挂工作区。
+那是**补救**，不是"一样" —— 而宿主里那条路径本来就在：
+
+```js
+// dsh-api-session-controller/lib/index.js 的 create()
+if (request.workspaceId !== void 0) workspace = registry.get(request.workspaceId)
+const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+...
+if (workspace !== void 0) await workspace.attachSession(sessionId)   // ← 只有这条分支
+```
+
+**用户从 UI 新建会话时传的正是 `workspaceId`**（`client/sessions/service.d.ts` 的
+`create({ workspaceId?, cwd?, ... })`）⇒ 用户那条路天然走到 `attachSession`。
+我们传 `cwd`，永远走不到 ⇒ 会话不归任何工作区。**补挂能修好数据，但修不好"形态不一样"**：
+凡是宿主在 `workspaceId` 分支里还会做的**其它**事（预设、归属校验、未来新增的逻辑），补挂全都拿不到。
+
+### 二、本版做法：与用户同一条分支
+
+```
+① 由 CCC 根反查 workspaceId（按 workspace.path 匹配，含 realpath 归一）
+② sessionController.create({ workspaceId })      ← 与用户完全同一形态
+③ resolveAgent(sessionId)  → appendBound(...)    ← 这两步与 v1.62.1 相同
+```
+
+`attachToWorkspace()` **降级为兜底**：只在"该目录尚无工作区登记"（`list()` 里查不到）时
+才退回 `{ cwd }` 并由我们自己补挂 —— 那种情况下至少保住"落进同一个 CCC"这个底线。
+
+回执里现在会明说是哪条路：`via-workspaceId(=用户同一形态)` 或 `via-cwd+attach`。
+
+### 三、🔴 为什么 skiff 那条路是"对的"（owner 的判断被源码证实）
+
+skiff 用的是 `ctx.agents.create({ sessionId, meta: { cwd, agentPreset }, setup })` ——
+**它绕过了 sessionController，直接建 agent 并自己挂 preset**。
+所以它「一直好用」不是因为调用了 `attachSession`，而是因为**它自己就是"建会话"这件事的全权实现者**。
+
+⚠️ 但 skiff 那条路**不适合** `send-now`：它没有工作区归属概念（skiff 会话本就不进 UI 工作区列表），
+而我们要的恰恰是"让它出现在那个 CCC 的工作区里" ⇒ 必须走 `sessionController`
+（那才是**管工作区归属**的那一层）。**"和用户一样"= 走用户的入口，而不是走另一条能跑通的路。**
+
+### 四、判据跟着语义改（这是本版的第二处价值）
+
+两个旧用例断言的正是**被废除的旧行为**（"事后补挂被调用"），本版把它们改成断言**新语义**：
+
+| 用例 | 旧断言 | 新断言 |
+|---|---|---|
+| 选对工作区 | `attachSession` 被调用在 ws-home | **`create` 收到的就是 `{ workspaceId: 'ws-home' }`**（夹具刻意把 ws-other 排在前面 ⇒ "拿第一个"会被抓） |
+| 兜底失败不吞 | 挂载抛错要进回执 | 先迫使走 cwd 兜底，**再**让挂载抛错 ⇒ 原因仍须进回执 |
+
+🔴 **教训**：改语义时旧用例变红**不一定是回归** —— 要看它断言的是"结果"还是"曾经的手段"。
+本版两个红都是后者。**手段类断言必须随实现一起退役**，否则它会锁死错误做法。
+
+### 五、验证
+
+- `test` 172 文件 / **2922 例** ✓（+2 例新增）｜`coverage` 95.1% ✓｜
+  `typecheck` ＋ `typecheck-host 0.2.1-rc.2` 双半 ✓｜`build` ✓（112 `.d.ts`）｜`pack-check` ✓（140 文件）
+- 🔵 **真机待验**：需装 v1.63.1 后用 `send-now` 打一条从未激活的轨迹，
+  判据 = 新会话**出现在该 CCC 的工作区里**（V23 探针 `V23b` 可机械核）。
+
 ## v1.63.0 — 2026-10-18（🚀 **航行页 v4：平面贴纸 → 真 3D 做旧金属 + 三 pass 后期**）
 
 **性质**：**内容级重做**（不是修补，故升 minor）。**来源**：S216 交付，owner 验收 ——

@@ -415,21 +415,25 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     writeFileSync(join(root, '.serenity'), 'wake-test\n')
     const sent: string[] = []
     const madeAgent = { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } }
-    let created: { cwd?: string } | null = null
+    let created: { cwd?: string; workspaceId?: string } | null = null
     let resolvedId: string | null = null
     const ctx = {
       agents: { get: () => undefined },
       get: (name: string) => (name === 'sessionController'
         ? {
-            create: async (req: { cwd?: string }) => { created = req; return { sessionId: 'sess-created' } },
+            create: async (req: { cwd?: string; workspaceId?: string }) => { created = req; return { sessionId: 'sess-created' } },
             resolveAgent: async (id: string) => { resolvedId = id; return { agent: madeAgent } },
           }
-        : undefined),
+        : name === 'workspaceRegistry'
+          // 🔴 2026-10-18：工作区在册 ⇒ 产品代码应当走 **workspaceId** 分支（= 用户同一形态）
+          ? { list: () => [{ id: 'ws-ccc', path: root, sessionIds: [], attachSession: async () => {} }] }
+          : undefined),
     }
     const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
     expect(res.ok).toBe(true)
-    // ① 创建用的是 **CCC 根**（不是轨迹目录——那会让会话落进另一个 CCC）
-    expect(created).toEqual({ cwd: root })
+    // ① 🔴 **必须用 workspaceId**（= 用户操作的同一条分支；宿主管工作区归属）
+    //    ⛔ 不能传 cwd：那条分支**不挂工作区**，正是本缺陷的根因。
+    expect(created).toEqual({ workspaceId: 'ws-ccc' })
     // ② 拿 agent 走的是刚建出来的那个 id
     expect(resolvedId).toBe('sess-created')
     // ③ 绑定**真写进去了**（否则下一条消息还是找不到它 = "建了但永远用不上"）
@@ -438,6 +442,29 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     expect(res.detail).toContain('auto-create(sess-created')
     expect(sent).toHaveLength(1)
     expect(sent[0]).toContain('给从未激活的轨迹')
+  })
+
+  it('🆕 该目录**尚无工作区登记** ⇒ 退回 cwd 建会话，并由我们自己补挂（兜底，不是主路径）', async () => {
+    writeSessionDir()
+    writeFileSync(join(root, '.serenity'), 'wake-test\n')
+    const madeAgent = { followup: () => {} }
+    let created: { cwd?: string; workspaceId?: string } | null = null
+    const ctx = {
+      agents: { get: () => undefined },
+      get: (name: string) => (name === 'sessionController'
+        ? {
+            create: async (req: { cwd?: string; workspaceId?: string }) => { created = req; return { sessionId: 'sess-c2' } },
+            resolveAgent: async () => ({ agent: madeAgent }),
+          }
+        : name === 'workspaceRegistry'
+          ? { list: () => [] } // 空注册表 = 该目录还没被宿主登记过
+          : undefined),
+    }
+    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    expect(res.ok).toBe(true)
+    // 查不到工作区 ⇒ 退回 cwd（保住"落进同一个 CCC"这个底线）
+    expect(created).toEqual({ cwd: root })
+    expect(res.detail).toContain('via-cwd+attach')
   })
 
   /**
@@ -459,30 +486,20 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
    * 判据（本项目既有纪律「判据必须能被独立印证」）：**建完之后必须显式 `attachSession`**，
    *   且**按 cwd 找对工作区**（不能拿到第一个就挂）。
    */
-  it('🔴 无绑定 ⇒ 自动建会话**必须挂进 cwd 所属的工作区**（缺陷：只建不挂 ⇒ UI 里它不属于任何工作区）', async () => {
+  it('🔴 无绑定 ⇒ 自动建会话**必须选中 cwd 所属的工作区**（不是"拿第一个"）', async () => {
     writeSessionDir()
     writeFileSync(join(root, '.serenity'), 'wake-test\n')
-    const attached: Array<{ ws: string; sessionId: string }> = []
     const madeAgent = { followup: () => {} }
-    const wsHome = {
-      id: 'ws-home',
-      path: root,
-      sessionIds: ['sess-existing'],
-      attachSession: async (sessionId: string) => { attached.push({ ws: 'ws-home', sessionId }) },
-    }
-    // 干扰项：**另一个工作区**排在前面。若实现"拿第一个就挂"，会挂错到这里。
-    const wsOther = {
-      id: 'ws-other',
-      path: '/somewhere/else',
-      sessionIds: [],
-      attachSession: async (sessionId: string) => { attached.push({ ws: 'ws-other', sessionId }) },
-    }
+    let createdReq: { cwd?: string; workspaceId?: string } | null = null
+    const wsHome = { id: 'ws-home', path: root, sessionIds: ['sess-existing'], attachSession: async () => {} }
+    // 干扰项：**另一个工作区**排在前面。若实现"拿第一个"，会选中它 —— 会话就落到错的 CCC。
+    const wsOther = { id: 'ws-other', path: '/somewhere/else', sessionIds: [], attachSession: async () => {} }
     const ctx = {
       agents: { get: () => undefined },
       get: (name: string) => {
         if (name === 'sessionController') {
           return {
-            create: async () => ({ sessionId: 'sess-created' }),
+            create: async (req: { cwd?: string; workspaceId?: string }) => { createdReq = req; return { sessionId: 'sess-created' } },
             resolveAgent: async () => ({ agent: madeAgent }),
           }
         }
@@ -492,16 +509,17 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     }
     const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
     expect(res.ok).toBe(true)
-    // ① 必须挂了，且只挂一次
-    expect(attached).toEqual([{ ws: 'ws-home', sessionId: 'sess-created' }])
-    // ② 绝不能挂到别的工作区
-    expect(attached.some((a) => a.ws === 'ws-other')).toBe(false)
+    // 🔴 选中 (root 对应的) ws-home，而**不是**排在前面的 ws-other
+    expect(createdReq).toEqual({ workspaceId: 'ws-home' })
   })
 
-  it('🔴 工作区挂载失败 ⇒ **不吞**：回执里明说（建会话本身成功，绑定也成功，但那一条要报出来）', async () => {
+  it('🔴 兜底路径的工作区挂载失败 ⇒ **不吞**：回执里明说（建会话与绑定本身成功）', async () => {
     writeSessionDir()
     writeFileSync(join(root, '.serenity'), 'wake-test\n')
     const madeAgent = { followup: () => {} }
+    // 让注册表在**第一次读**时为空（迫使走 cwd 兜底），之后返回一个 attachSession 会抛的工作区。
+    // —— 这样才测得到"兜底那条路失败时不吞原因"。
+    let firstList = true
     const wsHome = {
       id: 'ws-home',
       path: root,
@@ -517,12 +535,19 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
             resolveAgent: async () => ({ agent: madeAgent }),
           }
         }
-        if (name === 'workspaceRegistry') return { list: () => [wsHome] }
+        if (name === 'workspaceRegistry') {
+          return {
+            list: () => {
+              if (firstList) { firstList = false; return [] }
+              return [wsHome]
+            },
+          }
+        }
         return undefined
       },
     }
     const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
-    // 消息照常投递（工作区挂载是"锦上添花"，不是投递前提）——但必须如实报出
+    // 消息照常投递（工作区挂载不是投递前提）——但必须如实报出
     expect(res.ok).toBe(true)
     expect(res.detail).toContain('workspace store locked')
   })

@@ -72,6 +72,14 @@ import { PLUGIN_SOURCE } from './message-source.js'
  *   "这个文件的所有宿主 import 都是真依赖"。
  */
 
+/** 宿主 `workspaceRegistry.list()` 条目的最小形状（只用本模块真要的那几个字段） */
+interface WorkspaceLike {
+  id?: string
+  path?: string
+  sessionIds?: readonly string[]
+  attachSession?: (id: string) => Promise<void>
+}
+
 /** 宿主 sessionController 的最小形态（`resolveAgent`：live 优先，否则 resume） */
 interface HostSessionController {
   resolveAgent?: (sessionId: string) => Promise<{ agent?: Agent; error?: unknown }>
@@ -81,8 +89,13 @@ interface HostSessionController {
    * 语义逐字取自宿主 `.d.ts`：*"Create or idempotently adopt one ordinary Session."*
    * —— **idempotently adopt** 是关键：同一 `sessionId` 重复调用**不会**建出第二条，
    * 且会把已有的那条 adopt 进来 ⇒ 本路径天然可重入，不必自造"先查再建"的竞态窗口。
+   *
+   * 🔴 **`workspaceId` 与 `cwd` 互斥**（宿主显式拒绝两者同传：
+   * `session.create accepts workspaceId or cwd, not both`）。
+   * 传 `workspaceId` ⇒ 宿主走 `if (workspace !== void 0) await workspace.attachSession(...)`
+   * 那条分支（= **用户操作的同一条**）；传 `cwd` ⇒ 不挂工作区。
    */
-  create?: (request: { cwd?: string; sessionId?: string; agentPreset?: string }) => Promise<{ sessionId?: string; agentPreset?: string }>
+  create?: (request: { workspaceId?: string; cwd?: string; sessionId?: string; agentPreset?: string }) => Promise<{ sessionId?: string; agentPreset?: string }>
 }
 
 /** 投递结果（写回条目的 lastResult；人读） */
@@ -428,17 +441,39 @@ export async function sendToTrajectory(
  *
  * 何时用：**只有** `send-now` 在 `acquireWakeAgent` 报「无绑定会话记录」时（见该处的判据说明）。
  *
- * 三步（顺序不可换）：
- *   ① `sessionController.create({ cwd: root })` —— 宿主原语，**idempotently adopt**
- *      ⇒ 重复调用不会建出第二条（不必自造"先查再建"的竞态窗口）。
+ * ## 🔴 2026-10-18 根治：改成**和用户操作完全同一个调用形态**
+ *
+ * owner 原话：「应当和用户操作唤起的会话完全一样才行」。
+ *
+ * 上一版（v1.62.1）传的是 `{ cwd: root }`，然后**事后补** `attachSession()` 去挂工作区。
+ * 那是**补救**，不是"一样" —— 宿主里那条路径（`sessionController.create` 的
+ * `if (workspace !== void 0) await workspace.attachSession(sessionId)`）**只在 `workspaceId` 分支执行**：
+ *
+ *   ```js
+ *   if (request.workspaceId !== void 0) workspace = registry.get(request.workspaceId)
+ *   const cwd = workspace?.path ?? request.cwd ?? this.defaultCwd
+ *   ...
+ *   if (workspace !== void 0) await workspace.attachSession(sessionId)   // ← 只有这条分支
+ *   ```
+ *
+ * 而**用户在 UI 里新建会话传的正是 `workspaceId`**（见 `client/sessions/service.d.ts` 的
+ * `create({ workspaceId?, cwd?, ... })`）⇒ 用户那条路天然会走到 `attachSession`。
+ *
+ * ⇒ 现在与用户**同一条分支**：先由 CCC 根查出 `workspaceId`，再用 `{ workspaceId }` 建。
+ *   **`attachToWorkspace` 降级为兜底**（只在"该目录还没有工作区登记"时才会用上），
+ *   不再是主路径 —— 因为主路径已经由宿主自己做完。
+ *
+ * ## 三步（顺序不可换）
+ *   ① `sessionController.create({ workspaceId })` —— 与用户同一形态；宿主替我们挂工作区。
+ *      **idempotently adopt** ⇒ 重复调用不会建出第二条（不必自造"先查再建"的竞态窗口）。
  *   ② `resolveAgent(sessionId)` —— 拿到**真 agent**。`create` 只返回 id，不给 agent。
  *   ③ `appendBound(...)` —— 落绑定。**必须由本函数写**：`listBoundSessionIds` 是
  *      `acquireWakeAgent` 的唯一选人依据，不写绑定则下一条消息**还是**找不到它
  *      （那就成了"建了但永远用不上"，比不建更坏）。
  *
- * 🔴 **为什么用 `cwd: root` 而不是目标的目录**：会话的 cwd 决定它落在哪个 CCC
+ * 🔴 **为什么定位到 CCC 根这一级、不是轨迹目录**：会话的 cwd 决定它落在哪个 CCC
  *    （`cccRootForCwd` 上溯 `.serenity`）。目标轨迹本就住在该 CCC 的 `AGENT_SESSIONS/` 下
- *    ⇒ 传 CCC 根才让它**进同一个 CCC**；传轨迹目录会让它变成一个**不同 CCC**的会话。
+ *    ⇒ 落到 CCC 根才让它**进同一个 CCC**；落到轨迹目录会让它变成一个**不同 CCC**的会话。
  *
  * @returns 命中返回 agent 与取得方式；任一步失败返回**带原因**的 error（不静默、不误报成功）
  */
@@ -457,9 +492,12 @@ async function createAndBindTarget(
       notReady: true,
     }
   }
+  // 🔴 **与用户同一条分支**：能查到工作区 id 就传 workspaceId（宿主自己挂），查不到才退回 cwd。
+  const ws = findWorkspaceByPath(listWorkspaces(ctx) ?? [], root)
+  const workspaceId = typeof ws?.id === 'string' && ws.id !== '' ? ws.id : undefined
   let sessionId = ''
   try {
-    const out = await create.call(sc, { cwd: root })
+    const out = await create.call(sc, workspaceId !== undefined ? { workspaceId } : { cwd: root })
     sessionId = String(out?.sessionId ?? '')
   } catch (err) {
     return { error: `就地创建会话失败（${dirName}）: ${String((err as Error)?.message ?? err)}` }
@@ -484,9 +522,11 @@ async function createAndBindTarget(
     'activate',
     { dirName, mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'), note: 'auto-created by send-now' },
   )
-  // ④ 🔴 **把会话挂进它所属的工作区**（2026-10-17 修缺陷：owner 报「新建的会话工作区绑定不正确」）
-  const wsNote = await attachToWorkspace(ctx, root, sessionId)
-  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'}${wsNote})`
+  // ④ **兜底**：只在"查不到工作区 id、退回 cwd 建会话"时，才由我们自己补挂。
+  //    走 `workspaceId` 分支时宿主已经挂好了（= 用户那条路），这里只是幂等确认、不产生写。
+  const wsNote = workspaceId !== undefined ? '' : await attachToWorkspace(ctx, root, sessionId)
+  const viaNote = workspaceId !== undefined ? ', via-workspaceId(=用户同一形态)' : ', via-cwd+attach'
+  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'}${viaNote}${wsNote})`
   return { agent, how }
 }
 
@@ -524,16 +564,8 @@ async function createAndBindTarget(
  * @returns 追加到回执里的短注记（成功/跳过为空串，失败带原因）
  */
 async function attachToWorkspace(ctx: unknown, root: string, sessionId: string): Promise<string> {
-  const reg = hostService<{
-    list?: () => Array<{ id?: string; path?: string; sessionIds?: readonly string[]; attachSession?: (id: string) => Promise<void> }>
-  }>(ctx, 'workspaceRegistry')
-  if (typeof reg?.list !== 'function') return ', ⚠️ 工作区未挂载（workspaceRegistry 不可用）'
-  let workspaces: ReturnType<NonNullable<typeof reg.list>> = []
-  try {
-    workspaces = reg.list() ?? []
-  } catch (err) {
-    return `, ⚠️ 工作区未挂载（list 失败: ${String((err as Error)?.message ?? err)}）`
-  }
+  const workspaces = listWorkspaces(ctx)
+  if (workspaces === undefined) return ', ⚠️ 工作区未挂载（workspaceRegistry 不可用）'
   const match = findWorkspaceByPath(workspaces, root)
   // 没有登记该目录的工作区是**正常状态**（宿主只为见过的目录建工作区）⇒ 不是错误
   if (match === undefined) return ''
@@ -546,6 +578,17 @@ async function attachToWorkspace(ctx: unknown, root: string, sessionId: string):
   } catch (err) {
     // 🔴 不吞：回执里如实报出（现场缺陷正是"静默不挂"）
     return `, ⚠️ 工作区挂载失败: ${String((err as Error)?.message ?? err)}`
+  }
+}
+
+/** `workspaceRegistry.list()` 的读取收口（不可用返回 `undefined`，**与"空列表"区分**） */
+function listWorkspaces(ctx: unknown): WorkspaceLike[] | undefined {
+  const reg = hostService<{ list?: () => WorkspaceLike[] }>(ctx, 'workspaceRegistry')
+  if (typeof reg?.list !== 'function') return undefined
+  try {
+    return reg.list() ?? []
+  } catch {
+    return undefined
   }
 }
 
