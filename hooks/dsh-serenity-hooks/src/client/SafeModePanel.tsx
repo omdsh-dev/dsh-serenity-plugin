@@ -51,6 +51,16 @@ interface SerenityStatus {
   blacklist: string[]
   threshold: number | null
   cheapWorkerModel: string | null
+  /** 活跃轨迹（不含归档）。后端已排除 `_` 前缀目录 ⇒ 这里拿到的**就是**"没有归档的轨迹"。 */
+  trajectories?: TrajectorySummary[]
+}
+
+/** 一条活跃轨迹（与后端 `TrajectorySummary` 同形；无生命周期字段 —— 轨迹永存） */
+interface TrajectorySummary {
+  dirName: string
+  sessionId: string
+  ageDays: number
+  hasSessionMd: boolean
 }
 
 const API = '/serenity/status'
@@ -90,6 +100,9 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [popPos, setPopPos] = useState<PopPlacement | null>(null)
 
   const sessionId = props.sessionId
+  // 活跃轨迹（后端已排除归档区）。🔴 用 `?? []` 而非可选链散落各处：
+  // 老后端（未升级）不返回该字段时，面板退化为"暂无活跃轨迹"而不是崩掉。
+  const trajectories = status?.trajectories ?? []
 
   const refresh = useCallback(async () => {
     const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
@@ -286,6 +299,33 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                       {status.safeModeOn ? '写工具已隐藏，可无人值守运行' : '写工具可用（点击开启）'}
                     </span>
                   </div>
+                </div>
+
+                {/* ── 分组：活跃轨迹（owner 2026-10-18：面板要展示"所有没有归档的轨迹"）
+                    · 数据来自 /serenity/status 的 trajectories（后端已排除 `_archived` 等）
+                    · 🔴 不显示"完成/进行中" —— 轨迹永存，没有生命周期，就没有阶段可显示
+                    · 无 SESSION.md 的标出来：那是**真异常**（激活会失败），而不是阶段 */}
+                <div className={cx('sp-group')}>
+                  <div className={cx('sp-groupHead')}>
+                    <h3 className={cx('sp-groupTitle')}>活跃轨迹</h3>
+                    <span className={cx('sp-count')}>{trajectories.length}</span>
+                  </div>
+                  {trajectories.length === 0 ? (
+                    <p className={cx('sp-hint')}>（暂无活跃轨迹）</p>
+                  ) : (
+                    <ul className={cx('sp-trajList')}>
+                      {trajectories.map((t) => (
+                        <li key={t.dirName} className={cx('sp-trajItem')}>
+                          <span className={cx('sp-trajId')}>{t.sessionId || '—'}</span>
+                          <span className={cx('sp-trajName')} title={t.dirName}>{t.dirName}</span>
+                          <span className={cx('sp-trajAge')}>{t.ageDays}d</span>
+                          {!t.hasSessionMd && (
+                            <span className={cx('sp-trajWarn')} title="目录存在但没有 SESSION.md（空壳）">空壳</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
 
                 {/* ── 提示：配置在 DSH 设置面板 ── */}

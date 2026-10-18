@@ -215,7 +215,11 @@
   position: fixed; /* 不受祖先 overflow:hidden 裁切；left/top 由 JS 计算 */
   top: 0; /* ← 声明默认值，JS 会覆写（未落位时组件给 -9999 屏外值，不会闪到右下角） */
   left: 0;
-  width: min(680px, calc(100vw - 24px));
+  /* 🔴 2026-10-18（owner：「可以到 1000px 宽，长度更长些，允许存在滚动条」）：
+     680 → **1000px**。这是 CCC 状态面板的**容器**，未来更多 CCC 内容都装在这里，
+     ⇒ 宽度按"要承载什么"给，不按"当前装了多少"给。
+     窄视口仍走 `calc(100vw - 24px)` 兜底（不因追求宽度而在小屏上溢出）。 */
+  width: min(1000px, calc(100vw - 24px));
   z-index: 2000;
   box-sizing: border-box;
   padding: 14px;
@@ -243,7 +247,10 @@
   align-items: stretch;
   gap: 12px;
   padding: 12px;
-  max-height: calc(100vh - 120px);
+  /* 🔴 2026-10-18（owner：「长度更长些，允许存在滚动条」）：120 → **80**。
+     上限贴着视口走，把能给的垂直空间尽量给出去；真正超长时由**内部两栏各自滚动**消化
+     （左栏 `.sp-popBody` 有 overflow-y:auto，右栏动画吃满行高）——卡片本身仍不溢出视口。 */
+  max-height: calc(100vh - 80px);
 }
 /* 左栏：信息（正文）——固定 340px，与旧卡片同宽，保证原有排印不变 */
 .sp-popVoyage > .sp-popBody {
@@ -263,7 +270,9 @@
   pointer-events: none; /* 纯展示：不挡点击、不抢焦点 */
   overflow: hidden;
   border-radius: 10px;
-  min-height: 260px; /* 动画的下限：信息很少时也不塌成一条 */
+  /* 🔴 2026-10-18：下限 260 → **360**。卡片加高后动画也该跟着长起来，
+     否则"加高"只换来左栏更多留白、飞船还是原来那么大一块。 */
+  min-height: 360px;
 }
 .sp-voyage iframe {
   display: block;
@@ -281,7 +290,7 @@
 @media (max-width: 860px) {
   .sp-pop {
     /* 两栏放不下时，卡片回到"不超过视口"的旧行为 */
-    width: min(420px, calc(100vw - 24px));
+    width: min(520px, calc(100vw - 24px));
   }
   .sp-popVoyage {
     flex-direction: column;
@@ -335,6 +344,85 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* ── 活跃轨迹清单（owner 2026-10-18 需求二）─────────────────────────
+   形态：每行 = [S### 定宽] [目录名 伸缩] [天数 定宽右对齐] [空壳标记 条件]
+   · 用 mono 字体：目录名与 S### 是**标识符**，等宽才扫得快
+   · 名字用 `text-overflow: ellipsis` 单行截断 + `title` 全文 —— 目录名很长时
+     宁可行内截断，也不让一行折成三四行把整个清单撑得读不下去
+   · 整个列表**有上限高度 + 自身滚动**：轨迹会越攒越多，而它的容器（左栏）不该跟着无限长 */
+.sp-count {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code, monospace);
+  padding: 0 6px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 99px;
+}
+
+.sp-trajList {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* 清单自身封顶：活跃轨迹会越攒越多，超出后本列表滚动，不把左栏顶长 */
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.sp-trajItem {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 8px;
+  font-family: var(--ds-font-family-code, monospace);
+  font-size: 11px;
+  line-height: 16px;
+}
+.sp-trajItem:hover {
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.sp-trajId {
+  flex: none;
+  min-width: 40px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.sp-trajName {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sp-trajAge {
+  flex: none;
+  color: var(--dsw-alias-label-secondary);
+  text-align: right;
+  min-width: 32px;
+}
+
+/* 空壳标记：目录在但没有 SESSION.md —— 这是**真异常**（激活会失败），不是阶段。
+   ⚠️ 因此用告警色，而不是任何"状态"色。 */
+.sp-trajWarn {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: #fff;
+  background: #c2410c;
 }
 
 /* 行卡（rowCard：border + radius + padding；值与 label 分离、长内容可换行） */

@@ -71,7 +71,8 @@ describe('CRO 指南: 出口形状（guide 老套路，设计 §8.1）', () => {
 
   it('🔴 动作集合含 cro-guide（动作面 = 单一真相源，schema enum 由它派生）', () => {
     expect([...COGNITIVE_TRAJECTORY_ACTIONS]).toContain('cro-guide')
-    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(8) // 7 → 8（本轮新增第 8 个）
+    // 8 → 9（2026-10-18 新增 `archive`：轨迹没有生命周期后，它是唯一的状态变化）
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(9)
   })
 
   it('指南非空且是多行正文（不是占位符）', () => {

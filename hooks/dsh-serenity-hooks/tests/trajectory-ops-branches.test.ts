@@ -235,78 +235,73 @@ describe('cognitive-trajectory-ops 退化面：`showSession` / `findSession` 的
   })
 })
 
-describe('cognitive-trajectory-ops 退化面：`listSessions` 的 active 标记与 `summarize` 的 stale 告警', () => {
-  it('🔴 `:191`/`:192` active 三态标记：`●`（active）／`✓`（completed）／`○`（普通）', () => {
+describe('cognitive-trajectory-ops 退化面：`listSessions` 的 active 标记与 `summarize` 的计数（🔴 2026-10-18 去生命周期后）', () => {
+  it('🔴 active 两态标记：`●`（active）／`○`（普通）—— 三态里的 `✓` 已随生命周期删除', () => {
     const a = mk('甲')
     const b = mk('乙')
-    // 把乙标成完成（`[x]` 是机器契约本体 —— 与 sessionMdTemplate 逐字对齐）
+    // 旧实现：把乙写成 `[x]` 会让它变 ✓。现在**必须无影响**（状态行是惰性文本）。
     const mdB = join(b.sessionPath, 'SESSION.md')
     writeFileSync(mdB, readFileSync(mdB, 'utf-8').replace('- 状态: [ ] 进行中', '- 状态: [x] 已完成'), 'utf-8')
 
-    // 甲作为 activeId ⇒ 甲显 ●；乙已完成 ⇒ ✓
     const out = listSessions(dir, a.sessionId)
     const lineA = out.split('\n').find((l) => l.includes(a.dirName))!
     const lineB = out.split('\n').find((l) => l.includes(b.dirName))!
     expect(lineA.startsWith('●'), 'activeId 命中 ⇒ ●').toBe(true)
-    expect(lineB.startsWith('✓'), '完成 ⇒ ✓').toBe(true)
+    // 🔴 核心反证：`[x]` 不再产生 ✓
+    expect(lineB.startsWith('○'), '`[x]` 不再是终态 ⇒ 仍是普通 ○').toBe(true)
+    expect(out, '✓ 这个标记已不存在').not.toContain('✓')
 
-    // 🔴 `:191` 的**守卫**：`activeId` 未给 ⇒ 即便有完成项也不得把普通项错标成 ●
+    // 守卫：`activeId` 未给 ⇒ 一律 ○（不是 ●）
     const noActive = listSessions(dir)
     const lineA2 = noActive.split('\n').find((l) => l.includes(a.dirName))!
     expect(lineA2.startsWith('○'), '未指定 activeId ⇒ 一律 ○（不是 ●）').toBe(true)
   })
 
-  it('🔴 `summarize`：空仓 → 专属文案；有会话 → 六行计数 ＋ 最近 5 条', () => {
+  it('🔴 `summarize`：空仓 → 专属文案；有会话 → 唯一总数（活跃数）＋ 最近 5 条', () => {
     expect(summarize(dir)).toBe('AGENT_SESSIONS/ is empty.')
 
     mk('报告甲')
     mk('报告乙')
     const out = summarize(dir)
     expect(out).toContain('AGENT_SESSIONS Summary')
-    expect(out).toContain('Total:    2')
-    expect(out).toContain('Active:   2')
-    expect(out).toContain('Completed: 0')
+    // 🔴 唯一的计数 = 活跃数（Active/Completed/Stale/Ghost 四项全部随生命周期删除）
+    expect(out).toContain('Active (not archived): 2')
     expect(out).toContain('Recent activity (top 5):')
-    // 未超期 ⇒ **不得**出现 stale 告警（`:636` 的 `stale > 0` 右侧）
-    expect(out, '无 stale 时不得打印告警').not.toContain('⚠ Warning')
+    // 四项旧计数**一个都不许回来**
+    for (const gone of ['Total:', 'Completed:', 'Stale:', 'Ghost:', '⚠ Warning']) {
+      expect(out, `${gone} 已随生命周期删除，不得复现`).not.toContain(gone)
+    }
   })
 
-  it('🔴 `:636` `stale > 0` 告警臂：把 mtime 推到 **8 天前**（真 fs 操作，不 mock 时钟）', () => {
-    // 🔴 真故障形态：`HEALTH_STALE_DAYS = 7` ⇒ 把 mtime 改到 8 天前
-    //    （用 `utimesSync` 改**真实体**；不 mock 时钟、不改生产常量 —— 纪律 ⑧）
-    // 🔴 **两条夹具事实（首跑红逼出，生产代码无错）**：
-    //   ① **`utimesSync` 接受 `Date`（或**秒**），我原先传 `(Date.now()-8d)/1000` 却
-    //      把它当成"毫秒数"直接给了 —— 实参被当作**秒**解释 ⇒ 落成一个**远未来**的时间
-    //      ⇒ 摘要打印 `(-1d ago)`（负龄）。仓库既有先例（`trajectory-tool.test.ts:293`
-    //      ／ `session-cleanup.test.ts`）**一律传 `Date`** ⇒ 本件对齐先例，改用 `Date`。
-    //   ② 🔴 **决定 stale 的是【目录】的 mtime，不是 SESSION.md 的** ——
-    //      `readSessionEntry` 取 `statSync(dirPath)`（`src/cognitive-trajectory-ops.ts:121-126`）
-    //      ⇒ 只改 SESSION.md 的 mtime **不会**影响 stale 计数（**两个都要改**）。
+  it('🔴 年龄不再是判据：8 天前的轨迹**与新鲜轨迹同等对待**（旧实现会报 stale 告警）', () => {
+    // owner 2026-10-18：轨迹永存 ⇒ **旧不是问题**。
+    // 这条用例守住那个删除：把 mtime 推到 8 天前，摘要必须与新鲜时**无差别对待**。
     const r = mk('陈旧轨迹')
     const md = join(r.sessionPath, 'SESSION.md')
     const old = new Date(Date.now() - 8 * 86_400_000)
     utimesSync(md, old, old)
     utimesSync(r.sessionPath, old, old)
 
-    // 🟢 先证明读数器不瞎（纪律 10：夹具正控）—— 8 天前必须真的落了盘
+    // 正控（纪律 10：夹具正控）—— 8 天前必须真的落了盘，否则下面的断言分不清
+    // "老化判据已删" 与 "夹具根本没改成旧时间"。
     expect(Math.floor((Date.now() - statSync(r.sessionPath).mtimeMs) / 86_400_000),
-      '正控：目录 mtime 必须真的是 8 天前（否则下面的断言无法区分"守卫生效"与"夹具坏了"）').toBe(8)
+      '正控：目录 mtime 必须真的是 8 天前').toBe(8)
 
     const out = summarize(dir)
-    expect(out).toContain('Stale:    1')
-    expect(out, '有 stale ⇒ 必须打印告警').toContain('⚠ Warning: stale cognitive trajectories present')
-    // 正控方向：另一条**新鲜**的不得被算进 stale
-    mk('新鲜轨迹')
-    const out2 = summarize(dir)
-    expect(out2).toContain('Stale:    1')
-    expect(out2).toContain('Total:    2')
+    // ① 仍然计入活跃（旧轨迹不因年龄被扣掉）
+    expect(out).toContain('Active (not archived): 1')
+    // ② 不得出现任何老化告警（旧实现在这里会打印 ⚠ Warning: stale ...）
+    expect(out, '年龄已不是判据 ⇒ 不得再报 stale').not.toContain('Stale')
+    expect(out).not.toContain('⚠ Warning')
+    // ③ 天数照常显示 —— 它是**事实**（多少天没动），不是**判决**
+    expect(out).toContain('(8d ago)')
   })
 
-  it('🔴 `summarize` 的 Ghost 计数：目录在但无 SESSION.md 计一（`:619`）', () => {
+  it('🔴 空壳（无 SESSION.md）仍计入活跃，但**不再有 Ghost 计数**（改由 use 当场提示）', () => {
     mk('正常')
     mkEmptyDir('2026-01-01--S901--ghost-shell')
     const out = summarize(dir)
-    expect(out).toContain('Total:    2')
-    expect(out, '幽灵轨迹（无 SESSION.md）必须被计入').toContain('Ghost:    1')
+    expect(out).toContain('Active (not archived): 2')
+    expect(out, 'Ghost 计数已删；空壳改由 advisoryHint 在 use 时当场说清').not.toContain('Ghost')
   })
 })

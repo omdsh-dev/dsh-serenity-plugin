@@ -286,9 +286,9 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 > **为什么不再自造**：原 3100 面是一个**没有客户端生态**的私有外壳，而官方件已发布并随宿主同版本演进。
 > 详细接法与手机端配置见宁静号 CCC 的接入指南。
 
-### 6.5 轨迹与定时唤醒（cognitive trajectory）
+### 6.5 认知轨迹与定时唤醒（cognitive trajectory）
 
-`cognitive trajectory`（认知轨迹）是一等概念：一个工作区里可以有任意多条轨迹并行。
+`cognitive trajectory`（认知轨迹）是一等概念：一个工作区里可以有任意多条认知轨迹并行。
 
 **定时唤醒**：用 `cognitive_trajectory send-later` 登记一条"唤醒" = 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，**不阻塞、不等待、也不回执**。
 
@@ -347,7 +347,7 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 |---|---|---|
 | DSH 原生设置 | DSH 的 settings.yaml（即设置面板那几项） | 开关与阈值：网关总开关、重建阈值、子角色开关与调试端口、**CRO 总闸（`croEnabled`，默认为开）**、**图工具总闸（默认关）**、**官方 ACP 面（`acpFaceEnabled`，默认关）** |
 | 插件全局文件 | `~/.dsh/serenity-hooks.json`（权限 0600） | 网关账号（scrypt + TOTP）、监听地址与端口、工作区白名单、cookie 安全开关 |
-| 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**轨迹级 skill 供给（`cognitiveTrajectory.skills`）**、微信（账号/路由/开关） |
+| 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**认知轨迹级 skill 供给（`cognitiveTrajectory.skills`）**、微信（账号/路由/开关） |
 | 工作区凭据 | `localstore.json` | 密钥与本地偏好；微信机器人 token 也在这一层 |
 
 > 原则：**插件是全局的，工作区是具体的**——账号、开关、阈值归插件层；角色、凭据、本地偏好归工作区层。

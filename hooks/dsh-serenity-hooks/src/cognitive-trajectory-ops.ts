@@ -9,7 +9,30 @@
  * 其函数（closeSession / archiveSessions / healthCheck / qaCheck）**同批删除**——
  * 保留下来的只有：create（--desc / --issue 二选一、dry-run 预览）、
  * list（含 summarize 仪表盘）、show、use（激活 + 绑定）、以及供 list 用的 summarize。
- * 「完成」不再由 close 写入，而是从 SESSION.md 的 `[x]` 推导；归档走 `container_fs mv`。
+ *
+ * ## 🔴 2026-10-18（owner 令）：**认知轨迹没有生命周期**
+ *
+ * owner 原话要点：*"我需要允许永存的认知轨迹……我希望该生命周期足够简单，即没有生命周期，
+ * 但允许轨迹本身被操作为归档"*。据此**删除**了以下全部"生命周期"语义：
+ *
+ * | 被删的 | 为什么它属于生命周期 |
+ * |---|---|
+ * | `completed` 解析（SESSION.md 里的方括号小写 x） | "完成"是一个**终态**；没有生命周期就没有终态 |
+ * | `summarize` 的 Active / Completed / Stale / Ghost 四项计数 | 四项全部在给轨迹分"阶段" |
+ * | `advisoryHint` 的「N 天未更新」告警 | 老化告警的前提是"旧轨迹该退休了"——现在**旧不是问题** |
+ * | `findLatestActiveSessionMd`（**全仓零消费者**，纯死代码） | 它的语义是"最新的**未完成**轨迹"，前提已不存在 |
+ *
+ * **保留**：SESSION.md 头部的状态行**照旧生成**（`- 状态: [ ] 进行中`），但**不再被任何代码解析**。
+ * 理由（owner 裁决）：格式最小变动、老文件完全不用改。⇒ 它从"机器契约"降为**惰性文本**，
+ * 且"进行中"对永存轨迹**恒为真**，因此不构成谎言。
+ *
+ * **新增唯一的操作**：`archiveSession()` —— 单向移入 `_archived/`。
+ * 归档是**唯一的"变化"**，且它不属于轨迹自身：轨迹本体（目录 ＋ SESSION.md）**永不被改**，
+ * 只是**换了个存放位置**、从清单里消失。恢复 = 手工 `container_fs mv` 移回（owner 裁决：不设 unarchive）。
+ *
+ * ⚠️ 由此产生一条**必须成立**的配套：`readAllSessions` **跳过 `_` 前缀目录**。
+ * 否则归档后的轨迹会继续出现在清单里，"归档"就不是归档了（历史 bug：`_weixin-logs` /
+ * `_skiff-logs` / `_corpus` 曾被当成轨迹列出来）。
  */
 
 import {
@@ -18,6 +41,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
@@ -49,10 +73,10 @@ import { localDate, localDateTimeMinutes } from './time.js'
  *   而**管轨迹的人正是用本工具的人**；挂这儿 = 设计 §9-5 的"**既有 guide 位置、不新增域**"。
  *   ⚠️ 本动作**纯读**（输出指南正文，不碰 fs、不碰注册表）。
  */
-type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'send-now' | 'send-later' | 'cro-guide'
+type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'send-now' | 'send-later' | 'cro-guide'
 
 export const COGNITIVE_TRAJECTORY_ACTIONS: readonly CognitiveTrajectoryAction[] = [
-  'list', 'show', 'create', 'use', 'rebuild', 'send-now', 'send-later', 'cro-guide',
+  'list', 'show', 'create', 'use', 'rebuild', 'archive', 'send-now', 'send-later', 'cro-guide',
 ]
 
 /**
@@ -80,8 +104,10 @@ export function sessionEvents<T = unknown>(session: unknown): readonly T[] {
 }
 
 const SESSION_MD = 'SESSION.md'
-const HEALTH_STALE_DAYS = 7
 const DAY = 86_400_000
+
+/** 归档区目录名（`_` 前缀 ⇒ 不是轨迹，见 readAllSessions 的跳过判据） */
+export const ARCHIVED_DIR = '_archived'
 
 export function sessionsRoot(root: string): string {
   return join(root, 'AGENT_SESSIONS')
@@ -89,14 +115,14 @@ export function sessionsRoot(root: string): string {
 
 // ── 会话条目与状态（对齐 osp readAllSessions/parseSessionMd）──
 
+/**
+ * 轨迹的**存在形态**（🔴 **2026-10-18 起不再是"生命周期"**）。
+ *
+ * `hasSessionMd` 是唯一的判据，而且它**不是阶段**：它只说"这个目录里有没有正文"。
+ * 旧字段 `completed` 已删除（见文件头「认知轨迹没有生命周期」）。
+ */
 interface SessionStatus {
   hasSessionMd: boolean
-  /**
-   * 「完成」的判据 = SESSION.md 里**出现 `[x]`**（v1.33 起不再由 close 动作写入）。
-   * 🔴 这是**全文匹配**、两代格式通用：新格式的状态行 `- 状态: [x] …` 与旧格式的
-   * `## 状态` 段内 `- [x] 已完成` 都能被识别 ⇒ **不可改成锚定某一行的正则**（会让旧会话永远"未完成"）。
-   */
-  completed: boolean
 }
 
 interface SessionEntry {
@@ -106,13 +132,20 @@ interface SessionEntry {
   status: SessionStatus
 }
 
-/** 解析 SESSION.md 状态元数据（对齐 osp parseSessionMd） */
+/**
+ * 解析 SESSION.md 存在性。
+ *
+ * 🔴 **2026-10-18：不再解析"完成"**。旧实现 `completed: /\[\s*x\s*\]/i.test(content)` 已删——
+ * 轨迹永存 ⇒ 没有终态，而这个字段的所有消费者（排序 / 标记 / 计数）也同批删掉了。
+ * ⚠️ **副作用（有意接受）**：`[x]` 不再有机器含义 ⇒ 正文里出现它**不会再**把轨迹判成任何东西。
+ * 那条"正文绝不能用方括号小写 x"的老纪律随之解除（但它仍是无害的好习惯）。
+ */
 function parseSessionMd(filePath: string): SessionStatus {
   try {
-    const content = readFileSync(filePath, 'utf-8')
-    return { hasSessionMd: true, completed: /\[\s*x\s*\]/i.test(content) }
+    readFileSync(filePath, 'utf-8')
+    return { hasSessionMd: true }
   } catch {
-    return { hasSessionMd: false, completed: false }
+    return { hasSessionMd: false }
   }
 }
 
@@ -122,25 +155,32 @@ function readSessionEntry(dirPath: string): SessionEntry | null {
     if (!st.isDirectory()) return null
     const dirName = basename(dirPath)
     const mdPath = join(dirPath, SESSION_MD)
-    const status = existsSync(mdPath) ? parseSessionMd(mdPath) : { hasSessionMd: false, completed: false }
+    const status = existsSync(mdPath) ? parseSessionMd(mdPath) : { hasSessionMd: false }
     return { dirName, path: dirPath, mtime: st.mtime, status }
   } catch {
     return null
   }
 }
 
-/** 读取 AGENT_SESSIONS 中所有会话，活跃（未完成）排前（对齐 osp readAllSessions） */
+/**
+ * 读取 AGENT_SESSIONS 中所有**活跃**轨迹，按 mtime 降序。
+ *
+ * 🔴 **跳过 `_` 前缀目录**（2026-10-18 新增，与归档配套）：
+ * `_archived` 是归档区，`_skiff-logs` / `_weixin-logs` / `_corpus` 是**日志与数据区**——
+ * 它们**都不是轨迹**。旧实现会把它们当轨迹列出来（历史 bug）。
+ * 没有这条，归档后的轨迹仍会出现在清单里 ⇒ **"归档"名不副实**。
+ *
+ * ⚠️ 排序判据已变：旧实现是「未完成优先，再 mtime 降序」，现在**只有 mtime 降序**
+ * （没有"未完成"这个概念了）。
+ */
 function readAllSessions(sessionsDir: string): SessionEntry[] {
   try {
     return readdirSync(sessionsDir, { withFileTypes: true })
       .filter((e) => e.isDirectory())
+      .filter((e) => !e.name.startsWith('_') && !e.name.startsWith('.'))
       .map((e) => readSessionEntry(join(sessionsDir, e.name)))
       .filter((s): s is SessionEntry => s !== null)
-      .sort((a, b) => {
-        if (!a.status.completed && b.status.completed) return -1
-        if (a.status.completed && !b.status.completed) return 1
-        return b.mtime.getTime() - a.mtime.getTime()
-      })
+      .sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
   } catch {
     return []
   }
@@ -189,10 +229,11 @@ export function listSessions(root: string, activeId?: string): string {
     const age = Math.floor((Date.now() - s.mtime.getTime()) / DAY)
     const sessionId = extractSessionId(s.dirName)
     const isActive = activeId !== undefined && sessionId !== '' && sessionId === activeId
-    const status = isActive ? '●' : s.status.completed ? '✓' : '○'
+    // 🔴 2026-10-18：只剩两态（active ● / 普通 ○）。旧的三态里 `✓` = "已完成"，随生命周期一起删。
+    const status = isActive ? '●' : '○'
     return `${status} ${s.dirName} (${age}d ago)`
   })
-  return `AGENT_SESSIONS/ (${sessions.length} sessions)\n` + lines.join('\n')
+  return `AGENT_SESSIONS/ (${sessions.length} active)\n` + lines.join('\n')
 }
 
 // ── show ──
@@ -234,10 +275,12 @@ export interface CreateSessionResult {
 /**
  * 生成 SESSION.md 模板（固定格式，owner 2026-09-25 裁决；时间戳 YYYY-MM-DD HH:mm）。
  *
- * 🔴 **状态行是被解析的机器契约**：`completed` 的判据 = SESSION.md 里出现 `[x]`（见 `parseSessionMd`）
- * ⇒ 状态行必须带标记 token：未完成 `- 状态: [ ] <label>`／已完成 `- 状态: [x] <label>`。
- * ⚠️ 改模板时**两件事必须同时成立**：① 状态行保留 `[ ]`（且全模板不得出现任何 `[x]`——否则新会话
- * 一出生就被判 completed）② 七个固定段的名字与顺序不得动（契约钉在 `tests/trajectory-ops.test.ts`）。
+ * 🔴 **2026-10-18：状态行不再是机器契约**（owner 裁决：轨迹永存，没有生命周期）。
+ * 它**照旧生成** `- 状态: [ ] 进行中`，但**没有任何代码解析它** —— 从"被解析的机器契约"
+ * 降为**惰性文本**。保留的两个理由：
+ *   ① 格式最小变动、老文件完全不用改；
+ *   ② 对永存轨迹来说"进行中"**恒为真**，所以它不是谎言，只是冗余。
+ * ⚠️ 仍然**不得**把任何一段固定 7 段的段名与顺序动掉（契约钉在 `tests/trajectory-ops.test.ts`）。
  */
 function sessionMdTemplate(title: string, id: string, goal: string | undefined, now: Date): string {
   const ts = localDateTimeMinutes(now)
@@ -596,50 +639,131 @@ export function resolveSessionByTitle(title: string, sessionsDir: string): strin
   return null
 }
 
-/**
- * 约定回退（v1.24.11）：AGENT_SESSIONS 下最新修改的**未完成**会话的 SESSION.md。
- * readAllSessions 已按「未完成优先 + mtime 降序」排序 → 首个未完成且含 SESSION.md 即最新活动。
- * 只作最后手段（内存/events/锚点全缺时），保证重建锚点至少指向一个真实存在的轨迹。
- */
-export function findLatestActiveSessionMd(root: string): string | null {
-  for (const s of readAllSessions(sessionsRoot(root))) {
-    if (s.status.completed) continue
-    const md = join(s.path, SESSION_MD)
-    if (existsSync(md)) return md
-  }
-  return null
-}
-
 // ── summary ──
 
-/** summary 仪表盘（供 `list` 动作拼接；v1.33 起独立 `summary` 动作已撤，并入 list） */
+/**
+ * summary 仪表盘（供 `list` 动作拼接；v1.33 起独立 `summary` 动作已撤，并入 list）。
+ *
+ * 🔴 **2026-10-18：四项生命周期计数已删**（Active / Completed / Stale / Ghost）。
+ * 它们全都在给轨迹**分阶段**，而 owner 裁决「没有生命周期」⇒ 唯一有意义的总数是 `Total`。
+ * ⚠️ **`Ghost` 也被删了**（"目录在但没 SESSION.md"）—— 它不是阶段而是**损坏**，但：
+ *   · 真出现时 `use` 会在 `advisoryHint` 里**当场说清**（用到才发现，比长期挂一个计数更有效）；
+ *   · 挂一个恒 0 的计数只会钝化注意力。
+ * `Total` 现在 = **活跃轨迹数**（`_` 前缀的归档区与日志区已不在域内）。
+ */
 export function summarize(root: string): string {
   const sessions = readAllSessions(sessionsRoot(root))
   if (sessions.length === 0) return 'AGENT_SESSIONS/ is empty.'
   const now = Date.now()
-  const completed = sessions.filter((s) => s.status.completed).length
-  const active = sessions.length - completed
-  const stale = sessions.filter((s) => !s.status.completed && (now - s.mtime.getTime()) / DAY > HEALTH_STALE_DAYS).length
-  const ghost = sessions.filter((s) => !s.status.hasSessionMd).length
   const recent = sessions.slice(0, 5)
   const lines: string[] = [
     `AGENT_SESSIONS Summary`,
     `────────────────────────`,
-    `Total:    ${sessions.length}`,
-    `Active:   ${active}`,
-    `Completed: ${completed}`,
-    `Stale:    ${stale}`,
-    `Ghost:    ${ghost}`,
+    `Active (not archived): ${sessions.length}`,
     ``,
     `Recent activity (top 5):`,
     ...recent.map((s) => {
       const age = Math.floor((now - s.mtime.getTime()) / DAY)
-      return `  ${s.status.completed ? '✓' : '○'} ${s.dirName} (${age}d ago)`
+      return `  ○ ${s.dirName} (${age}d ago)`
     }),
   ]
-  if (stale > 0) {
-    // v1.33：不再指向已删的 health 动作——提示事实本身（长期无活动的轨迹清单在 list 里可见）
-    lines.push('', '⚠ Warning: stale cognitive trajectories present (no activity > 7d) — see the list above for detail.')
-  }
   return lines.join('\n')
+}
+
+// ── archive（🔴 2026-10-18 新增：唯一的"状态变化"，单向）──
+
+/**
+ * 活跃轨迹的**结构化**清单（面板消费；owner 2026-10-18 需求二）。
+ *
+ * 🔴 为什么不在面板侧重新扫目录：**"哪些轨迹是活跃的"只有一个判据源** =
+ * `readAllSessions`（它已经实现 `_` 前缀跳过 = 归档区不在域内）。面板若自己扫一遍
+ * `AGENT_SESSIONS/`，就会长出**第二份会漂的实现** —— 归档之后面板仍会列出它，
+ * 而这种不一致**没有任何机械信号**（两边各自都"跑成功了"）。
+ *
+ * 字段都取自**文件系统事实**，不做任何推断：
+ * `dirName` / `sessionId`（S### ，无则 ''）/ `ageDays`（目录 mtime 距今天数）/ `hasSessionMd`。
+ * ⚠️ **没有 `completed`** —— 轨迹没有生命周期（见文件头）。
+ *
+ * @param root CCC 根
+ * @returns 按 mtime 降序的活跃轨迹（已排除 `_` 前缀目录）
+ */
+export interface TrajectorySummary {
+  dirName: string
+  sessionId: string
+  ageDays: number
+  hasSessionMd: boolean
+}
+
+export function listActiveTrajectories(root: string): TrajectorySummary[] {
+  const now = Date.now()
+  return readAllSessions(sessionsRoot(root)).map((s) => ({
+    dirName: s.dirName,
+    sessionId: extractSessionId(s.dirName),
+    ageDays: Math.floor((now - s.mtime.getTime()) / DAY),
+    hasSessionMd: s.status.hasSessionMd,
+  }))
+}
+
+export interface ArchiveResult {
+  message: string
+  dirName: string
+  from: string
+  to: string
+  dryRun: boolean
+}
+
+/**
+ * 把一条轨迹**单向**归档到 `AGENT_SESSIONS/_archived/`（owner 2026-10-18 裁决）。
+ *
+ * ## 为什么这是"唯一"的状态变化
+ * 轨迹没有生命周期 ⇒ 它**不完成、不关闭、不衰老**。它只会**换个存放位置**：
+ * 从活跃区移到归档区。目录与 SESSION.md **逐字节不动**（纯 rename）——
+ * 「归档」在此**不是删除，也不是收尾**，只是"不再列在活跃清单里"。
+ *
+ * ## 判据（R↓）
+ * ① **单向**：owner 裁决不设 unarchive。恢复 = 手工 `container_fs mv` 移回。
+ *    ⇒ 不提供反向动作，避免"两个方向各自实现一遍、语义各自漂移"。
+ * ② **绝不覆盖**：目标已存在 ⇒ 报错，**不合并、不重命名、不删除**。归档是不可逆动作，
+ *    静默覆盖会**毁掉**先前那条轨迹（它的 SESSION.md 是唯一副本）。
+ * ③ **归档区不建在别处**：落点恒为 `<CCC>/AGENT_SESSIONS/_archived/`，
+ *    与 `readAllSessions` 的 `_` 跳过判据**成对**（换一处就要同时改两处 ⇒ 不换）。
+ * ④ `dryRun` 只报路径、不落盘。
+ *
+ * @param root CCC 根
+ * @param key 目录名 / S### / 唯一模糊串（同 findSession）
+ * @param dryRun 预览
+ */
+export function archiveSession(root: string, key: string, dryRun = false): ArchiveResult {
+  const sessionsDir = sessionsRoot(root)
+  const target = findSession(sessionsDir, key)
+  if (!target) {
+    throw new Error(`Trajectory not found: "${key}". Use "list" to see available trajectories.`)
+  }
+  const archiveRoot = join(sessionsDir, ARCHIVED_DIR)
+  const dest = join(archiveRoot, target.dirName)
+  // 判据②：目标已存在 ⇒ 响亮失败（绝不覆盖）
+  if (existsSync(dest)) {
+    throw new Error(
+      `Cannot archive: "${target.dirName}" already exists in ${ARCHIVED_DIR}/. ` +
+      `归档不会覆盖既有轨迹（那是不可逆的丢失）。请先人工处理 ${dest}`,
+    )
+  }
+  if (dryRun) {
+    return {
+      message: `[dry-run] Would archive: ${target.dirName} → ${ARCHIVED_DIR}/`,
+      dirName: target.dirName,
+      from: target.path,
+      to: dest,
+      dryRun: true,
+    }
+  }
+  mkdirSync(archiveRoot, { recursive: true })
+  renameSync(target.path, dest)
+  return {
+    message: `Archived: ${target.dirName} → ${ARCHIVED_DIR}/`,
+    dirName: target.dirName,
+    from: target.path,
+    to: dest,
+    dryRun: false,
+  }
 }

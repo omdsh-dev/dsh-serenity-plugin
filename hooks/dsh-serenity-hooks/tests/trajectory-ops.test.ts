@@ -12,7 +12,6 @@ import {
   getActiveSessionInfo,
   resetActiveSessionStore,
   parseSessionContextFromEvents,
-  findLatestActiveSessionMd,
   resolveSessionByTitle,
   sessionsRoot,
   sessionEvents,
@@ -47,10 +46,11 @@ function mk(desc: string, extra: Parameters<typeof createSession>[0] = {}): Retu
 }
 
 /**
- * 标记轨迹完成（v1.33：无 close 动作——完成与否由 SESSION.md 的 `[x]` 表达）。
- * 🔴 **这里的字面量就是机器契约本体**：状态行必须同时含 `[ ]`／`[x]` 标记与标签，
- * 与 `src/cognitive-trajectory-ops.ts` 的 `sessionMdTemplate` 逐字对齐；改模板时必须同步改这里
- * （2026-09-25 就是漏了这一步 ⇒ 本文件两条用例变红）。
+ * 把状态行改写成"已完成"形态。
+ *
+ * 🔴 **2026-10-18 起它不再是"标记完成"**（轨迹永存，没有生命周期）。保留本函数只为**证明**：
+ * 即使状态行写成已完成形态，**也不会**改变任何行为（`list` 不换标记、`summarize` 不计阶段、
+ * `readAllSessions` 排序不变）—— 即"状态行已降为惰性文本"。这个反证比删掉它更有价值。
  */
 function markDone(r: ReturnType<typeof createSession>): void {
   const md = join(r.sessionPath, 'SESSION.md')
@@ -123,12 +123,31 @@ describe('cognitive-trajectory-ops: 生命周期（对齐 osp spec）', () => {
     expect(showSession(dir, 'alpha')).toContain('阿尔法')
   })
 
+  it('🔥 反证：状态行写成已完成形态，**行为零变化**（状态行已降为惰性文本）', () => {
+    // owner 2026-10-18 裁决：保留状态行，但不再被解析 ⇒ 轨迹永存、没有终态。
+    // 这条用例就是那个判据的钉子：`[x]` 不能再影响任何读数。
+    const a = mk('lifecycle-gone')
+    const before = listSessions(dir)
+    markDone(a)
+    const after = listSessions(dir)
+    // ① 清单标记不变（旧实现在这里会从 ○ 变 ✓）
+    expect(after).toBe(before)
+    expect(after).not.toContain('✓')
+    // ② 统计里不再有任何阶段计数（旧实现会打印 Completed: 1）
+    const s = summarize(dir)
+    expect(s).not.toContain('Completed')
+    expect(s).not.toContain('Stale')
+    expect(s).not.toContain('Ghost')
+    // ③ 活跃数不因 `[x]` 而减少 —— 它仍然在活跃清单里
+    expect(s).toContain('Active (not archived): 1')
+  })
+
   it('summary 计数（文本仪表盘）', () => {
     mk('a')
     const s = summarize(dir)
-    expect(s).toContain('Total:    1')
-    expect(s).toContain('Active:   1')
-    expect(s).toContain('Completed: 0')
+    // 唯一的总数 = 活跃轨迹数（四项生命周期计数已删）
+    expect(s).toContain('Active (not archived): 1')
+    expect(s).not.toContain('Completed')
   })
 })
 
@@ -237,18 +256,13 @@ describe('cognitive-trajectory-ops: v1.24.11 恢复稳固化（路径规范行�
     expect(info!.dirName).toBe(b.dirName)
   })
 
-  it('findLatestActiveSessionMd：最新未完成会话胜出；已完成跳过（约定回退）', () => {
-    const old = mk('old-done')
-    const active = mk('active')
-    // 标记 old 完成 → 只返回 active（SESSION.md 文件路径）
-    markDone(old)
-    expect(findLatestActiveSessionMd(dir)).toBe(join(active.sessionPath, 'SESSION.md'))
-  })
-
-  it('findLatestActiveSessionMd：全部完成 → null', () => {
-    const a = mk('only-done')
-    markDone(a)
-    expect(findLatestActiveSessionMd(dir)).toBeNull()
+  // 🔴 2026-10-18：原两条用例测的是 `findLatestActiveSessionMd`（"最新的**未完成**轨迹"）。
+  // 该函数已**删除**：它在 `src/` 里零消费者（最后一个消费方 v1.30.13 已移除，见 rebuild.ts:188-194），
+  // 而其语义前提正是"未完成"这个生命周期概念 —— 前提既不存在，就该删而不是改写成语义不同的第二个东西。
+  // ⇒ 用例保留为**回归钉**：它若回来，说明有人又往生命周期方向加了东西。
+  it('🔴 `findLatestActiveSessionMd` 已随生命周期一起删除（不得复活）', async () => {
+    const mod = await import('../src/cognitive-trajectory-ops.js')
+    expect('findLatestActiveSessionMd' in mod, '该符号必须不存在——它的语义是"最新的未完成轨迹"').toBe(false)
   })
 
   /**

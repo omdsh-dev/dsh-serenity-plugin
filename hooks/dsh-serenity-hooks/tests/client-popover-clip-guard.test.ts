@@ -54,7 +54,14 @@ describe('自绘 popover 定位形态（防"祖先 overflow 裁切"回归）', (
   })
 
   it('宽度仍保留视口兜底（窄视口不溢出）', () => {
-    expect(pop).toMatch(/width:\s*min\(\s*680px\s*,\s*calc\(100vw\s*-\s*24px\)\s*\)/)
+    // 🔴 2026-10-18（owner：「可以到 1000px 宽」）：680 → 1000。
+    // ⚠️ 这条断言**刻意钉住"形如 min(<数字>px, calc(100vw - 24px))"这个结构**，
+    // 而不是钉住 680 这个具体值 —— 宽度是产品旋钮（会再变），
+    // 而"必须有视口兜底、否则窄屏溢出"是**不变量**。钉值会让每次调宽都红一次，
+    // 且红了之后容易被顺手改成 `expect(true)`（判据退化）。
+    expect(pop).toMatch(/width:\s*min\(\s*\d+px\s*,\s*calc\(100vw\s*-\s*24px\)\s*\)/)
+    // 正控：当前确实已经是 1000（若有人把它改回小值，上面那条结构断言仍会通过 ⇒ 需要这条）
+    expect(pop).toMatch(/width:\s*min\(\s*1000px\s*,/)
   })
 
   it('坐标由组件计算：useLayoutEffect + getBoundingClientRect + 视口夹取', () => {

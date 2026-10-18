@@ -116,11 +116,13 @@ afterEach(() => {
 })
 
 describe('cognitive_trajectory：工具面', () => {
-  it('工具名 = cognitive_trajectory；action 必填且枚举 = COGNITIVE_TRAJECTORY_ACTIONS（8 个）', () => {
+  it('工具名 = cognitive_trajectory；action 必填且枚举 = COGNITIVE_TRAJECTORY_ACTIONS（9 个，含 archive）', () => {
     expect(tool.name).toBe('cognitive_trajectory')
     expect(tool.parameters.action?.required).toBe(true)
     expect(tool.parameters.action?.enum).toEqual([...COGNITIVE_TRAJECTORY_ACTIONS])
-    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(8)
+    // 🔴 2026-10-18：8 → **9**（新增 `archive` —— 轨迹没有生命周期后，它是唯一的"状态变化"）
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(9)
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('archive')
     for (const k of ['name', 'summary', 'target', 'at', 'message', 'note', 'force', 'dryRun']) {
       expect(tool.parameters[k], `缺参数 ${k}`).toBeDefined()
     }
@@ -147,7 +149,8 @@ describe('cognitive_trajectory：list / show', () => {
     const out = (await run({ action: 'list' })) as string
     expect(out).toContain(A_DIR)
     expect(out).toContain('AGENT_SESSIONS Summary')
-    expect(out).toContain('Total:    1')
+    // 🔴 2026-10-18：计数字样改为「Active (not archived)」（四项生命周期计数已删）
+    expect(out).toContain('Active (not archived): 1')
   })
 
   it('空库：list 报无会话且统计为空库文案（不抛）', async () => {
@@ -315,13 +318,17 @@ describe('cognitive_trajectory：use —— 重命名门面（两态）', () => 
 })
 
 describe('cognitive_trajectory：use —— advisoryHint（只提示不阻断）', () => {
-  it('SESSION.md 陈旧（>7 天）⇒ 结果带 advisory 与天数', async () => {
+  it('🔴 SESSION.md 陈旧（>7 天）⇒ **不再有 advisory**（年龄已不是判据）', async () => {
+    // owner 2026-10-18：轨迹永存 ⇒ 「旧轨迹该退休了」这个前提消失。
+    // 旧实现在这里会返回 `… 已 N 天未更新 …` 的告警；现在必须**完全静默**。
+    // ⚠️ 这是**删除的钉子**：老化告警若回来，这条用例立刻红。
     const md = writeSession(A_DIR)
     const old = new Date(Date.now() - 8 * 86_400_000)
     utimesSync(md, old, old)
-    const out = (await run({ action: 'use', name: 'S900', summary: '概' })) as Record<string, string>
-    expect(out.advisory).toContain('天未更新')
-    expect(out.advisory).toContain(A_DIR)
+    const out = (await run({ action: 'use', name: 'S900', summary: '概' })) as Record<string, unknown>
+    expect(out.advisory, '年龄不再是判据 ⇒ 不得给任何老化提示').toBeUndefined()
+    // 正控：确实**激活成功**了（否则"无 advisory"可能只是因为它根本没跑到）
+    expect(out.dir, '激活必须真的成功，才能证明"静默"是判据生效而非路径没走到').toBe(A_DIR)
   })
 
   it('SESSION.md 新鲜 ⇒ 无 advisory 键（通过就静默）', async () => {
@@ -402,5 +409,93 @@ describe('cognitive_trajectory：其余动作的守卫与纯读面', () => {
 
   it('未知动作 ⇒ 抛 Unknown action（响亮而非静默）', async () => {
     await expect(run({ action: 'nope' })).rejects.toThrow('Unknown action: nope')
+  })
+})
+
+/**
+ * 🔴 2026-10-18 新增：`archive` —— 轨迹没有生命周期后，它是**唯一**的"状态变化"。
+ *
+ * 这组用例是本次改动的**核心判据**，四条各自对应一条会真出事的失效形态：
+ *  ① 归档后**仍出现在 list 里** ⇒ "归档"名不副实（`readAllSessions` 漏了 `_` 跳过）
+ *  ② 归档**覆盖了**同名既有轨迹 ⇒ 不可逆的丢失（唯一副本被毁）
+ *  ③ 归档**改动了内容** ⇒ 它不是"换位置"，而是"改写历史"
+ *  ④ 归档后 `use` 仍能激活它 ⇒ 归档区没有真正退出域
+ */
+describe('cognitive_trajectory：archive（🔴 唯一的"状态变化"，单向）', () => {
+  it('归档成功 ⇒ 目录移入 _archived/，且 list 里**不再出现**（判据①）', async () => {
+    writeSession(A_DIR)
+    const listBefore = (await run({ action: 'list' })) as string
+    expect(listBefore, '正控：归档前必须在清单里').toContain(A_DIR)
+
+    const out = (await run({ action: 'archive', name: 'S900' })) as Record<string, unknown>
+    expect(out.ok).toBe(true)
+    expect(out.dirName).toBe(A_DIR)
+
+    // 物理位置：旧路径没了、新路径在
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR)), '原位置必须已不存在').toBe(false)
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', '_archived', A_DIR)), '必须落在 _archived/').toBe(true)
+
+    // 🔴 判据①：list 里不得再出现
+    const listAfter = (await run({ action: 'list' })) as string
+    expect(listAfter, '归档后不得再出现在活跃清单里').not.toContain(A_DIR)
+    // 空仓走 summarize 的专属文案（不是计数行）—— 这本身就是"活跃数为 0"的证据
+    expect(listAfter).toContain('AGENT_SESSIONS/ is empty.')
+    expect(listAfter, '归档件不得被计入活跃').not.toContain('Active (not archived): 1')
+  })
+
+  it('归档**不得覆盖**同名既有轨迹（判据②：不可逆丢失的护栏）', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'archive', name: 'S900' })
+
+    // 再建一个同名的新轨迹，并塞不同内容 —— 然后试图再归档
+    writeSession(A_DIR, '# SESSION: alpha（新的一条，内容不同）\n')
+    await expect(run({ action: 'archive', name: 'S900' })).rejects.toThrow('already exists in _archived/')
+
+    // 🔴 负控：**先归档的那一份必须原封不动**（没被新内容覆盖，也没被删）
+    const kept = readFileSync(join(ccc, 'AGENT_SESSIONS', '_archived', A_DIR, 'SESSION.md'), 'utf-8')
+    expect(kept, '既有归档件的内容必须还是最早那一份').toBe(A_BODY)
+    // 并确认新那条仍在活跃区（报错不应产生任何副作用）
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR)), '归档失败 ⇒ 活跃区那条必须原地不动').toBe(true)
+  })
+
+  it('归档只换位置，**内容逐字节不变**（判据③：它不是改写历史）', async () => {
+    const md = writeSession(A_DIR)
+    const before = readFileSync(md, 'utf-8')
+    await run({ action: 'archive', name: 'S900' })
+    const after = readFileSync(join(ccc, 'AGENT_SESSIONS', '_archived', A_DIR, 'SESSION.md'), 'utf-8')
+    expect(after, 'SESSION.md 必须逐字节一致').toBe(before)
+  })
+
+  it('归档后 `use` 不再找得到它（判据④：归档区已退出域）', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'archive', name: 'S900' })
+    await expect(run({ action: 'use', name: 'S900', summary: '概' })).rejects.toThrow('Session not found')
+  })
+
+  it('dryRun ⇒ 只报路径不落盘（真故障形态：误用预览时把轨迹挪走了）', async () => {
+    writeSession(A_DIR)
+    const out = (await run({ action: 'archive', name: 'S900', dryRun: true })) as Record<string, unknown>
+    expect(String(out.message)).toContain('[dry-run]')
+    // 🔴 原地必须还在、归档区必须还不存在 —— 预览零副作用
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR)), 'dryRun 不得移动任何东西').toBe(true)
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', '_archived', A_DIR)), 'dryRun 不得创建归档件').toBe(false)
+  })
+
+  it('目标不存在 ⇒ 抛（响亮失败，不静默成功）', async () => {
+    await expect(run({ action: 'archive', name: 'S999' })).rejects.toThrow('Trajectory not found')
+  })
+
+  it('缺 name ⇒ 抛参数错', async () => {
+    await expect(run({ action: 'archive' })).rejects.toThrow('archive requires name')
+  })
+
+  it('🔴 `_archived` 本身不是轨迹：它不出现在 list，也不能被归档', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'archive', name: 'S900' })
+    const list = (await run({ action: 'list' })) as string
+    // 归档区目录名不得被当成一条轨迹列出来（`_` 前缀跳过的正控）
+    expect(list, '`_archived` 不得出现在清单里').not.toContain('_archived')
+    // 它的子项也不该被列
+    expect(list).not.toContain(A_DIR)
   })
 })

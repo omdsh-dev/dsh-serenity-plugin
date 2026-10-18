@@ -58,6 +58,7 @@ import {
   createSession,
   useSession,
   findSession,
+  archiveSession,
   COGNITIVE_TRAJECTORY_ACTIONS,
   DEFAULT_SESSION_SCOPE,
   getActiveSessionInfo,
@@ -231,12 +232,16 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     'cognitive_trajectory — one cognitive trajectory: its persistent body (SESSION.md) + its timeline.',
     'A cognitive trajectory is NOT the conversation: SESSION.md is the durable body and never moves;',
     'the dsh conversation is only its rebuildable carrier (Ship of Theseus — the carrier is replaced, the cognitive trajectory continues).',
+    'A COGNITIVE TRAJECTORY HAS NO LIFECYCLE — it does not complete, close, or expire, and age never counts against it;',
+    'it PERMANENTLY EXISTS. The only thing that ever changes is WHERE it is stored: archive moves it out of the active list',
+    'without touching a single byte of its directory or SESSION.md. There is no reverse action — to restore one, use container_fs mv.',
     // ── Tier 2 · 本体：动作按**效果**分三组（分组本身就是契约：一眼看出"这个动作改不改我的绑定"）──
     'ACTIONS, grouped by EFFECT (read the grouping before picking one):',
     '(A) LIFECYCLE — changes which cognitive trajectory THIS conversation is bound to:',
     'list (inventory + stats + anomaly marks) / show (read one SESSION.md) / create (make a NEW cognitive trajectory) /',
     'use (bind THIS conversation to an existing cognitive trajectory; inline integrity check — silent when fine, problems reported as hints, never errors) /',
-    'rebuild (clear-and-rebuild THIS conversation in place).',
+    'rebuild (clear-and-rebuild THIS conversation in place) /',
+    'archive (move a trajectory into the archived area so it leaves the active list; one-way, never overwrites, and its content is left byte-identical).',
     '(B) DELIVERY — sends ONE message to ANOTHER cognitive trajectory; your own binding is unchanged:',
     'send-now (deliver RIGHT NOW) / send-later (deliver at ONE future instant).',
     '(C) REFERENCE — cro-guide (how to give THIS cognitive trajectory its own program that decides when it should be woken).',
@@ -275,7 +280,8 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         'list (inventory + stats + anomaly marks) / show (S### or dir name or fuzzy keyword) /',
         'create (new cognitive trajectory; activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
         'use (activate context for THIS conversation; inline integrity check — pass silent, problems reported as hints, not errors) /',
-        'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note).',
+        'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note) /',
+        'archive (move a trajectory to the archived area; one-way, refuses to overwrite, content untouched — --dryRun previews).',
         'DELIVERY (sends one message to ANOTHER cognitive trajectory; your binding is unchanged):',
         'send-now (deliver RIGHT NOW; the target needs no prior setup — if it has no live session, one is created and bound automatically) /',
         'send-later (one future instant + one message; fire-and-forget, and it does NOT auto-create a target).',
@@ -456,6 +462,23 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
           instruction: 'Queued clear-and-rebuild: when this turn ends, the same conversation will be cleared and injected with the "continue the work" anchor (first-anchor protocol body included), then auto-continue — no manual input needed; resume from SESSION.md at that point.',
         }
       }
+      case 'archive': {
+        // 🔴 2026-10-18（owner 令）：**认知轨迹没有生命周期**，唯一的"变化"就是归档。
+        // 单向（owner 裁决 A2）：不设 unarchive；恢复 = 手工 container_fs mv 移回。
+        // 判据：不覆盖既有、纯 rename（目录与 SESSION.md 逐字节不动）——见 archiveSession 的注释。
+        if (!args.name) throw new Error('archive requires name (S### or directory name)')
+        const res = archiveSession(root, args.name, args.dryRun ?? false)
+        return {
+          ok: true,
+          dirName: res.dirName,
+          from: res.from,
+          to: res.to,
+          message: res.message,
+          note: res.dryRun
+            ? '预览：未落盘。'
+            : '已从活跃清单移出（目录与 SESSION.md 逐字节未改）。恢复方式：container_fs mv 移回 AGENT_SESSIONS/。',
+        }
+      }
       case 'send-later': {
         // v1.33：原 `wake-add` 并入本工具；**2026-09-17 由 `wake-later` 更名 `send-later`**（命名 A 案）。
         // 语义 = 一条「未来时刻 + 一条 message」；fire-and-forget：**无回执、不可回收、无面板**（用户明示接受）。
@@ -533,25 +556,21 @@ function renderWakeEntry(e: WakeEntry): string {
 }
 
 /**
- * `use` 的内联检查（v1.33）：**只报不依赖 SESSION.md 模板的两类可观测事实**，且**只提示不阻断**。
+ * `use` 的内联检查（v1.33；🔴 **2026-10-18 起只剩一条**）。
  *
- * 为什么只有两条（R↓）：原 `qa` 的六节名检查与 `health` 的 stalled/drift 都建立在"旧模板合规"假设上，
- * 而 ACC 层的编写标准已升级为 **EAP**（用户裁决：「这说明 qa 应该淘汰了」）⇒ 那类判据淘汰；
- * 剩下与模板无关、且"用到时才发现最划算"的只有：
- *   ① **空壳**：目录在但没有 SESSION.md（无正文可载 ⇒ 由 useSession 阻断，此处只是提前说清）
- *   ② **长期无活动**：SESSION.md 的 mtime 过旧（按 HEALTH_STALE_DAYS 同口径）
+ * 为什么只剩"空壳"这一条（R↓）：另一条是「SESSION.md 已 N 天未更新」的老化告警，
+ * 而 **owner 2026-10-18 裁决「认知轨迹没有生命周期」** ⇒ "旧轨迹该退休了"这个前提消失：
+ * **旧不是问题**，激活一条 300 天前的轨迹与激活昨天的是同一件事。
+ * ⇒ 老化告警不是在提示风险，它是在**暗示一个已不存在的规矩**，故删除。
+ *
+ * 剩下的这条**与模板、与年龄都无关**，它是纯粹的**事实缺失**：
+ * 目录在但没有 SESSION.md ⇒ 激活必然失败（`useSession` 会阻断），提前说清比让人撞墙好。
+ *
  * @param dirName 目标轨迹目录名
  * @param mdPath 目标 SESSION.md 绝对路径
  * @returns 提示文本；无异常 → null（**通过就静默**）
  */
 function advisoryHint(dirName: string, mdPath: string): string | null {
   if (!existsSync(mdPath)) return `⚠ ${dirName}: 目录存在但没有 SESSION.md（空壳）——本次激活会失败，先补正文或改用 create`
-  let ageDays = 0
-  try {
-    ageDays = (Date.now() - statSync(mdPath).mtimeMs) / 86_400_000
-  } catch {
-    return null
-  }
-  if (ageDays >= 7) return `⚠ ${dirName}: SESSION.md 已 ${Math.floor(ageDays)} 天未更新——激活的是旧轨迹，确认是否接续的是它`
   return null
 }

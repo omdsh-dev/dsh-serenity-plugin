@@ -18,6 +18,7 @@ import {
 } from './ccc.js'
 import { cccRootForCwd } from './ccc-roots.js'
 import { ACC_VERSION } from './constants.js'
+import { listActiveTrajectories, type TrajectorySummary } from './cognitive-trajectory-ops.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
 import { isoLocal } from './time.js'
 
@@ -113,6 +114,13 @@ interface SerenityStatus {
   blacklist: { pattern: string; message?: string }[]
   threshold: number | null
   cheapWorkerModel: string | null
+  /**
+   * 活跃轨迹清单（owner 2026-10-18：CCC 状态面板要展示"所有没有归档的轨迹"）。
+   * 🔴 判据源 = `listActiveTrajectories`（它内含 `_` 前缀跳过 ⇒ 归档区自动不在域内）；
+   * ⛔ 面板侧**不得自己扫目录** —— 那会长出第二份会漂的实现。
+   * 无 CCC 根时为 `[]`。
+   */
+  trajectories: TrajectorySummary[]
   restrict: {
     lastKey: string | null
     lastAttemptAt: string | null
@@ -133,7 +141,7 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     nodeVersion: process.version,
   }
   if (!root) {
-    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, cheapWorkerModel: null, restrict }
+    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, cheapWorkerModel: null, trajectories: [], restrict }
   }
   const cfg = loadSerenityConfig(root, configPaths)
   return {
@@ -143,6 +151,8 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     blacklist: readBlacklist(root, configPaths),
     threshold: cfg.sessionKeeper?.threshold ?? null,
     cheapWorkerModel: readCheapWorkerConfig(root, configPaths)?.defaultModel ?? null,
+    // 🔴 面板数据源：**复用**轨迹层的判据（含 `_` 跳过），不在这里自己扫目录
+    trajectories: listActiveTrajectories(root),
     restrict,
   }
 }
