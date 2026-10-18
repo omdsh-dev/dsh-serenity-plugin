@@ -26,6 +26,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
+import { injectVoyageVocab, scanVoyageLiveVocab } from './voyage-vocab.js'
 // 类型引用：拉入 webserver 的 cordis 声明增强（ctx.webServer）；运行时擦除
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
@@ -76,8 +77,14 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 /**
  * 注册 `/serenity/voyage`（GET）。
  * @param opts.assetPath 覆盖资产路径（测试用；生产不传）
+ * @param opts.resolveRoot 解析本次请求所属 CCC 根（生产由 api.ts 的 resolveWorkspace 提供）。
+ *   🔴 **2026-10-18 新增**：词表按请求所属 CCC **运行时注入**（owner 报「在别的 CCC 点开
+ *   显示的还是 home-serenity 的信息」）。不传 ⇒ 不注入（保持资产原样 = 旧行为）。
  */
-export function registerVoyageApi(ctx: Context, opts: { assetPath?: string } = {}): void {
+export function registerVoyageApi(
+  ctx: Context,
+  opts: { assetPath?: string; resolveRoot?: (req: IncomingMessage) => string | null } = {},
+): void {
   ctx.webServer.register({
     kind: 'exact',
     path: VOYAGE_PATH,
@@ -93,11 +100,29 @@ export function registerVoyageApi(ctx: Context, opts: { assetPath?: string } = {
         sendJson(res, 500, { error: `voyage asset unavailable: ${err?.message ?? String(err)}` })
         return
       }
+      // ── 词表按当前 CCC 注入（只改那一行；任何环节失败 ⇒ 原样返回）──
+      let root: string | null = null
+      try {
+        root = opts.resolveRoot?.(req) ?? null
+      } catch {
+        root = null // 解析失败不该让整页打不开
+      }
+      if (root !== null) {
+        try {
+          html = injectVoyageVocab(html, scanVoyageLiveVocab(root))
+        } catch {
+          /* 注入失败 ⇒ 用资产自带词表（退化到旧行为，仍可用） */
+        }
+      }
       res.statusCode = 200
       res.setHeader('content-type', 'text/html; charset=utf-8')
-      // 资产随**包版本**变，而 URL 稳定 ⇒ 由 client 用 `?v=<accVersion>` 打版本号；
-      // 同版本可长缓存（830 KB 只拉一次），升级即换 URL 自动失效。
-      res.setHeader('cache-control', 'private, max-age=86400')
+      // 🔴 **缓存策略因注入而改变**（2026-10-18）：
+      //   注入前资产是**与 CCC 无关的静态文件** ⇒ `max-age=86400` 合理。
+      //   注入后同一 URL 在**不同 CCC 下返回不同内容** ⇒ 长缓存会让"切了 CCC 还是旧词表"，
+      //   而这正是本轮要修的那类"看到别人的信息"病症的同族形态。
+      //   ⇒ 改 `no-cache`（**可缓存但每次回源校验**）：830 KB 走 304 仍很便宜，
+      //      而正确性优先于那点带宽。未注入时（resolveRoot 未接）仍给长缓存。
+      res.setHeader('cache-control', root !== null ? 'no-cache' : 'private, max-age=86400')
       res.setHeader('content-length', String(Buffer.byteLength(html)))
       res.end(html)
     },

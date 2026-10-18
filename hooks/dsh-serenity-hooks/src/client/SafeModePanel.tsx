@@ -360,12 +360,20 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                 （只在展开时请求一次）、关闭即卸载 ⇒ WebGL 上下文随之释放。
               · ?card=1 → 卡片模式（作品自带的大标题/航速/事实面板/铭牌层全部让位）
               · ?v=版本 → 资产随包变、URL 稳定 ⇒ 用 ACC 版本号打点，升级即失效重取
+              🔴 ?workspace=本面板所属 CCC → **词表按这个 CCC 运行时注入**（2026-10-18 缺陷：
+                别的 CCC 打开动画看到的仍是构建它的那个 CCC 的技能/工具名）。
+                ⚠️ 这一项**必须传**：src 若只带版本号，服务端无从知道"这一帧属于哪个 CCC"，
+                而多 CCC 共存时它的兜底第③步**故意不猜**（见 api.ts `resolveWorkspaceCore`）
+                ⇒ 不注入 ⇒ 退回资产里写死的词表 ⇒ 缺陷原样复现。两条修法是**互为前提**的。
+                取值 = `status.root`（本面板正在显示的那个 CCC，与轨迹/技能同源）。
               · aria-hidden + 无 tabindex：纯装饰，不进无障碍树、不可聚焦
               · DOM 顺序放正文之后 ⇒ 单栏（窄屏）时动画自然落在信息**下方** */}
           <div className={cx('sp-voyage')} aria-hidden="true">
             <iframe
-              key={status.accVersion}
-              src={`/serenity/voyage?card=1&v=${encodeURIComponent(status.accVersion)}`}
+              key={`${status.accVersion}|${status.root ?? ''}`}
+              src={`/serenity/voyage?card=1&v=${encodeURIComponent(status.accVersion)}${
+                status.root ? `&workspace=${encodeURIComponent(status.root)}` : ''
+              }`}
               title=""
               loading="lazy"
               tabIndex={-1}

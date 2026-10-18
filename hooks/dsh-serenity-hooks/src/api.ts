@@ -161,10 +161,24 @@ interface StatusApiRegistration {
 }
 
 /**
- * 从请求参数解析 workspace：优先 sessionId → 会话 header.cwd；其次 workspace 参数；
- * 无参 → 遍历 live sessions 找第一个 CCC 会话的 cwd（远程访问时 sessionId 可能缺失，
- * 回退 process.cwd()=$HOME 会错误显示"未激活"——v1.22.2 修复）；最后进程 cwd。
- * 纯逻辑（可单测）：resolveWorkspaceCore(sessionCwd, workspaceParam, listCwds)。
+ * 从请求参数解析 workspace：sessionId → 会话 header.cwd；其次 workspace 参数；
+ * 再次**唯一**的 CCC 会话 cwd；最后进程 cwd。
+ *
+ * 🔴🔴 **2026-10-18 修缺陷（owner 报「在别的 CCC 点开显示的还是 home-serenity 的信息」）**：
+ * 旧实现第 ③ 步是「**遍历 live sessions 找第一个 CCC 会话的 cwd**」—— 那是**跨工作区猜测**：
+ * 只要 sessionId 缺失或那条会话查不到（ACP/skiff 会话、尚未 materialize 的会话、远程访问），
+ * 它就会**静默返回另一个 CCC 的路径**，于是面板把**别人的轨迹/技能/安全模式**当成你的显示出来。
+ * 这比"显示未激活"危险得多 —— 用户会据此做判断（以为自己的 safe-mode 开着、以为那是自己的轨迹）。
+ *
+ * 修法与既有先例一致（`rebuild.ts` 对"跨轨迹猜测"的裁决：**响亮失败优于静默接错**）：
+ * **多个候选 ⇒ 不猜**。只有当 live sessions 里的 CCC 根**唯一**时才采用它
+ * （那正是 v1.22.2 要救的场景：单 CCC 部署 + 远程访问缺 sessionId）；
+ * 一旦出现**两个及以上**不同 CCC 根，就退回进程 cwd（→ 面板显示"未激活"），绝不挑一个顶替。
+ *
+ * @param sessionCwd sessionId 查到的会话 cwd（最权威）
+ * @param workspaceParam 显式 workspace 参数
+ * @param listCwds 枚举 live sessions 的 cwd（用于"唯一 CCC"兜底）
+ * @param fallback 最后兜底（进程 cwd）
  */
 export function resolveWorkspaceCore(
   sessionCwd: string | undefined,
@@ -174,13 +188,23 @@ export function resolveWorkspaceCore(
 ): string {
   if (sessionCwd) return sessionCwd
   if (workspaceParam) return workspaceParam
+  // ③ **唯一** CCC 根才兜底；多候选一律不猜（见上方注释）
+  const roots = new Set<string>()
   for (const cwd of listCwds()) {
-    if (cwd && cccRootForCwd(cwd)) return cwd
+    if (!cwd) continue
+    const r = cccRootForCwd(cwd)
+    if (r) roots.add(r)
   }
+  if (roots.size === 1) return [...roots][0] as string
   return fallback
 }
 
-function resolveWorkspace(ctx: Context, params: { sessionId?: string; workspace?: string }): string {
+/**
+ * 解析本次请求所属的 workspace。
+ * 🔴 2026-10-18：导出给 `registerVoyageApi` 复用（航行页词表按当前 CCC 注入）——
+ * **单一真相源**，⛔ 不让调用方另写一份"找 CCC"的逻辑。
+ */
+export function resolveWorkspace(ctx: Context, params: { sessionId?: string; workspace?: string }): string {
   let sessionCwd: string | undefined
   if (params.sessionId) {
     const session = hostSessions(ctx)?.get?.(params.sessionId as SessionId)

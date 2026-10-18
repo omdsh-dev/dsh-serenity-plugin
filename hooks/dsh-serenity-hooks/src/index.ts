@@ -31,7 +31,7 @@ import { registerKeeper } from './seams/keeper.js'
 import { registerContext } from './seams/context.js'
 import { registerEntrySkillSectionGlobal } from './seams/system-prompt.js'
 import { registerCompactRetention } from './seams/compact.js'
-import { registerStatusApi } from './api.js'
+import { registerStatusApi, resolveWorkspace } from './api.js'
 import { registerVoyageApi } from './voyage-page.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
@@ -437,7 +437,19 @@ export function apply(ctx: Context, config: Config): void {
     // S142 §12.44：宁静号航行动画（ACC 层静态资产）——
     // /serenity/voyage 发 assets/serenity-voyage.html（无参=全屏版 / ?card=1=卡片模式），
     // 供会话头部状态胶囊展开卡片（SafeModePanel 的 sp-pop）当背景层用。
-    registerVoyageApi(ctx)
+    // 🔴 2026-10-18：词表按**请求所属 CCC** 运行时注入（owner 报「别的 CCC 也显示 home-serenity」）。
+    //   根解析**复用 api.ts 的 resolveWorkspace** —— 与状态面板同一套判据（单一真相源），
+    //   ⛔ 不在这里另写一份"找 CCC"的逻辑（那会长出第二份会漂的实现）。
+    registerVoyageApi(ctx, {
+      resolveRoot: (req) => {
+        const url = new URL(req.url ?? '/', 'http://localhost')
+        const ws = resolveWorkspace(ctx, {
+          sessionId: url.searchParams.get('sessionId') ?? undefined,
+          workspace: url.searchParams.get('workspace') ?? undefined,
+        })
+        return cccRootForCwd(ws)
+      },
+    })
   }
   // v1.21 分层：简单配置（开关/阈值）注册到 dsh 原生设置面板（零改 DSH；
   // 旧 RC 白名单存在时 client 侧自动降级，账号复杂配置走宁静号面板不受影响）
