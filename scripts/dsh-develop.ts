@@ -1253,8 +1253,25 @@ function cmdRestartWeb(): void {
     }
   })()
   const log = `/tmp/dsh-web-restart-v${currentVersion().pkg}.log`
-  const cmd = `cd ${process.env.HOME ?? ''} && setsid nohup node --max-old-space-size=${heapMb} ${bin} web > ${log} 2>&1 < /dev/null & disown`
   console.log(`[dsh-develop]    堆上限 --max-old-space-size=${heapMb} MB（按 MemTotal 推导）`)
+  // 🔴 2026-10-18（owner 令「我们 dsp 占用内存不能过多」）—— 加**按需**诊断报告开关：
+  //   进程收到 SIGUSR2 时把 V8 诊断报告写到 `--report-directory`（默认 cwd）。
+  //   报告按**堆空间分项**报数（old_space / large_object_space / code_space / external_memory），
+  //   这正是「4.87 GB 到底是什么」缺的那一维 —— 只靠 RSS 与 VmHWM 只能知道"多"，
+  //   说不出"多在哪一份里"。
+  //   ⚠️ **默认不开 `--report-on-fatalerror`**：那会在 OOM 崩溃时额外写盘，崩溃现场要的是"能重启"，
+  //      而不是再抢一次 IO。分析用信号按需触发即可 ⇒ 平时**零开销**（无定时器、无采样）。
+  const reportDir = join(process.env.HOME ?? '', '.dsh', 'logs', 'heap-reports')
+  try {
+    mkdirSync(reportDir, { recursive: true })
+  } catch {
+    /* 建不出来就不带该 flag（不因诊断能力让宿主起不来） */
+  }
+  const reportFlags = `--report-on-signal --report-signal=SIGUSR2 --report-directory=${reportDir} --report-filename=heap-${Date.now()}.json`
+  console.log(`[dsh-develop]    诊断报告：kill -USR2 <pid> ⇒ ${reportDir}`)
+  // 报告 flag 用环境变量传（Node 认 NODE_OPTIONS 里的诊断类 flag），
+  // 这样不必拼进 setsid 的命令串、也不会与 --max-old-space-size 的位置耦合。
+  const cmd = `cd ${process.env.HOME ?? ''} && NODE_OPTIONS="${reportFlags}" setsid nohup node --max-old-space-size=${heapMb} ${bin} web > ${log} 2>&1 < /dev/null & disown`
   const r = run('bash', ['-c', cmd], { cwd: process.cwd(), quiet: true })
   if (r.status !== 0) fail(`web 启动失败: ${r.stderr}`, 2)
   console.log(`[dsh-develop] ✓ web 已重启（bin: ${bin}，日志: ${log}）`)
