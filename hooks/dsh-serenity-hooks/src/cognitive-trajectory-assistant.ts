@@ -1,8 +1,8 @@
 /**
- * trajectory-assistant.ts — 关卡化注入的统一命名与风格门面（v0.3，S142）
+ * cognitive-trajectory-assistant.ts — 关卡化注入的统一命名与风格门面（v0.3，S142）
  *
  * 概念（用户拍板 2026-09-05）：dsp 全部"过程中动态提示注入"统一命名为
- * trajectory-assistant（轨迹助航员）。关卡设计思想塑造**结构与时机**
+ * cognitive-trajectory-assistant（轨迹助航员）。关卡设计思想塑造**结构与时机**
  * （何时/何地注入），**不用于提示词用词**（D8 词法原则）——纯游戏黑话
  * （BOSS/XP/level-up）禁止出现在提示词文本；CHECKPOINT/LIMIT/TUTORIAL 等
  * 跨领域自然通用词允许。
@@ -15,7 +15,7 @@
  * L6 结算）仅在本模块注释与内部文档出现，永不浮现在提示词文本。
  *
  * 结算（settlement）挂点：D6 用户拍板——若 CCC 有标准 SESSION 复盘仪式，
- * 结算视图归 trajectory-assistant。当前 close/archive 无复盘摘要 ⇒ 机制延后。
+ * 结算视图归 cognitive-trajectory-assistant。当前 close/archive 无复盘摘要 ⇒ 机制延后。
  * 🔴 2026-09-25（S142 分批清死代码·第 1 批）：原先那个 `onSettlement(cb)` **空 seam 已删**
  * （零调用者、无触发器、空实现）——仪式真落地时按当时的信号重新设计，**不再靠空占位**。
  */
@@ -44,9 +44,9 @@ export const EVENT_LABEL = {
 } as const
 
 /** 家族标识（所有动态注入统一前缀） */
-export const ASSISTANT_PREFIX = 'TRAJECTORY-ASSISTANT'
+export const ASSISTANT_PREFIX = 'COGNITIVE-TRAJECTORY-ASSISTANT'
 
-/** 完整 token：`[TRAJECTORY-ASSISTANT · <LABEL>]` */
+/** 完整 token：`[COGNITIVE-TRAJECTORY-ASSISTANT · <LABEL>]` */
 export function eventToken(event: keyof typeof EVENT_LABEL): string {
   return `[${ASSISTANT_PREFIX} · ${EVENT_LABEL[event]}]`
 }
@@ -78,7 +78,7 @@ export const REBUILD_TODO_FILENAME = 'REBUILD-TODO.md'
 // ── 风格门面（D8：仅 plain 与 metaphor；无 game 档）──
 
 /** 风格档位：plain（默认，精确文本）/ metaphor（借星舰词——产品隐喻非游戏词） */
-type TrajectoryStyle = 'plain' | 'metaphor'
+type CognitiveTrajectoryStyle = 'plain' | 'metaphor'
 
 /** 星舰词变体（仅在 style=metaphor 时替换可见前缀；正文不动） */
 const METAPHOR_PREFIX: Record<keyof typeof EVENT_LABEL, string> = {
@@ -96,7 +96,7 @@ const METAPHOR_PREFIX: Record<keyof typeof EVENT_LABEL, string> = {
  * 星舰化变体时替换用词（当前等价保留——星舰词库隐喻域的既有措辞即
  * "context limit/deck check" 类，不强制替换；扩展点留给未来实验）。
  */
-export function styledToken(event: keyof typeof EVENT_LABEL, style: TrajectoryStyle = 'plain'): string {
+export function styledToken(event: keyof typeof EVENT_LABEL, style: CognitiveTrajectoryStyle = 'plain'): string {
   if (style === 'metaphor' && METAPHOR_PREFIX[event]) {
     return `[${ASSISTANT_PREFIX} · ${METAPHOR_PREFIX[event]}]`
   }

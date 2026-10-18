@@ -30,18 +30,18 @@ import type { Context } from 'cordis'
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import { existsSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { isSafeModeOn, readBlacklist, readTrajectorySkills } from '../ccc.js'
+import { isSafeModeOn, readBlacklist, readCognitiveTrajectorySkills } from '../ccc.js'
 import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
 import { buildResourceIndex } from '../skills/resource-index.js'
-import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory-ops.js'
-import { readLastBound } from '../trajectory-bound.js'
+import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../cognitive-trajectory-ops.js'
+import { readLastBound } from '../cognitive-trajectory-bound.js'
 import {
-  buildTrajectorySkillsSection,
-  hasTrajectorySkillsDeclaration,
-  TRAJECTORY_SKILLS_MAX_CHARS,
-} from '../trajectory-skills.js'
+  buildCognitiveTrajectorySkillsSection,
+  hasCognitiveTrajectorySkillsDeclaration,
+  COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
+} from '../cognitive-trajectory-skills.js'
 import { recordSkillInjections } from '../usage-stats.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
 import { readAdvancedSettings } from '../config-ops.js'
@@ -108,7 +108,7 @@ export function toolsBlock(): string {
     'The ACC (this plugin) provides the following built-in tools:',
     '',
     '  container_fs — container filesystem operations (15 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find)',
-    '  container_trajectory — one trajectory: its persistent body (SESSION.md) + its timeline. Lifecycle: list (inventory + stats) / show / create / use (activate; inline integrity check — silent when fine) / rebuild (clear-and-rebuild this conversation in place, Ship of Theseus); delivery: send-now (deliver one message RIGHT NOW; live target injected immediately, non-live cold-resumed like a direct wake — returns a synchronous receipt) / send-later (one future instant + one message to any trajectory; fire-and-forget — no receipt, no recall) / cro-guide (the CRO programming guide: how to give THIS trajectory its own program that decides when it should be woken)',
+    '  cognitive_trajectory — one cognitive trajectory: its persistent body (SESSION.md) + its timeline. Lifecycle: list (inventory + stats) / show / create / use (activate; inline integrity check — silent when fine) / rebuild (clear-and-rebuild this conversation in place, Ship of Theseus); delivery: send-now (deliver one message RIGHT NOW; live target injected immediately, non-live cold-resumed like a direct wake — returns a synchronous receipt) / send-later (one future instant + one message to any cognitive trajectory; fire-and-forget — no receipt, no recall) / cro-guide (the CRO programming guide: how to give THIS cognitive trajectory its own program that decides when it should be woken)',
     '  dashboard    — always-on container instruments: health (CCC three-principle check + registry integrity) / time (now) / wait (N seconds)',
     '  container_git— git operations (status/commit/push/log/pull/diff)',
     '  msm          — execute a registered CCC MSM: msm(name, args); partial name returns candidates; inspect=true shows usage',
@@ -145,7 +145,7 @@ export function cceBlock(): string {
     '',
     '1. Continuity — every interaction modifies the container\'s future state. Before',
     '   acting, consult what came before — prior decisions, abstractions, constraints.',
-    '   You are part of a trajectory, not a fresh start.',
+    '   You are part of a cognitive trajectory, not a fresh start.',
     '',
     '2. Bounded Space — the container has boundaries. Respect them. Do not assume',
     '   knowledge that has not been accumulated within this container.',
@@ -197,10 +197,10 @@ export function principlesBlock(root: string, omitMsmPrinciples = false): string
     'fault to be hidden. Never disguise or excuse what you do not know;',
     'not-knowing is a state to be repaired, and reporting it is the first repair.',
     '',
-    'The session-trajectory relation: a session is the rebuildable carrier of a',
-    'trajectory. SESSION.md is the trajectory\'s persistent body — it never moves;',
+    'The session–cognitive-trajectory relation: a session is the rebuildable carrier of a',
+    'cognitive trajectory. SESSION.md is the cognitive trajectory\'s persistent body — it never moves;',
     'the current conversation is a temporary work copy that may be discarded and',
-    'rebuilt (container_trajectory rebuild). Identity belongs to the trajectory, not to any',
+    'rebuilt (cognitive_trajectory rebuild). Identity belongs to the cognitive trajectory, not to any',
     'session.',
     '',
   ]
@@ -320,15 +320,16 @@ export function metaphorBlock(): string {
     '   ballast (constraints) before setting course. Verdict: skipping the',
     '   inspection and launching directly = flying uninspected.',
     '',
-    '7. The Ship\'s Log → Trajectory Tracking. SESSION.md is the trajectory\'s log —',
+    '7. The Ship\'s Log → Cognitive Trajectory Tracking. SESSION.md is the',
+    '   cognitive trajectory\'s log —',
     '   the persistent body of the voyage; sessions are rebuildable carriers of',
-    '   the trajectory. Discard the carrier, keep the log. Unrecorded =',
+    '   the cognitive trajectory. Discard the carrier, keep the log. Unrecorded =',
     '   unvoyaged. Verdict: finishing multi-step work without a progress record',
     '   = a missing page.',
     '',
     '8. The Ship of Theseus → Continuity. Planks may be replaced; the ship',
     '   remains the same. The container can be rebuilt; identity persists.',
-    '   You are part of a trajectory, not a new ship. Verdict: acting',
+    '   You are part of a cognitive trajectory, not a new ship. Verdict: acting',
     '   without consulting precedent = a different ship.',
     '',
     'THE CREW — multi-agent collaboration',
@@ -458,10 +459,10 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
   return [
     '',
     '=== Serenity Session ===',
-    `Active session: ${active.sessionId} — ${active.dirName} (this session is the rebuildable carrier of the trajectory)`,
-    `SESSION.md path: ${active.mdPath} (the trajectory's persistent body — stays in place through rebuilds)`,
+    `Active session: ${active.sessionId} — ${active.dirName} (this session is the rebuildable carrier of the cognitive trajectory)`,
+    `SESSION.md path: ${active.mdPath} (the cognitive trajectory's persistent body — stays in place through rebuilds)`,
     '',
-    'Rules (SESSION.md is the trajectory log — keep its format & granularity fixed):',
+    'Rules (SESSION.md is the cognitive trajectory log — keep its format & granularity fixed):',
     '  • Write only when a MILESTONE landed or a DECISION was made — not every round',
     '  • One entry = one abstraction level, at the highest one that can express it:',
     '    identity/anchors (rare) › decision (one line + rationale/rejected) › milestone',
@@ -485,12 +486,12 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
     'This preserves the session context across todo updates.',
     'Do NOT remove or reorder this item — keep it at position 0.',
     '',
-    'TRAJECTORY-ASSISTANT: a background tracker scores your tool use (write/edit=3,',
+    'COGNITIVE-TRAJECTORY-ASSISTANT: a background tracker scores your tool use (write/edit=3,',
     'task=10, read/grep/glob/msm=1, +1 per minute) and reminds you with a',
-    '[TRAJECTORY-ASSISTANT · CHECKPOINT] message when the threshold is reached. On every such',
+    '[COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT] message when the threshold is reached. On every such',
     'reminder you MUST reply with the exact ACK code:',
-    '  [TRAJECTORY-ASSISTANT-recorded-{code}]  — if you recorded progress to SESSION.md',
-    '  [TRAJECTORY-ASSISTANT-skipped-{code}]  — if nothing to record this round',
+    '  [COGNITIVE-TRAJECTORY-ASSISTANT-recorded-{code}]  — if you recorded progress to SESSION.md',
+    '  [COGNITIVE-TRAJECTORY-ASSISTANT-skipped-{code}]  — if nothing to record this round',
     'Do not ignore the reminder; do not stop ongoing work. Codes are single-use;',
     'never reuse a prior code.',
     '',
@@ -648,15 +649,15 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
 }
 
 /**
- * 轨迹 skill 注入 section（规格 `docs/trajectory-skill-injection.md` §3，v1.34.1）。
+ * 轨迹 skill 注入 section（规格 `docs/cognitive-trajectory-skill-injection.md` §3，v1.34.1）。
  *
  * **声明来源（两条，并集）**：
- *   · **CCC 级**（v1.44.0，owner 令）= `.opencode/serenity.json` 的 `trajectory.skills`
+ *   · **CCC 级**（v1.44.0，owner 令）= `.opencode/serenity.json` 的 `cognitiveTrajectory.skills`
  *     ——**本 CCC 的每条轨迹都带**（含 skiff 角色会话），是容器给的底座；
  *   · **轨迹级** = 该会话绑定的轨迹（`readLastBound(session).mdPath` = 它的 `SESSION.md`）
  *     顶部 frontmatter 的 `skills:`——这条轨迹额外的。
- *   合并规则与顺序见 `trajectory-skills.mergeSkillNames`（CCC 级在前，同名去重）。
- *   正文 = 合并清单里各 skill 的 `SKILL.md` 全文（本模块只注册，装配在 `trajectory-skills.ts`）。
+ *   合并规则与顺序见 `cognitive-trajectory-skills.mergeSkillNames`（CCC 级在前，同名去重）。
+ *   正文 = 合并清单里各 skill 的 `SKILL.md` 全文（本模块只注册，装配在 `cognitive-trajectory-skills.ts`）。
  *
  * 为什么是 **per-agent scoped section**（与 `registerEntrySkillSection` 同形）：注入必须
  * **绑定期间持续存在**（a2）——一次性注入会随对话压缩消失，而 section 每次装配重新求值。
@@ -667,24 +668,24 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
  *     自动跟上（**动态注入，不缓存**），且绑定消失时返回 `''`
  *     （宿主 renderSections **丢弃空 section**，不残留噪声）。
  *
- * ⚠️ 路径取自绑定的 `mdPath`（权威记录），**不用** `resolveSessionTrajectoryLabel` 的显示 label
+ * ⚠️ 路径取自绑定的 `mdPath`（权威记录），**不用** `resolveSessionCognitiveTrajectoryLabel` 的显示 label
  * 去拼路径——label 是模糊匹配的展示码，拼路径即模糊匹配当精确匹配用。
  *
  * @param agent 目标 agent（其 `session` 需有 `header.id` + `header.cwd`）
  * @param root 该 agent 的 CCC 根
  * @returns 是否**本次**完成注册（已注册过 / 门未过 → false）
  */
-const trajectorySkillAgents = new Set<string>()
+const cognitiveTrajectorySkillAgents = new Set<string>()
 
-export function registerTrajectorySkillSection(agent: Agent, root: string): boolean {
+export function registerCognitiveTrajectorySkillSection(agent: Agent, root: string): boolean {
   const session = agent.session
   const key = (session as { id?: string }).id ?? 'global'
-  if (trajectorySkillAgents.has(key)) return false
+  if (cognitiveTrajectorySkillAgents.has(key)) return false
   const bound = readLastBound(session)
   if (!bound) return false
   // 门（v1.44.0 放宽）：**CCC 有声明 ∨ 该轨迹有声明** ⇒ 注册。
   // 轨迹级那条老规则不变（无绑定 / 两条来源皆无 ⇒ 不注册，不产生空 section、不产生噪声）。
-  if (readTrajectorySkills(root).length === 0 && !hasTrajectorySkillsDeclaration(root, bound.mdPath)) return false
+  if (readCognitiveTrajectorySkills(root).length === 0 && !hasCognitiveTrajectorySkillsDeclaration(root, bound.mdPath)) return false
   try {
     agent.ctx.systemPrompt.section({
       name: 'serenity-trajectory-skills',
@@ -695,18 +696,18 @@ export function registerTrajectorySkillSection(agent: Agent, root: string): bool
         if (!current) return ''
         // 🔴 动态注入（owner 令 2026-09-20：「注入是动态注入就行」）：CCC 配置与轨迹 frontmatter
         // **每请求重读**——改配置/改 frontmatter 都即时生效，无需重新 use、无需重启，故不缓存。
-        return buildTrajectorySkillsSection(
+        return buildCognitiveTrajectorySkillsSection(
           root,
           current.mdPath,
-          TRAJECTORY_SKILLS_MAX_CHARS,
-          readTrajectorySkills(root),
+          COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
+          readCognitiveTrajectorySkills(root),
           // 🆕 用量统计（owner 令 2026-09-22）：记一笔 `skill.injections`（与 `skill.loads` 分字段）。
           // 🔴 纯观测 —— 回调**只在真的带上了非空 skill 清单**时被调用（见该函数内注释）。
           (names) => recordSkillInjections(root, names),
         )
       },
     })
-    trajectorySkillAgents.add(key)
+    cognitiveTrajectorySkillAgents.add(key)
     return true
   } catch {
     return false

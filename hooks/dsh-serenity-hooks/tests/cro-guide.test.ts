@@ -32,8 +32,8 @@ import {
   croGuidePayload,
   renderCroSampleSnapshot,
 } from '../src/cro-guide.js'
-import { TRAJECTORY_ACTIONS } from '../src/trajectory-ops.js'
-import { createTrajectoryTool } from '../src/tools/trajectory.js'
+import { COGNITIVE_TRAJECTORY_ACTIONS } from '../src/cognitive-trajectory-ops.js'
+import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory.js'
 
 /** 按 `a.b.c` 取值（**取不到返回 undefined**，不抛 —— 本测试就是要判"取不取得到"） */
 function getPath(obj: unknown, path: string): unknown {
@@ -57,7 +57,7 @@ describe('CRO 指南: 出口形状（guide 老套路，设计 §8.1）', () => {
     const root = mkdtempSync(join(tmpdir(), 'cro-guide-act-'))
     writeFileSync(join(root, '.serenity'), '')
     try {
-      const tool = createTrajectoryTool({} as never) as unknown as {
+      const tool = createCognitiveTrajectoryTool({} as never) as unknown as {
         execute: (args: unknown, exec: unknown) => Promise<unknown>
       }
       const out = await tool.execute({ action: 'cro-guide' }, { agent: { session: { header: { cwd: root } } } })
@@ -70,8 +70,8 @@ describe('CRO 指南: 出口形状（guide 老套路，设计 §8.1）', () => {
   })
 
   it('🔴 动作集合含 cro-guide（动作面 = 单一真相源，schema enum 由它派生）', () => {
-    expect([...TRAJECTORY_ACTIONS]).toContain('cro-guide')
-    expect(TRAJECTORY_ACTIONS).toHaveLength(8) // 7 → 8（本轮新增第 8 个）
+    expect([...COGNITIVE_TRAJECTORY_ACTIONS]).toContain('cro-guide')
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(8) // 7 → 8（本轮新增第 8 个）
   })
 
   it('指南非空且是多行正文（不是占位符）', () => {

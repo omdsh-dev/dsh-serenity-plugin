@@ -1,14 +1,14 @@
 /**
- * trajectory.ts — `container_trajectory` 真实 DSH 工具定义（defineTool）
+ * trajectory.ts — `cognitive_trajectory` 真实 DSH 工具定义（defineTool）
  *
  * v1.33（S142 §32 用户裁决）：由 `logbook` **更名并收敛为 `trajectory`**（v1.34：工具名再硬切为
- * `container_trajectory`，无别名）——trajectory 是一等概念
+ * `container_trajectory`，无别名）——cognitive trajectory 是一等概念
  * （SESSION.md 是它的持久身体），本工具管它的**载体生命周期 + 一次性时间安排**。
  * 动作面现行 **8 个**：list / show / create / use / rebuild / **`send-now`** / **`send-later`** / **`cro-guide`**。
  * 🔴 2026-09-16（所有者裁决）：**第 7 个动作 `send-message`（即时投递）**
  *    ——与 `wake-later` 共用取用通路，差别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）；
  *    实现落在 `wake-scheduler.ts` 的 `sendToTrajectory()`（"怎么把一句话送到一条轨迹"是调度器的知识）。
- *    设计稿 = `docs/trajectory-send-message-design.md`（v0.2 定稿）。
+ *    设计稿 = `docs/cognitive-trajectory-send-message-design.md`（v0.2 定稿）。
  * 🔴 2026-09-17（所有者裁决 · **命名 A 案**）：**两个投递动作更名** —— `wake-later` → **`send-later`**、
  *    `send-message` → **`send-now`**。判据（R↓）：两者本是**同一条投递通路**（同取用机制 / 同载荷 /
  *    同落点语义），只差**时刻**；而「唤醒（冷载入）」是**两条路径共有**的属性，不配做区分
@@ -27,7 +27,7 @@
  *     归档能力由 `container_fs mv → _archived/` 承担
  *   · `hook-develop-guide` → **淘汰**（v1.34.1：SEP 整体废除——「能落 harness 已有原语，
  *     就不要自造协议 + 脚本管道」；轨迹挂哪些 skill 改由 SESSION.md frontmatter 声明 +
- *     `systemPrompt.section` 注入，见 `docs/trajectory-skill-injection.md`）
+ *     `systemPrompt.section` 注入，见 `docs/cognitive-trajectory-skill-injection.md`）
  *   · autopilot 面（all/init/random/diag/doc/check/status/guide）→ `container_admin` 的 autopilot 域
  *   · `wake-add`/`wake-list`/`wake-rm` → **`wake-later`**（v1.33 收敛；**2026-09-17 更名 `send-later`**）
  *   · 2026-09-20（CRO 落地）：新增 **`cro-guide`** —— CRO 编写指南的出口（纯读）。
@@ -47,10 +47,10 @@ import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
-import { appendBound, pruneMissingBindings, readLastBound, resolveSessionTrajectoryLabel, supersedeOtherBindings } from '../trajectory-bound.js'
+import { appendBound, pruneMissingBindings, readLastBound, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings } from '../cognitive-trajectory-bound.js'
 import { hasSessionLogById, sessionsRootDir } from '../session-cleanup.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
-import { sendToTrajectory } from '../wake-scheduler.js'
+import { sendToCognitiveTrajectory } from '../wake-scheduler.js'
 import { CRO_GUIDE } from '../cro-guide.js'
 import {
   listSessions,
@@ -58,14 +58,14 @@ import {
   createSession,
   useSession,
   findSession,
-  TRAJECTORY_ACTIONS,
+  COGNITIVE_TRAJECTORY_ACTIONS,
   DEFAULT_SESSION_SCOPE,
   getActiveSessionInfo,
   namingTitleFor,
   summarize,
   type ActiveSessionInfo,
   type CreateSessionResult,
-} from '../trajectory-ops.js'
+} from '../cognitive-trajectory-ops.js'
 
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
@@ -212,41 +212,41 @@ function renderText(value: unknown): ContentBlock[] {
 // ── v1.34.1：SEP（Session Extension Protocol）整体废除 ──
 // 原「CCC 注册 session-tool MSM → ACC 在生命周期点 spawn 它」的协议 + 脚本管道已删除
 // （所有者裁决「能落 harness 已有原语，就不要自造协议 + 脚本管道」）。扩展面改为：
-//   · 轨迹挂哪些 skill → SESSION.md frontmatter 声明 + systemPrompt.section（docs/trajectory-skill-injection.md）
+//   · 轨迹挂哪些 skill → SESSION.md frontmatter 声明 + systemPrompt.section（docs/cognitive-trajectory-skill-injection.md）
 //   · 其余扩展 → harness 已有原语（工具/section/配置），不再经 ACC 的钩子通道。
 
 /**
- * 创建 trajectory 工具（原 logbook；v1.33 S142 §32 更名 + 动作收敛）。
+ * 创建 cognitive trajectory 工具（原 logbook；v1.33 S142 §32 更名 + 动作收敛）。
  * 闭包捕获插件 ctx → use 后可调 ctx.sessionTitle.rename。
  */
-export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool> {
+export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
-  name: 'container_trajectory',
+  name: 'cognitive_trajectory',
   // 🔴 本描述按 **EAP 五层**组织（owner 令 2026-10-16：「这个 tool 的 description 也用 eap 修订一遍」）。
   //    为什么用**数组 join** 而不是一长串 `+`：每个元素 = **一个层**，层的边界在源码里可见；
   //    旧写法把身份/动作/参数平铺成一条流水，读的人必须自己重建结构（低 E）。
   //    ⚠️ 相邻字符串字面量在 JS 里**不会**自动拼接（那不是 JS 语法）——必须显式 join 或 `+`。
   description: [
     // ── Tier 1 · 公理与边界：这是什么、**什么不是** ──
-    'container_trajectory — one trajectory: its persistent body (SESSION.md) + its timeline.',
-    'A trajectory is NOT the conversation: SESSION.md is the durable body and never moves;',
-    'the dsh conversation is only its rebuildable carrier (Ship of Theseus — the carrier is replaced, the trajectory continues).',
+    'cognitive_trajectory — one cognitive trajectory: its persistent body (SESSION.md) + its timeline.',
+    'A cognitive trajectory is NOT the conversation: SESSION.md is the durable body and never moves;',
+    'the dsh conversation is only its rebuildable carrier (Ship of Theseus — the carrier is replaced, the cognitive trajectory continues).',
     // ── Tier 2 · 本体：动作按**效果**分三组（分组本身就是契约：一眼看出"这个动作改不改我的绑定"）──
     'ACTIONS, grouped by EFFECT (read the grouping before picking one):',
-    '(A) LIFECYCLE — changes which trajectory THIS conversation is bound to:',
-    'list (inventory + stats + anomaly marks) / show (read one SESSION.md) / create (make a NEW trajectory) /',
-    'use (bind THIS conversation to an existing trajectory; inline integrity check — silent when fine, problems reported as hints, never errors) /',
+    '(A) LIFECYCLE — changes which cognitive trajectory THIS conversation is bound to:',
+    'list (inventory + stats + anomaly marks) / show (read one SESSION.md) / create (make a NEW cognitive trajectory) /',
+    'use (bind THIS conversation to an existing cognitive trajectory; inline integrity check — silent when fine, problems reported as hints, never errors) /',
     'rebuild (clear-and-rebuild THIS conversation in place).',
-    '(B) DELIVERY — sends ONE message to ANOTHER trajectory; your own binding is unchanged:',
+    '(B) DELIVERY — sends ONE message to ANOTHER cognitive trajectory; your own binding is unchanged:',
     'send-now (deliver RIGHT NOW) / send-later (deliver at ONE future instant).',
-    '(C) REFERENCE — cro-guide (how to give THIS trajectory its own program that decides when it should be woken).',
+    '(C) REFERENCE — cro-guide (how to give THIS cognitive trajectory its own program that decides when it should be woken).',
     // ── Tier 3 · 拓扑：动作之间的关系 = 选择规则（旧文案只列了"做什么"，没说"该选哪个"）──
     'HOW TO CHOOSE (a rule, not a guess):',
-    'not yet bound + starting new work ⇒ create — with no prior binding it activates immediately, so the new trajectory has a carrier at once.',
-    'already bound + recording a separate future line ⇒ create — it does NOT steal your binding (you stay on the current trajectory);',
+    'not yet bound + starting new work ⇒ create — with no prior binding it activates immediately, so the new cognitive trajectory has a carrier at once.',
+    'already bound + recording a separate future line ⇒ create — it does NOT steal your binding (you stay on the current cognitive trajectory);',
     'activate the new one when you want it by sending it a message.',
-    'want THIS conversation to move to another trajectory ⇒ use (refuses when it would orphan the current binding; --force overrides).',
-    'want to poke another trajectory ⇒ send-now. Its target needs NO prior setup:',
+    'want THIS conversation to move to another cognitive trajectory ⇒ use (refuses when it would orphan the current binding; --force overrides).',
+    'want to poke another cognitive trajectory ⇒ send-now. Its target needs NO prior setup:',
     'if the target has no live dsh session, one is created and bound automatically, and your message is injected into it.',
     // ── Tier 4 · 动力学与语义边界：回执**证明了什么、没证明什么** ──
     'RECEIPTS (read no more than is written): send-now returns a synchronous receipt meaning exactly "injected / turn started" —',
@@ -254,11 +254,11 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
     'It never queues behind the current turn: a busy target is steered mid-turn (read in the CURRENT turn), an idle target starts a turn at once.',
     'send-later is fire-and-forget by design: no receipt, no recall, no panel.',
     'ASYMMETRY (deliberate — the two differ in whether a missing target is normal): send-now creates a target on demand,',
-    'because sending to a never-used trajectory is a legitimate intent; send-later does NOT,',
-    'because scheduling for a trajectory that has never existed is almost always a mistyped name — auto-creating would hide that error behind an empty trajectory.',
+    'because sending to a never-used cognitive trajectory is a legitimate intent; send-later does NOT,',
+    'because scheduling for a cognitive trajectory that has never existed is almost always a mistyped name — auto-creating would hide that error behind an empty cognitive trajectory.',
     // ── Tier 5 · 表面：逐参数前置条件 ──
     'PARAMETERS: create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars).',
-    'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound trajectory.',
+    'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound cognitive trajectory.',
     'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self).',
     'send-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message.',
     'send-now requires target + message.',
@@ -267,16 +267,16 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
   parameters: {
     action: {
       type: 'string',
-      enum: [...TRAJECTORY_ACTIONS],
+      enum: [...COGNITIVE_TRAJECTORY_ACTIONS],
       required: true,
       description: [
         'Subcommand — grouped by effect.',
         'LIFECYCLE (changes THIS conversation\'s binding):',
         'list (inventory + stats + anomaly marks) / show (S### or dir name or fuzzy keyword) /',
-        'create (new trajectory; activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
+        'create (new cognitive trajectory; activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
         'use (activate context for THIS conversation; inline integrity check — pass silent, problems reported as hints, not errors) /',
         'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note).',
-        'DELIVERY (sends one message to ANOTHER trajectory; your binding is unchanged):',
+        'DELIVERY (sends one message to ANOTHER cognitive trajectory; your binding is unchanged):',
         'send-now (deliver RIGHT NOW; the target needs no prior setup — if it has no live session, one is created and bound automatically) /',
         'send-later (one future instant + one message; fire-and-forget, and it does NOT auto-create a target).',
         'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot)',
@@ -288,11 +288,11 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
     issue: { type: 'string', description: 'create: ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
     goal: { type: 'string', description: 'create: one-sentence goal (optional)' },
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
-    force: { type: 'boolean', description: 'use: allow switching away from the currently-bound trajectory (binding guard override)' },
+    force: { type: 'boolean', description: 'use: allow switching away from the currently-bound cognitive trajectory (binding guard override)' },
     dryRun: { type: 'boolean', description: 'create: preview mode (no actual changes)' },
-    target: { type: 'string', description: 'send-later/send-now: target trajectory (S### or AGENT_SESSIONS directory name)' },
+    target: { type: 'string', description: 'send-later/send-now: target cognitive trajectory (S### or AGENT_SESSIONS directory name)' },
     at: { type: 'string', description: 'send-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
-    message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target trajectory' },
+    message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target cognitive trajectory' },
   },
   output: {
     schema: { type: 'json' },
@@ -371,7 +371,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
         return [
           message,
           `⚠ 本轨迹【未】被激活 —— 当前已绑定 ${priorBound}，保绑定优先（不夺走你正在用的轨迹）。`,
-          `  要激活它（并在它名下开一条会话）：用 container_trajectory send-now 向 ${result.dirName} 投一条消息 ——`,
+          `  要激活它（并在它名下开一条会话）：用 cognitive_trajectory send-now 向 ${result.dirName} 投一条消息 ——`,
           `  目标若没有活跃 dsh 会话，会自动创建一条并把「使用提示词 ＋ 你的消息」一并注入。`,
         ].join('\n')
       }
@@ -392,7 +392,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
         const force = args.force === true
         if (switching && !force) {
           throw new Error(
-            `Session is bound to ${currentDir}. Switching to ${targetDirName} would orphan the current trajectory. ` +
+            `Session is bound to ${currentDir}. Switching to ${targetDirName} would orphan the current cognitive trajectory. ` +
             `Re-run with --force to switch (or close the current session first).`,
           )
         }
@@ -467,8 +467,8 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
           target: args.target,
           at: args.at,
           message: args.message,
-          // 发起者 = **调用方自身**所属 trajectory（`resolveSessionTrajectoryLabel` 的三级归属）
-          createdBy: resolveSessionTrajectoryLabel(exec.agent?.session, wakeScope === DEFAULT_SESSION_SCOPE ? '' : wakeScope),
+          // 发起者 = **调用方自身**所属 cognitive trajectory（`resolveSessionCognitiveTrajectoryLabel` 的三级归属）
+          createdBy: resolveSessionCognitiveTrajectoryLabel(exec.agent?.session, wakeScope === DEFAULT_SESSION_SCOPE ? '' : wakeScope),
           nowMs: Date.now(),
         })
         if (!res.ok) return { ok: false, error: res.error }
@@ -483,12 +483,12 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
           throw new Error('send-now requires target (S### or dir name) + message')
         }
         const sendScope = agentScope(exec)
-        const res = await sendToTrajectory(
+        const res = await sendToCognitiveTrajectory(
           ctx,
           root,
           args.target,
           args.message,
-          resolveSessionTrajectoryLabel(exec.agent?.session, sendScope === DEFAULT_SESSION_SCOPE ? '' : sendScope),
+          resolveSessionCognitiveTrajectoryLabel(exec.agent?.session, sendScope === DEFAULT_SESSION_SCOPE ? '' : sendScope),
         )
         if (!res.ok) return { ok: false, error: res.detail }
         return {
@@ -523,7 +523,7 @@ export function createTrajectoryTool(ctx: Context): ReturnType<typeof defineTool
  */
 function renderWakeEntry(e: WakeEntry): string {
   return [
-    '═══ trajectory 唤醒（1 条）═══',
+    '═══ cognitive trajectory 唤醒（1 条）═══',
     `  · ${e.id}  [${e.state}]  at=${e.at}  target=${e.target}  by=${e.createdBy || '?'}`,
     `      message: ${e.message.length > 120 ? `${e.message.slice(0, 120)}…` : e.message}`,
     '',

@@ -1,5 +1,5 @@
 /**
- * trajectory-assistant.test.ts — 关卡化注入统一命名模块（v0.3，S142）
+ * trajectory-assistant.test.ts — `cognitive-trajectory-assistant.ts` 的镜像测试（v0.3，S142）
  *
  * 覆盖：token 常量单一真相源（eventToken / EVENT_LABEL）/ ACK 前缀 /
  * 风格门面（plain 默认 + metaphor 变体——仅前缀措辞，D8 无 game 档）/
@@ -13,11 +13,11 @@ import {
   ACK_SKIP_PREFIX,
   eventToken,
   styledToken,
-} from '../src/trajectory-assistant.js'
+} from '../src/cognitive-trajectory-assistant.js'
 
-describe('trajectory-assistant: token 常量（单一真相源）', () => {
+describe('cognitive-trajectory-assistant: token 常量（单一真相源）', () => {
   it('家族标识 + 可见用词（自然跨领域词，无游戏黑话 D8）', () => {
-    expect(ASSISTANT_PREFIX).toBe('TRAJECTORY-ASSISTANT')
+    expect(ASSISTANT_PREFIX).toBe('COGNITIVE-TRAJECTORY-ASSISTANT')
     expect(EVENT_LABEL.checkpoint).toBe('CHECKPOINT')
     expect(EVENT_LABEL.limit).toBe('LIMIT') // 上下文极限（非 BOSS——D8）
     expect(EVENT_LABEL.limitMandatory).toBe('LIMIT · MANDATORY')
@@ -29,30 +29,30 @@ describe('trajectory-assistant: token 常量（单一真相源）', () => {
   })
 
   it('eventToken 组装完整前缀', () => {
-    expect(eventToken('checkpoint')).toBe('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
-    expect(eventToken('limit')).toBe('[TRAJECTORY-ASSISTANT · LIMIT]')
-    expect(eventToken('limitMandatory')).toBe('[TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]')
-    expect(eventToken('rebuild')).toBe('[TRAJECTORY-ASSISTANT · REBUILD]')
-    expect(eventToken('guard')).toBe('[TRAJECTORY-ASSISTANT · BOUNDARY GUARD]')
+    expect(eventToken('checkpoint')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT]')
+    expect(eventToken('limit')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · LIMIT]')
+    expect(eventToken('limitMandatory')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]')
+    expect(eventToken('rebuild')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · REBUILD]')
+    expect(eventToken('guard')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · BOUNDARY GUARD]')
   })
 
   it('ACK 前缀（recorded/skipped 语义不变，家族名更新）', () => {
-    expect(ACK_PREFIX).toBe('TRAJECTORY-ASSISTANT-recorded')
-    expect(ACK_SKIP_PREFIX).toBe('TRAJECTORY-ASSISTANT-skipped')
+    expect(ACK_PREFIX).toBe('COGNITIVE-TRAJECTORY-ASSISTANT-recorded')
+    expect(ACK_SKIP_PREFIX).toBe('COGNITIVE-TRAJECTORY-ASSISTANT-skipped')
   })
 })
 
-describe('trajectory-assistant: 风格门面（plain 默认 / metaphor 变体）', () => {
+describe('cognitive-trajectory-assistant: 风格门面（plain 默认 / metaphor 变体）', () => {
   it('缺省 = plain（与 eventToken 一致）', () => {
     expect(styledToken('checkpoint')).toBe(eventToken('checkpoint'))
-    expect(styledToken('limit')).toBe('[TRAJECTORY-ASSISTANT · LIMIT]')
+    expect(styledToken('limit')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · LIMIT]')
   })
 
   it('metaphor 档：仅前缀措辞变体（无 game 档——D8）', () => {
-    expect(styledToken('limit', 'metaphor')).toBe('[TRAJECTORY-ASSISTANT · CONTEXT LIMIT]')
-    expect(styledToken('limitMandatory', 'metaphor')).toBe('[TRAJECTORY-ASSISTANT · CONTEXT LIMIT · MANDATORY]')
+    expect(styledToken('limit', 'metaphor')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · CONTEXT LIMIT]')
+    expect(styledToken('limitMandatory', 'metaphor')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · CONTEXT LIMIT · MANDATORY]')
     // 无 metaphor 变体的事件 → 回退 plain（措辞一致）
-    expect(styledToken('checkpoint', 'metaphor')).toBe('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
+    expect(styledToken('checkpoint', 'metaphor')).toBe('[COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT]')
   })
 })
 

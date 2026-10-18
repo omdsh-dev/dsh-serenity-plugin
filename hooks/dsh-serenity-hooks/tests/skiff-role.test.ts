@@ -6,7 +6,7 @@ import {
   SKIFF_SESSION_PREFIX,
   isSkiffSessionId,
   readSkiffRoles,
-  trajectorySubset,
+  cognitiveTrajectorySubset,
   roleToolWhitelist,
   roleMsmWhitelist,
   buildSkiffBasePrompt,
@@ -62,7 +62,7 @@ describe('skiff-role: readSkiffRoles 配置解析', () => {
             model: 'm/M3',
             msms: ['cognitive-qa'],
             tools: [],
-            trajectory: { session: false, keeper: false, rebuild: false },
+            cognitiveTrajectory: { session: false, keeper: false, rebuild: false },
             systemPrompt: '你是宁静号的认知问答助手。',
           },
         },
@@ -74,11 +74,11 @@ describe('skiff-role: readSkiffRoles 配置解析', () => {
     expect(r.model).toBe('m/M3')
     expect(r.msms).toEqual(['cognitive-qa'])
     expect(r.tools).toEqual([])
-    expect(r.trajectory).toEqual({ session: false, keeper: false, rebuild: false })
+    expect(r.cognitiveTrajectory).toEqual({ session: false, keeper: false, rebuild: false })
     expect(r.systemPrompt).toContain('认知问答')
   })
 
-  it('多角色 + 字段缺省（model/trajectory/systemPrompt 可省略）', () => {
+  it('多角色 + 字段缺省（model/cognitiveTrajectory/systemPrompt 可省略）', () => {
     writeConfig({
       skiff: {
         roles: {
@@ -90,7 +90,7 @@ describe('skiff-role: readSkiffRoles 配置解析', () => {
     const roles = readSkiffRoles(dir)
     expect(roles.size).toBe(2)
     expect(roles.get('a')!.model).toBeUndefined()
-    expect(roles.get('a')!.trajectory).toBeUndefined()
+    expect(roles.get('a')!.cognitiveTrajectory).toBeUndefined()
     expect(roles.get('b')!.tools).toEqual(['read', 'grep'])
   })
 
@@ -149,14 +149,14 @@ describe('skiff-role: 子集与白名单纯函数', () => {
     model: 'm/M3',
     msms: ['a', 'b'],
     tools: ['read', 'grep', 'write'],
-    trajectory: { session: false, keeper: true, rebuild: false },
+    cognitiveTrajectory: { session: false, keeper: true, rebuild: false },
     systemPrompt: 'p',
   }
 
-  it('trajectorySubset 缺省全 false（完全独立）；按配置取', () => {
-    expect(trajectorySubset(undefined)).toEqual({ session: false, keeper: false, rebuild: false })
-    expect(trajectorySubset(full)).toEqual({ session: false, keeper: true, rebuild: false })
-    expect(trajectorySubset({ msms: ['x'] })).toEqual({ session: false, keeper: false, rebuild: false })
+  it('cognitiveTrajectorySubset 缺省全 false（完全独立）；按配置取', () => {
+    expect(cognitiveTrajectorySubset(undefined)).toEqual({ session: false, keeper: false, rebuild: false })
+    expect(cognitiveTrajectorySubset(full)).toEqual({ session: false, keeper: true, rebuild: false })
+    expect(cognitiveTrajectorySubset({ msms: ['x'] })).toEqual({ session: false, keeper: false, rebuild: false })
   })
 
   it('roleToolWhitelist：tools + msms 非空时 msm 自动可用', () => {

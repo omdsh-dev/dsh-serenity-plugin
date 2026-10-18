@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { entrySkillSectionText } from '../src/seams/system-prompt.js'
-import { buildTrajectorySkillsSection } from '../src/trajectory-skills.js'
+import { buildCognitiveTrajectorySkillsSection } from '../src/cognitive-trajectory-skills.js'
 import { registerOpencodeSkills } from '../src/seams/opencode-skills.js'
 import { buildResourceIndex } from '../src/skills/resource-index.js'
 
@@ -94,7 +94,7 @@ describe('P1b · 三个消费点都带第二层（J7）', () => {
 
   it('通路 B（轨迹段 order −45）：含参考件清单，且不含正文', () => {
     mkSkill('declared-skill', { refs: ['10-x.md'] })
-    const text = buildTrajectorySkillsSection(root, mkSessionMd('s1'), undefined, ['declared-skill'])
+    const text = buildCognitiveTrajectorySkillsSection(root, mkSessionMd('s1'), undefined, ['declared-skill'])
     expect(text).toContain('=== skill: declared-skill ===')
     expect(text).toContain(INDEX_HEADING)
     expect(text).toContain('references/10-x.md')
@@ -118,7 +118,7 @@ describe('P1b · 三个消费点都带第二层（J7）', () => {
 
     const a = indexBlock(entrySkillSectionText(root))
     const b = indexBlock(
-      buildTrajectorySkillsSection(root, mkSessionMd('s2'), undefined, ['shared-skill']),
+      buildCognitiveTrajectorySkillsSection(root, mkSessionMd('s2'), undefined, ['shared-skill']),
     )
     const provider = captureProvider()
     const cand = ((await provider.list({ cwd: root })).candidates as { name: string }[]).find((c) => c.name === 'shared-skill')
@@ -139,7 +139,7 @@ describe('P1b · 三个消费点都带第二层（J7）', () => {
     expect(a).toContain('# plain-entry 正文')
     expect(a).not.toContain(INDEX_HEADING)
     // B：轨迹段同样
-    const b = buildTrajectorySkillsSection(root, mkSessionMd('s3'), undefined, ['plain-entry'])
+    const b = buildCognitiveTrajectorySkillsSection(root, mkSessionMd('s3'), undefined, ['plain-entry'])
     expect(b).toContain('# plain-entry 正文')
     expect(b).not.toContain(INDEX_HEADING)
     // C：provider 同样

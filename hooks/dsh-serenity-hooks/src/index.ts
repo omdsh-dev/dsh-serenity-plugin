@@ -4,7 +4,7 @@
  * 形态（DSH 官方 native hook 约定）：name / inject / Config / apply，无 default export。
  *
  * 能力：
- *   1. 真实 DSH 工具注册：container_fs（文件系统 15 子命令，含 reveal）、container_trajectory（轨迹生命周期 + 一次性安排，含 rebuild）
+ *   1. 真实 DSH 工具注册：container_fs（文件系统 15 子命令，含 reveal）、cognitive_trajectory（轨迹生命周期 + 一次性安排，含 rebuild）
  *   2. 拦截缝机械约束：tools/pre-execute + ctx.tools.guard（安全模式/黑名单/路径守卫）
  *
  * 加载：~/.dsh/config.yaml 加 insert 行（免改 DSH 源码），插件包装入 DSH node_modules。
@@ -22,7 +22,7 @@ import { praxisTool } from './tools/praxis.js'
 import { createOntologyTool } from './tools/ontology-eng.js'
 import { createSkillCreatorTool } from './tools/skill-creator.js'
 import { createCheapWorkerTool } from './tools/cheap-worker.js'
-import { createTrajectoryTool } from './tools/trajectory.js'
+import { createCognitiveTrajectoryTool } from './tools/cognitive-trajectory.js'
 import { localstoreTool } from './tools/localstore.js'
 import { createContainerAdminTool } from './tools/container-admin.js'
 import { registerGuards } from './seams/guards.js'
@@ -66,7 +66,7 @@ import { createAccDiagTool } from './tools/acc-diag.js'
 import { createDiagramTool } from './tools/diagram.js'
 // §0L（S142 2026-09-19）：绑定载体迁到宿主存储域——装载期开域 + 注入句柄 + 一次性迁移
 import { openBindingDomain, bindingStore } from './host/storage-domain.js'
-import { setBindingStore } from './trajectory-bound.js'
+import { setBindingStore } from './cognitive-trajectory-bound.js'
 // （C4 块 A 顺带清理：`registerDisposer` 的 import 自 C2 删掉 skiff root 重试定时器后已无使用点）
 
 export const name = 'dsh-serenity-hooks'
@@ -395,7 +395,7 @@ export function apply(ctx: Context, config: Config): void {
     ctx.tools.register(ccFsTool) // container_fs
     // v1.33（S142 §32）：`logbook` 更名并收敛为 `trajectory`（原 autopilot 工具的动作 v1.33 归
     // container_admin 的 autopilot 域——该域 2026-09-15 随之退场；投递动作并入本工具）
-    ctx.tools.register(createTrajectoryTool(ctx)) // container_trajectory（含 rebuild + send-now / send-later）
+    ctx.tools.register(createCognitiveTrajectoryTool(ctx)) // cognitive_trajectory（含 rebuild + send-now / send-later）
     ctx.tools.register(createKitTool(ctx)) // dashboard
     ctx.tools.register(gitTool) // container_git
     ctx.tools.register(msmTool) // msm（单入口执行 + 发现）
@@ -454,11 +454,11 @@ export function apply(ctx: Context, config: Config): void {
   // enabled 读 DSH settings 开关，host/port/accounts 读全局文件，不依赖具体 CCC；
   // 旧 CCC localstore 配置在首个 agent/session-start 时一次性迁移）
   registerGateway(ctx)
-  // v1.22.4 定稿：container_trajectory rebuild（原 session_rebuild）排队 → agent/turn-stopping 时执行真正清空（复用旧会话原地重来）
+  // v1.22.4 定稿：cognitive_trajectory rebuild（原 session_rebuild）排队 → agent/turn-stopping 时执行真正清空（复用旧会话原地重来）
   registerRebuildTurnHook(ctx)
   // v1.26.3 输出守卫：最终输出敏感词检测 + steer 打回重生成（凭据/机制/MSM 名不泄露给用户）
   registerOutputGuardHook(ctx)
-  // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createTrajectoryTool 内实现，
+  // v1.21 F3：use 激活宁静号会话时同步重命名当前 dsh 会话（在 createCognitiveTrajectoryTool 内实现，
   // naming.enabled 简单配置门控；sessionTitle 可选服务守卫）
   if (config.env) {
     registerEnv(ctx)
@@ -492,8 +492,8 @@ export function apply(ctx: Context, config: Config): void {
   // `binding.runningSessionIds` 唯一数据源就是这张表（晚装 = 首拍读到空表 = 谎报"没在跑"）。
   // 评估与投递面在 tick 内（`wake-scheduler.ts` 的 `runCroPhase`），本行只装"是否正在跑轮次"。
   registerCroTurnTracking(ctx)
-  // trajectory 唤醒注册表（D58，v1.32.0）：中心调度器——5min tick 投递「未来时刻 + 一条
-  // message」的一次性唤醒（可自唤醒、可跨 trajectory）。冷会话经 ctx.sessionController
+  // cognitive trajectory 唤醒注册表（D58，v1.32.0）：中心调度器——5min tick 投递「未来时刻 + 一条
+  // message」的一次性唤醒（可自唤醒、可跨 cognitive trajectory）。冷会话经 ctx.sessionController
   // 载入后投递。🔴 **本钟无闸**（2026-09-21 所有者令砍掉 `wakeSchedulerEnabled`）⇒ **恒武装**、
   // 永不因闸跳过；tick 内**另一层**总闸是 CRO 阶段的 `croEnabled`（只停 CRO，**不影响**本注册表
   // 投递）。这是 ACC 唯一的轨迹调度机制。

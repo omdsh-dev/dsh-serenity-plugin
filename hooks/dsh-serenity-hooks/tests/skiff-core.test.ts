@@ -14,16 +14,16 @@ import {
   skiffSessionInfo,
   getSkiffAgent,
   skiffSessionSnapshot,
-  skiffTrajectoryEnabled,
+  skiffCognitiveTrajectoryEnabled,
   skiffMsmGate,
   askSkiff,
   createSkiffAgent,
   ensureSkiffSession,
-  workspaceTrajectoryLine,
+  workspaceCognitiveTrajectoryLine,
 } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX, type SkiffRoleConfig } from '../src/skiff-role.js'
-import { getActiveSessionInfo, resetActiveSessionStore } from '../src/trajectory-ops.js'
-import { readLastBound } from '../src/trajectory-bound.js'
+import { getActiveSessionInfo, resetActiveSessionStore } from '../src/cognitive-trajectory-ops.js'
+import { readLastBound } from '../src/cognitive-trajectory-bound.js'
 
 let dir: string
 
@@ -370,37 +370,37 @@ describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id c
   })
 })
 
-describe('skiff-core: skiffTrajectoryEnabled 轨迹纪律子集', () => {
+describe('skiff-core: skiffCognitiveTrajectoryEnabled 轨迹纪律子集', () => {
   it('非 skiff 会话恒 true（正常参与所有轨迹机制）', () => {
-    expect(skiffTrajectoryEnabled(dir, 'normal-session', 'keeper')).toBe(true)
-    expect(skiffTrajectoryEnabled(dir, 'cheap-worker-x', 'rebuild')).toBe(true)
-    expect(skiffTrajectoryEnabled(dir, undefined, 'session')).toBe(true)
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'normal-session', 'keeper')).toBe(true)
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'cheap-worker-x', 'rebuild')).toBe(true)
+    expect(skiffCognitiveTrajectoryEnabled(dir, undefined, 'session')).toBe(true)
   })
 
   it('skiff 会话未注册（注册表缺失）→ 保守旁路 false', () => {
     writeConfig({ skiff: { roles: { qa: { msms: ['x'] } } } })
-    expect(skiffTrajectoryEnabled(dir, 'skiff-qa-noreg', 'keeper')).toBe(false)
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'skiff-qa-noreg', 'keeper')).toBe(false)
   })
 
-  it('skiff 会话按角色 trajectory 子集：缺省全关（完全独立）；keeper=true 开启', () => {
+  it('skiff 会话按角色 cognitive trajectory 子集：缺省全关（完全独立）；keeper=true 开启', () => {
     writeConfig({
       skiff: {
         roles: {
           qa: { msms: ['x'] },
-          review: { msms: ['y'], trajectory: { keeper: true, rebuild: false, session: false } },
+          review: { msms: ['y'], cognitiveTrajectory: { keeper: true, rebuild: false, session: false } },
         },
       },
     })
     const qa = fakeAgent()
     registerSkiffSession(qa.session.id, 'qa', dir, qa as never)
-    expect(skiffTrajectoryEnabled(dir, qa.session.id, 'keeper')).toBe(false)
-    expect(skiffTrajectoryEnabled(dir, qa.session.id, 'rebuild')).toBe(false)
-    expect(skiffTrajectoryEnabled(dir, qa.session.id, 'session')).toBe(false)
+    expect(skiffCognitiveTrajectoryEnabled(dir, qa.session.id, 'keeper')).toBe(false)
+    expect(skiffCognitiveTrajectoryEnabled(dir, qa.session.id, 'rebuild')).toBe(false)
+    expect(skiffCognitiveTrajectoryEnabled(dir, qa.session.id, 'session')).toBe(false)
 
     const review = { session: { id: `${SKIFF_SESSION_PREFIX}review-1`, events: [] }, followup: () => {} }
     registerSkiffSession(review.session.id, 'review', dir, review as never)
-    expect(skiffTrajectoryEnabled(dir, review.session.id, 'keeper')).toBe(true)
-    expect(skiffTrajectoryEnabled(dir, review.session.id, 'rebuild')).toBe(false)
+    expect(skiffCognitiveTrajectoryEnabled(dir, review.session.id, 'keeper')).toBe(true)
+    expect(skiffCognitiveTrajectoryEnabled(dir, review.session.id, 'rebuild')).toBe(false)
   })
 })
 
@@ -473,10 +473,10 @@ describe('skiff-core: askSkiff 会话核心', () => {
     expect(result.answer).toBe('the answer')
     expect(result.sessionId).toBe(agent.session.id)
     // 轨迹 = 本轮新增（before = 0 → 全量）
-    expect(result.trajectory.length).toBeGreaterThanOrEqual(3)
-    expect(result.trajectory[0]).toEqual({ role: 'user', text: 'question' })
-    expect(result.trajectory.some((t) => t.role === 'assistant' && t.text.includes('container_fs'))).toBe(true)
-    expect(result.trajectory.some((t) => t.role === 'tool' && t.text.includes('tool result'))).toBe(true)
+    expect(result.cognitiveTrajectory.length).toBeGreaterThanOrEqual(3)
+    expect(result.cognitiveTrajectory[0]).toEqual({ role: 'user', text: 'question' })
+    expect(result.cognitiveTrajectory.some((t) => t.role === 'assistant' && t.text.includes('container_fs'))).toBe(true)
+    expect(result.cognitiveTrajectory.some((t) => t.role === 'tool' && t.text.includes('tool result'))).toBe(true)
   })
 
   it('无 assistant 文本 → 空答案（轨迹尽力而为）', async () => {
@@ -487,7 +487,7 @@ describe('skiff-core: askSkiff 会话核心', () => {
     }
     const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.answer).toBe('')
-    expect(result.trajectory).toEqual([{ role: 'tool', text: 'r', tool: 'container_fs' }])
+    expect(result.cognitiveTrajectory).toEqual([{ role: 'tool', text: 'r', tool: 'container_fs' }])
   })
 })
 
@@ -506,11 +506,11 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
   }
 
   /** 角色：开启 session 能力（用户拍板 my-role 形态） */
-  const sessionRole = (): SkiffRoleConfig => ({ msms: ['memory-tool'], tools: ['read', 'write', 'container_trajectory', 'msm'], trajectory: { session: true, keeper: true, rebuild: true } })
+  const sessionRole = (): SkiffRoleConfig => ({ msms: ['memory-tool'], tools: ['read', 'write', 'cognitive_trajectory', 'msm'], cognitiveTrajectory: { session: true, keeper: true, rebuild: true } })
   /** 未开 session 能力的角色 */
   const noSessionRole = (): SkiffRoleConfig => ({ msms: ['memory-tool'], tools: ['read'] })
 
-  it('trajectory.session=true + 无 bound → 自动创建专属 SESSION + 激活 + bound 持久化', () => {
+  it('cognitiveTrajectory.session=true + 无 bound → 自动创建专属 SESSION + 激活 + bound 持久化', () => {
     const agent = sessionAgent('skiff-weixin-user-a')
     const mdPath = ensureSkiffSession(dir, agent as never, 'my-role', sessionRole())
     // 自动创建：AGENT_SESSIONS/ 新增 <date>--S###--my-role skiff/ 含 SESSION.md
@@ -538,7 +538,7 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(sessions).toHaveLength(1)
   })
 
-  it('trajectory.session=false → 零变化（无创建/无激活/无 bound）', () => {
+  it('cognitiveTrajectory.session=false → 零变化（无创建/无激活/无 bound）', () => {
     const agent = sessionAgent('skiff-qa-1')
     const mdPath = ensureSkiffSession(dir, agent as never, 'qa', noSessionRole())
     expect(mdPath).toBeNull()
@@ -610,13 +610,13 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     expect(existsSync(join(dir, 'AGENT_SESSIONS'))).toBe(false)
   })
 
-  it('workspaceTrajectoryLine：完整纪律块含 SESSION.md 路径 + 绑定/rebuild 约束', () => {
-    const line = workspaceTrajectoryLine('/x/AGENT_SESSIONS/2026-09-07--S160--my-role skiff/SESSION.md')
+  it('workspaceCognitiveTrajectoryLine：完整纪律块含 SESSION.md 路径 + 绑定/rebuild 约束', () => {
+    const line = workspaceCognitiveTrajectoryLine('/x/AGENT_SESSIONS/2026-09-07--S160--my-role skiff/SESSION.md')
     expect(line).toContain('SESSION.md: /x/AGENT_SESSIONS/2026-09-07--S160--my-role skiff/SESSION.md')
     // 用户点破的缺口：不只是路径——含「已自动绑定（无需 use）+ 使用纪律 + rebuild 续接」约束
     expect(line).toContain('AUTO-BOUND')
-    expect(line).toContain('no container_trajectory use needed')
-    expect(line).toContain('container_trajectory rebuild')
+    expect(line).toContain('no cognitive_trajectory use needed')
+    expect(line).toContain('cognitive_trajectory rebuild')
     // v1.30.13（D5）：不点名具体工具——my-role 已无 write/edit（写能力归 CCC 的 session-write MSM），
     // 旧文案 "with write/edit" 指向它没有的工具（注入纪律与能力面矛盾）
     expect(line).not.toContain('write/edit')
@@ -657,9 +657,9 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     // cleanup 内置 afterEach 已 rm dir；此处 reset active 防污染
   })
 
-  it('🔴 createSkiffAgent 集成：CCC 级 trajectory.skills ⇒ skiff 会话也拿到该 section（v1.44.0，owner「skiff 也支持」）', async () => {
+  it('🔴 createSkiffAgent 集成：CCC 级 cognitiveTrajectory.skills ⇒ skiff 会话也拿到该 section（v1.44.0，owner「skiff 也支持」）', async () => {
     // CCC 级声明：一处声明、全容器生效（含 skiff）
-    writeConfig({ trajectory: { skills: ['cce'] } })
+    writeConfig({ cognitiveTrajectory: { skills: ['cce'] } })
     mkdirSync(join(dir, '.dsh', 'skills', 'cce'), { recursive: true })
     writeFileSync(join(dir, '.dsh', 'skills', 'cce', 'SKILL.md'), '# CCE 正文')
     const sections: Array<{ name: string; order?: number; text: () => string }> = []
@@ -689,7 +689,7 @@ describe('skiff-core: ensureSkiffSession 专属 SESSION（v1.30.3，S142 用户�
     } as never, undefined, 'skiff-weixin-fixed-cccskills')
     // skiff 自己的段照旧在
     expect(sections.find((s) => s.name === 'serenity-skiff')?.text()).toContain('角色人格')
-    // 🔴 CCC 级 skill 供给也送达（复用同一 registerTrajectorySkillSection，不另写一套）
+    // 🔴 CCC 级 skill 供给也送达（复用同一 registerCognitiveTrajectorySkillSection，不另写一套）
     const injected = sections.find((s) => s.name === 'serenity-trajectory-skills')
     expect(injected).toBeDefined()
     expect(injected?.order).toBe(-45)

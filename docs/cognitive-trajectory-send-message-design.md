@@ -221,7 +221,7 @@ send-message(target, message)
 
 - `src/templates/acc-serenity/SKILL.md`（`:55` / `:101`）、`src/templates/acc-session/SKILL.md`（`:3` 描述 / `:10` / `:30` / `:51`）——**这些会随包分发并被注入 agent 上下文**，属**契约面**。
 - `README.md` / `README.en.md` / `hooks/dsh-serenity-hooks/README.md`（三份，`:271`/`:283`）。
-- `CHANGELOG.md`；设计文档群（`trajectory-wake-registry-design.md` / `trajectory-scheduling.md` / `container-trajectory-rename.md` 的判据行 / `acc-component-relations-current-state.md`）。
+- `CHANGELOG.md`；设计文档群（`cognitive-trajectory-wake-registry-design.md` / `cognitive-trajectory-scheduling.md` / `container-trajectory-rename.md` 的判据行 / `acc-component-relations-current-state.md`）。
 - **测试（coverage-gate：新/改 src 模块必须同批带镜像测试）**：
   1. live 路径（mock `agents.get` 命中）⇒ `how=live(...)`；
   2. 冷路径（mock `sessionController.resolveAgent`）⇒ `how=cold-resume(...)`；

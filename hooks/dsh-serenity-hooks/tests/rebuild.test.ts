@@ -40,10 +40,10 @@ import {
   sanitizeFocusLine,
 } from '../src/rebuild.js'
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
-import { setActiveSessionInfo, resetActiveSessionStore } from '../src/trajectory-ops.js'
-import { SESSION_CONTEXT_MARKER } from '../src/trajectory-ops.js'
-import { readLastBound, appendBound } from '../src/trajectory-bound.js'
-import { REBUILD_TODO_FILENAME } from '../src/trajectory-assistant.js'
+import { setActiveSessionInfo, resetActiveSessionStore } from '../src/cognitive-trajectory-ops.js'
+import { SESSION_CONTEXT_MARKER } from '../src/cognitive-trajectory-ops.js'
+import { readLastBound, appendBound } from '../src/cognitive-trajectory-bound.js'
+import { REBUILD_TODO_FILENAME } from '../src/cognitive-trajectory-assistant.js'
 
 let dir: string
 
@@ -110,13 +110,13 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(stripAckSuffix('plain text')).toBe('plain text')
   })
 
-  it('buildRebuildAnchor：Continue {SESSION name} + persistent trajectory path + first-anchor protocol body（ack 剥离）', () => {
+  it('buildRebuildAnchor：Continue {SESSION name} + persistent cognitive trajectory path + first-anchor protocol body（ack 剥离）', () => {
     const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
     const a = buildRebuildAnchor(dir, 'S142', mdPath)
-    expect(a).toContain('[TRAJECTORY-ASSISTANT · REBUILD]')
+    expect(a).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · REBUILD]')
     expect(a).toContain('Continue the work of S142')
     expect(a).toContain('AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
-    expect(a).toContain('Persistent trajectory')
+    expect(a).toContain('Persistent cognitive trajectory')
     // v1.24.11 规范行：SESSION.md path: 与 use 上下文同格式（恢复机制可解析，无需 [SESSION CONTEXT] 标记）
     expect(a).toContain('SESSION.md path: AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
     // v1.22.5：保留 first-anchor 协议正文（ACC 身份/EAP/协作协议）
@@ -182,8 +182,8 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     const a = buildRebuildAnchor(dir, 'S142', mdPath, undefined, '完成 R1/R2 修正并验证发布')
     expect(a).toContain('Continue the work of S142')
     expect(a).toContain('- Task focus: 完成 R1/R2 修正并验证发布')
-    // 位于 Persistent trajectory 之后、锚点尾部（焦点是给重建后自己的补充，不干扰 SESSION 定位解析）
-    expect(a.indexOf('- Task focus:')).toBeGreaterThan(a.indexOf('Persistent trajectory'))
+    // 位于 Persistent cognitive trajectory 之后、锚点尾部（焦点是给重建后自己的补充，不干扰 SESSION 定位解析）
+    expect(a.indexOf('- Task focus:')).toBeGreaterThan(a.indexOf('Persistent cognitive trajectory'))
   })
 
   it('buildRebuildAnchor：无 focus → 锚点不含 Task focus（向后兼容）', () => {
@@ -295,12 +295,12 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(result.anchor).toContain(`SESSION.md path: AGENT_SESSIONS/${dirName}/SESSION.md`)
   })
 
-  it('queueRebuild：无任何会话上下文 → 抛错引导 container_trajectory use（v1.24.11 绝不写虚假路径）', async () => {
+  it('queueRebuild：无任何会话上下文 → 抛错引导 cognitive_trajectory use（v1.24.11 绝不写虚假路径）', async () => {
     const session = fakeSession([10])
     const ctx = { sessions: { get: () => session } } as never
     await expect(
       queueRebuild(ctx, { root: dir, summary: '无上下文', agentCwd: dir, dshSessionId: 'solo' }),
-    ).rejects.toThrow(/container_trajectory use/)
+    ).rejects.toThrow(/cognitive_trajectory use/)
     expect(pendingRebuildSnapshot().has('solo')).toBe(false)
   })
 
@@ -321,9 +321,9 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     })
     // surface 首条 user 消息 = 重建锚点（含规范路径行）
     const anchorText = [
-      '[TRAJECTORY-ASSISTANT · REBUILD] The conversation has been cleared and rebuilt.',
+      '[COGNITIVE-TRAJECTORY-ASSISTANT · REBUILD] The conversation has been cleared and rebuilt.',
       'Continue the work of S200.',
-      '- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/2026-08-28--S200--anch/SESSION.md (the trajectory\'s persistent body)',
+      '- Persistent cognitive trajectory — SESSION.md path: AGENT_SESSIONS/2026-08-28--S200--anch/SESSION.md (the cognitive trajectory\'s persistent body)',
     ].join('\n')
     const session = fakeSession([7])
     const events: unknown[] = Array.from({ length: 7 }, () => undefined)
@@ -489,7 +489,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     // v1.22.5：steer 自动继续（next-step 队列 → turn 不 break → 模型自动读 SESSION.md 继续）
     expect(agent._steers).toHaveLength(1)
     const steered = agent._steers[0] as { content?: Array<{ text?: string }>; source?: { kind?: string } }
-    expect(steered.content?.[0]?.text).toContain('[TRAJECTORY-ASSISTANT · REBUILD]')
+    expect(steered.content?.[0]?.text).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · REBUILD]')
     expect(steered.content?.[0]?.text).toContain('cleared and rebuilt')
     // v1.47：ACC 注入来源的 kind 由 `'plugin'`（已随 0.1.7 的类型面废止）改为自声明 kind
     expect(steered.source?.kind).toBe('plugin:dsh-serenity-hooks')
@@ -512,17 +512,17 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
 })
 
 describe('F2: rebuildReminderText（轨迹跟踪器提示，D64：注入不带消耗/阈值数值）', () => {
-  it('不含 K 占用/阈值数值 + 持久轨迹/临时副本语义 + container_trajectory rebuild 引导', () => {
+  it('不含 K 占用/阈值数值 + 持久轨迹/临时副本语义 + cognitive_trajectory rebuild 引导', () => {
     // 2026-09-16 所有者指令（D64）：判定仍读 K，但**注入文本不得透露消耗与限制**。
     // 触发判定本身在 keeper.test.ts 的 Tracker 用例里覆盖。
     const t = rebuildReminderText()
-    expect(t).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
+    expect(t).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · LIMIT]')
     expect(t).not.toContain('930K')
     expect(t).not.toContain('(threshold')
     expect(t).not.toMatch(/Context usage at/)
     expect(t).toContain('persistent body')
     expect(t).toContain('rebuildable carrier')
-    expect(t).toContain('container_trajectory rebuild')
+    expect(t).toContain('cognitive_trajectory rebuild')
     // v1.24.12 沉淀协议（S142 用户需求）：rebuild 前修订 skill / 新建 skill 写 SESSION 提案
     expect(t).toContain('revise the relevant existing skill')
     expect(t).toContain('SESSION.md')

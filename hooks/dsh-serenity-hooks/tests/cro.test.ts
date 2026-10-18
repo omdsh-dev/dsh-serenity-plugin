@@ -23,7 +23,7 @@ import {
   deriveCode,
   evaluateCro,
   isCroEnabled,
-  listCroTrajectories,
+  listCroCognitiveTrajectories,
   parseCroOutput,
   readCroSnapshotInput,
   renderCroOutcome,
@@ -38,7 +38,7 @@ const NOW = 1_789_800_000_000
 let root: string
 
 /** 在 CCC 根下建一条轨迹目录（可选写入 CRO 程序） */
-function makeTrajectory(dirName = DIR_NAME, croSource?: string): string {
+function makeCognitiveTrajectory(dirName = DIR_NAME, croSource?: string): string {
   const dir = join(root, 'AGENT_SESSIONS', dirName)
   mkdirSync(join(dir, 'references'), { recursive: true })
   writeFileSync(join(dir, 'SESSION.md'), '# SESSION\n', 'utf-8')
@@ -89,7 +89,7 @@ describe('CRO: 位置与形态（设计 §2）', () => {
   })
 
   it('🔴 启用判据 = 文件在不在（无 enabled 字段、无注册表）', () => {
-    makeTrajectory(DIR_NAME) // 不写 CRO 文件
+    makeCognitiveTrajectory(DIR_NAME) // 不写 CRO 文件
     expect(isCroEnabled(root, DIR_NAME)).toBe(false)
     writeFileSync(join(root, 'AGENT_SESSIONS', DIR_NAME, CRO_FILENAME), 'export {}', 'utf-8')
     expect(isCroEnabled(root, DIR_NAME)).toBe(true)
@@ -100,38 +100,38 @@ describe('CRO: 位置与形态（设计 §2）', () => {
   })
 })
 
-describe('CRO: 启用轨迹扫描（listCroTrajectories，调度器每 tick 用）', () => {
+describe('CRO: 启用轨迹扫描（listCroCognitiveTrajectories，调度器每 tick 用）', () => {
   it('只列出**有** CRO 文件的轨迹（无注册表 ⇒ 靠扫目录）', () => {
-    makeTrajectory(DIR_NAME, 'export {}')
-    makeTrajectory('2026-09-14--S186--no-cro') // 不写 CRO 文件
-    expect(listCroTrajectories(root)).toEqual([DIR_NAME])
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory('2026-09-14--S186--no-cro') // 不写 CRO 文件
+    expect(listCroCognitiveTrajectories(root)).toEqual([DIR_NAME])
   })
 
   it('🔴 跳过 `_` / `.` 前缀目录（_archived/_skiff-logs/_weixin-logs 不是轨迹）', () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const sys = join(root, 'AGENT_SESSIONS', '_archived', '2026-01-01--S001--old')
     mkdirSync(sys, { recursive: true })
     writeFileSync(join(sys, CRO_FILENAME), 'export {}', 'utf-8')
     const hidden = join(root, 'AGENT_SESSIONS', '.hidden')
     mkdirSync(hidden, { recursive: true })
     writeFileSync(join(hidden, CRO_FILENAME), 'export {}', 'utf-8')
-    expect(listCroTrajectories(root)).toEqual([DIR_NAME])
+    expect(listCroCognitiveTrajectories(root)).toEqual([DIR_NAME])
   })
 
   it('顶层文件（非目录）被跳过', () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     writeFileSync(join(root, 'AGENT_SESSIONS', 'stray.md'), 'x', 'utf-8')
-    expect(listCroTrajectories(root)).toEqual([DIR_NAME])
+    expect(listCroCognitiveTrajectories(root)).toEqual([DIR_NAME])
   })
 
   it('排序稳定（同 tick 顺序可比对）', () => {
-    makeTrajectory('2026-09-13--S185--b', 'export {}')
-    makeTrajectory('2026-09-13--S185--a', 'export {}')
-    expect(listCroTrajectories(root)).toEqual(['2026-09-13--S185--a', '2026-09-13--S185--b'])
+    makeCognitiveTrajectory('2026-09-13--S185--b', 'export {}')
+    makeCognitiveTrajectory('2026-09-13--S185--a', 'export {}')
+    expect(listCroCognitiveTrajectories(root)).toEqual(['2026-09-13--S185--a', '2026-09-13--S185--b'])
   })
 
   it('🔴 AGENT_SESSIONS 不存在 ⇒ 空数组（**绝不抛**——跑在调度器 tick 内）', () => {
-    expect(listCroTrajectories(join(root, 'no-such-root'))).toEqual([])
+    expect(listCroCognitiveTrajectories(join(root, 'no-such-root'))).toEqual([])
   })
 })
 
@@ -185,7 +185,7 @@ describe('CRO: 快照装配（纯函数，§3）', () => {
 
 describe('CRO: 快照读取（fs 侧）', () => {
   it('读到 SESSION.md 体积与 references 清单', () => {
-    const dir = makeTrajectory()
+    const dir = makeCognitiveTrajectory()
     writeFileSync(join(dir, 'references', 'note.md'), 'hello', 'utf-8')
     const input = readCroSnapshotInput(root, DIR_NAME, NOW, {
       liveSessionIds: [],
@@ -335,13 +335,13 @@ describe('CRO: 评估四态（§5）', () => {
   }
 
   it('无程序文件 ⇒ disabled（不跑、不报错）', async () => {
-    makeTrajectory(DIR_NAME)
+    makeCognitiveTrajectory(DIR_NAME)
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), { runner: neverRun })
     expect(out.status).toBe('disabled')
   })
 
   it('🔴 程序抛错/非 0 ⇒ skipped（**跳过本轮**，不影响既有机制）', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), {
       runner: async () => ({ ok: false, stdout: '', error: 'boom', code: 'cro-exit-nonzero' }),
     })
@@ -350,7 +350,7 @@ describe('CRO: 评估四态（§5）', () => {
   })
 
   it('输出是垃圾 ⇒ skipped（含稳定码）', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), {
       runner: async () => ({ ok: true, stdout: 'garbage', error: null }),
     })
@@ -359,7 +359,7 @@ describe('CRO: 评估四态（§5）', () => {
   })
 
   it('wake=false ⇒ no-wake', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), {
       runner: async () => ({ ok: true, stdout: '{"wake":false,"reason":"天还没亮"}', error: null }),
     })
@@ -368,7 +368,7 @@ describe('CRO: 评估四态（§5）', () => {
   })
 
   it('🟢 wake=true ⇒ wake + prompt 透传', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), {
       runner: async () => ({ ok: true, stdout: '{"wake":true,"prompt":"该醒了"}', error: null }),
     })
@@ -377,7 +377,7 @@ describe('CRO: 评估四态（§5）', () => {
   })
 
   it('🔴 喂进去的是**快照 JSON**（程序真能拿到轨迹状态）', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     let seen = ''
     await evaluateCro(root, DIR_NAME, snapshotInput({ runningSessionIds: ['s1'] }), {
       runner: async (_p, stdin) => {
@@ -397,7 +397,7 @@ describe('CRO: 评估四态（§5）', () => {
   })
 
   it('🟢 端到端：真实 spawn 一个程序并拿到唤起决定', async () => {
-    makeTrajectory(
+    makeCognitiveTrajectory(
       DIR_NAME,
       'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{' +
         'const o=JSON.parse(s);' +

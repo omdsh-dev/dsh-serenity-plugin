@@ -21,7 +21,7 @@
  * `human-channel.ts`（机器级机制；本文件只接线）。这是"微信桥上移 ACC 层"的第一步。
  *
  * 外部面纯净（D9/D11 延续）：微信桥会话 = 外部面——session/prompt 走
- * includeTrajectory:false（对外不返回轨迹）；skiff 角色白名单即授权（G9）。
+ * includeCognitiveTrajectory:false（对外不返回轨迹）；skiff 角色白名单即授权（G9）。
  */
 
 import type { Context } from 'cordis'
@@ -41,9 +41,9 @@ import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeix
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './weixin-api.js'
 import { readSkiffRoles, type SkiffRoleConfig } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
-import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
+import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection } from './skiff-core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './weixin-output-guard.js'
-import { getActiveSessionInfo } from './trajectory-ops.js'
+import { getActiveSessionInfo } from './cognitive-trajectory-ops.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './weixin-hook.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
@@ -475,7 +475,7 @@ export async function handleIncoming(
       const activeWorkspace = getActiveSessionInfo(sessionId)
       if (activeWorkspace?.mdPath) {
         const sectionOk = ensureWorkspacePromptSection(ref.agent, sessionId)
-        if (!sectionOk) parts.push(workspaceTrajectoryLine(activeWorkspace.mdPath))
+        if (!sectionOk) parts.push(workspaceCognitiveTrajectoryLine(activeWorkspace.mdPath))
       }
       // v1.30.10：关闭自动回发最终文本（weixin.autoReplyWithLastMessage: false）→
       // 每轮注入**机制标记**（事实 + 已填参数，措辞归 CCC——见 weixinManualOutputMarker 头注）。
@@ -513,7 +513,7 @@ export async function handleIncoming(
         })
       }
 
-      const result = await askSkiff(ctx, ref.agent, question, undefined, { includeTrajectory: false })
+      const result = await askSkiff(ctx, ref.agent, question, undefined, { includeCognitiveTrajectory: false })
       const answer = result.answer ?? ''
       // v1.30.10：手动输出模式——桥不转发最终文本（输出权归 agent，记录只记 agent 实际发出的
       // 消息，source=proactive）。系统类消息（新对话通知/语音提示）不受影响。

@@ -1,8 +1,8 @@
 /**
- * trajectory-bound.ts — SESSION 绑定持久化（CCC 内 `AGENT_SESSIONS/.bindings.json`）
+ * cognitive-trajectory-bound.ts — SESSION 绑定持久化（CCC 内 `AGENT_SESSIONS/.bindings.json`）
  *
  * 目标（S142 用户拍板，方案 v1.0）：让「dsh 会话（载体）↔ SESSION（宁静号轨迹）」
- * 的绑定坚固——LLM 不能因智力因素（幻觉/理解偏差）在过程中或 container_trajectory rebuild 后
+ * 的绑定坚固——LLM 不能因智力因素（幻觉/理解偏差）在过程中或 cognitive_trajectory rebuild 后
  * 自行更换 SESSION。
  *
  * 存储形态（v1.30.6 起，S142 review F-01）：绑定**不再写入 dsh 会话日志**。
@@ -28,7 +28,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import { cccRootForCwd } from './ccc-roots.js'
 import { type BindingStore, type BindingRecord } from './host/storage-domain.js'
-import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './trajectory-ops.js'
+import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './cognitive-trajectory-ops.js'
 
 type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
 
@@ -46,7 +46,7 @@ interface SessionBoundRecord {
    * 但**不再作为唤醒候选**（{@link listBoundSessionIds} 过滤掉）——这正是"解绑"的机械形态。
    *
    * 为什么需要（实证）：`.bindings.json` 只增不清——实测 S142 名下挂 **4 代**、S185 挂 **2 代**，
-   * 同一 trajectory 因此可以有**两条 live 会话**：各持一份完整上下文（内存翻倍）
+   * 同一 cognitive trajectory 因此可以有**两条 live 会话**：各持一份完整上下文（内存翻倍）
    * 且**都在写同一批文件**（双写者）。
    */
   supersededAt?: number
@@ -303,13 +303,13 @@ export function hasAnyBound(session: unknown): boolean {
 }
 
 /** 目录名 → 轨迹标签（`--S###--` 命中取 `S###`；未命中原样返回——编码无关 U4） */
-function trajectoryLabel(dirName: string): string {
+function cognitiveTrajectoryLabel(dirName: string): string {
   const m = dirName.match(/--S(\d{3,})--/)
   return m ? `S${m[1]}` : dirName
 }
 
 /**
- * **调用方自身**所属 trajectory 的标签（审计字段 `createdBy` 的唯一正解）。
+ * **调用方自身**所属 cognitive trajectory 的标签（审计字段 `createdBy` 的唯一正解）。
  *
  * 三级来源，逐级回退（R↓：为什么不用单一来源）：
  *  1. `readLastBound(session)` —— **持久 bound**，权威（重启存活、不受别的会话激活污染）
@@ -317,7 +317,7 @@ function trajectoryLabel(dirName: string): string {
  *  3. `getLastActiveSessionInfo()` —— **全局**最近激活指针（无绑定的会话兼容回退）
  *
  * ⚠️ 为何单列成本函数（S142 §30.12.1 实测缺陷）：唤醒注册表的 `createdBy` 原先直接取第 3 级
- * 全局指针，而它记录的是"**进程内最近一次被激活的 trajectory**"——多会话并发时必然张冠李戴
+ * 全局指针，而它记录的是"**进程内最近一次被激活的 cognitive trajectory**"——多会话并发时必然张冠李戴
  * （实测：S142 登记唤醒被写成 `by=S060`）。`createdBy` 是 D60「以可审计替代入口栅」的**唯一凭证**，
  * 失真即替代控制失效 ⇒ 必须以"调用方自己是谁"为准，全局指针只作最后兜底。
  *
@@ -325,16 +325,16 @@ function trajectoryLabel(dirName: string): string {
  * @param scope 调用方 dsh 会话 id（取不到传空串）
  * @returns 轨迹标签（`S###` 或完整目录名）；三级全落空 → 空串（渲染为 `?`）
  */
-export function resolveSessionTrajectoryLabel(session: unknown, scope: string): string {
+export function resolveSessionCognitiveTrajectoryLabel(session: unknown, scope: string): string {
   const bound = session ? readLastBound(session) : null
-  if (bound?.dirName) return trajectoryLabel(bound.dirName)
+  if (bound?.dirName) return cognitiveTrajectoryLabel(bound.dirName)
   const scoped = scope !== '' ? getActiveSessionInfo(scope) : null
   if (scoped) return scoped.sessionId
   return getLastActiveSessionInfo()?.sessionId ?? ''
 }
 
 /**
- * 反向查：绑定到某 trajectory 目录名的 dsh 会话 id（**按绑定时间倒序，最新在前**）。
+ * 反向查：绑定到某 cognitive trajectory 目录名的 dsh 会话 id（**按绑定时间倒序，最新在前**）。
  *
  * 用途（wake-scheduler 冷唤醒）：.bindings.json 以 **sessionId 为键**，而唤醒条目的
  * target 是**目录名**——需要值侧扫描做反向索引。冷会话被唤醒时必须先知道"哪个 dsh
@@ -406,17 +406,17 @@ function collectSupersedeTargets(
 }
 
 /**
- * **(b) 同一 trajectory 多 live 会话的机械守卫**（S142 §0y，所有者 2026-09-18 裁「b 做」）。
+ * **(b) 同一 cognitive trajectory 多 live 会话的机械守卫**（S142 §0y，所有者 2026-09-18 裁「b 做」）。
  *
  * 把绑定到 `dirName` 的**其它**会话 id 标记为 `supersededAt` —— **保留记录**（沿革/正向查询不丢），
  * 只切断"**唤醒还会找到它**"这条路。语义上即"解绑"，且**不动那个会话本身**（它仍可被人工使用）。
  *
  * 为什么必须有机制（R↓）：`.bindings.json` 的语义是"latest-wins 覆盖**本条会话记录**"，
- * 对**同一 trajectory 的其它会话**没有任何约束 ⇒ 多代会话自然堆积（实测 S142 4 代 / S185 2 代），
+ * 对**同一 cognitive trajectory 的其它会话**没有任何约束 ⇒ 多代会话自然堆积（实测 S142 4 代 / S185 2 代），
  * 而 `acquireWakeAgent` 是"遍历全部绑定 id、任一条 live 就用它"——**两条 live 都能被选中**。
  *
  * @param root CCC 根
- * @param dirName 目标 trajectory 目录名
+ * @param dirName 目标 cognitive trajectory 目录名
  * @param keepIds 保留（不标记）的会话 id 集合——通常是"当前正在 use 的这条"
  * @returns **实际被标记**的会话 id（升序稳定；供调用方如实报告，未标记任何一条 → `[]`）
  */
@@ -433,7 +433,7 @@ export function supersedeOtherBindings(
    *
    * 🔴 必须取**域 ∪ 文件的并集**（实测缺陷，2026-09-19）：
    * 首版实现只在**文件循环**里 `marked.push(id)`，于是"记录只在域里"时
-   * 返回值恒为 `[]` —— 而调用方（`tools/trajectory.ts` 的 `use`）**靠这个返回值**决定
+   * 返回值恒为 `[]` —— 而调用方（`tools/cognitive-trajectory.ts` 的 `use`）**靠这个返回值**决定
    * 是否回报 `supersededBindings`，并且早先用 `marked.length === 0` 短路**跳过了写盘**。
    * ⇒ 症状是"D69 只留一条**静默不生效**"（记录没被标记，返回也看不出异常）。
    * 由 `tests/trajectory-bound.test.ts` 的 D69 域路径用例抓到。

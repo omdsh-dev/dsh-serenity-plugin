@@ -1,5 +1,5 @@
 /**
- * wake-registry.test.ts — trajectory 唤醒注册表 + 投递路径（D58，S142 2026-09-13）
+ * wake-registry.test.ts — cognitive trajectory 唤醒注册表 + 投递路径（D58，S142 2026-09-13）
  *
  * 覆盖（设计文档 §11 验收 2）：
  *  - 注册表纯逻辑：时刻解析 / 登记校验 / 到期切分（due vs expired）/ 状态推进 / 移除 / 排序
@@ -29,8 +29,8 @@ import {
   WAKE_CATCH_UP_MS,
   type WakeEntry,
 } from '../src/wake-registry.js'
-import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
-import { listBoundSessionIds } from '../src/trajectory-bound.js'
+import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToCognitiveTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+import { listBoundSessionIds } from '../src/cognitive-trajectory-bound.js'
 import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/cro.js'
 import { croWakeLogPath } from '../src/cro-log.js'
 import { __resetCroTurnsForTest } from '../src/cro-turns.js'
@@ -302,7 +302,7 @@ describe('deliverWake（live 优先 → 冷唤醒正门）', () => {
     expect(sent[0]).toContain('继续 §30 实现')
   })
 
-  it('无绑定记录 → 报错说明需先 container_trajectory use（目标轨迹无载体）', async () => {
+  it('无绑定记录 → 报错说明需先 cognitive_trajectory use（目标轨迹无载体）', async () => {
     writeSessionDir()
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
     const res = await deliverWake(ctx as never, root, makeEntry())
@@ -333,13 +333,13 @@ describe('buildWakeText（投递正文：身份锚定 + 唤醒信息 + 任务）
 })
 
 /**
- * 即时投递（`container_trajectory send-now`；2026-09-16 所有者裁决，**2026-09-17 由 `send-message` 更名**）。
+ * 即时投递（`cognitive_trajectory send-now`；2026-09-16 所有者裁决，**2026-09-17 由 `send-message` 更名**）。
  *
  * **钉住的不变量**：与 `send-later`（原 `wake-later`）**共用取用通路**（live 优先 → 冷载入），
  * 区别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）。
- * 设计稿 = `docs/trajectory-send-message-design.md`（v0.2 定稿）。
+ * 设计稿 = `docs/cognitive-trajectory-send-message-design.md`（v0.2 定稿）。
  */
-describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () => {
+describe('sendToCognitiveTrajectory（即时投递：与 wake 共用取用通路）', () => {
   it('live 命中 ⇒ followup 收到**即时消息**正文（不是唤醒正文）', async () => {
     writeSessionDir()
     writeBinding('sess-live')
@@ -347,7 +347,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     const fakeAgent = { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } }
     const ctx = { agents: { get: (id: string) => (id === 'sess-live' ? fakeAgent : undefined) } }
 
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '现在就做这件事', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, '现在就做这件事', 'S142')
     expect(res.ok).toBe(true)
     expect(res.detail).toContain('live(bound sess-live)')
     expect(sent).toHaveLength(1)
@@ -359,8 +359,8 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     // 🔴 关键区分：**不得**把它说成"到点唤醒"（那是错的事实）。
     // ⚠️ 判据形态订正（本轮实测踩到）：**不能用 `not.toContain('到点')`** —— 本正文里那句
     //    "（**不是**到点唤醒）"自身就含"到点" ⇒ 该断言是**假阳性**，会把我方措辞当违规。
-    //    ⇒ 改用**精确判别符**：唤醒正文的头部标识 `[trajectory 唤醒]`（`buildWakeText` 第一行）。
-    expect(sent[0]).not.toContain('[trajectory 唤醒]')
+    //    ⇒ 改用**精确判别符**：唤醒正文的头部标识 `[认知轨迹唤醒]`（`buildWakeText` 第一行）。
+    expect(sent[0]).not.toContain('[认知轨迹唤醒]')
     expect(sent[0]).not.toContain('登记于')
   })
 
@@ -376,7 +376,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
         ? { resolveAgent: async (id: string) => { asked = id; return { agent: resumed } } }
         : undefined),
     }
-    const res = await sendToTrajectory(ctx as never, root, 'S999', '给冷会话的一句话', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, 'S999', '给冷会话的一句话', 'S142')
     expect(res.ok).toBe(true)
     expect(asked).toBe('sess-cold')
     expect(res.detail).toContain('cold-resume(sess-cold)')
@@ -387,7 +387,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
     writeSessionDir()
     writeBinding('sess-cold')
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('sessionController')
   })
@@ -395,7 +395,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
   it('无绑定记录 + create 可用 ⇒ **不再报错**，改为自动创建（语义已变，见 🆕 组）', async () => {
     writeSessionDir()
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(false)
     // ⚠️ 2026-10-16 起：无绑定**本身**不再是终局错误（`send-now` 会去建载体）；
     //    此处 `get()` 全缺 ⇒ 连 sessionController 都没有 ⇒ 仍报错，但**文案改指向 create 不可用**，
@@ -429,7 +429,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
           ? { list: () => [{ id: 'ws-ccc', path: root, sessionIds: [], attachSession: async () => {} }] }
           : undefined),
     }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
     expect(res.ok).toBe(true)
     // ① 🔴 **必须用 workspaceId**（= 用户操作的同一条分支；宿主管工作区归属）
     //    ⛔ 不能传 cwd：那条分支**不挂工作区**，正是本缺陷的根因。
@@ -460,7 +460,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
           ? { list: () => [] } // 空注册表 = 该目录还没被宿主登记过
           : undefined),
     }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(true)
     // 查不到工作区 ⇒ 退回 cwd（保住"落进同一个 CCC"这个底线）
     expect(created).toEqual({ cwd: root })
@@ -507,7 +507,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
         return undefined
       },
     }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, '给从未激活的轨迹', 'S142')
     expect(res.ok).toBe(true)
     // 🔴 选中 (root 对应的) ws-home，而**不是**排在前面的 ws-other
     expect(createdReq).toEqual({ workspaceId: 'ws-home' })
@@ -546,7 +546,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
         return undefined
       },
     }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     // 消息照常投递（工作区挂载不是投递前提）——但必须如实报出
     expect(res.ok).toBe(true)
     expect(res.detail).toContain('workspace store locked')
@@ -555,7 +555,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
   it('🆕 无绑定但 sessionController.create 缺席 ⇒ 报错（不静默、不误报成功）', async () => {
     writeSessionDir()
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('sessionController.create')
   })
@@ -566,7 +566,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
       agents: { get: () => undefined },
       get: () => ({ create: async () => { throw new Error('db locked') } }),
     }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('就地创建会话失败')
     expect(res.detail).toContain('db locked')
@@ -583,7 +583,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
         resolveAgent: async () => { throw new Error('load boom') },
       }),
     }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(false)
     expect(createCalled).toBe(false)
     expect(res.detail).toContain('冷会话载入失败')
@@ -591,7 +591,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
 
   it('目标未命中 ⇒ 报错', async () => {
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
-    const res = await sendToTrajectory(ctx as never, root, 'S404', 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, 'S404', 'x', 'S142')
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('未命中')
   })
@@ -606,7 +606,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
           : undefined),
       },
     }
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, 'x', 'S142')
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('投递失败')
     expect(res.detail).toContain('driver down')
@@ -619,7 +619,7 @@ describe('sendToTrajectory（即时投递：与 wake 共用取用通路）', () 
       agents: { get: (id: string) => (id === 'sess-live' ? { followup: () => {} } : undefined) },
     }
     const before = listWakes(root).entries.length
-    const res = await sendToTrajectory(ctx as never, root, DIR_NAME, '不留痕的一句话', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, '不留痕的一句话', 'S142')
     expect(res.ok).toBe(true)
     expect(listWakes(root).entries.length).toBe(before)
   })
@@ -915,7 +915,7 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     expect(sent[0]).toContain('CRO 唤起') // 正文**自我表明**来源（不是唤醒正文、不是即时消息）
     expect(sent[0]).toContain('你的 SESSION.md 已很大') // 提示词透传
     expect(sent[0]).toContain(`dir=${DIR_NAME}`) // 🔴 快照经 stdin 真到达了程序
-    expect(sent[0]).not.toContain('[trajectory 唤醒]') // 不得冒充"到点唤醒"
+    expect(sent[0]).not.toContain('[认知轨迹唤醒]') // 不得冒充"到点唤醒"
   }, 20_000)
 
   it('🔴 CRO **不写唤醒表**（设计 §6.3）：判定为真 ⇒ 投递，但表里一行都不增不减', async () => {

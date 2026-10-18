@@ -40,7 +40,7 @@ const OTHER = 'yh-Standard-PC-Q35-ICH9-2008'
 let root: string
 
 /** 建一条轨迹目录（可选写绑定文件） */
-function makeTrajectory(binding?: string): string {
+function makeCognitiveTrajectory(binding?: string): string {
   const dir = join(root, 'AGENT_SESSIONS', DIR_NAME)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'SESSION.md'), '# SESSION\n', 'utf-8')
@@ -96,7 +96,7 @@ describe('parseCroHostBinding: 纯函数边界', () => {
 
 describe('resolveCroHostBinding: 四态判定', () => {
   it('✅ 绑定本机 ⇒ allowed=true / code=bound-to-self', () => {
-    makeTrajectory(SELF)
+    makeCognitiveTrajectory(SELF)
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(true)
     expect(v.code).toBe('bound-to-self')
@@ -105,7 +105,7 @@ describe('resolveCroHostBinding: 四态判定', () => {
   })
 
   it('🔴 负控 A：**没有绑定文件 ⇒ 不跑**（fail-closed，"必须指定"的字面语义）', () => {
-    makeTrajectory() // 不写绑定文件
+    makeCognitiveTrajectory() // 不写绑定文件
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(false)
     expect(v.code).toBe('not-bound')
@@ -113,7 +113,7 @@ describe('resolveCroHostBinding: 四态判定', () => {
   })
 
   it('🔴 负控 B：**绑定给别的机器 ⇒ 本机不跑**（这正是"确保不在指定机器上发生"）', () => {
-    makeTrajectory(OTHER)
+    makeCognitiveTrajectory(OTHER)
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(false)
     expect(v.code).toBe('bound-to-other')
@@ -123,23 +123,23 @@ describe('resolveCroHostBinding: 四态判定', () => {
   })
 
   it('🔴 "没绑"与"绑给别人"是**两个不同的 code**（不许合并——否则排查指错方向）', () => {
-    makeTrajectory()
+    makeCognitiveTrajectory()
     const notBound = resolveCroHostBinding(root, DIR_NAME, SELF)
-    makeTrajectory(OTHER)
+    makeCognitiveTrajectory(OTHER)
     const other = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(notBound.code).not.toBe(other.code)
     expect(notBound.detail).not.toBe(other.detail)
   })
 
   it('文件只有注释 ⇒ 判"没绑"（不是"绑给空名"）', () => {
-    makeTrajectory('# TODO: 填机器名\n')
+    makeCognitiveTrajectory('# TODO: 填机器名\n')
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(false)
     expect(v.code).toBe('not-bound')
   })
 
   it('文件为空 ⇒ 判"没绑"', () => {
-    makeTrajectory('')
+    makeCognitiveTrajectory('')
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(false)
     expect(v.code).toBe('not-bound')
@@ -152,14 +152,14 @@ describe('resolveCroHostBinding: 四态判定', () => {
   })
 
   it('本机名为空串 ⇒ **一律不通过**（fail-closed，不是"取不到就随便跑"）', () => {
-    makeTrajectory(SELF)
+    makeCognitiveTrajectory(SELF)
     const v = resolveCroHostBinding(root, DIR_NAME, '')
     expect(v.allowed).toBe(false)
     expect(v.code).toBe('bound-to-other')
   })
 
   it('大小写不同 ⇒ 视为不同机器（不做大小写折叠——机器名是精确串）', () => {
-    makeTrajectory(SELF.toUpperCase())
+    makeCognitiveTrajectory(SELF.toUpperCase())
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(false)
     expect(v.code).toBe('bound-to-other')
@@ -170,7 +170,7 @@ describe('resolveCroHostBinding: 四态判定', () => {
 
 describe('resolveCroHostBinding: 异常路径一律 fail-closed', () => {
   it('🔴 绑定文件过大（写错了）⇒ 不跑，且 code=read-error', () => {
-    makeTrajectory('x'.repeat(2_048))
+    makeCognitiveTrajectory('x'.repeat(2_048))
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(false)
     expect(v.code).toBe('read-error')
@@ -184,7 +184,7 @@ describe('resolveCroHostBinding: 异常路径一律 fail-closed', () => {
 
   it('🔴 目录当文件（同名目录）⇒ 不跑，绝不抛', () => {
     // 真故障形态：把"绑定文件"造成**目录** ⇒ readFileSync 会 EISDIR
-    const dir = makeTrajectory()
+    const dir = makeCognitiveTrajectory()
     mkdirSync(join(dir, CRO_HOST_FILENAME), { recursive: true })
     const v = resolveCroHostBinding(root, DIR_NAME, SELF)
     expect(v.allowed).toBe(false)
@@ -194,7 +194,7 @@ describe('resolveCroHostBinding: 异常路径一律 fail-closed', () => {
   it('🔴 不可读文件（chmod 000）⇒ 不跑（**仅非 root 时有效**——root 下读得动，跳过该断）', () => {
     // 判据纪律：`chmod 000` 在 root 下拦不住读取 ⇒ 该故障形态**默认不可构造**。
     // 本用例在 root 环境下**会正确地读成功**，故不断言结果，只断言"绝不抛"。
-    makeTrajectory(SELF)
+    makeCognitiveTrajectory(SELF)
     const file = join(root, 'AGENT_SESSIONS', DIR_NAME, CRO_HOST_FILENAME)
     chmodSync(file, 0o000)
     let v: ReturnType<typeof resolveCroHostBinding> | null = null
@@ -211,7 +211,7 @@ describe('resolveCroHostBinding: 异常路径一律 fail-closed', () => {
 describe('绑定文件与 CRO 程序共存（真形态）', () => {
   it('🔴 两个文件同在轨迹目录 ⇒ 绑定判定不受 CRO 程序存在与否影响', async () => {
     const { CRO_FILENAME } = await import('../src/cro.js')
-    const dir = makeTrajectory(SELF)
+    const dir = makeCognitiveTrajectory(SELF)
     // 不写 CRO 程序时：绑定仍判通过（绑定是**独立的**一道门，不依赖程序文件）
     expect(resolveCroHostBinding(root, DIR_NAME, SELF).allowed).toBe(true)
     // 写上 CRO 程序后：判定不变

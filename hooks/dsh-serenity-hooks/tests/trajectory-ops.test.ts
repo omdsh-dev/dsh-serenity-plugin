@@ -18,10 +18,10 @@ import {
   sessionEvents,
   SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
-} from '../src/trajectory-ops.js'
+} from '../src/cognitive-trajectory-ops.js'
 
 /**
- * trajectory-ops 单元测试（S136 对齐 osp spec；v1.33 按 trajectory 六动作收敛）：
+ * cognitive-trajectory-ops 单元测试（S136 对齐 osp spec；v1.33 按 cognitive trajectory 六动作收敛）：
  * - create：--desc/--issue 二选一；返回 {message, dirName, sessionPath, sessionId}
  * - list/show/summary：文本输出（对齐 osp）
  * - **close / archive / health / qa 四个动作已于 v1.33 删除**（S142 §32 用户裁决），
@@ -49,7 +49,7 @@ function mk(desc: string, extra: Parameters<typeof createSession>[0] = {}): Retu
 /**
  * 标记轨迹完成（v1.33：无 close 动作——完成与否由 SESSION.md 的 `[x]` 表达）。
  * 🔴 **这里的字面量就是机器契约本体**：状态行必须同时含 `[ ]`／`[x]` 标记与标签，
- * 与 `src/trajectory-ops.ts` 的 `sessionMdTemplate` 逐字对齐；改模板时必须同步改这里
+ * 与 `src/cognitive-trajectory-ops.ts` 的 `sessionMdTemplate` 逐字对齐；改模板时必须同步改这里
  * （2026-09-25 就是漏了这一步 ⇒ 本文件两条用例变红）。
  */
 function markDone(r: ReturnType<typeof createSession>): void {
@@ -57,7 +57,7 @@ function markDone(r: ReturnType<typeof createSession>): void {
   writeFileSync(md, readFileSync(md, 'utf-8').replace('- 状态: [ ] 进行中', '- 状态: [x] 已完成'), 'utf-8')
 }
 
-describe('trajectory-ops: 生命周期（对齐 osp spec）', () => {
+describe('cognitive-trajectory-ops: 生命周期（对齐 osp spec）', () => {
   it('create desc 模式自动分配 S001 + 递增', () => {
     expect(listSessions(dir)).toBe('(no sessions in AGENT_SESSIONS/)')
     const a = mk('first')
@@ -132,7 +132,7 @@ describe('trajectory-ops: 生命周期（对齐 osp spec）', () => {
   })
 })
 
-describe('trajectory-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
+describe('cognitive-trajectory-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
   it('use 写内存 Map（不落盘）：getActiveSessionInfo + readActiveSessionMd 可读', () => {
     const r = mk('active-use')
     const used = useSession(dir, 'S001')
@@ -170,7 +170,7 @@ describe('trajectory-ops: 活跃会话（内存化，S134 v1.16.14）', () => {
   })
 })
 
-describe('trajectory-ops: 进程重启恢复（parseSessionContextFromEvents，只扫自己会话）', () => {
+describe('cognitive-trajectory-ops: 进程重启恢复（parseSessionContextFromEvents，只扫自己会话）', () => {
   it('events 含 [SESSION CONTEXT] 标记 → 解析出活跃会话', () => {
     const r = mk('recover-me')
     const mdPath = join(r.sessionPath, 'SESSION.md')
@@ -210,13 +210,13 @@ describe('trajectory-ops: 进程重启恢复（parseSessionContextFromEvents，�
   })
 })
 
-describe('trajectory-ops: v1.24.11 恢复稳固化（路径规范行即可，无需 [SESSION CONTEXT] 标记）', () => {
+describe('cognitive-trajectory-ops: v1.24.11 恢复稳固化（路径规范行即可，无需 [SESSION CONTEXT] 标记）', () => {
   it('重建锚点格式（无标记）→ 从路径行恢复（仅靠锚点的会话可恢复）', () => {
     const dirName = '2026-08-24--S142--dsh-serenity-plugin 长期维护'
     const anchor = [
-      '[TRAJECTORY-ASSISTANT · REBUILD] The conversation has been cleared and rebuilt.',
+      '[COGNITIVE-TRAJECTORY-ASSISTANT · REBUILD] The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the cognitive trajectory continues).',
       'Continue the work of S142.',
-      `- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/${dirName}/SESSION.md (the trajectory's persistent body)`,
+      `- Persistent cognitive trajectory — SESSION.md path: AGENT_SESSIONS/${dirName}/SESSION.md (the cognitive trajectory's persistent body)`,
     ].join('\n')
     const info = parseSessionContextFromEvents([
       { type: 'user/message', data: { content: [{ type: 'text', text: anchor }] } },
@@ -231,7 +231,7 @@ describe('trajectory-ops: v1.24.11 恢复稳固化（路径规范行即可，无
     const a = mk('old-active')
     const b = mk('newer')
     const m1 = `${SESSION_CONTEXT_MARKER} ${a.dirName}\nSESSION.md path: ${join(a.sessionPath, 'SESSION.md')}`
-    const m2 = `- Persistent trajectory — SESSION.md path: AGENT_SESSIONS/${b.dirName}/SESSION.md`
+    const m2 = `- Persistent cognitive trajectory — SESSION.md path: AGENT_SESSIONS/${b.dirName}/SESSION.md`
     const info = parseSessionContextFromEvents([{ data: { text: m1 } }, { data: { text: m2 } }])
     expect(info!.sessionId).toBe('S002')
     expect(info!.dirName).toBe(b.dirName)
@@ -304,7 +304,7 @@ describe('trajectory-ops: v1.24.11 恢复稳固化（路径规范行即可，无
   })
 })
 
-describe('trajectory-ops: sessionEvents（v1.28.1 适配 0.1.2-rc.1——rc.1 起 Session 无 .events 属性，snapshotEvents() 方法）', () => {
+describe('cognitive-trajectory-ops: sessionEvents（v1.28.1 适配 0.1.2-rc.1——rc.1 起 Session 无 .events 属性，snapshotEvents() 方法）', () => {
   it('snapshotEvents() 优先（真实 rc.1 Session 形态）', () => {
     const events = [{ type: 'user/message', seq: 1 }]
     const session = { snapshotEvents: () => events, events: [{ type: 'old' }] }

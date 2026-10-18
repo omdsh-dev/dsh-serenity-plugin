@@ -30,7 +30,7 @@
  *
  * 🔴 **两个面，两个入口**（2026-10-12 增；owner 裁决 O2）—— 同源、但成本形态不同：
  *    · **载入面** `buildResourceIndex()` —— 完整索引（名字 ＋ 首标题 ＋ 字节），带 `.md` 文件头读取；
- *      在三条路径上各附一次：入口段（`system-prompt.ts` order −50）／轨迹段（`trajectory-skills.ts`
+ *      在三条路径上各附一次：入口段（`system-prompt.ts` order −50）／轨迹段（`cognitive-trajectory-skills.ts`
  *      order −45）／目录 provider 的 `get()`（`opencode-skills.ts`）。
  *    · **目录面** `buildResourceNameSuffix()` —— **只有名字**，**不读任何正文**；只挂一处：
  *      目录 provider 的 `list()`（`available_skills` 的 `SkillSummary.description`）。

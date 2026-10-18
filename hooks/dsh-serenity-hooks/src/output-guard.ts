@@ -21,7 +21,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { loadMsmEntries } from './msm-ops.js'
 import { MECHANISM_PORTS } from './ports.js'
-import { eventToken } from './trajectory-assistant.js'
+import { eventToken } from './cognitive-trajectory-assistant.js'
 
 // ── 静态机制词（内部结构词汇；公开称呼词不入表）──
 
@@ -39,9 +39,9 @@ const MECHANISM_WORDS: string[] = [
   'agent/turn-stopping',
   'tools/pre-execute',
   'tools/post-execute',
-  'Trajectory Steward',
-  'TRAJECTORY-STEWARD',
-  'TRAJECTORY-ASSISTANT',
+  'Cognitive Trajectory Steward',
+  'COGNITIVE-TRAJECTORY-STEWARD',
+  'COGNITIVE-TRAJECTORY-ASSISTANT',
   'first-anchor',
   '拦截缝',
   '装配层',
@@ -177,7 +177,7 @@ const CATEGORY_GUIDE: Record<SensitiveCategory, string> = {
  * v1.26.10 只列裸词（如 "3080"）模型仍不知道是什么/怎么规避；现在按类说明：
  * "3080" → 内部服务端口，不要提及内部端口/地址/端点）。
  * R↓ 安全性：命中词本就已在被拦截回复中进入会话（已暴露面），打回重复一次不扩大暴露；
- * steer 是 plugin source 消息不回显给用户（3100 对外响应已不含 trajectory → 打回文本不达外部用户）。
+ * steer 是 plugin source 消息不回显给用户（3100 对外响应已不含 cognitive trajectory → 打回文本不达外部用户）。
  */
 export function buildRebuke(hits: SensitiveHit[]): string {
   const count = hits.length

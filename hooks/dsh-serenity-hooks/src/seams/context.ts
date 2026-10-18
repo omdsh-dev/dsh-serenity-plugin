@@ -21,10 +21,10 @@ import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
 import { cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
-import { registerEntrySkillSection, registerTrajectorySkillSection } from './system-prompt.js'
+import { registerEntrySkillSection, registerCognitiveTrajectorySkillSection } from './system-prompt.js'
 import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding } from './guards.js'
-import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory-ops.js'
-import { readLastBound, appendBound } from '../trajectory-bound.js'
+import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../cognitive-trajectory-ops.js'
+import { readLastBound, appendBound } from '../cognitive-trajectory-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 import { PLUGIN_SOURCE } from '../message-source.js'
 
@@ -167,7 +167,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
     // v1.34.1：轨迹声明的 skill 注入（绑定期间持续存在；无绑定/无声明 ⇒ 不注册，见 system-prompt.ts）
-    registerTrajectorySkillSection(agent, root)
+    registerCognitiveTrajectorySkillSection(agent, root)
     // 重启恢复（S134 v1.16.14 内存化，对齐 osp）：进程重启内存 Map 空 + 会话有历史 →
     // 从**当前会话 events** 解析 [SESSION CONTEXT] 标记恢复内存活跃会话（只扫自己会话，
     // 无跨会话串台）；全新会话（无历史）天然不恢复。autoRestoreSession 可关，默认开。
@@ -303,7 +303,7 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         // P0-1：pre-step 兜底路径也启用 scoped 身份 section（session-start 之外的 agent）
         registerEntrySkillSection(agent, root)
         // v1.34.1：轨迹声明的 skill 注入（绑定期间持续存在；无绑定/无声明 ⇒ 不注册，见 system-prompt.ts）
-        registerTrajectorySkillSection(agent, root)
+        registerCognitiveTrajectorySkillSection(agent, root)
       }
       if (!root || injected.has(key) || downstream.kind !== 'enter') return downstream
       injected.add(key)

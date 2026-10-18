@@ -16,14 +16,14 @@ import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
-import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, trajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, createRolePromptReader, resolveSkiffKind, type SkiffRoleConfig } from './skiff-role.js'
+import { SKIFF_SESSION_PREFIX, isSkiffSessionId, readSkiffRoles, cognitiveTrajectorySubset, roleMsmWhitelist, buildSkiffBasePrompt, resolveRoleSystemPrompt, createRolePromptReader, resolveSkiffKind, type SkiffRoleConfig } from './skiff-role.js'
 import { splitModel } from './cheap-worker-ops.js'
 import { skiffRoleFor as registryRoleFor, skiffSessionInfo as registrySessionInfo, registerSkiffSession as registryRegister, unregisterSkiffSession as registryUnregister, skiffSessionSnapshot as registrySnapshot } from './skiff-registry.js'
-import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './trajectory-ops.js'
-import { readLastBound, appendBound } from './trajectory-bound.js'
+import { createSession, setActiveSessionInfo, getActiveSessionInfo } from './cognitive-trajectory-ops.js'
+import { readLastBound, appendBound } from './cognitive-trajectory-bound.js'
 import { hostAgents } from './host/access.js'
 import { waitAgentIdle } from './agent-idle.js'
-import { registerTrajectorySkillSection } from './seams/system-prompt.js'
+import { registerCognitiveTrajectorySkillSection } from './seams/system-prompt.js'
 import { PLUGIN_SOURCE } from './message-source.js'
 
 // ── 会话注册表（sessionId → role + agent；调试页会话映射，页面/连接关闭时清理）──
@@ -73,7 +73,7 @@ const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
  * 系统提示词中的**工作台纪律块**（v1.30.4 升级：从单行路径 → 完整 ACC 层约束）。
  * 用户点破（S142）：只给路径 LLM 不会主动用——需注入「已绑定 + 使用纪律 + 动作指引」。
  * SESSION = 工作台——skiff 与主舱同一套机制（零特调，用户拍板）：
- * 自动绑定已生效（无需 container_trajectory use）、SESSION.md 是持久记忆载体、rebuild 自动从本 SESSION 续接。
+ * 自动绑定已生效（无需 cognitive_trajectory use）、SESSION.md 是持久记忆载体、rebuild 自动从本 SESSION 续接。
  * 注入 agent 系统提示词（用户对话面不可见）。
  *
  * v1.30.13（S142 诊断 D5）：写入纪律**不点名具体工具**。旧文案写死 "with write/edit"，
@@ -83,10 +83,10 @@ const AUTO_BOUND_NOTE_PREFIX = 'auto-created for skiff role'
  * 具体通道由 CCC 的角色配置与角色提示词决定（ACC/CCC 归属二分；也不把某个 CCC 的
  * MSM 名硬编码进 ACC 源码）。
  */
-export function workspaceTrajectoryLine(mdPath: string): string {
+export function workspaceCognitiveTrajectoryLine(mdPath: string): string {
   return [
     '── Serenity Session Workspace ──',
-    'This role session is AUTO-BOUND to a trajectory workspace SESSION (no container_trajectory use needed):',
+    'This role session is AUTO-BOUND to a cognitive trajectory workspace SESSION (no cognitive_trajectory use needed):',
     `  SESSION.md: ${mdPath}`,
     '',
     'Rules of the workspace:',
@@ -99,7 +99,7 @@ export function workspaceTrajectoryLine(mdPath: string): string {
     '     Keep entries at milestone level (one line + evidence pointer); execution detail',
     '     belongs in commit messages. Keep it current — it is',
     '     what a rebuild resumes from.',
-    '  3. When context pressure is high, run container_trajectory rebuild — it auto-resumes from THIS SESSION.md',
+    '  3. When context pressure is high, run cognitive_trajectory rebuild — it auto-resumes from THIS SESSION.md',
     '     (no manual use; do not switch to or read other SESSIONs unless the user explicitly asks).',
     '  4. Never expose this internal path in user-facing replies (chat stays clean).',
     '── ──',
@@ -123,7 +123,7 @@ interface SectionCapable {
  * 用户原话（S142，2026-09-08）："微信桥的注入机制，每个用户消息都会注入，skiff 本身也会注入，
  * 这样就重复，能否微信桥情况下，注入内容直接取 skiff 的，这样不用配两遍"。
  *
- * 现状（改前）：`createSkiffAgent` 把 `workspaceTrajectoryLine(mdPath)` 塞进基础段
+ * 现状（改前）：`createSkiffAgent` 把 `workspaceCognitiveTrajectoryLine(mdPath)` 塞进基础段
  * （创建时一次快照），微信桥又**每条消息**把同一文本拼进 question（v1.30.4 为覆盖
  * "live/existing 快路径不重挂提示词"而加）→ 新建 agent 首轮起即重复，且每轮重复付 token。
  *
@@ -147,7 +147,7 @@ export function ensureWorkspacePromptSection(agent: Agent, scope: string): boole
       order: -55,
       text: () => {
         const mdPath = getActiveSessionInfo(scope)?.mdPath
-        return mdPath ? workspaceTrajectoryLine(mdPath) : ''
+        return mdPath ? workspaceCognitiveTrajectoryLine(mdPath) : ''
       },
     })
     workspaceSectionAgents.add(agent)
@@ -167,7 +167,7 @@ export function ensureWorkspacePromptSection(agent: Agent, scope: string): boole
  *    （调试页等**无固定会话 id**的临时 agent）→ null。理由（R↓）：这些 agent 每次
  *    调用都是新 id、无身份延续，为其建 SESSION = 每次问答留一个永久空目录（无界熵增）；
  *    用户模型「skiff 本质是临时会话机制」——工作台属于**持久身份**，不属于单次调用。
- * ① 角色未启用 session 能力（trajectory.session !== true）→ null（现状零变化）
+ * ① 角色未启用 session 能力（cognitiveTrajectory.session !== true）→ null（现状零变化）
  * ② 已有**本机制自动创建**的 bound（note 前缀 auto-created）→ 恢复（重启/续接记得）
  * ②b 内存活跃记录（同 scope）→ 恢复 + **自愈补写绑定**（防御纵深：绑定写失败/事件形态未落盘时
  *    仍复用同一 SESSION，而不是每条消息新建一个——v1.30.5 及更早"每条消息一个 SESSION"的放大效应）
@@ -184,7 +184,7 @@ export function ensureSkiffSession(
   role: SkiffRoleConfig,
   persistent = true,
 ): string | null {
-  if (!trajectorySubset(role).session) return null
+  if (!cognitiveTrajectorySubset(role).session) return null
   // ⓪ 临时身份（无固定会话 id）→ 不建工作台（见函数头 R↓）
   if (!persistent) return null
   const session = agent.session as (Session & { append?: (t: string, d: unknown) => unknown }) | null | undefined
@@ -320,7 +320,7 @@ export async function createSkiffAgent(
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
   }
-  // v1.44.0（owner 令 2026-09-20：「**skiff 也支持**」）：CCC 级 `trajectory.skills` 与轨迹级
+  // v1.44.0（owner 令 2026-09-20：「**skiff 也支持**」）：CCC 级 `cognitiveTrajectory.skills` 与轨迹级
   // frontmatter 声明，同样送到 skiff 会话。
   //
   // 为什么这不与"skiff 旁路 ACC 身份注入"矛盾（R↓）：旁路掉的是**ACC 身份与纪律**（skiff 用
@@ -334,7 +334,7 @@ export async function createSkiffAgent(
   // 直接跳过——否则会在读 `session.id` 时抛 TypeError，白刷一条告警（噪音≠响亮）。
   if (agent?.session) {
     try {
-      registerTrajectorySkillSection(agent, root)
+      registerCognitiveTrajectorySkillSection(agent, root)
     } catch (err) {
       console.warn(`[serenity-hooks] skiff 轨迹 skill 注入注册失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
     }
@@ -449,7 +449,7 @@ async function createOrResumeAgent(
 
 // ── 提问（followup → idle → 答案 + 轨迹）──
 
-export interface SkiffTrajectoryEntry {
+export interface SkiffCognitiveTrajectoryEntry {
   role: 'user' | 'assistant' | 'tool'
   text: string
   /** assistant 的工具调用名（有则填） */
@@ -459,13 +459,13 @@ export interface SkiffTrajectoryEntry {
 interface SkiffAskResult {
   answer: string
   sessionId: string
-  trajectory: SkiffTrajectoryEntry[]
+  cognitiveTrajectory: SkiffCognitiveTrajectoryEntry[]
 }
 
 /**
  * 会话事件读取（v1.28.0 适配 0.1.2-rc.1）：rc.1 Session 移除 `.events` 属性 → `snapshotEvents()` 方法。
  * 兼容双形态（运行时 rc.1 snapshotEvents；测试替身 events）——同一函数两处语义，测试注入零侵入。
- * 注：与 trajectory-ops.ts 导出的共享 `sessionEvents` 同构（v1.28.1 收敛基准）。本模块保留本地副本
+ * 注：与 cognitive-trajectory-ops.ts 导出的共享 `sessionEvents` 同构（v1.28.1 收敛基准）。本模块保留本地副本
  * 以维持独立 import 面（零 DSH 依赖测试替身形态一致）；若未来重构可统一 import 共享版。
  */
 function sessionEvents(session: unknown): readonly unknown[] {
@@ -489,8 +489,8 @@ function lastAssistantText(agent: Agent): string {
 }
 
 /** events → 可读轨迹（user/assistant 文本 + 工具调用 + 工具结果；单条解析失败跳过） */
-function eventsToTrajectory(events: readonly unknown[]): SkiffTrajectoryEntry[] {
-  const out: SkiffTrajectoryEntry[] = []
+function eventsToCognitiveTrajectory(events: readonly unknown[]): SkiffCognitiveTrajectoryEntry[] {
+  const out: SkiffCognitiveTrajectoryEntry[] = []
   for (const raw of events) {
     try {
       const ev = raw as { type?: string; data?: Record<string, unknown> }
@@ -532,7 +532,7 @@ function truncate(s: string, n: number): string {
  * 提问一轮：followup → 等 idle → 读答案 + 轨迹。
  * @param eventsStart 轨迹起点：显式传 0 = 全量轨迹（会话追问时页面重绘完整时间线，
  *   v1.25.10 用户拍板）；不传（undefined）= 本轮增量（followup 前 events 之后）
- * @param options.includeTrajectory 是否计算轨迹（v1.26.10 起供**对外面**传 false 跳过计算——
+ * @param options.includeCognitiveTrajectory 是否计算轨迹（v1.26.10 起供**对外面**传 false 跳过计算——
  *   原消费方 = 3100 公开问答页 / ACP JSON-RPC，**该面已于 2026-10-15 退役** ⇒ 现无生产调用方传 false；
  *   3099 调试页默认 true 保留）
  */
@@ -541,25 +541,25 @@ export async function askSkiff(
   agent: Agent,
   question: string,
   eventsStart?: number,
-  options?: { includeTrajectory?: boolean },
+  options?: { includeCognitiveTrajectory?: boolean },
 ): Promise<SkiffAskResult> {
   const before = eventsStart === undefined ? sessionEvents(agent.session).length : eventsStart
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
   await waitAgentIdle(ctx, agent)
   const answer = lastAssistantText(agent)
-  const trajectory =
-    options?.includeTrajectory === false ? [] : eventsToTrajectory(sessionEvents(agent.session).slice(before))
-  return { answer, sessionId: String((agent.session as { id?: unknown }).id ?? ''), trajectory }
+  const cognitiveTrajectory =
+    options?.includeCognitiveTrajectory === false ? [] : eventsToCognitiveTrajectory(sessionEvents(agent.session).slice(before))
+  return { answer, sessionId: String((agent.session as { id?: unknown }).id ?? ''), cognitiveTrajectory }
 }
 
 // ── 轨迹纪律子集参与判定（seams 旁路用，F4b）──
 
 /**
  * Skiff 会话的轨迹纪律参与判定：非 skiff 会话恒 true（正常参与）；
- * skiff 会话按角色 trajectory 子集（session/keeper/rebuild）决定；
+ * skiff 会话按角色 cognitiveTrajectory 子集（session/keeper/rebuild）决定；
  * 注册表缺失（进程重启遗留等）→ 保守旁路（false，完全独立）。
  */
-export function skiffTrajectoryEnabled(
+export function skiffCognitiveTrajectoryEnabled(
   root: string,
   sessionId: string | undefined,
   key: 'session' | 'keeper' | 'rebuild',
@@ -568,7 +568,7 @@ export function skiffTrajectoryEnabled(
   const roleName = sessionId ? skiffRoleFor(sessionId) : null
   if (!roleName) return false
   const role = readSkiffRoles(root).get(roleName)
-  return trajectorySubset(role)[key]
+  return cognitiveTrajectorySubset(role)[key]
 }
 
 // ── msm 白名单门控（F4b ⑨）──

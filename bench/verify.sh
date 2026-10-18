@@ -132,8 +132,13 @@ check V5b "宿主真的创建过 agent（轮次缝被走到）" \
 # 判据 = 三个**只有真被调用才会打印**的 host 侧痕迹：
 #   · `anchor history fabricated`（`seams/bootstrap.ts`，首个真实轮次时造锚定历史；v1.62 改名）
 #   · 全局入口 skill section 注册 / 唤醒调度器启动（装配面）
+# 🔴 2026-10-18（v1.65.0 更名）：唤醒调度器的启动自证行由
+#    「[serenity-hooks] ✓ trajectory 唤醒调度器启动」改为
+#    「[serenity-hooks] ✓ 认知轨迹唤醒调度器启动」——**中文「认知轨迹」**。
+#    ⚠️ 本条是**判据自身**跟着改名走的一格：漏改 ⇒ V7 恒红，而它与"缝真没被调用"
+#    在读数上不可分（本轨既有判据：读数器先自证，别把工具坏当成被测对象坏）。
 seam_skill=$(grep -c '全局入口 skill section 已注册' "$web" 2>/dev/null || true)
-seam_wake=$(grep -c 'trajectory 唤醒调度器启动' "$web" 2>/dev/null || true)
+seam_wake=$(grep -c '认知轨迹唤醒调度器启动' "$web" 2>/dev/null || true)
 seam_ok=$([ "${seam_skill:-0}" -gt 0 ] && [ "${seam_wake:-0}" -gt 0 ] && echo 0 || echo 1)
 check V7 "我们的缝在宿主运行期真被调用（装配面 ≥2 条自证行）" "$seam_ok" \
   "入口 skill ${seam_skill:-0} 行 / 唤醒调度器 ${seam_wake:-0} 行 / 锚点注入 ${prompted:-0} 行"
@@ -514,6 +519,42 @@ if [ -f "$V23_PROBE" ]; then
 else
   for id_ in V23 V23b V23c; do
     check "$id_" "工作区归属（探针不在）" 1 "无 $V23_PROBE ⇒ 先 bench-docker vpush"
+  done
+fi
+
+# ── V24 🆕 **工具注册名判据**（v1.65.0 cognitive trajectory 更名的直接产物）──
+# 为什么必须单列（R↓）：那就是一次**纯改名**，最危险的后果全在「工具名是字符串契约」这条上 ——
+#   ① `REGISTERED_TOOLS`（插件侧）与 `dsh.plugin.json`（声明侧）**同时错**是可能的
+#      （v1.31.0 踩过「双侧陈旧一致 = 静默通过」）；
+#   ② `tools.restrict({ deny })` 按**工具名字符串**匹配，且 DSH 契约规定未注册的名字
+#      会让**整次调用失败** ⇒ 白名单与注册名不一致时，该角色**静默失去工具**（无报错）。
+# ⇒ 判据刻意**不用我们自己的常量自证**，而是读**加载后的发布物**导出的注册面。
+#
+#   V24   读数器自证（插件目录 + 清单可读）
+#   V24a  发布物导出的注册面可读（lib/invariant.js 的 REGISTERED_TOOLS）
+#   V24b  注册面与声明面**逐项**一致（不看总数）
+#   V24c  🔴 新名在册 ∧ 旧名不在册（改名只做一半时当场红）
+#   V24d  声明面同一组判据
+V24_PROBE=/usr/local/bin/v24-tool-registry-check.mjs
+if [ -f "$V24_PROBE" ]; then
+  v24out=$(node "$V24_PROBE" 2>&1)
+  v24rc=$?
+  for id_ in V24 V24a V24b V24c V24d; do
+    line=$(printf '%s\n' "$v24out" | grep -E "^PASS $id_ |^FAIL $id_ " | head -1)
+    if [ -z "$line" ]; then
+      check "$id_" "工具注册名（$id_ 未产出结论）" 1 "探针没给这条判据的结论"
+    else
+      st_=$(printf '%s' "$line" | cut -d' ' -f1)
+      lab_=$(printf '%s' "$line" | cut -d' ' -f3-)
+      [ "$st_" = "PASS" ] && check "$id_" "$lab_" 0 || check "$id_" "$lab_" 1
+    fi
+  done
+  if [ "$v24rc" != "0" ]; then
+    printf '%s\n' "$v24out" | grep -E '^FAIL ' | sed 's/^/      /'
+  fi
+else
+  for id_ in V24 V24a V24b V24c V24d; do
+    check "$id_" "工具注册名（探针不在）" 1 "无 $V24_PROBE ⇒ 先 bench-docker vpush"
   done
 fi
 

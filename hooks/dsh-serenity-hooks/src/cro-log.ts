@@ -3,10 +3,10 @@
  *
  * ## 所有者令（本模块的存在理由）
  *
- * 「S151 和 S185 的验证都说明，trajectory 倾向于自己做个结构化记录来记录自身 CRO 的执行情况，
+ * 「S151 和 S185 的验证都说明，认知轨迹倾向于自己做个结构化记录来记录自身 CRO 的执行情况，
  * 这是个结构化流水账；**我们 ACC 有必要进行 CRO 唤醒的日志记录**，当 CRO 存在时，每次**成功唤醒**
  * 写相关信息，但是保留数量要少，**只保留仅两日**的记录即可，**这个时间是程序化的**」
- * ＋「**这个日志写结构化文件到 trajectory 目录，文件名固定即可**」
+ * ＋「**这个日志写结构化文件到认知轨迹目录，文件名固定即可**」
  * ＋「**失败成功都记录**」。
  *
  * ## 它解决什么麻烦（白话）
@@ -48,7 +48,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { sessionsRoot } from './trajectory-ops.js'
+import { sessionsRoot } from './cognitive-trajectory-ops.js'
 import { isoLocal } from './time.js'
 
 /** 固定文件名（所有者令：「文件名固定即可」）——与程序自建的 `cro-state.json` 并排、主语分明 */

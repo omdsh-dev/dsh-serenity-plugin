@@ -71,7 +71,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | 工具 | 功能 | 使用场景 |
 |---|---|---|
 | `container_fs` | 在工作区内管理文件：列目录、查找、复制、移动、新建、追加、在文件管理器中打开 | 需要查看或整理工作区内文件时 |
-| `container_trajectory` | **一条轨迹**：其身体（SESSION.md）+ 其时间轴。除建/看/切换/原地重建外，还可登记**未来唤醒**与**即时递话** | 任何多步骤工作，第一步即调用它；需要 AI 在未来某刻自动继续时也用它 |
+| `cognitive_trajectory` | **一条认知轨迹**：其身体（SESSION.md）+ 其时间轴。除建/看/切换/原地重建外，还可登记**未来唤醒**与**即时递话** | 任何多步骤工作，第一步即调用它；需要 AI 在未来某刻自动继续时也用它 |
 | `dashboard` | 仪表盘：工作区健康检查（三项）、当前时间、等待 | 进入工作区后先行自查；等待外部服务时使用 |
 | `container_git` | git 操作：status / commit / push / log / pull / diff | 提交与推送代码；它绝不自动强推 |
 | `msm` | 小工具执行入口：`msm("名字", ["参数"])`；名字记不全时返回候选；`inspect=true` 查看用法 | 调用工作区内已注册的任何小工具 |
@@ -86,9 +86,9 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `diagram` | 绘图：AI 给出一段**标签式源码**，插件**在进程内**将其绘制为 PNG 并**贴入对话**——不启动浏览器、不截图、正常路径不落文件。坐标 = 画布像素、y 向下；写错的图元逐条报错并跳过，其余照常绘制；自带四项检查（块重叠 / 标签溢出 / 悬空端点 / 线压字），**只告警不拦图** | 需要把关系图/示意图直接放进对话时。**条件出现**：实验性 demo，**默认关**（关闭时该工具**根本不注册**，AI 看不到它、不占上下文）；开关在设置面板「工具」组，拨动即时生效。中英文与常用符号均可绘制，因字体随插件内置（约 5 MB） |
 
 > **更名记录**（旧名已彻底停用，无兼容别名；旧会话中出现旧名时，**一律取所在那一组的末项**）：
-> `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` → `trajectory` → **`container_trajectory`**（今名） ·
+> `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` → `trajectory` → **`cognitive_trajectory`**（今名） ·
 > `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理） · `eap`/`neat`/`cce` → `praxis` ·
-> `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory` → **`container_trajectory`**（今名）。
+> `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory` → **`cognitive_trajectory`**（今名）。
 
 ### 3.2 机械约束（AI 绕不过去）
 
@@ -180,7 +180,7 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 
 | # | 目标 | 实际路径 |
 |---|---|---|
-| 1 | **长期项目不断线** | `container_trajectory create` 建轨迹 → 每推进一段写进去 → 中断后 `container_trajectory use` 接上 → 上下文满了 `container_trajectory rebuild` 原地重建并自动继续 |
+| 1 | **长期项目不断线** | `cognitive_trajectory create` 建轨迹 → 每推进一段写进去 → 中断后 `cognitive_trajectory use` 接上 → 上下文满了 `cognitive_trajectory rebuild` 原地重建并自动继续 |
 | 2 | **批量同步代码** | 当前仓库 `container_git commit/push`；多个子仓库一条命令全同步（自动提交 + 推送） |
 | 3 | **做一集字幕** | 搜片源 → 下载 → Whisper 转写 → 翻译 → 双语 SRT → 机械质检（7 项）→ 推送订阅/邮件 |
 | 4 | **服务器巡检** | 一条命令输出 CPU/内存/GPU/容器/服务报告；重启容器也在同一条白名单通道里 |
@@ -286,20 +286,20 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 > **为什么不再自造**：原 3100 面是一个**没有客户端生态**的私有外壳，而官方件已发布并随宿主同版本演进。
 > 详细接法与手机端配置见宁静号 CCC 的接入指南。
 
-### 6.5 轨迹与定时唤醒（trajectory）
+### 6.5 认知轨迹与定时唤醒（cognitive trajectory）
 
-`trajectory`（轨迹）是一等概念：一个工作区里可以有任意多条轨迹并行。
+`cognitive trajectory`（认知轨迹）是一等概念：一个工作区里可以有任意多条认知轨迹并行。
 
-**定时唤醒**：用 `container_trajectory send-later` 登记一条"唤醒" = 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，**不阻塞、不等待、也不回执**。
+**定时唤醒**：用 `cognitive_trajectory send-later` 登记一条"唤醒" = 未来某时刻 + 一条消息——可以给自己预约，也可以唤醒别的轨迹；落在工作区内的 `AGENT_SESSIONS/wake-registry.json`（可读可审计），到点由中心调度器投递，**不阻塞、不等待、也不回执**。
 
-**即时投递**：用 `container_trajectory send-now` 把一条消息**现在**就递过去，并且**不排队**——目标在内存里且**正在跑轮次**，就 `steer` **当场注入当前轮**；目标空闲就**立即起一轮**；目标不在内存里就**冷载入后投递**（**等效于直接唤醒**，但**不等调度器的 5 分钟节拍**）。它**有同步回执**（告知走了 live 还是冷载入），**不落注册表**（那张表专管"未来时刻"）。
+**即时投递**：用 `cognitive_trajectory send-now` 把一条消息**现在**就递过去，并且**不排队**——目标在内存里且**正在跑轮次**，就 `steer` **当场注入当前轮**；目标空闲就**立即起一轮**；目标不在内存里就**冷载入后投递**（**等效于直接唤醒**，但**不等调度器的 5 分钟节拍**）。它**有同步回执**（告知走了 live 还是冷载入），**不落注册表**（那张表专管"未来时刻"）。
 
 - 两者只差两处：**时刻**（现在 / 未来）与**回执**（有 / 无）——"预约"天生是 fire-and-forget（不可回收、不回执），"递话"则是一次调用一次答复。各自语义干净，不把两种语义塞进同一个动作（🔴 更名：原名 `wake-later` / `send-message`，现名 **`send-later` / `send-now`**——族名取共享词干 `send-`，轴取 `-later`/`-now`）
 - ⚠️ **回执只到"已注入 / 已起轮"**：它**不表示**目标已经执行或答复。要确证"目标真的动了"，须查看它自己的 `SESSION.md`（**不得凭回执结案**）
 - ⚠️ **唯一的例外路径**：`steer` 不可用时**退回排队**（fail-safe：**宁可排队，不可静默丢消息**）——此时回执文案写明"steer 不可用 ⇒ 退回 followup"。**`send-later` 不受影响**：预约的本职是"到点唤起"，在跑时排队不打断当前轮，这一行为已经过实证验收
 - **目标没打开也能唤醒**：冷载入不了则条目留在登记表里并记下原因，**不静默丢弃**
 - **"周期"归工作区自己**：要一轮接一轮，就由**收到唤醒的那条轨迹**在每轮结束时再排一次下一轮——ACC 只提供"到点投递一条消息"这个原语，不替工作区决定节拍（焦点、节拍、偏见都由工作区自定；任意条轨迹并行、互不干扰）
-- **轨迹可以带上 skill**（两种写法，**取并集**：容器级在前、轨迹级追加、同名去重）：① **一处声明、全容器生效**——在 `.opencode/serenity.json` 写 `trajectory.skills: [名字, …]`（底座），**本工作区的每条轨迹**被绑定期间都注入这些 skill 的全文（**连子角色会话也算**）；② **只给这一条**——在它的 `SESSION.md` 顶部 frontmatter 写 `skills: [名字, …]`（这条额外的）。⚠️ 是"**绑定期间一直供给**"而非"`use` 时注入一次"——改了配置或 frontmatter **立即生效**（每请求重新求值，不缓存），也不随对话压缩消失；而 `create` 只新建、**不夺走当前绑定** ⇒ 新轨迹要**显式 `use`** 才挂上。skill 名来自工作区数据，**先过安全校验才会用于拼路径**，找不到会在提示里明说"缺失"而**不静默跳过**；⚠️ **重写 `SESSION.md` 时务必原样保留顶部 frontmatter**（抹掉 = 静默撤销该轨迹的声明）
+- **轨迹可以带上 skill**（两种写法，**取并集**：容器级在前、轨迹级追加、同名去重）：① **一处声明、全容器生效**——在 `.opencode/serenity.json` 写 `cognitiveTrajectory.skills: [名字, …]`（底座），**本工作区的每条轨迹**被绑定期间都注入这些 skill 的全文（**连子角色会话也算**）；② **只给这一条**——在它的 `SESSION.md` 顶部 frontmatter 写 `skills: [名字, …]`（这条额外的）。⚠️ 是"**绑定期间一直供给**"而非"`use` 时注入一次"——改了配置或 frontmatter **立即生效**（每请求重新求值，不缓存），也不随对话压缩消失；而 `create` 只新建、**不夺走当前绑定** ⇒ 新轨迹要**显式 `use`** 才挂上。skill 名来自工作区数据，**先过安全校验才会用于拼路径**，找不到会在提示里明说"缺失"而**不静默跳过**；⚠️ **重写 `SESSION.md` 时务必原样保留顶部 frontmatter**（抹掉 = 静默撤销该轨迹的声明）
 
 #### CRO —— 由轨迹**自行判断何时该被叫醒**
 
@@ -314,7 +314,7 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 | **谁跑它** | ACC 的唤醒调度器（既有 **5 分钟** tick） |
 | **给它什么** | 一条 stdin 进来的 **JSON 快照**：身份 / 时间 / 轨迹身体（SESSION.md 体积与 mtime、`references/` 清单）/ 绑定与载体（绑定的、live 的、🔴 **正在跑轮次的**）/ 调度面（本轨迹在办唤醒、调度器状态） |
 | **它给我什么** | stdout **一行 JSON**：`{"wake":true,"prompt":"…","reason":"…"}` 或 `{"wake":false}`（**缺省 = 不打扰**） |
-| **写程序前先读** | `container_trajectory cro-guide` —— **指南 + 一份可直接拿去自测的样例快照** |
+| **写程序前先读** | `cognitive_trajectory cro-guide` —— **指南 + 一份可直接拿去自测的样例快照** |
 
 **几条设计上的硬约束**（都不是随便定的）：
 
@@ -347,7 +347,7 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 |---|---|---|
 | DSH 原生设置 | DSH 的 settings.yaml（即设置面板那几项） | 开关与阈值：网关总开关、重建阈值、子角色开关与调试端口、**CRO 总闸（`croEnabled`，默认为开）**、**图工具总闸（默认关）**、**官方 ACP 面（`acpFaceEnabled`，默认关）** |
 | 插件全局文件 | `~/.dsh/serenity-hooks.json`（权限 0600） | 网关账号（scrypt + TOTP）、监听地址与端口、工作区白名单、cookie 安全开关 |
-| 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**轨迹级 skill 供给（`trajectory.skills`）**、微信（账号/路由/开关） |
+| 工作区配置 | `.opencode/serenity.json` | 助手模型白名单、日志阈值、安全模式黑名单、子角色、**认知轨迹级 skill 供给（`cognitiveTrajectory.skills`）**、微信（账号/路由/开关） |
 | 工作区凭据 | `localstore.json` | 密钥与本地偏好；微信机器人 token 也在这一层 |
 
 > 原则：**插件是全局的，工作区是具体的**——账号、开关、阈值归插件层；角色、凭据、本地偏好归工作区层。
@@ -362,7 +362,7 @@ AI 一次能"记住"的内容有上限。满了不用手动开新会话：
 | 机制 | 说明 |
 |---|---|
 | **工作日志（SESSION.md）** | AI 的"笔记本"，永远留在原地。目标、决定、进度都写这儿 |
-| **原地重建（container_trajectory rebuild）** | 快满时它会提示 AI 主动重建：把这一轮对话清空，但重新注入"你是谁 + 继续 S### 的工作"——**载体换了，活儿接着干**。重建前它会把"手头做到哪了"写进同目录的 `REBUILD-TODO.md`，重建后的它先去读那张便签 |
+| **原地重建（cognitive_trajectory rebuild）** | 快满时它会提示 AI 主动重建：把这一轮对话清空，但重新注入"你是谁 + 继续 S### 的工作"——**载体换了，活儿接着干**。重建前它会把"手头做到哪了"写进同目录的 `REBUILD-TODO.md`，重建后的它先去读那张便签 |
 | **进度提醒** | 做久了会按计分提醒 AI 把进度写回日志，并要求它回确认码 |
 | **沉淀纪律** | 重建前如果产生了有价值的认知，先把它写进相关技能（而不是丢掉） |
 
@@ -399,7 +399,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 | 跑在 | OpenCode | DeepSeek Harness |
 | 实现 | 独立 | **独立**（不复用源码，但遵循同一套标准） |
 | 系统提示词 | `system.transform` | `systemPrompt.section`，平台无关的部分逐字对齐 |
-| 工具 | msm / container_fs / logbook 等 | container_fs / container_trajectory / dashboard / container_git / msm / praxis / ontology / serenity-skill-creator / cheap-worker / localstore / container_admin ＋ 三个条件出现的（`im-bridge` / `acc-diag` / `diagram`） |
+| 工具 | msm / container_fs / logbook 等 | container_fs / cognitive_trajectory / dashboard / container_git / msm / praxis / ontology / serenity-skill-creator / cheap-worker / localstore / container_admin ＋ 三个条件出现的（`im-bridge` / `acc-diag` / `diagram`） |
 
 **同一个工作区可以随时换运行时**：`.serenity` 标记、`.opencode/skills/`、配置、`AGENT_SESSIONS/` 的文件格式都一致；
 差别只在平台层（工具名、注入方式），换过去以后 AI 收到的约束是一样的。
@@ -418,7 +418,7 @@ pnpm build              # 打包（lib/index.js + client.js）
 连续失败 5 次锁 15 分钟起（指数退避，上限 4 小时）。等锁过期，或检查账号的验证码绑定状态。
 
 **Q：上下文快满了怎么办？**
-先让 AI 把进度写回 SESSION.md，然后按提示调用 `container_trajectory rebuild`。轨迹会自动接续，不用手动开新会话。
+先让 AI 把进度写回 SESSION.md，然后按提示调用 `cognitive_trajectory rebuild`。轨迹会自动接续，不用手动开新会话。
 
 **Q：对外问答页会返回内部信息吗？**
 该面已于 2026-10-15 移除（改用官方 ACP，见 §6.4）。走官方 ACP 时，**认证与暴露范围由接入层决定**——

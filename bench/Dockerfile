@@ -73,6 +73,15 @@ COPY acp-face-check.mjs /usr/local/bin/acp-face-check.mjs
 #    🔴 它是 2026-10-17 v1.61.0 事故的直接产物：那次全部既有判据都绿，
 #    而 surface 上多了一个空占位 system ⇒ 模型被误导。**只有按序读 surface 才看得见**。
 COPY v22-system-head-check.mjs /usr/local/bin/v22-system-head-check.mjs
+# 🆕 V23 探针（**工作区归属**）：判宿主是否真把会话登记进了 workspace.json。
+#    🔴 v1.62.1 缺陷的直接产物：单测用替身 ctx 只证明"我们调用了"，证明不了"宿主登记了"。
+COPY v23-workspace-attach-check.mjs /usr/local/bin/v23-workspace-attach-check.mjs
+# 🆕 V24 探针（**工具注册名**）：v1.65.0 更名（container_trajectory → cognitive_trajectory）的直接产物。
+#    🔴 判据不读我们自己的源码常量，而读**加载后的发布物**导出的 REGISTERED_TOOLS，
+#    并要求「新名在册 ∧ 旧名不在册」—— 改名只做一半时它当场红。
+#    为什么这条非有不可：`tools.restrict({deny})` 按工具名字符串匹配，且 DSH 契约规定
+#    未注册的名字会让整次 restrict 失败 ⇒ 白名单与注册名不一致时角色**静默失去工具**（无报错）。
+COPY v24-tool-registry-check.mjs /usr/local/bin/v24-tool-registry-check.mjs
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/verify.sh
 
 WORKDIR /ccc

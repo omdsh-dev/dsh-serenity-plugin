@@ -38,7 +38,7 @@ import {
   metaphorBlock,
   serenitySystemPrompt,
 } from '../src/seams/system-prompt.js'
-import { useSession, resetActiveSessionStore } from '../src/trajectory-ops.js'
+import { useSession, resetActiveSessionStore } from '../src/cognitive-trajectory-ops.js'
 import { ACC_VERSION } from '../src/constants.js'
 
 let dir: string
@@ -71,7 +71,7 @@ const OSP_CCE = [
   '',
   '1. Continuity — every interaction modifies the container\'s future state. Before',
   '   acting, consult what came before — prior decisions, abstractions, constraints.',
-  '   You are part of a trajectory, not a fresh start.',
+  '   You are part of a cognitive trajectory, not a fresh start.',
   '',
   '2. Bounded Space — the container has boundaries. Respect them. Do not assume',
   '   knowledge that has not been accumulated within this container.',
@@ -116,10 +116,10 @@ const OSP_CCE = [
 const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   '',
   '=== Serenity Session ===',
-  `Active session: ${sessionId} — ${dirName} (this session is the rebuildable carrier of the trajectory)`,
-  `SESSION.md path: ${mdPath} (the trajectory's persistent body — stays in place through rebuilds)`,
+  `Active session: ${sessionId} — ${dirName} (this session is the rebuildable carrier of the cognitive trajectory)`,
+  `SESSION.md path: ${mdPath} (the cognitive trajectory's persistent body — stays in place through rebuilds)`,
   '',
-  'Rules (SESSION.md is the trajectory log — keep its format & granularity fixed):',
+  'Rules (SESSION.md is the cognitive trajectory log — keep its format & granularity fixed):',
   '  • Write only when a MILESTONE landed or a DECISION was made — not every round',
   '  • One entry = one abstraction level, at the highest one that can express it:',
   '    identity/anchors (rare) › decision (one line + rationale/rejected) › milestone',
@@ -143,12 +143,12 @@ const OSP_SESSION = (sessionId: string, dirName: string, mdPath: string) => [
   'This preserves the session context across todo updates.',
   'Do NOT remove or reorder this item — keep it at position 0.',
   '',
-  'TRAJECTORY-ASSISTANT: a background tracker scores your tool use (write/edit=3,',
+  'COGNITIVE-TRAJECTORY-ASSISTANT: a background tracker scores your tool use (write/edit=3,',
   'task=10, read/grep/glob/msm=1, +1 per minute) and reminds you with a',
-  '[TRAJECTORY-ASSISTANT · CHECKPOINT] message when the threshold is reached. On every such',
+  '[COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT] message when the threshold is reached. On every such',
   'reminder you MUST reply with the exact ACK code:',
-  '  [TRAJECTORY-ASSISTANT-recorded-{code}]  — if you recorded progress to SESSION.md',
-  '  [TRAJECTORY-ASSISTANT-skipped-{code}]  — if nothing to record this round',
+  '  [COGNITIVE-TRAJECTORY-ASSISTANT-recorded-{code}]  — if you recorded progress to SESSION.md',
+  '  [COGNITIVE-TRAJECTORY-ASSISTANT-skipped-{code}]  — if nothing to record this round',
   'Do not ignore the reminder; do not stop ongoing work. Codes are single-use;',
   'never reuse a prior code.',
   '',
@@ -176,11 +176,11 @@ describe('dsp 扩展：Principles 块（v1.19.8 合并原 Constraints——spec 
     expect(block).toContain('all work is cognition')
     expect(block).toContain('contains no errors')
     expect(block).toContain('not-knowing is a state to be repaired')
-    // v1.23.0：session-trajectory 关系段（session = trajectory 的可重建载体）
-    expect(block).toContain('The session-trajectory relation')
+    // v1.23.0：session–cognitive-trajectory 关系段（session = cognitive trajectory 的可重建载体）
+    expect(block).toContain('The session–cognitive-trajectory relation')
     expect(block).toContain('a session is the rebuildable carrier of a')
-    expect(block).toContain("SESSION.md is the trajectory's persistent body")
-    expect(block).toContain('Identity belongs to the trajectory')
+    expect(block).toContain("SESSION.md is the cognitive trajectory's persistent body")
+    expect(block).toContain('Identity belongs to the cognitive trajectory')
     // 操作边界（原 Constraints 内容，工具名为平台真实名 msm）
     expect(block).toContain('Operational boundaries:')
     expect(block).toContain(`Root: ${dir}`)
@@ -268,10 +268,10 @@ describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，
     expect(block).toContain('"Serenity Tools" heading')
   })
 
-  it('toolsBlock() 含 9 工具清单 + msm 单入口示例（v1.33：logbook 并入 trajectory）', () => {
+  it('toolsBlock() 含 9 工具清单 + msm 单入口示例（v1.33：logbook 并入 cognitive trajectory）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
       expect(block).toContain(tool)
     }
     // msm 单入口调用（替代旧 3 步协议）
@@ -309,7 +309,7 @@ describe('dsp 扩展：Metaphor 块（v1.19.6 起，宁静号宇宙隐喻域—�
     }
     // 每条含 → 约束映射（M-1）+ Verdict 判据（M-2）
     expect(block.match(/→/g)?.length).toBe(10)
-    for (const constraint of ['Bounded Space', 'Entropy (H_op)', 'EAP', 'MSM (Mech & Semi-Mech)', 'Single Source of Truth', 'First Anchor', 'Trajectory Tracking', 'Continuity', 'Multi-Agent Cognition', 'Reconstruction > Preservation']) {
+    for (const constraint of ['Bounded Space', 'Entropy (H_op)', 'EAP', 'MSM (Mech & Semi-Mech)', 'Single Source of Truth', 'First Anchor', 'Cognitive Trajectory Tracking', 'Continuity', 'Multi-Agent Cognition', 'Reconstruction > Preservation']) {
       expect(block).toContain(constraint)
     }
     expect(block.match(/Verdict:/g)?.length).toBe(10)

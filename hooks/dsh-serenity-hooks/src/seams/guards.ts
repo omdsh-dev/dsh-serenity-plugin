@@ -436,7 +436,7 @@ export function forgetImBridgeVisibility(sessionId: string): void {
  *
  * 🔴 **为什么要在 CCC 内屏蔽（owner 原话：「这和 CRO 冲突，要求在宁静号激活情况下屏蔽掉」）**：
  * 宿主从 `0.2.1-rc.2` 起自带一套**模型可见的定时器工具**（`ctx.schedule` 服务 + 这 4 个工具）。
- * 而宁静号的唤醒/巡航走的是**另一套**机制：`container_trajectory send-later` → 落 CCC 的
+ * 而宁静号的唤醒/巡航走的是**另一套**机制：`cognitive_trajectory send-later` → 落 CCC 的
  * `AGENT_SESSIONS/wake-registry.json` → 由**中心调度器 5min tick 统一投递**（D58）。
  * 两套并存会产生**三个具体问题**（不是"重复功能"这种审美问题）：
  *  ① **两处真相源**：宿主的 schedule 状态在宿主域、我们的在 CCC 文件里，**谁在跑说不清**；

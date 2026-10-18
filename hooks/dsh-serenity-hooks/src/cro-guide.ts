@@ -30,10 +30,10 @@ import { buildCroSnapshot, type CroSnapshotInput } from './cro.js'
  * 不写任何真实机器路径或私有会话名 —— 本文件随 npm 包发布（2026-10-14 隐私核查）。
  */
 export const CRO_SAMPLE_SNAPSHOT_INPUT: CroSnapshotInput = {
-  dirName: '2026-01-01--S001--example-trajectory',
+  dirName: '2026-01-01--S001--example-cognitive-trajectory',
   cccRoot: '/home/user/workspace',
   nowMs: 1_789_800_000_000,
-  sessionMdPath: '/home/user/workspace/AGENT_SESSIONS/2026-01-01--S001--example-trajectory/SESSION.md',
+  sessionMdPath: '/home/user/workspace/AGENT_SESSIONS/2026-01-01--S001--example-cognitive-trajectory/SESSION.md',
   sessionMdBytes: 182_000,
   sessionMdMtimeMs: 1_789_799_000_000,
   references: [

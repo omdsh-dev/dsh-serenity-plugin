@@ -150,7 +150,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(register).toHaveBeenCalledTimes(13)
     const names = register.mock.calls.map((c) => (c[0] as { name: string }).name)
     expect(names).toContain('container_fs')
-    expect(names).toContain('container_trajectory')
+    expect(names).toContain('cognitive_trajectory')
     expect(names).toContain('dashboard')
     expect(names).toContain('container_git')
     expect(names).toContain('msm')
@@ -158,7 +158,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(names).toContain('cheap-worker')
     expect(names).toContain('localstore')
     expect(names).toContain('container_admin')
-    expect(names).toContain('container_trajectory')
+    expect(names).toContain('cognitive_trajectory')
     expect(names).toContain('im-bridge')
     expect(names).toContain('acc-diag')
     expect(names).toContain('ontology')
@@ -244,7 +244,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     expect(events).toContain('session/disposed')
     // 自起资源各自登记拆卸：lifecycle 聚合资源（**含四个自起 HTTP 面**）/
     // opencode 路由自动配置的重试定时器（v1.31.7——命名空间竞态退避）/
-    // trajectory 唤醒调度器（D58，v1.32.0——中心 tick + 冷唤醒投递）。
+    // cognitive trajectory 唤醒调度器（D58，v1.32.0——中心 tick + 冷唤醒投递）。
     // ⚠️ v1.35（C2 块 C3）：**skiff root 退避重试定时器已退场**（原 v1.30.13/D1 的第 7 项），故 7 → 6。
     // ⚠️ C4 块 A（2026-09-15）：**gateway 第二监听器**与**weixin send api** 两处自带 disposer 已删
     //    ——listener 生命周期归 `face-host`，拆卸路径归一到 lifecycle 的聚合入口（`stopAllFaces`）。
@@ -265,7 +265,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     const labels = effect.mock.calls.map((c) => String(c[1]))
     expect(labels).toHaveLength(5)
     expect(labels.join('|')).not.toContain('autopilot')
-    expect(labels.join('|')).toContain('trajectory 唤醒调度器')
+    expect(labels.join('|')).toContain('认知轨迹唤醒调度器')
     expect(labels.join('|')).toContain('self-started resources')
     expect(labels.join('|')).toContain('opencode provider auto-config retry timer')
     expect(labels.join('|')).toContain('deepseek vision patch retry timer')

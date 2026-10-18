@@ -12,7 +12,7 @@
  *    （铁律：CRO 的任何问题都不得影响投递与既有链路）。
  * 4. 🔴 **不是第二真相源**：断言本档**不含**判定细节（无 `lastDecision` / 阈值 / 谓词），
  *    只存"投递面"（成败 / 方式 / tick / 摘要）——这是与程序 `cro-state.json` 的分工边界。
- * 5. **固定文件名 + 落在该轨迹目录**（所有者令「写结构化文件到 trajectory 目录，文件名固定」）。
+ * 5. **固定文件名 + 落在该轨迹目录**（所有者令「写结构化文件到 cognitive trajectory 目录，文件名固定」）。
  *
  * ## 判据纪律（本文件自己也遵守）
  *
@@ -61,7 +61,7 @@ function writeRaw(content: string): void {
   writeFileSync(p, content, 'utf-8')
 }
 
-describe('落点与文件名（所有者令：写进 trajectory 目录、文件名固定）', () => {
+describe('落点与文件名（所有者令：写进 cognitive trajectory 目录、文件名固定）', () => {
   it('路径 = <CCC 根>/AGENT_SESSIONS/<轨迹目录>/cro-wake-log.json', () => {
     expect(croWakeLogPath('/ccc', DIR)).toBe(join('/ccc', 'AGENT_SESSIONS', DIR, CRO_LOG_FILENAME))
     expect(CRO_LOG_FILENAME).toBe('cro-wake-log.json')

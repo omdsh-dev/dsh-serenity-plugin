@@ -1,3 +1,62 @@
+## v1.65.0 — 2026-10-18（🔴 **打破性更名：`trajectory` → `cognitive trajectory`，工具名 `cognitive_trajectory`**）
+
+**性质**：**概念更名 ＋ 死配置面删除**。**硬切无别名**（D46 / D61 先例）。
+
+**来源**：owner 逐条裁决 ——
+> 「我讨论的 trajectory 是 ACC 的概念，也是当前 trajectory tool 的实现；向前兼容是必须的，
+> 感觉一次做干净比较好……英文名直接叫 cognitive trajectory，中文名叫认知轨迹，全面改」
+> 「使用 `cognitive_trajectory`，原因是我们已经工作在宁静号**认知容器内**，**容器前缀可以省略**」
+> 「注意，autopilot 整体已经废弃，可以删除的」
+
+### 一、命名判据（本次确立）
+
+| 形 | 例子 | 为何 |
+|---|---|---|
+| `container_<X>` | `container_fs` / `container_git` / `container_admin` | 掌管**容器结构**之 X |
+| 无前缀 | `cognitive_trajectory` / `msm` / `praxis` / `dashboard` / `localstore` | 主语**不是**容器结构 |
+
+🔴 这**推翻了 D61 的一半**：D61 曾把「`trajectory` 不带容器前缀」列为已否方案。
+新理由（owner 原话）：认知容器已是语境 ⇒ 前缀冗余。`container_fs/git/admin` **不动**。
+
+### 二、改了什么
+
+| 面 | 内容 |
+|---|---|
+| 工具名 | `container_trajectory` → **`cognitive_trajectory`**（注册名 / `REGISTERED_TOOLS` / `dsh.plugin.json` / toolsBlock 注入行） |
+| 模块文件 | `tools/trajectory.ts` → `tools/cognitive-trajectory.ts`；`trajectory-{bound,ops,skills,assistant}.ts` → `cognitive-trajectory-*.ts` |
+| 标识符 | `createTrajectoryTool` / `resolveSessionTrajectoryLabel` / `trajectorySubset` / `TRAJECTORY_ACTIONS` / `sendToTrajectory` / `skiffTrajectoryEnabled` 等约 20 个符号族 |
+| 契约串 | `TRAJECTORY-ASSISTANT` → **`COGNITIVE-TRAJECTORY-ASSISTANT`**（含 ACK 形 `[COGNITIVE-TRAJECTORY-ASSISTANT-recorded-{code}]`） |
+| 配置键 | `trajectory.skills` → `cognitiveTrajectory.skills`；skiff 角色 `trajectory{}` → `cognitiveTrajectory{}` |
+| 文档 | 40+ 份（含 8 个 docs 文件名）、两份 README、`package.json`/`dsh.plugin.json` 描述 |
+| 测试 | 40 个文件 |
+
+### 三、删了什么（owner 令：autopilot 整体废弃）
+
+- 类型 `AutopilotTrajectorySettings`
+- 字段 `autopilotTrajectory` / `autotrajectory` / `cognitiveTrajectory.autopilot`
+- 🔵 **零迁移代价**：该配置段自 v1.35.0 机制退场后**已无任何消费者**，读到也不会改变行为。
+
+### 四、兼容性（为什么可以硬切）
+
+实测三处落盘件 `AGENT_SESSIONS/{.bindings.json, wake-registry.json, .restrict-diag.json}`
+**均不含 `trajectory` 作为标识符** ⇒ **零数据迁移**。这是「一次做干净」可行的前提。
+
+🔴 **唯一必须同批的外部改动 = CCC 侧**（owner 令「CCC 自行处理」）：
+`skiff.roles[].tools` 白名单与 skiff 角色提示词是**按工具名字符串**匹配的
+（`tools.restrict` 对未注册名会让整次调用失败）⇒ 不同批改会让该角色**静默失去工具**。
+
+### 五、门禁
+
+`typecheck` 双面 ✓｜`test` 170 文件 / 2860 例 ✓｜`coverage` 94.97% ✓｜
+`build` ✓（110 `.d.ts`）｜`pack-check` ✓（138 文件）｜`version` 三处一致 ✓
+
+### 六、一处本次抓到的既有缺陷（顺带修掉）
+
+`register.test.ts` 断言「`cognitive trajectory 唤醒调度器`」，而源码注册的标签是**中文**
+「`认知轨迹唤醒调度器`」⇒ 该断言**从未真正生效**（旧串同样匹配不上）。本次按源码实际值修正。
+
+---
+
 ## v1.64.0 — 2026-10-18（🔴 **无人值守代理回复整条退役** —— owner 判「已经证实没意义」）
 
 **性质**：**功能移除**（不是关开关，是代码不存在了）。**来源**：owner 直接令 ——

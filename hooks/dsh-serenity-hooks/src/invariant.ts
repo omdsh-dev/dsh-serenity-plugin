@@ -164,7 +164,7 @@ export const REGISTERED_TOOLS = [
   //   它被 `assertManifestProse`（本文件）用来把"后三个按条件出现"这类句子**钉成可判**——
   //   所以**别按字母序重排**，加工具时**加在对应段的末尾**（常驻加在 `serenity-skill-creator` 之后、
   //   条件加在末位），否则那条钉子会对**正确的文字**报假错。
-  'container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'ontology',
+  'container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'ontology',
   'serenity-skill-creator', 'cheap-worker', 'localstore', 'container_admin',
   // ↓ 条件出现的三个（按注册期的条件钩子判可见性，见各自 `src/tools/*.ts`）
   'im-bridge', 'acc-diag', 'diagram',

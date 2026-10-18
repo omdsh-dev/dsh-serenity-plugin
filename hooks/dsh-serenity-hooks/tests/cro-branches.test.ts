@@ -36,12 +36,12 @@
  * 唯一理由）。反向：若判据放宽成"任何失败都试下一个"，**程序的真报错会被掩盖**。
  *
  * ## 覆盖对象（报告 `cbranch-no`/`cstat-no` 逐条映射回源行；锚点 = 报告 :1429 ↔ 源 :230）
- * 全部落在 `runCroProcess` / `runCroOnce` / `evaluateCro` / `listCroTrajectories`：
+ * 全部落在 `runCroProcess` / `runCroOnce` / `evaluateCro` / `listCroCognitiveTrajectories`：
  *   · `:347` **ENOENT ⇒ continue**（试下一个 runner）＋ `:350` **两个都不可用** ⇒ `cro-no-runner`
  *   · `:537` `run.error ?? '…'` 与 `...(run.code ? {code} : {})` 的**两个方向**
  *   · `:541` `parsed.detail ?? parsed.error` 的**两个方向**（有 detail / 无 detail）
  *   · `:531` 快照序列化失败 catch
- *   · `:317` `listCroTrajectories` 的单条 catch
+ *   · `:317` `listCroCognitiveTrajectories` 的单条 catch
  *   · `:407` `stderr.trim().split('\n')[0] ?? ''`（**无 stderr** 时）
  *   · `:411` `detail ? `：${detail}` : ''` 的**空 detail** 方向
  *
@@ -56,7 +56,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { CRO_FILENAME, buildCroSnapshot, evaluateCro, listCroTrajectories, runCroProcess, type CroSnapshotInput } from '../src/cro.js'
+import { CRO_FILENAME, buildCroSnapshot, evaluateCro, listCroCognitiveTrajectories, runCroProcess, type CroSnapshotInput } from '../src/cro.js'
 
 const DIR_NAME = '2026-09-13--S185--desk-camera'
 
@@ -71,7 +71,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-function makeTrajectory(dirName = DIR_NAME, croSource?: string): string {
+function makeCognitiveTrajectory(dirName = DIR_NAME, croSource?: string): string {
   const dir = join(root, 'AGENT_SESSIONS', dirName)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'SESSION.md'), '# SESSION\n', 'utf-8')
@@ -177,7 +177,7 @@ describe('cro 退化面：`runCroOnce` 退出码文案边界', () => {
 
 describe('cro 退化面：`evaluateCro` 注入 runner 的两条降级臂', () => {
   it('🔴 `:537` `run.error ?? …` 的**右侧**：runner 返回 ok:false 且 **error 为 null** ⇒ 用兜底文案', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     // 真实形态：某些失败路径（如被信号杀）可能拿不到 error 文本
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), {
       runner: async () => ({ ok: false, stdout: '', error: null }),
@@ -192,7 +192,7 @@ describe('cro 退化面：`evaluateCro` 注入 runner 的两条降级臂', () =>
   })
 
   it('🔴 `:537` 的**左侧**（成对）：runner 带 error 与 code ⇒ 两者都透传', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), {
       runner: async () => ({ ok: false, stdout: '', error: '程序被信号杀死', code: 'cro-signal' }),
     })
@@ -204,7 +204,7 @@ describe('cro 退化面：`evaluateCro` 注入 runner 的两条降级臂', () =>
   })
 
   it('🔴 `:541` `parsed.detail ?? parsed.error` 的**两个方向**', async () => {
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
 
     // 方向一：**有 detail**（非 JSON 会带 detail）⇒ 用 detail
     const withDetail = await evaluateCro(root, DIR_NAME, snapshotInput(), {
@@ -251,7 +251,7 @@ describe('cro 退化面：`evaluateCro` 注入 runner 的两条降级臂', () =>
     // 下游语义仍可覆盖：注入 runner 走通 skipped 分支（与 `:531` 是同一个出口的**另一条**）
     // 🔴 **必须先建轨迹 + 写入 CRO 文件** —— 否则 `evaluateCro` 在 `:524` 就 disabled 返回，
     //    根本走不到 runner（我第二版漏了这个前置，实测 `disabled` ⇒ 错的是我的夹具）
-    makeTrajectory(DIR_NAME, 'export {}')
+    makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const out = await evaluateCro(root, DIR_NAME, snapshotInput(), {
       runner: async () => ({ ok: false, stdout: '', error: 'x', code: 'cro-x' }),
     })
@@ -259,29 +259,29 @@ describe('cro 退化面：`evaluateCro` 注入 runner 的两条降级臂', () =>
   })
 })
 
-describe('cro 退化面：`listCroTrajectories` 的目录退化', () => {
+describe('cro 退化面：`listCroCognitiveTrajectories` 的目录退化', () => {
   it('🔴 `:317` 单条 catch 与 `:313`/`:314` 的过滤：只列**目录**且**非 `_`/`.` 前缀**且有 CRO 文件', async () => {
-    makeTrajectory('2026-01-01--S001--a', 'export {}')          // ✅ 有 CRO ⇒ 列出
-    makeTrajectory('2026-01-02--S002--b')                        // ❌ 无 CRO ⇒ 不列
-    makeTrajectory('_archived', 'export {}')                     // ❌ `_` 前缀 ⇒ 不列
-    makeTrajectory('.hidden', 'export {}')                       // ❌ `.` 前缀 ⇒ 不列
+    makeCognitiveTrajectory('2026-01-01--S001--a', 'export {}')          // ✅ 有 CRO ⇒ 列出
+    makeCognitiveTrajectory('2026-01-02--S002--b')                        // ❌ 无 CRO ⇒ 不列
+    makeCognitiveTrajectory('_archived', 'export {}')                     // ❌ `_` 前缀 ⇒ 不列
+    makeCognitiveTrajectory('.hidden', 'export {}')                       // ❌ `.` 前缀 ⇒ 不列
     writeFileSync(join(root, 'AGENT_SESSIONS', 'loose.txt'), 'x') // ❌ 顶层文件 ⇒ 不列（`:313`）
 
-    const out = listCroTrajectories(root)
+    const out = listCroCognitiveTrajectories(root)
     expect(out).toEqual(['2026-01-01--S001--a'])
   })
 
   it('🔴 排序稳定（同 tick 顺序可比对）＋ AGENT_SESSIONS 不存在 ⇒ 空数组（绝不抛）', () => {
-    makeTrajectory('2026-01-03--S003--c', 'export {}')
-    makeTrajectory('2026-01-01--S001--a', 'export {}')
-    makeTrajectory('2026-01-02--S002--b', 'export {}')
-    expect(listCroTrajectories(root), '字典序稳定').toEqual([
+    makeCognitiveTrajectory('2026-01-03--S003--c', 'export {}')
+    makeCognitiveTrajectory('2026-01-01--S001--a', 'export {}')
+    makeCognitiveTrajectory('2026-01-02--S002--b', 'export {}')
+    expect(listCroCognitiveTrajectories(root), '字典序稳定').toEqual([
       '2026-01-01--S001--a', '2026-01-02--S002--b', '2026-01-03--S003--c',
     ])
 
     const empty = mkdtempSync(join(tmpdir(), 'cro-br-empty-'))
     try {
-      expect(listCroTrajectories(empty), '根目录不存在 ⇒ 空数组').toEqual([])
+      expect(listCroCognitiveTrajectories(empty), '根目录不存在 ⇒ 空数组').toEqual([])
     } finally {
       rmSync(empty, { recursive: true, force: true })
     }

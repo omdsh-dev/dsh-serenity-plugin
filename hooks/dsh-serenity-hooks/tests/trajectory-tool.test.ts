@@ -1,8 +1,8 @@
 /**
- * trajectory-tool.test.ts — `container_trajectory` 工具的 **execute 分派面** 行为测试（⑤ 第 5 件）
+ * trajectory-tool.test.ts — `cognitive_trajectory` 工具的 **execute 分派面** 行为测试（⑤ 第 5 件）
  *
  * 🔴 为什么有这个文件（挑靶依据 = coverage 的**未覆盖行**；`fstat-no` 逐条命中）：
- *   本仓 coverage 实测 `src/tools/trajectory.ts` **57.66%**，未覆盖的**函数**恰好是
+ *   本仓 coverage 实测 `src/tools/cognitive-trajectory.ts` **57.66%**，未覆盖的**函数**恰好是
  *   `agentScope` / `agentDshSession` / `currentBoundDirName` / `renderText`（＋ `output.render`）/
  *   `renderWakeEntry` / `advisoryHint` —— 它们**只经由本工具的 `execute` 进入**，
  *   而既有的 `trajectory-ops.test.ts`（测纯函数）与 `session-title.test.ts`（测重命名门面）
@@ -40,10 +40,10 @@ vi.mock('../src/session-cleanup.js', async (importOriginal) => {
   return { ...actual, hasSessionLogById: vi.fn(() => true) }
 })
 
-import { createTrajectoryTool } from '../src/tools/trajectory.js'
+import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory.js'
 import { hasSessionLogById } from '../src/session-cleanup.js'
-import { resetActiveSessionStore, TRAJECTORY_ACTIONS } from '../src/trajectory-ops.js'
-import { setBindingStore, BINDINGS_REL_PATH } from '../src/trajectory-bound.js'
+import { resetActiveSessionStore, COGNITIVE_TRAJECTORY_ACTIONS } from '../src/cognitive-trajectory-ops.js'
+import { setBindingStore, BINDINGS_REL_PATH } from '../src/cognitive-trajectory-bound.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/ccc-roots.js'
 
 const mockHasLog = vi.mocked(hasSessionLogById)
@@ -55,7 +55,7 @@ const A_BODY = '# SESSION: alpha\n- ID: S900\n'
 let ccc: string
 
 /** 工具对象在测试里是 defineTool 的透传形态 */
-const tool = createTrajectoryTool({ get: () => undefined } as never) as unknown as {
+const tool = createCognitiveTrajectoryTool({ get: () => undefined } as never) as unknown as {
   name: string
   parameters: Record<string, { type?: string; enum?: string[]; required?: boolean }>
   output: { render: (args: unknown, value: unknown) => Array<{ type: string; text: string }> }
@@ -89,7 +89,7 @@ function run(args: unknown, exec = fakeExec()): Promise<unknown> {
 
 /** 用指定 ctx 重新构造工具（仅「重命名两态」组用） */
 function toolWith(ctx: unknown) {
-  return createTrajectoryTool(ctx as never) as unknown as typeof tool
+  return createCognitiveTrajectoryTool(ctx as never) as unknown as typeof tool
 }
 
 function bindings(): { version: number; sessions: Record<string, { dirName: string; action: string; note?: string }> } {
@@ -115,12 +115,12 @@ afterEach(() => {
   resetActiveSessionStore()
 })
 
-describe('container_trajectory：工具面', () => {
-  it('工具名 = container_trajectory；action 必填且枚举 = TRAJECTORY_ACTIONS（8 个）', () => {
-    expect(tool.name).toBe('container_trajectory')
+describe('cognitive_trajectory：工具面', () => {
+  it('工具名 = cognitive_trajectory；action 必填且枚举 = COGNITIVE_TRAJECTORY_ACTIONS（8 个）', () => {
+    expect(tool.name).toBe('cognitive_trajectory')
     expect(tool.parameters.action?.required).toBe(true)
-    expect(tool.parameters.action?.enum).toEqual([...TRAJECTORY_ACTIONS])
-    expect(TRAJECTORY_ACTIONS).toHaveLength(8)
+    expect(tool.parameters.action?.enum).toEqual([...COGNITIVE_TRAJECTORY_ACTIONS])
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(8)
     for (const k of ['name', 'summary', 'target', 'at', 'message', 'note', 'force', 'dryRun']) {
       expect(tool.parameters[k], `缺参数 ${k}`).toBeDefined()
     }
@@ -141,7 +141,7 @@ describe('container_trajectory：工具面', () => {
   })
 })
 
-describe('container_trajectory：list / show', () => {
+describe('cognitive_trajectory：list / show', () => {
   it('list = 清单 + 全库统计（summary 已并入 list）', async () => {
     writeSession(A_DIR)
     const out = (await run({ action: 'list' })) as string
@@ -163,7 +163,7 @@ describe('container_trajectory：list / show', () => {
   })
 })
 
-describe('container_trajectory：create', () => {
+describe('cognitive_trajectory：create', () => {
   it('非 dry-run 且非 issue：缺 summary ⇒ 抛（且不建目录）', async () => {
     await expect(run({ action: 'create', desc: 'x' })).rejects.toThrow('create requires --summary')
     expect(readdirSync(join(ccc, 'AGENT_SESSIONS'))).toHaveLength(0)
@@ -218,7 +218,7 @@ describe('container_trajectory：create', () => {
   })
 })
 
-describe('container_trajectory：use —— 守卫与绑定（agentScope / agentDshSession / currentBoundDirName）', () => {
+describe('cognitive_trajectory：use —— 守卫与绑定（agentScope / agentDshSession / currentBoundDirName）', () => {
   it('缺 summary ⇒ 抛（不动绑定）', async () => {
     writeSession(A_DIR)
     await expect(run({ action: 'use', name: 'S900' })).rejects.toThrow('use requires --summary')
@@ -243,7 +243,7 @@ describe('container_trajectory：use —— 守卫与绑定（agentScope / agent
     writeSession(A_DIR)
     writeSession(B_DIR)
     await run({ action: 'use', name: 'S900', summary: '概' })
-    await expect(run({ action: 'use', name: 'S901', summary: '概' })).rejects.toThrow(/would orphan the current trajectory/)
+    await expect(run({ action: 'use', name: 'S901', summary: '概' })).rejects.toThrow(/would orphan the current cognitive trajectory/)
     // 被拒后绑定不变（仍是 A）
     expect(bindings().sessions['dsh-1']?.dirName).toBe(A_DIR)
   })
@@ -291,7 +291,7 @@ describe('container_trajectory：use —— 守卫与绑定（agentScope / agent
   })
 })
 
-describe('container_trajectory：use —— 重命名门面（两态）', () => {
+describe('cognitive_trajectory：use —— 重命名门面（两态）', () => {
   it('有 sessionTitle 服务 ⇒ rename 收到命名标题（S###-日期-概括）', async () => {
     writeSession(A_DIR)
     const rename = vi.fn()
@@ -314,7 +314,7 @@ describe('container_trajectory：use —— 重命名门面（两态）', () => 
   })
 })
 
-describe('container_trajectory：use —— advisoryHint（只提示不阻断）', () => {
+describe('cognitive_trajectory：use —— advisoryHint（只提示不阻断）', () => {
   it('SESSION.md 陈旧（>7 天）⇒ 结果带 advisory 与天数', async () => {
     const md = writeSession(A_DIR)
     const old = new Date(Date.now() - 8 * 86_400_000)
@@ -341,7 +341,7 @@ describe('container_trajectory：use —— advisoryHint（只提示不阻断）
   })
 })
 
-describe('container_trajectory：send-later（renderWakeEntry）', () => {
+describe('cognitive_trajectory：send-later（renderWakeEntry）', () => {
   const at = (): string => new Date(Date.now() + 3_600_000).toISOString()
 
   it('缺 target/at/message 任一 ⇒ 抛（三个都点名）', async () => {
@@ -376,7 +376,7 @@ describe('container_trajectory：send-later（renderWakeEntry）', () => {
   })
 })
 
-describe('container_trajectory：其余动作的守卫与纯读面', () => {
+describe('cognitive_trajectory：其余动作的守卫与纯读面', () => {
   it('send-now 缺 target / message ⇒ 抛（与 send-later 同款文案风格）', async () => {
     await expect(run({ action: 'send-now', message: 'm' })).rejects.toThrow('send-now requires target')
     await expect(run({ action: 'send-now', target: 'S900' })).rejects.toThrow('send-now requires target')

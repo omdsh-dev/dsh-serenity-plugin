@@ -89,7 +89,7 @@ describe('skiff-debug: 问答页渲染（纯函数，v1.25.4 多 CCC 切换）',
     // 默认选中
     expect(html).toContain('data-default="/ccc/home-serenity"')
     expect(html).toContain('http://127.0.0.1:3080')
-    expect(html).toContain('trajectory')
+    expect(html).toContain('cognitiveTrajectory')
     expect(html).toContain('/ask')
   })
 
@@ -308,20 +308,20 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     // 首次提问 → 新建会话
     const first = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hello' })
     expect(first.status).toBe(200)
-    const firstData = JSON.parse(first.body) as { sessionId: string; continued: boolean; trajectory: unknown[] }
+    const firstData = JSON.parse(first.body) as { sessionId: string; continued: boolean; cognitiveTrajectory: unknown[] }
     expect(firstData.continued).toBe(false)
     expect(firstData.sessionId.startsWith('skiff-qa-')).toBe(true)
     expect(created).toHaveLength(1)
-    expect(firstData.trajectory.length).toBeGreaterThan(0)
+    expect(firstData.cognitiveTrajectory.length).toBeGreaterThan(0)
     // 追问（带 sessionId）→ 复用同一 agent（created 不增加）+ continued:true + 全量轨迹
     const second = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'follow up', sessionId: firstData.sessionId })
     expect(second.status).toBe(200)
-    const secondData = JSON.parse(second.body) as { sessionId: string; continued: boolean; trajectory: unknown[] }
+    const secondData = JSON.parse(second.body) as { sessionId: string; continued: boolean; cognitiveTrajectory: unknown[] }
     expect(secondData.continued).toBe(true)
     expect(secondData.sessionId).toBe(firstData.sessionId)
     expect(created).toHaveLength(1)
     // 全量轨迹：两轮 events（每轮 user+assistant = 4 条）
-    expect(secondData.trajectory.length).toBeGreaterThan(firstData.trajectory.length)
+    expect(secondData.cognitiveTrajectory.length).toBeGreaterThan(firstData.cognitiveTrajectory.length)
     stopSkiffDebugServer()
   })
 

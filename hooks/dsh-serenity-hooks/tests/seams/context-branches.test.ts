@@ -91,15 +91,15 @@ vi.mock('../../src/seams/system-prompt.js', async (orig) => {
       if (throwSet.has('registerEntrySkillSection')) throw new Error('boom: entry-section')
       return actual.registerEntrySkillSection(a as never, r)
     },
-    registerTrajectorySkillSection: (a: unknown, r: string) => {
-      if (throwSet.has('registerTrajectorySkillSection')) throw new Error('boom: traj-section')
-      return actual.registerTrajectorySkillSection(a as never, r)
+    registerCognitiveTrajectorySkillSection: (a: unknown, r: string) => {
+      if (throwSet.has('registerCognitiveTrajectorySkillSection')) throw new Error('boom: traj-section')
+      return actual.registerCognitiveTrajectorySkillSection(a as never, r)
     },
   }
 })
 
 import { registerContext, accIdentityText } from '../../src/seams/context.js'
-import { getActiveSessionInfo, setActiveSessionInfo } from '../../src/trajectory-ops.js'
+import { getActiveSessionInfo, setActiveSessionInfo } from '../../src/cognitive-trajectory-ops.js'
 
 type Handler = (payload: unknown, next?: () => Promise<unknown>) => unknown
 

@@ -14,7 +14,7 @@ describe('invariant: 清单与注册工具一致性', () => {
       JSON.stringify({
         id: 'x',
         contributes: {
-          tools: ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology', 'serenity-skill-creator'],
+          tools: ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology', 'serenity-skill-creator'],
         },
       }),
     )
@@ -26,12 +26,12 @@ describe('invariant: 清单与注册工具一致性', () => {
     expect(REGISTERED_TOOLS).toHaveLength(14)
     expect(REGISTERED_TOOLS).toContain('container_fs')
     expect(REGISTERED_TOOLS).toContain('container_admin')
-    expect(REGISTERED_TOOLS).toContain('container_trajectory')
+    expect(REGISTERED_TOOLS).toContain('cognitive_trajectory')
     expect(REGISTERED_TOOLS).toContain('msm')
     expect(REGISTERED_TOOLS).toContain('praxis')
     expect(REGISTERED_TOOLS).toContain('dashboard')
     expect(REGISTERED_TOOLS).toContain('localstore')
-    expect(REGISTERED_TOOLS).toContain('container_trajectory')
+    expect(REGISTERED_TOOLS).toContain('cognitive_trajectory')
     // v1.31.1：v1.31.0 漏改此处与清单（双侧同错 → 陈旧一致静默通过），本次补齐
     expect(REGISTERED_TOOLS).toContain('im-bridge')
     expect(REGISTERED_TOOLS).toContain('serenity-skill-creator')

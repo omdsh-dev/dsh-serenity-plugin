@@ -1,17 +1,17 @@
 /**
- * trajectory-ops-branches.test.ts — 🔴 **⑤ 第 64 件**：`src/trajectory-ops.ts` 的
+ * trajectory-ops-branches.test.ts — 🔴 **⑤ 第 64 件**：`src/cognitive-trajectory-ops.ts` 的
  * **createSession 入参校验面 ＋ show/list/summary 的退化臂**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（00:51 那一跑，第 63 件之后）实测：`src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `trajectory-ops.ts`（**84.65% = 160/189**；
+ * **最低且尚未做过**的文件 = `cognitive-trajectory-ops.ts`（**84.65% = 160/189**；
  * 语句 94.85% ＝ 608/641；函数 28/28 已满）。
  * ⚠️ 复扫的成对读（纪律 16）再次拦下两个错靶：同为 83.33% 的两处，一处是
  * `gateway-dsh-auth.ts` 的**函数列**（其分支 100%），另一处 `git-ops.ts` 已在第 53 件做过。
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯）
- * 本件 grep `src/trajectory-ops.js` 的 import 点 ⇒ **命中 17 个文件**
+ * 本件 grep `src/cognitive-trajectory-ops.js` 的 import 点 ⇒ **命中 17 个文件**
  * （只有一个是按本模块命名的 `trajectory-ops.test.ts`；其余按**主题**散落：
  * `session-title` ／ `rebuild` ／ `keeper` ／ `skiff-core` ／ `trajectory-bound` ／
  * `seams/context-*` ／ `seams/lifecycle*` ／ `osp-alignment` ／ `cro-guide` ／
@@ -52,7 +52,7 @@ import {
   sessionsRoot,
   showSession,
   summarize,
-} from '../src/trajectory-ops.js'
+} from '../src/cognitive-trajectory-ops.js'
 
 let dir: string
 
@@ -78,7 +78,7 @@ function mkEmptyDir(dirName: string): string {
   return p
 }
 
-describe('trajectory-ops 退化面：`createSession` 的五条拒绝臂（**绝不静默建坏目录**）', () => {
+describe('cognitive-trajectory-ops 退化面：`createSession` 的五条拒绝臂（**绝不静默建坏目录**）', () => {
   it('🟢 正控（夹具自证）：合法 desc ⇒ 真建出目录 ＋ SESSION.md 落盘', () => {
     const r = mk('合法描述')
     expect(existsSync(r.sessionPath), '目录必须真被建出来').toBe(true)
@@ -196,7 +196,7 @@ describe('trajectory-ops 退化面：`createSession` 的五条拒绝臂（**绝�
   })
 })
 
-describe('trajectory-ops 退化面：`showSession` / `findSession` 的报错与歧义', () => {
+describe('cognitive-trajectory-ops 退化面：`showSession` / `findSession` 的报错与歧义', () => {
   it('🔴 `:204` 会话不存在 ⇒ **抛**（不是回空串）', () => {
     expect(() => showSession(dir, 'no-such-session')).toThrow(/Session not found/)
   })
@@ -235,7 +235,7 @@ describe('trajectory-ops 退化面：`showSession` / `findSession` 的报错与�
   })
 })
 
-describe('trajectory-ops 退化面：`listSessions` 的 active 标记与 `summarize` 的 stale 告警', () => {
+describe('cognitive-trajectory-ops 退化面：`listSessions` 的 active 标记与 `summarize` 的 stale 告警', () => {
   it('🔴 `:191`/`:192` active 三态标记：`●`（active）／`✓`（completed）／`○`（普通）', () => {
     const a = mk('甲')
     const b = mk('乙')
@@ -280,7 +280,7 @@ describe('trajectory-ops 退化面：`listSessions` 的 active 标记与 `summar
     //      ⇒ 摘要打印 `(-1d ago)`（负龄）。仓库既有先例（`trajectory-tool.test.ts:293`
     //      ／ `session-cleanup.test.ts`）**一律传 `Date`** ⇒ 本件对齐先例，改用 `Date`。
     //   ② 🔴 **决定 stale 的是【目录】的 mtime，不是 SESSION.md 的** ——
-    //      `readSessionEntry` 取 `statSync(dirPath)`（`src/trajectory-ops.ts:121-126`）
+    //      `readSessionEntry` 取 `statSync(dirPath)`（`src/cognitive-trajectory-ops.ts:121-126`）
     //      ⇒ 只改 SESSION.md 的 mtime **不会**影响 stale 计数（**两个都要改**）。
     const r = mk('陈旧轨迹')
     const md = join(r.sessionPath, 'SESSION.md')
@@ -294,7 +294,7 @@ describe('trajectory-ops 退化面：`listSessions` 的 active 标记与 `summar
 
     const out = summarize(dir)
     expect(out).toContain('Stale:    1')
-    expect(out, '有 stale ⇒ 必须打印告警').toContain('⚠ Warning: stale trajectories present')
+    expect(out, '有 stale ⇒ 必须打印告警').toContain('⚠ Warning: stale cognitive trajectories present')
     // 正控方向：另一条**新鲜**的不得被算进 stale
     mk('新鲜轨迹')
     const out2 = summarize(dir)

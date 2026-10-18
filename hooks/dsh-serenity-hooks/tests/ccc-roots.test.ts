@@ -199,7 +199,7 @@ describe('agentCwdFor / cccRootForExec / cccRootForCwd（L1 单根解析）', ()
     made.push(root)
     expect(cccRootForCwd(root)).toBe(root)
     expect(cccRootForCwd(join(root, 'a', 'b', 'c'))).toBe(root)
-    // 文件路径靠 dirname 上溯（trajectory 反查 SESSION.md 的既有用法）
+    // 文件路径靠 dirname 上溯（cognitive trajectory 反查 SESSION.md 的既有用法）
     expect(cccRootForCwd(join(root, 'AGENT_SESSIONS', 'x', 'SESSION.md'))).toBe(root)
     // 系统临时目录根部（无 .serenity）→ null
     expect(cccRootForCwd(tmpdir())).toBeNull()

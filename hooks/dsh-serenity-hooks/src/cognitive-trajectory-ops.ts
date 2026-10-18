@@ -1,9 +1,9 @@
 /**
- * trajectory-ops.ts — 轨迹工具纯操作层（零 DSH 依赖，可独立单测）
+ * cognitive-trajectory-ops.ts — 轨迹工具纯操作层（零 DSH 依赖，可独立单测）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/session/lib.ts）——osp 是 ACC 工具 spec。
  *
- * v1.33 收敛（S142 §32）：本文件只服务 `container_trajectory` 的动作面
+ * v1.33 收敛（S142 §32）：本文件只服务 `cognitive_trajectory` 的动作面
  * （现行 **8 个**：list / show / create / use / rebuild / **send-now** / **send-later** / **cro-guide**）。旧 `logbook` 面里
  * **close / archive / health / qa 四个动作已删**（用户裁决「功能上废弃，实际上没用」），
  * 其函数（closeSession / archiveSessions / healthCheck / qaCheck）**同批删除**——
@@ -24,7 +24,7 @@ import { join, basename, dirname } from 'node:path'
 import { localDate, localDateTimeMinutes } from './time.js'
 
 /**
- * `container_trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
+ * `cognitive_trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
  *
  * 为什么收敛到这 8 个（R↓；v1.33 收敛时为 **6 个** —— 其后追加 `send-now`（09-16）
  * 与 `cro-guide`（09-20），🔴 2026-09-25 更正计数，勿再写成"6 个"）：旧面是 `logbook`（11）+ `trajectory`（12）两个工具，用户裁决
@@ -36,7 +36,7 @@ import { localDate, localDateTimeMinutes } from './time.js'
  * wake-add/list/rm 收敛为 wake-later（**2026-09-17 更名 `send-later`**）。
  * 2026-09-16（所有者裁决）：新增 **send-message**（**2026-09-17 更名 `send-now`**）—— 即时投递
  *   （与 wake-later 共用取用通路，差别只在时刻"现在 vs 未来"与回执"有 vs 无"）。
- *   设计稿 docs/trajectory-send-message-design.md。
+ *   设计稿 docs/cognitive-trajectory-send-message-design.md。
  * 2026-09-17（所有者裁决 · 命名 A 案）：**两个投递动作更名** —— `wake-later` → **`send-later`**、
  *   `send-message` → **`send-now`**。判据（R↓）：两者是**同一条投递通路**（同取用机制 / 同载荷 /
  *   同落点语义），只差**时刻**；而「唤醒（冷载入）」是**两条路径共有**的属性，不配做区分
@@ -49,9 +49,9 @@ import { localDate, localDateTimeMinutes } from './time.js'
  *   而**管轨迹的人正是用本工具的人**；挂这儿 = 设计 §9-5 的"**既有 guide 位置、不新增域**"。
  *   ⚠️ 本动作**纯读**（输出指南正文，不碰 fs、不碰注册表）。
  */
-type TrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'send-now' | 'send-later' | 'cro-guide'
+type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'send-now' | 'send-later' | 'cro-guide'
 
-export const TRAJECTORY_ACTIONS: readonly TrajectoryAction[] = [
+export const COGNITIVE_TRAJECTORY_ACTIONS: readonly CognitiveTrajectoryAction[] = [
   'list', 'show', 'create', 'use', 'rebuild', 'send-now', 'send-later', 'cro-guide',
 ]
 
@@ -351,9 +351,9 @@ export interface ActiveSessionInfo {
 }
 
 // ── 会话命名（F3/v1.22.9 格式 + 需求② 概括）────────────────────────────────
-// 🔴 2026-09-25（S142 工程化程序第 ④ 项·第 1 步）**从 `tools/trajectory.ts` 下沉至此**。
-// 为何在 L1：`rebuild.ts`（L1）原**静态** import `tools/trajectory.ts`（L3）**只为取 `namingTitleFor`**
-// ⇒ 既是 L1→L3 上行边，又与 `tools/trajectory.ts` 里 `await import('../rebuild.js')` 的合法下行边
+// 🔴 2026-09-25（S142 工程化程序第 ④ 项·第 1 步）**从 `tools/cognitive-trajectory.ts` 下沉至此**。
+// 为何在 L1：`rebuild.ts`（L1）原**静态** import `tools/cognitive-trajectory.ts`（L3）**只为取 `namingTitleFor`**
+// ⇒ 既是 L1→L3 上行边，又与 `tools/cognitive-trajectory.ts` 里 `await import('../rebuild.js')` 的合法下行边
 // **成环**（证据＝模块图 §3-6）。两个纯函数（**零 DSH 依赖**）下沉到本模块后，两侧各自向下依赖，环解开。
 // 🔵 为何 `sanitizeSessionSummary` 必须**同批**下沉：它是 `namingTitleFor` 的私有助手，若留在 L3
 // 就会被 L1 反向 import ⇒ 只是把那条坏边挪个名字。**功能无影响的判据** = 输入输出与全部调用点不变 ＋ 全量测试绿。
@@ -537,7 +537,11 @@ export function extractSessionMdPathFromText(text: string): string | null {
   const m = text.match(SESSION_MD_PATH_RE)
   if (!m) return null
   let p = m[1]!.trim()
-  const suffix = p.search(/ \(the trajectory's persistent body/)
+  // 🔴 本正则必须与**两个发射点逐字同步**：`seams/system-prompt.ts` 的 Session 块
+  //    与 `rebuild.ts` 的重建锚点规范行。改一侧不改另一侧 ⇒ 静默剥不掉尾注 ⇒
+  //    解析出的路径带上注释文字 ⇒ 会话恢复断链，且 **typecheck 抓不到**（正则字面量无类型）。
+  //    （2026-10-18 更名时由三个 worker 独立报出同一处，见 D156。）
+  const suffix = p.search(/ \(the cognitive trajectory's persistent body/)
   if (suffix > 0) p = p.slice(0, suffix).trim()
   return p
 }
@@ -635,7 +639,7 @@ export function summarize(root: string): string {
   ]
   if (stale > 0) {
     // v1.33：不再指向已删的 health 动作——提示事实本身（长期无活动的轨迹清单在 list 里可见）
-    lines.push('', '⚠ Warning: stale trajectories present (no activity > 7d) — see the list above for detail.')
+    lines.push('', '⚠ Warning: stale cognitive trajectories present (no activity > 7d) — see the list above for detail.')
   }
   return lines.join('\n')
 }

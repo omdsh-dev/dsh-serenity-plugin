@@ -227,7 +227,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'sessionController',
     access: 'lazy',
     members: [{ name: 'resolveAgent', kind: 'function' }],
-    impact: 'trajectory 冷会话唤醒不可用（只能唤醒已加载的 live 会话）——唤醒注册表投递降级',
+    impact: 'cognitive trajectory 冷会话唤醒不可用（只能唤醒已加载的 live 会话）——唤醒注册表投递降级',
     required: false,
   },
   {
@@ -324,7 +324,7 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'session/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
   { name: 'settings/document-updated', site: 'opencode-provider.ts, deepseek-vision-patch.ts（ns 过滤复评）', impact: 'opencode 路由 / 多模态补丁热改不再自愈（自动配置仍覆盖首次）', required: false },
   { name: 'tools/pre-execute', site: 'seams/guards.ts', impact: '机械守卫（safe-mode/路径/白名单）失效', required: true },
-  { name: 'tools/post-execute', site: 'seams/keeper.ts', impact: 'trajectory-assistant 计分失效', required: false },
+  { name: 'tools/post-execute', site: 'seams/keeper.ts', impact: 'cognitive-trajectory-assistant 计分失效', required: false },
   { name: 'system-prompt/assemble', site: 'seams/bootstrap.ts', impact: '工具目录两阶段装配失效', required: false },
 ] as const
 

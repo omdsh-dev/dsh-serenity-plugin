@@ -88,8 +88,8 @@ vi.mock('../../src/skiff-core.js', async (orig) => {
   }
 })
 
-vi.mock('../../src/trajectory-ops.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/trajectory-ops.js')>()
+vi.mock('../../src/cognitive-trajectory-ops.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/cognitive-trajectory-ops.js')>()
   return {
     ...actual,
     clearActiveSessionInfo: (id: string) => {

@@ -1,6 +1,6 @@
 ---
 title: trajectory 调度 — 机制、模型与时间轴（总览 v1.0）
-status: 现行总览（单一入口；接口规格见 trajectory-wake-registry-design.md）
+status: 现行总览（单一入口；接口规格见 cognitive-trajectory-wake-registry-design.md）
 session: S142
 date: 2026-09-13
 decisions: D58 / D59 / D60
@@ -10,7 +10,7 @@ decisions: D58 / D59 / D60
 
 > **真相源分工（避免双份真相）**
 > - 本文 = **总览**：概念模型 / 两条唤醒线 / 结构全景 / 时间轴语义 / 边界 / 决策账 / 验证状态 / 概念前沿。
-> - 接口与行为规格 = [`trajectory-wake-registry-design.md`](./trajectory-wake-registry-design.md)。
+> - 接口与行为规格 = [`cognitive-trajectory-wake-registry-design.md`](./cognitive-trajectory-wake-registry-design.md)。
 > - 实现 = `hooks/dsh-serenity-hooks/src/wake-registry.ts`（注册表）、`wake-scheduler.ts`（调度+投递）、`autopilot-trajectory.ts`（autopilot 周期线）。
 > - 决策原始记录 = S142 `SESSION.md` §5（D58/D59/D60）与 §30（侦察 F1~F11、P-1、裁决、验证）。
 

@@ -11,9 +11,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionTrajectoryLabel, supersedeOtherBindings, setBindingStore, migrateBindingsToDomain } from '../src/trajectory-bound.js'
+import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings, setBindingStore, migrateBindingsToDomain } from '../src/cognitive-trajectory-bound.js'
 import { bindingStore } from '../src/host/storage-domain.js'
-import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory-ops.js'
+import { resetActiveSessionStore, setActiveSessionInfo } from '../src/cognitive-trajectory-ops.js'
 
 let ccc: string
 
@@ -35,7 +35,7 @@ function makeSession(id = 'sess-1', events: unknown[] = [], cwd = ccc) {
   return { header: { id, cwd }, snapshotEvents: () => events }
 }
 
-describe('trajectory-bound: appendBound（文件持久化）', () => {
+describe('cognitive-trajectory-bound: appendBound（文件持久化）', () => {
   it('写入 AGENT_SESSIONS/.bindings.json（含 dirName/mdPath/sessionId/action/at）', () => {
     const s = makeSession()
     const ok = appendBound(s, 'activate', {
@@ -84,7 +84,7 @@ describe('trajectory-bound: appendBound（文件持久化）', () => {
   })
 })
 
-describe('trajectory-bound: readLastBound / hasAnyBound', () => {
+describe('cognitive-trajectory-bound: readLastBound / hasAnyBound', () => {
   it('无记录 → null', () => {
     expect(readLastBound(makeSession())).toBeNull()
     expect(hasAnyBound(makeSession())).toBe(false)
@@ -113,7 +113,7 @@ describe('trajectory-bound: readLastBound / hasAnyBound', () => {
   })
 })
 
-describe('trajectory-bound: 旧事件形态回落（v1.29.1~v1.30.5 存量绑定）', () => {
+describe('cognitive-trajectory-bound: 旧事件形态回落（v1.29.1~v1.30.5 存量绑定）', () => {
   it('文件中无记录 → 回落扫描会话日志中的 serenity/bound（最后一条胜出）', () => {
     const events = [
       { type: 'user/message', data: { content: [] } },
@@ -135,7 +135,7 @@ describe('trajectory-bound: 旧事件形态回落（v1.29.1~v1.30.5 存量绑定
   })
 })
 
-describe('trajectory-bound: 编码无关（U4）', () => {
+describe('cognitive-trajectory-bound: 编码无关（U4）', () => {
   it('issue 会话（无 S 前缀）同样可绑定——dirName 是唯一硬锚', () => {
     const s = makeSession()
     const ok = appendBound(s, 'activate', {
@@ -165,10 +165,10 @@ describe('trajectory-bound: 编码无关（U4）', () => {
   })
 })
 
-describe('trajectory-bound: resolveSessionTrajectoryLabel（createdBy 审计归属）', () => {
+describe('cognitive-trajectory-bound: resolveSessionCognitiveTrajectoryLabel（createdBy 审计归属）', () => {
   /**
    * 回归（S142 §30.12.1 实测缺陷）：唤醒注册表的 createdBy 曾直接取**全局** lastActive 指针，
-   * 而它记录的是"进程内最近一次被激活的 trajectory"——多会话并发时张冠李戴
+   * 而它记录的是"进程内最近一次被激活的 cognitive trajectory"——多会话并发时张冠李戴
    * （实测：S142 登记唤醒被写成 `by=S060`）。本组用例把"以调用方自己为准"钉死。
    */
   it('① 持久 bound 命中 → 取该会话自己的标签（不看全局指针）', () => {
@@ -180,32 +180,32 @@ describe('trajectory-bound: resolveSessionTrajectoryLabel（createdBy 审计归�
     })
     // 全局指针被**别的**会话污染（模拟 S060 刚激活）
     setActiveSessionInfo('sess-other', { sessionId: 'S060', dirName: '2026-01-01--S060--x', mdPath: '/r/B/SESSION.md' })
-    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('S142')
+    expect(resolveSessionCognitiveTrajectoryLabel(caller, 'sess-caller')).toBe('S142')
   })
 
   it('② 无 bound 但本 scope 有内存激活 → 取本 scope（不看全局指针）', () => {
     const caller = makeSession('sess-caller')
     setActiveSessionInfo('sess-caller', { sessionId: 'S142', dirName: '2026-08-24--S142--dsp', mdPath: '/r/A/SESSION.md' })
     setActiveSessionInfo('sess-other', { sessionId: 'S060', dirName: '2026-01-01--S060--x', mdPath: '/r/B/SESSION.md' })
-    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('S142')
+    expect(resolveSessionCognitiveTrajectoryLabel(caller, 'sess-caller')).toBe('S142')
   })
 
   it('③ 两级皆空 → 回退全局最近活跃（无绑定会话的兼容）', () => {
     const caller = makeSession('sess-caller')
     setActiveSessionInfo('sess-other', { sessionId: 'S060', dirName: '2026-01-01--S060--x', mdPath: '/r/B/SESSION.md' })
-    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('S060')
+    expect(resolveSessionCognitiveTrajectoryLabel(caller, 'sess-caller')).toBe('S060')
   })
 
   it('④ 三级全落空 → 空串（渲染为 `?`，不抛错）', () => {
-    expect(resolveSessionTrajectoryLabel(makeSession('sess-caller'), 'sess-caller')).toBe('')
-    expect(resolveSessionTrajectoryLabel(null, '')).toBe('')
-    expect(resolveSessionTrajectoryLabel({}, '')).toBe('')
+    expect(resolveSessionCognitiveTrajectoryLabel(makeSession('sess-caller'), 'sess-caller')).toBe('')
+    expect(resolveSessionCognitiveTrajectoryLabel(null, '')).toBe('')
+    expect(resolveSessionCognitiveTrajectoryLabel({}, '')).toBe('')
   })
 
   it('⑤ 编码无关（U4）：目录名无 --S###-- → 原样返回目录名', () => {
     const caller = makeSession('sess-caller')
     appendBound(caller, 'activate', { dirName: '2026-09-04--apaas-26116', mdPath: '/r/C/SESSION.md' })
-    expect(resolveSessionTrajectoryLabel(caller, 'sess-caller')).toBe('2026-09-04--apaas-26116')
+    expect(resolveSessionCognitiveTrajectoryLabel(caller, 'sess-caller')).toBe('2026-09-04--apaas-26116')
   })
 })
 
@@ -216,7 +216,7 @@ describe('trajectory-bound: resolveSessionTrajectoryLabel（createdBy 审计归�
  * 而唤醒选人是"遍历全部绑定 id、任一条 live 就用它" ⇒ **两条 live 会话都能被唤醒选中**
  * （各持一份完整上下文 = 内存翻倍，且都在写同一批文件 = 双写者）。
  */
-describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理', () => {
+describe('cognitive-trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理', () => {
   const DIR = '2026-08-24--S142--dsp 维护'
   const MD = '/r/AGENT_SESSIONS/2026-08-24--S142--dsp 维护/SESSION.md'
 
@@ -295,7 +295,7 @@ describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理',
   /**
    * 接线钉（同 `client-popover-clip-guard.test.ts` 的形态）：
    * 上面两个函数**本身对**不等于**被接上了**——机制死在"实现了但没人调用"是最常见的静默失效。
-   * 这里钉住 `container_trajectory use` 这条真实路径确实调用它们，并确实把结果报出去。
+   * 这里钉住 `cognitive_trajectory use` 这条真实路径确实调用它们，并确实把结果报出去。
    *
    * 🔴 **2026-09-21 改向（F1/F2 修复）**：退休动作**不再**由 `use` 路径自己发起——
    * 它收进了 `appendBound` 单一入口（写自己那条时，同一次 RMW 内退休同轨迹其它条）。
@@ -304,7 +304,7 @@ describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理',
    * 而**退休判据必须出现在 `appendBound` 里**（否则"只留一条"又变成没人调用）。
    */
   it('🔴 接线钉：`use` 路径**不再**自己发起退休（F1 根因防回归）+ 仍调 pruneMissingBindings 并回报', () => {
-    const src = readFileSync(new URL('../src/tools/trajectory.ts', import.meta.url), 'utf-8')
+    const src = readFileSync(new URL('../src/tools/cognitive-trajectory.ts', import.meta.url), 'utf-8')
     const useCase = src.slice(src.indexOf("case 'use':"), src.indexOf("case 'rebuild':", src.indexOf("case 'use':")))
     // 负向：F1 的根因形态不得回归
     expect(useCase).not.toContain('supersedeOtherBindings(')
@@ -316,7 +316,7 @@ describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理',
   })
 
   it('🔴 接线钉：退休判据确实在 `appendBound` 单一入口里（否则「只留一条」无人调用）', () => {
-    const src = readFileSync(new URL('../src/trajectory-bound.ts', import.meta.url), 'utf-8')
+    const src = readFileSync(new URL('../src/cognitive-trajectory-bound.ts', import.meta.url), 'utf-8')
     const fn = src.slice(src.indexOf('export function appendBound('))
     expect(fn).toContain('collectSupersedeTargets(')
     expect(fn).toContain('supersededAt = record.at') // 同一次调用共用一个 at（与既有语义一致）
@@ -335,7 +335,7 @@ describe('trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑定清理',
  * 并显式传非空 `keepIds`** ⇒ **从不走真正出事的路径**；唯一"覆盖 `use`"的还只是**源码字符串接线钉**
  * （只能证明"**调用了**"，证明不了"**参数是对的**"）。⇒ 本组一律**走 `appendBound` 生产路径**。
  */
-describe('trajectory-bound: 🔴 D69 收进 appendBound 单一入口（F1/F2 修复）', () => {
+describe('cognitive-trajectory-bound: 🔴 D69 收进 appendBound 单一入口（F1/F2 修复）', () => {
   const DIR = '2026-08-24--S142--dsp 维护'
   const MD = '/r/AGENT_SESSIONS/2026-08-24--S142--dsp 维护/SESSION.md'
 
@@ -472,7 +472,7 @@ describe('trajectory-bound: 🔴 D69 收进 appendBound 单一入口（F1/F2 修
   })
 
   it('🔴 F3 接线钉：`agentDshSession` **不得把会话削成只带 `append`**（否则上面那条机制复发）', () => {
-    const src = readFileSync(new URL('../src/tools/trajectory.ts', import.meta.url), 'utf-8')
+    const src = readFileSync(new URL('../src/tools/cognitive-trajectory.ts', import.meta.url), 'utf-8')
     const fn = src.slice(src.indexOf('function agentDshSession('))
     expect(fn.slice(0, fn.indexOf('\n}'))).not.toContain('{ append: s.append')
     expect(fn).toContain('header?: unknown') // 类型上就承认"会话带 header"
@@ -500,7 +500,7 @@ describe('trajectory-bound: 🔴 D69 收进 appendBound 单一入口（F1/F2 修
  * 域用**替身**注入（`bindingStore(fakeDomain)`）——真实域的行为已由
  * `tests/host/storage-domain-module.test.ts` 与 `tests/host/storage-domain.test.ts` 钉住。
  */
-describe('trajectory-bound: §0L 域优先 / 文件兜底 / 双写', () => {
+describe('cognitive-trajectory-bound: §0L 域优先 / 文件兜底 / 双写', () => {
   const DIR = '2026-09-05--S142--dsp'
 
   /** 造一个可读写的假域（形状 = BindingStore 期望的 DomainLike 结构子集） */
@@ -599,7 +599,7 @@ describe('trajectory-bound: §0L 域优先 / 文件兜底 / 双写', () => {
  *  ③ **不动旧文件**（向前兼容的第二道保险必须完好）；
  *  ④ 域不可用 ⇒ 静默返回零计数、**不抛**（装载期，不能成为启动单点）。
  */
-describe('trajectory-bound: §0L 一次性迁移 migrateBindingsToDomain', () => {
+describe('cognitive-trajectory-bound: §0L 一次性迁移 migrateBindingsToDomain', () => {
   const DIR = '2026-09-05--S142--dsp'
 
   function fakeDomain(initial: Record<string, unknown> = {}) {
@@ -722,7 +722,7 @@ describe('trajectory-bound: §0L 一次性迁移 migrateBindingsToDomain', () =>
  * 为什么这组用例重要：§0L 换了载体（文件 → 域），**退休语义必须在域上同样成立**，
  * 否则"只留一条"会随载体迁移**静默失效**——这正是 owner 这条裁定要防的病。
  */
-describe('trajectory-bound: D69「只留一条」（域路径）', () => {
+describe('cognitive-trajectory-bound: D69「只留一条」（域路径）', () => {
   const DIR = '2026-08-24--S142--dsp 长期维护'
 
   function fakeDomain(initial: Record<string, unknown> = {}) {
@@ -817,7 +817,7 @@ describe('trajectory-bound: D69「只留一条」（域路径）', () => {
  *
  * 判据：**任何一次能定位 CCC 根的绑定读写，都应顺带把该 CCC 的历史绑定补灌进域**。
  */
-describe('trajectory-bound: §0L 惰性补迁移（bindingsPathFor 触发）', () => {
+describe('cognitive-trajectory-bound: §0L 惰性补迁移（bindingsPathFor 触发）', () => {
   const DIR = '2026-09-05--S142--dsp'
 
   function fakeDomain(initial: Record<string, unknown> = {}) {

@@ -113,7 +113,7 @@ export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'd
 const ACC_CATALOG = `═══ ACC Usage Catalog ═══
 Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
 
-  ① 轨迹本体          → container_trajectory（list/show/create/use + rebuild 超限重建 + send-now 即时投递 + send-later 未来一次性唤醒
+  ① 轨迹本体          → cognitive_trajectory（list/show/create/use + rebuild 超限重建 + send-now 即时投递 + send-later 未来一次性唤醒
                           + cro-guide CRO 编写指南）
                          原 logbook 已并入（v1.33 用户裁决：废除 logbook 词）；close/archive 删（归档走 container_fs mv），
                          health/qa/summary 分别并入 use / list，hook-develop-guide 并进 container_admin msm guide
@@ -127,15 +127,15 @@ Directory of ACC capabilities — each area lists where to go for details (guide
   ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
                          3099 Skiff 调试问答页（人工调试面）。🔴 2026-10-15：自造 ACP 面已退役
                          ⇒ 外部程序化接入改走官方 dsh --profile acp ＋ 现成 ACP 客户端
-  ⑤ 自主与接入        → container_trajectory send-now（跨轨迹的**即时**递送，**不排队**：live 目标在跑就当场注入当前轮、空闲则立即起轮；非 live 冷载入——等效于直接 wake；**有同步回执**）
-                         container_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
+  ⑤ 自主与接入        → cognitive_trajectory send-now（跨轨迹的**即时**递送，**不排队**：live 目标在跑就当场注入当前轮、空闲则立即起轮；非 live 冷载入——等效于直接 wake；**有同步回执**）
+                         cognitive_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
-  ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：cheap-worker/sessionKeeper/localstore/hooks/safeMode/skiff/trajectory/weixin/**exclusiveTools**）
+  ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：cheap-worker/sessionKeeper/localstore/hooks/safeMode/skiff/cognitiveTrajectory/weixin/**exclusiveTools**）
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
                          CCC 级开关：exclusiveTools（声明专属工具）/ safeMode.blacklist（写路径黑名单）
                          / safeMode.hiddenTools（**安全模式开启期间**额外隐藏的工具，v1.51.4）
-                         CCC 级 skill 供给：trajectory.skills（v1.44.0——**本 CCC 每条轨迹都带**，含 skiff 会话；与轨迹自己的 frontmatter 声明取并集）
+                         CCC 级 skill 供给：cognitiveTrajectory.skills（v1.44.0——**本 CCC 每条轨迹都带**，含 skiff 会话；与轨迹自己的 frontmatter 声明取并集）
 
 每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
 `
@@ -223,7 +223,7 @@ cheap-worker（杂工）工具可用模型白名单（provider/model 列表）�
     { "cheap-worker": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3" } }
 
 ── 2. sessionKeeper.threshold / sessionKeeper.sessionMdMaxKB ──
-trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积分阈值（非 headless 主 agent）。
+cognitive-trajectory-assistant（COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积分阈值（非 headless 主 agent）。
 按工具调用加权 + 耗时计分；达到阈值注入提醒，要求模型回复 ACK 码。
 
   Config:
@@ -233,7 +233,7 @@ trajectory-assistant（TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积�
   默认：150
 
   ▸ sessionMdMaxKB（v1.31.1 新增，v1.31.2 缺省 100→200）：**活跃 SESSION.md 体积上限（KB，缺省 200；0 = 关闭）**。
-    超过 → 注入 [TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION] 提醒：暂停当前工作 →
+    超过 → 注入 [COGNITIVE-TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION] 提醒：暂停当前工作 →
     加载 eap（praxis eap）→ 按 EAP 分层骨架重写 SESSION.md。四条原则（ACC 内嵌，随提醒给出）：
     ① 保留 EAP 分层骨架（不压成时间流水账）② 内容可外移到 references 文件
     （AGENT_SESSIONS/<会话>/references/*.md，SESSION.md 留链接）③ 允许整合/删除不重要事项
@@ -271,9 +271,9 @@ safe-mode 由 WebUI 开关控制（写 .serenity-safe-on 标记）；黑名单�
     { "safeMode": { "blacklist": [".secrets/"], "hiddenTools": ["workflow", "job_kill"] } }
 
 ── 6. skiff.roles（F4 认知子集角色）──
-Skiff 角色 = 全知全能 trajectory 的任意子集（CCC 定义）。每角色独立模型 + 双白名单
+Skiff 角色 = 全知全能 cognitive trajectory 的任意子集（CCC 定义）。每角色独立模型 + 双白名单
 （MSM 白名单 msms[] 与非 MSM 工具白名单 tools[]，白名单外全隐藏；skill 加载恒可用）。
-trajectory 纪律子集（session/keeper/rebuild 参与项）默认全关 = 完全独立。
+cognitive trajectory 纪律子集（session/keeper/rebuild 参与项）默认全关 = 完全独立。
 systemPrompt 内联 或 systemPromptFile（.md 引用，推荐）——角色会话的完整人格/边界提示词。
 validate 校验 / apply 生效 / list 查看：container_admin role <guide|validate|apply|list>（skiff_admin 已并入）。
 
@@ -286,31 +286,31 @@ validate 校验 / apply 生效 / list 查看：container_admin role <guide|valid
           "systemPromptFile": ".opencode/skiff/qa.md"
         } } } }
 
-── 7. container_trajectory（轨迹 + 唤醒注册表，D58）──
-CCC 的一条 trajectory = 持久身体（SESSION.md）+ 时间轴（AGENT_SESSIONS/ 目录 + 唤醒注册表）。
+── 7. cognitive_trajectory（轨迹 + 唤醒注册表，D58）──
+CCC 的一条 cognitive trajectory = 持久身体（SESSION.md）+ 时间轴（AGENT_SESSIONS/ 目录 + 唤醒注册表）。
 一个 CCC 内可多条并行；条目全部由人类/agent 显式登记。
 ⚠️ ACC 不再提供**周期自唤醒**（原 autopilot，2026-09-15 整段退场：机制/时钟/container_admin autopilot
 域/面板区块一并删除）。自主巡航改由 CCC 自己驱动（home-serenity 侧 msm autopilot-round 每轮自排下一轮，
-真相源 = S151 SESSION.md §1/§1b/§1c）。**本轮的 trajectory.autopilot 配置段保留**（见下表）——
+真相源 = S151 SESSION.md §1/§1b/§1c）。**本轮的 cognitiveTrajectory.autopilot 配置段保留**（见下表）——
 它现由 **CCC 侧脚本**读取，ACC 不再消费该段。
-唤醒注册表（container_trajectory send-later）：唤醒 = 未来时刻 + 一条 message，可唤醒自己或别的 trajectory；
+唤醒注册表（cognitive_trajectory send-later）：唤醒 = 未来时刻 + 一条 message，可唤醒自己或别的 cognitive trajectory；
 落点 AGENT_SESSIONS/wake-registry.json，中心调度器到点投递（fire-and-forget；无回执、无回收）。
 运行态诊断（ACC 负责人专用）：acc-diag（① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。
 
-▸ trajectory.skills（v1.44.0，**CCC 级 skill 供给**；owner 令 2026-09-20「要求实现我的诉求……
+▸ cognitiveTrajectory.skills（v1.44.0，**CCC 级 skill 供给**；owner 令 2026-09-20「要求实现我的诉求……
   注入是动态注入就行；create 先不触发吧；**skiff 也支持**」）：
   **本 CCC 的每条轨迹都带这些 skill**——声明的 skill 全文在该轨迹**被绑定期间**注入系统提示词
   （**动态注入**：每请求重新求值、不缓存 ⇒ 改配置或改 frontmatter **即时生效**，无需重新 use、无需重启）。
-  两条声明来源**并集**（不是二选一）：本键 **trajectory.skills**（容器给的底座，**在前**）
+  两条声明来源**并集**（不是二选一）：本键 **cognitiveTrajectory.skills**（容器给的底座，**在前**）
   ＋ 轨迹自己 SESSION.md 顶部 frontmatter 的 skills:（这条轨迹额外的，**追加**；同名去重）。
   ✅ **含 skiff 角色会话**（旁路的是 ACC 身份与纪律；skill 是"工作资料"，照给）。
   守卫：名字先过安全校验才用于拼路径（防穿越）｜**合并后**统一 32 KB 上限截断｜找不到响亮写 [缺失]。
-  ⚠️ 与 create **无关**（create 刻意不夺绑定，U6）⇒ 注入的门是"**存在绑定**"（container_trajectory use）。
+  ⚠️ 与 create **无关**（create 刻意不夺绑定，U6）⇒ 注入的门是"**存在绑定**"（cognitive_trajectory use）。
   失败语义：未配置 / 字段缺失 / 配置损坏 ⇒ **空数组**（= 无 CCC 级供给；轨迹级声明照旧生效）。
   归属（D23）：**机制在 ACC**（读取 + 合并 + 注入 + 守卫），**声明在 CCC**（本键）。
 
   Config:
-    { "trajectory": {
+    { "cognitiveTrajectory": {
         "skills": ["acc-session", "cce"],   // v1.44.0：本 CCC 的每条轨迹都带（含 skiff 会话）
         "autopilot": {                   // 原 autopilotTrajectory 段，字段不变（旧键仍回退读）
           "enabled": true,

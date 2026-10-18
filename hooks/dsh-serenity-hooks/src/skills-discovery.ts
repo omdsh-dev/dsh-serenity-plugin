@@ -47,7 +47,7 @@ function scanSerenityDirs(skillsRoot: string): string[] {
 /**
  * 防穿越：skill 名必须是简单目录名（拒绝分隔符与 `..`/`.` 路径段）。
  * v1.34.1：导出——轨迹 skill 声明（CCC 数据）的名字也要**先过这一关**才能用于拼路径
- * （规格 `docs/trajectory-skill-injection.md` §3「名字安全（必做）」）。
+ * （规格 `docs/cognitive-trajectory-skill-injection.md` §3「名字安全（必做）」）。
  */
 export function isSafeSkillName(name: string): boolean {
   if (name.length === 0) return false

@@ -159,23 +159,17 @@ interface SerenityConfig {
     roles?: Record<string, SkiffRoleConfig>;
   };
   /**
-   * Autopilot Trajectory（自动巡航轨迹，正式版 v1.27.4；前身 autotrajectory 实验 v1.26.12~17）：
-   * CCC 定义的一条自主 trajectory——时钟唤起 + 先验偏见（自生+随机）+ 前台运行。
-   * 未配置或 enabled=false → 机制完全不启动（零资源占用，零影响现有功能）。
-   * 多 CCC 独立（v1.27.4）：每 CCC 自己的配置，时钟遍历所有 live+enabled CCC 各自唤起。
+   * 认知轨迹族配置（D58，S142 2026-09-13；2026-10-18 更名 `cognitiveTrajectory`）。
+   *
+   * 🔴 **2026-10-18（owner 令）：autopilot 配置面整体删除** —— ACC 侧 autopilot 机制
+   *    早在 v1.35.0 就整段退场（周期性自主巡航已由 CRO 取代）。当时的处置只删了实现，
+   *    把配置读取面留了下来，成为"读到也无人消费"的死键。owner 2026-10-18 明示
+   *    「autopilot 整体已经废弃，可以删除的」⇒ 本次一并移除：
+   *    `cognitiveTrajectory.autopilot` ／ 旧键 `autopilotTrajectory` ／ 更旧键 `autotrajectory`
+   *    ／ 类型 `AutopilotTrajectorySettings`。
+   *    ⇒ 存量 CCC 里这段配置**不再被读取**（静默忽略；无迁移必要 —— 它已无消费者）。
    */
-  autopilotTrajectory?: AutopilotTrajectorySettings;
-  /** 旧键兼容（正式化前存量 CCC——新键 autopilotTrajectory 优先，旧键回退） */
-  autotrajectory?: AutopilotTrajectorySettings;
-  /**
-   * trajectory 族配置（D58，S142 2026-09-13）：`trajectory` 是一等概念，
-   * **autopilot 降为其子集**——故 autopilot 的配置迁到 `trajectory.autopilot`。
-   * 读取顺序（逐级回退，**不回写**）：`trajectory.autopilot` → `autopilotTrajectory` → `autotrajectory`。
-   * 唤醒注册表（未来时刻一次性唤醒）为 CCC 级文件 `AGENT_SESSIONS/wake-registry.json`，不在此配置。
-   */
-  trajectory?: {
-    /** autopilot（周期自唤醒的特例；每 CCC 单例，D59） */
-    autopilot?: AutopilotTrajectorySettings;
+  cognitiveTrajectory?: {
     /**
      * **CCC 级 skill 供给**（v1.44.0；owner 令 2026-09-20：「要求实现我的诉求……skiff 也支持」）。
      *
@@ -222,35 +216,6 @@ interface SerenityConfig {
    * ACC 代码里不出现任何具体 CCC 的名字；未声明（含未配置/配置损坏）⇒ 隐藏。
    */
   exclusiveTools?: string[];
-}
-
-/**
- * Autopilot Trajectory 配置（CCC 定义；S142 用户拍板 v0.5 + 正式化 v1.27.4）：
- * - 偏见内容提供者 = CCC 根目录下脚本（biasProvider，缺省 autopilot-bias.ts；旧默认
- *   autotrajectory-bias.ts 回退——存量 CCC 零迁移）——tool 直接运行取 stdout 作为偏见内容
- * - 会话标志 = 目录名后缀 `--auto`：AGENT_SESSIONS/<date>--<desc>--auto/
- * - **session 必填**（用户拍板：自动唤起不默认任何会话——CCC 日常有多条 trajectory 在跑，
- *   未配置明确目标绝不唤起）；唤起窗口避开北京时间 8~18 点（用量峰谷省钱——用户拍板）
- */
-export interface AutopilotTrajectorySettings {
-  /** 总开关（缺省 false——默认关，未开零资源占用） */
-  enabled?: boolean;
-  /** 无人类活动 N 小时后自动唤起（缺省 12；下限 0.01h——v1.27.8 支持小数高频实验） */
-  intervalHours?: number;
-  /** 偏见内容提供者脚本（相对 CCC 根；缺省 autopilot-bias.ts——缺失报错要求实现） */
-  biasProvider?: string;
-  /**
-   * 轨迹焦点（topPrompt，v1.26.17，用户"确保自动轨迹质量"）：**CCC 定义 Autopilot 时
-   * 自己填写**的顶层提示词——本轨迹的核心目标/纪律/质量要求。**每次唤起最先注入**（位于
-   * 身份锚定之前，影响力最大），作为稳定焦点锚定 trajectory，防止多轮自主唤起中焦点丢失
-   * （腐化）。区别于偏见内容（每轮随机探索方向）：焦点=稳定锚，偏见=随机探索，两者互补。
-   * 实验经验：trajectory 在多轮中腐化严重（焦点丢失）——topPrompt 即为此而设。
-   */
-  topPrompt?: string;
-  /** **必填**：目标会话（S### / 目录名）——未配置绝不唤起（CCC 日常多轨迹并行，不默认） */
-  session?: string;
-  /** 避开唤起的高峰时段（北京时间，[start, end) 内不唤起；缺省 {8, 18}——用量峰谷省钱） */
-  avoidWakeHours?: { start?: number; end?: number };
 }
 
 /**
@@ -414,8 +379,10 @@ export interface SkiffRoleConfig {
   msms?: string[];
   /** 非 MSM 工具白名单（独立）：平台/ACC 工具名列表；缺省空 = 仅 MSM 通道 */
   tools?: string[];
-  /** 轨迹纪律子集（缺省全 false = 完全独立，不参与 keeper/session/rebuild） */
-  trajectory?: {
+  /** 认知轨迹纪律子集（缺省全 false = 完全独立，不参与 keeper/session/rebuild）
+   *  🔴 2026-10-18 更名：`trajectory` → **`cognitiveTrajectory`**（与顶层同名同义）。
+   *  ⚠️ CCC 侧必须同批改（owner 令「CCC 自行处理」），否则该角色静默退化为全 false。 */
+  cognitiveTrajectory?: {
     session?: boolean;
     keeper?: boolean;
     rebuild?: boolean;
@@ -585,8 +552,8 @@ export function readSafeModeHiddenTools(root: string, paths: string[] = DEFAULT_
  * @param paths 候选配置相对路径
  * @returns 去空白后的 skill 名列表（非字符串/空白项被丢弃）
  */
-export function readTrajectorySkills(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
-  const list = loadSerenityConfig(root, paths).trajectory?.skills;
+export function readCognitiveTrajectorySkills(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): string[] {
+  const list = loadSerenityConfig(root, paths).cognitiveTrajectory?.skills;
   if (!Array.isArray(list)) return [];
   return list
     .filter((x): x is string => typeof x === 'string' && x.trim() !== '')

@@ -1,8 +1,8 @@
 /**
- * wake-scheduler.ts — trajectory 唤醒调度器（D58/D59/D60；S142 2026-09-13）
+ * wake-scheduler.ts — 认知轨迹唤醒调度器（D58/D59/D60；S142 2026-09-13）
  *
  * 一个**中心调度器**（5min tick，复用 autopilot 的节律常量），处理 CCC 唤醒注册表里
- * 到期的条目：把「未来时刻 + 一条 message」投递给目标 trajectory，**fire-and-forget**
+ * 到期的条目：把「未来时刻 + 一条 message」投递给目标认知轨迹，**fire-and-forget**
  * （无阻塞、无等待、无回执——发起方不 await，调度器不替模型结果负责）。
  *
  * 与 autopilot 的关系（D59）：**两个 tick 各自独立**。autopilot 是每 CCC 单例的
@@ -29,9 +29,9 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { findSession, sessionsRoot } from './trajectory-ops.js'
-import { listBoundSessionIds, appendBound } from './trajectory-bound.js'
-import { evaluateCro, listCroTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from './cro.js'
+import { findSession, sessionsRoot } from './cognitive-trajectory-ops.js'
+import { listBoundSessionIds, appendBound } from './cognitive-trajectory-bound.js'
+import { evaluateCro, listCroCognitiveTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from './cro.js'
 import { runningCarriersOf } from './cro-turns.js'
 import { appendCroWakeLog } from './cro-log.js'
 import { hostAgents, hostService } from './host/access.js'
@@ -164,7 +164,7 @@ export function resolveWakeTarget(root: string, target: string): WakeTarget | nu
  *
  * 历史（勿误读）：v1.34 S-1 曾把两闸解耦（周期自唤醒 `autopilotWakeEnabled` / 本钟 `wakeSchedulerEnabled`），
  * 理由是"关 auto-trajectory 不得连带关一次性唤醒"；随 ACC 侧 autopilot 于 v1.35.0 整段退场，
- * 两闸只剩本钟一座 ⇒ 现已整座移除。详见 `docs/trajectory-scheduling.md` §S-1 与 v1.44 CHANGELOG。
+ * 两闸只剩本钟一座 ⇒ 现已整座移除。详见 `docs/cognitive-trajectory-scheduling.md` §S-1 与 v1.44 CHANGELOG。
  */
 
 /**
@@ -179,15 +179,15 @@ export function resolveWakeTarget(root: string, target: string): WakeTarget | nu
  */
 /** 本钟的装配项（`ctx` 由 {@link registerWakeScheduler} 在装配点填入） */
 const clockOpts: ClockOptions<string[]> = {
-  label: 'trajectory 唤醒调度器',
+  label: '认知轨迹唤醒调度器',
   ctx: undefined,
   events: ['session/created', 'serenity/settings-changed'],
   // 🔴 无闸（2026-09-21 砍掉 `wakeSchedulerEnabled`）：**恒武装**。工厂的 `gate` 是可选能力，
   //    本钟不再使用它 ⇒ 永不因闸跳过（`lastSkipReason` 只由 tick 内的真实原因写，如"无 CCC 可扫"）。
   body: () => runWakeTick(clockOpts.ctx),
   // `countBeforeBody` 缺省 false：本钟 `ticks` = **真跑完**的 tick 数（既有语义，勿改）
-  logFrom: { prefix: '[serenity-hooks] trajectory 唤醒 ', lines: (lines) => lines },
-  startLog: () => '[serenity-hooks] ✓ trajectory 唤醒调度器启动（5min tick）',
+  logFrom: { prefix: '[serenity-hooks] 认知轨迹唤醒 ', lines: (lines) => lines },
+  startLog: () => '[serenity-hooks] ✓ 认知轨迹唤醒调度器启动（5min tick）',
 }
 const clock = createClock(clockOpts)
 
@@ -207,7 +207,7 @@ export function __resetWakeSchedulerStateForTest(): void {
  * 取目标 agent：live 优先 → 冷会话走 sessionController.resolveAgent → 标题回退。
  * @param ctx 插件上下文
  * @param root CCC 根
- * @param dirName 目标 trajectory 目录名
+ * @param dirName 目标认知轨迹目录名
  * @returns 命中返回 agent 与取得方式（how 进 lastResult，便于诊断）；未命中返回原因
  *   （原因带 `notReady` = **环境未就绪**而非投递失败，调用方**不得**据此记一次失败）
  *
@@ -258,7 +258,7 @@ async function acquireWakeAgent(
     }
   }
   return {
-    error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 container_trajectory use 激活过`,
+    error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 cognitive_trajectory use 激活过`,
     // 🆕 结构化判别符（2026-10-16，owner 令）：**不靠匹配错误文案**来分流。
     //    文案会漂（本仓已多次因"靠一句话给状态命名"翻车，见 D131），而"这条轨迹
     //    在绑定表里一条记录都没有"是一个**明确的判据结果** ⇒ 必须由产生它的地方显式标出。
@@ -269,12 +269,12 @@ async function acquireWakeAgent(
 /** 唤醒消息（唤起即投递正文：身份锚定 + 唤醒信息 + 任务） */
 export function buildWakeText(entry: WakeEntry, target: WakeTarget): string {
   return [
-    `[trajectory 唤醒] 到点（登记于 ${entry.createdAt}，发起者 ${entry.createdBy || '未知'}，id ${entry.id}）。`,
+    `[认知轨迹唤醒] 到点（登记于 ${entry.createdAt}，发起者 ${entry.createdBy || '未知'}，id ${entry.id}）。`,
     // v1.39.2（S142 §0r，所有者令「注入时除了内容再带上当前时间」）：目标据此判断"现在几点"，
     // 不必去翻系统提示或自己算——尤其是**冷载入**的目标，它的上下文里没有任何近期时间锚。
     `当前时间：${localHuman()}（当地时区）。`,
     '',
-    `身份锚定：继续 ${target.dirName} 的 trajectory（SESSION.md: ${target.mdPath}）。`,
+    `身份锚定：继续 ${target.dirName} 的认知轨迹（SESSION.md: ${target.mdPath}）。`,
     '',
     '唤醒信息：',
     entry.message,
@@ -292,7 +292,7 @@ export function buildWakeText(entry: WakeEntry, target: WakeTarget): string {
  */
 export async function deliverWake(ctx: unknown, root: string, entry: WakeEntry): Promise<WakeDeliveryResult> {
   const target = resolveWakeTarget(root, entry.target)
-  if (!target) return { ok: false, detail: `目标 trajectory 未命中（${entry.target}）` }
+  if (!target) return { ok: false, detail: `目标认知轨迹未命中（${entry.target}）` }
   const acquired = await acquireWakeAgent(ctx, root, target.dirName)
   if ('error' in acquired) return { ok: false, detail: acquired.error, notReady: acquired.notReady === true }
   try {
@@ -319,7 +319,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
   return [
     `[即时消息] 来自 ${sender || '未知轨迹'}。当前时间：${localHuman()}（当地时区）。`,
     '',
-    `身份锚定：继续 ${target.dirName} 的 trajectory（SESSION.md: ${target.mdPath}）。`,
+    `身份锚定：继续 ${target.dirName} 的认知轨迹（SESSION.md: ${target.mdPath}）。`,
     '',
     '消息：',
     message,
@@ -330,7 +330,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
 }
 
 /**
- * 即时投递（`container_trajectory send-now`）——与 `send-later`（预约）**共用取用通路**（`acquireWakeAgent`），
+ * 即时投递（`cognitive_trajectory send-now`）——与 `send-later`（预约）**共用取用通路**（`acquireWakeAgent`），
  * 区别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）：
  *   · `send-later`（原 `wake-later`）：未来时刻 + 一条 message → 落注册表 → 本文件的调度器到点投递（**fire-and-forget，无回执**）
  *   · `send-now`（原 `send-message`）：**此刻**把一条 message 递给目标 → **同步回执** → **不落注册表**
@@ -357,7 +357,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
  * 预约的本职是"到点唤起"，且在跑时排队不打断是它被实证验收过的行为，不顺手动它。
  *
  * **归属**：本函数放在调度器侧而非工具侧 —— "怎么把一句话送到一条轨迹"是**调度器的知识**，
- * 工具只该知道"有这个动作"。这样 `trajectory.ts` 完全不碰调度器内部（v1.35.0 硬约束①：
+ * 工具只该知道"有这个动作"。这样 `cognitive-trajectory.ts` 完全不碰调度器内部（v1.35.0 硬约束①：
  * `send-later` 链路**一行为不动**，本次改动 = **纯新增**）。
  *
  * @param ctx 插件上下文
@@ -367,7 +367,7 @@ export function buildSendText(target: WakeTarget, message: string, sender: strin
  * @param sender 发起者轨迹标识
  * @returns 投递结果（**同步**返回给调用方）
  */
-export async function sendToTrajectory(
+export async function sendToCognitiveTrajectory(
   ctx: unknown,
   root: string,
   target: string,
@@ -375,7 +375,7 @@ export async function sendToTrajectory(
   sender: string,
 ): Promise<WakeDeliveryResult> {
   const t = resolveWakeTarget(root, target)
-  if (!t) return { ok: false, detail: `目标 trajectory 未命中（${target}）` }
+  if (!t) return { ok: false, detail: `目标认知轨迹未命中（${target}）` }
   let acquired = await acquireWakeAgent(ctx, root, t.dirName)
   let createdNote = ''
   if ('error' in acquired) {
@@ -488,7 +488,7 @@ async function createAndBindTarget(
     return {
       error:
         `目标无活跃 dsh 会话，且 sessionController.create 不可用（绑定 id: 无）` +
-        `——无法就地创建载体；请先对该轨迹执行一次 container_trajectory use`,
+        `——无法就地创建载体；请先对该轨迹执行一次 cognitive_trajectory use`,
       notReady: true,
     }
   }
@@ -630,7 +630,7 @@ function findWorkspaceByPath<T extends { path?: string }>(workspaces: readonly T
  * （工作区注册表 ∪ 持久化会话 ∪ live 会话）：**没有 live 会话的 CCC 也会被扫到**。
  *
  * ⚠️ 边界（本步**只**改"枚举哪些 CCC"，**不改**"怎么找到要交付的 agent"）：
- * 把 message 交给某条 trajectory 仍必须靠 **live 会话**解析（见本文件
+ * 把 message 交给某条认知轨迹仍必须靠 **live 会话**解析（见本文件
  * `acquireWakeAgent`）；无 live 会话时该 CCC 只是**被扫到、
  * 无交付对象** ⇒ `deliverWake` 返回 `无绑定会话记录…`，条目回 `pending` 并留痕。
  * 因此本函数**不得**让 tick 抛错（异常一律由调用方 tick 兜住，见 `runWakeTick` 的 try）。
@@ -670,7 +670,7 @@ export function buildCroWakeText(dirName: string, mdPath: string, prompt: string
     `[CRO 唤起] ${dirName} 自带的 continuous-re-occurrence.ts 判定：现在该唤起。`,
     `当前时间：${localHuman()}（当地时区）。`,
     '',
-    `身份锚定：继续 ${dirName} 的 trajectory（SESSION.md: ${mdPath}）。`,
+    `身份锚定：继续 ${dirName} 的认知轨迹（SESSION.md: ${mdPath}）。`,
     '',
     `判定理由：${reason ?? '（程序未提供 reason —— 见 CRO 编写指南 §7 坑 3）'}`,
     '',
@@ -754,7 +754,7 @@ async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], lo
   }
   let dirs: string[]
   try {
-    dirs = listCroTrajectories(root)
+    dirs = listCroCognitiveTrajectories(root)
   } catch {
     return // 扫描失败 ⇒ 静默跳过本 tick 的 CRO（不影响既有链路）
   }
@@ -945,5 +945,5 @@ export function registerWakeScheduler(ctx: unknown): void {
   //      "无 CCC 可扫"的廉价跳过下沉到 runWakeTick 内部并写 lastSkipReason 供 acc-diag 判读。
   clockOpts.ctx = ctx
   clock.start()
-  registerDisposer(ctx, 'trajectory 唤醒调度器', () => clock.dispose())
+  registerDisposer(ctx, '认知轨迹唤醒调度器', () => clock.dispose())
 }

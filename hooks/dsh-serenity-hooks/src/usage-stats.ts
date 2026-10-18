@@ -38,7 +38,7 @@
  * | 字段 | 含义 | 喂它的地方 |
  * |---|---|---|
  * | `skill.loads` | 模型**主动**调宿主 `skill` 工具（把某 skill 的 `SKILL.md` 全文载入） | `tools/post-execute`（工具名 = `skill`） |
- * | `skill.injections` | ACC **每请求注入**的 skill 段（`trajectory.skills` / 轨迹 frontmatter 声明） | `seams/system-prompt.ts` 的 trajectory-skills section 求值回调 |
+ * | `skill.injections` | ACC **每请求注入**的 skill 段（`cognitiveTrajectory.skills` / 轨迹 frontmatter 声明） | `seams/system-prompt.ts` 的 cognitive-trajectory-skills section 求值回调 |
  * | `msm` | `msm` 工具的一次执行，按 **MSM 名**分桶 | `tools/post-execute`（工具名 = `msm`） |
  *
  * 🔴 **两者差好几个数量级**：`loads` 是模型的**动作**（稀疏），`injections` 是**请求的属性**（稠密）。

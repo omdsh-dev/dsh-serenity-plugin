@@ -1,9 +1,9 @@
 /**
  * skiff-role.ts — Skiff（F4，v1.25.0 实验性）角色层纯逻辑（零 DSH 依赖，可独立单测）
  *
- * 概念（S142 用户拍板）：Skiff = 完整宁静号 trajectory（在宁静号内全知全能）的
+ * 概念（S142 用户拍板）：Skiff = 完整宁静号 cognitive trajectory（在宁静号内全知全能）的
  * **任意子集**——CCC 通过角色配置定义：能力面（tools 非 MSM 工具白名单 + msms
- * MSM 白名单，双白名单独立，白名单外全隐藏）+ 轨迹纪律面（trajectory 子集）+
+ * MSM 白名单，双白名单独立，白名单外全隐藏）+ 轨迹纪律面（cognitive trajectory 子集）+
  * 系统提示词（CCC 完整定义，dsp 只给基础部分）。
  *
  * 实验性质：未配置任何角色 → Skiff 完全零影响（无监听、无 agent 创建、guard 无规则）。
@@ -40,10 +40,10 @@ export function readSkiffRoles(root: string, paths: string[] = DEFAULT_SERENITY_
         kind: role.kind === 'temporary' || role.kind === 'persistent' ? role.kind : undefined,
         msms: Array.isArray(role.msms) ? role.msms.filter((m): m is string => typeof m === 'string') : undefined,
         tools: Array.isArray(role.tools) ? role.tools.filter((t): t is string => typeof t === 'string') : undefined,
-        trajectory: role.trajectory && typeof role.trajectory === 'object' ? {
-          session: role.trajectory.session === true,
-          keeper: role.trajectory.keeper === true,
-          rebuild: role.trajectory.rebuild === true,
+        cognitiveTrajectory: role.cognitiveTrajectory && typeof role.cognitiveTrajectory === 'object' ? {
+          session: role.cognitiveTrajectory.session === true,
+          keeper: role.cognitiveTrajectory.keeper === true,
+          rebuild: role.cognitiveTrajectory.rebuild === true,
         } : undefined,
         systemPrompt: typeof role.systemPrompt === 'string' ? role.systemPrompt : undefined,
         systemPromptFile: typeof role.systemPromptFile === 'string' ? role.systemPromptFile : undefined,
@@ -59,17 +59,17 @@ export function readSkiffRoles(root: string, paths: string[] = DEFAULT_SERENITY_
 }
 
 /** 某角色的轨迹纪律子集（缺省全 false = 完全独立） */
-interface SkiffTrajectorySubset {
+interface SkiffCognitiveTrajectorySubset {
   session: boolean
   keeper: boolean
   rebuild: boolean
 }
 
-export function trajectorySubset(role: SkiffRoleConfig | undefined): SkiffTrajectorySubset {
+export function cognitiveTrajectorySubset(role: SkiffRoleConfig | undefined): SkiffCognitiveTrajectorySubset {
   return {
-    session: role?.trajectory?.session === true,
-    keeper: role?.trajectory?.keeper === true,
-    rebuild: role?.trajectory?.rebuild === true,
+    session: role?.cognitiveTrajectory?.session === true,
+    keeper: role?.cognitiveTrajectory?.keeper === true,
+    rebuild: role?.cognitiveTrajectory?.rebuild === true,
   }
 }
 

@@ -1,22 +1,22 @@
 /**
- * trajectory-skills-branches.test.ts — 🔴 **⑤ 第 67 件**：`src/trajectory-skills.ts` 的
+ * trajectory-skills-branches.test.ts — 🔴 **⑤ 第 67 件**：`src/cognitive-trajectory-skills.ts` 的
  * **解析未定义形态 ＋ 缩进列表终止 ＋ 四处读取失败兜底 ＋ 观测回调护栏**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（01:2x 那一跑，第 66 件之后）**成对读**（纪律 16）实测：
- * `trajectory-skills.ts` = 语句 **96.63%（230/238）**／分支 **85.5%（59/69）**／函数 10/10
+ * `cognitive-trajectory-skills.ts` = 语句 **96.63%（230/238）**／分支 **85.5%（59/69）**／函数 10/10
  * —— **`src/**` 中分支覆盖率最低且尚未做过**的文件。
  * 🔵 贴 objective：它是**轨迹技能注入面 = 与 DSH 的系统提示词衔接面**。
  * ⚠️ 成对读拦下的坑（纪律 16 第 7 次生效）：`gateway-dsh-auth.ts` 的 83.33% 是**函数列**（5/6），
  * 其**分支是 100%**；真正的低点是本文件（85.5%）⇒ 只读数值列会张冠李戴。
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯）
- * grep `trajectory-skills.js` 的 import 点 ⇒ 命中 `trajectory-skills.test.ts`（**515 行专测**）。
+ * grep `cognitive-trajectory-skills.js` 的 import 点 ⇒ 命中 `trajectory-skills.test.ts`（**515 行专测**）。
  * 逐块读过其覆盖面（**本件不重做其中任何一条**）：解析 ①②④⑤⑥ 五形态 ／ 注入装配 ／
  * 缺 skill 提示 ／ 长度截断 ／ 🔒 路径穿越 ／ section 注册门五态 ／ SEP 源码钉两枚 ＋
  * **SEP 语义孪生**（渲染输出级，含读数器自证）／ keeper 两条文案 ／ **CCC 级声明 v1.1 全套**
- * （readTrajectorySkills 三态 ／ mergeSkillNames ／ 并集装配 ／ 统一截断 ／ 注册门四态 ／ 动态注入）。
+ * （readCognitiveTrajectorySkills 三态 ／ mergeSkillNames ／ 并集装配 ／ 统一截断 ／ 注册门四态 ／ 动态注入）。
  * 🔵 ⇒ 既有覆盖面**很足**，本件只补它**结构上没碰过**的降级臂。
  *
  * ## 🔵 缺口形态（判据 = coverage 报告的 10 处 `cbranch-no`，逐条映射回源行）
@@ -93,10 +93,10 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import {
   parseDeclaredSkills,
-  buildTrajectorySkillsSection,
-  hasTrajectorySkillsDeclaration,
-  TRAJECTORY_SKILLS_MAX_CHARS,
-} from '../src/trajectory-skills.js'
+  buildCognitiveTrajectorySkillsSection,
+  hasCognitiveTrajectorySkillsDeclaration,
+  COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
+} from '../src/cognitive-trajectory-skills.js'
 
 let dir: string
 
@@ -130,7 +130,7 @@ function writeSession(root: string, md: string): string {
 
 // ── A. 解析：未定义形态与列表终止（`:102` / `:106`）──
 
-describe('trajectory-skills 退化面：解析的**未定义形态**与**缩进列表终止**', () => {
+describe('cognitive-trajectory-skills 退化面：解析的**未定义形态**与**缩进列表终止**', () => {
   it('🔴 `:102` 裸标量 `skills: a` ⇒ **视为无声明**（不得被当缩进列表继续往下吸）', () => {
     // 🔴 这是"不猜第三种形态"这条设计红线的**唯一执行点**（函数头逐字：规格 §2.1 只列了 ①②）。
     //    把 `continue` 删掉 ⇒ 本函数会继续往下扫，把**后面无关的** `- xxx` 行吸进声明。
@@ -169,37 +169,37 @@ describe('trajectory-skills 退化面：解析的**未定义形态**与**缩进�
   })
 })
 
-// ── B. `hasTrajectorySkillsDeclaration` 的读失败兜底（`:132`）──
+// ── B. `hasCognitiveTrajectorySkillsDeclaration` 的读失败兜底（`:132`）──
 
-describe('trajectory-skills 退化面：`:132` 读失败 ⇒ **响亮**（返回 true 交给装配层提示）', () => {
+describe('cognitive-trajectory-skills 退化面：`:132` 读失败 ⇒ **响亮**（返回 true 交给装配层提示）', () => {
   it('🔴 SESSION.md 路径**存在但读不动**（真 EISDIR 形态）⇒ true，且**不抛**', () => {
-    // 🔴 为何要紧：`hasTrajectorySkillsDeclaration` 是**注册门**。
+    // 🔴 为何要紧：`hasCognitiveTrajectorySkillsDeclaration` 是**注册门**。
     //    `:132` 若写成 `return false` ⇒ 该轨迹**静默丢技能**（用户看不到任何信号）——
     //    而源码注释逐字写明读失败要"交给装配层发响亮提示（不静默）"。
     // 真实故障形态：把**目录**当文件读（绑定记录指向目录、或归档时移走了文件只剩目录）
     const ghostDir = join(dir, 'AGENT_SESSIONS', 'ghost-as-dir', 'SESSION.md')
     mkdirSync(ghostDir, { recursive: true }) // 建一个**名为 SESSION.md 的目录**
-    expect(() => hasTrajectorySkillsDeclaration(dir, ghostDir), '读失败不得抛').not.toThrow()
-    expect(hasTrajectorySkillsDeclaration(dir, ghostDir), '读失败 ⇒ true（响亮，不静默丢）').toBe(true)
+    expect(() => hasCognitiveTrajectorySkillsDeclaration(dir, ghostDir), '读失败不得抛').not.toThrow()
+    expect(hasCognitiveTrajectorySkillsDeclaration(dir, ghostDir), '读失败 ⇒ true（响亮，不静默丢）').toBe(true)
   })
 
   it('🔵 正控（同夹具两个方向）：文件在**且**有声明 ⇒ true；文件在**且**无声明 ⇒ false', () => {
     const withDecl = writeSession(dir, '---\nskills: [a]\n---\n')
-    expect(hasTrajectorySkillsDeclaration(dir, withDecl)).toBe(true)
+    expect(hasCognitiveTrajectorySkillsDeclaration(dir, withDecl)).toBe(true)
     const noDecl = writeSession(dir, '# SESSION\n无 frontmatter\n')
-    expect(hasTrajectorySkillsDeclaration(dir, noDecl)).toBe(false)
+    expect(hasCognitiveTrajectorySkillsDeclaration(dir, noDecl)).toBe(false)
     // 文件根本不在 ⇒ true（既有覆盖面，此处作正控的第三方向，证明判据不是在瞎返 true）
-    expect(hasTrajectorySkillsDeclaration(dir, join(dir, 'nope', 'SESSION.md'))).toBe(true)
+    expect(hasCognitiveTrajectorySkillsDeclaration(dir, join(dir, 'nope', 'SESSION.md'))).toBe(true)
   })
 })
 
 // ── C. 装配层的读失败兜底（`:201` / `:232`）──
 
-describe('trajectory-skills 退化面：装配层 `:201`（SESSION.md 读失败）与 `:232`（skill 档读失败）', () => {
+describe('cognitive-trajectory-skills 退化面：装配层 `:201`（SESSION.md 读失败）与 `:232`（skill 档读失败）', () => {
   it('🔴 `:201` SESSION.md **存在但读不动** ⇒ notice 带 **EISDIR 原文**（可诊断），不抛', () => {
     const ghostDir = join(dir, 'AGENT_SESSIONS', 'ghost-as-dir', 'SESSION.md')
     mkdirSync(ghostDir, { recursive: true })
-    const out = buildTrajectorySkillsSection(dir, ghostDir)
+    const out = buildCognitiveTrajectorySkillsSection(dir, ghostDir)
     expect(out, '读失败必须响亮').toContain('[缺失]')
     // ⑫ 可分性：与"文件不存在"那条 notice **文案不同** —— 前者写"读取失败：<原因>"
     expect(out, '读失败须带出底层原因（否则运维无从诊断）').toContain('读取失败')
@@ -209,8 +209,8 @@ describe('trajectory-skills 退化面：装配层 `:201`（SESSION.md 读失败�
   it('🔴 `:201` 与"文件不存在"是**两条可分**的 notice（只断言含 [缺失] 无法区分它们）', () => {
     const ghostDir = join(dir, 'AGENT_SESSIONS', 'ghost-as-dir', 'SESSION.md')
     mkdirSync(ghostDir, { recursive: true })
-    const readFail = buildTrajectorySkillsSection(dir, ghostDir)
-    const absent = buildTrajectorySkillsSection(dir, join(dir, 'nope', 'SESSION.md'))
+    const readFail = buildCognitiveTrajectorySkillsSection(dir, ghostDir)
+    const absent = buildCognitiveTrajectorySkillsSection(dir, join(dir, 'nope', 'SESSION.md'))
     expect(readFail).toContain('读取失败')
     expect(absent).toContain('不存在')
     expect(absent).not.toContain('读取失败')
@@ -224,7 +224,7 @@ describe('trajectory-skills 退化面：装配层 `:201`（SESSION.md 读失败�
     //    真实形态：别的模块/中间层 `throw '字符串'`、或 Node 某些内部路径抛非 Error。
     const mdPath = writeSession(dir, '---\nskills: [a]\n---\n')
     h.throwString.add(join('AGENT_SESSIONS', '2026-09-26--S999--x')) // 真抛**字符串**（不是 Error）
-    const out = buildTrajectorySkillsSection(dir, mdPath)
+    const out = buildCognitiveTrajectorySkillsSection(dir, mdPath)
     expect(out, '非 Error 抛出物必须仍被渲染成可读文本').toContain('[缺失]')
     expect(out, '必须落到 String(err) 那一侧').toContain('读取失败：')
     expect(out, '不得出现 undefined（那是信息丢失）').not.toContain('读取失败：undefined')
@@ -236,7 +236,7 @@ describe('trajectory-skills 退化面：装配层 `:201`（SESSION.md 读失败�
     writeSkill(dir, 'bad-one', 'BAD 正文')
     const mdPath = writeSession(dir, '---\nskills: [good-one, bad-one]\n---\n')
     h.failRead.add(join('skills', 'bad-one')) // 只让 bad-one 的 SKILL.md 读失败
-    const out = buildTrajectorySkillsSection(dir, mdPath)
+    const out = buildCognitiveTrajectorySkillsSection(dir, mdPath)
     // 🔴 判据一：坏的那个**响亮**（不是静默丢、也不是把空的拼进去）
     expect(out, '读不动的 skill 必须响亮').toContain('bad-one（未找到该 skill）')
     // 🔴 判据二（**更强**）：好兄弟**不受连累** —— 逐个 skill 失败不得中断整段装配
@@ -250,7 +250,7 @@ describe('trajectory-skills 退化面：装配层 `:201`（SESSION.md 读失败�
     writeSkill(dir, 'good-one', 'GOOD 正文')
     writeSkill(dir, 'bad-one', 'BAD 正文')
     const mdPath = writeSession(dir, '---\nskills: [good-one, bad-one]\n---\n')
-    const out = buildTrajectorySkillsSection(dir, mdPath)
+    const out = buildCognitiveTrajectorySkillsSection(dir, mdPath)
     expect(out).toContain('GOOD 正文')
     expect(out).toContain('BAD 正文')
     expect(out).not.toContain('[缺失]')
@@ -259,7 +259,7 @@ describe('trajectory-skills 退化面：装配层 `:201`（SESSION.md 读失败�
 
 // ── D. 观测回调护栏（`:211`~`:217`）──
 
-describe('trajectory-skills 退化面：`:214` 观测回调抛错 ⇒ **统计失败绝不影响注入**', () => {
+describe('cognitive-trajectory-skills 退化面：`:214` 观测回调抛错 ⇒ **统计失败绝不影响注入**', () => {
   it('🔴 回调真抛 ⇒ 注入正文**逐字不变**（返回同一段文本），且不抛', () => {
     // 🔴 这是源码注释逐字承诺的唯一执行点（owner 令 2026-09-22）：
     //    "统计失败绝不影响注入正文（统计不是注入的一部分）"。
@@ -268,10 +268,10 @@ describe('trajectory-skills 退化面：`:214` 观测回调抛错 ⇒ **统计�
     const mdPath = writeSession(dir, '---\nskills: [home-rhetoric]\n---\n')
 
     // 🔵 基线：不传回调时的正文（下面要与它**逐字**比）
-    const baseline = buildTrajectorySkillsSection(dir, mdPath)
+    const baseline = buildCognitiveTrajectorySkillsSection(dir, mdPath)
 
     let calledWith: readonly string[] | null = null
-    const out = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, [], (names) => {
+    const out = buildCognitiveTrajectorySkillsSection(dir, mdPath, COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS, [], (names) => {
       calledWith = names
       throw new Error('统计后端炸了') // 真抛（不是 mock 掉 try）
     })
@@ -286,7 +286,7 @@ describe('trajectory-skills 退化面：`:214` 观测回调抛错 ⇒ **统计�
     // 源码注释逐字："放在 names.length === 0 之后 ⇒ 空 section 不计数天然成立"
     const mdPath = writeSession(dir, '# SESSION\n无 frontmatter\n')
     let calls = 0
-    const out = buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, [], () => {
+    const out = buildCognitiveTrajectorySkillsSection(dir, mdPath, COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS, [], () => {
       calls += 1
     })
     expect(out).toBe('')
@@ -299,7 +299,7 @@ describe('trajectory-skills 退化面：`:214` 观测回调抛错 ⇒ **统计�
     writeSkill(dir, 'base', 'BASE 正文')
     const mdPath = writeSession(dir, '---\nskills: [extra, base]\n---\n')
     let seen: readonly string[] = []
-    buildTrajectorySkillsSection(dir, mdPath, TRAJECTORY_SKILLS_MAX_CHARS, ['base'], (names) => {
+    buildCognitiveTrajectorySkillsSection(dir, mdPath, COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS, ['base'], (names) => {
       seen = names
     })
     expect(seen, 'CCC 级在前、同名只留一次').toEqual(['base', 'extra'])

@@ -1,5 +1,5 @@
 /**
- * rebuild.ts — 轨迹跟踪器（Trajectory Tracker）超限重建：container_trajectory rebuild
+ * rebuild.ts — 轨迹跟踪器（Cognitive Trajectory Tracker）超限重建：cognitive_trajectory rebuild
  * （v1.30 起并入 logbook 的 rebuild action，v1.33 随 logbook 并入 trajectory，v1.34 工具名硬切
  *   为 container_trajectory；原独立 session_rebuild 工具）
  *
@@ -56,10 +56,10 @@ import {
   extractSessionMdPathFromText,
   namingTitleFor,
   sessionEvents,
-} from './trajectory-ops.js'
+} from './cognitive-trajectory-ops.js'
 import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
-import { eventToken, REBUILD_TODO_FILENAME } from './trajectory-assistant.js'
-import { appendBound, readLastBound } from './trajectory-bound.js'
+import { eventToken, REBUILD_TODO_FILENAME } from './cognitive-trajectory-assistant.js'
+import { appendBound, readLastBound } from './cognitive-trajectory-bound.js'
 import { isoLocal } from './time.js'
 
 /** acknowledge 尾句（first-anchor 的确认要求——rebuild 重建后不重走确认轮，直接继续） */
@@ -102,15 +102,15 @@ export function buildRebuildAnchor(
       : null
   const focusLine = sanitizeFocusLine(focus)
   const lines = [
-    `${eventToken('rebuild')} The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the trajectory continues).`,
+    `${eventToken('rebuild')} The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the cognitive trajectory continues).`,
     '',
     ...anchorMessages.flatMap((text) => [stripAckSuffix(text), '']),
     sessionName !== '' ? `Continue the work of ${sessionName}.` : 'Continue the current work.',
     ...(sessionLine ? [sessionLine] : []),
     // v1.24.11 规范行：与 `session use` 上下文同格式（SESSION.md path:）——路径独立成行，
     // 恢复机制（parseSessionContextFromEvents）从 events 解析路径即可恢复，无需 [SESSION CONTEXT] 标记
-    `- Persistent trajectory — SESSION.md path: ${rel}`,
-    `  (the trajectory's persistent body — stays in place through rebuilds)`,
+    `- Persistent cognitive trajectory — SESSION.md path: ${rel}`,
+    `  (the cognitive trajectory's persistent body — stays in place through rebuilds)`,
     `- Read that SESSION.md first (goal/decisions/progress/unresolved), then continue from the last checkpoint.`,
     // v1.49.0 交接协议（owner 2026-09-26 裁决"**砍掉 in-flight**，这正是目的"）：读侧改指**独立便签文件**。
     // 🔴 便签**不是权威**（可被随时丢弃）——权威仍是 SESSION.md；此处刻意点明，防新我拿便签当状态真相源。
@@ -190,7 +190,7 @@ function sessionNameFromMdPath(mdPath: string): string {
  * 它会把 rebuild 静默接到 AGENT_SESSIONS 里最新的另一个会话（临时 skiff 会话 persistent=false、
  * 重启后首条消息前、新会话首条消息都命中该形态），而"接错轨迹"比重建失败危险得多
  * （错误轨迹被继续写入 + 正确轨迹静默丢失）。现在全部候选失败 → 返回 null → 调用方
- * 报错引导用户显式 `container_trajectory use`（响亮失败优于静默接错）。
+ * 报错引导用户显式 `cognitive_trajectory use`（响亮失败优于静默接错）。
  * 备选：④ 仅在"同 scope 确无绑定"时兜底——同样会接错轨迹，故不采纳。
  *
  * 每候选 resolve 后 existsSync 校验（相对路径按 root 解析）；全部失败返回 null → 调用方报错引导。
@@ -314,11 +314,11 @@ export async function queueRebuild(
     // （E↑：用户/agent 一眼知道该补哪一步，而不是拿到一个别的轨迹）。
     throw new Error(
       'Unable to determine the active SESSION.md for this session — checked (in order): ' +
-      'in-memory activation (container_trajectory use in this process), [SESSION CONTEXT] events in this conversation, ' +
+      'in-memory activation (cognitive_trajectory use in this process), [SESSION CONTEXT] events in this conversation, ' +
       'AGENT_SESSIONS/.bindings.json (authoritative binding), rebuild anchor in the surface. ' +
-      'None matched an existing SESSION.md. Run "container_trajectory use <S###> --summary <内容概括 ≤20 字>" to bind this ' +
-      'conversation to a trajectory, then retry container_trajectory rebuild. (No global fallback is applied on purpose — ' +
-      'guessing could resume a different trajectory.)',
+      'None matched an existing SESSION.md. Run "cognitive_trajectory use <S###> --summary <内容概括 ≤20 字>" to bind this ' +
+      'conversation to a cognitive trajectory, then retry cognitive_trajectory rebuild. (No global fallback is applied on purpose — ' +
+      'guessing could resume a different cognitive trajectory.)',
     )
   }
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)
@@ -487,11 +487,11 @@ export function registerRebuildTurnHook(ctx: Context): void {
         // v1.22.5 自动继续：steer 到 next-step 队列 → turn 循环 nextStep 非空不 break →
         // 模型在同轮内自动消费该指令，读取 SESSION.md 从上次进度继续（无需用户手工输入）
         agent.steer(createUserMessage({
-          content: [{ type: 'text', text: `${eventToken('rebuild')} The conversation has been cleared and rebuilt. Follow the anchor instructions above now: read the persistent trajectory (SESSION.md) and continue the work automatically from the last checkpoint.` }],
+          content: [{ type: 'text', text: `${eventToken('rebuild')} The conversation has been cleared and rebuilt. Follow the anchor instructions above now: read the persistent cognitive trajectory (SESSION.md) and continue the work automatically from the last checkpoint.` }],
           source: PLUGIN_SOURCE,
         }))
         writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'rebuilt' })
-        console.log(`[serenity-hooks] container_trajectory rebuild executed with auto-continue (turn ${payload.turn ?? '?'} ended): ${id}`)
+        console.log(`[serenity-hooks] cognitive_trajectory rebuild executed with auto-continue (turn ${payload.turn ?? '?'} ended): ${id}`)
       } else {
         // surface 空（无节点可清）——极罕见；记录诊断
         writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'empty-surface' })
@@ -501,7 +501,7 @@ export function registerRebuildTurnHook(ctx: Context): void {
       // 落盘诊断 + 保留 warn。诊断文件让 agent/用户可直接定位断点。
       const msg = String((error as Error)?.message ?? error)
       writeRebuildDiag(resolveSerenityRootFor(agent), { sessionId: id, event: 'failed', detail: msg })
-      console.warn(`[serenity-hooks] container_trajectory rebuild failed: ${msg}`)
+      console.warn(`[serenity-hooks] cognitive_trajectory rebuild failed: ${msg}`)
     }
   })
 }

@@ -7,7 +7,7 @@
  * 计分（对齐 opencode-serenity-plugin session-keeper）：
  *   write/edit=3, task=10, read/grep/glob/msm=1, 经过时间 +1 分/分钟
  * 阈值：.opencode/serenity.json sessionKeeper.threshold（规范位置，.dsh 回退；缺省 150）
- * 提醒要求模型回应 [TRAJECTORY-ASSISTANT-recorded-{code}] 确认（DCP 模式）。
+ * 提醒要求模型回应 [COGNITIVE-TRAJECTORY-ASSISTANT-recorded-{code}] 确认（DCP 模式）。
  */
 
 import type { Context } from 'cordis'
@@ -20,10 +20,10 @@ import { hostService } from '../host/access.js'
 import { loadSerenityConfig } from '../ccc.js'
 import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import { readSimpleSettings } from '../settings-section.js'
-import { skiffTrajectoryEnabled } from '../skiff-core.js'
-import { getActiveSessionInfo } from '../trajectory-ops.js'
-import { readLastBound } from '../trajectory-bound.js'
-import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, REBUILD_TODO_FILENAME } from '../trajectory-assistant.js'
+import { skiffCognitiveTrajectoryEnabled } from '../skiff-core.js'
+import { getActiveSessionInfo } from '../cognitive-trajectory-ops.js'
+import { readLastBound } from '../cognitive-trajectory-bound.js'
+import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, REBUILD_TODO_FILENAME } from '../cognitive-trajectory-assistant.js'
 import { recordToolUsage } from '../usage-stats.js'
 import { PLUGIN_SOURCE } from '../message-source.js'
 
@@ -82,7 +82,7 @@ export class KeeperTracker {
 export function reminderText(code: string): string {
   // v1.18.7：英文 + 不中断工作语气（用户要求）——无需停下，顺手回应即可
   // v1.23.0：前缀 SESSION-KEEPER → TRAJECTORY-STEWARD（用户定名：trajectory 维护机制）
-  // v0.3/v1.29：统一进 trajectory-assistant（TRAJECTORY-STEWARD → TRAJECTORY-ASSISTANT · CHECKPOINT）
+  // v0.3/v1.29：统一进 cognitive-trajectory-assistant（TRAJECTORY-STEWARD → COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT）
   // 2026-09-16（S142 所有者指令，D64）：**不再注入计分数值**。
   //   计分是 ACC 的内部账目（工具调用次数换算），LLM 拿到它既不构成可执行动作，
   //   又与"上下文消耗"同属"非必要信息"（占用注意力 ⇒ 净损耗）。
@@ -103,7 +103,7 @@ export function reminderText(code: string): string {
  * 简短留自由度（不提"加载 eap 工具"，模型自知；只说修订 skill + 新建 skill 落 SESSION）。
  *
  * escalated=true（v1.23.3）：连续多轮超阈值仍未 rebuild → 升级强制语气
- * （STOP and rebuild now，持续注入直到调用 container_trajectory rebuild）。
+ * （STOP and rebuild now，持续注入直到调用 cognitive_trajectory rebuild）。
  *
  * 需求①（S142 用户拍板，v1.28.0）：百分比比例 → K 数值——**判定**改为绝对
  * `projectedTokens ≥ thresholdK*1000`（触发语义，未变）。
@@ -116,7 +116,7 @@ export function reminderText(code: string): string {
  *
  * v1.31.1 交接协议（S142 用户需求"要求 LLM 将当前手头事项写在 SESSION.md 尾部，并要求
  * rebuild 后去读并处理"）：**写侧** = 这里；**读侧** = rebuild 锚点（rebuild.ts）。
- * 两侧共用 trajectory-assistant 的常量（单一真相源）。
+ * 两侧共用 cognitive-trajectory-assistant 的常量（单一真相源）。
  *
  * 🔴 **v1.49.0（owner 2026-09-26 裁决："砍掉 in-flight，这正是目的"）**：写侧**不再**指向
  * SESSION.md 末尾的段，改指**独立便签文件** `REBUILD-TODO_FILENAME`（轨迹目录下）——
@@ -125,14 +125,14 @@ export function reminderText(code: string): string {
 export function rebuildReminderText(escalated = false): string {
   const handover =
     ` Before rebuilding, write your current in-flight items (the exact step you are in the middle of, `
-    + `what is not finished yet, and what the next action is) into "${REBUILD_TODO_FILENAME}" in this trajectory's `
+    + `what is not finished yet, and what the next action is) into "${REBUILD_TODO_FILENAME}" in this cognitive trajectory's `
     + `directory — create it if it does not exist. That file is a scratch note for the handover only: `
     + `no format obligation, no archival duty, safe to discard at any time. The rebuilt conversation reads it first `
     + `and continues from it.`
   if (escalated) {
-    return `${eventToken('limitMandatory')} Context usage has reached the configured rebuild threshold — you have been reminded repeatedly and have NOT called the container_trajectory rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call container_trajectory rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild).${handover} The conversation will be cleared and rebuilt in place; SESSION.md is the persistent trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call container_trajectory rebuild.`
+    return `${eventToken('limitMandatory')} Context usage has reached the configured rebuild threshold — you have been reminded repeatedly and have NOT called the cognitive_trajectory rebuild action. This is now mandatory: STOP at the current task step, preserve valuable cognition into the CCC skills (or write a new-skill proposal into SESSION.md), then call cognitive_trajectory rebuild immediately, passing --summary "<content summary ≤20 chars>" (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild).${handover} The conversation will be cleared and rebuilt in place; SESSION.md is the persistent cognitive trajectory and stays in place — identity continues from it. Do not continue working without rebuilding; this reminder persists until you call cognitive_trajectory rebuild.`
   }
-  return `${eventToken('limit')} Context usage has reached the configured rebuild threshold. This session is the rebuildable carrier of the trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself.${handover} ACT NOW: at the next natural pause (end of the current task step), call the container_trajectory rebuild action — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
+  return `${eventToken('limit')} Context usage has reached the configured rebuild threshold. This session is the rebuildable carrier of the cognitive trajectory: SESSION.md is the persistent body, this conversation is only a temporary work copy. Before rebuilding: if this conversation produced valuable cognition, revise the relevant existing skill of this CCC (structure it with eap); if a new skill is warranted, write a short proposal into SESSION.md for the user to review — do not create it yourself.${handover} ACT NOW: at the next natural pause (end of the current task step), call the cognitive_trajectory rebuild action — passing --summary "<content summary ≤20 chars>" describing the next work phase (required; the dsh session title is renamed to S###-YYYY-MM-DD-<summary> after rebuild) — to clear and rebuild this conversation: the current copy is discarded, identity continues from SESSION.md. If you are in the middle of an unbreakable step, continue it, then rebuild at its end. Do not ignore this; rebuild is the expected action, not an option.`
 }
 
 /** 读取会话 contextPressure 投影（sessionProjections 可选服务；未装配返回 null） */
@@ -208,7 +208,7 @@ export function __resetLogbookCompactionForTest(): void {
  * 解析**活跃** SESSION.md 绝对路径（缓存 60s）。
  *
  * 候选链（刻意比 rebuild 的完整链短——这里每个工具调用都要跑，贵候选不划算）：
- * ① `getActiveSessionInfo(scope).mdPath`（`container_trajectory use` / skiff 绑定 / 重启恢复都会写）
+ * ① `getActiveSessionInfo(scope).mdPath`（`cognitive_trajectory use` / skiff 绑定 / 重启恢复都会写）
  * ② `readLastBound(session).mdPath`（`.bindings.json` 权威绑定——重启后内存空时兜底）
  * 两者都拿不到 → null（**不猜**：宁可不提醒，也不去猜别的轨迹——对齐 v1.30.13 D4 的教训）。
  */
@@ -281,7 +281,7 @@ export function readSessionMdMaxKB(root: string, configPaths?: string[], now: ()
  * ③ 允许整合不重要事项（被取代的决策 / 已解决问题 / 中间态）
  * ④ 自主裁量权充分允许（唯一硬要求 = 骨架 + 未决项/决策理由/下一步仍可重建）
  */
-export function trajectoryCompactionReminderText(input: {
+export function cognitiveTrajectoryCompactionReminderText(input: {
   sizeKB: number
   limitKB: number
   mdPath: string
@@ -297,15 +297,15 @@ export function trajectoryCompactionReminderText(input: {
     + '(3) merge or drop what no longer matters — superseded decisions, resolved issues, intermediate states; '
     + '(4) you have full discretion on how far to go: the only hard requirements are the skeleton and that every '
     + 'still-open item, decision rationale and next step stays recoverable (reconstruction over preservation).'
-  // v1.34.1 护栏（规格 docs/trajectory-skill-injection.md §4）：compaction 是**唯一会重写 SESSION.md** 的时刻，
+  // v1.34.1 护栏（规格 docs/cognitive-trajectory-skill-injection.md §4）：compaction 是**唯一会重写 SESSION.md** 的时刻，
   // 也正因此是 frontmatter（轨迹 skill 声明的唯一真相源）最可能被抹掉的时刻——在提醒里点名它。
   // 残余风险（记录在案）：护栏是**文案级**，不是机械强制；文案只此一处，两条提醒共用（防两处漂移）。
   const frontmatterGuard =
-    'Keep the YAML frontmatter at the top of the file exactly as it is — it carries this trajectory\'s skill declarations.'
+    'Keep the YAML frontmatter at the top of the file exactly as it is — it carries this cognitive trajectory\'s skill declarations.'
   if (escalated) {
     return `${eventToken('compaction')} ${facts} — you have been reminded repeatedly and have NOT compacted SESSION.md. This is now mandatory: STOP the current task step, load eap (praxis eap), rewrite SESSION.md, then resume. ${principles} ${frontmatterGuard} This reminder persists until the file is under the limit.`
   }
-  return `${eventToken('compaction')} ${facts}. Pause the current work and compact this trajectory's log (SESSION.md) before continuing — that log is the persistent body of this trajectory, and its size is operational entropy (H_op) the container pays on every read. ${principles} ${frontmatterGuard} After rewriting, resume the paused work; this reminder stops once the file is under the limit.`
+  return `${eventToken('compaction')} ${facts}. Pause the current work and compact this cognitive trajectory's log (SESSION.md) before continuing — that log is the persistent body of this cognitive trajectory, and its size is operational entropy (H_op) the container pays on every read. ${principles} ${frontmatterGuard} After rewriting, resume the paused work; this reminder stops once the file is under the limit.`
 }
 
 // ── REBUILD-TODO.md（交界便签）体积超限 → 清理提醒（v1.49.0，owner 2026-09-26 需求）──
@@ -349,7 +349,7 @@ export function __resetRebuildTodoForTest(): void {
  *
  * ## 与 SESSION.md 档的**语义差别**（刻意，不是疏漏）
  *
- * | | SESSION.md 超限（`trajectoryCompactionReminderText`） | 便签超限（本条） |
+ * | | SESSION.md 超限（`cognitiveTrajectoryCompactionReminderText`） | 便签超限（本条） |
  * |---|---|---|
  * | 动作 | **重写**（compaction） | **清理／丢弃**（prune） |
  * | 结构义务 | 保 EAP 骨架 ＋ 4 条重写原则 ＋ frontmatter 护栏 | **无** |
@@ -377,7 +377,7 @@ export function rebuildTodoReminderText(input: {
     `This file is a scratch note for the rebuild handover — it carries no archival duty and you may discard it `
     + `wholesale at any time. Prune it now, writing in the spirit of eap (praxis eap): `
     + `(1) delete what is already done; (2) delete what has been superseded; `
-    + `(3) delete what is already recorded in SESSION.md — that file is the trajectory's persistent body, `
+    + `(3) delete what is already recorded in SESSION.md — that file is the cognitive trajectory's persistent body, `
     + `this one only carries what the next self needs once. Do not restructure it into a formal document: `
     + `the only mechanical constraint on this file is its size.`
   if (escalated) {
@@ -431,7 +431,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
   // observe-and-enrich：先 next() 委托，再折叠提醒（block 决策也附加 context）。
   // v1.22.1 重构：**两个独立机制**——（🔴 **2026-09-22 起本缝为三个**，见 ③）
   // ① SESSION-KEEPER 计分提醒（DCP 确认码，阈值 150 缺省）
-  // ② 轨迹跟踪器（Trajectory Tracker）上下文压力检测：每次工具调用后独立检查
+  // ② 轨迹跟踪器（Cognitive Trajectory Tracker）上下文压力检测：每次工具调用后独立检查
   //    contextPressure 投影，超 rebuildThresholdK（K 数值）追加 rebuild 提示——**不依赖计分达标**
   //    （此前嵌套在 shouldRemind 内 + inject 缺 sessionProjections → 永不触发）。
   // ③ 🆕 **用量统计**（owner 令 2026-09-22）= **纯观测**：把 `skill` / `msm` 两类调用记一笔到
@@ -443,11 +443,11 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const cwd = (exec as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd ?? process.cwd()
     const root = cccRootForCwd(cwd)
     if (!root) return next()
-    // F4 Skiff 旁路（F4b ⑩）：计分提醒按角色 trajectory.keeper、重建压力检测按
-    // trajectory.rebuild 决定参与（默认全关 = Skiff 完全独立）；非 skiff 恒参与。
+    // F4 Skiff 旁路（F4b ⑩）：计分提醒按角色 cognitiveTrajectory.keeper、重建压力检测按
+    // cognitiveTrajectory.rebuild 决定参与（默认全关 = Skiff 完全独立）；非 skiff 恒参与。
     const sessionId = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id
-    const skiffKeeper = skiffTrajectoryEnabled(root, sessionId, 'keeper')
-    const skiffRebuild = skiffTrajectoryEnabled(root, sessionId, 'rebuild')
+    const skiffKeeper = skiffCognitiveTrajectoryEnabled(root, sessionId, 'keeper')
+    const skiffRebuild = skiffCognitiveTrajectoryEnabled(root, sessionId, 'rebuild')
     const tracker = trackerFor(exec)
     const shouldRemind = skiffKeeper ? tracker.step(exec.name) : false
     const downstream = await next()
@@ -473,7 +473,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // ② 轨迹跟踪器：上下文压力检测（独立——每次工具调用后都查，不依赖计分）
     // v1.23.3 用户拍板：**不做节流，催就行了**——每次超阈值都注入（每轮都催）；
     // 连续超阈值 REBUILD_ESCALATE_AFTER 轮仍未 rebuild → 升级 [TRAJECTORY-ESCALATED]
-    // 强制语气，此后持续升级催（不重置，直到 agent 调用 container_trajectory rebuild 压力自然回落）。
+    // 强制语气，此后持续升级催（不重置，直到 agent 调用 cognitive_trajectory rebuild 压力自然回落）。
     // 需求①（S142 用户拍板）：判定从窗口比例改为绝对 K——projectedTokens ≥ thresholdK*1000
     // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
     // 🔴 2026-09-16（S142 所有者指令，D64）：**判定照旧读 K，但注入文本不再带数值**
@@ -498,8 +498,8 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
 
     // ③ SESSION.md 体积检查（v1.31.1，S142 用户需求）：活跃轨迹工作台超限 → 提示暂停重写。
     // 独立于①②（与上下文压力无关——rebuild 只换载体，不会让 SESSION.md 变小）。
-    // 门控按角色 trajectory.session（工作台参与项），非 skiff 会话恒参与。
-    if (skiffTrajectoryEnabled(root, sessionId, 'session')) {
+    // 门控按角色 cognitiveTrajectory.session（工作台参与项），非 skiff 会话恒参与。
+    if (skiffCognitiveTrajectoryEnabled(root, sessionId, 'session')) {
       const limitKB = readSessionMdMaxKB(root, opts.configPaths)
       if (limitKB > 0) {
         const scope = sessionId ?? 'global'
@@ -511,7 +511,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
           st.consecutive += 1
           blocks.push({
             type: 'text',
-            text: trajectoryCompactionReminderText({
+            text: cognitiveTrajectoryCompactionReminderText({
               sizeKB: Math.round(size / 1024),
               limitKB,
               mdPath,
@@ -531,7 +531,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // ③ 要求"重写 SESSION.md 并保 EAP 骨架"，④ 只要求"**清理便签**"（可整份丢弃、不阻断工作）。
     // 🔴 **文件不存在 ⇒ 零成本**（`readFileSize` 返回 null ⇒ 直接清零；**不自动创建**——空文件本身即熵）。
     // 🔴 ACC 只提醒，**不做任何写／删／归档**（owner：*"清空我们就不干涉了，只管最大量"*）。
-    if (skiffTrajectoryEnabled(root, sessionId, 'session')) {
+    if (skiffCognitiveTrajectoryEnabled(root, sessionId, 'session')) {
       const scope = sessionId ?? 'global'
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       const mdPath = resolveActiveSessionMdPath(root, scope, session)

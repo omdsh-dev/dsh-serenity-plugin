@@ -48,7 +48,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
 import { resolveInside } from './ccc.js'
-import { sessionsRoot } from './trajectory-ops.js'
+import { sessionsRoot } from './cognitive-trajectory-ops.js'
 import { isoLocal } from './time.js'
 
 /** 入口文件名（**全写**，所有者令 2026-09-19；不改缩写） */
@@ -72,7 +72,7 @@ const CRO_STDOUT_MAX = 64 * 1024
 /** 绑定文件体积上限（它只是个机器名 ⇒ 超过这个数一定是写错了，不读） */
 const CRO_HOST_FILE_MAX = 1_024
 
-/** SESSION.md 文件名（与 `trajectory-ops.ts` 同值；此处本地常量避免反向依赖） */
+/** SESSION.md 文件名（与 `cognitive-trajectory-ops.ts` 同值；此处本地常量避免反向依赖） */
 const SESSION_MD = 'SESSION.md'
 
 // ── 输入快照（设计 §3）──
@@ -472,7 +472,7 @@ export function parseCroHostBinding(raw: string): string | null {
  * @param root CCC 根
  * @returns 启用了 CRO 的轨迹目录名（**排序后**，保证同 tick 顺序稳定、便于日志比对）
  */
-export function listCroTrajectories(root: string): string[] {
+export function listCroCognitiveTrajectories(root: string): string[] {
   const rootDir = sessionsRoot(root)
   let entries: Dirent[]
   try {

@@ -5,7 +5,7 @@
  * 页 Skiff 区块开关，不随插件加载自动启动）。
  *
  * - GET  /        → 问答 HTML 页（**CCC 选择器** + 角色下拉 + 输入框 + 答案区 + 轨迹区 + WebUI 链接）
- * - POST /ask     → {ccc?, role, question} → 走会话核心（skiff-core）→ {answer, sessionId, trajectory}
+ * - POST /ask     → {ccc?, role, question} → 走会话核心（skiff-core）→ {answer, sessionId, cognitiveTrajectory}
  *
  * **多 CCC 手工切换（v1.25.4，S142 用户）**：dsh 管理多个 CCC 时，调试页顶部 CCC
  * 下拉列出全部候选（live 会话 cwd 上溯 .serenity 去重 + 默认绑定 root 兜底），
@@ -24,7 +24,7 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { marked } from 'marked'
 import { readSkiffRoles } from './skiff-role.js'
-import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffTrajectoryEntry } from './skiff-core.js'
+import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffCognitiveTrajectoryEntry } from './skiff-core.js'
 import { readCheapWorkerConfig } from './ccc.js'
 // C2（CCC 发现面归一）：候选 CCC 枚举的**唯一真相源**是 ccc-roots.ts；
 // 本模块的 `discoverCccs` 已删除（调用点改用 `listCccs`，见各 handle 分支）。
@@ -128,7 +128,7 @@ export function skiffDebugPage(cccs: CccEntry[], defaultRoot: string, webPort: n
   details.think summary { cursor: pointer; padding: 6px 10px; font-size: 12px; color: #d29922; font-weight: 600; user-select: none; list-style-position: inside; }
   details.think summary:hover { opacity: .8; }
   details.think .think-body { padding: 2px 12px 10px; font-size: 13px; opacity: .78; white-space: normal; }
-  #trajectory { margin-top: 12px; font-size: 13px; }
+  #cognitiveTrajectory { margin-top: 12px; font-size: 13px; }
   .t-entry { border-left: 2px solid #d0d7de; padding: 6px 10px; margin: 6px 0; border-radius: 0 6px 6px 0; background: rgba(127,127,127,.06); white-space: pre-wrap; word-break: break-word; }
   .t-user { border-left-color: #0ba875; }
   .t-tool { border-left-color: #d29922; opacity: .85; font-family: ui-monospace, monospace; font-size: 12px; }
@@ -155,7 +155,7 @@ export function skiffDebugPage(cccs: CccEntry[], defaultRoot: string, webPort: n
   <textarea id="q" placeholder="向该角色提问…（追问直接继续输入）"></textarea>
   <button id="ask">提问</button>
   <div id="answer" class="muted">等待提问…</div>
-  <div id="trajectory"></div>
+  <div id="cognitiveTrajectory"></div>
   <p class="muted"><a href="${webUrl}" target="_blank" rel="noopener">在 dsh WebUI 查看完整会话</a>（会话列表搜索 sessionId；WebUI 有完整交互）</p>
 </main>
 <script id="skiff-data" type="application/json" data-default="${escapeHtml(defaultRoot)}">${data}</script>
@@ -169,7 +169,7 @@ const sessionBadge = document.getElementById('sessionBadge')
 const newChatBtn = document.getElementById('newChat')
 const btn = document.getElementById('ask')
 const answer = document.getElementById('answer')
-const traj = document.getElementById('trajectory')
+const traj = document.getElementById('cognitiveTrajectory')
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
 let sessionId = ''
 function shortId(id) { return id.length > 24 ? id.slice(0, 18) + '…' + id.slice(-6) : id }
@@ -230,7 +230,7 @@ btn.addEventListener('click', async () => {
     answer.innerHTML = data.answer_html || esc(data.answer || '') || '（空回答）'
     sessionId = data.sessionId || sessionId
     renderSessionBadge()
-    renderTrajectory(data.trajectory || [], data.sessionId || '')
+    renderCognitiveTrajectory(data.cognitiveTrajectory || [], data.sessionId || '')
   } catch (err) {
     answer.className = 'err'
     answer.textContent = String(err.message || err)
@@ -238,7 +238,7 @@ btn.addEventListener('click', async () => {
     btn.disabled = false
   }
 })
-function renderTrajectory(entries, sessionId) {
+function renderCognitiveTrajectory(entries, sessionId) {
   if (entries.length === 0) { traj.innerHTML = '<div class="muted">（本轮无轨迹）</div>'; return }
   traj.innerHTML = '<div class="sub">本轮轨迹 · ' + esc(sessionId) + '</div>' + entries.map((e) => {
     const cls = e.role === 'user' ? 't-user' : (e.role === 'tool' ? 't-tool' : '')
@@ -499,7 +499,7 @@ async function handle(
         answer_html: renderSkiffMarkdown(result.answer),
         sessionId: result.sessionId,
         continued,
-        trajectory: result.trajectory,
+        cognitiveTrajectory: result.cognitiveTrajectory,
       })
       return
     }

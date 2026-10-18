@@ -399,7 +399,7 @@ CRO 程序放**轨迹自己的目录** ⇒ 这是**逐轨迹**的知识，而管
 `src/trajectory-ops.ts`（动作集合）｜`src/tools/trajectory.ts`（dispatch + 描述）｜
 `src/seams/system-prompt.ts`（注入清单）｜`src/msm-ops.ts`（ACC catalog）｜
 `src/templates/acc-session/SKILL.md` 与 `src/templates/acc-serenity/SKILL.md`（**随包分发、进 agent 上下文**，
-属契约面——先例见 `docs/trajectory-send-message-design.md:222`）。
+属契约面——先例见 `docs/cognitive-trajectory-send-message-design.md:222`）。
 
 ### §12-3 ⛔ 仍未实现的两项（**明说，不留悬念**）
 

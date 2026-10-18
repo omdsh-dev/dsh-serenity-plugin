@@ -32,7 +32,7 @@ import {
   rebuildReminderText,
   readContextPressure,
   registerKeeper,
-  trajectoryCompactionReminderText,
+  cognitiveTrajectoryCompactionReminderText,
   readSessionMdMaxKB,
   readFileSize,
   resolveActiveSessionMdPath,
@@ -47,7 +47,7 @@ import {
   __resetRebuildTodoForTest,
 } from '../src/seams/keeper.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-core.js'
-import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/trajectory-ops.js'
+import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/cognitive-trajectory-ops.js'
 
 describe('keeper: 纯跟踪器', () => {
   it('计分表：write=3, task=10, read=1', () => {
@@ -80,9 +80,9 @@ describe('keeper: 纯跟踪器', () => {
     expect(t.step('read')).toBe(true) // 4+2+1 = 7 ≥ 5
   })
 
-  it('reminderText 含确认码（trajectory-assistant checkpoint 前缀）', () => {
-    expect(reminderText('K1')).toContain('[TRAJECTORY-ASSISTANT-recorded-K1]')
-    expect(reminderText('K1')).toContain('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
+  it('reminderText 含确认码（cognitive-trajectory-assistant checkpoint 前缀）', () => {
+    expect(reminderText('K1')).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT-recorded-K1]')
+    expect(reminderText('K1')).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT]')
     expect(reminderText('K1')).not.toContain('SESSION-KEEPER')
     expect(reminderText('K1')).not.toContain('[TRAJECTORY-STEWARD]')
   })
@@ -100,21 +100,21 @@ describe('keeper: 纯跟踪器', () => {
     expect(text).not.toContain('(150)')
     expect(text).not.toContain('reached (')
     // 确认协议不受影响（必须仍然可用——它是正常工作的前提）
-    expect(text).toContain('[TRAJECTORY-ASSISTANT · CHECKPOINT]')
-    expect(text).toContain('[TRAJECTORY-ASSISTANT-recorded-K1]')
+    expect(text).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT]')
+    expect(text).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT-recorded-K1]')
   })
 })
 
-describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () => {
+describe('轨迹跟踪器（Cognitive Trajectory Tracker）— v1.22.1 概念命名', () => {
   it('rebuildReminderText：SESSION.md=持久轨迹，会话=临时可重建工作副本（D64：注入不带数值）', () => {
     // 需求①（v1.28.0）曾把**判定**从比例改为绝对 K，并顺带让文案显示 K 数值；
     // 2026-09-16 所有者指令（D64）撤销"文案显示"这一半：**判定照旧读 K，注入文本不带数值**。
     const text = rebuildReminderText()
-    expect(text).toContain('[TRAJECTORY-ASSISTANT · LIMIT]')
+    expect(text).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · LIMIT]')
     expect(text).toContain('persistent body')
     expect(text).toContain('rebuildable carrier')
     expect(text).toContain('ACT NOW')
-    expect(text).toContain('container_trajectory rebuild')
+    expect(text).toContain('cognitive_trajectory rebuild')
     expect(text).toContain('not an option')
     // 🔴 D64 钉子：不得出现上下文消耗 / 阈值**数值**（旧文案 = `Context usage at 412K (threshold 400K)`）
     //    （"threshold" 一词本身不算违规——见上方 reminderText 用例的判据边界说明）
@@ -126,7 +126,7 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
     expect(text).toContain('write a short proposal into SESSION.md')
     expect(text).toContain('do not create it yourself')
     // v1.28.0 需求②（P0-1 审计补断言）：文案必须指导带 --summary（重建后标题重命名）——
-    // 若删指引，模型裸调 container_trajectory rebuild 会被 summary 必填拒绝（2026-09-05 rebuild bug 教训）
+    // 若删指引，模型裸调 cognitive_trajectory rebuild 会被 summary 必填拒绝（2026-09-05 rebuild bug 教训）
     expect(text).toContain('--summary')
     expect(text).toContain('≤20 chars')
     expect(text).toContain('renamed to S###-YYYY-MM-DD-<summary>')
@@ -146,13 +146,13 @@ describe('轨迹跟踪器（Trajectory Tracker）— v1.22.1 概念命名', () =
 
   it('rebuildReminderText 升级语气（escalated=true，D64：同样不带数值）', () => {
     const text = rebuildReminderText(true)
-    expect(text).toContain('[TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]')
+    expect(text).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · LIMIT · MANDATORY]')
     expect(text).not.toContain('460K')
     expect(text).not.toContain('(threshold')
     expect(text).toContain('mandatory')
     expect(text).toContain('STOP')
-    expect(text).toContain('container_trajectory rebuild')
-    expect(text).toContain('persists until you call container_trajectory rebuild')
+    expect(text).toContain('cognitive_trajectory rebuild')
+    expect(text).toContain('persists until you call cognitive_trajectory rebuild')
     // v1.24.12：升级版同样带紧凑沉淀指令（修订 skill / 新建 skill 提案进 SESSION）
     expect(text).toContain('preserve valuable cognition')
     expect(text).toContain('new-skill proposal into SESSION.md')
@@ -240,7 +240,7 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
     const texts = await fire()
     expect(texts).toHaveLength(1)
     const t = texts[0]!
-    expect(t).toContain('[TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION]')
+    expect(t).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION]')
     expect(t).toContain('2 KB')
     expect(t).toContain('limit 1 KB')
     expect(t).toContain('SESSION.md')
@@ -285,7 +285,7 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
     expect(await fire()).toHaveLength(0)
   })
 
-  it('skiff 会话（trajectory.session 关）→ 不提醒（角色子集控权）', async () => {
+  it('skiff 会话（cognitiveTrajectory.session 关）→ 不提醒（角色子集控权）', async () => {
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
       JSON.stringify({ sessionKeeper: { threshold: 99999, sessionMdMaxKB: 1 }, skiff: { roles: { quiet: { msms: [] } } } }),
@@ -304,15 +304,15 @@ describe('keeper: LOGBOOK COMPACTION 纯逻辑', () => {
   afterEach(() => { __resetLogbookCompactionForTest() })
 
   it('提醒文案：非升级版含行动指令 + 4 条原则；升级版含 mandatory/STOP', () => {
-    const base = trajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md' })
-    expect(base).toContain('[TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION]')
+    const base = cognitiveTrajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md' })
+    expect(base).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION]')
     expect(base).toContain('285 KB')
     expect(base).toContain('limit 100 KB')
     expect(base).toContain('/ccc/SESSION.md')
     expect(base).toContain('Pause the current work')
     expect(base).toContain('H_op')
     expect(base).toContain('resume the paused work')
-    const esc = trajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md', escalated: true })
+    const esc = cognitiveTrajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md', escalated: true })
     expect(esc).toContain('mandatory')
     expect(esc).toContain('STOP')
     expect(esc).toContain('persists until the file is under the limit')
@@ -437,7 +437,7 @@ describe('keeper: REBUILD-TODO 交界便签体积超限（v1.49.0，owner 2026-0
   it('提醒文案：独立 token + 事实三件套 + 三条清理建议 + 整份丢弃授权 + 参照 eap', () => {
     const base = rebuildTodoReminderText({ sizeKB: 14, limitKB: 10, mdPath: '/ccc/AGENT_SESSIONS/S1/REBUILD-TODO.md' })
     // 🔴 与 SESSION.md 档**分开的 token**——共用会让模型误以为要动 SESSION.md
-    expect(base).toContain('[TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
+    expect(base).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
     expect(base).not.toContain('LOGBOOK COMPACTION')
     expect(base).toContain('REBUILD-TODO.md is 14 KB (limit 10 KB)')
     expect(base).toContain('/ccc/AGENT_SESSIONS/S1/REBUILD-TODO.md')
@@ -457,7 +457,7 @@ describe('keeper: REBUILD-TODO 交界便签体积超限（v1.49.0，owner 2026-0
 
   it('升级版：语气加重，但动作仍只是清理、不阻断工作（与 SESSION.md 档的强制语义区分）', () => {
     const esc = rebuildTodoReminderText({ sizeKB: 14, limitKB: 10, mdPath: '/p/REBUILD-TODO.md', escalated: true })
-    expect(esc).toContain('[TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
+    expect(esc).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
     expect(esc).toContain('reminded repeatedly')
     expect(esc).toContain('persists until the file is under the limit')
     // 🔴 与 compaction 档的差别：**不得**出现强制重写语义
@@ -475,7 +475,7 @@ describe('keeper: REBUILD-TODO 交界便签体积超限（v1.49.0，owner 2026-0
     writeFileSync(todoPath, 'x'.repeat(11 * 1024))
     const texts = await fire()
     expect(texts).toHaveLength(1)
-    expect(texts[0]).toContain('[TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
+    expect(texts[0]).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · SCRATCH PRUNE]')
     expect(texts[0]).toContain('REBUILD-TODO.md is 11 KB (limit 10 KB)')
     expect(rebuildTodoStateSnapshot().get(SCOPE)?.consecutive).toBe(1)
     expect(await fire()).toHaveLength(1)
@@ -520,7 +520,7 @@ describe('keeper: Skiff 轨迹纪律子集旁路（F4b ⑩）', () => {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ sessionKeeper: { threshold: 1 }, skiff: { roles: { qa: { msms: ['x'] }, tracked: { msms: ['y'], trajectory: { keeper: true } } } } }),
+      JSON.stringify({ sessionKeeper: { threshold: 1 }, skiff: { roles: { qa: { msms: ['x'] }, tracked: { msms: ['y'], cognitiveTrajectory: { keeper: true } } } } }),
     )
     handler = null
     const fakeCtx = {

@@ -43,7 +43,7 @@ describe('skiff 角色逻辑（skiff-admin.ts——v1.30 起归 container_admin 
     expect(SKIFF_GUIDE).toContain('任意子集角色')
     expect(SKIFF_GUIDE).toContain('"msms"')
     expect(SKIFF_GUIDE).toContain('"tools"')
-    expect(SKIFF_GUIDE).toContain('"trajectory"')
+    expect(SKIFF_GUIDE).toContain('"cognitiveTrajectory"')
     expect(SKIFF_GUIDE).toContain('"systemPrompt"')
     expect(SKIFF_GUIDE).toContain('register/deregister 必拒')
     expect(SKIFF_GUIDE).toContain('SERENITY_ROOT')
@@ -143,7 +143,7 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: listSki
       skiff: {
         roles: {
           'qa-readonly': { msms: ['cognitive-qa'], tools: [] },
-          review: { msms: ['review-scan'], tools: ['read', 'grep'], trajectory: { keeper: true }, systemPrompt: 'p' },
+          review: { msms: ['review-scan'], tools: ['read', 'grep'], cognitiveTrajectory: { keeper: true }, systemPrompt: 'p' },
         },
       },
     })
@@ -153,11 +153,11 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: listSki
     expect(qa.model).toBe('(cheap-worker default)')
     expect(qa.msms).toEqual(['cognitive-qa'])
     expect(qa.tools).toEqual([])
-    expect((qa.trajectory as Record<string, boolean>).keeper).toBe(false)
+    expect((qa.cognitiveTrajectory as Record<string, boolean>).keeper).toBe(false)
     expect(qa.promptSource).toBe('none')
     const review = r.roles.find((x) => x.name === 'review')!
     expect(review.tools).toEqual(['read', 'grep'])
-    expect((review.trajectory as Record<string, boolean>).keeper).toBe(true)
+    expect((review.cognitiveTrajectory as Record<string, boolean>).keeper).toBe(true)
     expect(review.promptSource).toBe('inline')
   })
 

@@ -81,7 +81,7 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
     expect(block).toContain(`CCC: sp-`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     // 需求③：身份块不再内嵌工具清单
-    for (const tool of ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
       expect(block).not.toMatch(new RegExp(`^  ${tool} `, 'm'))
     }
     // EAP 优化 #2：说明平台工具仍可用（关系方向明确）
@@ -96,10 +96,10 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
     expect(block).toContain('call msm() with no arguments to list them')
   })
 
-  it('toolsBlock：9 工具清单 + msm 单入口示例（v1.33：logbook 并入 trajectory，im-bridge 条件可见不入块）', () => {
+  it('toolsBlock：9 工具清单 + msm 单入口示例（v1.33：logbook 并入 cognitive trajectory，im-bridge 条件可见不入块）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['container_fs', 'container_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
       expect(block).toContain(tool)
     }
     // msm 单入口调用（替代旧 3 步协议：list 发现 / --schema 查用法 / exec 执行）
@@ -457,7 +457,7 @@ describe('v1.23.1 persona 彩蛋（装配替换，SERENITY_HOOKS_CONFIG 注入�
     expect(text).not.toContain('Determinism first')
     // 安全硬约束永远保留：本体论 / 关系段 / 操作边界 / CCE
     expect(text).toContain('Why a cognitive container')
-    expect(text).toContain('The session-trajectory relation')
+    expect(text).toContain('The session–cognitive-trajectory relation')
     expect(text).toContain('Operational boundaries:')
     expect(text).toContain('File access')
     expect(text).toContain('=== Serenity CCE ===')

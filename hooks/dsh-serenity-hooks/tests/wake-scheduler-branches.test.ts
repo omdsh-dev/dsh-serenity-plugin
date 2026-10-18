@@ -16,7 +16,7 @@
  * 未覆盖的分支**全部落在两类**上，而既有 `wake-registry.test.ts` 虽大（1042 行、覆盖
  * 注册表与投递主干），**这两类都不是它的对象**：
  *
- *  **(甲) 即时投递的「空闲分支」**（`:1780`）：既有用例测 `sendToTrajectory` 时，
+ *  **(甲) 即时投递的「空闲分支」**（`:1780`）：既有用例测 `sendToCognitiveTrajectory` 时，
  *        `agent` 是**没有 `status` 字段**的普通对象 ⇒ `status === 'idle'` **恒 false**
  *        ⇒ 代码**永远走 `steer` 路径**。⇒ 🔴 也就是说：
  *        **`send-now` 投给一个「空闲」目标**（宿主 `agent.status === 'idle'`）这条**正常路径**
@@ -39,7 +39,7 @@
  *     A5 :1713 / :1665 `sender` / `createdBy` 为**空串** ⇒ 回退文案（`||` 真侧）
  *   B 类（容错兜底 —— 本件主靶）
  *     B1 :1934 `croEnabled === false` ⇒ 记一行 & 本阶段 return（**既有链路不受影响**）
- *     B2 :1941 `listCroTrajectories` 抛 ⇒ **静默跳过 CRO**，但既有投递照常
+ *     B2 :1941 `listCroCognitiveTrajectories` 抛 ⇒ **静默跳过 CRO**，但既有投递照常
  *     B3 :1987 CRO 流水写入失败 ⇒ 只记一行，**不影响投递结论**
  *     B4 :1998 单条轨迹 CRO 内部异常 ⇒ 计入 skips，**同 tick 其它轨迹不受连累**
  *     B5 :2022 存量清理真清到东西 ⇒ 记「存量首清」一行
@@ -69,7 +69,7 @@ import { join } from 'node:path'
 // 用 importActual 保留真实实现，只换掉下面这几个"可注入失败"与"可观测"的点。
 const croState = {
   enabled: true,
-  /** listCroTrajectories 是否真抛（B2） */
+  /** listCroCognitiveTrajectories 是否真抛（B2） */
   listThrows: false,
   /** 本 tick 会被扫描到的轨迹目录（B3/B4） */
   dirs: [] as string[],
@@ -82,9 +82,9 @@ vi.mock('../src/cro.js', async (importActual) => {
   const actual = await importActual<typeof import('../src/cro.js')>()
   return {
     ...actual,
-    listCroTrajectories: (root: string) => {
-      if (croState.listThrows) throw new Error('listCroTrajectories boom (injected)')
-      return croState.dirs.length > 0 ? croState.dirs : actual.listCroTrajectories(root)
+    listCroCognitiveTrajectories: (root: string) => {
+      if (croState.listThrows) throw new Error('listCroCognitiveTrajectories boom (injected)')
+      return croState.dirs.length > 0 ? croState.dirs : actual.listCroCognitiveTrajectories(root)
     },
     evaluateCro: async (root: string, dirName: string, input: unknown) => {
       if (croState.behavior === 'throw') throw new Error('evaluateCro boom (injected)')
@@ -118,7 +118,7 @@ vi.mock('../src/cro-log.js', async (importActual) => {
 import {
   deliverWake,
   registerWakeScheduler,
-  sendToTrajectory,
+  sendToCognitiveTrajectory,
   wakeSchedulerState,
   __resetWakeSchedulerStateForTest,
 } from '../src/wake-scheduler.js'
@@ -206,7 +206,7 @@ describe('wake-scheduler 分支面: A 即时投递的 status 分流', () => {
     writeBinding(BOUND_ID)
     const { agent, calls } = makeAgent() // 无 status
     const ctx = { agents: { get: () => agent }, get: () => undefined }
-    const res = await sendToTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
     expect(res.ok).toBe(true)
     // 🔴 正控先行：证明本组夹具能把消息送到 agent。若这条红了，
     //    下面"idle ⇒ followup"的断言就无法区分"分流生效"与"夹具坏了"。
@@ -219,7 +219,7 @@ describe('wake-scheduler 分支面: A 即时投递的 status 分流', () => {
     writeBinding(BOUND_ID)
     const { agent, calls } = makeAgent('idle')
     const ctx = { agents: { get: () => agent }, get: () => undefined }
-    const res = await sendToTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
     expect(res.ok).toBe(true)
     // 🔴 这条钉的是"分流两个方向都成立"。只钉 steer 侧 = 判反了也绿。
     expect(calls.followup).toBe(1)
@@ -235,7 +235,7 @@ describe('wake-scheduler 分支面: A 即时投递的 status 分流', () => {
       steer: () => {},
     }
     const ctx = { agents: { get: () => agent }, get: () => undefined }
-    const res = await sendToTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('followup boom (injected)')
   })
@@ -250,7 +250,7 @@ describe('wake-scheduler 分支面: A 即时投递的 status 分流', () => {
       followup: () => { followups += 1 },
     }
     const ctx = { agents: { get: () => agent }, get: () => undefined }
-    const res = await sendToTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
     // 🔴 语义：宁可不即时、不可丢消息。**且 detail 必须说"退回"** ——
     //    若这里报成"已即时注入"，就是**一条假陈述**（目标会误判看到它的时机）。
     expect(res.ok).toBe(true)
@@ -268,7 +268,7 @@ describe('wake-scheduler 分支面: A 即时投递的 status 分流', () => {
       followup: () => { throw new Error('followup boom (injected)') },
     }
     const ctx = { agents: { get: () => agent }, get: () => undefined }
-    const res = await sendToTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
+    const res = await sendToCognitiveTrajectory(ctx, root, DIR_NAME, '你好', 'S142')
     expect(res.ok).toBe(false)
     expect(res.detail).toContain('steer boom (injected)')
     expect(res.detail).toContain('followup boom (injected)')
@@ -284,7 +284,7 @@ describe('wake-scheduler 分支面: A 即时投递的 status 分流', () => {
       steer: () => {},
     }
     const ctx = { agents: { get: () => agent }, get: () => undefined }
-    await sendToTrajectory(ctx, root, DIR_NAME, '正文', '')
+    await sendToCognitiveTrajectory(ctx, root, DIR_NAME, '正文', '')
     expect(seen[0]).toContain('来自 未知轨迹')
   })
 })
@@ -347,7 +347,7 @@ describe('wake-scheduler 分支面: B CRO 与容错兜底', () => {
     expect(listWakes(root).entries.filter((e) => e.state === 'pending')).toHaveLength(0)
   })
 
-  it('🔴 B2：listCroTrajectories 真抛 ⇒ 静默跳过 CRO，但**既有投递照常**', async () => {
+  it('🔴 B2：listCroCognitiveTrajectories 真抛 ⇒ 静默跳过 CRO，但**既有投递照常**', async () => {
     writeSessionDir()
     writeBinding(BOUND_ID)
     const { agent, calls } = makeAgent(BOUND_ID)

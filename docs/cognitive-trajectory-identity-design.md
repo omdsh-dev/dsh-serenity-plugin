@@ -209,7 +209,7 @@ AGENT_SESSIONS/.trajectories.json        # v2 schema（或 .bindings.json 升 v2
 ### 4.2 存哪、怎么解析（**零破坏路径**）
 
 - **唯一真相源 = `SESSION.md` 顶部 frontmatter 的 `name:` 键**（与 `skills:` 同址——身份与声明同处轨迹本体，随目录存续，ACC 只读）。
-  🟢 **前向兼容**：现行解析器**只认 `skills:`、未知键一律忽略**（`trajectory-skill-injection.md:42`）⇒ **先加名字不破坏任何既有解析**，可分批落地。
+  🟢 **前向兼容**：现行解析器**只认 `skills:`、未知键一律忽略**（`cognitive-trajectory-skill-injection.md:42`）⇒ **先加名字不破坏任何既有解析**，可分批落地。
 - **resolution 插一层**：`findSession` 现有三步（精确目录名 → `S###` → 唯一模糊，`trajectory-ops.ts:152-173`）**在 `S###` 之后插"名字精确匹配"**；registry 作缓存加速。
 - **会话标题**：`S###` **必须保持首 token**（`resolveSessionByTitle:511` 取 `'-'` 前首段作 code），故标题可扩为 `S142-<名字>-YYYY-MM-DD-<概括>`——**解析兼容**（已核实）。
 - **压缩护栏扩展**：compaction 提醒现要求"保留 frontmatter 原样"（`keeper.ts` 的 `frontmatterGuard`）⇒ 文案补一句**写明 `name:`**（与 `skills:` 同款，单一文案两处共用）。

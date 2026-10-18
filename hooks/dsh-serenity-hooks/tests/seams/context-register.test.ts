@@ -13,7 +13,7 @@
  *   · `ctx` = 只记录 handler 的最小对象（不模拟 cordis Proxy）
  *   · `agent` = `{ session, inject }`
  *   · `registerEntrySkillSection` 内部 **try/catch** ⇒ 缺 `agent.ctx` 只是返回 false，**不抛**
- *   · `registerTrajectorySkillSection` 内部 try/catch ＋ `readLastBound()` 无绑定即**早返回**
+ *   · `registerCognitiveTrajectorySkillSection` 内部 try/catch ＋ `readLastBound()` 无绑定即**早返回**
  *   ⇒ 二者都在 `agent.inject(...)` **之前**，既然都不抛，注入就一定会发生 ⇒ 断言可靠
  *   · 注入**之后**的 `syncSafeModeRestriction` 等即使抛，也被 `agent/created` 处理器自己的
  *     try/catch 吞掉（不影响已发生的注入）
@@ -30,7 +30,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 }))
 
 import { registerContext } from '../../src/seams/context.js'
-import { getActiveSessionInfo } from '../../src/trajectory-ops.js'
+import { getActiveSessionInfo } from '../../src/cognitive-trajectory-ops.js'
 import { REGISTERED_TOOLS } from '../../src/invariant.js'
 import { forgetNonCccToolVisibility } from '../../src/seams/guards.js'
 

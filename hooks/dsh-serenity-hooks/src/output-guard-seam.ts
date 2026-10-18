@@ -8,7 +8,7 @@
  * 作用范围（v1.26.3 用户拍板）：**仅外部面**——skiff 等对外输出会话
  * （session id `skiff-`/`rebuild-` 前缀；v1.22.4 rebuild 新建会话同面）。
  * **本地维护会话（普通 dsh 会话）不检测**——维护会话必然提及机制词
- * （dsh-serenity-hooks/container_trajectory rebuild/mech-registry），打回会瘫痪自身工作。
+ * （dsh-serenity-hooks/cognitive_trajectory rebuild/mech-registry），打回会瘫痪自身工作。
  *
  * 🔴 **2026-10-15 补注（面 E 退役）**：`acp-` 前缀分支**已成孤儿，但本批不动**。
  * 判据（两条，实测）：① **该前缀从来没有生产者** —— 历史 `acp-core.ts` 建会话走的是
@@ -25,7 +25,7 @@ import { cccRootForCwd } from './ccc-roots.js'
 import { isSkiffSessionId } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { buildSensitiveTable, detectSensitive, buildRebuke, rebukeStates, REBUKE_MAX_ROUNDS } from './output-guard.js'
-import { sessionEvents } from './trajectory-ops.js'
+import { sessionEvents } from './cognitive-trajectory-ops.js'
 import { PLUGIN_SOURCE } from './message-source.js'
 
 /** 外部面会话判定（v1.26.3 用户拍板：仅外部面检测，本地维护会话豁免）：

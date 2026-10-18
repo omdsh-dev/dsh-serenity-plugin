@@ -83,28 +83,28 @@ describe('P1 — commit 支持显式 paths（修"绕过链"：工具可信才有
     const d = tmp('hooks-git-p1-')
     initRepo(d, 'main')
     writeFileSync(join(d, 'mine.md'), 'm')
-    writeFileSync(join(d, 'other-trajectory.md'), 'o') // 模拟"别的轨迹的在途文件"
+    writeFileSync(join(d, 'other-cognitive-trajectory.md'), 'o') // 模拟"别的认知轨迹的在途文件"
 
     const r = runGit(d, { action: 'commit', message: 'only mine', paths: ['mine.md'], noPush: true }) as string
 
     expect(r).not.toContain('整仓')
     expect(committedPaths(d)).toEqual(['mine.md'])
     // 🔴 核心：他轨迹的文件**没有被吸走**
-    expect(g(d, 'status', '--porcelain')).toContain('other-trajectory.md')
+    expect(g(d, 'status', '--porcelain')).toContain('other-cognitive-trajectory.md')
   })
 
   it('🔴 正控：不传 paths ⇒ 整仓 `add -A`（他轨迹文件**确实会被吸走**）＋ 回执显式告知', () => {
     const d = tmp('hooks-git-p1ctl-')
     initRepo(d, 'main')
     writeFileSync(join(d, 'mine.md'), 'm')
-    writeFileSync(join(d, 'other-trajectory.md'), 'o')
+    writeFileSync(join(d, 'other-cognitive-trajectory.md'), 'o')
 
     const r = runGit(d, { action: 'commit', message: 'all', noPush: true }) as string
 
     expect(r).toContain('整仓') // 回执必须**显式告知**，不再让 agent 靠记忆判断
     // 正控成立 = 不给 paths 时确实两个都被吸走（证明上一条断言真在判 paths）
-    expect(committedPaths(d).sort()).toEqual(['mine.md', 'other-trajectory.md'])
-    expect(g(d, 'status', '--porcelain')).not.toContain('other-trajectory.md')
+    expect(committedPaths(d).sort()).toEqual(['mine.md', 'other-cognitive-trajectory.md'])
+    expect(g(d, 'status', '--porcelain')).not.toContain('other-cognitive-trajectory.md')
   })
 })
 

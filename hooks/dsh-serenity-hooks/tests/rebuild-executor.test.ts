@@ -53,8 +53,8 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
 }))
 
 import { queueRebuild, registerRebuildTurnHook, pendingRebuildSnapshot, buildRebuildAnchor, performRebuild, resolveSessionMdPath } from '../src/rebuild.js'
-import { readLastBound, appendBound } from '../src/trajectory-bound.js'
-import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory-ops.js'
+import { readLastBound, appendBound } from '../src/cognitive-trajectory-bound.js'
+import { resetActiveSessionStore, setActiveSessionInfo } from '../src/cognitive-trajectory-ops.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string
@@ -184,7 +184,7 @@ describe('rebuild-executor：queueRebuild 的门与回落', () => {
     expect(bound?.sessionId).toBeUndefined() // 目录名不含 S### ⇒ 不编造
     expect(bound?.note).toBe('rebuild queued')
 
-    // ② 有内存活跃信息 ⇒ 走 `?.sessionId` 的**左侧**（生产常态：`container_trajectory use` 之后重启重建）
+    // ② 有内存活跃信息 ⇒ 走 `?.sessionId` 的**左侧**（生产常态：`cognitive_trajectory use` 之后重启重建）
     setActiveSessionInfo('s1', { sessionId: 'S777', dirName: '2026-08-28--no-id-here', mdPath: md })
     const r2 = await queueRebuild(qctx(session), { root: dir, summary: 'x', agentCwd: dir, dshSessionId: 's1' })
     expect(r2.queued).toBe(true)
@@ -284,7 +284,7 @@ describe('rebuild-executor：surface 与失败的诊断面', () => {
       expect(diag.lastEvent).toBe('failed')
       expect(diag.failedCount).toBe(before.failedCount + 1)
       expect(diag.detail).toContain('surface replace rejected')
-      expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('container_trajectory rebuild failed')
+      expect(warn.mock.calls.map((c) => c.join(' ')).join('\n')).toContain('cognitive_trajectory rebuild failed')
       expect(pendingRebuildSnapshot().has('s1')).toBe(false)
     } finally {
       warn.mockRestore()

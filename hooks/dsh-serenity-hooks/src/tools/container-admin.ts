@@ -131,7 +131,7 @@ export function createContainerAdminTool(ctx: Context) {
         })
         // v1.34.1：原 SEP（Session Extension Protocol）章节已随 SEP 废除一并移除
         // （所有者裁决「能落 harness 已有原语，就不要自造协议 + 脚本管道」）——手册只留 MSM 通用内容。
-        // 轨迹挂 skill 的扩展面见 docs/trajectory-skill-injection.md（SESSION.md frontmatter + section）。
+        // 轨迹挂 skill 的扩展面见 docs/cognitive-trajectory-skill-injection.md（SESSION.md frontmatter + section）。
         return out
       }
 

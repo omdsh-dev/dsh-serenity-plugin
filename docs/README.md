@@ -18,12 +18,12 @@
 
 | 件 | 谁指着它 |
 |---|---|
-| [`trajectory-skill-injection.md`](./trajectory-skill-injection.md) | `seams/keeper.ts` · `seams/system-prompt.ts` · `tools/trajectory.ts` · `trajectory-skills.ts` · `skills-discovery.ts` · 两个测试 |
+| [`cognitive-trajectory-skill-injection.md`](./cognitive-trajectory-skill-injection.md) | `seams/keeper.ts` · `seams/system-prompt.ts` · `tools/trajectory.ts` · `trajectory-skills.ts` · `skills-discovery.ts` · 两个测试 |
 | [`metaphor-domain.md`](./metaphor-domain.md) | `seams/system-prompt.ts` · `tests/osp-alignment.test.ts` |
 | [`failure-policy.md`](./failure-policy.md) | `tests/failure-policy.test.ts` |
 | [`cro-design.md`](./cro-design.md) | `wake-scheduler.ts` · `cro-turns.ts` · `index.ts` · `trajectory-ops.ts` · 三个测试 |
-| [`trajectory-send-message-design.md`](./trajectory-send-message-design.md) | `tools/trajectory.ts` · `trajectory-ops.ts` · `tests/wake-registry.test.ts` |
-| [`trajectory-scheduling.md`](./trajectory-scheduling.md) | `wake-scheduler.ts` |
+| [`cognitive-trajectory-send-message-design.md`](./cognitive-trajectory-send-message-design.md) | `tools/trajectory.ts` · `trajectory-ops.ts` · `tests/wake-registry.test.ts` |
+| [`cognitive-trajectory-scheduling.md`](./cognitive-trajectory-scheduling.md) | `wake-scheduler.ts` |
 | [`human-channel-plan.md`](./human-channel-plan.md) | `settings-section.ts` · `human-channel.ts` · `tests/human-channel-config.test.ts`（**§11 定案 = 权威规格**） |
 | [`weixin-bot-api.md`](./weixin-bot-api.md) | `weixin-api.ts`（协议真相源：§6 媒体 CDN/AES） |
 | [`weixin-message-hook-design.md`](./weixin-message-hook-design.md) | `weixin-hook.ts` |
@@ -48,9 +48,9 @@
 
 `skiff-design` / `skiff-followup-design` / `skiff-bound-trajectory-design` / `skiff-trajectory-bound-mode-design` /
 `skiff-type-and-injection-design` ｜ `weixin-bridge-design` / `weixin-media-design` / `weixin-as-acc-tool-design` /
-`weixin-acc-layer-design` / `acp-wecom-design` ｜ `trajectory-identity-design` / `trajectory-identity-deep-insights` /
-`trajectory-merge-naming` / `container-trajectory-rename` / `trajectory-wake-registry-design` /
-`trajectory-assistant-design` / `trajectory-assistant-plan` ｜ `acc-autopilot-retirement` /
+`weixin-acc-layer-design` / `acp-wecom-design` ｜ `cognitive-trajectory-identity-design` / `trajectory-identity-deep-insights` /
+`cognitive-trajectory-merge-naming` / `container-trajectory-rename` / `cognitive-trajectory-wake-registry-design` /
+`cognitive-trajectory-assistant-design` / `cognitive-trajectory-assistant-plan` ｜ `acc-autopilot-retirement` /
 `acc-component-relations-review` / `acc-component-relations-current-state` / `acc-tool-naming-rework` /
 `acc-tool-merge-and-msm-entry-rework` ｜ `autopilot-trajectory` / `autopilot-trajectory-design` /
 `rebuild-focus-note-and-autopilot-bound-wake` ｜ `cheap-worker-design` / `cheap-worker-dual-mode-design` ｜

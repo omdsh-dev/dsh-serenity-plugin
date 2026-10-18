@@ -1,13 +1,13 @@
 /**
- * trajectory-skills.ts — 轨迹 skill 声明解析 + 注入内容装配（纯逻辑，零 DSH 依赖）
+ * cognitive-trajectory-skills.ts — 轨迹 skill 声明解析 + 注入内容装配（纯逻辑，零 DSH 依赖）
  *
- * 接口真相源：`docs/trajectory-skill-injection.md` v1.0（§2 数据契约 / §3 注入契约）。
+ * 接口真相源：`docs/cognitive-trajectory-skill-injection.md` v1.0（§2 数据契约 / §3 注入契约）。
  * 一句话：**轨迹自己声明它要挂哪些 skill**（`SESSION.md` 顶部 YAML frontmatter 的 `skills:`），
  * ACC 在**绑定期间**把这些 skill 的 `SKILL.md` 全文注入系统提示词。
  *
  * 分工（R↓：为什么解析与注册分开）：
  *   · 本模块 = **纯文本层**（解析 / 装配 / 安全判定）——可脱离 DSH 单测；
- *   · `seams/system-prompt.ts` 的 `registerTrajectorySkillSection` = **宿主接入层**
+ *   · `seams/system-prompt.ts` 的 `registerCognitiveTrajectorySkillSection` = **宿主接入层**
  *     （per-agent `ctx.systemPrompt.section`），只做门与注册，不再解析文本。
  *
  * 边界（规格 §2.2）：**不解析** `skills` 以外任何键的语义（CCC 可自由使用，ACC 视而不见）；
@@ -20,7 +20,7 @@ import { findSkillMd, isSafeSkillName, truncateContent } from './skills-discover
 import { buildResourceIndex } from './skills/resource-index.js'
 
 /** 全文注入总长上限（字符数；规格 §3「缺省 32 KB」——防上下文爆炸） */
-export const TRAJECTORY_SKILLS_MAX_CHARS = 32 * 1024
+export const COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS = 32 * 1024
 
 /** 缺失标记（规格 §3/§6-3 的验收锚点：任何"拿不到全文"的情况都必须带它，绝不静默）
  *  🔴 2026-09-25（S142 分批清死代码·第 1 批）：**降为模块内常量**——全仓唯一消费者在本文件，
@@ -125,7 +125,7 @@ function absoluteMdPath(root: string, mdPath: string): string {
  *     （规格 §6-6 要求"不静默"；不注册就等于静默）
  * 其余（文件在但无 frontmatter / 无 `skills` 键 / 值为空）⇒ false，不注册、不产生噪声。
  */
-export function hasTrajectorySkillsDeclaration(root: string, mdPath: string): boolean {
+export function hasCognitiveTrajectorySkillsDeclaration(root: string, mdPath: string): boolean {
   const abs = absoluteMdPath(root, mdPath)
   if (!existsSync(abs)) return true
   try {
@@ -152,7 +152,7 @@ function normalizeNames(names: readonly string[]): string[] {
  * 合并两条声明来源（v1.44.0）：**CCC 级在前，轨迹级追加**，同名去重取首次位置。
  *
  * 两条来源（owner 令 2026-09-20）：
- *   · **CCC 级** = `.opencode/serenity.json` 的 `trajectory.skills`（本 CCC 所有轨迹共有的底座）；
+ *   · **CCC 级** = `.opencode/serenity.json` 的 `cognitiveTrajectory.skills`（本 CCC 所有轨迹共有的底座）；
  *   · **轨迹级** = 该轨迹 `SESSION.md` frontmatter 的 `skills:`（这条轨迹额外的）。
  *
  * 为什么是**并集**而不是二选一（R↓）：C1 设计当初否决"纯 CCC 全局"的理由是"会**丢掉
@@ -177,17 +177,17 @@ export function mergeSkillNames(cccSkills: readonly string[], trajSkills: readon
  * @param root CCC 根
  * @param mdPath 轨迹的 SESSION.md 路径（**来自绑定的 `mdPath`**，不用 label 拼）
  * @param maxChars 总长上限（字符）
- * @param cccSkills CCC 级声明（`readTrajectorySkills`；缺省空 = 只有轨迹级，行为与 v1.43 一致）
+ * @param cccSkills CCC 级声明（`readCognitiveTrajectorySkills`；缺省空 = 只有轨迹级，行为与 v1.43 一致）
  * @param onInjectedNames 观测回调（本次请求实际带上的 skill 名；**纯观测**，供用量统计用——
  *        回调抛错被吞，**不影响注入正文**）
  * @returns 注入正文；两条来源皆无声明 → `''`（空串 = 宿主不产出该 section 块）；
  *          SESSION.md 缺失/读失败 → 响亮提示（若同时有 CCC 级声明，则提示在前、正文随后——
  *          **提示不因"别处有内容"而被吞掉**）
  */
-export function buildTrajectorySkillsSection(
+export function buildCognitiveTrajectorySkillsSection(
   root: string,
   mdPath: string,
-  maxChars: number = TRAJECTORY_SKILLS_MAX_CHARS,
+  maxChars: number = COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
   cccSkills: readonly string[] = [],
   onInjectedNames?: (names: readonly string[]) => void,
 ): string {

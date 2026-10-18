@@ -57,7 +57,7 @@ describe('jscSafeJsonText：JSC JSON.parse 兼容层（v1.26.9）', () => {
       answer_html: '<p>HTML 含\u2028分隔</p>',
       sessionId: 'skiff-qa-x',
       continued: false,
-      trajectory: [
+      cognitiveTrajectory: [
         { role: 'user', text: '提问\u2028' },
         { role: 'tool', text: '结果\u2029内容\uFEFF', tool: 'web_search' },
         { role: 'assistant', text: '答案' },
@@ -75,7 +75,7 @@ describe('jscSafeJsonText：JSC JSON.parse 兼容层（v1.26.9）', () => {
   })
 
   it('常规 JSON（无触发字符）逐字节不变', () => {
-    const payload = { answer: '普通回答中文😀', answer_html: '<p>hi</p>', trajectory: [] }
+    const payload = { answer: '普通回答中文😀', answer_html: '<p>hi</p>', cognitiveTrajectory: [] }
     const json = JSON.stringify(payload)
     expect(jscSafeJsonText(json)).toBe(json)
   })
@@ -90,7 +90,7 @@ describe('jscSafeJsonText：JSC JSON.parse 兼容层（v1.26.9）', () => {
     expect(JSON.parse(safe)).toEqual(payload)
   })
 
-  it('3100 ask 响应完整形态（v1.26.10：不含 trajectory）：含触发字符的 payload → 安全文本 parse 等价', () => {
+  it('3100 ask 响应完整形态（v1.26.10：不含 cognitive trajectory）：含触发字符的 payload → 安全文本 parse 等价', () => {
     // 模拟 handleAskParsed 的 200 响应（v1.26.10 起对外仅 answer/answer_html/sessionId/continued）
     const response = {
       answer: '### 标题\u2028\n复杂内容\u2029与\uFEFF混合',

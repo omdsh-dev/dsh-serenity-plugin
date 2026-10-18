@@ -16,7 +16,7 @@ import { loadMsmEntries } from '../msm-ops.js'
 /** Skiff 定义教程（核心）：概念 / schema / 认知 MSM 写法 / 双白名单 / 轨迹纪律 / 示例角色 */
 export const SKIFF_GUIDE = `═══ Skiff Definition Guide (F4, experimental) ═══
 
-Skiff = 宁静号放出的独立小艇——完整 trajectory（在宁静号内全知全能）的**任意子集角色**。
+Skiff = 宁静号放出的独立小艇——完整 cognitive trajectory（在宁静号内全知全能）的**任意子集角色**。
 由本 CCC（.opencode/serenity.json skiff.roles）定义：能力面（双白名单）+ 轨迹纪律子集 + 系统提示词。
 dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）；角色内容完全由 CCC 发挥。
 
@@ -26,7 +26,7 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
         "model": "provider/model",             // 角色模型（CCC 直接指定，无白名单校验；缺省回退 cheap-worker.defaultModel）
         "msms": ["msm-a", "msm-b"],            // MSM 白名单（独立）：msm 工具只能执行这些；register/deregister 必拒
         "tools": ["read","grep","glob",...],   // 非 MSM 工具白名单（独立）：白名单外工具一律不可用（guard 强制）
-        "trajectory": { "session": false, "keeper": false, "rebuild": false },  // 轨迹纪律子集（缺省全关 = 完全独立）
+        "cognitiveTrajectory": { "session": false, "keeper": false, "rebuild": false },  // 轨迹纪律子集（缺省全关 = 完全独立）
         // 角色人格/认知边界/风格（CCC 完整定义；dsp 只给基础提示词）
         "systemPromptFile": ".opencode/skiff/<role>.md"   // ★ 推荐：引用 md 文件（相对 CCC 根；超长提示词在 JSON 内嵌不可读）
         // "systemPrompt": "..."                          // 兼容：内嵌字符串仍可用；两者都设时 systemPromptFile 优先
@@ -44,14 +44,14 @@ dsp 只提供机制（双白名单强制 + 基础提示词 + 调试问答页）�
   - 例：cognitive-qa（读 docs/references 回答）、review-scan（读代码出审查意见）、review-fix（写修复）
   - 注意：MSM 在脚本层执行（bun），文件访问不受 agent 工具面约束——"只读"语义靠 CCC 自写 MSM 自觉
 
-── 轨迹纪律子集（trajectory）──
+── 轨迹纪律子集（cognitiveTrajectory）──
   - session/keeper/rebuild 默认 false：Skiff 完全独立（不建 SESSION.md、无 keeper 提醒、无 rebuild 压力检测）
   - 开启某项 = 该角色参与对应轨迹机制（如 keeper=true 计分提醒按角色生效）
 
 ── 示例角色 ──
-  qa-readonly: { "msms": ["cognitive-qa"], "tools": [], "trajectory": {} }
+  qa-readonly: { "msms": ["cognitive-qa"], "tools": [], "cognitiveTrajectory": {} }
       → 认知问答（仅 MSM 通道，无直接工具，完全独立）
-  code-review: { "msms": ["review-scan","review-fix"], "tools": ["read","grep","glob","write","edit"], "trajectory": { "keeper": true } }
+  code-review: { "msms": ["review-scan","review-fix"], "tools": ["read","grep","glob","write","edit"], "cognitiveTrajectory": { "keeper": true } }
       → 有操作能力（可写修复），参与 keeper 轨迹机制
 
 ── 运行 ──
@@ -108,10 +108,10 @@ export function listSkiffRoles(root: string): JsonValue {
     model: role.model ?? '(cheap-worker default)',
     msms: role.msms ?? [],
     tools: role.tools ?? [],
-    trajectory: {
-      session: role.trajectory?.session === true,
-      keeper: role.trajectory?.keeper === true,
-      rebuild: role.trajectory?.rebuild === true,
+    cognitiveTrajectory: {
+      session: role.cognitiveTrajectory?.session === true,
+      keeper: role.cognitiveTrajectory?.keeper === true,
+      rebuild: role.cognitiveTrajectory?.rebuild === true,
     } satisfies Record<string, boolean>,
     promptSource: systemPromptSource(role),
     ...(role.systemPromptFile ? { systemPromptFile: role.systemPromptFile } : {}),

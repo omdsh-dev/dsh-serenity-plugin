@@ -1,7 +1,7 @@
 /**
- * wake-registry.ts — trajectory 唤醒注册表（D58，S142 2026-09-13）
+ * wake-registry.ts — 认知轨迹唤醒注册表（D58，S142 2026-09-13）
  *
- * 需求（用户原话）：一个 CCC 内允许多个 trajectory 任意形态并行；某个 trajectory 可以
+ * 需求（用户原话）：一个 CCC 内允许多个认知轨迹任意形态并行；某个认知轨迹可以
  * **预定未来唤醒自己或别人**，本质上是一次「未来时刻 + 一条 message」的投递；「周期自唤醒」
  * 曾是它的特例（原 ACC autopilot / D59，该机制已于 2026-09-15 整段退场）。协作边界：
  * 互相可见、**无阻塞无等待**。
@@ -37,11 +37,11 @@ type WakeState = 'pending' | 'delivered' | 'missed' | 'cancelled'
 export interface WakeEntry {
   /** 稳定 id（不复用；`w-<当地到分钟>-<4 hex>`） */
   id: string
-  /** 目标 trajectory：`S###` 或完整 AGENT_SESSIONS 目录名（编码无关，与绑定锚一致） */
+  /** 目标认知轨迹：`S###` 或完整 AGENT_SESSIONS 目录名（编码无关，与绑定锚一致） */
   target: string
   /** 绝对时刻（当地 RFC3339 带偏移，如 `2026-09-14T09:00:00.000+08:00`） */
   at: string
-  /** 唤醒 message（投递给目标 trajectory 的正文） */
+  /** 唤醒 message（投递给目标认知轨迹的正文） */
   message: string
   /** 状态 */
   state: WakeState
@@ -162,7 +162,7 @@ export function parseWakeAt(input: string, nowMs: number): { ok: true; ms: numbe
 /**
  * 登记一条唤醒。
  * @param root CCC 根
- * @param input 目标 trajectory / 时刻串 / message / 发起者 / 当前时刻
+ * @param input 目标认知轨迹 / 时刻串 / message / 发起者 / 当前时刻
  * @returns 成功返回条目，失败返回稳定错误文案（不抛错）
  */
 export function addWake(

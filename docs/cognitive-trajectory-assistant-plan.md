@@ -3,7 +3,7 @@
 > SESSION: S142 (2026-09-05)
 > Status: **APPROVED 2026-09-05 — implemented (commit `feat(trajectory-assistant)`), deploy/release pending D14**
 > Language: English (as required)
-> Companion design: `docs/trajectory-assistant-design.md` (v0.1 conceptual)
+> Companion design: `docs/cognitive-trajectory-assistant-design.md` (v0.1 conceptual)
 > v0.3 change: D8 vocabulary principle added — level-design thinking shapes structure & timing only;
 > game-only jargon banned from prompt text (BOSS → LIMIT; game style dropped; autopilot/first-anchor bodies stay pristine).
 
@@ -264,7 +264,7 @@ Also update: `src/output-guard.ts` sensitive mechanism-word list (`'Trajectory S
 ## 6. Doc sync
 
 - `docs/metaphor-domain.md`: add a short subsection noting trajectory-assistant references the metaphor domain (environment) — the universe wording itself unchanged.
-- `docs/trajectory-assistant-design.md`: v0.2 update — fold in D1-D7 rulings + this plan pointer (English plan as authoritative for implementation).
+- `docs/cognitive-trajectory-assistant-design.md`: v0.2 update — fold in D1-D7 rulings + this plan pointer (English plan as authoritative for implementation).
 - SKILL.md (`dsh-serenity-plugin-development`): mechanisms table token/name refresh + the new module in the seams list.
 - CHANGELOG.md: new section at release time (D14 — user explicitly requests release).
 
