@@ -256,18 +256,25 @@
    旧形态：固定 340px 的信息栏 ＋ 吃掉剩余宽度的动画栏（动画占了大半张卡片）。
    现在：内容区 `flex: 1` 吃掉主体，动画降为**定宽窄栏**（见 .sp-voyage）。
    ⚠️ 顺序仍由 `order` 决定（内容在左、动画在右），与 DOM 顺序解耦。 */
+/* 左栏：内容区——**定宽一列**（tab 只显示一个列表，不需要铺满）
+   🔴 2026-10-18 owner 修正后的分工：内容区占**固定列宽**，动画吃剩余空间。
+   为什么定宽而不是 flex:1：tab 里只有一个列表，铺得越宽每行留白越多、反而更难读；
+   定宽 420px 让"标识 ＋ 名字 ＋ 天数"三列都有合适密度，剩下的横向空间整体让给动画。 */
 .sp-popVoyage > .sp-content {
   order: 1;
   position: relative;
   z-index: 1;
+  flex: none;
+  width: 420px;
+  min-width: 0;
 }
-/* 右栏：动画——从"吃剩余宽度"降为**定宽装饰条**
-   owner 的原话是"内容区作为主体" ⇒ 装饰不该再与主体争面积。
-   240px：够看清飞船与词元，又不至于把两个 panel 挤窄。窄屏（@media）时退回全宽置于下方。 */
+/* 右栏：动画——**恢复为可伸缩**（owner 2026-10-18 修正：「剩下的位置还是给动画」）
+   🔵 为什么这次可以给它 flex:1 而上一版不行：上一版两 panel 并排把宽度吃光了；
+      改成 tab 后内容区只占一列 ⇒ 右侧空出来的位置本来就该是动画的。
+   ⚠️ 仍然 `min-width: 0`：动画 iframe 不该把内容区挤窄（内容区是 flex:none 的一列）。 */
 .sp-voyage {
   order: 2;
-  flex: none;
-  width: 240px;
+  flex: 1 1 auto;
   min-width: 0;
   position: relative;
   pointer-events: none; /* 纯展示：不挡点击、不抢焦点 */
@@ -299,11 +306,9 @@
     align-items: stretch;
   }
   .sp-popVoyage > .sp-content {
+    /* 单栏下不再定宽 420px：跟随卡片宽度 */
     flex: 1 1 auto;
-  }
-  /* 单栏时 panel 网格也退回单列（窄屏两列并排会各自只剩半屏不到的宽度） */
-  .sp-panels {
-    grid-template-columns: 1fr;
+    width: auto;
   }
   .sp-voyage {
     flex: none;
@@ -416,10 +421,13 @@
   opacity: 0.45;
 }
 
-/* ── 多 panel 主体（owner：「内容区作为主体，用多 panel 模式」）──────────
-   布局契约：这一层是**主体**，所以它拿 `flex: 1`；右栏动画被压到定宽窄条。
-   panel 网格两列等宽 —— 轨迹与技能并排，各自内部滚动。
-   ⚠️ 用 grid 而不是 flex：两 panel 要**等宽且同高**（等高让"多 panel"读起来是一个整体）。 */
+/* ── 主体：tab 容器（owner 2026-10-18 修正：「活动轨迹和 skills 使用 tab 来实现，
+   剩下的位置还是给动画」）─────────────────────────────────────────────
+   这条修正**推翻了上一版"两 panel 并排"的布局**，理由值得写下来（R↓）：
+   并排会把内容区横着吃掉一倍宽度，动画栏只能被压成 240px 定宽窄条。
+   改成 tab 后——**同一块面积轮换显示两个列表**——内容区宽度减半，
+   省下的横向空间**正好还给动画**（见 .sp-voyage 恢复 flex:1）。
+   ⇒ "tab" 在本面板里不只是交互选择，它**同时是布局手段**。 */
 .sp-content {
   flex: 1 1 auto;
   min-width: 0;
@@ -429,48 +437,56 @@
   gap: 10px;
   overflow: hidden;
 }
-.sp-panels {
+.sp-tabs {
   flex: 1 1 auto;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  overflow: hidden;
-}
-.sp-panel {
   min-width: 0;
-  min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: 10px;
-  background: var(--dsw-alias-bg-layer-2);
+  gap: 8px;
+  overflow: hidden;
 }
-.sp-panelHead {
+/* tab 条：贴近官方 settings 的分段控件语域（低调、无边框盒） */
+.sp-tabBar {
   flex: none;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1);
 }
-.sp-panelTitle {
-  margin: 0;
+.sp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 8px 8px 0 0;
+  background: transparent;
   font-size: 12px;
   line-height: 18px;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
   color: var(--dsw-alias-label-secondary);
+  cursor: pointer;
+  /* 选中态**不只依赖颜色**（色盲不友好）：底部 2px 高亮条 ＋ 文字色提亮 */
+  border-bottom: 2px solid transparent;
+  margin-bottom: -7px;
+}
+.sp-tab:hover {
+  color: var(--dsw-alias-label-primary);
+}
+.sp-tabActive {
+  color: var(--dsw-alias-label-primary);
+  border-bottom-color: #10b981;
 }
 .sp-panelEmpty {
   margin: 0;
+  padding: 8px 4px;
   font-size: 12px;
   line-height: 18px;
   color: var(--dsw-alias-label-secondary);
 }
-/* panel 内列表：**自身滚动**（不把 panel 顶长），外层不再套第二层滚动 */
+/* tab 内容列表：**自身滚动**（不把容器顶长） */
 .sp-list {
   margin: 0;
   padding: 0;

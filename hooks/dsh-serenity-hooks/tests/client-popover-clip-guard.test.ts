@@ -77,3 +77,49 @@ describe('自绘 popover 定位形态（防"祖先 overflow 裁切"回归）', (
     expect(tsx).toMatch(/popPos\s*\?/)
   })
 })
+
+/**
+ * 🔴 2026-10-18（owner 修正）：「活动轨迹和 skills 使用 tab 来实现，剩下的位置还是给动画」
+ *
+ * 这条守卫的**对象是布局角色分配**，不是某个 class 名：
+ *   · 两个列表必须**互斥显示**（tab），而不是并排 —— 并排会把宽度吃光、动画只剩窄条
+ *   · 内容区占**定宽一列**，动画**吃剩余**（flex）—— 顺序反了就等于没给动画让位
+ *
+ * ⚠️ 为什么用源码形态断言而不是渲染测试：本仓 client 侧**没有 DOM 测试环境**
+ *   （无 jsdom / react-dom），这是既有边界；形态断言能抓住"被顺手改回去"，与
+ *   `.sp-pop` 那组守卫同一套办法。真实观感留给真机看（D149）。
+ */
+describe('CCC 状态面板：tab 布局（活跃轨迹 ／ 技能 互斥显示，剩余位置给动画）', () => {
+  const tabBody = ruleBody(css, '.sp-tabs')
+  const voyage = ruleBody(css, '.sp-voyage')
+  const content = ruleBody(css, '.sp-popVoyage > .sp-content')
+
+  it('tsx 用 tab（role=tablist/tab ／ aria-selected）而不是两个并排 panel', () => {
+    expect(tsx, 'tab 容器必须存在').toMatch(/sp-tabs/)
+    expect(tsx).toMatch(/role="tablist"/)
+    expect(tsx).toMatch(/role="tab"/)
+    expect(tsx).toMatch(/aria-selected=/)
+    // 🔴 负控：旧的并排 panel 形态不得复活
+    expect(tsx, '两个并排 panel 的形态已被 owner 修正掉，不得复活').not.toMatch(/sp-panels/)
+  })
+
+  it('两个 tab 互斥显示（条件渲染，不是都挂着再 CSS 隐藏）', () => {
+    // 判据：tab 状态驱动条件渲染 ⇒ 同一时刻只有一个列表在 DOM 里。
+    // 若改成"都渲染 + display:none"，两份列表会同时存在于无障碍树里（读屏会念两遍）。
+    expect(tsx).toMatch(/tab === 'trajectories' \?/)
+    expect(tsx).toMatch(/useState<'trajectories' \| 'skills'>/)
+  })
+
+  it('内容区定宽一列 ＋ 动画吃剩余（顺序反了就等于没给动画让位）', () => {
+    expect(content, '内容区必须是定宽列（flex:none + width）').toMatch(/flex:\s*none/)
+    expect(content).toMatch(/width:\s*420px/)
+    expect(voyage, '动画必须吃剩余宽度').toMatch(/flex:\s*1 1 auto/)
+    // 🔴 负控：上一版的"定宽 240px 装饰条"不得复活 —— 那正是本次被推翻的布局
+    expect(voyage).not.toMatch(/width:\s*240px/)
+  })
+
+  it('tab 容器自身可滚动但不外溢（列表长时不把卡片顶破）', () => {
+    expect(tabBody).toMatch(/overflow:\s*hidden/)
+    expect(tabBody).toMatch(/min-height:\s*0/)
+  })
+})

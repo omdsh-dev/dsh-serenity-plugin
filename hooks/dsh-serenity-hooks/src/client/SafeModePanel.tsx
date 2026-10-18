@@ -105,6 +105,9 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
   // ⚠️ 不再有 `busy` 状态：面板已无写操作（safe-mode 降为状态信息），见下方注释
   const [open, setOpen] = useState(false)
+  /** tab 切换（2026-10-18 owner 修正：活跃轨迹 / 技能 用 tab，而不是并排两个 panel）
+   *  ⚠️ 纯前端显示状态 —— 两份数据后端一次性都给全，切换**不触发任何请求**。 */
+  const [tab, setTab] = useState<'trajectories' | 'skills'>('trajectories')
   const rootRef = useRef<HTMLDivElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   // v1.39.1：popover 改 `position:fixed` 后的视口坐标（null = 尚未测量，此时渲染在屏外）
@@ -277,21 +280,43 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                   </span>
                 </div>
 
-                {/* ── 多 panel 主体（owner 2026-10-18：「内容区作为主体，用多 panel 模式」
-                    「活跃轨迹、skills 分别占两个 panel」）
-                    🔴 布局契约：内容区 = grid（左栏 panel 网格 / 右栏窄动画）。
-                    动画从"吃剩余宽度的右栏"降级为**窄栏装饰** —— "内容为主体"之后它不该再占一半。 */}
-                <div className={cx('sp-panels')}>
-                  {/* ── panel：活跃轨迹 ── */}
-                  <section className={cx('sp-panel')}>
-                    <header className={cx('sp-panelHead')}>
-                      <h3 className={cx('sp-panelTitle')}>活跃轨迹</h3>
+                {/* ── 主体：**tab 容器**（owner 2026-10-18 修正：「活动轨迹和 skills 使用 tab 来实现，
+                    剩下的位置还是给动画」）
+                    🔴 布局契约变更（比"多 panel 并排"更省横向空间）：
+                      · 两个列表**不再并排**，改成**一个 tab 组**（同一块面积轮换显示）⇒ 内容区宽度减半、
+                        动画栏因此可以从 240px 定宽**恢复为可伸缩**（flex:1）。
+                      · 这正是 owner 的意图：让给动画的位置**是 tab 省下来的那份**。
+                    ⚠️ tab 只切换"显示哪一个列表"，**不改变任何数据获取**（两份数据一直都在，
+                      切换是纯前端状态，零额外请求）。 */}
+                <div className={cx('sp-tabs')}>
+                  <div className={cx('sp-tabBar')} role="tablist" aria-label="CCC 状态面板">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === 'trajectories'}
+                      className={cx('sp-tab', tab === 'trajectories' && 'sp-tabActive')}
+                      onClick={() => setTab('trajectories')}
+                    >
+                      活跃轨迹
                       <span className={cx('sp-count')}>{trajectories.length}</span>
-                    </header>
-                    {trajectories.length === 0 ? (
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={tab === 'skills'}
+                      className={cx('sp-tab', tab === 'skills' && 'sp-tabActive')}
+                      onClick={() => setTab('skills')}
+                    >
+                      技能
+                      <span className={cx('sp-count')}>{skills.length}</span>
+                    </button>
+                  </div>
+
+                  {tab === 'trajectories' ? (
+                    trajectories.length === 0 ? (
                       <p className={cx('sp-panelEmpty')}>暂无活跃轨迹</p>
                     ) : (
-                      <ul className={cx('sp-list')}>
+                      <ul className={cx('sp-list')} role="tabpanel">
                         {trajectories.map((t) => (
                           <li key={t.dirName} className={cx('sp-item')}>
                             {/* UID 优先显示：owner 定它是"用于交流的唯一标识"⇒ 有就顶在最前面；
@@ -307,31 +332,22 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                           </li>
                         ))}
                       </ul>
-                    )}
-                  </section>
-
-                  {/* ── panel：技能（owner：「skills 分别占两个 panel」） ── */}
-                  <section className={cx('sp-panel')}>
-                    <header className={cx('sp-panelHead')}>
-                      <h3 className={cx('sp-panelTitle')}>技能</h3>
-                      <span className={cx('sp-count')}>{skills.length}</span>
-                    </header>
-                    {skills.length === 0 ? (
-                      <p className={cx('sp-panelEmpty')}>暂无技能</p>
-                    ) : (
-                      <ul className={cx('sp-list')}>
-                        {skills.map((s) => (
-                          <li key={s.name} className={cx('sp-item')}>
-                            <span className={cx('sp-itemName', 'sp-itemNameFull')} title={s.name}>{s.name}</span>
-                            {/* 已建模 = 有 skill.ttl。🟢 它是**信息**不是缺陷：无 skill.ttl 完全正常。 */}
-                            {s.modeled && (
-                              <span className={cx('sp-itemTag')} title="已建模（存在 skill.ttl）">建模</span>
-                            )}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </section>
+                    )
+                  ) : skills.length === 0 ? (
+                    <p className={cx('sp-panelEmpty')}>暂无技能</p>
+                  ) : (
+                    <ul className={cx('sp-list')} role="tabpanel">
+                      {skills.map((s) => (
+                        <li key={s.name} className={cx('sp-item')}>
+                          <span className={cx('sp-itemName', 'sp-itemNameFull')} title={s.name}>{s.name}</span>
+                          {/* 已建模 = 有 skill.ttl。🟢 它是**信息**不是缺陷：无 skill.ttl 完全正常。 */}
+                          {s.modeled && (
+                            <span className={cx('sp-itemTag')} title="已建模（存在 skill.ttl）">建模</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               </>
             ) : (
