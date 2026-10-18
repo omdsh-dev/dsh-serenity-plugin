@@ -59,6 +59,9 @@ import {
   useSession,
   findSession,
   archiveSession,
+  setTrajectoryUid,
+  readTrajectoryUid,
+  UID_FILENAME,
   COGNITIVE_TRAJECTORY_ACTIONS,
   DEFAULT_SESSION_SCOPE,
   getActiveSessionInfo,
@@ -288,7 +291,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot)',
       ].join(' '),
     },
-    name: { type: 'string', description: 'show/use session identifier (S### or dir name or keyword)' },
+    name: { type: 'string', description: 'show/use/archive/uid identifier — S### / dir name / UID / fuzzy keyword' },    uid: { type: 'string', description: `uid: the trajectory's unique identifier (a separate, optional handle independent of its code and name — file ${UID_FILENAME} inside the trajectory dir). Omit to READ it; pass a value to SET it; pass "" to CLEAR it (falls back to the code). Allowed [A-Za-z0-9._-], ≤64, case-sensitive, must be unique across trajectories.` },
     note: { type: 'string', description: 'rebuild: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
     desc: { type: 'string', description: 'create: short description (any language, ≤5 words; mutually exclusive with issue)' },
     issue: { type: 'string', description: 'create: ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
@@ -477,6 +480,38 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
           note: res.dryRun
             ? '预览：未落盘。'
             : '已从活跃清单移出（目录与 SESSION.md 逐字节未改）。恢复方式：container_fs mv 移回 AGENT_SESSIONS/。',
+        }
+      }
+      case 'uid': {
+        // 🔴 2026-10-18（owner 需求）：唯一标识符 —— **独立于编码与命名**，可选。
+        // 语义：设定后 `S###` 能用的地方 `findSession` 都能用 UID 指认（同一入口，不分叉）。
+        // 清除（name 给了但 uid 为空/未给 + `--clear` 语义）：这里用 uid=null 表达"回到用编码"。
+        if (!args.name) throw new Error('uid requires name (S### / dir name / existing UID)')
+        // `uid` 参数三态：给值 = 设定；显式空串 = 清除；未给 = 读取
+        if (args.uid === undefined) {
+          const entry = findSession(join(root, 'AGENT_SESSIONS'), args.name)
+          if (!entry) throw new Error(`Trajectory not found: "${args.name}"`)
+          const cur = readTrajectoryUid(entry.path)
+          return {
+            ok: true,
+            dirName: entry.dirName,
+            uid: cur,
+            note: cur === null
+              ? `未设定 UID ⇒ 用编码指认（${entry.dirName.match(/--(S\d{3,})--/)?.[1] ?? '无编码'}）。`
+              : `当前 UID = ${cur}（文件 ${UID_FILENAME}）`,
+          }
+        }
+        // `''` / `null` ⇒ 删除声明文件，回到"用编码"
+        const next = args.uid === '' ? null : String(args.uid)
+        const r = setTrajectoryUid(join(root, 'AGENT_SESSIONS'), args.name, next)
+        return {
+          ok: true,
+          dirName: r.dirName,
+          uid: r.uid,
+          message: r.uid === null
+            ? `已清除 UID ⇒ "${r.dirName}" 回到用编码指认`
+            : `已设定 UID = "${r.uid}" ⇒ 所有支持编码的动作（show/use/archive/send-now/send-later/uid）现在也接受它`,
+          path: r.path,
         }
       }
       case 'send-later': {

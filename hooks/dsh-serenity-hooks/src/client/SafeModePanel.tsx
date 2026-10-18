@@ -53,14 +53,25 @@ interface SerenityStatus {
   cheapWorkerModel: string | null
   /** 活跃轨迹（不含归档）。后端已排除 `_` 前缀目录 ⇒ 这里拿到的**就是**"没有归档的轨迹"。 */
   trajectories?: TrajectorySummary[]
+  /** 技能清单（全量扫 `.opencode/skills/` 下每个含 SKILL.md 的目录）。老后端不返回该字段 ⇒ 退化为空清单。 */
+  skills?: SkillSummary[]
 }
 
 /** 一条活跃轨迹（与后端 `TrajectorySummary` 同形；无生命周期字段 —— 轨迹永存） */
 interface TrajectorySummary {
   dirName: string
   sessionId: string
+  /** 唯一标识符（未设定 ⇒ null）；面板优先显示它，否则退回编码（owner："不设定就还是用编码"） */
+  uid: string | null
   ageDays: number
   hasSessionMd: boolean
+}
+
+/** 技能摘要（owner 2026-10-18：skills 单独占一个 panel） */
+interface SkillSummary {
+  name: string
+  /** 已建模 = 存在 skill.ttl。**无 skill.ttl 完全正常**，不是缺陷。 */
+  modeled: boolean
 }
 
 const API = '/serenity/status'
@@ -92,7 +103,7 @@ function cx(...parts: Array<string | false | null | undefined>): string {
 /** 会话头部：Serenity 状态胶囊（点击 → 自绘 popover，纯状态展示） */
 export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   const [status, setStatus] = useState<SerenityStatus | null>(null)
-  const [busy, setBusy] = useState(false)
+  // ⚠️ 不再有 `busy` 状态：面板已无写操作（safe-mode 降为状态信息），见下方注释
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
@@ -103,6 +114,8 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   // 活跃轨迹（后端已排除归档区）。🔴 用 `?? []` 而非可选链散落各处：
   // 老后端（未升级）不返回该字段时，面板退化为"暂无活跃轨迹"而不是崩掉。
   const trajectories = status?.trajectories ?? []
+  // 技能清单（老后端不返回 ⇒ 空清单，面板退化为"暂无技能"而不是崩）
+  const skills = status?.skills ?? []
 
   const refresh = useCallback(async () => {
     const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
@@ -173,19 +186,11 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     }
   }, [open])
 
-  const toggle = async (on: boolean): Promise<void> => {
-    setBusy(true)
-    try {
-      await fetch(API, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
-        body: JSON.stringify({ sessionId, on }),
-      })
-      await refresh()
-    } finally {
-      setBusy(false)
-    }
-  }
+  // 🔴 2026-10-18（owner）：「safe_mode 在这里显示小标志即可，是个状态信息」⇒ **写通道删除**。
+  // 面板不再有可操作项 ⇒ 不再需要 toggle/POST/乐观刷新。
+  // 为什么连 POST 一起删而不是留着"以后可能用"：留一条**没有调用点**的写路径，
+  // 下一个人会以为面板能改安全模式（而 UI 上已经没有入口）—— 那是注释级别的谎。
+  // 开关仍在「设置 → Serenity」；HTTP 面的 POST 能力保留（api.ts 未动），只是本组件不调它。
 
   if (!status) {
     return (
@@ -222,21 +227,20 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
         {inCcc && (
           <>
             <span className={cx('sp-sep')} />
-            <span className={cx('sp-shield')}>{SHIELD_SVG}</span>
-            <span className={cx('sp-statusWord')}>SAFE</span>
-            {/* Mac 风格滑块快速开关（v1.24.10）：thumb 无图标；左=OFF 灰 / 右=ON 绿；stopPropagation 不触发弹层 */}
+            {/* 🔴 2026-10-18（owner）：「safe_mode 在这里显示小标志即可，是个状态信息」
+                旧形态 = 盾牌 ＋ SAFE 字样 ＋ **Mac 风格滑块**（可点击切换）。
+                现在：滑块去掉（配置面在设置里），只留一个小状态点 ＋ SAFE 字样。
+                ⚠️ 保留 `<span>` 而非按钮 ⇒ 它不再可交互（状态信息不该长得像控件）。 */}
             <span
-              className={cx('sp-switch', status.safeModeOn ? 'sp-switchOn' : 'sp-switchOff', busy ? 'sp-switchBusy' : undefined)}
-              role="switch"
-              aria-checked={status.safeModeOn}
-              title={status.safeModeOn ? 'safe-mode ON（点击关闭）' : 'safe-mode OFF（点击开启）'}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (busy) return
-                void toggle(!status.safeModeOn)
-              }}
+              className={cx('sp-safeBadge', status.safeModeOn ? 'sp-safeBadgeOn' : 'sp-safeBadgeOff')}
+              title={
+                status.safeModeOn
+                  ? 'safe-mode ON — 写工具已隐藏（状态信息；开关在 设置 → Serenity）'
+                  : 'safe-mode OFF — 写工具全开（状态信息；开关在 设置 → Serenity）'
+              }
             >
-              <span className={cx('sp-switchThumb')} />
+              <span className={cx('sp-safeDot')} />
+              SAFE {status.safeModeOn ? 'ON' : 'OFF'}
             </span>
           </>
         )}
@@ -256,93 +260,82 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
             popPos ? { left: popPos.left, top: popPos.top } : { left: POP_OFFSCREEN, top: POP_OFFSCREEN }
           }
         >
-          <div className={cx('sp-popBody')}>
+          <div className={cx('sp-content')}>
             {inCcc ? (
               <>
-                {/* ── 分组：运行环境 ── */}
-                <div className={cx('sp-group')}>
-                  <h3 className={cx('sp-groupTitle')}>运行环境</h3>
-                  <div className={cx('sp-rows')}>
-                    <div className={cx('sp-row')}>
-                      <span className={cx('sp-label')}>CCC</span>
-                      <span className={cx('sp-value')} title={status.root ?? undefined}>{status.root}</span>
-                    </div>
-                    <div className={cx('sp-row')}>
-                      <span className={cx('sp-label')}>CheapWorker 模型</span>
-                      <span className={cx('sp-value')} title={status.cheapWorkerModel ? `cheap-worker.models: ${status.cheapWorkerModel}` : undefined}>
-                        {status.cheapWorkerModel ?? '未配置'}
-                      </span>
-                    </div>
-                    <div className={cx('sp-row')}>
-                      <span className={cx('sp-label')}>守卫</span>
-                      <span className={cx('sp-value')}>
-                        blacklist {status.blacklist.length} 条{status.threshold !== null ? ` · keeper 阈值 ${status.threshold}` : ''}
-                      </span>
-                    </div>
-                  </div>
+                {/* ── 运行环境：压成**一行**元信息（owner 2026-10-18：「比较丑，简易一些」）
+                    旧形态 = 三行带边框卡片（CCC / 模型 / 守卫），每行一个独立 box ⇒ 视觉噪声大于信息量。
+                    现在 = 一行等宽文本，用 · 分隔：它是**背景事实**，不是需要逐项对焦的内容。 */}
+                <div className={cx('sp-meta')} title={`CCC: ${status.root ?? ''}`}>
+                  <span className={cx('sp-metaPath')}>{status.root}</span>
+                  <span className={cx('sp-metaSep')}>·</span>
+                  <span>{status.cheapWorkerModel ?? '模型未配置'}</span>
+                  <span className={cx('sp-metaSep')}>·</span>
+                  <span>
+                    blacklist {status.blacklist.length}
+                    {status.threshold !== null ? ` · keeper ${status.threshold}` : ''}
+                  </span>
                 </div>
 
-                {/* ── 分组：安全模式 ── */}
-                <div className={cx('sp-group')}>
-                  <h3 className={cx('sp-groupTitle')}>安全模式</h3>
-                  <div className={cx('sp-actions')}>
-                    <button
-                      type="button"
-                      className={cx('sp-toggle', status.safeModeOn ? 'sp-toggleOn' : 'sp-toggleOff', 'sp-toggleLg')}
-                      disabled={busy}
-                      onClick={() => void toggle(!status.safeModeOn)}
-                    >
-                      {status.safeModeOn && <IconWarningOutlineMedium size={14} className={cx('sp-toggleIcon')} />}
-                      safe-mode {status.safeModeOn ? 'ON' : 'OFF'}
-                    </button>
-                    <span className={cx('sp-toggleDesc')}>
-                      {status.safeModeOn ? '写工具已隐藏，可无人值守运行' : '写工具可用（点击开启）'}
-                    </span>
-                  </div>
-                </div>
+                {/* ── 多 panel 主体（owner 2026-10-18：「内容区作为主体，用多 panel 模式」
+                    「活跃轨迹、skills 分别占两个 panel」）
+                    🔴 布局契约：内容区 = grid（左栏 panel 网格 / 右栏窄动画）。
+                    动画从"吃剩余宽度的右栏"降级为**窄栏装饰** —— "内容为主体"之后它不该再占一半。 */}
+                <div className={cx('sp-panels')}>
+                  {/* ── panel：活跃轨迹 ── */}
+                  <section className={cx('sp-panel')}>
+                    <header className={cx('sp-panelHead')}>
+                      <h3 className={cx('sp-panelTitle')}>活跃轨迹</h3>
+                      <span className={cx('sp-count')}>{trajectories.length}</span>
+                    </header>
+                    {trajectories.length === 0 ? (
+                      <p className={cx('sp-panelEmpty')}>暂无活跃轨迹</p>
+                    ) : (
+                      <ul className={cx('sp-list')}>
+                        {trajectories.map((t) => (
+                          <li key={t.dirName} className={cx('sp-item')}>
+                            {/* UID 优先显示：owner 定它是"用于交流的唯一标识"⇒ 有就顶在最前面；
+                                没有则退回编码（"不设定就还是用编码"）。 */}
+                            <span className={cx('sp-itemId')} title={t.uid !== null ? 'UID（唯一标识符）' : '编码（未设定 UID）'}>
+                              {t.uid ?? (t.sessionId || '—')}
+                            </span>
+                            <span className={cx('sp-itemName')} title={t.dirName}>{t.dirName}</span>
+                            <span className={cx('sp-itemAge')}>{t.ageDays}d</span>
+                            {!t.hasSessionMd && (
+                              <span className={cx('sp-itemWarn')} title="目录存在但没有 SESSION.md（空壳）">空壳</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
 
-                {/* ── 分组：活跃轨迹（owner 2026-10-18：面板要展示"所有没有归档的轨迹"）
-                    · 数据来自 /serenity/status 的 trajectories（后端已排除 `_archived` 等）
-                    · 🔴 不显示"完成/进行中" —— 轨迹永存，没有生命周期，就没有阶段可显示
-                    · 无 SESSION.md 的标出来：那是**真异常**（激活会失败），而不是阶段 */}
-                <div className={cx('sp-group')}>
-                  <div className={cx('sp-groupHead')}>
-                    <h3 className={cx('sp-groupTitle')}>活跃轨迹</h3>
-                    <span className={cx('sp-count')}>{trajectories.length}</span>
-                  </div>
-                  {trajectories.length === 0 ? (
-                    <p className={cx('sp-hint')}>（暂无活跃轨迹）</p>
-                  ) : (
-                    <ul className={cx('sp-trajList')}>
-                      {trajectories.map((t) => (
-                        <li key={t.dirName} className={cx('sp-trajItem')}>
-                          <span className={cx('sp-trajId')}>{t.sessionId || '—'}</span>
-                          <span className={cx('sp-trajName')} title={t.dirName}>{t.dirName}</span>
-                          <span className={cx('sp-trajAge')}>{t.ageDays}d</span>
-                          {!t.hasSessionMd && (
-                            <span className={cx('sp-trajWarn')} title="目录存在但没有 SESSION.md（空壳）">空壳</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                  {/* ── panel：技能（owner：「skills 分别占两个 panel」） ── */}
+                  <section className={cx('sp-panel')}>
+                    <header className={cx('sp-panelHead')}>
+                      <h3 className={cx('sp-panelTitle')}>技能</h3>
+                      <span className={cx('sp-count')}>{skills.length}</span>
+                    </header>
+                    {skills.length === 0 ? (
+                      <p className={cx('sp-panelEmpty')}>暂无技能</p>
+                    ) : (
+                      <ul className={cx('sp-list')}>
+                        {skills.map((s) => (
+                          <li key={s.name} className={cx('sp-item')}>
+                            <span className={cx('sp-itemName', 'sp-itemNameFull')} title={s.name}>{s.name}</span>
+                            {/* 已建模 = 有 skill.ttl。🟢 它是**信息**不是缺陷：无 skill.ttl 完全正常。 */}
+                            {s.modeled && (
+                              <span className={cx('sp-itemTag')} title="已建模（存在 skill.ttl）">建模</span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </section>
                 </div>
-
-                {/* ── 提示：配置在 DSH 设置面板 ── */}
-                <p className={cx('sp-hint')}>
-                  💡 开关 / 阈值 / 账号 / 白名单在 <strong>设置 → Serenity</strong> 里配。
-                </p>
               </>
             ) : (
-              <div className={cx('sp-group')}>
-                <h3 className={cx('sp-groupTitle')}>状态</h3>
-                <div className={cx('sp-rows')}>
-                  <div className={cx('sp-row')}>
-                    <span className={cx('sp-label')}>ACC</span>
-                    <span className={cx('sp-value')}>未激活（工作区不在 CCC 内）</span>
-                  </div>
-                </div>
-              </div>
+              <p className={cx('sp-panelEmpty')}>未激活（工作区不在 CCC 内）</p>
             )}
           </div>
           {/* 右栏：宁静号航行动画（ACC 层资产 /serenity/voyage，S142 §12.44 → v1.36.1 改右栏）。

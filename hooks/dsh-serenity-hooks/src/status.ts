@@ -6,7 +6,7 @@
  */
 
 import { existsSync, writeFileSync, rmSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { resolve, join, dirname } from 'node:path'
+import { resolve, join, dirname, basename } from 'node:path'
 import { homedir } from 'node:os'
 import {
   isSafeModeOn,
@@ -19,6 +19,7 @@ import {
 import { cccRootForCwd } from './ccc-roots.js'
 import { ACC_VERSION } from './constants.js'
 import { listActiveTrajectories, type TrajectorySummary } from './cognitive-trajectory-ops.js'
+import { listOpencodeSkillDirs } from './skills/opencode-scan.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
 import { isoLocal } from './time.js'
 
@@ -104,8 +105,14 @@ export function readDshVersion(): string | null {
   return null
 }
 
-interface SerenityStatus {
-  root: string | null
+/** 面板用的技能摘要（owner 2026-10-18：skills 单独占一个 panel） */
+interface SkillSummary {
+  name: string
+  /** 是否已建模（同目录存在 `skill.ttl`）。**无 skill.ttl 完全正常**，不是缺陷。 */
+  modeled: boolean
+}
+
+interface SerenityStatus {  root: string | null
   accVersion: string
   dshVersion: string | null
   nodeVersion: string
@@ -121,6 +128,14 @@ interface SerenityStatus {
    * 无 CCC 根时为 `[]`。
    */
   trajectories: TrajectorySummary[]
+  /**
+   * 技能清单（owner 2026-10-18：「活跃轨迹、skills 分别占两个 panel」）。
+   * 只给**面板要展示的最小事实**（名字 ＋ 是否已建模 `skill.ttl`），**不搬 description**：
+   * 面板是**状态信息**，不是技能说明书；描述在 SKILL.md 里，搬一份即第二真相源。
+   * ⚠️ 数据源 = `listOpencodeSkillDirs`（全量扫描 `.opencode/skills/` 下每个含 SKILL.md 的目录）。
+   * ⛔ **不能用 `findEntrySkills`** —— 那只是入口 skill（`*-serenity`），不是全量。
+   */
+  skills: SkillSummary[]
   restrict: {
     lastKey: string | null
     lastAttemptAt: string | null
@@ -141,7 +156,7 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     nodeVersion: process.version,
   }
   if (!root) {
-    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, cheapWorkerModel: null, trajectories: [], restrict }
+    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, cheapWorkerModel: null, trajectories: [], skills: [], restrict }
   }
   const cfg = loadSerenityConfig(root, configPaths)
   return {
@@ -153,8 +168,29 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     cheapWorkerModel: readCheapWorkerConfig(root, configPaths)?.defaultModel ?? null,
     // 🔴 面板数据源：**复用**轨迹层的判据（含 `_` 跳过），不在这里自己扫目录
     trajectories: listActiveTrajectories(root),
+    skills: listSkillSummaries(root),
     restrict,
   }
+}
+
+/**
+ * 技能清单（面板用；owner 2026-10-18 要求 skills 单独占一个 panel）。
+ *
+ * 只取**两个可文件系统验证的事实**：名字（目录名）＋ 是否已建模（`skill.ttl` 存在）。
+ * 为什么"是否建模"值得进面板：它是 skill 形态的**唯一二值区别**（有 `skill.ttl` = 增强型，
+ * 无 = 普通 skill），而后者**完全正常** —— 所以面板把它呈现为**信息**，不是缺陷标记。
+ *
+ * ⚠️ 单目录读失败**不抛**（`loadOpencodeSkill` 返回 null 时照旧收入名字）：
+ * 面板是只读状态面，一个坏目录不该让整块面板消失。
+ */
+function listSkillSummaries(root: string): SkillSummary[] {
+  const out: SkillSummary[] = []
+  for (const dir of listOpencodeSkillDirs(root)) {
+    const name = basename(dir)
+    // 已建模判据 = 同目录下存在 `skill.ttl`（与 serenity-skill-creator 的判据**同一个**）
+    out.push({ name, modeled: existsSync(join(dir, 'skill.ttl')) })
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** 切换安全模式（写/删标记文件）；返回实际生效状态 */

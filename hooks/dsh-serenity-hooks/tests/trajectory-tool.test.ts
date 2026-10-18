@@ -116,14 +116,15 @@ afterEach(() => {
 })
 
 describe('cognitive_trajectory：工具面', () => {
-  it('工具名 = cognitive_trajectory；action 必填且枚举 = COGNITIVE_TRAJECTORY_ACTIONS（9 个，含 archive）', () => {
+  it('工具名 = cognitive_trajectory；action 必填且枚举 = COGNITIVE_TRAJECTORY_ACTIONS（10 个，含 archive/uid）', () => {
     expect(tool.name).toBe('cognitive_trajectory')
     expect(tool.parameters.action?.required).toBe(true)
     expect(tool.parameters.action?.enum).toEqual([...COGNITIVE_TRAJECTORY_ACTIONS])
-    // 🔴 2026-10-18：8 → **9**（新增 `archive` —— 轨迹没有生命周期后，它是唯一的"状态变化"）
-    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(9)
+    // 🔴 2026-10-18：8 → 9（`archive`）→ **10**（`uid`：唯一标识符，独立于编码与命名）
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(10)
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('archive')
-    for (const k of ['name', 'summary', 'target', 'at', 'message', 'note', 'force', 'dryRun']) {
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('uid')
+    for (const k of ['name', 'uid', 'summary', 'target', 'at', 'message', 'note', 'force', 'dryRun']) {
       expect(tool.parameters[k], `缺参数 ${k}`).toBeDefined()
     }
   })
@@ -497,5 +498,117 @@ describe('cognitive_trajectory：archive（🔴 唯一的"状态变化"，单向
     expect(list, '`_archived` 不得出现在清单里').not.toContain('_archived')
     // 它的子项也不该被列
     expect(list).not.toContain(A_DIR)
+  })
+})
+
+/**
+ * 🔴 2026-10-18 新增：`uid` —— 认知轨迹的**唯一标识符**。
+ *
+ * owner 原话：*"命名很可能由于变化而变化，所以我们需要让认知轨迹支持一种用于交流的唯一标识符，
+ * 它不同于编码和命名，而是单独设定的（也可以不设定，不设定就还是用编码），
+ * 所有可以用编码操作的能力，都同样支持唯一标识符，唯一标识符用文件形式声明在认知轨迹目录中"*。
+ *
+ * 核心判据 = **"所有能用编码操作的，都能用 UID 操作"**（本组第 2 条就是它的机械形式）。
+ */
+describe('cognitive_trajectory：uid（唯一标识符，独立于编码与命名）', () => {
+  const B_BODY = '# SESSION: beta\n- ID: S901\n'
+
+  it('设定 UID ⇒ 落成目录内的声明文件；未设定 ⇒ 读回 null（不是错误）', async () => {
+    writeSession(A_DIR)
+    // 未设定：读回 null
+    const before = (await run({ action: 'uid', name: 'S900' })) as Record<string, unknown>
+    expect(before.uid).toBeNull()
+    // 设定
+    const set = (await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })) as Record<string, unknown>
+    expect(set.uid).toBe('alpha-main')
+    // 文件真的落在轨迹目录内（owner："用文件形式声明在认知轨迹目录中"）
+    const f = join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID')
+    expect(existsSync(f), 'UID 必须是轨迹目录内的一个文件').toBe(true)
+    expect(readFileSync(f, 'utf-8').trim()).toBe('alpha-main')
+  })
+
+  it('🔴 核心判据：所有能用编码操作的动作，同样接受 UID', async () => {
+    // 这条是 owner 需求里最硬的一句的机械形式。只测 show 不够 —— 要逐条点名。
+    writeSession(A_DIR)
+    writeSession(B_DIR, B_BODY)
+    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
+
+    // show：用 UID 能读到同一条
+    const viaUid = (await run({ action: 'show', name: 'alpha-main' })) as string
+    const viaId = (await run({ action: 'show', name: 'S900' })) as string
+    expect(viaUid, 'show 用 UID 与用编码必须等价').toBe(viaId)
+
+    // use：用 UID 能激活
+    const used = (await run({ action: 'use', name: 'alpha-main', summary: '概' })) as Record<string, unknown>
+    expect(used.dir).toBe(A_DIR)
+
+    // uid 读回：用 UID 自己也能定位
+    const readBack = (await run({ action: 'uid', name: 'alpha-main' })) as Record<string, unknown>
+    expect(readBack.uid).toBe('alpha-main')
+
+    // archive：用 UID 能归档
+    const arch = (await run({ action: 'archive', name: 'alpha-main' })) as Record<string, unknown>
+    expect(arch.ok).toBe(true)
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', '_archived', A_DIR))).toBe(true)
+  })
+
+  it('UID 形态非法 ⇒ 拒（它要被逐字打出来交流，不容忍需转义的字符）', async () => {
+    writeSession(A_DIR)
+    // ⚠️ `''` 不在本组：空串是**清除**语义（回到用编码），不是"非法形态"。
+    //    第一版我把它混进来，得到"清除成功"而不是"拒绝" —— 那是测试写错，不是产品缺陷。
+    for (const bad of ['has space', '有中文', 'a/b', '-leading', 'x'.repeat(65)]) {
+      await expect(run({ action: 'uid', name: 'S900', uid: bad }), `"${bad}" 应被拒`).rejects.toThrow()
+    }
+  })
+
+  it('🔴 唯一性：重复 UID 被拒，且**不污染**既有的那一条（负控）', async () => {
+    writeSession(A_DIR)
+    writeSession(B_DIR, B_BODY)
+    await run({ action: 'uid', name: 'S900', uid: 'shared' })
+    await expect(run({ action: 'uid', name: 'S901', uid: 'shared' })).rejects.toThrow('已被')
+    // 负控：A 的 UID 文件必须原封不动、B 的不得生成
+    expect(readFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'utf-8').trim()).toBe('shared')
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', B_DIR, 'TRAJECTORY-UID'))).toBe(false)
+  })
+
+  it('清除（uid=""）⇒ 删除声明文件，回到用编码', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
+    await run({ action: 'uid', name: 'S900', uid: '' })
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'))).toBe(false)
+    // 清除后仍可用编码操作（"不设定就还是用编码"）
+    expect((await run({ action: 'show', name: 'S900' })) as string).toContain('alpha')
+  })
+
+  it('🔴 UID 精确匹配是大小写敏感的（`Alpha` ≠ `alpha`）', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'uid', name: 'S900', uid: 'Alpha' })
+    // 正控：精确大小写命中
+    expect((await run({ action: 'show', name: 'Alpha' })) as string).toContain('SESSION: alpha')
+    // 负控：小写**不命中 UID**。
+    // ⚠️ 但它仍会落到**模糊目录名匹配**（目录名含 `alpha`）⇒ 整体仍能解析到同一条 ——
+    //    这是**既有行为**（模糊分支在 UID 之前就存在），不是本改动引入的近似匹配。
+    //    所以要断言的是"UID 这条路没命中"，判据 = 去掉模糊分支时它会失败。
+    //    可机械验证的形态：用**目录名里不出现的**大小写变体。
+    await run({ action: 'uid', name: 'S900', uid: 'Zulu' })
+    await expect(
+      run({ action: 'show', name: 'zulu' }),
+      '小写 zulu 不得命中 UID "Zulu"（也不含在目录名里 ⇒ 两条路都不该命中）',
+    ).rejects.toThrow('Session not found')
+  })
+
+  it('list 会印出已设定的 UID（它是用于交流的标识，得让人看得见）', async () => {
+    writeSession(A_DIR)
+    expect((await run({ action: 'list' })) as string).not.toContain('[alpha-main]')
+    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
+    expect((await run({ action: 'list' })) as string).toContain('[alpha-main]')
+  })
+
+  it('🔴 UID 不改变本体：目录名与 SESSION.md 逐字节不变（与 archive 同一条纪律）', async () => {
+    const md = writeSession(A_DIR)
+    const before = readFileSync(md, 'utf-8')
+    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR)), '目录名不得因设定 UID 而改').toBe(true)
+    expect(readFileSync(md, 'utf-8'), 'SESSION.md 不得被改写').toBe(before)
   })
 })

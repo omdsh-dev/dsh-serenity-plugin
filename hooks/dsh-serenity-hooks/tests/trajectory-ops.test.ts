@@ -130,8 +130,14 @@ describe('cognitive-trajectory-ops: 生命周期（对齐 osp spec）', () => {
     const before = listSessions(dir)
     markDone(a)
     const after = listSessions(dir)
-    // ① 清单标记不变（旧实现在这里会从 ○ 变 ✓）
-    expect(after).toBe(before)
+    // ① 清单**标记**不变（旧实现在这里会从 ○ 变 ✓）
+    //    ⚠️ 不能直接 `expect(after).toBe(before)`：该行还含 **age 字符串**，而 age 是时间的函数
+    //    （`markDone` 写文件会刷新目录 mtime ⇒ 读数本身会变）。断言必须打在**不变量**上，
+    //    不打在"写下即变"的时间读数上 —— 这正是本仓既有那条纪律，我第一版就在这里栽了。
+    const markerOf = (s: string): string =>
+      (s.split('\n').find((l) => l.includes(a.dirName)) ?? '').trim().charAt(0)
+    expect(markerOf(before), '写入前该行标记必须是 ○').toBe('○')
+    expect(markerOf(after), '写成已完成形态之后标记仍是 ○（旧实现在此处会变 ✓）').toBe('○')
     expect(after).not.toContain('✓')
     // ② 统计里不再有任何阶段计数（旧实现会打印 Completed: 1）
     const s = summarize(dir)

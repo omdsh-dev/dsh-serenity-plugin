@@ -252,26 +252,28 @@
      （左栏 `.sp-popBody` 有 overflow-y:auto，右栏动画吃满行高）——卡片本身仍不溢出视口。 */
   max-height: calc(100vh - 80px);
 }
-/* 左栏：信息（正文）——固定 340px，与旧卡片同宽，保证原有排印不变 */
-.sp-popVoyage > .sp-popBody {
+/* 左栏：内容区（**主体**）—— owner 2026-10-18：「内容区作为主体，用多 panel 模式」
+   旧形态：固定 340px 的信息栏 ＋ 吃掉剩余宽度的动画栏（动画占了大半张卡片）。
+   现在：内容区 `flex: 1` 吃掉主体，动画降为**定宽窄栏**（见 .sp-voyage）。
+   ⚠️ 顺序仍由 `order` 决定（内容在左、动画在右），与 DOM 顺序解耦。 */
+.sp-popVoyage > .sp-content {
+  order: 1;
   position: relative;
   z-index: 1;
-  order: 1;
-  flex: none;
-  width: 340px;
-  min-width: 0;
 }
-/* 右栏：动画——吃掉剩余宽度，并吃满左栏高度 */
+/* 右栏：动画——从"吃剩余宽度"降为**定宽装饰条**
+   owner 的原话是"内容区作为主体" ⇒ 装饰不该再与主体争面积。
+   240px：够看清飞船与词元，又不至于把两个 panel 挤窄。窄屏（@media）时退回全宽置于下方。 */
 .sp-voyage {
   order: 2;
-  flex: 1 1 auto;
+  flex: none;
+  width: 240px;
   min-width: 0;
   position: relative;
   pointer-events: none; /* 纯展示：不挡点击、不抢焦点 */
   overflow: hidden;
   border-radius: 10px;
-  /* 🔴 2026-10-18：下限 260 → **360**。卡片加高后动画也该跟着长起来，
-     否则"加高"只换来左栏更多留白、飞船还是原来那么大一块。 */
+  /* 卡片加高后动画也随之变长，避免"加高只换来留白" */
   min-height: 360px;
 }
 .sp-voyage iframe {
@@ -296,13 +298,17 @@
     flex-direction: column;
     align-items: stretch;
   }
-  .sp-popVoyage > .sp-popBody {
-    width: auto; /* 单栏下不再固定 340px，跟随卡片宽度 */
-    flex: none; /* 按内容高（仍受自身 max-height 约束） */
+  .sp-popVoyage > .sp-content {
+    flex: 1 1 auto;
+  }
+  /* 单栏时 panel 网格也退回单列（窄屏两列并排会各自只剩半屏不到的宽度） */
+  .sp-panels {
+    grid-template-columns: 1fr;
   }
   .sp-voyage {
     flex: none;
-    height: 200px; /* 单栏时给动画明确高度，避免被 flex 压扁 */
+    width: auto;
+    height: 180px;
     min-height: 0;
   }
 }
@@ -344,6 +350,199 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+/* ── safe-mode 状态徽标（owner 2026-10-18：「显示小标志即可，是个状态信息」）──────────
+   旧形态 = 盾牌 ＋ SAFE 字样 ＋ Mac 滑块（看起来像控件、实际可点）。
+   现在 = **不可交互**的小徽标：一个状态点 ＋ 两三个字母。
+   ⚠️ 刻意**不做 hover 反馈、不做 cursor:pointer** —— 它不是按钮。
+     这类"长得像控件却只是信息"的形态，正是旧版让人误以为面板能改 safe-mode 的成因。 */
+.sp-safeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 10.5px;
+  line-height: 15px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.sp-safeBadgeOn {
+  color: #6ee7b7;
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.35);
+}
+.sp-safeBadgeOff {
+  color: var(--dsw-alias-label-secondary);
+  background: rgba(127, 127, 127, 0.1);
+  border-color: var(--dsw-alias-border-l1);
+}
+.sp-safeDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+  background: currentColor;
+}
+
+/* ── 运行环境：一行元信息（owner：「比较丑，简易一些」）──────────────
+   旧形态 = 三个带边框的 row 卡片。它们是**背景事实**（路径/模型/守卫），
+   逐行加框等于把"不值得对焦的信息"提到与主体同等的视觉权重。
+   现在 = 一行等宽小字，溢出省略（path 很长时靠 title 给全文）。 */
+.sp-meta {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+  font-family: var(--ds-font-family-code, monospace);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.sp-metaPath {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-metaSep {
+  flex: none;
+  opacity: 0.45;
+}
+
+/* ── 多 panel 主体（owner：「内容区作为主体，用多 panel 模式」）──────────
+   布局契约：这一层是**主体**，所以它拿 `flex: 1`；右栏动画被压到定宽窄条。
+   panel 网格两列等宽 —— 轨迹与技能并排，各自内部滚动。
+   ⚠️ 用 grid 而不是 flex：两 panel 要**等宽且同高**（等高让"多 panel"读起来是一个整体）。 */
+.sp-content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden;
+}
+.sp-panels {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  overflow: hidden;
+}
+.sp-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--dsw-alias-border-l1);
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+.sp-panelHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sp-panelTitle {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--dsw-alias-label-secondary);
+}
+.sp-panelEmpty {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+}
+/* panel 内列表：**自身滚动**（不把 panel 顶长），外层不再套第二层滚动 */
+.sp-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.sp-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  font-family: var(--ds-font-family-code, monospace);
+  font-size: 11px;
+  line-height: 16px;
+}
+.sp-item:hover {
+  background: var(--dsw-alias-bg-overlay);
+}
+/* 标识列：UID 或编码。定宽让多行对齐，与目录名分离 */
+.sp-itemId {
+  flex: none;
+  min-width: 56px;
+  max-width: 120px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-itemName {
+  flex: 1;
+  min-width: 0;
+  color: var(--dsw-alias-label-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sp-itemNameFull {
+  flex: 1 1 auto;
+}
+.sp-itemAge {
+  flex: none;
+  min-width: 32px;
+  text-align: right;
+  color: var(--dsw-alias-label-secondary);
+}
+/* 空壳标记：目录在但没有 SESSION.md ⇒ **真异常**（激活会失败），不是阶段 */
+.sp-itemWarn {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: #fff;
+  background: #c2410c;
+}
+/* 已建模标记：🟢 **信息**不是缺陷（无 skill.ttl 完全正常）⇒ 中性灰，不用告警色 */
+.sp-itemTag {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--dsw-alias-label-secondary);
+  border: 1px solid var(--dsw-alias-border-l1);
 }
 
 /* ── 活跃轨迹清单（owner 2026-10-18 需求二）─────────────────────────

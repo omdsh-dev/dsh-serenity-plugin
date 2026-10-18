@@ -42,6 +42,7 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
@@ -73,10 +74,10 @@ import { localDate, localDateTimeMinutes } from './time.js'
  *   而**管轨迹的人正是用本工具的人**；挂这儿 = 设计 §9-5 的"**既有 guide 位置、不新增域**"。
  *   ⚠️ 本动作**纯读**（输出指南正文，不碰 fs、不碰注册表）。
  */
-type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'send-now' | 'send-later' | 'cro-guide'
+type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'uid' | 'send-now' | 'send-later' | 'cro-guide'
 
 export const COGNITIVE_TRAJECTORY_ACTIONS: readonly CognitiveTrajectoryAction[] = [
-  'list', 'show', 'create', 'use', 'rebuild', 'archive', 'send-now', 'send-later', 'cro-guide',
+  'list', 'show', 'create', 'use', 'rebuild', 'archive', 'uid', 'send-now', 'send-later', 'cro-guide',
 ]
 
 /**
@@ -192,14 +193,118 @@ function extractSessionId(dirName: string): string {
   return m ? `S${m[1]}` : ''
 }
 
+// ── 唯一标识符（UID）──
+
 /**
- * 根据 key 查找会话（对齐 osp findSession）：
- * 精确目录名 → S### ID（允许 S31→031）→ 唯一模糊子串匹配（多个则报错）
+ * UID 的声明文件名（**固定名、住在轨迹目录内**）。
+ *
+ * 🔴 owner 2026-10-18 需求原话：*"认知轨迹编号和命名问题，命名很可能由于变化而变化，
+ * 所以我们需要让认知轨迹支持一种用于交流的唯一标识符，它不同于编码和命名，而是单独设定的
+ * （也可以不设定，不设定就还是用编码），所有可以用编码操作的能力，都同样支持唯一标识符，
+ * 唯一标识符用文件形式声明在认知轨迹目录中"*。
+ *
+ * ## 为什么是「一个文件」而不是 frontmatter 里一行
+ * | 形 | 问题 |
+ * |---|---|
+ * | 写进 `SESSION.md` frontmatter | SESSION.md 是**轨迹的身体**（会被重写、被 rebuild 锚点反复读）⇒ 标识符住在会变的东西里 |
+ * | 写进目录名 | 改名即变 —— 而这正是要解决的问题（owner：命名会变） |
+ * | **独立小文件**（选定） | 与目录名、SESSION.md **都解耦**；改标识符不动正文、不动目录名；删文件即"回到用编码" |
+ *
+ * ## 语义边界（R↓）
+ * - **可选**：文件不存在 ⇒ 用编码（`S###`），**不是错误**。
+ * - **只用于"被指认"**：它是 `findSession` 的一个**解析分支**，不参与排序、不参与展示优先级、
+ *   **不改变**目录名与 SESSION.md 一个字节（与 `archive` 同一条纪律：只换指认方式，不动本体）。
+ * - **唯一性**：由 `setTrajectoryUid` 在写入时保证（重复即拒绝）。读取侧不做全表唯一性断言 ——
+ *   外部手工造的重复应由写入侧拦，读取侧只能"第一个命中"，那是注入侧的职责不是解析侧的。
+ */
+export const UID_FILENAME = 'TRAJECTORY-UID'
+
+/** UID 合法形态：**保守**（只允许交流安全的字符）—— 它会被用在命令行、消息文本、日志里 */
+const UID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+
+/**
+ * 校验 UID 形态。
+ *
+ * 为什么保守（R↓）：UID 是**给人和 agent 在对话里互相指认用的**（owner：「用于交流」）⇒
+ * 它必须能**逐字打出来**。含空格/引号/中文的 UID 会在 shell、JSON、markdown 里各自需要一套转义
+ * ⇒ "用于交流"这个目的当场失败。⇒ 限定 `[A-Za-z0-9._-]`，首字符必须字母数字，上限 64。
+ *
+ * ⚠️ 大小写**敏感**：`S142` 与 `s142` 是两个不同 UID（判据：唯一标识符不是给人近似匹配用的；
+ * 要模糊匹配请用目录名/编码那条既有分支）。
+ */
+export function isValidUid(uid: string): boolean {
+  return UID_PATTERN.test(uid)
+}
+
+/**
+ * 读一条轨迹的 UID（文件不存在 / 读失败 / 形态非法 ⇒ `null` = "没设定"）。
+ *
+ * 🔴 **形态非法的文件按"没设定"处理，而不是报错**：解析侧出现在**每一次** `findSession` 里
+ * （show/use/archive/send-now/send-later 全走它），在那里抛错会让一个坏文件**炸掉整条轨迹的所有操作**
+ * —— 惩罚远大于问题本身。坏 UID 由 `setTrajectoryUid` 在**写入侧**拦住（那里才该响亮失败）。
+ */
+export function readTrajectoryUid(sessionPath: string): string | null {
+  try {
+    const raw = readFileSync(join(sessionPath, UID_FILENAME), 'utf-8').trim()
+    return isValidUid(raw) ? raw : null
+  } catch {
+    return null // 无该文件 = 未设定（常态，不是错误）
+  }
+}
+
+/**
+ * 设定 / 清除一条轨迹的 UID。
+ *
+ * @param sessionsDir AGENT_SESSIONS 绝对路径
+ * @param key 定位用（目录名 / S### / 既有 UID / 唯一模糊串）
+ * @param uid 新 UID；`null` ⇒ **删除声明文件**（回到"用编码"）
+ * @throws UID 形态非法 ／ 已被**别的**轨迹占用 ／ 目标轨迹不存在
+ */
+export function setTrajectoryUid(sessionsDir: string, key: string, uid: string | null): { dirName: string; uid: string | null; path: string } {
+  const target = findSession(sessionsDir, key)
+  if (!target) throw new Error(`Trajectory not found: "${key}". Use "list" to see available trajectories.`)
+  const file = join(target.path, UID_FILENAME)
+
+  if (uid === null) {
+    rmSync(file, { force: true })
+    return { dirName: target.dirName, uid: null, path: file }
+  }
+
+  if (!isValidUid(uid)) {
+    throw new Error(
+      `Invalid trajectory UID: "${uid}". ` +
+      `允许 [A-Za-z0-9._-]，首字符须字母或数字，长度 ≤64（它要被逐字打出来用于交流 ⇒ 不容忍需要转义的字符）`,
+    )
+  }
+  // 🔴 唯一性 = 写入侧的责任：重复 UID 会让"用 UID 指认"变成歧义，而**歧义在读取侧无法消解**
+  const clash = readAllSessions(sessionsDir).find(
+    (s) => s.dirName !== target.dirName && readTrajectoryUid(s.path) === uid,
+  )
+  if (clash) {
+    throw new Error(`UID "${uid}" 已被 ${clash.dirName} 占用（唯一标识符必须唯一；先解除它或换一个）`)
+  }
+  writeFileSync(file, uid + '\n', 'utf-8')
+  return { dirName: target.dirName, uid, path: file }
+}
+
+/**
+ * 根据 key 查找轨迹。
+ *
+ * 解析顺序（**越精确越靠前**，且**前三级都不做模糊**）：
+ * ① 目录名精确 ／ ② **UID 精确** ／ ③ 编码 `S###`（允许 `S31`→`031`）／ ④ 唯一模糊子串（多个则报错）
+ *
+ * 🔴 **UID 排在编码之前**是因为 owner 定的语义：UID 是"单独设定"的**交流标识**
+ * （"不设定就还是用编码"⇒ 设定之后，用 UID 指认就该与编码同等可靠）。
+ * 它与目录名都属**精确匹配**、彼此不会混淆（UID 形态不含 `--`，目录名必含）⇒ 顺序对结果无实质影响，
+ * 但把这个顺序写死，避免后来者以为"UID 是模糊匹配的一种"。
  */
 export function findSession(sessionsDir: string, key: string): SessionEntry | null {
   const all = readAllSessions(sessionsDir)
   const byName = all.find((s) => s.dirName === key)
   if (byName) return byName
+  // ② UID 精确命中（大小写敏感）
+  const byUid = all.find((s) => readTrajectoryUid(s.path) === key)
+  if (byUid) return byUid
   const searchId = key.replace(/^S/, '').padStart(3, '0')
   const byId = all.find((s) => {
     const m = s.dirName.match(/--S(\d{3,})--/)
@@ -231,7 +336,11 @@ export function listSessions(root: string, activeId?: string): string {
     const isActive = activeId !== undefined && sessionId !== '' && sessionId === activeId
     // 🔴 2026-10-18：只剩两态（active ● / 普通 ○）。旧的三态里 `✓` = "已完成"，随生命周期一起删。
     const status = isActive ? '●' : '○'
-    return `${status} ${s.dirName} (${age}d ago)`
+    // UID 设定过就同时印出来（owner：它是"用于交流的唯一标识符"）——
+    // ⚠️ 未设定时**不印占位符**：没有 UID 是常态，印一个空括号只会制造噪声。
+    const uid = readTrajectoryUid(s.path)
+    const uidTag = uid === null ? '' : ` [${uid}]`
+    return `${status} ${s.dirName} (${age}d ago)${uidTag}`
   })
   return `AGENT_SESSIONS/ (${sessions.length} active)\n` + lines.join('\n')
 }
@@ -690,6 +799,11 @@ export function summarize(root: string): string {
 export interface TrajectorySummary {
   dirName: string
   sessionId: string
+  /**
+   * 唯一标识符（未设定 ⇒ `null`）。面板与 `list` 同源显示 ——
+   * 它是"用于交流"的标识，人类在面板上看到它才能直接拿去用。
+   */
+  uid: string | null
   ageDays: number
   hasSessionMd: boolean
 }
@@ -699,6 +813,7 @@ export function listActiveTrajectories(root: string): TrajectorySummary[] {
   return readAllSessions(sessionsRoot(root)).map((s) => ({
     dirName: s.dirName,
     sessionId: extractSessionId(s.dirName),
+    uid: readTrajectoryUid(s.path),
     ageDays: Math.floor((now - s.mtime.getTime()) / DAY),
     hasSessionMd: s.status.hasSessionMd,
   }))
