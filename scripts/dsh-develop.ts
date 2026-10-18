@@ -1223,8 +1223,38 @@ function cmdRestartWeb(): void {
   }
 
   // 3) setsid + nohup 启动新进程（rc.6 CLI web profile）
+  //
+  // 🔴🔴 **2026-10-18（owner 报「把 node 搞崩了」）—— 必须显式给堆上限**：
+  //   本行原先是裸 `node … web` ⇒ 用 V8 **默认堆上限（本机实测 ≈4 GB）**。
+  //   实测（`/tmp/dsh-web-restart-v1.69.0.log`）：进程在**启动期**就把堆推到 3.7 GB
+  //   （`/proc/<pid>/status` 的 `VmHWM`），随后撞线 ⇒
+  //   `FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory`。
+  //   ⚠️ **不是内存不够**：同一时刻 `/proc/meminfo` 的 `MemAvailable` ≈17 GB（物理 31 GB）
+  //   ⇒ 真正的病是「**给自己设的上限低于自己的峰值**」，机器还有一半空着。
+  //
+  //   ⇒ 判据：**上限按机器容量推导，不写死一个数字**（写死会在换机器/加负载时再次贴线）。
+  //   取 `MemTotal × 0.6`，并夹在 [4 GB, 16 GB]：
+  //     · 下限 4 GB = 不低于 Node 默认值（换到小机器时行为不回退）
+  //     · 上限 16 GB = 给宿主 UI / chromium / 其他 CCC 留出余量（本机 31 GB 的一半以上）
+  //   🔵 为什么是 0.6 而不是 0.8：宿主的峰值里有一部分是**可回收的年轻代**，
+  //      留出空间能让 GC 正常工作；贴太紧会让 V8 提前进入"越 GC 越慢"的形态。
+  //
+  //   `--max-old-space-size` 只调**老生代**；总 RSS 会略高，因此上限不能再收紧。
+  const heapMb = ((): number => {
+    try {
+      const meminfo = readFileSync('/proc/meminfo', 'utf-8')
+      const m = /^MemTotal:\s+(\d+)\s+kB$/m.exec(meminfo)
+      if (!m) return 8192
+      const totalMb = Math.floor(Number(m[1]) / 1024)
+      return Math.max(4096, Math.min(16384, Math.floor(totalMb * 0.6)))
+    } catch {
+      // 读不到 meminfo（非 Linux / 受限容器）⇒ 退回一个仍然高于默认值的稳妥档
+      return 8192
+    }
+  })()
   const log = `/tmp/dsh-web-restart-v${currentVersion().pkg}.log`
-  const cmd = `cd ${process.env.HOME ?? ''} && setsid nohup node ${bin} web > ${log} 2>&1 < /dev/null & disown`
+  const cmd = `cd ${process.env.HOME ?? ''} && setsid nohup node --max-old-space-size=${heapMb} ${bin} web > ${log} 2>&1 < /dev/null & disown`
+  console.log(`[dsh-develop]    堆上限 --max-old-space-size=${heapMb} MB（按 MemTotal 推导）`)
   const r = run('bash', ['-c', cmd], { cwd: process.cwd(), quiet: true })
   if (r.status !== 0) fail(`web 启动失败: ${r.stderr}`, 2)
   console.log(`[dsh-develop] ✓ web 已重启（bin: ${bin}，日志: ${log}）`)
