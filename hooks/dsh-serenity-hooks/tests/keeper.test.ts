@@ -46,7 +46,7 @@ import {
   forgetRebuildTodoState,
   __resetRebuildTodoForTest,
 } from '../src/seams/keeper.js'
-import { unregisterSkiffSession } from '../src/role/skiff/core.js'
+import { unregisterSkiffSession } from '../src/trajectory/session.js'
 import { resetSkiffSessions } from '../src/trajectory/policy/window.js'
 import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
 import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/trajectory/core.js'

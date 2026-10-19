@@ -69,7 +69,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 import { writeWeixinCredential, weixinSessionIdForTrajectory } from '../src/im/route.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
+import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
 // 轨迹夹具（造 skiff 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `skiff.json` 里）
 import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 

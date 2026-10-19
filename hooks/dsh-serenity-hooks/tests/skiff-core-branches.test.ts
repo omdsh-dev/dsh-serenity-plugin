@@ -14,7 +14,7 @@ import {
   workspaceCognitiveTrajectoryLine,
   skiffCognitiveTrajectoryEnabled,
   skiffMsmGate,
-} from '../src/role/skiff/core.js'
+} from '../src/trajectory/session.js'
 import { resetSkiffSessions, registerSkiffSession } from '../src/trajectory/policy/window.js'
 import { makeSkiffSession, makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 import { resetActiveSessionStore } from '../src/trajectory/core.js'

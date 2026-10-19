@@ -24,7 +24,7 @@ import type { Context } from 'cordis'
 import type { JsonValue } from '../kernel/json.js'
 import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
 import { runMsm, MSM_ACTIONS } from './msm/service.js'
-import { skiffMsmGate } from '../role/skiff/core.js'
+import { skiffMsmGate } from '../trajectory/session.js'
 import { validateSkiffConfig, applySkiffConfig, listSkiffRoles, SKIFF_GUIDE } from './skiff-admin.js'
 
 function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {

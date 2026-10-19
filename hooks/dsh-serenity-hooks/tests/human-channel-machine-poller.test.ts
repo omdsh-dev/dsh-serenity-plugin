@@ -51,7 +51,7 @@ import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSet
 import { __resetPollersForTest, pollerOwners } from '../src/im/inbound.js'
 import { writeWeixinCredential } from '../src/im/route.js'
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
+import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
 import { makeTrajectory } from './helpers/skiff-fixture.js'
 
 /** 机器级账号行 */

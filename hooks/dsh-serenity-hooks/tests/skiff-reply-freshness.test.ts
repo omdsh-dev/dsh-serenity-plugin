@@ -6,7 +6,7 @@
  * 实测：同一段文本连发三条，**间隔仅 300~400ms、逐字相同**，`source: reply-fallback`。
  * 模型跑一轮不可能这么快 ⇒ 那不是"回答"，是**旧答案被反复重发**。
  *
- * 根因（`role/skiff/core.ts` 的 `askSkiff`）：`followup()` 是**异步投递** —— 刚投出去的那一刻
+ * 根因（`trajectory/session.ts` 的 `askSkiff`）：`followup()` 是**异步投递** —— 刚投出去的那一刻
  * `agent.status` **仍是 `idle`**，而 `waitAgentIdle` 的首行就是
  * `if (agent.status === 'idle') finish()` ⇒ 等待**立刻结算** ⇒ `lastAssistantText()` 读到的是
  * **上一轮**的 `assistant/message` ⇒ 桥把它当"本轮答案"；CCC 又开着 `fallbackOnNoSend`
@@ -21,7 +21,7 @@
  * ③ 超时有界：本轮不产出时，调用必须**有限时间返回**（不是挂住）。
  */
 import { describe, it, expect } from 'vitest'
-import { askSkiff } from '../src/role/skiff/core.js'
+import { askSkiff } from '../src/trajectory/session.js'
 
 /** fake ctx：不主动触发 idle（模拟"这一轮压根没起来"） */
 const ctxNoIdle = { on: () => () => {} } as never

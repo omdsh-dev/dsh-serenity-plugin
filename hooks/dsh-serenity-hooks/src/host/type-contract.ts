@@ -218,7 +218,7 @@ type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], st
  */
 type _AgentStatus = Expect<Extends<HostAgent['status'], string>>
 
-/** `agent.ctx.systemPrompt.section(...)` —— skiff 角色提示词 per-agent 注入（`role/skiff/core.ts:329`） */
+/** `agent.ctx.systemPrompt.section(...)` —— skiff 约束面提示词 per-agent 注入（`trajectory/session.ts`） */
 type _AgentCtxSystemPrompt = Expect<Extends<Ret<HostAgent['ctx']['systemPrompt']['section']>, unknown>>
 
 // ─────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 /**
- * role/skiff/core.ts — skiff 会话核心（**2026-10-19 重做**：skiff = 带 `skiff.json` 的认知轨迹）
+ * trajectory/session.ts — 轨迹的**会话（载体）管理**（**2026-10-19 重做**：skiff = 带 `skiff.json` 的认知轨迹）
  *
- * ## 与旧版的根本差别（R↓，这是本次重做的全部内容）
+ * ## 与旧版的根本差别（R↓，这是那次重做的全部内容）
  *
  * 旧版：skiff 是**一个角色**（`serenity.json` 的 `skiff.roles.<name>`），会话身份由
  * dsh sessionId 前缀 `skiff-` 判定，工作台由 `ensureSkiffSession` **另建一个 SESSION**。
@@ -9,7 +9,7 @@
  * 新版：skiff 是**一条认知轨迹**（目录里有 `skiff.json`）——
  * · **身份 = 轨迹编码**（不是角色名，不是 sessionId 前缀）；
  * · **工作台 = 该轨迹自己的 SESSION.md**（不再另建，`ensureSkiffSession` 已删除）；
- * · **判据 = 绑定的轨迹有没有 `skiff.json`**（唯一入口 `profile.ts` 的 `skiffProfileForSession`）。
+ * · **判据 = 绑定的轨迹有没有 `skiff.json`**（唯一入口 `policy/profile.ts` 的 `skiffProfileForSession`）。
  *
  * ⇒ 删掉的东西（它们只是旧模型的补丁，不是通用机制）：
  * `SKIFF_SESSION_PREFIX` 判定 ／ `ensureSkiffSession` 自动建工作台 ／
@@ -17,6 +17,15 @@
  *
  * ## 本文件仍负责
  * agent 创建/复用（resume-or-create）／系统提示词段注册／提问与等本轮回答／守门查询。
+ *
+ * ## S13（2026-10-19，轨迹中心重构）：此前位于 `role/skiff/` 下（该目录已随本重构消失）
+ *
+ * 文件名从 `core` 改为 `session`：它管的是**轨迹的会话（载体）**——
+ * 与同目录 `live.ts`（活载体查询）／`rebuild.ts`（换船板）／`cleanup.ts`（清理）同族。
+ * `core` 描述的是"它在角色目录里居中"，而那层含义随目录一起消失了。
+ *
+ * 🔴 **不拆**（S13 判据）：26 KB 未过 30 KB 阈值 ⇒ 按计划 R-d 的候选 ②，
+ * 本期是**零语义改动**，拆函数体属另一件事。
  */
 
 import type { Context } from 'cordis'
@@ -33,21 +42,21 @@ import {
   buildSkiffBasePrompt,
   resolveProfileSystemPrompt,
   createProfilePromptReader,
-} from '../../trajectory/policy/rules.js'
-import { readSkiffProfileAt, readSkiffProfileByCode, skiffProfileForSession, findDirNameByCode, type SkiffProfile } from '../../trajectory/policy/profile.js'
+} from './policy/rules.js'
+import { readSkiffProfileAt, readSkiffProfileByCode, skiffProfileForSession, findDirNameByCode, type SkiffProfile } from './policy/profile.js'
 import {
   registerSkiffSession as registryRegister,
   unregisterSkiffSession as registryUnregister,
   skiffTrajectoryDirNameFor as registryTrajectoryDirName,
   skiffSessionInfo as registrySessionInfo,
   skiffSessionSnapshot as registrySnapshot,
-} from '../../trajectory/policy/window.js'
-import { sessionsRoot } from '../../trajectory/core.js'
-import { hasTrajectoryPrompt } from '../../trajectory/prompt.js'
-import { hostAgents } from '../../host/access.js'
-import { waitAgentIdle } from '../worker/idle.js'
-import { registerCognitiveTrajectorySkillSection } from '../../seams/system-prompt.js'
-import { PLUGIN_SOURCE } from '../../kernel/message-source.js'
+} from './policy/window.js'
+import { sessionsRoot } from './core.js'
+import { hasTrajectoryPrompt } from './prompt.js'
+import { hostAgents } from '../host/access.js'
+import { waitAgentIdle } from '../role/worker/idle.js'
+import { registerCognitiveTrajectorySkillSection } from '../seams/system-prompt.js'
+import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
 export type { SkiffProfile }
 
@@ -394,7 +403,7 @@ async function createOrResumeAgent(
 }
 
 /** `provider/model` → agentOptions（由 worker/core 提供，保持单一实现） */
-import { splitModel } from '../worker/core.js'
+import { splitModel } from '../role/worker/core.js'
 
 // ── 提问（followup → 等本轮回答）──
 

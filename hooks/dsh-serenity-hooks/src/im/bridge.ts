@@ -41,7 +41,7 @@ import { readWeixinSettings, readWeixinCredential, weixinSessionIdForTrajectory,
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
 import { readSkiffProfileByCode, type SkiffProfile } from '../trajectory/policy/profile.js'
 import { stripThink } from '../surface/text.js'
-import { createSkiffAgent, getSkiffAgent, askSkiff, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../role/skiff/core.js'
+import { createSkiffAgent, getSkiffAgent, askSkiff, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../trajectory/session.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'

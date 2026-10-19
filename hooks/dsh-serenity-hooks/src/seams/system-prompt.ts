@@ -638,7 +638,7 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         // 🔴 T2（2026-10-19）**删掉了 skiff 旁路**。
         //
         // 旧行为：`if (isSkiffSession(root, scope)) return ''` —— skiff 会话**整段不注入 ACC**，
-        // 由 `role/skiff/core.ts` 的另一条路径用 CCC 文件"立人格"。
+        // 由 `trajectory/session.ts` 的另一条路径用 CCC 文件"立人格"。
         // 后果：同一个概念（"这条轨迹是谁、按什么章程工作"）由**两套互不知道的机制**拼装。
         //
         // 现在：所有轨迹走**同一条装配**；skiff 的差异只剩「能力约束面」（`skiff.json`），
@@ -646,7 +646,7 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         // ⇒ skiff 从"另一套机制"降级为"同一条装配 + 一个可选约束面"。
         //
         // ⚠️ 兼容期：`PROMPT.md` 不存在时，skiff 的旧 `systemPromptFile` 仍由
-        // `role/skiff/core.ts` 自己的 section 追加（见那里的说明）——存量 CCC 不会静默失去章程。
+        // `trajectory/session.ts` 自己的 section 追加（见那里的说明）——存量 CCC 不会静默失去章程。
         const base = serenitySystemPrompt(root, scope, boundDirNameFor(context.agent?.session))
         const codeLine = codeModeAdaptationLine(ctx, context.scope)
         return codeLine ? `${base}\n${codeLine}` : base

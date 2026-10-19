@@ -75,7 +75,7 @@ import {
   setWeixinEnabled,
   nextWeixinAccountId,
 } from '../src/im/route.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
+import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
 import { manualOutputFallbackNeeded } from '../src/im/bridge.js'
 import { registerWeixinOutputGuard } from '../src/im/guard.js'
 // 轨迹夹具（造 skiff 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `skiff.json` 里）

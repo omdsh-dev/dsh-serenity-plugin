@@ -25,7 +25,7 @@ import {
   askSkiff,
   createSkiffAgent,
   type SkiffProfile,
-} from '../src/role/skiff/core.js'
+} from '../src/trajectory/session.js'
 import { resetSkiffSessions } from '../src/trajectory/policy/window.js'
 import {
   profileToolWhitelist,

@@ -352,7 +352,7 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     const qa = makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
     const bound = makeTrajectory(dir, 'qa-bound', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
     // 直接注册一个绑定（trajectoryDirName=bound, ccc=dir）的会话（fake agent）
-    const { registerSkiffSession, unregisterSkiffSession } = await import('../src/role/skiff/core.js')
+    const { registerSkiffSession, unregisterSkiffSession } = await import('../src/trajectory/session.js')
     const sid = 'skiff-qa-bound'
     const fake = { session: { id: sid, events: [] }, followup: () => {} }
     registerSkiffSession(sid, bound.dirName, dir, fake as never)

@@ -59,7 +59,7 @@ import {
 import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSettings } from '../src/surface/settings.js'
 import { writeWeixinCredential } from '../src/im/route.js'
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
+import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
 import { makeTrajectory } from './helpers/skiff-fixture.js'
 
 /** 造一行订阅（缺省齐四字段；显式传 `undefined` 即"缺该字段"） */
