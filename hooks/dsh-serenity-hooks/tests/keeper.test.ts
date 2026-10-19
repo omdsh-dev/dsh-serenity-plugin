@@ -47,7 +47,7 @@ import {
   __resetRebuildTodoForTest,
 } from '../src/seams/keeper.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-core.js'
-import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/cognitive-trajectory-ops.js'
+import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/trajectory/core.js'
 
 describe('keeper: 纯跟踪器', () => {
   it('计分表：write=3, task=10, read=1', () => {

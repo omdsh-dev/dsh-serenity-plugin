@@ -19,7 +19,7 @@
  */
 
 import type { Context } from 'cordis'
-import { clearActiveSessionInfo } from '../cognitive-trajectory-ops.js'
+import { clearActiveSessionInfo } from '../trajectory/core.js'
 import { unregisterSkiffSession } from '../skiff-core.js'
 import { stopAllFaces } from '../face-host.js'
 import { stopAllBridges } from '../im/bridge.js'

@@ -42,7 +42,7 @@ vi.mock('@deepseek-ai/schemastery', () => {
 
 import { sessionIdOf, cleanupSessionState, registerLifecycle } from '../../src/seams/lifecycle.js'
 import { registerSkiffSession, skiffSessionInfo } from '../../src/skiff-core.js'
-import { setActiveSessionInfo, getActiveSessionInfo } from '../../src/cognitive-trajectory-ops.js'
+import { setActiveSessionInfo, getActiveSessionInfo } from '../../src/trajectory/core.js'
 
 const fakeAgent = { id: 'a1' } as never
 

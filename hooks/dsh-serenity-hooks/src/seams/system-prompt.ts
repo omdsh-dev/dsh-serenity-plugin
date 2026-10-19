@@ -35,13 +35,13 @@ import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { findEntrySkills } from '../skills-discovery.js'
 import { buildResourceIndex } from '../skills/resource-index.js'
-import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../cognitive-trajectory-ops.js'
-import { readLastBound } from '../cognitive-trajectory-bound.js'
+import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory/core.js'
+import { readLastBound } from '../trajectory/bound.js'
 import {
   buildCognitiveTrajectorySkillsSection,
   hasCognitiveTrajectorySkillsDeclaration,
   COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
-} from '../cognitive-trajectory-skills.js'
+} from '../trajectory/skills.js'
 import { recordSkillInjections } from '../usage-stats.js'
 import { localstorePath, readGitTrack } from '../localstore-ops.js'
 import { readAdvancedSettings } from '../config-ops.js'

@@ -640,7 +640,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             if (id) liveIds.add(id)
           }
         }
-        const { sessionsRootDir, collectEligibleSessions, performCleanup, cutoffDaysAgo } = await import('./session-cleanup.js')
+        const { sessionsRootDir, collectEligibleSessions, performCleanup, cutoffDaysAgo } = await import('./trajectory/cleanup.js')
         const root = sessionsRootDir()
 
         if (req.method === 'GET') {

@@ -28,9 +28,9 @@
  * **零处**属性访问（`ctx.xxx`）。
  */
 
-import { cccRootForCwd } from './ccc-roots.js'
-import { hostSessions } from './host/access.js'
-import { sessionEvents } from './cognitive-trajectory-ops.js'
+import { cccRootForCwd } from '../ccc-roots.js'
+import { hostSessions } from '../host/access.js'
+import { sessionEvents } from './core.js'
 
 /** live 会话条目（诊断用；标题从 events 读） */
 export interface LiveSessionEntry {

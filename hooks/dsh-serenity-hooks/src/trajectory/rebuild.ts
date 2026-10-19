@@ -45,22 +45,22 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message } from '@deepseek-ai/dsh-llm'
-import { hostService } from './host/access.js'
-import { PLUGIN_SOURCE } from './message-source.js'
+import { hostService } from '../host/access.js'
+import { PLUGIN_SOURCE } from '../message-source.js'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { agentCwdFor, cccRootForCwd } from './ccc-roots.js'
+import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
 import {
   getActiveSessionInfo,
   parseSessionContextFromEvents,
   extractSessionMdPathFromText,
   namingTitleFor,
   sessionEvents,
-} from './cognitive-trajectory-ops.js'
-import { DEFAULT_FAKE_INITIAL_MESSAGES } from './seams/bootstrap.js'
-import { eventToken, REBUILD_TODO_FILENAME } from './cognitive-trajectory-assistant.js'
-import { appendBound, readLastBound } from './cognitive-trajectory-bound.js'
-import { isoLocal } from './time.js'
+} from './core.js'
+import { DEFAULT_FAKE_INITIAL_MESSAGES } from '../seams/bootstrap.js'
+import { eventToken, REBUILD_TODO_FILENAME } from './assistant.js'
+import { appendBound, readLastBound } from './bound.js'
+import { isoLocal } from '../time.js'
 
 /** acknowledge 尾句（fake-initial-turns 的确认要求——rebuild 重建后不重走确认轮，直接继续） */
 const ACK_SUFFIX_RE = /Please simply reply "acknowledge" — no action needed\.\s*$/

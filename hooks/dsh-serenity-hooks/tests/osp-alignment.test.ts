@@ -38,7 +38,7 @@ import {
   metaphorBlock,
   serenitySystemPrompt,
 } from '../src/seams/system-prompt.js'
-import { useSession, resetActiveSessionStore } from '../src/cognitive-trajectory-ops.js'
+import { useSession, resetActiveSessionStore } from '../src/trajectory/core.js'
 import { ACC_VERSION } from '../src/constants.js'
 
 let dir: string

@@ -25,7 +25,7 @@ import { cccRootForCwd } from './ccc-roots.js'
 import { isSkiffSessionId } from './skiff-role.js'
 import { stripThink } from './skiff-debug.js'
 import { buildSensitiveTable, detectSensitive, buildRebuke, rebukeStates, REBUKE_MAX_ROUNDS } from './output-guard.js'
-import { sessionEvents } from './cognitive-trajectory-ops.js'
+import { sessionEvents } from './trajectory/core.js'
 import { PLUGIN_SOURCE } from './message-source.js'
 
 /** 外部面会话判定（v1.26.3 用户拍板：仅外部面检测，本地维护会话豁免）：

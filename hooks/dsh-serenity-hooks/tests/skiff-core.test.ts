@@ -22,8 +22,8 @@ import {
   workspaceCognitiveTrajectoryLine,
 } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX, type SkiffRoleConfig } from '../src/skiff-role.js'
-import { getActiveSessionInfo, resetActiveSessionStore } from '../src/cognitive-trajectory-ops.js'
-import { readLastBound } from '../src/cognitive-trajectory-bound.js'
+import { getActiveSessionInfo, resetActiveSessionStore } from '../src/trajectory/core.js'
+import { readLastBound } from '../src/trajectory/bound.js'
 
 let dir: string
 

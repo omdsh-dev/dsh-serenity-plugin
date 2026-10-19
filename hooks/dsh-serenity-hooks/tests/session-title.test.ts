@@ -28,7 +28,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 
 import { renameDshSessionOnUse, activeInfoFromCreate, renameDshSessionForActive } from '../src/tools/cognitive-trajectory.js'
 // 🔴 2026-09-25（S142 第 ④ 项·第 1 步）：这两个已下沉到 L1 的 cognitive-trajectory-ops.ts（解依赖环）
-import { createSession, namingTitleFor, sanitizeSessionSummary } from '../src/cognitive-trajectory-ops.js'
+import { createSession, namingTitleFor, sanitizeSessionSummary } from '../src/trajectory/core.js'
 import { defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string

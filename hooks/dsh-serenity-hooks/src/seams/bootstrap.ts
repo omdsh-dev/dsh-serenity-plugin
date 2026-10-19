@@ -24,7 +24,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { cccRootForCwd } from '../ccc-roots.js'
-import { sessionEvents } from '../cognitive-trajectory-ops.js'
+import { sessionEvents } from '../trajectory/core.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 import { ACC_MESSAGE_KIND } from '../message-source.js'
 

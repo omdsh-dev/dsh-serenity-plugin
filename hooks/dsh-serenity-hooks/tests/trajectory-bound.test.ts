@@ -11,9 +11,9 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings, setBindingStore, migrateBindingsToDomain } from '../src/cognitive-trajectory-bound.js'
+import { appendBound, readLastBound, hasAnyBound, bindingsPathFor, BINDINGS_REL_PATH, listBoundSessionIds, pruneMissingBindings, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings, setBindingStore, migrateBindingsToDomain } from '../src/trajectory/bound.js'
 import { bindingStore } from '../src/host/storage-domain.js'
-import { resetActiveSessionStore, setActiveSessionInfo } from '../src/cognitive-trajectory-ops.js'
+import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory/core.js'
 
 let ccc: string
 
@@ -316,7 +316,7 @@ describe('cognitive-trajectory-bound: (b) 多 live 会话守卫 + (c) 悬空绑�
   })
 
   it('🔴 接线钉：退休判据确实在 `appendBound` 单一入口里（否则「只留一条」无人调用）', () => {
-    const src = readFileSync(new URL('../src/cognitive-trajectory-bound.ts', import.meta.url), 'utf-8')
+    const src = readFileSync(new URL('../src/trajectory/bound.ts', import.meta.url), 'utf-8')
     const fn = src.slice(src.indexOf('export function appendBound('))
     expect(fn).toContain('collectSupersedeTargets(')
     expect(fn).toContain('supersededAt = record.at') // 同一次调用共用一个 at（与既有语义一致）

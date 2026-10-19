@@ -47,8 +47,8 @@ import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../ccc.js'
 import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
-import { appendBound, pruneMissingBindings, readLastBound, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings } from '../cognitive-trajectory-bound.js'
-import { hasSessionLogById, sessionsRootDir } from '../session-cleanup.js'
+import { appendBound, pruneMissingBindings, readLastBound, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings } from '../trajectory/bound.js'
+import { hasSessionLogById, sessionsRootDir } from '../trajectory/cleanup.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake/registry.js'
 import { sendToCognitiveTrajectory } from '../wake/scheduler.js'
 import { CRO_GUIDE } from '../wake/cro-guide.js'
@@ -69,7 +69,7 @@ import {
   summarize,
   type ActiveSessionInfo,
   type CreateSessionResult,
-} from '../cognitive-trajectory-ops.js'
+} from '../trajectory/core.js'
 
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
@@ -449,7 +449,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         }
         const dshSessionId = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id ?? ''
         if (!dshSessionId) throw new Error('Unable to determine the current dsh session id')
-        const { queueRebuild } = await import('../rebuild.js')
+        const { queueRebuild } = await import('../trajectory/rebuild.js')
         const result = await queueRebuild(ctx, {
           root,
           note: args.note as string | undefined,

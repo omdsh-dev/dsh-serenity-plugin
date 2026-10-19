@@ -13,7 +13,7 @@ import {
   ACK_SKIP_PREFIX,
   eventToken,
   styledToken,
-} from '../src/cognitive-trajectory-assistant.js'
+} from '../src/trajectory/assistant.js'
 
 describe('cognitive-trajectory-assistant: token 常量（单一真相源）', () => {
   it('家族标识 + 可见用词（自然跨领域词，无游戏黑话 D8）', () => {

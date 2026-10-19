@@ -96,7 +96,7 @@ import {
   buildCognitiveTrajectorySkillsSection,
   hasCognitiveTrajectorySkillsDeclaration,
   COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
-} from '../src/cognitive-trajectory-skills.js'
+} from '../src/trajectory/skills.js'
 
 let dir: string
 

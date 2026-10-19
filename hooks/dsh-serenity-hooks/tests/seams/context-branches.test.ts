@@ -99,7 +99,7 @@ vi.mock('../../src/seams/system-prompt.js', async (orig) => {
 })
 
 import { registerContext, accIdentityText } from '../../src/seams/context.js'
-import { getActiveSessionInfo, setActiveSessionInfo } from '../../src/cognitive-trajectory-ops.js'
+import { getActiveSessionInfo, setActiveSessionInfo } from '../../src/trajectory/core.js'
 
 type Handler = (payload: unknown, next?: () => Promise<unknown>) => unknown
 

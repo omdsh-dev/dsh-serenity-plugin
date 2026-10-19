@@ -52,7 +52,7 @@ import {
   sessionsRoot,
   showSession,
   summarize,
-} from '../src/cognitive-trajectory-ops.js'
+} from '../src/trajectory/core.js'
 
 let dir: string
 

@@ -17,7 +17,7 @@ import {
   sessionEvents,
   SESSION_CONTEXT_MARKER,
   DEFAULT_SESSION_SCOPE,
-} from '../src/cognitive-trajectory-ops.js'
+} from '../src/trajectory/core.js'
 
 /**
  * cognitive-trajectory-ops 单元测试（S136 对齐 osp spec；v1.33 按 cognitive trajectory 六动作收敛）：
@@ -267,7 +267,7 @@ describe('cognitive-trajectory-ops: v1.24.11 恢复稳固化（路径规范行�
   // 而其语义前提正是"未完成"这个生命周期概念 —— 前提既不存在，就该删而不是改写成语义不同的第二个东西。
   // ⇒ 用例保留为**回归钉**：它若回来，说明有人又往生命周期方向加了东西。
   it('🔴 `findLatestActiveSessionMd` 已随生命周期一起删除（不得复活）', async () => {
-    const mod = await import('../src/cognitive-trajectory-ops.js')
+    const mod = await import('../src/trajectory/core.js')
     expect('findLatestActiveSessionMd' in mod, '该符号必须不存在——它的语义是"最新的未完成轨迹"').toBe(false)
   })
 

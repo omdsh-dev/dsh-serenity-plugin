@@ -52,9 +52,9 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
   deriveEventMessage: (event: unknown) => (event as { data?: { message?: unknown } })?.data?.message ?? null,
 }))
 
-import { queueRebuild, registerRebuildTurnHook, pendingRebuildSnapshot, buildRebuildAnchor, performRebuild, resolveSessionMdPath } from '../src/rebuild.js'
-import { readLastBound, appendBound } from '../src/cognitive-trajectory-bound.js'
-import { resetActiveSessionStore, setActiveSessionInfo } from '../src/cognitive-trajectory-ops.js'
+import { queueRebuild, registerRebuildTurnHook, pendingRebuildSnapshot, buildRebuildAnchor, performRebuild, resolveSessionMdPath } from '../src/trajectory/rebuild.js'
+import { readLastBound, appendBound } from '../src/trajectory/bound.js'
+import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory/core.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string

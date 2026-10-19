@@ -30,7 +30,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 }))
 
 import { registerContext } from '../../src/seams/context.js'
-import { getActiveSessionInfo } from '../../src/cognitive-trajectory-ops.js'
+import { getActiveSessionInfo } from '../../src/trajectory/core.js'
 import { REGISTERED_TOOLS } from '../../src/invariant.js'
 import { forgetNonCccToolVisibility } from '../../src/seams/guards.js'
 

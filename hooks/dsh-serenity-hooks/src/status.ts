@@ -18,7 +18,7 @@ import {
 } from './ccc.js'
 import { cccRootForCwd } from './ccc-roots.js'
 import { ACC_VERSION } from './constants.js'
-import { listActiveTrajectories, type TrajectorySummary } from './cognitive-trajectory-ops.js'
+import { listActiveTrajectories, type TrajectorySummary } from './trajectory/core.js'
 import { listOpencodeSkillDirs } from './skills/opencode-scan.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
 import { isoLocal } from './time.js'

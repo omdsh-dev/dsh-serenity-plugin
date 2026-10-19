@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { cccRootForCwd } from '../src/ccc-roots.js'
-import { diagLive, listLiveSessions, readSessionTitle } from '../src/live-sessions.js'
+import { diagLive, listLiveSessions, readSessionTitle } from '../src/trajectory/live.js'
 
 type FakeCtx = { sessions?: { list?: () => unknown } }
 

@@ -30,7 +30,7 @@ import {
   type WakeEntry,
 } from '../src/wake/registry.js'
 import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToCognitiveTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
-import { listBoundSessionIds } from '../src/cognitive-trajectory-bound.js'
+import { listBoundSessionIds } from '../src/trajectory/bound.js'
 import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/wake/cro.js'
 import { croWakeLogPath } from '../src/wake/cro-log.js'
 import { __resetCroTurnsForTest } from '../src/wake/cro-turns.js'

@@ -13,7 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { entrySkillSectionText } from '../src/seams/system-prompt.js'
-import { buildCognitiveTrajectorySkillsSection } from '../src/cognitive-trajectory-skills.js'
+import { buildCognitiveTrajectorySkillsSection } from '../src/trajectory/skills.js'
 import { registerOpencodeSkills } from '../src/seams/opencode-skills.js'
 import { buildResourceIndex } from '../src/skills/resource-index.js'
 

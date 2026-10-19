@@ -38,12 +38,12 @@ import {
   stripAckSuffix,
   resolveSessionMdPath,
   sanitizeFocusLine,
-} from '../src/rebuild.js'
+} from '../src/trajectory/rebuild.js'
 import { rebuildReminderText, readContextPressure } from '../src/seams/keeper.js'
-import { setActiveSessionInfo, resetActiveSessionStore } from '../src/cognitive-trajectory-ops.js'
-import { SESSION_CONTEXT_MARKER } from '../src/cognitive-trajectory-ops.js'
-import { readLastBound, appendBound } from '../src/cognitive-trajectory-bound.js'
-import { REBUILD_TODO_FILENAME } from '../src/cognitive-trajectory-assistant.js'
+import { setActiveSessionInfo, resetActiveSessionStore } from '../src/trajectory/core.js'
+import { SESSION_CONTEXT_MARKER } from '../src/trajectory/core.js'
+import { readLastBound, appendBound } from '../src/trajectory/bound.js'
+import { REBUILD_TODO_FILENAME } from '../src/trajectory/assistant.js'
 
 let dir: string
 

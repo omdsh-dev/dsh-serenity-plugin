@@ -34,7 +34,7 @@
  */
 
 import { WAKE_CATCH_UP_MS } from './wake/registry.js'
-import { diagLive, type DiagLiveReport } from './live-sessions.js'
+import { diagLive, type DiagLiveReport } from './trajectory/live.js'
 import { containerClocks, containerWakes, type ClockSnapshot } from './container-status.js'
 import type { Context } from 'cordis'
 import { isoLocal } from './time.js'

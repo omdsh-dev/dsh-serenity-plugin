@@ -35,15 +35,15 @@ vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (o: unknown) => o }))
 vi.mock('@deepseek-ai/dsh-llm', () => ({ createUserMessage: (o: unknown) => o }))
 
 // 桩 ①（理由见文件头）：宿主会话日志面在测试里不可为真 ⇒ 打成可控开关
-vi.mock('../src/session-cleanup.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/session-cleanup.js')>()
+vi.mock('../src/trajectory/cleanup.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/trajectory/cleanup.js')>()
   return { ...actual, hasSessionLogById: vi.fn(() => true) }
 })
 
 import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory.js'
-import { hasSessionLogById } from '../src/session-cleanup.js'
-import { resetActiveSessionStore, COGNITIVE_TRAJECTORY_ACTIONS } from '../src/cognitive-trajectory-ops.js'
-import { setBindingStore, BINDINGS_REL_PATH } from '../src/cognitive-trajectory-bound.js'
+import { hasSessionLogById } from '../src/trajectory/cleanup.js'
+import { resetActiveSessionStore, COGNITIVE_TRAJECTORY_ACTIONS } from '../src/trajectory/core.js'
+import { setBindingStore, BINDINGS_REL_PATH } from '../src/trajectory/bound.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/ccc-roots.js'
 
 const mockHasLog = vi.mocked(hasSessionLogById)

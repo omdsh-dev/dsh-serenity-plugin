@@ -26,9 +26,9 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { cccRootForCwd } from './ccc-roots.js'
-import { type BindingStore, type BindingRecord } from './host/storage-domain.js'
-import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './cognitive-trajectory-ops.js'
+import { cccRootForCwd } from '../ccc-roots.js'
+import { type BindingStore, type BindingRecord } from '../host/storage-domain.js'
+import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './core.js'
 
 type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
 

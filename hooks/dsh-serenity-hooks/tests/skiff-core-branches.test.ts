@@ -17,7 +17,7 @@ import {
   registerSkiffSession,
 } from '../src/skiff-core.js'
 import { SKIFF_SESSION_PREFIX } from '../src/skiff-role.js'
-import { resetActiveSessionStore } from '../src/cognitive-trajectory-ops.js'
+import { resetActiveSessionStore } from '../src/trajectory/core.js'
 
 /**
  * skiff-core-branches.test.ts — Skiff 会话核心：**降级面与事件解析容错**（⑤ 第 56 件，S142 2026-09-26）

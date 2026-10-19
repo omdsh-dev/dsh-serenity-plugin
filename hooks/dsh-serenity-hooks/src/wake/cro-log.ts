@@ -48,7 +48,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { sessionsRoot } from '../cognitive-trajectory-ops.js'
+import { sessionsRoot } from '../trajectory/core.js'
 import { isoLocal } from '../time.js'
 
 /** 固定文件名（所有者令：「文件名固定即可」）——与程序自建的 `cro-state.json` 并排、主语分明 */

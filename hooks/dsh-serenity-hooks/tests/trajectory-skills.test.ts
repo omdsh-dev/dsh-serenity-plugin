@@ -47,7 +47,7 @@ import {
   hasCognitiveTrajectorySkillsDeclaration,
   mergeSkillNames,
   COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
-} from '../src/cognitive-trajectory-skills.js'
+} from '../src/trajectory/skills.js'
 import { readCognitiveTrajectorySkills } from '../src/ccc.js'
 import { findSkillMd } from '../src/skills-discovery.js'
 import { registerCognitiveTrajectorySkillSection, serenitySystemPrompt } from '../src/seams/system-prompt.js'

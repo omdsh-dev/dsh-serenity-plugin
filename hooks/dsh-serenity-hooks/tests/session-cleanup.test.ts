@@ -14,7 +14,7 @@ import {
   performCleanup,
   sessionLogArtifacts,
   sessionLogBytesById,
-} from '../src/session-cleanup.js'
+} from '../src/trajectory/cleanup.js'
 
 /** 造一个真实会话目录（project/session-id/session.jsonl），mtime 可调 */
 function makeSession(root: string, project: string, id: string, mtimeAgoMs: number, suffix = '.jsonl'): string {

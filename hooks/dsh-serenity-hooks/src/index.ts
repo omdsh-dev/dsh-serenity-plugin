@@ -45,7 +45,7 @@ import { readDshVersion } from './status.js'
 import { readSkiffRoles } from './skiff-role.js'
 import { registerSettingsSection, readSimpleSettings, SERENITY_SETTINGS_NS } from './settings-section.js'
 import { registerGateway } from './gateway.js'
-import { registerRebuildTurnHook } from './rebuild.js'
+import { registerRebuildTurnHook } from './trajectory/rebuild.js'
 import { registerOutputGuardHook } from './output-guard-seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './config-ops.js'
 import { startSkiffDebugServer, stopSkiffDebugServer } from './skiff-debug.js'
@@ -65,7 +65,7 @@ import { createAccDiagTool } from './tools/acc-diag.js'
 import { createDiagramTool } from './tools/diagram.js'
 // §0L（S142 2026-09-19）：绑定载体迁到宿主存储域——装载期开域 + 注入句柄 + 一次性迁移
 import { openBindingDomain, bindingStore } from './host/storage-domain.js'
-import { setBindingStore } from './cognitive-trajectory-bound.js'
+import { setBindingStore } from './trajectory/bound.js'
 // （C4 块 A 顺带清理：`registerDisposer` 的 import 自 C2 删掉 skiff root 重试定时器后已无使用点）
 
 export const name = 'dsh-serenity-hooks'

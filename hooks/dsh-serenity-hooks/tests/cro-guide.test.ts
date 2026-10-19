@@ -32,7 +32,7 @@ import {
   croGuidePayload,
   renderCroSampleSnapshot,
 } from '../src/wake/cro-guide.js'
-import { COGNITIVE_TRAJECTORY_ACTIONS } from '../src/cognitive-trajectory-ops.js'
+import { COGNITIVE_TRAJECTORY_ACTIONS } from '../src/trajectory/core.js'
 import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory.js'
 
 /** 按 `a.b.c` 取值（**取不到返回 undefined**，不抛 —— 本测试就是要判"取不取得到"） */

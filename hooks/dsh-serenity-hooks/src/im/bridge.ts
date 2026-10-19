@@ -43,7 +43,7 @@ import { readSkiffRoles, type SkiffRoleConfig } from '../skiff-role.js'
 import { stripThink } from '../skiff-debug.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection } from '../skiff-core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
-import { getActiveSessionInfo } from '../cognitive-trajectory-ops.js'
+import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */

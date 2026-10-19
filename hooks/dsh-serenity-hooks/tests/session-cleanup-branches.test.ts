@@ -73,7 +73,7 @@ import {
   findSessionLog,
   performCleanup,
   sessionLogArtifacts,
-} from '../src/session-cleanup.js'
+} from '../src/trajectory/cleanup.js'
 
 let root: string
 const roots: string[] = []
