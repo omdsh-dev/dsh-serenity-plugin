@@ -23,7 +23,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, readdirSync, rmSync, mkdirSync, cpSync, copyFileSync, symlinkSync, statSync, lstatSync, readlinkSync, createReadStream } from 'node:fs'
-import { resolve, dirname, join, basename } from 'node:path'
+import { resolve, dirname, join, basename, relative } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync, execFileSync, spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
@@ -2363,6 +2363,155 @@ async function runSessionProbe(storeRoot: string, only: Set<string> | undefined,
   }
 }
 
+// ── refactor-move：目录/命名重构的机械改名机 ────────────────────────────
+
+/** 递归收集某目录下的 `.ts`（跳过 node_modules / lib / coverage / dist） */
+function collectTs(dir: string, out: string[] = []): string[] {
+  let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }> = []
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }) as unknown as Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>
+  } catch {
+    return out
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) {
+      if (['node_modules', 'lib', 'coverage', 'dist', '.git'].includes(e.name)) continue
+      collectTs(p, out)
+    } else if (e.isFile() && e.name.endsWith('.ts')) {
+      out.push(p)
+    }
+  }
+  return out
+}
+
+/**
+ * refactor-move — 把一批模块搬到新路径，并**机械改写全仓的 import 说明符**。
+ *
+ * ## 为什么必须有这台机器
+ *
+ * 一次"域化"重构要动 **上百处** 说明符（静态 import、`import type`、动态 `import()`、
+ * `vi.mock()`），且 **src 与 tests 两侧**都要改。手改必然漏。
+ *
+ * ## 判据（每次都用，缺一不可）
+ *
+ * 1. **dry-run 先看数**：移动 N 个文件 / 需改写 M 处；M 与预期量级不符 ⇒ 先查，别 apply；
+ * 2. apply 后 **`typecheck` ＋ `test` 全绿**（漏改一处 typecheck 就红）；
+ * 3. **工具面 14 项逐字不变**（`invariant.ts:REGISTERED_TOOLS` ↔ `dsh.plugin.json`）。
+ *
+ * ## 边界（只做这一件事）
+ *
+ * - 只改**能解析到被移动文件**的相对说明符（`./x.js` 形态）；
+ * - **不碰注释行**（`//` / `*` / `/*` 开头）—— 那里的 `.js` 是散文，不是依赖；
+ * - 不碰包名（`@deepseek-ai/…`）、不碰非 `.js` 字面量、不改任何导出符号名。
+ *
+ * 用法: dsh-develop refactor-move --map <json> [--apply]
+ *   json 形态（相对 HOOKS_DIR）: { "src/old.ts": "src/new/old.ts", ... }
+ */
+function cmdRefactorMove(argv: string[]): void {
+  const apply = argv.includes('--apply')
+  const mapIdx = argv.indexOf('--map')
+  const mapPath = mapIdx >= 0 ? argv[mapIdx + 1] : undefined
+  if (mapPath === undefined) fail('refactor-move 需要 --map <json>（{ "src/old.ts": "src/new.ts" }）')
+  if (!existsSync(mapPath)) fail(`map 文件不存在: ${mapPath}`, 2)
+
+  const raw = readMapJson(mapPath)
+  const moves: Array<{ fromRel: string; toRel: string; fromAbs: string; toAbs: string }> = []
+  for (const [fromRel, toRel] of Object.entries(raw)) {
+    const fromAbs = resolve(HOOKS_DIR, fromRel)
+    const toAbs = resolve(HOOKS_DIR, toRel)
+    if (!existsSync(fromAbs)) fail(`源文件不存在: ${fromRel}`, 2)
+    if (existsSync(toAbs)) fail(`目标已存在（拒绝覆盖）: ${toRel}`, 2)
+    moves.push({ fromRel, toRel, fromAbs, toAbs })
+  }
+  const byFrom = new Map(moves.map((m) => [m.fromAbs, m.toAbs]))
+
+  const scanDirs = [join(HOOKS_DIR, 'src'), join(HOOKS_DIR, 'tests')]
+  const files = scanDirs.flatMap((d) => collectTs(d))
+
+  const plans: Array<{ file: string; next: string; hits: number }> = []
+  for (const file of files) {
+    const text = readFileSync(file, 'utf-8')
+    const next = rewriteSpecifiers(text, file, byFrom)
+    if (next.text !== text) plans.push({ file, next: next.text, hits: next.hits })
+  }
+  const totalHits = plans.reduce((n, p) => n + p.hits, 0)
+
+  console.log(`[refactor-move] ${apply ? '写回模式' : 'dry-run（只报告，不动任何文件）'}｜HOOKS_DIR=${HOOKS_DIR}`)
+  console.log(`  移动 ${moves.length} 个文件；扫描 ${files.length} 个 .ts；需改写 ${totalHits} 处（分布在 ${plans.length} 个文件）`)
+  for (const m of moves) console.log(`    mv ${m.fromRel} → ${m.toRel}`)
+  for (const p of plans) {
+    const rel = p.file.startsWith(HOOKS_DIR) ? p.file.slice(HOOKS_DIR.length + 1) : p.file
+    console.log(`    ~ ${rel}（${p.hits} 处）`)
+  }
+  if (!apply) {
+    console.log('[refactor-move] dry-run 结束；确认数字无误后加 --apply')
+    return
+  }
+
+  for (const m of moves) {
+    mkdirSync(dirname(m.toAbs), { recursive: true })
+    const r = run('git', ['-C', REPO_ROOT, 'mv', m.fromAbs, m.toAbs], { quiet: true })
+    if (r.status !== 0) {
+      const mv = run('mv', [m.fromAbs, m.toAbs], { quiet: true })
+      if (mv.status !== 0) fail(`移动失败: ${m.fromRel}（git mv + mv 都失败）`, 2)
+    }
+  }
+  let rewritten = 0
+  for (const p of plans) {
+    writeFileSync(p.file, p.next, 'utf-8')
+    rewritten += p.hits
+  }
+  console.log(`[refactor-move] ✓ 已移动 ${moves.length} 个文件，改写 ${rewritten} 处说明符`)
+  console.log('[refactor-move] 下一步必跑：typecheck ＋ test（漏改一处 typecheck 就红）')
+}
+
+function readMapJson(p: string): Record<string, string> {
+  const parsed = readJson(p)
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(parsed)) {
+    if (typeof v !== 'string') fail(`map 值必须是字符串: ${k}`, 2)
+    out[k] = v
+  }
+  return out
+}
+
+/**
+ * 改写一个文件里的模块说明符（**纯函数**，可单测）。
+ *
+ * @param text 原文
+ * @param importerAbs 该文件的绝对路径（用来解析相对说明符）
+ * @param byFrom 旧绝对路径 → 新绝对路径
+ * @returns 新文本与命中处数
+ */
+function rewriteSpecifiers(text: string, importerAbs: string, byFrom: Map<string, string>): { text: string; hits: number } {
+  let hits = 0
+  const lines = text.split('\n')
+  const out = lines.map((line) => {
+    const trimmed = line.trimStart()
+    // 🔴 注释里的 `.js` 是散文，不是依赖 ⇒ 一律跳过
+    if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return line
+    return line.replace(/(['"])([^'"]+\.js)\1/g, (whole: string, quote: string, spec: string) => {
+      if (!spec.startsWith('.')) return whole // 包名不碰
+      // 🔴 关键：TS 约定是「说明符写 .js、磁盘上是 .ts」⇒ 必须换成 .ts 才解析得到目标文件。
+      //    （本机首次实测就栽在这里：不换 ⇒ 命中恒 0，看起来像"没有要改的"。）
+      const target = resolve(dirname(importerAbs), spec.replace(/\.js$/, '.ts'))
+      const nextAbs = byFrom.get(target)
+      if (nextAbs === undefined) return whole
+      hits += 1
+      return `${quote}${relativeSpecifier(dirname(importerAbs), nextAbs).replace(/\.ts$/, '.js')}${quote}`
+    })
+  })
+  return { text: out.join('\n'), hits }
+}
+
+/** posix 形态的相对说明符，且以 `./` / `../` 开头（Node ESM 要求） */
+function relativeSpecifier(fromDir: string, toAbs: string): string {
+  const rel = relative(fromDir, toAbs).split('\\').join('/')
+  return rel.startsWith('.') ? rel : `./${rel}`
+}
+
+
 async function cmdSessionDoctor(argv: string[]): Promise<void> {
   let root: string | undefined
   let only: Set<string> | undefined
@@ -2777,6 +2926,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'host-upgrade': cmdHostUpgrade(rest); break
       case 'session-doctor': await cmdSessionDoctor(rest); break
       case 'session-repair': await cmdSessionRepair(rest); break
+      case 'refactor-move': cmdRefactorMove(rest); break
       case 'diag': cmdDiag(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break
