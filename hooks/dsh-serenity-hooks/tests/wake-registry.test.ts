@@ -28,12 +28,12 @@ import {
   wakeRegistryPath,
   WAKE_CATCH_UP_MS,
   type WakeEntry,
-} from '../src/wake-registry.js'
-import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToCognitiveTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+} from '../src/wake/registry.js'
+import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToCognitiveTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
 import { listBoundSessionIds } from '../src/cognitive-trajectory-bound.js'
-import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/cro.js'
-import { croWakeLogPath } from '../src/cro-log.js'
-import { __resetCroTurnsForTest } from '../src/cro-turns.js'
+import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/wake/cro.js'
+import { croWakeLogPath } from '../src/wake/cro-log.js'
+import { __resetCroTurnsForTest } from '../src/wake/cro-turns.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 

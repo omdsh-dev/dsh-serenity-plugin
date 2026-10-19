@@ -78,8 +78,8 @@ const croState = {
 }
 const logState = { appendOk: true }
 
-vi.mock('../src/cro.js', async (importActual) => {
-  const actual = await importActual<typeof import('../src/cro.js')>()
+vi.mock('../src/wake/cro.js', async (importActual) => {
+  const actual = await importActual<typeof import('../src/wake/cro.js')>()
   return {
     ...actual,
     listCroCognitiveTrajectories: (root: string) => {
@@ -104,8 +104,8 @@ vi.mock('../src/cro.js', async (importActual) => {
   }
 })
 
-vi.mock('../src/cro-log.js', async (importActual) => {
-  const actual = await importActual<typeof import('../src/cro-log.js')>()
+vi.mock('../src/wake/cro-log.js', async (importActual) => {
+  const actual = await importActual<typeof import('../src/wake/cro-log.js')>()
   return {
     ...actual,
     appendCroWakeLog: (...args: Parameters<typeof actual.appendCroWakeLog>) => {
@@ -121,15 +121,15 @@ import {
   sendToCognitiveTrajectory,
   wakeSchedulerState,
   __resetWakeSchedulerStateForTest,
-} from '../src/wake-scheduler.js'
+} from '../src/wake/scheduler.js'
 import {
   addWake,
   listWakes,
   wakeRegistryPath,
-} from '../src/wake-registry.js'
+} from '../src/wake/registry.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 import { hostname } from 'node:os'
-import { CRO_HOST_FILENAME } from '../src/cro.js'
+import { CRO_HOST_FILENAME } from '../src/wake/cro.js'
 
 const DIR_NAME = '2026-09-13--S999--sched-target--auto'
 const BOUND_ID = 'sess-sched-1'

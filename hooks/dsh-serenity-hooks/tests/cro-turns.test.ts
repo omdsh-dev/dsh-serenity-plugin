@@ -33,7 +33,7 @@ import {
   registerCroTurnTracking,
   runningCarriersOf,
   TURN_TTL_MS,
-} from '../src/cro-turns.js'
+} from '../src/wake/cro-turns.js'
 
 const NOW = 1_789_800_000_000
 const A = 'session-aaa'

@@ -29,17 +29,17 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { findSession, sessionsRoot } from './cognitive-trajectory-ops.js'
-import { listBoundSessionIds, appendBound } from './cognitive-trajectory-bound.js'
+import { findSession, sessionsRoot } from '../cognitive-trajectory-ops.js'
+import { listBoundSessionIds, appendBound } from '../cognitive-trajectory-bound.js'
 import { evaluateCro, listCroCognitiveTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from './cro.js'
 import { runningCarriersOf } from './cro-turns.js'
 import { appendCroWakeLog } from './cro-log.js'
-import { hostAgents, hostService } from './host/access.js'
-import { registerDisposer } from './host/effect.js'
-import { readSimpleSettings } from './settings-section.js'
-import { createClock, type ClockOptions, type ClockRuntime } from './clock-runtime.js'
-import { listCccs } from './ccc-roots.js'
-import { isoLocal, localHuman } from './time.js'
+import { hostAgents, hostService } from '../host/access.js'
+import { registerDisposer } from '../host/effect.js'
+import { readSimpleSettings } from '../settings-section.js'
+import { createClock, type ClockOptions, type ClockRuntime } from './clock.js'
+import { listCccs } from '../ccc-roots.js'
+import { isoLocal, localHuman } from '../time.js'
 import {
   finalizeWake,
   loadWakeRegistry,
@@ -48,8 +48,8 @@ import {
   updateWake,
   WAKE_CATCH_UP_MS,
   type WakeEntry,
-} from './wake-registry.js'
-import { PLUGIN_SOURCE } from './message-source.js'
+} from './registry.js'
+import { PLUGIN_SOURCE } from '../message-source.js'
 
 /**
  * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────

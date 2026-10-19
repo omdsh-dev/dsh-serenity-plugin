@@ -33,7 +33,7 @@
  * （诊断段不含 `message`，面板含；这是渲染差异，不是取数差异）。
  */
 
-import { WAKE_CATCH_UP_MS } from './wake-registry.js'
+import { WAKE_CATCH_UP_MS } from './wake/registry.js'
 import { diagLive, type DiagLiveReport } from './live-sessions.js'
 import { containerClocks, containerWakes, type ClockSnapshot } from './container-status.js'
 import type { Context } from 'cordis'

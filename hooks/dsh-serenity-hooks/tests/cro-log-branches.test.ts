@@ -41,7 +41,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { CRO_LOG_FILENAME, croWakeLogPath, loadCroWakeLog } from '../src/cro-log.js'
+import { CRO_LOG_FILENAME, croWakeLogPath, loadCroWakeLog } from '../src/wake/cro-log.js'
 
 const DIR = '2026-09-13--S185--相机沉淀与语音输入'
 

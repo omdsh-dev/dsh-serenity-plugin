@@ -49,9 +49,9 @@ import { findSerenityRoot } from '../ccc.js'
 import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { appendBound, pruneMissingBindings, readLastBound, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings } from '../cognitive-trajectory-bound.js'
 import { hasSessionLogById, sessionsRootDir } from '../session-cleanup.js'
-import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake-registry.js'
-import { sendToCognitiveTrajectory } from '../wake-scheduler.js'
-import { CRO_GUIDE } from '../cro-guide.js'
+import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake/registry.js'
+import { sendToCognitiveTrajectory } from '../wake/scheduler.js'
+import { CRO_GUIDE } from '../wake/cro-guide.js'
 import {
   listSessions,
   showSession,

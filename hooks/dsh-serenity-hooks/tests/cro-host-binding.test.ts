@@ -31,7 +31,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { CRO_HOST_FILENAME, parseCroHostBinding, resolveCroHostBinding } from '../src/cro.js'
+import { CRO_HOST_FILENAME, parseCroHostBinding, resolveCroHostBinding } from '../src/wake/cro.js'
 
 const DIR_NAME = '2026-09-13--S185--desk-camera'
 const SELF = 'yh-Standard-PC-Q35-ICH9-2009'
@@ -210,7 +210,7 @@ describe('resolveCroHostBinding: 异常路径一律 fail-closed', () => {
 
 describe('绑定文件与 CRO 程序共存（真形态）', () => {
   it('🔴 两个文件同在轨迹目录 ⇒ 绑定判定不受 CRO 程序存在与否影响', async () => {
-    const { CRO_FILENAME } = await import('../src/cro.js')
+    const { CRO_FILENAME } = await import('../src/wake/cro.js')
     const dir = makeCognitiveTrajectory(SELF)
     // 不写 CRO 程序时：绑定仍判通过（绑定是**独立的**一道门，不依赖程序文件）
     expect(resolveCroHostBinding(root, DIR_NAME, SELF).allowed).toBe(true)

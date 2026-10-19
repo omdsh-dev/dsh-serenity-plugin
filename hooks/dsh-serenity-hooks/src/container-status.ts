@@ -39,8 +39,8 @@ import { ACC_VERSION } from './constants.js'
 import { readDshVersion } from './status.js'
 import { hostContractReport, type HostContractReport } from './host/contract.js'
 import { checkRegistryQuality, type RegistryQualityReport } from './msm-ops.js'
-import { listWakes, type WakeEntry } from './wake-registry.js'
-import { wakeSchedulerState } from './wake-scheduler.js'
+import { listWakes, type WakeEntry } from './wake/registry.js'
+import { wakeSchedulerState } from './wake/scheduler.js'
 import type { JsonValue } from './json.js'
 
 // ── 分组 1：身份 / 版本 ──

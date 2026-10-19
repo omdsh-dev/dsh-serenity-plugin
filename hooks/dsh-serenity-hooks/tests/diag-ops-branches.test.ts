@@ -34,7 +34,7 @@ import { tmpdir } from 'node:os'
 vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (o: unknown) => o }))
 
 import { runAccDiag, renderAccDiag } from '../src/diag-ops.js'
-import { registerWakeScheduler, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+import { registerWakeScheduler, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string

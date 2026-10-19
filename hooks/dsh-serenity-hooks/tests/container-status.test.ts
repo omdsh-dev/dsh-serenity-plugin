@@ -28,7 +28,7 @@ import {
 import { hostContractReport } from '../src/host/contract.js'
 import { runKit } from '../src/kit-ops.js'
 import { ACC_VERSION } from '../src/constants.js'
-import { registerWakeScheduler, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake-scheduler.js'
+import { registerWakeScheduler, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 
 let dir: string

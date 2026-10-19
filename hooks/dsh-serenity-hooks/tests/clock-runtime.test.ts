@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createClock, type ClockOptions } from '../src/clock-runtime.js'
+import { createClock, type ClockOptions } from '../src/wake/clock.js'
 
 /** 受控计时器（拦下 setInterval，使我们能手动"走一拍"） */
 interface FakeTimer {

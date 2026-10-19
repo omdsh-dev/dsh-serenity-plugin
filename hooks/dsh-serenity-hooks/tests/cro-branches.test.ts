@@ -56,7 +56,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { CRO_FILENAME, buildCroSnapshot, evaluateCro, listCroCognitiveTrajectories, runCroProcess, type CroSnapshotInput } from '../src/cro.js'
+import { CRO_FILENAME, buildCroSnapshot, evaluateCro, listCroCognitiveTrajectories, runCroProcess, type CroSnapshotInput } from '../src/wake/cro.js'
 
 const DIR_NAME = '2026-09-13--S185--desk-camera'
 

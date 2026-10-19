@@ -49,7 +49,7 @@
  * ⚠️ 这也天然处理了「同一轨迹多载体」（S142 曾挂 4 条）的情形。
  */
 
-import { registerDisposer } from './host/effect.js'
+import { registerDisposer } from '../host/effect.js'
 
 /** 一次「在跑」记录的 TTL（见文件头的方向性判据） */
 export const TURN_TTL_MS = 30 * 60 * 1000

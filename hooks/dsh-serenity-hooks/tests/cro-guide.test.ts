@@ -25,13 +25,13 @@ import { describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildCroSnapshot, CRO_FILENAME, CRO_TIMEOUT_MS } from '../src/cro.js'
+import { buildCroSnapshot, CRO_FILENAME, CRO_TIMEOUT_MS } from '../src/wake/cro.js'
 import {
   CRO_GUIDE,
   CRO_SAMPLE_SNAPSHOT_INPUT,
   croGuidePayload,
   renderCroSampleSnapshot,
-} from '../src/cro-guide.js'
+} from '../src/wake/cro-guide.js'
 import { COGNITIVE_TRAJECTORY_ACTIONS } from '../src/cognitive-trajectory-ops.js'
 import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory.js'
 
