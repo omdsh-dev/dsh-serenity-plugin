@@ -173,7 +173,7 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     expect((captured!.text as (c: unknown) => string)({})).toBe('')
   })
 
-  it('全局注册：skiff 会话（绑定轨迹有 skiff.json）→ 空（CCC 提示词全替换，F4b 旁路）', () => {
+  it('🔴 T2 翻转：skiff 会话**不再旁路** —— 与普通会话走同一条装配（旁路已删除）', () => {
     let captured: { name: string; order: number; text: unknown } | null = null
     const fakeCtx = {
       systemPrompt: {
@@ -184,14 +184,16 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     }
     registerEntrySkillSectionGlobal(fakeCtx as never)
     setupCccWithSkill('other-serenity')
-    // 🔴 2026-10-19：判据从「session id 前缀 `skiff-`」改为「绑定轨迹有 skiff.json」。
-    //    ⚠️ 这条改动**必须有负控**（下一句）：单靠"给个 skiff- 前缀的 id"已**不再**触发旁路
-    //    —— 如果只留正控，把判据改回前缀也照样绿，那就不是判据。
+    // 🔴 2026-10-19 T2：旧语义是「skiff 会话 ⇒ 空（CCC 提示词全替换）」。
+    //    现在**删掉了那条旁路**：所有轨迹走同一条装配，skiff 的差异只剩能力约束面。
+    //    ⚠️ 配对负控（上一版是正控，这里必须反过来）：普通会话**同样**注入 —— 若哪天
+    //    "注入"变成恒真（比如函数直接 return 常量），这条就不再承重，故两条一起看。
     const SESSION = 'skiff-qa-readonly-uuid'
     makeSkiffSession(dir, SESSION, 'qa-readonly')
     const ctxSkiff = { agent: { session: { id: SESSION, header: { cwd: dir } } } }
-    expect((captured!.text as (c: unknown) => string)(ctxSkiff)).toBe('')
-    // 对照：普通会话仍注入
+    const skiffText = (captured!.text as (c: unknown) => string)(ctxSkiff)
+    expect(skiffText).toContain('=== Serenity ACC ===')
+    // 对照：普通会话仍是同一套容器层（两者在**容器层**上已无差别）
     const ctxNormal = { agent: { session: { id: 'main-1', header: { cwd: dir } } } }
     expect((captured!.text as (c: unknown) => string)(ctxNormal)).toContain('=== Serenity ACC ===')
   })
@@ -298,13 +300,14 @@ describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第
     expect(out).not.toBe('')
   })
 
-  it('🔴 兜底闸：scope 绑定的轨迹有 skiff.json ⇒ 空（CCC 提示词全替换）', () => {
+  it('🔴 T2 翻转：scoped 版**也删掉了 skiff 旁路** —— 兜底闸不再按 skiff 返回空', () => {
     setupCccWithSkill('other-serenity')
-    // 🔴 2026-10-19：判据是轨迹上的 skiff.json，不是 id 前缀 —— 故这里要真造一条 skiff 轨迹
+    // 🔴 2026-10-19 T2：旧语义是「scope 绑定的轨迹有 skiff.json ⇒ 空」。
+    //    现在不是了：装配只剩一条路径（旁路在全局版与 scoped 版**同时删除**）。
     makeSkiffSession(dir, 'skiff-qa-readonly-probe-4', 'qa-readonly', undefined, 'probe')
     const { agent, captured } = fakeAgent('skiff-qa-readonly-probe-4', dir)
     registerEntrySkillSection(agent as never, dir)
-    expect(captured()!.text({})).toBe('')
+    expect(captured()!.text({})).toContain('=== Serenity ACC ===')
   })
 
   it('注册失败（section 抛错）⇒ 返回 false 且不抛（apply 不可成为启动单点）', () => {
@@ -453,6 +456,9 @@ describe('v1.23.1 persona 彩蛋（装配替换，SERENITY_HOOKS_CONFIG 注入�
     const on = personaBlock('大肥鱼', 'You are a big fat fish.\nLazy but correct.')
     expect(on).toContain('=== Serenity Persona ===')
     expect(on).toContain('big fat fish')
+    // ⚠️ T3：personaBlock 自己**从不**产出/吞掉 EAP 块（它只管表达层）——
+    //    旧断言 `not.toContain('=== Serenity EAP ===')` 测的是装配层的置换行为，已随 T3 移走；
+    //    这里保留"它自己不含 EAP"这一层窄语义（它确实不含）。
     expect(on).not.toContain('=== Serenity EAP ===')
     expect(personaBlock('', 'text')).toBe('')
     expect(personaBlock('mode', '   ')).toBe('')
@@ -468,15 +474,20 @@ describe('v1.23.1 persona 彩蛋（装配替换，SERENITY_HOOKS_CONFIG 注入�
     expect(text).not.toContain('=== Serenity Persona ===')
   })
 
-  it('配置 → EAP 块替换为 Persona 块 + MSM 原则段剥离（安全边界保留）', async () => {
+  it('配置 → Persona 块**追加**为表达层，EAP 质量层仍在（T3 修正：不再置换）', async () => {
     writeFileSync(cfgPath, JSON.stringify({ persona: { mode: '大肥鱼', overrideText: 'You are a big fat fish.' } }))
     const { serenitySystemPrompt } = await import('../src/seams/system-prompt.js')
     const text = serenitySystemPrompt(dir)
-    // Persona 块出现、EAP 块消失
+    // 🔴 2026-10-19 T3：旧语义是「persona **替换** EAP 块」——那正是 review F-05/R-14
+    //    那个悬置冲突（违反 I5：Induction 内容必须匹配标准，EAP 属于 layer B）。
+    //    新语义：**两层都注入**，persona 只能收窄表达，不能取消"输出前自检"这件事本身。
     expect(text).toContain('=== Serenity Persona ===')
     expect(text).toContain('big fat fish')
-    expect(text).not.toContain('=== Serenity EAP ===')
-    // MSM 原则段剥离（指令遵循约束被 persona 承接）
+    expect(text).toContain('=== Serenity EAP ===')
+    expect(text).toContain('E↑ Explicit')
+    // 表达层紧跟在质量层之后（先立标准，再谈表达）
+    expect(text.indexOf('=== Serenity EAP ===')).toBeLessThan(text.indexOf('=== Serenity Persona ==='))
+    // MSM 原则段剥离（指令遵循约束被 persona 承接）——这一条**不变**
     expect(text).not.toContain('MSM principles')
     expect(text).not.toContain('Determinism first')
     // 安全硬约束永远保留：本体论 / 关系段 / 操作边界 / CCE

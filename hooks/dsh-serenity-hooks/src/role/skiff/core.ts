@@ -43,6 +43,7 @@ import {
   skiffSessionSnapshot as registrySnapshot,
 } from './registry.js'
 import { sessionsRoot } from '../../trajectory/core.js'
+import { hasTrajectoryPrompt } from '../../trajectory/prompt.js'
 import { hostAgents } from '../../host/access.js'
 import { waitAgentIdle } from '../worker/idle.js'
 import { registerCognitiveTrajectorySkillSection } from '../../seams/system-prompt.js'
@@ -260,8 +261,22 @@ export async function createSkiffAgent(
     agent.ctx.systemPrompt.section({
       name: 'serenity-skiff',
       order: -60,
-      // 基础段**不含清单**（清单的真相源 = 模型自己的工具 schema ＋ msm() 目录）
-      text: () => [buildSkiffBasePrompt(profile.code), livePrompt()].filter(Boolean).join('\n'),
+      // 🔴 **T2（2026-10-19）：本段不再"立人格"，只剩两件窄事** ——
+      //   ① 基础段 `buildSkiffBasePrompt`：**身份边界与能力发现路径**（"这是你，不是你演的角色"、
+      //      "能力面由机制强制、按 schema 与 msm() 目录现取"）；
+      //   ② **兼容期**：旧 `skiff.json` 的 `systemPromptFile` 正文。
+      //
+      // 为什么②还留着：存量 CCC 的章程仍写在 `.opencode/skiff/<name>.md`，
+      // 不迁也能继续工作 —— **不静默坏**。
+      // 新形态是轨迹目录里的 `PROMPT.md`（`trajectory/prompt.ts`），由主装配的第 ⑧ 段注入。
+      //
+      // ⚠️ **两者同时存在时**：`PROMPT.md` 走第 ⑧ 段、`systemPromptFile` 走本段，
+      //    会出现两份章程。⇒ 若该轨迹已有 `PROMPT.md`，本段的②**让位**（`livePrompt()` 返回空），
+      //    判据由 `hasTrajectoryPrompt()` 给出（单一判据，不在这里自己拼路径）。
+      text: () => {
+        const legacy = hasTrajectoryPrompt(root, profile.dirName) ? '' : livePrompt()
+        return [buildSkiffBasePrompt(profile.code), legacy].filter(Boolean).join('\n')
+      },
     })
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)

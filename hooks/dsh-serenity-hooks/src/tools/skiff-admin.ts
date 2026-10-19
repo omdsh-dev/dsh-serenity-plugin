@@ -17,6 +17,7 @@ import type { JsonValue } from '../kernel/json.js'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
 import { profileSystemPromptSource, profileCognitiveTrajectory, resolveProfileSystemPrompt, SKIFF_PROFILE_HINT } from '../role/skiff/config.js'
 import { listSkiffProfiles, SKIFF_PROFILE_FILENAME } from '../role/skiff/profile.js'
+import { hasTrajectoryPrompt, TRAJECTORY_PROMPT_FILENAME } from '../trajectory/prompt.js'
 import { loadMsmEntries } from './msm/service.js'
 
 /** Skiff 定义教程：概念 ／ `skiff.json` schema ／ 双白名单 ／ 轨迹纪律 ／ 微信路由 */
@@ -79,14 +80,22 @@ export function validateSkiffConfig(root: string): JsonValue {
   const hc = readCheapWorkerConfig(root)
   const allowedModels = hc ? new Set(hc.models) : null
   for (const p of profiles) {
-    // 提示词来源解析——systemPromptFile（推荐）缺失/逃逸 → issue；
-    // 两者都无 → issue（CCC 应完整定义人格；否则模型只有基础段）
-    try {
-      if (!resolveProfileSystemPrompt(root, p).trim()) {
-        issues.push(`trajectory "${p.code}": system prompt is empty (define systemPromptFile (recommended) or systemPrompt)`)
+    // 提示词来源解析——**两条来源，任一非空即可**（v1.72.0 起）：
+    //   ① 轨迹目录的 `PROMPT.md`（**新形态**：轨迹提示词，所有轨迹都适用）
+    //   ② skiff.json 的 `systemPromptFile` / `systemPrompt`（**兼容期**旧形态）
+    //
+    // 🔴 2026-10-19 修（T4）：旧判据只看② ⇒ 只写 `PROMPT.md` 的轨迹会被误报
+    //    "system prompt is empty"。那是**读数器过时**，不是配置缺失。
+    const hasTrajectoryPromptOrLegacy = hasTrajectoryPrompt(root, p.dirName) || (() => {
+      try {
+        return resolveProfileSystemPrompt(root, p).trim() !== ''
+      } catch (err) {
+        issues.push(`trajectory "${p.code}": ${String((err as Error)?.message ?? err)}`)
+        return true // 已在上面报过，不再叠一条"empty"
       }
-    } catch (err) {
-      issues.push(`trajectory "${p.code}": ${String((err as Error)?.message ?? err)}`)
+    })()
+    if (!hasTrajectoryPromptOrLegacy) {
+      issues.push(`trajectory "${p.code}": no trajectory prompt (add ${TRAJECTORY_PROMPT_FILENAME} in the trajectory dir — recommended — or the legacy systemPromptFile/systemPrompt)`)
     }
     for (const m of p.msms) {
       if (!registered.has(m)) issues.push(`trajectory "${p.code}": msms "${m}" is not registered in mech-registry.json`)

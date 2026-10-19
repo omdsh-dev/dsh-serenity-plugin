@@ -1,3 +1,64 @@
+## v1.72.0 — 2026-10-19（🔴🔴 **轨迹提示词（Trajectory Prompt）：用「章程」取代「人格」**）
+
+**性质**：**架构级概念重构** ＋ **一处语义修正**（persona 不再置换 EAP）＋ **装配路径合并**（skiff 旁路删除）。
+**来源**：owner 原话——「参考会话的系统提示词，我们建立**轨迹提示词**概念来代替人格。架构上会好很多」
+＋「我同意，**一次性做完**」。
+
+### 一、问题：同一个概念被两套互不知道的机制拼装
+
+改造前，**「这条轨迹是谁、按什么章程工作」**这件事散在两处：
+
+| | 会话侧（主 agent） | skiff 侧 |
+|---|---|---|
+| 装配入口 | `seams/system-prompt.ts` | `role/skiff/core.ts` 另注册 `serenity-skiff` 段 |
+| 内容 | 8 块（几乎全硬编码在源码） | `buildSkiffBasePrompt` ＋ `skiff.json` 的 `systemPromptFile` |
+| 关系 | skiff **整段旁路**（`isSkiffSession ⇒ return ''`） | 它**替换**掉 ACC 默认注入 |
+
+⇒ 「人格」这个词把身份绑在"像不像一个人"上，于是它被设计成**可以整体替换**；
+而身份与章程**不该被替换，只该被特化**。最硬的证据 = review 的悬置冲突
+**F-05/R-14：`persona` 开启时置换 EAP 块**（违反 spec I5）。
+
+### 二、四层模型：只有第 ④ 层可以被覆盖
+
+| 层 | 内容 | 谁定 | CCC 能否覆盖 |
+|---|---|---|---|
+| ① 容器层 | ACC 身份 ／ CCE ／ Principles ／ Metaphor | ACC | ⛔ |
+| ② 质量层 | EAP 自检 | ACC | ⛔ **（persona 置换它就是错的，本版修正）** |
+| ③ **轨迹章程层** | 这条轨迹是谁、边界、纪律、交接 | **CCC 的轨迹提示词文件** | ✅ **这是轨迹提示词的正文** |
+| ④ 表达层 | 语域、风格 | CCC（可选） | ✅ 只能**收窄**③，不能取消①② |
+
+### 三、落地
+
+- 🆕 `src/trajectory/prompt.ts`：`PROMPT.md` 的识别、读取器（mtime+size 热重载）、装配块
+- 🆕 装配第 **⑧** 段 `=== Serenity Trajectory Prompt ===`（位置：容器上下文之后、轨迹方法论之前）
+- 🔴 **落点 = `AGENT_SESSIONS/<轨迹目录>/PROMPT.md`** —— 跟着轨迹走，`archive` 时不会掉队
+  （旧形态 `.opencode/skiff/<name>.md` 与轨迹分居两处）
+- 🔴 **T2 装配合并**：删除 `registerEntrySkillSectionGlobal` 与 `registerEntrySkillSection` 里的
+  **skiff 旁路**（各一处）⇒ skiff 从"另一套机制"降级为"同一条装配 + 一个可选约束面"
+- 🔴 **T3 语义修正**：`persona` 不再 `personaOn ? personaBlock : eapBlock`，改为**两者都注入**
+  （表达层紧跟质量层之后）⇒ 修掉 F-05/R-14
+
+### 四、兼容（不静默坏）
+
+- `PROMPT.md` **不存在** ⇒ 正常（普通轨迹没有章程是常态）
+- skiff 旧字段 `systemPromptFile` **兼容期仍读**（存量 CCC 不必同批迁移）；
+  ⚠️ 若该轨迹已有 `PROMPT.md` ⇒ 旧字段**让位**（否则同一份章程注入两遍）
+- 未配置 persona ⇒ 行为与 v1.71.0 逐字节一致
+
+### 五、实测抓到并修掉的缺陷
+
+**`rm PROMPT.md` 后仍返回旧章程**（reader 在 `statSync` 失败时退化为"上次成功内容"）。
+那是**错误方向**：删除必须当场恢复默认。⇒ statSync 失败一律清空缓存、返回空串。
+**这条是单测抓出来的，不是设计时想到的** —— 回归钉见 `tests/trajectory-prompt.test.ts` 用例 ①。
+
+### 六、门禁
+
+typecheck ✓ ｜ test **181 文件 / 2922 例** ✓ ｜ coverage 95.7% ✓ ｜
+typecheck-host 0.2.1-rc.2 双半 ✓ ｜ build ✓（113 `.d.ts`）｜ pack-check ✓（140 文件）
+🔵 隐私门第三次拦下我自己的注释（写了具体角色名）⇒ 已去具体化。
+
+---
+
 ## v1.71.0 — 2026-10-19（🔴🔴 **skiff 重做：skiff = 带 `skiff.json` 的认知轨迹**）
 
 **性质**：**架构级简化**（一条判据取代四条机制）＋ **破坏性变更**（配置载体与身份概念都换了）。

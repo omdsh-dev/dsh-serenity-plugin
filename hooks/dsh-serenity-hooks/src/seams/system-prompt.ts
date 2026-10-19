@@ -46,6 +46,7 @@ import { recordSkillInjections } from '../surface/usage.js'
 import { localstorePath, readGitTrack } from '../tools/localstore/service.js'
 import { readAdvancedSettings } from '../kernel/config.js'
 import { isSkiffSession } from '../role/skiff/profile.js'
+import { createTrajectoryPromptReader, trajectoryPromptBlock } from '../trajectory/prompt.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
 function readPersonaSettings(): { mode: string; overrideText: string } {
@@ -511,7 +512,12 @@ export function sessionBlock(root: string, scope: string = DEFAULT_SESSION_SCOPE
  * Principles 剥离 MSM 原则段（指令遵循约束）——用户文本承接两处风格；本体论/关系段/
  * 操作边界（安全硬约束）永远保留。未配置 → 与 v1.23.0 逐字节一致（零影响）。
  */
-export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSION_SCOPE): string {
+export function serenitySystemPrompt(
+  root: string,
+  scope: string = DEFAULT_SESSION_SCOPE,
+  /** 活跃轨迹目录名（给了才有第 ⑧ 段；未绑定轨迹 ⇒ undefined，不注入） */
+  dirName?: string,
+): string {
   const persona = readPersonaSettings()
   const personaOn = persona.mode !== '' && persona.overrideText.trim() !== ''
   const parts = [
@@ -519,14 +525,29 @@ export function serenitySystemPrompt(root: string, scope: string = DEFAULT_SESSI
     metaphorBlock(),
     principlesBlock(root, personaOn),
     cceBlock(),
-    personaOn ? personaBlock(persona.mode, persona.overrideText) : eapBlock(),
+    // 🔴 T3（2026-10-19）：「人格」收敛为**表达层**，不再置换 EAP。
+    //    旧行为 = `personaOn ? personaBlock(...) : eapBlock()` ⇒ 开 persona 就**丢掉质量层**，
+    //    即 review F-05/R-14 那个悬置冲突。⇒ 现在两层**都注入**：persona 只能收窄表达，
+    //    不能取消「输出前自检」这件事本身（EAP 是容器纪律，不是风格）。
+    eapBlock(),
   ]
+  // 表达层（可选，紧跟质量层之后：先立标准，再谈表达）
+  if (personaOn) {
+    const expr = personaBlock(persona.mode, persona.overrideText)
+    if (expr !== '') parts.push(expr)
+  }
   // S134 v1.16.12：运行时状态动态块（safe-mode / localstore）——利用系统提示词约束 agent 行为；
   // 按当前状态条件生成（开关/策略变更每轮装配即时生效）
   const state = [safeModeBlock(root), localstoreBlock(root)].filter((b) => b !== '').join('\n')
   if (state) parts.push(state)
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
+  // 🆕 ⑧ 轨迹提示词（T1/T2，2026-10-19）：**这条轨迹是谁、按什么章程工作**。
+  //    位置刻意在容器上下文（⑦）之后、轨迹方法论（§serenity-trajectory-skills，order -45）之前：
+  //    先知道容器与语境，再说"我是谁、怎么做"，最后才是方法论与工具细节。
+  //    🔴 它**追加**，永不替换上面任何一块 —— 那正是本概念相对「人格」的核心修正。
+  const trajPrompt = dirName === undefined ? '' : trajectoryPromptBlock(createTrajectoryPromptReader(root, dirName)())
+  if (trajPrompt !== '') parts.push(trajPrompt)
   // 需求③：工具参考块殿后（SKILL 后、Session 前）——身份先行、工具清单独立成块
   parts.push(toolsBlock())
   const session = sessionBlock(root, scope)
@@ -580,6 +601,25 @@ function agentScope(context: AssembleContext): string {
 }
 
 /**
+ * 该会话**绑定的轨迹目录名**（有 ⇒ 注入第 ⑧ 段「轨迹提示词」；无 ⇒ `undefined`，不注入）。
+ *
+ * 🔴 为什么用**目录名**而不是编码或 label：`PROMPT.md` 的落盘位置是目录，
+ * 而编码只是目录名里的一段。用 label 拼路径 = 把模糊匹配当精确匹配用（本轨已踩过）。
+ *
+ * ⚠️ 每次装配都重读绑定（**不缓存**）：绑定切换后提示词必须立刻跟上，
+ * 这与 `serenity-trajectory-skills` section 的口径一致（动态注入，owner 令 2026-09-20）。
+ */
+function boundDirNameFor(session: unknown): string | undefined {
+  try {
+    const rec = readLastBound(session)
+    const name = rec?.dirName
+    return typeof name === 'string' && name !== '' ? name : undefined
+  } catch {
+    return undefined // 绑定读取失败 ⇒ 不注入第 ⑧ 段（不阻断装配）
+  }
+}
+
+/**
  * 全局注册系统提示词 section（osp system.transform 的 DSH 等价）。
  * text 回调按 context.agent 的 cwd 上溯 .serenity → 返回该 CCC 的完整注入文本；
  * 非 CCC / 无 agent 返回空（不注入）。
@@ -595,11 +635,19 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         const root = cccRootForCwd(cwd)
         if (!root) return ''
         const scope = agentScope(context)
-        // skiff 会话：不注入 ACC 默认系统提示词（CCC 提示词段全替换，scoped 'serenity-skiff'
-        // section 由 skiff 会话核心注册）。
-        // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 `skiff-` id 前缀）。
-        if (isSkiffSession(root, scope)) return ''
-        const base = serenitySystemPrompt(root, scope)
+        // 🔴 T2（2026-10-19）**删掉了 skiff 旁路**。
+        //
+        // 旧行为：`if (isSkiffSession(root, scope)) return ''` —— skiff 会话**整段不注入 ACC**，
+        // 由 `role/skiff/core.ts` 的另一条路径用 CCC 文件"立人格"。
+        // 后果：同一个概念（"这条轨迹是谁、按什么章程工作"）由**两套互不知道的机制**拼装。
+        //
+        // 现在：所有轨迹走**同一条装配**；skiff 的差异只剩「能力约束面」（`skiff.json`），
+        // 而它的"章程"由 `PROMPT.md`（轨迹提示词）承载 —— 与普通轨迹**同一机制**。
+        // ⇒ skiff 从"另一套机制"降级为"同一条装配 + 一个可选约束面"。
+        //
+        // ⚠️ 兼容期：`PROMPT.md` 不存在时，skiff 的旧 `systemPromptFile` 仍由
+        // `role/skiff/core.ts` 自己的 section 追加（见那里的说明）——存量 CCC 不会静默失去章程。
+        const base = serenitySystemPrompt(root, scope, boundDirNameFor(context.agent?.session))
         const codeLine = codeModeAdaptationLine(ctx, context.scope)
         return codeLine ? `${base}\n${codeLine}` : base
       },
@@ -634,11 +682,9 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
       name: 'serenity-entry',
       order: -50,
       text: (context) => {
-        // skiff：防御性跳过（scoped 注册由 context.ts 调用，skiff 已提前 return；
-        // 此处兜底确保任何路径下 skiff 会话都不注入 ACC 默认提示词）。
-        // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 id 前缀）。
-        if (isSkiffSession(root, scope)) return ''
-        const base = serenitySystemPrompt(root, scope)
+        // 🔴 T2（2026-10-19）：这里原先也有 `if (isSkiffSession(...)) return ''` 的防御性旁路，
+        // 与全局版一起**删除** —— 装配只剩一条路径（理由见全局版的同段注释）。
+        const base = serenitySystemPrompt(root, scope, boundDirNameFor(agent.session))
         const codeLine = codeModeAdaptationLine(agent.ctx, context.scope)
         return codeLine ? `${base}\n${codeLine}` : base
       },

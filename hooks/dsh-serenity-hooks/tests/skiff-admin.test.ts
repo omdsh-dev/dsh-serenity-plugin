@@ -12,7 +12,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -145,12 +145,24 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: validat
     expect(r.issues.some((i: string) => i.includes('trajectory "qa"') && i.includes('other/model') && i.includes('not in cheap-worker.models'))).toBe(true)
   })
 
-  it('systemPrompt 空 → 问题清单', () => {
+  it('无任何章程（既无 PROMPT.md 也无旧字段）→ 问题清单', () => {
     makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'] }))
     writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
     const r = validateSkiffConfig(dir)
     expect(r.ok).toBe(false)
-    expect(r.issues.some((i: string) => i.includes('system prompt is empty'))).toBe(true)
+    // 🔴 v1.72.0：文案从「system prompt is empty」改为点名两条来源之一
+    //    （PROMPT.md 是新形态、旧字段是兼容期）——断言跟语义走，别钉死措辞。
+    expect(r.issues.some((i: string) => i.includes('no trajectory prompt'))).toBe(true)
+    expect(r.issues.some((i: string) => i.includes('PROMPT.md'))).toBe(true)
+  })
+
+  it('🔴 只写 PROMPT.md（无旧字段）⇒ **不报**缺章程（新形态正控）', () => {
+    makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'] }))
+    writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
+    const trajDir = readdirSync(join(dir, 'AGENT_SESSIONS')).find((n) => n.includes('--qa'))
+    writeFileSync(join(dir, 'AGENT_SESSIONS', trajDir!, 'PROMPT.md'), '我是这条轨迹。')
+    const r = validateSkiffConfig(dir)
+    expect(r.issues.some((i: string) => i.includes('trajectory prompt'))).toBe(false)
   })
 
   it('systemPromptFile 缺失 → 问题清单（v1.25.10 md 文件引用）', () => {
@@ -242,7 +254,7 @@ describe('skiff 角色逻辑（v1.30 起归 container_admin role 域）: applySk
     expect(r.applied).toBe(false)
     expect(r.roleCount).toBe(1)
     expect(r.issues.some((i: string) => i.includes('ghost-msm'))).toBe(true)
-    expect(r.issues.some((i: string) => i.includes('system prompt is empty'))).toBe(true)
+    expect(r.issues.some((i: string) => i.includes('no trajectory prompt'))).toBe(true)
     expect(r.hint).toContain('fix the issues')
   })
 
