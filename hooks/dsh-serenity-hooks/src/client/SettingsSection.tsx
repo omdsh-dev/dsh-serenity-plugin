@@ -220,13 +220,13 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <li>
           <RowCard
             title="超限重建"
-            desc="上下文接近上限时提示调用 container_trajectory rebuild 清空重建"
+            desc="上下文接近上限时提示调用 cognitive_trajectory rebuild 清空重建"
             expandable
             open={openRebuild}
             onToggle={setOpenRebuild}
             detail={
               <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'上下文占用到阈值时，由模型调用 container_trajectory rebuild 原地清空重建。\n' +
+                <p className="ss-detailIntro">{'上下文占用到阈值时，由模型调用 cognitive_trajectory rebuild 原地清空重建。\n' +
                   '· 语义：丢弃当前会话 → 新建 → 注入「继续原 SESSION 的工作」\n' +
                   '· SESSION.md 原位不动，轨迹延续，上下文归零\n' +
                   '· 恒开、无总闸；要调敏感度只改下面的阈值'}
