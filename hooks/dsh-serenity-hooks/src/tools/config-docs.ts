@@ -58,7 +58,7 @@ export function renderDocsIndex(chapters: readonly DocsChapter[]): string {
     lines.push(`  ${ch.id.padEnd(14)}${ch.summary}`)
   }
   lines.push('')
-  lines.push('相关：container_admin msm catalog（工具/能力目录——与本章录互指，不互相复制）')
+  lines.push('旧入口（msm catalog / msm ccc-config / config guide）**降为指针**，只指路、不再返回正文。')
   return lines.join('\n')
 }
 
@@ -72,4 +72,34 @@ export function findDocsChapter(chapters: readonly DocsChapter[], id: string): D
   const want = id.trim().toLowerCase()
   if (want === '') return null
   return chapters.find((c) => c.id.toLowerCase() === want) ?? null
+}
+
+/**
+ * **指针文案**（v1.75.0，owner 裁 Q3「指针」）——被降级的旧入口共用这一份。
+ *
+ * ## 为什么要有"指针"这个形态（而不是直接删掉旧入口）
+ *
+ * 旧入口的名字（`msm catalog` / `msm ccc-config` / `config guide`）**已经写在 CCC 侧的
+ * 文档与提示词里**，硬删会让它们全部变成"未知动作"，而且**没有任何机械信号**告诉我们
+ * 哪份文档已经说谎了（本仓 D151 同族）。
+ *
+ * ⇒ 保留名字、只换返回内容：调用方能**自己顺着指针找到正文**，而正文仍然只有一份。
+ *
+ * 🔴 **必须只有一处实现**：`container-admin.ts`（config 域）与 `msm/service.ts`（msm 域）
+ * 都要用它。两处各写一份文案 ⇒ 措辞漂移（本仓反复踩过的形态）。
+ *
+ * @param chapter 正文所在的章 id
+ * @param what 这个入口原来叫什么（进标题，让调用方一眼确认自己找对了）
+ */
+export function docsPointer(chapter: string, what: string): string {
+  return [
+    `═══ ${what} — 正文已统一 ═══`,
+    '',
+    `正文在：container_admin config docs ${chapter}`,
+    '',
+    '为什么改（v1.75.0，owner 裁「指针」）：这个内容此前有**两个**正文入口，',
+    '而它们返回同一份常量 ⇒ 两个真相源。现在「一个内容一个正文入口」，本入口只指路。',
+    '',
+    '索引（不知道还有哪些章）：container_admin config docs',
+  ].join('\n')
 }

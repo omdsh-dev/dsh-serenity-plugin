@@ -109,8 +109,12 @@ export const MSM_ACTIONS: readonly MsmAction[] = ['list', 'exec', 'register', 'd
  * 目录在前、详情各归各——**单一真相源**：本目录只索引"去哪个工具/子命令看详情"，不复制详情
  * （避免 container_admin/weixin-doctor 等 guide 全文重复 → 多真相源 → 失同步）。
  * 后续新增功能只需在此加一行（低熵可演进）。
+ *
+ * 🔴 **2026-10-19 v1.75.0 起导出**：它是 `container_admin config docs catalog` 那一章的正文。
+ * `msm catalog` 动作**降为指针**（只指路，不再返回本常量）—— 否则同一份正文会有两个入口，
+ * 而"两个入口返回同一份内容"正是本目录自己反对的形态。
  */
-const ACC_CATALOG = `═══ ACC Usage Catalog ═══
+export const ACC_CATALOG = `═══ ACC Usage Catalog ═══
 Directory of ACC capabilities — each area lists where to go for details (guides live with their feature; this catalog only points).
 
   ① 轨迹本体          → cognitive_trajectory（list/show/create/use + rebuild 超限重建 + send-now 即时投递 + send-later 未来一次性唤醒
@@ -140,6 +144,8 @@ Directory of ACC capabilities — each area lists where to go for details (guide
 
 每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
 `
+
+import { docsPointer } from '../config-docs.js'
 
 export const MSM_GUIDE = `MSM Development Manual (Mech & Semi-Mech framework)
 
@@ -665,8 +671,12 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
     case 'guide':
       return { guide: MSM_GUIDE }
 
+    // 🔴 2026-10-19 v1.75.0：`catalog` **降为指针**（owner 裁 Q3）。
+    //    正文唯一入口 = `container_admin config docs catalog`。
+    //    ⚠️ 为什么不是删掉这个动作：`msm catalog` 这个名字写在 CCC 侧文档与提示词里
+    //    （本仓多处引用），硬删会静默失效。⇒ 保留名字、只换返回内容。
     case 'catalog':
-      return { catalog: ACC_CATALOG }
+      return { catalog: docsPointer('catalog', 'ACC 能力目录') }
 
     case 'exec': {
       const { entry, businessArgs, fmtJson, hasHelp, protocol } = prepareExec(root, args)
@@ -762,8 +772,9 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
       throw new Error(`MSM not registered: "${name}"`)
     }
 
+    // 🔴 2026-10-19 v1.75.0：`ccc-config` **降为指针**，同 `catalog`（owner 裁 Q3）。
     case 'ccc-config':
-      return CCC_CONFIG_REFERENCE
+      return docsPointer('config', 'CCC 配置参考')
 
     case 'check': {
       // C5（2026-09-15）：判据实现抽成具名导出 `checkRegistryQuality`（供 container-status

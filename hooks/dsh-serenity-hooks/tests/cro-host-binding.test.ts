@@ -225,3 +225,70 @@ describe('绑定文件与 CRO 程序共存（真形态）', () => {
     expect(CRO_HOST_FILENAME).toBe('cro-host-binding')
   })
 })
+
+/**
+ * 🆕 2026-10-19 owner 裁 Q2：**声明文件的 `cro.host` 优先，独立文件回落**（两代并读）。
+ *
+ * 🔴 **为什么这组比别处更要紧**（原裁定逐字保留在 `cro/core.ts` 头注）：
+ * 绑定声明要跟着轨迹走到**第二台机器**，在那里被判成「绑给了别人」而**正确地不跑**。
+ * 硬切之后那台机器读到的是**「没绑」** —— 都导致"不跑"，**表面结果相同，但判据退化**。
+ * ⇒ 两条路必须都能读，且**优先级明确**。
+ */
+describe('🆕 收拢后：`trajectory.json` 的 `cro.host` 与独立文件两代并读', () => {
+  /** 写声明文件（`trajectory.json`） */
+  function writeDeclaration(dir: string, body: Record<string, unknown>): void {
+    writeFileSync(join(dir, 'trajectory.json'), JSON.stringify(body), 'utf-8')
+  }
+
+  it('只有 `cro.host`（没有独立文件）⇒ 照样能判「绑给本机」（收拢后的常态形态）', () => {
+    const dir = makeCognitiveTrajectory() // 不写独立文件
+    writeDeclaration(dir, { cro: { host: SELF } })
+    const v = resolveCroHostBinding(root, DIR_NAME, SELF)
+    expect(v.allowed).toBe(true)
+    expect(v.code).toBe('bound-to-self')
+    expect(v.bound).toBe(SELF)
+  })
+
+  it('🔴 只有 `cro.host` 且绑给**别人** ⇒ 不跑，且**仍是 `bound-to-other`**（不是退化成 not-bound）', () => {
+    const dir = makeCognitiveTrajectory()
+    writeDeclaration(dir, { cro: { host: OTHER } })
+    const v = resolveCroHostBinding(root, DIR_NAME, SELF)
+    expect(v.allowed).toBe(false)
+    expect(v.code, '这一格就是"判据退化"的机械判据：必须还能说清是绑给了别人').toBe('bound-to-other')
+    expect(v.bound).toBe(OTHER)
+  })
+
+  it('🔴 两处都给且**冲突** ⇒ 声明文件优先', () => {
+    const dir = makeCognitiveTrajectory(OTHER) // 文件说绑给别人
+    writeDeclaration(dir, { cro: { host: SELF } }) // 声明说绑给本机
+    const v = resolveCroHostBinding(root, DIR_NAME, SELF)
+    expect(v.allowed).toBe(true)
+    expect(v.bound).toBe(SELF)
+  })
+
+  it('🔴 声明里 `cro.host` 空串 / 非字符串 ⇒ 按"没给"处理，**回落独立文件**（不得当成"绑了空名"）', () => {
+    for (const bad of ['', '   ', 42, null, ['x']]) {
+      const dir = makeCognitiveTrajectory(SELF)
+      writeDeclaration(dir, { cro: { host: bad } })
+      const v = resolveCroHostBinding(root, DIR_NAME, SELF)
+      expect(v.allowed, `cro.host=${JSON.stringify(bad)} 时不得吃掉独立文件里的绑定`).toBe(true)
+      expect(v.code).toBe('bound-to-self')
+    }
+  })
+
+  it('🔴 声明文件坏掉（非法 JSON）⇒ 回落独立文件（不抛、不 fail-open）', () => {
+    const dir = makeCognitiveTrajectory(OTHER)
+    writeFileSync(join(dir, 'trajectory.json'), '{ 这不是 JSON', 'utf-8')
+    const v = resolveCroHostBinding(root, DIR_NAME, SELF)
+    expect(v.allowed, '坏声明不得让本机误跑').toBe(false)
+    expect(v.code).toBe('bound-to-other')
+  })
+
+  it('🔴 两处都没有 ⇒ `not-bound` 且**不跑**（fail-closed 方向不变；文案要说出两个地方都查过）', () => {
+    makeCognitiveTrajectory()
+    const v = resolveCroHostBinding(root, DIR_NAME, SELF)
+    expect(v.allowed).toBe(false)
+    expect(v.code).toBe('not-bound')
+    expect(v.detail).toContain('cro.host')
+  })
+})

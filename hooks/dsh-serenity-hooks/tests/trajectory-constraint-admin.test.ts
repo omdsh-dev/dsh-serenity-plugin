@@ -23,6 +23,7 @@ vi.mock('@deepseek-ai/dsh-tools', () => ({
 
 import { TRAJECTORY_CONSTRAINT_GUIDE, validateTrajectoryConstraint, listTrajectoryConstraintSummary, applyTrajectoryConstraint } from '../src/tools/trajectory-constraint-admin.js'
 import { makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
+import { TRAJECTORY_CONSTRAINT_FILENAME } from '../src/trajectory/policy/profile.js'
 
 let dir: string
 
@@ -193,7 +194,8 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: l
     const r = listTrajectoryConstraintSummary(dir) as { roles: unknown[]; note: string }
     expect(r.roles).toEqual([])
     expect(r.note).toContain('no 轨迹约束 trajectories in this CCC')
-    expect(r.note).toContain('no trajectory has trajectory-constraint.json')
+    // 🔴 用常量而非字面量：这条断言的是"文案里印的是**当前**文件名"，写死字面量会把改名这件事钉在原地
+    expect(r.note).toContain(`no trajectory has ${TRAJECTORY_CONSTRAINT_FILENAME}`)
   })
 
   it('有轨迹 → 摘要（编码/目录/模型/msms/tools/纪律/提示词来源）', () => {

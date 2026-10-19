@@ -30,13 +30,70 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from 'cordis'
 import type { JsonValue } from '../kernel/json.js'
 import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
-import { runMsm, MSM_ACTIONS, CCC_CONFIG_REFERENCE } from './msm/service.js'
+import { runMsm, MSM_ACTIONS, CCC_CONFIG_REFERENCE, ACC_CATALOG } from './msm/service.js'
 import { trajectoryConstraintMsmGate } from '../trajectory/session.js'
 import { validateTrajectoryConstraint, applyTrajectoryConstraint, listTrajectoryConstraintSummary, TRAJECTORY_CONSTRAINT_GUIDE } from './trajectory-constraint-admin.js'
-import { renderDocsIndex, findDocsChapter, type DocsChapter } from './config-docs.js'
+import { renderDocsIndex, findDocsChapter, docsPointer, type DocsChapter } from './config-docs.js'
+import { loadSerenityConfig } from '../kernel/ccc.js'
 
 function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? ''
+}
+
+/**
+ * `config view` 的**现值摘要**（v1.75.0 起：不再回整份说明正文）。
+ *
+ * 语义边界（这正是它和 `docs config` 的分工）：
+ * - 本函数回答「**你这个 CCC 现在填了什么**」⇒ 只报有值的键，且值超长截断。
+ * - 它回答不了「**这个键该怎么填**」⇒ 那是 `docs config` 那一章。
+ *
+ * 🔴 为什么必须截断：现值里可能有很长的字段（`topPrompt` 实测数百字符）。
+ * 不截断会让 "看现值" 退化成 "又返回一坨正文" —— 那就回到了统一前的问题。
+ *
+ * ⚠️ 返回类型是 `JsonValue`（工具 output schema 的契约）⇒ 必须**转成纯 JSON 可表达形态**，
+ * 不能直接把 `Record<string, unknown>` 塞回去（`unknown` 里可能有函数/undefined，
+ * 那会让序列化层行为不确定）。
+ */
+function viewConfigSummary(root: string): JsonValue {
+  let cfg: Record<string, unknown>
+  try {
+    cfg = loadSerenityConfig(root) as unknown as Record<string, unknown>
+  } catch (err) {
+    return { error: `配置读取失败：${String((err as Error)?.message ?? err)}` }
+  }
+  const MAX_STR = 120
+  const MAX_ARRAY = 12
+  const MAX_KEYS = 12
+
+  /** 递归转成纯 JSON 可表达值（超长按上限截断，并标注原始规模） */
+  const toJson = (v: unknown): JsonValue => {
+    if (v === null || v === undefined) return null
+    if (typeof v === 'string') {
+      return v.length > MAX_STR ? `${v.slice(0, MAX_STR)}…（共 ${v.length} 字符）` : v
+    }
+    if (typeof v === 'number') return Number.isFinite(v) ? v : String(v)
+    if (typeof v === 'boolean') return v
+    if (Array.isArray(v)) {
+      const head = v.slice(0, MAX_ARRAY).map(toJson)
+      return v.length > MAX_ARRAY ? [...head, `…（共 ${v.length} 项）`] : head
+    }
+    if (typeof v === 'object') {
+      const obj = v as Record<string, unknown>
+      const keys = Object.keys(obj)
+      const out: Record<string, JsonValue> = {}
+      for (const k of keys.slice(0, MAX_KEYS)) out[k] = toJson(obj[k])
+      if (keys.length > MAX_KEYS) out['…'] = `另有 ${keys.length - MAX_KEYS} 个键`
+      return out
+    }
+    return String(v) // function / symbol 等：转为可读串（配置里本不该有，但不静默丢）
+  }
+
+  return {
+    cccRoot: root,
+    sections: Object.keys(cfg),
+    values: toJson(cfg),
+    note: '这是**现值摘要**（只报有值的键、超长已截断）。每段怎么填、填错会怎样 ⇒ container_admin config docs config',
+  }
 }
 
 function renderText(value: unknown): ContentBlock[] {
@@ -70,13 +127,33 @@ const ADMIN_ACTIONS: Record<AdminDomain, readonly string[]> = {
 const DOMAIN_NAMES = Object.keys(ADMIN_ACTIONS) as AdminDomain[]
 
 /**
- * 说明目录的章节（P3 两层菜单的**唯一注册处**）。
+ * 说明目录的章节（**说明类内容的唯一注册处**）。
  *
- * 🔴 加一章 = 在这里加一项（`render` 惰性求值）。**正文不复制**：
- * 每章的真相源就在它自己的函数里（`CCC_CONFIG_REFERENCE` / `TRAJECTORY_CONSTRAINT_GUIDE`）——
- * 本表只做**切分与路由**，避免"同一段说明有第二份会漂的副本"。
+ * 🔴 两条纪律：
+ * ① **加一章 = 在这里加一项**（`render` 惰性求值）——说明类内容增长时**不新增工具/子命令**。
+ * ② **正文不复制**：每章的真相源就在它自己的函数里（`CCC_CONFIG_REFERENCE` /
+ *    `TRAJECTORY_CONSTRAINT_GUIDE` / `ACC_CATALOG`）——本表只做**切分与路由**。
+ *
+ * ## 🔴 2026-10-19 v1.75.0：说明面统一（owner 裁 Q3 = 指针）
+ *
+ * 统一前有 **5 个并列入口**，其中两组返回**同一份正文**：
+ * `docs config` ≡ `msm ccc-config`｜`docs trajectory-constraint` ≡ `config guide`｜
+ * `msm catalog`（域挂错了：它描述整个 ACC，却挂在 MSM 注册表下）。
+ *
+ * ⇒ 统一后的分工（**一个内容一个正文入口**）：
+ * - **`config docs <chapter>`** = 唯一正文入口
+ * - `msm ccc-config` / `config guide` = **指针**（指向对应 chapter，不再返回正文）
+ * - `msm catalog` = **指针**（指向 `catalog` 章）
+ *
+ * 判据依据：`praxis` 已经做对了这件事 —— `praxis eap` 返回正文、`praxis` 无参返回目录，
+ * **没有第二个入口读同一份 EAP**。本表把同一形态搬到 config 域。
  */
 const DOCS_CHAPTERS: readonly DocsChapter[] = [
+  {
+    id: 'catalog',
+    summary: 'ACC 能力总目录——7 个能力分区，每区一句话 ＋ 去哪个子命令看详情',
+    render: () => ACC_CATALOG,
+  },
   {
     id: 'config',
     summary: 'CCC 配置全表——9 段各是什么、怎么填、填错会怎样（.opencode/serenity.json）',
@@ -84,10 +161,16 @@ const DOCS_CHAPTERS: readonly DocsChapter[] = [
   },
   {
     id: 'trajectory-constraint',
-    summary: '轨迹约束：一条轨迹怎么被约束（trajectory-constraint.json 的 schema ＋ 双白名单）',
+    summary: '轨迹约束：一条轨迹怎么被约束（trajectory.json 的 schema ＋ 双白名单）',
     render: () => TRAJECTORY_CONSTRAINT_GUIDE,
   },
 ]
+
+/**
+ * 指针与章目的关系（v1.75.0）：
+ * 被降级的旧入口（`msm catalog` / `msm ccc-config` / `config guide`）统一走
+ * `config-docs.ts` 的 `docsPointer()` —— **只有一处实现**，避免两域各写一份文案而漂移。
+ */
 
 export function createContainerAdminTool(ctx: Context) {
   return defineTool({
@@ -169,13 +252,21 @@ export function createContainerAdminTool(ctx: Context) {
             return { chapter: found.id, docs: found.render() }
           }
           // ── 现值（原 config 域的唯一动作） ──
+          //
+          // 🔴 2026-10-19 v1.75.0：`view` 曾转发 `msm ccc-config`（**返回整份配置全表正文**），
+          //    而 `docs config` 返回的是**同一个常量** ⇒ 两个正文入口。现在 `view` 只回
+          //    **现值摘要 ＋ 指针**：它这一格的语义本来就是"**看当前填了什么**"，
+          //    而"这个键该怎么填"是 `docs config` 的事 —— 两件事本来就不该共用一个动作。
           case 'view':
           case '': {
-            const ref = runMsm(root, { action: 'ccc-config' })
-            return { config: ref }
+            return {
+              config: viewConfigSummary(root),
+              docs: '完整配置说明（每段怎么填、填错会怎样）→ container_admin config docs config',
+            }
           }
-          // ── P4：原 role 域四动作（并入本域） ──
-          case 'guide': return { guide: TRAJECTORY_CONSTRAINT_GUIDE }
+          // ── 原 role 域四动作（并入本域） ──
+          // `guide` 降为指针（v1.75.0，owner 裁 Q3）：正文唯一入口 = `docs trajectory-constraint`
+          case 'guide': return { guide: docsPointer('trajectory-constraint', '轨迹约束教程') }
           case 'validate': return validateTrajectoryConstraint(root)
           case 'apply': return applyTrajectoryConstraint(root)
           case 'list': return listTrajectoryConstraintSummary(root)

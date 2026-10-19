@@ -17,7 +17,7 @@
  * 会告诉我们"哪份文档已经说谎了"（D151 同族）。⇒ 别名 + 一条钉住它的用例。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -135,14 +135,31 @@ describe('container_admin：domain 路由（v1.30 机务舱）', () => {
     ).rejects.toThrow(/execution goes through the msm tool/)
   })
 
-  it('config view → 转发 ccc-config 到 runMsm（现值）', async () => {
-    await containerAdminTool.execute({ domain: 'config', action: 'view' }, execWith())
-    expect(mockRunMsm).toHaveBeenCalledWith(tmp, expect.objectContaining({ action: 'ccc-config' }))
+  /**
+   * 🔴 **2026-10-19 v1.75.0：`config view` 不再转发 `ccc-config`（那会返回整份说明正文）**。
+   *
+   * 它现在回答的是「**你这个 CCC 现在填了什么**」—— 与 `docs config` 的
+   * 「**这个键该怎么填**」分工。两件事本来就不该共用一个动作。
+   */
+  it('config view → 现值摘要（不再转发 ccc-config 的说明正文）', async () => {
+    // 🔴 `.opencode/` 在临时 CCC 里还不存在 ⇒ 必须先建目录，否则 writeFileSync 直接 ENOENT
+    mkdirSync(join(tmp, '.opencode'), { recursive: true })
+    writeFileSync(join(tmp, '.opencode', 'serenity.json'), JSON.stringify({ cheapWorker: { models: ['a/b'] } }))
+    const res = (await containerAdminTool.execute({ domain: 'config', action: 'view' }, execWith())) as {
+      config: { cccRoot: string; sections: string[]; note: string }
+      docs: string
+    }
+    expect(res.config.cccRoot).toBe(tmp)
+    expect(Array.isArray(res.config.sections)).toBe(true)
+    // 指路：怎么填看 docs config
+    expect(res.docs).toContain('config docs config')
+    // 🔴 反向钉：**不再调用 runMsm 取说明正文**
+    expect(mockRunMsm).not.toHaveBeenCalledWith(tmp, expect.objectContaining({ action: 'ccc-config' }))
   })
 
   it('config 无 action → 按 view 处理（向后兼容旧的 `{domain:"config"}` 调用）', async () => {
-    await containerAdminTool.execute({ domain: 'config' }, execWith())
-    expect(mockRunMsm).toHaveBeenCalledWith(tmp, expect.objectContaining({ action: 'ccc-config' }))
+    const res = (await containerAdminTool.execute({ domain: 'config' }, execWith())) as { config: { cccRoot: string } }
+    expect(res.config.cccRoot).toBe(tmp)
   })
 
   it('非法 domain → 拒绝（文案只列新名）', async () => {
@@ -173,7 +190,8 @@ describe('container_admin：domain 路由（v1.30 机务舱）', () => {
 describe('config docs：两层说明菜单（P3）', () => {
   it('第一层：无 chapter ⇒ 目录，且列出全部章节 id', async () => {
     const res = (await exec({ domain: 'config', action: 'docs' })) as { docs: string; chapters: string[] }
-    expect(res.chapters).toEqual(['config', 'trajectory-constraint'])
+    // v1.75.0：catalog 从 msm 域并进来（它描述整个 ACC，挂在 MSM 注册表下是域挂错了）
+    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-constraint'])
     expect(res.docs).toContain('CCC 配置说明 · 目录')
     // 目录里每一章都有一句话
     expect(res.docs).toContain('config')
@@ -201,6 +219,42 @@ describe('config docs：两层说明菜单（P3）', () => {
     expect(res.docs).toContain('Guide (2026-10-19 redesigned)')
   })
 
+  /**
+   * 🔴 **能力目录正文的验证落点**（2026-10-19 v1.75.0 从 `acc-extras.test.ts` 迁来）。
+   *
+   * 迁移原因：`msm catalog` 降为指针后，那份正文**只在** `docs catalog` 这一章可达。
+   * ⇒ 若不放这里，全仓就**没有一处**在验"目录正文还对不对" —— 那是静默的覆盖退化。
+   * （本条的存在本身就是"指针化不许降低覆盖"的判据。）
+   */
+  it('第二层：catalog 章 = ACC 能力目录全文（7 分区 ＋ 各功能指路）', async () => {
+    const res = (await exec({ domain: 'config', action: 'docs', chapter: 'catalog' })) as { docs: string }
+    expect(res.docs).toContain('ACC Usage Catalog')
+    // 7 个能力分区（④ 于 2026-10-19 更名：role 域并入 config）
+    for (const area of ['轨迹本体', '认知质量框架', '工具与执行', '轨迹约束与对外面', '自主与接入', 'CCC 配置总览', '注册表与安全']) {
+      expect(res.docs).toContain(area)
+    }
+    // 🔴 目录不得再教旧域名（`role` 已并入 `config`）
+    expect(res.docs).not.toContain('container_admin role')
+    // 各详细入口指引（目录指向各功能，不复制全文）
+    expect(res.docs).toContain('container_admin')
+    expect(res.docs).toContain('cognitive_trajectory')
+    expect(res.docs).toContain('weixin-doctor')
+    expect(res.docs).toContain('cheap-worker')
+    // 单一真相源声明
+    expect(res.docs).toContain('only points')
+  })
+
+  /**
+   * 🔴 **指针化的机械判据**（owner 裁 Q3 的核心）：旧入口**不得再返回正文**。
+   * 反向断言比正向更难造假 —— 它直接钉住"同一份正文只有一处可达"。
+   */
+  it('🔴 config guide 只指路、不回正文（正文唯一入口 = docs trajectory-constraint）', async () => {
+    const guide = (await exec({ domain: 'config', action: 'guide' })) as { guide: string }
+    expect(guide.guide).toContain('container_admin config docs trajectory-constraint')
+    // 反向钉：教程正文不再从这里出去
+    expect(guide.guide).not.toContain('Guide (2026-10-19 redesigned)')
+  })
+
   it('章节名大小写不敏感（「我打错大小写」不该变成"没有这章"）', async () => {
     const res = (await exec({ domain: 'config', action: 'docs', chapter: 'CONFIG' })) as { chapter: string }
     expect(res.chapter).toBe('config')
@@ -208,12 +262,12 @@ describe('config docs：两层说明菜单（P3）', () => {
 
   it('🔴 未知章节 → 拒绝且**带候选清单**（"不知道这章"≠"这章是空的"）', async () => {
     await expect(exec({ domain: 'config', action: 'docs', chapter: 'nope' })).rejects.toThrow(
-      /unknown chapter "nope"[\s\S]*Available: config \| trajectory-constraint/,
+      /unknown chapter "nope"[\s\S]*Available: catalog \| config \| trajectory-constraint/,
     )
   })
 
   it('🔴 白空格章节 ⇒ 按"没给"处理（返回目录，不是报错）', async () => {
     const res = (await exec({ domain: 'config', action: 'docs', chapter: '   ' })) as { chapters: string[] }
-    expect(res.chapters).toEqual(['config', 'trajectory-constraint'])
+    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-constraint'])
   })
 })

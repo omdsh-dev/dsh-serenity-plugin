@@ -16,18 +16,23 @@
 
 ## ① 契约面（🔴 被**代码 / 测试 / README / bench** 直接引用 —— 改它要同批改代码）
 
-| 件 | 谁指着它 |
+> 🔴 **本表 2026-10-19 按 S1~S15 目录重构后的新树重排**（原表仍指旧扁平路径 `tools/trajectory.ts`、
+> `wake-scheduler.ts`、`skills-discovery.ts` … —— 那些文件**已不在那些位置**）。
+> **判据**：本表只写**现在指得到**的路径；路径对不对由 `tests/docs-ref-gate.test.ts` 机械守着。
+> ⚠️ 该门禁只判**文件存在性**，不判"这份文档是否仍然描述现状"——后半句无机械判据，属人工复核档。
+
+| 件 | 谁指着它（现行路径） |
 |---|---|
-| [`cognitive-trajectory-skill-injection.md`](./cognitive-trajectory-skill-injection.md) | `seams/keeper.ts` · `seams/system-prompt.ts` · `tools/trajectory.ts` · `trajectory-skills.ts` · `skills-discovery.ts` · 两个测试 |
+| [`cognitive-trajectory-skill-injection.md`](./cognitive-trajectory-skill-injection.md) | `seams/keeper.ts` · `seams/system-prompt.ts` · `tools/cognitive-trajectory.ts` · `trajectory/skills.ts` · `skills/discovery.ts` · 两个测试 |
 | [`metaphor-domain.md`](./metaphor-domain.md) | `seams/system-prompt.ts` · `tests/osp-alignment.test.ts` |
 | [`failure-policy.md`](./failure-policy.md) | `tests/failure-policy.test.ts` |
-| [`cro-design.md`](./cro-design.md) | `wake-scheduler.ts` · `cro-turns.ts` · `index.ts` · `trajectory-ops.ts` · 三个测试 |
-| [`cognitive-trajectory-send-message-design.md`](./cognitive-trajectory-send-message-design.md) | `tools/trajectory.ts` · `trajectory-ops.ts` · `tests/wake-registry.test.ts` |
-| [`cognitive-trajectory-scheduling.md`](./cognitive-trajectory-scheduling.md) | `wake-scheduler.ts` |
-| [`human-channel-plan.md`](./human-channel-plan.md) | `settings-section.ts` · `human-channel.ts` · `tests/human-channel-config.test.ts`（**§11 定案 = 权威规格**） |
-| [`weixin-bot-api.md`](./weixin-bot-api.md) | `weixin-api.ts`（协议真相源：§6 媒体 CDN/AES） |
-| [`weixin-message-hook-design.md`](./weixin-message-hook-design.md) | `weixin-hook.ts` |
-| [`session-binding-hardening-research.md`](./session-binding-hardening-research.md) | `trajectory-bound.ts`（`ignorable` 的机制取证） |
+| [`cro-design.md`](./cro-design.md) | `wake/scheduler.ts` · `cro/turns.ts` · `index.ts` · `tools/cognitive-trajectory.ts` · 三个测试 |
+| [`cognitive-trajectory-send-message-design.md`](./cognitive-trajectory-send-message-design.md) | `tools/cognitive-trajectory.ts` · `trajectory/core.ts` · `tests/wake-registry.test.ts` |
+| [`cognitive-trajectory-scheduling.md`](./cognitive-trajectory-scheduling.md) | `wake/scheduler.ts` |
+| [`human-channel-plan.md`](./human-channel-plan.md) | `surface/settings.ts` · `im/inbound.ts` · `tests/human-channel-config.test.ts`（**§11 定案 = 权威规格**） |
+| [`weixin-bot-api.md`](./weixin-bot-api.md) | `im/ilink.ts`（协议真相源：§6 媒体 CDN/AES） |
+| [`weixin-message-hook-design.md`](./weixin-message-hook-design.md) | `im/hook.ts` |
+| [`session-binding-hardening-research.md`](./session-binding-hardening-research.md) | `trajectory/bound.ts`（`ignorable` 的机制取证） |
 | [`plugin-development-standard.md`](./plugin-development-standard.md) · [`plugin-development-guide.md`](./plugin-development-guide.md) | `tests/compliance.test.ts` · `dsp-top-level-constraints.md` |
 | [`dsh-0.2.0-rc.1-adaptation-plan.md`](./dsh-0.2.0-rc.1-adaptation-plan.md) | `host/contract.ts`（**本轮适配的权威方案**） |
 | [`dsp-top-level-constraints.md`](./dsp-top-level-constraints.md) | 不变量 I1~I7 ／ 六层模型 ／ 宿主接触白名单 ／ 五层测试地图 —— **重构以它为准绳** |
@@ -39,12 +44,18 @@
 
 [`bindings-json-retirement-reconciliation.md`](./bindings-json-retirement-reconciliation.md)（**A7** 三形态待裁）·
 [`deadcode-batch2-ruling.md`](./deadcode-batch2-ruling.md)（**②第 2 批**逐条裁决清单）·
+[`cro-wake-log-design.md`](./cro-wake-log-design.md)（**CRO 流水**；🔴 **v1.75.0 形态已变**：JSON → 纯文本 `.log`，见文首告示）·
 [`unattended-proxy-design.md`](./unattended-proxy-design.md)（**D77；🔴 功能已于 2026-10-18 整条退役**
 —— owner 判「已经证实没意义」，本件**降级为历史留档**，不再描述现行能力）·
 [`git-commit-push-coupling-design.md`](./git-commit-push-coupling-design.md)（**D92** 交付物；P3b/B4 未做）·
 [`rebuild-todo-design.md`](./rebuild-todo-design.md)（**D93**）· [`injection-audit.md`](./injection-audit.md)（注入面审计）
 
 ## ③ 功能设计（已实现 ⇒ **回溯用**，不再是最新真相）
+
+🆕 [`trajectory-declaration-file.md`](./trajectory-declaration-file.md)（**v1.75.0 轨迹声明面**：
+`trajectory.json` 收拢约束＋`uid`＋`cro.host`；认族不认名；流水为何不并；**迁移时机判据**）·
+[`trajectory-centric-architecture.md`](./trajectory-centric-architecture.md)（**v1.72.0 轨迹中心架构**：
+"所有读数器过时类缺陷，形态都是同一个"＋ 九次折叠台账）
 
 `skiff-design` / `skiff-followup-design` / `skiff-bound-trajectory-design` / `skiff-trajectory-bound-mode-design` /
 `skiff-type-and-injection-design` ｜ `weixin-bridge-design` / `weixin-media-design` / `weixin-as-acc-tool-design` /

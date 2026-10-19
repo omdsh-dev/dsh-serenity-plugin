@@ -242,21 +242,24 @@ One DSH process can host several workspaces, each bridging its own WeChat accoun
   "the AI initiated it", and `source: "reply-fallback"` means "the AI did not send, the plugin did".
 - **Troubleshooting**: `msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
 
-### 6.3 Trajectory constraints
+### 6.3 Trajectory declaration
 
-**A trajectory constraint IS a cognitive trajectory whose directory contains `trajectory-constraint.json`** — that is the whole definition.
-Put the file there and the trajectory is constrained at once; delete it and it goes back to being an ordinary trajectory.
+**A trajectory's "declaration" is ONE file: `trajectory.json`.** Its existence IS the criterion — put it there and the
+trajectory is constrained at once; delete it and it goes back to being an ordinary trajectory.
 
 ```jsonc
 // AGENT_SESSIONS/2026-10-19--qa--qa/   ← the trajectory directory (code = the fixed segment of the dir name)
-//   ├─ SESSION.md                  ← its own body (this IS the workspace — nothing is auto-created)
-//   ├─ PROMPT.md                   ← its charter (recommended; every trajectory can have one, not just constrained ones)
-//   ├─ trajectory-constraint.json  ← the constraint surface (this file's existence is the criterion)
+//   ├─ SESSION.md              ← its own body (this IS the workspace — nothing is auto-created)
+//   ├─ PROMPT.md               ← its charter (recommended; every trajectory can have one, not just constrained ones)
+//   ├─ trajectory.json         ← the declaration (this file's existence is the criterion)
+//   └─ cro-wake-log.log        ← CRO wake log (plain text; only exists if it ever woke)
 {
   "model": "provider/model",              // this trajectory's own model
   "msms": ["web-search", "vlm-describe"], // which small tools (MSMs) it may call
   "tools": ["read", "grep", "glob"],      // which platform tools it may use
-  "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true }  // defaults to all true
+  "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true },  // defaults to all true
+  "uid": "my-handle",                     // optional: legacy read-only identifier (identity is the code now)
+  "cro": { "host": "<machine name>" }     // optional: which machine may run this trajectory's CRO program
 }
 ```
 
@@ -265,6 +268,10 @@ Put the file there and the trajectory is constrained at once; delete it and it g
 - The charter lives in **`PROMPT.md`** inside the trajectory directory (it travels with the trajectory on archive); the legacy `systemPromptFile` is still read, but `PROMPT.md` wins
 - `container_admin config validate` checks the config, `apply` makes it take effect; both read from disk live
 - WeChat routing points at it too: `routes: [{ "user": "*", "trajectory": "qa" }]` (**user → trajectory code**)
+- 🔴 **The old file names are still READ**: `trajectory-constraint.json` (v1.74) and `skiff.json` (v1.71) are both in the
+  **read family**; **writes go to `trajectory.json` only**, and the old files are **never auto-deleted**. The rule is
+  *recognise the family, not the current name* — "upstream renames, downstream hard-codes the old name" is a failure
+  mode this repo has hit twice. See [`docs/trajectory-declaration-file.md`](docs/trajectory-declaration-file.md).
 
 ### 6.4 Public Q&A page (3100) — **RETIRED**
 

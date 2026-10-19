@@ -443,13 +443,13 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const cwd = (exec as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd ?? process.cwd()
     const root = cccRootForCwd(cwd)
     if (!root) return next()
-    // F4 轨迹约束旁路（F4b ⑩）：计分提醒按角色 cognitiveTrajectory.keeper、重建压力检测按
-    // cognitiveTrajectory.rebuild 决定参与（默认全关 = 轨迹约束完全独立）；非 轨迹约束恒参与。
+    // 轨迹约束旁路：计分提醒按 `cognitiveTrajectory.keeper`、重建压力检测按
+    // `cognitiveTrajectory.rebuild` 决定参与（**缺省全 true**）；非约束轨迹恒参与。
     const sessionId = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id
-    const 轨迹约束Keeper = trajectoryConstraintParticipates(root, sessionId, 'keeper')
-    const 轨迹约束Rebuild = trajectoryConstraintParticipates(root, sessionId, 'rebuild')
+    const participatesKeeper = trajectoryConstraintParticipates(root, sessionId, 'keeper')
+    const participatesRebuild = trajectoryConstraintParticipates(root, sessionId, 'rebuild')
     const tracker = trackerFor(exec)
-    const shouldRemind = 轨迹约束Keeper ? tracker.step(exec.name) : false
+    const shouldRemind = participatesKeeper ? tracker.step(exec.name) : false
     const downstream = await next()
 
     // ③ 用量统计（owner 令 2026-09-22）：`skill` 加载与 `msm` 执行各记一笔到该 CCC 的
@@ -478,7 +478,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
     // 🔴 2026-09-16（S142 所有者指令，D64）：**判定照旧读 K，但注入文本不再带数值**
     // （`rebuildReminderText` 参数已退化为仅 escalated；见其头注）。
-    if (轨迹约束Rebuild) {
+    if (participatesRebuild) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
         const pressure = readContextPressure(ctx, session)

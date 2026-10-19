@@ -55,25 +55,25 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     expect(r.guide).toContain('--confirm')
   })
 
-  it('catalog 返回 ACC 使用目录（需求④：7 分区 + 只索引不复制详情——单一真相源）', () => {
+  /**
+   * 🔴 **2026-10-19 v1.75.0：`catalog` 动作降为指针**（owner 裁 Q3「指针」）。
+   *
+   * 起因：`msm catalog` 与 `config docs catalog` 返回**同一份常量** ⇒ 两个正文入口。
+   * 现在正文唯一入口 = `container_admin config docs catalog`，本动作只指路。
+   *
+   * ⚠️ **为什么本用例不是"被削弱了"**：目录正文（7 分区、指向各功能）**仍然被逐条钉住** ——
+   * 只是挪到了 `container-admin.test.ts` 的 `docs catalog` 章用例里。
+   * 本用例的职责从"正文对不对"变成"**旧入口是否正确地降成了指针**"。
+   */
+  it('catalog 降为指针（正文唯一入口 = config docs catalog）', () => {
     expect(MSM_ACTIONS).toContain('catalog')
     const r = runMsm(dir, { action: 'catalog' }) as { catalog: string }
-    expect(r.catalog).toContain('ACC Usage Catalog')
-    // 7 个能力分区（④ 于 2026-10-19 更名：role 域并入 config ⇒ 分区名随之改为「轨迹约束与对外面」）
-    for (const area of ['轨迹本体', '认知质量框架', '工具与执行', '轨迹约束与对外面', '自主与接入', 'CCC 配置总览', '注册表与安全']) {
-      expect(r.catalog).toContain(area)
-    }
-    // 🔴 目录不得再教旧域名（`role` 已并入 `config`）
-    expect(r.catalog).not.toContain('container_admin role')
-    // 各详细入口指引（目录指向 guide，不复制全文）
-    expect(r.catalog).toContain('container_admin')
-    expect(r.catalog).toContain('cognitive_trajectory')
-    expect(r.catalog).toContain('msm("<name>"')
-    expect(r.catalog).toContain('weixin-doctor')
-    expect(r.catalog).toContain('cheap-worker')
-    // 单一真相源声明
-    expect(r.catalog).toContain('guides live with their feature')
-    expect(r.catalog).toContain('only points')
+    // 指路：告诉调用方正文在哪一章
+    expect(r.catalog).toContain('container_admin config docs catalog')
+    expect(r.catalog).toContain('正文已统一')
+    // 🔴 反向钉：**不再返回正文**（这是"一个内容一个入口"的核心判据）
+    expect(r.catalog).not.toContain('ACC Usage Catalog')
+    expect(r.catalog).not.toContain('weixin-doctor')
   })
 
   it('exec --schema 返回条目 schema', () => {

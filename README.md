@@ -252,21 +252,23 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
   `source: "reply-fallback"` 表示"AI 没发、插件兜底发的"。
 - **排障**：`msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
 
-### 6.3 轨迹约束（trajectory constraint）
+### 6.3 轨迹声明（trajectory declaration）
 
-**轨迹约束就是一条「目录里放了 `trajectory-constraint.json` 的认知轨迹」** —— 没有别的定义。
-放进去，这条轨迹立刻受约束；删掉它，当场恢复成普通轨迹。
+**轨迹的"声明"只有一个文件**：`trajectory.json`。**目录里有它 ⇒ 这条轨迹受约束**；删掉它，当场恢复成普通轨迹。
 
 ```jsonc
 // AGENT_SESSIONS/2026-10-19--qa--问答/  ← 轨迹目录（编码 = 目录名固定位置那一段）
-//   ├─ SESSION.md                  ← 它自己的身体（工作台就是它，不另建）
-//   ├─ PROMPT.md                   ← 它的章程（推荐；所有轨迹都适用，不限于轨迹约束）
-//   ├─ trajectory-constraint.json  ← 约束面（这个文件的存在，就是"它是轨迹约束"的判据）
+//   ├─ SESSION.md              ← 它自己的身体（工作台就是它，不另建）
+//   ├─ PROMPT.md               ← 它的章程（推荐；所有轨迹都适用，不限于受约束的轨迹）
+//   ├─ trajectory.json         ← 声明面（这个文件的存在，就是判据）
+//   └─ cro-wake-log.log        ← CRO 流水（纯文本；只有真的唤起过才会有）
 {
   "model": "provider/model",              // 这条轨迹单独用哪个模型
   "msms": ["web-search", "vlm-describe"], // 它能调哪些小工具（MSM）
   "tools": ["read", "grep", "glob"],      // 它能用哪些平台工具
-  "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true }  // 缺省即全 true
+  "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true },  // 缺省即全 true
+  "uid": "my-handle",                     // 可选：旧的只读标识（身份已归轨迹编码）
+  "cro": { "host": "<机器名>" }           // 可选：本轨迹的 CRO 程序只许哪台机器跑
 }
 ```
 
@@ -275,6 +277,9 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
 - 章程写在轨迹目录的 **`PROMPT.md`** 里（跟着轨迹走，归档时一起搬）；旧的 `systemPromptFile` 仍被读取，但 `PROMPT.md` 优先
 - `container_admin config validate` 校验，`apply` 才真正生效；两者都**实时读盘**，改完下一轮即生效
 - 微信路由也指向它：`routes: [{ "user": "*", "trajectory": "qa" }]`（**user → 轨迹编码**）
+- 🔴 **旧文件名仍被读取**：`trajectory-constraint.json`（v1.74）／ `skiff.json`（v1.71）都在**读取族**里，
+  **写只写 `trajectory.json`**，旧文件**永不自动删**。判据 = **认族不认名**（上游改名、下游写死旧名
+  是本仓反复发生的失效形态）。详见 [`docs/trajectory-declaration-file.md`](docs/trajectory-declaration-file.md)。
 
 ### 6.4 对外接入（官方 ACP）
 

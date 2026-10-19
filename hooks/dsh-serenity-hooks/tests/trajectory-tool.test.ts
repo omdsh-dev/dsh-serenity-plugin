@@ -580,4 +580,35 @@ describe('cognitive_trajectory：uid（🔴 2026-10-19 起写入退役、读取�
     expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR)), '目录名不得因查看 UID 而改').toBe(true)
     expect(readFileSync(md, 'utf-8'), 'SESSION.md 不得被改写').toBe(before)
   })
+
+  /**
+   * 🆕 2026-10-19 owner 裁 Q2：**声明文件里的 `uid` 优先，独立文件回落**（两代并读）。
+   *
+   * 🔴 为什么这条必须有：收拢之后旧标识住进了 `trajectory.json`，而**存量轨迹**里
+   * 它还在独立文件里。只实现一侧的后果是「一部分轨迹的 UID 突然指认不到了」——
+   * 而症状（`Session not found`）与真因（"读的是另一条路"）在读数上完全不像。
+   */
+  it('🆕 声明文件的 `uid` 字段也能指认（收拢后的新形态）', async () => {
+    writeSession(A_DIR)
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'trajectory.json'), JSON.stringify({ uid: 'alpha-decl' }), 'utf-8')
+    const readBack = (await run({ action: 'uid', name: 'alpha-decl' })) as Record<string, unknown>
+    expect(readBack.uid).toBe('alpha-decl')
+    expect((await run({ action: 'show', name: 'alpha-decl' })) as string).toContain('SESSION: alpha')
+  })
+
+  it('🔴 两处都给 ⇒ **声明文件优先**（独立文件不得遮蔽它）', async () => {
+    writeSession(A_DIR)
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'from-file\n', 'utf-8')
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'trajectory.json'), JSON.stringify({ uid: 'from-json' }), 'utf-8')
+    expect((await run({ action: 'uid', name: 'S900' })) as Record<string, unknown>).toMatchObject({ uid: 'from-json' })
+    // 反向钉：被遮蔽的那个**不该**还能指认（否则等于两个标识同时生效）
+    await expect(run({ action: 'show', name: 'from-file' })).rejects.toThrow('Session not found')
+  })
+
+  it('🔴 声明文件的 `uid` 形态非法 ⇒ 按"没设定"处理，**回落独立文件**（不抛、不连坐）', async () => {
+    writeSession(A_DIR)
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'good-handle\n', 'utf-8')
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'trajectory.json'), JSON.stringify({ uid: '带中文 的 非法值' }), 'utf-8')
+    expect((await run({ action: 'uid', name: 'S900' })) as Record<string, unknown>).toMatchObject({ uid: 'good-handle' })
+  })
 })

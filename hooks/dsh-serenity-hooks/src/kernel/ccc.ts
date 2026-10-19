@@ -160,8 +160,9 @@ interface SerenityConfig {
    * （约束面住在轨迹目录里）。⇒ 本段**不再被读取**：存量配置里残留的 `轨迹约束.roles` ⇒
    * **静默忽略**（schemastery 非 strict，不报错；也不会被误当成"没有 轨迹约束"）。
    *
-   * 迁移路径 = 把 `轨迹约束.roles.<name>` 的内容原样搬进对应轨迹目录的 `trajectory-constraint.json`
-   * （判据与步骤见 `trajectory/policy/profile.ts` 头注释与 `docs/trajectory-constraint-redesign.md` §5）。
+   * 迁移路径 = 把 `轨迹约束.roles.<name>` 的内容原样搬进对应轨迹目录的声明文件
+   * （判据与步骤见 `trajectory/policy/profile.ts` 头注释）。
+   * 🔴 2026-10-19：声明文件已收拢为 **`trajectory.json`**（旧名仍在**读取族**里，写只写新名）。
    */
   /**
    * 认知轨迹族配置（D58，S142 2026-09-13；2026-10-18 更名 `cognitiveTrajectory`）。

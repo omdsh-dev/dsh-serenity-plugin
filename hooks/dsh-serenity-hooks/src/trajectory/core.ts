@@ -47,6 +47,7 @@ import {
 } from 'node:fs'
 import { join, basename, dirname } from 'node:path'
 import { localDate, localDateTimeMinutes } from '../kernel/time.js'
+import { readTrajectoryFile } from './policy/files.js'
 
 /**
  * `cognitive_trajectory` 工具的动作集合（v1.33，S142 §32 用户裁决后的收敛结果）。
@@ -308,8 +309,30 @@ export function isValidUid(uid: string): boolean {
  * 🔴 **形态非法的文件按"没设定"处理，而不是报错**：解析侧出现在**每一次** `findSession` 里
  * （show/use/archive/send-now/send-later 全走它），在那里抛错会让一个坏文件**炸掉整条轨迹的所有操作**
  * —— 惩罚远大于问题本身。而写入侧已退役 ⇒ 坏文件只可能来自外部手改，更不该连坐。
+ *
+ * ## 🆕 2026-10-19 owner 裁 Q2：**声明文件里的 `uid` 优先，独立文件回落**
+ *
+ * 收拢后这个旧标识住在 `<轨迹目录>/trajectory.json` 的 `uid` 字段里（它属"声明"，
+ * 与约束面/机器绑定同源）。判据（**两代并读，不硬切**）：
+ * **声明面里有合法 `uid` ⇒ 用它；否则回落 `TRAJECTORY-UID` 文件**。
+ *
+ * ⚠️ **为什么字段名是 `uid` 而不是方案书里写的 `code`**：`code` 在本仓已有一个**更窄的含义**
+ * —— 目录名里那个固定位置的轨迹编码（`parseTrajectoryCode`）。同一个词在一个 JSON 里表示两件事，
+ * 正是本轨反复抓的那类"名字会撒谎"。⇒ 旧标识就叫 `uid`（它本来就是 UID，见 `UID_FILENAME`）。
  */
 export function readTrajectoryUid(sessionPath: string): string | null {
+  // ① 声明文件（新形态）：`trajectory.json` 族的 `uid` 字段
+  try {
+    const decl = readTrajectoryFile(sessionPath)
+    const fromJson = decl?.data?.['uid']
+    if (typeof fromJson === 'string') {
+      const trimmed = fromJson.trim()
+      if (isValidUid(trimmed)) return trimmed
+    }
+  } catch {
+    /* 声明面读不动 ⇒ 回落独立文件（不抛：本函数在每一次 findSession 里） */
+  }
+  // ② 独立小文件（旧形态，只读兼容）
   try {
     const raw = readFileSync(join(sessionPath, UID_FILENAME), 'utf-8').trim()
     return isValidUid(raw) ? raw : null

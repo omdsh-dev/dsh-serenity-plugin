@@ -27,42 +27,43 @@
  */
 
 /** 注册表值：该 dsh 会话承载哪条轨迹（`trajectoryDirName` 为空串 = 已登记但还没定轨迹） */
-interface 轨迹约束SessionBinding {
-  /** 轨迹目录名（`YYYY-MM-DD--<code>[--<desc>]`）——**轨迹约束 身份的唯一载体** */
+interface TrajectorySessionBinding {
+  /** 轨迹目录名（`YYYY-MM-DD--<code>[--<desc>]`）——**轨迹身份的唯一载体** */
   trajectoryDirName: string
   /** CCC 根（多 CCC 时防止串味：同 sessionId 复用必须同 (轨迹, CCC)） */
   ccc: string
 }
 
-const 轨迹约束Sessions = new Map<string, 轨迹约束SessionBinding>()
+/** sessionId → 绑定的轨迹（**进程内**；跨重启的权威来源是 `trajectory/bound.ts` 的持久绑定） */
+const trajectorySessions = new Map<string, TrajectorySessionBinding>()
 
 /** 登记/更新一个会话 → 轨迹的映射 */
 export function registerTrajectorySession(sessionId: string, trajectoryDirName: string, ccc: string): void {
-  轨迹约束Sessions.set(sessionId, { trajectoryDirName, ccc })
+  trajectorySessions.set(sessionId, { trajectoryDirName, ccc })
 }
 
 /** 解绑（会话销毁 / 轨迹失效 ⇒ 换身份） */
 export function unregisterTrajectorySession(sessionId: string): void {
-  轨迹约束Sessions.delete(sessionId)
+  trajectorySessions.delete(sessionId)
 }
 
 /** 查会话承载的轨迹目录名（无 → null）；`guards`/`system-prompt` 的同步热路径用 */
 export function trajectoryDirNameForSession(sessionId: string): string | null {
-  const b = 轨迹约束Sessions.get(sessionId)
+  const b = trajectorySessions.get(sessionId)
   return b === undefined || b.trajectoryDirName === '' ? null : b.trajectoryDirName
 }
 
 /** 查会话的完整绑定（轨迹 + CCC；无 → null）——追问延续时校验 (轨迹, CCC) 未串味 */
-export function trajectorySessionInfo(sessionId: string): 轨迹约束SessionBinding | null {
-  return 轨迹约束Sessions.get(sessionId) ?? null
+export function trajectorySessionInfo(sessionId: string): TrajectorySessionBinding | null {
+  return trajectorySessions.get(sessionId) ?? null
 }
 
 /** 测试/诊断：注册表快照 */
-export function trajectorySessionSnapshot(): ReadonlyMap<string, 轨迹约束SessionBinding> {
-  return new Map(轨迹约束Sessions)
+export function trajectorySessionSnapshot(): ReadonlyMap<string, TrajectorySessionBinding> {
+  return new Map(trajectorySessions)
 }
 
 /** 测试：清空（进程级状态，用例间必须复位） */
 export function resetTrajectorySessions(): void {
-  轨迹约束Sessions.clear()
+  trajectorySessions.clear()
 }

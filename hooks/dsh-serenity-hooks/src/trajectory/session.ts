@@ -195,7 +195,7 @@ export function ensureWorkspacePromptSection(agent: Agent, scope: string, root: 
 
 // ── agent 生命周期 ──
 
-interface 轨迹约束AgentRef {
+interface TrajectoryAgentRef {
   handle: AgentHandle
   agent: Agent
   sessionId: string
@@ -222,8 +222,8 @@ export async function createTrajectoryAgent(
   profile: TrajectoryConstraint,
   defaultModel?: string,
   sessionId?: string,
-): Promise<轨迹约束AgentRef> {
-  if (!ctx.agents) throw new Error('轨迹约束: ctx.agents unavailable')
+): Promise<TrajectoryAgentRef> {
+  if (!ctx.agents) throw new Error('trajectory constraint: ctx.agents unavailable')
   const model = profile.model?.trim() || defaultModel || ''
   const id = (sessionId ?? `轨迹约束-${profile.code}-${randomUUID()}`) as SessionId
   const setup = async (agentCtx: Context) => {
@@ -407,7 +407,7 @@ import { splitModel } from './delegate/core.js'
 
 // ── 提问（followup → 等本轮回答）──
 
-interface 轨迹约束AskResult {
+interface TrajectoryAskResult {
   answer: string
   sessionId: string
 }
@@ -491,7 +491,7 @@ export async function askTrajectory(
   agent: Agent,
   question: string,
   options?: { timeoutMs?: number },
-): Promise<轨迹约束AskResult> {
+): Promise<TrajectoryAskResult> {
   const beforeAssistant = countAssistantMessages(agent.session)
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
   const produced = await waitForTurnAssistant(ctx, agent, beforeAssistant, { timeoutMs: options?.timeoutMs })
@@ -521,7 +521,7 @@ export function trajectoryConstraintParticipates(
   return constraintCognitiveTrajectory(profile)[key]
 }
 
-interface 轨迹约束MsmGate {
+interface TrajectoryConstraintMsmGate {
   /** 拒绝原因（有则拒绝执行） */
   reject?: string
   /** list 显示白名单（msms）；仅 action==='list' 时有值 */
@@ -533,12 +533,12 @@ interface 轨迹约束MsmGate {
  * exec 非白名单 MSM 拒绝（**不列名单**）、register/deregister 必拒、
  * list 白名单过滤、check/guide/ccc-config 只读放行。
  */
-export function trajectoryConstraintMsmGate(root: string, sessionId: string | undefined, action: string, name?: string): 轨迹约束MsmGate {
+export function trajectoryConstraintMsmGate(root: string, sessionId: string | undefined, action: string, name?: string): TrajectoryConstraintMsmGate {
   if (sessionId === undefined) return {}
   const profile = trajectoryConstraintFor(root, sessionId)
   if (profile === null) return {}
   if (action === 'register' || action === 'deregister') {
-    return { reject: 'register/deregister is not allowed in 轨迹约束 sessions' }
+    return { reject: 'register/deregister is not allowed in trajectory-constraint sessions' }
   }
   if (action === 'exec') {
     if (!name || !profile.msms.includes(name)) return { reject: 'MSM not allowed' }
@@ -548,8 +548,8 @@ export function trajectoryConstraintMsmGate(root: string, sessionId: string | un
   return {} // check / guide / ccc-config：只读放行
 }
 
-/** 该 轨迹约束会话的工具白名单（guards 的 schema 收窄用） */
-export function 轨迹约束ToolWhitelist(root: string, sessionId: string | undefined): Set<string> | null {
+/** 该轨迹约束会话的工具白名单（guards 的 schema 收窄用） */
+export function trajectoryConstraintToolWhitelist(root: string, sessionId: string | undefined): Set<string> | null {
   if (sessionId === undefined) return null
   const profile = trajectoryConstraintFor(root, sessionId)
   return profile === null ? null : profileToolWhitelist(profile)
@@ -561,11 +561,11 @@ export function trajectoryConstraintByCode(root: string, code: string): Trajecto
 }
 
 /** 编码 → 轨迹目录名（路由用；只做精确匹配） */
-export function 轨迹约束DirNameByCode(root: string, code: string): string | null {
+export function trajectoryConstraintDirNameByCode(root: string, code: string): string | null {
   return findDirNameByCode(root, code)
 }
 
 /** 一次性解析提示词全文（admin/validate 用；热路径不要用） */
-export function 轨迹约束SystemPrompt(root: string, profile: TrajectoryConstraint | null | undefined): string {
+export function trajectoryConstraintSystemPrompt(root: string, profile: TrajectoryConstraint | null | undefined): string {
   return resolveConstraintSystemPrompt(root, profile)
 }

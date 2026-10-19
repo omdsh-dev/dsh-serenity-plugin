@@ -17,10 +17,11 @@ import type { JsonValue } from '../kernel/json.js'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
 import { constraintSystemPromptSource, constraintCognitiveTrajectory, resolveConstraintSystemPrompt, TRAJECTORY_CONSTRAINT_HINT } from '../trajectory/policy/rules.js'
 import { listTrajectoryConstraints, TRAJECTORY_CONSTRAINT_FILENAME } from '../trajectory/policy/profile.js'
+import { TRAJECTORY_FILENAME, TRAJECTORY_LEGACY_FILENAMES } from '../trajectory/policy/files.js'
 import { hasTrajectoryPrompt, TRAJECTORY_PROMPT_FILENAME } from '../trajectory/prompt.js'
 import { loadMsmEntries } from './msm/service.js'
 
-/** 轨迹约束 定义教程：概念 ／ `trajectory-constraint.json` schema ／ 双白名单 ／ 轨迹纪律 ／ 微信路由 */
+/** 轨迹约束 定义教程：概念 ／ `trajectory.json` schema ／ 双白名单 ／ 轨迹纪律 ／ 微信路由 */
 export const TRAJECTORY_CONSTRAINT_GUIDE = `═══ 轨迹约束 Guide (2026-10-19 redesigned) ═══
 
 **A 轨迹约束 IS a cognitive trajectory — the one whose directory contains \`${TRAJECTORY_CONSTRAINT_FILENAME}\`.**
@@ -29,8 +30,12 @@ becomes a 轨迹约束; delete it and it goes back to being an ordinary trajecto
 
   AGENT_SESSIONS/<YYYY-MM-DD--<code>--<desc>>/
     ├─ SESSION.md      ← its persistent body (this IS the workspace — nothing is auto-created)
-    ├─ ${TRAJECTORY_CONSTRAINT_FILENAME}          ← its constraints (this file is what makes it a 轨迹约束)
-    └─ TRAJECTORY-UID  ← legacy, read-only (superseded by the code)
+    ├─ PROMPT.md       ← its charter (trajectory-level prompt; all trajectories may have one)
+    ├─ ${TRAJECTORY_CONSTRAINT_FILENAME}          ← its declaration (this file is what makes it a 轨迹约束)
+    └─ continuous-re-occurrence.ts  ← optional CRO program (spawned, never imported)
+
+  The older names ${TRAJECTORY_LEGACY_FILENAMES.map((n) => `\`${n}\``).join(' / ')} are still READ
+  (the family is checked in that order) — writing goes to \`${TRAJECTORY_FILENAME}\` only.
 
 ── ${TRAJECTORY_CONSTRAINT_FILENAME} schema ──
   {
@@ -38,8 +43,10 @@ becomes a 轨迹约束; delete it and it goes back to being an ordinary trajecto
     "tools": ["read","grep","msm",...], // non-MSM toolbar whitelist — anything not listed is REMOVED from the schema
     "msms":  ["msm-a","msm-b"],         // MSM whitelist — msm exec may only run these; register/deregister always refused
     "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true },  // defaults TRUE (see below)
-    "systemPromptFile": ".opencode/skiff/<role>.md",  // recommended: relative to CCC root, hot-reloads on save
-    "systemPrompt": "..."                             // inline fallback; systemPromptFile wins when both are set
+    "systemPromptFile": ".opencode/skiff/<role>.md",  // relative to CCC root, hot-reloads on save
+    "systemPrompt": "...",                            // inline fallback; systemPromptFile wins when both are set
+    "uid": "my-handle",                 // optional legacy alias (read-only; the code is the identity now)
+    "cro": { "host": "<machine name>" } // optional: which machine may run this trajectory's CRO program
   }
 
 ── Two whitelists, both default-deny ──

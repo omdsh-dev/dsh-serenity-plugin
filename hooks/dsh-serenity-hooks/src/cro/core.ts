@@ -49,6 +49,7 @@ import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from 'no
 import { join } from 'node:path'
 import { resolveInside } from '../kernel/ccc.js'
 import { sessionsRoot } from '../trajectory/core.js'
+import { readTrajectoryFile, TRAJECTORY_FILENAME } from '../trajectory/policy/files.js'
 import { isoLocal } from '../kernel/time.js'
 
 /** 入口文件名（**全写**，所有者令 2026-09-19；不改缩写） */
@@ -359,6 +360,16 @@ export interface CroHostVerdict {
  * —— 程序还没跑，没有快照可读。⇒ 只能读文件。（这也是"机制属 ACC"的体现：
  * ACC 在调用用户程序前先判定自己该不该调用。）
  *
+ * ## 🆕 2026-10-19 owner 裁 Q2：**声明文件里的 `cro.host` 优先，独立文件回落**
+ *
+ * 收拢后机器名住在 `<轨迹目录>/trajectory.json` 的 `cro.host` 字段里。
+ * 判据（**两代并读，不硬切**）：**声明面里有合法 `cro.host` ⇒ 用它；否则回落 `cro-host-binding` 文件**。
+ *
+ * 🔴 **为什么这里绝不能硬切**（比别处更硬的一条，逐字保留原裁定）：
+ * 硬切之后，**第二台机器**读到的是「没绑」而不是「绑给了别人」——
+ * 两者都导致"不跑"，**表面结果相同，但判据退化**（失去可诊断性）。
+ * ⇒ 只要还有一台机器可能装着旧版本，两条路都必须能读。
+ *
  * @param root CCC 根
  * @param dirName 轨迹目录名
  * @param selfHost 本机机器名（**注入** ⇒ 可测；生产调用方传 `hostname()`）
@@ -380,6 +391,13 @@ export function resolveCroHostBinding(root: string, dirName: string, selfHost: s
     }
   }
 
+  // ① 声明文件（新形态）：`trajectory.json` 族的 `cro.host`
+  const fromJson = readCroHostFromDeclaration(root, dirName)
+  if (fromJson !== null) {
+    return verdictFor(fromJson, self)
+  }
+
+  // ② 独立小文件（旧形态，只读兼容）
   let raw: string
   try {
     if (!existsSync(fileAbs)) {
@@ -388,7 +406,7 @@ export function resolveCroHostBinding(root: string, dirName: string, selfHost: s
         bound: null,
         self,
         code: 'not-bound',
-        detail: `未绑定机器（缺 ${CRO_HOST_FILENAME}）⇒ 按"必须指定"不运行`,
+        detail: `未绑定机器（缺 ${CRO_HOST_FILENAME}，且 ${TRAJECTORY_FILENAME} 里也没有 cro.host）⇒ 按"必须指定"不运行`,
       }
     }
     const st = statSync(fileAbs)
@@ -422,6 +440,42 @@ export function resolveCroHostBinding(root: string, dirName: string, selfHost: s
       detail: `绑定文件为空（只有注释/空行）⇒ 按"必须指定"不运行`,
     }
   }
+  // 🔴 两条读取路的最终判定收敛到**同一处**（`verdictFor`）：否则"声明面绑给别人"
+  // 与"文件面绑给别人"迟早会在日志里长得不一样。
+  return verdictFor(bound, self)
+}
+
+/**
+ * 从**声明文件**（`trajectory.json` 族）里取 `cro.host`（取不到 ⇒ `null`）。
+ *
+ * 🔴 **永不抛**：本函数跑在 tick 内（旁路容忍铁律）；坏 JSON / 结构不符一律按"没给"处理，
+ * 于是**自然回落到独立文件那条路** —— 这正是两代并读想要的降级方向。
+ *
+ * @param root CCC 根
+ * @param dirName 轨迹目录名
+ * @returns 机器名；没给 ⇒ `null`
+ */
+function readCroHostFromDeclaration(root: string, dirName: string): string | null {
+  try {
+    const decl = readTrajectoryFile(join(sessionsRoot(root), dirName))
+    const cro = decl?.data?.['cro']
+    if (!cro || typeof cro !== 'object' || Array.isArray(cro)) return null
+    const host = (cro as Record<string, unknown>)['host']
+    if (typeof host !== 'string') return null
+    const trimmed = host.trim()
+    return trimmed === '' ? null : trimmed
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 已解析出的机器名 → 判定结果（三种态的唯一收敛点）。
+ *
+ * 🔴 **抽出来的理由**：两条读取路（声明文件 / 独立文件）必须给出**同一种**判定语义；
+ * 各写一份迟早会漂（"声明面绑给别人"与"文件面绑给别人"在日志里长得不一样就糟了）。
+ */
+function verdictFor(bound: string, self: string): CroHostVerdict {
   if (bound === self) {
     return { allowed: true, bound, self, code: 'bound-to-self', detail: `已绑定本机（${bound}）` }
   }

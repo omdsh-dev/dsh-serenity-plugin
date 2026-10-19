@@ -37,9 +37,20 @@ import { join } from 'node:path'
 import { readUtf8, resolveInside } from '../../kernel/ccc.js'
 import { parseTrajectoryCode, sessionsRoot } from '../core.js'
 import { trajectoryDirNameForSession } from './window.js'
+import {
+  findTrajectoryFile,
+  readTrajectoryFile,
+  TRAJECTORY_FILENAME,
+  TRAJECTORY_FILENAME_FAMILY,
+} from './files.js'
 
-/** `trajectory-constraint.json` 的固定文件名（**判据就是它存在**——不是目录名前缀，也不是配置里的一行） */
-export const TRAJECTORY_CONSTRAINT_FILENAME = 'trajectory-constraint.json'
+/**
+ * 🆕 **声明文件的文件名**（2026-10-19 owner 裁 Q2：短名 `trajectory.json`）。
+ *
+ * ⚠️ **判据不是"这个名字在不在"**，而是**族内任一存在**（`TRAJECTORY_FILENAME_FAMILY`）。
+ * 这个名字只是**写入目标**与**提示文案里该印的那个**。
+ */
+export const TRAJECTORY_CONSTRAINT_FILENAME = TRAJECTORY_FILENAME
 
 /**
  * 一个 轨迹约束轨迹的**完整约束面**（= 旧 `轨迹约束.roles.<name>` 那套，整体搬进轨迹目录）。
@@ -108,28 +119,30 @@ export function readTrajectoryConstraintAt(trajectoryDir: string, root: string):
   const dirName = trajectoryDir.split('/').filter(Boolean).pop() ?? ''
   const code = parseTrajectoryCode(dirName)
   if (code === null) return null
-  const file = join(trajectoryDir, TRAJECTORY_CONSTRAINT_FILENAME)
-  if (!existsSync(file)) return null
+  // 🔴 认**族**（`trajectory.json` → `trajectory-constraint.json` → `skiff.json`），不认单点文件名。
+  const found = findTrajectoryFile(trajectoryDir)
+  if (found === null) return null
   let raw: unknown
   try {
-    raw = JSON.parse(readUtf8(file))
+    raw = JSON.parse(readUtf8(found))
   } catch (err) {
-    if (!warnedBrokenProfiles.has(file)) {
-      warnedBrokenProfiles.add(file)
+    if (!warnedBrokenProfiles.has(found)) {
+      warnedBrokenProfiles.add(found)
       console.warn(
-        `[serenity-hooks] ✗ ${TRAJECTORY_CONSTRAINT_FILENAME} 解析失败 ⇒ 该轨迹**按普通轨迹处理**（工具白名单与提示词约束全部不施加）。请修 JSON: ${file} — ${String((err as Error)?.message ?? err)}`,
+        `[serenity-hooks] ✗ ${TRAJECTORY_FILENAME} 解析失败 ⇒ 该轨迹**按普通轨迹处理**（工具白名单与提示词约束全部不施加）。请修 JSON: ${found} — ${String((err as Error)?.message ?? err)}`,
       )
     }
     return null
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    if (!warnedBrokenProfiles.has(file)) {
-      warnedBrokenProfiles.add(file)
-      console.warn(`[serenity-hooks] ✗ ${TRAJECTORY_CONSTRAINT_FILENAME} 顶层不是对象 ⇒ 按普通轨迹处理: ${file}`)
+    if (!warnedBrokenProfiles.has(found)) {
+      warnedBrokenProfiles.add(found)
+      console.warn(`[serenity-hooks] ✗ ${TRAJECTORY_FILENAME} 顶层不是对象 ⇒ 按普通轨迹处理: ${found}`)
     }
     return null
   }
   const obj = raw as Record<string, unknown>
+  const file = found
   const strList = (v: unknown): string[] =>
     Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim()) : []
   /** 布尔缺省 **true**（R↓ 见接口：工作台就是这条轨迹自己的身体） */

@@ -286,10 +286,13 @@ describe('msm-ops · list / ccc-config / 未知 action', () => {
     expect(lineB).not.toContain('[flags:')
   })
 
-  it('ccc-config ⇒ 返回非空配置参考（对齐 osp）', () => {
+  it('ccc-config ⇒ 只指路（指针指向唯一正文入口，本身不含正文）', () => {
     const out = runMsm(dir, { action: 'ccc-config' }) as string
-    expect(out).toContain('CCC Configuration Reference')
-    expect(out).toContain('cheap-worker.models')
+    // 正钉：必须指到唯一正文入口
+    expect(out).toContain('container_admin config docs config')
+    // 反向钉：正文不得在此处复现（复现即为第二真相源）
+    expect(out).not.toContain('cheap-worker.models')
+    expect(out).not.toContain('CCC Configuration Reference')
   })
 
   it('未知 action ⇒ 抛 Unknown action（响亮而非静默默认）', () => {
@@ -422,7 +425,7 @@ describe('msm-ops · checkRegistryQuality 的 M4 与扫描边', () => {
 describe('msm-ops · runMsmAsync', () => {
   it('非 exec 动作 ⇒ 委托同步实现（不 spawn）', async () => {
     expect(await runMsmAsync(dir, { action: 'list' })).toContain('(no MSM registered)')
-    expect(await runMsmAsync(dir, { action: 'ccc-config' })).toContain('CCC Configuration Reference')
+    expect(await runMsmAsync(dir, { action: 'ccc-config' })).toContain('container_admin config docs config')
   })
 
   it('exec --list 协议 ⇒ 返回条目数组（脚本未被 spawn）', async () => {

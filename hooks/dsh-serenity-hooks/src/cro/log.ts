@@ -22,11 +22,35 @@
  * | 文件 | 谁写 | 主语 | 回答 |
  * |---|---|---|---|
  * | `<轨迹目录>/cro-state.json`（CCC 侧程序自建，名字自定） | **CCC 的 CRO 程序** | 程序 | 「**我判了什么**」（含"没叫"的判定、心跳阈值、环境谓词） |
- * | `<轨迹目录>/cro-wake-log.json`（**本模块**） | **ACC** | ACC | 「**我把什么送出去了、送成没有**」 |
+ * | `<轨迹目录>/cro-wake-log.log`（**本模块**） | **ACC** | ACC | 「**我把什么送出去了、送成没有**」 |
  *
  * **内容不重叠**：本模块**不复制**判定细节（不存 `lastDecision` / 阈值 / 谓词）；
  * 而程序**不可能**知道投递结果（CRO 投递是 fire-and-forget）。
  * ⇒ 两者**互补**：完整审计 = 两者合看（本模块 = 投递面｜程序状态 = 判定面）。
+ *
+ * ## 🔴 形态 = 纯文本行，不是 JSON（owner 2026-10-19 裁 Q1）
+ *
+ * owner 原话：「**日志不要写 json，不合适，日志直接写纯文本 `.log` 就行**」。
+ * ⇒ 一行一条，**tab 分隔**（终端里按制表位对齐，`grep` / `cut` / `awk` 直接可用）：
+ *
+ * ```text
+ * # ACC CRO 唤起流水（纯文本 · tab 分隔 · 时间 / 结果 / tick / 方式 / 理由 / 提示词摘要）
+ * 2026-10-19T22:15:03+08:00	ok	tick=82	已投递（live）	reason=心跳：距上次 44m	prompt=17:请先整理你的 SESSION.md
+ * ```
+ *
+ * 🔴 **`#` 开头是注释 / 表头行，解析时跳过** —— 纯文本档案缺了表头，下一个人（或半年后的我）
+ * 打开只看到一堆制表符，那是把 R 推给读者。
+ * 🔴 **坏行跳过而非报错**（与 JSON 版的 `asEntry()` 同口径）：手改 / 半行 / 截断都不得让整档失效。
+ *
+ * ## 🔴 两代并读（**不硬切**，本容器反复栽过的形态）
+ *
+ * 旧名 `cro-wake-log.json` **仍然读**（存量轨迹里可能正有那份）；
+ * **只写新 `.log`**。读侧判据 = **「新档在就只读新档，否则回落旧档」**。
+ *
+ * 🔴 **首次写入 = 迁移，不是覆盖**：那一刻 `loadCroWakeLog` 读到的仍是旧档条目，
+ * 它们与新条目一起过裁剪、一起落进新档 ⇒ **窗内的旧记录不会凭空消失**；
+ * 而旧档此后不再被读（新档已在）⇒ **不会重复计入**，也不需要删除动作。
+ * ⚠️ 这条**只能靠读源码知道**（写出来的档看不出它继承过谁）⇒ 故在此明写。
  *
  * ## 🔴 轮转（所有者明示「程序化的」）
  *
@@ -52,7 +76,16 @@ import { sessionsRoot } from '../trajectory/core.js'
 import { isoLocal } from '../kernel/time.js'
 
 /** 固定文件名（所有者令：「文件名固定即可」）——与程序自建的 `cro-state.json` 并排、主语分明 */
-export const CRO_LOG_FILENAME = 'cro-wake-log.json'
+export const CRO_LOG_FILENAME = 'cro-wake-log.log'
+
+/**
+ * 🔴 **读取族 = 新名在前、旧名在后**（认族，不认"当前叫什么"）。
+ *
+ * 本容器已两次栽在"上游改名、下游写死旧名"：`skiff.json` → `trajectory-constraint.json` 那次，
+ * 症状是「写不进去」，而真因是「文件名对不上」，两者在读数上完全不像。
+ * ⇒ 上游再改名只往族里加一项。
+ */
+export const CRO_LOG_LEGACY_FILENAMES = ['cro-wake-log.json'] as const
 
 /** 保留窗 = 2 日（所有者令「只保留仅两日」）；**常量** ⇒ 「这个时间是程序化的」 */
 export const CRO_LOG_RETENTION_MS = 2 * 24 * 60 * 60 * 1000
@@ -60,7 +93,9 @@ export const CRO_LOG_RETENTION_MS = 2 * 24 * 60 * 60 * 1000
 /** 提示词摘要取前多少字（**只存摘要，不搬第二份全文**——全文属程序那侧的产物） */
 export const CRO_PROMPT_HEAD_MAX = 80
 
-const CRO_LOG_VERSION = 1
+/** 纯文本档案的表头行（解析时跳过；人打开时先看到它） */
+export const CRO_LOG_HEADER =
+  '# ACC CRO 唤起流水（纯文本 · tab 分隔 · 时间 / 结果 / tick / 方式 / 理由 / 提示词摘要）'
 
 /** 一条唤起**尝试**（成功与失败**都记**，所有者令 2026-09-20） */
 export interface CroWakeLogEntry {
@@ -78,7 +113,7 @@ export interface CroWakeLogEntry {
   promptDigest: { length: number; head: string }
 }
 
-/** 文件形态（与 `wake-registry.json` 同款：`{version, entries}`） */
+/** 内存形态（**不再落盘**；读取器与裁剪器都吃它 ⇒ 换载体不改上层契约） */
 export interface CroWakeLog {
   version: number
   entries: CroWakeLogEntry[]
@@ -94,16 +129,100 @@ export interface CroWakeLogInput {
   prompt?: string
 }
 
-/** 日志绝对路径 */
+/** 日志绝对路径（**写入目标** = 新名） */
 export function croWakeLogPath(root: string, dirName: string): string {
   return join(sessionsRoot(root), dirName, CRO_LOG_FILENAME)
 }
 
-function emptyLog(): CroWakeLog {
-  return { version: CRO_LOG_VERSION, entries: [] }
+/** 旧档绝对路径（**只读**，用于两代并读） */
+export function croWakeLogLegacyPath(root: string, dirName: string, filename: string): string {
+  return join(sessionsRoot(root), dirName, filename)
 }
 
-/** 条目形状校验（容忍手改：字段缺失/类型不符 → 丢弃该条，不阻断整档） */
+function emptyLog(): CroWakeLog {
+  return { version: 1, entries: [] }
+}
+
+/**
+ * 抹掉会破坏**行结构**的字符（tab / CR / LF）。
+ *
+ * 🔴 只抹这三个：它们是**分隔符**，混进来会让一行变成两行或错位；
+ * 其余字符（`|`、`]`、中文标点）**原样保留** —— 那些是内容，抹了就是把 E 降了。
+ */
+function oneline(text: string): string {
+  return text.replace(/[\t\r\n]+/g, ' ')
+}
+
+/** 一条记录 → 纯文本行（tab 分隔、字段带前缀便于人读） */
+export function formatCroLogLine(entry: CroWakeLogEntry): string {
+  const reason = entry.reason === null ? '' : oneline(entry.reason)
+  const head = oneline(entry.promptDigest.head)
+  return [
+    oneline(entry.at),
+    entry.ok ? 'ok' : 'fail',
+    `tick=${entry.tick}`,
+    oneline(entry.detail),
+    `reason=${reason}`,
+    `prompt=${entry.promptDigest.length}:${head}`,
+  ].join('\t')
+}
+
+/**
+ * 纯文本行 → 记录（**坏行返回 null 而不是抛**）。
+ *
+ * 判据：字段数不足 / 时间不可解析 / `ok` 标记不认识 ⇒ `null`（跳过该行，其余照读）。
+ * 🔴 `at` 必须**可被 `Date.parse` 解析**才收 —— 那是裁剪的前提，
+ * 收一条解析不了的时间等于让它在此档里永久驻留（轮转对它失效）。
+ */
+export function parseCroLogLine(line: string): CroWakeLogEntry | null {
+  if (line === '' || line.startsWith('#')) return null
+  const parts = line.split('\t')
+  if (parts.length < 6) return null
+  const at = parts[0]!
+  if (Number.isNaN(Date.parse(at))) return null
+  const mark = parts[1]
+  if (mark !== 'ok' && mark !== 'fail') return null
+  const tickM = /^tick=(\d+)$/.exec(parts[2]!)
+  if (!tickM) return null
+  const reasonRaw = parts[4]!.startsWith('reason=') ? parts[4]!.slice('reason='.length) : ''
+  const promptM = /^prompt=(\d+):([\s\S]*)$/.exec(parts[5]!)
+  return {
+    at,
+    ok: mark === 'ok',
+    detail: parts[3]!,
+    tick: Number(tickM[1]),
+    // 空串 ⇒ null（与"取不到写 null，不留空白"同口径）
+    reason: reasonRaw === '' ? null : reasonRaw,
+    promptDigest: {
+      length: promptM ? Number(promptM[1]) : 0,
+      head: promptM ? promptM[2]! : '',
+    },
+  }
+}
+
+/** 全文 → 记录（跳过表头与坏行；**永不抛**） */
+function parseCroLogText(text: string): CroWakeLogEntry[] {
+  const entries: CroWakeLogEntry[] = []
+  for (const line of text.split('\n')) {
+    const e = parseCroLogLine(line)
+    if (e) entries.push(e)
+  }
+  return entries
+}
+
+/** JSON 旧档 → 记录（字段缺失/类型不符 ⇒ 丢弃该条，不阻断整档） */
+function parseCroLogJson(text: string): CroWakeLogEntry[] {
+  const parsed = JSON.parse(text) as { entries?: unknown }
+  const raw = Array.isArray(parsed.entries) ? parsed.entries : []
+  const entries: CroWakeLogEntry[] = []
+  for (const item of raw) {
+    const e = asEntry(item)
+    if (e) entries.push(e)
+  }
+  return entries
+}
+
+/** 旧档条目形状校验（容忍手改） */
 function asEntry(value: unknown): CroWakeLogEntry | null {
   const e = value as Partial<CroWakeLogEntry> | null | undefined
   if (!e || typeof e !== 'object') return null
@@ -132,24 +251,32 @@ export function summarizeCroPrompt(prompt: string | undefined): { length: number
 
 /**
  * 读取日志（**永不抛**；读坏 ⇒ 当作空档 + 返回 error 文本）。
+ *
+ * 🔴 **两代并读的判据**：新档在 ⇒ **只读新档**；否则按族回落旧档。
+ * 这样首次写入之后旧档自然退场，**不需要删除动作、也不会重复计入**。
+ *
  * @param root CCC 根
  * @param dirName 轨迹目录名
  */
 export function loadCroWakeLog(root: string, dirName: string): { log: CroWakeLog; error: string | null } {
   const path = croWakeLogPath(root, dirName)
-  if (!existsSync(path)) return { log: emptyLog(), error: null }
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as Partial<CroWakeLog>
-    const raw = Array.isArray(parsed.entries) ? parsed.entries : []
-    const entries: CroWakeLogEntry[] = []
-    for (const item of raw) {
-      const e = asEntry(item)
-      if (e) entries.push(e)
+  if (existsSync(path)) {
+    try {
+      return { log: { version: 1, entries: parseCroLogText(readFileSync(path, 'utf-8')) }, error: null }
+    } catch (err) {
+      return { log: emptyLog(), error: `CRO 流水解析失败（${String((err as Error)?.message ?? err)}）` }
     }
-    return { log: { version: CRO_LOG_VERSION, entries }, error: null }
-  } catch (err) {
-    return { log: emptyLog(), error: `CRO 流水解析失败（${String((err as Error)?.message ?? err)}）` }
   }
+  for (const legacy of CRO_LOG_LEGACY_FILENAMES) {
+    const legacyPath = croWakeLogLegacyPath(root, dirName, legacy)
+    if (!existsSync(legacyPath)) continue
+    try {
+      return { log: { version: 1, entries: parseCroLogJson(readFileSync(legacyPath, 'utf-8')) }, error: null }
+    } catch (err) {
+      return { log: emptyLog(), error: `CRO 流水解析失败（${String((err as Error)?.message ?? err)}）` }
+    }
+  }
+  return { log: emptyLog(), error: null }
 }
 
 /**
@@ -178,6 +305,12 @@ export function pruneCroLogEntries(
     else pruned += 1
   }
   return { kept, pruned, dropped }
+}
+
+/** 记录集 → 落盘全文（表头 ＋ 逐行 ＋ 末尾换行） */
+function renderCroLogText(entries: CroWakeLogEntry[]): string {
+  const lines = [CRO_LOG_HEADER, ...entries.map(formatCroLogLine)]
+  return `${lines.join('\n')}\n`
 }
 
 /**
@@ -215,7 +348,7 @@ export function appendCroWakeLog(
     const { kept, pruned, dropped } = pruneCroLogEntries([...loaded.log.entries, entry], nowMs)
     mkdirSync(dirname(path), { recursive: true })
     const tmp = `${path}.tmp`
-    writeFileSync(tmp, `${JSON.stringify({ version: CRO_LOG_VERSION, entries: kept }, null, 2)}\n`, 'utf-8')
+    writeFileSync(tmp, renderCroLogText(kept), 'utf-8')
     renameSync(tmp, path)
     return { ok: true, error: null, kept: kept.length, pruned, dropped }
   } catch (err) {

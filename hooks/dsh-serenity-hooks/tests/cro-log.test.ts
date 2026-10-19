@@ -1,5 +1,5 @@
 /**
- * cro-log.test.ts — CRO 唤起日志的镜像测试（S142 §7.17，2026-09-20）
+ * cro-log.test.ts — CRO 唤起日志的镜像测试（S142 §7.17，2026-09-20；**2026-10-19 改纯文本**）
  *
  * ## 这个模块的测试重点（**不是**"能存能取"）
  *
@@ -13,6 +13,8 @@
  * 4. 🔴 **不是第二真相源**：断言本档**不含**判定细节（无 `lastDecision` / 阈值 / 谓词），
  *    只存"投递面"（成败 / 方式 / tick / 摘要）——这是与程序 `cro-state.json` 的分工边界。
  * 5. **固定文件名 + 落在该轨迹目录**（所有者令「写结构化文件到 cognitive trajectory 目录，文件名固定」）。
+ * 6. 🆕 **形态 = 纯文本行**（owner 2026-10-19 裁 Q1「日志不要写 json，不合适」）
+ *    ＋ **两代并读**（旧 `cro-wake-log.json` 仍读、**只写新 `.log`**）。
  *
  * ## 判据纪律（本文件自己也遵守）
  *
@@ -27,10 +29,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   appendCroWakeLog,
   CRO_LOG_FILENAME,
+  CRO_LOG_HEADER,
+  CRO_LOG_LEGACY_FILENAMES,
   CRO_LOG_RETENTION_MS,
   CRO_PROMPT_HEAD_MAX,
+  croWakeLogLegacyPath,
   croWakeLogPath,
+  formatCroLogLine,
   loadCroWakeLog,
+  parseCroLogLine,
   pruneCroLogEntries,
   summarizeCroPrompt,
   type CroWakeLogEntry,
@@ -49,9 +56,10 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true })
 })
 
-/** 直接读**磁盘**上的档（判据 = 实际内容，不是返回值） */
-function readRaw(): { version: number; entries: CroWakeLogEntry[] } {
-  return JSON.parse(readFileSync(croWakeLogPath(root, DIR), 'utf-8'))
+/** 直接读**磁盘**上的档（判据 = 实际内容，不是返回值）；走模块自己的解析器，不另写一份 */
+function readRaw(): { entries: CroWakeLogEntry[]; text: string } {
+  const text = readFileSync(croWakeLogPath(root, DIR), 'utf-8')
+  return { entries: loadCroWakeLog(root, DIR).log.entries, text }
 }
 
 /** 手工铺一份"坏档/手改档"现场 */
@@ -62,9 +70,14 @@ function writeRaw(content: string): void {
 }
 
 describe('落点与文件名（所有者令：写进 cognitive trajectory 目录、文件名固定）', () => {
-  it('路径 = <CCC 根>/AGENT_SESSIONS/<轨迹目录>/cro-wake-log.json', () => {
+  it('路径 = <CCC 根>/AGENT_SESSIONS/<轨迹目录>/cro-wake-log.log（纯文本，owner Q1）', () => {
     expect(croWakeLogPath('/ccc', DIR)).toBe(join('/ccc', 'AGENT_SESSIONS', DIR, CRO_LOG_FILENAME))
-    expect(CRO_LOG_FILENAME).toBe('cro-wake-log.json')
+    expect(CRO_LOG_FILENAME).toBe('cro-wake-log.log')
+  })
+
+  it('旧名进**读取族**（不硬切）：cro-wake-log.json 仍可读，但不作为写入目标', () => {
+    expect(CRO_LOG_LEGACY_FILENAMES).toContain('cro-wake-log.json')
+    expect(CRO_LOG_FILENAME).not.toBe('cro-wake-log.json')
   })
 
   it('文件名固定：不含日期 / 版本 / 轨迹号（无任何滑动成分）', () => {
@@ -76,6 +89,123 @@ describe('落点与文件名（所有者令：写进 cognitive trajectory 目录
     expect(existsSync(croWakeLogPath(root, DIR))).toBe(false)
     expect(loadCroWakeLog(root, DIR)).toEqual({ log: { version: 1, entries: [] }, error: null })
     expect(existsSync(croWakeLogPath(root, DIR))).toBe(false)
+  })
+})
+
+describe('🆕 形态 = 纯文本行（owner Q1「日志不要写 json」）', () => {
+  it('落盘是纯文本：首行是表头，之后一行一条、tab 分隔', () => {
+    appendCroWakeLog(root, DIR, { ok: true, detail: '已投递（live）', tick: 82, reason: '心跳', prompt: 'abc' }, NOW)
+    const { text } = readRaw()
+    const lines = text.trimEnd().split('\n')
+    expect(lines[0]).toBe(CRO_LOG_HEADER)
+    expect(lines).toHaveLength(2)
+    expect(lines[1]!.split('\t')).toHaveLength(6)
+    // 🔴 反向钉：**不得**是 JSON（这正是 owner 打回的那个形态）
+    expect(text.trimStart().startsWith('{')).toBe(false)
+    expect(text).not.toContain('"entries"')
+  })
+
+  it('格式与解析**互为逆运算**（含中文 / 冒号 / 反斜杠等不特殊处理的字符）', () => {
+    const e: CroWakeLogEntry = {
+      at: '2026-09-20T08:00:00+08:00',
+      ok: false,
+      detail: '无绑定会话记录（冷会话且 sessionController 缺席）',
+      tick: 83,
+      reason: '心跳：距上次 44m ／ 路径 C:\\x',
+      promptDigest: { length: 17, head: '请先整理你的 SESSION.md' },
+    }
+    expect(parseCroLogLine(formatCroLogLine(e))).toEqual(e)
+  })
+
+  it('🔴 字段里的 tab / 换行被抹成空格（否则一行会变成两行或错位）', () => {
+    const e: CroWakeLogEntry = {
+      at: '2026-09-20T08:00:00+08:00',
+      ok: true,
+      detail: 'a\tb\nc',
+      tick: 1,
+      reason: 'r1\r\nr2',
+      promptDigest: { length: 3, head: 'x\ty' },
+    }
+    const line = formatCroLogLine(e)
+    expect(line).not.toContain('\n')
+    expect(line.split('\t')).toHaveLength(6) // 分隔符数量不受内容影响
+  })
+
+  it('坏行**跳过而非报错**（半行 / 时间不可解析 / 标记不认识 / 表头注释）', () => {
+    expect(parseCroLogLine('# 这是注释')).toBeNull()
+    expect(parseCroLogLine('')).toBeNull()
+    expect(parseCroLogLine('只有一列')).toBeNull()
+    expect(parseCroLogLine('不是时间\tok\ttick=1\td\treason=\tprompt=0:')).toBeNull()
+    expect(parseCroLogLine('2026-09-20T08:00:00+08:00\tyes\ttick=1\td\treason=\tprompt=0:')).toBeNull()
+  })
+
+  it('reason 空串 ⇒ null（与"取不到写 null，不留空白"同口径）', () => {
+    const e = parseCroLogLine('2026-09-20T08:00:00+08:00\tok\ttick=1\td\treason=\tprompt=0:')
+    expect(e!.reason).toBeNull()
+    expect(e!.promptDigest).toEqual({ length: 0, head: '' })
+  })
+})
+
+describe('🆕 两代并读（旧 cro-wake-log.json 仍读、只写新 .log）', () => {
+  it('只有旧档 ⇒ 读得到旧档的条目', () => {
+    const legacy = croWakeLogLegacyPath(root, DIR, 'cro-wake-log.json')
+    mkdirSync(dirname(legacy), { recursive: true })
+    writeFileSync(
+      legacy,
+      JSON.stringify({
+        version: 1,
+        entries: [{ at: '2026-09-20T07:00:00+08:00', ok: true, detail: '旧档', tick: 5, reason: null }],
+      }),
+      'utf-8',
+    )
+    expect(loadCroWakeLog(root, DIR).log.entries.map((e) => e.detail)).toEqual(['旧档'])
+  })
+
+  it('🔴 新档在 ⇒ **只读新档**（旧档不再参与，也不会重复计入）', () => {
+    const legacy = croWakeLogLegacyPath(root, DIR, 'cro-wake-log.json')
+    mkdirSync(dirname(legacy), { recursive: true })
+    writeFileSync(
+      legacy,
+      JSON.stringify({
+        version: 1,
+        entries: [{ at: '2026-09-20T07:00:00+08:00', ok: true, detail: '旧档', tick: 5, reason: null }],
+      }),
+      'utf-8',
+    )
+    // 首次写入：旧档**窗内**条目被搬进新档（见下一条用例），随后新档接管
+    appendCroWakeLog(root, DIR, { ok: true, detail: '新档', tick: 6, reason: null }, NOW)
+    appendCroWakeLog(root, DIR, { ok: true, detail: '再一条', tick: 7, reason: null }, NOW)
+    // 🔴 判据：旧档里的条目**不得再被计入第二次**（数 = 新档实际行数）
+    expect(loadCroWakeLog(root, DIR).log.entries.map((e) => e.detail)).toEqual(['旧档', '新档', '再一条'])
+    expect(loadCroWakeLog(root, DIR).log.entries).toHaveLength(2 + 1)
+  })
+
+  it('🆕 迁移不丢数据：首次写入把旧档**窗内**条目搬进新档，窗外条目照裁', () => {
+    const legacy = croWakeLogLegacyPath(root, DIR, 'cro-wake-log.json')
+    mkdirSync(dirname(legacy), { recursive: true })
+    writeFileSync(
+      legacy,
+      JSON.stringify({
+        version: 1,
+        entries: [
+          { at: new Date(NOW - 60_000).toISOString(), ok: true, detail: '窗内旧条', tick: 4, reason: null },
+          { at: new Date(NOW - CRO_LOG_RETENTION_MS - 60_000).toISOString(), ok: true, detail: '窗外旧条', tick: 3, reason: null },
+        ],
+      }),
+      'utf-8',
+    )
+    const res = appendCroWakeLog(root, DIR, { ok: true, detail: '新档', tick: 6, reason: null }, NOW)
+    expect(res.pruned, '窗外旧条照常被裁').toBe(1)
+    expect(loadCroWakeLog(root, DIR).log.entries.map((e) => e.detail)).toEqual(['窗内旧条', '新档'])
+  })
+
+  it('旧档坏掉（非法 JSON）⇒ 结构化失败，不 throw', () => {
+    const legacy = croWakeLogLegacyPath(root, DIR, 'cro-wake-log.json')
+    mkdirSync(dirname(legacy), { recursive: true })
+    writeFileSync(legacy, '{ 这不是 JSON', 'utf-8')
+    const { log, error } = loadCroWakeLog(root, DIR)
+    expect(error).toContain('解析失败')
+    expect(log.entries).toEqual([])
   })
 })
 
@@ -167,29 +297,13 @@ describe('🔴 轮转：两日窗 + 程序化（清理与写入同一笔操作�
 })
 
 describe('🔴 绝不抛（铁律：写流水的问题不得影响投递与既有链路）', () => {
-  it('坏档（非法 JSON）⇒ 结构化失败，不 throw；且之后仍能追加（不是永久废掉）', () => {
-    writeRaw('{ 这不是 JSON')
+  it('坏档（半行乱码）⇒ 不 throw；坏行被跳过、好行照读，且之后仍能追加', () => {
+    writeRaw('# 表头\n这是半行乱码\n2026-09-20T08:00:00+08:00\tok\ttick=7\t好行\treason=\tprompt=0:\n')
     const loaded = loadCroWakeLog(root, DIR)
-    expect(loaded.error).toContain('解析失败')
-    expect(loaded.log.entries).toEqual([])
+    expect(loaded.error).toBeNull() // 纯文本的坏行**不是**整档失败
+    expect(loaded.log.entries.map((e) => e.detail)).toEqual(['好行'])
     expect(appendCroWakeLog(root, DIR, { ok: true, detail: 'after-corrupt', tick: 1, reason: null }, NOW).ok).toBe(true)
-    expect(readRaw().entries.map((e) => e.detail)).toEqual(['after-corrupt'])
-  })
-
-  it('坏条目（字段类型不符 / null）被丢弃，不阻断整档', () => {
-    writeRaw(
-      JSON.stringify({
-        version: 1,
-        entries: [
-          { at: '2026-09-20T08:00:00+08:00', ok: true, detail: 'good', tick: 1, reason: null },
-          { at: 123, ok: 'yes' },
-          null,
-        ],
-      }),
-    )
-    const { log, error } = loadCroWakeLog(root, DIR)
-    expect(error).toBeNull()
-    expect(log.entries.map((e) => e.detail)).toEqual(['good'])
+    expect(readRaw().entries.map((e) => e.detail)).toEqual(['好行', 'after-corrupt'])
   })
 
   it('落点父目录不可建（AGENT_SESSIONS 被占成普通文件）⇒ 返回失败，不 throw', () => {
@@ -210,7 +324,7 @@ describe('🔴 分工边界：这是"投递面"，不是第二真相源', () => 
   it('条目**只含投递面字段**，不夹带判定细节', () => {
     appendCroWakeLog(root, DIR, { ok: true, detail: '已投递（冷载入）', tick: 9, reason: '心跳', prompt: 'x' }, NOW)
     expect(Object.keys(readRaw().entries[0]!).sort()).toEqual(['at', 'detail', 'ok', 'promptDigest', 'reason', 'tick'])
-    const flat = JSON.stringify(readRaw())
+    const flat = readRaw().text
     for (const forbidden of ['lastDecision', 'lastRunAt', 'threshold', 'MIN_INTERVAL', 'predicate', 'category']) {
       expect(flat).not.toContain(forbidden)
     }
@@ -241,3 +355,4 @@ describe('summarizeCroPrompt（纯函数边界）', () => {
     expect([...r.head].length).toBe(CRO_PROMPT_HEAD_MAX)
   })
 })
+

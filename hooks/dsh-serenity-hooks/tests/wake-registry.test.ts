@@ -32,7 +32,7 @@ import {
 import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToCognitiveTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
 import { listBoundSessionIds } from '../src/trajectory/bound.js'
 import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/cro/core.js'
-import { croWakeLogPath } from '../src/cro/log.js'
+import { croWakeLogPath, loadCroWakeLog } from '../src/cro/log.js'
 import { __resetCroTurnsForTest } from '../src/cro/turns.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
@@ -993,14 +993,15 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     // 🔴 判据 = **磁盘上的档**（不是返回值）：固定名文件就在该轨迹目录里
     const path = croWakeLogPath(root, DIR_NAME)
     expect(existsSync(path), 'CRO 唤起的流水必须落在轨迹目录的固定名文件里').toBe(true)
-    const raw = JSON.parse(readFileSync(path, 'utf-8')) as { version: number; entries: Record<string, unknown>[] }
-    expect(raw.entries).toHaveLength(1)
-    expect(raw.entries[0]!.ok).toBe(true)
+    // 🔴 走模块自己的读取器（纯文本形态只有它认得对）：**不另写一份解析**
+    const entries = loadCroWakeLog(root, DIR_NAME).log.entries
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.ok).toBe(true)
     // ⚠️ 用 toContain 而非全等：`croProgram` 会把 `dir=<目录名>` 接在 reason 后（证明 stdin 真到达程序）
-    expect(String(raw.entries[0]!.reason)).toContain('心跳到点')
-    expect(String(raw.entries[0]!.detail)).toContain('已投递')
-    expect(typeof raw.entries[0]!.tick).toBe('number')
-    expect(raw.entries[0]!.promptDigest).toMatchObject({ length: 6, head: '该整理日志了' })
+    expect(String(entries[0]!.reason)).toContain('心跳到点')
+    expect(String(entries[0]!.detail)).toContain('已投递')
+    expect(typeof entries[0]!.tick).toBe('number')
+    expect(entries[0]!.promptDigest).toMatchObject({ length: 6, head: '该整理日志了' })
   }, 30_000)
 
   it('🔴 **投递失败 ⇒ 也落一条（ok:false + 原因）**（所有者令「失败成功都记录」）', async () => {
@@ -1013,10 +1014,10 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
     const path = croWakeLogPath(root, DIR_NAME)
     expect(existsSync(path), '失败也是一次"唤起尝试" ⇒ 必须留痕').toBe(true)
-    const raw = JSON.parse(readFileSync(path, 'utf-8')) as { entries: Record<string, unknown>[] }
-    expect(raw.entries).toHaveLength(1)
-    expect(raw.entries[0]!.ok).toBe(false)
-    expect(String(raw.entries[0]!.detail)).toContain('followup boom') // 原因可重建（不是空串）
+    const entries = loadCroWakeLog(root, DIR_NAME).log.entries
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.ok).toBe(false)
+    expect(String(entries[0]!.detail)).toContain('followup boom') // 原因可重建（不是空串）
     // 既有链路照常：CRO 的失败没有连累任何东西
     expect(listWakes(root).entries).toHaveLength(0)
   }, 30_000)

@@ -16,7 +16,7 @@ import {
   getTrajectoryAgent,
   trajectoryConstraintFor,
   trajectoryConstraintByCode,
-  轨迹约束ToolWhitelist,
+  trajectoryConstraintToolWhitelist,
   trajectoryWorkspaceMdPath,
   ensureWorkspacePromptSection,
   workspaceCognitiveTrajectoryLine,
@@ -37,6 +37,7 @@ import {
   TRAJECTORY_CONSTRAINT_HINT,
 } from '../src/trajectory/policy/rules.js'
 import { appendBound } from '../src/trajectory/bound.js'
+import { TRAJECTORY_CONSTRAINT_FILENAME } from '../src/trajectory/policy/profile.js'
 import { makeTrajectory, make轨迹约束Session, 轨迹约束Json, profileFor } from './helpers/trajectory-constraint-fixture.js'
 
 /**
@@ -535,24 +536,26 @@ describe('trajectory-session: 提示词热生效（文件 mtime / JSON 每轮 �
     expect(constraintSystemPromptSource(profile)).toBe('inline')
   })
 
-  it('🔴 改 trajectory-constraint.json 的约束面 → 守门立即跟上（JSON 每轮重读，不必重建 agent、不必重启）', async () => {
+  it('🔴 改 trajectory.json 的约束面 → 守门立即跟上（JSON 每轮重读，不必重建 agent、不必重启）', async () => {
     // ⚠️ 这条才是 owner 2026-10-19「工具清单也要热加载」那句话的机械形态：
-    //    守门每调用一次就重读一次 `trajectory-constraint.json` ⇒ 改了白名单/纪律，下一轮就生效。
+    //    守门每调用一次就重读一次声明文件 ⇒ 改了白名单/纪律，下一轮就生效。
     //    （提示词**内嵌**串是创建时快照——它没有 mtime 可比，见 config.ts 的说明；
     //      它的热更入口是"改用 systemPromptFile"，见下一条。）
     const profile = profileOf('hot-json', 轨迹约束Json({ msms: ['m1'], tools: ['read'] }))
     const { ctx } = recordingCtx()
     const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'sess-hot-json')
     // 正控：创建时的约束面
-    expect([...轨迹约束ToolWhitelist(root, ref.sessionId)!].sort()).toEqual(['msm', 'read'])
+    expect([...trajectoryConstraintToolWhitelist(root, ref.sessionId)!].sort()).toEqual(['msm', 'read'])
     expect(trajectoryConstraintMsmGate(root, ref.sessionId, 'exec', 'm2').reject, '白名单外').toBeDefined()
     // CCC 改了约束面：不重建 agent，不重启
-    writeFileSync(join(root, 'AGENT_SESSIONS', profile.dirName, 'trajectory-constraint.json'), JSON.stringify({
+    // 🔴 文件名**必须用常量**（不写死字面量）：它是"写入目标"，改名后写死会写到族里的旧名上，
+    //    而读取侧优先命中新名 ⇒ 测试会以为"改了没生效"（本轨实测踩到）。
+    writeFileSync(join(root, 'AGENT_SESSIONS', profile.dirName, TRAJECTORY_CONSTRAINT_FILENAME), JSON.stringify({
       msms: ['m2'],
       tools: ['grep'],
       cognitiveTrajectory: { keeper: false },
     }), 'utf-8')
-    expect([...轨迹约束ToolWhitelist(root, ref.sessionId)!].sort()).toEqual(['grep', 'msm'])
+    expect([...trajectoryConstraintToolWhitelist(root, ref.sessionId)!].sort()).toEqual(['grep', 'msm'])
     expect(trajectoryConstraintMsmGate(root, ref.sessionId, 'exec', 'm2'), '新的白名单成员').toEqual({})
     expect(trajectoryConstraintMsmGate(root, ref.sessionId, 'exec', 'm1').reject, '旧的已被移出').toBeDefined()
     expect(trajectoryConstraintParticipates(root, ref.sessionId, 'keeper')).toBe(false)
@@ -568,7 +571,7 @@ describe('trajectory-session: 提示词热生效（文件 mtime / JSON 每轮 �
     const ref = await createTrajectoryAgent(ctx as never, root, profile)
     const base = sections.find((s) => s.name === 'serenity-轨迹约束')!
     expect(base.text()).toContain('A 版提示词')
-    writeFileSync(join(root, 'AGENT_SESSIONS', profile.dirName, 'trajectory-constraint.json'), JSON.stringify({ systemPromptFile: 'b.md' }), 'utf-8')
+    writeFileSync(join(root, 'AGENT_SESSIONS', profile.dirName, TRAJECTORY_CONSTRAINT_FILENAME), JSON.stringify({ systemPromptFile: 'b.md' }), 'utf-8')
     expect(base.text()).toContain('B 版提示词')
     expect(base.text()).not.toContain('A 版提示词')
     unregisterTrajectorySession(ref.sessionId)
@@ -780,7 +783,7 @@ describe('trajectory-session: trajectoryConstraintParticipates 轨迹纪律子�
     // ⛔ 旧用例是"轨迹约束会话未注册 → 保守旁路 false"。新模型里**没有**"轨迹约束 但没登记"这回事：
     //    身份判据是"绑定的轨迹有没有 trajectory-constraint.json"，查不到就是普通轨迹 ⇒ 放行（fail-open 是有意的）。
     make轨迹约束Session(root, 'sess-noreg', 'noreg', 轨迹约束Json({}))
-    rmSync(join(root, 'AGENT_SESSIONS', '2026-10-19--noreg--traj', 'trajectory-constraint.json')) // 删掉判据文件 = 当场退化为普通轨迹
+    rmSync(join(root, 'AGENT_SESSIONS', '2026-10-19--noreg--traj', TRAJECTORY_CONSTRAINT_FILENAME)) // 删掉判据文件 = 当场退化为普通轨迹
     expect(trajectoryConstraintParticipates(root, 'sess-noreg', 'keeper')).toBe(true)
     expect(trajectoryConstraintParticipates(root, 'sess-noreg', 'rebuild')).toBe(true)
   })
@@ -834,8 +837,10 @@ describe('trajectory-session: trajectoryConstraintMsmGate msm 白名单门控', 
   })
 
   it('register/deregister 必拒', () => {
-    expect(trajectoryConstraintMsmGate(root, qaId, 'register', 'x').reject).toContain('not allowed in 轨迹约束')
-    expect(trajectoryConstraintMsmGate(root, qaId, 'deregister', 'x').reject).toContain('not allowed in 轨迹约束')
+    // 🔴 2026-10-19 v1.75.0：文案从「…in 轨迹约束 sessions」改为英文
+    // （原文是改名机把标识符改成中文后留下的中英混排，见 tests/identifier-ascii.test.ts）
+    expect(trajectoryConstraintMsmGate(root, qaId, 'register', 'x').reject).toContain('not allowed in trajectory-constraint')
+    expect(trajectoryConstraintMsmGate(root, qaId, 'deregister', 'x').reject).toContain('not allowed in trajectory-constraint')
   })
 
   it('list → 白名单过滤（来自 trajectory-constraint.json 的 msms）', () => {
@@ -851,21 +856,21 @@ describe('trajectory-session: trajectoryConstraintMsmGate msm 白名单门控', 
   })
 })
 
-describe('trajectory-session: 轨迹约束ToolWhitelist 工具面收窄', () => {
+describe('trajectory-session: trajectoryConstraintToolWhitelist 工具面收窄', () => {
   it('轨迹约束：tools ∪ {msm}（msms 非空 ⇒ msm 工具自动可达，单入口纪律）', () => {
     make轨迹约束Session(root, 'sess-tools', 'tools', 轨迹约束Json({ tools: ['read', 'grep'], msms: ['x'] }))
-    const w = 轨迹约束ToolWhitelist(root, 'sess-tools')
+    const w = trajectoryConstraintToolWhitelist(root, 'sess-tools')
     expect([...w!].sort()).toEqual(['grep', 'msm', 'read'])
   })
 
   it('msms 为空 ⇒ 不加 msm（并集不是覆盖：显式写的 tools 照旧生效）', () => {
     make轨迹约束Session(root, 'sess-nom', 'nom', 轨迹约束Json({ tools: ['read'] }))
-    expect([...轨迹约束ToolWhitelist(root, 'sess-nom')!].sort()).toEqual(['read'])
+    expect([...trajectoryConstraintToolWhitelist(root, 'sess-nom')!].sort()).toEqual(['read'])
   })
 
   it('非 轨迹约束 ⇒ null（调用方据此不收窄 schema）', () => {
-    expect(轨迹约束ToolWhitelist(root, 'normal')).toBeNull()
-    expect(轨迹约束ToolWhitelist(root, undefined)).toBeNull()
+    expect(trajectoryConstraintToolWhitelist(root, 'normal')).toBeNull()
+    expect(trajectoryConstraintToolWhitelist(root, undefined)).toBeNull()
   })
 })
 

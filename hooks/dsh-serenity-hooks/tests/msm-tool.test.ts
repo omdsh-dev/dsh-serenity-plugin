@@ -42,6 +42,7 @@ import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
 import { unregisterTrajectorySession } from '../src/trajectory/session.js'
 import { resetTrajectorySessions } from '../src/trajectory/policy/window.js'
 import { make轨迹约束Session, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
+import { TRAJECTORY_CONSTRAINT_FILENAME } from '../src/trajectory/policy/profile.js'
 
 const mockRunMsmAsync = vi.mocked(runMsmAsync)
 
@@ -81,9 +82,10 @@ function writeRegistry(entries: unknown[]): void {
   writeFileSync(join(p, 'mech-registry.json'), JSON.stringify({ version: 1, entries }, null, 2))
 }
 
-/** 改写某条轨迹的 `trajectory-constraint.json`（约束面每轮实时读 ⇒ 热生效，无需重新登记会话） */
+/** 改写某条轨迹的声明文件（约束面每轮实时读 ⇒ 热生效，无需重新登记会话） */
 function setProfile(dirName: string, json: Record<string, unknown>): void {
-  writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, 'trajectory-constraint.json'), JSON.stringify(json), 'utf-8')
+  // 🔴 用常量而非字面量：写死旧名会写到族里的**旧**文件上，而读取侧优先命中新名 ⇒ 测试会假红
+  writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, TRAJECTORY_CONSTRAINT_FILENAME), JSON.stringify(json), 'utf-8')
 }
 
 const THREE = [
