@@ -7,7 +7,7 @@
  * 后果实测：`acc-extras` / `ops` / `skiff-admin` 三个测试套件因解析不到宿主包而**整文件加载失败**
  * （它们只用到 MSM 注册表逻辑）。叶模块把「读」与「写」解耦：读者零依赖，写者自己承担重量。
  *
- * 同款先例：`host/effect.ts`（拆卸登记）、`role/worker/idle.ts`（等待结算）。
+ * 同款先例：`host/effect.ts`（拆卸登记）、`trajectory/carrier.ts`（等待结算）。
  */
 
 let endpoint: string | null = null

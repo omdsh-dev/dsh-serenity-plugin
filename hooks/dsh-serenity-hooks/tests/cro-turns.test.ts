@@ -40,7 +40,7 @@ const A = 'session-aaa'
 const B = 'session-bbb'
 const C = 'session-ccc'
 
-/** 事件 payload 的形状（照 `host/contract.ts` / `role/worker/idle.ts` 实测） */
+/** 事件 payload 的形状（照 `host/contract.ts` / `trajectory/carrier.ts` 实测） */
 const agentPayload = (id: string): unknown => ({ agent: { session: { id } } })
 
 /** `registerCroTurnTracking` 实际订阅的事件名（装配期抓取；见文件头第二条重点） */

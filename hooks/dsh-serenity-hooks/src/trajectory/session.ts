@@ -54,7 +54,7 @@ import {
 import { sessionsRoot } from './core.js'
 import { hasTrajectoryPrompt } from './prompt.js'
 import { hostAgents } from '../host/access.js'
-import { waitAgentIdle } from '../role/worker/idle.js'
+import { waitAgentIdle } from './carrier.js'
 import { registerCognitiveTrajectorySkillSection } from '../seams/system-prompt.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
@@ -402,8 +402,8 @@ async function createOrResumeAgent(
   }
 }
 
-/** `provider/model` → agentOptions（由 worker/core 提供，保持单一实现） */
-import { splitModel } from '../role/worker/core.js'
+/** `provider/model` → agentOptions（由 delegate/core 提供，保持单一实现） */
+import { splitModel } from './delegate/core.js'
 
 // ── 提问（followup → 等本轮回答）──
 

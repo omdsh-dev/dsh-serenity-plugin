@@ -406,7 +406,7 @@ export async function sendToCognitiveTrajectory(
   const make = (): ReturnType<typeof createUserMessage> =>
     createUserMessage({ content: [{ type: 'text', text: buildSendText(t, message, sender) }], source: PLUGIN_SOURCE })
   // 🔴 v1.39.2（S142 §0r，所有者令「不排队、直接即时注入」）：见函数头部的语义变更说明。
-  // 判据 = 宿主 agent 的 `status`（`role/worker/idle.ts` 同款读法：`followup`/`steer` 会**同步**置 running）。
+  // 判据 = 宿主 agent 的 `status`（`trajectory/carrier.ts` 同款读法：`followup`/`steer` 会**同步**置 running）。
   const idle = (agent as { status?: string }).status === 'idle'
   if (idle) {
     try {

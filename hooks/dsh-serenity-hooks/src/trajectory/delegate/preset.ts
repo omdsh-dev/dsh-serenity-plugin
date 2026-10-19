@@ -1,5 +1,5 @@
 /**
- * role/worker/preset.ts — cheap-worker worker 的 preset 继承 + 工具面收窄（纯函数，可单测）
+ * trajectory/delegate/preset.ts — cheap-worker worker 的 preset 继承 + 工具面收窄（纯函数，可单测）
  *
  * v1.24.0：loop → cheap-worker 重命名。对齐 subagent 先例（applyChildComposition →
  * agentPresets.composeFrom）：cheap-worker worker 在创建窗口内 join 发起方 agent 的 standing
@@ -16,7 +16,14 @@
  *     （在 agent 未发布前执行 composeFrom + restrict，失败由创建事务回滚）。
  *
  * 仅依赖 cordis 的 Context 类型（type-only，运行时擦除）——保持可被 vitest
- * 直接加载（与 kernel/ccc.ts / role/worker/core.ts 同级的纯模块约定）。
+ * 直接加载（与 kernel/ccc.ts / trajectory/delegate/core.ts 同级的纯模块约定）。
+ *
+ * ## S14（2026-10-19，轨迹中心重构）：此前位于 `role/worker/` 下（该目录已消失）
+ *
+ * 落点 = `trajectory/delegate/`，与 `./core.ts` 同域。这里的"preset 继承"是**委派关系**的
+ * 一部分（子 agent join 父的 standing preset），主语仍是"主轨迹怎么把活派出去"。
+ * 🔴 递归防护（`deny: ['cheap-worker']`）也住在这里 —— 它是委派**方向的守卫**，不是容器宪法：
+ * 换一条轨迹，它照样生效，但它约束的是"派出去之后再派"这件事。
  */
 
 import type { Context } from 'cordis'

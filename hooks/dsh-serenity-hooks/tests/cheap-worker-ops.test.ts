@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { CHEAP_WORKER_GUIDE, providerAvailabilityError, requireWhitelistedModel, splitModel } from '../src/role/worker/core.js'
+import { CHEAP_WORKER_GUIDE, providerAvailabilityError, requireWhitelistedModel, splitModel } from '../src/trajectory/delegate/core.js'
 
 /**
  * cheap-worker-ops（纯逻辑层）。
@@ -44,7 +44,7 @@ describe('cheap-worker-ops: 模型串解析 / 白名单', () => {
    * 这条钉的是"删除"本身（若将来有人把 per-call model 加回来，此处会红）。
    */
   it('🔴 反向钉：本模块不再导出 background 时代的任何符号', async () => {
-    const mod = await import('../src/role/worker/core.js')
+    const mod = await import('../src/trajectory/delegate/core.js')
     for (const gone of [
       'newStopToken', 'buildRoundPrompt', 'readProgress', 'writeProgress', 'writeFailedStatus',
       'cheapWorkerProgressPaths', 'sanitizeLabel', 'listActiveCheapWorkers',

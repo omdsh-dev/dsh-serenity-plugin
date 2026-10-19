@@ -132,7 +132,7 @@ function fakeCtx(opts?: { createThrows?: boolean }): {
 }
 
 /**
- * 🔴 夹具前置条件（本件首跑踩到、极其重要）：`waitAgentIdle`（`role/worker/idle.ts:71`）结算
+ * 🔴 夹具前置条件（本件首跑踩到、极其重要）：`waitAgentIdle`（`trajectory/carrier.ts:71`）结算
  * 的判据是 **`p?.agent === agent` 的同一性比较** ⇒ 触发 idle 时**必须交回那个真实 agent
  * 引用**，传 `undefined` 会让 Promise 永不结算 ⇒ 用例**超时**（不是生产代码有 bug）。
  * 本工厂把 agent 引用闭包保存，`on` 触发时回传真引用（与既有 `weixin.test.ts` 同构）。

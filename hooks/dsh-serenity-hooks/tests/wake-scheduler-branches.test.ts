@@ -8,7 +8,7 @@
  * 语句 95.13%（254/267）。
  *
  * 🔵 **本件的额外价值（为何值得优先做）**：`wake/scheduler.ts` 是 ④ I2 收敛后
- * **仍列在 L1 违反清单上的 3 个文件之一**（`trajectory/rebuild.ts` 7 ／ **本文件 2** ／ `role/worker/idle.ts` 1）
+ * **仍列在 L1 违反清单上的 3 个文件之一**（`trajectory/rebuild.ts` 7 ／ **本文件 2** ／ `trajectory/carrier.ts` 1）
  * —— 它是**宿主接触面**（`Agent.followup`/`steer` 真被调用）。objective 的要害正是
  * 「**尤其管好与 DSH 的衔接面**」⇒ 把它的**降级路径**钉牢，比再补一个普通业务模块更贴目标。
  *

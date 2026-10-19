@@ -27,7 +27,7 @@ import {
   providerAvailabilityError,
   requireWhitelistedModel,
   splitModel,
-} from '../role/worker/core.js'
+} from '../trajectory/delegate/core.js'
 import type { JsonValue } from '../kernel/json.js'
 import { hostLlm, hostSubagents } from '../host/access.js'
 

@@ -149,7 +149,7 @@ export function __resetCroTurnsForTest(): void {
  * 🔴 **本处顺带更正 §2.7 的一处分档**：本文件原被列在"剩余 3 个属**真依赖**档"里，
  * 但**逐符号查证后与那个判断不符** ——
  *   · `Context`：`ctx` 只被**结构化访问**（原码本就写着 `ctx as unknown as { on: … }`）
- *     ⇒ 该注解未提供任何类型保证（与 `role/worker/idle.ts` 同档）。
+ *     ⇒ 该注解未提供任何类型保证（与 `trajectory/carrier.ts` 同档）。
  *   · `Agent`：**导入后从未使用** —— 事件 payload 一律按 `{ agent?: unknown }` 解构，
  *     再交给 `sessionIdOf(...)`（它收 `unknown`）。⇒ **纯粹是死 import**。
  * ⇒ **判据（本件再证一次，且比上一件更硬）**：分档**必须逐符号看"它有没有参与类型检查"**，
@@ -193,7 +193,7 @@ export function registerCroTurnTracking(ctx: unknown): void {
   })
 
   // ③ 生命周期清理：载体销毁 ⇒ 清项（防"按载体只增"）
-  // ⚠️ 两个事件的 **payload 形状不同**（照 `role/worker/idle.ts:57-64` 实证）：
+  // ⚠️ 两个事件的 **payload 形状不同**（照 `trajectory/carrier.ts:57-64` 实证）：
   //    · `agent/disposed`   → `{ agent }`
   //    · `session/disposed` → **payload 本身就是那个 session**（直接有 `.id`）
   on('agent/disposed', (payload) => {

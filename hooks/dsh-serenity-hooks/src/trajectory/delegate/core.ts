@@ -1,9 +1,15 @@
 /**
- * role/worker/core.ts — cheap-worker（杂工）纯逻辑层（零 DSH 依赖，可独立单测）
+ * trajectory/delegate/core.ts — cheap-worker（杂工）纯逻辑层（零 DSH 依赖，可独立单测）
  *
  * 🆕 2026-10-14（owner 令「删除后台运行能力」）：**进度文件 / stop token / 轮次循环**整族已退场 ——
  * 它们**只**服务于 background 模式。本模块现存 = 前台委派真正需要的三件：
  * 模型串解析 ／ 白名单校验 ／ provider 可用性判读（＋ 使用指引文本）。
+ *
+ * ## S14（2026-10-19，轨迹中心重构）：此前位于 `role/worker/` 下（该目录已消失）
+ *
+ * 落点 = `trajectory/delegate/`。判据（判读表 §3.1）：它是**轨迹 × 轨迹**那种合法形态 ——
+ * 主语是「主轨迹把活交给子 agent」，既不是某一条轨迹的切面，也不是容器宪法。
+ * ⚠️ 它**不属于** `policy/`：policy 管"这条轨迹允许什么"，本模块管"一条轨迹怎么把活派出去"。
  */
 
 /** 解析 model 字符串（provider/model）→ {provider, model}；无 / 视为 model-only */

@@ -213,7 +213,7 @@ type _AgentInboxPrepend = Expect<Extends<HostAgent['inbox']['prepend'], (target:
 /** `agent.session.header.cwd` —— 工具工作目录解析 */
 type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], string | undefined>>
 /**
- * `agent.status === 'idle'` —— 等待空闲（`role/worker/idle.ts:65`，cheap-worker 的完成判据）。
+ * `agent.status === 'idle'` —— 等待空闲（`trajectory/carrier.ts:65`，cheap-worker 的完成判据）。
  * 注：`status` 是可变属性（非方法），断言其**可读**且类型覆盖 'idle'。
  */
 type _AgentStatus = Expect<Extends<HostAgent['status'], string>>
@@ -229,7 +229,7 @@ type _AgentCtxSystemPrompt = Expect<Extends<Ret<HostAgent['ctx']['systemPrompt']
 import type { Events } from 'cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
-/** `agent/status`：dsp 读 `payload.agent` + `payload.status === 'idle'`（`role/worker/idle.ts:55`） */
+/** `agent/status`：dsp 读 `payload.agent` + `payload.status === 'idle'`（`trajectory/carrier.ts:55`） */
 type _EvStatus = Expect<Extends<Parameters<Events['agent/status']>[0], { agent: unknown; status: string }>>
 /** `agent/inbox/inserted`：dsp 读 `payload.agent` / `payload.message`（`seams/bootstrap.ts`） */
 type _EvInbox = Expect<Extends<Parameters<Events['agent/inbox/inserted']>[0], { agent: unknown; message: unknown }>>
