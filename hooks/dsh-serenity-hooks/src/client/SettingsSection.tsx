@@ -7,10 +7,12 @@
  * 页面结构（官方 settings 设计语言：section > title + intro + 分组 + 行卡）：
  *  - 访问：双端口网关（展开 → 监听/账号/白名单/TOTP）
  *  - 上下文：超限重建（展开 → 阈值）
- *  - 外部能力：Skiff 调试（展开 → 说明）｜CRO（展开 → 说明）
- *  - 工具：ACP 面（展开 → 账户台账）｜图 diagram（展开 → 说明）
- *  - 折叠块：彩蛋模式 ／ 微信桥 ／ 会话清理
+ *  - 外部能力：CRO（展开 → 说明）
+ *  - 工具：图 diagram（展开 → 说明）
+ *  - 折叠块：彩蛋模式 ／ **IM 桥**（微信 ＋ 飞书，原「微信桥」）／ 会话清理
  * 行卡可展开：点整行 → 行内详设（开关与详设合一）；重型编辑器挂所属开关行下。
+ *
+ * ⛔ 2026-10-19：原「Skiff 调试」行已删（3099 调试面整条退役，owner 令）。
  *
  * 数据通道（双层）：
  *  - 简单配置：`ctx.configForms.get('serenity-hooks')` —— 0.1.7 起设置页由「profile 条目
@@ -28,7 +30,7 @@ import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-
 import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
-import { WeixinBridgeEditor } from './WeixinBridgeEditor.js'
+import { ImBridgeEditor } from './ImBridgeEditor.js'
 import './SettingsSection.css'
 
 /** serenity-hooks 简单配置 wire 形态（= 插件 Config 的**面板层**扁平键；host 侧同名） */
@@ -36,9 +38,7 @@ export interface SerenitySimpleWire {
   gatewayEnabled?: boolean
   // 🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
   rebuildThresholdK?: number
-  /** Skiff（实验性）：认知子集角色调试服务启停 + 端口 */
-  skiffEnabled?: boolean
-  skiffDebugPort?: number
+  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 面板键已删（Skiff 调试面 3099 退役）。
   /** CRO（轨迹自编程唤起）总闸（缺省开；只关 CRO 阶段，投递照常） */
   croEnabled?: boolean
   /** diagram 工具总开关：agent 给一段标签式源码，进程内光栅化成 PNG 并贴进对话
@@ -173,22 +173,16 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
     // 需求①：K 数值（默认 400K；范围 50~4000，纯绝对无窗口比例保护）
     set('rebuildThresholdK', Math.min(4000, Math.max(50, Math.round(v))))
   }
-  const setSkiffPort = (v: number): void => {
-    set('skiffDebugPort', Math.min(65535, Math.max(1024, Math.round(v))))
-  }
 
   const gatewayOn = value?.gatewayEnabled ?? false
   // v1.49.0：`rebuildOn` 已随总开关一起砍掉（超限重建恒开，面板不再有该 Toggle）
   const thresholdK = value?.rebuildThresholdK ?? 400
-  const skiffOn = value?.skiffEnabled ?? false
-  const skiffPort = value?.skiffDebugPort ?? 3099
   const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
   const diagramOn = value?.diagramEnabled ?? false // 缺省关（与 schema 一致；D104）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
   const [openGateway, setOpenGateway] = useState(false)
   const [openRebuild, setOpenRebuild] = useState(false)
-  const [openSkiff, setOpenSkiff] = useState(false)
   const [openCro, setOpenCro] = useState(false)
   const [openDiagram, setOpenDiagram] = useState(false)
 
@@ -269,37 +263,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       <Group title="外部能力">
         <li>
           <RowCard
-            title="Skiff 调试"
-            desc="Skiff 认知子集问答页（默认 3099，仅本机，实验性）"
-            expandable
-            open={openSkiff}
-            onToggle={setOpenSkiff}
-            control={
-              <span className="ss-switchRow">
-                <Toggle checked={skiffOn} onChange={(on) => toggle('skiffEnabled', on)} />
-                <input
-                  className="ss-portInput"
-                  type="number"
-                  min={1024}
-                  max={65535}
-                  value={skiffPort}
-                  disabled={!skiffOn}
-                  title="Skiff 调试端口（默认 3099）"
-                  onChange={(e) => setSkiffPort(Number(e.target.value))}
-                />
-              </span>
-            }
-            detail={
-              <p className="ss-detailIntro">{'Skiff 认知子集角色的问答页，仅监听 127.0.0.1。\n' +
-                '· Skiff = 完整轨迹的任意子集（认知子集角色）\n' +
-                '· 先在 CCC 的 skiff.roles 里配角色，再用此页以角色身份问答\n' +
-                '· 实验性，人工启停，默认关'}
-              </p>
-            }
-          />
-        </li>
-        <li>
-          <RowCard
             title="CRO（轨迹自编程唤起）"
             desc="让轨迹用自己的一段程序决定何时唤起（全局开关，默认开）"
             expandable
@@ -348,10 +311,12 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
         <PersonaEditor />
       </Collapse>
 
-      {/* F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置——无顶层 plugin 开关
-          （CCC 级 enabled），保留独立折叠块；内部行已用可展开详设 */}
-      <Collapse title="微信桥" desc="扫码绑定微信账号 · 路由到 skiff 角色（CCC 级配置）">
-        <WeixinBridgeEditor />
+      {/* IM 桥（原「微信桥」，2026-10-19 泛化）：CCC 级配置——无顶层 plugin 开关
+          （CCC 级 enabled），保留独立折叠块；内部行已用可展开详设。
+          🔴 泛化理由：P2 起「微信」与「飞书」是**并列的账号实现**（`account.channel` 分发），
+          而面板属于"设定账号"这一层 ⇒ 标题若仍叫微信，第二家 IM 一接上就开始说谎。 */}
+      <Collapse title="IM 桥" desc="绑定即时通讯账号 · 路由到认知轨迹（CCC 级配置）">
+        <ImBridgeEditor />
       </Collapse>
 
       {/* 旧会话清理（v1.29 需求③）：DSH 平台会话（对话历史）手动清理——lastActive 基准 + 物理删 */}

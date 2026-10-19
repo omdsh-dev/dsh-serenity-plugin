@@ -71,8 +71,9 @@ const code = stripComments(raw)
 const PANEL_ROWS: ReadonlyArray<{ key: string; bind: string; title: string }> = [
   { key: 'gatewayEnabled', bind: "toggle('gatewayEnabled'", title: '双端口网关' },
   { key: 'rebuildThresholdK', bind: 'setThreshold(', title: '重建阈值' },
-  { key: 'skiffEnabled', bind: "toggle('skiffEnabled'", title: 'Skiff 调试' },
-  { key: 'skiffDebugPort', bind: 'setSkiffPort(', title: 'Skiff 调试' },
+  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 两行已删 —— Skiff 调试面（3099）整条退役
+  //    （owner 令「面板里 Skiff 的内容不要了」）。靶表必须**同批**删掉这两行，
+  //    否则本文件会去要求一个**已经不存在的面板行** ⇒ 恒红（本次实测就是这样红的）。
   { key: 'croEnabled', bind: "toggle('croEnabled'", title: 'CRO' },
   { key: 'diagramEnabled', bind: "toggle('diagramEnabled'", title: '图（diagram）' },
 ]
@@ -109,6 +110,15 @@ describe('设置面板：每个开关都必须"数据面 ＋ 控件面 ＋ 呈�
     expect(code).not.toContain('acpFaceEnabled')
     expect(code).not.toContain('acpFacePort')
     expect(code).not.toContain('ACP 面')
+  })
+
+  it('🔴 已退役的 Skiff 调试面不得在面板上复活（2026-10-19 整面退役的机械守卫）', () => {
+    // owner 令「面板里 Skiff 的内容不要了，下掉吧，功能也检查下，应该下掉了」
+    // ⇒ 面本体（surface/debug.ts）＋ 装配 ＋ 两个配置键 ＋ 面板行 一起走。
+    // 本判据挡的是"**只删了面、面板行又长回来**"这种半删 —— 它没有任何机械信号。
+    expect(code).not.toContain('skiffEnabled')
+    expect(code).not.toContain('skiffDebugPort')
+    expect(code).not.toContain('Skiff 调试')
   })
 
   it('对照（防假绿）：`stripComments` 真的会剥掉注释（证明它不是空操作）', () => {

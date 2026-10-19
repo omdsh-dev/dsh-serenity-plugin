@@ -140,6 +140,28 @@
   color: var(--dsw-alias-label-primary);
 }
 
+/* IM 桥：账号行的**渠道标签**（2026-10-19 泛化后新增）。
+   为什么是标签而不是"把渠道拼进 id"：渠道是账号的属性，不是名字的一部分；
+   拼进去会让「同一个账号换了渠道」看起来像另一个账号。
+   🔴 不得定宽（v1.72.0 那次 `sp-label` 写死 76px 压住数值的教训）⇒ inline-block + 自适应。 */
+.ss-channelTag {
+  display: inline-block;
+  padding: 0 6px;
+  margin-right: 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 600;
+  vertical-align: 1px;
+  background: rgba(11, 168, 117, .12);
+  color: #0ba875;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .ss-channelTag { color: #3ddc9a; }
+}
+
 /* 行卡说明（12px/18 tertiary；v1.27.5 紧凑化：默认单行截断，hover title 看全文） */
 .ss-rowDesc {
   font-size: 12px;

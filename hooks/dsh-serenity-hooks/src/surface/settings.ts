@@ -45,7 +45,7 @@
 import type { Context, Volatile } from 'cordis'
 import { hostSettings } from '../host/access.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
-import { SKIFF_DEBUG_PORT } from '../kernel/ports.js'
+// ⚠️ 2026-10-19：`SKIFF_DEBUG_PORT` 随 Skiff 调试面（3099）退役而不再被本文件使用。
 
 /**
  * 面板层布尔键的**两种来法**（v1.47.2）：
@@ -75,8 +75,8 @@ interface SimpleConfigFragment {
   gatewayEnabled?: PanelBoolean
   // 🔴 v1.49.0：`rebuildEnabled` 面板键已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
   rebuildThresholdK?: PanelNumber
-  skiffEnabled?: PanelBoolean
-  skiffDebugPort?: PanelNumber
+  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 面板键已删（Skiff 调试面 3099 整条退役）。
+  //    旧配置残留 ⇒ 静默忽略（同 `rebuildEnabled` / `unattendedEnabled` 的处置）。
   croEnabled?: PanelBoolean
   // 🔴 v1.63.3：`unattendedEnabled` 面板键已砍掉（无人值守功能整条退役；owner 2026-10-18 裁决）
   diagramEnabled?: PanelBoolean
@@ -98,10 +98,9 @@ interface SerenitySimpleSettings {
   // 触发阈值 `rebuildThresholdK` **仍在**（面板那个滑块不动）⇒ 要调敏感度改阈值即可。
   /** F2 触发阈值（需求① S142 用户拍板：百分比比例 → K 数值；projectedTokens ≥ thresholdK*1000 触发） */
   rebuildThresholdK: number
-  /** F4 Skiff 调试服务总开关（实验性；默认关——不随插件加载自动启动，人工开启） */
-  skiffEnabled: boolean
-  /** F4 Skiff 调试端口（默认 3099，仅 127.0.0.1） */
-  skiffDebugPort: number
+  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 已随 Skiff 调试面（3099）整条退役删除。
+  //    🔴 注意区分：退役的是**调试 HTTP 面**；`skiff.json` 的**轨迹约束面机制**仍在用
+  //    （判据 = `trajectory/policy/profile.ts`），它本来也不经这两个键。
   // 🔴 2026-10-15（owner 裁「砍掉外部问答」）：面 E 三个键（`acpEnabled`／`acpHttpPort`／
   // `publicAskEnabled`）**已整组退役** —— 自造 ACP 面被官方 `dsh --profile acp` ＋ 现成客户端取代。
   // 旧配置残留这些键 ⇒ **静默忽略**（schemastery 非 strict，同 `rebuildEnabled` 的处置）。
@@ -143,8 +142,6 @@ export function defaultSimpleSettings(): SerenitySimpleSettings {
   return {
     gatewayEnabled: false,
     rebuildThresholdK: 400,
-    skiffEnabled: false,
-    skiffDebugPort: SKIFF_DEBUG_PORT,
     croEnabled: true,
     diagramEnabled: false,
     humanChannel: defaultHumanChannelSettings(),
@@ -299,8 +296,8 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
     // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` **已砍掉** —— 超限重建恒开、无总闸。
     // 旧配置残留该键 ⇒ 不进本结构、无人读（静默忽略）。
     rebuildThresholdK: unwrapVolatile(config.rebuildThresholdK) ?? config.rebuild?.thresholdK ?? d.rebuildThresholdK,
-    skiffEnabled: unwrapVolatile(config.skiffEnabled) ?? config.skiff?.enabled ?? d.skiffEnabled,
-    skiffDebugPort: unwrapVolatile(config.skiffDebugPort) ?? config.skiff?.debugPort ?? d.skiffDebugPort,
+    // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 已随 Skiff 调试面（3099）整条退役，
+    // 不再进本结构（旧配置残留 ⇒ 静默忽略，无人读）。
     // 🔴 2026-10-15：面 E 三个键（`acpEnabled`／`acpHttpPort`／`publicAskEnabled`）**已整组退役**，
     // 不再进本结构（旧配置残留 ⇒ 静默忽略，无人读）。
     croEnabled: unwrapVolatile(config.croEnabled) ?? d.croEnabled,

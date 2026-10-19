@@ -21,8 +21,8 @@
  * （默认值）、settings-section（面板默认）、index（Config 默认）都可安全引用而不引入依赖环。
  */
 
-/** 面标识（四个对外面；A 由宿主监听，B/C/D 由本插件监听） */
-export type FaceId = 'main' | 'gateway' | 'weixinSend' | 'skiffDebug'
+/** 面标识（**两个**对外面；A 由宿主监听，B/C 由本插件监听） */
+export type FaceId = 'main' | 'gateway' | 'weixinSend'
 
 /** 一个面的端口语义 */
 export interface PortSpec {
@@ -60,12 +60,10 @@ export const FACE_PORTS: Readonly<Record<FaceId, PortSpec>> = {
     defaultEnabled: true,
     meaning: '微信主动发送面（容器外进程 → POST /send；与 3080 显式解耦，不经网关）',
   },
-  skiffDebug: {
-    port: 3099,
-    host: '127.0.0.1',
-    defaultEnabled: false,
-    meaning: 'Skiff 调试问答面（人工调试子角色；无认证，仅靠 loopback）',
-  },
+  // ⚠️ 面 D（Skiff 调试问答，3099）**已删除**（owner 2026-10-19 令「面板里 Skiff 的内容不要了，
+  //    下掉吧，功能也检查下，应该下掉了」）⇒ 插件自起 listener 从 3 个降为 **2 个**（B 网关 / C 微信发送）。
+  //    🔴 退役的是**调试 HTTP 面**，不是 `skiff.json` 的**轨迹约束面机制**（那个仍在用）。
+  //    ⇒ `MECHANISM_PORTS` 由本表派生，自动少一项 —— 这是"派生而非手抄"的又一次直接收益。
   // ⚠️ 面 E（官方 ACP，端口 3200）**已删除**（owner 2026-10-19 裁「完整删除整个 ACP 的实现」）。
   //    理由实测：`dsh-acp` 无 `session/load`，且 `session/resume` 不回放历史 ⇒ 客户端每次连上
   //    只能新建会话、看不到既有对话（上游 discussion #6324 同证）⇒ 对长期轨迹系统不可接受。
@@ -78,8 +76,7 @@ export const MAIN_WEB_PORT: number = FACE_PORTS.main.port
 export const GATEWAY_PORT: number = FACE_PORTS.gateway.port
 /** 微信主动发送端口默认值（面 C） */
 export const WEIXIN_SEND_PORT: number = FACE_PORTS.weixinSend.port
-/** Skiff 调试页端口默认值（面 D） */
-export const SKIFF_DEBUG_PORT: number = FACE_PORTS.skiffDebug.port
+// ⛔ `SKIFF_DEBUG_PORT` 已随面 D 删除（2026-10-19）。旧配置/旧文档里出现该名 ⇒ 它是历史。
 
 /**
  * **机制端口**词表（output-guard 用：agent 在**用户可见输出**里提及内部端口即打回）。

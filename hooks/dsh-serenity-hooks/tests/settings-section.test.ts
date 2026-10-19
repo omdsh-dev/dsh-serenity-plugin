@@ -36,18 +36,33 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / CRO **on**）', () => {
+  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / CRO **on**）', () => {
     const d = simpleSettingsFromConfig({})
     expect(d).toEqual({
       gatewayEnabled: false,
       rebuildThresholdK: 400,
-      skiffEnabled: false,
-      skiffDebugPort: 3099,
       croEnabled: true,
       diagramEnabled: false,
       // 2026-09-26（P0-1）：机器级 human-channel 搭本结构出（读取入口唯一）；缺省见 human-channel-config.test.ts
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
+  })
+
+  it('🔴 2026-10-19 Skiff 调试面退役回归钉：结构里**不再有** skiff 两键（旧配置残留也不进结构）', () => {
+    // owner 令「面板里 Skiff 的内容不要了，下掉吧」⇒ 3099 调试面整条退役
+    //（装配 + surface/debug.ts + 端口面 + 两个配置键 一起走）。
+    // 用"键在不在"断言（而非 toBeUndefined）——契约是**无该键**，不是"值为 undefined"。
+    for (const key of ['skiffEnabled', 'skiffDebugPort']) {
+      expect(key in simpleSettingsFromConfig({}), `${key} 仍在结构里`).toBe(false)
+    }
+    const stale = simpleSettingsFromConfig({
+      skiffEnabled: true,
+      skiffDebugPort: 4000,
+      skiff: { enabled: true, debugPort: 4000 },
+    } as never)
+    for (const key of ['skiffEnabled', 'skiffDebugPort']) {
+      expect(key in stale, `${key} 被旧配置复活了`).toBe(false)
+    }
   })
 
   it('🔴 2026-10-15 面 E 退役回归钉：结构里**不再有** acp 三键（旧配置残留也不进结构）', () => {
@@ -81,13 +96,10 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     const d = simpleSettingsFromConfig({
       gateway: { enabled: true },
       rebuild: { thresholdK: 500 },
-      skiff: { enabled: true, debugPort: 4000 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
       rebuildThresholdK: 500,
-      skiffEnabled: true,
-      skiffDebugPort: 4000,
       croEnabled: true,
       diagramEnabled: false,
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },

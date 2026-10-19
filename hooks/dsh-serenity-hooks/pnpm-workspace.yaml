@@ -4,6 +4,7 @@
 # 故此项只影响本地 `pnpm install`（本地装机实际走 `dsh-develop deploy`，不经 pnpm）。
 allowBuilds:
   esbuild: true
+  protobufjs: set this to true or false
 minimumReleaseAgeExclude:
   - '@deepseek-ai/dsh-agent-loop@0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.7-rc.1'
   - '@deepseek-ai/dsh-agent-preset-registry@0.1.5-rc.1 || 0.1.5-rc.2 || 0.1.7-rc.1'

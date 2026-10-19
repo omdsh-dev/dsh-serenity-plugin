@@ -1,12 +1,22 @@
 /**
- * WeixinBridgeEditor.tsx — 「微信桥」配置区块（F4c-3，v1.27.0 实验性）
+ * ImBridgeEditor.tsx — 「IM 桥」配置区块（原 `WeixinBridgeEditor`，2026-10-19 泛化）
  *
- * **CCC 级配置**（S142 用户拍板：dsh 一个进程含多个 CCC，每个 CCC 独立对接微信桥）：
+ * ## 为什么改名 + 泛化（R↓，这不是"改个标题"）
+ *
+ * P2 起「微信」与「飞书」是**并列的账号实现**：装配处只认 `account.channel`
+ * （`im/accounts.ts` 的派发表），而账号、路由、会话**全部与渠道无关**。
+ * ⇒ 面板属于"设定账号"这一层，标题若仍叫「微信桥」，第二家 IM 一接上就开始说谎
+ * （**正是 D151 记过的那类失效：引用与口径随别的功能演进失效，且零机械信号**）。
+ *
+ * ⚠️ **扫码绑定是微信独有形态**；飞书走**凭据表单**（appId/appSecret）。
+ * 二者在同一个「IM 桥」块里按账号行的 `channel` 分列。
+ * 判据：**面板不是判据**（施工图 P4 原文），它只负责把统一配置显示出来并可写。
+ *
+ * **CCC 级配置**（S142 用户拍板：dsh 一个进程含多个 CCC，每个 CCC 独立对接 IM 桥）：
  * - 顶部 **CCC 选择器**（数据源 /serenity/cccs——listCccs 复用）——显式选择配置目标，
- *   不隐式依赖"当前活跃会话"（WebUI 顶层全局，微信桥是配置写入必须显式）
- * - 选中 CCC 后：总开关 / 账号列表（扫码绑定）/ 路由表（user → role）
- * - 扫码绑定：POST login-start → qrcode-generator 生成二维码 SVG（复用 v1.24.6 TOTP 同款机制）
- *   → 轮询 /serenity/weixin/login → confirmed 自动写凭据 + 账号元信息
+ *   不隐式依赖"当前活跃会话"（WebUI 顶层全局，IM 桥是配置写入必须显式）
+ * - 选中 CCC 后：总开关 / 账号列表 / 路由表（user → 轨迹编码）
+ * - 扫码绑定（**微信专用**）：POST login-start → qrcode-generator 生成二维码 SVG
  *
  * 全部端点带显式 ccc 参数 + x-serenity-ui 头（服务端校验）。
  */
@@ -21,11 +31,18 @@ interface CccEntry {
   roles: string[]
 }
 
-/** /serenity/weixin GET wire */
-interface WeixinStatusWire {
+/**
+ * /serenity/weixin GET wire。
+ *
+ * ⚠️ **端点名仍是 `weixin`**（路径不是本次改的对象）：它是"IM 桥配置"这个端点的历史名，
+ * 改路径会砸掉正在用的前端与真机验证。（判据：改名类改动要么全链同批，要么不改——
+ * 半改会制造 D151 那种"引用失效且无信号"。本批只改**界面语言**，端点保持。）
+ */
+interface ImStatusWire {
   enabled: boolean
   botType?: string
-  accounts: Array<{ accountId: string; name?: string; enabled: boolean; bound: boolean }>
+  /** `channel` 是账号实现名（`weixin` / `feishu` …）；缺省 ⇒ 后端按 `weixin` 归一 */
+  accounts: Array<{ accountId: string; name?: string; enabled: boolean; bound: boolean; channel?: string }>
   routes: Array<{ user: string; role: string }>
   bridge: Array<{ accountId: string; lastPollAt: number; lastError?: string }>
 }
@@ -41,13 +58,21 @@ function qrSvgFor(content: string): string {
   return qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true })
 }
 
+/** 账号渠道的显示名（未登记的新渠道原样显示，不猜） */
+function channelLabel(channel: string | undefined): string {
+  const c = (channel ?? 'weixin').trim() || 'weixin'
+  if (c === 'weixin') return '微信'
+  if (c === 'feishu') return '飞书'
+  return c
+}
+
 /** 当前工作区 CCC（默认选择器初值：settings 面板无 workspace 参数——服务端 /serenity/weixin 显式 ccc；
  *  选择器默认选第一个；用户手选） */
 
-export function WeixinBridgeEditor(): React.JSX.Element {
+export function ImBridgeEditor(): React.JSX.Element {
   const [cccs, setCccs] = useState<CccEntry[]>([])
   const [selectedRoot, setSelectedRoot] = useState<string>('')
-  const [status, setStatus] = useState<WeixinStatusWire | null>(null)
+  const [status, setStatus] = useState<ImStatusWire | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // 扫码登录状态
@@ -78,7 +103,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
     return () => { alive = false }
   }, [])
 
-  // 选中 CCC 变化 → 拉取该 CCC 微信桥状态
+  // 选中 CCC 变化 → 拉取该 CCC 的 IM 桥状态
   useEffect(() => {
     if (!selectedRoot) return
     let alive = true
@@ -93,7 +118,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
           if (alive) setLoadError(body?.error ?? `HTTP ${res.status}`)
           return
         }
-        const body = (await res.json()) as WeixinStatusWire
+        const body = (await res.json()) as ImStatusWire
         if (!alive) return
         setStatus(body)
         setRoutesDraft(JSON.stringify(body.routes ?? [], null, 2))
@@ -126,7 +151,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
           // 刷新状态显示新账号
           if (selectedRoot) {
             const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
-            const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
+            const sbody = (await sres.json().catch(() => null)) as ImStatusWire | null
             if (alive && sbody) setStatus(sbody)
           }
           return
@@ -182,7 +207,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
       if (!res.ok) return
       // 刷新状态
       const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
-      const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
+      const sbody = (await sres.json().catch(() => null)) as ImStatusWire | null
       if (sbody) setStatus(sbody)
     } catch {
       /* 静默 */
@@ -213,7 +238,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
       setLoadError(null)
       // 刷新
       const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
-      const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
+      const sbody = (await sres.json().catch(() => null)) as ImStatusWire | null
       if (sbody) setStatus(sbody)
     } catch {
       /* 静默 */
@@ -235,7 +260,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
       }
       setLoadError(null)
       const sres = await fetch(`/serenity/weixin?ccc=${encodeURIComponent(selectedRoot)}`, { headers: { accept: 'application/json', 'x-serenity-ui': '1' } })
-      const sbody = (await sres.json().catch(() => null)) as WeixinStatusWire | null
+      const sbody = (await sres.json().catch(() => null)) as ImStatusWire | null
       if (sbody) setStatus(sbody)
     } catch {
       /* 静默 */
@@ -252,16 +277,16 @@ export function WeixinBridgeEditor(): React.JSX.Element {
 
   return (
     <ul className="ss-rows">
-      {/* CCC 选择器（显式配置目标——WebUI 顶层全局，微信桥配置写入必须显式） */}
+      {/* CCC 选择器（显式配置目标——WebUI 顶层全局，IM 桥配置写入必须显式） */}
       <li>
         <div className="ss-rowCard">
           <div className="ss-rowText">
             <span className="ss-rowName">目标 CCC</span>
-            <span className="ss-rowDesc">选择要配置微信桥的认知容器</span>
+            <span className="ss-rowDesc">选择要配置 IM 桥的认知容器</span>
             <span className="ss-help">
               <button type="button" className="ss-helpMark" aria-label="目标 CCC 帮助">?</button>
-              <span className="ss-helpTip">{'微信桥是 CCC 级配置。\n' +
-                '· 一个 dsh 进程可挂多个 CCC，各自独立对接微信桥\n' +
+              <span className="ss-helpTip">{'IM 桥是 CCC 级配置。\n' +
+                '· 一个 dsh 进程可挂多个 CCC，各自独立对接 IM\n' +
                 '· 在这里显式选择目标，不跟随当前会话\n' +
                 '· 各 CCC 的账号、路由、开关互不影响\n' +
                 '· 切换后自动加载该 CCC 的配置'}
@@ -303,15 +328,17 @@ export function WeixinBridgeEditor(): React.JSX.Element {
               <div className="ss-rowText">
                 <span className="ss-rowName">总开关 · 账号（{status.accounts.length}）</span>
                 <span className="ss-rowDesc">
-                  {status.accounts.length === 0 ? '未绑定账号——下方扫码绑定' : status.accounts.map((a) => `${a.accountId}${a.name ? `·${a.name}` : ''}${a.bound ? '✓' : '✗'}`).join('  ')}
+                  {status.accounts.length === 0
+                    ? '未绑定账号——微信可扫码绑定，飞书填凭据'
+                    : status.accounts.map((a) => `${channelLabel(a.channel)}·${a.accountId}${a.bound ? '✓' : '✗'}`).join('  ')}
                 </span>
                 <span className="ss-help">
-                  <button type="button" className="ss-helpMark" aria-label="微信桥总开关帮助">?</button>
-                  <span className="ss-helpTip">{'微信桥总开关。\n' +
-                    '· 开启后该 CCC 开始长轮询收消息（35s）\n' +
-                    '· 前置：至少一个已扫码绑定的账号\n' +
-                    '· 每账号独立轮询；✓ = 已绑定凭据，✗ = 未绑定\n' +
-                    '· 关闭 = 停止全部轮询，零资源占用'}
+                  <button type="button" className="ss-helpMark" aria-label="IM 桥总开关帮助">?</button>
+                  <span className="ss-helpTip">{'IM 桥总开关。\n' +
+                    '· 开启后该 CCC 开始收消息（每个账号各自一条连接）\n' +
+                    '· 前置：至少一个已绑定凭据的账号\n' +
+                    '· 每账号独立连接；✓ = 已绑定凭据，✗ = 未绑定\n' +
+                    '· 关闭 = 停止全部连接，零资源占用'}
                   </span>
                 </span>
               </div>
@@ -331,7 +358,10 @@ export function WeixinBridgeEditor(): React.JSX.Element {
             <li key={a.accountId}>
               <div className="ss-rowCard">
                 <div className="ss-rowText">
-                  <span className="ss-rowName">{a.accountId}{a.name ? ` · ${a.name}` : ''}</span>
+                  <span className="ss-rowName">
+                    <span className="ss-channelTag">{channelLabel(a.channel)}</span>
+                    {a.accountId}{a.name ? ` · ${a.name}` : ''}
+                  </span>
                   <span className="ss-rowDesc">{a.bound ? '已绑定凭据' : '未绑定凭据'}（{bridgeStateText(a.accountId)}）</span>
                 </div>
                 <div className="ss-rowControl">
@@ -403,13 +433,13 @@ export function WeixinBridgeEditor(): React.JSX.Element {
             <div className="ss-rowCard">
               <div className="ss-rowText">
                 <span className="ss-rowName">路由表</span>
-                <span className="ss-rowDesc">微信用户 → skiff 角色（`*` 通配兜底）</span>
+                <span className="ss-rowDesc">IM 用户 → 认知轨迹编码（`*` 通配兜底）</span>
                 <span className="ss-help">
                   <button type="button" className="ss-helpMark" aria-label="路由表帮助">?</button>
-                  <span className="ss-helpTip">{'路由表：微信用户 → skiff 角色映射。\n' +
-                    '· 格式：[{"user": "xxx@im.wechat", "role": "my-role"}, ...]\n' +
-                    '· user = 微信用户 ID（from_user_id）；`*` = 通配兜底\n' +
-                    '· role = 该 CCC 已定义的 skiff.roles 角色名\n' +
+                  <span className="ss-helpTip">{'路由表：IM 用户 → 认知轨迹编码映射。\n' +
+                    '· 格式：[{"user": "xxx@im.wechat", "trajectory": "my-code"}, ...]\n' +
+                    '· user = 该渠道的用户 ID（微信 from_user_id ／ 飞书 open_id）；`*` = 通配兜底\n' +
+                    '· trajectory = 该 CCC 里某条认知轨迹的**编码**（目录名里 `YYYY-MM-DD--<编码>` 那一段）\n' +
                     '· 未命中路由的用户不回复（不暴露机器人）'}
                   </span>
                 </span>
@@ -433,7 +463,7 @@ export function WeixinBridgeEditor(): React.JSX.Element {
           <div className="ss-rowCard">
             <div className="ss-rowText">
               <span className="ss-rowName">加载中…</span>
-              <span className="ss-rowDesc">读取所选 CCC 的微信桥配置</span>
+              <span className="ss-rowDesc">读取所选 CCC 的 IM 桥配置</span>
             </div>
             <div className="ss-rowControl" />
           </div>

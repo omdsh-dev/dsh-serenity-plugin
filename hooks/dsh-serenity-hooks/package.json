@@ -150,6 +150,7 @@
     "@deepseek-ai/dsh-web-fetch-http": "0.1.7-rc.1",
     "@deepseek-ai/dsh-workspace": "0.1.7-rc.1",
     "@deepseek-ai/schemastery": "^3.18.4",
+    "@larksuiteoapi/node-sdk": "^1.76.0",
     "@types/node": "^20.0.0",
     "@types/qrcode-generator": "^1.0.6",
     "@types/react": "^18.2.0",

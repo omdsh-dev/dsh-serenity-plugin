@@ -52,12 +52,15 @@ import { Config } from '../src/index.ts'
  *     那两个测试文件 ⇒ 本表少一格**是预期**，不是漏登记。
  *  🔴 2026-10-19：**新面 E（官方 ACP）整面删除**（owner 裁「完整删除整个 ACP 的实现」）
  *     ⇒ `acpFaceEnabled` / `acpFacePort` 删除 ⇒ 八个 → **六个**。⚠️ 与 10-15 那次退役同形：
- *     **表少两格是预期**，且**旧名与 `acpFace` 名都要继续守着**（下一节有专门的回归钉）。 */
+ *     **表少两格是预期**，且**旧名与 `acpFace` 名都要继续守着**（下一节有专门的回归钉）。
+ *  🔴 2026-10-19（同日后半）：**Skiff 调试面（3099）整条退役**（owner 令「面板里 Skiff 的内容
+ *     不要了，下掉吧，功能也检查下，应该下掉了」）⇒ `skiffEnabled` / `skiffDebugPort` 删除
+ *     ⇒ 六个 → **四个**。⚠️ 第三次同形退役：**表少两格是预期**，旧名继续守着。
+ *     🔴 别与 `skiff.json` 混淆：那是**轨迹约束面机制**（仍在用，且从不在本表里 —— 它住在
+ *     轨迹目录，不是插件级面板键）。 */
 const PANEL_KEYS = [
   'gatewayEnabled',
   'rebuildThresholdK',
-  'skiffEnabled',
-  'skiffDebugPort',
   'croEnabled',
   'diagramEnabled',
 ] as const
@@ -66,8 +69,9 @@ const PANEL_KEYS = [
  *  🔴 v1.51（D104）：新增 `diagram`（缺省关）。**它必须在这里被钉住"不标 volatile"**：
  *  同义键两端都标 ⇒ 面板出现两个互相打架的控件。
  *  🔴 2026-10-15：旧面 E 退役 ⇒ `acp` 嵌套段删除。
- *  🔴 2026-10-19：新面 E 也整面删除 ⇒ `acpFace` 嵌套段随之删除（该面已无任何配置入口）。 */
-const DEPLOY_KEYS = ['gateway', 'rebuild', 'skiff', 'diagram'] as const
+ *  🔴 2026-10-19：新面 E 也整面删除 ⇒ `acpFace` 嵌套段随之删除（该面已无任何配置入口）。
+ *  🔴 2026-10-19（同日后半）：Skiff 调试面退役 ⇒ `skiff` 嵌套段删除（同理，无配置入口）。 */
+const DEPLOY_KEYS = ['gateway', 'rebuild', 'diagram'] as const
 
 /** 取 schema 字典里的一个字段（`z.object` 的 dict；读不到 ⇒ undefined） */
 function field(key: string) {

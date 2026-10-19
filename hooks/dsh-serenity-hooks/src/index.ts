@@ -36,19 +36,18 @@ import { registerVoyageApi } from './surface/voyage/page.js'
 import { registerEnv } from './seams/env.js'
 import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './kernel/ccc.js'
-import { cccRootForCwd, listCccs } from './kernel/ccc-roots.js'
-// C4 块 B：端口只从集中端口表取（默认值不再散写）
-import { MAIN_WEB_PORT, SKIFF_DEBUG_PORT } from './kernel/ports.js'
-import { hostSessions, hostWebServer } from './host/access.js'
+import { cccRootForCwd } from './kernel/ccc-roots.js'
+// C4 块 B：端口只从集中端口表取（默认值不再散写）。
+// ⚠️ 2026-10-19：本文件**不再直接引用任何端口常量** —— 两个消费方都随 Skiff 调试面（3099）退役：
+// `MAIN_WEB_PORT`（原 `readWebPort()` 的回退值）与 `SKIFF_DEBUG_PORT`（原调试面默认端口）。
+// 端口表本身仍保留，`surface/` 各处照旧从 `kernel/ports.ts` 派生。
 import { hostContractReport, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './surface/status.js'
-import { listSkiffProfiles } from './trajectory/policy/profile.js'
 import { registerSettingsSection, readSimpleSettings, SERENITY_SETTINGS_NS } from './surface/settings.js'
 import { registerGateway } from './gateway/server.js'
 import { registerRebuildTurnHook } from './trajectory/rebuild.js'
 import { registerOutputGuardHook } from './guard/seam.js'
 import { migrateLegacyLocalstore, globalConfigPath } from './kernel/config.js'
-import { startSkiffDebugServer, stopSkiffDebugServer } from './surface/debug.js'
 import { registerWakeScheduler } from './wake/scheduler.js'
 import { registerCroTurnTracking } from './cro/turns.js'
 import { registerWeixinBridge } from './im/bridge.js'
@@ -218,10 +217,10 @@ export interface Config {
   //    旧配置残留该键 ⇒ 静默忽略（schemastery 非 strict ⇒ 未声明键不会让旧文档被拒）。
   /** F2 触发阈值（K token；面板层；部署层同义键 = `rebuild.thresholdK`） */
   rebuildThresholdK?: Volatile<number | undefined>
-  /** F4 Skiff 调试服务总开关（面板层；部署层同义键 = `skiff.enabled`） */
-  skiffEnabled?: Volatile<boolean | undefined>
-  /** F4 Skiff 调试端口（面板层；部署层同义键 = `skiff.debugPort`） */
-  skiffDebugPort?: Volatile<number | undefined>
+  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` **已删除**（Skiff 调试面 3099 整条退役）。
+  //    旧配置残留这两个键 ⇒ 静默忽略（schemastery 非 strict），同上面 `rebuildEnabled` 的处置。
+  //    🔴 注意区分：退役的是**调试面**；`skiff.json` 的**轨迹约束面机制**仍在用
+  //    （判据 = `trajectory/policy/profile.ts`），只是它本来就不经这两个键。
   /** CRO（轨迹自编程唤起）总闸（面板层；无部署层同义键；缺省开） */
   croEnabled?: Volatile<boolean | undefined>
   // 🔴 v1.63.3（owner 2026-10-18 裁「砍掉无人值守功能，整个砍掉，已经证实没意义了」）：
@@ -285,7 +284,10 @@ export const Config = z.object({
   // 长期验证下超限重建已能很好地代替上下文压缩 ⇒ 不再需要"整体关掉"这个逃生门。
   // 同族先例 = `wakeSchedulerEnabled`（2026-09-21 砍掉，旧键静默忽略）。
   rebuild: z.object({ thresholdK: z.number().min(50).max(4000).default(400) }),
-  skiff: z.object({ enabled: z.boolean().default(false), debugPort: z.number().min(1024).max(65535).default(SKIFF_DEBUG_PORT) }),
+  // ⛔ 部署层的 `skiff: { enabled, debugPort }` 段已删（Skiff 调试面 3099 整条退役，2026-10-19）。
+  //    两个字段都只喂那个面；旧文档（cordis.yml / profile）里残留该段 ⇒ 静默忽略。
+  //    🔴 与 **`skiff.roles` 不是一个东西**：那段更早（v1.71.0 重做）就已退役，
+  //    而**轨迹约束面**现在住 `<轨迹目录>/skiff.json`，与这里无关。
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
@@ -323,8 +325,8 @@ export const Config = z.object({
   // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` **已砍掉**（超限重建恒开、无闸）。
   // 旧配置里若残留该键 ⇒ **静默忽略**（同 `wakeSchedulerEnabled` 的处置）。
   rebuildThresholdK: z.number().min(50).max(4000).volatile(),
-  skiffEnabled: z.boolean().volatile(),
-  skiffDebugPort: z.number().min(1024).max(65535).volatile(),
+  // ⛔ `skiffEnabled` / `skiffDebugPort` 已删（Skiff 调试面 3099 退役，2026-10-19）。
+  //    旧配置残留 ⇒ 静默忽略；**不写迁移代码**（与 `rebuildEnabled` 同款处置）。
   croEnabled: z.boolean().volatile(),
   // 🔴 v1.63.3：`unattendedEnabled` **已砍掉**（无人值守功能整条退役；owner 判「已经证实没意义」）。
   // 旧配置残留该键 ⇒ 静默忽略（同 `rebuildEnabled` / `wakeSchedulerEnabled` 的处置）。
@@ -465,9 +467,9 @@ export function apply(ctx: Context, config: Config): void {
   // 协议固有（S142 用户原则：任何 CCC 抽象层都是宁静号/ACC）——默认开启不可关、
   // 零配置面，锚定消息与机制参数全部代码固化（旧 serenity.json bootstrap 段 v1.19.5 起忽略）
   registerBootstrap(ctx)
-  // F4 Skiff（v1.25.0 实验性）：调试问答页装配——人工开关（settings skiffEnabled）→
-  // 启动/停止 node:http 调试服务；角色定义归 CCC（skiff.roles）；未开启零资源占用
-  registerSkiff(ctx)
+  // ⛔ F4 Skiff 调试面（v1.25.0 实验性，端口 3099）**已于 2026-10-19 整条退役** ——
+  // owner 令「面板里 Skiff 的内容不要了，下掉吧，功能也检查下，应该下掉了」。
+  // 墓碑与完整边界说明见**本文件最末尾**那一段（删了什么／没删什么／旧配置残留怎么处置）。
   // F4c ACP / F4d 建议问答页（v1.26.0 实验性，**2026-10-15 owner 裁「砍掉外部问答」⇒ 整面退役**）：
   // `acp-core.ts` / `acp-http.ts` / `PublicAskEditor.tsx` 连同本处装配、面板键与配置链**一并删除**。
   // 旧配置里若残留 `acpEnabled`/`acpHttpPort`/`publicAskEnabled`/`acp.*`/`publicAsk.*`
@@ -600,168 +602,33 @@ function registerDiagramTool(ctx: Context): void {
   sync()
 }
 
-/**
- * F4 Skiff 调试服务装配：启停 = 人工（设置面板 Skiff 区块开关，settings 持久化）。
- * settings-changed 事件触发同步（skiffEnabled 开 → 启动调试服务；关 → 停止）。
- * 角色配置（skiff.roles）从当前 CCC 根读取（含 skiff.roles 的 CCC 优先，进程 cwd 次之）。
- *
- * v1.30.13（S142 诊断 D1）：**CCC root 解析失败不再"永不重试"**。旧实现只在 apply 时
- * 同步一次——此刻通常还没有 live 会话，进程 cwd（服务启动目录）也不在 CCC 内 →
- * `resolveSkiffRoot` 返回 null → 打印一行警告后**永不重试**（实证：重启日志
- * `✗ Skiff 调试服务未启动：无法定位 CCC root`，`ss -ltn` 无 3099；同批 ACP 因容忍
- * `root ?? undefined` 而正常启动 —— ⚠️ **该对照已随面 E 退役而失效**（2026-10-15），
- * 但本条记录的**病因与修法不受影响**（Skiff 侧仍是"首次未定位 → 曾永不重试"）。
- *
- * v1.30.14（重启日志实证后的收敛）：**并发启动守卫** + 首次未定位降级为信息级日志。
- *  - 实证（v1.30.13 重启日志）：定时触发与"会话就绪"事件几乎同时到达 → 两次 sync 都
- *    看到 `started === false` → **两次 start**（第一次绑定成功、第二次 `EADDRINUSE` 刷错误日志）。
- *    → 加 `starting` 在飞标志（启动 Promise settle 前不再重复发起）。
- *  - 首次未定位**不是失败**（apply 时无 live 会话是常态）→ 用 `console.log` 说明"等待 live 会话"。
- *
- * v1.35（C2，S142 2026-09-15 Q5）：**退避重试定时器退场**。原形态是 ① 启动同步
- * ② 退避重试（1s/3s/8s/20s/40s） ③ 会话就绪事件再触发。C2 把 CCC 发现面归一后，
- * ② 的病灶（"apply 时刻解析不到根"）改由 **`resolveSkiffRoot` 第 ④ 档（ccc-roots 的
- * **并集**枚举：工作区注册表 ∪ 持久化会话 ∪ live 会话）** 从源头消掉——持久来源不依赖
- * 任何 live 会话，故 apply 时刻就能解析到，不再需要"等一会儿再试"。
- *
- * 🔒 **必须保留**（它们不是"重试"，删了会引入新缺陷）：
- *  - **反应式再触发**（`agent/created` / `session/created` → sync）：宿主重启后
- *    "恢复"旧会话不触发 `session/created`，但**开始对话**会触发 `agent/created`
- *    （v0.1.7 前名 `agent/session-start`）——这是唯一能把"进程起来时还解析不到、稍后才有会话"
- *    这条路径接上的通道。
- *  - **`starting` 在飞标志**：防同拍双次 start → `EADDRINUSE`。
- *    （C4 块 A 备注：面宿主亦按面名合并在飞启动，是第二道保险；**本标志仍保留**——
- *    它管的是"解析 root 这段装配流程"的在飞语义，且调试服务的启动替身在测试里被 mock，
- *     面宿主的 active 表在那种场景下为空，不能当作 `started` 的替代。）
- *  - **`informedRoot` 信息级日志**（只报一次，不刷屏）、`serenity/settings-changed` 监听、
- *    启动时那次 `sync()`。
- */
-function registerSkiff(ctx: Context): void {
-  let started = false
-  let starting = false
-  let informedRoot = false
-  /** 已解析到的根（成功后缓存，避免每次 sync 重复解析） */
-  let resolvedRoot: string | null = null
-
-  const sync = async (): Promise<void> => {
-    const s = readSimpleSettings()
-    if (s.skiffEnabled) {
-      if (started || starting) return
-      // ⚠️ 在飞标志**必须在任何 await 之前**置起（同步段内）——否则同一 tick 内的
-      // 第二个触发（事件 + 启动）会穿过守卫 → 双次 start → EADDRINUSE（原同步实现
-      // 天然没有这个窗口，改 async 后必须显式保住）。
-      starting = true
-      try {
-        const root = resolvedRoot ?? (await resolveSkiffRoot(ctx))
-        if (!root) {
-          if (!informedRoot) {
-            informedRoot = true
-            // 信息级（非失败）：apply 阶段无 live 会话是常态；会话就绪事件会接手再试
-            console.log(
-              '[serenity-hooks] Skiff 调试服务等待 CCC root（此刻无已知 CCC；会话就绪即试）',
-            )
-          }
-          return
-        }
-        resolvedRoot = root
-        const webPort = readWebPort(ctx)
-        await startSkiffDebugServer(ctx, root, s.skiffDebugPort, webPort)
-        started = true
-      } catch (err) {
-        console.error(`[serenity-hooks] ✗ Skiff 调试服务启动失败: ${String((err as Error)?.message ?? err)}`)
-      } finally {
-        starting = false
-      }
-      return
-    }
-    // 关闭状态：清掉在飞态（避免关开关后仍起服务）
-    if (started) {
-      stopSkiffDebugServer()
-      started = false
-    }
-    resolvedRoot = null
-    informedRoot = false
-  }
-
-  try {
-    ctx.on('serenity/settings-changed', () => {
-      void sync()
-    })
-  } catch {
-    /* 事件通道缺失不阻断（启动时 sync 仍执行） */
-  }
-  // 反应式再触发：live 会话就绪是"CCC root 现在可解析"的强信号（重启后会话恢复、用户开始对话）
-  // ⚠️ v0.1.7：`agent/session-start` → `agent/created`（serial ⇒ 处理函数只做同步判断，不 await）
-  for (const eventName of ['agent/created', 'session/created'] as const) {
-    try {
-      ctx.on(eventName, () => {
-        if (!started) void sync()
-      })
-    } catch {
-      /* 事件通道缺失不阻断（settings-changed 与启动 sync 仍兜底） */
-    }
-  }
-  // 启动时同步一次（settings.yaml 持久化 skiffEnabled=true → 重启后自动恢复调试服务）
-  void sync()
-}
-
-/**
- * 解析 Skiff 调试服务绑定的 CCC 根（v1.25.2 用户指出：skiff 必须绑定 CCC）：
- * ① live 会话中**配置了 skiff.roles 的 CCC 优先**（用户认知中的绑定目标）
- * ② 回退进程 cwd 上溯 .serenity
- * ③ 再回退任一 live 会话的 CCC
- * ④ **（v1.35 / C2 新增）ccc-roots 枚举出的 CCC——仅在唯一候选时采用**
- *
- * 第 ④ 档为什么存在：①②③ 全部依赖 live 会话或进程 cwd；宿主重启、浏览器尚未重连时
- * 三者可能同时落空，而 `ccc-roots.listCccs` 的**持久来源**（工作区注册表 / 持久化会话）
- * 不依赖 live 会话 ⇒ 这正是"apply 时刻就能解析到根"的那条路，也是退避重试定时器
- * 得以退场的原因。
- *
- * ④ 的收敛条件（**不猜**）：只在候选**唯一**时采用；多个候选 → 返回 `null`
- * （留着让 ①②③ 的语义与人类的显式选择决定，不代替人拍板）。
- *
- * ⚠️ ①②③ 的**逐条优先级不变**；④ 只追加在末尾。
- */
-async function resolveSkiffRoot(ctx: Context): Promise<string | null> {
-  const liveRoots: string[] = []
-  try {
-    const sessions = hostSessions(ctx)
-    for (const s of sessions?.list?.() ?? []) {
-      const cwd = s?.header?.cwd
-      if (typeof cwd === 'string') {
-        const r = cccRootForCwd(cwd)
-        if (r && !liveRoots.includes(r)) liveRoots.push(r)
-      }
-    }
-  } catch {
-    /* 遍历失败忽略 */
-  }
-  // ① 有 skiff 轨迹的 live CCC 优先（绑定用户确实在用 skiff 的 CCC）
-  // 🔴 2026-10-19：数据源从 `skiff.roles` 改为扫轨迹的 `skiff.json`。
-  for (const r of liveRoots) {
-    if (listSkiffProfiles(r).length > 0) return r
-  }
-  // ② 进程 cwd（服务器启动目录通常即 CCC）
-  const fromCwd = cccRootForCwd(process.cwd())
-  if (fromCwd) return fromCwd
-  // ③ 任一 live CCC
-  if (liveRoots[0]) return liveRoots[0]
-  // ④ 持久来源兜底（仅唯一候选；多个候选保持 null —— 不猜）
-  try {
-    const entries = await listCccs(ctx)
-    if (entries.length === 1) return entries[0]!.root
-  } catch {
-    /* 枚举失败忽略（等价于本档不存在） */
-  }
-  return null
-}
-
-/** 主 WebUI 端口（WebUI 链接；webServer 未装配回退集中端口表的 main 面端口） */
-function readWebPort(ctx: Context): number {
-  try {
-    const ws = hostWebServer(ctx)
-    return typeof ws?.port === 'number' ? ws.port : MAIN_WEB_PORT
-  } catch {
-    return MAIN_WEB_PORT
-  }
-}
+// ⛔ 【2026-10-19 整条退役】F4 Skiff 调试服务（面 D / 端口 3099）已删除。
+//
+// owner 令（逐字）：「面板里 Skiff 的内容不要了，下掉吧，功能也检查下，应该下掉了」
+//
+// ── 删了什么 ────────────────────────────────────────────────────────────────
+//   · 装配：`registerSkiff()`（连同它依赖的 `resolveSkiffRoot` 与 `readWebPort`，两者只为它服务）
+//   · 面本体：`surface/debug.ts` 整文件（原 `role/skiff/debug.ts`，S11 搬来）：listener/路由/HTML
+//   · 配置键：`skiffEnabled` / `skiffDebugPort`（provenance 见 `surface/settings.ts`）
+//   · 界面：设置面板「Skiff 调试」行（`client/SettingsSection.tsx`）
+//
+// ── ⚠️ 没有删什么（这个区分是本次最重要的一条）─────────────────────────────────
+//   `skiff.json` 那套**轨迹约束面机制**（工具白名单 / 模型 / 纪律参与项）**仍在用**：
+//     · 判据与读盘 = `trajectory/policy/profile.ts`（`skiffProfileForSession`）
+//     · 施加点     = `seams/guards.ts`（工具面收窄）、`seams/keeper.ts`（纪律）
+//   ⇒ 退役的是"一个调试 HTTP 面"，**不是**"skiff 这个约束面"。
+//   两者同名不是同一件事：面是给人手工问答用的窗口，约束面是轨迹自己的能力边界。
+//
+// ── 旧配置残留 ──────────────────────────────────────────────────────────────
+//   `skiffEnabled` / `skiffDebugPort` 写了也不认（schemastery 非 strict ⇒ 静默忽略），
+//   与 `rebuildEnabled` / `wakeSchedulerEnabled` / `acpEnabled` 同款处置，**不写迁移代码**。
+//
+// ── 为什么整段删而不是留空壳 ────────────────────────────────────────────────
+//   留壳会让下一个人以为"开关还在、只是没接"，而它其实**已经没有实现面**了。
+//   本轨判据：**留死行比删更坏**（它会在下次出现同名模块时静默豁免）。
+//
+// ── 历史（供追溯，不再是活文档）──────────────────────────────────────────────
+//   该面曾解决两个真缺陷：v1.30.13「CCC root 解析失败永不重试」与
+//   v1.30.14「同拍双次 start → EADDRINUSE」。两个缺陷的修法形态（反应式再触发 /
+//   在飞标志 / 持久来源兜底）随面退役而**失效**，教训已登记在维护 skill 的
+//   `references/55-criteria-discipline.md`。

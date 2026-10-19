@@ -116,22 +116,26 @@ describe('output-guard: 检测（detectSensitive）', () => {
 
   it('回答含内部端口 → 命中（分类 port，v1.26.11）', () => {
     const t = buildSensitiveTable(dir)
-    // ⚠️ 2026-10-15：原用 3100 举例，该面（面 E）已退役 ⇒ 改用仍在役的 3099（Skiff 调试面）。
+    // ⚠️ 2026-10-15：原用 3100 举例，该面（旧面 E）已退役 ⇒ 曾改用 3099。
+    // ⚠️ 2026-10-19：**3099（Skiff 调试面）也退役了** ⇒ 改用**仍在役**的 3081（网关面）。
     //    判据不变：在役内部端口出现在用户可见输出里必须被打回。
-    expect(detectSensitive('端口 3099 提供服务', t)).toContainEqual({ word: '3099', category: 'port' })
+    //    🔴 三次换例子都只因"例子所在的面退了"，不是因为判据变了 —— 这正是本用例的正确演化方式。
+    expect(detectSensitive('端口 3081 提供服务', t)).toContainEqual({ word: '3081', category: 'port' })
   })
 
   it('🔴 C4 块 B 缺陷修复：3082（微信发送面，默认开）也在守卫端口集合内', () => {
     // 修复前 MECHANISM_PORTS 硬写 ['3080','3081','3099','3100']——漏 3082 ⇒ 提 3082 不被打回。
     // 现由集中端口表派生（kernel/ports.ts），本断言钉住"守卫端口集合 = 各面端口"。
-    // ⚠️ 2026-10-15：面 E（3100）退役 ⇒ 期望集合由五项改四项；3082 那条**判据不变**（它是本用例的主题）。
+    // ⚠️ 2026-10-15：面 E（3100）退役 ⇒ 期望集合由五项改四项。
+    // ⚠️ 2026-10-19：面 D（3099）退役 ⇒ 期望集合再改三项；**3082 那条判据不变**（它是本用例的主题）。
     const t = buildSensitiveTable(dir)
-    for (const port of ['3080', '3081', '3082', '3099']) {
+    for (const port of ['3080', '3081', '3082']) {
       expect(t.portWords, `守卫端口词表缺 ${port}`).toContain(port)
       expect(detectSensitive(`服务监听在 ${port}`, t), `${port} 未被守卫识别`).toContainEqual({ word: port, category: 'port' })
     }
-    // 负控：已退役的 3100 不该再被当内部端口（否则守的是个不存在的面）
+    // 负控：已退役的 3100 / 3099 不该再被当内部端口（否则守的是个不存在的面）
     expect(t.portWords, '已退役的 3100 仍在守卫词表里').not.toContain('3100')
+    expect(t.portWords, '已退役的 3099 仍在守卫词表里').not.toContain('3099')
   })
 
   it('空文本 → 无命中', () => {
