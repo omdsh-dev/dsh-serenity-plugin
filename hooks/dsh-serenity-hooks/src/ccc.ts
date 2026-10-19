@@ -198,16 +198,8 @@ interface SerenityConfig {
    * 未配置或 enabled=false → 该 CCC 桥完全不启动（零资源占用）。
    */
   weixin?: WeixinSettings;
-  /**
-   * IM 通道选择（v1.59.0，owner 2026-10-17 令）：
-   * 「将微信桥升级为 IM 桥，每个 CCC 可以选择微信实现或 ACP 实现，微信实现保留不变向前兼容，
-   *  ACP 实现就可以暴露端口并绑定 skiff，并且要随即生成认证用的 token」。
-   *
-   * 🔴 **缺省 = weixin**（未配置的 CCC 行为与今天**逐字相同**）⇒ 向前兼容由**缺省值**保证，
-   *    不靠代码分支。选 `acp` 时该 CCC 的入站改走 ACP 面（面 E，端口 3200）；
-   *    其 `weixin.*` 段**保留**（向前兼容），但**不再驱动入站**；出站 `im-bridge` 不受影响。
-   */
-  im?: ImSettings;
+  // ⚠️ `im?: ImSettings`（IM 通道选择，v1.59.0）**已删除** —— 随面 E（官方 ACP）整面退役，
+  //    IM 入站只剩微信一种实现，"选通道"失去意义。旧配置残留 ⇒ 静默忽略。
   /**
    * 专属工具声明（v1.33，S142 §32.11）：**ACC 注册但默认对所有 CCC 隐藏**的工具，
    * 只有在自己这里声明的 CCC 可见（例：`["acc-diag"]` = ACC 负责人的运行态诊断）。
@@ -283,61 +275,10 @@ export interface WeixinSettings {
   fallbackOnNoSend?: boolean;
 }
 
-/**
- * IM 通道选择（CCC 级；v1.59.0，owner 2026-10-17 令）。
- *
- * 归属判据（D23「改它要不要发版」）：**选哪个通道、绑哪个角色 = CCC 的数据** ⇒ 归此处；
- * **怎么校验 token、怎么把 ACP 会话套上角色 = 机制** ⇒ 归 ACC 源码。
- */
-export interface ImSettings {
-  /**
-   * 入站通道选择。`"weixin"`（**缺省**，＝现状）｜ `"acp"`。
-   *
-   * 🔴 **缺省值即向前兼容**：不写这一项（或整个 `im` 段不存在）的 CCC，行为与升级前逐字相同。
-   * ⚠️ **只影响入站**（谁来驱动本 CCC 的 agent）；**出站**（`im-bridge` 工具发送）不受本项影响。
-   */
-  channel?: 'weixin' | 'acp';
-  /** ACP 通道参数（仅 `channel: "acp"` 时有意义） */
-  acp?: ImAcpSettings;
-}
-
-/** ACP 通道参数（CCC 级） */
-export interface ImAcpSettings {
-  /**
-   * 该 CCC 的 ACP 面开关（**与 `channel: "acp"` 是「与」关系**：两者都真才算启用）。
-   * 缺省 false。
-   */
-  enabled?: boolean;
-  /**
-   * **账户声明 —— 必填**（v1.59.1，owner 2026-10-17 令「token 生成和 skiff 绑定都做配置上」）。
-   *
-   * 🔴 **声明式，照 `weixin.accounts[]` 的形态**：结构（账户与角色）放本文件，
-   *    凭据（token）由 `accountId` 派生键 `IM_ACP_TOKEN_<ACCOUNT_ID>` 落 localstore。
-   *
-   * 判据（关键）：**配置是真相源，localstore 只是它的派生凭据**。
-   *   声明了账户却还没有 token ⇒ **下次判定前当场生成**（不依赖启动那一次）。
-   *   撤销账户 ⇒ 该账户的 token **不再被接受**（即使 localstore 里还留着，也只是死键）。
-   *
-   * ⚠️ **没有简写退回**：不写本项 ⇒ **一个账户都没有 ⇒ 谁都认证不了**。
-   *    刻意如此 —— 多一条永不生效的简写分支，只会把"配置写错了"伪装成"用了简写"。
-   */
-  accounts?: ImAcpAccount[];
-}
-
-/** ACP 账户声明（一台客户端一条；形状对齐 `weixin.accounts[]`） */
-export interface ImAcpAccount {
-  /**
-   * 本地唯一键（如 `agmente-phone`；凭据键 `IM_ACP_TOKEN_<ACCOUNT_ID>`）。
-   * ⚠️ 归一为 **UPPER_SNAKE**（`agmente-phone` → `AGMENTE_PHONE`），与微信桥同规则。
-   */
-  accountId: string;
-  /** 该账户绑定的 skiff 角色名（**必须 ∈ `skiff.roles`**；缺省 ＝ 拒绝该账户） */
-  role?: string;
-  /** 该账户开关（缺省 true）——撤一台设备用它，不必删条目 */
-  enabled?: boolean;
-  /** 展示名（可选，仅用于诊断面） */
-  name?: string;
-}
+// ⚠️ `ImSettings` / `ImAcpSettings` / `ImAcpAccount` **已删除**
+//    （owner 2026-10-19 裁「完整删除整个 ACP 的实现」，见 `2026-10-19 ACP 整面退役`）。
+//    IM 入站通道只剩微信一种实现 ⇒ "选通道"这个选择器本身失去意义，一并移除。
+//    旧配置里残留的 `im: { channel: "acp", acp: {…} }` ⇒ **静默忽略**（schemastery 非 strict）。
 
 /** 微信桥账号配置（serenity.json 内；凭据部分在 localstore） */
 export interface WeixinAccountConfig {

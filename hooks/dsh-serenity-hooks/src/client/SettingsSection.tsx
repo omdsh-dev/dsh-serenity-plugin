@@ -27,7 +27,6 @@ import type { InjectFace } from '@deepseek-ai/dsh-client-ui-slots'
 import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-settings/client'
 import { useEffect, useState } from 'react'
 import { AccountsEditor } from './AccountsEditor.js'
-import { AcpAccountsEditor } from './AcpAccountsEditor.js'
 import { PersonaEditor } from './PersonaEditor.js'
 import { WeixinBridgeEditor } from './WeixinBridgeEditor.js'
 import './SettingsSection.css'
@@ -45,11 +44,7 @@ export interface SerenitySimpleWire {
   /** diagram 工具总开关：agent 给一段标签式源码，进程内光栅化成 PNG 并贴进对话
    *  （不借浏览器；实验性 demo，缺省关） */
   diagramEnabled?: boolean
-  /** 面 E：官方 ACP 面总开关（缺省关）。
-   *  ⚠️ 它只管「端口开不开」；哪个 CCC 用 ACP 通道在该 CCC 的 `im.channel` 里配（D23）。 */
-  acpFaceEnabled?: boolean
-  /** 面 E 端口（缺省 3200；避开 3080/3081/3082/3099） */
-  acpFacePort?: number
+  // ⚠️ `acpFaceEnabled` / `acpFacePort` **已删除**（owner 2026-10-19 裁整面移除 ACP）。
 }
 
 /** 本 section 的注入面（apply 闭包提供表单源与写回调；组件不含任何订阅机制） */
@@ -189,7 +184,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const skiffPort = value?.skiffDebugPort ?? 3099
   const croOn = value?.croEnabled ?? true // 缺省开（与 schema 一致）
   const diagramOn = value?.diagramEnabled ?? false // 缺省关（与 schema 一致；D104）
-  const acpFaceOn = value?.acpFaceEnabled ?? false // 缺省关（与 schema 一致；安全：协议无认证）
 
   // 需求②：可展开行受控状态（默认网关/重建/问答页展开——首个详设可见引导用户理解）
   const [openGateway, setOpenGateway] = useState(false)
@@ -197,7 +191,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
   const [openSkiff, setOpenSkiff] = useState(false)
   const [openCro, setOpenCro] = useState(false)
   const [openDiagram, setOpenDiagram] = useState(false)
-  const [openAcpFace, setOpenAcpFace] = useState(false)
 
   return (
     <div className="ss-section">
@@ -329,27 +322,6 @@ export function SettingsSection(props: SettingsSectionProps): React.JSX.Element 
       {/* 工具（D104，2026-09-29 owner 具名令）：图（diagram）—— 实验性 demo，默认关；
           关时工具**根本不注册**（模型看不到它），开时 agent 给源码即出图 */}
       <Group title="工具">
-        <li>
-          <RowCard
-            title="ACP 面（官方 ACP，默认 3200）"
-            desc="让标准 ACP 客户端（如 Agmente）连进本机；每账户一枚 token 把关（默认关）"
-            expandable
-            open={openAcpFace}
-            onToggle={setOpenAcpFace}
-            control={<Toggle checked={acpFaceOn} onChange={(on) => toggle('acpFaceEnabled', on)} />}
-            detail={
-              <div className="ss-detailStack">
-                <p className="ss-detailIntro">{'把官方 @deepseek-ai/dsh-acp 挂进本进程，标准 ACP 客户端经 WebSocket 登入本机。\n' +
-                  '· 与微信桥的关系：两者是入站通道的两个实现，每个 CCC 二选一（在 CCC 的 .opencode/serenity.json 里配 im.channel）。本开关只管端口开不开\n' +
-                  '· 🔴 认证：本面绑 0.0.0.0，而 ACP 协议本身不做认证 ⇒ 由 ACC 在握手前用每账户一枚 token（localstore 键 IM_ACP_TOKEN_<账户ID>）把关；没配账户的 CCC 一律连不上\n' +
-                  '· 账户在下面那张表里管（加设备／看指纹／轮换／删除），不必改 JSON 或手敲命令\n' +
-                  '· ⚠️ 明文 ws:// ⇒ 局域网内可抓包；上公网必须走 wss ＋ Cloudflare Access'}
-                </p>
-                <AcpAccountsEditor />
-              </div>
-            }
-          />
-        </li>
         <li>
           <RowCard
             title="图（diagram）"

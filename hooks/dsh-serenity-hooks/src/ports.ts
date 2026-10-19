@@ -21,8 +21,8 @@
  * （默认值）、settings-section（面板默认）、index（Config 默认）都可安全引用而不引入依赖环。
  */
 
-/** 面标识（五个对外面；A 由宿主监听，B/C/D/E 由本插件监听） */
-export type FaceId = 'main' | 'gateway' | 'weixinSend' | 'skiffDebug' | 'acp'
+/** 面标识（四个对外面；A 由宿主监听，B/C/D 由本插件监听） */
+export type FaceId = 'main' | 'gateway' | 'weixinSend' | 'skiffDebug'
 
 /** 一个面的端口语义 */
 export interface PortSpec {
@@ -39,7 +39,7 @@ export interface PortSpec {
 /**
  * 集中端口表。
  * A=宿主主面（插件不监听）/ B=网关（可配，默认关）/ C=微信发送（默认开，仅 loopback）
- * / D=Skiff 调试（默认关）/ E=ACP（默认关，`0.0.0.0`）。
+ * / D=Skiff 调试（默认关）。
  */
 export const FACE_PORTS: Readonly<Record<FaceId, PortSpec>> = {
   main: {
@@ -66,26 +66,10 @@ export const FACE_PORTS: Readonly<Record<FaceId, PortSpec>> = {
     defaultEnabled: false,
     meaning: 'Skiff 调试问答面（人工调试子角色；无认证，仅靠 loopback）',
   },
-  /**
-   * 🔴 面 E：**官方 ACP 面**（2026-10-16，owner 令「跑在 dsh web 进程内」→ 已实测跑通）。
-   *
-   * 与已退役的**旧面 E（3100）不是一回事**，别混淆：
-   *  · 旧面 E = 当年**自造**的 HTTP＋HTML 问答面，2026-10-15 owner 裁「砍掉外部问答」时**整组退役**；
-   *  · 本面 = **官方 `@deepseek-ai/dsh-acp`**（官方 SDK ＋ 现成客户端 Agmente），
-   *    且**跑在宿主 web 进程内**（不另起进程、不需要 stdio 桥）。
-   *  ⇒ 端口**另选 3200**：既避开 3080/3081/3082/3099，也让"新旧一眼可分"。
-   *
-   * ⚠️ **安全边界（不许含混）**：**ACP 协议本身不做认证**（`dsh-acp` 的 `authenticate` 恒成功），
-   * 而本面按 owner 裁决绑 **`0.0.0.0`**（局域网内任何设备可连）⇒ **必须靠外部接入层兜底**
-   * （现为 Cloudflare Access）。⛔ **"隧道不是 ACC 该关心的事"（Q3 裁决）成立，但
-   * "所以不需要认证层"不成立** —— 交付文档与诊断输出里都要显式带这个前提。
-   */
-  acp: {
-    port: 3200,
-    host: '0.0.0.0',
-    defaultEnabled: false,
-    meaning: '官方 ACP 面（Agmente 等标准客户端登入本 CCC；**协议无认证**，靠外部 Access 兜底）',
-  },
+  // ⚠️ 面 E（官方 ACP，端口 3200）**已删除**（owner 2026-10-19 裁「完整删除整个 ACP 的实现」）。
+  //    理由实测：`dsh-acp` 无 `session/load`，且 `session/resume` 不回放历史 ⇒ 客户端每次连上
+  //    只能新建会话、看不到既有对话（上游 discussion #6324 同证）⇒ 对长期轨迹系统不可接受。
+  //    ⇒ `MECHANISM_PORTS` 由本表派生，自动少一项（这正是"派生而非手抄"的收益）。
 }
 
 /** 宿主主 WebUI 端口（面 A：插件**不监听**，只读取；`readWebPort` 的回退值） */
@@ -96,8 +80,6 @@ export const GATEWAY_PORT: number = FACE_PORTS.gateway.port
 export const WEIXIN_SEND_PORT: number = FACE_PORTS.weixinSend.port
 /** Skiff 调试页端口默认值（面 D） */
 export const SKIFF_DEBUG_PORT: number = FACE_PORTS.skiffDebug.port
-/** 官方 ACP 面端口默认值（面 E，2026-10-16） */
-export const ACP_PORT: number = FACE_PORTS.acp.port
 
 /**
  * **机制端口**词表（output-guard 用：agent 在**用户可见输出**里提及内部端口即打回）。

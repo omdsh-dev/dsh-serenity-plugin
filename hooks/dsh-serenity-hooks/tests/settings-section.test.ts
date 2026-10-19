@@ -36,7 +36,7 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(SERENITY_SETTINGS_NS).toBe('serenity-hooks')
   })
 
-  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / CRO **on** / ACP 面 off 3200）', () => {
+  it('空 Config → 全部内建缺省（gateway off / rebuild 400K / skiff off 3099 / CRO **on**）', () => {
     const d = simpleSettingsFromConfig({})
     expect(d).toEqual({
       gatewayEnabled: false,
@@ -45,9 +45,6 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       skiffDebugPort: 3099,
       croEnabled: true,
       diagramEnabled: false,
-      // 2026-10-16 新面 E（官方 ACP）：**缺省关** ＋ 端口 3200（`FACE_PORTS.acp`，非硬写）
-      acpFaceEnabled: false,
-      acpFacePort: 3200,
       // 2026-09-26（P0-1）：机器级 human-channel 搭本结构出（读取入口唯一）；缺省见 human-channel-config.test.ts
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
@@ -85,7 +82,6 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       gateway: { enabled: true },
       rebuild: { thresholdK: 500 },
       skiff: { enabled: true, debugPort: 4000 },
-      acpFace: { enabled: true, port: 3300 },
     })
     expect(d).toEqual({
       gatewayEnabled: true,
@@ -94,9 +90,6 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
       skiffDebugPort: 4000,
       croEnabled: true,
       diagramEnabled: false,
-      // 2026-10-16：面 E 的部署段同义键 = `acpFace`（与旧面 E 的 `acp` **刻意不同名**）
-      acpFaceEnabled: true,
-      acpFacePort: 3300,
       humanChannel: { accounts: [], subscriptions: [], relayCcc: null, sendingAllow: ['*'] },
     })
   })
@@ -140,16 +133,20 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     expect(simpleSettingsFromConfig({ diagram: { enabled: true }, diagramEnabled: false }).diagramEnabled).toBe(false)
   })
 
-  it('🆕 面 E acpFace：面板层 > 部署层，且两端都缺省**关**（安全：协议无认证）', () => {
-    expect(simpleSettingsFromConfig({}).acpFaceEnabled).toBe(false) // 缺省关
-    expect(simpleSettingsFromConfig({ acpFace: { enabled: true } }).acpFaceEnabled).toBe(true) // 部署层
-    // 面板层为真 ⇒ 压过部署层的 false
-    expect(simpleSettingsFromConfig({ acpFace: { enabled: false }, acpFaceEnabled: true }).acpFaceEnabled).toBe(true)
-    // 面板层为假 ⇒ 压过部署层的 true（两个方向都钉）
-    expect(simpleSettingsFromConfig({ acpFace: { enabled: true }, acpFaceEnabled: false }).acpFaceEnabled).toBe(false)
-    // 端口：缺省 3200，部署层可覆盖
-    expect(simpleSettingsFromConfig({}).acpFacePort).toBe(3200)
-    expect(simpleSettingsFromConfig({ acpFace: { port: 3300 } }).acpFacePort).toBe(3300)
+  it('🔴 2026-10-19 面 E 整面删除回归钉：结构里**不再有** acpFace 两键（旧配置残留也不进结构）', () => {
+    // owner 裁「完整删除整个 ACP 的实现」（实测理由：dsh-acp 无 session/load 且 resume 不回放历史
+    // ⇒ 客户端每次连上只能新建会话）。用"键在不在"断言（而非 toBeUndefined）——契约是**无该键**。
+    for (const key of ['acpFaceEnabled', 'acpFacePort']) {
+      expect(key in simpleSettingsFromConfig({}), `${key} 仍在结构里`).toBe(false)
+    }
+    const stale = simpleSettingsFromConfig({
+      acpFace: { enabled: true, port: 3300 },
+      acpFaceEnabled: true,
+      acpFacePort: 3300,
+    } as never)
+    for (const key of ['acpFaceEnabled', 'acpFacePort']) {
+      expect(key in stale, `${key} 被旧配置复活了`).toBe(false)
+    }
   })
 
   it('defaultSimpleSettings 与空 Config 一致', () => {

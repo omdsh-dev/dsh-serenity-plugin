@@ -49,7 +49,10 @@ import { Config } from '../src/index.ts'
  *     本表**不含**旧名是**判据的一部分**（下一节有条专门的回归钉）。
  *  🔴 2026-10-18（v1.63.3）：**无人值守整条退役**（owner 裁「已经证实没意义了」）⇒ `unattendedEnabled`
  *     删除 ⇒ 九个 → **八个**。⚠️ 同批消失的还有 `unattended-ops.ts` / `unattended-seam.ts` 与
- *     那两个测试文件 ⇒ 本表少一格**是预期**，不是漏登记。 */
+ *     那两个测试文件 ⇒ 本表少一格**是预期**，不是漏登记。
+ *  🔴 2026-10-19：**新面 E（官方 ACP）整面删除**（owner 裁「完整删除整个 ACP 的实现」）
+ *     ⇒ `acpFaceEnabled` / `acpFacePort` 删除 ⇒ 八个 → **六个**。⚠️ 与 10-15 那次退役同形：
+ *     **表少两格是预期**，且**旧名与 `acpFace` 名都要继续守着**（下一节有专门的回归钉）。 */
 const PANEL_KEYS = [
   'gatewayEnabled',
   'rebuildThresholdK',
@@ -57,16 +60,14 @@ const PANEL_KEYS = [
   'skiffDebugPort',
   'croEnabled',
   'diagramEnabled',
-  'acpFaceEnabled',
-  'acpFacePort',
 ] as const
 
 /** 部署层（嵌套段）——**不是**用户可改字段，与面板层是同一份数据的两种拼写
  *  🔴 v1.51（D104）：新增 `diagram`（缺省关）。**它必须在这里被钉住"不标 volatile"**：
  *  同义键两端都标 ⇒ 面板出现两个互相打架的控件。
  *  🔴 2026-10-15：旧面 E 退役 ⇒ `acp` 嵌套段删除。
- *  🔴 2026-10-16：新面 E 上线 ⇒ 新增 `acpFace`（**与旧 `acp` 不同名**，同上判据）。 */
-const DEPLOY_KEYS = ['gateway', 'rebuild', 'skiff', 'diagram', 'acpFace'] as const
+ *  🔴 2026-10-19：新面 E 也整面删除 ⇒ `acpFace` 嵌套段随之删除（该面已无任何配置入口）。 */
+const DEPLOY_KEYS = ['gateway', 'rebuild', 'skiff', 'diagram'] as const
 
 /** 取 schema 字典里的一个字段（`z.object` 的 dict；读不到 ⇒ undefined） */
 function field(key: string) {
@@ -113,26 +114,26 @@ describe('config-volatile: 设置面板层各键必须标 .volatile()（0.1.7 �
 })
 
 /**
- * 🔴 **旧面 E 的名字守卫**（2026-10-16 新增，随"新面 E 上线"一起立）。
+ * 🔴 **面 E 的名字守卫**（2026-10-16 立，"新面 E 上线"时写的；2026-10-19 整面删除后**继续守**）。
  *
- * **为什么值得一条独立 pin**：owner 2026-10-15 裁「砍掉外部问答」⇒ 旧面 E（自造 HTTP＋HTML）
- * 整组退役，其三个键进"静默忽略"状态（schemastery 非 strict ⇒ 旧配置里的残留键**不会报错**）。
- * 而 2026-10-16 owner 又令做**新面 E**（官方 ACP，跑在 web 进程内）—— **两者名字极像**。
+ * **为什么留着它**：owner 2026-10-15 裁「砍掉外部问答」⇒ 旧面 E（自造 HTTP＋HTML）整组退役，
+ * 其三个键进"静默忽略"状态（schemastery 非 strict ⇒ 旧配置里的残留键**不会报错**）。
+ * 2026-10-16 owner 又令做**新面 E**（官方 ACP），用了 `acpFace*` 这组新名以避开旧名；
+ * 2026-10-19 owner 再裁「完整删除整个 ACP 的实现」⇒ **两组名字现在都无主**。
  *
- * ⇒ 若新面复用了旧名（`acpEnabled` / `acpHttpPort`），会有**两个真实后果**：
- *   ① **旧配置复活**：当年那份 `acpEnabled: true` 会**静默打开新面**（用户从没同意过）；
- *   ② **退役不彻底**：面板上"消失又出现"的同一字段，读起来像 bug 而非新功能。
  * ⇒ 判据：**退役的是功能，名字必须继续守着**（"无人读"要能被机械验证，不能靠人记得）。
+ * 两个失效方向都要挡：① 旧名复活 ⇒ 当年那份 `acpEnabled: true` 会静默打开一个已不存在的面；
+ * ② 新名残留 ⇒ 配置面写着一个已删功能的开关，用户改了却什么都不会发生。
  */
-describe('config-volatile: 旧面 E（自造问答面）的名字不得被新面复用', () => {
-  it('🔴 旧面 E 的三个键**不在** schema 里（复用同名 ⇒ 旧配置静默复活新面）', () => {
+describe('config-volatile: 两个面 E 的键名都不得回到 schema 里', () => {
+  it('🔴 旧面 E 的三个键**不在** schema 里（复用同名 ⇒ 旧配置静默复活一个已不存在的面）', () => {
     for (const retired of ['acpEnabled', 'acpHttpPort', 'publicAskEnabled']) {
       expect(field(retired), `${retired} 不该在 schema 里：它是旧面 E 的退役键`).toBeUndefined()
     }
   })
 
-  it('🔴 旧面 E 的部署段 `acp` **不在** schema 里（新面用 `acpFace`，刻意不同名）', () => {
+  it('🔴 两个面 E 的部署段（`acp` 与 `acpFace`）**都不在** schema 里', () => {
     expect(field('acp'), '`acp` 嵌套段是旧面 E 的退役键，不该复活').toBeUndefined()
-    expect(field('acpFace'), '新面 E 的部署段应为 `acpFace`').toBeDefined()
+    expect(field('acpFace'), '`acpFace` 属已整面删除的新面 E，不该残留').toBeUndefined()
   })
 })

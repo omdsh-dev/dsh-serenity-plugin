@@ -1,29 +1,34 @@
 /**
- * settings-section-panel.test.ts — **设置面板行的存在性判据**（v1.59.0）
+ * settings-section-panel.test.ts — **设置面板行的存在性判据**（v1.59.0，2026-10-19 重定向）
  *
  * ## 为什么这件必须有（它来自一次真实的 owner 质问）
  *
  * 2026-10-17 owner 连问三句：「我要的功能呢，ACP 功能呢」→「开关呢？配置呢？我怎么用呢」→
- * 「我功能呢」。当时的实况：**面 E 代码 518 行全在、端口表在、装配点在、测试 24 例全绿**
+ * 「我功能呢」。当时的实况：**功能代码 518 行全在、端口表在、装配点在、测试 24 例全绿**
  * —— 而 **面板上没有这一行**，配置里也没有能打开它的键。
  *
  * ⇒ **这是一个"全绿但用户拿不到"的缺陷**：所有机械判据都过，唯独**交付面缺了一格**。
  *   既有测试测的是"面能不能跑"，**没有一条测"用户够不够得着"**。
  *
+ * ## 2026-10-19 的重定向（不是删掉，是换靶）
+ *
+ * 那个面（ACP）已被 owner 裁「完整删除整个 ACP 的实现」⇒ 它那一行**本就不该再存在**，
+ * 原来的五条断言全部失去靶子。但**判据本身不能跟着功能一起消失** —— 否则下一个功能
+ * 会以同样方式"全绿但用户拿不到"。
+ * ⇒ 改为对**每一个仍在面板上的开关**逐条钉：数据面声明 ＋ 控件面接线 ＋ 呈现面有那一行。
+ *
  * ## 本件的判据（静态文本级 —— 为什么足够）
  *
  * 面板是 React 组件，跑真渲染要拉 DOM 环境（本仓无此投入）。但**这个缺陷的形态是
- * "那一行根本不存在"**，不是"它渲染错了" ⇒ **静态断言足以捕获它**：
- * ① `SerenitySimpleWire` 里必须有 `acpFaceEnabled` / `acpFacePort`（数据面）
- * ② 组件里必须有一个绑到 `acpFaceEnabled` 的 `Toggle`（控件面）
- * ③ 该行必须在 JSX 里（`<RowCard>` 的 title 含 "ACP"）（呈现面）
+ * "那一行根本不存在"／"字段没接上控件"**，不是"它渲染错了" ⇒ **静态断言足以捕获它**。
+ * 三条对每一行成立：① `SerenitySimpleWire` 里有该键 ② 组件里有 `toggle('<键>'` ③ 有 `<RowCard>` 标题。
  *
- * ⚠️ **本件的边界（如实标注）**：它**不证明**那一行渲染出来好看、也不证明点击真的落盘
+ * ⚠️ **本件的边界（如实标注）**：它**不证明**那些行渲染出来好看、也不证明点击真的落盘
  * （后者已由 `settings-section.test.ts` 的优先级用例覆盖）。
- * ⇒ 它钉的是**"存在性"**这一格 —— 正是这次翻车的那一格。
+ * ⇒ 它钉的是**"存在性"**这一格 —— 正是那次翻车的那一格。
  *
- * 🔴 **判据纪律**：断言**剥注释后**再找（否则注释里提一句 `acpFaceEnabled` 就会假绿）。
- *    同族先例：`acp-face.test.ts` 的 `stripComments`（本仓既有的做法）。
+ * 🔴 **判据纪律**：断言**剥注释后**再找（否则注释里提一句键名就会假绿）。
+ *    本文件下面还带一条"防假绿对照"，证明 `stripComments` 不是空操作。
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
@@ -37,7 +42,7 @@ const srcPath = join(here, '..', 'src', 'client', 'SettingsSection.tsx')
  * 剥掉块注释与行注释（**判据必须作用在代码上，不是注释上**）。
  *
  * 🔴 **本函数的第二版**：第一版只剥**整行**注释（以两个斜杠开头的那种）—— 那是照抄仓里既有的
- * `acp-face.test.ts` 写法，而它是**不完整的**（行尾注释 `const a = 1` 后跟双斜杠的那种漏网）。
+ * 写法，而它是**不完整的**（行尾注释 `const a = 1` 后跟双斜杠的那种漏网）。
  * 本件的"对照用例"当场抓出了它 ⇒ 改成**行内任意位置**的双斜杠也剥。
  *
  * ⚠️ **已知边界（如实标注）**：它不理解字符串字面量 ⇒ 若某行有 `http:` 开头的 URL，
@@ -58,41 +63,59 @@ function stripComments(code: string): string {
 const raw = readFileSync(srcPath, 'utf8')
 const code = stripComments(raw)
 
-describe('设置面板：面 E（ACP）那一行必须存在（owner 质问的回归钉）', () => {
-  it('🔴 数据面：`SerenitySimpleWire` 必须声明 `acpFaceEnabled`', () => {
-    expect(code).toContain('acpFaceEnabled')
+/**
+ * 面板上**当前必须存在**的每一行。
+ * `bind` = 该键在组件里的**接线写法**（开关是 `toggle(...)`，数值是 `setXxx(...)`）——
+ * 逐行写死是有意的：它是本文件判据的靶，靶必须能一眼核对，不能从源码里"推导"出来。
+ */
+const PANEL_ROWS: ReadonlyArray<{ key: string; bind: string; title: string }> = [
+  { key: 'gatewayEnabled', bind: "toggle('gatewayEnabled'", title: '双端口网关' },
+  { key: 'rebuildThresholdK', bind: 'setThreshold(', title: '重建阈值' },
+  { key: 'skiffEnabled', bind: "toggle('skiffEnabled'", title: 'Skiff 调试' },
+  { key: 'skiffDebugPort', bind: 'setSkiffPort(', title: 'Skiff 调试' },
+  { key: 'croEnabled', bind: "toggle('croEnabled'", title: 'CRO' },
+  { key: 'diagramEnabled', bind: "toggle('diagramEnabled'", title: '图（diagram）' },
+]
+
+describe('设置面板：每个开关都必须"数据面 ＋ 控件面 ＋ 呈现面"三面俱到', () => {
+  it('🔴 数据面：`SerenitySimpleWire` 必须声明每一个面板键（漏声明 ⇒ 面板读不到值）', () => {
+    const at = code.indexOf('interface SerenitySimpleWire')
+    expect(at, '找不到 SerenitySimpleWire 接口 —— 判据的前提没满足').toBeGreaterThan(-1)
+    const block = code.slice(at, code.indexOf('}', at))
+    for (const { key } of PANEL_ROWS) {
+      expect(block, `${key} 不在 SerenitySimpleWire 里`).toContain(key)
+    }
   })
 
-  it('🔴 数据面：必须声明 `acpFacePort`（端口可在面板上调）', () => {
-    expect(code).toContain('acpFacePort')
+  it('🔴 控件面：每个键都必须有接线（只声明字段而不接控件 = 用户改不了）', () => {
+    for (const { key, bind } of PANEL_ROWS) {
+      expect(code, `${key} 没有接到任何控件上`).toContain(bind)
+    }
   })
 
-  it('🔴 控件面：必须有绑到 `acpFaceEnabled` 的 Toggle（不是只声明了字段）', () => {
-    // 判据：出现过 `toggle('acpFaceEnabled'` —— 这是本文件里开关的**唯一**写法
-    expect(code).toContain("toggle('acpFaceEnabled'")
+  it('🔴 呈现面：每一行都必须有 `<RowCard>` 标题（用户能看见的那一格）', () => {
+    for (const { title } of PANEL_ROWS) {
+      // 标题里有全角括号 ⇒ 转义后当普通字符用（`（`/`）` 在正则里本来就无特殊含义，
+      // 这里只把半角括号换成通配，避免以后标题微调就红）
+      const pattern = title.replace(/[()]/g, '.')
+      expect(code, `面板上找不到标题含「${title}」的 RowCard`).toMatch(
+        new RegExp(`<RowCard[\\s\\S]{0,400}?title="${pattern}`),
+      )
+    }
   })
 
-  it('🔴 呈现面：必须有一行 `<RowCard>` 标题提到 ACP（用户能看见的那一格）', () => {
-    expect(code).toMatch(/<RowCard[\s\S]{0,400}?title="[^"]*ACP/)
-  })
-
-  it('🔴 面板必须说清"协议无认证"这条前提（不许让用户看到 active 就以为它安全）', () => {
-    // ⚠️ 不用 `</RowCard>` 收尾 —— 本文件的 RowCard 是**自闭合**（`/>`），没有闭合标签
-    //    （第一版就是这么写错的：正则恒不匹配，看起来像"面板没写"，其实是**判据自己错了**。
-    //     同族：'判据报红先证"我喂给它的输入满足前提"'  —— 本轮实测又踩一次。）
-    const at = code.indexOf('title="ACP 面')
-    expect(at).toBeGreaterThan(-1)
-    const block = code.slice(at, at + 4000)
-    expect(block).toMatch(/不做认证|无认证/)
-    // 并且要给出**怎么办**（否则用户知道不安全却不知道去哪配）
-    expect(block).toMatch(/IM_ACP_TOKEN|token/)
+  it('🔴 已删除的 ACP 面不得在面板上复活（整面删除的机械守卫）', () => {
+    // 双方向都挡：数据面留字段 / 呈现面留行，任一残留都说明"删了一半"。
+    expect(code).not.toContain('acpFaceEnabled')
+    expect(code).not.toContain('acpFacePort')
+    expect(code).not.toContain('ACP 面')
   })
 
   it('对照（防假绿）：`stripComments` 真的会剥掉注释（证明它不是空操作）', () => {
     // 若 stripComments 是个 no-op，上面几条就可能靠"注释里写了"而假绿
-    const sample = 'const a = 1 // acpFaceEnabled\n/* toggle(\'acpFaceEnabled\' */ const b = 2'
+    const sample = 'const a = 1 // gatewayEnabled\n/* toggle(\'gatewayEnabled\' */ const b = 2'
     const stripped = stripComments(sample)
-    expect(stripped).not.toContain('acpFaceEnabled')
+    expect(stripped).not.toContain('gatewayEnabled')
     expect(stripped).toContain('const a = 1')
     expect(stripped).toContain('const b = 2')
     // 真文件里确实有注释被剥掉（两个变量都在用）

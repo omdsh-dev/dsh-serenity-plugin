@@ -1,3 +1,50 @@
+## v1.69.1 — 2026-10-19（🔴 **ACP 整面删除** —— 不是停用，是实现全部移除）
+
+**性质**：**功能移除**。**授权**：owner 2026-10-19 裁「完整删除整个 ACP 的实现」。
+
+### 为什么删（实测，非口味）
+
+`@deepseek-ai/dsh-acp` **没有 `session/load`**，而 `session/resume` **不回放历史**
+⇒ ACP 客户端每次连上只能**新建会话**，看不到既有对话。
+⇒ 对一个以"长期认知轨迹"为核心的系统，这是**结构性不可接受**（轨迹的意义在延续，而这个面
+天然要求每连一次就开一条新的）。上游 discussion `deepseek-ai/deepseek-harness#6324` 同证。
+
+**为什么是补丁号**：对外面已存在两版且**默认关**，从没进过任何人的日常路径 ⇒ 按移除计，
+不按不兼容变更计。
+
+### 删了什么（面 E ＋ IM 的 acp 分支，两层全删）
+
+| 层 | 删除物 |
+|---|---|
+| 实现 | `src/acp-face.ts` ／ `src/acp-auth.ts`（含账户台账、token 指纹、`listAcpRoots`） |
+| 界面 | `src/client/AcpAccountsEditor.tsx` ＋ `SettingsSection.tsx` 里那一行与孤立的展开态 |
+| 数据面 | `src/api.ts` 的 `ACP_PATH` 端点与 `registerAcpAccountsApi` 整个函数 |
+| 端口 | `src/ports.ts` 的 `acp` 面与 `ACP_PORT`（**`MECHANISM_PORTS` 自动少一项** —— 这正是当初"派生而非手抄"的收益） |
+| 配置 | `acpFace` 部署段 ＋ `acpFaceEnabled` / `acpFacePort` 两个面板键（含 schema、类型、wire、默认值、优先级映射） |
+| 配置 | `ccc.ts` 的 `ImSettings` / `ImAcpSettings` / `ImAcpAccount` 与 `im?:` 字段（IM 不再有"选通道"） |
+| 样式 | `SettingsSection.css` 台账那一族选择器（`.ss-table*` / `.ss-fieldLabel` / `.ss-textInput` / `.ss-tokenBox` / `.ss-switchRowWrap`）—— 全仓零引用 |
+| 测试 | `acp-face.test.ts` ／ `acp-auth.test.ts`（两份整删） |
+
+**旧配置残留**（`acpFace*` / `im.*`）⇒ **静默忽略**（schemastery 非 strict），与既有退役键同处置。
+**`weixin.*` 段不受影响** —— 它与 `im` 是并列的，从来不是嵌套。
+
+### 判据跟着换（不是删掉，是换靶）
+
+`settings-section-panel.test.ts` 原本整篇在钉「ACP 那一行必须存在」—— 它来自 2026-10-17
+owner 连问三句「我要的功能呢」，是一个真实的「**全绿但用户拿不到**」缺陷的回归钉。
+该面删除后那五条断言失去靶子，但**判据本身不能跟着功能一起消失**，否则下一个功能会以同样
+方式翻车。⇒ 改为对**每一个仍在面板上的开关**逐条钉三面：数据面声明 ／ 控件面接线 ／ 呈现面有那一行，
+并加一条反向守卫（两个面 E 的键名与标题都不得回来）。
+
+`config-volatile.test.ts` 的名字守卫同样扩展：原来守的是「旧面 E 的三个键不得被新面复用」，
+现在**两组名字都无主** —— 旧名回来会静默打开一个已不存在的面，新名残留会让用户改一个
+什么都不会发生的开关，两个方向都挡。
+
+### 验证
+
+- 门禁六项全绿（`typecheck` ／ `typecheck-host` ／ `test` ／ `coverage` ／ `build` ／ `pack-check`）。
+- **部署后判据：3200 端口消失**（`ss -ltnp` 无该项）—— 这是"面真的没了"唯一不靠自述的读数。
+
 ## v1.69.0 — 2026-10-18（🔴 **两个「别的 CCC 看到 home-serenity 信息」缺陷** —— 面板与动画，两个根因两条修法）
 
 **性质**：**缺陷修复**（两处，根因不同）。**来源**：owner 实测报告 ——

@@ -38,7 +38,7 @@ import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
 import { cccRootForCwd, listCccs } from './ccc-roots.js'
 // C4 块 B：端口只从集中端口表取（默认值不再散写）
-import { MAIN_WEB_PORT, SKIFF_DEBUG_PORT, ACP_PORT } from './ports.js'
+import { MAIN_WEB_PORT, SKIFF_DEBUG_PORT } from './ports.js'
 import { hostSessions, hostWebServer } from './host/access.js'
 import { hostContractReport, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './status.js'
@@ -53,7 +53,6 @@ import { registerWakeScheduler } from './wake-scheduler.js'
 import { registerCroTurnTracking } from './cro-turns.js'
 import { registerWeixinBridge } from './weixin-bridge.js'
 import { registerWeixinSendApi } from './weixin-send-api.js'
-import { registerAcpFace } from './acp-face.js'
 import { registerWeixinOutputGuard } from './weixin-output-guard.js'
 import { registerLifecycle } from './seams/lifecycle.js'
 import { registerWebFetchProvider } from './web-fetch-provider.js'
@@ -230,16 +229,6 @@ export interface Config {
   //    旧配置残留该键 ⇒ **静默忽略**（schemastery 非 strict，同 `rebuildEnabled` / `wakeSchedulerEnabled` 的处置）。
   /** **diagram 工具总闸**（面板层；部署层同义键 = `diagram.enabled`；缺省关；D104） */
   diagramEnabled?: Volatile<boolean | undefined>
-  /**
-   * 🔴 **面 E：官方 ACP 总闸**（面板层；部署层同义键 = `acpFace.enabled`；**缺省关**；2026-10-16）。
-   *
-   * ⚠️ **键名刻意不叫 `acpEnabled`** —— 那是**旧面 E（3100 自造问答面）**的键，
-   * 已随 owner「砍掉外部问答」裁决退役、现被**静默忽略**。复用同名会让"当年那份旧配置"
-   * 在新面上复活（判据：**退役的是功能，名字仍须留作"无人读"**，否则退役不彻底）。
-   */
-  acpFaceEnabled?: Volatile<boolean | undefined>
-  /** 面 E 端口（面板层；部署层同义键 = `acpFace.port`；缺省 3200） */
-  acpFacePort?: Volatile<number | undefined>
 }
 
 // 🔴 **刻意不写 `z<Config>` 标注**（v1.47.2 起）：volatile 键的**输入形状**（裸 `boolean`）与
@@ -302,8 +291,8 @@ export const Config = z.object({
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
   // diagram（实验性 demo；D104）：部署层缺省关（面板层同义键 = `diagramEnabled`，两者取或见 settings-section）
   diagram: z.object({ enabled: z.boolean().default(false) }),
-  // 🔴 面 E（官方 ACP，2026-10-16）：部署层缺省关 ＋ 端口 3200（面板层同义键 = `acpFaceEnabled`/`acpFacePort`）
-  acpFace: z.object({ enabled: z.boolean().default(false), port: z.number().min(1024).max(65535).default(ACP_PORT) }),
+  // ⚠️ 面 E（官方 ACP）的部署段 `acpFace` **已删除**（owner 2026-10-19 裁整面移除）。
+  //    旧配置残留该键 ⇒ 静默忽略（schemastery 非 strict）。
   // ── human-channel（人机信道；**机器级**；2026-09-26 owner 定案 ⇒ 方案 §2.2）──────────
   // 🔴 **机器级**：一个 dsh 进程一份（插件 Config），**不是每 CCC 一份** —— 因为它的三张表
   //    （账号 ／ 订阅 ／ 主控）天然跨 CCC；CCC 侧原 `weixin.*` 随之退役（见方案 §2.4：
@@ -342,14 +331,8 @@ export const Config = z.object({
   // D104（2026-09-29 owner 具名令）：diagram 工具总闸（面板层；**缺省关**）。第十号面板键——
   // 与 `config-volatile.test.ts` 的 PANEL_KEYS / DEPLOY_KEYS 两张表**必须同步**（少一处那条 pin 就红）。
   diagramEnabled: z.boolean().volatile(),
-  // 🔴 面 E（官方 ACP，2026-10-16 owner 令「跑在 dsh web 进程内」）：第十一／十二号面板键。
-  // **缺省关**：开了就是把本 CCC 开给外部 ACP 客户端，而 ACP 协议本身**不做认证**
-  // （`dsh-acp` 的 `authenticate` 恒成功），且本面绑 `0.0.0.0`（owner 裁决）⇒ 必须有外部兜底。
-  // ⚠️ 键名带 `Face` 后缀**是有意的**：`acpEnabled`/`acpHttpPort` 是**已退役旧面 E** 的键
-  // （现被静默忽略），复用会让旧配置复活。判据：**退役要连"名字"一起守**。
-  // 与 PANEL_KEYS / DEPLOY_KEYS 两张表**必须同步**。
-  acpFaceEnabled: z.boolean().volatile(),
-  acpFacePort: z.number().min(1024).max(65535).volatile(),
+  // ⚠️ 面 E（官方 ACP）的两个面板键 `acpFaceEnabled` / `acpFacePort` **已删除**
+  //    （owner 2026-10-19 裁整面移除）。旧配置残留 ⇒ 静默忽略。
 })
 
 export function apply(ctx: Context, config: Config): void {
@@ -518,11 +501,11 @@ export function apply(ctx: Context, config: Config): void {
   // （外部脚本/集成）使用。v1.31.0 起 agent 侧统一走 im-bridge 工具（进程内直调 + 记录），
   // 旧 CCC MSM weixin-send 已退役；此 HTTP 入口保留（发送与记录都经桥，outgoing hook source=proactive）。
   registerWeixinSendApi(ctx)
-  // 🔴 面 E：官方 ACP 面（2026-10-16，owner 令「跑在 dsh web 进程内」，P0′ 已实测成立）。
-  // **默认关**（FACE_PORTS.acp.defaultEnabled = false）⇒ 关时零成本（连依赖都不 import）。
-  // ⚠️ **安全前提**：ACP 协议**本身不做认证**，而本面绑 `0.0.0.0` ⇒ 必须由外部接入层
-  // （Cloudflare Access）兜底。Q3 裁的是"隧道不归 ACC 管"，**不是**"因此不需要认证层"。
-  registerAcpFace(ctx)
+  // 🔴 面 E（官方 ACP）**已整面删除**（owner 2026-10-19 裁「完整删除整个 ACP 的实现」）。
+  // 退役理由（实测，非口味）：`dsh-acp` 无 `session/load` 且 `session/resume` **不回放历史**
+  // ⇒ ACP 客户端每次连上只能**新建会话**，看不到既有对话；上游 discussion #6324 同证。
+  // 对一个"长期轨迹"系统，这个客户端体验无法接受 ⇒ 整面移除，IM 通道只剩微信。
+  // ⚠️ 旧配置残留 `acpFace*` / `im.*` ⇒ **静默忽略**（schemastery 非 strict，同既有退役键处置）。
   // v1.30.16（S142 用户"约束不够，LLM 不听"）：手动输出模式机械闸门——turn-stopping 检查
   // 本轮是否真的成功调用过输出工具（im-bridge，v1.30.x 为 weixin-send），未发送则 steer 打回
   // （≤2 次）。**措辞归 CCC 角色提示词**（本闸门只给机制事实 + 已填参数标记），与"ACC 管机制 /

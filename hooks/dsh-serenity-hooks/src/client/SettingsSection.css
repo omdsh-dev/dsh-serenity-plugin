@@ -331,97 +331,6 @@
   gap: 8px;
 }
 
-/* 同一行放不下时换行（ACP 新增账户那行有四个控件） */
-.ss-switchRowWrap {
-  flex-wrap: wrap;
-}
-
-/* 行内字段名（与 .ss-rowName 同一语域，但不吃行高） */
-.ss-fieldLabel {
-  flex: none;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-secondary);
-  white-space: nowrap;
-}
-
-/* 行内文本输入（与 .ss-portInput 同款外观，宽度随内容） */
-.ss-textInput {
-  flex: 1 1 140px;
-  min-width: 0;
-  padding: 6px 8px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-layer-2);
-  color: var(--dsw-alias-label-primary);
-  font-size: 13px;
-}
-
-.ss-textInput::placeholder {
-  color: var(--dsw-alias-label-dimmed);
-}
-
-/* 明文 token 展示块（等宽、可整体选中、长串折行） */
-.ss-tokenBox {
-  display: block;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--dsw-alias-border-l2);
-  background: var(--dsw-alias-bg-layer-2);
-  color: var(--dsw-alias-label-primary);
-  font-family: var(--ds-font-family-code);
-  font-size: 12px;
-  line-height: 18px;
-  word-break: break-all;
-  user-select: all;
-}
-
-/* ── ACP 账户台账表（owner 2026-10-17：「面板里只放个开关不放具体的条目吗？」）
- *
- * 用表格而不是卡片列表：台账天生是「一行一条、列对齐可比」的数据
- * （账户 ／ 角色 ／ 状态 ／ token 指纹），卡片会把可比性拆散。
- * 🔴 横向滚动必须挂在外层容器上：给 `<table>` 本身加 `display:block` 会连带丢掉
- *    `border-collapse`（表格边框塌陷失效），故表格保持 `display:table`，由 .ss-tableWrap 兜滚动。 */
-.ss-tableWrap {
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-.ss-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.ss-table th,
-.ss-table td {
-  padding: 6px 10px;
-  text-align: left;
-  border-bottom: 1px solid var(--dsw-alias-border-l2);
-  white-space: nowrap;
-  vertical-align: middle;
-}
-
-.ss-table th {
-  color: var(--dsw-alias-label-tertiary);
-  font-weight: 600;
-}
-
-.ss-table td code {
-  font-size: 11px;
-  padding: 1px 4px;
-  border-radius: 3px;
-  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.12));
-}
-
-.ss-table button {
-  margin-left: 4px;
-}
-
-.ss-table button:first-child {
-  margin-left: 0;
-}
-
 /* ── v1.27.6 「?」帮助浮层（hover/焦点显示三行以上严谨说明）── */
 .ss-help {
   position: relative;
@@ -616,13 +525,5 @@
   .ss-collapseBody {
     padding-left: 0;
     padding-right: 0;
-  }
-
-  .ss-switchRowWrap {
-    gap: 6px;
-  }
-
-  .ss-textInput {
-    flex-basis: 100%;
   }
 }

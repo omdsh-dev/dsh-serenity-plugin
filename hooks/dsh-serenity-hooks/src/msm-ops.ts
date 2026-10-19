@@ -125,8 +125,8 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                          cheap-worker（杂工 agent 编排——guide 子命令：cheap-worker guide）
                          专属工具（**默认对所有 CCC 隐藏**，只有在自己 exclusiveTools 里点名的 CCC 可见）→ acc-diag（运行态诊断）
   ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
-                         3099 Skiff 调试问答页（人工调试面）。🔴 2026-10-15：自造 ACP 面已退役
-                         ⇒ 外部程序化接入改走官方 dsh --profile acp ＋ 现成 ACP 客户端
+                         3099 Skiff 调试问答页（人工调试面）。外部程序化接入用官方 dsh --profile acp
+                         ＋ 现成 ACP 客户端；本插件不提供 ACP 面
   ⑤ 自主与接入        → cognitive_trajectory send-now（跨轨迹的**即时**递送，**不排队**：live 目标在跑就当场注入当前轮、空闲则立即起轮；非 live 冷载入——等效于直接 wake；**有同步回执**）
                          cognitive_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）

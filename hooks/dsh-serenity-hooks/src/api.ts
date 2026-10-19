@@ -30,8 +30,6 @@ const FILE_UPLOAD_PATH = '/serenity/file-upload'
 const CONFIG_PATH = '/serenity/config'
 const CCCS_PATH = '/serenity/cccs'
 const WEIXIN_PATH = '/serenity/weixin'
-/** 🔴 v1.59.1：ACP 账户台账（面板数据面；形状照 `/serenity/weixin`） */
-const ACP_PATH = '/serenity/acp'
 
 /** 图片落盘目录（CCC 根相对；S142 图片自动识别基础设施——粘贴图片落盘供 agent 经 CCC vlm MSM 自主处理） */
 export const IMAGE_UPLOAD_DIR = '_tmp/images_from_user'
@@ -679,9 +677,6 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
       }
     },
   })
-
-  // 🔴 v1.59.1：ACP 账户台账（面板数据面；owner 2026-10-17 令「面板里也放账户」）
-  registerAcpAccountsApi(ctx)
 }
 
 // ── 微信桥（F4c-3，v1.27.0 实验性；CCC 级配置——显式 ccc 参数）──
@@ -704,122 +699,3 @@ function requireCcc(root: string | undefined): { ok: true; root: string } | { ok
   return { ok: true, root: serenityRoot }
 }
 
-// ── ACP 账户台账（v1.59.1，owner 2026-10-17 令「面板里也放账户」）────────────────
-//
-// GET  ?ccc=<root>                     → { channel, enabled, accounts[]（脱敏）, roots[] }
-// POST { ccc, action: 'upsert', account: { accountId, role, name?, enabled? } }
-// POST { ccc, action: 'remove', accountId }
-// POST { ccc, action: 'rotate', accountId }   → { token }（**唯一**会回明文的地方）
-//
-// 🔴 **token 只在两处出现明文**：① `rotate` 的响应（用户主动要一枚新的）
-//    ② 账户首次 `upsert` 后的自动生成（回 `token` 一次，让用户当场抄走）。
-//    其余一切读路径只回**指纹**（`tokenFingerprint`）——与 `acpChannelStatus` 同源。
-
-/** ACP 账户台账端点（面板专用；形状照 `/serenity/weixin`） */
-function registerAcpAccountsApi(ctx: any): void {
-  ctx.webServer.register({
-    kind: 'exact',
-    path: ACP_PATH,
-    handler: async (req: IncomingMessage, res: ServerResponse) => {
-      try {
-        if (!requireWebUi(req, res, 'ACP 账户配置仅限 WebUI（client 专用）')) return
-        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-
-        if (req.method === 'GET') {
-          const chk = requireCcc(url.searchParams.get('ccc') ?? undefined)
-          if (!chk.ok) {
-            sendJson(res, 400, { error: chk.error })
-            return
-          }
-          const { acpChannelStatus, listAcpRoots } = await import('./acp-auth.js')
-          const { listCccs } = await import('./ccc-roots.js')
-          const st = acpChannelStatus(chk.root)
-          const all = (await listCccs(ctx)).map((e) => e.root)
-          sendJson(res, 200, {
-            channel: st.channel,
-            enabled: st.enabled,
-            accounts: st.accounts,
-            // 本机哪些 CCC 此刻"真的能连"（供面板显示总览；不是权限判据）
-            roots: listAcpRoots(all),
-          })
-          return
-        }
-
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { error: 'method not allowed' })
-          return
-        }
-
-        const raw = await readBody(req, 64 * 1024)
-        const body = JSON.parse(raw) as {
-          ccc?: string
-          action?: string
-          account?: unknown
-          accountId?: string
-        }
-        const chk = requireCcc(body.ccc)
-        if (!chk.ok) {
-          sendJson(res, 400, { error: chk.error })
-          return
-        }
-        const root = chk.root
-        const acp = await import('./acp-auth.js')
-
-        if (body.action === 'upsert') {
-          const account = acp.normalizeAcpAccount(body.account)
-          if (!account) {
-            sendJson(res, 400, { error: 'invalid account (accountId 与 role 均必填)' })
-            return
-          }
-          // 角色必须真实存在于该 CCC 的 skiff.roles —— 否则保存成功但永远连不上（静默失败）
-          const { readSkiffRoles } = await import('./skiff-role.js')
-          const roles = readSkiffRoles(root)
-          if (!roles.has(account.role)) {
-            sendJson(res, 400, {
-              error: `role "${account.role}" 不在该 CCC 的 skiff.roles 里（现有：${[...roles.keys()].join(', ') || '无'}）`,
-            })
-            return
-          }
-          acp.upsertAcpAccount(root, account)
-          // 保存即保障"有 token"（owner 令的「随即生成」；幂等，不轮换）
-          const created = acp.ensureAcpChannelTokens(root).includes(account.accountId)
-          const st = acp.acpChannelStatus(root)
-          sendJson(res, 200, {
-            saved: true,
-            accounts: st.accounts,
-            // 只在**首次生成**时回明文（用户要抄进客户端）；已存在则不回
-            token: created ? acp.readAcpToken(root, account.accountId) : undefined,
-          })
-          return
-        }
-
-        if (body.action === 'remove') {
-          const accountId = typeof body.accountId === 'string' ? body.accountId.trim() : ''
-          if (accountId === '') {
-            sendJson(res, 400, { error: 'missing accountId' })
-            return
-          }
-          acp.removeAcpAccount(root, accountId)
-          sendJson(res, 200, { removed: accountId, accounts: acp.acpChannelStatus(root).accounts })
-          return
-        }
-
-        if (body.action === 'rotate') {
-          const accountId = typeof body.accountId === 'string' ? body.accountId.trim() : ''
-          if (accountId === '') {
-            sendJson(res, 400, { error: 'missing accountId' })
-            return
-          }
-          // 轮换会让在用的客户端**立刻断线** ⇒ 必须由用户显式触发（本 action），不自动做
-          const token = acp.resetAcpToken(root, accountId)
-          sendJson(res, 200, { rotated: accountId, token })
-          return
-        }
-
-        sendJson(res, 400, { error: `unknown action: ${String(body.action)}` })
-      } catch (err: any) {
-        sendJson(res, 400, { error: err?.message ?? String(err) })
-      }
-    },
-  })
-}
