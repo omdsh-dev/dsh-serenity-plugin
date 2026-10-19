@@ -311,11 +311,48 @@ export async function createSkiffAgent(
     console.warn(`[serenity-hooks] skiff 角色 "${roleName}" 专属 SESSION 处理失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
   }
   try {
+    // 🔴 热生效的**唯一判据 = 每次求值都重读配置**（owner 2026-10-19 令）。
+    //   两个求值时机上的事实：
+    //    ① 本 `text()` **每轮都被调用**（不是建档时算一次）；
+    //    ② 但 `role` 是 createSkiffAgent 的入参 = **创建时的快照** ⇒ 旧版即使每轮重算，
+    //       算的也是冻结对象 ⇒ CCC 改了 `skiff.roles.<r>.*` 必须重启才生效。
+    //   ⇒ 现在每轮重读角色；读不到（配置被删/角色被移除）就退回创建时那份。
+    //   ⚠️ 角色提示词**文件**另有它自己的热重载（createRolePromptReader 按 mtime+size），
+    //   但那份 reader 是用**创建时的 role** 造的 ⇒ `systemPromptFile` 路径本身变了不生效。
+    //   ⇒ 这里按路径缓存 reader：路径不变就复用（保住 mtime 缓存，不每轮读盘），变了重建。
+    let readerPath: string | undefined = role?.systemPromptFile?.trim()
+    let reader = rolePrompt
+    const liveRolePrompt = (): string => {
+      let live = role
+      try {
+        const fresh = readSkiffRoles(root).get(roleName)
+        if (fresh) live = fresh
+      } catch {
+        /* 配置读取失败 ⇒ 沿用创建时那份（不阻断本轮） */
+      }
+      const wantPath = live?.systemPromptFile?.trim()
+      if (wantPath !== readerPath) {
+        // 路径变了（或从"内嵌"改成"文件"）⇒ 重建 reader，让新文件当场生效
+        reader = kind === 'persistent'
+          ? createRolePromptReader(root, live)
+          : ((): (() => string) => {
+              let snapshot = ''
+              try {
+                snapshot = resolveRoleSystemPrompt(root, live)
+              } catch {
+                /* 保持空：与 temporary 的既有语义一致（创建时快照，失败即空） */
+              }
+              return () => snapshot
+            })()
+        readerPath = wantPath
+      }
+      return reader()
+    }
     agent.ctx.systemPrompt.section({
       name: 'serenity-skiff',
       order: -60,
-      // 动态求值：基础段清单 + 角色提示词（persistent 型每次重读文件 → 热更新）
-      text: () => [buildSkiffBasePrompt(roleName, role), rolePrompt()].filter(Boolean).join('\n'),
+      // 基础段**不含清单**（清单的真相源 = 模型自己的工具 schema ＋ msm() 目录）
+      text: () => [buildSkiffBasePrompt(roleName), liveRolePrompt()].filter(Boolean).join('\n'),
     })
   } catch (err) {
     console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)

@@ -172,27 +172,41 @@ describe('skiff-role: 子集与白名单纯函数', () => {
   })
 })
 
-describe('skiff-role: buildSkiffBasePrompt 动态基础提示词', () => {
-  it('msms + tools 双清单', () => {
-    const p = buildSkiffBasePrompt('qa-readonly', { msms: ['cognitive-qa'], tools: ['read'] })
+describe('skiff-role: buildSkiffBasePrompt —— 只声明边界与发现路径，**不枚举清单**', () => {
+  /**
+   * owner 2026-10-19 令：「提示词也应当避免提到可用列表产生误会」。
+   * 判据 = **反向钉**：这两份清单（工具／MSM）**不得**出现在基础段里
+   * （清单的真相源 = 模型自己的 tool schema ＋ `msm()` 无参目录，两处都实时）。
+   */
+  it('身份行仍在（角色名逐字）', () => {
+    const p = buildSkiffBasePrompt('qa-readonly')
     expect(p).toContain('=== Serenity Skiff ===')
     expect(p).toContain('Role: qa-readonly (defined by this CCC)')
-    expect(p).toContain('MSMs: cognitive-qa')
-    expect(p).toContain('Tools: read')
-    expect(p).toContain('msm("<name>", ["<args>"])')
-    expect(p).toContain('No other tools are available.')
   })
 
-  it('无 msms → (none)；无 tools → (none)', () => {
-    const p = buildSkiffBasePrompt('r', { tools: [] })
-    expect(p).toContain('MSMs: (none)')
-    expect(p).toContain('Tools: (none)')
+  it('🔴 不枚举工具清单：基础段与传入的角色配置**无关**（签名已去掉 role 参数）', () => {
+    // 函数只收角色名 ⇒ 结构上就抄不了清单（比"断言不含某串"更硬的判据）
+    expect(buildSkiffBasePrompt.length).toBe(1)
+    const p = buildSkiffBasePrompt('r')
+    expect(p).not.toMatch(/^\s*Tools:/m)
+    expect(p).not.toMatch(/^\s*MSMs:/m)
+    expect(p).not.toContain('(none)')
   })
 
-  it('纯 MSM 角色（tools 空）', () => {
-    const p = buildSkiffBasePrompt('r', { msms: ['a'] })
-    expect(p).toContain('MSMs: a')
-    expect(p).toContain('Tools: (none)')
+  it('给出两条发现路径（工具 schema ／ msm 目录），否则"不枚举"就成了"不说"', () => {
+    const p = buildSkiffBasePrompt('r')
+    // 工具面：从 schema 得知
+    expect(p).toMatch(/tool schemas you see/i)
+    // MSM 面：无参调用取目录（带调用形态，否则模型不知道怎么写）
+    expect(p).toContain('msm()')
+    // 用法入口（单一真相源，不在这里背细节）
+    expect(p).toMatch(/inspect=true|--help/)
+  })
+
+  it('🔴 明说"表面会随配置变化、无需重启"，堵住"照旧记忆办事"这条退化路径', () => {
+    const p = buildSkiffBasePrompt('r')
+    expect(p).toMatch(/without restarting|takes effect/i)
+    expect(p).toMatch(/Do not infer unavailability/i)
   })
 })
 

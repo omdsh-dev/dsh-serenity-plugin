@@ -1,3 +1,65 @@
+## v1.69.2 — 2026-10-19（🔴 **skiff 配置热生效 ＋ 提示词不再抄清单** —— 一次"能用但没人知道"的缺陷）
+
+**性质**：**缺陷修复**。**来源**：owner 报告「当前 CCC 的 skiff 无法使用 cognitive trajectory tool 了」
+＋ owner 两条令（「配置变动要热生效」「提示词避免提到可用列表产生误会」）。
+
+### 一、症状与真因：能用，但它不知道
+
+取证结论：**工具一直可用，是模型以为自己没有**。同一会话同一时刻的两份读数：
+
+| 来源 | 内容 |
+|---|---|
+| 提示词 `Tools:` 行 | `read, grep, glob, web_search`（**4 项**） |
+| `.opencode/serenity.json` | 8 项（含 `cognitive_trajectory`） |
+
+守卫 `decideGuard` **每次调用实时读配置** ⇒ 实际放行；模型照着一份过期的清单办事 ⇒ 它不去调。
+
+**根因两条，都在同一个注入点**：
+
+1. **`buildSkiffBasePrompt` 抄了一份清单** —— 那是**第二真相源**。清单的真正来源本来就在
+   模型自己手里：工具 = 它这一轮看到的 tool schema，MSM = `msm()` 无参目录（已按角色过滤）。
+   抄一份就必然漂。
+2. **那份清单从「创建时冻结的 role 快照」求值** —— `createSkiffAgent(ctx, root, roleName, role, …)`
+   的 `role` 是入参一次性取值。`text: () => …` 虽然每轮都重算，**算的是同一个冻结对象**
+   ⇒ CCC 改了 `skiff.roles.<r>.tools`，提示词不变，必须重启才生效。
+
+### 二、修法（对应 owner 两条令）
+
+**令一·热生效**：提示词求值时**每轮重读角色配置**（与守卫、`skiffMsmGate` 同一真相源）。
+读不到（角色被删/配置读失败）就退回创建时那份 —— 绝不返回空，空提示词会让角色失去人格与
+纪律（同 `createRolePromptReader` 的既有降级哲学）。
+
+🔵 **顺带修掉一个同族缺口**：角色提示词**文件**本来就有热重载（`createRolePromptReader`
+按 mtime+size），但那个 reader 是用**创建时的 role** 造的 ⇒ 只有文件**内容**变才生效，
+`systemPromptFile` **路径本身**变了不生效。现按路径缓存 reader：路径不变就复用（保住 mtime
+缓存，不每轮读盘），路径变了当场重建。
+
+**令二·不抄清单**：基础段只剩身份与**发现路径**，不再列名字：
+
+> Your tools are exactly the tool schemas you see in this session
+> Your MSMs are listed by calling msm() with no arguments
+> Do not infer unavailability from anything you remember or from an earlier list
+
+**为什么"不枚举"不等于"不说"**（R↓）：只删列表会把缺陷换成另一种 —— 模型不知道去哪看。
+故同时给出两条路径，并明写「表面随配置变化、无需重启」堵住"照旧记忆办事"这条退化路径。
+
+### 三、判据（三条，都在新文件 `skiff-role-tool-surface.test.ts`）
+
+| # | 判据 | 为什么 |
+|---|---|---|
+| ① | 基础段不含 `Tools:` / `MSMs:` 清单行（`buildSkiffBasePrompt.length === 1`，结构上抄不了） | 签名去掉 role 参数 ⇒ 比"断言不含某串"更硬 |
+| ② | 但必须给出两条发现路径 ＋ "随配置变化无需重启" | 防"不枚举"退化成"不说" |
+| ③ | 本仓没有任何角色把退役旧名（`container_trajectory` / `trajectory` / `logbook`）写进白名单 | 这类名字会让守卫判"不在白名单"，而错误文案是泛化的 ⇒ 症状像"没权限"，实为改名没跟 |
+
+🔴 **③ 的夹具前提要显式解析 CCC 根**：vitest 的 cwd 是插件仓根，那里没有 `.opencode/`；
+直接 `readSkiffRoles(process.cwd())` 会恒读不到角色（本轮实测因此假红一次）。
+⇒ 改从上两级找 `.opencode/serenity.json`；**找不到就明确 skip，不写成通过**（空断言是反复踩过的假绿来源）。
+
+### 验证
+
+- 门禁六项全绿。
+- 部署后判据：**活会话**的提示词里不再出现 `Tools:` 清单行，且 `cognitive_trajectory` 可调。
+
 ## v1.69.1 — 2026-10-19（🔴 **ACP 整面删除** —— 不是停用，是实现全部移除）
 
 **性质**：**功能移除**。**授权**：owner 2026-10-19 裁「完整删除整个 ACP 的实现」。

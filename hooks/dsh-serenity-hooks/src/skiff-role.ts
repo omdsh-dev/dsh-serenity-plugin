@@ -190,26 +190,36 @@ export function createRolePromptReader(root: string, role: SkiffRoleConfig | und
 }
 
 /**
- * Skiff 基础提示词（dsp 只给这部分；CCC 的 systemPrompt 段由调用方拼接）：
- * 身份 + 可用 MSM/工具清单 + 调用协议 + 边界声明。动态生成（清单来自角色白名单）。
+ * Skiff 基础提示词（dsp 只给这部分；CCC 的 systemPrompt 段由调用方拼接）。
+ *
+ * ## 🔴 为什么**不再枚举**清单（owner 2026-10-19 令）
+ *
+ * 旧版在这里抄了两份清单（`MSMs: a, b, c` / `Tools: read, grep, …`）。那是**第二真相源**，
+ * 而真相源本来就在模型自己手里：
+ *   · **工具清单** = 这一轮实际注册给它的 tool schema —— 模型已经看得见，抄一遍只会漂
+ *   · **MSM 清单** = `msm()` 无参调用返回的目录 —— 已按角色白名单过滤，且**每次实时读配置**
+ *
+ * ⚠️ **漂移不是理论风险，是已发生的缺陷**（2026-10-19）：角色配置早就长到 8 个工具，
+ * 而这个函数是从**创建时冻结的 role 快照**求值的 ⇒ 提示词里一直写着旧的 4 个
+ * ⇒ 模型照着提示词办事，**它自己以为没有的能力就不去调** ⇒ 症状是"工具用不了"，
+ * 而守卫那边（每调用实时读配置）其实是放行的。两个真相源打架，输的总是提示词。
+ *
+ * ⇒ 现在只声明**边界与发现路径**，不抄内容：清单在哪，怎么取，越界会怎样。
+ *
+ * @param roleName 角色名（CCC 定义；用于身份声明）
  */
-export function buildSkiffBasePrompt(roleName: string, role: SkiffRoleConfig | undefined): string {
-  const msms = role?.msms ?? []
-  const tools = role?.tools ?? []
-  const lines = [
+export function buildSkiffBasePrompt(roleName: string): string {
+  return [
     '=== Serenity Skiff ===',
     `Role: ${roleName} (defined by this CCC)`,
-    'You interact with this CCC ONLY through the exposed surface below:',
-  ]
-  if (msms.length > 0) {
-    lines.push(`  MSMs: ${msms.join(', ')} (call msm("<name>", ["<args>"]) ; pass inspect=true or "--help" as first arg for usage)`)
-  } else {
-    lines.push('  MSMs: (none)')
-  }
-  lines.push(`  Tools: ${tools.length > 0 ? tools.join(', ') : '(none)'}`)
-  lines.push('No other tools are available. Your capability boundary is this surface.')
-  lines.push('')
-  lines.push('---')
-  lines.push('')
-  return lines.join('\n')
+    'Your capability boundary is enforced mechanically by this CCC — anything outside it is rejected at the call site, not by your judgment.',
+    'Discover your surface, do not memorize it (both are generated from the live config on every turn):',
+    '  · Your tools are exactly the tool schemas you see in this session — if a tool is not in your schema, it is not available.',
+    '  · Your MSMs are listed by calling msm() with no arguments — that directory is already filtered to this role.',
+    '  · Usage for any MSM: msm("<name>", [], inspect=true) or pass "--help" as the first argument.',
+    'Do not infer unavailability from anything you remember or from an earlier list: this surface changes when the CCC configuration changes, and it takes effect without restarting.',
+    '',
+    '---',
+    '',
+  ].join('\n')
 }
