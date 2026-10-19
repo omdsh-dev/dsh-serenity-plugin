@@ -65,7 +65,7 @@ vi.mock('../src/surface/settings.js', () => ({
   defaultSimpleSettings: () => h.settings,
 }))
 // 调试服务启动替身（不真的绑端口）
-vi.mock('../src/role/skiff/debug.js', () => ({
+vi.mock('../src/surface/debug.js', () => ({
   startSkiffDebugServer: h.start,
   stopSkiffDebugServer: h.stop,
 }))

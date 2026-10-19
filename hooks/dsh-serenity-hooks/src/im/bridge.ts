@@ -40,7 +40,7 @@ import { readSimpleSettings, type HumanChannelSettings } from '../surface/settin
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
 import { readSkiffProfileByCode, type SkiffProfile } from '../role/skiff/profile.js'
-import { stripThink } from '../role/skiff/debug.js'
+import { stripThink } from '../surface/text.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../role/skiff/core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'

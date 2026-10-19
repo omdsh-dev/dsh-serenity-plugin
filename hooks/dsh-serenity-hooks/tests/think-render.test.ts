@@ -36,7 +36,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { renderSkiffMarkdown } from '../src/role/skiff/debug.js'
+import { renderSkiffMarkdown } from '../src/surface/text.js'
 
 describe('renderSkiffMarkdown: 状态机 think 提取（v1.26.8）', () => {
   it('基础：think 块提取为折叠卡（🧠 默认收起）', () => {

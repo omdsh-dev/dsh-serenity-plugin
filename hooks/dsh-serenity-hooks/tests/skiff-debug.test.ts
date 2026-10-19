@@ -8,7 +8,8 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, renderSkiffMarkdown, skiffDebugSpec, type CccEntry } from '../src/role/skiff/debug.js'
+import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, skiffDebugSpec, type CccEntry } from '../src/surface/debug.js'
+import { renderSkiffMarkdown } from '../src/surface/text.js'
 // C2：候选 CCC 枚举的唯一真相源（原 skiff-debug.discoverCccs 已迁移至此）
 import { listCccs } from '../src/kernel/ccc-roots.js'
 // 🔴 2026-10-19 重做：skiff ＝ **带 `skiff.json` 的认知轨迹** ⇒ 造 skiff 的唯一入口是本夹具

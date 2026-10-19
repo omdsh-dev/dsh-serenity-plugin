@@ -37,7 +37,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { jscSafeJsonText } from '../src/role/skiff/debug.js'
+import { jscSafeJsonText } from '../src/surface/text.js'
 
 describe('jscSafeJsonText：JSC JSON.parse 兼容层（v1.26.9）', () => {
   it('原始 \\u2028/\\u2029/\\uFEFF 在文本层替换为字面 \\uXXXX 转义序列', () => {

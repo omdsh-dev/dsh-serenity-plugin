@@ -81,12 +81,12 @@ type _ToolsRegister = Expect<Extends<Ret<HostContext['tools']['register']>, unkn
 /** 机械守卫（`src/seams/guards.ts` safe-mode/路径/白名单——缺则守卫失效） */
 type _ToolsGuard = Expect<Extends<Ret<HostContext['tools']['guard']>, unknown>>
 
-/** 会话定位/rebuild/CCC 解析（`access.ts` `hostSessionCwds`、`role/skiff/debug.ts`、`surface/http.ts`） */
+/** 会话定位/rebuild/CCC 解析（`access.ts` `hostSessionCwds`、`surface/debug.ts`、`surface/http.ts`） */
 type _SessionsList = Expect<Extends<Ret<HostContext['sessions']['list']>, readonly unknown[]>>
 type _SessionsGet = Expect<Extends<Ret<HostContext['sessions']['get']>, unknown>>
 type _SessionsCreate = Expect<Extends<Ret<HostContext['sessions']['create']>, unknown>>
 
-/** CCC 自动发现回落（`role/skiff/debug.ts:103`；v1.31.6 C4 现场：list 形状在 0.1.5 变了） */
+/** CCC 自动发现回落（`surface/debug.ts:103`；v1.31.6 C4 现场：list 形状在 0.1.5 变了） */
 type _PersistenceList = Expect<Extends<Awaited<Ret<HostContext['sessionPersistence']['list']>>, readonly unknown[]>>
 
 /** 上下文压力读数（`seams/keeper.ts:readContextPressure`——rebuild 提醒的输入） */
@@ -98,7 +98,7 @@ type _TokenMeterEstimate = Expect<Extends<Ret<HostContext['tokenMeter']['estimat
 /** rebuild 后重命名会话标题（`trajectory/rebuild.ts:renameAfterRebuild`——签名 `(session, title)`） */
 type _SessionTitleRename = Expect<Extends<HostContext['sessionTitle']['rename'], (session: never, title: string) => unknown>>
 
-/** 工作区白名单下拉（`surface/http.ts:334`、`role/skiff/debug.ts:90`——读 `path`/`title`） */
+/** 工作区白名单下拉（`surface/http.ts:334`、`surface/debug.ts:90`——读 `path`/`title`） */
 type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry']['list']>, readonly unknown[]>>
 
 /**

@@ -289,7 +289,7 @@ describe('weixin-api: 协议客户端（mock fetch）', () => {
   })
 
   it('stripThink 剥离 <think> 块（微信桥用户反馈：用户不应看到思考过程）', async () => {
-    const { stripThink } = await import('../src/role/skiff/debug.js')
+    const { stripThink } = await import('../src/surface/text.js')
     expect(stripThink('答案<think>内部推理</think>正文')).toBe('答案正文')
     expect(stripThink('<think>只有思考</think>')).toBe('')
     expect(stripThink('无 think 的正常回复')).toBe('无 think 的正常回复')
