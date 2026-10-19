@@ -8,7 +8,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
-import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, renderSkiffMarkdown, skiffDebugSpec, type CccEntry } from '../src/skiff-debug.js'
+import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, renderSkiffMarkdown, skiffDebugSpec, type CccEntry } from '../src/role/skiff/debug.js'
 // C2：候选 CCC 枚举的唯一真相源（原 skiff-debug.discoverCccs 已迁移至此）
 import { listCccs } from '../src/kernel/ccc-roots.js'
 // ⑤ 第 34 件：意图读取通路（面规格 `enabled` ← `faceEnabled`）
@@ -338,7 +338,7 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }))
     // 直接注册一个绑定 role=qa 的会话（fake agent）
-    const { registerSkiffSession, unregisterSkiffSession } = await import('../src/skiff-core.js')
+    const { registerSkiffSession, unregisterSkiffSession } = await import('../src/role/skiff/core.js')
     const sid = 'skiff-qa-bound'
     const fake = { session: { id: sid, events: [] }, followup: () => {} }
     registerSkiffSession(sid, 'qa', dir, fake as never)

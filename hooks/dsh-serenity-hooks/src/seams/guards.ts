@@ -23,8 +23,8 @@ import {
   type BlacklistRule,
 } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
-import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
-import { skiffRoleFor } from '../skiff-registry.js'
+import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../role/skiff/config.js'
+import { skiffRoleFor } from '../role/skiff/registry.js'
 import { hasEnabledImChannel } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../kernel/invariant.js'
 import { isoLocal } from '../kernel/time.js'

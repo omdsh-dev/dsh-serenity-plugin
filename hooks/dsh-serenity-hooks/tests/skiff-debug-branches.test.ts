@@ -50,7 +50,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { request } from 'node:http'
 
-import { startSkiffDebugServer, stopSkiffDebugServer, skiffDebugPort } from '../src/skiff-debug.js'
+import { startSkiffDebugServer, stopSkiffDebugServer, skiffDebugPort } from '../src/role/skiff/debug.js'
 
 let dir: string
 

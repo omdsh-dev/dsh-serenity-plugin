@@ -40,7 +40,7 @@ vi.mock('@deepseek-ai/schemastery', () => {
 })
 vi.mock('@deepseek-ai/dsh-settings', () => ({ default: class {} }))
 
-import { buildSkiffBasePrompt, roleToolWhitelist, readSkiffRoles, type SkiffRoleConfig } from '../src/skiff-role.js'
+import { buildSkiffBasePrompt, roleToolWhitelist, readSkiffRoles, type SkiffRoleConfig } from '../src/role/skiff/config.js'
 
 /** 造一个角色配置（只填本件关心的字段） */
 const role = (tools: string[], msms: string[] = []): SkiffRoleConfig => ({ tools, msms })

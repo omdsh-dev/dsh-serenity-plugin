@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Context } from 'cordis'
-import { cheapWorkerPresetInheritance } from '../src/cheap-worker-preset-inherit.js'
+import { cheapWorkerPresetInheritance } from '../src/role/worker/preset.js'
 
 /**
  * cheapWorkerPresetInheritance 单元测试：cheap-worker worker 的 preset 继承 + 工具面收窄。

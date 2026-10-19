@@ -25,7 +25,7 @@ import { registerEntrySkillSection, registerCognitiveTrajectorySkillSection } fr
 import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding, syncSkiffRoleToolVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory/core.js'
 import { readLastBound, appendBound } from '../trajectory/bound.js'
-import { isSkiffSessionId } from '../skiff-role.js'
+import { isSkiffSessionId } from '../role/skiff/config.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
 // ── 纯文本构建（可单测）──

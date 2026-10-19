@@ -15,8 +15,8 @@ import {
   skiffCognitiveTrajectoryEnabled,
   skiffMsmGate,
   registerSkiffSession,
-} from '../src/skiff-core.js'
-import { SKIFF_SESSION_PREFIX } from '../src/skiff-role.js'
+} from '../src/role/skiff/core.js'
+import { SKIFF_SESSION_PREFIX } from '../src/role/skiff/config.js'
 import { resetActiveSessionStore } from '../src/trajectory/core.js'
 
 /**

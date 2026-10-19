@@ -22,7 +22,7 @@ import { join } from 'node:path'
  */
 
 import { syncSkiffRoleToolVisibility, forgetSkiffRoleToolVisibility } from '../src/seams/guards.js'
-import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
+import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/registry.js'
 
 const SESSION = 'skiff-demo-role-1234'
 

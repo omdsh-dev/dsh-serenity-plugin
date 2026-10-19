@@ -23,16 +23,16 @@ import { type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { marked } from 'marked'
-import { readSkiffRoles } from './skiff-role.js'
-import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffCognitiveTrajectoryEntry } from './skiff-core.js'
-import { readCheapWorkerConfig } from './kernel/ccc.js'
+import { readSkiffRoles } from './config.js'
+import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffCognitiveTrajectoryEntry } from './core.js'
+import { readCheapWorkerConfig } from '../../kernel/ccc.js'
 // C2（CCC 发现面归一）：候选 CCC 枚举的**唯一真相源**是 ccc-roots.ts；
 // 本模块的 `discoverCccs` 已删除（调用点改用 `listCccs`，见各 handle 分支）。
-import { listCccs, type CccEntry } from './kernel/ccc-roots.js'
+import { listCccs, type CccEntry } from '../../kernel/ccc-roots.js'
 // C4 块 A：listener 生命周期归面宿主（本面=面 D，端口语义见 ports.ts 的 FACE_PORTS.skiffDebug）
-import { faceActive, facePort, startFace, stopFace, type FaceSpec } from './face-host.js'
-import { FACE_PORTS } from './kernel/ports.js'
-import { readSimpleSettings } from './settings-section.js'
+import { faceActive, facePort, startFace, stopFace, type FaceSpec } from '../../face-host.js'
+import { FACE_PORTS } from '../../kernel/ports.js'
+import { readSimpleSettings } from '../../settings-section.js'
 
 /** 面名（C4 块 A） */
 const FACE_SKIFF_DEBUG = 'skiff-debug'

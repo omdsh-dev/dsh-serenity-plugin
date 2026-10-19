@@ -14,7 +14,7 @@ import {
   createRolePromptReader,
   resolveSkiffKind,
   systemPromptSource,
-} from '../src/skiff-role.js'
+} from '../src/role/skiff/config.js'
 import type { SkiffRoleConfig } from '../src/kernel/ccc.js'
 
 let dir: string

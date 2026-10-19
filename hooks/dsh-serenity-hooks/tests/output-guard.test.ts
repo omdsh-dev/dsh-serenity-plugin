@@ -15,7 +15,7 @@ import {
   rebukeStates,
 } from '../src/guard/filter.js'
 import { registerOutputGuardHook } from '../src/guard/seam.js'
-import { stripThink } from '../src/skiff-debug.js'
+import { stripThink } from '../src/role/skiff/debug.js'
 
 let dir: string
 

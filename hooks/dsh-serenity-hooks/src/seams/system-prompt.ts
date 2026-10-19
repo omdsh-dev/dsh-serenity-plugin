@@ -45,7 +45,7 @@ import {
 import { recordSkillInjections } from '../usage-stats.js'
 import { localstorePath, readGitTrack } from '../kernel/localstore.js'
 import { readAdvancedSettings } from '../kernel/config.js'
-import { isSkiffSessionId } from '../skiff-role.js'
+import { isSkiffSessionId } from '../role/skiff/config.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
 function readPersonaSettings(): { mode: string; overrideText: string } {

@@ -46,7 +46,7 @@ import {
   forgetRebuildTodoState,
   __resetRebuildTodoForTest,
 } from '../src/seams/keeper.js'
-import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-core.js'
+import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/core.js'
 import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/trajectory/core.js'
 
 describe('keeper: 纯跟踪器', () => {

@@ -20,8 +20,8 @@ import {
   createSkiffAgent,
   ensureSkiffSession,
   workspaceCognitiveTrajectoryLine,
-} from '../src/skiff-core.js'
-import { SKIFF_SESSION_PREFIX, type SkiffRoleConfig } from '../src/skiff-role.js'
+} from '../src/role/skiff/core.js'
+import { SKIFF_SESSION_PREFIX, type SkiffRoleConfig } from '../src/role/skiff/config.js'
 import { getActiveSessionInfo, resetActiveSessionStore } from '../src/trajectory/core.js'
 import { readLastBound } from '../src/trajectory/bound.js'
 

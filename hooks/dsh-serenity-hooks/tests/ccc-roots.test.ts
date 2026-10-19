@@ -17,7 +17,7 @@ import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { listCccs, agentCwdFor, cccRootForCwd, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
-import { readSkiffRoles } from '../src/skiff-role.js'
+import { readSkiffRoles } from '../src/role/skiff/config.js'
 
 /** 建一个临时 CCC（含 `.serenity`）；返回真实路径 */
 function makeCcc(prefix: string): string {
@@ -155,7 +155,7 @@ describe('listCccs：withRoles 缺省不读 serenity.json', () => {
     mkdirSync(join(a, '.opencode'), { recursive: true })
     writeFileSync(join(a, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'] } } } }))
 
-    const spy = vi.spyOn(await import('../src/skiff-role.js'), 'readSkiffRoles')
+    const spy = vi.spyOn(await import('../src/role/skiff/config.js'), 'readSkiffRoles')
     const cccs = await listCccs(fakeCtx({ workspaces: [{ path: a }] }) as never)
 
     // 用桩断言「fs 未被以那些路径调用」的等价形式：角色解析器一次都没被调用

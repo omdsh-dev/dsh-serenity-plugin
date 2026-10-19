@@ -39,8 +39,8 @@ vi.mock('../src/msm-ops.js', async (importOriginal) => {
 import { msmTool } from '../src/tools/msm.js'
 import { runMsmAsync } from '../src/msm-ops.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
-import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-core.js'
-import { SKIFF_SESSION_PREFIX } from '../src/skiff-role.js'
+import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/core.js'
+import { SKIFF_SESSION_PREFIX } from '../src/role/skiff/config.js'
 
 const mockRunMsmAsync = vi.mocked(runMsmAsync)
 

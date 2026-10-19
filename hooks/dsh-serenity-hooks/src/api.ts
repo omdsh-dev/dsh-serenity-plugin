@@ -511,7 +511,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             return
           }
           const { saveWeixinRoutes } = await import('./im/route.js')
-          const { readSkiffRoles } = await import('./skiff-role.js')
+          const { readSkiffRoles } = await import('./role/skiff/config.js')
           const roles = readSkiffRoles(root)
           for (const r of routes) {
             if (!roles.has(r.role)) {

@@ -22,7 +22,7 @@ import {
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/kernel/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im/channels.js'
 import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/kernel/ccc.js'
-import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
+import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/registry.js'
 
 let dir: string
 

@@ -9,7 +9,7 @@
  * 实验性质：未配置任何角色 → Skiff 完全零影响（无监听、无 agent 创建、guard 无规则）。
  */
 
-import { loadSerenityConfig, resolveInside, readUtf8, DEFAULT_SERENITY_CONFIG_PATHS, type SkiffRoleConfig } from './kernel/ccc.js'
+import { loadSerenityConfig, resolveInside, readUtf8, DEFAULT_SERENITY_CONFIG_PATHS, type SkiffRoleConfig } from '../../kernel/ccc.js'
 import { existsSync, statSync } from 'node:fs'
 
 export type { SkiffRoleConfig }

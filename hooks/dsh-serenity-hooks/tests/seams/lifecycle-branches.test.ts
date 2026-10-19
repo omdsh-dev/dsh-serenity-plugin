@@ -76,8 +76,8 @@ vi.mock('@deepseek-ai/schemastery', () => {
 const calls: string[] = []
 const throwSet = new Set<string>()
 
-vi.mock('../../src/skiff-core.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/skiff-core.js')>()
+vi.mock('../../src/role/skiff/core.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/role/skiff/core.js')>()
   return {
     ...actual,
     unregisterSkiffSession: (id: string) => {

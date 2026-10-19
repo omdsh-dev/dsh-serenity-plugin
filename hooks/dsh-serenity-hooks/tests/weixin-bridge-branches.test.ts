@@ -64,7 +64,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 import { writeWeixinCredential } from '../src/im/route.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
+import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
 
 let dir: string
 let oldConfigEnv: string | undefined

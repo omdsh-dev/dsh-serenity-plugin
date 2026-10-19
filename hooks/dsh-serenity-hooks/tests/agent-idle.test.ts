@@ -5,7 +5,7 @@
  * 就永久挂起。本测试钉死三条结算通道 + 订阅后状态兜底。
  */
 import { describe, it, expect, vi } from 'vitest'
-import { waitAgentIdle } from '../src/agent-idle.js'
+import { waitAgentIdle } from '../src/role/worker/idle.js'
 
 type Handler = (payload: unknown) => void
 
