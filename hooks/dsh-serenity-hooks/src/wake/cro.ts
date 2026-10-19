@@ -47,9 +47,9 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { join } from 'node:path'
-import { resolveInside } from '../ccc.js'
+import { resolveInside } from '../kernel/ccc.js'
 import { sessionsRoot } from '../trajectory/core.js'
-import { isoLocal } from '../time.js'
+import { isoLocal } from '../kernel/time.js'
 
 /** 入口文件名（**全写**，所有者令 2026-09-19；不改缩写） */
 export const CRO_FILENAME = 'continuous-re-occurrence.ts'

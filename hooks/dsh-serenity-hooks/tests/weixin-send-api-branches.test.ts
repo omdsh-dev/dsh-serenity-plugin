@@ -54,13 +54,13 @@ import type { ServerResponse } from 'node:http'
 vi.mock('../src/im/bridge.js', () => ({
   sendProactiveText: vi.fn(),
 }))
-vi.mock('../src/ccc-roots.js', () => ({
+vi.mock('../src/kernel/ccc-roots.js', () => ({
   listCccs: vi.fn(),
 }))
 
 import { handleWeixinSendRequest, registerWeixinSendApi, stopWeixinSendApi, weixinSendEndpoint } from '../src/im/send.js'
 import { sendProactiveText } from '../src/im/bridge.js'
-import { listCccs } from '../src/ccc-roots.js'
+import { listCccs } from '../src/kernel/ccc-roots.js'
 
 const sendMock = vi.mocked(sendProactiveText)
 const discoverMock = vi.mocked(listCccs)
@@ -365,7 +365,7 @@ describe('weixin-send-api 分支：E 组 —— 装配容错（配置抛 / 事�
     //    （真实生产端口）⇒ 那会去**绑定活服务端口**（本件首跑实测撞 EADDRINUSE）。
     //    改为直接观察**判据函数**的缺省语义（零监听、零端口）。
     rmSync(process.env.SERENITY_HOOKS_CONFIG!, { force: true }) // 文件不存在 ⇒ 走默认
-    const { readAdvancedSettings } = await import('../src/config-ops.js')
+    const { readAdvancedSettings } = await import('../src/kernel/config.js')
 
     // 🔴 真实契约：配置缺失**不得抛**（这条才是那道 catch 想守的东西）
     const cfg = readAdvancedSettings()

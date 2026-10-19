@@ -11,7 +11,7 @@
 
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import type { IncomingMessage } from 'node:http'
-import { verifyPassword } from '../config-ops.js'
+import { verifyPassword } from '../kernel/config.js'
 
 // ── 账号验证（纯逻辑）：user + password 对 accounts 匹配（scrypt）──
 

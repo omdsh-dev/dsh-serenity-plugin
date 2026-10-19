@@ -31,7 +31,7 @@
  */
 
 import { basename } from 'node:path'
-import { hostService, hostSessions } from './host/access.js'
+import { hostService, hostSessions } from '../host/access.js'
 import { findSerenityRoot } from './ccc.js'
 
 // ── L1：agent/exec → cwd → 根 ──
@@ -207,7 +207,7 @@ export async function listCccs(ctx: unknown, opts: ListCccsOptions = {}): Promis
   // 场景里被静态引用——如唤醒调度器；只有真要角色时才加载）。
   let rolesOf: ((root: string) => string[]) | null = null
   if (opts.withRoles === true) {
-    const { readSkiffRoles } = await import('./skiff-role.js')
+    const { readSkiffRoles } = await import('../skiff-role.js')
     rolesOf = (root: string) => [...readSkiffRoles(root).keys()]
   }
 

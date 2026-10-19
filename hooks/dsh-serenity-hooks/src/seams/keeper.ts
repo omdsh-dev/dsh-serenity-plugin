@@ -17,15 +17,15 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { existsSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { hostService } from '../host/access.js'
-import { loadSerenityConfig } from '../ccc.js'
-import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
+import { loadSerenityConfig } from '../kernel/ccc.js'
+import { agentCwdFor, cccRootForCwd } from '../kernel/ccc-roots.js'
 import { readSimpleSettings } from '../settings-section.js'
 import { skiffCognitiveTrajectoryEnabled } from '../skiff-core.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { readLastBound } from '../trajectory/bound.js'
 import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, REBUILD_TODO_FILENAME } from '../trajectory/assistant.js'
 import { recordToolUsage } from '../usage-stats.js'
-import { PLUGIN_SOURCE } from '../message-source.js'
+import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
 // ── 纯跟踪器（可单测）──
 

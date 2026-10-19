@@ -41,7 +41,7 @@ const CSS_VIRTUAL_PREFIX = '\0sp-css:'
 export default [
   {
     // Node half
-    entry: { index: 'src/index.ts', invariant: 'src/invariant.ts' },
+    entry: { index: 'src/index.ts', invariant: 'src/kernel/invariant.ts' },
     outDir: 'lib',
     format: ['esm'],
     platform: 'node',

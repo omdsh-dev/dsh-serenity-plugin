@@ -28,7 +28,7 @@
  * **零处**属性访问（`ctx.xxx`）。
  */
 
-import { cccRootForCwd } from '../ccc-roots.js'
+import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { hostSessions } from '../host/access.js'
 import { sessionEvents } from './core.js'
 

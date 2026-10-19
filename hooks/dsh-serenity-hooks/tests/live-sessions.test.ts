@@ -10,7 +10,7 @@
  * 那是 `ccc-roots` 自己的语义，不属于本模块的职责面。
  */
 import { describe, expect, it } from 'vitest'
-import { cccRootForCwd } from '../src/ccc-roots.js'
+import { cccRootForCwd } from '../src/kernel/ccc-roots.js'
 import { diagLive, listLiveSessions, readSessionTitle } from '../src/trajectory/live.js'
 
 type FakeCtx = { sessions?: { list?: () => unknown } }

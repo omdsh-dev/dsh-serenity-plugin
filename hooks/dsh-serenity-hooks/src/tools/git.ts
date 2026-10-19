@@ -4,7 +4,7 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
 import { runGit, GIT_ACTIONS } from '../git-ops.js'
 
 function renderText(value: unknown): ContentBlock[] {

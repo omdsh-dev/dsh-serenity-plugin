@@ -28,8 +28,8 @@
 
 import type { Context } from 'cordis'
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
-import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from '../config-ops.js'
-import { cccRootForCwd } from '../ccc-roots.js'
+import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from '../kernel/config.js'
+import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { readSimpleSettings } from '../settings-section.js'
 // C4 块 A：listener 生命周期归面宿主（本面=面 B，端口语义见 ports.ts 的 FACE_PORTS.gateway）
 import { startFace, type FaceHandle } from '../face-host.js'

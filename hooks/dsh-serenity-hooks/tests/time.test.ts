@@ -17,7 +17,7 @@ import {
   localHuman,
   localFileStamp,
   localIdStamp,
-} from '../src/time.js'
+} from '../src/kernel/time.js'
 
 const OFFSET_RE = /^[+-]\d{2}:\d{2}$/
 

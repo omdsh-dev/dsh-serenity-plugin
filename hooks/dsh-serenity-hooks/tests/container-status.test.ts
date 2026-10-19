@@ -27,7 +27,7 @@ import {
 } from '../src/container-status.js'
 import { hostContractReport } from '../src/host/contract.js'
 import { runKit } from '../src/kit-ops.js'
-import { ACC_VERSION } from '../src/constants.js'
+import { ACC_VERSION } from '../src/kernel/constants.js'
 import { registerWakeScheduler, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 

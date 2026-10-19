@@ -16,7 +16,7 @@ import {
   globalConfigPath,
   projectKnownWorkspaces,
   ADVANCED_SECTION,
-} from '../src/config-ops.js'
+} from '../src/kernel/config.js'
 import { generateTotpSecret, totpCode, nowEpochSeconds, TOTP_STEP_SECONDS } from '../src/gateway/totp.js'
 
 let dir: string

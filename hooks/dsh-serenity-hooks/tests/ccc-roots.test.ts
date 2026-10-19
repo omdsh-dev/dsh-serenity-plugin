@@ -16,7 +16,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { listCccs, agentCwdFor, cccRootForCwd, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../src/ccc-roots.js'
+import { listCccs, agentCwdFor, cccRootForCwd, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
 import { readSkiffRoles } from '../src/skiff-role.js'
 
 /** 建一个临时 CCC（含 `.serenity`）；返回真实路径 */

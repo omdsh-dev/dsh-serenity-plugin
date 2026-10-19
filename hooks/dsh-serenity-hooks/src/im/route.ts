@@ -15,8 +15,8 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type WeixinSettings, type WeixinRouteConfig, type WeixinAccountConfig } from '../ccc.js'
-import { writeEntry, getEntry, unsetEntry } from '../localstore-ops.js'
+import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type WeixinSettings, type WeixinRouteConfig, type WeixinAccountConfig } from '../kernel/ccc.js'
+import { writeEntry, getEntry, unsetEntry } from '../kernel/localstore.js'
 import type { WeixinMediaRef, WeixinMessageItem } from './ilink.js'
 
 /** localstore 凭据键前缀（**credential scope**——token 是凭据，走 UPPER_SNAKE 键；

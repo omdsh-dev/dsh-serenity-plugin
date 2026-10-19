@@ -28,7 +28,7 @@ import type { Context } from 'cordis'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { readCheapWorkerConfig } from '../ccc.js'
+import { readCheapWorkerConfig } from '../kernel/ccc.js'
 // P0-2（方案 §2.6）：机器级归属判定（一账号一 poller）—— 机制在 human-channel.ts，本文件只接线
 // P0-3（方案 §11.4）：订阅表 ＋ 路由 ＋ 机器级留痕 —— 同上，机制在 human-channel.ts
 import {
@@ -223,7 +223,7 @@ export function manualOutputFallbackNeeded(input: {
  */
 async function resolveCccRootByAlias(ctx: Context, alias: string): Promise<string | null> {
   try {
-    const { listCccs } = await import('../ccc-roots.js')
+    const { listCccs } = await import('../kernel/ccc-roots.js')
     const entries = await listCccs(ctx)
     const byName = entries.find((e) => e.name === alias)
     if (byName) return byName.root
@@ -815,7 +815,7 @@ export function syncHumanChannel(ctx: Context): void {
       // ∪ live 会话），取代原先"只认 live 会话 cwd"的第三份内联 Set 实现。
       // 收益：没有 live 会话时也能为已知 CCC 启桥（原实现会漏）。
       // 角色不读（withRoles 缺省 false）——本处只需要根。
-      const { listCccs } = await import('../ccc-roots.js')
+      const { listCccs } = await import('../kernel/ccc-roots.js')
       // 未配置的 CCC 不启动（syncCccBridge 内部判断 enabled）
       for (const entry of await listCccs(ctx)) syncCccBridge(ctx, entry.root)
     } catch {

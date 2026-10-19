@@ -16,7 +16,7 @@ import {
   docText,
   runLocalStore,
   CREDENTIAL_KEY_RE,
-} from '../src/localstore-ops.js'
+} from '../src/kernel/localstore.js'
 
 /**
  * localstore-ops 单元测试（S134 重设计：CCC 根 localstore.json + git 策略）。

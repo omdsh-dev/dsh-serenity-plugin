@@ -16,7 +16,7 @@ import {
   localstoreBlock,
   codeModeAdaptationLine,
 } from '../src/seams/system-prompt.js'
-import { ACC_VERSION } from '../src/constants.js'
+import { ACC_VERSION } from '../src/kernel/constants.js'
 
 let dir: string
 

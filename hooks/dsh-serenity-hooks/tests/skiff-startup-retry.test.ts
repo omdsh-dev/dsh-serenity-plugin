@@ -71,8 +71,8 @@ vi.mock('../src/skiff-debug.js', () => ({
 }))
 // CCC 根解析：只认本测试的临时 CCC（真实 findSerenityRoot(process.cwd()) 会命中
 // 开发机上的真实 CCC → "无可解析 CCC"前提变成假阴性；worker 里不能 chdir，故替换纯函数）
-vi.mock('../src/ccc.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/ccc.js')>()
+vi.mock('../src/kernel/ccc.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/kernel/ccc.js')>()
   return {
     ...actual,
     findSerenityRoot: (cwd: string) => {

@@ -48,7 +48,7 @@ import {
   writeEntry,
   getEntry,
   checkLocalstoreGitCompliance,
-} from '../src/localstore-ops.js'
+} from '../src/kernel/localstore.js'
 
 let dir: string
 

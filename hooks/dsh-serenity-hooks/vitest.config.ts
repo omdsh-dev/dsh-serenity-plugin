@@ -15,9 +15,9 @@ export default defineConfig({
       include: ['src/**/*.ts'],
       exclude: [
         'src/index.ts',
-        'src/invariant.ts',
-        'src/constants.ts',
-        'src/json.ts',
+        'src/kernel/invariant.ts',
+        'src/kernel/constants.ts',
+        'src/kernel/json.ts',
         'src/client/**',
         'src/**/*.d.ts',
       ],

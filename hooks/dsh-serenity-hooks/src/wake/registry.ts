@@ -16,7 +16,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { isoLocal, localIdStamp } from '../time.js'
+import { isoLocal, localIdStamp } from '../kernel/time.js'
 
 /** 注册表相对 CCC 根的路径（与 `.bindings.json` 同居 AGENT_SESSIONS/） */
 const WAKE_REGISTRY_REL_PATH = 'AGENT_SESSIONS/wake-registry.json'

@@ -39,7 +39,7 @@ import {
   serenitySystemPrompt,
 } from '../src/seams/system-prompt.js'
 import { useSession, resetActiveSessionStore } from '../src/trajectory/core.js'
-import { ACC_VERSION } from '../src/constants.js'
+import { ACC_VERSION } from '../src/kernel/constants.js'
 
 let dir: string
 

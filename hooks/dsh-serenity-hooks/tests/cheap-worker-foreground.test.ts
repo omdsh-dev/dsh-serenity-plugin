@@ -11,7 +11,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 }))
 
 import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
-import { readCheapWorkerConfig } from '../src/ccc.js'
+import { readCheapWorkerConfig } from '../src/kernel/ccc.js'
 
 /**
  * cheap-worker（前台委派）。

@@ -20,8 +20,8 @@
  * ⚠️ wire 形状**逐字不变**（字段名/取值/出现条件都不许动）——C5 是取数归一，不是文案改版。
  */
 
-import type { JsonValue } from './json.js'
-import { isoLocal } from './time.js'
+import type { JsonValue } from './kernel/json.js'
+import { isoLocal } from './kernel/time.js'
 
 type KitAction = 'health' | 'time' | 'wait'
 

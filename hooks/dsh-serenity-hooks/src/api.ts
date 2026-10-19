@@ -18,11 +18,11 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import { hostService, hostSessions } from './host/access.js'
 import { getStatus, setSafeMode } from './status.js'
-import { DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
+import { DEFAULT_SERENITY_CONFIG_PATHS } from './kernel/ccc.js'
 // C2（CCC 发现面归一）：L1 单根解析 / L2 枚举一律问 ccc-roots（本文件不再自写上溯包裹）
-import { cccRootForCwd, listCccs } from './ccc-roots.js'
-import { readAdvancedSettings, toWire, applyWirePatch, projectKnownWorkspaces } from './config-ops.js'
-import { isoLocal, localFileStamp } from './time.js'
+import { cccRootForCwd, listCccs } from './kernel/ccc-roots.js'
+import { readAdvancedSettings, toWire, applyWirePatch, projectKnownWorkspaces } from './kernel/config.js'
+import { isoLocal, localFileStamp } from './kernel/time.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const UPLOAD_PATH = '/serenity/image-upload'

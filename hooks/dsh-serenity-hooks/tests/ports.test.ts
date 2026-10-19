@@ -7,7 +7,7 @@ import {
   WEIXIN_SEND_PORT,
   SKIFF_DEBUG_PORT,
   type FaceId,
-} from '../src/ports.js'
+} from '../src/kernel/ports.js'
 
 /**
  * ports.test.ts — 集中端口表（C4 块 B，S142 2026-09-15）

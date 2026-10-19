@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { MessageSource } from '@deepseek-ai/dsh-llm'
-import { ACC_MESSAGE_KIND, PLUGIN_SOURCE } from '../src/message-source.js'
+import { ACC_MESSAGE_KIND, PLUGIN_SOURCE } from '../src/kernel/message-source.js'
 
 /**
  * message-source 镜像测试（v1.47.0 / DSH 0.1.7-rc.1 适配）。

@@ -46,10 +46,10 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { Message } from '@deepseek-ai/dsh-llm'
 import { hostService } from '../host/access.js'
-import { PLUGIN_SOURCE } from '../message-source.js'
+import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
+import { agentCwdFor, cccRootForCwd } from '../kernel/ccc-roots.js'
 import {
   getActiveSessionInfo,
   parseSessionContextFromEvents,
@@ -60,7 +60,7 @@ import {
 import { DEFAULT_FAKE_INITIAL_MESSAGES } from '../seams/bootstrap.js'
 import { eventToken, REBUILD_TODO_FILENAME } from './assistant.js'
 import { appendBound, readLastBound } from './bound.js'
-import { isoLocal } from '../time.js'
+import { isoLocal } from '../kernel/time.js'
 
 /** acknowledge 尾句（fake-initial-turns 的确认要求——rebuild 重建后不重走确认轮，直接继续） */
 const ACK_SUFFIX_RE = /Please simply reply "acknowledge" — no action needed\.\s*$/

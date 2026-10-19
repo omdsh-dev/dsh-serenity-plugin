@@ -20,15 +20,15 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from 'cordis'
-import { readCheapWorkerConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../ccc.js'
-import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
+import { readCheapWorkerConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../kernel/ccc.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
 import {
   CHEAP_WORKER_GUIDE,
   providerAvailabilityError,
   requireWhitelistedModel,
   splitModel,
 } from '../cheap-worker-ops.js'
-import type { JsonValue } from '../json.js'
+import type { JsonValue } from '../kernel/json.js'
 import { hostLlm, hostSubagents } from '../host/access.js'
 
 function renderText(value: unknown): ContentBlock[] {

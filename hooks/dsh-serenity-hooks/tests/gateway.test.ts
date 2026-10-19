@@ -32,7 +32,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { hashPassword } from '../src/config-ops.js'
+import { hashPassword } from '../src/kernel/config.js'
 import {
   loginPageHtml,
   verifyGatewayLogin,

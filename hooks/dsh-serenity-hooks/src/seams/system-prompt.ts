@@ -30,9 +30,9 @@ import type { Context } from 'cordis'
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import { existsSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { isSafeModeOn, readBlacklist, readCognitiveTrajectorySkills } from '../ccc.js'
-import { agentCwdFor, cccRootForCwd } from '../ccc-roots.js'
-import { ACC_VERSION } from '../constants.js'
+import { isSafeModeOn, readBlacklist, readCognitiveTrajectorySkills } from '../kernel/ccc.js'
+import { agentCwdFor, cccRootForCwd } from '../kernel/ccc-roots.js'
+import { ACC_VERSION } from '../kernel/constants.js'
 import { findEntrySkills } from '../skills/discovery.js'
 import { buildResourceIndex } from '../skills/resource-index.js'
 import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory/core.js'
@@ -43,8 +43,8 @@ import {
   COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
 } from '../trajectory/skills.js'
 import { recordSkillInjections } from '../usage-stats.js'
-import { localstorePath, readGitTrack } from '../localstore-ops.js'
-import { readAdvancedSettings } from '../config-ops.js'
+import { localstorePath, readGitTrack } from '../kernel/localstore.js'
+import { readAdvancedSettings } from '../kernel/config.js'
 import { isSkiffSessionId } from '../skiff-role.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */

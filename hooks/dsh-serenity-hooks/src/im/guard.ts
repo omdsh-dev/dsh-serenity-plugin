@@ -23,7 +23,7 @@
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { PLUGIN_SOURCE } from '../message-source.js'
+import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
 /** 打回上限（超过则放弃并告警——避免与模型无限拉扯） */
 export const WEIXIN_OUTPUT_REBUKE_MAX = 2

@@ -16,7 +16,7 @@
 
 import type { Context } from 'cordis'
 import type { SkillProvider, SkillCandidate, SkillDefinition, SkillLookupOptions } from '@deepseek-ai/dsh-skill'
-import { cccRootForCwd } from '../ccc-roots.js'
+import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { listOpencodeSkillDirs, loadOpencodeSkill } from '../skills/opencode-scan.js'
 import { buildResourceIndex, buildResourceNameSuffix } from '../skills/resource-index.js'
 

@@ -8,8 +8,8 @@
  * 公开入口 = container_admin（domain: role → guide/validate/apply/list）；本文件保留纯逻辑。
  */
 
-import type { JsonValue } from '../json.js'
-import { readCheapWorkerConfig } from '../ccc.js'
+import type { JsonValue } from '../kernel/json.js'
+import { readCheapWorkerConfig } from '../kernel/ccc.js'
 import { readSkiffRoles, resolveRoleSystemPrompt, systemPromptSource } from '../skiff-role.js'
 import { loadMsmEntries } from '../msm-ops.js'
 

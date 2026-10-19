@@ -8,7 +8,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 }))
 
 import { registerCompactRetention } from '../src/seams/compact.js'
-import { ACC_VERSION } from '../src/constants.js'
+import { ACC_VERSION } from '../src/kernel/constants.js'
 
 let dir: string
 

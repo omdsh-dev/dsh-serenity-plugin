@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
-import { verifyToolConsistency, assertManifestProse, REGISTERED_TOOLS } from '../src/invariant.js'
+import { verifyToolConsistency, assertManifestProse, REGISTERED_TOOLS } from '../src/kernel/invariant.js'
 
 describe('invariant: 清单与注册工具一致性', () => {
   it('一致时零问题（14 工具，与 dsh.plugin.json contributes.tools 一致）', () => {

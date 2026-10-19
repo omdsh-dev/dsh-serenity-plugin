@@ -15,13 +15,13 @@ import {
   readCheapWorkerConfig,
   SAFE_MODE_MARKER,
   DEFAULT_SERENITY_CONFIG_PATHS,
-} from './ccc.js'
-import { cccRootForCwd } from './ccc-roots.js'
-import { ACC_VERSION } from './constants.js'
+} from './kernel/ccc.js'
+import { cccRootForCwd } from './kernel/ccc-roots.js'
+import { ACC_VERSION } from './kernel/constants.js'
 import { listActiveTrajectories, type TrajectorySummary } from './trajectory/core.js'
 import { listOpencodeSkillDirs } from './skills/opencode-scan.js'
 import { getRestrictDiagnostics } from './seams/guards.js'
-import { isoLocal } from './time.js'
+import { isoLocal } from './kernel/time.js'
 
 /** 宿主包名 —— 从运行入口反推包根时的**身份核对**用（见 {@link dshVersionFromEntry}） */
 const HOST_PACKAGE_NAME = '@deepseek-ai/dsh'

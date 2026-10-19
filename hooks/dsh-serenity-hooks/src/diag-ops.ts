@@ -37,7 +37,7 @@ import { WAKE_CATCH_UP_MS } from './wake/registry.js'
 import { diagLive, type DiagLiveReport } from './trajectory/live.js'
 import { containerClocks, containerWakes, type ClockSnapshot } from './container-status.js'
 import type { Context } from 'cordis'
-import { isoLocal } from './time.js'
+import { isoLocal } from './kernel/time.js'
 import { readSimpleSettings } from './settings-section.js'
 
 /** 进程内时钟状态（唤醒调度器；判据单一真相源 = `wake-scheduler.ts`） */

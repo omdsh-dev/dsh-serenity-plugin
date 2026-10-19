@@ -18,7 +18,7 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
 import { runMsmAsync, loadMsmEntries, findEntry } from '../msm-ops.js'
 import { skiffMsmGate } from '../skiff-core.js'
 

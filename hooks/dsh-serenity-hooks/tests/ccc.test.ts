@@ -14,7 +14,7 @@ import {
   readBlacklist,
   matchBlacklist,
   isWriteTool,
-} from '../src/ccc.js'
+} from '../src/kernel/ccc.js'
 
 let dir: string
 

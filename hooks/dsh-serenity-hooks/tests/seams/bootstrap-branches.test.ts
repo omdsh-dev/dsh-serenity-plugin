@@ -67,7 +67,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { registerBootstrap, createEpochPromotion, hasUserMessageHistory } from '../../src/seams/bootstrap.js'
-import { ACC_MESSAGE_KIND } from '../../src/message-source.js'
+import { ACC_MESSAGE_KIND } from '../../src/kernel/message-source.js'
 
 type Handler = (...args: unknown[]) => unknown
 

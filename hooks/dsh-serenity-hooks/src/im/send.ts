@@ -24,10 +24,10 @@
 import { type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import { basename } from 'node:path'
-import { findSerenityRoot, readCccName } from '../ccc.js'
-import { readAdvancedSettings } from '../config-ops.js'
+import { findSerenityRoot, readCccName } from '../kernel/ccc.js'
+import { readAdvancedSettings } from '../kernel/config.js'
 import { faceEnabled, facePort, startFace, stopFace, type FaceSpec } from '../face-host.js'
-import { FACE_PORTS } from '../ports.js'
+import { FACE_PORTS } from '../kernel/ports.js'
 import { sendProactiveText } from './bridge.js'
 import { setWeixinSendEndpoint, weixinSendEndpoint } from './endpoint.js'
 
@@ -147,7 +147,7 @@ export function matchCcc(input: string, candidates: CccCandidate[]): { ok: true;
 async function collectCandidates(ctx: Context): Promise<CccCandidate[]> {
   // C2：候选来源改为 ccc-roots（L2 枚举唯一真相源）——不再绕 skiff-debug.js
   // （那样会连带加载整条 skiff 链）。默认根 = process.cwd()（既有语义不变）。
-  const { listCccs } = await import('../ccc-roots.js')
+  const { listCccs } = await import('../kernel/ccc-roots.js')
   const entries = await listCccs(ctx, { defaultRoot: process.cwd() })
   const seen = new Set<string>()
   const out: CccCandidate[] = []

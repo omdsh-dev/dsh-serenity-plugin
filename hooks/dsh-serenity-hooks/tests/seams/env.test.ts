@@ -24,8 +24,8 @@ import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { registerEnv } from '../../src/seams/env.js'
-import { readCccName } from '../../src/ccc.js'
-import { ACC_VERSION } from '../../src/constants.js'
+import { readCccName } from '../../src/kernel/ccc.js'
+import { ACC_VERSION } from '../../src/kernel/constants.js'
 
 const CCC_NAME = 'envccc'
 let dir: string

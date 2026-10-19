@@ -38,8 +38,8 @@ import { hostAgents, hostService } from '../host/access.js'
 import { registerDisposer } from '../host/effect.js'
 import { readSimpleSettings } from '../settings-section.js'
 import { createClock, type ClockOptions, type ClockRuntime } from './clock.js'
-import { listCccs } from '../ccc-roots.js'
-import { isoLocal, localHuman } from '../time.js'
+import { listCccs } from '../kernel/ccc-roots.js'
+import { isoLocal, localHuman } from '../kernel/time.js'
 import {
   finalizeWake,
   loadWakeRegistry,
@@ -49,7 +49,7 @@ import {
   WAKE_CATCH_UP_MS,
   type WakeEntry,
 } from './registry.js'
-import { PLUGIN_SOURCE } from '../message-source.js'
+import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
 /**
  * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────

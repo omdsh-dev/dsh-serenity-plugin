@@ -16,7 +16,7 @@
 
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { resolveInside } from '../ccc.js'
+import { resolveInside } from '../kernel/ccc.js'
 
 /** hook 执行超时（旁路记录足够；超时 kill 防挂死脚本） */
 const WEIXIN_HOOK_TIMEOUT_MS = 15_000

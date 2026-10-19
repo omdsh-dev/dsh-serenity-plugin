@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { registerGateway } from '../src/gateway/server.js'
 import { stopAllFaces, faceActive, facePort } from '../src/face-host.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
-import { hashPassword } from '../src/config-ops.js'
+import { hashPassword } from '../src/kernel/config.js'
 
 /**
  * gateway-branches.test.ts — 网关面：**cookieSecure 四分支与会话装配退路**（⑤ 第 58 件，S142 2026-09-26）

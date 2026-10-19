@@ -15,7 +15,7 @@ import {
   resolveSkiffKind,
   systemPromptSource,
 } from '../src/skiff-role.js'
-import type { SkiffRoleConfig } from '../src/ccc.js'
+import type { SkiffRoleConfig } from '../src/kernel/ccc.js'
 
 let dir: string
 

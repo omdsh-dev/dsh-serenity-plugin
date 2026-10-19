@@ -14,8 +14,8 @@ import type { ToolExecution } from '@deepseek-ai/dsh-tools'
 import type { BashEnvContributor } from '@deepseek-ai/dsh-shell-env'
 import type { DshEnvironmentKey } from '@deepseek-ai/dsh-shell'
 import { basename } from 'node:path'
-import { cccRootForCwd } from '../ccc-roots.js'
-import { ACC_VERSION } from '../constants.js'
+import { cccRootForCwd } from '../kernel/ccc-roots.js'
+import { ACC_VERSION } from '../kernel/constants.js'
 
 type SerenityEnvFacts = Partial<Record<DshEnvironmentKey, string>>
 

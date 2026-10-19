@@ -23,10 +23,10 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { GenerateOptions, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
-import { cccRootForCwd } from '../ccc-roots.js'
+import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { sessionEvents } from '../trajectory/core.js'
 import { isSkiffSessionId } from '../skiff-role.js'
-import { ACC_MESSAGE_KIND } from '../message-source.js'
+import { ACC_MESSAGE_KIND } from '../kernel/message-source.js'
 
 interface BootstrapSettings {
   /** 首请求（bootstrap 阶段）工具集（缺省 dsp 核心；zeroTools 时忽略——0 工具） */

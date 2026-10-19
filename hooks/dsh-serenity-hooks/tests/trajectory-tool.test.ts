@@ -44,7 +44,7 @@ import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory
 import { hasSessionLogById } from '../src/trajectory/cleanup.js'
 import { resetActiveSessionStore, COGNITIVE_TRAJECTORY_ACTIONS } from '../src/trajectory/core.js'
 import { setBindingStore, BINDINGS_REL_PATH } from '../src/trajectory/bound.js'
-import { NO_CCC_FROM_AGENT_CWD } from '../src/ccc-roots.js'
+import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
 
 const mockHasLog = vi.mocked(hasSessionLogById)
 

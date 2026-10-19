@@ -12,7 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createSkillCreatorTool } from '../src/tools/skill-creator.js'
-import { REGISTERED_TOOLS } from '../src/invariant.js'
+import { REGISTERED_TOOLS } from '../src/kernel/invariant.js'
 
 interface ExecutableTool {
   name: string

@@ -19,7 +19,7 @@ vi.mock('../src/im/bridge.js', () => ({
   sendProactiveText: vi.fn(),
 }))
 // C2：候选来源由 skiff-debug.discoverCccs 迁至 ccc-roots.listCccs（本模块改问后者）
-vi.mock('../src/ccc-roots.js', () => ({
+vi.mock('../src/kernel/ccc-roots.js', () => ({
   listCccs: vi.fn(),
 }))
 
@@ -37,7 +37,7 @@ import {
   type CccCandidate,
 } from '../src/im/send.js'
 import { sendProactiveText } from '../src/im/bridge.js'
-import { listCccs } from '../src/ccc-roots.js'
+import { listCccs } from '../src/kernel/ccc-roots.js'
 
 const sendMock = vi.mocked(sendProactiveText)
 const discoverMock = vi.mocked(listCccs)

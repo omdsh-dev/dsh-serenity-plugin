@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os'
 
 import { registerBootstrap, DEFAULT_FAKE_INITIAL_MESSAGES, FAKE_TURN_SUMMARY, FAKE_TURN_ACK_TEXT, DEFAULT_COMPACTION_TOOLS } from '../../src/seams/bootstrap.js'
 // 不硬编码字面量：插件来源 kind 的**单一真相源**在 message-source.ts
-import { ACC_MESSAGE_KIND } from '../../src/message-source.js'
+import { ACC_MESSAGE_KIND } from '../../src/kernel/message-source.js'
 
 type Handler = (...args: unknown[]) => unknown
 

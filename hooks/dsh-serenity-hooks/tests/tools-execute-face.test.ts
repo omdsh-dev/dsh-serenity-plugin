@@ -33,7 +33,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { ToolArgsError } from '@deepseek-ai/dsh-tools'
 
-import { NO_CCC_FROM_AGENT_CWD } from '../src/ccc-roots.js'
+import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
 import { ccFsTool } from '../src/tools/cc-fs.js'
 import { gitTool } from '../src/tools/git.js'
 import { localstoreTool } from '../src/tools/localstore.js'

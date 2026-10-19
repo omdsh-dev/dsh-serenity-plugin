@@ -46,7 +46,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-import { hashPassword } from '../src/config-ops.js'
+import { hashPassword } from '../src/kernel/config.js'
 import { registerGateway } from '../src/gateway/server.js'
 import { faceActive, facePort, stopAllFaces } from '../src/face-host.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'

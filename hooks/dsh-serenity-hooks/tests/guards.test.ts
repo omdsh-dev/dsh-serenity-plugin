@@ -19,9 +19,9 @@ import {
   forgetHostScheduleToolHiding,
   getHostScheduleHiddenDiagnostics,
 } from '../src/seams/guards.js'
-import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/invariant.js'
+import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/kernel/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im/channels.js'
-import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/ccc.js'
+import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/kernel/ccc.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
 
 let dir: string

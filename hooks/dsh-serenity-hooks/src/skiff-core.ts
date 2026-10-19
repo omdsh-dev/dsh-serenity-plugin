@@ -24,7 +24,7 @@ import { readLastBound, appendBound } from './trajectory/bound.js'
 import { hostAgents } from './host/access.js'
 import { waitAgentIdle } from './agent-idle.js'
 import { registerCognitiveTrajectorySkillSection } from './seams/system-prompt.js'
-import { PLUGIN_SOURCE } from './message-source.js'
+import { PLUGIN_SOURCE } from './kernel/message-source.js'
 
 // ── 会话注册表（sessionId → role + agent；调试页会话映射，页面/连接关闭时清理）──
 // 角色名 + CCC 根存 skiff-registry（零依赖，guards 等 seams 可安全查询；v1.25.10 起
