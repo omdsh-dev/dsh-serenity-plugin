@@ -203,6 +203,12 @@ interface SerenityConfig {
    * 未配置或 enabled=false → 该 CCC 桥完全不启动（零资源占用）。
    */
   weixin?: WeixinSettings;
+  /**
+   * 🔴 **统一 IM 配置（2026-10-19，owner 定向）**：微信与飞书**只是账号实现不同**，
+   * 配置整合到这一段。存在且 `accounts` 是数组 ⇒ 优先于旧 `weixin` 段。
+   * 见 `ImSettings` 的注释（含"为什么判据不是'段存在'"的坑）。
+   */
+  im?: ImSettings;
   // ⚠️ `im?: ImSettings`（IM 通道选择，v1.59.0）**已删除** —— 随面 E（官方 ACP）整面退役，
   //    IM 入站只剩微信一种实现，"选通道"失去意义。旧配置残留 ⇒ 静默忽略。
   /**
@@ -216,12 +222,85 @@ interface SerenityConfig {
 }
 
 /**
+ * 🔴 **统一 IM 配置（2026-10-19 owner 定向：「飞书和微信一样，只不过是 account 方实现不同。
+ * 要整合到统一的配置中」）。**
+ *
+ * ## 为什么是"账号"这一层，不是"通道"这一层
+ *
+ * 微信与飞书的差别**只在账号侧**：怎么连、怎么收、怎么发。而它们的**身份、路由、会话**
+ * 从来就是通道无关的（`routes: user → 轨迹编码`；会话 id 由轨迹编码派生）。
+ * ⇒ 抽象点是 `account.channel`（这个字段本来就有，装配处也早写着"等第二个实现"），
+ * 不是新造一个平行的"通道接口"。
+ *
+ * ## 与旧 `weixin` 段的关系（向后兼容是硬要求）
+ *
+ * - `im` 段**存在且 `accounts` 是数组** ⇒ 用它；
+ * - 否则 ⇒ **回退读旧 `weixin` 段**（存量 CCC 零迁移，行为逐字不变）。
+ * - 旧段**不删不改**：回滚 = 删掉 `im` 段即可。
+ *
+ * 🔴 **为什么判据是「`accounts` 是数组」而不是「有没有 im 段」**：
+ * 本 CCC 的配置里**曾经**有过一个 `im` 段（退役的 ACP：`{channel:"acp", acp:{…}}`）。
+ * 若只判"段存在"，那份残留会被当成新配置读 ⇒ **读到一个没有 accounts 的对象** ⇒
+ * 表现为"配置没生效"且**不报错**。⇒ 形状判据必须能区分这两种 `im`。
+ */
+export interface ImSettings {
+  /** 总开关（缺省 false——未开零资源占用） */
+  enabled?: boolean;
+  /** 账号表：**每条账号自带 `channel`**（`weixin` / `feishu`），凭据在 localstore */
+  accounts?: ImAccountConfig[];
+  /** 消息路由：**通道用户 id → 认知轨迹编码**（通道无关；`*` 通配兜底） */
+  routes?: ImRouteConfig[];
+  /** 用户别名表：`{ "<别名>": "<localstore 凭据键>" }` */
+  aliases?: Record<string, string>;
+  /** 消息记录 hook（相对 CCC 根的脚本路径） */
+  hook?: string;
+  /** 桥是否自动回发 agent 的最终文本（缺省 true；微信侧语义见旧注释） */
+  autoReplyWithLastMessage?: boolean;
+  /** 手动输出模式的兜底（缺省 false = 严格静默） */
+  fallbackOnNoSend?: boolean;
+  /** iLink 专属：bot_type 取码参数（飞书账号忽略它） */
+  botType?: string;
+}
+
+/** 统一账号配置：**`channel` 决定用哪个实现**；其余字段各实现自查 */
+export interface ImAccountConfig {
+  /** 本地唯一键（如 wechat-1 / feishu-1） */
+  accountId: string;
+  /**
+   * 账号实现（缺省 `weixin`——旧配置平移到 `im` 段时不必补这个字段）。
+   * 未实现的 channel ⇒ **出声但不静默跳过**（装配处已有该分支）。
+   */
+  channel?: string;
+  /** 展示名（可选） */
+  name?: string;
+  /** 该账号开关（缺省 true） */
+  enabled?: boolean;
+}
+
+/**
+ * 统一路由配置：**通道用户 id → 认知轨迹编码**。
+ *
+ * 与旧 `WeixinRouteConfig` 语义完全相同（那是它的超集形态）；保留别名仅为读侧兼容。
+ */
+export interface ImRouteConfig {
+  /** 通道用户 id（微信 `xxx@im.wechat` / 飞书 `open_id`）；`*` = 通配兜底 */
+  user: string;
+  /** 目标认知轨迹编码 */
+  trajectory: string;
+  /** @deprecated 过渡别名（语义等同 `trajectory`） */
+  role?: string;
+}
+
+/**
  * 微信桥配置（CCC 级；S142 用户拍板）：
  * - 结构/路由/开关在 .opencode/serenity.json（git 管可重建）
  * - **bot_token 凭据在 CCC localstore**（weixin.accounts.<accountId>.token/.baseUrl/.userId）——
  *   扫码登录后插件自动写入（面板只显示"已绑定"），永不进 git 明文面
  * - 路由 user → role：exact 匹配优先，通配 `*` 兜底；role 必须是该 CCC skiff.roles 之一
  * - 多账号：accounts[] 每项 { accountId, name?, enabled }（本地唯一键，如 wechat-1）
+ *
+ * 🔴 2026-10-19：**本段已被统一 `im` 段取代**（见上方 `ImSettings`）。此处保留是因为
+ * 存量 CCC 的配置里写的就是它——读侧继续认，**不强制迁移**。
  */
 export interface WeixinSettings {
   /** 总开关（缺省 false——默认关，未开零资源占用） */

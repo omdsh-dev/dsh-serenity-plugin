@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve, join } from 'node:path'
-import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type WeixinSettings, type WeixinRouteConfig, type WeixinAccountConfig } from '../kernel/ccc.js'
+import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS, type WeixinSettings, type WeixinRouteConfig, type WeixinAccountConfig, type ImSettings, type ImAccountConfig, type ImRouteConfig } from '../kernel/ccc.js'
 import { writeEntry, getEntry, unsetEntry } from '../tools/localstore/service.js'
 import type { WeixinMediaRef, WeixinMessageItem } from './ilink.js'
 
@@ -86,42 +86,99 @@ function routeTarget(row: { trajectory?: unknown; role?: unknown }): string {
 }
 
 /**
- * 读取 CCC 微信桥配置（未配置/未启用 → 归一默认）。
- * @returns 归一化 WeixinSettings（accounts/routes 数组清洗；空段 → 空数组）
+ * **统一 IM 配置的单一读取入口**（2026-10-19 owner 定向：微信与飞书只是账号实现不同，
+ * 整合到统一配置）。
+ *
+ * 读取顺序（**确定性，只有这一处**）：
+ *   ① `im` 段 —— 但**判据是 `accounts` 是数组**，不是"段存在"（见下 🔴）
+ *   ② 旧 `weixin` 段 —— 存量 CCC 零迁移
+ *   ③ 都没有 ⇒ 归一默认（`enabled:false`、空数组）
+ *
+ * 🔴 **为什么判据是「`accounts` 是数组」**：本 CCC 的配置里**曾经**有过一个 `im` 段
+ * （退役的 ACP 形态：`{channel:"acp", acp:{enabled, accounts:[…]}}`）。若只判"段存在"，
+ * 那份残留会被当成新配置读 ⇒ 得到一个没有 `accounts` 数组 ／ 或 `accounts` 形状完全不同的对象
+ * ⇒ 表现为**"配置没生效"且不报错**。⇒ 用可判别的形状把它排除掉（退役残留继续被静默忽略，
+ * 与 v1.59.0 的裁决一致）。
+ *
+ * ⚠️ 本函数**只做归一**，不判断"这个通道实现有没有"——那是装配处的事
+ * （`syncMachinePollers` 里有"未实现的 channel 出声但不静默跳过"）。
  */
-export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): WeixinSettings {
+export function readImSettings(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): ImSettings {
+  const empty = (): ImSettings => ({ enabled: false, accounts: [], routes: [] })
   try {
     const cfg = loadSerenityConfig(root, paths)
-    const w = cfg.weixin
-    if (!w || typeof w !== 'object') return { enabled: false, accounts: [], routes: [] }
-    return {
-      enabled: w.enabled === true,
-      botType: typeof w.botType === 'string' && w.botType !== '' ? w.botType : undefined,
-      hook: typeof w.hook === 'string' && w.hook.trim() !== '' ? w.hook.trim() : undefined,
-      // v1.30.10：缺省 true（现状）——只有显式 false 才关闭自动回发最终文本
-      autoReplyWithLastMessage: w.autoReplyWithLastMessage !== false,
-      // v1.30.17：手动模式的兜底——缺省 false（严格静默，向后兼容）；只有显式 true 才启用
-      fallbackOnNoSend: w.fallbackOnNoSend === true,
-      accounts: Array.isArray(w.accounts)
-        ? w.accounts
-            .filter((a): a is { accountId: string; name?: string; enabled?: boolean } =>
-              typeof a === 'object' && a !== null && typeof a.accountId === 'string' && a.accountId !== '')
-            .map((a) => ({ accountId: a.accountId, name: typeof a.name === 'string' ? a.name : undefined, enabled: a.enabled !== false }))
-        : [],
-      // 🔴 2026-10-19：路由表改为 **user → 认知轨迹编码**（owner 重做令）。
-      //    旧字段 `role` 仍被读取作**过渡别名**（存量 CCC 配置不必同批改），
-      //    但新写法是 `trajectory`；两者都给 ⇒ `trajectory` 优先。
-      routes: Array.isArray(w.routes)
-        ? w.routes
-            .filter((r): r is WeixinRouteConfig =>
-              typeof r === 'object' && r !== null && typeof r.user === 'string' && r.user !== '' && typeof routeTarget(r) === 'string')
-            .map((r) => ({ user: r.user, trajectory: routeTarget(r) }))
-        : [],
-      aliases: readAliases(w),
+    // ① 统一段（形状可判别才认）
+    const unified = cfg.im
+    if (isUnifiedImSection(unified)) {
+      return normalizeImSection(unified, empty())
     }
+    // ② 回退旧段（逐字保留既有归一语义——回退路径必须与升级前完全相同）
+    const legacy = cfg.weixin
+    if (!legacy || typeof legacy !== 'object') return empty()
+    return normalizeImSection(legacy, empty())
   } catch {
-    return { enabled: false, accounts: [], routes: [] }
+    return empty()
   }
+}
+
+/**
+ * 判别一个 `im` 段是不是**新的统一形态**。
+ *
+ * 判据 = `accounts` 是数组 **且** 每行（若有）不带退役 ACP 的 `accountId` 之外的 ACP 形状；
+ * 退役 ACP 形态的特征是顶层有 `channel:"acp"` 或 `acp` 对象。
+ * ⇒ 两者**任一命中**即判为"退役残留"，不认。
+ */
+function isUnifiedImSection(v: unknown): v is ImSettings {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false
+  const obj = v as Record<string, unknown>
+  // 退役 ACP 残留：顶层有 acp 对象，或 channel === 'acp'
+  // （变异探针已验：把这两行去掉 ⇒ 本文件两条残留判据立刻变红 ⇒ 判据有承重）
+  if (obj.acp !== undefined && (typeof obj.acp === 'object' || typeof obj.acp === 'string')) return false
+  if (obj.channel === 'acp') return false
+  return Array.isArray(obj.accounts)
+}
+
+/** 段 → 归一形态（统一段与旧段**共用同一套归一语义**，避免两条读法各漂） */
+function normalizeImSection(w: ImSettings | WeixinSettings, d: ImSettings): ImSettings {
+  const src = w as WeixinSettings & ImSettings
+  const accountsIn = Array.isArray(src.accounts) ? src.accounts : []
+  return {
+    enabled: src.enabled === true,
+    botType: typeof src.botType === 'string' && src.botType !== '' ? src.botType : undefined,
+    hook: typeof src.hook === 'string' && src.hook.trim() !== '' ? src.hook.trim() : undefined,
+    // 缺省 true（现状）——只有显式 false 才关闭自动回发最终文本
+    autoReplyWithLastMessage: src.autoReplyWithLastMessage !== false,
+    // 缺省 false（严格静默）；只有显式 true 才启用兜底
+    fallbackOnNoSend: src.fallbackOnNoSend === true,
+    accounts: accountsIn
+      .filter((a): a is ImAccountConfig =>
+        typeof a === 'object' && a !== null && typeof a.accountId === 'string' && a.accountId !== '')
+      .map((a) => ({
+        accountId: a.accountId,
+        // 🔴 缺省 `weixin`：老配置平移到 `im` 段时不必补这个字段（owner 的"统一配置"要能直接吃旧数据）
+        channel: typeof a.channel === 'string' && a.channel.trim() !== '' ? a.channel.trim() : 'weixin',
+        name: typeof a.name === 'string' ? a.name : undefined,
+        enabled: a.enabled !== false,
+      })),
+    routes: Array.isArray(src.routes)
+      ? src.routes
+          .filter((r): r is ImRouteConfig =>
+            typeof r === 'object' && r !== null && typeof r.user === 'string' && r.user !== '' && typeof routeTarget(r) === 'string')
+          .map((r) => ({ user: r.user, trajectory: routeTarget(r) }))
+      : [],
+    aliases: readAliases(src),
+  }
+}
+
+/**
+ * 读取 CCC 微信桥配置（未配置/未启用 → 归一默认）。
+ *
+ * ⚠️ 2026-10-19 起它是 {@link readImSettings} 的**薄别名**（签名与返回形状不变）：
+ * 旧调用点无需改动，但**配置来源已经统一**——`im` 段优先、`weixin` 段回退。
+ * 保留名字是为了让既有调用点与测试**逐字不动**（P1 是纯重构，读数必须不变）。
+ */
+export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): WeixinSettings {
+  return readImSettings(root, paths) as WeixinSettings
 }
 
 /**
