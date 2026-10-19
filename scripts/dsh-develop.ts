@@ -2526,7 +2526,7 @@ function collectByExt(dir: string, exts: string[], out: string[] = []): string[]
  * ## 为什么必须有这台机器（R↓）
  *
  * 目录重构后，`src/` 与 `tests/` 里有 **~90 个文件**在注释里写着旧文件名
- * （"见 `wake/scheduler.ts`"、"同 `wake/cro-log.ts` 款"）。这些引用**不参与编译**，
+ * （"见 `wake/scheduler.ts`"、"同 `cro/log.ts` 款"）。这些引用**不参与编译**，
  * 所以 typecheck/test 全绿也抓不到它们 —— 只有人读代码时被误导。
  * 手改必漏（同族教训：`INDIRECT_COVERED` 白名单按基名匹配，改名即静默失效）。
  *

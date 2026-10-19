@@ -1,19 +1,19 @@
 /**
- * cro-branches.test.ts — 🔴 **⑤ 第 63 件**：`src/wake/cro.ts` 的
+ * cro-branches.test.ts — 🔴 **⑤ 第 63 件**：`src/cro/core.ts` 的
  * **runner 回退链 ＋ 编排降级臂 ＋ 超时/退出码文案边界**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（00:44 那一跑，第 62 件之后）实测：`src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `wake/cro.ts`（**84.15% = 85/101**；
+ * **最低且尚未做过**的文件 = `cro/core.ts`（**84.15% = 85/101**；
  * 语句 96.64% ＝ 548/567；函数 14/14 已满）。
  * ⚠️ **复扫时的成对读（纪律 16）拦下一个错靶**：同为 83.33% 的两个候选里，
  * `gateway/dsh-auth.ts` 的 83.33% 是**函数列**（5/6）、其**分支是 100%**；
  * 真正的分支低点是 `tools/git/service.ts`（75/90）—— 但它**已在第 53 件做过**
- * ⇒ 才轮到 `wake/cro.ts`。**只读数值列会把这三者混为一谈。**
+ * ⇒ 才轮到 `cro/core.ts`。**只读数值列会把这三者混为一谈。**
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯，第 62 件的教训）
- * 本件**同时** grep 了文件名与**符号**（`src/wake/cro.js` 的 import 点）⇒ 找到四处：
+ * 本件**同时** grep 了文件名与**符号**（`src/cro/core.js` 的 import 点）⇒ 找到四处：
  * `cro.test.ts`（420 行，主）／`cro-guide.test.ts`／`wake-registry.test.ts`。
  * 🔴 v1.63.3 更正：原列第四处 `unattended-seam.test.ts` 已随无人值守功能整条退役删除
  * （它当年只取常量或 mock，对本件无影响）。
@@ -56,7 +56,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { CRO_FILENAME, buildCroSnapshot, evaluateCro, listCroCognitiveTrajectories, runCroProcess, type CroSnapshotInput } from '../src/wake/cro.js'
+import { CRO_FILENAME, buildCroSnapshot, evaluateCro, listCroCognitiveTrajectories, runCroProcess, type CroSnapshotInput } from '../src/cro/core.js'
 
 const DIR_NAME = '2026-09-13--S185--desk-camera'
 

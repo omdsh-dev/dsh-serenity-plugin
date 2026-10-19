@@ -1,5 +1,5 @@
 /**
- * wake/cro-guide.ts — CRO 编写指南（**ACC 内置**，S142 §7.8，2026-09-19）
+ * cro/guide.ts — CRO 编写指南（**ACC 内置**，S142 §7.8，2026-09-19）
  *
  * ## 为什么指南在 ACC 而不在 CCC（所有者令）
  *
@@ -20,7 +20,7 @@
  * 2. 🔴 **要一并给出测试用的参数**。
  */
 
-import { buildCroSnapshot, type CroSnapshotInput } from './cro.js'
+import { buildCroSnapshot, type CroSnapshotInput } from './core.js'
 
 /**
  * 样例快照输入 —— **代表性数据**（不是真实某条轨迹的现状）。
@@ -58,7 +58,7 @@ export function renderCroSampleSnapshot(): string {
 }
 
 /** 正式入口文件名（写死于此，供指南与实现共用同一常量来源） */
-export { CRO_FILENAME, CRO_TIMEOUT_MS } from './cro.js'
+export { CRO_FILENAME, CRO_TIMEOUT_MS } from './core.js'
 
 /**
  * CRO 编写指南正文（ACC 内置手册；由工具的 guide 动作输出）。

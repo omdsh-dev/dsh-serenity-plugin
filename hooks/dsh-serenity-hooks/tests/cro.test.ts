@@ -30,7 +30,7 @@ import {
   runCroProcess,
   type CroRunner,
   type CroSnapshotInput,
-} from '../src/wake/cro.js'
+} from '../src/cro/core.js'
 
 const DIR_NAME = '2026-09-13--S185--desk-camera'
 const NOW = 1_789_800_000_000

@@ -34,7 +34,7 @@ import {
   pruneCroLogEntries,
   summarizeCroPrompt,
   type CroWakeLogEntry,
-} from '../src/wake/cro-log.js'
+} from '../src/cro/log.js'
 
 const DAY = 24 * 60 * 60 * 1000
 const NOW = Date.parse('2026-09-20T08:00:00+08:00')

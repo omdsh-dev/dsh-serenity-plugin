@@ -51,7 +51,7 @@ import { appendBound, pruneMissingBindings, readLastBound, resolveSessionCogniti
 import { hasSessionLogById, sessionsRootDir } from '../trajectory/cleanup.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake/registry.js'
 import { sendToCognitiveTrajectory } from '../wake/scheduler.js'
-import { CRO_GUIDE } from '../wake/cro-guide.js'
+import { CRO_GUIDE } from '../cro/guide.js'
 import {
   listSessions,
   showSession,
@@ -570,7 +570,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
       }
       case 'cro-guide': {
         // CRO 编写指南（2026-09-20；owner 令「机制属 ACC / 程序属 CCC」+「指南 ACC 内置，guide 老套路」）。
-        // 纯读：只是把 `wake/cro-guide.ts` 的正文吐出来（正文含**由装配器实时生成**的样例快照，
+        // 纯读：只是把 `cro/guide.ts` 的正文吐出来（正文含**由装配器实时生成**的样例快照，
         // 故**永不与 schema 漂移** —— 见该文件头的单真相源纪律）。
         // 为什么挂在本工具：CRO 程序放在**轨迹自己的目录**里 ⇒ 这是"逐轨迹"的知识，
         // 而管轨迹的人正是用本工具的人（设计 §9-5：既有 guide 位置，不新增域）。

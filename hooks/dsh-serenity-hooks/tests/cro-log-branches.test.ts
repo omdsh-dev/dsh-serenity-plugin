@@ -1,17 +1,17 @@
 /**
- * cro-log-branches.test.ts — 🔴 **⑤ 第 65 件**：`src/wake/cro-log.ts` 的
+ * cro-log-branches.test.ts — 🔴 **⑤ 第 65 件**：`src/cro/log.ts` 的
  * **条目形状容错面（asEntry 的字段级拒绝与归一）＋ 解析层回退**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（01:0x 那一跑，第 64 件之后）实测：`src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `wake/cro-log.ts`（**84.78% = 39/46**；语句 **100% = 230/230**；
+ * **最低且尚未做过**的文件 = `cro/log.ts`（**84.78% = 39/46**；语句 **100% = 230/230**；
  * 函数 7/7 已满）。
  * 🔴 **成对读（纪律 16）本次拦下一处**：`tools/git/service.ts` 的 83.33% 确实更低，但**已在第 53 件做过**；
  * 而 84.84% 那处是 `tools/localstore/service.ts`（line 508）—— **裸百分比单元格不带文件身份，必须成对读**。
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯）
- * grep `wake/cro-log.js` 的 import 点与**全部导出名**（`appendCroWakeLog` ／ `pruneCroLogEntries`
+ * grep `cro/log.js` 的 import 点与**全部导出名**（`appendCroWakeLog` ／ `pruneCroLogEntries`
  * ／ `loadCroWakeLog` ／ `summarizeCroPrompt` ／ `croWakeLogPath`）⇒ 命中
  * `cro-log.test.ts`（243 行，专测本模块）／ `wake-registry.test.ts` ／ `wake-scheduler-branches.test.ts`。
  * 逐条核对后确认 `cro-log.test.ts` 已覆盖：**落点与固定文件名**／**成败都记**／
@@ -41,7 +41,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { CRO_LOG_FILENAME, croWakeLogPath, loadCroWakeLog } from '../src/wake/cro-log.js'
+import { CRO_LOG_FILENAME, croWakeLogPath, loadCroWakeLog } from '../src/cro/log.js'
 
 const DIR = '2026-09-13--S185--相机沉淀与语音输入'
 

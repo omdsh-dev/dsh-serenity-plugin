@@ -1,5 +1,5 @@
 /**
- * wake/cro.ts — CRO（Continuous Re-Occurrence · 持续再发生）机制层（S142 §7.8，2026-09-19）
+ * cro/core.ts — CRO（Continuous Re-Occurrence · 持续再发生）机制层（S142 §7.8，2026-09-19）
  *
  * ## 这东西用来干什么（白话）
  *
@@ -122,7 +122,7 @@ export interface CroSnapshot {
     /**
      * 🔴 其中**正在跑轮次**的（设计 §3.2 —— 本机制**唯一需要 ACC 新增的状态**）。
      * ⚠️ `live ≠ 在跑`：一条会话可以 live 而空闲。
-     * 宿主没有现成的 turn 运行标志 ⇒ 由 `wake/cro-turns.ts` 用 `agent/session-start` +
+     * 宿主没有现成的 turn 运行标志 ⇒ 由 `cro/turns.ts` 用 `agent/session-start` +
      * `agent/turn-stopping` 两个**既有契约事件**夹出来。
      */
     runningSessionIds: string[]

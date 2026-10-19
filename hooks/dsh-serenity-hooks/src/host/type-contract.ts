@@ -249,7 +249,7 @@ type _EvLlmStreamOptions = Expect<Extends<
 type _EvLlmStreamNext = Expect<Extends<Ret<Parameters<Events['llm/stream']>[1]>, AsyncIterable<unknown>>>
 /** 我们短路时产出的 chunk 形状必须仍是宿主的 `StreamChunk`（`text-delta` 那条最要紧） */
 type _EvLlmStreamChunk = Expect<Extends<{ type: 'text-delta'; index: number; text: string }, StreamChunk>>
-/** `agent/created`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种 · `wake/cro-turns.ts` 标"在跑" ·
+/** `agent/created`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种 · `cro/turns.ts` 标"在跑" ·
  *  `index.ts` 反应式同步）。⚠️ **v0.1.7 起该事件 `@mode = serial`**（监听器被 await、抛错会使
  *  创建失败 ⇒ 我方处理函数必须快速返回且不得抛；此处只钉字段，模式由实现纪律守） */
 type _EvAgentCreated = Expect<Extends<Parameters<Events['agent/created']>[0], { agent: unknown }>>
