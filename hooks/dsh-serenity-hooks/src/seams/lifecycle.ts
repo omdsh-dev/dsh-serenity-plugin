@@ -4,13 +4,13 @@
  * 两个此前缺失的收尾面：
  *
  * ① **会话/agent 销毁 → 清理 per-会话内存态**。dsp 有约 10 处 per-会话 Map
- *    （活跃 SESSION 作用域、skiff 注册表、keeper 计分、guard 白名单缓存、bootstrap
+ *    （活跃 SESSION 作用域、轨迹约束 注册表、keeper 计分、guard 白名单缓存、bootstrap
  *    晋升状态、输出守卫状态…）。此前无人订阅 `agent/disposed` / `session/disposed`
  *    （宿主 0.1.2-rc.1 真实存在：`core/agent/src/runtime-types.ts:175`、
  *    `core/session/src/index.ts:62`），长跑进程里这些 Map 只增不减——且 `waitIdle`
  *    在 agent 先被销毁时永不结算。
  *
- * ② **插件卸载/HMR/profile 重载 → 停掉自起的监听器与轮询器**。skiff 调试页、微信桥轮询
+ * ② **插件卸载/HMR/profile 重载 → 停掉自起的监听器与轮询器**。轨迹约束调试页、微信桥轮询
  *    都是 dsp 自己起的资源（⚠️ 2026-10-15：原同批还有 ACP HTTP 端点，该面已退役）；
  *    此前没有 `ctx.effect` 拆卸，卸载后端口仍被占用（EADDRINUSE）、轮询器重复启动。
  *
@@ -20,11 +20,11 @@
 
 import type { Context } from 'cordis'
 import { clearActiveSessionInfo } from '../trajectory/core.js'
-import { unregisterSkiffSession } from '../trajectory/session.js'
+import { unregisterTrajectorySession } from '../trajectory/session.js'
 import { stopAllFaces } from '../surface/faces.js'
 import { stopAllBridges } from '../im/bridge.js'
 import { forgetManualOutputSession } from '../im/guard.js'
-import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility, forgetNonCccToolVisibility, forgetHostScheduleToolHiding, forgetSkiffRoleToolVisibility } from './guards.js'
+import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility, forgetNonCccToolVisibility, forgetHostScheduleToolHiding, forgetTrajectoryConstraintToolVisibility } from './guards.js'
 import { forgetLogbookCompactionState } from './keeper.js'
 import { registerDisposer } from '../host/effect.js'
 
@@ -41,7 +41,7 @@ export function sessionIdOf(value: unknown): string | null {
 /** 单会话内存态清理（幂等；无对应状态即 no-op） */
 export function cleanupSessionState(sessionId: string): void {
   try {
-    unregisterSkiffSession(sessionId)
+    unregisterTrajectorySession(sessionId)
   } catch {
     /* 未注册 */
   }
@@ -81,8 +81,8 @@ export function cleanupSessionState(sessionId: string): void {
     /* 无状态 */
   }
   try {
-    // 🆕 v1.69.3：skiff 角色工具面（白名单之外从 schema 移除）的 restrict 状态（同上）
-    forgetSkiffRoleToolVisibility(sessionId)
+    // 🆕 v1.69.3：轨迹约束工具面（白名单之外从 schema 移除）的 restrict 状态（同上）
+    forgetTrajectoryConstraintToolVisibility(sessionId)
   } catch {
     /* 无状态 */
   }
@@ -139,5 +139,5 @@ export function registerLifecycle(ctx: Context): void {
   // ctx.effect 是 cordis Context 成员（宿主 rc.1 全量使用，如 core/tools/src/index.ts:943）——
   // 但**不可假定存在**：apply 抛错 = 整个 dsh 启动失败（app-boot "plugin(s) failed to load"），
   // 且测试替身/极旧宿主可能没有。缺失 → 响亮降级（registerDisposer 内记录）。
-  registerDisposer(ctx, 'self-started resources (gateway/weixin/skiff-debug faces + weixin bridges)', disposeAll)
+  registerDisposer(ctx, 'self-started resources (gateway/weixin/trajectory-debug faces + weixin bridges)', disposeAll)
 }

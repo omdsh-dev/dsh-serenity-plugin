@@ -5,7 +5,7 @@ import {
   MAIN_WEB_PORT,
   GATEWAY_PORT,
   WEIXIN_SEND_PORT,
-  SKIFF_DEBUG_PORT,
+  RETIRED_SK_DEBUG_PORT,
   type FaceId,
 } from '../src/kernel/ports.js'
 
@@ -28,12 +28,12 @@ import {
  * ⚠️ **三条同时成立且都必须钉**：① 表中**不含 3200**（新面真的删了）② 表中**不含 3100**
  * （旧面没被"改个号复活"）③ 词表**仍含 3082**（那条真缺陷的回归钉不能随面数变化而失效）。
  *
- * 🔴🔴 **面数变更（2026-10-19 同日后半）：Skiff 调试面（3099，面 D）整条退役**
- * （owner 令「面板里 Skiff 的内容不要了，下掉吧，功能也检查下，应该下掉了」）⇒ 四面 → **三面**。
+ * 🔴🔴 **面数变更（2026-10-19 同日后半）：轨迹约束调试面（3099，面 D）整条退役**
+ * （owner 令「面板里 轨迹约束的内容不要了，下掉吧，功能也检查下，应该下掉了」）⇒ 四面 → **三面**。
  * ⇒ 插件**自起 listener 只剩 2 个**（B 网关 / C 微信发送；A 由宿主监听）。
  * ⚠️ **本条与 3082 那条回归钉的关系**：3082 是**在役**面，判据不变；
  *    3099 退役后必须**从词表消失**（否则守卫仍会打回"提及 3099"——那是无对象的拦截）。
- *    🔴 注意区分：退役的是**端口面**，不是 `skiff.json` 轨迹约束面机制（那个仍在用）。
+ *    🔴 注意区分：退役的是**端口面**，不是 `trajectory-constraint.json` 轨迹约束面机制（那个仍在用）。
  */
 
 /** §① 表 A：各对外面的端口（取证文件 acc-c4c5-current-state.md；三个面均已退役） */
@@ -70,13 +70,13 @@ describe('ports: 集中端口表（三面语义）', () => {
     expect(WEIXIN_SEND_PORT).toBe(FACE_PORTS.weixinSend.port)
   })
 
-  it('🔴 三个已退役的面都不得回来：3100（旧自造面）／3200（官方 ACP）／3099（Skiff 调试）', () => {
+  it('🔴 三个已退役的面都不得回来：3100（旧自造面）／3200（官方 ACP）／3099（轨迹约束调试）', () => {
     const ports = (Object.values(FACE_PORTS) as Array<{ port: number }>).map((s) => s.port)
     expect(ports, '3100 仍留在端口表里').not.toContain(3100)
     expect(ports, '3200 仍留在端口表里 —— ACP 整面删除只做了一半').not.toContain(3200)
-    expect(ports, '3099 仍留在端口表里 —— Skiff 调试面退役只做了一半').not.toContain(3099)
-    // FaceId 联合类型也要同步：留一个 `skiffDebug` 成员会让下一个人以为面还在（类型层看不见的谎）
-    expect(Object.keys(FACE_PORTS)).not.toContain('skiffDebug')
+    expect(ports, '3099 仍留在端口表里 —— 轨迹约束调试面退役只做了一半').not.toContain(3099)
+    // FaceId 联合类型也要同步：留一个 `轨迹约束Debug` 成员会让下一个人以为面还在（类型层看不见的谎）
+    expect(Object.keys(FACE_PORTS)).not.toContain('轨迹约束Debug')
   })
 })
 

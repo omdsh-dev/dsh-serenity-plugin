@@ -2469,6 +2469,113 @@ function cmdRefactorMove(argv: string[]): void {
   console.log('[refactor-move] 下一步必跑：typecheck ＋ test（漏改一处 typecheck 就红）')
 }
 
+// ── rename-symbols：**代码级**标识符机械改名（rename-mentions 只管注释，本机管全部）──
+
+/**
+ * rename-symbols — 把代码与注释里的**标识符**按映射表机械改名。
+ *
+ * ## 为什么必须另起一台机器（R↓）
+ *
+ * `rename-mentions` **只改注释行**（它当年是为"注释里的旧文件名"造的，见其头注判据 2）。
+ * 而「skiff → 轨迹约束」这类改名要动的是**标识符本身**（`SkiffProfile` / `skiff.json` /
+ * 导入符号 / 字符串字面量）。用 `rename-mentions` 跑它 ⇒ **代码一行不改，测试全绿**，
+ * 而你要的功能没变 —— 那是本轨最怕的一类静默失效。
+ *
+ * ## 判据（与 rename-mentions 同族，逐条都有事故出处）
+ *
+ * 1. **长键优先**：`skiffProfile` 必须先于 `skiff` 换，否则长出 `trajectory-constraintProfile`；
+ * 2. **左边界守卫** `(?<![A-Za-z0-9_-])`：否则 `skiff-weixin-` 里的 `skiff` 被换掉
+ *    （那会把**正在续的对话史**砸断 —— 那是 owner 没授权的破坏性改动）；
+ * 3. **保护名单**：`skiff-weixin-` 整段先占位、后还原（它与会话 id 历史绑定，不得随改名消失）；
+ * 4. **dry-run 先看数**，apply 后自动复扫，残留必须为 0（残留里排除保护段）；
+ * 5. 🔴 **改完必须 typecheck** —— 预演通过 ≠ 改名成立（D132）。
+ *
+ * 用法: dsh-develop rename-symbols --map <json> [--apply]
+ *   json 形态: { "SkiffProfile": "TrajectoryConstraint", "skiff.json": "trajectory-constraint.json", ... }
+ */
+function cmdRenameSymbols(argv: string[]): void {
+  const apply = argv.includes('--apply')
+  const mapIdx = argv.indexOf('--map')
+  const mapPath = mapIdx >= 0 ? argv[mapIdx + 1] : undefined
+  if (mapPath === undefined) fail('rename-symbols 需要 --map <json>')
+  if (!existsSync(mapPath)) fail(`map 文件不存在: ${mapPath}`, 2)
+
+  const raw = readMapJson(mapPath)
+  // 长键优先（第 1 条判据）
+  const rules = Object.entries(raw).sort((a, b) => b[0].length - a[0].length)
+
+  /**
+   * 保护段（第 3 条判据）：先换成占位符，改完还原。
+   * ⚠️ 占位符里**不能含任何被映射的子串**，否则第二轮又被换掉。
+   */
+  const PROTECT = ['skiff-weixin-']
+  const PH = '\u0001P0\u0001'
+
+  const files = [
+    ...collectByExt(join(HOOKS_DIR, 'src'), ['.ts', '.tsx']),
+    ...collectByExt(join(HOOKS_DIR, 'tests'), ['.ts', '.tsx']),
+    ...collectByExt(join(REPO_ROOT, 'bench'), ['.mjs', '.sh']),
+  ]
+
+  const transform = (text: string): string => {
+    let t = text
+    for (const p of PROTECT) t = t.split(p).join(PH)
+    for (const [from, to] of rules) t = t.split(from).join(to)
+    t = t.split(PH).join(PROTECT[0]!)
+    return t
+  }
+
+  const plans: Array<{ file: string; next: string; hits: Map<string, number> }> = []
+  for (const file of files) {
+    const before = readFileSync(file, 'utf-8')
+    const after = transform(before)
+    if (after === before) continue
+    let probe = before
+    for (const p of PROTECT) probe = probe.split(p).join('')
+    const hits = new Map<string, number>()
+    let n = 0
+    for (const [from] of rules) {
+      const c = probe.split(from).length - 1
+      if (c > 0) { hits.set(from, c); n += c }
+    }
+    if (n > 0) plans.push({ file, next: after, hits })
+  }
+
+  const rel = (f: string): string => (f.startsWith(REPO_ROOT) ? f.slice(REPO_ROOT.length + 1) : f)
+  const total = plans.reduce((n, p) => n + [...p.hits.values()].reduce((a, b) => a + b, 0), 0)
+  console.log(`[rename-symbols] ${apply ? '写回模式' : 'dry-run（只报告）'}｜规则 ${rules.length} 条｜扫描 ${files.length} 个文件`)
+  console.log(`  命中 ${total} 处，分布在 ${plans.length} 个文件`)
+  for (const p of plans) {
+    const detail = [...p.hits.entries()].map(([k, v]) => `${k}×${v}`).join(' ')
+    console.log(`    ~ ${rel(p.file)}（${[...p.hits.values()].reduce((a, b) => a + b, 0)} 处）${detail.slice(0, 160)}`)
+  }
+  if (!apply) {
+    console.log('[rename-symbols] dry-run 结束；确认数字无误后加 --apply（**改完必须 typecheck**）')
+    return
+  }
+
+  for (const p of plans) writeFileSync(p.file, p.next, 'utf-8')
+  console.log(`[rename-symbols] ✓ 已改写 ${plans.length} 个文件`)
+
+  // 判据 4：复扫残留（排除保护段）
+  let leftovers = 0
+  for (const file of files) {
+    const text = readFileSync(file, 'utf-8')
+    let probe = text
+    for (const pt of PROTECT) probe = probe.split(pt).join('')
+    for (const [from] of rules) {
+      const c = probe.split(from).length - 1
+      if (c > 0) {
+        leftovers += c
+        console.log(`    ⚠ 残留 ${rel(file)}: ${from} ×${c}`)
+      }
+    }
+  }
+  console.log(leftovers === 0
+    ? '[rename-symbols] ✓ 标识符残留 = 0（保护段已排除）'
+    : `[rename-symbols] ⚠ 仍有 ${leftovers} 处残留`)
+}
+
 // ── rename-mentions：注释里的旧文件名机械改名 ─────────────────────────────
 
 function escapeRe(s: string): string {
@@ -3123,6 +3230,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'session-repair': await cmdSessionRepair(rest); break
       case 'refactor-move': cmdRefactorMove(rest); break
       case 'rename-mentions': cmdRenameMentions(rest); break
+      case 'rename-symbols': cmdRenameSymbols(rest); break
       case 'diag': cmdDiag(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break

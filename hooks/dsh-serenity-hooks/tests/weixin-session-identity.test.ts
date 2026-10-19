@@ -94,7 +94,7 @@ describe('微信桥会话身份：派生自**认知轨迹编码**（不含用户
     expect(id).toBe('skiff-weixin-qa')
     expect(existsSync(join(dir, 'AGENT_SESSIONS', '.weixin-session-gen.json'))).toBe(false)
     // 非微信桥会话仍不被误判（前缀判据是"命名形态"，不是权力面判据）
-    expect(isWeixinSessionId('skiff-qa-xxx')).toBe(false)
+    expect(isWeixinSessionId('轨迹约束-qa-xxx')).toBe(false)
     expect(isWeixinSessionId(undefined)).toBe(false)
   })
 })

@@ -28,9 +28,9 @@ import { tmpdir } from 'node:os'
 import { registerBootstrap, DEFAULT_FAKE_INITIAL_MESSAGES, FAKE_TURN_SUMMARY, FAKE_TURN_ACK_TEXT, DEFAULT_COMPACTION_TOOLS } from '../../src/seams/bootstrap.js'
 // 不硬编码字面量：插件来源 kind 的**单一真相源**在 kernel/message-source.ts
 import { ACC_MESSAGE_KIND } from '../../src/kernel/message-source.js'
-// 🔴 2026-10-19 skiff 重做：判据 = 绑定轨迹里有 `skiff.json`（不再是 sessionId 前缀）
-//    ⇒ 本文件里"这个会话是 skiff"的两处都必须**真造一条轨迹**（夹具唯一入口）。
-import { makeSkiffSession, skiffJson } from '../helpers/skiff-fixture.js'
+// 🔴 2026-10-19 轨迹约束 重做：判据 = 绑定轨迹里有 `trajectory-constraint.json`（不再是 sessionId 前缀）
+//    ⇒ 本文件里"这个会话是 轨迹约束"的两处都必须**真造一条轨迹**（夹具唯一入口）。
+import { make轨迹约束Session, 轨迹约束Json } from '../helpers/trajectory-constraint-fixture.js'
 
 type Handler = (...args: unknown[]) => unknown
 
@@ -124,14 +124,14 @@ describe('registerBootstrap: system-prompt/assemble —— 首锚目录窄化', 
     expect(out.tools).toHaveLength(fullCatalog().length)
   })
 
-  it('cheap-worker/skiff 会话**恒晋升** ⇒ 原样返回完整目录（无锚定轮）', async () => {
+  it('cheap-worker/轨迹约束会话**恒晋升** ⇒ 原样返回完整目录（无锚定轮）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    // 🔴 2026-10-19：skiff 一半必须**真造轨迹**——否则 `skiff-` 前缀早已不是判据，
+    // 🔴 2026-10-19：轨迹约束 一半必须**真造轨迹**——否则 `轨迹约束-` 前缀早已不是判据，
     //    走的还是普通分支，而"普通 + 未晋升"同样返回完整目录 ⇒ 这条会**假绿**。
     //    （判据恒等的局限是既有的：本缝对外只暴露 `tools`，无法区分 promoted 与 boundary<0。）
-    makeSkiffSession(dir, 'skiff-qa-boot-1', 'qa-boot-1', skiffJson({}), 'boot')
-    for (const id of ['cheap-worker-worker-1', 'skiff-qa-boot-1']) {
+    make轨迹约束Session(dir, '轨迹约束-qa-boot-1', 'qa-boot-1', 轨迹约束Json({}), 'boot')
+    for (const id of ['cheap-worker-worker-1', '轨迹约束-qa-boot-1']) {
       const out = (await assemble(ctx, fakeAgent(id, { header: { cwd: dir } }), fullCatalog())) as { tools: unknown[] }
       expect(out.tools, id).toHaveLength(fullCatalog().length)
     }
@@ -215,7 +215,7 @@ describe('registerBootstrap: agent/pre-step —— 首锚剥离注入上下文',
     expect(out).toBe(decision) // 身份相同 ⇒ 证明走的是 early-return 而非重建
   })
 
-  it('已晋升（cheap-worker/skiff 恒晋升）⇒ 原样返回，不剥离', async () => {
+  it('已晋升（cheap-worker/轨迹约束恒晋升）⇒ 原样返回，不剥离', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     const decision = { kind: 'enter', messages: [msg('skill-catalog')] }
@@ -390,12 +390,12 @@ describe('registerBootstrap: fake-initial-turns —— 注入两轮 ＋ 短路�
     expect(queue).toHaveLength(0)
   })
 
-  it('cheap-worker / skiff 会话 ⇒ 不注入（轨迹自带完整提示词）', () => {
+  it('cheap-worker / 轨迹约束会话 ⇒ 不注入（轨迹自带完整提示词）', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    // 🔴 2026-10-19：skiff 判据 = 绑定轨迹有 `skiff.json` ⇒ 前缀不再够用，必须先造真轨迹。
-    makeSkiffSession(dir, 'skiff-qa-boot-2', 'qa-boot-2', skiffJson({}), 'boot')
-    for (const id of ['cheap-worker-worker-3', 'skiff-qa-boot-2']) {
+    // 🔴 2026-10-19：轨迹约束 判据 = 绑定轨迹有 `trajectory-constraint.json` ⇒ 前缀不再够用，必须先造真轨迹。
+    make轨迹约束Session(dir, '轨迹约束-qa-boot-2', 'qa-boot-2', 轨迹约束Json({}), 'boot')
+    for (const id of ['cheap-worker-worker-3', '轨迹约束-qa-boot-2']) {
       const { agent, queue } = inboxAgent(id, { header: { cwd: dir }, events: [] })
       fireInserted(ctx, agent)
       expect(queue, id).toHaveLength(0)

@@ -50,8 +50,8 @@ afterEach(async () => {
   const { __resetWeixinOutputGuardForTest } = await import('../src/im/guard.js')
   __resetWeixinOutputGuardForTest()
   // 会话注册表是模块级 → 不清理会串到别的用例（与 human-channel-routing 同款收尾）
-  const { unregisterSkiffSession, skiffSessionSnapshot } = await import('../src/trajectory/session.js')
-  for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
+  const { unregisterTrajectorySession, trajectorySessionSnapshot } = await import('../src/trajectory/session.js')
+  for (const [id] of trajectorySessionSnapshot()) unregisterTrajectorySession(id)
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
   if (oldAuditEnv === undefined) delete process.env.SERENITY_HUMAN_CHANNEL_AUDIT
@@ -61,8 +61,8 @@ afterEach(async () => {
 })
 
 /**
- * 造一条**认知轨迹**（普通轨迹：有 SESSION.md，**无 skiff.json**）
- * ⇒ 中立层不施加 skiff 约束，但仍能往里投（这是"轨迹存在性"判据的正控）。
+ * 造一条**认知轨迹**（普通轨迹：有 SESSION.md，**无 trajectory-constraint.json**）
+ * ⇒ 中立层不施加 轨迹约束 约束，但仍能往里投（这是"轨迹存在性"判据的正控）。
  */
 function makeTrajectory(code: string): void {
   const d = join(dir, 'AGENT_SESSIONS', `2026-10-19--${code}--probe`)

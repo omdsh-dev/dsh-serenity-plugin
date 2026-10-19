@@ -12,7 +12,7 @@
  *  - 折叠块：彩蛋模式 ／ **IM 桥**（微信 ＋ 飞书，原「微信桥」）／ 会话清理
  * 行卡可展开：点整行 → 行内详设（开关与详设合一）；重型编辑器挂所属开关行下。
  *
- * ⛔ 2026-10-19：原「Skiff 调试」行已删（3099 调试面整条退役，owner 令）。
+ * ⛔ 2026-10-19：原「轨迹约束调试」行已删（3099 调试面整条退役，owner 令）。
  *
  * 数据通道（双层）：
  *  - 简单配置：`ctx.configForms.get('serenity-hooks')` —— 0.1.7 起设置页由「profile 条目
@@ -38,7 +38,7 @@ export interface SerenitySimpleWire {
   gatewayEnabled?: boolean
   // 🔴 v1.49.0：`rebuildEnabled` 已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
   rebuildThresholdK?: number
-  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 面板键已删（Skiff 调试面 3099 退役）。
+  // ⛔ 2026-10-19：`轨迹约束Enabled` / `轨迹约束DebugPort` 面板键已删（轨迹约束调试面 3099 退役）。
   /** CRO（轨迹自编程唤起）总闸（缺省开；只关 CRO 阶段，投递照常） */
   croEnabled?: boolean
   /** diagram 工具总开关：agent 给一段标签式源码，进程内光栅化成 PNG 并贴进对话

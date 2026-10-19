@@ -70,7 +70,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | Tool | What it does | When to use it |
 |---|---|---|
 | `container_fs` | File handling inside the workspace: list, find, copy, move, create, append, reveal in file manager | When workspace files must be inspected or tidied |
-| `container_trajectory` | **One trajectory**: its body (SESSION.md) plus its timeline. Beyond create / show / switch / in-place rebuild, it registers a **future wake** (a wake = a future instant + one message; it can wake yourself, or another trajectory) | Any multi-step job — this is step one; also to have the AI resume work at a future instant |
+| `cognitive_trajectory` | **One cognitive trajectory**: its body (SESSION.md) plus its timeline. Beyond create / show / use / in-place rebuild, it delivers a message **now** (`send-now`) or at **one future instant** (`send-later`) — to yourself, or to another trajectory | Any multi-step job — this is step one; also to have the AI resume work at a future instant |
 | `dashboard` | Instruments: workspace health (three checks), current time, wait | Self-check before working; wait on external services |
 | `container_git` | Git: status / commit / push / log / pull / diff | Commit and push; it never force-pushes on its own |
 | `msm` | The execution entry for small tools: `msm("name", ["args"])`; partial names return candidates; `inspect=true` shows usage | Calling any registered tool in the workspace |
@@ -81,7 +81,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `im-bridge` | Message an IM contact (WeChat today): send text, send a file, list configured recipients, check channel health. Every successful send is recorded in the workspace log | When the AI must message family/colleagues proactively (see §6.6). **It appears only when this workspace has the WeChat bridge configured**, and it can message from this workspace only |
 | `acc-diag` | ACC runtime diagnosis: one call returns the full report — which sessions are live and which workspace each belongs to, the cruising target/agent resolution, every entry in the wake registry, and the condition chain for "why did this round not wake" | **ACC maintainers only.** **Hidden from every workspace by default**; it appears only in a workspace that names it (config `exclusiveTools`) |
 
-> **Renamed** (old names are gone for good, no aliases): each arrow chain below lists the name **as shipped in each release** — the **last item is the current name**: `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` (v1.30/1.31) → `trajectory` (v1.32) → **`container_trajectory`** (v1.34, current) · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory` (v1.32) → **`container_trajectory`** (v1.34, current; **its cruising controls were retired in v1.35.0**). Old sessions referencing the old names will error — always take the **last item of the chain** as the live name.
+> **Renamed** (old names are gone for good, no aliases): each arrow chain below lists the name **as shipped in each release** — the **last item is the current name**: `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` (v1.30/1.31) → `trajectory` (v1.32) → **`cognitive_trajectory`** (v1.65.0, current) · `acc_kit` → `dashboard` · `acc_msm` → `msm` (execution) + `container_admin` (management) · `eap`/`neat`/`cce` → `praxis` · `skiff_admin` → `container_admin role` → **`container_admin config`** (v1.74.0, current; `role` still works as a transitional alias) · `autopilot-trajectory` → `trajectory` (v1.32) → **`cognitive_trajectory`** (current; **its cruising controls were retired in v1.35.0**). Old sessions referencing the old names will error — always take the **last item of the chain** as the live name.
 
 ### 3.2 Mechanical constraints (the AI cannot bypass them)
 
@@ -168,7 +168,7 @@ my-workspace/                     ← workspace root (just add .serenity)
 
 | # | Objective | Actual path |
 |---|---|---|
-| 1 | **Keep a long project alive** | `container_trajectory create` → write progress as work advances → resume with `container_trajectory use` after an interruption → `container_trajectory rebuild` when context fills up, continuing automatically |
+| 1 | **Keep a long project alive** | `cognitive_trajectory create` → write progress as work advances → resume with `cognitive_trajectory use` after an interruption → `cognitive_trajectory rebuild` when context fills up, continuing automatically |
 | 2 | **Sync code in bulk** | `container_git commit/push` in the current repo; one command syncs every sub-repo (auto commit + push) |
 | 3 | **Produce one episode of subtitles** | Find the source → download → Whisper transcription → translation → bilingual SRT → mechanical QC (7 checks) → push to subscribers/email |
 | 4 | **Server inspection** | One command returns CPU/memory/GPU/containers/services; restarting a container goes through the same allow-listed channel |
@@ -242,49 +242,51 @@ One DSH process can host several workspaces, each bridging its own WeChat accoun
   "the AI initiated it", and `source: "reply-fallback"` means "the AI did not send, the plugin did".
 - **Troubleshooting**: `msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
 
-### 6.3 Sub-roles (Skiff)
+### 6.3 Trajectory constraints
 
-Carve a **deliberately limited role** out of an all-capable assistant — not just Q&A, it can also have operational abilities:
+**A trajectory constraint IS a cognitive trajectory whose directory contains `trajectory-constraint.json`** — that is the whole definition.
+Put the file there and the trajectory is constrained at once; delete it and it goes back to being an ordinary trajectory.
 
 ```jsonc
+// AGENT_SESSIONS/2026-10-19--qa--qa/   ← the trajectory directory (code = the fixed segment of the dir name)
+//   ├─ SESSION.md                  ← its own body (this IS the workspace — nothing is auto-created)
+//   ├─ PROMPT.md                   ← its charter (recommended; every trajectory can have one, not just constrained ones)
+//   ├─ trajectory-constraint.json  ← the constraint surface (this file's existence is the criterion)
 {
-  "skiff": {
-    "roles": {
-      "qa": {
-        "model": "provider/model",              // this role's own model
-        "msms": ["web-search", "vlm-describe"], // which small tools it may call
-        "tools": ["read", "grep", "glob"],      // which platform tools it may use
-        "systemPromptFile": "roles/qa.md"       // its persona and boundaries (inline is also fine)
-      }
-    }
-  }
+  "model": "provider/model",              // this trajectory's own model
+  "msms": ["web-search", "vlm-describe"], // which small tools (MSMs) it may call
+  "tools": ["read", "grep", "glob"],      // which platform tools it may use
+  "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true }  // defaults to all true
 }
 ```
 
-- Two separate allow-lists (small tools / platform tools); anything unlisted is hidden
-- The debug page (3099) switches workspaces and shows the trajectory; answers render markdown with thinking collapsed
-- `container_admin role validate` checks the config, `apply` makes it take effect
+- Two separate allow-lists (small tools / platform tools); anything unlisted is **removed from the schema**, not merely rejected at call time
+- **`cognitiveTrajectory` defaults to all `true`**: the workspace is the trajectory's own `SESSION.md`, so turning it off cuts the trajectory off from its own body
+- The charter lives in **`PROMPT.md`** inside the trajectory directory (it travels with the trajectory on archive); the legacy `systemPromptFile` is still read, but `PROMPT.md` wins
+- `container_admin config validate` checks the config, `apply` makes it take effect; both read from disk live
+- WeChat routing points at it too: `routes: [{ "user": "*", "trajectory": "qa" }]` (**user → trajectory code**)
 
-### 6.4 Public Q&A page (3100)
+### 6.4 Public Q&A page (3100) — **RETIRED**
 
-- **Key auth** (constant-time comparison + failed-IP lockout + rotatable key) + container allow-list (empty = all open)
-- **Answers only**: the response carries answer / answer_html / sessionId — internal trajectory, tool results, and mechanics never leave
-- Listens on 127.0.0.1 by default; the exposure method (tunnel/reverse proxy/port mapping) is the operator's decision
+This face no longer exists: it was a self-made private HTTP + HTML shell with no client ecosystem, and it was removed
+in v1.57.1 / its successor ACP face was removed in v1.69.1. For programmatic or remote access, use the host's own
+official ACP server (`dsh --profile acp`, stdio, zero auth) and put authentication at the access layer
+(tunnel / reverse proxy / Cloudflare Access). This plugin provides **no** ACP face of its own.
 
-### 6.5 Trajectories and message delivery (trajectory)
+### 6.5 Trajectories and message delivery (cognitive_trajectory)
 
-`trajectory` (a trajectory) is the first-class concept: one workspace may run any number of trajectories in parallel, and each one's `SESSION.md` is its **persistent body** (the chat session is only its rebuildable carrier).
+`cognitive_trajectory` (a cognitive trajectory) is the first-class concept: one workspace may run any number of trajectories in parallel, and each one's `SESSION.md` is its **persistent body** (the chat session is only its rebuildable carrier).
 
-**Scheduled delivery**: `container_trajectory send-later` registers a wake = a future instant + one message — book it for yourself, or wake another trajectory. It lands in the workspace's `AGENT_SESSIONS/wake-registry.json` (readable and auditable) and a central scheduler delivers it when due — **no blocking, no waiting, and no receipt**.
+**Scheduled delivery**: `cognitive_trajectory send-later` registers a wake = a future instant + one message — book it for yourself, or wake another trajectory. It lands in the workspace's `AGENT_SESSIONS/wake-registry.json` (readable and auditable) and a central scheduler delivers it when due — **no blocking, no waiting, and no receipt**.
 
-**Instant delivery**: `container_trajectory send-now` hands a message over **right now**, and it is **never queued** — if the target is in memory and **mid-round**, it is `steer`ed **into the current round**; if the target is idle, a round starts immediately; if it is not in memory, it is **cold-loaded first and then delivered** (equivalent to a direct wake, but **not waiting for the scheduler's 5-minute tick**). It returns a **synchronous receipt** (stating whether it went live or cold-resume) and does **not** touch the registry (that table is only for "future instants").
+**Instant delivery**: `cognitive_trajectory send-now` hands a message over **right now**, and it is **never queued** — if the target is in memory and **mid-round**, it is `steer`ed **into the current round**; if the target is idle, a round starts immediately; if it is not in memory, it is **cold-loaded first and then delivered** (equivalent to a direct wake, but **not waiting for the scheduler's 5-minute tick**). It returns a **synchronous receipt** (stating whether it went live or cold-resume) and does **not** touch the registry (that table is only for "future instants").
 
 - The two differ in exactly two ways: **when** (now / future) and **receipt** (yes / no). Booking is innately fire-and-forget (no recall, no receipt), while handing over is one call and one answer — **each has clean semantics; the two are deliberately not crammed into a single action**. (🔴 **Renamed**: this pair used to be `wake-later` / `send-message`; it is now **`send-later` / `send-now`** — the family shares the stem `send-`, and the axis is `-later` / `-now`, because "waking" is a property **both** paths have and therefore cannot tell them apart. **Hard cut, no aliases.**)
 - ⚠️ **The receipt only means "injected / round started"**: it does **not** mean the target has run or replied. To confirm the target actually moved, read **its own `SESSION.md`** (a file-level criterion) — **never close the loop on the receipt alone**.
 - ⚠️ **The one exception path**: when `steer` is unavailable it **falls back to queueing** (fail-safe: **queueing is preferable to silently dropping the message**) — the receipt text says so explicitly. **`send-later` is unaffected**: booking exists to wake the target at a due instant, and "queue rather than interrupt the current round" is behaviour that has been empirically validated for it.
 - **A closed target can still be woken**: if the session is not in memory it is loaded first (**cold wake**); if it cannot be loaded, the entry stays in the registry with the reason recorded — **never silently dropped**.
 - **"Periodic" belongs to the workspace**: to go round after round, the **receiving** trajectory schedules the next round at the end of each round. ACC provides only the primitive "deliver one message when due" — it does not decide the cadence for the workspace (focus, cadence and bias are the workspace's own; any number of trajectories run in parallel, independent of each other).
-- **A trajectory can carry skills** (two forms, **unioned**): ① **declare once, the whole workspace inherits** — put `trajectory.skills: [name, …]` in `.opencode/serenity.json` and **every trajectory in this workspace** gets the full text of those skills injected while it is bound (**skiff role sessions included**); ② **this one trajectory only** — write `skills: [name, …]` in the top frontmatter of its `SESSION.md`. The two are unioned: workspace-level first (the base), trajectory-level appended (the extra). ⚠️ This is "**kept supplied for as long as it is bound**", not "poured in once at `use`" — editing the config or the frontmatter takes effect **immediately**, and it does not disappear on compaction. `create` merely creates: it **does not steal the current binding**, so a new trajectory must be **explicitly `use`d** before its skills are injected. Skill names come from workspace data and are **safety-checked before they are ever used to build a path**; a missing skill is reported as "missing" in the prompt rather than **silently skipped**. ⚠️ **Keep the top frontmatter intact when rewriting `SESSION.md`** — losing it silently revokes that trajectory's declaration.
+- **A trajectory can carry skills** (two forms, **unioned**): ① **declare once, the whole workspace inherits** — put `cognitiveTrajectory.skills: [name, …]` in `.opencode/serenity.json` and **every trajectory in this workspace** gets the full text of those skills injected while it is bound (**trajectory-constraint sessions included**); ② **this one trajectory only** — write `skills: [name, …]` in the top frontmatter of its `SESSION.md`. The two are unioned: workspace-level first (the base), trajectory-level appended (the extra). ⚠️ This is "**kept supplied for as long as it is bound**", not "poured in once at `use`" — editing the config or the frontmatter takes effect **immediately**, and it does not disappear on compaction. `create` merely creates: it **does not steal the current binding**, so a new trajectory must be **explicitly `use`d** before its skills are injected. Skill names come from workspace data and are **safety-checked before they are ever used to build a path**; a missing skill is reported as "missing" in the prompt rather than **silently skipped**. ⚠️ **Keep the top frontmatter intact when rewriting `SESSION.md`** — losing it silently revokes that trajectory's declaration.
 
 #### CRO — let a trajectory decide **when it should be woken**
 
@@ -299,7 +301,7 @@ Carve a **deliberately limited role** out of an all-capable assistant — not ju
 | **Who runs it** | ACC's wake scheduler (the existing **5-minute** tick) |
 | **What it receives** | a **JSON snapshot** on stdin: identity / time / trajectory body (SESSION.md size and mtime, `references/` listing) / binding and carriers (bound, live, and 🔴 **currently running a round**) / scheduling (this trajectory's pending wakes, scheduler state) |
 | **What it returns** | **one line of JSON** on stdout: `{"wake":true,"prompt":"…","reason":"…"}` or `{"wake":false}` (**absent = do not disturb**) |
-| **Read before writing** | `container_trajectory cro-guide` — the **guide plus a ready-to-use sample snapshot** |
+| **Read before writing** | `cognitive_trajectory cro-guide` — the **guide plus a ready-to-use sample snapshot** |
 
 **Hard constraints that shaped the design** (none of them arbitrary):
 
@@ -347,7 +349,7 @@ The AI's memory of a session is bounded. A fresh session is not required:
 | Mechanism | Description |
 |---|---|
 | **Work log (SESSION.md)** | The AI's notebook, and it never moves. Goals, decisions, progress all live there |
-| **In-place rebuild (`container_trajectory rebuild`)** | When it fills up, the AI is prompted to rebuild: this conversation is cleared, but "who you are + continue S###" is injected again — **the carrier is replaced, the work continues**. Token accounting settles correctly afterwards |
+| **In-place rebuild (`cognitive_trajectory rebuild`)** | When it fills up, the AI is prompted to rebuild: this conversation is cleared, but "who you are + continue S###" is injected again — **the carrier is replaced, the work continues**. Token accounting settles correctly afterwards |
 | **Progress reminders** | After long stretches it scores the work and reminds the AI to write progress back, expecting a confirmation code |
 | **Sedimentation discipline** | If rebuilding produced valuable insight, it is written into the relevant skill first, not thrown away |
 
@@ -384,7 +386,7 @@ pnpm build              # bundle (lib/index.js + client.js)
 | Runs on | OpenCode | DeepSeek Harness |
 | Implementation | Independent | **Independent** (no shared source, same standard) |
 | System prompt | `system.transform` | `systemPrompt.section`, platform-independent text aligned byte-for-byte |
-| Tools | msm / container_fs / logbook … | container_fs / container_trajectory / dashboard / container_git / msm / praxis / cheap-worker / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
+| Tools | msm / container_fs / logbook … | container_fs / cognitive_trajectory / dashboard / container_git / msm / praxis / cheap-worker / localstore / container_admin + two conditional ones (`im-bridge` / `acc-diag`) |
 
 **A workspace can switch runtimes at any time**: the `.serenity` marker, `.opencode/skills/`, configuration, and `AGENT_SESSIONS/` formats are identical.
 Only the platform layer differs (tool names, injection channel), and the constraints the AI receives stay the same.
@@ -403,7 +405,7 @@ Safe mode is on — that is the design, not a bug. Registered small tools are mo
 Five consecutive failures lock it for 15 minutes (exponential backoff). Wait it out, or check the account's code-binding status.
 
 **Q: Context is nearly full?**
-Have the AI write progress back to SESSION.md, then follow the prompt and call `container_trajectory rebuild`. The trajectory continues automatically — no new session needed.
+Have the AI write progress back to SESSION.md, then follow the prompt and call `cognitive_trajectory rebuild`. The trajectory continues automatically — no new session needed.
 
 **Q: Does the public Q&A page leak internals?**
 No. It returns only the answer; internal trajectories and tool results stay inside.

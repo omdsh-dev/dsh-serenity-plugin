@@ -82,14 +82,14 @@ describe('resolveTrajectoryPrompt —— 一次性解析与优先级', () => {
     expect(r.source).toBe('trajectory-file')
   })
 
-  it('只有旧内嵌 systemPrompt ⇒ 兼容期仍认（source=skiff-legacy）', () => {
+  it('只有旧内嵌 systemPrompt ⇒ 兼容期仍认（source=轨迹约束-legacy）', () => {
     const r = resolveTrajectoryPrompt(root, DIR, {
       dirName: DIR, code: 'probe', path: '/dev/null',
       tools: [], msms: [], cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
       systemPrompt: '旧内嵌章程',
     })
     expect(r.text).toBe('旧内嵌章程')
-    expect(r.source).toBe('skiff-legacy')
+    expect(r.source).toBe('轨迹约束-legacy')
   })
 })
 

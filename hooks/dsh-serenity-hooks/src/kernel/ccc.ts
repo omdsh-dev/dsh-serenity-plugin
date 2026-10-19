@@ -154,14 +154,14 @@ interface SerenityConfig {
     autoRestoreSession?: boolean;
   };
   /**
-   * 🔴 **`skiff` 段已于 2026-10-19 退役**（owner 重做令）。
+   * 🔴 **`轨迹约束` 段已于 2026-10-19 退役**（owner 重做令）。
    *
-   * skiff 不再是 `serenity.json` 里的一组角色定义，而是**带 `skiff.json` 的认知轨迹**
-   * （约束面住在轨迹目录里）。⇒ 本段**不再被读取**：存量配置里残留的 `skiff.roles` ⇒
-   * **静默忽略**（schemastery 非 strict，不报错；也不会被误当成"没有 skiff"）。
+   * 轨迹约束 不再是 `serenity.json` 里的一组角色定义，而是**带 `trajectory-constraint.json` 的认知轨迹**
+   * （约束面住在轨迹目录里）。⇒ 本段**不再被读取**：存量配置里残留的 `轨迹约束.roles` ⇒
+   * **静默忽略**（schemastery 非 strict，不报错；也不会被误当成"没有 轨迹约束"）。
    *
-   * 迁移路径 = 把 `skiff.roles.<name>` 的内容原样搬进对应轨迹目录的 `skiff.json`
-   * （判据与步骤见 `trajectory/policy/profile.ts` 头注释与 `docs/skiff-as-trajectory-redesign.md` §5）。
+   * 迁移路径 = 把 `轨迹约束.roles.<name>` 的内容原样搬进对应轨迹目录的 `trajectory-constraint.json`
+   * （判据与步骤见 `trajectory/policy/profile.ts` 头注释与 `docs/trajectory-constraint-redesign.md` §5）。
    */
   /**
    * 认知轨迹族配置（D58，S142 2026-09-13；2026-10-18 更名 `cognitiveTrajectory`）。
@@ -176,7 +176,7 @@ interface SerenityConfig {
    */
   cognitiveTrajectory?: {
     /**
-     * **CCC 级 skill 供给**（v1.44.0；owner 令 2026-09-20：「要求实现我的诉求……skiff 也支持」）。
+     * **CCC 级 skill 供给**（v1.44.0；owner 令 2026-09-20：「要求实现我的诉求……轨迹约束也支持」）。
      *
      * 语义：**本 CCC 的每条轨迹都带这些 skill**——声明的 skill 全文在该轨迹**被绑定期间**
      * 动态注入系统提示词（每请求重新求值，不缓存）。与轨迹自己在 `SESSION.md` frontmatter
@@ -191,7 +191,7 @@ interface SerenityConfig {
      * 配置损坏本身已由 `loadSerenityConfig` 响亮告警（不静默）。
      *
      * ⚠️ 与 `create` 的关系：**不触发**——`create` 刻意不夺绑定（U6），注入的门是"存在绑定"。
-     * ⚠️ 作用面：**含 skiff 角色会话**（它们同样绑定工作台轨迹）。
+     * ⚠️ 作用面：**含 轨迹约束角色会话**（它们同样绑定工作台轨迹）。
      */
     skills?: string[];
   };
@@ -296,7 +296,7 @@ export interface ImRouteConfig {
  * - 结构/路由/开关在 .opencode/serenity.json（git 管可重建）
  * - **bot_token 凭据在 CCC localstore**（weixin.accounts.<accountId>.token/.baseUrl/.userId）——
  *   扫码登录后插件自动写入（面板只显示"已绑定"），永不进 git 明文面
- * - 路由 user → role：exact 匹配优先，通配 `*` 兜底；role 必须是该 CCC skiff.roles 之一
+ * - 路由 user → role：exact 匹配优先，通配 `*` 兜底；role 必须是该 CCC 轨迹约束.roles 之一
  * - 多账号：accounts[] 每项 { accountId, name?, enabled }（本地唯一键，如 wechat-1）
  *
  * 🔴 2026-10-19：**本段已被统一 `im` 段取代**（见上方 `ImSettings`）。此处保留是因为
@@ -309,7 +309,7 @@ export interface WeixinSettings {
   botType?: string;
   /** 账号表（本地键 accountId；凭据在 localstore） */
   accounts?: WeixinAccountConfig[];
-  /** 消息路由：微信用户 → 该 CCC 的 skiff role（不绑定具体 role——用户自选） */
+  /** 消息路由：微信用户 → 该 CCC 的 轨迹约束 role（不绑定具体 role——用户自选） */
   routes?: WeixinRouteConfig[];
   /**
    * 用户别名表（v1.56.10）：`{ "<别名>": "<localstore 凭据键>" }`。
@@ -378,8 +378,8 @@ export interface WeixinAccountConfig {
  * 微信桥路由配置：微信用户 → 该 CCC 的**认知轨迹编码**
  *
  * 🔴 2026-10-19（owner 重做令）：「微信桥的路由表修改为 **user → 认知轨迹的映射**」。
- * 旧形态指向 `skiff.roles` 里的**角色名**；新形态直接指向**轨迹编码**
- * （= 目录名固定位置那一段；该轨迹目录里有 `skiff.json` 时它就是 skiff）。
+ * 旧形态指向 `轨迹约束.roles` 里的**角色名**；新形态直接指向**轨迹编码**
+ * （= 目录名固定位置那一段；该轨迹目录里有 `trajectory-constraint.json` 时它就是 轨迹约束）。
  */
 export interface WeixinRouteConfig {
   /** 微信用户标识（from_user_id，形如 userA@im.wechat）；`*` = 通配兜底 */
@@ -395,18 +395,18 @@ export interface WeixinRouteConfig {
 }
 
 /**
- * 🔴 **`SkiffRoleConfig` 已于 2026-10-19 退役**（owner 重做令）。
+ * 🔴 **`TrajectoryConstraintConfig` 已于 2026-10-19 退役**（owner 重做令）。
  *
- * 它的语义整体搬进**轨迹目录下的 `skiff.json`**，类型现在是
- * `trajectory/policy/profile.ts` 的 `SkiffProfile`（在那里还多了 `code`/`dirName`/`path`
+ * 它的语义整体搬进**轨迹目录下的 `trajectory-constraint.json`**，类型现在是
+ * `trajectory/policy/profile.ts` 的 `TrajectoryConstraint`（在那里还多了 `code`/`dirName`/`path`
  * 三个与轨迹身份相关的字段）。
  *
- * 退役理由（一句话）：skiff 的约束面是**某一条轨迹的属性**，不是容器级配置表里的一个 entry。
- * 放进 `serenity.json` 会让"这条轨迹是不是 skiff"分散在**两个文件**里，而 owner 要的是
- * 一条判据（「目录下拥有 `skiff.json` 的认知轨迹自动是一个 skiff」）。
+ * 退役理由（一句话）：轨迹约束的约束面是**某一条轨迹的属性**，不是容器级配置表里的一个 entry。
+ * 放进 `serenity.json` 会让"这条轨迹是不是 轨迹约束"分散在**两个文件**里，而 owner 要的是
+ * 一条判据（「目录下拥有 `trajectory-constraint.json` 的认知轨迹自动是一个 轨迹约束」）。
  *
  * ⚠️ 旧字段里 `kind: temporary|persistent` **整件无对应物**：它区分"有没有工作台"，
- * 而新模型里 skiff 恒等于一条轨迹 ⇒ 恒有 SESSION.md ⇒ 该区分没有指称对象（静默忽略）。
+ * 而新模型里 轨迹约束恒等于一条轨迹 ⇒ 恒有 SESSION.md ⇒ 该区分没有指称对象（静默忽略）。
  */
 
 /**
@@ -468,7 +468,7 @@ export function readUtf8(path: string): string {
 
 /**
  * 已告警过的损坏配置路径（进程级去重：同一坏文件不刷屏，但绝不静默）。
- * S142 review F-07：此前损坏 → 静默返回 `{}`——安全模式黑名单/cheap-worker 白名单/skiff 角色
+ * S142 review F-07：此前损坏 → 静默返回 `{}`——安全模式黑名单/cheap-worker 白名单/轨迹约束角色
  * 全部**无声失效**（用户以为配了，实际没配）。守卫的输入失败必须响亮。
  */
 const warnedBrokenConfigs = new Set<string>()
@@ -494,7 +494,7 @@ export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SEREN
       if (!warnedBrokenConfigs.has(p)) {
         warnedBrokenConfigs.add(p);
         console.warn(
-          `[serenity-hooks] ✗ CCC 配置解析失败，已按空配置继续（该 CCC 的安全模式黑名单/cheap-worker 白名单/skiff 角色等全部失效，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
+          `[serenity-hooks] ✗ CCC 配置解析失败，已按空配置继续（该 CCC 的安全模式黑名单/cheap-worker 白名单/轨迹约束角色等全部失效，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
         );
       }
       return {};

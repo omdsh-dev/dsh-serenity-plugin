@@ -20,7 +20,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../../kernel/ccc-roots.js'
 import { runMsmAsync, loadMsmEntries, findEntry } from './service.js'
-import { skiffMsmGate } from '../../trajectory/session.js'
+import { trajectoryConstraintMsmGate } from '../../trajectory/session.js'
 
 function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? ''
@@ -100,10 +100,10 @@ export const msmTool = defineTool({
   async execute(args, exec) {
     const root = cccRootForExec(exec)
     if (!root) throw new Error(NO_CCC_FROM_AGENT_CWD)
-    // Skiff 白名单门控（exec 校验；skiff 角色限定的 MSM 面）
+    // 轨迹约束白名单门控（exec 校验；轨迹约束角色限定的 MSM 面）
     const sessionId = agentSessionId(exec)
     const name = args.name as string | undefined
-    const gate = skiffMsmGate(root, sessionId, name ? 'exec' : 'list', name)
+    const gate = trajectoryConstraintMsmGate(root, sessionId, name ? 'exec' : 'list', name)
     if (gate.reject) throw new Error(gate.reject)
 
     // 无 name → 精简目录
@@ -113,7 +113,7 @@ export const msmTool = defineTool({
         : buildMsmIndex(root)
     }
     const clean = name.trim()
-    // Skiff 白名单过滤：name 不在白名单 → 拒绝（角色限定）
+    // 轨迹约束白名单过滤：name 不在白名单 → 拒绝（角色限定）
     if (gate.whitelist && !gate.whitelist.has(clean)) {
       return `MSM "${clean}" is not in this role's whitelist. Allowed: ${[...gate.whitelist].join(', ')}`
     }
@@ -121,7 +121,7 @@ export const msmTool = defineTool({
     // 精确查找：未命中 → 返回候选（list/exec 合一的发现路径）
     if (!findEntry(root, clean)) {
       const suggest = suggestMsm(root, clean)
-      // 非 skiff 正常返回候选；skiff 白名单时候选也过滤
+      // 非 轨迹约束 正常返回候选；轨迹约束白名单时候选也过滤
       return gate.whitelist ? `(whitelisted role — candidates filtered)\n${suggest}` : suggest
     }
 

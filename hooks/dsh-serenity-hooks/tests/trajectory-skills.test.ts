@@ -392,7 +392,7 @@ describe('cognitive-trajectory-skills: keeper compaction 护栏', () => {
 
 // ── 9. CCC 级声明（v1.44.0；规格 v1.1 §2.3）──
 //
-// owner 令 2026-09-20：「要求实现我的诉求……注入是动态注入就行；create 先不触发吧；skiff 也支持」
+// owner 令 2026-09-20：「要求实现我的诉求……注入是动态注入就行；create 先不触发吧；轨迹约束也支持」
 // ⇒ 声明来源由"轨迹自己"扩为**两条并集**（CCC 级在前、轨迹级追加）。
 
 describe('cognitive-trajectory-skills: CCC 级声明（cognitiveTrajectory.skills）', () => {

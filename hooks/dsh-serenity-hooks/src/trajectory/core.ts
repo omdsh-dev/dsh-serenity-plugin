@@ -32,7 +32,7 @@
  *
  * ⚠️ 由此产生一条**必须成立**的配套：`readAllSessions` **跳过 `_` 前缀目录**。
  * 否则归档后的轨迹会继续出现在清单里，"归档"就不是归档了（历史 bug：`_weixin-logs` /
- * `_skiff-logs` / `_corpus` 曾被当成轨迹列出来）。
+ * `_轨迹约束-logs` / `_corpus` 曾被当成轨迹列出来）。
  */
 
 import {
@@ -167,7 +167,7 @@ function readSessionEntry(dirPath: string): SessionEntry | null {
  * 读取 AGENT_SESSIONS 中所有**活跃**轨迹，按 mtime 降序。
  *
  * 🔴 **跳过 `_` 前缀目录**（2026-10-18 新增，与归档配套）：
- * `_archived` 是归档区，`_skiff-logs` / `_weixin-logs` / `_corpus` 是**日志与数据区**——
+ * `_archived` 是归档区，`_轨迹约束-logs` / `_weixin-logs` / `_corpus` 是**日志与数据区**——
  * 它们**都不是轨迹**。旧实现会把它们当轨迹列出来（历史 bug）。
  * 没有这条，归档后的轨迹仍会出现在清单里 ⇒ **"归档"名不副实**。
  *
@@ -189,7 +189,7 @@ function readAllSessions(sessionsDir: string): SessionEntry[] {
 
 // ── 轨迹编码（code）：目录名固定位置的唯一标识 ──────────────────────────────
 //
-// 🔴 owner 2026-10-19（skiff 重做令，逐字）：「**认知轨迹固定唯一标识规则，固定为目录中的固定位置编码**；
+// 🔴 owner 2026-10-19（轨迹约束 重做令，逐字）：「**认知轨迹固定唯一标识规则，固定为目录中的固定位置编码**；
 // 然后，**认知轨迹允许用户指定这个编码**（在约束范围内，不得包含中文）」。
 //
 // 旧模型是**二元**的：`S###`（自动递增、不可指定）＋ `TRAJECTORY-UID`（可选小文件，理由 = "命名会变"）。

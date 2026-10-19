@@ -541,14 +541,14 @@ export async function applyOpencodeAutoConfigOnce(ctx: Context, env?: Readonly<R
  *
  * 为什么要重试：`llm-pi-ai` 只在**它自己的** `ctx.inject(['settings'])` 回调里注册命名空间，
  * 与本插件 apply **无先后保证**（两者都依赖 settings 服务）。首次读取拿到 undefined 是常态而非错误
- * （与 skiff 的 CCC root 重试同款问题、同款处置：v1.30.13 实证"只在 apply 时试一次 → 永不重试"）。
+ * （与 轨迹约束的 CCC root 重试同款问题、同款处置：v1.30.13 实证"只在 apply 时试一次 → 永不重试"）。
  */
 const NAMESPACE_RETRY_DELAYS_MS = [1000, 3000, 8000, 20000, 40000] as const
 
 /**
  * 装配 opencode 路由自动配置。
  *
- * 触发面（三层，与 skiff 同款；R↓：单点触发在同装载竞态下必然漏）：
+ * 触发面（三层，与 轨迹约束 同款；R↓：单点触发在同装载竞态下必然漏）：
  *   ① apply 时立即试一次
  *   ② 命名空间尚未注册 → 退避重试（1s/3s/8s/20s/40s）
  *   ③ `settings/updated` → 再试（用户热改 settings.yaml 加路由时自愈；自身写入触发的复评是幂等空转）
@@ -583,7 +583,7 @@ export function registerOpencodeAutoConfig(ctx: Context): void {
       retries += 1
       sync()
     }, delay)
-    retryTimer.unref?.() // 不阻止进程退出（与 skiff 同款）
+    retryTimer.unref?.() // 不阻止进程退出（与 轨迹约束 同款）
   }
 
   function sync(): void {

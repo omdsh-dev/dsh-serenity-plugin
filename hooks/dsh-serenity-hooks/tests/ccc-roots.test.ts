@@ -4,13 +4,13 @@
  * 本文件锁死 `src/kernel/ccc-roots.ts`（L1 单根解析 + L2 全量枚举的唯一判断层）的三条契约：
  *  1. **并集语义**（不是短路）：三层来源各贡献候选，结果按来源顺序去重；`defaultRoot` 置首。
  *  2. **`withRoles` 缺省 false ⇒ 不扫任何 CCC 的 `AGENT_SESSIONS/`**（唤醒调度器每 tick
- *     枚举，不该为 skiff 付 IO）。
+ *     枚举，不该为 轨迹约束 付 IO）。
  *  3. `agentCwdFor` / `cccRootForExec` 的**逐字语义**（含 `process.cwd()` 回落）。
  *
- * 🔴 2026-10-19 skiff 重做：`roles` 的**数据源**从 `serenity.json` 的 `skiff.roles`
- * 换成"扫轨迹目录找 `skiff.json`"（`listSkiffProfiles`）⇒ 契约 2 的"不付 IO"由
+ * 🔴 2026-10-19 轨迹约束 重做：`roles` 的**数据源**从 `serenity.json` 的 `轨迹约束.roles`
+ * 换成"扫轨迹目录找 `trajectory-constraint.json`"（`listTrajectoryConstraintSummary`）⇒ 契约 2 的"不付 IO"由
  * **不读配置**变成**不扫盘**，强度更高（同样零调用，但代价面从一次配置读变成一次目录枚举）。
- * ⇒ 断言随之从 `readSkiffRoles` 零调用改为 `listSkiffProfiles` 零调用，**意图逐字保留**。
+ * ⇒ 断言随之从 `read轨迹约束Roles` 零调用改为 `listTrajectoryConstraintSummary` 零调用，**意图逐字保留**。
  *
  * 反例锚（回归钉）：第 1 条的用例在旧短路实现下只会得到 1 条——这正是 C2 要修的缺陷
  * （现状稿 §2.B E1 + §2.D 第 4 条："只要 workspaceRegistry 有任意一条就永远不看后两层"）。
@@ -22,8 +22,8 @@ import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { listCccs, agentCwdFor, cccRootForCwd, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
-import * as skiffProfile from '../src/trajectory/policy/profile.js'
-import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
+import * as trajectoryConstraint from '../src/trajectory/policy/profile.js'
+import { makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
 
 /** 建一个临时 CCC（含 `.serenity`）；返回真实路径 */
 function makeCcc(prefix: string): string {
@@ -154,31 +154,31 @@ describe('listCccs：并集语义（C2 核心修正）', () => {
 })
 
 describe('listCccs：withRoles 缺省不扫 AGENT_SESSIONS', () => {
-  it('🔴 withRoles 缺省 false ⇒ `listSkiffProfiles` **零调用**（不给唤醒调度器的每 tick 加 IO）', async () => {
+  it('🔴 withRoles 缺省 false ⇒ `listTrajectoryConstraints` **零调用**（不给唤醒调度器的每 tick 加 IO）', async () => {
     const a = makeCcc('ccc-roots-a-')
     made.push(a)
-    // 装上 skiff 轨迹（若真去扫，roles 会非空 → 反向也锁住）
-    makeTrajectory(a, 'qa', skiffJson({ msms: ['x'] }))
+    // 装上 轨迹约束轨迹（若真去扫，roles 会非空 → 反向也锁住）
+    makeTrajectory(a, 'qa', 轨迹约束Json({ msms: ['x'] }))
 
-    const spy = vi.spyOn(skiffProfile, 'listSkiffProfiles')
+    const spy = vi.spyOn(trajectoryConstraint, 'listTrajectoryConstraints')
     const cccs = await listCccs(fakeCtx({ workspaces: [{ path: a }] }) as never)
 
-    // 用桩断言「未发生 IO」的等价形式：skiff 扫描器一次都没被调用
+    // 用桩断言「未发生 IO」的等价形式：轨迹约束 扫描器一次都没被调用
     expect(spy).not.toHaveBeenCalled()
     expect(cccs[0]!.roles).toEqual([])
   })
 
-  it('withRoles: true ⇒ 逐 CCC 扫 skiff 轨迹，值 = **轨迹编码**（调试页/微信桥的既有行为）', async () => {
+  it('withRoles: true ⇒ 逐 CCC 扫 轨迹约束轨迹，值 = **轨迹编码**（调试页/微信桥的既有行为）', async () => {
     const a = makeCcc('ccc-roots-a-')
     const b = makeCcc('ccc-roots-b-')
     made.push(a, b)
-    makeTrajectory(a, 'qa', skiffJson({ msms: ['x'] }))
-    // 反向锁：b 里放一条**普通**轨迹（无 skiff.json ⇒ 不是 skiff），roles 必须仍为空
+    makeTrajectory(a, 'qa', 轨迹约束Json({ msms: ['x'] }))
+    // 反向锁：b 里放一条**普通**轨迹（无 trajectory-constraint.json ⇒ 不是 轨迹约束），roles 必须仍为空
     makeTrajectory(b, 'plain', null)
 
     // 🔴 同组顺带证明上面那条的桩**是活的**：同一个 spy 在 withRoles:true 下被调用了（2 个 CCC 各一次）
     //    —— 否则 "not.toHaveBeenCalled()" 可能只是因为桩压根没挂上（假绿）。
-    const spy = vi.spyOn(skiffProfile, 'listSkiffProfiles')
+    const spy = vi.spyOn(trajectoryConstraint, 'listTrajectoryConstraints')
     const cccs = await listCccs(fakeCtx({ workspaces: [{ path: a }, { path: b }] }) as never, { withRoles: true })
     expect(cccs[0]!.roles).toEqual(['qa'])
     expect(cccs[1]!.roles).toEqual([])

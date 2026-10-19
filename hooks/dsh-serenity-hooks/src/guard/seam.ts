@@ -5,14 +5,14 @@
  * 命中 → `agent.steer(buildRebuke(hits))` 打回重生成（turn 不关闭，模型同轮重答）。
  * 连续命中达 REBUKE_MAX_ROUNDS → 放弃打回（防死循环），输出保留 + 审计日志。
  *
- * 作用范围（v1.26.3 用户拍板）：**仅外部面**——skiff 等对外输出会话
- * （session id `skiff-`/`rebuild-` 前缀；v1.22.4 rebuild 新建会话同面）。
+ * 作用范围（v1.26.3 用户拍板）：**仅外部面**——轨迹约束 等对外输出会话
+ * （session id `轨迹约束-`/`rebuild-` 前缀；v1.22.4 rebuild 新建会话同面）。
  * **本地维护会话（普通 dsh 会话）不检测**——维护会话必然提及机制词
  * （dsh-serenity-hooks/cognitive_trajectory rebuild/mech-registry），打回会瘫痪自身工作。
  *
  * 🔴 **2026-10-15 补注（面 E 退役）**：`acp-` 前缀分支**已成孤儿，但本批不动**。
  * 判据（两条，实测）：① **该前缀从来没有生产者** —— 历史 `acp-core.ts` 建会话走的是
- * `createSkiffAgent`，其 id = `` `skiff-${role}-${uuid}` ``（`trajectory/session.ts`）⇒ `acp-` **从不出现**；
+ * `createTrajectoryAgent`，其 id = `` `轨迹约束-${role}-${uuid}` ``（`trajectory/session.ts`）⇒ `acp-` **从不出现**；
  * ② 面 E 退役后连"本可能产生它的模块"也不在了。⇒ 该分支是**恒 false 的死判据**。
  * ⚠️ **仍不擅自删**：这是**运行时字符串比较**，删它属**行为变更**（不是纯清理），
  * 依本轨既有先例（`cheap-worker-` 四处置孤儿，同族、同判据）⇒ **登记待裁**（见 S142 §当前状态「观察」）。
@@ -22,7 +22,7 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
-import { isSkiffSession } from '../trajectory/policy/profile.js'
+import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
 import { stripThink } from '../surface/text.js'
 import { buildSensitiveTable, detectSensitive, buildRebuke, rebukeStates, REBUKE_MAX_ROUNDS } from './filter.js'
 import { sessionEvents } from '../trajectory/core.js'
@@ -31,21 +31,21 @@ import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 /**
  * 外部面会话判定（v1.26.3 用户拍板：仅外部面检测，本地维护会话豁免）。
  *
- * 🔴 **2026-10-19 判据更换**：skiff 那一条从「sessionId 前缀 `skiff-`」改为
- * **「该会话绑定的轨迹有 `skiff.json`」**（owner 重做令）。前缀判据在新模型下是
- * **错的**——skiff 的身份是轨迹，不再由 id 前缀表达；继续用前缀会漏掉所有
- * "挂在 skiff 轨迹上、但 id 不带前缀"的会话（典型 = 微信桥按轨迹派生的会话 id）。
+ * 🔴 **2026-10-19 判据更换**：轨迹约束那一条从「sessionId 前缀 `轨迹约束-`」改为
+ * **「该会话绑定的轨迹有 `trajectory-constraint.json`」**（owner 重做令）。前缀判据在新模型下是
+ * **错的**——轨迹约束的身份是轨迹，不再由 id 前缀表达；继续用前缀会漏掉所有
+ * "挂在 轨迹约束轨迹上、但 id 不带前缀"的会话（典型 = 微信桥按轨迹派生的会话 id）。
  *
- * ⚠️ `rebuild-` 前缀保留（那是另一件事：重建会话同属对外面，与 skiff 无关）；
+ * ⚠️ `rebuild-` 前缀保留（那是另一件事：重建会话同属对外面，与 轨迹约束 无关）；
  * `acp-` 分支保留但**已是死判据**（无生产者；面 E 已于 2026-10-15 退役）——
  * 理由与"为何不擅自删"见文件头注释。
  */
 function isExternalFaceSession(sessionId: string | undefined, root: string): boolean {
   if (!sessionId) return false
-  return isSkiffSession(root, sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
+  return isTrajectoryConstrained(root, sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
 }
 
-/** 读会话最后一个 assistant/message 文本（skiff-core 同款）
+/** 读会话最后一个 assistant/message 文本（trajectory-session 同款）
  *  **v1.63.3 起唯一的导出理由消失**：原导出是给 `unattended-seam.ts` 复用的（D77），
  *  该文件已随无人值守功能整条退役 ⇒ 现只有本模块自己用（`isLeak` 的调用点）。
  *  ⚠️ 保持 `export` 无害（它有测试覆盖，且将来"同一读法只留一份"的纪律仍成立），
@@ -75,7 +75,7 @@ export function registerOutputGuardHook(ctx: Context): void {
   ctx.on('agent/turn-stopping', (payload: { agent?: Agent; turn?: number }) => {
     const agent = payload?.agent
     if (!agent) return
-    // 作用范围（v1.26.3 用户拍板）：仅外部面（skiff/acp/rebuild 前缀）——
+    // 作用范围（v1.26.3 用户拍板）：仅外部面（轨迹约束/acp/rebuild 前缀）——
     // 本地维护会话（普通 dsh 会话）豁免：维护会话必然提及机制词，打回会瘫痪自身工作
     const sessionId = String((agent.session as { id?: unknown }).id ?? '')
     // 激活门控：只在 .serenity 存在的 CCC 目录检测（非 CCC 目录零干预）

@@ -145,8 +145,8 @@ export function matchCcc(input: string, candidates: CccCandidate[]): { ok: true;
 
 /** 组装候选列表（`ccc-roots.listCccs` 投影 + `.serenity` 名；动态 import 保持本模块静态依赖轻量） */
 async function collectCandidates(ctx: Context): Promise<CccCandidate[]> {
-  // C2：候选来源改为 ccc-roots（L2 枚举唯一真相源）——不再绕 skiff-debug.js
-  // （那样会连带加载整条 skiff 链）。默认根 = process.cwd()（既有语义不变）。
+  // C2：候选来源改为 ccc-roots（L2 枚举唯一真相源）——不再绕 trajectory-debug.js
+  // （那样会连带加载整条 轨迹约束链）。默认根 = process.cwd()（既有语义不变）。
   const { listCccs } = await import('../kernel/ccc-roots.js')
   const entries = await listCccs(ctx, { defaultRoot: process.cwd() })
   const seen = new Set<string>()

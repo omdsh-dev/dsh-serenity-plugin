@@ -3,11 +3,11 @@
  *
  * ## 为什么它从调试面里拆出来（S11，2026-10-19，轨迹中心重构）
  *
- * 拆之前它是 `role/skiff/debug.ts` 的**后半段**，而那份文件是**混装件**：
+ * 拆之前它是 `role/轨迹约束/debug.ts` 的**后半段**，而那份文件是**混装件**：
  *   · 前半段 = **面 D** 的 HTTP 调试页（自起 listener，端口见 `kernel/ports.ts`）
  *   · 后半段 = **通用文本清洗**（本文件，已随重构搬到 `surface/text.ts`）
  *
- * 判据（实测，不是猜）：本文件的导出被**两个与 skiff 无关的模块**直接使用 ——
+ * 判据（实测，不是猜）：本文件的导出被**两个与 轨迹约束 无关的模块**直接使用 ——
  * `im/bridge.ts`（微信桥：回复前剥 think）与 `guard/seam.ts`（输出守卫：检测前剥 think）。
  * ⇒ 它不属于"某一条轨迹的调试面"，它是**任何输出面都会用的清洗**。
  *
@@ -31,7 +31,7 @@ import { marked } from 'marked'
  *    **hideThink=true（v1.26.4，public 口）→ 直接移除**（思考过程对普通用户不展示）
  * @param hideThink 为 true 时 `<think>` 内容完全不渲染（public 问答页体验）
  */
-export function renderSkiffMarkdown(raw: string, hideThink = false): string {
+export function renderTrajectoryMarkdown(raw: string, hideThink = false): string {
   const { body, thinks } = extractThinkBlocks(raw)
   const parsed = marked.parse(escapeHtml(body), { breaks: true, gfm: true })
   const html = typeof parsed === 'string' ? parsed : ''

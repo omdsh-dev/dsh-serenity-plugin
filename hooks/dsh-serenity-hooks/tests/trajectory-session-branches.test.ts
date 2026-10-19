@@ -8,45 +8,45 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 }))
 
 import {
-  askSkiff,
+  askTrajectory,
   ensureWorkspacePromptSection,
-  skiffWorkspaceMdPath,
+  trajectoryWorkspaceMdPath,
   workspaceCognitiveTrajectoryLine,
-  skiffCognitiveTrajectoryEnabled,
-  skiffMsmGate,
+  trajectoryConstraintParticipates,
+  trajectoryConstraintMsmGate,
 } from '../src/trajectory/session.js'
-import { resetSkiffSessions, registerSkiffSession } from '../src/trajectory/policy/window.js'
-import { makeSkiffSession, makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
+import { resetTrajectorySessions, registerTrajectorySession } from '../src/trajectory/policy/window.js'
+import { make轨迹约束Session, makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
 import { resetActiveSessionStore } from '../src/trajectory/core.js'
 
 /**
- * skiff-core-branches.test.ts — Skiff 会话核心：**降级面与事件解析容错**（⑤ 第 56 件，S142 2026-09-26）
+ * trajectory-session-branches.test.ts — 轨迹约束会话核心：**降级面与事件解析容错**（⑤ 第 56 件，S142 2026-09-26）
  *
- * ## 🔴 2026-10-19：随 skiff 重做同步更新的两处范围变更（R↓，为什么本文件被重写而不是只改断言）
+ * ## 🔴 2026-10-19：随 轨迹约束 重做同步更新的两处范围变更（R↓，为什么本文件被重写而不是只改断言）
  *
- * ① **`askSkiff` 不再返回 `cognitiveTrajectory`**（返回值现只剩 `{answer, sessionId}`）：
+ * ① **`askTrajectory` 不再返回 `cognitiveTrajectory`**（返回值现只剩 `{answer, sessionId}`）：
  *    旧的"事件 → 认知轨迹"派生（`eventsToCognitiveTrajectory` / `includeCognitiveTrajectory` /
  *    `eventsStart` 全量-增量两语义 / tool_calls 序列化 / 工具结果 500 字截断）**整件退役**。
  *    ⇒ 对应用例**删除**（生产实现已不在 `core.ts`；留着就是对不存在行为的空断言），
  *      保留的是同一段里**仍然活着**的"答案读取"两条形态兼容 —— 它们决定用户能不能收到回复。
- * ② **`ensureSkiffSession` 整件删除**（它会为 skiff 另建一个 SESSION，即"SESSION 爆炸"来源）：
+ * ② **`ensureTrajectorySession` 整件删除**（它会为 轨迹约束 另建一个 SESSION，即"SESSION 爆炸"来源）：
  *    工作台**就是该轨迹自己的 SESSION.md** ⇒ 同一位置的动作从「建」变成「查」
- *    （`skiffWorkspaceMdPath`，纯查询无副作用），C 段改钉这条新语义。
+ *    （`trajectoryWorkspaceMdPath`，纯查询无副作用），C 段改钉这条新语义。
  *
- * 身份判据同时换代：**不再看 `serenity.json` 的 `skiff.roles`，而看「会话绑定的轨迹目录里
- * 有没有 `skiff.json`」** ⇒ 本文件的夹具一律走 `helpers/skiff-fixture.ts`。
+ * 身份判据同时换代：**不再看 `serenity.json` 的 `轨迹约束.roles`，而看「会话绑定的轨迹目录里
+ * 有没有 `trajectory-constraint.json`」** ⇒ 本文件的夹具一律走 `helpers/trajectory-constraint-fixture.ts`。
  *
- * ## 与既有 `skiff-core.test.ts` 的分工（互补不重叠）
+ * ## 与既有 `trajectory-session.test.ts` 的分工（互补不重叠）
  *
- * 既有文件走**正路**：`createSkiffAgent` 的 resume-or-create、`askSkiff` 的成功往返、
- * `skiffCognitiveTrajectoryEnabled` 与 `skiffMsmGate` 的三态主路。
+ * 既有文件走**正路**：`createTrajectoryAgent` 的 resume-or-create、`askTrajectory` 的成功往返、
+ * `trajectoryConstraintParticipates` 与 `trajectoryConstraintMsmGate` 的三态主路。
  * 本文件补它**全部没碰**的降级面与事件形态兼容。
  *
  * ## 🔴 本件的硬前置（纪律 22/23/⑬ 同族）
  *
  * 1. **绝不占活服务端口**：本文件不建 listener（纯函数 ＋ 内存替身），端口纪律自动满足。
- * 2. **模块级状态必须重置**：活跃会话表 `resetActiveSessionStore()` ＋ skiff 会话注册表
- *    `resetSkiffSessions()`（两者都是进程级 Map/Set，用例间必须复位）。
+ * 2. **模块级状态必须重置**：活跃会话表 `resetActiveSessionStore()` ＋ 轨迹约束会话注册表
+ *    `resetTrajectorySessions()`（两者都是进程级 Map/Set，用例间必须复位）。
  * 3. **降级面断言须先有 happy-path 正控**（纪律 10 ／ 累积纪律 ⑬ "成对测"）：每条守卫断言
  *    都配一条"同一夹具在正常输入下确实走通"的对照，否则无法区分"守卫生效"与"夹具坏了"。
  */
@@ -54,15 +54,15 @@ import { resetActiveSessionStore } from '../src/trajectory/core.js'
 let dir: string
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'skiff-core-br-'))
+  dir = mkdtempSync(join(tmpdir(), 'trajectory-session-br-'))
   writeFileSync(join(dir, '.serenity'), 'test')
   resetActiveSessionStore()
-  resetSkiffSessions() // 会话 → 轨迹 的内存注册表（模块级状态，用例间必须复位）
+  resetTrajectorySessions() // 会话 → 轨迹 的内存注册表（模块级状态，用例间必须复位）
 })
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
-  resetSkiffSessions()
+  resetTrajectorySessions()
   vi.restoreAllMocks()
 })
 
@@ -80,7 +80,7 @@ function fakeCtx(agent: unknown): { on: (ev: string, cb: (p: { agent: unknown; s
 // A. 事件形态兼容（sessionEvents 双形态 ＋ assistant 取文两条路径）
 //
 // 🔴 2026-10-19 的范围变更（本段整体重写的理由，R↓）：
-//   `askSkiff` 的返回值**不再有 `cognitiveTrajectory`**（`SkiffAskResult` 现只剩
+//   `askTrajectory` 的返回值**不再有 `cognitiveTrajectory`**（`轨迹约束AskResult` 现只剩
 //   `{answer, sessionId}`）⇒ 旧版的"事件 → 认知轨迹"派生（`eventsToCognitiveTrajectory`、
 //   `includeCognitiveTrajectory`、`eventsStart` 全量/增量两语义、tool_calls 序列化、
 //   工具结果 500 字截断）**整件退役**，它们的生产实现已不在 `core.ts` 里。
@@ -89,7 +89,7 @@ function fakeCtx(agent: unknown): { on: (ev: string, cb: (p: { agent: unknown; s
 //      "用户能不能收到回复"，是本段最初的贴 objective）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant 取文两条路径）', () => {
+describe('trajectory-session: 事件形态兼容（sessionEvents 双形态 ＋ assistant 取文两条路径）', () => {
   it('🔴 A1：`snapshotEvents()` 形态（**真宿主 rc.1 走的那条**）⇒ 能取到答案', async () => {
     // 真故障形态的反面：rc.1 宿主把 `Session.events` 换成了 `snapshotEvents()` 方法。
     // 既有夹具只给 `.events` ⇒ `sessionEvents` 的兼容分支从未为真。
@@ -103,7 +103,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
         )
       },
     }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    const result = await askTrajectory(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.answer).toBe('via snapshotEvents')
   })
 
@@ -117,7 +117,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
         events.push({ type: 'assistant/message', data: { content: [{ type: 'text', text: 'flat shape' }] } })
       },
     }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    const result = await askTrajectory(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.answer).toBe('flat shape')
   })
 
@@ -129,7 +129,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
         events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'wrapped' }] } } })
       },
     }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    const result = await askTrajectory(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.answer).toBe('wrapped')
   })
 
@@ -146,7 +146,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
         )
       },
     }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    const result = await askTrajectory(fakeCtx(agent) as never, agent as never, 'q')
     // 判据不只"没崩"，而要**答案真为空**（畸形事件一条都没产出文本）
     expect(result.answer).toBe('')
   })
@@ -167,7 +167,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
         )
       },
     }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    const result = await askTrajectory(fakeCtx(agent) as never, agent as never, 'q')
     // 🔴 判据 = **最后一条**被读到（只断言"没抛"无法区分"跳过"与"整段中止"）
     expect(result.answer).toBe('after')
   })
@@ -182,7 +182,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
         events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'a' }] } } })
       },
     }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    const result = await askTrajectory(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.sessionId).toBe('')
     expect(result.answer).toBe('a') // 答案不受影响
   })
@@ -195,7 +195,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
         events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'a' }] } } })
       },
     }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    const result = await askTrajectory(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.sessionId).toBe('real-id')
   })
 })
@@ -204,7 +204,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
 // B. 工作台提示词段的降级面
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('skiff-core: ensureWorkspacePromptSection 的三条守卫（挂不上 ⇒ 调用方降级 question 注入）', () => {
+describe('trajectory-session: ensureWorkspacePromptSection 的三条守卫（挂不上 ⇒ 调用方降级 question 注入）', () => {
   it('🔴 B1：非对象 agent ⇒ false（不抛）', () => {
     // `:139` 的 `if (!agent || typeof agent !== 'object') return false` —— 两半都要走
     expect(ensureWorkspacePromptSection(null as never, dir)).toBe(false)
@@ -274,30 +274,30 @@ describe('skiff-core: ensureWorkspacePromptSection 的三条守卫（挂不上 �
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// C. 工作台路径的退化形态（`skiffWorkspaceMdPath`）
+// C. 工作台路径的退化形态（`trajectoryWorkspaceMdPath`）
 //
-// 🔴 2026-10-19：`ensureSkiffSession` **整件删除**（它会为 skiff 另建一个 SESSION ——
+// 🔴 2026-10-19：`ensureTrajectorySession` **整件删除**（它会为 轨迹约束 另建一个 SESSION ——
 //    那正是"SESSION 爆炸"的来源）。新模型里**工作台就是这条轨迹自己的 SESSION.md**，
 //    于是同一位置的动作从「**建**」变成「**查**」（纯查询，无副作用）。
 // ⇒ 下面四条替代原 C1~C4，钉的是新语义：**不给就不造**、身份跟着**轨迹**走。
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('skiff-core: skiffWorkspaceMdPath 的退化形态', () => {
+describe('trajectory-session: trajectoryWorkspaceMdPath 的退化形态', () => {
   it('🔴 C1：会话未登记（无绑定轨迹）⇒ null（**不猜、不新建**）', () => {
-    expect(skiffWorkspaceMdPath(dir, 'never-registered-1')).toBeNull()
-    expect(skiffWorkspaceMdPath(dir, undefined)).toBeNull()
+    expect(trajectoryWorkspaceMdPath(dir, 'never-registered-1')).toBeNull()
+    expect(trajectoryWorkspaceMdPath(dir, undefined)).toBeNull()
   })
 
   it('🔴 C2：登记了轨迹，但该轨迹目录里**没有 SESSION.md** ⇒ null（不代建）', () => {
-    // 旧 `ensureSkiffSession` 在这里会**新建**一个 SESSION —— 那正是要钉死的旧行为。
-    const dirName = makeSkiffSession(dir, 'sess-empty-body', 'empty-body', skiffJson({ tools: [] }))
+    // 旧 `ensureTrajectorySession` 在这里会**新建**一个 SESSION —— 那正是要钉死的旧行为。
+    const dirName = make轨迹约束Session(dir, 'sess-empty-body', 'empty-body', 轨迹约束Json({ tools: [] }))
     rmSync(join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md'))
-    expect(skiffWorkspaceMdPath(dir, 'sess-empty-body')).toBeNull()
+    expect(trajectoryWorkspaceMdPath(dir, 'sess-empty-body')).toBeNull()
   })
 
   it('🔴 C3：登记的轨迹有 SESSION.md ⇒ 返回**那条轨迹自己的** SESSION.md 路径', () => {
-    const dirName = makeSkiffSession(dir, 'sess-own-body', 'qa', skiffJson({ tools: [] }))
-    const md = skiffWorkspaceMdPath(dir, 'sess-own-body')
+    const dirName = make轨迹约束Session(dir, 'sess-own-body', 'qa', 轨迹约束Json({ tools: [] }))
+    const md = trajectoryWorkspaceMdPath(dir, 'sess-own-body')
     expect(md).not.toBeNull()
     expect(md).toBe(join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md'))
     // 🔴 语义钉：**不新建目录**——路径必须落在已存在的轨迹目录里（旧的"另建工作台"会指向别处）
@@ -305,63 +305,63 @@ describe('skiff-core: skiffWorkspaceMdPath 的退化形态', () => {
   })
 
   it('C4（正控）：换一个会话 id 指向**另一条轨迹** ⇒ 返回的是那条轨迹的 SESSION.md', () => {
-    const dirA = makeSkiffSession(dir, 'sess-a', 'traj-a', skiffJson({ tools: [] }), 'trajA')
-    const dirB = makeSkiffSession(dir, 'sess-b', 'traj-b', skiffJson({ tools: [] }), 'trajB')
-    // 身份跟着**轨迹**走（旧模型的身份是 sessionId 前缀 `skiff-`，且与轨迹无关）
-    expect(skiffWorkspaceMdPath(dir, 'sess-a')).toContain(dirA)
-    expect(skiffWorkspaceMdPath(dir, 'sess-b')).toContain(dirB)
+    const dirA = make轨迹约束Session(dir, 'sess-a', 'traj-a', 轨迹约束Json({ tools: [] }), 'trajA')
+    const dirB = make轨迹约束Session(dir, 'sess-b', 'traj-b', 轨迹约束Json({ tools: [] }), 'trajB')
+    // 身份跟着**轨迹**走（旧模型的身份是 sessionId 前缀 `轨迹约束-`，且与轨迹无关）
+    expect(trajectoryWorkspaceMdPath(dir, 'sess-a')).toContain(dirA)
+    expect(trajectoryWorkspaceMdPath(dir, 'sess-b')).toContain(dirB)
   })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// D. skiffCognitiveTrajectoryEnabled / skiffMsmGate 的边角
+// D. trajectoryConstraintParticipates / trajectoryConstraintMsmGate 的边角
 //
 // 🔴 2026-10-19：身份判据换了 —— 不再是「`serenity.json` 里配没配这个角色」，
-//    而是「**会话绑定的轨迹目录里有没有 `skiff.json`**」（`trajectory/policy/profile.ts`）。
-//    ⇒ 夹具从 writeConfig(`skiff.roles`) 改为 makeSkiffSession（真造一条带 `skiff.json` 的轨迹）。
+//    而是「**会话绑定的轨迹目录里有没有 `trajectory-constraint.json`**」（`trajectory/policy/profile.ts`）。
+//    ⇒ 夹具从 writeConfig(`轨迹约束.roles`) 改为 make轨迹约束Session（真造一条带 `trajectory-constraint.json` 的轨迹）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('skiff-core: 门控函数的边角（轨迹没有 skiff.json / 无 msms 声明）', () => {
-  it('🔴 D1：会话绑定到**没有 skiff.json 的普通轨迹** ⇒ 判「不是 skiff」⇒ 纪律**恒参与**（fail-open）', () => {
-    // 新语义（R↓ 见 core.ts 的 `skiffCognitiveTrajectoryEnabled` 注释）：拿不到约束面 ⇒
-    // 按"不是 skiff"处理 ⇒ **正常参与**。旧模型这里判的是 `false`（保守旁路）——
+describe('trajectory-session: 门控函数的边角（轨迹没有 trajectory-constraint.json / 无 msms 声明）', () => {
+  it('🔴 D1：会话绑定到**没有 trajectory-constraint.json 的普通轨迹** ⇒ 判「不是 轨迹约束」⇒ 纪律**恒参与**（fail-open）', () => {
+    // 新语义（R↓ 见 core.ts 的 `trajectoryConstraintParticipates` 注释）：拿不到约束面 ⇒
+    // 按"不是 轨迹约束"处理 ⇒ **正常参与**。旧模型这里判的是 `false`（保守旁路）——
     // 那是旧"角色可能被删"场景的产物；新模型里"约束面不存在"只意味着"这条轨迹是普通轨迹"。
-    // ⚠️ 夹具要点：`makeSkiffSession(root, sid, code, null)` 内部是 `profile ?? {}`
-    //    ⇒ 仍会落一个空 `skiff.json`，那样测的是"约束面全默认 true"而不是 fail-open。
+    // ⚠️ 夹具要点：`make轨迹约束Session(root, sid, code, null)` 内部是 `profile ?? {}`
+    //    ⇒ 仍会落一个空 `trajectory-constraint.json`，那样测的是"约束面全默认 true"而不是 fail-open。
     //    要造真正的普通轨迹必须用 `makeTrajectory(root, code, null)`（不写文件）＋ 手工登记。
     const { dirName } = makeTrajectory(dir, 'plain-trajectory', null)
-    registerSkiffSession('sess-plain', dirName, dir)
-    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-plain', 'session')).toBe(true)
-    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-plain', 'keeper')).toBe(true)
-    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-plain', 'rebuild')).toBe(true)
+    registerTrajectorySession('sess-plain', dirName, dir)
+    expect(trajectoryConstraintParticipates(dir, 'sess-plain', 'session')).toBe(true)
+    expect(trajectoryConstraintParticipates(dir, 'sess-plain', 'keeper')).toBe(true)
+    expect(trajectoryConstraintParticipates(dir, 'sess-plain', 'rebuild')).toBe(true)
   })
 
-  it('🔴 D1b：`skiff.json` 显式写 `session:false` ⇒ 那一条**不参与**（真 skiff 的开关仍有效）', () => {
-    // 与 D1 成对：D1 证明"不是 skiff ⇒ 恒参与"，这条证明"是 skiff 时开关读得到"
+  it('🔴 D1b：`trajectory-constraint.json` 显式写 `session:false` ⇒ 那一条**不参与**（真 轨迹约束的开关仍有效）', () => {
+    // 与 D1 成对：D1 证明"不是 轨迹约束 ⇒ 恒参与"，这条证明"是 轨迹约束 时开关读得到"
     // （否则 D1 会退化成"这函数恒 true"的空断言）。
-    makeSkiffSession(dir, 'sess-explicit', 'qa', skiffJson({
+    make轨迹约束Session(dir, 'sess-explicit', 'qa', 轨迹约束Json({
       tools: ['read'],
       cognitiveTrajectory: { session: false, keeper: true, rebuild: true },
     }))
-    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-explicit', 'session')).toBe(false)
-    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-explicit', 'keeper')).toBe(true)
+    expect(trajectoryConstraintParticipates(dir, 'sess-explicit', 'session')).toBe(false)
+    expect(trajectoryConstraintParticipates(dir, 'sess-explicit', 'keeper')).toBe(true)
   })
 
-  it('🔴 D2：`skiff.json` 里**没有 msms 键** ⇒ `exec` 拒绝（缺省空表，不是放行）', () => {
+  it('🔴 D2：`trajectory-constraint.json` 里**没有 msms 键** ⇒ `exec` 拒绝（缺省空表，不是放行）', () => {
     // 真故障形态：约束面只写 tools 不写 msms（**合法且常见**——只用平台工具、不用 MSM）。
-    // ⚠️ 必须走**真 `skiff.json`**（`makeSkiffSession` 会写盘），不能用内存替身：
+    // ⚠️ 必须走**真 `trajectory-constraint.json`**（`make轨迹约束Session` 会写盘），不能用内存替身：
     //    读侧 `strList` 把缺项归一成 `[]`，正是要兜的形态。
-    makeSkiffSession(dir, 'sess-no-msm', 'no-msm-role', skiffJson({ tools: ['read'] }))
+    make轨迹约束Session(dir, 'sess-no-msm', 'no-msm-role', 轨迹约束Json({ tools: ['read'] }))
 
     // 🔴 判据 = **拒绝**（不是静默放行）。缺项若被写成 `?? ['*']` 或漏掉，这里就会放行。
-    expect(skiffMsmGate(dir, 'sess-no-msm', 'exec', 'anything').reject).toContain('MSM not allowed')
+    expect(trajectoryConstraintMsmGate(dir, 'sess-no-msm', 'exec', 'anything').reject).toContain('MSM not allowed')
   })
 
-  it('D3（正控）：`skiff.json` **有** msms 声明且命中 ⇒ 放行 ⇒ 与 D2 成对', () => {
-    makeSkiffSession(dir, 'sess-with-msm', 'with-msm-role', skiffJson({ tools: ['read'], msms: ['memory-tool'] }))
-    expect(skiffMsmGate(dir, 'sess-with-msm', 'exec', 'memory-tool')).toEqual({})
+  it('D3（正控）：`trajectory-constraint.json` **有** msms 声明且命中 ⇒ 放行 ⇒ 与 D2 成对', () => {
+    make轨迹约束Session(dir, 'sess-with-msm', 'with-msm-role', 轨迹约束Json({ tools: ['read'], msms: ['memory-tool'] }))
+    expect(trajectoryConstraintMsmGate(dir, 'sess-with-msm', 'exec', 'memory-tool')).toEqual({})
     // 未声明的 MSM 仍拒绝（白名单是**逐条**判，不是"配过就全放"）
-    expect(skiffMsmGate(dir, 'sess-with-msm', 'exec', 'other-msm').reject).toContain('MSM not allowed')
+    expect(trajectoryConstraintMsmGate(dir, 'sess-with-msm', 'exec', 'other-msm').reject).toContain('MSM not allowed')
   })
 })
 
@@ -369,7 +369,7 @@ describe('skiff-core: 门控函数的边角（轨迹没有 skiff.json / 无 msms
 // E. workspaceCognitiveTrajectoryLine 的内容契约
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('skiff-core: workspaceCognitiveTrajectoryLine 的内容契约', () => {
+describe('trajectory-session: workspaceCognitiveTrajectoryLine 的内容契约', () => {
   it('🔴 E1：含 SESSION.md 路径 ＋ 「不点名具体写入工具」纪律（v1.30.13 的 ACC/CCC 归属二分）', () => {
     const line = workspaceCognitiveTrajectoryLine('/some/path/SESSION.md')
     expect(line).toContain('/some/path/SESSION.md')

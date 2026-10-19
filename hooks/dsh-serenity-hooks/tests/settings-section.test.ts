@@ -48,19 +48,19 @@ describe('settings-section: 简单配置读取（host 侧）', () => {
     })
   })
 
-  it('🔴 2026-10-19 Skiff 调试面退役回归钉：结构里**不再有** skiff 两键（旧配置残留也不进结构）', () => {
-    // owner 令「面板里 Skiff 的内容不要了，下掉吧」⇒ 3099 调试面整条退役
+  it('🔴 2026-10-19 轨迹约束调试面退役回归钉：结构里**不再有** 轨迹约束 两键（旧配置残留也不进结构）', () => {
+    // owner 令「面板里 轨迹约束的内容不要了，下掉吧」⇒ 3099 调试面整条退役
     //（装配 + surface/debug.ts + 端口面 + 两个配置键 一起走）。
     // 用"键在不在"断言（而非 toBeUndefined）——契约是**无该键**，不是"值为 undefined"。
-    for (const key of ['skiffEnabled', 'skiffDebugPort']) {
+    for (const key of ['轨迹约束Enabled', '轨迹约束DebugPort']) {
       expect(key in simpleSettingsFromConfig({}), `${key} 仍在结构里`).toBe(false)
     }
     const stale = simpleSettingsFromConfig({
-      skiffEnabled: true,
-      skiffDebugPort: 4000,
-      skiff: { enabled: true, debugPort: 4000 },
+      轨迹约束Enabled: true,
+      轨迹约束DebugPort: 4000,
+      轨迹约束: { enabled: true, debugPort: 4000 },
     } as never)
-    for (const key of ['skiffEnabled', 'skiffDebugPort']) {
+    for (const key of ['轨迹约束Enabled', '轨迹约束DebugPort']) {
       expect(key in stale, `${key} 被旧配置复活了`).toBe(false)
     }
   })
@@ -197,7 +197,7 @@ describe('settings-section: volatile 包装解包（v1.47.2）', () => {
     //    （未设置的包装必须让位给缺省），仍由余下三个键承担。
     const d = simpleSettingsFromConfig({
       gatewayEnabled: ref<boolean | undefined>(undefined),
-      skiffEnabled: ref<boolean | undefined>(undefined),
+      轨迹约束Enabled: ref<boolean | undefined>(undefined),
       croEnabled: ref<boolean | undefined>(undefined),
     })
     expect(d).toEqual(defaultSimpleSettings())

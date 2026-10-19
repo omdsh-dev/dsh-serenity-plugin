@@ -39,7 +39,7 @@ interface ManualOutputSession {
 const manualSessions = new Map<string, ManualOutputSession>()
 /**
  * 本轮是否已成功发送（**由桥在每轮开始时清空** `clearSentThisTurn`；闸门只置位不清空——
- * v1.30.17 起桥要在 `askSkiff` 返回后读它决定是否兜底，故 turn-stopping 不再结算清空）。
+ * v1.30.17 起桥要在 `askTrajectory` 返回后读它决定是否兜底，故 turn-stopping 不再结算清空）。
  */
 const sentThisTurn = new Set<string>()
 /** 连续打回计数（成功发送即清零） */
@@ -131,7 +131,7 @@ export function __resetWeixinOutputGuardForTest(): void {
 
 /**
  * 装配闸门（index.ts apply 调用）。
- * 只对**已登记的手动模式会话**生效——其他会话（主舱/其他 skiff 会话）零干预。
+ * 只对**已登记的手动模式会话**生效——其他会话（主舱/其他 轨迹约束会话）零干预。
  */
 export function registerWeixinOutputGuard(ctx: Context): void {
   // ① 观察工具调用：本轮是否真的发过
@@ -165,7 +165,7 @@ export function registerWeixinOutputGuard(ctx: Context): void {
       const session = manualSessions.get(sessionId)
       if (!session) return
       const sent = sentThisTurn.has(sessionId)
-      // v1.30.17：**不清空**——桥在 askSkiff 返回后读 hasSentThisTurn 决定是否兜底转发
+      // v1.30.17：**不清空**——桥在 askTrajectory 返回后读 hasSentThisTurn 决定是否兜底转发
       if (sent) return
 
       const count = (rebukeCounts.get(sessionId) ?? 0) + 1

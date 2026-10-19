@@ -23,7 +23,7 @@ import {
   type BlacklistRule,
 } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
-import { skiffProfileForSession, type SkiffProfile } from '../trajectory/policy/profile.js'
+import { trajectoryConstraintForSession, type TrajectoryConstraint } from '../trajectory/policy/profile.js'
 import { profileToolWhitelist } from '../trajectory/policy/rules.js'
 import { hasEnabledImChannel } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../kernel/invariant.js'
@@ -41,13 +41,13 @@ export interface GuardInput {
   /** container_fs 等复合工具的子命令 action（只读子命令不查黑名单） */
   action?: string
   /**
-   * 该会话的 skiff 约束面（`null`/`undefined` = 不是 skiff 会话 ⇒ 不判定）。
+   * 该会话的 轨迹约束面（`null`/`undefined` = 不是 轨迹约束会话 ⇒ 不判定）。
    *
    * 🔴 2026-10-19 起传**已解析好的约束面**，不传 sessionId：解判据（"这条轨迹有没有
-   * `skiff.json`"）留在唯一入口 `profile.ts`，守卫只消费结果 ⇒ 纯函数里不再做 IO，
+   * `trajectory-constraint.json`"）留在唯一入口 `profile.ts`，守卫只消费结果 ⇒ 纯函数里不再做 IO，
    * 也不可能出现"守卫的判据与 schema 收窄的判据不一致"。
    */
-  skiffProfile?: SkiffProfile | null
+  trajectoryConstraint?: TrajectoryConstraint | null
 }
 
 /** 写类工具名（黑名单/治理文件只拦这些；读工具只做路径越界检查——对齐 osp） */
@@ -73,7 +73,7 @@ const SENSITIVE_CREDENTIAL_FILES = new Set(['localstore.json'])
  * MSM 注册表写保护（需求⑤b S142 用户拍板："msm注册的文件需要写保护起来，避免CCC意外写坏搞崩自己"）：
  * mech-registry.json 是 CCC 执行层地基（坏 → loadMsmEntries 抛 → container_admin/output-guard 全崩，
  * register 也崩 → 自锁）。**写 deny、读 allow**（与 localstore 读 deny 语义区分 R6——注册表是
- * 结构核心不是秘密，需被 output-guard/skiff-admin 读取建 MSM 词表）。
+ * 结构核心不是秘密，需被 output-guard/trajectory-constraint-admin 读取建 MSM 词表）。
  *
  * 单级化（需求⑤a）后**唯一合法注册表 = cccName 聚合档**
  * `.opencode/skills/<cccName>/references/mech-registry.json`（cccName = .serenity 首行）。
@@ -135,16 +135,16 @@ interface GuardDecisionResult {
 export function decideGuard(input: GuardInput): GuardDecisionResult {
   const { root, toolName, safeModeOn, blacklist, pathArg, action } = input
 
-  // 0) skiff 约束（2026-10-19 重做）：会话绑定的轨迹有 `skiff.json` ⇒ 工具必须 ∈ 白名单。
+  // 0) 轨迹约束 约束（2026-10-19 重做）：会话绑定的轨迹有 `trajectory-constraint.json` ⇒ 工具必须 ∈ 白名单。
   //
-  // 判据（D23 归属）：**机制在 ACC**（怎么判、怎么拒），**内容在 CCC**（`skiff.json` 的白名单）。
-  // 🔴 判据从旧版的「sessionId 前缀 `skiff-`」换成「绑定轨迹有 `skiff.json`」——
-  //    前缀在新模型下会漏掉不带前缀的 skiff 会话，且会把**普通会话误判成 skiff**
-  //    （只要 id 恰好以 `skiff-` 开头）。两种误判都是权限面问题，故判据必须打在轨迹上。
-  // 由调用方（evaluate）传入 skiffProfile；纯函数内通过 GuardInput 支持单测。
-  // v1.25.3：skill 加载对 skiff 恒可用（S142 用户——skill 不设白名单；读知识面，无写能力）
-  if (input.skiffProfile !== undefined && input.skiffProfile !== null) {
-    const profile = input.skiffProfile
+  // 判据（D23 归属）：**机制在 ACC**（怎么判、怎么拒），**内容在 CCC**（`trajectory-constraint.json` 的白名单）。
+  // 🔴 判据从旧版的「sessionId 前缀 `轨迹约束-`」换成「绑定轨迹有 `trajectory-constraint.json`」——
+  //    前缀在新模型下会漏掉不带前缀的 轨迹约束会话，且会把**普通会话误判成 轨迹约束**
+  //    （只要 id 恰好以 `轨迹约束-` 开头）。两种误判都是权限面问题，故判据必须打在轨迹上。
+  // 由调用方（evaluate）传入 trajectoryConstraint；纯函数内通过 GuardInput 支持单测。
+  // v1.25.3：skill 加载对 轨迹约束恒可用（S142 用户——skill 不设白名单；读知识面，无写能力）
+  if (input.trajectoryConstraint !== undefined && input.trajectoryConstraint !== null) {
+    const profile = input.trajectoryConstraint
     if (toolName === 'skill') return { kind: 'allow' }
     // v1.30.2（S142 用户 bug）：模型把 MSM 名（如 memory-tool）当**直接工具**调 →
     // 旧泛化 deny "tool not allowed" 误导成"没权限"。区分：
@@ -158,7 +158,7 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     }
     const whitelist = profileToolWhitelist(profile)
     if (!whitelist.has(toolName)) {
-      return { deny: 'tool not allowed in this skiff trajectory', kind: 'deny' }
+      return { deny: 'tool not allowed in this 轨迹约束 trajectory', kind: 'deny' }
     }
   }
 
@@ -534,7 +534,7 @@ export function getExclusiveToolsDiagnostics(): { hidden: string[] } {
   return { hidden: [...exclusiveRestrictions.keys()] }
 }
 
-// ── Skiff 角色工具面：可见性同步（owner 2026-10-19 令「工具清单也要热加载」）──
+// ── 轨迹约束工具面：可见性同步（owner 2026-10-19 令「工具清单也要热加载」）──
 
 /**
  * `sessionId` → { signature, dispose }（角色工具面 restrict 状态）
@@ -543,26 +543,26 @@ export function getExclusiveToolsDiagnostics(): { hidden: string[] } {
  * 每次 pre-step 都重算白名单，只有**算出来的结果变了**才重新发 restrict
  * —— 配置不变就不重复发（restrict 会重建 schema，没必要每步都做）。
  */
-const skiffRoleRestrictions = new Map<string, { signature: string; deny: string[]; dispose: () => void }>()
+const trajectoryConstraintRestrictions = new Map<string, { signature: string; deny: string[]; dispose: () => void }>()
 
-/** Skiff 角色工具面诊断（排查"某工具为什么不在 skiff 的清单里"） */
-export function getSkiffRoleVisibilityDiagnostics(): { keys: string[]; denyByKey: Record<string, string[]> } {
+/** 轨迹约束工具面诊断（排查"某工具为什么不在 轨迹约束的清单里"） */
+export function getTrajectoryConstraintVisibilityDiagnostics(): { keys: string[]; denyByKey: Record<string, string[]> } {
   return {
-    keys: [...skiffRoleRestrictions.keys()],
-    denyByKey: Object.fromEntries([...skiffRoleRestrictions].map(([k, v]) => [k, v.deny])),
+    keys: [...trajectoryConstraintRestrictions.keys()],
+    denyByKey: Object.fromEntries([...trajectoryConstraintRestrictions].map(([k, v]) => [k, v.deny])),
   }
 }
 
 /**
- * 同步 **skiff 会话的工具面**：把白名单之外的工具**从 schema 移除**（不是"看得到但被拒"）。
+ * 同步 **轨迹约束会话的工具面**：把白名单之外的工具**从 schema 移除**（不是"看得到但被拒"）。
  *
  * ## 为什么必须有这条（owner 2026-10-19：「工具清单也要热加载」）
  *
- * 在它之前，skiff 白名单**只由运行时守卫拦截**（`decideGuard` 的 skiff 分支）：
+ * 在它之前，轨迹约束白名单**只由运行时守卫拦截**（`decideGuard` 的 轨迹约束 分支）：
  * 工具全部出现在模型 schema 里，调用时才被打回。⇒ 两个真实后果：
  *  ① **模型看得见它不该有的工具** —— 它会去试，试了才撞墙（一轮白烧，且错误文案泛化，
  *     看不出"是不在清单里"还是"临时性拒绝"）；
- *  ② **配置变动在 schema 上永远不生效** —— 改 `skiff.json` 的 `tools` 只影响"调用是否放行"。
+ *  ② **配置变动在 schema 上永远不生效** —— 改 `trajectory-constraint.json` 的 `tools` 只影响"调用是否放行"。
  *
  * ## 判据与降级
  *
@@ -570,20 +570,20 @@ export function getSkiffRoleVisibilityDiagnostics(): { keys: string[]; denyByKey
  *   不去动宿主的工具 —— 宿主的工具由各自的条件同步管）。
  * - ⚠️ **未注册的名字会让整次 restrict 失败**（宿主契约逐字 "unknown names … fail"），
  *   而 `diagram` 是按开关注册的 ⇒ 与 `hideAllFor` 同款**两档尝试**（先全覆盖，失败退常驻段）。
- * - 读不到约束面（不是 skiff / 配置删了）⇒ **撤销既有隐藏**（回到"无约束"）：
- *   ⛔ 不能只是 `return` —— 那会把上一步的隐藏**永久留在**一个已不再是 skiff 的会话上
- *   （这正是 owner 说的"删掉 `skiff.json` 就该立刻恢复"）。
+ * - 读不到约束面（不是 轨迹约束 / 配置删了）⇒ **撤销既有隐藏**（回到"无约束"）：
+ *   ⛔ 不能只是 `return` —— 那会把上一步的隐藏**永久留在**一个已不再是 轨迹约束的会话上
+ *   （这正是 owner 说的"删掉 `trajectory-constraint.json` 就该立刻恢复"）。
  * - 幂等：算出来的 deny 签名不变就跳过（不每步重建 schema）。
  *
  * @param agent 目标会话
  * @param root  CCC 根
  */
-export function syncSkiffRoleToolVisibility(agent: Agent, root: string): void {
+export function syncTrajectoryConstraintToolVisibility(agent: Agent, root: string): void {
   const sessionId = (agent.session as { id?: string }).id ?? 'global'
-  const profile = skiffProfileForSession(root, sessionId)
-  const existing = skiffRoleRestrictions.get(sessionId)
+  const profile = trajectoryConstraintForSession(root, sessionId)
+  const existing = trajectoryConstraintRestrictions.get(sessionId)
 
-  // 不是 skiff（含"刚刚删掉 skiff.json"）⇒ **撤销**既有隐藏，回到无约束
+  // 不是 轨迹约束（含"刚刚删掉 trajectory-constraint.json"）⇒ **撤销**既有隐藏，回到无约束
   if (profile === null) {
     if (existing !== undefined) {
       try {
@@ -591,7 +591,7 @@ export function syncSkiffRoleToolVisibility(agent: Agent, root: string): void {
       } catch {
         /* disposer 已失效 */
       }
-      skiffRoleRestrictions.delete(sessionId)
+      trajectoryConstraintRestrictions.delete(sessionId)
     }
     return
   }
@@ -612,7 +612,7 @@ export function syncSkiffRoleToolVisibility(agent: Agent, root: string): void {
         } catch {
           /* disposer 已失效 */
         }
-        skiffRoleRestrictions.delete(sessionId)
+        trajectoryConstraintRestrictions.delete(sessionId)
       }
       return
     }
@@ -624,10 +624,10 @@ export function syncSkiffRoleToolVisibility(agent: Agent, root: string): void {
         } catch {
           /* 旧 disposer 失效 ⇒ 直接发新的 */
         }
-        skiffRoleRestrictions.delete(sessionId)
+        trajectoryConstraintRestrictions.delete(sessionId)
       }
       const dispose = agent.ctx.tools.restrict({ deny: [...deny] })
-      skiffRoleRestrictions.set(sessionId, { signature, deny, dispose })
+      trajectoryConstraintRestrictions.set(sessionId, { signature, deny, dispose })
       return
     } catch {
       // 该档里有不在册的名字（典型 = `diagram` 关着）⇒ 退下一档
@@ -637,15 +637,15 @@ export function syncSkiffRoleToolVisibility(agent: Agent, root: string): void {
 }
 
 /** 会话销毁清理（lifecycle 调用） */
-export function forgetSkiffRoleToolVisibility(sessionId: string): void {
-  const existing = skiffRoleRestrictions.get(sessionId)
+export function forgetTrajectoryConstraintToolVisibility(sessionId: string): void {
+  const existing = trajectoryConstraintRestrictions.get(sessionId)
   if (!existing) return
   try {
     existing.dispose()
   } catch {
     /* disposer 已失效 */
   }
-  skiffRoleRestrictions.delete(sessionId)
+  trajectoryConstraintRestrictions.delete(sessionId)
 }
 
 /**
@@ -864,9 +864,9 @@ export function registerGuards(ctx: Context, opts: GuardRegistration = {}): void
     const pathArg = extractPathArg(exec)
     const action = extractAction(exec)
     const sessionId = (exec as { agent?: { session?: { id?: string } } } | undefined)?.agent?.session?.id
-    // skiff 约束面（**判据的唯一入口**在 profile.ts；此处只消费结果）
-    const skiffProfile = skiffProfileForSession(root, sessionId)
-    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg, action, skiffProfile })
+    // 轨迹约束面（**判据的唯一入口**在 profile.ts；此处只消费结果）
+    const trajectoryConstraint = trajectoryConstraintForSession(root, sessionId)
+    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg, action, trajectoryConstraint })
   }
 
   // 瀑布：deny 短路执行

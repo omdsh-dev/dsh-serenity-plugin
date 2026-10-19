@@ -147,7 +147,7 @@ export const weixinChannel: ImChannel = {
         lastPollAt: account.lastPollAt,
         ...(account.lastError ? { lastError: account.lastError } : {}),
       })))
-    // 🔴 2026-10-19：路由目标从「skiff 角色名」改为**认知轨迹编码**。
+    // 🔴 2026-10-19：路由目标从「轨迹约束角色名」改为**认知轨迹编码**。
     // `role` 键名保留（下游 hook/台账形状不变），值 = 轨迹编码。
     const routes: ImJson[] = (settings.routes ?? []).map((route) => ({ user: route.user, role: route.trajectory }))
     return {

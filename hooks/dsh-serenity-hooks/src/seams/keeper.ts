@@ -20,7 +20,7 @@ import { hostService } from '../host/access.js'
 import { loadSerenityConfig } from '../kernel/ccc.js'
 import { agentCwdFor, cccRootForCwd } from '../kernel/ccc-roots.js'
 import { readSimpleSettings } from '../surface/settings.js'
-import { skiffCognitiveTrajectoryEnabled } from '../trajectory/session.js'
+import { trajectoryConstraintParticipates } from '../trajectory/session.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { readLastBound } from '../trajectory/bound.js'
 import { eventToken, ACK_PREFIX, ACK_SKIP_PREFIX, REBUILD_TODO_FILENAME } from '../trajectory/assistant.js'
@@ -208,7 +208,7 @@ export function __resetLogbookCompactionForTest(): void {
  * 解析**活跃** SESSION.md 绝对路径（缓存 60s）。
  *
  * 候选链（刻意比 rebuild 的完整链短——这里每个工具调用都要跑，贵候选不划算）：
- * ① `getActiveSessionInfo(scope).mdPath`（`cognitive_trajectory use` / skiff 绑定 / 重启恢复都会写）
+ * ① `getActiveSessionInfo(scope).mdPath`（`cognitive_trajectory use` / 轨迹约束 绑定 / 重启恢复都会写）
  * ② `readLastBound(session).mdPath`（`.bindings.json` 权威绑定——重启后内存空时兜底）
  * 两者都拿不到 → null（**不猜**：宁可不提醒，也不去猜别的轨迹——对齐 v1.30.13 D4 的教训）。
  */
@@ -443,13 +443,13 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     const cwd = (exec as { agent?: { session?: { header?: { cwd?: string } } } }).agent?.session?.header?.cwd ?? process.cwd()
     const root = cccRootForCwd(cwd)
     if (!root) return next()
-    // F4 Skiff 旁路（F4b ⑩）：计分提醒按角色 cognitiveTrajectory.keeper、重建压力检测按
-    // cognitiveTrajectory.rebuild 决定参与（默认全关 = Skiff 完全独立）；非 skiff 恒参与。
+    // F4 轨迹约束旁路（F4b ⑩）：计分提醒按角色 cognitiveTrajectory.keeper、重建压力检测按
+    // cognitiveTrajectory.rebuild 决定参与（默认全关 = 轨迹约束完全独立）；非 轨迹约束恒参与。
     const sessionId = (exec as { agent?: { session?: { id?: string } } }).agent?.session?.id
-    const skiffKeeper = skiffCognitiveTrajectoryEnabled(root, sessionId, 'keeper')
-    const skiffRebuild = skiffCognitiveTrajectoryEnabled(root, sessionId, 'rebuild')
+    const 轨迹约束Keeper = trajectoryConstraintParticipates(root, sessionId, 'keeper')
+    const 轨迹约束Rebuild = trajectoryConstraintParticipates(root, sessionId, 'rebuild')
     const tracker = trackerFor(exec)
-    const shouldRemind = skiffKeeper ? tracker.step(exec.name) : false
+    const shouldRemind = 轨迹约束Keeper ? tracker.step(exec.name) : false
     const downstream = await next()
 
     // ③ 用量统计（owner 令 2026-09-22）：`skill` 加载与 `msm` 执行各记一笔到该 CCC 的
@@ -478,7 +478,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // （纯绝对，无窗口比例上限保护；contextWindow 不再参与判定，压力缺失 contextWindow 也照常触发）
     // 🔴 2026-09-16（S142 所有者指令，D64）：**判定照旧读 K，但注入文本不再带数值**
     // （`rebuildReminderText` 参数已退化为仅 escalated；见其头注）。
-    if (skiffRebuild) {
+    if (轨迹约束Rebuild) {
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       if (session) {
         const pressure = readContextPressure(ctx, session)
@@ -498,8 +498,8 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
 
     // ③ SESSION.md 体积检查（v1.31.1，S142 用户需求）：活跃轨迹工作台超限 → 提示暂停重写。
     // 独立于①②（与上下文压力无关——rebuild 只换载体，不会让 SESSION.md 变小）。
-    // 门控按角色 cognitiveTrajectory.session（工作台参与项），非 skiff 会话恒参与。
-    if (skiffCognitiveTrajectoryEnabled(root, sessionId, 'session')) {
+    // 门控按角色 cognitiveTrajectory.session（工作台参与项），非 轨迹约束会话恒参与。
+    if (trajectoryConstraintParticipates(root, sessionId, 'session')) {
       const limitKB = readSessionMdMaxKB(root, opts.configPaths)
       if (limitKB > 0) {
         const scope = sessionId ?? 'global'
@@ -531,7 +531,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
     // ③ 要求"重写 SESSION.md 并保 EAP 骨架"，④ 只要求"**清理便签**"（可整份丢弃、不阻断工作）。
     // 🔴 **文件不存在 ⇒ 零成本**（`readFileSize` 返回 null ⇒ 直接清零；**不自动创建**——空文件本身即熵）。
     // 🔴 ACC 只提醒，**不做任何写／删／归档**（owner：*"清空我们就不干涉了，只管最大量"*）。
-    if (skiffCognitiveTrajectoryEnabled(root, sessionId, 'session')) {
+    if (trajectoryConstraintParticipates(root, sessionId, 'session')) {
       const scope = sessionId ?? 'global'
       const session = (exec as { agent?: { session?: unknown } }).agent?.session
       const mdPath = resolveActiveSessionMdPath(root, scope, session)

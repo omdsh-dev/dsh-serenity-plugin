@@ -59,10 +59,12 @@ describe('msm: guide + 协议 flag + path-arg', () => {
     expect(MSM_ACTIONS).toContain('catalog')
     const r = runMsm(dir, { action: 'catalog' }) as { catalog: string }
     expect(r.catalog).toContain('ACC Usage Catalog')
-    // 7 个能力分区
-    for (const area of ['轨迹本体', '认知质量框架', '工具与执行', '角色与对外面', '自主与接入', 'CCC 配置总览', '注册表与安全']) {
+    // 7 个能力分区（④ 于 2026-10-19 更名：role 域并入 config ⇒ 分区名随之改为「轨迹约束与对外面」）
+    for (const area of ['轨迹本体', '认知质量框架', '工具与执行', '轨迹约束与对外面', '自主与接入', 'CCC 配置总览', '注册表与安全']) {
       expect(r.catalog).toContain(area)
     }
+    // 🔴 目录不得再教旧域名（`role` 已并入 `config`）
+    expect(r.catalog).not.toContain('container_admin role')
     // 各详细入口指引（目录指向 guide，不复制全文）
     expect(r.catalog).toContain('container_admin')
     expect(r.catalog).toContain('cognitive_trajectory')

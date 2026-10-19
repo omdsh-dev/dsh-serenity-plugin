@@ -38,8 +38,8 @@ import { registerOpencodeSkills } from './seams/opencode-skills.js'
 import { DEFAULT_SERENITY_CONFIG_PATHS } from './kernel/ccc.js'
 import { cccRootForCwd } from './kernel/ccc-roots.js'
 // C4 块 B：端口只从集中端口表取（默认值不再散写）。
-// ⚠️ 2026-10-19：本文件**不再直接引用任何端口常量** —— 两个消费方都随 Skiff 调试面（3099）退役：
-// `MAIN_WEB_PORT`（原 `readWebPort()` 的回退值）与 `SKIFF_DEBUG_PORT`（原调试面默认端口）。
+// ⚠️ 2026-10-19：本文件**不再直接引用任何端口常量** —— 两个消费方都随 轨迹约束调试面（3099）退役：
+// `MAIN_WEB_PORT`（原 `readWebPort()` 的回退值）与 `RETIRED_SK_DEBUG_PORT`（原调试面默认端口）。
 // 端口表本身仍保留，`surface/` 各处照旧从 `kernel/ports.ts` 派生。
 import { hostContractReport, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './surface/status.js'
@@ -65,7 +65,7 @@ import { createDiagramTool } from './tools/diagram.js'
 // §0L（S142 2026-09-19）：绑定载体迁到宿主存储域——装载期开域 + 注入句柄 + 一次性迁移
 import { openBindingDomain, bindingStore } from './host/storage-domain.js'
 import { setBindingStore } from './trajectory/bound.js'
-// （C4 块 A 顺带清理：`registerDisposer` 的 import 自 C2 删掉 skiff root 重试定时器后已无使用点）
+// （C4 块 A 顺带清理：`registerDisposer` 的 import 自 C2 删掉 轨迹约束 root 重试定时器后已无使用点）
 
 export const name = 'dsh-serenity-hooks'
 
@@ -125,7 +125,7 @@ export type HumanChannelSubscriptionConfig = {
   user?: string
   /** 目标 CCC（别名） */
   ccc?: string
-  /** 目标 skiff 角色名（∈ 该 CCC 的 `skiff.roles`） */
+  /** 目标 轨迹约束角色名（∈ 该 CCC 的 `轨迹约束.roles`） */
   role?: string
 }
 
@@ -134,8 +134,8 @@ export interface HumanChannelConfig {
   accounts?: HumanChannelAccountConfig[]
   /**
    * 订阅表：`(账号, 用户) → (CCC, 角色)` —— **收到**谁的消息。
-   * 🔴 机器级**显式表**，**不得**由"该 CCC 有没有 skiff 角色"推断（owner 2026-09-26 更正）：
-   * skiff 用途很多（传话员只是其一），推断会让**为别的目的建的 skiff 被静默误接上微信**。
+   * 🔴 机器级**显式表**，**不得**由"该 CCC 有没有 轨迹约束角色"推断（owner 2026-09-26 更正）：
+   * 轨迹约束 用途很多（传话员只是其一），推断会让**为别的目的建的 轨迹约束 被静默误接上微信**。
    */
   subscriptions?: HumanChannelSubscriptionConfig[]
   /** 主控（relay）：**唯一**可做跨 CCC 动作的 CCC */
@@ -178,8 +178,8 @@ export interface Config {
   gateway?: { enabled?: boolean }
   /** F2 超限重建（entry 默认值，运行时经 DSH settings） */
   rebuild?: { enabled?: boolean; thresholdK?: number }
-  /** F4 Skiff（实验性）：调试服务启停（entry 默认值，运行时经 DSH settings） */
-  skiff?: { enabled?: boolean; debugPort?: number }
+  /** F4 轨迹约束（实验性）：调试服务启停（entry 默认值，运行时经 DSH settings） */
+  轨迹约束?: { enabled?: boolean; debugPort?: number }
   /** v1.30.12 web_fetch provider 接管（fake-ip / TUN 网络：宿主内置 provider 判「非公网」恒拒） */
   webFetch?: { enabled?: boolean }
   /**
@@ -217,9 +217,9 @@ export interface Config {
   //    旧配置残留该键 ⇒ 静默忽略（schemastery 非 strict ⇒ 未声明键不会让旧文档被拒）。
   /** F2 触发阈值（K token；面板层；部署层同义键 = `rebuild.thresholdK`） */
   rebuildThresholdK?: Volatile<number | undefined>
-  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` **已删除**（Skiff 调试面 3099 整条退役）。
+  // ⛔ 2026-10-19：`轨迹约束Enabled` / `轨迹约束DebugPort` **已删除**（轨迹约束调试面 3099 整条退役）。
   //    旧配置残留这两个键 ⇒ 静默忽略（schemastery 非 strict），同上面 `rebuildEnabled` 的处置。
-  //    🔴 注意区分：退役的是**调试面**；`skiff.json` 的**轨迹约束面机制**仍在用
+  //    🔴 注意区分：退役的是**调试面**；`trajectory-constraint.json` 的**轨迹约束面机制**仍在用
   //    （判据 = `trajectory/policy/profile.ts`），只是它本来就不经这两个键。
   /** CRO（轨迹自编程唤起）总闸（面板层；无部署层同义键；缺省开） */
   croEnabled?: Volatile<boolean | undefined>
@@ -284,10 +284,10 @@ export const Config = z.object({
   // 长期验证下超限重建已能很好地代替上下文压缩 ⇒ 不再需要"整体关掉"这个逃生门。
   // 同族先例 = `wakeSchedulerEnabled`（2026-09-21 砍掉，旧键静默忽略）。
   rebuild: z.object({ thresholdK: z.number().min(50).max(4000).default(400) }),
-  // ⛔ 部署层的 `skiff: { enabled, debugPort }` 段已删（Skiff 调试面 3099 整条退役，2026-10-19）。
+  // ⛔ 部署层的 `轨迹约束: { enabled, debugPort }` 段已删（轨迹约束调试面 3099 整条退役，2026-10-19）。
   //    两个字段都只喂那个面；旧文档（cordis.yml / profile）里残留该段 ⇒ 静默忽略。
-  //    🔴 与 **`skiff.roles` 不是一个东西**：那段更早（v1.71.0 重做）就已退役，
-  //    而**轨迹约束面**现在住 `<轨迹目录>/skiff.json`，与这里无关。
+  //    🔴 与 **`轨迹约束.roles` 不是一个东西**：那段更早（v1.71.0 重做）就已退役，
+  //    而**轨迹约束面**现在住 `<轨迹目录>/trajectory-constraint.json`，与这里无关。
   webFetch: z.object({ enabled: z.boolean().default(true) }),
   opencodeProvider: z.object({ autoConfigure: z.boolean().default(true) }),
   visionPatch: z.object({ enabled: z.boolean().default(true) }),
@@ -307,7 +307,7 @@ export const Config = z.object({
   humanChannel: z.object({
     // 账号表：id 是订阅表引用它的键；channel = 渠道实现名；凭据落这里（owner Q3）
     accounts: z.array(humanChannelAccountSchema).default([]),
-    // 订阅表：机器级**显式**表 (账号, 用户) → (CCC, 角色)；不得由"有没有 skiff 角色"推断
+    // 订阅表：机器级**显式**表 (账号, 用户) → (CCC, 角色)；不得由"有没有 轨迹约束角色"推断
     subscriptions: z.array(humanChannelSubscriptionSchema).default([]),
     relay: z.object({ ccc: z.string() }),
     sending: z.object({ allow: z.array(z.string()).default(['*']) }),
@@ -325,7 +325,7 @@ export const Config = z.object({
   // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` **已砍掉**（超限重建恒开、无闸）。
   // 旧配置里若残留该键 ⇒ **静默忽略**（同 `wakeSchedulerEnabled` 的处置）。
   rebuildThresholdK: z.number().min(50).max(4000).volatile(),
-  // ⛔ `skiffEnabled` / `skiffDebugPort` 已删（Skiff 调试面 3099 退役，2026-10-19）。
+  // ⛔ `轨迹约束Enabled` / `轨迹约束DebugPort` 已删（轨迹约束调试面 3099 退役，2026-10-19）。
   //    旧配置残留 ⇒ 静默忽略；**不写迁移代码**（与 `rebuildEnabled` 同款处置）。
   croEnabled: z.boolean().volatile(),
   // 🔴 v1.63.3：`unattendedEnabled` **已砍掉**（无人值守功能整条退役；owner 判「已经证实没意义」）。
@@ -441,7 +441,7 @@ export function apply(ctx: Context, config: Config): void {
   registerSettingsSection(ctx, config)
   // D104（2026-09-29 owner 具名令）：diagram 工具 —— agent 给一段标签格式源码，进程内光栅化成
   // PNG（**不借浏览器**）并让图进对话。实验性 demo ⇒ **缺省关**；关时**不注册**
-  // （工具不进模型工具清单 ⇒ 零 token、不会被误调），同 skiff 的"未开启零资源占用"口径。
+  // （工具不进模型工具清单 ⇒ 零 token、不会被误调），同 轨迹约束的"未开启零资源占用"口径。
   // 🔴 **本行必须在 `registerSettingsSection` 之后**：开关经 `readSimpleSettings()` 读（唯一读取入口），
   //    而那个源是在 registerSettingsSection 里才接上的（早读 = 恒读到内建缺省 = 开关永远无效）。
   // 🔴 面板拨开关**无需**额外热同步订阅：宿主 `fiber.update()` 的语义 = 校验新 config 后 **restart 本插件**
@@ -467,8 +467,8 @@ export function apply(ctx: Context, config: Config): void {
   // 协议固有（S142 用户原则：任何 CCC 抽象层都是宁静号/ACC）——默认开启不可关、
   // 零配置面，锚定消息与机制参数全部代码固化（旧 serenity.json bootstrap 段 v1.19.5 起忽略）
   registerBootstrap(ctx)
-  // ⛔ F4 Skiff 调试面（v1.25.0 实验性，端口 3099）**已于 2026-10-19 整条退役** ——
-  // owner 令「面板里 Skiff 的内容不要了，下掉吧，功能也检查下，应该下掉了」。
+  // ⛔ F4 轨迹约束调试面（v1.25.0 实验性，端口 3099）**已于 2026-10-19 整条退役** ——
+  // owner 令「面板里 轨迹约束的内容不要了，下掉吧，功能也检查下，应该下掉了」。
   // 墓碑与完整边界说明见**本文件最末尾**那一段（删了什么／没删什么／旧配置残留怎么处置）。
   // F4c ACP / F4d 建议问答页（v1.26.0 实验性，**2026-10-15 owner 裁「砍掉外部问答」⇒ 整面退役**）：
   // `acp-core.ts` / `acp-http.ts` / `PublicAskEditor.tsx` 连同本处装配、面板键与配置链**一并删除**。
@@ -496,7 +496,7 @@ export function apply(ctx: Context, config: Config): void {
   // 投递）。这是 ACC 唯一的轨迹调度机制。
   registerWakeScheduler(ctx)
   // F4c-3 微信桥（v1.27.0 实验性）：CCC 级配置（serenity.json weixin + localstore 凭据）→
-  // 多账号 iLink 轮询 + 消息路由到 skiff role。enabled=false 未配置 → 零资源占用。
+  // 多账号 iLink 轮询 + 消息路由到 轨迹约束 role。enabled=false 未配置 → 零资源占用。
   registerWeixinBridge(ctx)
   // v1.30.9（S142 用户需求"微信桥支持被调用发消息给指定用户"）：主动发送入口——
   // 只绑 127.0.0.1 的独立监听器（默认 3082；plugin 全局配置 weixinApi），供**非 agent 调用者**
@@ -514,7 +514,7 @@ export function apply(ctx: Context, config: Config): void {
   // CCC 管内容"边界一致。
   registerWeixinOutputGuard(ctx)
   // review F-08（v1.30.8）：生命周期——agent/session 销毁清理 per-会话状态 +
-  // 插件卸载/HMR 停掉自起资源（skiff 调试页/微信桥；否则端口占用与重复轮询）
+  // 插件卸载/HMR 停掉自起资源（轨迹约束调试页/微信桥；否则端口占用与重复轮询）
   registerLifecycle(ctx)
   // v1.30.12（S142 用户拍板 L3）：web_fetch provider 接管——fake-ip 网络下宿主内置
   // provider（web-fetch-http）把 198.18.0.0/15 判为「非公网」恒拒；本插件用同一
@@ -554,7 +554,7 @@ export function apply(ctx: Context, config: Config): void {
  *   ① 听宿主的**真事件** `settings/document-updated`（ns = 我们那张设置页）——顺带说明为什么不用
  *      我们自己的 `serenity/settings-changed`：那个事件**全仓没有任何 `emit` 点**（只有 `ctx.on` 侧
  *      在用）＝**死通道**，照着它接线等于接了个永远不响的铃；
- *   ② 兜底再挂 `agent/created` ／ `session/created`（与 skiff 同款做法，那两条在实测里确实会 fire）
+ *   ② 兜底再挂 `agent/created` ／ `session/created`（与 轨迹约束 同款做法，那两条在实测里确实会 fire）
  *      —— 宿主事件面若换名，至少还有这一条能自愈；
  *   ③ 启动时同步一次（apply 时按当前配置定初始态）。
  * 🔴 **关的时候要注销**（不是"留着但不响应"）：与"关时不注册"同一口径 —— 工具不出现在模型清单里。
@@ -602,25 +602,25 @@ function registerDiagramTool(ctx: Context): void {
   sync()
 }
 
-// ⛔ 【2026-10-19 整条退役】F4 Skiff 调试服务（面 D / 端口 3099）已删除。
+// ⛔ 【2026-10-19 整条退役】F4 轨迹约束调试服务（面 D / 端口 3099）已删除。
 //
-// owner 令（逐字）：「面板里 Skiff 的内容不要了，下掉吧，功能也检查下，应该下掉了」
+// owner 令（逐字）：「面板里 轨迹约束的内容不要了，下掉吧，功能也检查下，应该下掉了」
 //
 // ── 删了什么 ────────────────────────────────────────────────────────────────
-//   · 装配：`registerSkiff()`（连同它依赖的 `resolveSkiffRoot` 与 `readWebPort`，两者只为它服务）
-//   · 面本体：`surface/debug.ts` 整文件（原 `role/skiff/debug.ts`，S11 搬来）：listener/路由/HTML
-//   · 配置键：`skiffEnabled` / `skiffDebugPort`（provenance 见 `surface/settings.ts`）
-//   · 界面：设置面板「Skiff 调试」行（`client/SettingsSection.tsx`）
+//   · 装配：`registerTrajectoryDebug()`（连同它依赖的 `resolveTrajectoryRoot` 与 `readWebPort`，两者只为它服务）
+//   · 面本体：`surface/debug.ts` 整文件（原 `role/轨迹约束/debug.ts`，S11 搬来）：listener/路由/HTML
+//   · 配置键：`轨迹约束Enabled` / `轨迹约束DebugPort`（provenance 见 `surface/settings.ts`）
+//   · 界面：设置面板「轨迹约束调试」行（`client/SettingsSection.tsx`）
 //
 // ── ⚠️ 没有删什么（这个区分是本次最重要的一条）─────────────────────────────────
-//   `skiff.json` 那套**轨迹约束面机制**（工具白名单 / 模型 / 纪律参与项）**仍在用**：
-//     · 判据与读盘 = `trajectory/policy/profile.ts`（`skiffProfileForSession`）
+//   `trajectory-constraint.json` 那套**轨迹约束面机制**（工具白名单 / 模型 / 纪律参与项）**仍在用**：
+//     · 判据与读盘 = `trajectory/policy/profile.ts`（`trajectoryConstraintForSession`）
 //     · 施加点     = `seams/guards.ts`（工具面收窄）、`seams/keeper.ts`（纪律）
-//   ⇒ 退役的是"一个调试 HTTP 面"，**不是**"skiff 这个约束面"。
+//   ⇒ 退役的是"一个调试 HTTP 面"，**不是**"轨迹约束 这个约束面"。
 //   两者同名不是同一件事：面是给人手工问答用的窗口，约束面是轨迹自己的能力边界。
 //
 // ── 旧配置残留 ──────────────────────────────────────────────────────────────
-//   `skiffEnabled` / `skiffDebugPort` 写了也不认（schemastery 非 strict ⇒ 静默忽略），
+//   `轨迹约束Enabled` / `轨迹约束DebugPort` 写了也不认（schemastery 非 strict ⇒ 静默忽略），
 //   与 `rebuildEnabled` / `wakeSchedulerEnabled` / `acpEnabled` 同款处置，**不写迁移代码**。
 //
 // ── 为什么整段删而不是留空壳 ────────────────────────────────────────────────

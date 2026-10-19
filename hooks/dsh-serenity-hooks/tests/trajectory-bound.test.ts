@@ -77,9 +77,9 @@ describe('cognitive-trajectory-bound: appendBound（文件持久化）', () => {
   it('不同会话各自独立记录（scope 隔离）', () => {
     const a = makeSession('sess-a')
     const b = makeSession('sess-b')
-    appendBound(a, 'activate', { dirName: '2026-09-07--S160--my-role skiff', mdPath: '/r/A/SESSION.md' })
+    appendBound(a, 'activate', { dirName: '2026-09-07--S160--my-role 轨迹约束', mdPath: '/r/A/SESSION.md' })
     appendBound(b, 'activate', { dirName: '2026-09-05--S142--dsp', mdPath: '/r/B/SESSION.md' })
-    expect(readLastBound(a)?.dirName).toBe('2026-09-07--S160--my-role skiff')
+    expect(readLastBound(a)?.dirName).toBe('2026-09-07--S160--my-role 轨迹约束')
     expect(readLastBound(b)?.dirName).toBe('2026-09-05--S142--dsp')
   })
 })

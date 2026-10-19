@@ -245,7 +245,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     // 自起资源各自登记拆卸：lifecycle 聚合资源（**含四个自起 HTTP 面**）/
     // opencode 路由自动配置的重试定时器（v1.31.7——命名空间竞态退避）/
     // cognitive trajectory 唤醒调度器（D58，v1.32.0——中心 tick + 冷唤醒投递）。
-    // ⚠️ v1.35（C2 块 C3）：**skiff root 退避重试定时器已退场**（原 v1.30.13/D1 的第 7 项），故 7 → 6。
+    // ⚠️ v1.35（C2 块 C3）：**轨迹约束 root 退避重试定时器已退场**（原 v1.30.13/D1 的第 7 项），故 7 → 6。
     // ⚠️ C4 块 A（2026-09-15）：**gateway 第二监听器**与**weixin send api** 两处自带 disposer 已删
     //    ——listener 生命周期归 `face-host`，拆卸路径归一到 lifecycle 的聚合入口（`stopAllFaces`）。
     //    故 6 → 4，且这两个标签从此**不应再现**（回归钉：删了就别让它悄悄回来）。
@@ -273,7 +273,7 @@ describe('dsh-serenity-hooks: 插件契约（native cordis 规范）', () => {
     // 退役回归钉：无人值守代理缝不得再被装配（删了就不要再悄悄回来）
     expect(labels.join('|')).not.toContain('unattended proxy')
     // 退避重试定时器不得再出现（回归钉：删了就不要再悄悄回来）
-    expect(labels.join('|')).not.toContain('skiff root retry timer')
+    expect(labels.join('|')).not.toContain('轨迹约束 root retry timer')
     // C4 块 A 回归钉：两处自带 listener disposer 已被单点取代
     expect(labels.join('|')).not.toContain('gateway 第二监听器')
     expect(labels.join('|')).not.toContain('weixin send api')

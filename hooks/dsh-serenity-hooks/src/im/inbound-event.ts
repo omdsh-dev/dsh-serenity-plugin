@@ -38,11 +38,11 @@ import { appendHumanChannelAudit, planInboundRoute, type InboundRoutePlan } from
 import { readSimpleSettings } from '../surface/settings.js'
 import { readWeixinSettings, weixinSessionIdForTrajectory, matchWeixinRoute, sanitizeFileName, weixinInboundDir } from './route.js'
 import { sniffImageExt, markdownToPlainText } from './ilink.js'
-import { readSkiffProfileByCode, type SkiffProfile } from '../trajectory/policy/profile.js'
+import { readTrajectoryConstraintByCode, type TrajectoryConstraint } from '../trajectory/policy/profile.js'
 import { stripThink } from '../surface/text.js'
 import {
-  createSkiffAgent, getSkiffAgent, askSkiff, workspaceCognitiveTrajectoryLine,
-  ensureWorkspacePromptSection, skiffWorkspaceMdPath,
+  createTrajectoryAgent, getTrajectoryAgent, askTrajectory, workspaceCognitiveTrajectoryLine,
+  ensureWorkspacePromptSection, trajectoryWorkspaceMdPath,
 } from '../trajectory/session.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
@@ -107,7 +107,7 @@ const MEDIA_MAX_BYTES = 20 * 1024 * 1024
 // ── 路由（原在 bridge.ts；通道无关，故随主流程一起搬进来）──────────────────
 
 /**
- * 路由解析结果：目标根 ＋ **轨迹编码** ＋ **该轨迹的 skiff 约束面**。
+ * 路由解析结果：目标根 ＋ **轨迹编码** ＋ **该轨迹的 轨迹约束面**。
  * `null` 从本函数出去 ⇒ **不投递**（未命中已留痕 ／ 目标不存在已响亮出声）。
  */
 export interface ResolvedInboundTarget {
@@ -115,11 +115,11 @@ export interface ResolvedInboundTarget {
   /** 目标认知轨迹编码（= 新模型里的"身份"；旧模型的角色名已退役） */
   trajectory: string
   /**
-   * 该轨迹的 skiff 约束面。
-   * ⚠️ **可能为 `null`**：轨迹存在但没有 `skiff.json` ⇒ 它是一条**普通轨迹**，
-   * IM 桥照样可以往里投，只是不施加 skiff 约束。
+   * 该轨迹的 轨迹约束面。
+   * ⚠️ **可能为 `null`**：轨迹存在但没有 `trajectory-constraint.json` ⇒ 它是一条**普通轨迹**，
+   * IM 桥照样可以往里投，只是不施加 轨迹约束 约束。
    */
-  profile: SkiffProfile | null
+  profile: TrajectoryConstraint | null
 }
 
 /**
@@ -197,7 +197,7 @@ export async function resolveInboundTarget(ctx: Context, input: {
     return null
   }
   // ③ 目标**轨迹**不存在 ⇒ 响亮报错。
-  // ⚠️ 轨迹存在但没有 `skiff.json` **不是错** —— 那只是一条普通轨迹。
+  // ⚠️ 轨迹存在但没有 `trajectory-constraint.json` **不是错** —— 那只是一条普通轨迹。
   const { findDirNameByCode } = await import('../trajectory/policy/profile.js')
   const dirName = findDirNameByCode(root, target.role)
   if (dirName === null) {
@@ -206,7 +206,7 @@ export async function resolveInboundTarget(ctx: Context, input: {
     appendHumanChannelAudit({ kind: 'inbound-target-missing', account: input.account, user: input.user, ccc: target.ccc, role: target.role, detail })
     return null
   }
-  const profile = readSkiffProfileByCode(root, target.role)
+  const profile = readTrajectoryConstraintByCode(root, target.role)
   return { root, trajectory: target.role, profile }
 }
 
@@ -270,10 +270,10 @@ export async function handleInboundEvent(
   try {
     // 🔴 会话 id **由轨迹编码派生**（身份挂在轨迹上，不挂在用户上）。
     const sessionId = weixinSessionIdForTrajectory(trajectory)
-    const existing = getSkiffAgent(sessionId)
+    const existing = getTrajectoryAgent(sessionId)
     const hc = readCheapWorkerConfig(root)
-    // 无 `skiff.json` 的普通轨迹：不施加任何 skiff 约束，用编码造一个最小面立提示词段。
-    const effective: SkiffProfile = profile ?? {
+    // 无 `trajectory-constraint.json` 的普通轨迹：不施加任何 轨迹约束 约束，用编码造一个最小面立提示词段。
+    const effective: TrajectoryConstraint = profile ?? {
       dirName: trajectory,
       code: trajectory,
       path: '',
@@ -283,7 +283,7 @@ export async function handleInboundEvent(
     }
     const ref = existing
       ? { agent: existing, sessionId, resumed: true }
-      : await createSkiffAgent(ctx, root, effective, hc?.defaultModel, sessionId)
+      : await createTrajectoryAgent(ctx, root, effective, hc?.defaultModel, sessionId)
 
     if (!ref.resumed) {
       // 真正首次（无持久化历史）→ 通知用户"新对话开始"；resume 不发
@@ -334,7 +334,7 @@ export async function handleInboundEvent(
 
       const parts: string[] = []
       // 工作台 = **该轨迹自己的 SESSION.md**（不再有"自动建一个"这回事）。
-      const workspaceMd = skiffWorkspaceMdPath(root, sessionId) ?? getActiveSessionInfo(sessionId)?.mdPath ?? null
+      const workspaceMd = trajectoryWorkspaceMdPath(root, sessionId) ?? getActiveSessionInfo(sessionId)?.mdPath ?? null
       if (workspaceMd) {
         const sectionOk = ensureWorkspacePromptSection(ref.agent, sessionId, root)
         if (!sectionOk) parts.push(workspaceCognitiveTrajectoryLine(workspaceMd))
@@ -343,7 +343,7 @@ export async function handleInboundEvent(
       if (text) parts.push(text)
       parts.push(...mediaNotes, ...degradedNotes)
       if (manualOutput) {
-        // 本轮开始 → 清空"已发送"标记（闸门只置位；桥在 askSkiff 后读它决定兜底）
+        // 本轮开始 → 清空"已发送"标记（闸门只置位；桥在 askTrajectory 后读它决定兜底）
         clearSentThisTurn(sessionId)
         noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory })
         parts.push(manualOutputMarker(accountId, fromUserId))
@@ -352,7 +352,7 @@ export async function handleInboundEvent(
       }
       const question = parts.join('\n')
 
-      // hook：incoming 事件（用户 → bot）——媒体落盘后、askSkiff 前 fire。旁路容忍（H3）。
+      // hook：incoming 事件（用户 → bot）——媒体落盘后、askTrajectory 前 fire。旁路容忍（H3）。
       const hookRel = settings.hook
       if (hookRel) {
         void invokeWeixinHook(root, hookRel, buildIncomingHookEvent({
@@ -368,7 +368,7 @@ export async function handleInboundEvent(
         })
       }
 
-      const result = await askSkiff(ctx, ref.agent, question)
+      const result = await askTrajectory(ctx, ref.agent, question)
       const answer = result.answer ?? ''
       // 手动输出模式——桥不转发最终文本（输出权归 agent）
       if (manualOutput) {

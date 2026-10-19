@@ -14,7 +14,7 @@ import {
 } from '../src/trajectory/core.js'
 
 /**
- * 轨迹编码（code）= 唯一标识（owner 2026-10-19 skiff 重做令，B 案）。
+ * 轨迹编码（code）= 唯一标识（owner 2026-10-19 轨迹约束 重做令，B 案）。
  *
  * 判据重心三条（每条都有对应的失败形态）：
  *  ① **固定位置解析**：目录名 `YYYY-MM-DD--<code>[--<desc>]` 的第二段恒为编码；

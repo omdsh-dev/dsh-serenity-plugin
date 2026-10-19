@@ -16,8 +16,8 @@ import {
 } from '../src/guard/filter.js'
 import { registerOutputGuardHook } from '../src/guard/seam.js'
 import { stripThink } from '../src/surface/text.js'
-import { resetSkiffSessions, registerSkiffSession } from '../src/trajectory/policy/window.js'
-import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
+import { resetTrajectorySessions, registerTrajectorySession } from '../src/trajectory/policy/window.js'
+import { makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
 
 let dir: string
 
@@ -38,18 +38,18 @@ beforeEach(() => {
       { name: 'vlm-describe', script: 'vlm-describe.ts' },
     ],
   }))
-  // 🔴 2026-10-19：输出守卫的「外部面」判据不再是 sessionId 的 `skiff-` 前缀，而是
-  //    「**该会话绑定的轨迹有 `skiff.json`**」（`guard/seam.ts` 的 `isSkiffSession`）。
-  //    ⇒ 下方两个默认夹具会话必须**真的挂到一条 skiff 轨迹上**，否则它们会被判成
+  // 🔴 2026-10-19：输出守卫的「外部面」判据不再是 sessionId 的 `轨迹约束-` 前缀，而是
+  //    「**该会话绑定的轨迹有 `trajectory-constraint.json`**」（`guard/seam.ts` 的 `isTrajectoryConstrained`）。
+  //    ⇒ 下方两个默认夹具会话必须**真的挂到一条 轨迹约束轨迹上**，否则它们会被判成
   //    本地维护会话（豁免）⇒ 打回类用例会集体假红。
-  const { dirName } = makeTrajectory(dir, 'qa', skiffJson({ tools: [] }))
-  registerSkiffSession('skiff-qa-uuid', dirName, dir)     // turn-stopping 组默认夹具
-  registerSkiffSession('skiff-edge-uuid', dirName, dir)   // 边界与失败路径组默认夹具
+  const { dirName } = makeTrajectory(dir, 'qa', 轨迹约束Json({ tools: [] }))
+  registerTrajectorySession('轨迹约束-qa-uuid', dirName, dir)     // turn-stopping 组默认夹具
+  registerTrajectorySession('轨迹约束-edge-uuid', dirName, dir)   // 边界与失败路径组默认夹具
 })
 
 afterEach(() => {
   rebukeStates.clear()
-  resetSkiffSessions() // 进程级注册表：会话 → 轨迹，用例间必须复位
+  resetTrajectorySessions() // 进程级注册表：会话 → 轨迹，用例间必须复位
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -117,7 +117,7 @@ describe('output-guard: 检测（detectSensitive）', () => {
   it('回答含内部端口 → 命中（分类 port，v1.26.11）', () => {
     const t = buildSensitiveTable(dir)
     // ⚠️ 2026-10-15：原用 3100 举例，该面（旧面 E）已退役 ⇒ 曾改用 3099。
-    // ⚠️ 2026-10-19：**3099（Skiff 调试面）也退役了** ⇒ 改用**仍在役**的 3081（网关面）。
+    // ⚠️ 2026-10-19：**3099（轨迹约束调试面）也退役了** ⇒ 改用**仍在役**的 3081（网关面）。
     //    判据不变：在役内部端口出现在用户可见输出里必须被打回。
     //    🔴 三次换例子都只因"例子所在的面退了"，不是因为判据变了 —— 这正是本用例的正确演化方式。
     expect(detectSensitive('端口 3081 提供服务', t)).toContainEqual({ word: '3081', category: 'port' })
@@ -178,7 +178,7 @@ describe('output-guard: 打回消息（buildRebuke，v1.26.11 分类指引）', 
 })
 
 describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
-  function fakeCtx(id = 'skiff-qa-uuid') {
+  function fakeCtx(id = '轨迹约束-qa-uuid') {
     const steers: string[] = []
     let hook: ((p: { agent?: unknown; turn?: number }) => void) | undefined
     const agent = {
@@ -227,7 +227,7 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
     for (let i = 1; i <= REBUKE_MAX_ROUNDS + 1; i++) f.fire(i)
     // REBUKE_MAX_ROUNDS 次打回 + 最后一次放弃
     expect(f.steers.length).toBe(REBUKE_MAX_ROUNDS)
-    expect(rebukeStates.has('skiff-qa-uuid')).toBe(false)
+    expect(rebukeStates.has('轨迹约束-qa-uuid')).toBe(false)
   })
 
   it('合规轮重置连续计数（先命中后合规 → 计数清零）', () => {
@@ -236,11 +236,11 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
     f.agent.session.events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'SSH_UBUNTU_PASSWORD' }] } } })
     f.fire(1)
     expect(f.steers.length).toBe(1)
-    expect(rebukeStates.get('skiff-qa-uuid')?.consecutive).toBe(1)
+    expect(rebukeStates.get('轨迹约束-qa-uuid')?.consecutive).toBe(1)
     // 合规轮
     f.agent.session.events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '正常回答' }] } } })
     f.fire(2)
-    expect(rebukeStates.has('skiff-qa-uuid')).toBe(false)
+    expect(rebukeStates.has('轨迹约束-qa-uuid')).toBe(false)
   })
 
   it('本地维护会话（普通 dsh id）→ 豁免不检测（用户拍板：仅外部面）', () => {
@@ -252,7 +252,7 @@ describe('output-guard-seam: turn-stopping 接线（v1.26.3）', () => {
   })
 
   it('🔴 `acp-` 前缀会话仍被判为外部面（**死判据但契约仍在**，2026-10-15 面 E 退役后仍钉）', () => {
-    // ⚠️ 该前缀**从无生产者**（历史 acp-core 建的是 skiff- 前缀会话），面 E 退役后更不会出现。
+    // ⚠️ 该前缀**从无生产者**（历史 acp-core 建的是 轨迹约束- 前缀会话），面 E 退役后更不会出现。
     //    本用例**刻意保留**：它钉的是 isExternalFaceSession 的**契约**（前缀命中即算外部面），
     //    而非"某处真的会产生这种 id"。若将来裁掉该分支（见 §当前状态「观察」的孤儿项），
     //    本用例应**同批删除**——它正是那条待裁项的机械锚点。
@@ -303,7 +303,7 @@ describe('output-guard-seam: 边界与失败路径（⑤ 第 20 件）', () => {
     const steers: string[] = []
     let hook: ((p: { agent?: unknown; turn?: number }) => void) | undefined
     const session: Record<string, unknown> = { events: [] as unknown[] }
-    if (opts.omitSessionId !== true) session.id = opts.sessionId ?? 'skiff-edge-uuid'
+    if (opts.omitSessionId !== true) session.id = opts.sessionId ?? '轨迹约束-edge-uuid'
     if (opts.withHeader !== false) session.header = { cwd: dir }
     const agent = {
       id: 'edge-agent',

@@ -375,9 +375,9 @@ describe('src/api.ts 族 ③：配置/设置缺键 ⇒ 兜底默认（不是 500
   })
 
   it('🔴 `set-enabled`：配置里**没有 `accounts` 键**时 enable ⇒ 400（`:576` 的 `?? []` 兜底把"无账号"判对）', async () => {
-    // 只写 `skiff.roles`，**刻意不写 `weixin`** ⇒ `settings.accounts` 缺席 ⇒ `(accounts ?? []).length === 0` 为真
+    // 只写 `轨迹约束.roles`，**刻意不写 `weixin`** ⇒ `settings.accounts` 缺席 ⇒ `(accounts ?? []).length === 0` 为真
     mkdirSync(join(ccc, '.opencode'), { recursive: true })
-    writeFileSync(join(ccc, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { prompt: 'x' } } } }, null, 2))
+    writeFileSync(join(ccc, '.opencode', 'serenity.json'), JSON.stringify({ 轨迹约束: { roles: { qa: { prompt: 'x' } } } }, null, 2))
 
     const api = await bootApi()
     try {

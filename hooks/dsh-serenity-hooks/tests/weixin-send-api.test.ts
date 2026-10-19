@@ -14,11 +14,11 @@ import { tmpdir } from 'node:os'
 import type { ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 
-// 桥与 CCC 发现都替身化：本模块的契约是"入口层"，不需要真实 iLink / 真实 skiff 链
+// 桥与 CCC 发现都替身化：本模块的契约是"入口层"，不需要真实 iLink / 真实 轨迹约束链
 vi.mock('../src/im/bridge.js', () => ({
   sendProactiveText: vi.fn(),
 }))
-// C2：候选来源由 skiff-debug.discoverCccs 迁至 ccc-roots.listCccs（本模块改问后者）
+// C2：候选来源由 trajectory-debug.discoverCccs 迁至 ccc-roots.listCccs（本模块改问后者）
 vi.mock('../src/kernel/ccc-roots.js', () => ({
   listCccs: vi.fn(),
 }))

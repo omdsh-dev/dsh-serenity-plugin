@@ -461,7 +461,7 @@ export function parseCroHostBinding(raw: string): string | null {
  *   `AGENT_SESSIONS/` 下每个目录查一次 `<目录>/continuous-re-occurrence.ts`。
  * · **一次 readdir + 每个目录一次 existsSync**：N 条轨迹的代价是 O(N) 次 `stat`，
  *   每 5min 一次 —— 与既有 `listSessions` 同量级，可接受。
- * · 跳过 **`_` 前缀**（`_archived` / `_skiff-logs` / `_weixin-logs` = 系统与日志目录）
+ * · 跳过 **`_` 前缀**（`_archived` / `_轨迹约束-logs` / `_weixin-logs` = 系统与日志目录）
  *   与 **`.` 前缀**（隐藏）——它们**不是轨迹**，且扫它们纯属浪费。
  * · 🔴 **本函数绝不抛错**（返回 `[]`）——它跑在调度器 tick 内，任何异常都可能影响既有链路
  *   （设计 §5 铁律）。目录读不到（不存在 / 权限）⇒ `[]` = "没有轨迹启用 CRO"，语义正确。

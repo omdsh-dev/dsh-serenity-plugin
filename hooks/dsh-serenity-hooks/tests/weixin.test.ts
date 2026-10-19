@@ -34,10 +34,10 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   settingsNamespace: (v: string) => v,
 }))
 
-// skiff-core 依赖 @deepseek-ai/dsh-session 类型（运行时擦除）——无需 mock；
-// createSkiffAgent 链在 handleIncoming 集成测试中用 fake ctx 走轻路径
-// （原注释写「acp-core → skiff-core 链」，2026-10-15 更正：**本链从不经过 acp-core**——
-//  桥 import 的是 skiff-core；acp-core 已随面 E 退役删除）
+// trajectory-session 依赖 @deepseek-ai/dsh-session 类型（运行时擦除）——无需 mock；
+// createTrajectoryAgent 链在 handleIncoming 集成测试中用 fake ctx 走轻路径
+// （原注释写「acp-core → trajectory-session 链」，2026-10-15 更正：**本链从不经过 acp-core**——
+//  桥 import 的是 trajectory-session；acp-core 已随面 E 退役删除）
 
 import {
   fetchQRCode,
@@ -75,11 +75,11 @@ import {
   setWeixinEnabled,
   nextWeixinAccountId,
 } from '../src/im/route.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
+import { registerTrajectorySession, unregisterTrajectorySession, trajectorySessionSnapshot } from '../src/trajectory/session.js'
 import { manualOutputFallbackNeeded } from '../src/im/bridge.js'
 import { registerWeixinOutputGuard } from '../src/im/guard.js'
-// 轨迹夹具（造 skiff 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `skiff.json` 里）
-import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
+// 轨迹夹具（造 轨迹约束 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `trajectory-constraint.json` 里）
+import { makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
 
 let dir: string
 let oldConfigEnv: string | undefined
@@ -101,10 +101,10 @@ beforeEach(() => {
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
   // 🔴 2026-10-19 重做后**路由目标必须是该 CCC 里真实存在的认知轨迹**（`findDirNameByCode`），
-  //    不再是"这个 CCC 配没配这个 skiff 角色" ⇒ 夹具默认造一条 `qa` 轨迹（有 `skiff.json`
-  //    ⇒ 它同时是一条 skiff 轨迹）。需要别的编码的用例各自另造（如 `zc`）；需要"目标不存在"
+  //    不再是"这个 CCC 配没配这个 轨迹约束角色" ⇒ 夹具默认造一条 `qa` 轨迹（有 `trajectory-constraint.json`
+  //    ⇒ 它同时是一条 轨迹约束轨迹）。需要别的编码的用例各自另造（如 `zc`）；需要"目标不存在"
   //    的用例（C4）写一个根本不存在的编码。
-  makeTrajectory(dir, 'qa', skiffJson({ tools: [], msms: [], systemPrompt: 'qa' }))
+  makeTrajectory(dir, 'qa', 轨迹约束Json({ tools: [], msms: [], systemPrompt: 'qa' }))
 })
 
 afterEach(async () => {
@@ -115,7 +115,7 @@ afterEach(async () => {
   // v1.30.16：手动输出闸门模块级状态（桥每轮登记）——跨用例清空
   const { __resetWeixinOutputGuardForTest } = await import('../src/im/guard.js')
   __resetWeixinOutputGuardForTest()
-  for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
+  for (const [id] of trajectorySessionSnapshot()) unregisterTrajectorySession(id)
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
   if (oldAuditEnv === undefined) delete process.env.SERENITY_HUMAN_CHANNEL_AUDIT
@@ -309,7 +309,7 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     expect(a).not.toBe(c)      // 换轨迹 ⇒ 换会话
     expect(a).toMatch(/^skiff-weixin-/)
     expect(isWeixinSessionId(a)).toBe(true)
-    expect(isWeixinSessionId('skiff-qa-xxx')).toBe(false)
+    expect(isWeixinSessionId('轨迹约束-qa-xxx')).toBe(false)
   })
 
   it('readWeixinSettings 归一（未配置 → 默认关）', () => {
@@ -458,7 +458,7 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
 })
 
 describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () => {
-  /** fake ctx（原地演化自 skiff-core 侧的 fakeCtx；原注「对齐 acp-core.test fakeCtx」已失效——
+  /** fake ctx（原地演化自 trajectory-session 侧的 fakeCtx；原注「对齐 acp-core.test fakeCtx」已失效——
    *  该文件 2026-10-15 随面 E 退役删除）：agents.create/resume 产生带 followup 的 fake agent；
    *  on 立即触发 idle（waitIdle 立即返回）；followup 推入 user + assistant 答案事件。
    *  resumeMode: 'create'（resume 缺失→恒 create 路径）/ 'resume'（resume 命中历史恢复）/ 'not-found'（首次）
@@ -474,7 +474,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       get?: (id: string) => unknown
     }
     on: () => () => void
-    /** askSkiff 注入的 question 文本（媒体存在性/降级断言用） */
+    /** askTrajectory 注入的 question 文本（媒体存在性/降级断言用） */
     questions: string[]
     /** agent 系统提示词段（v1.30.13：工作台纪律单一注入点断言用） */
     sections: Array<{ name: string; text: () => string }>
@@ -488,7 +488,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
         // 保真：宿主 agent 上下文有 systemPrompt.section（E-01 纪律——替身镜像宿主）
         ctx: testOpts?.noSystemPrompt ? {} : { systemPrompt: { section: (s: { name: string; text: () => string }) => sections.push(s) } },
         followup: (msg?: { content?: Array<{ type?: string; text?: string }> }) => {
-          // 捕获 askSkiff 注入的 question（含媒体存在性/降级说明）
+          // 捕获 askTrajectory 注入的 question（含媒体存在性/降级说明）
           const q = (msg?.content ?? []).filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
           if (q) questions.push(q)
           built.session.events.push(
@@ -581,7 +581,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
     // session/new 已创建（注册表含 skiff-weixin- 会话）+ 回复已回写
     // 首条消息 = 新会话 → 通知（新的对话已开始）+ 答案，共 2 条
-    expect([...skiffSessionSnapshot().keys()].some((id) => id.startsWith('skiff-weixin-'))).toBe(true)
+    expect([...trajectorySessionSnapshot().keys()].some((id) => id.startsWith('skiff-weixin-'))).toBe(true)
     expect(sent).toHaveLength(2)
     expect(sent[0]!.text.includes('新的对话')).toBe(true)
     expect(sent[1]!.to).toBe('u1@im.wechat')
@@ -803,7 +803,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent.some((s) => s.text.includes('新的对话'))).toBe(false)
     expect(sent.some((s) => s.text === '答案')).toBe(true)
     // 内存注册表已登记（后续消息走进程内延续）
-    expect([...skiffSessionSnapshot().keys()].some((id) => id === weixinSessionIdForTrajectory('qa'))).toBe(true)
+    expect([...trajectorySessionSnapshot().keys()].some((id) => id === weixinSessionIdForTrajectory('qa'))).toBe(true)
   })
 
   it('图片消息 → CDN 下载解密 → 落盘 _tmp/weixin-inbound → question 注入路径 → 回复（媒体接收）', async () => {
@@ -939,7 +939,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       from_user_id: 'u@im.wechat',
       item_list: [{ type: 1, text_item: { text: 'hi' } }],
     })
-    expect(skiffSessionSnapshot().size).toBe(0)
+    expect(trajectorySessionSnapshot().size).toBe(0)
   })
 
   it('非文本消息 → 忽略', async () => {
@@ -952,7 +952,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       from_user_id: 'u@im.wechat',
       item_list: [{ type: 2 }], // 图片
     })
-    expect(skiffSessionSnapshot().size).toBe(0)
+    expect(trajectorySessionSnapshot().size).toBe(0)
   })
 
   it('语音消息（带服务端转写 voice_item.text）→ 按文本处理并回复', async () => {
@@ -1001,7 +1001,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     expect(sent).toHaveLength(1)
     expect(sent[0]!.text.includes('无法解析')).toBe(true)
-    expect(skiffSessionSnapshot().size).toBe(0)
+    expect(trajectorySessionSnapshot().size).toBe(0)
   })
 
   it('正在输入：处理前 sendtyping 1，处理后 0（getconfig ticket 缓存一次）', async () => {
@@ -1108,13 +1108,13 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent.some((s) => s.text === '答案')).toBe(true) // 回复送达（hook 失败被吞）
   })
 
-  it('v1.30.13：工作台纪律单一注入点——挂 skiff 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
+  it('v1.30.13：工作台纪律单一注入点——挂 轨迹约束 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'zc' }] },
     }))
-    // 约束面不再写在 `serenity.json` 的 skiff 段里（该段已退役）——它住在 `zc` 轨迹目录的 `skiff.json`
-    const { dirName: zcDir } = makeTrajectory(dir, 'zc', skiffJson({
+    // 约束面不再写在 `serenity.json` 的 轨迹约束段里（该段已退役）——它住在 `zc` 轨迹目录的 `trajectory-constraint.json`
+    const { dirName: zcDir } = makeTrajectory(dir, 'zc', 轨迹约束Json({
       msms: ['memory-tool'],
       tools: ['read', 'write', 'cognitive_trajectory', 'msm'],
       cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
@@ -1132,8 +1132,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     const { handleIncoming } = await import('../src/im/bridge.js')
     const fromId = 'user@im.wechat'
     const sid = weixinSessionIdForTrajectory('zc')
-    // 两段式真实场景：第一次 incoming（agent 首次创建 → createSkiffAgent 内挂段 + 注册进注册表）；
-    // 第二次 incoming（同一条轨迹 ⇒ getSkiffAgent 命中 existing 快路径）
+    // 两段式真实场景：第一次 incoming（agent 首次创建 → createTrajectoryAgent 内挂段 + 注册进注册表）；
+    // 第二次 incoming（同一条轨迹 ⇒ getTrajectoryAgent 命中 existing 快路径）
     const ctx = fakeCtx('not-found')
     const msg: Parameters<typeof handleIncoming>[4] = {
       from_user_id: fromId,
@@ -1141,14 +1141,14 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     }
     // 第一次：create 路径
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
-    // 🔴 工作台 = **这条轨迹自己的 SESSION.md**（旧模型里 `createSkiffAgent` 另建一个
-    //    `zc skiff` 目录——那个"自动新建"的动作已随重做整件删除）⇒ 桥**不得**再落第三个目录。
+    // 🔴 工作台 = **这条轨迹自己的 SESSION.md**（旧模型里 `createTrajectoryAgent` 另建一个
+    //    `zc 轨迹约束` 目录——那个"自动新建"的动作已随重做整件删除）⇒ 桥**不得**再落第三个目录。
     const sessionDirs = readdirSync(join(dir, 'AGENT_SESSIONS'))
     expect(sessionDirs).toContain(zcDir)
     expect(sessionDirs).toHaveLength(2) // qa（beforeEach 造的）+ zc；桥没有另建
-    expect([...skiffSessionSnapshot().keys()].some((id) => id === sid)).toBe(true)
+    expect([...trajectorySessionSnapshot().keys()].some((id) => id === sid)).toBe(true)
     // 工作台纪律挂在 agent 系统提示词段（单一注入点）——question 不含（不再每轮重复）
-    const wsSections = ctx.sections.filter((s) => s.name === 'serenity-skiff-workspace')
+    const wsSections = ctx.sections.filter((s) => s.name === 'serenity-轨迹约束-workspace')
     expect(wsSections).toHaveLength(1)
     // 段正文指向**该轨迹自己的** SESSION.md（旧文案里的 AUTO-BOUND 标记随旧模型退役）
     expect(wsSections[0]!.text()).toContain(join(zcDir, 'SESSION.md'))
@@ -1158,9 +1158,9 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(ctx.questions.every((q) => !q.includes('Serenity Session Workspace'))).toBe(true)
     expect(ctx.questions.some((q) => q.includes('你好'))).toBe(true)
     const questionsAfterFirst = ctx.questions.length
-    // 第二次：existing 快路径（getSkiffAgent 命中——agent 已在注册表）——段幂等，question 仍不含
+    // 第二次：existing 快路径（getTrajectoryAgent 命中——agent 已在注册表）——段幂等，question 仍不含
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
-    expect(ctx.sections.filter((s) => s.name === 'serenity-skiff-workspace')).toHaveLength(1)
+    expect(ctx.sections.filter((s) => s.name === 'serenity-轨迹约束-workspace')).toHaveLength(1)
     const newQuestions = ctx.questions.slice(questionsAfterFirst)
     expect(newQuestions.some((q) => q.includes('你好'))).toBe(true)
     expect(newQuestions.every((q) => !q.includes('Serenity Session Workspace'))).toBe(true)
@@ -1171,7 +1171,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'zc' }] },
     }))
-    const { dirName: zcDir } = makeTrajectory(dir, 'zc', skiffJson({
+    const { dirName: zcDir } = makeTrajectory(dir, 'zc', 轨迹约束Json({
       msms: [],
       tools: ['read', 'cognitive_trajectory', 'msm'],
       cognitiveTrajectory: { session: true },

@@ -80,7 +80,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | `serenity-skill-creator` | 增强型技能标准（serenity-skill）的创建器：`guide` 编写方法 / `create` 生成骨架（基础链路径由它算）/ `check` 结构检查（三态可分辨：已建模通过 · 普通技能 · 建模了但检查未执行）/ `review` 逐条合规问题清单 / `index` 预览**模型实际会看到**的参考件清单 / `status` 全容器一览 | 新建或改造技能、为技能建本体、需要确认"模型究竟能否看到指定参考件"时 |
 | `cheap-worker` | 杂工：委派一个低成本模型的助手执行任务，取回其最终文本。一次调用一个串行子代理；`jobs` 可一次扇出多个并行（上限 10）。**不循环、不校验完成码、不写进度文件** | 大批量、重复性的工作（扫描数十个技能、逐用例回归） |
 | `localstore` | 存储密钥与配置（凭据、偏好两个命名空间） | API key、密码集中放一处，不进 git |
-| `container_admin` | 机务舱：管理受限轨迹（skiff）、管理小工具注册表、查看全部配置 | 定义 skiff、注册新小工具、修改配置时 |
+| `container_admin` | 机务舱：`config` 域（说明目录/按章详情 ＋ 轨迹约束的 guide/validate/apply/list ＋ 看当前配置）／`msm` 域（小工具注册表 ＋ 手册） | 定义轨迹约束、注册新小工具、查配置怎么填时 |
 | `im-bridge` | 向 IM 联系人发消息（目前为微信）：发文本、发文件、查已配置联系人、查通道状态。每次成功发送自动写入工作区的消息记录 | 需要 AI 主动给家人/同事发消息时（见 §6.2）。**条件出现**：仅在工作区配置了微信桥时可见 |
 | `acc-diag` | ACC 运行态诊断：一次调用输出全报告——当前活跃会话数、各自所属工作区、唤醒时钟的武装态与 tick 次数、唤醒登记表的每一条 | **ACC 维护者专用**。**条件出现**：默认对所有工作区隐藏，仅在工作区配置中点名（`exclusiveTools`）时出现 |
 | `diagram` | 绘图：AI 给出一段**标签式源码**，插件**在进程内**将其绘制为 PNG 并**贴入对话**——不启动浏览器、不截图、正常路径不落文件。坐标 = 画布像素、y 向下；写错的图元逐条报错并跳过，其余照常绘制；自带四项检查（块重叠 / 标签溢出 / 悬空端点 / 线压字），**只告警不拦图** | 需要把关系图/示意图直接放进对话时。**条件出现**：实验性 demo，**默认关**（关闭时该工具**根本不注册**，AI 看不到它、不占上下文）；开关在设置面板「工具」组，拨动即时生效。中英文与常用符号均可绘制，因字体随插件内置（约 5 MB） |
@@ -88,7 +88,7 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 > **更名记录**（旧名已彻底停用，无兼容别名；旧会话中出现旧名时，**一律取所在那一组的末项**）：
 > `cc_fs` → `container_fs` · `cc_git` → `container_git` · `session`+`session_rebuild` → `logbook` → `trajectory` → **`cognitive_trajectory`**（今名） ·
 > `acc_kit` → `dashboard` · `acc_msm` → `msm`（执行）+ `container_admin`（管理） · `eap`/`neat`/`cce` → `praxis` ·
-> `skiff_admin` → `container_admin role` · `autopilot-trajectory` → `trajectory` → **`cognitive_trajectory`**（今名）。
+> `skiff_admin` → `container_admin role` → **`container_admin config`**（今名；`role` 仍作过渡别名可用） · `autopilot-trajectory` → `trajectory` → **`cognitive_trajectory`**（今名）。
 
 ### 3.2 机械约束（AI 绕不过去）
 
@@ -112,10 +112,11 @@ dsh plugin --profile web add link:$(pwd)/hooks/dsh-serenity-hooks
 | DSH 主界面 | 3080 | 本机自用（插件不碰这个端口，也不起这个监听器） |
 | **网页登录入口** | 3081 | 外部/手机访问完整界面：登录后反向代理到 3080，可配工作区白名单 |
 | **微信主动发送入口** | 3082（只绑 127.0.0.1） | 工作区外的脚本/集成用它给微信发消息（公网不可达，所以不需要密钥）。工作区内的 AI 不走这个端口，直接使用 `im-bridge` 工具 |
-| **受限轨迹调试页** | 3099（只绑 127.0.0.1） | 调试 skiff 时使用，可切换工作区、查看对话轨迹 |
 | **微信桥** | 无需端口（出站长轮询） | 家人在微信里直接和 AI 说话 |
 
-> 3081 / 3099 **默认关**（须自行开启）；3082 **默认开**（微信桥启用时才有意义）。默认只监听 127.0.0.1 的入口，如需暴露到公网，由使用者自行决定方式（隧道 / 反代 / 端口映射都行），插件不绑定任何特定做法。
+> 3081 **默认关**（须自行开启）；3082 **默认开**（微信桥启用时才有意义）。默认只监听 127.0.0.1 的入口，如需暴露到公网，由使用者自行决定方式（隧道 / 反代 / 端口映射都行），插件不绑定任何特定做法。
+>
+> 原 3099「受限轨迹调试页」已随 v1.73.0 整条退役 —— 轨迹约束的配置现由 `container_admin config` 直接读写。
 
 > 🔴 **已退役：原「ACP + 对外问答页」（3100）**。该面是本插件早期自造的一套私有 HTTP＋HTML 协议外壳
 > （无客户端生态），已于 2026-10-15 **整体移除**（连同 `acp-core` / `acp-http` 与相关开关、问答页 key）。
@@ -251,28 +252,28 @@ my-workspace/                     ← 工作区根目录（放一个 .serenity �
   `source: "reply-fallback"` 表示"AI 没发、插件兜底发的"。
 - **排障**：`msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"])`
 
-### 6.3 受限轨迹（Skiff）
+### 6.3 轨迹约束（trajectory constraint）
 
-**skiff 就是一条「目录里放了 `skiff.json` 的认知轨迹」** —— 没有别的定义。
-放进去，这条轨迹立刻变成受限形态；删掉它，当场恢复成普通轨迹。
+**轨迹约束就是一条「目录里放了 `trajectory-constraint.json` 的认知轨迹」** —— 没有别的定义。
+放进去，这条轨迹立刻受约束；删掉它，当场恢复成普通轨迹。
 
 ```jsonc
 // AGENT_SESSIONS/2026-10-19--qa--问答/  ← 轨迹目录（编码 = 目录名固定位置那一段）
-//   ├─ SESSION.md    ← 它自己的身体（工作台就是它，不另建）
-//   ├─ skiff.json    ← 约束面（这个文件的存在，就是"它是 skiff"的判据）
+//   ├─ SESSION.md                  ← 它自己的身体（工作台就是它，不另建）
+//   ├─ PROMPT.md                   ← 它的章程（推荐；所有轨迹都适用，不限于轨迹约束）
+//   ├─ trajectory-constraint.json  ← 约束面（这个文件的存在，就是"它是轨迹约束"的判据）
 {
   "model": "provider/model",              // 这条轨迹单独用哪个模型
   "msms": ["web-search", "vlm-describe"], // 它能调哪些小工具（MSM）
   "tools": ["read", "grep", "glob"],      // 它能用哪些平台工具
-  "systemPromptFile": "roles/qa.md",       // 它的人格与边界（也可以直接内联 systemPrompt）
   "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true }  // 缺省即全 true
 }
 ```
 
 - 两份白名单分开配（小工具 / 平台工具），**没列出来的一律从工具清单里移除**（不是"看得见调不动"）
 - **`cognitiveTrajectory` 缺省全 `true`**：工作台就是它自己的 `SESSION.md`，关掉等于把它的身体摘了
-- 调试页（3099）可以切工作区、看轨迹；回答用 markdown 渲染，思考过程折叠
-- `container_admin role validate` 校验，`apply` 才真正生效；两者都**实时读盘**，改完下一轮即生效
+- 章程写在轨迹目录的 **`PROMPT.md`** 里（跟着轨迹走，归档时一起搬）；旧的 `systemPromptFile` 仍被读取，但 `PROMPT.md` 优先
+- `container_admin config validate` 校验，`apply` 才真正生效；两者都**实时读盘**，改完下一轮即生效
 - 微信路由也指向它：`routes: [{ "user": "*", "trajectory": "qa" }]`（**user → 轨迹编码**）
 
 ### 6.4 对外接入（官方 ACP）

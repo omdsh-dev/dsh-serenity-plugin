@@ -13,9 +13,9 @@
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯）
  * 本件 grep `src/trajectory/core.js` 的 import 点 ⇒ **命中 17 个文件**
  * （只有一个是按本模块命名的 `trajectory-ops.test.ts`；其余按**主题**散落：
- * `session-title` ／ `rebuild` ／ `keeper` ／ `skiff-core` ／ `trajectory-bound` ／
+ * `session-title` ／ `rebuild` ／ `keeper` ／ `trajectory-session` ／ `trajectory-bound` ／
  * `seams/context-*` ／ `seams/lifecycle*` ／ `osp-alignment` ／ `cro-guide` ／
- * `trajectory-tool` ／ `rebuild-executor` ／ `skiff-core-branches`）。
+ * `trajectory-tool` ／ `rebuild-executor` ／ `trajectory-session-branches`）。
  * ⇒ 🔵 **这正是纪律 ⑯ 存在的理由**：只看文件名会严重低估既有覆盖面。
  * 逐条核对后确认：**活跃会话内存模型**（set/get/clear/reset、scope 隔离）、
  * **events 恢复链**、**`resolveSessionByTitle` 三级优先序**、**create 正路与互斥**

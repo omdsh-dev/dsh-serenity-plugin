@@ -45,7 +45,7 @@ import {
 import { recordSkillInjections } from '../surface/usage.js'
 import { localstorePath, readGitTrack } from '../tools/localstore/service.js'
 import { readAdvancedSettings } from '../kernel/config.js'
-import { isSkiffSession } from '../trajectory/policy/profile.js'
+import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
 import { createTrajectoryPromptReader, trajectoryPromptBlock } from '../trajectory/prompt.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
@@ -118,7 +118,7 @@ export function toolsBlock(): string {
     '  cheap-worker     — delegate work to a worker agent on the CCC-configured model; one serial child per task, returns its final text. `jobs=[...]` fans out in parallel (cap 10, results keep your order). No loop, no completion code, no progress file. The model is NOT selectable per call (read from the CCC config); a worker\'s tool set excludes cheap-worker itself',
     '  serenity-skill-creator — creator for serenity-skills (this container\'s enhanced skill standard): guide (authoring/optimization method — read first) / create <name> (scaffold SKILL.md + skill.ttl + references/, base-chain import path computed) / check <name> (A1 structural + A2 base-chain; three states: modeled-ok / plain-skill / modeled-but-check-could-not-run) / review <name> (C tier: axiom-vs-text compliance question list, half-mechanical) / index <name> (preview the second-layer resource list the model will see) / status (which skills are modeled). A skill is "modeled" iff it has a file named exactly skill.ttl next to SKILL.md; a plain skill is NOT an anomaly. Only `create` writes, and it refuses an existing directory',
     '  localstore   — ACC local credential/config storage (CCC-root localstore.json; git policy localstore.gitTrack default deny)',
-    '  container_admin — container administration (the maintenance bay): role (Skiff roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config (view)',
+    '  container_admin — container administration (the maintenance bay): role (轨迹约束 roles: guide/validate/apply/list) / msm (register/deregister/check/guide/catalog/ccc-config) / config (view)',
     '',
     'MSM call (registered CCC MSMs, deterministic Mech & Semi-Mech):',
     '  Execute:       msm("<name>", ["<arg1>", "<arg2>"])   — run a registered MSM directly (partial name returns matching candidates)',
@@ -635,17 +635,17 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         const root = cccRootForCwd(cwd)
         if (!root) return ''
         const scope = agentScope(context)
-        // 🔴 T2（2026-10-19）**删掉了 skiff 旁路**。
+        // 🔴 T2（2026-10-19）**删掉了 轨迹约束旁路**。
         //
-        // 旧行为：`if (isSkiffSession(root, scope)) return ''` —— skiff 会话**整段不注入 ACC**，
+        // 旧行为：`if (isTrajectoryConstrained(root, scope)) return ''` —— 轨迹约束会话**整段不注入 ACC**，
         // 由 `trajectory/session.ts` 的另一条路径用 CCC 文件"立人格"。
         // 后果：同一个概念（"这条轨迹是谁、按什么章程工作"）由**两套互不知道的机制**拼装。
         //
-        // 现在：所有轨迹走**同一条装配**；skiff 的差异只剩「能力约束面」（`skiff.json`），
+        // 现在：所有轨迹走**同一条装配**；轨迹约束的差异只剩「能力约束面」（`trajectory-constraint.json`），
         // 而它的"章程"由 `PROMPT.md`（轨迹提示词）承载 —— 与普通轨迹**同一机制**。
-        // ⇒ skiff 从"另一套机制"降级为"同一条装配 + 一个可选约束面"。
+        // ⇒ 轨迹约束从"另一套机制"降级为"同一条装配 + 一个可选约束面"。
         //
-        // ⚠️ 兼容期：`PROMPT.md` 不存在时，skiff 的旧 `systemPromptFile` 仍由
+        // ⚠️ 兼容期：`PROMPT.md` 不存在时，轨迹约束的旧 `systemPromptFile` 仍由
         // `trajectory/session.ts` 自己的 section 追加（见那里的说明）——存量 CCC 不会静默失去章程。
         const base = serenitySystemPrompt(root, scope, boundDirNameFor(context.agent?.session))
         const codeLine = codeModeAdaptationLine(ctx, context.scope)
@@ -682,7 +682,7 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
       name: 'serenity-entry',
       order: -50,
       text: (context) => {
-        // 🔴 T2（2026-10-19）：这里原先也有 `if (isSkiffSession(...)) return ''` 的防御性旁路，
+        // 🔴 T2（2026-10-19）：这里原先也有 `if (isTrajectoryConstrained(...)) return ''` 的防御性旁路，
         // 与全局版一起**删除** —— 装配只剩一条路径（理由见全局版的同段注释）。
         const base = serenitySystemPrompt(root, scope, boundDirNameFor(agent.session))
         const codeLine = codeModeAdaptationLine(agent.ctx, context.scope)
@@ -701,7 +701,7 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
  *
  * **声明来源（两条，并集）**：
  *   · **CCC 级**（v1.44.0，owner 令）= `.opencode/serenity.json` 的 `cognitiveTrajectory.skills`
- *     ——**本 CCC 的每条轨迹都带**（含 skiff 角色会话），是容器给的底座；
+ *     ——**本 CCC 的每条轨迹都带**（含 轨迹约束角色会话），是容器给的底座；
  *   · **轨迹级** = 该会话绑定的轨迹（`readLastBound(session).mdPath` = 它的 `SESSION.md`）
  *     顶部 frontmatter 的 `skills:`——这条轨迹额外的。
  *   合并规则与顺序见 `cognitive-trajectory-skills.mergeSkillNames`（CCC 级在前，同名去重）。

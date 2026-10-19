@@ -107,7 +107,7 @@ describe('CRO: 启用轨迹扫描（listCroCognitiveTrajectories，调度器每 
     expect(listCroCognitiveTrajectories(root)).toEqual([DIR_NAME])
   })
 
-  it('🔴 跳过 `_` / `.` 前缀目录（_archived/_skiff-logs/_weixin-logs 不是轨迹）', () => {
+  it('🔴 跳过 `_` / `.` 前缀目录（_archived/_轨迹约束-logs/_weixin-logs 不是轨迹）', () => {
     makeCognitiveTrajectory(DIR_NAME, 'export {}')
     const sys = join(root, 'AGENT_SESSIONS', '_archived', '2026-01-01--S001--old')
     mkdirSync(sys, { recursive: true })

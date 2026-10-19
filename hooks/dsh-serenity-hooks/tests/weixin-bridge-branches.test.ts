@@ -14,7 +14,7 @@
  * ⚠️ **夹具前置条件（2026-10-19 重做后新增，漏了会让本件集体变红）**：路由目标必须是
  * **该 CCC 里真实存在的认知轨迹**（`im/bridge.ts` 的 `findDirNameByCode`）⇒ 每个用例
  * 都得先有一条轨迹可投。`beforeEach` 默认造 `qa`；要打"目标不存在"那档（C4）写一个
- * 不存在的编码。旧夹具靠 `serenity.json` 的 `skiff.roles` 造 skiff，该段已退役。
+ * 不存在的编码。旧夹具靠 `serenity.json` 的 `轨迹约束.roles` 造 轨迹约束，该段已退役。
  *
  * 覆盖的 29 处未覆盖分支（按源码位置，`im/bridge.ts`；行号为锚定时的读数）：
  *   A 组 — typing 失败静默（`:64` / `:86` 的两个 catch，函数头逐字承诺"任何失败静默"）
@@ -69,9 +69,9 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 import { writeWeixinCredential, weixinSessionIdForTrajectory } from '../src/im/route.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
-// 轨迹夹具（造 skiff 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `skiff.json` 里）
-import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
+import { registerTrajectorySession, unregisterTrajectorySession, trajectorySessionSnapshot } from '../src/trajectory/session.js'
+// 轨迹夹具（造 轨迹约束 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `trajectory-constraint.json` 里）
+import { makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
 
 let dir: string
 /** `beforeEach` 造的 `qa` 轨迹目录名（= 路由目标 `qa` 解析到的目录） */
@@ -88,16 +88,16 @@ function jsonResponse(status: number, body: unknown): Response {
 function writeConfig(weixin: unknown): void {
   writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
     'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-    // ⚠️ 这里**不再**写 `skiff: { roles: {...} }` —— 该段 2026-10-19 随重做退役（读侧也读不到）。
-    //    skiff 的约束面现在住在**轨迹目录的 `skiff.json`** 里，由 `beforeEach` 的夹具造。
+    // ⚠️ 这里**不再**写 `轨迹约束: { roles: {...} }` —— 该段 2026-10-19 随重做退役（读侧也读不到）。
+    //    轨迹约束的约束面现在住在**轨迹目录的 `trajectory-constraint.json`** 里，由 `beforeEach` 的夹具造。
     weixin,
   }))
 }
 
 /**
  * fake ctx：`agents.create/resume` 产生带 followup 的 fake agent；`on` 立即触发 idle。
- * 🔴 夹具前置条件（第 48~51 件的教训）：`on` 必须**真的调 cb**，否则 askSkiff 拿不到 idle
- * 信号而挂起；`followup` 必须推入 user+assistant 事件，否则 askSkiff 取不到 answer。
+ * 🔴 夹具前置条件（第 48~51 件的教训）：`on` 必须**真的调 cb**，否则 askTrajectory 拿不到 idle
+ * 信号而挂起；`followup` 必须推入 user+assistant 事件，否则 askTrajectory 取不到 answer。
  */
 function fakeCtx(opts?: { createThrows?: boolean }): {
   agents: { create: (o: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => Promise<unknown> }
@@ -188,9 +188,9 @@ beforeEach(() => {
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
   // 🔴 2026-10-19 重做后**路由目标必须是该 CCC 里真实存在的认知轨迹**（`findDirNameByCode`），
-  //    不再是"这个 CCC 配没配这个 skiff 角色" ⇒ 默认造一条 `qa` 轨迹（带 `skiff.json`）。
+  //    不再是"这个 CCC 配没配这个 轨迹约束角色" ⇒ 默认造一条 `qa` 轨迹（带 `trajectory-constraint.json`）。
   //    不造的话本件 A/D 组会集体停在路由层（表面症状各不相同，实际同一个原因）。
-  qaDirName = makeTrajectory(dir, 'qa', skiffJson({ tools: [], msms: [], systemPrompt: 'qa' })).dirName
+  qaDirName = makeTrajectory(dir, 'qa', 轨迹约束Json({ tools: [], msms: [], systemPrompt: 'qa' })).dirName
 })
 
 afterEach(async () => {
@@ -199,7 +199,7 @@ afterEach(async () => {
   resetWeixinTypingCache()
   const { __resetWeixinOutputGuardForTest } = await import('../src/im/guard.js')
   __resetWeixinOutputGuardForTest()
-  for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
+  for (const [id] of trajectorySessionSnapshot()) unregisterTrajectorySession(id)
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
   else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
   if (oldAuditEnv === undefined) delete process.env.SERENITY_HUMAN_CHANNEL_AUDIT
@@ -288,7 +288,7 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
     })
 
     expect(sent).toHaveLength(0)
-    expect(skiffSessionSnapshot().size).toBe(0)
+    expect(trajectorySessionSnapshot().size).toBe(0)
   })
 
   it('C2 桥未启用 → 直接 return（`!settings.enabled`）', async () => {
@@ -308,7 +308,7 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
     })
 
     expect(sent).toHaveLength(0)
-    expect(skiffSessionSnapshot().size).toBe(0)
+    expect(trajectorySessionSnapshot().size).toBe(0)
   })
 
   it('C3 routes 段缺省（`settings.routes ?? []`）→ 无路由 → 不回复', async () => {
@@ -345,9 +345,9 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
     })
     // 🔴 P0-3 起这一档**升格**：原来是 `console.log`（"告警"），现为 `console.error`
     //    —— 方案 §3.1 要求"目标不存在 ⇒ **响亮报错**，不静默丢弃"。
-    // 🔴 2026-10-19 重做后判据换了：不是"这个 CCC 有没有配这个 skiff 角色"，
+    // 🔴 2026-10-19 重做后判据换了：不是"这个 CCC 有没有配这个 轨迹约束角色"，
     //    而是"**这个 CCC 里有没有这条认知轨迹**"（`findDirNameByCode`）。
-    //    ⚠️ 与旧模型的关键差别：轨迹存在但没有 `skiff.json` **不是错**（那只是一条普通轨迹）。
+    //    ⚠️ 与旧模型的关键差别：轨迹存在但没有 `trajectory-constraint.json` **不是错**（那只是一条普通轨迹）。
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const { handleIncoming } = await import('../src/im/bridge.js')
@@ -375,9 +375,9 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
       return jsonResponse(200, { ret: 0 })
     })
 
-    // 预注册一个 existing agent（走 getSkiffAgent 快路径 ⇒ `agents.create` 一次都不该被调）。
+    // 预注册一个 existing agent（走 getTrajectoryAgent 快路径 ⇒ `agents.create` 一次都不该被调）。
     // 🔴 2026-10-19：注册签名 = `(sessionId, 轨迹目录名, CCC, agent)`；会话 id 由**轨迹编码**派生。
-    //    这里让它的 `systemPrompt.section` **抛错**——旧模型的 `ensureSkiffSession` 是同一个位置
+    //    这里让它的 `systemPrompt.section` **抛错**——旧模型的 `ensureTrajectorySession` 是同一个位置
     //    的失败点（现模型对应 `ensureWorkspacePromptSection` 返回 false ⇒ question 前缀兜底）。
     const sessionId = weixinSessionIdForTrajectory('qa')
     const asked: string[] = []
@@ -394,7 +394,7 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
       },
       interrupt: () => {},
     }
-    registerSkiffSession(sessionId, qaDirName, dir, existing as never)
+    registerTrajectorySession(sessionId, qaDirName, dir, existing as never)
 
     const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming({
@@ -499,7 +499,7 @@ describe('weixin-bridge 分支：D 组 —— 媒体/答案回退', () => {
     })
 
     const { handleIncoming } = await import('../src/im/bridge.js')
-    // agent 的 followup **不推任何事件** ⇒ askSkiff 取到空 answer ⇒ 走 `answer === ''` 的 return
+    // agent 的 followup **不推任何事件** ⇒ askTrajectory 取到空 answer ⇒ 走 `answer === ''` 的 return
     const ctx = fakeCtxWithAnswer(false)
 
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {

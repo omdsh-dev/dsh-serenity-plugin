@@ -5,52 +5,52 @@
  *
  * | 模块 | 管什么 |
  * |---|---|
- * | `./profile.ts` | **判据 + 读盘**（"这是不是 skiff"、"约束面是什么"） |
+ * | `./profile.ts` | **判据 + 读盘**（"这是不是 轨迹约束"、"约束面是什么"） |
  * | `./rules.ts`（本文件） | **从约束面派生出的纯函数**（白名单集合、提示词读取器、基础提示词文本） |
  * | `../session-create.ts` | 会话创建/复用、提问、守门查询 |
  *
- * ⇒ 本文件**不再读 `serenity.json`**：`skiff.roles` 整段已退役（owner 2026-10-19 重做）。
- * 它只接收一个已解析好的 `SkiffProfile`，因此**不涉及任何 IO**（除提示词文件，那是刻意懒读的）。
+ * ⇒ 本文件**不再读 `serenity.json`**：`轨迹约束.roles` 整段已退役（owner 2026-10-19 重做）。
+ * 它只接收一个已解析好的 `TrajectoryConstraint`，因此**不涉及任何 IO**（除提示词文件，那是刻意懒读的）。
  *
  * ## S12（2026-10-19，轨迹中心重构）
  *
- * 原名 `role/skiff/config.ts`。改名理由（框架 §6.3「角色不是一个概念，是一段历史」）：
+ * 原名 `role/轨迹约束/config.ts`。改名理由（框架 §6.3「角色不是一个概念，是一段历史」）：
  * 它派生的是**某条轨迹的约束面**，与"配置读取"无关（本文件零配置读取，见上一段）
  * ⇒ `config` 这个名字描述的是**它曾经的样子**，`rules` 描述它**现在做的事**。
  */
 
 import { existsSync, statSync } from 'node:fs'
 import { resolveInside, readUtf8 } from '../../kernel/ccc.js'
-import type { SkiffProfile } from './profile.js'
+import type { TrajectoryConstraint } from './profile.js'
 
 /** 白名单推导 ────────────────────────────────────────────────────────────── */
 
 /** 提示词来源提示串（`apply` 回执与面板共用；避免两处措辞漂） */
-export const SKIFF_PROFILE_HINT =
-  'systemPromptFile hot-reloads by mtime; the rest of skiff.json is re-read every turn'
+export const TRAJECTORY_CONSTRAINT_HINT =
+  'systemPromptFile hot-reloads by mtime; the rest of trajectory-constraint.json is re-read every turn'
 
 /**
- * 该 skiff 会话**可见**的工具面（tools ∪ `msm`）。
+ * 该 轨迹约束会话**可见**的工具面（tools ∪ `msm`）。
  *
- * 🔴 `msm` 为什么自动加入：`msms` 非空意味着这个 skiff **有 MSM 通道**，
+ * 🔴 `msm` 为什么自动加入：`msms` 非空意味着这个 轨迹约束 **有 MSM 通道**，
  * 而 MSM 的唯一合法调用入口是 `msm` 工具（单入口纪律）——不给它 `msm` 就等于
  * 声明了一堆调不动的能力。⚠️ 这是**并集**，不是覆盖：`tools` 里显式写的照旧生效。
  */
-export function profileToolWhitelist(profile: SkiffProfile | null | undefined): Set<string> {
+export function profileToolWhitelist(profile: TrajectoryConstraint | null | undefined): Set<string> {
   const out = new Set<string>()
   for (const t of profile?.tools ?? []) out.add(t)
   if ((profile?.msms?.length ?? 0) > 0) out.add('msm')
   return out
 }
 
-/** 该 skiff 会话可 exec 的 MSM 白名单（`msm` 工具内部再过滤；独立于工具白名单） */
-export function profileMsmWhitelist(profile: SkiffProfile | null | undefined): Set<string> {
+/** 该 轨迹约束会话可 exec 的 MSM 白名单（`msm` 工具内部再过滤；独立于工具白名单） */
+export function profileMsmWhitelist(profile: TrajectoryConstraint | null | undefined): Set<string> {
   return new Set(profile?.msms ?? [])
 }
 
-/** 轨迹纪律参与项（`profile` 缺省已在 `readSkiffProfileAt` 归一为全 true） */
-export function profileCognitiveTrajectory(
-  profile: SkiffProfile | null | undefined,
+/** 轨迹纪律参与项（`profile` 缺省已在 `readTrajectoryConstraintAt` 归一为全 true） */
+export function constraintCognitiveTrajectory(
+  profile: TrajectoryConstraint | null | undefined,
 ): { session: boolean; keeper: boolean; rebuild: boolean } {
   return {
     session: profile?.cognitiveTrajectory.session === true,
@@ -69,21 +69,38 @@ export function profileCognitiveTrajectory(
  *
  * ⚠️ 热路径**不用**它（那会用每次工具调用去读盘）——热路径用 `createProfilePromptReader`。
  */
-export function resolveProfileSystemPrompt(root: string, profile: SkiffProfile | null | undefined): string {
+export function resolveConstraintSystemPrompt(root: string, profile: TrajectoryConstraint | null | undefined): string {
   if (!profile) return ''
   const file = profile.systemPromptFile?.trim()
   if (file) {
     const abs = resolveInside(root, file) // 逃逸 → throw
     if (!existsSync(abs)) {
-      throw new Error(`skiff "${profile.code}": systemPromptFile "${file}" not found (resolved: ${abs})`)
+      throw new Error(`轨迹约束 "${profile.code}": systemPromptFile "${file}" not found (resolved: ${abs})`)
     }
     return readUtf8(abs).trim()
   }
   return profile.systemPrompt ?? ''
 }
 
-/** 提示词来源（`list`/`validate` 展示用） */
-export function profileSystemPromptSource(profile: SkiffProfile | null | undefined): 'file' | 'inline' | 'none' {
+/**
+ * 提示词来源（`list`/`validate` 展示用）。
+ *
+ * 🔴 **2026-10-19 修（T4 的漏网面）**：v1.72.0 起提示词有两代来源——**新形态**
+ * 是轨迹目录里的 `PROMPT.md`（`trajectory/prompt.ts`，**优先**），旧形态才是
+ * `systemPromptFile` / `systemPrompt`。本函数原先只认旧形态 ⇒ 两条只写了 `PROMPT.md`
+ * 的轨迹在 `container_admin config list` 里恒显示 `promptSource: 'none'`。
+ *
+ * 那是**读数器过时**，不是配置缺失：`validate` 侧早已按两条来源判（见
+ * `trajectory-constraint-admin.ts` 的 `hasTrajectoryPromptOrLegacy`），而 `list` 侧漏了。
+ * ⇒ 返 **四种**值，把"有章程但来源是新形态"这一格单独说出来。
+ *
+ * @param hasPromptFile 该轨迹目录下**是否真有** `PROMPT.md`（调用方查，本函数不做 IO）
+ */
+export function constraintSystemPromptSource(
+  profile: TrajectoryConstraint | null | undefined,
+  hasPromptFile = false,
+): 'trajectory-file' | 'file' | 'inline' | 'none' {
+  if (hasPromptFile) return 'trajectory-file'
   if (profile?.systemPromptFile?.trim()) return 'file'
   if (profile?.systemPrompt?.trim()) return 'inline'
   return 'none'
@@ -102,7 +119,7 @@ export function profileSystemPromptSource(profile: SkiffProfile | null | undefin
  * @param root CCC 根
  * @param profile 约束面
  */
-export function createProfilePromptReader(root: string, profile: SkiffProfile | null | undefined): () => string {
+export function createProfilePromptReader(root: string, profile: TrajectoryConstraint | null | undefined): () => string {
   const file = profile?.systemPromptFile?.trim()
   if (!file) {
     const inline = profile?.systemPrompt ?? ''
@@ -112,7 +129,7 @@ export function createProfilePromptReader(root: string, profile: SkiffProfile | 
   try {
     abs = resolveInside(root, file) // 逃逸 → 抛错（此处降级为空读取器 + 告警）
   } catch (err) {
-    console.warn(`[serenity-hooks] ✗ skiff 提示词路径非法（${file}）: ${String((err as Error)?.message ?? err)}`)
+    console.warn(`[serenity-hooks] ✗ 轨迹约束提示词路径非法（${file}）: ${String((err as Error)?.message ?? err)}`)
   }
   if (abs === null) return () => ''
   const absPath: string = abs
@@ -131,14 +148,14 @@ export function createProfilePromptReader(root: string, profile: SkiffProfile | 
       cachedText = text
       warned = false
       if (isReload) {
-        console.info(`[serenity-hooks] ↻ skiff 提示词已热重载（${file}，${text.length} 字符）`)
+        console.info(`[serenity-hooks] ↻ 轨迹约束提示词已热重载（${file}，${text.length} 字符）`)
       }
       return text
     } catch (err) {
       if (!warned) {
         warned = true
         console.warn(
-          `[serenity-hooks] ✗ skiff 提示词读取失败（${file}）——沿用上次成功内容: ${String((err as Error)?.message ?? err)}`,
+          `[serenity-hooks] ✗ 轨迹约束提示词读取失败（${file}）——沿用上次成功内容: ${String((err as Error)?.message ?? err)}`,
         )
       }
       return cachedText
@@ -147,7 +164,7 @@ export function createProfilePromptReader(root: string, profile: SkiffProfile | 
 }
 
 /**
- * skiff 基础提示词（dsp 只给这部分；CCC 的 `systemPrompt` 段由调用方拼接）。
+ * 轨迹约束 基础提示词（dsp 只给这部分；CCC 的 `systemPrompt` 段由调用方拼接）。
  *
  * ## 🔴 为什么**不再枚举**清单（owner 2026-10-19 令）
  *
@@ -163,11 +180,11 @@ export function createProfilePromptReader(root: string, profile: SkiffProfile | 
  *
  * ⇒ 现在只声明**边界与发现路径**，不抄内容：清单在哪，怎么取，越界会怎样。
  *
- * @param code 轨迹编码（skiff 的身份 —— 不是"角色名"，那个概念已退役）
+ * @param code 轨迹编码（轨迹约束的身份 —— 不是"角色名"，那个概念已退役）
  */
-export function buildSkiffBasePrompt(code: string): string {
+export function buildTrajectoryBasePrompt(code: string): string {
   return [
-    '=== Serenity Skiff ===',
+    '=== Serenity 轨迹约束 ===',
     `Cognitive trajectory: ${code} (this is the trajectory you ARE, not a role you play)`,
     'Your capability boundary is enforced mechanically by this CCC — anything outside it is rejected at the call site, not by your judgment.',
     'Discover your surface, do not memorize it (both are generated from the live config on every turn):',

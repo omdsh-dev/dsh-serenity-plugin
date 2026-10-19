@@ -124,18 +124,19 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                          acc_msm 已并入 msm（执行+发现）与 container_admin（管理）——msm("<name>", ["<args>"])；inspect=true 查用法
                          cheap-worker（杂工 agent 编排——guide 子命令：cheap-worker guide）
                          专属工具（**默认对所有 CCC 隐藏**，只有在自己 exclusiveTools 里点名的 CCC 可见）→ acc-diag（运行态诊断）
-  ④ 角色与对外面      → container_admin role（Skiff 认知子集角色：guide/validate/apply/list——skiff_admin 已并入）
-                         3099 Skiff 调试问答页（人工调试面）。外部程序化接入用官方 dsh --profile acp
+  ④ 轨迹约束与对外面  → container_admin config（轨迹约束四动作 guide/validate/apply/list——**原 role 域已并入 config**，旧名作过渡别名仍可用；说明类配置走**两层菜单** config docs 目录 ／ config docs <章节> 详情）
+                         外部程序化接入用官方 dsh --profile acp
                          ＋ 现成 ACP 客户端；本插件不提供 ACP 面
   ⑤ 自主与接入        → cognitive_trajectory send-now（跨轨迹的**即时**递送，**不排队**：live 目标在跑就当场注入当前轮、空闲则立即起轮；非 live 冷载入——等效于直接 wake；**有同步回执**）
                          cognitive_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
-  ⑥ CCC 配置总览      → container_admin msm ccc-config（9 段：cheap-worker/sessionKeeper/localstore/hooks/safeMode/skiff/cognitiveTrajectory/weixin/**exclusiveTools**）
+  ⑥ CCC 配置总览      → container_admin config docs config（按章详情——9 段全表）
+                          或 container_admin msm ccc-config（同一份正文的旧入口，保留）
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
                          CCC 级开关：exclusiveTools（声明专属工具）/ safeMode.blacklist（写路径黑名单）
                          / safeMode.hiddenTools（**安全模式开启期间**额外隐藏的工具，v1.51.4）
-                         CCC 级 skill 供给：cognitiveTrajectory.skills（v1.44.0——**本 CCC 每条轨迹都带**，含 skiff 会话；与轨迹自己的 frontmatter 声明取并集）
+                         CCC 级 skill 供给：cognitiveTrajectory.skills（v1.44.0——**本 CCC 每条轨迹都带**，含 轨迹约束会话；与轨迹自己的 frontmatter 声明取并集）
 
 每区：一句话定位 + 详细入口（工具名 / guide 子命令）。详情永远以对应工具的 guide/ccc-config 为单一真相源。
 `
@@ -194,8 +195,13 @@ msm("<name>", ["--schema", "<n>"])  — view a specific MSM's parameter schema
 msm("<name>", ["--format=json"])    — JSON output mode (remaining args passed through losslessly)
 `
 
-/** CCC 配置参考（对齐 osp ccc-config action） */
-const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═══
+/**
+ * CCC 配置参考（对齐 osp ccc-config action）。
+ *
+ * 🔴 **2026-10-19 起导出**：`container_admin config docs config` 的两层菜单把它作为
+ * 「config」章正文返回。**不另写一份**——同一段说明有第二份副本就会漂（本轨反复踩过）。
+ */
+export const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═══
 
 CCC-level features are configured in .opencode/serenity.json.
 Below are all available configuration sections.
@@ -270,15 +276,15 @@ safe-mode 由 WebUI 开关控制（写 .serenity-safe-on 标记）；黑名单�
   Config:
     { "safeMode": { "blacklist": [".secrets/"], "hiddenTools": ["workflow", "job_kill"] } }
 
-── 6. skiff.roles（F4 认知子集角色）──
-Skiff 角色 = 全知全能 cognitive trajectory 的任意子集（CCC 定义）。每角色独立模型 + 双白名单
+── 6. 轨迹约束.roles（F4 认知子集角色）──
+轨迹约束角色 = 全知全能 cognitive trajectory 的任意子集（CCC 定义）。每角色独立模型 + 双白名单
 （MSM 白名单 msms[] 与非 MSM 工具白名单 tools[]，白名单外全隐藏；skill 加载恒可用）。
 cognitive trajectory 纪律子集（session/keeper/rebuild 参与项）默认全关 = 完全独立。
 systemPrompt 内联 或 systemPromptFile（.md 引用，推荐）——角色会话的完整人格/边界提示词。
-validate 校验 / apply 生效 / list 查看：container_admin role <guide|validate|apply|list>（skiff_admin 已并入）。
+validate 校验 / apply 生效 / list 查看：container_admin config <guide|validate|apply|list>（原 role 域已并入 config，旧名作过渡别名仍可用）。
 
   Config:
-    { "skiff": { "roles": {
+    { "轨迹约束": { "roles": {
         "qa": {
           "model": "provider/model",
           "msms": ["web-search", "vlm-describe"],
@@ -298,12 +304,12 @@ CCC 的一条 cognitive trajectory = 持久身体（SESSION.md）+ 时间轴（A
 运行态诊断（ACC 负责人专用）：acc-diag（① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。
 
 ▸ cognitiveTrajectory.skills（v1.44.0，**CCC 级 skill 供给**；owner 令 2026-09-20「要求实现我的诉求……
-  注入是动态注入就行；create 先不触发吧；**skiff 也支持**」）：
+  注入是动态注入就行；create 先不触发吧；**轨迹约束也支持**」）：
   **本 CCC 的每条轨迹都带这些 skill**——声明的 skill 全文在该轨迹**被绑定期间**注入系统提示词
   （**动态注入**：每请求重新求值、不缓存 ⇒ 改配置或改 frontmatter **即时生效**，无需重新 use、无需重启）。
   两条声明来源**并集**（不是二选一）：本键 **cognitiveTrajectory.skills**（容器给的底座，**在前**）
   ＋ 轨迹自己 SESSION.md 顶部 frontmatter 的 skills:（这条轨迹额外的，**追加**；同名去重）。
-  ✅ **含 skiff 角色会话**（旁路的是 ACC 身份与纪律；skill 是"工作资料"，照给）。
+  ✅ **含 轨迹约束角色会话**（旁路的是 ACC 身份与纪律；skill 是"工作资料"，照给）。
   守卫：名字先过安全校验才用于拼路径（防穿越）｜**合并后**统一 32 KB 上限截断｜找不到响亮写 [缺失]。
   ⚠️ 与 create **无关**（create 刻意不夺绑定，U6）⇒ 注入的门是"**存在绑定**"（cognitive_trajectory use）。
   失败语义：未配置 / 字段缺失 / 配置损坏 ⇒ **空数组**（= 无 CCC 级供给；轨迹级声明照旧生效）。
@@ -311,7 +317,7 @@ CCC 的一条 cognitive trajectory = 持久身体（SESSION.md）+ 时间轴（A
 
   Config:
     { "cognitiveTrajectory": {
-        "skills": ["acc-session", "cce"],   // v1.44.0：本 CCC 的每条轨迹都带（含 skiff 会话）
+        "skills": ["acc-session", "cce"],   // v1.44.0：本 CCC 的每条轨迹都带（含 轨迹约束会话）
         "autopilot": {                   // 原 autopilotTrajectory 段，字段不变（旧键仍回退读）
           "enabled": true,
           "intervalHours": 2,
@@ -325,7 +331,7 @@ CCC 的一条 cognitive trajectory = 持久身体（SESSION.md）+ 时间轴（A
 CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 独立对接微信桥。
 账号/路由/开关在此文件；**bot_token 凭据在 CCC localstore credential scope**
 （扫码绑定后自动写入，永不进 git 明文面）。
-路由 user → role：exact 优先，* 通配兜底；role 必须 ∈ 该 CCC skiff.roles。
+路由 user → role：exact 优先，* 通配兜底；role 必须 ∈ 该 CCC 轨迹约束.roles。
 面板（WebUI 设置 → 微信桥）可扫码绑定/移除账号/编辑路由；msm("weixin-doctor", ["status"|"diag"|"verify"|"guide"]) 排查 + 大而全指南。凭据主动查看：localstore get WEIXIN_<ACCOUNT>_TOKEN。
   ▸ 主动发送（v1.31.0：**ACC 工具 im-bridge**）：调
     im-bridge({channel:"weixin", action:"send", user:"<别名|id>", text:"<文本>"}) 给用户发消息——
@@ -333,7 +339,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
     成功后触发 outgoing hook（source="proactive"）。文件用 action:"send-file" + file:"<CCC 内路径>"
     （逃逸/缺失/超 20MB 拒绝）+ 可选 caption。**可见性**：本 CCC 配置了 IM 通道
     （weixin.enabled=true）才出现在模型工具清单里；未配置 → 由 guards 逐 agent
-    tools.restrict({deny:['im-bridge']}) 移除（不是"看得到但被拒"）。skiff 角色另需在
+    tools.restrict({deny:['im-bridge']}) 移除（不是"看得到但被拒"）。轨迹约束角色另需在
     roles.<role>.tools 白名单列出 im-bridge。
     历史（v1.30.9~v1.30.x）：CCC 侧 MSM weixin-send（走 loopback HTTP 入口 3082）——
     v1.31.0 已退役（脚本删除 + 注册表注销）；3082 入口保留给**非 agent 调用者**。

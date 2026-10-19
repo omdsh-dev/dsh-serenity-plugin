@@ -93,9 +93,9 @@ export interface CccEntry {
   /** 目录名（展示用） */
   name: string
   /**
-   * 该 CCC 的 skiff 列表（**轨迹编码**；新模型里编码即身份）。
+   * 该 CCC 的 轨迹约束 列表（**轨迹编码**；新模型里编码即身份）。
    * ⚠️ **仅 `withRoles: true` 时非空**；缺省 `false` ⇒ 恒为 `[]` 且**不扫
-   * `AGENT_SESSIONS/`**（唤醒调度器每 tick 都要枚举，不该为 skiff 付 IO）。
+   * `AGENT_SESSIONS/`**（唤醒调度器每 tick 都要枚举，不该为 轨迹约束 付 IO）。
    */
   roles: string[]
 }
@@ -106,7 +106,7 @@ export interface ListCccsOptions {
    * 传 `undefined`/`''` 表示没有默认根。
    */
   defaultRoot?: string
-  /** 是否实时扫各 CCC 的 skiff 轨迹（缺省 false）。 */
+  /** 是否实时扫各 CCC 的 轨迹约束轨迹（缺省 false）。 */
   withRoles?: boolean
 }
 
@@ -187,7 +187,7 @@ function liveSessionPaths(ctx: unknown): string[] {
  * **整个列表都不含后者**（"名单不全"）。并集修正它，且**不改**任何消费方的输入契约。
  *
  * @param ctx 插件上下文
- * @param opts.defaultRoot 默认根（不在列表 → 置首）；opts.withRoles 是否读 `skiff.roles`
+ * @param opts.defaultRoot 默认根（不在列表 → 置首）；opts.withRoles 是否读 `轨迹约束.roles`
  * @returns 按上述顺序去重的 CCC 条目（无任何来源 → 空数组 + 可选默认根）
  */
 export async function listCccs(ctx: unknown, opts: ListCccsOptions = {}): Promise<CccEntry[]> {
@@ -203,20 +203,20 @@ export async function listCccs(ctx: unknown, opts: ListCccsOptions = {}): Promis
   }
 
   // 角色**按需**读取：`withRoles` 缺省 false ⇒ 一次 `AGENT_SESSIONS/` 扫描都不做。
-  // ⚠️ 动态 import：`trajectory/policy/profile.ts` 不是静态依赖（本模块要能在没有 skiff 链的
+  // ⚠️ 动态 import：`trajectory/policy/profile.ts` 不是静态依赖（本模块要能在没有 轨迹约束链的
   // 场景里被静态引用——如唤醒调度器；只有真要角色时才加载）。
   //
-  // 🔴 2026-10-19（owner 重做令）：数据源从 `serenity.json` 的 `skiff.roles` 改为
-  // **扫轨迹目录找 `skiff.json`**。`roles` 字段名保留（消费方形状不变），但内容 = **轨迹编码**
+  // 🔴 2026-10-19（owner 重做令）：数据源从 `serenity.json` 的 `轨迹约束.roles` 改为
+  // **扫轨迹目录找 `trajectory-constraint.json`**。`roles` 字段名保留（消费方形状不变），但内容 = **轨迹编码**
   // —— 那正是新模型里的"角色名"（身份 = 编码）。
   let rolesOf: ((root: string) => string[]) | null = null
   if (opts.withRoles === true) {
-    const { listSkiffProfiles } = await import('../trajectory/policy/profile.js')
+    const { listTrajectoryConstraints } = await import('../trajectory/policy/profile.js')
     rolesOf = (root: string) => {
       try {
-        return listSkiffProfiles(root).map((p) => p.code)
+        return listTrajectoryConstraints(root).map((p) => p.code)
       } catch {
-        return [] // 读不到 = 这个 CCC 没有 skiff（与"没配角色"同义）
+        return [] // 读不到 = 这个 CCC 没有 轨迹约束（与"没配角色"同义）
       }
     }
   }

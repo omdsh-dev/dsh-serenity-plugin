@@ -22,10 +22,10 @@ import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { ACC_VERSION } from '../kernel/constants.js'
 import { truncateContent } from '../skills/discovery.js'
 import { registerEntrySkillSection, registerCognitiveTrajectorySkillSection } from './system-prompt.js'
-import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding, syncSkiffRoleToolVisibility } from './guards.js'
+import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding, syncTrajectoryConstraintToolVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory/core.js'
 import { readLastBound, appendBound } from '../trajectory/bound.js'
-import { isSkiffSession } from '../trajectory/policy/profile.js'
+import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
 // ── 纯文本构建（可单测）──
@@ -118,11 +118,11 @@ export function shouldAutoRestore(agent: Agent, root?: string | null): boolean {
   if (session.header?.origin === 'subagent') return false
   if (session.header?.parentSession) return false
   if (session.id?.startsWith('cheap-worker-')) return false
-  // skiff 会话：完全独立（CCC 提示词全替换），不自动恢复宁静号会话激活信息。
-  // 🔴 2026-10-19：判据从「id 前缀 `skiff-`」改为「绑定轨迹有 `skiff.json`」。
+  // 轨迹约束会话：完全独立（CCC 提示词全替换），不自动恢复宁静号会话激活信息。
+  // 🔴 2026-10-19：判据从「id 前缀 `轨迹约束-`」改为「绑定轨迹有 `trajectory-constraint.json`」。
   //    ⇒ 需要 CCC 根；调用方通常已算出（seed/pre-step），没给就按会话 cwd 自己推导。
   const cccRoot = root !== undefined ? root : cccRootForCwd(session.header?.cwd ?? process.cwd())
-  if (cccRoot && isSkiffSession(cccRoot, session.id)) return false
+  if (cccRoot && isTrajectoryConstrained(cccRoot, session.id)) return false
   return true
 }
 
@@ -164,9 +164,9 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     }
     if (!root) return
     const key = agentKey(agent)
-    // skiff：完全旁路（不注入 ACC 身份；CCC 提示词全替换）
-    // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 id 前缀）
-    if (isSkiffSession(root, key)) return
+    // 轨迹约束：完全旁路（不注入 ACC 身份；CCC 提示词全替换）
+    // 🔴 2026-10-19：判据 = 绑定轨迹有 `trajectory-constraint.json`（不再是 id 前缀）
+    if (isTrajectoryConstrained(root, key)) return
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
@@ -269,20 +269,20 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       const root = cccRootForCwd(cwd)
       const key = agentKey(agent)
       const downstream = await next()
-      // 🔴 v1.69.3（owner 2026-10-19 令「工具清单也要热加载」）：**skiff 的角色工具面同步必须在这里**，
-      //    且在下面那条 skiff early-return **之前** —— 它此前被整个短路 ⇒ skiff 会话从不同步可见性
+      // 🔴 v1.69.3（owner 2026-10-19 令「工具清单也要热加载」）：**轨迹约束的角色工具面同步必须在这里**，
+      //    且在下面那条 轨迹约束 early-return **之前** —— 它此前被整个短路 ⇒ 轨迹约束会话从不同步可见性
       //    ⇒ 角色白名单只剩运行时拦截（"看得见但调不动"），配置变动在 schema 上永不生效。
-      //    本函数内部自带 `isSkiffSessionId` 判据（非 skiff 直接 return），故放在此处置零副作用。
+      //    本函数内部自带 `isTrajectoryConstrained` 判据（非 轨迹约束 直接 return），故放在此处置零副作用。
       if (root) {
         try {
-          syncSkiffRoleToolVisibility(agent, root)
+          syncTrajectoryConstraintToolVisibility(agent, root)
         } catch {
           /* 可见性同步失败不阻断 step（守卫仍兜底拦截） */
         }
       }
-      // skiff：完全旁路（不注入 ACC 身份 + 不注册 scoped section；守卫仍兜底约束）
-      // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 id 前缀）
-      if (root && isSkiffSession(root, key)) return downstream
+      // 轨迹约束：完全旁路（不注入 ACC 身份 + 不注册 scoped section；守卫仍兜底约束）
+      // 🔴 2026-10-19：判据 = 绑定轨迹有 `trajectory-constraint.json`（不再是 id 前缀）
+      if (root && isTrajectoryConstrained(root, key)) return downstream
       // 🔴 v1.56.6：非 CCC 会话 ⇒ 隐藏全部 ACC 工具（**必须在 `if (root)` 之外**——
       //    那道分支只在 CCC 内执行，把本句放进去等于非 CCC 一条 restrict 都不发＝缺陷原样）。
       //    与 `syncSafeModeRestriction` 同点调用、同样每步无条件同步（会话可能在两态间迁移）。

@@ -58,7 +58,7 @@ describe('resolveWorkspaceCore（远程状态显示修复 v1.22.2）', () => {
  * 🔴🔴 2026-10-18（owner 报的真缺陷）：「为什么我在别的 CCC 点开显示的还是我们 home-serenity 的信息」
  *
  * 根因：旧实现的第 ③ 步是「遍历 live sessions 找**第一个** CCC 会话的 cwd」——
- * 那是**跨工作区猜测**。只要 sessionId 缺失或那条会话查不到（ACP/skiff 会话、
+ * 那是**跨工作区猜测**。只要 sessionId 缺失或那条会话查不到（ACP/轨迹约束会话、
  * 尚未 materialize 的会话、远程访问），它就静默返回**另一个 CCC** 的路径 ⇒
  * 面板把别人的轨迹/技能/safe-mode 当成本工作区的显示出来。
  *

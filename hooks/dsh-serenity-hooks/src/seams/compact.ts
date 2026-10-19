@@ -28,7 +28,7 @@ import { DEFAULT_SERENITY_CONFIG_PATHS } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 // 复用 context.ts 的完整 ACC 注入消息（简短头 + ACC 5 块 + CCC 顶层 skill 原文）
 import { accMessage } from './context.js'
-import { isSkiffSession } from '../trajectory/policy/profile.js'
+import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
 
 interface CompactRegistration {
   /** CCC 配置相对路径；缺省用 DEFAULT_SERENITY_CONFIG_PATHS */
@@ -59,11 +59,11 @@ export function registerCompactRetention(ctx: Context, opts: CompactRegistration
     const cwd = (agent.session as { header?: { cwd?: string } } | undefined)?.header?.cwd ?? process.cwd()
     const root = cccRootForCwd(cwd)
     if (!root) return
-    // skiff 会话 ⇒ 不重注入 ACC 身份（CCC 提示词全替换，旁路）。
-    // 🔴 2026-10-19：判据从「id 前缀 `skiff-`」改为「绑定轨迹有 `skiff.json`」——
-    //    旧的 `if (isSkiffSessionId(...)) return` 在 `if (!root) return` **之前**，
+    // 轨迹约束会话 ⇒ 不重注入 ACC 身份（CCC 提示词全替换，旁路）。
+    // 🔴 2026-10-19：判据从「id 前缀 `轨迹约束-`」改为「绑定轨迹有 `trajectory-constraint.json`」——
+    //    旧的 `if (isTrajectoryConstrained(...)) return` 在 `if (!root) return` **之前**，
     //    因此改动后必须挪到 root 之后（判据需要 CCC 根去定位轨迹目录）。
-    if (isSkiffSession(root, String((session as { id?: unknown }).id ?? ''))) return
+    if (isTrajectoryConstrained(root, String((session as { id?: unknown }).id ?? ''))) return
 
     try {
       // 简短身份锚点（完整身份由系统提示词层持续提供；S134 去重）

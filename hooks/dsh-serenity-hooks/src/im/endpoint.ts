@@ -3,8 +3,8 @@
  *
  * 为什么单独一个模块（R↓）：地址的读者是 `msm-ops.buildMsmEnv`（把地址注入 MSM 子进程 env），
  * 写者才是 `weixin-send-api`（监听器启停）。若 msm-ops 直接 import weixin-send-api，
- * 静态依赖链会拖进整条微信桥栈（weixin-bridge → skiff-core → `@deepseek-ai/dsh-llm`）——
- * 后果实测：`acc-extras` / `ops` / `skiff-admin` 三个测试套件因解析不到宿主包而**整文件加载失败**
+ * 静态依赖链会拖进整条微信桥栈（weixin-bridge → trajectory-session → `@deepseek-ai/dsh-llm`）——
+ * 后果实测：`acc-extras` / `ops` / `trajectory-constraint-admin` 三个测试套件因解析不到宿主包而**整文件加载失败**
  * （它们只用到 MSM 注册表逻辑）。叶模块把「读」与「写」解耦：读者零依赖，写者自己承担重量。
  *
  * 同款先例：`host/effect.ts`（拆卸登记）、`trajectory/carrier.ts`（等待结算）。

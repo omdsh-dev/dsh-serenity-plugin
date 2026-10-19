@@ -164,7 +164,7 @@ interface StatusApiRegistration {
  *
  * 🔴🔴 **2026-10-18 修缺陷（owner 报「在别的 CCC 点开显示的还是 home-serenity 的信息」）**：
  * 旧实现第 ③ 步是「**遍历 live sessions 找第一个 CCC 会话的 cwd**」—— 那是**跨工作区猜测**：
- * 只要 sessionId 缺失或那条会话查不到（ACP/skiff 会话、尚未 materialize 的会话、远程访问），
+ * 只要 sessionId 缺失或那条会话查不到（ACP/轨迹约束会话、尚未 materialize 的会话、远程访问），
  * 它就会**静默返回另一个 CCC 的路径**，于是面板把**别人的轨迹/技能/安全模式**当成你的显示出来。
  * 这比"显示未激活"危险得多 —— 用户会据此做判断（以为自己的 safe-mode 开着、以为那是自己的轨迹）。
  *
@@ -373,7 +373,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
 
   // /serenity/cccs：候选认知容器列表（v1.26.2；**原**为设置面板「开放容器」白名单选择的数据源——
   // 该面板区已随面 E 退役，2026-10-15；本端点本身保留，仍是 CCC 枚举的只读口）
-  // 只读；与 skiff 调试页/微信桥**同一** listCccs——工作区注册表 ∪ 持久化会话 ∪ live）
+  // 只读；与 轨迹约束调试页/微信桥**同一** listCccs——工作区注册表 ∪ 持久化会话 ∪ live）
   ctx.webServer.register({
     kind: 'exact',
     path: CCCS_PATH,
@@ -386,7 +386,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const workspace = resolveWorkspace(ctx, { sessionId: url.searchParams.get('sessionId') ?? undefined, workspace: url.searchParams.get('workspace') ?? undefined })
         const root = cccRootForCwd(workspace) ?? ''
-        // C2：枚举归 ccc-roots（不再绕 skiff-debug.js 加载整条 skiff 链）；
+        // C2：枚举归 ccc-roots（不再绕 trajectory-debug.js 加载整条 轨迹约束链）；
         // CccEntry 带 name + roles ⇒ 面板选择器需要的字段齐备（与旧 discoverCccs 输出同形）。
         const cccs = await listCccs(ctx, { defaultRoot: root, withRoles: true })
         sendJson(res, 200, { cccs })
@@ -435,13 +435,23 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           const settings = readWeixinSettings(chk.root)
           const bridge = weixinBridgeStatus().find((b) => b.ccc === chk.root)
           // accounts 脱敏：只回元信息 + 是否已绑定（token 永不落 wire）
-          const { readWeixinCredential } = await import('../im/route.js')
-          const accounts = (settings.accounts ?? []).map((a) => ({
-            accountId: a.accountId,
-            name: a.name ?? undefined,
-            enabled: a.enabled !== false,
-            bound: readWeixinCredential(chk.root, a.accountId) !== null,
-          }))
+          //
+          // 🔴 **2026-10-19（P2 面板）修：必须回 `channel`** —— 原先这里不发这个字段，
+          //    而面板按 `a.channel` 选显示名与表单（扫码 vs 凭据）。缺字段 ⇒ 面板把**每个账号
+          //    都当微信**：飞书账号显示成「微信」、且只提供扫码绑定（对飞书无意义）。
+          //    症状极像"飞书没配"，实际是**读数面缺一格**（同族：D151 引用失效、T4 promptSource）。
+          const { imCredentialBound } = await import('../im/route.js')
+          const { normalizeAccountChannel } = await import('../im/accounts.js')
+          const accounts = (settings.accounts ?? []).map((a) => {
+            const channel = normalizeAccountChannel((a as { channel?: string }).channel)
+            return {
+              accountId: a.accountId,
+              name: a.name ?? undefined,
+              enabled: a.enabled !== false,
+              channel,
+              bound: imCredentialBound(chk.root, a.accountId, channel),
+            }
+          })
           sendJson(res, 200, {
             enabled: settings.enabled === true,
             botType: settings.botType ?? undefined,
@@ -464,6 +474,12 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           accountId?: string
           routes?: Array<{ user: string; role: string }>
           enabled?: boolean
+          /** add-feishu-account：应用 appId（非密，出现在每个事件的 app_id 里） */
+          appId?: string
+          /** add-feishu-account：应用 appSecret（**凭据**，只落 localstore，不回 wire） */
+          appSecret?: string
+          /** add-feishu-account：展示名（可选） */
+          name?: string
         }
         const chk = requireCcc(body.ccc)
         if (!chk.ok) {
@@ -510,7 +526,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             sendJson(res, 400, { error: 'invalid routes (expected [{user, trajectory}, ...])' })
             return
           }
-          // 🔴 2026-10-19：路由目标从「skiff 角色名」改为**认知轨迹编码**（owner 重做令：
+          // 🔴 2026-10-19：路由目标从「轨迹约束角色名」改为**认知轨迹编码**（owner 重做令：
           //    「微信桥的路由表修改为 user → 认知轨迹的映射」）。
           //    读侧接受旧 `role` 作过渡别名（面板/脚本存量），但**落盘统一写 `trajectory`**。
           const routes: Array<{ user: string; trajectory: string }> = []
@@ -555,6 +571,40 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             stopCccBridge(root)
           }
           sendJson(res, 200, { enabled })
+          return
+        }
+
+        // 飞书账号：面板表单提交（P4，2026-10-19）
+        //
+        // 为什么必须有这条（owner 原话）：「页面上没办法添加飞书 account，要能支持，不然我不知道怎么配」。
+        // 微信靠扫码出账号，飞书没有扫码形态 ⇒ 若不提供表单，用户只能手写 localstore 凭据，
+        // 而那不是"配"，那是"要求用户知道内部存储键名"。
+        //
+        // 落点（与装配处同源，勿另造）：结构进 serenity.json 的账号行（含 channel:'feishu'），
+        // 凭据进 localstore（`FEISHU_<A>_APPID|SECRET`）。二者分开是既有约定，不是本动作的选择。
+        if (body.action === 'add-feishu-account') {
+          const appId = (body.appId ?? '').trim()
+          const appSecret = (body.appSecret ?? '').trim()
+          if (appId === '' || appSecret === '') {
+            sendJson(res, 400, { error: 'appId 与 appSecret 都必须填（只填一个等于没绑）' })
+            return
+          }
+          const { readWeixinSettings, upsertWeixinAccount, writeFeishuCredential, nextFeishuAccountId } = await import('../im/route.js')
+          const { syncCccBridge } = await import('../im/bridge.js')
+          const before = readWeixinSettings(root)
+          const accountId = (body.accountId ?? '').trim() !== '' ? body.accountId!.trim() : nextFeishuAccountId(before)
+          // ① 结构：追加一行（channel 显式写 'feishu'——缺省会被归一成 weixin）
+          upsertWeixinAccount(root, {
+            accountId,
+            name: (body.name ?? '').trim() !== '' ? body.name!.trim() : undefined,
+            channel: 'feishu',
+            enabled: true,
+          } as never)
+          // ② 凭据：写 localstore
+          writeFeishuCredential(root, accountId, { appId, appSecret })
+          // ③ 起桥（已启用才起；未启用只落配置——与微信扫码路径同款）
+          if (before.enabled) syncCccBridge(ctx, root)
+          sendJson(res, 200, { accountId, channel: 'feishu', saved: true })
           return
         }
 

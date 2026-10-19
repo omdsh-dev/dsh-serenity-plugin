@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
-// 与 think-render.test 同款 mock：skiff-debug → skiff-core → dsh-llm 依赖链在测试环境需 mock
+// 与 think-render.test 同款 mock：trajectory-debug → trajectory-session → dsh-llm 依赖链在测试环境需 mock
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
@@ -55,7 +55,7 @@ describe('jscSafeJsonText：JSC JSON.parse 兼容层（v1.26.9）', () => {
     const payload = {
       answer: '行分隔符\u2028与段分隔符\u2029与BOM\uFEFF的复杂回答',
       answer_html: '<p>HTML 含\u2028分隔</p>',
-      sessionId: 'skiff-qa-x',
+      sessionId: '轨迹约束-qa-x',
       continued: false,
       cognitiveTrajectory: [
         { role: 'user', text: '提问\u2028' },
@@ -95,7 +95,7 @@ describe('jscSafeJsonText：JSC JSON.parse 兼容层（v1.26.9）', () => {
     const response = {
       answer: '### 标题\u2028\n复杂内容\u2029与\uFEFF混合',
       answer_html: '<h3>标题</h3>\n<p>复杂内容\u2028与\uFEFF混合</p>',
-      sessionId: 'skiff-qa-abc',
+      sessionId: '轨迹约束-qa-abc',
       continued: true,
     }
     const body = jscSafeJsonText(JSON.stringify(response))

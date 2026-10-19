@@ -10,7 +10,7 @@
  *
  * 测法（L3 工具面；**真实现 + 真夹具**，只在两处不可控面上打桩，理由逐条写在下）：
  *   · 真：`findSession` / `useSession` / `createSession` / `listSessions` / `showSession` /
- *     `addWake` ／ `appendBound`（绑定落 `.bindings.json`）／ 真 `skiff`-free 的 fake ctx/exec
+ *     `addWake` ／ `appendBound`（绑定落 `.bindings.json`）／ 真 `轨迹约束`-free 的 fake ctx/exec
  *   · 桩 ① `../src/session-cleanup.js` 的 `hasSessionLogById`：**宿主会话日志面在测试里不可能是真的**
  *     （夹具的 dsh 会话 id 在宿主机上没有日志）⇒ 打成可控开关：默认 `true`（= 有日志 ⇒ 不剪枝），
  *     一条用例置 `false` 以覆盖**悬空绑定剪枝**分支。⚠️ 不桩它的话，`(c)` 分支会**恒剪掉刚写的绑定**

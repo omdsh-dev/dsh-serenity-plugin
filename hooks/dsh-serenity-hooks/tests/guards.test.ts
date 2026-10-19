@@ -22,7 +22,7 @@ import {
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/kernel/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im/channels.js'
 import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/kernel/ccc.js'
-import type { SkiffProfile } from '../src/trajectory/policy/profile.js'
+import type { TrajectoryConstraint } from '../src/trajectory/policy/profile.js'
 
 let dir: string
 
@@ -44,19 +44,19 @@ function rules(...patterns: string[]): BlacklistRule[] {
 }
 
 /**
- * 直接造一条 `SkiffProfile`（`decideGuard` 的纯函数契约：约束面由调用方解析好传进来，守卫自己不读盘）。
+ * 直接造一条 `TrajectoryConstraint`（`decideGuard` 的纯函数契约：约束面由调用方解析好传进来，守卫自己不读盘）。
  *
- * 🔴 2026-10-19 重做带来的构造方式变化（R↓，别按旧模型再写回 `writeConfig({skiff:{roles:…}})`）：
- * - **载体**：skiff 的约束从 `.opencode/serenity.json` 的 `skiff.roles.<name>` 搬到**轨迹目录下的
- *   `skiff.json`**（`skiff.roles` 整段已退役 ⇒ 旧写法写进去也读不到）；
- * - **判据**：谁是 skiff 由 `trajectory/policy/profile.ts` 的 `skiffProfileForSession` **唯一**判定
- *   （"绑定的轨迹有 `skiff.json`"，不再看 sessionId 前缀）；
- * - **守卫**：只消费已解析好的 `skiffProfile`；`null`/`undefined` = 不是 skiff ⇒ 整段跳过。
+ * 🔴 2026-10-19 重做带来的构造方式变化（R↓，别按旧模型再写回 `writeConfig({轨迹约束:{roles:…}})`）：
+ * - **载体**：轨迹约束的约束从 `.opencode/serenity.json` 的 `轨迹约束.roles.<name>` 搬到**轨迹目录下的
+ *   `trajectory-constraint.json`**（`轨迹约束.roles` 整段已退役 ⇒ 旧写法写进去也读不到）；
+ * - **判据**：谁是 轨迹约束 由 `trajectory/policy/profile.ts` 的 `trajectoryConstraintForSession` **唯一**判定
+ *   （"绑定的轨迹有 `trajectory-constraint.json`"，不再看 sessionId 前缀）；
+ * - **守卫**：只消费已解析好的 `trajectoryConstraint`；`null`/`undefined` = 不是 轨迹约束 ⇒ 整段跳过。
  *
  * ⇒ 本文件只描述"给守卫什么约束面"，不落盘、不注册会话；落盘与判据路径由
- * `tests/skiff-profile.test.ts`（+ `tests/helpers/skiff-fixture.ts`）覆盖。
+ * `tests/轨迹约束-profile.test.ts`（+ `tests/helpers/trajectory-constraint-fixture.ts`）覆盖。
  */
-function profile(over: Partial<SkiffProfile> = {}): SkiffProfile {
+function profile(over: Partial<TrajectoryConstraint> = {}): TrajectoryConstraint {
   return {
     dirName: '2026-10-19--qa--t',
     code: 'qa',
@@ -772,9 +772,9 @@ describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-s
   })
 })
 
-describe('guards: Skiff 工具白名单（F4b ⑧）', () => {
-  // 一条 skiff 轨迹的约束面（= 它目录里 skiff.json 的解析结果）。
-  // 旧模型这条角色写在 `.opencode/serenity.json` 的 `skiff.roles.qa` 里、靠 sessionId 前缀认人；
+describe('guards: 轨迹约束 工具白名单（F4b ⑧）', () => {
+  // 一条 轨迹约束轨迹的约束面（= 它目录里 trajectory-constraint.json 的解析结果）。
+  // 旧模型这条角色写在 `.opencode/serenity.json` 的 `轨迹约束.roles.qa` 里、靠 sessionId 前缀认人；
   // 新模型约束面直接传给守卫（见 `profile()` 上方注释）。
   const QA = profile({
     dirName: '2026-10-19--qa--t',
@@ -786,68 +786,68 @@ describe('guards: Skiff 工具白名单（F4b ⑧）', () => {
 
   it('白名单内工具 → allow（read/grep/glob）', () => {
     for (const tool of ['read', 'grep', 'glob']) {
-      expect(decideGuard(base({ root: dir, toolName: tool, skiffProfile: QA })).kind).toBe('allow')
+      expect(decideGuard(base({ root: dir, toolName: tool, trajectoryConstraint: QA })).kind).toBe('allow')
     }
   })
 
   it('msms 非空 → msm 通道自动可用', () => {
-    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffProfile: QA })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'msm', trajectoryConstraint: QA })).kind).toBe('allow')
   })
 
   it('白名单外工具 → deny（拒绝信息不泄漏白名单外工具名）', () => {
     for (const tool of ['write', 'edit', 'bash', 'web_search', 'container_fs']) {
-      const d = decideGuard(base({ root: dir, toolName: tool, skiffProfile: QA }))
+      const d = decideGuard(base({ root: dir, toolName: tool, trajectoryConstraint: QA }))
       expect(d.kind).toBe('deny')
-      expect(d.deny).toContain('skiff trajectory')
+      expect(d.deny).toContain('轨迹约束 trajectory')
       expect(d.deny).not.toContain(tool) // 不泄漏被拒工具名
       expect(d.deny).not.toContain('read') // 不泄漏白名单内容
     }
   })
 
   it('约束面在、但未授予任何能力（tools/msms 皆空）→ 保守 deny（白名单外全隐藏）', () => {
-    // 旧模型此处钉的是"skiff 会话未注册 ⇒ 保守 deny"。新模型里那条判据**已上移**到
-    // `skiffProfileForSession`：判不出轨迹 = 返回 `null` = 不是 skiff ⇒ 守卫不判定（见下一条）。
+    // 旧模型此处钉的是"轨迹约束会话未注册 ⇒ 保守 deny"。新模型里那条判据**已上移**到
+    // `trajectoryConstraintForSession`：判不出轨迹 = 返回 `null` = 不是 轨迹约束 ⇒ 守卫不判定（见下一条）。
     // ⇒ 守卫层唯一还能钉的同类 fail-closed：**约束面存在却是空的** ⇒ 白名单外全 deny。
     const empty = profile({ dirName: '2026-10-19--empty--t', code: 'empty' })
-    const d = decideGuard(base({ root: dir, toolName: 'read', skiffProfile: empty }))
+    const d = decideGuard(base({ root: dir, toolName: 'read', trajectoryConstraint: empty }))
     expect(d.kind).toBe('deny')
-    expect(d.deny).toContain('skiff trajectory')
+    expect(d.deny).toContain('轨迹约束 trajectory')
   })
 
-  it('非 skiff 会话（无约束面 / skiffProfile=null）→ 不受白名单影响', () => {
+  it('非 轨迹约束会话（无约束面 / trajectoryConstraint=null）→ 不受白名单影响', () => {
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
-    // 🔴 `null` 显式声明"这不是 skiff"（新模型里普通会话的常态）——会话 id 已完全不参与判定
-    expect(decideGuard(base({ root: dir, toolName: 'write', skiffProfile: null, pathArg: 'docs/a.md' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cheap-worker', skiffProfile: null })).kind).toBe('allow')
+    // 🔴 `null` 显式声明"这不是 轨迹约束"（新模型里普通会话的常态）——会话 id 已完全不参与判定
+    expect(decideGuard(base({ root: dir, toolName: 'write', trajectoryConstraint: null, pathArg: 'docs/a.md' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cheap-worker', trajectoryConstraint: null })).kind).toBe('allow')
   })
 
   it('约束面 tools 空（纯 MSM 轨迹）→ 仅 msm 可用', () => {
     const pure = profile({ dirName: '2026-10-19--pure--t', code: 'pure', msms: ['cognitive-qa'], tools: [] })
-    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffProfile: pure })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'read', skiffProfile: pure })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'msm', trajectoryConstraint: pure })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'read', trajectoryConstraint: pure })).kind).toBe('deny')
   })
 
   it('skill 加载恒可用（不设白名单，v1.25.3）：白名单不含 skill 也 allow', () => {
     // 纯 MSM 约束面（tools 空）→ 其余工具全 deny，但 skill 恒 allow
     const pure = profile({ dirName: '2026-10-19--pure--t', code: 'pure', msms: ['cognitive-qa'], tools: [] })
-    expect(decideGuard(base({ root: dir, toolName: 'skill', skiffProfile: pure })).kind).toBe('allow')
-    // 对照：非 skiff 会话（无约束面）+ skill 也放行（豁免在白名单判定之前）
-    expect(decideGuard(base({ root: dir, toolName: 'skill', skiffProfile: null })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'skill', trajectoryConstraint: pure })).kind).toBe('allow')
+    // 对照：非 轨迹约束会话（无约束面）+ skill 也放行（豁免在白名单判定之前）
+    expect(decideGuard(base({ root: dir, toolName: 'skill', trajectoryConstraint: null })).kind).toBe('allow')
     // 非 skill 工具仍被白名单约束
-    expect(decideGuard(base({ root: dir, toolName: 'read', skiffProfile: pure })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'read', trajectoryConstraint: pure })).kind).toBe('deny')
   })
 })
 
-describe('guards: Skiff 工具白名单——真实形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
-  // 复刻一条真实 skiff 轨迹的约束（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory，
+describe('guards: 轨迹约束 工具白名单——真实形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
+  // 复刻一条真实 轨迹约束轨迹的约束（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory，
   // v1.34 工具名硬切；现名 cognitive_trajectory）：
-  // tools 含 msm/cognitive_trajectory + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
-  // （该提示语已随 2026-10-19 重做改为 "...in this skiff trajectory"）而 read/web_search 通。
+  // tools 含 msm/cognitive_trajectory + 19 msms——运行时实测全拒"tool not allowed in this 轨迹约束 role"
+  // （该提示语已随 2026-10-19 重做改为 "...in this 轨迹约束 trajectory"）而 read/web_search 通。
   // 此测试钉死逻辑层：该约束面形态下 decideGuard 必须放行
   // msm/cognitive_trajectory/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
   //
-  // 🔴 载体与身份的对应（重做前后）：旧 = `.opencode/serenity.json` 的 `skiff.roles['my-role']`；
-  // 新 = 该轨迹目录下的 `skiff.json`（`path` 指它），身份由**角色名**换成**轨迹编码**。
+  // 🔴 载体与身份的对应（重做前后）：旧 = `.opencode/serenity.json` 的 `轨迹约束.roles['my-role']`；
+  // 新 = 该轨迹目录下的 `trajectory-constraint.json`（`path` 指它），身份由**角色名**换成**轨迹编码**。
   // ⚠️ 编码用通用占位 `my-role`（**不用真实角色名**）：本仓公开面受 `privacy-scan` 的
   // `role-name-*` 规则约束（D145）——夹具要**能公开**，所以它描述形态、不搬运具体称呼。
   // 白名单内容（tools / msms / systemPromptFile）逐字照搬旧配置——那才是本组要钉的东西。
@@ -869,15 +869,15 @@ describe('guards: Skiff 工具白名单——真实形态（S142 微信 msm 全�
 
   it('真实形态：白名单内工具全放行（read/web_search/cognitive_trajectory/msm）', () => {
     for (const tool of ['read', 'grep', 'glob', 'web_search', 'cognitive_trajectory', 'msm']) {
-      expect(decideGuard(base({ root: dir, toolName: tool, skiffProfile: ZC })).kind, `tool ${tool} 应 allow`).toBe('allow')
+      expect(decideGuard(base({ root: dir, toolName: tool, trajectoryConstraint: ZC })).kind, `tool ${tool} 应 allow`).toBe('allow')
     }
   })
 
   it('真实形态：白名单外工具 deny（write/bash 等）', () => {
     for (const tool of ['write', 'edit', 'bash', 'container_fs', 'cheap-worker', 'container_admin', 'dashboard', 'praxis']) {
-      const d = decideGuard(base({ root: dir, toolName: tool, skiffProfile: ZC }))
+      const d = decideGuard(base({ root: dir, toolName: tool, trajectoryConstraint: ZC }))
       expect(d.kind, `tool ${tool} 应 deny`).toBe('deny')
-      expect(d.deny).toContain('skiff trajectory')
+      expect(d.deny).toContain('轨迹约束 trajectory')
     }
   })
 
@@ -889,28 +889,28 @@ describe('guards: Skiff 工具白名单——真实形态（S142 微信 msm 全�
       msms: ZC_MSMS,
       tools: ['read'],
     })
-    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffProfile: zcReadOnly })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'msm', trajectoryConstraint: zcReadOnly })).kind).toBe('allow')
   })
 
   it('v1.30.2 回归：模型把 MSM 名当直接工具调 → 明确指引经 msm()（非泛化"未授权"）', () => {
-    // 用户 bug（S142）：该轨迹调 memory-tool 等得到 "tool not allowed in this skiff role" →
+    // 用户 bug（S142）：该轨迹调 memory-tool 等得到 "tool not allowed in this 轨迹约束 role" →
     // 误导成"没权限"。根因 = 把 MSM 名当直接工具调用。修复 = deny 消息给出 msm() 通道指引。
     for (const msmName of ZC_MSMS) {
-      const d = decideGuard(base({ root: dir, toolName: msmName, skiffProfile: ZC }))
+      const d = decideGuard(base({ root: dir, toolName: msmName, trajectoryConstraint: ZC }))
       expect(d.kind, `直接调 ${msmName} 应 deny`).toBe('deny')
-      // 明确说这是 MSM + 给调用法（可行动规避指引），不说泛化的"not allowed in this skiff trajectory"
+      // 明确说这是 MSM + 给调用法（可行动规避指引），不说泛化的"not allowed in this 轨迹约束 trajectory"
       expect(d.deny, `deny 消息应含 ${msmName} 与 msm() 指引`).toContain(msmName)
       expect(d.deny).toContain('msm("')
       expect(d.deny).toContain('not a direct tool')
-      expect(d.deny).not.toContain('not allowed in this skiff trajectory')
+      expect(d.deny).not.toContain('not allowed in this 轨迹约束 trajectory')
     }
   })
 
   it('v1.30.2：白名单外真工具（write/bash 等）仍保守泛化 deny（不泄漏）', () => {
     for (const tool of ['write', 'bash', 'container_fs', 'acc_msm', 'cc_fs', 'session_rebuild']) {
-      const d = decideGuard(base({ root: dir, toolName: tool, skiffProfile: ZC }))
+      const d = decideGuard(base({ root: dir, toolName: tool, trajectoryConstraint: ZC }))
       expect(d.kind, `工具 ${tool} 应 deny`).toBe('deny')
-      expect(d.deny).toContain('not allowed in this skiff trajectory')
+      expect(d.deny).toContain('not allowed in this 轨迹约束 trajectory')
       expect(d.deny).not.toContain(tool) // 不泄漏被拒工具名
     }
   })
@@ -943,7 +943,7 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
     expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: '.opencode' })).kind).toBe('allow')
   })
 
-  it('读工具读注册表 → allow（注册表需被读——output-guard/skiff-admin 建 MSM 词表；读 deny 只用于凭据）', () => {
+  it('读工具读注册表 → allow（注册表需被读——output-guard/trajectory-constraint-admin 建 MSM 词表；读 deny 只用于凭据）', () => {
     expect(decideGuard(base({ root: dir, toolName: 'read', pathArg: aggRel })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'info', pathArg: aggRel })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'grep', pathArg: aggRel })).kind).toBe('allow')

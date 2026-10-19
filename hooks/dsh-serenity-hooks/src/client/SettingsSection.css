@@ -504,6 +504,32 @@
   height: 100%;
 }
 
+/* 飞书凭据表单（P4）：三格竖排——appId / appSecret / 账号名。
+ * 🔴 不做成一行三格：App Secret 通常 32 位，窄屏下会被压到看不见自己输了什么
+ * （本文件 D152 记过同族：定宽 + 无断点会把值压到标签上）。竖排在小屏也保持可读。 */
+.ss-feishuForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.ss-feishuForm .ss-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-primary);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.ss-feishuForm .ss-input::placeholder {
+  color: var(--dsw-alias-label-secondary);
+}
+
 /* 路由表 JSON 编辑框 */
 .ss-routesEditor {
   width: 100%;

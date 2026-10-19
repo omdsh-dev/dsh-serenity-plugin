@@ -34,7 +34,7 @@ function fakeChannel(overrides: Partial<ImChannel> = {}): ImChannel {
     send: async (input) => ({
       accountId: 'acc-1',
       userId: input.userId,
-      sessionId: 'skiff-fake',
+      sessionId: '轨迹约束-fake',
       role: 'tester',
     }),
     sendFile: async (input) => ({ fileName: input.fileName, size: input.data.length }),
@@ -163,7 +163,7 @@ describe('im-bridge: runImBridge 参数与错误码矩阵', () => {
     if (r.ok) {
       expect(r.channel).toBe('fake')
       expect(r.action).toBe('send')
-      expect(r.detail).toMatchObject({ accountId: 'acc-1', userId: 'u@im', sessionId: 'skiff-fake', role: 'tester', user: 'user-b' })
+      expect(r.detail).toMatchObject({ accountId: 'acc-1', userId: 'u@im', sessionId: '轨迹约束-fake', role: 'tester', user: 'user-b' })
     }
   })
 

@@ -4,7 +4,7 @@
  * 职责（零 DSH 依赖，可独立单测）：
  * - 读取 CCC 的 weixin 配置（.opencode/serenity.json weixin 段——结构/路由/开关）
  * - 读取/写入 CCC localstore 的账号凭据（weixin.accounts.<accountId>.token/.baseUrl/.userId）
- * - 微信用户 → skiff 会话 id 映射（固定可重建：skiff-weixin-<sha256(userid)>.slice(1, 17)；
+ * - 微信用户 → 轨迹约束会话 id 映射（固定可重建：skiff-weixin-<sha256(userid)>.slice(1, 17)；
  *   v1.27.3 错位一位避开损坏 log）
  * - 路由匹配（exact user → 通配 * 兜底）
  *
@@ -29,15 +29,15 @@ function accountKeyPart(accountId: string): string {
 }
 
 /**
- * 微信桥 skiff 会话 id 前缀（守卫识别"外部面"用）。
+ * 微信桥 轨迹约束会话 id 前缀（守卫识别"外部面"用）。
  *
- * ⚠️ **2026-10-19 起它只是命名习惯，不再是判据** —— skiff 的身份是**轨迹**，
- * 判据 = 「绑定的轨迹有 `skiff.json`」（`trajectory/policy/profile.ts` 的 `isSkiffSession`）。
+ * ⚠️ **2026-10-19 起它只是命名习惯，不再是判据** —— 轨迹约束的身份是**轨迹**，
+ * 判据 = 「绑定的轨迹有 `trajectory-constraint.json`」（`trajectory/policy/profile.ts` 的 `isTrajectoryConstrained`）。
  * 保留前缀只为：① 日志/会话列表里一眼认出这是外部面；② 存量会话目录名不变。
  */
 const WEIXIN_SESSION_PREFIX = 'skiff-weixin-'
 
-/** 判定 sessionId 是否为微信桥会话（**命名形态**判定；权力面判据见 `isSkiffSession`） */
+/** 判定 sessionId 是否为微信桥会话（**命名形态**判定；权力面判据见 `isTrajectoryConstrained`） */
 export function isWeixinSessionId(sessionId: string | undefined): boolean {
   return typeof sessionId === 'string' && sessionId.startsWith(WEIXIN_SESSION_PREFIX)
 }
@@ -52,7 +52,7 @@ export function isWeixinSessionId(sessionId: string | undefined): boolean {
  * 对不上旧会话的历史工具清单）。⇒ 那不是"轨迹是一等公民"，那是"用户是一等公民"。
  *
  * 新派生 = **由轨迹编码决定**：同一条轨迹 ⇒ 恒同一条 dsh 会话（无论谁在跟它说话）；
- * 换轨迹 ⇒ 新会话。这正是"skiff 是认知轨迹的一种"。
+ * 换轨迹 ⇒ 新会话。这正是"轨迹约束是认知轨迹的一种"。
  *
  * ## 连带删掉的东西
  *
@@ -273,6 +273,24 @@ export function clearFeishuCredential(root: string, accountId: string): void {
 }
 
 /**
+ * **按渠道判「该账号是否已绑定凭据」**（面板读数用；单一处）。
+ *
+ * 🔴 为什么需要它（2026-10-19 P2 面板实测缺陷）：面板原先对所有账号都调
+ * `readWeixinCredential`（只看 `WEIXIN_<A>_TOKEN`）。一个**飞书**账号的凭据在
+ * `FEISHU_<A>_APPID|SECRET`，走那条读法**必然读到 null** ⇒ 面板把一个配好的飞书账号
+ * 显示成「未绑定凭据」，用户据此以为没配上。
+ *
+ * 判据与装配处**同源**（`im/bridge.ts` 的 `readImCredentialByChannel`）：飞书要 appId **且**
+ * appSecret，微信只要有 token。两处若各写一份判据，就会重演"两个读数器给出不同答案"。
+ *
+ * ⚠️ 只回**布尔**，不回任何凭据值 —— 这是 wire 面。
+ */
+export function imCredentialBound(root: string, accountId: string, channel: string | undefined): boolean {
+  if ((channel ?? '').trim() === 'feishu') return readFeishuCredential(root, accountId) !== null
+  return readWeixinCredential(root, accountId) !== null
+}
+
+/**
  * 路由匹配：exact user 优先，通配 `*` 兜底。
  * @returns 命中的**轨迹编码**；未命中 → null（无路由 → 消息不回复/忽略）
  */
@@ -420,6 +438,20 @@ export function nextWeixinAccountId(settings: WeixinSettings): string {
   let n = 1
   while (used.has(`wechat-${n}`)) n++
   return `wechat-${n}`
+}
+
+/**
+ * 生成下一个可用飞书账号 id（`feishu-N`，N 取**最小未占用**）。
+ *
+ * 与 {@link nextWeixinAccountId} 分开而不是加参数：两者的**前缀不同**，
+ * 而前缀是给人看的（面板上一眼分清哪些账号来自哪个渠道）。
+ * 判据相同（最小未占用，删中间不跳号）。
+ */
+export function nextFeishuAccountId(settings: WeixinSettings): string {
+  const used = new Set((settings.accounts ?? []).map((a) => a.accountId))
+  let n = 1
+  while (used.has(`feishu-${n}`)) n++
+  return `feishu-${n}`
 }
 
 /** 切换总开关 */

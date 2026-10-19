@@ -176,15 +176,15 @@ describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
 describe('im-weixin: send（复用 sendProactiveText 唯一发送实现）', () => {
   it('成功 → 透传账号/会话/角色；参数只传 root/userId/text/account', async () => {
     setupCcc({ enabled: true })
-    sendProactiveText.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im', sessionId: 'skiff-1', role: 'my-role' })
+    sendProactiveText.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im', sessionId: '轨迹约束-1', role: 'my-role' })
     const r = await weixinChannel.send({ root: dir, userId: 'u@im', text: 'hi', accountId: 'wechat-1' })
-    expect(r).toEqual({ accountId: 'wechat-1', userId: 'u@im', sessionId: 'skiff-1', role: 'my-role' })
+    expect(r).toEqual({ accountId: 'wechat-1', userId: 'u@im', sessionId: '轨迹约束-1', role: 'my-role' })
     expect(sendProactiveText).toHaveBeenCalledWith({ root: dir, toUserId: 'u@im', text: 'hi', accountId: 'wechat-1' })
   })
 
   it('未指定 account → 不传 accountId（由桥按"首个启用账号"选择）', async () => {
     setupCcc({ enabled: true })
-    sendProactiveText.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im', sessionId: 'skiff-1', role: '' })
+    sendProactiveText.mockResolvedValue({ ok: true, accountId: 'wechat-1', userId: 'u@im', sessionId: '轨迹约束-1', role: '' })
     await weixinChannel.send({ root: dir, userId: 'u@im', text: 'hi' })
     expect(sendProactiveText).toHaveBeenCalledWith({ root: dir, toUserId: 'u@im', text: 'hi' })
   })

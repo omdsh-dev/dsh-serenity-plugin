@@ -3,20 +3,20 @@
  *
  * 契约：
  *  - `sessionIdOf` 对 Agent / Session / 事件负载三类形状都取得到 id（未知形状 → null）
- *  - `cleanupSessionState` 清 skiff 注册表与活跃 SESSION 作用域，且幂等
+ *  - `cleanupSessionState` 清 轨迹约束 注册表与活跃 SESSION 作用域，且幂等
  *
- * 🔴 2026-10-19 skiff 重做对本文件的唯一影响：`registerSkiffSession` 的**第 2 参是轨迹目录名**
- * （不再是角色名），`skiffSessionInfo` 回 `{ trajectoryDirName, ccc }`（不再是 `{ role, ccc }`）。
- * 本文件只验"注册 ⇄ 清理"这条生命周期，**不**依赖 skiff 判据（判据在 `trajectory/policy/profile.ts`，
- * 其测试见 `tests/skiff-core.test.ts`）⇒ 这里用目录名常量即可，无需造真实轨迹目录。
+ * 🔴 2026-10-19 轨迹约束 重做对本文件的唯一影响：`registerTrajectorySession` 的**第 2 参是轨迹目录名**
+ * （不再是角色名），`trajectorySessionInfo` 回 `{ trajectoryDirName, ccc }`（不再是 `{ role, ccc }`）。
+ * 本文件只验"注册 ⇄ 清理"这条生命周期，**不**依赖 轨迹约束 判据（判据在 `trajectory/policy/profile.ts`，
+ * 其测试见 `tests/trajectory-session.test.ts`）⇒ 这里用目录名常量即可，无需造真实轨迹目录。
  *  - `registerLifecycle` 订阅 `agent/disposed` + `session/disposed`，并在销毁时执行清理；
  *    事件通道缺失 / ctx.effect 缺失都不抛错（apply 不可成为启动单点）
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 
-// lifecycle.ts 经 skiff-core 间接引入宿主 peerDep（@deepseek-ai/dsh-llm 等不在插件
-// node_modules，仅由宿主提供）——与 skiff-core.test.ts / gateway.test.ts 同款 mock，
-// 保证 vitest 可解析（依赖链：lifecycle → skiff-core → cognitive-trajectory-ops → settings-section → schemastery）
+// lifecycle.ts 经 trajectory-session 间接引入宿主 peerDep（@deepseek-ai/dsh-llm 等不在插件
+// node_modules，仅由宿主提供）——与 trajectory-session.test.ts / gateway.test.ts 同款 mock，
+// 保证 vitest 可解析（依赖链：lifecycle → trajectory-session → cognitive-trajectory-ops → settings-section → schemastery）
 vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
@@ -46,12 +46,12 @@ vi.mock('@deepseek-ai/schemastery', () => {
 })
 
 import { sessionIdOf, cleanupSessionState, registerLifecycle } from '../../src/seams/lifecycle.js'
-import { registerSkiffSession, skiffSessionInfo } from '../../src/trajectory/session.js'
+import { registerTrajectorySession, trajectorySessionInfo } from '../../src/trajectory/session.js'
 import { setActiveSessionInfo, getActiveSessionInfo } from '../../src/trajectory/core.js'
 
 const fakeAgent = { id: 'a1' } as never
 
-/** skiff 绑定指向的**轨迹目录名**（🔴 2026-10-19：不再是角色名，见文件头契约注） */
+/** 轨迹约束 绑定指向的**轨迹目录名**（🔴 2026-10-19：不再是角色名，见文件头契约注） */
 const TRAJ_DIR = '2026-10-19--qa--traj'
 
 afterEach(() => {
@@ -78,21 +78,21 @@ describe('seams/lifecycle: sessionIdOf', () => {
 })
 
 describe('seams/lifecycle: cleanupSessionState', () => {
-  it('清 skiff 注册表 + 活跃 SESSION 作用域（幂等）', () => {
-    registerSkiffSession('skiff-lifecycle-1', TRAJ_DIR, '/ccc', fakeAgent)
-    setActiveSessionInfo('skiff-lifecycle-1', {
+  it('清 轨迹约束 注册表 + 活跃 SESSION 作用域（幂等）', () => {
+    registerTrajectorySession('轨迹约束-lifecycle-1', TRAJ_DIR, '/ccc', fakeAgent)
+    setActiveSessionInfo('轨迹约束-lifecycle-1', {
       sessionId: 'S999',
       dirName: 'x',
       mdPath: '/ccc/AGENT_SESSIONS/x/SESSION.md',
     })
-    expect(skiffSessionInfo('skiff-lifecycle-1')).toEqual({ trajectoryDirName: TRAJ_DIR, ccc: '/ccc' })
-    expect(getActiveSessionInfo('skiff-lifecycle-1')).not.toBeNull()
+    expect(trajectorySessionInfo('轨迹约束-lifecycle-1')).toEqual({ trajectoryDirName: TRAJ_DIR, ccc: '/ccc' })
+    expect(getActiveSessionInfo('轨迹约束-lifecycle-1')).not.toBeNull()
 
-    cleanupSessionState('skiff-lifecycle-1')
-    expect(skiffSessionInfo('skiff-lifecycle-1')).toBeNull()
-    expect(getActiveSessionInfo('skiff-lifecycle-1')).toBeNull()
+    cleanupSessionState('轨迹约束-lifecycle-1')
+    expect(trajectorySessionInfo('轨迹约束-lifecycle-1')).toBeNull()
+    expect(getActiveSessionInfo('轨迹约束-lifecycle-1')).toBeNull()
 
-    expect(() => cleanupSessionState('skiff-lifecycle-1')).not.toThrow() // 幂等
+    expect(() => cleanupSessionState('轨迹约束-lifecycle-1')).not.toThrow() // 幂等
   })
 })
 
@@ -126,13 +126,13 @@ describe('seams/lifecycle: registerLifecycle', () => {
     expect(names).toContain('session/disposed')
     expect(ctx.effect).toHaveBeenCalledTimes(1)
 
-    registerSkiffSession('skiff-lifecycle-2', TRAJ_DIR, '/ccc', fakeAgent)
-    ctx.emit('agent/disposed', { agent: { session: { id: 'skiff-lifecycle-2' } } })
-    expect(skiffSessionInfo('skiff-lifecycle-2')).toBeNull()
+    registerTrajectorySession('轨迹约束-lifecycle-2', TRAJ_DIR, '/ccc', fakeAgent)
+    ctx.emit('agent/disposed', { agent: { session: { id: '轨迹约束-lifecycle-2' } } })
+    expect(trajectorySessionInfo('轨迹约束-lifecycle-2')).toBeNull()
 
-    registerSkiffSession('skiff-lifecycle-3', TRAJ_DIR, '/ccc', fakeAgent)
-    ctx.emit('session/disposed', { id: 'skiff-lifecycle-3' })
-    expect(skiffSessionInfo('skiff-lifecycle-3')).toBeNull()
+    registerTrajectorySession('轨迹约束-lifecycle-3', TRAJ_DIR, '/ccc', fakeAgent)
+    ctx.emit('session/disposed', { id: '轨迹约束-lifecycle-3' })
+    expect(trajectorySessionInfo('轨迹约束-lifecycle-3')).toBeNull()
   })
 
   it('无 id 的销毁负载 → 不清理、不抛错', () => {
@@ -153,7 +153,7 @@ describe('seams/lifecycle: registerLifecycle', () => {
     expect(warn.mock.calls.some((c) => String(c[0]).includes('资源拆卸未装配'))).toBe(true)
   })
 
-  it('卸载时停掉自起资源（skiff 调试页/微信桥停止函数被调用且不抛错）', () => {
+  it('卸载时停掉自起资源（轨迹约束调试页/微信桥停止函数被调用且不抛错）', () => {
     const ctx = fakeCtx()
     registerLifecycle(ctx as never)
     expect(() => ctx.disposeAll()).not.toThrow()

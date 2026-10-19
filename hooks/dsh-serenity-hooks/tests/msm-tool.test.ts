@@ -7,13 +7,13 @@
  *   —— 即"这个工具从没被真正执行过"。（注意：**不是**"没被提到" —— `coverage-gate`
  *   用正则匹配 import 字符串，**提到即算覆盖**，故该门禁看不见这类缺口。）
  *
- * 覆盖面（按 L3 工具面测法：**真实 CCC 夹具 + 真注册表 + 真 skiff 门控**，只桩掉子进程执行）：
+ * 覆盖面（按 L3 工具面测法：**真实 CCC 夹具 + 真注册表 + 真 轨迹约束门控**，只桩掉子进程执行）：
  *   ① 工具面：名字 / 三参数 / render（字符串原样、非字符串 JSON）
  *   ② 根解析失败：无 `.serenity` ⇒ 抛 `NO_CCC_FROM_AGENT_CWD`
  *   ③ 精简目录（无 name）：空注册表 / 分组计数与降序 / 无 skill 归 `uncategorized` / 空白串等同无 name
  *   ④ 命中执行：载荷（`action:'exec'`、`args` 缺省 `[]`、透传、`inspect` ⇒ `['--schema', name]`）＋ name trim
  *   ⑤ 未命中候选：name 子串 / description 子串 / 全无匹配（回落目录）/ **limit=5** / flags 展示
- *   ⑥ Skiff 门控（**真 `skiffMsmGate`**，非替身）：白名单 list / 白名单内放行 / 白名单外拒绝 /
+ *   ⑥ 轨迹约束 门控（**真 `trajectoryConstraintMsmGate`**，非替身）：白名单 list / 白名单内放行 / 白名单外拒绝 /
  *      未注册会话拒绝 / 白名单内未注册名 ⇒ 候选带前缀
  *
  * ⚠️ 诚实边界（与 ⑤ 前两件同）：本文件**不给覆盖率百分比**（MSM 输出会被截断，溢写文件在
@@ -39,9 +39,9 @@ vi.mock('../src/tools/msm/service.js', async (importOriginal) => {
 import { msmTool } from '../src/tools/msm/index.js'
 import { runMsmAsync } from '../src/tools/msm/service.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
-import { unregisterSkiffSession } from '../src/trajectory/session.js'
-import { resetSkiffSessions } from '../src/trajectory/policy/window.js'
-import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
+import { unregisterTrajectorySession } from '../src/trajectory/session.js'
+import { resetTrajectorySessions } from '../src/trajectory/policy/window.js'
+import { make轨迹约束Session, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
 
 const mockRunMsmAsync = vi.mocked(runMsmAsync)
 
@@ -54,7 +54,7 @@ const tool = msmTool as unknown as {
   execute: (a: unknown, e: unknown) => Promise<unknown>
 }
 
-/** 执行入口：默认 cwd = 夹具根；sessionId 省略 ⇒ 非 skiff ⇒ 门控恒放行 */
+/** 执行入口：默认 cwd = 夹具根；sessionId 省略 ⇒ 非 轨迹约束 ⇒ 门控恒放行 */
 function exec(args: unknown, cwd = dir, sessionId?: string): Promise<unknown> {
   const session: Record<string, unknown> = { header: { cwd } }
   if (sessionId !== undefined) session.id = sessionId
@@ -81,9 +81,9 @@ function writeRegistry(entries: unknown[]): void {
   writeFileSync(join(p, 'mech-registry.json'), JSON.stringify({ version: 1, entries }, null, 2))
 }
 
-/** 改写某条轨迹的 `skiff.json`（约束面每轮实时读 ⇒ 热生效，无需重新登记会话） */
+/** 改写某条轨迹的 `trajectory-constraint.json`（约束面每轮实时读 ⇒ 热生效，无需重新登记会话） */
 function setProfile(dirName: string, json: Record<string, unknown>): void {
-  writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, 'skiff.json'), JSON.stringify(json), 'utf-8')
+  writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, 'trajectory-constraint.json'), JSON.stringify(json), 'utf-8')
 }
 
 const THREE = [
@@ -231,20 +231,20 @@ describe('msm：未精确命中 ⇒ 模糊候选（suggestMsm）', () => {
   })
 })
 
-describe('msm：Skiff 门控（真 skiffMsmGate）', () => {
-  // 🔴 2026-10-19 重做：skiff 身份 = 绑定的轨迹有没有 `skiff.json`（**不再是** sessionId 前缀，
-  //    也不是 `serenity.json` 的角色表）⇒ 夹具走 makeSkiffSession（造轨迹 + 登记会话）。
+describe('msm：轨迹约束 门控（真 trajectoryConstraintMsmGate）', () => {
+  // 🔴 2026-10-19 重做：轨迹约束 身份 = 绑定的轨迹有没有 `trajectory-constraint.json`（**不再是** sessionId 前缀，
+  //    也不是 `serenity.json` 的角色表）⇒ 夹具走 make轨迹约束Session（造轨迹 + 登记会话）。
   const qaId = 'sess-msm-gate-1'
   let qaDir: string
 
   beforeEach(() => {
     writeRegistry(THREE)
-    qaDir = makeSkiffSession(dir, qaId, 'qa-msm', skiffJson({ msms: ['alpha'], tools: [] }))
+    qaDir = make轨迹约束Session(dir, qaId, 'qa-msm', 轨迹约束Json({ msms: ['alpha'], tools: [] }))
   })
 
   afterEach(() => {
-    unregisterSkiffSession(qaId)
-    resetSkiffSessions()
+    unregisterTrajectorySession(qaId)
+    resetTrajectorySessions()
   })
 
   it('无 name ⇒ 只列本轨迹白名单（不列全仓目录）', async () => {
@@ -271,24 +271,24 @@ describe('msm：Skiff 门控（真 skiffMsmGate）', () => {
   })
 
   // 🔴 本组顺带钉住一条**实测发现**：`src/tools/msm/index.ts` 里两处 `gate.whitelist` 分支**不可达** ——
-  //   `whitelist` 只在 `skiffMsmGate(..., 'list', ...)` 里被返回，而 tools/msm/index.ts 只在 **name 为空**时传
+  //   `whitelist` 只在 `trajectoryConstraintMsmGate(..., 'list', ...)` 里被返回，而 tools/msm/index.ts 只在 **name 为空**时传
   //   `'list'`，且那一路在 L110 就**提前返回**了。于是 L117（白名单过滤）与 L125（候选加「已过滤」前缀）
   //   两处的 `gate.whitelist` **恒为 undefined**；exec 路的拒绝已由门控自己完成（`{reject}`）。
   //   ⇒ 下面这条用例钉的是**可观测契约**：白名单内、但未注册的名字 ⇒ 走**无前缀**的候选分支。
   it('白名单内但未注册 ⇒ 走无前缀候选分支（证明「加已过滤前缀」那条分支永不执行）', async () => {
-    setProfile(qaDir, skiffJson({ msms: ['ghost-msm'], tools: [] }))
+    setProfile(qaDir, 轨迹约束Json({ msms: ['ghost-msm'], tools: [] }))
     const text = (await exec({ name: 'ghost-msm' }, dir, qaId)) as string
     expect(text).toContain('No MSM matches "ghost-msm". Registered:')
     expect(text).not.toContain('(whitelisted role — candidates filtered)')
     expect(mockRunMsmAsync).not.toHaveBeenCalled()
   })
 
-  // 🔴 旧断言是「sessionId 带 `skiff-` 前缀但未登记 ⇒ 拒绝」。那个前提整块退役了：
+  // 🔴 旧断言是「sessionId 带 `轨迹约束-` 前缀但未登记 ⇒ 拒绝」。那个前提整块退役了：
   //    旧实现靠**前缀**猜身份（于是"前缀命中却没登记"只能保守拒绝）；新判据是"绑定的轨迹有没有
-  //    `skiff.json`"⇒ 查不到就是**普通轨迹**，门控恒放行（与 skiff-core 纪律子集同一 fail-open 口径）。
-  //    ⇒ 断言翻成新等价物：**同一个 `skiff-` 前缀 id 现在反而放行**——前缀不再承载身份。
-  it('未绑定任何 skiff 轨迹的会话（含旧 `skiff-` 前缀 id）⇒ 不是 skiff ⇒ 放行', async () => {
-    const ghost = 'skiff-ghost-9'
+  //    `trajectory-constraint.json`"⇒ 查不到就是**普通轨迹**，门控恒放行（与 trajectory-session 纪律子集同一 fail-open 口径）。
+  //    ⇒ 断言翻成新等价物：**同一个 `轨迹约束-` 前缀 id 现在反而放行**——前缀不再承载身份。
+  it('未绑定任何 轨迹约束轨迹的会话（含旧 `轨迹约束-` 前缀 id）⇒ 不是 轨迹约束 ⇒ 放行', async () => {
+    const ghost = '轨迹约束-ghost-9'
     await exec({ name: 'gamma' }, dir, ghost)
     expect(mockRunMsmAsync.mock.calls[0]?.[1]).toEqual({ action: 'exec', name: 'gamma', args: [] })
   })

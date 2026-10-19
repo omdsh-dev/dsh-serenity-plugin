@@ -177,7 +177,7 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     expect(hasSentThisTurn(SESSION)).toBe(true)
     f.stopTurn(agent)
     expect(steers).toEqual([])
-    // v1.30.17：闸门不清空——桥在 askSkiff 后读它决定是否兜底；清空由桥每轮开始执行
+    // v1.30.17：闸门不清空——桥在 askTrajectory 后读它决定是否兜底；清空由桥每轮开始执行
     expect(hasSentThisTurn(SESSION)).toBe(true)
     clearSentThisTurn(SESSION)
     expect(hasSentThisTurn(SESSION)).toBe(false)
@@ -256,7 +256,7 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     expect(log.mock.calls.some((c) => String(c[0]).includes('打回 1/2'))).toBe(true)
   })
 
-  it('未登记的手动模式之外会话 → 零干预（主舱 / 其它 skiff / ACP 临时会话）', async () => {
+  it('未登记的手动模式之外会话 → 零干预（主舱 / 其它 轨迹约束 / ACP 临时会话）', async () => {
     const f = fakeCtx()
     registerWeixinOutputGuard(f.ctx as never)
     const { agent, steers } = fakeAgent('dsh-main-session')

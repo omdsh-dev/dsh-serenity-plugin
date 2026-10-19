@@ -45,7 +45,7 @@ interface WeixinHookEventBase {
   userId: string
   /** 固定会话 id（同用户长期同一：skiff-weixin-xxx） */
   sessionId: string
-  /** 路由命中的 skiff role */
+  /** 路由命中的 轨迹约束 role */
   role: string
 }
 

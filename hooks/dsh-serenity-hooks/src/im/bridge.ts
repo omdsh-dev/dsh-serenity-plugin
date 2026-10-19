@@ -3,12 +3,12 @@
  *
  * **CCC 级**：dsh 一个进程含多个 CCC，每个 CCC 独立对接微信桥（S142 用户拍板）——
  * 扫描 live CCC → 每 CCC 读 weixin 配置（enabled + accounts + routes）→
- * 启动该 CCC 该账号的 iLink 轮询循环。消息 → weixin-route 路由 → skiff 核心直调
+ * 启动该 CCC 该账号的 iLink 轮询循环。消息 → weixin-route 路由 → 轨迹约束核心直调
  * （session/new + session/prompt，同进程不经网络）。
  *
  * 🔴 **一处陈旧注释的更正（2026-10-15，随面 E 退役一并核实）**：本行原写「→ **AcpServer 直调**
  * （…——acp-core 传输无关设计）」。**该描述从来不是事实** —— 实测 grep 全仓：本文件**从不**
- * `import acp-core`（它 import 的是 `skiff-core` / `skiff-role` / `weixin-*`），
+ * `import acp-core`（它 import 的是 `trajectory-session` / `trajectory-constraint` / `weixin-*`），
  * 而 `acp-core` 的消费者**自始至终只有两个**（`acp-http.ts` ＋ 其测试）。
  * ⇒ 当年那句是**设计意图的误记**，不是依赖关系；面 E 退役后它更是彻底失效。
  * 🔵 判据复述：**注释里的"设计意图"不能当依赖判据**，必须 grep import。
@@ -21,7 +21,7 @@
  * `im/inbound.ts`（机器级机制；本文件只接线）。这是"微信桥上移 ACC 层"的第一步。
  *
  * 外部面纯净（D9/D11 延续）：微信桥会话 = 外部面——session/prompt 走
- * includeCognitiveTrajectory:false（对外不返回轨迹）；skiff 角色白名单即授权（G9）。
+ * includeCognitiveTrajectory:false（对外不返回轨迹）；轨迹约束角色白名单即授权（G9）。
  */
 
 import type { Context } from 'cordis'
@@ -38,7 +38,7 @@ import {
 import { readSimpleSettings, type HumanChannelSettings } from '../surface/settings.js'
 import { readWeixinSettings, readWeixinCredential, readFeishuCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
-import { getSkiffAgent, askSkiff, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../trajectory/session.js'
+import { getTrajectoryAgent, askTrajectory, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, trajectoryWorkspaceMdPath } from '../trajectory/session.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildOutgoingHookEvent } from './hook.js'
@@ -473,7 +473,7 @@ export function syncHumanChannel(ctx: Context): void {
   // 🔴 缺 `humanChannel` 与"读取失败"**同处理** = **未配置** ⇒ 回退模式（不打断在用的微信）。
   //    ⚠️ 这不是"防御性编程"：本函数在 `apply` 的调用链上，而**宿主对插件 apply 抛错 = 整个 dsh
   //    启动失败** ⇒ 一个形状不全的设置源绝不能把启动带下去。**门禁实测抓到过这一处**
-  //    （`skiff-startup-retry.test.ts` 对设置模块做了部分替身 ⇒ `humanChannel` 不在其中）。
+  //    （`trajectory-startup-retry.test.ts` 对设置模块做了部分替身 ⇒ `humanChannel` 不在其中）。
   //    🔵 顺带：**"缺这一段"与"这段是空的"语义相同**（都是"机器级未配置"）⇒ 无需造一个缺省对象。
   if (hc && hc.accounts.length > 0) {
     try {

@@ -82,7 +82,7 @@ function mkActiveSession(desc: string, mtimeBump = false): string {
 
 /**
  * 预置**权威绑定**（`AGENT_SESSIONS/.bindings.json`）——v1.30.13（D4）后
- * resolveSessionMdPath 的候选②b。真实形态 = 会话此前 use/create/skiff 自动绑过，
+ * resolveSessionMdPath 的候选②b。真实形态 = 会话此前 use/create/轨迹约束 自动绑过，
  * 进程重启后内存活跃为空、events 无上下文时仍能精确定位。
  */
 function bindSession(session: unknown, mdPath: string): void {
@@ -356,7 +356,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
   })
 
   it('resolveSessionMdPath：②b 权威绑定命中（AGENT_SESSIONS/.bindings.json；v1.30.13 D4 新增候选）', () => {
-    // 真实形态：进程重启后 ① 内存活跃为空、② events 无 [SESSION CONTEXT]（skiff 会话从不写）、
+    // 真实形态：进程重启后 ① 内存活跃为空、② events 无 [SESSION CONTEXT]（轨迹约束会话从不写）、
     // ③ 无 rebuild 锚点——旧实现只能落到 ④「全局最新会话」（可能接错轨迹）。
     const bound = mkActiveSession('bound')
     mkActiveSession('other') // 另一个"更新"的会话目录（旧 ④ 会误选它）

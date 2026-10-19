@@ -1,24 +1,24 @@
 /**
- * trajectory/session.ts — 轨迹的**会话（载体）管理**（**2026-10-19 重做**：skiff = 带 `skiff.json` 的认知轨迹）
+ * trajectory/session.ts — 轨迹的**会话（载体）管理**（**2026-10-19 重做**：轨迹约束 = 带 `trajectory-constraint.json` 的认知轨迹）
  *
  * ## 与旧版的根本差别（R↓，这是那次重做的全部内容）
  *
- * 旧版：skiff 是**一个角色**（`serenity.json` 的 `skiff.roles.<name>`），会话身份由
- * dsh sessionId 前缀 `skiff-` 判定，工作台由 `ensureSkiffSession` **另建一个 SESSION**。
+ * 旧版：轨迹约束是**一个角色**（`serenity.json` 的 `轨迹约束.roles.<name>`），会话身份由
+ * dsh sessionId 前缀 `轨迹约束-` 判定，工作台由 `ensureTrajectorySession` **另建一个 SESSION**。
  *
- * 新版：skiff 是**一条认知轨迹**（目录里有 `skiff.json`）——
+ * 新版：轨迹约束是**一条认知轨迹**（目录里有 `trajectory-constraint.json`）——
  * · **身份 = 轨迹编码**（不是角色名，不是 sessionId 前缀）；
- * · **工作台 = 该轨迹自己的 SESSION.md**（不再另建，`ensureSkiffSession` 已删除）；
- * · **判据 = 绑定的轨迹有没有 `skiff.json`**（唯一入口 `policy/profile.ts` 的 `skiffProfileForSession`）。
+ * · **工作台 = 该轨迹自己的 SESSION.md**（不再另建，`ensureTrajectorySession` 已删除）；
+ * · **判据 = 绑定的轨迹有没有 `trajectory-constraint.json`**（唯一入口 `policy/profile.ts` 的 `trajectoryConstraintForSession`）。
  *
  * ⇒ 删掉的东西（它们只是旧模型的补丁，不是通用机制）：
- * `SKIFF_SESSION_PREFIX` 判定 ／ `ensureSkiffSession` 自动建工作台 ／
+ * `SKIFF_SESSION_PREFIX` 判定 ／ `ensureTrajectorySession` 自动建工作台 ／
  * `kind: temporary|persistent` ／ 换代计数器（`im/route.ts` 的 `.weixin-session-gen.json`）。
  *
  * ## 本文件仍负责
  * agent 创建/复用（resume-or-create）／系统提示词段注册／提问与等本轮回答／守门查询。
  *
- * ## S13（2026-10-19，轨迹中心重构）：此前位于 `role/skiff/` 下（该目录已随本重构消失）
+ * ## S13（2026-10-19，轨迹中心重构）：此前位于 `role/轨迹约束/` 下（该目录已随本重构消失）
  *
  * 文件名从 `core` 改为 `session`：它管的是**轨迹的会话（载体）**——
  * 与同目录 `live.ts`（活载体查询）／`rebuild.ts`（换船板）／`cleanup.ts`（清理）同族。
@@ -36,20 +36,20 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 import {
-  profileCognitiveTrajectory,
+  constraintCognitiveTrajectory,
   profileMsmWhitelist,
   profileToolWhitelist,
-  buildSkiffBasePrompt,
-  resolveProfileSystemPrompt,
+  buildTrajectoryBasePrompt,
+  resolveConstraintSystemPrompt,
   createProfilePromptReader,
 } from './policy/rules.js'
-import { readSkiffProfileAt, readSkiffProfileByCode, skiffProfileForSession, findDirNameByCode, type SkiffProfile } from './policy/profile.js'
+import { readTrajectoryConstraintAt, readTrajectoryConstraintByCode, trajectoryConstraintForSession, findDirNameByCode, type TrajectoryConstraint } from './policy/profile.js'
 import {
-  registerSkiffSession as registryRegister,
-  unregisterSkiffSession as registryUnregister,
-  skiffTrajectoryDirNameFor as registryTrajectoryDirName,
-  skiffSessionInfo as registrySessionInfo,
-  skiffSessionSnapshot as registrySnapshot,
+  registerTrajectorySession as registryRegister,
+  unregisterTrajectorySession as registryUnregister,
+  trajectoryDirNameForSession as registryTrajectoryDirName,
+  trajectorySessionInfo as registrySessionInfo,
+  trajectorySessionSnapshot as registrySnapshot,
 } from './policy/window.js'
 import { sessionsRoot } from './core.js'
 import { hasTrajectoryPrompt } from './prompt.js'
@@ -58,60 +58,60 @@ import { waitAgentIdle } from './carrier.js'
 import { registerCognitiveTrajectorySkillSection } from '../seams/system-prompt.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
-export type { SkiffProfile }
+export type { TrajectoryConstraint }
 
 // ── 会话注册表（sessionId → 轨迹目录名 ＋ CCC；见 registry.ts 的 R↓）──
 
-const skiffAgents = new Map<string, Agent>()
+const trajectoryAgents = new Map<string, Agent>()
 
 /** 查 sessionId 承载的轨迹目录名（无 → null） */
-export function skiffTrajectoryDirNameFor(sessionId: string): string | null {
+export function trajectoryDirNameForSession(sessionId: string): string | null {
   return registryTrajectoryDirName(sessionId)
 }
 
 /** 查 sessionId 的会话绑定（轨迹 ＋ ccc；无 → null）——追问校验 */
-export function skiffSessionInfo(sessionId: string): { trajectoryDirName: string; ccc: string } | null {
+export function trajectorySessionInfo(sessionId: string): { trajectoryDirName: string; ccc: string } | null {
   return registrySessionInfo(sessionId)
 }
 
 /** 查 sessionId 的活体 agent（进程内会话延续用；未注册/已清理 → undefined） */
-export function getSkiffAgent(sessionId: string): Agent | undefined {
-  return skiffAgents.get(sessionId)
+export function getTrajectoryAgent(sessionId: string): Agent | undefined {
+  return trajectoryAgents.get(sessionId)
 }
 
-/** 该会话当前绑定的 skiff 约束面（不是 skiff → null）。**守门与提示词的唯一查询入口。** */
-export function skiffProfileFor(root: string, sessionId: string | undefined): SkiffProfile | null {
+/** 该会话当前绑定的 轨迹约束面（不是 轨迹约束 → null）。**守门与提示词的唯一查询入口。** */
+export function trajectoryConstraintFor(root: string, sessionId: string | undefined): TrajectoryConstraint | null {
   if (sessionId === undefined) return null
-  return skiffProfileForSession(root, sessionId, registryTrajectoryDirName(sessionId))
+  return trajectoryConstraintForSession(root, sessionId, registryTrajectoryDirName(sessionId))
 }
 
-export function registerSkiffSession(sessionId: string, trajectoryDirName: string, ccc: string, agent: Agent): void {
-  skiffAgents.set(sessionId, agent)
+export function registerTrajectorySession(sessionId: string, trajectoryDirName: string, ccc: string, agent: Agent): void {
+  trajectoryAgents.set(sessionId, agent)
   registryRegister(sessionId, trajectoryDirName, ccc)
 }
 
-export function unregisterSkiffSession(sessionId: string): void {
-  skiffAgents.delete(sessionId)
+export function unregisterTrajectorySession(sessionId: string): void {
+  trajectoryAgents.delete(sessionId)
   registryUnregister(sessionId)
 }
 
 /** 测试/调试：注册表快照 */
-export function skiffSessionSnapshot(): ReadonlyMap<string, { trajectoryDirName: string; ccc: string }> {
+export function trajectorySessionSnapshot(): ReadonlyMap<string, { trajectoryDirName: string; ccc: string }> {
   return new Map(registrySnapshot())
 }
 
 // ── 工作台（= 该轨迹自己的 SESSION.md，不再另建）──
 
 /**
- * 该 skiff 会话的**工作台路径** = 它自己轨迹的 SESSION.md。
+ * 该 轨迹约束会话的**工作台路径** = 它自己轨迹的 SESSION.md。
  *
- * 🔴 与旧版的差别：旧版会在这里**自动新建**一个 SESSION（`ensureSkiffSession`）；
- * 新版**没有新建这个动作** —— 轨迹就是工作台，`skiff.json` 与 `SESSION.md` 同处一个目录。
+ * 🔴 与旧版的差别：旧版会在这里**自动新建**一个 SESSION（`ensureTrajectorySession`）；
+ * 新版**没有新建这个动作** —— 轨迹就是工作台，`trajectory-constraint.json` 与 `SESSION.md` 同处一个目录。
  * ⇒ 语义变成纯粹的"查询：我自己的身体在哪"。
  *
- * @returns SESSION.md 绝对路径；不是 skiff / 文件不在 → null
+ * @returns SESSION.md 绝对路径；不是 轨迹约束 / 文件不在 → null
  */
-export function skiffWorkspaceMdPath(root: string, sessionId: string | undefined): string | null {
+export function trajectoryWorkspaceMdPath(root: string, sessionId: string | undefined): string | null {
   if (sessionId === undefined) return null
   const dirName = registryTrajectoryDirName(sessionId)
   if (dirName === null) return null
@@ -122,12 +122,12 @@ export function skiffWorkspaceMdPath(root: string, sessionId: string | undefined
 /**
  * 系统提示词中的**工作台纪律块**（S142 用户：只给路径 LLM 不会主动用）。
  *
- * SESSION = 工作台 —— skiff 与主舱同一套机制（**零特调**，用户拍板）：
+ * SESSION = 工作台 —— 轨迹约束与主舱同一套机制（**零特调**，用户拍板）：
  * SESSION.md 是持久记忆载体、rebuild 自动从本 SESSION 续接。
  * 注入 agent 系统提示词（用户对话面不可见）。
  *
  * v1.30.13（S142 诊断 D5）：写入纪律**不点名具体工具** —— 旧文案写死 "with write/edit"，
- * 而某个 skiff 的工具白名单里根本没有 write/edit ⇒ 指令指向它没有的工具
+ * 而某个 轨迹约束的工具白名单里根本没有 write/edit ⇒ 指令指向它没有的工具
  * （注入纪律与能力面矛盾，模型只能猜）。现文案改为「用本轨迹被授权的写入通道」。
  */
 export function workspaceCognitiveTrajectoryLine(mdPath: string): string {
@@ -162,10 +162,10 @@ interface SectionCapable {
 /**
  * 把**工作台纪律块**挂到 agent 的系统提示词段（单一注入点）。
  *
- * 用户原话（S142，2026-09-08）："微信桥的注入机制，每个用户消息都会注入，skiff 本身也会注入，
- * 这样就重复，能否微信桥情况下，注入内容直接取 skiff 的，这样不用配两遍"。
+ * 用户原话（S142，2026-09-08）："微信桥的注入机制，每个用户消息都会注入，轨迹约束本身也会注入，
+ * 这样就重复，能否微信桥情况下，注入内容直接取 轨迹约束的，这样不用配两遍"。
  *
- * 现形态：工作台行**只**经本函数挂系统提示词段（name `serenity-skiff-workspace`，
+ * 现形态：工作台行**只**经本函数挂系统提示词段（name `serenity-轨迹约束-workspace`，
  * 动态 `text()` 每轮按 scope 读当前活跃 mdPath）。
  *
  * @returns true = 段已在位；false = 该 agent 挂不上（调用方降级为 question 前缀注入）
@@ -177,25 +177,25 @@ export function ensureWorkspacePromptSection(agent: Agent, scope: string, root: 
   if (typeof api?.section !== 'function') return false
   try {
     api.section({
-      name: 'serenity-skiff-workspace',
-      // 排在基础段（serenity-skiff，-60）之后、CCC 提示词段之前
+      name: 'serenity-轨迹约束-workspace',
+      // 排在基础段（serenity-轨迹约束，-60）之后、CCC 提示词段之前
       order: -55,
       text: () => {
-        const mdPath = skiffWorkspaceMdPath(root, scope)
+        const mdPath = trajectoryWorkspaceMdPath(root, scope)
         return mdPath ? workspaceCognitiveTrajectoryLine(mdPath) : ''
       },
     })
     workspaceSectionAgents.add(agent)
     return true
   } catch (err) {
-    console.warn(`[serenity-hooks] skiff 工作台提示词段注册失败（回退 question 注入）: ${String((err as Error)?.message ?? err)}`)
+    console.warn(`[serenity-hooks] 轨迹约束 工作台提示词段注册失败（回退 question 注入）: ${String((err as Error)?.message ?? err)}`)
     return false
   }
 }
 
 // ── agent 生命周期 ──
 
-interface SkiffAgentRef {
+interface 轨迹约束AgentRef {
   handle: AgentHandle
   agent: Agent
   sessionId: string
@@ -203,35 +203,35 @@ interface SkiffAgentRef {
   resumed: boolean
 }
 
-/** skiff agent 挂载的 DSH preset（平台工具面由 preset 决定；白名单再按轨迹过滤） */
-const SKIFF_PRESET = 'standard'
+/** 轨迹约束 agent 挂载的 DSH preset（平台工具面由 preset 决定；白名单再按轨迹过滤） */
+const TRAJECTORY_PRESET = 'standard'
 
 /**
- * 创建（或复用）一个 skiff 会话。
+ * 创建（或复用）一个 轨迹约束会话。
  *
  * **固定 sessionId 的 resume-or-create**（v1.27.2）：指定 sessionId 且磁盘已有持久化 log →
  * `ctx.agents.resume`（DSH 持久化语义：sessionId 即身份，历史 + turn 续号延续）；
  * 无 log（首次）→ `ctx.agents.create`。不指定 → 随机 id 恒 create（调试页路径）。
  *
- * @param profile 该 skiff 的约束面（来自 `skiff.json`）
+ * @param profile 该 轨迹约束的约束面（来自 `trajectory-constraint.json`）
  * @param sessionId 指定会话 id（可选；微信桥等外部面用固定 id 实现"轨迹 ↔ 会话"长期映射）
  */
-export async function createSkiffAgent(
+export async function createTrajectoryAgent(
   ctx: Context,
   root: string,
-  profile: SkiffProfile,
+  profile: TrajectoryConstraint,
   defaultModel?: string,
   sessionId?: string,
-): Promise<SkiffAgentRef> {
-  if (!ctx.agents) throw new Error('skiff: ctx.agents unavailable')
+): Promise<轨迹约束AgentRef> {
+  if (!ctx.agents) throw new Error('轨迹约束: ctx.agents unavailable')
   const model = profile.model?.trim() || defaultModel || ''
-  const id = (sessionId ?? `skiff-${profile.code}-${randomUUID()}`) as SessionId
+  const id = (sessionId ?? `轨迹约束-${profile.code}-${randomUUID()}`) as SessionId
   const setup = async (agentCtx: Context) => {
     try {
       // 挂载 standard preset → agent 工具面含 read/grep/glob/web_search 等平台工具；
       // agentPresets 可选服务缺失（未装配）→ 跳过（回退全局工具层，不阻断创建）
       const presets = agentCtx.get('agentPresets') as { mount?: (c: Context, id: string) => Promise<unknown> } | undefined
-      await presets?.mount?.(agentCtx, SKIFF_PRESET)
+      await presets?.mount?.(agentCtx, TRAJECTORY_PRESET)
     } catch {
       /* preset 挂载失败不影响 agent 创建（白名单仍兜底约束） */
     }
@@ -243,7 +243,7 @@ export async function createSkiffAgent(
   // 🔴 热生效的**唯一判据 = 每次求值都重读配置**（owner 2026-10-19 令「工具清单也要热加载」）。
   //   两个事实：① 本 `text()` **每轮都被调用**；② 但 `profile` 是入参 = **创建时的快照**
   //   ⇒ 旧版即使每轮重算，算的也是冻结对象 ⇒ CCC 改了配置必须重启才生效。
-  //   ⇒ 现在每轮按 `profile.path` 重读 `skiff.json`；读不到（文件被删）就退回创建时那份。
+  //   ⇒ 现在每轮按 `profile.path` 重读 `trajectory-constraint.json`；读不到（文件被删）就退回创建时那份。
   //   ⚠️ 提示词**文件**另有它自己的热重载（createProfilePromptReader 按 mtime+size），
   //   但那份 reader 是用创建时的 profile 造的 ⇒ `systemPromptFile` 路径本身变了不生效
   //   ⇒ 这里按路径缓存 reader：路径不变就复用（保住 mtime 缓存），变了重建。
@@ -252,7 +252,7 @@ export async function createSkiffAgent(
   const livePrompt = (): string => {
     let live = profile
     try {
-      const fresh = readSkiffProfileAt(join(sessionsRoot(root), profile.dirName), root)
+      const fresh = readTrajectoryConstraintAt(join(sessionsRoot(root), profile.dirName), root)
       if (fresh) live = fresh
     } catch {
       /* 配置读取失败 ⇒ 沿用创建时那份（不阻断本轮） */
@@ -268,12 +268,12 @@ export async function createSkiffAgent(
   void livePrompt()
   try {
     agent.ctx.systemPrompt.section({
-      name: 'serenity-skiff',
+      name: 'serenity-轨迹约束',
       order: -60,
       // 🔴 **T2（2026-10-19）：本段不再"立人格"，只剩两件窄事** ——
-      //   ① 基础段 `buildSkiffBasePrompt`：**身份边界与能力发现路径**（"这是你，不是你演的角色"、
+      //   ① 基础段 `buildTrajectoryBasePrompt`：**身份边界与能力发现路径**（"这是你，不是你演的角色"、
       //      "能力面由机制强制、按 schema 与 msm() 目录现取"）；
-      //   ② **兼容期**：旧 `skiff.json` 的 `systemPromptFile` 正文。
+      //   ② **兼容期**：旧 `trajectory-constraint.json` 的 `systemPromptFile` 正文。
       //
       // 为什么②还留着：存量 CCC 的章程仍写在 `.opencode/skiff/<name>.md`，
       // 不迁也能继续工作 —— **不静默坏**。
@@ -284,27 +284,27 @@ export async function createSkiffAgent(
       //    判据由 `hasTrajectoryPrompt()` 给出（单一判据，不在这里自己拼路径）。
       text: () => {
         const legacy = hasTrajectoryPrompt(root, profile.dirName) ? '' : livePrompt()
-        return [buildSkiffBasePrompt(profile.code), legacy].filter(Boolean).join('\n')
+        return [buildTrajectoryBasePrompt(profile.code), legacy].filter(Boolean).join('\n')
       },
     })
   } catch (err) {
-    console.warn(`[serenity-hooks] skiff 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
+    console.warn(`[serenity-hooks] 轨迹约束 系统提示词注册失败: ${String((err as Error)?.message ?? err)}`)
   }
-  // CCC 级 `cognitiveTrajectory.skills` 与轨迹级 frontmatter 声明，同样送到 skiff 会话。
+  // CCC 级 `cognitiveTrajectory.skills` 与轨迹级 frontmatter 声明，同样送到 轨迹约束会话。
   //
-  // 为什么这不与"skiff 旁路 ACC 身份注入"矛盾（R↓）：旁路掉的是**ACC 身份与纪律**
-  // （skiff 用 CCC 自己的提示词立人格）；而 skill 供给是**工作资料**（"这件事按哪套方法做"），
+  // 为什么这不与"轨迹约束旁路 ACC 身份注入"矛盾（R↓）：旁路掉的是**ACC 身份与纪律**
+  // （轨迹约束 用 CCC 自己的提示词立人格）；而 skill 供给是**工作资料**（"这件事按哪套方法做"），
   // 与人格无关 ⇒ 照给。判据是「旁路的是谁的身份」，不是「凡是 ACC 的 section 都旁路」。
   if (agent?.session) {
     try {
       registerCognitiveTrajectorySkillSection(agent, root)
     } catch (err) {
-      console.warn(`[serenity-hooks] skiff 轨迹 skill 注入注册失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
+      console.warn(`[serenity-hooks] 轨迹约束轨迹 skill 注入注册失败（不影响 agent 创建）: ${String((err as Error)?.message ?? err)}`)
     }
   }
   // 工作台纪律块**只**经 ensureWorkspacePromptSection 挂（单一注入点）
-  if (skiffWorkspaceMdPath(root, id) !== null) ensureWorkspacePromptSection(agent, id, root)
-  registerSkiffSession(id, profile.dirName, root, agent)
+  if (trajectoryWorkspaceMdPath(root, id) !== null) ensureWorkspacePromptSection(agent, id, root)
+  registerTrajectorySession(id, profile.dirName, root, agent)
   return { handle, agent, sessionId: id, resumed: handle.resumed }
 }
 
@@ -345,7 +345,7 @@ async function createOrResumeAgent(
     return {
       ...await ctx.agents.create({
         sessionId: id,
-        meta: { cwd: root, agentPreset: SKIFF_PRESET },
+        meta: { cwd: root, agentPreset: TRAJECTORY_PRESET },
         setup,
         ...(model ? { agentOptions: splitModel(model) } : {}),
       }),
@@ -362,7 +362,7 @@ async function createOrResumeAgent(
     return {
       ...await ctx.agents.create({
         sessionId: id,
-        meta: { cwd: root, agentPreset: SKIFF_PRESET },
+        meta: { cwd: root, agentPreset: TRAJECTORY_PRESET },
         setup,
         ...(model ? { agentOptions: splitModel(model) } : {}),
       }),
@@ -388,12 +388,12 @@ async function createOrResumeAgent(
     // v1.27.2 用户拍板：**resume 失败一律降级新建**（透传会让桥静默"不唤醒"）+ 打印堆栈定位
     const msg = err instanceof Error ? err.message : String(err)
     const stack = err instanceof Error ? (err.stack ?? '') : ''
-    console.log(`[serenity-hooks] skiff resume 失败降级 create (id=${id}): ${msg}`)
-    if (stack) console.log(`[serenity-hooks] skiff resume stack:\n${stack.slice(0, 1200)}`)
+    console.log(`[serenity-hooks] 轨迹约束 resume 失败降级 create (id=${id}): ${msg}`)
+    if (stack) console.log(`[serenity-hooks] 轨迹约束 resume stack:\n${stack.slice(0, 1200)}`)
     return {
       ...await ctx.agents.create({
         sessionId: id,
-        meta: { cwd: root, agentPreset: SKIFF_PRESET },
+        meta: { cwd: root, agentPreset: TRAJECTORY_PRESET },
         setup,
         ...(model ? { agentOptions: splitModel(model) } : {}),
       }),
@@ -407,7 +407,7 @@ import { splitModel } from './delegate/core.js'
 
 // ── 提问（followup → 等本轮回答）──
 
-interface SkiffAskResult {
+interface 轨迹约束AskResult {
   answer: string
   sessionId: string
 }
@@ -486,12 +486,12 @@ export async function waitForTurnAssistant(
  *
  * @param options.timeoutMs 本轮等待上限（测试注入；生产用缺省）
  */
-export async function askSkiff(
+export async function askTrajectory(
   ctx: Context,
   agent: Agent,
   question: string,
   options?: { timeoutMs?: number },
-): Promise<SkiffAskResult> {
+): Promise<轨迹约束AskResult> {
   const beforeAssistant = countAssistantMessages(agent.session)
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
   const produced = await waitForTurnAssistant(ctx, agent, beforeAssistant, { timeoutMs: options?.timeoutMs })
@@ -503,25 +503,25 @@ export async function askSkiff(
 // ── 守门查询（seams / guards 用；全部走 profile.ts 的单一判据）──
 
 /**
- * skiff 会话的轨迹纪律参与判定：**不是 skiff 恒 true**（正常参与）；
- * skiff 按 `skiff.json` 的 `cognitiveTrajectory` 子集决定。
+ * 轨迹约束会话的轨迹纪律参与判定：**不是 轨迹约束恒 true**（正常参与）；
+ * 轨迹约束 按 `trajectory-constraint.json` 的 `cognitiveTrajectory` 子集决定。
  *
- * 注册表缺失（进程刚重启、绑定还没读）⇒ 由 `skiffProfileForSession` 回落持久绑定；
- * 两者都不中 ⇒ 判"不是 skiff" ⇒ 恒 true（正常参与）。**fail-open 是有意的**：
+ * 注册表缺失（进程刚重启、绑定还没读）⇒ 由 `trajectoryConstraintForSession` 回落持久绑定；
+ * 两者都不中 ⇒ 判"不是 轨迹约束" ⇒ 恒 true（正常参与）。**fail-open 是有意的**：
  * 纪律参与项的失败不该让会话失去 keeper/rebuild（那是能力倒退，比多跑一次更糟）。
  */
-export function skiffCognitiveTrajectoryEnabled(
+export function trajectoryConstraintParticipates(
   root: string,
   sessionId: string | undefined,
   key: 'session' | 'keeper' | 'rebuild',
 ): boolean {
   if (sessionId === undefined) return true
-  const profile = skiffProfileFor(root, sessionId)
+  const profile = trajectoryConstraintFor(root, sessionId)
   if (profile === null) return true
-  return profileCognitiveTrajectory(profile)[key]
+  return constraintCognitiveTrajectory(profile)[key]
 }
 
-interface SkiffMsmGate {
+interface 轨迹约束MsmGate {
   /** 拒绝原因（有则拒绝执行） */
   reject?: string
   /** list 显示白名单（msms）；仅 action==='list' 时有值 */
@@ -529,16 +529,16 @@ interface SkiffMsmGate {
 }
 
 /**
- * `msm` 工具的 skiff 门控：非 skiff 恒放行；skiff 会话——
+ * `msm` 工具的 轨迹约束门控：非 轨迹约束恒放行；轨迹约束会话——
  * exec 非白名单 MSM 拒绝（**不列名单**）、register/deregister 必拒、
  * list 白名单过滤、check/guide/ccc-config 只读放行。
  */
-export function skiffMsmGate(root: string, sessionId: string | undefined, action: string, name?: string): SkiffMsmGate {
+export function trajectoryConstraintMsmGate(root: string, sessionId: string | undefined, action: string, name?: string): 轨迹约束MsmGate {
   if (sessionId === undefined) return {}
-  const profile = skiffProfileFor(root, sessionId)
+  const profile = trajectoryConstraintFor(root, sessionId)
   if (profile === null) return {}
   if (action === 'register' || action === 'deregister') {
-    return { reject: 'register/deregister is not allowed in skiff sessions' }
+    return { reject: 'register/deregister is not allowed in 轨迹约束 sessions' }
   }
   if (action === 'exec') {
     if (!name || !profile.msms.includes(name)) return { reject: 'MSM not allowed' }
@@ -548,24 +548,24 @@ export function skiffMsmGate(root: string, sessionId: string | undefined, action
   return {} // check / guide / ccc-config：只读放行
 }
 
-/** 该 skiff 会话的工具白名单（guards 的 schema 收窄用） */
-export function skiffToolWhitelist(root: string, sessionId: string | undefined): Set<string> | null {
+/** 该 轨迹约束会话的工具白名单（guards 的 schema 收窄用） */
+export function 轨迹约束ToolWhitelist(root: string, sessionId: string | undefined): Set<string> | null {
   if (sessionId === undefined) return null
-  const profile = skiffProfileFor(root, sessionId)
+  const profile = trajectoryConstraintFor(root, sessionId)
   return profile === null ? null : profileToolWhitelist(profile)
 }
 
-/** 按编码解析 skiff（路由/调试页/审计用） */
-export function skiffProfileByCode(root: string, code: string): SkiffProfile | null {
-  return readSkiffProfileByCode(root, code)
+/** 按编码解析 轨迹约束（路由/调试页/审计用） */
+export function trajectoryConstraintByCode(root: string, code: string): TrajectoryConstraint | null {
+  return readTrajectoryConstraintByCode(root, code)
 }
 
 /** 编码 → 轨迹目录名（路由用；只做精确匹配） */
-export function skiffDirNameByCode(root: string, code: string): string | null {
+export function 轨迹约束DirNameByCode(root: string, code: string): string | null {
   return findDirNameByCode(root, code)
 }
 
 /** 一次性解析提示词全文（admin/validate 用；热路径不要用） */
-export function skiffSystemPrompt(root: string, profile: SkiffProfile | null | undefined): string {
-  return resolveProfileSystemPrompt(root, profile)
+export function 轨迹约束SystemPrompt(root: string, profile: TrajectoryConstraint | null | undefined): string {
+  return resolveConstraintSystemPrompt(root, profile)
 }

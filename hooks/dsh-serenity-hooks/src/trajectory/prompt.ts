@@ -8,7 +8,7 @@
  * **轨迹提示词** = 一条认知轨迹的**可编辑章程声明**，由 ACC 按固定顺序装配进系统提示词。
  * 三个关键词各是一条判据：
  * - **可编辑**：住在 CCC（盘上），改它**不发版**（D23 归属判据的直接推论）
- * - **声明**：它声明**身份／章程／方法论**，**不声明能力**（能力面归 `skiff.json` 白名单与工具 schema）
+ * - **声明**：它声明**身份／章程／方法论**，**不声明能力**（能力面归 `trajectory-constraint.json` 白名单与工具 schema）
  * - **固定顺序**：装配顺序由 ACC 定死（见 `seams/system-prompt.ts` 的 ⑧ 位）
  *
  * ## 为什么取代「人格」
@@ -23,20 +23,20 @@
  *
  * - **跟着轨迹走**：`archive` 时整个目录搬走，章程不会掉队（旧形态 `.opencode/skiff/<name>.md`
  *   与轨迹**分居两处** —— 多条轨迹共用一份文件正是那个后果）。
- * - **每条轨迹都能有**：不只是 skiff。普通轨迹同样需要"我是谁、按什么章程"。
- * - 与 `SESSION.md`（身体：延续/日志）、`skiff.json`（约束面：能力）三件并列，
+ * - **每条轨迹都能有**：不只是 轨迹约束。普通轨迹同样需要"我是谁、按什么章程"。
+ * - 与 `SESSION.md`（身体：延续/日志）、`trajectory-constraint.json`（约束面：能力）三件并列，
  *   各管一件事，不合并（合并会让"改能力"与"改身份"互相牵连）。
  *
  * ## 兼容（不静默坏）
  *
- * `PROMPT.md` 不存在时**不报错**（普通轨迹常态）。skiff 的旧字段 `systemPromptFile`
+ * `PROMPT.md` 不存在时**不报错**（普通轨迹常态）。轨迹约束的旧字段 `systemPromptFile`
  * 在兼容期仍被读取——优先级见 {@link resolveTrajectoryPrompt}。
  */
 
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readUtf8 } from '../kernel/ccc.js'
-import type { SkiffProfile } from './policy/profile.js'
+import type { TrajectoryConstraint } from './policy/profile.js'
 import { sessionsRoot } from './core.js'
 
 /** 轨迹提示词的固定文件名（**判据就是它存在**——不是目录名前缀，也不是配置里的一行） */
@@ -46,8 +46,8 @@ export const TRAJECTORY_PROMPT_FILENAME = 'PROMPT.md'
 export interface TrajectoryPromptResolution {
   /** 提示词正文（已 trim）；无来源 ⇒ 空串 */
   text: string
-  /** 来源：轨迹目录的 PROMPT.md ／ skiff 旧字段 ／ 无 */
-  source: 'trajectory-file' | 'skiff-legacy' | 'none'
+  /** 来源：轨迹目录的 PROMPT.md ／ 轨迹约束 旧字段 ／ 无 */
+  source: 'trajectory-file' | '轨迹约束-legacy' | 'none'
   /** 实际读取的绝对路径（`none` ⇒ null） */
   path: string | null
 }
@@ -62,9 +62,9 @@ export function trajectoryPromptPath(root: string, dirName: string): string {
 /**
  * 该轨迹**有没有**轨迹提示词（单一判据）。
  *
- * 用途：兼容期的"让位"判定 —— 若已有 `PROMPT.md`，skiff 旧字段 `systemPromptFile`
- * 必须**让位**，否则同一份章程会在两处各注入一遍（第 ⑧ 段 ＋ `serenity-skiff` 段）。
- * 🔴 判据只有这一处：别在 skiff 那边自己拼路径再判（两处会漂）。
+ * 用途：兼容期的"让位"判定 —— 若已有 `PROMPT.md`，轨迹约束 旧字段 `systemPromptFile`
+ * 必须**让位**，否则同一份章程会在两处各注入一遍（第 ⑧ 段 ＋ `serenity-轨迹约束` 段）。
+ * 🔴 判据只有这一处：别在 轨迹约束那边自己拼路径再判（两处会漂）。
  */
 export function hasTrajectoryPrompt(root: string, dirName: string): boolean {
   try {
@@ -81,7 +81,7 @@ export function hasTrajectoryPrompt(root: string, dirName: string): boolean {
  *
  * 优先级（**确定性，只有这一条**）：
  *   ① `<轨迹目录>/PROMPT.md` —— 新形态，**所有轨迹**都能有
- *   ② skiff 的 `systemPromptFile` —— **兼容期**旧形态（存量 CCC 不必同批迁移）
+ *   ② 轨迹约束的 `systemPromptFile` —— **兼容期**旧形态（存量 CCC 不必同批迁移）
  *   ③ 无 ⇒ 空串（**不是错误**：没有章程的轨迹是常态）
  *
  * ⚠️ 读失败（权限/坏文件）⇒ 空串而不是抛错：提示词读不到不该阻断会话创建；
@@ -90,7 +90,7 @@ export function hasTrajectoryPrompt(root: string, dirName: string): boolean {
 export function resolveTrajectoryPrompt(
   root: string,
   dirName: string,
-  legacyProfile?: SkiffProfile | null,
+  legacyProfile?: TrajectoryConstraint | null,
 ): TrajectoryPromptResolution {
   const own = trajectoryPromptPath(root, dirName)
   try {
@@ -100,14 +100,14 @@ export function resolveTrajectoryPrompt(
   } catch {
     /* 落到兼容分支（下面会告警的是 reader 版本；这里保持"解析不抛错"） */
   }
-  // ② 兼容期：skiff 的旧字段（它自己已做过路径逃逸拒绝）
+  // ② 兼容期：轨迹约束的旧字段（它自己已做过路径逃逸拒绝）
   const legacyFile = legacyProfile?.systemPromptFile?.trim()
   if (legacyFile) {
-    return { text: '', source: 'skiff-legacy', path: legacyFile }
+    return { text: '', source: '轨迹约束-legacy', path: legacyFile }
   }
   const inline = legacyProfile?.systemPrompt?.trim()
   if (inline) {
-    return { text: inline, source: 'skiff-legacy', path: null }
+    return { text: inline, source: '轨迹约束-legacy', path: null }
   }
   return EMPTY
 }

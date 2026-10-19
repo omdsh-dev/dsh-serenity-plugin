@@ -47,9 +47,9 @@ const MECHANISM_WORDS: string[] = [
   '拦截缝',
   '装配层',
   'acp-core',
-  'skiff-core',
-  'skiff-registry',
-  'skiff-role',
+  'trajectory-session',
+  'trajectory-window',
+  'trajectory-constraint',
   'output-guard',
 ]
 

@@ -17,7 +17,7 @@
  *   **没有任何测试会红** —— 这正是"声明—现实一致"（I7）意义上的静默缺口。
  *
  * 逐处清单（源码行 = 本件写作时的锚）：
- *   L1 :45  `unregisterSkiffSession` 抛
+ *   L1 :45  `unregisterTrajectorySession` 抛
  *   L2 :50  `clearActiveSessionInfo` 抛
  *   L3 :56  `forgetManualOutputSession` 抛
  *   L4 :62  `forgetImBridgeVisibility` 抛
@@ -43,7 +43,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// 与既有 lifecycle.test.ts 同款 mock（依赖链经 skiff-core 引宿主 peerDep）
+// 与既有 lifecycle.test.ts 同款 mock（依赖链经 trajectory-session 引宿主 peerDep）
 vi.mock('@deepseek-ai/dsh-llm', () => ({ createUserMessage: (o: unknown) => o }))
 vi.mock('@deepseek-ai/dsh-settings', () => ({
   installSettingsSection: () => {},
@@ -80,10 +80,10 @@ vi.mock('../../src/trajectory/session.js', async (orig) => {
   const actual = await orig<typeof import('../../src/trajectory/session.js')>()
   return {
     ...actual,
-    unregisterSkiffSession: (id: string) => {
-      calls.push('unregisterSkiffSession')
-      if (throwSet.has('unregisterSkiffSession')) throw new Error('boom: skiff')
-      return actual.unregisterSkiffSession(id)
+    unregisterTrajectorySession: (id: string) => {
+      calls.push('unregisterTrajectorySession')
+      if (throwSet.has('unregisterTrajectorySession')) throw new Error('boom: 轨迹约束')
+      return actual.unregisterTrajectorySession(id)
     },
   }
 })
@@ -170,7 +170,7 @@ import { registerLifecycle } from '../../src/seams/lifecycle.js'
 
 /** 六步清理的名字（顺序与源码一致；本件用它做"全部执行"的判据） */
 const SIX_STEPS = [
-  'unregisterSkiffSession',
+  'unregisterTrajectorySession',
   'clearActiveSessionInfo',
   'forgetManualOutputSession',
   'forgetImBridgeVisibility',
@@ -197,8 +197,8 @@ describe('lifecycle 吞异常面: cleanupSessionState 的六步（L1~L6）', () 
 
   // ── 逐处：某一步抛 ⇒ 吞掉，且**其余各步仍全部执行** ──────────────────────
 
-  it('L1 `unregisterSkiffSession` 抛 ⇒ 吞掉，其余五步仍全跑', () => {
-    throwSet.add('unregisterSkiffSession')
+  it('L1 `unregisterTrajectorySession` 抛 ⇒ 吞掉，其余五步仍全跑', () => {
+    throwSet.add('unregisterTrajectorySession')
     expect(() => cleanupSessionState('s-l1')).not.toThrow()
     expect(calls).toEqual([...SIX_STEPS])
   })

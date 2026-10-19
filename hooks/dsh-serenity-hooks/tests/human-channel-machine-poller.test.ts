@@ -51,8 +51,8 @@ import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSet
 import { __resetPollersForTest, pollerOwners } from '../src/im/inbound.js'
 import { writeWeixinCredential } from '../src/im/route.js'
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
-import { makeTrajectory } from './helpers/skiff-fixture.js'
+import { registerTrajectorySession, unregisterTrajectorySession, trajectorySessionSnapshot } from '../src/trajectory/session.js'
+import { makeTrajectory } from './helpers/trajectory-constraint-fixture.js'
 
 /** 机器级账号行 */
 function acct(id: string, channel: string | undefined, token: string | undefined, enabled = true) {
@@ -76,10 +76,10 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
   /**
    * 造一个 CCC 根：`weixin` 启用 ＋ 一个已绑定凭据的账号 ＋ **一条编码为 `qa` 的认知轨迹**。
    *
-   * 🔴 2026-10-19：`serenity.json` 的 `skiff.roles` 整段退役 ⇒ 路由目标不再是"角色名"，
+   * 🔴 2026-10-19：`serenity.json` 的 `轨迹约束.roles` 整段退役 ⇒ 路由目标不再是"角色名"，
    *    而是**认知轨迹编码**；桥投递前会 `findDirNameByCode(root, code)` 查这条轨迹，
    *    查不到就是"目标不存在"（响亮报错 ＋ 留痕）⇒ 正控用例**必须先造出这条轨迹**。
-   *    skiff 约束面改由轨迹目录下的 `skiff.json` 承载（`makeTrajectory` 的第三个入参）。
+   *    轨迹约束面改由轨迹目录下的 `trajectory-constraint.json` 承载（`makeTrajectory` 的第三个入参）。
    */
   function makeCcc(token: string): string {
     const d = mkdtempSync(join(tmpdir(), 'hc-machine-ccc-'))
@@ -134,7 +134,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     __setWeixinFetchForTest(null)
     const { resetWeixinTypingCache } = await import('../src/im/bridge.js')
     resetWeixinTypingCache()
-    for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
+    for (const [id] of trajectorySessionSnapshot()) unregisterTrajectorySession(id)
     if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
     else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
     if (oldAuditEnv === undefined) delete process.env.SERENITY_HUMAN_CHANNEL_AUDIT
@@ -262,7 +262,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    expect(skiffSessionSnapshot().size).toBe(0) // ← 一条会话都没建
+    expect(trajectorySessionSnapshot().size).toBe(0) // ← 一条会话都没建
     const ls = auditLines()
     expect(ls).toHaveLength(1)
     expect(ls[0]!.kind).toBe('inbound-unrouted')
@@ -310,7 +310,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    expect(skiffSessionSnapshot().size).toBe(1) // ← 会话真的建了
+    expect(trajectorySessionSnapshot().size).toBe(1) // ← 会话真的建了
     expect(questions.join('\n')).toContain('你好') // ← 消息真的到了角色面前
     expect(auditLines()).toHaveLength(0) // 投递成功 ⇒ 不留痕
     rmSync(a, { recursive: true, force: true })
@@ -357,7 +357,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
       from_user_id: 'u1@im.wechat',
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
-    expect(skiffSessionSnapshot().size).toBe(1) // ← 机器级模式**投到了**（没被 enabled:false 挡住）
+    expect(trajectorySessionSnapshot().size).toBe(1) // ← 机器级模式**投到了**（没被 enabled:false 挡住）
 
     // 🔴 **对照（缺了它这条断言就是空的）**：同一份 CCC 配置走 **CCC 模式**（`handleIncoming`）
     //    会被 `enabled:false` 挡在门外 ⇒ 证明上面那一格"投到了"**确实是机器级模式带来的**，
@@ -367,7 +367,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
       from_user_id: 'u2@im.wechat',
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
-    expect(skiffSessionSnapshot().size).toBe(1) // ← 仍是 1：CCC 模式**一条都没建**
+    expect(trajectorySessionSnapshot().size).toBe(1) // ← 仍是 1：CCC 模式**一条都没建**
 
     rmSync(a, { recursive: true, force: true })
   })

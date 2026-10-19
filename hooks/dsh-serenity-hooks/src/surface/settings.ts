@@ -15,7 +15,7 @@
  * ## 为什么旧扁平键**原样保留**（这是本文件最容易被后人改错的地方）
  *
  * 旧模型把简单配置存成 `~/.dsh/settings.yaml` 的 `serenity-hooks:` 段，字段名是**扁平**的
- * （`gatewayEnabled` / `skiffEnabled` / …）。新模型的命名空间**逐字相同**
+ * （`gatewayEnabled` / `轨迹约束Enabled` / …）。新模型的命名空间**逐字相同**
  * （`serenity-hooks`），而宿主的 `SettingsForms.importLegacyDocument()` 会把该段
  * **按同名条目导入**；schemastery 的 object 解析在非 strict 模式下 `merge(result, data)`
  * ⇒ **未声明的键会被保留而非报错**。⇒ 只要这些扁平键**仍在本插件 Config 里声明**，
@@ -45,7 +45,7 @@
 import type { Context, Volatile } from 'cordis'
 import { hostSettings } from '../host/access.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
-// ⚠️ 2026-10-19：`SKIFF_DEBUG_PORT` 随 Skiff 调试面（3099）退役而不再被本文件使用。
+// ⚠️ 2026-10-19：`RETIRED_SK_DEBUG_PORT` 随 轨迹约束调试面（3099）退役而不再被本文件使用。
 
 /**
  * 面板层布尔键的**两种来法**（v1.47.2）：
@@ -63,9 +63,9 @@ interface SimpleConfigFragment {
   gateway?: { enabled?: boolean }
   // 🔴 v1.49.0：`rebuild.enabled` 与扁平键 `rebuildEnabled` 均已砍掉（owner 2026-09-26 裁决）
   rebuild?: { thresholdK?: number }
-  /** F4 Skiff（实验性）：调试服务启停（人工） */
-  skiff?: { enabled?: boolean; debugPort?: number }
-  /** F4 Skiff（实验性）：调试服务启停（人工） */
+  /** F4 轨迹约束（实验性）：调试服务启停（人工） */
+  轨迹约束?: { enabled?: boolean; debugPort?: number }
+  /** F4 轨迹约束（实验性）：调试服务启停（人工） */
   /** diagram（实验性 demo；2026-09-29 owner 具名令 D104）：标签源码 → 进程内出图（不借浏览器） */
   diagram?: { enabled?: boolean }
   // ⚠️ `acpFace?` **已删除**（owner 2026-10-19 裁整面移除 ACP）。旧配置残留 ⇒ 静默忽略。
@@ -75,7 +75,7 @@ interface SimpleConfigFragment {
   gatewayEnabled?: PanelBoolean
   // 🔴 v1.49.0：`rebuildEnabled` 面板键已砍掉（超限重建恒开、无总闸；owner 2026-09-26 裁决）
   rebuildThresholdK?: PanelNumber
-  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 面板键已删（Skiff 调试面 3099 整条退役）。
+  // ⛔ 2026-10-19：`轨迹约束Enabled` / `轨迹约束DebugPort` 面板键已删（轨迹约束调试面 3099 整条退役）。
   //    旧配置残留 ⇒ 静默忽略（同 `rebuildEnabled` / `unattendedEnabled` 的处置）。
   croEnabled?: PanelBoolean
   // 🔴 v1.63.3：`unattendedEnabled` 面板键已砍掉（无人值守功能整条退役；owner 2026-10-18 裁决）
@@ -98,8 +98,8 @@ interface SerenitySimpleSettings {
   // 触发阈值 `rebuildThresholdK` **仍在**（面板那个滑块不动）⇒ 要调敏感度改阈值即可。
   /** F2 触发阈值（需求① S142 用户拍板：百分比比例 → K 数值；projectedTokens ≥ thresholdK*1000 触发） */
   rebuildThresholdK: number
-  // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 已随 Skiff 调试面（3099）整条退役删除。
-  //    🔴 注意区分：退役的是**调试 HTTP 面**；`skiff.json` 的**轨迹约束面机制**仍在用
+  // ⛔ 2026-10-19：`轨迹约束Enabled` / `轨迹约束DebugPort` 已随 轨迹约束调试面（3099）整条退役删除。
+  //    🔴 注意区分：退役的是**调试 HTTP 面**；`trajectory-constraint.json` 的**轨迹约束面机制**仍在用
   //    （判据 = `trajectory/policy/profile.ts`），它本来也不经这两个键。
   // 🔴 2026-10-15（owner 裁「砍掉外部问答」）：面 E 三个键（`acpEnabled`／`acpHttpPort`／
   // `publicAskEnabled`）**已整组退役** —— 自造 ACP 面被官方 `dsh --profile acp` ＋ 现成客户端取代。
@@ -124,7 +124,7 @@ interface SerenitySimpleSettings {
    *  `parseDsl → renderDsl（SVG ＋ 四项体检）→ resvg-wasm 光栅化（内置字体）→ PNG`，
    *  产物落 CCC `_tmp/diagram/` 且**图片块进对话**（**不借浏览器、不截图**）。
    *  **缺省关**：owner 口中的"demo 功能" ⇒ 关时**不注册**（工具不进模型工具清单：
-   *  零 token、不会被误调），同 `skiff` 的"未开启零资源占用"口径。
+   *  零 token、不会被误调），同 `轨迹约束` 的"未开启零资源占用"口径。
    *  依赖面：随包分发 3.8 MB 内置字体（`assets/diagram/`，wasm 对系统字体不可见）。 */
   diagramEnabled: boolean
   // ⚠️ `acpFaceEnabled` / `acpFacePort` **已删除**（owner 2026-10-19 裁「完整删除整个 ACP 的实现」）。
@@ -163,7 +163,7 @@ interface VolatileRef<T> {
  *    `meta.volatile` **无条件**包 `createVolatile(value)`，且该分支排在"缺省值回退"那一段
  *    **之前** ⇒ **"用户没设过"的字段也是恒真对象**（`.get()` 返回 `undefined`），**不是 `undefined`**。
  *
- * ⇒ 若这里不解包，下面十行的 `??` 链会**短路在这层包装上** ⇒ 网关 / Skiff 会被
+ * ⇒ 若这里不解包，下面十行的 `??` 链会**短路在这层包装上** ⇒ 网关 / 轨迹约束 会被
  * **无意打开**（比"面板不显示"更坏：静默改变对外暴露面）。
  *
  * ## 为什么用结构判定
@@ -296,7 +296,7 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
     // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` **已砍掉** —— 超限重建恒开、无总闸。
     // 旧配置残留该键 ⇒ 不进本结构、无人读（静默忽略）。
     rebuildThresholdK: unwrapVolatile(config.rebuildThresholdK) ?? config.rebuild?.thresholdK ?? d.rebuildThresholdK,
-    // ⛔ 2026-10-19：`skiffEnabled` / `skiffDebugPort` 已随 Skiff 调试面（3099）整条退役，
+    // ⛔ 2026-10-19：`轨迹约束Enabled` / `轨迹约束DebugPort` 已随 轨迹约束调试面（3099）整条退役，
     // 不再进本结构（旧配置残留 ⇒ 静默忽略，无人读）。
     // 🔴 2026-10-15：面 E 三个键（`acpEnabled`／`acpHttpPort`／`publicAskEnabled`）**已整组退役**，
     // 不再进本结构（旧配置残留 ⇒ 静默忽略，无人读）。
@@ -313,7 +313,7 @@ export function simpleSettingsFromConfig(config: SimpleConfigFragment): Serenity
 let simpleSource: (() => SerenitySimpleSettings) | null = null
 
 /**
- * 读取当前简单配置（各功能 gateway/rebuild/skiff/… 的启动与运行时判断都经此）。
+ * 读取当前简单配置（各功能 gateway/rebuild/轨迹约束/… 的启动与运行时判断都经此）。
  *
  * 源 = 本插件 fiber 的 `config`（宿主在配置变更时走 `fiber.update()` ⇒ `config` 始终最新，
  * **不必**依赖 apply 重跑，也不必缓存）。

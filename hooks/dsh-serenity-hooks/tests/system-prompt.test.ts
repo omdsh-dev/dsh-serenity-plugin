@@ -17,7 +17,7 @@ import {
   codeModeAdaptationLine,
 } from '../src/seams/system-prompt.js'
 import { ACC_VERSION } from '../src/kernel/constants.js'
-import { makeSkiffSession } from './helpers/skiff-fixture.js'
+import { make轨迹约束Session } from './helpers/trajectory-constraint-fixture.js'
 
 let dir: string
 
@@ -173,7 +173,7 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     expect((captured!.text as (c: unknown) => string)({})).toBe('')
   })
 
-  it('🔴 T2 翻转：skiff 会话**不再旁路** —— 与普通会话走同一条装配（旁路已删除）', () => {
+  it('🔴 T2 翻转：轨迹约束会话**不再旁路** —— 与普通会话走同一条装配（旁路已删除）', () => {
     let captured: { name: string; order: number; text: unknown } | null = null
     const fakeCtx = {
       systemPrompt: {
@@ -184,21 +184,21 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     }
     registerEntrySkillSectionGlobal(fakeCtx as never)
     setupCccWithSkill('other-serenity')
-    // 🔴 2026-10-19 T2：旧语义是「skiff 会话 ⇒ 空（CCC 提示词全替换）」。
-    //    现在**删掉了那条旁路**：所有轨迹走同一条装配，skiff 的差异只剩能力约束面。
+    // 🔴 2026-10-19 T2：旧语义是「轨迹约束会话 ⇒ 空（CCC 提示词全替换）」。
+    //    现在**删掉了那条旁路**：所有轨迹走同一条装配，轨迹约束的差异只剩能力约束面。
     //    ⚠️ 配对负控（上一版是正控，这里必须反过来）：普通会话**同样**注入 —— 若哪天
     //    "注入"变成恒真（比如函数直接 return 常量），这条就不再承重，故两条一起看。
-    const SESSION = 'skiff-qa-readonly-uuid'
-    makeSkiffSession(dir, SESSION, 'qa-readonly')
-    const ctxSkiff = { agent: { session: { id: SESSION, header: { cwd: dir } } } }
-    const skiffText = (captured!.text as (c: unknown) => string)(ctxSkiff)
-    expect(skiffText).toContain('=== Serenity ACC ===')
+    const SESSION = '轨迹约束-qa-readonly-uuid'
+    make轨迹约束Session(dir, SESSION, 'qa-readonly')
+    const ctx轨迹约束 = { agent: { session: { id: SESSION, header: { cwd: dir } } } }
+    const 轨迹约束Text = (captured!.text as (c: unknown) => string)(ctx轨迹约束)
+    expect(轨迹约束Text).toContain('=== Serenity ACC ===')
     // 对照：普通会话仍是同一套容器层（两者在**容器层**上已无差别）
     const ctxNormal = { agent: { session: { id: 'main-1', header: { cwd: dir } } } }
     expect((captured!.text as (c: unknown) => string)(ctxNormal)).toContain('=== Serenity ACC ===')
   })
 
-  it('🔴 负控：仅有 `skiff-` 前缀、但轨迹没有 skiff.json ⇒ **仍注入**（前缀不再是判据）', () => {
+  it('🔴 负控：仅有 `轨迹约束-` 前缀、但轨迹没有 trajectory-constraint.json ⇒ **仍注入**（前缀不再是判据）', () => {
     let captured: { name: string; order: number; text: unknown } | null = null
     const fakeCtx = {
       systemPrompt: {
@@ -210,7 +210,7 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     registerEntrySkillSectionGlobal(fakeCtx as never)
     setupCccWithSkill('other-serenity')
     // 前缀在、轨迹无 ⇒ 这是"普通认知轨迹"，必须照常拿到 ACC 身份
-    const ctx = { agent: { session: { id: 'skiff-prefix-only-no-profile', header: { cwd: dir } } } }
+    const ctx = { agent: { session: { id: '轨迹约束-prefix-only-no-profile', header: { cwd: dir } } } }
     expect((captured!.text as (c: unknown) => string)(ctx)).toContain('=== Serenity ACC ===')
   })
 
@@ -300,12 +300,12 @@ describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第
     expect(out).not.toBe('')
   })
 
-  it('🔴 T2 翻转：scoped 版**也删掉了 skiff 旁路** —— 兜底闸不再按 skiff 返回空', () => {
+  it('🔴 T2 翻转：scoped 版**也删掉了 轨迹约束旁路** —— 兜底闸不再按 轨迹约束 返回空', () => {
     setupCccWithSkill('other-serenity')
-    // 🔴 2026-10-19 T2：旧语义是「scope 绑定的轨迹有 skiff.json ⇒ 空」。
+    // 🔴 2026-10-19 T2：旧语义是「scope 绑定的轨迹有 trajectory-constraint.json ⇒ 空」。
     //    现在不是了：装配只剩一条路径（旁路在全局版与 scoped 版**同时删除**）。
-    makeSkiffSession(dir, 'skiff-qa-readonly-probe-4', 'qa-readonly', undefined, 'probe')
-    const { agent, captured } = fakeAgent('skiff-qa-readonly-probe-4', dir)
+    make轨迹约束Session(dir, '轨迹约束-qa-readonly-probe-4', 'qa-readonly', undefined, 'probe')
+    const { agent, captured } = fakeAgent('轨迹约束-qa-readonly-probe-4', dir)
     registerEntrySkillSection(agent as never, dir)
     expect(captured()!.text({})).toContain('=== Serenity ACC ===')
   })

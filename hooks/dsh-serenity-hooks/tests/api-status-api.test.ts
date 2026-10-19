@@ -31,8 +31,8 @@ import { tmpdir } from 'node:os'
 import { IMAGE_UPLOAD_DIR, registerStatusApi } from '../src/surface/http.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 // 🔴 2026-10-19：微信桥路由的目标是**认知轨迹编码**，`save-routes` 会校验该轨迹在 CCC 里真实存在
-//    ⇒ "保存成功"的前置 = 先造出那条轨迹（夹具是造 skiff/轨迹数据的唯一入口）。
-import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
+//    ⇒ "保存成功"的前置 = 先造出那条轨迹（夹具是造 轨迹约束/轨迹数据的唯一入口）。
+import { makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => unknown
 
@@ -684,8 +684,8 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
   }
 
   it('save-routes：形状不合 ⇒ 400（非数组 ／ 空 user ／ 空 trajectory）；**省略 routes = 清空表**（整体替换语义）', async () => {
-    // 🔴 2026-10-19：`serenity.json` 的 `skiff.roles` 段已**退役**（约束面搬进轨迹目录的
-    //    `skiff.json`）⇒ 本组不再写任何 skiff 配置，路由目标改为**认知轨迹编码**。
+    // 🔴 2026-10-19：`serenity.json` 的 `轨迹约束.roles` 段已**退役**（约束面搬进轨迹目录的
+    //    `trajectory-constraint.json`）⇒ 本组不再写任何 轨迹约束 配置，路由目标改为**认知轨迹编码**。
     writeCccConfig({})
     const api = await bootApi()
     try {
@@ -706,7 +706,7 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
       // 先存一条，再用"省略 routes"把它清掉 —— 钉住「整体替换」语义
       // （首跑时我把它当成"非法输入"，实测是 200：`body.routes ?? []`）
       // 🔴 保存成功的前置：目标轨迹必须**真实存在**（save-routes 校验 `findDirNameByCode`）
-      makeTrajectory(ccc, 'qa', skiffJson({}), '桥接目标')
+      makeTrajectory(ccc, 'qa', 轨迹约束Json({}), '桥接目标')
       await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', trajectory: 'qa' }] })
       expect(readCccConfig().weixin?.routes).toEqual([{ user: 'u1', trajectory: 'qa' }])
 
@@ -725,7 +725,7 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
   })
 
   it('🔴 save-routes：目标必须是该 CCC 里**真实存在的认知轨迹**；合法时**真写进 CCC 配置**', async () => {
-    // 🔴 2026-10-19 换被测对象（不是改断言）：旧判据是"角色 ∈ serenity.json 的 `skiff.roles`"
+    // 🔴 2026-10-19 换被测对象（不是改断言）：旧判据是"角色 ∈ serenity.json 的 `轨迹约束.roles`"
     //    （该段已退役）；新判据是"**轨迹编码能在 CCC 的 AGENT_SESSIONS/ 里解析到一条目录**"
     //    ⇒ 同样的"不存在即拒绝"语义，落在新载体上。
     writeCccConfig({}) // CCC 里一条轨迹都没有
@@ -741,7 +741,7 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
     }
 
     // 造出那条轨迹后，同一个请求应当成功（同一夹具、只多一条轨迹）
-    makeTrajectory(ccc, 'qa', skiffJson({}), '桥接目标')
+    makeTrajectory(ccc, 'qa', 轨迹约束Json({}), '桥接目标')
     const api2 = await bootApi()
     try {
       const ok = await postWeixin(api2.port, { action: 'save-routes', routes: [{ user: 'u1', trajectory: 'qa' }] })
@@ -905,15 +905,58 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
     try {
       const res = await raw({ port: api.port, method: 'GET', path: `/serenity/weixin?ccc=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
       expect(res.status).toBe(200)
-      const body = jsonBody(res) as { accounts: Array<{ accountId: string; name?: string; enabled: boolean; bound: boolean }> }
+      const body = jsonBody(res) as { accounts: Array<{ accountId: string; name?: string; enabled: boolean; bound: boolean; channel?: string }> }
+      // 🔴 2026-10-19（P2 面板）起 wire **必须带 `channel`**：面板按它选标签与绑定表单；
+      //    缺字段 ⇒ 飞书账号被显示成「微信」且只给扫码入口（用户"不知道怎么配"的直接成因）。
+      //    行的 `channel` 缺省归一为 `weixin`（存量配置不必补这个字段）。
       expect(body.accounts).toEqual([
-        { accountId: 'wechat-1', name: '微信 1', enabled: true, bound: true },
-        { accountId: 'wechat-2', name: undefined, enabled: true, bound: false },
+        { accountId: 'wechat-1', name: '微信 1', enabled: true, channel: 'weixin', bound: true },
+        { accountId: 'wechat-2', name: undefined, enabled: true, channel: 'weixin', bound: false },
       ])
       // 脱敏不变量（强化版）：token 值本身也**不出现**在 wire 上
       expect(res.body).not.toContain('tok-1')
       expect(res.body).not.toContain('WEIXIN_WECHAT_1_TOKEN')
       expect(body.accounts[0]).not.toHaveProperty('token')
+    } finally {
+      await api.close()
+    }
+  })
+
+  /**
+   * 🔴 回归钉（2026-10-19，P2 读数面缺陷）：`bound` 必须**按渠道**判。
+   *
+   * 原先这里对**所有**账号都调 `readWeixinCredential`（只看 `WEIXIN_<A>_TOKEN`）⇒
+   * 一个凭据齐全的**飞书**账号（`FEISHU_<A>_APPID|SECRET`）必然被读成"未绑定"，
+   * ⇒ 面板显示「未绑定凭据」⇒ 用户据此以为没配上，反复重填。
+   *
+   * 变异检验：把 `imCredentialBound` 换回 `readWeixinCredential` ⇒ 本用例 feishu-1 的
+   * `bound` 变 false ⇒ 当场红。
+   */
+  it('🔴 weixin GET 飞书账号：`bound` 走 FEISHU_* 凭据（用微信读法必然读到 null）', async () => {
+    mkdirSync(join(ccc, '.opencode'), { recursive: true })
+    writeFileSync(join(ccc, '.opencode', 'serenity.json'), JSON.stringify({
+      weixin: {
+        accounts: [
+          { accountId: 'feishu-1', channel: 'feishu', name: '飞书机器人' },
+          { accountId: 'feishu-2', channel: 'feishu' },
+        ],
+      },
+    }, null, 2))
+    writeFileSync(join(ccc, 'localstore.json'), JSON.stringify({
+      credentials: { FEISHU_FEISHU_1_APPID: 'cli_x', FEISHU_FEISHU_1_SECRET: 'sec-x' },
+    }, null, 2))
+    const api = await bootApi()
+    try {
+      const res = await raw({ port: api.port, method: 'GET', path: `/serenity/weixin?ccc=${encodeURIComponent(ccc)}`, headers: UI_HEADERS })
+      expect(res.status).toBe(200)
+      const body = jsonBody(res) as { accounts: Array<{ accountId: string; bound: boolean; channel?: string }> }
+      expect(body.accounts.map((a) => ({ id: a.accountId, channel: a.channel, bound: a.bound }))).toEqual([
+        { id: 'feishu-1', channel: 'feishu', bound: true },
+        { id: 'feishu-2', channel: 'feishu', bound: false },
+      ])
+      // 凭据值不得上 wire（appSecret 是密）
+      expect(res.body).not.toContain('sec-x')
+      expect(res.body).not.toContain('FEISHU_FEISHU_1_SECRET')
     } finally {
       await api.close()
     }

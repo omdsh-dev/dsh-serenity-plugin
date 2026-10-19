@@ -1,12 +1,12 @@
 /**
- * skiff-reply-freshness.test.ts —— 「本轮答案必须是本轮产出的」回归钉（S142 2026-10-19）
+ * trajectory-reply-freshness.test.ts —— 「本轮答案必须是本轮产出的」回归钉（S142 2026-10-19）
  *
  * ## 缺陷形态（owner 报「微信桥变成复读机」）
  *
  * 实测：同一段文本连发三条，**间隔仅 300~400ms、逐字相同**，`source: reply-fallback`。
  * 模型跑一轮不可能这么快 ⇒ 那不是"回答"，是**旧答案被反复重发**。
  *
- * 根因（`trajectory/session.ts` 的 `askSkiff`）：`followup()` 是**异步投递** —— 刚投出去的那一刻
+ * 根因（`trajectory/session.ts` 的 `askTrajectory`）：`followup()` 是**异步投递** —— 刚投出去的那一刻
  * `agent.status` **仍是 `idle`**，而 `waitAgentIdle` 的首行就是
  * `if (agent.status === 'idle') finish()` ⇒ 等待**立刻结算** ⇒ `lastAssistantText()` 读到的是
  * **上一轮**的 `assistant/message` ⇒ 桥把它当"本轮答案"；CCC 又开着 `fallbackOnNoSend`
@@ -21,7 +21,7 @@
  * ③ 超时有界：本轮不产出时，调用必须**有限时间返回**（不是挂住）。
  */
 import { describe, it, expect } from 'vitest'
-import { askSkiff } from '../src/trajectory/session.js'
+import { askTrajectory } from '../src/trajectory/session.js'
 
 /** fake ctx：不主动触发 idle（模拟"这一轮压根没起来"） */
 const ctxNoIdle = { on: () => () => {} } as never
@@ -44,7 +44,7 @@ function makeAgent(events: unknown[], onFollowup?: () => void): never {
   } as never
 }
 
-describe('askSkiff：本轮答案必须来自本轮（复读缺陷回归钉）', () => {
+describe('askTrajectory：本轮答案必须来自本轮（复读缺陷回归钉）', () => {
   it('① 正控：本轮真产出一条 assistant ⇒ 答案就是本条（不是历史里那条）', async () => {
     const events: unknown[] = [
       { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '上一轮的答案' }] } } },
@@ -52,11 +52,11 @@ describe('askSkiff：本轮答案必须来自本轮（复读缺陷回归钉）',
     const agent = makeAgent(events, () => {
       events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '本轮的答案' }] } } })
     })
-    // 🔴 2026-10-19：`askSkiff` 的签名已是 `(ctx, agent, question, options?)` ——
-    //    旧的第 5 参 `{ includeCognitiveTrajectory }`（连同 `serenity.json` 的 `skiff.roles`
-    //    配置面）随 skiff 重做整体退役 ⇒ 继续写旧形只会让 `options` 变 undefined，
+    // 🔴 2026-10-19：`askTrajectory` 的签名已是 `(ctx, agent, question, options?)` ——
+    //    旧的第 5 参 `{ includeCognitiveTrajectory }`（连同 `serenity.json` 的 `轨迹约束.roles`
+    //    配置面）随 轨迹约束 重做整体退役 ⇒ 继续写旧形只会让 `options` 变 undefined，
     //    落进 180s 的缺省上限 ⇒ 表现为**用例超时**（而不是断言失败，更难定位）。
-    const r = await askSkiff(ctxIdle(agent), agent, 'q', { timeoutMs: 2000 })
+    const r = await askTrajectory(ctxIdle(agent), agent, 'q', { timeoutMs: 2000 })
     expect(r.answer).toBe('本轮的答案')
   })
 
@@ -67,7 +67,7 @@ describe('askSkiff：本轮答案必须来自本轮（复读缺陷回归钉）',
       { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '上一轮的答案' }] } } },
     ]
     const agent = makeAgent(events) // followup 什么都不推（模拟本轮跑了但没产出/被 guard 全拒）
-    const r = await askSkiff(ctxNoIdle, agent, 'q', { timeoutMs: 150 })
+    const r = await askTrajectory(ctxNoIdle, agent, 'q', { timeoutMs: 150 })
     expect(r.answer).toBe('')
   })
 
@@ -75,7 +75,7 @@ describe('askSkiff：本轮答案必须来自本轮（复读缺陷回归钉）',
     const events: unknown[] = []
     const agent = makeAgent(events)
     const t0 = Date.now()
-    const r = await askSkiff(ctxNoIdle, agent, 'q', { timeoutMs: 120 })
+    const r = await askTrajectory(ctxNoIdle, agent, 'q', { timeoutMs: 120 })
     expect(r.answer).toBe('')
     expect(Date.now() - t0).toBeLessThan(3000)
   })

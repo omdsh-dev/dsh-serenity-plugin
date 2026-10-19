@@ -18,7 +18,7 @@
  * ## 🔴 本件最要紧的两条测试设计
  *  - **"残缺独立于命中"**：表里同时有一条**完好**行和一条**残缺**行 ⇒ 命中完好行的同时
  *    **仍要**报残缺。只测"残缺 ⇒ 报"会漏掉"命中掩盖了笔误"这一半。
- *  - **正控**（方案 §7 第 6 条明写）：**"建了 skiff 但不在表里的 CCC 收不到"必须配
+ *  - **正控**（方案 §7 第 6 条明写）：**"建了 轨迹约束 但不在表里的 CCC 收不到"必须配
  *    "加进表就收得到"** —— 只测"收不到"的话，把路由写死成"永不投递"也照样绿。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -59,8 +59,8 @@ import {
 import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSettings } from '../src/surface/settings.js'
 import { writeWeixinCredential } from '../src/im/route.js'
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
-import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/trajectory/session.js'
-import { makeTrajectory } from './helpers/skiff-fixture.js'
+import { registerTrajectorySession, unregisterTrajectorySession, trajectorySessionSnapshot } from '../src/trajectory/session.js'
+import { makeTrajectory } from './helpers/trajectory-constraint-fixture.js'
 
 /** 造一行订阅（缺省齐四字段；显式传 `undefined` 即"缺该字段"） */
 function sub(account?: string, user?: string, ccc?: string, role?: string) {
@@ -278,9 +278,9 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
   /**
    * CCC 配置。
    *
-   * 🔴 2026-10-19：`skiff: { roles: {...} }` **整段退役**（写进去也读不到）⇒ 删除。
-   *    目标从「skiff 角色名」改为「**认知轨迹编码**」，skiff 约束面改由**轨迹目录下的
-   *    `skiff.json`** 承载（见 `beforeEach` 里的 `makeTrajectory`）。
+   * 🔴 2026-10-19：`轨迹约束: { roles: {...} }` **整段退役**（写进去也读不到）⇒ 删除。
+   *    目标从「轨迹约束角色名」改为「**认知轨迹编码**」，轨迹约束面改由**轨迹目录下的
+   *    `trajectory-constraint.json`** 承载（见 `beforeEach` 里的 `makeTrajectory`）。
    */
   function writeConfig(weixin: unknown): void {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
@@ -291,7 +291,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
 
   /**
    * fake ctx：`get('workspaceRegistry')` 供 `listCccs` 枚举出本 CCC（订阅表按**别名**寻址
-   * 时必须能解析）；`agents.create` ＋ `on` 供 skiff 投递（形状同 `weixin-bridge-branches`，
+   * 时必须能解析）；`agents.create` ＋ `on` 供 轨迹约束 投递（形状同 `weixin-bridge-branches`，
    * 🔴 `on` 必须回传**真 agent 引用**，否则 `waitAgentIdle` 永不结算 ⇒ 用例超时）。
    */
   function fakeCtx() {
@@ -361,7 +361,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     resetWeixinTypingCache()
     const { __resetWeixinOutputGuardForTest } = await import('../src/im/guard.js')
     __resetWeixinOutputGuardForTest()
-    for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
+    for (const [id] of trajectorySessionSnapshot()) unregisterTrajectorySession(id)
     if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
     else process.env.SERENITY_HOOKS_CONFIG = oldConfigEnv
     if (oldAuditEnv === undefined) delete process.env.SERENITY_HUMAN_CHANNEL_AUDIT
@@ -381,7 +381,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
-    expect(skiffSessionSnapshot().size).toBe(1) // ← 会话真的建了
+    expect(trajectorySessionSnapshot().size).toBe(1) // ← 会话真的建了
     expect(ctx.questions.join('\n')).toContain('你好') // ← 消息真的到了角色面前
     expect(auditLines()).toHaveLength(0) // 投递成功 ⇒ **不留痕**（留痕只记异常档）
   })
@@ -396,7 +396,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
-    expect(skiffSessionSnapshot().size).toBe(0) // ← 没有投递
+    expect(trajectorySessionSnapshot().size).toBe(0) // ← 没有投递
     expect(ctx.questions).toHaveLength(0)
     const ls = auditLines()
     expect(ls).toHaveLength(1)
@@ -417,7 +417,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
-    expect(skiffSessionSnapshot().size).toBe(0)
+    expect(trajectorySessionSnapshot().size).toBe(0)
     const ls = auditLines()
     expect(ls).toHaveLength(1)
     expect(ls[0]!.kind).toBe('inbound-target-missing')
@@ -436,7 +436,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
-    expect(skiffSessionSnapshot().size).toBe(0)
+    expect(trajectorySessionSnapshot().size).toBe(0)
     const ls = auditLines()
     expect(ls).toHaveLength(1)
     expect(ls[0]!.kind).toBe('inbound-target-missing')
@@ -460,7 +460,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
     // 命中照常投递
-    expect(skiffSessionSnapshot().size).toBe(1)
+    expect(trajectorySessionSnapshot().size).toBe(1)
     // 残缺照常出声（**不被命中掩盖**）
     const ls = auditLines()
     expect(ls).toHaveLength(1)
@@ -482,7 +482,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
-    expect(skiffSessionSnapshot().size).toBe(1)
+    expect(trajectorySessionSnapshot().size).toBe(1)
     expect(ctx.questions.join('\n')).toContain('你好')
     expect(auditLines()).toHaveLength(0)
   })
