@@ -92,7 +92,7 @@ import {
   sendFileMessage,
   fetchQRCode,
   __setWeixinFetchForTest,
-} from '../src/weixin-api.js'
+} from '../src/im/ilink.js'
 
 let dir: string
 

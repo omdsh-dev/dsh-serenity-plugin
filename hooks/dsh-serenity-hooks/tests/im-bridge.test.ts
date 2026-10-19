@@ -12,7 +12,7 @@ import {
   runImBridge,
   __resetImChannelsForTest,
   type ImChannel,
-} from '../src/im-bridge.js'
+} from '../src/im/channels.js'
 
 /**
  * im-bridge 能力层测试（v1.31.0，S142 P1）。

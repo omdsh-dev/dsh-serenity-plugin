@@ -51,15 +51,15 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { ServerResponse } from 'node:http'
 
-vi.mock('../src/weixin-bridge.js', () => ({
+vi.mock('../src/im/bridge.js', () => ({
   sendProactiveText: vi.fn(),
 }))
 vi.mock('../src/ccc-roots.js', () => ({
   listCccs: vi.fn(),
 }))
 
-import { handleWeixinSendRequest, registerWeixinSendApi, stopWeixinSendApi, weixinSendEndpoint } from '../src/weixin-send-api.js'
-import { sendProactiveText } from '../src/weixin-bridge.js'
+import { handleWeixinSendRequest, registerWeixinSendApi, stopWeixinSendApi, weixinSendEndpoint } from '../src/im/send.js'
+import { sendProactiveText } from '../src/im/bridge.js'
 import { listCccs } from '../src/ccc-roots.js'
 
 const sendMock = vi.mocked(sendProactiveText)

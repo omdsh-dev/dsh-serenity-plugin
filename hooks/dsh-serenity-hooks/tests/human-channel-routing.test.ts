@@ -55,10 +55,10 @@ import {
   planInboundRoute,
   appendHumanChannelAudit,
   humanChannelAuditPath,
-} from '../src/human-channel.js'
+} from '../src/im/inbound.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSettings } from '../src/settings-section.js'
-import { writeWeixinCredential } from '../src/weixin-route.js'
-import { __setWeixinFetchForTest } from '../src/weixin-api.js'
+import { writeWeixinCredential } from '../src/im/route.js'
+import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
 
 /** 造一行订阅（缺省齐四字段；显式传 `undefined` 即"缺该字段"） */
@@ -347,9 +347,9 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
   afterEach(async () => {
     __setSimpleSourceForTest(null)
     __setWeixinFetchForTest(null)
-    const { resetWeixinTypingCache } = await import('../src/weixin-bridge.js')
+    const { resetWeixinTypingCache } = await import('../src/im/bridge.js')
     resetWeixinTypingCache()
-    const { __resetWeixinOutputGuardForTest } = await import('../src/weixin-output-guard.js')
+    const { __resetWeixinOutputGuardForTest } = await import('../src/im/guard.js')
     __resetWeixinOutputGuardForTest()
     for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
     if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
@@ -368,7 +368,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const ctx = fakeCtx()
     __setWeixinFetchForTest(async () => jsonResponse(200, { ret: 0 }))
 
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
     expect(skiffSessionSnapshot().size).toBe(1) // ← 会话真的建了
@@ -383,7 +383,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const ctx = fakeCtx()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
     expect(skiffSessionSnapshot().size).toBe(0) // ← 没有投递
@@ -404,7 +404,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const ctx = fakeCtx()
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
     expect(skiffSessionSnapshot().size).toBe(0)
@@ -423,7 +423,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const ctx = fakeCtx()
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
 
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
     expect(skiffSessionSnapshot().size).toBe(0)
@@ -446,7 +446,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
     __setWeixinFetchForTest(async () => jsonResponse(200, { ret: 0 }))
 
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
     // 命中照常投递
@@ -469,7 +469,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     const ctx = fakeCtx()
     __setWeixinFetchForTest(async () => jsonResponse(200, { ret: 0 }))
 
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, MSG)
 
     expect(skiffSessionSnapshot().size).toBe(1)

@@ -45,7 +45,7 @@ import {
   simpleSettingsFromConfig,
   defaultSimpleSettings,
 } from '../src/settings-section.js'
-import { readWeixinSettings } from '../src/weixin-route.js'
+import { readWeixinSettings } from '../src/im/route.js'
 
 /** schema 里的机器级段（读不到 ⇒ undefined，交给用例断言报错文案） */
 function hc() {

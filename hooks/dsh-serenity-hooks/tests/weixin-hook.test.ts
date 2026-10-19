@@ -20,7 +20,7 @@ import {
   invokeWeixinHook,
   type WeixinHookIncomingEvent,
   type WeixinHookOutgoingEvent,
-} from '../src/weixin-hook.js'
+} from '../src/im/hook.js'
 
 let dir: string
 

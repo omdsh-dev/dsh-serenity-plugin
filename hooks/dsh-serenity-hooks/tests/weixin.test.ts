@@ -55,7 +55,7 @@ import {
   markdownToPlainText,
   buildClientVersion,
   __setWeixinFetchForTest,
-} from '../src/weixin-api.js'
+} from '../src/im/ilink.js'
 import {
   weixinSessionIdFor,
   isWeixinSessionId,
@@ -74,10 +74,10 @@ import {
   saveWeixinRoutes,
   setWeixinEnabled,
   nextWeixinAccountId,
-} from '../src/weixin-route.js'
+} from '../src/im/route.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
-import { manualOutputFallbackNeeded } from '../src/weixin-bridge.js'
-import { registerWeixinOutputGuard } from '../src/weixin-output-guard.js'
+import { manualOutputFallbackNeeded } from '../src/im/bridge.js'
+import { registerWeixinOutputGuard } from '../src/im/guard.js'
 
 let dir: string
 let oldConfigEnv: string | undefined
@@ -103,10 +103,10 @@ beforeEach(() => {
 afterEach(async () => {
   __setWeixinFetchForTest(null)
   // typing_ticket 缓存清空（模块级状态，防测试间污染）
-  const { resetWeixinTypingCache } = await import('../src/weixin-bridge.js')
+  const { resetWeixinTypingCache } = await import('../src/im/bridge.js')
   resetWeixinTypingCache()
   // v1.30.16：手动输出闸门模块级状态（桥每轮登记）——跨用例清空
-  const { __resetWeixinOutputGuardForTest } = await import('../src/weixin-output-guard.js')
+  const { __resetWeixinOutputGuardForTest } = await import('../src/im/guard.js')
   __resetWeixinOutputGuardForTest()
   for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
   if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
@@ -556,7 +556,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       return jsonResponse(200, { ret: 0 })
     })
 
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found') // 首次：resume not-found → 降级 create → 新会话
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://ilinkai.weixin.qq.com' }, {
       from_user_id: 'u1@im.wechat',
@@ -591,12 +591,12 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       return jsonResponse(200, { ret: 0 })
     })
     const hookEvents: unknown[] = []
-    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    const { setWeixinHookRunnerForTest } = await import('../src/im/hook.js')
     setWeixinHookRunnerForTest(async (_root, _rel, ev) => {
       hookEvents.push(ev)
       return { ok: true }
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'manual@im.wechat',
@@ -661,14 +661,14 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       return jsonResponse(200, { ret: 0 })
     })
     const hookEvents: unknown[] = []
-    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    const { setWeixinHookRunnerForTest } = await import('../src/im/hook.js')
     setWeixinHookRunnerForTest(async (_root, _rel, ev) => {
       hookEvents.push(ev)
       return { ok: true }
     })
     // 闸门装配（handler 不会被触发 → 本轮"未发送"成立）；同时验证 guardActive=true
     registerWeixinOutputGuard({ on: () => () => {} } as never)
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'fallback@im.wechat',
@@ -703,7 +703,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       return jsonResponse(200, { ret: 0 })
     })
     registerWeixinOutputGuard({ on: () => () => {} } as never)
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'strict@im.wechat',
@@ -730,7 +730,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       }
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'auto@im.wechat',
@@ -755,7 +755,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       }
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('resume') // 重启后：resume 命中历史 → 恢复，非新对话
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'u2@im.wechat',
@@ -781,7 +781,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       }
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     // 重启后：resume 报 "while it is live"、create 报 "already exists"、get 命中 live agent
     const fromId = 'live@im.wechat'
     const ctx = fakeCtx('live', weixinSessionIdFor(fromId))
@@ -816,7 +816,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       if (url.includes('download')) return new Response(encrypted, { status: 200 })
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'img@im.wechat',
@@ -853,7 +853,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       if (url.includes('download') || url.includes('cdn/f')) return new Response(plain, { status: 200 })
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'file@im.wechat',
@@ -884,7 +884,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       if (url.includes('download')) return new Response('err', { status: 500 })
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'fail@im.wechat',
@@ -914,7 +914,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       if (url.includes('download')) return new Response(big, { status: 200 })
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'big@im.wechat',
@@ -927,7 +927,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('无路由 → 不创建会话不回复', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true } }))
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = { agents: { create: async () => { throw new Error('should not create') } }, on: () => () => {} }
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 't', baseUrl: 'https://x' }, {
       from_user_id: 'u@im.wechat',
@@ -941,7 +941,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
       skiff: { roles: { qa: { systemPrompt: 'qa' } } },
     }))
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = { agents: { create: async () => { throw new Error('should not create') } }, on: () => () => {} }
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 't', baseUrl: 'https://x' }, {
       from_user_id: 'u@im.wechat',
@@ -965,7 +965,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       }
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'voice@im.wechat',
@@ -990,7 +990,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       }
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = { agents: { create: async () => { throw new Error('should not create') } }, on: () => () => {} }
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 't', baseUrl: 'https://x' }, {
       from_user_id: 'u@im.wechat',
@@ -1014,7 +1014,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       if (url.includes('getconfig')) return jsonResponse(200, { ret: 0, typing_ticket: 'tk-1' })
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'typing@im.wechat',
@@ -1048,12 +1048,12 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     // hook runner 注入捕获（真实 spawn 由 weixin-hook.test 覆盖——此处断言 bridge 触发时机与载荷）
     const hookEvents: unknown[] = []
-    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    const { setWeixinHookRunnerForTest } = await import('../src/im/hook.js')
     setWeixinHookRunnerForTest(async (_root, _hookRel, ev) => {
       hookEvents.push(ev)
       return { ok: true }
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'hook@im.wechat',
@@ -1094,11 +1094,11 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       }
       return jsonResponse(200, { ret: 0 })
     })
-    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    const { setWeixinHookRunnerForTest } = await import('../src/im/hook.js')
     setWeixinHookRunnerForTest(async () => {
       throw new Error('hook boom') // 注入 runner 抛错（真实执行已吞错——此处验证 fire-and-forget 不阻断）
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await expect(handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'fail@im.wechat',
@@ -1123,7 +1123,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       }
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const fromId = 'user@im.wechat'
     const sid = weixinSessionIdFor(fromId)
     // 两段式真实场景：第一次 incoming（agent 首次创建 → createSkiffAgent 内 ensure + 注册进注册表）；
@@ -1166,7 +1166,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       if (url.includes('sendmessage')) return jsonResponse(200, { ret: 0 })
       return jsonResponse(200, { ret: 0 })
     })
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found', undefined, { noSystemPrompt: true })
     const msg: Parameters<typeof handleIncoming>[4] = {
       from_user_id: 'user2@im.wechat',
@@ -1206,13 +1206,13 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })
     writeWeixinCredential(dir, 'wechat-2', { token: 'tok2', baseUrl: 'https://y' })
     const { sent, events } = setupFetchAndHook()
-    const { setWeixinHookRunnerForTest } = await import('../src/weixin-hook.js')
+    const { setWeixinHookRunnerForTest } = await import('../src/im/hook.js')
     setWeixinHookRunnerForTest(async (_root, _rel, ev) => {
       events.push(ev as unknown as Record<string, unknown>)
       return { ok: true }
     })
 
-    const { sendProactiveText } = await import('../src/weixin-bridge.js')
+    const { sendProactiveText } = await import('../src/im/bridge.js')
     const r = await sendProactiveText({ root: dir, toUserId: 'u1@im.wechat', text: '**报告**已生成' })
     expect(r).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u1@im.wechat', sessionId: weixinSessionIdFor('u1@im.wechat'), role: 'my-role' })
     expect(sent).toHaveLength(1)
@@ -1241,14 +1241,14 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })
     writeWeixinCredential(dir, 'wechat-2', { token: 'tok2', baseUrl: 'https://y' })
     const { sent } = setupFetchAndHook()
-    const { sendProactiveText } = await import('../src/weixin-bridge.js')
+    const { sendProactiveText } = await import('../src/im/bridge.js')
     const r = await sendProactiveText({ root: dir, toUserId: 'u2@im.wechat', text: 'hi', accountId: 'wechat-2' })
     expect(r).toMatchObject({ ok: true, accountId: 'wechat-2', role: '' })
     expect(sent).toHaveLength(1)
   })
 
   it('失败路径：桥未启用 / 无账号 / 账号不存在 / 未绑定 / 发送失败 → 稳定 code', async () => {
-    const { sendProactiveText } = await import('../src/weixin-bridge.js')
+    const { sendProactiveText } = await import('../src/im/bridge.js')
 
     // ① 未启用
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: false, accounts: [] } }))

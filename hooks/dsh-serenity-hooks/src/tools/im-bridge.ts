@@ -15,7 +15,7 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { cccRootForExec } from '../ccc-roots.js'
-import { runImBridge, imChannelIds } from '../im-bridge.js'
+import { runImBridge, imChannelIds } from '../im/channels.js'
 
 const ACTIONS = ['send', 'send-file', 'users', 'status'] as const
 

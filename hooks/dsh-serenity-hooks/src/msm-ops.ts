@@ -20,7 +20,7 @@ import { join, dirname, relative, resolve } from 'node:path'
 import { platform } from 'node:process'
 import { classifyPath, readCccName as readCccNameFromCcc } from './ccc.js'
 import { ACC_VERSION } from './constants.js'
-import { weixinSendEndpoint } from './weixin-send-endpoint.js'
+import { weixinSendEndpoint } from './im/endpoint.js'
 import type { JsonValue } from './json.js'
 
 const execFileAsync = promisify(execFile)

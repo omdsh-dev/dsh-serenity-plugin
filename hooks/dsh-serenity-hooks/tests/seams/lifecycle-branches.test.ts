@@ -100,8 +100,8 @@ vi.mock('../../src/cognitive-trajectory-ops.js', async (orig) => {
   }
 })
 
-vi.mock('../../src/weixin-output-guard.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/weixin-output-guard.js')>()
+vi.mock('../../src/im/guard.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/im/guard.js')>()
   return {
     ...actual,
     forgetManualOutputSession: (id: string) => {
@@ -153,8 +153,8 @@ vi.mock('../../src/face-host.js', async (orig) => {
   }
 })
 
-vi.mock('../../src/weixin-bridge.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/weixin-bridge.js')>()
+vi.mock('../../src/im/bridge.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/im/bridge.js')>()
   return {
     ...actual,
     stopAllBridges: () => {

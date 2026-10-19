@@ -45,9 +45,9 @@ import {
   releaseAllPollers,
   __resetPollersForTest,
   type PollerRequest,
-} from '../src/human-channel.js'
-import { writeWeixinCredential } from '../src/weixin-route.js'
-import { __setWeixinFetchForTest } from '../src/weixin-api.js'
+} from '../src/im/inbound.js'
+import { writeWeixinCredential } from '../src/im/route.js'
+import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 
 /** 造一个请求（`identity` 缺省时按 token 算，与生产同源） */
 function req(root: string, accountId: string, token?: string): PollerRequest {
@@ -173,7 +173,7 @@ describe('human-channel: 接线（syncCccBridge 一队账号只起一次）', ()
   })
 
   afterEach(async () => {
-    const { stopAllBridges } = await import('../src/weixin-bridge.js')
+    const { stopAllBridges } = await import('../src/im/bridge.js')
     stopAllBridges()
     __resetPollersForTest()
     for (const d of dirs) rmSync(d, { recursive: true, force: true })
@@ -183,7 +183,7 @@ describe('human-channel: 接线（syncCccBridge 一队账号只起一次）', ()
   it('🔴 两个 CCC 配**同一份凭据** ⇒ 只有先来的那个起循环 ＋ 被跳过者留响亮日志', async () => {
     const a = makeCcc('same-token')
     const b = makeCcc('same-token')
-    const { syncCccBridge, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncCccBridge, weixinBridgeStatus } = await import('../src/im/bridge.js')
     const ctx = { on: () => () => {} } as never
 
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -202,7 +202,7 @@ describe('human-channel: 接线（syncCccBridge 一队账号只起一次）', ()
   it('正控：两份**不同**凭据 ⇒ 两个 CCC 各起一个循环（去重没有过度生效）', async () => {
     const a = makeCcc('token-a')
     const b = makeCcc('token-b')
-    const { syncCccBridge, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncCccBridge, weixinBridgeStatus } = await import('../src/im/bridge.js')
     const ctx = { on: () => () => {} } as never
 
     syncCccBridge(ctx, a)

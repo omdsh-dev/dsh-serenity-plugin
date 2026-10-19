@@ -48,9 +48,9 @@ vi.mock('@deepseek-ai/schemastery', () => {
 vi.mock('@deepseek-ai/dsh-settings', () => ({ installSettingsSection: () => {}, settingsNamespace: (v: string) => v }))
 
 import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSettings } from '../src/settings-section.js'
-import { __resetPollersForTest, pollerOwners } from '../src/human-channel.js'
-import { writeWeixinCredential } from '../src/weixin-route.js'
-import { __setWeixinFetchForTest } from '../src/weixin-api.js'
+import { __resetPollersForTest, pollerOwners } from '../src/im/inbound.js'
+import { writeWeixinCredential } from '../src/im/route.js'
+import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/skiff-core.js'
 
 /** 机器级账号行 */
@@ -119,12 +119,12 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
   })
 
   afterEach(async () => {
-    const { stopAllBridges } = await import('../src/weixin-bridge.js')
+    const { stopAllBridges } = await import('../src/im/bridge.js')
     stopAllBridges()
     __resetPollersForTest()
     __setSimpleSourceForTest(null)
     __setWeixinFetchForTest(null)
-    const { resetWeixinTypingCache } = await import('../src/weixin-bridge.js')
+    const { resetWeixinTypingCache } = await import('../src/im/bridge.js')
     resetWeixinTypingCache()
     for (const [id] of skiffSessionSnapshot()) unregisterSkiffSession(id)
     if (oldConfigEnv === undefined) delete process.env.SERENITY_HOOKS_CONFIG
@@ -140,7 +140,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
 
   it('🔴 机器级账号表非空 ⇒ 起**机器级** poller（`weixinBridgeStatus()` 出现哨兵行，且**不带任何 CCC**）', async () => {
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-machine')]
-    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     syncHumanChannel(ctx())
 
     const status = weixinBridgeStatus()
@@ -152,7 +152,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
   it('🔴 回退（方案 Q5）：机器级表**空** ⇒ 仍按 **CCC** 起桥（不打断在用的微信）', async () => {
     const a = makeCcc('tok-a')
     machine.accounts = []
-    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     // 枚举面：让 listCccs 看得到 a（`get('workspaceRegistry')`）
     const c = { on: () => () => {}, get: (n: string) => (n === 'workspaceRegistry' ? { list: () => [{ path: a }] } : undefined) } as never
     syncHumanChannel(c)
@@ -163,7 +163,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
 
   it('🔴🔴 两种模式**互斥**：先 CCC 模式起桥，再切机器级 ⇒ CCC 那一侧**被停掉**', async () => {
     const a = makeCcc('tok-a')
-    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     const c = { on: () => () => {}, get: (n: string) => (n === 'workspaceRegistry' ? { list: () => [{ path: a }] } : undefined) } as never
 
     machine.accounts = []
@@ -180,7 +180,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
 
   it('🔴 机器级表里**两行绑同一个 bot**（同 token）⇒ 只起**一个** poller（复用 P0-2 的同一套判据）', async () => {
     machine.accounts = [acct('wechat-1', 'weixin', 'same-tok'), acct('wechat-2', 'weixin', 'same-tok')]
-    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     syncHumanChannel(ctx())
 
@@ -192,7 +192,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
 
   it('无 token（未绑定）⇒ **不起** poller ＋ 出声', async () => {
     machine.accounts = [acct('wechat-1', 'weixin', undefined)]
-    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     syncHumanChannel(ctx())
     expect(weixinBridgeStatus()).toHaveLength(0)
@@ -202,7 +202,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
 
   it('渠道未实现 ⇒ 不起 poller ＋ 出声（且**只出声一次**，不随每次重扫刷屏）', async () => {
     machine.accounts = [acct('feishu-1', 'feishu', 'tok-x')]
-    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     syncHumanChannel(ctx())
     syncHumanChannel(ctx())
@@ -214,14 +214,14 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
 
   it('`enabled: false` 的账号 ⇒ 不起 poller（与 CCC 级账号表同款语义）', async () => {
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-1', false)]
-    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     syncHumanChannel(ctx())
     expect(weixinBridgeStatus()).toHaveLength(0)
   })
 
   it('🔴 归属表里记的是**哨兵根**（不是某个 CCC 根）—— 机器级与 CCC 级不会互相误判', async () => {
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-machine')]
-    const { syncHumanChannel } = await import('../src/weixin-bridge.js')
+    const { syncHumanChannel } = await import('../src/im/bridge.js')
     syncHumanChannel(ctx())
     expect([...pollerOwners().values()].map((o) => o.root)).toEqual(['<machine>'])
   })
@@ -232,7 +232,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     const a = makeCcc('tok-a')
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-machine')]
     machine.subscriptions = [sub('wechat-1', 'someone-else', basename(a), 'qa')] // ← 不是发信人
-    const { handleMachineIncoming } = await import('../src/weixin-bridge.js')
+    const { handleMachineIncoming } = await import('../src/im/bridge.js')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
     await handleMachineIncoming(ctx(), 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
@@ -253,7 +253,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     const a = makeCcc('tok-a')
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-machine')]
     machine.subscriptions = [sub('wechat-1', 'u1@im.wechat', basename(a), 'qa')] // ← 按**别名**寻址
-    const { handleMachineIncoming } = await import('../src/weixin-bridge.js')
+    const { handleMachineIncoming } = await import('../src/im/bridge.js')
     const questions: string[] = []
     let agent: unknown
     const c = {
@@ -304,7 +304,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     }))
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-machine')]
     machine.subscriptions = [sub('wechat-1', 'u1@im.wechat', basename(a), 'qa')]
-    const { handleMachineIncoming } = await import('../src/weixin-bridge.js')
+    const { handleMachineIncoming } = await import('../src/im/bridge.js')
     let agent: unknown
     const c = {
       get: (n: string) => (n === 'workspaceRegistry' ? { list: () => [{ path: a }] } : undefined),
@@ -339,7 +339,7 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     // 🔴 **对照（缺了它这条断言就是空的）**：同一份 CCC 配置走 **CCC 模式**（`handleIncoming`）
     //    会被 `enabled:false` 挡在门外 ⇒ 证明上面那一格"投到了"**确实是机器级模式带来的**，
     //    不是"这个 CCC 反正都能投"。
-    const { handleIncoming } = await import('../src/weixin-bridge.js')
+    const { handleIncoming } = await import('../src/im/bridge.js')
     await handleIncoming(c, a, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'u2@im.wechat',
       item_list: [{ type: 1, text_item: { text: '你好' } }],

@@ -19,21 +19,21 @@ const sendTextMessage = vi.fn()
 const invokeWeixinHook = vi.fn()
 const buildOutgoingHookEvent = vi.fn()
 
-vi.mock('../src/weixin-bridge.js', () => ({
+vi.mock('../src/im/bridge.js', () => ({
   sendProactiveText: (...a: unknown[]) => sendProactiveText(...a),
   weixinBridgeStatus: (...a: unknown[]) => weixinBridgeStatus(...a),
   resolveWeixinAccount: (...a: unknown[]) => resolveWeixinAccount(...a),
 }))
-vi.mock('../src/weixin-api.js', () => ({
+vi.mock('../src/im/ilink.js', () => ({
   sendFileMessage: (...a: unknown[]) => sendFileMessage(...a),
   sendTextMessage: (...a: unknown[]) => sendTextMessage(...a),
 }))
-vi.mock('../src/weixin-hook.js', () => ({
+vi.mock('../src/im/hook.js', () => ({
   invokeWeixinHook: (...a: unknown[]) => invokeWeixinHook(...a),
   buildOutgoingHookEvent: (...a: unknown[]) => buildOutgoingHookEvent(...a),
 }))
 
-const { weixinChannel, weixinAliasMap } = await import('../src/im-weixin.js')
+const { weixinChannel, weixinAliasMap } = await import('../src/im/weixin-channel.js')
 
 let dir = ''
 
@@ -88,7 +88,7 @@ describe('im-weixin: 别名解析（别名归 CCC 配置，D23 / v1.56.10）', (
     expect(weixinAliasMap(dir)).toEqual({})
     expect(weixinChannel.listUsers(dir)).toEqual([])
     // 源码面：别名只在 CCC 配置里出现
-    const src = readFileSync(new URL('../src/im-weixin.ts', import.meta.url), 'utf-8')
+    const src = readFileSync(new URL('../src/im/weixin-channel.ts', import.meta.url), 'utf-8')
     for (const person of ['user-b', 'user-a', 'user-c']) {
       expect(src.toLowerCase()).not.toContain(`'${person}'`)
     }

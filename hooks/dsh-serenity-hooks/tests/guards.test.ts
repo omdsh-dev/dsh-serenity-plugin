@@ -20,7 +20,7 @@ import {
   getHostScheduleHiddenDiagnostics,
 } from '../src/seams/guards.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/invariant.js'
-import { registerImChannel, __resetImChannelsForTest } from '../src/im-bridge.js'
+import { registerImChannel, __resetImChannelsForTest } from '../src/im/channels.js'
 import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/ccc.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/skiff-registry.js'
 

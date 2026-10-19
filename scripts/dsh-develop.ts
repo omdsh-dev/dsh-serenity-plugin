@@ -2429,11 +2429,13 @@ function cmdRefactorMove(argv: string[]): void {
   const scanDirs = [join(HOOKS_DIR, 'src'), join(HOOKS_DIR, 'tests')]
   const files = scanDirs.flatMap((d) => collectTs(d))
 
-  const plans: Array<{ file: string; next: string; hits: number }> = []
+  // 计划：**在移动之前**算出新内容，但记住"该写到哪"（自己也被移动时写新路径）
+  const plans: Array<{ from: string; to: string; next: string; hits: number }> = []
   for (const file of files) {
     const text = readFileSync(file, 'utf-8')
-    const next = rewriteSpecifiers(text, file, byFrom)
-    if (next.text !== text) plans.push({ file, next: next.text, hits: next.hits })
+    const movedTo = byFrom.get(file)
+    const next = rewriteSpecifiers(text, file, movedTo ?? file, byFrom)
+    if (next.text !== text) plans.push({ from: file, to: movedTo ?? file, next: next.text, hits: next.hits })
   }
   const totalHits = plans.reduce((n, p) => n + p.hits, 0)
 
@@ -2441,7 +2443,7 @@ function cmdRefactorMove(argv: string[]): void {
   console.log(`  移动 ${moves.length} 个文件；扫描 ${files.length} 个 .ts；需改写 ${totalHits} 处（分布在 ${plans.length} 个文件）`)
   for (const m of moves) console.log(`    mv ${m.fromRel} → ${m.toRel}`)
   for (const p of plans) {
-    const rel = p.file.startsWith(HOOKS_DIR) ? p.file.slice(HOOKS_DIR.length + 1) : p.file
+    const rel = p.from.startsWith(HOOKS_DIR) ? p.from.slice(HOOKS_DIR.length + 1) : p.from
     console.log(`    ~ ${rel}（${p.hits} 处）`)
   }
   if (!apply) {
@@ -2459,7 +2461,8 @@ function cmdRefactorMove(argv: string[]): void {
   }
   let rewritten = 0
   for (const p of plans) {
-    writeFileSync(p.file, p.next, 'utf-8')
+    // 🔴 写到**移动后**的路径：写回旧路径会凭空重建一份旧文件（本轮实测发生过）
+    writeFileSync(p.to, p.next, 'utf-8')
     rewritten += p.hits
   }
   console.log(`[refactor-move] ✓ 已移动 ${moves.length} 个文件，改写 ${rewritten} 处说明符`)
@@ -2479,12 +2482,24 @@ function readMapJson(p: string): Record<string, string> {
 /**
  * 改写一个文件里的模块说明符（**纯函数**，可单测）。
  *
+ * ## 两条必须同时成立（本轮实测各栽一次）
+ *
+ * **(a) 目标被移动** ⇒ 说明符要按**新位置**重算。
+ * **(b) 自己（importer）被移动** ⇒ 即使目标没动，**相对路径也变了**（`./ccc.js` → `../ccc.js`）。
+ *     ⛔ 只做 (a) 会让搬走的文件里所有"指向留在原处的模块"的 import 全部断（TS2307 一片）。
+ *
  * @param text 原文
- * @param importerAbs 该文件的绝对路径（用来解析相对说明符）
- * @param byFrom 旧绝对路径 → 新绝对路径
+ * @param importerOldAbs 该文件**移动前**的绝对路径（用来解析原说明符）
+ * @param importerNewAbs 该文件**移动后**的绝对路径（用来算新说明符）；没移动则与 old 相同
+ * @param byFrom 旧绝对路径 → 新绝对路径（只含被移动的模块）
  * @returns 新文本与命中处数
  */
-function rewriteSpecifiers(text: string, importerAbs: string, byFrom: Map<string, string>): { text: string; hits: number } {
+function rewriteSpecifiers(
+  text: string,
+  importerOldAbs: string,
+  importerNewAbs: string,
+  byFrom: Map<string, string>,
+): { text: string; hits: number } {
   let hits = 0
   const lines = text.split('\n')
   const out = lines.map((line) => {
@@ -2493,13 +2508,16 @@ function rewriteSpecifiers(text: string, importerAbs: string, byFrom: Map<string
     if (trimmed.startsWith('//') || trimmed.startsWith('*') || trimmed.startsWith('/*')) return line
     return line.replace(/(['"])([^'"]+\.js)\1/g, (whole: string, quote: string, spec: string) => {
       if (!spec.startsWith('.')) return whole // 包名不碰
-      // 🔴 关键：TS 约定是「说明符写 .js、磁盘上是 .ts」⇒ 必须换成 .ts 才解析得到目标文件。
-      //    （本机首次实测就栽在这里：不换 ⇒ 命中恒 0，看起来像"没有要改的"。）
-      const target = resolve(dirname(importerAbs), spec.replace(/\.js$/, '.ts'))
-      const nextAbs = byFrom.get(target)
-      if (nextAbs === undefined) return whole
+      // 🔴 TS 约定：说明符写 .js、磁盘上是 .ts ⇒ 换成 .ts 才解析得到目标
+      const targetOldTs = resolve(dirname(importerOldAbs), spec.replace(/\.js$/, '.ts'))
+      const movedTo = byFrom.get(targetOldTs)
+      const targetNewTs = movedTo ?? targetOldTs
+      // 目标没动 且 自己没动 ⇒ 这条说明符不受影响
+      if (movedTo === undefined && importerOldAbs === importerNewAbs) return whole
+      const nextSpec = relativeSpecifier(dirname(importerNewAbs), targetNewTs).replace(/\.ts$/, '.js')
+      if (nextSpec === spec) return whole
       hits += 1
-      return `${quote}${relativeSpecifier(dirname(importerAbs), nextAbs).replace(/\.ts$/, '.js')}${quote}`
+      return `${quote}${nextSpec}${quote}`
     })
   })
   return { text: out.join('\n'), hits }

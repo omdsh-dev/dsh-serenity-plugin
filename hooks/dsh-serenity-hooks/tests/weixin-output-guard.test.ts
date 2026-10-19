@@ -17,7 +17,7 @@ import {
   noteManualOutputSession,
   registerWeixinOutputGuard,
   __resetWeixinOutputGuardForTest,
-} from '../src/weixin-output-guard.js'
+} from '../src/im/guard.js'
 
 const SESSION = 'skiff-weixin-0123456789abcdef'
 const MANUAL = { root: '/ccc/home-serenity', accountId: 'wechat-1', userId: 'u@im.wechat', role: 'my-role' }

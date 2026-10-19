@@ -25,9 +25,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { registerStatusApi } from '../src/api.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
-import { __setWeixinFetchForTest } from '../src/weixin-api.js'
-import { readWeixinCredential, writeWeixinCredential } from '../src/weixin-route.js'
-import { stopCccBridge, weixinBridgeStatus } from '../src/weixin-bridge.js'
+import { __setWeixinFetchForTest } from '../src/im/ilink.js'
+import { readWeixinCredential, writeWeixinCredential } from '../src/im/route.js'
+import { stopCccBridge, weixinBridgeStatus } from '../src/im/bridge.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => unknown
 

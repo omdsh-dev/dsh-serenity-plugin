@@ -18,7 +18,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { createDecipheriv, createHash } from 'node:crypto'
-import { sendFileMessage, __setWeixinFetchForTest } from '../src/weixin-api.js'
+import { sendFileMessage, __setWeixinFetchForTest } from '../src/im/ilink.js'
 
 /** 一次被记录下来的 fetch 调用（url / method / body / headers 全留痕） */
 interface Call {

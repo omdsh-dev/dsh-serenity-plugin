@@ -3,7 +3,7 @@ import {
   setWeixinSendEndpoint,
   weixinSendEndpoint,
   resetWeixinSendEndpointForTest,
-} from '../src/weixin-send-endpoint.js'
+} from '../src/im/endpoint.js'
 
 /**
  * weixin-send-endpoint 镜像测试（v1.30.9，S142）

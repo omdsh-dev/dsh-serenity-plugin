@@ -25,7 +25,7 @@ import {
 import { cccRootForCwd } from '../ccc-roots.js'
 import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../skiff-role.js'
 import { skiffRoleFor } from '../skiff-registry.js'
-import { hasEnabledImChannel } from '../im-bridge.js'
+import { hasEnabledImChannel } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../invariant.js'
 import { isoLocal } from '../time.js'
 

@@ -15,7 +15,7 @@ import type { ServerResponse } from 'node:http'
 import { createServer } from 'node:http'
 
 // 桥与 CCC 发现都替身化：本模块的契约是"入口层"，不需要真实 iLink / 真实 skiff 链
-vi.mock('../src/weixin-bridge.js', () => ({
+vi.mock('../src/im/bridge.js', () => ({
   sendProactiveText: vi.fn(),
 }))
 // C2：候选来源由 skiff-debug.discoverCccs 迁至 ccc-roots.listCccs（本模块改问后者）
@@ -35,8 +35,8 @@ import {
   weixinSendEndpoint,
   weixinSendSpec,
   type CccCandidate,
-} from '../src/weixin-send-api.js'
-import { sendProactiveText } from '../src/weixin-bridge.js'
+} from '../src/im/send.js'
+import { sendProactiveText } from '../src/im/bridge.js'
 import { listCccs } from '../src/ccc-roots.js'
 
 const sendMock = vi.mocked(sendProactiveText)
