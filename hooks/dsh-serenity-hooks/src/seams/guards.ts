@@ -527,6 +527,118 @@ export function getExclusiveToolsDiagnostics(): { hidden: string[] } {
   return { hidden: [...exclusiveRestrictions.keys()] }
 }
 
+// ── Skiff 角色工具面：可见性同步（owner 2026-10-19 令「工具清单也要热加载」）──
+
+/**
+ * `sessionId` → { signature, dispose }（角色工具面 restrict 状态）
+ *
+ * `signature` = 本轮实际发出的 deny 清单（排序后 join）。用它做**幂等判据**：
+ * 每次 pre-step 都重算白名单，只有**算出来的结果变了**才重新发 restrict
+ * —— 配置不变就不重复发（restrict 会重建 schema，没必要每步都做）。
+ */
+const skiffRoleRestrictions = new Map<string, { signature: string; deny: string[]; dispose: () => void }>()
+
+/** Skiff 角色工具面诊断（排查"某工具为什么不在 skiff 的清单里"） */
+export function getSkiffRoleVisibilityDiagnostics(): { keys: string[]; denyByKey: Record<string, string[]> } {
+  return {
+    keys: [...skiffRoleRestrictions.keys()],
+    denyByKey: Object.fromEntries([...skiffRoleRestrictions].map(([k, v]) => [k, v.deny])),
+  }
+}
+
+/**
+ * 同步 **Skiff 会话的工具面**：把角色白名单之外的工具**从 schema 移除**（不是"看得到但被拒"）。
+ *
+ * ## 为什么必须有这条（owner 2026-10-19：「工具清单也要热加载」）
+ *
+ * 在它之前，skiff 角色白名单**只由运行时守卫拦截**（`decideGuard` 的 skiff 分支）：
+ * 工具全部出现在模型 schema 里，调用时才被 `tool not allowed in this skiff role` 打回。
+ * ⇒ 两个真实后果：
+ *  ① **模型看得见它不该有的工具** —— 它会去试，试了才撞墙（一轮白烧，且错误文案泛化，
+ *     看不出"是不在清单里"还是"临时性拒绝"）；
+ *  ② **配置变动在 schema 上永远不生效** —— 改 `skiff.roles.<r>.tools` 只影响"调用是否放行"，
+ *     不影响"模型看得见什么"。这正是 owner 报的"工具清单不热加载"。
+ *
+ * ## 判据与降级
+ *
+ * - deny 集合 = **`REGISTERED_TOOLS` − 角色白名单**（只对**我们自己注册的**工具算，
+ *   不去动宿主的工具 —— 宿主的工具由各自的条件同步管）。
+ * - ⚠️ **未注册的名字会让整次 restrict 失败**（宿主契约逐字 "unknown names … fail"），
+ *   而 `diagram` 是按开关注册的 ⇒ 与 `hideAllFor` 同款**两档尝试**（先全覆盖，失败退常驻段）。
+ * - 读不到角色（配置删了/角色被移除）⇒ **不动**（fail-open）：此时守卫仍会拦，
+ *   最坏是"又变成看得见但调不动"，而不是把工具全删光。
+ * - 幂等：算出来的 deny 签名不变就跳过（不每步重建 schema）。
+ *
+ * @param agent 目标会话
+ * @param root  CCC 根
+ */
+export function syncSkiffRoleToolVisibility(agent: Agent, root: string): void {
+  const sessionId = (agent.session as { id?: string }).id ?? 'global'
+  if (!isSkiffSessionId(sessionId)) return
+
+  const roleName = skiffRoleFor(sessionId)
+  if (!roleName) return
+  let allowed: Set<string>
+  try {
+    const role = readSkiffRoles(root).get(roleName)
+    if (!role) return // 角色被移除 ⇒ 不动（守卫仍兜底）
+    allowed = roleToolWhitelist(role)
+  } catch {
+    return // 配置读取失败 ⇒ 不动（同上）
+  }
+
+  const resident = REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT)
+  const tiers: Array<readonly string[]> = [REGISTERED_TOOLS, resident]
+  const existing = skiffRoleRestrictions.get(sessionId)
+
+  for (const names of tiers) {
+    const deny = names.filter((n) => !allowed.has(n))
+    const signature = [...deny].sort().join(',')
+    if (existing !== undefined && existing.signature === signature) return // 已是目标态
+    if (deny.length === 0) {
+      // 白名单覆盖全部注册工具 ⇒ 解除既有隐藏
+      if (existing !== undefined) {
+        try {
+          existing.dispose()
+        } catch {
+          /* disposer 已失效 */
+        }
+        skiffRoleRestrictions.delete(sessionId)
+      }
+      return
+    }
+    try {
+      // 先解除旧 restrict（否则多发射一次会叠加；宿主的 dispose 才是"撤销上一次"）
+      if (existing !== undefined) {
+        try {
+          existing.dispose()
+        } catch {
+          /* 旧 disposer 失效 ⇒ 直接发新的 */
+        }
+        skiffRoleRestrictions.delete(sessionId)
+      }
+      const dispose = agent.ctx.tools.restrict({ deny: [...deny] })
+      skiffRoleRestrictions.set(sessionId, { signature, deny, dispose })
+      return
+    } catch {
+      // 该档里有不在册的名字（典型 = `diagram` 关着）⇒ 退下一档
+      continue
+    }
+  }
+}
+
+/** 会话销毁清理（lifecycle 调用） */
+export function forgetSkiffRoleToolVisibility(sessionId: string): void {
+  const existing = skiffRoleRestrictions.get(sessionId)
+  if (!existing) return
+  try {
+    existing.dispose()
+  } catch {
+    /* disposer 已失效 */
+  }
+  skiffRoleRestrictions.delete(sessionId)
+}
+
 /**
  * 同步专属工具可见性（v1.33）。
  *

@@ -22,7 +22,7 @@ import { cccRootForCwd } from '../ccc-roots.js'
 import { ACC_VERSION } from '../constants.js'
 import { truncateContent } from '../skills-discovery.js'
 import { registerEntrySkillSection, registerCognitiveTrajectorySkillSection } from './system-prompt.js'
-import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding } from './guards.js'
+import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding, syncSkiffRoleToolVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../cognitive-trajectory-ops.js'
 import { readLastBound, appendBound } from '../cognitive-trajectory-bound.js'
 import { isSkiffSessionId } from '../skiff-role.js'
@@ -265,6 +265,17 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       const root = cccRootForCwd(cwd)
       const key = agentKey(agent)
       const downstream = await next()
+      // 🔴 v1.69.3（owner 2026-10-19 令「工具清单也要热加载」）：**skiff 的角色工具面同步必须在这里**，
+      //    且在下面那条 skiff early-return **之前** —— 它此前被整个短路 ⇒ skiff 会话从不同步可见性
+      //    ⇒ 角色白名单只剩运行时拦截（"看得见但调不动"），配置变动在 schema 上永不生效。
+      //    本函数内部自带 `isSkiffSessionId` 判据（非 skiff 直接 return），故放在此处置零副作用。
+      if (root) {
+        try {
+          syncSkiffRoleToolVisibility(agent, root)
+        } catch {
+          /* 可见性同步失败不阻断 step（守卫仍兜底拦截） */
+        }
+      }
       // F4 Skiff：完全旁路（不注入 ACC 身份 + 不注册 scoped section；guard 白名单仍兜底约束）
       if (isSkiffSessionId(key)) return downstream
       // 🔴 v1.56.6：非 CCC 会话 ⇒ 隐藏全部 ACC 工具（**必须在 `if (root)` 之外**——

@@ -1,3 +1,67 @@
+## v1.69.3 — 2026-10-19（🔴🔴 **skiff 的「工具清单」从来没同步过** —— 角色白名单只拦调用、不摘 schema）
+
+**性质**：**缺陷修复**。**来源**：v1.69.2 修完提示词后，owner 复测仍报同一现象，并指出
+「工具清单也要热加载」。追下去发现是**另一层、更根本**的问题。
+
+### 一、真因：`agent/pre-step` 把 skiff 整个短路了
+
+`seams/context.ts` 的 pre-step 里依次同步五种工具可见性（非 CCC 隐藏 / safe-mode / im-bridge /
+专属工具 / 宿主定时器工具），**但它们全在下面这条之后**：
+
+```ts
+if (isSkiffSessionId(key)) return downstream   // ← 全部 visibility 同步被跳过
+```
+
+⇒ **skiff 会话从来没有做过任何工具面同步**。角色白名单（`skiff.roles.<r>.tools`）
+于是只剩运行时守卫 `decideGuard` 那一层：**工具照旧出现在模型 schema 里，调用时才被打回**。
+
+**两个真实后果**：
+1. **模型看得见它不该有的工具** —— 它会去试，试了才撞墙；而错误文案是泛化的
+   `tool not allowed in this skiff role`，**看不出是"不在清单里"还是"临时拒绝"**。
+2. **配置变动在 schema 上永远不生效** —— 改 `skiff.roles.<r>.tools` 只影响"调用是否放行"，
+   不影响"模型看得见什么"。**这就是 owner 说的"工具清单不热加载"**。
+
+🔵 **为什么 v1.69.2 没修好它**：那一版修的是**提示词段**（含清单的那段文本），
+而**工具 schema 是另一条通路**。两处都能让模型"以为没有"，但只有 schema 才是能力的实际边界。
+⇒ 判据教训：**"提示词说了什么"与"schema 里有什么"是两条独立通路，改一条不能假定另一条跟着变。**
+
+### 二、修法
+
+新增 `syncSkiffRoleToolVisibility(agent, root)`（`seams/guards.ts`），并在 pre-step 里
+**放到 skiff early-return 之前**：
+
+- deny 集合 = **`REGISTERED_TOOLS` − 角色白名单**（只算**我们自己注册的**工具，
+  不碰宿主的工具 —— 那些由各自的条件同步管）。
+- **每次 pre-step 都重读角色配置** ⇒ 配置一变，下一次 pre-step 就换 schema（热加载）。
+- **幂等**：按 deny 签名比对，配置没变就不重复发 restrict（restrict 会重建 schema）。
+- **两档尝试**：宿主契约规定未注册的名字会让整次 `restrict` 失败，而 `diagram` 是按开关注册的
+  ⇒ 先全覆盖、失败退常驻段（与 `hideAllFor` 同款）。
+- **降级**：读不到角色（配置删了/角色被移除）⇒ **不动**（fail-open）。此时守卫仍会拦，
+  最坏是退回"看得见但调不动"，而不是把工具面删光。
+- 会话销毁时 `forgetSkiffRoleToolVisibility` 回收（防 Map 无界增长）。
+
+### 三、判据（新文件 `skiff-role-hot-reload.test.ts`，六条）
+
+用**真 restrict 契约**（替身 agent 记录收到的 deny）钉：
+
+| # | 判据 |
+|---|---|
+| ① | 白名单之外的工具**真被 deny**（不是只靠调用时拦截） |
+| ② | 🔴 **改磁盘配置 ⇒ deny 清单当场跟着变**（不重启、不重建会话、不重新注册） |
+| ③ | 幂等：配置没变不重复发 restrict |
+| ④ | 🔴 **收回授权 ⇒ 重新 deny**（两个方向都钉，防只做"放开"不做"收回"） |
+| ⑤ | 角色被移除 ⇒ 不动（fail-open） |
+| ⑥ | 非 skiff 会话 ⇒ 直接 return |
+
+🔴 **已做负控**：把幂等判据临时改成"恒返回"（模拟不热加载），② 与 ④ **立即 FAIL**
+（`expected 1 to be 2` / `container_fs` 仍在 deny 里）⇒ **判据非恒绿**。恢复后全绿。
+
+### 验证
+
+- 门禁六项全绿（`coverage` 95.55%）。
+- 部署后判据：活 skiff 会话的 `request/header.tools[]` 里**只有当轮白名单内的工具**；
+  改 `skiff.roles.<r>.tools` 后，**下一轮**该数组就变（不需要重启宿主）。
+
 ## v1.69.2 — 2026-10-19（🔴 **skiff 配置热生效 ＋ 提示词不再抄清单** —— 一次"能用但没人知道"的缺陷）
 
 **性质**：**缺陷修复**。**来源**：owner 报告「当前 CCC 的 skiff 无法使用 cognitive trajectory tool 了」

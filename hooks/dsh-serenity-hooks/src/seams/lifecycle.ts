@@ -24,7 +24,7 @@ import { unregisterSkiffSession } from '../skiff-core.js'
 import { stopAllFaces } from '../face-host.js'
 import { stopAllBridges } from '../weixin-bridge.js'
 import { forgetManualOutputSession } from '../weixin-output-guard.js'
-import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility, forgetNonCccToolVisibility, forgetHostScheduleToolHiding } from './guards.js'
+import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility, forgetNonCccToolVisibility, forgetHostScheduleToolHiding, forgetSkiffRoleToolVisibility } from './guards.js'
 import { forgetLogbookCompactionState } from './keeper.js'
 import { registerDisposer } from '../host/effect.js'
 
@@ -77,6 +77,12 @@ export function cleanupSessionState(sessionId: string): void {
   try {
     // 🆕 v1.59.5：宿主定时器工具（schedule_*）的屏蔽状态（同上——防 per-会话 Map 无界增长）
     forgetHostScheduleToolHiding(sessionId)
+  } catch {
+    /* 无状态 */
+  }
+  try {
+    // 🆕 v1.69.3：skiff 角色工具面（白名单之外从 schema 移除）的 restrict 状态（同上）
+    forgetSkiffRoleToolVisibility(sessionId)
   } catch {
     /* 无状态 */
   }

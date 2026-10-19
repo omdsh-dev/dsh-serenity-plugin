@@ -1,6 +1,6 @@
 {
   "id": "dsh-serenity-hooks",
-  "version": "1.69.2",
+  "version": "1.69.3",
   "main": "lib/index.js",
   "description": "宁静号 ACC harness（Native Cordis 插件）：给 DSH 装一个「AI 工作区」——14 个工具（container_fs/cognitive_trajectory/dashboard/container_git/msm/praxis/ontology/serenity-skill-creator/cheap-worker/localstore/container_admin；另三个 im-bridge/acc-diag/diagram 按配置条件出现）+ 机械约束（安全模式/工作区围墙/密钥守卫）+ 认知轨迹日志与原地重建 + 网页登录入口/微信桥/子角色/官方 ACP 面/认知轨迹唤醒注册表。适配 DSH 0.1.7-rc.1 / 0.2.0-rc.1 / 0.2.1-rc.1（三档，deepseek-ai/deepseek-harness）。",
   "engines": {
