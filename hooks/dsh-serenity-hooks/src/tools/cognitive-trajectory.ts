@@ -462,7 +462,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
           queued: result.queued,
           anchor: result.anchor,
           sessionMdPath: result.sessionMdPath,
-          instruction: 'Queued clear-and-rebuild: when this turn ends, the same conversation will be cleared and injected with the "continue the work" anchor (first-anchor protocol body included), then auto-continue — no manual input needed; resume from SESSION.md at that point.',
+          instruction: 'Queued clear-and-rebuild: when this turn ends, the same conversation will be cleared and injected with the "continue the work" anchor (fake-initial-turns protocol body included), then auto-continue — no manual input needed; resume from SESSION.md at that point.',
         }
       }
       case 'archive': {

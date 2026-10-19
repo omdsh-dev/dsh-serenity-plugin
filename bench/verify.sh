@@ -117,11 +117,16 @@ else
     "🔴 **读数器缺失**（镜像里没有 zstd CLI）⇒ 无法读会话日志；**这不等于没播种**（见 Dockerfile 注释）"
 fi
 # 🔵 与 V5 配对：**宿主是否真的创建过 agent** —— `agent/created` 的宿主侧同源痕迹
-# 🔴 v1.62（D140）判据同步：锚定从「真跑两轮」改为「造历史」⇒ 自证行改名为
-#    `anchor history fabricated`。⛔ 仍用旧串 `anchor turns injected` 会让两条判据**恒红**
+# 🔴 v1.70（fake-initial-turns）判据同步：锚定机制从「造历史」改为「注入两轮 ＋ 模型侧短路」
+#    ⇒ 自证行改名为 `fake initial turns injected` / `fake initial turn short-circuited`。
+#    ⛔ 仍用旧串（`anchor turns injected` / `anchor history fabricated`）会让本条**恒红**
 #    （而那与"真的没跑轮次"在读数上不可分 —— 本轨既有判据：读数器先自证）。
-#    兼容：两个串**都认**（旧版本的日志仍可判绿）。
-prompted=$(( $(grep -c 'bootstrap: anchor history fabricated' "$web" 2>/dev/null || true) + $(grep -c 'bootstrap: anchor turns injected' "$web" 2>/dev/null || true) ))
+#    兼容：三个世代的串**都认**（旧版本日志仍可判绿）。
+prompted=$(( $(grep -c 'bootstrap: fake initial turns injected' "$web" 2>/dev/null || true) \
+  + $(grep -c 'bootstrap: anchor history fabricated' "$web" 2>/dev/null || true) \
+  + $(grep -c 'bootstrap: anchor turns injected' "$web" 2>/dev/null || true) ))
+# 🆕 v1.70：短路自证 —— **只有真的拦下了模型调用**才会打印这一行
+shortcircuited=$(grep -c 'fake initial turn short-circuited' "$web" 2>/dev/null || true)
 check V5b "宿主真的创建过 agent（轮次缝被走到）" \
   "$([ "${prompted:-0}" -gt 0 ] && echo 0 || echo 1)" \
   "锚定痕迹 ${prompted:-0} 条（0 = 容器内**没有任何真实用户轮** ⇒ 先跑 bench-docker turn）"
@@ -130,7 +135,7 @@ check V5b "宿主真的创建过 agent（轮次缝被走到）" \
 # 为什么需要它：V5 判的是"播种内容对不对"，而它依赖一整条真实轮次；V7 判的是
 # **"宿主的运行期调用链真的走到我们的缝里了吗"** —— 这一条**不依赖模型**（缝在模型调用之前跑）。
 # 判据 = 三个**只有真被调用才会打印**的 host 侧痕迹：
-#   · `anchor history fabricated`（`seams/bootstrap.ts`，首个真实轮次时造锚定历史；v1.62 改名）
+#   · `fake initial turns injected`（`seams/bootstrap.ts`，首个真实轮次时注入；v1.70 改名）
 #   · 全局入口 skill section 注册 / 唤醒调度器启动（装配面）
 # 🔴 2026-10-18（v1.65.0 更名）：唤醒调度器的启动自证行由
 #    「[serenity-hooks] ✓ trajectory 唤醒调度器启动」改为
@@ -142,8 +147,12 @@ seam_wake=$(grep -c '认知轨迹唤醒调度器启动' "$web" 2>/dev/null || tr
 seam_ok=$([ "${seam_skill:-0}" -gt 0 ] && [ "${seam_wake:-0}" -gt 0 ] && echo 0 || echo 1)
 check V7 "我们的缝在宿主运行期真被调用（装配面 ≥2 条自证行）" "$seam_ok" \
   "入口 skill ${seam_skill:-0} 行 / 唤醒调度器 ${seam_wake:-0} 行 / 锚点注入 ${prompted:-0} 行"
-check V7b "首个真实轮次走到了 bootstrap 缝（锚定历史已造）" \
+check V7b "首个真实轮次走到了 bootstrap 缝（假首轮已注入）" \
   "$([ "${prompted:-0}" -gt 0 ] && echo 0 || echo 1)" "命中 ${prompted:-0} 条"
+# 🆕 V7c（v1.70）：**短路真发生过** —— 假首轮的回复不是模型给的，而是我们产出的
+check V7c "假首轮的模型调用被短路（请求未发到模型）" \
+  "$([ "${shortcircuited:-0}" -gt 0 ] && echo 0 || echo 1)" \
+  "短路痕迹 ${shortcircuited:-0} 行（0 = 要么没跑够两轮，要么拦截判据没认出来）"
 
 # ── V6 设置面板（B1：0.1.7 换了模型 ⇒ 装错就整页不出现）──
 # 🔵 判据升级（2026-09-24：原判据只有"grep 无报错" = **只能证明"没炸"**，证明不了"契约没破"）。

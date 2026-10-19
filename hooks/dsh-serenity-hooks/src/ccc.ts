@@ -143,7 +143,7 @@ interface SerenityConfig {
   };
   /** localstore git 提交策略（S134 重设计）：allow 可提交 / deny 禁提交（缺省 deny） */
   localstore?: { gitTrack?: 'allow' | 'deny' };
-  // 注意：bootstrap 配置段已于 v1.19.5 移除（S142 用户原则——first-anchor 属
+  // 注意：bootstrap 配置段已于 v1.19.5 移除（S142 用户原则——fake-initial-turns 属
   // ACC 协议层，任何 CCC 抽象层都是宁静号/ACC，机制与内容零配置面，代码固化）。
   hooks?: {
     enabled?: boolean;

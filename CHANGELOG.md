@@ -1,3 +1,53 @@
+## v1.70.0 — 2026-10-19（🔴🔴 **first-anchor 退役 → `fake-initial-turns`：真跑两轮 ＋ 模型侧短路**）
+
+**性质**：**机制改写 ＋ 正名**。**来源**：owner 两条令——① 「新方案就退回最早版本的 first anchor 了，
+区别只是 acknowledge 由真的发到 LLM 改为短路」；② 「first-anchor 是老名字，新名字叫 fake-initial-turns」。
+
+### 一、为什么不再往会话日志里"造历史"
+
+v1.69.4 手写 `assistant/message` 把真机会话写坏（打不开）。根因不是"字段少补两个"，而是**判据打错了维度**：
+`assistant/message` 在宿主里是**结算事件（settlement）**，形状由**四个互不重叠的校验器**分段把关
+（`stream` 数组 ／ `source.provider`+`model` ／ message `id`+`role` ／ 禁带 `sourceEventSeqs`），
+而**写通道完全不校验** ⇒ 只在**投影/重进会话**时炸。⇒ 结论：**事件一律由宿主自己写**。
+
+### 二、新机制（三处改动，全在 `seams/bootstrap.ts`）
+
+| # | 改动 | 为什么 |
+|---|---|---|
+| ① | `agent/inbox/inserted` → `inbox.prepend('next-turn', …)` 注入两条 | **只动队列、不动日志** ⇒ 不会让 surface 首节点变成 user（那会让重放抛 `requires a protected first surface head`）。两轮成为**真 turn** ⇒ 顺序天然是「假首轮① → ack① → 假首轮② → ack② → 真实消息」，**不需要"插入"** |
+| ② | 新增 `llm/stream` 瀑布监听：命中即**不调 `next()`**，返回 `fakeTurnAckStream()` | 宿主契约逐字：*call `next()` to reach the resolved adapter's stream, or yield your own chunks to short-circuit* ⇒ **请求根本不发给模型**（owner 原话）。流形状 = `block-start → text-delta → block-end → usage(全零) → finish(stop)` |
+| ③ | 删掉 `appendAnchorHistory` / `hasAssistantHistory` / 占位 system 那一整套 | 零伪造：一个会话事件都不写 |
+
+**拦截判据 = 双条件**（`isFakeInitialTurn`）：**(a)** 该 session 登记着未兑现的假首轮；
+**(b)** 请求里**最近一条"人写的话"**逐字等于假首轮文本（跳过 `runtime-context`/`time-context`/`skill-catalog` 等注入源）。
+⇒ **代价不对称**：漏拦 = 真发一次调用（慢，无害）；**误拦 = 吞掉真实用户请求**（用户眼里"卡死"）⇒ 判据偏保守。
+
+**`session.id` 取不到 ⇒ 不注入**：短路要靠 sessionId 认回会话，认不回就会退化成两次**真模型调用**——
+那正是本机制要消掉的东西。
+
+### 三、判据
+
+| # | 判据 | 结果 |
+|---|---|---|
+| ① | 单测 `tests/fake-initial-turns.test.ts`（13 例）—— 重心是**误拦防护**：历史含假首轮但末条是真人 ／ 未登记 ／ 登记清零 ／ 退化输入 ／ content 非块数组 ⇒ **全部必须放行** | ✅ |
+| ② | 流形状：`usage` 全零且在 `finish` 之前、`finish` 是最后一条、`block-end` 带装配好的块 | ✅ |
+| ③ | 缝侧行为（`bootstrap-register` / `bootstrap-branches`）：注入顺序「逆序 prepend ⇒ 正序排队」、`appends` **恒为空**、`prepend` 抛错被吞、子 agent 只注入一次 | ✅ |
+| ④ | `type-contract.ts` 新增三条 `llm/stream` 闸门 ＋ **负控实测**（改成不成立 ⇒ `TS2344` 当场红） | ✅ |
+| ⑤ | **容器实测**（宿主 0.2.1-rc.2 ＋ 本地 tarball）：真机事件序 `假首轮①→ack→假首轮②→ack→真实消息→真模型回复`；`V7c` 短路痕迹 1 行；`V22/V22b/V22c` 日志可重放 1/1 | ✅ |
+
+### 四、另一处真缺陷（顺带修）
+
+`warnOnce` 原本是**全局一个布尔** ⇒ 进程里打完第一条告警后，"假首轮已短路"这条**唯一**能证明拦截生效的痕迹被永久吞掉
+（容器实测：注入行打出、短路行消失 ⇒ 判据无法收）。改为**按消息去重**（`Set<string>`），并给 `verify.sh` 加 **V7c**。
+⇒ 同时约束：去重键 = 消息原文，**消息里不要带逐次变化的数字**（否则等于没有去重）。
+
+### 五、正名
+
+`first-anchor` → **`fake-initial-turns`**（中文：假首轮）。标识符 `DEFAULT_ANCHOR_MESSAGES` → `DEFAULT_FAKE_INITIAL_MESSAGES`、
+`ANCHOR_ACK_TEXT` → `FAKE_TURN_ACK_TEXT`、`ANCHOR_MESSAGE_SUMMARY` → `FAKE_TURN_SUMMARY`、`anchorMessages` → `fakeInitialMessages`、
+`pendingAnchors` → `pendingFakeTurns`、`isAnchorRequest` → `isFakeInitialTurn`、`anchorAckStream` → `fakeTurnAckStream`。
+**刻意不动**：`diagram` 的 `ANCHOR_RE`（连线锚点，同名不同义）、「Anchored Standard」工具目录变体。
+
 ## v1.69.4 — 2026-10-19（🔴🔴 **first-anchor 造出的是「两句用户独白」，不是一次交换** —— owner 报的两个缺陷其实是同一个）
 
 **性质**：**缺陷修复**。**来源**：owner 看界面截图后逐字指出两点——

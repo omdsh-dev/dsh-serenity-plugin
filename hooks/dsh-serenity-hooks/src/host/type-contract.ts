@@ -43,6 +43,7 @@
 
 import type { Context } from 'cordis'
 // ① 空类型 import（仅拉入各包的 Context 声明增强 + 其依赖类型）
+import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
@@ -207,7 +208,7 @@ type HostAgent = NonNullable<Ret<HostContext['agents']['get']>>
 
 /** `agent.steer(msg)` —— rebuild 自动继续（`rebuild.ts:442`）、输出守卫打回 */
 type _AgentSteer = Expect<Extends<HostAgent['steer'], (message: never) => unknown>>
-/** `agent.inbox.prepend(target, msg)` —— first-anchor 锚定（`seams/bootstrap.ts:302`） */
+/** `agent.inbox.prepend(target, msg)` —— fake-initial-turns 注入（`seams/bootstrap.ts`） */
 type _AgentInboxPrepend = Expect<Extends<HostAgent['inbox']['prepend'], (target: never, message: never) => unknown>>
 /** `agent.session.header.cwd` —— 工具工作目录解析 */
 type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], string | undefined>>
@@ -232,6 +233,22 @@ import type { SessionEvent } from '@deepseek-ai/dsh-session'
 type _EvStatus = Expect<Extends<Parameters<Events['agent/status']>[0], { agent: unknown; status: string }>>
 /** `agent/inbox/inserted`：dsp 读 `payload.agent` / `payload.message`（`seams/bootstrap.ts`） */
 type _EvInbox = Expect<Extends<Parameters<Events['agent/inbox/inserted']>[0], { agent: unknown; message: unknown }>>
+/**
+ * `llm/stream`：**位置参数**（`options, next`）—— fake-initial-turns 的短路点（`seams/bootstrap.ts`）。
+ *
+ * dsp 读 `options.sessionId`（把请求认回会话）与 `options.messages`（逐字比对假首轮文本），
+ * 返回值**不调 `next()`** 而是自己产出一条 `StreamChunk` 流 ⇒ 请求不发到模型。
+ * 🔴 三处会静默失效：`sessionId` 没了（认不回会话 ⇒ 退回真调用，只是变慢）、
+ * `messages` 改形状（比对恒假 ⇒ 同上）、`llm/stream` 不再是 waterfall（本机制整体失效）。
+ */
+type _EvLlmStreamOptions = Expect<Extends<
+  Parameters<Events['llm/stream']>[0],
+  { sessionId?: unknown; messages?: readonly unknown[] }
+>>
+/** `llm/stream` 的第二参 `next()` 返回 **AsyncIterable**（拿不到它就没法"或短路或放行"） */
+type _EvLlmStreamNext = Expect<Extends<Ret<Parameters<Events['llm/stream']>[1]>, AsyncIterable<unknown>>>
+/** 我们短路时产出的 chunk 形状必须仍是宿主的 `StreamChunk`（`text-delta` 那条最要紧） */
+type _EvLlmStreamChunk = Expect<Extends<{ type: 'text-delta'; index: number; text: string }, StreamChunk>>
 /** `agent/created`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种 · `cro-turns.ts` 标"在跑" ·
  *  `index.ts` 反应式同步）。⚠️ **v0.1.7 起该事件 `@mode = serial`**（监听器被 await、抛错会使
  *  创建失败 ⇒ 我方处理函数必须快速返回且不得抛；此处只钉字段，模式由实现纪律守） */

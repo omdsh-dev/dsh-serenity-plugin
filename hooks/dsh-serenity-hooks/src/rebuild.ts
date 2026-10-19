@@ -29,7 +29,7 @@
  *      （DSH 官方先例：hooks-claude-code Stop hook 在 turn-stopping 里 steer 强制
  *      再执行一步）——next-step 队列非空 → turn 循环不 break → 模型自动读取
  *      SESSION.md 继续工作，无需用户手工输入。
- *   ② **保留 first-anchor**：锚点消息并入 DEFAULT_ANCHOR_MESSAGES 正文（ACC 身份/
+ *   ② **保留协议正文**：并入 DEFAULT_FAKE_INITIAL_MESSAGES 正文（ACC 身份/
  *      EAP/协作协议），去掉 acknowledge 尾句（重建后直接干活，不重走确认轮）——
  *      系统提示词层身份未丢（每轮注入），bootstrap 晋升状态不受影响（surface
  *      replace 不改 events，promoted 保持完整工具目录）。
@@ -57,37 +57,37 @@ import {
   namingTitleFor,
   sessionEvents,
 } from './cognitive-trajectory-ops.js'
-import { DEFAULT_ANCHOR_MESSAGES } from './seams/bootstrap.js'
+import { DEFAULT_FAKE_INITIAL_MESSAGES } from './seams/bootstrap.js'
 import { eventToken, REBUILD_TODO_FILENAME } from './cognitive-trajectory-assistant.js'
 import { appendBound, readLastBound } from './cognitive-trajectory-bound.js'
 import { isoLocal } from './time.js'
 
-/** acknowledge 尾句（first-anchor 的确认要求——rebuild 重建后不重走确认轮，直接继续） */
+/** acknowledge 尾句（fake-initial-turns 的确认要求——rebuild 重建后不重走确认轮，直接继续） */
 const ACK_SUFFIX_RE = /Please simply reply "acknowledge" — no action needed\.\s*$/
 
 /**
- * 剥离 first-anchor 消息的 acknowledge 尾句（rebuild 锚点保留协议正文但不要求确认回复）。
+ * 剥离假首轮消息的 acknowledge 尾句（rebuild 锚点保留协议正文但不要求确认回复）。
  */
 export function stripAckSuffix(text: string): string {
   return text.replace(ACK_SUFFIX_RE, '').trimEnd()
 }
 
 /**
- * 构建重建锚点消息（v1.22.4 定稿语义 + v1.22.5 保留 first-anchor 正文）：
- * 「[TRAJECTORY-REBUILD] + first-anchor 协议正文（去 acknowledge 尾句）+ 继续 {SESSION 名} 的工作」。
+ * 构建重建锚点消息（v1.22.4 定稿语义 + v1.22.5 保留协议正文）：
+ * 「[TRAJECTORY-REBUILD] + fake-initial-turns 协议正文（去 acknowledge 尾句）+ 继续 {SESSION 名} 的工作」。
  * v1.29.2（R1）：可选 task focus 段——简短任务焦点文字传入重建后会话（不含历史，
  * 历史完整在 SESSION.md；让重建后的自己第一时间理解本轮焦点，降低冷启动认知成本）。
  * @param root - CCC 根
  * @param sessionName - 当前 use 的宁静号 SESSION 名（如 S142）；无激活则通用指令
  * @param activeMdPath - 持久轨迹 SESSION.md 绝对路径（保持原位）
- * @param anchorMessages - first-anchor 协议消息序列（缺省 DEFAULT_ANCHOR_MESSAGES；可注入测试）
+ * @param protocolMessages - 协议正文消息序列（缺省 DEFAULT_FAKE_INITIAL_MESSAGES；可注入测试）
  * @param focus - 可选任务焦点（单行化 + ≤200 字消毒；无则不输出 focus 段——向后兼容）
  */
 export function buildRebuildAnchor(
   root: string,
   sessionName: string,
   activeMdPath: string,
-  anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
+  protocolMessages: string[] = DEFAULT_FAKE_INITIAL_MESSAGES,
   focus?: string | null,
 ): string {
   const rel = activeMdPath.startsWith(root) ? activeMdPath.slice(root.length + 1) : activeMdPath
@@ -104,7 +104,7 @@ export function buildRebuildAnchor(
   const lines = [
     `${eventToken('rebuild')} The conversation has been cleared and rebuilt (Ship of Theseus: the carrier is replaced, the cognitive trajectory continues).`,
     '',
-    ...anchorMessages.flatMap((text) => [stripAckSuffix(text), '']),
+    ...protocolMessages.flatMap((text) => [stripAckSuffix(text), '']),
     sessionName !== '' ? `Continue the work of ${sessionName}.` : 'Continue the current work.',
     ...(sessionLine ? [sessionLine] : []),
     // v1.24.11 规范行：与 `session use` 上下文同格式（SESSION.md path:）——路径独立成行，
@@ -324,7 +324,7 @@ export async function queueRebuild(
   const sessionName = getActiveSessionInfo(dshSessionId)?.sessionId ?? sessionNameFromMdPath(mdPath)
   // v1.29.2（R1）：note → 任务焦点（单行化+截断在 buildRebuildAnchor/sanitizeFocusLine 内做）
   const focus = note && note.trim() !== '' ? note : undefined
-  const anchor = buildRebuildAnchor(root, sessionName, mdPath, DEFAULT_ANCHOR_MESSAGES, focus)
+  const anchor = buildRebuildAnchor(root, sessionName, mdPath, DEFAULT_FAKE_INITIAL_MESSAGES, focus)
 
   // U1（方案 v1.0）：rebuild 排队时持久化绑定（action: rebuild）——权威绑定随会话日志
   // 存续跨 rebuild（同一 dsh 会话 id 日志保留）；post-rebuild 恢复读 last bound 即此记录。

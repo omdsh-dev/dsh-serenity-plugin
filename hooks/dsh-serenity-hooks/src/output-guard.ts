@@ -43,6 +43,7 @@ const MECHANISM_WORDS: string[] = [
   'COGNITIVE-TRAJECTORY-STEWARD',
   'COGNITIVE-TRAJECTORY-ASSISTANT',
   'first-anchor',
+  'fake-initial-turns',
   '拦截缝',
   '装配层',
   'acp-core',

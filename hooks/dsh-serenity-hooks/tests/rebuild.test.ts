@@ -100,7 +100,7 @@ function fakeAgent(id: string, session: unknown) {
   }
 }
 
-describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结束清空；v1.22.5：自动继续 + 保留 first-anchor）', () => {
+describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结束清空；v1.22.5：自动继续 + 保留协议正文）', () => {
   it('stripAckSuffix：去掉 acknowledge 尾句（保留协议正文）', () => {
     const text = 'We anchor first, then act.\nPlease simply reply "acknowledge" — no action needed.'
     expect(stripAckSuffix(text)).toBe('We anchor first, then act.')
@@ -110,7 +110,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(stripAckSuffix('plain text')).toBe('plain text')
   })
 
-  it('buildRebuildAnchor：Continue {SESSION name} + persistent cognitive trajectory path + first-anchor protocol body（ack 剥离）', () => {
+  it('buildRebuildAnchor：Continue {SESSION name} + persistent cognitive trajectory path + fake-initial-turns protocol body（ack 剥离）', () => {
     const mdPath = join(dir, 'AGENT_SESSIONS', '2026-08-24--S142--dsp', 'SESSION.md')
     const a = buildRebuildAnchor(dir, 'S142', mdPath)
     expect(a).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · REBUILD]')
@@ -119,7 +119,7 @@ describe('轨迹跟踪器 rebuild（v1.22.4 定稿：复用旧会话 + turn 结�
     expect(a).toContain('Persistent cognitive trajectory')
     // v1.24.11 规范行：SESSION.md path: 与 use 上下文同格式（恢复机制可解析，无需 [SESSION CONTEXT] 标记）
     expect(a).toContain('SESSION.md path: AGENT_SESSIONS/2026-08-24--S142--dsp/SESSION.md')
-    // v1.22.5：保留 first-anchor 协议正文（ACC 身份/EAP/协作协议）
+    // v1.22.5：保留协议正文（ACC 身份/EAP/协作协议）—— v1.70 起这段正文归 fake-initial-turns
     expect(a).toContain('Abstract Cognitive Container')
     expect(a).toContain('Explicit Abstraction Principle')
     expect(a).toContain('We anchor first, then act')

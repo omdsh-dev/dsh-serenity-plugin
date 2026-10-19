@@ -85,7 +85,7 @@ export const COGNITIVE_TRAJECTORY_ACTIONS: readonly CognitiveTrajectoryAction[] 
  * 移除 `.events` 属性 → `snapshotEvents()` 方法（dsh-session/src/session.ts：
  * `snapshotEvents(fromSeq, toSeqExclusive)`）。插件早期代码多处裸读 `.events`
  * （经 `as unknown as { events? }` 断言绕过 typecheck），运行时静默 undefined——
- * 造成 first-anchor 每轮重插 / SESSION 激活恢复失效 / rebuild 定位错乱。
+ * 造成 fake-initial-turns 每轮重插 / SESSION 激活恢复失效 / rebuild 定位错乱。
  * 统一收敛到本 helper：snapshotEvents() 优先（rc.1 真实形态），`.events` 兜底
  * （测试替身/旧运行时）。所有消费方一律经此读取，禁止再裸读 `.events`。
  * 泛型 T：调用方按需声明事件形状（如 `SessionEvent`），unknown 默认。

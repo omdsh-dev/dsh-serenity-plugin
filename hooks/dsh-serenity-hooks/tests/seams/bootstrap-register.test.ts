@@ -16,7 +16,7 @@
  *   · `bootstrap.ts` 对宿主的引用**全是 `import type`**（Context / Agent / UserMessage /
  *     PromptAssembly）⇒ 运行时无需 mock 任何宿主包
  *   · `SETTINGS` 是**模块级固化常量**（协议固有、零配置面）⇒ 测试断言对**导出常量**取，
- *     不硬编码字面量（`DEFAULT_ANCHOR_MESSAGES` / `DEFAULT_COMPACTION_TOOLS`），改常量不会假红
+ *     不硬编码字面量（`DEFAULT_FAKE_INITIAL_MESSAGES` / `DEFAULT_COMPACTION_TOOLS`），改常量不会假红
  *   · ⚠️ `warnOnce` 是"只喊一次"的模块级函数 ⇒ **本文件不断言日志**（否则用例间互相干扰）
  */
 
@@ -25,7 +25,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { registerBootstrap, DEFAULT_ANCHOR_MESSAGES, DEFAULT_COMPACTION_TOOLS } from '../../src/seams/bootstrap.js'
+import { registerBootstrap, DEFAULT_FAKE_INITIAL_MESSAGES, FAKE_TURN_SUMMARY, FAKE_TURN_ACK_TEXT, DEFAULT_COMPACTION_TOOLS } from '../../src/seams/bootstrap.js'
 // 不硬编码字面量：插件来源 kind 的**单一真相源**在 message-source.ts
 import { ACC_MESSAGE_KIND } from '../../src/message-source.js'
 
@@ -78,10 +78,10 @@ afterEach(() => {
 // ── 接线 ────────────────────────────────────────────────────────────────────
 
 describe('registerBootstrap: 接线', () => {
-  it('装四条缝：session/event ／ agent/inbox/inserted ／ system-prompt/assemble ／ agent/pre-step', () => {
+  it('装五条缝：session/event ／ agent/inbox/inserted ／ llm/stream ／ system-prompt/assemble ／ agent/pre-step', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    for (const name of ['session/event', 'agent/inbox/inserted', 'system-prompt/assemble', 'agent/pre-step']) {
+    for (const name of ['session/event', 'agent/inbox/inserted', 'llm/stream', 'system-prompt/assemble', 'agent/pre-step']) {
       expect(ctx.handlers.get(name), name).toHaveLength(1)
     }
   })
@@ -130,13 +130,13 @@ describe('registerBootstrap: system-prompt/assemble —— 首锚目录窄化', 
     }
   })
 
-  it('已达 requiredSignals（= 锚定消息条数）⇒ 晋升 ⇒ 原样返回完整目录', async () => {
+  it('已达 requiredSignals（= 假首轮条数）⇒ 晋升 ⇒ 原样返回完整目录', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     // boundary 5 之后再攒够 requiredSignals 条 assistant/message
     const events = [
       { type: 'compaction/end', seq: 5 },
-      ...DEFAULT_ANCHOR_MESSAGES.map((_, i) => ({ type: 'assistant/message', seq: 6 + i })),
+      ...DEFAULT_FAKE_INITIAL_MESSAGES.map((_, i) => ({ type: 'assistant/message', seq: 6 + i })),
     ]
     const out = (await assemble(ctx, fakeAgent('main-boot-3', { header: { cwd: dir }, events }), fullCatalog())) as { tools: unknown[] }
     expect(out.tools).toHaveLength(fullCatalog().length)
@@ -245,97 +245,169 @@ describe('registerBootstrap: agent/pre-step —— 首锚剥离注入上下文',
   })
 })
 
-// ── session/event(system/message)：锚定历史（造，而非真跑）──────────────────
+// ── fake-initial-turns：注入（agent/inbox/inserted）＋ 短路（llm/stream）──────
 
-describe('registerBootstrap: session/event —— 锚定历史（造，而非真跑）', () => {
-  function inboxAgent(id: string, extra: Record<string, unknown> = {}): { agent: Record<string, unknown>; appends: Array<{ type: string; text: string }> } {
-    const appends: Array<{ type: string; text: string }> = []
+describe('registerBootstrap: fake-initial-turns —— 注入两轮 ＋ 短路模型回复', () => {
+  type Queued = {
+    role?: string
+    content?: Array<{ text?: string }>
+    source?: { kind?: string; summary?: string }
+  }
+
+  /** 假 agent：`inbox.prepend` 记录器（**unshift 语义**，与宿主一致） */
+  function inboxAgent(id: string, extra: Record<string, unknown> = {}): { agent: Record<string, unknown>; queue: Queued[] } {
+    const queue: Queued[] = []
     const agent = {
-      session: {
-        id,
-        ...extra,
-        append: (type: string, data: unknown) => {
-          const text = (data as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? ''
-          appends.push({ type, text })
-          return { seq: appends.length }
+      session: { id, ...extra },
+      inbox: {
+        prepend: (_target: string, message: unknown) => {
+          queue.unshift(message as Queued)
         },
       },
     }
-    return { agent, appends }
-  }
-  /** 触发锚定的唯一合法时机：宿主已提交该会话第一条 `system/message`。
-   *  🔴 锚定走 `setTimeout(0)`（避开宿主"append 不可重入"）⇒ 必须**让出一拍**再断言。 */
-  const fireSystem = async (ctx: FakeCtx, session: unknown) => {
-    first(ctx, 'session/event')(session, { type: 'system/message', seq: 1 })
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    return { agent, queue }
   }
 
-  it('宿主提交 system/message 之后 ⇒ 按**正序**写入锚定 `user/message`（v1.62 / D140）', async () => {
-    const ctx = fakeCtx()
-    registerBootstrap(ctx as never)
-    const { agent, appends } = inboxAgent('main-boot-12', { header: { cwd: dir }, events: [] })
+  /** 注入时机 = 新会话第一条**真实**用户消息进 inbox */
+  const fireInserted = (ctx: FakeCtx, agent: unknown, kind = 'user') =>
+    first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind } } })
 
-    await fireSystem(ctx, agent.session)
-
-    expect(appends).toHaveLength(DEFAULT_ANCHOR_MESSAGES.length)
-    // 🔴 形状约束（D140-A，宿主 v4 校验的硬要求）：**只能是 `user/message`**。
-    //    `system/message` 与 `assistant/message` 都在 `STEP_EVENT_TYPES` 里 ⇒ 必须过 `requireStep`
-    //    （turn/step 精确匹配当前打开的），而锚定写入时 turn/step **都还没打开**
-    //    ⇒ 代写它们 = 首轮正常、**重新进入会话即 corrupt**（v1.61.0 事故的根因）。
-    expect(appends.every((a) => a.type === 'user/message')).toBe(true)
-    // 正序：日志里就是模型看到的顺序（不再是"逆序 prepend 到队列"）
-    expect(appends.map((a) => a.text)).toEqual([...DEFAULT_ANCHOR_MESSAGES])
+  /** 造一条模型请求：`text` 是"最近一条人写的话" */
+  const request = (sessionId: string, text: string, sourceKind?: string) => ({
+    sessionId,
+    messages: [
+      {
+        role: 'user',
+        content: [{ type: 'text', text }],
+        ...(sourceKind === undefined ? {} : { source: { kind: sourceKind } }),
+      },
+    ],
   })
 
-  it('🔴 时机约束（D140-B）：`agent/inbox/inserted` **不得**写锚定历史', async () => {
+  /** 把短路流抽干（形状断言用） */
+  async function drain(stream: AsyncIterable<unknown>): Promise<Array<Record<string, unknown>>> {
+    const out: Array<Record<string, unknown>> = []
+    for await (const chunk of stream) out.push(chunk as Record<string, unknown>)
+    return out
+  }
+
+  /** 调用 llm/stream 处理器；`nextCalled` 记录**真调用**是否被放行 */
+  async function streamCall(
+    ctx: FakeCtx,
+    options: unknown,
+  ): Promise<{ nextCalled: boolean; chunks: Array<Record<string, unknown>> }> {
+    let nextCalled = false
+    const next = () => {
+      nextCalled = true
+      return (async function* () {
+        yield { type: 'REAL' }
+      })()
+    }
+    const out = await first(ctx, 'llm/stream')(options, next)
+    return { nextCalled, chunks: await drain(out as AsyncIterable<unknown>) }
+  }
+
+  it('注入：按**正序**排队 ⇒ [假首轮①, 假首轮②, 真实消息]（逆序 prepend 的净效果）', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, appends } = inboxAgent('main-boot-timing', { header: { cwd: dir }, events: [] })
-    // 这个时机太早：宿主的 `system/message` 还没提交。若在此写 user 消息，
-    // surface 首节点就变成 user ⇒ 重放抛
-    // `system/message requires a protected first surface head` ⇒ 会话 corrupt。
-    // ⇒ 这就是"第一次修复后仍然翻车"的第二个缺陷（单测全绿、首轮正常，只有重进才暴露）。
-    await first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
-    expect(appends).toHaveLength(0)
-    // 正控：同一会话在 system/message 到达后**确实**会写 ⇒ 证明上面不是"永远不写"
-    await fireSystem(ctx, agent.session)
-    expect(appends.length).toBeGreaterThan(0)
-  })
+    const { agent, queue } = inboxAgent('main-boot-12', { header: { cwd: dir }, events: [] })
 
-  it('已有**模型回复**的会话 ⇒ 不锚定（已非首轮）', async () => {
-    const ctx = fakeCtx()
-    registerBootstrap(ctx as never)
-    const { agent, appends } = inboxAgent('main-boot-13', {
-      header: { cwd: dir },
-      // 🔴 v1.62：锚定的形状判据 = 「还没有 assistant/message」（= 仍是首轮）。
-      //    ⛔ 不能用 user/message 历史判：锚定跑在 setTimeout(0) 之后，那时真人 prompt 已写入。
-      events: [{ type: 'assistant/message', seq: 1 }],
-    })
+    fireInserted(ctx, agent)
 
-    await fireSystem(ctx, agent.session)
-
-    expect(appends).toHaveLength(0)
-  })
-
-  it('cheap-worker / skiff 会话 ⇒ 不锚定（autonomous worker 与角色会话不需锚定轮）', async () => {
-    const ctx = fakeCtx()
-    registerBootstrap(ctx as never)
-    for (const id of ['cheap-worker-worker-3', 'skiff-qa-boot-2']) {
-      const { agent, appends } = inboxAgent(id, { header: { cwd: dir }, events: [] })
-      await fireSystem(ctx, agent.session)
-      expect(appends, id).toHaveLength(0)
+    expect(queue).toHaveLength(DEFAULT_FAKE_INITIAL_MESSAGES.length)
+    expect(queue.map((q) => q.content?.[0]?.text)).toEqual([...DEFAULT_FAKE_INITIAL_MESSAGES])
+    // 带 ACC 标记 ⇒ ① 递归守卫认它 ② 拦截判据认它（两处同源）
+    for (const q of queue) {
+      expect(q.source?.kind).toBe(ACC_MESSAGE_KIND)
+      expect(q.source?.summary).toBe(FAKE_TURN_SUMMARY)
     }
   })
 
-  it('幂等：同一条会话的第二次 system/message ⇒ 不再重复造历史', async () => {
+  it('🔴 两条都不调 `next()`：**请求根本不发给模型**（owner 令「拦截 LLM」）', async () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const { agent, appends } = inboxAgent('main-boot-idem', { header: { cwd: dir }, events: [] })
-    await fireSystem(ctx, agent.session)
-    const afterFirst = appends.length
-    await fireSystem(ctx, agent.session)
-    // 每轮 system 都会更新（contentGeneration/replace），但**锚定历史只造一次**
-    expect(appends.length).toBe(afterFirst)
-    expect(afterFirst).toBe(DEFAULT_ANCHOR_MESSAGES.length)
+    const { agent } = inboxAgent('main-boot-13', { header: { cwd: dir }, events: [] })
+    fireInserted(ctx, agent)
+
+    for (const text of DEFAULT_FAKE_INITIAL_MESSAGES) {
+      const { nextCalled, chunks } = await streamCall(ctx, request('main-boot-13', text, ACC_MESSAGE_KIND))
+      expect(nextCalled, '假首轮不许落到真调用').toBe(false)
+      // 形状：text 块 → usage 全零 → finish(stop)
+      expect(chunks[0]).toMatchObject({ type: 'block-start', blockType: 'text' })
+      expect(chunks.filter((c) => c.type === 'text-delta').map((c) => c.text)).toEqual([FAKE_TURN_ACK_TEXT])
+      expect(chunks.some((c) => c.type === 'usage' && (c as { usage?: { outputTokens?: number } }).usage?.outputTokens === 0)).toBe(true)
+      expect(chunks.at(-1)).toEqual({ type: 'finish', reason: { kind: 'stop' } })
+    }
+  })
+
+  it('🔴 两轮兑现完之后：真实用户消息**必须放行**给模型（不许被吞）', async () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const { agent } = inboxAgent('main-boot-14', { header: { cwd: dir }, events: [] })
+    fireInserted(ctx, agent)
+
+    for (const text of DEFAULT_FAKE_INITIAL_MESSAGES) {
+      await streamCall(ctx, request('main-boot-14', text, ACC_MESSAGE_KIND))
+    }
+    const real = await streamCall(ctx, request('main-boot-14', 'please fix the bug'))
+    expect(real.nextCalled, '登记清零后必须回到真调用').toBe(true)
+    expect(real.chunks).toEqual([{ type: 'REAL' }])
+  })
+
+  it('🔴 文本不符（真人的话）⇒ 即便登记还在也**不拦**（误拦会吞掉真实请求）', async () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const { agent } = inboxAgent('main-boot-15', { header: { cwd: dir }, events: [] })
+    fireInserted(ctx, agent)
+
+    const { nextCalled } = await streamCall(ctx, request('main-boot-15', 'hello, are you there?', 'user'))
+    expect(nextCalled).toBe(true)
+  })
+
+  it('未登记的会话 ⇒ 一律放行（别的会话不受影响）', async () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const { nextCalled } = await streamCall(ctx, request('other-session', DEFAULT_FAKE_INITIAL_MESSAGES[0]!, ACC_MESSAGE_KIND))
+    expect(nextCalled).toBe(true)
+  })
+
+  it('已有**真人历史**的会话 ⇒ 不注入（resume/续跑不重插）', () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const { agent, queue } = inboxAgent('main-boot-16', {
+      header: { cwd: dir },
+      events: [{ type: 'user/message', seq: 1, data: { source: { kind: 'user' } } }],
+    })
+
+    fireInserted(ctx, agent)
+    expect(queue).toHaveLength(0)
+  })
+
+  it('cheap-worker / skiff 会话 ⇒ 不注入（角色提示词已完整）', () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    for (const id of ['cheap-worker-worker-3', 'skiff-qa-boot-2']) {
+      const { agent, queue } = inboxAgent(id, { header: { cwd: dir }, events: [] })
+      fireInserted(ctx, agent)
+      expect(queue, id).toHaveLength(0)
+    }
+  })
+
+  it('我们自己的 ACC 消息进队列 ⇒ 不递归注入（否则每轮都插两轮）', () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const { agent, queue } = inboxAgent('main-boot-17', { header: { cwd: dir }, events: [] })
+
+    fireInserted(ctx, agent, ACC_MESSAGE_KIND)
+    expect(queue).toHaveLength(0)
+  })
+
+  it('非 CCC（cwd 无 .serenity）⇒ 不注入', () => {
+    const ctx = fakeCtx()
+    registerBootstrap(ctx as never)
+    const { agent, queue } = inboxAgent('main-boot-18', { header: { cwd: outside }, events: [] })
+
+    fireInserted(ctx, agent)
+    expect(queue).toHaveLength(0)
   })
 })

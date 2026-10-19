@@ -7,7 +7,7 @@
  * （43~50 已做完）。语句 90.09%（364/404）、函数 13/13。
  * 🔵 复扫按「文件名单元格 ＋ 数值单元格」**成对读**（纪律 16）。
  *
- * 🔵 **为何它值得优先做（贴 objective）**：`bootstrap.ts` 管的是 **first-anchor 两阶段工具目录**
+ * 🔵 **为何它值得优先做（贴 objective）**：`bootstrap.ts` 管的是 **fake-initial-turns 两阶段工具目录**
  * ——**与 DSH 的衔接面**（`system-prompt/assemble` ／ `agent/pre-step` ／ `agent/inbox/inserted`
  * ／ `session/event` 四条缝）。objective 要害是「**尤其管好与 DSH 的衔接面**」。
  *
@@ -233,13 +233,14 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
     const decision = { kind: 'enter', messages: [{ source: { kind: 'skill-catalog' } }] }
     const pre = await preStep(ctx, { session: { header: { cwd: 123 } } }, decision)
     expect(pre).toBe(decision)
-    // ③ inbox：无 agent 上的 session.header.cwd ⇒ 不写入任何锚定历史
-    const appends: unknown[] = []
+    // ③ inbox：无 agent 上的 session.header.cwd ⇒ 不注入任何假首轮
+    const queued: unknown[] = []
     const inboxAgent = {
-      session: { id: 'x', header: {}, append: (t: string, d: unknown) => appends.push({ t, d }) },
+      session: { id: 'x', header: {} },
+      inbox: { prepend: (_t: string, m: unknown) => queued.push(m) },
     }
     first(ctx, 'agent/inbox/inserted')({ agent: inboxAgent, message: { source: { kind: 'user' } } })
-    expect(appends).toHaveLength(0)
+    expect(queued).toHaveLength(0)
   })
 
   it('🔴 B2：`session/event` 的 root 解析不到 ⇒ 早退（不抛、不建 tracker）', () => {
@@ -251,81 +252,87 @@ describe('bootstrap 分支面: B 四条缝的退化输入守卫', () => {
     expect(() => h({ header: { cwd: outside } }, { type: 'assistant/message', seq: 1 })).not.toThrow()
   })
 
-  it('🔴 B5：会话**无 append** ⇒ 早退（不抛，会话正常处理）', async () => {
+  /** 假 agent：`inbox.prepend` 记录器（**unshift 语义**，与宿主一致） */
+  function queueAgent(id: unknown, extra: Record<string, unknown> = {}): {
+    agent: Record<string, unknown>
+    queue: Array<{ content?: Array<{ text?: string }> }>
+    appends: Array<{ type: string; data: unknown }>
+  } {
+    const queue: Array<{ content?: Array<{ text?: string }> }> = []
+    const appends: Array<{ type: string; data: unknown }> = []
+    const agent = {
+      session: {
+        id,
+        ...extra,
+        append: (type: string, data: unknown) => {
+          appends.push({ type, data })
+          return { seq: appends.length }
+        },
+      },
+      inbox: { prepend: (_t: string, m: unknown) => queue.unshift(m as { content?: Array<{ text?: string }> }) },
+    }
+    return { agent, queue, appends }
+  }
+
+  it('🔴 B5：agent **无 inbox.prepend** ⇒ 早退（不抛，会话正常处理）', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const agent = { session: { id: 'no-append', header: { cwd: dir } } } // 无 append
+    const agent = { session: { id: 'no-prepend', header: { cwd: dir } } } // 无 inbox
     expect(() =>
       first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } }),
     ).not.toThrow()
   })
 
-  it('🔴 B6：注入体**真抛**（`append` 抛）⇒ 吞掉，**不阻断会话**', () => {
+  it('🔴 B6：注入体**真抛**（`prepend` 抛）⇒ 吞掉，**不阻断会话**', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
     const agent = {
-      session: {
-        id: 'throw-append',
-        header: { cwd: dir },
-        append: () => { throw new Error('append boom (injected)') },
+      session: { id: 'throw-prepend', header: { cwd: dir } },
+      inbox: {
+        prepend: () => {
+          throw new Error('prepend boom (injected)')
+        },
       },
     }
-    // 🔴 断言方向：**不抛出去**（锚定注入失败不阻断会话 —— 文件头的承诺）
+    // 🔴 断言方向：**不抛出去**（注入失败不阻断会话 —— 文件头的承诺）
     expect(() =>
       first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } }),
     ).not.toThrow()
   })
 
-  /** 让出一拍：锚定走 `setTimeout(0)`（避开宿主 append 不可重入） */
-  const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
-
-  it('🔴 B4：**子 agent（delegationDepth > 0）** ⇒ 用 `anchoredSessions` 防重（只锚定一次）', async () => {
+  it('🔴 B4：**子 agent（delegationDepth > 0）** ⇒ 用 `anchoredSessions` 防重（只注入一次）', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const h = first(ctx, 'session/event')
-    let n = 0
-    const session = { id: 'sub-1', header: { cwd: dir, delegationDepth: 1 }, append: () => { n += 1 } }
-    // 触发时机 = 宿主提交第一条 `system/message` 之后（D140-B）
-    h(session, { type: 'system/message', seq: 1 })
-    await tick()
-    const afterFirst = n
-    h(session, { type: 'system/message', seq: 2 })
-    await tick()
-    expect(n).toBe(afterFirst) // 第二次没有新增
-    expect(afterFirst).toBeGreaterThan(0) // 首次确实锚定了（正控意味）
+    const { agent, queue } = queueAgent('sub-1', { header: { cwd: dir, delegationDepth: 1 } })
+    const fire = (kind = 'user') => first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind } } })
+    // 第一次真实消息到达 ⇒ 注入
+    fire()
+    const afterFirst = queue.length
+    expect(afterFirst).toBeGreaterThan(0) // 正控：首次确实注入了
+    // 第二次真实消息（子 agent 走 `anchoredSessions` 的"每会话只注入一次"分支）
+    fire()
+    expect(queue.length).toBe(afterFirst)
   })
 
-  it('🔴 B3：`session.id` **非字符串** ⇒ `sid = undefined`（仍按根会话路径锚定）', async () => {
+  it('🔴 B3：`session.id` **非字符串** ⇒ 不注入（无法短路就不许插真调用）', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    let n = 0
-    const session = { id: 777, header: { cwd: dir }, append: () => { n += 1 } }
-    first(ctx, 'session/event')(session, { type: 'system/message', seq: 1 })
-    await tick()
-    // 🔴 语义：sid 取不到 ⇒ ① 不写 `anchoredSessions` ② 仍走 depth===0 的"无历史即锚定"
-    //    ⇒ **确实锚定了**（不被 id 非串这件事挡住）。
-    expect(n).toBeGreaterThan(0)
+    const { agent, queue } = queueAgent(777, { header: { cwd: dir } })
+    first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
+    // 🔴 判据：假首轮的两轮回复靠 `llm/stream` 按 sessionId 短路。id 取不到 ⇒ 短路不了
+    //    ⇒ 插进去就是**两次真模型调用**（本机制要消掉的正是这个）⇒ 宁可不插。
+    expect(queue).toHaveLength(0)
   })
 
-  it('🔴 B9（v1.62 / D140）：**只写 `user/message`** —— 绝不代写 system／assistant', async () => {
+  it('🔴 B9（v1.70）：**一个会话事件都不写** —— 只动 inbox 队列，日志全由宿主写', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    const calls: Array<{ type: string; data: unknown }> = []
-    const session = {
-      id: 'shape-1',
-      header: { cwd: dir },
-      append: (type: string, data: unknown) => { calls.push({ type, data }); return { seq: calls.length } },
-    }
-    first(ctx, 'session/event')(session, { type: 'system/message', seq: 1 })
-    await tick()
-    // 🔴 宿主 v4 校验：`system/message` 与 `assistant/message` 必须落在已打开的 turn+step 内
-    //    （`STEP_EVENT_TYPES` ⇒ `requireStep`），而锚定写入时 turn/step **都还没打开**。
-    //    代写它们 ⇒ 首轮正常、**重新进入会话即 corrupt**（v1.61.0 事故）。
-    expect(calls.length).toBeGreaterThan(0)
-    expect(calls.every((c) => c.type === 'user/message')).toBe(true)
-    for (const c of calls) {
-      expect((c.data as { source?: { kind?: string } }).source?.kind).toBe('user')
-    }
+    const { agent, queue, appends } = queueAgent('shape-1', { header: { cwd: dir } })
+    first(ctx, 'agent/inbox/inserted')({ agent, message: { source: { kind: 'user' } } })
+    // 🔴 v1.69.4 事故的根因就是"手写会话事件"（写通道不校验，投影期才炸）
+    //    ⇒ 本机制的硬约束：**appends 必须恒为空**，事件全部由宿主自己写。
+    expect(queue.length).toBeGreaterThan(0) // 正控：确实注入了
+    expect(appends).toHaveLength(0)
   })
 
   it('🔴 B7：`warnOnce` **只喊一次**（第二次不得再写日志）', async () => {
@@ -452,7 +459,7 @@ describe('bootstrap 分支面: hasUserMessageHistory 退化输入', () => {
    *     它**不保证**条目非空 —— 条目形态由**宿主**决定，插件无从假设；
    *   · 调用点 `bootstrap.ts:297` **在 `try` 内**（`:279` 开），所以不会把异常抛给宿主 ——
    *     **但后果仍是行为性的**：`catch`（`:316`）吞掉后 `agent/inbox/inserted` **整段提前结束**
-   *     ⇒ **该会话永远不会得到 first-anchor 锚定轮**（静默、无告警）。
+   *     ⇒ **该会话永远不会得到 fake-initial-turns 的假首轮**（静默、无告警）。
    *   · 同文件 `pre-step`（`:393`）的同类过滤用的是 `message?.source?.kind` **可选链** ——
    *     ⇒ **同一模块内两种写法并存，本处是较弱的那种**（与第 44 件发现的"生产代码不对称"同族）。
    *

@@ -317,7 +317,7 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'agent/pre-step', site: 'seams/context.ts, seams/bootstrap.ts', impact: '上下文注入/首轮锚定失效', required: true },
   { name: 'agent/turn-stopping', site: 'rebuild.ts, output-guard-seam.ts', impact: 'rebuild 不执行 / 输出守卫失效', required: true },
   { name: 'agent/status', site: 'skiff-core.ts, tools/cheap-worker.ts', impact: '等待空闲逻辑失效', required: false },
-  { name: 'agent/inbox/inserted', site: 'seams/bootstrap.ts', impact: 'first-anchor 锚定失效', required: false },
+  { name: 'agent/inbox/inserted', site: 'seams/bootstrap.ts', impact: 'fake-initial-turns 注入失效', required: false },
   { name: 'agent/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
   { name: 'session/event', site: 'seams/compact.ts, seams/bootstrap.ts', impact: '压缩后重注入/晋升状态失效', required: false },
   { name: 'session/created', site: 'weixin-bridge.ts', impact: '定时器/桥同步失效', required: false },

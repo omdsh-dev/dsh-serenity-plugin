@@ -5,7 +5,7 @@ import {
   DEFAULT_BOOTSTRAP_TOOLS,
   DEFAULT_SUPPRESSED_SOURCES,
   DEFAULT_COMPACTION_TOOLS,
-  DEFAULT_ANCHOR_MESSAGES,
+  DEFAULT_FAKE_INITIAL_MESSAGES,
   hasUserMessageHistory,
 } from '../src/seams/bootstrap.js'
 
@@ -205,31 +205,29 @@ describe('bootstrap: hasUserMessageHistory（v1.28.1 根会话重锚判定；v1.
 })
 
 describe('bootstrap: resolveBootstrapSettings 协议固有默认值（零配置面，S142）', () => {
-  it('无参返回唯一固化设置：zeroTools + 两条协议锚定消息', () => {
+  it('无参返回唯一固化设置：zeroTools + 两条协议假首轮消息', () => {
     const s = resolveBootstrapSettings()
     expect(s.bootstrapTools).toEqual(DEFAULT_BOOTSTRAP_TOOLS)
     expect(s.promoteEvents.has('assistant/message')).toBe(true)
     expect(s.promoteEvents.has('tool/call')).toBe(false) // zeroTools 变体：仅 assistant/message
     expect([...s.suppressedSources]).toEqual(DEFAULT_SUPPRESSED_SOURCES)
     expect(s.compactionTools).toEqual(DEFAULT_COMPACTION_TOOLS)
-    expect(s.anchorMessages).toEqual(DEFAULT_ANCHOR_MESSAGES)
-    expect(s.anchorMessages).toHaveLength(2)
-    expect(s.requiredSignals).toBe(2) // 两轮锚定：每条回复计一次，第 2 条回复后晋升
-    expect(s.zeroTools).toBe(false) // v1.62 / D140：锚定历史只造 user 消息 ⇒ 首请求须给完整目录
+    expect(s.fakeInitialMessages).toEqual(DEFAULT_FAKE_INITIAL_MESSAGES)
+    expect(s.fakeInitialMessages).toHaveLength(2)
+    expect(s.requiredSignals).toBe(2) // 两轮假首轮：每条回复计一次，第 2 条回复后晋升
+    expect(s.zeroTools).toBe(false) // v1.70：假首轮真跑两轮但模型侧短路 ⇒ 首请求须给完整目录
   })
 
   it('协议固有设置：zeroTools=false 是**结构性要求**，不是调参', () => {
     const s = resolveBootstrapSettings()
-    // 🔴 为什么必须是 false：锚定历史在**首请求时**（`boundary < 0`）还没把模型拉进"已同意"
-    //    状态 ⇒ 若 zeroTools=true，首请求会真的退化成「0 工具」，模型看不到任何 ACC 工具。
-    //    v1.69.4 起锚定交换含 `assistant/message` ack（合法前提 = turn/step 已打开），
-    //    但**首请求发生在此之前**（promotion 信号要等事件落盘后计数）
-    //    ⇒ 这条 `zeroTools=false` 的结论**不因补 ack 而改变**。
+    // 🔴 为什么必须是 false：假首轮的两轮回复走短路（不发真调用），晋升信号要等事件落盘后
+    //    才计数 ⇒ 首请求时 `boundary < 0` ⇒ 若 zeroTools=true，首请求会退化成「0 工具」，
+    //    模型看不到任何 ACC 工具。
     expect(s.zeroTools).toBe(false)
   })
 
-  it('协议锚定消息内容不可配置：含 ACC 身份 + acknowledge 要求（S142 用户确认固化）', () => {
-    const [first, second] = DEFAULT_ANCHOR_MESSAGES
+  it('协议假首轮消息内容不可配置：含 ACC 身份 + acknowledge 要求（S142 用户确认固化）', () => {
+    const [first, second] = DEFAULT_FAKE_INITIAL_MESSAGES
     expect(first).toContain('Abstract Cognitive Container (ACC) protocol')
     expect(first).toContain('Explicit Abstraction Principle')
     expect(first).toContain('The personal pronoun is us/we.')

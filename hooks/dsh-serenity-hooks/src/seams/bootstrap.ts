@@ -14,14 +14,14 @@
  *    skill-catalog + agent-instructions——即 Standard 比 Minimal 多出的两类注入）
  *  - 降级：过滤器出错绝不吞上下文（pre-step 保留全部）/ 工具缺失降级完整目录 + 一次性告警
  *
- * 协议固有（用户原则 2026-08-24，S142）：first-anchor 属 ACC 协议层——任何 CCC
+ * 协议固有（用户原则 2026-08-24，S142）：fake-initial-turns（假首轮）属 ACC 协议层——任何 CCC
  * 在抽象层都是宁静号/ACC，机制与内容均不可配置（零配置面）。旧版 serenity.json
  * bootstrap 段（S137 引入的调参入口）已移除，遗留字段静默忽略。
  */
 
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import type { UserMessage } from '@deepseek-ai/dsh-llm'
+import type { GenerateOptions, StreamChunk, UserMessage } from '@deepseek-ai/dsh-llm'
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { cccRootForCwd } from '../ccc-roots.js'
 import { sessionEvents } from '../cognitive-trajectory-ops.js'
@@ -33,14 +33,14 @@ interface BootstrapSettings {
   bootstrapTools: string[]
   /** 晋升信号类型集合 */
   promoteEvents: Set<'tool/call' | 'assistant/message'>
-  /** 晋升所需信号数（boundary 后累计；多轮锚定时 = 锚定轮数） */
+  /** 晋升所需信号数（boundary 后累计；多轮假首轮时 = 轮数） */
   requiredSignals: number
   /** bootstrap 阶段剥离的注入源 */
   suppressedSources: Set<string>
   /** compaction 后（重新晋升前）额外保留的工具集 */
   compactionTools: string[]
-  /** 锚定消息序列（v4 两轮递进：按序 prepend 到 next-turn 队列，每条一轮 0 工具回复） */
-  anchorMessages: string[]
+  /** 假首轮话语序列（v4 两轮递进：按序 prepend 到 next-turn 队列，每条一轮） */
+  fakeInitialMessages: string[]
   /** Zero-Anchored 变体：首请求 0 工具（晋升信号仅 assistant/message，对齐 zero-anchored-standard） */
   zeroTools: boolean
 }
@@ -55,31 +55,23 @@ export const DEFAULT_SUPPRESSED_SOURCES = ['skill-catalog', 'agent-instructions'
 export const DEFAULT_COMPACTION_TOOLS = ['read', 'write', 'edit', 'glob', 'grep', 'todo_write']
 
 /**
- * 协议级锚定消息序列（用户确认固化，2026-08-24 S142）：任何 CCC 在抽象层都是
- * 宁静号/ACC——首轮锚定话语统一，无 CCC 配置面。两轮递进：
+ * 协议级「假首轮」话语序列（用户确认固化，2026-08-24 S142）：任何 CCC 在抽象层都是
+ * 宁静号/ACC——假首轮话语统一，无 CCC 配置面。两轮递进：
  *  ① ACC 身份 + EAP 原则 + we/us 人称 + 先锚定后行动
  *  ② 协作协议 5 条 + acknowledge 要求（只回确认，不做事）
- * 文本 = 原 home-serenity CCC 配置（anchorMessages），随零配置化固化进代码。
+ * 文本 = 原 home-serenity CCC 配置，随零配置化固化进代码。
  */
-export const DEFAULT_ANCHOR_MESSAGES: string[] = [
+export const DEFAULT_FAKE_INITIAL_MESSAGES: string[] = [
   'You are the operator agent of Serenity — a cognitive container governed by the Abstract Cognitive Container (ACC) protocol.\nWe operate under the Explicit Abstraction Principle (EAP): the functional value of a thought equals its external reconstructability — every output we produce must be explicit (E↑), reconstructable (R↓), and stable (S↑).\nThe personal pronoun is us/we.\nWe anchor first, then act: the abstract layer precedes the concrete.\nPlease simply reply "acknowledge" — no action needed.',
   'Before we proceed, align on how we work:\n1. We read before we write — every decision grounds in what already exists in the container.\n2. Every output records its reasoning (R↓): decisions carry reasons and alternatives.\n3. We never jump levels — abstract layer first, then specifics.\n4. Every artifact we create is a durable cognitive anchor for the work that follows.\n5. We keep the container\'s state coherent (SESSION.md) as we advance.\nPlease simply reply "acknowledge" — no action needed.',
 ]
 
 /**
- * 锚定交换里「模型那半」的回复文本。
- *
- * 只写一个词：锚定话语明确要求 `reply "acknowledge" — no action needed`，
- * 伪造一条更长的回复反而与提示词不符（模型会据历史学样）。
- */
-export const ANCHOR_ACK_TEXT = 'acknowledge'
-
-/**
- * 根会话锚定重入判定（v1.28.1 提取导出以便单测）：会话是否已有真实用户消息。
- * resume/续跑的会话已有对话历史 → **不重锚**（first-anchor 只注入一次）。
+ * 根会话重入判定（v1.28.1 提取导出以便单测）：会话是否已有真实用户消息。
+ * resume/续跑的会话已有对话历史 → **不重插假首轮**（只注入一次）。
  *
  * 0.1.2-rc.1 适配教训：裸读 `session.events`（经类型断言）恒 undefined →
- * `!undefined` 恒 true → 有历史也永不跳过 → 任何情况发消息都重插 first-anchor。
+ * `!undefined` 恒 true → 有历史也永不跳过 → 任何情况发消息都重插假首轮。
  * 统一经 sessionEvents() 读取（snapshotEvents() 优先，.events 兜底）。
  */
 export function hasUserMessageHistory(session: unknown): boolean {
@@ -89,139 +81,117 @@ export function hasUserMessageHistory(session: unknown): boolean {
     // 🔴 v1.62：只认**真人**说过话（`source.kind === 'user'`）。
     //    宿主自己会写一批 `user/message`：ACC 横幅（`plugin:*`）、`runtime-context`、
     //    `time-context`、`skill-catalog`… ⇒ 若把它们也算作"历史"，本判定在**首轮就已经为真**，
-    //    锚定永不触发（实测：v1.62 首版正是这样静默失效的 —— 会话里 4 条 user 消息，
+    //    假首轮永不触发（实测：v1.62 首版正是这样静默失效的 —— 会话里 4 条 user 消息，
     //    其中只有 1 条 `kind=user` 是真人说的 `hi`，而它在 system 之后才写）。
-    //    ⚠️ 缺 `source` 的条目按"不是真人"处理（宁可重锚一次，也不因形状缺失而漏判）。
+    //    ⚠️ 缺 `source` 的条目按"不是真人"处理（宁可重插一次，也不因形状缺失而漏判）。
     return e.data?.source?.kind === 'user'
   })
 }
 
 /**
- * 会话里是否已有模型回复（= 已经不是首轮）。
+ * 假首轮的模型回复文本（= 短路产出的那半）。
  *
- * 🔴 这是锚定的**形状判据**（v1.62）：锚定只能在**首轮**造。
- *    ⛔ 不能用 `hasUserMessageHistory`：宿主在 system 之后、真人 prompt 之前就写了
- *    ACC 横幅，而锚定实际执行点（`setTimeout(0)`）更晚 ⇒ 真人历史**必然已存在** ⇒ 恒真。
- *    而 `assistant/message` 只在**模型真的答过一轮之后**才出现 ⇒ 它在首轮时必然为空。
+ * 只写一个词：假首轮话语明确要求 `reply "acknowledge" — no action needed`。
+ * 写长了模型会据历史学样（假首轮话语是它的"先例"）。
  */
-export function hasAssistantHistory(session: unknown): boolean {
-  return sessionEvents(session).some((event) => (event as { type?: string }).type === 'assistant/message')
-}
-
-// ── 锚定历史「造」而非「跑」（v1.62，D140）──
+export const FAKE_TURN_ACK_TEXT = 'acknowledge'
 
 /**
- * 把 first-anchor 的锚定话语**直接写进会话日志**，取代「真跑两轮」。
- *
- * ## 🔴 两条硬约束（宿主 v4 格式校验器，实测逐条踩过）
- *
- * **约束 A — `system/message` 绝不能代写；`assistant/message` 可以，但必须落在已打开的 turn/step 内**。
- *
- *   🔴 **D140 的理由已由本文件 `tests/anchor-history-shape.test.ts` 当场更正**（探针直调宿主
- *   `assertReleasedV4Relationships()`，不靠读源码推断）：
- *   原记「`system/message` 与 `assistant/message` 都在 `STEP_EVENT_TYPES` 里」—— **只对前半**。
- *   实测 `STEP_EVENT_TYPES` = `{ system/message, developer/message, assistant/attempt }`，
- *   **`assistant/message` 不在其中**。它仍要过 `requireStep`，但走的是另一条路
- *   （`Relationships.accept()` → `case "assistant/message"` → `tool()` → `requireStep`）。
- *
- *   ⇒ **结论保留、理由作废**：`assistant/message` 在**该 system/message 之前**写是非法的
- *   （那时 turn/step 尚未打开）；而在**之后**写是**合法的**（那时两者都已打开）。
- *   探针三态实测：A（仅 user）✅ ／ **B（user ＋ assistant 交替，turn/step 匹配）✅** ／
- *   C（assistant 落在未打开的 turn/step）❌ `does not match an open turn and step`。
- *
- *   ⚠️ 症状（不许省这条）：写通道不校验 ⇒ **首轮看着正常**；**重新进入**时重放才抛
- *   `does not match an open turn and step` ⇒ 会话 corrupt、界面空白。
- *   ⇒ **v1.60 那版「先写占位 system 等宿主 replace」的整套方案仍然作废**
- *     （它写的是 `system/message`，那**确实**在 `STEP_EVENT_TYPES` 里）。
- *
- * **约束 B — 必须写在宿主提交 `system/message` 之后**：格式层有 `protectedHead`
- *   机制 —— `foldSurface()` 里 `system/message` 若在 **surface 非空且尚无 protectedHead**
- *   时到来，直接抛 `system/message requires a protected first surface head`。
- *   也就是说：**surface 的第一个节点必须是 system**。
- *   ⇒ 若我们先写 user 消息，宿主随后的 system 就落不到首位 ⇒ 重放同样判 corrupt。
- *   ⚠️ 这条是**第一次修复后仍然翻车**的原因（同一会话、不同报错），
- *   判据仍是「重启宿主后重新进入该会话」。
- *
- * ⇒ 因此调用时机 = **`session/event` 里看到该会话第一条 `system/message` 之后**（见下方注册处），
- *   而不是 `agent/inbox/inserted`（那太早）。
- *
- * ## 为什么必须成对（user ＋ assistant ack）—— v1.69.4 修正
- *
- * 只造 user 的那一版在**界面上读不成对话**：两条"用户"消息连排在模型回复之前，
- * 看起来像用户自己连说了两句协议、而模型没理。owner 2026-10-19 报的两点
- * （「助手的回应也需要造出来」＋「用户的怎么跑到第一个了」）其实是**同一个缺陷的两面**。
- * ⇒ 造**成对交换**：每条锚定话语后面跟一条 `acknowledge` 回复。
- *
- * 🔴 **前提条件**：`assistant/message` 必须落在**已打开**的 turn/step 内
- *   （探针 S3/S4 实测：未打开/已关闭都抛 `does not match an open turn and step`）。
- *   本函数由 `session/event` 的 `system/message` 分支触发，而**那条事件自己就带着
- *   `data.turn` / `data.step`** —— 且实测此刻 turn/step 确实处于打开态
- *   （真机日志：`step/start` → `system/message` → 锚定写入 → `step/end`）。
- *   ⇒ turn/step **从触发事件透传进来**，不自己猜。
- *
- * ⚠️ **拿不到 turn/step 时退回只造 user**（不抛、不阻断）：宁可少伪造一条 ack，
- *   也绝不在非法坐标上写 `assistant/message` —— 那会让会话在重放时 corrupt。
- *
- * ## 判据（改这个函数前后都必须跑）
- *
- * ① 形状判据 = `tests/anchor-history-shape.test.ts`（直调宿主校验器，正控 ＋ 两种负控）；
- * ② 单测钉事件序列（user/assistant 交替、turn/step 逐条匹配）；
- * ③ **容器内真跑一轮 → 重启宿主 → 重新进入该会话** —— 只有这条路能证明日志合法
- *   （前两次修复都是"单测全绿 + 首轮正常"却仍然 corrupt）。
- *
- * @param session 会话（需有 append）
- * @param anchorMessages 锚定话语序列（缺省协议固有两条）
- * @param slot 触发本轮 `system/message` 所在的 turn/step（缺省或非法 ⇒ 只造 user）
- * @returns 是否成功写入
+ * 假首轮消息的 `source.summary` —— 同时也**是拦截判据的标记之一**（见 {@link isFakeInitialTurn}）。
+ * 两处必须同源：注入侧写它，拦截侧认它。
  */
-export function appendAnchorHistory(
-  session: unknown,
-  anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
-  slot?: { turn?: unknown; step?: unknown },
-): boolean {
-  const target = session as {
-    append?: (type: string, data: unknown, opts?: unknown) => { seq?: number }
-  } | undefined
-  if (typeof target?.append !== 'function') return false
-  const append = target.append.bind(target)
-  const rid = (prefix: string): string => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  // 坐标必须**成对且为正整数**：宿主 `sessionFormatCount` 对 0/null 一律拒
-  const turn = typeof slot?.turn === 'number' ? slot.turn : 0
-  const step = typeof slot?.step === 'number' ? slot.step : 0
-  const canPlaceAck = turn > 0 && step > 0
-  try {
-    for (let i = 0; i < anchorMessages.length; i++) {
-      append(
-        'user/message',
-        {
-          id: rid(`anchor-user-${i + 1}`),
-          role: 'user',
-          content: [{ type: 'text', text: anchorMessages[i] }],
-          source: { kind: 'user' },
-        },
-        { surfaceOp: 'append' },
-      )
-      if (!canPlaceAck) continue
-      append(
-        'assistant/message',
-        {
-          turn,
-          step,
-          message: {
-            id: rid(`anchor-ack-${i + 1}`),
-            role: 'assistant',
-            content: [{ type: 'text', text: ANCHOR_ACK_TEXT }],
-            source: { kind: 'model' },
-          },
-        },
-        { surfaceOp: 'append' },
-      )
-    }
-    return anchorMessages.length > 0
-  } catch {
-    return false
-  }
+export const FAKE_TURN_SUMMARY = 'fake initial turn'
+
+/** 假首轮待短路登记（sessionId → 还没兑现的轮数 ＋ 可识别的文本） */
+export interface PendingFakeTurn {
+  /** 还剩几轮要短路；归零即删除登记 */
+  remaining: number
+  /** 可识别的假首轮文本（= 注入时用的那几条，逐字比对） */
+  texts: string[]
 }
+
+/** 从消息里取纯文本（content 是块数组；只拼 `text` 块） */
+function textOfMessage(message: unknown): string | undefined {
+  const content = (message as { content?: unknown })?.content
+  if (!Array.isArray(content)) return undefined
+  const parts: string[] = []
+  for (const block of content) {
+    const b = block as { type?: string; text?: unknown }
+    if (b?.type === 'text' && typeof b.text === 'string') parts.push(b.text)
+  }
+  return parts.length > 0 ? parts.join('') : undefined
+}
+
+/**
+ * 判据：**这条模型请求是不是假首轮**（纯函数，可单测；见 `tests/fake-initial-turns.test.ts`）。
+ *
+ * ## 为什么是**双条件**
+ *
+ * 误拦的代价不对称：**漏拦** = 老老实实发一次真调用（慢一点，错得无害）；
+ * **误拦** = 把一条**真实的**用户请求吞掉，模型永远不回答（用户眼里是"卡死"）。
+ * ⇒ 两个**互相独立**的信号同时成立才拦：
+ *
+ * 1. **登记在册**：该 session 还有未兑现的假首轮（`pending.remaining > 0`）；
+ * 2. **文本逐字吻合**：请求里**最近一条"人写的话"**的正文 ∈ 待兑现的文本。
+ *
+ * ## 第 2 条怎么找"最近一条人写的话"
+ *
+ * 从尾部往前扫，跳过 `system` / `assistant` / `tool`：
+ * - `source.kind` 是**我们的假首轮标记** → 它就是候选，逐字判；
+ * - `source.kind === 'user'` 或**没有 source** → 真人说的，逐字判；
+ * - 其它注入源（`runtime-context` / `time-context` / `skill-catalog` / `plugin:*`…）
+ *   → **既不是人也不是假首轮**，跳过继续往前找。
+ *
+ * ⚠️ **不能改成"请求里任意一条消息等于假首轮文本"**：真轮次的历史里**必然**含着那些消息，
+ *   那样判会在第一轮真实对话上就误拦（把真请求吞掉）。
+ *
+ * @param options 模型请求（`llm/stream` 的第一参）
+ * @param pending 该 session 的登记（无登记 ⇒ 一定不是假首轮）
+ */
+export function isFakeInitialTurn(
+  options: { sessionId?: unknown; messages?: readonly unknown[] } | undefined,
+  pending: PendingFakeTurn | undefined,
+): boolean {
+  if (pending === undefined || pending.remaining <= 0) return false
+  const messages = options?.messages
+  if (!Array.isArray(messages) || messages.length === 0) return false
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i] as { role?: unknown; source?: { kind?: unknown } } | undefined
+    if (message?.role !== 'user') continue
+    const kind = message?.source?.kind
+    const authored = kind === undefined || kind === 'user' || kind === ACC_MESSAGE_KIND
+    if (!authored) continue
+    const text = textOfMessage(message)
+    return text !== undefined && pending.texts.includes(text)
+  }
+  return false
+}
+
+/**
+ * 生成一轮**假首轮确认**的流（`llm/stream` 的短路返回值）。
+ *
+ * ## 为什么这是"拦截"而不是"伪造日志"
+ *
+ * 它只替换**模型这一侧的输出**：请求由宿主自己发起、`user/message` 由宿主自己写、
+ * `assistant/message` 由宿主**据这条流**自己结算 ⇒ 事件形状、turn/step 坐标、
+ * `stream` 数组、`source.provider/model` 全部由宿主填写 ⇒ **不可能再写出非法事件**
+ * （v1.69.4 事故的根因是手写 `assistant/message` 缺结算字段）。
+ *
+ * ## 形状（对着宿主 `StreamChunk` 契约逐字段写）
+ *
+ * 文本块 = `block-start` → `text-delta` → `block-end`（带**装配好的块**）；
+ * 结算顺序 = `usage` 先、`finish` 最后（宿主契约：`usage` 在终结之前，终结之后什么都没有）。
+ * `usage` 全零 —— 没有真的模型调用，不许让计量器把它算进账。
+ */
+export async function* fakeTurnAckStream(): AsyncIterable<StreamChunk> {
+  yield { type: 'block-start', index: 0, blockType: 'text' }
+  yield { type: 'text-delta', index: 0, text: FAKE_TURN_ACK_TEXT }
+  yield { type: 'block-end', index: 0, block: { type: 'text', text: FAKE_TURN_ACK_TEXT } }
+  yield { type: 'usage', usage: { inputTokens: 0, outputTokens: 0 } }
+  yield { type: 'finish', reason: { kind: 'stop' } }
+}
+
+
 
 // ── 阶段机（等价 anchored compaction-epoch.mjs createEpochPromotion）──
 
@@ -342,7 +312,7 @@ export function createEpochPromotion(
 }
 
 // ── 协议固有设置（零配置面：用户原则 2026-08-24 S142）──
-// first-anchor 属 ACC 协议层——任何 CCC 抽象层都是宁静号/ACC，机制与内容
+// fake-initial-turns 属 ACC 协议层——任何 CCC 抽象层都是宁静号/ACC，机制与内容
 // 统一由代码常量决定，无 CCC 配置入口（旧 bootstrap 配置段已移除）。
 
 const PROMOTE_EVENTS: Record<'tool-call' | 'assistant-message' | 'either', Set<'tool/call' | 'assistant/message'>> = {
@@ -351,15 +321,16 @@ const PROMOTE_EVENTS: Record<'tool-call' | 'assistant-message' | 'either', Set<'
   either: new Set(['tool/call', 'assistant/message']),
 }
 
-/** 协议固有 bootstrap 设置（v1.62 / D140）。
+/** 协议固有 bootstrap 设置（v1.70 fake-initial-turns）。
  *
- * 🔴 **zeroTools 必须为 false**：v1.62 起锚定历史**只造 `user/message`**（不含伪造的
- *   `assistant/message`）⇒ **首请求时晋升信号尚未满足** ⇒ 若仍 `zeroTools: true`，
+ * 🔴 **zeroTools 必须为 false**：假首轮**真跑两轮**，但两轮的模型回复走短路
+ *   （`llm/stream` 不发真调用）⇒ 首请求时晋升信号尚未满足 ⇒ 若仍 `zeroTools: true`，
  *   首请求会真的退化成「0 工具」，模型看不到任何 ACC 工具。
  *
- * 🔴 **为什么不改回去伪造一条 assistant**：宿主 v4 校验要求 `assistant/message` 落在
- *   已打开的 turn+step 内（见 `appendAnchorHistory` 头注释），而锚定写入时 turn/step
- *   都还没打开 ⇒ 伪造它**结构性非法**，代价是「重新进入会话即 corrupt」。
+ * 🔴 **为什么不回到"手写历史"那条路**：宿主把 `assistant/message` 当**结算事件**，
+ *   形状由四个校验器分段把关，缺一段**写入时不报错**、**投影/重进会话时炸**
+ *   （v1.69.4 实测：`Cannot read properties of undefined (reading 'length')`）。
+ *   ⇒ 事件一律由宿主自己写，我们只截模型那一侧。
  *
  * ⇒ 取舍：**首请求就给完整工具目录**（放弃「首请求窄目录」这个 cache 断点优化），
  *   换来**日志合法**。`bootstrapTools` 因此只是历史字段，`boundary < 0` 分支已让位。 */
@@ -367,10 +338,10 @@ export function resolveBootstrapSettings(): BootstrapSettings {
   return {
     bootstrapTools: [...DEFAULT_BOOTSTRAP_TOOLS],
     promoteEvents: PROMOTE_EVENTS['assistant-message'],
-    requiredSignals: DEFAULT_ANCHOR_MESSAGES.length,
+    requiredSignals: DEFAULT_FAKE_INITIAL_MESSAGES.length,
     suppressedSources: new Set(DEFAULT_SUPPRESSED_SOURCES),
     compactionTools: [...DEFAULT_COMPACTION_TOOLS],
-    anchorMessages: [...DEFAULT_ANCHOR_MESSAGES],
+    fakeInitialMessages: [...DEFAULT_FAKE_INITIAL_MESSAGES],
     zeroTools: false,
   }
 }
@@ -383,6 +354,7 @@ export function resolveBootstrapSettings(): BootstrapSettings {
  *  1. session/event 观察晋升信号（assistant/message + step/start 兜底 + compaction/end）
  *  2. system-prompt/assemble：bootstrap 阶段目录窄化到 bootstrapTools（+compaction 后 compactionTools）
  *  3. agent/pre-step：bootstrap 阶段剥离 suppressedSources 注入消息（降级保留全部）
+ *  4. agent/inbox/inserted ＋ llm/stream：fake-initial-turns（注入两轮假首轮 ＋ 短路其模型回复）
  *
  * 摘除 = 删除 index.ts 中本注册行（独立模块）。
  */
@@ -400,8 +372,10 @@ const SETTINGS: BootstrapSettings = resolveBootstrapSettings()
 export function registerBootstrap(ctx: Context): void {
   // 每 CCC root 一个 tracker（晋升状态按 root 隔离；设置协议固有全局一致）
   const trackers = new Map<string, PromotionTracker>()
-  /** 已锚定会话（进程内防重：子 agent 每会话只锚定一次） */
+  /** 已注入假首轮的会话（进程内防重：子 agent 每会话只注入一次） */
   const anchoredSessions = new Set<string>()
+  /** 假首轮待短路登记（注入时写入、拦截到就递减；见 {@link isFakeInitialTurn}） */
+  const pendingFakeTurns = new Map<string, PendingFakeTurn>()
 
   const trackerFor = (root: string): PromotionTracker => {
     let t = trackers.get(root)
@@ -413,7 +387,6 @@ export function registerBootstrap(ctx: Context): void {
   }
 
   // session/event 观察：按 session 所属 CCC root 路由到对应 tracker（晋升状态按 root 隔离）
-  // 🆕 v1.62（D140）：**锚定历史也在这里造** —— 时机是本函数最关键的参数，见下。
   ctx.on('session/event', (session, event) => {
     try {
       const cwd = (session as { header?: { cwd?: string } } | undefined)?.header?.cwd
@@ -421,92 +394,105 @@ export function registerBootstrap(ctx: Context): void {
       const root = cccRootForCwd(cwd)
       if (!root) return
       trackerFor(root).observe(session, event)
-      // 🔴 **必须是 `system/message` 之后**（宿主 v4 的 `protectedHead` 硬约束）：
-      //    `foldSurface()` 里 `system/message` 若在 **surface 非空且尚无 protectedHead** 时到来，
-      //    直接抛 `system/message requires a protected first surface head`
-      //    ⇒ **surface 的第一个节点必须是 system**。
-      //    ⇒ 若我们在 `agent/inbox/inserted`（太早，system 还没提交）就写 user 消息，
-      //      宿主随后的 system 落不到首位 ⇒ **重放即 corrupt**。
-      //    🔵 这条正是"第一次修复后仍然翻车"的第二个缺陷 —— 单测全绿、首轮正常，
-      //      只有**重启宿主后重新进入该会话**才暴露。
-      if (event.type === 'system/message') {
-        // 🔴 **不能在 `session/event` 回调里直接 append**（第三个缺陷，2026-10-17 容器实测）：
-        //    宿主的 `publicationEntry()` 会抛 `session append cannot reenter while another
-        //    append is being published` —— 此刻它**正在**发布这条 `system/message`。
-        //    而该异常会被本回调的 `try/catch` 与宿主的 per-listener containment **双重吞掉**
-        //    ⇒ 症状是"首轮完全正常，但锚定就是没发生"，**没有任何报错**。
-        //    ⇒ 用 setTimeout(0) 把写入推到**发布完成之后**的下一拍（同一个 Node 事件循环）
-        //
-        // 🔴 **turn/step 从这条事件自己透传**（v1.69.4）：`system/message` 的 data 里就带着
-        //    `{turn, step}`，且宿主的发布顺序使此刻两者**处于打开态**（真机日志实测：
-        //    `step/start` → `system/message` → 锚定写入 → `step/end`）。
-        //    ⛔ 不要自己从别处猜：`assistant/message` 要求坐标**精确等于当前打开的**。
-        const slot = (event as { data?: { turn?: unknown; step?: unknown } }).data
-        setTimeout(() => {
-          try {
-            maybeAnchor(session, root, slot)
-          } catch {
-            /* 锚定失败不阻断会话 */
-          }
-        }, 0)
-      }
     } catch {
       /* 观察失败不阻断 */
     }
   })
 
-  /** 造锚定历史（幂等；防重靠 `anchoredSessions`）。 */
-  const maybeAnchor = (session: unknown, _root: string, slot?: { turn?: unknown; step?: unknown }): void => {
-    const s = session as { header?: { delegationDepth?: number }; id?: string } | undefined
-    const depth = s?.header?.delegationDepth ?? 0
-    const sid = typeof s?.id === 'string' ? s.id : undefined
-    if (sid !== undefined && anchoredSessions.has(sid)) return
-    // cheap-worker worker / Skiff：autonomous 与角色会话不需要锚定（同 apply 侧判定）
-    if (sid !== undefined && (sid.startsWith('cheap-worker-') || isSkiffSessionId(sid))) return
-    // 🔴 **不要用 `hasUserMessageHistory` 当防重判据**（v1.62 实测踩到）：
-    //    本函数跑在 `setTimeout(0)` 之后，而那一刻**真人消息已经写进日志了**
-    //    （宿主的顺序是 system → ACC 横幅 → 真人 prompt → runtime-context …）
-    //    ⇒ 若在这里查历史，它**恒为真** ⇒ 锚定永不触发（且**没有任何报错**）。
-    //    防重改用进程内 `anchoredSessions`；"resume/续跑不重锚"由**更早**的
-    //    `agent/inbox/inserted` 那条路径负责（那里能看到"是否已有真人历史"）。
-    //    形状判据：只有**首轮**才锚 —— 即该会话还没有任何 `assistant/message`。
-    if (hasAssistantHistory(session)) return
-    void depth
-    const wrote = appendAnchorHistory(session, SETTINGS.anchorMessages, slot)
-    if (wrote && sid !== undefined) anchoredSessions.add(sid)
-    if (wrote) {
-      const paired = typeof slot?.turn === 'number' && typeof slot?.step === 'number' && slot.turn > 0 && slot.step > 0
-      warnOnce(
-        `anchor history fabricated: ${SETTINGS.anchorMessages.length} 条 user 消息`
-        + (paired ? ` ＋ ${SETTINGS.anchorMessages.length} 条 ack（turn ${String(slot.turn)} / step ${String(slot.step)}）` : '（无打开坐标 ⇒ 未造 ack）')
-        + '（不再真跑）',
-      )
-    }
-  }
-
-  // 首轮锚定（v1.62 起**不再**在这里写历史 —— 见上面 `session/event` 的 `system/message` 分支）。
-  // 本订阅保留用于：判定「是否该锚定」的**早期信号**（不改日志），以及未来的旁路需求。
+  // ── fake-initial-turns（假首轮）：**真跑两轮**，模型那半走短路 ──
+  //
+  // 历史三版，读之前先看清差别（R↓）：
+  //   ① v1.18~v1.60「真跑两轮」：往 next-turn 队列 prepend 两条消息 ⇒ 两轮真调用。
+  //   ② v1.61~v1.69.4「造历史」：手写事件进会话日志 ⇒ v1.61.0 把系统提示词推到末尾、
+  //      v1.69.4 把会话写坏（`assistant/message` 缺结算字段 ⇒ 投影期
+  //      `Cannot read properties of undefined (reading 'length')` ⇒ 会话打不开）。
+  //   ③ **v1.70（当前，owner 2026-10-19 裁）＝ fake-initial-turns**：回到 ① 的注入形态，
+  //      **唯一差别**是假首轮的模型回复**不请求模型** —— 在 `llm/stream` 瀑布里短路产出
+  //      `acknowledge`（owner 原话：「拦截 LLM = **根本不发给 LLM**」）。
+  //      ⇒ 事件全由宿主自己写（形状/坐标/结算字段天然合法），零伪造、零真调用。
+  //
+  // 注入时机 = `agent/inbox/inserted`（新会话第一条真实用户消息到达时）：
+  // 此时宿主的 `system/message` 还没提交，**只动队列、不动日志** ⇒ 不会把 surface
+  // 首节点让给 user（那会让重放抛 `requires a protected first surface head`）。
   ctx.on('agent/inbox/inserted', ({ agent, message }) => {
     try {
       const root = agentRoot(agent)
       if (!root) return
-      const session = (agent as { session?: unknown }).session as { header?: { delegationDepth?: number }; id?: string } | undefined
+      const session = (agent as { session?: unknown }).session as
+        | { header?: { delegationDepth?: number }; id?: string }
+        | undefined
+      const depth = session?.header?.delegationDepth ?? 0
       const sid = typeof session?.id === 'string' ? session.id : undefined
-      if (sid !== undefined && (sid.startsWith('cheap-worker-') || isSkiffSessionId(sid))) return
+      // 🔴 取不到 sessionId ⇒ **不注入**：注入的两轮要靠 `llm/stream` 按 sessionId 短路，
+      //    没有 id 就短路不了 ⇒ 会退化成两次**真模型调用**（正是本机制要消掉的东西）。
+      if (sid === undefined) return
+      // cheap-worker worker / Skiff 角色会话：已有完整 ACC 提示词，不需要假首轮
+      if (sid.startsWith('cheap-worker-') || isSkiffSessionId(sid)) return
+      if (depth === 0) {
+        // resume/续跑不重插：会话里已有**真人**说过的话（注入源不算）
+        if (hasUserMessageHistory(session)) return
+      } else if (anchoredSessions.has(sid)) {
+        return
+      }
+      // 插件来源消息不递归注入（含我们刚注入的假首轮消息本身）
       if ((message as { source?: { kind?: string } })?.source?.kind === ACC_MESSAGE_KIND) return
-      // ⚠️ **不要在这里写锚定历史**：此刻宿主的 `system/message` 还没提交，
-      //    先写 user 消息会把 surface 首节点让给 user ⇒ 重放抛
-      //    `system/message requires a protected first surface head`（见头注释约束 B）。
-      void session
+      const inbox = (agent as { inbox?: { prepend?: (queue: string, msg: unknown) => void } }).inbox
+      if (!inbox?.prepend) return
+      // 逆序 prepend（prepend 插到队首）⇒ 队列最终 = [假首轮①, 假首轮②, 真实消息]
+      for (let i = SETTINGS.fakeInitialMessages.length - 1; i >= 0; i--) {
+        inbox.prepend('next-turn', {
+          id: `fake-initial-turn-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${i}`,
+          role: 'user',
+          content: [{ type: 'text', text: SETTINGS.fakeInitialMessages[i] }],
+          // 🔴 必须带 ACC 标记：① 上面那条递归守卫认它；② 拦截判据认它（见 isFakeInitialTurn）
+          source: { kind: ACC_MESSAGE_KIND, form: 'notice', summary: FAKE_TURN_SUMMARY },
+        })
+      }
+      anchoredSessions.add(sid)
+      pendingFakeTurns.set(sid, {
+        remaining: SETTINGS.fakeInitialMessages.length,
+        texts: [...SETTINGS.fakeInitialMessages],
+      })
+      warnOnce(`fake initial turns injected: ${SETTINGS.fakeInitialMessages.length} 条（acknowledge 走短路，不请求模型）`)
     } catch {
-      /* 不阻断 */
+      /* 注入失败不阻断（会话正常处理） */
     }
   })
 
-  let warned = false
+  // llm/stream：**假首轮的模型回复在这里短路** —— `next()` 一次都不调用，
+  // 请求因此**根本不会发到模型**（owner 2026-10-19：「拦截 LLM = 根本不发给 LLM」）。
+  //
+  // ⚠️ 拦截判据必须双条件（见 {@link isFakeInitialTurn}）：登记在册 ＋ 文本逐字吻合。
+  //    宁可漏拦（真发一次调用，慢但无害），绝不误拦（吞掉一条真实用户请求）。
+  // ⚠️ 任何异常都退回 `next()`：短路失败只是回到真调用，不许让会话卡住。
+  ctx.on('llm/stream', (options: GenerateOptions, next: () => AsyncIterable<StreamChunk>) => {
+    try {
+      const sid = typeof options?.sessionId === 'string' ? options.sessionId : undefined
+      if (sid === undefined) return next()
+      const pending = pendingFakeTurns.get(sid)
+      if (!isFakeInitialTurn(options, pending)) return next()
+      const left = pending!.remaining - 1
+      if (left <= 0) pendingFakeTurns.delete(sid)
+      else pendingFakeTurns.set(sid, { ...pending!, remaining: left })
+      warnOnce('fake initial turn short-circuited: acknowledge 由短路产出，未请求模型')
+      return fakeTurnAckStream()
+    } catch {
+      return next()
+    }
+  })
+
+  /**
+   * 每种消息**只喊一次**（同一条消息去重；不同消息互不影响）。
+   *
+   * 🔴 v1.70 修：原实现是**全局一个 `warned` 布尔** ⇒ 进程里只要打过任何一条告警，
+   * 后面的告警（包括"假首轮短路了"这条**唯一**能证明拦截生效的痕迹）就再也不打了。
+   * 实测代价：bench 里注入行打出来、短路行被吞 ⇒ `verify` 无法判"短路真发生过"。
+   * ⚠️ 所以消息里**不要带逐次变化的数字**（`剩 N 轮` 这类），否则去重失效、会刷屏。
+   */
+  const warnedMessages = new Set<string>()
   const warnOnce = (message: string): void => {
-    if (warned) return
-    warned = true
+    if (warnedMessages.has(message)) return
+    warnedMessages.add(message)
     try {
       console.warn(`[serenity-hooks] bootstrap: ${message}`)
     } catch {
@@ -546,11 +532,11 @@ export function registerBootstrap(ctx: Context): void {
         } as PromptAssembly
       }
       // Anchored 变体：bootstrap 集 + compaction 后 compactionTools（中途任务继续）
-      // 🆕 v1.62（D140）：`boundary < 0`（真·首请求）**直接给完整目录**。
-      //   为什么：锚定历史现在只造 user 消息 ⇒ 首请求时**晋升信号尚未满足** ⇒ 会落进窄目录分支；
-      //   而我们的目的正是**取消那个断点**，若仍收窄成 5 个工具，等于把「空→满」的断点换成
-      //   「窄→满」的断点，白改一场。compaction 之后（boundary ≥ 0）仍收窄 —— 那是**另一档**
-      //   （压缩后继续任务），不放宽，否则压缩后工具面突变又造一次 cache 断点。
+      // `boundary < 0`（真·首请求）**直接给完整目录**。
+      //   为什么：首请求若收窄成 5 个工具，等于把断点从「空→满」换成「窄→满」，白改一场
+      //   （锚定轮本身不请求模型，工具面对它没有意义）。compaction 之后（boundary ≥ 0）
+      //   仍收窄 —— 那是**另一档**（压缩后继续任务），不放宽，否则压缩后工具面突变
+      //   又造一次 cache 断点。
       if (status.boundary < 0) return assembled
       const keep = new Set<string>(SETTINGS.bootstrapTools)
       for (const toolName of SETTINGS.compactionTools) keep.add(toolName)
