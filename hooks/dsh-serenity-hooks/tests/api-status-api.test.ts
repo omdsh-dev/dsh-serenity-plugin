@@ -30,6 +30,9 @@ import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { IMAGE_UPLOAD_DIR, registerStatusApi } from '../src/surface/http.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
+// 🔴 2026-10-19：微信桥路由的目标是**认知轨迹编码**，`save-routes` 会校验该轨迹在 CCC 里真实存在
+//    ⇒ "保存成功"的前置 = 先造出那条轨迹（夹具是造 skiff/轨迹数据的唯一入口）。
+import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => unknown
 
@@ -672,27 +675,46 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
     mkdirSync(join(ccc, '.opencode'), { recursive: true })
     writeFileSync(join(ccc, '.opencode', 'serenity.json'), JSON.stringify(cfg, null, 2))
   }
-  function readCccConfig(): { weixin?: { enabled?: boolean; routes?: Array<{ user: string; role: string }> } } {
+  // 🔴 2026-10-19：路由行的字段是 `trajectory`（旧字段 `role` 读侧仍作过渡别名，落盘统一写 `trajectory`）
+  function readCccConfig(): { weixin?: { enabled?: boolean; routes?: Array<{ user: string; trajectory: string }> } } {
     return JSON.parse(readFileSync(join(ccc, '.opencode', 'serenity.json'), 'utf-8')) as never
   }
   async function postWeixin(port: number, body: Record<string, unknown>): Promise<RawRes> {
     return raw({ port, method: 'POST', path: '/serenity/weixin', headers: UI_HEADERS, body: JSON.stringify({ ccc, ...body }) })
   }
 
-  it('save-routes：形状不合 ⇒ 400（非数组 ／ 空 user ／ 空 role）；**省略 routes = 清空表**（整体替换语义）', async () => {
-    writeCccConfig({ skiff: { roles: { qa: { prompt: 'x' } } } })
+  it('save-routes：形状不合 ⇒ 400（非数组 ／ 空 user ／ 空 trajectory）；**省略 routes = 清空表**（整体替换语义）', async () => {
+    // 🔴 2026-10-19：`serenity.json` 的 `skiff.roles` 段已**退役**（约束面搬进轨迹目录的
+    //    `skiff.json`）⇒ 本组不再写任何 skiff 配置，路由目标改为**认知轨迹编码**。
+    writeCccConfig({})
     const api = await bootApi()
     try {
-      for (const bad of [{ routes: 'nope' }, { routes: [{ user: '', role: 'qa' }] }, { routes: [{ user: 'u', role: '' }] }]) {
+      // ① 形状层（routes 不是数组）——与旧模型同一条判据，只有文案里的字段名变了
+      const notArray = await postWeixin(api.port, { action: 'save-routes', routes: 'nope' })
+      expect(notArray.status).toBe(400)
+      expect(JSON.parse(notArray.body)).toEqual({ error: 'invalid routes (expected [{user, trajectory}, ...])' })
+
+      // ② 行层（空 user / 空 trajectory）——🔴 新模型下是**两条独立文案**：
+      //    旧实现把"非数组"与"行不合法"合成一条 `some(...)` 判据，重做后拆开了。
+      //    ⇒ 这里分别断言，钉住"哪类输入得到哪句话"（避免只钉住其中一半）。
+      for (const bad of [{ routes: [{ user: '', trajectory: 'qa' }] }, { routes: [{ user: 'u', trajectory: '' }] }]) {
         const res = await postWeixin(api.port, { action: 'save-routes', ...bad })
         expect(res.status, JSON.stringify(bad)).toBe(400)
-        expect(JSON.parse(res.body)).toEqual({ error: 'invalid routes (expected [{user, role}, ...])' })
+        expect(JSON.parse(res.body)).toEqual({ error: 'invalid routes (each row needs non-empty user and trajectory)' })
       }
 
       // 先存一条，再用"省略 routes"把它清掉 —— 钉住「整体替换」语义
       // （首跑时我把它当成"非法输入"，实测是 200：`body.routes ?? []`）
-      await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', role: 'qa' }] })
-      expect(readCccConfig().weixin?.routes).toEqual([{ user: 'u1', role: 'qa' }])
+      // 🔴 保存成功的前置：目标轨迹必须**真实存在**（save-routes 校验 `findDirNameByCode`）
+      makeTrajectory(ccc, 'qa', skiffJson({}), '桥接目标')
+      await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', trajectory: 'qa' }] })
+      expect(readCccConfig().weixin?.routes).toEqual([{ user: 'u1', trajectory: 'qa' }])
+
+      // 🔴 过渡别名（存量面板/脚本仍在发旧 `role` 字段）：**读侧接受，落盘统一写 `trajectory`**
+      const viaAlias = await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', role: 'qa' }] })
+      expect(viaAlias.status).toBe(200)
+      expect(readCccConfig().weixin?.routes, '旧 role 字段必须被归一为 trajectory').toEqual([{ user: 'u1', trajectory: 'qa' }])
+
       const cleared = await postWeixin(api.port, { action: 'save-routes' })
       expect(cleared.status).toBe(200)
       expect(JSON.parse(cleared.body)).toEqual({ saved: 0 })
@@ -702,28 +724,31 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
     }
   })
 
-  it('🔴 save-routes：角色必须 ∈ 该 CCC 的 `skiff.roles`；合法时**真写进 CCC 配置**', async () => {
-    writeCccConfig({}) // 未配置 skiff.roles
+  it('🔴 save-routes：目标必须是该 CCC 里**真实存在的认知轨迹**；合法时**真写进 CCC 配置**', async () => {
+    // 🔴 2026-10-19 换被测对象（不是改断言）：旧判据是"角色 ∈ serenity.json 的 `skiff.roles`"
+    //    （该段已退役）；新判据是"**轨迹编码能在 CCC 的 AGENT_SESSIONS/ 里解析到一条目录**"
+    //    ⇒ 同样的"不存在即拒绝"语义，落在新载体上。
+    writeCccConfig({}) // CCC 里一条轨迹都没有
     const api = await bootApi()
     try {
-      const denied = await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', role: 'qa' }] })
+      const denied = await postWeixin(api.port, { action: 'save-routes', routes: [{ user: 'u1', trajectory: 'qa' }] })
       expect(denied.status).toBe(400)
-      expect(String((JSON.parse(denied.body) as { error: string }).error)).toContain('unknown role: qa')
+      expect(String((JSON.parse(denied.body) as { error: string }).error)).toContain('unknown trajectory: qa')
       // 负控：被拒的写入**没落盘**
       expect(readCccConfig().weixin?.routes).toBeUndefined()
     } finally {
       await api.close()
     }
 
-    // 配上角色后同一个请求应当成功（同一夹具、只改配置）
-    writeCccConfig({ skiff: { roles: { qa: { prompt: '你是质检' } } } })
+    // 造出那条轨迹后，同一个请求应当成功（同一夹具、只多一条轨迹）
+    makeTrajectory(ccc, 'qa', skiffJson({}), '桥接目标')
     const api2 = await bootApi()
     try {
-      const ok = await postWeixin(api2.port, { action: 'save-routes', routes: [{ user: 'u1', role: 'qa' }] })
+      const ok = await postWeixin(api2.port, { action: 'save-routes', routes: [{ user: 'u1', trajectory: 'qa' }] })
       expect(ok.status).toBe(200)
       expect(JSON.parse(ok.body)).toEqual({ saved: 1 })
-      // 🔴 端到端：配置**真落盘**（不是只在内存里）
-      expect(readCccConfig().weixin?.routes).toEqual([{ user: 'u1', role: 'qa' }])
+      // 🔴 端到端：配置**真落盘**（不是只在内存里），且字段是 `trajectory`
+      expect(readCccConfig().weixin?.routes).toEqual([{ user: 'u1', trajectory: 'qa' }])
     } finally {
       await api2.close()
     }
@@ -925,7 +950,7 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
       // 🔴 盘上读数（不看响应自述）
       const cfg = JSON.parse(readFileSync(join(ccc, '.opencode', 'serenity.json'), 'utf-8')) as { weixin?: { accounts?: unknown[]; routes?: unknown[] } }
       expect(cfg.weixin?.accounts).toEqual([])
-      expect(cfg.weixin?.routes, '移除账号不该动路由表').toEqual([{ user: 'u1', role: 'qa' }])
+      expect(cfg.weixin?.routes, '移除账号不该动路由表').toEqual([{ user: 'u1', trajectory: 'qa' }])
       const creds = JSON.parse(readFileSync(join(ccc, 'localstore.json'), 'utf-8')) as { credentials?: Record<string, string> }
       expect(Object.keys(creds.credentials ?? {}).filter((k) => k.startsWith('WEIXIN_WECHAT_1_'))).toEqual([])
     } finally {

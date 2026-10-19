@@ -11,6 +11,9 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebugActive, skiffDebugPort, renderSkiffMarkdown, skiffDebugSpec, type CccEntry } from '../src/role/skiff/debug.js'
 // C2：候选 CCC 枚举的唯一真相源（原 skiff-debug.discoverCccs 已迁移至此）
 import { listCccs } from '../src/kernel/ccc-roots.js'
+// 🔴 2026-10-19 重做：skiff ＝ **带 `skiff.json` 的认知轨迹** ⇒ 造 skiff 的唯一入口是本夹具
+//    （旧件到处写 `serenity.json` 的 `skiff.roles`，该段已退役 ⇒ 读出来恒空）
+import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 // ⑤ 第 34 件：意图读取通路（面规格 `enabled` ← `faceEnabled`）
 import { faceEnabled } from '../src/surface/faces.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings, readSimpleSettings } from '../src/surface/settings.js'
@@ -67,7 +70,13 @@ async function startDebugEphemeral(ctx: unknown = {}, root: string = dir, webPor
   return port
 }
 
+/** 读 `/ask` 错误响应的 `error` 串（**先 JSON.parse 再断子串**：文案里有引号，raw body 里被转义成 `\"`） */
+function askError(body: string): string {
+  return (JSON.parse(body) as { error: string }).error
+}
+
 describe('skiff-debug: 问答页渲染（纯函数，v1.25.4 多 CCC 切换）', () => {
+  // ⚠️ `roles` 字段名保留（消费方形状不变），但内容自 2026-10-19 起是**轨迹编码** —— 那正是新模型里的"角色名"
   const cccs: CccEntry[] = [
     { root: '/ccc/home-serenity', name: 'home-serenity', roles: ['qa-readonly', 'review'] },
     { root: '/ccc/other-ccc', name: 'other-ccc', roles: ['helper'] },
@@ -105,8 +114,8 @@ describe('ccc-roots.listCccs 候选发现（v1.25.6 三层：workspace → sessi
     writeFileSync(join(cccA, '.serenity'), 'test')
     const cccB = mkdtempSync(join(tmpdir(), 'skiff-ccc-b-'))
     writeFileSync(join(cccB, '.serenity'), 'test')
-    mkdirSync(join(cccA, '.opencode'), { recursive: true })
-    writeFileSync(join(cccA, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'] } } } }))
+    // A 有 skiff 轨迹（编码 `qa`），B 没有 ⇒ roles 分别 ['qa'] / []
+    makeTrajectory(cccA, 'qa', skiffJson({ msms: ['x'] }))
     // 非 CCC 工作区（无 .serenity）应被跳过
     const plain = mkdtempSync(join(tmpdir(), 'plain-ws-'))
     const fakeCtx = {
@@ -132,8 +141,7 @@ describe('ccc-roots.listCccs 候选发现（v1.25.6 三层：workspace → sessi
     writeFileSync(join(cccA, '.serenity'), 'test')
     const cccB = mkdtempSync(join(tmpdir(), 'skiff-ccc-b-'))
     writeFileSync(join(cccB, '.serenity'), 'test')
-    mkdirSync(join(cccA, '.opencode'), { recursive: true })
-    writeFileSync(join(cccA, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'] } } } }))
+    makeTrajectory(cccA, 'qa', skiffJson({ msms: ['x'] }))
     // v1.31.6 适配 0.1.5-rc.1：list() 返回 SessionPersistenceSnapshot[]（cwd 在 header 下），
     // 不再是 0.1.2 的 SessionHeader[]（cwd 顶层）——形状由宿主决定，dsp 侧断言必须跟随。
     const fakeCtx = {
@@ -177,9 +185,8 @@ describe('ccc-roots.listCccs 候选发现（v1.25.6 三层：workspace → sessi
     writeFileSync(join(cccA, '.serenity'), 'test')
     const cccB = mkdtempSync(join(tmpdir(), 'skiff-ccc-b-'))
     writeFileSync(join(cccB, '.serenity'), 'test')
-    // A 有角色，B 无
-    mkdirSync(join(cccA, '.opencode'), { recursive: true })
-    writeFileSync(join(cccA, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'] } } } }))
+    // A 有 skiff 轨迹，B 没有
+    makeTrajectory(cccA, 'qa', skiffJson({ msms: ['x'] }))
     const fakeCtx = {
       get: () => undefined, // 无 workspaceRegistry / sessionPersistence
       sessions: {
@@ -223,41 +230,42 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     expect(skiffDebugActive()).toBe(false)
   })
 
-  it('角色配置实时读取：写配置后 GET / 立即可见（不缓存快照，v1.25.2）', async () => {
+  it('skiff 列表实时读取：新建一条 skiff 轨迹后 GET / 立即可见（不缓存快照，v1.25.2）', async () => {
     const port = await startDebugEphemeral()
     const empty = await httpGet(port, '/')
     expect(empty.body).toContain('(未发现 CCC)')
-    // 写入 skiff.roles 后刷新页面即生效（无需重启服务）
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
-    )
+    // 新建带 `skiff.json` 的轨迹（2026-10-19：数据源从 `serenity.json` skiff.roles 改为轨迹目录）
+    // ⇒ 刷新页面即生效（无需重启服务）；列表项内容 = **轨迹编码**
+    makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
     const after = await httpGet(port, '/')
     expect(after.body).toContain('"roles":["qa"]')
   })
 
-  it('POST /ask unknown role → 400（错误路径；不创建 agent）', async () => {
+  it('POST /ask 未知轨迹编码 → 400（错误路径；不创建 agent）', async () => {
     const port = await startDebugEphemeral()
     const res = await httpPost(port, '/ask', { role: 'ghost', question: 'hi' })
     expect(res.status).toBe(400)
-    expect(res.body).toContain('unknown role')
+    // 🔴 2026-10-19 新文案：入参 `role` 现在**承载轨迹编码**（旧文案 "unknown role" 已随角色名退役）
+    const err = askError(res.body)
+    expect(err).toContain('unknown skiff trajectory: ghost')
+    expect(err).toContain('no trajectory with code "ghost" has skiff.json')
+    expect(err).toContain(dir) // 报出**在哪个 CCC 里查的** —— 排查多 CCC 串味的第一条线索
   })
 
-  it('POST /ask 切换 CCC（ccc 字段）→ 目标 CCC 无该角色 → 400（v1.25.4）', async () => {
+  it('POST /ask 切换 CCC（ccc 字段）→ **按目标 CCC** 解析轨迹编码 → 目标 CCC 无该轨迹 ⇒ 400（v1.25.4）', async () => {
     const other = mkdtempSync(join(tmpdir(), 'skiff-other-'))
     writeFileSync(join(other, '.serenity'), 'test')
-    mkdirSync(join(other, '.opencode'), { recursive: true })
-    writeFileSync(join(other, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { 'other-role': { msms: ['y'] } } } }))
+    // 目标 CCC 里有一条 skiff 轨迹，但**编码不同** ⇒ 用 `qa` 提问仍必须被拒（且报的是 `other`）
+    makeTrajectory(other, 'other-trajectory', skiffJson({ msms: ['y'] }))
     const port = await startDebugEphemeral()
-    // 默认 CCC（dir）无 qa 角色
+    // 默认 CCC（dir）无编码 qa 的轨迹
     const res = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hi' })
     expect(res.status).toBe(400)
-    expect(res.body).toContain('unknown role')
-    // 切换的 CCC（other）有 other-role——角色校验按目标 CCC
+    expect(askError(res.body)).toContain('unknown skiff trajectory: qa')
+    // 切换的 CCC（other）有自己的 skiff，但**没有编码 qa** ⇒ 轨迹校验按**目标 CCC**（不是默认 CCC）判定
     const res2 = await httpPost(port, '/ask', { ccc: other, role: 'qa', question: 'hi' })
     expect(res2.status).toBe(400)
-    expect(res2.body).toContain('unknown role')
+    expect(askError(res2.body)).toContain(`has skiff.json in ${other}`)
     rmSync(other, { recursive: true, force: true })
   })
 
@@ -268,12 +276,13 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     expect(res.body).toContain('invalid JSON')
   })
 
-  it('POST /ask 会话延续：新建（continued:false）→ 同会话追问（continued:true）→ 全量轨迹（v1.25.10）', async () => {
-    // 角色配置（cheap-worker.defaultModel 供 createSkiffAgent）
+  it('POST /ask 会话延续：新建（continued:false）→ 同会话追问（continued:true）（v1.25.10）', async () => {
+    // skiff 轨迹（`role` 字段现在承载**轨迹编码** `qa`）＋ cheap-worker.defaultModel 供 createSkiffAgent
+    makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ 'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' }, skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
+      JSON.stringify({ 'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' } }),
     )
     // fake ctx：agents.create 产生带 followup 的 fake agent（events 可累积）；
     // on 注册时立即触发 idle（waitIdle 同步 resolve，skiff-core 测试同款）
@@ -308,52 +317,62 @@ describe('skiff-debug: 调试服务（ephemeral 端口）', () => {
     // 首次提问 → 新建会话
     const first = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hello' })
     expect(first.status).toBe(200)
-    const firstData = JSON.parse(first.body) as { sessionId: string; continued: boolean; cognitiveTrajectory: unknown[] }
+    const firstData = JSON.parse(first.body) as { sessionId: string; continued: boolean; answer: string; answer_html: string }
     expect(firstData.continued).toBe(false)
+    // 🔴 2026-10-19：会话 id = `skiff-<轨迹编码>-<uuid>`（编码即身份，不再是角色名）
     expect(firstData.sessionId.startsWith('skiff-qa-')).toBe(true)
     expect(created).toHaveLength(1)
-    expect(firstData.cognitiveTrajectory.length).toBeGreaterThan(0)
-    // 追问（带 sessionId）→ 复用同一 agent（created 不增加）+ continued:true + 全量轨迹
+    // 🔴 2026-10-19：`askSkiff` 返回值只剩 `{answer, sessionId}`（`cognitiveTrajectory` 已随返回类型移除）
+    //    ⇒ 断言从"轨迹条数"改为**钉新的返回形状**（答案原文 ＋ 服务端渲染的 HTML）
+    expect(firstData.answer).toBe('a')
+    expect(firstData.answer_html).toContain('<p>a</p>')
+    expect((firstData as Record<string, unknown>).cognitiveTrajectory).toBeUndefined()
+    // 追问（带 sessionId）→ 复用同一 agent（created 不增加）+ continued:true
     const second = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'follow up', sessionId: firstData.sessionId })
     expect(second.status).toBe(200)
-    const secondData = JSON.parse(second.body) as { sessionId: string; continued: boolean; cognitiveTrajectory: unknown[] }
+    const secondData = JSON.parse(second.body) as { sessionId: string; continued: boolean; answer: string }
     expect(secondData.continued).toBe(true)
     expect(secondData.sessionId).toBe(firstData.sessionId)
-    expect(created).toHaveLength(1)
-    // 全量轨迹：两轮 events（每轮 user+assistant = 4 条）
-    expect(secondData.cognitiveTrajectory.length).toBeGreaterThan(firstData.cognitiveTrajectory.length)
+    expect(secondData.answer, '本轮真的产出了回答（askSkiff 只在 assistant 计数增长时给文本）').toBe('a')
+    expect(created, '追问不得新建第二个 agent').toHaveLength(1)
     stopSkiffDebugServer()
   })
 
   it('POST /ask 会话延续：未注册 sessionId → 400 不可恢复（重启后/不存在）', async () => {
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }))
+    makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
     const port = await startDebugEphemeral()
     const res = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hi', sessionId: 'skiff-qa-ghost' })
     expect(res.status).toBe(400)
     expect(res.body).toContain('not recoverable')
   })
 
-  it('POST /ask 会话延续：sessionId 绑定角色/CCC 不匹配 → 400（切换残留）', async () => {
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }))
-    // 直接注册一个绑定 role=qa 的会话（fake agent）
+  it('POST /ask 会话延续：sessionId 绑定的**轨迹/CCC** 与请求不符 → 400（切换残留）', async () => {
+    // dir 下两条 skiff 轨迹：`qa`（请求里指名的）与 `qa-bound`（会话实际绑的）
+    const qa = makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
+    const bound = makeTrajectory(dir, 'qa-bound', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
+    // 直接注册一个绑定（trajectoryDirName=bound, ccc=dir）的会话（fake agent）
     const { registerSkiffSession, unregisterSkiffSession } = await import('../src/role/skiff/core.js')
     const sid = 'skiff-qa-bound'
     const fake = { session: { id: sid, events: [] }, followup: () => {} }
-    registerSkiffSession(sid, 'qa', dir, fake as never)
+    registerSkiffSession(sid, bound.dirName, dir, fake as never)
     const port = await startDebugEphemeral()
     try {
-      // 角色不匹配（请求 review——CCC 无该角色会先 400 unknown role？不：readSkiffRoles 无 review → 400 unknown role）
-      // 所以用真实存在的第二个角色验证 role 不匹配
+      // ① 同 CCC、**另一条轨迹**（`qa`）⇒ 错配（旧模型这条只能靠"另一个角色名"试出来，
+      //    新模型里轨迹身份是独立的一维 ⇒ 单独可测）
+      const resTraj = await httpPost(port, '/ask', { ccc: dir, role: 'qa', question: 'hi', sessionId: sid })
+      expect(resTraj.status).toBe(400)
+      expect(askError(resTraj.body)).toContain(`belongs to trajectory "${bound.dirName}"`)
+      // 报的是**会话绑的那条**，不是请求指名的（否则报错会误导排查方向）
+      expect(askError(resTraj.body)).not.toContain(qa.dirName)
+      // ② 同编码、**另一个 CCC** ⇒ 错配（这条钉"跨容器不串味"）
       const other = mkdtempSync(join(tmpdir(), 'skiff-other-ccc-'))
       writeFileSync(join(other, '.serenity'), 'test')
-      mkdirSync(join(other, '.opencode'), { recursive: true })
-      writeFileSync(join(other, '.opencode', 'serenity.json'), JSON.stringify({ skiff: { roles: { qa: { msms: ['y'], systemPrompt: 'p' } } } }))
-      // CCC 不匹配：请求 other（qa 角色存在，但 session 绑定 dir）→ 400 belongs to role
-      const resCcc = await httpPost(port, '/ask', { ccc: other, role: 'qa', question: 'hi', sessionId: sid })
+      makeTrajectory(other, 'qa-bound', skiffJson({ msms: ['y'], systemPrompt: 'p' }))
+      const resCcc = await httpPost(port, '/ask', { ccc: other, role: 'qa-bound', question: 'hi', sessionId: sid })
       expect(resCcc.status).toBe(400)
-      expect(resCcc.body).toContain('belongs to role')
+      // 🔴 2026-10-19 新文案：`belongs to role` 随角色名退役 ⇒ 改为 `belongs to trajectory "<目录名>"`
+      expect(askError(resCcc.body)).toContain(`belongs to trajectory "${bound.dirName}"`)
+      expect(askError(resCcc.body)).toContain('in another CCC')
       rmSync(other, { recursive: true, force: true })
     } finally {
       unregisterSkiffSession(sid)

@@ -23,8 +23,8 @@ import {
   type BlacklistRule,
 } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
-import { isSkiffSessionId, roleToolWhitelist, readSkiffRoles } from '../role/skiff/config.js'
-import { skiffRoleFor } from '../role/skiff/registry.js'
+import { skiffProfileForSession, type SkiffProfile } from '../role/skiff/profile.js'
+import { profileToolWhitelist } from '../role/skiff/config.js'
 import { hasEnabledImChannel } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../kernel/invariant.js'
 import { isoLocal } from '../kernel/time.js'
@@ -40,8 +40,14 @@ export interface GuardInput {
   pathArg?: string
   /** container_fs 等复合工具的子命令 action（只读子命令不查黑名单） */
   action?: string
-  /** 当前 agent 的 dsh 会话 id（Skiff 角色白名单判定；非 skiff 会话不判定） */
-  skiffSessionId?: string
+  /**
+   * 该会话的 skiff 约束面（`null`/`undefined` = 不是 skiff 会话 ⇒ 不判定）。
+   *
+   * 🔴 2026-10-19 起传**已解析好的约束面**，不传 sessionId：解判据（"这条轨迹有没有
+   * `skiff.json`"）留在唯一入口 `profile.ts`，守卫只消费结果 ⇒ 纯函数里不再做 IO，
+   * 也不可能出现"守卫的判据与 schema 收窄的判据不一致"。
+   */
+  skiffProfile?: SkiffProfile | null
 }
 
 /** 写类工具名（黑名单/治理文件只拦这些；读工具只做路径越界检查——对齐 osp） */
@@ -129,29 +135,30 @@ interface GuardDecisionResult {
 export function decideGuard(input: GuardInput): GuardDecisionResult {
   const { root, toolName, safeModeOn, blacklist, pathArg, action } = input
 
-  // 0) Skiff 角色白名单（F4b ⑧）：skiff 会话工具必须 ∈ 角色白名单（tools ∪ msm 通道），
-  // 白名单外一律 deny（拒绝信息泛化——不泄漏白名单外工具名；完备性：不枚举工具名）。
-  // 由调用方（evaluate）传入 sessionId 判定；纯函数内通过 GuardInput.skiffSessionId 支持单测。
+  // 0) skiff 约束（2026-10-19 重做）：会话绑定的轨迹有 `skiff.json` ⇒ 工具必须 ∈ 白名单。
+  //
+  // 判据（D23 归属）：**机制在 ACC**（怎么判、怎么拒），**内容在 CCC**（`skiff.json` 的白名单）。
+  // 🔴 判据从旧版的「sessionId 前缀 `skiff-`」换成「绑定轨迹有 `skiff.json`」——
+  //    前缀在新模型下会漏掉不带前缀的 skiff 会话，且会把**普通会话误判成 skiff**
+  //    （只要 id 恰好以 `skiff-` 开头）。两种误判都是权限面问题，故判据必须打在轨迹上。
+  // 由调用方（evaluate）传入 skiffProfile；纯函数内通过 GuardInput 支持单测。
   // v1.25.3：skill 加载对 skiff 恒可用（S142 用户——skill 不设白名单；读知识面，无写能力）
-  if (input.skiffSessionId !== undefined && isSkiffSessionId(input.skiffSessionId)) {
+  if (input.skiffProfile !== undefined && input.skiffProfile !== null) {
+    const profile = input.skiffProfile
     if (toolName === 'skill') return { kind: 'allow' }
-    const roleName = input.skiffSessionId ? skiffRoleFor(input.skiffSessionId) : null
-    const role = roleName ? readSkiffRoles(root).get(roleName) : undefined
-    // v1.30.2（S142 用户 bug）：模型把 MSM 名（memory-tool 等）当**直接工具**调 →
-    // 旧泛化 deny "tool not allowed in this skiff role" 误导成"没权限"。区分：
-    // 工具名命中角色 msms 清单 = 已授权的 MSM 但调用格式错 → 明确提示经 msm() 单入口。
-    // 安全：msms 清单已注入角色 base prompt（buildSkiffBasePrompt）——对该 skiff 会话
-    // 无新增泄漏；提示含规避指引（打回语义化 D2 哲学：告知命中 + 可行动）。
-    const msms = role?.msms ?? []
-    if (msms.includes(toolName)) {
+    // v1.30.2（S142 用户 bug）：模型把 MSM 名（如 memory-tool）当**直接工具**调 →
+    // 旧泛化 deny "tool not allowed" 误导成"没权限"。区分：
+    // 工具名命中 msms 清单 = 已授权的 MSM 但调用格式错 → 明确提示经 msm() 单入口。
+    // 安全：提示不泄漏白名单外的东西（只说"它是 MSM，请走 msm"）。
+    if (profile.msms.includes(toolName)) {
       return {
-        deny: `"${toolName}" is a registered MSM, not a direct tool in this role — call it through the msm tool: msm("${toolName}", ["<args>"]) (pass "--help" or inspect=true for usage)`,
+        deny: `"${toolName}" is a registered MSM, not a direct tool in this trajectory — call it through the msm tool: msm("${toolName}", ["<args>"]) (pass "--help" or inspect=true for usage)`,
         kind: 'deny',
       }
     }
-    const whitelist = roleToolWhitelist(role)
+    const whitelist = profileToolWhitelist(profile)
     if (!whitelist.has(toolName)) {
-      return { deny: 'tool not allowed in this skiff role', kind: 'deny' }
+      return { deny: 'tool not allowed in this skiff trajectory', kind: 'deny' }
     }
   }
 
@@ -547,26 +554,25 @@ export function getSkiffRoleVisibilityDiagnostics(): { keys: string[]; denyByKey
 }
 
 /**
- * 同步 **Skiff 会话的工具面**：把角色白名单之外的工具**从 schema 移除**（不是"看得到但被拒"）。
+ * 同步 **skiff 会话的工具面**：把白名单之外的工具**从 schema 移除**（不是"看得到但被拒"）。
  *
  * ## 为什么必须有这条（owner 2026-10-19：「工具清单也要热加载」）
  *
- * 在它之前，skiff 角色白名单**只由运行时守卫拦截**（`decideGuard` 的 skiff 分支）：
- * 工具全部出现在模型 schema 里，调用时才被 `tool not allowed in this skiff role` 打回。
- * ⇒ 两个真实后果：
+ * 在它之前，skiff 白名单**只由运行时守卫拦截**（`decideGuard` 的 skiff 分支）：
+ * 工具全部出现在模型 schema 里，调用时才被打回。⇒ 两个真实后果：
  *  ① **模型看得见它不该有的工具** —— 它会去试，试了才撞墙（一轮白烧，且错误文案泛化，
  *     看不出"是不在清单里"还是"临时性拒绝"）；
- *  ② **配置变动在 schema 上永远不生效** —— 改 `skiff.roles.<r>.tools` 只影响"调用是否放行"，
- *     不影响"模型看得见什么"。这正是 owner 报的"工具清单不热加载"。
+ *  ② **配置变动在 schema 上永远不生效** —— 改 `skiff.json` 的 `tools` 只影响"调用是否放行"。
  *
  * ## 判据与降级
  *
- * - deny 集合 = **`REGISTERED_TOOLS` − 角色白名单**（只对**我们自己注册的**工具算，
+ * - deny 集合 = **`REGISTERED_TOOLS` − 白名单**（只对**我们自己注册的**工具算，
  *   不去动宿主的工具 —— 宿主的工具由各自的条件同步管）。
  * - ⚠️ **未注册的名字会让整次 restrict 失败**（宿主契约逐字 "unknown names … fail"），
  *   而 `diagram` 是按开关注册的 ⇒ 与 `hideAllFor` 同款**两档尝试**（先全覆盖，失败退常驻段）。
- * - 读不到角色（配置删了/角色被移除）⇒ **不动**（fail-open）：此时守卫仍会拦，
- *   最坏是"又变成看得见但调不动"，而不是把工具全删光。
+ * - 读不到约束面（不是 skiff / 配置删了）⇒ **撤销既有隐藏**（回到"无约束"）：
+ *   ⛔ 不能只是 `return` —— 那会把上一步的隐藏**永久留在**一个已不再是 skiff 的会话上
+ *   （这正是 owner 说的"删掉 `skiff.json` 就该立刻恢复"）。
  * - 幂等：算出来的 deny 签名不变就跳过（不每步重建 schema）。
  *
  * @param agent 目标会话
@@ -574,22 +580,25 @@ export function getSkiffRoleVisibilityDiagnostics(): { keys: string[]; denyByKey
  */
 export function syncSkiffRoleToolVisibility(agent: Agent, root: string): void {
   const sessionId = (agent.session as { id?: string }).id ?? 'global'
-  if (!isSkiffSessionId(sessionId)) return
+  const profile = skiffProfileForSession(root, sessionId)
+  const existing = skiffRoleRestrictions.get(sessionId)
 
-  const roleName = skiffRoleFor(sessionId)
-  if (!roleName) return
-  let allowed: Set<string>
-  try {
-    const role = readSkiffRoles(root).get(roleName)
-    if (!role) return // 角色被移除 ⇒ 不动（守卫仍兜底）
-    allowed = roleToolWhitelist(role)
-  } catch {
-    return // 配置读取失败 ⇒ 不动（同上）
+  // 不是 skiff（含"刚刚删掉 skiff.json"）⇒ **撤销**既有隐藏，回到无约束
+  if (profile === null) {
+    if (existing !== undefined) {
+      try {
+        existing.dispose()
+      } catch {
+        /* disposer 已失效 */
+      }
+      skiffRoleRestrictions.delete(sessionId)
+    }
+    return
   }
+  const allowed = profileToolWhitelist(profile)
 
   const resident = REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT)
   const tiers: Array<readonly string[]> = [REGISTERED_TOOLS, resident]
-  const existing = skiffRoleRestrictions.get(sessionId)
 
   for (const names of tiers) {
     const deny = names.filter((n) => !allowed.has(n))
@@ -855,7 +864,9 @@ export function registerGuards(ctx: Context, opts: GuardRegistration = {}): void
     const pathArg = extractPathArg(exec)
     const action = extractAction(exec)
     const sessionId = (exec as { agent?: { session?: { id?: string } } } | undefined)?.agent?.session?.id
-    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg, action, skiffSessionId: sessionId })
+    // skiff 约束面（**判据的唯一入口**在 profile.ts；此处只消费结果）
+    const skiffProfile = skiffProfileForSession(root, sessionId)
+    return decideGuard({ root, toolName: exec.name, safeModeOn, blacklist, pathArg, action, skiffProfile })
   }
 
   // 瀑布：deny 短路执行

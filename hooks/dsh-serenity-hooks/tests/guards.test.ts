@@ -22,7 +22,7 @@ import {
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/kernel/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im/channels.js'
 import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/kernel/ccc.js'
-import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/registry.js'
+import type { SkiffProfile } from '../src/role/skiff/profile.js'
 
 let dir: string
 
@@ -41,6 +41,32 @@ function base(over: Partial<GuardInput>): GuardInput {
 
 function rules(...patterns: string[]): BlacklistRule[] {
   return patterns.map((p) => ({ pattern: p }))
+}
+
+/**
+ * 直接造一条 `SkiffProfile`（`decideGuard` 的纯函数契约：约束面由调用方解析好传进来，守卫自己不读盘）。
+ *
+ * 🔴 2026-10-19 重做带来的构造方式变化（R↓，别按旧模型再写回 `writeConfig({skiff:{roles:…}})`）：
+ * - **载体**：skiff 的约束从 `.opencode/serenity.json` 的 `skiff.roles.<name>` 搬到**轨迹目录下的
+ *   `skiff.json`**（`skiff.roles` 整段已退役 ⇒ 旧写法写进去也读不到）；
+ * - **判据**：谁是 skiff 由 `role/skiff/profile.ts` 的 `skiffProfileForSession` **唯一**判定
+ *   （"绑定的轨迹有 `skiff.json`"，不再看 sessionId 前缀）；
+ * - **守卫**：只消费已解析好的 `skiffProfile`；`null`/`undefined` = 不是 skiff ⇒ 整段跳过。
+ *
+ * ⇒ 本文件只描述"给守卫什么约束面"，不落盘、不注册会话；落盘与判据路径由
+ * `tests/skiff-profile.test.ts`（+ `tests/helpers/skiff-fixture.ts`）覆盖。
+ */
+function profile(over: Partial<SkiffProfile> = {}): SkiffProfile {
+  return {
+    dirName: '2026-10-19--qa--t',
+    code: 'qa',
+    path: '',
+    tools: [],
+    msms: [],
+    // 缺省全 true：新模型里工作台就是这条轨迹自己的 SESSION.md（旧模型缺省全 false，见 profile.ts R↓）
+    cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
+    ...over,
+  }
 }
 
 describe('guards: decideGuard 纯决策', () => {
@@ -746,183 +772,145 @@ describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-s
   })
 })
 
-describe('guards: Skiff 角色白名单（F4b ⑧）', () => {
-  const QA_ID = 'skiff-qa-1'
-
-  beforeEach(() => {
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({
-        skiff: {
-          roles: {
-            qa: { msms: ['cognitive-qa'], tools: ['read', 'grep', 'glob'], systemPrompt: 'p' },
-          },
-        },
-      }),
-    )
-    registerSkiffSession(QA_ID, 'qa', dir)
-  })
-
-  afterEach(() => {
-    unregisterSkiffSession(QA_ID)
+describe('guards: Skiff 工具白名单（F4b ⑧）', () => {
+  // 一条 skiff 轨迹的约束面（= 它目录里 skiff.json 的解析结果）。
+  // 旧模型这条角色写在 `.opencode/serenity.json` 的 `skiff.roles.qa` 里、靠 sessionId 前缀认人；
+  // 新模型约束面直接传给守卫（见 `profile()` 上方注释）。
+  const QA = profile({
+    dirName: '2026-10-19--qa--t',
+    code: 'qa',
+    msms: ['cognitive-qa'],
+    tools: ['read', 'grep', 'glob'],
+    systemPrompt: 'p',
   })
 
   it('白名单内工具 → allow（read/grep/glob）', () => {
     for (const tool of ['read', 'grep', 'glob']) {
-      expect(decideGuard(base({ root: dir, toolName: tool, skiffSessionId: QA_ID })).kind).toBe('allow')
+      expect(decideGuard(base({ root: dir, toolName: tool, skiffProfile: QA })).kind).toBe('allow')
     }
   })
 
   it('msms 非空 → msm 通道自动可用', () => {
-    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffSessionId: QA_ID })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffProfile: QA })).kind).toBe('allow')
   })
 
   it('白名单外工具 → deny（拒绝信息不泄漏白名单外工具名）', () => {
     for (const tool of ['write', 'edit', 'bash', 'web_search', 'container_fs']) {
-      const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: QA_ID }))
+      const d = decideGuard(base({ root: dir, toolName: tool, skiffProfile: QA }))
       expect(d.kind).toBe('deny')
-      expect(d.deny).toContain('skiff role')
+      expect(d.deny).toContain('skiff trajectory')
       expect(d.deny).not.toContain(tool) // 不泄漏被拒工具名
       expect(d.deny).not.toContain('read') // 不泄漏白名单内容
     }
   })
 
-  it('skiff 会话未注册（注册表缺失）→ 保守 deny（白名单外全隐藏）', () => {
-    const d = decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-ghost-1' }))
+  it('约束面在、但未授予任何能力（tools/msms 皆空）→ 保守 deny（白名单外全隐藏）', () => {
+    // 旧模型此处钉的是"skiff 会话未注册 ⇒ 保守 deny"。新模型里那条判据**已上移**到
+    // `skiffProfileForSession`：判不出轨迹 = 返回 `null` = 不是 skiff ⇒ 守卫不判定（见下一条）。
+    // ⇒ 守卫层唯一还能钉的同类 fail-closed：**约束面存在却是空的** ⇒ 白名单外全 deny。
+    const empty = profile({ dirName: '2026-10-19--empty--t', code: 'empty' })
+    const d = decideGuard(base({ root: dir, toolName: 'read', skiffProfile: empty }))
     expect(d.kind).toBe('deny')
+    expect(d.deny).toContain('skiff trajectory')
   })
 
-  it('非 skiff 会话（无 skiffSessionId / 普通 id）→ 不受白名单影响', () => {
+  it('非 skiff 会话（无约束面 / skiffProfile=null）→ 不受白名单影响', () => {
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'write', skiffSessionId: 'normal-session', pathArg: 'docs/a.md' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cheap-worker', skiffSessionId: 'cheap-worker-x' })).kind).toBe('allow')
+    // 🔴 `null` 显式声明"这不是 skiff"（新模型里普通会话的常态）——会话 id 已完全不参与判定
+    expect(decideGuard(base({ root: dir, toolName: 'write', skiffProfile: null, pathArg: 'docs/a.md' })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'cheap-worker', skiffProfile: null })).kind).toBe('allow')
   })
 
-  it('角色 tools 空（纯 MSM 角色）→ 仅 msm 可用', () => {
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ skiff: { roles: { pure: { msms: ['cognitive-qa'], tools: [] } } } }),
-    )
-    registerSkiffSession('skiff-pure-1', 'pure', dir)
-    try {
-      expect(decideGuard(base({ root: dir, toolName: 'msm', skiffSessionId: 'skiff-pure-1' })).kind).toBe('allow')
-      expect(decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-pure-1' })).kind).toBe('deny')
-    } finally {
-      unregisterSkiffSession('skiff-pure-1')
-    }
+  it('约束面 tools 空（纯 MSM 轨迹）→ 仅 msm 可用', () => {
+    const pure = profile({ dirName: '2026-10-19--pure--t', code: 'pure', msms: ['cognitive-qa'], tools: [] })
+    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffProfile: pure })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'read', skiffProfile: pure })).kind).toBe('deny')
   })
 
   it('skill 加载恒可用（不设白名单，v1.25.3）：白名单不含 skill 也 allow', () => {
-    // 纯 MSM 角色（tools 空）→ 其余工具全 deny，但 skill 恒 allow
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ skiff: { roles: { pure: { msms: ['cognitive-qa'], tools: [] } } } }),
-    )
-    registerSkiffSession('skiff-pure-2', 'pure', dir)
-    try {
-      expect(decideGuard(base({ root: dir, toolName: 'skill', skiffSessionId: 'skiff-pure-2' })).kind).toBe('allow')
-      // 对照：未注册会话 + skill 也放行（豁免在角色查询之前）
-      expect(decideGuard(base({ root: dir, toolName: 'skill', skiffSessionId: 'skiff-ghost-9' })).kind).toBe('allow')
-      // 非 skill 工具仍被白名单约束
-      expect(decideGuard(base({ root: dir, toolName: 'read', skiffSessionId: 'skiff-pure-2' })).kind).toBe('deny')
-    } finally {
-      unregisterSkiffSession('skiff-pure-2')
-    }
+    // 纯 MSM 约束面（tools 空）→ 其余工具全 deny，但 skill 恒 allow
+    const pure = profile({ dirName: '2026-10-19--pure--t', code: 'pure', msms: ['cognitive-qa'], tools: [] })
+    expect(decideGuard(base({ root: dir, toolName: 'skill', skiffProfile: pure })).kind).toBe('allow')
+    // 对照：非 skiff 会话（无约束面）+ skill 也放行（豁免在白名单判定之前）
+    expect(decideGuard(base({ root: dir, toolName: 'skill', skiffProfile: null })).kind).toBe('allow')
+    // 非 skill 工具仍被白名单约束
+    expect(decideGuard(base({ root: dir, toolName: 'read', skiffProfile: pure })).kind).toBe('deny')
   })
 })
 
-describe('guards: Skiff 角色白名单——真实 my-role 配置形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
-  // 复刻 .opencode/serenity.json my-role 角色（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory，
+describe('guards: Skiff 工具白名单——真实形态（S142 微信 msm 全拒 bug 回归钉死）', () => {
+  // 复刻一条真实 skiff 轨迹的约束（2026-09-07 磁盘态；v1.33 白名单里 logbook → trajectory，
   // v1.34 工具名硬切；现名 cognitive_trajectory）：
   // tools 含 msm/cognitive_trajectory + 19 msms——运行时实测全拒"tool not allowed in this skiff role"
-  // 而 read/web_search 通。此测试钉死逻辑层：该配置形态下 decideGuard 必须放行
+  // （该提示语已随 2026-10-19 重做改为 "...in this skiff trajectory"）而 read/web_search 通。
+  // 此测试钉死逻辑层：该约束面形态下 decideGuard 必须放行
   // msm/cognitive_trajectory/read/web_search（若此测试红 = 守卫逻辑 bug；绿 = 逻辑正确，差异在运行时层）。
-  const MY_ROLE_MSMS = [
+  //
+  // 🔴 载体与身份的对应（重做前后）：旧 = `.opencode/serenity.json` 的 `skiff.roles['my-role']`；
+  // 新 = 该轨迹目录下的 `skiff.json`（`path` 指它），身份由**角色名**换成**轨迹编码**。
+  // ⚠️ 编码用通用占位 `my-role`（**不用真实角色名**）：本仓公开面受 `privacy-scan` 的
+  // `role-name-*` 规则约束（D145）——夹具要**能公开**，所以它描述形态、不搬运具体称呼。
+  // 白名单内容（tools / msms / systemPromptFile）逐字照搬旧配置——那才是本组要钉的东西。
+  const ZC_MSMS = [
     'anysearch', 'web-search', 'memory-tool', 'mail-tool', 'vlm-describe',
     'eap-analyzer', 'qbit', 'session-log-tool', 'movie-search', 'home-diag',
     'bill-analyzer', 'mortgage-rate-compare', 'sheet-parser', 'pdf-extract',
     'archive-extract', 'profile-tool', 'weixin-send', 'autopilot-todo', 'subscription-tool',
   ]
-  const ZC_ID = 'skiff-weixin-0123456789abcdef'
-
-  beforeEach(() => {
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({
-        skiff: {
-          roles: {
-            'my-role': {
-              model: 'minimax-cn-coding-plan/MiniMax-M3',
-              msms: MY_ROLE_MSMS,
-              tools: ['read', 'grep', 'glob', 'web_search', 'cognitive_trajectory', 'msm'],
-              cognitiveTrajectory: { session: true, keeper: false, rebuild: true },
-              systemPromptFile: '.opencode/skiff/zhaocai.md',
-            },
-          },
-        },
-      }),
-    )
-    registerSkiffSession(ZC_ID, 'my-role', dir)
+  const ZC = profile({
+    dirName: '2026-10-19--my-role--weixin',
+    code: 'my-role',
+    model: 'minimax-cn-coding-plan/MiniMax-M3',
+    msms: ZC_MSMS,
+    tools: ['read', 'grep', 'glob', 'web_search', 'cognitive_trajectory', 'msm'],
+    cognitiveTrajectory: { session: true, keeper: false, rebuild: true },
+    systemPromptFile: '.opencode/skiff/my-role.md',
   })
 
-  afterEach(() => {
-    unregisterSkiffSession(ZC_ID)
-  })
-
-  it('my-role 形态：白名单内工具全放行（read/web_search/cognitive_trajectory/msm）', () => {
+  it('真实形态：白名单内工具全放行（read/web_search/cognitive_trajectory/msm）', () => {
     for (const tool of ['read', 'grep', 'glob', 'web_search', 'cognitive_trajectory', 'msm']) {
-      expect(decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID })).kind, `tool ${tool} 应 allow`).toBe('allow')
+      expect(decideGuard(base({ root: dir, toolName: tool, skiffProfile: ZC })).kind, `tool ${tool} 应 allow`).toBe('allow')
     }
   })
 
-  it('my-role 形态：白名单外工具 deny（write/bash 等）', () => {
+  it('真实形态：白名单外工具 deny（write/bash 等）', () => {
     for (const tool of ['write', 'edit', 'bash', 'container_fs', 'cheap-worker', 'container_admin', 'dashboard', 'praxis']) {
-      const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID }))
+      const d = decideGuard(base({ root: dir, toolName: tool, skiffProfile: ZC }))
       expect(d.kind, `tool ${tool} 应 deny`).toBe('deny')
-      expect(d.deny).toContain('skiff role')
+      expect(d.deny).toContain('skiff trajectory')
     }
   })
 
-  it('my-role 形态：msms 非空 → msm 工具本身放行（roleToolWhitelist msm 通道）', () => {
-    // 关键回归：即使 tools 不含 msm，msms 非空也必须放行 msm（roleToolWhitelist 自动加 msm）
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({
-        skiff: { roles: { 'my-role': { msms: MY_ROLE_MSMS, tools: ['read'] } } },
-      }),
-    )
-    registerSkiffSession('skiff-weixin-zc2', 'my-role', dir)
-    try {
-      expect(decideGuard(base({ root: dir, toolName: 'msm', skiffSessionId: 'skiff-weixin-zc2' })).kind).toBe('allow')
-    } finally {
-      unregisterSkiffSession('skiff-weixin-zc2')
-    }
+  it('msms 非空 → msm 工具本身放行（profileToolWhitelist msm 通道）', () => {
+    // 关键回归：即使 tools 不含 msm，msms 非空也必须放行 msm（profileToolWhitelist 自动加 msm）
+    const zcReadOnly = profile({
+      dirName: '2026-10-19--my-role--weixin2',
+      code: 'my-role',
+      msms: ZC_MSMS,
+      tools: ['read'],
+    })
+    expect(decideGuard(base({ root: dir, toolName: 'msm', skiffProfile: zcReadOnly })).kind).toBe('allow')
   })
 
   it('v1.30.2 回归：模型把 MSM 名当直接工具调 → 明确指引经 msm()（非泛化"未授权"）', () => {
-    // 用户 bug（S142）：my-role 调 memory-tool 等得到 "tool not allowed in this skiff role" →
+    // 用户 bug（S142）：该轨迹调 memory-tool 等得到 "tool not allowed in this skiff role" →
     // 误导成"没权限"。根因 = 把 MSM 名当直接工具调用。修复 = deny 消息给出 msm() 通道指引。
-    for (const msmName of MY_ROLE_MSMS) {
-      const d = decideGuard(base({ root: dir, toolName: msmName, skiffSessionId: ZC_ID }))
+    for (const msmName of ZC_MSMS) {
+      const d = decideGuard(base({ root: dir, toolName: msmName, skiffProfile: ZC }))
       expect(d.kind, `直接调 ${msmName} 应 deny`).toBe('deny')
-      // 明确说这是 MSM + 给调用法（可行动规避指引），不说"not allowed in this skiff role"
+      // 明确说这是 MSM + 给调用法（可行动规避指引），不说泛化的"not allowed in this skiff trajectory"
       expect(d.deny, `deny 消息应含 ${msmName} 与 msm() 指引`).toContain(msmName)
       expect(d.deny).toContain('msm("')
       expect(d.deny).toContain('not a direct tool')
-      expect(d.deny).not.toContain('not allowed in this skiff role')
+      expect(d.deny).not.toContain('not allowed in this skiff trajectory')
     }
   })
 
   it('v1.30.2：白名单外真工具（write/bash 等）仍保守泛化 deny（不泄漏）', () => {
     for (const tool of ['write', 'bash', 'container_fs', 'acc_msm', 'cc_fs', 'session_rebuild']) {
-      const d = decideGuard(base({ root: dir, toolName: tool, skiffSessionId: ZC_ID }))
+      const d = decideGuard(base({ root: dir, toolName: tool, skiffProfile: ZC }))
       expect(d.kind, `工具 ${tool} 应 deny`).toBe('deny')
-      expect(d.deny).toContain('not allowed in this skiff role')
+      expect(d.deny).toContain('not allowed in this skiff trajectory')
       expect(d.deny).not.toContain(tool) // 不泄漏被拒工具名
     }
   })

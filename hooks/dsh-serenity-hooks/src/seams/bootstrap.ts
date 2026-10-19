@@ -25,7 +25,7 @@ import type { GenerateOptions, StreamChunk, UserMessage } from '@deepseek-ai/dsh
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { sessionEvents } from '../trajectory/core.js'
-import { isSkiffSessionId } from '../role/skiff/config.js'
+import { isSkiffSession } from '../role/skiff/profile.js'
 import { ACC_MESSAGE_KIND } from '../kernel/message-source.js'
 
 interface BootstrapSettings {
@@ -278,9 +278,12 @@ export function createEpochPromotion(
       // 它经 ctx.agents.create 直接创建（非 DSH delegation 路径），delegationDepth 为 0，
       // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故显式按 `cheap-worker-` 前缀判 promoted，
       // 与 context.ts shouldAutoRestore 的 `cheap-worker-` 约定保持一致。
-      // F4 Skiff（`skiff-` 前缀）：角色 CCC 提示词全替换，无需 whoami 锚定轮——恒 promoted（同 cheap-worker）。
+      // skiff 会话：CCC 提示词全替换，无需 whoami 锚定轮——恒 promoted（同 cheap-worker）。
+      // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 `skiff-` 前缀）。
       const loopSid = (session as { id?: string }).id
-      if (typeof loopSid === 'string' && (loopSid.startsWith('cheap-worker-') || isSkiffSessionId(loopSid))) return { boundary: -1, promoted: true }
+      const loopCwd = (session as { header?: { cwd?: string } }).header?.cwd ?? process.cwd()
+      const loopRoot = cccRootForCwd(loopCwd)
+      if (typeof loopSid === 'string' && (loopSid.startsWith('cheap-worker-') || (loopRoot !== null && isSkiffSession(loopRoot, loopSid)))) return { boundary: -1, promoted: true }
       // 子 agent（delegationDepth > 0）恒为完整目录（anchored 语义）
       const header = (session as { header?: { delegationDepth?: number } }).header
       if ((header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
@@ -426,8 +429,9 @@ export function registerBootstrap(ctx: Context): void {
       // 🔴 取不到 sessionId ⇒ **不注入**：注入的两轮要靠 `llm/stream` 按 sessionId 短路，
       //    没有 id 就短路不了 ⇒ 会退化成两次**真模型调用**（正是本机制要消掉的东西）。
       if (sid === undefined) return
-      // cheap-worker worker / Skiff 角色会话：已有完整 ACC 提示词，不需要假首轮
-      if (sid.startsWith('cheap-worker-') || isSkiffSessionId(sid)) return
+      // cheap-worker worker / skiff 会话：已有完整 ACC 提示词，不需要假首轮。
+      // 🔴 2026-10-19：skiff 判据 = 绑定轨迹有 `skiff.json`（不再是 `skiff-` 前缀）。
+      if (sid.startsWith('cheap-worker-') || isSkiffSession(root, sid)) return
       if (depth === 0) {
         // resume/续跑不重插：会话里已有**真人**说过的话（注入源不算）
         if (hasUserMessageHistory(session)) return

@@ -153,11 +153,16 @@ interface SerenityConfig {
     /** 重启自动恢复最近激活的宁静号会话（session-start 时，根会话且无自身标记 → 回退最近 use 的标记） */
     autoRestoreSession?: boolean;
   };
-  /** Skiff（F4，v1.25.0 实验性）认知子集角色配置——角色归 CCC 定义（S142 用户拍板） */
-  skiff?: {
-    /** 角色定义（名 → 角色配置）；缺省/空 = Skiff 未启用（零影响） */
-    roles?: Record<string, SkiffRoleConfig>;
-  };
+  /**
+   * 🔴 **`skiff` 段已于 2026-10-19 退役**（owner 重做令）。
+   *
+   * skiff 不再是 `serenity.json` 里的一组角色定义，而是**带 `skiff.json` 的认知轨迹**
+   * （约束面住在轨迹目录里）。⇒ 本段**不再被读取**：存量配置里残留的 `skiff.roles` ⇒
+   * **静默忽略**（schemastery 非 strict，不报错；也不会被误当成"没有 skiff"）。
+   *
+   * 迁移路径 = 把 `skiff.roles.<name>` 的内容原样搬进对应轨迹目录的 `skiff.json`
+   * （判据与步骤见 `role/skiff/profile.ts` 头注释与 `docs/skiff-as-trajectory-redesign.md` §5）。
+   */
   /**
    * 认知轨迹族配置（D58，S142 2026-09-13；2026-10-18 更名 `cognitiveTrajectory`）。
    *
@@ -290,51 +295,40 @@ export interface WeixinAccountConfig {
   enabled?: boolean;
 }
 
-/** 微信桥路由配置：微信用户 → CCC 的 skiff role */
+/**
+ * 微信桥路由配置：微信用户 → 该 CCC 的**认知轨迹编码**
+ *
+ * 🔴 2026-10-19（owner 重做令）：「微信桥的路由表修改为 **user → 认知轨迹的映射**」。
+ * 旧形态指向 `skiff.roles` 里的**角色名**；新形态直接指向**轨迹编码**
+ * （= 目录名固定位置那一段；该轨迹目录里有 `skiff.json` 时它就是 skiff）。
+ */
 export interface WeixinRouteConfig {
   /** 微信用户标识（from_user_id，形如 userA@im.wechat）；`*` = 通配兜底 */
   user: string;
-  /** 目标 skiff role 名（必须 ∈ 该 CCC skiff.roles；ACC 不绑定——用户自选） */
-  role: string;
+  /**
+   * 目标**认知轨迹编码**（必须是该 CCC 内一条活跃轨迹的编码；ACC 不绑定——用户自选）。
+   * ⚠️ 存量配置里的 `role` 字段仍被读取作**过渡别名**（读侧 `routeTarget` 统一解析），
+   * 但**新写法是 `trajectory`**，且两者都给时 `trajectory` 优先。
+   */
+  trajectory: string;
+  /** @deprecated 过渡别名：语义已等同于 `trajectory`（见上）。新配置不要写它。 */
+  role?: string;
 }
 
 /**
- * Skiff 角色配置（CCC 定义：全知全能轨迹的一个子集）：
- * 能力面 = tools（非 MSM 工具白名单）+ msms（MSM 白名单）双白名单，白名单外全隐藏；
- * 轨迹纪律面 = trajectory 子集（session/keeper/rebuild 参与项，默认全关）。
- * 实验性质：未配置任何角色时 Skiff 完全零影响（无监听、无 agent 创建）。
+ * 🔴 **`SkiffRoleConfig` 已于 2026-10-19 退役**（owner 重做令）。
+ *
+ * 它的语义整体搬进**轨迹目录下的 `skiff.json`**，类型现在是
+ * `role/skiff/profile.ts` 的 `SkiffProfile`（在那里还多了 `code`/`dirName`/`path`
+ * 三个与轨迹身份相关的字段）。
+ *
+ * 退役理由（一句话）：skiff 的约束面是**某一条轨迹的属性**，不是容器级配置表里的一个 entry。
+ * 放进 `serenity.json` 会让"这条轨迹是不是 skiff"分散在**两个文件**里，而 owner 要的是
+ * 一条判据（「目录下拥有 `skiff.json` 的认知轨迹自动是一个 skiff」）。
+ *
+ * ⚠️ 旧字段里 `kind: temporary|persistent` **整件无对应物**：它区分"有没有工作台"，
+ * 而新模型里 skiff 恒等于一条轨迹 ⇒ 恒有 SESSION.md ⇒ 该区分没有指称对象（静默忽略）。
  */
-export interface SkiffRoleConfig {
-  /** 角色模型（provider/model；CCC 直接指定，无白名单校验——用户拍板） */
-  model?: string;
-  /**
-   * 角色类型（v1.30.15，S142 用户拍板"skiff 应该区分的类型是临时和长期"）：
-   * - `temporary`：临时 skiff——不绑定 trajectory（无 SESSION.md 工作台），
-   *   提示词按创建时快照注入（"注入发生一次"）。
-   * - `persistent`：长期 skiff——绑定 trajectory（自动建/恢复 SESSION.md 工作台），
-   *   提示词**每轮动态重读文件**（改 `systemPromptFile` 即生效，无需重启）。
-   * 缺省（未写）= 隐式推断：调用方传入稳定 sessionId → persistent，否则 temporary。
-   */
-  kind?: 'temporary' | 'persistent';
-  /** MSM 白名单（独立）：该角色可 exec 的 MSM 名列表；缺省空 = 无 MSM 通道 */
-  msms?: string[];
-  /** 非 MSM 工具白名单（独立）：平台/ACC 工具名列表；缺省空 = 仅 MSM 通道 */
-  tools?: string[];
-  /** 认知轨迹纪律子集（缺省全 false = 完全独立，不参与 keeper/session/rebuild）
-   *  🔴 2026-10-18 更名：`trajectory` → **`cognitiveTrajectory`**（与顶层同名同义）。
-   *  ⚠️ CCC 侧必须同批改（owner 令「CCC 自行处理」），否则该角色静默退化为全 false。 */
-  cognitiveTrajectory?: {
-    session?: boolean;
-    keeper?: boolean;
-    rebuild?: boolean;
-  };
-  /** 角色系统提示词（CCC 完整定义：人格/认知边界/回答风格） */
-  systemPrompt?: string;
-  /** 角色系统提示词文件（推荐：相对 CCC 根引用 md 文件——超长提示词在 JSON 内嵌不可读；
-   *  优先于 systemPrompt；文件缺失/逃逸 → resolveRoleSystemPrompt 抛错。
-   *  persistent 型每轮重读（mtime 缓存），改文件即生效） */
-  systemPromptFile?: string;
-}
 
 /**
  * 解析 cheap-worker 配置。

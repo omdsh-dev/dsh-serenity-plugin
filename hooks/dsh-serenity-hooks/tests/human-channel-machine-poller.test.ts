@@ -52,6 +52,7 @@ import { __resetPollersForTest, pollerOwners } from '../src/im/inbound.js'
 import { writeWeixinCredential } from '../src/im/route.js'
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
+import { makeTrajectory } from './helpers/skiff-fixture.js'
 
 /** 机器级账号行 */
 function acct(id: string, channel: string | undefined, token: string | undefined, enabled = true) {
@@ -72,16 +73,23 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   }
 
-  /** 造一个 CCC 根：`weixin` 启用 ＋ 一个已绑定凭据的账号 ＋ `qa` 角色 */
+  /**
+   * 造一个 CCC 根：`weixin` 启用 ＋ 一个已绑定凭据的账号 ＋ **一条编码为 `qa` 的认知轨迹**。
+   *
+   * 🔴 2026-10-19：`serenity.json` 的 `skiff.roles` 整段退役 ⇒ 路由目标不再是"角色名"，
+   *    而是**认知轨迹编码**；桥投递前会 `findDirNameByCode(root, code)` 查这条轨迹，
+   *    查不到就是"目标不存在"（响亮报错 ＋ 留痕）⇒ 正控用例**必须先造出这条轨迹**。
+   *    skiff 约束面改由轨迹目录下的 `skiff.json` 承载（`makeTrajectory` 的第三个入参）。
+   */
   function makeCcc(token: string): string {
     const d = mkdtempSync(join(tmpdir(), 'hc-machine-ccc-'))
     mkdirSync(join(d, '.opencode'), { recursive: true })
     writeFileSync(join(d, '.serenity'), 'test')
     writeFileSync(join(d, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: true, accounts: [{ accountId: 'wechat-1' }], routes: [{ user: '*', role: 'qa' }] },
     }))
+    makeTrajectory(d, 'qa', { tools: [], msms: [], systemPrompt: 'qa' })
     writeWeixinCredential(d, 'wechat-1', { token, baseUrl: 'https://x' })
     return d
   }
@@ -297,9 +305,10 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
   it('🔴 机器级模式**不看目标 CCC 的 `weixin.enabled`**（起 poller 与路由已上移机器级）', async () => {
     const a = makeCcc('tok-a')
     // 把目标 CCC 的 weixin 段整体关掉（甚至删掉）——机器级模式**照样投得到**
+    // ⚠️ 只改 serenity.json：**轨迹**（`AGENT_SESSIONS/2026-10-19--qa--traj`）不动 ——
+    //    本用例要证明的是"`weixin.enabled=false` 挡不住机器级投递"，不是"目标不存在"。
     writeFileSync(join(a, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin: { enabled: false },
     }))
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-machine')]

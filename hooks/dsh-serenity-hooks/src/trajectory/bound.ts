@@ -28,7 +28,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { type BindingStore, type BindingRecord } from '../host/storage-domain.js'
-import { getActiveSessionInfo, getLastActiveSessionInfo, sessionEvents } from './core.js'
+import { getActiveSessionInfo, getLastActiveSessionInfo, parseTrajectoryCode, sessionEvents } from './core.js'
 
 type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 'reconcile' | 'release'
 
@@ -302,10 +302,9 @@ export function hasAnyBound(session: unknown): boolean {
   return readLastBound(session) !== null
 }
 
-/** 目录名 → 轨迹标签（`--S###--` 命中取 `S###`；未命中原样返回——编码无关 U4） */
+/** 目录名 → 轨迹标签（取固定位置编码；非本工具建的目录回退整名——编码无关 U4） */
 function cognitiveTrajectoryLabel(dirName: string): string {
-  const m = dirName.match(/--S(\d{3,})--/)
-  return m ? `S${m[1]}` : dirName
+  return parseTrajectoryCode(dirName) ?? dirName
 }
 
 /**

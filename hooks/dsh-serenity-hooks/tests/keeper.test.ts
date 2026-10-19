@@ -46,7 +46,9 @@ import {
   forgetRebuildTodoState,
   __resetRebuildTodoForTest,
 } from '../src/seams/keeper.js'
-import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/core.js'
+import { unregisterSkiffSession } from '../src/role/skiff/core.js'
+import { resetSkiffSessions } from '../src/role/skiff/registry.js'
+import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
 import { setActiveSessionInfo, clearActiveSessionInfo } from '../src/trajectory/core.js'
 
 describe('keeper: 纯跟踪器', () => {
@@ -201,13 +203,20 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
     )
   }
 
-  /** 建 SESSION.md 并绑定为活跃会话；返回其绝对路径 */
-  function bindSession(sizeBytes: number): string {
-    const sessionDir = join(dir, 'AGENT_SESSIONS', '2026-01-01--S001--size-test')
+  /**
+   * 建 SESSION.md 并绑定为活跃会话；返回其绝对路径。
+   *
+   * ⚠️ `scope` 必须 = 发起工具调用的那个 **sessionId**（keeper 的 `resolveActiveSessionMdPath`
+   * 以 sessionId 为缓存键）。把活跃绑定挂在别的 scope 上会让"体积提醒"因路径解析不到而恒不触发
+   * —— 那时断言通过，但测的不是纪律开关 ⇒ 纪律子集用例必须显式传自己的 sessionId。
+   */
+  function bindSession(sizeBytes: number, scope: string = SCOPE): string {
+    const dirName = `2026-01-01--${scope}--size-test`
+    const sessionDir = join(dir, 'AGENT_SESSIONS', dirName)
     mkdirSync(sessionDir, { recursive: true })
     const mdPath = join(sessionDir, 'SESSION.md')
     writeFileSync(mdPath, 'x'.repeat(sizeBytes))
-    setActiveSessionInfo(SCOPE, { sessionId: 'S001', dirName: '2026-01-01--S001--size-test', mdPath })
+    setActiveSessionInfo(scope, { sessionId: scope, dirName, mdPath })
     return mdPath
   }
 
@@ -231,6 +240,10 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
 
   afterEach(() => {
     clearActiveSessionInfo(SCOPE)
+    // 纪律子集用例按各自 sessionId 挂活跃绑定（见 bindSession 的注释）⇒ 一并清，别留给下个用例
+    clearActiveSessionInfo('skiff-quiet-1')
+    clearActiveSessionInfo('skiff-loud-1')
+    resetSkiffSessions()
     __resetLogbookCompactionForTest()
     rmSync(dir, { recursive: true, force: true })
   })
@@ -285,18 +298,31 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
     expect(await fire()).toHaveLength(0)
   })
 
-  it('skiff 会话（cognitiveTrajectory.session 关）→ 不提醒（角色子集控权）', async () => {
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ sessionKeeper: { threshold: 99999, sessionMdMaxKB: 1 }, skiff: { roles: { quiet: { msms: [] } } } }),
-    )
-    __resetLogbookCompactionForTest()
-    registerSkiffSession('skiff-quiet-1', 'quiet', dir, { session: { id: 'skiff-quiet-1' } } as never)
-    bindSession(4096)
-    const exec = { name: 'read', agent: { session: { id: 'skiff-quiet-1', header: { cwd: dir } } } }
+  it('skiff 轨迹（cognitiveTrajectory.session 关）→ 不提醒（纪律子集控权）', async () => {
+    // 🔴 2026-10-19 重做：身份判据 = 绑定的轨迹有没有 `skiff.json`（不再是 `serenity.json` 的角色表）。
+    //    纪律缺省也翻成了 **true** ⇒ 要"关"必须显式写 false（旧夹具靠缺省 false 拿到关闭）。
+    const QUIET = 'skiff-quiet-1'
+    makeSkiffSession(dir, QUIET, 'quiet', skiffJson({ msms: [], cognitiveTrajectory: { session: false } }))
+    // ⚠️ 活跃绑定挂在**同一个** sessionId 上：否则路径解析不到 ⇒ 恒零注入 ⇒ 断言测不到门控
+    bindSession(4096, QUIET)
+    const exec = { name: 'read', agent: { session: { id: QUIET, header: { cwd: dir } } } }
     const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
     expect(result.additionalContexts ?? []).toHaveLength(0)
-    unregisterSkiffSession('skiff-quiet-1')
+    unregisterSkiffSession(QUIET)
+  })
+
+  it('对照组：同一超限体积、cognitiveTrajectory.session 开 ⇒ 提醒（唯一变量 = 纪律开关）', async () => {
+    // ↑ 没有这条，上面那条就可能是"因为路径解析不到而恒零注入"的假绿（本条给出反证）
+    const LOUD = 'skiff-loud-1'
+    makeSkiffSession(dir, LOUD, 'loud', skiffJson({ msms: [], cognitiveTrajectory: { session: true } }))
+    bindSession(4096, LOUD)
+    const exec = { name: 'read', agent: { session: { id: LOUD, header: { cwd: dir } } } }
+    const texts = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as {
+      additionalContexts?: Array<{ content?: Array<{ text?: string }> }>
+    }
+    expect((texts.additionalContexts ?? []).map((m) => m.content?.[0]?.text ?? '')).toHaveLength(1)
+    expect(texts.additionalContexts?.[0]?.content?.[0]?.text).toContain('LOGBOOK COMPACTION')
+    unregisterSkiffSession(LOUD)
   })
 })
 
@@ -518,9 +544,12 @@ describe('keeper: Skiff 轨迹纪律子集旁路（F4b ⑩）', () => {
     dir = mkdtempSync(join(tmpdir(), 'keeper-skiff-'))
     writeFileSync(join(dir, '.serenity'), 'test')
     mkdirSync(join(dir, '.opencode'), { recursive: true })
+    // 🔴 2026-10-19 重做：skiff 约束面不再写在 `serenity.json` 的 `skiff.roles`（该段已退役），
+    //    改由**轨迹目录下的 `skiff.json`** 承载 ⇒ 这里只留 CCC 级计分配置，轨迹面见下方各用例。
+    //    ⚠️ 纪律缺省翻成 **全 true**（旧夹具靠"缺省 false"表达"这个 skiff 不参与 keeper"）。
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ sessionKeeper: { threshold: 1 }, skiff: { roles: { qa: { msms: ['x'] }, tracked: { msms: ['y'], cognitiveTrajectory: { keeper: true } } } } }),
+      JSON.stringify({ sessionKeeper: { threshold: 1 } }),
     )
     handler = null
     const fakeCtx = {
@@ -534,19 +563,30 @@ describe('keeper: Skiff 轨迹纪律子集旁路（F4b ⑩）', () => {
   afterEach(() => {
     unregisterSkiffSession('skiff-qa-1')
     unregisterSkiffSession('skiff-tracked-1')
+    unregisterSkiffSession('skiff-default-1')
+    resetSkiffSessions()
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('Skiff 会话（keeper 子集关）→ 计分不触发提醒（完全独立）', async () => {
-    registerSkiffSession('skiff-qa-1', 'qa', dir, { session: { id: 'skiff-qa-1' } } as never)
+  it('Skiff 轨迹（keeper 子集显式关）→ 计分不触发提醒（完全独立）', async () => {
+    makeSkiffSession(dir, 'skiff-qa-1', 'qa', skiffJson({ msms: ['x'], cognitiveTrajectory: { keeper: false } }))
     const exec = { name: 'read', agent: { session: { id: 'skiff-qa-1', header: { cwd: dir } } } }
     const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
     expect(result.additionalContexts ?? []).toHaveLength(0)
   })
 
-  it('Skiff 会话（keeper 子集开）→ 计分提醒生效（按角色配置）', async () => {
-    registerSkiffSession('skiff-tracked-1', 'tracked', dir, { session: { id: 'skiff-tracked-1' } } as never)
+  it('Skiff 轨迹（keeper 子集开）→ 计分提醒生效（按 skiff.json）', async () => {
+    makeSkiffSession(dir, 'skiff-tracked-1', 'tracked', skiffJson({ msms: ['y'], cognitiveTrajectory: { keeper: true } }))
     const exec = { name: 'read', agent: { session: { id: 'skiff-tracked-1', header: { cwd: dir } } } }
+    const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
+    expect(result.additionalContexts ?? []).toHaveLength(1)
+  })
+
+  it('🔴 Skiff 轨迹未声明 cognitiveTrajectory ⇒ 缺省参与 keeper（重做后缺省翻成 true）', async () => {
+    // 回归钉：旧模型里 skiff 的纪律缺省全 false（工作台是外挂的）；新模型工作台就是它自己的
+    // SESSION.md ⇒ 缺省全 true。若哪天又翻回 false，这条会红。
+    makeSkiffSession(dir, 'skiff-default-1', 'defaults', skiffJson({ msms: ['z'] }))
+    const exec = { name: 'read', agent: { session: { id: 'skiff-default-1', header: { cwd: dir } } } }
     const result = (await handler!(exec, {}, async () => ({ kind: 'enter' }))) as { additionalContexts?: unknown[] }
     expect(result.additionalContexts ?? []).toHaveLength(1)
   })

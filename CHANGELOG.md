@@ -1,3 +1,66 @@
+## v1.71.0 — 2026-10-19（🔴🔴 **skiff 重做：skiff = 带 `skiff.json` 的认知轨迹**）
+
+**性质**：**架构级简化**（一条判据取代四条机制）＋ **破坏性变更**（配置载体与身份概念都换了）。
+**来源**：owner 原话——「为了贯彻**认知轨迹是一等公民**这个情况，我觉得需要**重做**；
+skiff 复杂的约束和提示词体系都干掉，改为这样的实现：**skiff 本身是认知轨迹的一个特殊情况，
+即目录下拥有 `skiff.json` 的认知轨迹自动是一个 skiff**（json 里配置上个版本就有的各种约束），
+**会话跑在认知轨迹上且发现 `skiff.json`，则运行时实现各类约束**；
+**微信桥的路由表修改为 user → 认知轨迹的映射**；**认知轨迹固定唯一标识规则，固定为目录中的固定位置编码**；
+然后，**认知轨迹允许用户指定这个编码**（在约束范围内，不得包含中文）」＋
+「在这个玩法下，**微信桥要做的就是，新建认知轨迹，定义为 skiff，然后绑定到微信的某个 account 即可**」。
+
+### 一、一条判据取代四条
+
+| 项 | 旧模型 | 新模型 |
+|---|---|---|
+| skiff 是什么 | `serenity.json` 的 `skiff.roles.<name>` 一条配置 | **轨迹目录里有 `skiff.json`** |
+| 怎么认出 skiff 会话 | dsh sessionId 前缀 `skiff-` | **它绑定的轨迹有 `skiff.json`** |
+| 工作台从哪来 | `ensureSkiffSession` **另建**一个 SESSION | **就是该轨迹自己的 SESSION.md** |
+| 身份 | 角色名 | **轨迹编码**（目录名固定位置，创建时可指定） |
+
+⇒ **净减**：删掉 `skiff.roles` 配置段 ／ `SKIFF_SESSION_PREFIX` 判定 ／ `ensureSkiffSession` ／
+`.weixin-session-gen.json` 换代计数器 ／ 用户哈希派生的会话 id ／ `TRAJECTORY-UID` 写入路径 ／
+`kind: temporary|persistent` ／ `setTrajectoryUid`。
+增：`skiff.json` 读取层（`role/skiff/profile.ts`，一个文件）＋ `create --id`（一个参数）＋
+`parseTrajectoryCode`（一个纯函数）。
+
+### 二、要改的东西（**破坏性**，CCC 侧需同批迁移）
+
+| # | 变更 | 迁移动作 |
+|---|---|---|
+| ① | `serenity.json` 的 **`skiff` 段退役**（静默忽略，不报错） | 把 `skiff.roles.<name>` 的内容原样搬进对应轨迹目录的 `skiff.json`（`kind` 丢弃） |
+| ② | **微信路由目标从「角色名」改为「轨迹编码」**：`{user, trajectory}` | 把 `routes[].role` 改名为 `trajectory`（⚠️ 旧 `role` **仍被读取作过渡别名**，但落盘统一写 `trajectory`） |
+| ③ | 微信会话 id 由**用户哈希**改为**轨迹编码**派生：`skiff-weixin-<code>` | 无（自动；首条消息会开一条新 dsh 会话——旧会话仍在 WebUI 可查） |
+| ④ | **`TRAJECTORY-UID` 写入退役**（读取保留） | 改用 `cognitive_trajectory create --id <code>` 起带稳定编码的轨迹 |
+
+### 三、两处**有意的语义翻转**（不是"顺手改默认值"）
+
+| 翻转 | 旧 | 新 | 理由 |
+|---|---|---|---|
+| `cognitiveTrajectory.*` 缺省 | 全 **false**（"skiff 完全独立"） | 全 **true** | 旧模型 false 是因为**工作台是外挂的**；新模型里工作台**就是它自己的身体** ⇒ false 会让它拿不到自己的身体 |
+| 工具面"读不到约束"时 | **不动**（fail-open，隐藏残留） | **主动撤销**既有隐藏 | 新模型下"删掉 `skiff.json`"是**合法操作且必须立刻生效**；只 `return` 会把隐藏永久留在一条已变回普通轨迹的会话上 |
+
+### 四、判据
+
+| # | 判据 | 结果 |
+|---|---|---|
+| ① | `tests/trajectory-code.test.ts`（17 例）：编码固定位置解析 ／ `create --id` ／ **重复编码响亮拒绝** ／ 中文与 `--` 被拒 ／ 自定义编码不参与 `S###` 编号 ／ 编码与遗留 UID 同名时编码胜出 | ✅ |
+| ② | `tests/skiff-profile.test.ts`（22 例）：**J1 文件存在性**（含"删掉即恢复"正反控）／ 缺省值 ／ 坏 JSON ／ 顶层非对象 ／ `systemPromptFile` 越界只丢该项 ／ 编码精确匹配 ／ 全量枚举跳过 `_` 前缀 ／ **J2 两来源**（窗口期 ／ 已删轨迹 ／ 解绑 ／ 登记了但没 `skiff.json`） | ✅ |
+| ③ | **两条反向控制**（没有它们判据不承重）：`skiff-` 前缀但轨迹无 `skiff.json` ⇒ **仍注入 ACC 身份**；`bootstrap` 同理 ⇒ **不得晋升** | ✅ |
+| ④ | `syncSkiffRoleToolVisibility` 新增「删掉 `skiff.json` ⇒ 旧 restrict 被 dispose ＋ 不再发新的 ＋ 加回文件后重新生效」 | ✅ |
+| ⑤ | **全量**：177 文件 / 2885 例 ✓ ｜ coverage 95.66% ｜ typecheck ／ typecheck-host 0.2.1-rc.2 双半 ／ build（110 `.d.ts`）／ pack-check（137 文件） | ✅ |
+
+### 五、测试面迁移的一类教训（值得留档）
+
+183 个用例在改造中集体变红，**表面症状各不相同，根因只有一条**：配置载体从 `serenity.json`
+搬到了轨迹目录。⇒ 新增 `tests/helpers/skiff-fixture.ts` 作为造数据的**单一入口**，
+各测试只描述意图（哪个会话、什么约束）。迁移中抓到三类**假绿**：
+
+- **passing vacuously**：一条"skiff 恒晋升"的断言比对的是**完整工具目录**，而普通未晋升会话给出同样输出
+  ⇒ 该用例**从来没进过 skiff 分支**；
+- **空 `skiff.json` ≠ 普通轨迹**（判据是**文件存在**，与内容无关）；
+- **`fakeAgent().disposed` 是 getter** ⇒ 解构即冻结在 `0`。
+
 ## v1.70.0 — 2026-10-19（🔴🔴 **first-anchor 退役 → `fake-initial-turns`：真跑两轮 ＋ 模型侧短路**）
 
 **性质**：**机制改写 ＋ 正名**。**来源**：owner 两条令——① 「新方案就退回最早版本的 first anchor 了，

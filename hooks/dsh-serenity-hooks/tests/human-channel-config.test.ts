@@ -242,7 +242,11 @@ describe('human-channel: 旧 CCC 侧读取面的时点钉（P0-1 不退役它）
     expect(w.accounts).toHaveLength(1)
     expect(w.accounts?.[0]?.accountId).toBe('wechat-1')
     expect(w.accounts?.[0]?.enabled).toBe(true)
-    expect(w.routes).toEqual([{ user: 'user-b', role: 'my-role' }])
+    // 🔴 2026-10-19：路由行的**规范字段名是 `trajectory`**（值 = 认知轨迹编码）。
+    //    旧字段 `role` 仍被 `readWeixinSettings` 读作**过渡别名**（存量 CCC 配置不必同批改），
+    //    但读侧**归一化**后一律输出 `{user, trajectory}` ⇒ 本断言钉的是**归一后的形态**，
+    //    而不是磁盘上的键名（否则"配置里两种写法都合法"这条会被误钉成"只认 role"）。
+    expect(w.routes).toEqual([{ user: 'user-b', trajectory: 'my-role' }])
 
     // 对照：同一时刻，**机器级**投影对这份 CCC 文件一无所知（它只吃插件 Config）
     expect(simpleSettingsFromConfig({}).humanChannel).toEqual(defaultHumanChannelSettings())

@@ -202,10 +202,18 @@ describe('cognitive-trajectory-bound: resolveSessionCognitiveTrajectoryLabel（c
     expect(resolveSessionCognitiveTrajectoryLabel({}, '')).toBe('')
   })
 
-  it('⑤ 编码无关（U4）：目录名无 --S###-- → 原样返回目录名', () => {
+  it('⑤ 自定义编码同样给出稳定标签（2026-10-19：编码即身份，不再只认 S###）', () => {
     const caller = makeSession('sess-caller')
     appendBound(caller, 'activate', { dirName: '2026-09-04--apaas-26116', mdPath: '/r/C/SESSION.md' })
-    expect(resolveSessionCognitiveTrajectoryLabel(caller, 'sess-caller')).toBe('2026-09-04--apaas-26116')
+    // 🔴 旧实现只匹配 `--S\d{3,}--` ⇒ 自定义编码会退回**整条目录名**（把日期也带进标签，
+    //    它在绑定/唤醒记录里既长又会随日期漂）。现在取固定位置编码 ⇒ 与 S### 同一语义。
+    expect(resolveSessionCognitiveTrajectoryLabel(caller, 'sess-caller')).toBe('apaas-26116')
+  })
+
+  it('⑤b 非本工具建的目录名（无日期前缀）→ 仍原样返回（不猜编码）', () => {
+    const caller = makeSession('sess-caller')
+    appendBound(caller, 'activate', { dirName: 'legacy-dir-without-date', mdPath: '/r/C/SESSION.md' })
+    expect(resolveSessionCognitiveTrajectoryLabel(caller, 'sess-caller')).toBe('legacy-dir-without-date')
   })
 })
 

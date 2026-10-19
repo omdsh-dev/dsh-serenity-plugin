@@ -25,7 +25,7 @@ import { registerEntrySkillSection, registerCognitiveTrajectorySkillSection } fr
 import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding, syncSkiffRoleToolVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory/core.js'
 import { readLastBound, appendBound } from '../trajectory/bound.js'
-import { isSkiffSessionId } from '../role/skiff/config.js'
+import { isSkiffSession } from '../role/skiff/profile.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
 // ── 纯文本构建（可单测）──
@@ -112,24 +112,27 @@ function agentScope(agent: Agent): string {
  * - cheap-worker 杂工：sessionId 固定 `cheap-worker-` 前缀（tools/cheap-worker.ts 生成）
  * 三者都不恢复（避免把主会话激活注入子上下文，违背 v1.16.2 scope 隔离）。
  */
-export function shouldAutoRestore(agent: Agent): boolean {
-  const session = agent.session as { id?: string; header?: { origin?: string; parentSession?: string } } | undefined
+export function shouldAutoRestore(agent: Agent, root?: string | null): boolean {
+  const session = agent.session as { id?: string; header?: { origin?: string; parentSession?: string; cwd?: string } } | undefined
   if (!session) return false
   if (session.header?.origin === 'subagent') return false
   if (session.header?.parentSession) return false
   if (session.id?.startsWith('cheap-worker-')) return false
-  // F4 Skiff：完全独立会话（角色 CCC 提示词全替换），不自动恢复宁静号会话激活信息
-  if (isSkiffSessionId(session.id)) return false
+  // skiff 会话：完全独立（CCC 提示词全替换），不自动恢复宁静号会话激活信息。
+  // 🔴 2026-10-19：判据从「id 前缀 `skiff-`」改为「绑定轨迹有 `skiff.json`」。
+  //    ⇒ 需要 CCC 根；调用方通常已算出（seed/pre-step），没给就按会话 cwd 自己推导。
+  const cccRoot = root !== undefined ? root : cccRootForCwd(session.header?.cwd ?? process.cwd())
+  if (cccRoot && isSkiffSession(cccRoot, session.id)) return false
   return true
 }
 
 /**
  * 恢复触发判定（S134 泄漏修复 v1.16.13）：根会话 **且已有对话历史**（续跑/恢复的会话）
- * 才自动恢复上次激活的宁静号会话——全新会话（新任务，如 apaas-26116）无历史 → 不恢复，
+ * 才自动恢复上次激活的宁静号会话——全新会话（新任务）无历史 → 不恢复，
  * 避免把过去的 SESSION 上下文注入新任务（跨任务污染）。
  */
-export function shouldRestoreActive(agent: Agent): boolean {
-  if (!shouldAutoRestore(agent)) return false
+export function shouldRestoreActive(agent: Agent, root?: string | null): boolean {
+  if (!shouldAutoRestore(agent, root)) return false
   const events = sessionEvents(agent.session)
   return events.length > 0
 }
@@ -161,8 +164,9 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     }
     if (!root) return
     const key = agentKey(agent)
-    // F4 Skiff：会话 id `skiff-` 前缀 → 完全旁路（不注入 ACC 身份；角色 CCC 提示词全替换）
-    if (isSkiffSessionId(key)) return
+    // skiff：完全旁路（不注入 ACC 身份；CCC 提示词全替换）
+    // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 id 前缀）
+    if (isSkiffSession(root, key)) return
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
@@ -276,8 +280,9 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
           /* 可见性同步失败不阻断 step（守卫仍兜底拦截） */
         }
       }
-      // F4 Skiff：完全旁路（不注入 ACC 身份 + 不注册 scoped section；guard 白名单仍兜底约束）
-      if (isSkiffSessionId(key)) return downstream
+      // skiff：完全旁路（不注入 ACC 身份 + 不注册 scoped section；守卫仍兜底约束）
+      // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 id 前缀）
+      if (root && isSkiffSession(root, key)) return downstream
       // 🔴 v1.56.6：非 CCC 会话 ⇒ 隐藏全部 ACC 工具（**必须在 `if (root)` 之外**——
       //    那道分支只在 CCC 内执行，把本句放进去等于非 CCC 一条 restrict 都不发＝缺陷原样）。
       //    与 `syncSafeModeRestriction` 同点调用、同样每步无条件同步（会话可能在两态间迁移）。

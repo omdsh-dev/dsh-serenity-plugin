@@ -39,8 +39,9 @@ vi.mock('../src/tools/msm/service.js', async (importOriginal) => {
 import { msmTool } from '../src/tools/msm/index.js'
 import { runMsmAsync } from '../src/tools/msm/service.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
-import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/core.js'
-import { SKIFF_SESSION_PREFIX } from '../src/role/skiff/config.js'
+import { unregisterSkiffSession } from '../src/role/skiff/core.js'
+import { resetSkiffSessions } from '../src/role/skiff/registry.js'
+import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
 
 const mockRunMsmAsync = vi.mocked(runMsmAsync)
 
@@ -80,10 +81,9 @@ function writeRegistry(entries: unknown[]): void {
   writeFileSync(join(p, 'mech-registry.json'), JSON.stringify({ version: 1, entries }, null, 2))
 }
 
-/** 写 CCC 配置（skiff 角色面） */
-function writeConfig(cfg: unknown): void {
-  mkdirSync(join(dir, '.opencode'), { recursive: true })
-  writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify(cfg))
+/** 改写某条轨迹的 `skiff.json`（约束面每轮实时读 ⇒ 热生效，无需重新登记会话） */
+function setProfile(dirName: string, json: Record<string, unknown>): void {
+  writeFileSync(join(dir, 'AGENT_SESSIONS', dirName, 'skiff.json'), JSON.stringify(json), 'utf-8')
 }
 
 const THREE = [
@@ -232,19 +232,22 @@ describe('msm：未精确命中 ⇒ 模糊候选（suggestMsm）', () => {
 })
 
 describe('msm：Skiff 门控（真 skiffMsmGate）', () => {
-  const qaId = `${SKIFF_SESSION_PREFIX}qa-msm-1`
+  // 🔴 2026-10-19 重做：skiff 身份 = 绑定的轨迹有没有 `skiff.json`（**不再是** sessionId 前缀，
+  //    也不是 `serenity.json` 的角色表）⇒ 夹具走 makeSkiffSession（造轨迹 + 登记会话）。
+  const qaId = 'sess-msm-gate-1'
+  let qaDir: string
 
   beforeEach(() => {
     writeRegistry(THREE)
-    writeConfig({ skiff: { roles: { qa: { msms: ['alpha'], tools: [] } } } })
-    registerSkiffSession(qaId, 'qa', dir, { session: { id: qaId, events: [] } } as never)
+    qaDir = makeSkiffSession(dir, qaId, 'qa-msm', skiffJson({ msms: ['alpha'], tools: [] }))
   })
 
   afterEach(() => {
     unregisterSkiffSession(qaId)
+    resetSkiffSessions()
   })
 
-  it('无 name ⇒ 只列本角色白名单（不列全仓目录）', async () => {
+  it('无 name ⇒ 只列本轨迹白名单（不列全仓目录）', async () => {
     const text = (await exec({}, dir, qaId)) as string
     expect(text).toBe('MSMs allowed in this role:\nalpha')
     expect(text).not.toContain('MSMs registered (by skill)')
@@ -273,16 +276,20 @@ describe('msm：Skiff 门控（真 skiffMsmGate）', () => {
   //   两处的 `gate.whitelist` **恒为 undefined**；exec 路的拒绝已由门控自己完成（`{reject}`）。
   //   ⇒ 下面这条用例钉的是**可观测契约**：白名单内、但未注册的名字 ⇒ 走**无前缀**的候选分支。
   it('白名单内但未注册 ⇒ 走无前缀候选分支（证明「加已过滤前缀」那条分支永不执行）', async () => {
-    writeConfig({ skiff: { roles: { qa: { msms: ['ghost-msm'], tools: [] } } } })
+    setProfile(qaDir, skiffJson({ msms: ['ghost-msm'], tools: [] }))
     const text = (await exec({ name: 'ghost-msm' }, dir, qaId)) as string
     expect(text).toContain('No MSM matches "ghost-msm". Registered:')
     expect(text).not.toContain('(whitelisted role — candidates filtered)')
     expect(mockRunMsmAsync).not.toHaveBeenCalled()
   })
 
-  it('skiff 会话未注册（进程重启遗留）⇒ 拒绝', async () => {
-    await expect(exec({ name: 'alpha' }, dir, `${SKIFF_SESSION_PREFIX}ghost-9`)).rejects.toThrow(
-      'MSM not allowed in this skiff session',
-    )
+  // 🔴 旧断言是「sessionId 带 `skiff-` 前缀但未登记 ⇒ 拒绝」。那个前提整块退役了：
+  //    旧实现靠**前缀**猜身份（于是"前缀命中却没登记"只能保守拒绝）；新判据是"绑定的轨迹有没有
+  //    `skiff.json`"⇒ 查不到就是**普通轨迹**，门控恒放行（与 skiff-core 纪律子集同一 fail-open 口径）。
+  //    ⇒ 断言翻成新等价物：**同一个 `skiff-` 前缀 id 现在反而放行**——前缀不再承载身份。
+  it('未绑定任何 skiff 轨迹的会话（含旧 `skiff-` 前缀 id）⇒ 不是 skiff ⇒ 放行', async () => {
+    const ghost = 'skiff-ghost-9'
+    await exec({ name: 'gamma' }, dir, ghost)
+    expect(mockRunMsmAsync.mock.calls[0]?.[1]).toEqual({ action: 'exec', name: 'gamma', args: [] })
   })
 })

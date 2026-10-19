@@ -9,6 +9,8 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 
 import { registerCompactRetention } from '../src/seams/compact.js'
 import { ACC_VERSION } from '../src/kernel/constants.js'
+import { resetSkiffSessions } from '../src/role/skiff/registry.js'
+import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string
 
@@ -18,6 +20,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetSkiffSessions() // 进程级注册表（会话 → 轨迹），用例间必须复位
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -85,9 +88,17 @@ describe('compact: 压缩保留（P2）', () => {
     expect(injected.length).toBe(2)
   })
 
-  it('Skiff 会话（id `skiff-` 前缀）→ 不重注入 ACC 身份（F4b 旁路：角色 CCC 提示词全替换）', () => {
+  it('Skiff 会话（绑定轨迹**有 `skiff.json`**）→ 不重注入 ACC 身份（F4b 旁路：CCC 提示词全替换）', () => {
+    // 🔴 2026-10-19：判据不再是 id 前缀 `skiff-`，而是「会话绑定的轨迹有 `skiff.json`」
+    //    （`seams/compact.ts` 的 `isSkiffSession(root, id)`；该判据需要 CCC 根，故 seam 里
+    //    它被挪到了 `if (!root) return` **之后**）⇒ 夹具必须真造一条 skiff 轨迹并登记会话。
     const { emit, injected } = captureListener()
-    emit({ id: 'skiff-qa-readonly-uuid' }, { type: 'compaction/end', data: { compactionId: 'c6', turn: 1 } })
+    makeSkiffSession(dir, 'sess-skiff-compact', 'qa', skiffJson({ tools: [] }))
+    emit({ id: 'sess-skiff-compact' }, { type: 'compaction/end', data: { compactionId: 'c6', turn: 1 } })
     expect(injected.length).toBe(0)
+    // 反控：id 带 `skiff-` 前缀但**没挂轨迹** ⇒ 按普通会话处理（会重注入）
+    // （这格把判据钉在轨迹上；否则"凡 skiff-* 都旁路"的旧实现照样绿）
+    emit({ id: 'skiff-legacy-looking-id' }, { type: 'compaction/end', data: { compactionId: 'c7', turn: 1 } })
+    expect(injected.length).toBe(1)
   })
 })

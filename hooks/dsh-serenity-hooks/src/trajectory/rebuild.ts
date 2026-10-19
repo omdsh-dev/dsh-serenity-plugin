@@ -55,6 +55,7 @@ import {
   parseSessionContextFromEvents,
   extractSessionMdPathFromText,
   namingTitleFor,
+  parseTrajectoryCode,
   sessionEvents,
 } from './core.js'
 import { DEFAULT_FAKE_INITIAL_MESSAGES } from '../seams/bootstrap.js'
@@ -172,11 +173,10 @@ function parseAnchorMdPath(session: Session): string | null {
   }
 }
 
-/** 从 SESSION.md 绝对路径派生会话名（S###；issue 目录回退完整目录名） */
+/** 从 SESSION.md 绝对路径派生会话名（编码；issue 目录回退完整目录名） */
 function sessionNameFromMdPath(mdPath: string): string {
   const dirName = basename(dirname(mdPath))
-  const idMatch = dirName.match(/--S(\d{3,})--/)
-  return idMatch ? `S${idMatch[1]}` : dirName
+  return parseTrajectoryCode(dirName) ?? dirName
 }
 
 /**
@@ -430,8 +430,7 @@ function renameAfterRebuild(ctx: Context, agent: Agent, pending: PendingRebuild)
   try {
     const mdPath = pending.mdPath
     const dirName = basename(dirname(mdPath))
-    const idMatch = dirName.match(/--S(\d{3,})--/)
-    const sessionId = idMatch ? `S${idMatch[1]}` : dirName.replace(/^\d{4}-\d{2}-\d{2}--/, '')
+    const sessionId = parseTrajectoryCode(dirName) ?? dirName.replace(/^\d{4}-\d{2}-\d{2}--/, '')
     const info = { sessionId, dirName, mdPath }
     const title = namingTitleFor(info, pending.summary)
     const titles = hostService<{ rename?: (session: unknown, title: string) => unknown }>(ctx, 'sessionTitle')

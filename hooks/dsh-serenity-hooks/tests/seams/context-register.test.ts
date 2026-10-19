@@ -33,6 +33,9 @@ import { registerContext } from '../../src/seams/context.js'
 import { getActiveSessionInfo } from '../../src/trajectory/core.js'
 import { REGISTERED_TOOLS } from '../../src/kernel/invariant.js'
 import { forgetNonCccToolVisibility } from '../../src/seams/guards.js'
+// 🔴 2026-10-19 skiff 重做：判据 = 绑定轨迹里有 `skiff.json`（不再是 sessionId 前缀）
+//    ⇒ "这个会话是 skiff" 必须**真造一条轨迹**，统一走夹具（tests/helpers/skiff-fixture.ts）。
+import { makeSkiffSession, skiffJson } from '../helpers/skiff-fixture.js'
 
 type Handler = (...args: unknown[]) => unknown
 
@@ -175,7 +178,10 @@ describe('registerContext: agent/created 播种', () => {
     expect(injected).toHaveLength(0)
   })
 
-  it('skiff 会话 ⇒ 完全旁路（不注入 ACC 身份，角色提示词全替换）', async () => {
+  it('skiff 会话 ⇒ 完全旁路（不注入 ACC 身份，轨迹提示词全替换）', async () => {
+    // 🔴 2026-10-19：判据从「sessionId 前缀 `skiff-`」改为「绑定轨迹有 `skiff.json`」
+    //    ⇒ "这个会话是 skiff" 的**完整前置** = 造轨迹目录 + 登记绑定（夹具一件事做完）。
+    makeSkiffSession(dir, 'skiff-qa-seam-1', 'qa-seam', skiffJson({}), 'seam')
     const { agent, injected } = fakeAgent('skiff-qa-seam-1', { header: { cwd: dir } })
     const ctx = fakeCtx()
     registerContext(ctx as never, { injectOnPrompt: false })
@@ -183,6 +189,19 @@ describe('registerContext: agent/created 播种', () => {
     await fireCreated(ctx, agent)
 
     expect(injected).toHaveLength(0)
+  })
+
+  it('🔴 判别性对照：id 带 `skiff-` 前缀但**没有真实 skiff 轨迹** ⇒ 不再当 skiff，照常注入', async () => {
+    // 这条是"前缀判据已移除"的机械证据：同一条缝、同一个前缀，只差有没有 skiff.json。
+    // （若哪天有人把前缀判据加回来，本例会红 —— 它挡住的是**静默放宽**，不是噪声。）
+    const { agent, injected } = fakeAgent('skiff-qa-seam-prefix-only', { header: { cwd: dir } })
+    const ctx = fakeCtx()
+    registerContext(ctx as never, { injectOnPrompt: false })
+
+    await fireCreated(ctx, agent)
+
+    expect(injected).toHaveLength(1)
+    expect(msgText(injected[0])).toContain('[ACC] Serenity cognitive container active')
   })
 })
 
@@ -379,6 +398,8 @@ describe('registerContext: agent/pre-step（"context-only 必须 next() 委托"�
   })
 
   it('skiff 会话 ⇒ 不注入、原样返回 downstream（F4 完全旁路）', async () => {
+    // 🔴 2026-10-19：同上一组——skiff 判据 = 绑定轨迹有 `skiff.json`，前缀本身无意义。
+    makeSkiffSession(dir, 'skiff-qa-pre-1', 'qa-pre', skiffJson({}), 'pre')
     const { agent } = fakeAgent('skiff-qa-pre-1', { header: { cwd: dir } })
     const ctx = fakeCtx()
     registerContext(ctx as never, { seedOnStart: false })

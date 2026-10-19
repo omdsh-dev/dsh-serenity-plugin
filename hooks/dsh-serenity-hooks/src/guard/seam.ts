@@ -22,19 +22,27 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
-import { isSkiffSessionId } from '../role/skiff/config.js'
+import { isSkiffSession } from '../role/skiff/profile.js'
 import { stripThink } from '../role/skiff/debug.js'
 import { buildSensitiveTable, detectSensitive, buildRebuke, rebukeStates, REBUKE_MAX_ROUNDS } from './filter.js'
 import { sessionEvents } from '../trajectory/core.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
-/** 外部面会话判定（v1.26.3 用户拍板：仅外部面检测，本地维护会话豁免）：
- *  skiff-（F4 问答）/ rebuild-（v1.22.4 重建会话）前缀。
- *  🔴 `acp-` 分支保留但**已是死判据**（无生产者；面 E 已于 2026-10-15 退役）——
- *  理由与"为何不擅自删"见文件头注释。 */
-function isExternalFaceSession(sessionId: string | undefined): boolean {
+/**
+ * 外部面会话判定（v1.26.3 用户拍板：仅外部面检测，本地维护会话豁免）。
+ *
+ * 🔴 **2026-10-19 判据更换**：skiff 那一条从「sessionId 前缀 `skiff-`」改为
+ * **「该会话绑定的轨迹有 `skiff.json`」**（owner 重做令）。前缀判据在新模型下是
+ * **错的**——skiff 的身份是轨迹，不再由 id 前缀表达；继续用前缀会漏掉所有
+ * "挂在 skiff 轨迹上、但 id 不带前缀"的会话（典型 = 微信桥按轨迹派生的会话 id）。
+ *
+ * ⚠️ `rebuild-` 前缀保留（那是另一件事：重建会话同属对外面，与 skiff 无关）；
+ * `acp-` 分支保留但**已是死判据**（无生产者；面 E 已于 2026-10-15 退役）——
+ * 理由与"为何不擅自删"见文件头注释。
+ */
+function isExternalFaceSession(sessionId: string | undefined, root: string): boolean {
   if (!sessionId) return false
-  return isSkiffSessionId(sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
+  return isSkiffSession(root, sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
 }
 
 /** 读会话最后一个 assistant/message 文本（skiff-core 同款）
@@ -70,11 +78,12 @@ export function registerOutputGuardHook(ctx: Context): void {
     // 作用范围（v1.26.3 用户拍板）：仅外部面（skiff/acp/rebuild 前缀）——
     // 本地维护会话（普通 dsh 会话）豁免：维护会话必然提及机制词，打回会瘫痪自身工作
     const sessionId = String((agent.session as { id?: unknown }).id ?? '')
-    if (!isExternalFaceSession(sessionId)) return
     // 激活门控：只在 .serenity 存在的 CCC 目录检测（非 CCC 目录零干预）
     const cwd = (agent.session as { header?: { cwd?: string } }).header?.cwd ?? process.cwd()
     const root = cccRootForCwd(cwd)
     if (!root) return
+    // 作用范围：仅外部面 —— 本地维护会话豁免（维护会话必然提及机制词，打回会瘫痪自身工作）
+    if (!isExternalFaceSession(sessionId, root)) return
 
     const id = agent.id
     const text = lastAssistantText(agent)

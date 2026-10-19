@@ -60,6 +60,7 @@ import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSet
 import { writeWeixinCredential } from '../src/im/route.js'
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
+import { makeTrajectory } from './helpers/skiff-fixture.js'
 
 /** 造一行订阅（缺省齐四字段；显式传 `undefined` 即"缺该字段"） */
 function sub(account?: string, user?: string, ccc?: string, role?: string) {
@@ -274,11 +275,16 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   }
 
-  /** CCC 配置：skiff 有 `qa` 角色；`weixin` 段按需给 routes */
+  /**
+   * CCC 配置。
+   *
+   * 🔴 2026-10-19：`skiff: { roles: {...} }` **整段退役**（写进去也读不到）⇒ 删除。
+   *    目标从「skiff 角色名」改为「**认知轨迹编码**」，skiff 约束面改由**轨迹目录下的
+   *    `skiff.json`** 承载（见 `beforeEach` 里的 `makeTrajectory`）。
+   */
   function writeConfig(weixin: unknown): void {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
       weixin,
     }))
   }
@@ -336,6 +342,10 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     process.env.SERENITY_HUMAN_CHANNEL_AUDIT = join(dir, 'audit.jsonl')
     writeFileSync(join(dir, '.serenity'), 'test')
     mkdirSync(join(dir, '.opencode'), { recursive: true })
+    // 🔴 2026-10-19：路由目标 = **认知轨迹编码**。桥在投递前会 `findDirNameByCode(root, code)`
+    //    —— CCC 里没有这条轨迹就是"目标不存在"（响亮报错 ＋ 留痕，不投递）。
+    //    ⇒ 正控用例必须先**造出这条轨迹**，否则它们会退化成"目标不存在"档而假绿/假红。
+    makeTrajectory(dir, 'qa', { tools: [], msms: [], systemPrompt: 'qa' })
     machineSubscriptions = []
     // 机器级读取面注入：`humanChannel.subscriptions` 来自本用例的 `machineSubscriptions`
     __setSimpleSourceForTest((): SerenitySimpleSettings => ({
@@ -361,7 +371,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
 
   const MSG = { from_user_id: 'u1@im.wechat', item_list: [{ type: 1, text_item: { text: '你好' } }] }
 
-  it('🔴🔴 正控：订阅表**加进一行** ⇒ 真的投到该 (CCC, 角色)（证明路由不是写死"永不投递"）', async () => {
+  it('🔴🔴 正控：订阅表**加进一行** ⇒ 真的投到该 (CCC, 轨迹)（证明路由不是写死"永不投递"）', async () => {
     writeConfig({ enabled: true, accounts: [{ accountId: 'wechat-1' }] }) // ← 无 CCC 级 routes
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     machineSubscriptions = [sub('wechat-1', 'u1@im.wechat', basename(dir), 'qa')] // ← 按**别名**寻址
@@ -416,7 +426,7 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
     err.mockRestore()
   })
 
-  it('🔴 目标**角色**不存在 ⇒ **响亮报错** ＋ 留痕（CCC 解析得到，角色没有）', async () => {
+  it('🔴 目标**轨迹**不存在 ⇒ **响亮报错** ＋ 留痕（CCC 解析得到，那条轨迹没有）', async () => {
     writeConfig({ enabled: true, accounts: [{ accountId: 'wechat-1' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     machineSubscriptions = [sub('wechat-1', 'u1@im.wechat', basename(dir), 'no-such-role')]

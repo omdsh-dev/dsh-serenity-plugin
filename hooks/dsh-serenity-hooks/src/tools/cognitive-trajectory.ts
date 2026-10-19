@@ -59,7 +59,7 @@ import {
   useSession,
   findSession,
   archiveSession,
-  setTrajectoryUid,
+  parseTrajectoryCode,
   readTrajectoryUid,
   UID_FILENAME,
   COGNITIVE_TRAJECTORY_ACTIONS,
@@ -235,6 +235,8 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     'cognitive_trajectory — one cognitive trajectory: its persistent body (SESSION.md) + its timeline.',
     'A cognitive trajectory is NOT the conversation: SESSION.md is the durable body and never moves;',
     'the dsh conversation is only its rebuildable carrier (Ship of Theseus — the carrier is replaced, the cognitive trajectory continues).',
+    'IDENTITY: every trajectory has a CODE — the fixed-position segment of its directory name (YYYY-MM-DD--<code>[--<desc>]).',
+    'The code IS the trajectory\'s unique identifier, and you can choose it at creation time with create --id.',
     'A COGNITIVE TRAJECTORY HAS NO LIFECYCLE — it does not complete, close, or expire, and age never counts against it;',
     'it PERMANENTLY EXISTS. The only thing that ever changes is WHERE it is stored: archive moves it out of the active list',
     'without touching a single byte of its directory or SESSION.md. There is no reverse action — to restore one, use container_fs mv.',
@@ -265,12 +267,13 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     'because sending to a never-used cognitive trajectory is a legitimate intent; send-later does NOT,',
     'because scheduling for a cognitive trajectory that has never existed is almost always a mistyped name — auto-creating would hide that error behind an empty cognitive trajectory.',
     // ── Tier 5 · 表面：逐参数前置条件 ──
-    'PARAMETERS: create requires --desc <desc> [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars).',
+    'PARAMETERS: create requires --desc <desc> [--id <code>] [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars).',
     'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound cognitive trajectory.',
     'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self).',
-    'send-later requires target (S### or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message.',
+    'send-later requires target (a code or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message.',
     'send-now requires target + message.',
-    'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the S### id and date stay server-derived.',
+    'uid: READS a legacy TRAJECTORY-UID only — setting one is retired (codes replaced it). Use create --id instead.',
+    'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the code and date stay server-derived unless you pass --id.',
   ].join(' '),
   parameters: {
     action: {
@@ -280,8 +283,8 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
       description: [
         'Subcommand — grouped by effect.',
         'LIFECYCLE (changes THIS conversation\'s binding):',
-        'list (inventory + stats + anomaly marks) / show (S### or dir name or fuzzy keyword) /',
-        'create (new cognitive trajectory; activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
+        'list (inventory + stats + anomaly marks) / show (a code, dir name, or fuzzy keyword) /',
+        'create (new cognitive trajectory; --id sets its code. Activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
         'use (activate context for THIS conversation; inline integrity check — pass silent, problems reported as hints, not errors) /',
         'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note) /',
         'archive (move a trajectory to the archived area; one-way, refuses to overwrite, content untouched — --dryRun previews).',
@@ -291,9 +294,11 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot)',
       ].join(' '),
     },
-    name: { type: 'string', description: 'show/use/archive/uid identifier — S### / dir name / UID / fuzzy keyword' },    uid: { type: 'string', description: `uid: the trajectory's unique identifier (a separate, optional handle independent of its code and name — file ${UID_FILENAME} inside the trajectory dir). Omit to READ it; pass a value to SET it; pass "" to CLEAR it (falls back to the code). Allowed [A-Za-z0-9._-], ≤64, case-sensitive, must be unique across trajectories.` },
+    name: { type: 'string', description: 'show/use/archive/uid identifier — a trajectory code (S### or a custom code) / dir name / legacy UID / fuzzy keyword' },
+    uid: { type: 'string', description: `uid: READ-ONLY legacy field. Omit to read a trajectory's legacy ${UID_FILENAME}. Passing any value is REJECTED — setting a UID is retired (2026-10-19); a trajectory's code is its unique identity now, and you choose it at creation with create --id <code>.` },
     note: { type: 'string', description: 'rebuild: task focus ≤200 chars for the rebuilt self — what to work on next (short, no history; SESSION.md holds the full history). Injected as "- Task focus: …" into the rebuild anchor.' },
     desc: { type: 'string', description: 'create: short description (any language, ≤5 words; mutually exclusive with issue)' },
+    id: { type: 'string', description: 'create: the trajectory CODE to assign (its stable unique identity — this is what you later pass as name/target). Omit to auto-assign S###. Allowed [A-Za-z0-9._-], starts alphanumeric, ≤64, must NOT contain Chinese or "--" (that is the dir-name separator); must not collide with an active trajectory code.' },
     issue: { type: 'string', description: 'create: ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
     goal: { type: 'string', description: 'create: one-sentence goal (optional)' },
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
@@ -333,6 +338,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
           root,
           desc: args.desc,
           issue: args.issue,
+          id: args.id,
           goal: args.goal,
           dryRun: isDryRun,
         })
@@ -483,35 +489,38 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         }
       }
       case 'uid': {
-        // 🔴 2026-10-18（owner 需求）：唯一标识符 —— **独立于编码与命名**，可选。
-        // 语义：设定后 `S###` 能用的地方 `findSession` 都能用 UID 指认（同一入口，不分叉）。
-        // 清除（name 给了但 uid 为空/未给 + `--clear` 语义）：这里用 uid=null 表达"回到用编码"。
-        if (!args.name) throw new Error('uid requires name (S### / dir name / existing UID)')
-        // `uid` 参数三态：给值 = 设定；显式空串 = 清除；未给 = 读取
-        if (args.uid === undefined) {
-          const entry = findSession(join(root, 'AGENT_SESSIONS'), args.name)
-          if (!entry) throw new Error(`Trajectory not found: "${args.name}"`)
-          const cur = readTrajectoryUid(entry.path)
-          return {
-            ok: true,
-            dirName: entry.dirName,
-            uid: cur,
-            note: cur === null
-              ? `未设定 UID ⇒ 用编码指认（${entry.dirName.match(/--(S\d{3,})--/)?.[1] ?? '无编码'}）。`
-              : `当前 UID = ${cur}（文件 ${UID_FILENAME}）`,
-          }
+        // 🔴 2026-10-19（owner 追加令裁 B 案）：**UID 写入已退役，读取保留**。
+        //
+        // 为什么退役（R↓）：UID 当初存在的唯一理由是「命名很可能由于变化而变化」——
+        // 而现在的**编码本身就稳定且可指定**（`create --id <code>`）⇒ 二元性取消
+        // （owner：「取消 `S###` 与 UID 的二元性 —— 编码就是唯一标识，用户可指定」）。
+        //
+        // 为什么**读取**仍留着：存量文件里已有设定（本仓 = S142 的 `serenity-acc-maintainer`），
+        // 删掉读取侧就等于把一个仍在用的指认通道作废（能力倒退，且没有任何收益）。
+        // ⇒ 本动作用来**查看**现状并指引新路径；**任何写入尝试都响亮报错**。
+        if (!args.name) throw new Error('uid requires name (code / S### / dir name / existing UID)')
+        const entry = findSession(join(root, 'AGENT_SESSIONS'), args.name)
+        if (!entry) throw new Error(`Trajectory not found: "${args.name}"`)
+        const cur = readTrajectoryUid(entry.path)
+        if (args.uid !== undefined) {
+          throw new Error(
+            'Setting a trajectory UID has been retired (2026-10-19). ' +
+            'A trajectory\'s code IS its unique identity now, and you can choose it at creation time: ' +
+            'cognitive_trajectory create --id <code> --desc <desc> --summary <summary>. ' +
+            'Existing TRAJECTORY-UID files are still READ (so old handles keep resolving) — they are just never written.',
+          )
         }
-        // `''` / `null` ⇒ 删除声明文件，回到"用编码"
-        const next = args.uid === '' ? null : String(args.uid)
-        const r = setTrajectoryUid(join(root, 'AGENT_SESSIONS'), args.name, next)
         return {
           ok: true,
-          dirName: r.dirName,
-          uid: r.uid,
-          message: r.uid === null
-            ? `已清除 UID ⇒ "${r.dirName}" 回到用编码指认`
-            : `已设定 UID = "${r.uid}" ⇒ 所有支持编码的动作（show/use/archive/send-now/send-later/uid）现在也接受它`,
-          path: r.path,
+          dirName: entry.dirName,
+          code: parseTrajectoryCode(entry.dirName),
+          uid: cur,
+          retired: true,
+          note: cur === null
+            ? `未设定遗留 UID ⇒ 用编码指认（${parseTrajectoryCode(entry.dirName) ?? '无编码'}）。` +
+              `UID 写入已退役；要一条可指定的标识，请用 create --id 起新轨迹。`
+            : `遗留 UID = ${cur}（文件 ${UID_FILENAME}，只读兼容）——仍可用它指认本条轨迹。` +
+              `⚠️ 写入已退役：新轨迹用 create --id 指定编码。`,
         }
       }
       case 'send-later': {

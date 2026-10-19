@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -10,50 +10,43 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 import {
   askSkiff,
   ensureWorkspacePromptSection,
-  ensureSkiffSession,
+  skiffWorkspaceMdPath,
   workspaceCognitiveTrajectoryLine,
   skiffCognitiveTrajectoryEnabled,
   skiffMsmGate,
-  registerSkiffSession,
 } from '../src/role/skiff/core.js'
-import { SKIFF_SESSION_PREFIX } from '../src/role/skiff/config.js'
+import { resetSkiffSessions, registerSkiffSession } from '../src/role/skiff/registry.js'
+import { makeSkiffSession, makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 import { resetActiveSessionStore } from '../src/trajectory/core.js'
 
 /**
  * skiff-core-branches.test.ts — Skiff 会话核心：**降级面与事件解析容错**（⑤ 第 56 件，S142 2026-09-26）
  *
+ * ## 🔴 2026-10-19：随 skiff 重做同步更新的两处范围变更（R↓，为什么本文件被重写而不是只改断言）
+ *
+ * ① **`askSkiff` 不再返回 `cognitiveTrajectory`**（返回值现只剩 `{answer, sessionId}`）：
+ *    旧的"事件 → 认知轨迹"派生（`eventsToCognitiveTrajectory` / `includeCognitiveTrajectory` /
+ *    `eventsStart` 全量-增量两语义 / tool_calls 序列化 / 工具结果 500 字截断）**整件退役**。
+ *    ⇒ 对应用例**删除**（生产实现已不在 `core.ts`；留着就是对不存在行为的空断言），
+ *      保留的是同一段里**仍然活着**的"答案读取"两条形态兼容 —— 它们决定用户能不能收到回复。
+ * ② **`ensureSkiffSession` 整件删除**（它会为 skiff 另建一个 SESSION，即"SESSION 爆炸"来源）：
+ *    工作台**就是该轨迹自己的 SESSION.md** ⇒ 同一位置的动作从「建」变成「查」
+ *    （`skiffWorkspaceMdPath`，纯查询无副作用），C 段改钉这条新语义。
+ *
+ * 身份判据同时换代：**不再看 `serenity.json` 的 `skiff.roles`，而看「会话绑定的轨迹目录里
+ * 有没有 `skiff.json`」** ⇒ 本文件的夹具一律走 `helpers/skiff-fixture.ts`。
+ *
  * ## 与既有 `skiff-core.test.ts` 的分工（互补不重叠）
  *
- * 既有文件走**正路**：注册表增删查、`askSkiff` 的成功往返（真 followup 推事件）、
- * `ensureSkiffSession` 的创建/恢复/隔离、`skiffCognitiveTrajectoryEnabled` 与 `skiffMsmGate` 的三态主路。
- * 本文件补它**全部没碰**的三类：
- *
- *   ① 🔴 **事件解析的容错面** —— `sessionEvents` 的双形态（`snapshotEvents()` vs `.events`）、
- *      `assistant/message` 的 `data.message.content` **与** `data.content` 两条取文路径、
- *      `tool_calls` 的两种参数形态、`extractText` 的非数组守卫、`truncate` 的截断侧、
- *      `eventsToCognitiveTrajectory` 的单条解析失败跳过。
- *      既有夹具**只造一种事件形状**（`data.message.content` ＋ 字符串 `arguments`），
- *      其余分支**一次都没跑过**。
- *   ② 🔴 **工作台提示词段的降级面** —— `ensureWorkspacePromptSection` 的三条守卫
- *      （非对象 agent ／ 无 `systemPrompt.section` ／ 注册抛错）＋ `text()` 在**无活跃绑定**时
- *      返回空串。既有文件只测了"挂成功"这一侧。
- *   ③ 🔴 **恢复链的退化形态** —— `ensureSkiffSession` 的 `persistent=false`（临时身份不建工作台）、
- *      无 `session.id` 时回落 `agent.id`、`lastBound` 无 `sessionId` 的回落、
- *      内存活跃记录**无 sessionId** 时的自愈补写。
- *
- * ## 为什么这三类重要（贴 objective：**skiff 是微信桥的落点**）
- *
- * `role/skiff/core.ts` 是**家庭唯一 IM 通道**（微信桥）与 ACP/调试页共同的下游：用户消息进来 →
- * `askSkiff` 读事件取答案。上面①正是"答案能不能被读到"的**唯一执行点**：
- * DSH 在 rc.1 把 `Session.events` 改成了 `snapshotEvents()` 方法（源码 `:466` 逐字记录），
- * 而**兼容双形态的那两行**（`:473`/`:474`）在既有夹具下**只跑了 `.events` 一侧** ——
- * 真宿主走的却是 `snapshotEvents()` 一侧 ⇒ **最常用的那条路径从来没有被执行过**。
- * 同族的还有 `data.content` 直挂形态（宿主不同版本的事件形状）。
+ * 既有文件走**正路**：`createSkiffAgent` 的 resume-or-create、`askSkiff` 的成功往返、
+ * `skiffCognitiveTrajectoryEnabled` 与 `skiffMsmGate` 的三态主路。
+ * 本文件补它**全部没碰**的降级面与事件形态兼容。
  *
  * ## 🔴 本件的硬前置（纪律 22/23/⑬ 同族）
  *
  * 1. **绝不占活服务端口**：本文件不建 listener（纯函数 ＋ 内存替身），端口纪律自动满足。
- * 2. **模块级状态必须重置**：`skiff-core` 的活跃会话表由 `resetActiveSessionStore()` 清空（既有先例）。
+ * 2. **模块级状态必须重置**：活跃会话表 `resetActiveSessionStore()` ＋ skiff 会话注册表
+ *    `resetSkiffSessions()`（两者都是进程级 Map/Set，用例间必须复位）。
  * 3. **降级面断言须先有 happy-path 正控**（纪律 10 ／ 累积纪律 ⑬ "成对测"）：每条守卫断言
  *    都配一条"同一夹具在正常输入下确实走通"的对照，否则无法区分"守卫生效"与"夹具坏了"。
  */
@@ -64,18 +57,14 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'skiff-core-br-'))
   writeFileSync(join(dir, '.serenity'), 'test')
   resetActiveSessionStore()
+  resetSkiffSessions() // 会话 → 轨迹 的内存注册表（模块级状态，用例间必须复位）
 })
 
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
+  resetSkiffSessions()
   vi.restoreAllMocks()
 })
-
-/** 写 CCC 配置（真配置路径：readSkiffRoles 会做规范化，正是被测分支的输入形态） */
-function writeConfig(cfg: unknown): void {
-  mkdirSync(join(dir, '.opencode'), { recursive: true })
-  writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify(cfg))
-}
 
 /** fake ctx：`on` 立即触发 idle（waitAgentIdle 同步 resolve 的前提；纪律：必须回传真 agent 引用） */
 function fakeCtx(agent: unknown): { on: (ev: string, cb: (p: { agent: unknown; status: string }) => void) => () => void } {
@@ -88,19 +77,25 @@ function fakeCtx(agent: unknown): { on: (ev: string, cb: (p: { agent: unknown; s
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// A. 事件解析的容错面（"答案读不读得到"的唯一执行点）
+// A. 事件形态兼容（sessionEvents 双形态 ＋ assistant 取文两条路径）
+//
+// 🔴 2026-10-19 的范围变更（本段整体重写的理由，R↓）：
+//   `askSkiff` 的返回值**不再有 `cognitiveTrajectory`**（`SkiffAskResult` 现只剩
+//   `{answer, sessionId}`）⇒ 旧版的"事件 → 认知轨迹"派生（`eventsToCognitiveTrajectory`、
+//   `includeCognitiveTrajectory`、`eventsStart` 全量/增量两语义、tool_calls 序列化、
+//   工具结果 500 字截断）**整件退役**，它们的生产实现已不在 `core.ts` 里。
+//   ⇒ 对应用例**删除**（不是"断言放宽"）：保留它们只会变成对不存在行为的空断言。
+//   ⇒ 下面保留下来的，是**答案读取**这条链上仍然活着的两条形态兼容（它们决定
+//      "用户能不能收到回复"，是本段最初的贴 objective）。
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant 取文两条路径）', () => {
-  it('🔴 A1：`snapshotEvents()` 形态（**真宿主 rc.1 走的那条**）⇒ 能取到答案与轨迹', async () => {
+  it('🔴 A1：`snapshotEvents()` 形态（**真宿主 rc.1 走的那条**）⇒ 能取到答案', async () => {
     // 真故障形态的反面：rc.1 宿主把 `Session.events` 换成了 `snapshotEvents()` 方法。
-    // 既有夹具只给 `.events` ⇒ `:473` 那一行（`typeof s.snapshotEvents === 'function'`）从未为真。
+    // 既有夹具只给 `.events` ⇒ `sessionEvents` 的兼容分支从未为真。
     const events: unknown[] = []
     const agent = {
-      session: {
-        id: `${SKIFF_SESSION_PREFIX}snap-1`,
-        snapshotEvents: () => events,
-      },
+      session: { id: 'sess-snap-1', snapshotEvents: () => events },
       followup: () => {
         events.push(
           { type: 'user/message', data: { content: [{ type: 'text', text: 'q' }] } },
@@ -110,15 +105,14 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
     }
     const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.answer).toBe('via snapshotEvents')
-    expect(result.cognitiveTrajectory[0]).toEqual({ role: 'user', text: 'q' })
   })
 
   it('🔴 A2：`assistant/message` 的 `data.content` 直挂形态（无 `message` 包裹）⇒ 仍能取到', async () => {
-    // `:483` 的 `e.data?.message?.content ?? e.data?.content ?? []` —— 既有夹具恒给
-    // `message` 包裹 ⇒ `?? e.data?.content` 这一侧**从未执行**。
+    // `e.data?.message?.content ?? e.data?.content ?? []` —— 既有夹具恒给 `message`
+    // 包裹 ⇒ `?? e.data?.content` 这一侧**从未执行**。
     const events: unknown[] = []
     const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}flat-1`, events },
+      session: { id: 'sess-flat-1', events },
       followup: () => {
         events.push({ type: 'assistant/message', data: { content: [{ type: 'text', text: 'flat shape' }] } })
       },
@@ -130,7 +124,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
   it('A3（正控）：`data.message.content` 包裹形态仍走通 ⇒ 证明 A2 的对照点成立', async () => {
     const events: unknown[] = []
     const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}wrap-1`, events },
+      session: { id: 'sess-wrap-1', events },
       followup: () => {
         events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'wrapped' }] } } })
       },
@@ -139,12 +133,11 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
     expect(result.answer).toBe('wrapped')
   })
 
-  it('🔴 A4：`text()`/`extractText` 遇**非数组 content** ⇒ 返回空串（不抛），cognitive trajectory 为空', async () => {
-    // `:523` 的 `if (!Array.isArray(content)) return ''`。既有夹具恒给数组。
+  it('🔴 A4：content **非数组**（字符串/null/对象）⇒ 答案取不到就是空串，⛔ 不抛', async () => {
     // 真故障形态：宿主事件里 content 是字符串/null/对象（版本差异或畸形事件）。
     const events: unknown[] = []
     const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}bad-1`, events },
+      session: { id: 'sess-bad-1', events },
       followup: () => {
         events.push(
           { type: 'user/message', data: { content: 'not-an-array' } },
@@ -154,84 +147,33 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
       },
     }
     const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
+    // 判据不只"没崩"，而要**答案真为空**（畸形事件一条都没产出文本）
     expect(result.answer).toBe('')
-    // 🔴 判据升级（累积纪律 ⑫ 同族）：不只要"没崩"，而要**轨迹真为空**（三条畸形事件全被过滤）
-    expect(result.cognitiveTrajectory).toEqual([])
   })
 
-  it('🔴 A5：`tool_calls` 的 `arguments` 为**对象**（非字符串）⇒ JSON 序列化进轨迹；缺 `name` 回落 `(tool)`', async () => {
-    // `:507` 的三元 `typeof c.arguments === 'string' ? c.arguments : JSON.stringify(c.arguments ?? {})`
-    // ＋ `:508` 的 `c.name ?? '(tool)'`。既有夹具只给字符串 arguments **且**恒有 name。
+  it('🔴 A5：事件序列里有 `null` / 缺 `type` 的坏条目 ⇒ **跳过该条、其余照常**', async () => {
+    // 真故障形态：事件数组里混入 `null`（宿主侧落盘残缺）。旧实现里这条断言是
+    // "轨迹尽力而为"，现在轨迹已退役 ⇒ **同一容错判据改挂在答案读取上**：
+    // 坏条目不得让整段读取中止（否则用户收到空回复却查不到原因）。
     const events: unknown[] = []
     const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}tc-1`, events },
-      followup: () => {
-        events.push({
-          type: 'assistant/message',
-          data: {
-            message: {
-              content: [],
-              tool_calls: [
-                { arguments: { action: 'list', deep: { n: 1 } } }, // 无 name ⇒ 回落 (tool)
-              ],
-            },
-          },
-        })
-      },
-    }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
-    const call = result.cognitiveTrajectory.find((t) => t.text.includes('→'))
-    expect(call).toBeDefined()
-    // 对象被 JSON 序列化（不是 "[object Object]"）
-    expect(call!.text).toContain('"action":"list"')
-    expect(call!.text).toContain('(tool)') // name 缺失的回落
-    expect(call!.tool).toBeUndefined() // name 缺失 ⇒ tool 字段不出现（undefined）
-  })
-
-  it('🔴 A6：`truncate` 的**截断侧** ⇒ 超长文本被切到上限并带省略号', async () => {
-    // `:528` 的 `s.length > n ? slice(0,n)+'…' : s` —— 既有夹具文本都短 ⇒ **恒走 `: s` 那侧**。
-    // 真故障形态：长工具结果（生产里很常见）。
-    const long = 'x'.repeat(900)
-    const events: unknown[] = []
-    const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}trunc-1`, events },
-      followup: () => {
-        events.push({ type: 'tool/result', data: { name: 'big', content: [{ type: 'text', text: long }] } })
-      },
-    }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
-    const toolEntry = result.cognitiveTrajectory.find((t) => t.role === 'tool')
-    expect(toolEntry).toBeDefined()
-    // 上限 500（源码 :512）⇒ 500 + 省略号
-    expect(toolEntry!.text).toHaveLength(501)
-    expect(toolEntry!.text.endsWith('…')).toBe(true)
-    // 正控（成对）：截断**没有**发生在短文本上 —— 同一断言链的反侧
-    expect('short'.length > 500).toBe(false)
-  })
-
-  it('🔴 A7：单条事件解析失败 ⇒ **跳过该条、其余照常**（轨迹尽力而为）', async () => {
-    // `:514` 的 catch「单条事件解析失败跳过（轨迹尽力而为，不影响答案）」。
-    // 真故障形态：事件条目是 `null` ⇒ 读 `ev.type` 抛 TypeError。
-    const events: unknown[] = []
-    const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}skip-1`, events },
+      session: { id: 'sess-skip-1', events },
       followup: () => {
         events.push(
-          { type: 'user/message', data: { content: [{ type: 'text', text: 'before' }] } },
-          null, // ← 解析时抛
-          { type: 'user/message', data: { content: [{ type: 'text', text: 'after' }] } },
+          { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'before' }] } } },
+          null, // ← 读取时必须跳过
+          { type: 'no-type-here' },
+          { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'after' }] } } },
         )
       },
     }
     const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
-    // 🔴 判据 = **前后两条都在**（只断言"没抛"无法区分"跳过"与"整段中止"——累积纪律 ⑫）
-    const texts = result.cognitiveTrajectory.map((t) => t.text)
-    expect(texts).toContain('before')
-    expect(texts).toContain('after')
+    // 🔴 判据 = **最后一条**被读到（只断言"没抛"无法区分"跳过"与"整段中止"）
+    expect(result.answer).toBe('after')
   })
 
-  it('🔴 A8：`answer` 的 `session.id` 缺失 ⇒ 回落空串（非 "undefined"）', async () => {
-    // `:551` 的 `String((agent.session as {id?:unknown}).id ?? '')`。
+  it('🔴 A6：`answer` 的 `session.id` 缺失 ⇒ 回落空串（非 "undefined"）', async () => {
+    // `String((agent.session as {id?:unknown}).id ?? '')`。
     // 真故障形态：测试替身/极简构造的 session 无 id。
     const events: unknown[] = []
     const agent = {
@@ -245,7 +187,7 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
     expect(result.answer).toBe('a') // 答案不受影响
   })
 
-  it('A9（正控）：存在 id 时如实带出 ⇒ 证明 A8 的空串来自 ?? 回落', async () => {
+  it('A7（正控）：存在 id 时如实带出 ⇒ 证明 A6 的空串来自 ?? 回落', async () => {
     const events: unknown[] = []
     const agent = {
       session: { id: 'real-id', events },
@@ -255,38 +197,6 @@ describe('skiff-core: 事件形态兼容（sessionEvents 双形态 ＋ assistant
     }
     const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q')
     expect(result.sessionId).toBe('real-id')
-  })
-
-  it('🔴 A10：`includeCognitiveTrajectory:false` ⇒ 轨迹跳过计算，**但答案仍取到**（3100 对外面的分工）', async () => {
-    const events: unknown[] = []
-    const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}notraj-1`, events },
-      followup: () => {
-        events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'only answer' }] } } })
-      },
-    }
-    const result = await askSkiff(fakeCtx(agent) as never, agent as never, 'q', undefined, { includeCognitiveTrajectory: false })
-    expect(result.cognitiveTrajectory).toEqual([])
-    expect(result.answer).toBe('only answer') // 🔴 关闭的是轨迹，**不是答案**
-  })
-
-  it('🔴 A11：`eventsStart` 显式传 0 ⇒ **全量轨迹**；不传 ⇒ 本轮增量（v1.25.10 用户拍板的两语义）', async () => {
-    const events: unknown[] = []
-    const agent = {
-      session: { id: `${SKIFF_SESSION_PREFIX}start-1`, events },
-      followup: () => {
-        events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: 'incremental' }] } } })
-      },
-    }
-    // 先垫一条历史（不属于本轮）
-    events.push({ type: 'user/message', data: { content: [{ type: 'text', text: 'historical' }] } })
-    const agentAny = agent as never
-    // 不传 eventsStart ⇒ before = 当前长度 ⇒ 只含本轮
-    const inc = await askSkiff(fakeCtx(agent) as never, agentAny, 'q')
-    expect(inc.cognitiveTrajectory.map((t) => t.text)).not.toContain('historical')
-    // 显式 0 ⇒ 全量（含历史）
-    const full = await askSkiff(fakeCtx(agent) as never, agentAny, 'q', 0)
-    expect(full.cognitiveTrajectory.map((t) => t.text)).toContain('historical')
   })
 })
 
@@ -364,73 +274,94 @@ describe('skiff-core: ensureWorkspacePromptSection 的三条守卫（挂不上 �
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// C. 恢复链的退化形态
+// C. 工作台路径的退化形态（`skiffWorkspaceMdPath`）
+//
+// 🔴 2026-10-19：`ensureSkiffSession` **整件删除**（它会为 skiff 另建一个 SESSION ——
+//    那正是"SESSION 爆炸"的来源）。新模型里**工作台就是这条轨迹自己的 SESSION.md**，
+//    于是同一位置的动作从「**建**」变成「**查**」（纯查询，无副作用）。
+// ⇒ 下面四条替代原 C1~C4，钉的是新语义：**不给就不造**、身份跟着**轨迹**走。
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('skiff-core: ensureSkiffSession 的退化形态', () => {
-  const sessionRole = () => ({
-    msms: ['memory-tool'],
-    tools: ['read'],
-    cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
+describe('skiff-core: skiffWorkspaceMdPath 的退化形态', () => {
+  it('🔴 C1：会话未登记（无绑定轨迹）⇒ null（**不猜、不新建**）', () => {
+    expect(skiffWorkspaceMdPath(dir, 'never-registered-1')).toBeNull()
+    expect(skiffWorkspaceMdPath(dir, undefined)).toBeNull()
   })
 
-  it('🔴 C1：`persistent=false`（临时身份）⇒ null，**不建工作台**（v1.30.9 "SESSION 爆炸"根治）', () => {
-    // `:189` 的 `if (!persistent) return null`
-    const agent = { session: { id: 'tmp-1', header: { id: 'tmp-1', cwd: dir }, events: [], append: () => {} } }
-    expect(ensureSkiffSession(dir, agent as never, 'my-role', sessionRole() as never, false)).toBeNull()
+  it('🔴 C2：登记了轨迹，但该轨迹目录里**没有 SESSION.md** ⇒ null（不代建）', () => {
+    // 旧 `ensureSkiffSession` 在这里会**新建**一个 SESSION —— 那正是要钉死的旧行为。
+    const dirName = makeSkiffSession(dir, 'sess-empty-body', 'empty-body', skiffJson({ tools: [] }))
+    rmSync(join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md'))
+    expect(skiffWorkspaceMdPath(dir, 'sess-empty-body')).toBeNull()
   })
 
-  it('🔴 C2：角色未开 session 能力 ⇒ null（现状零变化）', () => {
-    // `:187` 的 `if (!cognitiveTrajectorySubset(role).session) return null`
-    const agent = { session: { id: 'x', header: { id: 'x', cwd: dir }, events: [], append: () => {} } }
-    expect(ensureSkiffSession(dir, agent as never, 'my-role', { msms: [], tools: ['read'] } as never)).toBeNull()
+  it('🔴 C3：登记的轨迹有 SESSION.md ⇒ 返回**那条轨迹自己的** SESSION.md 路径', () => {
+    const dirName = makeSkiffSession(dir, 'sess-own-body', 'qa', skiffJson({ tools: [] }))
+    const md = skiffWorkspaceMdPath(dir, 'sess-own-body')
+    expect(md).not.toBeNull()
+    expect(md).toBe(join(dir, 'AGENT_SESSIONS', dirName, 'SESSION.md'))
+    // 🔴 语义钉：**不新建目录**——路径必须落在已存在的轨迹目录里（旧的"另建工作台"会指向别处）
+    expect(md).toContain(dirName)
   })
 
-  it('🔴 C3：session 无 `id` ⇒ scope 回落 `agent.id`（而非字面量 "undefined"）', () => {
-    // `:191` 的 `String((agent.session as {id?:unknown}).id ?? agent.id)`
-    const agent = {
-      id: 'agent-fallback-id',
-      session: { header: { id: 'h', cwd: dir }, events: [], append: () => {} }, // ← 无 session.id
-    }
-    // 能走通（建工作台）即证明 scope 不是 "undefined"——否则下游会按错的 scope 记绑定
-    const mdPath = ensureSkiffSession(dir, agent as never, 'my-role', sessionRole() as never)
-    expect(mdPath).not.toBeNull()
-    expect(mdPath).toContain('SESSION.md')
-  })
-
-  it('C4（正控）：session 有 id 时正常建工作台 ⇒ 与 C3 成对', () => {
-    const agent = { session: { id: 'real-scope', header: { id: 'real-scope', cwd: dir }, events: [], append: () => {} } }
-    const mdPath = ensureSkiffSession(dir, agent as never, 'my-role', sessionRole() as never)
-    expect(mdPath).not.toBeNull()
+  it('C4（正控）：换一个会话 id 指向**另一条轨迹** ⇒ 返回的是那条轨迹的 SESSION.md', () => {
+    const dirA = makeSkiffSession(dir, 'sess-a', 'traj-a', skiffJson({ tools: [] }), 'trajA')
+    const dirB = makeSkiffSession(dir, 'sess-b', 'traj-b', skiffJson({ tools: [] }), 'trajB')
+    // 身份跟着**轨迹**走（旧模型的身份是 sessionId 前缀 `skiff-`，且与轨迹无关）
+    expect(skiffWorkspaceMdPath(dir, 'sess-a')).toContain(dirA)
+    expect(skiffWorkspaceMdPath(dir, 'sess-b')).toContain(dirB)
   })
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
 // D. skiffCognitiveTrajectoryEnabled / skiffMsmGate 的边角
+//
+// 🔴 2026-10-19：身份判据换了 —— 不再是「`serenity.json` 里配没配这个角色」，
+//    而是「**会话绑定的轨迹目录里有没有 `skiff.json`**」（`role/skiff/profile.ts`）。
+//    ⇒ 夹具从 writeConfig(`skiff.roles`) 改为 makeSkiffSession（真造一条带 `skiff.json` 的轨迹）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe('skiff-core: 门控函数的边角（role 缺失/无 msms 声明）', () => {
-  it('🔴 D1：`skiffCognitiveTrajectoryEnabled` —— skiff 会话但角色已从配置移除 ⇒ 保守旁路 false', () => {
-    // `:568` 的 `if (!roleName) return false`
-    expect(skiffCognitiveTrajectoryEnabled(dir, `${SKIFF_SESSION_PREFIX}ghost-x`, 'session')).toBe(false)
+describe('skiff-core: 门控函数的边角（轨迹没有 skiff.json / 无 msms 声明）', () => {
+  it('🔴 D1：会话绑定到**没有 skiff.json 的普通轨迹** ⇒ 判「不是 skiff」⇒ 纪律**恒参与**（fail-open）', () => {
+    // 新语义（R↓ 见 core.ts 的 `skiffCognitiveTrajectoryEnabled` 注释）：拿不到约束面 ⇒
+    // 按"不是 skiff"处理 ⇒ **正常参与**。旧模型这里判的是 `false`（保守旁路）——
+    // 那是旧"角色可能被删"场景的产物；新模型里"约束面不存在"只意味着"这条轨迹是普通轨迹"。
+    // ⚠️ 夹具要点：`makeSkiffSession(root, sid, code, null)` 内部是 `profile ?? {}`
+    //    ⇒ 仍会落一个空 `skiff.json`，那样测的是"约束面全默认 true"而不是 fail-open。
+    //    要造真正的普通轨迹必须用 `makeTrajectory(root, code, null)`（不写文件）＋ 手工登记。
+    const { dirName } = makeTrajectory(dir, 'plain-trajectory', null)
+    registerSkiffSession('sess-plain', dirName, dir)
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-plain', 'session')).toBe(true)
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-plain', 'keeper')).toBe(true)
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-plain', 'rebuild')).toBe(true)
   })
 
-  it('🔴 D2：`skiffMsmGate` —— 角色声明里**没有 msms 键** ⇒ `exec` 拒绝（`?? []` 那侧）', () => {
-    // `:596` 的 `(role.msms ?? [])` —— 既有夹具恒有 msms ⇒ `?? []` 从未执行。
-    // 真故障形态：角色配置只写 tools 不写 msms（**合法且常见**——只用平台工具、不用 MSM）。
-    // ⚠️ 必须走**真配置**（writeConfig → readSkiffRoles），不能用内存替身：
-    //    `readSkiffRoles` 会把缺省的 msms 规范成 `undefined`，正是 `?? []` 要兜的形态。
-    writeConfig({ skiff: { roles: { 'no-msm-role': { tools: ['read'] } } } })
-    registerSkiffSession(`${SKIFF_SESSION_PREFIX}no-msm`, 'no-msm-role', dir, {} as never)
-
-    // 🔴 判据 = **拒绝**（不是静默放行）。`?? []` 若写成 `?? ['*']` 或漏掉，这里就会放行。
-    expect(skiffMsmGate(dir, `${SKIFF_SESSION_PREFIX}no-msm`, 'exec', 'anything').reject).toContain('MSM not allowed')
+  it('🔴 D1b：`skiff.json` 显式写 `session:false` ⇒ 那一条**不参与**（真 skiff 的开关仍有效）', () => {
+    // 与 D1 成对：D1 证明"不是 skiff ⇒ 恒参与"，这条证明"是 skiff 时开关读得到"
+    // （否则 D1 会退化成"这函数恒 true"的空断言）。
+    makeSkiffSession(dir, 'sess-explicit', 'qa', skiffJson({
+      tools: ['read'],
+      cognitiveTrajectory: { session: false, keeper: true, rebuild: true },
+    }))
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-explicit', 'session')).toBe(false)
+    expect(skiffCognitiveTrajectoryEnabled(dir, 'sess-explicit', 'keeper')).toBe(true)
   })
 
-  it('D3（正控）：角色**有** msms 声明且命中 ⇒ 放行 ⇒ 与 D2 成对', () => {
-    writeConfig({ skiff: { roles: { 'with-msm-role': { tools: ['read'], msms: ['memory-tool'] } } } })
-    registerSkiffSession(`${SKIFF_SESSION_PREFIX}with-msm`, 'with-msm-role', dir, {} as never)
-    expect(skiffMsmGate(dir, `${SKIFF_SESSION_PREFIX}with-msm`, 'exec', 'memory-tool')).toEqual({})
+  it('🔴 D2：`skiff.json` 里**没有 msms 键** ⇒ `exec` 拒绝（缺省空表，不是放行）', () => {
+    // 真故障形态：约束面只写 tools 不写 msms（**合法且常见**——只用平台工具、不用 MSM）。
+    // ⚠️ 必须走**真 `skiff.json`**（`makeSkiffSession` 会写盘），不能用内存替身：
+    //    读侧 `strList` 把缺项归一成 `[]`，正是要兜的形态。
+    makeSkiffSession(dir, 'sess-no-msm', 'no-msm-role', skiffJson({ tools: ['read'] }))
+
+    // 🔴 判据 = **拒绝**（不是静默放行）。缺项若被写成 `?? ['*']` 或漏掉，这里就会放行。
+    expect(skiffMsmGate(dir, 'sess-no-msm', 'exec', 'anything').reject).toContain('MSM not allowed')
+  })
+
+  it('D3（正控）：`skiff.json` **有** msms 声明且命中 ⇒ 放行 ⇒ 与 D2 成对', () => {
+    makeSkiffSession(dir, 'sess-with-msm', 'with-msm-role', skiffJson({ tools: ['read'], msms: ['memory-tool'] }))
+    expect(skiffMsmGate(dir, 'sess-with-msm', 'exec', 'memory-tool')).toEqual({})
+    // 未声明的 MSM 仍拒绝（白名单是**逐条**判，不是"配过就全放"）
+    expect(skiffMsmGate(dir, 'sess-with-msm', 'exec', 'other-msm').reject).toContain('MSM not allowed')
   })
 })
 

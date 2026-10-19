@@ -8,15 +8,20 @@
  * 为何挑它：微信桥是**家庭唯一 IM 通道**（owner 与家人全靠它），文件头的设计承诺是
  * 「桥错误静默 —— 不中断轮询循环」「旁路容忍 H3：hook 失败不阻塞对话处理」
  * 「typing 失败静默（不影响主流程）」⇒ 这些**降级承诺**必须被机械钉住；
- * 而既有 `weixin.test.ts`（1264 行）虽覆盖了所有 happy path 与主要降级，
+ * 而既有 `weixin.test.ts` 虽覆盖了所有 happy path 与主要降级，
  * 其夹具**恒走"配置齐全 + 正常返回"形态** ⇒ 下列分支从未执行。
  *
- * 覆盖的 29 处未覆盖分支（按源码位置，`im/bridge.ts`）：
+ * ⚠️ **夹具前置条件（2026-10-19 重做后新增，漏了会让本件集体变红）**：路由目标必须是
+ * **该 CCC 里真实存在的认知轨迹**（`im/bridge.ts` 的 `findDirNameByCode`）⇒ 每个用例
+ * 都得先有一条轨迹可投。`beforeEach` 默认造 `qa`；要打"目标不存在"那档（C4）写一个
+ * 不存在的编码。旧夹具靠 `serenity.json` 的 `skiff.roles` 造 skiff，该段已退役。
+ *
+ * 覆盖的 29 处未覆盖分支（按源码位置，`im/bridge.ts`；行号为锚定时的读数）：
  *   A 组 — typing 失败静默（`:64` / `:86` 的两个 catch，函数头逐字承诺"任何失败静默"）
  *   B 组 — 轮询循环容错（`:118` `??` 游标回退 / `:122` 忽略非用户消息 / `:124` `?? []` /
  *           `:127` 非 Error 抛出的 `String(err)` 分支 / `:130` catch 后**继续循环**）
  *   C 组 — handleIncoming 早退（`:204` 无 fromUserId / `:209` 未启用 / `:210` routes 缺省 /
- *           `:230` 路由命中但角色未定义 / `:244` ensure 失败不阻断）
+ *           `:230` 路由命中但**轨迹不存在** / `:244` 挂段失败 ⇒ 降级 question 注入不阻断）
  *   D 组 — 媒体/答案回退（`:272` 文件无名 / `:289` 净化后空名 / `:296` 保存失败 /
  *           `:351` answer 缺省 / `:425` 非 Error 抛出）
  *   E 组 — 装配与状态（`:438` 热重建 / `:444` 未启用 / `:447` accounts 缺省 /
@@ -63,10 +68,14 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 }))
 
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'
-import { writeWeixinCredential } from '../src/im/route.js'
+import { writeWeixinCredential, weixinSessionIdForTrajectory } from '../src/im/route.js'
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
+// 轨迹夹具（造 skiff 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `skiff.json` 里）
+import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string
+/** `beforeEach` 造的 `qa` 轨迹目录名（= 路由目标 `qa` 解析到的目录） */
+let qaDirName: string
 let oldConfigEnv: string | undefined
 /** P0-3：机器级留痕的 env 隔离（见 `beforeEach` 注释） */
 let oldAuditEnv: string | undefined
@@ -79,7 +88,8 @@ function jsonResponse(status: number, body: unknown): Response {
 function writeConfig(weixin: unknown): void {
   writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
     'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-    skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
+    // ⚠️ 这里**不再**写 `skiff: { roles: {...} }` —— 该段 2026-10-19 随重做退役（读侧也读不到）。
+    //    skiff 的约束面现在住在**轨迹目录的 `skiff.json`** 里，由 `beforeEach` 的夹具造。
     weixin,
   }))
 }
@@ -177,6 +187,10 @@ beforeEach(() => {
   process.env.SERENITY_HUMAN_CHANNEL_AUDIT = join(dir, 'human-channel-audit.jsonl')
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
+  // 🔴 2026-10-19 重做后**路由目标必须是该 CCC 里真实存在的认知轨迹**（`findDirNameByCode`），
+  //    不再是"这个 CCC 配没配这个 skiff 角色" ⇒ 默认造一条 `qa` 轨迹（带 `skiff.json`）。
+  //    不造的话本件 A/D 组会集体停在路由层（表面症状各不相同，实际同一个原因）。
+  qaDirName = makeTrajectory(dir, 'qa', skiffJson({ tools: [], msms: [], systemPrompt: 'qa' })).dirName
 })
 
 afterEach(async () => {
@@ -197,7 +211,7 @@ afterEach(async () => {
 
 describe('weixin-bridge 分支：A 组 —— typing 失败静默（文件头逐字承诺「任何失败静默」）', () => {
   it('A1 getconfig 抛错 → typing start 静默，**主流程继续**（不中断对话）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
 
     const sent: string[] = []
@@ -227,7 +241,7 @@ describe('weixin-bridge 分支：A 组 —— typing 失败静默（文件头逐
   })
 
   it('A2 sendtyping 抛错 → typing stop 静默（finally 里，异常路径也不掩盖主流程）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
 
     const sent: string[] = []
@@ -258,7 +272,7 @@ describe('weixin-bridge 分支：A 组 —— typing 失败静默（文件头逐
 
 describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
   it('C1 无 fromUserId → 直接 return（不发任何东西、不建会话）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: string[] = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -278,7 +292,7 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
   })
 
   it('C2 桥未启用 → 直接 return（`!settings.enabled`）', async () => {
-    writeConfig({ enabled: false, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: false, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: string[] = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -316,12 +330,11 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
     expect(sent).toHaveLength(0)
   })
 
-  it('C4 路由命中角色但该 CCC 未定义该角色 → **响亮报错**并 return（P0-3 起走 `console.error`）', async () => {
-    // 路由指向 qa，但 skiff.roles 里没有 qa
+  it('C4 路由命中但该 CCC 里**没有这条轨迹** → **响亮报错**并 return（P0-3 起走 `console.error`）', async () => {
+    // 路由指向 ghost —— 该 CCC 内不存在这个编码的轨迹（`beforeEach` 只造了 `qa`）
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: {} }, // ← 空角色表
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'ghost' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: string[] = []
@@ -332,6 +345,9 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
     })
     // 🔴 P0-3 起这一档**升格**：原来是 `console.log`（"告警"），现为 `console.error`
     //    —— 方案 §3.1 要求"目标不存在 ⇒ **响亮报错**，不静默丢弃"。
+    // 🔴 2026-10-19 重做后判据换了：不是"这个 CCC 有没有配这个 skiff 角色"，
+    //    而是"**这个 CCC 里有没有这条认知轨迹**"（`findDirNameByCode`）。
+    //    ⚠️ 与旧模型的关键差别：轨迹存在但没有 `skiff.json` **不是错**（那只是一条普通轨迹）。
     const err = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     const { handleIncoming } = await import('../src/im/bridge.js')
@@ -341,13 +357,13 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
     })
 
     expect(sent).toHaveLength(0)
-    // 🔴 可观测性断言：不是"静默返回"，而是**留下指引性日志**（告诉运维查 skiff.roles）
-    expect(err.mock.calls.some((c) => String(c[0]).includes('skiff.roles'))).toBe(true)
+    // 🔴 可观测性断言：不是"静默返回"，而是**留下指引性日志**（告诉运维去建这条轨迹）
+    expect(err.mock.calls.some((c) => String(c[0]).includes('内没有编码为 "ghost" 的认知轨迹'))).toBe(true)
     err.mockRestore()
   })
 
-  it('C5 existing agent 的 ensureSkiffSession 抛错 → 告警但**不阻断本轮处理**（`:244`）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+  it('C5 existing 快路径：agent 挂不上系统提示词段 → 降级 question 前缀注入，**不阻断本轮处理**', async () => {
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: string[] = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -359,28 +375,47 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
       return jsonResponse(200, { ret: 0 })
     })
 
-    // 预注册一个 existing agent（走 live 复用快路径 → 触发 ensureSkiffSession）
-    const sessionId = 'skiff-weixin-u1'
-    registerSkiffSession(sessionId, {
-      roleName: 'qa',
-      handle: { session: { id: sessionId, events: [] } },
-      agent: {
-        session: { id: sessionId, events: [] },
-        ctx: { systemPrompt: { section: () => {} } },
-        followup: () => {},
-        interrupt: () => {},
+    // 预注册一个 existing agent（走 getSkiffAgent 快路径 ⇒ `agents.create` 一次都不该被调）。
+    // 🔴 2026-10-19：注册签名 = `(sessionId, 轨迹目录名, CCC, agent)`；会话 id 由**轨迹编码**派生。
+    //    这里让它的 `systemPrompt.section` **抛错**——旧模型的 `ensureSkiffSession` 是同一个位置
+    //    的失败点（现模型对应 `ensureWorkspacePromptSection` 返回 false ⇒ question 前缀兜底）。
+    const sessionId = weixinSessionIdForTrajectory('qa')
+    const asked: string[] = []
+    const existing = {
+      session: { id: sessionId, events: [] as unknown[] },
+      ctx: { systemPrompt: { section: () => { throw new Error('section boom') } } },
+      followup: (m?: { content?: Array<{ type?: string; text?: string }> }) => {
+        const q = (m?.content ?? []).filter((b) => b.type === 'text' && b.text).map((b) => b.text).join('\n')
+        if (q) asked.push(q)
+        existing.session.events.push(
+          { type: 'user/message', data: { content: [{ type: 'text', text: 'q' }] } },
+          { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '答' }] } } },
+        )
       },
-    } as never)
+      interrupt: () => {},
+    }
+    registerSkiffSession(sessionId, qaDirName, dir, existing as never)
 
     const { handleIncoming } = await import('../src/im/bridge.js')
-    await handleIncoming(fakeCtx() as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+    await handleIncoming({
+      // 命中 existing ⇒ 不该走 create（若误走，这里会抛并被桥吞掉 → 断言失守）
+      agents: { create: async () => { throw new Error('should not create on the existing fast path') } },
+      on: (_e: string, cb: (p: { agent: unknown; status: string }) => void) => {
+        cb({ agent: existing, status: 'idle' }) // ← 回传真引用（waitAgentIdle 的同一性判据）
+        return () => {}
+      },
+    } as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'u1@im.wechat',
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    // 🔴 方向断言：ensure 即便失败，**本轮仍产出答案**（"不影响处理"是逐字承诺）
+    // 🔴 方向断言：挂段失败（降级）后，**本轮仍产出答案**（"不影响处理"是逐字承诺）
+    //    —— 且降级不是静默的：工作台纪律改由 question 前缀注入（约束仍在场）。
+    expect(sent.some((t) => t.includes('答'))).toBe(true)
+    expect(asked.some((q) => q.includes('Serenity Session Workspace') && q.includes('你好'))).toBe(true)
+    // existing 快路径 = 历史延续 ⇒ 不发"新的对话已开始"通知
+    expect(sent.some((t) => t.includes('新的对话'))).toBe(false)
     // 注：本用例同时是 C 组与"existing 快路径"的 happy-path 正控（纪律 10）
-    expect(sent.length).toBeGreaterThan(0)
   })
 })
 
@@ -388,7 +423,7 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
 
 describe('weixin-bridge 分支：D 组 —— 媒体/答案回退', () => {
   it('D1 🔴 文件消息 fileName 为空串 ⇒ 降级文案出现**悬空空白**（真实缺口，如实钉住）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     // 真故障形态：**CDN 下载真失败**（非 200）——否则走 success 路径，根本到不了降级文案。
     // 🔴 本件首跑两次栽在这里，两次都是**我的注入选错分支**（见 commit message 的纪律沉淀）。
@@ -422,7 +457,7 @@ describe('weixin-bridge 分支：D 组 —— 媒体/答案回退', () => {
   })
 
   it('D1b 图片消息无 fileName（`fileName: undefined`）⇒ 「(未命名)」兜底**可达**（正控）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     __setWeixinFetchForTest(async (input) => {
       const url = typeof input === 'string' ? input : String(input)
@@ -451,7 +486,7 @@ describe('weixin-bridge 分支：D 组 —— 媒体/答案回退', () => {
   })
 
   it('D2 answer 为空 ⇒ 自动回发模式下不发送空消息（`:394`）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: string[] = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -478,7 +513,7 @@ describe('weixin-bridge 分支：D 组 —— 媒体/答案回退', () => {
   })
 
   it('D3 非 Error 抛出（`String(err)` 分支）→ 仍然静默并继续（`:425`）', async () => {
-    writeConfig({ enabled: true, routes: [{ user: '*', role: 'qa' }] })
+    writeConfig({ enabled: true, routes: [{ user: '*', trajectory: 'qa' }] })
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
 
     __setWeixinFetchForTest(async (input) => {

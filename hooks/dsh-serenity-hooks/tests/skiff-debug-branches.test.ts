@@ -26,12 +26,19 @@
  *   那组已**整组删除**，只保留下面真正未被覆盖的部分。
  *
  * ## 本件真正覆盖的对象（既有两文件都没碰的）
- * 全部落在 `handle()`（源 `:425-509`）——**`/ask` 的入参退化面与 handler 尾部**：
- *   · `:453`/`:454` `role` ／ `question` **非字符串/缺失** ⇒ `?? ''` 兜底
- *   · `:462` **空问题守卫**（`!question.trim()`）
- *   · `:508` **handler 顶层 catch** ⇒ 500 ＋ 可读原因
- *   · `:433` query string 剥除 ／ 非 GET//ask ⇒ 404
- *   · `:445` 体**不是对象**（解析成功但非 object —— 与"非法 JSON"是两条分支）
+ * 全部落在 `handle()`——**`/ask` 的入参退化面与 handler 尾部**（行号随源漂移，以**分支**为准）：
+ *   · `role` ／ `question` **非字符串/缺失** ⇒ `?? ''` 兜底
+ *   · **空问题守卫**（`!question.trim()`）
+ *   · **handler 顶层 catch** ⇒ 500 ＋ 可读原因
+ *   · query string 剥除 ／ 非 GET//ask ⇒ 404
+ *   · 体**不是对象**（解析成功但非 object —— 与"非法 JSON"是两条分支）
+ *
+ * ## 🔴 2026-10-19 重做对本件的影响（R↓，别照旧件改回来）
+ * `/ask` 的 `role` 字段自此**承载轨迹编码**（skiff ＝ 带 `skiff.json` 的轨迹），
+ * 解析失败文案由 `unknown role` 改为 `unknown skiff trajectory: <code> (…)`。
+ * ⇒ 造"合法角色"的办法随之从 `serenity.json` skiff.roles 换成 `makeTrajectory`；
+ * 不换的后果是**本文件要测的分支全部变成死代码**（请求在更上游就被拒，失败形态是
+ * "期望 500 得到 400"这类误报——看起来像守卫坏了，实则前提已不成立）。
  *
  * ## 🔴 本件为何要紧
  * · `:508` 顶层 catch 是这个面「**绝不把异常泄成连接重置**」的唯一执行点。
@@ -45,12 +52,17 @@
  * · **端口纪律**：全部 `port: 0`（**绝不占用 3099 —— 那是 skiff 调试面生产端口**）。
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { request } from 'node:http'
 
 import { startSkiffDebugServer, stopSkiffDebugServer, skiffDebugPort } from '../src/role/skiff/debug.js'
+// 🔴 2026-10-19 重做：skiff ＝ **带 `skiff.json` 的认知轨迹**。旧件靠写
+//    `serenity.json` 的 `skiff.roles` 造"合法角色"，该段已退役 ⇒ 读到恒空 ⇒ 请求在
+//    轨迹解析那一步就被拒，下游分支（空问题守卫 / 顶层 catch）**根本没被走到**。
+//    ⇒ 造 skiff 走夹具（唯一入口），于是这些退化面重新可达。
+import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string
 
@@ -90,13 +102,15 @@ function httpReq(port: number, method: string, path: string, raw?: string): Prom
   })
 }
 
-/** 写入一个有 `qa` 角色的 CCC 配置（裸 `dir` 无角色 ⇒ 会被 `unknown role` 先拦掉） */
-function writeQaRole(): void {
-  mkdirSync(join(dir, '.opencode'), { recursive: true })
-  writeFileSync(
-    join(dir, '.opencode', 'serenity.json'),
-    JSON.stringify({ skiff: { roles: { qa: { msms: ['x'], systemPrompt: 'p' } } } }),
-  )
+/**
+ * 在裸 `dir` 里造一条 skiff 轨迹（编码 `qa`）。
+ *
+ * 🔴 没有它 ⇒ 任何 `/ask` 请求都会先被"未知轨迹编码"拦下 ⇒ 本文件要测的**下游分支**
+ *    （空问题守卫 / 顶层 catch）一条都走不到（且失败形态是"期望 500 得到 400"这类误报）。
+ * ⚠️ `role` 字段自 2026-10-19 起承载**轨迹编码**，故夹具 code 即请求里的 `role` 值。
+ */
+function writeQaTrajectory(): void {
+  makeTrajectory(dir, 'qa', skiffJson({ msms: ['x'], systemPrompt: 'p' }))
 }
 
 /**
@@ -117,24 +131,30 @@ function agentProbe(): { ctx: unknown; creates: () => number } {
 
 describe('skiff-debug 退化面：`/ask` 入参校验（拒绝时**绝不创建 agent**）', () => {
   it('🔴 `:453`/`:454` role 与 question **非字符串/缺失** ⇒ 走 `?? ""` 兜底 ⇒ 400', async () => {
+    writeQaTrajectory() // 有合法轨迹 ⇒ 下面的"编码非法"拒绝不会被误认成"缺轨迹"
     const probe = agentProbe()
     const port = await startEphemeral(probe.ctx)
 
-    // role 非字符串 ⇒ `roleName = ''` ⇒ `!roleName` ⇒ 400 unknown role（文案里 roleName 是空串）
+    // role 非字符串 ⇒ `code = ''` ⇒ 无此编码 ⇒ 400（文案自 2026-10-19 起由 "unknown role" 改为轨迹编码文案）
     const badRole = await httpReq(port, 'POST', '/ask', JSON.stringify({ ccc: dir, role: 123, question: 'hi' }))
     expect(badRole.status).toBe(400)
-    expect(badRole.body).toContain('unknown role')
+    expect(badRole.body).toContain('unknown skiff trajectory')
+    // 判别性：它被**轨迹解析**拦下，**不是**被空问题守卫拦下（否则本条与下面那条同义）
+    expect(badRole.body).not.toContain('empty question')
 
     // question 非字符串 ⇒ `question = ''` ⇒ `!''.trim()` ⇒ 400 empty question
-    const badQ = await httpReq(port, 'POST', '/ask', JSON.stringify({ ccc: dir, role: 'ghost', question: 42 }))
+    // （🔴 用**真实存在的编码** `qa`：旧件此处用 `ghost`，那个请求其实死在轨迹解析上，
+    //   `?? ''` 这条兜底分支**从未被真正测到**——本轮把它补成真测。）
+    const badQ = await httpReq(port, 'POST', '/ask', JSON.stringify({ ccc: dir, role: 'qa', question: 42 }))
     expect(badQ.status).toBe(400)
+    expect(badQ.body).toContain('empty question')
 
     // 🔴 负控（纪律 ⑬）：以上两次拒绝**都没有碰过 agent 创建口**
     expect(probe.creates(), '被拒的请求绝不得创建 agent').toBe(0)
   })
 
   it('🔴 `:462` 空问题守卫：`question` **纯空白**（空格/制表/换行）⇒ 400 empty question', async () => {
-    writeQaRole() // 角色合法 ⇒ 必须由**空问题守卫**拦下（而不是被 unknown role 拦下）
+    writeQaTrajectory() // 轨迹合法 ⇒ 必须由**空问题守卫**拦下（而不是被"未知轨迹"拦下）
     const probe = agentProbe()
     const port = await startEphemeral(probe.ctx)
 
@@ -148,7 +168,7 @@ describe('skiff-debug 退化面：`/ask` 入参校验（拒绝时**绝不创建 
   })
 
   it('🔴 `:462` 守卫的**正控方向**：非空白问题**不得**被拦（否则"守卫生效"与"端点坏了"不可分）', async () => {
-    writeQaRole()
+    writeQaTrajectory()
     const port = await startEphemeral(agentProbe().ctx)
     // 用非空问题 ⇒ 守卫放行 ⇒ 继续走到 agent 创建口（该口故意抛）⇒ 由顶层 catch 收敛成 500。
     // 🔴 关键判据：**状态码不是 400，也不是 "empty question"** —— 证明它**越过了**空问题守卫。
@@ -160,7 +180,7 @@ describe('skiff-debug 退化面：`/ask` 入参校验（拒绝时**绝不创建 
 
 describe('skiff-debug 退化面：handler 顶层兜底与请求形状', () => {
   it('🔴 `:508` 顶层 catch：意外抛出 ⇒ **500 ＋ 可读原因**（不是连接重置、不是 400）', async () => {
-    writeQaRole()
+    writeQaTrajectory()
     // 真实故障形态：agent 创建口抛（宿主 agents 服务不可用 / 模型未配置）
     const port = await startEphemeral(agentProbe().ctx)
     const res = await httpReq(port, 'POST', '/ask', JSON.stringify({ ccc: dir, role: 'qa', question: 'q' }))

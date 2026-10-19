@@ -45,7 +45,7 @@ import {
 import { recordSkillInjections } from '../surface/usage.js'
 import { localstorePath, readGitTrack } from '../tools/localstore/service.js'
 import { readAdvancedSettings } from '../kernel/config.js'
-import { isSkiffSessionId } from '../role/skiff/config.js'
+import { isSkiffSession } from '../role/skiff/profile.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
 function readPersonaSettings(): { mode: string; overrideText: string } {
@@ -595,9 +595,10 @@ export function registerEntrySkillSectionGlobal(ctx: Context): void {
         const root = cccRootForCwd(cwd)
         if (!root) return ''
         const scope = agentScope(context)
-        // F4 Skiff：会话 id `skiff-` 前缀 → 不注入 ACC 默认系统提示词
-        // （Skiff 用 CCC 定义段全替换，scoped 'serenity-skiff' section 由 skiff-core 注册）
-        if (isSkiffSessionId(scope)) return ''
+        // skiff 会话：不注入 ACC 默认系统提示词（CCC 提示词段全替换，scoped 'serenity-skiff'
+        // section 由 skiff 会话核心注册）。
+        // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 `skiff-` id 前缀）。
+        if (isSkiffSession(root, scope)) return ''
         const base = serenitySystemPrompt(root, scope)
         const codeLine = codeModeAdaptationLine(ctx, context.scope)
         return codeLine ? `${base}\n${codeLine}` : base
@@ -633,9 +634,10 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
       name: 'serenity-entry',
       order: -50,
       text: (context) => {
-        // F4 Skiff：防御性跳过（scoped 注册由 context.ts 调用，skiff 已提前 return；
-        // 此处兜底确保任何路径下 skiff 会话都不注入 ACC 默认提示词）
-        if (isSkiffSessionId(scope)) return ''
+        // skiff：防御性跳过（scoped 注册由 context.ts 调用，skiff 已提前 return；
+        // 此处兜底确保任何路径下 skiff 会话都不注入 ACC 默认提示词）。
+        // 🔴 2026-10-19：判据 = 绑定轨迹有 `skiff.json`（不再是 id 前缀）。
+        if (isSkiffSession(root, scope)) return ''
         const base = serenitySystemPrompt(root, scope)
         const codeLine = codeModeAdaptationLine(agent.ctx, context.scope)
         return codeLine ? `${base}\n${codeLine}` : base

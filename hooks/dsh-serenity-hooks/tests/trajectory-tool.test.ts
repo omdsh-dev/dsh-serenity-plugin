@@ -510,105 +510,74 @@ describe('cognitive_trajectory：archive（🔴 唯一的"状态变化"，单向
  *
  * 核心判据 = **"所有能用编码操作的，都能用 UID 操作"**（本组第 2 条就是它的机械形式）。
  */
-describe('cognitive_trajectory：uid（唯一标识符，独立于编码与命名）', () => {
+describe('cognitive_trajectory：uid（🔴 2026-10-19 起写入退役、读取保留）', () => {
   const B_BODY = '# SESSION: beta\n- ID: S901\n'
 
-  it('设定 UID ⇒ 落成目录内的声明文件；未设定 ⇒ 读回 null（不是错误）', async () => {
+  it('未设定 ⇒ 读回 null（不是错误）；并回执说明写入已退役', async () => {
     writeSession(A_DIR)
-    // 未设定：读回 null
     const before = (await run({ action: 'uid', name: 'S900' })) as Record<string, unknown>
     expect(before.uid).toBeNull()
-    // 设定
-    const set = (await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })) as Record<string, unknown>
-    expect(set.uid).toBe('alpha-main')
-    // 文件真的落在轨迹目录内（owner："用文件形式声明在认知轨迹目录中"）
-    const f = join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID')
-    expect(existsSync(f), 'UID 必须是轨迹目录内的一个文件').toBe(true)
-    expect(readFileSync(f, 'utf-8').trim()).toBe('alpha-main')
+    expect(before.retired).toBe(true)
+    expect(String(before.note)).toContain('create --id')
   })
 
-  it('🔴 核心判据：所有能用编码操作的动作，同样接受 UID', async () => {
-    // 这条是 owner 需求里最硬的一句的机械形式。只测 show 不够 —— 要逐条点名。
+  it('🔴 任何写入尝试都被拒，且给出可行动指引（指向 create --id）', async () => {
+    writeSession(A_DIR)
+    // 值 / 空串（旧语义=清除）**都**拒绝：退役是"不再产生新标识"，
+    // 而"清除"也是写操作 —— 留一个半开的口子会长出两套语义。
+    for (const attempt of ['alpha-main', '']) {
+      await expect(
+        run({ action: 'uid', name: 'S900', uid: attempt }),
+        `uid="${attempt}" 应被拒（写入已退役）`,
+      ).rejects.toThrow(/retired/)
+    }
+    // 负控：文件**没有**被创建
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'))).toBe(false)
+  })
+
+  it('🔴 核心判据：遗留 UID 文件仍可指认（写入退役 ≠ 读取退役）', async () => {
+    // 这条守的是"能力不倒退"：S142 的 TRAJECTORY-UID 是**存量事实**，
+    // 退役写入不该把它变成不可用。文件直接写盘 = 模拟存量。
     writeSession(A_DIR)
     writeSession(B_DIR, B_BODY)
-    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'alpha-main\n', 'utf-8')
 
-    // show：用 UID 能读到同一条
-    const viaUid = (await run({ action: 'show', name: 'alpha-main' })) as string
-    const viaId = (await run({ action: 'show', name: 'S900' })) as string
-    expect(viaUid, 'show 用 UID 与用编码必须等价').toBe(viaId)
-
-    // use：用 UID 能激活
-    const used = (await run({ action: 'use', name: 'alpha-main', summary: '概' })) as Record<string, unknown>
-    expect(used.dir).toBe(A_DIR)
-
-    // uid 读回：用 UID 自己也能定位
+    // uid 读回
     const readBack = (await run({ action: 'uid', name: 'alpha-main' })) as Record<string, unknown>
     expect(readBack.uid).toBe('alpha-main')
-
-    // archive：用 UID 能归档
+    // show / use / archive 逐条点名（不只测 show —— 与退役前同一套判据）
+    const viaUid = (await run({ action: 'show', name: 'alpha-main' })) as string
+    const viaId = (await run({ action: 'show', name: 'S900' })) as string
+    expect(viaUid, 'show 用遗留 UID 与用编码必须等价').toBe(viaId)
+    const used = (await run({ action: 'use', name: 'alpha-main', summary: '概' })) as Record<string, unknown>
+    expect(used.dir).toBe(A_DIR)
     const arch = (await run({ action: 'archive', name: 'alpha-main' })) as Record<string, unknown>
     expect(arch.ok).toBe(true)
     expect(existsSync(join(ccc, 'AGENT_SESSIONS', '_archived', A_DIR))).toBe(true)
   })
 
-  it('UID 形态非法 ⇒ 拒（它要被逐字打出来交流，不容忍需转义的字符）', async () => {
+  it('🔴 遗留 UID 精确匹配仍大小写敏感（`Zulu` ≠ `zulu`）', async () => {
     writeSession(A_DIR)
-    // ⚠️ `''` 不在本组：空串是**清除**语义（回到用编码），不是"非法形态"。
-    //    第一版我把它混进来，得到"清除成功"而不是"拒绝" —— 那是测试写错，不是产品缺陷。
-    for (const bad of ['has space', '有中文', 'a/b', '-leading', 'x'.repeat(65)]) {
-      await expect(run({ action: 'uid', name: 'S900', uid: bad }), `"${bad}" 应被拒`).rejects.toThrow()
-    }
-  })
-
-  it('🔴 唯一性：重复 UID 被拒，且**不污染**既有的那一条（负控）', async () => {
-    writeSession(A_DIR)
-    writeSession(B_DIR, B_BODY)
-    await run({ action: 'uid', name: 'S900', uid: 'shared' })
-    await expect(run({ action: 'uid', name: 'S901', uid: 'shared' })).rejects.toThrow('已被')
-    // 负控：A 的 UID 文件必须原封不动、B 的不得生成
-    expect(readFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'utf-8').trim()).toBe('shared')
-    expect(existsSync(join(ccc, 'AGENT_SESSIONS', B_DIR, 'TRAJECTORY-UID'))).toBe(false)
-  })
-
-  it('清除（uid=""）⇒ 删除声明文件，回到用编码', async () => {
-    writeSession(A_DIR)
-    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
-    await run({ action: 'uid', name: 'S900', uid: '' })
-    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'))).toBe(false)
-    // 清除后仍可用编码操作（"不设定就还是用编码"）
-    expect((await run({ action: 'show', name: 'S900' })) as string).toContain('alpha')
-  })
-
-  it('🔴 UID 精确匹配是大小写敏感的（`Alpha` ≠ `alpha`）', async () => {
-    writeSession(A_DIR)
-    await run({ action: 'uid', name: 'S900', uid: 'Alpha' })
-    // 正控：精确大小写命中
-    expect((await run({ action: 'show', name: 'Alpha' })) as string).toContain('SESSION: alpha')
-    // 负控：小写**不命中 UID**。
-    // ⚠️ 但它仍会落到**模糊目录名匹配**（目录名含 `alpha`）⇒ 整体仍能解析到同一条 ——
-    //    这是**既有行为**（模糊分支在 UID 之前就存在），不是本改动引入的近似匹配。
-    //    所以要断言的是"UID 这条路没命中"，判据 = 去掉模糊分支时它会失败。
-    //    可机械验证的形态：用**目录名里不出现的**大小写变体。
-    await run({ action: 'uid', name: 'S900', uid: 'Zulu' })
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'Zulu\n', 'utf-8')
+    expect((await run({ action: 'show', name: 'Zulu' })) as string).toContain('SESSION: alpha')
     await expect(
       run({ action: 'show', name: 'zulu' }),
       '小写 zulu 不得命中 UID "Zulu"（也不含在目录名里 ⇒ 两条路都不该命中）',
     ).rejects.toThrow('Session not found')
   })
 
-  it('list 会印出已设定的 UID（它是用于交流的标识，得让人看得见）', async () => {
+  it('list 会印出遗留 UID（它是用于交流的标识，得让人看得见）', async () => {
     writeSession(A_DIR)
     expect((await run({ action: 'list' })) as string).not.toContain('[alpha-main]')
-    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
+    writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'alpha-main\n', 'utf-8')
     expect((await run({ action: 'list' })) as string).toContain('[alpha-main]')
   })
 
-  it('🔴 UID 不改变本体：目录名与 SESSION.md 逐字节不变（与 archive 同一条纪律）', async () => {
+  it('🔴 只读：查看 UID 不改本体（目录名与 SESSION.md 逐字节不变）', async () => {
     const md = writeSession(A_DIR)
     const before = readFileSync(md, 'utf-8')
-    await run({ action: 'uid', name: 'S900', uid: 'alpha-main' })
-    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR)), '目录名不得因设定 UID 而改').toBe(true)
+    await run({ action: 'uid', name: 'S900' })
+    expect(existsSync(join(ccc, 'AGENT_SESSIONS', A_DIR)), '目录名不得因查看 UID 而改').toBe(true)
     expect(readFileSync(md, 'utf-8'), 'SESSION.md 不得被改写').toBe(before)
   })
 })

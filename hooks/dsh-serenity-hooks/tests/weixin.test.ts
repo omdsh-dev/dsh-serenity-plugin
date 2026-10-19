@@ -57,7 +57,7 @@ import {
   __setWeixinFetchForTest,
 } from '../src/im/ilink.js'
 import {
-  weixinSessionIdFor,
+  weixinSessionIdForTrajectory,
   isWeixinSessionId,
   readWeixinSettings,
   readWeixinCredential,
@@ -78,6 +78,8 @@ import {
 import { registerSkiffSession, unregisterSkiffSession, skiffSessionSnapshot } from '../src/role/skiff/core.js'
 import { manualOutputFallbackNeeded } from '../src/im/bridge.js'
 import { registerWeixinOutputGuard } from '../src/im/guard.js'
+// 轨迹夹具（造 skiff 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `skiff.json` 里）
+import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string
 let oldConfigEnv: string | undefined
@@ -98,6 +100,11 @@ beforeEach(() => {
   process.env.SERENITY_HUMAN_CHANNEL_AUDIT = join(dir, 'human-channel-audit.jsonl')
   writeFileSync(join(dir, '.serenity'), 'test')
   mkdirSync(join(dir, '.opencode'), { recursive: true })
+  // 🔴 2026-10-19 重做后**路由目标必须是该 CCC 里真实存在的认知轨迹**（`findDirNameByCode`），
+  //    不再是"这个 CCC 配没配这个 skiff 角色" ⇒ 夹具默认造一条 `qa` 轨迹（有 `skiff.json`
+  //    ⇒ 它同时是一条 skiff 轨迹）。需要别的编码的用例各自另造（如 `zc`）；需要"目标不存在"
+  //    的用例（C4）写一个根本不存在的编码。
+  makeTrajectory(dir, 'qa', skiffJson({ tools: [], msms: [], systemPrompt: 'qa' }))
 })
 
 afterEach(async () => {
@@ -292,12 +299,14 @@ describe('weixin-api: 协议客户端（mock fetch）', () => {
 })
 
 describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
-  it('会话 id 固定可重建 + 前缀判定', () => {
-    const a = weixinSessionIdFor('userA@im.wechat')
-    const b = weixinSessionIdFor('userA@im.wechat')
-    const c = weixinSessionIdFor('userB@im.wechat')
-    expect(a).toBe(b)
-    expect(a).not.toBe(c)
+  it('会话 id 由**轨迹编码**派生 + 前缀判定（身份挂在轨迹上，不挂在微信用户上）', () => {
+    // 🔴 2026-10-19：旧派生是 `skiff-weixin-<sha256(微信用户 id)>`（"用户是一等公民"），
+    //    现派生是 `skiff-weixin-<轨迹编码>`。完整语义见 `weixin-session-identity.test.ts`。
+    const a = weixinSessionIdForTrajectory('qa')
+    const b = weixinSessionIdForTrajectory('qa')
+    const c = weixinSessionIdForTrajectory('zc')
+    expect(a).toBe(b)          // 同一条轨迹 ⇒ 恒同一条会话（跨调用稳定）
+    expect(a).not.toBe(c)      // 换轨迹 ⇒ 换会话
     expect(a).toMatch(/^skiff-weixin-/)
     expect(isWeixinSessionId(a)).toBe(true)
     expect(isWeixinSessionId('skiff-qa-xxx')).toBe(false)
@@ -307,19 +316,26 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     expect(readWeixinSettings(dir)).toEqual({ enabled: false, accounts: [], routes: [] })
   })
 
-  it('readWeixinSettings 读取配置 + 清洗非法项', () => {
+  it('readWeixinSettings 读取配置 + 清洗非法项（`role` 过渡别名仍读，统一映射为 `trajectory`）', () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       weixin: {
         enabled: true,
         accounts: [{ accountId: 'wechat-1', name: '家庭', enabled: true }, { accountId: '' }],
-        routes: [{ user: 'u1@im.wechat', role: 'qa' }, { user: '', role: 'x' }],
+        routes: [
+          { user: 'u1@im.wechat', trajectory: 'qa' },        // 新写法（canonical）
+          { user: 'u2@im.wechat', role: 'zc' },              // 旧写法（存量 CCC 不必同批迁移）
+          { user: '', role: 'x' },                           // 残缺行（无 user）→ 丢弃
+        ],
       },
     }))
     const s = readWeixinSettings(dir)
     expect(s.enabled).toBe(true)
     expect(s.accounts).toHaveLength(1)
     expect(s.accounts![0]!.accountId).toBe('wechat-1')
-    expect(s.routes).toHaveLength(1)
+    expect(s.routes).toHaveLength(2)
+    // 🔴 返回行一律带 `trajectory`：`role` 只在**读侧**作别名（存量配置不必同批改）
+    expect(s.routes![0]!.trajectory).toBe('qa')
+    expect(s.routes![1]!.trajectory).toBe('zc')
   })
 
   it('v1.30.10 autoReplyWithLastMessage 归一（缺省 = 自动回发；显式 false 才关）', () => {
@@ -351,8 +367,8 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     expect(readWeixinCredential(dir, 'wechat-1')).toBeNull()
   })
 
-  it('路由匹配：exact 优先，通配兜底，无命中 null', () => {
-    const routes = [{ user: 'a@im.wechat', role: 'r1' }, { user: '*', role: 'r2' }]
+  it('路由匹配：exact 优先，通配兜底，无命中 null（返回值 = 目标**轨迹编码**）', () => {
+    const routes = [{ user: 'a@im.wechat', trajectory: 'r1' }, { user: '*', trajectory: 'r2' }]
     expect(matchWeixinRoute(routes, 'a@im.wechat')).toBe('r1')
     expect(matchWeixinRoute(routes, 'b@im.wechat')).toBe('r2')
     expect(matchWeixinRoute([], 'a@im.wechat')).toBeNull()
@@ -419,9 +435,9 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     s = readWeixinSettings(dir)
     expect(s.accounts![0]!.name).toBe('n2')
     expect(s.accounts).toHaveLength(1)
-    saveWeixinRoutes(dir, [{ user: '*', role: 'qa' }])
+    saveWeixinRoutes(dir, [{ user: '*', trajectory: 'qa' }])
     s = readWeixinSettings(dir)
-    expect(s.routes![0]!.role).toBe('qa')
+    expect(s.routes![0]!.trajectory).toBe('qa')
     setWeixinEnabled(dir, true)
     expect(readWeixinSettings(dir).enabled).toBe(true)
     removeWeixinAccount(dir, 'wechat-1')
@@ -539,8 +555,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     // 配置：enabled + 路由 * → qa
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     // 凭据
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://ilinkai.weixin.qq.com' })
@@ -577,8 +592,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.16 autoReplyWithLastMessage=false → 桥不回发最终文本 + 每轮末尾注入机制标记（措辞归 CCC）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, autoReplyWithLastMessage: false, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, autoReplyWithLastMessage: false, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: Array<{ text: string }> = []
@@ -647,8 +661,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.17 fallbackOnNoSend=true + 闸门已装配 + 本轮未发送 → 桥兜底转发最终文本（source=reply-fallback）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, autoReplyWithLastMessage: false, fallbackOnNoSend: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, autoReplyWithLastMessage: false, fallbackOnNoSend: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: Array<{ text: string; contextToken?: string }> = []
@@ -689,8 +702,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.17 fallbackOnNoSend 缺省（false）→ 不兜底（严格静默，向后兼容）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, autoReplyWithLastMessage: false, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, autoReplyWithLastMessage: false, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: Array<{ text: string }> = []
@@ -717,8 +729,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.10 autoReplyWithLastMessage=true（显式）→ 仍自动回发（开关对照）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, autoReplyWithLastMessage: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, autoReplyWithLastMessage: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: Array<{ text: string }> = []
@@ -743,8 +754,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -769,8 +779,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('重启后会话已 live（DSH 恢复）→ live 复用直接回答，无"新对话"通知（v1.27.3 修复）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -783,8 +792,9 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     const { handleIncoming } = await import('../src/im/bridge.js')
     // 重启后：resume 报 "while it is live"、create 报 "already exists"、get 命中 live agent
+    // 🔴 会话 id 由**轨迹编码**派生 ⇒ live 的那条会话 id 就是 `skiff-weixin-qa`（与用户无关）
     const fromId = 'live@im.wechat'
-    const ctx = fakeCtx('live', weixinSessionIdFor(fromId))
+    const ctx = fakeCtx('live', weixinSessionIdForTrajectory('qa'))
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: fromId,
       item_list: [{ type: 1, text_item: { text: 'hi' } }],
@@ -793,14 +803,13 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent.some((s) => s.text.includes('新的对话'))).toBe(false)
     expect(sent.some((s) => s.text === '答案')).toBe(true)
     // 内存注册表已登记（后续消息走进程内延续）
-    expect([...skiffSessionSnapshot().keys()].some((id) => id === weixinSessionIdFor(fromId))).toBe(true)
+    expect([...skiffSessionSnapshot().keys()].some((id) => id === weixinSessionIdForTrajectory('qa'))).toBe(true)
   })
 
   it('图片消息 → CDN 下载解密 → 落盘 _tmp/weixin-inbound → question 注入路径 → 回复（媒体接收）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const key = Buffer.from('0123456789abcdef0123456789abcdef', 'hex')
     const jpg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46])
@@ -839,8 +848,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('文件消息 → 落盘（净化文件名）+ 注入存在性（无加密原样保存）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const plain = Buffer.from('hello file content')
     const sent: Array<{ text: string }> = []
@@ -871,8 +879,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('媒体下载失败 → 降级注入"下载失败"进对话（不静默）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -900,8 +907,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('媒体超 20MB → 降级注入"大小限制"进对话（不落盘）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const big = Buffer.alloc(20 * 1024 * 1024 + 1, 1)
     const sent: Array<{ text: string }> = []
@@ -938,8 +944,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('非文本消息 → 忽略', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
-      skiff: { roles: { qa: { systemPrompt: 'qa' } } },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = { agents: { create: async () => { throw new Error('should not create') } }, on: () => () => {} }
@@ -953,8 +958,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('语音消息（带服务端转写 voice_item.text）→ 按文本处理并回复', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -978,8 +982,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('语音无转写 → 降级提示（不静默、不创建会话）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
-      skiff: { roles: { qa: { systemPrompt: 'qa' } } },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -1004,8 +1007,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('正在输入：处理前 sendtyping 1，处理后 0（getconfig ticket 缓存一次）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const calls: Array<{ url: string; body?: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -1034,8 +1036,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.27.13 消息 hook：incoming + outgoing 双向触发（runner 捕获事件，不含凭据）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -1082,8 +1083,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.27.13 消息 hook：hook 失败不阻断微信桥（旁路容忍 H3）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { qa: { msms: [], tools: [], systemPrompt: 'qa' } } },
-      weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', role: 'qa' }] },
+      weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -1111,8 +1111,14 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.13：工作台纪律单一注入点——挂 skiff 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { zc: { msms: ['memory-tool'], tools: ['read', 'write', 'cognitive_trajectory', 'msm'], cognitiveTrajectory: { session: true, keeper: true, rebuild: true }, systemPrompt: '某角色' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'zc' }] },
+    }))
+    // 约束面不再写在 `serenity.json` 的 skiff 段里（该段已退役）——它住在 `zc` 轨迹目录的 `skiff.json`
+    const { dirName: zcDir } = makeTrajectory(dir, 'zc', skiffJson({
+      msms: ['memory-tool'],
+      tools: ['read', 'write', 'cognitive_trajectory', 'msm'],
+      cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
+      systemPrompt: '某角色',
     }))
     const sent: Array<{ text: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -1125,9 +1131,9 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     const { handleIncoming } = await import('../src/im/bridge.js')
     const fromId = 'user@im.wechat'
-    const sid = weixinSessionIdFor(fromId)
-    // 两段式真实场景：第一次 incoming（agent 首次创建 → createSkiffAgent 内 ensure + 注册进注册表）；
-    // 第二次 incoming（同用户 → getSkiffAgent 命中 existing 快路径）
+    const sid = weixinSessionIdForTrajectory('zc')
+    // 两段式真实场景：第一次 incoming（agent 首次创建 → createSkiffAgent 内挂段 + 注册进注册表）；
+    // 第二次 incoming（同一条轨迹 ⇒ getSkiffAgent 命中 existing 快路径）
     const ctx = fakeCtx('not-found')
     const msg: Parameters<typeof handleIncoming>[4] = {
       from_user_id: fromId,
@@ -1135,12 +1141,17 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     }
     // 第一次：create 路径
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
-    expect(readdirSync(join(dir, 'AGENT_SESSIONS')).some((n) => n.includes('zc skiff'))).toBe(true)
+    // 🔴 工作台 = **这条轨迹自己的 SESSION.md**（旧模型里 `createSkiffAgent` 另建一个
+    //    `zc skiff` 目录——那个"自动新建"的动作已随重做整件删除）⇒ 桥**不得**再落第三个目录。
+    const sessionDirs = readdirSync(join(dir, 'AGENT_SESSIONS'))
+    expect(sessionDirs).toContain(zcDir)
+    expect(sessionDirs).toHaveLength(2) // qa（beforeEach 造的）+ zc；桥没有另建
     expect([...skiffSessionSnapshot().keys()].some((id) => id === sid)).toBe(true)
     // 工作台纪律挂在 agent 系统提示词段（单一注入点）——question 不含（不再每轮重复）
     const wsSections = ctx.sections.filter((s) => s.name === 'serenity-skiff-workspace')
     expect(wsSections).toHaveLength(1)
-    expect(wsSections[0]!.text()).toContain('AUTO-BOUND')
+    // 段正文指向**该轨迹自己的** SESSION.md（旧文案里的 AUTO-BOUND 标记随旧模型退役）
+    expect(wsSections[0]!.text()).toContain(join(zcDir, 'SESSION.md'))
     // 动态 text()：每轮按 scope 读活跃 mdPath（绑定变化自动跟随，无需重挂）
     expect(wsSections[0]!.text()).toContain('AGENT_SESSIONS')
     expect(wsSections[0]!.text()).toContain('SESSION.md')
@@ -1158,8 +1169,13 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('v1.30.13：agent 无 systemPrompt 段 → 降级 question 前缀注入（约束必须在场）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      skiff: { roles: { zc: { msms: [], tools: ['read', 'cognitive_trajectory', 'msm'], cognitiveTrajectory: { session: true }, systemPrompt: '某角色' } } },
-      weixin: { enabled: true, routes: [{ user: '*', role: 'zc' }] },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'zc' }] },
+    }))
+    const { dirName: zcDir } = makeTrajectory(dir, 'zc', skiffJson({
+      msms: [],
+      tools: ['read', 'cognitive_trajectory', 'msm'],
+      cognitiveTrajectory: { session: true },
+      systemPrompt: '某角色',
     }))
     __setWeixinFetchForTest(async (input) => {
       const url = typeof input === 'string' ? input : String(input)
@@ -1174,7 +1190,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     }
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, msg)
     expect(ctx.sections).toHaveLength(0)
-    expect(ctx.questions.some((q) => q.includes('Serenity Session Workspace') && q.includes('AUTO-BOUND') && q.includes('你好'))).toBe(true)
+    // 降级注入的纪律块指向该轨迹自己的工作台（AUTO-BOUND 标记随旧模型退役）
+    expect(ctx.questions.some((q) => q.includes('Serenity Session Workspace') && q.includes(join(zcDir, 'SESSION.md')) && q.includes('你好'))).toBe(true)
   })
 })
 
@@ -1194,13 +1211,13 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
     return { sent, events }
   }
 
-  it('成功：主动发送（无 contextToken）+ outgoing hook 带 source=proactive + sessionId 复用该用户会话', async () => {
+  it('成功：主动发送（无 contextToken）+ outgoing hook 带 source=proactive + sessionId 复用该用户所路由的轨迹会话', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       weixin: {
         enabled: true,
         hook: 'scripts/hook.js',
         accounts: [{ accountId: 'wechat-1' }, { accountId: 'wechat-2' }],
-        routes: [{ user: '*', role: 'my-role' }],
+        routes: [{ user: '*', trajectory: 'my-role' }],
       },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })
@@ -1214,7 +1231,8 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
 
     const { sendProactiveText } = await import('../src/im/bridge.js')
     const r = await sendProactiveText({ root: dir, toUserId: 'u1@im.wechat', text: '**报告**已生成' })
-    expect(r).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u1@im.wechat', sessionId: weixinSessionIdFor('u1@im.wechat'), role: 'my-role' })
+    // 🔴 记录用的 sessionId = 该用户**所路由到的那条轨迹**的会话 id（记录里能按会话串联）
+    expect(r).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u1@im.wechat', sessionId: weixinSessionIdForTrajectory('my-role'), role: 'my-role' })
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ to: 'u1@im.wechat', text: '报告已生成' }) // md→plain
     expect(sent[0]!.contextToken).toBeUndefined() // 主动消息不带 context_token
@@ -1224,7 +1242,7 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
       source: 'proactive',
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
-      sessionId: weixinSessionIdFor('u1@im.wechat'),
+      sessionId: weixinSessionIdForTrajectory('my-role'),
       role: 'my-role',
       reply: '报告已生成',
     })
@@ -1235,7 +1253,7 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
       weixin: {
         enabled: true,
         accounts: [{ accountId: 'wechat-1' }, { accountId: 'wechat-2' }],
-        routes: [{ user: 'someone-else@im.wechat', role: 'my-role' }],
+        routes: [{ user: 'someone-else@im.wechat', trajectory: 'my-role' }],
       },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })

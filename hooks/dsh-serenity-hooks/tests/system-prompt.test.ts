@@ -17,6 +17,7 @@ import {
   codeModeAdaptationLine,
 } from '../src/seams/system-prompt.js'
 import { ACC_VERSION } from '../src/kernel/constants.js'
+import { makeSkiffSession } from './helpers/skiff-fixture.js'
 
 let dir: string
 
@@ -172,7 +173,7 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     expect((captured!.text as (c: unknown) => string)({})).toBe('')
   })
 
-  it('全局注册：Skiff 会话（session id `skiff-` 前缀）→ 空（角色 CCC 提示词全替换，F4b 旁路）', () => {
+  it('全局注册：skiff 会话（绑定轨迹有 skiff.json）→ 空（CCC 提示词全替换，F4b 旁路）', () => {
     let captured: { name: string; order: number; text: unknown } | null = null
     const fakeCtx = {
       systemPrompt: {
@@ -183,11 +184,32 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
     }
     registerEntrySkillSectionGlobal(fakeCtx as never)
     setupCccWithSkill('other-serenity')
-    const ctxSkiff = { agent: { session: { id: 'skiff-qa-readonly-uuid', header: { cwd: dir } } } }
+    // 🔴 2026-10-19：判据从「session id 前缀 `skiff-`」改为「绑定轨迹有 skiff.json」。
+    //    ⚠️ 这条改动**必须有负控**（下一句）：单靠"给个 skiff- 前缀的 id"已**不再**触发旁路
+    //    —— 如果只留正控，把判据改回前缀也照样绿，那就不是判据。
+    const SESSION = 'skiff-qa-readonly-uuid'
+    makeSkiffSession(dir, SESSION, 'qa-readonly')
+    const ctxSkiff = { agent: { session: { id: SESSION, header: { cwd: dir } } } }
     expect((captured!.text as (c: unknown) => string)(ctxSkiff)).toBe('')
     // 对照：普通会话仍注入
     const ctxNormal = { agent: { session: { id: 'main-1', header: { cwd: dir } } } }
     expect((captured!.text as (c: unknown) => string)(ctxNormal)).toContain('=== Serenity ACC ===')
+  })
+
+  it('🔴 负控：仅有 `skiff-` 前缀、但轨迹没有 skiff.json ⇒ **仍注入**（前缀不再是判据）', () => {
+    let captured: { name: string; order: number; text: unknown } | null = null
+    const fakeCtx = {
+      systemPrompt: {
+        section: (section: { name: string; order: number; text: unknown }) => {
+          captured = section
+        },
+      },
+    }
+    registerEntrySkillSectionGlobal(fakeCtx as never)
+    setupCccWithSkill('other-serenity')
+    // 前缀在、轨迹无 ⇒ 这是"普通认知轨迹"，必须照常拿到 ACC 身份
+    const ctx = { agent: { session: { id: 'skiff-prefix-only-no-profile', header: { cwd: dir } } } }
+    expect((captured!.text as (c: unknown) => string)(ctx)).toContain('=== Serenity ACC ===')
   })
 
   it('全局注册失败（重复 section 名）不抛错（try/catch 吞掉）', () => {
@@ -276,8 +298,10 @@ describe('system-prompt: scoped 注册变体 registerEntrySkillSection（⑤ 第
     expect(out).not.toBe('')
   })
 
-  it('🔴 scope 取自 agent.session.id：`skiff-` 前缀 ⇒ 空（角色提示词全替换的兜底闸）', () => {
+  it('🔴 兜底闸：scope 绑定的轨迹有 skiff.json ⇒ 空（CCC 提示词全替换）', () => {
     setupCccWithSkill('other-serenity')
+    // 🔴 2026-10-19：判据是轨迹上的 skiff.json，不是 id 前缀 —— 故这里要真造一条 skiff 轨迹
+    makeSkiffSession(dir, 'skiff-qa-readonly-probe-4', 'qa-readonly', undefined, 'probe')
     const { agent, captured } = fakeAgent('skiff-qa-readonly-probe-4', dir)
     registerEntrySkillSection(agent as never, dir)
     expect(captured()!.text({})).toBe('')

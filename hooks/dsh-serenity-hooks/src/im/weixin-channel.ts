@@ -12,7 +12,7 @@
  */
 
 import { readStore } from '../tools/localstore/service.js'
-import { readWeixinSettings, weixinSessionIdFor, matchWeixinRoute } from './route.js'
+import { readWeixinSettings, weixinSessionIdForTrajectory, matchWeixinRoute, sanitizeFileName } from './route.js'
 import { sendProactiveText, weixinBridgeStatus, resolveWeixinAccount } from './bridge.js'
 import { sendFileMessage, sendTextMessage } from './ilink.js'
 import { invokeWeixinHook, buildOutgoingHookEvent } from './hook.js'
@@ -113,13 +113,14 @@ export const weixinChannel: ImChannel = {
     }
     // 记录（与对话回复同源；source=proactive + file 元数据——CCC 侧只读勿改）
     if (settings.hook) {
-      const role = matchWeixinRoute(settings.routes ?? [], input.userId) ?? ''
+      // 会话 id = 该用户当前路由到的**轨迹**（与真实对话同一条轨迹）
+      const trajectory = matchWeixinRoute(settings.routes ?? [], input.userId) ?? ''
       void invokeWeixinHook(input.root, settings.hook, buildOutgoingHookEvent({
         cccRoot: input.root,
         accountId: account.accountId,
         userId: input.userId,
-        sessionId: weixinSessionIdFor(input.userId),
-        role,
+        sessionId: weixinSessionIdForTrajectory(trajectory !== '' ? trajectory : sanitizeFileName(input.userId) || 'unknown'),
+        role: trajectory,
         reply: input.caption ? `[文件] ${sent.fileName} — ${input.caption}` : `[文件] ${sent.fileName}`,
         source: 'proactive',
         file: { name: sent.fileName, size: sent.size, ...(input.caption ? { caption: input.caption } : {}) },
@@ -146,7 +147,9 @@ export const weixinChannel: ImChannel = {
         lastPollAt: account.lastPollAt,
         ...(account.lastError ? { lastError: account.lastError } : {}),
       })))
-    const routes: ImJson[] = (settings.routes ?? []).map((route) => ({ user: route.user, role: route.role }))
+    // 🔴 2026-10-19：路由目标从「skiff 角色名」改为**认知轨迹编码**。
+    // `role` 键名保留（下游 hook/台账形状不变），值 = 轨迹编码。
+    const routes: ImJson[] = (settings.routes ?? []).map((route) => ({ user: route.user, role: route.trajectory }))
     return {
       enabled: settings.enabled === true,
       autoReplyWithLastMessage: settings.autoReplyWithLastMessage !== false,

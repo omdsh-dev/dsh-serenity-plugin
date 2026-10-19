@@ -23,8 +23,8 @@ import { type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { marked } from 'marked'
-import { readSkiffRoles } from './config.js'
-import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffCognitiveTrajectoryEntry } from './core.js'
+import { readSkiffProfileByCode, SKIFF_PROFILE_FILENAME } from './profile.js'
+import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession } from './core.js'
 import { readCheapWorkerConfig } from '../../kernel/ccc.js'
 // C2（CCC 发现面归一）：候选 CCC 枚举的**唯一真相源**是 kernel/ccc-roots.ts；
 // 本模块的 `discoverCccs` 已删除（调用点改用 `listCccs`，见各 handle 分支）。
@@ -451,25 +451,27 @@ async function handle(
       }
       // 手工切换的 CCC（v1.25.4）；缺省回退默认绑定 root
       const ccc = typeof body.ccc === 'string' && body.ccc !== '' ? body.ccc : defaultRoot
-      const roleName = typeof body.role === 'string' ? body.role : ''
+      // 🔴 2026-10-19：选择项从「角色名」改为**轨迹编码**（skiff = 带 skiff.json 的轨迹）
+      const code = typeof body.role === 'string' ? body.role : ''
       const question = typeof body.question === 'string' ? body.question : ''
       const sessionId = typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : undefined
-      const roles = readSkiffRoles(ccc)
-      const role = roles.get(roleName)
-      if (!roleName || !role) {
-        sendJson(res, 400, { error: `unknown role: ${roleName} (ccc: ${ccc})` })
+      const profile = code !== '' ? readSkiffProfileByCode(ccc, code) : null
+      if (!profile) {
+        sendJson(res, 400, {
+          error: `unknown skiff trajectory: ${code} (no trajectory with code "${code}" has ${SKIFF_PROFILE_FILENAME} in ${ccc})`,
+        })
         return
       }
       if (!question.trim()) {
         sendJson(res, 400, { error: 'empty question' })
         return
       }
-      // 会话延续（v1.25.10，S142 用户：同一 qa 会话追问）：
+      // 会话延续（v1.25.10，S142 用户：同一会话追问）：
       // ① 无 sessionId → 新建（continued:false）
       // ② 有 sessionId：
-      //    a. 进程内命中（skiffAgents）→ 校验 (role, ccc) 绑定一致 → 复用（continued:true）
-      //    b. 未命中（重启后/不存在）→ 400「会话不可恢复，请新对话」（首版仅进程内延续）
-      //    c. 绑定不匹配（角色/容器切换残留）→ 400 提示（前端清 sessionId 重建）
+      //    a. 进程内命中（skiffAgents）→ 校验 (轨迹, ccc) 绑定一致 → 复用（continued:true）
+      //    b. 未命中（重启后/不存在）→ 400「会话不可恢复，请新对话」（仅进程内延续）
+      //    c. 绑定不匹配（轨迹/容器切换残留）→ 400 提示（前端清 sessionId 重建）
       let agent: Agent | undefined
       let continued = false
       if (sessionId) {
@@ -479,8 +481,8 @@ async function handle(
           sendJson(res, 400, { error: 'session is not recoverable (process restarted or session unknown) — start a new conversation' })
           return
         }
-        if (info.role !== roleName || info.ccc !== ccc) {
-          sendJson(res, 400, { error: `session "${sessionId}" belongs to role "${info.role}" in another CCC — start a new conversation` })
+        if (info.trajectoryDirName !== profile.dirName || info.ccc !== ccc) {
+          sendJson(res, 400, { error: `session "${sessionId}" belongs to trajectory "${info.trajectoryDirName}" in another CCC — start a new conversation` })
           return
         }
         agent = live
@@ -488,18 +490,16 @@ async function handle(
       }
       const hc = readCheapWorkerConfig(ccc)
       if (!agent) {
-        const ref = await createSkiffAgent(ctx, ccc, roleName, role, hc?.defaultModel)
+        const ref = await createSkiffAgent(ctx, ccc, profile, hc?.defaultModel)
         agent = ref.agent
       }
-      const result = await askSkiff(ctx, agent, question, 0)
+      const result = await askSkiff(ctx, agent, question)
       // v1.25.9：answer_html = marked 服务端渲染（页面直接 innerHTML；answer 保留原文兜底）
-      // v1.25.10：continued 标记 + 全量轨迹（eventsStart=0 默认，页面重绘完整时间线）
       sendJson(res, 200, {
         answer: result.answer,
         answer_html: renderSkiffMarkdown(result.answer),
         sessionId: result.sessionId,
         continued,
-        cognitiveTrajectory: result.cognitiveTrajectory,
       })
       return
     }

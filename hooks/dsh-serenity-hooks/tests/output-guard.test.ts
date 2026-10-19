@@ -16,6 +16,8 @@ import {
 } from '../src/guard/filter.js'
 import { registerOutputGuardHook } from '../src/guard/seam.js'
 import { stripThink } from '../src/role/skiff/debug.js'
+import { resetSkiffSessions, registerSkiffSession } from '../src/role/skiff/registry.js'
+import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string
 
@@ -36,10 +38,18 @@ beforeEach(() => {
       { name: 'vlm-describe', script: 'vlm-describe.ts' },
     ],
   }))
+  // 🔴 2026-10-19：输出守卫的「外部面」判据不再是 sessionId 的 `skiff-` 前缀，而是
+  //    「**该会话绑定的轨迹有 `skiff.json`**」（`guard/seam.ts` 的 `isSkiffSession`）。
+  //    ⇒ 下方两个默认夹具会话必须**真的挂到一条 skiff 轨迹上**，否则它们会被判成
+  //    本地维护会话（豁免）⇒ 打回类用例会集体假红。
+  const { dirName } = makeTrajectory(dir, 'qa', skiffJson({ tools: [] }))
+  registerSkiffSession('skiff-qa-uuid', dirName, dir)     // turn-stopping 组默认夹具
+  registerSkiffSession('skiff-edge-uuid', dirName, dir)   // 边界与失败路径组默认夹具
 })
 
 afterEach(() => {
   rebukeStates.clear()
+  resetSkiffSessions() // 进程级注册表：会话 → 轨迹，用例间必须复位
   rmSync(dir, { recursive: true, force: true })
 })
 

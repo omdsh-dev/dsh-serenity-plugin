@@ -42,7 +42,7 @@ import { MAIN_WEB_PORT, SKIFF_DEBUG_PORT } from './kernel/ports.js'
 import { hostSessions, hostWebServer } from './host/access.js'
 import { hostContractReport, summarizeHostContract } from './host/contract.js'
 import { readDshVersion } from './surface/status.js'
-import { readSkiffRoles } from './role/skiff/config.js'
+import { listSkiffProfiles } from './role/skiff/profile.js'
 import { registerSettingsSection, readSimpleSettings, SERENITY_SETTINGS_NS } from './surface/settings.js'
 import { registerGateway } from './gateway/server.js'
 import { registerRebuildTurnHook } from './trajectory/rebuild.js'
@@ -736,9 +736,10 @@ async function resolveSkiffRoot(ctx: Context): Promise<string | null> {
   } catch {
     /* 遍历失败忽略 */
   }
-  // ① 含 skiff.roles 的 live CCC 优先（绑定用户配置了角色的 CCC）
+  // ① 有 skiff 轨迹的 live CCC 优先（绑定用户确实在用 skiff 的 CCC）
+  // 🔴 2026-10-19：数据源从 `skiff.roles` 改为扫轨迹的 `skiff.json`。
   for (const r of liveRoots) {
-    if (readSkiffRoles(r).size > 0) return r
+    if (listSkiffProfiles(r).length > 0) return r
   }
   // ② 进程 cwd（服务器启动目录通常即 CCC）
   const fromCwd = cccRootForCwd(process.cwd())

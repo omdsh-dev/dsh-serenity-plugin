@@ -4,6 +4,11 @@
  * 契约：
  *  - `sessionIdOf` 对 Agent / Session / 事件负载三类形状都取得到 id（未知形状 → null）
  *  - `cleanupSessionState` 清 skiff 注册表与活跃 SESSION 作用域，且幂等
+ *
+ * 🔴 2026-10-19 skiff 重做对本文件的唯一影响：`registerSkiffSession` 的**第 2 参是轨迹目录名**
+ * （不再是角色名），`skiffSessionInfo` 回 `{ trajectoryDirName, ccc }`（不再是 `{ role, ccc }`）。
+ * 本文件只验"注册 ⇄ 清理"这条生命周期，**不**依赖 skiff 判据（判据在 `role/skiff/profile.ts`，
+ * 其测试见 `tests/skiff-core.test.ts`）⇒ 这里用目录名常量即可，无需造真实轨迹目录。
  *  - `registerLifecycle` 订阅 `agent/disposed` + `session/disposed`，并在销毁时执行清理；
  *    事件通道缺失 / ctx.effect 缺失都不抛错（apply 不可成为启动单点）
  */
@@ -46,6 +51,9 @@ import { setActiveSessionInfo, getActiveSessionInfo } from '../../src/trajectory
 
 const fakeAgent = { id: 'a1' } as never
 
+/** skiff 绑定指向的**轨迹目录名**（🔴 2026-10-19：不再是角色名，见文件头契约注） */
+const TRAJ_DIR = '2026-10-19--qa--traj'
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -71,13 +79,13 @@ describe('seams/lifecycle: sessionIdOf', () => {
 
 describe('seams/lifecycle: cleanupSessionState', () => {
   it('清 skiff 注册表 + 活跃 SESSION 作用域（幂等）', () => {
-    registerSkiffSession('skiff-lifecycle-1', 'my-role', '/ccc', fakeAgent)
+    registerSkiffSession('skiff-lifecycle-1', TRAJ_DIR, '/ccc', fakeAgent)
     setActiveSessionInfo('skiff-lifecycle-1', {
       sessionId: 'S999',
       dirName: 'x',
       mdPath: '/ccc/AGENT_SESSIONS/x/SESSION.md',
     })
-    expect(skiffSessionInfo('skiff-lifecycle-1')).toEqual({ role: 'my-role', ccc: '/ccc' })
+    expect(skiffSessionInfo('skiff-lifecycle-1')).toEqual({ trajectoryDirName: TRAJ_DIR, ccc: '/ccc' })
     expect(getActiveSessionInfo('skiff-lifecycle-1')).not.toBeNull()
 
     cleanupSessionState('skiff-lifecycle-1')
@@ -118,11 +126,11 @@ describe('seams/lifecycle: registerLifecycle', () => {
     expect(names).toContain('session/disposed')
     expect(ctx.effect).toHaveBeenCalledTimes(1)
 
-    registerSkiffSession('skiff-lifecycle-2', 'my-role', '/ccc', fakeAgent)
+    registerSkiffSession('skiff-lifecycle-2', TRAJ_DIR, '/ccc', fakeAgent)
     ctx.emit('agent/disposed', { agent: { session: { id: 'skiff-lifecycle-2' } } })
     expect(skiffSessionInfo('skiff-lifecycle-2')).toBeNull()
 
-    registerSkiffSession('skiff-lifecycle-3', 'my-role', '/ccc', fakeAgent)
+    registerSkiffSession('skiff-lifecycle-3', TRAJ_DIR, '/ccc', fakeAgent)
     ctx.emit('session/disposed', { id: 'skiff-lifecycle-3' })
     expect(skiffSessionInfo('skiff-lifecycle-3')).toBeNull()
   })

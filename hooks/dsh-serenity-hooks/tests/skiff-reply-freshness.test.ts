@@ -52,7 +52,11 @@ describe('askSkiff：本轮答案必须来自本轮（复读缺陷回归钉）',
     const agent = makeAgent(events, () => {
       events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '本轮的答案' }] } } })
     })
-    const r = await askSkiff(ctxIdle(agent), agent, 'q', undefined, { timeoutMs: 2000 })
+    // 🔴 2026-10-19：`askSkiff` 的签名已是 `(ctx, agent, question, options?)` ——
+    //    旧的第 5 参 `{ includeCognitiveTrajectory }`（连同 `serenity.json` 的 `skiff.roles`
+    //    配置面）随 skiff 重做整体退役 ⇒ 继续写旧形只会让 `options` 变 undefined，
+    //    落进 180s 的缺省上限 ⇒ 表现为**用例超时**（而不是断言失败，更难定位）。
+    const r = await askSkiff(ctxIdle(agent), agent, 'q', { timeoutMs: 2000 })
     expect(r.answer).toBe('本轮的答案')
   })
 
@@ -63,7 +67,7 @@ describe('askSkiff：本轮答案必须来自本轮（复读缺陷回归钉）',
       { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '上一轮的答案' }] } } },
     ]
     const agent = makeAgent(events) // followup 什么都不推（模拟本轮跑了但没产出/被 guard 全拒）
-    const r = await askSkiff(ctxNoIdle, agent, 'q', undefined, { timeoutMs: 150 })
+    const r = await askSkiff(ctxNoIdle, agent, 'q', { timeoutMs: 150 })
     expect(r.answer).toBe('')
   })
 
@@ -71,7 +75,7 @@ describe('askSkiff：本轮答案必须来自本轮（复读缺陷回归钉）',
     const events: unknown[] = []
     const agent = makeAgent(events)
     const t0 = Date.now()
-    const r = await askSkiff(ctxNoIdle, agent, 'q', undefined, { timeoutMs: 120 })
+    const r = await askSkiff(ctxNoIdle, agent, 'q', { timeoutMs: 120 })
     expect(r.answer).toBe('')
     expect(Date.now() - t0).toBeLessThan(3000)
   })

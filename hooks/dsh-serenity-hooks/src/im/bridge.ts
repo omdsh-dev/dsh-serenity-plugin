@@ -37,11 +37,11 @@ import {
 } from './inbound.js'
 // 机器级配置的**唯一读取入口**（P0-1 起 `humanChannel` 随它一起出）⇒ 天然热生效（方案 Q8）
 import { readSimpleSettings, type HumanChannelSettings } from '../surface/settings.js'
-import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, currentSessionIdFor, discardCurrentSessionGen, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
+import { readWeixinSettings, readWeixinCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
-import { readSkiffRoles, type SkiffRoleConfig } from '../role/skiff/config.js'
+import { readSkiffProfileByCode, type SkiffProfile } from '../role/skiff/profile.js'
 import { stripThink } from '../role/skiff/debug.js'
-import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, currentWorkspaceMdPath, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection } from '../role/skiff/core.js'
+import { createSkiffAgent, getSkiffAgent, askSkiff, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../role/skiff/core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'
@@ -236,13 +236,20 @@ async function resolveCccRootByAlias(ctx: Context, alias: string): Promise<strin
 }
 
 /**
- * 路由解析结果：目标根 ＋ 角色名 ＋ **角色配置**（三者一起给，避免调用方再读一次 skiff.roles）。
+ * 路由解析结果：目标根 ＋ **轨迹编码** ＋ **该轨迹的 skiff 约束面**。
  * `null` 从本函数出去 ⇒ **不投递**（未命中已留痕 ／ 目标不存在已响亮出声）。
  */
 interface ResolvedInboundTarget {
   root: string
-  roleName: string
-  role: SkiffRoleConfig
+  /** 目标认知轨迹编码（= 新模型里的"身份"；旧模型的角色名已退役） */
+  trajectory: string
+  /**
+   * 该轨迹的 skiff 约束面。
+   * ⚠️ **可能为 `null`**：轨迹存在但没有 `skiff.json` ⇒ 它是一条**普通轨迹**，
+   * 微信桥照样可以往里投（投进一条普通认知轨迹是合法的），只是不施加 skiff 约束。
+   * ⇒ 这与旧模型的关键差别：旧模型里"角色不存在"是硬错，新模型里"没有 skiff.json"不是错。
+   */
+  profile: SkiffProfile | null
 }
 
 /**
@@ -254,14 +261,14 @@ interface ResolvedInboundTarget {
  * 三档（方案 §3.1，**刻意分档**）：
  *  - **未命中** ⇒ 不投递 ＋ **留痕**（`console.warn`，静默档：这是"表里没有你"，不是错误）
  *  - **表残缺** ⇒ **响亮出声**（`console.error`；且**独立于是否命中**）
- *  - **目标不存在**（CCC ／ 角色）⇒ **响亮报错**（`console.error`；不静默丢弃）
+ *  - **目标不存在**（CCC ／ **轨迹**）⇒ **响亮报错**（`console.error`；不静默丢弃）
  *
  * @param input.cccFallback 过渡期回退（方案 Q5）；**机器级模式传 `null`** ⇒ 未命中即不投递
  */
 async function resolveInboundTarget(ctx: Context, input: {
   account: string
   user: string
-  cccFallback: { root: string; role: string } | null
+  cccFallback: { root: string; trajectory: string } | null
 }): Promise<ResolvedInboundTarget | null> {
   const route: InboundRoutePlan = planInboundRoute({
     subscriptions: readSimpleSettings().humanChannel.subscriptions,
@@ -270,7 +277,7 @@ async function resolveInboundTarget(ctx: Context, input: {
     // 🔴 回退目标的 `ccc` 装的是**本 CCC 的绝对路径**（不是别名）—— 计划层两种写法都收
     //    （先按别名匹配、再按根匹配），故此处无需解析；`source === 'ccc-fallback'` 时
     //    下面**跳过**枚举查找，直接把 `target.ccc` 当根用。
-    fallback: input.cccFallback ? { ccc: input.cccFallback.root, role: input.cccFallback.role } : null,
+    fallback: input.cccFallback ? { ccc: input.cccFallback.root, role: input.cccFallback.trajectory } : null,
   })
 
   // 表残缺 ⇒ **响亮出声**（与"未命中"分档：笔误必须有人去改）
@@ -303,14 +310,22 @@ async function resolveInboundTarget(ctx: Context, input: {
     appendHumanChannelAudit({ kind: 'inbound-target-missing', account: input.account, user: input.user, ccc: target.ccc, role: target.role, detail })
     return null
   }
-  const role = readSkiffRoles(root).get(target.role)
-  if (!role) {
-    const detail = `目标 CCC "${target.ccc}" 未定义 skiff 角色 "${target.role}"`
-    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${input.account} user=${input.user}）—— 该消息**未投递**，请改订阅表或该 CCC 的 skiff.roles`)
+  // ③ 目标**轨迹**不存在 ⇒ 响亮报错。
+  // 🔴 2026-10-19：目标从「skiff 角色名」改为「**认知轨迹编码**」。
+  //    ⇒ 判据也换了：不是"这个 CCC 有没有配这个角色"，而是"**这个 CCC 里有没有这条轨迹**"。
+  //    ⚠️ **与旧模型的关键差别**：轨迹存在但没有 `skiff.json` **不是错** ——
+  //       那只是一条普通轨迹，微信桥照样可以往里投（只是不施加 skiff 约束）。
+  //       "没有这条轨迹"才是硬错（否则会静默投到一个不存在的地方）。
+  const { findDirNameByCode } = await import('../role/skiff/profile.js')
+  const dirName = findDirNameByCode(root, target.role)
+  if (dirName === null) {
+    const detail = `目标 CCC "${target.ccc}" 内没有编码为 "${target.role}" 的认知轨迹`
+    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${input.account} user=${input.user}）—— 该消息**未投递**，请改订阅表里的目标编码`)
     appendHumanChannelAudit({ kind: 'inbound-target-missing', account: input.account, user: input.user, ccc: target.ccc, role: target.role, detail })
     return null
   }
-  return { root, roleName: target.role, role }
+  const profile = readSkiffProfileByCode(root, target.role)
+  return { root, trajectory: target.role, profile }
 }
 
 /**
@@ -368,15 +383,15 @@ export async function handleIncoming(
     resolved = preset.target // 机器级模式：目标已解析（且**不看本 CCC 的 enabled**）
   } else {
     if (!settings.enabled) return
-    const cccRole = matchWeixinRoute(settings.routes ?? [], fromUserId)
+    const cccTarget = matchWeixinRoute(settings.routes ?? [], fromUserId)
     resolved = await resolveInboundTarget(ctx, {
       account: accountId,
       user: fromUserId,
-      cccFallback: cccRole ? { root, role: cccRole } : null,
+      cccFallback: cccTarget ? { root, trajectory: cccTarget } : null,
     })
   }
   if (!resolved) return // 未命中／目标不存在 ⇒ 已留痕／已出声，两者都**不投递**
-  const { roleName, role } = resolved
+  const { trajectory, profile } = resolved
   // 🔴 此后本函数的 `root` 语义 = **投递目标根**：回退模式下恒 === 入参 root；
   //    机器级模式下由订阅表指定（`handleMachineIncoming` 已把入参传成该根）。
   root = resolved.root
@@ -396,45 +411,32 @@ export async function handleIncoming(
   }
 
   try {
-    // 🔴 会话 id 分两层（owner 2026-10-19 令「没有 skiff 会话就自动新建一个」）：
-    //   `baseId` = 用户身份派生（weixinSessionIdFor，同用户恒定）；
-    //   `sessionId` = 当代身份（`baseId` 或 `baseId-g<n>`，载体缺失时换代）。
-    const baseId = weixinSessionIdFor(fromUserId)
-    let sessionId = currentSessionIdFor(root, baseId)
+    // 🔴🔴 会话 id **由轨迹编码派生**（2026-10-19 重做：身份挂在轨迹上，不挂在用户上）。
+    //
+    // 旧派生 = `skiff-weixin-<sha256(用户)>` + 换代计数器（`.weixin-session-gen.json`）。
+    // 那套的语义是"用户是一等公民"：同一轨迹换个用户 = 另一条会话；
+    // 同一用户换轨迹 = 还是原来那条会话（⇒ 新轨迹的约束对不上旧会话的历史工具清单）。
+    //
+    // 新语义：**同一条轨迹 ⇒ 恒同一条 dsh 会话**；换轨迹 ⇒ 新会话。
+    // ⇒ 换代计数器**整件删除**：轨迹没了就该在路由层报"目标不存在"（响亮），
+    //    而不是静默换一个 id 续命（那正是旧的 `-g<n>` 干的事）。
+    const sessionId = weixinSessionIdForTrajectory(trajectory)
     const existing = getSkiffAgent(sessionId)
     const hc = readCheapWorkerConfig(root)
-    // v1.30.4：existing（进程内/重启后 live 复用）路径也走 ensureSkiffSession——
-    // create 路径由 createSkiffAgent 内 ensure；live/老 agent 快路径此前跳过 → 未绑定/未注入。
-    if (existing) {
-      try {
-        // 微信桥恒为持久身份（固定 skiff 会话 id）→ persistent=true
-        ensureSkiffSession(root, existing, roleName, role, true)
-      } catch (err) {
-        console.warn(`[serenity-hooks] weixin-bridge ensure 失败（不影响处理）: ${String((err as Error)?.message ?? err)}`)
-      }
+    // 无 `skiff.json` 的普通轨迹：用缺省级约束面（空白名单 ⇒ 工具面收窄到 0？
+    // ⛔ 不：`profile` 为 null 时**不施加任何 skiff 约束**，它就是一条普通认知轨迹。
+    //    但 `createSkiffAgent` 需要一个 profile 来立提示词段 —— 用编码造一个最小面。
+    const effective: SkiffProfile = profile ?? {
+      dirName: trajectory,
+      code: trajectory,
+      path: '',
+      tools: [],
+      msms: [],
+      cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
     }
-    // 🔴 v1.71.0（owner 2026-10-19：「没有 skiff 会话就自动新建一个」）：工作台失效 ⇒ **不复用旧会话**。
-    //   形态：owner 把某个 skiff 工作台归档后，agent 的 sessionId 仍是老的 ⇒ resume 旧 log ⇒
-    //   旧历史里的**工具清单**（老工具名）继续污染本轮 ⇒ 每次调用被角色白名单拒
-    //   （`tool not allowed in this skiff role`）⇒ 本轮无产出。用户看到的是「工具一直不刷新」。
-    //   判据：**工作台（SESSION.md）是否还在** —— 它是这个会话身份的载体；
-    //   载体没了就该起新身份，而不是让一个"指向已归档目录"的旧会话继续活着。
-    //   换代**落盘**（`.weixin-session-gen.json`）⇒ 跨进程重启仍然生效（只放内存的话重启会 resume 回去）。
-    let target = existing
-    if (existing) {
-      if (currentWorkspaceMdPath(sessionId) === null) {
-        console.warn(
-          `[serenity-hooks] weixin 工作台已不存在（可能被归档/删除）⇒ 丢弃旧会话并新建（旧=${sessionId}）`,
-        )
-        unregisterSkiffSession(sessionId)
-        target = undefined
-        sessionId = discardCurrentSessionGen(root, baseId)
-        console.warn(`[serenity-hooks] weixin 新会话 id = ${sessionId}`)
-      }
-    }
-    const ref = target
-      ? { agent: target, sessionId, resumed: true }
-      : await createSkiffAgent(ctx, root, roleName, role, hc?.defaultModel, sessionId)
+    const ref = existing
+      ? { agent: existing, sessionId, resumed: true }
+      : await createSkiffAgent(ctx, root, effective, hc?.defaultModel, sessionId)
 
     if (!ref.resumed) {
       // 真正首次（无持久化历史）→ 通知用户"新对话开始"（对齐 3100 问答页行为）；
@@ -495,10 +497,11 @@ export async function handleIncoming(
       // 桥不再每轮把它拼进 question（省 token + 不重复配置）。仅当该 agent 挂不上
       // 系统提示词段（返回 false）时降级为 question 前缀注入，保证约束仍在场。
       const parts: string[] = []
-      const activeWorkspace = getActiveSessionInfo(sessionId)
-      if (activeWorkspace?.mdPath) {
-        const sectionOk = ensureWorkspacePromptSection(ref.agent, sessionId)
-        if (!sectionOk) parts.push(workspaceCognitiveTrajectoryLine(activeWorkspace.mdPath))
+      // 工作台 = **该轨迹自己的 SESSION.md**（不再有"自动建一个"这回事）。
+      const workspaceMd = skiffWorkspaceMdPath(root, sessionId) ?? getActiveSessionInfo(sessionId)?.mdPath ?? null
+      if (workspaceMd) {
+        const sectionOk = ensureWorkspacePromptSection(ref.agent, sessionId, root)
+        if (!sectionOk) parts.push(workspaceCognitiveTrajectoryLine(workspaceMd))
       }
       // v1.30.10：关闭自动回发最终文本（weixin.autoReplyWithLastMessage: false）→
       // 每轮注入**机制标记**（事实 + 已填参数，措辞归 CCC——见 weixinManualOutputMarker 头注）。
@@ -512,7 +515,7 @@ export async function handleIncoming(
       if (manualOutput) {
         // v1.30.17：本轮开始 → 清空"已发送"标记（闸门只置位；桥在 askSkiff 后读它决定兜底）
         clearSentThisTurn(sessionId)
-        noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: roleName })
+        noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory })
         parts.push(weixinManualOutputMarker(root, accountId, fromUserId))
       } else {
         forgetManualOutputSession(sessionId)
@@ -528,7 +531,7 @@ export async function handleIncoming(
           accountId,
           userId: fromUserId,
           sessionId,
-          role: roleName,
+          role: trajectory,
           text,
           media: hookMedia,
         })).catch((err) => {
@@ -536,7 +539,7 @@ export async function handleIncoming(
         })
       }
 
-      const result = await askSkiff(ctx, ref.agent, question, undefined, { includeCognitiveTrajectory: false })
+      const result = await askSkiff(ctx, ref.agent, question)
       const answer = result.answer ?? ''
       // v1.30.10：手动输出模式——桥不转发最终文本（输出权归 agent，记录只记 agent 实际发出的
       // 消息，source=proactive）。系统类消息（新对话通知/语音提示）不受影响。
@@ -563,7 +566,7 @@ export async function handleIncoming(
           contextToken: msg.context_token,
         })
         console.warn(
-          `[serenity-hooks] ⚠ weixin 输出兜底：agent 本轮未发送（闸门打回用尽）→ 桥转发最终文本（session=${sessionId}, role=${roleName}）`,
+          `[serenity-hooks] ⚠ weixin 输出兜底：agent 本轮未发送（闸门打回用尽）→ 桥转发最终文本（session=${sessionId}, trajectory=${trajectory}）`,
         )
         if (hookRel) {
           void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
@@ -571,7 +574,7 @@ export async function handleIncoming(
             accountId,
             userId: fromUserId,
             sessionId,
-            role: roleName,
+            role: trajectory,
             reply,
             source: 'reply-fallback',
           })).catch((err) => {
@@ -600,7 +603,7 @@ export async function handleIncoming(
           accountId,
           userId: fromUserId,
           sessionId,
-          role: roleName,
+          role: trajectory,
           reply,
         })).catch((err) => {
           console.log(`[serenity-hooks] weixin hook outgoing error: ${err instanceof Error ? err.message : String(err)}`)
@@ -930,8 +933,10 @@ export async function sendProactiveText(input: ProactiveSendInput): Promise<Proa
   if (!account.ok) return account
   const { accountId, cred } = account
 
-  const sessionId = weixinSessionIdFor(toUserId)
-  const role = matchWeixinRoute(settings.routes ?? [], toUserId) ?? ''
+  // 记录用的会话 id：按**该用户当前路由到的轨迹**派生（与真实对话同一条轨迹，
+  // 记录里能直接按会话串联）。无路由 ⇒ 用用户标识兜底（仍可串联，只是没有轨迹语义）。
+  const trajectory = matchWeixinRoute(settings.routes ?? [], toUserId) ?? ''
+  const sessionId = weixinSessionIdForTrajectory(trajectory !== '' ? trajectory : sanitizeFileName(toUserId) || 'unknown')
   try {
     await sendTextMessage({ baseUrl: cred.baseUrl, token: cred.token, toUserId, text: input.text })
   } catch (err) {
@@ -944,14 +949,14 @@ export async function sendProactiveText(input: ProactiveSendInput): Promise<Proa
       accountId,
       userId: toUserId,
       sessionId,
-      role,
+      role: trajectory,
       reply: markdownToPlainText(input.text),
       source: 'proactive',
     })).catch((err) => {
       console.log(`[serenity-hooks] weixin hook outgoing(proactive) error: ${err instanceof Error ? err.message : String(err)}`)
     })
   }
-  return { ok: true, accountId, userId: toUserId, sessionId, role }
+  return { ok: true, accountId, userId: toUserId, sessionId, role: trajectory }
 }
 
 /**

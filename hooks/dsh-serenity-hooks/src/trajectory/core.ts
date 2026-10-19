@@ -187,13 +187,66 @@ function readAllSessions(sessionsDir: string): SessionEntry[] {
   }
 }
 
-/** 提取目录名中的会话 ID（S### 或 issue 名）；无匹配返回 '' */
-function extractSessionId(dirName: string): string {
-  const m = dirName.match(/--S(\d{3,})--/)
-  return m ? `S${m[1]}` : ''
+// ── 轨迹编码（code）：目录名固定位置的唯一标识 ──────────────────────────────
+//
+// 🔴 owner 2026-10-19（skiff 重做令，逐字）：「**认知轨迹固定唯一标识规则，固定为目录中的固定位置编码**；
+// 然后，**认知轨迹允许用户指定这个编码**（在约束范围内，不得包含中文）」。
+//
+// 旧模型是**二元**的：`S###`（自动递增、不可指定）＋ `TRAJECTORY-UID`（可选小文件，理由 = "命名会变"）。
+// owner 2026-10-19 追加令裁 **B 案**：**取消二元性** —— 编码就是唯一标识，可直接指定；
+// UID 的"独立于命名"那个理由被"编码本身稳定且可指定"覆盖 ⇒ **写入侧退役，读取侧保留**（存量仍可指认）。
+//
+// ## 形态：目录名 = `YYYY-MM-DD--<code>[--<desc>]`
+// 这就是"目录中的固定位置"：剥掉日期前缀后的**第一段**。issue 目录 `YYYY-MM-DD--<ticket>` 的 code 即 ticket。
+//
+// ⚠️ **编码内不得含 `--`**：它是本解析的分隔符 —— 含它就等于把"固定位置"这个前提破坏掉
+// （与"不得含中文"同一条理由：编码必须是**结构安全**的，不是"看起来像名字"）。
+
+/** 目录名的日期前缀（`createSession` 恒写；`isSessionDirName` 同源判据） */
+const DIR_DATE_PREFIX_RE = /^\d{4}-\d{2}-\d{2}--/
+
+/** 合法编码：`[A-Za-z0-9]` 开头，其后 `[A-Za-z0-9._-]`，≤64，**不含 `--`** */
+const CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
+
+/**
+ * 校验轨迹编码形态。**这是写入侧（create --id）与外部输入的唯一闸门。**
+ *
+ * 判据三条（R↓）：
+ * ① `CODE_PATTERN` —— 只允许交流安全字符：编码会被逐字打在命令、消息、日志里，
+ *    含空格/引号/中文会在 shell、JSON、markdown 各需一套转义（旧 UID 的同一条理由，D158）；
+ * ② **不得含 `--`** —— 目录名解析用它当分隔符（见上）；
+ * ③ 长度上限 64（同旧 UID；够长以致不会撞名，够短以致能打出来）。
+ *
+ * ⚠️ 大小写**敏感**：`S142` 与 `s142` 是两个不同编码（编码不是近似匹配语义）。
+ */
+export function isValidTrajectoryCode(code: string): boolean {
+  return CODE_PATTERN.test(code) && !code.includes('--')
 }
 
-// ── 唯一标识符（UID）──
+/**
+ * 从目录名解析轨迹编码（固定位置 = 剥掉日期前缀后的第一段）。
+ *
+ * @returns 编码；目录名不带日期前缀（非本工具建的 / 损坏）→ `null`
+ */
+export function parseTrajectoryCode(dirName: string): string | null {
+  if (!DIR_DATE_PREFIX_RE.test(dirName)) return null
+  const rest = dirName.replace(DIR_DATE_PREFIX_RE, '')
+  const sep = rest.indexOf('--')
+  const code = sep === -1 ? rest : rest.slice(0, sep)
+  return code === '' ? null : code
+}
+
+/**
+ * 展示用会话 ID（`list` 面板 / 绑定记录的 `sessionId` 字段）。
+ *
+ * 🔴 2026-10-19 起**编码即 ID**，不再只认 `S###` —— 旧实现只匹配 `--S(\d{3,})--`，
+ * 自定义编码（owner 令允许的那类）会全被渲染成空串。无编码 → `''`（不是目录名：调用方各有回退）。
+ */
+function extractSessionId(dirName: string): string {
+  return parseTrajectoryCode(dirName) ?? ''
+}
+
+// ── 唯一标识符（UID）——🔴 2026-10-19 起**只读兼容**（写入侧退役，见文件上方 owner 令）──
 
 /**
  * UID 的声明文件名（**固定名、住在轨迹目录内**）。
@@ -211,21 +264,34 @@ function extractSessionId(dirName: string): string {
  * | **独立小文件**（选定） | 与目录名、SESSION.md **都解耦**；改标识符不动正文、不动目录名；删文件即"回到用编码" |
  *
  * ## 语义边界（R↓）
- * - **可选**：文件不存在 ⇒ 用编码（`S###`），**不是错误**。
+ * - **可选**：文件不存在 ⇒ 用编码，**不是错误**。
  * - **只用于"被指认"**：它是 `findSession` 的一个**解析分支**，不参与排序、不参与展示优先级、
  *   **不改变**目录名与 SESSION.md 一个字节（与 `archive` 同一条纪律：只换指认方式，不动本体）。
- * - **唯一性**：由 `setTrajectoryUid` 在写入时保证（重复即拒绝）。读取侧不做全表唯一性断言 ——
- *   外部手工造的重复应由写入侧拦，读取侧只能"第一个命中"，那是注入侧的职责不是解析侧的。
+ *
+ * ## 🔴 2026-10-19：**写入侧退役，读取侧保留**
+ *
+ * owner 追加令裁 B 案：「取消 `S###` 与 UID 的二元性 —— 编码就是唯一标识，用户可指定」。
+ * UID 当初存在的**唯一理由**是「命名很可能由于变化而变化」（D158），而现在的编码
+ * **本身就稳定且可指定**（`create --id`）⇒ 该理由被覆盖 ⇒ **二元性取消**。
+ *
+ * 处置（**不对称，刻意**）：
+ * - **写**：`setTrajectoryUid()` **已删除**（`uid` 动作改为报"已退役"并指向 `create --id`）；
+ * - **读**：本文件与 `findSession` 的 UID 分支**保留** —— 存量文件（本仓 = S142 的
+ *   `serenity-acc-maintainer`）仍能按它指认，**不因退役而失去能力**。
+ *
+ * ⚠️ **为什么不物理删除那些文件**：删了就丢掉一个仍在被读的指认通道（能力倒退），
+ * 而保留的成本是零（文件不存在 ⇒ `readFileSync` 失败 ⇒ null）。
+ * 判据：**退役的是"产生新标识"这种能力，不是"旧标识还在被用"这个事实。**
  */
 export const UID_FILENAME = 'TRAJECTORY-UID'
 
-/** UID 合法形态：**保守**（只允许交流安全的字符）—— 它会被用在命令行、消息文本、日志里 */
+/** UID 合法形态（**只读兼容用**；新编码的形态校验见 `isValidTrajectoryCode`） */
 const UID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/
 
 /**
- * 校验 UID 形态。
+ * 校验 UID 形态（**只读兼容路径** —— 写入侧已退役，见 `UID_FILENAME` 的 R↓ 段）。
  *
- * 为什么保守（R↓）：UID 是**给人和 agent 在对话里互相指认用的**（owner：「用于交流」）⇒
+ * 为什么保守：UID 是**给人和 agent 在对话里互相指认用的**（owner：「用于交流」）⇒
  * 它必须能**逐字打出来**。含空格/引号/中文的 UID 会在 shell、JSON、markdown 里各自需要一套转义
  * ⇒ "用于交流"这个目的当场失败。⇒ 限定 `[A-Za-z0-9._-]`，首字符必须字母数字，上限 64。
  *
@@ -241,7 +307,7 @@ export function isValidUid(uid: string): boolean {
  *
  * 🔴 **形态非法的文件按"没设定"处理，而不是报错**：解析侧出现在**每一次** `findSession` 里
  * （show/use/archive/send-now/send-later 全走它），在那里抛错会让一个坏文件**炸掉整条轨迹的所有操作**
- * —— 惩罚远大于问题本身。坏 UID 由 `setTrajectoryUid` 在**写入侧**拦住（那里才该响亮失败）。
+ * —— 惩罚远大于问题本身。而写入侧已退役 ⇒ 坏文件只可能来自外部手改，更不该连坐。
  */
 export function readTrajectoryUid(sessionPath: string): string | null {
   try {
@@ -253,64 +319,36 @@ export function readTrajectoryUid(sessionPath: string): string | null {
 }
 
 /**
- * 设定 / 清除一条轨迹的 UID。
- *
- * @param sessionsDir AGENT_SESSIONS 绝对路径
- * @param key 定位用（目录名 / S### / 既有 UID / 唯一模糊串）
- * @param uid 新 UID；`null` ⇒ **删除声明文件**（回到"用编码"）
- * @throws UID 形态非法 ／ 已被**别的**轨迹占用 ／ 目标轨迹不存在
- */
-export function setTrajectoryUid(sessionsDir: string, key: string, uid: string | null): { dirName: string; uid: string | null; path: string } {
-  const target = findSession(sessionsDir, key)
-  if (!target) throw new Error(`Trajectory not found: "${key}". Use "list" to see available trajectories.`)
-  const file = join(target.path, UID_FILENAME)
-
-  if (uid === null) {
-    rmSync(file, { force: true })
-    return { dirName: target.dirName, uid: null, path: file }
-  }
-
-  if (!isValidUid(uid)) {
-    throw new Error(
-      `Invalid trajectory UID: "${uid}". ` +
-      `允许 [A-Za-z0-9._-]，首字符须字母或数字，长度 ≤64（它要被逐字打出来用于交流 ⇒ 不容忍需要转义的字符）`,
-    )
-  }
-  // 🔴 唯一性 = 写入侧的责任：重复 UID 会让"用 UID 指认"变成歧义，而**歧义在读取侧无法消解**
-  const clash = readAllSessions(sessionsDir).find(
-    (s) => s.dirName !== target.dirName && readTrajectoryUid(s.path) === uid,
-  )
-  if (clash) {
-    throw new Error(`UID "${uid}" 已被 ${clash.dirName} 占用（唯一标识符必须唯一；先解除它或换一个）`)
-  }
-  writeFileSync(file, uid + '\n', 'utf-8')
-  return { dirName: target.dirName, uid, path: file }
-}
-
-/**
  * 根据 key 查找轨迹。
  *
  * 解析顺序（**越精确越靠前**，且**前三级都不做模糊**）：
- * ① 目录名精确 ／ ② **UID 精确** ／ ③ 编码 `S###`（允许 `S31`→`031`）／ ④ 唯一模糊子串（多个则报错）
+ * ① 目录名精确 ／ ② **编码精确** ／ ③ **UID 精确（只读兼容）** ／ ④ 唯一模糊子串（多个则报错）
  *
- * 🔴 **UID 排在编码之前**是因为 owner 定的语义：UID 是"单独设定"的**交流标识**
- * （"不设定就还是用编码"⇒ 设定之后，用 UID 指认就该与编码同等可靠）。
- * 它与目录名都属**精确匹配**、彼此不会混淆（UID 形态不含 `--`，目录名必含）⇒ 顺序对结果无实质影响，
- * 但把这个顺序写死，避免后来者以为"UID 是模糊匹配的一种"。
+ * 🔴 **2026-10-19 起编码排在 UID 之前**（旧顺序相反）：编码现在是**一等标识**
+ * （owner：「固定为目录中的固定位置编码」＋「允许用户指定」），而 UID 已退役为兼容层。
+ * 顺序对结果无实质影响（两者都属精确匹配、形态互斥 —— 编码不含 `--`），
+ * 但把顺序写死，避免后来者以为"编码是模糊匹配的一种"或"UID 优先"。
+ *
+ * 🔵 `S31` → `S031` 的**数字补零**兼容保留（存量用户习惯）；它现在只是编码匹配的一个特例：
+ * 编码恰为 `S###` 形态时允许省前导零。
  */
 export function findSession(sessionsDir: string, key: string): SessionEntry | null {
   const all = readAllSessions(sessionsDir)
   const byName = all.find((s) => s.dirName === key)
   if (byName) return byName
-  // ② UID 精确命中（大小写敏感）
+  // ② 编码精确命中
+  const byCode = all.find((s) => parseTrajectoryCode(s.dirName) === key)
+  if (byCode) return byCode
+  // ②b 补零兼容（`S31` → `S031`）
+  const padded = key.match(/^S(\d{1,})$/)
+  if (padded) {
+    const want = `S${padded[1]!.padStart(3, '0')}`
+    const byPadded = all.find((s) => parseTrajectoryCode(s.dirName) === want)
+    if (byPadded) return byPadded
+  }
+  // ③ UID 精确命中（只读兼容，大小写敏感）
   const byUid = all.find((s) => readTrajectoryUid(s.path) === key)
   if (byUid) return byUid
-  const searchId = key.replace(/^S/, '').padStart(3, '0')
-  const byId = all.find((s) => {
-    const m = s.dirName.match(/--S(\d{3,})--/)
-    return m && m[1] === searchId
-  })
-  if (byId) return byId
   const lower = key.toLowerCase()
   const fuzzy = all.filter((s) => s.dirName.toLowerCase().includes(lower))
   if (fuzzy.length === 1) return fuzzy[0] ?? null
@@ -370,6 +408,15 @@ interface CreateSessionOptions {
   desc?: string
   /** --issue 模式的工单号（与 desc 互斥） */
   issue?: string
+  /**
+   * 显式指定的**轨迹编码**（owner 2026-10-19 令：「允许用户指定这个编码」）。
+   *
+   * - 不给 ⇒ 沿用既有行为：自增 `S###`（desc 模式）／ 工单号即编码（issue 模式）。
+   * - 给了 ⇒ **它就是目录名的 code 段**，并且是这条轨迹**唯一的**稳定标识。
+   *
+   * 形态由 `isValidTrajectoryCode` 把关（不得含中文/`--`），唯一性由本函数把关（重复即拒）。
+   */
+  id?: string
   goal?: string
   dryRun: boolean
 }
@@ -430,6 +477,31 @@ export function createSession(opts: CreateSessionOptions): CreateSessionResult {
     throw new Error('--desc and --issue are mutually exclusive')
   }
 
+  // 🔴 owner 2026-10-19 令：「认知轨迹允许用户指定这个编码（在约束范围内，不得包含中文）」。
+  //    这里同时承担**两个守卫**（都在写入侧 —— 读取侧无法消解歧义）：
+  //    ① **形态**：`isValidTrajectoryCode`（不含中文/不含 `--`/字符集保守）；
+  //    ② **唯一性**：编码当前是否已被某条活跃轨迹占用。
+  //    ⚠️ 唯一性**只在活跃轨迹里判**（`readAllSessions` 已跳过 `_` 前缀 = 归档区）：
+  //       归档轨迹不再参与指认（`findSession` 也查不到它）⇒ 允许复用其编码是**一致的**，
+  //       否则会出现"看得见的编码用不了、又查不到是谁占着"的死角。
+  const requestedId = opts.id?.trim()
+  if (requestedId !== undefined && requestedId !== '') {
+    if (!isValidTrajectoryCode(requestedId)) {
+      throw new Error(
+        `Invalid trajectory code: "${requestedId}". ` +
+        `允许 [A-Za-z0-9._-]、首字符须字母或数字、长度 ≤64，且**不得含中文与 "--"**` +
+        `（"--" 是目录名分隔符，含它就把"固定位置编码"这个前提破坏掉）`,
+      )
+    }
+    const clash = readAllSessions(sessionsDir).find((s) => parseTrajectoryCode(s.dirName) === requestedId)
+    if (clash) {
+      throw new Error(
+        `Trajectory code "${requestedId}" is already in use by ${clash.dirName}. ` +
+        `Codes are the trajectory's unique identity — pick another, or operate on the existing one by that code.`,
+      )
+    }
+  }
+
   if (issue) {
     if (issue.length > 100) {
       throw new Error(`issue too long: ${issue.length} chars (max 100)`)
@@ -455,31 +527,37 @@ export function createSession(opts: CreateSessionOptions): CreateSessionResult {
     throw new Error(`description too long: ${desc.length} chars (max 200)`)
   }
   const sessions = readAllSessions(sessionsDir)
-  let maxId = 0
-  for (const s of sessions) {
-    const m = s.dirName.match(/--S(\d{3,})--/)
-    if (m) {
-      const num = parseInt(m[1]!, 10)
-      if (num > maxId) maxId = num
+  // 给定的编码直接用；没给才自增（**只在 `S###` 形态的编码里**取 max —— 自定义编码不参与编号）
+  let code: string
+  if (requestedId !== undefined && requestedId !== '') {
+    code = requestedId
+  } else {
+    let maxId = 0
+    for (const s of sessions) {
+      const m = parseTrajectoryCode(s.dirName)?.match(/^S(\d{3,})$/)
+      if (m) {
+        const num = parseInt(m[1]!, 10)
+        if (num > maxId) maxId = num
+      }
     }
+    code = `S${String(maxId + 1).padStart(3, '0')}`
   }
-  const nextId = String(maxId + 1).padStart(3, '0')
-  const dirName = `${datePrefix}--S${nextId}--${sanitizeDirName(desc)}`
+  const dirName = `${datePrefix}--${code}--${sanitizeDirName(desc)}`
   const sessionPath = join(sessionsDir, dirName)
   if (!dryRun && existsSync(sessionPath)) {
     throw new Error(`Session directory already exists: "${dirName}"`)
   }
   if (dryRun) {
     return {
-      message: `[dry-run] Would create: ${dirName}/\n  goal=${goal ?? '(none)'}`,
+      message: `[dry-run] Would create: ${dirName}/\n  code=${code}\n  goal=${goal ?? '(none)'}`,
       dirName,
       sessionPath,
-      sessionId: `S${nextId}`,
+      sessionId: code,
     }
   }
   mkdirSync(sessionPath, { recursive: true })
-  writeFileSync(join(sessionPath, SESSION_MD), sessionMdTemplate(desc, `S${nextId}`, goal, now), 'utf-8')
-  return { message: `Created: ${dirName}/ (S${nextId})`, dirName, sessionPath, sessionId: `S${nextId}` }
+  writeFileSync(join(sessionPath, SESSION_MD), sessionMdTemplate(desc, code, goal, now), 'utf-8')
+  return { message: `Created: ${dirName}/ (${code})`, dirName, sessionPath, sessionId: code }
 }
 
 // ── S134 活跃会话（内存 Map + events 恢复；对齐 osp active-state 的内存模型）──
@@ -656,9 +734,10 @@ export function parseSessionContextFromEvents(events: readonly unknown[]): Activ
         continue
       }
       if (!isSessionDirName(dirName)) continue
-      const idMatch = dirName.match(/--S(\d{3,})--/)
+      // 🔴 2026-10-19：编码即 ID（自定义编码同样要能从这里恢复；旧实现只认 `S###` ⇒ 自定义编码会话
+      //    重启后 sessionId 退化成整条目录名）。
       return {
-        sessionId: idMatch ? `S${idMatch[1]}` : dirName,
+        sessionId: parseTrajectoryCode(dirName) ?? dirName,
         dirName,
         mdPath: filePath,
       }

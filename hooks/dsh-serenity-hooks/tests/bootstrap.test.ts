@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   createEpochPromotion,
   resolveBootstrapSettings,
@@ -8,6 +11,8 @@ import {
   DEFAULT_FAKE_INITIAL_MESSAGES,
   hasUserMessageHistory,
 } from '../src/seams/bootstrap.js'
+import { resetSkiffSessions, registerSkiffSession } from '../src/role/skiff/registry.js'
+import { makeSkiffSession, makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 /** 构造最小 agent（子 agent 模拟） */
 function mkAgent(session: unknown): unknown {
@@ -93,13 +98,48 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
     expect(p.status(mkAgent(session) as never)).toEqual({ boundary: -1, promoted: true })
   })
 
-  it('Skiff agent（sessionId `skiff-` 前缀）恒晋升（角色 CCC 提示词全替换，无锚定轮，F4b 旁路）', () => {
-    const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
-    const agent = mkAgent(mkSession('skiff-qa-readonly-uuid', [], { delegationDepth: 0 }))
-    expect(p.status(agent as never)).toEqual({ boundary: -1, promoted: true })
-    // 有历史事件也恒晋升
-    const session = mkSession('skiff-review-1', [ev('compaction/end', 5), ev('tool/call', 6)])
-    expect(p.status(mkAgent(session) as never)).toEqual({ boundary: -1, promoted: true })
+  it('Skiff agent（绑定轨迹**有 `skiff.json`**）恒晋升（提示词全替换，无锚定轮，F4b 旁路）', () => {
+    // 🔴 2026-10-19：判据不再是 sessionId 的 `skiff-` 前缀，而是「**会话绑定的轨迹目录里
+    //    有 `skiff.json`**」（`seams/bootstrap.ts` 的 `isSkiffSession(loopRoot, loopSid)`）。
+    //    ⇒ 夹具必须造一条真轨迹（CCC 根 → `AGENT_SESSIONS/2026-10-19--qa--traj/skiff.json`）
+    //    并把会话登记进去，同时让 `session.header.cwd` 指向该 CCC 根（根解析靠 `.serenity` 标记）。
+    const dir = mkdtempSync(join(tmpdir(), 'bootstrap-skiff-'))
+    writeFileSync(join(dir, '.serenity'), 'test')
+    const dirName = makeSkiffSession(dir, 'sess-skiff-1', 'qa', skiffJson({ tools: ['read'] }))
+
+    try {
+      const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
+      const agent = mkAgent(mkSession('sess-skiff-1', [], { delegationDepth: 0, cwd: dir }))
+      expect(p.status(agent as never)).toEqual({ boundary: -1, promoted: true })
+      // 有历史事件也恒晋升
+      const session = mkSession('sess-skiff-1', [ev('compaction/end', 5), ev('tool/call', 6)], { delegationDepth: 0, cwd: dir })
+      expect(p.status(mkAgent(session) as never)).toEqual({ boundary: -1, promoted: true })
+      expect(dirName).toContain('qa') // 夹具自证：登记的确实是这条轨迹
+    } finally {
+      resetSkiffSessions()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('🔴 反控：sessionId 带 `skiff-` 前缀但绑定的轨迹**没有 `skiff.json`** ⇒ 按普通会话判（不恒晋升）', () => {
+    // 这条与上一条成对：删掉前缀判据后，"恒晋升"若退化成"凡是 skiff-* 都恒晋升"，
+    // 上一条照样绿 —— 只有反控能把判据钉在**轨迹**上。
+    const dir = mkdtempSync(join(tmpdir(), 'bootstrap-plain-'))
+    writeFileSync(join(dir, '.serenity'), 'test')
+    // 普通轨迹：**不写 `skiff.json`**（`makeTrajectory(root, code, null)`），再把会话登记到它
+    // ⚠️ 不能用 `makeSkiffSession(..., null)`：它内部是 `profile ?? {}` ⇒ 仍会落一个空
+    //    `skiff.json`，那样这条反控会**假绿**（判成了"是 skiff"）。
+    const { dirName } = makeTrajectory(dir, 'plain-trajectory', null)
+    registerSkiffSession('skiff-legacy-looking-id', dirName, dir)
+
+    try {
+      const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))
+      const agent = mkAgent(mkSession('skiff-legacy-looking-id', [], { delegationDepth: 0, cwd: dir }))
+      expect(p.status(agent as never).promoted).toBe(false)
+    } finally {
+      resetSkiffSessions()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it('resume：从持久 events 重建阶段（不依赖进程内存）', () => {

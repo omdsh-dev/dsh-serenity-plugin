@@ -9,6 +9,8 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 
 import { accIdentityText, accMessage, shouldAutoRestore, shouldRestoreActive } from '../src/seams/context.js'
 import { ACC_VERSION } from '../src/kernel/constants.js'
+import { resetSkiffSessions } from '../src/role/skiff/registry.js'
+import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string
 
@@ -18,6 +20,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  resetSkiffSessions() // 进程级注册表（会话 → 轨迹），用例间必须复位
   rmSync(dir, { recursive: true, force: true })
 })
 
@@ -71,9 +74,17 @@ describe('context: 重启自动恢复的根会话判定（shouldAutoRestore）',
     expect(shouldAutoRestore(fakeAgent({ id: 'cheap-worker-sqc-scan-1234' }))).toBe(false)
   })
 
-  it('Skiff 会话（id 以 skiff- 开头）→ 不恢复（完全独立，F4b 旁路）', () => {
-    expect(shouldAutoRestore(fakeAgent({ id: 'skiff-qa-readonly-uuid' }))).toBe(false)
-    expect(shouldAutoRestore(fakeAgent({ id: 'skiff-review-1' }))).toBe(false)
+  it('Skiff 会话（绑定轨迹**有 `skiff.json`**）→ 不恢复（完全独立，F4b 旁路）', () => {
+    // 🔴 2026-10-19：判据不再是 id 前缀 `skiff-`，而是「会话绑定的轨迹有 `skiff.json`」
+    //    （`seams/context.ts` 的 `isSkiffSession(root, session.id)`）⇒ 夹具必须造真轨迹 +
+    //    把会话登记进去，并把 `header.cwd` 指向该 CCC 根（根解析靠 `.serenity` 标记）。
+    const dirName = makeSkiffSession(dir, 'sess-skiff-auto-restore', 'qa', skiffJson({ tools: [] }))
+    const skiffSession = { id: 'sess-skiff-auto-restore', header: { cwd: dir } }
+    expect(shouldAutoRestore(fakeAgent(skiffSession))).toBe(false)
+    // 正交的第二条：同一判据下，**带 `skiff-` 前缀但没挂轨迹**的会话按普通会话处理
+    //（前缀在新模型里不表达身份 —— 保留这格可防"前缀判据悄悄回来"）
+    expect(shouldAutoRestore(fakeAgent({ id: 'skiff-review-1' }))).toBe(true)
+    expect(dirName).toContain('qa')
   })
 
   it('无 session → 不恢复', () => {
@@ -109,7 +120,14 @@ describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复�
   })
 
   it('Skiff 会话（有历史但独立）→ 不恢复（F4b 旁路）', () => {
-    expect(shouldRestoreActive(fakeAgent({ id: 'skiff-qa-1', events: [{ type: 'user/message' }] }))).toBe(false)
+    // 🔴 2026-10-19：同上一处 —— 判据换成「绑定轨迹有 `skiff.json`」，id 前缀不再表达身份。
+    makeSkiffSession(dir, 'sess-skiff-restore-active', 'qa', skiffJson({ tools: [] }))
+    const skiffSession = {
+      id: 'sess-skiff-restore-active',
+      header: { cwd: dir },
+      events: [{ type: 'user/message' }],
+    }
+    expect(shouldRestoreActive(fakeAgent(skiffSession))).toBe(false)
   })
 })
 

@@ -503,19 +503,33 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           return
         }
 
-        // save-routes：保存路由表（整体替换；校验 role 合法性——必须 ∈ 该 CCC skiff.roles）
+        // save-routes：保存路由表（整体替换；校验目标轨迹存在）
         if (body.action === 'save-routes') {
-          const routes = body.routes ?? []
-          if (!Array.isArray(routes) || routes.some((r) => typeof r?.user !== 'string' || typeof r?.role !== 'string' || r.user === '' || r.role === '')) {
-            sendJson(res, 400, { error: 'invalid routes (expected [{user, role}, ...])' })
+          const raw = body.routes ?? []
+          if (!Array.isArray(raw)) {
+            sendJson(res, 400, { error: 'invalid routes (expected [{user, trajectory}, ...])' })
             return
           }
+          // 🔴 2026-10-19：路由目标从「skiff 角色名」改为**认知轨迹编码**（owner 重做令：
+          //    「微信桥的路由表修改为 user → 认知轨迹的映射」）。
+          //    读侧接受旧 `role` 作过渡别名（面板/脚本存量），但**落盘统一写 `trajectory`**。
+          const routes: Array<{ user: string; trajectory: string }> = []
+          for (const r of raw as Array<{ user?: unknown; trajectory?: unknown; role?: unknown }>) {
+            const user = typeof r?.user === 'string' ? r.user : ''
+            const code = typeof r?.trajectory === 'string' && r.trajectory !== ''
+              ? r.trajectory
+              : (typeof r?.role === 'string' ? r.role : '')
+            if (user === '' || code === '') {
+              sendJson(res, 400, { error: 'invalid routes (each row needs non-empty user and trajectory)' })
+              return
+            }
+            routes.push({ user, trajectory: code })
+          }
           const { saveWeixinRoutes } = await import('../im/route.js')
-          const { readSkiffRoles } = await import('../role/skiff/config.js')
-          const roles = readSkiffRoles(root)
+          const { findDirNameByCode } = await import('../role/skiff/profile.js')
           for (const r of routes) {
-            if (!roles.has(r.role)) {
-              sendJson(res, 400, { error: `unknown role: ${r.role} (not in ${root} skiff.roles)` })
+            if (findDirNameByCode(root, r.trajectory) === null) {
+              sendJson(res, 400, { error: `unknown trajectory: ${r.trajectory} (no such trajectory code in ${root})` })
               return
             }
           }

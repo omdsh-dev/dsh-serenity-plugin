@@ -28,90 +28,61 @@ function accountKeyPart(accountId: string): string {
   return accountId.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
 }
 
-/** 微信桥 skiff 会话 id 前缀（seams 旁路判定；对外面纯净——守卫识别外部面） */
+/**
+ * 微信桥 skiff 会话 id 前缀（守卫识别"外部面"用）。
+ *
+ * ⚠️ **2026-10-19 起它只是命名习惯，不再是判据** —— skiff 的身份是**轨迹**，
+ * 判据 = 「绑定的轨迹有 `skiff.json`」（`role/skiff/profile.ts` 的 `isSkiffSession`）。
+ * 保留前缀只为：① 日志/会话列表里一眼认出这是外部面；② 存量会话目录名不变。
+ */
 const WEIXIN_SESSION_PREFIX = 'skiff-weixin-'
 
-/** 判定 sessionId 是否为微信桥会话（外部面——输出守卫/轨迹隐藏生效） */
+/** 判定 sessionId 是否为微信桥会话（**命名形态**判定；权力面判据见 `isSkiffSession`） */
 export function isWeixinSessionId(sessionId: string | undefined): boolean {
   return typeof sessionId === 'string' && sessionId.startsWith(WEIXIN_SESSION_PREFIX)
 }
 
-/** 微信用户 → 固定会话 id（同用户长期同一会话，记忆延续；多用户天然隔离）。
- *  **v1.27.2 错位一位（用户拍板）**：`.slice(0, 16)` → `.slice(1, 17)`——旧规则生成的
- *  固定 id 已与磁盘损坏的持久化 log 绑定（dsh 不可硬删，create 同 id 必撞）→
- *  新规则下同用户生成**全新 id**，避开损坏 log；固定可重建语义不变（同用户恒同 id）。 */
-export function weixinSessionIdFor(fromUserId: string): string {
-  const digest = createHash('sha256').update(fromUserId).digest('hex').slice(1, 17)
-  return `${WEIXIN_SESSION_PREFIX}${digest}`
+/**
+ * **轨迹编码 → 固定的 dsh 会话 id**（2026-10-19 重做：身份挂在轨迹上，不挂在用户上）。
+ *
+ * ## 为什么改（owner 重做令的实际含义）
+ *
+ * 旧派生 = `skiff-weixin-<sha256(微信用户 id)>`：**同一条轨迹换一个用户就是另一条会话**，
+ * 而**同一个用户换一条轨迹也还是原来那条会话**（后者的症状：改路由之后，新轨迹的约束
+ * 对不上旧会话的历史工具清单）。⇒ 那不是"轨迹是一等公民"，那是"用户是一等公民"。
+ *
+ * 新派生 = **由轨迹编码决定**：同一条轨迹 ⇒ 恒同一条 dsh 会话（无论谁在跟它说话）；
+ * 换轨迹 ⇒ 新会话。这正是"skiff 是认知轨迹的一种"。
+ *
+ * ## 连带删掉的东西
+ *
+ * 旧实现有 `.weixin-session-gen.json` 换代计数器（`baseId-g<n>`），存在的唯一理由是
+ * "身份绑在用户上、载体（SESSION.md）可能先被归档" ⇒ 只能靠换代续命。
+ * 现在**身份就是轨迹**：轨迹没了就该报"目标不存在"（响亮），**不该静默续命**
+ * ⇒ 计数器整件删除。
+ *
+ * ⚠️ 会话 id 里保留 `skiff-weixin-` 前缀只为可读性；**它不含用户身份**，
+ * 因此也不会泄漏"谁在跟它说话"（旧形态的哈希虽是伪名，但它是**可复算的稳定标识**，
+ * 见 `privacy-scan` 的 `weixin-session-pseudonym` 规则 —— 新形态连这个问题都没有了）。
+ */
+export function weixinSessionIdForTrajectory(code: string): string {
+  // 编码已在 create 时过 `isValidTrajectoryCode`（无中文/无 `--`），此处只做长度安全截断。
+  return `${WEIXIN_SESSION_PREFIX}${code}`
 }
 
 /**
- * 会话**代次**落盘（owner 2026-10-19：「没有 skiff 会话就自动新建一个」的持久面）。
+ * 路由行的**目标编码**（过渡别名解析，单一处）。
  *
- * ## 为什么需要它（R↓）
- *
- * 工作台（SESSION.md）被归档/删除后，旧会话身份就**不该再被 resume** ——
- * 它的历史里带着当时的工具清单，会让新配置永远不生效（实测：每次调用都被角色白名单拒）。
- * 但"该新建"这个判断必须**跨进程重启仍然成立**：只放内存 ⇒ 重启后又 resume 回旧 log。
- *
- * ⇒ 落一个极小的代次表（`AGENT_SESSIONS/.weixin-session-gen.json`）：
- * `{ "<baseId>": "<gen>" }`。新会话 id = `<baseId>-g<gen>`。
- *
- * ⚠️ **只在"载体缺失"时递增**，正常路径（工作台还在）**不碰这个文件** ⇒ 同用户长期同一会话
- * 的语义不变。递增的时机唯一（见 bridge 的丢弃分支），不吃并发。
+ * 🔴 2026-10-19：目标从「角色名」改为**认知轨迹编码**。存量 CCC 的配置里写的是
+ * `{user, role}` —— **不强制同批迁移**（配置是 CCC 的数据，改它不该要求同步发版）。
+ * ⇒ 读侧接受三种写法，按确定性顺序：`trajectory`（新）→ `role`（旧值，语义已等同编码）
+ * → 空（该行作废，由调用方按"未命中"处理）。
  */
-const SESSION_GEN_REL = 'AGENT_SESSIONS/.weixin-session-gen.json'
-
-function sessionGenPath(root: string): string {
-  return join(root, SESSION_GEN_REL)
-}
-
-/** 读代次（无文件/坏档 ⇒ 0，永不抛） */
-export function readSessionGen(root: string, baseId: string): number {
-  try {
-    const raw = JSON.parse(readFileSync(sessionGenPath(root), 'utf-8')) as Record<string, unknown>
-    const n = raw[baseId]
-    return typeof n === 'number' && Number.isFinite(n) ? n : 0
-  } catch {
-    return 0
+function routeTarget(row: { trajectory?: unknown; role?: unknown }): string {
+  for (const v of [row.trajectory, row.role]) {
+    if (typeof v === 'string' && v.trim() !== '') return v.trim()
   }
-}
-
-/** 代次 +1 并落盘（失败不抛：退回内存序号由调用方保证唯一性——最坏只是多一个新会话） */
-export function bumpSessionGen(root: string, baseId: string): number {
-  const next = readSessionGen(root, baseId) + 1
-  try {
-    const p = sessionGenPath(root)
-    let all: Record<string, unknown> = {}
-    try {
-      all = JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>
-    } catch {
-      /* 无档/坏档 ⇒ 从空表开始（代次语义允许重置：重置后生成的是**又一个新的** id，不撞旧 log） */
-    }
-    all[baseId] = next
-    mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
-    writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8')
-  } catch {
-    /* 落盘失败：仍返回 next（本次进程内有效） */
-  }
-  return next
-}
-
-/**
- * 由基准 id 派生**当代**会话 id。
- *
- * 无代次（从未丢弃过）⇒ 原样返回基准 id ⇒ **行为与改动前逐字相同**（零回归面）。
- * 有代次 ⇒ `<baseId>-g<n>`（n ≥ 1）。
- */
-export function currentSessionIdFor(root: string, baseId: string): string {
-  const gen = readSessionGen(root, baseId)
-  return gen === 0 ? baseId : `${baseId}-g${gen}`
-}
-
-/** 丢弃当前代 ⇒ 下一轮用新一代 id（新建一个干净会话） */
-export function discardCurrentSessionGen(root: string, baseId: string): string {
-  const gen = bumpSessionGen(root, baseId)
-  return `${baseId}-g${gen}`
+  return ''
 }
 
 /**
@@ -137,10 +108,14 @@ export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SEREN
               typeof a === 'object' && a !== null && typeof a.accountId === 'string' && a.accountId !== '')
             .map((a) => ({ accountId: a.accountId, name: typeof a.name === 'string' ? a.name : undefined, enabled: a.enabled !== false }))
         : [],
+      // 🔴 2026-10-19：路由表改为 **user → 认知轨迹编码**（owner 重做令）。
+      //    旧字段 `role` 仍被读取作**过渡别名**（存量 CCC 配置不必同批改），
+      //    但新写法是 `trajectory`；两者都给 ⇒ `trajectory` 优先。
       routes: Array.isArray(w.routes)
         ? w.routes
             .filter((r): r is WeixinRouteConfig =>
-              typeof r === 'object' && r !== null && typeof r.user === 'string' && r.user !== '' && typeof r.role === 'string' && r.role !== '')
+              typeof r === 'object' && r !== null && typeof r.user === 'string' && r.user !== '' && typeof routeTarget(r) === 'string')
+            .map((r) => ({ user: r.user, trajectory: routeTarget(r) }))
         : [],
       aliases: readAliases(w),
     }
@@ -202,15 +177,15 @@ export function clearWeixinCredential(root: string, accountId: string): void {
 
 /**
  * 路由匹配：exact user 优先，通配 `*` 兜底。
- * @returns 命中的 role 名；未命中 → null（无路由 → 消息不回复/忽略）
+ * @returns 命中的**轨迹编码**；未命中 → null（无路由 → 消息不回复/忽略）
  */
 export function matchWeixinRoute(routes: WeixinRouteConfig[], fromUserId: string): string | null {
   if (!Array.isArray(routes) || routes.length === 0) return null
   for (const r of routes) {
-    if (r.user === fromUserId) return r.role
+    if (r.user === fromUserId) return r.trajectory
   }
   for (const r of routes) {
-    if (r.user === '*') return r.role
+    if (r.user === '*') return r.trajectory
   }
   return null
 }
