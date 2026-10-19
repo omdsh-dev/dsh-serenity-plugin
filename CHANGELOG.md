@@ -1,3 +1,76 @@
+## v1.73.0 — 2026-10-19（🔴🔴 **IM 桥泛化 ＋ 飞书账号实现（P3）**：微信与飞书成为真正的并列实现）
+
+**性质**：**结构性重构**（抽出通道中立的入站层）＋ **新能力**（第二个 IM 渠道）＋ **退役**（Skiff 调试面）。
+**来源**：owner 原话——「微信桥改为 IM 桥，然后里面微信和飞书都能设定」
+＋「Skiff 的内容不要了，下掉吧」＋「**要把飞书绑定实现了，我要测啊**」。
+
+### 一、先纠正一句表述（R↓：把错误留档，别让它变成"已完成"）
+
+上一版之后我曾说「微信与飞书成为**并列实现**」——**那笔只做了派发表**，飞书仍走
+「未实现 ⇒ 出声」分支，`src/im` 里 `feishu` **零命中**。正确说法是「**位置留好了**」。
+本版才是把位置填上。
+
+### 二、B1：抽出**中立入站事件层**（`src/im/inbound-event.ts`）
+
+改造前 `handleIncoming` 同时干两件不同的事：①「iLink 消息长什么样」
+②「一条已到达的消息该投到哪、怎么答、怎么记账」。接第二家 IM 时只有 ① 要新写。
+
+| 中立件 | 内容 |
+|---|---|
+| `ImInboundEvent` | `{userId, text, media[], hasVoice, replyRef?}` |
+| `ImMediaItem` | `kind` / `fileName` / **`fetch()`（取字节的动作）** |
+| `ImAccountIo` | `sendText` / `typingStart?` / `typingStop?`（**可选**：飞书没有打字态） |
+| `handleInboundEvent()` | 通道中立的**主流程**（原 `handleIncoming` 的主体） |
+
+🔴 **切法是适配器，不是改签名**：全仓约 50 处测试按 iLink 形状驱动 `handleIncoming`，
+而 B1 的验收判据是「**微信行为逐字不变**」⇒ 改签名会让判据自己失去可复算性。
+现在 `bridge.ts` 的 `handleIncoming` 只做形状翻译。
+
+🔴 **媒体取字节放进事件里**：iLink 是 CDN 下载＋AES 解密、飞书是 `messageResource.get`，
+两者除"返回字节"外无共同点 ⇒ 中立层只约定**动作**，不约定协议。
+
+### 三、P3：飞书账号实现（`src/im/feishu-account.ts`）
+
+- **收**：`WSClient` ＋ `EventDispatcher` 订阅 `im.message.receive_v1`
+  - 🔴 回调里**只入队**（官方 3 秒约束；任何 await 都可能超时导致重推）
+  - 🔴 按 `message_id` **去重**（超时会重推 ⇒ 不去重就同一句话答两遍）
+- **发**：`im.v1.message.create`，`receive_id_type: 'open_id'`，
+  `content` 是 **JSON 字符串**（官方形态；裸文本会被拒且错误码不直观）
+- **归一**：`feishuEventToInbound()` —— 用户标识取 **open_id**（不是 chat_id）；
+  群聊 `@_user_N` 占位从正文剔除
+- **凭据**：`FEISHU_<ACCOUNT>_APPID` / `_SECRET`（与微信同一套 localstore 约定）
+
+🔴 **装配处新增单一入口 `readImCredentialByChannel()`**：原先 CCC 级与机器级
+**两条装配路径**各写一份"怎么取微信 token" ⇒ 接第二家必然分叉且零机械信号。
+
+### 四、其它
+
+- 面板「微信桥」→「**IM 桥**」（`WeixinBridgeEditor` → `ImBridgeEditor`），账号行加渠道标签
+- **Skiff 调试面整条退役**：删 `surface/debug.ts`、`skiffEnabled`/`skiffDebugPort`、端口 3099
+  ＋ 三个整测该面的测试文件；补三条「不得复活」守卫
+- 🔴 设置面板两处活引用仍是**已退役的 `container_trajectory`**（v1.65.0 起不存在）⇒ 已修
+
+### 五、判据与一条测试装置教训
+
+- `tests/im-inbound-event.test.ts`（8 例）：核心那条**喂一个非 iLink 形状的事件**，
+  主流程照样跑通 —— 这才是"抽缝是否干净"的判据（不是 grep 有没有 `context_token` 字样）
+- `tests/feishu-account.test.ts`（10 例）：凭据判据 ／ 形状翻译 ／ 去重 ／ 发送形状
+- 🔴 **`vi.mock` 拦不住动态 import 的外置依赖**（本轮三次都没成）。决定性证据 =
+  真 SDK 自己打的 `[error]: [ '[ws]', 'invalid appId: cli_x' ]`。
+  ⇒ 改用**依赖注入**（`installFeishuSdk`），与微信侧同款，**没有魔法**
+- ⚠️ **本版不声称"飞书能用"**：单测证明的是代码路径；**建连／收／发是分开的三格**，
+  需真 appId/appSecret 才能验（建立连接 ≠ 能收消息）
+
+### 六、读数
+
+`test` **181 文件 / 2907 例** ｜ `coverage` 95.63% ｜ `build` 115 `.d.ts` ｜ `pack-check` 143 文件
+｜ `typecheck` ＋ `typecheck-host 0.2.1-rc.2` 双半
+
+### 七、未做（如实登记）
+
+- 飞书**媒体/富文本**不解析（非 text 类型按"有消息无文本"交中立层）
+- 面板的飞书凭据表单（P4）未做 —— 面板不是判据，可用 `localstore` 直接写
+
 ## v1.72.0 — 2026-10-19（🔴🔴 **轨迹提示词（Trajectory Prompt）：用「章程」取代「人格」**）
 
 **性质**：**架构级概念重构** ＋ **一处语义修正**（persona 不再置换 EAP）＋ **装配路径合并**（skiff 旁路删除）。
