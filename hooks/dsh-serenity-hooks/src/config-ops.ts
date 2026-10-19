@@ -18,7 +18,7 @@
 import { existsSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto'
-import { base32Decode } from './totp.js'
+import { base32Decode } from './gateway/totp.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
 import { FACE_PORTS, GATEWAY_PORT, WEIXIN_SEND_PORT } from './ports.js'
 

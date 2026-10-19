@@ -64,8 +64,8 @@
  * 那是第二真相源，属本仓已多次识别过的"只增不清"病族（§0z / §0A-5），**不值得为它引入**。
  */
 import type { Context } from 'cordis'
-import { hostSettings } from './host/access.js'
-import { registerDisposer } from './host/effect.js'
+import { hostSettings } from '../host/access.js'
+import { registerDisposer } from '../host/effect.js'
 import { LLM_PI_AI_NAMESPACE } from './opencode-provider.js'
 
 /** 触发判据：模型 id 含此串即补（**大小写不敏感**；owner：「任何 deepseek 模型」） */

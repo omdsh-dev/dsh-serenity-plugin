@@ -19,9 +19,9 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { loadMsmEntries } from './msm-ops.js'
-import { MECHANISM_PORTS } from './ports.js'
-import { eventToken } from './trajectory/assistant.js'
+import { loadMsmEntries } from '../msm-ops.js'
+import { MECHANISM_PORTS } from '../ports.js'
+import { eventToken } from '../trajectory/assistant.js'
 
 // ── 静态机制词（内部结构词汇；公开称呼词不入表）──
 

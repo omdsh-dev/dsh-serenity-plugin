@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { registerGateway } from '../src/gateway.js'
+import { registerGateway } from '../src/gateway/server.js'
 import { stopAllFaces, faceActive, facePort } from '../src/face-host.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 import { hashPassword } from '../src/config-ops.js'

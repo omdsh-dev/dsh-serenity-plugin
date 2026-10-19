@@ -28,11 +28,11 @@
 
 import type { Context } from 'cordis'
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http'
-import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from './config-ops.js'
-import { cccRootForCwd } from './ccc-roots.js'
-import { readSimpleSettings } from './settings-section.js'
+import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from '../config-ops.js'
+import { cccRootForCwd } from '../ccc-roots.js'
+import { readSimpleSettings } from '../settings-section.js'
 // C4 块 A：listener 生命周期归面宿主（本面=面 B，端口语义见 ports.ts 的 FACE_PORTS.gateway）
-import { startFace, type FaceHandle } from './face-host.js'
+import { startFace, type FaceHandle } from '../face-host.js'
 import { verifyTotpCode } from './totp.js'
 import {
   loginPageHtml,
@@ -48,7 +48,7 @@ import {
   csrfFromRequest,
   originAllowed,
   cookieValue,
-} from './gateway-auth.js'
+} from './auth.js'
 import {
   injectPolyfillHtml,
   filterWorkspaceList,
@@ -58,12 +58,12 @@ import {
   parseWorkspaceCreateBody,
   buildProxyHeaders,
   transformHtmlForProxy,
-} from './gateway-proxy.js'
+} from './proxy.js'
 
 /** 面名（C4 块 A：listener 生命周期归 `face-host`） */
 const FACE_GATEWAY = 'gateway'
-import { createDshCookieProvider, mergeCookieHeader, type DshCookieProvider } from './gateway-dsh-auth.js'
-import { hostService, hostWebServer } from './host/access.js'
+import { createDshCookieProvider, mergeCookieHeader, type DshCookieProvider } from './dsh-auth.js'
+import { hostService, hostWebServer } from '../host/access.js'
 
 // re-export 认证域 + 代理域（兼容既有 import 面；gateway-auth/gateway-proxy 为权威定义）
 export {
@@ -76,7 +76,7 @@ export {
   parseWorkspaceCreateBody,
   buildProxyHeaders,
   transformHtmlForProxy,
-} from './gateway-proxy.js'
+} from './proxy.js'
 export {
   loginPageHtml,
   verifyGatewayLogin,
@@ -98,7 +98,7 @@ export {
   safeEqual,
   originAllowed,
   cookieValue,
-} from './gateway-auth.js'
+} from './auth.js'
 
 // 自定义事件：配置 PUT 后触发 gateway 重建（跨模块松耦合通知）
 declare module 'cordis' {

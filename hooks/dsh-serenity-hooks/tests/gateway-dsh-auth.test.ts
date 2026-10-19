@@ -9,7 +9,7 @@ import {
   exchangeDshCookie,
   createDshCookieProvider,
   type DshConnectionLike,
-} from '../src/gateway-dsh-auth.js'
+} from '../src/gateway/dsh-auth.js'
 
 /** 构造一个伪 connection（模拟官方 HostConnectionHandle 的 token 交换） */
 function fakeConnection(opts: { token?: string; cookie?: string | string[]; fail?: boolean } = {}): DshConnectionLike {

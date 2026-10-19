@@ -26,7 +26,8 @@ const SKIP_BASENAMES = new Set(['index.ts', 'constants.ts', 'json.ts', 'css-modu
 const SKIP_CLIENT_SUFFIX = ['.tsx', '.css']
 /**
  * 显式间接覆盖白名单（模块无测试直接 import，但经宿主模块被测试执行——覆盖率实证见 coverage 报告）：
- *  - gateway-auth / gateway-proxy：gateway.ts import 它们 → gateway.test.ts 执行（auth 94.7% / proxy 100%）
+ *  - auth / proxy（`gateway/auth.ts` / `gateway/proxy.ts`）：`gateway/server.ts` import 它们
+ *    → gateway.test.ts 执行（auth 94.7% / proxy 100%）；2026-10-19 目录域化后按**新基名**登记
  *  - tools/* 薄壳（cc-fs/git/kit/msm/cheap-worker/localstore/cognitive-trajectory/cce/eap/neat）：
  *    纯 defineTool 注册壳或知识内容源（cce/eap/neat 供 praxis import），逻辑在 ops 层
  *    （fs-ops/git-ops/... 已被各自测试覆盖）；存在性/注册契约由 register.test.ts
@@ -34,8 +35,8 @@ const SKIP_CLIENT_SUFFIX = ['.tsx', '.css']
  * 新增 src 模块一律走镜像或直接 import；需间接豁免须在此显式登记 + 注明宿主与实证
  */
 const INDIRECT_COVERED = new Set([
-  'gateway-auth.ts',
-  'gateway-proxy.ts',
+  'auth.ts',
+  'proxy.ts',
   'cc-fs.ts',
   'git.ts',
   'kit.ts',

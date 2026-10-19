@@ -24,7 +24,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join, relative } from 'node:path'
 import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../ccc-roots.js'
 import { resolveInside } from '../ccc.js'
-import { isSafeSkillName } from '../skills-discovery.js'
+import { isSafeSkillName } from '../skills/discovery.js'
 import { runOntologyCli } from '../ontology/engine.js'
 import { buildResourceIndex, REFERENCE_DIR, SKILL_ONTOLOGY_FILE } from '../skills/resource-index.js'
 import { analyzeSkillLayering, formatLayeringReport } from '../skills/skill-layering.js'

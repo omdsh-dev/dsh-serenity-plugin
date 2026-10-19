@@ -63,8 +63,8 @@
  */
 
 import type { Context } from 'cordis'
-import { hostSettings } from './host/access.js'
-import { registerDisposer } from './host/effect.js'
+import { hostSettings } from '../host/access.js'
+import { registerDisposer } from '../host/effect.js'
 
 /** `llm-pi-ai` 的 settings 命名空间（宿主 `dsh-llm-pi-ai` 的 `NS`） */
 export const LLM_PI_AI_NAMESPACE = 'llm-pi-ai'

@@ -22,8 +22,8 @@ import {
   isDeepseekModelId,
   planDeepseekVisionPatch,
   registerDeepseekVisionPatch,
-} from '../src/deepseek-vision-patch.js'
-import { LLM_PI_AI_NAMESPACE } from '../src/opencode-provider.js'
+} from '../src/patches/deepseek-vision.js'
+import { LLM_PI_AI_NAMESPACE } from '../src/patches/opencode-provider.js'
 
 function plan(resolved: unknown, enabled?: boolean) {
   return planDeepseekVisionPatch({ resolved, ...enabled === undefined ? {} : { enabled } })

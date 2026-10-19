@@ -49,7 +49,7 @@ import {
   COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
 } from '../src/trajectory/skills.js'
 import { readCognitiveTrajectorySkills } from '../src/ccc.js'
-import { findSkillMd } from '../src/skills-discovery.js'
+import { findSkillMd } from '../src/skills/discovery.js'
 import { registerCognitiveTrajectorySkillSection, serenitySystemPrompt } from '../src/seams/system-prompt.js'
 import { cognitiveTrajectoryCompactionReminderText } from '../src/seams/keeper.js'
 

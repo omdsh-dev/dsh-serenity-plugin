@@ -16,7 +16,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { findSkillMd, isSafeSkillName, truncateContent } from '../skills-discovery.js'
+import { findSkillMd, isSafeSkillName, truncateContent } from '../skills/discovery.js'
 import { buildResourceIndex } from '../skills/resource-index.js'
 
 /** 全文注入总长上限（字符数；规格 §3「缺省 32 KB」——防上下文爆炸） */

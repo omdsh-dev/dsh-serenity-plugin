@@ -13,8 +13,8 @@ import {
   buildRebuke,
   REBUKE_MAX_ROUNDS,
   rebukeStates,
-} from '../src/output-guard.js'
-import { registerOutputGuardHook } from '../src/output-guard-seam.js'
+} from '../src/guard/filter.js'
+import { registerOutputGuardHook } from '../src/guard/seam.js'
 import { stripThink } from '../src/skiff-debug.js'
 
 let dir: string

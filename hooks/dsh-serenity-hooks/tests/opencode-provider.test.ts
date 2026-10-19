@@ -20,7 +20,7 @@ import {
   opencodeRouteHeaders,
   planOpencodeAutoConfig,
   registerOpencodeAutoConfig,
-} from '../src/opencode-provider.js'
+} from '../src/patches/opencode-provider.js'
 
 const HEADERS = opencodeRouteHeaders()
 

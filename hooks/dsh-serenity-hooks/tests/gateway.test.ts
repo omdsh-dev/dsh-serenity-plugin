@@ -60,13 +60,13 @@ import {
   csrfFromRequest,
   safeEqual,
   originAllowed,
-} from '../src/gateway.js'
+} from '../src/gateway/server.js'
 // C4 块 A 冒烟：装配入口 + 面状态真值源 + 简单配置注入
-import { registerGateway } from '../src/gateway.js'
+import { registerGateway } from '../src/gateway/server.js'
 import { faceActive, facePort, stopAllFaces } from '../src/face-host.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
 // 登录面集成：TOTP 二选一（真 code 生成，不 mock 校验器）
-import { totpCode, base32Encode, TOTP_STEP_SECONDS } from '../src/totp.js'
+import { totpCode, base32Encode, TOTP_STEP_SECONDS } from '../src/gateway/totp.js'
 
 let dir: string
 
@@ -466,7 +466,7 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
   // Node 对无监听器的 'error' 事件直接 throw（node:events:497）→ 整个 dsh web 进程崩溃。
   // 验证方式：源文件必须包含这些监听注册（防止未来重构删除）。
   it('proxy 链路：客户端 req/res 挂 error 监听 + 透传 upstream 挂 error', () => {
-    const src = readFileSync(join(__dirname, '..', 'src', 'gateway.ts'), 'utf-8')
+    const src = readFileSync(join(__dirname, '..', 'src', 'gateway', 'server.ts'), 'utf-8')
     const proxyBody = src.split("const proxy = ")[1] ?? ''
     // req error → 销毁 target
     expect(proxyBody).toMatch(/req\.on\('error'/)
@@ -477,7 +477,7 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
   })
 
   it('WS upgrade 链路：客户端 socket 与上游 usocket 都挂 error 监听', () => {
-    const src = readFileSync(join(__dirname, '..', 'src', 'gateway.ts'), 'utf-8')
+    const src = readFileSync(join(__dirname, '..', 'src', 'gateway', 'server.ts'), 'utf-8')
     const upgradeBody = src.split("server.on('upgrade'")[1] ?? ''
     // 客户端 socket error → 销毁上游
     expect(upgradeBody).toMatch(/socket\.on\('error'/)
@@ -486,7 +486,7 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
   })
 
   it('登录 POST 分支 req/res 挂 error 监听', () => {
-    const src = readFileSync(join(__dirname, '..', 'src', 'gateway.ts'), 'utf-8')
+    const src = readFileSync(join(__dirname, '..', 'src', 'gateway', 'server.ts'), 'utf-8')
     const loginBody = src.split("'/serenity/login'")[1] ?? ''
     expect(loginBody).toMatch(/req\.on\('error'/)
     expect(loginBody).toMatch(/res\.on\('error'/)
@@ -500,7 +500,7 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
     const src = readFileSync(join(__dirname, '..', 'src', 'face-host.ts'), 'utf-8')
     expect(src).toMatch(/server\.on\('clientError'/)
     // 且 gateway.ts 不再自持一份（同一卸载语义两套实现 = C4 要收的重复形态）
-    const gw = readFileSync(join(__dirname, '..', 'src', 'gateway.ts'), 'utf-8')
+    const gw = readFileSync(join(__dirname, '..', 'src', 'gateway', 'server.ts'), 'utf-8')
     expect(gw).not.toMatch(/server\.on\('clientError'/)
   })
 })

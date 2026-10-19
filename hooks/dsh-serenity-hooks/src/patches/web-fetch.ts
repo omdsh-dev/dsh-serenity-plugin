@@ -27,7 +27,7 @@ import { lookup } from 'node:dns/promises'
 import { isIP } from 'node:net'
 import type { Context } from 'cordis'
 import type { HttpFetchLimits, HttpFetchResolver } from '@deepseek-ai/dsh-web-fetch-http'
-import { hostWeb } from './host/access.js'
+import { hostWeb } from '../host/access.js'
 
 /**
  * 与宿主 `WebError` 同形的最小错误（带机器可路由的 `code`）。

@@ -17,7 +17,7 @@ import {
   projectKnownWorkspaces,
   ADVANCED_SECTION,
 } from '../src/config-ops.js'
-import { generateTotpSecret, totpCode, nowEpochSeconds, TOTP_STEP_SECONDS } from '../src/totp.js'
+import { generateTotpSecret, totpCode, nowEpochSeconds, TOTP_STEP_SECONDS } from '../src/gateway/totp.js'
 
 let dir: string
 let oldEnv: string | undefined

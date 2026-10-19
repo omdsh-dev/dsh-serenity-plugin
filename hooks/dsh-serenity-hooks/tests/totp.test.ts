@@ -7,7 +7,7 @@ import {
   verifyTotpCode,
   otpauthUri,
   TOTP_STEP_SECONDS,
-} from '../src/totp.js'
+} from '../src/gateway/totp.js'
 
 describe('TOTP: base32（RFC 4648）', () => {
   it('编码/解码往返一致', () => {

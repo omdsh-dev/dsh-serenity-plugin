@@ -40,7 +40,7 @@ import {
   isPublicV4,
   isPublicV6,
   resolveAllowedAddresses,
-} from '../src/web-fetch-provider.js'
+} from '../src/patches/web-fetch.js'
 
 describe('v1.30.12 web fetch 地址判据', () => {
   it('放行公网单播（IPv4/IPv6）', () => {
@@ -223,7 +223,7 @@ describe('v1.30.12 resolver 域名分支（lookupAll：本模块唯一带 cstat-
 
 describe('v1.30.12 provider 注册', () => {
   it('注册进 ctx.web，且沿用宿主内置 id=http（无需改宿主 web 配置）', async () => {
-    const { registerWebFetchProvider } = await import('../src/web-fetch-provider.js')
+    const { registerWebFetchProvider } = await import('../src/patches/web-fetch.js')
     const registered: Array<{ id?: string; available?: () => boolean }> = []
     const ctx = {
       get: (name: string) =>
@@ -238,7 +238,7 @@ describe('v1.30.12 provider 注册', () => {
   })
 
   it('web 服务缺失 → 只告警，不抛错', async () => {
-    const { registerWebFetchProvider } = await import('../src/web-fetch-provider.js')
+    const { registerWebFetchProvider } = await import('../src/patches/web-fetch.js')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     await expect(registerWebFetchProvider({ get: () => undefined } as never)).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()

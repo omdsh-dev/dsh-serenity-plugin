@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { findEntrySkill, findEntrySkills, findSkillMd, truncateContent } from '../src/skills-discovery.js'
+import { findEntrySkill, findEntrySkills, findSkillMd, truncateContent } from '../src/skills/discovery.js'
 
 let dir: string
 
