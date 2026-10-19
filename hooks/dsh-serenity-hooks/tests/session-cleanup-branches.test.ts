@@ -19,7 +19,7 @@
  *
  * ## 为什么这四类重要（贴 objective：**这是唯一会物理删用户数据的模块**）
  *
- * `session-cleanup.ts` 是插件里**唯一执行 `rmSync` 删用户会话目录**的地方（`performCleanup`）。
+ * `trajectory/cleanup.ts` 是插件里**唯一执行 `rmSync` 删用户会话目录**的地方（`performCleanup`）。
  * 上面①~③正是"**该不该把这条会话列为候选**"的三个否决点：
  *   · ① 若 `isDirectory()` 守卫写反/删掉 ⇒ **普通文件被当成会话目录**，其父目录被扫进候选；
  *   · ② 若竞态 catch 改成 throw ⇒ **一次并发写就让整个清理 500**（且调用方无从区分"没候选"与"崩了"）；

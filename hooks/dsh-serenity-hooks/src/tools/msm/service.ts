@@ -1,5 +1,5 @@
 /**
- * msm-ops.ts — msm 纯操作层（acc_msm → msm 执行 + container_admin 管理面，v1.30；零 DSH 依赖）
+ * tools/msm/service.ts — msm 纯操作层（acc_msm → msm 执行 + container_admin 管理面，v1.30；零 DSH 依赖）
  *
  * MSM（Mech & Semi-Mech）框架：exec 执行 / register|deregister|check 管理。
  * 复用 CCC 的 mech-registry.json（v1 或数组格式）。cwd 钉在 CCC 根。
@@ -49,7 +49,7 @@ function bunExecutablePath(): string | null {
   return null
 }
 
-/** CCC 名：从 .serenity 解析（review P2-2 统一收口到 ccc.ts readCccName——跳 # 注释/空行首非空行；此处保留导出名兼容内部调用） */
+/** CCC 名：从 .serenity 解析（review P2-2 统一收口到 kernel/ccc.ts readCccName——跳 # 注释/空行首非空行；此处保留导出名兼容内部调用） */
 function readCccName(root: string): string | null {
   return readCccNameFromCcc(root)
 }

@@ -1,5 +1,5 @@
 /**
- * ⑤ 第 13 件（语义深度：**文件发送三步链**，2026-09-25）：`weixin-api.ts` 的 `sendFileMessage`
+ * ⑤ 第 13 件（语义深度：**文件发送三步链**，2026-09-25）：`im/ilink.ts` 的 `sendFileMessage`
  * 在覆盖率报告里整段 `fstat-no`（连它私有的 `padTo16` 也没执行过）—— 而它是 **`im-bridge send-file`
  * 的落地实现**（v1.31.0 从 CCC MSM 迁入 ACC），即"用户让某角色发个文件"这条真实链路的最后一公里。
  *

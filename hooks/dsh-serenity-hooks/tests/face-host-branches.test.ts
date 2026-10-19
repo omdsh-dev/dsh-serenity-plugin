@@ -26,7 +26,7 @@ import {
  *
  * ## 为什么这两类重要（贴 objective：**面宿主 = 对外面／宿主接触面**）
  *
- * `face-host.ts` 是插件**唯一**自起 HTTP listener 的生命周期处（B/C/D/E 四个面）。
+ * `surface/faces.ts` 是插件**唯一**自起 HTTP listener 的生命周期处（B/C/D/E 四个面）。
  * 上面两类正是文件头两条设计承诺的**唯一执行点**：
  *   · `:232` 「server 级 clientError 兜底 —— 否则**整个 dsh web 进程崩溃**」（v1.22.3 事故的修复）
  *   · `:328` 「单请求异常不得杀进程（…这是**第二道**）」

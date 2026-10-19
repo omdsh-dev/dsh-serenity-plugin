@@ -1,11 +1,11 @@
 /**
- * container-status-degradation.test.ts — 🔴 **⑤ 第 61 件**：`src/container-status.ts` 的
+ * container-status-degradation.test.ts — 🔴 **⑤ 第 61 件**：`src/surface/observation.ts` 的
  * **注册表结构判据（判据 A）的退化面**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（00:29 那一跑，第 60 件之后）实测：`src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `container-status.ts`（**83.05% = 49/59**；
+ * **最低且尚未做过**的文件 = `surface/observation.ts`（**83.05% = 49/59**；
  * 语句 98.48% ＝ 324/329；函数 6/6 已满）。
  *
  * ## 🔴 开工第一步 = 核对既有登记（第 59/60 件沉淀的纪律）
@@ -16,7 +16,7 @@
  * **判据 A 自己的全部退化路径从未被执行过**。
  *
  * ## 🔴 本件为何要紧（源码文件头逐字给出的事故形态）
- * `container-status.ts:135-136` 写着：**「health 必须不因坏表抛错（注册表坏 → `loadMsmEntries` 抛
+ * `surface/observation.ts:135-136` 写着：**「health 必须不因坏表抛错（注册表坏 → `loadMsmEntries` 抛
  * → `container_admin`/`output-guard` 全崩且**自锁无法自救**），故本判据独立解析，不走
  * `loadMsmEntries`」**。
  * ⇒ 本件覆盖的**恰恰是那条设计红线的唯一执行点**。它要是写坏了（catch 改成 throw、

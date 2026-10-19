@@ -1,10 +1,10 @@
 /**
- * gateway-auth.ts — F1 双端口网关：认证域纯逻辑（v1.22.4 安全加固）
+ * gateway/auth.ts — F1 双端口网关：认证域纯逻辑（v1.22.4 安全加固）
  *
- * 从 gateway.ts 拆分（S142 熵点治理，v1.22.8）：认证纯逻辑独立成模块——
+ * 从 gateway/server.ts 拆分（S142 熵点治理，v1.22.8）：认证纯逻辑独立成模块——
  * 登录验证（scrypt）/ 会话 token（滑动 TTL + 吊销）/ 失败锁定（账号维度指数退避）/
  * CSRF（双提交 + Origin 校验）/ cookie 解析 / 登录页 HTML。
- * gateway.ts 保留 HTTP 装配（startGateway/registerGateway）并从本模块 import。
+ * gateway/server.ts 保留 HTTP 装配（startGateway/registerGateway）并从本模块 import。
  *
  * 纯函数设计（可单测）：无 socket/无 HTTP 依赖，全部导出可注入测试。
  */

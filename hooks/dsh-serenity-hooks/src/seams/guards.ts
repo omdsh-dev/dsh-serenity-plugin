@@ -81,7 +81,7 @@ function isProtectedRegistryRel(root: string, rel: string): boolean {
   const relCi = lower(rel)
   // cccName 聚合档：.opencode/skills/<cccName>/references/mech-registry.json
   // 注：大小写比较按平台（win32 不敏感 / posix 敏感）——review P2-1：Linux 大写 CCC 名不得误放行
-  // cccName 解析统一走 ccc.ts readCccName（review P2-2：跳过 # 注释/空行首非空行，四处单源）
+  // cccName 解析统一走 kernel/ccc.ts readCccName（review P2-2：跳过 # 注释/空行首非空行，四处单源）
   try {
     const marker = resolve(root, '.serenity')
     if (existsSync(marker)) {
@@ -365,7 +365,7 @@ export function syncSafeModeRestriction(agent: Agent, root: string): void {
 
 // ── im-bridge 条件可见（v1.31.0）──
 
-/** 条件可见的 IM 工具名（与 tools/im-bridge.ts 的注册名一致） */
+/** 条件可见的 IM 工具名（与 tools/im/channels.ts 的注册名一致） */
 const IM_BRIDGE_TOOL_NAME = 'im-bridge'
 
 /** agent key → restrict disposer（im-bridge 隐藏状态；key 同安全模式 = 会话 id） */

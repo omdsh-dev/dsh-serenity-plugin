@@ -7,11 +7,11 @@
  *
  * | 半 | 位置 | 单测 |
  * |---|---|---|
- * | ① 服务端**能**按请求所属 CCC 注入 | `src/voyage-vocab.ts` ＋ `src/voyage-page.ts` | 各自有测 |
+ * | ① 服务端**能**按请求所属 CCC 注入 | `src/surface/voyage/vocab.ts` ＋ `src/surface/voyage/page.ts` | 各自有测 |
  * | ② 客户端 iframe **把 workspace 传上去** | `src/client/SafeModePanel.tsx` | ⬅ 原本没有 |
  *
  * 🔴 **为什么单测全绿仍会失效（本仓反复踩的形态）**：
- * 服务端的兜底第③步在**多 CCC 共存时故意不猜**（`api.ts` 的 `resolveWorkspaceCore`，
+ * 服务端的兜底第③步在**多 CCC 共存时故意不猜**（`surface/http.ts` 的 `resolveWorkspaceCore`，
  * 与「跨轨迹不许猜」同一裁决）⇒ iframe 若只带 `?v=<版本号>`，服务端拿不到归属，
  * 只能退回进程 cwd ⇒ `cccRootForCwd` = null ⇒ **不注入** ⇒ 资产里写死的
  * home-serenity 词表原样发出去 ⇒ **缺陷逐字复现**，且**没有任何报错**。

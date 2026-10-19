@@ -1,5 +1,5 @@
 /**
- * ccc.ts — CCC 纯逻辑层（零 DSH 依赖，可独立单测）
+ * kernel/ccc.ts — CCC 纯逻辑层（零 DSH 依赖，可独立单测）
  *
  * 职责：CCC 根检测（P1）、git 检测（P2）、serenity.json 配置读取（.opencode 规范位置，.dsh 回退）、
  * 路径守卫（P3 语义）、安全模式黑名单匹配。

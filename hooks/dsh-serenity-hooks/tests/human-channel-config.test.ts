@@ -177,7 +177,7 @@ describe('human-channel: 投影（settings-section；P0-1）', () => {
   })
 
   it('🔴 旧 CCC 侧 `weixin.*` 被忽略（含正控）：同一份数据放旧键**无效**、放新键**生效**', () => {
-    // 旧 CCC 侧形态（`serenity.json` 的 `weixin` 段 —— 见 src/ccc.ts 的 WeixinSettings）
+    // 旧 CCC 侧形态（`serenity.json` 的 `weixin` 段 —— 见 src/kernel/ccc.ts 的 WeixinSettings）
     const legacy = {
       weixin: {
         enabled: true,

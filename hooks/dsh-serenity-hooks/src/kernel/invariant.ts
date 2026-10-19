@@ -1,5 +1,5 @@
 /**
- * invariant.ts — 包级不变量伴生（dsh-my-rsi creating-a-plugin 规范）
+ * kernel/invariant.ts — 包级不变量伴生（dsh-my-rsi creating-a-plugin 规范）
  *
  * 检查：dsh.plugin.json 的 contributes.tools 与代码实际注册的工具一致。
  * 挂载时 plugin-local 会校验清单；本不变量让仓库内 `verify-package-invariants`

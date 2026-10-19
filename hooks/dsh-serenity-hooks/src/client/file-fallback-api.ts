@@ -9,7 +9,7 @@
  *  - fileNoteTemplate(paths)     → 消息模板（draft 追加，随发送进消息——用户拍板）
  */
 
-/** 文件落盘接口路径（node half api.ts，client 专属 x-serenity-ui 头） */
+/** 文件落盘接口路径（node half surface/http.ts，client 专属 x-serenity-ui 头） */
 const FILE_UPLOAD_PATH = '/serenity/file-upload'
 
 /**

@@ -6,7 +6,7 @@ import { createServer, request as httpRequest } from 'node:http'
 import { connect as netConnect } from 'node:net'
 import { gzipSync } from 'node:zlib'
 
-// gateway.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
+// gateway/server.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
 vi.mock('@deepseek-ai/schemastery', () => {
   const chain: unknown = new Proxy(function () {}, {
     get: (_t, prop) => {
@@ -493,13 +493,13 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
   })
 
   it('server 级 clientError 兜底监听存在（C4 块 A 起：归面宿主 face-host.ts）', () => {
-    // C4（2026-09-15）：该兜底原本内联在 gateway.ts 的 listenWithRetry 里；listener 生命周期
-    // 归一到 `face-host.ts` 后，**守护的对象没变**（server 级 clientError → 静默销毁 socket，
+    // C4（2026-09-15）：该兜底原本内联在 gateway/server.ts 的 listenWithRetry 里；listener 生命周期
+    // 归一到 `surface/faces.ts` 后，**守护的对象没变**（server 级 clientError → 静默销毁 socket，
     // 防"无 error 监听的 socket 直接 throw → 进程崩溃"），只是位置从面内搬到面宿主。
     // 本断言随代码位置迁移（回归钉保留：不许静默消失）。
     const src = readFileSync(join(__dirname, '..', 'src', 'surface', 'faces.ts'), 'utf-8')
     expect(src).toMatch(/server\.on\('clientError'/)
-    // 且 gateway.ts 不再自持一份（同一卸载语义两套实现 = C4 要收的重复形态）
+    // 且 gateway/server.ts 不再自持一份（同一卸载语义两套实现 = C4 要收的重复形态）
     const gw = readFileSync(join(__dirname, '..', 'src', 'gateway', 'server.ts'), 'utf-8')
     expect(gw).not.toMatch(/server\.on\('clientError'/)
   })
@@ -913,7 +913,7 @@ describe('v1.22.3 语义化：外部连接硬断不崩（真 socket ＋ 真上�
  * ⑤ 第 11 件（登录面集成，2026-09-25）：上文各 describe 已把登录**纯逻辑**逐件覆盖（verifyGatewayLogin ／
  * token ／ 锁定计数 ／ CSRF ／ loginPageHtml ／ TOTP），但**装配层那一段**（`startGateway` 的登录 POST
  * 分支——CSRF 双提交判定 → 锁定前置 → 密码/TOTP 二选一 → 失败计数与三档响应 ／ 登出吊销）从未被
- * **真 listener** 走到：覆盖率报告显示 gateway.ts 该段全为 `fstat-no`（同批未测的还有 `readBody`，
+ * **真 listener** 走到：覆盖率报告显示 gateway/server.ts 该段全为 `fstat-no`（同批未测的还有 `readBody`，
  * 归 workspace.create 那一组）。
  * ⇒ 本组用**真 HTTP 往返**补齐这条装配链，断言取"客户端看到什么"（状态码 ＋ 响应体文案 ＋ 回注的 csrf
  * cookie ＋ 会话 cookie 是否真能换来反代），**不复用任何源码字符串**。

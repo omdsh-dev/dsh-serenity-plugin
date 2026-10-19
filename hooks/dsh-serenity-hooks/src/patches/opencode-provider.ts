@@ -1,5 +1,5 @@
 /**
- * opencode-provider.ts — opencode zen / go 路由的自动配置（v1.31.7，S142 用户需求）
+ * patches/opencode-provider.ts — opencode zen / go 路由的自动配置（v1.31.7，S142 用户需求）
  *
  * ## 为什么存在（R↓）
  *

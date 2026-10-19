@@ -1,17 +1,17 @@
 /**
- * trajectory-ops-branches.test.ts — 🔴 **⑤ 第 64 件**：`src/cognitive-trajectory-ops.ts` 的
+ * trajectory-ops-branches.test.ts — 🔴 **⑤ 第 64 件**：`src/trajectory/core.ts` 的
  * **createSession 入参校验面 ＋ show/list/summary 的退化臂**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（00:51 那一跑，第 63 件之后）实测：`src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `cognitive-trajectory-ops.ts`（**84.65% = 160/189**；
+ * **最低且尚未做过**的文件 = `trajectory/core.ts`（**84.65% = 160/189**；
  * 语句 94.85% ＝ 608/641；函数 28/28 已满）。
  * ⚠️ 复扫的成对读（纪律 16）再次拦下两个错靶：同为 83.33% 的两处，一处是
- * `gateway-dsh-auth.ts` 的**函数列**（其分支 100%），另一处 `git-ops.ts` 已在第 53 件做过。
+ * `gateway/dsh-auth.ts` 的**函数列**（其分支 100%），另一处 `tools/git/service.ts` 已在第 53 件做过。
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯）
- * 本件 grep `src/cognitive-trajectory-ops.js` 的 import 点 ⇒ **命中 17 个文件**
+ * 本件 grep `src/trajectory/core.js` 的 import 点 ⇒ **命中 17 个文件**
  * （只有一个是按本模块命名的 `trajectory-ops.test.ts`；其余按**主题**散落：
  * `session-title` ／ `rebuild` ／ `keeper` ／ `skiff-core` ／ `trajectory-bound` ／
  * `seams/context-*` ／ `seams/lifecycle*` ／ `osp-alignment` ／ `cro-guide` ／

@@ -1,8 +1,8 @@
 /**
- * clock-runtime.ts — **时钟运行时工厂**（S142 §38 复审候选 C6b，路径 **P2**）
+ * wake/clock.ts — **时钟运行时工厂**（S142 §38 复审候选 C6b，路径 **P2**）
  *
  * 🔴 2026-09-25（S142 分批清死代码·第 1 批）**更正**：本文件当初是为**两条**独立 5min 时钟抽出的公共引擎：
- *   · 唤醒调度器（`wake-scheduler.ts`，一次性唤醒，D58）—— **现存**
+ *   · 唤醒调度器（`wake/scheduler.ts`，一次性唤醒，D58）—— **现存**
  *   · autopilot 时钟（`autopilot-trajectory.ts`，周期自唤醒，D59）—— 🔴 **已随 v1.35.0 整段退场**
  * 二者的**业务判据完全不同**（谁来扫 / 扫什么 / 投递给谁 / 按什么周期），但**引擎骨架逐字同形**
  * ——进程态 + 快照 + 复位 + `startTimer` + tick 外壳 + 事件接线 + disposer + `timer.unref()`。
@@ -49,7 +49,7 @@
  * **本工厂是"加法式"重构**（P2 的性质）：不新增任何判定逻辑，只把同形骨架收成一份代码；
  * 两个模块仍各自导出 `wakeSchedulerState()` / `autopilotClockState()` 与各自的
  * `__reset…ForTest()`，**对外可观测面（字段名与语义）零变化**——`acc-diag` ①b 段、
- * `container-status.ts:containerClocks()` 与面板都在读它们（见该文件 :225–250 的设计红线）。
+ * `surface/observation.ts:containerClocks()` 与面板都在读它们（见该文件 :225–250 的设计红线）。
  *
  * 为什么**不**取 P1（真合并成一个 `setInterval` + 两条策略）——2026-09-15 所有者裁决：
  * P1 只多省 ~20 行，却要把 `armed` 拆成"宿主 + 每策略"两层、并强行分开串行域，

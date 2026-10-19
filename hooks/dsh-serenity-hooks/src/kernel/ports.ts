@@ -1,5 +1,5 @@
 /**
- * ports.ts — ACC 对外面的**集中端口表**（C4 块 B，S142 2026-09-15）
+ * kernel/ports.ts — ACC 对外面的**集中端口表**（C4 块 B，S142 2026-09-15）
  *
  * 为什么存在（现状取证：`AGENT_SESSIONS/…/acc-c4c5-current-state.md` §③ 3.2-8）：
  * 端口此前**散在 4 处默认值**（`config-ops.defaultAdvancedSettings` / `settings-section` schema

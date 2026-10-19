@@ -1,5 +1,5 @@
 /**
- * web-fetch-provider.ts — fake-ip / TUN 网络下的 web_fetch provider（v1.30.12，S142）
+ * patches/web-fetch.ts — fake-ip / TUN 网络下的 web_fetch provider（v1.30.12，S142）
  *
  * 问题（用户报告 + 实证）：`web_fetch` 在本机恒失败，报
  *   `URL hostname "X" resolves to a non-public IP address`（`WEB_BLOCKED_URL`）。

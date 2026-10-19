@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer, request as httpRequest } from 'node:http'
 
-// gateway.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
+// gateway/server.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
 vi.mock('@deepseek-ai/schemastery', () => {
   const chain: unknown = new Proxy(function () {}, {
     get: (_t, prop) => {

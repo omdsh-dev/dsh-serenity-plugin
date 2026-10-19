@@ -13,7 +13,7 @@
  *     `serenity-hooks`** —— 这就是 "配置面板不见了" 的**全部**根因。
  *
  *  ② 标了之后**读取面必须解包**：schemastery 对 volatile 字段**无条件**包 `Volatile<T>` 引用
- *     （"未设置"也是**恒真对象**）⇒ 见 `settings-section.ts` 的 `unwrapVolatile` 与
+ *     （"未设置"也是**恒真对象**）⇒ 见 `surface/settings.ts` 的 `unwrapVolatile` 与
  *     `settings-section.test.ts` 的回归用例。
  *
  * ## 🔴 为什么这条 pin **必须用真 schemastery**（本文件与其余 index.ts 测试的关键差别）

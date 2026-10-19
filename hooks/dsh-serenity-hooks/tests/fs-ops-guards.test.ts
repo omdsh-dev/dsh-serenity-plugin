@@ -1,7 +1,7 @@
 /**
  * fs-ops-guards.test.ts — `container_fs` 的**守卫面与路径校验**（⑤ 第 21 件）
  *
- * 挑靶依据 = **分支覆盖率**（`fs-ops.ts` 64.36%，除已退役 `diag-ops` 与已满的 `output-guard-seam` 外最低）。
+ * 挑靶依据 = **分支覆盖率**（`tools/fs/service.ts` 64.36%，除已退役 `diag-ops` 与已满的 `output-guard-seam` 外最低）。
  * 🔴 **缺口形态**：既有 `tests/fs-ops.test.ts` 走的是**顺利路径**（正常读/写/删 + 注册表保护 + 词法逃逸），
  * 而报告里成片的 `cbranch-no`/`cstat-no` 全是**守卫与边界**：缺参 ／ 不存在 ／ 根外绝对路径 ／
  * 绝对路径的正常侧 ／ mkdir 已存在两态 ／ rm 的 not-found·dry-run 目录·**空目录 rmdir** ／

@@ -1,5 +1,5 @@
 /**
- * localstore-ops.ts — localstore 纯逻辑层（零 DSH 依赖，可独立单测）
+ * tools/localstore/service.ts — localstore 纯逻辑层（零 DSH 依赖，可独立单测）
  *
  * S134 重设计（v1.16.7）：存储从 ~/.serenity/ 迁到 **CCC 根根目录 localstore.json**
  * （JSON 格式——方便 MSM 直接 read + JSON.parse 读取，零解析依赖）。

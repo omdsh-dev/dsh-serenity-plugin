@@ -1,5 +1,5 @@
 /**
- * cro-turns.ts — 「这条轨迹是否正在跑轮次」的追踪（设计 §3.2，2026-09-19 S142）
+ * wake/cro-turns.ts — 「这条轨迹是否正在跑轮次」的追踪（设计 §3.2，2026-09-19 S142）
  *
  * ## 为什么需要这个模块（CRO 唯一需要 ACC 新增的状态）
  *
@@ -13,7 +13,7 @@
  * | 事件 | 动作 | 出处 |
  * |---|---|---|
  * | `agent/created` | 标记「在跑」 | `host/contract.ts`（dsp 已在 `seams/context.ts` 订阅）。⚠️ v0.1.7 前名为 `agent/session-start`；新事件 `@mode = serial` ⇒ 处理函数须快速返回 |
- * | `agent/turn-stopping` | 清除标记 | `host/contract.ts:277`（dsp 已在 `rebuild.ts:442` 等 4 处订阅） |
+ * | `agent/turn-stopping` | 清除标记 | `host/contract.ts:277`（dsp 已在 `trajectory/rebuild.ts:442` 等 4 处订阅） |
  * | `agent/disposed` | **清该载体的项** | `host/contract.ts:280` |
  * | `session/disposed` | **清该载体的项** | `host/contract.ts:283` |
  *
@@ -149,13 +149,13 @@ export function __resetCroTurnsForTest(): void {
  * 🔴 **本处顺带更正 §2.7 的一处分档**：本文件原被列在"剩余 3 个属**真依赖**档"里，
  * 但**逐符号查证后与那个判断不符** ——
  *   · `Context`：`ctx` 只被**结构化访问**（原码本就写着 `ctx as unknown as { on: … }`）
- *     ⇒ 该注解未提供任何类型保证（与 `agent-idle.ts` 同档）。
+ *     ⇒ 该注解未提供任何类型保证（与 `role/worker/idle.ts` 同档）。
  *   · `Agent`：**导入后从未使用** —— 事件 payload 一律按 `{ agent?: unknown }` 解构，
  *     再交给 `sessionIdOf(...)`（它收 `unknown`）。⇒ **纯粹是死 import**。
  * ⇒ **判据（本件再证一次，且比上一件更硬）**：分档**必须逐符号看"它有没有参与类型检查"**，
  *   **不能按文件整档划分** —— 同一个文件里可以并存"真依赖符号"与"纯名义符号"。
- * 🔵 **剩余 2 个文件**才是真依赖档：`rebuild.ts` 用 `Session`/`SessionEvent`/
- *   `deriveEventMessage`/`Agent` 等**真调用**的类型；`wake-scheduler.ts` 用 `Agent` 的
+ * 🔵 **剩余 2 个文件**才是真依赖档：`trajectory/rebuild.ts` 用 `Session`/`SessionEvent`/
+ *   `deriveEventMessage`/`Agent` 等**真调用**的类型；`wake/scheduler.ts` 用 `Agent` 的
  *   `followup`/`steer`（**真调用**）⇒ 它们走 §2.7-③ **选项 (b)** 或把中立接口下沉到 L0，
  *   **另立一件**（D85 一次只改一件事）。
  * @param ctx 插件上下文（**结构化访问** `on`，故类型为 `unknown`，见下方 I2 说明）
@@ -193,7 +193,7 @@ export function registerCroTurnTracking(ctx: unknown): void {
   })
 
   // ③ 生命周期清理：载体销毁 ⇒ 清项（防"按载体只增"）
-  // ⚠️ 两个事件的 **payload 形状不同**（照 `agent-idle.ts:57-64` 实证）：
+  // ⚠️ 两个事件的 **payload 形状不同**（照 `role/worker/idle.ts:57-64` 实证）：
   //    · `agent/disposed`   → `{ agent }`
   //    · `session/disposed` → **payload 本身就是那个 session**（直接有 `.id`）
   on('agent/disposed', (payload) => {

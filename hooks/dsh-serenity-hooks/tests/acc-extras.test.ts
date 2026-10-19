@@ -16,7 +16,7 @@ import { resolveSerenityEnv } from '../src/seams/env.js'
 let dir: string
 
 /**
- * MSM `exec` 真跑 `.ts` 脚本需要 **TS 运行时**：有 bun 则直跑（`msm-ops.ts` 的 `bunExecutablePath()`），
+ * MSM `exec` 真跑 `.ts` 脚本需要 **TS 运行时**：有 bun 则直跑（`tools/msm/service.ts` 的 `bunExecutablePath()`），
  * 无 bun 时回落 `npx tsx <script>`——脚本位于**临时 CCC 目录**（`mkdtemp`），那里没有本地 tsx，
  * npx 只能**联网拉取**。CI runner 无 bun 且网络抖动 → 偶发 exit 1。
  * **实证**：`exec --format=json 包装输出` 在 CI run #33（`ef71d2b`）通过、run #34（`e35aa17`，

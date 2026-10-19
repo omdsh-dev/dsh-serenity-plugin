@@ -1,5 +1,5 @@
 /**
- * cognitive-trajectory-bound.ts — SESSION 绑定持久化（CCC 内 `AGENT_SESSIONS/.bindings.json`）
+ * trajectory/bound.ts — SESSION 绑定持久化（CCC 内 `AGENT_SESSIONS/.bindings.json`）
  *
  * 目标（S142 用户拍板，方案 v1.0）：让「dsh 会话（载体）↔ SESSION（宁静号轨迹）」
  * 的绑定坚固——LLM 不能因智力因素（幻觉/理解偏差）在过程中或 cognitive_trajectory rebuild 后

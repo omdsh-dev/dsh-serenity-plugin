@@ -33,7 +33,7 @@ import {
   fakeTurnAckStream,
   type PendingFakeTurn,
 } from '../src/seams/bootstrap.js'
-// 不硬编码字面量：插件来源 kind 的**单一真相源**在 message-source.ts
+// 不硬编码字面量：插件来源 kind 的**单一真相源**在 kernel/message-source.ts
 import { ACC_MESSAGE_KIND } from '../src/kernel/message-source.js'
 
 /** 默认登记（= 刚注入完两条） */

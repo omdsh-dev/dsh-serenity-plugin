@@ -1,5 +1,5 @@
 /**
- * weixin-route.ts — 微信桥 CCC 配置层纯逻辑（F4c-3，v1.27.0 实验性）
+ * im/route.ts — 微信桥 CCC 配置层纯逻辑（F4c-3，v1.27.0 实验性）
  *
  * 职责（零 DSH 依赖，可独立单测）：
  * - 读取 CCC 的 weixin 配置（.opencode/serenity.json weixin 段——结构/路由/开关）

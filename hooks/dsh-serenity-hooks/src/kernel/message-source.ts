@@ -1,5 +1,5 @@
 /**
- * message-source.ts — ACC 注入消息的来源标识（**单一真相源**，v1.47.0 / DSH 0.1.7-rc.1 适配）
+ * kernel/message-source.ts — ACC 注入消息的来源标识（**单一真相源**，v1.47.0 / DSH 0.1.7-rc.1 适配）
  *
  * **为什么有这个文件**：DSH 0.1.7-rc.1（session format v3→v4）把消息来源从
  * 「`kind: 'plugin'` ＋ `plugin` 字段」改成**每个生产者声明自己的 kind** ——

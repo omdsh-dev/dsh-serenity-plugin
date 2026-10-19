@@ -1,5 +1,5 @@
 /**
- * cro.ts — CRO（Continuous Re-Occurrence · 持续再发生）机制层（S142 §7.8，2026-09-19）
+ * wake/cro.ts — CRO（Continuous Re-Occurrence · 持续再发生）机制层（S142 §7.8，2026-09-19）
  *
  * ## 这东西用来干什么（白话）
  *
@@ -40,7 +40,7 @@
  * ## 🔴 铁律：CRO 的任何失败，绝不影响既有机制（设计 §5）
  *
  * `send-later` / `send-now` / 唤醒表的投递**照常工作**。
- * 先例 = `weixin-hook.ts` 的**旁路容忍**（"超时 kill / 非 0 退出 / spawn 失败 → 仅日志返回，绝不抛"）。
+ * 先例 = `im/hook.ts` 的**旁路容忍**（"超时 kill / 非 0 退出 / spawn 失败 → 仅日志返回，绝不抛"）。
  * ⇒ 本模块的**每一个**导出函数**都不抛错**（返回结构化失败）。
  */
 
@@ -72,7 +72,7 @@ const CRO_STDOUT_MAX = 64 * 1024
 /** 绑定文件体积上限（它只是个机器名 ⇒ 超过这个数一定是写错了，不读） */
 const CRO_HOST_FILE_MAX = 1_024
 
-/** SESSION.md 文件名（与 `cognitive-trajectory-ops.ts` 同值；此处本地常量避免反向依赖） */
+/** SESSION.md 文件名（与 `trajectory/core.ts` 同值；此处本地常量避免反向依赖） */
 const SESSION_MD = 'SESSION.md'
 
 // ── 输入快照（设计 §3）──
@@ -122,7 +122,7 @@ export interface CroSnapshot {
     /**
      * 🔴 其中**正在跑轮次**的（设计 §3.2 —— 本机制**唯一需要 ACC 新增的状态**）。
      * ⚠️ `live ≠ 在跑`：一条会话可以 live 而空闲。
-     * 宿主没有现成的 turn 运行标志 ⇒ 由 `cro-turns.ts` 用 `agent/session-start` +
+     * 宿主没有现成的 turn 运行标志 ⇒ 由 `wake/cro-turns.ts` 用 `agent/session-start` +
      * `agent/turn-stopping` 两个**既有契约事件**夹出来。
      */
     runningSessionIds: string[]
@@ -268,14 +268,14 @@ export interface CroRunResult {
   code?: string
 }
 
-/** runner 签名（**可注入** —— 测试捕获防真实 spawn flake；同 `weixin-hook.ts` 手法） */
+/** runner 签名（**可注入** —— 测试捕获防真实 spawn flake；同 `im/hook.ts` 手法） */
 export type CroRunner = (scriptAbs: string, stdinJson: string, timeoutMs: number) => Promise<CroRunResult>
 
 /**
  * CRO 程序路径：`<CCC 根>/AGENT_SESSIONS/<dirName>/continuous-re-occurrence.ts`。
  *
  * ⚠️ 路径逃逸校验（`resolveInside`）：`dirName` 来自配置/工具入参，
- * 必须确保解析后仍在 CCC 根内（同 `weixin-hook.ts:160` 手法）。**抛错由调用方吞**。
+ * 必须确保解析后仍在 CCC 根内（同 `im/hook.ts:160` 手法）。**抛错由调用方吞**。
  * @param root CCC 根
  * @param dirName 轨迹目录名
  * @returns 绝对路径
@@ -496,7 +496,7 @@ export function listCroCognitiveTrajectories(root: string): string[] {
 /**
  * 执行一次 CRO 程序（**永不抛** —— 旁路容忍铁律）。
  *
- * runner 顺序（照 `weixin-hook.ts:171-174` 的 bun 优先 / node 兜底）：
+ * runner 顺序（照 `im/hook.ts:171-174` 的 bun 优先 / node 兜底）：
  * `bun` → `process.execPath`（同运行时）。
  * 判据：`ENOENT`（二进制不存在）⇒ 试下一个；**其余失败视为最终结果**
  * （程序自己报错就是报错，不该用另一个 runner 掩盖——与 hook 一致）。

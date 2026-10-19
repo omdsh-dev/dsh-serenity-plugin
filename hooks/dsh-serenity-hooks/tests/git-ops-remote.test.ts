@@ -1,5 +1,5 @@
 /**
- * ⑤ 第 14 件（语义深度：**远程流程 ＋ 失败注入**，2026-09-25）：`git-ops.ts` 当时 **79.68%**，
+ * ⑤ 第 14 件（语义深度：**远程流程 ＋ 失败注入**，2026-09-25）：`tools/git/service.ts` 当时 **79.68%**，
  * 且**没有任何 `fstat-no`** —— 缺口全在"已执行函数体内的分支"里。逐块读 `cstat-no` 后，未执行的
  * 恰好是**用户真正会走到的那些**：
  *   - `push`：**成功路径**从未执行过（既有测试只覆盖"被拒绝"）＋ 无远程 ＋ push 失败；
@@ -18,7 +18,7 @@
  *
  * 🔵 **2026-09-26 更新 —— 此前的"诚实边界"已闭合**：`git()` 的**超时**分支当时记为不可覆盖
  * （"要真触发就得让用例挂 30 秒以上"）。该理由**在旧设计下成立**；新设计给了超时覆盖缝
- * （`DSH_GIT_TIMEOUT_MS` / `DSH_GIT_NET_TIMEOUT_MS`，见 `src/git-ops.ts`）⇒ 现可在 **300ms** 内
+ * （`DSH_GIT_TIMEOUT_MS` / `DSH_GIT_NET_TIMEOUT_MS`，见 `src/tools/git/service.ts`）⇒ 现可在 **300ms** 内
  * 真触发。回归测试见 `tests/git-commit-push-coupling.test.ts` 的「B 回归」组。
  * ⚠️ 同批**更正旧判据**：超时**不设 `err.killed`**（实测 `code=ETIMEDOUT` / `signal=SIGTERM` /
  * `status=null` / stderr 长度 0）—— 旧守卫 `err.killed ? … : err.stderr` 因此是**死代码**，

@@ -1,5 +1,5 @@
 /**
- * kit-ops.ts — dashboard 纯操作层（acc_kit → dashboard，v1.30；零 DSH 依赖）
+ * tools/kit/service.ts — dashboard 纯操作层（acc_kit → dashboard，v1.30；零 DSH 依赖）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/acc-kit.ts）——osp 是 ACC 工具 spec：
  *   - health：{ccc, root, version, status: healthy|degraded, principles: {P1_rooted, P2_git_managed, P3_binary_permissions}}
@@ -12,11 +12,11 @@
  * wait 用纯 Node setTimeout——不依赖外部 sleep 可执行文件（Windows 无 GNU coreutils sleep）。
  *
  * C5「观察面归一」（S142 2026-09-15）：本文件的 health **不再自己取数**——三原则、注册表结构判据、
- * 配置、宿主契约一律经 `container-status.ts` 取（唯一取数出口），本文件只把事实**渲染**成 osp
+ * 配置、宿主契约一律经 `surface/observation.ts` 取（唯一取数出口），本文件只把事实**渲染**成 osp
  * 既有 wire 形状。故：
- *  - `checkRegistryHealth` 已迁入 `container-status.ts`（同一实现，名字不变）；
- *  - `container-status.ts` 带 @deepseek-ai 值依赖（时钟段）⇒ 这里用 `await import` 保持本模块
- *    静态链**零 DSH 依赖**（与 `api.ts` 的既有约定同规格）。
+ *  - `checkRegistryHealth` 已迁入 `surface/observation.ts`（同一实现，名字不变）；
+ *  - `surface/observation.ts` 带 @deepseek-ai 值依赖（时钟段）⇒ 这里用 `await import` 保持本模块
+ *    静态链**零 DSH 依赖**（与 `surface/http.ts` 的既有约定同规格）。
  * ⚠️ wire 形状**逐字不变**（字段名/取值/出现条件都不许动）——C5 是取数归一，不是文案改版。
  */
 

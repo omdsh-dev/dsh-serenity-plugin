@@ -1,11 +1,11 @@
 /**
- * weixin-api.ts — 微信个人号 iLink Bot API 客户端（F4c-3，v1.27.0 实验性）
+ * im/ilink.ts — 微信个人号 iLink Bot API 客户端（F4c-3，v1.27.0 实验性）
  *
  * 纯 fetch 客户端（Node ≥ 18 原生 fetch + node:crypto），零第三方依赖——
- * 对齐 openclaw-weixin 插件 api.ts 语义（协议全解见 docs/weixin-bot-api.md）。
+ * 对齐 openclaw-weixin 插件 surface/http.ts 语义（协议全解见 docs/weixin-bot-api.md）。
  *
  * 定位：**Mech 传输层**——只做 HTTP 编解码与请求头，不含业务逻辑（路由/会话映射
- * 在 weixin-route.ts / weixin-bridge.ts）。所有函数可单测（fetch 注入 mock）。
+ * 在 im/route.ts / im/bridge.ts）。所有函数可单测（fetch 注入 mock）。
  *
  * 关键协议事实（实证裸调 2026-08-31）：
  * - get_bot_qrcode 无需任何凭据即可取码（无 OpenClaw 账号体系/平台审核）

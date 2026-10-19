@@ -2,15 +2,15 @@
  * api-status-api.test.ts — 🔴 **HTTP 对外面（`registerStatusApi`）的首次行为验收**
  * （2026-09-25 · ⑤ 第 8 件 · 对应地图 §3-9 新增行）
  *
- * 为什么必须补（R↓，读数是实测的）：`src/api.ts` 是**整个 HTTP 对外面**（9 条 `/serenity/*`
+ * 为什么必须补（R↓，读数是实测的）：`src/surface/http.ts` 是**整个 HTTP 对外面**（9 条 `/serenity/*`
  * 路由：状态／safe-mode 切换／图片落盘／文件落盘／配置读写／cccs／public-ask／weixin／
- * session-cleanup）。而覆盖率报告实测：**`api.ts` 23.55% statements、4/11 functions**
+ * session-cleanup）。而覆盖率报告实测：**`surface/http.ts` 23.55% statements、4/11 functions**
  * —— **`registerStatusApi` 这个入口本身（约 530 行）从未被执行过**，连带 6 个私有助手
  * （`readBody` / `sendJson` / `senderIsWebUi` / `requireWebUi` / `resolveWorkspace` / `requireCcc`）
  * 也全是"零执行"。⇒ 此前**没有任何测试证明这些端点真的能应答**。
  *
  * 🔴 为什么覆盖门禁没拦住（这正是地图 §3-9 第 5 行那条缺口形态）：`coverage-gate` 用**正则匹配
- * 测试源码里的 import 字符串**（"**提到即算覆盖**"）——`accounts-api.test.ts` 提到了 `api.ts`，
+ * 测试源码里的 import 字符串**（"**提到即算覆盖**"）——`accounts-api.test.ts` 提到了 `surface/http.ts`，
  * 于是门禁判"已覆盖"，而**77% 的语句从未运行**。
  *
  * 本组用的是**真 listener ＋ 真 HTTP 往返 ＋ 真 CCC 夹具**（不是构造 req/res 假对象）：
@@ -766,9 +766,9 @@ describe('src/api.ts：weixin 的三个写动作（只写 CCC 配置）', () => 
 })
 
 /**
- * 🔴 ⑤ 第 17 件：`api.ts` 的**错误与边界分支**（客户端真会走到，此前 64 条语句零执行）。
+ * 🔴 ⑤ 第 17 件：`surface/http.ts` 的**错误与边界分支**（客户端真会走到，此前 64 条语句零执行）。
  *
- * 挑靶法（本轮写入地图 §2.7b）：从 `coverage/src/api.ts.html` 的 `cline-no` **反推源行**
+ * 挑靶法（本轮写入地图 §2.7b）：从 `coverage/src/surface/http.ts.html` 的 `cline-no` **反推源行**
  * （该文件 `class="text"` 块起始 HTML 行 = 源行 1）⇒ 得到的是"哪些分支从没走过"，
  * 而不是"哪个文件覆盖率低"（后者已无靶：每个 src 文件都 ≥80%）。
  *
@@ -946,7 +946,7 @@ describe('src/api.ts：错误与边界分支（⑤ 第 17 件）', () => {
 })
 
 /**
- * 🔴 ⑤ 第 18 件：`api.ts` 的**残余 catch 与尾部支线**（第 17 件后剩 22 条里的可覆盖部分）。
+ * 🔴 ⑤ 第 18 件：`surface/http.ts` 的**残余 catch 与尾部支线**（第 17 件后剩 22 条里的可覆盖部分）。
  *
  * 🔵 **本件的判据要点：用"真实故障形态"触发 catch，不用 mock 制造异常**（§4.2-㊾）。
  *    三种形态都是产线上真会发生的：① 宿主服务读取抛错（cordis Proxy 对未声明服务确实会抛）
@@ -1037,7 +1037,7 @@ describe('src/api.ts：残余 catch 与尾部支线（⑤ 第 18 件）', () => 
 // 🆕 2026-09-25 ⑤ 第 31 件：`resolveWorkspace` 的**默认箭头**（`listCwds = () => []`）
 //
 // 挑靶依据 = **先逐行读覆盖率报告的 `cstat-no`/`fstat-no`**（别按 branch% 排序硬上）：
-// 当时 `api.ts` 的**唯一未执行函数**就是那句默认箭头（语句面已 99.73%，另一处 2 条属
+// 当时 `surface/http.ts` 的**唯一未执行函数**就是那句默认箭头（语句面已 99.73%，另一处 2 条属
 // **构造上不可达**的 catch ⇒ 地图 §3-8 第 9 行已登记）⇒ 补掉它即可让该文件**函数面全满**。
 //
 // 🔴 为什么既有用例没覆盖到：⑰ 件那组测的是"**列表存在**"的两条路（`sessions.get` ／

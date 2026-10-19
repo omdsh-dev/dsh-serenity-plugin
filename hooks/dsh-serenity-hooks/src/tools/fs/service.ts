@@ -1,5 +1,5 @@
 /**
- * fs-ops.ts — container_fs 纯操作层（cc_fs → container_fs，v1.30；零 DSH 依赖，可独立单测）
+ * tools/fs/service.ts — container_fs 纯操作层（cc_fs → container_fs，v1.30；零 DSH 依赖，可独立单测）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/fs/file-system-tool.ts）——osp 是 ACC 工具 spec：
  *   - rm：目录需 recursive 才删除；非空目录无 recursive → [SKIP]；保护 .serenity 与 CCC 根；dry-run 预览

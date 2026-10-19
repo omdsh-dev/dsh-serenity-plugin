@@ -1,5 +1,5 @@
 /**
- * skiff-role.ts — Skiff（F4，v1.25.0 实验性）角色层纯逻辑（零 DSH 依赖，可独立单测）
+ * role/skiff/config.ts — Skiff（F4，v1.25.0 实验性）角色层纯逻辑（零 DSH 依赖，可独立单测）
  *
  * 概念（S142 用户拍板）：Skiff = 完整宁静号 cognitive trajectory（在宁静号内全知全能）的
  * **任意子集**——CCC 通过角色配置定义：能力面（tools 非 MSM 工具白名单 + msms

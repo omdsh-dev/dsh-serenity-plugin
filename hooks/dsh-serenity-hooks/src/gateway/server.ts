@@ -1,5 +1,5 @@
 /**
- * gateway.ts — F1 双端口网关（v1.21）+ 安全加固（v1.22.4）——**装配层**
+ * gateway/server.ts — F1 双端口网关（v1.21）+ 安全加固（v1.22.4）——**装配层**
  *
  * 需求（S142 用户拍板）：dsh web 维持 127.0.0.1 主端口现状不变，**额外监听一个端口**；
  * 额外端口需网页登录（账号+密码），登录后即原生 Web UI 使用；适应任何部署情况。
@@ -20,8 +20,8 @@
  *   - S7：cookieSecure 配置项（反代 TLS 时开启；默认关保持明文 HTTP 可用）
  *   - S9：登录失败审计日志（时间/IP/账号/原因，console.warn）
  *
- * v1.22.8 熵点治理（S142）：认证域纯逻辑拆到 gateway-auth.ts（会话/锁定/CSRF/Origin/
- * cookie/登录页），代理辅助纯逻辑拆到 gateway-proxy.ts（polyfill/headers/workspace 过滤）；
+ * v1.22.8 熵点治理（S142）：认证域纯逻辑拆到 gateway/auth.ts（会话/锁定/CSRF/Origin/
+ * cookie/登录页），代理辅助纯逻辑拆到 gateway/proxy.ts（polyfill/headers/workspace 过滤）；
  * 本文件只保留 HTTP 装配（startGateway/registerGateway/readBody）——re-export 两模块
  * 保持既有 import 面兼容（tests/gateway.test.ts 直接 import 两模块导出）。
  */
@@ -31,7 +31,7 @@ import { request as httpRequest, type IncomingMessage, type ServerResponse } fro
 import { readAdvancedSettings, migrateLegacyLocalstore, verifyPassword } from '../kernel/config.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { readSimpleSettings } from '../surface/settings.js'
-// C4 块 A：listener 生命周期归面宿主（本面=面 B，端口语义见 ports.ts 的 FACE_PORTS.gateway）
+// C4 块 A：listener 生命周期归面宿主（本面=面 B，端口语义见 kernel/ports.ts 的 FACE_PORTS.gateway）
 import { startFace, type FaceHandle } from '../surface/faces.js'
 import { verifyTotpCode } from './totp.js'
 import {
@@ -522,7 +522,7 @@ async function startGateway(
   })
 
   // v1.22.1 稳定性：listen 的 EADDRINUSE 重试与 clientError 兜底**已归面宿主**
-  // （`face-host.ts` 的 `listenWithRetry` / `dispatch`；此前面只有 gateway 独享这套样板，
+  // （`surface/faces.ts` 的 `listenWithRetry` / `dispatch`；此前面只有 gateway 独享这套样板，
   //  C4 归一后四个面统一享有——见 face-host 的模块头注释）。
   return handle
 }

@@ -1,5 +1,5 @@
 /**
- * status.ts — 状态与安全模式操作（纯逻辑，零 DSH 依赖，可独立单测）
+ * surface/status.ts — 状态与安全模式操作（纯逻辑，零 DSH 依赖，可独立单测）
  *
  * WebUI 停靠栏的数据源：ACC 版本 / CCC 根 / safe-mode 状态 / 黑名单 / keeper 阈值 / cheap-worker 模型。
  * setSafeMode 直接读写 .serenity-safe-on 标记（守卫实时读取，写即生效）。

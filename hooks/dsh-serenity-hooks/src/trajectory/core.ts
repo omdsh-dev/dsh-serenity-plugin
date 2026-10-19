@@ -1,5 +1,5 @@
 /**
- * cognitive-trajectory-ops.ts — 轨迹工具纯操作层（零 DSH 依赖，可独立单测）
+ * trajectory/core.ts — 轨迹工具纯操作层（零 DSH 依赖，可独立单测）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/session/lib.ts）——osp 是 ACC 工具 spec。
  *
@@ -504,7 +504,7 @@ export interface ActiveSessionInfo {
 
 // ── 会话命名（F3/v1.22.9 格式 + 需求② 概括）────────────────────────────────
 // 🔴 2026-09-25（S142 工程化程序第 ④ 项·第 1 步）**从 `tools/cognitive-trajectory.ts` 下沉至此**。
-// 为何在 L1：`rebuild.ts`（L1）原**静态** import `tools/cognitive-trajectory.ts`（L3）**只为取 `namingTitleFor`**
+// 为何在 L1：`trajectory/rebuild.ts`（L1）原**静态** import `tools/cognitive-trajectory.ts`（L3）**只为取 `namingTitleFor`**
 // ⇒ 既是 L1→L3 上行边，又与 `tools/cognitive-trajectory.ts` 里 `await import('../rebuild.js')` 的合法下行边
 // **成环**（证据＝模块图 §3-6）。两个纯函数（**零 DSH 依赖**）下沉到本模块后，两侧各自向下依赖，环解开。
 // 🔵 为何 `sanitizeSessionSummary` 必须**同批**下沉：它是 `namingTitleFor` 的私有助手，若留在 L3
@@ -690,7 +690,7 @@ export function extractSessionMdPathFromText(text: string): string | null {
   if (!m) return null
   let p = m[1]!.trim()
   // 🔴 本正则必须与**两个发射点逐字同步**：`seams/system-prompt.ts` 的 Session 块
-  //    与 `rebuild.ts` 的重建锚点规范行。改一侧不改另一侧 ⇒ 静默剥不掉尾注 ⇒
+  //    与 `trajectory/rebuild.ts` 的重建锚点规范行。改一侧不改另一侧 ⇒ 静默剥不掉尾注 ⇒
   //    解析出的路径带上注释文字 ⇒ 会话恢复断链，且 **typecheck 抓不到**（正则字面量无类型）。
   //    （2026-10-18 更名时由三个 worker 独立报出同一处，见 D156。）
   const suffix = p.search(/ \(the cognitive trajectory's persistent body/)

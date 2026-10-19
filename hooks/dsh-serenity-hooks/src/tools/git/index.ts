@@ -1,5 +1,5 @@
 /**
- * git.ts — container_git 真实 DSH 工具定义（defineTool）（v1.30：cc_git → container_git）
+ * tools/git/index.ts — container_git 真实 DSH 工具定义（defineTool）（v1.30：cc_git → container_git）
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -27,7 +27,7 @@ export const gitTool = defineTool({
     },
     noPush: { type: 'boolean', description: 'commit: 只提交到本地，不随后推送（默认提交后自动推送）' },
     // 注意：公测 rc.6 value schema DSL 不支持 minimum/maximum 数字边界键（defineTool 阶段会拒绝）。
-    // 边界校验（1-100）在 git-ops.ts 运行时 clamp 执行。
+    // 边界校验（1-100）在 tools/git/service.ts 运行时 clamp 执行。
     count: { type: 'integer', description: 'Log count (default 10, max 100; runtime clamp 1-100)' },
     staged: { type: 'boolean', description: 'diff: show staged changes (--cached)' },
     ref: { type: 'string', description: 'diff: compare ref (e.g. HEAD~1 / main / origin/main)' },

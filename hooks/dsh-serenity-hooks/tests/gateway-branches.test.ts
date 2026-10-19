@@ -30,7 +30,7 @@ import { hashPassword } from '../src/kernel/config.js'
  * **承诺写进注释与配置项、却没有回归钉**。
  *
  * 🔵 **另一处本件补的对象**：`:442` 的 `enabled: () => readSimpleSettings().gatewayEnabled`
- * 是覆盖率报告里 `gateway.ts` **唯一剩下的 `fstat-no`**（函数从未被调用）——
+ * 是覆盖率报告里 `gateway/server.ts` **唯一剩下的 `fstat-no`**（函数从未被调用）——
  * 它是 spec 的**意图读取闭包**（`faceEnabled(spec)` 才调它），而既有用例全部**直接调 `registerGateway`**
  * ⇒ 这个闭包从未被求值过。本件把它钉住（"配置说关 ⇒ 意图为假"）。
  *
@@ -277,13 +277,13 @@ describe('gateway: cookieSecure 缺省的正控方向（成对测 —— 累积�
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
-// C. 装配意图闭包（gateway.ts 唯一剩下的 fstat-no）
+// C. 装配意图闭包（gateway/server.ts 唯一剩下的 fstat-no）
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('gateway: spec.enabled 意图闭包（faceEnabled 才调它 —— 既有用例全部绕过）', () => {
   it('🔴 C1：`gateway.ts` 传给面宿主的 spec，其 `enabled()` **如实读设置源**（开/关两个方向）', async () => {
     // 源码 :442 `enabled: () => readSimpleSettings().gatewayEnabled`
-    // 覆盖率报告里这是 gateway.ts **唯一剩下的 fstat-no**（该箭头从未被求值）。
+    // 覆盖率报告里这是 gateway/server.ts **唯一剩下的 fstat-no**（该箭头从未被求值）。
     // 语义：装配层据此判"该面此刻应否在监听"。判反的后果 =
     // **设置面板关了网关、意图仍报"开"** ⇒ 用户在 UI 上关不掉这个对外端口。
     //
@@ -305,7 +305,7 @@ describe('gateway: spec.enabled 意图闭包（faceEnabled 才调它 —— 既�
 })
 
 /**
- * 截获 `gateway.ts` 真正传给面宿主的 spec。
+ * 截获 `gateway/server.ts` 真正传给面宿主的 spec。
  *
  * 手法：把 `face-host.startFace` 换成一个**只记录不绑定**的替身（面宿主的边界，不是被测对象），
  * 于是 `startGateway` 会走到它自己那句 `startFace({ … enabled: () => … , handler })` 并把 spec 交出来。

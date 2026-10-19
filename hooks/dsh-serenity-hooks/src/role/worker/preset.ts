@@ -1,5 +1,5 @@
 /**
- * cheap-worker-preset-inherit.ts — cheap-worker worker 的 preset 继承 + 工具面收窄（纯函数，可单测）
+ * role/worker/preset.ts — cheap-worker worker 的 preset 继承 + 工具面收窄（纯函数，可单测）
  *
  * v1.24.0：loop → cheap-worker 重命名。对齐 subagent 先例（applyChildComposition →
  * agentPresets.composeFrom）：cheap-worker worker 在创建窗口内 join 发起方 agent 的 standing
@@ -16,7 +16,7 @@
  *     （在 agent 未发布前执行 composeFrom + restrict，失败由创建事务回滚）。
  *
  * 仅依赖 cordis 的 Context 类型（type-only，运行时擦除）——保持可被 vitest
- * 直接加载（与 ccc.ts / cheap-worker-ops.ts 同级的纯模块约定）。
+ * 直接加载（与 kernel/ccc.ts / role/worker/core.ts 同级的纯模块约定）。
  */
 
 import type { Context } from 'cordis'

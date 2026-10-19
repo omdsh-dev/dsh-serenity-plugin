@@ -1,5 +1,5 @@
 /**
- * kit.ts — dashboard 真实 DSH 工具定义（defineTool）（v1.30：acc_kit → dashboard）
+ * tools/kit/index.ts — dashboard 真实 DSH 工具定义（defineTool）（v1.30：acc_kit → dashboard）
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'

@@ -115,7 +115,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
       //   两条功能**又**变成静默跳过 —— 即：**修好了新宿主，却弄坏了老宿主**。
       //   ⇒ 判据（本条的一般化）：**`required` 成员必须是"两代都提供"的交集**；
       //     只在某一代存在的成员，**不得**进 required（它若真的必需，应由调用点自己守卫）。
-      //   · `configure` 的调用点 = `settings-section.ts`，**本就写成 `settings?.configure?.({auto:false})`**
+      //   · `configure` 的调用点 = `surface/settings.ts`，**本就写成 `settings?.configure?.({auto:false})`**
       //     （可选链 + try/catch）⇒ **不要求它，零损失**：老宿主上只是多出一张宿主自动生成的设置页。
       { name: 'describe', kind: 'function' },
       { name: 'update', kind: 'function' },

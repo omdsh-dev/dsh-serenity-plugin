@@ -19,7 +19,7 @@
  * ## 明确**不**被宿主消费的声明（旧结论复核结论，勿再当契约）
  *
  * - **`dsh.plugin.json`**：0.1.5-rc.1 的 45 个宿主包内**连字符串都零命中** → **非宿主识别格式**，
- *   是本包**自维护元数据**（`contributes.tools` 供 `invariant.ts` 与测试自检；工具真正注册走 `ctx.tools.register`）
+ *   是本包**自维护元数据**（`contributes.tools` 供 `kernel/invariant.ts` 与测试自检；工具真正注册走 `ctx.tools.register`）
  * - **`engines.dsh`**：全树 `engines` 只在无关注释里出现 → **无宿主强制**；真正的版本门 = `peerDependencies`
  *   解析 + 本包自己的 `REQUIRED_HOST_RANGE`（`src/host/contract.ts`）
  */

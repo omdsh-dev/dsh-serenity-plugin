@@ -4,6 +4,8 @@
 > **与顶层约束的分工**：`docs/dsp-top-level-constraints.md` 给**规则**（层怎么定义、依赖只许怎么走）；**本文件给落位**。两份文档**不许互相抄写**。
 > **维护**：任何新增/删除/挪动模块 ⇒ **同批**改本文件（§6.2 退役纪律）。层判定用约束文档 §3.3 的准入三问。
 > **数据来源**：2026-09-25 六域只读盘点（每域一位独立盘查者，逐文件读实现，不只看文件名）；grep 域 = `hooks/dsh-serenity-hooks/{src,tests}` ＋ `AI_LAB/dsh-serenity-plugin/{docs,CHANGELOG.md}`。
+> 🔴 **2026-10-19 结构更新**：`src/` 完成目录域化（平铺 73 条目 → `index.ts` ＋ 16 目录，零功能改动，S1~S8 八个阶段）。
+> **落位以 §1b 为准**；§2 各表的"文件"列仍是旧布局路径，逐域重写单列一件（**不要**用它来定位文件）。
 
 ---
 
@@ -21,14 +23,51 @@
 
 ---
 
-## 1. 规模与层总览（锚定 2026-09-25 实测）
+## 1. 规模与层总览
 
-| 项 | 读数 |
+> 🔴 **2026-10-19 目录域化后，本节改为"结构读数"；用例数这类会漂的数值不回写**（看 `dsh-develop test` 的当次输出）。
+> 🔴 **§2 分域明细的"文件"列仍是 2026-09-25 的旧布局** —— 那一栏的**路径**已过期，但它的
+> "职责 / 依赖 / 被测"三栏内容仍然有效。**落位以 §1b 的目录树为准**；§2 逐域改路径单列一件（见 §6.2）。
+
+| 项 | 读数（2026-10-19） |
 |---|---|
-| `src/` 模块总数 | 顶层 `~70` ＋ `client/` 18 ＋ `host/` 5 ＋ `seams/` 9 ＋ `tools/` 15 ＋ `skills/` 1 ≈ **118** |
-| 测试 | **113 文件 / 1799 用例**（锚定 2026-09-25 **⑤ 第 5 件 `58d58b2` 之后**的一次 `dsh-develop test` 读数；演进：1700 →（死代码第 1 批）1699 →（⑤ 第 1~5 件）1715 → 1733 → 1756 → 1767 → **1799**） |
-| `docs/` 条目 | **72**（其中**绝大多数是历史设计/评审**，不是现行依据） |
-| 对宿主包的直接 import | **146 处**（实测 grep `from '@deepseek-ai/…'` 或 `'cordis'`）⇒ 见 §3-1 |
+| `src/` 顶层 | **`index.ts`（唯一入口/装配点）＋ 16 个目录** —— 平铺的 73 条目已全部归域 |
+| 目录 = ？ | **能力域**（12 个：`kernel` `trajectory` `wake` `im` `gateway` `guard` `patch` `role` `surface` `tools` `skills` ＋ 四层既有域 `host` `seams` `client`） |
+| 文件名 = ？ | **能力名**；域内不重复域前缀；禁用 `-ops` / `-runtime` / `-helpers` / `-utils` / `-misc` 后缀 |
+| 域内 ≤ | 8 个文件；超过就该问"这是两个域吗" |
+| 工具后端 | `tools/<能力>/{index,service}.ts`：`index` = 注册壳，`service` = 后端实现 |
+
+### 1b. 目录树（落位真相源 · 2026-10-19）
+
+```
+src/index.ts                 装配点（apply：注册工具/缝/面）
+src/kernel/                  L0/L1 容器内核：ccc · ccc-roots · config · ports · constants
+                             · invariant · message-source · json · time
+src/trajectory/              L1 认知轨迹：core（读写）· bound（绑定）· assistant · skills
+                             · rebuild · live · cleanup
+src/wake/                    L1 唤醒与自主轮：scheduler · registry · cro · cro-turns
+                             · cro-log · cro-guide · clock
+src/im/                      L2 对外通信：ilink · bridge · hook · route · send · endpoint
+                             · guard · channels · weixin-channel · inbound
+src/gateway/                 L2 反代与登录：server · auth · dsh-auth · proxy · totp
+src/guard/                   L1/L2 输出守卫：filter（检测）· seam（缝接线）
+src/patches/                 L2 宿主/上游补丁：deepseek-vision · opencode-provider · web-fetch
+src/role/skiff/              L2 认知子集（skiff 一类角色）：core · debug · registry · config
+src/role/worker/             L2 工作委派子 agent：core · preset · idle
+src/surface/                 L2/L3 面与呈现：http · faces · observation（容器状态取数）
+                             · status（停靠栏/safe-mode）· settings · usage · voyage/{page,vocab}
+src/tools/                   L3 工具：<能力>/{index,service} 6 对（fs/git/kit/msm/diag/localstore）
+                             ＋ 单文件壳：cheap-worker · cognitive-trajectory · container-admin
+                             · diagram · im-bridge · skiff-admin · skill-creator · ontology-eng
+                             · praxis · eap · cce · neat · ontology
+src/skills/                  L2 CCC 技能发现与供给：opencode-scan · resource-index · discovery
+                             · skill-layering · skill-ontology
+src/host/        L0 宿主缝（5）     src/seams/   L2 拦截缝（10）
+src/client/      L4 浏览器半（18）   src/diagram/ L3 出图    src/ontology/ L3 本体引擎
+```
+
+🔴 **两条命名裁定的落点**（理由见 S142 §决策 D163/D164）：`surface/observation.ts` = 容器状态**取数**
+唯一出口（重链）；`surface/status.ts` = 停靠栏数据源 ＋ safe-mode 读写（轻链）。二者**不合并**。
 
 ---
 

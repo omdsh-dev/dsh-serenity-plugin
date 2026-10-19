@@ -1,5 +1,5 @@
 /**
- * skiff-registry.ts — Skiff 会话注册表（sessionId → {role, ccc}；零 DSH 依赖，可被任何 seams 安全 import）
+ * role/skiff/registry.ts — Skiff 会话注册表（sessionId → {role, ccc}；零 DSH 依赖，可被任何 seams 安全 import）
  *
  * F4b 会话映射：Skiff agent 创建时注册（skiff-core），guards/seams 按 sessionId 查角色。
  * 独立成模块的原因：guards.ts 等拦截缝需要查角色而不引入 skiff-core 的运行时依赖

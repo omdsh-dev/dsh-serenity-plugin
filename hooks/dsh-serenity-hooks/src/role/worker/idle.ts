@@ -1,5 +1,5 @@
 /**
- * agent-idle.ts — 等待 agent 空闲（含销毁竞速，S142 review F-08）
+ * role/worker/idle.ts — 等待 agent 空闲（含销毁竞速，S142 review F-08）
  *
  * 为什么单独成模块：`askSkiff`（skiff 问答）与 `cheap-worker`（杂工循环）都要"等这一轮做完"，
  * 此前各自复制了一份只监听 `agent/status → idle` 的实现。该实现有一个静默挂死：
@@ -26,7 +26,7 @@
  * 它只贡献了一处 L1→宿主 的接触点。
  * 🔵 **证据（可重跑）**：本文件**零处** `ctx.xxx` 类型化属性访问；
  * 唯一的 `ctx` 使用点是被 `as unknown as` **双重断言**后的结构化调用。
- * ⚠️ 与 `live-sessions.ts`／`ccc-roots.ts` 的区别：那两处是**纯透传**（连断言都没有）；
+ * ⚠️ 与 `trajectory/live.ts`／`kernel/ccc-roots.ts` 的区别：那两处是**纯透传**（连断言都没有）；
  * 本处是**结构化访问**。两者的共同结论一致：`Context` 注解未参与类型检查。
  * 🔵 **`Agent` 类型 import 保留**：它**被真正使用**（`p?.agent === agent` 的同一性比较）
  * ⇒ 属 §2.6 的 W2-类型，但本模块**不是**"只贡献接触点"那种 —— 它是真需要，故不在本次收敛面。

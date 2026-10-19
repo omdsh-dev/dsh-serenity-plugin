@@ -1,8 +1,8 @@
 /**
- * diag-ops-branches.test.ts — `diag-ops.ts` 的**分支面**（⑤ 第 43 件，2026-09-25）
+ * diag-ops-branches.test.ts — `tools/diag/service.ts` 的**分支面**（⑤ 第 43 件，2026-09-25）
  *
  * ── 挑靶依据（机械，不是叙述）───────────────────────────────────────────────
- * 复扫 coverage 报告取 `src/**` 里**分支覆盖率最低**的文件 ⇒ `diag-ops.ts`：
+ * 复扫 coverage 报告取 `src/**` 里**分支覆盖率最低**的文件 ⇒ `tools/diag/service.ts`：
  *   · 语句 **100%**（163/163）却只有 **分支 52.63%（10/19）** ⇒ **全仓最大的分支缺口**。
  *   · 这正是 ⑤ 换挡后的口径（"语义深度 ／ 边界与错误路径"）：每条语句都跑过，
  *     但**超过一半的分支从没走过另一侧** ⇒ 纯函数测试的典型盲区。
@@ -152,13 +152,13 @@ describe('diag-ops 分支面: 注册表条目字段的缺省（B4）', () => {
     expect(text).toContain('attempts=0')
     expect(text).not.toContain('undefined')
     // 🔴 **诚实登记（本件实测发现，不要读成本用例"赎了 B4"）**：
-    //    `diag-ops.ts` 的 `e.attempts ?? 0` **在真实路径上不可达** —— 上游 `wake-registry.ts`
+    //    `tools/diag/service.ts` 的 `e.attempts ?? 0` **在真实路径上不可达** —— 上游 `wake/registry.ts`
     //    的 `asEntry()`（约 :90）**已经把 attempts 规范成有限数**（非有限数一律写 0）⇒
     //    `containerWakes()` 给出的条目里 attempts **永远不是 undefined**。
     //    ⇒ 本用例的绿灯来自 `asEntry` 的规范化，**不是** diag-ops 那个 `??`。
     //    ⇒ 该 `??` 属**防御性冗余**（与地图 §3-8「构造上不可达」同族），本件**不动它**
     //      （删它 = 改生产代码；且它零风险、可读性上有守门价值）⇒ **登记，不赎**。
-    //    判据（可重跑）：`grep -n "attempts:" src/wake-registry.ts` ⇒ 命中 `asEntry` 的规范化行。
+    //    判据（可重跑）：`grep -n "attempts:" src/wake/registry.ts` ⇒ 命中 `asEntry` 的规范化行。
     expect(r.wakes.entries[0]!.attempts).toBe(0) // 行为本身仍要钉住（回归价值）
   })
 

@@ -1,8 +1,8 @@
 /**
- * cc-fs.ts — container_fs 真实 DSH 工具定义（defineTool）（v1.30：cc_fs → container_fs）
+ * tools/fs/index.ts — container_fs 真实 DSH 工具定义（defineTool）（v1.30：cc_fs → container_fs）
  *
  * 进程内注册（取代 v0.1 的 bash spawn runner）：zod/schemastery 参数校验、
- * 规范 JSON 输出、纯 render 投影。逻辑在 fs-ops.ts（可单测）。
+ * 规范 JSON 输出、纯 render 投影。逻辑在 tools/fs/service.ts（可单测）。
  */
 
 import { defineTool } from '@deepseek-ai/dsh-tools'

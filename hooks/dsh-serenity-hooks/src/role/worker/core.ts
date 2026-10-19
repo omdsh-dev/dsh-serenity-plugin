@@ -1,5 +1,5 @@
 /**
- * cheap-worker-ops.ts — cheap-worker（杂工）纯逻辑层（零 DSH 依赖，可独立单测）
+ * role/worker/core.ts — cheap-worker（杂工）纯逻辑层（零 DSH 依赖，可独立单测）
  *
  * 🆕 2026-10-14（owner 令「删除后台运行能力」）：**进度文件 / stop token / 轮次循环**整族已退场 ——
  * 它们**只**服务于 background 模式。本模块现存 = 前台委派真正需要的三件：

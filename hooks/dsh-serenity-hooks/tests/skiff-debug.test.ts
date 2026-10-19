@@ -423,10 +423,10 @@ describe('skiff-debug: renderSkiffMarkdown 服务端渲染（v1.25.9 marked）',
 // 🔴 **本件同时产出并登记一条结构性发现（见地图 §3-8 与 §2.7s）**：
 //    `FaceSpec.enabled` 是**类型上的必填字段** ⇒ **各面都写了**（`weixin` / `gateway` / `skiff-debug`，
 //    ⚠️ 原还有第四个 `acp-http`，已随面 E 退役删除），
-//    但全仓**只有一个读者**：`faceEnabled`（`face-host.ts`），**且只有一处调用点**（`weixin-send-api.ts`）。
+//    但全仓**只有一个读者**：`faceEnabled`（`surface/faces.ts`），**且只有一处调用点**（`im/send.ts`）。
 //    ⇒ `gateway` ／ `skiff-debug` 两处的声明**当前无人读取**。
 //    ⚠️ 其中 **`gateway` 连被"以同一形态"取到都不可能** —— 它的 spec 是 `startFace({...})` 里的**内联字面量**，
-//    该模块**没有 spec 构造函数**（`gateway.ts` 的唯一导出是 `registerGateway`）⇒ 对象从不外泄 ⇒
+//    该模块**没有 spec 构造函数**（`gateway/server.ts` 的唯一导出是 `registerGateway`）⇒ 对象从不外泄 ⇒
 //    既谈不上被 `faceEnabled` 读，也无法在测试里按 §2.7m 的形态取到（**构造上不可达**）。
 //    ⇒ 🔴 **本件刻意不给 `gateway` 那处硬凑测试**（拦截 `startFace` 抓内联字面量 = 把"产线从不发生"固化成"期望形态"，
 //    且会把这条发现**涂绿掩盖掉**）—— 它归 **② 死代码／装配缺口**那一批，不归 ⑤。

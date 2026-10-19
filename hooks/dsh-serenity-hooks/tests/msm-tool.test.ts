@@ -2,7 +2,7 @@
  * msm-tool.test.ts — `msm` 工具（v1.30 单入口：list/exec 合一）行为测试
  *
  * 🔴 为什么有这个文件（⑤ 第 3 件；挑靶依据 = coverage 的**未覆盖行**）：
- *   本仓 coverage 实测 `src/tools/msm.ts` 41.42%，未覆盖面 = **整个 `execute` 处理器
+ *   本仓 coverage 实测 `src/tools/msm/index.ts` 41.42%，未覆盖面 = **整个 `execute` 处理器
  *   ＋ 四个私有助手**（`agentSessionId` / `renderText` / `buildMsmIndex` / `suggestMsm`）
  *   —— 即"这个工具从没被真正执行过"。（注意：**不是**"没被提到" —— `coverage-gate`
  *   用正则匹配 import 字符串，**提到即算覆盖**，故该门禁看不见这类缺口。）
@@ -267,8 +267,8 @@ describe('msm：Skiff 门控（真 skiffMsmGate）', () => {
     expect(mockRunMsmAsync).not.toHaveBeenCalled()
   })
 
-  // 🔴 本组顺带钉住一条**实测发现**：`src/tools/msm.ts` 里两处 `gate.whitelist` 分支**不可达** ——
-  //   `whitelist` 只在 `skiffMsmGate(..., 'list', ...)` 里被返回，而 msm.ts 只在 **name 为空**时传
+  // 🔴 本组顺带钉住一条**实测发现**：`src/tools/msm/index.ts` 里两处 `gate.whitelist` 分支**不可达** ——
+  //   `whitelist` 只在 `skiffMsmGate(..., 'list', ...)` 里被返回，而 tools/msm/index.ts 只在 **name 为空**时传
   //   `'list'`，且那一路在 L110 就**提前返回**了。于是 L117（白名单过滤）与 L125（候选加「已过滤」前缀）
   //   两处的 `gate.whitelist` **恒为 undefined**；exec 路的拒绝已由门控自己完成（`{reject}`）。
   //   ⇒ 下面这条用例钉的是**可观测契约**：白名单内、但未注册的名字 ⇒ 走**无前缀**的候选分支。

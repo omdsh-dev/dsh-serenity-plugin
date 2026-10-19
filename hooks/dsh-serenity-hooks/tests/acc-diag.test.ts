@@ -12,7 +12,7 @@
  * 2026-09-15（ACC 侧 autopilot 退场，S142 §1 二阶裁定）：报告由四段降为三段
  * （① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。原 ② 面板解析与 ④ 唤起条件链的主语
  * 随机制消失 ⇒ 本文件对应用例（④ 进程内判据、④ 未配置如实报告）**整组删除**，
- * 不保留、不改为 skip。④ 的诊断缺口已登记在 `src/diag-ops.ts` 文件头与基线 doc §1。
+ * 不保留、不改为 skip。④ 的诊断缺口已登记在 `src/tools/diag/service.ts` 文件头与基线 doc §1。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'

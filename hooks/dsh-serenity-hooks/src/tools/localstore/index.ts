@@ -2,7 +2,7 @@
  * localstore.ts — localstore 真实 DSH 工具定义（defineTool）
  *
  * ACC 标准本地凭据/配置存储（S133 设计，S134 重设计：CCC 根 localstore.json）。
- * 进程内注册，零 DSH 依赖逻辑在 localstore-ops.ts（可单测）。
+ * 进程内注册，零 DSH 依赖逻辑在 tools/localstore/service.ts（可单测）。
  * doc 子命令输出存储规范，agent 可直接用 fs 工具（read/write）自己读写。
  */
 

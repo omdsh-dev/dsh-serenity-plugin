@@ -1,7 +1,7 @@
 /**
  * clock-runtime.test.ts — 时钟运行时工厂（C6b / 路径 P2）
  *
- * 本文件是 `src/clock-runtime.ts` 的**镜像测试**（coverage-gate.test.ts 的 P2-2 门禁要求
+ * 本文件是 `src/wake/clock.ts` 的**镜像测试**（coverage-gate.test.ts 的 P2-2 门禁要求
  * 每个 src 业务模块都有测试覆盖），同时承载 C6b 的**分界判据**：
  *
  * 🔴 最重要的是「**串行域独立**」那一条（{@link describe} 最后一组）——它是 **P2 与 P1 的分界**：

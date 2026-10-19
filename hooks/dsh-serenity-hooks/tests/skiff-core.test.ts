@@ -315,7 +315,7 @@ describe('skiff-core: createSkiffAgent resume-or-create（v1.27.2 微信桥 id c
   /**
    * 🔴 **⑤ 第 39 件：本条用例是"发现"，不是"靶"** —— 保留它是为了把结论钉成机械事实。
    *
-   * **起因**：`skiff-core.ts` 的 `liveReuseRef` 返回对象里的 `dispose: async () => {}` 是 `fstat-no`
+   * **起因**：`role/skiff/core.ts` 的 `liveReuseRef` 返回对象里的 `dispose: async () => {}` 是 `fstat-no`
    * （从没被进入）。按挑靶流程先证可达性，结论与预期相反：
    *
    * 1. `dispose` 是 **`AgentHandle` 上的成员**，而 `createSkiffAgent` 的返回类型 `SkiffAgentRef`

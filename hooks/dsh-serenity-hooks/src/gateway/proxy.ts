@@ -1,12 +1,12 @@
 /**
- * gateway-proxy.ts — F1 双端口网关：代理辅助纯逻辑（v1.22.1-1.22.3 稳定性修复）
+ * gateway/proxy.ts — F1 双端口网关：代理辅助纯逻辑（v1.22.1-1.22.3 稳定性修复）
  *
- * 从 gateway.ts 拆分（S142 熵点治理，v1.22.8）：
+ * 从 gateway/server.ts 拆分（S142 熵点治理，v1.22.8）：
  *  - crypto.randomUUID polyfill（非安全上下文修复，v1.22.0）
  *  - 反代请求头构造（信任栅栏修复：Host + Origin 同步改写 loopback，v1.22.1）
  *  - workspace 白名单过滤（响应 items 前缀过滤 + create 校验 + 403 RPC 响应，v1.22）
  *  - HTML polyfill 注入（幂等 marker）
- * 纯函数设计（可单测）；gateway.ts 装配层 import 使用。
+ * 纯函数设计（可单测）；gateway/server.ts 装配层 import 使用。
  */
 
 // ── crypto.randomUUID polyfill（浏览器 Web Crypto 仅安全上下文可用）──

@@ -3,7 +3,7 @@
  *
  * ## 这个模块为什么必须有测试（它自己就是"病族成员"）
  *
- * `cro-turns.ts` 是 CRO 唯一需要 ACC 新增的状态，而它的头号风险是
+ * `wake/cro-turns.ts` 是 CRO 唯一需要 ACC 新增的状态，而它的头号风险是
  * **"只增不清"**（本容器栽过 5 次：wake-registry / keeper 三表 / pendingRebuilds …）。
  * ⇒ 本文件的重点**不是**"表能存能取"，而是**清理真的发生了**：
  *   · TTL 过期 ⇒ 项**被删掉**（不是只跳过）——用 `croTurnTableSize()` 断言**表变小了**；
@@ -40,7 +40,7 @@ const A = 'session-aaa'
 const B = 'session-bbb'
 const C = 'session-ccc'
 
-/** 事件 payload 的形状（照 `host/contract.ts` / `agent-idle.ts` 实测） */
+/** 事件 payload 的形状（照 `host/contract.ts` / `role/worker/idle.ts` 实测） */
 const agentPayload = (id: string): unknown => ({ agent: { session: { id } } })
 
 /** `registerCroTurnTracking` 实际订阅的事件名（装配期抓取；见文件头第二条重点） */

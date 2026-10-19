@@ -63,7 +63,7 @@ export function accIdentityText(
   // 🔴 曾在此注入 `- cheap-worker default model: <model>`（所有者 2026-09-16 令删，S142 §0e-G）：
   //   模型名对 LLM **不构成可执行动作**（调 cheap-worker 时不由它选模型——默认值由 `cheap-worker.ts`
   //   自己读配置决定，见 `cheap-worker.ts:213/461`），所以它拿到这个名字也无法据此决策 ⇒ 纯噪音。
-  //   ⇒ 删注入；**机制与面板都保留**（`status.ts:85` 仍把 cheapWorkerModel 喂给 WebUI 面板，那是给人看的）。
+  //   ⇒ 删注入；**机制与面板都保留**（`surface/status.ts:85` 仍把 cheapWorkerModel 喂给 WebUI 面板，那是给人看的）。
   //   出处依据：所有者「我记得 cheap-worker 用的模型是啥总是被注入，这个 LLM 不关注的，需要删掉」。
   //   连带清理：`readCheapWorkerConfig` 的读取也一并去掉（它只为这一行存在，留下即为未使用变量）。
   if (phase2) {

@@ -1,5 +1,5 @@
 /**
- * cognitive-trajectory-skills.ts — 轨迹 skill 声明解析 + 注入内容装配（纯逻辑，零 DSH 依赖）
+ * trajectory/skills.ts — 轨迹 skill 声明解析 + 注入内容装配（纯逻辑，零 DSH 依赖）
  *
  * 接口真相源：`docs/cognitive-trajectory-skill-injection.md` v1.0（§2 数据契约 / §3 注入契约）。
  * 一句话：**轨迹自己声明它要挂哪些 skill**（`SESSION.md` 顶部 YAML frontmatter 的 `skills:`），

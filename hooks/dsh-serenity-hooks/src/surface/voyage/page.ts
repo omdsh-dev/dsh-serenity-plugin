@@ -1,5 +1,5 @@
 /**
- * voyage-page.ts — `/serenity/voyage`：宁静号航行动画（**ACC 层静态资产**）
+ * surface/voyage/page.ts — `/serenity/voyage`：宁静号航行动画（**ACC 层静态资产**）
  *
  * 作用：把「宁静号航行动画」作为 **ACC 的一部分**随包分发，并用一条 HTTP 路由把它
  * 交给 WebUI。当前唯一消费者 = 会话头部状态胶囊展开卡片（`SafeModePanel` 的 `sp-pop`）
@@ -43,7 +43,7 @@ export const VOYAGE_ASSET = 'assets/serenity-voyage.html'
 
 /**
  * 包根 = 含本包 `package.json` 的目录。
- * 🔴 **不许写死层数**：本模块自身位置随目录重构变化（曾 `src/voyage-page.ts`，现
+ * 🔴 **不许写死层数**：本模块自身位置随目录重构变化（曾 `src/surface/voyage/page.ts`，现
  * `src/surface/voyage/page.ts`），而发布态是从打包入口 `lib/index.js` 反推 ⇒ 两种布局深度不同，
  * 写死 `'..'` 必在其中一个布局下静默指错（实测：搬进 `surface/voyage/` 后路由直接读不到资产 → 500）。
  * ⇒ 交给 {@link findPackageRoot} 按**内容**定位。
@@ -74,7 +74,7 @@ export function resetVoyageCache(): void {
   cachedHtml = null
 }
 
-/** 发 JSON（错误分支用；与 api.ts 的 sendJson 同形，但本模块不依赖它，保持零耦合） */
+/** 发 JSON（错误分支用；与 surface/http.ts 的 sendJson 同形，但本模块不依赖它，保持零耦合） */
 function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status
   res.setHeader('content-type', 'application/json; charset=utf-8')
@@ -84,7 +84,7 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 /**
  * 注册 `/serenity/voyage`（GET）。
  * @param opts.assetPath 覆盖资产路径（测试用；生产不传）
- * @param opts.resolveRoot 解析本次请求所属 CCC 根（生产由 api.ts 的 resolveWorkspace 提供）。
+ * @param opts.resolveRoot 解析本次请求所属 CCC 根（生产由 surface/http.ts 的 resolveWorkspace 提供）。
  *   🔴 **2026-10-18 新增**：词表按请求所属 CCC **运行时注入**（owner 报「在别的 CCC 点开
  *   显示的还是 home-serenity 的信息」）。不传 ⇒ 不注入（保持资产原样 = 旧行为）。
  */

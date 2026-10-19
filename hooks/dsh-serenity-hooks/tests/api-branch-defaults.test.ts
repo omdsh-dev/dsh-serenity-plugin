@@ -1,10 +1,10 @@
 /**
- * api-branch-defaults.test.ts — 🔴 **⑤ 第 60 件**：`src/api.ts` 的**兜底与降级分支**
+ * api-branch-defaults.test.ts — 🔴 **⑤ 第 60 件**：`src/surface/http.ts` 的**兜底与降级分支**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（00:15 那一跑，第 59 件之后）实测：全仓 `src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `api.ts`（**82.96% = 190/229**；语句 99.73%；函数 23/23 已满）。
+ * **最低且尚未做过**的文件 = `surface/http.ts`（**82.96% = 190/229**；语句 99.73%；函数 23/23 已满）。
  * 🔵 它同时是**对外面**（9 条 `/serenity/*` HTTP 路由）⇒ 贴 objective。
  *
  * ## 🔴 开工第一步 = 核对既有登记（第 59 件沉淀的纪律）
@@ -17,7 +17,7 @@
  * ⇒ 本件**不重做**上述任何一条；对象 = 既有用例**结构上碰不到**的那一档：**取值兜底**。
  *
  * ## 分组（先从 `cbranch-no` 清单**按形态归类**，再逐条实测可达性 —— 不是盲补 37 处）
- * 复扫后 `api.ts` 剩 **37 处** `cbranch-no`。逐条映射回源行（判据：报告里
+ * 复扫后 `surface/http.ts` 剩 **37 处** `cbranch-no`。逐条映射回源行（判据：报告里
  * `<span class="cline-any cline-*">` 块与其后 `class="text"` 块按序一一对应 —— 已用
  * `:1623`/`:1750`/`:2244` 三处实测校准）后归为五族：
  *
@@ -30,12 +30,12 @@
  * | ⑤ | `EXT_BY_MEDIA[… ] ?? 'img'` ／ `name.split(…).pop() ?? ''` | **2** | 🔴 **两处都构造上不可达**（各有一个**支配性前置守卫**）⇒ **如实登记，不涂绿** |
  *
  * ## 🔴 本件最值钱的产出 = 两条「构造上不可达」的结构取证（族 ⑤）
- * - `api.ts:72` `EXT_BY_MEDIA[mediaType] ?? 'img'`：**不可达**。:60 的
+ * - `surface/http.ts:72` `EXT_BY_MEDIA[mediaType] ?? 'img'`：**不可达**。:60 的
  *   `if (!IMAGE_MEDIA_TYPES.has(mediaType)) throw` 是它的**支配性守卫**，而
  *   `IMAGE_MEDIA_TYPES`（4 个）与 `EXT_BY_MEDIA` 的键**逐一相同** ⇒ 走到 :72 时查表**必命中**。
  *   ⚠️ 顺带更正既有读法：既有 `api-upload.test.ts` 断言 `.jpg$/.webp$/.gif$`，这**不证明**回退可测 ——
  *   它证明的是**表命中**；想走到 `'img'` 得把表或白名单改坏（= 改生产语义）⇒ **不测**。
- * - `api.ts:83` `name.split(/[\\/]/).pop() ?? ''`：**不可达**。`''.split(x).pop()` 恒为 `''`（不是
+ * - `surface/http.ts:83` `name.split(/[\\/]/).pop() ?? ''`：**不可达**。`''.split(x).pop()` 恒为 `''`（不是
  *   `undefined`）⇒ `.pop() === undefined` **永不成立**（本件 B3 用真函数正向钉住这条 ES 语义）。
  *   既有 `api-file-upload.test.ts` 断言 `sanitizeFileName('   ') === 'file'` 走的是**后置**的
  *   `cleaned === '' → 'file'`，与这条 `??` **无关**。
@@ -317,7 +317,7 @@ describe('src/api.ts 族 ③：配置/设置缺键 ⇒ 兜底默认（不是 500
       const body = jsonBody(res) as Record<string, unknown>
       // 🔴 **变异实测（本件）**：把 `settings.accounts ?? []` 改成 `settings.accounts!` **照样绿**
       //    —— 因为它的生产者 `readWeixinSettings` **恒返回数组**
-      //    （`weixin-route.ts:70` 的 `Array.isArray(…) ? … : []` ＋ `:78` 的 catch 兜底）
+      //    （`im/route.ts:70` 的 `Array.isArray(…) ? … : []` ＋ `:78` 的 catch 兜底）
       //    ⇒ 该 `?? []` 是**经真实生产者不可达的防御守卫**（与族 ⑤ 同性质，差别只在
       //      "守卫在**别的模块**"）。⇒ **如实登记，不声称它承重**（纪律 8 的镜像）。
       //      它仍有价值：把 `readWeixinSettings` 换成别的实现时，这里不会崩。

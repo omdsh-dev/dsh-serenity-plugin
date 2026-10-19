@@ -81,24 +81,24 @@ type _ToolsRegister = Expect<Extends<Ret<HostContext['tools']['register']>, unkn
 /** 机械守卫（`src/seams/guards.ts` safe-mode/路径/白名单——缺则守卫失效） */
 type _ToolsGuard = Expect<Extends<Ret<HostContext['tools']['guard']>, unknown>>
 
-/** 会话定位/rebuild/CCC 解析（`access.ts` `hostSessionCwds`、`skiff-debug.ts`、`api.ts`） */
+/** 会话定位/rebuild/CCC 解析（`access.ts` `hostSessionCwds`、`role/skiff/debug.ts`、`surface/http.ts`） */
 type _SessionsList = Expect<Extends<Ret<HostContext['sessions']['list']>, readonly unknown[]>>
 type _SessionsGet = Expect<Extends<Ret<HostContext['sessions']['get']>, unknown>>
 type _SessionsCreate = Expect<Extends<Ret<HostContext['sessions']['create']>, unknown>>
 
-/** CCC 自动发现回落（`skiff-debug.ts:103`；v1.31.6 C4 现场：list 形状在 0.1.5 变了） */
+/** CCC 自动发现回落（`role/skiff/debug.ts:103`；v1.31.6 C4 现场：list 形状在 0.1.5 变了） */
 type _PersistenceList = Expect<Extends<Awaited<Ret<HostContext['sessionPersistence']['list']>>, readonly unknown[]>>
 
 /** 上下文压力读数（`seams/keeper.ts:readContextPressure`——rebuild 提醒的输入） */
 type _ProjectionsSnapshot = Expect<Extends<Ret<HostContext['sessionProjections']['snapshot']>, unknown>>
 
-/** shadow-price 定价（`rebuild.ts:356` `meter.estimateMessage(message)`） */
+/** shadow-price 定价（`trajectory/rebuild.ts:356` `meter.estimateMessage(message)`） */
 type _TokenMeterEstimate = Expect<Extends<Ret<HostContext['tokenMeter']['estimateMessage']>, number>>
 
-/** rebuild 后重命名会话标题（`rebuild.ts:renameAfterRebuild`——签名 `(session, title)`） */
+/** rebuild 后重命名会话标题（`trajectory/rebuild.ts:renameAfterRebuild`——签名 `(session, title)`） */
 type _SessionTitleRename = Expect<Extends<HostContext['sessionTitle']['rename'], (session: never, title: string) => unknown>>
 
-/** 工作区白名单下拉（`api.ts:334`、`skiff-debug.ts:90`——读 `path`/`title`） */
+/** 工作区白名单下拉（`surface/http.ts:334`、`role/skiff/debug.ts:90`——读 `path`/`title`） */
 type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry']['list']>, readonly unknown[]>>
 
 /**
@@ -123,7 +123,7 @@ type _SubagentsHasStarter =
 type _SubagentsStarterPresent = Expect<_SubagentsHasStarter>
 
 /** 设置面板（v0.1.7 起 = `SettingsForms`）：本插件用 `configure` 关掉自动生成页；
- *  `update`/`describe` 供诊断与将来的写入面（`settings-section.ts`） */
+ *  `update`/`describe` 供诊断与将来的写入面（`surface/settings.ts`） */
 type _SettingsConfigure = Expect<Extends<HostContext['settings']['configure'], (presentation: { auto?: boolean }, owner?: never) => unknown>>
 type _SettingsDescribe = Expect<Extends<Ret<HostContext['settings']['describe']>, readonly unknown[]>>
 type _SettingsUpdate = Expect<Extends<Ret<HostContext['settings']['update']>, Promise<void>>>
@@ -131,10 +131,10 @@ type _SettingsUpdate = Expect<Extends<Ret<HostContext['settings']['update']>, Pr
 /** Induction 注入（`seams/system-prompt.ts:561` 全局 + `:604` per-agent） */
 type _SystemPromptSection = Expect<Extends<Ret<HostContext['systemPrompt']['section']>, unknown>>
 
-/** web_fetch provider 接管（`web-fetch-provider.ts`，v1.30.12 fake-ip 网络） */
+/** web_fetch provider 接管（`patches/web-fetch.ts`，v1.30.12 fake-ip 网络） */
 type _WebRegisterFetchProvider = Expect<Extends<Ret<HostContext['web']['registerFetchProvider']>, unknown>>
 
-/** 状态接口/网关端口发现（`api.ts`、`gateway.ts`） */
+/** 状态接口/网关端口发现（`surface/http.ts`、`gateway/server.ts`） */
 type _WebServerRegister = Expect<Extends<Ret<HostContext['webServer']['register']>, unknown>>
 /**
  * 🔴 **v1.59.3 适配（0.2.1-rc.1）**：宿主把这个 getter **放宽**成 `number | undefined`
@@ -143,7 +143,7 @@ type _WebServerRegister = Expect<Extends<Ret<HostContext['webServer']['register'
  * 语义依据（宿主注释逐字）：*"The listening port … or `undefined` before `listen` binds."*
  * ⇒ **不是**宿主退化，而是它**如实**了 —— 监听未绑定时确实没有端口。
  *
- * ⚠️ 我们**已有的消费处都自带判空**（实测：`gateway.ts:588` 的 `if (!webServer?.port) return`
+ * ⚠️ 我们**已有的消费处都自带判空**（实测：`gateway/server.ts:588` 的 `if (!webServer?.port) return`
  * 已在窄化作用域内覆盖 593/611/622/630；`index.ts:773` 用 `typeof ws?.port === 'number'` 回落常量）
  * ⇒ **本处只改类型钉，不需要改任何消费代码**。这与适配方案 §A4 的初判一致。
  */
@@ -180,14 +180,14 @@ type _ContextPressure = Expect<Extends<
   { projectedTokens?: number; contextWindow?: number }
 >>
 
-/** `session.snapshotEvents()`（`cognitive-trajectory-ops.ts:57` 统一读取入口；`.events` 属性早已移除） */
+/** `session.snapshotEvents()`（`trajectory/core.ts:57` 统一读取入口；`.events` 属性早已移除） */
 type _SessionSnapshotEvents = Expect<Extends<Ret<NonNullable<Ret<HostContext['sessions']['get']>>['snapshotEvents']>, readonly unknown[]>>
 
-/** `session.surface.nodes`（`rebuild.ts:345` 取被替换范围） */
+/** `session.surface.nodes`（`trajectory/rebuild.ts:345` 取被替换范围） */
 type _SessionSurfaceNodes = Expect<Extends<NonNullable<Ret<HostContext['sessions']['get']>>['surface']['nodes'], readonly unknown[]>>
 
 // ─────────────────────────────────────────────────────────────
-// ④ `Session.append` 的两处调用（`rebuild.ts:358/365`——**全部用 `as never` 断言，编译器原本完全失明**）
+// ④ `Session.append` 的两处调用（`trajectory/rebuild.ts:358/365`——**全部用 `as never` 断言，编译器原本完全失明**）
 // ─────────────────────────────────────────────────────────────
 
 /** `'compaction/prune'` 仍是合法事件类型，且 payload 形状与 dsp 传的一致（shadow-price 协议） */
@@ -206,19 +206,19 @@ type _AppendUserMessageType = Expect<Extends<'user/message', Parameters<NonNulla
 
 type HostAgent = NonNullable<Ret<HostContext['agents']['get']>>
 
-/** `agent.steer(msg)` —— rebuild 自动继续（`rebuild.ts:442`）、输出守卫打回 */
+/** `agent.steer(msg)` —— rebuild 自动继续（`trajectory/rebuild.ts:442`）、输出守卫打回 */
 type _AgentSteer = Expect<Extends<HostAgent['steer'], (message: never) => unknown>>
 /** `agent.inbox.prepend(target, msg)` —— fake-initial-turns 注入（`seams/bootstrap.ts`） */
 type _AgentInboxPrepend = Expect<Extends<HostAgent['inbox']['prepend'], (target: never, message: never) => unknown>>
 /** `agent.session.header.cwd` —— 工具工作目录解析 */
 type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], string | undefined>>
 /**
- * `agent.status === 'idle'` —— 等待空闲（`agent-idle.ts:65`，cheap-worker 的完成判据）。
+ * `agent.status === 'idle'` —— 等待空闲（`role/worker/idle.ts:65`，cheap-worker 的完成判据）。
  * 注：`status` 是可变属性（非方法），断言其**可读**且类型覆盖 'idle'。
  */
 type _AgentStatus = Expect<Extends<HostAgent['status'], string>>
 
-/** `agent.ctx.systemPrompt.section(...)` —— skiff 角色提示词 per-agent 注入（`skiff-core.ts:329`） */
+/** `agent.ctx.systemPrompt.section(...)` —— skiff 角色提示词 per-agent 注入（`role/skiff/core.ts:329`） */
 type _AgentCtxSystemPrompt = Expect<Extends<Ret<HostAgent['ctx']['systemPrompt']['section']>, unknown>>
 
 // ─────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ type _AgentCtxSystemPrompt = Expect<Extends<Ret<HostAgent['ctx']['systemPrompt']
 import type { Events } from 'cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
-/** `agent/status`：dsp 读 `payload.agent` + `payload.status === 'idle'`（`agent-idle.ts:55`） */
+/** `agent/status`：dsp 读 `payload.agent` + `payload.status === 'idle'`（`role/worker/idle.ts:55`） */
 type _EvStatus = Expect<Extends<Parameters<Events['agent/status']>[0], { agent: unknown; status: string }>>
 /** `agent/inbox/inserted`：dsp 读 `payload.agent` / `payload.message`（`seams/bootstrap.ts`） */
 type _EvInbox = Expect<Extends<Parameters<Events['agent/inbox/inserted']>[0], { agent: unknown; message: unknown }>>
@@ -249,7 +249,7 @@ type _EvLlmStreamOptions = Expect<Extends<
 type _EvLlmStreamNext = Expect<Extends<Ret<Parameters<Events['llm/stream']>[1]>, AsyncIterable<unknown>>>
 /** 我们短路时产出的 chunk 形状必须仍是宿主的 `StreamChunk`（`text-delta` 那条最要紧） */
 type _EvLlmStreamChunk = Expect<Extends<{ type: 'text-delta'; index: number; text: string }, StreamChunk>>
-/** `agent/created`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种 · `cro-turns.ts` 标"在跑" ·
+/** `agent/created`：dsp 读 `payload.agent`（`seams/context.ts` 身份播种 · `wake/cro-turns.ts` 标"在跑" ·
  *  `index.ts` 反应式同步）。⚠️ **v0.1.7 起该事件 `@mode = serial`**（监听器被 await、抛错会使
  *  创建失败 ⇒ 我方处理函数必须快速返回且不得抛；此处只钉字段，模式由实现纪律守） */
 type _EvAgentCreated = Expect<Extends<Parameters<Events['agent/created']>[0], { agent: unknown }>>
@@ -284,7 +284,7 @@ type _EvPreStep = Expect<Extends<
 
 /**
  * `agent/turn-stopping`：dsp 读 `payload.agent` / `payload.turn`
- * （`rebuild.ts:424` 真正执行清空、`output-guard-seam.ts:56` 卡最终输出、`weixin-output-guard.ts:162` 打回）。
+ * （`trajectory/rebuild.ts:424` 真正执行清空、`guard/seam.ts:56` 卡最终输出、`im/guard.ts:162` 打回）。
  * dsp 侧的注解是 `{agent?: Agent; turn?: number}`（**比宿主宽**）——闸门按 dsp 假设锁"这两个键仍可读"，
  * 宿主把 payload 换成位置参数或改名 → 此处红。
  */

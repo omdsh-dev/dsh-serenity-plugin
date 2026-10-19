@@ -1,5 +1,5 @@
 /**
- * msm.ts — msm 工具（v1.30 重构：单入口执行，list/exec 合一）
+ * tools/msm/index.ts — msm 工具（v1.30 重构：单入口执行，list/exec 合一）
  *
  * 设计（S142 用户拍板"msm 单入口同意 + 参数简易高效"）：
  *   acc_msm（8 action enum）→ msm（3 参数：name + args + inspect）——

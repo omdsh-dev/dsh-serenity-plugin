@@ -1,11 +1,11 @@
 /**
- * skiff-debug-branches.test.ts — 🔴 **⑤ 第 62 件**：`src/skiff-debug.ts` 的
+ * skiff-debug-branches.test.ts — 🔴 **⑤ 第 62 件**：`src/role/skiff/debug.ts` 的
  * **`/ask` 入参校验面 ＋ handler 尾部兜底**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（00:36 那一跑，第 61 件之后）实测：`src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `skiff-debug.ts`（**83.2% = 104/125**；
+ * **最低且尚未做过**的文件 = `role/skiff/debug.ts`（**83.2% = 104/125**；
  * 语句 99.01% ＝ 504/509；函数 19/19 已满）。
  *
  * ## 🔴 开工第一步 = 核对既有登记（但**本件第一步做得不够，见下**）

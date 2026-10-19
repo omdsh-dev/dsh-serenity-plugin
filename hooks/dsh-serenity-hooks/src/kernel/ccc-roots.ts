@@ -1,5 +1,5 @@
 /**
- * ccc-roots.ts — CCC 根解析的**唯一判断层**（L1 单根解析 + L2 全量枚举）
+ * kernel/ccc-roots.ts — CCC 根解析的**唯一判断层**（L1 单根解析 + L2 全量枚举）
  *
  * 为什么存在（C2「CCC 发现面归一」，S142 2026-09-15 Q5 裁决）：
  * 「这个会话/路径属于哪个 CCC 根」（L1）与「本机有哪些 CCC」（L2）这两层判断此前被
@@ -8,11 +8,11 @@
  * 调用方只问本模块，不再各写各的上溯 + 兜底。
  *
  * 分层（唯一真相源边界，**不要**把下层搬进本模块）：
- *  - **L0 原语** `findSerenityRoot(cwd)`（`ccc.ts:16`）——**仍是唯一** L0 实现，本模块从它 import。
+ *  - **L0 原语** `findSerenityRoot(cwd)`（`kernel/ccc.ts:16`）——**仍是唯一** L0 实现，本模块从它 import。
  *  - **L1 单根解析** —— 本模块：{@link agentCwdFor}（agent/exec → cwd）与
  *    {@link cccRootForCwd}/{@link cccRootForExec}（cwd → 根）。
  *  - **L2 全量枚举** —— 本模块：{@link listCccs}。
- *  - **L3 CCC 名解析** `readCccName`（`ccc.ts`）——不在本模块，也不与 `skills-discovery` 的
+ *  - **L3 CCC 名解析** `readCccName`（`kernel/ccc.ts`）——不在本模块，也不与 `skills-discovery` 的
  *    第二份实现合并（那是另一条开放项）。
  *
  * 不新增持久状态（Q5 裁决：**不新增"本机 CCC 名单"**、不扫盘、不写路径假设）——
@@ -21,7 +21,7 @@
  * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────
  * **本模块的 `ctx` 参数类型从 `Context` 改为 `unknown`** —— 消除本文件唯一的 `W2` 接触。
  *
- * **判据（与 `live-sessions.ts` 同款，但本文件要多过一道）：** 约束文档 §2.7 原记本处
+ * **判据（与 `trajectory/live.ts` 同款，但本文件要多过一道）：** 约束文档 §2.7 原记本处
  * `Context` 是"**实测真被用到**"（因它调 `hostService(ctx,…)`／`hostSessions(ctx)`）。
  * 🔴 **该判断把"透传"与"解引用"混为一谈了** —— 实测本文件 `ctx` 的**唯一**去向是
  * **原样透传**给两个 L0 取数口（签名均为 `ctx: unknown`），**零处** `ctx.xxx` 属性访问。
@@ -59,7 +59,7 @@ export function agentCwdFor(execOrAgent: ExecOrAgent): string {
 }
 
 /**
- * cwd → CCC 根（L0 原语的唯一调用形态；`ccc.ts` 之外不要再各写一遍）。
+ * cwd → CCC 根（L0 原语的唯一调用形态；`kernel/ccc.ts` 之外不要再各写一遍）。
  * @param cwd 起始路径（目录或文件；文件会靠 `dirname` 上溯）
  * @returns CCC 根绝对路径；不在任何 CCC 内 → `null`
  */
@@ -69,7 +69,7 @@ export function cccRootForCwd(cwd: string): string | null {
 
 /**
  * 工具/缝入口的根解析（L1 标准形态）：`agentCwdFor(...)` 再上溯。
- * @returns CCC 根；解析不到 → `null`（**不**回落假根——"回落进程 cwd 当根"是 `rebuild.ts`
+ * @returns CCC 根；解析不到 → `null`（**不**回落假根——"回落进程 cwd 当根"是 `trajectory/rebuild.ts`
  *   独有的另一条语义，见该处注释）
  */
 export function cccRootForExec(execOrAgent: ExecOrAgent): string | null {
@@ -203,7 +203,7 @@ export async function listCccs(ctx: unknown, opts: ListCccsOptions = {}): Promis
   }
 
   // 角色**按需**读取：`withRoles` 缺省 false ⇒ 一个 serenity.json 都不读。
-  // ⚠️ 动态 import：`skiff-role.ts` 不是静态依赖（本模块要能在没有 skiff 链的
+  // ⚠️ 动态 import：`role/skiff/config.ts` 不是静态依赖（本模块要能在没有 skiff 链的
   // 场景里被静态引用——如唤醒调度器；只有真要角色时才加载）。
   let rolesOf: ((root: string) => string[]) | null = null
   if (opts.withRoles === true) {

@@ -1,5 +1,5 @@
 /**
- * wake-registry.ts — 认知轨迹唤醒注册表（D58，S142 2026-09-13）
+ * wake/registry.ts — 认知轨迹唤醒注册表（D58，S142 2026-09-13）
  *
  * 需求（用户原话）：一个 CCC 内允许多个认知轨迹任意形态并行；某个认知轨迹可以
  * **预定未来唤醒自己或别人**，本质上是一次「未来时刻 + 一条 message」的投递；「周期自唤醒」
@@ -11,7 +11,7 @@
  *  - 状态机：`pending` →（投递成功）`delivered`｜（超补跑窗口）`missed`｜（`wake rm` 物理移除）
  *  - 投递即终结：一次性，不重投（无回执语义——发起方不 await，见设计文档 §2）
  *
- * 调度与投递在 `wake-scheduler.ts`（需要 ctx），本模块保持纯净。
+ * 调度与投递在 `wake/scheduler.ts`（需要 ctx），本模块保持纯净。
  */
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'

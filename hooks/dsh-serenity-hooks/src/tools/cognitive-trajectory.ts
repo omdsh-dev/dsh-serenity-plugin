@@ -7,7 +7,7 @@
  * 动作面现行 **8 个**：list / show / create / use / rebuild / **`send-now`** / **`send-later`** / **`cro-guide`**。
  * 🔴 2026-09-16（所有者裁决）：**第 7 个动作 `send-message`（即时投递）**
  *    ——与 `wake-later` 共用取用通路，差别只在**时刻**（现在 vs 未来）与**回执**（有 vs 无）；
- *    实现落在 `wake-scheduler.ts` 的 `sendToTrajectory()`（"怎么把一句话送到一条轨迹"是调度器的知识）。
+ *    实现落在 `wake/scheduler.ts` 的 `sendToTrajectory()`（"怎么把一句话送到一条轨迹"是调度器的知识）。
  *    设计稿 = `docs/cognitive-trajectory-send-message-design.md`（v0.2 定稿）。
  * 🔴 2026-09-17（所有者裁决 · **命名 A 案**）：**两个投递动作更名** —— `wake-later` → **`send-later`**、
  *    `send-message` → **`send-now`**。判据（R↓）：两者本是**同一条投递通路**（同取用机制 / 同载荷 /
@@ -118,7 +118,7 @@ interface RenameOnUseDeps {
 }
 
 // 🔴 2026-09-25（S142 工程化程序第 ④ 项·第 1 步）：`sanitizeSessionSummary` 与 `namingTitleFor`
-// **已下沉到 L1 的 `trajectory-ops.ts`** —— 解 L1→L3 上行边 ＋ `rebuild.ts` ⇄ 本文件的依赖环
+// **已下沉到 L1 的 `trajectory-ops.ts`** —— 解 L1→L3 上行边 ＋ `trajectory/rebuild.ts` ⇄ 本文件的依赖环
 // （证据＝模块图 §3-6）。此处只保留**用**它们的门面（`renameDshSessionOnUse` 等）。
 
 /**
@@ -561,7 +561,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
       }
       case 'cro-guide': {
         // CRO 编写指南（2026-09-20；owner 令「机制属 ACC / 程序属 CCC」+「指南 ACC 内置，guide 老套路」）。
-        // 纯读：只是把 `cro-guide.ts` 的正文吐出来（正文含**由装配器实时生成**的样例快照，
+        // 纯读：只是把 `wake/cro-guide.ts` 的正文吐出来（正文含**由装配器实时生成**的样例快照，
         // 故**永不与 schema 漂移** —— 见该文件头的单真相源纪律）。
         // 为什么挂在本工具：CRO 程序放在**轨迹自己的目录**里 ⇒ 这是"逐轨迹"的知识，
         // 而管轨迹的人正是用本工具的人（设计 §9-5：既有 guide 位置，不新增域）。

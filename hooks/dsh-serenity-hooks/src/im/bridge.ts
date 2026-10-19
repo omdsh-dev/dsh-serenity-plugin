@@ -1,5 +1,5 @@
 /**
- * weixin-bridge.ts — 微信桥装配（F4c-3，v1.27.0 实验性）
+ * im/bridge.ts — 微信桥装配（F4c-3，v1.27.0 实验性）
  *
  * **CCC 级**：dsh 一个进程含多个 CCC，每个 CCC 独立对接微信桥（S142 用户拍板）——
  * 扫描 live CCC → 每 CCC 读 weixin 配置（enabled + accounts + routes）→
@@ -18,7 +18,7 @@
  *
  * 🔴 **P0-2（2026-09-27，方案 §2.6）：起桥仍按 CCC，但"谁轮询"按账号判定** ——
  * 同一个账号（= 同一份凭据）在同一时刻**只允许一个 poller**，判定与归属表在
- * `human-channel.ts`（机器级机制；本文件只接线）。这是"微信桥上移 ACC 层"的第一步。
+ * `im/inbound.ts`（机器级机制；本文件只接线）。这是"微信桥上移 ACC 层"的第一步。
  *
  * 外部面纯净（D9/D11 延续）：微信桥会话 = 外部面——session/prompt 走
  * includeCognitiveTrajectory:false（对外不返回轨迹）；skiff 角色白名单即授权（G9）。
@@ -29,8 +29,8 @@ import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
-// P0-2（方案 §2.6）：机器级归属判定（一账号一 poller）—— 机制在 human-channel.ts，本文件只接线
-// P0-3（方案 §11.4）：订阅表 ＋ 路由 ＋ 机器级留痕 —— 同上，机制在 human-channel.ts
+// P0-2（方案 §2.6）：机器级归属判定（一账号一 poller）—— 机制在 im/inbound.ts，本文件只接线
+// P0-3（方案 §11.4）：订阅表 ＋ 路由 ＋ 机器级留痕 —— 同上，机制在 im/inbound.ts
 import {
   accountIdentity, planPollerClaims, commitPollerClaims, releasePollersOf, releaseAllPollers, pollerOwners, type PollerRequest,
   planInboundRoute, appendHumanChannelAudit, type InboundRoutePlan,
@@ -69,7 +69,7 @@ const bridges = new Map<string, CccBridge>()
  *
  * 机器级 poller **不属于任何 CCC**（这正是"上移 ACC 层"的含义：谁轮询不再由 CCC 数量决定）。
  * 用途有二：① `runAccountLoop` 的 `root` 形参在机器级模式下不被使用，传它以示"无根"；
- * ② 归属表（`human-channel.ts`）按 root 区分拥有者 ⇒ 机器级用这个哨兵值，
+ * ② 归属表（`im/inbound.ts`）按 root 区分拥有者 ⇒ 机器级用这个哨兵值，
  *    与任何**真实** CCC 根都不会撞（真根一律是绝对路径）。
  */
 const MACHINE_SCOPE = '<machine>'
@@ -627,7 +627,7 @@ export async function handleMachineIncoming(
  * 已存在（配置变化热重建）→ 先停旧循环再启动新的。
  *
  * 🔴 **P0-2（2026-09-27，方案 §2.6）：一账号一 poller** —— 起循环**之前**先过机器级归属判定
- * （`human-channel.ts`）：身份被**别的** CCC 占着的账号**不起循环**，只留一条响亮日志。
+ * （`im/inbound.ts`）：身份被**别的** CCC 占着的账号**不起循环**，只留一条响亮日志。
  * 身份 = **凭据 token 的哈希**（不是 `accountId`：那是每 CCC 的本地标签，跨 CCC 无意义）。
  * 先 `releasePollersOf(root)` 再重新 claim —— 热重建语义与"归属粘住不漂"的论证见该函数注释。
  */

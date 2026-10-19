@@ -11,7 +11,7 @@
 // `Context as ClientContext` from '@deepseek-ai/cordis'（:70/:83 的 ctx.get/sessions 运行时面签名未变）
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 
-/** 图片落盘接口路径（node half api.ts，client 专属 x-serenity-ui 头） */
+/** 图片落盘接口路径（node half surface/http.ts，client 专属 x-serenity-ui 头） */
 const UPLOAD_PATH = '/serenity/image-upload'
 
 /**

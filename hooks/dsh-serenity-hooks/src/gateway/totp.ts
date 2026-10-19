@@ -1,5 +1,5 @@
 /**
- * totp.ts — TOTP 第二因素（RFC 6238，零依赖，v1.22.4）
+ * gateway/totp.ts — TOTP 第二因素（RFC 6238，零依赖，v1.22.4）
  *
  * 背景（S142 安全审计 S1）：公网暴露密码登录不足 → 可选 Authenticator 第二因素。
  * 实现：HMAC-SHA1 TOTP（与 Google Authenticator / 1Password / Aegis 等兼容），

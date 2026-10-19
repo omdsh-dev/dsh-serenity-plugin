@@ -11,7 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-// 🔴 域名分支的替身（⑤ 第 41 件）：`src/web-fetch-provider.ts` 从 `node:dns/promises` import `lookup`。
+// 🔴 域名分支的替身（⑤ 第 41 件）：`src/patches/web-fetch.ts` 从 `node:dns/promises` import `lookup`。
 // 必须在 import 被测模块之前声明（vi.mock 提升），否则拿到的是真解析器 ⇒ 用例依赖外网。
 // ⚠️ 这是**模块级** mock：本文件既有用例全走 IP 字面量（不触发 `lookup`），故不受影响。
 const lookupMock = vi.hoisted(() => vi.fn())

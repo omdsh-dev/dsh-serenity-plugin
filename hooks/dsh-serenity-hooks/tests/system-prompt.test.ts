@@ -208,7 +208,7 @@ describe('system-prompt: 全局 section 注册（任何会话自动注入）', (
  * 🔴 **为什么它此前零行为证据**：全局变体（`...Global`）有 3 条用例，而**本变体一条也没有**
  * —— 覆盖率报告把它整段标成 `fstat-no` ＋ 6 行 `cstat-no`（函数体连同语句一起没进过）。
  * 🔴 **可达性已取证**（挑靶四条，动手前）：`src/seams/context.ts` 两处调用它
- * （`agent/created` 播种 与 会话恢复路径），`src/skiff-core.ts` 另有一处同族调用 ⇒ **是活路径不是死代码**。
+ * （`agent/created` 播种 与 会话恢复路径），`src/role/skiff/core.ts` 另有一处同族调用 ⇒ **是活路径不是死代码**。
  *
  * **它与全局变体的三处语义差异**（本组逐条钉住，这才是它的价值所在）：
  *   ① **`sectionedAgents` 幂等闸**（模块级 Set，key = dsh 会话 id）⇒ 同会话第二次调用返回 `false` 且**不重复注册**

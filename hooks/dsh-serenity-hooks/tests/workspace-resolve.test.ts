@@ -65,7 +65,7 @@ describe('resolveWorkspaceCore（远程状态显示修复 v1.22.2）', () => {
  * 🔴 为什么这比"显示未激活"危险得多：用户会**据此做判断**
  * （以为自己的 safe-mode 开着、以为那些轨迹是自己的）。
  * ⇒ 与本仓对"跨轨迹猜测"的既有裁决一致：**多候选不许猜，响亮失败优于静默接错**
- *   （先例 = `rebuild.ts` 移除 `findLatestActiveSessionMd` 那条约定回退）。
+ *   （先例 = `trajectory/rebuild.ts` 移除 `findLatestActiveSessionMd` 那条约定回退）。
  */
 describe('resolveWorkspaceCore：多 CCC 共存时**不跨区猜测**（2026-10-18 缺陷）', () => {
   it('🔴 负控：两个不同 CCC 的 live 会话 ⇒ 回退 fallback（**不挑其中任何一个**）', () => {

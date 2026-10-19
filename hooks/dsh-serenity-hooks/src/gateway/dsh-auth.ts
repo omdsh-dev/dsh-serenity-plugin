@@ -1,5 +1,5 @@
 /**
- * gateway-dsh-auth.ts — 3081 网关对 DSH 主端口 BrowserAuth 的适配（v1.28.2，S142 用户 bug）
+ * gateway/dsh-auth.ts — 3081 网关对 DSH 主端口 BrowserAuth 的适配（v1.28.2，S142 用户 bug）
  *
  * 背景：DSH 0.1.2-rc.1 新增 BrowserAuth（browser-auth.ts）——主端口所有 /api 请求与
  * index 渲染前必须持有 authority 绑定的签名 cookie（`dsh-auth-<sha256(Host)>`）。

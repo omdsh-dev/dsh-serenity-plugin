@@ -1,5 +1,5 @@
 /**
- * git-ops.ts — container_git 纯操作层（cc_git → container_git，v1.30；零 DSH 依赖）
+ * tools/git/service.ts — container_git 纯操作层（cc_git → container_git，v1.30；零 DSH 依赖）
  *
  * 行为对齐 osp（opencode-serenity-plugin/src/git/cc-git-tool.ts）——osp 是 ACC 工具 spec：
  *   - status：JSON {clean, files:[{status,file}], summary, ahead, behind}

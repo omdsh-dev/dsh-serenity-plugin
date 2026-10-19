@@ -1,7 +1,7 @@
 /**
  * gateway-ws.test.ts — 面 B 的 **WS 反代残余面**（⑤ 第 24 件）
  *
- * 挑靶依据 = **分支覆盖率**（`gateway.ts` 分支 86/122 = 70.49%，是已满靶之外最低者之一）。
+ * 挑靶依据 = **分支覆盖率**（`gateway/server.ts` 分支 86/122 = 70.49%，是已满靶之外最低者之一）。
  *
  * 🔴 **先复核再开工（本件的第一条产出）**：既有 `tests/gateway.test.ts` 的 v1.22.3 组
  * **已经**跑过一条**已认证**的 WS upgrade（断言 101 被回写）⇒ 那段不是"整块未覆盖"，
@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os'
 import { createServer, request as httpRequest } from 'node:http'
 import { connect as netConnect } from 'node:net'
 
-// gateway.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
+// gateway/server.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
 vi.mock('@deepseek-ai/schemastery', () => {
   const chain: unknown = new Proxy(function () {}, {
     get: (_t, prop) => {

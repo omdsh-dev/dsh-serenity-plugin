@@ -1,7 +1,7 @@
 /**
  * gateway-dsh-cookie.test.ts — 面 B（3081 网关）的 **DSH BrowserAuth cookie 注入面**（⑤ 第 26 件）
  *
- * 靶 = `gateway.ts` 对 `gateway-dsh-auth.ts` 的**接线**（纯函数面已被 `tests/gateway-dsh-auth.test.ts` 覆盖，
+ * 靶 = `gateway/server.ts` 对 `gateway/dsh-auth.ts` 的**接线**（纯函数面已被 `tests/gateway-dsh-auth.test.ts` 覆盖，
  * 该文件报告里已无 `cstat-no`）：
  *   · `buildDshCookieProvider`：connection **可取／不可取**两态 ＋ **首次诊断日志** ＋ **缓存**
  *   · `upstreamHeaders`：`dshCookie !== undefined` ⇒ **合并进反代上游的 cookie 头**
@@ -20,7 +20,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createServer, request as httpRequest } from 'node:http'
 
-// gateway.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
+// gateway/server.ts 依赖 settings-section（peerDep schemastery/dsh-settings）——mock 保证 vitest 解析
 vi.mock('@deepseek-ai/schemastery', () => {
   const chain: unknown = new Proxy(function () {}, {
     get: (_t, prop) => {

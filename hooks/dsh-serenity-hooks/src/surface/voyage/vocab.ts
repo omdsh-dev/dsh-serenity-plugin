@@ -1,5 +1,5 @@
 /**
- * voyage-vocab.ts — 航行页词表改为**按当前 CCC 运行时注入**（纯逻辑，零 DSH 依赖）
+ * surface/voyage/vocab.ts — 航行页词表改为**按当前 CCC 运行时注入**（纯逻辑，零 DSH 依赖）
  *
  * ## 为什么需要它（owner 2026-10-18 报的缺陷）
  * 资产 `assets/serenity-voyage.html` 的词表是**构建期扫描容器写死的常量**：

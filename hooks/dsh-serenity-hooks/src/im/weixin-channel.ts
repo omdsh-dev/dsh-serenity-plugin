@@ -1,5 +1,5 @@
 /**
- * im-weixin.ts — 微信通道实现（`im-bridge` 的通道之一，v1.31.0）
+ * im/weixin-channel.ts — 微信通道实现（`im-bridge` 的通道之一，v1.31.0）
  *
  * 能力归 ACC（S142 用户洞察）：本文件吸收原 CCC MSM `.opencode/skills/home-serenity/scripts/
  * weixin-send.ts` 的 `send` / `send-file` / `users` 语义——协议、凭据、账号选择、别名解析、

@@ -2397,7 +2397,7 @@ function collectTs(dir: string, out: string[] = []): string[] {
  *
  * 1. **dry-run 先看数**：移动 N 个文件 / 需改写 M 处；M 与预期量级不符 ⇒ 先查，别 apply；
  * 2. apply 后 **`typecheck` ＋ `test` 全绿**（漏改一处 typecheck 就红）；
- * 3. **工具面 14 项逐字不变**（`invariant.ts:REGISTERED_TOOLS` ↔ `dsh.plugin.json`）。
+ * 3. **工具面 14 项逐字不变**（`kernel/invariant.ts:REGISTERED_TOOLS` ↔ `dsh.plugin.json`）。
  *
  * ## 边界（只做这一件事）
  *
@@ -2467,6 +2467,183 @@ function cmdRefactorMove(argv: string[]): void {
   }
   console.log(`[refactor-move] ✓ 已移动 ${moves.length} 个文件，改写 ${rewritten} 处说明符`)
   console.log('[refactor-move] 下一步必跑：typecheck ＋ test（漏改一处 typecheck 就红）')
+}
+
+// ── rename-mentions：注释里的旧文件名机械改名 ─────────────────────────────
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 新树的一级域目录（做"不许再加前缀"的守卫，也做 dedupe 回修） */
+const MENTION_DOMAINS = [
+  'kernel', 'trajectory', 'wake', 'im', 'gateway', 'guard', 'patches', 'role',
+  'surface', 'tools', 'skills', 'host', 'seams', 'client', 'diagram', 'ontology',
+]
+
+/**
+ * 旧名的匹配正则。
+ * 🔴 **两道守卫，缺一即出事故**（本机两次实测）：
+ *  ① 左边界不是标识符字符（`[A-Za-z0-9_-]`）—— 否则 `clock-runtime.ts` 里的 `time.ts` 被误换；
+ *  ② 左边界**也不是「域目录 ＋ /」** —— 否则已是新路径的尾段会被**再加一次前缀**：
+ *     `kernel/ccc.ts` 里含 `ccc.ts` ⇒ `kernel/kernel/ccc.ts`（本机真发生过，随后要 dedupe 回修）。
+ */
+function mentionRe(from: string): RegExp {
+  const guards = MENTION_DOMAINS.map((d) => `(?<!${d}/)`).join('')
+  return new RegExp(`(?<![A-Za-z0-9_-])${guards}${escapeRe(from)}`, 'g')
+}
+
+/** 一行是不是「注释行」（够用即可：本仓注释全部是行首 `//` / `/*` / `*` / `#`（shell）） */
+function isCommentLine(line: string, ext: string): boolean {
+  const t = line.trimStart()
+  if (t.startsWith('//') || t.startsWith('/*') || t.startsWith('*')) return true
+  return ext === '.sh' && t.startsWith('#')
+}
+
+/** 递归收集指定扩展名的文件（跳过 node_modules / lib / coverage / dist / .git） */
+function collectByExt(dir: string, exts: string[], out: string[] = []): string[] {
+  let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }> = []
+  try {
+    entries = readdirSync(dir, { withFileTypes: true }) as unknown as Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>
+  } catch {
+    return out
+  }
+  for (const e of entries) {
+    const p = join(dir, e.name)
+    if (e.isDirectory()) {
+      if (['node_modules', 'lib', 'coverage', 'dist', '.git'].includes(e.name)) continue
+      collectByExt(p, exts, out)
+    } else if (e.isFile() && exts.some((x) => e.name.endsWith(x))) {
+      out.push(p)
+    }
+  }
+  return out
+}
+
+/**
+ * rename-mentions — 把**注释里**的旧文件名机械换成新路径。
+ *
+ * ## 为什么必须有这台机器（R↓）
+ *
+ * 目录重构后，`src/` 与 `tests/` 里有 **~90 个文件**在注释里写着旧文件名
+ * （"见 `wake/scheduler.ts`"、"同 `wake/cro-log.ts` 款"）。这些引用**不参与编译**，
+ * 所以 typecheck/test 全绿也抓不到它们 —— 只有人读代码时被误导。
+ * 手改必漏（同族教训：`INDIRECT_COVERED` 白名单按基名匹配，改名即静默失效）。
+ *
+ * ## 判据（每次都用）
+ *
+ * 1. **dry-run 先看数**：命中行数 / 文件数与预期量级不符 ⇒ 先查规则表，别 apply；
+ * 2. **只动注释行** —— 代码行、字符串字面量一律不碰（那里的旧名可能是运行时契约）；
+ * 3. **长键优先 ＋ 左边界**（`(?<![A-Za-z0-9_-])`）—— 否则 `wake/clock.ts` 里的 `kernel/time.ts`
+ *    会被误换（这是本机第一版就会踩的坑）；
+ * 4. apply 后**自动复扫**，残留必须为 0（否则点名打印）。
+ *
+ * 用法: dsh-develop rename-mentions --map <json> [--apply]
+ *   json 形态: { "旧文件名.ts": "新路径/文件名.ts", ... }
+ */
+function cmdRenameMentions(argv: string[]): void {
+  const apply = argv.includes('--apply')
+  const dedupe = argv.includes('--dedupe')
+  const mapIdx = argv.indexOf('--map')
+  const mapPath = mapIdx >= 0 ? argv[mapIdx + 1] : undefined
+  if (mapPath === undefined && !dedupe) fail('rename-mentions 需要 --map <json>（或 --dedupe 单独回修重复前缀）')
+  if (mapPath !== undefined && !existsSync(mapPath)) fail(`map 文件不存在: ${mapPath}`, 2)
+
+  const raw = mapPath === undefined ? {} : readMapJson(mapPath)
+  const rules = Object.entries(raw)
+    .sort((a, b) => b[0].length - a[0].length) // 长键优先
+    .map(([from, to]) => ({ from, to, re: mentionRe(from) }))
+
+  /** --dedupe：把 `域/域/` 折叠成 `域/`（回修"已被加了两次前缀"的注释） */
+  const dedupeLine = (line: string): string => {
+    let cur = line
+    for (let pass = 0; pass < 4; pass += 1) {
+      let changed = false
+      for (const d of MENTION_DOMAINS) {
+        const re = new RegExp(`${d}/${d}/`, 'g')
+        if (re.test(cur)) { cur = cur.replace(re, `${d}/`); changed = true }
+      }
+      if (!changed) break
+    }
+    return cur
+  }
+
+  const files = [
+    ...collectTs(join(HOOKS_DIR, 'src')),
+    ...collectTs(join(HOOKS_DIR, 'tests')),
+    ...collectByExt(join(REPO_ROOT, 'bench'), ['.mjs', '.sh']),
+    ...collectByExt(join(REPO_ROOT, 'scripts'), ['.ts']),
+  ]
+
+  const plans: Array<{ file: string; next: string; hits: number; lines: number }> = []
+  for (const file of files) {
+    const ext = file.slice(file.lastIndexOf('.'))
+    const text = readFileSync(file, 'utf-8')
+    const outLines: string[] = []
+    let hits = 0
+    let lines = 0
+    for (const line of text.split('\n')) {
+      if (!isCommentLine(line, ext)) { outLines.push(line); continue }
+      let next = line
+      if (dedupe) {
+        const ded = dedupeLine(next)
+        if (ded !== next) { hits += 1; next = ded }
+      }
+      for (const r of rules) {
+        const found = next.match(r.re)
+        if (found !== null) {
+          hits += found.length
+          next = next.replace(r.re, r.to)
+        }
+      }
+      if (next !== line) lines += 1
+      outLines.push(next)
+    }
+    if (hits > 0) plans.push({ file, next: outLines.join('\n'), hits, lines })
+  }
+
+  const totalHits = plans.reduce((n, p) => n + p.hits, 0)
+  const rel = (f: string): string => (f.startsWith(REPO_ROOT) ? f.slice(REPO_ROOT.length + 1) : f)
+  const mode = `${apply ? '写回模式' : 'dry-run（只报告，不动任何文件）'}${dedupe ? '｜dedupe' : ''}`
+  console.log(`[rename-mentions] ${mode}｜规则 ${rules.length} 条｜扫描 ${files.length} 个文件`)
+  console.log(`  命中 ${totalHits} 处，分布在 ${plans.length} 个文件的注释里`)
+  for (const p of plans) console.log(`    ~ ${rel(p.file)}（${p.hits} 处 / ${p.lines} 行）`)
+  if (!apply) {
+    console.log('[rename-mentions] dry-run 结束；确认数字无误后加 --apply')
+    return
+  }
+
+  for (const p of plans) writeFileSync(p.file, p.next, 'utf-8')
+  console.log(`[rename-mentions] ✓ 已改写 ${plans.length} 个文件`)
+
+  // 判据 4：复扫残留。只认注释行（代码/字符串里的旧名是**故意留的**，不在此列），
+  // 且**用同一个带守卫的正则**判 —— 否则 `image-fallback-api.ts` 这类会被 `api.ts` 误报。
+  let leftovers = 0
+  for (const file of files) {
+    const ext = file.slice(file.lastIndexOf('.'))
+    const text = readFileSync(file, 'utf-8')
+    for (const line of text.split('\n')) {
+      if (!isCommentLine(line, ext)) continue
+      if (dedupe) {
+        for (const d of MENTION_DOMAINS) {
+          if (line.includes(`${d}/${d}/`)) {
+            leftovers += 1
+            console.log(`    ⚠ 重复前缀 ${rel(file)}: ${line.trim().slice(0, 100)}`)
+          }
+        }
+      }
+      for (const r of rules) {
+        if (r.re.test(line)) {
+          leftovers += 1
+          console.log(`    ⚠ 残留 ${rel(file)}: ${line.trim().slice(0, 100)}`)
+        }
+        r.re.lastIndex = 0
+      }
+    }
+  }
+  console.log(leftovers === 0
+    ? '[rename-mentions] ✓ 注释里旧名残留 = 0'
+    : `[rename-mentions] ⚠ 仍有 ${leftovers} 处残留（见上）`)
 }
 
 function readMapJson(p: string): Record<string, string> {
@@ -2945,6 +3122,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'session-doctor': await cmdSessionDoctor(rest); break
       case 'session-repair': await cmdSessionRepair(rest); break
       case 'refactor-move': cmdRefactorMove(rest); break
+      case 'rename-mentions': cmdRenameMentions(rest); break
       case 'diag': cmdDiag(); break
       case 'api-status': cmdApiStatus(rest[0]); break
       case 'inspect-dsh': cmdInspectDsh(rest[0]); break

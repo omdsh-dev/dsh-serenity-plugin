@@ -9,7 +9,7 @@
  * ## 做法：真 listener 实现 iLink 契约 ＋ **官方注入点**（不改一处生产语义）
  * ① 假后端 = 本进程内一台**真 HTTP server**，实现两个端点：
  *    `GET /ilink/bot/get_bot_qrcode?bot_type=` ／ `GET /ilink/bot/get_qrcode_status?qrcode=`；
- * ② 经 `weixin-api.ts` **自带的测试注入点** `__setWeixinFetchForTest()`（生产零调用）把注入的 fetch
+ * ② 经 `im/ilink.ts` **自带的测试注入点** `__setWeixinFetchForTest()`（生产零调用）把注入的 fetch
  *    把 URL **改指本机假后端**；
  * ⇒ `apiGet` 整条链（URL 组装 → 真 socket → abort 计时器 → `res.ok`/`res.text()` → JSON 解析）**全被走到**，
  *    而**一个字节都不出本机**。这严格强于"把 fetch 换成返回假 Response 的函数"（那会跳过真实 HTTP 层）。
@@ -244,7 +244,7 @@ describe('src/api.ts：微信扫码登录（假 iLink 后端 ＋ 真 HTTP 往返
   it('🆕 ②b 🔴 **现状（不是缺陷声明，是登记待裁）**：iLink 用 HTTP 200 ＋ `errcode` 报失败时，`login-start` 回 **200 且 `qrcode` 为空**', async () => {
     // 本用例是"首跑红 ⇒ 分诊"的产物：我原以为这里会 400，实测是 200。
     // 根因（已回源码取证，非猜测）：`fetchQRCode` 只走 `apiGet`（HTTP 层）＋ `JSON.parse`，
-    // **不校验 iLink 的业务返回码**；`assertIlinkOk`（`weixin-api.ts` 的 errcode/ret 校验）
+    // **不校验 iLink 的业务返回码**；`assertIlinkOk`（`im/ilink.ts` 的 errcode/ret 校验）
     // 按设计**只挂在发送类调用**上（见该文件注释"发送类调用一律经此校验"）。
     // ⇒ 服务端把"上游业务失败"当成 200 透出；**兜底在客户端**：`WeixinBridgeEditor.tsx`
     // 判 `!res.ok || !body.qrcode_img_content || !body.loginKey` ⇒ 面板会显示失败（不是静默假绿）。

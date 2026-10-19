@@ -1,5 +1,5 @@
 /**
- * skills-discovery.ts — CCC 入口 skill 自动发现（纯逻辑，零 DSH 依赖）
+ * skills/discovery.ts — CCC 入口 skill 自动发现（纯逻辑，零 DSH 依赖）
  *
  * 发现全部入口技能（原文全量，不截断）—— **现行三个来源**（原为四个，**来源 3 已于 2026-09-21 删除**）：
  *   0. **`.serenity` 记号文件内容 = 顶层入口 skill 名**（CCC 记号文件的权威语义）—— 最高优先

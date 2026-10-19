@@ -1,7 +1,7 @@
 /**
- * diag-ops.ts — `acc-diag` 报告装配（v1.33，S142 §32.11；2026-09-15 段数收缩）
+ * tools/diag/service.ts — `acc-diag` 报告装配（v1.33，S142 §32.11；2026-09-15 段数收缩）
  *
- * 为什么单独成模块（R↓）：工具面（`tools/acc-diag.ts`）只做"取 CCC 根 + 渲染"，
+ * 为什么单独成模块（R↓）：工具面（`tools/diag/index.ts`）只做"取 CCC 根 + 渲染"，
  * 装配逻辑放这里 ⇒ 纯函数可单测、不依赖 DSH 工具注册。
  *
  * 为什么**无动作参数**：诊断是低频动作（§32.9 收敛取向），一次调用即出全报告，
@@ -13,7 +13,7 @@
  *   ①b 唤醒时钟 —— `containerClocks().wake`（唤醒调度器进程内快照：武装态/计数/上次跳过原因）
  *   ③  唤醒注册表 —— `wake-registry.json` 的**在办条目**（state / at / target / lastResult）+ 补跑窗口
  *       （🔴 2026-09-19 §0Q 甲案：终态条目**结案即清除** ⇒ 本段只列在办项，不再是"历史全量"；
- *        历史由 SESSION.md / 工具输出承担——该承诺原本就写在 `wake-registry.ts` 注释里，本次做实）
+ *        历史由 SESSION.md / 工具输出承担——该承诺原本就写在 `wake/registry.ts` 注释里，本次做实）
  *
  * ── 2026-09-15：段数由四降为三（S142「ACC 侧 autopilot 退场」§1 二阶裁定）─────────────
  * ACC 侧 autopilot 整段退场后，报告里两段的**主语消失**，故删除（不是"暂时关掉"）：
@@ -29,7 +29,7 @@
  * 条目到期 / 补跑窗口 / 目标可解析 / CCC 闸）。**不得**以"顺手保留 ④"的方式把它偷偷带回。
  *
  * C5「观察面归一」（2026-09-15）：① 走 `diagLive`（那是**live 运行态**的独有取数，没有第二个
- * 来源）；①b 时钟与 ③ 注册表经 `container-status.ts` 取（唯一取数出口）——**投影仍在本文件**
+ * 来源）；①b 时钟与 ③ 注册表经 `surface/observation.ts` 取（唯一取数出口）——**投影仍在本文件**
  * （诊断段不含 `message`，面板含；这是渲染差异，不是取数差异）。
  */
 
@@ -40,7 +40,7 @@ import type { Context } from 'cordis'
 import { isoLocal } from '../../kernel/time.js'
 import { readSimpleSettings } from '../../surface/settings.js'
 
-/** 进程内时钟状态（唤醒调度器；判据单一真相源 = `wake-scheduler.ts`） */
+/** 进程内时钟状态（唤醒调度器；判据单一真相源 = `wake/scheduler.ts`） */
 type ClockState = ClockSnapshot
 
 /** 人读渲染一行时钟状态（"为何没有 tick" 的第一手判据） */

@@ -1,5 +1,5 @@
 /**
- * session-cleanup.ts — DSH 平台旧会话自动清理（v1.29，S142 需求③）
+ * trajectory/cleanup.ts — DSH 平台旧会话自动清理（v1.29，S142 需求③）
  *
  * 背景（实证）：DSH 会话物理存储 = `$DSH_HOME/sessions/`（缺省 ~/.dsh/sessions；
  * base bundle cordis.patch.yml root: dshHomePath('sessions')）。磁盘布局：

@@ -1,7 +1,7 @@
 /**
  * ccc-roots.test.ts — C2「CCC 发现面归一」的契约测试
  *
- * 本文件锁死 `src/ccc-roots.ts`（L1 单根解析 + L2 全量枚举的唯一判断层）的三条契约：
+ * 本文件锁死 `src/kernel/ccc-roots.ts`（L1 单根解析 + L2 全量枚举的唯一判断层）的三条契约：
  *  1. **并集语义**（不是短路）：三层来源各贡献候选，结果按来源顺序去重；`defaultRoot` 置首。
  *  2. **`withRoles` 缺省 false ⇒ 不读任何 CCC 的 `serenity.json`**（唤醒调度器每 tick
  *     枚举，不该为角色付 IO）。

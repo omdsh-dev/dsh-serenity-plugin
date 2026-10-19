@@ -1,5 +1,5 @@
 /**
- * skiff-debug.ts — Skiff 调试问答页（F4a'，v1.25.x 实验性）
+ * role/skiff/debug.ts — Skiff 调试问答页（F4a'，v1.25.x 实验性）
  *
  * node:http 调试端口（默认关，仅监听 127.0.0.1；启停 = 人工——设置面板「Serenity」
  * 页 Skiff 区块开关，不随插件加载自动启动）。
@@ -26,10 +26,10 @@ import { marked } from 'marked'
 import { readSkiffRoles } from './config.js'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession, type SkiffCognitiveTrajectoryEntry } from './core.js'
 import { readCheapWorkerConfig } from '../../kernel/ccc.js'
-// C2（CCC 发现面归一）：候选 CCC 枚举的**唯一真相源**是 ccc-roots.ts；
+// C2（CCC 发现面归一）：候选 CCC 枚举的**唯一真相源**是 kernel/ccc-roots.ts；
 // 本模块的 `discoverCccs` 已删除（调用点改用 `listCccs`，见各 handle 分支）。
 import { listCccs, type CccEntry } from '../../kernel/ccc-roots.js'
-// C4 块 A：listener 生命周期归面宿主（本面=面 D，端口语义见 ports.ts 的 FACE_PORTS.skiffDebug）
+// C4 块 A：listener 生命周期归面宿主（本面=面 D，端口语义见 kernel/ports.ts 的 FACE_PORTS.skiffDebug）
 import { faceActive, facePort, startFace, stopFace, type FaceSpec } from '../../surface/faces.js'
 import { FACE_PORTS } from '../../kernel/ports.js'
 import { readSimpleSettings } from '../../surface/settings.js'
@@ -70,7 +70,7 @@ function sendHtml(res: ServerResponse, html: string): void {
 /**
  * 候选 CCC 条目（调试页 CCC 切换器数据）。
  *
- * C2：定义已迁至 `ccc-roots.ts`（L2 枚举的唯一真相源）——此处只在**类型层**转出
+ * C2：定义已迁至 `kernel/ccc-roots.ts`（L2 枚举的唯一真相源）——此处只在**类型层**转出
  * （零运行时重导出，避免把 `ccc-roots` 拉进本模块的运行时静态链）。
  */
 export type { CccEntry }

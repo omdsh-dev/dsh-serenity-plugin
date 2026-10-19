@@ -43,7 +43,7 @@ import { resetActiveSessionStore } from '../src/trajectory/core.js'
  *
  * ## 为什么这三类重要（贴 objective：**skiff 是微信桥的落点**）
  *
- * `skiff-core.ts` 是**家庭唯一 IM 通道**（微信桥）与 ACP/调试页共同的下游：用户消息进来 →
+ * `role/skiff/core.ts` 是**家庭唯一 IM 通道**（微信桥）与 ACP/调试页共同的下游：用户消息进来 →
  * `askSkiff` 读事件取答案。上面①正是"答案能不能被读到"的**唯一执行点**：
  * DSH 在 rc.1 把 `Session.events` 改成了 `snapshotEvents()` 方法（源码 `:466` 逐字记录），
  * 而**兼容双形态的那两行**（`:473`/`:474`）在既有夹具下**只跑了 `.events` 一侧** ——

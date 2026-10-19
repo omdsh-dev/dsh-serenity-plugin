@@ -14,7 +14,7 @@
  * 六条硬性规则（逐条对应设计 §4.2，改这里先改那里）：
  *   ① **只枚举，不注入正文** —— 索引里**绝不**出现任何参考文件的正文；
  *   ② **确定性排序** = 相对路径的 **UTF-8 字节序**（🔴 **不用 mtime**：mtime 随检出漂移，
- *      会让每请求的注入文本抖动；对照 `src/cro.ts:101` 那份**落盘快照**用 {name,bytes,mtime} ——
+ *      会让每请求的注入文本抖动；对照 `src/wake/cro.ts:101` 那份**落盘快照**用 {name,bytes,mtime} ——
  *      **同一件事两处的取舍相反，那个差异是判据不是巧合**）；
  *   ③ **有界 ＋ 响亮** —— 条数/字符各有上限，超出**必须显式写出还剩多少项**，**绝不静默截断**；
  *   ④ **摘要可复现** —— 取该文件首个 `#` 标题（剥 markdown 记号）；取不到 ⇒ 留空，**不编**；
@@ -30,7 +30,7 @@
  *
  * 🔴 **两个面，两个入口**（2026-10-12 增；owner 裁决 O2）—— 同源、但成本形态不同：
  *    · **载入面** `buildResourceIndex()` —— 完整索引（名字 ＋ 首标题 ＋ 字节），带 `.md` 文件头读取；
- *      在三条路径上各附一次：入口段（`system-prompt.ts` order −50）／轨迹段（`cognitive-trajectory-skills.ts`
+ *      在三条路径上各附一次：入口段（`system-prompt.ts` order −50）／轨迹段（`trajectory/skills.ts`
  *      order −45）／目录 provider 的 `get()`（`opencode-skills.ts`）。
  *    · **目录面** `buildResourceNameSuffix()` —— **只有名字**，**不读任何正文**；只挂一处：
  *      目录 provider 的 `list()`（`available_skills` 的 `SkillSummary.description`）。

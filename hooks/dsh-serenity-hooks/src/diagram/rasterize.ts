@@ -28,7 +28,7 @@ import {
 /**
  * 包根 = **向上找到含 `package.json` 的那一级**。
  *
- * 🔴 为什么不能照抄 `voyage-page.ts` 的「`..` 一次」：那个文件在 `src/` 根下，一次 `..` 恰好是包根；
+ * 🔴 为什么不能照抄 `surface/voyage/page.ts` 的「`..` 一次」：那个文件在 `src/` 根下，一次 `..` 恰好是包根；
  * 本模块在 `src/diagram/` 里 ⇒ 开发态（vitest 直接跑 TS 源码）一次 `..` 只到 `src/`，
  * 于是去找 `src/assets/…` —— **实测 ENOENT**（测试全红，且现象是"字体不在"，与真因"路径层级算错"
  * 长得完全不同）。按 `package.json` 上溯对**开发态（src/diagram）与发布态（lib/diagram）都成立**。

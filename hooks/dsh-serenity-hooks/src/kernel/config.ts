@@ -1,5 +1,5 @@
 /**
- * config-ops.ts — plugin 全局配置读写（结构化，`~/.dsh/serenity-hooks.json`）
+ * kernel/config.ts — plugin 全局配置读写（结构化，`~/.dsh/serenity-hooks.json`）
  *
  * 归属原则（S142 用户拍板，v1.22）：**plugin 是全局的，CCC 是具体的**——
  * 账号密码/gateway 监听配置是 plugin 级能力，归 plugin 全局文件；
@@ -72,7 +72,7 @@ interface PersonaSettings {
 /**
  * 高级设定全量（~/.dsh/serenity-hooks.json 持久化形态；passHash 含 hash）。
  * review P2-3：**rebuild 已从高级配置删除**——rebuild 开关/阈值归"简单配置"
- * （settings.yaml 原生面板，见 settings-section.ts），运行时只读 readSimpleSettings()；
+ * （settings.yaml 原生面板，见 surface/settings.ts），运行时只读 readSimpleSettings()；
  * 旧高级 rebuild 字段是死双胞胎（/serenity/config PUT 回显但运行时从不读它）——
  * 删除防误导（用户在高级面板改了却无效）。历史残留字段被 mergeWithDefaults 忽略（幂等安全）。
  */
@@ -274,7 +274,7 @@ export function updateAdvancedSettings(patch: Partial<AdvancedSettings>): Advanc
 // 随之删除：`ensurePublicAskKey` / `verifyPublicAskKey` / `rotatePublicAskKey` /
 // `resetPublicAskIpFail` / `isPublicAskIpLocked` / `recordPublicAskFail` 与 `ipFailStates`
 // ＋ 三个 `PUBLIC_ASK_*` 常量（owner 裁「砍掉外部问答」；替代路径 = 官方 ACP ＋ 隧道/Access 层认证）。
-// 🔴 **边界（别误删）**：**网关自己的**密码失败锁定（`gateway-auth.ts`）**不受影响**，仍在用。
+// 🔴 **边界（别误删）**：**网关自己的**密码失败锁定（`gateway/auth.ts`）**不受影响**，仍在用。
 
 /**
  * 一次性迁移（v1.21.x → v1.22）：旧版把 `serenityAdvanced` 存在 CCC localstore.json；

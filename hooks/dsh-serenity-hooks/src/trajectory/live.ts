@@ -1,5 +1,5 @@
 /**
- * live-sessions.ts — 进程内 live 会话取数 + 精简诊断
+ * trajectory/live.ts — 进程内 live 会话取数 + 精简诊断
  *
  * ── 为什么单独成模块（R↓，2026-09-15 S142「ACC 侧 autopilot 退场」S1 搬迁）──
  * 这两个函数原先住在 `autopilot-trajectory.ts`，但它们的**主语不是 autopilot**：

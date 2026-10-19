@@ -154,7 +154,7 @@ function readHeader(file) {
  *   ⛔ 原版 `walk('/')`：慢、且会把**无关 CCC** 的绑定也算进来 —— 扫描域溢出。
  *
  * 为什么这样认（而不是按 id 前缀）：那个 note 是产品代码**唯一**写入点
- * （`wake-scheduler.ts` 的 `createAndBindTarget`），它就是"这条是 send-now 冷建的"的**凭据**。
+ * （`wake/scheduler.ts` 的 `createAndBindTarget`），它就是"这条是 send-now 冷建的"的**凭据**。
  */
 function sendNowCreatedSessionIds(workspaces) {
   const ids = new Set()

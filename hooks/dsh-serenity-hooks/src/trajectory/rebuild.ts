@@ -1,5 +1,5 @@
 /**
- * rebuild.ts — 轨迹跟踪器（Cognitive Trajectory Tracker）超限重建：cognitive_trajectory rebuild
+ * trajectory/rebuild.ts — 轨迹跟踪器（Cognitive Trajectory Tracker）超限重建：cognitive_trajectory rebuild
  * （v1.30 起并入 logbook 的 rebuild action，v1.33 随 logbook 并入 trajectory，v1.34 工具名硬切
  *   为 container_trajectory；原独立 session_rebuild 工具）
  *

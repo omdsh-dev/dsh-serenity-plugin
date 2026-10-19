@@ -1,5 +1,5 @@
 /**
- * wake-scheduler.ts — 认知轨迹唤醒调度器（D58/D59/D60；S142 2026-09-13）
+ * wake/scheduler.ts — 认知轨迹唤醒调度器（D58/D59/D60；S142 2026-09-13）
  *
  * 一个**中心调度器**（5min tick，复用 autopilot 的节律常量），处理 CCC 唤醒注册表里
  * 到期的条目：把「未来时刻 + 一条 message」投递给目标认知轨迹，**fire-and-forget**
@@ -55,8 +55,8 @@ import { PLUGIN_SOURCE } from '../kernel/message-source.js'
  * ── 🔴 2026-09-25 I2 收敛（约束文档 §2.7 违反清单，L1 违反之一）────────────────
  * **`Context`（cordis）import 已清除**，本文件全部 `ctx` 参数类型 → `unknown`。
  *
- * 🔴 **本处是本清单上第三次「按文件整档」判错的实例**（前两次见 `ccc-roots.ts`
- * 与 `cro-turns.ts`）。本文件原被并进"**真依赖档**"，理由是"它用了 `Agent` 的
+ * 🔴 **本处是本清单上第三次「按文件整档」判错的实例**（前两次见 `kernel/ccc-roots.ts`
+ * 与 `wake/cro-turns.ts`）。本文件原被并进"**真依赖档**"，理由是"它用了 `Agent` 的
  * `followup`/`steer`"—— 但那证明的是 **`Agent` 是真依赖**，**不能顺带证明
  * `Context` 也是**。逐符号查证后：
  *   · `Agent` ⇒ ✅ **真依赖**（`followup`/`steer` **真被调用**；参与返回类型）⇒ **保留**。
@@ -65,7 +65,7 @@ import { PLUGIN_SOURCE } from '../kernel/message-source.js'
  *     `registerDisposer(ctx,…)`）或**转发给同文件内的其它函数**；
  *     🔵 **证据（可重跑）**：`ctx.` 在本文件**代码中 0 命中**（唯一命中在 :15 的注释里）。
  *     而上述四个被调方的签名**本就写作 `ctx: unknown`**（`host/access.ts` ／
- *     `host/effect.ts` ／ `ccc-roots.ts`）⇒ 该 import **未参与任何类型检查**。
+ *     `host/effect.ts` ／ `kernel/ccc-roots.ts`）⇒ 该 import **未参与任何类型检查**。
  *   · 顺带化简 :145 的 `clockOpts.ctx as Context`（`ClockOptions.ctx` 本就声明 `unknown`）
  *     与 :322 的签名 —— 那两处 cast 都是**为了迁就一个没人需要的类型**。
  * ⇒ 🆕 **判据（第三次印证）**：**分档必须逐符号做**；"用了某个宿主类型"**不能**推出
@@ -406,7 +406,7 @@ export async function sendToCognitiveTrajectory(
   const make = (): ReturnType<typeof createUserMessage> =>
     createUserMessage({ content: [{ type: 'text', text: buildSendText(t, message, sender) }], source: PLUGIN_SOURCE })
   // 🔴 v1.39.2（S142 §0r，所有者令「不排队、直接即时注入」）：见函数头部的语义变更说明。
-  // 判据 = 宿主 agent 的 `status`（`agent-idle.ts` 同款读法：`followup`/`steer` 会**同步**置 running）。
+  // 判据 = 宿主 agent 的 `status`（`role/worker/idle.ts` 同款读法：`followup`/`steer` 会**同步**置 running）。
   const idle = (agent as { status?: string }).status === 'idle'
   if (idle) {
     try {
@@ -745,7 +745,7 @@ async function deliverCroWake(
  */
 async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], log: string[]): Promise<void> {
   // 🔴 CRO 闸（2026-09-21 所有者令新增，缺省**开**）：关掉只影响**本阶段** ——
-  //    `send-later` / `send-now` / 唤醒表投递**照常**（`cro.ts` 头注的承诺）。
+  //    `send-later` / `send-now` / 唤醒表投递**照常**（`wake/cro.ts` 头注的承诺）。
   //    跳过**记一行**（否则"关掉 CRO 后轨迹不再被自编程唤起"这件事在 tick 日志里不可见 —— 同族缺口：
   //    "为什么这轮没唤起"必须可答）。
   if (readSimpleSettings().croEnabled === false) {
@@ -807,7 +807,7 @@ async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], lo
         const res = await deliverCroWake(ctx, root, dirName, outcome.prompt, outcome.decision.reason)
         log.push(`· ${root}: ${renderCroOutcome(dirName, outcome)} → ${res.ok ? '已投递' : `投递未成功：${res.detail}`}`)
         // 🔴 ACC 侧流水（所有者令 2026-09-20「ACC 有必要进行 CRO 唤醒的日志记录」「失败成功都记录」）：
-        // 落点 = **该轨迹目录**下的固定名文件（`cro-log.ts`），只留两日、写入时按窗裁剪。
+        // 落点 = **该轨迹目录**下的固定名文件（`wake/cro-log.ts`），只留两日、写入时按窗裁剪。
         // ⚠️ 两条硬约束：
         //   ① **`notReady` 不记**（`:171` 既定语义：环境未就绪 ≠ 投递失败 ⇒ 记了就是**假失败**）；
         //   ② **写流水失败绝不影响投递与既有链路**（设计 §5 铁律）⇒ 失败只进 tick 日志一行。
@@ -903,7 +903,7 @@ async function runWakeTick(ctx: unknown): Promise<string[]> {
       }
       if (res.ok) {
         // 🔴 owner 2026-09-19 裁「直接删」：投递成功 = 结案 ⇒ 同一笔事务写终态 + 移除。
-        //    审计由 SESSION.md / 工具输出承担（`wake-registry.ts` 既有注释承诺，本次做实）。
+        //    审计由 SESSION.md / 工具输出承担（`wake/registry.ts` 既有注释承诺，本次做实）。
         finalizeWake(root, e.id, 'delivered', res.detail)
         log.push(`· ${root}: ${e.id} → delivered（已清除）`)
       } else {

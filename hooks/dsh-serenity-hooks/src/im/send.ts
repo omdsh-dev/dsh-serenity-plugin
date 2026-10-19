@@ -1,5 +1,5 @@
 /**
- * weixin-send-api.ts — 主动发送入口（S142 v1.30.9，用户需求"微信桥支持被调用发消息给指定用户"）
+ * im/send.ts — 主动发送入口（S142 v1.30.9，用户需求"微信桥支持被调用发消息给指定用户"）
  *
  * 形态（用户拍板 A2）：**独立监听器，只绑 127.0.0.1**（默认 3082，plugin 全局配置 weixinApi）。
  * 为什么不挂在主 webServer(3080) 上：3080 会被 3081 公网网关原样反代（含全部请求头），
@@ -40,7 +40,7 @@ export const WEIXIN_SEND_MAX_TEXT = 4000
 
 /**
  * 面名（C4 块 A：listener 生命周期归 `face-host`，面向宿主提供规格）。
- * 本面=面 C（端口语义见 `ports.ts` 的 `FACE_PORTS.weixinSend`）。
+ * 本面=面 C（端口语义见 `kernel/ports.ts` 的 `FACE_PORTS.weixinSend`）。
  */
 const FACE_WEIXIN_SEND = 'weixin-send-api'
 /** 监听地址：**只绑 loopback**（本面不变量——不经网关、公网不可达，故不做共享密钥） */
@@ -269,7 +269,7 @@ export function weixinSendSpec(ctx: Context, cfg: { enabled: boolean; port: numb
     // 意图 = 配置启用且端口有效（`port:0` 视为关闭；这一判据此前写在 sync 里，现只在规格里写一次）
     enabled: () => cfg.enabled && cfg.port > 0,
     handler: (req, res) => handleWeixinSendRequest(ctx, req, res),
-    // 🔒 unref（v1.34.1 恢复；C4 归一丢失前的 `weixin-send-api.ts` 原语义）：
+    // 🔒 unref（v1.34.1 恢复；C4 归一丢失前的 `im/send.ts` 原语义）：
     //    本面**默认开**（FACE_PORTS.weixinSend.defaultEnabled）。若宿主以一次性命令方式跑
     //    （`dsh <cmd>` 用完即退），未 unref 的 listener 会维持事件循环 ⇒ 进程**挂住不退出**。
     //    进程存活时监听照常工作，只在"没有别的活"时才不拖住退出——故本面语义不受损。

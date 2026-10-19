@@ -210,7 +210,7 @@ export interface Config {
   //    （= 旧 settings.yaml 的段名）⇒ 宿主的 `importLegacyDocument()` 会把旧值导入同一命名空间，
   //    声明了这些键 ⇒ **旧值零迁移自动生效**（schemastery 非 strict 会保留未声明键，但读取需要声明）。
   //    ⚠️ **一律不带 `.default()`**：带上就永远非 undefined，部署层（`gateway.enabled` 等）
-  //    会被无声压死。读取优先级见 `settings-section.ts`：面板层 > 部署层 > 内建缺省。
+  //    会被无声压死。读取优先级见 `surface/settings.ts`：面板层 > 部署层 > 内建缺省。
   /** F1 双端口网关总开关（面板层；部署层同义键 = `gateway.enabled`） */
   gatewayEnabled?: Volatile<boolean | undefined>
   // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` 的**声明也删掉**（不只删 schema）——
@@ -317,7 +317,7 @@ export const Config = z.object({
   //    ⇒ 一个 volatile 字段都没有 ⇒ **本插件命名空间整个不进 describe** ⇒ 设置面板那一节消失
   //    （实证 = 0.1.7-rc.1 真机 `namespaces` 16 条里没有 `serenity-hooks`）。
   // ⚠️ **读取面必须配合**：运行期 volatile 字段是 `Volatile<T>` **恒真包装**（缺省时 `.get()`
-  //    返回 `undefined`），**不是** `undefined` ⇒ 一律经 `settings-section.ts` 的 `unwrapVolatile()`。
+  //    返回 `undefined`），**不是** `undefined` ⇒ 一律经 `surface/settings.ts` 的 `unwrapVolatile()`。
   // 约束（min/max）与旧 settings schema 逐字一致，保证面板输入仍被宿主校验。
   gatewayEnabled: z.boolean().volatile(),
   // 🔴 v1.49.0（owner 2026-09-26 裁决）：`rebuildEnabled` **已砍掉**（超限重建恒开、无闸）。
@@ -421,7 +421,7 @@ export function apply(ctx: Context, config: Config): void {
     // /serenity/voyage 发 assets/serenity-voyage.html（无参=全屏版 / ?card=1=卡片模式），
     // 供会话头部状态胶囊展开卡片（SafeModePanel 的 sp-pop）当背景层用。
     // 🔴 2026-10-18：词表按**请求所属 CCC** 运行时注入（owner 报「别的 CCC 也显示 home-serenity」）。
-    //   根解析**复用 api.ts 的 resolveWorkspace** —— 与状态面板同一套判据（单一真相源），
+    //   根解析**复用 surface/http.ts 的 resolveWorkspace** —— 与状态面板同一套判据（单一真相源），
     //   ⛔ 不在这里另写一份"找 CCC"的逻辑（那会长出第二份会漂的实现）。
     registerVoyageApi(ctx, {
       resolveRoot: (req) => {
@@ -485,7 +485,7 @@ export function apply(ctx: Context, config: Config): void {
   // （设计 §2.3 B 案：进程边界同时挡掉"ACC 依赖 CCC 源码路径"与"用户程序语法错放倒 ACC"）。
   // 🔴 本行**必须在 `registerWakeScheduler` 之前**：后者会立刻跑第一次 tick，而 CRO 快照的
   // `binding.runningSessionIds` 唯一数据源就是这张表（晚装 = 首拍读到空表 = 谎报"没在跑"）。
-  // 评估与投递面在 tick 内（`wake-scheduler.ts` 的 `runCroPhase`），本行只装"是否正在跑轮次"。
+  // 评估与投递面在 tick 内（`wake/scheduler.ts` 的 `runCroPhase`），本行只装"是否正在跑轮次"。
   registerCroTurnTracking(ctx)
   // cognitive trajectory 唤醒注册表（D58，v1.32.0）：中心调度器——5min tick 投递「未来时刻 + 一条
   // message」的一次性唤醒（可自唤醒、可跨 cognitive trajectory）。冷会话经 ctx.sessionController

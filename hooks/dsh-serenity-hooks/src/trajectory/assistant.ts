@@ -1,5 +1,5 @@
 /**
- * cognitive-trajectory-assistant.ts — 关卡化注入的统一命名与风格门面（v0.3，S142）
+ * trajectory/assistant.ts — 关卡化注入的统一命名与风格门面（v0.3，S142）
  *
  * 概念（用户拍板 2026-09-05）：dsp 全部"过程中动态提示注入"统一命名为
  * cognitive-trajectory-assistant（轨迹助航员）。关卡设计思想塑造**结构与时机**
@@ -67,7 +67,7 @@ export const ACK_SKIP_PREFIX = `${ASSISTANT_PREFIX}-skipped`
  * ⇒ 分家：**只用一次的交界材料**写进这份**临时便签**（无格式义务、无留档义务、可随时丢弃）。
  *
  * ## 🔴 三处引用同一常量（单一真相源）
- * **写侧** = `seams/keeper.ts` 的 `rebuildReminderText()`｜**读侧** = `rebuild.ts` 的重建锚点｜
+ * **写侧** = `seams/keeper.ts` 的 `rebuildReminderText()`｜**读侧** = `trajectory/rebuild.ts` 的重建锚点｜
  * **体积提醒** = `seams/keeper.ts` 的 `rebuildTodoReminderText()`。
  * 文件名一旦漂移，写侧写的东西读侧就找不到 —— **且没有任何机械信号会报警**。
  *

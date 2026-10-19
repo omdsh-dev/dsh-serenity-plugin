@@ -657,7 +657,7 @@ export function registerEntrySkillSection(agent: Agent, root: string): boolean {
  *   · **轨迹级** = 该会话绑定的轨迹（`readLastBound(session).mdPath` = 它的 `SESSION.md`）
  *     顶部 frontmatter 的 `skills:`——这条轨迹额外的。
  *   合并规则与顺序见 `cognitive-trajectory-skills.mergeSkillNames`（CCC 级在前，同名去重）。
- *   正文 = 合并清单里各 skill 的 `SKILL.md` 全文（本模块只注册，装配在 `cognitive-trajectory-skills.ts`）。
+ *   正文 = 合并清单里各 skill 的 `SKILL.md` 全文（本模块只注册，装配在 `trajectory/skills.ts`）。
  *
  * 为什么是 **per-agent scoped section**（与 `registerEntrySkillSection` 同形）：注入必须
  * **绑定期间持续存在**（a2）——一次性注入会随对话压缩消失，而 section 每次装配重新求值。

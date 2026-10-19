@@ -42,7 +42,7 @@
  * **自己在实现里写明的契约**给出 —— `packages/settings/settings/src/index.ts` 的 `mergeLayers`
  * 逐字：*"plain objects merge recursively, **every other value (arrays included) replaces
  * the lower layer wholesale**"*。⇒ **W-1 的结论（数组整体替换）在新路径上原样成立**，
- * 我方两处读-改-整写（`opencode-provider.ts` / `deepseek-vision-patch.ts`）**无需改语义**。
+ * 我方两处读-改-整写（`patches/opencode-provider.ts` / `patches/deepseek-vision.ts`）**无需改语义**。
  * ⚠️ 但这是**"宿主文档/实现契约"**等级的证据，**不是**旧探针那种"真跑一条链"的等级
  * （§4.2：*"我读了源码"与"我执行了那条链"是两个证据等级*）⇒ **已作为残留项登记**
  * （S142：新写入路径尚无端到端探针）。
@@ -112,7 +112,7 @@ describe.skip('§26 §0x-9 V-1 探针（真实 dsh-settings）—— ⛔ 0.1.7 �
       /**
        * 🔴 `writable` 由**子类**定义（基类不设 ⇒ falsy ⇒ `write()` 直接抛
        * `settings provider is read-only`，`:448`）。
-       * 真机里恒 true 的是 `dsh-settings-file`（`opencode-provider.ts:24` 已记此事实）
+       * 真机里恒 true 的是 `dsh-settings-file`（`patches/opencode-provider.ts:24` 已记此事实）
        * ⇒ 本探针如实模拟该值——**这是取得真实写入链路的前提**，不是绕过校验。
        */
       writable = true

@@ -1,11 +1,11 @@
 /**
- * im-bridge.ts（工具面）— IM 消息发送工具（v1.31.0）
+ * im/channels.ts（工具面）— IM 消息发送工具（v1.31.0）
  *
  * 用户洞察（S142）：微信桥是 ACC 提供的 → **发送能力也应是 ACC 的工具**；
  * 「当用户配置了微信桥则可用，不配置则不可见」。
  *
  * 本文件只做工具面三件事：① 从 agent 会话解析**本会话 CCC**（R4：不接受目标 CCC）
- * ② 把参数交给 `im-bridge.ts`（能力层）分发 ③ 渲染结果/错误。
+ * ② 把参数交给 `im/channels.ts`（能力层）分发 ③ 渲染结果/错误。
  *
  * 可见性不在这里判定：`seams/context.ts` 在会话就绪时按 CCC 配置
  * `agent.ctx.tools.restrict({ deny: ['im-bridge'] })` 把本工具从**未配置通道**的

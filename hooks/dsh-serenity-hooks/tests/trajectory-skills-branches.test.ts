@@ -1,18 +1,18 @@
 /**
- * trajectory-skills-branches.test.ts — 🔴 **⑤ 第 67 件**：`src/cognitive-trajectory-skills.ts` 的
+ * trajectory-skills-branches.test.ts — 🔴 **⑤ 第 67 件**：`src/trajectory/skills.ts` 的
  * **解析未定义形态 ＋ 缩进列表终止 ＋ 四处读取失败兜底 ＋ 观测回调护栏**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（01:2x 那一跑，第 66 件之后）**成对读**（纪律 16）实测：
- * `cognitive-trajectory-skills.ts` = 语句 **96.63%（230/238）**／分支 **85.5%（59/69）**／函数 10/10
+ * `trajectory/skills.ts` = 语句 **96.63%（230/238）**／分支 **85.5%（59/69）**／函数 10/10
  * —— **`src/**` 中分支覆盖率最低且尚未做过**的文件。
  * 🔵 贴 objective：它是**轨迹技能注入面 = 与 DSH 的系统提示词衔接面**。
- * ⚠️ 成对读拦下的坑（纪律 16 第 7 次生效）：`gateway-dsh-auth.ts` 的 83.33% 是**函数列**（5/6），
+ * ⚠️ 成对读拦下的坑（纪律 16 第 7 次生效）：`gateway/dsh-auth.ts` 的 83.33% 是**函数列**（5/6），
  * 其**分支是 100%**；真正的低点是本文件（85.5%）⇒ 只读数值列会张冠李戴。
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯）
- * grep `cognitive-trajectory-skills.js` 的 import 点 ⇒ 命中 `trajectory-skills.test.ts`（**515 行专测**）。
+ * grep `trajectory/skills.js` 的 import 点 ⇒ 命中 `trajectory-skills.test.ts`（**515 行专测**）。
  * 逐块读过其覆盖面（**本件不重做其中任何一条**）：解析 ①②④⑤⑥ 五形态 ／ 注入装配 ／
  * 缺 skill 提示 ／ 长度截断 ／ 🔒 路径穿越 ／ section 注册门五态 ／ SEP 源码钉两枚 ＋
  * **SEP 语义孪生**（渲染输出级，含读数器自证）／ keeper 两条文案 ／ **CCC 级声明 v1.1 全套**

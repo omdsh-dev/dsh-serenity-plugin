@@ -1,5 +1,5 @@
 /**
- * acc-diag.ts（工具面）— ACC 负责人专用的运行态诊断（v1.33，S142 §32.11）
+ * tools/diag/index.ts（工具面）— ACC 负责人专用的运行态诊断（v1.33，S142 §32.11）
  *
  * 用户裁决（2026-09-14）：「不要 diag-live 了；或者变成一个隐藏 tool **只对 home-serenity 可见**，
  * 做成我们专属的运行时诊断工具」。⇒ 合并原 `diag`（脚本侧条件链）+ `diag-live`（进程内运行态），
@@ -26,7 +26,7 @@ import { runAccDiag, renderAccDiag } from './service.js'
  * （① live 运行态 / ①b 唤醒时钟 / ③ 唤醒注册表）。
  *
  * ⚠️ 2026-09-15（ACC 侧 autopilot 退场，S142）：原四段降为三段——原 ②「面板解析」与
- * ④「唤起条件链」的主语随机制消失，已删（见 `../diag-ops.ts` 文件头；④ 的缺口已登记）。
+ * ④「唤起条件链」的主语随机制消失，已删（见 `tools/diag/service.ts` 文件头；④ 的缺口已登记）。
  */
 export function createAccDiagTool(ctx: Context) {
   return defineTool({

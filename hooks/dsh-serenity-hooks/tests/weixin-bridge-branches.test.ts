@@ -1,9 +1,9 @@
 /**
- * ⑤ 第 52 件 — `src/weixin-bridge.ts` 分支退化面。
+ * ⑤ 第 52 件 — `src/im/bridge.ts` 分支退化面。
  *
  * 靶（锚定 2026-09-25 23:2x 那一跑）：分支 **77.69%**（108/139）、语句 94.16%（597/634）
- * —— 复扫后 `src/**` 分支覆盖率最低的未做过文件（比 handover 里列的 weixin-api.ts
- * 82.96% 更低；且 rebuild.ts 实测已 100%、不再是靶）。
+ * —— 复扫后 `src/**` 分支覆盖率最低的未做过文件（比 handover 里列的 im/ilink.ts
+ * 82.96% 更低；且 trajectory/rebuild.ts 实测已 100%、不再是靶）。
  *
  * 为何挑它：微信桥是**家庭唯一 IM 通道**（owner 与家人全靠它），文件头的设计承诺是
  * 「桥错误静默 —— 不中断轮询循环」「旁路容忍 H3：hook 失败不阻塞对话处理」
@@ -11,7 +11,7 @@
  * 而既有 `weixin.test.ts`（1264 行）虽覆盖了所有 happy path 与主要降级，
  * 其夹具**恒走"配置齐全 + 正常返回"形态** ⇒ 下列分支从未执行。
  *
- * 覆盖的 29 处未覆盖分支（按源码位置，`weixin-bridge.ts`）：
+ * 覆盖的 29 处未覆盖分支（按源码位置，`im/bridge.ts`）：
  *   A 组 — typing 失败静默（`:64` / `:86` 的两个 catch，函数头逐字承诺"任何失败静默"）
  *   B 组 — 轮询循环容错（`:118` `??` 游标回退 / `:122` 忽略非用户消息 / `:124` `?? []` /
  *           `:127` 非 Error 抛出的 `String(err)` 分支 / `:130` catch 后**继续循环**）
@@ -122,7 +122,7 @@ function fakeCtx(opts?: { createThrows?: boolean }): {
 }
 
 /**
- * 🔴 夹具前置条件（本件首跑踩到、极其重要）：`waitAgentIdle`（`agent-idle.ts:71`）结算
+ * 🔴 夹具前置条件（本件首跑踩到、极其重要）：`waitAgentIdle`（`role/worker/idle.ts:71`）结算
  * 的判据是 **`p?.agent === agent` 的同一性比较** ⇒ 触发 idle 时**必须交回那个真实 agent
  * 引用**，传 `undefined` 会让 Promise 永不结算 ⇒ 用例**超时**（不是生产代码有 bug）。
  * 本工厂把 agent 引用闭包保存，`on` 触发时回传真引用（与既有 `weixin.test.ts` 同构）。

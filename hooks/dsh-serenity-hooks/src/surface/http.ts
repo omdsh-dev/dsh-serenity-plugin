@@ -1,5 +1,5 @@
 /**
- * api.ts — HTTP 状态接口（WebUI 停靠栏数据源/开关通道 + 图片落盘）
+ * surface/http.ts — HTTP 状态接口（WebUI 停靠栏数据源/开关通道 + 图片落盘）
  *
  * 路由：
  *   GET  /serenity/status            ?workspace=<路径>  → 状态（root/accVersion/safeModeOn/...）
@@ -168,7 +168,7 @@ interface StatusApiRegistration {
  * 它就会**静默返回另一个 CCC 的路径**，于是面板把**别人的轨迹/技能/安全模式**当成你的显示出来。
  * 这比"显示未激活"危险得多 —— 用户会据此做判断（以为自己的 safe-mode 开着、以为那是自己的轨迹）。
  *
- * 修法与既有先例一致（`rebuild.ts` 对"跨轨迹猜测"的裁决：**响亮失败优于静默接错**）：
+ * 修法与既有先例一致（`trajectory/rebuild.ts` 对"跨轨迹猜测"的裁决：**响亮失败优于静默接错**）：
  * **多个候选 ⇒ 不猜**。只有当 live sessions 里的 CCC 根**唯一**时才采用它
  * （那正是 v1.22.2 要救的场景：单 CCC 部署 + 远程访问缺 sessionId）；
  * 一旦出现**两个及以上**不同 CCC 根，就退回进程 cwd（→ 面板显示"未激活"），绝不挑一个顶替。

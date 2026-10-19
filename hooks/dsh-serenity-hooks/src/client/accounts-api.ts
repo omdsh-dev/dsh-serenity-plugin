@@ -3,7 +3,7 @@
  *
  * 归属原则（v1.22）：账号密码是 **plugin 全局配置**（~/.dsh/serenity-hooks.json），
  * 不依赖任何具体 CCC——GET/PUT 不带 sessionId/workspace。
- * 数据通道：同源 HTTP /serenity/config（node half api.ts；x-serenity-ui 头）。
+ * 数据通道：同源 HTTP /serenity/config（node half surface/http.ts；x-serenity-ui 头）。
  *  GET → wire 形态（accounts: {id, user, hasPassword}[]；无 hash）
  *  PUT → wire patch（账号数组整体替换；pass 空=保留原 hash；新账号必带 pass）
  *

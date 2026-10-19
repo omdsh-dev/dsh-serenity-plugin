@@ -1,5 +1,5 @@
 /**
- * usage-stats.test.ts — `src/usage-stats.ts` 的镜像测试
+ * usage-stats.test.ts — `src/surface/usage.ts` 的镜像测试
  *
  * 覆盖：落点 / 初态 / 自增语义（firstAt 不漂、lastAt 跟进）/ **重启续算** /
  * 两个 skill 口径不混 / 只记名字不记参数 / 损坏容错（不抛且能自愈）/

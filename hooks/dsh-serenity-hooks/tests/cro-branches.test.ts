@@ -1,19 +1,19 @@
 /**
- * cro-branches.test.ts — 🔴 **⑤ 第 63 件**：`src/cro.ts` 的
+ * cro-branches.test.ts — 🔴 **⑤ 第 63 件**：`src/wake/cro.ts` 的
  * **runner 回退链 ＋ 编排降级臂 ＋ 超时/退出码文案边界**
  * （2026-09-26 · 对应地图 §2.7 的续段）
  *
  * ## 为什么挑它（复扫读数，纪律 2）
  * `coverage/src/index.html`（00:44 那一跑，第 62 件之后）实测：`src/**` 分支覆盖率
- * **最低且尚未做过**的文件 = `cro.ts`（**84.15% = 85/101**；
+ * **最低且尚未做过**的文件 = `wake/cro.ts`（**84.15% = 85/101**；
  * 语句 96.64% ＝ 548/567；函数 14/14 已满）。
  * ⚠️ **复扫时的成对读（纪律 16）拦下一个错靶**：同为 83.33% 的两个候选里，
- * `gateway-dsh-auth.ts` 的 83.33% 是**函数列**（5/6）、其**分支是 100%**；
- * 真正的分支低点是 `git-ops.ts`（75/90）—— 但它**已在第 53 件做过**
- * ⇒ 才轮到 `cro.ts`。**只读数值列会把这三者混为一谈。**
+ * `gateway/dsh-auth.ts` 的 83.33% 是**函数列**（5/6）、其**分支是 100%**；
+ * 真正的分支低点是 `tools/git/service.ts`（75/90）—— 但它**已在第 53 件做过**
+ * ⇒ 才轮到 `wake/cro.ts`。**只读数值列会把这三者混为一谈。**
  *
  * ## 🔴 开工第一步 = 按【被测符号】核对既有登记（纪律 ⑯，第 62 件的教训）
- * 本件**同时** grep 了文件名与**符号**（`src/cro.js` 的 import 点）⇒ 找到四处：
+ * 本件**同时** grep 了文件名与**符号**（`src/wake/cro.js` 的 import 点）⇒ 找到四处：
  * `cro.test.ts`（420 行，主）／`cro-guide.test.ts`／`wake-registry.test.ts`。
  * 🔴 v1.63.3 更正：原列第四处 `unattended-seam.test.ts` 已随无人值守功能整条退役删除
  * （它当年只取常量或 mock，对本件无影响）。
@@ -24,7 +24,7 @@
  * 🔵 **分工干净互补（缺口在"回退链本身"）**：既有 spawn 组**每一条都只跑一跳**
  * （本机有 `bun` ⇒ 第一次迭代就 `res.ok === true || code !== 'ENOENT'` 而 return）
  * ⇒ **`ENOENT ⇒ continue` 试下一个 runner** 与 **两个 runner 都不可用 ⇒ `cro-no-runner`**
- * 这两条**从未被执行**。而同族（第 47 件 `weixin-hook.ts`）踩过一模一样的坑：
+ * 这两条**从未被执行**。而同族（第 47 件 `im/hook.ts`）踩过一模一样的坑：
  * 「设计承诺写进文件头、却从未被执行」。
  *
  * ## 🔴 本件为何要紧（源码逐字给出的承诺）
@@ -126,7 +126,7 @@ describe('cro 退化面：runner 回退链（**本机有 bun ⇒ 此前从未走
     //    ① `bun` 不在 PATH **且** ② `process.execPath` 也不存在。
     //    ② 在**当前 Node 进程里结构上不可能**（execPath 就是正在跑的解释器）。
     //    ⇒ 真实 spawn 路径下这条分支**不可达** ⇒ **不造假故障去涂绿**。
-    //    同族先例：第 47 件 `weixin-hook.ts` 的 bun 回退链第一跳（本机有 bun ⇒ 走不到）。
+    //    同族先例：第 47 件 `im/hook.ts` 的 bun 回退链第一跳（本机有 bun ⇒ 走不到）。
     expect(typeof runCroProcess).toBe('function')
   })
 

@@ -1,14 +1,14 @@
 /**
- * wake-scheduler-branches.test.ts — `wake-scheduler.ts` 的**降级/兜底/容错面**（⑤ 第 48 件，2026-09-25）
+ * wake-scheduler-branches.test.ts — `wake/scheduler.ts` 的**降级/兜底/容错面**（⑤ 第 48 件，2026-09-25）
  *
  * ── 挑靶依据（机械，不是叙述）───────────────────────────────────────────────
  * 按 ⑤ 换挡后的入口「**按分支覆盖率排序**」复扫 `coverage/src/**` ⇒
- * `wake-scheduler.ts` = 分支 **75.86%（22/29）**，是 `src/**` 中**最低的未被做过**的文件
+ * `wake/scheduler.ts` = 分支 **75.86%（22/29）**，是 `src/**` 中**最低的未被做过**的文件
  * （43 `diag-ops` ／ 44 `compact` ／ 45 `lifecycle` ／ 46 `seams/context` ／ 47 `weixin-hook` 已做完）。
  * 语句 95.13%（254/267）。
  *
- * 🔵 **本件的额外价值（为何值得优先做）**：`wake-scheduler.ts` 是 ④ I2 收敛后
- * **仍列在 L1 违反清单上的 3 个文件之一**（`rebuild.ts` 7 ／ **本文件 2** ／ `agent-idle.ts` 1）
+ * 🔵 **本件的额外价值（为何值得优先做）**：`wake/scheduler.ts` 是 ④ I2 收敛后
+ * **仍列在 L1 违反清单上的 3 个文件之一**（`trajectory/rebuild.ts` 7 ／ **本文件 2** ／ `role/worker/idle.ts` 1）
  * —— 它是**宿主接触面**（`Agent.followup`/`steer` 真被调用）。objective 的要害正是
  * 「**尤其管好与 DSH 的衔接面**」⇒ 把它的**降级路径**钉牢，比再补一个普通业务模块更贴目标。
  *
@@ -65,7 +65,7 @@ import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-// ── 🔴 只替换被调方，被测模块 `wake-scheduler.ts` **真跑** ──────────────────
+// ── 🔴 只替换被调方，被测模块 `wake/scheduler.ts` **真跑** ──────────────────
 // 用 importActual 保留真实实现，只换掉下面这几个"可注入失败"与"可观测"的点。
 const croState = {
   enabled: true,

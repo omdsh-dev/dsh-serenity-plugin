@@ -1,5 +1,5 @@
 /**
- * trajectory-assistant.test.ts — `cognitive-trajectory-assistant.ts` 的镜像测试（v0.3，S142）
+ * trajectory-assistant.test.ts — `trajectory/assistant.ts` 的镜像测试（v0.3，S142）
  *
  * 覆盖：token 常量单一真相源（eventToken / EVENT_LABEL）/ ACK 前缀 /
  * 风格门面（plain 默认 + metaphor 变体——仅前缀措辞，D8 无 game 档）/

@@ -119,7 +119,7 @@ export function registerLifecycle(ctx: Context): void {
   // ② 插件卸载/HMR → 停掉自起资源（端口/轮询器）
   //
   // 🔒 C4 块 A（2026-09-15）：**这是自起 HTTP listener 的唯一拆卸挂点**。
-  // 此前拆卸裂成两套——本处一个聚合 disposer，而 `gateway.ts` / `weixin-send-api.ts`
+  // 此前拆卸裂成两套——本处一个聚合 disposer，而 `gateway/server.ts` / `im/send.ts`
   // 各自另注册一个（D/E 干脆没有自己的）。现在四个面（B 3081 / C 3082 / D 3099 /
   // E 3100）的 listener 全部由 `face-host` 持有，拆卸 = `stopAllFaces()` 一处；
   // 面自己的 `registerDisposer` 已删除（名单归 active 表，不再靠人记）。

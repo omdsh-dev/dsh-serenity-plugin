@@ -1,5 +1,5 @@
 /**
- * container-status.ts — 容器状态模型的**取数层唯一出口**（C5「观察面归一」，S142 2026-09-15）
+ * surface/observation.ts — 容器状态模型的**取数层唯一出口**（C5「观察面归一」，S142 2026-09-15）
  *
  * 为什么存在（R↓）：ACC 有多个观察面（`dashboard health` / `acc-diag` / WebUI 面板 /
  * 系统提示词注入），它们读的是同一批宿主事实。此前"这些事实怎么取"写在**每个消费方各自的
@@ -17,13 +17,13 @@
  * 依赖分层（为什么本模块"重"而 `kit-ops` / `status` 保持"轻"）：
  *  {@link containerClocks} 必须读 `wake-scheduler` 的进程内快照，而该模块带 **@deepseek-ai 值依赖**
  *  （`dsh-llm` 的 `createUserMessage`）。故本模块**只能**被本就重型或异步的消费方使用：
- *  `diag-ops`（静态 import）、`api.ts` / `kit-ops`（`await import(...)`，与 `api.ts` 既有的
+ *  `diag-ops`（静态 import）、`surface/http.ts` / `kit-ops`（`await import(...)`，与 `surface/http.ts` 既有的
  *  "保持静态链纯净"约定一致）。**轻链模块不得静态 import 本模块**。
  *
  * 已有的单一真相源继续指向原处（**不复制**）：
- *  L0 根解析 `ccc.ts findSerenityRoot`｜L1/L2 根与枚举 `ccc-roots.ts`｜宿主契约 `host/contract.ts`
- *  ｜CCC 配置 `ccc.ts loadSerenityConfig`｜注册表 `msm-ops.ts`｜时钟 `wake-scheduler.ts`
- *  ｜唤醒注册表 `wake-registry.ts`。
+ *  L0 根解析 `kernel/ccc.ts findSerenityRoot`｜L1/L2 根与枚举 `kernel/ccc-roots.ts`｜宿主契约 `host/contract.ts`
+ *  ｜CCC 配置 `kernel/ccc.ts loadSerenityConfig`｜注册表 `tools/msm/service.ts`｜时钟 `wake/scheduler.ts`
+ *  ｜唤醒注册表 `wake/registry.ts`。
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
@@ -86,7 +86,7 @@ export interface ContainerPrinciples {
 
 /**
  * 三原则取数。
- * ⚠️ 与 `ccc.ts` 的 P1/P2 原语是**同一实现**（`existsSync(.serenity)` / `findGitRoot`），
+ * ⚠️ 与 `kernel/ccc.ts` 的 P1/P2 原语是**同一实现**（`existsSync(.serenity)` / `findGitRoot`），
  * 本函数只把它们组装成"一次检查"的形状；判定语义未变（P1 要求文件非空、P2 要求 `.git` 存在）。
  */
 export function containerPrinciples(root: string | null): ContainerPrinciples {
@@ -118,7 +118,7 @@ export interface RegistryStructureReport {
 }
 
 /**
- * **判据 A —— 注册表「结构完整性」**（原 `kit-ops.ts checkRegistryHealth`，C5 迁入本模块）。
+ * **判据 A —— 注册表「结构完整性」**（原 `tools/kit/service.ts checkRegistryHealth`，C5 迁入本模块）。
  *
  * 回答的问题：**这张表坏没坏**——文件能不能被安全解析（JSON 合法 / 顶层形状 / entry 字段类型 /
  * name 全局唯一 / path 在根内且脚本存在）。
@@ -210,7 +210,7 @@ export function checkRegistryHealth(root: string): RegistryStructureReport {
 }
 
 /**
- * **判据 B —— 注册表「质量契约」**（DC-M1~M4；实现在 `msm-ops.ts checkRegistryQuality`，
+ * **判据 B —— 注册表「质量契约」**（DC-M1~M4；实现在 `tools/msm/service.ts checkRegistryQuality`，
  * 执行面 `container_admin msm check` 亦走它）。
  *
  * 与判据 A 的关系见 {@link checkRegistryHealth} 的对照注释——**两条判据、两个名字、两份结论**。
@@ -222,7 +222,7 @@ export { checkRegistryQuality, type RegistryQualityReport }
 
 /**
  * 进程内时钟快照类型。
- * ⚠️ 形状由**时钟模块自身**定义（`wake-scheduler.ts` 未导出的 `WakeSchedulerRuntime`）——故此处
+ * ⚠️ 形状由**时钟模块自身**定义（`wake/scheduler.ts` 未导出的 `WakeSchedulerRuntime`）——故此处
  * 直接取其返回类型。2026-09-15：原为「唤醒调度器 ∪ autopilot」联合（两者诊断字段同规格但类型
  * 不同）；autopilot 时钟随 ACC 侧 autopilot 退场删除后，**只剩一座钟**（唤醒调度器）。
  */
@@ -237,7 +237,7 @@ export interface ContainerClocks {
  * 时钟的进程内状态（"为什么这轮没被唤起"的第一手判据）。
  *
  * 🔴 **只读快照，不重算**（设计红线）：`armed`/`ticks`/`lastTickAt`/`lastSkipReason` 只存在于
- * 调度器自己的模块级运行时对象里（`wake-scheduler.ts schedulerRuntime`）。任何"从配置或文件
+ * 调度器自己的模块级运行时对象里（`wake/scheduler.ts schedulerRuntime`）。任何"从配置或文件
  * 重新推导"得到的值都会与真实调度器的状态不一致——那比没有可观测量更糟（会给出假的"一切正常"）。
  */
 export function containerClocks(): ContainerClocks {
@@ -282,7 +282,7 @@ export interface ContainerStatus {
      */
     quality: RegistryQualityReport | null
   }
-  /** CCC 配置（`ccc.ts loadSerenityConfig`；无根 → null） */
+  /** CCC 配置（`kernel/ccc.ts loadSerenityConfig`；无根 → null） */
   config: JsonValue | null
   /** 宿主契约（进程内唯一来源，见 `host/contract.ts hostContractReport`） */
   hostContract: HostContractReport | null

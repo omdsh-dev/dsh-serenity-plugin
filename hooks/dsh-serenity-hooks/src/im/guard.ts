@@ -1,5 +1,5 @@
 /**
- * weixin-output-guard.ts — 手动输出模式的**机械闸门**（v1.30.16，S142 用户"LLM 不听"）
+ * im/guard.ts — 手动输出模式的**机械闸门**（v1.30.16，S142 用户"LLM 不听"）
  *
  * 问题（实证）：`weixin.autoReplyWithLastMessage: false` 时桥不回发最终文本，输出权归 agent
  * （必须自己调 `im-bridge` 工具，v1.30.x 为 `msm("weixin-send", …)`）。提示词层面已说明，

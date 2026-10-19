@@ -1,5 +1,5 @@
 /**
- * face-host.ts — **面宿主**：插件自起 HTTP listener 的唯一生命周期处（C4 块 A，S142 2026-09-15）
+ * surface/faces.ts — **面宿主**：插件自起 HTTP listener 的唯一生命周期处（C4 块 A，S142 2026-09-15）
  *
  * ## 现状 → 本模块要收掉什么（取证：`…/acc-c4c5-current-state.md` §①/§③ 3.1）
  *
@@ -8,7 +8,7 @@
  * ⇒ 仍保有面 B/C/D 三个；本段保留"当年是四个"的记述，因为下方"两套拆卸"的病史由它解释。
  * 此前四处各写一份同款样板：`createServer` + `server.once('error')` +
  * `listen(port, host)` + 模块级 `active` 变量 + `close()`；拆卸也分裂成**两套**——
- * `seams/lifecycle.ts` 有一个聚合 disposer，而 `gateway.ts` 与 `weixin-send-api.ts`
+ * `seams/lifecycle.ts` 有一个聚合 disposer，而 `gateway/server.ts` 与 `im/send.ts`
  * **各自另注册**一个（D/E 干脆没有自己的 disposer）。
  *
  * 本模块把"listener 生命周期"收成一处：**active 表 + 统一 listen/close + 统一错误与端口占用
@@ -17,7 +17,7 @@
  * ## 🔴 共享的是「生命周期与样板」，**绝不是**「路由 / 监听器 / 鉴权」
  *
  * 每个面**保留自己的 listener、自己的路由、自己的鉴权**（`handler` 内部原样不动）：
- *   · **A ↔ C 解耦**（`weixin-send-api.ts:4-7`）：3080 会被 3081 原样反代（连请求头），
+ *   · **A ↔ C 解耦**（`im/send.ts:4-7`）：3080 会被 3081 原样反代（连请求头），
  *     把 3082 的端点挂到 3080 上 = 已登录的外部家庭账号即可冒充 bot 发消息
  *     ⇒ 本模块**不提供**"把面挂到别的面"的能力，也不共享路由表；
  *   · （原 **E ↔ D** 共用会话核心但各自独立 listener 一条，**随 E 退役删除**）；
@@ -66,7 +66,7 @@ export interface FaceSpec {
    *
    * 面 C（微信发送，`FACE_PORTS.weixinSend.defaultEnabled = true`）必须传 `true`：宿主若以
    * **一次性命令**方式跑（`dsh <cmd>` 用完即退），未 unref 的 listener 会拖着进程不退出。
-   * 这是 C4 之前 `weixin-send-api.ts` 的原语义（C4 归一到面宿主时丢失），现逐字恢复。
+   * 这是 C4 之前 `im/send.ts` 的原语义（C4 归一到面宿主时丢失），现逐字恢复。
    */
   unref?: boolean
 }

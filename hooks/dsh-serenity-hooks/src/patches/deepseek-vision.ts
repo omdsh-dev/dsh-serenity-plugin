@@ -1,5 +1,5 @@
 /**
- * deepseek-vision-patch.ts — DeepSeek 模型的"支持图片"声明自动补齐（临时，S142 §26 §0x-9）
+ * patches/deepseek-vision.ts — DeepSeek 模型的"支持图片"声明自动补齐（临时，S142 §26 §0x-9）
  *
  * ## 这东西用来干什么（D70：先用途、后机制）
  *
@@ -23,10 +23,10 @@
  *
  * owner 2026-09-19 14:5x 明确授权走**写入型**（§0x-9d 路线 c）：
  * 「临时的我允许，还是要 patch，帮我做个逻辑，如果发现任何 deepseek 模型，都直接 patch 支持多模态」。
- * ⇒ 与 `opencode-provider.ts` **同款通道、同款授权模式**（`ctx.settings.update` 写 `llm-pi-ai` 命名空间）。
+ * ⇒ 与 `patches/opencode-provider.ts` **同款通道、同款授权模式**（`ctx.settings.update` 写 `llm-pi-ai` 命名空间）。
  * 🔴 **只补缺失，绝不覆盖用户已有声明**（判据 J4）；**只碰 deepseek 模型**（判据 J1/J2）。
  *
- * ## 注入通道（唯一可用且是官方的）—— 与 `opencode-provider.ts` 同源
+ * ## 注入通道（唯一可用且是官方的）—— 与 `patches/opencode-provider.ts` 同源
  *
  * `ctx.settings.update('llm-pi-ai', patch)`：
  *   ① 深合并（`mergeLayers` 逐层递归）② **先校验后落盘** ③ `writable` ⇒ 写入用户 settings 文档（0600）。
@@ -210,7 +210,7 @@ interface SettingsLike {
   /** 🔴 0.1.7 的读面（取代 `get`）：`SettingsForms.describe()` 按**条目 id** 给出表单，
    *  其 `value` = 该条目已解析的配置。⚠️ 它有**副作用**：修订号变化时会 emit
    *  `settings/document-updated` ⇒ 本函数被该事件再触发时，第二次 `describe` 的 raw 不变
-   *  ⇒ 不会再 emit（**收敛，不成环**）。与 `opencode-provider.ts` 同款通道，两处须同步改。 */
+   *  ⇒ 不会再 emit（**收敛，不成环**）。与 `patches/opencode-provider.ts` 同款通道，两处须同步改。 */
   describe?: (options?: { redactSecrets?: boolean }) => readonly { ns?: string; value?: unknown }[] | undefined
   update?: (ns: string, patch: object) => Promise<void>
 }

@@ -115,7 +115,7 @@ export function reminderText(code: string): string {
  *   使用者若要查看当前占用/阈值：看面板（`rebuildThresholdK` 滑块 + 状态显示）——那是给人看的。
  *
  * v1.31.1 交接协议（S142 用户需求"要求 LLM 将当前手头事项写在 SESSION.md 尾部，并要求
- * rebuild 后去读并处理"）：**写侧** = 这里；**读侧** = rebuild 锚点（rebuild.ts）。
+ * rebuild 后去读并处理"）：**写侧** = 这里；**读侧** = rebuild 锚点（trajectory/rebuild.ts）。
  * 两侧共用 cognitive-trajectory-assistant 的常量（单一真相源）。
  *
  * 🔴 **v1.49.0（owner 2026-09-26 裁决："砍掉 in-flight，这正是目的"）**：写侧**不再**指向
@@ -435,7 +435,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
   //    contextPressure 投影，超 rebuildThresholdK（K 数值）追加 rebuild 提示——**不依赖计分达标**
   //    （此前嵌套在 shouldRemind 内 + inject 缺 sessionProjections → 永不触发）。
   // ③ 🆕 **用量统计**（owner 令 2026-09-22）= **纯观测**：把 `skill` / `msm` 两类调用记一笔到
-  //    该 CCC 的 `_tmp/acc-usage.json`（逻辑在 `../usage-stats.ts`）。
+  //    该 CCC 的 `_tmp/acc-usage.json`（逻辑在 `../surface/usage.ts`）。
   //    ⇒ 本缝的**决策**仍只有 ①②；**③ 一律忽略返回值、抛错被吞，绝不改变任何决策**。
   ctx.on('tools/post-execute', async (exec, _result, next): Promise<PostToolDecision> => {
     if (!exec.agent) return next()
@@ -454,7 +454,7 @@ export function registerKeeper(ctx: Context, opts: KeeperRegistration = {}): voi
 
     // ③ 用量统计（owner 令 2026-09-22）：`skill` 加载与 `msm` 执行各记一笔到该 CCC 的
     //    `_tmp/acc-usage.json`。🔴 **纯观测**：返回值一律忽略 —— 统计绝不改变本缝的任何决策。
-    //    （`usage-stats.ts` 自身永不抛；此处再兜一层 try 是纵深防御：本缝每轮都跑，
+    //    （`surface/usage.ts` 自身永不抛；此处再兜一层 try 是纵深防御：本缝每轮都跑，
     //    宁可少记一笔，也不能让统计打断会话。）
     try {
       recordToolUsage(root, exec.name, (exec as { arguments?: unknown }).arguments)
