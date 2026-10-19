@@ -45,6 +45,8 @@ import { createSkiffAgent, getSkiffAgent, askSkiff, unregisterSkiffSession, work
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'
+import { getImAccountImpl, imAccountChannels, normalizeAccountChannel, type ImAccountImpl } from './accounts.js'
+import { installWeixinAccountImpl } from './weixin-account.js'
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
 interface AccountLoop {
@@ -129,45 +131,16 @@ export function resetWeixinTypingCache(): void {
   typingTicketByUser.clear()
 }
 
-/** 单账号轮询循环：getupdates 长轮询 → 逐消息分发 → 回复回写 */
-async function runAccountLoop(
-  ctx: Context,
-  root: string,
-  accountId: string,
-  cred: WeixinAccountCredential,
-  loop: AccountLoop,
-  /**
-   * P0-3 A：**机器级 poller**。为真时逐条消息先由订阅表解析目标（`root` 入参**不使用**，
-   * 传 `MACHINE_SCOPE` 即可）—— 因为"投到哪个 CCC"是**每条消息**才决定的。
-   */
-  machine = false,
-): Promise<void> {
-  let buf = ''
-  while (!loop.stopped) {
-    loop.lastPollAt = Date.now()
-    try {
-      const resp = await getUpdates({
-        baseUrl: cred.baseUrl,
-        token: cred.token,
-        getUpdatesBuf: buf,
-        timeoutMs: 35_000,
-      })
-      buf = resp.get_updates_buf ?? buf
-      for (const msg of resp.msgs ?? []) {
-        if (loop.stopped) break
-        // 只处理用户消息（message_type=1）——忽略 bot 自己/系统消息
-        if (msg.message_type !== 1) continue
-        if (machine) await handleMachineIncoming(ctx, accountId, cred, msg)
-        else await handleIncoming(ctx, root, accountId, cred, msg)
-      }
-      // 成功 → 立即续轮询（不 sleep；长轮询本身 hold 35s）
-    } catch (err) {
-      loop.lastError = err instanceof Error ? err.message : String(err)
-      // 失败 → 指数退避重试（对齐 orbit/ws 模式）
-      await new Promise((r) => setTimeout(r, POLL_RETRY_MS))
-    }
-  }
-}
+/**
+ * 🔴 **2026-10-19（P2）`runAccountLoop` 已迁出本文件** —— 逐字搬到
+ * `im/weixin-account.ts`，成为 `ImAccountImpl` 的一个实现（微信）。
+ *
+ * 为什么搬：装配处原先把渠道写死在这里（`channel !== 'weixin'` ⇒ 跳过）。
+ * owner 定向「飞书和微信一样，只不过是 account 方实现不同」⇒ 起循环这个动作
+ * 归**账号自己的实现**，装配处只按 `channel` 查派发表。
+ * ⚠️ 依赖（`getUpdates` / `handleIncoming` / `handleMachineIncoming`）通过
+ * `installWeixinAccountImpl` **注入**，避免 `bridge ⇄ weixin-account` 互相 import 成环。
+ */
 
 /**
  * 手动输出模式的**机制标记**（v1.30.10 引入；v1.30.16 按 S142 用户"这个词不能让 ACC 定义，
@@ -672,10 +645,23 @@ export function syncCccBridge(ctx: Context, root: string): void {
   // 组装请求（只含 enabled ＋ 已绑定凭据的账号）——凭据随请求带上，避免后面二次读取
   const requests: PollerRequest[] = []
   const creds = new Map<string, WeixinAccountCredential>()
+  /** 账号 id → 它的实现（P2：按 `channel` 查派发表） */
+  const implByAccount = new Map<string, ImAccountImpl>()
   for (const account of settings.accounts ?? []) {
     if (account.enabled === false) continue
+    const channel = normalizeAccountChannel((account as { channel?: string }).channel)
+    const impl = getImAccountImpl(channel)
+    if (!impl) {
+      if (!warnedChannels.has(`${account.accountId}:${channel}`)) {
+        warnedChannels.add(`${account.accountId}:${channel}`)
+        console.warn(`[serenity-hooks] ⚠ weixin-bridge: 账号 ${account.accountId}（ccc=${root}）的渠道 "${channel}" **本机未实现** ⇒ 不起循环（已实现：${imAccountChannels().join(', ') || '(无)'}）`)
+      }
+      continue
+    }
     const cred = readWeixinCredential(root, account.accountId)
     if (!cred) continue // 无凭据（未扫码绑定）→ 跳过
+    if (!impl.isReady(cred)) continue
+    implByAccount.set(account.accountId, impl)
     creds.set(account.accountId, cred)
     requests.push({ root, accountId: account.accountId, identity: accountIdentity(root, account.accountId, cred.token) })
   }
@@ -692,10 +678,11 @@ export function syncCccBridge(ctx: Context, root: string): void {
   const bridge: CccBridge = { root, loops: new Map() }
   for (const claim of plan.claims) {
     const cred = creds.get(claim.accountId)
-    if (!cred) continue
-    const loop: AccountLoop = { stopped: false, lastPollAt: 0 }
+    const impl = implByAccount.get(claim.accountId)
+    if (!cred || !impl) continue
+    // 🔴 P2：起循环交给账号自己的实现（不认具体渠道）
+    const loop = impl.startLoop({ ctx, root, accountId: claim.accountId, cred, machine: false })
     bridge.loops.set(claim.accountId, loop)
-    void runAccountLoop(ctx, root, claim.accountId, cred, loop)
   }
   commitPollerClaims(plan)
   if (bridge.loops.size > 0) {
@@ -755,6 +742,8 @@ function syncMachinePollers(ctx: Context, hc: HumanChannelSettings): void {
 
   const requests: PollerRequest[] = []
   const creds = new Map<string, WeixinAccountCredential>()
+  /** 账号 id → 它的实现（P2：**按 `channel` 查派发表**，不再写死 weixin） */
+  const implByAccount = new Map<string, ImAccountImpl>()
   for (const account of hc.accounts) {
     const id = account.id
     if (account.enabled === false) continue
@@ -762,21 +751,29 @@ function syncMachinePollers(ctx: Context, hc: HumanChannelSettings): void {
       console.warn('[serenity-hooks] ⚠ human-channel: 机器级账号表有一行**缺 `id`** ⇒ 跳过（该行无法被订阅表引用）')
       continue
     }
-    // 只有已实现的渠道能起 poller（P2 才加第二个实现）⇒ 未实现的**出声但不静默跳过**
-    if (account.channel !== 'weixin') {
-      if (!warnedChannels.has(`${id}:${account.channel ?? ''}`)) {
-        warnedChannels.add(`${id}:${account.channel ?? ''}`)
-        console.warn(`[serenity-hooks] ⚠ human-channel: 账号 ${id} 的渠道 "${account.channel ?? '(未填)'}" **本机未实现** ⇒ 不起 poller（当前只有 weixin）`)
+    // 🔴 P2：**按 channel 取实现**（原先是写死 `!== 'weixin'` 就跳过）。
+    //    未注册的实现 ⇒ **出声但不静默跳过** —— 静默会表现成"某账号莫名不工作"。
+    const channel = normalizeAccountChannel(account.channel)
+    const impl = getImAccountImpl(channel)
+    if (!impl) {
+      // 🔴 未注册的实现 ⇒ **出声但不静默跳过**（静默会表现成"某账号莫名不工作"）。
+      //    变异探针已验：把这里改成裸 continue ⇒ `human-channel-machine-poller.test.ts`
+      //    的「渠道未实现 ⇒ 出声」当场变红 ⇒ 这条判据承重。
+      if (!warnedChannels.has(`${id}:${channel}`)) {
+        warnedChannels.add(`${id}:${channel}`)
+        console.warn(`[serenity-hooks] ⚠ human-channel: 账号 ${id} 的渠道 "${account.channel ?? '(未填)'}" **本机未实现** ⇒ 不起 poller（已实现：${imAccountChannels().join(', ') || '(无)'}）`)
       }
       continue
     }
     const token = (account.token ?? '').trim()
-    if (token === '') {
-      console.warn(`[serenity-hooks] ⚠ human-channel: 账号 ${id} **无 token**（未绑定）⇒ 不起 poller`)
+    const cred: WeixinAccountCredential = { token, baseUrl: '', userId: account.userId }
+    if (!impl.isReady(cred)) {
+      console.warn(`[serenity-hooks] ⚠ human-channel: 账号 ${id} ${impl.notReadyReason?.(cred) ?? '**凭据不全**'} ⇒ 不起 poller`)
       continue
     }
+    implByAccount.set(id, impl)
     // baseUrl 留空 = 走官方默认（机器级 schema 里刻意没有它；§2.2 拟稿同）
-    creds.set(id, { token, baseUrl: '', userId: account.userId })
+    creds.set(id, cred)
     requests.push({ root: MACHINE_SCOPE, accountId: id, identity: accountIdentity(MACHINE_SCOPE, id, token) })
   }
 
@@ -793,10 +790,11 @@ function syncMachinePollers(ctx: Context, hc: HumanChannelSettings): void {
   stopMachineLoops()
   for (const claim of plan.claims) {
     const cred = creds.get(claim.accountId)
-    if (!cred) continue
-    const loop: AccountLoop = { stopped: false, lastPollAt: 0 }
+    const impl = implByAccount.get(claim.accountId)
+    if (!cred || !impl) continue
+    // 🔴 P2：起循环的动作交给**账号自己的实现**（微信与飞书并列，装配处不认具体渠道）
+    const loop = impl.startLoop({ ctx, root: MACHINE_SCOPE, accountId: claim.accountId, cred, machine: true })
     machineLoops.set(claim.accountId, loop)
-    void runAccountLoop(ctx, MACHINE_SCOPE, claim.accountId, cred, loop, true)
   }
   commitPollerClaims(plan)
   if (machineLoops.size > 0) {
@@ -985,6 +983,8 @@ export function weixinBridgeStatus(): Array<{
  * 事件驱动（对齐 autotrajectory v1.26.15）。
  */
 export function registerWeixinBridge(ctx: Context): void {
+  // 🟢 P2：微信实现**已在模块求值时**登记进派发表（见文件末尾）——
+  //    不能等这里，因为测试与面板会**直接**调 `syncCccBridge`（那时本函数还没跑过）。
   syncHumanChannel(ctx)
 
   // 会话创建/关闭 → 重扫（配置变化经此路径热重建 ⇒ 方案 Q8 的"热生效"）
@@ -994,3 +994,24 @@ export function registerWeixinBridge(ctx: Context): void {
     /* 事件监听失败不阻断（桥仍可按需启动） */
   }
 }
+
+/**
+ * 🔴 **P2 装配：微信实现登记进"账号实现派发表"**（模块求值时执行，不是等 `apply`）。
+ *
+ * ## 为什么必须在模块求值时做（本轮实测教训）
+ *
+ * 首版把这句放在 `registerWeixinBridge` 里 ⇒ 全量测试 **12 例红**，报的全是
+ * 「`weixinBridgeStatus()` 空数组」。根因：测试与设置面板会**直接**调 `syncCccBridge` /
+ * `syncHumanChannel`，那时装配入口还没跑过 ⇒ 派发表是空的 ⇒ 每条账号都走进
+ * 「渠道未实现」分支（那分支是给**真正**未实现的渠道用的）。
+ *
+ * ⇒ 判据：**"谁能被调"决定"注册要在哪儿发生"**，不能按"装配流程"想当然。
+ *
+ * 注入的是本模块自己的函数（`getUpdates` / `handleIncoming` / `handleMachineIncoming`）——
+ * 不需要 `weixin-account.ts import 回 bridge.ts`，避免两个文件互相 import 成环。
+ */
+installWeixinAccountImpl({
+  getUpdates: getUpdates as never,
+  handleIncoming: handleIncoming as never,
+  handleMachineIncoming: handleMachineIncoming as never,
+})
