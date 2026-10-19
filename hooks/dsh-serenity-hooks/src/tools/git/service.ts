@@ -22,8 +22,8 @@
  */
 
 import { execFileSync } from 'node:child_process'
-import { checkLocalstoreGitCompliance } from './kernel/localstore.js'
-import type { JsonValue } from './kernel/json.js'
+import { checkLocalstoreGitCompliance } from '../localstore/service.js'
+import type { JsonValue } from '../../kernel/json.js'
 
 type GitAction = 'status' | 'commit' | 'push' | 'log' | 'pull' | 'diff'
 

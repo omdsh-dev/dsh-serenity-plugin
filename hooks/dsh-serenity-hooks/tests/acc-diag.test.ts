@@ -22,8 +22,8 @@ import { tmpdir } from 'node:os'
 vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (o: unknown) => o }))
 
 import { readExclusiveTools } from '../src/kernel/ccc.js'
-import { runAccDiag, renderAccDiag } from '../src/diag-ops.js'
-import { createAccDiagTool } from '../src/tools/acc-diag.js'
+import { runAccDiag, renderAccDiag } from '../src/tools/diag/service.js'
+import { createAccDiagTool } from '../src/tools/diag/index.js'
 
 let dir: string
 

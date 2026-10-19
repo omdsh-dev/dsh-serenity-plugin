@@ -29,7 +29,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, chmodSync, 
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runMsm, runMsmAsync, checkRegistryQuality } from '../src/msm-ops.js'
+import { runMsm, runMsmAsync, checkRegistryQuality } from '../src/tools/msm/service.js'
 
 const SCRIPTS_REL = '.opencode/skills/t/scripts'
 const REGISTRY_REL = '.opencode/skills/t/references/mech-registry.json'

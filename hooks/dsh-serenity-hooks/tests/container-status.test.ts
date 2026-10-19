@@ -26,7 +26,7 @@ import {
   containerWakes,
 } from '../src/surface/observation.js'
 import { hostContractReport } from '../src/host/contract.js'
-import { runKit } from '../src/kit-ops.js'
+import { runKit } from '../src/tools/kit/service.js'
 import { ACC_VERSION } from '../src/kernel/constants.js'
 import { registerWakeScheduler, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'

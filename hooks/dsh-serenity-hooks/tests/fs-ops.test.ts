@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:
 import { execFileSync, spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { tmpdir, platform } from 'node:os'
-import { runCcFs, type CcFsArgs, CC_FS_ACTIONS } from '../src/fs-ops.js'
+import { runCcFs, type CcFsArgs, CC_FS_ACTIONS } from '../src/tools/fs/service.js'
 
 // reveal 打开 OS 文件管理器（有 GUI 副作用）——模块级 mock child_process + os.platform，
 // 使测试断言调用参数而不真实弹出窗口（node: 内置模块命名空间不可 spyOn）。

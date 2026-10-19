@@ -28,21 +28,18 @@ const SKIP_CLIENT_SUFFIX = ['.tsx', '.css']
  * 显式间接覆盖白名单（模块无测试直接 import，但经宿主模块被测试执行——覆盖率实证见 coverage 报告）：
  *  - auth / proxy（`gateway/auth.ts` / `gateway/proxy.ts`）：`gateway/server.ts` import 它们
  *    → gateway.test.ts 执行（auth 94.7% / proxy 100%）；2026-10-19 目录域化后按**新基名**登记
- *  - tools/* 薄壳（cc-fs/git/kit/msm/cheap-worker/localstore/cognitive-trajectory/cce/eap/neat）：
- *    纯 defineTool 注册壳或知识内容源（cce/eap/neat 供 praxis import），逻辑在 ops 层
- *    （fs-ops/git-ops/... 已被各自测试覆盖）；存在性/注册契约由 register.test.ts
- *    （apply 注册 11 工具断言，import index.ts 全链）保障；praxis 有独立镜像测试
+ *  - tools/* 薄壳（cheap-worker/cognitive-trajectory/cce/eap/neat）：
+ *    纯 defineTool 注册壳或知识内容源（cce/eap/neat 供 praxis import），逻辑在同域 service 层；
+ *    存在性/注册契约由 register.test.ts 保障；praxis 有独立镜像测试。
+ *    🔵 2026-10-19（S8 目录域化）：`cc-fs`/`git`/`kit`/`msm`/`localstore` 五条已**删除** ——
+ *    那五个薄壳搬成了 `tools/<能力>/index.ts`，而 `index.ts` 在 {@link SKIP_BASENAMES} 里（聚合壳免测）
+ *    ⇒ 白名单行不再有用。**留死行比删更坏**：它会在下次出现同名模块时静默豁免。
  * 新增 src 模块一律走镜像或直接 import；需间接豁免须在此显式登记 + 注明宿主与实证
  */
 const INDIRECT_COVERED = new Set([
   'auth.ts',
   'proxy.ts',
-  'cc-fs.ts',
-  'git.ts',
-  'kit.ts',
-  'msm.ts',
   'cheap-worker.ts',
-  'localstore.ts',
   'cognitive-trajectory.ts',
   'cce.ts',
   'eap.ts',
@@ -104,10 +101,12 @@ describe('src↔tests 镜像一致性门禁（P2-2，防 src 模块无测试裸�
     const mirrorRel = rel.replace(/\.ts$/, '.test.ts')
     const mirror = testFiles.some((f) => f === mirrorRel || f === `${base}.test.ts`)
     if (mirror) return false
-    // 间接：模块 basename 出现在任一测试 import（匹配 src 路径引用各形态：
-    // `../src/x.js`（跨目录）/ `./x.js`（同目录兄弟）/ `src/tools/x.js` 等）
-    const modName = rel.replace(/\.ts$/, '').split('/').pop()!
-    const importRef = new RegExp(`['"][^'"]*\\/${modName}\\.js['"]`).test(testsContent)
+    // 间接：模块的**路径尾**出现在任一测试 import 里。
+    // 🔴 用路径尾、不用 basename：`tools/<能力>/service.ts` 这种**同名分居**的模块
+    // （2026-10-19 S8 有 6 个）若按 basename 判，一个测试覆盖了其中一个就把其余 5 个一起"算过"
+    // ⇒ 门禁粒度塌掉。路径尾（`tools/fs/service.js`）逐域唯一，判据不塌。
+    const relTail = rel.replace(/\.ts$/, '.js').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const importRef = new RegExp(`['"][^'"]*${relTail}['"]`).test(testsContent)
     return !importRef
   })
 

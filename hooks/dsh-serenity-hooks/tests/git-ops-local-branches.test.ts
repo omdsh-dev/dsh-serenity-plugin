@@ -38,7 +38,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runGit } from '../src/git-ops.js'
+import { runGit } from '../src/tools/git/service.js'
 
 /** 在 `cwd` 跑一条真 git 命令（本文件一律不 mock） */
 function g(cwd: string, ...args: string[]): string {

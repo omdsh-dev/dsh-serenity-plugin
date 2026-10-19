@@ -21,7 +21,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { checkRegistryQuality } from '../src/msm-ops.js'
+import { checkRegistryQuality } from '../src/tools/msm/service.js'
 
 let root: string
 

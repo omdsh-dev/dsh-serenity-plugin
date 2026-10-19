@@ -18,9 +18,9 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
-import { runMsmAsync, loadMsmEntries, findEntry } from '../msm-ops.js'
-import { skiffMsmGate } from '../role/skiff/core.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../../kernel/ccc-roots.js'
+import { runMsmAsync, loadMsmEntries, findEntry } from './service.js'
+import { skiffMsmGate } from '../../role/skiff/core.js'
 
 function agentSessionId(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? ''

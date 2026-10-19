@@ -8,8 +8,8 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
-import { runLocalStore, LOCALSTORE_SCOPES } from '../kernel/localstore.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../../kernel/ccc-roots.js'
+import { runLocalStore, LOCALSTORE_SCOPES } from './service.js'
 
 const ACTIONS = ['list', 'get', 'set', 'unset', 'show', 'doc'] as const
 

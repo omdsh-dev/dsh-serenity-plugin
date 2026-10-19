@@ -33,12 +33,12 @@
  * （诊断段不含 `message`，面板含；这是渲染差异，不是取数差异）。
  */
 
-import { WAKE_CATCH_UP_MS } from './wake/registry.js'
-import { diagLive, type DiagLiveReport } from './trajectory/live.js'
-import { containerClocks, containerWakes, type ClockSnapshot } from './surface/observation.js'
+import { WAKE_CATCH_UP_MS } from '../../wake/registry.js'
+import { diagLive, type DiagLiveReport } from '../../trajectory/live.js'
+import { containerClocks, containerWakes, type ClockSnapshot } from '../../surface/observation.js'
 import type { Context } from 'cordis'
-import { isoLocal } from './kernel/time.js'
-import { readSimpleSettings } from './surface/settings.js'
+import { isoLocal } from '../../kernel/time.js'
+import { readSimpleSettings } from '../../surface/settings.js'
 
 /** 进程内时钟状态（唤醒调度器；判据单一真相源 = `wake-scheduler.ts`） */
 type ClockState = ClockSnapshot

@@ -19,8 +19,8 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from './ccc.js'
-import type { JsonValue } from './json.js'
+import { loadSerenityConfig, DEFAULT_SERENITY_CONFIG_PATHS } from '../../kernel/ccc.js'
+import type { JsonValue } from '../../kernel/json.js'
 
 /** 命名空间：credential（凭据）| config（配置） */
 type LocalStoreScope = 'credential' | 'config'

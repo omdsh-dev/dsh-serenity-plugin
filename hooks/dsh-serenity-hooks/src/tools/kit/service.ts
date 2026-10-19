@@ -20,8 +20,8 @@
  * ⚠️ wire 形状**逐字不变**（字段名/取值/出现条件都不许动）——C5 是取数归一，不是文案改版。
  */
 
-import type { JsonValue } from './kernel/json.js'
-import { isoLocal } from './kernel/time.js'
+import type { JsonValue } from '../../kernel/json.js'
+import { isoLocal } from '../../kernel/time.js'
 
 type KitAction = 'health' | 'time' | 'wait'
 
@@ -36,7 +36,7 @@ export async function runKit(root: string | null, args: KitArgs, hostCtx?: unkno
   switch (args.action) {
     case 'health': {
       // 取数唯一出口（动态 import：见文件头「依赖分层」）
-      const { containerStatus } = await import('./surface/observation.js')
+      const { containerStatus } = await import('../../surface/observation.js')
       const s = containerStatus({ root, hostCtx })
       // osp 的 P1/P2/P3 在 DSH 上的判据由 container-status 给出；**人读 detail 文案归本渲染点**
       // （模型只给事实：rooted / gitManaged / configPath）——原文案逐字保留。

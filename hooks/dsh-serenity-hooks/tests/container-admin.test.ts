@@ -18,8 +18,8 @@ import { tmpdir } from 'node:os'
 vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (o: unknown) => o }))
 vi.mock('@deepseek-ai/dsh-llm', () => ({ createUserMessage: (o: unknown) => o }))
 
-vi.mock('../src/msm-ops.js', () => {
-  const actual = vi.importActual<typeof import('../src/msm-ops.js')>('../src/msm-ops.js')
+vi.mock('../src/tools/msm/service.js', () => {
+  const actual = vi.importActual<typeof import('../src/tools/msm/service.js')>('../src/tools/msm/service.js')
   return {
     ...actual,
     runMsm: vi.fn((root: string, args: { action: string }) => ({ action: args.action, root })),
@@ -27,7 +27,7 @@ vi.mock('../src/msm-ops.js', () => {
 })
 
 import { createContainerAdminTool } from '../src/tools/container-admin.js'
-import { runMsm } from '../src/msm-ops.js'
+import { runMsm } from '../src/tools/msm/service.js'
 
 const mockRunMsm = vi.mocked(runMsm)
 

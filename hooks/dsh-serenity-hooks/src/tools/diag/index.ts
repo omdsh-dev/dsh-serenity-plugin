@@ -18,8 +18,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from 'cordis'
-import { cccRootForExec } from '../kernel/ccc-roots.js'
-import { runAccDiag, renderAccDiag } from '../diag-ops.js'
+import { cccRootForExec } from '../../kernel/ccc-roots.js'
+import { runAccDiag, renderAccDiag } from './service.js'
 
 /**
  * 运行态诊断工具（`acc-diag`）。**无动作参数**：一次调用即全报告

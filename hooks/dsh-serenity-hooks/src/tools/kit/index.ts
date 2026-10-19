@@ -5,8 +5,8 @@
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { Context } from 'cordis'
-import { cccRootForExec } from '../kernel/ccc-roots.js'
-import { runKit, KIT_ACTIONS } from '../kit-ops.js'
+import { cccRootForExec } from '../../kernel/ccc-roots.js'
+import { runKit, KIT_ACTIONS } from './service.js'
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)

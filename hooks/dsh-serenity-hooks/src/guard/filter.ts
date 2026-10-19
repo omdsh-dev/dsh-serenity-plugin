@@ -19,7 +19,7 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { loadMsmEntries } from '../msm-ops.js'
+import { loadMsmEntries } from '../tools/msm/service.js'
 import { MECHANISM_PORTS } from '../kernel/ports.js'
 import { eventToken } from '../trajectory/assistant.js'
 

@@ -38,14 +38,14 @@
 import { describe, it, expect } from 'vitest'
 
 import { praxisTool } from '../src/tools/praxis.js'
-import { ccFsTool } from '../src/tools/cc-fs.js'
-import { gitTool } from '../src/tools/git.js'
-import { localstoreTool } from '../src/tools/localstore.js'
-import { createKitTool } from '../src/tools/kit.js'
+import { ccFsTool } from '../src/tools/fs/index.js'
+import { gitTool } from '../src/tools/git/index.js'
+import { localstoreTool } from '../src/tools/localstore/index.js'
+import { createKitTool } from '../src/tools/kit/index.js'
 import { createContainerAdminTool } from '../src/tools/container-admin.js'
 import { createImBridgeTool } from '../src/tools/im-bridge.js'
 import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
-import { createAccDiagTool } from '../src/tools/acc-diag.js'
+import { createAccDiagTool } from '../src/tools/diag/index.js'
 import { createOntologyTool } from '../src/tools/ontology-eng.js'
 
 /** 单个内容块的**结构性**视图（本件只关心 `type` 与 `text`，不引宿主类型） */

@@ -11,7 +11,7 @@
 import type { JsonValue } from '../kernel/json.js'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
 import { readSkiffRoles, resolveRoleSystemPrompt, systemPromptSource } from '../role/skiff/config.js'
-import { loadMsmEntries } from '../msm-ops.js'
+import { loadMsmEntries } from './msm/service.js'
 
 /** Skiff 定义教程（核心）：概念 / schema / 认知 MSM 写法 / 双白名单 / 轨迹纪律 / 示例角色 */
 export const SKIFF_GUIDE = `═══ Skiff Definition Guide (F4, experimental) ═══

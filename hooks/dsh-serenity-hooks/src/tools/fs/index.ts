@@ -7,8 +7,8 @@
 
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
-import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
-import { runCcFs, CC_FS_ACTIONS } from '../fs-ops.js'
+import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../../kernel/ccc-roots.js'
+import { runCcFs, CC_FS_ACTIONS } from './service.js'
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)

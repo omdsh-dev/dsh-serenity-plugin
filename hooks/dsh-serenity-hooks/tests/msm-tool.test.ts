@@ -28,16 +28,16 @@ vi.mock('@deepseek-ai/dsh-tools', () => ({ defineTool: (o: unknown) => o }))
 vi.mock('@deepseek-ai/dsh-llm', () => ({ createUserMessage: (o: unknown) => o }))
 
 // 只桩「跑子进程」这一步；注册表读取（loadMsmEntries/findEntry）走**真实现**（真夹具文件）。
-vi.mock('../src/msm-ops.js', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../src/msm-ops.js')>()
+vi.mock('../src/tools/msm/service.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/tools/msm/service.js')>()
   return {
     ...actual,
     runMsmAsync: vi.fn(async (root: string, args: Record<string, unknown>) => ({ stub: 'runMsmAsync', root, args })),
   }
 })
 
-import { msmTool } from '../src/tools/msm.js'
-import { runMsmAsync } from '../src/msm-ops.js'
+import { msmTool } from '../src/tools/msm/index.js'
+import { runMsmAsync } from '../src/tools/msm/service.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
 import { registerSkiffSession, unregisterSkiffSession } from '../src/role/skiff/core.js'
 import { SKIFF_SESSION_PREFIX } from '../src/role/skiff/config.js'

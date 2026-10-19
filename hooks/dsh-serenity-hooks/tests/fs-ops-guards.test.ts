@@ -18,7 +18,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, symlinkSync,
 import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runCcFs, type CcFsArgs } from '../src/fs-ops.js'
+import { runCcFs, type CcFsArgs } from '../src/tools/fs/service.js'
 
 let dir: string
 let outside: string | null

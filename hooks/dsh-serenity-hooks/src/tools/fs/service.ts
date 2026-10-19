@@ -30,9 +30,9 @@ import {
 import { spawn, execFileSync } from 'node:child_process'
 import { join, relative, dirname, resolve } from 'node:path'
 import { platform } from 'node:os'
-import { resolveInside, pathInside, readCccName } from './kernel/ccc.js'
-import type { JsonValue } from './kernel/json.js'
-import { isoLocal } from './kernel/time.js'
+import { resolveInside, pathInside, readCccName } from '../../kernel/ccc.js'
+import type { JsonValue } from '../../kernel/json.js'
+import { isoLocal } from '../../kernel/time.js'
 
 type CcFsAction =
   | 'root'

@@ -43,7 +43,7 @@ import {
   COGNITIVE_TRAJECTORY_SKILLS_MAX_CHARS,
 } from '../trajectory/skills.js'
 import { recordSkillInjections } from '../surface/usage.js'
-import { localstorePath, readGitTrack } from '../kernel/localstore.js'
+import { localstorePath, readGitTrack } from '../tools/localstore/service.js'
 import { readAdvancedSettings } from '../kernel/config.js'
 import { isSkiffSessionId } from '../role/skiff/config.js'
 

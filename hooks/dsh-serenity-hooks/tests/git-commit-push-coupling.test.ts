@@ -34,7 +34,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:f
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runGit } from '../src/git-ops.js'
+import { runGit } from '../src/tools/git/service.js'
 
 function g(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf8' })

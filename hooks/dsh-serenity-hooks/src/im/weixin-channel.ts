@@ -11,7 +11,7 @@
  * - `sendFile` 走 iLink 上传（`weixin-api.sendFileMessage`）+ 同一 outgoing hook（带 `file` 元数据）
  */
 
-import { readStore } from '../kernel/localstore.js'
+import { readStore } from '../tools/localstore/service.js'
 import { readWeixinSettings, weixinSessionIdFor, matchWeixinRoute } from './route.js'
 import { sendProactiveText, weixinBridgeStatus, resolveWeixinAccount } from './bridge.js'
 import { sendFileMessage, sendTextMessage } from './ilink.js'

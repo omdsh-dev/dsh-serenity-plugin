@@ -41,7 +41,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runMsm } from '../src/msm-ops.js'
+import { runMsm } from '../src/tools/msm/service.js'
 
 const SCRIPTS_REL = '.opencode/skills/t/scripts'
 const REGISTRY_REL = '.opencode/skills/t/references/mech-registry.json'
