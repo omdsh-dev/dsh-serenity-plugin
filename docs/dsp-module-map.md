@@ -29,45 +29,72 @@
 > 🔴 **§2 分域明细的"文件"列仍是 2026-09-25 的旧布局** —— 那一栏的**路径**已过期，但它的
 > "职责 / 依赖 / 被测"三栏内容仍然有效。**落位以 §1b 的目录树为准**；§2 逐域改路径单列一件（见 §6.2）。
 
-| 项 | 读数（2026-10-19） |
+| 项 | 读数（2026-10-19 S10~S14 轨迹中心重构后） |
 |---|---|
 | `src/` 顶层 | **`index.ts`（唯一入口/装配点）＋ 16 个目录** —— 平铺的 73 条目已全部归域 |
-| 目录 = ？ | **能力域**（12 个：`kernel` `trajectory` `wake` `im` `gateway` `guard` `patch` `role` `surface` `tools` `skills` ＋ 四层既有域 `host` `seams` `client`） |
+| 目录 = ？ | **能力域**；分两类：**容器宪法 14**（`kernel` `host` `seams` `wake` `gateway` `guard` `patches` `skills` `surface` `tools` `im` `client` `diagram` `ontology`）＋ **轨迹层 2**（`trajectory`〔含 `policy/` `delegate/` 两个子域〕· `cro`） |
+| 🔴 已消失 | **`role/`** —— 框架判死的「平行于轨迹的组织单位」；它的 8 个文件按**实测归属**拆到了 4 个位置 |
 | 文件名 = ？ | **能力名**；域内不重复域前缀；禁用 `-ops` / `-runtime` / `-helpers` / `-utils` / `-misc` 后缀 |
-| 域内 ≤ | 8 个文件；超过就该问"这是两个域吗" |
+| 域内 ≤ | 8 个文件；超过就该问"这是两个域吗"（`trajectory/` 现 10，靠 `policy/` `delegate/` 两个子域保持每层 ≤8） |
 | 工具后端 | `tools/<能力>/{index,service}.ts`：`index` = 注册壳，`service` = 后端实现 |
 
-### 1b. 目录树（落位真相源 · 2026-10-19）
+### 1b. 目录树（落位真相源 · 2026-10-19 S10~S14 轨迹中心重构后）
+
+> 🔴 **本节的判据是「轨迹中心架构」**（`docs/trajectory-centric-architecture.md`，`158be9a`）：
+> 容器层 = 换一条轨迹**逐字不变**的规则；轨迹层 = 挂在轨迹上、**跟着变**的能力。
+> **`role/` 已不存在** —— 它是框架判死的那个「平行于轨迹的组织单位」。
+> 判读表（16 目录逐个过 Q1/Q2/Q3）= S142 会话目录 `2026-10-19T1835-a3f1-trajectory-centric-readjudication.md`。
 
 ```
 src/index.ts                 装配点（apply：注册工具/缝/面）
+
+── 容器宪法（换一条轨迹，逐字不变）──────────────────────────────────
 src/kernel/                  L0/L1 容器内核：ccc · ccc-roots · config · ports · constants
                              · invariant · message-source · json · time
-src/trajectory/              L1 认知轨迹：core（读写）· bound（绑定）· assistant · skills
-                             · rebuild · live · cleanup
-src/wake/                    L1 唤醒与自主轮：scheduler · registry · cro · cro-turns
-                             · cro-log · cro-guide · clock
-src/im/                      L2 对外通信：ilink · bridge · hook · route · send · endpoint
-                             · guard · channels · weixin-channel · inbound
+src/host/                    L0 宿主缝（5）：access · contract · type-contract · effect · storage-domain
+src/seams/                   L2 拦截缝（9）：bootstrap · compact · context · env · guards · keeper
+                             · lifecycle · opencode-skills · system-prompt
+src/wake/                    L1 容器时钟：scheduler（5min tick）· registry（唤醒表）· clock（引擎工厂）
 src/gateway/                 L2 反代与登录：server · auth · dsh-auth · proxy · totp
 src/guard/                   L1/L2 输出守卫：filter（检测）· seam（缝接线）
 src/patches/                 L2 宿主/上游补丁：deepseek-vision · opencode-provider · web-fetch
-src/role/skiff/              L2 认知子集（skiff 一类角色）：core · debug · registry · config
-src/role/worker/             L2 工作委派子 agent：core · preset · idle
-src/surface/                 L2/L3 面与呈现：http · faces · observation（容器状态取数）
-                             · status（停靠栏/safe-mode）· settings · usage · voyage/{page,vocab}
+src/skills/                  L2 CCC 技能发现与供给：opencode-scan · resource-index · discovery
+                             · skill-layering · skill-ontology
+src/surface/                 L2/L3 面与呈现：http · faces · observation（状态取数）· status
+                             · settings · usage · debug（面 D）· text（文本清洗原语）
+                             · voyage/{page,vocab}
 src/tools/                   L3 工具：<能力>/{index,service} 6 对（fs/git/kit/msm/diag/localstore）
                              ＋ 单文件壳：cheap-worker · cognitive-trajectory · container-admin
                              · diagram · im-bridge · skiff-admin · skill-creator · ontology-eng
                              · praxis · eap · cce · neat · ontology
-src/skills/                  L2 CCC 技能发现与供给：opencode-scan · resource-index · discovery
-                             · skill-layering · skill-ontology
-src/host/        L0 宿主缝（5）     src/seams/   L2 拦截缝（10）
-src/client/      L4 浏览器半（18）   src/diagram/ L3 出图    src/ontology/ L3 本体引擎
+src/im/                      L2 对外通信：ilink · bridge · hook · route · send · endpoint
+                             · guard · channels · accounts · weixin-account · weixin-channel · inbound
+src/client/                  L4 浏览器半    src/diagram/ L3 出图    src/ontology/ L3 本体引擎
+
+── 轨迹层（换一条轨迹，跟着变）──────────────────────────────────────
+src/trajectory/              L1 轨迹本体：core（读写）· bound（绑定）· assistant（ack）
+                             · prompt（章程 PROMPT.md）· skills（方法论供给）· rebuild（换船板）
+                             · live（活载体）· cleanup（清理）
+                             · session（载体管理：resume-or-create / 提问 / 守门）
+                             · carrier（载体原语：这一轮跑完没有）
+  ├── policy/                L1 约束面：profile（判据：目录里有 skiff.json）· rules（约束派生）
+                             · window（会话→轨迹 的内存窗口，绑定落盘前）
+  └── delegate/              L1 轨迹 × 轨迹：core（模型/白名单/可用性）· preset（继承 + 递归防护）
+src/cro/                     L1 轨迹自己的程序：core（机制）· turns（在跑吗）· log（投递流水）
+                             · guide（编写指南）
 ```
 
 🔴 **两条命名裁定的落点**（理由见 S142 §决策 D163/D164）：`surface/observation.ts` = 容器状态**取数**
 唯一出口（重链）；`surface/status.ts` = 停靠栏数据源 ＋ safe-mode 读写（轻链）。二者**不合并**。
+
+🔴 **S10~S14 的五条改名判据**（每条都记了"名字描述的是过去，不是现在"）：
+`wake/cro*` → `cro/*`（容器时钟 vs 轨迹自己的程序）｜`skiff/config` → `policy/rules`（零配置读取，
+派生的是**约束规则**）｜`skiff/registry` → `policy/window`（**不是权威名单**，权威是 `bound.ts`）｜
+`skiff/core` → `session`（说的是**载体**，且域内已有 `core.ts`）｜`worker/idle` → `carrier`
+（三个结算条件里**只有一条**与 idle 有关 —— 名字取窄会误导调用方以为只需等空闲）。
+
+🔴 **符号名一律未动**（`SkiffProfile` / `readSkiffProfileAt` / `SKIFF_PROFILE_FILENAME` / `createSkiffAgent` …）：
+它们是**有具体指称**的东西（一个固定文件名 ＋ 它的解析结果），不是组织单位。
 
 ---
 
