@@ -67,6 +67,14 @@ export const DEFAULT_ANCHOR_MESSAGES: string[] = [
 ]
 
 /**
+ * 锚定交换里「模型那半」的回复文本。
+ *
+ * 只写一个词：锚定话语明确要求 `reply "acknowledge" — no action needed`，
+ * 伪造一条更长的回复反而与提示词不符（模型会据历史学样）。
+ */
+export const ANCHOR_ACK_TEXT = 'acknowledge'
+
+/**
  * 根会话锚定重入判定（v1.28.1 提取导出以便单测）：会话是否已有真实用户消息。
  * resume/续跑的会话已有对话历史 → **不重锚**（first-anchor 只注入一次）。
  *
@@ -107,14 +115,24 @@ export function hasAssistantHistory(session: unknown): boolean {
  *
  * ## 🔴 两条硬约束（宿主 v4 格式校验器，实测逐条踩过）
  *
- * **约束 A — 只能写 `user/message`**：`system/message` 与 `assistant/message` 都在
- *   `STEP_EVENT_TYPES` 里 ⇒ 必须过 `requireStep()`（`data.turn`/`data.step` 精确匹配
- *   **当前打开的** turn 与 step，且为 null 时同样拒绝）。而本函数在 `agent/pre-step`
- *   前后被调用时 **turn/step 都还没打开**（`turn/start` 在 preStep 之前，`step/start`
- *   在 preStep 之后）⇒ 代写它们**结构性非法**。
- *   ⚠️ 症状：写通道不校验 ⇒ **首轮正常**；**重新进入**时重放才抛
- *   `system/message does not match an open turn and step` ⇒ 会话 corrupt、界面空白。
- *   ⇒ **v1.60 那版「先写占位 system 等宿主 replace」的整套方案因此作废**。
+ * **约束 A — `system/message` 绝不能代写；`assistant/message` 可以，但必须落在已打开的 turn/step 内**。
+ *
+ *   🔴 **D140 的理由已由本文件 `tests/anchor-history-shape.test.ts` 当场更正**（探针直调宿主
+ *   `assertReleasedV4Relationships()`，不靠读源码推断）：
+ *   原记「`system/message` 与 `assistant/message` 都在 `STEP_EVENT_TYPES` 里」—— **只对前半**。
+ *   实测 `STEP_EVENT_TYPES` = `{ system/message, developer/message, assistant/attempt }`，
+ *   **`assistant/message` 不在其中**。它仍要过 `requireStep`，但走的是另一条路
+ *   （`Relationships.accept()` → `case "assistant/message"` → `tool()` → `requireStep`）。
+ *
+ *   ⇒ **结论保留、理由作废**：`assistant/message` 在**该 system/message 之前**写是非法的
+ *   （那时 turn/step 尚未打开）；而在**之后**写是**合法的**（那时两者都已打开）。
+ *   探针三态实测：A（仅 user）✅ ／ **B（user ＋ assistant 交替，turn/step 匹配）✅** ／
+ *   C（assistant 落在未打开的 turn/step）❌ `does not match an open turn and step`。
+ *
+ *   ⚠️ 症状（不许省这条）：写通道不校验 ⇒ **首轮看着正常**；**重新进入**时重放才抛
+ *   `does not match an open turn and step` ⇒ 会话 corrupt、界面空白。
+ *   ⇒ **v1.60 那版「先写占位 system 等宿主 replace」的整套方案仍然作废**
+ *     （它写的是 `system/message`，那**确实**在 `STEP_EVENT_TYPES` 里）。
  *
  * **约束 B — 必须写在宿主提交 `system/message` 之后**：格式层有 `protectedHead`
  *   机制 —— `foldSurface()` 里 `system/message` 若在 **surface 非空且尚无 protectedHead**
@@ -127,26 +145,39 @@ export function hasAssistantHistory(session: unknown): boolean {
  * ⇒ 因此调用时机 = **`session/event` 里看到该会话第一条 `system/message` 之后**（见下方注册处），
  *   而不是 `agent/inbox/inserted`（那太早）。
  *
- * ## 为什么去掉 assistant 那半不损失什么
+ * ## 为什么必须成对（user ＋ assistant ack）—— v1.69.4 修正
  *
- * 锚定话语的**唯一目的**是让模型认为自己已经同意过协作协议。
- * 保留 **2 条 `user/message`** 即可达成；丢掉的只是"模型自己的 ack 回复"——
- * 而那原本也是**我们伪造的**，不是模型真说过的。
+ * 只造 user 的那一版在**界面上读不成对话**：两条"用户"消息连排在模型回复之前，
+ * 看起来像用户自己连说了两句协议、而模型没理。owner 2026-10-19 报的两点
+ * （「助手的回应也需要造出来」＋「用户的怎么跑到第一个了」）其实是**同一个缺陷的两面**。
+ * ⇒ 造**成对交换**：每条锚定话语后面跟一条 `acknowledge` 回复。
+ *
+ * 🔴 **前提条件**：`assistant/message` 必须落在**已打开**的 turn/step 内
+ *   （探针 S3/S4 实测：未打开/已关闭都抛 `does not match an open turn and step`）。
+ *   本函数由 `session/event` 的 `system/message` 分支触发，而**那条事件自己就带着
+ *   `data.turn` / `data.step`** —— 且实测此刻 turn/step 确实处于打开态
+ *   （真机日志：`step/start` → `system/message` → 锚定写入 → `step/end`）。
+ *   ⇒ turn/step **从触发事件透传进来**，不自己猜。
+ *
+ * ⚠️ **拿不到 turn/step 时退回只造 user**（不抛、不阻断）：宁可少伪造一条 ack，
+ *   也绝不在非法坐标上写 `assistant/message` —— 那会让会话在重放时 corrupt。
  *
  * ## 判据（改这个函数前后都必须跑）
  *
- * ① 单测钉形状（只许 user/message）；
- * ② **容器内真跑一轮 → 重启宿主 → 重新进入该会话** —— 只有这条路能证明日志合法
+ * ① 形状判据 = `tests/anchor-history-shape.test.ts`（直调宿主校验器，正控 ＋ 两种负控）；
+ * ② 单测钉事件序列（user/assistant 交替、turn/step 逐条匹配）；
+ * ③ **容器内真跑一轮 → 重启宿主 → 重新进入该会话** —— 只有这条路能证明日志合法
  *   （前两次修复都是"单测全绿 + 首轮正常"却仍然 corrupt）。
- * ③ 直接调宿主自己的 `assertReleasedV4Relationships()` 判形状，**不要自写复刻**。
  *
  * @param session 会话（需有 append）
  * @param anchorMessages 锚定话语序列（缺省协议固有两条）
+ * @param slot 触发本轮 `system/message` 所在的 turn/step（缺省或非法 ⇒ 只造 user）
  * @returns 是否成功写入
  */
 export function appendAnchorHistory(
   session: unknown,
   anchorMessages: string[] = DEFAULT_ANCHOR_MESSAGES,
+  slot?: { turn?: unknown; step?: unknown },
 ): boolean {
   const target = session as {
     append?: (type: string, data: unknown, opts?: unknown) => { seq?: number }
@@ -154,6 +185,10 @@ export function appendAnchorHistory(
   if (typeof target?.append !== 'function') return false
   const append = target.append.bind(target)
   const rid = (prefix: string): string => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  // 坐标必须**成对且为正整数**：宿主 `sessionFormatCount` 对 0/null 一律拒
+  const turn = typeof slot?.turn === 'number' ? slot.turn : 0
+  const step = typeof slot?.step === 'number' ? slot.step : 0
+  const canPlaceAck = turn > 0 && step > 0
   try {
     for (let i = 0; i < anchorMessages.length; i++) {
       append(
@@ -163,6 +198,21 @@ export function appendAnchorHistory(
           role: 'user',
           content: [{ type: 'text', text: anchorMessages[i] }],
           source: { kind: 'user' },
+        },
+        { surfaceOp: 'append' },
+      )
+      if (!canPlaceAck) continue
+      append(
+        'assistant/message',
+        {
+          turn,
+          step,
+          message: {
+            id: rid(`anchor-ack-${i + 1}`),
+            role: 'assistant',
+            content: [{ type: 'text', text: ANCHOR_ACK_TEXT }],
+            source: { kind: 'model' },
+          },
         },
         { surfaceOp: 'append' },
       )
@@ -386,9 +436,15 @@ export function registerBootstrap(ctx: Context): void {
         //    而该异常会被本回调的 `try/catch` 与宿主的 per-listener containment **双重吞掉**
         //    ⇒ 症状是"首轮完全正常，但锚定就是没发生"，**没有任何报错**。
         //    ⇒ 用 setTimeout(0) 把写入推到**发布完成之后**的下一拍（同一个 Node 事件循环）
+        //
+        // 🔴 **turn/step 从这条事件自己透传**（v1.69.4）：`system/message` 的 data 里就带着
+        //    `{turn, step}`，且宿主的发布顺序使此刻两者**处于打开态**（真机日志实测：
+        //    `step/start` → `system/message` → 锚定写入 → `step/end`）。
+        //    ⛔ 不要自己从别处猜：`assistant/message` 要求坐标**精确等于当前打开的**。
+        const slot = (event as { data?: { turn?: unknown; step?: unknown } }).data
         setTimeout(() => {
           try {
-            maybeAnchor(session, root)
+            maybeAnchor(session, root, slot)
           } catch {
             /* 锚定失败不阻断会话 */
           }
@@ -400,7 +456,7 @@ export function registerBootstrap(ctx: Context): void {
   })
 
   /** 造锚定历史（幂等；防重靠 `anchoredSessions`）。 */
-  const maybeAnchor = (session: unknown, _root: string): void => {
+  const maybeAnchor = (session: unknown, _root: string, slot?: { turn?: unknown; step?: unknown }): void => {
     const s = session as { header?: { delegationDepth?: number }; id?: string } | undefined
     const depth = s?.header?.delegationDepth ?? 0
     const sid = typeof s?.id === 'string' ? s.id : undefined
@@ -416,9 +472,16 @@ export function registerBootstrap(ctx: Context): void {
     //    形状判据：只有**首轮**才锚 —— 即该会话还没有任何 `assistant/message`。
     if (hasAssistantHistory(session)) return
     void depth
-    const wrote = appendAnchorHistory(session, SETTINGS.anchorMessages)
+    const wrote = appendAnchorHistory(session, SETTINGS.anchorMessages, slot)
     if (wrote && sid !== undefined) anchoredSessions.add(sid)
-    if (wrote) warnOnce(`anchor history fabricated: ${SETTINGS.anchorMessages.length} 条 user 消息（不再真跑）`)
+    if (wrote) {
+      const paired = typeof slot?.turn === 'number' && typeof slot?.step === 'number' && slot.turn > 0 && slot.step > 0
+      warnOnce(
+        `anchor history fabricated: ${SETTINGS.anchorMessages.length} 条 user 消息`
+        + (paired ? ` ＋ ${SETTINGS.anchorMessages.length} 条 ack（turn ${String(slot.turn)} / step ${String(slot.step)}）` : '（无打开坐标 ⇒ 未造 ack）')
+        + '（不再真跑）',
+      )
+    }
   }
 
   // 首轮锚定（v1.62 起**不再**在这里写历史 —— 见上面 `session/event` 的 `system/message` 分支）。

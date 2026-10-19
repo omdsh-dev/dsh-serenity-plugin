@@ -218,12 +218,13 @@ describe('bootstrap: resolveBootstrapSettings 协议固有默认值（零配置�
     expect(s.zeroTools).toBe(false) // v1.62 / D140：锚定历史只造 user 消息 ⇒ 首请求须给完整目录
   })
 
-  it('协议固有设置（v1.62 / D140）：zeroTools=false 是**结构性要求**，不是调参', () => {
+  it('协议固有设置：zeroTools=false 是**结构性要求**，不是调参', () => {
     const s = resolveBootstrapSettings()
-    // 🔴 为什么必须是 false：v1.62 起锚定历史**只造 `user/message`**（不再伪造 assistant）。
-    //    ⇒ 首请求时晋升信号**尚未满足** ⇒ 若 zeroTools=true，首请求会真的退化成「0 工具」，
-    //    模型看不到任何 ACC 工具。而伪造 assistant 是**结构性非法**的（宿主 v4 `requireStep`）。
-    //    详见 appendAnchorHistory 头注释与 D140。
+    // 🔴 为什么必须是 false：锚定历史在**首请求时**（`boundary < 0`）还没把模型拉进"已同意"
+    //    状态 ⇒ 若 zeroTools=true，首请求会真的退化成「0 工具」，模型看不到任何 ACC 工具。
+    //    v1.69.4 起锚定交换含 `assistant/message` ack（合法前提 = turn/step 已打开），
+    //    但**首请求发生在此之前**（promotion 信号要等事件落盘后计数）
+    //    ⇒ 这条 `zeroTools=false` 的结论**不因补 ack 而改变**。
     expect(s.zeroTools).toBe(false)
   })
 

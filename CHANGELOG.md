@@ -1,3 +1,56 @@
+## v1.69.4 — 2026-10-19（🔴🔴 **first-anchor 造出的是「两句用户独白」，不是一次交换** —— owner 报的两个缺陷其实是同一个）
+
+**性质**：**缺陷修复**。**来源**：owner 看界面截图后逐字指出两点——
+「中间 acknowledged 的回应缺了 / 助手的回应也需要造出来」＋「顺序上也不对，用户的怎么跑到第一个了，应该在后面」。
+
+### 一、先纠正 v1.62（D140）记错的那条**理由**
+
+D140 当时把「不能代写 `assistant/message`」的理由记成「它在 `STEP_EVENT_TYPES` 里」。
+**实测（直调宿主 `assertReleasedV4Relationships()`，非读源码推断）**：
+
+| 事实 | 结论 |
+|---|---|
+| `STEP_EVENT_TYPES` = `{ system/message, developer/message, assistant/attempt }` | **`assistant/message` 不在其中** |
+| 但它走 `accept()` → `case "assistant/message"` → `tool()` → `requireStep()` | 仍然要「已打开的 turn+step」 |
+| 锚定写入点（`step/start` → `system/message` → 锚定 → `step/end`，真机日志实测） | **turn/step 此刻确实打开** |
+
+⇒ **D140 的结论对、理由错**。真正约束不是「不许写 assistant」，而是「**坐标必须等于当前打开的那个**」。
+🔵 为什么「理由错」必须纠正：它会让后续修复朝错方向走（以为"只要不写 assistant 就安全"）。
+
+### 二、修法（两个缺陷同一处）
+
+1. **成对造交换**：每条锚定话语后跟一条 `assistant/message`，内容 = `acknowledge`
+   （与提示词 `Please simply reply "acknowledge"` 一致；写长了模型会据历史学样）。
+2. **坐标从触发事件透传**：`system/message` 的 `data` 自带 `{turn, step}`
+   ⇒ 直接传给 `appendAnchorHistory`，**不从别处猜**。
+3. 🔴 **拿不到合法坐标 ⇒ 退回只造 user**（不抛、不阻断）：宁可少一条伪造 ack，
+   也绝不在非法坐标上写 `assistant/message` —— 那会让会话在重放时 corrupt。
+
+### 三、判据
+
+新文件 `tests/anchor-history-shape.test.ts`（8 例）。**判词由宿主给，探针只负责喂形状**（D141）：
+
+| # | 判据 | 结果 |
+|---|---|---|
+| ① | 读数器自证（宿主校验器可解析） | ✅ 解析不到即红，不伪装成"形状合法" |
+| ② | S1 现状 A 形（只 user×2） | ✅ 宿主接受 |
+| ③ | **S2 B 形（user ＋ ack 交替，坐标匹配）** | ✅ **宿主接受 ⇒ 补 ack 可行** |
+| ④ | S3 负控（assistant 落在未打开的 turn/step） | ❌ 拒绝 `does not match an open turn and step` |
+| ⑤ | S4 负控（step 已关后写 assistant） | ❌ 拒绝 |
+| ⑥ | 事件序列：user → ack → user → ack | ✅ |
+| ⑦ | 🔴 无合法坐标 ⇒ **只造 user** | ✅ 四种退化输入逐一钉 |
+| ⑧ | **整段写入过宿主校验器**（正控） | ✅ 与真机同序 |
+
+🔴 **负控已做**：S3/S4 两条是**真故障形态**（不是自造假想），报错原文逐字断言。
+⚠️ **判据边界**：`tests/` 里解析宿主模块靠 `createRequire(homedir()/... )` 推导
+（去掉路径化，D145）；**宿主不在场的环境会红在 ①**，那是**读数器**失败，不是形状失败。
+
+### 验证
+
+- 门禁：`test` **173 文件 / 2831 测试**全绿；`typecheck` 通过。
+- ⏭️ **仍缺的验收格**（D141 固定含）：**重启宿主 → 重新进入该会话**。
+  写通道不校验 ⇒ 单测与首轮运行都证明不了日志合法。
+
 ## v1.69.3 — 2026-10-19（🔴🔴 **skiff 的「工具清单」从来没同步过** —— 角色白名单只拦调用、不摘 schema）
 
 **性质**：**缺陷修复**。**来源**：v1.69.2 修完提示词后，owner 复测仍报同一现象，并指出
