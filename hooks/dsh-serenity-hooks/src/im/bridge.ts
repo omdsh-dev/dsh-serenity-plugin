@@ -25,7 +25,6 @@
  */
 
 import type { Context } from 'cordis'
-import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
@@ -33,20 +32,25 @@ import { readCheapWorkerConfig } from '../kernel/ccc.js'
 // P0-3（方案 §11.4）：订阅表 ＋ 路由 ＋ 机器级留痕 —— 同上，机制在 im/inbound.ts
 import {
   accountIdentity, planPollerClaims, commitPollerClaims, releasePollersOf, releaseAllPollers, pollerOwners, type PollerRequest,
-  planInboundRoute, appendHumanChannelAudit, type InboundRoutePlan,
+  appendHumanChannelAudit,
 } from './inbound.js'
 // 机器级配置的**唯一读取入口**（P0-1 起 `humanChannel` 随它一起出）⇒ 天然热生效（方案 Q8）
 import { readSimpleSettings, type HumanChannelSettings } from '../surface/settings.js'
-import { readWeixinSettings, readWeixinCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
+import { readWeixinSettings, readWeixinCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
-import { readSkiffProfileByCode, type SkiffProfile } from '../trajectory/policy/profile.js'
-import { stripThink } from '../surface/text.js'
-import { createSkiffAgent, getSkiffAgent, askSkiff, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../trajectory/session.js'
+import { getSkiffAgent, askSkiff, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../trajectory/session.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
-import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'
+import { invokeWeixinHook, buildOutgoingHookEvent } from './hook.js'
 import { getImAccountImpl, imAccountChannels, normalizeAccountChannel, type ImAccountImpl } from './accounts.js'
 import { installWeixinAccountImpl } from './weixin-account.js'
+import {
+  handleInboundEvent, resolveInboundTarget, manualOutputMarker, manualOutputFallbackNeeded,
+  type ImInboundEvent, type ImAccountIo, type ResolvedInboundTarget,
+} from './inbound-event.js'
+
+export { manualOutputFallbackNeeded, resolveInboundTarget }
+export type { ResolvedInboundTarget }
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */
 interface AccountLoop {
@@ -143,186 +147,25 @@ export function resetWeixinTypingCache(): void {
  */
 
 /**
- * 手动输出模式的**机制标记**（v1.30.10 引入；v1.30.16 按 S142 用户"这个词不能让 ACC 定义，
- * 要让 CCC 定义"重构）。
+ * 处理单条**微信**消息：把 iLink 形状的 `msg` 归一成**中立入站事件**，
+ * 再交给通道中立的 `handleInboundEvent`（`im/inbound-event.ts`）走主流程。
  *
- * 边界（R↓）：ACC 只提供**机制与数据**——"桥不转发最终文本"这个事实 + 三个已填好的参数值
- * （CCC 根 / 账号 / 用户 id）。**纪律措辞归 CCC**：怎么写、必须怎么做、后果是什么，全部写在
- * CCC 的角色提示词文件里（如 `.opencode/skiff/<role>.md` 的「输出通道」节），CCC 可随时改，
- * 且 v1.30.15 起角色提示词热重载——改完立即生效，无需 ACC 发版。
+ * ## 🔴 2026-10-19（B1）：本函数已退化为**薄适配器**，主流程不在本文件
  *
- * 为什么不用 ACC 写措辞（历史教训）：v1.30.10~v1.30.15 由 ACC 内嵌一段纪律文案，用户实测
- * "约束不够，LLM 不听"——且措辞迭代要动插件代码 + 发版 + 重启；把措辞放 CCC 才能快速迭代，
- * 也符合"ACC 管机制、CCC 管内容"的归属二分。
+ * 原因：`handleIncoming` 原先同时承担两件不同的事 —— ① "iLink 消息长什么样"
+ * ② "一条已到达的消息该投到哪、怎么答、怎么记账"。接第二家 IM 时只有 ① 需要新写，
+ * 而 ② 应该**被两家共用**。两者混在一个函数里 ⇒ 飞书接进来只能复制一整份主流程。
  *
- * 标记格式（稳定，供 CCC 提示词引用；v1.31.0 起为 ACC 工具形态）：
- * ```
- * [serenity:weixin-manual-output]
- * im-bridge({channel:"weixin", action:"send", account:"<account>", user:"<user>", text:"<回复>"})
- * ```
- */
-function weixinManualOutputMarker(root: string, accountId: string, userId: string): string {
-  return [
-    '[serenity:weixin-manual-output]',
-    `im-bridge({channel:"weixin", action:"send", account:"${accountId}", user:"${userId}", text:"<回复>"})`,
-  ].join('\n')
-}
-
-/**
- * 手动输出模式的**兜底判定**（纯函数，v1.30.17——把决策矩阵从装配里抽出来，可独立测试）。
+ * ⇒ 主流程搬到 `im/inbound-event.ts`，本函数只做**形状翻译**：
+ *   `msg`（iLink）＋ `cred`（iLink 凭据）→ `ImInboundEvent` ＋ `ImAccountIo`。
  *
- * 四个条件同时成立才兜底：
- * ① CCC 显式开启 `fallbackOnNoSend`（缺省 false = 严格静默，向后兼容）
- * ② 机械闸门**已装配**（未装配时无法判定"是否发送过" → 宁可静默也不冒重复发送风险）
- * ③ 本轮**没有**成功发送（agent 自己发过 → 输出权归 agent，桥不插话）
- * ④ 有最终文本可转发（空文本无意义）
- */
-export function manualOutputFallbackNeeded(input: {
-  fallbackOnNoSend?: boolean
-  guardActive: boolean
-  sentThisTurn: boolean
-  answer: string
-}): boolean {
-  return input.fallbackOnNoSend === true && input.guardActive && !input.sentThisTurn && input.answer !== ''
-}
-
-/**
- * 订阅表里的 `ccc` **别名 → CCC 根**（P0-3）。
+ * ## 为什么保留这个签名（而不是让调用方直接调新的主流程）
  *
- * 别名取值与面板下拉**同源**（方案 §2.3：`listCccs({withRoles:true})` 的下拉）⇒
- * 先按 **`CccEntry.name`**（= CCC 根目录名，`basename(root)`）匹配；再退一步接受**绝对路径**
- * （手写配置时人会直接粘路径）。两条都试 ⇒ 两种写法都可用，且**不引入第二张名字表**。
- * @returns 命中的 CCC 根；枚举里没有 ⇒ `null`（调用方**响亮报错**，不静默丢弃）
- */
-async function resolveCccRootByAlias(ctx: Context, alias: string): Promise<string | null> {
-  try {
-    const { listCccs } = await import('../kernel/ccc-roots.js')
-    const entries = await listCccs(ctx)
-    const byName = entries.find((e) => e.name === alias)
-    if (byName) return byName.root
-    const byRoot = entries.find((e) => e.root === alias)
-    return byRoot ? byRoot.root : null
-  } catch {
-    // 枚举失败（服务不可用等）⇒ 与"没找到"同处理（响亮报错 + 留痕，由调用方做）
-    return null
-  }
-}
-
-/**
- * 路由解析结果：目标根 ＋ **轨迹编码** ＋ **该轨迹的 skiff 约束面**。
- * `null` 从本函数出去 ⇒ **不投递**（未命中已留痕 ／ 目标不存在已响亮出声）。
- */
-interface ResolvedInboundTarget {
-  root: string
-  /** 目标认知轨迹编码（= 新模型里的"身份"；旧模型的角色名已退役） */
-  trajectory: string
-  /**
-   * 该轨迹的 skiff 约束面。
-   * ⚠️ **可能为 `null`**：轨迹存在但没有 `skiff.json` ⇒ 它是一条**普通轨迹**，
-   * 微信桥照样可以往里投（投进一条普通认知轨迹是合法的），只是不施加 skiff 约束。
-   * ⇒ 这与旧模型的关键差别：旧模型里"角色不存在"是硬错，新模型里"没有 skiff.json"不是错。
-   */
-  profile: SkiffProfile | null
-}
-
-/**
- * **入站路由的单一解析处**（P0-3）：机器级订阅表优先 → CCC 级回退；三档语义都在这里落地。
+ * 全仓约 50 处测试按 iLink 形状驱动本函数，而 B1 的验收判据是「**微信行为逐字不变**」
+ * （用例数守恒 ＋ 真机一条微信）。保留签名 ⇒ 那 50 处**逐字不动**，判据可复算。
  *
- * 🔴 为什么抽成一个函数而不是写两遍：**两种模式（CCC 起桥 ／ 机器级起 poller）走的是同一套
- * 判据**，差别只有一格 —— **有没有 CCC 级回退**（`cccFallback`）。写两遍必然分叉。
- *
- * 三档（方案 §3.1，**刻意分档**）：
- *  - **未命中** ⇒ 不投递 ＋ **留痕**（`console.warn`，静默档：这是"表里没有你"，不是错误）
- *  - **表残缺** ⇒ **响亮出声**（`console.error`；且**独立于是否命中**）
- *  - **目标不存在**（CCC ／ **轨迹**）⇒ **响亮报错**（`console.error`；不静默丢弃）
- *
- * @param input.cccFallback 过渡期回退（方案 Q5）；**机器级模式传 `null`** ⇒ 未命中即不投递
- */
-async function resolveInboundTarget(ctx: Context, input: {
-  account: string
-  user: string
-  cccFallback: { root: string; trajectory: string } | null
-}): Promise<ResolvedInboundTarget | null> {
-  const route: InboundRoutePlan = planInboundRoute({
-    subscriptions: readSimpleSettings().humanChannel.subscriptions,
-    account: input.account,
-    user: input.user,
-    // 🔴 回退目标的 `ccc` 装的是**本 CCC 的绝对路径**（不是别名）—— 计划层两种写法都收
-    //    （先按别名匹配、再按根匹配），故此处无需解析；`source === 'ccc-fallback'` 时
-    //    下面**跳过**枚举查找，直接把 `target.ccc` 当根用。
-    fallback: input.cccFallback ? { ccc: input.cccFallback.root, role: input.cccFallback.trajectory } : null,
-  })
-
-  // 表残缺 ⇒ **响亮出声**（与"未命中"分档：笔误必须有人去改）
-  // ⚠️ 它**独立于是否命中** —— 命中一条完好的行不掩盖另一行的笔误。
-  for (const defect of route.defects) {
-    console.error(
-      `[serenity-hooks] ✗ human-channel: 订阅表第 ${defect.index + 1} 行**残缺**（缺 ${defect.missing.join(' / ')}）`
-      + `｜已有字段 ${JSON.stringify(defect.present)}｜该行**不生效** —— 请补全或删掉（机器级 humanChannel.subscriptions）`,
-    )
-    appendHumanChannelAudit({ kind: 'subscription-defect', account: input.account, index: defect.index, missing: defect.missing, present: defect.present })
-  }
-
-  const target = route.target
-  // ① 未命中 ⇒ **不投递 ＋ 留痕**（**静默档**：这不是错误，是"表里没有你"）
-  if (!target) {
-    const detail = route.skipReason === 'no-subscription'
-      ? '机器级订阅表为空（且无 CCC 级回退）'
-      : '订阅表里没有匹配 (账号, 用户) 的行'
-    console.warn(`[serenity-hooks] ⚠ human-channel: 入站未命中订阅 ⇒ **不投递**（account=${input.account} user=${input.user}）：${detail}`)
-    appendHumanChannelAudit({ kind: 'inbound-unrouted', account: input.account, user: input.user, reason: route.skipReason ?? 'no-match', detail })
-    return null
-  }
-
-  // ② 目标**不存在** ⇒ **响亮报错**（方案 §3.1 / W5'：**不静默丢弃**）
-  // 🔴 回退来源的 `ccc` **就是已知的本 CCC 根** ⇒ 不做枚举查找（省一次 IO，也不依赖它出现在枚举里）
-  const root = route.source === 'ccc-fallback' ? target.ccc : await resolveCccRootByAlias(ctx, target.ccc)
-  if (root === null) {
-    const detail = `订阅表指向的 CCC "${target.ccc}" 在本机 CCC 枚举里不存在`
-    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${input.account} user=${input.user}）—— 该消息**未投递**，请改订阅表`)
-    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: input.account, user: input.user, ccc: target.ccc, role: target.role, detail })
-    return null
-  }
-  // ③ 目标**轨迹**不存在 ⇒ 响亮报错。
-  // 🔴 2026-10-19：目标从「skiff 角色名」改为「**认知轨迹编码**」。
-  //    ⇒ 判据也换了：不是"这个 CCC 有没有配这个角色"，而是"**这个 CCC 里有没有这条轨迹**"。
-  //    ⚠️ **与旧模型的关键差别**：轨迹存在但没有 `skiff.json` **不是错** ——
-  //       那只是一条普通轨迹，微信桥照样可以往里投（只是不施加 skiff 约束）。
-  //       "没有这条轨迹"才是硬错（否则会静默投到一个不存在的地方）。
-  const { findDirNameByCode } = await import('../trajectory/policy/profile.js')
-  const dirName = findDirNameByCode(root, target.role)
-  if (dirName === null) {
-    const detail = `目标 CCC "${target.ccc}" 内没有编码为 "${target.role}" 的认知轨迹`
-    console.error(`[serenity-hooks] ✗ human-channel: ${detail}（account=${input.account} user=${input.user}）—— 该消息**未投递**，请改订阅表里的目标编码`)
-    appendHumanChannelAudit({ kind: 'inbound-target-missing', account: input.account, user: input.user, ccc: target.ccc, role: target.role, detail })
-    return null
-  }
-  const profile = readSkiffProfileByCode(root, target.role)
-  return { root, trajectory: target.role, profile }
-}
-
-/**
- * 处理单条微信消息：路由 → skiff 会话（固定 id 创建/延续）→ 提问 → 回复回写。
- *
- * 会话语义：`weixinSessionIdFor(fromUserId)` 固定可重建——同用户长期同一会话；
- * 进程内已有（getSkiffAgent 命中）→ 延续；无（首次/进程重启）→ createSkiffAgent
- * 固定 id resume-or-create（v1.27.2）：磁盘已有持久化 log → resume（历史延续，
- * 重启后记忆保留——真正的"同用户长期延续"）；无 log（首次）→ create。
- * "新的对话已开始"通知仅真正首次（create）时发送；resume/进程内延续不发。
- *
- * 完善（v1.27.3）：
- * - **语音支持**：`voice_item.text` = 微信服务端自带语音转写 → 与文本同路径进对话
- *   （无需下载/ASR）；语音无转写 → 降级提示"暂时无法解析"
- * - **正在输入**：处理前 sendtyping 1（微信显示"正在输入..."），处理后（含异常）0
- * - **媒体接收（图片/文件）**：桥侧 CDN 下载 + AES 解密 → 落盘 CCC 根
- *   `_tmp/weixin-inbound/<userhash>/` → question 注入「存在性 + 路径」（ACC 层只保证
- *   可达性——"让会话知道文件的存在并可以拿到"；识别/解析归角色 LLM 决策，不编排）。
- *   降级不静默：下载失败 / 超 20MB → 注入说明进对话；typing 窗口覆盖下载（M7）。
- *
- * 🔴 **P0-3（2026-09-27）：路由改由机器级订阅表决定**（本函数的 `root` 入参退为
- * **回退目标**）。两档语义刻意分开（方案 §3.1）：**未命中 ⇒ 不投递 ＋ 留痕**（静默档）；
- * **目标不存在（CCC ／ 角色）⇒ 响亮报错**（`console.error` ＋ 机器级留痕）。两者都
- * **不是**"投给默认角色"。
+ * 会话语义（不变）：会话 id 由**轨迹编码**派生 ⇒ 同一条轨迹恒同一条 dsh 会话；
+ * 进程内已有 → 延续；无 → 固定 id resume-or-create。
  */
 export async function handleIncoming(
   ctx: Context,
@@ -331,267 +174,47 @@ export async function handleIncoming(
   cred: WeixinAccountCredential,
   msg: Pick<WeixinMessage, 'from_user_id' | 'context_token' | 'item_list'>,
   /**
-   * **机器级模式**（P0-3 A）：目标已由 `handleMachineIncoming` 解析好（`root` 入参即该目标根）。
-   * 给了它 ⇒ 本函数**不再自行路由**，且**不看本 CCC 的 `weixin.enabled`** ——
-   * 起 poller 与路由都已上移机器级（目标 CCC 没配 weixin 段也照样收得到）。
-   * ⚠️ **行为开关仍归目标 CCC**（`hook` ／ `autoReplyWithLastMessage` ／ `fallbackOnNoSend`）
-   * —— 机器级只管"**谁收**"与"**投到哪**"，不管"**怎么答**"。
+   * **机器级模式**（P0-3 A）：目标已解析好（`root` 入参即该目标根）⇒ 不再自行路由，
+   * 且**不看本 CCC 的 `weixin.enabled`**。⚠️ 行为开关仍归目标 CCC。
    */
   preset?: { target: ResolvedInboundTarget },
 ): Promise<void> {
   const fromUserId = msg.from_user_id
   if (!fromUserId) return
-  const text = extractWeixinText(msg)
-  const mediaRefs = extractWeixinMedia(msg)
 
-  const settings = readWeixinSettings(root)
-
-  // ── P0-3 路由：**机器级订阅表优先** → CCC 级 `routes` 回退 ─────────────────────────
-  // 🔴 回退是**过渡期**语义（方案 §11.3 **Q5**："不打断在用的微信"）：机器级账号表为空时，
-  //    桥仍按 CCC 起、路由也仍认 CCC 级 routes。机器级一旦配起来 ⇒ 回退传 null ⇒
-  //    **未命中 = 不投递**（**不是**"投给默认角色" —— 方案 §3.1 明令禁止）。
-  // 🔴 三档语义（未命中 ／ 表残缺 ／ 目标不存在）的落地**只有一处** = `resolveInboundTarget`。
-  let resolved: ResolvedInboundTarget | null
-  if (preset) {
-    resolved = preset.target // 机器级模式：目标已解析（且**不看本 CCC 的 enabled**）
-  } else {
-    if (!settings.enabled) return
-    const cccTarget = matchWeixinRoute(settings.routes ?? [], fromUserId)
-    resolved = await resolveInboundTarget(ctx, {
-      account: accountId,
-      user: fromUserId,
-      cccFallback: cccTarget ? { root, trajectory: cccTarget } : null,
-    })
-  }
-  if (!resolved) return // 未命中／目标不存在 ⇒ 已留痕／已出声，两者都**不投递**
-  const { trajectory, profile } = resolved
-  // 🔴 此后本函数的 `root` 语义 = **投递目标根**：回退模式下恒 === 入参 root；
-  //    机器级模式下由订阅表指定（`handleMachineIncoming` 已把入参传成该根）。
-  root = resolved.root
-
-  // 纯语音无转写（无文本无媒体）→ 降级提示（不静默；不创建会话）
-  if (!text && mediaRefs.length === 0) {
-    if (hasVoiceItem(msg)) {
-      await sendTextMessage({
-        baseUrl: cred.baseUrl,
-        token: cred.token,
-        toUserId: fromUserId,
-        text: '（抱歉，暂时无法解析这条语音消息，请尝试发送文字）',
-        contextToken: msg.context_token,
-      }).catch(() => { /* 提示失败不影响 */ })
-    }
-    return
+  // ── 形状翻译：iLink → 中立事件 ────────────────────────────────────────────
+  const event: ImInboundEvent = {
+    userId: fromUserId,
+    text: extractWeixinText(msg),
+    // 媒体项与 iLink 的差异**全部收在这一处**：中立层只拿到"取字节的动作"。
+    media: extractWeixinMedia(msg).map((ref) => ({
+      kind: ref.kind,
+      fileName: ref.fileName,
+      fetch: () => downloadMedia({
+        item: ref.item,
+        mediaType: ref.kind === 'image' ? 'image_item' : 'file_item',
+      }).then((r) => (r ? { data: r.data, fileName: r.fileName } : null)),
+    })),
+    hasVoice: hasVoiceItem(msg),
+    replyRef: msg.context_token,
   }
 
-  try {
-    // 🔴🔴 会话 id **由轨迹编码派生**（2026-10-19 重做：身份挂在轨迹上，不挂在用户上）。
-    //
-    // 旧派生 = `skiff-weixin-<sha256(用户)>` + 换代计数器（`.weixin-session-gen.json`）。
-    // 那套的语义是"用户是一等公民"：同一轨迹换个用户 = 另一条会话；
-    // 同一用户换轨迹 = 还是原来那条会话（⇒ 新轨迹的约束对不上旧会话的历史工具清单）。
-    //
-    // 新语义：**同一条轨迹 ⇒ 恒同一条 dsh 会话**；换轨迹 ⇒ 新会话。
-    // ⇒ 换代计数器**整件删除**：轨迹没了就该在路由层报"目标不存在"（响亮），
-    //    而不是静默换一个 id 续命（那正是旧的 `-g<n>` 干的事）。
-    const sessionId = weixinSessionIdForTrajectory(trajectory)
-    const existing = getSkiffAgent(sessionId)
-    const hc = readCheapWorkerConfig(root)
-    // 无 `skiff.json` 的普通轨迹：用缺省级约束面（空白名单 ⇒ 工具面收窄到 0？
-    // ⛔ 不：`profile` 为 null 时**不施加任何 skiff 约束**，它就是一条普通认知轨迹。
-    //    但 `createSkiffAgent` 需要一个 profile 来立提示词段 —— 用编码造一个最小面。
-    const effective: SkiffProfile = profile ?? {
-      dirName: trajectory,
-      code: trajectory,
-      path: '',
-      tools: [],
-      msms: [],
-      cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
-    }
-    const ref = existing
-      ? { agent: existing, sessionId, resumed: true }
-      : await createSkiffAgent(ctx, root, effective, hc?.defaultModel, sessionId)
-
-    if (!ref.resumed) {
-      // 真正首次（无持久化历史）→ 通知用户"新对话开始"（对齐 3100 问答页行为）；
-      // resume（历史延续）不发——用户记得之前的对话
+  // ── 动作面：中立 io → iLink 发送/打字 ─────────────────────────────────────
+  const io: ImAccountIo = {
+    sendText: async ({ toUserId, text, replyRef }) => {
       await sendTextMessage({
         baseUrl: cred.baseUrl,
         token: cred.token,
-        toUserId: fromUserId,
-        text: '（新的对话已开始）',
-        contextToken: msg.context_token,
-      }).catch(() => { /* 通知失败不影响主流程 */ })
-    }
-
-    // 正在输入：处理前开始（**含媒体下载**——M7 用户等待时显示状态），处理完（含异常路径）结束
-    await sendTypingStart(cred, accountId, fromUserId, msg.context_token)
-    try {
-      // 媒体：下载 → 落盘 → 存在性+路径注入（ACC 层最小闭环；M1/M2/M3/M4/M6）
-      const mediaNotes: string[] = []
-      const degradedNotes: string[] = []
-      // hook 事件媒体列表（v1.27.13：成功带 relPath，失败 null——CCC 记录侧可完整审计）
-      const hookMedia: WeixinHookMediaRef[] = []
-      for (const mediaRef of mediaRefs) {
-        const mediaType = mediaRef.kind === 'image' ? 'image_item' : 'file_item'
-        const label = mediaRef.kind === 'image' ? '一张图片' : `文件 ${mediaRef.fileName ?? '(未命名)'}`
-        const result = await downloadMedia({ item: mediaRef.item, mediaType })
-        if (!result) {
-          hookMedia.push({ kind: mediaRef.kind, relPath: null })
-          degradedNotes.push(`（用户发送了${label}，但下载失败——可请用户重发）`)
-          continue
-        }
-        if (result.data.length > MEDIA_MAX_BYTES) {
-          hookMedia.push({ kind: mediaRef.kind, relPath: null })
-          degradedNotes.push(`（用户发送了${label}，但超过 20MB 大小限制）`)
-          continue
-        }
-        try {
-          const inboundDir = weixinInboundDir(root, fromUserId)
-          mkdirSync(inboundDir, { recursive: true })
-          const fname = mediaRef.kind === 'image'
-            ? `img_${Date.now()}_${randomBytes(4).toString('hex')}.${sniffImageExt(result.data)}`
-            : (sanitizeFileName(result.fileName ?? '') || `file_${Date.now()}_${randomBytes(4).toString('hex')}`)
-          const abs = join(inboundDir, fname)
-          writeFileSync(abs, result.data)
-          const rel = relative(root, abs)
-          hookMedia.push({ kind: mediaRef.kind, relPath: rel })
-          // 注引用**实际保存的文件名**（fname = 净化后）——agent 按 rel 路径找文件，名字须一致
-          mediaNotes.push(`（用户发送了${mediaRef.kind === 'image' ? '一张图片' : `文件 ${fname}`}，已保存到 ${rel}）`)
-        } catch {
-          hookMedia.push({ kind: mediaRef.kind, relPath: null })
-          degradedNotes.push(`（媒体保存失败，请重试）`)
-        }
-      }
-
-      // question = 原文 + 媒体存在性注入 + 降级说明（不做内容转述/工具引导——M3）
-      // v1.30.13（S142 用户："微信桥的注入机制每个用户消息都会注入，skiff 本身也会注入，
-      // 这样就重复，能否微信桥情况下注入内容直接取 skiff 的"）：工作台纪律块**单一注入点**
-      // = skiff agent 的系统提示词段（ensureWorkspacePromptSection，动态读活跃 mdPath）——
-      // 桥不再每轮把它拼进 question（省 token + 不重复配置）。仅当该 agent 挂不上
-      // 系统提示词段（返回 false）时降级为 question 前缀注入，保证约束仍在场。
-      const parts: string[] = []
-      // 工作台 = **该轨迹自己的 SESSION.md**（不再有"自动建一个"这回事）。
-      const workspaceMd = skiffWorkspaceMdPath(root, sessionId) ?? getActiveSessionInfo(sessionId)?.mdPath ?? null
-      if (workspaceMd) {
-        const sectionOk = ensureWorkspacePromptSection(ref.agent, sessionId, root)
-        if (!sectionOk) parts.push(workspaceCognitiveTrajectoryLine(workspaceMd))
-      }
-      // v1.30.10：关闭自动回发最终文本（weixin.autoReplyWithLastMessage: false）→
-      // 每轮注入**机制标记**（事实 + 已填参数，措辞归 CCC——见 weixinManualOutputMarker 头注）。
-      // v1.30.16（用户"约束不够，LLM 不听"+"这个词要让 CCC 定义"）：
-      // ① 标记移到**消息末尾**（recency——用户正文之前的位置被压过）
-      // ② ACC 不再写纪律措辞（归 CCC 角色提示词，可热改）
-      // ③ 登记手动模式会话 → 机械闸门在 turn-stopping 检查本轮是否真的发过（不可绕过）
-      const manualOutput = settings.autoReplyWithLastMessage === false
-      if (text) parts.push(text)
-      parts.push(...mediaNotes, ...degradedNotes)
-      if (manualOutput) {
-        // v1.30.17：本轮开始 → 清空"已发送"标记（闸门只置位；桥在 askSkiff 后读它决定兜底）
-        clearSentThisTurn(sessionId)
-        noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory })
-        parts.push(weixinManualOutputMarker(root, accountId, fromUserId))
-      } else {
-        forgetManualOutputSession(sessionId)
-      }
-      const question = parts.join('\n')
-
-      // hook：incoming 事件（用户 → bot）——媒体落盘后、askSkiff 前 fire。
-      // 旁路容忍（H3）：异步 fire-and-forget，失败仅日志——不阻塞对话处理。
-      const hookRel = settings.hook
-      if (hookRel) {
-        void invokeWeixinHook(root, hookRel, buildIncomingHookEvent({
-          cccRoot: root,
-          accountId,
-          userId: fromUserId,
-          sessionId,
-          role: trajectory,
-          text,
-          media: hookMedia,
-        })).catch((err) => {
-          console.log(`[serenity-hooks] weixin hook incoming error: ${err instanceof Error ? err.message : String(err)}`)
-        })
-      }
-
-      const result = await askSkiff(ctx, ref.agent, question)
-      const answer = result.answer ?? ''
-      // v1.30.10：手动输出模式——桥不转发最终文本（输出权归 agent，记录只记 agent 实际发出的
-      // 消息，source=proactive）。系统类消息（新对话通知/语音提示）不受影响。
-      //
-      // v1.30.17 兜底（S142 用户拍板"鲁棒修法"）：`weixin.fallbackOnNoSend: true` 时，若本轮
-      // agent **一次都没成功调用输出工具**（v1.31.0 起为 im-bridge；闸门打回 ≤2 次仍无效——实证某模型在寒暄类消息
-      // 上跨 3 版提示词仍不调工具），桥把该轮最终文本转发给用户（`source: "reply-fallback"`），
-      // 保证"不丢消息"。前置条件 `isWeixinOutputGuardActive()`：闸门未装配 → 无法判定 → 不兜底
-      // （宁可静默也不冒重复发送的风险）。agent 自己发过 → 不兜底，输出权仍在 agent。
-      if (manualOutput) {
-        const fallback = manualOutputFallbackNeeded({
-          fallbackOnNoSend: settings.fallbackOnNoSend,
-          guardActive: isWeixinOutputGuardActive(),
-          sentThisTurn: hasSentThisTurn(sessionId),
-          answer,
-        })
-        if (!fallback) return
-        const reply = markdownToPlainText(stripThink(answer))
-        await sendTextMessage({
-          baseUrl: cred.baseUrl,
-          token: cred.token,
-          toUserId: fromUserId,
-          text: reply,
-          contextToken: msg.context_token,
-        })
-        console.warn(
-          `[serenity-hooks] ⚠ weixin 输出兜底：agent 本轮未发送（闸门打回用尽）→ 桥转发最终文本（session=${sessionId}, trajectory=${trajectory}）`,
-        )
-        if (hookRel) {
-          void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
-            cccRoot: root,
-            accountId,
-            userId: fromUserId,
-            sessionId,
-            role: trajectory,
-            reply,
-            source: 'reply-fallback',
-          })).catch((err) => {
-            console.log(`[serenity-hooks] weixin hook outgoing(reply-fallback) error: ${err instanceof Error ? err.message : String(err)}`)
-          })
-        }
-        return
-      }
-      if (answer === '') return
-
-      // 回复文本：stripThink 剥离 <think> 块（微信桥用户反馈：用户不应看到思考过程）→
-      // md→plain 转微信可见纯文本（sendTextMessage 内置同款转换——hook 记录与用户实际收到一致）
-      const reply = markdownToPlainText(stripThink(answer))
-      await sendTextMessage({
-        baseUrl: cred.baseUrl,
-        token: cred.token,
-        toUserId: fromUserId,
-        text: reply,
-        contextToken: msg.context_token,
+        toUserId,
+        text,
+        contextToken: replyRef,
       })
-
-      // hook：outgoing 事件（bot → 用户）——发送成功后 fire（发送失败不记录——从未送达的回复无记录价值）
-      if (hookRel) {
-        void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
-          cccRoot: root,
-          accountId,
-          userId: fromUserId,
-          sessionId,
-          role: trajectory,
-          reply,
-        })).catch((err) => {
-          console.log(`[serenity-hooks] weixin hook outgoing error: ${err instanceof Error ? err.message : String(err)}`)
-        })
-      }
-    } finally {
-      await sendTypingStop(cred, accountId, fromUserId)
-    }
-  } catch (err) {
-    // 桥错误静默（日志可见；不中断轮询循环）——含堆栈（v1.27.2 诊断 resume 失败路径）
-    const msg = err instanceof Error ? err.message : String(err)
-    console.log(`[serenity-hooks] weixin-bridge error (ccc=${root}): ${msg}`)
-    const stack = err instanceof Error ? err.stack : undefined
-    if (stack) console.log(`[serenity-hooks] weixin-bridge stack:\n${stack.slice(0, 1500)}`)
+    },
+    typingStart: ({ toUserId, replyRef }) => sendTypingStart(cred, accountId, toUserId, replyRef),
+    typingStop: ({ toUserId }) => sendTypingStop(cred, accountId, toUserId),
   }
+
+  await handleInboundEvent(ctx, root, accountId, io, event, preset)
 }
 
 /**
@@ -599,11 +222,7 @@ export async function handleIncoming(
  *
  * 与 `handleIncoming` 的唯一差别：**目标由机器级订阅表逐条解析，且没有 CCC 级回退**
  * （方案 §3.1：机器级模式下**未命中 = 不投递**，不是"投给默认角色"）。
- * 解析出来后把**目标根**当 `root` 交给 `handleIncoming`（并带上 `preset` ⇒ 它不再自行路由、
- * 也不看目标 CCC 的 `weixin.enabled`）。
- *
- * 🔴 为什么"起 poller"与"路由"必须同批（本件即 P0-2 的后半）：机器级 poller 收到消息时
- * **不知道它属于哪个 CCC** —— 那个答案是订阅表给的。没有订阅表 ⇒ **能收不能投**。
+ * 解析出来后把**目标根**当 `root` 交给 `handleIncoming`（并带上 `preset`）。
  *
  * 🔵 **导出供测试直接驱动**（与 `handleIncoming` 同款：它俩都是"单条消息的入口"，
  * 生产路径 `runAccountLoop` 只是循环壳）。
