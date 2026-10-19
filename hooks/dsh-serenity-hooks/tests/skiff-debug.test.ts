@@ -12,8 +12,8 @@ import { skiffDebugPage, startSkiffDebugServer, stopSkiffDebugServer, skiffDebug
 // C2：候选 CCC 枚举的唯一真相源（原 skiff-debug.discoverCccs 已迁移至此）
 import { listCccs } from '../src/kernel/ccc-roots.js'
 // ⑤ 第 34 件：意图读取通路（面规格 `enabled` ← `faceEnabled`）
-import { faceEnabled } from '../src/face-host.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings, readSimpleSettings } from '../src/settings-section.js'
+import { faceEnabled } from '../src/surface/faces.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings, readSimpleSettings } from '../src/surface/settings.js'
 
 let dir: string
 

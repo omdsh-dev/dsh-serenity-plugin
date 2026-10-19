@@ -30,9 +30,9 @@ import { readCheapWorkerConfig } from '../../kernel/ccc.js'
 // 本模块的 `discoverCccs` 已删除（调用点改用 `listCccs`，见各 handle 分支）。
 import { listCccs, type CccEntry } from '../../kernel/ccc-roots.js'
 // C4 块 A：listener 生命周期归面宿主（本面=面 D，端口语义见 ports.ts 的 FACE_PORTS.skiffDebug）
-import { faceActive, facePort, startFace, stopFace, type FaceSpec } from '../../face-host.js'
+import { faceActive, facePort, startFace, stopFace, type FaceSpec } from '../../surface/faces.js'
 import { FACE_PORTS } from '../../kernel/ports.js'
-import { readSimpleSettings } from '../../settings-section.js'
+import { readSimpleSettings } from '../../surface/settings.js'
 
 /** 面名（C4 块 A） */
 const FACE_SKIFF_DEBUG = 'skiff-debug'

@@ -26,7 +26,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { injectVoyageVocab, scanVoyageLiveVocab } from './voyage-vocab.js'
+import { injectVoyageVocab, scanVoyageLiveVocab } from './vocab.js'
+import { findPackageRoot } from '../../kernel/constants.js'
 // 类型引用：拉入 webserver 的 cordis 声明增强（ctx.webServer）；运行时擦除
 import type {} from '@deepseek-ai/dsh-host-webserver'
 
@@ -40,9 +41,15 @@ export const VOYAGE_PATH = '/serenity/voyage'
  */
 export const VOYAGE_ASSET = 'assets/serenity-voyage.html'
 
-/** 包根 = 本模块所在目录的上一级（构建产物在 `lib/`，与 `assets/` 同级；同 constants.ts 定位法） */
+/**
+ * 包根 = 含本包 `package.json` 的目录。
+ * 🔴 **不许写死层数**：本模块自身位置随目录重构变化（曾 `src/voyage-page.ts`，现
+ * `src/surface/voyage/page.ts`），而发布态是从打包入口 `lib/index.js` 反推 ⇒ 两种布局深度不同，
+ * 写死 `'..'` 必在其中一个布局下静默指错（实测：搬进 `surface/voyage/` 后路由直接读不到资产 → 500）。
+ * ⇒ 交给 {@link findPackageRoot} 按**内容**定位。
+ */
 function packageRootPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), '..')
+  return findPackageRoot() ?? join(dirname(fileURLToPath(import.meta.url)), '..')
 }
 
 /** 资产绝对路径（导出以便测试与 pack-check 共用同一判据来源） */

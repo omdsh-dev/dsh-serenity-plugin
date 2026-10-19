@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { getStatus, setSafeMode, readDshVersion, dshVersionFromEntry } from '../src/status.js'
+import { getStatus, setSafeMode, readDshVersion, dshVersionFromEntry } from '../src/surface/status.js'
 
 /**
  * 🔴 **实测发现（本件首跑即撞到，值得记）**：**在本进程内改 `process.env.HOME` 不会改变 `os.homedir()`** ——

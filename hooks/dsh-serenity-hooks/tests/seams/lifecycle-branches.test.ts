@@ -141,8 +141,8 @@ vi.mock('../../src/seams/keeper.js', async (orig) => {
   }
 })
 
-vi.mock('../../src/face-host.js', async (orig) => {
-  const actual = await orig<typeof import('../../src/face-host.js')>()
+vi.mock('../../src/surface/faces.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/surface/faces.js')>()
   return {
     ...actual,
     stopAllFaces: () => {

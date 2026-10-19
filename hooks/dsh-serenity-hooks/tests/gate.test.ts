@@ -26,7 +26,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 }))
 
 import { registerKeeper, rebuildReminderStateSnapshot } from '../src/seams/keeper.js'
-import { __setSimpleSourceForTest } from '../src/settings-section.js'
+import { __setSimpleSourceForTest } from '../src/surface/settings.js'
 
 type PostExecuteListener = (
   exec: unknown,

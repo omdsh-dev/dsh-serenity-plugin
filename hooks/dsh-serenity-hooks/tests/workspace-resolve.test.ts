@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { resolveWorkspaceCore } from '../src/api.js'
+import { resolveWorkspaceCore } from '../src/surface/http.js'
 
 let dir: string
 let cccDir: string

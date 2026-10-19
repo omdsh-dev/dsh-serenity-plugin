@@ -27,7 +27,7 @@ import { join, dirname } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import type { IncomingMessage } from 'node:http'
-import { registerVoyageApi } from '../src/voyage-page.js'
+import { registerVoyageApi } from '../src/surface/voyage/page.js'
 
 const clientDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'client')
 const tsx = readFileSync(join(clientDir, 'SafeModePanel.tsx'), 'utf-8')

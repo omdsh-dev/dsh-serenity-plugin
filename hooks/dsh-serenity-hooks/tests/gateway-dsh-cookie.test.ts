@@ -48,8 +48,8 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 
 import { hashPassword } from '../src/kernel/config.js'
 import { registerGateway } from '../src/gateway/server.js'
-import { faceActive, facePort, stopAllFaces } from '../src/face-host.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { faceActive, facePort, stopAllFaces } from '../src/surface/faces.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 
 /** 主端口替身：**记录真收到的 cookie 头**（判据源） */
 interface UpstreamProbe {

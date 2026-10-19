@@ -127,7 +127,7 @@ import {
   listWakes,
   wakeRegistryPath,
 } from '../src/wake/registry.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 import { hostname } from 'node:os'
 import { CRO_HOST_FILENAME } from '../src/wake/cro.js'
 

@@ -59,7 +59,7 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
   deriveEventMessage: (event: unknown) => (event as { data?: { message?: unknown } })?.data?.message ?? null,
 }))
 // 简单配置源（skiffEnabled 由本测试控制；避免读真实 settings.yaml）
-vi.mock('../src/settings-section.js', () => ({
+vi.mock('../src/surface/settings.js', () => ({
   readSimpleSettings: () => h.settings,
   registerSettingsSection: () => {},
   defaultSimpleSettings: () => h.settings,

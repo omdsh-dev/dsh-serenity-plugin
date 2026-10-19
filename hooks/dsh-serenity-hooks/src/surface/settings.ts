@@ -43,9 +43,9 @@
  */
 
 import type { Context, Volatile } from 'cordis'
-import { hostSettings } from './host/access.js'
+import { hostSettings } from '../host/access.js'
 // C4 块 B：端口默认值只从集中端口表取（不再散写）
-import { SKIFF_DEBUG_PORT } from './kernel/ports.js'
+import { SKIFF_DEBUG_PORT } from '../kernel/ports.js'
 
 /**
  * 面板层布尔键的**两种来法**（v1.47.2）：

@@ -59,7 +59,7 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
 }))
 
 import { name, inject, apply, type Config } from '../src/index.ts'
-import { __setSimpleSourceForTest, defaultSimpleSettings, SERENITY_SETTINGS_NS } from '../src/settings-section.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings, SERENITY_SETTINGS_NS } from '../src/surface/settings.js'
 
 /**
  * 宿主替身。

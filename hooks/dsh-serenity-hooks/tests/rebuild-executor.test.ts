@@ -55,7 +55,7 @@ vi.mock('@deepseek-ai/dsh-session', () => ({
 import { queueRebuild, registerRebuildTurnHook, pendingRebuildSnapshot, buildRebuildAnchor, performRebuild, resolveSessionMdPath } from '../src/trajectory/rebuild.js'
 import { readLastBound, appendBound } from '../src/trajectory/bound.js'
 import { resetActiveSessionStore, setActiveSessionInfo } from '../src/trajectory/core.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 
 let dir: string
 let altRoot: string | null

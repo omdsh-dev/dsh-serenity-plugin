@@ -29,7 +29,7 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
   default: class {},
 }))
 
-import { simpleSettingsFromConfig, defaultSimpleSettings, SERENITY_SETTINGS_NS, unwrapVolatile } from '../src/settings-section.js'
+import { simpleSettingsFromConfig, defaultSimpleSettings, SERENITY_SETTINGS_NS, unwrapVolatile } from '../src/surface/settings.js'
 
 describe('settings-section: 简单配置读取（host 侧）', () => {
   it('命名空间 = profile 条目 id（serenity-hooks；与旧 settings.yaml 段名逐字相同）', () => {

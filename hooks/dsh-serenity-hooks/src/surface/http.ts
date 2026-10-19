@@ -16,13 +16,13 @@ import { extname, join } from 'node:path'
 // 类型引用：拉入 webserver / session 包的 cordis 声明增强（ctx.webServer / ctx.sessions）；运行时擦除
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { SessionId } from '@deepseek-ai/dsh-session'
-import { hostService, hostSessions } from './host/access.js'
+import { hostService, hostSessions } from '../host/access.js'
 import { getStatus, setSafeMode } from './status.js'
-import { DEFAULT_SERENITY_CONFIG_PATHS } from './kernel/ccc.js'
+import { DEFAULT_SERENITY_CONFIG_PATHS } from '../kernel/ccc.js'
 // C2（CCC 发现面归一）：L1 单根解析 / L2 枚举一律问 ccc-roots（本文件不再自写上溯包裹）
-import { cccRootForCwd, listCccs } from './kernel/ccc-roots.js'
-import { readAdvancedSettings, toWire, applyWirePatch, projectKnownWorkspaces } from './kernel/config.js'
-import { isoLocal, localFileStamp } from './kernel/time.js'
+import { cccRootForCwd, listCccs } from '../kernel/ccc-roots.js'
+import { readAdvancedSettings, toWire, applyWirePatch, projectKnownWorkspaces } from '../kernel/config.js'
+import { isoLocal, localFileStamp } from '../kernel/time.js'
 
 const ROUTE_PATH = '/serenity/status' // 非 /api：/api 前缀由 connection 路由拥有
 const UPLOAD_PATH = '/serenity/image-upload'
@@ -430,12 +430,12 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             sendJson(res, 400, { error: chk.error })
             return
           }
-          const { readWeixinSettings } = await import('./im/route.js')
-          const { weixinBridgeStatus } = await import('./im/bridge.js')
+          const { readWeixinSettings } = await import('../im/route.js')
+          const { weixinBridgeStatus } = await import('../im/bridge.js')
           const settings = readWeixinSettings(chk.root)
           const bridge = weixinBridgeStatus().find((b) => b.ccc === chk.root)
           // accounts 脱敏：只回元信息 + 是否已绑定（token 永不落 wire）
-          const { readWeixinCredential } = await import('./im/route.js')
+          const { readWeixinCredential } = await import('../im/route.js')
           const accounts = (settings.accounts ?? []).map((a) => ({
             accountId: a.accountId,
             name: a.name ?? undefined,
@@ -474,13 +474,13 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
 
         // login-start：出码（进程内调 iLink get_bot_qrcode；无需凭据）→ 存 loginKey 供轮询
         if (body.action === 'login-start') {
-          const { fetchQRCode } = await import('./im/ilink.js')
+          const { fetchQRCode } = await import('../im/ilink.js')
           const { randomUUID } = await import('node:crypto')
           // 清理过期登录
           for (const [key, v] of weixinLogins) {
             if (Date.now() - v.startedAt > WEIXIN_LOGIN_TTL_MS) weixinLogins.delete(key)
           }
-          const { readWeixinSettings } = await import('./im/route.js')
+          const { readWeixinSettings } = await import('../im/route.js')
           const settings = readWeixinSettings(root)
           const qr = await fetchQRCode({ botType: settings.botType ?? undefined })
           const loginKey = randomUUID()
@@ -495,8 +495,8 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             sendJson(res, 400, { error: 'missing accountId' })
             return
           }
-          const { removeWeixinAccount } = await import('./im/route.js')
-          const { syncCccBridge } = await import('./im/bridge.js')
+          const { removeWeixinAccount } = await import('../im/route.js')
+          const { syncCccBridge } = await import('../im/bridge.js')
           removeWeixinAccount(root, body.accountId)
           syncCccBridge(ctx, root)
           sendJson(res, 200, { removed: body.accountId })
@@ -510,8 +510,8 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             sendJson(res, 400, { error: 'invalid routes (expected [{user, role}, ...])' })
             return
           }
-          const { saveWeixinRoutes } = await import('./im/route.js')
-          const { readSkiffRoles } = await import('./role/skiff/config.js')
+          const { saveWeixinRoutes } = await import('../im/route.js')
+          const { readSkiffRoles } = await import('../role/skiff/config.js')
           const roles = readSkiffRoles(root)
           for (const r of routes) {
             if (!roles.has(r.role)) {
@@ -527,8 +527,8 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
         // set-enabled：切换总开关（启用时无账号/无路由 → 400 提示先绑定）
         if (body.action === 'set-enabled') {
           const enabled = body.enabled === true
-          const { readWeixinSettings, setWeixinEnabled } = await import('./im/route.js')
-          const { syncCccBridge } = await import('./im/bridge.js')
+          const { readWeixinSettings, setWeixinEnabled } = await import('../im/route.js')
+          const { syncCccBridge } = await import('../im/bridge.js')
           const settings = readWeixinSettings(root)
           if (enabled && (settings.accounts ?? []).length === 0) {
             sendJson(res, 400, { error: '启用前请先扫码绑定至少一个账号' })
@@ -537,7 +537,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           setWeixinEnabled(root, enabled)
           if (enabled) syncCccBridge(ctx, root)
           else {
-            const { stopCccBridge } = await import('./im/bridge.js')
+            const { stopCccBridge } = await import('../im/bridge.js')
             stopCccBridge(root)
           }
           sendJson(res, 200, { enabled })
@@ -575,8 +575,8 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
           return
         }
 
-        const { pollQRStatus } = await import('./im/ilink.js')
-        const { readWeixinSettings } = await import('./im/route.js')
+        const { pollQRStatus } = await import('../im/ilink.js')
+        const { readWeixinSettings } = await import('../im/route.js')
         const settings = readWeixinSettings(login.root)
         const status = await pollQRStatus({ baseUrl: undefined, qrcode: login.qrcode })
 
@@ -587,8 +587,8 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
               sendJson(res, 200, { status: 'error', error: 'confirmed but no bot_token' })
               return
             }
-            const { upsertWeixinAccount, writeWeixinCredential, nextWeixinAccountId } = await import('./im/route.js')
-            const { syncCccBridge } = await import('./im/bridge.js')
+            const { upsertWeixinAccount, writeWeixinCredential, nextWeixinAccountId } = await import('../im/route.js')
+            const { syncCccBridge } = await import('../im/bridge.js')
             // 多账号：每次扫码生成最小未占用 id（移除中间账号后复用，不冲突）
             const accountId = nextWeixinAccountId(settings)
             upsertWeixinAccount(login.root, { accountId, name: `微信 ${accountId}`, enabled: true })
@@ -640,7 +640,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             if (id) liveIds.add(id)
           }
         }
-        const { sessionsRootDir, collectEligibleSessions, performCleanup, cutoffDaysAgo } = await import('./trajectory/cleanup.js')
+        const { sessionsRootDir, collectEligibleSessions, performCleanup, cutoffDaysAgo } = await import('../trajectory/cleanup.js')
         const root = sessionsRootDir()
 
         if (req.method === 'GET') {

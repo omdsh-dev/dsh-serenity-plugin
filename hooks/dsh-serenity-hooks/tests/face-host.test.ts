@@ -10,7 +10,7 @@ import {
   activeFaceNames,
   FaceStartCancelled,
   type FaceSpec,
-} from '../src/face-host.js'
+} from '../src/surface/faces.js'
 
 /**
  * face-host.test.ts — 面宿主（C4 块 A，S142 2026-09-15）

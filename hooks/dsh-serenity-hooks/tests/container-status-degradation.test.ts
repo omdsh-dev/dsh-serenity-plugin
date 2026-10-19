@@ -47,7 +47,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { checkRegistryHealth } from '../src/container-status.js'
+import { checkRegistryHealth } from '../src/surface/observation.js'
 
 let dir: string
 

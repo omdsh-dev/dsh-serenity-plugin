@@ -53,8 +53,8 @@ import { createServer, request as httpRequest, type IncomingMessage, type Server
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { sanitizeFileName, saveImageToTmp, registerStatusApi } from '../src/api.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { sanitizeFileName, saveImageToTmp, registerStatusApi } from '../src/surface/http.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 
 type Handler = (req: IncomingMessage, res: ServerResponse) => unknown
 

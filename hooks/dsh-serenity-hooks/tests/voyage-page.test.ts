@@ -7,7 +7,7 @@ import {
   loadVoyageHtml,
   resetVoyageCache,
   registerVoyageApi,
-} from '../src/voyage-page.js'
+} from '../src/surface/voyage/page.js'
 
 /**
  * voyage-page 镜像测试（2026-09-15 S142）。

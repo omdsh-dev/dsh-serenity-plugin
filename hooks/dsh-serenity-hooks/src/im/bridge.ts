@@ -36,7 +36,7 @@ import {
   planInboundRoute, appendHumanChannelAudit, type InboundRoutePlan,
 } from './inbound.js'
 // 机器级配置的**唯一读取入口**（P0-1 起 `humanChannel` 随它一起出）⇒ 天然热生效（方案 Q8）
-import { readSimpleSettings, type HumanChannelSettings } from '../settings-section.js'
+import { readSimpleSettings, type HumanChannelSettings } from '../surface/settings.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
 import { readSkiffRoles, type SkiffRoleConfig } from '../role/skiff/config.js'

@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { injectVoyageVocab, scanVoyageLiveVocab } from '../src/voyage-vocab.js'
+import { injectVoyageVocab, scanVoyageLiveVocab } from '../src/surface/voyage/vocab.js'
 
 let root: string
 

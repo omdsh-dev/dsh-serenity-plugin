@@ -47,7 +47,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { isoLocal } from './kernel/time.js'
+import { isoLocal } from '../kernel/time.js'
 
 /** 落点目录（所有者令：CCC 的 `_tmp` 内） */
 export const USAGE_STATS_SUBDIR = '_tmp'

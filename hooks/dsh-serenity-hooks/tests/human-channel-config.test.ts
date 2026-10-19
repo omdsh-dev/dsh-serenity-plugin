@@ -44,7 +44,7 @@ import {
   defaultHumanChannelSettings,
   simpleSettingsFromConfig,
   defaultSimpleSettings,
-} from '../src/settings-section.js'
+} from '../src/surface/settings.js'
 import { readWeixinSettings } from '../src/im/route.js'
 
 /** schema 里的机器级段（读不到 ⇒ undefined，交给用例断言报错文案） */

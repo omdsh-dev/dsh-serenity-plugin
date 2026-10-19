@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { saveImageToTmp, IMAGE_UPLOAD_DIR } from '../src/api.js'
+import { saveImageToTmp, IMAGE_UPLOAD_DIR } from '../src/surface/http.js'
 
 let dir: string
 

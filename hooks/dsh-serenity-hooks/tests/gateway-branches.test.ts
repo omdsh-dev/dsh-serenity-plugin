@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { registerGateway } from '../src/gateway/server.js'
-import { stopAllFaces, faceActive, facePort } from '../src/face-host.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { stopAllFaces, faceActive, facePort } from '../src/surface/faces.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 import { hashPassword } from '../src/kernel/config.js'
 
 /**
@@ -314,7 +314,7 @@ describe('gateway: spec.enabled 意图闭包（faceEnabled 才调它 —— 既�
  */
 async function captureGatewaySpec(): Promise<{ enabled: () => boolean } | undefined> {
   const { EventEmitter } = await import('node:events')
-  const faceHost = await import('../src/face-host.js')
+  const faceHost = await import('../src/surface/faces.js')
   let captured: { enabled: () => boolean } | undefined
 
   const fakeServer = new EventEmitter() as EventEmitter & { close: () => void; closeIdleConnections?: () => void }

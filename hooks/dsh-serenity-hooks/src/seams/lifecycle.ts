@@ -21,7 +21,7 @@
 import type { Context } from 'cordis'
 import { clearActiveSessionInfo } from '../trajectory/core.js'
 import { unregisterSkiffSession } from '../role/skiff/core.js'
-import { stopAllFaces } from '../face-host.js'
+import { stopAllFaces } from '../surface/faces.js'
 import { stopAllBridges } from '../im/bridge.js'
 import { forgetManualOutputSession } from '../im/guard.js'
 import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility, forgetNonCccToolVisibility, forgetHostScheduleToolHiding, forgetSkiffRoleToolVisibility } from './guards.js'

@@ -22,7 +22,7 @@ import {
   recordSkillInjections,
   recordToolUsage,
   usageStatsPath,
-} from '../src/usage-stats.js'
+} from '../src/surface/usage.js'
 
 let root = ''
 let path = ''

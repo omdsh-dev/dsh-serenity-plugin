@@ -47,7 +47,7 @@ vi.mock('@deepseek-ai/schemastery', () => {
 })
 vi.mock('@deepseek-ai/dsh-settings', () => ({ installSettingsSection: () => {}, settingsNamespace: (v: string) => v }))
 
-import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSettings } from '../src/settings-section.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings, type SerenitySimpleSettings } from '../src/surface/settings.js'
 import { __resetPollersForTest, pollerOwners } from '../src/im/inbound.js'
 import { writeWeixinCredential } from '../src/im/route.js'
 import { __setWeixinFetchForTest } from '../src/im/ilink.js'

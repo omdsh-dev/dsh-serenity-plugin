@@ -63,8 +63,8 @@ import {
 } from '../src/gateway/server.js'
 // C4 块 A 冒烟：装配入口 + 面状态真值源 + 简单配置注入
 import { registerGateway } from '../src/gateway/server.js'
-import { faceActive, facePort, stopAllFaces } from '../src/face-host.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { faceActive, facePort, stopAllFaces } from '../src/surface/faces.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 // 登录面集成：TOTP 二选一（真 code 生成，不 mock 校验器）
 import { totpCode, base32Encode, TOTP_STEP_SECONDS } from '../src/gateway/totp.js'
 
@@ -497,7 +497,7 @@ describe('v1.22.3: 外部连接中断崩溃修复（S142 实测：Unhandled ECON
     // 归一到 `face-host.ts` 后，**守护的对象没变**（server 级 clientError → 静默销毁 socket，
     // 防"无 error 监听的 socket 直接 throw → 进程崩溃"），只是位置从面内搬到面宿主。
     // 本断言随代码位置迁移（回归钉保留：不许静默消失）。
-    const src = readFileSync(join(__dirname, '..', 'src', 'face-host.ts'), 'utf-8')
+    const src = readFileSync(join(__dirname, '..', 'src', 'surface', 'faces.ts'), 'utf-8')
     expect(src).toMatch(/server\.on\('clientError'/)
     // 且 gateway.ts 不再自持一份（同一卸载语义两套实现 = C4 要收的重复形态）
     const gw = readFileSync(join(__dirname, '..', 'src', 'gateway', 'server.ts'), 'utf-8')

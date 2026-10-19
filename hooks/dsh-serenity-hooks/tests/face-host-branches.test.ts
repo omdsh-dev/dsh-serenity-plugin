@@ -8,7 +8,7 @@ import {
   faceActive,
   activeFaceNames,
   type FaceSpec,
-} from '../src/face-host.js'
+} from '../src/surface/faces.js'
 
 /**
  * face-host-branches.test.ts — 面宿主：**«绑上之后» 与半途中止面**（⑤ 第 55 件，S142 2026-09-26）

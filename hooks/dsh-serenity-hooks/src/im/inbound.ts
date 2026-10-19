@@ -32,7 +32,7 @@ import { appendFileSync, mkdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 // 只取**类型**（`import type` 编译期擦除 ⇒ 运行时零依赖、无环风险）：
 // 订阅行的形状由读取面（settings-section）定义，本模块**不复制**一份（单真相源）。
-import type { HumanChannelSubscriptionSettings } from '../settings-section.js'
+import type { HumanChannelSubscriptionSettings } from '../surface/settings.js'
 
 /** 一个"想为该账号起 poller"的请求（来自某 CCC） */
 export interface PollerRequest {

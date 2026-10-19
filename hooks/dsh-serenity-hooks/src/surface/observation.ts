@@ -34,14 +34,14 @@ import {
   loadSerenityConfig,
   pathInside,
   readCccName,
-} from './kernel/ccc.js'
-import { ACC_VERSION } from './kernel/constants.js'
+} from '../kernel/ccc.js'
+import { ACC_VERSION } from '../kernel/constants.js'
 import { readDshVersion } from './status.js'
-import { hostContractReport, type HostContractReport } from './host/contract.js'
-import { checkRegistryQuality, type RegistryQualityReport } from './msm-ops.js'
-import { listWakes, type WakeEntry } from './wake/registry.js'
-import { wakeSchedulerState } from './wake/scheduler.js'
-import type { JsonValue } from './kernel/json.js'
+import { hostContractReport, type HostContractReport } from '../host/contract.js'
+import { checkRegistryQuality, type RegistryQualityReport } from '../msm-ops.js'
+import { listWakes, type WakeEntry } from '../wake/registry.js'
+import { wakeSchedulerState } from '../wake/scheduler.js'
+import type { JsonValue } from '../kernel/json.js'
 
 // ── 分组 1：身份 / 版本 ──
 

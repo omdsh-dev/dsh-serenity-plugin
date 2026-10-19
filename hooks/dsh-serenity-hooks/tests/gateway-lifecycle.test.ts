@@ -46,8 +46,8 @@ vi.mock('@deepseek-ai/dsh-settings', () => ({
 
 import { hashPassword } from '../src/kernel/config.js'
 import { registerGateway } from '../src/gateway/server.js'
-import { faceActive, facePort, stopAllFaces } from '../src/face-host.js'
-import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/settings-section.js'
+import { faceActive, facePort, stopAllFaces } from '../src/surface/faces.js'
+import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 
 async function startUpstream(): Promise<{ server: import('node:http').Server; mainPort: number }> {
   const server = createServer((_req, res) => {

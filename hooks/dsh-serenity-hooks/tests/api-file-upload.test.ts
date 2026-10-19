@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { saveFileToTmp, sanitizeFileName, FILE_UPLOAD_DIR } from '../src/api.js'
+import { saveFileToTmp, sanitizeFileName, FILE_UPLOAD_DIR } from '../src/surface/http.js'
 
 let dir: string
 
