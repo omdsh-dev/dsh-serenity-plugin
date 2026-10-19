@@ -209,7 +209,10 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
   })
 
   it('渠道未实现 ⇒ 不起 poller ＋ 出声（且**只出声一次**，不随每次重扫刷屏）', async () => {
-    machine.accounts = [acct('feishu-1', 'feishu', 'tok-x')]
+    // 🔴 P3（2026-10-19）起 `feishu` **已实现** ⇒ 不能再拿它当"未实现的样本"
+    //    （用它的话这条用例会变成"已实现渠道正确起 poller"，判据方向反了）。
+    //    这里改用一个**确实不存在**的渠道名，判据本身（未实现 ⇒ 出声且只一次）不变。
+    machine.accounts = [acct('unknown-1', 'telegram', 'tok-x')]
     const { syncHumanChannel, weixinBridgeStatus } = await import('../src/im/bridge.js')
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     syncHumanChannel(ctx())
@@ -217,6 +220,17 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     syncHumanChannel(ctx())
     expect(weixinBridgeStatus()).toHaveLength(0)
     expect(warn.mock.calls.filter((c) => String(c[0]).includes('未实现')).length).toBe(1)
+    warn.mockRestore()
+  })
+
+  it('🆕 P3：`feishu` 已实现 ⇒ **不再**报"未实现"（与上一条互为对照）', async () => {
+    machine.accounts = [acct('feishu-1', 'feishu', 'tok-x')]
+    const { syncHumanChannel } = await import('../src/im/bridge.js')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    syncHumanChannel(ctx())
+    // 飞书已注册 ⇒ 不进"未实现"分支（它会因缺 appId 走"凭据不全"，那是另一档，且必出声）
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('未实现')).length).toBe(0)
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('appId'))).toBe(true)
     warn.mockRestore()
   })
 

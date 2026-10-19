@@ -36,14 +36,15 @@ import {
 } from './inbound.js'
 // 机器级配置的**唯一读取入口**（P0-1 起 `humanChannel` 随它一起出）⇒ 天然热生效（方案 Q8）
 import { readSimpleSettings, type HumanChannelSettings } from '../surface/settings.js'
-import { readWeixinSettings, readWeixinCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, type WeixinAccountCredential } from './route.js'
+import { readWeixinSettings, readWeixinCredential, readFeishuCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
 import { getSkiffAgent, askSkiff, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../trajectory/session.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildOutgoingHookEvent } from './hook.js'
-import { getImAccountImpl, imAccountChannels, normalizeAccountChannel, type ImAccountImpl } from './accounts.js'
+import { getImAccountImpl, imAccountChannels, normalizeAccountChannel, type ImAccountCredential, type ImAccountImpl } from './accounts.js'
 import { installWeixinAccountImpl } from './weixin-account.js'
+import { installFeishuAccountImpl } from './feishu-account.js'
 import {
   handleInboundEvent, resolveInboundTarget, manualOutputMarker, manualOutputFallbackNeeded,
   type ImInboundEvent, type ImAccountIo, type ResolvedInboundTarget,
@@ -241,6 +242,29 @@ export async function handleMachineIncoming(
 }
 
 /**
+ * **按渠道读凭据**（P3 起的单一入口）。
+ *
+ * 为什么必须抽成一个函数：CCC 级桥（`syncCccBridge`）与机器级 poller（`syncMachinePollers`）
+ * 是**两条装配路径**，原先各自写着"怎么从 localstore 取微信 token"。接第二家渠道时若两边各写一份，
+ * 必然分叉（一家改了另一家忘改，且**没有任何机械信号**）。
+ *
+ * 两种取法的**真实差别**（不是风格差异）：
+ * - **CCC 级**：凭据在 localstore（`WEIXIN_<A>_TOKEN` / `FEISHU_<A>_APPID|SECRET`）。
+ * - **机器级**：凭据在插件设置行（`account.token`）——那是宿主设置面，不经 localstore。
+ *
+ * ⇒ 本函数只负责**把"渠道"翻译成"该读哪套字段"**，返回统一形状 `ImAccountCredential`。
+ *   微信的 appId 恒 undefined；飞书把 appSecret 装进 `token`（让两边共用同一个就绪判据位置）。
+ */
+function readImCredentialByChannel(root: string, accountId: string, channel: string): ImAccountCredential | null {
+  if (channel === 'feishu') {
+    const f = readFeishuCredential(root, accountId)
+    return f ? { appId: f.appId, token: f.appSecret } : null
+  }
+  const w = readWeixinCredential(root, accountId)
+  return w ? { token: w.token, baseUrl: w.baseUrl, userId: w.userId } : null
+}
+
+/**
  * 启动/重建某 CCC 的桥：读配置 → 对每个 enabled + 有凭据的账号启动轮询循环。
  * 已存在（配置变化热重建）→ 先停旧循环再启动新的。
  *
@@ -263,7 +287,7 @@ export function syncCccBridge(ctx: Context, root: string): void {
 
   // 组装请求（只含 enabled ＋ 已绑定凭据的账号）——凭据随请求带上，避免后面二次读取
   const requests: PollerRequest[] = []
-  const creds = new Map<string, WeixinAccountCredential>()
+  const creds = new Map<string, ImAccountCredential>()
   /** 账号 id → 它的实现（P2：按 `channel` 查派发表） */
   const implByAccount = new Map<string, ImAccountImpl>()
   for (const account of settings.accounts ?? []) {
@@ -277,12 +301,12 @@ export function syncCccBridge(ctx: Context, root: string): void {
       }
       continue
     }
-    const cred = readWeixinCredential(root, account.accountId)
-    if (!cred) continue // 无凭据（未扫码绑定）→ 跳过
+    const cred = readImCredentialByChannel(root, account.accountId, channel)
+    if (!cred) continue // 无凭据（未绑定）→ 跳过
     if (!impl.isReady(cred)) continue
     implByAccount.set(account.accountId, impl)
-    creds.set(account.accountId, cred)
-    requests.push({ root, accountId: account.accountId, identity: accountIdentity(root, account.accountId, cred.token) })
+    creds.set(account.accountId, cred as WeixinAccountCredential)
+    requests.push({ root, accountId: account.accountId, identity: accountIdentity(root, account.accountId, cred.token ?? '') })
   }
 
   const plan = planPollerClaims(requests, pollerOwners())
@@ -360,7 +384,7 @@ function syncMachinePollers(ctx: Context, hc: HumanChannelSettings): void {
   stopCccBridges()
 
   const requests: PollerRequest[] = []
-  const creds = new Map<string, WeixinAccountCredential>()
+  const creds = new Map<string, ImAccountCredential>()
   /** 账号 id → 它的实现（P2：**按 `channel` 查派发表**，不再写死 weixin） */
   const implByAccount = new Map<string, ImAccountImpl>()
   for (const account of hc.accounts) {
@@ -384,8 +408,17 @@ function syncMachinePollers(ctx: Context, hc: HumanChannelSettings): void {
       }
       continue
     }
+    // 🔴 机器级凭据来自**插件设置行**（不经 localstore）。飞书两要素：appId(account.userId? 不) ＋
+    //    token(=appSecret)。⚠️ 设置行的形状是通道无关的（只有 token/userId 两格），
+    //    飞书把 appId 放进 `account.appId`（设置面新增的可选字段，缺省 undefined ⇒ 微信不受影响）。
     const token = (account.token ?? '').trim()
-    const cred: WeixinAccountCredential = { token, baseUrl: '', userId: account.userId }
+    const appIdRaw = (account as { appId?: string }).appId
+    const cred: ImAccountCredential = {
+      token,
+      baseUrl: '',
+      userId: account.userId,
+      ...(channel === 'feishu' && typeof appIdRaw === 'string' ? { appId: appIdRaw.trim() } : {}),
+    }
     if (!impl.isReady(cred)) {
       console.warn(`[serenity-hooks] ⚠ human-channel: 账号 ${id} ${impl.notReadyReason?.(cred) ?? '**凭据不全**'} ⇒ 不起 poller`)
       continue
@@ -634,3 +667,12 @@ installWeixinAccountImpl({
   handleIncoming: handleIncoming as never,
   handleMachineIncoming: handleMachineIncoming as never,
 })
+
+/**
+ * 🆕 **P3 装配：飞书实现登记进同一张派发表**（同样是模块求值时）。
+ *
+ * 飞书不需要注入依赖 —— 它的收（`WSClient`）与发（`im.v1.message.create`）都在 SDK 里，
+ * 主流程则复用 `im/inbound-event.ts`。⇒ 这一行就是"微信与飞书成为并列实现"的**最后一块**：
+ * 派发表有了两个条目，装配处一行没改（它只按 `channel` 查表）。
+ */
+installFeishuAccountImpl()

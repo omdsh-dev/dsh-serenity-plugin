@@ -232,6 +232,46 @@ export function clearWeixinCredential(root: string, accountId: string): void {
   unsetEntry(root, 'credential', lsKey(accountId, 'USERID'))
 }
 
+// ── 飞书凭据（P3，2026-10-19）──────────────────────────────────────────────
+//
+// 与微信**同族但不同形态**：微信是单要素（token），飞书是双要素（appId ＋ appSecret）。
+// 🔴 appSecret 落 **credential** scope（UPPER_SNAKE），不进 git 明文面；
+//    appId 不是密（它出现在每个事件的 `app_id` 字段里），但为对称也放同一处。
+// ⇒ 复用的是**同一套 localstore 约定**，不是新造一层存储。
+
+/** 飞书凭据键（credential scope: FEISHU_<ACCOUNT_ID>_<FIELD>） */
+function feishuLsKey(accountId: string, field: 'APPID' | 'SECRET'): string {
+  return `FEISHU_${accountKeyPart(accountId)}_${field}`
+}
+
+/** 飞书账号凭据（appSecret 缺 ⇒ 账号未绑定） */
+export interface FeishuAccountCredential {
+  /** 应用 appId（自建应用「凭证与基础信息」页） */
+  appId: string
+  /** 应用 appSecret（**凭据**，只在 localstore） */
+  appSecret: string
+}
+
+/** 读取飞书账号凭据（appId 或 appSecret 缺失 → null——账号未绑定） */
+export function readFeishuCredential(root: string, accountId: string): FeishuAccountCredential | null {
+  const appId = getEntry(root, 'credential', feishuLsKey(accountId, 'APPID'))
+  const appSecret = getEntry(root, 'credential', feishuLsKey(accountId, 'SECRET'))
+  if (!appId || !appSecret) return null
+  return { appId, appSecret }
+}
+
+/** 写入飞书账号凭据（面板保存后；两者都必写——只写一半等于没绑） */
+export function writeFeishuCredential(root: string, accountId: string, cred: FeishuAccountCredential): void {
+  writeEntry(root, 'credential', feishuLsKey(accountId, 'APPID'), cred.appId)
+  writeEntry(root, 'credential', feishuLsKey(accountId, 'SECRET'), cred.appSecret)
+}
+
+/** 清除飞书账号凭据（移除账号时） */
+export function clearFeishuCredential(root: string, accountId: string): void {
+  unsetEntry(root, 'credential', feishuLsKey(accountId, 'APPID'))
+  unsetEntry(root, 'credential', feishuLsKey(accountId, 'SECRET'))
+}
+
 /**
  * 路由匹配：exact user 优先，通配 `*` 兜底。
  * @returns 命中的**轨迹编码**；未命中 → null（无路由 → 消息不回复/忽略）
