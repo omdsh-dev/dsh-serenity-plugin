@@ -46,6 +46,75 @@ export function weixinSessionIdFor(fromUserId: string): string {
 }
 
 /**
+ * 会话**代次**落盘（owner 2026-10-19：「没有 skiff 会话就自动新建一个」的持久面）。
+ *
+ * ## 为什么需要它（R↓）
+ *
+ * 工作台（SESSION.md）被归档/删除后，旧会话身份就**不该再被 resume** ——
+ * 它的历史里带着当时的工具清单，会让新配置永远不生效（实测：每次调用都被角色白名单拒）。
+ * 但"该新建"这个判断必须**跨进程重启仍然成立**：只放内存 ⇒ 重启后又 resume 回旧 log。
+ *
+ * ⇒ 落一个极小的代次表（`AGENT_SESSIONS/.weixin-session-gen.json`）：
+ * `{ "<baseId>": "<gen>" }`。新会话 id = `<baseId>-g<gen>`。
+ *
+ * ⚠️ **只在"载体缺失"时递增**，正常路径（工作台还在）**不碰这个文件** ⇒ 同用户长期同一会话
+ * 的语义不变。递增的时机唯一（见 bridge 的丢弃分支），不吃并发。
+ */
+const SESSION_GEN_REL = 'AGENT_SESSIONS/.weixin-session-gen.json'
+
+function sessionGenPath(root: string): string {
+  return join(root, SESSION_GEN_REL)
+}
+
+/** 读代次（无文件/坏档 ⇒ 0，永不抛） */
+export function readSessionGen(root: string, baseId: string): number {
+  try {
+    const raw = JSON.parse(readFileSync(sessionGenPath(root), 'utf-8')) as Record<string, unknown>
+    const n = raw[baseId]
+    return typeof n === 'number' && Number.isFinite(n) ? n : 0
+  } catch {
+    return 0
+  }
+}
+
+/** 代次 +1 并落盘（失败不抛：退回内存序号由调用方保证唯一性——最坏只是多一个新会话） */
+export function bumpSessionGen(root: string, baseId: string): number {
+  const next = readSessionGen(root, baseId) + 1
+  try {
+    const p = sessionGenPath(root)
+    let all: Record<string, unknown> = {}
+    try {
+      all = JSON.parse(readFileSync(p, 'utf-8')) as Record<string, unknown>
+    } catch {
+      /* 无档/坏档 ⇒ 从空表开始（代次语义允许重置：重置后生成的是**又一个新的** id，不撞旧 log） */
+    }
+    all[baseId] = next
+    mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
+    writeFileSync(p, JSON.stringify(all, null, 2), 'utf-8')
+  } catch {
+    /* 落盘失败：仍返回 next（本次进程内有效） */
+  }
+  return next
+}
+
+/**
+ * 由基准 id 派生**当代**会话 id。
+ *
+ * 无代次（从未丢弃过）⇒ 原样返回基准 id ⇒ **行为与改动前逐字相同**（零回归面）。
+ * 有代次 ⇒ `<baseId>-g<n>`（n ≥ 1）。
+ */
+export function currentSessionIdFor(root: string, baseId: string): string {
+  const gen = readSessionGen(root, baseId)
+  return gen === 0 ? baseId : `${baseId}-g${gen}`
+}
+
+/** 丢弃当前代 ⇒ 下一轮用新一代 id（新建一个干净会话） */
+export function discardCurrentSessionGen(root: string, baseId: string): string {
+  const gen = bumpSessionGen(root, baseId)
+  return `${baseId}-g${gen}`
+}
+
+/**
  * 读取 CCC 微信桥配置（未配置/未启用 → 归一默认）。
  * @returns 归一化 WeixinSettings（accounts/routes 数组清洗；空段 → 空数组）
  */

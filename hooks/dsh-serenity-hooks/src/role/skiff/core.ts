@@ -159,6 +159,25 @@ export function ensureWorkspacePromptSection(agent: Agent, scope: string): boole
 }
 
 /**
+ * 该 skiff 会话**当前绑定的工作台**是否还在盘上（owner 2026-10-19 令的可判定面）。
+ *
+ * 判据（两档，任一命中即"在"）：
+ * ① 会话事件里的 last bound（`readLastBound`）指向的 SESSION.md 存在；
+ * ② 内存活跃记录（`getActiveSessionInfo`）指向的 SESSION.md 存在。
+ *
+ * @returns 在 = 路径；不在/从未绑定 = null
+ *
+ * 🔴 用途（为什么需要它）：owner 归档某个 skiff 工作台后，agent 的 sessionId 没变 ⇒
+ * resume 旧 log ⇒ 旧历史里的**工具清单**污染本轮（每次调用被角色白名单拒）⇒
+ * 用户视角是「工具一直不刷新」。**载体没了，身份就该换**——这个函数就是"载体还在吗"。
+ */
+export function currentWorkspaceMdPath(scopeOrSessionId: string): string | null {
+  const inMemory = getActiveSessionInfo(scopeOrSessionId)
+  if (inMemory?.mdPath && existsSync(inMemory.mdPath)) return inMemory.mdPath
+  return null
+}
+
+/**
  * 确保启用 session 能力的 skiff 会话拥有**专属 SESSION**（工作台）：
  * 懒绑定 + 幂等（per skiff 会话 scope 隔离——微信多用户各自独立，永不共享同一份）。
  *
@@ -565,25 +584,83 @@ function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n)}…` : s
 }
 
+/** 本轮等待上限（毫秒）：超时即判「本轮无产出」——**绝不**把上一轮的旧答案当本轮答案 */
+const ASK_TURN_TIMEOUT_MS = 180_000
+/** 轮询间隔（毫秒） */
+const ASK_POLL_MS = 50
+
+/** 会话里 `assistant/message` 的条数（判「本轮是否真的产出了回答」） */
+function countAssistantMessages(session: unknown): number {
+  let n = 0
+  for (const e of sessionEvents(session)) {
+    if ((e as { type?: string } | undefined)?.type === 'assistant/message') n += 1
+  }
+  return n
+}
+
 /**
- * 提问一轮：followup → 等 idle → 读答案 + 轨迹。
+ * 等**本轮**产出一条 assistant 消息。
+ *
+ * ## 为什么不能用 `waitAgentIdle` 单独当判据（2026-10-19 复读缺陷）
+ *
+ * `waitAgentIdle` 的首行是 `if (agent.status === 'idle') finish()` —— 而 `followup()`
+ * 是**异步投递**：刚投出去的这一刻 agent 状态**仍是 idle** ⇒ 等待**立刻结算** ⇒
+ * `lastAssistantText()` 读到的是**上一轮的** `assistant/message` ⇒ 桥把它当"本轮答案"转发。
+ * 若 CCC 又开了 `fallbackOnNoSend`，同一条旧答案会被反复重发——实测三次间隔仅 300~400ms、
+ * 文本逐字相同（模型跑一轮不可能这么快）。
+ *
+ * ## 判据（`idle` 只是"可以开始看"的信号，不是成功信号）
+ *
+ * ① 期望值 = 调用前 `assistant/message` 的**条数**；
+ * ② 成功 ⟺ 该计数**增长**（本轮确实产出了回答）；
+ * ③ 超时或有界轮询耗尽 ⇒ 返回 `false`（调用方据此给空答案，兜底不触发）。
+ *
+ * @returns true = 本轮有回答；false = 本轮无产出（超时/会话销毁）
+ */
+export async function waitForTurnAssistant(
+  ctx: unknown,
+  agent: Agent,
+  beforeAssistantCount: number,
+  opts: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<boolean> {
+  const timeoutMs = opts.timeoutMs ?? ASK_TURN_TIMEOUT_MS
+  const grew = (): boolean => countAssistantMessages(agent.session) > beforeAssistantCount
+  // ① 先与超时赛跑等一次 idle。**idle = 这一轮结束了**，是"可以结算"的信号。
+  // 🔴 必须有界：`waitAgentIdle` 只在事件/状态变化时结算；若这一轮压根没起来
+  //    （例如被角色白名单全拒、宿主不发 idle），它会永远挂着 ⇒ 桥那条消息永远没人回。
+  const idleReached = await Promise.race([
+    waitAgentIdle(ctx, agent).then(() => true),
+    new Promise<boolean>((resolve) => { setTimeout(() => resolve(false), timeoutMs) }),
+  ])
+  // ② **idle 一到就结算**（不再空等）：有产出 = 成功；没产出 = 这一轮没答，立刻判失败。
+  //    ⛔ 绝不因此退回上一轮的旧文本（那正是复读的形态）。
+  if (idleReached) return grew()
+  // ③ idle 没来（超时）：最后再看一眼计数，避免"产出已落盘但 idle 事件丢了"被误判为失败。
+  return grew()
+}
+
+/**
+ * 提问一轮：followup → 等**本轮**回答 → 读答案 + 轨迹。
  * @param eventsStart 轨迹起点：显式传 0 = 全量轨迹（会话追问时页面重绘完整时间线，
  *   v1.25.10 用户拍板）；不传（undefined）= 本轮增量（followup 前 events 之后）
  * @param options.includeCognitiveTrajectory 是否计算轨迹（v1.26.10 起供**对外面**传 false 跳过计算——
  *   原消费方 = 3100 公开问答页 / ACP JSON-RPC，**该面已于 2026-10-15 退役** ⇒ 现无生产调用方传 false；
  *   3099 调试页默认 true 保留）
+ * @param options.timeoutMs 本轮等待上限（测试注入；生产用缺省）
  */
 export async function askSkiff(
   ctx: Context,
   agent: Agent,
   question: string,
   eventsStart?: number,
-  options?: { includeCognitiveTrajectory?: boolean },
+  options?: { includeCognitiveTrajectory?: boolean; timeoutMs?: number },
 ): Promise<SkiffAskResult> {
   const before = eventsStart === undefined ? sessionEvents(agent.session).length : eventsStart
+  const beforeAssistant = countAssistantMessages(agent.session)
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
-  await waitAgentIdle(ctx, agent)
-  const answer = lastAssistantText(agent)
+  const produced = await waitForTurnAssistant(ctx, agent, beforeAssistant, { timeoutMs: options?.timeoutMs })
+  // 🔴 本轮没产出 ⇒ **空答案**（绝不退回上一轮的旧文本：那正是复读的形态）
+  const answer = produced ? lastAssistantText(agent) : ''
   const cognitiveTrajectory =
     options?.includeCognitiveTrajectory === false ? [] : eventsToCognitiveTrajectory(sessionEvents(agent.session).slice(before))
   return { answer, sessionId: String((agent.session as { id?: unknown }).id ?? ''), cognitiveTrajectory }

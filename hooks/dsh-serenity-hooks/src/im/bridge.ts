@@ -37,11 +37,11 @@ import {
 } from './inbound.js'
 // 机器级配置的**唯一读取入口**（P0-1 起 `humanChannel` 随它一起出）⇒ 天然热生效（方案 Q8）
 import { readSimpleSettings, type HumanChannelSettings } from '../surface/settings.js'
-import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
+import { readWeixinSettings, readWeixinCredential, weixinSessionIdFor, currentSessionIdFor, discardCurrentSessionGen, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
 import { readSkiffRoles, type SkiffRoleConfig } from '../role/skiff/config.js'
 import { stripThink } from '../role/skiff/debug.js'
-import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection } from '../role/skiff/core.js'
+import { createSkiffAgent, getSkiffAgent, askSkiff, ensureSkiffSession, currentWorkspaceMdPath, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection } from '../role/skiff/core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'
@@ -396,7 +396,11 @@ export async function handleIncoming(
   }
 
   try {
-    const sessionId = weixinSessionIdFor(fromUserId)
+    // 🔴 会话 id 分两层（owner 2026-10-19 令「没有 skiff 会话就自动新建一个」）：
+    //   `baseId` = 用户身份派生（weixinSessionIdFor，同用户恒定）；
+    //   `sessionId` = 当代身份（`baseId` 或 `baseId-g<n>`，载体缺失时换代）。
+    const baseId = weixinSessionIdFor(fromUserId)
+    let sessionId = currentSessionIdFor(root, baseId)
     const existing = getSkiffAgent(sessionId)
     const hc = readCheapWorkerConfig(root)
     // v1.30.4：existing（进程内/重启后 live 复用）路径也走 ensureSkiffSession——
@@ -409,8 +413,27 @@ export async function handleIncoming(
         console.warn(`[serenity-hooks] weixin-bridge ensure 失败（不影响处理）: ${String((err as Error)?.message ?? err)}`)
       }
     }
-    const ref = existing
-      ? { agent: existing, sessionId, resumed: true }
+    // 🔴 v1.71.0（owner 2026-10-19：「没有 skiff 会话就自动新建一个」）：工作台失效 ⇒ **不复用旧会话**。
+    //   形态：owner 把某个 skiff 工作台归档后，agent 的 sessionId 仍是老的 ⇒ resume 旧 log ⇒
+    //   旧历史里的**工具清单**（老工具名）继续污染本轮 ⇒ 每次调用被角色白名单拒
+    //   （`tool not allowed in this skiff role`）⇒ 本轮无产出。用户看到的是「工具一直不刷新」。
+    //   判据：**工作台（SESSION.md）是否还在** —— 它是这个会话身份的载体；
+    //   载体没了就该起新身份，而不是让一个"指向已归档目录"的旧会话继续活着。
+    //   换代**落盘**（`.weixin-session-gen.json`）⇒ 跨进程重启仍然生效（只放内存的话重启会 resume 回去）。
+    let target = existing
+    if (existing) {
+      if (currentWorkspaceMdPath(sessionId) === null) {
+        console.warn(
+          `[serenity-hooks] weixin 工作台已不存在（可能被归档/删除）⇒ 丢弃旧会话并新建（旧=${sessionId}）`,
+        )
+        unregisterSkiffSession(sessionId)
+        target = undefined
+        sessionId = discardCurrentSessionGen(root, baseId)
+        console.warn(`[serenity-hooks] weixin 新会话 id = ${sessionId}`)
+      }
+    }
+    const ref = target
+      ? { agent: target, sessionId, resumed: true }
       : await createSkiffAgent(ctx, root, roleName, role, hc?.defaultModel, sessionId)
 
     if (!ref.resumed) {
