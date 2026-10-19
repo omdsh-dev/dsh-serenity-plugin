@@ -15,8 +15,8 @@
 
 import type { JsonValue } from '../kernel/json.js'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
-import { profileSystemPromptSource, profileCognitiveTrajectory, resolveProfileSystemPrompt, SKIFF_PROFILE_HINT } from '../role/skiff/config.js'
-import { listSkiffProfiles, SKIFF_PROFILE_FILENAME } from '../role/skiff/profile.js'
+import { profileSystemPromptSource, profileCognitiveTrajectory, resolveProfileSystemPrompt, SKIFF_PROFILE_HINT } from '../trajectory/policy/rules.js'
+import { listSkiffProfiles, SKIFF_PROFILE_FILENAME } from '../trajectory/policy/profile.js'
 import { hasTrajectoryPrompt, TRAJECTORY_PROMPT_FILENAME } from '../trajectory/prompt.js'
 import { loadMsmEntries } from './msm/service.js'
 

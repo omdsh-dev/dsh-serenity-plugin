@@ -203,7 +203,7 @@ export async function listCccs(ctx: unknown, opts: ListCccsOptions = {}): Promis
   }
 
   // 角色**按需**读取：`withRoles` 缺省 false ⇒ 一次 `AGENT_SESSIONS/` 扫描都不做。
-  // ⚠️ 动态 import：`role/skiff/profile.ts` 不是静态依赖（本模块要能在没有 skiff 链的
+  // ⚠️ 动态 import：`trajectory/policy/profile.ts` 不是静态依赖（本模块要能在没有 skiff 链的
   // 场景里被静态引用——如唤醒调度器；只有真要角色时才加载）。
   //
   // 🔴 2026-10-19（owner 重做令）：数据源从 `serenity.json` 的 `skiff.roles` 改为
@@ -211,7 +211,7 @@ export async function listCccs(ctx: unknown, opts: ListCccsOptions = {}): Promis
   // —— 那正是新模型里的"角色名"（身份 = 编码）。
   let rolesOf: ((root: string) => string[]) | null = null
   if (opts.withRoles === true) {
-    const { listSkiffProfiles } = await import('../role/skiff/profile.js')
+    const { listSkiffProfiles } = await import('../trajectory/policy/profile.js')
     rolesOf = (root: string) => {
       try {
         return listSkiffProfiles(root).map((p) => p.code)

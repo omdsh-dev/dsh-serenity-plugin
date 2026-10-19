@@ -32,7 +32,7 @@ function accountKeyPart(accountId: string): string {
  * 微信桥 skiff 会话 id 前缀（守卫识别"外部面"用）。
  *
  * ⚠️ **2026-10-19 起它只是命名习惯，不再是判据** —— skiff 的身份是**轨迹**，
- * 判据 = 「绑定的轨迹有 `skiff.json`」（`role/skiff/profile.ts` 的 `isSkiffSession`）。
+ * 判据 = 「绑定的轨迹有 `skiff.json`」（`trajectory/policy/profile.ts` 的 `isSkiffSession`）。
  * 保留前缀只为：① 日志/会话列表里一眼认出这是外部面；② 存量会话目录名不变。
  */
 const WEIXIN_SESSION_PREFIX = 'skiff-weixin-'

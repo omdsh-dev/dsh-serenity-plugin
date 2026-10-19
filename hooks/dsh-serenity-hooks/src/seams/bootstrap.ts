@@ -25,7 +25,7 @@ import type { GenerateOptions, StreamChunk, UserMessage } from '@deepseek-ai/dsh
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { sessionEvents } from '../trajectory/core.js'
-import { isSkiffSession } from '../role/skiff/profile.js'
+import { isSkiffSession } from '../trajectory/policy/profile.js'
 import { ACC_MESSAGE_KIND } from '../kernel/message-source.js'
 
 interface BootstrapSettings {

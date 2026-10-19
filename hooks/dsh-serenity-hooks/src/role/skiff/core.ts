@@ -33,15 +33,15 @@ import {
   buildSkiffBasePrompt,
   resolveProfileSystemPrompt,
   createProfilePromptReader,
-} from './config.js'
-import { readSkiffProfileAt, readSkiffProfileByCode, skiffProfileForSession, findDirNameByCode, type SkiffProfile } from './profile.js'
+} from '../../trajectory/policy/rules.js'
+import { readSkiffProfileAt, readSkiffProfileByCode, skiffProfileForSession, findDirNameByCode, type SkiffProfile } from '../../trajectory/policy/profile.js'
 import {
   registerSkiffSession as registryRegister,
   unregisterSkiffSession as registryUnregister,
   skiffTrajectoryDirNameFor as registryTrajectoryDirName,
   skiffSessionInfo as registrySessionInfo,
   skiffSessionSnapshot as registrySnapshot,
-} from './registry.js'
+} from '../../trajectory/policy/window.js'
 import { sessionsRoot } from '../../trajectory/core.js'
 import { hasTrajectoryPrompt } from '../../trajectory/prompt.js'
 import { hostAgents } from '../../host/access.js'

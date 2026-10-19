@@ -23,8 +23,8 @@ import {
   type BlacklistRule,
 } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
-import { skiffProfileForSession, type SkiffProfile } from '../role/skiff/profile.js'
-import { profileToolWhitelist } from '../role/skiff/config.js'
+import { skiffProfileForSession, type SkiffProfile } from '../trajectory/policy/profile.js'
+import { profileToolWhitelist } from '../trajectory/policy/rules.js'
 import { hasEnabledImChannel } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../kernel/invariant.js'
 import { isoLocal } from '../kernel/time.js'

@@ -26,7 +26,7 @@ import {
   createSkiffAgent,
   type SkiffProfile,
 } from '../src/role/skiff/core.js'
-import { resetSkiffSessions } from '../src/role/skiff/registry.js'
+import { resetSkiffSessions } from '../src/trajectory/policy/window.js'
 import {
   profileToolWhitelist,
   profileMsmWhitelist,
@@ -35,7 +35,7 @@ import {
   profileSystemPromptSource,
   createProfilePromptReader,
   SKIFF_PROFILE_HINT,
-} from '../src/role/skiff/config.js'
+} from '../src/trajectory/policy/rules.js'
 import { appendBound } from '../src/trajectory/bound.js'
 import { makeTrajectory, makeSkiffSession, skiffJson, profileFor } from './helpers/skiff-fixture.js'
 

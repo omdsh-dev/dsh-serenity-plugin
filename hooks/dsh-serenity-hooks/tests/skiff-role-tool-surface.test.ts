@@ -50,8 +50,8 @@ vi.mock('@deepseek-ai/schemastery', () => {
 })
 vi.mock('@deepseek-ai/dsh-settings', () => ({ default: class {} }))
 
-import { buildSkiffBasePrompt, profileToolWhitelist } from '../src/role/skiff/config.js'
-import { listSkiffProfiles, type SkiffProfile } from '../src/role/skiff/profile.js'
+import { buildSkiffBasePrompt, profileToolWhitelist } from '../src/trajectory/policy/rules.js'
+import { listSkiffProfiles, type SkiffProfile } from '../src/trajectory/policy/profile.js'
 
 /**
  * 造一个约束面（纯函数入参，只填本件关心的字段）。

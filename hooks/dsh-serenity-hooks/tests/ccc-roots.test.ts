@@ -22,7 +22,7 @@ import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { listCccs, agentCwdFor, cccRootForCwd, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
-import * as skiffProfile from '../src/role/skiff/profile.js'
+import * as skiffProfile from '../src/trajectory/policy/profile.js'
 import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 /** 建一个临时 CCC（含 `.serenity`）；返回真实路径 */

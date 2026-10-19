@@ -526,7 +526,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
             routes.push({ user, trajectory: code })
           }
           const { saveWeixinRoutes } = await import('../im/route.js')
-          const { findDirNameByCode } = await import('../role/skiff/profile.js')
+          const { findDirNameByCode } = await import('../trajectory/policy/profile.js')
           for (const r of routes) {
             if (findDirNameByCode(root, r.trajectory) === null) {
               sendJson(res, 400, { error: `unknown trajectory: ${r.trajectory} (no such trajectory code in ${root})` })

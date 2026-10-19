@@ -28,7 +28,7 @@ import { DEFAULT_SERENITY_CONFIG_PATHS } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 // 复用 context.ts 的完整 ACC 注入消息（简短头 + ACC 5 块 + CCC 顶层 skill 原文）
 import { accMessage } from './context.js'
-import { isSkiffSession } from '../role/skiff/profile.js'
+import { isSkiffSession } from '../trajectory/policy/profile.js'
 
 interface CompactRegistration {
   /** CCC 配置相对路径；缺省用 DEFAULT_SERENITY_CONFIG_PATHS */

@@ -161,7 +161,7 @@ interface SerenityConfig {
    * **静默忽略**（schemastery 非 strict，不报错；也不会被误当成"没有 skiff"）。
    *
    * 迁移路径 = 把 `skiff.roles.<name>` 的内容原样搬进对应轨迹目录的 `skiff.json`
-   * （判据与步骤见 `role/skiff/profile.ts` 头注释与 `docs/skiff-as-trajectory-redesign.md` §5）。
+   * （判据与步骤见 `trajectory/policy/profile.ts` 头注释与 `docs/skiff-as-trajectory-redesign.md` §5）。
    */
   /**
    * 认知轨迹族配置（D58，S142 2026-09-13；2026-10-18 更名 `cognitiveTrajectory`）。
@@ -398,7 +398,7 @@ export interface WeixinRouteConfig {
  * 🔴 **`SkiffRoleConfig` 已于 2026-10-19 退役**（owner 重做令）。
  *
  * 它的语义整体搬进**轨迹目录下的 `skiff.json`**，类型现在是
- * `role/skiff/profile.ts` 的 `SkiffProfile`（在那里还多了 `code`/`dirName`/`path`
+ * `trajectory/policy/profile.ts` 的 `SkiffProfile`（在那里还多了 `code`/`dirName`/`path`
  * 三个与轨迹身份相关的字段）。
  *
  * 退役理由（一句话）：skiff 的约束面是**某一条轨迹的属性**，不是容器级配置表里的一个 entry。

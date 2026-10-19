@@ -9,7 +9,7 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
 
 import { accIdentityText, accMessage, shouldAutoRestore, shouldRestoreActive } from '../src/seams/context.js'
 import { ACC_VERSION } from '../src/kernel/constants.js'
-import { resetSkiffSessions } from '../src/role/skiff/registry.js'
+import { resetSkiffSessions } from '../src/trajectory/policy/window.js'
 import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string

@@ -40,8 +40,8 @@ import { join } from 'node:path'
 const ALLOWED = ['read', 'grep']
 
 import { syncSkiffRoleToolVisibility, forgetSkiffRoleToolVisibility, getSkiffRoleVisibilityDiagnostics } from '../src/seams/guards.js'
-import { registerSkiffSession, resetSkiffSessions } from '../src/role/skiff/registry.js'
-import { SKIFF_PROFILE_FILENAME } from '../src/role/skiff/profile.js'
+import { registerSkiffSession, resetSkiffSessions } from '../src/trajectory/policy/window.js'
+import { SKIFF_PROFILE_FILENAME } from '../src/trajectory/policy/profile.js'
 import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 const SESSION = 'skiff-demo-role-1234'

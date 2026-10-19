@@ -40,7 +40,7 @@ import { msmTool } from '../src/tools/msm/index.js'
 import { runMsmAsync } from '../src/tools/msm/service.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
 import { unregisterSkiffSession } from '../src/role/skiff/core.js'
-import { resetSkiffSessions } from '../src/role/skiff/registry.js'
+import { resetSkiffSessions } from '../src/trajectory/policy/window.js'
 import { makeSkiffSession, skiffJson } from './helpers/skiff-fixture.js'
 
 const mockRunMsmAsync = vi.mocked(runMsmAsync)

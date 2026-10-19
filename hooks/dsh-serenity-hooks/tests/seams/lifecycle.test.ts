@@ -7,7 +7,7 @@
  *
  * 🔴 2026-10-19 skiff 重做对本文件的唯一影响：`registerSkiffSession` 的**第 2 参是轨迹目录名**
  * （不再是角色名），`skiffSessionInfo` 回 `{ trajectoryDirName, ccc }`（不再是 `{ role, ccc }`）。
- * 本文件只验"注册 ⇄ 清理"这条生命周期，**不**依赖 skiff 判据（判据在 `role/skiff/profile.ts`，
+ * 本文件只验"注册 ⇄ 清理"这条生命周期，**不**依赖 skiff 判据（判据在 `trajectory/policy/profile.ts`，
  * 其测试见 `tests/skiff-core.test.ts`）⇒ 这里用目录名常量即可，无需造真实轨迹目录。
  *  - `registerLifecycle` 订阅 `agent/disposed` + `session/disposed`，并在销毁时执行清理；
  *    事件通道缺失 / ctx.effect 缺失都不抛错（apply 不可成为启动单点）

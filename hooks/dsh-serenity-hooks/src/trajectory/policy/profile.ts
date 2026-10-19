@@ -1,5 +1,5 @@
 /**
- * role/skiff/profile.ts — **skiff 的唯一判据**：目录下有 `skiff.json` 的认知轨迹（零 DSH 依赖，可独立单测）
+ * trajectory/policy/profile.ts — **skiff 的唯一判据**：目录下有 `skiff.json` 的认知轨迹（零 DSH 依赖，可独立单测）
  *
  * ## 🔴 owner 2026-10-19 重做令（逐字，本文件存在的全部理由）
  *
@@ -23,13 +23,20 @@
  * **机制在 ACC**（文件叫什么、怎么读、怎么判、缺省值、如何施加约束）；
  * **内容在 CCC**（`skiff.json` 里填什么：模型、白名单、提示词路径）。
  * ⇒ ACC 代码里**不出现任何具体角色名**，也不读 `serenity.json` 的 skiff 段（该段已退役）。
+ *
+ * ## S12（2026-10-19，轨迹中心重构）：此前位于 `role/skiff/` 下（该目录已随本重构消失）
+ *
+ * 落点 = `trajectory/policy/`。判据（判读表 §3.1）：本文件判的是**某条轨迹的约束面**，
+ * 主语是轨迹 ⇒ 它一直就是轨迹切面，只是旧目录把它挂在"角色"这个**平行概念**下。
+ * ⚠️ **文件名 `profile` 与 `skiff.json` / `SkiffProfile` 等符号名一律不动**：
+ * 那是有具体指称的东西（一个固定文件名 ＋ 它的解析结果），不是组织单位。
  */
 
 import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { readUtf8, resolveInside } from '../../kernel/ccc.js'
-import { parseTrajectoryCode, sessionsRoot } from '../../trajectory/core.js'
-import { skiffTrajectoryDirNameFor } from './registry.js'
+import { parseTrajectoryCode, sessionsRoot } from '../core.js'
+import { skiffTrajectoryDirNameFor } from './window.js'
 
 /** `skiff.json` 的固定文件名（**判据就是它存在**——不是目录名前缀，也不是配置里的一行） */
 export const SKIFF_PROFILE_FILENAME = 'skiff.json'
@@ -205,7 +212,7 @@ export function findDirNameByCode(root: string, code: string): string | null {
  *
  * ## 为什么"绑定的轨迹"从两个来源取（R↓，一个失败模式）
  * ① **持久绑定**（`readLastBound`，宿主存储域/`.bindings.json`）—— 权威，跨重启成立；
- * ② **内存注册表**（`skiff/registry`）—— 覆盖绑定的**窗口期**（轨迹刚定、bound 还没落盘）。
+ * ② **内存注册表**（`trajectory/policy/window`）—— 覆盖绑定的**窗口期**（轨迹刚定、bound 还没落盘）。
  * ⇒ 只取 ① 会在建会话的第一轮判成"不是 skiff"（工具面不收窄，模型看见不该有的工具）；
  *    只取 ② 会在进程重启后全判成"不是"（skiff 失去约束，**权限面静默放开**）。
  * ⇒ **两来源并取**，都不中才 `null`。

@@ -36,7 +36,7 @@
 import { existsSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { readUtf8 } from '../kernel/ccc.js'
-import type { SkiffProfile } from '../role/skiff/profile.js'
+import type { SkiffProfile } from './policy/profile.js'
 import { sessionsRoot } from './core.js'
 
 /** 轨迹提示词的固定文件名（**判据就是它存在**——不是目录名前缀，也不是配置里的一行） */

@@ -45,7 +45,7 @@ import {
 import { recordSkillInjections } from '../surface/usage.js'
 import { localstorePath, readGitTrack } from '../tools/localstore/service.js'
 import { readAdvancedSettings } from '../kernel/config.js'
-import { isSkiffSession } from '../role/skiff/profile.js'
+import { isSkiffSession } from '../trajectory/policy/profile.js'
 import { createTrajectoryPromptReader, trajectoryPromptBlock } from '../trajectory/prompt.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */

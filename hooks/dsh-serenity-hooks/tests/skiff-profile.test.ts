@@ -9,8 +9,8 @@ import {
   findDirNameByCode,
   skiffProfileForSession,
   SKIFF_PROFILE_FILENAME,
-} from '../src/role/skiff/profile.js'
-import { registerSkiffSession, unregisterSkiffSession, resetSkiffSessions } from '../src/role/skiff/registry.js'
+} from '../src/trajectory/policy/profile.js'
+import { registerSkiffSession, unregisterSkiffSession, resetSkiffSessions } from '../src/trajectory/policy/window.js'
 
 /**
  * skiff 的唯一判据（owner 2026-10-19 重做令）：**目录下有 `skiff.json` 的认知轨迹**。

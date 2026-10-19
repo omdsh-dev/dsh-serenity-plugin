@@ -11,7 +11,7 @@ import {
   DEFAULT_FAKE_INITIAL_MESSAGES,
   hasUserMessageHistory,
 } from '../src/seams/bootstrap.js'
-import { resetSkiffSessions, registerSkiffSession } from '../src/role/skiff/registry.js'
+import { resetSkiffSessions, registerSkiffSession } from '../src/trajectory/policy/window.js'
 import { makeSkiffSession, makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 /** 构造最小 agent（子 agent 模拟） */

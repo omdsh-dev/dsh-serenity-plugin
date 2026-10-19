@@ -39,7 +39,7 @@ import {
 import { readSimpleSettings, type HumanChannelSettings } from '../surface/settings.js'
 import { readWeixinSettings, readWeixinCredential, weixinSessionIdForTrajectory, matchWeixinRoute, extractWeixinText, hasVoiceItem, extractWeixinMedia, sanitizeFileName, weixinInboundDir, type WeixinAccountCredential } from './route.js'
 import { getUpdates, sendTextMessage, getConfig, sendTyping, TypingStatus, downloadMedia, sniffImageExt, markdownToPlainText, type WeixinMessage } from './ilink.js'
-import { readSkiffProfileByCode, type SkiffProfile } from '../role/skiff/profile.js'
+import { readSkiffProfileByCode, type SkiffProfile } from '../trajectory/policy/profile.js'
 import { stripThink } from '../surface/text.js'
 import { createSkiffAgent, getSkiffAgent, askSkiff, unregisterSkiffSession, workspaceCognitiveTrajectoryLine, ensureWorkspacePromptSection, skiffWorkspaceMdPath } from '../role/skiff/core.js'
 import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
@@ -289,7 +289,7 @@ async function resolveInboundTarget(ctx: Context, input: {
   //    ⚠️ **与旧模型的关键差别**：轨迹存在但没有 `skiff.json` **不是错** ——
   //       那只是一条普通轨迹，微信桥照样可以往里投（只是不施加 skiff 约束）。
   //       "没有这条轨迹"才是硬错（否则会静默投到一个不存在的地方）。
-  const { findDirNameByCode } = await import('../role/skiff/profile.js')
+  const { findDirNameByCode } = await import('../trajectory/policy/profile.js')
   const dirName = findDirNameByCode(root, target.role)
   if (dirName === null) {
     const detail = `目标 CCC "${target.ccc}" 内没有编码为 "${target.role}" 的认知轨迹`

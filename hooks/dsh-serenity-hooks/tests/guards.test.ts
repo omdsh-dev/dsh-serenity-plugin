@@ -22,7 +22,7 @@ import {
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/kernel/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im/channels.js'
 import { readBlacklist, matchBlacklist, pathInside, readSafeModeHiddenTools, type BlacklistRule } from '../src/kernel/ccc.js'
-import type { SkiffProfile } from '../src/role/skiff/profile.js'
+import type { SkiffProfile } from '../src/trajectory/policy/profile.js'
 
 let dir: string
 
@@ -49,7 +49,7 @@ function rules(...patterns: string[]): BlacklistRule[] {
  * 🔴 2026-10-19 重做带来的构造方式变化（R↓，别按旧模型再写回 `writeConfig({skiff:{roles:…}})`）：
  * - **载体**：skiff 的约束从 `.opencode/serenity.json` 的 `skiff.roles.<name>` 搬到**轨迹目录下的
  *   `skiff.json`**（`skiff.roles` 整段已退役 ⇒ 旧写法写进去也读不到）；
- * - **判据**：谁是 skiff 由 `role/skiff/profile.ts` 的 `skiffProfileForSession` **唯一**判定
+ * - **判据**：谁是 skiff 由 `trajectory/policy/profile.ts` 的 `skiffProfileForSession` **唯一**判定
  *   （"绑定的轨迹有 `skiff.json`"，不再看 sessionId 前缀）；
  * - **守卫**：只消费已解析好的 `skiffProfile`；`null`/`undefined` = 不是 skiff ⇒ 整段跳过。
  *

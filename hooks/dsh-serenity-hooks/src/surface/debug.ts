@@ -29,7 +29,7 @@
 import { type IncomingMessage, type ServerResponse } from 'node:http'
 import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { readSkiffProfileByCode, SKIFF_PROFILE_FILENAME } from '../role/skiff/profile.js'
+import { readSkiffProfileByCode, SKIFF_PROFILE_FILENAME } from '../trajectory/policy/profile.js'
 import { createSkiffAgent, askSkiff, getSkiffAgent, skiffSessionInfo, unregisterSkiffSession } from '../role/skiff/core.js'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
 // C2（CCC 发现面归一）：候选 CCC 枚举的**唯一真相源**是 kernel/ccc-roots.ts；

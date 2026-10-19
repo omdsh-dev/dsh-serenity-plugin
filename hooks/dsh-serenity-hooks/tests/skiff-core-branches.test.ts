@@ -15,7 +15,7 @@ import {
   skiffCognitiveTrajectoryEnabled,
   skiffMsmGate,
 } from '../src/role/skiff/core.js'
-import { resetSkiffSessions, registerSkiffSession } from '../src/role/skiff/registry.js'
+import { resetSkiffSessions, registerSkiffSession } from '../src/trajectory/policy/window.js'
 import { makeSkiffSession, makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 import { resetActiveSessionStore } from '../src/trajectory/core.js'
 
@@ -317,7 +317,7 @@ describe('skiff-core: skiffWorkspaceMdPath 的退化形态', () => {
 // D. skiffCognitiveTrajectoryEnabled / skiffMsmGate 的边角
 //
 // 🔴 2026-10-19：身份判据换了 —— 不再是「`serenity.json` 里配没配这个角色」，
-//    而是「**会话绑定的轨迹目录里有没有 `skiff.json`**」（`role/skiff/profile.ts`）。
+//    而是「**会话绑定的轨迹目录里有没有 `skiff.json`**」（`trajectory/policy/profile.ts`）。
 //    ⇒ 夹具从 writeConfig(`skiff.roles`) 改为 makeSkiffSession（真造一条带 `skiff.json` 的轨迹）。
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { registerSkiffSession } from '../../src/role/skiff/registry.js'
-import { SKIFF_PROFILE_FILENAME, skiffProfileForSession, type SkiffProfile } from '../../src/role/skiff/profile.js'
+import { registerSkiffSession } from '../../src/trajectory/policy/window.js'
+import { SKIFF_PROFILE_FILENAME, skiffProfileForSession, type SkiffProfile } from '../../src/trajectory/policy/profile.js'
 
 /**
  * skiff 测试夹具（**2026-10-19 重做后**的单一造数据入口）。

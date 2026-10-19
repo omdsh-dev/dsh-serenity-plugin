@@ -1,5 +1,5 @@
 /**
- * role/skiff/registry.ts — skiff 会话注册表（sessionId → {trajectory, ccc}；零 DSH 依赖）
+ * trajectory/policy/window.ts — 会话 → 轨迹 的内存映射（零 DSH 依赖）
  *
  * ## 它现在只做一件事：**把「会话」映到「轨迹」**
  *
@@ -7,6 +7,12 @@
  * skiff 的身份是**轨迹编码**，约束面住在该轨迹的 `skiff.json` 里（见 `./profile.ts`）。
  * ⇒ 本表退化为一张**会话 → 轨迹目录名**的内存映射，供**同步**热路径（guards / system-prompt）查询；
  * 权威来源仍是持久绑定（`trajectory/bound.ts` 的 `readLastBound`）。
+ *
+ * ## S12（2026-10-19，轨迹中心重构）：原名 `role/skiff/registry.ts`
+ *
+ * 改名理由：它**不是**一张"注册表"（注册表的语义是权威名单），它是**权威来源之外的一个窗口**——
+ * 覆盖「轨迹已定、绑定还没落盘」那一段（见下方「为什么还需要这张内存表」）。
+ * `registry` 这个名字会让下一个人以为它是权威，而权威在 `bound.ts` ⇒ 改叫 `window`。
  *
  * ## 为什么还需要这张内存表（R↓，一个窗口期）
  *

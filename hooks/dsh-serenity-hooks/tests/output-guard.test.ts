@@ -16,7 +16,7 @@ import {
 } from '../src/guard/filter.js'
 import { registerOutputGuardHook } from '../src/guard/seam.js'
 import { stripThink } from '../src/surface/text.js'
-import { resetSkiffSessions, registerSkiffSession } from '../src/role/skiff/registry.js'
+import { resetSkiffSessions, registerSkiffSession } from '../src/trajectory/policy/window.js'
 import { makeTrajectory, skiffJson } from './helpers/skiff-fixture.js'
 
 let dir: string
