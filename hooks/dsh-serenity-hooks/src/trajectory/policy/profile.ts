@@ -37,6 +37,7 @@ import { join } from 'node:path'
 import { readUtf8, resolveInside } from '../../kernel/ccc.js'
 import { parseTrajectoryCode, sessionsRoot } from '../core.js'
 import { trajectoryDirNameForSession } from './window.js'
+import type { RawPromptInjection } from '../prompt-injection.js'
 import {
   findTrajectoryFile,
   readTrajectoryFile,
@@ -94,6 +95,18 @@ export interface TrajectoryConstraint {
    * `resident` 只读动作按需查出。两句判据：管的是**被找到**，不是**不被销毁**。
    */
   resident?: { serves?: string }
+  /**
+   * **提示词注入模式**（owner 2026-10-20 令）—— 轨迹提示词**怎么**进入系统提示词。
+   *
+   * - 缺省（字段不写）⇒ `append`：容器与质量各块照常注入，轨迹提示词追加在第 ⑧ 位。
+   * - `{ "injection": "replace", "replaces": [...] }` ⇒ 轨迹提示词**取代**指定的约束块
+   *   （`metaphor` / `principles` / `cce` / `eap`；缺省全换），并站到它们的原位上。
+   *   **身份块（`=== Serenity ACC ===`）刻意不可替换** —— 判据见 `trajectory/prompt-injection.ts`。
+   *
+   * ⚠️ 本字段**只搬运值**，合法性与降级判决在 `planPromptInjection()`（纯函数、可单测）；
+   * 两份实现会让"文件里写的"与"实际生效的"分叉。
+   */
+  prompt?: RawPromptInjection
 }
 
 /**
@@ -206,6 +219,25 @@ export function readTrajectoryConstraintAt(trajectoryDir: string, root: string):
   }
   const tools = strListMaybe(obj.tools)
   const msms = strListMaybe(obj.msms)
+  /**
+   * 提示词注入模式（owner 2026-10-20）：只搬运，不判决。
+   *
+   * 🔴 判决在 `planPromptInjection()` —— 那里有唯一的合法性表与降级规则。
+   * 这里若也判一次（比如把未知值归一成 append），就会有两处真相：
+   * 一处静默改值、一处告警，读数是矛盾的（D151 同族）。
+   */
+  const promptRaw = obj.prompt
+  const prompt: RawPromptInjection | undefined =
+    promptRaw !== null && typeof promptRaw === 'object' && !Array.isArray(promptRaw)
+      ? {
+          ...(typeof (promptRaw as Record<string, unknown>).injection === 'string'
+            ? { injection: (promptRaw as Record<string, unknown>).injection as string }
+            : {}),
+          ...(strListMaybe((promptRaw as Record<string, unknown>).replaces) !== undefined
+            ? { replaces: strListMaybe((promptRaw as Record<string, unknown>).replaces) }
+            : {}),
+        }
+      : undefined
   return {
     dirName,
     code,
@@ -214,6 +246,7 @@ export function readTrajectoryConstraintAt(trajectoryDir: string, root: string):
     ...(tools !== undefined ? { tools } : {}),
     ...(msms !== undefined ? { msms } : {}),
     ...(resident !== undefined ? { resident } : {}),
+    ...(prompt !== undefined ? { prompt } : {}),
     cognitiveTrajectory: {
       session: boolOrTrue(ct.session),
       keeper: boolOrTrue(ct.keeper),

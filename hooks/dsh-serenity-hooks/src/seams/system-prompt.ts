@@ -29,13 +29,13 @@ import type { Context } from 'cordis'
 // 类型引用：拉入 system-prompt 包的 cordis 声明增强（ctx.systemPrompt）+ agent 对 AssembleContext 的合并
 import type { AssembleContext } from '@deepseek-ai/dsh-system-prompt'
 import { existsSync } from 'node:fs'
-import { basename, dirname } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { isSafeModeOn, readBlacklist, readCognitiveTrajectorySkills } from '../kernel/ccc.js'
 import { agentCwdFor, cccRootForCwd } from '../kernel/ccc-roots.js'
 import { ACC_VERSION } from '../kernel/constants.js'
 import { findEntrySkills } from '../skills/discovery.js'
 import { buildResourceIndex } from '../skills/resource-index.js'
-import { readActiveSessionMd, DEFAULT_SESSION_SCOPE } from '../trajectory/core.js'
+import { readActiveSessionMd, DEFAULT_SESSION_SCOPE, sessionsRoot } from '../trajectory/core.js'
 import { readLastBound } from '../trajectory/bound.js'
 import {
   buildCognitiveTrajectorySkillsSection,
@@ -45,8 +45,9 @@ import {
 import { recordSkillInjections } from '../surface/usage.js'
 import { localstorePath, readGitTrack } from '../tools/localstore/service.js'
 import { readAdvancedSettings } from '../kernel/config.js'
-import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
+import { isTrajectoryConstrained, readTrajectoryConstraintAt } from '../trajectory/policy/profile.js'
 import { createTrajectoryPromptReader, trajectoryPromptBlock } from '../trajectory/prompt.js'
+import { planPromptInjection, type RawPromptInjection } from '../trajectory/prompt-injection.js'
 
 /** 读取 persona 彩蛋配置（plugin 全局；未配置 → mode='' 彩蛋关闭） */
 function readPersonaSettings(): { mode: string; overrideText: string } {
@@ -520,17 +521,29 @@ export function serenitySystemPrompt(
 ): string {
   const persona = readPersonaSettings()
   const personaOn = persona.mode !== '' && persona.overrideText.trim() !== ''
-  const parts = [
-    identityBlock(root),
-    metaphorBlock(),
-    principlesBlock(root, personaOn),
-    cceBlock(),
-    // 🔴 T3（2026-10-19）：「人格」收敛为**表达层**，不再置换 EAP。
-    //    旧行为 = `personaOn ? personaBlock(...) : eapBlock()` ⇒ 开 persona 就**丢掉质量层**，
-    //    即 review F-05/R-14 那个悬置冲突。⇒ 现在两层**都注入**：persona 只能收窄表达，
-    //    不能取消「输出前自检」这件事本身（EAP 是容器纪律，不是风格）。
-    eapBlock(),
-  ]
+  // ⑧ 轨迹提示词（T1/T2，2026-10-19）：**这条轨迹是谁、按什么章程工作**。
+  //
+  // 🔴 2026-10-20（owner 令）：它的**注入模式**由 `trajectory.json` 的 `prompt` 段决定 ——
+  //    · 缺省 `append` ⇒ 追加（原行为，不变）
+  //    · `replace`   ⇒ 取代 `replaces` 里点名的**约束块**，并站到它们的原位上
+  //    判决是纯函数（`planPromptInjection`），**每次装配重新读盘** ⇒ 改设定即下一轮生效。
+  const trajReader = dirName === undefined ? null : createTrajectoryPromptReader(root, dirName)
+  const trajPrompt = trajReader === null ? '' : trajectoryPromptBlock(trajReader())
+  const plan = planInjectionFor(root, dirName, trajPrompt !== '')
+  // 🔴 身份块**无条件注入**：它不在可替换集里（`REPLACEABLE_PROMPT_BLOCKS`），
+  //    所以这里没有 `if (!plan.replaces.has('identity'))` 的分支 —— 那不是漏写。
+  //    若哪天要开放身份块替换（标准级决定），**两处必须同批改**：词表 ＋ 本行。
+  const parts: string[] = [identityBlock(root)]
+  // 表达层（replace 模式下紧随被取代块之后：先立"我的章法"，再谈表达）
+  if (plan.promptPosition === 'constraint' && trajPrompt !== '') parts.push(trajPrompt)
+  if (!plan.replaces.has('metaphor')) parts.push(metaphorBlock())
+  if (!plan.replaces.has('principles')) parts.push(principlesBlock(root, personaOn))
+  if (!plan.replaces.has('cce')) parts.push(cceBlock())
+  // 🔴 T3（2026-10-19）：「人格」收敛为**表达层**，不再置换 EAP。
+  //    旧行为 = `personaOn ? personaBlock(...) : eapBlock()` ⇒ 开 persona 就**丢掉质量层**，
+  //    即 review F-05/R-14 那个悬置冲突。⇒ 现在两层**都注入**：persona 只能收窄表达，
+  //    不能取消「输出前自检」这件事本身（EAP 是容器纪律，不是风格）。
+  if (!plan.replaces.has('eap')) parts.push(eapBlock())
   // 表达层（可选，紧跟质量层之后：先立标准，再谈表达）
   if (personaOn) {
     const expr = personaBlock(persona.mode, persona.overrideText)
@@ -542,12 +555,9 @@ export function serenitySystemPrompt(
   if (state) parts.push(state)
   const skill = entrySkillSectionText(root)
   if (skill) parts.push(skill)
-  // 🆕 ⑧ 轨迹提示词（T1/T2，2026-10-19）：**这条轨迹是谁、按什么章程工作**。
-  //    位置刻意在容器上下文（⑦）之后、轨迹方法论（§serenity-trajectory-skills，order -45）之前：
-  //    先知道容器与语境，再说"我是谁、怎么做"，最后才是方法论与工具细节。
-  //    🔴 它**追加**，永不替换上面任何一块 —— 那正是本概念相对「人格」的核心修正。
-  const trajPrompt = dirName === undefined ? '' : trajectoryPromptBlock(createTrajectoryPromptReader(root, dirName)())
-  if (trajPrompt !== '') parts.push(trajPrompt)
+  // 追加形态：位置刻意在容器上下文（⑦）之后、轨迹方法论（§serenity-trajectory-skills，order -45）之前：
+  // 先知道容器与语境，再说"我是谁、怎么做"，最后才是方法论与工具细节。
+  if (plan.promptPosition === 'late' && trajPrompt !== '') parts.push(trajPrompt)
   // 需求③：工具参考块殿后（SKILL 后、Session 前）——身份先行、工具清单独立成块
   parts.push(toolsBlock())
   const session = sessionBlock(root, scope)
@@ -555,6 +565,40 @@ export function serenitySystemPrompt(
   // 对齐 osp：块间以空行分隔（osp 逐项 push output.system，host 以换行拼接；不加 `---` 分隔线）
   return parts.join('\n\n')
 }
+
+/**
+ * 解析该轨迹的**注入判决**（每次装配现读；坏设定只告警一次，不阻断装配）。
+ *
+ * 🔴 为什么热路径可以读盘：`trajectory.json` 是**每轮都要读**的本来就有的东西
+ * （工具白名单 / model / resident 都走同一条读取路径），多读一次不会改变复杂度量级；
+ * 而**缓存**会让"改了设定但没生效"重新变成一个只能靠重启解释的现象 ——
+ * owner 这次的原话里明确要求「对提示词和设定的修改可以热生效」。
+ *
+ * @param root CCC 根
+ * @param dirName 绑定的轨迹目录名（`undefined` ⇒ 追加模式，无轨迹上下文）
+ * @param hasTrajectoryPrompt 该轨迹目录里是否真有 `PROMPT.md`（`replace` 的前提）
+ */
+function planInjectionFor(root: string, dirName: string | undefined, hasTrajectoryPrompt: boolean) {
+  if (dirName === undefined) return planPromptInjection(undefined, false)
+  let raw: RawPromptInjection | undefined
+  try {
+    raw = readTrajectoryConstraintAt(join(sessionsRoot(root), dirName), root)?.prompt
+  } catch {
+    raw = undefined // 读不到 ⇒ 缺省追加（不阻断装配；坏 JSON 已在 profile 层告警过）
+  }
+  const plan = planPromptInjection(raw, hasTrajectoryPrompt)
+  for (const p of plan.problems) {
+    const key = `${root}\u0000${dirName}\u0000${p}`
+    if (!warnedPromptInjection.has(key)) {
+      warnedPromptInjection.add(key)
+      console.warn(`[serenity-hooks] ✗ 轨迹提示词注入设定（${dirName}）：${p}`)
+    }
+  }
+  return plan
+}
+
+/** 同一（CCC × 轨迹 × 原因）只告警一次：每轮装配都执行，不去重会刷屏（但**不静默**） */
+const warnedPromptInjection = new Set<string>()
 
 /**
  * Code Mode 适配行：当前 scope 以 Code Mode 呈现工具时（run_code 可见），

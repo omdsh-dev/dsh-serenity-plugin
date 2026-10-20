@@ -110,6 +110,7 @@ const ALL_KEYS_OPTIONAL = `── 🔴 所有 key 都是可选的：不写 = 不
   | \`resident\` | 不出现在常驻名单里（不参与"被找"） | 每轮 |
   | \`cognitiveTrajectory\` | 三项纪律全参与（true） | 每轮 |
   | \`systemPromptFile\` / \`systemPrompt\` | 用 ACC 的通用身份（**不替换**） | 保存即生效 |
+  | \`prompt\` | 追加模式：宁静号各块照常注入，章程排在它们之后 | **每轮**（改文件下一轮即生效） |
 
   🔴 **"没写" 与 "写了空数组" 是两种意思**：
       \`"tools": []\`（显式空数组）= **我一个都不给** ⇒ 除 \`skill\` 外全部工具被隐藏。
@@ -117,8 +118,44 @@ const ALL_KEYS_OPTIONAL = `── 🔴 所有 key 都是可选的：不写 = 不
       ⇒ 想只声明常驻？那就**只写 resident**，别的键一个都不要写。
 
   🔴 **写 \`trajectory.json\` 本身不改任何默认行为** —— 它只是"我把设定放这儿了"。
-      只有当某个 key **真的取代了默认**（目前唯一一个是自带章程 systemPrompt*）时，
-      这条轨迹才不再注入 ACC 身份。其余字段都不影响。`
+      只有当某个 key **真的取代了默认**时才改变装配，目前只有两处：
+      ① 自带章程 \`systemPromptFile\` / \`systemPrompt\`（取代 ACC 身份）；
+      ② \`prompt.injection = "replace"\`（**只**取代四个约束块，**不动**身份块）。
+      其余字段都不影响。`
+
+/**
+ * 提示词注入模式（owner 2026-10-20 令）—— "我的章程是**加在**宁静号上面，还是**取代**它的约束层"。
+ *
+ * 🔴 为什么必须写进手册（D178）：它改的是**我每轮看到什么**，而写它的人正是"我"这条轨迹；
+ * 藏在别处等于不存在。判据（可替换的四块 / 身份块不可换 / 没有章程就降级）逐条对着实现写。
+ */
+const PROMPT_INJECTION = `── 我的章程怎么进来：追加（缺省）还是替换 ──
+
+  \`trajectory.json\` 的 \`prompt\` 段（**不写它 = 追加**，既有行为逐字不变）：
+
+  \`\`\`jsonc
+  {
+    "prompt": {
+      "injection": "replace",                       // append（缺省）| replace
+      "replaces": ["metaphor", "principles", "cce", "eap"]   // 可选；不写 = 四块全换
+    }
+  }
+  \`\`\`
+
+  | 模式 | 结果 |
+  |---|---|
+  | \`append\`（缺省） | 宁静号各块照常注入，我的 \`PROMPT.md\` **追加**在它们之后 |
+  | \`replace\` | 我点名的**约束块**不再注入，我的 \`PROMPT.md\` **站到它们原来的位置**（紧跟身份块） |
+
+  可替换的四块：\`metaphor\`（世界模型）／\`principles\`（信念与边界）／\`cce\`（连续性纪律）／\`eap\`（输出标准）。
+  🔴 **身份块（\`=== Serenity ACC ===\`）不可替换** —— 它回答"我在哪儿工作"，不是"按什么章法工作"；
+  写进去会被丢弃并指名告警。
+
+  🔴 **两条硬前提**（缺一即**降级回 append** 并告警，绝不静默）：
+  ① \`replace\` 需要**真的有一份 \`PROMPT.md\`** —— 没有替代物的替换 = 静默清空纪律；
+  ② \`append\` 下写 \`replaces\` 不生效（会告诉你，别以为它管用）。
+
+  ⚠️ 想表达"我一块都不想换" ⇒ 写 \`"replaces": []\`（显式空数组），它**不等于**不写（不写 = 四块全换）。`
 
 /**
  * 约束面 —— 只讲"怎么开启"，正文指向另一章。
@@ -133,6 +170,8 @@ const CONSTRAINT_POINTER = `── 想限制自己（白名单 / 模型 / 纪律
 const VERIFY = `── 写完之后怎么验（别只看文档，要能机械判定）──
 
   章程生效了吗    改 PROMPT.md 后**在同一会话里**看下一轮的系统提示词段是否变化（保存即生效）
+  注入模式生效了吗 改 trajectory.json 的 prompt 段后，**同一会话下一轮**：replace 下四块消失、
+                  我的章程紧跟身份块；⛔ 不需要重启（这两者都是每轮现读）
   我声明了什么    container_admin config list  —— 逐轨迹列出 model/tools/msms 的**生效值**；
                   没写的字段印 \`(unchanged)\` / \`(unrestricted)\`，不是伪装成某个默认值
   配置合法吗      container_admin config validate  —— msms 均已注册 / model 在可用表里
@@ -154,6 +193,8 @@ export const TRAJECTORY_SELF_GUIDE = [
   CARRIERS,
   '',
   CHARTER,
+  '',
+  PROMPT_INJECTION,
   '',
   RESIDENT,
   '',
