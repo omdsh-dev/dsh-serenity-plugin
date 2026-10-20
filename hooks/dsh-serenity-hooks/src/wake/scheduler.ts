@@ -31,7 +31,8 @@ import { existsSync, realpathSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { findSession, parseTrajectoryCode, sessionsRoot, trajectoryDescOf } from '../trajectory/core.js'
 import { buildCarrierOpening, deliverCarrierOpening } from '../trajectory/user-carrier.js'
-import { listBoundSessionIds, appendBound } from '../trajectory/bound.js'
+import { listBoundSessionIds, appendBound, carrierState } from '../trajectory/bound.js'
+import { hasSessionLogById, sessionsRootDir } from '../trajectory/cleanup.js'
 import { evaluateCro, listCroCognitiveTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from '../cro/core.js'
 import { runningCarriersOf } from '../cro/turns.js'
 import { appendCroWakeLog } from '../cro/log.js'
@@ -396,6 +397,39 @@ export async function sendToCognitiveTrajectory(
     //    冷载入失败）**一律照原样返回** —— 那些不是"没载体"，而是"载体此刻取不到"，
     //    建新载体既解决不了问题、还会**制造第二条**（与"只留一条"冲突）。
     if (!acquired.notReady && acquired.noBinding === true) {
+      // 🔴 **第 2 条守卫（owner 2026-10-20）**：**这条轨迹曾经有过载体 ⇒ 禁止再建新的**。
+      //
+      // 为什么不能只看 `noBinding`：它的判据是"绑定表里有没有**未退**条目"，
+      // 而"条目被退掉"与"从未有过会话"在读数上完全一样 ⇒ 于是一条轨迹的载体退役后
+      // 又长出一个新的（实测：S196 在同一分钟内出现第二个载体）。
+      //
+      // 新判据 = **轨迹目录里有没有交代**（`carrierState`）：
+      //  · `never`    ⇒ 从未有过 ⇒ 允许自建（owner 认这是正当用例）
+      //  · `occupied` ⇒ 有过，但那个会话现在不在 ⇒ **禁止自建**，如实报错
+      //  · `live`     ⇒ 此刻有效（`acqired.noBinding` 与它矛盾 = 读数打架，同样不建）
+      const carrier = carrierState(root, t.dirName, (id) => {
+        const live = hostAgents(ctx)?.get?.(id)
+        if (live) return true
+        // 冷会话：宿主存储里有它的日志就算"存在"（fail-open：读不到 ⇒ 当作存在 ⇒ 不建新的）
+        try {
+          return hasSessionLogById(sessionsRootDir(), id)
+        } catch {
+          return true
+        }
+      })
+      if (carrier.state !== 'never') {
+        const why =
+          carrier.state === 'occupied'
+            ? `该轨迹曾经由会话 ${carrier.sessionId} 承载，而它此刻不在了`
+            : `该轨迹当前由会话 ${carrier.sessionId} 承载`
+        return {
+          ok: false,
+          detail:
+            `${t.dirName}：${why} ⇒ **拒绝自动新建载体**（一条轨迹至多一个载体）。\n` +
+            `  · 要让它重新跑起来：把那个会话恢复，或用 cognitive_trajectory rebuild 换代（显式 takeover）。\n` +
+            `  · 不明所以就先 cognitive_trajectory show ${t.dirName} 看它的交代文件。`,
+        }
+      }
       acquired = await createAndBindTarget(ctx, root, t.dirName)
       if ('error' in acquired) return { ok: false, detail: acquired.error }
       createdNote = `；目标原本无活跃 dsh 会话 ⇒ **已自动创建并绑定**一条（${acquired.how}）`

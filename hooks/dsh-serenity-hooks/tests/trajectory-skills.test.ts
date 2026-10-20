@@ -81,11 +81,21 @@ function writeSession(root: string, dirName: string, md: string): string {
   return p
 }
 
-function bind(root: string, sessionId: string, dirName: string, mdPath: string): void {
-  mkdirSync(join(root, 'AGENT_SESSIONS'), { recursive: true })
+/**
+ * 写一条归属（D172：**归属住在轨迹目录自己里面**）。
+ *
+ * ⚠️ 语义是"这条轨迹此刻由 `sessionId` 承载"——单槽位，重复调用即**覆盖**（不是追加）。
+ * ⚠️ 只建目录与交代文件，**不建 `SESSION.md`** —— 有一组用例正是要断言
+ *    「绑定在、但 `SESSION.md` 不存在」时的 `[缺失]` 提示；顺手造一份就把它测没了。
+ * ⚠️ `mdPath` 参数保留只为不改所有调用点：新形态下 `mdPath` 由 `dirName` 派生，
+ *    读侧根本不再从绑定里取它（见 `bound.ts` 的 `toRecord`）。
+ */
+function bind(root: string, sessionId: string, dirName: string, _mdPath: string): void {
+  const dir = join(root, 'AGENT_SESSIONS', dirName)
+  mkdirSync(dir, { recursive: true })
   writeFileSync(
-    join(root, 'AGENT_SESSIONS', '.bindings.json'),
-    JSON.stringify({ version: 1, sessions: { [sessionId]: { dirName, mdPath, action: 'activate', at: Date.now() } } }),
+    join(dir, 'current.dsh_session_bind'),
+    JSON.stringify({ sessionId, at: Date.now(), action: 'activate' }),
   )
 }
 
@@ -281,7 +291,12 @@ describe('cognitive-trajectory-skills: section 注册门（per-agent）', () => 
     const { agent, sections } = fakeAgent(dir, id)
     expect(registerCognitiveTrajectorySkillSection(agent, dir)).toBe(true)
     expect(renderText(sections[0]!)).toContain('FIRST 正文')
-    // 换绑定 → 同一 section 的求值改为新轨迹的声明
+    // 换绑定 → 同一 section 的求值改为新轨迹的声明。
+    //
+    // 🔴 D172 的 switch 是**两动作配对**：单槽位形态下"只写 B"会让 A 与 B 都声称自己承载这个会话
+    // （旧夹具靠重写整张 `.bindings.json` 隐式做到了"清 A"，那在新形态里是**结构上不可能**的）。
+    // ⇒ 夹具必须照 `bind-file.ts` 头注的迁移表做：**先清 A，再写 B**。
+    rmSync(join(dir, 'AGENT_SESSIONS', '2026-09-15--S999--a', 'current.dsh_session_bind'), { force: true })
     const md2 = writeSession(dir, '2026-09-15--S999--b', '---\nskills: [second]\n---\n')
     bind(dir, id, '2026-09-15--S999--b', md2)
     const after = renderText(sections[0]!)

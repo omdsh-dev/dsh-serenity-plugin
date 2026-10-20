@@ -49,17 +49,21 @@ function writeSessionDir(dirName = DIR_NAME): string {
   return dir
 }
 
+/**
+ * 写一条归属（D172：写进**轨迹目录**的 `current.dsh_session_bind`，不再是旁路表）。
+ *
+ * ⚠️ 语义是"这条轨迹当前由 `sessionId` 承载"——**单槽位**，重复调用即覆盖（不是追加）。
+ * 旧夹具靠 `.bindings.json` 的多条记录构造"一条轨迹挂多代载体"，
+ * 那在新形态里**结构上不可能**，相关用例已随判决退役。
+ */
 function writeBinding(sessionId: string, dirName = DIR_NAME, at = Date.now()): void {
-  const path = join(root, 'AGENT_SESSIONS', '.bindings.json')
-  let sessions: Record<string, unknown> = {}
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as { sessions?: Record<string, unknown> }
-    sessions = parsed.sessions ?? {}
-  } catch {
-    sessions = {}
-  }
-  sessions[sessionId] = { dirName, mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'), action: 'activate', at }
-  writeFileSync(path, JSON.stringify({ version: 1, sessions }), 'utf-8')
+  const dir = join(root, 'AGENT_SESSIONS', dirName)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, 'current.dsh_session_bind'),
+    JSON.stringify({ sessionId, at, action: 'activate' }),
+    'utf-8',
+  )
 }
 
 beforeEach(() => {

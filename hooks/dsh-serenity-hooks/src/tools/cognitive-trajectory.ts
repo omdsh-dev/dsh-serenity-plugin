@@ -47,8 +47,7 @@ import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../kernel/ccc.js'
 import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
-import { appendBound, pruneMissingBindings, readLastBound, resolveSessionCognitiveTrajectoryLabel, supersedeOtherBindings } from '../trajectory/bound.js'
-import { hasSessionLogById, sessionsRootDir } from '../trajectory/cleanup.js'
+import { appendBound, readLastBound, resolveSessionCognitiveTrajectoryLabel } from '../trajectory/bound.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake/registry.js'
 import { sendToCognitiveTrajectory } from '../wake/scheduler.js'
 import { CRO_GUIDE } from '../cro/guide.js'
@@ -408,29 +407,37 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         const targetEntry = findSession(join(root, 'AGENT_SESSIONS'), args.name)
         if (!targetEntry) throw new Error(`Session not found: "${args.name}". Use "list" to see available sessions.`)
         const targetDirName = targetEntry.dirName
-        // G1 硬守卫（U5）：目标 ≠ 当前绑定 → 拒绝（除非 --force 显式切换）
+        // 🔴 G1 硬守卫（D172，owner 2026-10-20 裁「use 直接报错」）：**不许原地改宗**。
+        //
+        // 旧实现留了 `--force` 后门，于是"一条会话先后属于两条轨迹"在事实上可能发生。
+        // owner 的要求是一条会话**终身**只属于一条轨迹 ⇒ 后门整条退役。
+        //
+        // ⚠️ `--force` 参数**保留解析**（不报 unknown-arg）：老调用会命中这里并拿到
+        // **说明为何退役**的文案 —— 静默忽略比报错更坏（本仓 D131：错误文案不是机制的证据）。
         const currentDir = currentBoundDirName(exec, scope)
-        const switching = currentDir !== null && targetDirName !== currentDir
-        const force = args.force === true
-        if (switching && !force) {
+        if (currentDir !== null && targetDirName !== currentDir) {
           throw new Error(
-            `Session is bound to ${currentDir}. Switching to ${targetDirName} would orphan the current cognitive trajectory. ` +
-            `Re-run with --force to switch (or close the current session first).`,
+            `这个会话已经承载认知轨迹「${currentDir}」，不能改宗到「${targetDirName}」。\n` +
+            `一个会话终身只属于一条认知轨迹（2026-10-20 裁决，--force 已退役）。\n` +
+            `要继续用「${currentDir}」⇒ 不用任何操作；要给「${targetDirName}」开一个载体 ⇒ 新建一条会话再 use。`,
           )
         }
         const active = useSession(root, args.name, scope)
         // v1.21 F3：激活后重命名 dsh 会话标题（S###-日期-概括）
         const info = getActiveSessionInfo(scope)
         if (info) renameDshSessionForActive(ctx, exec, info, args.summary)
-        // 持久化绑定（U1）：无先前绑定 → activate；经 force 切换 → switch
+        // 持久化归属（D172）：写**轨迹目录里的自我交代**。
+        //
+        // 生命周期（`trajectory/bind-file.ts` 头注）：走到这里只有两种迁移 ——
+        //  · 该会话此前无归属 ⇒ **acquire**
+        //  · 已归属**同一条**轨迹 ⇒ **幂等重入**（不产生第二次写语义）
+        // ⛔ `switch` 已由上面的硬守卫挡掉；`takeover` 只属于 rebuild 路径。
         const dsh = agentDshSession(exec)
         if (dsh && info) {
-          const prevBound = readLastBound(dsh)
-          appendBound(dsh, switching && prevBound ? 'switch' : 'activate', {
+          appendBound(dsh, 'activate', {
             dirName: info.dirName,
             mdPath: info.mdPath,
             sessionId: info.sessionId,
-            ...(switching ? { note: 'forced switch' } : {}),
           })
         }
         // 内联完整性检查（v1.33）：原 health/qa 因"判据＝旧模板"被淘汰，这里只留不依赖模板的两项
@@ -438,20 +445,9 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         const advisory = advisoryHint(targetEntry.dirName, join(targetEntry.path, 'SESSION.md'))
         const out: Record<string, JsonValue> = { dir: active.dir, mdPath: active.mdPath, context: active.context }
         if (advisory) out.advisory = advisory
-        // (b) 多 live 会话守卫（S142 §0y，所有者 2026-09-18 裁「b 做」）：
-        //   🔴 **2026-09-21 起退休动作由 `appendBound` 单一入口负责**（上一步那次写入时，
-        //      **同一次 RMW** 里就把同轨迹的其它条标 superseded）。**此处不再自己算 selfId**——
-        //      那正是 F1 的成因：`agentDshSession(exec)` 返回的是**只带 `append` 的包装对象**，
-        //      读 `.header?.id` **恒得 `''`** ⇒ 保留集为空 ⇒ 把**刚写进去的自己那条**也标掉
-        //      ⇒ 该轨迹瞬间**零可用绑定** ⇒ 唤醒 / `send-now` / `send-later` 全部报
-        //      「无绑定会话记录」（且症状与"到点没人接"不可区分）。
-        //      收进入口后，`create`/`activate`/`switch`/`rebuild` **全部路径一致生效**（F2 同解）。
-        if (dsh) {
-          // (c) 兜底：清掉指向**已不存在**的 dsh 会话的悬空绑定（判据 fail-closed，
-          //     见 hasSessionLogById —— sessions root 读不到时一律保留）。
-          const pruned = pruneMissingBindings(root, (id) => !hasSessionLogById(sessionsRootDir(), id))
-          if (pruned.length > 0) out.prunedBindings = pruned
-        }
+        // (b)(c) 已退役（D172）：
+        //  · "只留一条"不再需要 —— 轨迹的槽位是**一个文件**，写入即覆盖，没有可以退的第二条；
+        //  · "悬空清理"不再需要 —— owner：「sessionId 不存在 ⇒ 视同没绑定」，过期文件自动失效。
         return out
       }
       case 'rebuild': {

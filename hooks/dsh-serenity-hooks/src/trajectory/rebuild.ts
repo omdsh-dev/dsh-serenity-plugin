@@ -329,7 +329,11 @@ export async function queueRebuild(
   // U1（方案 v1.0）：rebuild 排队时持久化绑定（action: rebuild）——权威绑定随会话日志
   // 存续跨 rebuild（同一 dsh 会话 id 日志保留）；post-rebuild 恢复读 last bound 即此记录。
   const dirName = basename(dirname(mdPath))
-  const boundRec = { dirName, mdPath, sessionId: sessionName.startsWith('S') ? sessionName : undefined, note: 'rebuild queued' }
+  // 🔴 D172（2026-10-20）：**不再传 `sessionId`**。旧写法传的是"展示码（S###），非 S### 则 undefined"，
+  // 那是**旧记录语义**；新形态下 `sessionId` 恒等于 dsh 会话 id（硬锚，由 `appendBound` 从
+  // `session.header.id` 取，**不读这个字段**）⇒ 那行参数从来就没生效过（死参数，且会让人误以为
+  // 它决定落盘内容）。展示码现在由 `readLastBound` 从目录名派生到 `sessionId2`。
+  const boundRec = { dirName, mdPath, note: 'rebuild queued' }
   appendBound(session, 'rebuild', boundRec)
 
   // ③ 排队（覆盖同会话旧队列）——需求②：存 summary + mdPath（turn-stopping 重建后重命名标题）

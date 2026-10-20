@@ -82,10 +82,24 @@ afterEach(() => {
 
 // ── 夹具（与 tests/rebuild.test.ts 同形状；此处按需加"可注入故障"） ────────────────
 
+/**
+ * 🔴 D172（2026-10-20）：**每条夹具会话必须有唯一 id**。
+ *
+ * 旧写法所有实例都硬编码 `header.id = 'session-x'`，而新不变量是
+ * 「一个会话终身只属于一条认知轨迹」（`claimBinding` 的 `SESSION_TAKEN`）⇒
+ * 同一用例里第二个 `queueFor` 的绑定会被**正当地拒绝**，随后 `resolveSessionMdPath`
+ * 回落到第一个目录 ⇒ 症状是「rename 拿到了别人的目录名」。
+ *
+ * ⚠️ 这不是夹具"抄错了"，而是**夹具不像真实会话**：真实 dsh 会话 id 天然互不相同。
+ * 🔵 判据：凡"一个会话只能绑一条轨迹"这类**跨实例**不变量，夹具必须让实例真的可区分，
+ *    否则不变量要么测不到、要么以别的形态炸在远处。
+ */
+let fakeSessionSeq = 0
 function fakeSession(nodes: number[], opts: { appendThrows?: boolean; events?: unknown[] } = {}) {
   const calls: Array<{ type: string; data: unknown; opts: unknown }> = []
+  fakeSessionSeq += 1
   return {
-    header: { id: 'session-x', cwd: dir },
+    header: { id: `session-x-${fakeSessionSeq}`, cwd: dir },
     surface: { nodes, replaceGeneration: 0 },
     ...(opts.events ? { events: opts.events } : {}),
     append: (type: string, data: unknown, o?: unknown) => {
@@ -181,7 +195,13 @@ describe('rebuild-executor：queueRebuild 的门与回落', () => {
     expect(r.sessionMdPath).toBe(md)
     const bound = readLastBound(session)
     expect(bound?.action).toBe('rebuild')
-    expect(bound?.sessionId).toBeUndefined() // 目录名不含 S### ⇒ 不编造
+    // 🔴 D172：`sessionId` 现在是 **dsh 会话 id**（硬锚，必有）；展示码搬到了 `sessionId2`。
+    // 旧断言 `sessionId` 未定义，测的是"目录名不含 S### ⇒ 不编造展示码"——
+    // 那条语义仍然成立，但**落点变了**：判据在 `sessionId2` 上。
+    expect(bound?.sessionId).toBe(session.header.id) // 硬锚 = 会话 id，不是展示码
+    // 展示码 = `parseTrajectoryCode` 的产物（剥掉日期前缀后的首段，无 `--` 则取整段剩余）
+    // ⇒ `2026-08-28--no-id-here` → `no-id-here`。**这套派生与编号编造无关**：它只是"能从目录名读到什么"。
+    expect(bound?.sessionId2).toBe('no-id-here')
     expect(bound?.note).toBe('rebuild queued')
 
     // ② 有内存活跃信息 ⇒ 走 `?.sessionId` 的**左侧**（生产常态：`cognitive_trajectory use` 之后重启重建）
@@ -189,7 +209,14 @@ describe('rebuild-executor：queueRebuild 的门与回落', () => {
     const r2 = await queueRebuild(qctx(session), { root: dir, summary: 'x', agentCwd: dir, dshSessionId: 's1' })
     expect(r2.queued).toBe(true)
     expect(r2.anchor).toContain('S777') // 锚点里的会话名来自活跃存储，不是目录名
-    expect(readLastBound(session)?.sessionId).toBe('S777')
+    // 🔴 D172 **一处真实的语义变化**（不是凑数）：绑定记录里的展示码现在**由目录名派生**
+    // （`toRecord` → `cognitiveTrajectoryLabel(dirName)`），**不再取自内存活跃存储**。
+    //
+    // 为什么可以且更对：展示码是**目录名的结构**（D165：「`code` 留给结构」）⇒ 从目录派生 = 单真相源；
+    // 而本用例的 `S777` 与目录名 `2026-08-28--no-id-here` **本来就是矛盾的**（夹具刻意造的错配，
+    // 生产里 `use` 写活跃存储的 `sessionId` 正是 `extractSessionId(dirName)`，两者天然一致）。
+    // ⇒ 错配时以**目录**为准；锚点仍用活跃存储（那是"这次重建叫它什么"的运行时事实，两件事分开）。
+    expect(readLastBound(session)?.sessionId2).toBe('no-id-here')
   })
 })
 

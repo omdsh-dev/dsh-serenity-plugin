@@ -143,16 +143,15 @@ function writeSessionDir(dirName = DIR_NAME): string {
   return dir
 }
 
+/** 写一条归属（D172：写进轨迹目录的 `current.dsh_session_bind`；单槽位，重复调用即覆盖） */
 function writeBinding(sessionId: string, dirName = DIR_NAME, at = Date.now()): void {
-  const path = join(root, 'AGENT_SESSIONS', '.bindings.json')
-  const sessions: Record<string, unknown> = {}
-  sessions[sessionId] = {
-    dirName,
-    mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'),
-    action: 'activate',
-    at,
-  }
-  writeFileSync(path, JSON.stringify({ version: 1, sessions }), 'utf-8')
+  const dir = join(root, 'AGENT_SESSIONS', dirName)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(
+    join(dir, 'current.dsh_session_bind'),
+    JSON.stringify({ sessionId, at, action: 'activate' }),
+    'utf-8',
+  )
 }
 
 /**

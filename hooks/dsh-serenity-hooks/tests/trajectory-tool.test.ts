@@ -43,7 +43,7 @@ vi.mock('../src/trajectory/cleanup.js', async (importOriginal) => {
 import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory.js'
 import { hasSessionLogById } from '../src/trajectory/cleanup.js'
 import { resetActiveSessionStore, COGNITIVE_TRAJECTORY_ACTIONS } from '../src/trajectory/core.js'
-import { setBindingStore, BINDINGS_REL_PATH } from '../src/trajectory/bound.js'
+import { BIND_FILENAME } from '../src/trajectory/bound.js'
 import { NO_CCC_FROM_AGENT_CWD } from '../src/kernel/ccc-roots.js'
 
 const mockHasLog = vi.mocked(hasSessionLogById)
@@ -92,8 +92,44 @@ function toolWith(ctx: unknown) {
   return createCognitiveTrajectoryTool(ctx as never) as unknown as typeof tool
 }
 
+/**
+ * 读绑定（D172：归属住在**轨迹目录**的 `current.dsh_session_bind`，不再是旁路表）。
+ *
+ * 返回形状保持旧用例的读法（`{version, sessions: {sessionId: record}}`），便于判据几乎不动 ——
+ * **但来源换成了"扫所有轨迹目录"**，即"归属是算出来的，不是记下来的"。
+ */
+/**
+ * D172：判断"有没有绑定"不再看旁路表，而是**扫轨迹目录**。
+ * 空 ⇒ 一条归属都没有；非空 ⇒ 有会话被绑在某条轨迹上。
+ */
+function hasAnyBindingFile(): boolean {
+  return Object.keys(bindings().sessions).length > 0
+}
+
 function bindings(): { version: number; sessions: Record<string, { dirName: string; action: string; note?: string }> } {
-  return JSON.parse(readFileSync(join(ccc, BINDINGS_REL_PATH), 'utf-8'))
+  const sessions: Record<string, { dirName: string; action: string; note?: string }> = {}
+  const root = join(ccc, 'AGENT_SESSIONS')
+  let names: string[] = []
+  try {
+    names = readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+      .map((e) => e.name)
+  } catch {
+    return { version: 1, sessions }
+  }
+  for (const dirName of names) {
+    const p = join(root, dirName, BIND_FILENAME)
+    if (!existsSync(p)) continue
+    try {
+      const d = JSON.parse(readFileSync(p, 'utf-8')) as { sessionId?: string; action?: string; note?: string }
+      if (typeof d.sessionId === 'string' && d.sessionId !== '') {
+        sessions[d.sessionId] = { dirName, action: d.action ?? 'activate', ...(d.note ? { note: d.note } : {}) }
+      }
+    } catch {
+      /* 坏文件跳过 */
+    }
+  }
+  return { version: 1, sessions }
 }
 
 function wakeRegistry(): { entries?: Array<{ id: string; target: string; state: string }> } {
@@ -105,13 +141,11 @@ beforeEach(() => {
   writeFileSync(join(ccc, '.serenity'), 'trajtest\n')
   mkdirSync(join(ccc, 'AGENT_SESSIONS'), { recursive: true })
   resetActiveSessionStore()
-  setBindingStore(null) // 桩 ②：绑定钉回 CCC 内文件
   mockHasLog.mockReturnValue(true)
 })
 
 afterEach(() => {
   rmSync(ccc, { recursive: true, force: true })
-  setBindingStore(null)
   resetActiveSessionStore()
 })
 
@@ -176,13 +210,13 @@ describe('cognitive_trajectory：create', () => {
   it('dry-run 豁免 summary（未真实创建 ⇒ 不写绑定）', async () => {
     const out = (await run({ action: 'create', desc: 'preview', dryRun: true })) as string
     expect(out.length).toBeGreaterThan(0)
-    expect(existsSync(join(ccc, BINDINGS_REL_PATH))).toBe(false)
+    expect(hasAnyBindingFile()).toBe(false)
   })
 
   it('issue 会话豁免 summary（编号固定派生、无概括语义）', async () => {
     await run({ action: 'create', issue: 'apaas-1' })
     // 真建了目录 + 写了绑定。🆕 2026-10-16（owner 令）：**无绑定 ⇒ 自动激活**（故 action=activate，不再是 create）
-    expect(existsSync(join(ccc, BINDINGS_REL_PATH))).toBe(true)
+    expect(hasAnyBindingFile()).toBe(true)
     expect(bindings().sessions['dsh-1']?.action).toBe('activate')
     expect(bindings().sessions['dsh-1']?.note).toContain('auto-activated on create (no prior binding)')
   })
@@ -243,24 +277,24 @@ describe('cognitive_trajectory：use —— 守卫与绑定（agentScope / agent
     expect(rec?.action).toBe('activate')
   })
 
-  it('🔴 G1 切换守卫：已绑定 A ⇒ 用 B 被拒（文案说明会 orphan 当前轨迹）', async () => {
+  it('🔴 G1 切换守卫（D172）：已承载 A ⇒ 用 B 被拒（**一个会话终身一条轨迹**）', async () => {
     writeSession(A_DIR)
     writeSession(B_DIR)
     await run({ action: 'use', name: 'S900', summary: '概' })
-    await expect(run({ action: 'use', name: 'S901', summary: '概' })).rejects.toThrow(/would orphan the current cognitive trajectory/)
-    // 被拒后绑定不变（仍是 A）
+    await expect(run({ action: 'use', name: 'S901', summary: '概' })).rejects.toThrow(/不能改宗到/)
+    // 被拒后归属不变（仍是 A）
     expect(bindings().sessions['dsh-1']?.dirName).toBe(A_DIR)
   })
 
-  it('🔴 G1 放行：--force ⇒ 真切换，绑定 action=switch + note=forced switch', async () => {
+  it('🔴 D172：`--force` **已退役** —— 显式传它也照样被拒（不是"换了个后门"）', async () => {
     writeSession(A_DIR)
     writeSession(B_DIR)
     await run({ action: 'use', name: 'S900', summary: '概' })
-    await run({ action: 'use', name: 'S901', summary: '概', force: true })
-    const rec = bindings().sessions['dsh-1']
-    expect(rec?.dirName).toBe(B_DIR)
-    expect(rec?.action).toBe('switch')
-    expect(rec?.note).toBe('forced switch')
+    // 旧实现在这里真的会切过去；现在必须拒绝，且**文案要说明为何退役**（静默忽略更坏）
+    await expect(run({ action: 'use', name: 'S901', summary: '概', force: true })).rejects.toThrow(/--force 已退役/)
+    // 归属仍是 A，B 一个字节都没被写
+    expect(bindings().sessions['dsh-1']?.dirName).toBe(A_DIR)
+    expect(bindings().sessions['dsh-1']?.dirName).not.toBe(B_DIR)
   })
 
   it('重复 use 同一条（非切换）仍记 activate（守卫只挡"换目标"）', async () => {
@@ -277,15 +311,18 @@ describe('cognitive_trajectory：use —— 守卫与绑定（agentScope / agent
     const exec = { agent: { session: { header: { id: 'x', cwd: ccc } } } } // 无 append ⇒ agentDshSession → null
     const out = (await run({ action: 'use', name: 'S900', summary: '概' }, exec as never)) as Record<string, string>
     expect(out.dir).toBe(A_DIR)
-    expect(existsSync(join(ccc, BINDINGS_REL_PATH))).toBe(false)
+    expect(hasAnyBindingFile()).toBe(false)
   })
 
-  it('🔴 悬空绑定剪枝：宿主侧无该会话日志 ⇒ prunedBindings 出现在结果里', async () => {
+  it('🔴 D172：**不再有 prunedBindings**（悬空清理整条退役）—— 过期绑定自动失效', async () => {
     writeSession(A_DIR)
+    // 宿主侧根本没有该会话日志（旧形态会把这类记录"剪掉"）
     mockHasLog.mockReturnValue(false)
     const out = (await run({ action: 'use', name: 'S900', summary: '概' })) as Record<string, unknown>
-    expect(Array.isArray(out.prunedBindings)).toBe(true)
-    expect((out.prunedBindings as string[]).length).toBeGreaterThan(0)
+    // ① 结果里不再有这个字段（机制已不存在，不是"这次没触发"）
+    expect(out.prunedBindings).toBeUndefined()
+    // ② 而绑定本身照常写成 —— 因为"会话在不在"由 `isBindUsable` 探针判，不由清理动作判
+    expect(hasAnyBindingFile()).toBe(true)
   })
 
   it('宿主机读不到会话日志根（hasSessionLogById=true）⇒ 不剪枝（fail-closed 保留）', async () => {
@@ -405,7 +442,7 @@ describe('cognitive_trajectory：其余动作的守卫与纯读面', () => {
     const out = (await run({ action: 'cro-guide' })) as string
     expect(out).toContain('CRO')
     expect(typeof out).toBe('string')
-    expect(existsSync(join(ccc, BINDINGS_REL_PATH))).toBe(false)
+    expect(hasAnyBindingFile()).toBe(false)
   })
 
   it('未知动作 ⇒ 抛 Unknown action（响亮而非静默）', async () => {
