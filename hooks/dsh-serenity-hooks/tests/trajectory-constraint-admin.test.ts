@@ -55,11 +55,12 @@ function writeRegistry(entries: Array<{ name: string; path: string }>): void {
 
 describe('轨迹约束角色逻辑（trajectory-constraint-admin.ts——v1.30 起归 container_admin role 域）: guide 定义教程', () => {
   it('含一条判据/目录形态/schema/双白名单/纪律缺省/微信路由/调试页', () => {
-    // ① 标题（重做后带日期标记）
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('轨迹约束 Guide (2026-10-19 redesigned)')
+    // ① 标题（2026-10-20 拆章后：本章只讲"限制面"）
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('轨迹约束 Guide')
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('限制面')
 
     // ② 一条判据取代"角色表"——旧断言 `'任意子集角色'` 的**新等价**：
-    //    "任意一条带 trajectory-constraint.json 的轨迹"＋删文件即当场退化（两种语义都在这一句里）
+    //    "任意一条带 trajectory.json 的轨迹"＋删文件即当场退化（两种语义都在这一句里）
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('A 轨迹约束 IS a cognitive trajectory')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('That is the whole rule. No role table, no name registry')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('delete it and it goes back to being an ordinary trajectory (takes effect at once)')
@@ -68,14 +69,18 @@ describe('轨迹约束角色逻辑（trajectory-constraint-admin.ts——v1.30 �
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('AGENT_SESSIONS/<YYYY-MM-DD--<code>--<desc>>/')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('SESSION.md      ← its persistent body')
 
-    // ④ schema 五个字段（旧断言 '"msms"/"tools"/"cognitiveTrajectory"/"systemPrompt"' 全部保留）
+    // ④ schema 的限制面字段
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('"model"')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('"msms"')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('"tools"')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('"cognitiveTrajectory"')
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('"systemPromptFile"')
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('"systemPrompt"')
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('systemPromptFile wins when both are set')
+    // 🔴 2026-10-20 拆章：`systemPromptFile`/`systemPrompt` **已从 schema 示例移走**
+    //    （新形态 = `PROMPT.md`，这两个是兼容期旧字段）⇒ 断言改为钉"它们被点名为兼容期"
+    //    而不是钉"它们在 schema 里" —— 否则就是在测一个已被判定为旧形态的形状。
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('systemPromptFile')
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('兼容期')
+    // 反向钉：新形态的提示词载体是 PROMPT.md，**不是**内联字段
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('PROMPT.md')
 
     // ⑤ 双白名单都默认拒（schema 行就写明 register/deregister 必拒）
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('Two whitelists, both default-deny')
@@ -85,12 +90,17 @@ describe('轨迹约束角色逻辑（trajectory-constraint-admin.ts——v1.30 �
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('all default to true')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('cut it off from')
 
-    // ⑥ 提示词路径相对 CCC 根（旧断言 `SERENITY_ROOT` 的新等价：相对基准写在教程里）
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('relative to CCC root')
+    // ⑥ 提示词载体（2026-10-20 拆章：新形态 = 轨迹目录里的 `PROMPT.md`，**没有"相对 CCC 根"这个概念了**
+    //    —— 旧断言钉的是 `systemPromptFile` 的相对基准，而该字段已移出 schema 示例、降级为兼容期形态）
+    //    ⇒ 新等价钉**载体所在的那一行**（比 ④ 里裸的 `PROMPT.md` 更窄：钉位置，不是钉词出现过）
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('PROMPT.md       ← its charter')
+    // 反向钉：旧概念不得回潮 —— 它只属于 `systemPromptFile`，教给新读者就是教一个已退役的形状（D151 同族）
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).not.toContain('relative to CCC root')
 
     // ⑦ 旧断言 `'qa-readonly' / 'code-review'` 的新等价 = **路由与反例**（示例角色名不再出现在 ACC 里，
     //    但"无 trajectory-constraint.json 的轨迹仍是合法路由目标"这条边界必须有）
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('WeChat routing: user → trajectory code')
+    //    🔴 2026-10-20：出站通道不再只有微信（飞书同一张表）⇒ 表名改为 IM，断言跟着改族名不认旧称（D167）
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('IM routing: user → trajectory code')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('is still a legal target')
 
     // ⑧ 生效机制（热读、不重启）

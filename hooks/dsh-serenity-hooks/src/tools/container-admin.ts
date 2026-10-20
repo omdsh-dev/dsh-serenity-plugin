@@ -33,6 +33,7 @@ import { cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
 import { runMsm, MSM_ACTIONS, CCC_CONFIG_REFERENCE, ACC_CATALOG } from './msm/service.js'
 import { trajectoryConstraintMsmGate } from '../trajectory/session.js'
 import { validateTrajectoryConstraint, applyTrajectoryConstraint, listTrajectoryConstraintSummary, TRAJECTORY_CONSTRAINT_GUIDE } from './trajectory-constraint-admin.js'
+import { TRAJECTORY_SELF_GUIDE } from './trajectory-self-docs.js'
 import { renderDocsIndex, findDocsChapter, docsPointer, type DocsChapter } from './config-docs.js'
 import { loadSerenityConfig } from '../kernel/ccc.js'
 
@@ -160,8 +161,13 @@ const DOCS_CHAPTERS: readonly DocsChapter[] = [
     render: () => CCC_CONFIG_REFERENCE,
   },
   {
+    id: 'trajectory-self',
+    summary: '一条轨迹怎么描述自己——章程 PROMPT.md ／ 常驻声明（resident.serves）／ 三个载体的分工 ＋ 写完怎么验',
+    render: () => TRAJECTORY_SELF_GUIDE,
+  },
+  {
     id: 'trajectory-constraint',
-    summary: '轨迹约束：一条轨迹怎么被约束（trajectory.json 的 schema ＋ 双白名单）',
+    summary: '轨迹约束（只讲限制面）：trajectory.json 的双白名单 ／ 模型 ／ 纪律参与项 ／ IM 路由',
     render: () => TRAJECTORY_CONSTRAINT_GUIDE,
   },
 ]
@@ -180,6 +186,12 @@ export function createContainerAdminTool(ctx: Context) {
       'config — CCC configuration: docs (usage-manual index) / docs <chapter> (one chapter in full) / view (current values) ' +
       '+ 轨迹约束 (guide/validate/apply/list); ' +
       'msm — MSM registry management (register/deregister/check quality DC-M1~M4) + manuals (guide dev manual / catalog ACC capability directory / ccc-config CCC configuration reference). ' +
+      // 🔴 2026-10-20：把两个"轨迹自己的手册"提到顶层描述里。
+      //    为什么必须在这里（R↓）：此前「怎么写章程／怎么声明常驻」藏在 config docs 的第二章，
+      //    而**该读它的人（写自我声明的轨迹）用的是 cognitive_trajectory，不是本工具**
+      //    ⇒ 两级指针都没指到，手册在事实上不可发现。
+      'TRAJECTORY SELF-DOCS: a cognitive trajectory describing ITSELF — charter (PROMPT.md) / resident declaration / ' +
+      'self-restriction (whitelists) ⇒ config docs trajectory-self; the restriction side only ⇒ config docs trajectory-constraint. ' +
       'Execution of registered MSMs belongs to the msm tool; this tool manages the container.',
     parameters: {
       domain: {

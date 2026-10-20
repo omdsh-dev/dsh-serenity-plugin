@@ -191,10 +191,13 @@ describe('config docs：两层说明菜单（P3）', () => {
   it('第一层：无 chapter ⇒ 目录，且列出全部章节 id', async () => {
     const res = (await exec({ domain: 'config', action: 'docs' })) as { docs: string; chapters: string[] }
     // v1.75.0：catalog 从 msm 域并进来（它描述整个 ACC，挂在 MSM 注册表下是域挂错了）
-    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-constraint'])
+    // 2026-10-20：新增 `trajectory-self`（owner：「这是认知轨迹感知理解这些边界的重要手册」）
+    //   ⇒ 拆章判据 = 描述自己（所有轨迹） vs 限制自己（特例），两者读者不同、不该同居一章。
+    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-self', 'trajectory-constraint'])
     expect(res.docs).toContain('CCC 配置说明 · 目录')
     // 目录里每一章都有一句话
     expect(res.docs).toContain('config')
+    expect(res.docs).toContain('trajectory-self')
     expect(res.docs).toContain('trajectory-constraint')
   })
 
@@ -214,9 +217,39 @@ describe('config docs：两层说明菜单（P3）', () => {
     expect(res.docs).toContain('exclusiveTools')
   })
 
-  it('第二层：trajectory-constraint 章 = 轨迹约束教程全文', async () => {
+  it('第二层：trajectory-constraint 章 = 限制面全文（并指路自述章，不复制）', async () => {
     const res = (await exec({ domain: 'config', action: 'docs', chapter: 'trajectory-constraint' })) as { docs: string }
-    expect(res.docs).toContain('Guide (2026-10-19 redesigned)')
+    // 2026-10-20 拆章后标题变了 —— 断言改成钉**新**载体里逐字存在的串（D133：钉新载体，不钉旧标题）
+    expect(res.docs).toContain('限制面')
+    // 🔴 反向钉：描述面的内容必须**不在这里**（一个内容一个正文入口）
+    expect(res.docs).not.toContain('── PROMPT.md：我的章程')
+    // 但它必须**指路**（拆章不是藏起来）
+    expect(res.docs).toContain('config docs trajectory-self')
+  })
+
+  /**
+   * 🔴 新章 `trajectory-self` 的判据（2026-10-20 owner：「这是认知轨迹感知理解这些边界的重要手册」）。
+   *
+   * 为什么这条必须有：这份手册此前**藏在与"限制自己"同一章里**，而普通轨迹不会去读那一章
+   * ⇒ 「怎么写章程 / 怎么声明常驻」在事实上不可发现。判据要钉住**三件自设都在**，
+   * 而不只是"这章能返回东西"。
+   */
+  it('🔴 第二层：trajectory-self 章 —— 三种自我描述（章程／常驻／约束）齐备且各自可辨', async () => {
+    const res = (await exec({ domain: 'config', action: 'docs', chapter: 'trajectory-self' })) as { chapter: string; docs: string }
+    expect(res.chapter).toBe('trajectory-self')
+    // ① 章程
+    expect(res.docs).toContain('PROMPT.md：我的章程')
+    // ② 常驻 —— 必须带字段名与语义，且**先排除"资源状态"这个误解**
+    expect(res.docs).toContain('resident')
+    expect(res.docs).toContain('serves')
+    expect(res.docs).toContain('不是资源状态')
+    // ③ 限制面只指路不复制
+    expect(res.docs).toContain('config docs trajectory-constraint')
+    expect(res.docs).not.toContain('Two whitelists, both default-deny')
+    // ④ 三个载体都点名（想改哪件事 → 写哪个文件）
+    for (const f of ['SESSION.md', 'PROMPT.md', 'trajectory.json']) expect(res.docs).toContain(f)
+    // ⑤ 写完怎么验（判据比描述重要）
+    expect(res.docs).toContain('config validate')
   })
 
   /**
@@ -251,8 +284,8 @@ describe('config docs：两层说明菜单（P3）', () => {
   it('🔴 config guide 只指路、不回正文（正文唯一入口 = docs trajectory-constraint）', async () => {
     const guide = (await exec({ domain: 'config', action: 'guide' })) as { guide: string }
     expect(guide.guide).toContain('container_admin config docs trajectory-constraint')
-    // 反向钉：教程正文不再从这里出去
-    expect(guide.guide).not.toContain('Guide (2026-10-19 redesigned)')
+    // 反向钉：教程正文不再从这里出去（钉正文里一个逐字存在的串，不是标题——标题会随改版变）
+    expect(guide.guide).not.toContain('A 轨迹约束 IS a cognitive trajectory')
   })
 
   it('章节名大小写不敏感（「我打错大小写」不该变成"没有这章"）', async () => {
@@ -262,12 +295,12 @@ describe('config docs：两层说明菜单（P3）', () => {
 
   it('🔴 未知章节 → 拒绝且**带候选清单**（"不知道这章"≠"这章是空的"）', async () => {
     await expect(exec({ domain: 'config', action: 'docs', chapter: 'nope' })).rejects.toThrow(
-      /unknown chapter "nope"[\s\S]*Available: catalog \| config \| trajectory-constraint/,
+      /unknown chapter "nope"[\s\S]*Available: catalog \| config \| trajectory-self \| trajectory-constraint/,
     )
   })
 
   it('🔴 白空格章节 ⇒ 按"没给"处理（返回目录，不是报错）', async () => {
     const res = (await exec({ domain: 'config', action: 'docs', chapter: '   ' })) as { chapters: string[] }
-    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-constraint'])
+    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-self', 'trajectory-constraint'])
   })
 })

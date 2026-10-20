@@ -57,6 +57,7 @@ let ccc: string
 /** 工具对象在测试里是 defineTool 的透传形态 */
 const tool = createCognitiveTrajectoryTool({ get: () => undefined } as never) as unknown as {
   name: string
+  description: string
   parameters: Record<string, { type?: string; enum?: string[]; required?: boolean }>
   output: { render: (args: unknown, value: unknown) => Array<{ type: string; text: string }> }
   execute: (a: unknown, e: unknown) => Promise<unknown>
@@ -91,6 +92,48 @@ function run(args: unknown, exec = fakeExec()): Promise<unknown> {
 function toolWith(ctx: unknown) {
   return createCognitiveTrajectoryTool(ctx as never) as unknown as typeof tool
 }
+
+/**
+ * 🔴 手册**可被发现性**的机械钉（owner 2026-10-20：「这是认知轨迹感知理解这些边界的重要手册」）。
+ *
+ * ## 为什么这条必须存在（它抓的是"内容对但没人找得到"这一类）
+ *
+ * 手册正文本身早就写好了，但它住在 `container_admin config docs` 的第二章里。
+ * 而**该读它的人 —— 想给自己写章程／声明常驻的轨迹 —— 用的是 `cognitive_trajectory`**。
+ * ⇒ 那条路此前**没有任何指针**，于是"手册存在"与"手册可用"是两回事，且**零机械信号**。
+ *
+ * ## 判据的两半（缺一不可）
+ * ① 正向：本工具的 description 必须**逐字**给出可达路径 `config docs trajectory-self`
+ * ② 反向：这条指针**不能**指向一个不存在的章（钉章 id，防止改章时指针悄悄悬空）
+ */
+describe('cognitive_trajectory: 自我描述手册的可发现性（指针钉）', () => {
+  const desc = (tool as unknown as { description?: string }).description ?? ''
+
+  it('① 工具说明里必须给出自述手册的可达路径（否则该读它的人找不到）', () => {
+    // 🔴 必须钉**词边界**，不能只 toContain：子串匹配对"改名成 trajectory-selffff"是瞎的
+    //    （2026-10-20 变异检验实测：只写 toContain 时，把章名改成 trajectory-selffff 测试仍绿）
+    expect(desc).toMatch(/config docs trajectory-self(?![\w-])/)
+    // 三种自设都要点名 —— 只写"看手册"而不说手册管什么，等于没指
+    expect(desc).toContain('PROMPT.md')
+    expect(desc).toContain('resident')
+  })
+
+  it('🔴 ② 反向钉：说明里承诺的章必须真的在目录里注册（章改名 ⇒ 指针不许悬空）', async () => {
+    // 用 container_admin 的公开面（一次 docs 目录调用）取回真实章表 —— 不碰模块私有表
+    const { createContainerAdminTool } = await import('../src/tools/container-admin.js')
+    const t = createContainerAdminTool({ get: () => undefined } as never) as unknown as {
+      execute: (a: unknown, e: unknown) => Promise<{ chapters?: string[] }>
+    }
+    const res = await t.execute({ domain: 'config', action: 'docs' }, { agent: { session: { header: { cwd: ccc } } } })
+    const ids = res.chapters ?? []
+    // ① 指针里承诺的那一章必须存在 —— 否则说明在撒谎
+    expect(ids).toContain('trajectory-self')
+    // ② 两章互指：限制面章同样可达（拆章不是把旧章删掉）
+    expect(ids).toContain('trajectory-constraint')
+    // 🔵 正控：不是"目录为空"导致的假通过
+    expect(ids.length).toBeGreaterThan(1)
+  })
+})
 
 /**
  * 读绑定（D172：归属住在**轨迹目录**的 `current.dsh_session_bind`，不再是旁路表）。

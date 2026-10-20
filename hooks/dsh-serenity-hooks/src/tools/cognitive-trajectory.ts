@@ -225,61 +225,55 @@ function renderText(value: unknown): ContentBlock[] {
 export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
   name: 'cognitive_trajectory',
-  // 🔴 本描述按 **EAP 五层**组织（owner 令 2026-10-16：「这个 tool 的 description 也用 eap 修订一遍」）。
-  //    为什么用**数组 join** 而不是一长串 `+`：每个元素 = **一个层**，层的边界在源码里可见；
-  //    旧写法把身份/动作/参数平铺成一条流水，读的人必须自己重建结构（低 E）。
+  // 🔴 本描述按 **EAP 五层压缩层级**组织（owner 令 2026-10-16；2026-10-20 二次重写）。
+  //    用**数组 join** 而非一长串 `+`：每个元素 = 一层，层的边界在源码里可见；
+  //    旧写法把身份/动作/参数平铺成流水，读的人必须自己重建结构（低 E）。
   //    ⚠️ 相邻字符串字面量在 JS 里**不会**自动拼接（那不是 JS 语法）——必须显式 join 或 `+`。
+  //    🔴 层名与 EAP §7.2 的五个 Tier **逐字对应**（公理/本体/拓扑/动力学/表面），今后加内容先归层。
   description: [
-    // ── Tier 1 · 公理与边界：这是什么、**什么不是** ──
-    'cognitive_trajectory — one cognitive trajectory: its persistent body (SESSION.md) + its timeline.',
-    'A cognitive trajectory is NOT the conversation: SESSION.md is the durable body and never moves;',
-    'the dsh conversation is only its rebuildable carrier (Ship of Theseus — the carrier is replaced, the cognitive trajectory continues).',
-    'IDENTITY: every trajectory has a CODE — the fixed-position segment of its directory name (YYYY-MM-DD--<code>[--<desc>]).',
-    'The code IS the trajectory\'s unique identifier, and you can choose it at creation time with create --id.',
-    'A COGNITIVE TRAJECTORY HAS NO LIFECYCLE — it does not complete, close, or expire, and age never counts against it;',
-    'it PERMANENTLY EXISTS. The only thing that ever changes is WHERE it is stored: archive moves it out of the active list',
-    'without touching a single byte of its directory or SESSION.md. There is no reverse action — to restore one, use container_fs mv.',
-    // ── Tier 2 · 本体：动作按**效果**分三组（分组本身就是契约：一眼看出"这个动作改不改我的绑定"）──
-    'ACTIONS, grouped by EFFECT (read the grouping before picking one):',
+    // ════ Tier 1 · 公理与意图层（最大压缩：不变式 ＋ 严格不做项）════
+    'A COGNITIVE TRAJECTORY is a durable body (SESSION.md) that outlives every conversation carrying it.',
+    'AXIOM 1 — THE TRAJECTORY IS THE SUBJECT; THE CONVERSATION IS ITS CARRIER. Rebuilding the carrier replaces the conversation and leaves SESSION.md byte-identical.',
+    'AXIOM 2 — A TRAJECTORY HAS NO LIFECYCLE. It never completes, closes, or expires, and age never counts against it. The only thing that changes is WHERE it is stored: archive moves it out of the active list without touching its directory.',
+    'AXIOM 3 — IDENTITY IS THE CODE: the fixed-position segment of the directory name `YYYY-MM-DD--<code>[--<desc>]`. The code (not the summary, not the title) is the unique identifier, and create --id lets you choose it.',
+    'DOES NOT: this tool never deletes a trajectory, never edits SESSION.md content, and never schedules recurring work (that is cro-guide).',
+    // ════ Tier 2 · 本体与概念层（高压缩：实体 ＋ 不可变规则）════
+    'ENTITIES. TRAJECTORY = a directory under AGENT_SESSIONS/ holding SESSION.md. CARRIER = a dsh session bound to it. BINDING DECLARATION = the file `<trajectory>/current.dsh_session_bind` — ONE FILE PER TRAJECTORY, a single slot, never a table.',
+    'IMMUTABLE 1 — ONE SESSION BELONGS TO AT MOST ONE TRAJECTORY, FOR LIFE. use refuses to move a session that already carries a different trajectory. There is NO --force override (retired 2026-10-20; passing it returns a refusal explaining why). To give another trajectory a carrier, open a new session.',
+    'IMMUTABLE 2 — ONE TRAJECTORY HAS AT MOST ONE CURRENT CARRIER, and THE BINDING DECLARATION IS THE ONLY TRUTH. If several dsh sessions happen to be open, only the one named in the declaration carries the trajectory; the others are simply unbound. Never infer a binding from "a session looks active".',
+    'IMMUTABLE 3 — A DECLARATION WHOSE SESSION NO LONGER EXISTS COUNTS AS UNBOUND. No cleanup is ever required, and a stale declaration is deliberately left in place: it records who carried this trajectory last.',
+    // ════ Tier 3 · 拓扑与结构层（中压缩：动作按效果分组 = 关系图）════
+    'ACTIONS, GROUPED BY EFFECT — read the grouping before choosing, because it answers "does this change what I am bound to?":',
     '(A) LIFECYCLE — changes which cognitive trajectory THIS conversation is bound to:',
-    'list (inventory + stats + anomaly marks) / show (read one SESSION.md) / create (make a NEW cognitive trajectory) /',
-    'use (bind THIS conversation to an existing cognitive trajectory; inline integrity check — silent when fine, problems reported as hints, never errors) /',
-    'rebuild (clear-and-rebuild THIS conversation in place) /',
-    'archive (move a trajectory into the archived area so it leaves the active list; one-way, never overwrites, and its content is left byte-identical).',
-    '(B) DELIVERY — sends ONE message to ANOTHER cognitive trajectory; your own binding is unchanged:',
-    'send-now (deliver RIGHT NOW) / send-later (deliver at ONE future instant).',
-    '(C) REFERENCE — cro-guide (how to give THIS cognitive trajectory its own program that decides when it should be woken).',
-    // ── Tier 3 · 拓扑：动作之间的关系 = 选择规则（旧文案只列了"做什么"，没说"该选哪个"）──
+    'list (inventory + stats) / show (read one SESSION.md) / create (make a NEW trajectory) / use (bind THIS conversation) / rebuild (clear-and-rebuild THIS conversation in place) / archive (move a trajectory out of the active list; one-way, never overwrites).',
+    '(B) DELIVERY — sends ONE message to ANOTHER trajectory; your own binding is unchanged: send-now (right now) / send-later (one future instant).',
+    '(C) REFERENCE — cro-guide: how to give a trajectory its own program that decides when it should be woken.',
+    // ════ Tier 4 · 动力学与逻辑层（低压缩：选择规则 ＋ 边界情形）════
     'HOW TO CHOOSE (a rule, not a guess):',
-    'not yet bound + starting new work ⇒ create — with no prior binding it activates immediately, so the new cognitive trajectory has a carrier at once.',
-    'already bound + recording a separate future line ⇒ create — it does NOT steal your binding (you stay on the current cognitive trajectory);',
-    'activate the new one when you want it by sending it a message.',
-    'want THIS conversation to move to another cognitive trajectory ⇒ use (refuses when it would orphan the current binding; --force overrides).',
-    'want to poke another cognitive trajectory ⇒ send-now. Its target needs NO prior setup:',
-    'if the target has no live dsh session, one is created and bound automatically, and your message is injected into it.',
-    // ── Tier 4 · 动力学与语义边界：回执**证明了什么、没证明什么** ──
-    'RECEIPTS (read no more than is written): send-now returns a synchronous receipt meaning exactly "injected / turn started" —',
-    'NEVER "the target ran or replied"; to prove the target actually moved, read its SESSION.md.',
-    'It never queues behind the current turn: a busy target is steered mid-turn (read in the CURRENT turn), an idle target starts a turn at once.',
+    'not yet bound + starting new work ⇒ create (with no prior binding it activates immediately, so the new trajectory has a carrier at once).',
+    'already bound + recording a SEPARATE future line ⇒ create (it does NOT steal your binding; activate the new one later by send-now).',
+    'want THIS conversation to move ⇒ use. It refuses if this session already carries another trajectory (IMMUTABLE 1) — that refusal is the design, not an error to work around.',
+    'want to make another trajectory act ⇒ send-now. The target needs no prior setup: if it has no live session, one is created and bound automatically, and your message is injected.',
+    'RECEIPTS (read no more than is written): send-now returns a synchronous receipt meaning exactly "injected / turn started" — NEVER "the target ran or replied". To prove the target actually moved, read its SESSION.md.',
+    'send-now never queues behind the current turn: a busy target is steered mid-turn (read in the CURRENT turn), an idle target starts a turn at once.',
     'send-later is fire-and-forget by design: no receipt, no recall, no panel.',
-    'ASYMMETRY (deliberate — the two differ in whether a missing target is normal): send-now creates a target on demand,',
-    'because sending to a never-used cognitive trajectory is a legitimate intent; send-later does NOT,',
-    'because scheduling for a cognitive trajectory that has never existed is almost always a mistyped name — auto-creating would hide that error behind an empty cognitive trajectory.',
-    // ── Tier 5 · 表面：逐参数前置条件 ──
-    'PARAMETERS: create requires --desc <desc> [--id <code>] [--goal] or --issue <ticket> (exactly one) plus --summary (≤20 chars).',
-    'use requires --summary (≤20 chars) and may pass --force to switch away from the currently-bound cognitive trajectory.',
-    'rebuild requires --summary (next-phase summary ≤20 chars) + optional --note (task focus for the rebuilt self).',
-    'send-later requires target (a code or AGENT_SESSIONS dir name) + at (RFC3339 or +30m/+2h) + message.',
-    'send-now requires target + message.',
-    // ── Tier 6 · 授权（owner 2026-10-20：「在工具说明里讲好即可」）──
-    'AUTHORIZATION (read this before creating anything): creating a cognitive trajectory or a dsh carrier costs real work,',
-    'and both are meant to serve a human intent — not to be spawned speculatively. Call create only when the user asked for',
-    'a new line of work (or confirmed it), never to "tidy up" or to pre-provision something nobody requested.',
-    'send-now creating a missing carrier on demand is likewise acceptable ONLY for a delivery the user actually wants made;',
-    'it is not a way to start work nobody asked for. When in doubt, ask the user instead of creating.',
-    '⚠️ This is a behavioral rule, not a mechanical gate: nothing stops a careless call. Treat it as etiquette with a cost.',
-    'uid: READS a legacy TRAJECTORY-UID only — setting one is retired (codes replaced it). Use create --id instead.',
-    'The summary is appended to the dsh session title (S###-YYYY-MM-DD-<summary>); the code and date stay server-derived unless you pass --id.',
+    'ASYMMETRY (deliberate): send-now may create a missing carrier; send-later NEVER does. Scheduling for a trajectory that never existed is almost always a mistyped name, and auto-creating would hide that error.',
+    'CARRIER GUARD: send-now auto-creates a carrier ONLY for a trajectory that has never had one. If a declaration exists but its session is gone, it refuses and says so — one trajectory keeps one carrier. Two independent gates can refuse: (a) the declared session cannot be resolved at all; (b) it existed and is now gone.',
+    // ════ Tier 5 · 表面与产物层（零压缩：逐参数前置条件）════
+    'PARAMETERS: create needs --desc <desc> [--id <code>] [--goal], OR --issue <ticket> (exactly one), PLUS --summary (≤20 chars).',
+    'use needs --name + --summary (≤20 chars). --force is ACCEPTED BUT REFUSED (retired): it exists only to explain why.',
+    'rebuild needs --summary (next-phase, ≤20 chars) + optional --note (≤200 chars, task focus for the rebuilt self).',
+    'send-now needs target + message. send-later needs target + at (RFC3339 with timezone, or +30m / +2h) + message.',
+    'target/name accept a code (S### or custom), a full AGENT_SESSIONS directory name, or a fuzzy keyword.',
+    'AUTHORIZATION (read before creating anything): create and send-now both cost real work and must serve a human intent. Call create only when the user asked for a new line of work (or confirmed it) — never to "tidy up" or pre-provision what nobody requested. When in doubt, ask instead of creating. This is a behavioral rule, not a mechanical gate: treat it as etiquette with a cost.',
+    'uid: READS a legacy TRAJECTORY-UID only. Setting one is retired — a trajectory\'s code is its identity now; use create --id <code>.',
+    'summary is appended to the dsh session title as <code>-<date>-<summary>; the code and date stay server-derived unless you pass --id.',
+    // ════ 手册指针（owner 2026-10-20：「这是认知轨迹感知理解这些边界的重要手册」）════
+    // 🔴 为什么必须在这里：手册正文住在 container_admin 的说明章里，而**写自我声明的人**
+    //    用的是本工具 —— 没有这条指针，那份手册在事实上不可发现（此前正是如此）。
+    'SELF-DECLARATION MANUAL — how to write your own charter (PROMPT.md), declare yourself resident',
+    '(trajectory.json `resident.serves`), or restrict yourself (tool/model whitelists):',
+    'container_admin config docs trajectory-self. Read it before changing any file in your own directory.',
   ].join(' '),
   parameters: {
     action: {
@@ -287,11 +281,11 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
       enum: [...COGNITIVE_TRAJECTORY_ACTIONS],
       required: true,
       description: [
-        'Subcommand — grouped by effect.',
+        'Subcommand — grouped by effect (see Tier 3 of the description).',
         'LIFECYCLE (changes THIS conversation\'s binding):',
-        'list (inventory + stats + anomaly marks) / show (a code, dir name, or fuzzy keyword) /',
-        'create (new cognitive trajectory; --id sets its code. Activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
-        'use (activate context for THIS conversation; inline integrity check — pass silent, problems reported as hints, not errors) /',
+        'list (inventory + stats) / show (a code, dir name, or fuzzy keyword) /',
+        'create (new trajectory; --id sets its code. Activates itself when you have no binding, otherwise leaves your binding untouched and tells you how to activate it) /',
+        'use (activate context for THIS conversation; refuses if this session already carries another trajectory — no override) /',
         'rebuild (clear-and-rebuild current conversation — requires --summary + optional --note) /',
         'archive (move a trajectory to the archived area; one-way, refuses to overwrite, content untouched — --dryRun previews).',
         'DELIVERY (sends one message to ANOTHER cognitive trajectory; your binding is unchanged):',
@@ -308,11 +302,11 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     issue: { type: 'string', description: 'create: ticket number (e.g. apaas-26116; dir named YYYY-MM-DD--<issue>; mutually exclusive with desc)' },
     goal: { type: 'string', description: 'create: one-sentence goal (optional)' },
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
-    force: { type: 'boolean', description: 'use: allow switching away from the currently-bound cognitive trajectory (binding guard override)' },
+    force: { type: 'boolean', description: 'use: RETIRED (2026-10-20) — one session belongs to one cognitive trajectory for life, so switching is refused unconditionally. The flag is still ACCEPTED so that an old call gets an explanation instead of an "unknown argument" error; it never overrides the guard.' },
     dryRun: { type: 'boolean', description: 'create: preview mode (no actual changes)' },
     target: { type: 'string', description: 'send-later/send-now: target cognitive trajectory (S### or AGENT_SESSIONS directory name)' },
     at: { type: 'string', description: 'send-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
-    message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target cognitive trajectory. send-now may create and bind a carrier when the target has no live session — acceptable only for a delivery the user actually wants made (user-intent-driven), not for speculatively starting work.' },
+    message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target cognitive trajectory. send-now may create and bind a carrier ONLY when the target has never had one — acceptable only for a delivery the user actually wants made (user-intent-driven), never for speculatively starting work.' },
   },
   output: {
     schema: { type: 'json' },
