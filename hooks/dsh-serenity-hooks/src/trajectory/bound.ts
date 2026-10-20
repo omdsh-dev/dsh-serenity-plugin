@@ -250,12 +250,40 @@ export function pruneMissingBindings(_root: string, _isMissing: (sessionId: stri
 }
 
 /**
+ * 绑定写入的结果（分级，**不是 boolean**）。
+ *
+ * 分级的意义 = **调用方能说出是哪一半失败**（见 `appendBound` 头注）。
+ */
+export type BindWriteCode =
+  | 'SESSION_HEADER_UNRESOLVED'
+  | 'SESSION_TAKEN'
+  | 'TRAJECTORY_OCCUPIED'
+  | 'WRITE_FAILED'
+
+export type BindWriteResult =
+  | {
+      ok: true
+      /** 同一轨迹上被顶掉的旧载体 id（`use` 无条件覆盖时要写进回执 —— 静默换代是不允许的） */
+      replaced?: string
+      /** 被清掉的**另一条**轨迹的残留声明（`claimBinding` 的安全网） */
+      released?: string
+    }
+  | { ok: false; code: BindWriteCode; detail: string }
+
+/**
  * 把一条轨迹的当前载体写成 `sessionId`（**唯一写入口**，内部走 `claimBinding` 的两条不变量）。
  *
  * 旧签名 `appendBound(session, action, rec)` 保持不变：`session` 提供 `header.id` / `header.cwd`，
  * `rec.dirName` 指明写哪条轨迹的交代。
  *
- * @returns 写入成功 ⇒ true（**每条轨迹只有一个文件，没有"追加"语义，只有"覆盖"**）
+ * @returns 写入成功 ⇒ `{ ok: true, replaced?, released? }`（**每条轨迹只有一个文件，没有"追加"语义，只有"覆盖"**）；
+ *          失败 ⇒ `{ ok: false, code, detail }`，**`code` 指名是哪一条守卫拒的**
+ *
+ * 🔴 **为什么从 `boolean` 改成分级结果（2026-10-20，一条 skiff 轨迹实测逼出）**：
+ * 本函数有**两条完全不同的失败路径** —— ① header 守卫（id / root 取不到）② `claimBinding` 拒绝
+ * （`SESSION_TAKEN` / `TRAJECTORY_OCCUPIED` / `WRITE_FAILED`）。日志侧早已分开（D186），
+ * **但回执侧只有一句 header 文案** ⇒ 调用方被指向错误的方向（那位实测者第一轮就照文案去找 header，
+ * 真因是槽位被占）。⇒ 结果必须**带码**，让回执能说出是哪一半。
  */
 export function appendBound(
   session: unknown,
@@ -277,7 +305,7 @@ export function appendBound(
      */
     alive?: (sessionId: string) => boolean
   },
-): boolean {
+): BindWriteResult {
   const id = sessionHeader(session)?.id
   const root = rootOf(session)
   // 🔴 **这条守卫不许静默**（2026-10-20，D186：守卫可以拒绝，但不许不出声）。
@@ -290,15 +318,14 @@ export function appendBound(
   //    ⇒ 保留这条告警**仍然正确**（它确实哑过，也确实该出声），但**别再把它当 S196 的解释**：
   //      两条失败路径的**读数不同** —— 这条是"取不到 header"，S196 是"header 齐全但槽位被占"。
   if (typeof id !== 'string' || id === '' || root === null) {
-    console.warn(
-      '[serenity-hooks] ✗ 绑定未写入（SESSION_HEADER_UNRESOLVED）：'
-      + `会话对象取不到可用的 header（id=${typeof id === 'string' && id !== '' ? id : '(空/非字符串)'}，`
+    const detail =
+      `会话对象取不到可用的 header（id=${typeof id === 'string' && id !== '' ? id : '(空/非字符串)'}，`
       + `root=${root ?? 'null（header.cwd 缺失或上溯不到 .serenity）'}）`
       + ` ⇒ 轨迹「${rec.dirName}」的 current.dsh_session_bind **未被改写**。`
       + ' 排查：该会话的 header.cwd 是否指向某个含 .serenity 的目录；'
-      + ' 无 cwd 的会话（如某些程序性创建的载体）**不会**写绑定。',
-    )
-    return false
+      + ' 无 cwd 的会话（如某些程序性创建的载体）**不会**写绑定。'
+    console.warn(`[serenity-hooks] ✗ 绑定未写入（SESSION_HEADER_UNRESOLVED）：${detail}`)
+    return { ok: false, code: 'SESSION_HEADER_UNRESOLVED', detail }
   }
   const result = claimBinding(
     sessionsRoot(root),
@@ -315,9 +342,13 @@ export function appendBound(
   if (!result.ok) {
     // 🔴 不静默：绑定被拒意味着"这条轨迹现在归属不明"，必须让人看见
     console.warn(`[serenity-hooks] ✗ 绑定未写入（${result.code}）：${result.detail}`)
-    return false
+    return { ok: false, code: result.code, detail: result.detail }
   }
-  return true
+  return {
+    ok: true,
+    ...(result.replaced === undefined ? {} : { replaced: result.replaced }),
+    ...(result.released === undefined ? {} : { released: result.released }),
+  }
 }
 
 // ── 供调用方做"这一步能不能建新载体"的判断（owner 第 2 条）─────────────────────────

@@ -27,7 +27,7 @@
  * ⚠️ 诚实边界（同 ⑤ 前几件）：**不写覆盖率百分比**（MSM 输出会被截断）；证据 = 这些函数只由本文件的断言触达。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, utimesSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, readdirSync, utimesSync, chmodSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -349,6 +349,67 @@ describe('cognitive_trajectory：use —— 守卫与绑定（agentScope / agent
     await run({ action: 'use', name: 'S900', summary: '概' })
     await run({ action: 'use', name: 'S900', summary: '概' })
     expect(bindings().sessions['dsh-1']?.action).toBe('activate')
+  })
+
+  /**
+   * 🔴 **D191（owner 裁决「use 只要被调用了，可以无条件覆盖绑定到当前会话」）**。
+   *
+   * ## 这条判据为什么必须存在（它抓的是一个**真实使用者付过代价**的缺陷）
+   *
+   * 上一版实现**收窄**了那条裁决：传 `alive` 探针 ⇒ "活着的旧载体"仍然拒绝。
+   * 现场后果（一条 skiff 轨迹实测）：`send-now` 给一条轨迹自动建了载体（它必须写绑定，
+   * 否则唤醒路径找不到载体），随后**人**那条会话 `use` 时被这个机器建来的活载体挡住
+   * ⇒ 表现为"绑定反复被顶掉 / use 一直 not-written"，只能干等它退场。
+   *
+   * ⚠️ **本夹具的判活探针恒为真**（`hasSessionLogById` 在文件头被桩成 `() => true`），
+   * 所以这条用例**天然带判别力**：旧实现（alive 探针）在这里必然 `not-written`。
+   */
+  it('🔴 活载体占着槽位 ⇒ use 照样写成，并把被顶掉的 id 带进回执（覆盖可以，静默覆盖不行）', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'use', name: 'S900', summary: '概' })
+    expect(bindings().sessions['dsh-1']?.dirName).toBe(A_DIR)
+    const out = (await run(
+      { action: 'use', name: 'S900', summary: '概' },
+      fakeExec({ id: 'dsh-2' }),
+    )) as Record<string, string>
+    expect(out.binding).toBe('written')
+    // 顶掉了谁必须能被读出来（D186 同族：可以覆盖，但不许静默覆盖）
+    expect(out.bindingReplaced).toBe('dsh-1')
+    // 单槽位：旧载体不再承载，新载体是唯一那条
+    expect(bindings().sessions['dsh-2']?.dirName).toBe(A_DIR)
+    expect(bindings().sessions['dsh-1']).toBeUndefined()
+  })
+
+  it('同一会话重复 use ⇒ 没有 bindingReplaced（重入不是换代）', async () => {
+    writeSession(A_DIR)
+    await run({ action: 'use', name: 'S900', summary: '概' })
+    const out = (await run({ action: 'use', name: 'S900', summary: '概' })) as Record<string, string>
+    expect(out.binding).toBe('written')
+    expect(out.bindingReplaced).toBeUndefined()
+  })
+
+  /**
+   * 🔴 **D190：回执必须指名"是哪一半失败"**（2026-10-20，一条 skiff 轨迹实测逼出）。
+   *
+   * 旧文案把**两条完全不同的失败路径**都说成"取不到可用的 header"：header 守卫
+   * （`SESSION_HEADER_UNRESOLVED`）与 `claimBinding` 拒绝（`SESSION_TAKEN` /
+   * `TRAJECTORY_OCCUPIED` / `WRITE_FAILED`）。实测者照着文案去找 header，
+   * 真因是槽位被占 ⇒ **错误文案会把人指向错误的方向**（比不出声更坏）。
+   */
+  it('🔴 绑定写失败 ⇒ 回执带 bindingCode，且不许再套 header 文案（真故障形态：目录只读）', async () => {
+    const dir = join(ccc, 'AGENT_SESSIONS', A_DIR)
+    writeSession(A_DIR)
+    chmodSync(dir, 0o555) // 原子写建不出 .tmp ⇒ WRITE_FAILED（真故障形态，不是桩）
+    try {
+      const out = (await run({ action: 'use', name: 'S900', summary: '概' })) as Record<string, string>
+      expect(out.binding).toBe('not-written')
+      expect(out.bindingCode).toBe('WRITE_FAILED')
+      expect(out.bindingHint).toContain('WRITE_FAILED')
+      // 🔴 反向钉：旧文案必须消失 —— 它把"写盘失败"也说成 header 缺失
+      expect(out.bindingHint).not.toContain('取不到可用的 header')
+    } finally {
+      chmodSync(dir, 0o755)
+    }
   })
 
   it('agent 无 session ⇒ 仍激活成功，但不写绑定（不抛）', async () => {

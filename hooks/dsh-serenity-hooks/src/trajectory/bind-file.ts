@@ -338,14 +338,21 @@ export function findTrajectoryHolding(sessionsRoot: string, sessionId: string): 
  * @param decl 要写入的声明
  * @param opts.takeover 允许顶掉本条轨迹现有的另一个载体
  * @param opts.alive 探针：**旧载体**是否还活着（缺省 ⇒ 一律当活 = 旧语义）
- * @returns `{ ok: true }` 或 `{ ok: false, code, detail }`（**不抛**，由调用方决定如何呈现）
+ * @returns `{ ok: true, replaced?, released? }` 或 `{ ok: false, code, detail }`（**不抛**，由调用方决定如何呈现）
+ *
+ * 🔴 **2026-10-20 追加 `replaced`（由一条 skiff 轨迹的实测逼出）**：`released` 只覆盖
+ * 「这个会话此前安家在**另一条**轨迹」那一格（跨轨迹清理）；而**同一轨迹换载体**时被顶掉的那个
+ * 会话 id 此前**没有任何出口** ⇒ 调用方无法在回执里说出"你顶掉了谁"。
+ * 静默换代正是"一条轨迹感觉有两个载体"的成因 ⇒ 顶掉谁必须能被读出来。
  */
 export function claimBinding(
   sessionsRoot: string,
   dirName: string,
   decl: BindDeclaration,
   opts: { takeover?: boolean; alive?: (sessionId: string) => boolean } = {},
-): { ok: true; released?: string } | { ok: false; code: 'SESSION_TAKEN' | 'TRAJECTORY_OCCUPIED' | 'WRITE_FAILED'; detail: string } {
+):
+  | { ok: true; replaced?: string; released?: string }
+  | { ok: false; code: 'SESSION_TAKEN' | 'TRAJECTORY_OCCUPIED' | 'WRITE_FAILED'; detail: string } {
   // ① 载体唯一：这个会话 id 是否已在别的轨迹名下？
   const holder = findTrajectoryHolding(sessionsRoot, decl.sessionId)
   if (holder !== null && holder !== dirName) {
@@ -389,5 +396,11 @@ export function claimBinding(
   if (!writeBindDeclaration(join(sessionsRoot, dirName), decl)) {
     return { ok: false, code: 'WRITE_FAILED', detail: `写 ${BIND_FILENAME} 失败：${join(sessionsRoot, dirName)}` }
   }
-  return released === undefined ? { ok: true } : { ok: true, released }
+  // 同一轨迹换载体时被顶掉的那个 id：**必须能读出来**（否则回执无法说明"你顶掉了谁"）
+  const replaced = cur !== null && cur.sessionId !== decl.sessionId ? cur.sessionId : undefined
+  return {
+    ok: true,
+    ...(replaced === undefined ? {} : { replaced }),
+    ...(released === undefined ? {} : { released }),
+  }
 }

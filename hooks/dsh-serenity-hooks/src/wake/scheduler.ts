@@ -580,7 +580,7 @@ async function createAndBindTarget(
   //    走 `workspaceId` 分支时宿主已经挂好了（= 用户那条路），这里只是幂等确认、不产生写。
   const wsNote = workspaceId !== undefined ? '' : await attachToWorkspace(ctx, root, sessionId)
   const viaNote = workspaceId !== undefined ? ', via-workspaceId(=用户同一形态)' : ', via-cwd+attach'
-  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'}${viaNote}${openingNote}${wsNote})`
+  const how = `auto-create(${sessionId}${bound.ok ? ', bound' : `, ⚠️ 绑定写入失败（${bound.code}）`}${viaNote}${openingNote}${wsNote})`
   return { agent, how }
 }
 

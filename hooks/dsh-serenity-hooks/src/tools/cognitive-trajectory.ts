@@ -47,8 +47,7 @@ import { join } from 'node:path'
 import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../kernel/ccc.js'
 import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
-import { appendBound, readLastBound, resolveSessionCognitiveTrajectoryLabel } from '../trajectory/bound.js'
-import { hostAliveProbe } from '../trajectory/alive.js'
+import { appendBound, readLastBound, resolveSessionCognitiveTrajectoryLabel, type BindWriteResult } from '../trajectory/bound.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake/registry.js'
 import { sendToCognitiveTrajectory } from '../wake/scheduler.js'
 import { CRO_GUIDE } from '../cro/guide.js'
@@ -435,26 +434,30 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         //    实测里出现了「回执成功、标题已改、绑定文件逐字节未变」这种组合，
         //    使用者只能靠事后比对 mtime 才发现 ⇒ 那是把"真相源没更新"伪装成成功。
         //    ⚠️ 标题改名走的是另一条通路（它有日志），所以"标题变了"**不能**当绑定成功的证据。
-        let bound: boolean | null = null
+        let bound: BindWriteResult | null = null
         if (dsh && info) {
           // 🔴 **`use` 无条件覆盖绑定**（owner 2026-10-20 裁决，原话：
           //    「use 只要被调用了，可以无条件覆盖绑定到当前会话（这说明当前会话肯定活着啊）」）。
           //
-          // 为什么这是对的（而不是又一个后门）：`use` 手里拿的是**自己这条会话** ——
-          // 它能被调用，就证明它此刻活着。而 `claimBinding` 的第 ② 条守卫问的是
-          // 「别的 id 还占着这个槽吗」，那个判断针对的是**文件里写的那个 id**，不是自己。
-          // ⇒ 对 `use` 而言，槽位里躺着谁都不该拦住它：那条旧载体若还活着，
-          //    是一个**真实的冲突**（该由 IMMUTABLE 2 报错）；若已死，就更不该拦。
+          // 🔴🔴 **2026-10-20 晚些时候的自我更正（由一条 skiff 轨迹的真机实测逼出）**：
+          //    上一版**收窄了这条裁决** —— 传 `alive` 探针，让"活的旧载体"仍然拒绝
+          //    （当时我写的理由是"那是 IMMUTABLE 2 的真实冲突"）。**那个理由是错的**：
+          //    IMMUTABLE 2 要求"一条轨迹至多一个当前载体"，而**单槽位文件**在结构上已经保证
+          //    了这一点 —— 覆盖后旧载体只是**不再是载体**，不变量并没有被违反。
           //
-          // ⚠️ 但**不传 `takeover` 的语义要保留**：这里传的 `alive` 让 `claimBinding`
-          //    自己判死活 —— 活的旧载体仍然拒绝（那是 IMMUTABLE 2 的真实冲突），
-          //    死的才放行。⇒ 既满足"无条件覆盖"（对死载体），又不放弃"一轨迹一载体"。
-          //    `takeover` 仍**只**留给 rebuild / 崩溃重建那种"明知故换"的路径。
+          //    收窄的真实代价（现场）：`send-now` 给一条轨迹自动建了载体（它必须写绑定，
+          //    否则唤醒路径找不到载体 —— 见 `createAndBindTarget` ③），而**人**那条会话
+          //    （微信 route）随后 `use` 时，被这个机器建来的活载体挡住 ⇒ 表现为
+          //    「同一条轨迹的绑定反复被顶掉 / use 一直 not-written」，只能干等它退场。
+          //    ⇒ 回到裁决原文：`use` 拿来的是**调用者自己的会话**，它此刻活着本身就是证明。
+          //
+          // ⚠️ **仍然会出声**：被顶掉的载体 id 进回执的 `bindingReplaced`
+          //    （D186 同族：可以覆盖，但不许静默覆盖）。
           bound = appendBound(dsh, 'activate', {
             dirName: info.dirName,
             mdPath: info.mdPath,
             sessionId: info.sessionId,
-            alive: hostAliveProbe(ctx),
+            takeover: true,
           })
         }
         // 内联完整性检查（v1.33）：原 health/qa 因"判据＝旧模板"被淘汰，这里只留不依赖模板的两项
@@ -463,18 +466,28 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         const out: Record<string, JsonValue> = { dir: active.dir, mdPath: active.mdPath, context: active.context }
         if (advisory) out.advisory = advisory
         // 🔴 绑定结果**显式**回报（三态，缺一不可）：
-        //  · `written`     —— 真相源已改写，`use` 真的落地了
-        //  · `not-written` —— 取不到会话对象/header ⇒ 契约下**仍是未绑定**（绝不谎报"已激活"就是绑定完成）
+        //  · `written`     —— 真相源已改写，`use` 真的落地了（若顶掉了旧载体 ⇒ 带出 `bindingReplaced`）
+        //  · `not-written` —— 写没成 ⇒ 契约下**仍是未绑定**（绝不谎报"已激活"就是绑定完成）
         //  · 缺省不出现   —— 只在真的没走到写入分支时才没有这一格
-        if (bound === true) {
+        //
+        // 🔴 **`bindingHint` 必须指名是哪一半失败**（2026-10-20；两条失败路径的读数是不同的：
+        //    header 取不到 vs 槽位被别人占着。此前一律印 header 文案，把实测者带偏过一轮）。
+        if (bound !== null && bound.ok) {
           out.binding = 'written'
-        } else if (bound === false) {
+          if (bound.replaced !== undefined) {
+            out.bindingReplaced = bound.replaced
+            out.bindingHint =
+              `已顶掉原载体 ${bound.replaced}（owner 裁决：use 无条件覆盖到当前会话）。`
+              + `若那条会话还活着，它此刻**不再**承载「${info?.dirName ?? targetEntry.dirName}」——`
+              + '这是单槽位的必然结果，不是错误；需要它继续承载就再对它 `use` 一次。'
+          }
+        } else if (bound !== null) {
           out.binding = 'not-written'
+          out.bindingCode = bound.code
           out.bindingHint =
-            `绑定未写入：本会话取不到可用的 header（id / cwd 缺一不可）⇒ 按契约「绑定声明是唯一真相」，`
-            + `「${info?.dirName ?? targetEntry.dirName}」此刻仍是**未绑定**。`
+            `绑定未写入（${bound.code}）：${bound.detail}`
+            + ` ⇒ 按契约「绑定声明是唯一真相」，「${info?.dirName ?? targetEntry.dirName}」此刻仍是**未绑定**。`
             + ' 会话标题变了**不能**当作绑定成功的证据（改名走的是另一条通路）。'
-            + ' 详见宿主日志里的 `✗ 绑定未写入（SESSION_HEADER_UNRESOLVED）`。'
         }
         // (b)(c) 已退役（D172）：
         //  · "只留一条"不再需要 —— 轨迹的槽位是**一个文件**，写入即覆盖，没有可以退的第二条；

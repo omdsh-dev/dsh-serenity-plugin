@@ -462,7 +462,7 @@ describe('trajectory-session: createTrajectoryAgent（preset 挂载 + 约束面�
       dirName,
       mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'),
       sessionId: 'cccskills',
-    })).toBe(true)
+    }).ok).toBe(true)
 
     const sections: Section[] = []
     const ctx = {

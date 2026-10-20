@@ -85,7 +85,7 @@ describe('D172 · 归属写在轨迹目录自己的交代里', () => {
   it('appendBound 写出 current.dsh_session_bind（含 sessionId/at/action）', () => {
     mkTraj()
     const ok = appendBound(makeSession('sess-1'), 'activate', { dirName: DIR, mdPath: '/x/SESSION.md' })
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     // ① 文件真的在**轨迹目录**里（不是任何旁路位置）
     expect(existsSync(join(ccc, SESS, DIR, BIND_FILENAME))).toBe(true)
     // ② 内容对得上
@@ -103,10 +103,10 @@ describe('D172 · 归属写在轨迹目录自己的交代里', () => {
     expect(existsSync(join(ccc, SESS, '.bindings.json'))).toBe(false)
   })
 
-  it('无 header / 定位不到 CCC 根 ⇒ false，不抛（绑定失败不阻断主流程）', () => {
+  it('无 header / 定位不到 CCC 根 ⇒ 失败，不抛（绑定失败不阻断主流程）', () => {
     mkTraj()
-    expect(appendBound({}, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
-    expect(appendBound({ header: { id: 'x' } }, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
+    expect(appendBound({}, 'activate', { dirName: DIR, mdPath: '/x' }).ok).toBe(false)
+    expect(appendBound({ header: { id: 'x' } }, 'activate', { dirName: DIR, mdPath: '/x' }).ok).toBe(false)
   })
 
   /**
@@ -131,13 +131,13 @@ describe('D172 · 归属写在轨迹目录自己的交代里', () => {
     mkTraj()
 
     // ① 完全没有 header
-    expect(appendBound({}, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
+    expect(appendBound({}, 'activate', { dirName: DIR, mdPath: '/x' }).ok).toBe(false)
     expect(warn).toHaveBeenCalled()
     expect(warn.mock.calls.some((c) => String(c[0]).includes('SESSION_HEADER_UNRESOLVED'))).toBe(true)
 
     // ② 有 id 但无 cwd（**这正是"根定位不到"那一半**，也是最容易被忽略的形态）
     warn.mockClear()
-    expect(appendBound({ header: { id: 'x' } }, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
+    expect(appendBound({ header: { id: 'x' } }, 'activate', { dirName: DIR, mdPath: '/x' }).ok).toBe(false)
     expect(warn.mock.calls.some((c) => String(c[0]).includes('SESSION_HEADER_UNRESOLVED'))).toBe(true)
 
     // ③ 告警里必须**指名是哪一半缺**（否则排查者还得自己猜）
@@ -152,7 +152,7 @@ describe('D172 · 归属写在轨迹目录自己的交代里', () => {
   it('🔴 反向：**成功**路径不许刷这条告警（别把真信号淹掉）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     mkTraj()
-    expect(appendBound(makeSession('sess-ok'), 'activate', { dirName: DIR, mdPath: '/x' })).toBe(true)
+    expect(appendBound(makeSession('sess-ok'), 'activate', { dirName: DIR, mdPath: '/x' }).ok).toBe(true)
     expect(warn.mock.calls.some((c) => String(c[0]).includes('SESSION_HEADER_UNRESOLVED'))).toBe(false)
     warn.mockRestore()
   })
@@ -225,6 +225,63 @@ describe('D172 · 不变量 1：一条轨迹至多一个载体（单槽位）', 
     expect(r.ok).toBe(true)
     expect(declOf(DIR)?.sessionId).toBe('sess-new')
     expect(listBoundSessionIds(ccc, DIR)).toEqual(['sess-new'])
+  })
+
+  /**
+   * 🔴 **`replaced` 出口**（2026-10-20 追加）：`use` 无条件覆盖之后，
+   * 「顶掉了谁」必须能被回执读出来 —— 静默换代正是"一条轨迹感觉有两个载体"的成因。
+   * ⚠️ `released` 只覆盖**跨轨迹**清理那一格，换代此前**没有任何出口**。
+   */
+  it('🔴 takeover 换代 ⇒ 交出被顶掉的旧载体 id（`replaced`）', () => {
+    mkTraj()
+    claimBinding(join(ccc, SESS), DIR, { sessionId: 'sess-old', at: 1, action: 'activate' })
+    const r = claimBinding(join(ccc, SESS), DIR, { sessionId: 'sess-new', at: 2, action: 'activate' }, { takeover: true })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.replaced).toBe('sess-old')
+  })
+
+  it('同一会话重入 ⇒ 没有 replaced（重入不是换代）', () => {
+    mkTraj()
+    claimBinding(join(ccc, SESS), DIR, { sessionId: 'sess-same', at: 1, action: 'activate' })
+    const r = claimBinding(join(ccc, SESS), DIR, { sessionId: 'sess-same', at: 2, action: 'activate' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.replaced).toBeUndefined()
+  })
+})
+
+/**
+ * 🔴 **D190：绑定结果分级** —— 失败必须带码，回执才可能"指对路"。
+ *
+ * 背景：`appendBound` 有两条**完全不同**的失败路径（header 守卫 / `claimBinding` 拒绝），
+ * 日志侧早已分开，而**回执侧只有一句 header 文案** ⇒ 实测者被指向错误方向。
+ */
+describe('D190 · 绑定结果分级（code 必须区分两条失败路径）', () => {
+  it('🔴 两条失败路径交出**不同**的码，且 detail 点名占位者', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mkTraj()
+
+    // ① header 守卫
+    const header = appendBound({}, 'activate', { dirName: DIR, mdPath: '/x' })
+    expect(header.ok).toBe(false)
+    if (!header.ok) expect(header.code).toBe('SESSION_HEADER_UNRESOLVED')
+
+    // ② claimBinding 拒绝（槽位被另一个会话占着）
+    claimBinding(join(ccc, SESS), DIR, { sessionId: 'sess-holder', at: 1, action: 'activate' })
+    const occupied = appendBound(makeSession('sess-other'), 'activate', { dirName: DIR, mdPath: '/x' })
+    expect(occupied.ok).toBe(false)
+    if (!occupied.ok) {
+      expect(occupied.code).toBe('TRAJECTORY_OCCUPIED')
+      // 只说"被占"等于把排查又推回给读者 ⇒ 必须点名是谁占着
+      expect(occupied.detail).toContain('sess-holder')
+    }
+    warn.mockRestore()
+  })
+
+  it('🔴 反向：成功时不许塞码（别把成功也做成"有 code 就算失败"的形态）', () => {
+    mkTraj()
+    const r = appendBound(makeSession('sess-ok'), 'activate', { dirName: DIR, mdPath: '/x' })
+    expect(r.ok).toBe(true)
+    expect((r as { code?: string }).code).toBeUndefined()
   })
 })
 
@@ -314,7 +371,7 @@ describe('D172 · 编码无关（U4）：目录名是硬锚，S 前缀不重要'
   it('issue 会话（无 S 前缀）同样可绑定', () => {
     const dir = '2026-09-04--apaas-26116'
     mkTraj(dir)
-    expect(appendBound(makeSession('sess-1'), 'activate', { dirName: dir, mdPath: '/x' })).toBe(true)
+    expect(appendBound(makeSession('sess-1'), 'activate', { dirName: dir, mdPath: '/x' }).ok).toBe(true)
     const b = readLastBound(makeSession('sess-1'))
     expect(b?.dirName).toBe(dir)
     // sessionId 是 dsh 会话 id（硬锚），展示码另给
