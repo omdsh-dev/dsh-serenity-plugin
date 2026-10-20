@@ -1,3 +1,59 @@
+## v1.81.0 — 2026-10-20（**第三个白名单：写「路径」** —— `trajectory.json` 的 `writes`）
+
+**来源**：owner 2026-10-20 令（原话去标识）——
+「我们 ACC 如果支持**轨迹设定自己的写白名单**就好了，这样就可以很好的进行限制」。
+
+### 一、它补的是哪一种洞
+
+`tools` 只管**工具名**。给了一条轨迹 `write` 之后，路径守卫拦的是
+「逃出 CCC」与黑名单 —— **拦不住它去写别人的轨迹目录、`docs/`、乃至注册表以外的一切**。
+⇒ "给不给 write" 长期是个**二选一**，而这正是 owner 说的"不好限制"。
+
+新字段把写权限**收到路径维度**：
+
+```jsonc
+{
+  "tools": ["read","write","edit", ...],
+  "writes": ["AGENT_SESSIONS/2026-10-19--<your-code>--<desc>/"]   // 可选
+}
+```
+
+### 二、契约（判据与 D181 同一条：**字段在不在**，不是数组空不空）
+
+| `writes` | 语义 |
+|---|---|
+| 缺省 | **不收窄** —— 与升级前完全一致（写权限 = 路径守卫那几条） |
+| `[]` | **一个写都落不下**（显式意图；只影响写，**读不受影响**） |
+| 非空 | 写类工具的**目标路径**必须落在这些前缀内；条目可相对 CCC 根，也可绝对路径 |
+
+- **只管写类工具**：`write` ／ `edit` ／ `container_fs` 的写动作（mkdir/rm/mv/cp/touch/append）／ `append` ／ `touch`。
+  ⛔ 只读工具与 `container_fs` 的只读子命令**不受影响**（否则会连自己的日志都读不了）。
+- **边界按路径分隔符判**：`…--qa--t2/` **不算**在 `…--qa--t` 之内（兄弟前缀陷阱）。
+- 越界拒绝的文案**同时给出「允许什么」与「目标是什么」**（D186/D190：出声必须指对路），例如：
+  `write: write outside this trajectory's declared write scope (allowed: AGENT_SESSIONS/<own>/); target: docs/x.md — add the prefix to this trajectory's trajectory.json "writes" …`
+
+### 三、读数与校验（不许不出声）
+
+- `container_admin config list` 新增 `writes` 列，**三态**如实印：`(unrestricted)` ／ 原数组 ／ `[]`。
+- `container_admin config validate` 新增一条 issue：条目**落在 CCC 之外**时点名。
+  ⚠️ 它不是安全判据（逃逸的写本来就被路径守卫拦），它管的是**配置自洽** ——
+  一条永远匹配不上的前缀，表现为"我明明写了 `writes`，怎么处处被拒"，**静默不生效比报错更坏**。
+- 手册 `config docs trajectory-constraint` 新增「第三个白名单：路径维度」一节；
+  `trajectory-self` 的"不写会怎样"表补一行。
+
+### 四、变异检验（两条，都承重）
+
+| 变异 | 结果 |
+|---|---|
+| `profileWriteWhitelist` 恒返回 `null`（等于没接上） | **4 条红**（目录外拒绝／兄弟前缀／`[]` 全拒／container_fs 写动作） |
+| 把「没写」读成「一个都不许」（`?? []`） | **2 条红** —— 新增的反向钉 ＋ **既有的 D181 判据**（同一族判据同时报警） |
+
+### 五、实现落点
+
+`trajectory/policy/profile.ts`（类型＋搬运，**不判决**）｜`trajectory/policy/rules.ts` 的 `profileWriteWhitelist`（`null` = 不收窄）｜
+`seams/guards.ts`（只对写类工具 + 带路径参数的调用判）｜`tools/trajectory-constraint-admin.ts`（教程＋校验＋列表）。
+⇒ 全部**每轮现读**，改 `trajectory.json` **下一轮即生效、不需重启**。
+
 ## v1.80.0 — 2026-10-20（**轨迹可声明「替换约束块」**：`prompt.injection` ＋ 两条热生效判据）
 
 **来源**：owner 2026-10-20 令（原话见 `src/trajectory/prompt-injection.ts` 头注；此处按隐私门去标识）——

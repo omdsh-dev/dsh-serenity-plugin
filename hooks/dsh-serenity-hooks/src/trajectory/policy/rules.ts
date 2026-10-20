@@ -64,6 +64,31 @@ export function profileMsmWhitelist(profile: TrajectoryConstraint | null | undef
   return new Set(profile?.msms ?? [])
 }
 
+/**
+ * 该轨迹可**写**的路径前缀（owner 2026-10-20 令：「轨迹设定自己的写白名单」）。
+ *
+ * 🔴 与 `profileToolWhitelist` 共用同一条判据（D181/D183）：**字段在不在，不是数组空不空**。
+ *
+ * | `writes` | 返回 | 语义 |
+ * |---|---|---|
+ * | 缺省 | **`null`** | 不收窄（写权限 = 路径守卫那几条，与今天一致） |
+ * | `[]` | `[]`（空数组） | **一个写都落不下**（显式意图） |
+ * | `['a/']` | `['a/']` | 写目标必须落在 `a/` 之内 |
+ *
+ * ⛔ **调用方不许把 `null` 当 `[]`** —— 那会把"我没想到这件事"读成"我不许写任何东西"，
+ * 正是 S196 被静默锁死的形态（D179(b)）。
+ *
+ * ⚠️ 返回的是**原始条目**（相对 CCC 根或绝对路径都可），解析成绝对路径由调用方按自己的 root 做 ——
+ * 本模块不持有 root（判据在 `seams/guards.ts`）。
+ */
+export function profileWriteWhitelist(
+  profile: TrajectoryConstraint | null | undefined,
+): string[] | null {
+  if (!profile) return null
+  if (profile.writes === undefined) return null
+  return profile.writes
+}
+
 /** 轨迹纪律参与项（`profile` 缺省已在 `readTrajectoryConstraintAt` 归一为全 true） */
 export function constraintCognitiveTrajectory(
   profile: TrajectoryConstraint | null | undefined,

@@ -55,6 +55,8 @@ export function make轨迹约束Session(
 export function 轨迹约束Json(opts: {
   tools?: string[]
   msms?: string[]
+  /** 写路径白名单（owner 2026-10-20 令）：`[]` 与不写是两种意思，故用 `undefined` 区分 */
+  writes?: string[]
   model?: string
   systemPrompt?: string
   systemPromptFile?: string
@@ -64,6 +66,7 @@ export function 轨迹约束Json(opts: {
     ...(opts.model !== undefined ? { model: opts.model } : {}),
     ...(opts.tools !== undefined ? { tools: opts.tools } : {}),
     ...(opts.msms !== undefined ? { msms: opts.msms } : {}),
+    ...(opts.writes !== undefined ? { writes: opts.writes } : {}),
     ...(opts.systemPrompt !== undefined ? { systemPrompt: opts.systemPrompt } : {}),
     ...(opts.systemPromptFile !== undefined ? { systemPromptFile: opts.systemPromptFile } : {}),
     ...(opts.cognitiveTrajectory !== undefined ? { cognitiveTrajectory: opts.cognitiveTrajectory } : {}),

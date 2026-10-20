@@ -81,6 +81,20 @@ export interface TrajectoryConstraint {
   tools?: string[]
   /** MSM 白名单；缺省/空数组语义同 `tools`（D181） */
   msms?: string[]
+  /**
+   * **写路径白名单**（owner 2026-10-20 令：「ACC 如果支持轨迹设定自己的写白名单就好了」）。
+   *
+   * `tools` 只管**工具名**，管不了"这个工具能写哪儿"——一旦给了 `write`，路径守卫只拦
+   * "逃出 CCC"与黑名单，**拦不住它去写别人的轨迹或 `docs/`**。本字段补的就是这一维。
+   *
+   * 🔴 判据与 D181 同一条：**字段在不在，不是数组空不空**。
+   * - 缺省（`undefined`）⇒ **不收窄**（写权限 = 路径守卫那几条）；
+   * - `[]` ⇒ **一个写都落不下**（显式意图，不告警）；
+   * - 非空 ⇒ 写类工具的**目标路径**必须落在这些前缀内（相对 CCC 根，或其绝对路径）。
+   *
+   * 只约束**写类**工具（`write`/`edit`/`container_fs` 写动作/`append`/`touch`）；读不受影响。
+   */
+  writes?: string[]
   /** 轨迹纪律参与项（**缺省全 true**，见上方 R↓） */
   cognitiveTrajectory: { session: boolean; keeper: boolean; rebuild: boolean }
   /** 内嵌提示词（`systemPromptFile` 为空时用） */
@@ -219,6 +233,7 @@ export function readTrajectoryConstraintAt(trajectoryDir: string, root: string):
   }
   const tools = strListMaybe(obj.tools)
   const msms = strListMaybe(obj.msms)
+  const writes = strListMaybe(obj.writes)
   /**
    * 提示词注入模式（owner 2026-10-20）：只搬运，不判决。
    *
@@ -245,6 +260,7 @@ export function readTrajectoryConstraintAt(trajectoryDir: string, root: string):
     ...(model !== undefined ? { model } : {}),
     ...(tools !== undefined ? { tools } : {}),
     ...(msms !== undefined ? { msms } : {}),
+    ...(writes !== undefined ? { writes } : {}),
     ...(resident !== undefined ? { resident } : {}),
     ...(prompt !== undefined ? { prompt } : {}),
     cognitiveTrajectory: {

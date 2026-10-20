@@ -108,6 +108,18 @@ describe('轨迹约束-profile: 缺省值与容错', () => {
     expect(readTrajectoryConstraintAt(dir, root)!.model).toBeUndefined()
   })
 
+  it('🔴 writes：缺省 ⇒ undefined（不收窄）、显式 [] ⇒ 保留空数组（判据是字段在不在）', () => {
+    // 与 D181 同一条判据。归一成 `[]` 会把"我没想到写路径这件事"读成"我不许写任何东西"。
+    const unset = mkTraj('writes-unset', { tools: ['read'] })
+    expect(readTrajectoryConstraintAt(unset.dir, root)!.writes).toBeUndefined()
+
+    const empty = mkTraj('writes-empty', { writes: [] })
+    expect(readTrajectoryConstraintAt(empty.dir, root)!.writes).toEqual([])
+
+    const filled = mkTraj('writes-filled', { writes: ['AGENT_SESSIONS/x/', '  _tmp/  '] })
+    expect(readTrajectoryConstraintAt(filled.dir, root)!.writes).toEqual(['AGENT_SESSIONS/x/', '_tmp/'])
+  })
+
   it('🔴 坏 JSON ⇒ null ＋ 响亮告警（不带着半份权限面运行）', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { dir } = mkTraj('broken')

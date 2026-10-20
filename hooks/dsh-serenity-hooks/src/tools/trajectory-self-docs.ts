@@ -107,6 +107,7 @@ const ALL_KEYS_OPTIONAL = `── 🔴 所有 key 都是可选的：不写 = 不
   | \`model\` | 用会话当前的模型（**不会**回退到 cheap-worker） | **每轮**（改文件下一轮即生效） |
   | \`tools\` | **不收窄**工具面 | 每轮 |
   | \`msms\` | **不收窄** MSM 面 | 每轮 |
+  | \`writes\` | **不收窄**写路径（写权限 = 路径守卫那几条） | 每轮 |
   | \`resident\` | 不出现在常驻名单里（不参与"被找"） | 每轮 |
   | \`cognitiveTrajectory\` | 三项纪律全参与（true） | 每轮 |
   | \`systemPromptFile\` / \`systemPrompt\` | 用 ACC 的通用身份（**不替换**） | 保存即生效 |
@@ -172,7 +173,7 @@ const VERIFY = `── 写完之后怎么验（别只看文档，要能机械判
   章程生效了吗    改 PROMPT.md 后**在同一会话里**看下一轮的系统提示词段是否变化（保存即生效）
   注入模式生效了吗 改 trajectory.json 的 prompt 段后，**同一会话下一轮**：replace 下四块消失、
                   我的章程紧跟身份块；⛔ 不需要重启（这两者都是每轮现读）
-  我声明了什么    container_admin config list  —— 逐轨迹列出 model/tools/msms 的**生效值**；
+  我声明了什么    container_admin config list  —— 逐轨迹列出 model/tools/msms/writes 的**生效值**；
                   没写的字段印 \`(unchanged)\` / \`(unrestricted)\`，不是伪装成某个默认值
   配置合法吗      container_admin config validate  —— msms 均已注册 / model 在可用表里
   常驻被看见了吗  cognitive_trajectory action=resident —— 我出现在名单里，且 serves 可读

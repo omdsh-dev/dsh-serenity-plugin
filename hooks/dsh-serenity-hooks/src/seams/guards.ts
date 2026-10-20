@@ -24,7 +24,7 @@ import {
 } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { trajectoryConstraintForSession, type TrajectoryConstraint } from '../trajectory/policy/profile.js'
-import { profileToolWhitelist } from '../trajectory/policy/rules.js'
+import { profileToolWhitelist, profileWriteWhitelist } from '../trajectory/policy/rules.js'
 import { hasEnabledImChannel } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../kernel/invariant.js'
 import { isoLocal } from '../kernel/time.js'
@@ -163,6 +163,27 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     const whitelist = profileToolWhitelist(profile)
     if (whitelist !== null && !whitelist.has(toolName)) {
       return { deny: 'tool not allowed in this 轨迹约束 trajectory', kind: 'deny' }
+    }
+    // 🔴 写路径白名单（owner 2026-10-20 令「轨迹设定自己的写白名单」）：
+    //    给了 `write` **不等于**放开整个容器 —— `tools` 只管工具名，管不了"写到哪儿"。
+    //    判据同 D181：**字段在不在**。缺省 ⇒ 不收窄（`profileWriteWhitelist` 返回 `null`）；
+    //    `[]` ⇒ 一个写都落不下（显式意图）。
+    //    只判**写类工具**且**带路径参数**的那一半：无路径的写（如 `bash`）由后面的守卫管。
+    const writeScopes = profileWriteWhitelist(profile)
+    if (writeScopes !== null && pathArg !== undefined && isWriteTool(toolName, action)) {
+      const abs = resolve(root, pathArg)
+      const inside = writeScopes.some((scope) => pathInside(resolve(root, scope), abs))
+      if (!inside) {
+        // 出声必须指名缺哪一条（D186/D190 同族）：只报"越界"会让人以为 CCC 根不对
+        return {
+          deny:
+            `${toolName}: write outside this trajectory's declared write scope`
+            + ` (allowed: ${writeScopes.length > 0 ? writeScopes.join(' / ') : '(none — "writes" is an empty array)'})`
+            + `; target: ${pathArg}`
+            + ' — add the prefix to this trajectory\'s trajectory.json "writes" if the write is intended',
+          kind: 'deny',
+        }
+      }
     }
   }
 

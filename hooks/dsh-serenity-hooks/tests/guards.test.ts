@@ -835,6 +835,85 @@ describe('guards: 轨迹约束 工具白名单（F4b ⑧）', () => {
     expect(decideGuard(base({ root: dir, toolName: 'cheap-worker', trajectoryConstraint: null })).kind).toBe('allow')
   })
 
+  // ── 第三个白名单：写**路径**（owner 2026-10-20 令「轨迹设定自己的写白名单」）────────────────
+  //
+  // 它补的是 `tools` 补不上的那一维：给了 `write` 之后，路径守卫只拦"逃出 CCC"与黑名单，
+  // **拦不住它去写别人的轨迹或 docs/**。判据与 D181 同源：**字段在不在，不是数组空不空**。
+  describe('writes 白名单（写路径维度）', () => {
+    const OWN = 'AGENT_SESSIONS/2026-10-19--qa--t/'
+    const withWrite = profile({
+      tools: ['read', 'write', 'edit'],
+      writes: [OWN],
+    })
+
+    it('目录内（含目录自身与其子路径）→ allow', () => {
+      for (const p of [OWN, `${OWN}SESSION.md`, `${OWN}notes.md`, `${OWN}sub/x.md`]) {
+        const d = decideGuard(base({ root: dir, toolName: 'write', pathArg: p, trajectoryConstraint: withWrite }))
+        expect(d.kind, `${p} 应放行`).toBe('allow')
+      }
+    })
+
+    it('目录外 → deny，且**指名允许的前缀与当前目标**（D186/D190：出声必须指对路）', () => {
+      const d = decideGuard(base({
+        root: dir, toolName: 'write', pathArg: 'AGENT_SESSIONS/2026-10-19--other--t/SESSION.md', trajectoryConstraint: withWrite,
+      }))
+      expect(d.kind).toBe('deny')
+      expect(d.deny).toContain(OWN)                                            // 允许什么
+      expect(d.deny).toContain('AGENT_SESSIONS/2026-10-19--other--t/SESSION.md') // 目标是什么
+      expect(d.deny).toContain('writes')                                       // 改哪个键
+    })
+
+    it('🔴 兄弟前缀陷阱：目录名只差一个后缀不算"在目录内"（边界按路径分隔符判）', () => {
+      // 若按字符串 startsWith 判，`…--qa--t2/` 会命中 `…--qa--t`。
+      const d = decideGuard(base({
+        root: dir, toolName: 'write', pathArg: 'AGENT_SESSIONS/2026-10-19--qa--t2/SESSION.md', trajectoryConstraint: withWrite,
+      }))
+      expect(d.kind).toBe('deny')
+    })
+
+    it('**只约束写**：读同一目录外的文件照常 allow', () => {
+      expect(decideGuard(base({
+        root: dir, toolName: 'read', pathArg: 'docs/a.md', trajectoryConstraint: withWrite,
+      })).kind).toBe('allow')
+    })
+
+    it('🔴 D181 反向钉：`writes: []` ⇒ 一个写都落不下（显式意图，不是"不收窄"）', () => {
+      const none = profile({ tools: ['read', 'write', 'edit'], writes: [] })
+      const d = decideGuard(base({ root: dir, toolName: 'write', pathArg: `${OWN}SESSION.md`, trajectoryConstraint: none }))
+      expect(d.kind).toBe('deny')
+      expect(d.deny).toContain('empty array')
+    })
+
+    it('🔴 反向钉：`writes` **字段缺省** ⇒ 不收窄（与 D181 同一条判据）', () => {
+      const unset = profile({ tools: ['read', 'write', 'edit'] })
+      expect(decideGuard(base({
+        root: dir, toolName: 'write', pathArg: 'docs/anything.md', trajectoryConstraint: unset,
+      })).kind).toBe('allow')
+    })
+
+    it('绝对路径前缀同样可用（条目既可以是相对 CCC 根，也可以是绝对路径）', () => {
+      const abs = profile({ tools: ['write'], writes: [join(dir, 'AGENT_SESSIONS/2026-10-19--qa--t')] })
+      expect(decideGuard(base({
+        root: dir, toolName: 'write', pathArg: `${OWN}x.md`, trajectoryConstraint: abs,
+      })).kind).toBe('allow')
+    })
+
+    it('container_fs 的**写动作**受管、只读动作不受管', () => {
+      // ⚠️ 夹具必须把 `container_fs` 放进 tools —— 否则命中的是**工具白名单**那条拒绝，
+      //    而不是写路径这条 ⇒ 用例会"绿得不明所以"（判据打在错的那一维上）。
+      const withFs = profile({ tools: ['read', 'container_fs'], writes: [OWN] })
+      const deny = decideGuard(base({
+        root: dir, toolName: 'container_fs', action: 'rm', pathArg: 'docs/a.md', trajectoryConstraint: withFs,
+      }))
+      expect(deny.kind).toBe('deny')
+      expect(deny.deny).toContain('write scope') // 拒绝来自写路径这条，不是工具白名单
+      const allow = decideGuard(base({
+        root: dir, toolName: 'container_fs', action: 'list', pathArg: 'docs', trajectoryConstraint: withFs,
+      }))
+      expect(allow.kind).toBe('allow')
+    })
+  })
+
   it('约束面 tools 空（纯 MSM 轨迹）→ 仅 msm 可用', () => {
     const pure = profile({ dirName: '2026-10-19--pure--t', code: 'pure', msms: ['cognitive-qa'], tools: [] })
     expect(decideGuard(base({ root: dir, toolName: 'msm', trajectoryConstraint: pure })).kind).toBe('allow')

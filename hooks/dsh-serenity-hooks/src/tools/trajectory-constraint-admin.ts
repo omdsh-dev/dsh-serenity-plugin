@@ -14,7 +14,7 @@
  */
 
 import type { JsonValue } from '../kernel/json.js'
-import { readCheapWorkerConfig } from '../kernel/ccc.js'
+import { readCheapWorkerConfig, resolveInside } from '../kernel/ccc.js'
 import { constraintSystemPromptSource, constraintCognitiveTrajectory, resolveConstraintSystemPrompt, TRAJECTORY_CONSTRAINT_HINT } from '../trajectory/policy/rules.js'
 import { listTrajectoryConstraints, TRAJECTORY_CONSTRAINT_FILENAME } from '../trajectory/policy/profile.js'
 import { TRAJECTORY_FILENAME, TRAJECTORY_LEGACY_FILENAMES } from '../trajectory/policy/files.js'
@@ -52,6 +52,7 @@ becomes a 轨迹约束; delete it and it goes back to being an ordinary trajecto
     "model": "provider/model",          // optional; **不写 = 用会话当前模型**（不回退 cheap-worker；每轮生效）
     "tools": ["read","grep","msm",...], // optional; **不写 = 不收窄**。显式 [] = 全隐藏（除 skill）
     "msms":  ["msm-a","msm-b"],         // optional; **不写 = 不收窄**。register/deregister 恒拒
+    "writes": ["AGENT_SESSIONS/<我的目录>/"], // optional; **不写 = 不收窄**。显式 [] = 一个写都落不下
     "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true },  // 缺省 TRUE（见下）
     "resident": { "serves": "..." },    // optional; 对外用途自述（见 trajectory-self 章）
     "cro": { "host": "<machine name>" } // optional: which machine may run this trajectory's CRO program
@@ -76,6 +77,20 @@ becomes a 轨迹约束; delete it and it goes back to being an ordinary trajecto
   - anything outside a **declared** whitelist is invisible in the schema, not merely rejected at call time
   🔴 判据是**字段在不在**，不是**数组空不空**（D181）。旧版把两者混成"空 = 全拒"，
      于是「只想声明常驻」的人被静默锁死 —— 那是本仓实测踩过的坑（D179(b)）。
+
+── \`writes\`: the THIRD whitelist — the PATH dimension（owner 2026-10-20 令）──
+  \`tools\` 管的是**工具名**，管不了"这个工具能写哪儿"：给了 \`write\` 之后，路径守卫只拦
+  「逃出 CCC」与黑名单，**拦不住它去写别人的轨迹或 docs/**。\`writes\` 补的正是这一维。
+
+  - **不写** ⇒ 不收窄（写权限 = 路径守卫那几条，与之前完全一致）
+  - \`"writes": []\` ⇒ **一个写都落不下**（显式意图；只影响写，不影响读）
+  - \`"writes": ["AGENT_SESSIONS/<我的目录>/", "_tmp/"]\` ⇒ 写类工具的**目标路径**必须落在这些前缀内
+  - 条目可以是**相对 CCC 根**的路径，也可以是绝对路径；判定按"目标在这个目录之内（含自身）"
+  - 只管**写类**工具（\`write\` / \`edit\` / \`container_fs\` 的写动作 / \`append\` / \`touch\`），**读不受影响**
+  - 越界拒绝时**会指名允许的前缀与当前目标**（D186：不许不出声；出声必须指对路）
+
+  ⇒ 典型用法（两条 IM 轨迹）：给 \`write\`/\`edit\` 写自己的身体，同时把写面收窄到自己那一格：
+     \`"tools": ["read","write","edit",...], "writes": ["AGENT_SESSIONS/<code 目录>/"]\`
 
 ── cognitiveTrajectory: why the defaults are TRUE ──
   The workspace of a 轨迹约束 is its own SESSION.md. Setting these to false would cut it off from
@@ -131,6 +146,18 @@ export function validateTrajectoryConstraint(root: string): JsonValue {
     for (const m of p.msms ?? []) {
       if (!registered.has(m)) issues.push(`trajectory "${p.code}": msms "${m}" is not registered in mech-registry.json`)
     }
+    // 写路径白名单：条目写成绝对路径且**逃出 CCC** ⇒ 那多半是抄了别人的机器路径（永远匹配不上），
+    // 静默不生效比报错更坏 ⇒ 这里点名（不判对错：它是配置，不是攻击面 —— 逃逸的写本来就被路径守卫拦）。
+    for (const w of p.writes ?? []) {
+      try {
+        resolveInside(root, w)
+      } catch (err) {
+        issues.push(
+          `trajectory "${p.code}": writes "${w}" is outside the CCC root (${String((err as Error)?.message ?? err)})`
+          + ' — a write prefix outside the container can never match; use a path relative to the CCC root',
+        )
+      }
+    }
     if (p.model && allowedModels && !allowedModels.has(p.model)) {
       issues.push(`trajectory "${p.code}": model "${p.model}" not in cheap-worker.models (${[...allowedModels].join(', ') || '(none)'})`)
     }
@@ -162,6 +189,8 @@ export function listTrajectoryConstraintSummary(root: string): JsonValue {
       model: p.model ?? '(unchanged)',
       msms: wl(p.msms, '(unrestricted)'),
       tools: wl(p.tools, '(unrestricted)'),
+      // 写路径白名单（owner 2026-10-20 令）：三态同上 —— 没写 = 不收窄、写了 [] = 一个都写不了
+      writes: wl(p.writes, '(unrestricted)'),
       // 常驻自述（D173）：没写就不出现 —— 它是"我欢迎被找到"的声明，不是状态位
       ...(p.resident !== undefined ? { resident: p.resident.serves !== undefined ? p.resident.serves : '(no serves)' } : {}),
       cognitiveTrajectory: constraintCognitiveTrajectory(p) satisfies Record<string, boolean>,

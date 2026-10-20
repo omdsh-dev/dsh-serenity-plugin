@@ -90,6 +90,14 @@ describe('轨迹约束角色逻辑（trajectory-constraint-admin.ts——v1.30 �
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('UNSET means unrestricted, EMPTY means nothing')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('register/deregister')
 
+    // ⑤b 🔴 **第三个白名单 = 写「路径」**（owner 2026-10-20 令「轨迹设定自己的写白名单」）。
+    //     `tools` 管的是工具名，管不了"这个工具能写到哪儿" —— 给了 `write` 之后，路径守卫只拦
+    //     "逃出 CCC"与黑名单，拦不住它去写别人的轨迹。教程必须把这一维讲出来，否则没人会写它。
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('"writes"')
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('the PATH dimension')
+    // 反向钉：它**只管写** —— 不得被读成"读也受限"（那会让人以为读不了自己的日志与档案）
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('读不受影响')
+
     // 🔴 纪律缺省翻成 **true**（工作台就是这条轨迹自己的身体）——本次重做的语义翻转之一，必须在教程里写明
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('all default to true')
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('cut it off from')
@@ -201,6 +209,31 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: v
     expect(r.ok).toBe(true)
     expect(r.issues).toEqual([])
   })
+
+  /**
+   * `writes` 的**唯一**校验目的：让"永远匹配不上"这件事可见。
+   *
+   * 条目写成 CCC 之外的绝对路径（多半是从别的机器抄来的）时，前缀判定**永远不成立** ⇒
+   * 表现为"我明明写了 writes，怎么还是处处被拒"。静默不生效比报错更坏（D151 同族）。
+   * ⚠️ 这不是安全判据 —— 逃逸的写本来就被路径守卫拦；这里管的是**配置是否自洽**。
+   */
+  it('🔴 writes 条目落在 CCC 之外 ⇒ 报 issue（否则就是一句永远不生效的配置）', () => {
+    makeTrajectory(dir, 'wq', 轨迹约束Json({ msms: ['x'], writes: ['/etc/passwd'] }))
+    writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
+    const r = validateTrajectoryConstraint(dir)
+    expect(r.ok).toBe(false)
+    expect(r.issues.join('\n')).toContain('writes "/etc/passwd" is outside the CCC root')
+  })
+
+  it('writes 用相对 CCC 根的路径 ⇒ 不报（正常形态）', () => {
+    // ⚠️ 带上 systemPrompt：否则会命中"没有轨迹提示词"那条**无关**的 issue，
+    //    用例就变成在测别的东西（判据要打在它宣称的那一维上）。
+    makeTrajectory(dir, 'wq2', 轨迹约束Json({
+      msms: ['x'], systemPrompt: 'p', writes: ['AGENT_SESSIONS/2026-10-19--wq2--traj/'],
+    }))
+    writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
+    expect(validateTrajectoryConstraint(dir).ok).toBe(true)
+  })
 })
 
 describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: listTrajectoryConstraintSummary 角色摘要', () => {
@@ -240,6 +273,21 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: l
     expect(review.promptSource).toBe('inline')
     // 轨迹目录名也带出来（调试"这个编码对应哪条轨迹"）
     expect(String(review.dirName)).toContain('--review--')
+  })
+
+  /**
+   * `writes` 的三态读数（与 model/tools/msms 同一条口径，D179(c)＋D181）：
+   * 没写 ⇒ `(unrestricted)`；写了 ⇒ 原样；写了 `[]` ⇒ `[]`（"一个都写不了"，与前者**恰好相反**）。
+   * 读数器的价值就在这里：两种不同意图必须能一眼分辨。
+   */
+  it('🔴 writes 三态读数（没写 / 写了 / 写了空数组）', () => {
+    makeTrajectory(dir, 'w-unset', 轨迹约束Json({ tools: ['read', 'write'] }))
+    makeTrajectory(dir, 'w-some', 轨迹约束Json({ tools: ['read', 'write'], writes: ['AGENT_SESSIONS/2026-10-19--w-some--t/'] }))
+    makeTrajectory(dir, 'w-none', 轨迹约束Json({ tools: ['read', 'write'], writes: [] }))
+    const r = listTrajectoryConstraintSummary(dir) as { roles: Array<Record<string, unknown>> }
+    expect(r.roles.find((x) => x.name === 'w-unset')!.writes).toBe('(unrestricted)')
+    expect(r.roles.find((x) => x.name === 'w-some')!.writes).toEqual(['AGENT_SESSIONS/2026-10-19--w-some--t/'])
+    expect(r.roles.find((x) => x.name === 'w-none')!.writes).toEqual([])
   })
 
   it('有轨迹（systemPromptFile）→ promptSource=file + 文件路径展示（v1.25.10）', () => {
