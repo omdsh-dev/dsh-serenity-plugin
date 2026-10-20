@@ -118,6 +118,34 @@ export function sessionsRoot(root: string): string {
   return join(root, 'AGENT_SESSIONS')
 }
 
+/** 归档区绝对路径（`<CCC>/AGENT_SESSIONS/_archived`） */
+export function archivedSessionsDir(sessionsDir: string): string {
+  return join(sessionsDir, ARCHIVED_DIR)
+}
+
+/**
+ * **编码是否已被占用**（活跃区 ＋ 归档区，**全仓**）。
+ *
+ * 🔴 为什么必须扫归档区（2026-10-20，S222 报告 / owner 转 S142 处置）：
+ * 编码是**终身身份**（AXIOM 3），而归档只改位置、不改身份 ⇒
+ * 若分配器只看活跃区，归档过的码会被**重新发出**，于是同一个身份挂在两个载体上
+ * （实测：`S222` 活跃＋归档并存；更早 `S140` 被两条轨迹共用，08-27 就登记过、一直没判据）。
+ * 一个可复用的身份码会让历史 `send-now` / 唤醒条目 / 文档引用**静默指向另一个对象**。
+ *
+ * ⚠️ 与 `readAllSessions` 的分工：那个函数回答"**眼下有哪些活跃轨迹**"（该跳 `_` 前缀），
+ *    本函数回答"**这个码有没有人用过**"（必须看全仓）。**两个问题，两个扫描域** ——
+ *    把它们合并成一个才是错的。
+ *
+ * @returns 撞车时返回**占用者的完整路径**（活跃区优先说明）；无冲突 ⇒ `null`
+ */
+export function findCodeCollision(sessionsDir: string, code: string): string | null {
+  for (const dir of [sessionsDir, archivedSessionsDir(sessionsDir)]) {
+    const hit = readAllSessions(dir).find((s) => parseTrajectoryCode(s.dirName) === code)
+    if (hit) return hit.path
+  }
+  return null
+}
+
 // ── 会话条目与状态（对齐 osp readAllSessions/parseSessionMd）──
 
 /**
@@ -390,6 +418,14 @@ export function findSession(sessionsDir: string, key: string): SessionEntry | nu
   // ③ UID 精确命中（只读兼容，大小写敏感）
   const byUid = all.find((s) => readTrajectoryUid(s.path) === key)
   if (byUid) return byUid
+  // 🔴 **归档区故意不参与解析**（2026-10-20 复核后确认：这条既有裁决要保留）。
+  //
+  // 我一度在这里加了"活跃区零命中就回落归档区"，被 `trajectory-tool.test.ts` 的
+  // 判据④「归档后 `use` 不再找得到它」当场打红 —— **那条用例是对的**：
+  // 归档的语义就是"退出日常解析域"（要找它得用完整目录名／`container_fs`）。
+  // ⇒ S222 报的"传 S222 有歧义"**不是解析歧义**（活跃区唯一命中），而是**身份重复**：
+  //    两个载体都自称 S222。修法在**分配侧拒绝重复**（`findCodeCollision`），
+  //    ⛔ 不是把解析域扩大 —— 扩大只会把"身份重复"变成"每次都要人工挑一个"。
   const lower = key.toLowerCase()
   const fuzzy = all.filter((s) => s.dirName.toLowerCase().includes(lower))
   if (fuzzy.length === 1) return fuzzy[0] ?? null
@@ -572,9 +608,31 @@ export function createSession(opts: CreateSessionOptions): CreateSessionResult {
   let code: string
   if (requestedId !== undefined && requestedId !== '') {
     code = requestedId
+    // 🔴 **2026-10-20（S222 报告，owner 转 S142 处置）：编码终身唯一 —— 归档不释放代码。**
+    //
+    // 修之前：分配器只扫 `readAllSessions()`（= **活跃区**），而归档不动目录名 ⇒
+    // 归档把代码"带走"了，于是 `S222` 又被发了一次（活跃区的 S222 与
+    // `_archived/2026-10-19--S222--…` 并存）。实测更早还有 `S140` 被两条轨迹共用
+    // （`2026-08-20--S140--skill-msm-impl` 与 `2026-08-20--S140--loop-agents-dcp-layer-fix`），
+    // 2026-08-27 就被 S144 记为待办，**一直没有机械判据**。
+    //
+    // 立场（本仓裁决）：**AXIOM 3 说 identity = 编码，那它就必须全仓唯一** ——
+    // 一个"退役后可被复用"的身份码会让历史 `send-now` / 唤醒条目 / 文档引用
+    // **静默指向另一个对象**（同族：改名两代并存，D167）。归档改的是位置，不是身份。
+    // ⇒ 分配与显式指定**都要扫归档区**。
+    const dup = findCodeCollision(sessionsDir, code)
+    if (dup !== null) {
+      throw new Error(
+        `编码「${code}」已被占用：${dup}\n` +
+        '认知轨迹的编码是**终身身份**（AXIOM 3：identity = 编码），归档不会释放它 —— ' +
+        '归档只改位置，不改身份。\n' +
+        '⇒ 换一个编码（`create --id <新码>`），或用 `create` 的自动分配（会跳过全部已用码）。',
+      )
+    }
   } else {
     let maxId = 0
-    for (const s of sessions) {
+    // 🔴 取 max 的扫描域必须**含归档区**，否则归档过的最高码会被重新发出（本函数修的正是这个）
+    for (const s of [...sessions, ...readAllSessions(archivedSessionsDir(sessionsDir))]) {
       const m = parseTrajectoryCode(s.dirName)?.match(/^S(\d{3,})$/)
       if (m) {
         const num = parseInt(m[1]!, 10)

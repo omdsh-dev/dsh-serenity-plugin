@@ -98,6 +98,60 @@ describe('cognitive-trajectory-ops: 生命周期（对齐 osp spec）', () => {
     expect(readFileSync(join(r.sessionPath, 'SESSION.md'), 'utf-8')).toContain('完成对照')
   })
 
+  /**
+   * 🔴 **编码终身唯一 —— 归档不释放代码**（2026-10-20，S222 实测报告 / owner 转 S142 处置）。
+   *
+   * ## 真实现场
+   *
+   * · 归档区已有 `2026-10-19--S222--Shameless S02 字幕调整`，而活跃区 `create` 又发了一个 `S222`
+   *   ⇒ 同一个身份码挂在两个载体上（传 `S222` 有歧义）。
+   * · 更早还有 `S140` 被两条轨迹共用（`skill-msm-impl` 与 `loop-agents-dcp-layer-fix`），
+   *   2026-08-27 就被 S144 记为待办，**一直没有机械判据**。
+   *
+   * ## 判据
+   *
+   * 编码是**终身身份**（AXIOM 3）⇒ 归档只改位置、不改身份 ⇒ **分配域必须含归档区**。
+   * ⚠️ 这与 `readAllSessions` 的扫描域**故意不同**：那个回答"眼下有哪些活跃轨迹"（跳 `_`），
+   * 本判据回答"这个码有没有人用过"（看全仓）。**两个问题，两个扫描域。**
+   */
+  it('🔴 自动分配跳过归档区已用过的码（档案不释放代码）', () => {
+    // 归档区已有 S222（真实现场的形状）
+    const arch = join(dir, 'AGENT_SESSIONS', '_archived', '2026-10-19--S222--Shameless S02 字幕调整')
+    mkdirSync(arch, { recursive: true })
+    writeFileSync(join(arch, 'SESSION.md'), '# SESSION\n', 'utf-8')
+    // 活跃区最高到 S221
+    const live = join(dir, 'AGENT_SESSIONS', '2026-10-19--S221--dsh plugin authoring skill')
+    mkdirSync(live, { recursive: true })
+    writeFileSync(join(live, 'SESSION.md'), '# SESSION\n', 'utf-8')
+
+    const r = mk('trajectory-housekeeping')
+    // 修之前：只扫活跃区 ⇒ 发 S222（撞车）；修之后：看全仓 ⇒ 跳过 S222 发 S223
+    expect(r.sessionId).toBe('S223')
+  })
+
+  it('🔴 显式指定一个已被归档占用的码 ⇒ 拒绝（不靠读者自己发现）', () => {
+    const arch = join(dir, 'AGENT_SESSIONS', '_archived', '2026-10-19--S222--old')
+    mkdirSync(arch, { recursive: true })
+    writeFileSync(join(arch, 'SESSION.md'), '# SESSION\n', 'utf-8')
+
+    expect(() => createSession({ root: dir, desc: 'x', id: 'S222', dryRun: false }))
+      .toThrow(/已被占用[^]*终身身份/)
+  })
+
+  it('🔴 反向：活跃区占用的码同样拒绝（`--id` 不是后门）', () => {
+    mk('first') // S001
+    // ⚠️ 这一格由**既有**的活跃区守卫负责（文案不同：「already in use by …」），
+    //    本轮新增的归档区判据接在它后面 ⇒ 断言**行为**（拒绝 + 点名占用者），
+    //    ⛔ 不钉具体文案：两处守卫的措辞不同，钉文案会让用例随文案漂移而红（D131 同族）。
+    expect(() => createSession({ root: dir, desc: 'x', id: 'S001', dryRun: false }))
+      .toThrow(/S001[^]*2026-.*--S001--first/)
+  })
+
+  it('🟢 正控：空闲的显式码照常可用（证明上面两条不是"一律拒绝"）', () => {
+    const r = createSession({ root: dir, desc: 'x', id: 'mycode', dryRun: false })
+    expect(r.sessionId).toBe('mycode')
+  })
+
   it('create 模板 = 固定格式契约（状态行标记 ＋ 七个固定段按序 ＋ 全模板无 [x]）', () => {
     const r = mk('format-contract')
     const md = readFileSync(join(r.sessionPath, 'SESSION.md'), 'utf-8')

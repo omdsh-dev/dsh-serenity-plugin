@@ -233,7 +233,25 @@ export function runGit(root: string, args: GitArgs): JsonValue {
       if (!scoped && !hasChanges(root)) return '(nothing to commit — working tree clean)'
 
       // 1) 暂存：给了 paths ⇒ 只暂存这些路径；未给 ⇒ 保持原行为（整仓）
-      const addR = git(root, scoped ? ['add', '--', ...paths] : ['add', '-A'])
+      //
+      // 🔴 **2026-10-20（S222 实测报告，owner 转 S142 处置）：归档移动提交不了。**
+      //
+      // 现场：17 条轨迹 `mv` 进 `_archived/` 之后，按路径提交报
+      //   `fatal: 路径规格 '…' 未匹配任何文件`（exit 128）。
+      //
+      // 真因（本轮用 `--dry-run` 逐形态实测，不是推断）：
+      //   · `git add -- <已跟踪的、文件已消失的路径>` ⇒ **能**匹配，输出「删除 '…'」（正常）
+      //   · `git add -- <源目录已不存在、且从未被跟踪的路径>` ⇒ **`fatal` exit 128**
+      //   · 整条命令**整体失败** ⇒ 同批里那些本来能匹配的删除也**一条都没暂存**
+      //     ⇒ 这才是"归档 + 按路径提交不通"的真实形状：**一条坏路径毒死整批**。
+      //
+      // 修法：改用 `git add -A -- <paths>`。
+      //   `-A` 的语义 = 这些 pathspec 下**增/删/改全收**，因此：
+      //   ① 源目录消失的删除仍被收下（这正是归档要提交的那一半）；
+      //   ② 对"根本不存在"的 pathspec，`-A` 不再 exit 128（`--dry-run` 实测：空输出、exit 0）。
+      //   ⚠️ **风险边界**：`-A` 只作用于**给定的 pathspec**，不会扩大成整仓
+      //   （那正是 `add -A`（无 pathspec）才有的行为，本函数未传 paths 时仍走那条老路）。
+      const addR = git(root, scoped ? ['add', '-A', '--', ...paths] : ['add', '-A'])
       if (addR.timedOut) throw new Error(`container_git commit: git add timed out (${localTimeout() / 1000}s)`)
       if (!addR.ok) throw new Error(`container_git commit: git add failed\n${addR.stderr || addR.stdout}`)
 
