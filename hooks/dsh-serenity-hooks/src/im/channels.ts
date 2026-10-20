@@ -74,6 +74,16 @@ export interface ImChannel {
   id: string
   /** 该 CCC 是否启用了本通道（缺省实现：读该通道的 CCC 配置） */
   isEnabled(root: string): boolean
+  /**
+   * `isEnabled` 为假时**给人看的原因与怎么改**（可选）。
+   *
+   * 🔴 为什么它归通道自己而不归工具面（2026-10-20 Q4 真机验收踩到）：
+   * 工具面先前统一印「enable it in … (weixin.enabled)」，而**只有通道自己知道
+   * "怎样才能启用我"** —— 飞书能否用不取决于 `weixin.enabled`，而取决于有没有
+   * 一条启用中的飞书账号。⇒ 统一文案在第二个渠道上就成了**教一个不生效的改法**。
+   * 缺省（不给）⇒ 用通用文案，说"查该渠道自己的开关／账号表"，不点名任何具体字段。
+   */
+  notEnabledReason?(root: string): string | undefined
   /** 别名/裸 id → 通道用户；无法解析返回 null */
   resolveUser(root: string, input: string): ImUserEntry | null
   /** 已配置别名列表（`users` 动作） */
@@ -137,11 +147,21 @@ interface ImToolRequest {
   account?: string
 }
 
-/** 错误码 → 可行动提示（模型视角：说清怎么改） */
-function remediationFor(code: string): string | undefined {
+/**
+ * 错误码 → 可行动提示（模型视角：说清怎么改）。
+ *
+ * 🔴 `CHANNEL_NOT_CONFIGURED` 的提示**不能写死某一个渠道的字段名**（2026-10-20 Q4 真机验收踩到）：
+ * 首版逐字写「enable it in … (weixin.enabled)」，而接第二个渠道后，**飞书能不能用不取决于
+ * 这个开关**（它取决于有没有一条启用中的飞书账号）⇒ 按那句提示去改 `weixin.enabled`
+ * **不会生效**，而错误码又指向"没配置" ⇒ 用户据此改完还是同一句报错。
+ * ⇒ 提示按**渠道是否带自己的启用判据**分岔：带 `channelHint` 的就用它自己的说法。
+ */
+function remediationFor(code: string, channelHint?: string): string | undefined {
   switch (code) {
     case 'CHANNEL_UNKNOWN': return 'Use a registered channel id (see the tool description)'
-    case 'CHANNEL_NOT_CONFIGURED': return 'This CCC has not configured that channel — enable it in .opencode/serenity.json (weixin.enabled) or the settings panel'
+    case 'CHANNEL_NOT_CONFIGURED':
+      return channelHint
+        ?? 'This CCC has not configured that channel — check .opencode/serenity.json (the channel\'s own enabled flag / accounts) or the settings panel'
     case 'ACTION_UNKNOWN': return 'Use send / send-file / users / status'
     case 'ACTION_UNSUPPORTED': return 'This channel does not support that action'
     case 'ALIAS_UNKNOWN': return 'Use a configured alias (see action=users) or a raw channel user id'
@@ -202,7 +222,15 @@ export async function runImBridge(root: string, req: ImToolRequest): Promise<ImT
     return fail('CHANNEL_UNKNOWN', `unknown channel "${channelId}" (registered: ${imChannelIds().join(', ') || '(none)'})`)
   }
   if (!channel.isEnabled(root)) {
-    return fail('CHANNEL_NOT_CONFIGURED', `channel "${channelId}" is not configured for this CCC (${root})`)
+    // 🔴 提示按**通道自己**的说法给（2026-10-20 Q4 真机验收踩到）：
+    //    首版写死「enable it in … (weixin.enabled)」，而飞书能不能用**不取决于那个开关**
+    //    （它取决于有没有一条启用中的飞书账号）⇒ 照着改不会生效，报错却还是同一句。
+    //    ⚠️ 只有通道自己知道"怎样才能启用我" —— 这就是 `notEnabledReason` 存在的原因。
+    return fail(
+      'CHANNEL_NOT_CONFIGURED',
+      `channel "${channelId}" is not configured for this CCC (${root})`,
+      channel.notEnabledReason?.(root),
+    )
   }
   if (action === 'users') {
     return { ok: true, channel: channelId, action, detail: { users: channel.listUsers(root) } }

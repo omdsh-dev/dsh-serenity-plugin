@@ -158,7 +158,12 @@ describe('轨迹约束面：已硬切退役的工具名不得回到白名单', (
     }
     const offenders: string[] = []
     for (const p of profiles) {
-      for (const t of p.tools) if ((RETIRED as readonly string[]).includes(t)) offenders.push(`${p.code}(${p.dirName}).tools: ${t}`)
+      // 🔴 `tools` 自 v1.78.0 起是 `string[] | undefined`（owner 令「不写当然不收窄」）：
+      //    **字段不存在 = 不设定**，与"显式空数组"是两件事（D181）。
+      //    本判据问的是"有没有把退役旧名写进白名单" ⇒ 没写这个字段 = **没写旧名**，不是违规。
+      for (const t of p.tools ?? []) {
+        if ((RETIRED as readonly string[]).includes(t)) offenders.push(`${p.code}(${p.dirName}).tools: ${t}`)
+      }
     }
     expect(offenders, `以下约束面仍写着退役旧名：${offenders.join(', ')}`).toEqual([])
   })

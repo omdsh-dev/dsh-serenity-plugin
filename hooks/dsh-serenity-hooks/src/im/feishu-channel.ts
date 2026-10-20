@@ -159,6 +159,20 @@ export const feishuChannel: ImChannel = {
     )
   },
 
+  /**
+   * 启用判据不成立时**说清是哪一半不成立**。
+   *
+   * 🔴 两半的改法完全不同（总开关 vs 加一条账号），合并成一句会让人改错那一半
+   * —— 这正是本轮真机验收暴露出来的形态（旧文案只提 `weixin.enabled`）。
+   */
+  notEnabledReason(root: string): string | undefined {
+    const settings = readWeixinSettings(root)
+    if (settings.enabled !== true) {
+      return 'This CCC has no IM bridge enabled — turn on the IM switch in .opencode/serenity.json (im.enabled, or the legacy weixin.enabled) or in the settings panel'
+    }
+    return 'The IM bridge is on, but this CCC has no enabled feishu account — add one (App ID + App Secret) in the settings panel, or add a row with channel:"feishu" to im.accounts'
+  },
+
   resolveUser(root: string, input: string): ImUserEntry | null {
     const raw = input.trim()
     if (raw === '') return null

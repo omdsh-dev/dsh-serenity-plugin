@@ -56,6 +56,14 @@ export const weixinChannel: ImChannel = {
     return readWeixinSettings(root).enabled === true
   },
 
+  /**
+   * 微信的启用判据**只有总开关这一半**（有 token 的账号是可选的：条数不限、0 条也能开）。
+   * ⇒ 它的提示可以只提这个开关 —— 这与飞书的**两半**不同，别把两家的提示合成一句。
+   */
+  notEnabledReason(): string | undefined {
+    return 'This CCC has no IM bridge enabled — turn on the IM switch in .opencode/serenity.json (im.enabled, or the legacy weixin.enabled) or in the settings panel'
+  },
+
   resolveUser(root: string, input: string): ImUserEntry | null {
     const raw = input.trim()
     if (raw === '') return null

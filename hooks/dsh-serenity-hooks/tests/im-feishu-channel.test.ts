@@ -287,3 +287,52 @@ describe('飞书出站通道：经 im-bridge 工具面分发', () => {
     expect(channels.imChannelIds().sort()).toEqual(['feishu', 'weixin'])
   })
 })
+
+describe('飞书出站通道：未配置时的提示必须说清是哪一半（2026-10-20 真机验收暴露）', () => {
+  it('🔴 桥开但没飞书账号 ⇒ 提示指向"加账号"，**不指向 weixin.enabled**', async () => {
+    const { feishuChannel } = await import('../src/im/feishu-channel.js')
+    channels.registerImChannel(feishuChannel)
+    // 桥开着，但只有微信账号
+    writeConfig({ enabled: true, accounts: [{ accountId: 'wechat-1', channel: 'weixin', enabled: true }] })
+
+    const r = await channels.runImBridge(dir, { channel: 'feishu', action: 'status' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe('CHANNEL_NOT_CONFIGURED')
+      // 这一半的改法是"加一条飞书账号"，去开 weixin.enabled 不会生效
+      expect(r.remediation).toMatch(/feishu account/i)
+      expect(r.remediation).not.toContain('weixin.enabled')
+    }
+  })
+
+  it('🔴 桥没开 ⇒ 提示指向总开关（这时加账号也没用）', async () => {
+    const { feishuChannel } = await import('../src/im/feishu-channel.js')
+    channels.registerImChannel(feishuChannel)
+    writeConfig({ enabled: false, accounts: [{ accountId: 'feishu-1', channel: 'feishu', enabled: true }] })
+
+    const r = await channels.runImBridge(dir, { channel: 'feishu', action: 'status' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe('CHANNEL_NOT_CONFIGURED')
+      expect(r.remediation).toMatch(/IM switch|im\.enabled/)
+    }
+  })
+
+  it('反向：未实现 notEnabledReason 的通道仍给通用提示（不点名任何具体字段）', async () => {
+    // 这条守着"缺省文案不许再硬写某个渠道的字段名" —— 那正是本轮修掉的缺陷形态
+    channels.registerImChannel({
+      id: 'probe',
+      isEnabled: () => false,
+      resolveUser: () => null,
+      listUsers: () => [],
+      send: async () => { throw new Error('unused') },
+      status: () => ({ enabled: false }),
+    })
+    const r = await channels.runImBridge(dir, { channel: 'probe', action: 'status' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.code).toBe('CHANNEL_NOT_CONFIGURED')
+      expect(r.remediation).not.toContain('weixin.enabled')
+    }
+  })
+})
