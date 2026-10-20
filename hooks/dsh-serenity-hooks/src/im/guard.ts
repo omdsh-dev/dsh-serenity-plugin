@@ -7,12 +7,20 @@
  * 该用机械守卫兜底的场景（与 output-guard 同一套思路：turn-stopping + agent.steer）。
  *
  * 本模块做三件事（全部是机制，不含任何纪律措辞——措辞归 CCC 角色提示词）：
- *  ① `noteManualOutputSession`：桥每轮把手动模式会话登记进来（含 root/account/user/role）
+ *  ① `noteManualOutputSession`：桥每轮把手动模式会话登记进来（含 root/account/user/role/**channel**）
  *  ② 订阅 `tools/post-execute`：观察本轮是否真的成功调用过输出工具（`im-bridge` 的
  *     `action=send|send-file`，兼容旧 `msm("weixin-send", …)`）——**只在执行成功时**计入
  *  ③ 订阅 `agent/turn-stopping`：本轮结束仍没有成功发送 → `agent.steer` 打回一次（≤2 次），
  *     提示内容 = **标记 + 事实**（"本轮未发送，用户什么都没收到"），具体怎么做由 CCC 角色
  *     提示词定义（与 per-message 标记同名 `[serenity:weixin-manual-output]`，模型能对上）。
+ *
+ * 🔴 **渠道中立（2026-10-20，Q4 出站飞书）**：本模块原先**处处假定微信**——
+ * "成功判定"硬比 `channel === 'weixin'`、打回文案硬写 `channel:"weixin"`。
+ * 接第二个渠道后那两处会让**飞书会话永远打回**（详见 `isSuccessfulImSend` 的注释）。
+ * ⇒ 现在渠道由**登记时**带进来（缺省 `'weixin'`，既有调用点与测试读数不变）。
+ * ⚠️ **标记字符串 `[serenity:weixin-manual-output]` 不改名**：CCC 侧的角色提示词按它做判据，
+ *    改名会把所有已写好的 CCC 纪律文档打成废纸；它是一个**协议标记**，不是渠道名
+ *    （与 `weixinSessionIdForTrajectory` 同一个处置，A85）。
  *
  * 为什么不直接替 agent 发送（R↓）：用户拍板的语义是"输出权归 agent"——代发会让 agent 误以为
  * 自己发过、也掩盖了"模型没遵守"这一事实；打回让模型自己完成，且留下可观测的日志。
@@ -34,6 +42,14 @@ interface ManualOutputSession {
   accountId: string
   userId: string
   role: string
+  /**
+   * 这个会话走的是哪个渠道（2026-10-20 Q4）。
+   *
+   * 🔴 它决定两件事：① 打回文案里那条命令该写哪个 `channel`；
+   * ② 判定"本轮是否真的发出去了"时该认哪个 `channel`。
+   * ⚠️ 缺省 `'weixin'` 保留既有调用点与测试的读数（B1 判据：微信行为逐字不变）。
+   */
+  channel?: string
 }
 
 const manualSessions = new Map<string, ManualOutputSession>()
@@ -91,33 +107,44 @@ function sessionIdOf(value: unknown): string | null {
 }
 
 /**
- * 工具调用是否为「成功的微信发送」。
+ * 工具调用是否为「本轮成功发出了一条消息」。
  *
  * v1.31.0 起有两种合法形态（标记与闸门同时认，迁移期并存）：
- * - `im-bridge({channel:"weixin", action:"send"|"send-file", …})` —— ACC 工具（推荐）
+ * - `im-bridge({channel:"<渠道>", action:"send"|"send-file", …})` —— ACC 工具（推荐）
  * - `msm("weixin-send", ["send"|"send-file", …])` —— CCC MSM（v1.30.x 通道，逐步退役）
+ *
+ * 🔴 **原名为 `isSuccessfulWeixinSend`，2026-10-20 改名**（Q4 出站飞书）：
+ * 它曾硬比 `channel !== 'weixin' ⇒ false`。接第二个渠道后，那条判据的含义变成
+ * **"只有微信算发出去了"** —— 而实际后果是：飞书会话里 agent 真的发成功了，
+ * 闸门仍判"未发送" ⇒ 打回 ≤2 次，若 CCC 开了 `fallbackOnNoSend` 还会再兜底转发一遍
+ * ⇒ **重复投递**。⇒ 判据从"是不是微信"改成"是不是**这个会话所在的那条渠道**"，
+ * 函数名随之更正（**名字要能对着行为读**，D151/D179 同族）。
+ *
+ * @param channel 该会话的渠道（缺省 `'weixin'` = 既有调用点与测试的读数不变）
  */
-export function isSuccessfulWeixinSend(exec: unknown, result: unknown): boolean {
+export function isSuccessfulImSend(exec: unknown, result: unknown, channel = 'weixin'): boolean {
   const e = exec as { name?: unknown; arguments?: unknown } | null | undefined
   const r = result as { isError?: unknown } | null | undefined
   if (r?.isError === true) return false
   const args = e?.arguments as { name?: unknown; action?: unknown; channel?: unknown } | null | undefined
   if (e?.name === 'im-bridge') {
-    const channel = typeof args?.channel === 'string' ? args.channel : ''
-    if (channel !== 'weixin') return false
+    const sent = typeof args?.channel === 'string' ? args.channel : ''
+    if (sent !== channel) return false
     const action = typeof args?.action === 'string' ? args.action : ''
     return action === 'send' || action === 'send-file'
   }
-  if (e?.name === 'msm') return args?.name === 'weixin-send'
+  // 旧形态只存在于微信时代 ⇒ 只对微信渠道认它（飞书从来没有过这个 MSM）
+  if (e?.name === 'msm') return channel === 'weixin' && args?.name === 'weixin-send'
   return false
 }
 
 /** 打回消息（机制事实 + 标记；怎么做由 CCC 角色提示词定义） */
 export function buildManualOutputRebuke(session: ManualOutputSession): string {
+  const channel = session.channel ?? 'weixin'
   return [
     '[serenity:weixin-manual-output] no send detected in this turn — the user has received NOTHING.',
-    `ccc=${session.root} account=${session.accountId} user=${session.userId}`,
-    `im-bridge({channel:"weixin", action:"send", account:"${session.accountId}", user:"${session.userId}", text:"<回复>"})`,
+    `ccc=${session.root} account=${session.accountId} user=${session.userId} channel=${channel}`,
+    `im-bridge({channel:"${channel}", action:"send", account:"${session.accountId}", user:"${session.userId}", text:"<回复>"})`,
   ].join('\n')
 }
 
@@ -140,9 +167,13 @@ export function registerWeixinOutputGuard(ctx: Context): void {
       const downstream = await next()
       try {
         const sessionId = sessionIdOf((exec as { agent?: unknown } | undefined)?.agent)
-        if (sessionId && manualSessions.has(sessionId) && isSuccessfulWeixinSend(exec, result)) {
-          sentThisTurn.add(sessionId)
-          rebukeCounts.delete(sessionId)
+        if (sessionId && manualSessions.has(sessionId)) {
+          // 🔴 按**该会话自己的渠道**判（缺省 weixin）—— 见 `isSuccessfulImSend` 的名字更正说明
+          const session = manualSessions.get(sessionId)
+          if (isSuccessfulImSend(exec, result, session?.channel ?? 'weixin')) {
+            sentThisTurn.add(sessionId)
+            rebukeCounts.delete(sessionId)
+          }
         }
       } catch {
         /* 观测失败不影响工具执行 */

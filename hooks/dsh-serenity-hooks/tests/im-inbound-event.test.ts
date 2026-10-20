@@ -281,4 +281,40 @@ describe('中立入站事件层：通道无关的纯机制面', () => {
     expect(manualOutputFallbackNeeded({ fallbackOnNoSend: true, guardActive: false, sentThisTurn: false, answer: 'x' })).toBe(false)
     expect(manualOutputFallbackNeeded({ fallbackOnNoSend: true, guardActive: true, sentThisTurn: false, answer: '' })).toBe(false)
   })
+
+  it('🔴 渠道不是常量：传 `channel:"feishu"` ⇒ 注入的命令写 feishu（缺省仍是 weixin）', async () => {
+    const { manualOutputMarker } = await import('../src/im/inbound-event.js')
+    expect(manualOutputMarker('acct-a', 'u1')).toContain('channel:"weixin"')
+    expect(manualOutputMarker('acct-a', 'u1', 'feishu')).toContain('channel:"feishu"')
+    // 协议标记本身**不改名**（CCC 侧角色提示词按它做判据；A85）
+    expect(manualOutputMarker('acct-a', 'u1', 'feishu')).toContain('[serenity:weixin-manual-output]')
+  })
+})
+
+describe('中立入站事件层：渠道身份穿过本层（Q4）', () => {
+  it('🔴 CCC 级路径传 `{channel}`（无 target）⇒ 自己按 routes 路由并投递，**不被静默丢弃**', async () => {
+    // 这是本轮实测抓到的一个真缺陷的反向钉：
+    // 首版把"机器级模式"的判据写成 `if (preset)`，而飞书 CCC 级路径要传 `{channel:'feishu'}`
+    // （没有 target）⇒ 那条路径 `resolved = undefined` ⇒ 命中 `if (!resolved) return`
+    // ⇒ **每一条飞书消息都被静默丢掉**，且零报错。
+    makeTrajectory('probe-code')
+    const { handleInboundEvent } = await import('../src/im/inbound-event.js')
+    const { ctx, questions } = fakeCtx()
+
+    // CCC 级路由（serenity.json 的 routes），不靠订阅表
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      im: {
+        enabled: true,
+        accounts: [{ accountId: 'feishu-1', channel: 'feishu', enabled: true }],
+        routes: [{ user: 'ou_feishu', trajectory: 'probe-code' }],
+      },
+    }, null, 2))
+
+    await handleInboundEvent(ctx as never, dir, 'feishu-1', { sendText: async () => {} }, {
+      userId: 'ou_feishu', text: '来自飞书的消息', media: [], hasVoice: false,
+    }, { channel: 'feishu' })
+
+    // 🔴 判据 = **问题真的进了会话**（若被静默丢弃，这里会是空数组）
+    expect(questions.join('\n')).toContain('来自飞书的消息')
+  })
 })

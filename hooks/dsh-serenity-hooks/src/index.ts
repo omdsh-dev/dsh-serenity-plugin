@@ -59,6 +59,7 @@ import { registerOpencodeAutoConfig } from './patches/opencode-provider.js'
 import { registerDeepseekVisionPatch } from './patches/deepseek-vision.js'
 import { registerImChannel } from './im/channels.js'
 import { weixinChannel } from './im/weixin-channel.js'
+import { feishuChannel } from './im/feishu-channel.js'
 import { createImBridgeTool } from './tools/im-bridge.js'
 import { createAccDiagTool } from './tools/diag/index.js'
 import { createDiagramTool } from './tools/diagram.js'
@@ -355,6 +356,10 @@ export function apply(ctx: Context, config: Config): void {
   // （imChannelIds）。可见性不在这里判定：未配置通道的 CCC 由 guards 逐 agent
   // `tools.restrict({deny:['im-bridge']})` 从清单中移除（未配置 = 模型看不到）。
   registerImChannel(weixinChannel)
+  // 2026-10-20（Q4，owner「补」）：飞书**出站**通道 —— 此前注册表只有 `weixin` 一个条目，
+  // 于是 `im-bridge({channel:"feishu"})` 恒返回 CHANNEL_UNKNOWN，尽管飞书的发消息协议
+  // 在 `feishu-account.ts` 里早已实现（入站回复在用）。两个半件接上即成。
+  registerImChannel(feishuChannel)
   // §0L（S142 2026-09-19，owner「同意，开工吧，注意向前兼容」）：把「会话 ↔ 轨迹」绑定的
   // 载体从 CCC 内 `.bindings.json` 迁到**宿主自己的存储域**（`~/.dsh/storages/`）。
   // 形态 = **域优先 + 文件兜底 + 双写**（向前兼容：域不可用/未迁移时行为与升级前逐字一致）。

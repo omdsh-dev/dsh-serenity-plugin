@@ -32,11 +32,12 @@ export function createImBridgeTool() {
   return defineTool({
     name: 'im-bridge',
     description:
-      'Send messages to family members through an IM channel configured for THIS container (currently: weixin / 微信). '
-      + 'Every successful send is recorded in the container log automatically; this tool only acts on the current container (no target container parameter). '
+      'Send messages to family members through an IM channel configured for THIS container. '
+      + 'This tool only acts on the current container (no target container parameter). '
       + 'It is hidden entirely when this container has no IM channel configured. '
       + `Channels: ${imChannelIds().join(', ') || '(none registered)'}. `
       + 'Actions: send (text) / send-file (a file inside this container) / users (list configured recipients) / status (channel health). '
+      + 'Not every channel supports every action (e.g. send-file may return ACTION_UNSUPPORTED). '
       + 'user accepts a configured alias (e.g. user-a, user-b) or a raw channel user id. '
       + 'Failures return a stable code plus a remediation hint.',
     parameters: {

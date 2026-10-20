@@ -68,8 +68,16 @@ export function installFeishuSdk(loader: () => Promise<FeishuSdk>): void {
   sdkLoader = loader
 }
 
-/** 取 SDK（未注入 ⇒ 动态 import 真包） */
-async function loadFeishuSdk(): Promise<FeishuSdk> {
+/**
+ * 取 SDK（未注入 ⇒ 动态 import 真包）。
+ *
+ * 🔴 **导出**（2026-10-20 Q4）：出站通道 `feishu-channel.ts` 也要用它。
+ * 让它走**同一个加载器**而不是自己再写一次 `import('@larksuiteoapi/node-sdk')` ——
+ * 否则 `installFeishuSdk()` 注入的替身只对入站那半生效，出站那半在测试里会去加载真 SDK
+ * （那正是本文件头注记着的实测坑：真 SDK 会打自己的日志证明你没拦住它）。
+ * ⇒ **注入点必须唯一**，否则"能不能测"这件事会随调用方向而变。
+ */
+export async function loadFeishuSdk(): Promise<FeishuSdk> {
   if (sdkLoader) return sdkLoader()
   const mod = await import('@larksuiteoapi/node-sdk')
   return mod as unknown as FeishuSdk
@@ -240,9 +248,11 @@ async function runFeishuAccountLoop(input: ImAccountLoopInput, loop: ImAccountLo
               cccFallback: null,
             })
             if (!target) continue // 未命中／目标不存在 ⇒ 中立层已留痕／已出声
-            await handleInboundEvent(ctx, target.root, input.accountId, io, event, { target })
+            // 🔴 渠道身份必须显式传（2026-10-20 Q4）：不传 ⇒ 中立层缺省按 weixin 处理
+            // ⇒ 手动输出模式下注入给模型的会是"发往微信"的命令（目标 id 却是 open_id）。
+            await handleInboundEvent(ctx, target.root, input.accountId, io, event, { target, channel: 'feishu' })
           } else {
-            await handleInboundEvent(ctx, input.root, input.accountId, io, event)
+            await handleInboundEvent(ctx, input.root, input.accountId, io, event, { channel: 'feishu' })
           }
         } catch (err) {
           loop.lastError = err instanceof Error ? err.message : String(err)

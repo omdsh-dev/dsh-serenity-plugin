@@ -12,7 +12,7 @@ import {
   forgetManualOutputSession,
   hasSentThisTurn,
   isManualOutputSession,
-  isSuccessfulWeixinSend,
+  isSuccessfulImSend,
   isWeixinOutputGuardActive,
   noteManualOutputSession,
   registerWeixinOutputGuard,
@@ -87,38 +87,53 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('weixin-output-guard: 成功发送判定（isSuccessfulWeixinSend）', () => {
+describe('weixin-output-guard: 成功发送判定（isSuccessfulImSend）', () => {
   it('im-bridge + channel=weixin + action=send / send-file + 无错误 → 计入', () => {
-    expect(isSuccessfulWeixinSend(sendExec(), { isError: false })).toBe(true)
-    expect(isSuccessfulWeixinSend(sendExec(SESSION, {}, 'send-file'), { isError: false })).toBe(true)
-    expect(isSuccessfulWeixinSend(sendExec(), undefined)).toBe(true) // 宿主成功结果无 isError 字段时也算成功
+    expect(isSuccessfulImSend(sendExec(), { isError: false })).toBe(true)
+    expect(isSuccessfulImSend(sendExec(SESSION, {}, 'send-file'), { isError: false })).toBe(true)
+    expect(isSuccessfulImSend(sendExec(), undefined)).toBe(true) // 宿主成功结果无 isError 字段时也算成功
   })
 
   it('兼容形态 msm("weixin-send") 仍计入（迁移期并存，逐步退役）', () => {
-    expect(isSuccessfulWeixinSend(legacyMsmExec(), { isError: false })).toBe(true)
+    expect(isSuccessfulImSend(legacyMsmExec(), { isError: false })).toBe(true)
   })
 
   it('调用失败（isError:true）→ 不计入（从未送达）', () => {
-    expect(isSuccessfulWeixinSend(sendExec(), { isError: true })).toBe(false)
-    expect(isSuccessfulWeixinSend(legacyMsmExec(), { isError: true })).toBe(false)
+    expect(isSuccessfulImSend(sendExec(), { isError: true })).toBe(false)
+    expect(isSuccessfulImSend(legacyMsmExec(), { isError: true })).toBe(false)
   })
 
   it('im-bridge 但别的通道 / 别的动作（users/status）→ 不计入', () => {
-    expect(isSuccessfulWeixinSend(sendExec(SESSION, { channel: 'other' }), { isError: false })).toBe(false)
-    expect(isSuccessfulWeixinSend(sendExec(SESSION, {}, 'users'), { isError: false })).toBe(false)
-    expect(isSuccessfulWeixinSend(sendExec(SESSION, {}, 'status'), { isError: false })).toBe(false)
+    expect(isSuccessfulImSend(sendExec(SESSION, { channel: 'other' }), { isError: false })).toBe(false)
+    expect(isSuccessfulImSend(sendExec(SESSION, {}, 'users'), { isError: false })).toBe(false)
+    expect(isSuccessfulImSend(sendExec(SESSION, {}, 'status'), { isError: false })).toBe(false)
+  })
+
+  it('🔴 飞书渠道：`channel:"feishu"` 的成功发送**要计入**（Q4 的反向钉）', () => {
+    // 旧实现硬比 `channel !== 'weixin' ⇒ false` ⇒ 飞书会话**永远**被判"未发送"
+    // ⇒ 打回 ≤2 次；若 CCC 开了 fallbackOnNoSend 还会再兜底转发一遍 = **重复投递**。
+    const feishuExec = { name: 'im-bridge', arguments: { channel: 'feishu', action: 'send', user: 'ou_x', text: 'hi' }, agent: { session: { id: SESSION } } }
+    expect(isSuccessfulImSend(feishuExec, { isError: false }, 'feishu')).toBe(true)
+    // 通道不匹配两个方向都不成立（不因为"给了 channel 参数"就放宽）
+    expect(isSuccessfulImSend(feishuExec, { isError: false }, 'weixin')).toBe(false)
+    expect(isSuccessfulImSend(sendExec(), { isError: false }, 'feishu')).toBe(false)
+  })
+
+  it('🔴 旧 MSM 形态只对微信渠道成立（飞书从来没有过 weixin-send 这个 MSM）', () => {
+    expect(isSuccessfulImSend(legacyMsmExec(), { isError: false }, 'weixin')).toBe(true)
+    expect(isSuccessfulImSend(legacyMsmExec(), { isError: false }, 'feishu')).toBe(false)
   })
 
   it('非目标工具 / msm 但别的 MSM → 不计入', () => {
-    expect(isSuccessfulWeixinSend(otherExec('container_fs', { action: 'list' }), { isError: false })).toBe(false)
-    expect(isSuccessfulWeixinSend(otherExec('msm', { name: 'weixin-doctor' }), { isError: false })).toBe(false)
+    expect(isSuccessfulImSend(otherExec('container_fs', { action: 'list' }), { isError: false })).toBe(false)
+    expect(isSuccessfulImSend(otherExec('msm', { name: 'weixin-doctor' }), { isError: false })).toBe(false)
   })
 
   it('形状异常（null/undefined/缺 arguments）→ 不计入且不抛错', () => {
-    expect(isSuccessfulWeixinSend(null, { isError: false })).toBe(false)
-    expect(isSuccessfulWeixinSend(undefined, undefined)).toBe(false)
-    expect(isSuccessfulWeixinSend({ name: 'msm' }, { isError: false })).toBe(false)
-    expect(isSuccessfulWeixinSend({ name: 'im-bridge' }, { isError: false })).toBe(false)
+    expect(isSuccessfulImSend(null, { isError: false })).toBe(false)
+    expect(isSuccessfulImSend(undefined, undefined)).toBe(false)
+    expect(isSuccessfulImSend({ name: 'msm' }, { isError: false })).toBe(false)
+    expect(isSuccessfulImSend({ name: 'im-bridge' }, { isError: false })).toBe(false)
   })
 })
 
@@ -157,6 +172,20 @@ describe('weixin-output-guard: 打回文案（机制事实 + 标记，无纪律�
     expect(msg).not.toContain('no fallback')
     expect(msg).not.toContain('MUST')
     expect(msg).not.toContain('你必须')
+  })
+
+  it('🔴 飞书会话的打回文案写的是 `channel:"feishu"`（不是写死的 weixin）', () => {
+    const msg = buildManualOutputRebuke({ ...MANUAL, channel: 'feishu' })
+    expect(msg).toContain('im-bridge({channel:"feishu", action:"send"')
+    expect(msg).not.toContain('channel:"weixin"')
+    // 事实行也带上渠道（排查时要一眼看出是哪条渠道没发出去）
+    expect(msg).toContain('channel=feishu')
+  })
+
+  it('未给渠道 ⇒ 文案仍是 weixin（既有调用点读数不变）', () => {
+    const msg = buildManualOutputRebuke(MANUAL)
+    expect(msg).toContain('im-bridge({channel:"weixin", action:"send"')
+    expect(msg).toContain('channel=weixin')
   })
 })
 

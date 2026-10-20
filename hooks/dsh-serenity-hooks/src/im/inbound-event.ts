@@ -229,8 +229,20 @@ export async function handleInboundEvent(
   accountId: string,
   io: ImAccountIo,
   event: ImInboundEvent,
-  preset?: { target: ResolvedInboundTarget },
+  preset?: { target?: ResolvedInboundTarget; channel?: string },
 ): Promise<void> {
+  /**
+   * 🔴 **渠道身份必须穿过本层**（2026-10-20，Q4 出站飞书）。
+   *
+   * 为什么缺省值是 `'weixin'` 而不是"必填"：本层有 7 处既有测试调用点**逐字不动**
+   * （B1 的判据是"微信行为逐字不变"）。⇒ 缺省 = 当时唯一存在的渠道，
+   * 而**新增渠道必须显式传**，这样"漏传"只会退化到旧行为，不会把两条渠道搅混。
+   *
+   * ⚠️ 为什么由**调用方**给而不是从 `accountId` 推：`accountId`（`feishu-1` / `wechat-1`）
+   * 只是**命名习惯**，配置里没有任何字段强制它带渠道前缀 —— 从名字推渠道 =
+   * 让一个会漂的约定承当判据（D167 同族：认族不认名）。
+   */
+  const channel = preset?.channel ?? 'weixin'
   const fromUserId = event.userId
   if (!fromUserId) return
   const text = event.text
@@ -240,7 +252,12 @@ export async function handleInboundEvent(
 
   // ── 路由：**机器级订阅表优先** → CCC 级 `routes` 回退 ─────────────────────────
   let resolved: ResolvedInboundTarget | null
-  if (preset) {
+  // 🔴 判据是 **`preset.target` 在不在**，不是 `preset` 在不在（2026-10-20 Q4 实测踩到）：
+  //    飞书 CCC 级路径要传 `{ channel:'feishu' }`（没有 target，让它自己按 routes 路由），
+  //    而首版把判据写成 `if (preset)` ⇒ 那条路径会拿到 `resolved = undefined`
+  //    ⇒ 被下一行的 `if (!resolved) return` **静默丢掉每一条消息**（零报错）。
+  //    ⇒ "机器级模式"的定义是**目标已被解析好**，不是"调用方多传了一个对象"。
+  if (preset?.target) {
     resolved = preset.target // 机器级模式：目标已解析（且**不看本 CCC 的 enabled**）
   } else {
     if (!settings.enabled) return
@@ -345,8 +362,8 @@ export async function handleInboundEvent(
       if (manualOutput) {
         // 本轮开始 → 清空"已发送"标记（闸门只置位；桥在 askTrajectory 后读它决定兜底）
         clearSentThisTurn(sessionId)
-        noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory })
-        parts.push(manualOutputMarker(accountId, fromUserId))
+        noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory, channel })
+        parts.push(manualOutputMarker(accountId, fromUserId, channel))
       } else {
         forgetManualOutputSession(sessionId)
       }
@@ -436,11 +453,15 @@ export async function handleInboundEvent(
  *
  * 边界（R↓）：ACC 只提供**机制与数据**——"桥不转发最终文本"这个事实 + 三个已填好的参数值。
  * **纪律措辞归 CCC**：怎么写、必须怎么做、后果是什么，全部写在轨迹的 `PROMPT.md` 里。
+ *
+ * 🔴 **渠道不是常量**（2026-10-20 Q4）：此前这里硬写 `channel:"weixin"`，
+ * 而一条**飞书**会话收到的却是"发往微信"的命令 ⇒ 模型照着做必然失败（目标 id 是 open_id）。
+ * ⇒ 渠道由调用方传入；缺省 `'weixin'` 保留既有调用点与测试的读数。
  */
-export function manualOutputMarker(accountId: string, userId: string): string {
+export function manualOutputMarker(accountId: string, userId: string, channel = 'weixin'): string {
   return [
     '[serenity:weixin-manual-output]',
-    `im-bridge({channel:"weixin", action:"send", account:"${accountId}", user:"${userId}", text:"<回复>"})`,
+    `im-bridge({channel:"${channel}", action:"send", account:"${accountId}", user:"${userId}", text:"<回复>"})`,
   ].join('\n')
 }
 

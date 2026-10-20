@@ -1,3 +1,98 @@
+## v1.79.0 — 2026-10-20（`im-bridge` **出站飞书通道** ＋ 渠道身份穿过中立层）
+
+**来源**：owner 2026-10-20 五问 **Q4 =「补」**（出站飞书通道）。
+**性质**：新增一个通道实现 ＋ 修正三处「隐含微信假设」。**微信行为逐字不变**。
+
+---
+
+### 一、为什么这件事此前一直缺着（先摆事实）
+
+`im-bridge` 工具查的是 `im/channels.ts` 的**通道注册表**，而那张表里只有 `weixin` 一个条目
+⇒ `im-bridge({channel:"feishu"})` **恒返回 `CHANNEL_UNKNOWN`**。
+
+而飞书**发消息的协议形态早就写好并测过** —— 它在 `feishu-account.ts` 的 `feishuIo()` 里，
+被「收到消息后回它」这条路径用着。缺的不是能力，是**两个各自能用的半件没接上**。
+
+### 二、新增 `src/im/feishu-channel.ts`（`ImChannel` 六格）
+
+| 格 | 实现要点 |
+|---|---|
+| `id` | `'feishu'` |
+| `isEnabled` | **本 CCC 有一条启用中的飞书账号**（不是只看渠道无关的总开关 —— 否则只配了微信的 CCC 也会把飞书报成"已启用"，`Channels:` 枚举里出现一个用不了的名字） |
+| `resolveUser` | 别名 → localstore 键 → 值；**值必须以 `ou_` 开头**才认（见下 🔴） |
+| `listUsers` | **只列解析得出来的**（读数面不许撒谎） |
+| `send` | `receive_id_type:'open_id'` ＋ `content` 是 **JSON 字符串** |
+| `sendFile` | ⛔ **刻意不实现** ⇒ 工具如实返回 `ACTION_UNSUPPORTED`（假装支持会得到"发出去但收不到"的静默故障） |
+
+🔴 **`resolveUser` 的形状校验是本文件最要紧的一条判据**：`im.aliases` 是**一张表服务所有渠道**
+（`{别号: localstore 键}`）。若只做"按键查值"，把映射到**微信 id** 的那条喂给飞书通道，
+就会拿别人的 id 跨渠道发消息，而飞书 API 返回的错误码**读不懂** ——
+症状会表现为"飞书发不出去"而不是"我配错了渠道"。
+⇒ 校验**值的形状**：错配在**解析处**就失败（`ALIAS_UNKNOWN`，且**不触达 SDK**）。
+
+🔴 **刻意不 fire 记录 hook**：`settings.hook` 的契约与消费方都是微信的
+（CCC 的 `scripts/weixin-message-hook.ts` 写 `AGENT_SESSIONS/_weixin-logs/`）。
+飞书事件流进去，那个目录就**同时装两种渠道的数据而名字只说一种** ⇒ 本期不落记录（见「待裁」）。
+
+### 三、🔴 渠道身份穿过中立层（三处，不一起改则是**补出一个陷阱**）
+
+**共同根因**：渠道身份没有穿过中立层 —— `handleInboundEvent()` 只拿到 `accountId`，
+而 `accountId`（`feishu-1` / `wechat-1`）**只是命名习惯**，配置里没有任何字段强制它带渠道前缀
+⇒ 从名字推渠道 = 让一个会漂的约定承当判据。
+
+| 处 | 旧行为（接第二个渠道后**必然发作**） | 新行为 |
+|---|---|---|
+| `manualOutputMarker()` | 硬写 `channel:"weixin"` ⇒ **飞书会话收到一条"发往微信"的注入命令**（目标 id 却是 open_id，照着做必然失败） | 渠道由调用方传入，缺省 `'weixin'` |
+| `isSuccessfulWeixinSend()` → **`isSuccessfulImSend()`** | 硬比 `channel !== 'weixin' ⇒ false` ⇒ 飞书会话里 agent **真发成功了**仍被判"未发送" ⇒ 打回 ≤2 次；若 CCC 开了 `fallbackOnNoSend` 还会再兜底转发一遍 = **重复投递** | 按**该会话自己的渠道**判；缺省 `'weixin'` |
+| `im-bridge` 工具描述 | 首句写死 `(currently: weixin / 微信)`，而紧邻的 `Channels:` 是自动枚举 ⇒ **同一句里两半自相矛盾** | 删掉写死的那半；补一句"不是每个渠道都支持每个动作" |
+
+**函数改名**（`isSuccessfulWeixinSend` → `isSuccessfulImSend`）：名字要能对着行为读。
+⚠️ 但**协议标记 `[serenity:weixin-manual-output]` 刻意不改名** —— CCC 侧角色提示词按它做判据，
+改名会把所有已写好的 CCC 纪律文档打成废纸；它是**协议标记**不是渠道名。
+
+**兼容性**：`channel` 参数**全部可选、缺省 `'weixin'`** ⇒ 既有 7 处 `handleInboundEvent`
+调用点与全部微信侧用例**逐字不动**（B1 判据：微信行为逐字不变）。
+
+### 四、🔴 顺带修掉一个**只在新路径上才会命中**的静默丢弃
+
+`handleInboundEvent()` 里"机器级模式"的原判据是 `if (preset)`，而飞书 **CCC 级路径**要传
+`{channel:'feishu'}`（**没有 target**，让它自己按 `routes` 路由）⇒ 那条路径拿到
+`resolved = undefined` ⇒ 命中 `if (!resolved) return` ⇒ **每一条飞书消息都被静默丢掉**，且零报错。
+
+⇒ 判据改为 **`if (preset?.target)`**："机器级模式"的定义是**目标已被解析好**，
+不是"调用方多传了一个对象"。
+
+### 五、测试与变异检验
+
+- 新增 `tests/im-feishu-channel.test.ts`（12 例）：通道注册与分发 ／ 发送形状 ／
+  **跨渠道别名错配** ／ 可见性三态 ／ `send-file` 如实不支持 ／ 失败码矩阵（全部**不触达 SDK**）。
+- `tests/weixin-output-guard.test.ts` 增 4 例（飞书成功发送**要计入** ／ 反向：通道不匹配两个方向都不成立 ／
+  旧 MSM 形态只对微信成立 ／ 打回文案按渠道写）。
+- `tests/im-inbound-event.test.ts` 增 2 例（标记渠道不是常量 ／ **CCC 级路径不被静默丢弃**）。
+
+**变异检验（两条都承重，均当场转红后恢复）**：
+1. `preset?.target` → `preset` ⇒ 「CCC 级路径不被静默丢弃」**当场红**；
+2. `isSuccessfulImSend` 忽略渠道参数、硬比 `weixin` ⇒ 「飞书成功发送要计入」**当场红**（其余 26 条照旧绿）。
+
+**六项门禁**：typecheck ✓｜typecheck-host 0.2.1-rc.2 ✓｜test **191 文件 / 3020 例** ✓｜
+coverage **95.48%** ✓｜build（`.d.ts` 123）｜pack-check（155 文件，含 `lib/im/feishu-channel.d.ts`）。
+
+### 六、诚实边界（哪些**已验证**、哪些**没有**）
+
+✅ 已验证：管路与形状（注册、分发、`receive_id_type`/`content`、别名校验、可见性、错误码矩阵）。
+⛔ **未验证**：**真的能发出去** —— 需要真实 appId/appSecret，属真机门槛（D141 同族）。
+🔴 飞书 SDK 已打进 `lib/` 产物（不需要运行时 shim，与 `ws`/`@resvg` 不同）。
+
+### 七、本批不做（已登记）
+
+| # | 事项 | 处置 |
+|---|---|---|
+| A83 | 飞书出站**要不要落记录**、落到哪 | **待裁**（默认不落：落进 `_weixin-logs/` 会让目录名撒谎） |
+| A84 | 飞书 `send-file`（`im.v1.file.create` ＋ `msg_type:'file'`） | 不做（工具会如实返回 `ACTION_UNSUPPORTED`） |
+| A85 | 名字带 `weixin` 但已通道中立的函数/标记（`weixinSessionIdForTrajectory` ／ `matchWeixinRoute` ／ 标记串） | 不做（D167「只加不删」：改名会砸会话连续性与 CCC 侧纪律文档） |
+
+---
+
 ## v1.78.0 — 2026-10-20（🔴🔴 **所有 key 都是可选的：不写 = 不设定 = 不影响默认行为** ＋ `model` 运行时热加载 ＋ `resident` 落地）
 
 **来源**：owner 2026-10-20 三条令（逐字）——
