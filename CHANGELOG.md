@@ -1,3 +1,89 @@
+## v1.79.2 — 2026-10-20（**"死"的判据收了归档** ＋ `use` 无条件覆盖 ＋ 三处同族漏洞）
+
+**来源**：owner 2026-10-20 两条裁决（逐字）——
+> 「死应该包含归档判断；只有 ① 或者 ②且不在归档集 才算活」
+> 「use 只要被调用了，可以无条件覆盖绑定到当前会话（这说明当前会话肯定活着啊）」
+
+**起因**：S196 报「`use` 回执成功、标题已改，但 `current.dsh_session_bind` 未改写」。
+🔴 **上一轮把它归因成 `SESSION_HEADER_UNRESOLVED`（那条静默守卫）是错的** —— 真因见 §一。
+
+---
+
+### 一、真因：**读侧与写侧用了两套判据**（同一条轨迹，两个函数给出相反答案）
+
+| 侧 | 函数 | 判据 | 对过期声明的结论 |
+|---|---|---|---|
+| 读 | `listBoundSessionIds(root, dir, alive)` | 带探针 | **没绑定**（IMMUTABLE 3） |
+| 写 | `claimBinding(...)` | **完全不问存活** | **被占用 ⇒ 拒写** |
+
+S196 的现场：绑定文件指着 `session-52d680ae`，而它**在宿主归档集里**（`~/.dsh/storages/workspace.json`
+的 `archivedSessionIds`，实测逐字命中）。按 IMMUTABLE 3 它早该视同没绑定，但写侧只读文件
+⇒ `TRAJECTORY_OCCUPIED` 拒掉，而 `use` 的回执当时既没带 `alive`、也没能解释。
+
+### 二、判据收成一个模块：`trajectory/alive.ts`
+
+```text
+活 ⟺ ① 进程内 loaded  ∨  (② 日志在磁盘 ∧ 不在归档集)
+```
+
+三个旧判据各自都不够：
+
+| # | 旧判据 | 单独用时漏什么 |
+|---|---|---|
+| ① | `hostAgents.get(id)` | 冷会话全判死 |
+| ② | `hasSessionLogById()` | 🔴 **归档后日志逐字节不动** ⇒ 归档会话判活 |
+| ③ | `workspaceRegistry.archivedSessionIds` | 旧 dsp **零引用**（全仓 0 处） |
+
+宿主的归档语义就是"只往集合里加 id"（`dsh-workspace` 的 `archiveSession` 注释：
+「Archiving never touches workspace accounting」）⇒ 只问 ② 的实现**必然**在归档上判错。
+
+🔴 **一处对 owner 原话的收紧（已写进源码注释，不默默改）**：原话的 ① 没附"不在归档集"，
+而本实现把**归档判定排在最前**（`归档 ∧ live ⇒ 判死`）。理由：归档是**人对这条会话的处置声明**，
+若仍被当载体，唤醒调度器会去驱动一条使用者以为已经收起来的会话。差异仅此一格，
+且 `use` 不受影响（见 §三）⇒ 真要复活一条已归档会话**仍有受支持的路**。
+
+### 三、`use` 无条件覆盖（owner 第二条）
+
+`use` 被调用这件事本身证明**它自己**活着；而 `claimBinding` 第 ② 条问的是
+"**文件里写的那个 id** 还占着槽吗"。⇒ `use` 现在传 `hostAliveProbe(ctx)`：
+- 旧载体**已死** ⇒ 槽位算空，直接写（这就是"无条件覆盖"）
+- 旧载体**还活着** ⇒ 仍拒绝（那是 IMMUTABLE 2 的真实冲突，`takeover` 只留给 rebuild）
+
+### 四、顺带修掉的三处同族漏洞
+
+1. **`claimBinding` 新增 `alive` 参数**：死载体不构成占用。**不传 = 旧语义（当活）**——
+   降级方向是"保守拒绝"，不是"静默顶掉"。
+2. **两个生产调用点原来都不传探针**：`acquireWakeAgent` 与 CRO 快照各自写死
+   `isBindUsable(decl, () => true)`（= 只要文件在就算绑定）⇒ 已归档会话会作为候选载体
+   进 CRO，`resolveAgent` 失败后记 `notReady` 再重试，**没有退出条件**。现在两处都传。
+3. 🔴 **`listBindDeclarations` 不扫 `_archived/`** ⇒ 已归档轨迹的绑定声明对唯一性检查
+   **完全隐形**，承载过它的会话看起来"无归属"，可以被 `use` 到另一条轨迹上
+   —— 正是 IMMUTABLE 1 要禁的事，而且是**静默**发生的。现在补扫一层。
+
+### 五、契约：`workspaceRegistry` 增成员
+
+`host/contract.ts` 的 `workspaceRegistry` 从 `members: [list]` 增到 `[list, archivedSessionIds]`
+（它是 **getter**，故 `kind: 'value'`）。缺失后果改写为"**归档状态不可知**（已归档会话会被误判成活载体）"。
+
+### 六、测试
+
+- **新增** `tests/trajectory-alive.test.ts`（7 例）：判据的每一格，含"归档 ＋ 日志在 ⇒ 死"
+  与"归档 ＋ **仍然 loaded** ⇒ 死"两条反向钉。
+- **`wake-registry.test.ts` 夹具修正**（7 例曾同时红）：旧 `writeBinding` 只写绑定文件、
+  **不建会话日志**，而用例把 `agents.get` 桩成 `undefined` ⇒ 按新判据那是**死的**，
+  于是走到"无绑定会话记录"。🔴 那不是判据错，是**夹具构造了生产中不存在的状态**：
+  真实的冷会话一定是"进程里没有、磁盘上有日志"（这正是"冷"的定义）。现在夹具补齐 ②。
+- **`container-status.test.ts`**：桩补上 `archivedSessionIds`；`checked` 的期望值从写死 `+1`
+  改为**按契约声明的成员数推**（否则每次加成员都要红一次）。
+
+**六项门禁**：typecheck ✓｜typecheck-host 0.2.1-rc.2 ✓（node 105 / client 177 文件）｜
+test **192 文件 / 3032 例** ✓｜coverage **95.44%** ✓｜build ✓（`.d.ts` 124）｜pack-check ✓（156 文件）。
+
+**变异检验**：注掉 `isSessionAlive` 里的归档判断 ⇒ 新增的 2 条反向钉**当场红**、其余 5 条仍绿；
+恢复后 7/7 绿。
+
+---
+
 ## v1.79.1 — 2026-10-20（**真机验收抓到的两处**：错误提示教了个不生效的改法 ＋ 一条测试被真实数据撞崩）
 
 **性质**：v1.79.0 已上传并重启（`accVersion` = 1.79.0）。本版补的是**只有在真机／真数据上才会露头**的两处。

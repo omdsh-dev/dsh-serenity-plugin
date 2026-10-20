@@ -91,6 +91,9 @@ export const BIND_FILENAME = 'current.dsh_session_bind'
  */
 export const BIND_FILENAME_FAMILY = [BIND_FILENAME] as const
 
+/** 轨迹归档区的目录名（**自持一份，不从 `core.ts` import**）。 */
+export const ARCHIVED_DIR_NAME = '_archived'
+
 /**
  * 绑定文件的内容（**自我交代**：不只是"谁"，还有"何时、为何、谁建的"）。
  *
@@ -188,23 +191,42 @@ export function clearBindDeclaration(trajectoryDir: string): boolean {
  * 这是**反向查询**（会话 → 轨迹 / 轨迹 → 会话）的唯一入口，取代旧的旁路表扫描。
  * 跳过 `_` / `.` 前缀目录（归档区与运行时区不是轨迹，判据同 `activeTrajectoryDirNames`）。
  *
+ * 🔴 **2026-10-20（owner 裁决「死包含归档判断」配套）：`_archived/` 必须**再扫一层**。**
+ *
+ * 修之前：归档目录整体被跳过 ⇒ **已归档轨迹的绑定声明对唯一性检查完全隐形**。
+ * 后果：承载过它的 dsh 会话看起来"无归属"，可以被 `use` 到另一条轨迹上 ——
+ * 这正是 IMMUTABLE 1「一个会话终身只属于一条轨迹」要禁的事，而且是**静默**发生的。
+ *
+ * 为什么只扫归档区、不扫别的 `_` 目录：归档区里的**确实是轨迹**（只是不再活跃），
+ * 而 `_轨迹约束-logs` / `_weixin-logs` / `_corpus` 是日志与数据区，它们里面不会有
+ * `current.dsh_session_bind`（真有一个也只是垃圾，读到会被 `asDeclaration` 挡掉）。
+ * ⇒ 只多付一次 `_archived` 的 readdir，不改变"活跃清单"的语义（那是 `readAllSessions` 的事）。
+ *
  * @param sessionsRoot `<CCC>/AGENT_SESSIONS`
  * @returns 有交代的轨迹；**永不抛**（目录读不到 ⇒ 空表）
  */
 export function listBindDeclarations(sessionsRoot: string): Array<{ dirName: string; decl: BindDeclaration }> {
   const out: Array<{ dirName: string; decl: BindDeclaration }> = []
-  let names: string[]
-  try {
-    names = readdirSync(sessionsRoot, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
-      .map((e) => e.name)
-  } catch {
-    return out
+  const collect = (dir: string, into: (dirName: string, decl: BindDeclaration) => void): void => {
+    let names: string[]
+    try {
+      names = readdirSync(dir, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && !e.name.startsWith('_') && !e.name.startsWith('.'))
+        .map((e) => e.name)
+    } catch {
+      return
+    }
+    for (const dirName of names) {
+      const decl = readBindDeclaration(join(dir, dirName))
+      if (decl) into(dirName, decl)
+    }
   }
-  for (const dirName of names) {
-    const decl = readBindDeclaration(join(sessionsRoot, dirName))
-    if (decl) out.push({ dirName, decl })
-  }
+  collect(sessionsRoot, (dirName, decl) => out.push({ dirName, decl }))
+  // 归档区：轨迹本体没变，只是不在活跃清单里 —— **它的会话仍然属于它**。
+  collect(join(sessionsRoot, ARCHIVED_DIR_NAME), (dirName, decl) => {
+    // 同 id 存活于活跃区时以活跃区为准（理论上不该并存；并存时不让归档区覆盖活跃区的读法）
+    if (!out.some((r) => r.dirName === dirName)) out.push({ dirName, decl })
+  })
   return out
 }
 
@@ -298,17 +320,31 @@ export function findTrajectoryHolding(sessionsRoot: string, sessionId: string): 
  *    `takeover` = 载体换代（`rebuild` / 崩溃后新建），由调用方**显式**声明；
  *    绝不默认允许 —— 静默换代正是"一条轨迹长出两个载体"的成因。
  *
+ * 🔴 **2026-10-20（owner 裁决，S196 实测逼出）：第 ② 条只在"旧载体还活着"时成立。**
+ *
+ * 修之前：`claimBinding` **完全不问存活**，只要文件里有别的 `sessionId` 就拒。
+ * 而读侧（`listBoundSessionIds(…, alive)`）却按 IMMUTABLE 3 把过期声明当"没绑定"
+ * ⇒ **同一条轨迹，两个函数给出相反的答案**。S196 就是撞上这一格：
+ * 它的绑定文件指着 `session-52d680ae`（**已在宿主归档集里** = 死），
+ * 而 `use` 被 `TRAJECTORY_OCCUPIED` 拒掉，回执还说"成功"（另有一条 D186 的静默问题）。
+ *
+ * ⇒ 判据（第三条不变量的**写侧形态**）：**旧载体会死 ⇒ 本条轨迹算空槽，直接写**。
+ *    `alive` 不传时**沿用"文件在就算占用"**的旧语义（保守、向后兼容）——
+ *    ⚠️ 那是"读不到宿主事实"的降级，**不是**"它一定活着"；
+ *    生产调用点必须显式传 {@link hostAliveProbe}。
+ *
  * @param sessionsRoot `<CCC>/AGENT_SESSIONS`
  * @param dirName 目标轨迹目录名
  * @param decl 要写入的声明
  * @param opts.takeover 允许顶掉本条轨迹现有的另一个载体
+ * @param opts.alive 探针：**旧载体**是否还活着（缺省 ⇒ 一律当活 = 旧语义）
  * @returns `{ ok: true }` 或 `{ ok: false, code, detail }`（**不抛**，由调用方决定如何呈现）
  */
 export function claimBinding(
   sessionsRoot: string,
   dirName: string,
   decl: BindDeclaration,
-  opts: { takeover?: boolean } = {},
+  opts: { takeover?: boolean; alive?: (sessionId: string) => boolean } = {},
 ): { ok: true; released?: string } | { ok: false; code: 'SESSION_TAKEN' | 'TRAJECTORY_OCCUPIED' | 'WRITE_FAILED'; detail: string } {
   // ① 载体唯一：这个会话 id 是否已在别的轨迹名下？
   const holder = findTrajectoryHolding(sessionsRoot, decl.sessionId)
@@ -324,13 +360,18 @@ export function claimBinding(
   // ② 轨迹唯一：本条轨迹是否已由**另一个**会话承载？
   const cur = readBindDeclaration(join(sessionsRoot, dirName))
   if (cur !== null && cur.sessionId !== decl.sessionId && opts.takeover !== true) {
-    return {
-      ok: false,
-      code: 'TRAJECTORY_OCCUPIED',
-      detail:
-        `轨迹「${dirName}」当前已由会话 ${cur.sessionId} 承载（${cur.action}，${new Date(cur.at).toISOString()}）。` +
-        `如需换代（rebuild / 重建载体），调用方必须显式声明 takeover —— ` +
-        `静默换代会让一条轨迹出现两个载体。`,
+    // 🔴 死载体不构成占用（owner 2026-10-20）：见函数头注 §判据。
+    //    ⚠️ 探针缺省 = 当活（旧语义）——降级方向是"保守拒绝"，不是"静默顶掉"。
+    const occupied = opts.alive === undefined ? true : opts.alive(cur.sessionId)
+    if (occupied) {
+      return {
+        ok: false,
+        code: 'TRAJECTORY_OCCUPIED',
+        detail:
+          `轨迹「${dirName}」当前已由会话 ${cur.sessionId} 承载（${cur.action}，${new Date(cur.at).toISOString()}）。` +
+          `如需换代（rebuild / 重建载体），调用方必须显式声明 takeover —— ` +
+          `静默换代会让一条轨迹出现两个载体。`,
+      }
     }
   }
   // ③ 🔴 **生命周期配对（switch 的一半）**：写 B 之前先清 A。

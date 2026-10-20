@@ -24,7 +24,7 @@
  * `supersedeOtherBindings` / `pruneMissingBindings` / `migrateBindingsToDomain` /
  * `.bindings.json` 双写 / 存储域优先。它们由 `D172` 判决删除，**不是漏测**。
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -107,6 +107,54 @@ describe('D172 · 归属写在轨迹目录自己的交代里', () => {
     mkTraj()
     expect(appendBound({}, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
     expect(appendBound({ header: { id: 'x' } }, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
+  })
+
+  /**
+   * 🔴 **这条守卫不许静默**（2026-10-20，D186：守卫可以拒绝，但不许不出声）。
+   *
+   * ## 它为什么被加进来
+   *
+   * `appendBound` 里"取不到 header/根"这条曾经是裸 `return false`，而**同一函数里
+   * 另一条失败路径（绑定被拒）是有 `console.warn` 的** ⇒ 排查者看到"没有任何告警"，
+   * 自然推断"根本没走到这里"，而事实是走到了、被拒了、没吭声。
+   *
+   * ⚠️ **归因更正**：加这条时我以为它就是 S196 那次事故的成因，**那是错的** ——
+   * S196 的 header 齐全，真因是 `claimBinding` 把已归档的死载体当成占用者
+   * （见 `trajectory-alive.test.ts` 与 `bind-file.ts` 的 `alive` 参数）。
+   * 这条用例**本身仍然成立**（那个分支确实哑过），只是**不能拿它解释 S196**。
+   *
+   * ⚠️ **上面那条用例（只断言 `false`）就是这个缺陷的温床** —— 它从头到尾没要求"要出声"。
+   * ⇒ 这里补的判据是**成对的**：返回值照旧 `false`（判据不变），**但必须有一条告警**。
+   */
+  it('🔴 取不到 header/根 ⇒ 必须**出声**（不许静默 return false）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mkTraj()
+
+    // ① 完全没有 header
+    expect(appendBound({}, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
+    expect(warn).toHaveBeenCalled()
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('SESSION_HEADER_UNRESOLVED'))).toBe(true)
+
+    // ② 有 id 但无 cwd（**这正是"根定位不到"那一半**，也是最容易被忽略的形态）
+    warn.mockClear()
+    expect(appendBound({ header: { id: 'x' } }, 'activate', { dirName: DIR, mdPath: '/x' })).toBe(false)
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('SESSION_HEADER_UNRESOLVED'))).toBe(true)
+
+    // ③ 告警里必须**指名是哪一半缺**（否则排查者还得自己猜）
+    const all = warn.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(all).toContain('id=')
+    expect(all).toContain('root=')
+    // ④ 并且必须说清后果（"文件未被改写"），不能只说"失败了"
+    expect(all).toContain('未被改写')
+    warn.mockRestore()
+  })
+
+  it('🔴 反向：**成功**路径不许刷这条告警（别把真信号淹掉）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mkTraj()
+    expect(appendBound(makeSession('sess-ok'), 'activate', { dirName: DIR, mdPath: '/x' })).toBe(true)
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('SESSION_HEADER_UNRESOLVED'))).toBe(false)
+    warn.mockRestore()
   })
 
   it('readLastBound 正查：会话 → 它承载的轨迹', () => {

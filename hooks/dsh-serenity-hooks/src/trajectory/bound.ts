@@ -202,6 +202,13 @@ export function resolveSessionCognitiveTrajectoryLabel(session: unknown, scope: 
  * 那是"读不到宿主事实"的降级，**不是**"会话一定在"。需要严格判的一方请显式传探针
  * （唤醒选人是这种：见 `wake/scheduler.ts`）。
  *
+ * 🔴 **2026-10-20（owner 裁决）：生产调用点必须传探针，两个调用点都已接上。**
+ * 缺省分支**保留**只为两件事：① 既有单测的向后兼容；② 诊断面"只读文件"的显式用法。
+ * ⛔ 不要新增不传探针的生产调用点 —— 那等于把"归档会话算活"的漏洞再开一次
+ * （本仓同族已踩：`carrierState` ＋ CRO 快照两处都漏传过）。
+ * 生产一律用 `trajectory/alive.ts` 的 `hostAliveProbe(ctx)`（判据 ＝ owner 定的
+ * 「① 进程内 loaded ∨ ② 日志在且未被归档」）。
+ *
  * @param root CCC 根
  * @param dirName 轨迹目录名
  * @param alive 探针：该 dsh 会话 id 此刻是否真实存在
@@ -261,11 +268,38 @@ export function appendBound(
     createdAsUser?: boolean
     /** 允许顶掉该轨迹现有的另一个载体（rebuild / 崩溃后重建载体时**必须显式**声明） */
     takeover?: boolean
+    /**
+     * 探针：该轨迹**现有载体**是否还活着（决定"算不算占用"）。
+     *
+     * 🔴 2026-10-20（owner 裁决）：**死载体不构成占用**。
+     * 不传 ⇒ 同一条轨迹现有的任何声明都算占用（旧语义，保守拒绝）。
+     * 生产调用点应当传 {@link hostAliveProbe}（`trajectory/alive.ts`）。
+     */
+    alive?: (sessionId: string) => boolean
   },
 ): boolean {
   const id = sessionHeader(session)?.id
   const root = rootOf(session)
-  if (typeof id !== 'string' || id === '' || root === null) return false
+  // 🔴 **这条守卫不许静默**（2026-10-20，D186：守卫可以拒绝，但不许不出声）。
+  //    它曾经是 `return false` 一句话，没有任何日志，而调用点又把返回值丢掉了。
+  //
+  //    ⚠️ **归因更正（同日晚些时候）**：S196 那次「回执成功、标题已改、绑定文件逐字节未变」
+  //    **不是这一条守卫造成的** —— 那条会话的 header 齐全、日志也在。真因是
+  //    `claimBinding` 的第 ② 条把**已归档的死载体**当成了占用者（见 `trajectory/alive.ts`
+  //    与 `bind-file.ts` 的 `alive` 参数）。当时我读错了实现，把这条静默守卫当成了现场。
+  //    ⇒ 保留这条告警**仍然正确**（它确实哑过，也确实该出声），但**别再把它当 S196 的解释**：
+  //      两条失败路径的**读数不同** —— 这条是"取不到 header"，S196 是"header 齐全但槽位被占"。
+  if (typeof id !== 'string' || id === '' || root === null) {
+    console.warn(
+      '[serenity-hooks] ✗ 绑定未写入（SESSION_HEADER_UNRESOLVED）：'
+      + `会话对象取不到可用的 header（id=${typeof id === 'string' && id !== '' ? id : '(空/非字符串)'}，`
+      + `root=${root ?? 'null（header.cwd 缺失或上溯不到 .serenity）'}）`
+      + ` ⇒ 轨迹「${rec.dirName}」的 current.dsh_session_bind **未被改写**。`
+      + ' 排查：该会话的 header.cwd 是否指向某个含 .serenity 的目录；'
+      + ' 无 cwd 的会话（如某些程序性创建的载体）**不会**写绑定。',
+    )
+    return false
+  }
   const result = claimBinding(
     sessionsRoot(root),
     rec.dirName,
@@ -276,7 +310,7 @@ export function appendBound(
       ...(rec.note !== undefined ? { note: rec.note } : {}),
       ...(rec.createdAsUser === true ? { createdAsUser: true } : {}),
     },
-    { takeover: rec.takeover === true },
+    { takeover: rec.takeover === true, ...(rec.alive !== undefined ? { alive: rec.alive } : {}) },
   )
   if (!result.ok) {
     // 🔴 不静默：绑定被拒意味着"这条轨迹现在归属不明"，必须让人看见

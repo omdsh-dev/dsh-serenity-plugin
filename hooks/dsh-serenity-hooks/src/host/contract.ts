@@ -210,8 +210,16 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     id: 'workspaceRegistry',
     name: 'workspaceRegistry',
     access: 'lazy',
-    members: [{ name: 'list', kind: 'function' }],
-    impact: '工作区白名单下拉为空（外部访问配置受限）',
+    // 🔴 2026-10-20（owner 裁决「死必须包含归档判断」）：`archivedSessionIds` 从
+    //    "可选增强"升为**判活判据的一半**。宿主 `dsh-workspace` 的归档只往该集合加 id、
+    //    **日志逐字节不动** ⇒ 只问"日志在不在"的实现在归档上必然判错。
+    //    ⚠️ 它是 **getter**（`get archivedSessionIds()`），故 kind 记 `value`：
+    //    探针读的是属性，不是调用。
+    members: [
+      { name: 'list', kind: 'function' },
+      { name: 'archivedSessionIds', kind: 'value' },
+    ],
+    impact: 'CCC 自动发现回落失效 ＋ **归档状态不可知**（已归档会话会被误判成活载体）',
     required: false,
   },
   {

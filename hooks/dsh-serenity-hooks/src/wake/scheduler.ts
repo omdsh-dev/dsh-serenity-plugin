@@ -32,6 +32,7 @@ import { hostname } from 'node:os'
 import { findSession, parseTrajectoryCode, sessionsRoot, trajectoryDescOf } from '../trajectory/core.js'
 import { buildCarrierOpening, deliverCarrierOpening } from '../trajectory/user-carrier.js'
 import { listBoundSessionIds, appendBound, carrierState } from '../trajectory/bound.js'
+import { hostAliveProbe } from '../trajectory/alive.js'
 import { hasSessionLogById, sessionsRootDir } from '../trajectory/cleanup.js'
 import { evaluateCro, listCroCognitiveTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from '../cro/core.js'
 import { runningCarriersOf } from '../cro/turns.js'
@@ -230,7 +231,10 @@ async function acquireWakeAgent(
   dirName: string,
 ): Promise<{ agent: Agent; how: string } | { error: string; notReady?: boolean; noBinding?: boolean }> {
   const agents = hostAgents(ctx)
-  const ids = listBoundSessionIds(root, dirName)
+  // 🔴 2026-10-20（owner 裁决）：**必须传探针**。缺省语义是"文件在就算绑定"，
+  //    而归档只加 id、日志不动 ⇒ 已归档会话会被当成可用载体，CRO 每个 tick 都去
+  //    `resolveAgent` 一条使用者早已收起来的会话，且**没有退出条件**。
+  const ids = listBoundSessionIds(root, dirName, hostAliveProbe(ctx))
   for (const id of ids) {
     const live = agents?.get?.(id) as Agent | undefined
     if (live) return { agent: live, how: `live(bound ${id})` }
@@ -407,16 +411,7 @@ export async function sendToCognitiveTrajectory(
       //  · `never`    ⇒ 从未有过 ⇒ 允许自建（owner 认这是正当用例）
       //  · `occupied` ⇒ 有过，但那个会话现在不在 ⇒ **禁止自建**，如实报错
       //  · `live`     ⇒ 此刻有效（`acqired.noBinding` 与它矛盾 = 读数打架，同样不建）
-      const carrier = carrierState(root, t.dirName, (id) => {
-        const live = hostAgents(ctx)?.get?.(id)
-        if (live) return true
-        // 冷会话：宿主存储里有它的日志就算"存在"（fail-open：读不到 ⇒ 当作存在 ⇒ 不建新的）
-        try {
-          return hasSessionLogById(sessionsRootDir(), id)
-        } catch {
-          return true
-        }
-      })
+      const carrier = carrierState(root, t.dirName, hostAliveProbe(ctx))
       if (carrier.state !== 'never') {
         const why =
           carrier.state === 'occupied'
@@ -844,7 +839,9 @@ async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], lo
         log.push(`· ${root}: ${dirName}: CRO 机器绑定未通过（${verdict.code}）：${verdict.detail}`)
         continue
       }
-      const bound = listBoundSessionIds(root, dirName)
+      // 🔴 2026-10-20（owner 裁决）：CRO 快照同样**必须**带探针 —— 否则已归档会话
+      //    会作为候选载体进 `boundSessionIds`，CRO 的"有载体在跑"判断随之失真。
+      const bound = listBoundSessionIds(root, dirName, hostAliveProbe(ctx))
       // 🔴 `running ≠ live`（设计 §3.2）：running 来自 `cro-turns` 的事件夹取 + TTL 兜底
       const running = runningCarriersOf(bound, nowMs)
       const live = bound.filter((id) => Boolean(agents?.get?.(id)))

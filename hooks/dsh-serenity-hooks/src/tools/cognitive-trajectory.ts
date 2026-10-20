@@ -48,6 +48,7 @@ import { existsSync, statSync } from 'node:fs'
 import { findSerenityRoot } from '../kernel/ccc.js'
 import { agentCwdFor, cccRootForExec, NO_CCC_FROM_AGENT_CWD } from '../kernel/ccc-roots.js'
 import { appendBound, readLastBound, resolveSessionCognitiveTrajectoryLabel } from '../trajectory/bound.js'
+import { hostAliveProbe } from '../trajectory/alive.js'
 import { addWake, WAKE_CATCH_UP_MS, type WakeEntry } from '../wake/registry.js'
 import { sendToCognitiveTrajectory } from '../wake/scheduler.js'
 import { CRO_GUIDE } from '../cro/guide.js'
@@ -429,11 +430,31 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         //  · 已归属**同一条**轨迹 ⇒ **幂等重入**（不产生第二次写语义）
         // ⛔ `switch` 已由上面的硬守卫挡掉；`takeover` 只属于 rebuild 路径。
         const dsh = agentDshSession(exec)
+        // 🔴 **写入结果必须进回执**（2026-10-20，由 S196 的实测逼出）：
+        //    `use` 的回执此前只说"已激活"，而绑定写没写成**完全看不出来** ⇒
+        //    实测里出现了「回执成功、标题已改、绑定文件逐字节未变」这种组合，
+        //    使用者只能靠事后比对 mtime 才发现 ⇒ 那是把"真相源没更新"伪装成成功。
+        //    ⚠️ 标题改名走的是另一条通路（它有日志），所以"标题变了"**不能**当绑定成功的证据。
+        let bound: boolean | null = null
         if (dsh && info) {
-          appendBound(dsh, 'activate', {
+          // 🔴 **`use` 无条件覆盖绑定**（owner 2026-10-20 裁决，原话：
+          //    「use 只要被调用了，可以无条件覆盖绑定到当前会话（这说明当前会话肯定活着啊）」）。
+          //
+          // 为什么这是对的（而不是又一个后门）：`use` 手里拿的是**自己这条会话** ——
+          // 它能被调用，就证明它此刻活着。而 `claimBinding` 的第 ② 条守卫问的是
+          // 「别的 id 还占着这个槽吗」，那个判断针对的是**文件里写的那个 id**，不是自己。
+          // ⇒ 对 `use` 而言，槽位里躺着谁都不该拦住它：那条旧载体若还活着，
+          //    是一个**真实的冲突**（该由 IMMUTABLE 2 报错）；若已死，就更不该拦。
+          //
+          // ⚠️ 但**不传 `takeover` 的语义要保留**：这里传的 `alive` 让 `claimBinding`
+          //    自己判死活 —— 活的旧载体仍然拒绝（那是 IMMUTABLE 2 的真实冲突），
+          //    死的才放行。⇒ 既满足"无条件覆盖"（对死载体），又不放弃"一轨迹一载体"。
+          //    `takeover` 仍**只**留给 rebuild / 崩溃重建那种"明知故换"的路径。
+          bound = appendBound(dsh, 'activate', {
             dirName: info.dirName,
             mdPath: info.mdPath,
             sessionId: info.sessionId,
+            alive: hostAliveProbe(ctx),
           })
         }
         // 内联完整性检查（v1.33）：原 health/qa 因"判据＝旧模板"被淘汰，这里只留不依赖模板的两项
@@ -441,6 +462,20 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         const advisory = advisoryHint(targetEntry.dirName, join(targetEntry.path, 'SESSION.md'))
         const out: Record<string, JsonValue> = { dir: active.dir, mdPath: active.mdPath, context: active.context }
         if (advisory) out.advisory = advisory
+        // 🔴 绑定结果**显式**回报（三态，缺一不可）：
+        //  · `written`     —— 真相源已改写，`use` 真的落地了
+        //  · `not-written` —— 取不到会话对象/header ⇒ 契约下**仍是未绑定**（绝不谎报"已激活"就是绑定完成）
+        //  · 缺省不出现   —— 只在真的没走到写入分支时才没有这一格
+        if (bound === true) {
+          out.binding = 'written'
+        } else if (bound === false) {
+          out.binding = 'not-written'
+          out.bindingHint =
+            `绑定未写入：本会话取不到可用的 header（id / cwd 缺一不可）⇒ 按契约「绑定声明是唯一真相」，`
+            + `「${info?.dirName ?? targetEntry.dirName}」此刻仍是**未绑定**。`
+            + ' 会话标题变了**不能**当作绑定成功的证据（改名走的是另一条通路）。'
+            + ' 详见宿主日志里的 `✗ 绑定未写入（SESSION_HEADER_UNRESOLVED）`。'
+        }
         // (b)(c) 已退役（D172）：
         //  · "只留一条"不再需要 —— 轨迹的槽位是**一个文件**，写入即覆盖，没有可以退的第二条；
         //  · "悬空清理"不再需要 —— owner：「sessionId 不存在 ⇒ 视同没绑定」，过期文件自动失效。

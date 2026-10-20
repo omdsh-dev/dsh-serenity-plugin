@@ -25,7 +25,7 @@ import {
   containerStatus,
   containerWakes,
 } from '../src/surface/observation.js'
-import { hostContractReport } from '../src/host/contract.js'
+import { hostContractReport, HOST_SERVICES } from '../src/host/contract.js'
 import { runKit } from '../src/tools/kit/service.js'
 import { ACC_VERSION } from '../src/kernel/constants.js'
 import { registerWakeScheduler, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
@@ -206,7 +206,10 @@ describe('container-status: 宿主契约统一取数口（**每次现探**，v1.
       get: (name: string) => {
         if (name !== 'workspaceRegistry') return undefined
         calls += 1
-        return calls === 1 ? undefined : { list: () => [] }
+        // 🔴 桩必须给出**契约声明的全部成员**（2026-10-20 起含 `archivedSessionIds`）：
+        //    少给一个，本用例会以"多出一条 missing member"的形态红 ——
+        //    那不是判据坏了，是桩比真服务少了一块（`dsh-workspace` 真有这个 getter）。
+        return calls === 1 ? undefined : { list: () => [], archivedSessionIds: [] as string[] }
       },
     }
 
@@ -216,7 +219,11 @@ describe('container-status: 宿主契约统一取数口（**每次现探**，v1.
 
     const second = hostContractReport(ctx, null)
     expect(second!.issues.map((i) => i.id)).not.toContain('workspaceRegistry') // 运行态：必须反映当前可用
-    expect(second!.checked).toBe(first!.checked + 1) // 该服务的成员这次被核到了
+    // 该服务的**全部成员**这次都被核到了。⚠️ 历次加成员都会让这条期望值变：
+    //   写死 `+1` 会随着契约长大而红 —— 那不是判据坏了，是判据把"成员数"钉进了用例。
+    //   改成"按契约声明的成员数推"（单真相源 = `HOST_SERVICES`）。
+    const members = HOST_SERVICES.find((s) => s.id === 'workspaceRegistry')!.members.length
+    expect(second!.checked).toBe(first!.checked + members)
   })
 
   it('未给 ctx → 返回 null（不猜、不暗跑探针）', () => {

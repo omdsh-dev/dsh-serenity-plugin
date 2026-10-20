@@ -40,7 +40,15 @@ import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/
 const HOUR = 3_600_000
 const DIR_NAME = '2026-09-13--S999--wake-target--auto'
 
+/**
+ * 会话日志的项目目录名（`hasSessionLogById` 会遍历 sessions root 下**所有**项目目录，
+ * 所以这里的取值不重要，只要是一个目录名即可；用真形态让夹具长得像真的）。
+ */
+const PROJECT_SLUG = '--home-yh-home-home-serenity--'
+
 let root: string
+/** 临时 `DSH_HOME`：把"会话日志在磁盘上"这一维关进沙箱，绝不读本机真实会话 */
+let dshHome: string
 
 function writeSessionDir(dirName = DIR_NAME): string {
   const dir = join(root, 'AGENT_SESSIONS', dirName)
@@ -55,8 +63,26 @@ function writeSessionDir(dirName = DIR_NAME): string {
  * ⚠️ 语义是"这条轨迹当前由 `sessionId` 承载"——**单槽位**，重复调用即覆盖（不是追加）。
  * 旧夹具靠 `.bindings.json` 的多条记录构造"一条轨迹挂多代载体"，
  * 那在新形态里**结构上不可能**，相关用例已随判决退役。
+ *
+ * 🔴 **2026-10-20（owner 裁决「死包含归档判断」）后必须同时造出会话日志。**
+ *
+ * 修之前本夹具只写绑定文件、不建会话日志，而用例把 `agents.get` 桩成 `undefined`
+ * （= 非 live）⇒ 按新判据「活 ⟺ ① ∨ (② ∧ 不在归档集)」这条会话是**死的**，
+ * 于是 `deliverWake` 走到"无绑定会话记录"那一支，7 条用例同时红。
+ *
+ * ⚠️ 那不是判据错，是**夹具构造了一个生产中不可能出现的状态**：
+ * 一条真实存在的冷会话一定是"进程里没有、但磁盘上有日志"（这正是"冷"的定义）。
+ * ⇒ 夹具按真形态补齐 ②（日志），让用例被测的对象回到"冷会话"本身。
+ *
+ * @param sessionId 绑定到这条轨迹的会话 id
+ * @param opts.cold 是否造出"日志在磁盘"（缺省 true = 真实的冷会话形态）
  */
-function writeBinding(sessionId: string, dirName = DIR_NAME, at = Date.now()): void {
+function writeBinding(
+  sessionId: string,
+  dirName = DIR_NAME,
+  at = Date.now(),
+  opts: { cold?: boolean } = {},
+): void {
   const dir = join(root, 'AGENT_SESSIONS', dirName)
   mkdirSync(dir, { recursive: true })
   writeFileSync(
@@ -64,14 +90,41 @@ function writeBinding(sessionId: string, dirName = DIR_NAME, at = Date.now()): v
     JSON.stringify({ sessionId, at, action: 'activate' }),
     'utf-8',
   )
+  if (opts.cold !== false) writeSessionLog(sessionId)
+}
+
+/**
+ * 造出"这条会话的日志在磁盘上"（= 判活判据 ② 的事实来源）。
+ *
+ * 落点必须与 `hasSessionLogById` 的扫描域一致：
+ * `<DSH_HOME>/sessions/<project>/<session-id>/session.v4.jsonl.zstd`。
+ * 本组用例用 `DSH_HOME` 指向临时目录，**绝不碰真实宿主数据**
+ * （⚠️ 别把 `DSH_HOME` 指向 `$HOME`：那会让判据读到本机真实会话，用例互串）。
+ *
+ * ⚠️ 只造"名字与位置"，不造 zstd 内容：`hasSessionLogById` 只 `stat` 大小、
+ *    不解析内容 ⇒ 空文件即可（并且这一点被 `hasSessionLogById` 的实现钉着）。
+ */
+function writeSessionLog(sessionId: string): void {
+  // ⚠️ 目录名的归一化**必须与 `hasSessionLogById` 的约定一致**（它按"含 `session-` 前缀"
+  //    判目录名：`sess-cold` ⇒ 去找 `session-sess-cold`）。本夹具用短 id（`sess-cold`）
+  //    是为了可读，真实 id 是 `session-<uuid>`（那样归一化是恒等的）。
+  //    ⇒ 这里照约定补齐前缀，让夹具长得像真会话目录，而不是绕开判据。
+  const dirName = sessionId.startsWith('session-') ? sessionId : `session-${sessionId}`
+  const dir = join(dshHome, 'sessions', PROJECT_SLUG, dirName)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), '', 'utf-8')
 }
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), 'dsp-wake-'))
+  dshHome = mkdtempSync(join(tmpdir(), 'dsp-wake-home-'))
+  process.env.DSH_HOME = dshHome
 })
 
 afterEach(() => {
   rmSync(root, { recursive: true, force: true })
+  rmSync(dshHome, { recursive: true, force: true })
+  delete process.env.DSH_HOME
 })
 
 /**
