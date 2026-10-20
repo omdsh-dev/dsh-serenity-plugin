@@ -74,17 +74,21 @@ describe('context: 重启自动恢复的根会话判定（shouldAutoRestore）',
     expect(shouldAutoRestore(fakeAgent({ id: 'cheap-worker-sqc-scan-1234' }))).toBe(false)
   })
 
-  it('轨迹约束会话（绑定轨迹**有 `trajectory-constraint.json`**）→ 不恢复（完全独立，F4b 旁路）', () => {
-    // 🔴 2026-10-19：判据不再是 id 前缀 `轨迹约束-`，而是「会话绑定的轨迹有 `trajectory-constraint.json`」
-    //    （`seams/context.ts` 的 `isTrajectoryConstrained(root, session.id)`）⇒ 夹具必须造真轨迹 +
-    //    把会话登记进去，并把 `header.cwd` 指向该 CCC 根（根解析靠 `.serenity` 标记）。
-    const dirName = make轨迹约束Session(dir, 'sess-轨迹约束-auto-restore', 'qa', 轨迹约束Json({ tools: [] }))
+  it('轨迹**自带章程**（selfPromptFile）→ 不恢复（D183 旁路判据）', () => {
+    // 🔴 2026-10-20 D183：判据从「有 trajectory-constraint.json」收窄为「**自带章程**」。
+    //    只收窄能力（tools）或不改身份（model/resident）的声明**不**旁路自动恢复。
+    const dirName = make轨迹约束Session(dir, 'sess-轨迹约束-auto-restore', 'qa', 轨迹约束Json({ tools: [], systemPromptFile: 'charter.md' }))
     const 轨迹约束Session = { id: 'sess-轨迹约束-auto-restore', header: { cwd: dir } }
     expect(shouldAutoRestore(fakeAgent(轨迹约束Session))).toBe(false)
     // 正交的第二条：同一判据下，**带 `轨迹约束-` 前缀但没挂轨迹**的会话按普通会话处理
     //（前缀在新模型里不表达身份 —— 保留这格可防"前缀判据悄悄回来"）
     expect(shouldAutoRestore(fakeAgent({ id: '轨迹约束-review-1' }))).toBe(true)
     expect(dirName).toContain('qa')
+  })
+
+  it('🔴 D183 反向钉：只写 tools（无章程）⇒ **照常恢复**（不写就是不设定）', () => {
+    make轨迹约束Session(dir, 'sess-tools-only-restore', 'tools-only', 轨迹约束Json({ tools: ['read'] }))
+    expect(shouldAutoRestore(fakeAgent({ id: 'sess-tools-only-restore', header: { cwd: dir } }))).toBe(true)
   })
 
   it('无 session → 不恢复', () => {
@@ -119,9 +123,9 @@ describe('context: 恢复触发判定（S134 泄漏修复：有历史才恢复�
     expect(shouldRestoreActive(fakeAgent({ id: 'cheap-worker-x-1', events: [{ type: 'user/message' }] }))).toBe(false)
   })
 
-  it('轨迹约束会话（有历史但独立）→ 不恢复（F4b 旁路）', () => {
-    // 🔴 2026-10-19：同上一处 —— 判据换成「绑定轨迹有 `trajectory-constraint.json`」，id 前缀不再表达身份。
-    make轨迹约束Session(dir, 'sess-轨迹约束-restore-active', 'qa', 轨迹约束Json({ tools: [] }))
+  it('轨迹自带章程（有历史但独立）→ 不恢复（D183 旁路判据）', () => {
+    // 🔴 2026-10-20 D183：同上一处 —— 判据 = 「**自带章程**」，不再等于「有 trajectory.json」。
+    make轨迹约束Session(dir, 'sess-轨迹约束-restore-active', 'qa', 轨迹约束Json({ tools: [], systemPromptFile: 'charter.md' }))
     const 轨迹约束Session = {
       id: 'sess-轨迹约束-restore-active',
       header: { cwd: dir },

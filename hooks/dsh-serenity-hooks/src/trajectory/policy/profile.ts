@@ -68,18 +68,32 @@ export interface TrajectoryConstraint {
   code: string
   /** `trajectory-constraint.json` 的绝对路径 */
   path: string
-  /** 模型（`provider/model`）；缺省回退 `cheap-worker.defaultModel` */
+  /** 模型（`provider/model`）；缺省 ⇒ 不改变会话当前模型（**不**回退 cheap-worker），见 D181 */
   model?: string
-  /** 非 MSM 工具白名单（白名单外**从 schema 移除**，不是"看得见调不动"） */
-  tools: string[]
-  /** MSM 白名单（`msm()` 单入口内再过滤） */
-  msms: string[]
+  /**
+   * 非 MSM 工具白名单。
+   *
+   * 🔴 **D181（owner 2026-10-20 裁「不写当然不收窄」）：
+   * `undefined` = 字段缺省 ⇒ **不收窄**；`[]` = 显式空数组 ⇒ **全隐藏**（除恒可用的 `skill`）。**
+   * 两者是**不同的意图**，故类型必须是 `string[] | undefined`，不能归一成 `[]`。
+   */
+  tools?: string[]
+  /** MSM 白名单；缺省/空数组语义同 `tools`（D181） */
+  msms?: string[]
   /** 轨迹纪律参与项（**缺省全 true**，见上方 R↓） */
   cognitiveTrajectory: { session: boolean; keeper: boolean; rebuild: boolean }
   /** 内嵌提示词（`systemPromptFile` 为空时用） */
   systemPrompt?: string
   /** 提示词文件（相对 CCC 根；**优先于** `systemPrompt`） */
   systemPromptFile?: string
+  /**
+   * 常驻自述（D173）：我对**自己用途**的公开声明。
+   *
+   * 🔴 它**不是**资源状态（不是"永不休眠"），**不碰**载体生命周期，
+   * **不进系统提示词**（不占每轮 token）—— 只被 `cognitive_trajectory` 的
+   * `resident` 只读动作按需查出。两句判据：管的是**被找到**，不是**不被销毁**。
+   */
+  resident?: { serves?: string }
 }
 
 /**
@@ -143,8 +157,25 @@ export function readTrajectoryConstraintAt(trajectoryDir: string, root: string):
   }
   const obj = raw as Record<string, unknown>
   const file = found
-  const strList = (v: unknown): string[] =>
-    Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim()) : []
+  /**
+   * 白名单字段的**两态**读取（D181，owner 2026-10-20 裁「不写当然不收窄」）：
+   *
+   * | 文件里 | 返回 | 语义 |
+   * |---|---|---|
+   * | 字段**不存在** | `undefined` | **不收窄**（这条轨迹要的是别的设定，比如只写 `resident`） |
+   * | `[]`（显式空数组） | `[]` | **全隐藏**（除恒可用的 `skill`）—— 用户明说了"我一个都不给" |
+   * | `["a","b"]` | `["a","b"]` | 只给这些 |
+   *
+   * 🔴 **为什么不能归一成 `[]`**：那会把"我没提这件事"读成"我要禁止一切"，
+   * 于是「只想声明常驻」的人会被静默锁死（S196 实测踩到，见 D179(b)）。
+   * 判据是**字段在不在**，不是数组空不空。
+   */
+  const strListMaybe = (v: unknown): string[] | undefined =>
+    v === undefined
+      ? undefined
+      : Array.isArray(v)
+        ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '').map((x) => x.trim())
+        : undefined // 不是数组 ⇒ 当作没写（宽松，不整份作废）
   /** 布尔缺省 **true**（R↓ 见接口：工作台就是这条轨迹自己的身体） */
   const boolOrTrue = (v: unknown): boolean => (typeof v === 'boolean' ? v : true)
   const ct = (obj.cognitiveTrajectory && typeof obj.cognitiveTrajectory === 'object')
@@ -166,13 +197,23 @@ export function readTrajectoryConstraintAt(trajectoryDir: string, root: string):
       )
     }
   }
+  // 常驻自述（D173）：`serves` 非空才算"可被判断"（见 `trajectory-self-docs.ts` 的两门槛）
+  const residentRaw = obj.resident
+  let resident: { serves?: string } | undefined
+  if (residentRaw && typeof residentRaw === 'object' && !Array.isArray(residentRaw)) {
+    const serves = (residentRaw as Record<string, unknown>).serves
+    resident = typeof serves === 'string' && serves.trim() !== '' ? { serves: serves.trim() } : {}
+  }
+  const tools = strListMaybe(obj.tools)
+  const msms = strListMaybe(obj.msms)
   return {
     dirName,
     code,
     path: file,
     ...(model !== undefined ? { model } : {}),
-    tools: strList(obj.tools),
-    msms: strList(obj.msms),
+    ...(tools !== undefined ? { tools } : {}),
+    ...(msms !== undefined ? { msms } : {}),
+    ...(resident !== undefined ? { resident } : {}),
     cognitiveTrajectory: {
       session: boolOrTrue(ct.session),
       keeper: boolOrTrue(ct.keeper),
@@ -256,7 +297,42 @@ function registeredDirName(sessionId: string | undefined): string | null {
  *
  * 存在的理由：调用点很多只要一个"是/不是"（seams 的旁路判定），
  * 让它们各自写 `!== null` 会把判据散开；**判据只能有一个入口**。
+ *
+ * 🔴 **D183（owner 2026-10-20）：这里的 `true` 只表示"有声明"，不再等于"该旁路默认行为"。**
+ * 要判断后者请用 `replacesDefaultIdentity()` —— 两者**刻意分开**，因为：
+ * 「我声明过」与「我声明了什么」是两件事，而旁路 ACC 身份只需要后者成立。
  */
 export function isTrajectoryConstrained(root: string, sessionId: string | undefined): boolean {
   return trajectoryConstraintForSession(root, sessionId) !== null
+}
+
+/**
+ * 这条声明**是否真的取代了该轨迹的默认身份**（= 该不该旁路 ACC 身份/首轮/恢复等默认行为）。
+ *
+ * ## 为什么需要它（D183，owner 2026-10-20 逐字）
+ *
+ * > 「这个 `trajectory.json` 中**所有 key 都是可选的；不写就是不设定 不应影响默认行为**」
+ *
+ * 旧判据是**文件存在** ⇒ 只写一句 `resident`（对外用途自述）就会连带丢掉
+ * ACC 身份播种、首轮锚定、自动恢复、compact 重注入 —— **完全超出用户预期**。
+ *
+ * ## 判据（哪些 key 真的改"这条轨迹是谁"）
+ *
+ * | key | 取代默认身份？ | 理由 |
+ * |---|---|---|
+ * | `tools` / `msms` | **否** | 它们收窄**能力**，但"我是谁、我按什么章程工作"没变 ⇒ 仍该拿 ACC 身份 |
+ * | `model` | **否** | 换的只是**执行的模型**，不是身份 |
+ * | `resident` | **否** | 纯对外自述，D173 明说"不碰任何默认行为" |
+ * | `cro.host` | **否** | 管"哪台机器跑 CRO 程序"，与身份无关 |
+ * | `cognitiveTrajectory` | **否** | 管"参与哪些纪律"，纪律是叠加不是取代 |
+ * | `systemPromptFile` / `systemPrompt` | **是** | 它自带**章程** ⇒ 用户的提示词整段取代 ACC 的 |
+ * | `PROMPT.md`（目录里） | **否** | 它**追加**在 ACC 身份之外（v1.72.0 起的机制），不取代 |
+ *
+ * @returns `true` ⇒ 该轨迹自带章程，应旁路 ACC 身份类默认行为；否则 `false`
+ */
+export function replacesDefaultIdentity(profile: TrajectoryConstraint | null | undefined): boolean {
+  if (!profile) return false
+  const hasFile = (profile.systemPromptFile ?? '').trim() !== ''
+  const hasInline = (profile.systemPrompt ?? '').trim() !== ''
+  return hasFile || hasInline
 }

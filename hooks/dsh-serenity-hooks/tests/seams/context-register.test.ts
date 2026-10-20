@@ -178,10 +178,10 @@ describe('registerContext: agent/created 播种', () => {
     expect(injected).toHaveLength(0)
   })
 
-  it('轨迹约束会话 ⇒ 完全旁路（不注入 ACC 身份，轨迹提示词全替换）', async () => {
-    // 🔴 2026-10-19：判据从「sessionId 前缀 `轨迹约束-`」改为「绑定轨迹有 `trajectory-constraint.json`」
-    //    ⇒ "这个会话是 轨迹约束" 的**完整前置** = 造轨迹目录 + 登记绑定（夹具一件事做完）。
-    make轨迹约束Session(dir, '轨迹约束-qa-seam-1', 'qa-seam', 轨迹约束Json({}), 'seam')
+  it('轨迹**自带章程** ⇒ 完全旁路（不注入 ACC 身份，轨迹提示词全替换）', async () => {
+    // 🔴 2026-10-20 D183：判据从「有 trajectory-constraint.json」收窄为「**自带章程**」。
+    //    只收窄能力／改模型／写自述 都**不**取代身份 ⇒ 照常注入 ACC 身份。
+    make轨迹约束Session(dir, '轨迹约束-qa-seam-1', 'qa-seam', 轨迹约束Json({ systemPromptFile: 'charter.md' }), 'seam')
     const { agent, injected } = fakeAgent('轨迹约束-qa-seam-1', { header: { cwd: dir } })
     const ctx = fakeCtx()
     registerContext(ctx as never, { injectOnPrompt: false })
@@ -189,6 +189,19 @@ describe('registerContext: agent/created 播种', () => {
     await fireCreated(ctx, agent)
 
     expect(injected).toHaveLength(0)
+  })
+
+  it('🔴 D183 反向钉：声明存在但**没写任何取代默认的东西** ⇒ 照常注入（不写就是不设定）', async () => {
+    // owner 2026-10-20：「所有 key 都是可选的；**不写就是不设定 不应影响默认行为**」
+    // ⇒ 一个空 `{}` 声明的轨迹，行为必须与"根本没有这个文件"**逐字相同**。
+    make轨迹约束Session(dir, '轨迹约束-empty-decl', 'empty-decl', 轨迹约束Json({}), 'seam')
+    const { agent, injected } = fakeAgent('轨迹约束-empty-decl', { header: { cwd: dir } })
+    const ctx = fakeCtx()
+    registerContext(ctx as never, { injectOnPrompt: false })
+
+    await fireCreated(ctx, agent)
+
+    expect(injected.length).toBeGreaterThan(0)
   })
 
   it('🔴 判别性对照：id 带 `轨迹约束-` 前缀但**没有真实 轨迹约束轨迹** ⇒ 不再当 轨迹约束，照常注入', async () => {
@@ -397,9 +410,9 @@ describe('registerContext: agent/pre-step（"context-only 必须 next() 委托"�
     expect(decision).toEqual(downstream)
   })
 
-  it('轨迹约束会话 ⇒ 不注入、原样返回 downstream（F4 完全旁路）', async () => {
-    // 🔴 2026-10-19：同上一组——轨迹约束 判据 = 绑定轨迹有 `trajectory-constraint.json`，前缀本身无意义。
-    make轨迹约束Session(dir, '轨迹约束-qa-pre-1', 'qa-pre', 轨迹约束Json({}), 'pre')
+  it('轨迹**自带章程** ⇒ 不注入、原样返回 downstream（D183 完全旁路）', async () => {
+    // 🔴 2026-10-20 D183：判据 = 「自带章程」，不再等于「有 trajectory.json」。
+    make轨迹约束Session(dir, '轨迹约束-qa-pre-1', 'qa-pre', 轨迹约束Json({ systemPromptFile: 'charter.md' }), 'pre')
     const { agent } = fakeAgent('轨迹约束-qa-pre-1', { header: { cwd: dir } })
     const ctx = fakeCtx()
     registerContext(ctx as never, { seedOnStart: false })

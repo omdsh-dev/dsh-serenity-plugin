@@ -30,20 +30,36 @@ export const TRAJECTORY_CONSTRAINT_HINT =
   'systemPromptFile hot-reloads by mtime; the rest of trajectory-constraint.json is re-read every turn'
 
 /**
- * 该 轨迹约束会话**可见**的工具面（tools ∪ `msm`）。
+ * 该轨迹会话**可见**的工具面（tools ∪ `msm`）。
  *
- * 🔴 `msm` 为什么自动加入：`msms` 非空意味着这个 轨迹约束 **有 MSM 通道**，
+ * 🔴 **返回值 `null` 有专门含义（D181，owner 2026-10-20 裁「不写当然不收窄」）**：
+ *
+ * | `tools` | `msms` | 返回 | 语义 |
+ * |---|---|---|---|
+ * | 缺省 | 缺省 | **`null`** | **不收窄任何工具面**（这条轨迹要的是别的设定，如只写 `resident`） |
+ * | `[]` | 缺省 | `{'msm'?}` 空/仅 msm | **全隐藏**（除恒可用的 `skill`） |
+ * | `['a']` | … | `{'a', …}` | 只给这些 |
+ *
+ * ⛔ **调用方不许把 `null` 当空集处理** —— 那正是 S196 被锁死的形态（D179(b)）。
+ * 判据是**字段在不在**，不是数组空不空。
+ *
+ * 🔴 `msm` 为什么自动加入：`msms` 非空意味着这个轨迹 **有 MSM 通道**，
  * 而 MSM 的唯一合法调用入口是 `msm` 工具（单入口纪律）——不给它 `msm` 就等于
  * 声明了一堆调不动的能力。⚠️ 这是**并集**，不是覆盖：`tools` 里显式写的照旧生效。
+ *
+ * @returns 白名单集合；**`null` = 不收窄**（调用方须显式判 `null`）
  */
-export function profileToolWhitelist(profile: TrajectoryConstraint | null | undefined): Set<string> {
+export function profileToolWhitelist(profile: TrajectoryConstraint | null | undefined): Set<string> | null {
+  if (!profile) return null
+  // 🔴 D181：`tools` 缺省**且** `msms` 缺省 ⇒ 这条轨迹没打算限制工具面
+  if (profile.tools === undefined && profile.msms === undefined) return null
   const out = new Set<string>()
-  for (const t of profile?.tools ?? []) out.add(t)
-  if ((profile?.msms?.length ?? 0) > 0) out.add('msm')
+  for (const t of profile.tools ?? []) out.add(t)
+  if ((profile.msms?.length ?? 0) > 0) out.add('msm')
   return out
 }
 
-/** 该 轨迹约束会话可 exec 的 MSM 白名单（`msm` 工具内部再过滤；独立于工具白名单） */
+/** 该轨迹会话可 exec 的 MSM 白名单（`msm` 工具内部再过滤；独立于工具白名单） */
 export function profileMsmWhitelist(profile: TrajectoryConstraint | null | undefined): Set<string> {
   return new Set(profile?.msms ?? [])
 }

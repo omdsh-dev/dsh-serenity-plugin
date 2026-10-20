@@ -25,7 +25,8 @@ import type { GenerateOptions, StreamChunk, UserMessage } from '@deepseek-ai/dsh
 import type { PromptAssembly } from '@deepseek-ai/dsh-system-prompt'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { sessionEvents } from '../trajectory/core.js'
-import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
+import { replacesDefaultIdentity } from '../trajectory/policy/profile.js'
+import { trajectoryConstraintFor } from '../trajectory/session.js'
 import { ACC_MESSAGE_KIND } from '../kernel/message-source.js'
 
 interface BootstrapSettings {
@@ -283,7 +284,7 @@ export function createEpochPromotion(
       const loopSid = (session as { id?: string }).id
       const loopCwd = (session as { header?: { cwd?: string } }).header?.cwd ?? process.cwd()
       const loopRoot = cccRootForCwd(loopCwd)
-      if (typeof loopSid === 'string' && (loopSid.startsWith('cheap-worker-') || (loopRoot !== null && isTrajectoryConstrained(loopRoot, loopSid)))) return { boundary: -1, promoted: true }
+      if (typeof loopSid === 'string' && (loopSid.startsWith('cheap-worker-') || (loopRoot !== null && replacesDefaultIdentity(trajectoryConstraintFor(loopRoot, loopSid))))) return { boundary: -1, promoted: true }
       // 子 agent（delegationDepth > 0）恒为完整目录（anchored 语义）
       const header = (session as { header?: { delegationDepth?: number } }).header
       if ((header?.delegationDepth ?? 0) > 0) return { boundary: -1, promoted: true }
@@ -431,7 +432,7 @@ export function registerBootstrap(ctx: Context): void {
       if (sid === undefined) return
       // cheap-worker worker / 轨迹约束会话：已有完整 ACC 提示词，不需要假首轮。
       // 🔴 2026-10-19：轨迹约束 判据 = 绑定轨迹有 `trajectory-constraint.json`（不再是 `轨迹约束-` 前缀）。
-      if (sid.startsWith('cheap-worker-') || isTrajectoryConstrained(root, sid)) return
+      if (sid.startsWith('cheap-worker-') || replacesDefaultIdentity(trajectoryConstraintFor(root, sid))) return
       if (depth === 0) {
         // resume/续跑不重插：会话里已有**真人**说过的话（注入源不算）
         if (hasUserMessageHistory(session)) return

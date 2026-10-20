@@ -82,9 +82,13 @@ describe('轨迹约束角色逻辑（trajectory-constraint-admin.ts——v1.30 �
     // 反向钉：新形态的提示词载体是 PROMPT.md，**不是**内联字段
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('PROMPT.md')
 
-    // ⑤ 双白名单都默认拒（schema 行就写明 register/deregister 必拒）
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('Two whitelists, both default-deny')
-    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('register/deregister always refused')
+    // ⑤ 双白名单：**缺省不收窄 / 显式空数组才全拒**
+    // 🔴 2026-10-20（D181）语义被 owner 裁定替换：旧标题 "both default-deny" 的前提是
+    //    "写文件就是要限制"，而 owner 现在要求「不写就是不设定，不应影响默认行为」
+    //    ⇒ 缺省**不再**默认拒。`register/deregister 恒拒` 那一条**不受影响**（它不是白名单语义），
+    //    故保留原断言不动 —— 只有真正被取代的那一条改了。
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('UNSET means unrestricted, EMPTY means nothing')
+    expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('register/deregister')
 
     // 🔴 纪律缺省翻成 **true**（工作台就是这条轨迹自己的身体）——本次重做的语义翻转之一，必须在教程里写明
     expect(TRAJECTORY_CONSTRAINT_GUIDE).toContain('all default to true')
@@ -221,7 +225,9 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: l
     expect(r.count).toBe(2)
     // 🔴 `name` 键名保留（消费方形状不变），但值 = **轨迹编码**（新模型里的身份）
     const qa = r.roles.find((x) => x.name === 'qa-readonly')!
-    expect(qa.model).toBe('(cheap-worker default)')
+    // 🔴 D179(c)/D182：没写 model 时印 `(unchanged)`**不是**新文案换皮 —— 旧文案
+    //    `(cheap-worker default)` 暗示"会被回退到杂工模型"，而实际行为是**不动**（S196 就是被它误导的）。
+    expect(qa.model).toBe('(unchanged)')
     expect(qa.msms).toEqual(['cognitive-qa'])
     expect(qa.tools).toEqual([])
     // 🔴 纪律缺省翻成全 true（旧版缺省全 false）——摘要必须展示**生效值**，不是声明值

@@ -804,14 +804,28 @@ describe('guards: 轨迹约束 工具白名单（F4b ⑧）', () => {
     }
   })
 
-  it('约束面在、但未授予任何能力（tools/msms 皆空）→ 保守 deny（白名单外全隐藏）', () => {
-    // 旧模型此处钉的是"轨迹约束会话未注册 ⇒ 保守 deny"。新模型里那条判据**已上移**到
-    // `trajectoryConstraintForSession`：判不出轨迹 = 返回 `null` = 不是 轨迹约束 ⇒ 守卫不判定（见下一条）。
-    // ⇒ 守卫层唯一还能钉的同类 fail-closed：**约束面存在却是空的** ⇒ 白名单外全 deny。
-    const empty = profile({ dirName: '2026-10-19--empty--t', code: 'empty' })
-    const d = decideGuard(base({ root: dir, toolName: 'read', trajectoryConstraint: empty }))
+  it('🔴 D181：tools/msms **字段缺省** ⇒ 不收窄（写文件≠要限制）', () => {
+    // 🔴 语义于 2026-10-20 被 owner 裁定替换（**不是放宽，是前提变了**）：
+    //    旧判据的前提是"写了 trajectory.json 就是要限制自己"，故当时把"白名单全空 ⇒ 保守 deny"
+    //    钉成 fail-closed。owner 现在确立的原则是 **「这个 json 统一存放各类结构化设定」**
+    //    ⇒ 写文件表达的是**任何一种设定**（常驻、章程指针、模型…），**不必然是限制**。
+    //    再按旧判据办，会将"我只想声明常驻"读成"我要禁止一切" —— S196 实测被静默锁死（D179(b)）。
+    //    ⇒ 判据改为按**字段在不在**区分，而不是按**数组空不空**区分（D181）。
+    const noLists = profile({ dirName: '2026-10-19--res--t', code: 'res', tools: undefined, msms: undefined })
+    expect(decideGuard(base({ root: dir, toolName: 'read', trajectoryConstraint: noLists })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md', trajectoryConstraint: noLists })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'container_admin', trajectoryConstraint: noLists })).kind).toBe('allow')
+  })
+
+  it('🔴 D181 反向钉：tools/msms **显式空数组** ⇒ 全隐藏（除恒可用的 skill）', () => {
+    // 同一个"空"，两种意思。**显式 `[]` 是用户明说"我一个都不给"**，必须仍然生效 ——
+    // 否则 D181 就把一条真正的限制能力一起削掉了。
+    const explicitEmpty = profile({ dirName: '2026-10-19--empty--t', code: 'empty', tools: [], msms: [] })
+    const d = decideGuard(base({ root: dir, toolName: 'read', trajectoryConstraint: explicitEmpty }))
     expect(d.kind).toBe('deny')
     expect(d.deny).toContain('轨迹约束 trajectory')
+    // 对照：skill 恒可用（豁免在白名单判定之前，不受本次语义变更影响）
+    expect(decideGuard(base({ root: dir, toolName: 'skill', trajectoryConstraint: explicitEmpty })).kind).toBe('allow')
   })
 
   it('非 轨迹约束会话（无约束面 / trajectoryConstraint=null）→ 不受白名单影响', () => {

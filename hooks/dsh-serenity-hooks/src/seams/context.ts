@@ -25,10 +25,59 @@ import { registerEntrySkillSection, registerCognitiveTrajectorySkillSection } fr
 import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding, syncTrajectoryConstraintToolVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory/core.js'
 import { readLastBound, appendBound } from '../trajectory/bound.js'
-import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
+import { isTrajectoryConstrained, replacesDefaultIdentity } from '../trajectory/policy/profile.js'
+import { trajectoryConstraintFor } from '../trajectory/session.js'
+import { syncTrajectoryModel } from '../trajectory/model-runtime.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 
-// ── 纯文本构建（可单测）──
+/** 最小 agent 形状（本文件只需 session.id 与 ctx） */
+type AgentLike = { session?: { id?: string }; ctx?: unknown }
+
+/**
+ * 该会话的轨迹**是否自带章程**（= 该不该旁路 ACC 身份类默认行为）。D183。
+ *
+ * 🔴 判据唯一入口 = `replacesDefaultIdentity`（见 `policy/profile.ts` 的判据表）。
+ * ⛔ 不要在这里写 `isTrajectoryConstrained` —— 那个只回答"有没有声明"，
+ * 用它做旁路就是 owner 2026-10-20 指出的那个 bug（只写 resident 也丢身份）。
+ */
+function hasTrajectoryOwnCharter(root: string, sessionId: string | undefined): boolean {
+  if (typeof sessionId !== 'string' || sessionId === '') return false
+  try {
+    return replacesDefaultIdentity(trajectoryConstraintFor(root, sessionId))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 该 agent 绑定的轨迹目录名（没有 ⇒ `null`）。
+ *
+ * 🔴 判据唯一入口 = `trajectoryConstraintFor`（它内部并取"持久绑定 + 内存注册表"两来源，
+ * 见 `policy/profile.ts` 的 R↓）。⛔ 不要在这里另写一套解析 —— 两份判据会漂。
+ */
+function trajectoryDirNameOf(agent: AgentLike, root: string): string | null {
+  const sessionId = agent.session?.id
+  if (typeof sessionId !== 'string' || sessionId === '') return null
+  try {
+    return trajectoryConstraintFor(root, sessionId)?.dirName ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 同步该 agent 的**模型热切换**（D182）。
+ *
+ * 🔴 把它做成"按 agent 解析目录名 ⇒ 交给 `trajectory/model-runtime`"的薄适配，
+ * 是为了让 `model-runtime` 保持**零 seams 依赖**（可独立单测）。
+ */
+function syncTrajectoryModelForSession(agent: AgentLike, root: string): void {
+  const dirName = trajectoryDirNameOf(agent, root)
+  if (dirName === null) return
+  syncTrajectoryModel(agent as never, root, dirName)
+}
+
+
 
 const DEFAULT_ENTRY_SKILL_MAX_CHARS = 30000
 
@@ -122,7 +171,9 @@ export function shouldAutoRestore(agent: Agent, root?: string | null): boolean {
   // 🔴 2026-10-19：判据从「id 前缀 `轨迹约束-`」改为「绑定轨迹有 `trajectory-constraint.json`」。
   //    ⇒ 需要 CCC 根；调用方通常已算出（seed/pre-step），没给就按会话 cwd 自己推导。
   const cccRoot = root !== undefined ? root : cccRootForCwd(session.header?.cwd ?? process.cwd())
-  if (cccRoot && isTrajectoryConstrained(cccRoot, session.id)) return false
+  // 🔴 D183（owner 2026-10-20）：判据是「**这条轨迹自带章程**」而不是「有没有 trajectory.json」。
+  //    只写 model/resident/白名单 的轨迹，仍应照常自动恢复宁静号会话 —— 那些 key 不取代身份。
+  if (cccRoot && hasTrajectoryOwnCharter(cccRoot, session.id)) return false
   return true
 }
 
@@ -164,9 +215,10 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     }
     if (!root) return
     const key = agentKey(agent)
-    // 轨迹约束：完全旁路（不注入 ACC 身份；CCC 提示词全替换）
-    // 🔴 2026-10-19：判据 = 绑定轨迹有 `trajectory-constraint.json`（不再是 id 前缀）
-    if (isTrajectoryConstrained(root, key)) return
+    // 轨迹：**只有自带章程**才完全旁路（不注入 ACC 身份；CCC 提示词全替换）
+    // 🔴 D183（owner 2026-10-20）：判据从「有 trajectory.json」收窄为「有 systemPromptFile/systemPrompt」。
+    //    只写 model／resident／白名单 的轨迹**照常拿 ACC 身份** —— 那些 key 不取代"我是谁"。
+    if (hasTrajectoryOwnCharter(root, key)) return
     // P0-1：agent 级 scoped 注册身份 section（最近层，抗 preset/动态插件同名 shadow）。
     // 与全局 section 同名 → scoped 胜出；全局保留为冷恢复/未走 session-start 的 fallback。
     registerEntrySkillSection(agent, root)
@@ -245,6 +297,14 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     } catch {
       /* 同上：可见性失败不阻断播种 */
     }
+    // 🆕 v1.78.0（D182）：模型运行时热切换 —— 只有该轨迹**声明了 model** 才装缝。
+    //    为什么放在播种处：`agent/created` 是**我们唯一能拿到 agent.ctx** 的时机，
+    //    而 `installModelSelection` 是 agent-scoped 的（装进 agent.ctx 才随会话销毁）。
+    try {
+      syncTrajectoryModelForSession(agent, root)
+    } catch {
+      /* 装配失败不阻断播种：模型不切换 ≠ 会话不可用（内部已告警） */
+    }
   }
 
   // agent/created：serial 事件（监听器被 await、抛错会使创建失败）⇒ CCC 内新会话播种。
@@ -279,10 +339,17 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         } catch {
           /* 可见性同步失败不阻断 step（守卫仍兜底拦截） */
         }
+        // 🆕 v1.78.0（D182）：**每轮**重读 `trajectory.json` 的 model 并刷新选择。
+        //    这是"运行时热加载"的落点：改文件 ⇒ 下一轮 `agent/request` 就拿到新路由，
+        //    与该会话"是谁创建的/什么时候创建的"**无关**（owner 2026-10-20 令）。
+        try {
+          syncTrajectoryModelForSession(agent, root)
+        } catch {
+          /* 模型刷新失败不阻断 step（保持上一轮的选择） */
+        }
       }
-      // 轨迹约束：完全旁路（不注入 ACC 身份 + 不注册 scoped section；守卫仍兜底约束）
-      // 🔴 2026-10-19：判据 = 绑定轨迹有 `trajectory-constraint.json`（不再是 id 前缀）
-      if (root && isTrajectoryConstrained(root, key)) return downstream
+      // 轨迹：只有**自带章程**才旁路身份注入（D183；见上方 seed 处同段说明）
+      if (root && hasTrajectoryOwnCharter(root, key)) return downstream
       // 🔴 v1.56.6：非 CCC 会话 ⇒ 隐藏全部 ACC 工具（**必须在 `if (root)` 之外**——
       //    那道分支只在 CCC 内执行，把本句放进去等于非 CCC 一条 restrict 都不发＝缺陷原样）。
       //    与 `syncSafeModeRestriction` 同点调用、同样每步无条件同步（会话可能在两态间迁移）。

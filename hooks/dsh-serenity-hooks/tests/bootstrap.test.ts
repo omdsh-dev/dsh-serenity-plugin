@@ -105,7 +105,7 @@ describe('bootstrap: createEpochPromotion 阶段机（对齐 anchored compaction
     //    并把会话登记进去，同时让 `session.header.cwd` 指向该 CCC 根（根解析靠 `.serenity` 标记）。
     const dir = mkdtempSync(join(tmpdir(), 'bootstrap-轨迹约束-'))
     writeFileSync(join(dir, '.serenity'), 'test')
-    const dirName = make轨迹约束Session(dir, 'sess-轨迹约束-1', 'qa', 轨迹约束Json({ tools: ['read'] }))
+    const dirName = make轨迹约束Session(dir, 'sess-轨迹约束-1', 'qa', 轨迹约束Json({ tools: [], systemPromptFile: 'charter.md' }))
 
     try {
       const p = createEpochPromotion(new Set(['tool/call', 'assistant/message']))

@@ -193,14 +193,18 @@ afterEach(() => {
 })
 
 describe('cognitive_trajectory：工具面', () => {
-  it('工具名 = cognitive_trajectory；action 必填且枚举 = COGNITIVE_TRAJECTORY_ACTIONS（10 个，含 archive/uid）', () => {
+  it('工具名 = cognitive_trajectory；action 必填且枚举 = COGNITIVE_TRAJECTORY_ACTIONS（11 个，含 archive/uid/resident）', () => {
     expect(tool.name).toBe('cognitive_trajectory')
     expect(tool.parameters.action?.required).toBe(true)
     expect(tool.parameters.action?.enum).toEqual([...COGNITIVE_TRAJECTORY_ACTIONS])
     // 🔴 2026-10-18：8 → 9（`archive`）→ **10**（`uid`：唯一标识符，独立于编码与命名）
-    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(10)
+    // 🔴 2026-10-20（D173 兑现）：10 → **11**（`resident`：常驻名单的只读发现动作）。
+    //    ⚠️ 它补的正是 v1.77.1 手册**曾承诺却不存在**的那个动作（D179(a)，S196 踩到）
+    //    ⇒ 这个计数不只是加一，它是一条"说明面终于与实现对齐"的证据。
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(11)
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('archive')
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('uid')
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('resident')
     for (const k of ['name', 'uid', 'summary', 'target', 'at', 'message', 'note', 'force', 'dryRun']) {
       expect(tool.parameters[k], `缺参数 ${k}`).toBeDefined()
     }

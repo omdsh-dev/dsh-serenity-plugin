@@ -150,14 +150,18 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
     // 旧泛化 deny "tool not allowed" 误导成"没权限"。区分：
     // 工具名命中 msms 清单 = 已授权的 MSM 但调用格式错 → 明确提示经 msm() 单入口。
     // 安全：提示不泄漏白名单外的东西（只说"它是 MSM，请走 msm"）。
-    if (profile.msms.includes(toolName)) {
+    // ⚠️ `msms` 现在可能是 `undefined`（D181：字段缺省 = 不收窄）⇒ 必须先兜空
+    if ((profile.msms ?? []).includes(toolName)) {
       return {
         deny: `"${toolName}" is a registered MSM, not a direct tool in this trajectory — call it through the msm tool: msm("${toolName}", ["<args>"]) (pass "--help" or inspect=true for usage)`,
         kind: 'deny',
       }
     }
+    // 🔴 D181（owner 2026-10-20 裁「不写当然不收窄」）：`null` = 这条轨迹没限制工具面
+    //    ⇒ **不进入白名单判定**（继续走后面的 safe-mode / 路径 / 黑名单检查）。
+    //    ⛔ 这里若把 `null` 当空集，会重演 S196 被静默锁死的形态（D179(b)）。
     const whitelist = profileToolWhitelist(profile)
-    if (!whitelist.has(toolName)) {
+    if (whitelist !== null && !whitelist.has(toolName)) {
       return { deny: 'tool not allowed in this 轨迹约束 trajectory', kind: 'deny' }
     }
   }
@@ -596,6 +600,20 @@ export function syncTrajectoryConstraintToolVisibility(agent: Agent, root: strin
     return
   }
   const allowed = profileToolWhitelist(profile)
+
+  // 🔴 D181：`null` = 不收窄 ⇒ **撤销**既有隐藏，回到无约束（与"删掉文件"同效）。
+  //    判据是**字段在不在**，不是数组空不空 —— 见 rules.ts 的 profileToolWhitelist。
+  if (allowed === null) {
+    if (existing !== undefined) {
+      try {
+        existing.dispose()
+      } catch {
+        /* disposer 已失效 */
+      }
+      trajectoryConstraintRestrictions.delete(sessionId)
+    }
+    return
+  }
 
   const resident = REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT)
   const tiers: Array<readonly string[]> = [REGISTERED_TOOLS, resident]

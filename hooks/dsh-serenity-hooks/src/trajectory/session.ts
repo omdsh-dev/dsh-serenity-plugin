@@ -541,6 +541,8 @@ export function trajectoryConstraintMsmGate(root: string, sessionId: string | un
     return { reject: 'register/deregister is not allowed in trajectory-constraint sessions' }
   }
   if (action === 'exec') {
+    // ⚠️ D181：`msms` 缺省 = 不收窄（该轨迹没限制 MSM）⇒ 放行；显式 `[]` 才全拒
+    if (profile.msms === undefined) return {}
     if (!name || !profile.msms.includes(name)) return { reject: 'MSM not allowed' }
     return {}
   }

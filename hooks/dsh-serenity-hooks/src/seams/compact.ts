@@ -28,7 +28,8 @@ import { DEFAULT_SERENITY_CONFIG_PATHS } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
 // 复用 context.ts 的完整 ACC 注入消息（简短头 + ACC 5 块 + CCC 顶层 skill 原文）
 import { accMessage } from './context.js'
-import { isTrajectoryConstrained } from '../trajectory/policy/profile.js'
+import { replacesDefaultIdentity } from '../trajectory/policy/profile.js'
+import { trajectoryConstraintFor } from '../trajectory/session.js'
 
 interface CompactRegistration {
   /** CCC 配置相对路径；缺省用 DEFAULT_SERENITY_CONFIG_PATHS */
@@ -63,7 +64,13 @@ export function registerCompactRetention(ctx: Context, opts: CompactRegistration
     // 🔴 2026-10-19：判据从「id 前缀 `轨迹约束-`」改为「绑定轨迹有 `trajectory-constraint.json`」——
     //    旧的 `if (isTrajectoryConstrained(...)) return` 在 `if (!root) return` **之前**，
     //    因此改动后必须挪到 root 之后（判据需要 CCC 根去定位轨迹目录）。
-    if (isTrajectoryConstrained(root, String((session as { id?: unknown }).id ?? ''))) return
+    // 只有在轨迹**自带章程**时才不重注入 ACC 身份（D183：只写 model/resident 不算旁路理由）。
+    const sid = String((session as { id?: unknown }).id ?? '')
+    try {
+      if (replacesDefaultIdentity(trajectoryConstraintFor(root, sid))) return
+    } catch {
+      /* 判据失败 ⇒ 保守照常重注入（缺一次身份锚点比丢整轮便宜） */
+    }
 
     try {
       // 简短身份锚点（完整身份由系统提示词层持续提供；S134 去重）

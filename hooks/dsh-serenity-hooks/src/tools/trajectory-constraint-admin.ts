@@ -49,26 +49,33 @@ becomes a 轨迹约束; delete it and it goes back to being an ordinary trajecto
 
 ── ${TRAJECTORY_CONSTRAINT_FILENAME} schema（限制面部分）──
   {
-    "model": "provider/model",          // optional; falls back to cheap-worker.defaultModel
-    "tools": ["read","grep","msm",...], // non-MSM toolbar whitelist — anything not listed is REMOVED from the schema
-    "msms":  ["msm-a","msm-b"],         // MSM whitelist — msm exec may only run these; register/deregister always refused
-    "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true },  // defaults TRUE (see below)
+    "model": "provider/model",          // optional; **不写 = 用会话当前模型**（不回退 cheap-worker；每轮生效）
+    "tools": ["read","grep","msm",...], // optional; **不写 = 不收窄**。显式 [] = 全隐藏（除 skill）
+    "msms":  ["msm-a","msm-b"],         // optional; **不写 = 不收窄**。register/deregister 恒拒
+    "cognitiveTrajectory": { "session": true, "keeper": true, "rebuild": true },  // 缺省 TRUE（见下）
+    "resident": { "serves": "..." },    // optional; 对外用途自述（见 trajectory-self 章）
     "cro": { "host": "<machine name>" } // optional: which machine may run this trajectory's CRO program
   }
+
+  🔴 **所有 key 都是可选的：不写 = 不设定 = 不影响默认行为**（owner 2026-10-20 裁决）。
+     ⛔ **"没写" ≠ "写了空数组"**：\`"tools": []\` 是"我一个都不给"（除 \`skill\` 外全隐藏）；
+        **不写 \`tools\`** 是"不收窄"。这两者在旧版被混成同一个意思，害人把自己锁死过。
 
   ⚠️ 提示词**不在这里**（新形态）：写 \`PROMPT.md\` 即可，**所有轨迹**都适用。
      旧字段 \`systemPromptFile\` / \`systemPrompt\` 属**兼容期**形态，仍在读、但不再推荐；
      两者同时存在时 \`PROMPT.md\` 让位规则见 \`trajectory/prompt.ts\`（此处不重复）。
 
-  ⚠️ **只想声明常驻、不想限制自己**：只写 \`"resident"\` 字段、**不写 tools/msms**。
-     空白名单 = **不收窄任何工具面**（见下方"两个默认"）—— 但请注意你仍因此"成为轨迹约束"，
-     只是没有实际限制。
+  ⚠️ **只想声明常驻、不想限制自己**：只写 \`"resident"\` 字段，**tools/msms 一个都不要写**。
+     ⇒ 不收窄任何工具面（见下方"两个默认"）。⛔ **不要**为了"空着"而写 \`"tools": []\` —— 那是全隐藏。
 
-── Two whitelists, both default-deny ──
-  - \`tools: []\` + non-empty \`msms\` = pure-MSM 轨迹约束 (the usual knowledge-QA shape)
-  - 空 \`tools\` + 空 \`msms\` = **无限制**（普通行为；常驻自述用的就是这一格）
+── Two whitelists: UNSET means unrestricted, EMPTY means nothing ──
+  - **字段缺省（没写）** = **不收窄**（这条轨迹只放别的设定，比如只写 resident）
+  - \`"tools": []\`（显式空数组）= **全隐藏**，除恒可用的 \`skill\`
+  - \`tools\` + non-empty \`msms\` = pure-MSM trajectory (the usual knowledge-QA shape)
   - non-empty \`msms\` ⇒ the \`msm\` tool is added automatically (the only entry point for MSMs)
-  - anything outside both lists is invisible in the schema, not merely rejected at call time
+  - anything outside a **declared** whitelist is invisible in the schema, not merely rejected at call time
+  🔴 判据是**字段在不在**，不是**数组空不空**（D181）。旧版把两者混成"空 = 全拒"，
+     于是「只想声明常驻」的人被静默锁死 —— 那是本仓实测踩过的坑（D179(b)）。
 
 ── cognitiveTrajectory: why the defaults are TRUE ──
   The workspace of a 轨迹约束 is its own SESSION.md. Setting these to false would cut it off from
@@ -121,7 +128,7 @@ export function validateTrajectoryConstraint(root: string): JsonValue {
     if (!hasTrajectoryPromptOrLegacy) {
       issues.push(`trajectory "${p.code}": no trajectory prompt (add ${TRAJECTORY_PROMPT_FILENAME} in the trajectory dir — recommended — or the legacy systemPromptFile/systemPrompt)`)
     }
-    for (const m of p.msms) {
+    for (const m of p.msms ?? []) {
       if (!registered.has(m)) issues.push(`trajectory "${p.code}": msms "${m}" is not registered in mech-registry.json`)
     }
     if (p.model && allowedModels && !allowedModels.has(p.model)) {
@@ -137,19 +144,33 @@ export function listTrajectoryConstraintSummary(root: string): JsonValue {
   if (profiles.length === 0) {
     return { roles: [], note: `no 轨迹约束 trajectories in this CCC (no trajectory has ${TRAJECTORY_CONSTRAINT_FILENAME})` }
   }
-  const items = profiles.map((p) => ({
-    // ⚠️ 键名沿用 `name`（面板/工具回执形状不变），值 = **轨迹编码**（新模型里的身份）
-    name: p.code,
-    dirName: p.dirName,
-    model: p.model ?? '(cheap-worker default)',
-    msms: p.msms,
-    tools: p.tools,
-    cognitiveTrajectory: constraintCognitiveTrajectory(p) satisfies Record<string, boolean>,
-    // 🔴 两条来源都要报（v1.72.0 起 `PROMPT.md` 是新形态且优先）：只报旧形态会让
-    //    "只写了 PROMPT.md 的轨迹"显示成 `none` —— 那是读数器过时，不是配置缺失。
-    promptSource: constraintSystemPromptSource(p, hasTrajectoryPrompt(root, p.dirName)),
-    ...(p.systemPromptFile ? { systemPromptFile: p.systemPromptFile } : {}),
-  }))
+  const items = profiles.map((p) => {
+    /**
+     * 🔴 三个字段的读数必须**如实表达三态**（D179(c)＋D181，S196 就是被这里的旧读数误导的）。
+     *
+     * | 文件里 | 打印 | 为什么不能印别的 |
+     * |---|---|---|
+     * | 没写 `model` | `'(unchanged)'` | 旧文案印 `'(cheap-worker default)'` ⇒ **暗示会回退到杂工模型**，而实际是**不动**。那是一次**空头承诺**：用户以为要被换模型，其实是误解 |
+     * | 没写 `tools`/`msms` | `'(unrestricted)'` | 缺省 = **不收窄**（D181）。印 `[]` 会让人以为"我被全隐藏了" |
+     * | 写了 `[]` | `'[]'` | 显式空数组 = **全隐藏**，与上一行**恰好相反**，必须能一眼分辨 |
+     */
+    const wl = (v: string[] | undefined, whenUnset: string): JsonValue => (v === undefined ? whenUnset : v)
+    return {
+      // ⚠️ 键名沿用 `name`（面板/工具回执形状不变），值 = **轨迹编码**（新模型里的身份）
+      name: p.code,
+      dirName: p.dirName,
+      model: p.model ?? '(unchanged)',
+      msms: wl(p.msms, '(unrestricted)'),
+      tools: wl(p.tools, '(unrestricted)'),
+      // 常驻自述（D173）：没写就不出现 —— 它是"我欢迎被找到"的声明，不是状态位
+      ...(p.resident !== undefined ? { resident: p.resident.serves !== undefined ? p.resident.serves : '(no serves)' } : {}),
+      cognitiveTrajectory: constraintCognitiveTrajectory(p) satisfies Record<string, boolean>,
+      // 🔴 两条来源都要报（v1.72.0 起 `PROMPT.md` 是新形态且优先）：只报旧形态会让
+      //    "只写了 PROMPT.md 的轨迹"显示成 `none` —— 那是读数器过时，不是配置缺失。
+      promptSource: constraintSystemPromptSource(p, hasTrajectoryPrompt(root, p.dirName)),
+      ...(p.systemPromptFile ? { systemPromptFile: p.systemPromptFile } : {}),
+    }
+  })
   return { roles: items, count: items.length }
 }
 

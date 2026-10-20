@@ -83,22 +83,47 @@ const RESIDENT = `── 常驻：自己声明"欢迎别人来麻烦我"（traje
      只写半个（有字段、没 serves）等于把自己挂上去却不说能干什么 —— 那比不写更坏，
      因为别人会来问，然后发现问错了人。
 
-  谁能看见：通过 cognitive_trajectory 的常驻名单动作按需查询。
+  谁能看见：\`cognitive_trajectory\` 的 **\`resident\` 动作**（只读发现）。
      **它不进系统提示词**（不占每个请求的 token）—— 只在有人真的要找人时才读。
-     这是 owner 2026-10-20 的裁决：说明类信息按需取，不常驻在上下文里。`
+     这是 owner 2026-10-20 的裁决：说明类信息按需取，不常驻在上下文里。
+
+  🔴 它**不碰任何默认行为**（D183）：只写 resident 的轨迹，ACC 身份注入、首轮锚定、
+     自动恢复、compact 重注入 **全部照常**。常驻管的是**被找到**，不是**不被销毁**。`
+
+/**
+ * 🔴 **所有 key 都是可选的**（owner 2026-10-20 逐字：「不写就是不设定 不应影响默认行为」）。
+ *
+ * 这一节存在的理由：**读者最需要的不是"有哪些字段"，而是"不写某字段会怎样"**。
+ * 旧版手册在这里写错过两件事（`空白名单 = 不收窄` 当时代码里是"全隐藏"；
+ * 没写 model 当时会"回退杂工模型"）⇒ 这两条现在都已在**实现里**改对了，
+ * 本节按**改完的实现**逐字写。
+ */
+const ALL_KEYS_OPTIONAL = `── 🔴 所有 key 都是可选的：不写 = 不设定 = 不影响默认行为 ──
+
+  这条是总规则（owner 2026-10-20 裁决）。下面逐字段说清"不写会怎样"：
+
+  | 字段 | 不写它 | 生效时机 |
+  |---|---|---|
+  | \`model\` | 用会话当前的模型（**不会**回退到 cheap-worker） | **每轮**（改文件下一轮即生效） |
+  | \`tools\` | **不收窄**工具面 | 每轮 |
+  | \`msms\` | **不收窄** MSM 面 | 每轮 |
+  | \`resident\` | 不出现在常驻名单里（不参与"被找"） | 每轮 |
+  | \`cognitiveTrajectory\` | 三项纪律全参与（true） | 每轮 |
+  | \`systemPromptFile\` / \`systemPrompt\` | 用 ACC 的通用身份（**不替换**） | 保存即生效 |
+
+  🔴 **"没写" 与 "写了空数组" 是两种意思**：
+      \`"tools": []\`（显式空数组）= **我一个都不给** ⇒ 除 \`skill\` 外全部工具被隐藏。
+      **不写 \`tools\`** = **不收窄** ⇒ 工具面完全不变。
+      ⇒ 想只声明常驻？那就**只写 resident**，别的键一个都不要写。
+
+  🔴 **写 \`trajectory.json\` 本身不改任何默认行为** —— 它只是"我把设定放这儿了"。
+      只有当某个 key **真的取代了默认**（目前唯一一个是自带章程 systemPrompt*）时，
+      这条轨迹才不再注入 ACC 身份。其余字段都不影响。`
 
 /**
  * 约束面 —— 只讲"怎么开启"，正文指向另一章。
  */
 const CONSTRAINT_POINTER = `── 想限制自己（白名单 / 模型 / 纪律参与项）──
-
-  写 \`trajectory.json\` 即成为**轨迹约束**（判据是**文件存在**，不是某个字段存在）。
-  删掉它 ⇒ 当场退回普通轨迹。
-
-  ⚠️ 一个必须知道的连带后果：**写 trajectory.json 会把我变成受约束的轨迹**。
-     所以如果你只想"描述自己"（章程、常驻），**不需要**建这个文件 ——
-     章程走 PROMPT.md；常驻字段确实也在这个文件里，但**只写 resident、不写 tools/msms**
-     时，白名单为空 = 不收窄任何工具面（见下一章"两个默认"）。
 
   schema、双白名单、纪律参与项的完整说明 → container_admin config docs trajectory-constraint`
 
@@ -108,9 +133,10 @@ const CONSTRAINT_POINTER = `── 想限制自己（白名单 / 模型 / 纪律
 const VERIFY = `── 写完之后怎么验（别只看文档，要能机械判定）──
 
   章程生效了吗    改 PROMPT.md 后**在同一会话里**看下一轮的系统提示词段是否变化（保存即生效）
-  我是轨迹约束吗  container_admin config list  —— 我的编码出现在列表里即成立
-  配置合法吗      container_admin config validate  —— msms 均已注册 / model 在可用表里 / 提示词非空
-  常驻被看见了吗  cognitive_trajectory 的常驻名单动作 —— 我出现在名单里，且 serves 可读
+  我声明了什么    container_admin config list  —— 逐轨迹列出 model/tools/msms 的**生效值**；
+                  没写的字段印 \`(unchanged)\` / \`(unrestricted)\`，不是伪装成某个默认值
+  配置合法吗      container_admin config validate  —— msms 均已注册 / model 在可用表里
+  常驻被看见了吗  cognitive_trajectory action=resident —— 我出现在名单里，且 serves 可读
 
   ⚠️ 以上四项都是**读取当前真实状态**，不是"保存成功"的回执。保存成功 ≠ 生效（本仓反复踩过）。`
 
@@ -130,6 +156,8 @@ export const TRAJECTORY_SELF_GUIDE = [
   CHARTER,
   '',
   RESIDENT,
+  '',
+  ALL_KEYS_OPTIONAL,
   '',
   CONSTRAINT_POINTER,
   '',

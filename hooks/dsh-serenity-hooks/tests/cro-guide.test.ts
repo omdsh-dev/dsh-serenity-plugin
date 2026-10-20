@@ -72,7 +72,8 @@ describe('CRO 指南: 出口形状（guide 老套路，设计 §8.1）', () => {
   it('🔴 动作集合含 cro-guide（动作面 = 单一真相源，schema enum 由它派生）', () => {
     expect([...COGNITIVE_TRAJECTORY_ACTIONS]).toContain('cro-guide')
     // 9 → 10（2026-10-18 新增 `uid`：认知轨迹的唯一标识符，独立于编码与命名）
-    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(10)
+    // 10 → 11（2026-10-20 新增 `resident`：常驻名单只读动作，D173 兑现）
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(11)
   })
 
   it('指南非空且是多行正文（不是占位符）', () => {

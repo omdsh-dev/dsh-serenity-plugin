@@ -390,11 +390,11 @@ describe('registerBootstrap: fake-initial-turns —— 注入两轮 ＋ 短路�
     expect(queue).toHaveLength(0)
   })
 
-  it('cheap-worker / 轨迹约束会话 ⇒ 不注入（轨迹自带完整提示词）', () => {
+  it('cheap-worker / 自带章程的轨迹 ⇒ 不注入（轨迹自带完整提示词）', () => {
     const ctx = fakeCtx()
     registerBootstrap(ctx as never)
-    // 🔴 2026-10-19：轨迹约束 判据 = 绑定轨迹有 `trajectory-constraint.json` ⇒ 前缀不再够用，必须先造真轨迹。
-    make轨迹约束Session(dir, '轨迹约束-qa-boot-2', 'qa-boot-2', 轨迹约束Json({}), 'boot')
+    // 🔴 2026-10-20 D183：判据 = 「**自带章程**」；只写 tools/model/resident 不触发旁路。
+    make轨迹约束Session(dir, '轨迹约束-qa-boot-2', 'qa-boot-2', 轨迹约束Json({ systemPromptFile: 'charter.md' }), 'boot')
     for (const id of ['cheap-worker-worker-3', '轨迹约束-qa-boot-2']) {
       const { agent, queue } = inboxAgent(id, { header: { cwd: dir }, events: [] })
       fireInserted(ctx, agent)

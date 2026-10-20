@@ -886,10 +886,26 @@ describe('trajectory-session: 约束面派生纯函数（config 层）', () => {
     expect(constraintCognitiveTrajectory(profile)).toEqual({ session: true, keeper: false, rebuild: true })
   })
 
-  it('无约束面（null）⇒ 空集合 / 全 false（调用方自行决定降级）', () => {
-    expect([...profileToolWhitelist(null)]).toEqual([])
+  it('无约束面（null）⇒ 白名单 **null**（= 不收窄）/ MSM 空集 / 全 false', () => {
+    // 🔴 D181：`profileToolWhitelist` 的返回类型改成 `Set<string> | null`，
+    //    `null` 专门表示"不限制工具面"。这里钉的是"没有约束面 ⇒ 也不限制"。
+    expect(profileToolWhitelist(null)).toBeNull()
     expect([...profileMsmWhitelist(null)]).toEqual([])
     expect(constraintCognitiveTrajectory(null)).toEqual({ session: false, keeper: false, rebuild: false })
+  })
+
+  it('🔴 D181：字段**缺省** ⇒ 白名单 null（不收窄）；**显式空数组** ⇒ 空集（全隐藏）', () => {
+    // 同一个"空"，两种意思 —— 这是 owner 2026-10-20 那条令的机械判据。
+    const unset = profileOf('unset', 轨迹约束Json({ model: 'p/m' }))
+    expect(profileToolWhitelist(unset)).toBeNull()
+
+    const explicitEmpty = profileOf('explicit-empty', 轨迹约束Json({ tools: [], msms: [] }))
+    expect(profileToolWhitelist(explicitEmpty)).not.toBeNull()
+    expect([...profileToolWhitelist(explicitEmpty)!]).toEqual([])
+
+    // 只写 tools 不写 msms ⇒ 仍是"限制态"（给了 tools 就是明确的白名单），但 msm 通道不自动开
+    const toolsOnly = profileOf('tools-only', 轨迹约束Json({ tools: ['read'] }))
+    expect([...profileToolWhitelist(toolsOnly)!].sort()).toEqual(['read'])
   })
 
   it('resolveConstraintSystemPrompt：file 优先于 inline；缺失抛错（调用方降级）', () => {

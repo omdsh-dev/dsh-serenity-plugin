@@ -88,17 +88,26 @@ describe('compact: 压缩保留（P2）', () => {
     expect(injected.length).toBe(2)
   })
 
-  it('轨迹约束会话（绑定轨迹**有 `trajectory-constraint.json`**）→ 不重注入 ACC 身份（F4b 旁路：CCC 提示词全替换）', () => {
-    // 🔴 2026-10-19：判据不再是 id 前缀 `轨迹约束-`，而是「会话绑定的轨迹有 `trajectory-constraint.json`」
-    //    （`seams/compact.ts` 的 `isTrajectoryConstrained(root, id)`；该判据需要 CCC 根，故 seam 里
-    //    它被挪到了 `if (!root) return` **之后**）⇒ 夹具必须真造一条 轨迹约束轨迹并登记会话。
+  it('轨迹**自带章程**（`systemPromptFile`）→ 不重注入 ACC 身份（D183 旁路判据）', () => {
+    // 🔴 2026-10-20 D183（owner：「所有 key 都是可选的；不写就是不设定 不应影响默认行为」）：
+    //    旁路判据从「有 trajectory-constraint.json」收窄为「**自带章程**」。
+    //    只用 `tools: []`（只收窄能力）**不再**触发旁路 —— 那不改"我是谁"。
     const { emit, injected } = captureListener()
-    make轨迹约束Session(dir, 'sess-轨迹约束-compact', 'qa', 轨迹约束Json({ tools: [] }))
+    make轨迹约束Session(dir, 'sess-轨迹约束-compact', 'qa', 轨迹约束Json({ tools: [], systemPromptFile: 'charter.md' }))
     emit({ id: 'sess-轨迹约束-compact' }, { type: 'compaction/end', data: { compactionId: 'c6', turn: 1 } })
     expect(injected.length).toBe(0)
     // 反控：id 带 `轨迹约束-` 前缀但**没挂轨迹** ⇒ 按普通会话处理（会重注入）
     // （这格把判据钉在轨迹上；否则"凡 轨迹约束-* 都旁路"的旧实现照样绿）
     emit({ id: '轨迹约束-legacy-looking-id' }, { type: 'compaction/end', data: { compactionId: 'c7', turn: 1 } })
+    expect(injected.length).toBe(1)
+  })
+
+  it('🔴 D183 反向钉：只写 tools（不写章程）⇒ **照常重注入** ACC 身份', () => {
+    // 这一格是 owner 那条令的机械判据：**声明了但没取代身份** ⇒ 默认行为一点不许变。
+    // 若有人把判据改回 `isTrajectoryConstrained`，本格立刻变红。
+    const { emit, injected } = captureListener()
+    make轨迹约束Session(dir, 'sess-tools-only', 'tools-only', 轨迹约束Json({ tools: ['read'] }))
+    emit({ id: 'sess-tools-only' }, { type: 'compaction/end', data: { compactionId: 'c8', turn: 1 } })
     expect(injected.length).toBe(1)
   })
 })

@@ -42,6 +42,12 @@ import { PLUGIN_SOURCE } from '../kernel/message-source.js'
  */
 function isExternalFaceSession(sessionId: string | undefined, root: string): boolean {
   if (!sessionId) return false
+  // 🔵 **这里刻意仍用 `isTrajectoryConstrained`（文件存在），不用 D183 的
+  //    `replacesDefaultIdentity`** —— 两个判据回答**不同的问题**：
+  //    · 身份旁路问「它自带章程吗」（自带 ⇒ 不该再注入 ACC 身份）
+  //    · 本函数问「它是不是对外面」（输出守卫要不要保护隐私）
+  //    受约束的轨迹（IM 会话）**没有**自带章程，但**确实是**对外面 ⇒ 用身份判据会把
+  //    它们的输出守卫误关掉，那是一次静默的隐私回归。
   return isTrajectoryConstrained(root, sessionId) || sessionId.startsWith('acp-') || sessionId.startsWith('rebuild-')
 }
 

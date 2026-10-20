@@ -1,3 +1,142 @@
+## v1.78.0 — 2026-10-20（🔴🔴 **所有 key 都是可选的：不写 = 不设定 = 不影响默认行为** ＋ `model` 运行时热加载 ＋ `resident` 落地）
+
+**来源**：owner 2026-10-20 三条令（逐字）——
+> 「我认为这个 json 应当**统一存放各类结构化设定**。站在这个基础上统一设计。」
+> 「认知轨迹作为统一概念 **设定不应根据入口不同而有变化 所以应当直接生效 运行时热加载**。」
+> 「注意 这个 `trajectory.json` 中**所有 key 都是可选的；不写就是不设定 不应影响默认行为**。」
+> 「不写当然不收窄」
+
+**性质**：**语义级修正**，不是功能堆叠。三件事共用一条判据：
+**判据是"字段在不在"，不是"文件在不在"、也不是"数组空不空"。**
+
+---
+
+### 一、🔴🔴 最重的一处：`isTrajectoryConstrained()` 曾用"文件存在"旁路掉 7 处默认行为
+
+**旧行为**：轨迹目录里有 `trajectory.json` ⇒ 下面这些**全部关掉**：
+`shouldAutoRestore` ／ ACC 身份播种 ／ `agent/pre-step` 身份注入 ／ compact 重注入 ／
+whoami 首轮 ／ first-anchor ／（共 7 处）。
+
+⇒ **只写一句 `resident` 就会连带丢掉 ACC 身份与首轮锚定** —— 完全超出用户预期。
+这正是 owner 说的"不应影响默认行为"。
+
+**新判据**（`replacesDefaultIdentity()`，`trajectory/policy/profile.ts`）：
+
+> 只有**自带章程**（`systemPromptFile` / `systemPrompt`）才旁路 ACC 身份 ——
+> 因为那才是"这条轨迹的提示词整段取代了默认"。
+
+| key | 取代默认身份？ | 为什么 |
+|---|---|---|
+| `tools` / `msms` | **否** | 收窄**能力**，"我是谁"没变 |
+| `model` | **否** | 换的是执行的模型，不是身份 |
+| `resident` | **否** | 纯对外自述 |
+| `cro.host` | **否** | 管哪台机器跑 CRO |
+| `cognitiveTrajectory` | **否** | 纪律是叠加，不是取代 |
+| `systemPromptFile` / `systemPrompt` | **是** | 自带章程 ⇒ 取代 |
+| `PROMPT.md`（目录里） | **否** | 它**追加**在 ACC 身份之外（v1.72.0 机制） |
+
+🔴 **一处刻意例外**：`guard/seam.ts` 的「对外面」判定**仍用文件存在**。
+它问的是"要不要保护隐私"，不是"它是谁"。改用身份判据会**静默关掉 IM 轨迹的输出守卫**。
+
+---
+
+### 二、`model`：从「装配时读一次」→ **每轮求值 ＋ 运行时热切换**
+
+**旧行为**：`model` 的**唯一消费点**是建 agent（`createTrajectoryAgent`），
+而它**唯一调用方**是 IM 入站 ⇒ **对已存在的 web 会话完全不生效**，而 `config list`
+把它印成 `(cheap-worker default)`，看上去像统一设定。
+⇒ **同一个字段在 A 入口生效、在 B 入口不生效** —— 正是 owner 要禁的形态。
+
+**新实现**（`trajectory/model-runtime.ts`，新文件）：接宿主**自带**的
+`installModelSelection(agentCtx, selection)`（挂 `system-prompt/assemble` ＋ **`agent/request`** ＋ `agent/pre-step`）。
+`selection.current` 由**每轮重读 `trajectory.json`** 的求值器提供 ⇒ 改文件下一轮即生效，
+**与该会话是谁创建的无关**。
+
+🔴 **跨宿主档位已实测**：`_tmp/host-*` 全部 **10 个**快照（`0.1.5-rc.1` … `0.2.1-rc.2`）
+该导出**全部存在且签名一致** ⇒ 无需宿主升级、无需分档分支。
+
+**三条硬边界**：
+1. **没写 `model` ⇒ 不装这条缝**。⛔ **绝不回退 `cheap-worker.defaultModel`** ——
+   那个回退把"我想声明自述"变成"我被降级到杂工模型"，而用户完全不会预期（S196 实测踩到）。
+2. 切换会留下宿主的 `[model changed: …]` 提示 —— **特性不是噪声**（否则模型不知道自己换了）。
+3. 模型名非法 / 宿主取不到该能力 ⇒ **响亮告警 ＋ 不切**，绝不静默停在旧模型。
+
+⚠️ 用的是 `createRequire(import.meta.url)` 动态取（本仓是 ESM）：
+`@deepseek-ai/dsh-agent` 是 `peerDependencies`，改成顶层运行时 import 会把它变成**硬依赖** ——
+宿主没装好时**整个插件起不来**，那比"模型不切换"严重得多。取不到 ⇒ 告警 ＋ 保持原模型。
+
+---
+
+### 三、白名单：**缺省 = 不收窄**，**显式 `[]` = 全隐藏**
+
+**旧行为**：任何 `trajectory.json` ⇒ 清白名单 ⇒ **除 `skill` 外全 deny**。
+`guards.test.ts` 当时把这条钉成 fail-closed 判据 —— 而它的**前提**是"写了文件就是要限制自己"。
+
+**owner 现在确立的原则是「统一设定面」** ⇒ 写文件表达的是**任何一种设定**，不必然是限制。
+⇒ 旧判据不是"被违反"，而是**前提被更高原则取代**。这一点已写进测试注释，
+否则下一个人会以为是让步。
+
+| 文件里 | 语义 |
+|---|---|
+| 字段**不存在** | **不收窄** |
+| `"tools": []`（显式空数组） | **全隐藏**（除恒可用的 `skill`） |
+| `["a","b"]` | 只给这些 |
+
+**类型改动**：`tools` / `msms` 从 `string[]` 改为 `string[] | undefined`；
+`profileToolWhitelist()` 返回 `Set<string> | null`（`null` = 不收窄）。
+⛔ **调用方不许把 `null` 当空集** —— 那正是 S196 被静默锁死的形态。
+
+---
+
+### 四、`resident` 落地（D173 的兑现口 ＋ 一处说明面失真被修正）
+
+新增**只读**动作 `cognitive_trajectory action=resident`（动作面 10 → **11**）。
+列出全部写了 `resident.serves` 的轨迹；**只写半个**（有字段没 serves）的单独数出来。
+
+🔴 **它还修掉一处失真**：v1.77.1 的手册曾承诺"通过 `cognitive_trajectory` 的常驻名单动作按需查询"，
+而**那个动作当时并不存在**（S196 实测发现）。⇒ 现在它真的存在。
+**教一个不存在的入口，比不教更坏** —— 这条教训已登记为判据。
+
+🔴 **纯读**：不写任何文件、不碰注册表、**不碰 `wake/scheduler.ts`**。
+D173 的判据：「常驻」管的是**被找到**，不是**不被销毁**。
+
+---
+
+### 五、`config list` 的三态读数（S196 就是被旧读数误导的）
+
+| 文件里 | 旧打印 | 新打印 |
+|---|---|---|
+| 没写 `model` | `(cheap-worker default)` ← **空头承诺** | `(unchanged)` |
+| 没写 `tools`/`msms` | `[]` ← 让人以为被全隐藏 | `(unrestricted)` |
+| 写了 `[]` | `[]` | `[]`（与上一行**必须能分辨**） |
+
+---
+
+### 六、测试
+
+- 新增 `tests/trajectory/model-runtime.test.ts`（8 例）／`tests/trajectory/resident.test.ts`（10 例）。
+- **变异检验已完成（判据承重）**：把 `replacesDefaultIdentity` 短路成恒 `true`
+  ⇒ 3 条反向钉（compact ／ context ／ context-register）**当场转红**；恢复后全绿。
+- 语义被取代的旧判据逐条改写，**每条注释里写明"原来的前提是什么、被哪条令取代"**：
+  `guards.test.ts`（空白名单）／`trajectory-session-branches.test.ts`（缺 msms）／
+  `trajectory-constraint-admin.test.ts`（`both default-deny` 标题 ＋ `(cheap-worker default)`）／
+  `trajectory-session.test.ts`（`profileToolWhitelist(null)` 返回 `null`）／
+  `cro-guide.test.ts` ＋ `trajectory-tool.test.ts`（动作数 10 → 11）。
+- 4 处「旁路」用例的夹具从 `tools: [...]` 改为 `systemPromptFile: 'charter.md'`
+  （真造出"自带章程"这一前提），并各配**反向钉**：只写 tools ⇒ 照常注入 / 照常恢复。
+
+**六项门禁**：typecheck ✓｜typecheck-host 0.2.1-rc.2 ✓｜test **190 文件 / 3002 例** ✓｜
+coverage **95.5%** ✓｜build（`.d.ts` 122）｜pack-check（154 文件）。
+
+---
+
+### 七、说明面同批重写（owner 令「调整实现和说明」）
+
+`trajectory-self` 新增「**所有 key 都是可选的**」整节（逐字段的"不写会怎样"表）；
+`trajectory-constraint` 的 schema 每行标出生效时机，并说清"没写 ≠ 写了空数组"。
+
+---
+
 ## v1.77.1 — 2026-10-20（说明面重构：**「描述自己」独立成章** ＋ `cognitive_trajectory` 说明按 EAP 五层重写）
 
 **性质**：**说明面（文档/工具描述）重构，零行为变更**。不改任何机制、不改任何落盘格式、不改任何判据。

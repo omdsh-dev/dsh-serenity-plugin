@@ -347,14 +347,23 @@ describe('trajectory-session: 门控函数的边角（轨迹没有 trajectory-co
     expect(trajectoryConstraintParticipates(dir, 'sess-explicit', 'keeper')).toBe(true)
   })
 
-  it('🔴 D2：`trajectory-constraint.json` 里**没有 msms 键** ⇒ `exec` 拒绝（缺省空表，不是放行）', () => {
-    // 真故障形态：约束面只写 tools 不写 msms（**合法且常见**——只用平台工具、不用 MSM）。
-    // ⚠️ 必须走**真 `trajectory-constraint.json`**（`make轨迹约束Session` 会写盘），不能用内存替身：
-    //    读侧 `strList` 把缺项归一成 `[]`，正是要兜的形态。
+  it('🔴 D181/D183 取代 D2：**没写 msms 键** ⇒ 不设定 ⇒ `exec` 放行（不是"缺省空表=拒绝"）', () => {
+    // 🔴 **这条判据被 owner 2026-10-20 的令取代了，不是被"放宽"**：
+    //    旧 D2 的前提是"写了 trajectory.json 就是来限制的" ⇒ 于是把"缺 msms"读成"一个都不给"。
+    //    owner 现在定的是「**所有 key 都是可选的；不写就是不设定，不应影响默认行为**」
+    //    ⇒ 「只用平台工具、不用 MSM」的轨迹**不该**被读成"MSM 全禁"（那会把一条合法配置变成锁死）。
+    //    判据改成按**字段在不在**区分（D181），与 tools 同一套语义。
     make轨迹约束Session(dir, 'sess-no-msm', 'no-msm-role', 轨迹约束Json({ tools: ['read'] }))
 
-    // 🔴 判据 = **拒绝**（不是静默放行）。缺项若被写成 `?? ['*']` 或漏掉，这里就会放行。
-    expect(trajectoryConstraintMsmGate(dir, 'sess-no-msm', 'exec', 'anything').reject).toContain('MSM not allowed')
+    // 缺键 ⇒ 不设定 ⇒ 放行
+    expect(trajectoryConstraintMsmGate(dir, 'sess-no-msm', 'exec', 'anything')).toEqual({})
+  })
+
+  it('🔴 D181 反向钉：**显式 `"msms": []`** ⇒ 全拒（用户明说"一个都不给"）', () => {
+    // 同一个"空"，两种意思。显式空数组是**真限制**，必须仍然生效 ——
+    // 否则 D181 就把 MSM 白名单这条真能力一起削掉了。
+    make轨迹约束Session(dir, 'sess-empty-msm', 'empty-msm-role', 轨迹约束Json({ tools: ['read'], msms: [] }))
+    expect(trajectoryConstraintMsmGate(dir, 'sess-empty-msm', 'exec', 'anything').reject).toContain('MSM not allowed')
   })
 
   it('D3（正控）：`trajectory-constraint.json` **有** msms 声明且命中 ⇒ 放行 ⇒ 与 D2 成对', () => {

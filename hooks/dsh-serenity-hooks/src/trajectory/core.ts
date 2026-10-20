@@ -74,11 +74,14 @@ import { readTrajectoryFile } from './policy/files.js'
  *   （`<轨迹目录>/continuous-re-occurrence.ts`）⇒ 「怎么写它」是**逐轨迹**的知识，
  *   而**管轨迹的人正是用本工具的人**；挂这儿 = 设计 §9-5 的"**既有 guide 位置、不新增域**"。
  *   ⚠️ 本动作**纯读**（输出指南正文，不碰 fs、不碰注册表）。
+ * 2026-10-20（D173 兑现，owner 令）：「常驻」= 轨迹的**自我声明**，落地为 **`resident`** 只读动作。
+ *   判据：它管的是**被找到**，不是**不被销毁** ⇒ 纯读、不碰生命周期、不进系统提示词。
+ *   ⚠️ 这也修正了 v1.77.1 的一处说明面失真（手册曾描述一个**不存在**的动作，D179(a)）。
  */
-type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'uid' | 'send-now' | 'send-later' | 'cro-guide'
+type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'uid' | 'send-now' | 'send-later' | 'cro-guide' | 'resident'
 
 export const COGNITIVE_TRAJECTORY_ACTIONS: readonly CognitiveTrajectoryAction[] = [
-  'list', 'show', 'create', 'use', 'rebuild', 'archive', 'uid', 'send-now', 'send-later', 'cro-guide',
+  'list', 'show', 'create', 'use', 'rebuild', 'archive', 'uid', 'send-now', 'send-later', 'cro-guide', 'resident',
 ]
 
 /**

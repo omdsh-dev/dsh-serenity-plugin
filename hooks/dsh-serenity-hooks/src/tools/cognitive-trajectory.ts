@@ -69,6 +69,7 @@ import {
   type ActiveSessionInfo,
   type CreateSessionResult,
 } from '../trajectory/core.js'
+import { listResident } from '../trajectory/resident.js'
 
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
@@ -291,7 +292,8 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         'DELIVERY (sends one message to ANOTHER cognitive trajectory; your binding is unchanged):',
         'send-now (deliver RIGHT NOW; the target needs no prior setup — if it has no live session, one is created and bound automatically) /',
         'send-later (one future instant + one message; fire-and-forget, and it does NOT auto-create a target).',
-        'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot)',
+        'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot) /',
+        'resident (READ-ONLY: the roster of trajectories that declared themselves RESIDENT — "I am here, this is what I am good at, come bother me". It lists each code with its own `serves` sentence, plus any code that wrote `resident` without `serves` (half a declaration is worse than none: people ask, then find they asked the wrong one). ⚠️ Residency is NOT a resource state — it does not mean "never sleeps" or "never destroyed"; a trajectory permanently exists either way. It governs BEING FOUND, not being kept alive, and it never touches the scheduler).',
       ].join(' '),
     },
     name: { type: 'string', description: 'show/use/archive/uid identifier — a trajectory code (S### or a custom code) / dir name / legacy UID / fuzzy keyword' },
@@ -572,6 +574,22 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         // 为什么挂在本工具：CRO 程序放在**轨迹自己的目录**里 ⇒ 这是"逐轨迹"的知识，
         // 而管轨迹的人正是用本工具的人（设计 §9-5：既有 guide 位置，不新增域）。
         return CRO_GUIDE
+      }
+      case 'resident': {
+        /**
+         * 常驻名单（D173 兑现，owner 2026-10-20）。
+         *
+         * 🔴 **这个动作的存在本身就是一条判据**：v1.77.1 的手册曾承诺"通过本工具的
+         * 常驻名单动作按需查询"，而**那个动作当时并不存在**（D179(a)，S196 踩到）。
+         * ⇒ 现在它真的存在了。
+         *
+         * 🔴 **纯读**（不碰 fs 写、不碰注册表、不碰调度器）：D173 的判据是
+         * 「常驻」管的是**被找到**，不是**不被销毁** —— 两件事混为一谈就会去动
+         * `wake/scheduler.ts` 的载体生命周期，那正是本轨反复踩的"名字撒谎"。
+         *
+         * 🔴 **不进系统提示词**（owner 裁决 Q2：说明类信息按需取，不占每轮 token）。
+         */
+        return listResident(root)
       }
       default:
         throw new Error(`Unknown action: ${args.action as string}`)
