@@ -440,8 +440,15 @@ describe('sendToCognitiveTrajectory（即时投递：与 wake 共用取用通路
     expect(listBoundSessionIds(root, DIR_NAME)).toContain('sess-created')
     // ④ 回执里明说"自动创建"，且正文照常送达
     expect(res.detail).toContain('auto-create(sess-created')
-    expect(sent).toHaveLength(1)
-    expect(sent[0]).toContain('给从未激活的轨迹')
+    // ⑤ 🔴 D171：自建后**先投一条"用户形态"开场白**，再投正文 ⇒ 共 2 条，且**顺序固定**。
+    //    判据不能只写"长度 2"（那是弱断言：把两条都换成正文也过）。
+    //    ⇒ 钉住**两条各是什么**：第 0 条是开场白（带自证标记），第 1 条才是正文。
+    expect(sent).toHaveLength(2)
+    expect(sent[0]).toContain('[ACC 代用户开场]')
+    expect(sent[0]).not.toContain('给从未激活的轨迹')
+    expect(sent[1]).toContain('给从未激活的轨迹')
+    // ⑥ 回执要如实说出开场白投没投（静默失败 = 以后查不到为什么没标题）
+    expect(res.detail).toContain('opening-as-user')
   })
 
   it('🆕 该目录**尚无工作区登记** ⇒ 退回 cwd 建会话，并由我们自己补挂（兜底，不是主路径）', async () => {

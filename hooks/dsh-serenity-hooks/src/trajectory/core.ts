@@ -238,6 +238,21 @@ export function parseTrajectoryCode(dirName: string): string | null {
 }
 
 /**
+ * 从目录名取**可读描述**（编码之后那一段；没有就返回空串）。
+ *
+ * 用途：给"模拟用户开场白"当标签（D171）。判据 = 与 {@link parseTrajectoryCode} **互逆、同源**：
+ * 剥日期前缀 → 第一段是编码 → 其后（去掉前导 `--`）全是描述。
+ * ⚠️ 描述里**可以**含 `--`（只有编码不许）⇒ 这里必须取"第一段之后整串"，不能 split 再取第二段。
+ */
+export function trajectoryDescOf(dirName: string): string {
+  if (!DIR_DATE_PREFIX_RE.test(dirName)) return ''
+  const rest = dirName.replace(DIR_DATE_PREFIX_RE, '')
+  const sep = rest.indexOf('--')
+  return sep === -1 ? '' : rest.slice(sep + 2).trim()
+}
+
+
+/**
  * 展示用会话 ID（`list` 面板 / 绑定记录的 `sessionId` 字段）。
  *
  * 🔴 2026-10-19 起**编码即 ID**，不再只认 `S###` —— 旧实现只匹配 `--S(\d{3,})--`，

@@ -1,3 +1,79 @@
+## v1.76.0 — 2026-10-20（🔴 **程序性创建的载体 = 用户人工创建：模拟用户开场白**）
+
+**性质**：修一条**只在运行时投影上才看得见的**不一致 —— 加一条消息、两个布尔字段、一条语料排除判据。
+
+**来源**：owner 两条修正 ——
+① 「cognitive_trajectory 的 create 和 send-创建要有编号和用户授权（避免 agent 自己造，是一种浪费）」
+② 「创建出来并进行 send-now 唤醒的，**没有标题也没走 initial**，和用户创建的不一致，这是要修正的」
+＋ 三条裁决：授权**写进工具说明即可**（不做配置键）／**选 B**（模拟一个用户开场白）／
+**存量三条自建会话不追，只补标题**。
+
+### 一、根因：宿主**只把 `source.kind === 'user'` 的消息当作"有人说过话"**
+
+`dsh-session-title` 的 `sessionTitleUserMessageOf()` **第一行**：
+
+```js
+if (event.type !== "user/message" || event.data.source.kind !== "user") return void 0
+```
+
+而 ACC 的一切注入（唤醒／keeper／打回／锚定）都是 `{ kind: 'plugin:dsh-serenity-hooks' }`
+⇒ `send-now` 自建的会话在宿主眼里**从来没有真人说过话**。
+
+实测同一 CCC 同一晚、同一时刻的两条会话（`session_projcache` 投影）：
+
+| 投影字段 | 用户建 | 自建（修前） |
+|---|---|---|
+| `title` | `S222-2026-10-19-无耻之徒S02字幕调整` | **`null`** |
+| `titleInput.count` | **6** | **0** |
+| `titleInput.first` | 有 | **`null`** |
+| 假首轮 | 一对 `acknowledge` | **无**（被自家递归守卫按 `kind` 挡掉） |
+| 工作区 `sessionIds` | 在册 | **在册**（2026-10-18 的修复是生效的 —— 这格本来就对） |
+
+🔴 **所以"手动补一次 rename"是错的修法**：补得了 `title`，补不了 `titleInput`
+及其它按 `kind` 分流的宿主行为。
+
+### 二、修法（owner 裁 B）
+
+新增 `src/trajectory/user-carrier.ts` —— **全仓唯一**允许 `source: { kind: 'user' }` 的地方：
+
+- `CARRIER_OPENING_MARK = '[ACC 代用户开场]'`：正文**逐字自证**是模拟的；
+- `buildCarrierOpening(code, desc)`：**不含版本号／日期／模型名**（D159）；
+- `deliverCarrierOpening(agent, text)`：投一条 `kind:'user'` 消息，失败返回 `false` 不抛。
+
+`createAndBindTarget` 在 `resolveAgent` 之后、真正正文之前投这条开场白；
+回执追加 `opening-as-user` / `⚠️ 开场白未投递`（**不静默**）。
+
+### 三、配套（缺一不可）
+
+| 改动 | 为什么必须同批 |
+|---|---|
+| `BindingRecord.createdAsUser` 布尔字段（域 ＋ 文件两侧都过） | 审计"哪些会话不是真人建的"要一个**事实**，不能长在 `note` 文案上（D151 同族：文案会改） |
+| `session-corpus` 的 `INJECTION_PATTERNS` 加 `/^\[ACC 代用户开场\]/` | 🔴 **伪造可以，污染不许**。不排除 ⇒ 以后统计"所有者说过什么"会算进一句机器写的开场白 |
+| `trajectoryDescOf(dirName)` | 开场白标签取**人起的目录描述**，不造第二真相源 |
+
+### 四、代价（明知故犯，写在这里不藏）
+
+1. **伪造用户身份**：与 D160「不再造历史」方向相反。范围**仅限**开场白这一条消息，且正文自证。
+2. **语料污染**：已由上面那条排除判据堵住，且 `session-corpus.test.ts` 双向钉住。
+3. **与假首轮的先后**：开场白若先落盘，`hasUserMessageHistory` 会为真 ⇒ 假首轮永不注入。
+   现机制靠"注入发生在 `agent/inbox/inserted`（只动队列）、开场白排在其后"保证；
+   `user-carrier.test.ts` 的 S3 组把这个**后果**钉死，不靠"应该会"。
+
+### 五、测试
+
+- `tests/user-carrier.test.ts`（新增 13 例）：kind 断言 ＋ **反向断言**（不等于 ACC 常规 kind）＋
+  自证标记 ＋ 无版本号 ＋ 失败不抛 ＋ S3 顺序后果。
+- `tests/wake-registry.test.ts`：自建后断言**两条各是什么**（第 0 条开场白、第 1 条正文），
+  ⛔ 不只断言长度 —— 那是弱断言，两条都换成正文也会过。
+- `session-corpus.test.ts`：伪造开场白被默认过滤，`--keep-injected` 时回来（反向证明被排除的是它）。
+- 🔴 **变异检验承重**：把 `kind:'user'` 改回 `plugin:*` ⇒ 当场 2 红。
+
+### 六、授权口径（owner：「在工具说明里讲好即可」）
+
+写进 `send-now` / `create` 的工具说明：**建载体是应当由用户意图触发的动作**，
+agent 不自行发起；`create` 建的是**轨迹**（不是 dsh 会话），同样不应无授权自建。
+⚠️ 这只是**行为约定**，不产生机械判据 —— 属已知盲区（D143 同族：声明面散文没有机械信号）。
+
 ## v1.75.0 — 2026-10-19（🔴 **轨迹声明收拢 `trajectory.json` ＋ CRO 流水改纯文本 ＋ 说明面统一 ＋ 文档引用门禁**）
 
 **性质**：**结构收拢**（三个文件名 → 一个声明文件）＋ **载体换形态**（JSON 流水 → 纯文本日志）

@@ -49,6 +49,14 @@ export interface BindingRecord {
   action: string
   at: number
   note?: string
+  /**
+   * 🆕 **这条载体是 ACC 以"用户开场白"形态建出来的**（2026-10-20 owner 裁 B）。
+   *
+   * 🔴 为什么必须单列一个字段、而不是靠 `note` 文案判：`note` 是人类可读的自由文本，
+   * 判据一旦长在它上面，改一次文案就静默失效（D151 同族：引用与口径会随演进失效）。
+   * ⇒ 审计"哪些会话不是真人建的"必须有一个**布尔事实**。
+   */
+  createdAsUser?: boolean
   /** 已被取代（D69：同轨迹多会话只留一条；记录保留、退出"当前"） */
   supersededAt?: number
 }

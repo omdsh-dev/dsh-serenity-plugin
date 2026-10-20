@@ -29,7 +29,8 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { findSession, sessionsRoot } from '../trajectory/core.js'
+import { findSession, parseTrajectoryCode, sessionsRoot, trajectoryDescOf } from '../trajectory/core.js'
+import { buildCarrierOpening, deliverCarrierOpening } from '../trajectory/user-carrier.js'
 import { listBoundSessionIds, appendBound } from '../trajectory/bound.js'
 import { evaluateCro, listCroCognitiveTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from '../cro/core.js'
 import { runningCarriersOf } from '../cro/turns.js'
@@ -520,13 +521,37 @@ async function createAndBindTarget(
   const bound = appendBound(
     { header: { id: sessionId, cwd: root } },
     'activate',
-    { dirName, mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'), note: 'auto-created by send-now' },
+    {
+      dirName,
+      mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'),
+      note: 'auto-created by send-now',
+      // 🔴 布尔事实：这条载体是 ACC 以"用户开场白"形态建的（D171）。
+      //    不从 `note` 文案推 —— 文案会改，判据不能长在文案上（D151 同族）。
+      createdAsUser: true,
+    },
   )
+  // ③b 🔴 **投一条"用户形态"开场白**（D171 / owner 裁 B）。
+  //
+  // 为什么必须做：宿主的自动命名与 `titleInput` 投影只认 `source.kind === 'user'`。
+  // 不投这条 ⇒ 建出来的会话在宿主眼里**从来没有真人说过话** ⇒ 标题恒 null、
+  // `titleInput.count` 恒 0（实测：用户建的 6，我们建的 0）。
+  //
+  // ⚠️ 顺序：必须在 `resolveAgent` 之后、**真正的那条消息之前**投。
+  //    agent 此刻是新建的、没有历史 ⇒ 宿主 `agent/inbox/inserted` 会先注入假首轮，
+  //    再把这条开场白排在其后（prepend 语义）⇒ 两者都成立。
+  //
+  // ⚠️ 失败不阻断投递：开场白是"让投影一致"的增强，拿不到就把原因写进回执，
+  //    不许因此把一条能送达的消息判成失败。
+  const opening = deliverCarrierOpening(
+    agent as unknown as { followup?: (msg: unknown) => void },
+    buildCarrierOpening(parseTrajectoryCode(dirName) ?? dirName, trajectoryDescOf(dirName)),
+  )
+  const openingNote = opening ? ', opening-as-user' : ', ⚠️ 开场白未投递'
   // ④ **兜底**：只在"查不到工作区 id、退回 cwd 建会话"时，才由我们自己补挂。
   //    走 `workspaceId` 分支时宿主已经挂好了（= 用户那条路），这里只是幂等确认、不产生写。
   const wsNote = workspaceId !== undefined ? '' : await attachToWorkspace(ctx, root, sessionId)
   const viaNote = workspaceId !== undefined ? ', via-workspaceId(=用户同一形态)' : ', via-cwd+attach'
-  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'}${viaNote}${wsNote})`
+  const how = `auto-create(${sessionId}${bound ? ', bound' : ', ⚠️ 绑定写入失败'}${viaNote}${openingNote}${wsNote})`
   return { agent, how }
 }
 

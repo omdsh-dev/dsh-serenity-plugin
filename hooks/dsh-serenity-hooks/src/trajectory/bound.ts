@@ -39,6 +39,8 @@ interface SessionBoundRecord {
   action: SessionBoundAction
   at: number
   note?: string
+  /** 🆕 ACC 以"用户开场白"形态建的载体（判决 D171）。**布尔事实**，不从 `note` 文案推。 */
+  createdAsUser?: boolean
   /**
    * **(b) 已被取代标记**（S142 §0y，所有者 2026-09-18 裁「b 做」）。
    *
@@ -92,6 +94,7 @@ function fromDomainRecord(rec: BindingRecord): SessionBoundRecord {
     action: (rec.action ?? 'activate') as SessionBoundAction,
     at: typeof rec.at === 'number' ? rec.at : 0,
     ...(rec.note ? { note: rec.note } : {}),
+    ...(rec.createdAsUser === true ? { createdAsUser: true } : {}),
     ...(rec.supersededAt !== undefined ? { supersededAt: rec.supersededAt } : {}),
   }
 }
@@ -105,6 +108,7 @@ function toDomainRecord(rec: SessionBoundRecord): BindingRecord {
     action: rec.action,
     at: rec.at,
     ...(rec.note ? { note: rec.note } : {}),
+    ...(rec.createdAsUser === true ? { createdAsUser: true } : {}),
     ...(rec.supersededAt !== undefined ? { supersededAt: rec.supersededAt } : {}),
   }
 }
@@ -552,7 +556,7 @@ export function pruneMissingBindings(
 export function appendBound(
   session: unknown,
   action: SessionBoundAction,
-  rec: { dirName: string; mdPath: string; sessionId?: string; note?: string },
+  rec: { dirName: string; mdPath: string; sessionId?: string; note?: string; createdAsUser?: boolean },
 ): boolean {
   const path = bindingsPathFor(session)
   const id = sessionHeader(session)?.id
@@ -564,6 +568,7 @@ export function appendBound(
     action,
     at: Date.now(),
     ...(rec.note ? { note: rec.note } : {}),
+    ...(rec.createdAsUser === true ? { createdAsUser: true } : {}),
   }
 
   // §0L 双写：域（权威，异步落盘 fire-and-forget）+ 旧文件（兜底，同步）。
