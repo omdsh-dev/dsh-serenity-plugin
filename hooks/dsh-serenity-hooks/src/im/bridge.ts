@@ -93,6 +93,61 @@ const MEDIA_MAX_BYTES = 20 * 1024 * 1024
 /** typing_ticket 缓存（每 (accountId, fromUserId)；getconfig 一次后续复用——对齐参考实现 typingTicketCache） */
 const typingTicketByUser = new Map<string, string>()
 
+/**
+ * 🔴 **最近一次 `context_token` 缓存**（每 `(accountId, userId)`）—— 2026-10-21，owner 报
+ * 「久不在微信发言，认知轨迹主动发消息就不通」。
+ *
+ * ## 为什么必须有它（协议规范，不是我们的发明）
+ *
+ * 微信 iLink 协议的 `context_token` **不是"用户 ID"**，而是
+ * **「当前对话上下文的会话能力令牌」**（[公开协议规范] §5.10）。规范逐字：
+ *
+ * - **文本回复：必填。图片/文件/视频回复：必填。**（§6.4）
+ * - 「以 `(accountId, userId)` 为 key **缓存最近一次 `context_token`**」（§5.10 工程建议）
+ * - 「**主动发消息能力**：公开实现普遍依赖**最近一次入站消息**带来的 `context_token`」（§12 对比表）
+ *   —— 这是微信相对 Telegram/Slack 的**根本差异**（那两家只要知道 chat_id 就行）。
+ * - 「协议里**未观察到**单独"打开会话"的 API」（§5.10）⇒ **没有任何办法主动"开一个会话"**，
+ *   只能靠人发一条消息来刷新这张票。
+ *
+ * ## 🔴 修前我们是什么状态
+ *
+ * 收到 token 后**只用一次就丢**（唯一消费点是"回复这一条消息"）⇒ 那条回复发完，
+ * 手上就**再没有票**了 ⇒ 之后任何**主动**发送都是裸发（不带 `context_token`）。
+ * ⇒ 这与 owner 的观察完全吻合：**刚聊过就通**（票还在窗口内/刚被刷新），**隔久了就不通**。
+ * ⚠️ 这**不是心跳问题** —— 规范里根本没有心跳；是**票没留住**。
+ *
+ * ## 边界（照规范原话）
+ *
+ * - **不跨用户复用、不跨 bot 账号复用**（key 含 accountId 与 userId 两段）。
+ * - **不伪造 token**：只存服务端真给过的。
+ * - **进程重启即丢失**（内存缓存）——规范也确认这条，因为**没有开新会话的 API**；
+ *   重启后的第一条主动消息仍可能失败，这是**平台限制**，由 O3 的失败文案如实告知。
+ */
+const contextTokenByUser = new Map<string, string>()
+
+/** context_token 的缓存键（与 typing 同款两段式，但**语义不同**：这里存的是会话票） */
+function contextCacheKey(accountId: string, userId: string): string {
+  return `${accountId}|${userId}`
+}
+
+/** 记下最近一次入站带来的 `context_token`（**只存非空**；空串会把好票覆盖成坏票） */
+export function rememberContextToken(accountId: string, userId: string, token: string | undefined): void {
+  if (!userId) return
+  const t = (token ?? '').trim()
+  if (t === '') return
+  contextTokenByUser.set(contextCacheKey(accountId, userId), t)
+}
+
+/** 取该用户最近一次的 `context_token`（没有 ⇒ `undefined`，调用方按"裸发"处理并如实回执） */
+export function recallContextToken(accountId: string, userId: string): string | undefined {
+  return contextTokenByUser.get(contextCacheKey(accountId, userId))
+}
+
+/** 测试辅助：清空 context_token 缓存（生产零调用；与 resetWeixinTypingCache 同款） */
+export function resetWeixinContextCache(): void {
+  contextTokenByUser.clear()
+}
+
 function typingCacheKey(accountId: string, fromUserId: string): string {
   return `${accountId}|${fromUserId}`
 }
@@ -182,6 +237,13 @@ export async function handleIncoming(
 ): Promise<void> {
   const fromUserId = msg.from_user_id
   if (!fromUserId) return
+
+  // 🔴 **留住这张会话票**（2026-10-21）：`context_token` 是「当前对话上下文的会话能力令牌」，
+  // 协议要求主动发送也带上它（公开规范 §5.10/§6.4）。不存 ⇒ 回复一发完就再也没有票 ⇒
+  // 之后所有主动发送都是裸发 ⇒ 表现为"久不发言就不通"。
+  // ⚠️ 必须在这里（**早于任何早退分支**）记：哪怕这条消息后来没投递（未命中路由等），
+  //    服务端给的票仍然是有效的上下文 ⇐ 它证明"此刻这个会话窗口是活的"。
+  rememberContextToken(accountId, fromUserId, msg.context_token)
 
   // ── 形状翻译：iLink → 中立事件 ────────────────────────────────────────────
   const event: ImInboundEvent = {
@@ -587,10 +649,51 @@ export async function sendProactiveText(input: ProactiveSendInput): Promise<Proa
   // 记录里能直接按会话串联）。无路由 ⇒ 用用户标识兜底（仍可串联，只是没有轨迹语义）。
   const trajectory = matchWeixinRoute(settings.routes ?? [], toUserId) ?? ''
   const sessionId = weixinSessionIdForTrajectory(trajectory !== '' ? trajectory : sanitizeFileName(toUserId) || 'unknown')
+  /**
+   * 🔴 **带上最近一次的 `context_token`**（2026-10-21，协议规范 §5.10/§6.4）。
+   *
+   * 修前这里是**裸发**（`sendTextMessage` 不传 `contextToken`）。而规范把 `context_token`
+   * 定为「会话能力令牌」：主动发送**依赖最近一次入站消息**带来的那张票（§12 对比表逐字：
+   * 这正是微信相对 Telegram/Slack 的根本差异）。
+   * ⇒ 没有票时，服务端无法把消息关联到对话窗口 ⇒ 表现为"久不发言就发不出去"。
+   *
+   * ⚠️ **仍然允许无票发送**（不改成硬拒绝）：修前就是这么发的，而且**部分时机它是能成功的**
+   * （票还在服务端窗口内的那些时刻）。改成硬拒绝 = 把"有时能发"变成"永远不发"。
+   * ⇒ 取**尽力而为 + 如实回执**：能带就带；没票照发，但把"没票"这件事**写进回执**，
+   * 让人知道这一条是"运气发出去的"（D186：可以降级，但不许不出声）。
+   */
+  const contextToken = recallContextToken(accountId, toUserId)
   try {
-    await sendTextMessage({ baseUrl: cred.baseUrl, token: cred.token, toUserId, text: input.text })
+    await sendTextMessage({
+      baseUrl: cred.baseUrl,
+      token: cred.token,
+      toUserId,
+      text: input.text,
+      ...(contextToken === undefined ? {} : { contextToken }),
+    })
   } catch (err) {
-    return { ok: false, code: 'SEND_FAILED', error: `发送失败: ${err instanceof Error ? err.message : String(err)}` }
+    /**
+     * 🔴 **失败必须落盘**（2026-10-21，O1）。修前失败只回给调用方、**不写任何流水**
+     * （outgoing hook 只在**成功后**触发）⇒ 「失败过没有、失败成什么样」在盘上不可见
+     * ⇒ 下次报障只能猜。这里补上**只有失败才会产生**的那行日志。
+     *
+     * ⚠️ 按规范 §11：`ret=-2` 在社区实现里被误报成"rate limited"，
+     *    而真因常是**缺 `context_token`**（第三方实测）⇒ 故把「有没有票」一起记进日志，
+     *    这样一眼能分辨"票的问题"还是"账号/网络的问题"。
+     */
+    const detail = err instanceof Error ? err.message : String(err)
+    console.warn(
+      `[serenity-hooks] ✗ im 主动发送失败: account=${accountId} user=${toUserId} ` +
+        `contextToken=${contextToken === undefined ? 'ABSENT(无票，裸发)' : 'present'} err=${detail}`,
+    )
+    return {
+      ok: false,
+      code: 'SEND_FAILED',
+      error: `发送失败: ${detail}`,
+      ...(contextToken === undefined
+        ? { remediation: '该用户近期未发过消息 ⇒ 手上没有 context_token（会话能力令牌）。协议没有"主动开新会话"的 API ⇒ 请先让用户在微信里发一条消息激活会话，再重试。' }
+        : {}),
+    }
   }
   // hook：outgoing（source=proactive）——与回复同源记录；失败仅日志（旁路容忍 H3）
   if (settings.hook) {

@@ -29,7 +29,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { basename, join } from 'node:path'
 import { existsSync, realpathSync } from 'node:fs'
 import { hostname } from 'node:os'
-import { findSession, parseTrajectoryCode, sessionsRoot, trajectoryDescOf } from '../trajectory/core.js'
+import { findSession, namingTitleFor, parseTrajectoryCode, sessionsRoot, trajectoryDescOf } from '../trajectory/core.js'
 import { buildCarrierOpening, deliverCarrierOpening } from '../trajectory/user-carrier.js'
 import { listBoundSessionIds, appendBound, carrierState } from '../trajectory/bound.js'
 import { hostAliveProbe } from '../trajectory/alive.js'
@@ -576,12 +576,89 @@ async function createAndBindTarget(
     buildCarrierOpening(parseTrajectoryCode(dirName) ?? dirName, trajectoryDescOf(dirName)),
   )
   const openingNote = opening ? ', opening-as-user' : ', ⚠️ 开场白未投递'
+  // ③c 🔴 **把标题钉成与 `use` 完全同一形态**（2026-10-21，owner 报「send-now 建的会话标题不规范」）。
+  //
+  // ## 为什么必须有这一步（不是锦上添花）
+  //
+  // ③b 投开场白**解决了"没有标题"**，却顺手制造了**"标题难看"**：
+  // 宿主的自动取名器只拿到那一条开场白当素材（`messageSeqs:[465]`），
+  // 于是开场白那句「`[ACC 代用户开场] 激活认知轨迹 <编码>（<职能>），接着它 SESSION.md 里的工作往下做。`」
+  // 被切成 **`激活 <职能>会话`** —— 既没有轨迹编码，也没有真正的职能描述。
+  // ⇒ **投开场白是"让会话有标题"的手段，而它成了唯一的取名素材**。修 bug 的动作制造了新 bug。
+  //
+  // ## 修法：用宿主自己的 `sessionTitle.rename`，而不是去调开场白的措辞
+  //
+  // 为什么不改开场白文案：那条正文有**三个用途**（人工可辨／语料排除判据／单测反向钉住，
+  // 见 `user-carrier.ts` 的 `CARRIER_OPENING_MARK` 注释），为了标题去改它，
+  // 会把一个**机器判据**（语料排除）绑上排版考虑 —— 判据不该长在措辞上。
+  //
+  // 为什么 `rename` 就够（宿主源码取证，`dsh-session-title/lib/index.js`）：
+  // - `rename()` 追加 `session/title` 且 `source:{kind:'user'}`；
+  // - 它先 `supersede(state, …)` ⇒ **abort 在飞的自动生成并 `delete state.pending`**；
+  // - 且 `onUserMessage` 首句 `if (this.get(session)?.source.kind === "user") return`
+  //   ⇒ 此后**同样不再**排自动取名。
+  // ⇒ 一次 `rename` = 钉住标题，自动取名器不再改它。
+  //
+  // ## 🔴 标题必须与 `use` 派生的一致（D182 的判据）
+  //
+  // owner 的原话是「设定不应根据入口不同而有变化」⇒ **一条轨迹的标题不该因为
+  // "它是被 send-now 建起来的"而与被 `use` 激活时不同**。⇒ 复用同一个纯函数
+  // `namingTitleFor`（`trajectory/core.ts`），不另造第二套命名规则。
+  //
+  // ⚠️ 失败不阻断投递：标题是观感，把一条能送达的消息判成失败是本末倒置。
+  const titleNote = renameCarrierTitle(ctx, agent, root, dirName)
   // ④ **兜底**：只在"查不到工作区 id、退回 cwd 建会话"时，才由我们自己补挂。
   //    走 `workspaceId` 分支时宿主已经挂好了（= 用户那条路），这里只是幂等确认、不产生写。
   const wsNote = workspaceId !== undefined ? '' : await attachToWorkspace(ctx, root, sessionId)
   const viaNote = workspaceId !== undefined ? ', via-workspaceId(=用户同一形态)' : ', via-cwd+attach'
-  const how = `auto-create(${sessionId}${bound.ok ? ', bound' : `, ⚠️ 绑定写入失败（${bound.code}）`}${viaNote}${openingNote}${wsNote})`
+  const how = `auto-create(${sessionId}${bound.ok ? ', bound' : `, ⚠️ 绑定写入失败（${bound.code}）`}${viaNote}${openingNote}${titleNote}${wsNote})`
   return { agent, how }
+}
+
+/**
+ * 把刚建的载体会话标题**钉成与 `use` 同一形态**（2026-10-21，owner 报「标题不规范」）。
+ *
+ * ## 为什么单独成函数
+ *
+ * 它是**全仓第二个**写会话标题的点（第一个是 `use`/`rebuild` 的 `renameDshSessionOnUse`）。
+ * 集中在一处，将来若要改命名规则，判据仍在 `namingTitleFor` 一个地方。
+ *
+ * ## 三者顺序不可换
+ *
+ * 必须在 ③b（投开场白）**之后**调用：
+ * - 开场白让 `titleInput.count` > 0，是标题得以成立的前提；
+ * - 放在之后还有**降级好处**：万一 `rename` 失败，宿主自己的 fallback 标题仍在
+ *   （难看但存在），而不是两者皆无。
+ *
+ * @returns 回执片段（成功 `, titled` ／ 失败 `, ⚠️ 标题未写（原因）`）—— **必须出声**，
+ *   否则"标题没写"会表现成"这条轨迹就是这名字"（D186：守卫可以拒绝，但不许不出声）。
+ */
+function renameCarrierTitle(
+  ctx: unknown,
+  agent: Agent,
+  root: string,
+  dirName: string,
+): string {
+  try {
+    // 🔴 传**整个服务对象**、以方法形态调用 `titles.rename(...)`。
+    //    ⛔ 绝不 `const { rename } = titles`：解构丢 `this` 是本仓踩过的坑（v1.23.2），
+    //    宿主方法内部要 `this.ctx.sessions.get(...)` 校验会话是否 live。
+    const titles = hostService<{ rename?: (session: unknown, title: string) => unknown }>(ctx, 'sessionTitle')
+    if (!titles || typeof titles.rename !== 'function') return ', ⚠️ 标题未写（sessionTitle 不可用）'
+    const session = (agent as { session?: unknown }).session
+    if (!session || typeof session !== 'object') return ', ⚠️ 标题未写（无 session）'
+    // 与 `use` 完全同一条派生路径（含 S### 的「编号-日期」与目录名回退）。
+    const title = namingTitleFor({
+      sessionId: parseTrajectoryCode(dirName) ?? dirName,
+      dirName,
+      mdPath: join(root, 'AGENT_SESSIONS', dirName, 'SESSION.md'),
+    })
+    titles.rename(session, title)
+    return ', titled'
+  } catch (err) {
+    // 不抛：标题失败不该让一条能送达的消息判成失败。
+    return `, ⚠️ 标题未写（${String((err as Error)?.message ?? err)}）`
+  }
 }
 
 /**

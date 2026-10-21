@@ -110,8 +110,13 @@ beforeEach(() => {
 afterEach(async () => {
   __setWeixinFetchForTest(null)
   // typing_ticket 缓存清空（模块级状态，防测试间污染）
-  const { resetWeixinTypingCache } = await import('../src/im/bridge.js')
+  const { resetWeixinTypingCache, resetWeixinContextCache } = await import('../src/im/bridge.js')
   resetWeixinTypingCache()
+  // 🔴 2026-10-21：`context_token` 缓存同样是**模块级**状态 —— 不清就会跨用例污染。
+  //    实测形态（本文件首跑就踩到）：前一条用例入站带了 `ct1`，后一条用例的
+  //    「无票 ⇒ 裸发」断言于是收到 `expected 'ct1' to be undefined`。
+  //    ⚠️ 这类污染**只在同文件内串行执行时才暴露**，跑单条用例永远是绿的。
+  resetWeixinContextCache()
   // v1.30.16：手动输出闸门模块级状态（桥每轮登记）——跨用例清空
   const { __resetWeixinOutputGuardForTest } = await import('../src/im/guard.js')
   __resetWeixinOutputGuardForTest()
@@ -1211,7 +1216,7 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
     return { sent, events }
   }
 
-  it('成功：主动发送（无 contextToken）+ outgoing hook 带 source=proactive + sessionId 复用该用户所路由的轨迹会话', async () => {
+  it('成功：无票时主动发送照旧（不带 contextToken）+ outgoing hook 带 source=proactive + sessionId 复用该用户所路由的轨迹会话', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       weixin: {
         enabled: true,
@@ -1235,7 +1240,9 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
     expect(r).toEqual({ ok: true, accountId: 'wechat-1', userId: 'u1@im.wechat', sessionId: weixinSessionIdForTrajectory('my-role'), role: 'my-role' })
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ to: 'u1@im.wechat', text: '报告已生成' }) // md→plain
-    expect(sent[0]!.contextToken).toBeUndefined() // 主动消息不带 context_token
+    // 🔵 2026-10-21 语义变化（**不是**放宽断言）：没有票时仍走裸发（修前行为）。
+    //    「有票就带上」由下方新增的两条用例钉住 —— 两条合起来才是完整契约。
+    expect(sent[0]!.contextToken).toBeUndefined()
     await vi.waitFor(() => expect(events).toHaveLength(1))
     expect(events[0]).toMatchObject({
       event: 'outgoing',
@@ -1245,6 +1252,80 @@ describe('weixin-bridge: sendProactiveText（v1.30.9 主动发送，S142 用户�
       sessionId: weixinSessionIdForTrajectory('my-role'),
       role: 'my-role',
       reply: '报告已生成',
+    })
+  })
+
+  /**
+   * 🔴 **2026-10-21（owner 报「久不发言就不通」的修法判据）**
+   *
+   * 协议规范把 `context_token` 定为「会话能力令牌」：主动发送**依赖最近一次入站**带来的票
+   * （公开规范 §5.10/§6.4/§12）。修前我们**收到就丢** ⇒ 回复一发完就再没票 ⇒ 主动发送恒裸发。
+   * ⇒ 本组用例钉住：**入站带来的票被留住，并在下一次主动发送时带上**。
+   *
+   * 🔴 判据纪律：这里断言的是**出站 body 里真的出现了那个 token 值**（副作用），
+   * 而不是"我们调用了 rememberContextToken"（入参）—— D144：断言入参是弱断言。
+   */
+  describe('🆕 context_token 缓存（协议 §5.10：主动发送依赖最近一次入站带来的票）', () => {
+    beforeEach(async () => {
+      writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+        weixin: { enabled: true, accounts: [{ accountId: 'wechat-1' }], routes: [{ user: '*', trajectory: 'my-role' }] },
+      }))
+      writeWeixinCredential(dir, 'wechat-1', { token: 'tok1', baseUrl: 'https://x' })
+      const { resetWeixinContextCache } = await import('../src/im/bridge.js')
+      resetWeixinContextCache()
+    })
+
+    it('🔴 入站带来 token ⇒ 下一次主动发送**带上它**（修前恒不带）', async () => {
+      const { sent } = setupFetchAndHook()
+      const { handleIncoming, sendProactiveText } = await import('../src/im/bridge.js')
+      const cred = { token: 'tok1', baseUrl: 'https://x', userId: 'me' }
+
+      // ① 用户发来一条消息（带票）
+      await handleIncoming({} as never, dir, 'wechat-1', cred, {
+        from_user_id: 'u1@im.wechat',
+        context_token: 'CT-FROM-INBOUND',
+        item_list: [],
+      } as never)
+      // ② 之后某条轨迹主动发消息 —— 必须带上那张票
+      await sendProactiveText({ root: dir, toUserId: 'u1@im.wechat', text: '主动通知' })
+      const proactiveSend = sent.filter((s) => s.text === '主动通知')
+      expect(proactiveSend).toHaveLength(1)
+      expect(proactiveSend[0]!.contextToken).toBe('CT-FROM-INBOUND')
+    })
+
+    it('🔴 反向钉：**别人**的票不能用在另一个用户身上（不跨用户复用）', async () => {
+      const { sent } = setupFetchAndHook()
+      const { handleIncoming, sendProactiveText } = await import('../src/im/bridge.js')
+      const cred = { token: 'tok1', baseUrl: 'https://x', userId: 'me' }
+
+      await handleIncoming({} as never, dir, 'wechat-1', cred, {
+        from_user_id: 'u1@im.wechat',
+        context_token: 'CT-OF-U1',
+        item_list: [],
+      } as never)
+      // 给**另一个**用户主动发 —— 他从来没有票 ⇒ 必须裸发
+      await sendProactiveText({ root: dir, toUserId: 'u2@im.wechat', text: '给 u2' })
+      const toU2 = sent.filter((s) => s.text === '给 u2')
+      expect(toU2).toHaveLength(1)
+      expect(toU2[0]!.contextToken).toBeUndefined()
+    })
+
+    it('🔴 空 token 不覆盖已有的好票（`trim===""` 时记都不记）', async () => {
+      const { sent } = setupFetchAndHook()
+      const { handleIncoming, sendProactiveText } = await import('../src/im/bridge.js')
+      const cred = { token: 'tok1', baseUrl: 'https://x', userId: 'me' }
+
+      await handleIncoming({} as never, dir, 'wechat-1', cred, {
+        from_user_id: 'u1@im.wechat', context_token: 'CT-GOOD', item_list: [],
+      } as never)
+      // 再来一条**没带票**的消息（服务端没给）⇒ 不能把它当成"票变成了空"
+      await handleIncoming({} as never, dir, 'wechat-1', cred, {
+        from_user_id: 'u1@im.wechat', context_token: '', item_list: [],
+      } as never)
+      await sendProactiveText({ root: dir, toUserId: 'u1@im.wechat', text: '还是要有票' })
+      const s = sent.filter((x) => x.text === '还是要有票')
+      expect(s).toHaveLength(1)
+      expect(s[0]!.contextToken).toBe('CT-GOOD')
     })
   })
 

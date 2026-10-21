@@ -32,6 +32,8 @@ import {
 import { buildWakeText, deliverWake, registerWakeScheduler, resolveWakeTarget, sendToCognitiveTrajectory, wakeSchedulerState, __resetWakeSchedulerStateForTest } from '../src/wake/scheduler.js'
 import { listBoundSessionIds } from '../src/trajectory/bound.js'
 import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/cro/core.js'
+// 标题判据（D182）：期望值**现算**，不抄字符串——抄一份就是第二真相源
+import { namingTitleFor, parseTrajectoryCode } from '../src/trajectory/core.js'
 import { croWakeLogPath, loadCroWakeLog } from '../src/cro/log.js'
 import { __resetCroTurnsForTest } from '../src/cro/turns.js'
 import { existsSync, readFileSync } from 'node:fs'
@@ -506,6 +508,100 @@ describe('sendToCognitiveTrajectory（即时投递：与 wake 共用取用通路
     expect(sent[1]).toContain('给从未激活的轨迹')
     // ⑥ 回执要如实说出开场白投没投（静默失败 = 以后查不到为什么没标题）
     expect(res.detail).toContain('opening-as-user')
+  })
+
+  /**
+   * 🔴 **2026-10-21（owner 报「send-now 创建的会话标题不规范，看着碍眼」）**
+   *
+   * ## 现象
+   * 宿主的自动取名器只拿到**开场白**当素材，于是标题被切成
+   * `激活 <职能>会话` —— 既没有轨迹编码，也没有真正的职能描述。
+   *
+   * ## 根因（是"修 bug 制造了新 bug"，不是漏做）
+   * ③b 投开场白**是为了让会话有标题**（宿主只认 `source.kind==='user'`），
+   * 结果它成了**唯一的取名素材**。
+   *
+   * ## 修法与判据
+   * 用宿主自己的 `sessionTitle.rename` 把标题**钉住**（`source:{kind:'user'}`
+   * ⇒ abort 在飞的自动生成，且此后不再排自动取名）。
+   * 🔴 **判据不是"标题好看"，而是"与 `use` 派生的一致"**（D182：设定不因入口而异）
+   * ⇒ 断言直接调 `namingTitleFor` 现算期望值，**不抄一份字符串**（抄了就成了第二真相源）。
+   */
+  it('🔴 send-now 建的载体**标题必须被钉住**，且与 `use` 派生的一致（不是开场白切片）', async () => {
+    writeSessionDir()
+    writeFileSync(join(root, '.serenity'), 'wake-test\n')
+    const madeAgent = {
+      session: { id: 'sess-created', append: () => {} },
+      followup: () => {},
+    }
+    /** 记录宿主 `sessionTitle.rename` 的调用（这就是"标题被钉住"的唯一机械判据） */
+    const renames: Array<{ session: unknown; title: string }> = []
+    const sessionTitle = {
+      // 🔴 必须是**方法**（内部用 this）—— 解构裸调用会丢 this（v1.23.2 的坑）
+      rename(session: unknown, title: string) { renames.push({ session, title }) },
+    }
+    const ctx = {
+      agents: { get: () => undefined },
+      get: (name: string) => {
+        if (name === 'sessionController') {
+          return {
+            create: async () => ({ sessionId: 'sess-created' }),
+            resolveAgent: async () => ({ agent: madeAgent }),
+          }
+        }
+        if (name === 'workspaceRegistry') {
+          return { list: () => [{ id: 'ws-ccc', path: root, sessionIds: [], attachSession: async () => {} }] }
+        }
+        if (name === 'sessionTitle') return sessionTitle
+        return undefined
+      },
+    }
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, '正文', 'S142')
+    expect(res.ok).toBe(true)
+
+    // ① 标题**真的被写了**（一次，且写在那条刚建的会话上）
+    expect(renames).toHaveLength(1)
+    expect(renames[0]!.session).toBe(madeAgent.session)
+
+    // ② 🔴 **与 `use` 派生的一致** —— 期望值现算，不写死字符串。
+    //    `DIR_NAME` 无 S### 编码 ⇒ `namingTitleFor` 回退目录名（这正是既有 `use` 的行为）。
+    const expected = namingTitleFor({
+      sessionId: parseTrajectoryCode(DIR_NAME) ?? DIR_NAME,
+      dirName: DIR_NAME,
+      mdPath: join(root, 'AGENT_SESSIONS', DIR_NAME, 'SESSION.md'),
+    })
+    expect(renames[0]!.title).toBe(expected)
+
+    // ③ **反向钉**：绝不能是开场白切片那种形状。
+    //    只写"不等于 expected"还不够 —— 必须钉住"它不含为标题而生的那句动词短语"，
+    //    否则将来有人把 expected 改坏成开场白切片，这条仍会绿。
+    expect(renames[0]!.title).not.toContain('激活')
+    expect(renames[0]!.title).not.toContain('[ACC 代用户开场]')
+
+    // ④ 回执如实说出标题写没写（D186：不许不出声）
+    expect(res.detail).toContain('titled')
+  })
+
+  it('sessionTitle 服务缺席 ⇒ 投递照常成功，但回执**响亮**说明标题没写', async () => {
+    writeSessionDir()
+    writeFileSync(join(root, '.serenity'), 'wake-test\n')
+    const madeAgent = { session: { id: 'sess-created' }, followup: () => {} }
+    const ctx = {
+      agents: { get: () => undefined },
+      get: (name: string) => (name === 'sessionController'
+        ? {
+            create: async () => ({ sessionId: 'sess-created' }),
+            resolveAgent: async () => ({ agent: madeAgent }),
+          }
+        : name === 'workspaceRegistry'
+          ? { list: () => [{ id: 'ws-ccc', path: root, sessionIds: [], attachSession: async () => {} }] }
+          : undefined), // ← sessionTitle 刻意缺席
+    }
+    const res = await sendToCognitiveTrajectory(ctx as never, root, DIR_NAME, '正文', 'S142')
+    // 🔴 标题是观感，**不许**因为拿不到服务就把一条能送达的消息判成失败
+    expect(res.ok).toBe(true)
+    // 但必须出声 —— 否则"标题没写"会表现成"这条轨迹就叫这名字"
+    expect(res.detail).toContain('⚠️ 标题未写')
   })
 
   it('🆕 该目录**尚无工作区登记** ⇒ 退回 cwd 建会话，并由我们自己补挂（兜底，不是主路径）', async () => {
