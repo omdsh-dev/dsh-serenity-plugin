@@ -473,7 +473,18 @@ describe('sendToCognitiveTrajectory（即时投递：与 wake 共用取用通路
     //    本用例要让**产品代码自己**去写绑定 ⇒ 夹具必须长成**真 CCC 的样子**（生产里 root 就是 CCC）。
     writeFileSync(join(root, '.serenity'), 'wake-test\n')
     const sent: string[] = []
-    const madeAgent = { followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') } }
+    // 🔴 **必须同时提供 `steer`**（A96 修的正是这条用例的缺口）。
+    // 改之前夹具**只有 `followup`**：自建载体的 status 因开场白变成 running ⇒ 产品代码走 `steer`
+    // ⇒ 而夹具没有 `steer` ⇒ 抛错被 catch **退回 followup** ⇒ 两条进同一个数组、顺序恰好正确 ⇒ **绿**。
+    // 真机上同样的调用真的走了 `steer`（next-step 整队认领、先于 next-turn）⇒ 顺序是倒的。
+    // ⇒ 夹具缺的那两个成员**正好把被测路径换成了另一条**（D144 同族，更隐蔽）。
+    // 现在把它补全：`steer` 单独记账，且 `status: 'running'` 重现"刚投完开场白"那一刻的真实状态。
+    const steered: string[] = []
+    const madeAgent = {
+      status: 'running',
+      followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') },
+      steer: (m: { content: Array<{ text?: string }> }) => { steered.push(m.content[0]?.text ?? '') },
+    }
     let created: { cwd?: string; workspaceId?: string } | null = null
     let resolvedId: string | null = null
     const ctx = {
@@ -508,6 +519,14 @@ describe('sendToCognitiveTrajectory（即时投递：与 wake 共用取用通路
     expect(sent[1]).toContain('给从未激活的轨迹')
     // ⑥ 回执要如实说出开场白投没投（静默失败 = 以后查不到为什么没标题）
     expect(res.detail).toContain('opening-as-user')
+    // ⑦ 🔴🔴 **A96 的承重判据：刚建出来的载体，任务必须走 `followup` 而绝不走 `steer`。**
+    //    为什么这条才是真正的靶子：`steer` 落 `next-step`（每 step 整队认领，且宿主 `claim()`
+    //    **先取 next-step**），而 anchor 与开场白落 `next-turn`（每 turn 只认 1 条）
+    //    ⇒ 一旦任务走了 `steer`，它就会**插到所有 anchor 前面**、在 turn 1 就干完活。
+    //    ⛔ 不能只断言 `sent` 里有两条：把实测的 `status:'running'` 留下，`sent` 仍然是两条
+    //    （因为 catch 把 steer 失败退回 followup）—— 那正是旧夹具骗过我们的方式。
+    expect(steered).toEqual([])
+    expect(res.detail).toContain('刚建的载体')
   })
 
   /**

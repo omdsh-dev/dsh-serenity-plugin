@@ -302,10 +302,22 @@ export function listTrajectoryConstraints(root: string): TrajectoryConstraint[] 
  * 静默投到一条相近的轨迹上——那正是最难查的一类串味。
  */
 export function findDirNameByCode(root: string, code: string): string | null {
+  const hits: string[] = []
   for (const name of activeTrajectoryDirNames(root)) {
-    if (parseTrajectoryCode(name) === code) return name
+    if (parseTrajectoryCode(name) === code) hits.push(name)
   }
-  return null
+  // 🔴🔴 **2026-10-21（A95 ①）：命中多条时响亮报歧义，不再 `return` 第一个。**
+  // 与 `core.ts` 的 `findSession` 同一判据 —— 两个解析面必须同族（D167 的教训：
+  // 只修一处 ⇒ 另一处继续静默，而症状与真因在读数上完全不像）。
+  // 这条路径的调用方是**路由 / 约束施加**，静默投到另一条轨迹上最难查（见上方注释）。
+  if (hits.length > 1) {
+    throw new Error(
+      `编码「${code}」在本 CCC 有 ${hits.length} 条轨迹同时占用，无法确定要施加到哪一条：\n` +
+      hits.map((n) => `  · ${n}`).join('\n') +
+      '\n编码是终身身份（AXIOM 3）⇒ 不替你任选其一。改用**完整目录名**指定。',
+    )
+  }
+  return hits[0] ?? null
 }
 
 /**

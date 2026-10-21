@@ -70,9 +70,21 @@ describe('飞书面板入口（P4）：owner 要能"在页面上配飞书"', () 
     expect(httpCode).toMatch(/appId === '' \|\| appSecret === ''/)
   })
 
-  it('🔴 扫码行必须标明是微信独有形态（否则用户会等飞书二维码）', () => {
-    // 这一条挡的是：飞书接上后，扫码行仍写"扫码绑定"而不说只对微信 —— 用户会以为飞书也走扫码
-    expect(clientCode).toContain('扫码绑定微信')
+  it('🔴 扫码路径必须标明是微信独有形态；且两个渠道是**二选一**而非并列卡片', () => {
+    // 这条挡的两件事，来自 owner 2026-10-21 实测反馈「不对称，交互上要体现二选一」：
+    //  ① 飞书接上后，扫码行若仍写"扫码绑定"而不说只对微信 ⇒ 用户会以为飞书也走扫码；
+    //  ② 两个渠道若各是**一张常驻卡片**（且飞书三格表单一直展开）⇒ 读起来像"两件事都要填"，
+    //     而实际互斥。
+    // ⇒ 现在是一个「添加账号」入口 + 渠道切换（`addChannel`），选中哪一个才展开哪一条路径。
+    // ⚠️ 判据钉**结构**而不是钉某句文案：`addChannel` 的三态（null / weixin / feishu）
+    //    才是"二选一"的机械形态；只钉文案会被下一次改字骗过（D131 同族）。
+    expect(clientCode).toContain('addChannel')
+    expect(clientCode).toContain("role=\"radiogroup\"")
+    // 两条路径都必须在**选中态**下才渲染（条件渲染 ⇒ 不会同时出现）
+    expect(clientCode).toMatch(/addChannel === 'weixin'/)
+    expect(clientCode).toMatch(/addChannel === 'feishu'/)
+    // 微信路径的动作词要自证渠道（"扫码绑定"是微信独有形态）
+    expect(clientCode).toContain('扫码绑定')
   })
 })
 

@@ -437,14 +437,37 @@ export async function sendToCognitiveTrajectory(
     createUserMessage({ content: [{ type: 'text', text: buildSendText(t, message, sender) }], source: PLUGIN_SOURCE })
   // 🔴 v1.39.2（S142 §0r，所有者令「不排队、直接即时注入」）：见函数头部的语义变更说明。
   // 判据 = 宿主 agent 的 `status`（`trajectory/carrier.ts` 同款读法：`followup`/`steer` 会**同步**置 running）。
-  const idle = (agent as { status?: string }).status === 'idle'
+  //
+  // 🔴🔴 **2026-10-21（owner 报「first-anchor 注入顺序倒了」，A96）：判据必须用「载体交到手上时」的状态，
+  //    而不是「我们投完开场白之后」的状态。**
+  //
+  // 缺陷事实（两个独立会话实测一致）：真任务在 **turn 1** 就跑完了，而第二条 anchor 在 turn 2、
+  // 开场白在 turn 3 才到 ⇒ 模型"先干活、后收到协作声明、再被要求重新锚定从头做"。
+  //
+  // 根因（确定性，不是竞态）：
+  //   · `followup` 落 `next-turn`，**每个 turn 只认领 1 条**；
+  //   · `steer` 落 `next-step`，**每个 step 边界整队认领**，而宿主 `claim()` **先取 next-step**；
+  //   · 而本函数在自动建载体那条路上，**③b 已经投过开场白（followup ⇒ 同步置 running）**，
+  //     ④ 才读 `agent.status` ⇒ 必然读到 running ⇒ 任务走 `steer` ⇒ 插到 anchor **前面**。
+  //
+  // ⇒ 修法：`createdNote !== ''` 就说明这条载体是**本次刚建出来的**（它是自动建分支唯一的赋值点）。
+  //   对一条刚建出来的载体，`steer` 的语义前提（"目标在跑，把话插进当前轮"）**根本不成立** ——
+  //   那个 running 只是开场白刚排队造成的假象。⇒ 一律走 `followup`，让 anchor 排在任务之前。
+  //
+  // ⚠️ **代价（明示，不隐瞒）**：任务从 turn 1 推到 turn 4（假① 短路 → 假② 短路 → 开场白 → 任务）。
+  //   两个 turn 是短路（零 token），一个是开场白那次轻量调用。**这是"锚定先于干活"的对价。**
+  const freshCarrier = createdNote !== ''
+  const idle = freshCarrier || (agent as { status?: string }).status === 'idle'
   if (idle) {
     try {
       agent.followup(make())
     } catch (err) {
       return { ok: false, detail: `投递失败（${acquired.how}）: ${String((err as Error)?.message ?? err)}` }
     }
-    return { ok: true, detail: `已即时投递 ${t.dirName}（${acquired.how}；目标空闲 ⇒ followup 立即起轮）${createdNote}` }
+    return {
+      ok: true,
+      detail: `已即时投递 ${t.dirName}（${acquired.how}；${freshCarrier ? '刚建的载体 ⇒ followup 排队，锚定先于任务' : '目标空闲 ⇒ followup 立即起轮'}）${createdNote}`,
+    }
   }
   try {
     agent.steer(make())

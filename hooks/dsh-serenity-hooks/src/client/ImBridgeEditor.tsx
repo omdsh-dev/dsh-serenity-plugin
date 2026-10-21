@@ -92,6 +92,26 @@ export function ImBridgeEditor(): React.JSX.Element {
   const [feishuBusy, setFeishuBusy] = useState<boolean>(false)
   const [feishuNotice, setFeishuNotice] = useState<string | null>(null)
 
+  /**
+   * 添加账号的**渠道二选一**（owner 2026-10-21：「不对称，交互上要体现二选一」）。
+   *
+   * ## 改之前为什么"不对称"（这是真问题，不是审美）
+   *
+   * 微信与飞书各是**一张常驻卡片**，并且飞书那张的**三格表单一直展开**：
+   * · 视觉上像是"**两件事都要填**"，而实际是二选一；
+   * · 微信只有一个按钮，飞书有一整块输入区 ⇒ 两边**分量不等**，读起来像"微信是次要的"；
+   * · 空着两格 App ID/Secret 长期占版面，把真正的动作（扫码）挤到上面去。
+   *
+   * ## 改成什么
+   *
+   * **一个「添加账号」入口 + 渠道切换**：先选渠道，再只显示该渠道的一条路径。
+   * `null` = 还没选（**初始收起**，不默认展开任何一家 —— 默认展开就等于替用户做了选择）。
+   *
+   * ⚠️ **为什么仍是同一个块的两种形态，而不是两个并列卡片**：渠道是**互斥**的
+   * （一个账号只属于一家），并列会把"互斥"读成"并列"。
+   */
+  const [addChannel, setAddChannel] = useState<'weixin' | 'feishu' | null>(null)
+
   // 加载 CCC 列表（选择器数据源）
   useEffect(() => {
     let alive = true
@@ -429,39 +449,129 @@ export function ImBridgeEditor(): React.JSX.Element {
             </li>
           ))}
 
-          {/* 扫码绑定（**微信独有形态**——飞书走上面的凭据表单） */}
+          {/* ── 添加账号：**渠道二选一**（owner 2026-10-21：「不对称，交互上要体现二选一」）──
+              改之前是两张常驻卡片（微信扫码 / 飞书凭据表单，且表单**一直展开**）⇒
+              读起来像"两件事都要填"，而实际互斥。现在收成一个入口 + 渠道切换。 */}
           <li>
             <div className="ss-rowCard">
               <div className="ss-rowText">
-                <span className="ss-rowName">扫码绑定微信</span>
+                <span className="ss-rowName">添加账号</span>
                 <span className="ss-rowDesc">
-                  {loginPhase === 'idle' && '微信「扫一扫」确认——每扫一次绑定一个新账号'}
-                  {loginPhase === 'waiting' && '二维码已生成（5 分钟有效）——微信扫一扫 → 手机确认'}
-                  {loginPhase === 'confirmed' && (loginNotice ?? '绑定成功')}
-                  {loginPhase === 'error' && (loginError ?? '绑定失败')}
-                  {loginPhase === 'expired' && '二维码已过期，请重新获取'}
+                  {addChannel === null && '选一个渠道，再按它的方式绑定（一个账号只属于一家）'}
+                  {addChannel === 'weixin' && '微信：手机「扫一扫」确认——每扫一次绑定一个新账号'}
+                  {addChannel === 'feishu' && '飞书：填企业自建应用的 App ID 与 App Secret——每提交一次新增一个账号'}
                 </span>
                 <span className="ss-help">
-                  <button type="button" className="ss-helpMark" aria-label="扫码绑定帮助">?</button>
-                  <span className="ss-helpTip">{'扫码绑定微信账号。\n' +
-                    '· 走腾讯 iLink 开放协议（个人微信 Bot API）\n' +
-                    '· 步骤：生成二维码 → 手机微信「扫一扫」→ 手机上确认\n' +
-                    '· 每扫一次绑定一个新账号，可多账号，各自独立轮询\n' +
-                    '· 二维码 5 分钟有效；不需要平台审核'}
+                  <button type="button" className="ss-helpMark" aria-label="添加账号帮助">?</button>
+                  <span className="ss-helpTip">{'两个渠道二选一，绑定方式不同：\n' +
+                    '· 微信：走腾讯 iLink 开放协议（个人微信 Bot API），扫码确认，不需要平台审核\n' +
+                    '· 飞书：走企业自建应用，需要 App ID 与 App Secret（开放平台 → 开发者后台 → 凭证与基础信息）\n' +
+                    '· 两者可以同时存在，但**每个账号只属于一家**；账号、路由、开关互不影响\n' +
+                    '· 每绑定一次新增一个账号，各自独立连接'}
                   </span>
                 </span>
               </div>
               <div className="ss-rowControl">
-                <button
-                  type="button"
-                  className="ss-loginBtn"
-                  disabled={loginPhase === 'waiting'}
-                  onClick={() => void startLogin()}
-                >
-                  {loginPhase === 'waiting' ? '等待扫码…' : '扫码绑定'}
-                </button>
+                {addChannel !== null && (
+                  <button
+                    type="button"
+                    className="ss-removeBtn"
+                    onClick={() => { setAddChannel(null); setFeishuNotice(null) }}
+                  >
+                    收起
+                  </button>
+                )}
               </div>
             </div>
+
+            {/* 渠道切换（二选一：只有一个能被选中） */}
+            <div className="ss-channelPicker" role="radiogroup" aria-label="选择添加渠道">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={addChannel === 'weixin'}
+                className={`ss-channelOption${addChannel === 'weixin' ? ' ss-channelOptionOn' : ''}`}
+                onClick={() => { setAddChannel('weixin'); setFeishuNotice(null) }}
+              >
+                微信
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={addChannel === 'feishu'}
+                className={`ss-channelOption${addChannel === 'feishu' ? ' ss-channelOptionOn' : ''}`}
+                onClick={() => { setAddChannel('feishu'); setFeishuNotice(null) }}
+              >
+                飞书
+              </button>
+            </div>
+
+            {/* 微信路径：只有一个按钮 */}
+            {addChannel === 'weixin' && (
+              <div className="ss-channelBody">
+                <div className="ss-rowText">
+                  <span className="ss-rowDesc">
+                    {loginPhase === 'idle' && '点击后用手机微信「扫一扫」确认'}
+                    {loginPhase === 'waiting' && '二维码已生成（5 分钟有效）——微信扫一扫 → 手机确认'}
+                    {loginPhase === 'confirmed' && (loginNotice ?? '绑定成功')}
+                    {loginPhase === 'error' && (loginError ?? '绑定失败')}
+                    {loginPhase === 'expired' && '二维码已过期，请重新获取'}
+                  </span>
+                </div>
+                <div className="ss-rowControl">
+                  <button
+                    type="button"
+                    className="ss-loginBtn"
+                    disabled={loginPhase === 'waiting'}
+                    onClick={() => void startLogin()}
+                  >
+                    {loginPhase === 'waiting' ? '等待扫码…' : '扫码绑定'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 飞书路径：三格表单 + 提交 */}
+            {addChannel === 'feishu' && (
+              <div className="ss-channelBody ss-channelBodyCol">
+                {feishuNotice !== null && (
+                  <span className="ss-rowDesc">{feishuNotice}</span>
+                )}
+                <div className="ss-feishuForm">
+                  <input
+                    className="ss-input"
+                    type="text"
+                    placeholder="App ID（cli_xxx）"
+                    value={feishuAppId}
+                    onChange={(e) => setFeishuAppId(e.target.value)}
+                  />
+                  <input
+                    className="ss-input"
+                    type="password"
+                    placeholder="App Secret"
+                    value={feishuAppSecret}
+                    onChange={(e) => setFeishuAppSecret(e.target.value)}
+                  />
+                  <input
+                    className="ss-input"
+                    type="text"
+                    placeholder="账号名（可选，如「家庭群机器人」）"
+                    value={feishuName}
+                    onChange={(e) => setFeishuName(e.target.value)}
+                  />
+                </div>
+                <div className="ss-channelActions">
+                  <button
+                    type="button"
+                    className="ss-loginBtn"
+                    disabled={feishuBusy || feishuAppId.trim() === '' || feishuAppSecret.trim() === ''}
+                    onClick={() => void addFeishuAccount()}
+                  >
+                    {feishuBusy ? '添加中…' : '添加飞书账号'}
+                  </button>
+                </div>
+              </div>
+            )}
           </li>
 
           {/* 二维码展示（等待扫码时；v1.27.5 紧凑化：更小 + 步骤横排） */}
@@ -479,61 +589,6 @@ export function ImBridgeEditor(): React.JSX.Element {
               </div>
             </li>
           )}
-
-          {/* 飞书凭据表单（可反复添加——每提交一次即新增一个账号） */}
-          <li>
-            <div className="ss-rowCard">
-              <div className="ss-rowText">
-                <span className="ss-rowName">添加飞书账号</span>
-                <span className="ss-rowDesc">
-                  {feishuNotice ?? '填企业自建应用的 App ID 与 App Secret——每提交一次新增一个账号'}
-                </span>
-                <span className="ss-help">
-                  <button type="button" className="ss-helpMark" aria-label="飞书绑定帮助">?</button>
-                  <span className="ss-helpTip">{'添加飞书账号（企业自建应用）。\n' +
-                    '· 飞书开放平台 → 开发者后台 → 你的应用 → 「凭证与基础信息」\n' +
-                    '· 复制 App ID 与 App Secret 填在下面\n' +
-                    '· 事件订阅选「长连接」并订阅 im.message.receive_v1\n' +
-                    '· 每提交一次新增一个账号，各自独立连接\n' +
-                    '· 与微信并列：账号、路由、开关互不影响'}
-                  </span>
-                </span>
-              </div>
-              <div className="ss-rowControl">
-                <button
-                  type="button"
-                  className="ss-loginBtn"
-                  disabled={feishuBusy || feishuAppId.trim() === '' || feishuAppSecret.trim() === ''}
-                  onClick={() => void addFeishuAccount()}
-                >
-                  {feishuBusy ? '添加中…' : '添加飞书账号'}
-                </button>
-              </div>
-            </div>
-            <div className="ss-feishuForm">
-              <input
-                className="ss-input"
-                type="text"
-                placeholder="App ID（cli_xxx）"
-                value={feishuAppId}
-                onChange={(e) => setFeishuAppId(e.target.value)}
-              />
-              <input
-                className="ss-input"
-                type="password"
-                placeholder="App Secret"
-                value={feishuAppSecret}
-                onChange={(e) => setFeishuAppSecret(e.target.value)}
-              />
-              <input
-                className="ss-input"
-                type="text"
-                placeholder="账号名（可选，如「家庭群机器人」）"
-                value={feishuName}
-                onChange={(e) => setFeishuName(e.target.value)}
-              />
-            </div>
-          </li>
 
           {/* 路由表（JSON 编辑；v1.27.5 紧凑化：textarea 默认 3 行） */}
           <li>

@@ -530,6 +530,62 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* 渠道二选一（owner 2026-10-21：「不对称，交互上要体现二选一」）。
+ * 判据：**选中态必须一眼可见**（描边 + 文字色），因为这两个按钮的"当前只有一个成立"
+ * 是这条交互的全部语义；没有选中态就退化成两个普通按钮，等于没做二选一。 */
+.ss-channelPicker {
+  display: flex;
+  gap: 6px;
+  margin: 8px 0 0;
+}
+
+.ss-channelOption {
+  flex: none;
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: transparent;
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--ds-transition-duration-fast, 0.15s) ease;
+}
+
+.ss-channelOption:hover {
+  color: var(--dsw-alias-label-primary);
+}
+
+.ss-channelOptionOn {
+  border-color: var(--dsw-alias-state-success-primary, #22c55e);
+  color: var(--dsw-alias-state-success-primary, #22c55e);
+  background: var(--dsw-alias-interactive-bg-active, rgba(128, 128, 128, 0.12));
+}
+
+/* 渠道展开区：微信是「一行说明 + 按钮」，飞书是「竖排表单 + 按钮」 */
+.ss-channelBody {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-bg-layer-2);
+}
+
+.ss-channelBodyCol {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.ss-channelActions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 /* 路由表 JSON 编辑框 */
 .ss-routesEditor {
   width: 100%;

@@ -406,13 +406,43 @@ export function findSession(sessionsDir: string, key: string): SessionEntry | nu
   const byName = all.find((s) => s.dirName === key)
   if (byName) return byName
   // ② 编码精确命中
-  const byCode = all.find((s) => parseTrajectoryCode(s.dirName) === key)
+  //
+  // 🔴🔴 **2026-10-21（A95 ①，owner 批「①②」）：命中多条时**响亮报歧义**，不再静默取首命中。**
+  //
+  // 改之前是 `all.find(...)` ⇒ 重码时按目录扫描顺序取第一个，**既不报歧义也不告警**。
+  // 而编码是**终身身份**（AXIOM 3）⇒ 静默取其一 = 把命令投到**另一条轨迹**上，且盘上没有任何信号
+  // （同族 D186：可以拒绝，但不许不出声）。
+  //
+  // ⚠️ **重码从哪来**：分配侧早已有闸（`findCodeCollision` 扫活跃＋归档），自动分配走 `maxId+1`
+  // 且扫描域含归档区 ⇒ **按构造不撞车**。盘古/天工那些重码是**闸装上之前的存量**
+  // ⇒ 本条修的不是"新重码"，而是"**存量重码被静默消费**"。
+  //
+  // ⚠️ **为什么抛错而不是返回 null**：返回 null 会让调用方把"identity 有歧义"读成"没有这条"，
+  // 转而自己造一个新的 —— 那正是"重码继续繁殖"的写法。
+  const byCodeHits = all.filter((s) => parseTrajectoryCode(s.dirName) === key)
+  if (byCodeHits.length > 1) {
+    throw new Error(
+      `编码「${key}」在本 CCC 有 ${byCodeHits.length} 条轨迹同时占用，无法确定要操作哪一条：\n` +
+      byCodeHits.map((s) => `  · ${s.dirName}`).join('\n') +
+      '\n认知轨迹的编码是**终身身份**（AXIOM 3），重码意味着历史存量有问题 —— ⛔ 不会替你任选其一。\n' +
+      '⇒ 改用**完整目录名**指定（上列任一）。',
+    )
+  }
+  const byCode = byCodeHits[0]
   if (byCode) return byCode
   // ②b 补零兼容（`S31` → `S031`）
   const padded = key.match(/^S(\d{1,})$/)
   if (padded) {
     const want = `S${padded[1]!.padStart(3, '0')}`
-    const byPadded = all.find((s) => parseTrajectoryCode(s.dirName) === want)
+    const byPaddedHits = all.filter((s) => parseTrajectoryCode(s.dirName) === want)
+    if (byPaddedHits.length > 1) {
+      throw new Error(
+        `编码「${want}」（由「${key}」补零而来）有 ${byPaddedHits.length} 条轨迹同时占用，无法确定：\n` +
+        byPaddedHits.map((s) => `  · ${s.dirName}`).join('\n') +
+        '\n⇒ 改用**完整目录名**指定。',
+      )
+    }
+    const byPadded = byPaddedHits[0]
     if (byPadded) return byPadded
   }
   // ③ UID 精确命中（只读兼容，大小写敏感）
@@ -583,7 +613,32 @@ export function createSession(opts: CreateSessionOptions): CreateSessionResult {
     if (issue.length > 100) {
       throw new Error(`issue too long: ${issue.length} chars (max 100)`)
     }
-    const dirName = `${datePrefix}--${sanitizeDirName(issue)}`
+    // 🔴🔴 **2026-10-21（A94，owner 批「补」）：`--issue` 也要过码的两道闸。**
+    //
+    // 改之前：目录名直接取 `sanitizeDirName(issue)`，**既不校验形态、也不查占用**
+    // ⇒ `create --issue S142` 会造出一个**自称 S142** 的目录（`parseTrajectoryCode` 把
+    // 剥掉日期前缀后的第一段当编码）⇒ 一个**全新的重码**，且分配侧的闸完全没经过。
+    // ⇒ 那正是「存量重码被静默消费」（A95 ①）之外**唯一还能继续生产重码的口子**。
+    //
+    // ⚠️ 作用面要看清：`issue` 同时承担**两个角色** —— 目录名的可读段 **和** 轨迹编码。
+    //    工单号（`apaas-26116`、`TEST-1`）本来就落在 `CODE_PATTERN` 的字符集内，照常通过；
+    //    这条闸真正挡的是 ① 含空格/中文/`--` 的串 ② **已被别人占用的串**（含归档区）。
+    const issueCode = sanitizeDirName(issue)
+    if (!isValidTrajectoryCode(issueCode)) {
+      throw new Error(
+        `issue「${issue}」会被当成本轨迹的**编码**（目录名 = 日期--<编码>），但它不是合法编码：` +
+        `允许 [A-Za-z0-9._-]、首字符须字母或数字、长度 ≤64，且不得含中文与 "--"。`,
+      )
+    }
+    const issueDup = findCodeCollision(sessionsDir, issueCode)
+    if (issueDup !== null) {
+      throw new Error(
+        `issue「${issue}」会被当成本轨迹的**编码**，而它已被占用：${issueDup}\n` +
+        '认知轨迹的编码是**终身身份**（AXIOM 3），归档不会释放它。\n' +
+        '⇒ 换一个工单号，或用 `create --desc … --id <新码>` 显式指定。',
+      )
+    }
+    const dirName = `${datePrefix}--${issueCode}`
     const sessionPath = join(sessionsDir, dirName)
     if (!dryRun && existsSync(sessionPath)) {
       throw new Error(`Session directory already exists: "${dirName}"`)

@@ -116,9 +116,14 @@ describe('cognitive-trajectory-ops 退化面：`createSession` 的五条拒绝�
 
   it('🔴 `:282` issue **超 100 字符** ⇒ 抛 `issue too long`；`--desc`/`--issue` **互斥**与**二选一**', () => {
     expect(() => createSession({ root: dir, issue: 'a'.repeat(101), dryRun: false })).toThrow(/issue too long: 101 chars \(max 100\)/)
-    // 边界正控：恰好 100 放行
-    const ok = createSession({ root: dir, issue: 'b'.repeat(100), dryRun: false })
+    // 🔴 **边界正控已改（2026-10-21，A94）**：原断言「恰好 100 字符放行」。
+    //    而 `issue` 同时**充当轨迹编码**（目录名 = 日期--<编码>），编码上限是 **64**
+    //    ⇒ 65~100 字符的 issue 会造出一个**不合法编码的目录**（改之前真的会建出来）。
+    //    这是 A94 缺陷的另一半，不是本次引入。⇒ 正控改用 **64 字符**（编码上限的正控）。
+    const ok = createSession({ root: dir, issue: 'b'.repeat(64), dryRun: false })
     expect(existsSync(ok.sessionPath)).toBe(true)
+    // 65 字符 ⇒ 被码形态闸拦下（issue 兼作编码）
+    expect(() => createSession({ root: dir, issue: 'c'.repeat(65), dryRun: false })).toThrow(/不是合法编码/)
 
     // `:274` 两个都没给 ⇒ 抛
     expect(() => createSession({ root: dir, dryRun: false })).toThrow(/requires either --desc or --issue/)
@@ -164,7 +169,12 @@ describe('cognitive-trajectory-ops 退化面：`createSession` 的五条拒绝�
   it('🔴 `:287` **目录已存在**（issue 模式）：同 issue 重复创建 ⇒ 抛（与 desc 模式是**两条独立**守卫）', () => {
     const first = createSession({ root: dir, issue: 'TEST-1', dryRun: false })
     expect(existsSync(first.sessionPath)).toBe(true)
-    expect(() => createSession({ root: dir, issue: 'TEST-1', dryRun: false })).toThrow(/already exists/)
+    // 🔴 **断言改钉（2026-10-21，A94）**：改之前这里命中 `:287` 的 `already exists`
+    //    （靠 `existsSync(sessionPath)`）。现在 A94 把**码占用闸**放在更前面，
+    //    同一个 issue 第二次会被**编码占用**拦下（`findCodeCollision` 命中刚建的那条）。
+    //    ⇒ 两条守卫都"会拒绝"，但**拒绝它的那一道换了**。这是行为变化，如实钉新的那道。
+    //    ⚠️ 判据要看住**语义**（重复创建必须被拒），而不是看住某一句文案（D131）。
+    expect(() => createSession({ root: dir, issue: 'TEST-1', dryRun: false })).toThrow(/已被占用/)
   })
 
   it('🔴 `:290`/`:320` **dryRun 两条返回**：不建目录、但给出**将要建的路径**与不同文案', () => {
