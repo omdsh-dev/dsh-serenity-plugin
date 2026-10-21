@@ -158,12 +158,15 @@ export function readContextPressure(
  * 活跃 SESSION.md 体积上限缺省值（KB）。
  * CCC 级可覆盖：`.opencode/serenity.json` → `sessionKeeper.sessionMdMaxKB`（0 = 关闭）。
  *
- * v1.31.2（S142 用户 2026-09-09）：缺省 **100 → 200**。理由（R↓）：100KB 对**长期维护会话**
- * 偏紧——S142 自身日志达 292KB，100KB 阈值会在每轮都催（提醒疲劳），而重写本身是大工程；
- * 200KB 仍能把"无界增长"挡在门外，又给维护类会话留出一次完整的重写周期。
- * 备选：保持 100（催得勤但疲劳）；CCC 各自覆盖（新容器默认无指引）。
+ * 变更史（每次改都有明确 owner 令，别把它当调参）：
+ * · v1.31.1 引入，缺省 **100**；
+ * · v1.31.2（owner 2026-09-09）**100 → 200**：当时理由是"100KB 对长期维护会话偏紧"；
+ * · 🔴 **v1.84.0（owner 2026-10-21）200 → 100** —— owner 明令「阈值改为 100k」。
+ *   ⚠️ **同时**把重写文案换成「按 EAP 重构整个 SESSION.md」（同一次令）。两件事配套：
+ *   更低的阈值 + 更明确的动作词 ⇒ 催得更早，但每次催都给出**可执行的重构判据**，
+ *   而不是只报一个体积数。⇒ 旧理由（"催得勤会疲劳"）的前提被"催得更可执行"抵消。
  */
-export const DEFAULT_SESSION_MD_MAX_KB = 200
+export const DEFAULT_SESSION_MD_MAX_KB = 100
 
 /** 连续超限轮数达此值 → 升级强制语气（对齐 rebuild 提醒的 REBUILD_ESCALATE_AFTER） */
 const COMPACTION_ESCALATE_AFTER = 3
@@ -269,17 +272,21 @@ export function readSessionMdMaxKB(root: string, configPaths?: string[], now: ()
 }
 
 /**
- * LOGBOOK COMPACTION 提醒文案（v1.31.1）。
+ * LOGBOOK COMPACTION 提醒文案（v1.31.1；🔴 **v1.84.0 文案改版**）。
  *
- * 归属（D23 + 用户 2026-09-09 拍板）：**ACC 内嵌机制事实 + 4 条重写原则**——理由：这 4 条是
- * 认知质量规范（与 EAP 同层，不是会随角色迭代的措辞），且未配置任何 CCC 文档的容器也要立刻可用。
+ * 归属（D23）：**ACC 内嵌机制事实 + 动作判据**——理由：判据是认知质量规范（与 EAP 同层，
+ * 不是会随角色迭代的措辞），且未配置任何 CCC 文档的容器也要立刻可用。
  *
- * 四条原则（用户原话逐条落成可执行判据）：
- * ① 保留 EAP 分层骨架（不许压成时间流水账）
- * ② 内容可外移到 references 文件（证据链/日志/参考资料 → `AGENT_SESSIONS/<会话>/references/*.md`，
- *    在 SESSION.md 里留链接）
- * ③ 允许整合不重要事项（被取代的决策 / 已解决问题 / 中间态）
- * ④ 自主裁量权充分允许（唯一硬要求 = 骨架 + 未决项/决策理由/下一步仍可重建）
+ * 🔴 **v1.84.0（owner 2026-10-21 令）**：文案从「4 条重写原则」换成
+ * **「按 EAP 重构整个 SESSION.md」**（owner 选 B 案）。新文案的判据直接取 EAP 的三个变量：
+ * · **E↑** 变量／边界／有向关系全部显式；
+ * · **R↓** 带理由与被否项（下一个自我重建**推理**而非只有结论），并把长证据链外移到
+ *   `AGENT_SESSIONS/<会话>/references/*.md`、在 SESSION.md 里留链接；
+ * · **S↑** 结构每次都能同样地重建，而不是时间流水账。
+ * ⚠️ **另两句是硬约束，不许删**（各自理由见函数体内的注释）：
+ * ① `The fixed sections are a contract with the harness: keep their order and headings, …`
+ *    —— 与系统提示词的 `Fixed sections, in this order: …` 对齐，「重构」不含契约骨架；
+ * ② `frontmatterGuard` —— 唯一防住"skill 声明被抹掉"的东西。
  */
 export function cognitiveTrajectoryCompactionReminderText(input: {
   sizeKB: number
@@ -289,21 +296,35 @@ export function cognitiveTrajectoryCompactionReminderText(input: {
 }): string {
   const { sizeKB, limitKB, mdPath, escalated = false } = input
   const facts = `SESSION.md is ${sizeKB} KB (limit ${limitKB} KB): ${mdPath}`
+  // 🔴 **2026-10-21（owner 令）**：原「4 条重写原则」（keep the EAP layered skeleton ／ move detail out ／
+  //    merge or drop ／ full discretion）整段被**按 EAP 重构整个 SESSION.md** 取代。
+  //    新文案（owner 选 B 案）把动作词从 `rewrite` 改成 `refactor … end to end under EAP`，
+  //    并把三条具体细则换成 EAP 的三个**变量**（E↑ ／ R↓ ／ S↑）——判据来源从"上一版的口诀"
+  //    回到**理论本身**（`praxis eap`），模型不必依赖这段文字转述才能做对。
+  //
+  //    🔴 **两句必须一起留着，理由不同**：
+  //    ① `keep their order and headings, rewrite everything inside them` —— 系统提示词每轮逐字要求
+  //       `Fixed sections, in this order: 身份与边界 / 权威锚点 / …` 且 `keep its format & granularity fixed`。
+  //       「重构整个」若不划这条线，模型可能连**契约骨架**一起重建 ⇒ 与注入面直接冲突。
+  //       ⇒ 重构的是**内容**，不是**契约**。
+  //    ② `move detail out … references/*.md` —— EAP **推不出**"外移到哪"（EAP 只说 R↓，不指定落点）。
+  //       它是一条独立的操作指令，owner 2026-10-21 明确要求保留。
   const principles =
-    'Load eap (praxis eap) first, then rewrite SESSION.md under these principles: '
-    + '(1) keep the EAP layered skeleton — a stable section structure, not a chronological dump; '
-    + '(2) move detail out — long evidence chains, logs and reference material belong in separate files '
+    'Load eap (praxis eap) first, then refactor SESSION.md end to end under EAP: '
+    + '(1) E↑ — make every variable, boundary and directed relationship explicit; '
+    + '(2) R↓ — carry rationale and rejected alternatives, so the next self can rebuild the reasoning rather than '
+    + 'only the conclusion, and move long evidence chains, logs and reference material out into separate files '
     + '(e.g. AGENT_SESSIONS/<session>/references/*.md) linked from SESSION.md; '
-    + '(3) merge or drop what no longer matters — superseded decisions, resolved issues, intermediate states; '
-    + '(4) you have full discretion on how far to go: the only hard requirements are the skeleton and that every '
-    + 'still-open item, decision rationale and next step stays recoverable (reconstruction over preservation).'
+    + '(3) S↑ — a structure that regenerates the same way each time instead of a chronological transcript. '
+    + 'The fixed sections are a contract with the harness: keep their order and headings, and rewrite everything '
+    + 'inside them.'
   // v1.34.1 护栏（规格 docs/cognitive-trajectory-skill-injection.md §4）：compaction 是**唯一会重写 SESSION.md** 的时刻，
   // 也正因此是 frontmatter（轨迹 skill 声明的唯一真相源）最可能被抹掉的时刻——在提醒里点名它。
   // 残余风险（记录在案）：护栏是**文案级**，不是机械强制；文案只此一处，两条提醒共用（防两处漂移）。
   const frontmatterGuard =
     'Keep the YAML frontmatter at the top of the file exactly as it is — it carries this cognitive trajectory\'s skill declarations.'
   if (escalated) {
-    return `${eventToken('compaction')} ${facts} — you have been reminded repeatedly and have NOT compacted SESSION.md. This is now mandatory: STOP the current task step, load eap (praxis eap), rewrite SESSION.md, then resume. ${principles} ${frontmatterGuard} This reminder persists until the file is under the limit.`
+    return `${eventToken('compaction')} ${facts} — you have been reminded repeatedly and have NOT compacted SESSION.md. This is now mandatory: STOP the current task step, load eap (praxis eap), refactor SESSION.md end to end, then resume. ${principles} ${frontmatterGuard} This reminder persists until the file is under the limit.`
   }
   return `${eventToken('compaction')} ${facts}. Pause the current work and compact this cognitive trajectory's log (SESSION.md) before continuing — that log is the persistent body of this cognitive trajectory, and its size is operational entropy (H_op) the container pays on every read. ${principles} ${frontmatterGuard} After rewriting, resume the paused work; this reminder stops once the file is under the limit.`
 }

@@ -152,4 +152,4 @@ ACC 代码里不出现任何具体 CCC 或具体 skill 名。
 | 🔴 `container_trajectory create` | **不触发注入**——它**刻意不夺走当前绑定**（U6；防"长会话中途误 `create` 即被夺走"），只写一条 `'create'` 审计记录（note 逐字 `binding unchanged until explicit use`）⇒ **新建轨迹须后续显式 `use`** 才挂上 skill |
 | `container_admin msm guide` | SEP 章节移除；MSM 手册其余内容不动 |
 | `skiff` 角色提示词 | **同机制的另一消费者**（`skiff-core.ts:329`）；两者互不依赖，各自注册自己的 section。**v1.1**：CCC 级声明**也送达 skiff 会话**（复用同一 `registerTrajectorySkillSection`，不另写一套） |
-| `SESSION.md` 体积上限（D48，200 KB） | 本规格**不改变**它；frontmatter 体积可忽略 |
+| `SESSION.md` 体积上限（原 D48 为 200 KB；🔴 **v1.84.0（owner 2026-10-21 令）改为 100 KB**） | 本规格**不改变**它；frontmatter 体积可忽略 |

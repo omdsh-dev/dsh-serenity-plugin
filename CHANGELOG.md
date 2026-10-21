@@ -1,3 +1,76 @@
+## v1.84.0 — 2026-10-21（**SESSION.md 体积阈值 200 → 100 KB** ＋ **重写提醒改为「按 EAP 重构整个 SESSION.md」**）
+
+**来源一件**：owner「阈值改为100k，选用B方案，小版本+1 然后发布；references 外移 保留」。
+
+两处改动是同一次令的两半，配套生效：**催得更早**（100 KB）＋ **每次催都给出可执行的重构判据**（EAP 三变量），
+而不是只报一个体积数。
+
+---
+
+### 一、阈值 `DEFAULT_SESSION_MD_MAX_KB`：200 → 100
+
+| 项 | 值 |
+|---|---|
+| 缺省上限 | **100 KB**（`seams/keeper.ts`） |
+| CCC 覆盖 | `.opencode/serenity.json` → `sessionKeeper.sessionMdMaxKB`（`0` = 关闭整条提醒） |
+| 判定 | `size > limitKB * 1024`（严格大于，恰好相等不触发） |
+
+**变更史**（写在常量头注里，防下一次"以为是调参"）：v1.31.1 引入 100 → v1.31.2（2026-09-09）改 200
+→ **v1.84.0 回到 100**。
+
+🔴 **旧理由为什么不再成立**：v1.31.2 把 100 上调 200 的理由是"100KB 对长期维护会话偏紧，
+会在每轮都催（提醒疲劳），而重写本身是大工程"。本版把**动作词换成了可执行的重构判据**
+⇒ 每次催都回答"具体怎么改"，而不再是只给一个数字 ⇒ "催得勤会疲劳"的前提被抵消。
+
+### 二、重写提醒文案：四条原则 → **按 EAP 重构整个 SESSION.md**（owner 选 B 案）
+
+**旧文案**（被取代，`keep the EAP layered skeleton` / `move detail out` / `merge or drop` / `full discretion`）
+是 2026-09-09 拍板的**四条操作口诀**。**新文案**把判据来源从口诀**回到理论本身**（`praxis eap`）：
+
+```
+Load eap (praxis eap) first, then refactor SESSION.md end to end under EAP:
+(1) E↑ — make every variable, boundary and directed relationship explicit;
+(2) R↓ — carry rationale and rejected alternatives, so the next self can rebuild the reasoning
+    rather than only the conclusion, and move long evidence chains, logs and reference material
+    out into separate files (e.g. AGENT_SESSIONS/<session>/references/*.md) linked from SESSION.md;
+(3) S↑ — a structure that regenerates the same way each time instead of a chronological transcript.
+The fixed sections are a contract with the harness: keep their order and headings,
+and rewrite everything inside them.
+```
+
+#### 🔴 三句必须一起留着，各自理由不同（删任何一句都会坏）
+
+| 句 | 为什么不能删 |
+|---|---|
+| `refactor … end to end under EAP` | 动作词从 `rewrite` 改成 `refactor`，范围明确为**整个文件**（owner 原话） |
+| `The fixed sections are a contract … keep their order and headings` | 系统提示词每轮逐字要求 `Fixed sections, in this order: 身份与边界 / 权威锚点 / …` ＋ `keep its format & granularity fixed`。「重构整个」若不划这条线，模型可能连**契约骨架**一起重建 ⇒ 与注入面直接冲突。**重构的是内容，不是契约。** |
+| `move detail out … references/*.md` | EAP **推不出**"外移到哪"（EAP 只说 R↓，不指定落点）。这是一条独立的操作指令，owner 明确要求**保留** |
+| `frontmatterGuard`（原样不动） | compaction 是**唯一会重写 SESSION.md** 的时刻，也是 skill 声明最可能被抹掉的时刻 |
+
+**升级档同步**：`rewrite SESSION.md` → `refactor SESSION.md end to end`（两档动作词不许混着读）。
+证据：`tests/keeper.test.ts` 断言升级档含 `refactor SESSION.md end to end`。
+
+### 三、测试：改 3 处、修 1 处**原本已失效的反向钉**
+
+| 处 | 处置 |
+|---|---|
+| `超限 → 注入提醒` | 旧四条断言（`EAP layered skeleton` 等）**删**，换 `refactor SESSION.md end to end under EAP` ＋ `E↑`/`R↓`/`S↑` ＋ 两条硬约束 |
+| `提醒文案：非升级版…` | 同上，并**新增**升级档动作词断言 |
+| `阈值：未配置 → 缺省` | `toBe(200)` → **`toBe(100)`**，注释写明变更史 |
+| 🆕 `SCRATCH PRUNE` 的反向钉 | 原钉 `not.toContain('keep the EAP layered skeleton')` —— 那句话改版后**已不存在** ⇒ 该反向钉**当时就已失效**（即使整段 compaction 文案混进便签档也照样绿）。改钉 `not.toContain('refactor SESSION.md end to end')` |
+
+🔴 **第三类是本次顺带发现的真缺口（D151 同族）**：反向钉钉的是一个**会消失的字符串**，
+它失效时**没有任何信号** —— 绿得和真的一样。
+
+### 四、文档同步
+
+| 文件 | 改动 |
+|---|---|
+| `src/tools/msm/service.ts`（`ccc-config` 手册） | 配置示例 `sessionMdMaxKB: 200` → `100`；正文改为 EAP 三变量 ＋ 两条硬约束；补变更史 |
+| `docs/cognitive-trajectory-skill-injection.md` | `SESSION.md 体积上限（D48，200 KB）` → 标注 v1.84.0 改为 **100 KB** |
+
+---
+
 ## v1.83.0 — 2026-10-21（**iLink 带上 `context_token`（主动发送不再裸发）** ＋ **`send-now` 建的载体标题钉住**）
 
 **来源两件**：

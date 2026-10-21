@@ -248,7 +248,7 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('超限 → 注入提醒（含 token / 体积 / 阈值 / 路径 / 4 条原则）', async () => {
+  it('超限 → 注入提醒（含 token / 体积 / 阈值 / 路径 / EAP 三变量）', async () => {
     bindSession(2048) // 2 KB > 1 KB
     const texts = await fire()
     expect(texts).toHaveLength(1)
@@ -258,11 +258,19 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
     expect(t).toContain('limit 1 KB')
     expect(t).toContain('SESSION.md')
     expect(t).toContain('praxis eap')
-    expect(t).toContain('EAP layered skeleton')
+    // 🔴 v1.84.0（owner 2026-10-21 令）：文案从「4 条重写原则」换成「按 EAP 重构整个 SESSION.md」。
+    //    被取代的旧断言（keep the EAP layered skeleton ／ merge or drop ／ full discretion ／
+    //    reconstruction over preservation）**不再钉**——它们钉的是一个已被删除的文案形态，
+    //    留着只会让下一版以为那四条还在。取代它的是 EAP 的三个变量 + 两条硬约束。
+    expect(t).toContain('refactor SESSION.md end to end under EAP')
+    expect(t).toContain('E↑')
+    expect(t).toContain('R↓')
+    expect(t).toContain('S↑')
+    // ② references 外移：owner 2026-10-21 明确「保留」——EAP 推不出"外移到哪"，它是独立操作指令。
     expect(t).toContain('references/')
-    expect(t).toContain('merge or drop')
-    expect(t).toContain('full discretion')
-    expect(t).toContain('reconstruction over preservation')
+    // ③ 两条硬约束：契约骨架（顺序与标题）+ frontmatter
+    expect(t).toContain('keep their order and headings')
+    expect(t).toContain('frontmatter')
   })
 
   it('未超限 → 零注入；重写后（文件变小）提醒自动停止', async () => {
@@ -329,7 +337,7 @@ describe('keeper: LOGBOOK COMPACTION（SESSION.md 体积超限重写提醒，v1.
 describe('keeper: LOGBOOK COMPACTION 纯逻辑', () => {
   afterEach(() => { __resetLogbookCompactionForTest() })
 
-  it('提醒文案：非升级版含行动指令 + 4 条原则；升级版含 mandatory/STOP', () => {
+  it('提醒文案：非升级版含行动指令 + EAP 三变量；升级版含 mandatory/STOP', () => {
     const base = cognitiveTrajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md' })
     expect(base).toContain('[COGNITIVE-TRAJECTORY-ASSISTANT · LOGBOOK COMPACTION]')
     expect(base).toContain('285 KB')
@@ -338,18 +346,26 @@ describe('keeper: LOGBOOK COMPACTION 纯逻辑', () => {
     expect(base).toContain('Pause the current work')
     expect(base).toContain('H_op')
     expect(base).toContain('resume the paused work')
+    // v1.84.0 文案（EAP 三变量，取代旧四条原则）
+    expect(base).toContain('refactor SESSION.md end to end under EAP')
+    expect(base).toContain('E↑')
+    expect(base).toContain('R↓')
+    expect(base).toContain('S↑')
     const esc = cognitiveTrajectoryCompactionReminderText({ sizeKB: 285, limitKB: 100, mdPath: '/ccc/SESSION.md', escalated: true })
     expect(esc).toContain('mandatory')
     expect(esc).toContain('STOP')
     expect(esc).toContain('persists until the file is under the limit')
+    // 升级档的动作词也必须一致（旧版这里是 rewrite，会与 refactor 混着读）
+    expect(esc).toContain('refactor SESSION.md end to end')
   })
 
-  it('阈值：未配置 → 缺省 200KB（v1.31.2 由 100 上调）；配置生效；0 生效（关闭）；坏值回落缺省', () => {
+  it('阈值：未配置 → 缺省 100KB（v1.84.0 由 200 下调）；配置生效；0 生效（关闭）；坏值回落缺省', () => {
     const dir = mkdtempSync(join(tmpdir(), 'keeper-limit-'))
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     const cfg = join(dir, '.opencode', 'serenity.json')
-    // v1.31.2（S142 用户"默认阈值设定在200kb吧"）：缺省值硬断言——防再次静默漂移
-    expect(DEFAULT_SESSION_MD_MAX_KB).toBe(200)
+    // 🔴 v1.84.0（owner 2026-10-21 令「阈值改为 100k」）：缺省值硬断言——防再次静默漂移。
+    //    变更史：v1.31.1 引入 100 → v1.31.2 改 200 → v1.84.0 回到 100（配套文案改版）。
+    expect(DEFAULT_SESSION_MD_MAX_KB).toBe(100)
     expect(readSessionMdMaxKB(dir)).toBe(DEFAULT_SESSION_MD_MAX_KB)
     writeFileSync(cfg, JSON.stringify({ sessionKeeper: { sessionMdMaxKB: 250 } }))
     __resetLogbookCompactionForTest()
@@ -470,7 +486,11 @@ describe('keeper: REBUILD-TODO 交界便签体积超限（v1.49.0，owner 2026-0
     // 动作 = **清理**，不是重写保骨架
     expect(base).toContain('Prune it now')
     expect(base).toContain('praxis eap')
-    expect(base).not.toContain('keep the EAP layered skeleton')
+    // 🔴 反向钉：便签档**不得**含 SESSION.md 档的重写文案。
+    //    ⚠️ v1.84.0 修正：这里原先钉的是 `keep the EAP layered skeleton`，而那句话已随文案改版消失
+    //    ⇒ 该反向钉**当时就失效**（旧串不存在，就算整段 compaction 文案混进来也照样绿）。
+    //    改钉新文案里最独特的动作短语，反向钉才继续有判别力。
+    expect(base).not.toContain('refactor SESSION.md end to end')
     expect(base).not.toContain('frontmatter')
     // 三条清理建议（已完成 / 已被取代 / 已进 SESSION.md）
     expect(base).toContain('already done')
