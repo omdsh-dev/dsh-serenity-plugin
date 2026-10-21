@@ -22,14 +22,29 @@ import {
 const SESSION = 'skiff-weixin-0123456789abcdef'
 const MANUAL = { root: '/ccc/home-serenity', accountId: 'wechat-1', userId: 'u@im.wechat', role: 'my-role' }
 
-/** 成功的 im-bridge 调用（v1.31.0 主形态：ACC 工具，channel=weixin + action=send/send-file） */
-function sendExec(sessionId = SESSION, args: Record<string, unknown> = {}, action = 'send') {
-  return { name: 'im-bridge', arguments: { channel: 'weixin', action, user: MANUAL.userId, text: 'hi', ...args }, agent: { session: { id: sessionId } } }
+/**
+ * 成功的 im-bridge 调用（v1.31.0 主形态：ACC 工具，channel=weixin + action=send/send-file）
+ *
+ * @param turn 这个工具调用发生在**第几轮**。真机上它由会话事件序推出来
+ *   （`guard.currentTurnOf` 的三级兜底），夹具里显式给 —— 因为"是哪一轮"正是本组要验的维度。
+ */
+function sendExec(sessionId = SESSION, args: Record<string, unknown> = {}, action = 'send', turn?: number) {
+  return {
+    name: 'im-bridge',
+    arguments: { channel: 'weixin', action, user: MANUAL.userId, text: 'hi', ...args },
+    ...(turn !== undefined ? { turn } : {}),
+    agent: { session: { id: sessionId } },
+  }
 }
 
 /** 兼容形态：v1.30.x 的 CCC MSM 通道（迁移期闸门同时认） */
-function legacyMsmExec(sessionId = SESSION) {
-  return { name: 'msm', arguments: { name: 'weixin-send', args: ['send', '--ccc', MANUAL.root] }, agent: { session: { id: sessionId } } }
+function legacyMsmExec(sessionId = SESSION, turn?: number) {
+  return {
+    name: 'msm',
+    arguments: { name: 'weixin-send', args: ['send', '--ccc', MANUAL.root] },
+    ...(turn !== undefined ? { turn } : {}),
+    agent: { session: { id: sessionId } },
+  }
 }
 
 /** 其它工具调用（msm 但非 weixin-send / 完全别的工具） */
@@ -245,6 +260,50 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     expect(hasSentThisTurn(SESSION)).toBe(false)
     f.stopTurn(agent)
     expect(steers).toHaveLength(1)
+  })
+
+  /**
+   * 🔴 **本组的靶子是真故障**（2026-10-21 真机："同一条消息被处理两轮"）。
+   *
+   * 现场时刻线：`12:08:25 发送成功 → 12:08:56 新入站 → 12:09:19 那一轮 turn-stopping`。
+   * 旧实现：入站到达时 `clearSentThisTurn` 把**正在跑那一轮**的证据抹掉 ⇒ 判"没发" ⇒ 打回 ⇒ 重答。
+   * ⇒ 用户看到"同一条消息处理了两轮"。
+   *
+   * 新契约：记账按**轮号**；陈旧记录靠"轮号不等"淘汰，**不再有清空动作**。
+   */
+  it('🔴 回归钉：同一轮内"发送成功 → 新入站 → turn-stopping" ⇒ **不得打回**', async () => {
+    const f = fakeCtx()
+    registerWeixinOutputGuard(f.ctx as never)
+    noteManualOutputSession(SESSION, MANUAL)
+    const { agent, steers } = fakeAgent()
+
+    await f.runTool(sendExec(SESSION, {}, 'send', 7), { isError: false })   // turn 7 里发出的
+    // 桥侧现在**不再清空**（旧实现会在这里把标记抹掉 —— 那就是缺陷本身）
+    f.stopTurn(agent, 7)                              // 同一轮收尾
+    expect(steers, '本轮确实发过，不许打回').toHaveLength(0)
+  })
+
+  it('🔴 反向钉：上一轮发的 **不能**顶替这一轮（跨轮必须重新发）', async () => {
+    const f = fakeCtx()
+    registerWeixinOutputGuard(f.ctx as never)
+    noteManualOutputSession(SESSION, MANUAL)
+    const { agent, steers } = fakeAgent()
+    // 模拟"turn 7 发过、turn 8 没发" ⇒ 必须打回（否则就退化成"发一次管一辈子"）
+    await f.runTool(sendExec(SESSION, {}, 'send', 7), { isError: false })
+    f.stopTurn(agent, 8)
+    expect(steers, 'turn 8 没发过，必须打回').toHaveLength(1)
+  })
+
+  it('取不到轮号时**偏向"发过"**（少打回，绝不误打回）', async () => {
+    const f = fakeCtx()
+    registerWeixinOutputGuard(f.ctx as never)
+    noteManualOutputSession(SESSION, MANUAL)
+    const { agent, steers } = fakeAgent()
+    // exec 上没有 turn、session 里也没有 turn/start ⇒ 记成 null（"不知道是哪一轮"）
+    await f.runTool(sendExec(), { isError: false })
+    expect(hasSentThisTurn(SESSION, null), '任一侧取不到轮号 ⇒ 判"发过"').toBe(true)
+    f.stopTurn(agent, null as unknown as number)
+    expect(steers, '取不到轮号不许打回').toHaveLength(0)
   })
 
   it('其它 MSM / 其它工具调用 → 不计入（只认 weixin-send）', async () => {

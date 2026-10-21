@@ -54,10 +54,23 @@ interface ManualOutputSession {
 
 const manualSessions = new Map<string, ManualOutputSession>()
 /**
- * 本轮是否已成功发送（**由桥在每轮开始时清空** `clearSentThisTurn`；闸门只置位不清空——
- * v1.30.17 起桥要在 `askTrajectory` 返回后读它决定是否兜底，故 turn-stopping 不再结算清空）。
+ * 「已发送」记账 —— 值是**发送发生时的轮号**（`null` = 取不到轮号，退化为旧语义）。
+ *
+ * ## 🔴 为什么必须是「轮号」而不是一个布尔（2026-10-21 实测缺陷）
+ *
+ * 旧形态是 `Set<sessionId>`：桥在**每条入站一到达**就 `clearSentThisTurn()`（`inbound-event.ts`），
+ * 而闸门只在 `tools/post-execute` 置位、`turn-stopping` 只读。
+ * ⇒ **一个还在跑的轮，它"我已经发了"的证据会被后到的那条入站抹掉。**
+ *
+ * 现场时刻线（真机，12:08~12:10）：`12:08:25` 发送成功 → `12:08:56` 新入站（抹）→
+ * `12:09:19` 那一轮的 `turn-stopping` 读空 ⇒ 判"没发" ⇒ 打回 ⇒ 模型重答。
+ * 用户看到的就是"同一条消息被处理了两轮"。
+ *
+ * ⇒ 记**轮号**之后：抹除操作可以问"我要抹的这一发，是不是**当前这一轮**发的"；
+ *   `turn-stopping` 也可以问"这一发是不是**我这一轮**发的"。两处都从"是不是同一轮"出发，
+ *   而不是从"这个会话有没有发过"出发。
  */
-const sentThisTurn = new Set<string>()
+const sentTurn = new Map<string, number | null>()
 /** 连续打回计数（成功发送即清零） */
 const rebukeCounts = new Map<string, number>()
 /** 闸门是否装配成功（v1.30.17：桥据此判断能否信任"未发送"这一判定——未装配时不兜底，防重复发送） */
@@ -72,7 +85,7 @@ export function noteManualOutputSession(sessionId: string, session: ManualOutput
 /** 桥：非手动模式 / 会话失效 → 注销（闸门随之失效，零干预） */
 export function forgetManualOutputSession(sessionId: string): void {
   manualSessions.delete(sessionId)
-  sentThisTurn.delete(sessionId)
+  sentTurn.delete(sessionId)
   rebukeCounts.delete(sessionId)
 }
 
@@ -81,17 +94,48 @@ export function isManualOutputSession(sessionId: string): boolean {
   return manualSessions.has(sessionId)
 }
 
-/** 本轮是否已成功发送（测试/诊断用；桥在每轮结束时读它决定是否兜底） */
-export function hasSentThisTurn(sessionId: string): boolean {
-  return sentThisTurn.has(sessionId)
+/**
+ * 本轮是否已成功发送。
+ *
+ * @param turn 期望的轮号（`agent/turn-stopping` 的 `payload.turn`）。
+ *   - **省略** ⇒ 旧语义："这个会话发过就算"（测试与桥的兜底判定用）。
+ *   - **给了** ⇒ 按轮比：只有"**这一轮**发的"才算。
+ *   - **任一侧取不到轮号**（记录是 `null`，或 `turn` 传了 `null`）⇒ **偏向"发过"**。
+ *     🔴 方向是刻意的：误判"没发"的代价 = 打回 + 重复回答（用户看到两轮，本缺陷本尊）；
+ *     误判"发过"的代价 = 少打回一次（用户可能真没收到一条）。前者已经发生过、后者尚未。
+ */
+export function hasSentThisTurn(sessionId: string, turn?: number | null): boolean {
+  if (!sentTurn.has(sessionId)) return false
+  if (turn === undefined) return true
+  const recorded = sentTurn.get(sessionId) ?? null
+  if (recorded === null || turn === null) return true // 任一侧取不到轮号 ⇒ 少打回
+  return recorded === turn
 }
 
 /**
- * 桥：**每轮开始时**清空本会话的"已发送"标记（turn 边界由桥掌握——v1.30.17）。
- * 闸门侧不再于 turn-stopping 结算清空，否则桥读不到本轮结果、无法兜底。
+ * 🔴 **桥不再调用本函数**（2026-10-21）。
+ *
+ * 旧语义 `clearSentThisTurn(sessionId)` = "来了新消息就当这个会话没发过"，
+ * 它**连正在跑那一轮的证据一起抹掉** —— 这正是"同一条消息被处理两轮"的根因：
+ * `12:08:25 发送成功 → 12:08:56 新入站(抹) → 12:09:19 那一轮 turn-stopping 判"没发" ⇒ 打回`。
+ *
+ * ## 现在的分工（判据只有一处：轮号）
+ *
+ * - **置位**：`tools/post-execute` 发送成功 ⇒ 记下**当前轮号**（`currentTurnOf`）。
+ * - **判定**：`agent/turn-stopping` 拿 `payload.turn` 与记录比对（`hasSentThisTurn`）。
+ * - **陈旧**：靠"轮号不等"自然淘汰 —— 上一轮发的记录，在下一轮 stopping 时天然不匹配。
+ *   ⇒ **不再需要任何"清空"动作**，也就不存在"清错人的记录"这件事。
+ *
+ * 本函数只留给**测试与显式重置**（如切换手动/自动模式）。`turn` 给定时按轮清，
+ * 是给诊断用的窄口子，生产路径不调用。
  */
-export function clearSentThisTurn(sessionId: string): void {
-  sentThisTurn.delete(sessionId)
+export function clearSentThisTurn(sessionId: string, turn?: number | null): void {
+  if (turn === undefined || turn === null) {
+    sentTurn.delete(sessionId)
+    return
+  }
+  const recorded = sentTurn.get(sessionId)
+  if (recorded !== undefined && recorded === turn) sentTurn.delete(sessionId)
 }
 
 /** 闸门是否装配成功（未装配 → 桥不做兜底：宁可静默也不冒重复发送的风险） */
@@ -151,9 +195,34 @@ export function buildManualOutputRebuke(session: ManualOutputSession): string {
 /** 测试辅助：清空全部状态 */
 export function __resetWeixinOutputGuardForTest(): void {
   manualSessions.clear()
-  sentThisTurn.clear()
+  sentTurn.clear()
   rebukeCounts.clear()
   guardActive = false
+}
+
+/**
+ * 从 `tools/post-execute` / 会话事件里取**当前轮号**（取不到 ⇒ `null`）。
+ *
+ * 为什么要费这个劲：修"同一条消息处理两轮"的判据是「这一发是不是**我这一轮**发的」，
+ * 而 `tools/post-execute` 的 `exec` 上**不一定**带 turn（宿主形状随版本变）。
+ * ⇒ 三级兜底：① `exec.turn` ② `agent.session` 的最后一个 `turn/start` ③ `null`（退化为旧语义）。
+ * ⛔ `null` 时**绝不**当成"发过了/没发过"的强判据 —— 见 `hasSentThisTurn` 的降级说明。
+ */
+function currentTurnOf(exec: unknown, agent: unknown): number | null {
+  const direct = (exec as { turn?: unknown } | null | undefined)?.turn
+  if (typeof direct === 'number' && Number.isFinite(direct)) return direct
+  const session = (agent as { session?: unknown } | null | undefined)?.session
+  const events = (session as { snapshotEvents?: () => readonly unknown[]; events?: readonly unknown[] } | null | undefined)
+  const list = typeof events?.snapshotEvents === 'function' ? events.snapshotEvents() : events?.events
+  if (!Array.isArray(list)) return null
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i] as { type?: unknown; data?: { turn?: unknown } } | undefined
+    if (e?.type === 'turn/start') {
+      const t = e.data?.turn
+      return typeof t === 'number' && Number.isFinite(t) ? t : null
+    }
+  }
+  return null
 }
 
 /**
@@ -171,7 +240,8 @@ export function registerWeixinOutputGuard(ctx: Context): void {
           // 🔴 按**该会话自己的渠道**判（缺省 weixin）—— 见 `isSuccessfulImSend` 的名字更正说明
           const session = manualSessions.get(sessionId)
           if (isSuccessfulImSend(exec, result, session?.channel ?? 'weixin')) {
-            sentThisTurn.add(sessionId)
+            // 🔴 记**轮号**（2026-10-21）：记布尔会让"后到的入站"把正在跑那一轮的证据抹掉。
+            sentTurn.set(sessionId, currentTurnOf(exec, (exec as { agent?: unknown }).agent))
             rebukeCounts.delete(sessionId)
           }
         }
@@ -195,7 +265,10 @@ export function registerWeixinOutputGuard(ctx: Context): void {
       if (!sessionId) return
       const session = manualSessions.get(sessionId)
       if (!session) return
-      const sent = sentThisTurn.has(sessionId)
+      // 🔴 按**轮**判（2026-10-21 修"同一条消息处理两轮"）：
+      //    旧判据是"这个会话发过没有" ⇒ 一条新入站把标记抹掉后，**正在跑的这一轮**会被误判"没发"。
+      //    `payload.turn` 由宿主给出；取不到时 `hasSentThisTurn` 退化为旧语义（少打回，不误打回）。
+      const sent = hasSentThisTurn(sessionId, payload?.turn ?? null)
       // v1.30.17：**不清空**——桥在 askTrajectory 返回后读 hasSentThisTurn 决定是否兜底转发
       if (sent) return
 

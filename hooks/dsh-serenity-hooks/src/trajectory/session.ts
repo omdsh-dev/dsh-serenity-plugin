@@ -446,6 +446,72 @@ function countAssistantMessages(session: unknown): number {
 }
 
 /**
+ * 会话当前轮号（最后一个 `turn/start` 的 `turn`；取不到 ⇒ `null`）。
+ *
+ * 🔴 为什么需要它（2026-10-21，"同一条消息被处理两轮"的第二处缺陷）：
+ * 判"本轮是否产出"用的是 **`assistant/message` 条数增长**。而在**并发入站**下，
+ * 后一条的快照里，**前一条那一轮**还在继续产出 assistant 消息 ⇒ 计数照样增长
+ * ⇒ 后一条会把**别人那一轮的文本**当成自己的答案（真机实测：兜底把内部过程话发给了家人）。
+ * ⇒ 增长必须限定在「**这一轮开始之后**新出现的事件」里。
+ */
+function currentTurnOfSession(session: unknown): number | null {
+  const events = sessionEvents(session)
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i] as { type?: unknown; data?: { turn?: unknown } } | undefined
+    if (e?.type === 'turn/start') {
+      const t = e.data?.turn
+      return typeof t === 'number' && Number.isFinite(t) ? t : null
+    }
+  }
+  return null
+}
+
+/**
+ * 会话快照：**调用那一刻**的（轮号, assistant 条数, 事件条数）。
+ *
+ * 三个值一起记，是因为判"增长"要能回答两个问题：
+ * ① 有没有新的 assistant 消息？（条数）
+ * ② 那些新消息是不是**我这一轮**产的？（轮号 ＋ 只看快照之后的事件）
+ */
+interface SessionSnapshot {
+  turn: number | null
+  assistantCount: number
+  eventCount: number
+}
+
+function snapshotSession(session: unknown): SessionSnapshot {
+  return {
+    turn: currentTurnOfSession(session),
+    assistantCount: countAssistantMessages(session),
+    eventCount: sessionEvents(session).length,
+  }
+}
+
+/**
+ * **本轮**（快照之后）是否产出了 assistant 消息。
+ *
+ * 判据顺序（每一条都是被真账打出来的）：
+ * ① 只数**快照之后**新增的事件 ⇒ 前一轮续跑的产出**不进账**（2026-10-21）；
+ * ② 若快照时的轮号已知，且现在的轮号变了 ⇒ 那是**别的轮**在产出 ⇒ 不算我的；
+ * ③ 条数确实增长 ⇒ 成功。
+ */
+function grewWithFreshAssistant(session: unknown, snap: SessionSnapshot): boolean {
+  const events = sessionEvents(session)
+  if (events.length <= snap.eventCount) return false
+  const now = currentTurnOfSession(session)
+  // ② 轮号变了 ⇒ 那些新消息属于**另一个轮**（并发入站的典型形态）
+  if (snap.turn !== null && now !== null && now !== snap.turn) return false
+  // ① 只看快照之后的事件
+  let fresh = 0
+  for (let i = snap.eventCount; i < events.length; i++) {
+    if ((events[i] as { type?: string } | undefined)?.type === 'assistant/message') fresh += 1
+  }
+  if (fresh > 0) return true
+  // 兜底：事件数组被压缩/重排过（长度回退但内容更新）时，退回"总条数增长"的旧判据
+  return countAssistantMessages(session) > snap.assistantCount
+}
+
+/**
  * 等**本轮**产出一条 assistant 消息。
  *
  * ## 为什么不能用 `waitAgentIdle` 单独当判据（2026-10-19 复读缺陷）
@@ -464,11 +530,21 @@ function countAssistantMessages(session: unknown): number {
 export async function waitForTurnAssistant(
   ctx: unknown,
   agent: Agent,
-  beforeAssistantCount: number,
+  before: number | SessionSnapshot,
   opts: { timeoutMs?: number; pollMs?: number } = {},
 ): Promise<boolean> {
   const timeoutMs = opts.timeoutMs ?? ASK_TURN_TIMEOUT_MS
-  const grew = (): boolean => countAssistantMessages(agent.session) > beforeAssistantCount
+  /**
+   * 快照兼容两种入参：数字（旧调用方的"条数"）与 `SessionSnapshot`（新，带轮号与事件位）。
+   * 🔴 数字形态**仍然可用**，因为既有测试与调用点按数字传，而它们的语义（"条数增长"）
+   * 在本轮修法之后依然成立 —— 只是**并发**时不够。给 `SessionSnapshot` 才拿到全部判别力。
+   */
+  const snap: SessionSnapshot = typeof before === 'number'
+    ? { turn: null, assistantCount: before, eventCount: 0 }
+    : before
+  const grew = (): boolean => (typeof before === 'number'
+    ? countAssistantMessages(agent.session) > before
+    : grewWithFreshAssistant(agent.session, snap))
   // ① 先与超时赛跑等一次 idle。**idle = 这一轮结束了**，是"可以结算"的信号。
   // 🔴 必须有界：若这一轮压根没起来（如被白名单全拒、宿主不发 idle），旧实现会永远挂着。
   const idleReached = await Promise.race([
@@ -484,6 +560,13 @@ export async function waitForTurnAssistant(
 /**
  * 提问一轮：followup → 等**本轮**回答 → 读答案。
  *
+ * ## 🔴 2026-10-21：快照从"条数"升级为"（轮号, 条数, 事件位）"
+ *
+ * 并发入站时，后一条的快照里**前一条那一轮还在产出** ⇒ 旧判据（条数增长）会被满足
+ * ⇒ 后一条把**别人那一轮的文本**当自己的答案。新快照让"增长"只在**本轮的窗口内**才成立。
+ * 配套：调用侧（`im/inbound-event.ts`）给**同一会话**加了串行锁 —— 两层都要，缺一不可：
+ * 锁防"同时开两轮"，快照防"锁被绕过时（如别的路径直接调本函数）把错轮的文本当答案"。
+ *
  * @param options.timeoutMs 本轮等待上限（测试注入；生产用缺省）
  */
 export async function askTrajectory(
@@ -492,9 +575,9 @@ export async function askTrajectory(
   question: string,
   options?: { timeoutMs?: number },
 ): Promise<TrajectoryAskResult> {
-  const beforeAssistant = countAssistantMessages(agent.session)
+  const beforeSnapshot = snapshotSession(agent.session)
   agent.followup(createUserMessage({ content: [{ type: 'text', text: question }], source: PLUGIN_SOURCE }))
-  const produced = await waitForTurnAssistant(ctx, agent, beforeAssistant, { timeoutMs: options?.timeoutMs })
+  const produced = await waitForTurnAssistant(ctx, agent, beforeSnapshot, { timeoutMs: options?.timeoutMs })
   // 🔴 本轮没产出 ⇒ **空答案**（绝不退回上一轮的旧文本：那正是复读的形态）
   const answer = produced ? lastAssistantText(agent) : ''
   return { answer, sessionId: String((agent.session as { id?: unknown }).id ?? '') }

@@ -79,4 +79,28 @@ describe('askTrajectory：本轮答案必须来自本轮（复读缺陷回归钉
     expect(r.answer).toBe('')
     expect(Date.now() - t0).toBeLessThan(3000)
   })
+
+  /**
+   * 🔴 ④ **2026-10-21 新增**：并发入站时，**别的轮**的产出不能被当成本轮答案。
+   *
+   * 现场（真机 12:08~12:10）：owner 连发两条，后一条进来时前一条那一轮**还在跑**。
+   * 旧判据只数"assistant 条数是否增长" ⇒ **前一轮续跑产出的一条 assistant 就满足了它**
+   * ⇒ 后一次调用把**别人那一轮的文本**当自己的答案 ⇒ 桥兜底把它发了出去。
+   *
+   * 判据：followup 之后落盘的是**另一个轮（turn=8）**的 assistant 消息 ⇒ 本次调用必须判"无产出"。
+   * ⚠️ 这条在旧实现下**必然失败**（旧实现会返回 '别人的答案'）。
+   */
+  it('🔴 ④ 反向钉：别的轮（turn 号变了）产出的 assistant **不得**当本轮答案', async () => {
+    const events: unknown[] = [
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '上一轮的答案' }] } } },
+    ]
+    const agent = makeAgent(events, () => {
+      // 并发场景：followup 之后，**另一个轮**在推进（不是我们这一轮）
+      events.push({ type: 'turn/start', data: { turn: 8 } })
+      events.push({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '别人的答案' }] } } })
+    })
+    const r = await askTrajectory(ctxIdle(agent), agent, 'q', { timeoutMs: 2000 })
+    expect(r.answer, '别的轮的产出必须判为"本轮无产出"').toBe('')
+  })
 })

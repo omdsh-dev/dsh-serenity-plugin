@@ -44,7 +44,7 @@ import {
   createTrajectoryAgent, getTrajectoryAgent, askTrajectory, workspaceCognitiveTrajectoryLine,
   ensureWorkspacePromptSection, trajectoryWorkspaceMdPath,
 } from '../trajectory/session.js'
-import { noteManualOutputSession, forgetManualOutputSession, clearSentThisTurn, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
+import { noteManualOutputSession, forgetManualOutputSession, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
 import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'
 
@@ -213,6 +213,50 @@ export async function resolveInboundTarget(ctx: Context, input: {
 // ── 中立主流程 ─────────────────────────────────────────────────────────────
 
 /**
+ * 同会话入站**串行化**（2026-10-21，修"同一条消息被处理两轮"的第二个缺陷）。
+ *
+ * ## 为什么必须有锁（R↓，代价换来的）
+ *
+ * `askTrajectory` 的成功判据是"`assistant/message` **条数增长**"。两条入站并发时，
+ * 后一条的快照包含前一条尚未落盘的产出 ⇒ **前一轮的产出会满足后一条的成功判据**
+ * ⇒ 兜底 / `reply-fallback` 可能拿到**错轮**的答案（真机实测：把内部过程话发给了家人）。
+ *
+ * ## 粒度与边界
+ *
+ * - 按**会话 id**加锁：不同轨迹（各 IM 账号）各跑各的，互不拖慢。
+ * - ⚠️ 与投递侧"不排队"**不是一回事**：`send-now` 的"当场注入"是**投递**语义，
+ *   这里排的是**处理**语义 —— 同一会话不该同时开两轮。两者不冲突。
+ * - 用 acquire/release 而不是 callback 形态：主流程已在 `try/catch/finally` 里，
+ *   callback 会把整段重新缩进，diff 看不清"到底改了什么"。
+ */
+const sessionLocks = new Map<string, Promise<void>>()
+
+async function acquireSessionLock(key: string): Promise<() => void> {
+  const prev = sessionLocks.get(key) ?? Promise.resolve()
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => { release = resolve })
+  const mine = prev.catch(() => undefined).then(() => held)
+  sessionLocks.set(key, mine)
+  // 等前一位**结束**（它成功或失败都不该毒死后来者）
+  await prev.catch(() => undefined)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    if (sessionLocks.get(key) === mine) sessionLocks.delete(key)
+    release()
+  }
+}
+
+/** 测试/诊断用：当前有几条会话仍持有锁位（0 = 全部释放） */
+export function __sessionLockCountForTest(): number {
+  return sessionLocks.size
+}
+
+/** 测试专用：直接拿真锁（不复制实现 —— 实现换形状时本导出会先炸，不会静默失效） */
+export const __acquireSessionLockForTest = acquireSessionLock
+
+/**
  * **一条入站消息的主流程**（通道中立）。
  *
  * 职责：路由 → 固定会话 id 创建/延续 → 提问 → 回复（或被闸门拦下后兜底）。
@@ -284,9 +328,22 @@ export async function handleInboundEvent(
     return
   }
 
+  let releaseLock: (() => void) | null = null
   try {
     // 🔴 会话 id **由轨迹编码派生**（身份挂在轨迹上，不挂在用户上）。
     const sessionId = weixinSessionIdForTrajectory(trajectory)
+    /**
+     * 🔴 **同会话串行化**（2026-10-21，修"同一条消息被处理两轮"的第二个缺陷）。
+     *
+     * `askTrajectory` 的成功判据是"`assistant/message` **条数增长**"。两条入站并发时，
+     * 后一条的快照包含前一条尚未落盘的产出 ⇒ **前一轮的产出会满足后一条的成功判据**
+     * ⇒ 兜底/`reply-fallback` 可能拿到**错轮**的答案（真机实测：把内部过程话发给了家人）。
+     *
+     * 锁的粒度 = **一个会话同一时刻只跑一条入站**（不同轨迹各跑各的，互不拖慢）。
+     * ⚠️ 与投递侧"不排队"不是一回事：`send-now` 的"当场注入"是**投递**语义，
+     * 这里排的是**处理**语义 —— 两者不冲突。
+     */
+    releaseLock = await acquireSessionLock(sessionId)
     const existing = getTrajectoryAgent(sessionId)
     const hc = readCheapWorkerConfig(root)
     // 无 `trajectory-constraint.json` 的普通轨迹：不施加任何 轨迹约束 约束，用编码造一个最小面立提示词段。
@@ -360,8 +417,18 @@ export async function handleInboundEvent(
       if (text) parts.push(text)
       parts.push(...mediaNotes, ...degradedNotes)
       if (manualOutput) {
-        // 本轮开始 → 清空"已发送"标记（闸门只置位；桥在 askTrajectory 后读它决定兜底）
-        clearSentThisTurn(sessionId)
+        /**
+         * 🔴 **不在这里清空"已发送"标记**（2026-10-21 修"同一条消息被处理两轮"）。
+         *
+         * 旧写法 `clearSentThisTurn(sessionId)` 的语义是"来了新消息就当这个会话没发过"——
+         * 而它**连正在跑那一轮的证据一起抹掉**：真机时刻线
+         * `12:08:25 发送成功 → 12:08:56 新入站(抹) → 12:09:19 那一轮 turn-stopping 判"没发" ⇒ 打回`
+         * ⇒ 用户看到的就是"同一条消息被处理了两轮"。
+         *
+         * 现在**没有任何清空动作**：标记记的是**轮号**，上一轮发的记录在下一轮 `turn-stopping`
+         * 时天然不匹配（`hasSentThisTurn` 按轮比）⇒ 陈旧记录靠"轮号不等"淘汰，
+         * 不靠"谁来抹掉"。清空动作本身就是误伤面。
+         */
         noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory, channel })
         parts.push(manualOutputMarker(accountId, fromUserId, channel))
       } else {
@@ -443,6 +510,9 @@ export async function handleInboundEvent(
     console.log(`[serenity-hooks] im-bridge error (ccc=${root}): ${msg}`)
     const stack = err instanceof Error ? err.stack : undefined
     if (stack) console.log(`[serenity-hooks] im-bridge stack:\n${stack.slice(0, 1500)}`)
+  } finally {
+    // 🔴 锁必须在这里放：异常路径也要放，否则该会话此后永久排队
+    releaseLock?.()
   }
 }
 
