@@ -331,27 +331,89 @@ describe('safe-mode 工具隐藏（源 = computeVisibilitySources.safeMode）', 
     expect(denyOf('safeMode', dir)).toEqual(['bash', 'workflow'])
   })
 })
-describe('guards: im-bridge 条件可见（源 = computeVisibilitySources.imBridge）', () => {
+describe('guards: im-bridge 条件可见（源 = computeVisibilitySources.imBridge，**轨迹级**）', () => {
+  /**
+   * 🔴🔴 **2026-10-23 owner 令：判据从「CCC 级」改为「轨迹级」**（D212）。
+   *
+   * 旧判据 = 本 CCC 有任一启用账号 ⇒ **全体可见**。owner 报的问题不是"少一个工具"，
+   * 而是**一条错误的工作流**：每条轨迹都以为自己该直接对 owner 说话 ⇒ 发完就**停下来等人回**，
+   * 而 owner 根本没空逐条回（原话见 `src/im/channels.ts` 的去标识改写）。
+   *
+   * ⇒ 新判据：**本会话所属轨迹出现在 IM 路由表（`routes[].trajectory`）里**才可见。
+   *
+   * ⚠️ **这组用例的前置条件变了，不是"放宽"**（D184：改判据必须能说出原前提被谁取代）：
+   * 原来的 3 条只造了 `accounts`、**不造 `routes`、也不造轨迹绑定** ——
+   * 那在旧判据下足以判可见，在新判据下则**必然不可见**（没有点名）。
+   * ⇒ 每条用例现在都要显式造出"这条会话属于哪条轨迹"＋"路由表点了谁"，
+   *    这样测的才是判据本身，而不是"夹具恰好空着"。
+   */
+  /** 造一条会话 → 轨迹的**持久绑定**（`trajectoryCodeForSession` 第二来源） */
+  function bindSessionTo(sessionId: string, dirName: string): void {
+    const trajDir = join(dir, 'AGENT_SESSIONS', dirName)
+    mkdirSync(trajDir, { recursive: true })
+    writeFileSync(
+      join(trajDir, 'current.dsh_session_bind'),
+      JSON.stringify({ sessionId, at: Date.now(), action: 'activate' }),
+      'utf-8',
+    )
+  }
+
+  /** 写 `weixin` 段（accounts ＋ routes 一起，夹具长成真形态） */
+  function writeIm(accounts: unknown[], routes: unknown[]): void {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ weixin: { enabled: true, accounts, routes } }),
+    )
+  }
+
+  const LIVE_ACCOUNT = [{ accountId: 'w1', channel: 'weixin', enabled: true }]
+
   it('没有可用账号 → deny im-bridge（工具不可见）', () => {
     expect(denyOf('imBridge', dir)).toEqual(['im-bridge'])
   })
 
-  it('🔴 有任意启用账号 → 不隐藏，且**不看总开关**（owner 2026-10-22 令）', () => {
+  it('有账号但仍不隐藏的前提是**轨迹被路由点名**（连带验证"不看总开关"）', () => {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ weixin: { enabled: false, accounts: [{ accountId: 'f1', channel: 'feishu', enabled: true }] } }),
+      JSON.stringify({
+        weixin: {
+          enabled: false, // 总开关关着也不影响可见性（owner 2026-10-22 令，保留）
+          accounts: [{ accountId: 'f1', channel: 'feishu', enabled: true }],
+          routes: [{ user: 'u-owner', trajectory: 'S999' }],
+        },
+      }),
     )
+    bindSessionTo('s-test', '2026-01-01--S999--wired')
     expect(denyOf('imBridge', dir)).toEqual([])
   })
 
-  it('账号被显式停用 → 视为没有可用账号 ⇒ 隐藏', () => {
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ weixin: { enabled: true, accounts: [{ accountId: 'w1', channel: 'weixin', enabled: false }] } }),
-    )
+  it('账号被显式停用 → 视为没有可用账号 ⇒ 隐藏（即使轨迹被点名）', () => {
+    writeIm([{ accountId: 'w1', channel: 'weixin', enabled: false }], [
+      { user: 'u-owner', trajectory: 'S999' },
+    ])
+    bindSessionTo('s-test', '2026-01-01--S999--wired')
     expect(denyOf('imBridge', dir)).toEqual(['im-bridge'])
+  })
+
+  // ── 🆕 D212 的核心：**同样有账号，差别只在轨迹有没有被点名** ──
+  it('🔴 有账号但这**条轨迹没被路由点名** ⇒ 隐藏（这就是 owner 要的那条边界）', () => {
+    writeIm(LIVE_ACCOUNT, [{ user: 'u-owner', trajectory: 'S888' }]) // 点名的是**别人**
+    bindSessionTo('s-test', '2026-01-01--S999--not-wired')
+    expect(denyOf('imBridge', dir)).toEqual(['im-bridge'])
+  })
+
+  it('🔴 取不到轨迹归属（会话没绑定任何轨迹）⇒ 隐藏（fail-closed）', () => {
+    writeIm(LIVE_ACCOUNT, [{ user: 'u-owner', trajectory: 'S999' }])
+    // ⛔ 刻意不调 bindSessionTo：这就是"or"的另一侧
+    expect(denyOf('imBridge', dir)).toEqual(['im-bridge'])
+  })
+
+  it('通配路由 `{user:"*"}` 也算点名（与 matchWeixinRoute 兜底同源）', () => {
+    writeIm(LIVE_ACCOUNT, [{ user: '*', trajectory: 'S999' }])
+    bindSessionTo('s-test', '2026-01-01--S999--wired')
+    expect(denyOf('imBridge', dir)).toEqual([])
   })
 })
 describe('guards: 专属工具条件可见（源 = computeVisibilitySources.exclusive）', () => {

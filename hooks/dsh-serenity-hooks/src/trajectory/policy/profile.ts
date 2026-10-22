@@ -36,6 +36,7 @@ import { existsSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { readUtf8, resolveInside } from '../../kernel/ccc.js'
 import { parseTrajectoryCode, sessionsRoot } from '../core.js'
+import { listBindDeclarations } from '../bind-file.js'
 import { trajectoryDirNameForSession } from './window.js'
 import type { RawPromptInjection } from '../prompt-injection.js'
 import {
@@ -351,6 +352,47 @@ export function trajectoryConstraintForSession(
 function registeredDirName(sessionId: string | undefined): string | null {
   if (typeof sessionId !== 'string' || sessionId === '') return null
   return trajectoryDirNameForSession(sessionId)
+}
+
+/**
+ * **会话 → 认知轨迹编码**（供工具可见性这类"只有 sessionId、没有 agent 对象"的调用方用）。
+ *
+ * ## 为什么需要它（而不是复用 `trajectoryConstraintForSession`）
+ *
+ * 那条路的判据是"**绑定的轨迹有 `trajectory-constraint.json`**"——它回答的是
+ * 「这条会话是不是一条**约束会话**」。而工具可见性问的是另一个问题：
+ * 「这条会话属于**哪条**轨迹」。前者对**普通轨迹**恒返回 `null`（它们没有约束文件），
+ * ⇒ 拿它去判 IM 接线，会把所有普通轨迹一律判成"无归属"。
+ *
+ * ## 两个来源并取（与 `trajectoryConstraintForSession` 同一条纪律）
+ *
+ * ① **内存注册表**（`window.ts`）——覆盖"刚 `use`、绑定还没落盘"的窗口期；
+ * ② **持久绑定**（`listBindDeclarations` 扫 `current.dsh_session_bind`）——跨重启成立。
+ *
+ * ⇒ 只取 ① 会在重启后全判成"没归属"（工具**静默消失**）；
+ *    只取 ② 会在建会话的第一轮判成"没归属"（同样是静默）。
+ * 🔴 **这条纪律不是新发明的**：`trajectoryConstraintForSession` 的注释里已经付过一次代价。
+ *
+ * @param root CCC 根
+ * @param sessionId dsh 会话 id
+ * @returns 轨迹编码（`S###` 或自定义码）；解析不到 ⇒ `null`
+ */
+export function trajectoryCodeForSession(root: string, sessionId: string | undefined): string | null {
+  if (typeof sessionId !== 'string' || sessionId === '') return null
+  // ① 内存注册表（快）
+  const fromMemory = registeredDirName(sessionId)
+  if (fromMemory !== null && fromMemory !== '') return parseTrajectoryCode(fromMemory) ?? fromMemory
+  // ② 持久绑定（权威）——按 sessionId 反查哪个轨迹目录的交代指向它
+  try {
+    for (const { dirName, decl } of listBindDeclarations(sessionsRoot(root))) {
+      if (decl.sessionId !== sessionId) continue
+      // 编码可能取不到（非 S### 的自定义目录名）⇒ 回退整名，与 `cognitiveTrajectoryLabel` 同口径
+      return parseTrajectoryCode(dirName) ?? dirName
+    }
+  } catch {
+    /* 读盘失败 ⇒ 当作"解析不到"，由调用方 fail-closed */
+  }
+  return null
 }
 
 /**

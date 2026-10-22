@@ -23,9 +23,9 @@ import {
   type BlacklistRule,
 } from '../kernel/ccc.js'
 import { cccRootForCwd } from '../kernel/ccc-roots.js'
-import { trajectoryConstraintForSession, type TrajectoryConstraint } from '../trajectory/policy/profile.js'
+import { trajectoryConstraintForSession, trajectoryCodeForSession, type TrajectoryConstraint } from '../trajectory/policy/profile.js'
 import { profileToolWhitelist, profileWriteWhitelist } from '../trajectory/policy/rules.js'
-import { hasEnabledImChannel } from '../im/channels.js'
+import { isImWiredTrajectory } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../kernel/invariant.js'
 import { isoLocal } from '../kernel/time.js'
 import {
@@ -338,9 +338,26 @@ export function computeVisibilitySources(sessionId: string, root: string | null)
     }),
   )
 
-  // ③ im-bridge：无任何启用账号 ⇒ 隐藏
+  // ③ im-bridge：**轨迹级**判据（2026-10-23 owner 令）
+  //
+  // owner 原话（**去标识改写**：原文含私有角色名，按 D145 不入仓库）：
+  // 「很多轨迹发消息给我，但是我没空回，它们就会等待我，其实并不是，我希望他们继续工作；
+  //   所以只有 IM 桥绑定了任意账户的认知轨迹才拥有 im-bridge 这个 tool，
+  //   这样可以确保只有一个接线角色和我联系，其它轨迹和它联系即可，它会自行回复它们的」
+  //
+  // **旧判据 = CCC 级**（`hasEnabledImChannel(root)`：本 CCC 有任一启用账号 ⇒ **全体可见**）。
+  // 后果不是"少一个工具"，而是**一条错误的工作流**：每条轨迹都以为自己该直接对 owner 说话
+  // ⇒ 发完就**停下来等人回**，而 owner 根本没空逐条回。**工具在，就把"等待"也一起给了。**
+  //
+  // **新判据 = 轨迹级**：本会话所属轨迹出现在 IM 路由表（`routes[].trajectory`）里才可见。
+  // ⚠️ **取不到轨迹编码 ⇒ 不可见**（fail-closed，与 `exclusive` 同向）：
+  //    反向放行会让"绑定坏了"表现成"工具还在"，而那正是本判据要防的形态（D179）。
   out.push(
-    sourceOf('imBridge', () => (hasEnabledImChannel(root) ? { deny: [] } : { deny: [IM_BRIDGE_TOOL_NAME] })),
+    sourceOf('imBridge', () =>
+      isImWiredTrajectory(root, trajectoryCodeForSession(root, sessionId))
+        ? { deny: [] }
+        : { deny: [IM_BRIDGE_TOOL_NAME] },
+    ),
   )
 
   // ④ 专属工具：未声明 ⇒ 隐藏（fail-closed）

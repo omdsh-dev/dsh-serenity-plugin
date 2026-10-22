@@ -188,6 +188,64 @@ export function hasEnabledImChannel(root: string): boolean {
   return accounts.some((a) => a.enabled !== false)
 }
 
+/**
+ * 可见性判据（**轨迹级**，2026-10-23 owner 令）：
+ * 这个 dsh 会话所属的认知轨迹，是否**被 IM 路由表点名**（= 它才是那个"接线人"）。
+ *
+ * ## 它解决的问题（owner 原话的**去标识改写**，原文含私有角色名，按 D145 不入仓库）
+ *
+ * > 「很多轨迹发消息给我，但是我没空回，它们就会等待我，其实并不是，我希望他们继续工作；
+ * >  所以只有 IM 桥绑定了任意账户的认知轨迹才拥有 `im-bridge` 这个 tool，
+ * >  这样可以确保只有一个接线角色和我联系，其它轨迹和它联系即可，它会自行回复它们的」
+ *
+ * ⇒ 旧判据是 **CCC 级**（{@link hasEnabledImChannel}：本 CCC 有任一启用账号 ⇒ 全体可见）。
+ * 它的后果不是"少一个工具"，而是**一条错误的工作流**：每条轨迹都以为自己该直接对 owner 说话，
+ * 于是发完就**停下来等人回**——而 owner 根本没空逐条回。**工具在，就把等待也带上了。**
+ *
+ * ## 判据（两条，缺一不可）
+ *
+ * 1. 本 CCC 有可用账号（{@link hasEnabledImChannel}）—— 没有账号时路由表也没有意义；
+ * 2. 本会话**绑定的轨迹编码**出现在 `routes[].trajectory` 里。
+ *
+ * ⚠️ **为什么不看 `routes[].user`**：那是"对端是谁"（owner 的通道 id），
+ *    判"这条轨迹能不能说话"只跟**轨迹**有关，与哪个对端无关。
+ *
+ * ⚠️ **`*` 通配也算点名**：`{ user:"*", trajectory:"<某轨迹>" }` 这条路由的含义就是
+ *    "**没人认领的消息都归那条轨迹**" ⇒ 它确实是一条被授权的接线轨迹，必须算可见。
+ *    这与 `matchWeixinRoute` 的通配兜底语义**同源**，不另立规则。
+ *
+ * ## 拿不到轨迹编码时怎么办（fail-closed，与 `exclusive` 同向）
+ *
+ * 会话 → 轨迹编码要读绑定。**取不到就判不可见**：
+ * - 与 `exclusive`（未声明 ⇒ 隐藏）同向；
+ * - 反向（取不到就放行）会让"绑定坏了"表现成"工具还在"，
+ *   而那正是本判据要防的形态（D179：配置说它有、行为说它没有，且零报错）。
+ * ⚠️ 代价明示：绑定读取若短暂失败，该轮会少一个工具；下一轮绑定恢复即回。
+ *    这比"误给一条轨迹发消息的权限"便宜 —— 后者会让它**停下来等 owner**。
+ *
+ * @param root CCC 根
+ * @param trajectoryCode 本会话所属认知轨迹的编码（**由调用方解析**，见 `trajectory/policy/profile.ts`）
+ * @returns true = 该轨迹接线，`im-bridge` 可见
+ */
+export function isImWiredTrajectory(root: string, trajectoryCode: string | null | undefined): boolean {
+  // ① 无轨迹归属 ⇒ 无从判断"它是不是接线人" ⇒ 不给（fail-closed）
+  if (typeof trajectoryCode !== 'string' || trajectoryCode.trim() === '') return false
+  // ② CCC 级前置：没有可用账号，路由表再全也没人能收
+  if (!hasEnabledImChannel(root)) return false
+  let settings
+  try {
+    settings = readImSettings(root)
+  } catch {
+    return false
+  }
+  const wanted = trajectoryCode.trim()
+  for (const route of settings.routes ?? []) {
+    const target = typeof route.trajectory === 'string' ? route.trajectory.trim() : ''
+    if (target !== '' && target === wanted) return true
+  }
+  return false
+}
+
 /** 结果载荷（lossless JSON——工具返回值必须可 JSON 化） */
 export type ImJson = null | boolean | number | string | ImJson[] | { [key: string]: ImJson }
 
