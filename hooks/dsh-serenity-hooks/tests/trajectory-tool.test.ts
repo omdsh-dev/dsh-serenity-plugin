@@ -201,10 +201,13 @@ describe('cognitive_trajectory：工具面', () => {
     // 🔴 2026-10-20（D173 兑现）：10 → **11**（`resident`：常驻名单的只读发现动作）。
     //    ⚠️ 它补的正是 v1.77.1 手册**曾承诺却不存在**的那个动作（D179(a)，S196 踩到）
     //    ⇒ 这个计数不只是加一，它是一条"说明面终于与实现对齐"的证据。
-    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(11)
+    // 🔴 2026-10-22：11 → **12**（`interrupted`：以 interrupted 结尾的 dsh 会话只读发现）。
+    //    边界（owner 原话「我们 ACC 不关心周期」）：只出**入口**，周期归调用方的认知轨迹。
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(12)
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('archive')
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('uid')
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('resident')
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('interrupted')
     for (const k of ['name', 'uid', 'summary', 'target', 'at', 'message', 'note', 'force', 'dryRun']) {
       expect(tool.parameters[k], `缺参数 ${k}`).toBeDefined()
     }

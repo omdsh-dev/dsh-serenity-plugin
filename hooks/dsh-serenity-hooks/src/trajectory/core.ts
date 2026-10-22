@@ -77,11 +77,19 @@ import { readTrajectoryFile } from './policy/files.js'
  * 2026-10-20（D173 兑现，owner 令）：「常驻」= 轨迹的**自我声明**，落地为 **`resident`** 只读动作。
  *   判据：它管的是**被找到**，不是**不被销毁** ⇒ 纯读、不碰生命周期、不进系统提示词。
  *   ⚠️ 这也修正了 v1.77.1 的一处说明面失真（手册曾描述一个**不存在**的动作，D179(a)）。
+ * 2026-10-22（owner 令「在 trajectory 加上触发入口即可，剩下的 CCC 搞定」）：新增
+ *   **`interrupted`** —— 列出**以 `interrupted` 结尾**的 dsh 会话（进程在轮次完成前退出）。
+ *   判据（R↓，为何 ACC 只出**入口**不管周期）：**周期性归属调用方的认知轨迹**，
+ *   ACC 只回答"此刻哪些会话以 interrupted 结尾"这一个问题。⇒ 本动作**纯读**、
+ *   **不判周期、不自动续跑、不改任何会话日志**（是否续、续谁、几点续 = CCC 的事）。
+ *   ⚠️ 判据的锋利处：**只认"以 interrupted 结尾"**，不认"曾经中断过"—— 长会话历史上
+ *   可中断几十次（实测单会话 33 次），按"曾经"判会把早已恢复的会话全部当成待续。
  */
-type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'uid' | 'send-now' | 'send-later' | 'cro-guide' | 'resident'
+type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'uid' | 'send-now' | 'send-later' | 'cro-guide' | 'resident' | 'interrupted'
 
 export const COGNITIVE_TRAJECTORY_ACTIONS: readonly CognitiveTrajectoryAction[] = [
   'list', 'show', 'create', 'use', 'rebuild', 'archive', 'uid', 'send-now', 'send-later', 'cro-guide', 'resident',
+  'interrupted',
 ]
 
 /**

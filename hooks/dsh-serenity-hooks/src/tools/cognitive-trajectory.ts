@@ -70,6 +70,85 @@ import {
   type CreateSessionResult,
 } from '../trajectory/core.js'
 import { listResident } from '../trajectory/resident.js'
+import { listLiveSessions } from '../trajectory/live.js'
+import { sessionsRootDir } from '../trajectory/cleanup.js'
+import {
+  DEFAULT_LOOKBACK_MS,
+  projectDirNameForCwd,
+  scanInterruptedSessions,
+  type ScanResult,
+} from '../trajectory/interrupted.js'
+
+/**
+ * 当前宿主里**正在跑**的 dsh 会话 id（用于把 live 会话排除出"待续"名单）。
+ *
+ * 🔴 **为什么必须排除**：一个正在跑的会话，其日志末条**不是** `session/end-seed`
+ * （它还在写），所以按判据本来也不会命中；但排除是**双保险** ——
+ * 万一某轮刚被中断、宿主还没来得及继续，把 live 会话当"待续"会导致**重复投递**。
+ * 拿不到 live 列表时退化为空集（不阻断扫描，只少一层保护）。
+ */
+function collectLiveSessionIds(): Set<string> {
+  const out = new Set<string>()
+  try {
+    // ctx 在 execute 里拿不到（本工具只拿到 exec）⇒ 走进程内活跃表
+    for (const s of listLiveSessions(undefined)) {
+      if (typeof s.id === 'string' && s.id) out.add(s.id)
+    }
+  } catch {
+    /* live 表不可用 → 退化为空集 */
+  }
+  return out
+}
+
+/**
+ * 渲染 `interrupted` 扫描结果（人读）。
+ *
+ * 显示口径：**先给"有没有"，再给每一条的定位信息，最后给边界说明**。
+ * ⚠️ 明确写出"这些会话是否续跑由调用方决定" —— 否则读者会以为本动作已经处理了。
+ */
+function renderInterruptedScan(input: {
+  projectDir: string
+  lookbackHours: number
+  scan: ScanResult
+}): string {
+  const { projectDir, lookbackHours, scan } = input
+  const lines: string[] = []
+  lines.push(`═══ 以 interrupted 结尾的 dsh 会话（回看 ${lookbackHours}h）═══`)
+  lines.push(`  扫描域: ${projectDir}`)
+  lines.push(
+    `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped}` +
+      ` · 耗时 ${scan.elapsedMs}ms${scan.errors.length > 0 ? ` · 读取失败 ${scan.errors.length}` : ''}`,
+  )
+
+  if (scan.sessions.length === 0) {
+    lines.push('')
+    lines.push('✓ 没有会话以 interrupted 结尾 —— 无需处理。')
+    return lines.join('\n')
+  }
+
+  lines.push('')
+  for (const s of scan.sessions) {
+    const at = s.lastEventAt !== null ? new Date(s.lastEventAt).toISOString() : '(时间未知)'
+    lines.push(`  · ${s.sessionId}`)
+    lines.push(`      轮次 turn=${s.turn ?? '?'} · 末事件 ${at}`)
+    if (s.pendingTools.length > 0) {
+      lines.push(`      ⚠️ 有调用无结果的工具（副作用未知）: ${s.pendingTools.join(', ')}`)
+    }
+  }
+
+  lines.push('')
+  lines.push('判据: 日志末条 = session/end-seed，且其前最近的 turn/end 的 reason.kind = interrupted。')
+  lines.push('🔴 本动作**只读** —— 是否续跑、续哪条、几点续，由调用方（你的认知轨迹）决定。')
+  lines.push('⚠️ 未完成的工具调用「副作用未知」≠「没执行」：它们可能已写文件 / 已发消息。')
+  lines.push('   续跑前应先核对副作用，而不是把那一轮整段重放。')
+
+  if (scan.errors.length > 0) {
+    lines.push('')
+    lines.push('读取失败（诊断）:')
+    for (const e of scan.errors.slice(0, 10)) lines.push(`  · ${e.sessionId}: ${e.message}`)
+  }
+  return lines.join('\n')
+}
 
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
@@ -249,6 +328,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     'list (inventory + stats) / show (read one SESSION.md) / create (make a NEW trajectory) / use (bind THIS conversation) / rebuild (clear-and-rebuild THIS conversation in place) / archive (move a trajectory out of the active list; one-way, never overwrites).',
     '(B) DELIVERY — sends ONE message to ANOTHER trajectory; your own binding is unchanged: send-now (right now) / send-later (one future instant).',
     '(C) REFERENCE — cro-guide: how to give a trajectory its own program that decides when it should be woken.',
+    '(D) INSPECTION — interrupted: list dsh sessions whose LAST turn ended with reason "interrupted" (the process died before that turn completed). PURE READ: no periodic scheduling, no auto-continue, no log mutation — deciding IF/WHEN/WHICH to resume belongs to the calling trajectory (this is the "entry point only" contract). The criterion is EXACTLY "ends with interrupted", NOT "was ever interrupted": one long session may have been interrupted dozens of times historically, and treating those as pending would resurrect sessions that already recovered. Each hit reports the turn number and the tool names that had a call but no result (best-effort — those side effects are UNKNOWN, so re-running them blindly is dangerous).',
     // ════ Tier 4 · 动力学与逻辑层（低压缩：选择规则 ＋ 边界情形）════
     'HOW TO CHOOSE (a rule, not a guess):',
     'not yet bound + starting new work ⇒ create (with no prior binding it activates immediately, so the new trajectory has a carrier at once).',
@@ -294,6 +374,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         'send-later (one future instant + one message; fire-and-forget, and it does NOT auto-create a target).',
         'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot) /',
         'resident (READ-ONLY: the roster of trajectories that declared themselves RESIDENT — "I am here, this is what I am good at, come bother me". It lists each code with its own `serves` sentence, plus any code that wrote `resident` without `serves` (half a declaration is worse than none: people ask, then find they asked the wrong one). ⚠️ Residency is NOT a resource state — it does not mean "never sleeps" or "never destroyed"; a trajectory permanently exists either way. It governs BEING FOUND, not being kept alive, and it never touches the scheduler).',
+        'INSPECTION: interrupted (READ-ONLY: dsh sessions whose LAST turn ended with reason "interrupted" — the process died mid-turn. Accepts an optional lookbackHours (default 8). Deciding whether/when to resume is YOUR job — this action only answers "which sessions are in that state right now").',
       ].join(' '),
     },
     name: { type: 'string', description: 'show/use/archive/uid identifier — a trajectory code (S### or a custom code) / dir name / legacy UID / fuzzy keyword' },
@@ -309,6 +390,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     target: { type: 'string', description: 'send-later/send-now: target cognitive trajectory (S### or AGENT_SESSIONS directory name)' },
     at: { type: 'string', description: 'send-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
     message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target cognitive trajectory. send-now may create and bind a carrier ONLY when the target has never had one — acceptable only for a delivery the user actually wants made (user-intent-driven), never for speculatively starting work.' },
+    lookbackHours: { type: 'number', description: 'interrupted: how far back to look, in hours (default 8). Sessions whose current-generation log was last written earlier than this are not examined at all.' },
   },
   output: {
     schema: { type: 'json' },
@@ -638,6 +720,37 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
          * 🔴 **不进系统提示词**（owner 裁决 Q2：说明类信息按需取，不占每轮 token）。
          */
         return listResident(root)
+      }
+      case 'interrupted': {
+        /**
+         * 以 `interrupted` 结尾的 dsh 会话（owner 2026-10-22 令：**只出入口**）。
+         *
+         * 🔴 **边界（owner 原话：「我们 ACC 不关心周期」）**：本动作**只回答**"此刻哪些会话
+         * 的最后一轮以 interrupted 结束"，**不判周期、不自动续跑、不改日志**。
+         * 何时扫、续谁、怎么续 = 调用方（CCC 的认知轨迹）的事。
+         *
+         * 🔴 **为什么不是"曾经中断过"**：长会话历史上可中断几十次（实测单会话 33 次）；
+         * 按"曾经"判会把早已恢复的会话全部当成待续 ⇒ 灾难。判据在
+         * `trajectory/interrupted.ts` 的 `detectInterruptedEnd`：**末条 = end-seed
+         * 且其前最近的 turn/end 是 interrupted**。
+         *
+         * 🔴 **正在跑的会话要排除**：live 会话不该被判成"待续"（它正在跑，不是中断）。
+         */
+        const lookbackHours = typeof args.lookbackHours === 'number' && args.lookbackHours > 0
+          ? args.lookbackHours
+          : DEFAULT_LOOKBACK_MS / 3_600_000
+
+        const sessionsRootPath = sessionsRootDir()
+        // 当前 dsh 会话的 cwd 决定项目目录名（宿主 `--<path-with-dashes>--` 规则）
+        const cwd = exec.agent?.session?.header?.cwd ?? root
+        const projectDir = join(sessionsRootPath, projectDirNameForCwd(cwd))
+
+        const scan = scanInterruptedSessions(projectDir, {
+          lookbackMs: lookbackHours * 3_600_000,
+          liveIds: collectLiveSessionIds(),
+        })
+
+        return renderInterruptedScan({ projectDir, lookbackHours, scan })
       }
       default:
         throw new Error(`Unknown action: ${args.action as string}`)
