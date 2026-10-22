@@ -421,6 +421,54 @@
   opacity: 0.45;
 }
 
+/* ── safe-mode 快捷开关（owner 2026-10-22：「放到 CCC 面板里吧，方便些」）──
+   形态沿用胶囊里那枚 Mac 风格滑块（24×13），只缩到 32×16 以贴合 11px 小字行高。
+   🔴 `align-self: center` + `flex: none`：`.sp-meta` 是 `align-items: baseline`，
+      滑块按基线对齐会**沉到文字下沿**（视觉上像掉出这一行）。 */
+.sp-quickSwitch {
+  flex: none;
+  align-self: center;
+  position: relative;
+  width: 32px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+/* OFF 态底色取官方 `border-l3`（中性灰，浅/深主题都成立）。
+   ⚠️ 不用 `--dsw-alias-fill-*` 家族：那份词汇表里**没有** fill-* 系列
+   （`client-css-tokens.test.ts` 的官方白名单是唯一真相源，自造 token 会在浅色主题下变黑块）。 */
+.sp-quickSwitchOff {
+  background: var(--dsw-alias-border-l3);
+}
+.sp-quickSwitchOn {
+  background: #10b981; /* emerald-500，与胶囊 SAFE ON 的绿一致 */
+}
+.sp-quickSwitchBusy {
+  opacity: 0.55;
+  cursor: default;
+}
+.sp-quickSwitchThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 120ms ease;
+}
+.sp-quickSwitchOn .sp-quickSwitchThumb {
+  transform: translateX(16px);
+}
+/* SAFE ON/OFF 字样：紧挨滑块，是**状态文字**不是控件（滑块才是控件） */
+.sp-metaSafeWord {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── 主体：tab 容器（owner 2026-10-18 修正：「活动轨迹和 skills 使用 tab 来实现，
    剩下的位置还是给动画」）─────────────────────────────────────────────
    这条修正**推翻了上一版"两 panel 并排"的布局**，理由值得写下来（R↓）：

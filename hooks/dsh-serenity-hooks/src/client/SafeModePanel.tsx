@@ -6,11 +6,11 @@
  *  - 绿点（恒亮 = Serenity 在线，不随 SAFE 变）+ Serenity vX.Y.Z + 分隔线 + 🛡 SAFE 滑块 + chevron
  *  - SAFE = 盾牌 + 文字：ON 绿（emerald 渐变）/ OFF 灰；滑块 Mac 风格（24×13 轨道 + 11px 灰白 thumb 无图标）
  *  - 点击 → **自绘 popover**（340px 右上角卡片，外点 / Escape 关闭）——替代官方 Modal
- * 面板只承载**状态展示**（v1.22 归属原则：账号密码等 plugin 配置在 DSH 设置面板
- * 「Serenity」页设定，本面板不再承载配置表单）：
- *  - 运行环境：CCC / CheapWorker 模型 / 守卫
- *  - 安全模式：大开关（唯一可操作项，用户能力）
- *  - CheapWorker 运行：运行列表 + 详情折叠
+ * 面板承载两件事：
+ *  - **safe-mode 快捷开关**（2026-10-22 owner：「放到 CCC 面板里吧，方便些」）——
+ *    位于 popover 的「运行环境」行首，写通道 = 同源 `POST /serenity/status`（需 WebUI 专属头）
+ *  - 状态展示：CCC / CheapWorker 模型 / 守卫 / 活跃轨迹 / 技能
+ * 账号密码等 plugin 配置仍在 DSH 设置面板「Serenity」页（v1.22 归属原则）。
  * 数据经同源 HTTP /serenity/status + /serenity/cheap-workers（插件服务端路由）。
  *
  * 槽：conversation.session.header.actions（官方既有槽，list）
@@ -108,6 +108,8 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   /** tab 切换（2026-10-18 owner 修正：活跃轨迹 / 技能 用 tab，而不是并排两个 panel）
    *  ⚠️ 纯前端显示状态 —— 两份数据后端一次性都给全，切换**不触发任何请求**。 */
   const [tab, setTab] = useState<'trajectories' | 'skills'>('trajectories')
+  /** 切换在途（防重复点击；同时给按钮一个禁用态） */
+  const [busy, setBusy] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
   // v1.39.1：popover 改 `position:fixed` 后的视口坐标（null = 尚未测量，此时渲染在屏外）
@@ -133,6 +135,36 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
   useEffect(() => {
     void refresh()
   }, [refresh])
+
+  /**
+   * 切换安全模式（owner 2026-10-22：「放到 CCC 面板里吧，方便些」⇒ 快捷开关放回面板）。
+   *
+   * 🔴 写通道 = 同源 `POST /serenity/status`，服务端要求 **WebUI 专属头 `x-serenity-ui`**
+   *    （`requireWebUi`：agent 工具 / curl 不带该头 ⇒ 403，safe-mode 仍是**用户能力**）。
+   * 🔴 成功后**以服务端回包为准**（`{...getStatus(), ...setSafeMode()}` 里带 `safeModeOn`），
+   *    不做乐观刷新 —— 标记文件写没写成，只有回包知道（D144：断言入参 ≠ 断言效果）。
+   */
+  const toggleSafeMode = useCallback(async (on: boolean): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const r = await fetch(API, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-serenity-ui': '1' },
+        body: JSON.stringify({ sessionId, on }),
+      })
+      if (r.ok) {
+        setStatus((await r.json()) as SerenityStatus)
+      } else {
+        // 失败不改本地状态：让面板继续显示**服务端上次告诉我们的**那个值
+        await refresh()
+      }
+    } catch {
+      await refresh()
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, sessionId, refresh])
 
   // 自绘 popover：外点 / Escape 关闭
   useEffect(() => {
@@ -189,11 +221,12 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
     }
   }, [open])
 
-  // 🔴 2026-10-18（owner）：「safe_mode 在这里显示小标志即可，是个状态信息」⇒ **写通道删除**。
-  // 面板不再有可操作项 ⇒ 不再需要 toggle/POST/乐观刷新。
-  // 为什么连 POST 一起删而不是留着"以后可能用"：留一条**没有调用点**的写路径，
-  // 下一个人会以为面板能改安全模式（而 UI 上已经没有入口）—— 那是注释级别的谎。
-  // 开关仍在「设置 → Serenity」；HTTP 面的 POST 能力保留（api.ts 未动），只是本组件不调它。
+  // 🔴 2026-10-18（owner）：「safe_mode 在这里显示小标志即可，是个状态信息」⇒ 当时把写通道删了。
+  // 🔴 2026-10-22（owner）：「safe-mode 放到 CCC 面板里吧，方便些」⇒ **写通道回来**（见上方 toggleSafeMode）。
+  // 历史（R↓）：上一版注释写着「开关仍在设置 → Serenity」—— **那句是假的**，SettingsSection 里
+  // 从来没有过 safe-mode 开关（2026-10-22 实测 grep 只有一条"面板只展示状态"的注释）。
+  // ⇒ 当时那次删除把这个能力**从界面上彻底弄丢了**，而说明面还在指路。
+  // 教训与 D179 同族：**说明面说它有、行为说它没有，且零报错**。
 
   if (!status) {
     return (
@@ -270,6 +303,36 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                     旧形态 = 三行带边框卡片（CCC / 模型 / 守卫），每行一个独立 box ⇒ 视觉噪声大于信息量。
                     现在 = 一行等宽文本，用 · 分隔：它是**背景事实**，不是需要逐项对焦的内容。 */}
                 <div className={cx('sp-meta')} title={`CCC: ${status.root ?? ''}`}>
+                  {/* 🔴 safe-mode 快捷开关（owner 2026-10-22：「放到 CCC 面板里吧，方便些」）。
+                      ⚠️ **必须排在这一行最前面**：`.sp-meta` 是 `nowrap + overflow:hidden`，
+                      只有 `sp-metaPath` 会收缩 —— 放在行尾时窄面板下会被裁掉，
+                      那就等于"开关又没了"（正是本次要修的症状）。放行首则永在。
+                      为什么和上面三项同一行而不新起一块：它同属「本 CCC 的运行态」，
+                      而这一行的高度已经付过 —— 加一个 32×16 开关不换行、不涨高度。
+                      为什么不必再写"去设置里开"的指路：那里**从来没有**过这个开关
+                      （旧注释那句是不实说明，已删）。 */}
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={status.safeModeOn}
+                    aria-label="safe-mode"
+                    disabled={busy}
+                    className={cx(
+                      'sp-quickSwitch',
+                      status.safeModeOn ? 'sp-quickSwitchOn' : 'sp-quickSwitchOff',
+                      busy ? 'sp-quickSwitchBusy' : undefined,
+                    )}
+                    title={
+                      status.safeModeOn
+                        ? 'safe-mode ON —— 写工具已隐藏（点击关闭）'
+                        : 'safe-mode OFF —— 写工具全开（点击开启）'
+                    }
+                    onClick={() => void toggleSafeMode(!status.safeModeOn)}
+                  >
+                    <span className={cx('sp-quickSwitchThumb')} />
+                  </button>
+                  <span className={cx('sp-metaSafeWord')}>SAFE {status.safeModeOn ? 'ON' : 'OFF'}</span>
+                  <span className={cx('sp-metaSep')}>·</span>
                   <span className={cx('sp-metaPath')}>{status.root}</span>
                   <span className={cx('sp-metaSep')}>·</span>
                   <span>{status.cheapWorkerModel ?? '模型未配置'}</span>
