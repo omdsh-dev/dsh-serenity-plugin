@@ -20,7 +20,7 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve as resolvePath, relative, isAbsolute } from 'node:path'
-import { readWeixinSettings } from './route.js'
+import { readWeixinSettings, readImSettings } from './route.js'
 import { scanImContacts } from './log-scan.js'
 
 /** 文本长度上限（微信侧单条实践上限；超限拒绝而非静默截断——与 HTTP 入口同值） */
@@ -150,19 +150,42 @@ export function imChannelIds(): string[] {
 }
 
 /**
- * 可见性判据：本 CCC 是否启用了**任一** IM 通道。
+ * 可见性判据：本 CCC 是否**有任何可用的 IM 账号**。
  * 未启用 → 工具面对该 agent **不可见**（`tools.restrict` 移除，而非调用时报错）。
+ *
+ * ## 🔴 2026-10-22 判据修正（owner 令：「把开关升级为有任意账号即可，而不是盯着微信」）
+ *
+ * **旧判据** = 遍历已注册通道、任一 `channel.isEnabled(root)` 为真即可见。
+ * **旧判据的缺陷**（实测于一个只配飞书的 CCC）：`feishuChannel.isEnabled()` 首行是
+ * `if (settings.enabled !== true) return false` —— 总开关一关，**后面的账号判断根本不执行**
+ * ⇒ 账号明明配了、`enabled:true`，却因为一个**渠道无关的总开关**被永久判成"未启用"
+ * ⇒ `im-bridge` 在模型清单里彻底消失，而配置面看上去是对的（`accounts[]` 里躺着一条 feishu）。
+ * 这正是 D179 的形态：**配置说它有，行为说它没有**，且零报错。
+ *
+ * **新判据** = **账号即事实**：`readImSettings(root).accounts` 里存在
+ * 「`enabled !== false` 的账号」即视为可见。理由三条：
+ * ① **可见性问的是"这个 CCC 有没有 IM 能力"**，而能力的载体是**账号**，不是总开关；
+ * ② 总开关的语义是"**要不要让桥跑起来**"，把它当成可见性上限，会让"配好了但暂时不想让它跑"
+ *    这种合法状态变成"工具凭空消失"；
+ * ③ 判**按账号判**后，微信与飞书不再各有一套"总开关 + 账号"的双重判据 ⇒ 消除同族漂移。
+ *
+ * ⚠️ **不放宽的部分**：没有账号 ⇒ 仍然不可见（`accounts` 为空即 false）。
+ * ⚠️ 单个通道自己的 `isEnabled` 仍是**发送/启停**判据（那是通道自己的事），
+ *    只是**不再兼任**工具可见性判据 —— 两件事被这次修正分开了。
+ *
  * @param root 本会话 CCC 根（由调用方解析）
  */
 export function hasEnabledImChannel(root: string): boolean {
-  for (const channel of channels.values()) {
-    try {
-      if (channel.isEnabled(root)) return true
-    } catch {
-      /* 单通道判据失败不影响其他通道（配置损坏由通道自身响亮处理） */
-    }
+  let settings
+  try {
+    settings = readImSettings(root)
+  } catch {
+    // 判据失败按"不可见"处理会凭空夺走能力；但这里不能反过来放行——
+    // 放行会让"坏配置"变成"工具在但用不了"。返回 false 由调用方决定是否告警。
+    return false
   }
-  return false
+  const accounts = settings.accounts ?? []
+  return accounts.some((a) => a.enabled !== false)
 }
 
 /** 结果载荷（lossless JSON——工具返回值必须可 JSON 化） */

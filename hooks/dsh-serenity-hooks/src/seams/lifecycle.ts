@@ -25,6 +25,7 @@ import { stopAllFaces } from '../surface/faces.js'
 import { stopAllBridges } from '../im/bridge.js'
 import { forgetManualOutputSession } from '../im/guard.js'
 import { forgetImBridgeVisibility, forgetExclusiveToolsVisibility, forgetNonCccToolVisibility, forgetHostScheduleToolHiding, forgetTrajectoryConstraintToolVisibility } from './guards.js'
+import { forgetToolVisibility } from './tool-visibility.js'
 import { forgetLogbookCompactionState } from './keeper.js'
 import { registerDisposer } from '../host/effect.js'
 
@@ -53,6 +54,15 @@ export function cleanupSessionState(sessionId: string): void {
   try {
     // v1.30.16：手动输出闸门状态（会话销毁后不再判定；同时防 per-会话 Map 无界增长）
     forgetManualOutputSession(sessionId)
+  } catch {
+    /* 无状态 */
+  }
+  try {
+    // 🔴 2026-10-22 方案 C：**六源汇一后的唯一撤销点**。
+    //    顺序上必须**先**于下面那些语义占位（它们现在不做实际动作）。
+    //    为什么这一条不可省：合并后只有**一份** restrict，若不在销毁时撤销，
+    //    它持有的 disposer 永远不会被调用 —— 会话没了，状态表还在（这正是 review F-08 那类泄漏）。
+    forgetToolVisibility(sessionId)
   } catch {
     /* 无状态 */
   }

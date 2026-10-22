@@ -28,6 +28,12 @@ import { profileToolWhitelist, profileWriteWhitelist } from '../trajectory/polic
 import { hasEnabledImChannel } from '../im/channels.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../kernel/invariant.js'
 import { isoLocal } from '../kernel/time.js'
+import {
+  applyVisibilityDecision,
+  collectVisibilityDecision,
+  getToolVisibilityDiagnostics,
+  type VisibilitySource,
+} from './tool-visibility.js'
 
 // ── 纯决策（可单测）──
 
@@ -239,7 +245,145 @@ export function decideGuard(input: GuardInput): GuardDecisionResult {
   return { kind: 'allow' }
 }
 
-// ── DSH 注册 ──
+// ── 工具可见性：六源汇一（方案 C，owner 2026-10-22 裁）────────────────────────────
+
+/**
+ * 🔴 **工具可见性的唯一发射入口**（方案 C 的落地）。
+ *
+ * ## 它取代了什么
+ *
+ * 改之前有六条独立 sync，每条在自己的 per-会话 Map 里放一个 `restrict` disposer，
+ * 且都由 `pre-step`（每步）与 `seed`（冷载入）各自调用 ⇒ 一次交互里可能发出多次
+ * `tools.restrict` ⇒ 宿主每次发 `tools/change` ⇒ 模型侧看到工具清单**先进后出**
+ * （实测症状：`新增 7 个` 紧跟 `移除 7 个`）。
+ *
+ * ## 为什么合并是对的（不是简化）
+ *
+ * 宿主 `ToolRuntime.restrict` 契约逐字：**Restrictions intersect**。
+ * ⇒ N 次 `deny: Dᵢ` 的净效果 = `⋃Dᵢ`。先求并集只发一次，**结果相同**、只触发一次 `tools/change`。
+ * 前提 = **只用 `deny`**（`allow` 的"交集"不满足并集律）；本仓 18 处 restrict 全部只发 `deny`。
+ *
+ * ## 正确性怎么保住（这是本设计被质疑的那一点）
+ *
+ * 六源**各自独立**算自己的 deny 并**各自 catch**：某一个来源读配置抛错 ⇒ 它返回
+ * `ok:false`（不贡献 deny），**其余五源照常生效**。⇒ 合并**不会**把一格的失败放大成六格。
+ * 全量计算见 {@link computeVisibilitySources}（纯函数）。
+ *
+ * @param agent 目标会话
+ * @param root  CCC 根；`null` ⇒ 不在 CCC 内 ⇒ 隐藏**全部** ACC 工具
+ */
+export function syncToolVisibility(agent: Agent, root: string | null): void {
+  const sessionId = (agent.session as { id?: string }).id ?? 'global'
+  const sources = computeVisibilitySources(sessionId, root)
+  const decision = collectVisibilityDecision(sources)
+
+  if (root !== null && decision.hasError) {
+    // 只在 CCC 内报（非 CCC 的"根缺失"是常态，不是错误）
+    const bad = sources.filter((s) => s.error !== undefined)
+    for (const s of bad) {
+      console.error(`[serenity-hooks] 工具可见性来源「${s.id}」判据失败（其余来源照常生效）: ${s.error ?? ''}`)
+    }
+  }
+
+  const r = applyVisibilityDecision(agent, sessionId, decision)
+  if (r.status === 'failed') {
+    console.error(`[serenity-hooks] 工具可见性发射失败 (session=${sessionId}): ${r.error ?? ''}`)
+  } else if (r.dropped.length > 0) {
+    // 剔掉的是"本 CCC 没注册的名字"（典型：diagram 关着 / 宿主没装 schedule 包）——常态，不刷 error
+    console.log(
+      `[serenity-hooks] 工具可见性：跳过 ${r.dropped.length} 个未注册名（${r.dropped.join(', ')}）`,
+    )
+  }
+}
+
+/**
+ * 六源 → 各自的 deny 集合（**纯函数：只读配置、不碰宿主**）。
+ *
+ * 每条来源**自己负责自己的失败**：抛错就 catch 在这里，转成 `ok:false + error`。
+ * ⛔ 绝不让一个来源的异常冒泡 —— 那会让另外五源一起失效（正是合并最容易犯的错）。
+ */
+export function computeVisibilitySources(sessionId: string, root: string | null): VisibilitySource[] {
+  const out: VisibilitySource[] = []
+
+  // ① 非 CCC ⇒ 隐藏全部 ACC 工具（两档：含条件工具 / 只常驻段）
+  out.push(
+    sourceOf('nonCcc', () => {
+      if (root !== null) return { deny: [] }
+      // 两档是历史原因（`diagram` 等条件工具可能未注册）——合并发射层已统一探活，
+      // 这里直接用全表即可；保留条件工具会让探活把它们剔掉，效果相同。
+      return { deny: [...REGISTERED_TOOLS] }
+    }),
+  )
+
+  // 非 CCC 时其余五源都没有意义（没有 CCC 就没有配置可读）⇒ 显式记空
+  if (root === null) {
+    for (const id of ['safeMode', 'imBridge', 'exclusive', 'hostSchedule', 'trajectoryConstraint'] as const) {
+      out.push({ id, deny: [], ok: false })
+    }
+    return out
+  }
+
+  // ② 安全模式：基础表 ∪ CCC 声明的 hiddenTools（**只在安全模式开启时**贡献）
+  out.push(
+    sourceOf('safeMode', () => {
+      if (!isSafeModeOn(root)) return { deny: [] }
+      let declared: string[] = []
+      try {
+        declared = readSafeModeHiddenTools(root)
+      } catch (e) {
+        // 声明读不到 ≠ 安全模式不生效：基础表仍必须藏（退化为只藏基础表）
+        return { deny: [...SAFE_MODE_DENY_TOOLS], error: (e as Error).message }
+      }
+      return { deny: [...new Set([...SAFE_MODE_DENY_TOOLS, ...declared])] }
+    }),
+  )
+
+  // ③ im-bridge：无任何启用账号 ⇒ 隐藏
+  out.push(
+    sourceOf('imBridge', () => (hasEnabledImChannel(root) ? { deny: [] } : { deny: [IM_BRIDGE_TOOL_NAME] })),
+  )
+
+  // ④ 专属工具：未声明 ⇒ 隐藏（fail-closed）
+  out.push(
+    sourceOf('exclusive', () => {
+      const declared = readExclusiveTools(root)
+      return { deny: EXCLUSIVE_TOOL_NAMES.filter((t) => !declared.includes(t)) }
+    }),
+  )
+
+  // ⑤ 宿主定时器工具：CCC 内一律屏蔽（owner 2026-10-17 令：与 CRO 冲突）
+  out.push(sourceOf('hostSchedule', () => ({ deny: [...HOST_SCHEDULE_TOOL_NAMES] })))
+
+  // ⑥ 轨迹约束白名单：deny = 我们注册的工具 − 白名单
+  out.push(
+    sourceOf('trajectoryConstraint', () => {
+      const profile = trajectoryConstraintForSession(root, sessionId)
+      if (profile === null) return { deny: [] }
+      const allowed = profileToolWhitelist(profile)
+      // 🔴 D181：`null` = 字段缺省 = 不收窄（不是"全禁止"）
+      if (allowed === null) return { deny: [] }
+      return { deny: REGISTERED_TOOLS.filter((n) => !allowed.has(n)) }
+    }),
+  )
+
+  return out
+}
+
+/**
+ * 把一个"可能抛错的 denies 计算"包成来源（**统一在这里 catch**）。
+ * 失败 ⇒ `ok:false`：本来源不贡献 deny，**其余来源不受影响**。
+ */
+function sourceOf(id: string, fn: () => { deny: readonly string[]; error?: string }): VisibilitySource {
+  try {
+    const r = fn()
+    return { id, deny: r.deny, ok: true, ...(r.error !== undefined ? { error: r.error } : {}) }
+  } catch (e) {
+    return { id, deny: [], ok: false, error: (e as Error).message }
+  }
+}
+
+// ── 安全模式基础表（下方 syncSafeModeRestriction 保留为**兼容入口**）──
+
 
 /** 从 exec 提取 agent 会话 cwd（CCC 根检测基准）；无则回退进程 cwd */
 function resolveAgentCwd(exec: ToolExecution): string {
@@ -312,88 +456,6 @@ function writeRestrictDiag(root: string): void {
   }
 }
 
-/**
- * 同步安全模式工具隐藏：标记存在 → `agent.ctx.tools.restrict deny` 隐藏
- * **基础表（bash）∪ CCC 声明的 `safeMode.hiddenTools`**；标记消失 → 全部解除。
- * pre-step 每步调用 ⇒ 开／关／**改声明**三种变化都实时生效（v1.51.4 起含"改声明"）。
- *
- * 与 `readSafeModeHiddenTools` 的分工（R↓）：本函数负责**形状与失败退化**，reader 只管取值。
- * 🔴 退化规则：DSH 契约规定 **未注册的工具名会让整次 restrict 失败**（"unknown names … fail"）
- * ⇒ 绝不能让 CCC 写错一个名字就丢掉 safe-mode 的核心隐藏（bash）。失败时退化为**只隐藏基础表**，
- * 并在日志响亮报错；退化态**按期望签名记账**，不会每步重试刷屏。
- */
-export function syncSafeModeRestriction(agent: Agent, root: string): void {
-  const key = (agent.session as { id?: string }).id ?? 'global'
-  const on = isSafeModeOn(root)
-  const existing = safeModeRestrictions.get(key)
-
-  if (!on) {
-    if (existing !== undefined) {
-      try {
-        existing.dispose()
-      } catch (e) {
-        console.error(`[serenity-hooks] restrict 解除失败 (key=${key}):`, (e as Error).message)
-      }
-      safeModeRestrictions.delete(key)
-    }
-    writeRestrictDiag(root)
-    return
-  }
-
-  // 安全模式开启：deny = 基础表 ∪ CCC 声明（声明只在安全模式期间生效 —— owner 2026-10-09 令）
-  let declared: string[] = []
-  try {
-    declared = readSafeModeHiddenTools(root)
-  } catch (e) {
-    console.error(`[serenity-hooks] safeMode.hiddenTools 判据读取失败 (key=${key}):`, (e as Error).message)
-  }
-  const deny = [...new Set([...SAFE_MODE_DENY_TOOLS, ...declared])]
-  const signature = deny.join(',')
-
-  if (existing !== undefined && existing.signature === signature) {
-    writeRestrictDiag(root)
-    return
-  }
-  if (existing !== undefined) {
-    try {
-      existing.dispose()
-    } catch (e) {
-      console.error(`[serenity-hooks] restrict 重算前解除失败 (key=${key}):`, (e as Error).message)
-    }
-    safeModeRestrictions.delete(key)
-  }
-
-  let applied = deny
-  let dispose: () => void
-  try {
-    dispose = agent.ctx.tools.restrict({ deny: [...deny] })
-  } catch (e) {
-    restrictDiag.lastKey = key
-    restrictDiag.lastAttemptAt = isoLocal()
-    restrictDiag.lastSuccess = false
-    restrictDiag.lastError = (e as Error).message
-    console.error(
-      `[serenity-hooks] restrict 失败，已退化为基础表（多为 safeMode.hiddenTools 里有本 CCC **未注册**的工具名）(key=${key}):`,
-      (e as Error).message,
-    )
-    applied = [...SAFE_MODE_DENY_TOOLS]
-    try {
-      dispose = agent.ctx.tools.restrict({ deny: applied })
-    } catch (e2) {
-      restrictDiag.lastError = `${(e as Error).message} ／ 退化亦失败: ${(e2 as Error).message}`
-      console.error(`[serenity-hooks] restrict 退化失败（守卫仍兜底拦截）(key=${key}):`, (e2 as Error).message)
-      safeModeRestrictions.set(key, { signature, deny: [], dispose: () => {} })
-      writeRestrictDiag(root)
-      return
-    }
-  }
-  restrictDiag.lastKey = key
-  restrictDiag.lastAttemptAt = isoLocal()
-  restrictDiag.lastSuccess = true
-  restrictDiag.lastError = null
-  safeModeRestrictions.set(key, { signature, deny: applied, dispose })
-  writeRestrictDiag(root)
-}
 
 // ── im-bridge 条件可见（v1.31.0）──
 
@@ -403,94 +465,30 @@ const IM_BRIDGE_TOOL_NAME = 'im-bridge'
 /** agent key → restrict disposer（im-bridge 隐藏状态；key 同安全模式 = 会话 id） */
 const imBridgeRestrictions = new Map<string, () => void>()
 
-/** im-bridge 隐藏诊断（排查"工具为什么不在清单里"） */
+/**
+ * im-bridge 隐藏诊断（排查"工具为什么不在清单里"）。
+ *
+ * 🔴 方案 C 之后**唯一真相源**是 `seams/tool-visibility.ts` 的全局表。
+ * 本函数只**读**它并回答"该会话当前是否隐藏了 im-bridge" ——
+ * 不再自己维护第二份状态（那会让诊断与实现各说一套，D164 同族）。
+ */
 export function getImBridgeVisibilityDiagnostics(): { hiddenKeys: string[] } {
-  return { hiddenKeys: [...imBridgeRestrictions.keys()] }
+  const vis = getToolVisibilityDiagnostics()
+  return { hiddenKeys: vis.keys.filter((k) => (vis.denyByKey[k] ?? []).includes(IM_BRIDGE_TOOL_NAME)) }
 }
 
 /**
- * 同步 im-bridge 可见性（v1.31.0，S142 用户拍板 Q3「未配置则不可见」）。
+ * 会话销毁清理（lifecycle 调用）。
  *
- * 判据 = 本会话 CCC 是否启用了**任一** IM 通道（`hasEnabledImChannel`，当前只有 weixin）：
- * - 未启用 → `agent.ctx.tools.restrict({ deny: ['im-bridge'] })`：**从 schema 移除**
- *   （模型看不到，而不是看得到但调用被拒——用户原话"不配置则不可见"）
- * - 启用 → 解除隐藏（CCC 配置热更新即时生效）
- *
- * 与 `syncSafeModeRestriction` 同点调用（pre-step 每步 + 会话就绪），失败不阻断
- * （守卫仍兜底；restrict 不可用时最坏是"看得到但通道未配置 → 返回 CHANNEL_NOT_CONFIGURED"）。
+ * ⚠️ 方案 C 后撤销动作**只在** `forgetToolVisibility` 里做一次（那一次合并 restrict）。
+ * 本函数保留为语义占位：重复撤销同一条 restrict 会抛错，故这里刻意不做动作。
  */
-export function syncImBridgeVisibility(agent: Agent, root: string): void {
-  const key = (agent.session as { id?: string }).id ?? 'global'
-  let enabled = false
-  try {
-    enabled = hasEnabledImChannel(root)
-  } catch (e) {
-    // 判据失败按"未启用"处理会让工具凭空消失 → 按"启用"放行，由通道自身报未配置
-    console.error(`[serenity-hooks] im-bridge 可见性判据失败 (key=${key}):`, (e as Error).message)
-    return
-  }
-  const existing = imBridgeRestrictions.get(key)
-  if (!enabled && !existing) {
-    try {
-      const dispose = agent.ctx.tools.restrict({ deny: [IM_BRIDGE_TOOL_NAME] })
-      imBridgeRestrictions.set(key, dispose)
-    } catch (e) {
-      console.error(`[serenity-hooks] im-bridge 隐藏失败 (key=${key}):`, (e as Error).message)
-      /* 隐藏失败不阻断：调用时通道判据仍会拒绝（CHANNEL_NOT_CONFIGURED） */
-    }
-  } else if (enabled && existing) {
-    try {
-      existing()
-    } catch (e) {
-      console.error(`[serenity-hooks] im-bridge 解除隐藏失败 (key=${key}):`, (e as Error).message)
-    }
-    imBridgeRestrictions.delete(key)
-  }
-}
-
-/** 会话销毁清理（lifecycle 调用；防 per-会话 Map 无界增长——review F-08 同族） */
-export function forgetImBridgeVisibility(sessionId: string): void {
-  const existing = imBridgeRestrictions.get(sessionId)
-  if (!existing) return
-  try {
-    existing()
-  } catch {
-    /* disposer 已失效 */
-  }
-  imBridgeRestrictions.delete(sessionId)
+export function forgetImBridgeVisibility(_sessionId: string): void {
+  /* 实际撤销见 forgetToolVisibility（lifecycle 已单独调用） */
 }
 
 // ── 🆕 宿主自带「定时器」工具在 CCC 内屏蔽（v1.59.5，owner 令 2026-10-17）──
 
-/**
- * 宿主 `dsh-tool-schedule` 注册的 4 个模型可见工具名（**逐字**，来自该包 `lib/index.js` 的
- * `defineTool({ name: … })`：`schedule_create` / `schedule_list` / `schedule_update` / `schedule_delete`）。
- *
- * 🔴 **为什么要在 CCC 内屏蔽（owner 原话：「这和 CRO 冲突，要求在宁静号激活情况下屏蔽掉」）**：
- * 宿主从 `0.2.1-rc.2` 起自带一套**模型可见的定时器工具**（`ctx.schedule` 服务 + 这 4 个工具）。
- * 而宁静号的唤醒/巡航走的是**另一套**机制：`cognitive_trajectory send-later` → 落 CCC 的
- * `AGENT_SESSIONS/wake-registry.json` → 由**中心调度器 5min tick 统一投递**（D58）。
- * 两套并存会产生**三个具体问题**（不是"重复功能"这种审美问题）：
- *  ① **两处真相源**：宿主的 schedule 状态在宿主域、我们的在 CCC 文件里，**谁在跑说不清**；
- *  ② **CRO 判据失真**：CRO 程序读的是 `wake-registry.json`，宿主定时器触发的唤起**它看不见**
- *     ⇒ 巡检/记账全部遗漏（本轨已有同族教训：「CRO 只在 `wake===true` 时算」那条被推翻）；
- *  ③ **安静失败**：模型可能顺手用 `schedule_create` 排一个唤醒，**它不在任何人的账本里**。
- * ⇒ 故**在 CCC 内隐藏**（从模型清单移除），非 CCC 会话**不受影响**（那是宿主的正常能力）。
- *
- * ⚠️ **一处必须防的坑**（与 `hideAllFor` 同族）：宿主 `restrict` 对**未注册的名字**会让**整次调用失败**
- * （`dsh-tools` 契约逐字："Empty filters, unknown names … fail"）。
- * 这 4 个名字是否在册取决于**宿主是否装了该 tool 包**（不同宿主版本/裁剪可能没有）
- * ⇒ 所以**逐个名字单独发 restrict**，某个失败就跳过那个，**绝不整批发**
- * （整批发一旦撞到缺名的宿主 ⇒ 一个都不隐藏 + 只有一行 log ⇒ 缺陷静默）。
- */
-const HOST_SCHEDULE_TOOL_NAMES = [
-  'schedule_create',
-  'schedule_list',
-  'schedule_update',
-  'schedule_delete',
-] as const
-
-/** `${sessionId}::${toolName}` → restrict disposer（逐工具，便于某个名字不成立时单独跳过） */
 const hostScheduleRestrictions = new Map<string, () => void>()
 
 /** 诊断面：本会话已屏蔽的宿主定时器工具（排查"工具为什么不见了"） */
@@ -498,48 +496,30 @@ export function getHostScheduleHiddenDiagnostics(): { hidden: string[] } {
   return { hidden: [...hostScheduleRestrictions.keys()] }
 }
 
-/**
- * 在 **CCC 内**屏蔽宿主自带的定时器工具（v1.59.5）。
- *
- * 判据 = **会话是否落在某个 CCC 内**（`root !== null`）——与 `syncCccToolVisibility` 互补：
- * 那个管"不在 CCC ⇒ 隐藏**我们自己的**全部工具"，本函数管"**在** CCC ⇒ 隐藏**宿主的**定时器工具"。
- *
- * 幂等；失败不阻断 step（最坏 = 那一个工具仍可见，但那只是"宿主的正常能力没被藏起来"，
- * 不会让会话坏掉）。逐个名字独立发 restrict ⇒ 任何一个名字不在册都不会连累其余三个。
- *
- * @param agent 目标会话
- * @param root  该会话的 CCC 根；`null` ⇒ 非 CCC ⇒ **不动**（宿主的定时器在别处是正常能力）
- */
-export function syncHostScheduleToolHiding(agent: Agent, root: string | null): void {
-  if (root === null) return
-  const sessionId = (agent.session as { id?: string }).id ?? 'global'
-  for (const tool of HOST_SCHEDULE_TOOL_NAMES) {
-    const key = `${sessionId}::${tool}`
-    if (hostScheduleRestrictions.has(key)) continue
-    try {
-      hostScheduleRestrictions.set(key, agent.ctx.tools.restrict({ deny: [tool] }))
-    } catch {
-      // 该名字不在册（宿主没装那个工具包 / 被裁剪）⇒ 跳过它，**不影响其余三个**
-      // 刻意不逐条告警：这会随宿主版本常态发生，逐条 error 会在每个 CCC 会话上刷假警报。
-    }
-  }
-}
 
-/** 会话销毁清理（lifecycle 调用；按 `${sessionId}::` 前缀回收） */
-export function forgetHostScheduleToolHiding(sessionId: string): void {
-  const prefix = `${sessionId}::`
-  for (const [key, dispose] of [...hostScheduleRestrictions]) {
-    if (!key.startsWith(prefix)) continue
-    try {
-      dispose()
-    } catch {
-      /* disposer 已失效 */
-    }
-    hostScheduleRestrictions.delete(key)
-  }
+/** 会话销毁清理（lifecycle 调用）——方案 C 后由统一清理撤销，这里保留语义占位。 */
+export function forgetHostScheduleToolHiding(_sessionId: string): void {
+  /* 实际撤销见 forgetToolVisibility */
 }
 
 // ── 专属工具条件可见（v1.33，S142 §32.11）──
+
+/**
+ * 宿主 `dsh-tool-schedule` 注册的 4 个模型可见工具名（**逐字**）。
+ *
+ * 🔴 **为什么要在 CCC 内屏蔽**（owner 原话：「这和 CRO 冲突，要求在宁静号激活情况下屏蔽掉」）：
+ * 宁静号的唤醒/巡航走 `cognitive_trajectory send-later` → `AGENT_SESSIONS/wake-registry.json`
+ * → 中心调度器 5min tick（D58）。宿主这套定时器是**另一个**真相源 ⇒ 两处记账、
+ * CRO 判据失真、且模型可能顺手排一个"不在任何账本里"的唤醒。
+ * ⚠️ 本清单**合并发射时不需要探活**（`applyVisibilityDecision` 统一个剔掉未注册名），
+ *    所以宿主没装该包时不会炸掉整次发射 —— 这是方案 C 顺带修掉的一个旧坑。
+ */
+const HOST_SCHEDULE_TOOL_NAMES = [
+  'schedule_create',
+  'schedule_list',
+  'schedule_update',
+  'schedule_delete',
+] as const
 
 /**
  * ACC 注册但**默认对所有 CCC 隐藏**的专属工具清单。
@@ -578,168 +558,19 @@ export function getTrajectoryConstraintVisibilityDiagnostics(): { keys: string[]
   }
 }
 
-/**
- * 同步 **轨迹约束会话的工具面**：把白名单之外的工具**从 schema 移除**（不是"看得到但被拒"）。
- *
- * ## 为什么必须有这条（owner 2026-10-19：「工具清单也要热加载」）
- *
- * 在它之前，轨迹约束白名单**只由运行时守卫拦截**（`decideGuard` 的 轨迹约束 分支）：
- * 工具全部出现在模型 schema 里，调用时才被打回。⇒ 两个真实后果：
- *  ① **模型看得见它不该有的工具** —— 它会去试，试了才撞墙（一轮白烧，且错误文案泛化，
- *     看不出"是不在清单里"还是"临时性拒绝"）；
- *  ② **配置变动在 schema 上永远不生效** —— 改 `trajectory-constraint.json` 的 `tools` 只影响"调用是否放行"。
- *
- * ## 判据与降级
- *
- * - deny 集合 = **`REGISTERED_TOOLS` − 白名单**（只对**我们自己注册的**工具算，
- *   不去动宿主的工具 —— 宿主的工具由各自的条件同步管）。
- * - ⚠️ **未注册的名字会让整次 restrict 失败**（宿主契约逐字 "unknown names … fail"），
- *   而 `diagram` 是按开关注册的 ⇒ 与 `hideAllFor` 同款**两档尝试**（先全覆盖，失败退常驻段）。
- * - 读不到约束面（不是 轨迹约束 / 配置删了）⇒ **撤销既有隐藏**（回到"无约束"）：
- *   ⛔ 不能只是 `return` —— 那会把上一步的隐藏**永久留在**一个已不再是 轨迹约束的会话上
- *   （这正是 owner 说的"删掉 `trajectory-constraint.json` 就该立刻恢复"）。
- * - 幂等：算出来的 deny 签名不变就跳过（不每步重建 schema）。
- *
- * @param agent 目标会话
- * @param root  CCC 根
- */
-export function syncTrajectoryConstraintToolVisibility(agent: Agent, root: string): void {
-  const sessionId = (agent.session as { id?: string }).id ?? 'global'
-  const profile = trajectoryConstraintForSession(root, sessionId)
-  const existing = trajectoryConstraintRestrictions.get(sessionId)
 
-  // 不是 轨迹约束（含"刚刚删掉 trajectory-constraint.json"）⇒ **撤销**既有隐藏，回到无约束
-  if (profile === null) {
-    if (existing !== undefined) {
-      try {
-        existing.dispose()
-      } catch {
-        /* disposer 已失效 */
-      }
-      trajectoryConstraintRestrictions.delete(sessionId)
-    }
-    return
-  }
-  const allowed = profileToolWhitelist(profile)
-
-  // 🔴 D181：`null` = 不收窄 ⇒ **撤销**既有隐藏，回到无约束（与"删掉文件"同效）。
-  //    判据是**字段在不在**，不是数组空不空 —— 见 rules.ts 的 profileToolWhitelist。
-  if (allowed === null) {
-    if (existing !== undefined) {
-      try {
-        existing.dispose()
-      } catch {
-        /* disposer 已失效 */
-      }
-      trajectoryConstraintRestrictions.delete(sessionId)
-    }
-    return
-  }
-
-  const resident = REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT)
-  const tiers: Array<readonly string[]> = [REGISTERED_TOOLS, resident]
-
-  for (const names of tiers) {
-    const deny = names.filter((n) => !allowed.has(n))
-    const signature = [...deny].sort().join(',')
-    if (existing !== undefined && existing.signature === signature) return // 已是目标态
-    if (deny.length === 0) {
-      // 白名单覆盖全部注册工具 ⇒ 解除既有隐藏
-      if (existing !== undefined) {
-        try {
-          existing.dispose()
-        } catch {
-          /* disposer 已失效 */
-        }
-        trajectoryConstraintRestrictions.delete(sessionId)
-      }
-      return
-    }
-    try {
-      // 先解除旧 restrict（否则多发射一次会叠加；宿主的 dispose 才是"撤销上一次"）
-      if (existing !== undefined) {
-        try {
-          existing.dispose()
-        } catch {
-          /* 旧 disposer 失效 ⇒ 直接发新的 */
-        }
-        trajectoryConstraintRestrictions.delete(sessionId)
-      }
-      const dispose = agent.ctx.tools.restrict({ deny: [...deny] })
-      trajectoryConstraintRestrictions.set(sessionId, { signature, deny, dispose })
-      return
-    } catch {
-      // 该档里有不在册的名字（典型 = `diagram` 关着）⇒ 退下一档
-      continue
-    }
-  }
+/** 会话销毁清理（lifecycle 调用）。
+ * ⚠️ 方案 C 后撤销只在 `forgetToolVisibility` 做一次；本函数保留语义占位。
+ * 留着它的价值：lifecycle 的调用点表达"这条会话有轨迹约束可见性状态要清"，
+ * 删掉调用点会让那件事**从代码里消失**（将来有人重加机制时找不到插点）。 */
+export function forgetTrajectoryConstraintToolVisibility(_sessionId: string): void {
+  /* 见 forgetToolVisibility */
 }
 
-/** 会话销毁清理（lifecycle 调用） */
-export function forgetTrajectoryConstraintToolVisibility(sessionId: string): void {
-  const existing = trajectoryConstraintRestrictions.get(sessionId)
-  if (!existing) return
-  try {
-    existing.dispose()
-  } catch {
-    /* disposer 已失效 */
-  }
-  trajectoryConstraintRestrictions.delete(sessionId)
-}
 
-/**
- * 同步专属工具可见性（v1.33）。
- *
- * 判据 = CCC 配置 `exclusiveTools`（`readExclusiveTools`）：
- * - **未声明** → `agent.ctx.tools.restrict({ deny: [tool] })`：从 schema 移除（模型看不到）
- * - **声明** → 解除隐藏（CCC 配置热更新即时生效）
- *
- * 判据失败按"未声明"处理（fail-closed：专属工具默认隐藏），原因见 `readExclusiveTools` 注释。
- * 与 `syncImBridgeVisibility` 同点调用（pre-step 每步 + 会话就绪），失败不阻断一步——
- * 最坏情况是"看得到但被拒"，而不是让 step 出错。
- */
-export function syncExclusiveToolsVisibility(agent: Agent, root: string): void {
-  const sessionId = (agent.session as { id?: string }).id ?? 'global'
-  let declared: string[] = []
-  try {
-    declared = readExclusiveTools(root)
-  } catch (e) {
-    console.error(`[serenity-hooks] 专属工具可见性判据失败 (session=${sessionId}):`, (e as Error).message)
-  }
-  for (const tool of EXCLUSIVE_TOOL_NAMES) {
-    const key = `${sessionId}::${tool}`
-    const existing = exclusiveRestrictions.get(key)
-    const visible = declared.includes(tool)
-    if (!visible && !existing) {
-      try {
-        exclusiveRestrictions.set(key, agent.ctx.tools.restrict({ deny: [tool] }))
-      } catch (e) {
-        console.error(`[serenity-hooks] 专属工具隐藏失败 (${key}):`, (e as Error).message)
-        /* 隐藏失败不阻断：最坏是该 CCC 看得见这个工具（诊断工具本身无副作用） */
-      }
-    } else if (visible && existing) {
-      try {
-        existing()
-      } catch (e) {
-        console.error(`[serenity-hooks] 专属工具解除隐藏失败 (${key}):`, (e as Error).message)
-      }
-      exclusiveRestrictions.delete(key)
-    }
-  }
-}
-
-/** 会话销毁清理（lifecycle 调用；本函数按 `${sessionId}::` 前缀回收全部专属工具项） */
-export function forgetExclusiveToolsVisibility(sessionId: string): void {
-  const prefix = `${sessionId}::`
-  for (const [key, dispose] of [...exclusiveRestrictions]) {
-    if (!key.startsWith(prefix)) continue
-    try {
-      dispose()
-    } catch {
-      /* disposer 已失效 */
-    }
-    exclusiveRestrictions.delete(key)
-  }
+/** 会话销毁清理（lifecycle 调用）——同上，语义占位。 */
+export function forgetExclusiveToolsVisibility(_sessionId: string): void {
+  /* 见 forgetToolVisibility */
 }
 
 // ── 🔴 非 CCC 会话：**全工具面隐藏**（v1.56.6，owner 2026-10-13 报缺陷）──
@@ -773,75 +604,7 @@ export function getNonCccHiddenDiagnostics(): { hidden: string[] } {
   return { hidden: [...nonCccRestrictions.keys()] }
 }
 
-/**
- * 在非 CCC 会话上隐藏全部 ACC 工具（两档尝试）。
- *
- * 🔴 **为什么要两档（D119：不许照源码"意图"断言宿主行为）**：取消注册的工具名会让整次
- * `restrict` 失败，而 `diagram` 缺省不在册。若只发一次全表 deny，"deny 里有个不在册的名字"
- * 就会让**整次调用**失败 ⇒ 一个都不隐藏（且只有一行 console.error）。
- *
- * 档位（**先全覆盖、失败再退到"恒在册"那一段**）：
- *   ① 全表 `REGISTERED_TOOLS`（14：含条件工具）—— 首选，覆盖最全
- *   ② 常驻段（前 `length - CONDITIONAL_TOOL_COUNT` 个）—— 退路：只保证**恒注册**的那些被隐藏
- *
- * 返回**实际生效的注销器**；两档都失败 → `{ failed: [...] }`（原因一并带回，由调用方决定怎么响）。
- *
- * ⚠️ **档位失败不在这里逐条告警**：档 ① 在 `diagram` 缺省关时**按设计**就会失败（它不在册），
- * 那是**常态**、不是故障 ⇒ 逐条 error 会在每个非 CCC 会话上刷**假警报**（看着像坏了，其实档 ② 已成功）。
- * 真正的失败只由调用方在"两档全失败"时**响亮报一次**。
- */
-function hideAllFor(agent: Agent): { dispose: () => void; names: readonly string[] } | { failed: string[] } {
-  const resident = REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT)
-  const tiers: Array<{ label: string; names: readonly string[] }> = [
-    { label: '全表（含条件工具）', names: REGISTERED_TOOLS },
-    { label: '常驻段（跳过条件工具）', names: resident },
-  ]
-  const failed: string[] = []
-  for (const tier of tiers) {
-    try {
-      return { dispose: agent.ctx.tools.restrict({ deny: [...tier.names] }), names: tier.names }
-    } catch (e) {
-      failed.push(`${tier.label}: ${(e as Error).message}`)
-    }
-  }
-  return { failed }
-}
 
-/**
- * 同步「本会话在不在 CCC 内」的工具可见性（v1.56.6）。
- *
- * @param agent 目标会话的 agent
- * @param root 该会话的 CCC 根；`null` ⇒ **不在任何 CCC 内** ⇒ 隐藏全部 ACC 工具
- *
- * 幂等：同一会话重复调用不会重复 restrict（已是目标态即直接返回）。
- * 失败不抛（最坏情况：工具可见，但**调用时**仍被各工具自己的根解析拒绝——既有兜底不变）。
- */
-export function syncCccToolVisibility(agent: Agent, root: string | null): void {
-  const sessionId = (agent.session as { id?: string }).id ?? 'global'
-  const existing = nonCccRestrictions.get(sessionId)
-  const shouldHide = root === null
-
-  if (shouldHide && !existing) {
-    const hidden = hideAllFor(agent)
-    if ('failed' in hidden) {
-      console.error(
-        `[serenity-hooks] 非 CCC 工具隐藏**两档全失败**(session=${sessionId}) —— 工具仍可见（但有各工具自身的 !root 兜底）：${hidden.failed.join(' ／ ')}`,
-      )
-      return
-    }
-    nonCccRestrictions.set(sessionId, hidden.dispose)
-    return
-  }
-  if (!shouldHide && existing) {
-    // 会话从非 CCC 迁入 CCC（或根中途出现）⇒ 恢复可见
-    try {
-      existing()
-    } catch (e) {
-      console.error(`[serenity-hooks] 非 CCC 工具恢复失败 (session=${sessionId}):`, (e as Error).message)
-    }
-    nonCccRestrictions.delete(sessionId)
-  }
-}
 
 /** 会话销毁清理（lifecycle 调用；防 per-会话 Map 无界增长） */
 export function forgetNonCccToolVisibility(sessionId: string): void {

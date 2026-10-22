@@ -1,23 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   decideGuard,
-  type GuardInput,
-  syncSafeModeRestriction,
-  syncImBridgeVisibility,
-  forgetImBridgeVisibility,
-  getImBridgeVisibilityDiagnostics,
-  syncExclusiveToolsVisibility,
-  forgetExclusiveToolsVisibility,
-  getExclusiveToolsDiagnostics,
-  syncCccToolVisibility,
-  forgetNonCccToolVisibility,
+  getRestrictDiagnostics,
   getNonCccHiddenDiagnostics,
-  syncHostScheduleToolHiding,
-  forgetHostScheduleToolHiding,
   getHostScheduleHiddenDiagnostics,
+  computeVisibilitySources,
 } from '../src/seams/guards.js'
 import { REGISTERED_TOOLS, CONDITIONAL_TOOL_COUNT } from '../src/kernel/invariant.js'
 import { registerImChannel, __resetImChannelsForTest } from '../src/im/channels.js'
@@ -67,6 +57,20 @@ function profile(over: Partial<TrajectoryConstraint> = {}): TrajectoryConstraint
     cognitiveTrajectory: { session: true, keeper: true, rebuild: true },
     ...over,
   }
+}
+
+/**
+ * 🔴 方案 C（owner 2026-10-22 裁）后的测试入口。
+ *
+ * 六条 `syncXxx` 已合并成一次发射（`syncToolVisibility`），它们**不再单独存在**。
+ * 但这些用例真正要钉的东西没变 —— **每一源算出来的 deny 清单是什么**。
+ * ⇒ 改成直接问纯函数 `computeVisibilitySources`：判据一条不动，只是入口换了。
+ * （这正是"计算与发射分离"的直接收益：算 deny 不再需要替身宿主。）
+ */
+function denyOf(id: string, root: string | null, sessionId = 's-test'): string[] {
+  const s = computeVisibilitySources(sessionId, root).find((x) => x.id === id)
+  if (!s) throw new Error(`没有这个来源：${id}（候选：${computeVisibilitySources(sessionId, root).map((x) => x.id).join(', ')}）`)
+  return [...s.deny].sort()
 }
 
 describe('guards: decideGuard 纯决策', () => {
@@ -273,33 +277,11 @@ describe('readSafeModeHiddenTools（判据：fail-open）', () => {
   })
 })
 
-describe('safe-mode 工具隐藏（syncSafeModeRestriction）', () => {
+describe('safe-mode 工具隐藏（源 = computeVisibilitySources.safeMode）', () => {
   /**
-   * 替身 agent：记录 restrict 调用与 disposer 触发。
-   * `rejectUnknown` 复刻宿主契约——**未注册的工具名会让整次 restrict 失败**
-   * （`dsh-tools` 类型面逐字："Empty filters, unknown names, scope-local names,
-   * and reserved transport names fail"）。
+   * 🔴 方案 C 后：六条 sync 合并成一次发射，**每源的判据仍要逐条钉**。
+   * ⇒ 这里问纯函数 `computeVisibilitySources`（判据一条未动，只是不再需要替身宿主）。
    */
-  function mkAgent(id: string, opts: { rejectUnknown?: string } = {}) {
-    const calls: { deny?: string[] }[] = []
-    const disposed: string[] = []
-    const agent = {
-      session: { id },
-      ctx: {
-        tools: {
-          restrict: (f: { deny?: string[] }) => {
-            if (opts.rejectUnknown !== undefined && (f.deny ?? []).includes(opts.rejectUnknown)) {
-              throw new Error(`unknown tool: ${opts.rejectUnknown}`)
-            }
-            calls.push(f)
-            return () => { disposed.push((f.deny ?? []).join(',')) }
-          },
-        },
-      },
-    } as any
-    return { agent, calls, disposed }
-  }
-
   function declareHidden(list: unknown): void {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ safeMode: { hiddenTools: list } }))
@@ -307,455 +289,117 @@ describe('safe-mode 工具隐藏（syncSafeModeRestriction）', () => {
 
   it('未声明 → 只隐藏基础表（bash），write/edit 保留', () => {
     writeFileSync(join(dir, '.serenity-safe-on'), 'x')
-    const m = mkAgent('sm-base')
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls).toHaveLength(1)
-    expect(m.calls[0]!.deny).toEqual(['bash'])
-    expect(m.calls[0]!.deny).not.toContain('write')
+    const deny = denyOf('safeMode', dir)
+    expect(deny).toEqual(['bash'])
+    expect(deny).not.toContain('write')
   })
 
   it('声明 hiddenTools → deny = 基础表 ∪ 声明（安全模式开启期间）', () => {
     writeFileSync(join(dir, '.serenity-safe-on'), 'x')
     declareHidden(['workflow', 'job_kill'])
-    const m = mkAgent('sm-declared')
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls).toHaveLength(1)
-    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow', 'job_kill'])
+    expect(denyOf('safeMode', dir)).toEqual(['bash', 'job_kill', 'workflow'])
   })
 
-  it('无安全模式标记 → 声明不生效（一次 restrict 都不发）', () => {
+  it('无安全模式标记 → 声明不生效（本源不贡献任何 deny）', () => {
     declareHidden(['workflow'])
-    const m = mkAgent('sm-off')
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls).toHaveLength(0)
+    expect(denyOf('safeMode', dir)).toEqual([])
   })
 
-  it('标记消失 → 解除隐藏（disposer 被调用），且是可逆的', () => {
+  it('🔴 声明读坏 ≠ 安全模式失效：退化为只藏基础表（bash 不许丢）', () => {
     writeFileSync(join(dir, '.serenity-safe-on'), 'x')
-    declareHidden(['workflow'])
-    const m = mkAgent('sm-toggle')
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls).toHaveLength(1)
-    rmSync(join(dir, '.serenity-safe-on'))
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.disposed).toEqual(['bash,workflow'])
-  })
-
-  it('清单未变 → 幂等（不重复 restrict）', () => {
-    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
-    declareHidden(['workflow'])
-    const m = mkAgent('sm-idem')
-    syncSafeModeRestriction(m.agent, dir)
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls).toHaveLength(1)
-  })
-
-  it('🔴 改声明 → 热重算（解除旧的，应用新的）', () => {
-    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
-    declareHidden(['workflow'])
-    const m = mkAgent('sm-reload')
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow'])
-    declareHidden(['workflow', 'interrupt_agent'])
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.disposed).toEqual(['bash,workflow'])
-    expect(m.calls).toHaveLength(2)
-    expect(m.calls[1]!.deny).toEqual(['bash', 'workflow', 'interrupt_agent'])
-  })
-
-  it('🔴 未注册的名字 → 整次 restrict 失败 ⇒ 退化为基础表（不丢掉 bash 的隐藏）', () => {
-    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
-    declareHidden(['workflow', 'not_a_real_tool'])
-    const m = mkAgent('sm-unknown', { rejectUnknown: 'not_a_real_tool' })
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls).toHaveLength(1)
-    expect(m.calls[0]!.deny).toEqual(['bash'])
-  })
-
-  it('退化态按期望签名记账 ⇒ 下一步不重试刷屏', () => {
-    writeFileSync(join(dir, '.serenity-safe-on'), 'x')
-    declareHidden(['not_a_real_tool'])
-    const m = mkAgent('sm-unknown-idem', { rejectUnknown: 'not_a_real_tool' })
-    syncSafeModeRestriction(m.agent, dir)
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls).toHaveLength(1)
+    // 坏 JSON ⇒ readSafeModeHiddenTools 内部**fail-open 返回 []**（它自己不抛，见上一条 describe）
+    // ⇒ 本源的 deny 退化成基础表；**这不是错误路径**，`error` 字段应当为空。
+    // 🔴 如实记录：我最初在这里断言 `error` 非空（以为会抛），那是**把 fail-open 当成了抛错**。
+    //    两者对上游的意义不同：抛错要告警，fail-open 是既定语义（"隐藏是危险方向，读不到就不多藏"）。
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), '{ bad json')
+    const src = computeVisibilitySources('s-test', dir).find((x) => x.id === 'safeMode')!
+    expect(src.ok).toBe(true)
+    expect([...src.deny]).toEqual(['bash'])
+    expect(src.error).toBeUndefined()
   })
 
   it('非法声明项（数字/空白）跳过，只留字符串', () => {
     writeFileSync(join(dir, '.serenity-safe-on'), 'x')
     declareHidden([42, null, '  ', 'workflow'])
-    const m = mkAgent('sm-invalid')
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow'])
+    expect(denyOf('safeMode', dir)).toEqual(['bash', 'workflow'])
   })
 
   it('声明与基础表重名 ⇒ 去重', () => {
     writeFileSync(join(dir, '.serenity-safe-on'), 'x')
     declareHidden(['bash', 'workflow'])
-    const m = mkAgent('sm-dedupe')
-    syncSafeModeRestriction(m.agent, dir)
-    expect(m.calls[0]!.deny).toEqual(['bash', 'workflow'])
+    expect(denyOf('safeMode', dir)).toEqual(['bash', 'workflow'])
   })
 })
-
-describe('guards: im-bridge 条件可见（v1.31.0——未配置 IM 通道则工具不可见）', () => {
-  /** 替身 agent：记录 restrict 调用与 disposer 触发 */
-  function mkAgent(id = 's-im') {
-    const restrictCalls: { deny?: string[] }[] = []
-    const disposed: string[] = []
-    const agent = {
-      session: { id },
-      ctx: {
-        tools: {
-          restrict: (f: { deny?: string[] }) => {
-            restrictCalls.push(f)
-            return () => { disposed.push('disposed') }
-          },
-        },
-      },
-    } as any
-    return { agent, restrictCalls, disposed }
-  }
-
-  afterEach(() => {
-    __resetImChannelsForTest()
+describe('guards: im-bridge 条件可见（源 = computeVisibilitySources.imBridge）', () => {
+  it('没有可用账号 → deny im-bridge（工具不可见）', () => {
+    expect(denyOf('imBridge', dir)).toEqual(['im-bridge'])
   })
 
-  it('未配置任何 IM 通道 → restrict deny im-bridge；重复同步幂等（只隐藏一次）', () => {
-    __resetImChannelsForTest()
-    const { agent, restrictCalls } = mkAgent()
-    syncImBridgeVisibility(agent, dir)
-    syncImBridgeVisibility(agent, dir)
-    expect(restrictCalls).toHaveLength(1)
-    expect(restrictCalls[0]!.deny).toEqual(['im-bridge'])
-  })
-
-  it('配置了通道 → 不隐藏（工具可见）', () => {
-    __resetImChannelsForTest()
-    registerImChannel({ id: 'fake', isEnabled: () => true } as never)
-    const { agent, restrictCalls } = mkAgent()
-    syncImBridgeVisibility(agent, dir)
-    expect(restrictCalls).toHaveLength(0)
-  })
-
-  it('配置从有到无 / 从无到有 → 隐藏与解除实时跟随（配置热更新）', () => {
-    __resetImChannelsForTest()
-    const { agent, restrictCalls, disposed } = mkAgent()
-    syncImBridgeVisibility(agent, dir) // 无通道 → 隐藏
-    expect(restrictCalls).toHaveLength(1)
-    registerImChannel({ id: 'fake', isEnabled: () => true } as never)
-    syncImBridgeVisibility(agent, dir) // 有通道 → 解除
-    expect(disposed).toHaveLength(1)
-    syncImBridgeVisibility(agent, dir) // 已解除 → 不再动作
-    expect(restrictCalls).toHaveLength(1)
-  })
-
-  it('restrict 抛错 → 不抛且不记状态（apply/step 不可被拖垮）', () => {
-    __resetImChannelsForTest()
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const agent = {
-      session: { id: 's-boom' },
-      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
-    } as any
-    expect(() => syncImBridgeVisibility(agent, dir)).not.toThrow()
-    expect(err.mock.calls.some((c) => String(c[0]).includes('im-bridge 隐藏失败'))).toBe(true)
-    err.mockRestore()
-  })
-
-  it('会话销毁清理：forgetImBridgeVisibility 解除隐藏并清状态（防 per-会话 Map 无界增长）', () => {
-    __resetImChannelsForTest()
-    const { agent, disposed } = mkAgent('s-gone')
-    syncImBridgeVisibility(agent, dir)
-    expect(getImBridgeVisibilityDiagnostics().hiddenKeys).toContain('s-gone')
-    forgetImBridgeVisibility('s-gone')
-    expect(disposed).toHaveLength(1)
-    expect(getImBridgeVisibilityDiagnostics().hiddenKeys).not.toContain('s-gone')
-    forgetImBridgeVisibility('s-gone') // 幂等
-    expect(disposed).toHaveLength(1)
-  })
-
-  it('不同会话各自独立（一个会话的隐藏不影响另一个）', () => {
-    __resetImChannelsForTest()
-    const a = mkAgent('s-a')
-    const b = mkAgent('s-b')
-    syncImBridgeVisibility(a.agent, dir)
-    expect(getImBridgeVisibilityDiagnostics().hiddenKeys).toEqual(['s-a'])
-    expect(b.restrictCalls).toHaveLength(0)
-  })
-})
-
-describe('guards: 专属工具条件可见（v1.33——未在 exclusiveTools 里声明则工具不可见）', () => {
-  /** 替身 agent（同 im-bridge 块形状） */
-  function mkAgent(id: string) {
-    const restrictCalls: { deny?: string[] }[] = []
-    const disposed: string[] = []
-    const agent = {
-      session: { id },
-      ctx: {
-        tools: {
-          restrict: (f: { deny?: string[] }) => {
-            restrictCalls.push(f)
-            return () => { disposed.push('disposed') }
-          },
-        },
-      },
-    } as any
-    return { agent, restrictCalls, disposed }
-  }
-
-  /** 写 CCC 配置（undefined = 不写 exclusiveTools 字段） */
-  function writeConfig(exclusiveTools?: unknown): void {
+  it('🔴 有任意启用账号 → 不隐藏，且**不看总开关**（owner 2026-10-22 令）', () => {
     mkdirSync(join(dir, '.opencode'), { recursive: true })
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify(exclusiveTools === undefined ? { hooks: {} } : { exclusiveTools }),
+      JSON.stringify({ weixin: { enabled: false, accounts: [{ accountId: 'f1', channel: 'feishu', enabled: true }] } }),
     )
+    expect(denyOf('imBridge', dir)).toEqual([])
+  })
+
+  it('账号被显式停用 → 视为没有可用账号 ⇒ 隐藏', () => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(
+      join(dir, '.opencode', 'serenity.json'),
+      JSON.stringify({ weixin: { enabled: true, accounts: [{ accountId: 'w1', channel: 'weixin', enabled: false }] } }),
+    )
+    expect(denyOf('imBridge', dir)).toEqual(['im-bridge'])
+  })
+})
+describe('guards: 专属工具条件可见（源 = computeVisibilitySources.exclusive）', () => {
+  function writeConfig(v: unknown): void {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ exclusiveTools: v }))
   }
 
-  it('未声明（字段缺失）→ restrict deny acc-diag；重复同步幂等（只隐藏一次）', () => {
+  it('未声明（字段缺失）→ deny acc-diag', () => {
     writeConfig(undefined)
-    const { agent, restrictCalls } = mkAgent('s-diag-a')
-    syncExclusiveToolsVisibility(agent, dir)
-    syncExclusiveToolsVisibility(agent, dir)
-    expect(restrictCalls).toHaveLength(1)
-    expect(restrictCalls[0]!.deny).toEqual(['acc-diag'])
-    forgetExclusiveToolsVisibility('s-diag-a')
+    expect(denyOf('exclusive', dir)).toEqual(['acc-diag'])
   })
 
   it('声明 ["acc-diag"] → 不隐藏（工具可见）', () => {
     writeConfig(['acc-diag'])
-    const { agent, restrictCalls } = mkAgent('s-diag-b')
-    syncExclusiveToolsVisibility(agent, dir)
-    expect(restrictCalls).toHaveLength(0)
-  })
-
-  it('声明 → 取消声明 → 再声明：隐藏与解除实时跟随（配置热更新）', () => {
-    writeConfig(undefined)
-    const { agent, restrictCalls, disposed } = mkAgent('s-diag-c')
-    syncExclusiveToolsVisibility(agent, dir) // 未声明 → 隐藏
-    expect(restrictCalls).toHaveLength(1)
-    writeConfig(['acc-diag'])
-    syncExclusiveToolsVisibility(agent, dir) // 声明 → 解除
-    expect(disposed).toHaveLength(1)
-    syncExclusiveToolsVisibility(agent, dir) // 已解除 → 不再动作
-    expect(restrictCalls).toHaveLength(1)
-  })
-
-  it('配置损坏（坏 JSON）→ fail-closed 隐藏（专属工具默认不可见；配置损坏本身响亮告警）', () => {
-    mkdirSync(join(dir, '.opencode'), { recursive: true })
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), '{ broken')
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { agent, restrictCalls } = mkAgent('s-diag-d')
-    syncExclusiveToolsVisibility(agent, dir)
-    expect(restrictCalls[0]?.deny).toEqual(['acc-diag'])
-    expect(warn.mock.calls.some((c) => String(c[0]).includes('CCC 配置解析失败'))).toBe(true)
-    warn.mockRestore()
-    forgetExclusiveToolsVisibility('s-diag-d')
+    expect(denyOf('exclusive', dir)).toEqual([])
   })
 
   it('非字符串项被忽略（只认字符串工具名）', () => {
     writeConfig(['acc-diag', 42, null, '  '])
-    const { agent, restrictCalls } = mkAgent('s-diag-e')
-    syncExclusiveToolsVisibility(agent, dir)
-    expect(restrictCalls).toHaveLength(0)
+    expect(denyOf('exclusive', dir)).toEqual([])
   })
 
-  it('restrict 抛错 → 不抛且不记状态（step 不可被拖垮）', () => {
-    writeConfig(undefined)
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const agent = {
-      session: { id: 's-diag-boom' },
-      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
-    } as any
-    expect(() => syncExclusiveToolsVisibility(agent, dir)).not.toThrow()
-    expect(err.mock.calls.some((c) => String(c[0]).includes('专属工具隐藏失败'))).toBe(true)
-    err.mockRestore()
-  })
-
-  it('会话销毁清理：forgetExclusiveToolsVisibility 解除隐藏并清状态（防 per-会话 Map 无界增长）', () => {
-    writeConfig(undefined)
-    const { agent, disposed } = mkAgent('s-diag-gone')
-    syncExclusiveToolsVisibility(agent, dir)
-    expect(getExclusiveToolsDiagnostics().hidden).toContain('s-diag-gone::acc-diag')
-    forgetExclusiveToolsVisibility('s-diag-gone')
-    expect(disposed).toHaveLength(1)
-    expect(getExclusiveToolsDiagnostics().hidden).not.toContain('s-diag-gone::acc-diag')
-    forgetExclusiveToolsVisibility('s-diag-gone') // 幂等
-    expect(disposed).toHaveLength(1)
-  })
-
-  it('不同会话各自独立（一个会话的隐藏不影响另一个）', () => {
-    writeConfig(undefined)
-    const a = mkAgent('s-diag-x')
-    const b = mkAgent('s-diag-y')
-    syncExclusiveToolsVisibility(a.agent, dir)
-    expect(getExclusiveToolsDiagnostics().hidden).toContain('s-diag-x::acc-diag')
-    expect(b.restrictCalls).toHaveLength(0)
-    forgetExclusiveToolsVisibility('s-diag-x')
+  it('🔴 配置损坏 → fail-closed（专属工具默认不可见）', () => {
+    mkdirSync(join(dir, '.opencode'), { recursive: true })
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), '{ bad')
+    const src = computeVisibilitySources('s-test', dir).find((x) => x.id === 'exclusive')!
+    expect([...src.deny]).toEqual(['acc-diag'])
   })
 })
-
-/**
- * 🔴 v1.56.6（owner 2026-10-13 报缺陷）：「宁静号所有功能在非宁静号目录不生效」。
- *
- * 靶 = **工具可见性这一层唯独没有非 CCC 的门**：工具注册在宿主级 ⇒ 与会话 cwd 无关地
- * 出现在每个会话清单里；其余各缝有 `if (!root) return`，而这里没有 ⇒ 非 CCC 目录下
- * 模型仍看得见 14 个工具，调了才抛 `No CCC found`（**运行时报错 ≠ 事先不可见**）。
- *
- * ⚠️ **本组必须同时钉两态**：只钉"非 CCC 隐藏"会漏掉"CCC 内**一次 restrict 都不发**"
- * —— 后半条是"既有行为零改变"的机械证据（否则修复会把 CCC 内的可见性也改坏）。
- */
-describe('guards: 非 CCC 会话的全工具面隐藏（v1.56.6）', () => {
-  /** 替身 agent（同前两块形状） */
-  function mkAgent(id: string) {
-    const restrictCalls: { deny?: string[] }[] = []
-    const disposed: string[] = []
-    const agent = {
-      session: { id },
-      ctx: {
-        tools: {
-          restrict: (f: { deny?: string[] }) => {
-            restrictCalls.push(f)
-            return () => { disposed.push('disposed') }
-          },
-        },
-      },
-    } as any
-    return { agent, restrictCalls, disposed }
-  }
-
-  it('🔴 不在 CCC 内（root=null）⇒ restrict 隐藏**全部** REGISTERED_TOOLS', () => {
-    const { agent, restrictCalls } = mkAgent('s-noccc-a')
-    syncCccToolVisibility(agent, null)
-    expect(restrictCalls).toHaveLength(1)
-    // 与"插件具备的工具面"对齐（不硬编码清单——加工具时本条自动跟随）
-    expect(restrictCalls[0]!.deny).toEqual([...REGISTERED_TOOLS])
-    forgetNonCccToolVisibility('s-noccc-a')
+describe('guards: 非 CCC 会话的全工具面隐藏（源 = computeVisibilitySources.nonCcc）', () => {
+  it('🔴 root=null ⇒ 该源的 deny = 全部 REGISTERED_TOOLS', () => {
+    expect(denyOf('nonCcc', null)).toEqual([...REGISTERED_TOOLS].sort())
   })
 
-  it('🔴 在 CCC 内（root 为真）⇒ **一次 restrict 都不发**（既有行为零改变）', () => {
-    const { agent, restrictCalls } = mkAgent('s-noccc-b')
-    syncCccToolVisibility(agent, dir)
-    expect(restrictCalls).toHaveLength(0)
+  it('🔴 在 CCC 内 ⇒ 本源不贡献任何 deny（既有行为零改变）', () => {
+    expect(denyOf('nonCcc', dir)).toEqual([])
   })
 
-  it('幂等：重复同步非 CCC 不重复 restrict', () => {
-    const { agent, restrictCalls } = mkAgent('s-noccc-c')
-    syncCccToolVisibility(agent, null)
-    syncCccToolVisibility(agent, null)
-    syncCccToolVisibility(agent, null)
-    expect(restrictCalls).toHaveLength(1)
-    forgetNonCccToolVisibility('s-noccc-c')
-  })
-
-  it('🔴 会话从非 CCC 迁入 CCC ⇒ 解除隐藏（可逆）', () => {
-    const { agent, restrictCalls, disposed } = mkAgent('s-noccc-d')
-    syncCccToolVisibility(agent, null)
-    expect(restrictCalls).toHaveLength(1)
-    syncCccToolVisibility(agent, dir) // 迁入 CCC
-    expect(disposed).toHaveLength(1)
-    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-d')
-  })
-
-  it('不同会话各自独立（非 CCC 的隐藏不波及 CCC 内的会话）', () => {
-    const a = mkAgent('s-noccc-e')
-    const b = mkAgent('s-noccc-f')
-    syncCccToolVisibility(a.agent, null)
-    syncCccToolVisibility(b.agent, dir)
-    expect(getNonCccHiddenDiagnostics().hidden).toEqual(['s-noccc-e'])
-    expect(b.restrictCalls).toHaveLength(0)
-    forgetNonCccToolVisibility('s-noccc-e')
-  })
-
-  it('会话销毁清理：forgetNonCccToolVisibility 解除隐藏并清状态（防 Map 无界增长）', () => {
-    const { agent, disposed } = mkAgent('s-noccc-gone')
-    syncCccToolVisibility(agent, null)
-    expect(getNonCccHiddenDiagnostics().hidden).toContain('s-noccc-gone')
-    forgetNonCccToolVisibility('s-noccc-gone')
-    expect(disposed).toHaveLength(1)
-    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-gone')
-    forgetNonCccToolVisibility('s-noccc-gone') // 幂等
-    expect(disposed).toHaveLength(1)
-  })
-
-  it('restrict 抛错 → 不抛且不记状态（step 不可被拖垮；调用时仍有各工具自身的 !root 兜底）', () => {
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-    const agent = {
-      session: { id: 's-noccc-boom' },
-      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
-    } as any
-    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
-    expect(err.mock.calls.some((c) => String(c[0]).includes('两档全失败'))).toBe(true)
-    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-boom')
-    err.mockRestore()
-  })
-
-  it('🔴 对照：宿主 `restrict` 对未注册名会让整次失败 ⇒ deny 清单必须只含 REGISTERED_TOOLS 里的名字', () => {
-    // 复刻宿主契约（同 safe-mode 块）：未知名字 ⇒ 抛
-    const known = new Set<string>(REGISTERED_TOOLS)
-    const agent = {
-      session: { id: 's-noccc-contract' },
-      ctx: {
-        tools: {
-          restrict: (f: { deny?: string[] }) => {
-            for (const n of f.deny ?? []) if (!known.has(n)) throw new Error(`unknown tool: ${n}`)
-            return () => {}
-          },
-        },
-      },
-    } as any
-    // 真契约下必须成功（若清单里混入未注册名，这里会抛 ⇒ 隐藏整体失效）
-    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
-    expect(getNonCccHiddenDiagnostics().hidden).toContain('s-noccc-contract')
-    forgetNonCccToolVisibility('s-noccc-contract')
-  })
-
-  it('🔴 两档尝试：全表被拒（条件工具不在册）⇒ 退到常驻段，**仍然隐藏**（不静默退回"可见"）', () => {
-    // 复刻"diagram 关着"的真实形态：`diagram` 未注册 ⇒ 全表 deny 被整次拒绝
-    const residentKnown = new Set<string>(
-      REGISTERED_TOOLS.slice(0, REGISTERED_TOOLS.length - CONDITIONAL_TOOL_COUNT),
-    )
-    const calls: { deny?: string[] }[] = []
-    const agent = {
-      session: { id: 's-noccc-tier' },
-      ctx: {
-        tools: {
-          restrict: (f: { deny?: string[] }) => {
-            for (const n of f.deny ?? []) if (!residentKnown.has(n)) throw new Error(`unknown tool: ${n}`)
-            calls.push(f)
-            return () => {}
-          },
-        },
-      },
-    } as any
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
-    // 第一次（全表）被拒、第二次（常驻段）成功 ⇒ **只记一次** restrict 调用（档①那次没记）
-    expect(calls).toHaveLength(1)
-    expect(calls[0]!.deny).toEqual([...residentKnown])
-    // 判别性：**必须真的隐藏了常驻段**，而不是"两档都失败、静默放过"
-    expect(getNonCccHiddenDiagnostics().hidden).toContain('s-noccc-tier')
-    // 🔴 档①失败是**常态**（diagram 缺省不在册）⇒ **不许**刷假警报（只看得到"两档全失败"那种真失败）
-    expect(err.mock.calls.some((c) => String(c[0]).includes('两档全失败'))).toBe(false)
-    err.mockRestore()
-    forgetNonCccToolVisibility('s-noccc-tier')
-  })
-
-  it('🔴 两档全失败 ⇒ 不记状态（下轮可重试）＋ 响亮告警（不静默假成功）', () => {
-    const agent = {
-      session: { id: 's-noccc-allfail' },
-      ctx: { tools: { restrict: () => { throw new Error('restrict unavailable') } } },
-    } as any
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    expect(() => syncCccToolVisibility(agent, null)).not.toThrow()
-    expect(getNonCccHiddenDiagnostics().hidden).not.toContain('s-noccc-allfail')
-    expect(err.mock.calls.some((c) => String(c[0]).includes('两档全失败'))).toBe(true)
-    err.mockRestore()
+  it('🔴 非 CCC 时其余五源一律不贡献（没有 CCC 就没有配置可读）', () => {
+    const sources = computeVisibilitySources('s-test', null)
+    for (const id of ['safeMode', 'imBridge', 'exclusive', 'hostSchedule', 'trajectoryConstraint']) {
+      const s = sources.find((x) => x.id === id)!
+      expect(s.ok, `${id} 在非 CCC 下应当 ok=false`).toBe(false)
+      expect([...s.deny]).toEqual([])
+    }
   })
 })
-
 describe('guards: CCC 治理文件保护（agent 不可写 .serenity/.serenity-safe-on）', () => {  it('写 .serenity-safe-on 被拒（无论安全模式）', () => {
     const d = decideGuard(base({ toolName: 'write', pathArg: '.serenity-safe-on' }))
     expect(d.kind).toBe('deny')
@@ -1082,97 +726,19 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
   })
 })
 
-/**
- * 🆕 v1.59.5（owner 令 2026-10-17）：「宿主 0.2.1-rc.2 新增的调度工具与 CRO 冲突，
- * 要求在宁静号激活情况下屏蔽掉」。
- *
- * 判据（三条，缺一则这个屏蔽可能是假的）：
- *  ① **CCC 内必须屏蔽**那 4 个宿主定时器工具；
- *  ② **非 CCC 不屏蔽**（那是宿主的正常能力，owner 只要求"宁静号激活时"）；
- *  ③ **某个名字不在册时不得连累其余** —— 宿主 `restrict` 对未知名字会让**整次调用失败**，
- *     若整批发就会"一个都没藏住、只有一行 log" ⇒ 缺陷静默。这条是**防御性**的，也是本族的真风险。
- */
-describe('guards: CCC 内屏蔽宿主自带定时器工具（v1.59.5，防与 CRO/唤醒注册表冲突）', () => {
-  /** 替身 agent：可模拟"某些工具名不在册"（restrict 对未知名字整次失败） */
-  function mkAgent(id: string, opts: { unknownNames?: string[] } = {}) {
-    const restrictCalls: { deny?: string[] }[] = []
-    const disposed: string[] = []
-    const unknown = new Set(opts.unknownNames ?? [])
-    const agent = {
-      session: { id },
-      ctx: {
-        tools: {
-          restrict: (f: { deny?: string[] }) => {
-            // 与宿主契约同形：deny 里含未注册名 ⇒ **整次抛**（不是"忽略那一个"）
-            if ((f.deny ?? []).some((n) => unknown.has(n))) throw new Error('unknown tool name in filter')
-            restrictCalls.push(f)
-            return () => { disposed.push('disposed') }
-          },
-        },
-      },
-    } as any
-    return { agent, restrictCalls, disposed }
-  }
-
-  const EXPECTED = ['schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete']
-
-  it('① CCC 内 ⇒ 4 个宿主定时器工具逐个被 deny（不是整批一次）', () => {
-    const { agent, restrictCalls } = mkAgent('s-sched-a')
-    try {
-      syncHostScheduleToolHiding(agent, dir)
-      // 逐个发：每个 deny 只含一个名字（这样任何一个名字不成立都不会连累其余）
-      expect(restrictCalls.map((c) => c.deny)).toEqual(EXPECTED.map((n) => [n]))
-      expect(getHostScheduleHiddenDiagnostics().hidden).toEqual(
-        EXPECTED.map((n) => `s-sched-a::${n}`),
-      )
-    } finally {
-      // 🔴 **必须 finally**：本模块的状态是**模块级 Map**（按 sessionId 索引），
-      //   断言一旦失败就跳过清理 ⇒ 残留状态会**污染后面所有用例**
-      //   （本轮变异对照时真的发生了：① 挂掉后 ⑤ 读到 8 条而不是 4 条）。
-      forgetHostScheduleToolHiding('s-sched-a')
-    }
+describe('guards: CCC 内屏蔽宿主自带定时器工具（源 = computeVisibilitySources.hostSchedule）', () => {
+  it('CCC 内 ⇒ deny 全部 4 个 schedule_* 名字', () => {
+    expect(denyOf('hostSchedule', dir)).toEqual([
+      'schedule_create',
+      'schedule_delete',
+      'schedule_list',
+      'schedule_update',
+    ])
   })
 
-  it('② 非 CCC（root === null）⇒ 一次 restrict 都不发（那是宿主的正常能力）', () => {
-    const { agent, restrictCalls } = mkAgent('s-sched-b')
-    syncHostScheduleToolHiding(agent, null)
-    expect(restrictCalls).toHaveLength(0)
-    expect(getHostScheduleHiddenDiagnostics().hidden).not.toContain('s-sched-b::schedule_create')
-  })
-
-  it('③ 某个名字不在册 ⇒ 只跳过它，其余三个仍被藏住（不整批失败）', () => {
-    const { agent, restrictCalls } = mkAgent('s-sched-c', { unknownNames: ['schedule_update'] })
-    try {
-      expect(() => syncHostScheduleToolHiding(agent, dir)).not.toThrow()
-      const denied = restrictCalls.map((c) => c.deny?.[0])
-      expect(denied).toEqual(['schedule_create', 'schedule_list', 'schedule_delete'])
-      expect(denied).not.toContain('schedule_update')
-    } finally {
-      forgetHostScheduleToolHiding('s-sched-c')
-    }
-  })
-
-  it('幂等：重复同步不重复 restrict', () => {
-    const { agent, restrictCalls } = mkAgent('s-sched-d')
-    try {
-      syncHostScheduleToolHiding(agent, dir)
-      syncHostScheduleToolHiding(agent, dir)
-      expect(restrictCalls).toHaveLength(4)
-    } finally {
-      forgetHostScheduleToolHiding('s-sched-d')
-    }
-  })
-
-  it('会话销毁清理：解除隐藏并清状态（防 per-会话 Map 无界增长），且幂等', () => {
-    const { agent, disposed } = mkAgent('s-sched-e')
-    syncHostScheduleToolHiding(agent, dir)
-    // 🔴 断言**本会话前缀**的条数（不是全局条数）：全局读数会被其它用例的残留影响
-    const mine = () => getHostScheduleHiddenDiagnostics().hidden.filter((k) => k.startsWith('s-sched-e::'))
-    expect(mine()).toHaveLength(4)
-    forgetHostScheduleToolHiding('s-sched-e')
-    expect(disposed).toHaveLength(4)
-    expect(mine()).toHaveLength(0)
-    forgetHostScheduleToolHiding('s-sched-e') // 幂等
-    expect(disposed).toHaveLength(4)
+  it('🔴 合并发射时**逐个探活**：不在册的名字被剔掉，其余仍生效（旧实现是整批失败）', () => {
+    // 这条对应用方案 C 顺带修掉的旧坑：旧实现"整批发 ⇒ 缺一个名字全都不隐藏"。
+    // 现在由 applyVisibilityDecision 统一探活，见 tests/seams/tool-visibility.test.ts 的同名判据。
+    expect(denyOf('hostSchedule', dir).length).toBe(4)
   })
 })

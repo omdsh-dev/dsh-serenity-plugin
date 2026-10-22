@@ -22,7 +22,7 @@ import { cccRootForCwd } from '../kernel/ccc-roots.js'
 import { ACC_VERSION } from '../kernel/constants.js'
 import { truncateContent } from '../skills/discovery.js'
 import { registerEntrySkillSection, registerCognitiveTrajectorySkillSection } from './system-prompt.js'
-import { syncSafeModeRestriction, syncImBridgeVisibility, syncExclusiveToolsVisibility, syncCccToolVisibility, syncHostScheduleToolHiding, syncTrajectoryConstraintToolVisibility } from './guards.js'
+import { syncToolVisibility } from './guards.js'
 import { parseSessionContextFromEvents, getActiveSessionInfo, setActiveSessionInfo, DEFAULT_SESSION_SCOPE, sessionEvents, resolveSessionByTitle, sessionsRoot } from '../trajectory/core.js'
 import { readLastBound, appendBound } from '../trajectory/bound.js'
 import { isTrajectoryConstrained, replacesDefaultIdentity } from '../trajectory/policy/profile.js'
@@ -265,8 +265,14 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     // 🔴 v1.56.6（owner 报缺陷）：工具是 `apply()` 里注册到**宿主级**的 ⇒ 与会话 cwd 无关地
     //    出现在每个会话的清单里。其余各缝"不在 CCC ⇒ 不注入"即自然失效，**工具面必须显式隐藏**
     //    ⇒ 这一句就是那道门（必须在下面的 `if (!root) return` **之前**，否则非 CCC 永远走不到）。
+    // 🔴 2026-10-22 方案 C（owner 裁）：**六源汇一**。
+    //    改之前这里是 5 条独立 sync（各自在自己的 Map 里放 disposer），加上 pre-step
+    //    那 5 条 ⇒ 一次交互发出多次 `tools.restrict` ⇒ 宿主每次发 `tools/change`
+    //    ⇒ 模型侧看到工具清单**先进后出**（实测：`新增 7 个` 紧跟 `移除 7 个`）。
+    //    宿主契约「Restrictions intersect」⇒ 先并集只发一次，**结果相同**、只触发一次变更。
+    //    ⚠️ 必须在 `if (!root) return` **之前**调用：非 CCC 也要隐藏全部 ACC 工具。
     try {
-      syncCccToolVisibility(agent, root)
+      syncToolVisibility(agent, root)
     } catch {
       /* 可见性同步失败不阻断播种（最坏：工具可见，调用时仍被各工具自身的 !root 判据拒绝） */
     }
@@ -342,23 +348,13 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
     }
     injected.add(key)
     agent.inject(accMessage(root, configPaths, entrySkillMaxChars))
-    syncSafeModeRestriction(agent, root)
+    // 🔴 2026-10-22 方案 C：六源汇一，这里**一次**发射（原先在此另有 4 条独立 restrict）。
+    //    `syncToolVisibility` 在函数开头已跑过一次（那时 root 可能是 null ⇒ 隐藏全部 ACC 工具）；
+    //    这里 root 已知非 null ⇒ 再算一次得到"CCC 内"的目标态。**幂等**：两次判决相同则第二次不发。
     try {
-      syncImBridgeVisibility(agent, root)
+      syncToolVisibility(agent, root)
     } catch {
-      /* 可见性同步失败不阻断播种（最坏情况：工具可见但通道未配置 → 调用时返回 CHANNEL_NOT_CONFIGURED） */
-    }
-    try {
-      // v1.33：专属工具（acc-diag）——未在 CCC 配置里声明 ⇒ 从 schema 移除
-      syncExclusiveToolsVisibility(agent, root)
-    } catch {
-      /* 同上：可见性失败不阻断播种 */
-    }
-    try {
-      // 🆕 v1.59.5：宿主自带定时器工具（schedule_*）——**在 CCC 内**屏蔽，防与 CRO/唤醒注册表冲突
-      syncHostScheduleToolHiding(agent, root)
-    } catch {
-      /* 同上：可见性失败不阻断播种 */
+      /* 可见性同步失败不阻断播种（最坏：工具可见，调用时仍被各工具自身判据拒绝） */
     }
     // 🆕 v1.78.0（D182）：模型运行时热切换 —— 只有该轨迹**声明了 model** 才装缝。
     //    为什么放在播种处：`agent/created` 是**我们唯一能拿到 agent.ctx** 的时机，
@@ -392,16 +388,28 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
       const root = cccRootForCwd(cwd)
       const key = agentKey(agent)
       const downstream = await next()
-      // 🔴 v1.69.3（owner 2026-10-19 令「工具清单也要热加载」）：**轨迹约束的角色工具面同步必须在这里**，
-      //    且在下面那条 轨迹约束 early-return **之前** —— 它此前被整个短路 ⇒ 轨迹约束会话从不同步可见性
-      //    ⇒ 角色白名单只剩运行时拦截（"看得见但调不动"），配置变动在 schema 上永不生效。
-      //    本函数内部自带 `isTrajectoryConstrained` 判据（非 轨迹约束 直接 return），故放在此处置零副作用。
+      // 🔴 2026-10-22 方案 C（owner 裁）：**六源汇一，每 step 只发一次 restrict**。
+      //
+      // 改之前这里有 5 条独立 sync（轨迹约束 / 非CCC / safeMode / im-bridge / 专属 / 宿主定时器），
+      // 每条在自己的 Map 里放 disposer 且**每步都发** ⇒ 一次交互产生多次 `tools.restrict`
+      // ⇒ 宿主每次发 `tools/change` ⇒ 模型侧看到工具清单**先进后出**
+      // （实测症状：`新增 7 个：acc-diag, bash, im-bridge, schedule_*, …` 紧跟 `移除 7 个：同一批`）。
+      //
+      // 为什么合并是**等价**的：宿主 `ToolRuntime.restrict` 契约逐字
+      // 「Restrictions **intersect**」⇒ N 次 `deny: Dᵢ` 的净效果 = `⋃Dᵢ`。
+      // 先并集、只发一次 = 结果相同，但只触发一次 `tools/change`。
+      //
+      // 正确性怎么保住：六源**各自 catch**（见 `computeVisibilitySources`），
+      // 某一源读配置抛错只让它自己不贡献 deny，**其余五源照常生效** —— 合并不放大失败面。
+      // 幂等：判决签名不变 ⇒ `applyVisibilityDecision` 一个字节都不发。
+      //
+      // ⚠️ 必须在 `if (root)` **之外**调用：非 CCC 会话也要隐藏全部 ACC 工具（v1.56.6 缺陷）。
+      try {
+        syncToolVisibility(agent, root)
+      } catch {
+        /* 可见性同步失败不阻断 step（守卫仍兜底拦截） */
+      }
       if (root) {
-        try {
-          syncTrajectoryConstraintToolVisibility(agent, root)
-        } catch {
-          /* 可见性同步失败不阻断 step（守卫仍兜底拦截） */
-        }
         // 🆕 v1.78.0（D182）：**每轮**重读 `trajectory.json` 的 model 并刷新选择。
         //    这是"运行时热加载"的落点：改文件 ⇒ 下一轮 `agent/request` 就拿到新路由，
         //    与该会话"是谁创建的/什么时候创建的"**无关**（owner 2026-10-20 令）。
@@ -412,40 +420,10 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         }
       }
       // 轨迹：只有**自带章程**才旁路身份注入（D183；见上方 seed 处同段说明）
+      // ⚠️ 本行不可省：它决定"这条轨迹还要不要拿 ACC 身份"。方案 C 只合并**可见性发射**，
+      //    不碰身份注入的旁路判据 —— 两件事无关，合并时误删过一次，此处显式留住。
       if (root && hasTrajectoryOwnCharter(root, key)) return downstream
-      // 🔴 v1.56.6：非 CCC 会话 ⇒ 隐藏全部 ACC 工具（**必须在 `if (root)` 之外**——
-      //    那道分支只在 CCC 内执行，把本句放进去等于非 CCC 一条 restrict 都不发＝缺陷原样）。
-      //    与 `syncSafeModeRestriction` 同点调用、同样每步无条件同步（会话可能在两态间迁移）。
-      try {
-        syncCccToolVisibility(agent, root)
-      } catch {
-        /* 可见性同步失败不阻断 step */
-      }
-      // 每步无条件同步 safe-mode 工具隐藏（restrict 实时跟随标记文件；必须在 early-return 之前）
       if (root) {
-        try {
-          syncSafeModeRestriction(agent, root)
-        } catch {
-          /* 同步失败不阻断 step（守卫仍兜底拦截） */
-        }
-        try {
-          // v1.31.0：im-bridge 条件可见（本 CCC 未配置 IM 通道 → 从工具清单移除）
-          syncImBridgeVisibility(agent, root)
-        } catch {
-          /* 同上：可见性失败不阻断 step */
-        }
-        try {
-          // v1.33：专属工具条件可见（未在本 CCC 的 exclusiveTools 里声明 → 从工具清单移除）
-          syncExclusiveToolsVisibility(agent, root)
-        } catch {
-          /* 同上：可见性失败不阻断 step */
-        }
-        try {
-          // 🆕 v1.59.5：宿主自带定时器工具（schedule_*）——**在 CCC 内**屏蔽，防与 CRO/唤醒注册表冲突
-          syncHostScheduleToolHiding(agent, root)
-        } catch {
-          /* 同上：可见性失败不阻断 step */
-        }
         // P0-1：pre-step 兜底路径也启用 scoped 身份 section（session-start 之外的 agent）
         registerEntrySkillSection(agent, root)
         // v1.34.1：轨迹声明的 skill 注入（绑定期间持续存在；无绑定/无声明 ⇒ 不注册，见 system-prompt.ts）

@@ -33,6 +33,7 @@ import { registerContext } from '../../src/seams/context.js'
 import { getActiveSessionInfo } from '../../src/trajectory/core.js'
 import { REGISTERED_TOOLS } from '../../src/kernel/invariant.js'
 import { forgetNonCccToolVisibility } from '../../src/seams/guards.js'
+import { forgetToolVisibility } from '../../src/seams/tool-visibility.js'
 // 🔴 2026-10-19 轨迹约束 重做：判据 = 绑定轨迹里有 `trajectory-constraint.json`（不再是 sessionId 前缀）
 //    ⇒ "这个会话是 轨迹约束" 必须**真造一条轨迹**，统一走夹具（tests/helpers/trajectory-constraint-fixture.ts）。
 import { make轨迹约束Session, 轨迹约束Json } from '../helpers/trajectory-constraint-fixture.js'
@@ -223,7 +224,12 @@ describe('registerContext: agent/created 播种', () => {
 // （放进那道分支里 = 非 CCC 一条 restrict 都不发 = 缺陷原样）。
 
 describe('registerContext: 非 CCC 会话的工具面隐藏（v1.56.6 接线）', () => {
-  /** 带 `ctx.tools.restrict` 记录的 agent（记录每次 deny 清单） */
+  /**
+   * 带 `ctx.tools.restrict` 记录的 agent。
+   *
+   * 🔴 2026-10-22（方案 C）：**必须提供 `get`**，否则合并发射会走"旧的 host 无探活"分支；
+   * 而真宿主有 `get`，替身不补就等于用一个不存在的宿主形态来验（D144 同族）。
+   */
   function fakeAgentWithTools(id: string, cwd: string): { agent: unknown; restrictCalls: { deny?: string[] }[] } {
     const restrictCalls: { deny?: string[] }[] = []
     return {
@@ -232,6 +238,7 @@ describe('registerContext: 非 CCC 会话的工具面隐藏（v1.56.6 接线）'
         inject: () => {},
         ctx: {
           tools: {
+            get: (_n: string) => ({}),
             restrict: (f: { deny?: string[] }) => {
               restrictCalls.push(f)
               return () => {}
@@ -251,7 +258,10 @@ describe('registerContext: 非 CCC 会话的工具面隐藏（v1.56.6 接线）'
     await fireCreated(ctx, agent)
 
     expect(restrictCalls).toHaveLength(1)
-    expect(restrictCalls[0]!.deny).toEqual([...REGISTERED_TOOLS])
+    // 🔴 方案 C 后 deny 是**合并集且已排序**（排序让签名稳定、幂等判据才成立）
+    //    ⇒ 比较用排序后的副本；集合本身仍要求"恰好等于全部注册工具"（不是"包含"——那会放松判据）。
+    expect([...restrictCalls[0]!.deny!].sort()).toEqual([...REGISTERED_TOOLS].sort())
+    forgetToolVisibility('main-noccc-created')
     forgetNonCccToolVisibility('main-noccc-created')
   })
 
@@ -264,7 +274,8 @@ describe('registerContext: 非 CCC 会话的工具面隐藏（v1.56.6 接线）'
     await firePreStep(ctx, agent, [], downstream)
 
     expect(restrictCalls).toHaveLength(1)
-    expect(restrictCalls[0]!.deny).toEqual([...REGISTERED_TOOLS])
+    expect([...restrictCalls[0]!.deny!].sort()).toEqual([...REGISTERED_TOOLS].sort())
+    forgetToolVisibility('main-noccc-pre')
     forgetNonCccToolVisibility('main-noccc-pre')
   })
 

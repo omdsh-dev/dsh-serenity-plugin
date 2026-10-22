@@ -49,6 +49,22 @@ beforeEach(() => {
   mkdirSync(join(dir, '.opencode'), { recursive: true })
 })
 
+/**
+ * 写一份**旧形态**的 `weixin` 段（存量 CCC 的形态，`readImSettings` 会回退读它）。
+ *
+ * 🔴 刻意走**旧段**而不是 `im` 段：今天出问题的那个 CCC 用的就是旧段形态
+ * （`weixin.enabled:false` + 一条 `channel:"feishu"` 的账号）——
+ * 夹具必须长成**真故障那个形状**，否则这条判据抓不到它（判据纪律）。
+ */
+function putSettings(section: { enabled?: boolean; accounts: Array<Record<string, unknown>> }): void {
+  writeFileSync(
+    join(dir, '.opencode', 'serenity.json'),
+    JSON.stringify({ weixin: { hook: 'h.js', routes: [], ...section } }),
+  )
+  writeFileSync(join(dir, '.serenity'), '')
+}
+
+
 afterEach(() => {
   __resetImChannelsForTest()
   rmSync(dir, { recursive: true, force: true })
@@ -63,24 +79,40 @@ describe('im-bridge: 通道注册表', () => {
     expect(imChannelIds()).toEqual(['fake'])
   })
 
-  it('可见性判据：任一通道启用 → true；全部未启用 → false', () => {
+  /**
+   * 🔴 2026-10-22 判据修正（owner：「把开关升级为有任意账号即可，而不是盯着微信」）。
+   *
+   * 旧判据 = 遍历通道的 `isEnabled()`；新判据 = **账号即事实**。
+   * ⇒ 这三条从"替身通道的 isEnabled"改钉**真配置文件的读取结果**：
+   *   判据现在不经过通道，替身在这条判据上已经**没有判别力**了（D174）。
+   */
+  it('🔴 可见性判据 = 有任意启用账号即 true（不看总开关、不看是哪个渠道）', () => {
+    // 无配置 ⇒ 没有账号 ⇒ false
     expect(hasEnabledImChannel(dir)).toBe(false)
-    registerImChannel(fakeChannel({ id: 'off', isEnabled: () => false }))
-    registerImChannel(fakeChannel({ id: 'on', isEnabled: () => true }))
+
+    // 只配飞书 + 总开关是 false ⇒ **仍应可见**（这正是旧判据踩到的那个坑）
+    putSettings({ enabled: false, accounts: [{ accountId: 'feishu-1', channel: 'feishu', enabled: true }] })
     expect(hasEnabledImChannel(dir)).toBe(true)
+
+    // 账号被显式停用 ⇒ 不算
+    putSettings({ enabled: true, accounts: [{ accountId: 'wechat-1', channel: 'weixin', enabled: false }] })
+    expect(hasEnabledImChannel(dir)).toBe(false)
+
+    // 账号存在且未停用 ⇒ 可见（哪怕总开关关着）
+    putSettings({ enabled: false, accounts: [{ accountId: 'wechat-1', channel: 'weixin' }] })
+    expect(hasEnabledImChannel(dir)).toBe(true)
+  })
+
+  it('🔴 反向钉：空账号表 ⇒ 不可见（放宽的是"看哪个开关"，不是"没有也能用"）', () => {
+    putSettings({ enabled: true, accounts: [] })
+    expect(hasEnabledImChannel(dir)).toBe(false)
+  })
+
+  it('🔴 判据不依赖通道注册表（把通道清空，结果不变 —— 修好后两件事已分开）', () => {
+    putSettings({ enabled: true, accounts: [{ accountId: 'wechat-1', channel: 'weixin', enabled: true }] })
     __resetImChannelsForTest()
-    registerImChannel(fakeChannel({ isEnabled: () => false }))
-    expect(hasEnabledImChannel(dir)).toBe(false)
-  })
-
-  it('单通道判据抛错不影响其他通道（配置损坏由通道自身响亮处理）', () => {
-    registerImChannel(fakeChannel({ id: 'boom', isEnabled: () => { throw new Error('bad config') } }))
-    registerImChannel(fakeChannel({ id: 'ok', isEnabled: () => true }))
+    expect(imChannelIds()).toEqual([])
     expect(hasEnabledImChannel(dir)).toBe(true)
-  })
-
-  it('无通道注册时判据为 false（未配置任何 IM → 工具应不可见）', () => {
-    expect(hasEnabledImChannel(dir)).toBe(false)
   })
 })
 
@@ -248,11 +280,19 @@ describe('im-bridge: 结果载荷可 JSON 化（工具返回值契约）', () =>
   })
 })
 
-describe('im-bridge: 可见性判据与通道注册解耦（无宿主依赖）', () => {
-  it('判据只读通道的 isEnabled，不读任何宿主服务（vi 无 mock 亦通过）', () => {
+describe('im-bridge: 可见性判据不依赖宿主服务', () => {
+  /**
+   * 🔴 2026-10-22：判据换过之后，本组的**承重对象**也换了。
+   * 旧版钉的是"会去问通道的 `isEnabled`"；新版钉的是"**只读 CCC 配置、不碰宿主服务**"。
+   * ⚠️ 如实记录：`spy 未被调用` 这一条**不是**新实现的选择，而是判据搬家后的**必然结果**
+   *    —— 它钉住的是"判据不再经过通道"这件事（防止有人把通道判据又接回去而没人发现）。
+   */
+  it('判据只读 CCC 配置里的账号（不经过通道、不读宿主服务；vi 无 mock 亦通过）', () => {
     const spy = vi.fn(() => true)
     registerImChannel(fakeChannel({ isEnabled: spy }))
+    putSettings({ enabled: true, accounts: [{ accountId: 'acc-1', channel: 'fake', enabled: true }] })
     expect(hasEnabledImChannel(dir)).toBe(true)
-    expect(spy).toHaveBeenCalledWith(dir)
+    // 反向钉：判据不该再调通道的 isEnabled（否则"总开关压过账号"那个坑会回来）
+    expect(spy).not.toHaveBeenCalled()
   })
 })
