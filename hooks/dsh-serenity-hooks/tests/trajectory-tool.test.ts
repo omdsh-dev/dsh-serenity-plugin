@@ -41,6 +41,9 @@ vi.mock('../src/trajectory/cleanup.js', async (importOriginal) => {
 })
 
 import { createCognitiveTrajectoryTool } from '../src/tools/cognitive-trajectory.js'
+import { sessionsRootDir } from '../src/trajectory/cleanup.js'
+import { projectDirNameForCwd } from '../src/trajectory/interrupted.js'
+import * as nodeZlib from 'node:zlib'
 import { hasSessionLogById } from '../src/trajectory/cleanup.js'
 import { resetActiveSessionStore, COGNITIVE_TRAJECTORY_ACTIONS } from '../src/trajectory/core.js'
 import { BIND_FILENAME } from '../src/trajectory/bound.js'
@@ -91,6 +94,32 @@ function run(args: unknown, exec = fakeExec()): Promise<unknown> {
 /** 用指定 ctx 重新构造工具（仅「重命名两态」组用） */
 function toolWith(ctx: unknown) {
   return createCognitiveTrajectoryTool(ctx as never) as unknown as typeof tool
+}
+
+/**
+ * `continue-all-interrupted` 组的靶子会话 id + 其"以 interrupted 结尾"的日志构造器。
+ *
+ * 🔴 夹具写成**真 zstd 多帧**（每帧一个事件）—— 与 DSH 真机形态一致。
+ * 单帧夹具会让"只解第一帧"的实现也变绿，那是假绿。
+ */
+const LIVE_ID = 'session-interrupted-fixture'
+
+function writeInterruptedSessionLog(sessionId: string): void {
+  const zstd = (nodeZlib as unknown as { zstdCompressSync?: (b: Buffer) => Buffer }).zstdCompressSync
+  if (zstd === undefined) throw new Error('本机 Node 无 zstdCompressSync，无法构造夹具')
+  // 会话目录要落在本 CCC 推导出的 project 目录下（扫描域由 header.cwd 推导）
+  const projectDir = join(sessionsRootDir(), projectDirNameForCwd(ccc))
+  const sessionDir = join(projectDir, sessionId)
+  mkdirSync(sessionDir, { recursive: true })
+  const events = [
+    { type: 'turn/start', time: 1000, data: { turn: 1 } },
+    { type: 'step/start', time: 1001, data: { turn: 1, step: 1 } },
+    { type: 'turn/end', time: 1002, data: { turn: 1, reason: { kind: 'interrupted' } } },
+    { type: 'step/end', time: 1003, data: { turn: 1, step: 1 } },
+    { type: 'session/end-seed', time: 1004, data: {} },
+  ]
+  const frames = events.map((e) => zstd(Buffer.from(`${JSON.stringify(e)}\n`, 'utf8')))
+  writeFileSync(join(sessionDir, 'session.v4.jsonl.zstd'), Buffer.concat(frames))
 }
 
 /**
@@ -758,5 +787,47 @@ describe('cognitive_trajectory：uid（🔴 2026-10-19 起写入退役、读取�
     writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'TRAJECTORY-UID'), 'good-handle\n', 'utf-8')
     writeFileSync(join(ccc, 'AGENT_SESSIONS', A_DIR, 'trajectory.json'), JSON.stringify({ uid: '带中文 的 非法值' }), 'utf-8')
     expect((await run({ action: 'uid', name: 'S900' })) as Record<string, unknown>).toMatchObject({ uid: 'good-handle' })
+  })
+
+  /**
+   * 🔴 2026-10-22 真机实测踩到的缺陷（v1.87.5 修复）：
+   * `continue-all-interrupted` 需要 `ctx.agents` / `ctx.sessionController` 才能唤醒会话。
+   * 初版从 `execute(args, exec)` 的 `exec` 取 —— 而 `exec` 是宿主 `ToolRunContext`
+   * （= ToolExecution + deferContext…），**不含 cordis 服务** ⇒ 一律 undefined
+   * ⇒ 症状「sessionController 不可用」，而目标会话其实**就在 live 列表里**。
+   *
+   * 这条用例钉住的是**取值来源**：把 live agent 挂在**工厂 ctx** 上（不在 exec 上），
+   * 若实现退回 `exec` ⇒ 必然走到「不可用」分支 ⇒ 红。
+   *
+   * ⚠️ 它与 `createResumeOne` 的单测**不重复**：那边验的是注入逻辑（替身 direct 喂 deps），
+   * 这边验的是**服务从哪儿取**——两者正交，缺了这条就再次"跑绿也照样炸"。
+   */
+  it('🔴 continue-all-interrupted 必须从**工厂 ctx** 取 agents（从 exec 取会拿不到服务）', async () => {
+    const injected: string[] = []
+    const liveAgent = {
+      status: 'idle',
+      followup: (m: unknown) => injected.push(JSON.stringify(m)),
+    }
+    const ctxWithAgents = {
+      get: (n: string) => (n === 'agents' ? { get: (id: string) => (id === LIVE_ID ? liveAgent : undefined) } : undefined),
+    } as never
+
+    // 构造一个"以 interrupted 结尾"的 live 会话日志（真 zstd 多帧，与真机同形）
+    writeInterruptedSessionLog(LIVE_ID)
+    const t = toolWith(ctxWithAgents)
+    const out = (await t.execute({ action: 'continue-all-interrupted', lookbackHours: 8 }, fakeExec())) as string
+
+    expect(out).toContain('已注入 1')
+    expect(out).toContain(LIVE_ID)
+    expect(injected.length).toBe(1)
+  })
+
+  it('🔴 continue-all-interrupted：无 live agent 且无 sessionController ⇒ 如实报"不可用"，不假装成功', async () => {
+    writeInterruptedSessionLog(LIVE_ID)
+    // 工厂 ctx 里两个服务都没有
+    const t = toolWith({ get: () => undefined } as never)
+    const out = (await t.execute({ action: 'continue-all-interrupted', lookbackHours: 8 }, fakeExec())) as string
+    expect(out).toContain('已注入 0')
+    expect(out).toContain('sessionController')
   })
 })

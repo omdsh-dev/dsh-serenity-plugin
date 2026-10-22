@@ -1,3 +1,58 @@
+## v1.87.6 — 2026-10-22（🔴 **修复 v1.87.5 的真机缺陷：`continue-all-interrupted` 取错了 ctx，所有注入必然失败**）
+
+**来源**：v1.87.5 发布后**第一次真机调用**即暴露 ——
+```
+结果：已注入 0 ／ 失败 1
+  ✗ session-1e83779c…  宿主 sessionController 不可用（重启启动窗口？）—— 稍后重试
+```
+而 `acc-diag` 的 live 列表里**那个会话明明在**。
+
+---
+
+### 一、缺陷：服务从 `exec` 取，而 `exec` 不是 cordis ctx
+
+`execute(args, exec)` 的第二参是宿主 **`ToolRunContext`**（= `ToolExecution` + `deferContext` 等），
+**不含 cordis 服务**。初版写成：
+
+```ts
+const hostCtx = exec as unknown as Context   // ❌ 这不是 ctx
+const agents = hostAgents(hostCtx)           // ⇒ 恒 undefined
+const sc = hostService(hostCtx, 'sessionController')  // ⇒ 恒 undefined
+```
+
+⇒ `agents.get()` 拿不到 live 会话 → 退到冷恢复 → `sessionController` 也拿不到
+⇒ **每一条注入都报「不可用」**。文案还把维护者往"重启启动窗口"上引（那是个假因）。
+
+**修法**：`createCognitiveTrajectoryTool(ctx: Context)` **本来就有真 ctx**，直接用工厂参数。
+
+🔴 **这与 F3「包装对象没有 header」是同一族错误** —— **服务要从真 ctx 取，不能拿别的东西冒充**。
+
+### 二、为什么单测没抓住它（这才是重点）
+
+`createResumeOne` 的单测把 `agents` / `sessionController` **作为 deps 直接喂替身**
+⇒ 它们验的是**注入逻辑**，从不验**服务从哪儿取**。两者正交，缺一边就是"跑绿也照样炸"。
+
+⇒ 补两条**取值来源**的用例（`tests/trajectory-tool.test.ts`）：
+
+| 用例 | 钉住什么 |
+|---|---|
+| live agent 只挂在**工厂 ctx** 上 ⇒ 注入必须成功 | 若实现退回 `exec` ⇒ 必然红 |
+| 两个服务都没有 ⇒ 如实报"不可用"、不假装成功 | 失败路径不许静默 |
+
+**变异承重**：把取值改回 `hostAgents(exec as …)` ⇒ 用例**立刻红**（已实测）。
+
+### 三、判据（新增，可复用）
+
+> **凡"工具里要用宿主服务"的代码，服务必须从工具工厂的 `ctx` 取；
+> `execute` 的 `exec` 只提供「本次调用的身份与参数」，不提供任何服务。**
+> 且**必须有一条用例把服务只挂在 ctx 上** —— 否则接线断了也测不出来。
+
+### 四、门禁
+
+`typecheck` ✓ ／ `test` **202 文件 3152 例** ✓ ／ `coverage` **95.41%** ✓ ／ `build` ✓ ／ `pack-check` ✓
+
+---
+
 ## v1.87.5 — 2026-10-22（🆕 **`continue-all-interrupted`：扫出被打断的会话并自动注入续跑**）
 
 **来源**：owner 对 v1.87.4 的追加令 ——

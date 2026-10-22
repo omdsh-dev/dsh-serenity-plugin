@@ -850,11 +850,16 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         }
 
         // 逐条注入（**串行**：冷载入开销大，并发起多个 agent 会互相抢算力）
-        const hostCtx = exec as unknown as Context
-        const agents = hostAgents(hostCtx) as { get?: (id: string) => unknown } | undefined
+        //
+        // 🔴 **必须用工厂参数 `ctx`，不能用 `exec`**（2026-10-22 真机实测踩到）：
+        //    `execute(args, exec)` 的第二参是宿主 `ToolRunContext`（= ToolExecution + deferContext…），
+        //    **不含 cordis 服务**。拿它去 `hostAgents()` / `hostService()` 一律 undefined
+        //    ⇒ 症状是「sessionController 不可用」—— 而那个会话其实**就在 live 列表里**。
+        //    ⇒ 这与 F3「包装对象没有 header」是同一族错误：**服务要从真 ctx 取，不能从别的东西冒充。**
+        const agents = hostAgents(ctx) as { get?: (id: string) => unknown } | undefined
         const sc = hostService<{
           resolveAgent?: (id: string) => Promise<{ agent?: unknown; error?: string }>
-        }>(hostCtx, 'sessionController')
+        }>(ctx, 'sessionController')
         const resumeOne = createResumeOne({
           agents,
           sessionController: sc,
