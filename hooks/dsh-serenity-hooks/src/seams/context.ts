@@ -142,11 +142,68 @@ export function accMessage(root: string, configPaths: string[], entrySkillMaxCha
   return createUserMessage({ content, source: PLUGIN_SOURCE })
 }
 
-/** 每 agent 是否已注入过（进程内存态） */
+/**
+ * 每 agent 是否已注入过 —— **只作为本进程内的快路径**，⛔ 不是判据。
+ *
+ * 🔴🔴 2026-10-22（owner 报「send-now 创建的会话消息注入两次」的取证结论）：
+ * 此前**它就是判据**，于是 `pre-step` 那道门拿它回答"**这条会话**注入过没有"——
+ * 而它实际回答的是"**本进程**注入过没有"。进程一换（`restart-web` / 看门狗拉起 /
+ * 崩溃重启）它就清空 ⇒ 老会话被冷载入时 `pre-step` 判"没注入过" ⇒ **再注入一遍**。
+ *
+ * 实测铁证（同一会话两条 `[ACC] … active` 横幅，相隔 18.6 小时）：
+ * 只有**跨过重启**的会话有两条，没跨的只有一条 ⇒ 重复的量 = 跨了几个进程。
+ *
+ * ⇒ 判据改为 {@link hasAccBanner}（读**会话历史**）。本 Set 降级为"同进程免重复扫"的优化：
+ *   命中它就直接返回（省一次扫），⛔ 它为空**不代表**没注入过。
+ */
 const injected = new Set<string>()
 
 function agentKey(agent: Agent): string {
   return (agent.session as { id?: string }).id ?? 'global'
+}
+
+/**
+ * ACC 身份横幅在**会话历史**里的识别特征（结构判据，不依赖措辞顺序）。
+ *
+ * 🔴 为什么认 `source.kind` ＋ 正文前缀两件：
+ *   - 只认正文 ⇒ 将来文案一改就静默失效（D151 同族：判据不能长在措辞上）；
+ *   - 只认 `source.kind` ⇒ 本插件注入的**所有**消息都算（`skill-catalog` 块、假首轮横幅…）
+ *     ⇒ 会把"别的注入出现过"误当成"身份横幅出现过"，导致**永不再注入**。
+ * ⇒ 两者与：由本插件发出 **且** 正文以 ACC 横幅首词开头。
+ */
+const ACC_BANNER_PREFIX = '[ACC] Serenity cognitive container active'
+
+/**
+ * 这条会话的历史里**是否已经有** ACC 身份横幅（= 判据的唯一权威）。
+ *
+ * 🔴 这是本条修复的核心：**"注入过没有"是会话的属性，不是进程的属性。**
+ * 会话历史随会话走（落盘、重启后仍在），进程内状态随进程死。
+ *
+ * ⚠️ 读不到 events（受限宿主 / 投影未就绪）⇒ 返回 `false`（退回"注入一次"）。
+ *   这是**偏保守**的选择：多注入一条横幅（可见、可清理）远好于
+ *   **永远不再注入**（陈旧会话里 ACC 身份彻底缺失，且零信号）。
+ *
+ * @param session 目标会话（`sessionEvents` 能读的形状）
+ */
+export function hasAccBanner(session: unknown): boolean {
+  return sessionEvents(session).some((event) => {
+    const e = event as { type?: string; data?: { source?: { kind?: string }; content?: unknown } }
+    if (e.type !== 'user/message') return false
+    if (e.data?.source?.kind !== PLUGIN_SOURCE.kind) return false
+    return textOfUserMessage(e.data)?.trimStart().startsWith(ACC_BANNER_PREFIX) === true
+  })
+}
+
+/** 从 `user/message` 的 content 块数组里拼出纯文本（无 text 块 ⇒ undefined） */
+function textOfUserMessage(data: { content?: unknown } | undefined): string | undefined {
+  const content = data?.content
+  if (!Array.isArray(content)) return undefined
+  const parts: string[] = []
+  for (const block of content) {
+    const b = block as { type?: string; text?: unknown }
+    if (b?.type === 'text' && typeof b.text === 'string') parts.push(b.text)
+  }
+  return parts.length === 0 ? undefined : parts.join('')
 }
 
 function agentScope(agent: Agent): string {
@@ -276,7 +333,13 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         /* 恢复失败不阻断播种（Session 块自然为空，用户可手动 session use） */
       }
     }
-    if (injected.has(key)) return
+    // 🔴 2026-10-22 同批修复：`seed` 这条也改读会话历史。
+    //    它是冷载入时唯一会跑的那条（`agent/created` 未必再触发）⇒ 若只用进程内 Set，
+    //    "全新会话"与"跨重启的老会话"在这条路上完全不可分。
+    if (injected.has(key) || hasAccBanner(agent.session)) {
+      injected.add(key) // 补记快路径
+      return
+    }
     injected.add(key)
     agent.inject(accMessage(root, configPaths, entrySkillMaxChars))
     syncSafeModeRestriction(agent, root)
@@ -388,7 +451,15 @@ export function registerContext(ctx: Context, opts: ContextRegistration = {}): v
         // v1.34.1：轨迹声明的 skill 注入（绑定期间持续存在；无绑定/无声明 ⇒ 不注册，见 system-prompt.ts）
         registerCognitiveTrajectorySkillSection(agent, root)
       }
-      if (!root || injected.has(key) || downstream.kind !== 'enter') return downstream
+      if (!root || downstream.kind !== 'enter') return downstream
+      // 🔴 2026-10-22 修复（owner 报「消息注入两次」）：**判据必须读会话历史**。
+      //    此前这里是 `injected.has(key)`（进程内 Set）⇒ 每次重启后老会话都会被再注入一遍。
+      //    `injected` 仍保留为**快路径**：命中就直接返回（省一次扫历史），
+      //    ⚠️ 但它为空**不代表**没注入过 —— 真相只在 `hasAccBanner(session)`。
+      if (injected.has(key) || hasAccBanner(agent.session)) {
+        injected.add(key) // 顺带补记快路径，下次省扫
+        return downstream
+      }
       injected.add(key)
       return { kind: 'enter', messages: [accMessage(root, configPaths, entrySkillMaxChars), ...messages, ...downstream.messages] }
     })

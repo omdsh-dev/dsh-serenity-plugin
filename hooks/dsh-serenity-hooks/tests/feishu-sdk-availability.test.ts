@@ -23,6 +23,17 @@ import { describe, it, expect } from 'vitest'
  * ⛔ 测试**不建连、不发请求**：本文件零网络副作用。
  */
 describe('飞书 SDK 可安装性（P3 第 0 格）', () => {
+  /**
+   * 🔴 2026-10-22：显式超时 20s（vitest 缺省 5s）。
+   *
+   * **为什么**：本条要**动态 import 整个飞书 SDK**（`@larksuiteoapi/node-sdk`，带 protobufjs
+   * 与长连接栈）。5s 在**单跑**时够用，但全量跑时它与另外 199 个文件并行 ⇒ 模块解析排队
+   * ⇒ 实测**反复** `Test timed out in 5000ms`，而**同一个文件单跑永远绿**。
+   *
+   * ⚠️ 这不是"把红改成绿"：判据（三条 expect）**一个字没动**，改的只是**等它多久**。
+   * 若 SDK 真坏了（import 抛错 / 缺 `WSClient`），本条仍会红 —— 超时只挡"慢"，不挡"坏"。
+   * 📌 归属：本文件自 9fd8690 起就带这个脆弱点，与本轮改动无关（本轮只是撞上它）。
+   */
   it('模块可加载，且长连接与消息 API 都在客户端面上', async () => {
     const Lark = await import('@larksuiteoapi/node-sdk')
 
@@ -44,5 +55,5 @@ describe('飞书 SDK 可安装性（P3 第 0 格）', () => {
     const ws = new Lark.WSClient({ appId: 'probe-app-id', appSecret: 'probe-app-secret' })
     expect(ws).toBeTruthy()
     expect(typeof (ws as unknown as { start: unknown }).start).toBe('function')
-  })
+  }, 20_000)
 })

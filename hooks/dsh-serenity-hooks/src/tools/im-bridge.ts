@@ -17,7 +17,7 @@ import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { cccRootForExec } from '../kernel/ccc-roots.js'
 import { runImBridge, imChannelIds } from '../im/channels.js'
 
-const ACTIONS = ['send', 'send-file', 'users', 'status'] as const
+const ACTIONS = ['send', 'send-file', 'users', 'status', 'contacts'] as const
 
 function renderText(value: unknown): ContentBlock[] {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -36,13 +36,18 @@ export function createImBridgeTool() {
       + 'This tool only acts on the current container (no target container parameter). '
       + 'It is hidden entirely when this container has no IM channel configured. '
       + `Channels: ${imChannelIds().join(', ') || '(none registered)'}. `
-      + 'Actions: send (text) / send-file (a file inside this container) / users (list configured recipients) / status (channel health). '
+      + 'Actions: send (text) / send-file (a file inside this container) / users (configured aliases) / '
+      + 'status (channel health, accounts + current routes) / '
+      + 'contacts (people this container has exchanged messages with — use this to find the '
+      + '`user` id when adding a route, since that id exists only in the chat logs). '
       + 'Not every channel supports every action (e.g. send-file may return ACTION_UNSUPPORTED). '
-      + 'user accepts a configured alias (e.g. user-a, user-b) or a raw channel user id. '
+      + 'user accepts a configured alias or a raw channel user id. '
+      // 🔴 D178：指针必须从"使用者实际打开的那个工具"发出 —— 配路由的人先打开的是本工具。
+      + 'Docs: container_admin config docs im-bridge (how to add a route, where the other party\'s id comes from). '
       + 'Failures return a stable code plus a remediation hint.',
     parameters: {
       channel: { type: 'string', description: `IM channel id (e.g. "weixin"); available: ${imChannelIds().join(', ') || '(none)'}` , required: true },
-      action: { type: 'string', enum: [...ACTIONS], required: true, description: 'send / send-file / users / status' },
+      action: { type: 'string', enum: [...ACTIONS], required: true, description: 'send / send-file / users / status / contacts' },
       user: { type: 'string', description: 'Recipient: configured alias (user-a, user-b) or raw channel user id (send / send-file)' },
       text: { type: 'string', description: 'Message text, plain text only (send)' },
       file: { type: 'string', description: 'File path inside this container, relative to the container root (send-file)' },

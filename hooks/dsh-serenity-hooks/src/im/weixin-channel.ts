@@ -13,6 +13,7 @@
 
 import { readStore } from '../tools/localstore/service.js'
 import { readWeixinSettings, weixinSessionIdForTrajectory, matchWeixinRoute, sanitizeFileName } from './route.js'
+import { findDirNameByCode } from '../trajectory/policy/profile.js'
 import { sendProactiveText, weixinBridgeStatus, resolveWeixinAccount } from './bridge.js'
 import { sendFileMessage, sendTextMessage } from './ilink.js'
 import { invokeWeixinHook, buildOutgoingHookEvent } from './hook.js'
@@ -47,6 +48,25 @@ function credentialValue(root: string, key: string): string | null {
 /** 把通道层的失败码转成一句可读错误（工具面统一映射为 SEND_FAILED） */
 function channelError(code: string, error: string, remediation?: string): Error {
   return new Error(`${code}: ${error}${remediation ? ` — ${remediation}` : ''}`)
+}
+
+/**
+ * 路由目标轨迹**是否存在**（`status` 的自检列）。
+ *
+ * 🔴 复用既有判据 `findDirNameByCode`（它扫活跃区并按编码解析）—— ⛔ 不在这里另写一套目录扫描，
+ *    两份判据会漂（一处认归档、另一处不认，就会出现"这里说有、投递时说没有"）。
+ *
+ * ⚠️ 解析失败（`findDirNameByCode` 在**重码**时会抛）⇒ 返回 `false` 但**不吞掉原因**：
+ *    重码本身也是"这个路由不可信"的一种形态，`status` 里会表现为 `targetExists:false`，
+ *    配合 `cognitive_trajectory list` 可定位。不额外造一个错误码（键名已经够直白）。
+ */
+function trajectoryDirExists(root: string, code: string): boolean {
+  if (typeof code !== 'string' || code.trim() === '') return false
+  try {
+    return findDirNameByCode(root, code.trim()) !== null
+  } catch {
+    return false
+  }
 }
 
 export const weixinChannel: ImChannel = {
@@ -125,6 +145,8 @@ export const weixinChannel: ImChannel = {
       const trajectory = matchWeixinRoute(settings.routes ?? [], input.userId) ?? ''
       void invokeWeixinHook(input.root, settings.hook, buildOutgoingHookEvent({
         cccRoot: input.root,
+        // 本文件即 `weixin` 的实现 ⇒ 渠道是**已知常量**，不是从 accountId 名字猜的（D167）
+        channel: 'weixin',
         accountId: account.accountId,
         userId: input.userId,
         sessionId: weixinSessionIdForTrajectory(trajectory !== '' ? trajectory : sanitizeFileName(input.userId) || 'unknown'),
@@ -157,7 +179,21 @@ export const weixinChannel: ImChannel = {
       })))
     // 🔴 2026-10-19：路由目标从「轨迹约束角色名」改为**认知轨迹编码**。
     // `role` 键名保留（下游 hook/台账形状不变），值 = 轨迹编码。
-    const routes: ImJson[] = (settings.routes ?? []).map((route) => ({ user: route.user, role: route.trajectory }))
+    //
+    // 🔴 2026-10-22 新增 `targetExists`：**每条路由的目标轨迹是否真的存在**。
+    //    为什么必须加（owner：「配路由」这件事 CCC 此前只能猜）：
+    //    路由表里写错一个轨迹编码**不会有任何报错** —— 消息进来时 `resolveInboundTarget`
+    //    找不到目标，按既有纪律"不投递但留痕"，而调用方（CCC）看到的只是"没回音"。
+    //    ⇒ 那是**配了不生效**的典型形态（D179 同族：假入口必须能被发现）。
+    //    ⚠️ 它只做**存在性**检查（该目录在不在），不判断该轨迹是否"该收这条消息"。
+    const routes: ImJson[] = (settings.routes ?? []).map((route) => {
+      const code = route.trajectory
+      return {
+        user: route.user,
+        role: code,
+        targetExists: trajectoryDirExists(root, code),
+      }
+    })
     return {
       enabled: settings.enabled === true,
       autoReplyWithLastMessage: settings.autoReplyWithLastMessage !== false,

@@ -441,6 +441,7 @@ export async function handleInboundEvent(
       if (hookRel) {
         void invokeWeixinHook(root, hookRel, buildIncomingHookEvent({
           cccRoot: root,
+          channel,
           accountId,
           userId: fromUserId,
           sessionId,
@@ -471,6 +472,7 @@ export async function handleInboundEvent(
         if (hookRel) {
           void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
             cccRoot: root,
+            channel,
             accountId,
             userId: fromUserId,
             sessionId,
@@ -492,6 +494,7 @@ export async function handleInboundEvent(
       if (hookRel) {
         void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
           cccRoot: root,
+          channel,
           accountId,
           userId: fromUserId,
           sessionId,

@@ -39,6 +39,19 @@ interface WeixinHookEventBase {
   ts: number
   /** 触发 CCC 根（多 CCC 一进程可区分） */
   cccRoot: string
+  /**
+   * 渠道 id（`weixin` / `feishu`）。
+   *
+   * 🔴 2026-10-22 新增（owner：「一个 CCC 绑定多个账户很常见，聊天记录落盘要完善」）。
+   * 此前**没有这个字段** ⇒ 三个后果：① 飞书事件落进同一份 jsonl 后**无法区分渠道**
+   * （只能靠 `ou_` / `@im.wechat` 的形状猜 = D167 违反：认族不认名）；② 一个 CCC 配多个
+   * 账号时**不知是哪个渠道**收发的（`accountId` 是本地命名习惯，不携带渠道信息）；
+   * ③ 按渠道分组统计在字段层就做不到。
+   *
+   * ⚠️ **向后兼容**：存量事件没有它 ⇒ 读侧按 `accountId → im.accounts[].channel`
+   * 回填，仍取不到则按 `weixin`（那是本字段存在之前唯一的渠道）。
+   */
+  channel: string
   /** 接收账号（incoming）/ 发送账号（outgoing） */
   accountId: string
   /** 对端用户（from_user_id，形如 userA@im.wechat） */
@@ -87,6 +100,8 @@ type WeixinHookEventJson = WeixinHookEvent
 /** incoming 事件构造输入（bridge 提供实参） */
 interface IncomingHookInput {
   cccRoot: string
+  /** 渠道 id（`weixin` / `feishu`）；缺省 `weixin`（存量调用点零改动） */
+  channel?: string
   accountId: string
   userId: string
   sessionId: string
@@ -98,6 +113,8 @@ interface IncomingHookInput {
 /** outgoing 事件构造输入（bridge 提供实参） */
 interface OutgoingHookInput {
   cccRoot: string
+  /** 渠道 id（`weixin` / `feishu`）；缺省 `weixin` */
+  channel?: string
   accountId: string
   userId: string
   sessionId: string
@@ -109,12 +126,16 @@ interface OutgoingHookInput {
   file?: { name: string; size: number; caption?: string }
 }
 
+/** 存量调用点未传 `channel` 时的缺省值（本字段存在之前唯一的渠道） */
+const DEFAULT_HOOK_CHANNEL = 'weixin'
+
 /** 构造 incoming 事件对象（纯函数，可测） */
 export function buildIncomingHookEvent(input: IncomingHookInput): WeixinHookIncomingEvent {
   return {
     event: 'incoming',
     ts: Date.now(),
     cccRoot: input.cccRoot,
+    channel: input.channel ?? DEFAULT_HOOK_CHANNEL,
     accountId: input.accountId,
     userId: input.userId,
     sessionId: input.sessionId,
@@ -132,6 +153,7 @@ export function buildOutgoingHookEvent(input: OutgoingHookInput): WeixinHookOutg
     event: 'outgoing',
     ts: Date.now(),
     cccRoot: input.cccRoot,
+    channel: input.channel ?? DEFAULT_HOOK_CHANNEL,
     accountId: input.accountId,
     userId: input.userId,
     sessionId: input.sessionId,

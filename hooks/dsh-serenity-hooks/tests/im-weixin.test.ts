@@ -147,7 +147,13 @@ describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
       enabled: true,
       autoReplyWithLastMessage: false,
       fallbackOnNoSend: true,
-      routes: [{ user: '*', role: 'my-role' }],
+      // 🔴 2026-10-22 语义变更（owner：「配路由需要…需要有个能力让 CCC 查询」）：
+      //    `status` 的每条 route 新增 **`targetExists`** —— 该路由指向的轨迹编码**真的存在吗**。
+      //    它治的是"配了不生效"：写错一个编码不会有任何报错，消息进来找不到目标就静默不投递
+      //    （D179 同族：假入口必须能被发现）。
+      //    ⚠️ 本夹具里 `role: 'my-role'` **不是**真实轨迹编码 ⇒ 期望值必须是 `false`
+      //    （正好也把"它会真的去查"这件事钉住了）。
+      routes: [{ user: '*', role: 'my-role', targetExists: false }],
       accounts: [{ accountId: 'wechat-1', lastPollAt: 123, lastError: 'boom' }],
     })
     expect(JSON.parse(JSON.stringify(status))).toEqual(status)

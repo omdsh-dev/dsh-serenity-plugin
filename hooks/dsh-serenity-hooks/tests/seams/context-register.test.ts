@@ -399,6 +399,95 @@ describe('registerContext: agent/pre-step（"context-only 必须 next() 委托"�
     expect(decision).toEqual(downstream)
   })
 
+  /**
+   * 🔴🔴 2026-10-22（owner 报「send-now 创建的会话消息注入两次」）：
+   * 「注入过没有」的判据从**进程内 Set** 改为**会话历史**。
+   *
+   * 这两条必须**成对**存在 —— 只钉"跨重启不重复"，就会让修复退化成"干脆不注入"
+   * （那比重复更坏：陈旧会话里 ACC 身份彻底缺失，且零信号）。
+   */
+  describe('🔴 横幅去重：判据是会话历史，不是进程内存', () => {
+    /** 造一条"历史里已经有 ACC 横幅"的会话事件（形状对齐真实日志） */
+    const bannerEvent = (): unknown => ({
+      type: 'user/message',
+      data: {
+        content: [{ type: 'text', text: '[ACC] Serenity cognitive container active (dsh-serenity-hooks v1.85.0)\n- CCC root: …' }],
+        source: { kind: 'plugin:dsh-serenity-hooks' },
+      },
+    })
+
+    it('历史里已有横幅 ⇒ 再进 pre-step **不再注入**（等价于"跨重启后的老会话"）', async () => {
+      // 关键：**全新 registerContext = 全新进程**（`injected` 是模块级 Set，
+      // 但本文件每条用例 import 同一模块实例；用 history 判据才能表达"新进程 + 老会话"）。
+      // ⇒ 本用例不依赖 Set 是否为空：就算 Set 有值，判据也必须由历史给出。
+      const { agent } = fakeAgent('banner-dup-1', { header: { cwd: dir }, events: [bannerEvent()] })
+      const ctx = fakeCtx()
+      registerContext(ctx as never, { seedOnStart: false })
+
+      const { decision } = await firePreStep(
+        ctx,
+        agent,
+        [{ tag: 'current' }],
+        { kind: 'enter', messages: [{ tag: 'downstream' }] },
+      )
+      // 不注入 ⇒ 原样返回 downstream（messages 长度仍是它自己那 1 条）
+      const d = decision as { kind: string; messages: unknown[] }
+      expect(d.messages).toEqual([{ tag: 'downstream' }])
+    })
+
+    it('🔴 反向钉：历史里**没有**横幅 ⇒ 照常注入一次（⛔ 不许把去重做成不注入）', async () => {
+      const { agent } = fakeAgent('banner-fresh-1', {
+        header: { cwd: dir },
+        // 有历史、但**不含** ACC 横幅（例如只有别的注入消息）
+        events: [
+          { type: 'user/message', data: { content: [{ type: 'text', text: '别的注入' }], source: { kind: 'skill-catalog' } } },
+        ],
+      })
+      const ctx = fakeCtx()
+      registerContext(ctx as never, { seedOnStart: false })
+
+      const { decision } = await firePreStep(
+        ctx,
+        agent,
+        [{ tag: 'current' }],
+        { kind: 'enter', messages: [{ tag: 'downstream' }] },
+      )
+      const d = decision as { kind: string; messages: unknown[] }
+      expect(d.messages).toHaveLength(3)
+      expect(msgText(d.messages[0])).toContain('[ACC] Serenity cognitive container active')
+    })
+
+    it('🔴 判别性：别的插件注入（非 ACC banner）**不算**注入过', async () => {
+      // 若判据只认 `source.kind === PLUGIN_SOURCE` 而不认正文前缀，这条会误判成"已注入"
+      // ⇒ 真会话将**永不再**拿到身份横幅。这里把那个错误形状钉死。
+      const { agent } = fakeAgent('banner-other-1', {
+        header: { cwd: dir },
+        events: [
+          {
+            type: 'user/message',
+            data: {
+              // 同 kind，但正文**不是**横幅（例如 keeper 提醒 / 唤醒投递 / 打回提示）
+              content: [{ type: 'text', text: '[唤醒] 到点，请继续 S142 的工作' }],
+              source: { kind: 'plugin:dsh-serenity-hooks' },
+            },
+          },
+        ],
+      })
+      const ctx = fakeCtx()
+      registerContext(ctx as never, { seedOnStart: false })
+
+      const { decision } = await firePreStep(
+        ctx,
+        agent,
+        [],
+        { kind: 'enter', messages: [] },
+      )
+      const d = decision as { kind: string; messages: unknown[] }
+      expect(d.messages).toHaveLength(1)
+      expect(msgText(d.messages[0])).toContain('[ACC] Serenity cognitive container active')
+    })
+  })
+
   it('不在任何 CCC ⇒ 不注入、原样返回 downstream', async () => {
     const { agent } = fakeAgent('main-pre-3', { header: { cwd: outside } })
     const ctx = fakeCtx()

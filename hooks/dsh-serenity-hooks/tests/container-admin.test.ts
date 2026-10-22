@@ -193,7 +193,10 @@ describe('config docs：两层说明菜单（P3）', () => {
     // v1.75.0：catalog 从 msm 域并进来（它描述整个 ACC，挂在 MSM 注册表下是域挂错了）
     // 2026-10-20：新增 `trajectory-self`（owner：「这是认知轨迹感知理解这些边界的重要手册」）
     //   ⇒ 拆章判据 = 描述自己（所有轨迹） vs 限制自己（特例），两者读者不同、不该同居一章。
-    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-self', 'trajectory-constraint'])
+    // 2026-10-22：新增 `im-bridge`（owner：「ACC 没提供 IM 桥使用说明…导致 CCC 没办法自己配路由」）
+    //   ⇒ 同一条判据的第二次应用：读者是 **CCC 的 agent、手边工具是 im-bridge**，
+    //     而不是"写自我声明的轨迹"。⛔ 不是把断言放宽 —— 集合相等仍然精确，只是成员变了。
+    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-self', 'trajectory-constraint', 'im-bridge'])
     expect(res.docs).toContain('CCC 配置说明 · 目录')
     // 目录里每一章都有一句话
     expect(res.docs).toContain('config')
@@ -301,6 +304,6 @@ describe('config docs：两层说明菜单（P3）', () => {
 
   it('🔴 白空格章节 ⇒ 按"没给"处理（返回目录，不是报错）', async () => {
     const res = (await exec({ domain: 'config', action: 'docs', chapter: '   ' })) as { chapters: string[] }
-    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-self', 'trajectory-constraint'])
+    expect(res.chapters).toEqual(['catalog', 'config', 'trajectory-self', 'trajectory-constraint', 'im-bridge'])
   })
 })

@@ -27,12 +27,17 @@
  * ⇒ 校验**值的形状**（飞书 open_id 以 `ou_` 开头）：错配在**解析处**就失败，
  *    错误码是 `ALIAS_UNKNOWN` + 可行动提示。
  *
- * ## 🔴 为什么不 fire 记录 hook
+ * ## 🔴 记录 hook：曾经不 fire，2026-10-22 起 fire（A83 已裁）
  *
- * `settings.hook` 的契约与消费方都是**微信的**：CCC 的 `scripts/weixin-message-hook.ts`
- * 把事件追加进 `AGENT_SESSIONS/_weixin-logs/<日期>.jsonl`。飞书事件若流进去，
- * 那个目录就**同时装两种渠道的数据而名字只说一种**（D151／D179 同族：名字开始撒谎）。
- * ⇒ 本期**不落记录**，并把它登记为待裁（A83）。工具描述里按渠道写清这件事。
+ * **当时的理由**：`settings.hook` 的契约与消费方都是**微信的**，CCC 的
+ * `scripts/weixin-message-hook.ts` 把事件追加进 `AGENT_SESSIONS/_weixin-logs/<日期>.jsonl`。
+ * 飞书事件若流进去，那个目录就**同时装两种渠道的数据而名字只说一种**（D151／D179 同族）。
+ *
+ * **为什么现在可以 fire**：同批给 hook 事件加了 **`channel` 字段**（owner 2026-10-22：
+ * 「一个 CCC 绑定多个账户很常见，聊天记录落盘要完善」）⇒ CCC 侧 hook 按渠道分流到
+ * `_im-logs/<channel>/`，**目录名不再需要撒谎**。
+ * ⇒ 所以这不是"决定记录"，而是"**让记录不再有害**之后才记录"。
+ * ⚠️ 顺序有意义：**先有渠道字段，再有记录**。反过来做就会先造出一批分不清渠道的数据。
  */
 import { readStore } from '../tools/localstore/service.js'
 import {
@@ -40,6 +45,7 @@ import {
 } from './route.js'
 import { weixinBridgeStatus } from './bridge.js'
 import { markdownToPlainText } from './ilink.js'
+import { invokeWeixinHook, buildOutgoingHookEvent } from './hook.js'
 import { loadFeishuSdk } from './feishu-account.js'
 import type { ImChannel, ImUserEntry, ImJson } from './channels.js'
 
@@ -222,7 +228,25 @@ export const feishuChannel: ImChannel = {
     const sessionId = weixinSessionIdForTrajectory(
       trajectory !== '' ? trajectory : sanitizeFileName(input.userId) || 'unknown',
     )
-    // ⚠️ 刻意**不** fire 记录 hook：见文件头注「为什么不 fire 记录 hook」（A83 待裁）
+    // 🔴 2026-10-22（owner：「飞书要记录」＋「一个 CCC 绑定多个账户很常见，落盘要完善」）：
+    //    **开始 fire 记录 hook**。上一版不 fire 的理由是"目录名会说谎"（`_weixin-logs` 里装飞书数据）；
+    //    那个理由**随事件新增 `channel` 字段而消失** —— 现在事件自带渠道，
+    //    CCC 侧的 hook 可以按渠道分流到 `_im-logs/<channel>/`，目录名不再需要撒谎。
+    if (settings.hook) {
+      void invokeWeixinHook(input.root, settings.hook, buildOutgoingHookEvent({
+        cccRoot: input.root,
+        // 🔴 渠道**显式声明**，不是从 accountId 名字推断（D167：认族不认名）
+        channel: 'feishu',
+        accountId: account.accountId,
+        userId: input.userId,
+        sessionId,
+        role: trajectory,
+        reply: markdownToPlainText(input.text),
+        source: 'proactive',
+      })).catch((err) => {
+        console.log(`[serenity-hooks] im hook outgoing(feishu) error: ${err instanceof Error ? err.message : String(err)}`)
+      })
+    }
     return { accountId: account.accountId, userId: input.userId, sessionId, role: trajectory }
   },
 

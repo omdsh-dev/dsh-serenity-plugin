@@ -699,6 +699,8 @@ export async function sendProactiveText(input: ProactiveSendInput): Promise<Proa
   if (settings.hook) {
     void invokeWeixinHook(root, settings.hook, buildOutgoingHookEvent({
       cccRoot: root,
+      // 本文件是微信 iLink 的发送实现 ⇒ 渠道已知（不从 accountId 名字推断，D167）
+      channel: 'weixin',
       accountId,
       userId: toUserId,
       sessionId,

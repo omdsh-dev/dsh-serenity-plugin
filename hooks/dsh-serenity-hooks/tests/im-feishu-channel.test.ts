@@ -196,8 +196,48 @@ describe('飞书出站通道：发送（形状是官方硬要求）', () => {
     expect(result.role).toBe('probe')
   })
 
-  it('无可用账号 / 未绑定 / 指定账号不存在 → 各自稳定码（不触达 SDK）', async () => {
+  /**
+   * 🔴🔴 2026-10-22（owner：「飞书要记录」＋「一个 CCC 绑定多个账户很常见，落盘要完善」）：
+   * 飞书出站**开始 fire 记录 hook**，且事件必须自带 `channel:"feishu"`。
+   *
+   * 为什么这条最要紧：`channel` 字段是 **"多渠道落盘分得开"的唯一依据**。
+   * 它若缺失，飞书事件写进日志后无法与微信区分（只能靠 `ou_` 前缀猜 = D167 违反），
+   * `contacts` 也就没法按渠道分组。⇒ 这里把"带渠道"钉死。
+   */
+  it('🔴 发送成功 ⇒ fire 记录 hook，且事件带 `channel:"feishu"`', async () => {
     const { feishuChannel } = await import('../src/im/feishu-channel.js')
+    await readyEnv()
+    // 这条要在**有 hook 配置**的前提下跑（`readyEnv` 默认不配 hook）
+    writeConfig({
+      enabled: true,
+      accounts: [{ accountId: 'feishu-1', channel: 'feishu', enabled: true }],
+      routes: [{ user: 'ou_abc', trajectory: 'probe' }],
+      hook: 'scripts/fake-hook.ts',
+    })
+
+    const { setWeixinHookRunnerForTest } = await import('../src/im/hook.js')
+    const captured: Array<Record<string, unknown>> = []
+    setWeixinHookRunnerForTest(async (_root, _rel, event) => {
+      captured.push(event as unknown as Record<string, unknown>)
+      return { ok: true }
+    })
+
+    try {
+      await feishuChannel.send({ root: dir, userId: 'ou_abc', text: 'hello' })
+      expect(captured).toHaveLength(1)
+      const ev = captured[0]!
+      expect(ev.channel).toBe('feishu')   // ← 本轮新增的判据
+      expect(ev.event).toBe('outgoing')
+      expect(ev.accountId).toBe('feishu-1')
+      expect(ev.userId).toBe('ou_abc')
+      expect(ev.reply).toBe('hello')
+      expect(ev.source).toBe('proactive')
+    } finally {
+      setWeixinHookRunnerForTest(null)
+    }
+  })
+
+  it('无可用账号 / 未绑定 / 指定账号不存在 → 各自稳定码（不触达 SDK）', async () => {    const { feishuChannel } = await import('../src/im/feishu-channel.js')
 
     // ① 桥未启用
     writeConfig({ enabled: false, accounts: [] })

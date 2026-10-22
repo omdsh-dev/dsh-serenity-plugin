@@ -20,6 +20,8 @@
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { resolve as resolvePath, relative, isAbsolute } from 'node:path'
+import { readWeixinSettings } from './route.js'
+import { scanImContacts } from './log-scan.js'
 
 /** 文本长度上限（微信侧单条实践上限；超限拒绝而非静默截断——与 HTTP 入口同值） */
 export const IM_SEND_MAX_TEXT = 4000
@@ -94,6 +96,40 @@ export interface ImChannel {
   sendFile?(input: ImSendFileInput): Promise<{ fileName: string; size: number }>
   /** 通道健康快照（`status` 动作）——必须可 JSON 化（工具返回值契约） */
   status(root: string): ImJson
+  /**
+   * 列出**与这条 CCC 有过往来的对端用户**（`contacts` 动作，2026-10-22 新增）。
+   *
+   * 🔴 **它存在的理由**（owner 原话：「配路由需要的是账户到轨迹，轨迹 CCC 知道，
+   * 账户 CCC 不知道，需要有个能力让 CCC 查询用户配好的账户」）：
+   * 路由要写 `{ user: "<通道用户 id>", trajectory: "<轨迹编码>" }`。轨迹编码 CCC 知道，
+   * **但"对方是谁"它不知道** —— 那个 id 只存在于聊天记录里。
+   * ⇒ 没有本动作，CCC 配路由时只能去翻日志或猜。
+   *
+   * ⚠️ **可选**：某通道若没有可扫的记录来源（例如未实现记录落盘），不实现即可，
+   * 工具会如实返回 `ACTION_UNSUPPORTED` —— 比返回空数组好（空数组会被读成"确实没有人"）。
+   */
+  listContacts?(root: string): ImContact[]
+}
+
+/**
+ * 一个"有过往来的对端"（`contacts` 动作的条目）。
+ *
+ * 字段刻意**全部可 JSON 化**（工具返回值契约），且不引用内部类型。
+ */
+export interface ImContact {
+  /** 该对端属于哪个渠道（`weixin` / `feishu`） */
+  channel: string
+  /** 对端在该通道内的稳定 id（微信 `xxx@im.wechat` / 飞书 `ou_…`） */
+  userId: string
+  /** 收发过它的账号（本地唯一键，如 `wechat-1`）—— 多账号 CCC 靠它区分 */
+  accountIds: string[]
+  /** 当前路由到的轨迹编码；未配路由 ⇒ `null` */
+  route: string | null
+  /** 首次/最近出现时间（ISO8601；取不到为 `null`） */
+  firstSeen: string | null
+  lastSeen: string | null
+  /** 见过的消息条数 */
+  messages: number
 }
 
 const channels = new Map<string, ImChannel>()
@@ -234,6 +270,69 @@ export async function runImBridge(root: string, req: ImToolRequest): Promise<ImT
   }
   if (action === 'users') {
     return { ok: true, channel: channelId, action, detail: { users: channel.listUsers(root) } }
+  }
+  if (action === 'contacts') {
+    // 🔴 2026-10-22（owner：「需要有个能力让 CCC 查询用户配好的账户」）：
+    //    对端用户 id 只存在于聊天记录里 ⇒ 这里把记录读成联系人表，并与**当前路由**对账。
+    //    三个输出各有用途，缺一个这个动作就只剩"列名字"：
+    //      · contacts      —— 这些人是谁（含 id，供复制进 routes）
+    //      · unrouted      —— ⚠️ 有往来但没配路由（**该配的**）
+    //      · orphanRoutes  —— ❓ 配了路由但从没收到过消息（**id 可能写错了**，D179 同族：假入口要能被发现）
+    if (!channel.listContacts) {
+      return fail('ACTION_UNSUPPORTED', `channel "${channelId}" has no record source for contacts`)
+    }
+    const settings = readWeixinSettings(root)
+    // 存量事件缺 `channel` 时按账号回填（⛔ 不按 userId 形状猜渠道）
+    const accountChannel: Record<string, string> = {}
+    for (const account of settings.accounts ?? []) {
+      if (typeof account.accountId === 'string' && account.accountId !== '') {
+        accountChannel[account.accountId] = typeof account.channel === 'string' && account.channel !== ''
+          ? account.channel
+          : 'weixin'
+      }
+    }
+    const scanned = scanImContacts(root, accountChannel)
+    // 只保留**本渠道**的联系人（本动作是"按渠道"提问的）
+    const mine = scanned.contacts.filter((c) => c.channel === channelId)
+
+    /** 当前路由表（`user → trajectory`）；同一 user 多条时后者覆盖 */
+    const routeMap = new Map<string, string>()
+    for (const route of settings.routes ?? []) {
+      if (typeof route.user === 'string' && route.user !== '') {
+        routeMap.set(route.user, typeof route.trajectory === 'string' ? route.trajectory : '')
+      }
+    }
+
+    const contacts: ImJson[] = mine.map((c) => ({
+      channel: c.channel,
+      userId: c.userId,
+      accountIds: c.accountIds,
+      route: routeMap.get(c.userId) ?? null,
+      firstSeen: c.firstSeen === null ? null : new Date(c.firstSeen).toISOString(),
+      lastSeen: c.lastSeen === null ? null : new Date(c.lastSeen).toISOString(),
+      messages: c.messages,
+    }))
+    const seenUsers = new Set(mine.map((c) => c.userId))
+    // ⚠️ 有往来、但当前路由表里没有它 ⇒ 这个人的消息现在**无处可去**
+    const unrouted = mine.filter((c) => !routeMap.has(c.userId)).map((c) => c.userId)
+    // ❓ 配了路由、但记录里从没出现过 ⇒ 大概率 id 写错了（或从未有人发过消息）
+    const orphanRoutes = [...routeMap.keys()].filter((user) => !seenUsers.has(user))
+
+    return {
+      ok: true,
+      channel: channelId,
+      action,
+      detail: {
+        contacts,
+        unrouted,
+        orphanRoutes,
+        // 🔴 **不可省**：unrouted / orphanRoutes 是**否定性结论**，
+        //    其可信度上限 = 扫描域（判据纪律）。没有它，调用方会把"日志里没有"
+        //    读成"这个人不存在"。
+        sources: scanned.sources,
+        ...(scanned.errors.length > 0 ? { errors: scanned.errors } : {}),
+      },
+    }
   }
   if (action === 'status') {
     return { ok: true, channel: channelId, action, detail: channel.status(root) }

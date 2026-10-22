@@ -176,9 +176,16 @@ function normalizeImSection(w: ImSettings | WeixinSettings, d: ImSettings): ImSe
  * ⚠️ 2026-10-19 起它是 {@link readImSettings} 的**薄别名**（签名与返回形状不变）：
  * 旧调用点无需改动，但**配置来源已经统一**——`im` 段优先、`weixin` 段回退。
  * 保留名字是为了让既有调用点与测试**逐字不动**（P1 是纯重构，读数必须不变）。
+ *
+ * 🔴 2026-10-22：**返回类型由 `WeixinSettings` 改为 `ImSettings`**。
+ * 此前实现返回的就是 `readImSettings(...)`（已是归一形态：`accounts[].channel` 必填），
+ * 却把它断言成旧类型 —— 于是类型层"看不见"`channel` 字段，
+ * 调用方写 `a.channel` 会报 TS2339，而**运行时它一直在那儿**。
+ * ⇒ 那是**类型声明在撒谎**，不是调用方写错。改成真实类型后，多账户/多渠道的读侧才敢用它。
+ * ⚠️ 附带效应：`WeixinSettings` 的旧形状调用方若用到旧字段，会在此处暴露（好事，早暴露）。
  */
-export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): WeixinSettings {
-  return readImSettings(root, paths) as WeixinSettings
+export function readWeixinSettings(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): ImSettings {
+  return readImSettings(root, paths)
 }
 
 /**

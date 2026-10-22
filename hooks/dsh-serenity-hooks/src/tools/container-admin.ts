@@ -34,6 +34,7 @@ import { runMsm, MSM_ACTIONS, CCC_CONFIG_REFERENCE, ACC_CATALOG } from './msm/se
 import { trajectoryConstraintMsmGate } from '../trajectory/session.js'
 import { validateTrajectoryConstraint, applyTrajectoryConstraint, listTrajectoryConstraintSummary, TRAJECTORY_CONSTRAINT_GUIDE } from './trajectory-constraint-admin.js'
 import { TRAJECTORY_SELF_GUIDE } from './trajectory-self-docs.js'
+import { IM_BRIDGE_GUIDE } from './im-docs.js'
 import { renderDocsIndex, findDocsChapter, docsPointer, type DocsChapter } from './config-docs.js'
 import { loadSerenityConfig } from '../kernel/ccc.js'
 
@@ -170,6 +171,14 @@ const DOCS_CHAPTERS: readonly DocsChapter[] = [
     summary: '轨迹约束（只讲限制面）：trajectory.json 的双白名单 ／ 模型 ／ 纪律参与项 ／ IM 路由',
     render: () => TRAJECTORY_CONSTRAINT_GUIDE,
   },
+  {
+    id: 'im-bridge',
+    // 🔴 2026-10-22（owner：「ACC 没提供 IM 桥使用说明和账户查询方法，导致 CCC 没办法自己配路由」）：
+    //    这一章补的就是那个缺口。读者是 **CCC 的 agent**，所以指针必须也从 `im-bridge`
+    //    工具描述发出（D178：指针要从"使用者实际打开的那个工具"发出）——两处都已加。
+    summary: 'IM 桥怎么用、怎么配路由、怎么查对方 id —— send/send-file/users/status/contacts 五个动作 ＋ 路由三步法（contacts → 写 → status 自检）',
+    render: () => IM_BRIDGE_GUIDE,
+  },
 ]
 
 /**
@@ -192,6 +201,11 @@ export function createContainerAdminTool(ctx: Context) {
       //    ⇒ 两级指针都没指到，手册在事实上不可发现。
       'TRAJECTORY SELF-DOCS: a cognitive trajectory describing ITSELF — charter (PROMPT.md) / resident declaration / ' +
       'self-restriction (whitelists) ⇒ config docs trajectory-self; the restriction side only ⇒ config docs trajectory-constraint. ' +
+      // 🔴 2026-10-22：同一条判据（D178）的第二个落点。IM 桥这一章读者是 **CCC 的 agent**，
+      //    而 agent 发现"怎么配路由"的入口既可能是本工具（找手册），也可能是 `im-bridge`（干活）
+      //    ⇒ 两端都要有指针；只从一端发，从另一端进来的人照样看不到。
+      'IM BRIDGE: how to send / configure routes / look up the other party\'s channel user id — ' +
+      'send / send-file / users / status / contacts + the three-step route recipe ⇒ config docs im-bridge. ' +
       'Execution of registered MSMs belongs to the msm tool; this tool manages the container.',
     parameters: {
       domain: {
