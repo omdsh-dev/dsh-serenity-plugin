@@ -42,6 +42,10 @@
  * "写起来难度比较高"的地方）。发射层对此的处理见 {@link applyVisibilityDecision}。
  */
 import type { Context } from 'cordis'
+import { REGISTERED_TOOLS } from '../kernel/invariant.js'
+
+/** ACC 自己注册的工具名集合（退化档只发这些 —— 它们一定在册） */
+const REGISTERED_TOOLS_SET = new Set<string>(REGISTERED_TOOLS)
 
 /** 一次 restrict 的 deny 集合来源（每个来源**独立成败**，互不连累） */
 export interface VisibilitySource {
@@ -134,15 +138,20 @@ export function getToolVisibilityDiagnostics(): {
  *    （旧集合是新集合的子集时叠不叠都看不出来，但**不是子集时**会残留 —— 必须撤。）
  * ③ 🔴 **未注册的名字不许炸掉整次发射**：宿主契约"unknown names … fail"。
  *    合并后集合里只要有一个不在册的名字，整次 restrict 就失败 ⇒ 六个机制**全都不生效**。
- *    ⇒ 发射前**先逐个探活**（`tools.get(name)`），把不在册的名字剔掉并**如实记账**
- *    （剔除的名字进 `dropped`，由调用方决定要不要告警）。
+ *    ⇒ 策略 = **直接发 → 全量被拒才退到「只发 ACC 自己注册的那些」一档**，退档时
+ *    把被放弃的名字如实记账（进 `dropped`，由调用方决定要不要告警）。
+ *    ⚠️ **不做 `tools.get` 预探活** —— 那个视图查不出 agent-plane 贡献的工具
+ *    （`bash` / `schedule_*`），会把**在册的名字误判成未注册**（见下方发射段的实测记录）。
  *    ⚠️ 这比旧行为**更保守**：旧行为是"某条 restrict 失败 ⇒ 那一格静默不生效"，
- *    新行为是"剔掉那个名字、其余照常生效" —— **等价或更好**，且总有日志。
+ *    新行为是"全量失败 ⇒ 至少 ACC 那一格照常生效" —— **等价或更好**，且总有日志。
  *
  * @returns `'unchanged'` ／ `'applied'` ／ `'failed'`（`failed` 时 `deny` 保持原样）
  */
 export function applyVisibilityDecision(
-  agent: { ctx: { tools: { restrict(f: { deny: string[] }): () => void; get?(n: string): unknown } } },
+  // 🔴 类型里**故意不声明 `get`**：它不再参与任何判断，声明出来就等于给人留一条
+  //    "用别的视图查表冒充在册判据"的路（v1.87.0 真机事故的正是这条路）。
+  //    真宿主的 agent 结构上多一个 `get` 也照样能传进来（多余属性不参与结构检查）。
+  agent: { ctx: { tools: { restrict(f: { deny: string[] }): () => void } } },
   sessionId: string,
   decision: VisibilityDecision,
 ): { status: 'unchanged' | 'applied' | 'failed'; dropped: string[]; error?: string } {
@@ -163,23 +172,27 @@ export function applyVisibilityDecision(
     applied.delete(sessionId)
   }
 
-  // ② 探活：剔掉不在册的名字（宿主 unknown names ⇒ 整次失败）
+  // ② 发射 —— 🔴 **不做预探活**（2026-10-22 真机当晚纠正，见下）
+  //
+  // 第一版用 `tools.get(name)` 逐个探活来剔除未注册名。**真机一上线就炸**：
+  // 日志打出「跳过 12 个未注册名（bash, exit_plan_mode, …, schedule_*）」——那 12 个**全部在册**。
+  //
+  // **根因**：宿主 `get(name, scope?)` 省略 scope = **全局视图**，而 `bash` / `schedule_*` 这类
+  // 是**宿主的 agent-plane 贡献**（宿主文档逐字：*"Once presets moved them onto the agent plane
+  // they became an ANCESTOR contribution"*）⇒ 从全局视图查它们**恒为 undefined**。
+  // 后果比原缺陷更严重：`bash` 被剔 ⇒ **safe mode 的 bash 隐藏直接失效**。
+  //
+  // ⇒ 判据：**"这个名字在不在册"只能问宿主自己**（发一次就知道），
+  //    ⛔ 不能拿"另一个视图的查表结果"冒充（D146 同族：判据必须打在真故障的那一维）。
+  //
+  // 退化策略：**直接发 → 失败才整流重发**。宿主的 unknown-name 是**整次失败**，
+  // 所以「剔掉那一个、留其余」需要先知道是哪一个 —— 用二分太重，改用：
+  // 逐名单独发一次代价太高（N 次 tools/change，正是我们要消除的），
+  // 故取**两档**：全量 → 若失败，退到"只发 ACC 自己注册的那些"（`REGISTERED_TOOLS ∩ deny`）。
+  // ⚠️ 这不是"猜"，是**明确降级并记账**：退档时把被放弃的名字如实回报给调用方。
   const tools = agent.ctx.tools
   const dropped: string[] = []
-  let names = decision.deny
-  if (typeof tools.get === 'function') {
-    names = []
-    for (const n of decision.deny) {
-      let present = false
-      try {
-        present = tools.get(n) !== undefined
-      } catch {
-        present = false
-      }
-      if (present) names.push(n)
-      else dropped.push(n)
-    }
-  }
+  const names = decision.deny
 
   // ③ 全部都不需要藏 ⇒ 不发射（撤销即可，已经撤过了）
   if (names.length === 0) {
@@ -191,12 +204,23 @@ export function applyVisibilityDecision(
 
   try {
     const dispose = tools.restrict({ deny: [...names] })
-    // ⚠️ 签名记**原始判决**（不是剔名后的），否则下一轮会把"被剔掉的名字"当成变化而反复重算
     applied.set(sessionId, { signature, deny: names, dispose })
     return { status: 'applied', dropped }
-  } catch (e) {
-    // 发射失败：**不记账**，让下一轮重试（最坏是每步重试一次，但不会留下错误的目标态）
-    return { status: 'failed', dropped, error: (e as Error).message }
+  } catch (firstError) {
+    // 全量被拒（确有不在册的名字）⇒ 退到**只发我们自己注册的**那一档，并记账
+    const accOnly = names.filter((n) => REGISTERED_TOOLS_SET.has(n))
+    if (accOnly.length === 0 || accOnly.length === names.length) {
+      // 无法有意义的退档 ⇒ 如实失败（调用方告警），且不记账（下轮重试）
+      return { status: 'failed', dropped, error: (firstError as Error).message }
+    }
+    const abandoned = names.filter((n) => !REGISTERED_TOOLS_SET.has(n))
+    try {
+      const dispose = tools.restrict({ deny: accOnly })
+      applied.set(sessionId, { signature, deny: accOnly, dispose })
+      return { status: 'applied', dropped: abandoned }
+    } catch (secondError) {
+      return { status: 'failed', dropped, error: (secondError as Error).message }
+    }
   }
 }
 

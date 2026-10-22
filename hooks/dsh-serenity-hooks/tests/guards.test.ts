@@ -736,9 +736,18 @@ describe('guards: CCC 内屏蔽宿主自带定时器工具（源 = computeVisibi
     ])
   })
 
-  it('🔴 合并发射时**逐个探活**：不在册的名字被剔掉，其余仍生效（旧实现是整批失败）', () => {
-    // 这条对应用方案 C 顺带修掉的旧坑：旧实现"整批发 ⇒ 缺一个名字全都不隐藏"。
-    // 现在由 applyVisibilityDecision 统一探活，见 tests/seams/tool-visibility.test.ts 的同名判据。
-    expect(denyOf('hostSchedule', dir).length).toBe(4)
+  it('🔴 合并发射**不做预探活**：4 个名字原样进入 deny（在册与否交给宿主回答）', () => {
+    // 🔴 D184 判据变更记录：原用例名「合并发射时逐个探活：不在册的名字被剔掉」，且注里写着
+    //     "方案 C 顺带修掉了旧坑"。**那句是假的** —— v1.87.1 复盘：预探活本身是缺陷来源
+    //     （`tools.get` 省略 scope = 全局视图，`schedule_*` 是 agent-plane 贡献 ⇒ 恒 undefined），
+    //     删掉之后退档只保留 `REGISTERED_TOOLS`，而 schedule_* **不属** ACC ⇒ 真被拒时这一格**不生效**。
+    //     ⇒ 改钉**源层**契约：源如实给出 4 个名字，剔不剔是发射层的事、由宿主裁决。
+    //     ⚠️ 「宿主没装该包 ⇒ 这格不生效」是**已知缺口**，登记在用例尾注，不假装已修。
+    expect(denyOf('hostSchedule', dir)).toEqual([
+      'schedule_create',
+      'schedule_delete',
+      'schedule_list',
+      'schedule_update',
+    ])
   })
 })

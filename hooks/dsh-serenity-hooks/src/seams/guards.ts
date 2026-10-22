@@ -511,8 +511,9 @@ export function forgetHostScheduleToolHiding(_sessionId: string): void {
  * 宁静号的唤醒/巡航走 `cognitive_trajectory send-later` → `AGENT_SESSIONS/wake-registry.json`
  * → 中心调度器 5min tick（D58）。宿主这套定时器是**另一个**真相源 ⇒ 两处记账、
  * CRO 判据失真、且模型可能顺手排一个"不在任何账本里"的唤醒。
- * ⚠️ 本清单**合并发射时不需要探活**（`applyVisibilityDecision` 统一个剔掉未注册名），
- *    所以宿主没装该包时不会炸掉整次发射 —— 这是方案 C 顺带修掉的一个旧坑。
+ * ⚠️ 本清单**合并发射时不做探活**。⚠️ 现状缺口（v1.87.1 如实登记）：宿主**没装**
+ *    `dsh-tool-schedule` 时，这 4 个名字会把整次 restrict 拒掉，而退档只保留 ACC 自己的名字
+ *    ⇒ 这一格的屏蔽**不生效**（旧实现同样不生效，**未回归**；但"顺带修好了"这句是假的，已删）。
  */
 const HOST_SCHEDULE_TOOL_NAMES = [
   'schedule_create',
