@@ -19,6 +19,8 @@ import { tmpdir } from 'node:os'
 import * as nodeZlib from 'node:zlib'
 
 import {
+  buildContinueText,
+  createResumeOne,
   detectInterruptedEnd,
   projectDirNameForCwd,
   scanInterruptedSessions,
@@ -193,5 +195,126 @@ describe('projectDirNameForCwd（宿主目录名规则）', () => {
 
   it('单层路径也能正确成型', () => {
     expect(projectDirNameForCwd('/workspace')).toBe('--workspace--')
+  })
+})
+
+describe('buildContinueText（续跑正文）', () => {
+  it('无未完成调用 ⇒ 不提副作用核对（不制造无谓警告）', () => {
+    const t = buildContinueText('session-x', 7, [])
+    expect(t).toContain('session-x')
+    expect(t).toContain('turn 7')
+    expect(t).not.toContain('副作用未知')
+  })
+
+  it('🔴 有未完成调用 ⇒ 必须警告"副作用未知≠没执行"并禁止整段重放', () => {
+    const t = buildContinueText('session-y', 3, ['edit', 'im-bridge'])
+    expect(t).toContain('edit, im-bridge')
+    expect(t).toContain('副作用未知')
+    expect(t).toContain('可能已经执行')
+    expect(t).toContain('不要把被中断的那一轮整段重放')
+  })
+
+  it('🔴 正文不含版本号（D159：唤醒文本不得写死版本）', () => {
+    const t = buildContinueText('session-z', 1, [])
+    expect(t).not.toMatch(/v?\d+\.\d+\.\d+/)
+  })
+})
+
+describe('createResumeOne（逐条注入）', () => {
+  function fakeAgent(behaviour: { steerThrows?: boolean; status?: string } = {}) {
+    const calls: string[] = []
+    return {
+      calls,
+      agent: {
+        status: behaviour.status ?? 'idle',
+        steer: (m: unknown) => {
+          calls.push(`steer:${JSON.stringify(m)}`)
+          if (behaviour.steerThrows) throw new Error('steer boom')
+        },
+        followup: (m: unknown) => {
+          calls.push(`followup:${JSON.stringify(m)}`)
+        },
+      },
+    }
+  }
+
+  it('live 会话且空闲 ⇒ followup', async () => {
+    const { agent, calls } = fakeAgent({ status: 'idle' })
+    const one = createResumeOne({
+      agents: { get: () => agent },
+      sessionController: undefined,
+      makeMessage: (text) => ({ text }),
+    })
+    const out = await one({ sessionId: 's1', turn: 1, pendingTools: [] })
+    expect(out.ok).toBe(true)
+    expect(out.how).toBe('live+followup')
+    expect(calls[0]).toContain('followup')
+  })
+
+  it('live 会话且在跑 ⇒ steer（当场注入当前轮）', async () => {
+    const { agent, calls } = fakeAgent({ status: 'running' })
+    const one = createResumeOne({
+      agents: { get: () => agent },
+      sessionController: undefined,
+      makeMessage: (text) => ({ text }),
+    })
+    const out = await one({ sessionId: 's2', turn: 2, pendingTools: [] })
+    expect(out.how).toBe('live+steer')
+    expect(calls[0]).toContain('steer')
+  })
+
+  it('🔴 steer 抛错 ⇒ 退回 followup（宁可排队，不可静默丢）', async () => {
+    const { agent, calls } = fakeAgent({ status: 'running', steerThrows: true })
+    const one = createResumeOne({
+      agents: { get: () => agent },
+      sessionController: undefined,
+      makeMessage: (text) => ({ text }),
+    })
+    const out = await one({ sessionId: 's3', turn: 3, pendingTools: [] })
+    expect(out.ok).toBe(true)
+    expect(out.how).toContain('followup')
+    expect(calls.some((c) => c.includes('followup'))).toBe(true)
+  })
+
+  it('冷会话 ⇒ 走 sessionController.resolveAgent', async () => {
+    const { agent, calls } = fakeAgent({ status: 'idle' })
+    let asked: string | null = null
+    const one = createResumeOne({
+      agents: { get: () => undefined },
+      sessionController: {
+        resolveAgent: async (id: string) => {
+          asked = id
+          return { agent }
+        },
+      },
+      makeMessage: (text) => ({ text }),
+    })
+    const out = await one({ sessionId: 'cold-1', turn: 4, pendingTools: [] })
+    expect(asked).toBe('cold-1')
+    expect(out.ok).toBe(true)
+    expect(out.how).toBe('cold-resume+followup')
+    expect(calls.length).toBe(1)
+  })
+
+  it('sessionController 缺失 ⇒ 明确报"不可用"（不静默）', async () => {
+    const one = createResumeOne({
+      agents: { get: () => undefined },
+      sessionController: undefined,
+      makeMessage: (text) => ({ text }),
+    })
+    const out = await one({ sessionId: 'cold-2', turn: 5, pendingTools: [] })
+    expect(out.ok).toBe(false)
+    expect(out.error).toContain('sessionController')
+  })
+
+  it('冷载入报错 ⇒ 把原因带出来（不吞）', async () => {
+    const one = createResumeOne({
+      agents: { get: () => undefined },
+      sessionController: { resolveAgent: async () => ({ error: 'not found' }) },
+      makeMessage: (text) => ({ text }),
+    })
+    const out = await one({ sessionId: 'cold-3', turn: 6, pendingTools: [] })
+    expect(out.ok).toBe(false)
+    expect(out.error).toContain('not found')
   })
 })

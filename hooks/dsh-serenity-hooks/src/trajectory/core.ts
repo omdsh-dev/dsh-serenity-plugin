@@ -84,12 +84,19 @@ import { readTrajectoryFile } from './policy/files.js'
  *   **不判周期、不自动续跑、不改任何会话日志**（是否续、续谁、几点续 = CCC 的事）。
  *   ⚠️ 判据的锋利处：**只认"以 interrupted 结尾"**，不认"曾经中断过"—— 长会话历史上
  *   可中断几十次（实测单会话 33 次），按"曾经"判会把早已恢复的会话全部当成待续。
+ * 2026-10-22（owner 追加令「我希望实现的是 continue-all-interrupted 方法，调用后自动找到
+ *   8h 内所有 dsh 会话注入简单的 continue 进行唤醒，这样 CCC 就不用动脑子了」）：
+ *   新增 **`continue-all-interrupted`** = `interrupted` 的**动作版**（扫 → 逐条注入续跑消息）。
+ *   判据（R↓，两者为何并存而不合并）：`interrupted` 是**观察**（只读，零副作用），
+ *   `continue-all-interrupted` 是**动作**（会真起 agent、真消耗算力）。
+ *   ⇒ 观察与动作**必须分开可调用** —— 想看一眼清单却误触发全量续跑，是不可接受的副作用。
+ *   ⚠️ 边界不变：ACC 仍**不判周期**（何时调用归调用方），只是把"调用一次要做完什么"补齐。
  */
-type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'uid' | 'send-now' | 'send-later' | 'cro-guide' | 'resident' | 'interrupted'
+type CognitiveTrajectoryAction = 'list' | 'show' | 'create' | 'use' | 'rebuild' | 'archive' | 'uid' | 'send-now' | 'send-later' | 'cro-guide' | 'resident' | 'interrupted' | 'continue-all-interrupted'
 
 export const COGNITIVE_TRAJECTORY_ACTIONS: readonly CognitiveTrajectoryAction[] = [
   'list', 'show', 'create', 'use', 'rebuild', 'archive', 'uid', 'send-now', 'send-later', 'cro-guide', 'resident',
-  'interrupted',
+  'interrupted', 'continue-all-interrupted',
 ]
 
 /**

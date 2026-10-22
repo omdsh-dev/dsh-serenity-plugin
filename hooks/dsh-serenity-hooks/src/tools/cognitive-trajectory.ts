@@ -72,11 +72,16 @@ import {
 import { listResident } from '../trajectory/resident.js'
 import { listLiveSessions } from '../trajectory/live.js'
 import { sessionsRootDir } from '../trajectory/cleanup.js'
+import { hostAgents } from '../host/access.js'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { PLUGIN_SOURCE } from '../kernel/message-source.js'
 import {
   DEFAULT_LOOKBACK_MS,
   projectDirNameForCwd,
   scanInterruptedSessions,
+  createResumeOne,
   type ScanResult,
+  type ResumeOutcome,
 } from '../trajectory/interrupted.js'
 
 /**
@@ -150,6 +155,64 @@ function renderInterruptedScan(input: {
   return lines.join('\n')
 }
 
+/**
+ * 渲染 `continue-all-interrupted` 的结果（人读）。
+ *
+ * 三种形态必须能一眼分清：**dryRun（只预告）** ／ **有命中且全成功** ／ **有失败**。
+ * ⚠️ 明确写出"已注入 ≠ 已跑完" —— 与 `send-now` 的回执口径一致（D-族：回执只到注入）。
+ */
+function renderContinueResult(input: {
+  projectDir: string
+  lookbackHours: number
+  scan: ScanResult
+  outcomes: ResumeOutcome[] | null
+  dryRun: boolean
+}): string {
+  const { projectDir, lookbackHours, scan, outcomes, dryRun } = input
+  const lines: string[] = []
+  const head = dryRun ? '续跑预告（dryRun，未注入任何消息）' : '中断续跑结果'
+  lines.push(`═══ ${head}（回看 ${lookbackHours}h）═══`)
+  lines.push(`  扫描域: ${projectDir}`)
+  lines.push(
+    `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped} · 耗时 ${scan.elapsedMs}ms`,
+  )
+
+  if (scan.sessions.length === 0) {
+    lines.push('')
+    lines.push('✓ 没有会话以 interrupted 结尾 —— 无需续跑。')
+    return lines.join('\n')
+  }
+
+  lines.push('')
+  if (dryRun) {
+    lines.push('将对这些会话注入续跑消息:')
+    for (const s of scan.sessions) {
+      const at = s.lastEventAt !== null ? new Date(s.lastEventAt).toISOString() : '(时间未知)'
+      lines.push(`  · ${s.sessionId}  turn=${s.turn ?? '?'}  末事件 ${at}`)
+      if (s.pendingTools.length > 0) lines.push(`      副作用未知: ${s.pendingTools.join(', ')}`)
+    }
+    lines.push('')
+    lines.push('要真的执行，去掉 dryRun 再调用一次。')
+    return lines.join('\n')
+  }
+
+  const okCount = (outcomes ?? []).filter((o) => o.ok).length
+  const failCount = (outcomes ?? []).length - okCount
+  lines.push(`结果：已注入 ${okCount} ／ 失败 ${failCount}`)
+  lines.push('')
+  for (const o of outcomes ?? []) {
+    lines.push(o.ok ? `  ✓ ${o.sessionId}  (${o.how ?? '已注入'})` : `  ✗ ${o.sessionId}  ${o.error ?? '未知原因'}`)
+  }
+  lines.push('')
+  lines.push('⚠️ 回执只到「消息已注入」——**不表示**目标已经跑完或已答复。')
+  lines.push('   要确认它真的动了，去看该会话的日志 / 它自己的 SESSION.md。')
+  if (scan.errors.length > 0) {
+    lines.push('')
+    lines.push('扫描期读取失败（诊断）:')
+    for (const e of scan.errors.slice(0, 10)) lines.push(`  · ${e.sessionId}: ${e.message}`)
+  }
+  return lines.join('\n')
+}
 /** 当前 dsh 会话 id（use/close 按会话隔离的 scope） */
 function agentScope(exec: { agent?: { session?: { id?: string } } }): string {
   return exec.agent?.session?.id ?? DEFAULT_SESSION_SCOPE
@@ -374,7 +437,8 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         'send-later (one future instant + one message; fire-and-forget, and it does NOT auto-create a target).',
         'REFERENCE: cro-guide (no parameters: prints the CRO programming guide, including a ready-to-use sample snapshot) /',
         'resident (READ-ONLY: the roster of trajectories that declared themselves RESIDENT — "I am here, this is what I am good at, come bother me". It lists each code with its own `serves` sentence, plus any code that wrote `resident` without `serves` (half a declaration is worse than none: people ask, then find they asked the wrong one). ⚠️ Residency is NOT a resource state — it does not mean "never sleeps" or "never destroyed"; a trajectory permanently exists either way. It governs BEING FOUND, not being kept alive, and it never touches the scheduler).',
-        'INSPECTION: interrupted (READ-ONLY: dsh sessions whose LAST turn ended with reason "interrupted" — the process died mid-turn. Accepts an optional lookbackHours (default 8). Deciding whether/when to resume is YOUR job — this action only answers "which sessions are in that state right now").',
+        'INSPECTION: interrupted (READ-ONLY: dsh sessions whose LAST turn ended with reason "interrupted" — the process died mid-turn. Accepts an optional lookbackHours (default 8). Deciding whether/when to resume is YOUR job — this action only answers "which sessions are in that state right now") /',
+        'continue-all-interrupted (ACTION: same detection as above, but it then INJECTS a short continue message into every hit, waking them. Serial delivery. Supports dryRun to preview without injecting. ⚠️ This really starts agents and spends real compute — use dryRun first if unsure. The receipt means "injected", NOT "the target finished or replied").',
       ].join(' '),
     },
     name: { type: 'string', description: 'show/use/archive/uid identifier — a trajectory code (S### or a custom code) / dir name / legacy UID / fuzzy keyword' },
@@ -386,11 +450,11 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     goal: { type: 'string', description: 'create: one-sentence goal (optional)' },
     summary: { type: 'string', description: 'content summary ≤20 chars (REQUIRED for use and create — create exempts --dry-run preview and --issue sessions) — appended to the dsh session title as S###-YYYY-MM-DD-<summary>; the S### id and date stay server-derived; sanitized/truncated server-side' },
     force: { type: 'boolean', description: 'use: RETIRED (2026-10-20) — one session belongs to one cognitive trajectory for life, so switching is refused unconditionally. The flag is still ACCEPTED so that an old call gets an explanation instead of an "unknown argument" error; it never overrides the guard.' },
-    dryRun: { type: 'boolean', description: 'create: preview mode (no actual changes)' },
+    dryRun: { type: 'boolean', description: 'create: preview mode (no actual changes). continue-all-interrupted: preview which sessions WOULD be resumed, injecting nothing.' },
     target: { type: 'string', description: 'send-later/send-now: target cognitive trajectory (S### or AGENT_SESSIONS directory name)' },
     at: { type: 'string', description: 'send-later: future instant (RFC3339 with timezone, or relative +30m / +2h)' },
     message: { type: 'string', description: 'send-later/send-now: the single message delivered to the target cognitive trajectory. send-now may create and bind a carrier ONLY when the target has never had one — acceptable only for a delivery the user actually wants made (user-intent-driven), never for speculatively starting work.' },
-    lookbackHours: { type: 'number', description: 'interrupted: how far back to look, in hours (default 8). Sessions whose current-generation log was last written earlier than this are not examined at all.' },
+    lookbackHours: { type: 'number', description: 'interrupted / continue-all-interrupted: how far back to look, in hours (default 8). Sessions whose current-generation log was last written earlier than this are not examined at all.' },
   },
   output: {
     schema: { type: 'json' },
@@ -751,6 +815,66 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
         })
 
         return renderInterruptedScan({ projectDir, lookbackHours, scan })
+      }
+      case 'continue-all-interrupted': {
+        /**
+         * 扫 + 逐条注入续跑消息（owner 2026-10-22 追加令：
+         * 「我希望实现的是 continue-all-interrupted 方法，调用后自动找到 8h 内所有 dsh 会话
+         *   注入简单的 continue 进行唤醒，这样 CCC 就不用动脑子了」）。
+         *
+         * 🔴 **与 `interrupted` 分立而不合并**：前者是**观察**（只读、零副作用），
+         * 后者是**动作**（会真起 agent、真烧算力）。想看一眼清单却误触发全量续跑
+         * 是不可接受的 ⇒ 两个动作各自可调用。
+         *
+         * 🔴 **边界仍是"不判周期"**：何时调用归调用方（CCC 的定时轨迹）。
+         * 本动作只保证"**调用一次就把该做的做完**"。
+         */
+        const lookbackHours = typeof args.lookbackHours === 'number' && args.lookbackHours > 0
+          ? args.lookbackHours
+          : DEFAULT_LOOKBACK_MS / 3_600_000
+
+        // dryRun：只报"会续哪些"，一条都不注入（给调用方一次确认机会）
+        const dryRun = args.dryRun === true
+
+        const sessionsRootPath = sessionsRootDir()
+        const cwdRead = exec.agent?.session?.header?.cwd ?? root
+        const projectDir = join(sessionsRootPath, projectDirNameForCwd(cwdRead))
+
+        const scan = scanInterruptedSessions(projectDir, {
+          lookbackMs: lookbackHours * 3_600_000,
+          liveIds: collectLiveSessionIds(),
+        })
+
+        if (dryRun) {
+          return renderContinueResult({ projectDir, lookbackHours, scan, outcomes: null, dryRun: true })
+        }
+
+        // 逐条注入（**串行**：冷载入开销大，并发起多个 agent 会互相抢算力）
+        const hostCtx = exec as unknown as Context
+        const agents = hostAgents(hostCtx) as { get?: (id: string) => unknown } | undefined
+        const sc = hostService<{
+          resolveAgent?: (id: string) => Promise<{ agent?: unknown; error?: string }>
+        }>(hostCtx, 'sessionController')
+        const resumeOne = createResumeOne({
+          agents,
+          sessionController: sc,
+          makeMessage: (text) => createUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE }),
+        })
+
+        const outcomes: ResumeOutcome[] = []
+        for (const hit of scan.sessions) {
+          try {
+            outcomes.push(await resumeOne(hit))
+          } catch (err) {
+            outcomes.push({
+              sessionId: hit.sessionId,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+
+        return renderContinueResult({ projectDir, lookbackHours, scan, outcomes, dryRun: false })
       }
       default:
         throw new Error(`Unknown action: ${args.action as string}`)

@@ -307,3 +307,121 @@ export function projectDirNameForCwd(cwd: string): string {
   const normalized = cwd.replace(/\/+$/, '')
   return `--${normalized.split('/').filter(Boolean).join('-')}--`
 }
+
+// ── 续跑（continue-all-interrupted）────────────────────────────────────────
+
+/** 单条续跑结果 */
+export interface ResumeOutcome {
+  sessionId: string
+  /** 是否已把消息投进该会话 */
+  ok: boolean
+  /** 投递路径：live = 已在跑（直接注入）｜cold-resume = 冷载入后注入 */
+  how?: string
+  /** 失败原因 */
+  error?: string
+}
+
+/**
+ * 续跑正文（**简单、稳定、不含版本号**）。
+ *
+ * 判据（为什么这么短）：本动作的用途是**把被打断的会话推回工作状态**，
+ * 不是替它重述任务 —— 被打断那一轮的上下文就在它自己的日志里。
+ * ⇒ 正文只做三件事：① 说明发生了什么；② 提示**先核对副作用**；③ 让它接着做。
+ *
+ * 🔴 **为什么要写"先核对副作用"**：中断时可能有「有 call 无 result」的工具调用，
+ * 它们的副作用**未知**（可能已写文件 / 已发消息）。若模型把那一轮整段重放，
+ * 会**重复执行**。这句话是给模型的护栏，不是客套。
+ */
+export function buildContinueText(sessionId: string, turn: number | null, pendingTools: string[]): string {
+  const lines: string[] = []
+  lines.push('[中断续跑] 上一条进程在本轮完成前退出，该轮已被中止。现在继续。')
+  lines.push('')
+  lines.push(`会话: ${sessionId}${turn === null ? '' : ` ／ 被中断的轮次: turn ${turn}`}`)
+  if (pendingTools.length > 0) {
+    lines.push('')
+    lines.push(`⚠️ 中断时这些工具「有调用、无结果」（副作用未知，**可能已经执行**）: ${pendingTools.join(', ')}`)
+    lines.push('   ⇒ 先核对它们是否已生效（文件是否已写、消息是否已发），再决定要不要重做。')
+    lines.push('   ⛔ 不要把被中断的那一轮整段重放。')
+  }
+  lines.push('')
+  lines.push('请接着完成该轮未完成的工作；完成后把进展写入本轨迹的 SESSION.md。')
+  return lines.join('\n')
+}
+
+/**
+ * 把一个 agent 唤醒（注入一条续跑消息）。
+ *
+ * 两条路径（与 `wake/scheduler.ts` 的 `sendToCognitiveTrajectory` 同源判据）：
+ * - **live**：`agents.get(id)` 拿得到 ⇒ 目标在跑（或被加载）⇒ `steer` 当场注入当前轮；
+ *   `steer` 不可用则退回 `followup`（宁可排队，不可静默丢）。
+ * - **cold-resume**：`sessionController.resolveAgent(id)` 冷载入后同样注入。
+ *
+ * ⚠️ 冷会话载入**会真起一个 agent**（消耗真实算力）⇒ 调用方必须自己决定要不要，
+ * 本函数不做数量限制（那是策略，归调用者）。
+ */
+export function createResumeOne(deps: {
+  agents: { get?: (id: string) => unknown } | undefined
+  sessionController: { resolveAgent?: (id: string) => Promise<{ agent?: unknown; error?: string }> } | undefined
+  makeMessage: (text: string) => unknown
+}): (hit: { sessionId: string; turn: number | null; pendingTools: string[] }) => Promise<ResumeOutcome> {
+  return async (hit) => {
+    const { sessionId } = hit
+    const text = buildContinueText(sessionId, hit.turn, hit.pendingTools)
+
+    let agent: unknown
+    let how: string
+
+    // ① live 优先
+    const live = deps.agents?.get?.(sessionId)
+    if (live) {
+      agent = live
+      how = 'live'
+    } else {
+      // ② 冷恢复
+      const sc = deps.sessionController
+      const resolve = sc?.resolveAgent
+      if (typeof resolve !== 'function' || sc === undefined) {
+        return { sessionId, ok: false, error: '宿主 sessionController 不可用（重启启动窗口？）—— 稍后重试' }
+      }
+      try {
+        const out = await resolve.call(sc, sessionId)
+        if (!out?.agent) {
+          return { sessionId, ok: false, error: `冷载入未返回 agent: ${String(out?.error ?? '未知原因')}` }
+        }
+        agent = out.agent
+        how = 'cold-resume'
+      } catch (err) {
+        return { sessionId, ok: false, error: `冷载入失败: ${err instanceof Error ? err.message : String(err)}` }
+      }
+    }
+
+    // ③ 注入：steer 优先（当场进当前轮），失败退回 followup（排队，不丢）
+    const a = agent as { steer?: (m: unknown) => void; followup?: (m: unknown) => void; status?: string }
+    try {
+      if (typeof a.steer === 'function' && a.status === 'running') {
+        a.steer(deps.makeMessage(text))
+        return { sessionId, ok: true, how: `${how}+steer` }
+      }
+      if (typeof a.followup === 'function') {
+        a.followup(deps.makeMessage(text))
+        return { sessionId, ok: true, how: `${how}+followup` }
+      }
+      if (typeof a.steer === 'function') {
+        a.steer(deps.makeMessage(text))
+        return { sessionId, ok: true, how: `${how}+steer` }
+      }
+      return { sessionId, ok: false, how, error: 'agent 既无 steer 也无 followup（宿主契约漂移）' }
+    } catch (err) {
+      // steer 抛错 → 退 followup
+      if (typeof a.followup === 'function') {
+        try {
+          a.followup(deps.makeMessage(text))
+          return { sessionId, ok: true, how: `${how}+followup(steer 失败后退回)` }
+        } catch (err2) {
+          return { sessionId, ok: false, error: `steer 与 followup 均失败: ${String((err2 as Error)?.message ?? err2)}` }
+        }
+      }
+      return { sessionId, ok: false, error: `注入失败: ${err instanceof Error ? err.message : String(err)}` }
+    }
+  }
+}

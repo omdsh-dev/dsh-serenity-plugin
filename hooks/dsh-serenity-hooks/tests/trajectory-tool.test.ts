@@ -203,7 +203,7 @@ describe('cognitive_trajectory：工具面', () => {
     //    ⇒ 这个计数不只是加一，它是一条"说明面终于与实现对齐"的证据。
     // 🔴 2026-10-22：11 → **12**（`interrupted`：以 interrupted 结尾的 dsh 会话只读发现）。
     //    边界（owner 原话「我们 ACC 不关心周期」）：只出**入口**，周期归调用方的认知轨迹。
-    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(12)
+    expect(COGNITIVE_TRAJECTORY_ACTIONS).toHaveLength(13)
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('archive')
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('uid')
     expect(COGNITIVE_TRAJECTORY_ACTIONS).toContain('resident')
