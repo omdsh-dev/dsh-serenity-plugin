@@ -54,6 +54,31 @@ function buildCommonHeaders(): Record<string, string> {
   }
 }
 
+/**
+ * `base_info` —— **每一个业务 POST 都必须带**（2026-10-22 补齐，完全照官方实现）。
+ *
+ * ## 🔴 我们漏了这个字段，漏了很久
+ *
+ * 腾讯官方 `@tencent-weixin/openclaw-weixin` 的 `src/api/api.ts` 里，**九处**业务 POST
+ * 全部无条件附加它（`body: JSON.stringify({ ...body, base_info: buildBaseInfo() })`），
+ * 而 `buildBaseInfo()` 恒为 `{ channel_version: pkg.version }`。
+ *
+ * 我们这一侧长期只发 `{ msg: {...} }` —— **`base_info` 完全没有**。
+ *
+ * ## 症状为什么是「平时能发，隔久了发不出」
+ *
+ * 缺字段本身不会每次崩：入站带来的**新** `context_token` 给服务端提供了足够上下文，
+ * 请求照样成立。等票变旧、服务端进入 `prepare`（准备会话上下文）阶段时，
+ * **没有 `channel_version` 可依据** ⇒ 只能回 `ret=-2: prepare failed`。
+ * ⇒ 那个报错读作「准备阶段缺参数」，**不是**「会话过期」（后者是 `-14`）。
+ *
+ * ⚠️ 判据边界：本字段**不修复**「票真的过期」那种失败（那是 `-14`），
+ * 它修复的是**票在半旧窗口内、本该能发却被拒**的那一档。
+ */
+export function buildBaseInfo(): { channel_version: string } {
+  return { channel_version: CHANNEL_VERSION }
+}
+
 function buildHeaders(token?: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
@@ -95,6 +120,28 @@ async function apiGet(params: { baseUrl: string; endpoint: string; timeoutMs: nu
   }
 }
 
+/**
+ * 给 POST body 统一附加 `base_info`（**对齐官方做法**）。
+ *
+ * 官方的九处业务 POST 各自写 `{ ...body, base_info: buildBaseInfo() }`；
+ * 我们把它收进 `apiPost` 一处 —— 语义完全相同（每个 POST 都带上），
+ * 但**新增调用点不可能漏**（这正是我们当初漏掉它的形态：靠每处手写就会漏）。
+ *
+ * ⚠️ 只在 body 是 JSON 对象时附加；解析失败就原样发（不为了加字段把请求搞坏）。
+ * ⚠️ 已经带 `base_info` 的 body **不覆盖**（以调用方给的为准）。
+ */
+function withBaseInfo(body: string): string {
+  try {
+    const parsed: unknown = JSON.parse(body)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return body
+    const obj = parsed as Record<string, unknown>
+    if (obj.base_info !== undefined) return body
+    return JSON.stringify({ ...obj, base_info: buildBaseInfo() })
+  } catch {
+    return body
+  }
+}
+
 async function apiPost(params: { baseUrl: string; endpoint: string; body: string; token?: string; timeoutMs: number }): Promise<string> {
   const base = ensureTrailingSlash(params.baseUrl)
   const url = new URL(params.endpoint, base)
@@ -104,7 +151,7 @@ async function apiPost(params: { baseUrl: string; endpoint: string; body: string
     const res = await currentFetch(url.toString(), {
       method: 'POST',
       headers: buildHeaders(params.token),
-      body: params.body,
+      body: withBaseInfo(params.body),
       signal: controller.signal,
     })
     clearTimeout(timer)
@@ -279,6 +326,8 @@ export async function sendTextMessage(params: {
   text: string
   contextToken?: string
   clientId?: string
+  /** 本轮次的运行 id（官方每条出站都带；同一次回复的多条消息共享它） */
+  runId?: string
   timeoutMs?: number
 }): Promise<void> {
   const clientId = params.clientId ?? `dsp-weixin-${randomBytes(4).toString('hex')}`
@@ -294,6 +343,9 @@ export async function sendTextMessage(params: {
         message_state: MessageState.FINISH,
         item_list: [{ type: MessageItemType.TEXT, text_item: { text: markdownToPlainText(params.text) } }],
         ...(params.contextToken ? { context_token: params.contextToken } : {}),
+        // 🔴 2026-10-22 补齐（对齐官方 `send.ts`）：官方每条出站消息都带 `run_id`，
+        //    它把「同一次回复」产生的多条消息归为一组。我们此前完全没有这个字段。
+        ...(params.runId ? { run_id: params.runId } : {}),
       },
     }),
     token: params.token,

@@ -202,6 +202,64 @@ describe('weixin-api: 协议客户端（mock fetch）', () => {
     expect(parsed.msg.item_list[0]!.text_item.text).toBe('hi link')
   })
 
+  /**
+   * 🔴 2026-10-22（v1.87.3）：`base_info` 与 `run_id` —— **完全照官方实现补齐**。
+   *
+   * 事故背景：本插件长期**只发 `{ msg: {...} }`**，而腾讯官方
+   * `@tencent-weixin/openclaw-weixin` 的 `src/api/api.ts` 里，**九处**业务 POST
+   * 全部无条件附加 `base_info: { channel_version: pkg.version }`。
+   * 缺失的直接后果见 `sendmessage` 的 `ret=-2: prepare failed`（准备阶段缺参数）。
+   *
+   * ⚠️ 判据边界（别把这条读成"已定位根因"）：本用例只钉**协议形态与官方一致**。
+   * 「补上之后那次故障是否消失」是另一件事，属真机验证，不在单测里。
+   */
+  it('🔴 base_info 恒带（对齐官方九处 POST）：每个 POST body 都有 channel_version', async () => {
+    const bodies: string[] = []
+    __setWeixinFetchForTest(async (_input, init) => {
+      bodies.push(init?.body as string)
+      return jsonResponse(200, { ret: 0 })
+    })
+    await sendTextMessage({ baseUrl: 'https://ilinkai.weixin.qq.com', token: 't', toUserId: 'u@im.wechat', text: 'a' })
+    await getConfig({ baseUrl: 'https://x', token: 't', ilinkUserId: 'u@im.wechat' })
+    for (const b of bodies) {
+      const parsed = JSON.parse(b) as { base_info?: { channel_version?: string } }
+      expect(parsed.base_info).toBeDefined()
+      // 非空字符串——空串等于没给
+      expect(typeof parsed.base_info!.channel_version).toBe('string')
+      expect(parsed.base_info!.channel_version!.length).toBeGreaterThan(0)
+    }
+    // ⚠️ 变异：把 `withBaseInfo()` 去掉（`body: params.body`）⇒ 本格红
+  })
+
+  it('🔴 base_info 不覆盖调用方已给的值（显式优先）', async () => {
+    let bodyText = ''
+    __setWeixinFetchForTest(async (_input, init) => {
+      bodyText = init?.body as string
+      return jsonResponse(200, { ret: 0 })
+    })
+    // 直接打 apiPost 的通道：用 sendTyping 之外的路径不便覆写，这里用 getUpdates 的 buf 字段
+    // 不足以覆盖 body —— 故用 low-level 验证：任何 POST 都不该丢调用方字段。
+    await sendTextMessage({ baseUrl: 'https://x', token: 't', toUserId: 'u@im.wechat', text: 'x', contextToken: 'ct' })
+    const parsed = JSON.parse(bodyText) as { msg?: { context_token?: string }; base_info?: unknown }
+    expect(parsed.msg?.context_token).toBe('ct') // 调用方字段保留
+    expect(parsed.base_info).toBeDefined() // 且被补上
+  })
+
+  it('🔴 run_id 透传（官方每条出站都带；不传则不出现该键）', async () => {
+    const bodies: string[] = []
+    __setWeixinFetchForTest(async (_input, init) => {
+      bodies.push(init?.body as string)
+      return jsonResponse(200, { ret: 0 })
+    })
+    await sendTextMessage({ baseUrl: 'https://x', token: 't', toUserId: 'u@im.wechat', text: '1', runId: 'run-abc' })
+    await sendTextMessage({ baseUrl: 'https://x', token: 't', toUserId: 'u@im.wechat', text: '2' })
+    const withRun = JSON.parse(bodies[0]!) as { msg: Record<string, unknown> }
+    const withoutRun = JSON.parse(bodies[1]!) as { msg: Record<string, unknown> }
+    expect(withRun.msg.run_id).toBe('run-abc')
+    // ⚠️ 反向钉：不传时**不得**出现 `run_id: undefined` 的键（JSON 里会变成 null 语义偏差）
+    expect(Object.hasOwn(withoutRun.msg, 'run_id')).toBe(false)
+  })
+
   it('getConfig 取 typing_ticket + sendTyping 状态 1/0（正在输入）', async () => {
     const calls: Array<{ url: string; body?: string }> = []
     __setWeixinFetchForTest(async (input, init) => {
@@ -216,10 +274,16 @@ describe('weixin-api: 协议客户端（mock fetch）', () => {
     await sendTyping({ baseUrl: 'https://x', token: 't', ilinkUserId: 'u@im.wechat', typingTicket: 'tk-1', status: TypingStatus.CANCEL })
     // getconfig body 带 ilink_user_id + context_token
     expect(calls[0]!.url).toContain('/ilink/bot/getconfig')
-    expect(JSON.parse(calls[0]!.body!)).toEqual({ ilink_user_id: 'u@im.wechat', context_token: 'ct' })
+    // 🔴 2026-10-22（v1.87.3）判据变更记录（D184：前提真变了，不是放宽）：
+    //    原断言 `toEqual({ ilink_user_id, context_token })` 钉的是"body 精确等于这两键"。
+    //    现在 `apiPost` 统一附加 `base_info`（对齐官方九处 POST），第三键是**协议要求**而非噪声
+    //    ⇒ 改为「这两个键仍在（值不变）」＋「base_info 已带上」。集合相等仍被下面 base_info 那组用例覆盖。
+    expect(JSON.parse(calls[0]!.body!)).toMatchObject({ ilink_user_id: 'u@im.wechat', context_token: 'ct' })
+    expect((JSON.parse(calls[0]!.body!) as { base_info?: unknown }).base_info).toBeDefined()
     // sendtyping body 带 ticket + 状态 1 → 0
     expect(calls[1]!.url).toContain('/ilink/bot/sendtyping')
-    expect(JSON.parse(calls[1]!.body!)).toEqual({ ilink_user_id: 'u@im.wechat', typing_ticket: 'tk-1', status: 1 })
+    // 同上（D184）：sendtyping 的 body 现在也含 base_info ⇒ 只钉它自己那两个键
+    expect(JSON.parse(calls[1]!.body!)).toMatchObject({ ilink_user_id: 'u@im.wechat', typing_ticket: 'tk-1', status: 1 })
     expect(JSON.parse(calls[2]!.body!).status).toBe(0)
   })
 

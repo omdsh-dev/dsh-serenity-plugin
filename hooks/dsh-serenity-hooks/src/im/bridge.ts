@@ -25,6 +25,7 @@
  */
 
 import type { Context } from 'cordis'
+import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { readCheapWorkerConfig } from '../kernel/ccc.js'
@@ -271,6 +272,8 @@ export async function handleIncoming(
         toUserId,
         text,
         contextToken: replyRef,
+        // 同一次回复（一轮）的消息共享 run_id，与官方 `send.ts` 同款
+        runId: `dsp-run-${randomBytes(6).toString('hex')}`,
       })
     },
     typingStart: ({ toUserId, replyRef }) => sendTypingStart(cred, accountId, toUserId, replyRef),
@@ -670,6 +673,7 @@ export async function sendProactiveText(input: ProactiveSendInput): Promise<Proa
       toUserId,
       text: input.text,
       ...(contextToken === undefined ? {} : { contextToken }),
+      runId: `dsp-run-${randomBytes(6).toString('hex')}`,
     })
   } catch (err) {
     /**
