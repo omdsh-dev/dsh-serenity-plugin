@@ -1,3 +1,31 @@
+## v1.87.2 — 2026-10-22（**safe-mode 快捷开关回到 CCC 面板**）
+
+**来源**：owner「突然发现 safe-mode 的快捷开关没了，找回来」＋「放到 CCC 面板里吧，方便些」。
+
+**背景**：2026-10-18 owner 说「safe_mode 在这里显示小标志即可，是个状态信息」⇒ 当时把面板里的
+开关删了，注释写着「开关仍在**设置 → Serenity**」。🔴 **那句是假的** —— 2026-10-22 实测
+`SettingsSection.tsx` 里从来没有过 safe-mode 开关，于是 safe-mode 在界面上**彻底没有入口**，
+而说明面还在指路（D179 同族的又一次：说明面说它有、行为说它没有，且零报错）。
+
+**改动（小）**：
+- `SafeModePanel.tsx`：`toggleSafeMode()` 接回写通道 —— 同源 `POST /serenity/status`，
+  带 **WebUI 专属头 `x-serenity-ui`**（服务端 `requireWebUi` 门，agent / curl 不带该头仍 403
+  ⇒ safe-mode 依旧是**用户能力**）。成功后**以服务端回包为准**，不做乐观刷新（D144）。
+- 位置 = popover「运行环境」那一行的**行首**（32×16 滑块 ＋ `SAFE ON/OFF` 字样）。
+  ⚠️ **必须行首**：`.sp-meta` 是 `nowrap + overflow:hidden`，只有 `sp-metaPath` 会收缩 ——
+  放在行尾时窄面板下会被裁掉，那就等于"开关又没了"（正是本次要修的症状）。
+- `SafeModePanel.css`：`.sp-quickSwitch*` ／ `.sp-metaSafeWord`。OFF 底色用官方 `border-l3`
+  （`client-css-tokens.test.ts` 的官方白名单是唯一真相源；第一版我用了**不存在**的
+  `--dsw-alias-fill-quaternary`，被那道门当场打红 —— 护栏有效，记一笔）。
+- 删掉两处不实说明（文件头 ＋ 那段历史注释），把"指路文案"换成如实的历史记录。
+
+**未改动**：HTTP 面（POST 能力一直在，只是此前无调用点）、`setSafeMode` 语义、面板其余部分。
+
+**门禁**：`typecheck` ✓｜`test` **201 文件 / 3122 例** ✓｜`coverage` **95.65%** ✓｜`build` ✓｜`pack-check` ✓｜
+`version` 三处一致 ✓。
+
+---
+
 ## v1.87.1 — 2026-10-22（🔴 **修 v1.87.0 的探活误判 —— safe mode 的 `bash` 隐藏曾失效**）
 
 **来源**：**v1.87.0 上线当晚的真机日志**，不是代码评审。
@@ -49,28 +77,7 @@
 这是方案 C 顺带修掉的一个旧坑」。**那句是假的**（退档只保留 ACC 自己注册的名字，`schedule_*` 不属）。
 说明面撒谎比缺说明更坏（D179 同族：配置/文档说它有、行为说它没有）。
 
-### 五、safe-mode 快捷开关回到 CCC 面板（owner 2026-10-22：「放到 CCC 面板里吧，方便些」）
-
-**背景**：2026-10-18 owner 说「safe_mode 在这里显示小标志即可，是个状态信息」⇒ 当时把面板里的
-开关删了，注释写着「开关仍在**设置 → Serenity**」。🔴 **那句是假的** —— 2026-10-22 实测
-`SettingsSection.tsx` 里从来没有过 safe-mode 开关，于是 safe-mode 在界面上**彻底没有入口**，
-而说明面还在指路（D179 同族的又一次：说明面说它有、行为说它没有，且零报错）。
-
-**改动（小）**：
-- `SafeModePanel.tsx`：`toggleSafeMode()` 接回写通道 —— 同源 `POST /serenity/status`，
-  带 **WebUI 专属头 `x-serenity-ui`**（服务端 `requireWebUi` 门，agent / curl 不带该头仍 403
-  ⇒ safe-mode 依旧是**用户能力**）。成功后**以服务端回包为准**，不做乐观刷新（D144）。
-- 位置 = popover「运行环境」那一行的**行首**（32×16 滑块 ＋ `SAFE ON/OFF` 字样）。
-  ⚠️ **必须行首**：`.sp-meta` 是 `nowrap + overflow:hidden`，只有 `sp-metaPath` 会收缩 ——
-  放在行尾时窄面板下会被裁掉，那就等于"开关又没了"（正是本次要修的症状）。
-- `SafeModePanel.css`：`.sp-quickSwitch*` ／ `.sp-metaSafeWord`。OFF 底色用官方 `border-l3`
-  （`client-css-tokens.test.ts` 的官方白名单是唯一真相源；第一版我用了**不存在**的
-  `--dsw-alias-fill-quaternary`，被那道门当场打红 —— 护栏有效，记一笔）。
-- 删掉两处不实说明（文件头 ＋ 那段历史注释），把"指路文案"换成如实的历史记录。
-
-**未改动**：HTTP 面（POST 能力一直在，只是此前无调用点）、`setSafeMode` 语义、面板其余部分。
-
-### 六、门禁与变异检验
+### 五、门禁与变异检验
 
 `typecheck` ✓｜`test` **201 文件 / 3122 例** ✓｜`coverage` **95.65%** ✓｜`build` ✓｜`pack-check` ✓。
 
