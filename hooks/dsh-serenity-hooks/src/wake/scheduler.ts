@@ -264,7 +264,14 @@ async function acquireWakeAgent(
     }
   }
   return {
-    error: `无绑定会话记录（AGENT_SESSIONS/.bindings.json 中无 ${dirName}）——目标轨迹需先被 cognitive_trajectory use 激活过`,
+    /**
+     * 🔴 **文案改指真相源（2026-10-23，guard 实测报障）**：原写「`AGENT_SESSIONS/.bindings.json` 中无 X」，
+     * 而 D172 之后绑定真相源 = **`<轨迹目录>/current.dsh_session_bind`**，`.bindings.json`
+     * **已退役且不在盘上**（实测不存在）⇒ 照旧文案排查的人会去翻一个**不存在的文件**。
+     */
+    error:
+      `无绑定会话记录（AGENT_SESSIONS/${dirName}/current.dsh_session_bind 不存在或无有效会话）` +
+      `——目标轨迹需先被 cognitive_trajectory use 激活过，或由 send-now 自动创建载体`,
     // 🆕 结构化判别符（2026-10-16，owner 令）：**不靠匹配错误文案**来分流。
     //    文案会漂（本仓已多次因"靠一句话给状态命名"翻车，见 D131），而"这条轨迹
     //    在绑定表里一条记录都没有"是一个**明确的判据结果** ⇒ 必须由产生它的地方显式标出。
@@ -862,7 +869,65 @@ async function deliverCroWake(
   reason: string | null,
 ): Promise<WakeDeliveryResult> {
   const mdPath = join(sessionsRoot(root), dirName, 'SESSION.md')
-  const acquired = await acquireWakeAgent(ctx, root, dirName)
+  let acquired = await acquireWakeAgent(ctx, root, dirName)
+
+  /**
+   * 🔴 **载体自举（2026-10-23，guard 实测报障后补）**
+   *
+   * ## 缺陷（真实代价）
+   *
+   * 一条「**生来就是为了被自己的 CRO 叫醒**」的轨迹，**第一次自唤醒在物理上不可能**：
+   * 它是程序化 `create` 出来的 ⇒ 没有载体 ⇒ `noBinding` ⇒ 投递被拒
+   * ⇒ **恰恰在最需要被叫醒的那一刻没有载体可注入**。实测证据：
+   * `cro-wake-log.log` 首行 `fail ... 无绑定会话记录`，而**那一轮的 CRO 判定完全正确**。
+   *
+   * ## 为什么可以自举，以及它与 `send-now` 的分支差在哪
+   *
+   * `send-now` 的自举理由是「完成一次**人/agent 的**意图」；CRO 是**每 5min 自动重判**，
+   * 若照搬会有「**载体爆炸**」风险。故本路径**多一道闸**：
+   *
+   * - 只认 `carrierState === 'never'`（**从未有过载体**）⇒ 建一次；
+   * - `occupied`（有过但那个会话不在了）⇒ **一律不建**，如实报错。
+   *
+   * ⇒ 自举**至多发生一次**（建完就有 `current.dsh_session_bind`，此后 `carrierState` 不再是 `never`）。
+   * 这正是 `carrierState` 那道守卫的语义，与 `send-now` 共用同一条判据（不另立）。
+   *
+   * ⚠️ 只处理 `noBinding`；`notReady`（启动窗口）与冷载入失败**照原样返回** ——
+   * 那些不是"没载体"，建新载体解决不了且可能制造第二条。
+   */
+  if ('error' in acquired && acquired.noBinding === true) {
+    const carrier = carrierState(root, dirName, hostAliveProbe(ctx))
+    if (carrier.state === 'never') {
+      const created = await createAndBindTarget(ctx, root, dirName)
+      if (!('error' in created)) {
+        acquired = created
+        console.log(
+          `[serenity-hooks] CRO 载体自举：${dirName} 从未有过载体 ⇒ 已自动创建并绑定（${created.how}）`,
+        )
+      }
+    } else {
+      /**
+       * 🔴 **拒绝自举时必须指名是哪一半**（D186：守卫可以拒绝，但不许不出声）。
+       *
+       * 若照原样把 `acquireWakeAgent` 的 `noBinding` 文案透传出去，`cro-wake-log` 里
+       * 「`current.dsh_session_bind` 不存在或无有效会话」**两种状态长得一模一样**：
+       *   · `never` —— 那条轨迹**生来就没有载体**（本次已自举，不会走到这里）；
+       *   · `occupied` —— **有过载体、那个会话现在不在了**（本分支拒绝自建）。
+       * ⇒ 读日志的人分不出"该去救那个会话"还是"该去查为什么没建起来"，
+       *   而这正是本仓反复付代价的那类缺陷（D131：不靠一句话给状态命名，但**状态不同必须说出来**）。
+       */
+      acquired = {
+        error:
+          carrier.state === 'occupied'
+            ? `CRO 唤起未投递：${dirName} 曾经由会话 ${carrier.sessionId} 承载，而它此刻不在了` +
+              ` ⇒ **拒绝自动新建载体**（一条轨迹至多一个载体，而 CRO 每 5min 重判一次，自建会让载体反复膨胀）。\n` +
+              `  · 要恢复：把那个会话救回来，或用 cognitive_trajectory rebuild 显式换代（takeover）。`
+            : `CRO 唤起未投递：${dirName} 的载体声明指向会话 ${carrier.sessionId}，` +
+              `它按探针**仍可用**，而选人路径却报"无绑定" ⇒ **两处读数打架，不新建载体**（先查绑定文件与归档集）。`,
+      }
+    }
+  }
+
   if ('error' in acquired) return { ok: false, detail: acquired.error, notReady: acquired.notReady === true }
   try {
     acquired.agent.followup(
@@ -964,14 +1029,33 @@ async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], lo
         log.push(`· ${root}: ${renderCroOutcome(dirName, outcome)} → ${res.ok ? '已投递' : `投递未成功：${res.detail}`}`)
         // 🔴 ACC 侧流水（所有者令 2026-09-20「ACC 有必要进行 CRO 唤醒的日志记录」「失败成功都记录」）：
         // 落点 = **该轨迹目录**下的固定名文件（`cro/log.ts`），只留两日、写入时按窗裁剪。
-        // ⚠️ 两条硬约束：
-        //   ① **`notReady` 不记**（`:171` 既定语义：环境未就绪 ≠ 投递失败 ⇒ 记了就是**假失败**）；
-        //   ② **写流水失败绝不影响投递与既有链路**（设计 §5 铁律）⇒ 失败只进 tick 日志一行。
-        if (!res.notReady) {
+        //
+        // 🔴🔴 **2026-10-23 改判：`notReady` 从此也落盘**（guard 实测报障，owner 认这是最痛的点）。
+        //
+        // 旧注释写「`notReady` 不记（记了就是假失败）」，那半句**是对的**——
+        // 它确实不是失败，**所以不能记成 `fail`**。但旧实现把"不能记成 fail"执行成了"整条不记"，
+        // 于是得到的是**第三种更坏的东西：静默**。实测（guard 轨迹，真机日志）：
+        //   · CRO 判定正确、`wake:true` 也发了；
+        //   · 投递因 `sessionController` 未就绪而 `notReady`；
+        //   · `cro-wake-log.log` **一个字都没有**（累计仍只有 1 行，来自更早的 noBinding）。
+        // ⇒ 所有人看到的都是「CRO 没工作」，而真相是「CRO 工作了、投递被挡住」。
+        //    **失败不可见比失败本身更坏**（D186：可以拒绝，但不许不出声）。
+        //
+        // ⇒ 修法 = **三态**：`ok` ／ `fail` ／ `not-ready`（`ok:false` + `notReady:true`）。
+        //   不折成 `ok:true`（假成功），也不折成 `fail`（假失败）—— 这正是 `:171` 语义要的。
+        // ⚠️ 另一条硬约束不变：**写流水失败绝不影响投递与既有链路**（设计 §5 铁律）。
+        {
           const rec = appendCroWakeLog(
             root,
             dirName,
-            { ok: res.ok, detail: res.detail, tick: s.ticks, reason: outcome.decision.reason ?? null, prompt: outcome.prompt },
+            {
+              ok: res.ok,
+              ...(res.notReady === true ? { notReady: true as const } : {}),
+              detail: res.detail,
+              tick: s.ticks,
+              reason: outcome.decision.reason ?? null,
+              prompt: outcome.prompt,
+            },
             nowMs,
           )
           if (!rec.ok) {

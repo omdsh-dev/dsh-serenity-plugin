@@ -178,10 +178,23 @@ function dirOf(logPath: string): string {
  * 这是"靠 agent 自觉 rebuild 不够"的机制层原因（keeper 的 K 量的是**模型上下文**，压缩后回落；
  * 而**日志文件只增不减** ⇒ rebuild 提醒永远不会因为"日志 72 MB"触发）。
  *
+ * 🔴 **会话 id 有两种形态，目录名不能靠补前缀猜**（2026-10-23 owner 报「载体明明在，却报不在了」）：
+ *   · 普通会话 = `session-<uuid>`，目录名与 id **逐字相同**；
+ *   · skiff 会话 = `skiff-*`，同样**逐字相同**。
+ * 旧实现无条件 `session-${id}` ⇒ 对 `skiff-weixin-…` 拼出一个**从不存在的目录**
+ * ⇒ `hasSessionLogById` 判 false ⇒ 一条**活得好好的**载体被判成「曾经有过、此刻不在了」
+ * ⇒ 调用方（`send-now` / CRO 自举闸门）据此**拒绝投递并拒绝建载体**，
+ * 而错误文案说「把那个会话恢复」—— 一个不存在的问题。
+ *
+ * ⇒ 判据改为：**先按本名找，找不到再试 `session-` 前缀形态**。
+ * 两个方向都试的理由 = 我们**不知道**调用方手里的串是 id 还是目录名；
+ * 而 `stat` 一个不存在的目录成本可忽略，误判的代价却是一整条轨迹被锁死。
+ * ⚠️ 仍找不到 ⇒ `null`（"这条会话的日志不在"），与"读不到"同口径，由调用方决定降级。
+ *
  * 只认会话目录（含任意世代日志）；返回**最高世代**的日志（= 宿主 `findLog` 选中的当前世代）。
  * 未命中 / 不可读 → null（非错误，调用方按"未知"处理）。
  * @param root - DSH 会话 root（{@link sessionsRootDir}）
- * @param sessionId - 会话目录名（`.bindings.json` 的键，含 `session-` 前缀）或裸 id
+ * @param sessionId - 会话 id 或会话目录名（`session-*` / `skiff-*` 都按本名找）
  * @returns 字节数 + 日志绝对路径；未命中 → null
  */
 export function sessionLogBytesById(
@@ -189,15 +202,21 @@ export function sessionLogBytesById(
   sessionId: string,
 ): { bytes: number; path: string } | null {
   if (sessionId === '' || !existsSync(root)) return null
-  const dirName = sessionId.startsWith('session-') ? sessionId : `session-${sessionId}`
-  for (const project of readdirSync(root, { withFileTypes: true })) {
-    if (!project.isDirectory()) continue
-    const log = findSessionLog(join(root, project.name, dirName))
-    if (log === null) continue
-    try {
-      return { bytes: statSync(log).size, path: log }
-    } catch {
-      return null // 文件消失（竞态）→ 视为未知
+  // 🔴 **本名优先**，补前缀只是回退（见上方 2026-10-23 的缺陷说明）。
+  //    ⛔ 不要改回"先补前缀"：那会让所有 skiff 会话重新被判成"不在了"。
+  const candidates = sessionId.startsWith('session-')
+    ? [sessionId] // 已经带前缀 ⇒ 它本来就是目录名形态，补一次只会得到 session-session-…
+    : [sessionId, `session-${sessionId}`]
+  for (const dirName of candidates) {
+    for (const project of readdirSync(root, { withFileTypes: true })) {
+      if (!project.isDirectory()) continue
+      const log = findSessionLog(join(root, project.name, dirName))
+      if (log === null) continue
+      try {
+        return { bytes: statSync(log).size, path: log }
+      } catch {
+        return null // 文件消失（竞态）→ 视为未知
+      }
     }
   }
   return null

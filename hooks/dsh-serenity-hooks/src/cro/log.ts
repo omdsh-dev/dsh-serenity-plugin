@@ -103,6 +103,19 @@ export interface CroWakeLogEntry {
   at: string
   /** 投递是否成功 */
   ok: boolean
+  /**
+   * 🔴 **"没送成、但这不算失败"**（`ok=false` 时才有意义）—— 2026-10-23 guard 实测逼出。
+   *
+   * 现状：宿主重启窗口里 `sessionController` 还没就绪 ⇒ 投递取不到载体 ⇒ `notReady`。
+   * 那不是"投递失败"（下个 tick 会重试，且**每次都真的重试**），
+   * 但也**不是"没发生"** —— 原先整条不落档 ⇒ 该轨迹的流水里**一个字都没有**
+   * ⇒ 读日志的人无法区分「CRO 从没工作过」与「CRO 工作了、投递被挡住」。
+   *
+   * 🔴 **判据（D186 的又一次应用）**：可以不算失败，**但不许不出声**。
+   * 三态因此显式分开：`ok` ／ `fail` ／ `not-ready`（`ok:false` ＋ `notReady:true`）。
+   * ⛔ 不要把它折回 `ok:true`（那是假成功），也不要折成 `fail`（那是假失败，见 `:171` 语义）。
+   */
+  notReady?: true
   /** 投递方式（`已投递（live）` / `已投递（冷载入）`）或失败原因 */
   detail: string
   /** 调度器 tick 计数（便于与 `acc-diag` ①b 对齐） */
@@ -122,6 +135,8 @@ export interface CroWakeLog {
 /** 追加所需的输入（`at` 由本模块按当地时区生成，不劳调用方） */
 export interface CroWakeLogInput {
   ok: boolean
+  /** 🔴 `true` ⇒ 记作 `not-ready`（没送成，但**不算失败**）。见 {@link CroWakeLogEntry.notReady} */
+  notReady?: boolean
   detail: string
   tick: number
   reason: string | null
@@ -159,7 +174,9 @@ export function formatCroLogLine(entry: CroWakeLogEntry): string {
   const head = oneline(entry.promptDigest.head)
   return [
     oneline(entry.at),
-    entry.ok ? 'ok' : 'fail',
+    // 🔴 三态，不是两态：`ok` ／ `fail` ／ `not-ready`。
+    //    写成两态就会把 `notReady` 折进其中一边 —— 折进 ok 是假成功，折进 fail 是假失败。
+    entry.ok ? 'ok' : entry.notReady === true ? 'not-ready' : 'fail',
     `tick=${entry.tick}`,
     oneline(entry.detail),
     `reason=${reason}`,
@@ -181,7 +198,9 @@ export function parseCroLogLine(line: string): CroWakeLogEntry | null {
   const at = parts[0]!
   if (Number.isNaN(Date.parse(at))) return null
   const mark = parts[1]
-  if (mark !== 'ok' && mark !== 'fail') return null
+  // 🔴 **旧档只认识两态** ⇒ `not-ready` 是**新增**取值，读侧必须同时认它；
+  //    不认的后果不是报错，而是**整行被当成坏行静默丢弃**（历史记录凭空消失，零信号）。
+  if (mark !== 'ok' && mark !== 'fail' && mark !== 'not-ready') return null
   const tickM = /^tick=(\d+)$/.exec(parts[2]!)
   if (!tickM) return null
   const reasonRaw = parts[4]!.startsWith('reason=') ? parts[4]!.slice('reason='.length) : ''
@@ -189,6 +208,7 @@ export function parseCroLogLine(line: string): CroWakeLogEntry | null {
   return {
     at,
     ok: mark === 'ok',
+    ...(mark === 'not-ready' ? { notReady: true as const } : {}),
     detail: parts[3]!,
     tick: Number(tickM[1]),
     // 空串 ⇒ null（与"取不到写 null，不留空白"同口径）
@@ -340,6 +360,12 @@ export function appendCroWakeLog(
     const entry: CroWakeLogEntry = {
       at: isoLocal(nowMs),
       ok: input.ok,
+      // 🔴 **这一行是 D209 的承重点**：接口加了 `notReady`、格式化也认了它，
+      //    但若**构造 entry 时不搬过来**，它就在这一步被丢掉 ⇒ 永远落成 `fail`
+      //    ⇒ 整个三态改动静默失效（本轮实测：测试红在 "expected undefined to be true"）。
+      //    ⇒ 判据：**加一个可选字段，要同时改「类型 ＋ 构造 ＋ 格式化 ＋ 解析」四处**；
+      //      少任何一处都不会报错，只会静默降级。
+      ...(input.notReady === true ? { notReady: true as const } : {}),
       detail: input.detail,
       tick: input.tick,
       reason: input.reason,

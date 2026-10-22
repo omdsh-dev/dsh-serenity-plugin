@@ -366,7 +366,12 @@ describe('deliverWake（live 优先 → 冷唤醒正门）', () => {
     const ctx = { agents: { get: () => undefined }, get: () => undefined }
     const res = await deliverWake(ctx as never, root, makeEntry())
     expect(res.ok).toBe(false)
-    expect(res.detail).toContain('.bindings.json')
+    // 🔴 2026-10-23 判据更新（D208）：原断言钉的是 `.bindings.json`——
+    //    而 D172 之后那是**已退役且不在盘上**的文件名（guard 实测报障：照旧文案会让人去翻
+    //    一个不存在的文件）。真相源 = `<轨迹目录>/current.dsh_session_bind`。
+    //    ⇒ 钉「指向真相源」而不是钉「某个历史文件名」：后者会把一次正确的修复判成回归。
+    expect(res.detail).toContain('current.dsh_session_bind')
+    expect(res.detail).not.toContain('.bindings.json')
   })
 
   it('目标未命中 → 报错', async () => {
@@ -1201,7 +1206,22 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     expect(listWakes(root).entries).toHaveLength(0)
   }, 30_000)
 
-  it('🔴 `notReady`（环境未就绪）**不算失败、不记流水**（`:171` 既定语义：记了就是假失败）', async () => {
+  /**
+   * 🔴🔴 **D209（2026-10-23 guard 实测报障，owner 认这是最痛的点）**：
+   * `notReady` **不再是"不记录"，而是记成第三态 `not-ready`**。
+   *
+   * ## 旧行为错在哪（这一格原来钉的正是它）
+   * 原断言是 `existsSync(...).toBe(false)` —— 它把「**不能记成失败**」（对的）
+   * 落实成了「**整条不记**」（错的）。后果是**最坏的那种静默**：
+   * CRO 判定正确、`wake:true` 发出、投递被 `sessionController` 未就绪挡住，
+   * 而该轨迹的 `cro-wake-log.log` **一个字都没有**
+   * ⇒ 读日志的人只能得到「CRO 从没工作过」，而真相是「工作了、投递被挡」。
+   *
+   * 🔴 **判据（D186 的又一次应用）：可以不算失败，但不许不出声。**
+   * ⇒ 三态必须**各自可分**：`ok` ／ `fail` ／ `not-ready`。
+   *    ⛔ 折进 `ok:true` = 假成功；折进 `fail` = 假失败（违反 `:171` 语义）。
+   */
+  it('🔴 D209 `notReady`（环境未就绪）⇒ **落一条 `not-ready`**（不算失败，但必须可见）', async () => {
     writeFileSync(join(root, '.serenity'), '')
     writeSessionDir()
     writeBinding('sess-live')
@@ -1209,10 +1229,45 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     writeCroHostBinding()
     registerWakeScheduler(croCtxNoTarget() as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
-    // tick 日志里看得到"投递未成功"，但**流水档不该出现**（它不是一次投递失败）
+    // ① tick 日志里看得到"投递未成功"
     const log = (wakeSchedulerState().lastTickLog ?? []).join('\n')
     expect(log).toContain('投递未成功')
-    expect(existsSync(croWakeLogPath(root, DIR_NAME)), 'notReady 是环境未就绪 ⇒ 不得记成失败').toBe(false)
+    // ② 🔴 流水档**必须存在**（这就是 D209 的靶子：以前它是 false）
+    expect(existsSync(croWakeLogPath(root, DIR_NAME)), 'notReady 也必须留痕，否则等于 CRO 没工作过').toBe(true)
+    const entries = loadCroWakeLog(root, DIR_NAME).log.entries
+    expect(entries).toHaveLength(1)
+    // ③ 三态可分辨：`ok` 为 false，但 **`notReady` 为 true**
+    expect(entries[0]!.ok).toBe(false)
+    expect(entries[0]!.notReady, '必须与真正的 fail 区分开（否则读日志的人分不出该重试还是该修）').toBe(true)
+    // ④ 落盘的**纯文本行**同样要能表达第三态
+    //    （读侧若只认 ok/fail，这行会被当坏行**静默丢弃** —— 那等于又静默了一次）
+    expect(readFileSync(croWakeLogPath(root, DIR_NAME), 'utf-8')).toContain('\tnot-ready\t')
+  }, 30_000)
+
+  it('🔴 D209 `notReady` 与**真失败**在流水里是两种标记（同一份档里可比对）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"叫我"}'))
+    writeCroHostBinding()
+    // 先落一条 not-ready（notReady 分支）
+    registerWakeScheduler(croCtxNoTarget() as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
+    // 再落一条真失败（followup 抛错）。
+    // ⚠️ **必须重置进程态 + 重建时钟**：`registerWakeScheduler` 只在**首次**装配时武装，
+    //    第二次调用不会自动再 tick 一次（调度器是幂等的）。不重置 ⇒ 第二格**永远不会跑**
+    //    ⇒ 本用例会红在"没有 fail 行"，而真因是**第二格根本没执行**（D205 同族：先让格子成立）。
+    __resetWakeSchedulerStateForTest()
+    // 换一个新的 tick 来源：直接制造一条真失败
+    registerWakeScheduler(croCtxThrowOnDeliver() as never)
+    // 触发一次 tick（与既有用例同一条路：启动即 tick 一次）
+    await waitFor(
+      () => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')),
+      20_000,
+    )
+    const text = readFileSync(croWakeLogPath(root, DIR_NAME), 'utf-8')
+    expect(text, '未就绪标 not-ready').toContain('\tnot-ready\t')
+    expect(text, '真失败仍标 fail').toContain('\tfail\t')
   }, 30_000)
 
   it('🔴 不唤起（wake:false）⇒ **不产生流水档**（没有尝试就没有记录）', async () => {
@@ -1226,6 +1281,133 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
     expect(existsSync(croWakeLogPath(root, DIR_NAME)), '没发生尝试就不该建空档').toBe(false)
   }, 30_000)
+
+  // ── 🆕 2026-10-23：CRO 投递面的**载体自举**及其闸门（guard 实测报障后补）──────────────
+  //
+  // ## 缺陷（真实代价，不是假想）
+  //   一条「生来就是为了被自己的 CRO 叫醒」的轨迹是**程序化 `create` 出来的** ⇒ 没有载体
+  //   ⇒ `acquireWakeAgent` 给 `noBinding` ⇒ `deliverCroWake` 直接返回 error
+  //   ⇒ **第一次自唤醒在物理上不可能**，而那恰恰是最需要被叫醒的一刻。
+  //   实测证据：`cro-wake-log.log` 首行 `fail … 无绑定会话记录`，而那一轮 CRO 判定完全正确。
+  //
+  // ## 为什么不能照搬 `send-now` 的自举
+  //   `send-now` 的自举理由是「完成一次**人/agent 的**意图」（一次性）；
+  //   CRO 是**每 5min 自动重判**，若无条件自建 ⇒ 载体反复膨胀。
+  //   ⇒ 本路径只认 `carrierState === 'never'`，下面两条用例分别钉住它的两侧。
+
+  /** 一个带 `sessionController`（能建会话）的 CRO ctx；`createCalls` 供"有没有建"这条判据读 */
+  function croCtxCanCreate(sent: string[], createCalls: string[]): unknown {
+    const agent = {
+      session: { id: 'sess-born', append: () => {} },
+      followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') },
+    }
+    return {
+      sessions: { list: () => [{ id: 'sess-live', header: { cwd: root } }] },
+      agents: { get: () => undefined }, // 没有任何活着的 agent ⇒ 才有 `noBinding` 之后的自举可言
+      get: (name: string) => {
+        if (name === 'sessionController') {
+          return {
+            create: async () => { createCalls.push('create'); return { sessionId: 'sess-born' } },
+            resolveAgent: async () => ({ agent }),
+          }
+        }
+        if (name === 'workspaceRegistry') {
+          return { list: () => [{ id: 'ws-ccc', path: root, sessionIds: [], attachSession: async () => {} }] }
+        }
+        return undefined
+      },
+      on: () => undefined,
+      effect: (cb: () => () => void) => { disposers.push(cb()) },
+    }
+  }
+
+  /**
+   * 🟢 **`carrierState === 'never'` ⇒ 自动建载体并投递成功**（"从未有过"这一侧）。
+   *
+   * 🔴 **判据打在副作用上，不打在返回值上**（D144/D157 同族）：
+   * 真正只有"成功"才会产生的东西是 **`current.dsh_session_bind` 出现在盘上**，
+   * 以及流水档里那条 `ok:true`。只断言"投出去了"证明不了载体被建过。
+   */
+  it('🟢 CRO 载体自举：`never`（从未有过载体）⇒ **自动创建并绑定**，随后照常投递', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    // ⛔ 刻意**不写** `current.dsh_session_bind`：这就是"从未有过载体"的真形态
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"该自检了"}'))
+    writeCroHostBinding()
+    const sent: string[] = []
+    const createCalls: string[] = []
+    registerWakeScheduler(croCtxCanCreate(sent, createCalls) as never)
+
+    await waitFor(
+      () => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')),
+      30_000,
+    )
+
+    // ① 自举**确实发生了**（不是靠"没报错"推出来的）
+    expect(createCalls, 'never ⇒ 允许建一次载体').toHaveLength(1)
+    // ② 🔴 **只有成功才会留下的痕迹**：绑定文件落盘，且指向刚建的会话
+    const bindPath = join(root, 'AGENT_SESSIONS', DIR_NAME, 'current.dsh_session_bind')
+    expect(existsSync(bindPath), '自举成立的定义就是"绑定真写进去了"（否则下一条消息还是找不到它）').toBe(true)
+    expect(readFileSync(bindPath, 'utf-8')).toContain('sess-born')
+
+    // ③ 投递成立：第 0 条是自建载体的开场白（D171），第 1 条才是 CRO 正文 ⇒ 顺序固定
+    expect(sent).toHaveLength(2)
+    expect(sent[0]).toContain('[ACC 代用户开场]')
+    expect(sent[1]).toContain('CRO 唤起')
+    expect(sent[1]).toContain('该自检了')
+
+    // ④ 流水档如实记成功（失败成功都记录 = owner 令）
+    const entries = loadCroWakeLog(root, DIR_NAME).log.entries
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.ok).toBe(true)
+  }, 40_000)
+
+  /**
+   * 🔴 **`carrierState === 'occupied'`（有过载体、那个会话现在不在了）⇒ 一律不建**。
+   *
+   * 这是自举的**闸门本身**：CRO 每 5min 重判一次，若 `occupied` 也自建，
+   * 一条载体退役的轨迹会**每 5 分钟长出一个新载体**。
+   * ⇒ 判据 = **`create` 一次都没被调用** ＋ 绑定文件**逐字未变** ＋ 流水如实报错并指名是哪一半。
+   */
+  it('🔴 CRO 载体自举的闸门：`occupied`（有过但会话不在了）⇒ **不建**，如实报错', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    // 🔴 夹具必须先造出**一个真实存在的 sessions root**（`writeSessionLog('sess-other')`），
+    //    否则 `hasSessionLogById` 走到它的 **fail-closed** 分支：
+    //      `if (!existsSync(sessionRoot)) return true`  （root 整个不在 ⇒ 当作"在"）
+    //    ⇒ 那条本该判死的 `sess-gone` 会被判活 ⇒ 本用例变成"冷载入成功并投递"，测的就不是闸门。
+    //    （这是它在生产里的真形态：宿主有别的会话、而这一条真没了。）
+    //    ⚠️ 实测代价：第一版夹具少这一行，用例红在 `sent` 而不是红在闸门 —— 读数与本意无关。
+    writeSessionLog('sess-other')
+    // 有过载体：声明指向 `sess-gone`，但**不造它的会话日志**（= 那个会话真的不在了 ⇒ occupied）
+    writeBinding('sess-gone', DIR_NAME, Date.now(), { cold: false })
+    const bindPath = join(root, 'AGENT_SESSIONS', DIR_NAME, 'current.dsh_session_bind')
+    const bindBefore = readFileSync(bindPath, 'utf-8')
+    writeCro(DIR_NAME, croProgram('{"wake":true,"prompt":"叫我"}'))
+    writeCroHostBinding()
+    const sent: string[] = []
+    const createCalls: string[] = []
+    registerWakeScheduler(croCtxCanCreate(sent, createCalls) as never)
+
+    await waitFor(
+      () => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')),
+      30_000,
+    )
+
+    // ① 🔴 闸门承重判据：**一次都没建**
+    expect(createCalls, 'occupied ⇒ 禁止自建（否则每 5min 长一个载体）').toHaveLength(0)
+    // ② 绑定声明**逐字未变**（不是"看起来还在"，是字节相等）
+    expect(readFileSync(bindPath, 'utf-8')).toBe(bindBefore)
+    // ③ 没有投递发生
+    expect(sent).toHaveLength(0)
+    // ④ 🔴 **不许不出声**（D186）：流水里必须有一条失败，且**指名是哪一半**
+    //    ——「有过载体」与「从未有过」是两种完全不同的处置方向，不能共用一句文案。
+    const entries = loadCroWakeLog(root, DIR_NAME).log.entries
+    expect(entries).toHaveLength(1)
+    expect(entries[0]!.ok).toBe(false)
+    expect(String(entries[0]!.detail)).toContain('sess-gone') // 指名那个不在了的会话
+    expect(String(entries[0]!.detail)).toContain('拒绝自动新建载体')
+  }, 40_000)
 })
 
 // ─────────────────────────────────────────────────────────────────────────────

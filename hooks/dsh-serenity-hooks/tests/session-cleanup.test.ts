@@ -198,9 +198,33 @@ describe('session-cleanup: sessionLogBytesById / hasSessionLogById（§0y）', (
     expect(hit?.bytes).toBe(statSync(log).size)
   })
 
-  it('裸 id（无 session- 前缀）同样命中', () => {
+  it('裸 id（无 session- 前缀）同样命中（回退到 `session-<id>` 形态）', () => {
     makeSession(root, '--proj--', 'session-abc', 1000)
     expect(sessionLogBytesById(root, 'abc')?.bytes).toBeGreaterThan(0)
+  })
+
+  /**
+   * 🔴🔴 **D211（2026-10-23 owner 实测报障：「载体明明在，却报不在了」）**。
+   *
+   * `skiff-*` 会话的**目录名逐字等于 id**（无 `session-` 前缀）。
+   * 旧实现无条件拼 `session-${id}` ⇒ 得到一个**从不存在的目录** ⇒ 判 false
+   * ⇒ 一条活得好好的载体被判成 `occupied`（"曾经有过、此刻不在了"）
+   * ⇒ `send-now` / CRO 自举闸门据此**拒绝投递并拒绝建载体**，而文案还说"把那个会话恢复"。
+   *
+   * ⇒ 本用例是那条报障的**最小复现**：目录名 `skiff-weixin-x`，用同名 id 去查。
+   * ⚠️ 反向钉（下一条）保证"回退前缀"没有把**未命中**变成**假命中**。
+   */
+  it('🔴 D211：`skiff-*` 形态的会话 id（目录名逐字等于 id）必须命中', () => {
+    makeSession(root, '--proj--', 'skiff-weixin-x', 1000)
+    const hit = sessionLogBytesById(root, 'skiff-weixin-x')
+    expect(hit, 'skiff 会话的目录名就是 id，不能给它补 session- 前缀').not.toBeNull()
+    expect(hit!.bytes).toBeGreaterThan(0)
+  })
+
+  it('🔴 D211 反向钉：一个真不存在的 id 仍然 null（回退不等于放松）', () => {
+    makeSession(root, '--proj--', 'skiff-weixin-x', 1000)
+    // 既没有 `skiff-weixin-y` 目录，也没有 `session-skiff-weixin-y` 目录 ⇒ 必须 null
+    expect(sessionLogBytesById(root, 'skiff-weixin-y')).toBeNull()
   })
 
   it('多世代并存 → 取**最高世代**（= 宿主 findLog 选中的当前世代）', () => {

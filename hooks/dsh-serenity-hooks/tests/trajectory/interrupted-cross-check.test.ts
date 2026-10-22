@@ -24,7 +24,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
@@ -51,7 +51,22 @@ const GUARD_CRO = join(CCC_ROOT, 'AGENT_SESSIONS', '2026-10-22--guard--中断守
 
 const zstd = (nodeZlib as unknown as { zstdCompressSync?: (b: Buffer) => Buffer }).zstdCompressSync
 
-/** 把事件序列写成 CRO 能读的真 zstd 多帧会话日志，返回 {dshHome, cccRoot} */
+/**
+ * 把事件序列写成 CRO 能读的真 zstd 多帧会话日志，返回 {dshHome, cccRoot}。
+ *
+ * 🔴 **必须把 mtime 回拨**（2026-10-23 实测；否则 5 条用例会**假红**）。
+ *
+ * CRO 侧有一条 live 保护：日志 mtime 落在 `RECENT_MTIME_MS`（90s）以内 ⇒ 视为
+ * "这条会话可能正在跑" ⇒ **本轮直接跳过**。它加这条的理由是正当的（ACC 快照给的
+ * `liveSessionIds` 只含**绑到本轨迹**的载体，护不住别人家的活会话）。
+ * 而本夹具是**刚刚**写出的文件 ⇒ mtime 必然是"现在" ⇒ **每条用例都被跳过**
+ * ⇒ CRO 恒答 `wake:false` ⇒ 与 ACC 侧天然不一致 ⇒ 红，且**红得与被测判据无关**。
+ *
+ * ⇒ 夹具把 mtime 拨到 `RECENT_MTIME_MS` 之外、`LOOKBACK_MS`（8h）之内：
+ * 「一条几分钟前停在那里、且没人在跑的会话」—— 这才是被测对象的**真形态**。
+ * ⚠️ 这不是"为了让测试变绿而放宽"：把 mtime 留在"现在"，测的就**不是判据**，
+ *    而是那条 live 保护（D204 同族：先让被测格子成立）。
+ */
 function stageLog(events: Array<Record<string, unknown>>): { dshHome: string; cccRoot: string; cleanup: () => void } {
   if (zstd === undefined) throw new Error('本机 Node 无 zstdCompressSync')
   const root = mkdtempSync(join(tmpdir(), 'cro-cross-'))
@@ -60,7 +75,13 @@ function stageLog(events: Array<Record<string, unknown>>): { dshHome: string; cc
   const dir = join(root, '.dsh', 'sessions', slug, 'session-target')
   mkdirSync(dir, { recursive: true })
   const frames = events.map((e) => zstd(Buffer.from(`${JSON.stringify(e)}\n`, 'utf8')))
-  writeFileSync(join(dir, 'session.v4.jsonl.zstd'), Buffer.concat(frames))
+  const logPath = join(dir, 'session.v4.jsonl.zstd')
+  writeFileSync(logPath, Buffer.concat(frames))
+  // 回拨 mtime：**10 分钟前** ⇒ 远超 90s、远小于 8h。两端的量级差一个数量级以上，
+  // 不会因为将来微调阈值而变得黏在边界上。数值各自持有，不跨文件 import（CRO 不能 import ACC）。
+  const stagedAgeSec = 10 * 60
+  const t = new Date(Date.now() - stagedAgeSec * 1000)
+  utimesSync(logPath, t, t)
   return { dshHome: join(root, '.dsh'), cccRoot: ccc, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
 
@@ -110,12 +131,36 @@ const resumedAfterInterrupt = [
   { type: 'user/message', time: 2001, data: { content: 'later' } },
 ]
 
+/**
+ * 🔴🔴 **2026-10-23 新增（D210，owner 实测报障的病历本身）**：
+ * 末轮 interrupted **之后**又追加了 `agent/inbox/spliced`（宿主重启后把待办消息重塞收件箱）。
+ * 真机形态逐字为 `turn/end[interrupted] -> session/end-seed -> agent/inbox/spliced -> agent/inbox/spliced`。
+ *
+ * 旧判据要求「**末条** = end-seed」⇒ 这一格**恒不命中**，而实测本机有 **2 条**会话长这样
+ * ⇒ 它们永远叫不醒。**这恰恰是"被恢复过、又再次被打断"的会话**，即最该被守护的那一类。
+ */
+const interruptedThenInboxSpliced = [
+  { type: 'turn/start', time: 1000, data: { turn: 5 } },
+  { type: 'step/start', time: 1001, data: { turn: 5, step: 1 } },
+  { type: 'turn/end', time: 1002, data: { turn: 5, reason: { kind: 'interrupted' } } },
+  { type: 'session/end-seed', time: 1003, data: {} },
+  { type: 'agent/inbox/spliced', time: 1004, data: { target: 'main', start: 0, inserted: [] } },
+  { type: 'agent/inbox/spliced', time: 1005, data: { target: 'main', start: 0, inserted: [] } },
+]
+
 describe('判据交叉校验：ACC 的 detectInterruptedEnd ≡ 守护 CRO 的判定', () => {
   const cases: Array<{ name: string; events: Array<Record<string, unknown>> }> = [
     { name: '末条 end-seed ＋ interrupted ⇒ 命中', events: interruptedTail },
     { name: '正常结束 ⇒ 不命中', events: completedTail },
     { name: '曾经中断但已继续 ⇒ 不命中', events: resumedAfterInterrupt },
     { name: '末条不是 end-seed ⇒ 不命中', events: [{ type: 'turn/start', data: { turn: 1 } }] },
+    // 🔴 D210：末轮 interrupted 之后只有非轮次事件（end-seed / inbox/spliced）⇒ **仍要命中**
+    { name: 'D210 末轮 interrupted ＋ 之后仅 inbox/spliced ⇒ 命中（不是"末条非 end-seed 就不命中"）', events: interruptedThenInboxSpliced },
+    // 🔴 与上一条配对的**反向钉**：中断之后真的又开了一轮 ⇒ 不命中（放宽没把误报放进来）
+    {
+      name: 'D210 反向钉：interrupted 之后又有 turn/start ⇒ 不命中',
+      events: [...interruptedThenInboxSpliced, { type: 'turn/start', time: 2000, data: { turn: 6 } }],
+    },
   ]
 
   /**

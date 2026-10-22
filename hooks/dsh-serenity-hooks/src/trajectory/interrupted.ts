@@ -17,12 +17,17 @@
  *
  * ## 判据（三条同时成立，缺一不可）
  *
- * 1. 日志**最后一条事件是 `session/end-seed`** —— 这是"上一进程已结束、本进程重放"的标记；
- * 2. 该标记**之前最近的 `turn/end`** 的 `reason.kind === 'interrupted'`；
- * 3. `session/end-seed` 之后**没有新事件**（由判据 1 保证）。
+ * 1. 日志里**最后一条 `turn/end`** 的 `reason.kind === 'interrupted'`；
+ * 2. 该 `turn/end` **之后没有新的 `turn/start`**（否则已被后续轮次接续）；
+ * 3. ⛔ **不要求**末条是 `session/end-seed`（2026-10-23 放宽，原因见 {@link detectInterruptedEnd}）。
  *
  * ⚠️ **为什么不能只看"存在过 interrupted"**：一个长会话历史上可能中断几十次
  * （本容器实测单会话 33 次）。只看"曾经中断"会把早已恢复的会话全部当成待续 ⇒ 灾难。
+ *
+ * 🔴 **为什么原判据要求"末条 = end-seed"是错的**（实测 26 条里漏 2 条）：
+ * 重启后宿主会在 end-seed **之后**追加 `agent/inbox/spliced`（把待办消息重新塞进收件箱）
+ * ⇒ "末条必须 end-seed"**在恢复动作发生之后就恒不成立**，
+ * 而"被恢复过又再次被打断"恰恰是守护最该覆盖的形态。
  *
  * ## 为什么不整文件解压
  *
@@ -173,23 +178,52 @@ function readTailEvents(logPath: string, want: number): SessionEvent[] {
 /**
  * 判定一组尾部事件是否「以 interrupted 结尾」。
  * 不命中 → null。
+ *
+ * ## 🔴 2026-10-23 判据放宽（owner 实测：「不是挂在工具调用上的，也要能被 interrupted 筛选到并唤醒」）
+ *
+ * ### 原判据（v1.87.4 起）为什么漏
+ * 原来只认 **末条事件 = `session/end-seed`**。实测（本机 3337 条会话全扫）：
+ *   · 末轮 `turn/end[interrupted]` 的会话 **26** 条；
+ *   · 其中满足原判据的只有 **24** 条 ⇒ **漏 2 条**，形态逐字为：
+ *     `… turn/end[interrupted] -> session/end-seed -> agent/inbox/spliced -> agent/inbox/spliced`
+ *   ⇒ 重启后宿主把这**两条**追加在 end-seed 之后（它们是"恢复时把待办消息重新塞进收件箱"），
+ *     于是"末条必须 end-seed"这条**在恢复动作发生之后就恒不成立**。
+ *   ⚠️ 讽刺的是：**正是那些被恢复过、又再次被打断的会话**最容易长成这样
+ *     ⇒ 原判据恰好对"反复中断"的会话失明，而它们才是最需要守护的。
+ *
+ * ### 新判据（三条，缺一不可）
+ * 1. 日志里**最后一条 `turn/end`** 的 `reason.kind === 'interrupted'`；
+ * 2. 该 `turn/end` **之后没有新的 `turn/start`**（否则说明它已被后续轮次接续）；
+ * 3. ⛔ **不再要求末条是 `end-seed`**。
+ *
+ * ### 为什么不改成"末条必须是某个白名单"
+ * 那就是原缺陷换个白名单再犯一次（`agent/inbox/spliced` 之外还会有别的）。
+ * **判据要问的是"最后一轮的结束原因是什么、之后有没有新轮开始"**，
+ * 而不是"日志最后一个 token 长什么样"——后者是**载体形态**，前者是**状态**。
+ *
+ * ### 为什么不会误报"曾经中断但已恢复"
+ * 恢复一定伴随 `turn/start`（新一轮）或新的 `turn/end`（`completed` 等）⇒ 判据 1／2 各自挡住。
+ * 实测该放宽**不新增误报**：原 24 条全含于新判据（`curOnly = 0`），新增 2 条全是真漏。
  */
 export function detectInterruptedEnd(events: SessionEvent[]): { turn: number | null; pendingTools: string[] } | null {
   if (events.length === 0) return null
 
-  // 判据 1：最后一条必须是 end-seed
-  const last = events[events.length - 1]
-  if (last?.type !== 'session/end-seed') return null
-
-  // 判据 2：end-seed 之前最近的 turn/end 必须是 interrupted
-  let turnEnd: SessionEvent | undefined
-  for (let i = events.length - 2; i >= 0; i--) {
+  // 🔴 判据 1／2：找**最后一条** turn/end，要求它是 interrupted **且其后没有新的 turn/start**。
+  //    ⛔ 不要退回"末条必须 end-seed"：那是载体形态判据，被恢复动作打破（见上方缺陷说明）。
+  let idx = -1
+  for (let i = events.length - 1; i >= 0; i--) {
     if (events[i]?.type === 'turn/end') {
-      turnEnd = events[i]
+      idx = i
       break
     }
   }
-  if (!turnEnd || turnEnd.data?.reason?.kind !== 'interrupted') return null
+  if (idx < 0) return null
+  const turnEnd = events[idx]
+  if (turnEnd?.data?.reason?.kind !== 'interrupted') return null
+  // 之后若又开了新轮 ⇒ 已被接续，不是"停在这里"
+  for (let i = idx + 1; i < events.length; i++) {
+    if (events[i]?.type === 'turn/start') return null
+  }
 
   const turn = typeof turnEnd.data?.turn === 'number' ? turnEnd.data.turn : null
   return { turn, pendingTools: findPendingTools(events, turn) }

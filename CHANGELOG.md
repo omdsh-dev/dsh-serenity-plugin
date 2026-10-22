@@ -1,3 +1,99 @@
+## v1.87.7 — 2026-10-23（🔴 **三处投递面缺陷：guard 与 owner 各自实测报障，逐条查证后全部成立**）
+
+**来源**：本版没有一条是"顺手加的"。三处都由**真机报障**触发，且每一处的第一版判断都被读数推翻过一次。
+
+---
+
+### 一、D209 `notReady` 的失败**完全不可见**（guard 报障：owner 最痛的那格）
+
+**症状**：CRO 判定正确、`wake:true` 已发出、投递被 `sessionController` 未就绪挡住，
+而该轨迹的 `cro-wake-log.log` **一个字都没有**（真机实测：整天只有 1 行，来自更早的另一种失败）。
+⇒ 所有人（含 owner 与 guard）看到的都是「**CRO 没工作**」，真相是「**CRO 工作了、投递被挡**」。
+
+**根因**：`runCroPhase` 里 `if (!res.notReady) { appendCroWakeLog(...) }`。
+那半句的本意是「**不能记成失败**」（对的，`:171` 语义），
+但实现把它执行成了「**整条不记**」⇒ 得到第三种更坏的东西：**静默**。
+
+**修法**：三态而非两态 —— `ok` ／ `fail` ／ **`not-ready`**（`ok:false` + `notReady:true`）。
+⛔ 不折进 `ok:true`（假成功），⛔ 不折进 `fail`（假失败）。
+
+🔴 **判据（D186 的又一次应用）：可以不算失败，但不许不出声。**
+
+⚠️ **加一个可选字段要同时改四处**：类型 ／ **构造** ／ 格式化 ／ 解析。
+本轮实测：前三处都改了，**漏了构造** ⇒ 字段在 `appendCroWakeLog` 里被丢掉 ⇒ 永远落成 `fail`
+⇒ 测试红在 `expected undefined to be true`。**少任何一处都不会报错，只会静默降级。**
+
+### 二、D210 `interrupted` 判据漏掉「不是卡在工具调用上」的中断（owner 报障）
+
+**owner 原话**：「不是挂在工具调用上的，也要能被 interrupted 筛选到并唤醒」。
+
+**实测取证（本机 3337 条会话全扫）**：末轮 `turn/end[interrupted]` 有 **26** 条，旧判据只命中 **24**
+⇒ **漏 2 条**，形态逐字为：
+```
+turn/end[interrupted] -> session/end-seed -> agent/inbox/spliced -> agent/inbox/spliced
+```
+成因：重启后宿主把待办消息**重塞收件箱**，这两条 `agent/inbox/spliced` 追加在 end-seed **之后**
+⇒ 「**末条必须 end-seed**」在这之后就恒不成立。
+
+🔴 **讽刺处**：「被恢复过、又再次被打断」最容易长成这个形状 ⇒
+旧判据**恰好对反复中断者失明**，而它们才是最需要守护的一类。
+
+**修法**（判据从"载体形态"改成"状态"）：
+1. 日志里**最后一条 `turn/end`** 的 `reason.kind === 'interrupted'`；
+2. 该 `turn/end` **之后没有新的 `turn/start`**；
+3. ⛔ **不再要求**末条是 `session/end-seed`。
+
+⛔ **不能改成"末条必须是某个白名单"** —— 那是同一缺陷换个名单再犯。
+实测该放宽**不新增误报**（原 24 条全含于新判据，`curOnly = 0`）。
+
+### 三、D211 `skiff-*` 会话的活载体被误判成「不在了」（owner 报障）
+
+**症状**：
+```
+该轨迹曾经由会话 skiff-weixin-… 承载，而它此刻不在了 ⇒ 拒绝自动新建载体
+```
+而那个会话**活得好好的**（日志 13 MB、`session.lock` 在、mtime 是刚才）。
+
+**根因**：`sessionLogBytesById` 无条件把 id 拼成 `session-${id}`。
+普通会话（`session-<uuid>`）目录名与 id 逐字相同，所以能命中；
+**`skiff-*` 会话的目录名也逐字等于 id**，却被拼成 `session-skiff-…` ⇒ **一个从不存在的目录**
+⇒ 判 false ⇒ 载体被判 `occupied` ⇒ `send-now` ／ CRO 自举闸门据此**拒绝投递并拒绝建载体**，
+而文案还说「把那个会话恢复」—— **一个不存在的问题**。
+
+**修法**：**先按本名找，找不到再试 `session-` 前缀形态**。
+我们不知道调用方手里是 id 还是目录名；`stat` 一次的成本 ≪ 锁死一整条轨迹的代价。
+
+### 四、附带修复：guard 的 CRO 自测**跑的是副本，不是产品**
+
+`continuous-re-occurrence.dev.test.ts` 原先 spawn 的是 `continuous-re-occurrence.dev.ts` ——
+正式程序的**一份手工复制品**（10793 B vs 正式 14063 B，早已分叉）。
+
+后果是教科书级的「跑绿也照样炸」：改了正式程序的判据，**自测 13/13 全绿**，
+而调度器真正 spawn 的是正式文件。⇒ **绿灯证明的是副本，不是产品**。
+
+**修法**：自测直接跑正式程序，**删除 `dev.ts`**（消灭一份会静默漂移的第二真相源）。
+
+### 五、门禁与验证
+
+六项全绿：`typecheck` ／ `typecheck-host 0.2.1-rc.2` ／ `test` **203 文件 3164 例** ／
+`coverage` **95.42%** ／ `build` ／ `pack-check`（161 文件）。
+
+**变异检验（四处，全部承重）**：
+
+| 变异 | 结果 |
+|---|---|
+| 拆掉 CRO 自举的 `carrierState === 'never'` 闸 | 2 红（`occupied` 那条抓到"建了"） |
+| 整段自举失效 | 1 红（`never` 那条抓到"没建"） |
+| 判据退回「末条必须 end-seed」 | 2 红（D210 两条） |
+| `sessionLogBytesById` 退回无条件补前缀 | 1 红（D211 那条） |
+
+**CRO 侧同步**：guard 的 `continuous-re-occurrence.ts` 判据同步到同一版（D210），
+其自测由 **13 例 → 16 例**（新增 D210 命中 ＋ 前置条件两条单列断言）。
+`tests/trajectory/interrupted-cross-check.test.ts` 用同一批事件喂两边、断言判定相等 ——
+**它红是设计，不是噪音**。
+
+---
+
 ## v1.87.6 — 2026-10-22（🔴 **修复 v1.87.5 的真机缺陷：`continue-all-interrupted` 取错了 ctx，所有注入必然失败**）
 
 **来源**：v1.87.5 发布后**第一次真机调用**即暴露 ——
