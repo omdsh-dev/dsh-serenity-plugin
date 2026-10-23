@@ -37,7 +37,8 @@ import { hasSessionLogById, sessionsRootDir } from '../trajectory/cleanup.js'
 import { evaluateCro, listCroCognitiveTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from '../cro/core.js'
 import { runningCarriersOf } from '../cro/turns.js'
 import { appendCroWakeLog } from '../cro/log.js'
-import { hostAgents, hostService } from '../host/access.js'
+import { createResumeOne, projectDirNameForCwd, scanInterruptedSessions } from '../trajectory/interrupted.js'
+import { hostAgents, hostService, hostSessions } from '../host/access.js'
 import { registerDisposer } from '../host/effect.js'
 import { readSimpleSettings } from '../surface/settings.js'
 import { createClock, type ClockOptions, type ClockRuntime } from './clock.js'
@@ -1067,6 +1068,36 @@ async function runCroPhase(ctx: unknown, root: string, registry: WakeEntry[], lo
         log.push(`· ${root}: ${renderCroOutcome(dirName, outcome)}`)
       } else if (outcome.status === 'no-wake') {
         quiet += 1
+        /**
+         * 🔴 **2026-10-23（A102）：`no-wake` 也落盘。**
+         *
+         * 修前这里**只累加计数**、一个字都不写该轨迹的流水 ⇒ 流水**永久停在上一次真唤起处**。
+         * 实测后果（guard 轨迹，真机）：它的 `cro-wake-log.log` 停在 `01:40:55`，
+         * owner 据此认为"守卫从那以后就没工作过"——而真相是它**此后每个 tick 都在被评估**，
+         * 只是判定为"不打扰"。⇒ **「我判了、只是不叫」与「我根本没被评估」在读数上完全一样。**
+         *
+         * 判据同 D209：**可以不出声地判"不打扰"，但"判过"本身要留痕**。
+         * 四态：`ok` ／ `fail` ／ `not-ready` ／ `no-wake`。
+         *
+         * ⚠️ 与 `wake` 分支同一条硬约束：**写流水失败绝不影响投递与既有链路**（设计 §5 铁律）。
+         */
+        {
+          const rec = appendCroWakeLog(
+            root,
+            dirName,
+            {
+              ok: false,
+              noWake: true,
+              detail: outcome.detail,
+              tick: s.ticks,
+              reason: outcome.decision.reason ?? null,
+            },
+            nowMs,
+          )
+          if (!rec.ok) {
+            log.push(`· ${root}: ${dirName}: CRO 流水写入失败（已忽略，不影响既有链路）: ${rec.error}`)
+          }
+        }
       }
       // `disabled`：本不该出现（`dirs` 已按"文件在"筛过）⇒ 只可能是扫描后被删的竞态 ⇒ 静默
     } catch (err) {
@@ -1154,8 +1185,90 @@ async function runWakeTick(ctx: unknown): Promise<string[]> {
     }
     // CRO 阶段（设计 §6.1：执行者 = 本调度器）：既有投递**之后**（见 `runCroPhase` 的排序理由）
     await runCroPhase(ctx, root, registry.entries, log)
+    // 🔴 A104-C′：容器级中断兜底（**在所有轨迹级唤起来源之后**跑）
+    //    —— 这样"某条轨迹已经叫过并恢复了"的会话，在扫描时已带 `turn/start` ⇒ 天然不重复。
+    await runInterruptedSafetyNet(ctx, root, log)
   }
   return log
+}
+
+/**
+ * 🔴🔴 **A104-C′（2026-10-23，owner 点头）：容器级「被重启打断的会话」兜底 —— 每 tick 扫一次并注入。**
+ *
+ * ## 为什么必须做（不是"多一层保险"，是**已有实测盲窗**）
+ *
+ * 2026-10-23 实测：`08:02` 一次 `restart-web` 打断了一个会话，此后 **13 分钟无人拉起**。
+ * 用真回放（把日志截到争议时刻 ＋ 重压 zstd 帧 ＋ 同一份实现）验证：
+ *  - 截到 `08:07:30`／`08:12:40` ⇒ **两次都能判出该会话 `turn/end[interrupted]` 且其后无新 `turn/start`**
+ *  - 而那两个 tick **实际都没有叫** ⇒ **判据没错，是"没有被跑起来"**
+ *
+ * ⇒ 结论：**「守护程序自己修好」≠「一定有人拉起」**。任何单条 CRO 轨迹都可能因为
+ *    自身在跑、绑定缺失、阈值保护、程序 bug 而漏掉 —— 而被打断的会话**不会自己恢复**。
+ * ⇒ 兜底必须放在**容器自己**身上，且必须**自己完成"发现 + 注入"**（只扫不动没有用）。
+ *
+ * ## 边界（写在这里免得后人扩大它）
+ *
+ * - ⚠️ **这会真的起 agent、真烧算力** —— owner 已被告知并点头（2026-10-23）。
+ * - 🔴 **必须排除 live 会话**：正在跑的会话不该被再注入一次（否则重复投递）。
+ * - 🔴 **与 CRO 并存、不替代**：CRO 是**轨迹自己的策略**（何时该叫由它判），
+ *   本兜底只覆盖「**无论谁都没叫**」这一格。两者重复命中时，靠 `live` 排除天然去重。
+ * - ⚠️ **本函数任何失败都不得连累既有链路**（设计 §5 铁律）：整体 try/catch 吞掉并留一行日志。
+ */
+async function runInterruptedSafetyNet(ctx: unknown, root: string, log: string[]): Promise<void> {
+  try {
+    const agents = hostAgents(ctx) as { get?: (id: string) => unknown } | undefined
+    const sc = hostService<{
+      resolveAgent?: (id: string) => Promise<{ agent?: unknown; error?: string }>
+    }>(ctx, 'sessionController')
+
+    // live 表 = **容器级**（不是某个轨迹的载体表）—— 这正是 A′ 要补的那一维。
+    // 拿不到就退化为空集：宁可多注入一次，也不要因为读数缺失而整条兜底罢工。
+    const liveIds = new Set<string>()
+    if (typeof agents?.get === 'function') {
+      for (const id of collectLiveSessionIdsForSafetyNet(ctx)) liveIds.add(id)
+    }
+
+    const projectDir = `${sessionsRootDir()}/${projectDirNameForCwd(root)}`
+    const scan = scanInterruptedSessions(projectDir, { liveIds })
+    if (scan.sessions.length === 0) return
+
+    const resumeOne = createResumeOne({
+      agents,
+      sessionController: sc,
+      makeMessage: (text) => createUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE }),
+    })
+
+    for (const hit of scan.sessions) {
+      try {
+        const out = await resumeOne(hit)
+        log.push(
+          `· ${root}: 中断兜底 ${hit.sessionId}（turn ${hit.turn ?? '?'}）→ ` +
+            (out.ok ? `已注入（${out.how ?? '?'}）` : `未注入：${out.error ?? '未知'}`),
+        )
+      } catch (err) {
+        log.push(`· ${root}: 中断兜底 ${hit.sessionId} 注入抛错（已忽略）：${String((err as Error)?.message ?? err)}`)
+      }
+    }
+  } catch (err) {
+    log.push(`· ${root}: 中断兜底整体失败（已忽略，不影响既有链路）：${String((err as Error)?.message ?? err)}`)
+  }
+}
+
+/** 取容器内**全部** live 会话 id（best-effort，取不到就少排除几个）。 */
+function collectLiveSessionIdsForSafetyNet(ctx: unknown): string[] {
+  const out: string[] = []
+  try {
+    // 🔴 与 discovery 走**同一个取数口**（`hostSessions` → `hostInjected` 先属性后 `get`）：
+    //    换一个取法会出现"发现得到 root、却拿不到 live 表"的不对称，而那种不对称
+    //    在读数上表现成"live 排除静默失效"（本轮变异检验已证：写错这一格则变异②假绿）。
+    const list = hostSessions(ctx)?.list?.() ?? []
+    for (const s of list) {
+      if (typeof s?.id === 'string' && s.id) out.push(s.id)
+    }
+  } catch {
+    /* 拿不到 ⇒ 空集（少一层保护，不阻断扫描） */
+  }
+  return out
 }
 
 /**

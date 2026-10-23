@@ -116,6 +116,20 @@ export interface CroWakeLogEntry {
    * ⛔ 不要把它折回 `ok:true`（那是假成功），也不要折成 `fail`（那是假失败，见 `:171` 语义）。
    */
   notReady?: true
+  /**
+   * 🔴 **"我判了，但决定不叫"**（`ok=false` 时才有意义）—— 2026-10-23 A102。
+   *
+   * 现状（修前）：`no-wake` 只累加调度器的一个计数，**一个字都不落本档**
+   * ⇒ 该轨迹的流水**永久停在上一次真唤起处**。
+   * ⇒ 于是 **「我判了、只是不叫」与「我根本没被评估」在读数上完全一样** ——
+   *    实测：某轨迹的流水停在 `01:40`，owner 据此认为"守卫从那以后就没工作过"，
+   *    而真相是它**此后每个 tick 都在被评估**，只是判定为"不打扰"。
+   *
+   * 🔴 **这是 D209 的同族第三条**，判据同源：**可以不出声地判"不打扰"，但"判过"本身要留痕**。
+   * 四态因此显式分开：`ok` ／ `fail` ／ `not-ready` ／ `no-wake`。
+   * ⛔ 不要把它折进 `ok`（那会让人以为"叫过了"），也不要折进 `fail`（它不是失败）。
+   */
+  noWake?: true
   /** 投递方式（`已投递（live）` / `已投递（冷载入）`）或失败原因 */
   detail: string
   /** 调度器 tick 计数（便于与 `acc-diag` ①b 对齐） */
@@ -137,6 +151,8 @@ export interface CroWakeLogInput {
   ok: boolean
   /** 🔴 `true` ⇒ 记作 `not-ready`（没送成，但**不算失败**）。见 {@link CroWakeLogEntry.notReady} */
   notReady?: boolean
+  /** 🔴 `true` ⇒ 记作 `no-wake`（**判了、但不叫**，不是失败）。见 {@link CroWakeLogEntry.noWake} */
+  noWake?: boolean
   detail: string
   tick: number
   reason: string | null
@@ -174,9 +190,11 @@ export function formatCroLogLine(entry: CroWakeLogEntry): string {
   const head = oneline(entry.promptDigest.head)
   return [
     oneline(entry.at),
-    // 🔴 三态，不是两态：`ok` ／ `fail` ／ `not-ready`。
+    // 🔴 四态，不是两态：`ok` ／ `fail` ／ `not-ready` ／ `no-wake`。
     //    写成两态就会把 `notReady` 折进其中一边 —— 折进 ok 是假成功，折进 fail 是假失败。
-    entry.ok ? 'ok' : entry.notReady === true ? 'not-ready' : 'fail',
+    //    同理 `noWake`（判了但不叫）**既不是成功也不是失败**，必须独立成态：
+    //    折进 ok ⇒ 读日志的人以为"叫过了"；折进 fail ⇒ 每次都像在报错（最坏：把真失败淹掉）。
+    entry.ok ? 'ok' : entry.notReady === true ? 'not-ready' : entry.noWake === true ? 'no-wake' : 'fail',
     `tick=${entry.tick}`,
     oneline(entry.detail),
     `reason=${reason}`,
@@ -198,9 +216,9 @@ export function parseCroLogLine(line: string): CroWakeLogEntry | null {
   const at = parts[0]!
   if (Number.isNaN(Date.parse(at))) return null
   const mark = parts[1]
-  // 🔴 **旧档只认识两态** ⇒ `not-ready` 是**新增**取值，读侧必须同时认它；
+  // 🔴 **旧档只认识两态** ⇒ `not-ready`／`no-wake` 是**新增**取值，读侧必须同时认它们；
   //    不认的后果不是报错，而是**整行被当成坏行静默丢弃**（历史记录凭空消失，零信号）。
-  if (mark !== 'ok' && mark !== 'fail' && mark !== 'not-ready') return null
+  if (mark !== 'ok' && mark !== 'fail' && mark !== 'not-ready' && mark !== 'no-wake') return null
   const tickM = /^tick=(\d+)$/.exec(parts[2]!)
   if (!tickM) return null
   const reasonRaw = parts[4]!.startsWith('reason=') ? parts[4]!.slice('reason='.length) : ''
@@ -209,6 +227,7 @@ export function parseCroLogLine(line: string): CroWakeLogEntry | null {
     at,
     ok: mark === 'ok',
     ...(mark === 'not-ready' ? { notReady: true as const } : {}),
+    ...(mark === 'no-wake' ? { noWake: true as const } : {}),
     detail: parts[3]!,
     tick: Number(tickM[1]),
     // 空串 ⇒ null（与"取不到写 null，不留空白"同口径）
@@ -366,6 +385,10 @@ export function appendCroWakeLog(
       //    ⇒ 判据：**加一个可选字段，要同时改「类型 ＋ 构造 ＋ 格式化 ＋ 解析」四处**；
       //      少任何一处都不会报错，只会静默降级。
       ...(input.notReady === true ? { notReady: true as const } : {}),
+      // 🔴 **A102 的承重点**：接口加了 `noWake`、格式化也认了它，
+      //    但若**构造 entry 时不搬过来**，它就在这一步被丢掉 ⇒ 永远落成 `fail`
+      //    ⇒ 整个改动静默失效（D209 那次正是漏在「构造」这一处）。
+      ...(input.noWake === true ? { noWake: true as const } : {}),
       detail: input.detail,
       tick: input.tick,
       reason: input.reason,

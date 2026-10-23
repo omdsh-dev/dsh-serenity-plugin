@@ -14,6 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
+import * as zlib from 'node:zlib'
 import {
   addWake,
   finalizeWake,
@@ -37,6 +38,7 @@ import { namingTitleFor, parseTrajectoryCode } from '../src/trajectory/core.js'
 import { croWakeLogPath, loadCroWakeLog } from '../src/cro/log.js'
 import { __resetCroTurnsForTest } from '../src/cro/turns.js'
 import { existsSync, readFileSync } from 'node:fs'
+import { projectDirNameForCwd } from '../src/trajectory/interrupted.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
 
 const HOUR = 3_600_000
@@ -1270,7 +1272,27 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     expect(text, '真失败仍标 fail').toContain('\tfail\t')
   }, 30_000)
 
-  it('🔴 不唤起（wake:false）⇒ **不产生流水档**（没有尝试就没有记录）', async () => {
+  /**
+   * 🔴🔴 **A102（2026-10-23）推翻了本条的原前提 —— 按 D184 改钉，不是放宽。**
+   *
+   * ## 原前提（v1.87.x 及以前）
+   * 「不唤起（`wake:false`）⇒ **不产生流水档**（没有尝试就没有记录）」。
+   * 它隐含的假设是：**流水只记"尝试"**。
+   *
+   * ## 原前提被谁取代
+   * 实测（guard 轨迹，真机）：该轨迹的 `cro-wake-log.log` **永久停在 `01:40:55`**，
+   * 而它**此后每个 tick 都在被评估**、只是判定为"不打扰"
+   * ⇒ owner 据此得出「守卫从那以后就没工作过」，**与事实相反**。
+   * ⇒ 病根就是本用例钉住的那条：`no-wake` **一个字都不落盘**
+   * ⇒ **「我判了、只是不叫」与「我根本没被评估」在读数上完全一样**。
+   *
+   * ## 新判据（D209 同族第三条）
+   * **可以不出声地判"不打扰"，但"判过"本身要留痕。**
+   * ⇒ 四态：`ok` ／ `fail` ／ `not-ready` ／ `no-wake`。
+   * ⚠️ 「没有 CRO 文件的轨迹不建档」那条**仍然成立**（见 `appendCroWakeLog` 的注释：
+   *    只有真的发生过一次判定才建/写该档）—— 那是**另一格**，别和本条混。
+   */
+  it('🔴 A102 不唤起（wake:false）⇒ **落一条 `no-wake`**（判了就要留痕，但不是失败）', async () => {
     writeFileSync(join(root, '.serenity'), '')
     writeSessionDir()
     writeBinding('sess-live')
@@ -1279,7 +1301,43 @@ describe('🔴 CRO 与调度器集成（设计 §5 铁律 / §6.3 不落表）',
     const sent: string[] = []
     registerWakeScheduler(croCtx(sent) as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
-    expect(existsSync(croWakeLogPath(root, DIR_NAME)), '没发生尝试就不该建空档').toBe(false)
+    // ① 档必须存在（这句是本条改钉的核心：原断言是 `.toBe(false)`）
+    expect(existsSync(croWakeLogPath(root, DIR_NAME)), 'no-wake 也是"判过" ⇒ 必须留痕').toBe(true)
+    // ② 四态可分辨：不是 ok、也不是 fail，而是 noWake
+    const entries = loadCroWakeLog(root, DIR_NAME).log.entries
+    expect(entries.length).toBeGreaterThan(0)
+    const last = entries[entries.length - 1]!
+    expect(last.ok, '不唤起不是成功').toBe(false)
+    expect(last.noWake, '必须与真失败区分开 —— 否则每次不叫都像在报错，会把真失败淹掉').toBe(true)
+    expect(last.notReady, '也不能混进 not-ready（那是"投递被挡"）').toBeUndefined()
+    // ③ 理由要可重建（不能是空串）
+    expect(String(last.reason)).toContain('没事')
+    // ④ 落盘的纯文本行同样要能表达第四态（读侧不认 ⇒ 整行被当坏行静默丢弃 = 又静默了一次）
+    expect(readFileSync(croWakeLogPath(root, DIR_NAME), 'utf-8')).toContain('\tno-wake\t')
+    // ⑤ 🔴 它**不能**触发任何投递（这是「不叫」的定义）
+    expect(sent).toHaveLength(0)
+  }, 30_000)
+
+  it('🔴 A102 `no-wake` 与 `fail`／`not-ready` 在流水里是**三种不同标记**（可逐条比对）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCro(DIR_NAME, croProgram('{"wake":false,"reason":"不打扰"}'))
+    writeCroHostBinding()
+    registerWakeScheduler(croCtx([]) as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
+    expect(readFileSync(croWakeLogPath(root, DIR_NAME), 'utf-8')).toContain('\tno-wake\t')
+  }, 30_000)
+
+  it('🔴 没有 CRO 文件的轨迹 ⇒ **仍然不建档**（A102 没有推翻这一格）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCroHostBinding()
+    // 刻意不写 CRO 程序：该轨迹根本不在 CRO 名单里 ⇒ 谈不上"判过"
+    registerWakeScheduler(croCtx([]) as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('CRO 评估')), 20_000)
+    expect(existsSync(croWakeLogPath(root, DIR_NAME)), '没有 CRO ⇒ 没有判定 ⇒ 不该建空档').toBe(false)
   }, 30_000)
 
   // ── 🆕 2026-10-23：CRO 投递面的**载体自举**及其闸门（guard 实测报障后补）──────────────
@@ -1615,4 +1673,129 @@ describe('wake-registry: 读面容错 / 写面失败 / 结案清理（⑤ 第 29
     expect(res.ok).toBe(false)
     if (!res.ok) expect(res.error).toContain('时刻无法解析')
   })
+})
+
+/**
+ * 🔴🔴 **A104-C′（2026-10-23，owner 点头）：容器级「被重启打断的会话」兜底。**
+ *
+ * ## 为什么这是一条**必须存在**的机制（不是"多一层保险"）
+ * 实测盲窗：`08:02` 一次重启打断了一个会话，此后 **13 分钟无人拉起**；
+ * 真回放证明 `08:07:30`／`08:12:40` 两个 tick **都本应命中**，而**实际都没叫**
+ * ⇒ **「守护程序自己修好」≠「一定有人拉起」**。
+ *
+ * ## 本组钉的是三件（缺一件这个兜底就不成立）
+ *  ① **它会扫到**（不被"本轨迹在跑/无线程绑定/阈值保护"之类的轨迹级条件挡住）
+ *  ② **它会注入**（只扫不动没有用 —— 这是 owner 点名要我区分的那一格）
+ *  ③ **它不会碰 live 会话**（否则同一会话被重复注入）
+ */
+describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ 注入」）', () => {
+  const INTERRUPTED_ID = 'session-dead-beef-0001'
+
+  /** 造一份**真 zstd、真内容**的会话日志：末轮 `turn/end[interrupted]` 且其后无 `turn/start` */
+  function writeInterruptedLog(sessionId: string, opts: { withNewTurn?: boolean } = {}): void {
+    // 🔴 **扫描域必须与实现算出来的目录名逐字一致**：兜底用的是
+    //    `sessionsRootDir() + '/' + projectDirNameForCwd(root)`，而 `root` 是**本用例的临时目录**
+    //    ⇒ 目录名是 `--tmp-dsp-wake-XXXX--`，**不是**本文件顶部的 `PROJECT_SLUG`（那是另一个夹具用的）。
+    //    ⚠️ 写错这一格的症状是**看起来像缺陷**：「注入 0 条」而真因是**夹具放在了实现不会去读的地方**
+    //    （同族 D205/实测：先让被测格子成立，再判实现）。
+    const slug = projectDirNameForCwd(root)
+    const dir = join(dshHome, 'sessions', slug, sessionId)
+    mkdirSync(dir, { recursive: true })
+    const base = Date.now() - 60_000
+    const events: unknown[] = [
+      { type: 'turn/start', time: base, data: { turn: 7 } },
+      { type: 'step/start', time: base + 10, data: { turn: 7, step: 1 } },
+      { type: 'turn/end', time: base + 20, data: { turn: 7, reason: { kind: 'interrupted' } } },
+      { type: 'session/end-seed', time: base + 30, data: {} },
+    ]
+    if (opts.withNewTurn) {
+      events.push({ type: 'turn/start', time: base + 40, data: { turn: 8 } })
+    }
+    const body = Buffer.from(events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8')
+    // ⚠️ 必须真 zstd 帧：`readTailEvents` 靠帧魔数定位，纯文本会被判"读不到事件"
+    //    （写错这一格的症状是**用例假绿**——扫描返回空 ⇒ 看起来"没东西要恢复"）
+    writeFileSync(join(dir, 'session.v4.jsonl.zstd'), zlib.zstdCompressSync(body))
+  }
+
+  /** 一个能让兜底真正跑到"注入"的 ctx（注意 `agents.get` 对目标返回 undefined ⇒ 走冷载入） */
+  function safetyCtx(sent: string[], liveIds: string[] = []): unknown {
+    const agent = {
+      session: { id: INTERRUPTED_ID, append: () => {} },
+      followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') },
+    }
+    // 🔴 **`sessions` 必须既是属性、也经 `get` 可取**：
+    //    实现读 live 表走的是 `hostService(ctx,'sessions')`（= `ctx.get('sessions')`），
+    //    而 discovery 走 `hostSessions(ctx)` = `hostInjected`（先读属性、失败回落 `get`）。
+    //    ⚠️ 只在属性上给、不给 `get` ⇒ **live 表恒为空** ⇒ "live 排除"这一侧
+    //    在测试里**从未被真正验证过**（变异检验会假绿 —— 本轮实测踩到）。
+    const sessions = {
+      list: () => [
+        { id: 'sess-for-discovery', header: { cwd: root } },
+        // `liveIds` 里点名的会话要**真的出现在 live 表**里（这才叫"它在跑"）
+        ...liveIds.map((id) => ({ id, header: { cwd: root } })),
+      ],
+    }
+    return {
+      sessions,
+      agents: { get: () => undefined }, // 冷会话：进程里没有
+      get: (name: string) => {
+        if (name === 'sessions') return sessions
+        if (name === 'sessionController') return { resolveAgent: async () => ({ agent }) }
+        return undefined
+      },
+      on: () => undefined,
+      effect: () => undefined,
+    }
+  }
+
+  it('🔴 会扫到并注入：被打断的会话即使没有任何轨迹叫它，容器也会拉起', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    // ⚠️ 刻意**不写 CRO 程序**：本用例要证的是"不依赖任何轨迹级唤起来源"
+    writeCroHostBinding()
+    writeInterruptedLog(INTERRUPTED_ID)
+    const sent: string[] = []
+    __resetWakeSchedulerStateForTest() // 同族：不重置 ⇒ 不武装 ⇒ 本用例不跑 tick
+    registerWakeScheduler(safetyCtx(sent) as never)
+    await waitFor(() => sent.length > 0, 20_000)
+    expect(sent, '被打断的会话必须被注入一次续跑').toHaveLength(1)
+    expect(sent[0]).toContain('中断续跑')
+    expect(sent[0]).toContain(INTERRUPTED_ID)
+    // tick 日志里也要能看见（否则"它到底动没动"又只能靠猜）
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('中断兜底')), 20_000)
+  }, 30_000)
+
+  it('🔴 反向钉：**live 会话不碰**（否则同一会话会被重复注入）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCroHostBinding()
+    writeInterruptedLog(INTERRUPTED_ID)
+    const sent: string[] = []
+    // 🔴🔴 **必须先重置进程态**：`registerWakeScheduler` **只在首次装配时武装**
+    //    （调度器幂等；本文件另一处注释已写明这条，我第一版就踩了它）。
+    //    ⚠️ 不重置的后果是**假绿**：本用例根本没跑 tick ⇒ `sent` 恒空 ⇒
+    //    "live 不碰"看起来通过了，其实**什么都没验证**。
+    //    实测证据：我第一次跑变异检验（把 `liveIds` 换成空集）时本条**仍然绿** —— 那正是这个陷阱。
+    __resetWakeSchedulerStateForTest()
+    // 把目标会话放进 live 表 ⇒ 兜底必须跳过它
+    registerWakeScheduler(safetyCtx(sent, [INTERRUPTED_ID]) as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).length > 0, 20_000)
+    expect(sent, 'live 会话正在跑，兜底不得再注入一次').toHaveLength(0)
+  }, 30_000)
+
+  it('🔴 反向钉：末轮之后**已有新 turn/start** ⇒ 不算"停在这里"，不注入', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCroHostBinding()
+    writeInterruptedLog(INTERRUPTED_ID, { withNewTurn: true }) // 已被接续
+    const sent: string[] = []
+    // 🔴 同上：不重置 ⇒ 本用例**根本没跑 tick** ⇒ 假绿
+    __resetWakeSchedulerStateForTest()
+    registerWakeScheduler(safetyCtx(sent) as never)
+    await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).length > 0, 20_000)
+    expect(sent, '已接续的会话不是"被打断停住"，不许重复拉起').toHaveLength(0)
+  }, 30_000)
 })
