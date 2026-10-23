@@ -286,10 +286,26 @@ function cmdBuild(): void {
     console.error(r.stdout + r.stderr)
     fail(`tsdown 失败 (exit ${r.status})`, 2)
   }
-  const clientSize = existsSync(join(HOOKS_DIR, 'lib', 'client.js'))
-    ? `${statSync(join(HOOKS_DIR, 'lib', 'client.js')).size} B`
-    : 'N/A'
-  console.log(`[dsh-develop] ✓ 构建完成（lib/index.js + lib/client.js ${clientSize}）`)
+  // 🔴 **两个产物都要报**（2026-10-23 v1.90.0）。
+  //
+  // 修前只报 `client.js` 一个，而文案写的是「lib/index.js + lib/client.js 224144 B」
+  // ⇒ **读起来像"两个产物的合计/指纹"**，实际只测一个。
+  // 实测后果（同日，跨轨迹）：改了 **node 半**（`src/tools/*`、`src/wake/*`）后，
+  // build 打印的字节数与上一版**逐字相同** ⇒ 对方据此判「这条门禁不证明新代码被编译过」。
+  // ⇒ 那个怀疑**是对的**（这条读数确实什么都不证明），但**真因不是"没重跑"**，
+  //   而是**读数覆盖域与改动域不相交**（改的不是 client 半 ⇒ client 必然不变）。
+  //
+  // ⇒ 判据（D227）：**判据要覆盖"我改的那一半"**；跨半引用同一个数字 = 拿不相关的读数当证据。
+  // ⇒ 修法：**两个产物各自报一个数**，读的人不用猜"这个 224144 到底测的是谁"。
+  // ⚠️ 同时报 `index.js` 是因为**绝大多数改动落在 node 半**（工具的 src 都在那边），
+  //    只报 client 等于对多数改动失明。
+  const sizeText = (rel: string): string => {
+    const p = join(HOOKS_DIR, 'lib', rel)
+    return existsSync(p) ? `${statSync(p).size} B` : 'N/A'
+  }
+  console.log(
+    `[dsh-develop] ✓ 构建完成（node: lib/index.js ${sizeText('index.js')}｜client: lib/client.js ${sizeText('client.js')}）`,
+  )
 
   // 🔴 2026-10-16（S142 续 147）：**必须补第二半** —— `tsc --emitDeclarationOnly`。
   //
