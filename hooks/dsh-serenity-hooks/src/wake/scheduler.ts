@@ -35,10 +35,10 @@ import { listBoundSessionIds, appendBound, carrierState } from '../trajectory/bo
 import { hostAliveProbe } from '../trajectory/alive.js'
 import { hasSessionLogById, sessionsRootDir } from '../trajectory/cleanup.js'
 import { evaluateCro, listCroCognitiveTrajectories, readCroSnapshotInput, renderCroOutcome, resolveCroHostBinding } from '../cro/core.js'
-import { runningCarriersOf } from '../cro/turns.js'
+import { listRunningSessionIds, runningCarriersOf } from '../cro/turns.js'
 import { appendCroWakeLog } from '../cro/log.js'
 import { createResumeOne, projectDirNameForCwd, scanInterruptedSessions } from '../trajectory/interrupted.js'
-import { hostAgents, hostService, hostSessions } from '../host/access.js'
+import { hostAgents, hostService } from '../host/access.js'
 import { registerDisposer } from '../host/effect.js'
 import { readSimpleSettings } from '../surface/settings.js'
 import { createClock, type ClockOptions, type ClockRuntime } from './clock.js'
@@ -1215,22 +1215,57 @@ async function runWakeTick(ctx: unknown): Promise<string[]> {
  * - ⚠️ **本函数任何失败都不得连累既有链路**（设计 §5 铁律）：整体 try/catch 吞掉并留一行日志。
  */
 async function runInterruptedSafetyNet(ctx: unknown, root: string, log: string[]): Promise<void> {
+  // 🔴 **A106：本拍编号 —— 必须先取，且要分清是哪一种拍**
+  //
+  // `wakeSchedulerState().ticks` = **已完成**拍数（工厂在 body 之后记账）⇒ 此刻是第 `ticks+1` 拍。
+  // ⚠️ 这与 guard 程序自己记的 `tick`（当前拍，1-based）**是同一个口径**，别混：
+  //    ACC 的 `cro-wake-log.log` 里 `tick=` 记的是 `ticks`（0-based 已完成数），
+  //    于是**同一事件在两处差 1** —— 这是历史事实（见 D226 的配套），本次不改格式，
+  //    只在兜底的日志里**把两者都写出来**（`tick=N(当前第 N+1 拍)`），让读的人不必自己换算。
+  const s0 = wakeSchedulerState()
+  const tickNow = s0.ticks + 1
+  // "刚启动窗口"= 第 2~3 拍（与 CRO 触发器同口径）；用来标注这行日志属于哪一种拍。
+  const phase = tickNow <= 1 ? '启动首拍' : tickNow <= 3 ? '刚启动窗口' : '常规 tick'
+  const tickTag = `tick=${s0.ticks}(当前第${tickNow}拍·${phase})`
+
   try {
     const agents = hostAgents(ctx) as { get?: (id: string) => unknown } | undefined
     const sc = hostService<{
       resolveAgent?: (id: string) => Promise<{ agent?: unknown; error?: string }>
     }>(ctx, 'sessionController')
 
-    // live 表 = **容器级**（不是某个轨迹的载体表）—— 这正是 A′ 要补的那一维。
-    // 拿不到就退化为空集：宁可多注入一次，也不要因为读数缺失而整条兜底罢工。
-    const liveIds = new Set<string>()
-    if (typeof agents?.get === 'function') {
-      for (const id of collectLiveSessionIdsForSafetyNet(ctx)) liveIds.add(id)
-    }
+    /**
+     * 🔴 **A105：live 排除的粒度 =「此刻有没有在跑」，不是「宿主认不认识它」。**
+     *
+     * 修前：`collectLiveSessionIdsForSafetyNet` 取的是 `hostSessions(ctx).list()`
+     * ⇒ 那是**载入状态**（会话对象在本进程里），**不是**轮次状态 ⇒
+     * 一条「已载入、但上一轮被重启打断」的会话会被**误排除**，
+     * 而那恰恰是**最该被接走**的一类（2026-10-23 实测：这正是那次 13 分钟盲窗的形状）。
+     *
+     * ⇒ 现在与权威 `interrupted` 动作**用同一个取数口**（`listRunningSessionIds`），
+     *   两处对"在跑"的认知**不可能再不一致**（A105 的全部目的就是这一条）。
+     */
+    const liveIds = new Set<string>(listRunningSessionIds(Date.now()))
 
     const projectDir = `${sessionsRootDir()}/${projectDirNameForCwd(root)}`
     const scan = scanInterruptedSessions(projectDir, { liveIds })
-    if (scan.sessions.length === 0) return
+
+    /**
+     * 🔴 **A106：无命中也要出声**（`ok`/`fail`/`not-ready`/`no-wake` 之后缺的第五格）。
+     *
+     * 修前这里 `return`，**一行都不写** ⇒ 宿主日志里没有任何「中断兜底」字样 ⇒
+     * **「我扫了、没东西」与「我没被跑」在读数上完全一样**（D216 同族第四次）。
+     * ⇒ 判据同 A102：**可以不出声地判"没事"，但"判过"本身要留痕**。
+     * ⚠️ 密度很低（每 tick 一行，5min 一次），且**必须带拍号与扫描读数**，
+     *   否则又是一堆分不清是哪一拍的日志行（guard 明确要求）。
+     */
+    if (scan.sessions.length === 0) {
+      log.push(
+        `· ${root}: 中断兜底 ${tickTag} → 扫 ${scan.scanned} 个 · 命中 0` +
+          ` · 排除在跑 ${liveIds.size} 个 · 跳过 ${scan.skipped} ⇒ 无需注入`,
+      )
+      return
+    }
 
     const resumeOne = createResumeOne({
       agents,
@@ -1238,6 +1273,10 @@ async function runInterruptedSafetyNet(ctx: unknown, root: string, log: string[]
       makeMessage: (text) => createUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE }),
     })
 
+    log.push(
+      `· ${root}: 中断兜底 ${tickTag} → 扫 ${scan.scanned} 个 · 命中 ${scan.sessions.length}` +
+        ` · 排除在跑 ${liveIds.size} 个`,
+    )
     for (const hit of scan.sessions) {
       try {
         const out = await resumeOne(hit)
@@ -1250,26 +1289,21 @@ async function runInterruptedSafetyNet(ctx: unknown, root: string, log: string[]
       }
     }
   } catch (err) {
-    log.push(`· ${root}: 中断兜底整体失败（已忽略，不影响既有链路）：${String((err as Error)?.message ?? err)}`)
+    log.push(`· ${root}: 中断兜底 ${tickTag} 整体失败（已忽略，不影响既有链路）：${String((err as Error)?.message ?? err)}`)
   }
 }
 
-/** 取容器内**全部** live 会话 id（best-effort，取不到就少排除几个）。 */
-function collectLiveSessionIdsForSafetyNet(ctx: unknown): string[] {
-  const out: string[] = []
-  try {
-    // 🔴 与 discovery 走**同一个取数口**（`hostSessions` → `hostInjected` 先属性后 `get`）：
-    //    换一个取法会出现"发现得到 root、却拿不到 live 表"的不对称，而那种不对称
-    //    在读数上表现成"live 排除静默失效"（本轮变异检验已证：写错这一格则变异②假绿）。
-    const list = hostSessions(ctx)?.list?.() ?? []
-    for (const s of list) {
-      if (typeof s?.id === 'string' && s.id) out.push(s.id)
-    }
-  } catch {
-    /* 拿不到 ⇒ 空集（少一层保护，不阻断扫描） */
-  }
-  return out
-}
+/**
+ * ⚠️ **2026-10-23 A105 已删除 `collectLiveSessionIdsForSafetyNet`。**
+ *
+ * 它取的是 `hostSessions(ctx).list()` =「宿主认不认识」，而 A105 的结论是
+ * 判据必须是「**此刻有没有在跑**」。现在两处（本兜底与权威 `interrupted` 动作）
+ * 都走 `listRunningSessionIds()` —— **同一张表、同一个口径**，不可能再打架。
+ *
+ * 🔴 后人若要"把 live 表也加回来做双保险"：**不要** ——
+ *    `live ∧ ¬running` 恰是「已载入、但上一轮被打断」那一类，**它最该被接走**；
+ *    加回来就是把最该救的那一格重新排除掉。
+ */
 
 /**
  * 装配调度器（index.ts apply 调用）：5min tick + 生命周期 disposer +

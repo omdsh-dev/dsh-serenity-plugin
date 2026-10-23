@@ -70,7 +70,7 @@ import {
   type CreateSessionResult,
 } from '../trajectory/core.js'
 import { listResident } from '../trajectory/resident.js'
-import { listLiveSessions } from '../trajectory/live.js'
+import { listRunningSessionIds } from '../cro/turns.js'
 import { sessionsRootDir } from '../trajectory/cleanup.js'
 import { hostAgents } from '../host/access.js'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -85,22 +85,48 @@ import {
 } from '../trajectory/interrupted.js'
 
 /**
- * 当前宿主里**正在跑**的 dsh 会话 id（用于把 live 会话排除出"待续"名单）。
+ * 当前**正在跑轮次**的 dsh 会话 id（用于把 live 会话排除出"待续"名单）。
  *
  * 🔴 **为什么必须排除**：一个正在跑的会话，其日志末条**不是** `session/end-seed`
  * （它还在写），所以按判据本来也不会命中；但排除是**双保险** ——
  * 万一某轮刚被中断、宿主还没来得及继续，把 live 会话当"待续"会导致**重复投递**。
- * 拿不到 live 列表时退化为空集（不阻断扫描，只少一层保护）。
+ *
+ * ── 🔴🔴 2026-10-23 A105：**从「live 表」改为「在跑表」，且从 `ctx` 取数** ──────────
+ *
+ * **修前有两个缺陷，叠在一起让这段排除在生产上形同虚设：**
+ *
+ * ① **`ctx` 传的是 `undefined`** ⇒ `listLiveSessions(undefined)` ⇒ `hostSessions(undefined)`
+ *    ⇒ 取不到宿主 ⇒ **live 表恒空** ⇒ `scanInterruptedSessions` 的 `liveIds` 是空集。
+ *    ⚠️ 原注释写「ctx 在 execute 里拿不到（本工具只拿到 exec）」，**那句是错的**：
+ *    本工具的工厂 `createCognitiveTrajectoryTool(ctx)` **闭包捕获了真 ctx**，
+ *    且同文件的 `continue-all-interrupted` 分支早就靠它取 `hostAgents(ctx)` / `hostService(ctx,…)`
+ *    —— 见那一支的注释「**必须用工厂参数 `ctx`，不能用 `exec`**」。**同一份源码里，
+ *    一处说"拿不到"、另一处说"必须用它"**，这正是两个读数打架的典型形态。
+ *
+ * ② **粒度错了：`live ≠ 在跑`。** `listLiveSessions` 答的是「宿主认不认识这个会话」
+ *    （会话对象已载入本进程），**不是**「它此刻有没有轮次在跑」。
+ *    ⇒ 一条**已载入但空闲**的会话会被误排除 ⇒ **它恰恰是"上一轮被重启打断、最该被接走"的那一类**。
+ *    2026-10-23 实测：同一时刻 `acc-diag` 把一条会话列为 live，而本动作把它当命中扫出 ⇒
+ *    两个口径两个答案；随后真机证明那条会话当时**确实该被接走**。
+ *
+ * ⇒ **现在答的是「此刻有没有在跑」**，取数口 = `listRunningSessionIds(nowMs)`（`cro/turns.ts`）：
+ *   由 `agent/status=running` 置位、`idle` 清位，`TURN_TTL_MS` 兜底。
+ *
+ * 🔴 **不要再改回「宿主认不认识它」** —— 这是本函数最容易被"改得更省事"而改回去的地方。
+ *    「宿主认识」是**载入状态**，「在跑」是**轮次状态**，两者互不蕴含：
+ *    载入而空闲（该接走）、在跑但刚被中断（该接走）、在跑且健康（才该排除）。
+ *    只有第三格该排除 ⇒ 判据必须是轮次状态。
+ *
+ * 拿不到 running 表时退化为空集（不阻断扫描，只少一层保护）—— 与修前同口径。
  */
-function collectLiveSessionIds(): Set<string> {
+function collectRunningSessionIds(nowMs: number): Set<string> {
   const out = new Set<string>()
   try {
-    // ctx 在 execute 里拿不到（本工具只拿到 exec）⇒ 走进程内活跃表
-    for (const s of listLiveSessions(undefined)) {
-      if (typeof s.id === 'string' && s.id) out.add(s.id)
+    for (const id of listRunningSessionIds(nowMs)) {
+      if (typeof id === 'string' && id) out.add(id)
     }
   } catch {
-    /* live 表不可用 → 退化为空集 */
+    /* running 表不可用 → 退化为空集 */
   }
   return out
 }
@@ -811,7 +837,8 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
 
         const scan = scanInterruptedSessions(projectDir, {
           lookbackMs: lookbackHours * 3_600_000,
-          liveIds: collectLiveSessionIds(),
+          // 🔴 A105：排除「此刻在跑轮次」的会话（不是「宿主认识的」）。见 `collectRunningSessionIds` 的注释。
+          liveIds: collectRunningSessionIds(Date.now()),
         })
 
         return renderInterruptedScan({ projectDir, lookbackHours, scan })
@@ -842,7 +869,8 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
 
         const scan = scanInterruptedSessions(projectDir, {
           lookbackMs: lookbackHours * 3_600_000,
-          liveIds: collectLiveSessionIds(),
+          // 🔴 A105：同 `interrupted`，排除「此刻在跑轮次」的会话。
+          liveIds: collectRunningSessionIds(Date.now()),
         })
 
         if (dryRun) {

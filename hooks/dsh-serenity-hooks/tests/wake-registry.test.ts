@@ -36,7 +36,7 @@ import { CRO_FILENAME, CRO_HOST_FILENAME } from '../src/cro/core.js'
 // 标题判据（D182）：期望值**现算**，不抄字符串——抄一份就是第二真相源
 import { namingTitleFor, parseTrajectoryCode } from '../src/trajectory/core.js'
 import { croWakeLogPath, loadCroWakeLog } from '../src/cro/log.js'
-import { __resetCroTurnsForTest } from '../src/cro/turns.js'
+import { markTurnRunning, __resetCroTurnsForTest } from '../src/cro/turns.js'
 import { existsSync, readFileSync } from 'node:fs'
 import { projectDirNameForCwd } from '../src/trajectory/interrupted.js'
 import { __setSimpleSourceForTest, defaultSimpleSettings } from '../src/surface/settings.js'
@@ -1718,22 +1718,23 @@ describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ �
   }
 
   /** 一个能让兜底真正跑到"注入"的 ctx（注意 `agents.get` 对目标返回 undefined ⇒ 走冷载入） */
-  function safetyCtx(sent: string[], liveIds: string[] = []): unknown {
+  function safetyCtx(sent: string[], runningIds: string[] = []): unknown {
     const agent = {
       session: { id: INTERRUPTED_ID, append: () => {} },
       followup: (m: { content: Array<{ text?: string }> }) => { sent.push(m.content[0]?.text ?? '') },
     }
-    // 🔴 **`sessions` 必须既是属性、也经 `get` 可取**：
-    //    实现读 live 表走的是 `hostService(ctx,'sessions')`（= `ctx.get('sessions')`），
-    //    而 discovery 走 `hostSessions(ctx)` = `hostInjected`（先读属性、失败回落 `get`）。
-    //    ⚠️ 只在属性上给、不给 `get` ⇒ **live 表恒为空** ⇒ "live 排除"这一侧
-    //    在测试里**从未被真正验证过**（变异检验会假绿 —— 本轮实测踩到）。
+    // 🔴 **A105 改判（2026-10-23）：排除判据从「live」改为「在跑」，夹具必须跟着换语义。**
+    //
+    //    修前本参数叫 `liveIds`，靠**把目标塞进 `sessions.list()`** 来模拟"它在跑"。
+    //    但 A105 的结论是 `live ≠ 在跑`：`sessions.list()` 答的是「宿主认不认识这个会话」
+    //    （载入状态），而排除要的是「此刻有没有轮次在跑」（轮次状态，`cro/turns.ts` 的表）。
+    //    ⚠️ **继续用 `sessions.list()` 模拟"在跑"会让这条反向钉假绿**：
+    //    实现已不看那张表 ⇒ 无论塞不塞，目标都会被注入 ⇒ `sent` 非空 ⇒ 用例红得莫名其妙；
+    //    反过来若实现被改回看 live 表，本条又会"恰好"通过 ⇒ **两个方向都测不出真东西**。
+    //    ⇒ 现在改用真机制：`markTurnRunning(id)` 置位（并配 `__resetCroTurnsForTest()` 清态）。
+    for (const id of runningIds) markTurnRunning(id, Date.now(), 1)
     const sessions = {
-      list: () => [
-        { id: 'sess-for-discovery', header: { cwd: root } },
-        // `liveIds` 里点名的会话要**真的出现在 live 表**里（这才叫"它在跑"）
-        ...liveIds.map((id) => ({ id, header: { cwd: root } })),
-      ],
+      list: () => [{ id: 'sess-for-discovery', header: { cwd: root } }],
     }
     return {
       sessions,
@@ -1757,6 +1758,7 @@ describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ �
     writeInterruptedLog(INTERRUPTED_ID)
     const sent: string[] = []
     __resetWakeSchedulerStateForTest() // 同族：不重置 ⇒ 不武装 ⇒ 本用例不跑 tick
+    __resetCroTurnsForTest() // 🔴 A105：轮次表是进程级的 ⇒ 不清会让上一条用例的"在跑"漏进来
     registerWakeScheduler(safetyCtx(sent) as never)
     await waitFor(() => sent.length > 0, 20_000)
     expect(sent, '被打断的会话必须被注入一次续跑').toHaveLength(1)
@@ -1766,7 +1768,7 @@ describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ �
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('中断兜底')), 20_000)
   }, 30_000)
 
-  it('🔴 反向钉：**live 会话不碰**（否则同一会话会被重复注入）', async () => {
+  it('🔴 反向钉：**此刻在跑轮次**的会话不碰（否则同一会话会被重复注入）', async () => {
     writeFileSync(join(root, '.serenity'), '')
     writeSessionDir()
     writeBinding('sess-live')
@@ -1779,10 +1781,12 @@ describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ �
     //    "live 不碰"看起来通过了，其实**什么都没验证**。
     //    实测证据：我第一次跑变异检验（把 `liveIds` 换成空集）时本条**仍然绿** —— 那正是这个陷阱。
     __resetWakeSchedulerStateForTest()
-    // 把目标会话放进 live 表 ⇒ 兜底必须跳过它
+    // 🔴 A105：清轮次表，再用**真机制**标记目标"此刻在跑"（不是塞进 sessions.list）
+    __resetCroTurnsForTest()
+    // 把目标会话标记为"在跑" ⇒ 兜底必须跳过它
     registerWakeScheduler(safetyCtx(sent, [INTERRUPTED_ID]) as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).length > 0, 20_000)
-    expect(sent, 'live 会话正在跑，兜底不得再注入一次').toHaveLength(0)
+    expect(sent, '该会话正在跑轮次，兜底不得再注入一次').toHaveLength(0)
   }, 30_000)
 
   it('🔴 反向钉：末轮之后**已有新 turn/start** ⇒ 不算"停在这里"，不注入', async () => {
@@ -1794,8 +1798,45 @@ describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ �
     const sent: string[] = []
     // 🔴 同上：不重置 ⇒ 本用例**根本没跑 tick** ⇒ 假绿
     __resetWakeSchedulerStateForTest()
+    __resetCroTurnsForTest() // 🔴 A105：同上，防跨用例污染
     registerWakeScheduler(safetyCtx(sent) as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).length > 0, 20_000)
     expect(sent, '已接续的会话不是"被打断停住"，不许重复拉起').toHaveLength(0)
+  }, 30_000)
+
+  /**
+   * 🔴🔴 **A106：无命中时也必须留一行**（本族第五格）。
+   *
+   * 修前 `if (scan.sessions.length === 0) return` ⇒ 宿主日志里**一个字都没有** ⇒
+   * **「我扫了、没东西」与「我没被跑」在读数上完全一样**（D216 同族第四次）。
+   *
+   * ⚠️ 本条的判别力**全在"能区分这两种状态"上**：
+   *  - 正向：无靶时**有**一行含「命中 0」的日志；
+   *  - 反向钉（下一条）：这行必须**带拍号**，否则一堆无拍号的行仍然不可归因。
+   */
+  it('🔴 A106：兜底无命中也要出声（带扫描读数 ＋ 拍号）', async () => {
+    writeFileSync(join(root, '.serenity'), '')
+    writeSessionDir()
+    writeBinding('sess-live')
+    writeCroHostBinding()
+    // ⚠️ 刻意**不写**任何 interrupted 日志 ⇒ 扫描域为空 ⇒ 走"无命中"分支
+    const sent: string[] = []
+    __resetWakeSchedulerStateForTest()
+    __resetCroTurnsForTest()
+    registerWakeScheduler(safetyCtx(sent) as never)
+    await waitFor(
+      () => (wakeSchedulerState().lastTickLog ?? []).some((l) => l.includes('中断兜底')),
+      20_000,
+    )
+    const lines = (wakeSchedulerState().lastTickLog ?? []).filter((l) => l.includes('中断兜底'))
+    expect(lines.length, '无命中时一行都没有 ⇒ 与"没被跑"不可分').toBeGreaterThan(0)
+    const summary = lines.find((l) => l.includes('命中 0'))
+    expect(summary, `无命中没写「命中 0」：${lines.join(' / ')}`).toBeDefined()
+    // 拍号：必须写清是哪一拍，且标注属于哪种拍（guard 明确要求）
+    expect(summary, '这行没带拍号 ⇒ 一堆无拍号的行仍然不可归因').toContain('tick=')
+    expect(summary, '这行没说明是哪一种拍（启动首拍/刚启动窗口/常规 tick）').toMatch(
+      /启动首拍|刚启动窗口|常规 tick/,
+    )
+    expect(sent, '无靶时不该注入任何东西').toHaveLength(0)
   }, 30_000)
 })
