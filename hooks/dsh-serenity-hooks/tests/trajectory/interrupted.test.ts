@@ -87,6 +87,39 @@ describe('detectInterruptedEnd（纯判定）', () => {
     expect(detectInterruptedEnd(events)).toBeNull()
   })
 
+  /**
+   * 🔴🔴 **D210 命中格（2026-10-23 从 `interrupted-cross-check.test.ts` 迁入）**
+   *
+   * 为什么迁到这里：那条判据**归 ACC**，它就该由 ACC 自己的用例钉住。
+   * 原先它只活在"交叉校验"文件里 ⇒ 一旦那个文件因职责重组而改动，**这根唯一的钉就丢了**。
+   * （guard 实测 grep 过全仓：只有那个文件提 `spliced`。）
+   *
+   * 形态（真机实测 26 条里漏掉的 2 条就是它）：
+   * `turn/end[interrupted] -> session/end-seed -> agent/inbox/spliced -> agent/inbox/spliced`
+   * ⇒ 重启后宿主把**待办消息重新塞进收件箱**，追加在 end-seed 之后
+   * ⇒ 旧判据「末条必须 end-seed」在这之后**恒不成立** ⇒ 恰恰对「反复被打断者」失明。
+   */
+  it('🔴 D210：末轮 interrupted ＋ 之后仅非轮次事件（end-seed / inbox/spliced）⇒ **仍命中**', () => {
+    const events = [
+      ...turnEvents(5, 'interrupted'),
+      { type: 'session/end-seed', data: {} },
+      { type: 'agent/inbox/spliced', data: { target: 'main', start: 0, inserted: [] } },
+      { type: 'agent/inbox/spliced', data: { target: 'main', start: 0, inserted: [] } },
+    ]
+    expect(detectInterruptedEnd(events), '非轮次事件不得让"停在这里"变成"已接续"').not.toBeNull()
+  })
+
+  /** 🔴 D210 的**反向钉**：放宽没把误报放进来 —— 中断之后真的又开了新轮 ⇒ 不命中 */
+  it('🔴 D210 反向钉：interrupted ＋ inbox/spliced 之后**又有 turn/start** ⇒ 不命中', () => {
+    const events = [
+      ...turnEvents(5, 'interrupted'),
+      { type: 'session/end-seed', data: {} },
+      { type: 'agent/inbox/spliced', data: { target: 'main', start: 0, inserted: [] } },
+      { type: 'turn/start', data: { turn: 6 } },
+    ]
+    expect(detectInterruptedEnd(events)).toBeNull()
+  })
+
   it('末条不是 end-seed（会话仍在写）⇒ 不命中', () => {
     const events = [{ type: 'turn/start', data: { turn: 9 } }]
     expect(detectInterruptedEnd(events)).toBeNull()

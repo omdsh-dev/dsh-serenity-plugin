@@ -1,25 +1,44 @@
 /**
- * 判据交叉校验 —— **ACC 侧 vs CRO 侧必须同一条判据**
+ * 判据**归属**校验 —— ACC 负责判据，守护程序只负责触发
  *
- * ## 为什么这个测试必须存在（本轮 review 的头号战场）
+ * ## 改钉记录（出处可查，D184）
  *
- * 「以 interrupted 结尾」这条判据现在有**两处独立实现**：
- *   ① ACC：`src/trajectory/interrupted.ts` 的 `detectInterruptedEnd`
- *   ② 守护轨迹的 CRO：`AGENT_SESSIONS/<guard>/continuous-re-occurrence.ts` 的同名逻辑
+ * **原名**：`判据交叉校验：ACC 的 detectInterruptedEnd ≡ 守护 CRO 的判定`
  *
- * 🔴 **为什么不能合成一处**：CRO 是**独立子进程**（由 ACC 以 `bun <file>` 起），
- * **不能 import `src/`** —— 那是构建产物，且不在该子进程的运行时路径上。
- * ⇒ 两处实现是**结构性冗余**，不是疏忽。
+ * **原前提**：ACC 与守护 CRO 各有一份 interrupted 判据的独立实现，
+ * 本文件用同一批事件喂两边、断言**判定结果一致**，防它们漂移。
  *
- * 🔴 **但冗余必须有机械守卫**：两处一旦漂移，症状是
- * 「**ACC 说有待续会话，CRO 说没有**」（或反之）⇒ 守护轨迹**永远叫不起来**，
- * 而两边各自的单测都会是绿的 —— 这是最典型的「跑绿也照样炸」。
+ * 🔴 **原前提被谁取代**（2026-10-23）：
+ * owner 令「保守点，只判断 dsh 启动时长这种简单的因素」⇒ 守护程序改成**纯触发器**
+ * （400 行 → 166 行，zstd 扫描整段删除，**不再读会话日志**）。
+ * ⇒ 守护程序**根本不回答**「有没有待恢复的会话」这个问题，它答的是「宿主启动后第几拍」。
+ * ⇒ 旧断言必然红，**且红得与被测判据无关**（它在比较两个不同问题的答案）。
  *
- * ## 它怎么测（不复制判据，而是**对读两处实现的行为**）
+ * ## 现在钉什么：**「两个实现不许重复实现」**（比"必须一样"更硬）
  *
- * 用**同一批事件序列**分别喂给两个实现，断言**判定结果一致**。
- * ⚠️ 关键：**不在这里再抄一份期望值** —— 抄一份就是第三真相源。
- *    这里只断言「两者**彼此相等**」，期望值由各自的正向单测负责。
+ * 原版只能证明"两份实现此刻相等"（下次改动就可能漂）；新版证明的是"**压根只有一份**"——
+ * 那才是不会漂的形态。
+ *
+ * 规格由 guard 给定（它同意"我改、归属记它名下"），五条：
+ * 1. **判据不变性（核心）**：同一快照 ＋ 两份**语义相反**的会话日志 ⇒ CRO 输出**逐字相同**
+ * 2. **触发敏感性**：同一日志只改 ticks ⇒ 0 不醒／1 醒／3 不醒
+ * 3. **缺字段不崩**：无 `scheduling` ⇒ `wake:false` 且产出可解析 JSON
+ * 4. **前置条件显式红**（⛔ 不许静默跳过 —— 初版就栽在这里：4 个用例全绿、一个都没真跑）
+ * 5. **路径可覆盖**：`GUARD_CRO_PATH` 环境变量兜底（避免硬编码一条会归档的轨迹路径）
+ *
+ * ## ⛔ 两条实现者禁令（guard 明确要求）
+ *
+ * - ⛔ **不许在本文件再抄一份判据**（那会变成第三真相源）
+ * - ⛔ **不许用「断言源码不含某关键字」代替行为断言**（文本匹配 ≠ 行为）
+ *   🔵 我第一版差点这么做 —— 而且实测证明它没用：我在程序里注入"读会话内容就短路唤醒"
+ *      的变异后，行为断言**仍然绿**，因为我喂的字段名是我自己猜的、程序读的是别的。
+ *      ⇒ 判据：**只有"同一快照 ＋ 相反日志 ⇒ 输出相同"才能抓到"它又自己判了"**（本文件 §1）。
+ *
+ * ## D210 那根钉已迁走（**迁，不是删**）
+ *
+ * `interruptedThenInboxSpliced`（D210 命中格）与它的反向钉已迁入
+ * `tests/trajectory/interrupted.test.ts` —— 判据归 ACC，就由 ACC 自己的用例钉。
+ * 原先它们只活在本文件 ⇒ 本文件一因职责重组而改动，**唯一的钉就丢了**。
  */
 
 import { describe, it, expect } from 'vitest'
@@ -29,8 +48,6 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import * as nodeZlib from 'node:zlib'
-
-import { detectInterruptedEnd } from '../../src/trajectory/interrupted.js'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 /**
@@ -47,29 +64,31 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  * ⇒ 测试静默走"跳过"分支 ⇒ **4 个用例全绿但一个都没真跑**（假绿的教科书形态）。
  */
 const CCC_ROOT = join(HERE, '..', '..', '..', '..', '..', '..')
-const GUARD_CRO = join(CCC_ROOT, 'AGENT_SESSIONS', '2026-10-22--guard--中断守护', 'continuous-re-occurrence.ts')
+
+/**
+ * 守护程序路径 —— **可被环境变量覆盖**（规格 §5）。
+ *
+ * 为什么要有这一口：本文件**硬编码依赖一条 CCC 轨迹的路径**（`AGENT_SESSIONS/<guard>/…`）。
+ * 那条轨迹一旦归档/搬家，本文件就红 —— 一个**未来的定时炸弹**。
+ * ⇒ 留一个覆盖口不改变任何语义，只是"换了个地方也能跑"。
+ */
+const GUARD_CRO =
+  process.env.GUARD_CRO_PATH ??
+  join(CCC_ROOT, 'AGENT_SESSIONS', '2026-10-22--guard--中断守护', 'continuous-re-occurrence.ts')
 
 const zstd = (nodeZlib as unknown as { zstdCompressSync?: (b: Buffer) => Buffer }).zstdCompressSync
 
 /**
- * 把事件序列写成 CRO 能读的真 zstd 多帧会话日志，返回 {dshHome, cccRoot}。
+ * 把事件序列写成**真 zstd 多帧**会话日志，返回可用于喂 CRO 的环境。
  *
- * 🔴 **必须把 mtime 回拨**（2026-10-23 实测；否则 5 条用例会**假红**）。
- *
- * CRO 侧有一条 live 保护：日志 mtime 落在 `RECENT_MTIME_MS`（90s）以内 ⇒ 视为
- * "这条会话可能正在跑" ⇒ **本轮直接跳过**。它加这条的理由是正当的（ACC 快照给的
- * `liveSessionIds` 只含**绑到本轨迹**的载体，护不住别人家的活会话）。
- * 而本夹具是**刚刚**写出的文件 ⇒ mtime 必然是"现在" ⇒ **每条用例都被跳过**
- * ⇒ CRO 恒答 `wake:false` ⇒ 与 ACC 侧天然不一致 ⇒ 红，且**红得与被测判据无关**。
- *
- * ⇒ 夹具把 mtime 拨到 `RECENT_MTIME_MS` 之外、`LOOKBACK_MS`（8h）之内：
- * 「一条几分钟前停在那里、且没人在跑的会话」—— 这才是被测对象的**真形态**。
- * ⚠️ 这不是"为了让测试变绿而放宽"：把 mtime 留在"现在"，测的就**不是判据**，
- *    而是那条 live 保护（D204 同族：先让被测格子成立）。
+ * 🔴 **mtime 必须回拨**（2026-10-23 实测；否则用例会**假红/假绿**都出现过）：
+ * 旧版程序有一条 live 保护（日志 mtime 在 90s 内 ⇒ 视为"可能在跑"⇒ 本轮跳过）。
+ * 新版触发器**不读日志**，但夹具仍按"一条几分钟前停在那里的会话"这个**真形态**造 ——
+ * 这样万一日后有人把判据放回程序里，本夹具也不会因为"刚写出来的文件"而给出假读数。
  */
 function stageLog(events: Array<Record<string, unknown>>): { dshHome: string; cccRoot: string; cleanup: () => void } {
   if (zstd === undefined) throw new Error('本机 Node 无 zstdCompressSync')
-  const root = mkdtempSync(join(tmpdir(), 'cro-cross-'))
+  const root = mkdtempSync(join(tmpdir(), 'cro-attribution-'))
   const ccc = join(root, 'ccc')
   const slug = `--${ccc.split('/').filter(Boolean).join('-')}--`
   const dir = join(root, '.dsh', 'sessions', slug, 'session-target')
@@ -77,119 +96,152 @@ function stageLog(events: Array<Record<string, unknown>>): { dshHome: string; cc
   const frames = events.map((e) => zstd(Buffer.from(`${JSON.stringify(e)}\n`, 'utf8')))
   const logPath = join(dir, 'session.v4.jsonl.zstd')
   writeFileSync(logPath, Buffer.concat(frames))
-  // 回拨 mtime：**10 分钟前** ⇒ 远超 90s、远小于 8h。两端的量级差一个数量级以上，
-  // 不会因为将来微调阈值而变得黏在边界上。数值各自持有，不跨文件 import（CRO 不能 import ACC）。
-  const stagedAgeSec = 10 * 60
-  const t = new Date(Date.now() - stagedAgeSec * 1000)
+  const t = new Date(Date.now() - 10 * 60 * 1000) // 10 分钟前：远超任何"刚写过"阈值
   utimesSync(logPath, t, t)
   return { dshHome: join(root, '.dsh'), cccRoot: ccc, cleanup: () => rmSync(root, { recursive: true, force: true }) }
 }
 
-/** 跑 CRO，返回它是否 wake:true（= 它认为"有以 interrupted 结尾的会话"） */
-function croSaysInterrupted(events: Array<Record<string, unknown>>): boolean | null {
-  if (!existsSync(GUARD_CRO)) return null // 轨迹可能被归档/未建 ⇒ 本测试跳过（不是失败）
+/** 一次 CRO 调用的**原始输出**（保持原文，供"逐字相同"断言） */
+function croRaw(staged: { dshHome: string; cccRoot: string }, snapshot: Record<string, unknown>): string {
+  const res = spawnSync('bun', [GUARD_CRO], {
+    input: JSON.stringify({
+      identity: { dirName: 'guard', code: 'guard', cccRoot: staged.cccRoot },
+      time: { nowMs: Date.now() },
+      binding: { liveSessionIds: [], runningSessionIds: [] },
+      ...snapshot,
+    }),
+    encoding: 'utf-8',
+    env: { ...process.env, DSH_HOME: staged.dshHome },
+    timeout: 30_000,
+  })
+  return (res.stdout ?? '').trim()
+}
+
+/** 解析后的 wake 值；输出不可解析 ⇒ `null`（由调用方显式判红，不许静默放过） */
+function parseWake(raw: string): boolean | null {
+  if (raw === '') return null
+  try {
+    return (JSON.parse(raw) as { wake?: boolean }).wake === true
+  } catch {
+    return null
+  }
+}
+
+/** 造一份 staged 日志并跑一次 CRO，返回原始输出（用完即清） */
+function runWithLog(events: Array<Record<string, unknown>>, snapshot: Record<string, unknown>): string {
   const staged = stageLog(events)
   try {
-    const res = spawnSync('bun', [GUARD_CRO], {
-      input: JSON.stringify({
-        identity: { dirName: 'guard', code: 'guard', cccRoot: staged.cccRoot },
-        time: { nowMs: Date.now() },
-        binding: { liveSessionIds: [], runningSessionIds: [] },
-      }),
-      encoding: 'utf-8',
-      env: { ...process.env, DSH_HOME: staged.dshHome },
-      timeout: 30_000,
-    })
-    const out = (res.stdout ?? '').trim()
-    if (out === '') return null
-    const parsed = JSON.parse(out) as { wake?: boolean }
-    return parsed.wake === true
+    return croRaw(staged, snapshot)
   } finally {
     staged.cleanup()
   }
 }
 
-const interruptedTail = [
+// ── 两份**语义相反**的会话日志（本文件不解释它们"为什么"命中，那是 ACC 自己的用例的事）──
+const LOG_INTERRUPTED_TAIL = [
   { type: 'turn/start', time: 1000, data: { turn: 5 } },
   { type: 'step/start', time: 1001, data: { turn: 5, step: 1 } },
   { type: 'turn/end', time: 1002, data: { turn: 5, reason: { kind: 'interrupted' } } },
-  { type: 'step/end', time: 1003, data: { turn: 5, step: 1 } },
-  { type: 'session/end-seed', time: 1004, data: {} },
+  { type: 'session/end-seed', time: 1003, data: {} },
 ]
 
-const completedTail = [
+const LOG_COMPLETED_TAIL = [
   { type: 'turn/start', time: 1000, data: { turn: 5 } },
   { type: 'turn/end', time: 1002, data: { turn: 5, reason: { kind: 'completed' } } },
-  { type: 'session/end-seed', time: 1004, data: {} },
-]
-
-/** 曾经中断，但之后又继续跑过（最危险的误报形态） */
-const resumedAfterInterrupt = [
-  { type: 'turn/end', time: 1002, data: { turn: 5, reason: { kind: 'interrupted' } } },
   { type: 'session/end-seed', time: 1003, data: {} },
-  { type: 'turn/start', time: 2000, data: { turn: 6 } },
-  { type: 'user/message', time: 2001, data: { content: 'later' } },
 ]
 
-/**
- * 🔴🔴 **2026-10-23 新增（D210，owner 实测报障的病历本身）**：
- * 末轮 interrupted **之后**又追加了 `agent/inbox/spliced`（宿主重启后把待办消息重塞收件箱）。
- * 真机形态逐字为 `turn/end[interrupted] -> session/end-seed -> agent/inbox/spliced -> agent/inbox/spliced`。
- *
- * 旧判据要求「**末条** = end-seed」⇒ 这一格**恒不命中**，而实测本机有 **2 条**会话长这样
- * ⇒ 它们永远叫不醒。**这恰恰是"被恢复过、又再次被打断"的会话**，即最该被守护的那一类。
- */
-const interruptedThenInboxSpliced = [
-  { type: 'turn/start', time: 1000, data: { turn: 5 } },
-  { type: 'step/start', time: 1001, data: { turn: 5, step: 1 } },
-  { type: 'turn/end', time: 1002, data: { turn: 5, reason: { kind: 'interrupted' } } },
-  { type: 'session/end-seed', time: 1003, data: {} },
-  { type: 'agent/inbox/spliced', time: 1004, data: { target: 'main', start: 0, inserted: [] } },
-  { type: 'agent/inbox/spliced', time: 1005, data: { target: 'main', start: 0, inserted: [] } },
-]
-
-describe('判据交叉校验：ACC 的 detectInterruptedEnd ≡ 守护 CRO 的判定', () => {
-  const cases: Array<{ name: string; events: Array<Record<string, unknown>> }> = [
-    { name: '末条 end-seed ＋ interrupted ⇒ 命中', events: interruptedTail },
-    { name: '正常结束 ⇒ 不命中', events: completedTail },
-    { name: '曾经中断但已继续 ⇒ 不命中', events: resumedAfterInterrupt },
-    { name: '末条不是 end-seed ⇒ 不命中', events: [{ type: 'turn/start', data: { turn: 1 } }] },
-    // 🔴 D210：末轮 interrupted 之后只有非轮次事件（end-seed / inbox/spliced）⇒ **仍要命中**
-    { name: 'D210 末轮 interrupted ＋ 之后仅 inbox/spliced ⇒ 命中（不是"末条非 end-seed 就不命中"）', events: interruptedThenInboxSpliced },
-    // 🔴 与上一条配对的**反向钉**：中断之后真的又开了一轮 ⇒ 不命中（放宽没把误报放进来）
-    {
-      name: 'D210 反向钉：interrupted 之后又有 turn/start ⇒ 不命中',
-      events: [...interruptedThenInboxSpliced, { type: 'turn/start', time: 2000, data: { turn: 6 } }],
-    },
-  ]
-
-  /**
-   * 🔴 **前置条件必须单独断言成一条用例**，不能散在各用例里静默跳过。
-   *
-   * 初版把「CRO 文件找不到」处理成 `expect(true).toBe(true)` ⇒ 路径还写错了一级，
-   * 结果**4 个用例全绿、一个都没真跑**。⇒ 判据：**"跳过"与"通过"必须是两种不同的颜色**，
-   * 前置条件不成立要**显式红**，而不是悄悄放过。
-   */
-  it('前置条件：守护 CRO 程序必须能被找到（找不到 ⇒ 本条显式失败，不许静默跳过）', () => {
+describe('判据归属：ACC 判「有没有待恢复的会话」／守护程序判「要不要醒」', () => {
+  /** 🔴 规格 §4：前置条件**单独一条**，⛔ 不许静默跳过（初版就在这里假绿过） */
+  it('前置条件：守卫程序必须能被找到（找不到 ⇒ 本条显式失败，不许静默跳过）', () => {
     expect(
       existsSync(GUARD_CRO),
-      `找不到 CRO 程序：${GUARD_CRO}\n` +
-        '（若该轨迹已被归档/删除，请同步更新本测试的路径或删除本文件）',
+      `守卫程序缺失：${GUARD_CRO}\n` +
+        '（若该轨迹已被归档/删除 ⇒ 请更新 GUARD_CRO_PATH 或删除本文件；⛔ 不要改成静默跳过）',
     ).toBe(true)
   })
 
-  for (const c of cases) {
-    it(`两边判定一致：${c.name}`, () => {
-      const accHit = detectInterruptedEnd(c.events as never) !== null
-      const croHit = croSaysInterrupted(c.events)
+  /**
+   * 🔴🔴 **规格 §1 —— 本文件的核心那一条。**
+   *
+   * 同一份快照，分别喂**语义相反**的两份日志（甲：末轮 interrupted ／ 乙：正常完成）：
+   * ⇒ **CRO 的输出必须逐字相同**（wake 与 reason 都同）。谁再把判据复算进程序里，这条立刻红。
+   *
+   * ## 🔴 快照为什么取 **窗口外（ticks=3 ⇒ 第 4 拍）**——这一格是变异检验逼出来的
+   *
+   * 我第一版取的是 `ticks=1`（窗口内 ⇒ 本来就该 wake:true）。**那次变异检验假绿了**：
+   * 我在程序里注入"真去读日志、判出 interrupted 就唤醒"的变异 ⇒ **测试仍然全绿** ——
+   * 因为两份日志的 tick 都是 1，输出本来**都是 true**，注入的变异根本**改变不了**结果。
+   * ⇒ **判据（D222 同族）：不变性断言必须放在"两份输入本会产生不同结果"的那一格上。**
+   *   窗口内两边都唤醒 ⇒ 观察不到差异；**窗口外两边都该沉默** ⇒ 谁偷读日志、谁就当场暴露。
+   *
+   * ⚠️ 这也解释了为什么"wake 相同"不够：本格真正的观察量是**沉默的一致性**。
+   */
+  it('🔴 判据不变性：同一快照 ＋ 语义相反的两份日志 ⇒ CRO 输出**逐字相同**（窗口外）', () => {
+    // ticks=3 ⇒ 当前第 4 拍 ⇒ **已过唤醒窗口** ⇒ 两份日志都该沉默
+    const snapshot = { scheduling: { scheduler: { ticks: 3 } } }
+    const rawA = runWithLog(LOG_INTERRUPTED_TAIL, snapshot)
+    const rawB = runWithLog(LOG_COMPLETED_TAIL, snapshot)
 
-      // 走到这里前置条件已由上面的用例保证；真的拿不到输出 ⇒ 这是环境问题，必须红而不是绿
-      expect(croHit, 'CRO 没有产出可解析的决策（bun 不可用？程序报错？）').not.toBeNull()
-      expect(
-        croHit,
-        `ACC 判「${accHit ? '命中' : '不命中'}」而 CRO 判「${croHit ? '命中' : '不命中'}」` +
-          ' —— 两侧判据已漂移，守护轨迹会永远叫不起来（或狂叫）',
-      ).toBe(accHit)
+    expect(rawA, 'CRO 没有产出可解析的决策（bun 不可用？程序报错？）').not.toBe('')
+    expect(rawB).not.toBe('')
+    expect(
+      parseWake(rawA),
+      '窗口外却唤醒了 ⇒ 它按日志内容（interrupted）自己判了 —— 判据被重复实现',
+    ).toBe(false)
+    expect(
+      rawA,
+      '同一快照下，"命中"与"不命中"两种日志产出了不同输出 ⇒ 守护程序又在自己判 interrupted 了' +
+        `（职责边界被破坏）。甲=${rawA} ／ 乙=${rawB}`,
+    ).toBe(rawB)
+  })
+
+  /**
+   * 🔴 **同一条不变性的另一侧：窗口内也必须是"纯触发"**。
+   *
+   * 与上一条互补：窗口内两份日志**都该唤醒**（因为唤不唤醒只由拍数决定）。
+   * ⚠️ 单独一条的价值：如果哪天有人把窗口逻辑写错成"永不唤醒"，上一条会绿（都是 false），
+   *    而本条会红 —— **两条一起才把"由拍数决定"这件事钉成双向**。
+   */
+  it('🔴 判据不变性（另一侧）：窗口内 ＋ 两份语义相反的日志 ⇒ **都唤醒**（唤不唤醒只由拍数决定）', () => {
+    const snapshot = { scheduling: { scheduler: { ticks: 1 } } }
+    expect(parseWake(runWithLog(LOG_INTERRUPTED_TAIL, snapshot)), '窗口内应当唤醒').toBe(true)
+    expect(parseWake(runWithLog(LOG_COMPLETED_TAIL, snapshot)), '窗口内应当唤醒（与日志内容无关）').toBe(true)
+  })
+
+  /** 🔴 规格 §2：触发敏感性 —— 同一日志，只改 ticks */
+  it('🔴 触发敏感性：ticks 0 ⇒ 不醒 ／ 1 ⇒ 醒 ／ 3 ⇒ 不醒', () => {
+    const at = (ticks: number): boolean | null =>
+      parseWake(runWithLog(LOG_COMPLETED_TAIL, { scheduling: { scheduler: { ticks } } }))
+
+    const t0 = at(0) // 当前第 1 拍 = 启动即跑那拍，宿主未就绪
+    const t1 = at(1) // 当前第 2 拍 = 主唤起窗口
+    const t3 = at(3) // 当前第 4 拍 = 已过窗口
+    expect(t0, 'CRO 没有产出可解析的决策').not.toBeNull()
+    expect(t1, 'CRO 没有产出可解析的决策').not.toBeNull()
+    expect(t3, 'CRO 没有产出可解析的决策').not.toBeNull()
+    expect(t0, '第 1 拍（宿主未就绪）不该醒').toBe(false)
+    expect(t1, '第 2 拍是主唤起窗口，必须醒').toBe(true)
+    expect(t3, '第 4 拍已过窗口，不该醒').toBe(false)
+  })
+
+  /** 🔴 规格 §3：缺字段不崩 */
+  it('🔴 缺字段不崩：快照无 `scheduling` ⇒ wake:false 且产出可解析 JSON', () => {
+    const raw = runWithLog(LOG_COMPLETED_TAIL, {})
+    expect(raw, '缺字段时没有产出任何东西（应当给一个可解析的 JSON 决策）').not.toBe('')
+    const wake = parseWake(raw)
+    expect(wake, `缺字段时输出不可解析：${raw}`).not.toBeNull()
+    expect(wake, '缺 ticks 时不该醒（fail-closed）').toBe(false)
+  })
+
+  /** 🔴 护栏（与拍数无关）：本轨迹自己在跑 ⇒ 不自我唤醒 */
+  it('🔴 护栏：本轨迹正在跑 ⇒ 不自我唤醒（即便正在唤醒窗口内）', () => {
+    const raw = runWithLog(LOG_INTERRUPTED_TAIL, {
+      scheduling: { scheduler: { ticks: 1 } },
+      binding: { liveSessionIds: ['sess-x'], runningSessionIds: ['sess-x'] },
     })
-  }
+    const wake = parseWake(raw)
+    expect(wake, 'CRO 没有产出可解析的决策').not.toBeNull()
+    expect(wake, '自己正在跑时不该自我唤醒').toBe(false)
+  })
 })
