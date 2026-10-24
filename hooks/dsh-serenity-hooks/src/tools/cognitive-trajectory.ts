@@ -468,57 +468,28 @@ function renderText(value: unknown): ContentBlock[] {
 export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof defineTool> {
   return defineTool({
   name: 'cognitive_trajectory',
-  // 🔴 本描述按 **EAP 五层压缩层级**组织（owner 令 2026-10-16；2026-10-20 二次重写）。
-  //    用**数组 join** 而非一长串 `+`：每个元素 = 一层，层的边界在源码里可见；
-  //    旧写法把身份/动作/参数平铺成流水，读的人必须自己重建结构（低 E）。
+  // 🔴 本描述按 **EAP 五层压缩层级**组织（owner 令 2026-10-16；2026-10-20 二次重写；
+  //    2026-10-24 三次重写 = owner 令「用符合 EAP 的自然语言」）。
+  //    用**数组 join** 而非一长串 `+`：每个元素 = 一段，段的边界在源码里可见。
   //    ⚠️ 相邻字符串字面量在 JS 里**不会**自动拼接（那不是 JS 语法）——必须显式 join 或 `+`。
-  //    🔴 层名与 EAP §7.2 的五个 Tier **逐字对应**（公理/本体/拓扑/动力学/表面），今后加内容先归层。
+  //    🔴 第三版的关键改动是**行文形态**：前两版用全大写 + 斜杠枚举 + ⇒ 箭头做压缩标记，
+  //       那**把重建成本推给读者**（EAP 反对的形态）。本版全部改为自然英语散文，
+  //       句子自己承担结构；段落顺序仍对应五层（公理/本体/拓扑/动力学/表面）。
+  //    🔴 join 分隔符是 `\n\n` 而非空格：自然语言靠**段落**分段，粘成一行会毁掉这一点。
+  //    🔴 判据守恒：66 条语义逐条仍在（校验件 = AGENT_SESSIONS/S142 的 prompt-cost11.dev.test.ts）。
   description: [
-    // ════ Tier 1 · 公理与意图层（最大压缩：不变式 ＋ 严格不做项）════
-    'A COGNITIVE TRAJECTORY is a durable body (SESSION.md) that outlives every conversation carrying it.',
-    'AXIOM 1 — THE TRAJECTORY IS THE SUBJECT; THE CONVERSATION IS ITS CARRIER. Rebuilding the carrier replaces the conversation and leaves SESSION.md byte-identical.',
-    'AXIOM 2 — A TRAJECTORY HAS NO LIFECYCLE. It never completes, closes, or expires, and age never counts against it. The only thing that changes is WHERE it is stored: archive moves it out of the active list without touching its directory.',
-    'AXIOM 3 — IDENTITY IS THE CODE: the fixed-position segment of the directory name `YYYY-MM-DD--<code>[--<desc>]`. The code (not the summary, not the title) is the unique identifier, and create --id lets you choose it.',
-    'DOES NOT: this tool never deletes a trajectory, never edits SESSION.md content, and never schedules recurring work (that is cro-guide).',
-    // ════ Tier 2 · 本体与概念层（高压缩：实体 ＋ 不可变规则）════
-    'ENTITIES. TRAJECTORY = a directory under AGENT_SESSIONS/ holding SESSION.md. CARRIER = a dsh session bound to it. BINDING DECLARATION = the file `<trajectory>/current.dsh_session_bind` — ONE FILE PER TRAJECTORY, a single slot, never a table.',
-    'IMMUTABLE 1 — ONE SESSION BELONGS TO AT MOST ONE TRAJECTORY, FOR LIFE. use refuses to move a session that already carries a different trajectory. There is NO --force override (retired 2026-10-20; passing it returns a refusal explaining why). To give another trajectory a carrier, open a new session.',
-    'IMMUTABLE 2 — ONE TRAJECTORY HAS AT MOST ONE CURRENT CARRIER, and THE BINDING DECLARATION IS THE ONLY TRUTH. If several dsh sessions happen to be open, only the one named in the declaration carries the trajectory; the others are simply unbound. Never infer a binding from "a session looks active".',
-    'IMMUTABLE 3 — A DECLARATION WHOSE SESSION NO LONGER EXISTS COUNTS AS UNBOUND. No cleanup is ever required, and a stale declaration is deliberately left in place: it records who carried this trajectory last.',
-    // ════ Tier 3 · 拓扑与结构层（中压缩：动作按效果分组 = 关系图）════
-    'ACTIONS, GROUPED BY EFFECT — read the grouping before choosing, because it answers "does this change what I am bound to?":',
-    '(A) LIFECYCLE — changes which cognitive trajectory THIS conversation is bound to:',
-    'list (inventory + stats) / show (read one SESSION.md) / create (make a NEW trajectory) / use (bind THIS conversation) / rebuild (clear-and-rebuild THIS conversation in place) / archive (move a trajectory out of the active list; one-way, never overwrites).',
-    '(B) DELIVERY — sends ONE message to ANOTHER trajectory; your own binding is unchanged: send-now (right now) / send-later (one future instant).',
-    '(C) REFERENCE — cro-guide: how to give a trajectory its own program that decides when it should be woken.',
-    '(D) INSPECTION — interrupted: list dsh sessions whose LAST turn did not finish — reason.kind is "interrupted" (process died; the host synthesised the closer on resume) OR "aborted" (terminated normally: restart, dispose, user cancel). Both mean "this turn did not complete"; picking only one misses an entire class. PURE READ: no periodic scheduling, no auto-continue, no log mutation — deciding IF/WHEN/WHICH to resume belongs to the calling trajectory (this is the "entry point only" contract). The criterion is EXACTLY "the last turn did not finish", NOT "was ever interrupted": one long session may have been interrupted dozens of times historically, and treating those as pending would resurrect sessions that already recovered. Each hit reports the turn number and the tool names that had a call but no result (best-effort — those side effects are UNKNOWN, so re-running them blindly is dangerous).',
-    // ════ Tier 4 · 动力学与逻辑层（低压缩：选择规则 ＋ 边界情形）════
-    'HOW TO CHOOSE (a rule, not a guess):',
-    'not yet bound + starting new work ⇒ create (with no prior binding it activates immediately, so the new trajectory has a carrier at once).',
-    'already bound + recording a SEPARATE future line ⇒ create (it does NOT steal your binding; activate the new one later by send-now).',
-    'want THIS conversation to move ⇒ use. It refuses if this session already carries another trajectory (IMMUTABLE 1) — that refusal is the design, not an error to work around.',
-    'want to make another trajectory act ⇒ send-now. The target needs no prior setup: if it has no live session, one is created and bound automatically, and your message is injected.',
-    'RECEIPTS (read no more than is written): send-now returns a synchronous receipt meaning exactly "injected / turn started" — NEVER "the target ran or replied". To prove the target actually moved, read its SESSION.md.',
-    'send-now never queues behind the current turn: a busy target is steered mid-turn (read in the CURRENT turn), an idle target starts a turn at once.',
-    'send-later is fire-and-forget by design: no receipt, no recall, no panel.',
-    'ASYMMETRY (deliberate): send-now may create a missing carrier; send-later NEVER does. Scheduling for a trajectory that never existed is almost always a mistyped name, and auto-creating would hide that error.',
-    'CARRIER GUARD: send-now auto-creates a carrier ONLY for a trajectory that has never had one. If a declaration exists but its session is gone, it refuses and says so — one trajectory keeps one carrier. Two independent gates can refuse: (a) the declared session cannot be resolved at all; (b) it existed and is now gone.',
-    // ════ Tier 5 · 表面与产物层（零压缩：逐参数前置条件）════
-    'PARAMETERS: create needs --desc <desc> [--id <code>] [--goal], OR --issue <ticket> (exactly one), PLUS --summary (≤20 chars).',
-    'use needs --name + --summary (≤20 chars). --force is ACCEPTED BUT REFUSED (retired): it exists only to explain why.',
-    'rebuild needs --summary (next-phase, ≤20 chars) + optional --note (≤200 chars, task focus for the rebuilt self).',
-    'send-now needs target + message. send-later needs target + at (RFC3339 with timezone, or +30m / +2h) + message.',
-    'target/name accept a code (S### or custom), a full AGENT_SESSIONS directory name, or a fuzzy keyword.',
-    'AUTHORIZATION (read before creating anything): create and send-now both cost real work and must serve a human intent. Call create only when the user asked for a new line of work (or confirmed it) — never to "tidy up" or pre-provision what nobody requested. When in doubt, ask instead of creating. This is a behavioral rule, not a mechanical gate: treat it as etiquette with a cost.',
-    'uid: READS a legacy TRAJECTORY-UID only. Setting one is retired — a trajectory\'s code is its identity now; use create --id <code>.',
-    'summary is appended to the dsh session title as <code>-<date>-<summary>; the code and date stay server-derived unless you pass --id.',
-    // ════ 手册指针（owner 2026-10-20：「这是认知轨迹感知理解这些边界的重要手册」）════
-    // 🔴 为什么必须在这里：手册正文住在 container_admin 的说明章里，而**写自我声明的人**
-    //    用的是本工具 —— 没有这条指针，那份手册在事实上不可发现（此前正是如此）。
-    'SELF-DECLARATION MANUAL — how to write your own charter (PROMPT.md), declare yourself resident',
-    '(trajectory.json `resident.serves`), or restrict yourself (tool/model whitelists):',
-    'container_admin config docs trajectory-self. Read it before changing any file in your own directory.',
-  ].join(' '),
+    'A cognitive trajectory is a durable body — its SESSION.md — that outlives every conversation carrying it.',
+    'Three axioms hold. The trajectory is the subject and the conversation is only its carrier, so rebuilding the carrier leaves SESSION.md byte for byte identical. A trajectory has no lifecycle: it never completes, closes, or expires, and its age never counts against it — only where it is stored changes, so archiving removes it from the active list without touching its directory. And identity is the code, the fixed `YYYY-MM-DD--<code>[--<desc>]` segment of the directory name, never the summary or the title; create --id chooses it.',
+    'What this tool never does: it never deletes a trajectory, never edits the content of SESSION.md, and never schedules recurring work, because that belongs to cro-guide.',
+    'A trajectory is a directory under AGENT_SESSIONS/ holding a SESSION.md, a carrier is a dsh session bound to one, and the binding declaration is the file current.dsh_session_bind inside the trajectory: one file per trajectory, a single slot, never a table.',
+    'Three rules are immutable. A session belongs to at most one trajectory for its whole life, so use refuses a session already carrying another, and there is no --force override — that flag was retired on 2026-10-20 and now only explains why; to give another trajectory a carrier, open a new session. A trajectory has at most one current carrier, and the binding declaration is the only truth about which, so other open sessions are simply unbound; never infer a binding from a session looking active. A declaration whose session no longer exists counts as unbound, and no cleanup is required, because a stale declaration deliberately records who carried the trajectory last.',
+    'Actions are grouped by effect, and the grouping answers one question: would this change what I am bound to? The lifecycle group does change this conversation\'s binding — list, show, create, use, rebuild, and archive, where archiving is one-way, never overwrites, and leaves content untouched. The delivery group sends one message to another trajectory and leaves your own binding alone — send-now and send-later. One action is a reference rather than an operation: cro-guide explains how to give a trajectory its own program deciding when it should be woken. The inspection action is read-only: interrupted returns the dsh sessions whose last turn did not finish. A turn is unfinished when its reason.kind is "interrupted", meaning the process died, or "aborted", meaning it ended normally through a restart, a dispose, or a cancel; both mean the turn did not complete, so taking only one would miss a whole class. It schedules nothing, continues nothing, and mutates no log — deciding whether and when to resume belongs to the caller. The criterion is exactly "the last turn did not finish", never "was ever interrupted", since one long session may have been interrupted dozens of times and already recovered. Each hit also names the turn number and the tools that made a call without a result, but those side effects are unknown, so do not re-run them blindly.',
+    'Choose by rule, not by guess. Not yet bound and starting new work: create, which activates itself at once when there is no prior binding. Already bound and recording a separate future line: also create, since that leaves your binding intact and you can activate it later with send-now. Want this conversation to move: use, and treat its refusal — when the session already carries another trajectory — as the design rather than an error to work around. Want another trajectory to act: send-now, whose target needs no prior setup, since a live session is created, bound, and injected when none exists.',
+    'Read a receipt for no more than it says. send-now returns a synchronous receipt meaning the message was injected and the turn started; it never means the target ran or replied, and to prove the target moved you must read its SESSION.md. send-now never queues behind the current turn — a busy target is steered mid-turn while an idle one starts at once. send-later is fire-and-forget by design, with no receipt and no recall.',
+    'The asymmetry is deliberate: send-now may create a missing carrier, send-later never does, because scheduling work for a trajectory that never existed is almost always a mistyped name. A carrier guard applies to send-now: it creates a carrier automatically only for a trajectory that has never had one, and otherwise refuses, either because a declaration exists but its session is gone or because the declared session cannot be resolved at all — one trajectory keeps one carrier.',
+    'For parameters: create needs --desc with optional --id and --goal, or --issue instead, exactly one of those two forms, plus --summary of at most 20 characters. use needs --name and --summary. rebuild needs --summary naming the next phase in at most 20 characters, plus an optional --note of at most 200 characters stating the task focus for the rebuilt self. send-now needs a target and a message; send-later needs a target, an instant as RFC 3339 with a timezone or a relative form like +30m or +2h, and a message. A target or name may be a code such as S### or a custom one, a full AGENT_SESSIONS directory name, or a fuzzy keyword. --force is still accepted but always refused, being retired and existing only to explain why. uid reads a legacy TRAJECTORY-UID only, since setting one is retired and the code is now the identity. summary is appended to the dsh session title alongside the code and date, which stay server-derived unless you pass --id.',
+    'Two rules of conduct, not operations. create and send-now both cost real work and must serve a human intent, so call create only when the user asked for a new line of work or confirmed one — never to tidy up and never to pre-provision what nobody requested; when in doubt, ask. That is etiquette with a cost rather than a mechanical gate. And to describe yourself rather than operate: your own charter in PROMPT.md, a resident declaration through resident.serves in trajectory.json, and self-restriction by tool and model whitelists all live in container_admin config docs trajectory-self — read that chapter before changing any file in your own directory.',
+  ].join('\n\n'),
   parameters: {
     action: {
       type: 'string',
