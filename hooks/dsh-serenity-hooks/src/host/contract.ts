@@ -321,10 +321,10 @@ type HostEventName = (typeof HOST_EVENT_NAMES)[number]
  * dsp 订阅的宿主事件清单（与 HOST_EVENT_NAMES 同源；impact/site 供 health 报告与文档）。
  */
 export const HOST_EVENTS: readonly HostEventContract[] = [
-  { name: 'agent/created', site: 'seams/context.ts, gateway.ts, cro-turns.ts, index.ts', impact: 'ACC 身份播种失效（identity + 工具可见性/restrict 不播种）', required: true },
+  { name: 'agent/created', site: 'seams/context.ts, gateway.ts, index.ts', impact: 'ACC 身份播种失效（identity + 工具可见性/restrict 不播种）', required: true },
   { name: 'agent/pre-step', site: 'seams/context.ts, seams/bootstrap.ts', impact: '上下文注入/首轮锚定失效', required: true },
   { name: 'agent/turn-stopping', site: 'rebuild.ts, output-guard-seam.ts', impact: 'rebuild 不执行 / 输出守卫失效', required: true },
-  { name: 'agent/status', site: 'trajectory-session.ts, tools/cheap-worker.ts', impact: '等待空闲逻辑失效', required: false },
+  { name: 'agent/status', site: 'trajectory-session.ts, tools/cheap-worker.ts, cro-turns.ts', impact: '等待空闲逻辑失效 / CRO「在跑」表恒空', required: false },
   { name: 'agent/inbox/inserted', site: 'seams/bootstrap.ts', impact: 'fake-initial-turns 注入失效', required: false },
   { name: 'agent/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
   { name: 'session/event', site: 'seams/compact.ts, seams/bootstrap.ts', impact: '压缩后重注入/晋升状态失效', required: false },

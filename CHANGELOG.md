@@ -1,3 +1,73 @@
+## v1.95.0 — 2026-10-24（🔴🔴 **`liveIds` 排除过宽：把「载入」当「在跑」⇒ `interrupted` 把最该接走的会话藏起来**）
+
+**来源**：本轨迹（S142）本轮实测发现 —— `cognitive_trajectory interrupted` 在**真有**未跑完会话时
+报「检查 5 个 · 命中 0」。已登记为 **D243**。
+
+---
+
+### 一、修前：同一根因的两个面
+
+`src/cro/turns.ts` 的 `agent/created` 订阅会 `markTurnRunning(...)`。而该事件是
+`AgentRegistry.announce(agent, source)` 发的，**`source` 明确包含 `resume`** ——
+宿主**每次重启**都会把 persisted 会话重新载入并 announce 一遍。
+
+⇒ **每个被「载入」的会话都被打成「在跑」**，而**它那一轮早随旧进程死掉了**
+（`agent/turn-stopping` 永不到）⇒ 该假标记活满 `TURN_TTL_MS`（30 分钟）。
+
+| 面 | 谁在消费这张表 | 代价（均已实测） |
+|---|---|---|
+| **面一** | CRO 守卫（`wake/`） | 拿它否决唤起 ⇒ **重启后聋 30 分钟**（guard 已在自己域绕开） |
+| **面二** | `cognitive_trajectory interrupted`（本轮发现） | 拿它当排除集 ⇒ **把该唤醒的藏起来**（判据命中 5 条，生产入口报命中 0） |
+
+### 二、修法：`agent/created` 不再置位，只认 `agent/status=running`
+
+**判据**：「载体被发布」≠「有轮次在跑」。两者互不蕴含（与 D225 同族：*字段名不是语义*）。
+
+- **删**：`cro/turns.ts` 中对 `agent/created` 的订阅（订阅数 5 → 4）；
+- **留**：`agent/status` —— 它是宿主 `AgentLoop.status` getter 的直接投影
+  （`phase.kind === 'idle' | 'maintenance'` 才是 idle，其余皆 running），且**只在状态真的跃迁时发**；
+  每次真正开轮必然是 `idle → running` ⇒ **粒度正好**；
+- **顺带修正一处 payload 误读**：宿主原文 `emit("agent/status", { status })` —— **没有 `turn` 字段**，
+  原代码 `typeof p.turn === 'number'` 恒为 false（无害但属"照意图抄"）。已删除该读取。
+
+### 三、代价与兜底（为什么这个方向是安全的）
+
+删掉 `agent/created` 后，本表在「宿主刚重启、某会话真正开跑之前」为空 ⇒
+落到本模块文件头那条**便宜**的误判方向：**报"没跑"** ⇒ 最多**多唤起一次**（常态成本），
+⛔ 而不是**藏起该唤醒的**（硬故障）。
+
+### 四、测试：3 条用例按 D184 改钉（**钉旧规则，非放宽**）
+
+| # | 原名 | 原前提 | 处理后 |
+|---|---|---|---|
+| 1 | 订阅的 5 个事件名全在契约表里 | 含 `agent/created` | 改「4 个」；**原意（防名字写错）完全保留** |
+| 2 | `agent/created` ⇒ 标记在跑 | 钉的**正是要废除的行为** | **反向钉**：「`agent/created` ⇒ **不**置位」 |
+| 3 | 拆卸 ⇒ 表清空 | 用 `agent/created` 造表 | 改用 `agent/status=running` 造表 |
+
+配套：`host/contract.ts` 的 `HOST_EVENTS` 登记面同步改（`cro-turns.ts` 从 `agent/created` 的 `site`
+移到 `agent/status` 的 `site`）——否则那份"谁订阅了什么"的声明会**撒谎**。
+
+**变异检验**：把 `agent/created` 的置位加回去 ⇒ **恰好 2 红**（第 1、2 条），其余 24 绿
+⇒ 新判据承重，且**红的位置正是钉它的那两条**（D223）。
+
+### 五、真机验收（真日志，不是测试绿）
+
+本机 `~/.dsh/sessions/--home-yh-home-home-serenity--/` 8 小时窗口：
+
+| 读数 | 修前（v1.94.0，生产入口） | 修后（离线同实现，`liveIds` 为空集） |
+|---|---|---|
+| 检查 | **5**（被排除集砍掉一半） | **10**（= 窗口内总数） |
+| 命中 | **0** | **3**（turn 58 / 48 / 105，均含未完成工具调用） |
+
+🔴 **为什么修后离线读数取「`liveIds` 为空集」**：测试进程从未收到宿主事件 ⇒ 表为空，
+这**正好等价于"重启后、无人真在跑"的状态**，也就是本缺陷暴露得最厉害的那一态。
+线上重启后再跑一次 `interrupted` 才是最终判据（发布后复测）。
+
+### 六、门禁
+
+typecheck ✓ ｜ typecheck-host `0.2.1-rc.2` ✓ ｜ test **204 files / 3202 tests** ✓ ｜
+coverage 95.46 ✓ ｜ build ✓ ｜ pack-check 161 文件 ✓
+
 ## v1.94.0 — 2026-10-24（🔴🔴 **入站不再排队：轨迹正在跑时消息当场进当前轮（`steer`）**）
 
 **来源（owner 原话）**：「**当用户消息进来，且绑定轨迹正在活动时，消息是排队而不是直接进入，

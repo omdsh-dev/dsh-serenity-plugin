@@ -8,14 +8,34 @@
  * 调度器只掌握**会话 live 与否**，而 **`live ≠ 在跑`**——
  * 一条会话可以 live 而空闲（本会话此刻就是活的反例）。
  *
- * ## 怎么夹出来（用**既有的**两个契约事件，不需要新宿主能力）
+ * ## 怎么夹出来（用**既有的**契约事件，不需要新宿主能力）
  *
  * | 事件 | 动作 | 出处 |
  * |---|---|---|
- * | `agent/created` | 标记「在跑」 | `host/contract.ts`（dsp 已在 `seams/context.ts` 订阅）。⚠️ v0.1.7 前名为 `agent/session-start`；新事件 `@mode = serial` ⇒ 处理函数须快速返回 |
- * | `agent/turn-stopping` | 清除标记 | `host/contract.ts:277`（dsp 已在 `trajectory/rebuild.ts:442` 等 4 处订阅） |
- * | `agent/disposed` | **清该载体的项** | `host/contract.ts:280` |
- * | `session/disposed` | **清该载体的项** | `host/contract.ts:283` |
+ * | `agent/status` = `running` | 标记「在跑」；`idle` ⇒ 清除 | 宿主 `AgentLoop.setPhase`：`emit("agent/status", { status })`，**只在状态真的变化时发** |
+ * | `agent/turn-stopping` | 清除标记 | `host/contract.ts`（dsp 已在 `trajectory/rebuild.ts` 等 4 处订阅） |
+ * | `agent/disposed` | **清该载体的项** | `host/contract.ts` |
+ * | `session/disposed` | **清该载体的项** | `host/contract.ts` |
+ *
+ * ## 🔴🔴 D243（2026-10-24）：**⛔ 不许用 `agent/created` 标记「在跑」**
+ *
+ * **修前**：`agent/created` 也 `markTurnRunning(...)`。**为什么这是错的** —— 该事件是
+ * `AgentRegistry.announce(agent, source)` 发的，而 `source` 明确包含 **`resume`**：
+ * 宿主**每次重启**都会把 persisted 会话重新载入并 announce ⇒ 每个被**载入**的会话都被打成"在跑"，
+ * 而**它那一轮早随旧进程死掉了** ⇒ `turn-stopping` 永不到达 ⇒ 该假标记活满 `TURN_TTL_MS`（30 min）。
+ *
+ * **代价（两个面，都已实测）**：
+ * - **面一**：CRO 守卫拿它否决唤起 ⇒ **重启后聋 30 分钟**（guard 已在自己域绕开）。
+ * - **面二**：`cognitive_trajectory interrupted` 拿它当排除集 ⇒ **把最该被接走的会话藏起来**
+ *   （实测：判据命中 5 条，生产入口报「检查 5 · 命中 0」）。
+ *
+ * **判据**：`agent/created` 证明的是「**载体被发布了**」，**不是**「有轮次在跑」。
+ * 「载入」与「在跑」互不蕴含（与 D225 同族：*字段名/字面形态不是语义*）。
+ * ⇒ **唯一权威 = `agent/status`**（宿主 `status` getter：`phase.kind === 'idle' | 'maintenance'`
+ * 才是 idle，其余皆 running），且它在**每次真实状态跃迁**时发 —— 正是我们要的粒度。
+ *
+ * **代价与兜底**：删掉 `agent/created` 后，本表在"宿主重启后、某会话真正开跑之前"为空
+ * ⇒ 落到文件尾那条**便宜**的误判方向（报"没跑"），不会被拿来藏会话。
  *
  * ## 🔴 清理设计（**这是本模块最容易被做坏的地方**）
  *
@@ -57,16 +77,16 @@ export const TURN_TTL_MS = 30 * 60 * 1000
 interface TurnRecord {
   /** 最近一次确认「在跑」的时刻（epoch ms） */
   at: number
-  /** 该轮序号（诊断用；宿主 payload 里有 `turn`） */
+  /** 该轮序号（诊断用；**来自 `markTurnRunning` 的显式入参**，事件 payload 里没有它） */
   turn: number | null
 }
 
 /**
  * 进程内的「正在跑」表（键 = 载体 dsh 会话 id）。
  *
- * ⚠️ **仅内存**：进程重启即空 —— 这是**可接受的**，因为重启后宿主会重发
- * `agent/created`（或至少下一次 `turn-stopping` 会清掉残留），且空表 = "没有在跑"，
- * 落到上面那条**便宜**的误判方向。
+ * ⚠️ **仅内存**：进程重启即空 —— 这是**可接受的，且是刻意选的**：
+ * 空表 = "没有在跑" ⇒ 落到上面那条**便宜**的误判方向（漏排是硬故障、多排是常态成本）。
+ * 🔴 **D243**：刻意**不**在重启后用 `agent/created` 去"补"这张表 —— 那会把「载入」当「在跑」。
  */
 const runningBySession = new Map<string, TurnRecord>()
 
@@ -76,7 +96,7 @@ function sessionIdOf(agent: unknown): string | null {
   return typeof id === 'string' && id !== '' ? id : null
 }
 
-/** 标记「在跑」（`agent/created` + `agent/status=running` 调用） */
+/** 标记「在跑」（**唯一**生产调用点 = `agent/status=running`；另供测试与 CRO 自检置位） */
 export function markTurnRunning(sessionId: string, nowMs: number, turn: number | null = null): void {
   if (!sessionId) return
   runningBySession.set(sessionId, { at: nowMs, turn })
@@ -135,9 +155,12 @@ export function __resetCroTurnsForTest(): void {
  * 装配追踪（`index.ts` apply 调用）：订阅四个既有事件 + 拆卸。
  *
  * **为什么订阅四个而不是两个**（R↓）：
- * · 前两个（`agent/created` / `turn-stopping`）负责**语义**——"在不在跑"；
+ * · 前两个（`agent/status` / `turn-stopping`）负责**语义**——"在不在跑"；
  * · 后两个（`agent/disposed` / `session/disposed`）负责**生命周期**——
  *   载体没了必须清项，否则表按载体只增（本模块的头号风险）。
+ *
+ * 🔴 **D243：`agent/created` 已于 2026-10-24 从订阅清单中移除**（原先共 5 个）。
+ *    理由与代价见**文件头 D243 段**；一句话：它是「载体被发布」的信，不是「轮次在跑」的信。
  *
  * ⚠️ **失败不抛**：任一事件通道缺失 ⇒ 响亮日志 + 该订阅跳过（**apply 不可成为启动单点**，
  * 与 `registerDeepseekVisionPatch` 等既有装配同款纪律）。
@@ -171,18 +194,15 @@ export function registerCroTurnTracking(ctx: unknown): void {
     }
   }
 
-  // ① 开轮：agent/created（新会话首次进入；v0.1.7 前名 session-start）+ status=running（每次开轮都会发）
-  on('agent/created', (payload) => {
-    const id = sessionIdOf((payload as { agent?: unknown })?.agent)
-    if (id) markTurnRunning(id, Date.now())
-  })
+  // ① 开轮：**只认** `agent/status=running`（见下方 D243 段，⛔ 不要把 `agent/created` 加回来）
   on('agent/status', (payload) => {
-    const p = payload as { agent?: unknown; status?: unknown; turn?: unknown }
+    const p = payload as { agent?: unknown; status?: unknown }
     const id = sessionIdOf(p?.agent)
     if (!id) return
-    const turn = typeof p.turn === 'number' ? p.turn : null
     // 只在 running 时报"在跑"；idle ⇒ 清（status 是轮次状态的权威）
-    if (p.status === 'running') markTurnRunning(id, Date.now(), turn)
+    // ⚠️ payload **只有 `status`**（宿主 `AgentLoop.setPhase` 原文：`emit("agent/status", { status })`）
+    //    ⇒ 不再读不存在的 `turn`；轮次序号仍可由 `markTurnRunning` 第三参传（其它调用方用）。
+    if (p.status === 'running') markTurnRunning(id, Date.now())
     else if (p.status === 'idle') clearTurnRunning(id)
   })
 

@@ -13,8 +13,16 @@
  * ## 第二条重点：**订阅的事件名真的存在**（"接口 200 ≠ 内容到了"）
  *
  * 宿主事件是**字符串键**：名字写错**不会报错**，只会**静默不订阅**——正是本模块注释里
- * 自己点出的风险。⇒ 本文件把"装配时实际订阅的 5 个名字"抓下来，与宿主契约表
+ * 自己点出的风险。⇒ 本文件把"装配时实际订阅的 4 个名字"抓下来，与宿主契约表
  * `HOST_EVENTS`（单一真相源）**逐个比对**。这条能机械挡住未来的一次改名/笔误。
+ *
+ * ## 第四条（D243，2026-10-24 新增）：**`agent/created` 不得标记「在跑」**
+ *
+ * 「载体被发布」≠「有轮次在跑」。宿主**重启会把 persisted 会话全部 announce 一遍**
+ * ⇒ 若拿 `agent/created` 置位，每个被**载入**的会话都成了"在跑"，
+ * 而那一轮早死了（`turn-stopping` 永不到 ⇒ 假标记活满 TTL 30 min）。
+ * 代价已实测：`interrupted` 扫描把它当排除集 ⇒ **把最该被接走的会话藏起来**。
+ * ⇒ 本文件**反向钉死**这条：`agent/created` 必须**不**置位；只有 `agent/status=running` 才置位。
  *
  * ## 第三条：失败不抛（`apply` 不可成为启动单点）
  *
@@ -42,6 +50,16 @@ const C = 'session-ccc'
 
 /** 事件 payload 的形状（照 `host/contract.ts` / `trajectory/carrier.ts` 实测） */
 const agentPayload = (id: string): unknown => ({ agent: { session: { id } } })
+
+/**
+ * `agent/status` 的 payload —— 🔴 **只有 `status`**。
+ * 出处：宿主 `AgentLoop.setPhase` 原文 `this.dispatch.emit("agent/status", { status })`
+ * （`agent` 由 dispatcher 的 `fused()` 注入）⇒ 本文件**不许**在这条 payload 里塞 `turn`。
+ */
+const statusPayload = (id: string, status: 'running' | 'idle'): unknown => ({
+  agent: { session: { id } },
+  status,
+})
 
 /** `registerCroTurnTracking` 实际订阅的事件名（装配期抓取；见文件头第二条重点） */
 let subscribed: string[] = []
@@ -195,49 +213,58 @@ describe('CRO turn 追踪: 按轨迹聚合（runningCarriersOf）', () => {
 // ── 事件接缝（registerCroTurnTracking）──
 
 describe('CRO turn 追踪: 事件接缝', () => {
-  it('🔴 订阅的 5 个事件名**全部**在宿主契约表里（防"名字写错 ⇒ 静默不订阅"）', () => {
+  it('🔴 订阅的 4 个事件名**全部**在宿主契约表里（防"名字写错 ⇒ 静默不订阅"）', () => {
     install()
+    // 🔴 D243 改钉（原文写「订阅的 5 个」并含 `agent/created`）：
+    //    **原前提** =「`agent/created` 负责语义『在不在跑』」，该前提已被实测取代 ——
+    //    `agent/created` 是 `AgentRegistry.announce()` 发的，`source` 含 `resume` ⇒
+    //    宿主重启会把 persisted 会话全部 announce 一遍 ⇒ 「载入」被当成「在跑」。
+    //    ⇒ 它已从订阅清单移除；**本用例的原意（防名字写错）完全保留**，只是集合少一个。
+    //    ⚠️ 这不是放宽：同文件的「`agent/created` 不置位」用例是配套的**反向钉**（D240）。
     expect(subscribed.sort()).toEqual(
-      ['agent/created', 'agent/disposed', 'agent/status', 'agent/turn-stopping', 'session/disposed'].sort(),
+      ['agent/disposed', 'agent/status', 'agent/turn-stopping', 'session/disposed'].sort(),
     )
+    // 原意仍在：**剩下每一个**都必须在白名单里（少一个不影响这条判据的判别力）
     const contract = new Set(HOST_EVENTS.map((e) => e.name))
     for (const name of subscribed) {
       expect(contract.has(name), `事件 ${name} 不在 HOST_EVENTS 白名单里`).toBe(true)
     }
   })
 
-  it('`agent/created`（v0.1.7 前名 `agent/session-start`）⇒ 标记在跑', () => {
+  it('🔴🔴 D243 反向钉：`agent/created`（含宿主重启后的 resume announce）⇒ **不**标记在跑', () => {
     const f = install()
+    // 宿主重启的形态：persisted 会话被重新载入并 announce —— 它那一轮**早已随旧进程死掉**
     f.emit('agent/created', agentPayload(A))
-    expect(listRunningSessionIds(NOW)).toEqual([A])
+    expect(listRunningSessionIds(Date.now())).toEqual([])
+    expect(croTurnTableSize()).toBe(0)
   })
 
   it('`agent/status=running` ⇒ 标记在跑；`=idle` ⇒ 清除（status 是轮次状态的权威）', () => {
     const f = install()
-    f.emit('agent/status', { agent: { session: { id: A } }, status: 'running', turn: 3 })
-    expect(listRunningSessionIds(NOW)).toEqual([A])
-    f.emit('agent/status', { agent: { session: { id: A } }, status: 'idle' })
-    expect(listRunningSessionIds(NOW)).toEqual([])
+    f.emit('agent/status', statusPayload(A, 'running'))
+    expect(listRunningSessionIds(Date.now())).toEqual([A])
+    f.emit('agent/status', statusPayload(A, 'idle'))
+    expect(listRunningSessionIds(Date.now())).toEqual([])
   })
 
   it('`agent/turn-stopping` ⇒ 清除（正常收轮路径）', () => {
     const f = install()
-    f.emit('agent/created', agentPayload(A))
+    f.emit('agent/status', statusPayload(A, 'running'))
     f.emit('agent/turn-stopping', agentPayload(A))
-    expect(listRunningSessionIds(NOW)).toEqual([])
+    expect(listRunningSessionIds(Date.now())).toEqual([])
     expect(croTurnTableSize()).toBe(0)
   })
 
   it('🔴 `agent/disposed`（payload `{ agent }`）⇒ 清除', () => {
     const f = install()
-    f.emit('agent/created', agentPayload(A))
+    f.emit('agent/status', statusPayload(A, 'running'))
     f.emit('agent/disposed', agentPayload(A))
     expect(croTurnTableSize()).toBe(0)
   })
 
   it('🔴 `session/disposed` 的 payload **本身就是那个 session**（形状与上一条不同）⇒ 清除', () => {
     const f = install()
-    f.emit('agent/created', agentPayload(A))
+    f.emit('agent/status', statusPayload(A, 'running'))
     f.emit('session/disposed', { id: A }) // 直接有 .id，没有 .agent
     expect(croTurnTableSize()).toBe(0)
   })
@@ -245,6 +272,7 @@ describe('CRO turn 追踪: 事件接缝', () => {
   it('畸形 payload ⇒ 不抛、也不误标（不制造无名项）', () => {
     const f = install()
     for (const bad of [undefined, null, {}, { agent: {} }, { agent: { session: {} } }, { id: 42 }]) {
+      expect(() => f.emit('agent/status', bad)).not.toThrow()
       expect(() => f.emit('agent/created', bad)).not.toThrow()
       expect(() => f.emit('session/disposed', bad)).not.toThrow()
     }
@@ -253,7 +281,9 @@ describe('CRO turn 追踪: 事件接缝', () => {
 
   it('🔴 拆卸 ⇒ 表清空（内存态不留残余）', () => {
     const f = install()
-    f.emit('agent/created', agentPayload(A))
+    // D243 改钉：原用 `agent/created` 造表 —— 那条路已不再置位（否则本用例会"绿得莫名"：
+    // 断言 `toBe(1)` 会红）。改用**唯一**的置位路径 `agent/status=running`，语义不变。
+    f.emit('agent/status', statusPayload(A, 'running'))
     expect(croTurnTableSize()).toBe(1)
     for (const cleanup of f.cleanups) cleanup()
     expect(croTurnTableSize()).toBe(0)
