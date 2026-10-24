@@ -167,6 +167,22 @@ export interface ScanResult {
   errors: Array<{ sessionId: string; message: string }>
   /** 扫描耗时（ms） */
   elapsedMs: number
+  /**
+   * 🔴🔴 **D245（2026-10-24）：被"在跑"排除掉的会话 id** —— 必须报告，不能静默跳过。
+   *
+   * **为什么这个字段是必需的**（真机实测，owner 报障「唤起了没有成功恢复」）：
+   * 修前 `if (liveIds.has(sessionId)) continue` 是**静默**跳过 —— 既不计数也不报告。
+   * 于是同一次扫描出现两个读数：
+   * - 生产 tick 日志：`扫 11 个 · 排除在跑 4 个`（**知道**有 4 个被藏起来）
+   * - 工具输出（guard 查的那个）：`检查 7 个 · 命中 0 · 跳过 7`（**完全看不到**那 4 个）
+   * ⇒ guard 判「没事」⇒ 该救的没人救。
+   *
+   * ⇒ **判据（D237 同族）**：`scanned + excluded.size` 才是**窗口内总数**；
+   *   只报 `scanned` 会让读者以为"就这么点会话"。
+   * ⚠️ 这不是"多给一个诊断字段"——**它是"排除"这个动作的可见性**：
+   *   任何"我替你把某些东西藏起来"的实现，都必须报告藏了几个、藏了谁。
+   */
+  excluded: string[]
 }
 
 /**
@@ -441,7 +457,7 @@ export function scanInterruptedSessions(
   const cutoff = now - lookbackMs
   const liveIds = options.liveIds ?? new Set<string>()
 
-  const result: ScanResult = { sessions: [], scanned: 0, skipped: 0, errors: [], elapsedMs: 0 }
+  const result: ScanResult = { sessions: [], scanned: 0, skipped: 0, errors: [], elapsedMs: 0, excluded: [] }
 
   if (!existsSync(projectDir)) {
     result.elapsedMs = Date.now() - t0
@@ -458,7 +474,20 @@ export function scanInterruptedSessions(
   }
 
   for (const sessionId of entries) {
-    if (liveIds.has(sessionId)) continue
+    // 🔴🔴 D245：排除**必须登记**，不能静默 continue（见 `ScanResult.excluded` 的注释）。
+    //    ⚠️ 只登记**落在回看窗口内**的那些 —— 窗口外的会话本来就不在该关心，
+    //    把它们也算进 excluded 会让「窗口内总数」这个读数失真。
+    if (liveIds.has(sessionId)) {
+      const lp = findSessionLog(join(projectDir, sessionId))
+      if (lp !== null) {
+        try {
+          if (statSync(lp).mtimeMs >= cutoff) result.excluded.push(sessionId)
+        } catch {
+          /* 读不到 mtime ⇒ 不登记（它连"是不是窗口内"都判不了） */
+        }
+      }
+      continue
+    }
 
     const dirPath = join(projectDir, sessionId)
     // 世代识别复用 cleanup 的判据（不硬编码文件名）

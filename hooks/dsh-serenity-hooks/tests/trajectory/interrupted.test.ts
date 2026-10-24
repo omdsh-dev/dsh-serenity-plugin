@@ -365,6 +365,52 @@ describe('scanInterruptedSessions（真日志 + 多帧）', () => {
     expect(r.sessions).toEqual([])
   })
 
+  /**
+   * 🔴🔴 **D245 反向钉：排除必须登记，不许静默吞掉。**
+   *
+   * **原形态**（修前）：`if (liveIds.has(sessionId)) continue` —— 既不计数也不报告。
+   * 真机代价：同一次扫描出现**两个互不兼容的读数** ——
+   * 生产 tick 日志写「扫 11 · 排除在跑 4」，而工具输出（guard 查的那个）写
+   * 「检查 7 · 命中 0 · 跳过 7」⇒ guard 判「没事」⇒ **该救的 4 个无人过问**。
+   *
+   * ⇒ 判据：`excluded` 必须列出被排除的会话，且 `scanned + excluded.length` = 窗口内总数。
+   */
+  it('🔴🔴 D245：被 liveIds 排除的会话必须出现在 `excluded` 里（不许静默吞掉）', () => {
+    writeSession('session-live', [
+      ...turnEvents(5, 'interrupted'),
+      { type: 'session/end-seed', data: {} },
+    ])
+    writeSession('session-dead', [
+      ...turnEvents(6, 'interrupted'),
+      { type: 'session/end-seed', data: {} },
+    ])
+    const r = scanInterruptedSessions(dir, { liveIds: new Set(['session-live']) })
+    // 被排除的那个**必须**登记（这是本条的全部意义）
+    expect(r.excluded, '排除集为空 ⇒ 读者会以为"窗口内就这么点会话"').toEqual(['session-live'])
+    // 窗口内总数 = 检查 + 排除（两个数必须自洽）
+    expect(r.scanned + r.excluded.length).toBe(2)
+    // 反向钉：另一个仍被正常检查到（排除没有波及无关会话）
+    expect(r.sessions.map((s) => s.sessionId)).toEqual(['session-dead'])
+  })
+
+  it('🔴 D245 反向钉：排除数不能把「窗口外」的会话算进来', () => {
+    writeSession('session-live-old', [
+      ...turnEvents(5, 'interrupted'),
+      { type: 'session/end-seed', data: {} },
+    ])
+    // 把 mtime 推到 48h 前 ⇒ 它在回看窗口**之外**
+    const logPath = join(dir, 'session-live-old', 'session.v4.jsonl.zstd')
+    const longAgo = new Date(Date.now() - 48 * 3600 * 1000)
+    utimesSync(logPath, longAgo, longAgo)
+
+    const r = scanInterruptedSessions(dir, {
+      lookbackMs: 8 * 3600 * 1000,
+      liveIds: new Set(['session-live-old']),
+    })
+    // 窗口外的会话不该被算进「窗口内被排除 N 个」—— 否则那个读数会失真
+    expect(r.excluded).toEqual([])
+  })
+
   it('不存在的根目录 ⇒ 空结果（非错误）', () => {
     const r = scanInterruptedSessions(join(dir, 'does-not-exist'))
     expect(r.sessions).toEqual([])

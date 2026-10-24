@@ -144,16 +144,35 @@ function renderInterruptedScan(input: {
 }): string {
   const { projectDir, lookbackHours, scan } = input
   const lines: string[] = []
+  const excludedCount = scan.excluded.length
   lines.push(`═══ 末轮未跑完的 dsh 会话（回看 ${lookbackHours}h）═══`)
   lines.push(`  扫描域: ${projectDir}`)
+  // 🔴🔴 D245：**窗口内总数 = 检查 + 排除**，两个数必须同屏。
+  //    修前只报「检查 N」⇒ 读者以为"就这么点会话"，而实际上被排除的那批**看不见**
+  //    （真机实测：guard 看到「检查 7 · 命中 0」判「没事」，而同一刻生产日志写着
+  //     「排除在跑 4 个」—— 该救的 4 个就此无人过问）。
   lines.push(
     `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped}` +
+      (excludedCount > 0 ? ` · 排除在跑 ${excludedCount} 个` : '') +
       ` · 耗时 ${scan.elapsedMs}ms${scan.errors.length > 0 ? ` · 读取失败 ${scan.errors.length}` : ''}`,
   )
+  if (excludedCount > 0) {
+    lines.push(
+      `  ⓘ 窗口内共 ${scan.scanned + excludedCount} 个会话，其中 ${excludedCount} 个**此刻有轮次在跑**，` +
+        `按「正在跑的不该被判为待续」的纪律被排除：`,
+    )
+    for (const id of scan.excluded) lines.push(`      - ${id}`)
+    lines.push('    ⚠️ 这些**没有**被检查过。若你认为其中某个其实已死（进程重启后残留的"在跑"标记），')
+    lines.push('      请告知 ACC 维护方 —— 那是「在跑」表的判据问题，不是扫描的问题。')
+  }
 
   if (scan.sessions.length === 0) {
     lines.push('')
-    lines.push('✓ 没有末轮未跑完的会话 —— 无需处理。')
+    lines.push(
+      excludedCount > 0
+        ? `✓ 被检查的 ${scan.scanned} 个里没有末轮未跑完的 —— 另有 ${excludedCount} 个在跑，未检查（见上）。`
+        : '✓ 没有末轮未跑完的会话 —— 无需处理。',
+    )
     return lines.join('\n')
   }
 
@@ -211,16 +230,27 @@ function renderContinueResult(input: {
 }): string {
   const { projectDir, lookbackHours, scan, outcomes, dryRun } = input
   const lines: string[] = []
+  const excludedCount = scan.excluded.length
   const head = dryRun ? '续跑预告（dryRun，未注入任何消息）' : '中断续跑结果'
   lines.push(`═══ ${head}（回看 ${lookbackHours}h）═══`)
   lines.push(`  扫描域: ${projectDir}`)
+  // 🔴🔴 D245：与 `renderInterruptedScan` 同口径 —— 排除数必须同屏（理由见那里的注释）。
   lines.push(
-    `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped} · 耗时 ${scan.elapsedMs}ms`,
+    `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped}` +
+      (excludedCount > 0 ? ` · 排除在跑 ${excludedCount} 个` : '') +
+      ` · 耗时 ${scan.elapsedMs}ms`,
   )
+  if (excludedCount > 0) {
+    lines.push(`  ⓘ 另有 ${excludedCount} 个会话**此刻有轮次在跑**，未检查：${scan.excluded.join('、')}`)
+  }
 
   if (scan.sessions.length === 0) {
     lines.push('')
-    lines.push('✓ 没有末轮未跑完的会话 —— 无需续跑。')
+    lines.push(
+      excludedCount > 0
+        ? `✓ 被检查的 ${scan.scanned} 个里没有末轮未跑完的 —— 另有 ${excludedCount} 个在跑，未续（见上）。`
+        : '✓ 没有末轮未跑完的会话 —— 无需续跑。',
+    )
     return lines.join('\n')
   }
 
