@@ -1,6 +1,12 @@
 /**
  * im/guard.ts — 手动输出模式的**机械闸门**（v1.30.16，S142 用户"LLM 不听"）
  *
+ * 🔴 **2026-10-24（D238）后本模块从"边缘"变成"主路径"**：`autoReplyWithLastMessage` 那条开关
+ * 已整条退役 ⇒ **所有会话都是手动输出**（桥永不自动回发）⇒ 本闸门**每轮恒生效**。
+ * 由此得到一条必配件判据（D234）：打回前**必须**先确认 `im-bridge` 对该轨迹可见 ——
+ * 否则"该轨迹没有发送权"会被无解地打回成"忘了发"。见 `isImWiredTrajectory` 的使用处。
+ * 下面第 4 行起的"问题（实证）"是**当时**的缘起叙述，其中提到的开关现已不存在。
+ *
  * 问题（实证）：`weixin.autoReplyWithLastMessage: false` 时桥不回发最终文本，输出权归 agent
  * （必须自己调 `im-bridge` 工具，v1.30.x 为 `msm("weixin-send", …)`）。提示词层面已说明，
  * 但用户实测 **LLM 仍经常不发**——结果用户什么都收不到（静默）。这类"提示词软约束失效"正是 ACC
@@ -32,6 +38,10 @@ import type { Context } from 'cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
+// 🔴 D234 修法（2026-10-24）：打回前先判「这条轨迹有没有 im-bridge 发送权」。
+// 两个都是**判据函数**（不是 UI 逻辑）：可见性判据与打回判据必须**同源**。
+import { isImWiredTrajectory } from './channels.js'
+import { trajectoryCodeForSession } from '../trajectory/policy/profile.js'
 
 /** 打回上限（超过则放弃并告警——避免与模型无限拉扯） */
 export const WEIXIN_OUTPUT_REBUKE_MAX = 2
@@ -160,7 +170,7 @@ function sessionIdOf(value: unknown): string | null {
  * 🔴 **原名为 `isSuccessfulWeixinSend`，2026-10-20 改名**（Q4 出站飞书）：
  * 它曾硬比 `channel !== 'weixin' ⇒ false`。接第二个渠道后，那条判据的含义变成
  * **"只有微信算发出去了"** —— 而实际后果是：飞书会话里 agent 真的发成功了，
- * 闸门仍判"未发送" ⇒ 打回 ≤2 次，若 CCC 开了 `fallbackOnNoSend` 还会再兜底转发一遍
+ * 闸门仍判"未发送" ⇒ 打回 ≤2 次，且当时的 `fallbackOnNoSend` 还会再兜底转发一遍
  * ⇒ **重复投递**。⇒ 判据从"是不是微信"改成"是不是**这个会话所在的那条渠道**"，
  * 函数名随之更正（**名字要能对着行为读**，D151/D179 同族）。
  *
@@ -269,15 +279,46 @@ export function registerWeixinOutputGuard(ctx: Context): void {
       //    旧判据是"这个会话发过没有" ⇒ 一条新入站把标记抹掉后，**正在跑的这一轮**会被误判"没发"。
       //    `payload.turn` 由宿主给出；取不到时 `hasSentThisTurn` 退化为旧语义（少打回，不误打回）。
       const sent = hasSentThisTurn(sessionId, payload?.turn ?? null)
-      // v1.30.17：**不清空**——桥在 askTrajectory 返回后读 hasSentThisTurn 决定是否兜底转发
       if (sent) return
+
+      /**
+       * 🔴🔴 **D234 修法（2026-10-24，D238 强制同批）：先确认"它有权发"，再打回。**
+       *
+       * 缺陷（我 2026-10-23 查出的真缺陷）：v1.88.0 起 `im-bridge` **只对 IM 路由表点名的
+       * 轨迹可见**（取不到轨迹编码即 fail-closed 隐藏）。而本闸门**无条件打回**，打回文案
+       * （`buildManualOutputRebuke`）逐字要求调用的正是那个工具 ⇒ 对一条"能收到消息但没被
+       * 路由表点名"的轨迹，**agent 无论如何都满足不了** ⇒ 连打 2 次后只剩告警，
+       * 用户侧零输出。**打回命中一个不可满足的前置条件**（D205 同族：前置不成立必须显式红，
+       * 而不是继续走必然失败的重试）。
+       *
+       * 🔴 为什么砍掉自动回发后这条变成**必配件**：手动模式成了唯一路径 ⇒ 本闸门**恒生效**
+       * （不再有"自动模式"这条安全退路），缺陷从边缘情形升级为主路径。
+       *
+       * 判据（与 `seams/guards.ts` 的可见性判据**同源**，D235 的要求）：
+       * 用同一个 `isImWiredTrajectory` 判——**可见性判据与打回判据必须同源**，
+       * 否则两处各判一套，又会长出"能发但被判成不能发"这类漂移。
+       */
+      if (!isImWiredTrajectory(session.root, trajectoryCodeForSession(session.root, sessionId))) {
+        // 不打回，但**必须出声**（D186：可以拒绝，但不许不出声；出声必须指名哪一半）
+        console.warn(
+          `[serenity-hooks] ✗ im 输出闸门：session=${sessionId} role=${session.role} `
+          + `**没有 im-bridge 发送权**（该轨迹不在本 CCC 的 IM 路由表 im.routes 里）⇒ **不打回**。`
+          + `本轮 agent 若想说话也无路可走 —— 请把该轨迹编码加进 .opencode/serenity.json 的 im.routes，`
+          + `或让它把话交给已被点名的接线轨迹。`,
+        )
+        rebukeCounts.delete(sessionId)
+        return
+      }
 
       const count = (rebukeCounts.get(sessionId) ?? 0) + 1
       if (count > WEIXIN_OUTPUT_REBUKE_MAX) {
         rebukeCounts.delete(sessionId)
-        // 达上限：放弃打回但**响亮告警**（若 CCC 开了 fallbackOnNoSend，桥随后会兜底转发）
+        // 达上限：放弃打回但**响亮告警**。
+        // 🔴 D238 起不再有兜底（`fallbackOnNoSend` 已退役）⇒ 这句是**唯一的**失败信号。
         console.warn(
-          `[serenity-hooks] ✗ weixin 输出闸门：连续 ${WEIXIN_OUTPUT_REBUKE_MAX} 次打回后仍未发送（session=${sessionId}, role=${session.role}）——本轮用户将收不到 agent 自己发的消息`,
+          `[serenity-hooks] ✗ weixin 输出闸门：连续 ${WEIXIN_OUTPUT_REBUKE_MAX} 次打回后仍未发送`
+          + `（session=${sessionId}, role=${session.role}）——**本轮用户将收不到任何消息**`
+          + `（兜底转发已于 2026-10-24 整条退役，出站只剩 im-bridge 一条路）`,
         )
         return
       }

@@ -48,8 +48,6 @@ describe('readImSettings —— 与旧 weixin 段逐字段等价（P1 纯重构�
         enabled: true,
         botType: '3',
         hook: 'scripts/im-hook.ts',
-        autoReplyWithLastMessage: false,
-        fallbackOnNoSend: true,
         accounts: [
           { accountId: 'wechat-1', name: '占位甲', enabled: true },
           { accountId: 'wechat-2', enabled: false },
@@ -73,12 +71,15 @@ describe('readImSettings —— 与旧 weixin 段逐字段等价（P1 纯重构�
     expect(s.accounts![0]!.channel).toBe('weixin')
   })
 
-  it('三个布尔缺省不写反：autoReply 缺省 true ／ fallbackOnNoSend 缺省 false ／ enabled 缺省 false', () => {
-    writeConfig({ weixin: {} })
-    const s = readImSettings(dir)
+  it('🔴 已退役的两个键**不进归一形态**（配了也不生效，且不报错）', () => {
+    // D238（2026-10-24）：`autoReplyWithLastMessage` / `fallbackOnNoSend` 整条退役。
+    // 判据 = 它们**不出现**在归一结果里 —— 旧配置残留必须"静默忽略"而不是"悄悄仍生效"。
+    writeConfig({ weixin: { autoReplyWithLastMessage: false, fallbackOnNoSend: true } })
+    const s = readImSettings(dir) as Record<string, unknown>
+    expect(s).not.toHaveProperty('autoReplyWithLastMessage')
+    expect(s).not.toHaveProperty('fallbackOnNoSend')
+    // enabled 的缺省语义不受影响（仍是 false）
     expect(s.enabled).toBe(false)
-    expect(s.autoReplyWithLastMessage).toBe(true)
-    expect(s.fallbackOnNoSend).toBe(false)
   })
 })
 

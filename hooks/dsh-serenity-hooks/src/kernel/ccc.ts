@@ -255,10 +255,10 @@ export interface ImSettings {
   aliases?: Record<string, string>;
   /** 消息记录 hook（相对 CCC 根的脚本路径） */
   hook?: string;
-  /** 桥是否自动回发 agent 的最终文本（缺省 true；微信侧语义见旧注释） */
-  autoReplyWithLastMessage?: boolean;
-  /** 手动输出模式的兜底（缺省 false = 严格静默） */
-  fallbackOnNoSend?: boolean;
+  // 🔴🔴 2026-10-24（owner 令，D238）：`autoReplyWithLastMessage` 与 `fallbackOnNoSend`
+  // **字段整条删除**（不是"保留但忽略"）——出站只剩一条路：agent 自己调 `im-bridge`。
+  // 旧配置里残留这两个键 ⇒ schemastery 非 strict ⇒ **静默忽略**，不影响加载。
+  // 退役理由（owner 原话）：「autoReply 并不合适，主动性的 imBridge 仍然是更好的」。
   /** iLink 专属：bot_type 取码参数（飞书账号忽略它） */
   botType?: string;
 }
@@ -328,36 +328,18 @@ export interface WeixinSettings {
    * 执行语义：旁路 fire-and-forget + 超时 + 失败仅日志（微信桥可靠性不受 hook 影响）。
    */
   hook?: string;
-  /**
-   * 桥是否**自动回发 agent 的最终文本**（v1.30.10，用户拍板命名；缺省 true = 现状）。
-   *
-   * 关闭（false）→ 桥不再把一轮结束时 agent 的最终 assistant 文本转发给用户；
-   * 输出权完全交给 agent：每轮 question 末尾注入**机制标记 + 已填参数的命令**
-   * （v1.31.0 起为 `im-bridge` 工具形态），由 agent 自己决定发什么/发几条（全部记 `source=proactive`）。
-   *
-   * 为什么需要（R↓）：v1.30.9 起 agent 已能主动输出（工具/桥 → iLink），
-   * 「桥替 agent 说最后一句」从机制上变成可选项——进程式汇报、多段输出、静默处理都需要它。
-   * 语义边界（用户拍板）：只关**最终文本**；系统类消息（新对话通知 / 语音无法解析提示）保留；
-   * agent 一轮未输出 → 静默不兜底（否则开关语义被破坏）。
-   */
-  autoReplyWithLastMessage?: boolean;
-  /**
-   * 手动输出模式下的**兜底**（v1.30.17，S142 用户拍板"鲁棒修法"；**缺省 false = 严格静默**）。
-   *
-   * 仅在 `autoReplyWithLastMessage: false` 时生效：
-   * - `true` → 一轮结束时若 agent **一次都没成功调用输出工具**（im-bridge / 旧 weixin-send），
-   *   桥把该轮最终文本转发给用户（记录 `source: "reply-fallback"`，并在日志留响亮告警）。
-   * - `false`（缺省）→ 保持 v1.30.10 的"静默不兜底"语义。
-   *
-   * 为什么需要（实证 R↓）：v1.30.16 的机械闸门会打回 ≤2 次；但用户实测某模型在**寒暄类消息**上
-   * 连续 4 轮（turn 186/191/192/193）、跨 3 版 CCC 提示词（v0/v1/v2）仍不调工具 → 打回用尽后
-   * **用户什么都收不到**。提示词与闸门均已排除（同一模型在任务类消息下正常发送）→ 桥兜底是
-   * 唯一能保证"不丢消息"的机械手段。
-   *
-   * 代价（显式）：角色失去"故意静默"能力（它总会产出一段最终文本）→ 需要严格静默的角色保持缺省。
-   * agent 只要自己发过（哪怕只发一条），桥就不兜底——输出权仍在 agent。
-   */
-  fallbackOnNoSend?: boolean;
+  // 🔴🔴 2026-10-24（owner 令，D238）：`autoReplyWithLastMessage` 与 `fallbackOnNoSend`
+  // **已整条退役**（字段删除）。出站只剩一条路：agent 自己调 `im-bridge`。
+  //
+  // 历史留档（R↓，被否的两条设计）：
+  //  - `autoReplyWithLastMessage`（v1.30.10）：桥替 agent 说最后一句。**被否理由**：owner
+  //    「autoReply 并不合适，主动性的 imBridge 仍然是更好的」——自动回发让 agent 无法决定
+  //    "说几条/什么时候说/要不要不说"，而这正是主动发送要解决的问题。
+  //  - `fallbackOnNoSend`（v1.30.17）：手动模式下 agent 一次没发成功时桥兜底转发。
+  //    **随之失效** —— 它只在 `autoReplyWithLastMessage=false` 时才有意义，而后者已不存在。
+  //    ⚠️ 它的移除意味着：**agent 不发 ⇒ 用户确实收不到**。这是有意的取舍（输出权完全归 agent），
+  //    代价由 D234 的修法承担：guard 打回前必须确认 `im-bridge` 对该轨迹**可见**，
+  //    否则"没权发"会被误读成"忘了发"。
 }
 
 // ⚠️ `ImSettings` / `ImAcpSettings` / `ImAcpAccount` **已删除**

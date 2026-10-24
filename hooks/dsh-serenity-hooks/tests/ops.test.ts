@@ -205,8 +205,14 @@ describe('msm-ops', () => {
       description: '测试',
     }) as { registered: string }
     expect(r.registered).toBe('tool')
-    const check = runMsm(dir, { action: 'check' }) as { issues: { name: string; check: string }[] }
-    expect(check.issues.some((i) => i.name === 'tool' && i.check === 'M1')).toBe(true)
+    // 🔴 D237：`check` 的**工具返回面**已改压缩形态（按 check+detail 分组）。
+    //    逐条 `issues` 仍在，只是形状从「行数组」变成「组数组 + names」——
+    //    这是渲染层压缩，判据内容（谁因什么被报）一个字没丢。
+    const check = runMsm(dir, { action: 'check' }) as {
+      issueCount: number
+      groups: { check: string; detail: string; count: number; names: string[] }[]
+    }
+    expect(check.groups.some((g) => g.check === 'M1' && g.names.includes('tool'))).toBe(true)
   })
 })
 

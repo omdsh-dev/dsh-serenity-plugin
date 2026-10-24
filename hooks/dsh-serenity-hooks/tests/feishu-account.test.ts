@@ -301,7 +301,15 @@ describe('飞书：长连接行为（3 秒约束 / 去重 / 发送形状）', ()
     // 🔴 content 必须是 **JSON 字符串**，且能解析回 { text }
     expect(typeof p.data.content).toBe('string')
     const parsed = JSON.parse(p.data.content) as { text: string }
-    expect(parsed.text).toContain('答案') // 也证明 md 已被转纯文本
+    // 🔴 D238（2026-10-24，owner 令「出站只有 im-bridge 一条路」）：
+    //    桥**不再自动回发 agent 的最终文本** ⇒ 本路径唯一的出站是系统通知「（新的对话已开始）」。
+    //    本条用例要验的是**发送形状**（`receive_id_type` / `content` 是 JSON 字符串），
+    //    不是"桥转发了答案"—— 那个行为已随 `autoReplyWithLastMessage` 整条退役。
+    //    ⚠️ 原来这里靠 `toContain('答案')` 顺带证明「md 已转纯文本」，该证明点随转发一起消失；
+    //    `markdownToPlainText` 本身的 7 类转换由 `weixin.test.ts` 的专门用例钉住。
+    expect(parsed.text).toContain('新的对话')
+    // 反向钉（与微信侧同款）：桥**没有**把 agent 的最终文本（`**答案**`）转发出去
+    expect(parsed.text).not.toContain('答案')
     expect(p.data.content.startsWith('{')).toBe(true)
   })
 

@@ -519,7 +519,7 @@ function grewWithFreshAssistant(session: unknown, snap: SessionSnapshot): boolea
  * `waitAgentIdle` 的首行是 `if (agent.status === 'idle') finish()` —— 而 `followup()`
  * 是**异步投递**：刚投出去的这一刻 agent 状态**仍是 idle** ⇒ 等待**立刻结算** ⇒
  * `lastAssistantText()` 读到的是**上一轮的** `assistant/message` ⇒ 桥把它当"本轮答案"转发。
- * 若 CCC 又开了 `fallbackOnNoSend`，同一条旧答案会被反复重发（实测三次间隔 300~400ms、逐字相同）。
+ * 而当时若 CCC 又开了 `fallbackOnNoSend`（该开关已于 D238 退役），同一条旧答案会被反复重发（实测三次间隔 300~400ms、逐字相同）。
  *
  * ## 判据（`idle` 只是"可以开始看"的信号，不是成功信号）
  *

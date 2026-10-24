@@ -272,8 +272,7 @@ export const feishuChannel: ImChannel = {
     const routes: ImJson[] = (settings.routes ?? []).map((route) => ({ user: route.user, role: route.trajectory }))
     return {
       enabled: settings.enabled === true,
-      autoReplyWithLastMessage: settings.autoReplyWithLastMessage !== false,
-      fallbackOnNoSend: settings.fallbackOnNoSend === true,
+      // 🔴 2026-10-24（D238）：`autoReplyWithLastMessage` / `fallbackOnNoSend` 已整条退役。
       routes,
       accounts,
     }

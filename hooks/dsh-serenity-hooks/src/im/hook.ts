@@ -74,12 +74,17 @@ export interface WeixinHookIncomingEvent extends WeixinHookEventBase {
 }
 
 /**
- * outgoing 事件来源：
- *  - `reply`（缺省，向后兼容）= 收到用户消息后的回复
- *  - `proactive` = 桥被调用主动发给指定用户（CCC MSM 经本机入口发起）
- *  - `reply-fallback`（v1.30.17）= 手动输出模式下 agent 本轮一次都没发送成功 → 桥兜底转发其最终文本
+ * outgoing 事件来源 —— 🔴 **2026-10-24（D238）只剩 `proactive` 一个值**。
+ *
+ * 历史（R↓，两个已退役的值）：
+ *  - `reply`（v1.27 缺省）= 桥收到消息后自动回发最终文本。**随 `autoReplyWithLastMessage` 退役**；
+ *  - `reply-fallback`（v1.30.17）= 手动模式下 agent 未发送时桥兜底转发。**随 `fallbackOnNoSend` 退役**。
+ *
+ * ⇒ 现在**所有出站都来自 agent 自己调 `im-bridge`**。保留 `source` 字段本身是为了：
+ * ① 存量日志里那两种值仍可被读到（历史不改写）；
+ * ② 将来接第二种"出站起因"时不必再动事件形状。
  */
-type WeixinOutgoingSource = 'reply' | 'proactive' | 'reply-fallback'
+type WeixinOutgoingSource = 'proactive'
 
 /** outgoing 事件（bot → 用户）：回复文本（已剥离 think） */
 export interface WeixinHookOutgoingEvent extends WeixinHookEventBase {
@@ -120,7 +125,10 @@ interface OutgoingHookInput {
   sessionId: string
   role: string
   reply: string
-  /** 缺省 'reply'（对话回复）；'proactive' = 主动发送；'reply-fallback' = 手动模式兜底转发 */
+  /**
+   * 出站来源。🔴 **D238 起只剩 `'proactive'`**（历史值 `reply` / `reply-fallback` 已退役）。
+   * 造事件时**不传就不写该字段** —— 缺席 = 调用方未指定，**不是某个缺省语义**（见 buildOutgoingHookEvent）。
+   */
   source?: WeixinOutgoingSource
   /** 文件外发记录（可选；send-file 路径填） */
   file?: { name: string; size: number; caption?: string }
@@ -159,7 +167,9 @@ export function buildOutgoingHookEvent(input: OutgoingHookInput): WeixinHookOutg
     sessionId: input.sessionId,
     role: input.role,
     reply: input.reply,
-    ...(input.source && input.source !== 'reply' ? { source: input.source } : {}),
+    // 🔴 2026-10-24（D238）：`source` 传了才写。**不传就不写**（缺席 = 未指定，不是缺省值）。
+    // 退役的那条约定只有"省略 `reply`"，它随 `reply` 值一起消失 ⇒ 现在没有任何值靠缺席表达。
+    ...(input.source ? { source: input.source } : {}),
     ...(input.file ? { file: input.file } : {}),
   }
 }

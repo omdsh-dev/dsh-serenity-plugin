@@ -47,11 +47,12 @@ import { getImAccountImpl, imAccountChannels, normalizeAccountChannel, type ImAc
 import { installWeixinAccountImpl } from './weixin-account.js'
 import { installFeishuAccountImpl } from './feishu-account.js'
 import {
-  handleInboundEvent, resolveInboundTarget, manualOutputMarker, manualOutputFallbackNeeded,
+  handleInboundEvent, resolveInboundTarget, manualOutputMarker,
   type ImInboundEvent, type ImAccountIo, type ResolvedInboundTarget,
 } from './inbound-event.js'
 
-export { manualOutputFallbackNeeded, resolveInboundTarget }
+// 🔴 2026-10-24（D238）：`manualOutputFallbackNeeded` 已随 `fallbackOnNoSend` 删除。
+export { resolveInboundTarget }
 export type { ResolvedInboundTarget }
 
 /** 运行中的桥（CCC 根 → 账号 id → 循环控制） */

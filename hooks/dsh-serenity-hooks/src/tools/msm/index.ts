@@ -49,7 +49,10 @@ function buildMsmIndex(root: string): string {
     `Execute: msm("<name>", ["<args>"]) — e.g. msm("ssh-connect", ["status"])\n` +
     `Inspect: msm("<name>", [], inspect=true) — view usage/flags\n` +
     `Partial name returns matching candidates.\n` +
-    `Full listing: use container_admin (register/deregister/check).`
+    // 🔴 D237 文案修正：原文写 "Full listing: use container_admin" —— 但 `container_admin` 是**工具**
+    //    不是 MSM，照它去 `msm("container_admin", ...)` 只会得到一次未命中（实测踩到）。
+    //    注册/注销/质检的**动作名**也各有归口：msm check 走 container_admin(domain=msm)。
+    `Registry maintenance: container_admin (domain=msm, action=register|deregister|check).`
   )
 }
 
@@ -61,14 +64,59 @@ function suggestMsm(root: string, query: string, limit = 5): string {
     .filter((e) => e.name.toLowerCase().includes(q) || (e.description ?? '').toLowerCase().includes(q))
     .slice(0, limit)
   if (hits.length === 0) {
-    return `No MSM matches "${query}". Registered: ${buildMsmIndex(root)}`
+    // 🔴 D237：未命中时**不再倾倒全量分类表**（26 行）——它对"我打错了哪个名字"零信息量，
+    //    真正有用的是「总共有多少个 + 怎么列出来」。列全表的入口在 container_admin。
+    const skills = new Set(entries.map((e) => e.skill ?? 'uncategorized'))
+    return (
+      `No MSM matches "${query}" (${entries.length} registered across ${skills.size} skills).\n` +
+      `Try a shorter fragment, e.g. msm("${query.slice(0, 3)}"), or msm() for counts by skill.`
+    )
   }
   const lines = hits.map((e) => {
-    const base = `${e.name} | ${e.skill ?? '-'} | ${e.category ?? '-'} | ${e.description ?? ''}`
+    const base = `${e.name} | ${e.skill ?? '-'} | ${e.category ?? '-'} | ${shortDesc(e.description)}`
     const flags = (e.flags ?? []).map((f) => `--${f.name} <${f.type ?? 'string'}>`).join(', ')
     return flags ? `${base} [flags: ${flags}]` : base
   })
   return `No exact MSM "${query}" — did you mean one of these?\n` + lines.join('\n')
+}
+
+/**
+ * 候选行的**描述截断**（D237：其它调用的"简练结构"那一档）。
+ *
+ * 判据 = **「帮不帮得了下决定」**：选哪个 MSM 靠前半句的分句就够，后面那些
+ * 「子命令清单 / 设计取舍 / 历史沿革」属于**选中之后**才需要的细节（`inspect=true` 给全）。
+ * 实测：一条候选描述可达 200+ 字，5 条候选就能吃掉大半屏。
+ *
+ * ⚠️ 截断点选**分号/句号/破折号**这类天然断句符，不做"每 N 字硬切"——硬切会把词切两半
+ *    （中文尤其明显），反而降低可读性。
+ *
+ * 🔴 **实现更正（自查抓到）**：初版先 `slice(0, max)` 再在里面找断句符 ⇒ 当第一个断句符
+ *    出现在很靠前的位置时（如「短说明；后面全是细节」），它落在 `max/3` 之外就被放弃了，
+ *    于是退化成硬切 —— **正好违反"在天然断句符处收尾"这条本意**。
+ *    ⇒ 正确做法：**先找 max 之后最近的那个断句符**，让它成为截断点（宁可略超 max，
+ *      也要停在句读上）；只有在整串都没有断句符时才硬切。
+ */
+function shortDesc(desc: string | null | undefined, max = 64): string {
+  const s = (desc ?? '').trim()
+  if (s === '') return ''
+  if (s.length <= max) return s
+  const BREAKS = ['；', ';', '。', '——', '·', '，', ',']
+  // 优先：从 max 处向后找**最近**的断句符（最多再看 max 个字，避免把整段都吞掉）
+  const windowEnd = Math.min(s.length, max * 2)
+  let best = -1
+  for (const brk of BREAKS) {
+    const at = s.indexOf(brk, max) // 从 max 开始向后找
+    if (at !== -1 && at < windowEnd && (best === -1 || at < best)) best = at
+  }
+  if (best !== -1) return s.slice(0, best).trimEnd() + '…'
+  // 其次：在 max 之内往回找最后一个断句符（句读优先于长度）
+  let back = -1
+  for (const brk of BREAKS) {
+    const at = s.lastIndexOf(brk, max)
+    if (at > back) back = at
+  }
+  if (back >= Math.floor(max / 4)) return s.slice(0, back).trimEnd() + '…'
+  return s.slice(0, max).trimEnd() + '…'
 }
 
 export const msmTool = defineTool({

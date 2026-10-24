@@ -325,16 +325,27 @@ describe('weixin-hook 分支面: 判别联合未漂移', () => {
     expect(out.source).toBe('proactive')
   })
 
-  it('source 缺省或为 reply 时不出现在载荷里（三元真侧）', () => {
-    const ev = buildOutgoingHookEvent({
+  it('🔴 D238：不传 source ⇒ 不写字段；传了就显式写出（"省略 reply"那条约定已退役）', () => {
+    // 不传 ⇒ 调用方没说，就不编一个值出来（字段缺席 = 未指定，不是某个缺省语义）
+    const noSrc = buildOutgoingHookEvent({
       cccRoot: dir,
       accountId: 'wechat-1',
       userId: 'u1@im.wechat',
       sessionId: 'skiff-weixin-abc123',
       role: 'my-role',
       reply: 'x',
-      source: 'reply',
     })
-    expect('source' in ev).toBe(false)
+    expect('source' in noSrc).toBe(false)
+    // 传 proactive ⇒ 显式写出（D238 之后这是唯一的出站来源）
+    const proact = buildOutgoingHookEvent({
+      cccRoot: dir,
+      accountId: 'wechat-1',
+      userId: 'u1@im.wechat',
+      sessionId: 'skiff-weixin-abc123',
+      role: 'my-role',
+      reply: 'x',
+      source: 'proactive',
+    })
+    expect(proact.source).toBe('proactive')
   })
 })

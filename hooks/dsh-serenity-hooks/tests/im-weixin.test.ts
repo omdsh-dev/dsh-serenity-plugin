@@ -131,9 +131,10 @@ describe('im-weixin: 别名解析（别名归 CCC 配置，D23 / v1.56.10）', (
 })
 
 describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
-  it('三态配置 + 路由 + 本 CCC 账号轮询快照', () => {
+  it('配置 + 路由 + 本 CCC 账号轮询快照（🔴 D238 起不含两个已退役开关）', () => {
     setupCcc({
       enabled: true,
+      // 故意塞进已退役的键：**必须不出现**在 status 里（配了也不生效，不能让读的人以为还能配）
       autoReplyWithLastMessage: false,
       fallbackOnNoSend: true,
       routes: [{ user: '*', role: 'my-role' }],
@@ -142,11 +143,11 @@ describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
       { ccc: dir, accounts: [{ accountId: 'wechat-1', lastPollAt: 123, lastError: 'boom' }] },
       { ccc: '/other/ccc', accounts: [{ accountId: 'wechat-9', lastPollAt: 1 }] },
     ])
-    const status = weixinChannel.status(dir)
+    const status = weixinChannel.status(dir) as Record<string, unknown>
+    expect(status).not.toHaveProperty('autoReplyWithLastMessage')
+    expect(status).not.toHaveProperty('fallbackOnNoSend')
     expect(status).toEqual({
       enabled: true,
-      autoReplyWithLastMessage: false,
-      fallbackOnNoSend: true,
       // 🔴 2026-10-22 语义变更（owner：「配路由需要…需要有个能力让 CCC 查询」）：
       //    `status` 的每条 route 新增 **`targetExists`** —— 该路由指向的轨迹编码**真的存在吗**。
       //    它治的是"配了不生效"：写错一个编码不会有任何报错，消息进来找不到目标就静默不投递
@@ -159,12 +160,10 @@ describe('im-weixin: status（工具返回值必须可 JSON 化）', () => {
     expect(JSON.parse(JSON.stringify(status))).toEqual(status)
   })
 
-  it('未配置 → 缺省三态（自动回发开 / 不兜底）+ 空路由账号', () => {
+  it('未配置 → 只有 enabled/routes/accounts（两个已退役开关不出现）', () => {
     const status = weixinChannel.status(dir)
     expect(status).toEqual({
       enabled: false,
-      autoReplyWithLastMessage: true,
-      fallbackOnNoSend: false,
       routes: [],
       accounts: [],
     })

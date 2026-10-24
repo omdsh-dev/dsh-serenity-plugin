@@ -5,6 +5,26 @@ vi.mock('@deepseek-ai/dsh-llm', () => ({
   createUserMessage: (o: unknown) => o,
 }))
 
+/**
+ * 🔴 **D234 修法的替身（2026-10-24）**：guard 在打回前先判「这条轨迹有没有 im-bridge 发送权」，
+ * 用的是与可见性判据**同源**的 `isImWiredTrajectory`。
+ *
+ * 为什么必须 mock 而不是造真目录：该判据要读 CCC 的 `serenity.json` + 轨迹绑定，
+ * 而本文件的夹具根 `/ccc/home-serenity` 根本不存在 —— 不 mock 的话它恒判"无权"，
+ * 于是**所有**打回用例都会静默变成"不打回"（这正是本轮实测到的那 30 条红里的一类）。
+ *
+ * `__setImWired(false)` 用来**单独验那条新分支**（无权 ⇒ 不打回但出声）。
+ */
+let imWired = true
+vi.mock('../src/im/channels.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/im/channels.js')>()
+  return { ...actual, isImWiredTrajectory: () => imWired }
+})
+vi.mock('../src/trajectory/policy/profile.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/trajectory/policy/profile.js')>()
+  return { ...actual, trajectoryCodeForSession: () => 'my-role' }
+})
+
 import {
   WEIXIN_OUTPUT_REBUKE_MAX,
   buildManualOutputRebuke,
@@ -95,10 +115,13 @@ function fakeCtx() {
 
 beforeEach(() => {
   __resetWeixinOutputGuardForTest()
+  // 🔴 缺省"有授权"：本组绝大多数用例验的是打回逻辑本身，不是权限判据
+  imWired = true
 })
 
 afterEach(() => {
   __resetWeixinOutputGuardForTest()
+  imWired = true
   vi.restoreAllMocks()
 })
 
@@ -249,6 +272,42 @@ describe('weixin-output-guard: 闸门接线（tools/post-execute + agent/turn-st
     expect(steers[0]).toContain('[serenity:weixin-manual-output]')
     expect(steers[0]).toContain('im-bridge({channel:"weixin", action:"send"')
     expect(steers[0]).toContain(`user:"${MANUAL.userId}"`)
+  })
+
+  /**
+   * 🔴🔴 **D234 的正控（2026-10-24）**：该轨迹**没有 im-bridge 发送权**时，闸门**不打回**，
+   * 而是响亮告警。
+   *
+   * 为什么这是正确行为：v1.88.0 起 `im-bridge` 只对 IM 路由表点名的轨迹可见；对一条没被点名的轨迹，
+   * 打回文案要求调用的正是那个**不存在的工具** ⇒ agent 无论如何满足不了 ⇒ 连打 2 次空转、
+   * 而用户侧零输出。D205 同族：**前置不成立时必须显式红，而不是继续走必然失败的重试**。
+   *
+   * ⚠️ 本用例同时是**变异承重位**：把 guard 里那段 `isImWiredTrajectory(...)` 判断删掉，它会红。
+   */
+  it('🔴 D234 正控：无发送权 ⇒ **不打回**，但响亮告警指明"该轨迹无发送权"', () => {
+    imWired = false // 该轨迹不在 im.routes 里
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const f = fakeCtx()
+    registerWeixinOutputGuard(f.ctx as never)
+    noteManualOutputSession(SESSION, MANUAL)
+    const { agent, steers } = fakeAgent()
+    f.stopTurn(agent)
+    // ① 不打回 —— 打回一个满足不了的要求只会空转
+    expect(steers).toHaveLength(0)
+    // ② 但**必须出声**，且指名是哪一半（D186：可以拒绝，但不许不出声）
+    const msg = warn.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(msg).toContain('没有 im-bridge 发送权')
+    expect(msg).toContain('im.routes')
+  })
+
+  it('🔴 D234 反向钉：有发送权时**照常打回**（证明上面那条不是"永远不打回"）', () => {
+    imWired = true
+    const f = fakeCtx()
+    registerWeixinOutputGuard(f.ctx as never)
+    noteManualOutputSession(SESSION, MANUAL)
+    const { agent, steers } = fakeAgent()
+    f.stopTurn(agent)
+    expect(steers).toHaveLength(1)
   })
 
   it('发送失败（isError:true）→ 仍打回（失败调用不算已送达）', async () => {

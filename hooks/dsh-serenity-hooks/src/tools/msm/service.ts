@@ -351,36 +351,30 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
     历史（v1.30.9~v1.30.x）：CCC 侧 MSM weixin-send（走 loopback HTTP 入口 3082）——
     v1.31.0 已退役（脚本删除 + 注册表注销）；3082 入口保留给**非 agent 调用者**。
 
-  ▸ weixin.autoReplyWithLastMessage（v1.30.10，关闭桥的自动输出）：
-    缺省 true = 现状：桥在 agent 一轮结束后把**最终 assistant 文本**自动回发用户（source="reply"）。
-    显式 false = 关闭：桥**不再转发最终文本**，输出权交给 agent——每轮在用户消息**末尾**追加
-    **机制标记** [serenity:weixin-manual-output] + 一行已填好参数的 im-bridge 调用
-    （账号/用户 id），agent 自己决定发什么、发几条（全部记 source="proactive"）。
-    **ACC 只给机制与数据，纪律措辞归 CCC**（v1.30.16）：怎么写/必须怎么做/后果是什么写在
-    CCC 角色提示词文件里（如 .opencode/skiff/<role>.md），可热改（v1.30.15 起角色提示词热重载）。
-    机械闸门（v1.30.16）：本轮 turn 结束仍未成功调用 im-bridge（send / send-file；兼容旧
-    msm("weixin-send") 形态）→ agent 被打回（≤2 次，提示 = 标记 + 事实）；达上限放弃并响亮告警。
-    失败调用不算已送达。
-    语义边界（用户拍板）：只关最终文本；系统类消息（新对话通知 / 语音无法解析提示）保留；
-    typing 指示与 incoming hook 不受影响。
+  ▸ 🔴🔴 **出站只有一条路：agent 自己调 im-bridge**（2026-10-24 起，owner 令）。
+    桥**永不**替你回发最终文本 —— 你说什么、说几条、什么时候说、要不要不说，全由你决定。
+    ⛔ 不要指望"我把话写进回答里就会自动发出去"：**不会**。必须真的调工具。
+    ⇒ 每轮用户消息末尾都会附一行**已填好参数**的 im-bridge 调用模板（机制标记
+    [serenity:weixin-manual-output]），照它改 text 即可。
+    ⇒ 本轮结束仍未成功调用（send / send-file）→ 你会被打回（≤2 次，提示 = 标记 + 事实）；
+      达上限后**用户将收不到任何消息**（没有任何兜底转发）。
+    ⇒ 成功调用才算送达；失败调用不算（不会被当成本轮已发送）。
+    ⚠️ **前提**：本轨迹必须在 \`.opencode/serenity.json\` 的 \`im.routes\` 里被点名，否则 \`im-bridge\`
+      对你不**可见**——那种情况下闸门不会打回你（改成一条响亮告警，指明"该轨迹无发送权"），
+      因为打回一个你根本满足不了的要求只会空转。
 
-  ▸ weixin.fallbackOnNoSend（v1.30.17，手动模式的**兜底**；缺省 false）：
-    仅在 autoReplyWithLastMessage=false 时生效。true → 一轮结束时若 agent **一次都没成功**
-    调用输出工具（闸门打回用尽），桥把该轮最终文本转发给用户（记录 source="reply-fallback"，
-    日志留响亮告警）——保证"不丢消息"。agent 自己发过 → 不兜底（输出权仍在 agent）。
-    为什么需要（实证）：v1.30.16 闸门会打回 ≤2 次，但实测某模型在**寒暄类消息**上连续 4 轮、
-    跨 3 版 CCC 提示词仍不调工具 → 打回用尽后用户什么都收不到；提示词与闸门均已排除。
-    代价（显式）：角色失去"故意静默"能力（它总会产出一段最终文本）→ 需严格静默的角色保持缺省。
-    三态：① autoReplyWithLastMessage=true（缺省）桥总是回发；② =false + fallbackOnNoSend=true
-    = agent 优先、桥兜底（推荐）；③ 两者皆 false（缺省）= 严格静默（v1.30.10 语义）。
-    ⚠️ 兜底只在**闸门装配成功**时生效（未装配则无法判定是否发送过 → 不冒重复发送风险）。
+  ▸ **已退役（不要再配，配了也不生效）**：
+    · \`weixin.autoReplyWithLastMessage\`（v1.30.10~2026-10-24）= 桥替 agent 回发最终文本。
+      **被否理由**（owner 原话）：「autoReply 并不合适，主动性的 imBridge 仍然是更好的」——
+      它让 agent 失去"说几条/何时说/要不要不说"的决定权，而那正是主动发送的价值。
+    · \`weixin.fallbackOnNoSend\`（v1.30.17~2026-10-24）= 手动模式下 agent 没发成功时桥兜底转发。
+      它只在上面那个开关 =false 时才有意义 ⇒ 一起退役。
+    ⚠️ 旧配置里残留这两个键**静默忽略**（不会报错，也不会生效）。
 
   Config:
     { "weixin": {
         "enabled": true,
         "hook": "scripts/weixin-message-hook.ts",
-        "autoReplyWithLastMessage": true,
-        "fallbackOnNoSend": false,
         "accounts": [{ "accountId": "wechat-1", "name": "家庭助手", "enabled": true }],
         "routes": [{ "user": "*", "role": "my-role" }]
       } }
@@ -392,9 +386,9 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
   触发（双向）：
     incoming  = 用户 → bot：路由命中后、媒体落盘后触发（文本含语音转写；媒体带落盘 relPath）
     outgoing  = bot → 用户：发送成功后触发（reply = 用户实际收到的纯文本，已剥离 think）
-      · source="reply"（缺省）= 回复用户消息；source="proactive"（v1.30.9）= bot 主动发起
-        （CCC 经 im-bridge 工具（v1.31.0；旧 weixin-send MSM 已退役）→ sendProactiveText）；
-        source="reply-fallback"（v1.30.17）= 手动模式下 agent 本轮未发送 → 桥兜底转发最终文本
+      · source="proactive" = agent 经 im-bridge 主动发起（**2026-10-24 起这是唯一值**）
+      · 历史值 reply / reply-fallback（桥自动回发 / 桥兜底转发）已随两个开关一起退役；
+        存量日志里仍能看到它们，那是历史事实，不是当前行为
       · file（仅 send-file 补记）：{ "name": "报告.pdf", "size": 12345, "caption": "可选" }
 
   脚本约定（事件 JSON 单行经 stdin 传入；bun 优先 node 兜底）：
@@ -409,7 +403,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
       "message": { "text": "你好", "media": [{ "kind": "image", "relPath": "_tmp/weixin-inbound/<hash>/img_x.jpg" }] } }
     { "event": "outgoing", "ts": ..., "cccRoot": ..., "accountId": ...,
       "userId": ..., "sessionId": ..., "role": ...,
-      "reply": "已记录（纯文本）", "source": "reply" | "proactive" | "reply-fallback" }
+      "reply": "已记录（纯文本）", "source": "proactive" }
 
   示例脚本（追加到按日文件——持久化归 CCC 自选：文件/DB/远端均可）：
     const fs = require('node:fs'); const p = '/path/ccc/AGENT_SESSIONS/_weixin-log.jsonl';
@@ -582,6 +576,49 @@ export type RegistryQualityReport = {
   /** 被检查的注册表条目数 */
   checked: number
   issues: { name: string; check: string; detail: string }[]
+}
+
+/**
+ * **把 issue 列表压成「按检查码分组的一行摘要」**（D237：成功/失败类调用的返回精简）。
+ *
+ * ## 为什么需要它（owner 2026-10-24 令）
+ *
+ * > 「tool 的返回内容会影响 Agent 注意力……对于返回成功失败类的调用，如果成功要大幅精简；
+ * >   对于其它的调用，简练其结构，在确保信息有效的情况下降低大小」
+ *
+ * 实测症状（本仓真读数）：`container_admin msm check` 返回 **36 条 issue，每条一个三字段对象**，
+ * 而其中 **M1 有 20 条、detail 逐字相同**（`no .test.ts / .spec.ts`）、**M3 有 16 条**（同样同 detail）。
+ * ⇒ 同一句话重复 20 遍**不携带额外信息**，只吃掉注意力。
+ *
+ * ## 判据（照 D237 分档）
+ *
+ * - **有 issue（失败面）⇒ 不省略任何一条**：失败条目是唯一能改变下一步的东西（D186「出声必须指名哪一半」）。
+ *   但可以**折叠结构**：同 `(check, detail)` 的条目合并成「一组 + 名字列表」，逐条信息一个字不丢。
+ * - **零 issue（成功面）⇒ 只留一行结论 + 计数**：通过的条目对下一步零信息量。
+ *
+ * @param report 原始报告（逐条 issue）
+ * @returns 压缩后的**面向 agent 的**结构（键名短、重复消除；entries 全保留只做分组）
+ */
+export function compactRegistryQuality(report: RegistryQualityReport): {
+  checked: number
+  /** 0 ⇒ 全部通过（此时 groups 为空，agent 只需读 checked） */
+  issueCount: number
+  /** 按 (check, detail) 分组；**每个名字都保留**，只去掉重复的 detail 字面量 */
+  groups: { check: string; detail: string; count: number; names: string[] }[]
+} {
+  const byKey = new Map<string, { check: string; detail: string; names: string[] }>()
+  for (const it of report.issues) {
+    // 分组键 = 检查码 + detail（同因同码才是"同一条判据的一次重复"）
+    const key = `${it.check}\u0000${it.detail}`
+    const hit = byKey.get(key)
+    if (hit) hit.names.push(it.name)
+    else byKey.set(key, { check: it.check, detail: it.detail, names: [it.name] })
+  }
+  const groups = [...byKey.values()]
+    // 组间排序：检查码升序、组内名字保持原序（稳定 ⇒ 同一份注册表每次输出一致，S↑）
+    .sort((a, b) => (a.check === b.check ? b.names.length - a.names.length : a.check < b.check ? -1 : 1))
+    .map((g) => ({ check: g.check, detail: g.detail, count: g.names.length, names: g.names }))
+  return { checked: report.checked, issueCount: report.issues.length, groups }
 }
 
 /**
@@ -780,7 +817,13 @@ export function runMsm(root: string, args: MsmArgs): JsonValue {
     case 'check': {
       // C5（2026-09-15）：判据实现抽成具名导出 `checkRegistryQuality`（供 container-status
       // 的注册表分组取用）。行为逐字不变——本分支曾内联这段逻辑且**无名字**。
-      return checkRegistryQuality(root)
+      //
+      // 🔴 D237（2026-10-24 owner 令）：**工具返回面**改为压缩形态 —— 同 (check,detail) 的重复
+      // 条目合并成一组（每个 name 仍逐条保留，只去掉重复的 detail 字面量）。
+      // ⚠️ **只改返回面，不改 `checkRegistryQuality` 本身**：它有 5 处消费者
+      //    （`surface/observation.ts` 的 quality 段 ＋ 4 个测试文件），改它的形状 = 换真相源形状。
+      //    压缩是**渲染层**的事（E↑：数据保真、展示精简）。
+      return compactRegistryQuality(checkRegistryQuality(root))
     }
 
     default:

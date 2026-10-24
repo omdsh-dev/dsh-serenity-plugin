@@ -146,10 +146,10 @@ function normalizeImSection(w: ImSettings | WeixinSettings, d: ImSettings): ImSe
     enabled: src.enabled === true,
     botType: typeof src.botType === 'string' && src.botType !== '' ? src.botType : undefined,
     hook: typeof src.hook === 'string' && src.hook.trim() !== '' ? src.hook.trim() : undefined,
-    // 缺省 true（现状）——只有显式 false 才关闭自动回发最终文本
-    autoReplyWithLastMessage: src.autoReplyWithLastMessage !== false,
-    // 缺省 false（严格静默）；只有显式 true 才启用兜底
-    fallbackOnNoSend: src.fallbackOnNoSend === true,
+    // 🔴🔴 2026-10-24（owner 令，D238）：`autoReplyWithLastMessage` 与 `fallbackOnNoSend`
+    // **整条退役** —— 出站只剩一条路：agent 自己调 `im-bridge`。
+    // 旧配置里残留这两个键 ⇒ **静默忽略**（无人读，不是报错）。
+    // 退役理由（owner 原话）：「autoReply 并不合适，主动性的 imBridge 仍然是更好的」。
     accounts: accountsIn
       .filter((a): a is ImAccountConfig =>
         typeof a === 'object' && a !== null && typeof a.accountId === 'string' && a.accountId !== '')

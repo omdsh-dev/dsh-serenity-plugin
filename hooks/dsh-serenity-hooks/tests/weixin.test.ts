@@ -76,7 +76,7 @@ import {
   nextWeixinAccountId,
 } from '../src/im/route.js'
 import { registerTrajectorySession, unregisterTrajectorySession, trajectorySessionSnapshot } from '../src/trajectory/session.js'
-import { manualOutputFallbackNeeded } from '../src/im/bridge.js'
+import { manualOutputMarker } from '../src/im/inbound-event.js'
 import { registerWeixinOutputGuard } from '../src/im/guard.js'
 // 轨迹夹具（造 轨迹约束 数据的**唯一入口**；2026-10-19 重做后约束面住在轨迹目录的 `trajectory-constraint.json` 里）
 import { makeTrajectory, 轨迹约束Json } from './helpers/trajectory-constraint-fixture.js'
@@ -407,16 +407,14 @@ describe('weixin-route: CCC 配置 + 凭据 + 映射', () => {
     expect(s.routes![1]!.trajectory).toBe('zc')
   })
 
-  it('v1.30.10 autoReplyWithLastMessage 归一（缺省 = 自动回发；显式 false 才关）', () => {
-    // 缺省（未写该键）→ 非 false（= 现状：桥回发最终文本）
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true } }))
-    expect(readWeixinSettings(dir).autoReplyWithLastMessage).not.toBe(false)
-    // 显式 false → 关闭
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true, autoReplyWithLastMessage: false } }))
-    expect(readWeixinSettings(dir).autoReplyWithLastMessage).toBe(false)
-    // 显式 true → 开启
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ weixin: { enabled: true, autoReplyWithLastMessage: true } }))
-    expect(readWeixinSettings(dir).autoReplyWithLastMessage).toBe(true)
+  it('🔴 D238：`autoReplyWithLastMessage` 三种取值都不进归一形态（键已退役）', () => {
+    for (const v of [undefined, false, true]) {
+      writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+        weixin: { enabled: true, ...(v === undefined ? {} : { autoReplyWithLastMessage: v }) },
+      }))
+      // 判据 = **字段不存在**（不是"值为某个缺省"）——写什么都不会被读到
+      expect(readWeixinSettings(dir) as Record<string, unknown>).not.toHaveProperty('autoReplyWithLastMessage')
+    }
   })
 
   it('凭据读写分离：token 只进 localstore credentials，不落 serenity.json', () => {
@@ -648,17 +646,19 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    // session/new 已创建（注册表含 skiff-weixin- 会话）+ 回复已回写
-    // 首条消息 = 新会话 → 通知（新的对话已开始）+ 答案，共 2 条
+    // 🔴 D238（2026-10-24，owner 令「出站只有 im-bridge 一条路」）：
+    //    **桥不再自动回发最终文本** ⇒ 只该有「新的对话已开始」这一条系统通知。
+    //    「答案」不再出现在出站里 —— 它现在只可能由 agent 自己调 im-bridge 发出（`proactive`）。
     expect([...trajectorySessionSnapshot().keys()].some((id) => id.startsWith('skiff-weixin-'))).toBe(true)
-    expect(sent).toHaveLength(2)
+    expect(sent).toHaveLength(1)
     expect(sent[0]!.text.includes('新的对话')).toBe(true)
-    expect(sent[1]!.to).toBe('u1@im.wechat')
-    expect(sent[1]!.text).toBe('答案') // markdown **答**案 → 答案
-    expect(sent[1]!.contextToken).toBe('ct1') // context_token 回带
+    // 反向钉：桥**没有**把 agent 的最终文本转发出去
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
+    // 但它确实被追问了（否则"没发"就无从谈起）
+    expect(ctx.questions.length).toBeGreaterThan(0)
   })
 
-  it('v1.30.16 autoReplyWithLastMessage=false → 桥不回发最终文本 + 每轮末尾注入机制标记（措辞归 CCC）', async () => {
+  it('🔴 D238：桥永不回发最终文本 + 每轮末尾注入机制标记（手动模式已是唯一路径）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, autoReplyWithLastMessage: false, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
@@ -713,21 +713,13 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(hookEvents.map((e) => (e as { event: string }).event)).toEqual(['incoming'])
   })
 
-  it('v1.30.17 兜底判定矩阵（manualOutputFallbackNeeded：四条件全成立才兜底）', () => {
-    const base = { guardActive: true, sentThisTurn: false, answer: '答案' }
-    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true })).toBe(true)
-    // agent 自己发过 → 不重复（输出权归 agent）
-    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true, sentThisTurn: true })).toBe(false)
-    // 缺省（未配置 / 显式 false）→ 严格静默（v1.30.10 语义，向后兼容）
-    expect(manualOutputFallbackNeeded({ ...base })).toBe(false)
-    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: false })).toBe(false)
-    // 闸门未装配 → 无法判定"是否发送过" → 不兜底（防重复发送）
-    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true, guardActive: false })).toBe(false)
-    // 无最终文本 → 不兜底
-    expect(manualOutputFallbackNeeded({ ...base, fallbackOnNoSend: true, answer: '' })).toBe(false)
+  it('🔴 D238：`manualOutputFallbackNeeded` 已删除（兜底随 fallbackOnNoSend 一起退役）', async () => {
+    // 判据 = **符号不存在**。它若被人"贴心地"恢复回来，这条会红。
+    const mod = await import('../src/im/inbound-event.js')
+    expect('manualOutputFallbackNeeded' in mod).toBe(false)
   })
 
-  it('v1.30.17 fallbackOnNoSend=true + 闸门已装配 + 本轮未发送 → 桥兜底转发最终文本（source=reply-fallback）', async () => {
+  it('🔴 D238：`fallbackOnNoSend=true` 也不再兜底（键已无人读）—— 桥一条都不发', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, autoReplyWithLastMessage: false, fallbackOnNoSend: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
@@ -758,17 +750,14 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    // 系统类「新对话」通知 + 兜底转发的最终文本（markdown **答**案 → 答案，context_token 回带）
-    expect(sent.map((s) => s.text)).toEqual(['（新的对话已开始）', '答案'])
-    expect(sent[1]!.contextToken).toBe('ct-fb')
-    // 记录：incoming + outgoing(source=reply-fallback) —— 与 agent 自己发的 proactive 可区分
-    const outgoing = hookEvents.filter((e) => (e as { event: string }).event === 'outgoing') as Array<{ source?: string; reply?: string }>
-    expect(outgoing).toHaveLength(1)
-    expect(outgoing[0]!.source).toBe('reply-fallback')
-    expect(outgoing[0]!.reply).toBe('答案')
+    // 🔴 D238：兜底转发已整条退役 ⇒ 只有系统类「新对话」通知，「答案」永不由桥转发
+    expect(sent.map((s) => s.text)).toEqual(['（新的对话已开始）'])
+    // 记录：只有 incoming，**没有** outgoing(reply-fallback) —— 那个 source 值已退役
+    const outgoing = hookEvents.filter((e) => (e as { event: string }).event === 'outgoing')
+    expect(outgoing).toHaveLength(0)
   })
 
-  it('v1.30.17 fallbackOnNoSend 缺省（false）→ 不兜底（严格静默，向后兼容）', async () => {
+  it('🔴 D238：`fallbackOnNoSend` 缺省时同样不兜底（此处已无"开关"语义可言）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, autoReplyWithLastMessage: false, routes: [{ user: '*', trajectory: 'qa' }] },
@@ -795,10 +784,11 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
-  it('v1.30.10 autoReplyWithLastMessage=true（显式）→ 仍自动回发（开关对照）', async () => {
+  it('🔴 D238：两个已退役的键**塞进配置也不改变行为**（桥永不自动回发）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
       'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
-      weixin: { enabled: true, autoReplyWithLastMessage: true, routes: [{ user: '*', trajectory: 'qa' }] },
+      // 四个格子全试（含已退役的两个键的两种取值）—— 行为必须**逐字一致**
+      weixin: { enabled: true, autoReplyWithLastMessage: true, fallbackOnNoSend: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
     const sent: Array<{ text: string }> = []
@@ -813,12 +803,16 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     const { handleIncoming } = await import('../src/im/bridge.js')
     const ctx = fakeCtx('not-found')
     await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
-      from_user_id: 'auto@im.wechat',
+      from_user_id: 'legacy@im.wechat',
       context_token: 'ct',
       item_list: [{ type: 1, text_item: { text: 'hi' } }],
     })
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
-    expect(ctx.questions[0] ?? '').not.toContain('[serenity:weixin-manual-output]')
+    // ① 桥不回发答案（哪怕配了 autoReplyWithLastMessage:true —— 那个键已无人读）
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
+    // ② 也不兜底（哪怕配了 fallbackOnNoSend:true）
+    expect(sent.map((s) => s.text)).toEqual(['（新的对话已开始）'])
+    // ③ 但机制标记仍然注入（手动模式已是唯一路径 ⇒ 每轮都注入）
+    expect(ctx.questions[0] ?? '').toContain('[serenity:weixin-manual-output]')
   })
 
   it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
@@ -842,7 +836,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     // 历史延续：无"新的对话"通知，只有答案
     expect(sent.some((s) => s.text.includes('新的对话'))).toBe(false)
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('重启后会话已 live（DSH 恢复）→ live 复用直接回答，无"新对话"通知（v1.27.3 修复）', async () => {
@@ -870,7 +865,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     // 历史延续（live 复用 resumed=true）：只有答案，无"新的对话已开始"通知
     expect(sent.some((s) => s.text.includes('新的对话'))).toBe(false)
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
     // 内存注册表已登记（后续消息走进程内延续）
     expect([...trajectorySessionSnapshot().keys()].some((id) => id === weixinSessionIdForTrajectory('qa'))).toBe(true)
   })
@@ -911,7 +907,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(files[0]!.endsWith('.jpg')).toBe(true)
     expect(readFileSync(join(inboundDir, files[0]!)).equals(jpg)).toBe(true)
     // 回复回写（通知 + 答案）
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('文件消息 → 落盘（净化文件名）+ 注入存在性（无加密原样保存）', async () => {
@@ -942,7 +939,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(readFileSync(join(inboundDir, '报告.txt')).toString()).toBe('hello file content')
     // 注入存在性 + 文件名
     expect(ctx.questions.some((q) => q.includes('文件 报告.txt') && q.includes('已保存到'))).toBe(true)
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('媒体下载失败 → 降级注入"下载失败"进对话（不静默）', async () => {
@@ -970,7 +968,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     // 未落盘
     expect(existsSync(weixinInboundDir(dir, 'fail@im.wechat'))).toBe(false)
     // agent 处理后回复（降级说明进对话 → 回复告知用户）
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('媒体超 20MB → 降级注入"大小限制"进对话（不落盘）', async () => {
@@ -997,7 +996,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     expect(ctx.questions.some((q) => q.includes('20MB'))).toBe(true)
     expect(existsSync(weixinInboundDir(dir, 'big@im.wechat'))).toBe(false)
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('无路由 → 不创建会话不回复', async () => {
@@ -1046,7 +1046,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     })
     // 服务端转写 → 进对话 → 正常回复（新会话通知 + 答案）
     expect(sent.some((s) => s.text.includes('新的对话'))).toBe(true)
-    expect(sent.some((s) => s.text === '答案')).toBe(true)
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('语音无转写 → 降级提示（不静默、不创建会话）', async () => {
@@ -1131,22 +1132,21 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       item_list: [{ type: 1, text_item: { text: '记录我' } }],
     })
 
-    // 双向：incoming（用户消息）+ outgoing（bot 回复）各一次，顺序入→出
-    expect(hookEvents).toHaveLength(2)
+    // 🔴 D238：桥不再自动回发 ⇒ **只有 incoming**（outgoing 只可能来自 agent 自己调 im-bridge）。
+    // 本用例真正要验的是「incoming 事件的载荷形状与凭据安全」，那部分不受影响。
+    expect(hookEvents).toHaveLength(1)
     const incoming = hookEvents[0] as { event: string; userId: string; role: string; message: { text: string | null; media: unknown[] } }
-    const outgoing = hookEvents[1] as { event: string; reply: string }
     expect(incoming.event).toBe('incoming')
     expect(incoming.userId).toBe('hook@im.wechat')
     expect(incoming.role).toBe('qa')
     expect(incoming.message.text).toBe('记录我')
     expect(incoming.message.media).toEqual([])
-    expect(outgoing.event).toBe('outgoing')
-    expect(outgoing.reply).toBe('答案') // stripThink 后的回复文本
     // 载荷无凭据（context_token 不随事件）
     const json = JSON.stringify(hookEvents)
     expect(json).not.toContain('context_token')
     expect(json).not.toContain('"token"')
-    expect(sent.some((s) => s.text === '答案')).toBe(true) // 回复仍正常送达（hook 旁路）
+    // 桥一条都没发
+    expect(sent.some((s) => s.text === '答案')).toBe(false)
   })
 
   it('v1.27.13 消息 hook：hook 失败不阻断微信桥（旁路容忍 H3）', async () => {
@@ -1174,7 +1174,8 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       context_token: 'ct',
       item_list: [{ type: 1, text_item: { text: 'hi' } }],
     })).resolves.toBeUndefined()
-    expect(sent.some((s) => s.text === '答案')).toBe(true) // 回复送达（hook 失败被吞）
+    // 🔴 D238：桥不再自动回发 ⇒ 「答案」不出现在出站；本用例真正要验的（媒体解析/注入）由上面的 questions 断言覆盖
+    expect(sent.some((s) => s.text === '答案')).toBe(false) // 回复送达（hook 失败被吞）
   })
 
   it('v1.30.13：工作台纪律单一注入点——挂 轨迹约束 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {

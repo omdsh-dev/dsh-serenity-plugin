@@ -29,7 +29,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync, chmodSync, 
 import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { runMsm, runMsmAsync, checkRegistryQuality } from '../src/tools/msm/service.js'
+import { runMsm, runMsmAsync, checkRegistryQuality, compactRegistryQuality } from '../src/tools/msm/service.js'
 
 const SCRIPTS_REL = '.opencode/skills/t/scripts'
 const REGISTRY_REL = '.opencode/skills/t/references/mech-registry.json'
@@ -417,6 +417,86 @@ describe('msm-ops · checkRegistryQuality 的 M4 与扫描边', () => {
     // 正控：内容一字未改、**只**恢复权限 ⇒ 判据翻回"不是入口" ⇒ 证明差异只在"读得出来吗"
     chmodSync(abs, 0o644)
     expect(checkRegistryQuality(dir).issues.filter((i) => i.check === 'M3')).toEqual([])
+  })
+})
+
+// ── D237：`check` 的工具返回面走压缩形态 ──────────────────────────────────────
+//
+// 🔴 owner 令（2026-10-24）：「tool 的返回内容会影响 Agent 注意力……对于返回成功失败类的调用，
+//    如果成功要大幅精简；对于其它的调用，简练其结构，在确保信息有效的情况下降低大小」。
+// 判据分档：**失败面一条不许少**（失败条目是唯一能改变下一步的东西），但**同因同码的重复字面量可以折叠**。
+
+describe('msm-ops · compactRegistryQuality（D237 返回面压缩）', () => {
+  it('零 issue ⇒ 只留 checked + issueCount=0，不产生任何分组（成功面只要一行结论）', () => {
+    const c = compactRegistryQuality({ checked: 74, issues: [] })
+    expect(c).toEqual({ checked: 74, issueCount: 0, groups: [] })
+  })
+
+  it('同 (check, detail) 的多条 ⇒ 合并成一组，但**每个 name 逐条保留**（失败面不许丢信息）', () => {
+    const c = compactRegistryQuality({
+      checked: 3,
+      issues: [
+        { name: 'a', check: 'M1', detail: 'no .test.ts / .spec.ts' },
+        { name: 'b', check: 'M1', detail: 'no .test.ts / .spec.ts' },
+        { name: 'c', check: 'M4', detail: 'flag --profile should be type:"path"' },
+      ],
+    })
+    expect(c.issueCount).toBe(3)
+    // 两条 M1 合成一组（这是"降大小"的那一半）
+    const m1 = c.groups.find((g) => g.check === 'M1')!
+    expect(m1.count).toBe(2)
+    expect(m1.names).toEqual(['a', 'b'])
+    // M4 自成一组、detail 原样保留（这是"信息有效"的那一半）
+    const m4 = c.groups.find((g) => g.check === 'M4')!
+    expect(m4.count).toBe(1)
+    expect(m4.detail).toContain('--profile')
+    // 🔴 反向钉：分组后名字总数必须等于 issue 总数 —— 否则就是"压缩掉了失败信息"
+    const totalNames = c.groups.reduce((n, g) => n + g.names.length, 0)
+    expect(totalNames).toBe(3)
+  })
+
+  it('排序稳定：同码内按组大小降序、跨码按码升序（同一份注册表每次输出一致 ⇒ S↑）', () => {
+    const c = compactRegistryQuality({
+      checked: 4,
+      issues: [
+        { name: 'a', check: 'M3', detail: 'x' },
+        { name: 'b', check: 'M1', detail: 'y' },
+        { name: 'c', check: 'M1', detail: 'y' },
+        { name: 'd', check: 'M1', detail: 'z' },
+      ],
+    })
+    expect(c.groups.map((g) => g.check)).toEqual(['M1', 'M1', 'M3'])
+    expect(c.groups[0]!.count).toBe(2) // 'y' 组（2 条）排在 'z' 组（1 条）之前
+  })
+
+  it('🔴 压缩后字节数确实下降（钉住"它真的变小了"，不只看结构）', () => {
+    // 构造成实测里那种形态：同一条 detail 重复很多次
+    const many = Array.from({ length: 20 }, (_, i) => ({ name: `m${i}`, check: 'M1', detail: 'no .test.ts / .spec.ts' }))
+    const raw = JSON.stringify({ checked: 20, issues: many })
+    const packed = JSON.stringify(compactRegistryQuality({ checked: 20, issues: many }))
+    // detail 只出现一次 ⇒ 压缩后必然更短；不断言具体比例（那是会漂的数）
+    expect(packed.length).toBeLessThan(raw.length)
+    expect(packed.split('no .test.ts / .spec.ts').length - 1).toBe(1)
+  })
+
+  /**
+   * 🔴 **接线钉**（D222 教训：只测函数不测装配 ⇒ "压缩写好了但没人调用"这种回归零信号）。
+   * 钉住：`runMsm({action:'check'})` 这个**生产入口**返回的必须是压缩形态（有 issueCount/groups），
+   * 而**不是**原始 {checked, issues}。同时反向钉：`checkRegistryQuality` 本身形状不变
+   * （它有 5 处消费者，改它就是换真相源形状）。
+   */
+  it('🔴 runMsm(check) 走压缩形态；checkRegistryQuality 本体形状不变（两条各钉一半）', () => {
+    writeScript('a.ts', ENTRY_SRC)
+    writeRegistry([{ name: 'a', path: `${SCRIPTS_REL}/a.ts`, skill: 't', category: 'mech' }])
+    // 正控：本体仍是原始形状（有 issues 数组、无 issueCount）
+    const raw = checkRegistryQuality(dir)
+    expect(Array.isArray(raw.issues)).toBe(true)
+    expect(raw).not.toHaveProperty('issueCount')
+    // 生产入口：压缩形状
+    const out = runMsm(dir, { action: 'check' }) as Record<string, unknown>
+    expect(out).toHaveProperty('issueCount')
+    expect(out).toHaveProperty('groups')
+    expect(out).not.toHaveProperty('issues')
   })
 })
 

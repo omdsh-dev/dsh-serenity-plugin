@@ -142,7 +142,10 @@ describe('msm：无 name ⇒ 精简目录（buildMsmIndex）', () => {
       'Execute: msm("<name>", ["<args>"])',
       'Inspect: msm("<name>", [], inspect=true)',
       'Partial name returns matching candidates.',
-      'Full listing: use container_admin (register/deregister/check).',
+      // 🔴 D237（2026-10-24）：原文案 "Full listing: use container_admin" 会把人引去
+      //    `msm("container_admin", …)`（它是**工具**不是 MSM，实测撞过一次未命中）。
+      //    ⇒ 改成指名 domain/action，钉的是「能照做」而不是「长得像」。
+      'Registry maintenance: container_admin (domain=msm, action=register|deregister|check).',
     ]) {
       expect(text).toContain(line)
     }
@@ -218,9 +221,50 @@ describe('msm：未精确命中 ⇒ 模糊候选（suggestMsm）', () => {
     expect(text).toContain('orphan | - | - | no skill field')
   })
 
-  it('全无匹配 ⇒ 回落完整目录（含注册总数）', async () => {
+  /**
+   * 🔴 D237：候选行的长描述要截断（**选中之前的决策只需要前半句**）。
+   * 实测病：五条候选一行 200+ 字 ⇒ 大半屏被"子命令清单/历史沿革"占掉，
+   * 而那些细节属于选中之后才需要的（`inspect=true` 给全）。
+   *
+   * ⚠️ 写法要点（我自己踩过一次）：**必须传一个只匹配描述、不匹配名字的片段** ——
+   *    否则精确命中会走**执行**分支，根本到不了候选渲染（症状 = 返回 mock 的空数组）。
+   */
+  it('🔴 候选行超长描述 ⇒ 截断并在天然断句符处收尾（不含后半段的内部细节）', async () => {
+    // ⚠️ 构造要点（我自己连踩两次）：① **必须真的超过** max=64 字才会走截断分支；
+    //    ② 用来做反向断言的词必须落在**前 64 字之外**，否则它本来就该出现在截断结果里。
+    const first = '短说明足够决策；' // 8 字：这是读者据此决定"选不选它"的部分
+    const filler = '这条线还包含许多选中之后才需要知道的东西，'.repeat(3) // 把长尾推远
+    const tail = '这里才是历史沿革与迁移表等长尾细节'
+    const long = first + filler + tail
+    expect(long.length).toBeGreaterThan(64) // 自证前提（D204：先让被测格子成立）
+    expect(long.indexOf(tail)).toBeGreaterThan(64) // 自证：长尾确实在截断线之外
+    writeRegistry([{ name: 'longone', skill: 'home-a', category: 'mech', description: long }])
+    // 用描述里才有的片段 ⇒ 必然走"未命中 ⇒ 候选"分支
+    const text = (await exec({ name: '决策' })) as string
+    // 前半句在（能据此判断它是不是我要的）
+    expect(text).toContain('短说明足够决策')
+    // 长尾被砍掉
+    expect(text).not.toContain('历史沿革')
+    // 有省略标记，读者知道"这里还有"
+    expect(text).toContain('…')
+    // 短描述不受影响（不无脑截断）
+    writeRegistry([{ name: 'shortone', skill: 'home-a', category: 'mech', description: '短说明' }])
+    const t2 = (await exec({ name: '短说' })) as string
+    expect(t2).toContain('shortone | home-a | mech | 短说明')
+    expect(t2).not.toContain('短说明…')
+  })
+
+  it('全无匹配 ⇒ 简洁提示（总数 + 下一步），不再倾倒全量分类表', async () => {
     const text = (await exec({ name: 'zzz-nothing' })) as string
-    expect(text).toContain('No MSM matches "zzz-nothing". Registered: 3 MSMs registered (by skill):')
+    // 🔴 D237（2026-10-24 owner 令「成功/无匹配类返回要精简，别吃注意力」）：
+    //    旧行为 = 未命中时回**全量分类表**（实测 26 行，对"我打错了哪个名字"零信息量）。
+    //    ⇒ 新判据钉**两件**：① 给出总数与 skill 数（可判断"是不是根本没有这个东西"）；
+    //       ② 给出一个**可照做的下一步**（缩短片段 / 无参看目录）。
+    expect(text).toContain('No MSM matches "zzz-nothing" (3 registered across 2 skills).')
+    expect(text).toContain('Try a shorter fragment')
+    expect(text).toContain('msm() for counts by skill')
+    // 反向钉：**不得**再出现全量目录的分组行（那正是被砍掉的噪音）
+    expect(text).not.toContain('home-a: 2 MSM')
   })
 
   it('候选数上限 5（第 6 条起不显示）', async () => {
@@ -280,7 +324,8 @@ describe('msm：轨迹约束 门控（真 trajectoryConstraintMsmGate）', () =>
   it('白名单内但未注册 ⇒ 走无前缀候选分支（证明「加已过滤前缀」那条分支永不执行）', async () => {
     setProfile(qaDir, 轨迹约束Json({ msms: ['ghost-msm'], tools: [] }))
     const text = (await exec({ name: 'ghost-msm' }, dir, qaId)) as string
-    expect(text).toContain('No MSM matches "ghost-msm". Registered:')
+    // D237：未命中提示已精简（不再回全量分类表），钉"未命中"这一事实本身
+    expect(text).toContain('No MSM matches "ghost-msm"')
     expect(text).not.toContain('(whitelisted role — candidates filtered)')
     expect(mockRunMsmAsync).not.toHaveBeenCalled()
   })

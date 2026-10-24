@@ -230,14 +230,17 @@ describe('weixin-bridge 分支：A 组 —— typing 失败静默（文件头逐
     })
 
     const { handleIncoming } = await import('../src/im/bridge.js')
-    await handleIncoming(fakeCtx() as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+    const ctx = fakeCtxWithAnswer(true)
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'u1@im.wechat',
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    // 🔴 方向断言（纪律 20）：不是"没抛"，而是**降级后真跑成功** —— 答案仍回写
+    // 🔴 方向断言（纪律 20）：不是"没抛"，而是**降级后主流程真跑到结束**。
+    // ⚠️ D238（2026-10-24）：不能再断言"答案被回写" —— 桥已不再转发最终文本。
+    //    ⇒ 证据换成「追问真的送进了会话」（`questions`）＋「无异常逃逸」（正常 resolve）。
     expect(configCalls).toBe(1)
-    expect(sent.some((t) => t.includes('答'))).toBe(true)
+    expect(ctx.questions.length).toBeGreaterThan(0)
   })
 
   it('A2 sendtyping 抛错 → typing stop 静默（finally 里，异常路径也不掩盖主流程）', async () => {
@@ -258,13 +261,14 @@ describe('weixin-bridge 分支：A 组 —— typing 失败静默（文件头逐
     })
 
     const { handleIncoming } = await import('../src/im/bridge.js')
-    await handleIncoming(fakeCtx() as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
+    const ctx2 = fakeCtxWithAnswer(true)
+    await handleIncoming(ctx2 as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' }, {
       from_user_id: 'u1@im.wechat',
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    // 🔴 方向断言：typing 端点全挂，但**答案照样回写**
-    expect(sent.some((t) => t.includes('答'))).toBe(true)
+    // 🔴 方向断言：typing 端点全挂，但**主流程照样跑完**（D238：不再有"答案回写"这回事）
+    expect(ctx2.questions.length).toBeGreaterThan(0)
   })
 })
 
@@ -409,12 +413,14 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
       item_list: [{ type: 1, text_item: { text: '你好' } }],
     })
 
-    // 🔴 方向断言：挂段失败（降级）后，**本轮仍产出答案**（"不影响处理"是逐字承诺）
+    // 🔴 方向断言：挂段失败（降级）后，**本轮仍跑到产出答案那一步**（"不影响处理"是逐字承诺）
     //    —— 且降级不是静默的：工作台纪律改由 question 前缀注入（约束仍在场）。
-    expect(sent.some((t) => t.includes('答'))).toBe(true)
+    // ⚠️ D238（2026-10-24）：桥不再转发最终文本 ⇒ "产出答案"的证据 = **question 真的进了会话**，
+    //    而不是"答案被回写"（那是已退役的行为）。
     expect(asked.some((q) => q.includes('Serenity Session Workspace') && q.includes('你好'))).toBe(true)
-    // existing 快路径 = 历史延续 ⇒ 不发"新的对话已开始"通知
+    // existing 快路径 = 历史延续 ⇒ 不发"新的对话已开始"通知，也**不自动回发答案**
     expect(sent.some((t) => t.includes('新的对话'))).toBe(false)
+    expect(sent.some((t) => t.includes('答'))).toBe(false)
     // 注：本用例同时是 C 组与"existing 快路径"的 happy-path 正控（纪律 10）
   })
 })

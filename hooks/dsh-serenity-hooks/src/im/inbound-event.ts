@@ -46,7 +46,7 @@ import {
 } from '../trajectory/session.js'
 import { noteManualOutputSession, forgetManualOutputSession, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
 import { getActiveSessionInfo } from '../trajectory/core.js'
-import { invokeWeixinHook, buildIncomingHookEvent, buildOutgoingHookEvent, type WeixinHookMediaRef } from './hook.js'
+import { invokeWeixinHook, buildIncomingHookEvent, type WeixinHookMediaRef } from './hook.js'
 
 // ── 中立事件的形状 ──────────────────────────────────────────────────────────
 
@@ -413,27 +413,24 @@ export async function handleInboundEvent(
         const sectionOk = ensureWorkspacePromptSection(ref.agent, sessionId, root)
         if (!sectionOk) parts.push(workspaceCognitiveTrajectoryLine(workspaceMd))
       }
-      const manualOutput = settings.autoReplyWithLastMessage === false
       if (text) parts.push(text)
       parts.push(...mediaNotes, ...degradedNotes)
-      if (manualOutput) {
-        /**
-         * 🔴 **不在这里清空"已发送"标记**（2026-10-21 修"同一条消息被处理两轮"）。
-         *
-         * 旧写法 `clearSentThisTurn(sessionId)` 的语义是"来了新消息就当这个会话没发过"——
-         * 而它**连正在跑那一轮的证据一起抹掉**：真机时刻线
-         * `12:08:25 发送成功 → 12:08:56 新入站(抹) → 12:09:19 那一轮 turn-stopping 判"没发" ⇒ 打回`
-         * ⇒ 用户看到的就是"同一条消息被处理了两轮"。
-         *
-         * 现在**没有任何清空动作**：标记记的是**轮号**，上一轮发的记录在下一轮 `turn-stopping`
-         * 时天然不匹配（`hasSentThisTurn` 按轮比）⇒ 陈旧记录靠"轮号不等"淘汰，
-         * 不靠"谁来抹掉"。清空动作本身就是误伤面。
-         */
-        noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory, channel })
-        parts.push(manualOutputMarker(accountId, fromUserId, channel))
-      } else {
-        forgetManualOutputSession(sessionId)
-      }
+      /**
+       * 🔴🔴 **2026-10-24（owner 令，D238）：出站只有一条路 —— agent 自己调 `im-bridge`。**
+       *
+       * 此前这里是 `if (manualOutput) {…}` 条件分支：`autoReplyWithLastMessage=false` 才走手动，
+       * 否则桥替 agent 转发最终文本。**该开关已整条退役** ⇒ 本段成为**唯一路径**：
+       * 每轮都登记闸门 ＋ 注入机制标记，桥**永不**自动回发。
+       *
+       * 为什么要这样（owner 原话）：「autoReply 并不合适，主动性的 imBridge 仍然是更好的」
+       * —— 自动回发让 agent 失去"说几条 / 何时说 / 要不要不说"的决定权，而这正是主动发送的价值。
+       *
+       * ⚠️ **由此产生的唯一代价（必须同时修）**：agent 不发 ⇒ 用户确实收不到。
+       * 所以 D234 的修法是本改动的**必配件**：guard 打回前必须确认 `im-bridge` 对该轨迹可见，
+       * 否则"没权发"会被无解地打回成"忘了发"。见 `im/guard.ts`。
+       */
+      noteManualOutputSession(sessionId, { root, accountId, userId: fromUserId, role: trajectory, channel })
+      parts.push(manualOutputMarker(accountId, fromUserId, channel))
       const question = parts.join('\n')
 
       // hook：incoming 事件（用户 → bot）——媒体落盘后、askTrajectory 前 fire。旁路容忍（H3）。
@@ -454,56 +451,20 @@ export async function handleInboundEvent(
       }
 
       const result = await askTrajectory(ctx, ref.agent, question)
-      const answer = result.answer ?? ''
-      // 手动输出模式——桥不转发最终文本（输出权归 agent）
-      if (manualOutput) {
-        const fallback = manualOutputFallbackNeeded({
-          fallbackOnNoSend: settings.fallbackOnNoSend,
-          guardActive: isWeixinOutputGuardActive(),
-          sentThisTurn: hasSentThisTurn(sessionId),
-          answer,
-        })
-        if (!fallback) return
-        const reply = markdownToPlainText(stripThink(answer))
-        await io.sendText({ toUserId: fromUserId, text: reply, replyRef: event.replyRef })
-        console.warn(
-          `[serenity-hooks] ⚠ im 输出兜底：agent 本轮未发送（闸门打回用尽）→ 桥转发最终文本（session=${sessionId}, trajectory=${trajectory}）`,
-        )
-        if (hookRel) {
-          void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
-            cccRoot: root,
-            channel,
-            accountId,
-            userId: fromUserId,
-            sessionId,
-            role: trajectory,
-            reply,
-            source: 'reply-fallback',
-          })).catch((err) => {
-            console.log(`[serenity-hooks] im hook outgoing(reply-fallback) error: ${err instanceof Error ? err.message : String(err)}`)
-          })
-        }
-        return
-      }
-      if (answer === '') return
-
-      const reply = markdownToPlainText(stripThink(answer))
-      await io.sendText({ toUserId: fromUserId, text: reply, replyRef: event.replyRef })
-
-      // hook：outgoing 事件——发送成功后 fire（发送失败不记录——从未送达的回复无记录价值）
-      if (hookRel) {
-        void invokeWeixinHook(root, hookRel, buildOutgoingHookEvent({
-          cccRoot: root,
-          channel,
-          accountId,
-          userId: fromUserId,
-          sessionId,
-          role: trajectory,
-          reply,
-        })).catch((err) => {
-          console.log(`[serenity-hooks] im hook outgoing error: ${err instanceof Error ? err.message : String(err)}`)
-        })
-      }
+      /**
+       * 🔴🔴 **2026-10-24（owner 令，D238）：这里不再有任何"桥转发最终文本"的分支。**
+       *
+       * 删掉的两段（历史留档，R↓）：
+       * ① `manualOutput` 的兜底转发（原 `fallbackOnNoSend` + `source:'reply-fallback'`）；
+       * ② 自动模式的直接转发（原 `io.sendText` + `source:'reply'` 缺省）。
+       *
+       * **留下的唯一事实**：`askTrajectory` 返回后**什么都不发** —— 出站只可能由 agent
+       * 自己调 `im-bridge` 产生（`source:'proactive'`）。
+       *
+       * ⚠️ `answer` / `result` 仍要读：不读它们会丢失**有内容却没发**这一信息的诊断面，
+       *    留给下面那条"本轮未发送"的日志（由 guard 的 turn-stopping 打回 + 告警承担）。
+       */
+      void result
     } finally {
       await io.typingStop?.({ toUserId: fromUserId })
     }
@@ -522,7 +483,7 @@ export async function handleInboundEvent(
 // ── 与通道无关、但被主流程用到的那个标记 ───────────────────────────────────
 
 /**
- * 手动输出模式的**机制标记**（v1.30.10 引入；v1.30.16 按「ACC 管机制、CCC 管措辞」重构）。
+ * 出站**机制标记**（v1.30.10 引入；v1.30.16 按「ACC 管机制、CCC 管措辞」重构）。
  *
  * 边界（R↓）：ACC 只提供**机制与数据**——"桥不转发最终文本"这个事实 + 三个已填好的参数值。
  * **纪律措辞归 CCC**：怎么写、必须怎么做、后果是什么，全部写在轨迹的 `PROMPT.md` 里。
@@ -530,6 +491,10 @@ export async function handleInboundEvent(
  * 🔴 **渠道不是常量**（2026-10-20 Q4）：此前这里硬写 `channel:"weixin"`，
  * 而一条**飞书**会话收到的却是"发往微信"的命令 ⇒ 模型照着做必然失败（目标 id 是 open_id）。
  * ⇒ 渠道由调用方传入；缺省 `'weixin'` 保留既有调用点与测试的读数。
+ *
+ * 🔴 2026-10-24（D238）：本标记从"手动模式才注入"变成**每轮必注入**（手动模式已成唯一路径）。
+ * ⚠️ **标记字符串 `[serenity:weixin-manual-output]` 不改名**：CCC 侧角色提示词按它做判据，
+ *    改名会把已写好的纪律文档全打成废纸；它是**协议标记**，不是渠道名（与 A85 同一处置）。
  */
 export function manualOutputMarker(accountId: string, userId: string, channel = 'weixin'): string {
   return [
@@ -539,19 +504,13 @@ export function manualOutputMarker(accountId: string, userId: string, channel = 
 }
 
 /**
- * 手动输出模式的**兜底判定**（纯函数，v1.30.17——把决策矩阵从装配里抽出来，可独立测试）。
+ * 🔴 **`manualOutputFallbackNeeded` 已于 2026-10-24 删除**（owner 令，D238）。
  *
- * 四个条件同时成立才兜底：
- * ① CCC 显式开启 `fallbackOnNoSend`（缺省 false = 严格静默）
- * ② 机械闸门**已装配**（未装配时无法判定"是否发送过" → 宁可静默也不冒重复发送风险）
- * ③ 本轮**没有**成功发送（agent 自己发过 → 输出权归 agent，桥不插话）
- * ④ 有最终文本可转发（空文本无意义）
+ * 它实现的是「手动模式下 agent 一次都没发成功 ⇒ 桥兜底转发最终文本」。
+ * **随 `fallbackOnNoSend` 一起退役** —— 那个开关只在 `autoReplyWithLastMessage=false` 时才有意义，
+ * 而后者已整条删除（出站只剩 `im-bridge` 一条路）。
+ *
+ * ⛔ **不要把它改写成"自动兜底"再放回来**：owner 否决的正是"桥替 agent 说最后一句"这件事本身
+ * （「autoReply 并不合适，主动性的 imBridge 仍然是更好的」），而不是它的某个实现细节。
+ * 兜底带来的"不丢消息"收益，改由 guard 打回（可见性前置检查 ＋ 响亮告警）承担。
  */
-export function manualOutputFallbackNeeded(input: {
-  fallbackOnNoSend?: boolean
-  guardActive: boolean
-  sentThisTurn: boolean
-  answer: string
-}): boolean {
-  return input.fallbackOnNoSend === true && input.guardActive && !input.sentThisTurn && input.answer !== ''
-}

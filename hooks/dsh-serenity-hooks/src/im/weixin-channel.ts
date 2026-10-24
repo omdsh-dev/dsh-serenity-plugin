@@ -196,8 +196,9 @@ export const weixinChannel: ImChannel = {
     })
     return {
       enabled: settings.enabled === true,
-      autoReplyWithLastMessage: settings.autoReplyWithLastMessage !== false,
-      fallbackOnNoSend: settings.fallbackOnNoSend === true,
+      // 🔴 2026-10-24（D238）：`autoReplyWithLastMessage` / `fallbackOnNoSend` 已整条退役，
+      // 不再出现在 status 回显里（旧字段留着会让读的人以为还能配）。
+      // 出站只有一条路：agent 自己调 im-bridge。
       routes,
       accounts,
     }

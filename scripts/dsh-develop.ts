@@ -717,9 +717,19 @@ function verifyTarball(): void {
   // lib/ 产物清单（验证 chunk 与 .d.ts 齐全——v1.26.15 事故后常驻可见性）
   const libEntries = tarballFiles.filter((f) => f.startsWith('lib/'))
   const dtsCount = tarballFiles.filter((f) => f.endsWith('.d.ts')).length
-  console.log(`[dsh-develop]   lib/ 共 ${libEntries.length} 项（js ${libEntries.filter((f) => f.endsWith('.js')).length} / d.ts ${libEntries.filter((f) => f.endsWith('.d.ts')).length}）`)
-  for (const f of libEntries) console.log(`    ${f}`)
-  console.log(`[dsh-develop]   包内 .d.ts 类型文件总计 ${dtsCount} 个`)
+  const libJsCount = libEntries.filter((f) => f.endsWith('.js')).length
+  const libDtsCount = libEntries.filter((f) => f.endsWith('.d.ts')).length
+  // 🔴 D237（2026-10-24 owner 令「成功要大幅精简，别逐条列」）：
+  //    此前这里**无条件逐行打印 145 项** lib/ 产物 —— 那是**成功**路径，
+  //    而"清单每一项都在"这件事已经由上面那行 `✓ 核对通过` 的**判据**保证了
+  //    （缺任何一个 chunk，`missingLibJs` 早就 fail 退出、根本走不到这里）。
+  //    ⇒ 成功面只留「结论 ＋ 计数」；**要看全清单时**显式传 `--list-artifacts` 拿全（人读/排障用）。
+  console.log(`[dsh-develop]   lib/ 共 ${libEntries.length} 项（js ${libJsCount} / d.ts ${libDtsCount}）｜包内 .d.ts 共 ${dtsCount} 个`)
+  if (process.argv.includes('--list-artifacts')) {
+    for (const f of libEntries) console.log(`    ${f}`)
+  } else {
+    console.log('[dsh-develop]   （要看逐项清单：pack-check --list-artifacts）')
+  }
 }
 
 function cmdGithubPushRepo(dir?: string): void {

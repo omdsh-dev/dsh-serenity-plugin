@@ -131,14 +131,14 @@ describe('中立入站事件层：一条消息的主流程（与通道无关）'
     }, { target: target! })
 
     expect(questions.join('\n')).toContain('你好呀') // 问题真进了会话
-    // 🔴 断言必须钉**回复本身**，不能只断言"发过东西"——
-    //    「（新的对话已开始）」那条系统通知也会让 `sent.length > 0` 成立。
-    //    实测：把 io.sendText 那行改成不调用 ⇒ 旧断言**照样绿**（假绿，已修）。
-    //    ⇒ 这里要求：**最后一条**是模型答复（fake agent 的答案是 `**答**案`），
-    //       且先有系统通知、后有答复（顺序也要对，否则用户看到的是倒的）。
+    // 🔴 D238（2026-10-24，owner 令「出站只有 im-bridge 一条路」）：
+    //    **桥不再转发 agent 的最终文本** ⇒ 只有系统类「新的对话已开始」这一条，
+    //    而 fake agent 的 `**答**案` **不会**出现在出站里。
+    //    ⇒ 「问题真被追问」由上面的 questions 断言承担（否则"没发"无从谈起）。
     expect(sent.some((s) => s.includes('新的对话已开始'))).toBe(true)
-    expect(sent[sent.length - 1]).toContain('答案')
-    expect(sent.length).toBeGreaterThan(1)
+    expect(sent.some((s) => s.includes('答案'))).toBe(false)
+    // 且机制标记已注入（手动模式是唯一路径）
+    expect(questions.join('\n')).toContain('[serenity:weixin-manual-output]')
   })
 
   it('无文本无媒体 + 有语音 ⇒ 发降级提示（不静默、不建会话）', async () => {
@@ -271,15 +271,12 @@ describe('中立入站事件层：一条消息的主流程（与通道无关）'
 })
 
 describe('中立入站事件层：通道无关的纯机制面', () => {
-  it('机制标记与兜底矩阵仍是已导出、可独立测的纯函数（与通道无关）', async () => {
-    const { manualOutputMarker, manualOutputFallbackNeeded } = await import('../src/im/inbound-event.js')
-    expect(manualOutputMarker('acct-a', 'u1')).toContain('[serenity:weixin-manual-output]')
-    expect(manualOutputFallbackNeeded({ fallbackOnNoSend: true, guardActive: true, sentThisTurn: false, answer: 'x' })).toBe(true)
-    // 反向：四条件任一不成立 ⇒ 不兜底（宁可静默也不冒重复发送风险）
-    expect(manualOutputFallbackNeeded({ fallbackOnNoSend: true, guardActive: true, sentThisTurn: true, answer: 'x' })).toBe(false)
-    expect(manualOutputFallbackNeeded({ fallbackOnNoSend: false, guardActive: true, sentThisTurn: false, answer: 'x' })).toBe(false)
-    expect(manualOutputFallbackNeeded({ fallbackOnNoSend: true, guardActive: false, sentThisTurn: false, answer: 'x' })).toBe(false)
-    expect(manualOutputFallbackNeeded({ fallbackOnNoSend: true, guardActive: true, sentThisTurn: false, answer: '' })).toBe(false)
+  it('机制标记仍是已导出、可独立测的纯函数；兜底函数已随 D238 退役', async () => {
+    const mod = await import('../src/im/inbound-event.js')
+    expect(mod.manualOutputMarker('acct-a', 'u1')).toContain('[serenity:weixin-manual-output]')
+    // 🔴 D238：`manualOutputFallbackNeeded` 已删除 —— 兜底随 fallbackOnNoSend 一起退役。
+    //    判据 = **符号不存在**；它若被"贴心地"恢复回来，这条会红。
+    expect('manualOutputFallbackNeeded' in mod).toBe(false)
   })
 
   it('🔴 渠道不是常量：传 `channel:"feishu"` ⇒ 注入的命令写 feishu（缺省仍是 weixin）', async () => {
