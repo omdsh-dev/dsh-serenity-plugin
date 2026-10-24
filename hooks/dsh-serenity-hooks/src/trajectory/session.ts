@@ -558,7 +558,59 @@ export async function waitForTurnAssistant(
 }
 
 /**
+ * 把一条用户消息**投进**载体会话 —— 🔴 **2026-10-24 owner 令：正在跑就直接进，不排队**。
+ *
+ * ## owner 原话
+ * 「**当用户消息进来，且绑定轨迹正在活动时，消息是排队而不是直接进入，应当改为直接进入，
+ *   这样确保来回通信的流畅性**」。
+ *
+ * ## 修前为什么是"排队"
+ * 入站走 {@link askTrajectory}：它 `followup()`（**排队语义**，等本轮结束才开新一轮）
+ * 然后**等整轮跑完**读答案。而 D238（2026-10-24，出站只剩 `im-bridge`）之后
+ * 那个答案**已经没有消费方**（调用点是 `void result`）⇒
+ * **整轮等待只剩副作用：把后一条消息堵在前一条那一轮后面**。
+ *
+ * ## 判据（与 `trajectory/interrupted.ts` 的 `createResumeOne` 同源）
+ * - **`agent.status === 'running'` 且 `steer` 可用** ⇒ `steer`：**当场注入当前轮**
+ *   （模型在同一次生成里就看到这句话 ⇒ 来回通信连续）。
+ * - 否则 `followup`：空闲 ⇒ 立刻起一轮；`steer` 缺失 ⇒ 排队也比丢掉好。
+ *
+ * ## 为什么本函数**不等**回答
+ * ① 答案没人读（D238 之后出站只能由 agent 自己调 `im-bridge`）；
+ * ② **等待正是"排队"的机制本体** —— 不等，锁就只覆盖投递那一下，
+ *    下一条消息才能也当场进去。
+ * ⇒ 语义从"**问一句、等回答**"变成"**把话递进去**"。这也更贴近 IM 的真实形态：
+ *    用户是连续说话的，不是一问一答的请求-响应。
+ *
+ * ⚠️ **与 {@link askTrajectory} 的分工**：后者保留"问 + 等本轮答案"的完整语义
+ * （仍有消费方/测试在用）；本函数是**入站投递**专用。
+ */
+export function deliverToTrajectory(agent: Agent, text: string): { how: string } {
+  const a = agent as unknown as {
+    steer?: (m: unknown) => void
+    followup?: (m: unknown) => void
+    status?: string
+  }
+  const msg = createUserMessage({ content: [{ type: 'text', text }], source: PLUGIN_SOURCE })
+  // 🔴 分支顺序即判据：在跑优先当场注入
+  if (a.status === 'running' && typeof a.steer === 'function') {
+    a.steer(msg)
+    return { how: 'steer' }
+  }
+  if (typeof a.followup === 'function') {
+    a.followup(msg)
+    return { how: 'followup' }
+  }
+  return { how: 'none' }
+}
+
+/**
  * 提问一轮：followup → 等**本轮**回答 → 读答案。
+ *
+ * ⚠️ **2026-10-24：本函数已不再是 IM 入站的投递路径**（改用 {@link deliverToTrajectory}，
+ * 因为 owner 要求"正在跑就直接进、不排队"，且 D238 之后答案已无消费方）。
+ * 保留它是因为"问一句并等这一轮的答案"这个语义本身仍然有效（测试与将来的同步调用方）。
+ * ⛔ **不要把它改回入站路径** —— 那会把排队一起带回来。
  *
  * ## 🔴 2026-10-21：快照从"条数"升级为"（轮号, 条数, 事件位）"
  *

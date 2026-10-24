@@ -41,7 +41,7 @@ import { sniffImageExt, markdownToPlainText } from './ilink.js'
 import { readTrajectoryConstraintByCode, type TrajectoryConstraint } from '../trajectory/policy/profile.js'
 import { stripThink } from '../surface/text.js'
 import {
-  createTrajectoryAgent, getTrajectoryAgent, askTrajectory, workspaceCognitiveTrajectoryLine,
+  createTrajectoryAgent, getTrajectoryAgent, deliverToTrajectory, workspaceCognitiveTrajectoryLine,
   ensureWorkspacePromptSection, trajectoryWorkspaceMdPath,
 } from '../trajectory/session.js'
 import { noteManualOutputSession, forgetManualOutputSession, hasSentThisTurn, isWeixinOutputGuardActive } from './guard.js'
@@ -333,15 +333,22 @@ export async function handleInboundEvent(
     // 🔴 会话 id **由轨迹编码派生**（身份挂在轨迹上，不挂在用户上）。
     const sessionId = weixinSessionIdForTrajectory(trajectory)
     /**
-     * 🔴 **同会话串行化**（2026-10-21，修"同一条消息被处理两轮"的第二个缺陷）。
+     * 🔴 **同会话串行化**（2026-10-21 引入；**2026-10-24 理由已变，见下**）。
      *
-     * `askTrajectory` 的成功判据是"`assistant/message` **条数增长**"。两条入站并发时，
-     * 后一条的快照包含前一条尚未落盘的产出 ⇒ **前一轮的产出会满足后一条的成功判据**
-     * ⇒ 兜底/`reply-fallback` 可能拿到**错轮**的答案（真机实测：把内部过程话发给了家人）。
+     * ## 原理由（已失效，留档 R↓）
+     * `askTrajectory` 的成功判据是"`assistant/message` **条数增长**"，两条入站并发时
+     * 后一条的快照包含前一条尚未落盘的产出 ⇒ 前一轮的产出满足后一条的判据 ⇒
+     * 兜底可能拿到**错轮**的答案（真机实测：把内部过程话发给了家人）。
      *
-     * 锁的粒度 = **一个会话同一时刻只跑一条入站**（不同轨迹各跑各的，互不拖慢）。
-     * ⚠️ 与投递侧"不排队"不是一回事：`send-now` 的"当场注入"是**投递**语义，
-     * 这里排的是**处理**语义 —— 两者不冲突。
+     * ## 🔴 现在的理由（owner 2026-10-24 令「正在跑就直接进、不排队」之后）
+     * 入站改走 `deliverToTrajectory`（**不等回答**）⇒ 上面那条"错轮答案"的路径**已不存在**。
+     * 锁**仍然需要**，但它现在防的是另一件事：
+     * **`createTrajectoryAgent` 的"查-没有-再建"** —— 两条入站同时到达且都发现"没有载体"时，
+     * 会各自建一个 ⇒ **同一轨迹两个载体**（撞 D-族「一条轨迹至多一个载体」的底线）。
+     * ⇒ 锁的**覆盖范围应当只包住"投递"这一步**，⛔ 不该再包住整轮等待
+     * （那正是 owner 说的"排队"）。投递本身是同步的几十微秒，串行化代价可忽略。
+     *
+     * ⚠️ 粒度 = **一个会话同一时刻只处理一条入站的投递**（不同轨迹各跑各的）。
      */
     releaseLock = await acquireSessionLock(sessionId)
     const existing = getTrajectoryAgent(sessionId)
@@ -450,7 +457,24 @@ export async function handleInboundEvent(
         })
       }
 
-      const result = await askTrajectory(ctx, ref.agent, question)
+      /**
+       * 🔴🔴 **2026-10-24（owner 令）：正在跑就**直接进**，不排队。**
+       *
+       * owner 原话：「当用户消息进来，且绑定轨迹正在活动时，消息是排队而不是直接进入，
+       * 应当改为直接进入，这样确保来回通信的流畅性」。
+       *
+       * **修前**：`await askTrajectory(...)` = `followup()`（排队语义）＋ **等整轮跑完**。
+       * ⇒ 用户连说两句，第二句要等第一句那一整轮结束才被看见 ⇒ **来回通信卡顿**。
+       *
+       * **为什么现在可以不等**：D238（同日，出站只剩 `im-bridge`）之后，
+       * 那个 `answer` **已经没有消费方**（上一版这里就是 `void result`）——
+       * 整轮等待**只剩"把后一条堵在前面"这一个副作用**。
+       *
+       * **投递形态**（`deliverToTrajectory`，与 `interrupted.ts` 的 `createResumeOne` 同判据）：
+       * 在跑 ⇒ `steer`（当场进当前轮，模型同一次生成里就看到）；
+       * 空闲 ⇒ `followup`（立刻起一轮）；`steer` 缺失 ⇒ 排队也比丢掉好。
+       */
+      const delivered = deliverToTrajectory(ref.agent, question)
       /**
        * 🔴🔴 **2026-10-24（owner 令，D238）：这里不再有任何"桥转发最终文本"的分支。**
        *
@@ -458,13 +482,31 @@ export async function handleInboundEvent(
        * ① `manualOutput` 的兜底转发（原 `fallbackOnNoSend` + `source:'reply-fallback'`）；
        * ② 自动模式的直接转发（原 `io.sendText` + `source:'reply'` 缺省）。
        *
-       * **留下的唯一事实**：`askTrajectory` 返回后**什么都不发** —— 出站只可能由 agent
+       * **留下的唯一事实**：投递之后**什么都不发** —— 出站只可能由 agent
        * 自己调 `im-bridge` 产生（`source:'proactive'`）。
        *
-       * ⚠️ `answer` / `result` 仍要读：不读它们会丢失**有内容却没发**这一信息的诊断面，
-       *    留给下面那条"本轮未发送"的日志（由 guard 的 turn-stopping 打回 + 告警承担）。
+       * ⚠️ `delivered.how` 要记：它回答"这条消息是怎么进去的"
+       *    （`steer` = 当场进当前轮 ／ `followup` = 排进下一轮 ／ `none` = 无通道）。
+       *    **不记它就无法从日志上分清"不排队"到底生效了没有**（D216 同族）。
        */
-      void result
+      if (delivered.how === 'none') {
+        console.log(`[serenity-hooks] im 投递失败：会话 ${sessionId} 既无 steer 也无 followup（宿主契约漂移）`)
+      } else {
+        console.log(`[serenity-hooks] im 投递：会话 ${sessionId} → ${delivered.how}（不排队；出站走 im-bridge）`)
+      }
+      /**
+       * 🔴🔴 **2026-10-24（owner 令「不排队」）：锁在这里就放，⛔ 不再等整轮。**
+       *
+       * 投递已在上一步**同步**完成（`steer` ／ `followup` 都是同步调用）⇒
+       * 锁要保护的"查载体-没有-再建"那一段**已经结束**。
+       * ⇒ 从这里往后（typingStop、日志、hook 回调）没有任何"必须串行"的事，
+       *    让锁继续持有 = **把下一条消息堵在这里** = owner 说的"排队"。
+       *
+       * ⚠️ 早期释放是**安全**的：下面 `finally` 里的 `releaseLock?.()` 有 `released` 幂等判据
+       *    （见 `acquireSessionLock` 的返回），重复调用是空操作 ⇒ 不会二次释放。
+       */
+      releaseLock?.()
+      releaseLock = null
     } finally {
       await io.typingStop?.({ toUserId: fromUserId })
     }
