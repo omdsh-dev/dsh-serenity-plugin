@@ -79,11 +79,34 @@ const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 /** 默认回看窗口：8 小时（owner 2026-10-22 定） */
 export const DEFAULT_LOOKBACK_MS = 8 * 60 * 60 * 1000
 
-/** 每次从文件尾部读取的字节数（够覆盖数百个末尾事件） */
-const TAIL_WINDOW_BYTES = 1 << 20 // 1 MiB
+/**
+ * 每次从文件尾部读取的字节数。
+ *
+ * 🔴 **2026-10-24 从 1 MiB 提到 8 MiB**：与 `TAIL_EVENT_TARGET` 提到 400 配套。
+ * 1 MiB 常常装不下 400 个事件（大 step 的 `tool/result` 单条就可几十 KB）——
+ * 那样"要 400 个"只是愿望，实际被字节数截断（**两种上限里小的那个说了算**）。
+ */
+const TAIL_WINDOW_BYTES = 8 << 20 // 8 MiB
 
-/** 需要凑够的末尾事件数（够跨过 turn/end + step/end + end-seed 即可，留余量） */
-const TAIL_EVENT_TARGET = 60
+/**
+ * 需要凑够的末尾事件数。
+ *
+ * 🔴🔴 **2026-10-24 从 60 提到 400 —— 这是"啥都扫不到"的直接成因（实测，不是估算）**。
+ *
+ * 原值 60 的前提是「`turn/end` + `step/end` + `end-seed` 三个事件就在尾部附近」——
+ * 那个前提**在"轮内被打断"时完全不成立**：
+ *   · 一轮跑到一半死掉 ⇒ 尾部全是 `tool/call` / `tool/result` / `assistant/message` / `step/start`，
+ *     **一条 `turn/start`／`turn/end` 都凑不齐**；
+ *   · 实测本机 10 个窗口内会话，**4 个**在 60 事件窗口里凑不到 `turn/start`
+ *     （被误判成"没开轮"）⇒ 换成 400 事件**全部命中**（turn=56/105/192/24）。
+ *   · 最坏一条：57 MB 的日志里，一个 step 就可能塞进几十个 `tool/call`。
+ *
+ * ⚠️ **这不是"调参"，是判据前提变了**：一旦允许"轮内任意位置中断"这个形态，
+ *    尾部窗口就**必须**宽到能跨过一整轮的碎片。
+ * 💰 成本：解压帧数上升（实测 6 会话 × 400 事件仍是**几十毫秒**量级）——
+ *    用几十毫秒换"不再漏掉一整类"，划算。
+ */
+const TAIL_EVENT_TARGET = 400
 
 /** 日志里被我们识别的事件形状（只取用得到的字段） */
 interface SessionEvent {
@@ -226,14 +249,19 @@ function readTailEvents(logPath: string, want: number): SessionEvent[] {
 const UNFINISHED_KINDS: ReadonlySet<string> = new Set(['interrupted', 'aborted'])
 
 /**
- * 命中判定。
+ * 命中判定（**形态 A：靠 `turn/end.reason.kind`**）。
+ *
+ * ⚠️ **本函数刻意不判「开了没收」** —— 那种形态与「此刻正在跑」在日志读数上**不可分**，
+ * 只有扫描层手里有 `liveIds`（正在跑的会话 id）才判得准。
+ * ⇒ 分工：**本函数判"收尾原因"，`scanInterruptedSessions` 判"开了没收"**（见 `detectUnclosedTurn`）。
+ * ⛔ 不要把这些情形塞进本函数 —— 会让它同时依赖"日志形态"与"进程状态"，那种判据无法单独证伪。
  *
  * @returns 命中时给出被中断的轮次与"可能有副作用"的工具名；不命中 null
  */
 export function detectInterruptedEnd(events: SessionEvent[]): { turn: number | null; pendingTools: string[] } | null {
   if (events.length === 0) return null
 
-  // 🔴 判据 1／2：找**最后一条** turn/end，要求它属于「没跑完」的取值域，且其后没有新的 turn/start。
+  // 判据 1／2：找**最后一条** turn/end，要求它属于「没跑完」的取值域，且其后没有新的 turn/start。
   //    ⛔ 不要退回"末条必须 end-seed"：那是载体形态判据，被恢复动作打破（见上方缺陷说明）。
   let idx = -1
   for (let i = events.length - 1; i >= 0; i--) {
@@ -246,12 +274,72 @@ export function detectInterruptedEnd(events: SessionEvent[]): { turn: number | n
   const turnEnd = events[idx]
   const kind = turnEnd?.data?.reason?.kind
   if (typeof kind !== 'string' || !UNFINISHED_KINDS.has(kind)) return null
-  // 之后若又开了新轮 ⇒ 已被接续，不是"停在这里"
+  // 之后若又开了新轮 ⇒ 旧轮已封口、且新一轮由 `detectUnclosedTurn` 负责判
   for (let i = idx + 1; i < events.length; i++) {
     if (events[i]?.type === 'turn/start') return null
   }
 
   const turn = typeof turnEnd?.data?.turn === 'number' ? turnEnd.data.turn : null
+  return { turn, pendingTools: findPendingTools(events, turn) }
+}
+
+/**
+ * 命中判定（**形态 B：一轮开了却没收**）—— 🔴🔴 **2026-10-24 owner 报障的正解**。
+ *
+ * ## 为什么这一格以前整类漏掉
+ *
+ * 进程在**轮内任意位置**死掉时，宿主**永远没机会写 `turn/end`**
+ * ⇒ 日志就停在 `tool/call` ／ `step/start` ／ `assistant/message` 上。
+ * 修前 `detectInterruptedEnd` 首行是 `if (idx < 0) return null`（找不到 turn/end 就放弃）
+ * ⇒ **这一整类被判成"没中断"**。
+ *
+ * ## 判据
+ * **最后一条 `turn/start` 之后没有 `turn/end`** ⇒ 那一轮开了没收。
+ *
+ * ## 为什么必须由**扫描层**调用（而不是并进 `detectInterruptedEnd`）
+ * 「开了没收」与「此刻正在跑」在**日志读数上完全一样**。
+ * 唯一能分开它们的东西是 `liveIds`（宿主报的"此刻在跑的会话"）——
+ * 而那是**扫描层**的参数，不是日志的属性。
+ * ⇒ 本函数只回答"日志形态是不是开了没收"，**由调用方保证已排除在跑的会话**。
+ * ⚠️ 判据纪律：两个不同的问题（日志形态 ／ 进程状态）**不许塞进同一个函数**，
+ *    否则那个函数无法被单独证伪（改任一侧都可能让测试红，而说不清是哪侧错了）。
+ *
+ * @param events 尾部事件
+ * @returns 命中时给出未收尾的轮次与"可能有副作用"的工具名；没有未收尾的轮次 ⇒ null
+ */
+export function detectUnclosedTurn(events: SessionEvent[]): { turn: number | null; pendingTools: string[] } | null {
+  if (events.length === 0) return null
+
+  let lastEnd = -1
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'turn/end') {
+      lastEnd = i
+      break
+    }
+  }
+  // 最后一条 turn/start 必须晚于最后一条 turn/end
+  let startIdx = -1
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'turn/start') {
+      startIdx = i
+      break
+    }
+  }
+  if (startIdx < 0 || startIdx < lastEnd) return null
+
+  /**
+   * ⚠️ **不要拿 `session/end-seed` 当"已封口"判据**（我第一版这样写，当场被真机用例打红）。
+   *
+   * 真实日志里最常见的恢复形态就是
+   *   `turn/end[interrupted] → session/end-seed → turn/start(新轮)`
+   * —— `end-seed` 是**上一轮**的收尾标记，**不是新一轮的**。
+   * 拿它判"新一轮已封口" ⇒ 会把「新一轮开了就死」误判成"已接续" ⇒ **又回到"啥都扫不到"**。
+   *
+   * ⇒ 判据保持最简：**最后一条 `turn/start` 是否晚于最后一条 `turn/end`**。
+   *   "会不会重复拉起正在跑的会话"由 `liveIds` 负责（扫描层），不是本函数的事。
+   */
+  const t = events[startIdx]?.data?.turn
+  const turn = typeof t === 'number' ? t : null
   return { turn, pendingTools: findPendingTools(events, turn) }
 }
 
@@ -332,7 +420,22 @@ export function scanInterruptedSessions(
     result.scanned++
     try {
       const events = readTailEvents(logPath, TAIL_EVENT_TARGET)
-      const hit = detectInterruptedEnd(events)
+      /**
+       * 🔴🔴 **两种形态都要接**（2026-10-24 owner 报障：「我要求你抓到非工具调用的中断，
+       * 现在什么都抓不到了」）。
+       *
+       * - 形态 A `detectInterruptedEnd`：日志里有 `turn/end`，且它的 `reason.kind` 是
+       *   `interrupted`（崩溃后被 resume 补收尾）／`aborted`（被正常终止）。
+       * - 形态 B `detectUnclosedTurn`：**日志里压根没有 `turn/end`** —— 进程在轮内任意位置死掉，
+       *   宿主没机会写收尾 ⇒ 日志停在 `tool/call` / `step/start` / `assistant/message`。
+       *   ⚠️ **这一格必须靠"已排除在跑的会话"才成立**，而 `liveIds` 恰好在本函数手里
+       *   （循环开头 `if (liveIds.has(sessionId)) continue`）⇒ 这就是它该待在这里、而不是
+       *   并进 `detectInterruptedEnd` 的原因。
+       *
+       * 实测（本机 10 个窗口内会话）：**4 条**只能由形态 B 抓到（末条 `tool/call` / `step/start`），
+       * 修前全落到 `skipped`。
+       */
+      const hit = detectInterruptedEnd(events) ?? detectUnclosedTurn(events)
       if (!hit) {
         result.skipped++
         continue

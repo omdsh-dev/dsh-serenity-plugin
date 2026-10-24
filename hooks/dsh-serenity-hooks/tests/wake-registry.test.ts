@@ -1709,7 +1709,11 @@ describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ �
       { type: 'session/end-seed', time: base + 30, data: {} },
     ]
     if (opts.withNewTurn) {
+      // 🔴 2026-10-24：新一轮必须**真跑完**（有 turn/end）才算"已接续"。
+      //    只加 `turn/start` 而不管它有没有收尾 ⇒ 那个形态恰恰是**新的中断**（turn 开了没收）。
+      //    见该用处的改钉注释（D184）。
       events.push({ type: 'turn/start', time: base + 40, data: { turn: 8 } })
+      events.push({ type: 'turn/end', time: base + 50, data: { turn: 8, reason: { kind: 'completed' } } })
     }
     const body = Buffer.from(events.map((e) => JSON.stringify(e)).join('\n') + '\n', 'utf-8')
     // ⚠️ 必须真 zstd 帧：`readTailEvents` 靠帧魔数定位，纯文本会被判"读不到事件"
@@ -1789,19 +1793,38 @@ describe('🔴 A104-C′ 容器级中断兜底（每 tick 自带「发现 ＋ �
     expect(sent, '该会话正在跑轮次，兜底不得再注入一次').toHaveLength(0)
   }, 30_000)
 
-  it('🔴 反向钉：末轮之后**已有新 turn/start** ⇒ 不算"停在这里"，不注入', async () => {
+  /**
+   * 🔴🔴 **2026-10-24 改钉（D184：必须说出原前提被谁取代）**
+   *
+   * **原名**：`反向钉：末轮之后已有新 turn/start ⇒ 不算"停在这里"，不注入`
+   * **原前提**：判据 = "最后一条 `turn/end` 的 kind" ⇒ 只要它之后又出现 `turn/start`，
+   * 就说明"那一轮已被接续"，于是不该再拉起。
+   *
+   * 🔴 **原前提被谁取代**（owner 2026-10-24：「我要求你抓到非工具调用的中断」＋
+   * 「扫到的五个大概率也就是需要唤醒的，问题是判断逻辑有问题」）：
+   * 判据改问 **「最后一轮有没有收完」**。于是
+   * `turn/end[interrupted] → end-seed → turn/start(8)`（**turn 8 之后什么都没有**）
+   * 这个形态**恰恰就是新的中断** —— turn 8 开了、一个字都没写就死了。
+   * ⇒ 旧断言把「新一轮刚开就死」误当成「已接续」，**正是"啥都扫不到"的成因之一**。
+   * ⇒ 新钉：**只有那一轮真的跑完了（有 `turn/end`）才算已接续。**
+   *
+   * ⚠️ **"会不会重复拉起正在跑的会话"由另一条判据兜住**：
+   * 见上一条「此刻在跑轮次的会话不碰」（`liveIds` 排除）。
+   * 两条分工：本条目判**日志形态**，上一条判**进程状态**。
+   */
+  it('🔴 反向钉：新一轮**真跑完了**（有 turn/end）⇒ 不算"停在这里"，不注入', async () => {
     writeFileSync(join(root, '.serenity'), '')
     writeSessionDir()
     writeBinding('sess-live')
     writeCroHostBinding()
-    writeInterruptedLog(INTERRUPTED_ID, { withNewTurn: true }) // 已被接续
+    writeInterruptedLog(INTERRUPTED_ID, { withNewTurn: true }) // 新一轮已完整收尾
     const sent: string[] = []
     // 🔴 同上：不重置 ⇒ 本用例**根本没跑 tick** ⇒ 假绿
     __resetWakeSchedulerStateForTest()
     __resetCroTurnsForTest() // 🔴 A105：同上，防跨用例污染
     registerWakeScheduler(safetyCtx(sent) as never)
     await waitFor(() => (wakeSchedulerState().lastTickLog ?? []).length > 0, 20_000)
-    expect(sent, '已接续的会话不是"被打断停住"，不许重复拉起').toHaveLength(0)
+    expect(sent, '新一轮已完整收尾 ⇒ 不是"被打断停住"，不许重复拉起').toHaveLength(0)
   }, 30_000)
 
   /**

@@ -22,6 +22,7 @@ import {
   buildContinueText,
   createResumeOne,
   detectInterruptedEnd,
+  detectUnclosedTurn,
   projectDirNameForCwd,
   scanInterruptedSessions,
 } from '../../src/trajectory/interrupted.js'
@@ -141,16 +142,59 @@ describe('detectInterruptedEnd（纯判定）', () => {
   })
 
   /**
-   * ⚠️ **已知边界（刻意不纳入，写成用例以免后人"顺手补上"）**：
-   * 末条是 `turn/start` 后再无任何事件的"开轮未闭合"形态 **不命中** ——
-   * 因为它与「进程正活着、这一轮正在跑」在日志读数上**不可分**，纳入会误唤醒在跑的会话。
+   * ⚠️ **已知边界（刻意不纳入 `detectInterruptedEnd`，写成用例以免后人"顺手补进去"）**：
+   * 末条是 `turn/start` 后再无 `turn/end` 的"开轮未闭合"形态，
+   * **在纯判定层不命中** —— 因为它与「进程正活着、这一轮正在跑」在日志读数上**不可分**。
+   * ⇒ 它由 `detectUnclosedTurn` 负责（扫描层已用 `liveIds` 排除了在跑的会话）。
    */
-  it('⚠️ 已知边界：有 turn/start 但完全没有 turn/end ⇒ 不命中（与"正在跑"不可分）', () => {
+  it('⚠️ `detectInterruptedEnd` 对"开了没收"不命中（该形态归 `detectUnclosedTurn`）', () => {
     const events = [
       { type: 'turn/start', data: { turn: 30 } },
       { type: 'step/start', data: { turn: 30, step: 1 } },
     ]
     expect(detectInterruptedEnd(events)).toBeNull()
+  })
+
+  /**
+   * 🔴🔴 **2026-10-24 owner 报障的正解：`detectUnclosedTurn`（形态 B）**
+   *
+   * owner 原话：「我要求你抓到非工具调用的中断，现在什么都抓不到了」。
+   * 真因：进程在**轮内任意位置**死掉 ⇒ 宿主**永远没机会写 `turn/end`**
+   * ⇒ 日志停在 `tool/call` / `step/start` / `assistant/message` 上 ⇒ 修前整类被判成"没中断"。
+   *
+   * 实测（本机 10 个窗口内会话）：**4 条**只能由本形态抓到
+   * （末条分别为 tool/call、step/start、tool/call、agent/inbox/spliced）。
+   */
+  it('🔴 `detectUnclosedTurn`：turn/start 后无 turn/end ⇒ 命中（轮内被打断）', () => {
+    const events = [
+      { type: 'turn/start', data: { turn: 56 } },
+      { type: 'step/start', data: { turn: 56, step: 1 } },
+      { type: 'tool/call', data: { turn: 56, callId: 'c1', name: 'edit' } },
+    ]
+    expect(detectUnclosedTurn(events)).toEqual({ turn: 56, pendingTools: ['edit'] })
+  })
+
+  it('🔴 `detectUnclosedTurn`：末条是 tool/call（真日志最常见的形态）⇒ 命中', () => {
+    // 与 session-99009627 实测尾部逐字同形
+    const events = [
+      { type: 'turn/start', data: { turn: 192 } },
+      { type: 'assistant/message', data: { turn: 192, step: 3 } },
+      { type: 'tool/call', data: { turn: 192, callId: 'c9', name: 'read' } },
+    ]
+    expect(detectUnclosedTurn(events)).toEqual({ turn: 192, pendingTools: ['read'] })
+  })
+
+  it('🔴 `detectUnclosedTurn` 反向钉：turn/end 在 turn/start **之后** ⇒ 不命中（已收尾）', () => {
+    const events = [
+      { type: 'turn/start', data: { turn: 7 } },
+      { type: 'turn/end', data: { turn: 7, reason: { kind: 'completed' } } },
+    ]
+    expect(detectUnclosedTurn(events)).toBeNull()
+  })
+
+  it('🔴 `detectUnclosedTurn` 反向钉：没有 turn/start ⇒ 不命中（空会话不算中断）', () => {
+    expect(detectUnclosedTurn([{ type: 'system/message', data: {} }])).toBeNull()
+    expect(detectUnclosedTurn([])).toBeNull()
   })
 
   it('🔴 曾经 interrupted 但之后又有新事件 ⇒ 不命中（已恢复，不得当待续）', () => {
@@ -264,6 +308,37 @@ describe('scanInterruptedSessions（真日志 + 多帧）', () => {
     const r = scanInterruptedSessions(dir)
     expect(r.scanned).toBe(0)
     expect(r.sessions).toEqual([])
+  })
+
+  /**
+   * 🔴🔴 **端到端：形态 B（轮内被打断，日志里没有 `turn/end`）必须被扫出来。**
+   *
+   * 这是 owner 报障「不是崩溃的就扫不到」／「我要求你抓到非工具调用的中断」的**验收格**。
+   * 修前这条必然红（`detectInterruptedEnd` 找不到 turn/end 就返回 null）。
+   * ⚠️ 与纯判定层用例分工：那条证明 `detectUnclosedTurn` 算对了；
+   *    这条证明**扫描层真的把它接进去了**（接线，不是算法）。
+   */
+  it('🔴 形态 B：日志停在 tool/call（轮内被打断，无 turn/end）⇒ 必须被扫出', () => {
+    writeSession('session-unclosed', [
+      { type: 'turn/start', seq: 1, time: 1000, data: { turn: 192 } },
+      { type: 'step/start', seq: 2, time: 1001, data: { turn: 192, step: 1 } },
+      { type: 'assistant/message', seq: 3, time: 1002, data: { turn: 192, step: 1 } },
+      { type: 'tool/call', seq: 4, time: 1003, data: { turn: 192, callId: 'c1', name: 'edit' } },
+    ])
+    const r = scanInterruptedSessions(dir)
+    expect(r.sessions.map((s) => s.sessionId)).toEqual(['session-unclosed'])
+    expect(r.sessions[0]?.turn).toBe(192)
+    expect(r.sessions[0]?.pendingTools).toEqual(['edit'])
+  })
+
+  it('🔴 形态 B 接线反向钉：已收尾（有 turn/end）的会话不得因接线而误报', () => {
+    writeSession('session-closed', [
+      { type: 'turn/start', seq: 1, time: 1000, data: { turn: 5 } },
+      { type: 'turn/end', seq: 2, time: 1002, data: { turn: 5, reason: { kind: 'completed' } } },
+    ])
+    const r = scanInterruptedSessions(dir)
+    expect(r.sessions).toEqual([])
+    expect(r.skipped).toBe(1)
   })
 
   it('🔴 回看窗口生效：窗口外的会话不被检查', () => {
