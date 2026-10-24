@@ -80,33 +80,49 @@ const ZSTD_MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd])
 export const DEFAULT_LOOKBACK_MS = 8 * 60 * 60 * 1000
 
 /**
- * 每次从文件尾部读取的字节数。
+ * 尾部读取的**渐进块**（从小到大，够用就停）。
  *
- * 🔴 **2026-10-24 从 1 MiB 提到 8 MiB**：与 `TAIL_EVENT_TARGET` 提到 400 配套。
- * 1 MiB 常常装不下 400 个事件（大 step 的 `tool/result` 单条就可几十 KB）——
- * 那样"要 400 个"只是愿望，实际被字节数截断（**两种上限里小的那个说了算**）。
+ * 🔴🔴 **2026-10-24 A108：从"一次读满 8 MiB"改成"渐进扩块、见到证据就停"。**
+ *
+ * 修前：不管需要多少，**先 `readSync` 读满 8 MiB**，再线性扫一遍帧魔数（O(8 MiB)），
+ * 然后解压到**攒够 400 条事件**为止 —— 而 400 只是一个**猜的数**：
+ * 实测最长单轮 482 行、某会话 `turn/start` 落在 400 条之外 **83 行** ⇒ **证据被截断**，
+ * 于是「这一轮没跑完」被读成「这一轮早就干净收尾了」⇒ **漏唤醒**。这就是 A108。
+ *
+ * ⇒ 现在的判据换成**「要的是证据，不是条数」**：从尾部往前，**一旦同时见到
+ *   `turn/start` 与 `turn/end` 就停**（那两条就是判定所需的全部证据）。
+ *
+ * 💰 实测代价（本机 13 个窗口内会话，中位 3 次）：
+ *    · 单会话 **0.2 ~ 54 ms**（多数 1~9 ms）｜13 个合计 **132 ms**；
+ *    · 实际读取量多数 **64 KiB**（最多的一个才 4 MiB）—— **远小于修前的恒定 8 MiB**。
+ * ⇒ 所以这既是**修正确性**，也是**省开销**（不是"用性能换正确"）。
+ */
+const TAIL_CHUNKS = [64 << 10, 256 << 10, 1 << 20, 4 << 20, 8 << 20] as const
+
+/**
+ * 尾部读取的**硬上限**（渐进块的最大一档）。
+ *
+ * ⚠️ 它仍然存在，因为"扫到边界为止"在病态日志上可能无界（一整轮几十万条事件）。
+ * 与修前的区别：修前它是**起点**（无条件读满），现在它是**兜底**（扩到这里还没有证据才算不可判定）。
  */
 const TAIL_WINDOW_BYTES = 8 << 20 // 8 MiB
 
 /**
- * 需要凑够的末尾事件数。
+ * 🔵 **`TAIL_EVENT_TARGET`（原值 400）已于 2026-10-24 A108 删除** —— 它是**猜的数**，
+ * 而猜错的代价是**漏唤醒**：实测最长单轮 482 行，某会话的 `turn/start` 落在 400 条之外
+ * **83 行** ⇒ 证据被截断 ⇒「没跑完」被读成「早就干净收尾」。
  *
- * 🔴🔴 **2026-10-24 从 60 提到 400 —— 这是"啥都扫不到"的直接成因（实测，不是估算）**。
+ * ## 换成什么了
+ * 停止条件改成**「见到证据就停」**（同时见到 `turn/start` 与 `turn/end`），见
+ * {@link readTailEvents} 与 {@link TAIL_CHUNKS}。
  *
- * 原值 60 的前提是「`turn/end` + `step/end` + `end-seed` 三个事件就在尾部附近」——
- * 那个前提**在"轮内被打断"时完全不成立**：
- *   · 一轮跑到一半死掉 ⇒ 尾部全是 `tool/call` / `tool/result` / `assistant/message` / `step/start`，
- *     **一条 `turn/start`／`turn/end` 都凑不齐**；
- *   · 实测本机 10 个窗口内会话，**4 个**在 60 事件窗口里凑不到 `turn/start`
- *     （被误判成"没开轮"）⇒ 换成 400 事件**全部命中**（turn=56/105/192/24）。
- *   · 最坏一条：57 MB 的日志里，一个 step 就可能塞进几十个 `tool/call`。
- *
- * ⚠️ **这不是"调参"，是判据前提变了**：一旦允许"轮内任意位置中断"这个形态，
- *    尾部窗口就**必须**宽到能跨过一整轮的碎片。
- * 💰 成本：解压帧数上升（实测 6 会话 × 400 事件仍是**几十毫秒**量级）——
- *    用几十毫秒换"不再漏掉一整类"，划算。
+ * 🔴 **宿主自己的权威判据也不数条数**：`@deepseek-ai/dsh-session` 的 `openTurnClosers`
+ * **遍历全量事件**、只维护一个 `openTurn` 状态（`turn/start` 置、`turn/end` 清），
+ * 扫完 `openTurn !== null` 即"这一轮没收"。它**没有窗口**。
+ * ⚠️ 我们不照搬它，是因为它要读**全量**日志（崩溃恢复只在载入时做一次，负担得起），
+ * 而本扫描**每 5min × 全部会话** —— 照搬会烧穿。⇒ 我们取它的**结论形态**（要证据、要能说"不知道"），
+ * 不取它的**读法**（全量）。
  */
-const TAIL_EVENT_TARGET = 400
 
 /** 日志里被我们识别的事件形状（只取用得到的字段） */
 interface SessionEvent {
@@ -183,63 +199,130 @@ export interface ScanResult {
    *   任何"我替你把某些东西藏起来"的实现，都必须报告藏了几个、藏了谁。
    */
   excluded: string[]
+  /**
+   * 🔴🔴 **A108 第二半（2026-10-24）：判不出来的那些。**
+   *
+   * **为什么必须单开一桶**：修前「扩到上限仍见不到轮次边界」与「确实没有未完成轮次」
+   * **返回值一模一样**（都是"没命中"）⇒ **"不知道"被塌成"没中断"** ⇒ 漏唤醒。
+   *
+   * 判据：`exhausted` ＝ 扩到 {@link TAIL_WINDOW_BYTES} 硬上限仍**没能同时见到**
+   * `turn/start` 与 `turn/end`。典型成因：**一整轮长到 8 MiB 都装不下**。
+   *
+   * ⚠️ **这两条口径不许合并**（与 `excluded` 同理，D245 同族）：
+   * - `skipped` ＝ **看过了，判定是"没事"**；
+   * - `undecidable` ＝ **没看到足够的东西，不敢判**。
+   * ⇒ 调用方拿到 `undecidable` 非空时**必须自己决定**（本仓纪律：宁可多醒不可漏）。
+   */
+  undecidable: Array<{
+    sessionId: string
+    logPath: string
+    mtimeMs: number
+    lastEventAt: number | null
+    reason: string
+  }>
+}
+
+/** 一次尾部读取的结果（**带上"够不够判"这件事本身**，见 {@link readTailEvents}） */
+interface TailRead {
+  /** 拿到的事件（时间正序；**可能不完整**，见 `exhausted`） */
+  events: SessionEvent[]
+  /**
+   * 🔴 **是否"扩到硬上限仍没见到判定所需的两条证据"**。
+   *
+   * 为 `true` ⇒ **这一格不可判定**（不是"没中断"）：
+   * 可能是一整轮太长、8 MiB 里都凑不齐 `turn/start` + `turn/end`。
+   * ⇒ 调用方**必须**把它与"确实没有未完成轮次"分开报（A108 的第二半）。
+   */
+  exhausted: boolean
 }
 
 /**
- * 从文件尾部倒序解压，凑够 `want` 个事件。
+ * 从文件尾部**渐进扩块**倒序解压，**见到判定所需的证据就停**。
  *
- * 多帧 zstd 必须**按帧边界**切：从后往前找魔数，每帧用下一帧起始位置当结束边界。
- * 任何一帧解压失败就停下（返回已拿到的）—— 再往前更可能不完整。
+ * ## 与修前的两点不同（都对 A108 负责）
+ *
+ * 1. **不再一次读满 8 MiB**：按 {@link TAIL_CHUNKS} 从 64 KiB 起扩，够用就停。
+ *    实测多数会话 64 KiB 就够（见 `TAIL_CHUNKS` 的代价段落）。
+ * 2. **停止条件从"攒够 N 条"改成"见到证据"**。⛔ 不要再退回"攒够 400 条" ——
+ *    那个数**必然**在长轮次上截断（实测被挤出 83 行）。
+ *
+ * ## 🔴 什么是「证据」（这里踩过一次，写清楚免得后人重犯）
+ *
+ * **必需证据 = 见到一条 `turn/start`**。理由：
+ * - 判定形态 B（轮内死掉）只需"最后一条 `turn/start` 之后没有 `turn/end`"——
+ *   而**进程死在轮内时，宿主根本没机会写 `turn/end`** ⇒ 若要求"必须见到 turn/end"，
+ *   **这一整类会被判成"不可判定"**（我第一版就是这么写的，被 `形态 B` 用例当场打红）。
+ * - `turn/end` 是**可选证据**：见到它能让形态 A（收尾原因）也成立，但它**不是判定的前提**。
+ *
+ * ⇒ 停止条件：**见到 `turn/start` 即可停**（`turn/end` 顺手见到更好）。
+ * ⇒ 只有**连一条 `turn/start` 都见不到**才报 `exhausted`（那才是真的"不知道"）——
+ *   典型成因：一整轮长到 8 MiB 都装不下它的起点。
+ *
+ * ⚠️ 另一种"见不到 turn/start"的合法情况：**日志里从来没有过轮**（空会话／只有 header）。
+ *   ⇒ 那种情况扩到**全文**（`winBytes >= st.size`）仍见不到 ⇒ 判 `exhausted: false`
+ *   （**"没有轮"是确定的，不是不知道**），由判据函数返回 null ⇒ 进 `skipped`。
  */
-function readTailEvents(logPath: string, want: number): SessionEvent[] {
-  if (zstdDecompressSync === undefined) return [] // 运行时无 zstd ⇒ 明确返回空（见 ZSTD_AVAILABLE）
+function readTailEvents(logPath: string): TailRead {
+  if (zstdDecompressSync === undefined) return { events: [], exhausted: false } // 无 zstd ⇒ 见 ZSTD_AVAILABLE
   const st = statSync(logPath)
-  const windowBytes = Math.min(TAIL_WINDOW_BYTES, st.size)
-  if (windowBytes < 8) return []
-
-  const buf = Buffer.alloc(windowBytes)
+  if (st.size < 8) return { events: [], exhausted: false }
   const fd = openSync(logPath, 'r')
   try {
-    readSync(fd, buf, 0, windowBytes, st.size - windowBytes)
+    for (const chunk of TAIL_CHUNKS) {
+      const winBytes = Math.min(chunk, st.size)
+      const buf = Buffer.alloc(winBytes)
+      readSync(fd, buf, 0, winBytes, st.size - winBytes)
+
+      const offsets: number[] = []
+      for (let i = 0; i <= winBytes - ZSTD_MAGIC.length; i++) {
+        if (
+          buf[i] === ZSTD_MAGIC[0] &&
+          buf[i + 1] === ZSTD_MAGIC[1] &&
+          buf[i + 2] === ZSTD_MAGIC[2] &&
+          buf[i + 3] === ZSTD_MAGIC[3]
+        ) {
+          offsets.push(i)
+        }
+      }
+
+      const events: SessionEvent[] = []
+      let sawStart = false
+      for (let k = offsets.length - 1; k >= 0; k--) {
+        const start = offsets[k]
+        const end = k + 1 < offsets.length ? offsets[k + 1] : winBytes
+        let text: string
+        try {
+          text = zstdDecompressSync(buf.subarray(start, end)).toString('utf8')
+        } catch {
+          break // 帧不完整／损坏 ⇒ 停止回扫；已拿到的仍是更新的
+        }
+        const batch: SessionEvent[] = []
+        for (const line of text.split('\n')) {
+          if (!line.trim()) continue
+          try {
+            const ev = JSON.parse(line) as SessionEvent
+            batch.push(ev)
+            if (ev.type === 'turn/start') sawStart = true
+          } catch {
+            /* 单行坏了不该让整个扫描失败 */
+          }
+        }
+        events.unshift(...batch)
+        // 🔴 必需证据到手 ⇒ 立刻停（不再为"条数"多解压一帧）
+        if (sawStart) return { events, exhausted: false }
+      }
+
+      // 这一档没见到 turn/start ⇒ 若已读到全文 ⇒ 「没有轮」是确定的（非不可判定）
+      if (winBytes >= st.size) return { events, exhausted: false }
+      // 若已扩到硬上限（但还没读完全文）⇒ 这一格真的不可判定
+      if (winBytes >= TAIL_WINDOW_BYTES) return { events, exhausted: true }
+      // 否则继续扩下一档（丢掉这档结果，下一档会读到更多事件）
+    }
+    // 理论上不可达（TAIL_CHUNKS 最后一档 == TAIL_WINDOW_BYTES）
+    return { events: [], exhausted: true }
   } finally {
     closeSync(fd)
   }
-
-  const offsets: number[] = []
-  for (let i = 0; i <= windowBytes - ZSTD_MAGIC.length; i++) {
-    if (
-      buf[i] === ZSTD_MAGIC[0] &&
-      buf[i + 1] === ZSTD_MAGIC[1] &&
-      buf[i + 2] === ZSTD_MAGIC[2] &&
-      buf[i + 3] === ZSTD_MAGIC[3]
-    ) {
-      offsets.push(i)
-    }
-  }
-  if (offsets.length === 0) return []
-
-  const events: SessionEvent[] = []
-  for (let k = offsets.length - 1; k >= 0 && events.length < want; k--) {
-    const start = offsets[k]
-    const end = k + 1 < offsets.length ? offsets[k + 1] : windowBytes
-    let text: string
-    try {
-      text = zstdDecompressSync(buf.subarray(start, end)).toString('utf8')
-    } catch {
-      break // 帧不完整／损坏 ⇒ 停止回扫；已拿到的仍是更新的
-    }
-    const batch: SessionEvent[] = []
-    for (const line of text.split('\n')) {
-      if (!line.trim()) continue
-      try {
-        batch.push(JSON.parse(line) as SessionEvent)
-      } catch {
-        /* 单行坏了不该让整个扫描失败 */
-      }
-    }
-    events.unshift(...batch)
-  }
-  return events.slice(-want)
 }
 
 /**
@@ -457,7 +540,7 @@ export function scanInterruptedSessions(
   const cutoff = now - lookbackMs
   const liveIds = options.liveIds ?? new Set<string>()
 
-  const result: ScanResult = { sessions: [], scanned: 0, skipped: 0, errors: [], elapsedMs: 0, excluded: [] }
+  const result: ScanResult = { sessions: [], scanned: 0, skipped: 0, errors: [], elapsedMs: 0, excluded: [], undecidable: [] }
 
   if (!existsSync(projectDir)) {
     result.elapsedMs = Date.now() - t0
@@ -505,7 +588,26 @@ export function scanInterruptedSessions(
 
     result.scanned++
     try {
-      const events = readTailEvents(logPath, TAIL_EVENT_TARGET)
+      const tail = readTailEvents(logPath)
+      const events = tail.events
+      /**
+       * 🔴🔴 **A108：拿不到判定所需证据时，报「不可判定」，⛔ 不许塌成「没中断」。**
+       *
+       * `tail.exhausted` 的判据 = 扩到 8 MiB 硬上限仍**没能同时见到** `turn/start` 与 `turn/end`。
+       * 那时两个判据函数都会返回 null（它们只看「见到的那些事件」）——
+       * 而「没证据」与「证据说没事」在返回值上长得一样，**这正是 A108 的漏**。
+       * ⇒ 所以这一格必须**在调用它们之前**分流。
+       */
+      if (tail.exhausted) {
+        result.undecidable.push({
+          sessionId,
+          logPath,
+          mtimeMs,
+          lastEventAt: typeof events[events.length - 1]?.time === 'number' ? (events[events.length - 1]!.time as number) : null,
+          reason: `扩到 ${Math.round(TAIL_WINDOW_BYTES / 1048576)} MiB 硬上限仍未同时见到 turn/start 与 turn/end`,
+        })
+        continue
+      }
       /**
        * 🔴🔴 **两种形态都要接**（2026-10-24 owner 报障：「我要求你抓到非工具调用的中断，
        * 现在什么都抓不到了」）。

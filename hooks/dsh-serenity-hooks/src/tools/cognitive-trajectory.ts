@@ -145,6 +145,7 @@ function renderInterruptedScan(input: {
   const { projectDir, lookbackHours, scan } = input
   const lines: string[] = []
   const excludedCount = scan.excluded.length
+  const undecidableCount = scan.undecidable.length
   lines.push(`═══ 末轮未跑完的 dsh 会话（回看 ${lookbackHours}h）═══`)
   lines.push(`  扫描域: ${projectDir}`)
   // 🔴🔴 D245：**窗口内总数 = 检查 + 排除**，两个数必须同屏。
@@ -154,6 +155,7 @@ function renderInterruptedScan(input: {
   lines.push(
     `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped}` +
       (excludedCount > 0 ? ` · 排除在跑 ${excludedCount} 个` : '') +
+      ` · 不可判定 ${undecidableCount} 个` +
       ` · 耗时 ${scan.elapsedMs}ms${scan.errors.length > 0 ? ` · 读取失败 ${scan.errors.length}` : ''}`,
   )
   if (excludedCount > 0) {
@@ -165,12 +167,27 @@ function renderInterruptedScan(input: {
     lines.push('    ⚠️ 这些**没有**被检查过。若你认为其中某个其实已死（进程重启后残留的"在跑"标记），')
     lines.push('      请告知 ACC 维护方 —— 那是「在跑」表的判据问题，不是扫描的问题。')
   }
+  // 🔴🔴 A108：「不可判定」单开一桶 —— ⛔ 不许把它与「跳过（看过、判定没事）」混为一谈。
+  if (undecidableCount > 0) {
+    lines.push('')
+    lines.push(`  ⚠️ **不可判定 ${undecidableCount} 个** —— 这些**既不是"命中"也不是"没事"**，是"判不出来"：`)
+    for (const u of scan.undecidable) {
+      const at = u.lastEventAt !== null ? new Date(u.lastEventAt).toISOString() : '(时间未知)'
+      lines.push(`      - ${u.sessionId}（末事件 ${at}）`)
+      lines.push(`        ${u.reason}`)
+    }
+    lines.push('    ⇒ 成因通常是：**一整轮长到 8 MiB 都装不下它的起点**（`turn/start` 在窗口之外）。')
+    lines.push('    🔴 **是否处理由你决定**（ACC 不代判）。本仓纪律：**宁可多醒不可漏** ⇒ 倾向按"该接走"处理。')
+  }
 
   if (scan.sessions.length === 0) {
     lines.push('')
+    const tails: string[] = []
+    if (excludedCount > 0) tails.push(`另有 ${excludedCount} 个在跑，未检查`)
+    if (undecidableCount > 0) tails.push(`另有 ${undecidableCount} 个**不可判定**`)
     lines.push(
-      excludedCount > 0
-        ? `✓ 被检查的 ${scan.scanned} 个里没有末轮未跑完的 —— 另有 ${excludedCount} 个在跑，未检查（见上）。`
+      tails.length > 0
+        ? `✓ 被检查的 ${scan.scanned} 个里没有末轮未跑完的 —— ${tails.join('；')}（见上）。`
         : '✓ 没有末轮未跑完的会话 —— 无需处理。',
     )
     return lines.join('\n')
@@ -231,6 +248,7 @@ function renderContinueResult(input: {
   const { projectDir, lookbackHours, scan, outcomes, dryRun } = input
   const lines: string[] = []
   const excludedCount = scan.excluded.length
+  const undecidableCount = scan.undecidable.length
   const head = dryRun ? '续跑预告（dryRun，未注入任何消息）' : '中断续跑结果'
   lines.push(`═══ ${head}（回看 ${lookbackHours}h）═══`)
   lines.push(`  扫描域: ${projectDir}`)
@@ -238,17 +256,28 @@ function renderContinueResult(input: {
   lines.push(
     `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped}` +
       (excludedCount > 0 ? ` · 排除在跑 ${excludedCount} 个` : '') +
+      ` · 不可判定 ${undecidableCount} 个` +
       ` · 耗时 ${scan.elapsedMs}ms`,
   )
   if (excludedCount > 0) {
     lines.push(`  ⓘ 另有 ${excludedCount} 个会话**此刻有轮次在跑**，未检查：${scan.excluded.join('、')}`)
   }
+  if (undecidableCount > 0) {
+    lines.push(
+      `  ⚠️ 另有 ${undecidableCount} 个**不可判定**（既非同中、也非没事），**未处理**：` +
+        scan.undecidable.map((u) => u.sessionId).join('、'),
+    )
+    lines.push('    ⇒ 若要处理它们，须人工/调用方判断（ACC 不代判）。')
+  }
 
   if (scan.sessions.length === 0) {
     lines.push('')
+    const tails: string[] = []
+    if (excludedCount > 0) tails.push(`另有 ${excludedCount} 个在跑，未续`)
+    if (undecidableCount > 0) tails.push(`另有 ${undecidableCount} 个不可判定`)
     lines.push(
-      excludedCount > 0
-        ? `✓ 被检查的 ${scan.scanned} 个里没有末轮未跑完的 —— 另有 ${excludedCount} 个在跑，未续（见上）。`
+      tails.length > 0
+        ? `✓ 被检查的 ${scan.scanned} 个里没有末轮未跑完的 —— ${tails.join('；')}（见上）。`
         : '✓ 没有末轮未跑完的会话 —— 无需续跑。',
     )
     return lines.join('\n')

@@ -13,10 +13,11 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import * as nodeZlib from 'node:zlib'
+import { randomBytes } from 'node:crypto'
 
 import {
   buildContinueText,
@@ -333,6 +334,82 @@ describe('scanInterruptedSessions（真日志 + 多帧）', () => {
 
   it('🔴 形态 B 接线反向钉：已收尾（有 turn/end）的会话不得因接线而误报', () => {
     writeSession('session-closed', [
+      { type: 'turn/start', seq: 1, time: 1000, data: { turn: 5 } },
+      { type: 'turn/end', seq: 2, time: 1002, data: { turn: 5, reason: { kind: 'completed' } } },
+    ])
+    const r = scanInterruptedSessions(dir)
+    expect(r.sessions).toEqual([])
+    expect(r.skipped).toBe(1)
+  })
+
+  /**
+   * 🔴🔴 **A108：`turn/start` 被推出窗口时，必须报「不可判定」，⛔ 不许塌成「没中断」。**
+   *
+   * **修前的形态**：窗口硬停在 400 条事件 ⇒ 一整轮超过 400 条时，它的 `turn/start`
+   * 落在窗口外 ⇒ 判据函数看到"没有 turn/start"⇒ **判"没开轮"** ⇒ 报「没中断」。
+   * 而那与"这轮早就干净收尾了"**返回值一模一样** ⇒ **"不知道"被塌成"没事"**。
+   *
+   * **怎么构造**：造一个**又长又碎**的轮（大量 `tool/result` 把 `turn/start` 推到窗口外），
+   * 再在末尾放 `turn/end[completed]`。体积必须超过 8 MiB 硬上限才会走到 `exhausted`
+   * ⇒ 用大块的 `tool/result` 把帧撑大（不靠条数，靠字节）。
+   *
+   * ⚠️ 这条钉的是**"不许沉默"**：只要 `undecidable` 里有它，就算合格；
+   *   `sessions`（命中）**必须为空** —— 因为真正的答案确实是"不知道"。
+   */
+  it('🔴🔴 A108：turn/start 被推出 8 MiB 硬上限 ⇒ 落 `undecidable`，不得静默算"没事"', () => {
+    // 🔴 必须用**真正不可压缩**的数据：全 'x' 被压到近零；**我自造的"伪随机"也被压到 16 KB**
+    //    （它的周期太短）—— 两次都栽在这 ⇒ 改用 `randomBytes`，它压不动。
+    const events: Array<Record<string, unknown>> = [
+      { type: 'turn/start', seq: 1, time: 1000, data: { turn: 7 } },
+    ]
+    for (let i = 0; i < 16; i++) {
+      events.push({
+        type: 'tool/result',
+        seq: 2 + i,
+        time: 1001 + i,
+        data: { turn: 7, callId: `c${i}`, content: randomBytes(600_000).toString('base64') },
+      })
+    }
+    events.push({ type: 'turn/end', seq: 9999, time: 9000, data: { turn: 7, reason: { kind: 'completed' } } })
+    const sessionDir = writeSession('session-huge-turn', events)
+
+    // 前提自证（D-族：用例要自证前提，否则红的是用例不是实现）
+    const logBytes = statSync(join(sessionDir, 'session.v4.jsonl.zstd')).size
+    expect(logBytes, '构造的日志必须真的超过 8 MiB 硬上限，否则走不到 exhausted 那一格').toBeGreaterThan(8 << 20)
+
+    const r = scanInterruptedSessions(dir)
+    // 🔴 核心断言：它必须出现在 `undecidable`，而不是被静默算成"跳过/没事"
+    expect(
+      r.undecidable.map((u) => u.sessionId),
+      'turn/start 被挤出 8 MiB ⇒ 这一格不可判定；若这里为空，说明"不知道"被塌成了"没中断"（A108 复发）',
+    ).toEqual(['session-huge-turn'])
+    // 反向钉：它**不该**被当成命中（真正的答案就是"不知道"，不是"命中了"）
+    expect(r.sessions).toEqual([])
+    // 反向钉：也**不该**混进 skipped 里（skipped 的语义是"看过、判定没事"）
+    expect(r.skipped).toBe(0)
+  })
+
+  it('🔴 A108 反向钉：正常长度的轮（turn/start 在窗口内）**不得**被判成不可判定', () => {
+    writeSession('session-normal', [
+      { type: 'turn/start', seq: 1, time: 1000, data: { turn: 3 } },
+      { type: 'tool/call', seq: 2, time: 1001, data: { turn: 3, callId: 'c1', name: 'read' } },
+    ])
+    const r = scanInterruptedSessions(dir)
+    expect(r.undecidable).toEqual([])
+    expect(r.sessions.map((s) => s.sessionId)).toEqual(['session-normal'])
+  })
+
+  it('🔴 A108 反向钉：空会话（从没有过轮）⇒ 不得判成不可判定', () => {
+    writeSession('session-empty', [{ type: 'session/header', seq: 0, time: 1000, data: {} }])
+    const r = scanInterruptedSessions(dir)
+    // "从来没有过轮"是**确定的**，不是"不知道" ⇒ 必须落 skipped，不许进 undecidable
+    expect(r.undecidable).toEqual([])
+    expect(r.sessions).toEqual([])
+    expect(r.skipped).toBe(1)
+  })
+
+  it('🔴 形态 B 接线反向钉 · 第二个：已收尾的会话同样不得误报', () => {
+    writeSession('session-closed2', [
       { type: 'turn/start', seq: 1, time: 1000, data: { turn: 5 } },
       { type: 'turn/end', seq: 2, time: 1002, data: { turn: 5, reason: { kind: 'completed' } } },
     ])
