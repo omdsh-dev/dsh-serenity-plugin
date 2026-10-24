@@ -23,6 +23,7 @@ import {
   decisionSignature,
   forgetToolVisibility,
   getToolVisibilityDiagnostics,
+  parseUnknownToolNames,
   type VisibilitySource,
 } from '../../src/seams/tool-visibility.js'
 import { REGISTERED_TOOLS } from '../../src/kernel/invariant.js'
@@ -67,7 +68,16 @@ function mkAgent(opts: { rejectUnknown?: boolean; throwOnRestrict?: boolean; hos
           // 真故障形态注入：宿主对 unknown name 是**整次失败**（不是"剔掉那一个"）
           if (opts.rejectUnknown === true) {
             const unknown = f.deny.filter((n) => !hostKnown.has(n))
-            if (unknown.length > 0) throw new Error(`unknown tool: ${unknown.join(', ')}`)
+            if (unknown.length > 0) {
+              // 🔴 文案必须**逐字复刻宿主**（`dsh-tools` 的 `restrict()`）：
+              //    `tools.restrict() names unknown global tool(s) "a", "b"; known global tools: x, y`
+              //    单数时是 `tool`、复数时是 `tool(s)`。⇒ 解析器若只认自己编的格式，
+              //    这个用例会绿而真机照炸（D144「参数传对了≠效果达成了」同族）。
+              throw new Error(
+                `tools.restrict() names unknown global tool${unknown.length > 1 ? 's' : ''} `
+                + `${unknown.map((n) => `"${n}"`).join(', ')}; known global tools: ${[...hostKnown].sort().join(', ')}`,
+              )
+            }
           }
           calls.push({ deny: [...f.deny] })
           return () => { disposed++ }
@@ -149,22 +159,21 @@ describe('applyVisibilityDecision：唯一发射点', () => {
     expect(disposedCount()).toBe(1) // 旧的那条被撤销过
   })
 
-  it('🔴 全量被拒 ⇒ 退到「只发 ACC 已注册的」一档，其余仍生效 ＋ 放弃的名字如实记账', () => {
-    // 🔴 D184 判据变更记录：本用例原钉"发射前用 tools.get 预探活、把 ghost 剔掉"。
-    //     那个前提**真的变了**（v1.87.0 真机实测：`tools.get` 省略 scope = 全局视图，
-    //     查不出 agent-plane 贡献的 bash/schedule_*，把 12 个**在册**工具判成未注册 ⇒
-    //     safe mode 的 bash 隐藏直接失效）。改钉**没有预探活**的现行契约：
-    //     直接发全量 → 宿主整次拒绝 → 退到 ACC-only 档并记账。
+  it('🔴 全量被拒 ⇒ **只剔宿主点名的那几个**，其余原样重发（不按"谁注册的"降级）', () => {
+    // 🔴🔴 D184／2026-10-24 真机缺陷：上一版退到 `names ∩ REGISTERED_TOOLS`（只有 ACC 自己的 14 个）
+    //     ⇒ **宿主工具整类被丢掉**（实测 14 个 deny 里 13 个是宿主名字，退档只剩 1 个）。
+    //     owner 症状 = 「藏了的不消失」。现契约：用**宿主错误文案点名的名字**定位，只剔那几个。
     const { agent, calls } = mkAgent({ rejectUnknown: true })
     const r = applyVisibilityDecision(
       agent,
       's-ghost',
-      collectVisibilityDecision([src('a', ['container_fs', 'ghost'])]),
+      collectVisibilityDecision([src('a', ['container_fs', 'bash', 'ghost'])]),
     )
     expect(r.status).toBe('applied')
-    expect(calls).toHaveLength(1) // 只发了退档那一次（全量那次被拒、没进 calls）
-    expect(calls[0]!.deny).toEqual(['container_fs']) // ghost 被放弃
-    expect(r.dropped).toEqual(['ghost']) // 且如实上报（不静默）
+    expect(calls).toHaveLength(1) // 全量那次被拒、没进 calls；只发了修正后的那一次
+    // ⚠️ 关键：bash 是**宿主工具**（不在 REGISTERED_TOOLS 里），必须**保留**
+    expect(calls[0]!.deny).toEqual(['bash', 'container_fs'])
+    expect(r.dropped).toEqual(['ghost']) // 只有真未知的那个被放弃
   })
 
   it('🔴 名字在册与否**不由本地判断**：非 ACC 注册的名字照样发出去（agent-plane 工具也是）', () => {
@@ -182,36 +191,64 @@ describe('applyVisibilityDecision：唯一发射点', () => {
     expect(r.dropped).toEqual([]) // 没退档
   })
 
-  it('🔴 退档的代价：非 ACC 注册的名字被**整体放弃**（已知缺口，不是修复）', () => {
-    // v1.87.1 复盘的第二个发现，如实钉住 —— 别让它悄悄"看起来好了"。
-    // 宿主没装 `dsh-tool-schedule` 时 deny 里含 4 个 schedule_* ⇒ 整次被拒 ⇒ 退到 ACC-only
-    // ⇒ **schedule_* 那一格的屏蔽不生效**（旧实现同样不生效，未回归）。
-    // 🔧 修法候选（未做，需 owner 点头）：二分/逐类重试，或向宿主问 scope。
+  it('🔴 退档只放弃**宿主真没装**的那些，其余（含其它宿主工具）全部保留', () => {
+    // 宿主没装 `dsh-tool-schedule` 时，deny 里那 4 个 schedule_* 会被点名 ⇒ 只剔它们。
+    // ⚠️ 上一版会连 `bash` 一起丢掉（因为它也不在 REGISTERED_TOOLS 里）—— 那是缺陷本体。
     const { agent, calls } = mkAgent({
       rejectUnknown: true,
-      hostLacks: ['schedule_create', 'schedule_list'], // 真·没装该包的宿主（另一种形态）
+      hostLacks: ['schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete'],
     })
     const r = applyVisibilityDecision(
       agent,
       's-degrade-cost',
-      collectVisibilityDecision([src('hostSchedule', ['schedule_create', 'schedule_list']), src('a', ['container_fs'])]),
+      collectVisibilityDecision([
+        src('hostSchedule', ['schedule_create', 'schedule_list', 'schedule_update', 'schedule_delete']),
+        src('safeMode', ['bash', 'workflow']),
+        src('a', ['container_fs']),
+      ]),
     )
     expect(r.status).toBe('applied')
-    expect(calls[0]!.deny).toEqual(['container_fs']) // schedule_* 被放弃
-    expect(r.dropped).toEqual(['schedule_create', 'schedule_list']) // 但如实记账（不静默）
+    expect(calls[0]!.deny).toEqual(['bash', 'container_fs', 'workflow']) // 宿主工具**保住**
+    expect(r.dropped).toEqual(['schedule_create', 'schedule_delete', 'schedule_list', 'schedule_update'])
   })
 
-  it('🔴 全量被拒且 ACC-only 为空 ⇒ status=failed 且**不记账**（下轮重试）', () => {
-    // 🔴 D184 判据变更记录：原用例名「全被剔光 ⇒ 不发射」，前提是"有预探活 ⇒ ghost 全被剔 ⇒ 空集合"。
-    //     预探活已删 ⇒ ghost 会被**真的发出去**，那个前提不复存在。改钉现行契约的失败路径。
+  it('🔴 退档后**签名记实际发出的集合** ⇒ 下一轮仍会重试（不永久 unchanged）', () => {
+    // 二次缺陷：上一版退档时记的是**全量**签名 ⇒ 下一轮算出同签名 ⇒ unchanged ⇒ 永远不再试。
+    const { agent, calls } = mkAgent({ rejectUnknown: true })
+    const d = collectVisibilityDecision([src('a', ['container_fs', 'ghost'])])
+    expect(applyVisibilityDecision(agent, 's-retry', d).status).toBe('applied')
+    // 同一判决再来：因签名记的是"实际发出的 1 个"，与全量签名不同 ⇒ 会重试（再走一次失败→降级）
+    const again = applyVisibilityDecision(agent, 's-retry', d)
+    expect(again.status).toBe('applied') // ⚠️ 变异：若记全量签名 ⇒ 这里变 'unchanged'
+    expect(calls).toHaveLength(2)
+  })
+
+  it('🔴 全量被拒且**名字全未知** ⇒ status=failed 且**不记账**（下轮重试）', () => {
     const { agent, calls } = mkAgent({ rejectUnknown: true })
     const d = collectVisibilityDecision([src('a', ['ghost1', 'ghost2'])])
     const r = applyVisibilityDecision(agent, 's-allghost', d)
     expect(r.status).toBe('failed')
-    expect(r.error).toContain('unknown tool')
+    expect(r.error).toContain('unknown global tool')
     expect(calls).toHaveLength(0)
     // 不记账的证据：同判决再来仍是 failed（走"尝试"分支，不是 unchanged）
     expect(applyVisibilityDecision(agent, 's-allghost', d).status).toBe('failed')
+  })
+
+  it('🔴 错误文案**解析不出**未知名字（文案变了/非 unknown 类）⇒ failed 不记账，**不退回旧降级**', () => {
+    // 判据：宁可 failed 让人看见，也不按"谁注册的"瞎猜 —— 那正是本缺陷的成因。
+    const calls: { deny: string[] }[] = []
+    const agent = {
+      ctx: {
+        tools: {
+          restrict: () => { throw new Error('some unrelated failure') },
+          get: () => undefined,
+        },
+      },
+    } as never
+    const r = applyVisibilityDecision(agent, 's-unparsable', collectVisibilityDecision([src('a', ['container_fs'])]))
+    expect(r.status).toBe('failed')
+    expect(r.dropped).toEqual([])
+    expect(calls).toHaveLength(0)
   })
 
   it('restrict 抛错 ⇒ 返回 failed 且**不记账**（下一轮会重试，不留错误目标态）', () => {
@@ -248,6 +285,29 @@ describe('applyVisibilityDecision：唯一发射点', () => {
     expect(b.calls).toHaveLength(0)
     expect(getToolVisibilityDiagnostics().keys).toContain('s-a')
     expect(getToolVisibilityDiagnostics().keys).not.toContain('s-b')
+  })
+})
+
+describe('parseUnknownToolNames：从宿主错误文案定位未知名字', () => {
+  it('复数形态（tool(s) 语序）：抽出被点名的名字', () => {
+    const m = 'tools.restrict() names unknown global tools "ghost", "phantom"; known global tools: a, b, c'
+    expect(parseUnknownToolNames(m)).toEqual(['ghost', 'phantom'])
+  })
+
+  it('单数形态（tool）：同样抽出', () => {
+    const m = 'tools.restrict() names unknown global tool "ghost"; known global tools: a, b'
+    expect(parseUnknownToolNames(m)).toEqual(['ghost'])
+  })
+
+  it('🔴 分号之后的 known 清单**不得**被当成未知名字（扫描域必须与问题同域）', () => {
+    const m = 'tools.restrict() names unknown global tool "ghost"; known global tools: "a", "b"'
+    expect(parseUnknownToolNames(m)).toEqual(['ghost']) // ⚠️ 变异：去掉 split(';') ⇒ 变成 3 个
+  })
+
+  it('🔴 不是 unknown-name 类的错误 ⇒ 空数组（调用方据此走"如实失败"，绝不猜）', () => {
+    expect(parseUnknownToolNames('some unrelated failure')).toEqual([])
+    expect(parseUnknownToolNames('tools.restrict({}) is a no-op')).toEqual([])
+    expect(parseUnknownToolNames('')).toEqual([])
   })
 })
 

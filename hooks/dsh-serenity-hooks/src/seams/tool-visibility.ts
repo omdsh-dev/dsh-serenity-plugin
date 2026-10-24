@@ -42,10 +42,6 @@
  * "写起来难度比较高"的地方）。发射层对此的处理见 {@link applyVisibilityDecision}。
  */
 import type { Context } from 'cordis'
-import { REGISTERED_TOOLS } from '../kernel/invariant.js'
-
-/** ACC 自己注册的工具名集合（退化档只发这些 —— 它们一定在册） */
-const REGISTERED_TOOLS_SET = new Set<string>(REGISTERED_TOOLS)
 
 /** 一次 restrict 的 deny 集合来源（每个来源**独立成败**，互不连累） */
 export interface VisibilitySource {
@@ -138,12 +134,13 @@ export function getToolVisibilityDiagnostics(): {
  *    （旧集合是新集合的子集时叠不叠都看不出来，但**不是子集时**会残留 —— 必须撤。）
  * ③ 🔴 **未注册的名字不许炸掉整次发射**：宿主契约"unknown names … fail"。
  *    合并后集合里只要有一个不在册的名字，整次 restrict 就失败 ⇒ 六个机制**全都不生效**。
- *    ⇒ 策略 = **直接发 → 全量被拒才退到「只发 ACC 自己注册的那些」一档**，退档时
- *    把被放弃的名字如实记账（进 `dropped`，由调用方决定要不要告警）。
+ *    ⇒ 策略 = **直接发 → 被拒时从宿主的错误文案里解析出它点名的未知名字 → 只剔那几个、其余重发一次**。
+ *    被剔掉的名字进 `dropped`（调用方决定要不要告警）。
  *    ⚠️ **不做 `tools.get` 预探活** —— 那个视图查不出 agent-plane 贡献的工具
  *    （`bash` / `schedule_*`），会把**在册的名字误判成未注册**（见下方发射段的实测记录）。
- *    ⚠️ 这比旧行为**更保守**：旧行为是"某条 restrict 失败 ⇒ 那一格静默不生效"，
- *    新行为是"全量失败 ⇒ 至少 ACC 那一格照常生效" —— **等价或更好**，且总有日志。
+ *    🔴 **也不按"谁注册的"降级** —— `REGISTERED_TOOLS` 只含 ACC 自己的 14 个，
+ *    用它当"在册面"会**整类丢掉宿主工具**（2026-10-24 真机缺陷，见发射段）。
+ *    ⇒ 唯一合法的在册判据是**宿主自己的回答**：要么发一次成功，要么它说出哪些名字不认识。
  *
  * @returns `'unchanged'` ／ `'applied'` ／ `'failed'`（`failed` 时 `deny` 保持原样）
  */
@@ -185,11 +182,24 @@ export function applyVisibilityDecision(
   // ⇒ 判据：**"这个名字在不在册"只能问宿主自己**（发一次就知道），
   //    ⛔ 不能拿"另一个视图的查表结果"冒充（D146 同族：判据必须打在真故障的那一维）。
   //
-  // 退化策略：**直接发 → 失败才整流重发**。宿主的 unknown-name 是**整次失败**，
-  // 所以「剔掉那一个、留其余」需要先知道是哪一个 —— 用二分太重，改用：
-  // 逐名单独发一次代价太高（N 次 tools/change，正是我们要消除的），
-  // 故取**两档**：全量 → 若失败，退到"只发 ACC 自己注册的那些"（`REGISTERED_TOOLS ∩ deny`）。
-  // ⚠️ 这不是"猜"，是**明确降级并记账**：退档时把被放弃的名字如实回报给调用方。
+  // 🔴🔴 2026-10-24 真机缺陷（owner 报「工具在过程中变来变去」）——**上一版的降级档是错的**：
+  //    上一版写 `accOnly = names ∩ REGISTERED_TOOLS`，而 `REGISTERED_TOOLS` 只含 **ACC 自己注册的**
+  //    那些；`safeMode.hiddenTools` / `hostSchedule` 里的名字（`bash` / `job_*` / `workflow` /
+  //    `schedule_*` / `exit_plan_mode` …）**全是宿主工具**，必然落在外面。
+  //    ⇒ 全量一旦被拒，退档会把**宿主工具整类丢掉**（实测：14 个 deny 里 13 个是宿主名字，
+  //    退档只剩 1 个）⇒ owner 看到的就是「藏了的不消失」。
+  //    更糟：退档时记的签名是**全量**签名、实际只发了 accOnly ⇒ 下一轮签名相同 ⇒ `unchanged`
+  //    ⇒ **永久不再重试**（二次缺陷，静默）。
+  //
+  // ⇒ 现策略（两段，都**只依赖宿主自己的回答**，不猜）：
+  //    ① 直接发全量。
+  //    ② 失败时**从宿主错误消息里解析出它点名的未知名字**（宿主逐字：
+  //       `tools.restrict() names unknown global tool(s) "a", "b"; known global tools: …`），
+  //       只剔掉**那几个**，其余**原样重发一次**。⇒ 不再按"谁注册的"猜，而是用**故障本身**定位。
+  //    ③ 解析不出名字（错误文案变了 / 不是 unknown-name 类失败）⇒ 如实 `failed`、**不记账**
+  //       （下一轮重试，保持"不留错误目标态"）。
+  //    ④ 记账的签名必须与**实际发出**的集合一致（`appliedSignature`），否则重试永远不会发生。
+  //    ⚠️ 解析失败时不退回旧的两档降级 —— 那正是本缺陷的成因；宁可 failed 让人看见。
   const tools = agent.ctx.tools
   const dropped: string[] = []
   const names = decision.deny
@@ -207,21 +217,63 @@ export function applyVisibilityDecision(
     applied.set(sessionId, { signature, deny: names, dispose })
     return { status: 'applied', dropped }
   } catch (firstError) {
-    // 全量被拒（确有不在册的名字）⇒ 退到**只发我们自己注册的**那一档，并记账
-    const accOnly = names.filter((n) => REGISTERED_TOOLS_SET.has(n))
-    if (accOnly.length === 0 || accOnly.length === names.length) {
-      // 无法有意义的退档 ⇒ 如实失败（调用方告警），且不记账（下轮重试）
-      return { status: 'failed', dropped, error: (firstError as Error).message }
+    const message = errorText(firstError)
+    // ② 用**宿主点名的未知名字**定位，而不是用"谁注册的"猜
+    const unknown = parseUnknownToolNames(message)
+    if (unknown.length === 0) {
+      // ③ 解析不出 ⇒ 如实失败、不记账（下轮重试）
+      return { status: 'failed', dropped, error: message }
     }
-    const abandoned = names.filter((n) => !REGISTERED_TOOLS_SET.has(n))
+    const unknownSet = new Set(unknown)
+    const remaining = names.filter((n) => !unknownSet.has(n))
+    dropped.push(...names.filter((n) => unknownSet.has(n)))
+    if (remaining.length === 0) {
+      // 全都不在册 ⇒ 无可发之名；**不记账**，下轮重试（宿主可能装上了那些包）
+      return { status: 'failed', dropped, error: message }
+    }
     try {
-      const dispose = tools.restrict({ deny: accOnly })
-      applied.set(sessionId, { signature, deny: accOnly, dispose })
-      return { status: 'applied', dropped: abandoned }
+      const dispose = tools.restrict({ deny: remaining })
+      // ④ 记**实际发出**的集合签名（不是全量）⇒ 全量再被算出时仍会重试，不会永久 unchanged
+      applied.set(sessionId, { signature: decisionSignature({ ...decision, deny: remaining }), deny: remaining, dispose })
+      return { status: 'applied', dropped }
     } catch (secondError) {
-      return { status: 'failed', dropped, error: (secondError as Error).message }
+      return { status: 'failed', dropped, error: errorText(secondError) }
     }
   }
+}
+
+/** 取异常的可读文案（非 Error 也能取到 message；都没有则 String()） */
+function errorText(e: unknown): string {
+  if (e instanceof Error) return e.message
+  if (typeof e === 'object' && e !== null && 'message' in e && typeof (e as { message: unknown }).message === 'string') {
+    return (e as { message: string }).message
+  }
+  return String(e)
+}
+
+/**
+ * 从宿主的 `tools.restrict()` 错误文案里解析出**被点名的未知工具名**。
+ *
+ * 宿主逐字形态（`dsh-tools/lib/types/index.js` 的 `restrict()`）：
+ * ```
+ * tools.restrict() names unknown global tool(s) "a", "b"; known global tools: x, y, z
+ * ```
+ * 单数时是 `tool`，复数时是 `tool(s)`——两种都匹配。
+ *
+ * 🔴 **只取分号之前那一段**：分号后是 `known global tools:` 清单，**不能**误当成未知名字。
+ * 🔴 解析不出来就返回 `[]`（调用方据此走"如实失败、不记账"），**绝不猜**。
+ */
+export function parseUnknownToolNames(message: string): string[] {
+  // 必须在分号处截断：否则 known 清单会被一起扫进来
+  const head = message.split(';')[0] ?? ''
+  if (!/names unknown global tool/.test(head)) return []
+  const out: string[] = []
+  // 双引号包裹的名字（宿主用 `"${n}"` 拼接）
+  for (const m of head.matchAll(/"([^"]+)"/g)) {
+    const name = m[1]
+    if (name !== undefined && name !== '') out.push(name)
+  }
+  return [...new Set(out)]
 }
 
 /** 会话销毁清理（防 per-会话 Map 无界增长；lifecycle 调用） */
