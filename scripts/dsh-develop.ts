@@ -1328,6 +1328,68 @@ function cmdVersion(): void {
   else console.log('✓ 版本一致')
 }
 
+/**
+ * `run-trajectory-test <轨迹目录名> [测试文件名]` —— **跑某条轨迹自己的自测脚本**（Mech，只读）。
+ *
+ * ## 为什么这个子命令必须存在（2026-10-24，guard 报障引出）
+ *
+ * 容器里**没有给轨迹的本地执行通道**：无 bash ／ 无通用 exec MSM ／ `sys` 白名单**无 `bun`**。
+ * 而 guard 的 CRO 程序是 **bun .ts**，它的 23 例自测**只能**由别人代跑
+ * ⇒ 那是**单点依赖**：他改一行措辞都要等我的轮次（他自己在 SESSION 里记为「唯一还欠的一次绿」）。
+ *
+ * ⇒ 本子命令把那件事变成一个**可自助的窄入口**：给轨迹目录名，跑它目录里的 `*.dev.test.ts`
+ *   （或显式给文件名），把 stdout/stderr 原样透出。
+ *
+ * ## 边界（写在这里免得后人扩大它）
+ * - 🔴 **只读被跑的对象**：本命令**不写**目标轨迹目录的任何文件，也不替它改代码。
+ * - 🔴 **不碰 `src/`，不发版**：纯开发工具面，与插件产物无关。
+ * - ⚠️ **只在 scratch 上改代码是调用方的事**：本命令**只负责跑**，不复制、不改写。
+ *   guard 的纪律是「⛔ 不改自己的活程序」⇒ 他改副本、指本命令去跑副本目录。
+ * - 🔴 **bun 路径可从 env 覆盖**（`SERENITY_BUN`），缺省 `~/.bun/bin/bun`。
+ *
+ * @param rest `[轨迹目录名, 测试文件名?]`
+ */
+function cmdRunTrajectoryTest(rest: string[]): void {
+  const [trajectoryDir, explicitFile] = rest
+  if (!trajectoryDir) {
+    fail('run-trajectory-test 需要轨迹目录名: dsh-develop run-trajectory-test "<AGENT_SESSIONS 下的目录名>" [测试文件名]')
+  }
+  const root = resolve(REPO_ROOT, '../..') // AI_LAB/dsh-serenity-plugin → CCC 根（home-serenity）
+  const target = join(root, 'AGENT_SESSIONS', trajectoryDir)
+  if (!existsSync(target)) fail(`轨迹目录不存在: ${target}`)
+
+  // 缺省挑它目录里的 *.dev.test.ts（本仓约定；显式给文件名可覆盖）
+  let testFile = explicitFile
+  if (!testFile) {
+    const candidates = readdirSync(target).filter((f) => f.endsWith('.dev.test.ts'))
+    if (candidates.length === 0) fail(`目录里没有 *.dev.test.ts: ${target}`)
+    if (candidates.length > 1) {
+      fail(`目录里有多个 *.dev.test.ts（${candidates.join(', ')}）⇒ 请显式指定文件名`)
+    }
+    testFile = candidates[0]
+  }
+  const testPath = join(target, testFile)
+  if (!existsSync(testPath)) fail(`测试文件不存在: ${testPath}`)
+
+  const bun = process.env.SERENITY_BUN ?? join(HOME_DIR, '.bun', 'bin', 'bun')
+  if (!existsSync(bun)) fail(`找不到 bun: ${bun}（可用 SERENITY_BUN 覆盖）`)
+
+  console.log(`[dsh-develop] run-trajectory-test: ${testPath}`)
+  console.log(`[dsh-develop] bun: ${bun}（cwd = 轨迹目录；只读，不改该目录任何文件）`)
+  // ⚠️ 用 pipe 再回放：要拿到 exit code，同时把被测程序的原话**逐字**透出（不夹杂工具噪音）
+  const r = spawnSync(bun, [testPath], {
+    cwd: target,
+    encoding: 'utf-8',
+    timeout: 300_000,
+    env: process.env,
+  })
+  if (r.stdout) process.stdout.write(r.stdout)
+  if (r.stderr) process.stderr.write(r.stderr)
+  if (r.error) fail(`执行失败: ${String(r.error.message ?? r.error)}`)
+  console.log(`[dsh-develop] ${r.status === 0 ? '✓ 自测通过' : `✗ 自测失败（exit ${r.status}）`}`)
+  if (r.status !== 0) process.exit(r.status ?? 2)
+}
+
 function cmdBump(version?: string): void {
   if (!version || !/^\d+\.\d+\.\d+$/.test(version)) fail('bump 需要版本号: dsh-develop bump <x.y.z>')
   for (const f of ['package.json', 'dsh.plugin.json']) {
@@ -3230,6 +3292,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       case 'github-push-repo': cmdGithubPushRepo(rest[0]); break
       case 'github-ls': cmdGithubLs(rest[0]); break
       case 'version': cmdVersion(); break
+      case 'run-trajectory-test': cmdRunTrajectoryTest(rest); break
       case 'sys': {
         // 诊断：执行白名单系统命令（ps/ss/curl/lsof/xdg-open/zstd/git 等只读诊断）
         const [cmd, ...args] = rest
@@ -3311,7 +3374,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   readme-sync           包内 README ← 仓库 README（机械同步，相对链接转绝对 URL）
   dump-config [pattern] dsh --dump-config（合成后的 profile 条目树；pattern 过滤）
   publish               npm publish @shgroup/dsh-serenity-hooks（凭据走 ~/.npmrc）
-  github-push [--force] push 到 GitHub 公开仓库（tellmewhattodo）`)
+  github-push [--force] push 到 GitHub 公开仓库（tellmewhattodo）
+  run-trajectory-test <轨迹目录名> [测试文件名]  跑某条轨迹自己的 *.dev.test.ts（只读；bun 缺省 ~/.bun/bin/bun，可用 SERENITY_BUN 覆盖）`)
         break
       default:
         fail(`未知子命令: ${sub}`)
