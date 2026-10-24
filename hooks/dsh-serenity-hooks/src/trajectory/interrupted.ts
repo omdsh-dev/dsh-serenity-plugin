@@ -129,6 +129,30 @@ export interface InterruptedSession {
   mtimeMs: number
   /** 该轮里"有 call 无 result"的工具名（**尽力而为**，可能因尾部窗口截断而不全） */
   pendingTools: string[]
+  /**
+   * 🔴 **命中形态**（D244 输出面，guard 2026-10-24 要的判别式 Y 的一半）。
+   *
+   * | 值 | 含义 | 末条 `turn/end` |
+   * |---|---|---|
+   * | `interrupted-end` | 形态 A：日志**有** `turn/end`，其 `reason.kind ∈ {interrupted, aborted}` | 存在，见 {@link lastTurnEndKind} |
+   * | `unclosed` | 形态 B：**开了没收** —— 窗口内最后一条 `turn/start` 之后没有 `turn/end` | **可能不存在** |
+   *
+   * 🔴 **为什么必须暴露它**：调用方（如 guard 的守护程序）要能自己判「该不该注入」，
+   * 而这两种形态的**可用判据完全不同** —— 形态 B 连"末条 turn/end 的 kind"都不存在。
+   * 把决定权留在 ACC 里 = 让调用方没法自己躲开误注入（D237 同族：读数要能改变下一步）。
+   */
+  form: 'interrupted-end' | 'unclosed'
+  /**
+   * 形态 A：末条 `turn/end` 的 `reason.kind`；形态 B：**恒为 `null`**（那时没有末条 turn/end）。
+   * ⚠️ `null` 在这里**承载语义**（"该格不存在"），不是"没读到"（D233 同族）——
+   * 两种成因在读数上不同：形态 B 的 `form` 会是 `unclosed`。
+   */
+  lastTurnEndKind: string | null
+  /**
+   * 日志尾部窗口里**最后一条 `turn/start` 的轮号**；窗口内没有则 `null`。
+   * 与 {@link turn} 对照可看出「窗口是否把这一轮的起点挤出去了」（A108 的现场判据）。
+   */
+  lastTurnStartTurn: number | null
 }
 
 /** 扫描结果 */
@@ -247,6 +271,39 @@ function readTailEvents(logPath: string, want: number): SessionEvent[] {
  * ⚠️ **这是判据的唯一取值点** —— 别在别处再写一份字面量（两份会漂）。
  */
 const UNFINISHED_KINDS: ReadonlySet<string> = new Set(['interrupted', 'aborted'])
+
+/**
+ * 尾部窗口里**最后一条 `turn/start` 的轮号**（D244 输出面，给调用方做 A108 的现场判断）。
+ *
+ * ⚠️ 与 {@link detectUnclosedTurn} 不同：**它不判"是否未收尾"**，只**如实报告窗口里有什么**。
+ * 分开的理由：前者是判据（会 deciding 命中），后者是读数（零判据风险）——
+ * 把读数塞进判据函数，调用方就没法在"判据因为窗口截断而沉默"时看出**为什么**沉默。
+ *
+ * @returns 轮号；窗口内没有 `turn/start` 或轮号缺失 ⇒ `null`
+ */
+export function lastTurnStartTurnOf(events: SessionEvent[]): number | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'turn/start') {
+      const t = events[i]?.data?.turn
+      return typeof t === 'number' ? t : null
+    }
+  }
+  return null
+}
+
+/**
+ * 尾部窗口里**最后一条 `turn/end` 的 `reason.kind`**（同上：读数，不是判据）。
+ * @returns kind；窗口内没有 `turn/end`（形态 B 的典型）或 kind 缺失 ⇒ `null`
+ */
+export function lastTurnEndKindOf(events: SessionEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    if (events[i]?.type === 'turn/end') {
+      const k = events[i]?.data?.reason?.kind
+      return typeof k === 'string' ? k : null
+    }
+  }
+  return null
+}
 
 /**
  * 命中判定（**形态 A：靠 `turn/end.reason.kind`**）。
@@ -435,7 +492,9 @@ export function scanInterruptedSessions(
        * 实测（本机 10 个窗口内会话）：**4 条**只能由形态 B 抓到（末条 `tool/call` / `step/start`），
        * 修前全落到 `skipped`。
        */
-      const hit = detectInterruptedEnd(events) ?? detectUnclosedTurn(events)
+      const formA = detectInterruptedEnd(events)
+      const formB = formA === null ? detectUnclosedTurn(events) : null
+      const hit = formA ?? formB
       if (!hit) {
         result.skipped++
         continue
@@ -448,6 +507,11 @@ export function scanInterruptedSessions(
         lastEventAt: typeof tailTime === 'number' ? tailTime : null,
         mtimeMs,
         pendingTools: hit.pendingTools,
+        // 🔴 D244 输出面（guard 判别式 Y）：把「哪一形态」与「窗口里到底有什么」如实交出去，
+        //   让调用方能自己判该不该注入 —— 而不是把这层判断藏在 ACC 里。
+        form: formA !== null ? 'interrupted-end' : 'unclosed',
+        lastTurnEndKind: lastTurnEndKindOf(events),
+        lastTurnStartTurn: lastTurnStartTurnOf(events),
       })
     } catch (err) {
       result.errors.push({ sessionId, message: err instanceof Error ? err.message : String(err) })

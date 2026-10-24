@@ -213,16 +213,20 @@ describe('CRO turn 追踪: 按轨迹聚合（runningCarriersOf）', () => {
 // ── 事件接缝（registerCroTurnTracking）──
 
 describe('CRO turn 追踪: 事件接缝', () => {
-  it('🔴 订阅的 4 个事件名**全部**在宿主契约表里（防"名字写错 ⇒ 静默不订阅"）', () => {
+  it('🔴 订阅的 3 个事件名**全部**在宿主契约表里（防"名字写错 ⇒ 静默不订阅"）', () => {
     install()
     // 🔴 D243 改钉（原文写「订阅的 5 个」并含 `agent/created`）：
     //    **原前提** =「`agent/created` 负责语义『在不在跑』」，该前提已被实测取代 ——
     //    `agent/created` 是 `AgentRegistry.announce()` 发的，`source` 含 `resume` ⇒
     //    宿主重启会把 persisted 会话全部 announce 一遍 ⇒ 「载入」被当成「在跑」。
-    //    ⇒ 它已从订阅清单移除；**本用例的原意（防名字写错）完全保留**，只是集合少一个。
-    //    ⚠️ 这不是放宽：同文件的「`agent/created` 不置位」用例是配套的**反向钉**（D240）。
+    // 🔴🔴 D244 再改钉（4 → 3，去掉 `agent/turn-stopping`）：
+    //    **新前提** =「`turn-stopping` = 轮结束」，该前提被宿主源码推翻 ——
+    //    它是**轮末暂停点**，监听者往 `next-step` 塞消息（`steer`）后**同一轮继续**，
+    //    `turn/start` 与 `agent/status` 都**不重发** ⇒ 清表 ⇒ 那条长轮从此"不在跑"。
+    //    ⇒ 清理改由 `agent/status=idle` 独家负责。**原意（防名字写错）完全保留**。
+    //    ⚠️ 这不是放宽：下面「`turn-stopping` ⇒ **不**清」是配套的**反向钉**（D240）。
     expect(subscribed.sort()).toEqual(
-      ['agent/disposed', 'agent/status', 'agent/turn-stopping', 'session/disposed'].sort(),
+      ['agent/disposed', 'agent/status', 'session/disposed'].sort(),
     )
     // 原意仍在：**剩下每一个**都必须在白名单里（少一个不影响这条判据的判别力）
     const contract = new Set(HOST_EVENTS.map((e) => e.name))
@@ -247,10 +251,18 @@ describe('CRO turn 追踪: 事件接缝', () => {
     expect(listRunningSessionIds(Date.now())).toEqual([])
   })
 
-  it('`agent/turn-stopping` ⇒ 清除（正常收轮路径）', () => {
+  it('🔴🔴 D244 反向钉：`agent/turn-stopping` ⇒ **不**清（它是轮末暂停点，不是轮结束）', () => {
     const f = install()
     f.emit('agent/status', statusPayload(A, 'running'))
     f.emit('agent/turn-stopping', agentPayload(A))
+    // 那一轮可能**还在跑**（监听者在 turn-stopping 里 steer ⇒ next-step 非空 ⇒ 同轮继续）
+    expect(
+      listRunningSessionIds(Date.now()),
+      'turn-stopping 清表了 ⇒ rebuild/auto-continue 那种长轮会整段时间"不在跑"（真机实测 9 分钟）',
+    ).toEqual([A])
+    expect(croTurnTableSize()).toBe(1)
+    // 真正的收轮信号随后到达 ⇒ 这才清
+    f.emit('agent/status', statusPayload(A, 'idle'))
     expect(listRunningSessionIds(Date.now())).toEqual([])
     expect(croTurnTableSize()).toBe(0)
   })

@@ -1,3 +1,82 @@
+## v1.96.0 — 2026-10-24（🔴🔴 **`turn-stopping` ≠ 轮结束：`rebuild` 的 auto-continue 让一条轮连跑 9 分钟却全程"不在跑"**）
+
+**来源**：guard 轨迹报障（2026-10-24 18:1x）—— 它把 `steer` 塞进了**正在跑的那一轮**，
+因为那条会话的 `turn 32` 还在飞，却**不在 `liveIds` 排除集里**。已登记为 **D244**。
+
+---
+
+### 一、真因：`agent/turn-stopping` 是「轮末暂停点」，不是「轮结束」
+
+宿主 `AgentLoop.turn()` 原文（`dsh-agent-loop/lib/index.js`）：
+
+```js
+if (turnEnds && this.inbox.nextStep.length === 0) {
+    await this.dispatch.serial("agent/turn-stopping", { turn, signal })   // ← 暂停点
+    signal.throwIfAborted()
+}
+if (turnEnds && this.inbox.nextStep.length === 0) break                   // ← 只有 nextStep 空才真结束
+target = "next-step"                                                      // ← 否则同轮继续！
+```
+
+⇒ 任何监听者在 `turn-stopping` 回调里 `steer`（往 `next-step` 塞消息）⇒ **同一轮继续跑**，
+而 `turn/start` **不重发**、`agent/status` 也**不重发**（状态没变，还是 `running`）。
+
+🔴 **`trajectory/rebuild.ts` 的 auto-continue 干的正是这件事**（`agent.steer(...)` 塞
+"The conversation has been cleared and rebuilt…"）。
+
+### 二、实测读数（本机真机，逐数吻合）
+
+| 事件 | 时刻 | 修前「在跑」表 |
+|---|---|---|
+| `turn/start(32)` | **18:12:00** | `status=running` ⇒ 置位 ✔ |
+| rebuild 的 `turn-stopping` | 期间 | 🔴 **被清空** |
+| rebuild `steer` ⇒ next-step 非空 ⇒ **同轮继续** | 期间 | 🔴 **空着，但轮还在跑** |
+| guard 的 `tick=2` 命中 turn 32 ⇒ `live+steer` | 18:1x | 🔴 表里没有它 ⇒ **排除没拦住** |
+| `turn/end(32)` | **18:21:27** | `setPhase(idle)` ⇒ 发 `idle` |
+
+⇒ **一条轮连跑 9 分钟，整段时间都不在「在跑」表里。**
+⚠️ D243（v1.95.0）之前这一格被 `agent/created` 的**假置位掩盖**；D243 删掉它 ⇒ **洞才暴露**。
+⇒ **D243 的方向是对的，它只是揭开了一个更老的语义误解。**
+
+### 三、修法
+
+**`agent/turn-stopping` 不再清表；清理只认 `agent/status = idle`。**
+依据：`kick()` 的 `finally` **一定** `setPhase({kind:'idle'})` ⇒ 那是**唯一知道"轮真的结束了"的地方**。
+订阅数 4 → 3。三层清理改为：① `status=idle` ② `disposed`／`session-disposed` ③ TTL 兜底。
+
+🔴 **已知残留窗口（写进判据，因为它是"收窄"不是"根除"）**：
+`runMaintenance` 期间 `status` 也是 `idle` ⇒ 压缩等内部工作时不置位。
+⇒ **后果**：在那个窗口里，一条正在跑 `rebuild`/auto-continue 那种长轮的会话，表里可能没有它
+⇒ **今天那个形态（命中 ⇒ `steer` 塞进正在跑的那一轮）在那个窗口里会原样复现**。
+⇒ 方向落到本模块头那条**便宜**的误判（报"没跑"）；要彻底分开「真死着」与「表没长齐」，
+需要一条**时序线索**（"标记曾存在过、最近 N 分钟内被清"），**本轮不做**。
+
+### 四、测试：1 条按 D184 改钉 ＋ 1 条新增反向钉
+
+- 「订阅的 4 个事件名」→ **3 个**（去掉 `agent/turn-stopping`），原意（防名字写错）完全保留；
+- 🆕 **反向钉**「`agent/turn-stopping` ⇒ **不**清」＋ 正向钉「随后 `status=idle` ⇒ 才清」。
+
+**变异检验 M1**：把 `turn-stopping` 的清表加回去 ⇒ **恰好 2 红**（订阅清单 ＋ 反向钉），余 24 绿
+⇒ 红的位置正是钉它的那两条（D223）。
+
+### 五、同时交付：`interrupted` 输出面结构化（guard 判别式 Y）
+
+命中项**新增三个字段**，让"该不该注入"成为**可见判断**而不是藏在 ACC 里（D237 同族）：
+
+| 字段 | 含义 |
+|---|---|
+| `form` | `interrupted-end`（形态 A）｜`unclosed`（形态 B：窗口内开了没收） |
+| `lastTurnEndKind` | 形态 A 给 `reason.kind`；**形态 B 恒 `null`**（那时没有末条 `turn/end`） |
+| `lastTurnStartTurn` | 窗口内最后一条 `turn/start` 的轮号（与 `turn` 对照可看出窗口是否挤掉了起点） |
+
+渲染层同步：命中行显示形态与三个读数，并写清**哪些形态该先核再注入**。
+⚠️ `lastTurnEndKind = null` 在这里**承载语义**（该格不存在），不是"没读到"（D233 同族）。
+
+### 六、门禁
+
+typecheck ✓ ｜ typecheck-host `0.2.1-rc.2` ✓ ｜ test **204 files / 3202 tests** ✓ ｜
+coverage 95.44 ✓ ｜ build ✓ ｜ pack-check 161 文件 ✓
+
 ## v1.95.0 — 2026-10-24（🔴🔴 **`liveIds` 排除过宽：把「载入」当「在跑」⇒ `interrupted` 把最该接走的会话藏起来**）
 
 **来源**：本轨迹（S142）本轮实测发现 —— `cognitive_trajectory interrupted` 在**真有**未跑完会话时

@@ -12,10 +12,12 @@
  *
  * | 事件 | 动作 | 出处 |
  * |---|---|---|
- * | `agent/status` = `running` | 标记「在跑」；`idle` ⇒ 清除 | 宿主 `AgentLoop.setPhase`：`emit("agent/status", { status })`，**只在状态真的变化时发** |
- * | `agent/turn-stopping` | 清除标记 | `host/contract.ts`（dsp 已在 `trajectory/rebuild.ts` 等 4 处订阅） |
+ * | `agent/status` = `running` | **置位**「在跑」 | 宿主 `AgentLoop.setPhase`：`emit("agent/status", { status })`，**只在状态真的变化时发** |
+ * | `agent/status` = `idle` | **清位** | 同上；`kick()` 的 `finally` 一定 `setPhase({kind:'idle'})` |
  * | `agent/disposed` | **清该载体的项** | `host/contract.ts` |
  * | `session/disposed` | **清该载体的项** | `host/contract.ts` |
+ *
+ * 🔴 **`agent/turn-stopping` 刻意不订阅** —— 它是「轮末暂停点」不是「轮结束」，见下方 D244 段。
  *
  * ## 🔴🔴 D243（2026-10-24）：**⛔ 不许用 `agent/created` 标记「在跑」**
  *
@@ -37,18 +39,46 @@
  * **代价与兜底**：删掉 `agent/created` 后，本表在"宿主重启后、某会话真正开跑之前"为空
  * ⇒ 落到文件尾那条**便宜**的误判方向（报"没跑"），不会被拿来藏会话。
  *
+ * ## 🔴🔴 D244（2026-10-24）：**⛔ `agent/turn-stopping` 不得清表**
+ *
+ * **它看起来最像"收轮"，其实不是。** 宿主 `AgentLoop.turn()` 原文：
+ *
+ * ```js
+ * if (turnEnds && this.inbox.nextStep.length === 0) {
+ *     await this.dispatch.serial("agent/turn-stopping", { turn, signal })  // 暂停点
+ *     signal.throwIfAborted()
+ * }
+ * if (turnEnds && this.inbox.nextStep.length === 0) break                  // 只有 nextStep 空才真结束
+ * target = "next-step"                                                     // 否则同轮继续
+ * ```
+ *
+ * ⇒ 任何监听者在 `turn-stopping` 回调里 `steer`（往 `next-step` 塞消息）⇒ **同一轮继续跑**，
+ *   而 `turn/start` **不重发**、`agent/status` 也**不重发**（状态没变，还是 running）。
+ *
+ * 🔴 **实测代价**（真机 2026-10-24 18:1x）：`trajectory/rebuild.ts` 的 auto-continue 正是
+ *   在 `turn-stopping` 里 `agent.steer(...)` ⇒ 一条轮**连跑 9 分钟**
+ *   （`turn/start(32)` 18:12:00 → `turn/end(32)` 18:21:27），而本表**整段时间都是空的**
+ *   ⇒ `interrupted` 的排除失效 ⇒ `steer` 被塞进**正在跑的那一轮**（对它是误导）。
+ *   ⚠️ D243 之前这一格被 `agent/created` 的假置位**掩盖**；D243 删掉它 ⇒ 洞才暴露。
+ *   ⇒ **D243 的方向是对的，它只是揭开了一个更老的语义误解**。
+ *
+ * ⇒ **清理只认 `agent/status = idle`**（`kick()` 的 `finally` 一定 `setPhase({kind:'idle'})`）。
+ * ⚠️ **已知窄代价**：`runMaintenance` 期间 `status` 也是 `idle` ⇒ 压缩等内部工作时不置位。
+ *   判可接受：那时没有 CRO 该救的轮；方向落到那条**便宜**的误判（报"没跑"）。
+ * ⛔ **不要把 `clearTurnRunning` 加回 `turn-stopping`** —— 等于重新打开那个 9 分钟的洞。
+ *
  * ## 🔴 清理设计（**这是本模块最容易被做坏的地方**）
  *
  * ⚠️ 本容器栽过 **5 次**「只增不清」的病（wake-registry / keeper 三表 / pendingRebuilds …），
  * 而 `agent/disposed` 在 `HOST_EVENTS` 里的 impact 原文**恰好就是**
  * 「*per-会话内存态不清理（**长跑泄漏**）*」⇒ **本模块属于该已登记病族，必须在设计期就带清理**。
  *
- * **三层清理**：
- * 1. **正常路径**：`turn-stopping` ⇒ 清除该项；
+ * **三层清理**（D244 起第 1 层已从 `turn-stopping` 换成 `status=idle`）：
+ * 1. **正常路径**：`agent/status = idle` ⇒ 清除该项；
  * 2. **载体销毁**：`agent/disposed` / `session/disposed` ⇒ 清除该项；
  * 3. 🔴 **异常路径（前两层都漏掉的兜底）**：读取时按 **TTL** 过滤——
- *    超过 `TURN_TTL_MS` 未收到 `turn-stopping` 的项**视为不在跑**（并顺手清除）。
- *    触发场景：进程被 kill / 卡死 / 事件丢失。
+ *    超过 `TURN_TTL_MS` 未刷新的项**视为不在跑**（并顺手清除）。
+ *    触发场景：进程被 kill / 卡死 / 事件丢失（这些情况下 `idle` 永远不会来）。
  *
  * ## TTL 取值的**方向性判据**（R↓，别用"感觉合适"）
  *
@@ -58,7 +88,7 @@
  *   「漏排是硬故障、多排是常态成本」）。
  *
  * ⇒ **不确定时宁可报"没跑"**（选便宜的那种错）⇒ **TTL 不宜过长**。
- * 取 **30 分钟**：单轮静默超过 30 分钟仍无 `turn-stopping` 的情形罕见；
+ * 取 **30 分钟**：单轮静默超过 30 分钟仍无 `idle` 的情形罕见；
  * 而真发生了，代价只是一次可能多余的唤起（5min tick 限制频率，且 CRO 程序自己还能看
  * `pendingWakes` / `lastWakeAt` 二次判）。
  *
@@ -206,11 +236,34 @@ export function registerCroTurnTracking(ctx: unknown): void {
     else if (p.status === 'idle') clearTurnRunning(id)
   })
 
-  // ② 收轮：turn-stopping（宿主在每个 turn 结束前 serial 触发）
-  on('agent/turn-stopping', (payload) => {
-    const id = sessionIdOf((payload as { agent?: unknown })?.agent)
-    if (id) clearTurnRunning(id)
-  })
+  // ② 收轮：🔴🔴 **D244（2026-10-24）：`agent/turn-stopping` ⛔ 不再清表** ————
+  //
+  // **为什么**（宿主原文 `AgentLoop.turn()`，`dsh-agent-loop/lib/index.js`）：
+  // ```js
+  // if (turnEnds && this.inbox.nextStep.length === 0) {
+  //     await this.dispatch.serial("agent/turn-stopping", { turn, signal })   // ← 暂停点
+  //     signal.throwIfAborted()
+  // }
+  // if (turnEnds && this.inbox.nextStep.length === 0) break                   // ← 只有 nextStep 空才真结束
+  // target = "next-step"                                                      // ← 否则同轮继续！
+  // ```
+  // ⇒ **`turn-stopping` 是「轮末暂停点」，不是「轮结束」**：任何监听者在回调里往
+  //   `next-step` 塞消息（`steer`），**同一轮就继续跑** —— `turn/start` 不重发、
+  //   `agent/status` 也不重发（状态没变，还是 running）。
+  //
+  // 🔴 **实测代价**（2026-10-24 18:1x，真机）：`trajectory/rebuild.ts` 的 auto-continue
+  //   在 `turn-stopping` 里 `agent.steer(...)` ⇒ 同轮继续 ⇒ 而本表已被这里清空
+  //   ⇒ 一条**连跑 9 分钟**（18:12:00 `turn/start(32)` → 18:21:27 `turn/end(32)`）的轮
+  //   **在整段时间里都不在「在跑」表里** ⇒ `interrupted` 的排除失效 ⇒ 把 `steer`
+  //   塞进了**正在跑的那一轮**（对它是误导：它没被打断）。
+  //
+  // ⇒ **唯一知道「轮真的结束了」的地方** = `agent/status = idle`
+  //   （`kick()` 的 `finally` 一定 `setPhase({kind:'idle'})`）⇒ 清理只认它。
+  // ⚠️ **已知窄代价**：`runMaintenance` 期间 `status` 也是 `idle` ⇒ 压缩等内部工作时不置位。
+  //   判可接受：那时没有 CRO 该救的轮；且方向落到本模块头那条**便宜**的误判（报"没跑"）。
+  //
+  // ⛔ **不要把 `clearTurnRunning` 加回 `turn-stopping`** —— 加了就等于把上面那条 9 分钟的洞
+  //   重新打开，而**没有任何一条用例会红**（除非同批加反向钉，见 `tests/cro-turns.test.ts`）。
 
   // ③ 生命周期清理：载体销毁 ⇒ 清项（防"按载体只增"）
   // ⚠️ 两个事件的 **payload 形状不同**（照 `trajectory/carrier.ts:57-64` 实证）：

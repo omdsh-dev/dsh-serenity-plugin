@@ -161,16 +161,29 @@ function renderInterruptedScan(input: {
   for (const s of scan.sessions) {
     const at = s.lastEventAt !== null ? new Date(s.lastEventAt).toISOString() : '(时间未知)'
     lines.push(`  · ${s.sessionId}`)
+    // 🔴 D244：**形态 ＋ 窗口读数一并给人** —— 调用方要能自己判"该不该注入"。
+    //    ⚠️ `lastTurnEndKind` 为 null 是**语义**（形态 B 没有末条 turn/end），不是"没读到"。
+    const formText = s.form === 'unclosed' ? '未收尾（窗口内无 turn/end）' : '有收尾（reason.kind 命中）'
     lines.push(`      轮次 turn=${s.turn ?? '?'} · 末事件 ${at}`)
+    lines.push(
+      `      形态 ${s.form} = ${formText}` +
+        ` · 末条 turn/end.kind=${s.lastTurnEndKind ?? 'null'}` +
+        ` · 窗口内最后 turn/start=${s.lastTurnStartTurn ?? 'null'}`,
+    )
     if (s.pendingTools.length > 0) {
       lines.push(`      ⚠️ 有调用无结果的工具（副作用未知）: ${s.pendingTools.join(', ')}`)
     }
   }
 
   lines.push('')
-  lines.push('判据: 日志末条 `turn/end` 的 `reason.kind` ∈ {interrupted, aborted}，且其后没有新的 turn/start。')
+  lines.push('判据（两种形态，任一命中即收）:')
+  lines.push('  A `interrupted-end`: 末条 `turn/end.reason.kind` ∈ {interrupted, aborted}，且其后没有新的 turn/start。')
   lines.push('      interrupted = 进程崩溃后被 resume 补收尾 ／ aborted = 被正常终止（重启、销毁、用户中断）。')
-  lines.push('      两者都表示「这一轮没跑完」，都会被收进来。')
+  lines.push('  B `unclosed`: 窗口内最后一条 `turn/start` 之后没有 `turn/end`（进程在轮内任意位置死掉，宿主来不及写收尾）。')
+  lines.push('🔴 **怎么用「形态」判该不该续**（调用方口径，ACC 不代判）:')
+  lines.push('  · 投递方式 `cold-resume` ⇒ 该会话**未被载入本进程**（死着）⇒ 真需要接走；')
+  lines.push('  · 投递方式 `live+steer` ⇒ 它在进程里 ⇒ ⚠️ **「载入」≠「空闲」**：')
+  lines.push('      `form=unclosed` 且 `窗口内最后 turn/start` == 命中 turn ⇒ 可能**那一轮正在跑** ⇒ 先核再注入。')
   lines.push('🔴 本动作**只读** —— 是否续跑、续哪条、几点续，由调用方（你的认知轨迹）决定。')
   lines.push('⚠️ 未完成的工具调用「副作用未知」≠「没执行」：它们可能已写文件 / 已发消息。')
   lines.push('   续跑前应先核对副作用，而不是把那一轮整段重放。')
