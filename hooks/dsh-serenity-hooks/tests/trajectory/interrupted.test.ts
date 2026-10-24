@@ -77,6 +77,82 @@ describe('detectInterruptedEnd（纯判定）', () => {
     expect(detectInterruptedEnd(events)).toBeNull()
   })
 
+  /**
+   * 🔴🔴 **2026-10-24（owner 报障：「有的会话在重启时不是崩溃的就扫不到，还是没修好」）**
+   *
+   * 宿主对「这一轮没跑完」有**两种**写法，`kind` **不是同一个词**：
+   * · 崩溃后被 resume 补收尾 → `interrupted`（`interruptedTurnClosers`）
+   * · 被正常终止（重启／销毁／用户中断）→ `aborted`（驱动 catch 里 `abortedCancelCause`）
+   *
+   * 修前只认前者 ⇒ **发布重启这一类整批漏扫** —— 而那正是最常见的形态。
+   * ⇒ 下面这是一条**正控**：`aborted` 必须命中。它红 = 判据又窄回去了。
+   */
+  it('🔴 末轮 aborted（被正常终止：重启／销毁／用户中断）⇒ **必须命中**', () => {
+    const events = [
+      { type: 'turn/start', seq: 1, time: 1000, data: { turn: 12 } },
+      {
+        type: 'turn/end', seq: 2, time: 1002,
+        // 宿主真实形状：外层 aborted，内层是谁取消的（那是另一个问题，判据不看它）
+        data: { turn: 12, reason: { kind: 'aborted', reason: { kind: 'disposed' } } },
+      },
+      { type: 'session/end-seed', data: {} },
+    ]
+    expect(detectInterruptedEnd(events)).toEqual({ turn: 12, pendingTools: [] })
+  })
+
+  it('🔴 内层 reason 是 user／parent／hook 的 aborted 都算（判据只看外层，不看谁取消的）', () => {
+    for (const inner of ['user', 'parent', 'disposed', 'hook']) {
+      const events = [
+        { type: 'turn/start', data: { turn: 3 } },
+        { type: 'turn/end', data: { turn: 3, reason: { kind: 'aborted', reason: { kind: inner } } } },
+      ]
+      expect(detectInterruptedEnd(events), `内层=${inner} 也该命中`).toEqual({ turn: 3, pendingTools: [] })
+    }
+  })
+
+  /**
+   * ⛔ 反向钉（与上面的正控**成对**，缺一不可）：
+   * 「放宽」不能放到 `completed` 也命中 —— 那会把健康会话全部当成待续（灾难）。
+   */
+  it('🔴 反向钉：completed ⇒ 不命中（放宽不得放到"已完成"上）', () => {
+    const events = [
+      { type: 'turn/start', data: { turn: 4 } },
+      { type: 'turn/end', data: { turn: 4, reason: { kind: 'completed' } } },
+      { type: 'session/end-seed', data: {} },
+    ]
+    expect(detectInterruptedEnd(events)).toBeNull()
+  })
+
+  it('🔴 反向钉：error ⇒ 不命中（错误轮次**有**收尾，不是"停在这里等人续"）', () => {
+    const events = [
+      { type: 'turn/start', data: { turn: 4 } },
+      { type: 'turn/end', data: { turn: 4, reason: { kind: 'error', error: { message: 'x' } } } },
+    ]
+    expect(detectInterruptedEnd(events)).toBeNull()
+  })
+
+  it('🔴 反向钉：aborted 之后又有新 turn/start ⇒ 不命中（已被接续）', () => {
+    const events = [
+      { type: 'turn/start', data: { turn: 8 } },
+      { type: 'turn/end', data: { turn: 8, reason: { kind: 'aborted', reason: { kind: 'user' } } } },
+      { type: 'turn/start', data: { turn: 9 } },
+    ]
+    expect(detectInterruptedEnd(events)).toBeNull()
+  })
+
+  /**
+   * ⚠️ **已知边界（刻意不纳入，写成用例以免后人"顺手补上"）**：
+   * 末条是 `turn/start` 后再无任何事件的"开轮未闭合"形态 **不命中** ——
+   * 因为它与「进程正活着、这一轮正在跑」在日志读数上**不可分**，纳入会误唤醒在跑的会话。
+   */
+  it('⚠️ 已知边界：有 turn/start 但完全没有 turn/end ⇒ 不命中（与"正在跑"不可分）', () => {
+    const events = [
+      { type: 'turn/start', data: { turn: 30 } },
+      { type: 'step/start', data: { turn: 30, step: 1 } },
+    ]
+    expect(detectInterruptedEnd(events)).toBeNull()
+  })
+
   it('🔴 曾经 interrupted 但之后又有新事件 ⇒ 不命中（已恢复，不得当待续）', () => {
     const events = [
       ...turnEvents(5, 'interrupted'),
@@ -162,6 +238,25 @@ describe('scanInterruptedSessions（真日志 + 多帧）', () => {
     expect(r.sessions).toEqual([])
     expect(r.scanned).toBe(1)
     expect(r.skipped).toBe(1)
+  })
+
+  /**
+   * 🔴 端到端（真 zstd 多帧 ⇒ 走 `readTailEvents` 真解析路径）：
+   * `aborted` 形态必须被扫出来。这条与纯判定层的正控**分工不同** ——
+   * 纯判定层证明"算对了"，这条证明"真的从盘上读到了"。
+   */
+  it('🔴 aborted 结尾的会话（重启打断）能被扫出，且带出轮次号', () => {
+    writeSession('session-aborted', [
+      { type: 'turn/start', seq: 1, time: 1000, data: { turn: 54 } },
+      {
+        type: 'turn/end', seq: 2, time: 1002,
+        data: { turn: 54, reason: { kind: 'aborted', reason: { kind: 'disposed' } } },
+      },
+      { type: 'session/end-seed', seq: 3, time: 1003, data: {} },
+    ])
+    const r = scanInterruptedSessions(dir)
+    expect(r.sessions.map((s) => s.sessionId)).toEqual(['session-aborted'])
+    expect(r.sessions[0]?.turn).toBe(54)
   })
 
   it('无日志文件的目录被忽略（不算 scanned）', () => {

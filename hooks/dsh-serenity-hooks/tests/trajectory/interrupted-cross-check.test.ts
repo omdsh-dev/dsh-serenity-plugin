@@ -234,14 +234,51 @@ describe('判据归属：ACC 判「有没有待恢复的会话」／守护程序
     expect(wake, '缺 ticks 时不该醒（fail-closed）').toBe(false)
   })
 
-  /** 🔴 护栏（与拍数无关）：本轨迹自己在跑 ⇒ 不自我唤醒 */
-  it('🔴 护栏：本轨迹正在跑 ⇒ 不自我唤醒（即便正在唤醒窗口内）', () => {
+  /**
+   * 🔴🔴 **2026-10-24 改钉（D184：改判据必须能说出原前提被谁取代）**
+   *
+   * **原名**：`护栏：本轨迹正在跑 ⇒ 不自我唤醒（即便正在唤醒窗口内）`
+   * **原前提**：「在跑」= 这条轨迹正在干活 ⇒ 别自唤醒（免得自我打断）。
+   *
+   * 🔴 **原前提被什么取代**（guard 2026-10-24 实测 + 源码坐标）：
+   * 宿主**重启后会重发 `agent/created`** ⇒ `cro/turns.ts` 的 `markTurnRunning` 又被打上，
+   * 而那一轮**早已随旧进程死掉** ⇒ `agent/turn-stopping` **永不到** ⇒ 标记活到 30min TTL。
+   * ⇒ 那个「在跑」信号在重启后**只证明"载体存在过"，不证明"正在干活"**。
+   * ⇒ 拿它否决 ⇒ **守卫在重启后恰好聋 30 分钟**（owner 看到的"又"就是这个）。
+   *
+   * 🔴 **代价不对称**（guard 的判据，我方同意）：
+   * 误否决 = 聋 30 分钟 ｜ 误唤醒 = 多醒一次（权威判据复读幂等 ⇒ 实测良性）。
+   * ⇒ **观测量 ≠ 判据**：`running` 只能记进判定流水与提示词，**不得否决窗口内的唤起**。
+   *
+   * ⚠️ **这条用例必须留着**（哪怕它现在钉的是**反向**命题）——
+   * 否则有人把护栏加回来 ⇒ 又一次聋 30 分钟，**而没有任何一条用例会红**。
+   *
+   * @see 现在的行为：窗口内在跑 ⇒ **仍然醒**（跑信号不否决）
+   */
+  it('🔴 在跑信号**不得**否决刚启动窗口内的唤起（重启后 running 只证明"载体存在过"）', () => {
     const raw = runWithLog(LOG_INTERRUPTED_TAIL, {
       scheduling: { scheduler: { ticks: 1 } },
       binding: { liveSessionIds: ['sess-x'], runningSessionIds: ['sess-x'] },
     })
     const wake = parseWake(raw)
     expect(wake, 'CRO 没有产出可解析的决策').not.toBeNull()
-    expect(wake, '自己正在跑时不该自我唤醒').toBe(false)
+    expect(
+      wake,
+      '窗口内被在跑信号否决了 ⇒ 宿主重启后会重发 agent/created ⇒ 守卫将聋 30 分钟',
+    ).toBe(true)
+  })
+
+  /**
+   * ⛔ **与上一条成对的反向钉**：放宽"在跑不否决"**只能是窗口内**，
+   * 不许把窗口外也一起放开 —— 那会让它每拍都醒（退化成噪声源）。
+   */
+  it('🔴 反向钉：窗口**外**＋在跑信号 ⇒ 仍然不醒（放宽不得越出窗口）', () => {
+    const raw = runWithLog(LOG_INTERRUPTED_TAIL, {
+      scheduling: { scheduler: { ticks: 3 } },
+      binding: { liveSessionIds: ['sess-x'], runningSessionIds: ['sess-x'] },
+    })
+    const wake = parseWake(raw)
+    expect(wake, 'CRO 没有产出可解析的决策').not.toBeNull()
+    expect(wake, '过了窗口还在跑 ⇒ 不该醒').toBe(false)
   })
 })

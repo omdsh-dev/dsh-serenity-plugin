@@ -17,9 +17,13 @@
  *
  * ## 判据（三条同时成立，缺一不可）
  *
- * 1. 日志里**最后一条 `turn/end`** 的 `reason.kind === 'interrupted'`；
+ * 1. 日志里**最后一条 `turn/end`** 的 `reason.kind` ∈ {@link UNFINISHED_KINDS}
+ *    （= `interrupted` 崩溃补收尾 ／ `aborted` 正常终止，两者都是"这一轮没收完"）；
  * 2. 该 `turn/end` **之后没有新的 `turn/start`**（否则已被后续轮次接续）；
  * 3. ⛔ **不要求**末条是 `session/end-seed`（2026-10-23 放宽，原因见 {@link detectInterruptedEnd}）。
+ *
+ * 🔴 **2026-10-24 补入 `aborted`**：修前只认 `interrupted` ⇒「被正常终止」整类漏扫
+ * （发布重启／换宿主最常见的形态）。判据问的是「这一轮收完了吗」，**不是"进程死得惨不惨"**。
  *
  * ⚠️ **为什么不能只看"存在过 interrupted"**：一个长会话历史上可能中断几十次
  * （本容器实测单会话 33 次）。只看"曾经中断"会把早已恢复的会话全部当成待续 ⇒ 灾难。
@@ -176,39 +180,60 @@ function readTailEvents(logPath: string, want: number): SessionEvent[] {
 }
 
 /**
- * 判定一组尾部事件是否「以 interrupted 结尾」。
+ * 判定一组尾部事件是否「以未完成的轮次结尾」。
  * 不命中 → null。
  *
- * ## 🔴 2026-10-23 判据放宽（owner 实测：「不是挂在工具调用上的，也要能被 interrupted 筛选到并唤醒」）
+ * ## 🔴🔴 2026-10-24 判据放宽（owner 报障：「有的会话在重启时不是崩溃的就扫不到，还是没修好」）
  *
- * ### 原判据（v1.87.4 起）为什么漏
- * 原来只认 **末条事件 = `session/end-seed`**。实测（本机 3337 条会话全扫）：
- *   · 末轮 `turn/end[interrupted]` 的会话 **26** 条；
- *   · 其中满足原判据的只有 **24** 条 ⇒ **漏 2 条**，形态逐字为：
- *     `… turn/end[interrupted] -> session/end-seed -> agent/inbox/spliced -> agent/inbox/spliced`
- *   ⇒ 重启后宿主把这**两条**追加在 end-seed 之后（它们是"恢复时把待办消息重新塞进收件箱"），
- *     于是"末条必须 end-seed"这条**在恢复动作发生之后就恒不成立**。
- *   ⚠️ 讽刺的是：**正是那些被恢复过、又再次被打断的会话**最容易长成这样
- *     ⇒ 原判据恰好对"反复中断"的会话失明，而它们才是最需要守护的。
+ * ### 漏的是什么（宿主源码实读，非推测）
  *
- * ### 新判据（三条，缺一不可）
- * 1. 日志里**最后一条 `turn/end`** 的 `reason.kind === 'interrupted'`；
- * 2. 该 `turn/end` **之后没有新的 `turn/start`**（否则说明它已被后续轮次接续）；
- * 3. ⛔ **不再要求末条是 `end-seed`**。
+ * 宿主只有**两条**会写出「轮次没收完」的 `turn/end`，而它们的 `kind` **不是同一个词**：
  *
- * ### 为什么不改成"末条必须是某个白名单"
- * 那就是原缺陷换个白名单再犯一次（`agent/inbox/spliced` 之外还会有别的）。
- * **判据要问的是"最后一轮的结束原因是什么、之后有没有新轮开始"**，
- * 而不是"日志最后一个 token 长什么样"——后者是**载体形态**，前者是**状态**。
+ * | 形态 | 写谁 | `reason.kind` | 修前是否命中 |
+ * |---|---|---|---|
+ * | 进程**崩溃**／被强杀，下一轮 resume 时补收尾 | `interruptedTurnClosers()` → `openTurnClosers(events,{kind:'interrupted'})` | **`interrupted`** | ✅ |
+ * | 进程**正常退出**（`restart-web` 的 SIGTERM、`agent/disposed`、用户中断） | 驱动 catch 里 `abortedCancelCause(signal)` | **`aborted`** ＋ 内层 `reason:{kind:'user'\|'parent'\|'disposed'\|'hook'}` | ❌ **漏** |
+ *
+ * ⇒ 修前只认 `interrupted` ⇒ **「被正常终止」这一大类全部漏掉**，而它恰恰是
+ * **发布重启／换宿主** 最常见的形态（比崩溃常见得多）。
+ *
+ * 🔴 **这两条是同一个状态的两种成因，不是"一个对一个不对"**：
+ * 判据问的是「**这一轮有没有收完**」，不是「进程死得惨不惨」。
+ * 拿死法当判据 ⇒ 换一种死法就漏一批（这正是 owner 反复看到的"还是没修好"）。
+ *
+ * ### 为什么不能只加 `aborted` 就完事
+ * `aborted.reason.kind` 里还可能有 `hook`（宿主主动 hook 取消）——它同属"没跑完"。
+ * ⇒ 本判据**只看外层 `kind`**，理由：外层已经回答了"这一轮收完了吗"，
+ *   内层回答的是"谁让它停的"，**那是另一个问题**，混进来会让判据随"谁取消的"漂移。
+ *
+ * ### ⛔ 刻意**不**纳入的形态（保守边界，写明理由）
+ * - `error`：本轮**收完了**（宿主记了错误收尾），它不是"停在这里等人续"；
+ * - 完全没有 `turn/end` 的开轮（例如日志末尾是 `turn/start` 后再无事件）：
+ *   那**也可能是"进程正活着、这一轮正在跑"**，与真中断在读数上不可分
+ *   ⇒ 纳入会误唤醒在跑的会话。⚠️ 这是**已知边界**，不是遗漏。
  *
  * ### 为什么不会误报"曾经中断但已恢复"
  * 恢复一定伴随 `turn/start`（新一轮）或新的 `turn/end`（`completed` 等）⇒ 判据 1／2 各自挡住。
- * 实测该放宽**不新增误报**：原 24 条全含于新判据（`curOnly = 0`），新增 2 条全是真漏。
+ */
+/**
+ * 「这一轮没跑完」的 `turn/end.reason.kind` 取值域。
+ *
+ * 🔴🔴 **2026-10-24（owner 报障）**：原判据只认 `'interrupted'` 一个词 ⇒
+ * **「被正常终止」整类漏扫**。两个值对应的形态见 {@link detectInterruptedEnd} 的头注。
+ *
+ * ⚠️ **这是判据的唯一取值点** —— 别在别处再写一份字面量（两份会漂）。
+ */
+const UNFINISHED_KINDS: ReadonlySet<string> = new Set(['interrupted', 'aborted'])
+
+/**
+ * 命中判定。
+ *
+ * @returns 命中时给出被中断的轮次与"可能有副作用"的工具名；不命中 null
  */
 export function detectInterruptedEnd(events: SessionEvent[]): { turn: number | null; pendingTools: string[] } | null {
   if (events.length === 0) return null
 
-  // 🔴 判据 1／2：找**最后一条** turn/end，要求它是 interrupted **且其后没有新的 turn/start**。
+  // 🔴 判据 1／2：找**最后一条** turn/end，要求它属于「没跑完」的取值域，且其后没有新的 turn/start。
   //    ⛔ 不要退回"末条必须 end-seed"：那是载体形态判据，被恢复动作打破（见上方缺陷说明）。
   let idx = -1
   for (let i = events.length - 1; i >= 0; i--) {
@@ -219,13 +244,14 @@ export function detectInterruptedEnd(events: SessionEvent[]): { turn: number | n
   }
   if (idx < 0) return null
   const turnEnd = events[idx]
-  if (turnEnd?.data?.reason?.kind !== 'interrupted') return null
+  const kind = turnEnd?.data?.reason?.kind
+  if (typeof kind !== 'string' || !UNFINISHED_KINDS.has(kind)) return null
   // 之后若又开了新轮 ⇒ 已被接续，不是"停在这里"
   for (let i = idx + 1; i < events.length; i++) {
     if (events[i]?.type === 'turn/start') return null
   }
 
-  const turn = typeof turnEnd.data?.turn === 'number' ? turnEnd.data.turn : null
+  const turn = typeof turnEnd?.data?.turn === 'number' ? turnEnd.data.turn : null
   return { turn, pendingTools: findPendingTools(events, turn) }
 }
 

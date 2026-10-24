@@ -144,7 +144,7 @@ function renderInterruptedScan(input: {
 }): string {
   const { projectDir, lookbackHours, scan } = input
   const lines: string[] = []
-  lines.push(`═══ 以 interrupted 结尾的 dsh 会话（回看 ${lookbackHours}h）═══`)
+  lines.push(`═══ 末轮未跑完的 dsh 会话（回看 ${lookbackHours}h）═══`)
   lines.push(`  扫描域: ${projectDir}`)
   lines.push(
     `  检查 ${scan.scanned} 个 · 命中 ${scan.sessions.length} · 跳过 ${scan.skipped}` +
@@ -153,7 +153,7 @@ function renderInterruptedScan(input: {
 
   if (scan.sessions.length === 0) {
     lines.push('')
-    lines.push('✓ 没有会话以 interrupted 结尾 —— 无需处理。')
+    lines.push('✓ 没有末轮未跑完的会话 —— 无需处理。')
     return lines.join('\n')
   }
 
@@ -168,7 +168,9 @@ function renderInterruptedScan(input: {
   }
 
   lines.push('')
-  lines.push('判据: 日志末条 = session/end-seed，且其前最近的 turn/end 的 reason.kind = interrupted。')
+  lines.push('判据: 日志末条 `turn/end` 的 `reason.kind` ∈ {interrupted, aborted}，且其后没有新的 turn/start。')
+  lines.push('      interrupted = 进程崩溃后被 resume 补收尾 ／ aborted = 被正常终止（重启、销毁、用户中断）。')
+  lines.push('      两者都表示「这一轮没跑完」，都会被收进来。')
   lines.push('🔴 本动作**只读** —— 是否续跑、续哪条、几点续，由调用方（你的认知轨迹）决定。')
   lines.push('⚠️ 未完成的工具调用「副作用未知」≠「没执行」：它们可能已写文件 / 已发消息。')
   lines.push('   续跑前应先核对副作用，而不是把那一轮整段重放。')
@@ -205,7 +207,7 @@ function renderContinueResult(input: {
 
   if (scan.sessions.length === 0) {
     lines.push('')
-    lines.push('✓ 没有会话以 interrupted 结尾 —— 无需续跑。')
+    lines.push('✓ 没有末轮未跑完的会话 —— 无需续跑。')
     return lines.join('\n')
   }
 
@@ -417,7 +419,7 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
     'list (inventory + stats) / show (read one SESSION.md) / create (make a NEW trajectory) / use (bind THIS conversation) / rebuild (clear-and-rebuild THIS conversation in place) / archive (move a trajectory out of the active list; one-way, never overwrites).',
     '(B) DELIVERY — sends ONE message to ANOTHER trajectory; your own binding is unchanged: send-now (right now) / send-later (one future instant).',
     '(C) REFERENCE — cro-guide: how to give a trajectory its own program that decides when it should be woken.',
-    '(D) INSPECTION — interrupted: list dsh sessions whose LAST turn ended with reason "interrupted" (the process died before that turn completed). PURE READ: no periodic scheduling, no auto-continue, no log mutation — deciding IF/WHEN/WHICH to resume belongs to the calling trajectory (this is the "entry point only" contract). The criterion is EXACTLY "ends with interrupted", NOT "was ever interrupted": one long session may have been interrupted dozens of times historically, and treating those as pending would resurrect sessions that already recovered. Each hit reports the turn number and the tool names that had a call but no result (best-effort — those side effects are UNKNOWN, so re-running them blindly is dangerous).',
+    '(D) INSPECTION — interrupted: list dsh sessions whose LAST turn did not finish — reason.kind is "interrupted" (process died; the host synthesised the closer on resume) OR "aborted" (terminated normally: restart, dispose, user cancel). Both mean "this turn did not complete"; picking only one misses an entire class. PURE READ: no periodic scheduling, no auto-continue, no log mutation — deciding IF/WHEN/WHICH to resume belongs to the calling trajectory (this is the "entry point only" contract). The criterion is EXACTLY "the last turn did not finish", NOT "was ever interrupted": one long session may have been interrupted dozens of times historically, and treating those as pending would resurrect sessions that already recovered. Each hit reports the turn number and the tool names that had a call but no result (best-effort — those side effects are UNKNOWN, so re-running them blindly is dangerous).',
     // ════ Tier 4 · 动力学与逻辑层（低压缩：选择规则 ＋ 边界情形）════
     'HOW TO CHOOSE (a rule, not a guess):',
     'not yet bound + starting new work ⇒ create (with no prior binding it activates immediately, so the new trajectory has a carrier at once).',
@@ -813,16 +815,16 @@ export function createCognitiveTrajectoryTool(ctx: Context): ReturnType<typeof d
       }
       case 'interrupted': {
         /**
-         * 以 `interrupted` 结尾的 dsh 会话（owner 2026-10-22 令：**只出入口**）。
+         * 以未完成轮次结尾的 dsh 会话（owner 2026-10-22 令：**只出入口**）。
          *
          * 🔴 **边界（owner 原话：「我们 ACC 不关心周期」）**：本动作**只回答**"此刻哪些会话
-         * 的最后一轮以 interrupted 结束"，**不判周期、不自动续跑、不改日志**。
+         * 的最后一轮没跑完"，**不判周期、不自动续跑、不改日志**。
          * 何时扫、续谁、怎么续 = 调用方（CCC 的认知轨迹）的事。
          *
          * 🔴 **为什么不是"曾经中断过"**：长会话历史上可中断几十次（实测单会话 33 次）；
-         * 按"曾经"判会把早已恢复的会话全部当成待续 ⇒ 灾难。判据在
-         * `trajectory/interrupted.ts` 的 `detectInterruptedEnd`：**末条 = end-seed
-         * 且其前最近的 turn/end 是 interrupted**。
+         * 按"曾经"判会把早已恢复的会话全部当成待续 ⇒ 灾难。
+         * 🔴 **判据只在一处**：`trajectory/interrupted.ts` 的 `detectInterruptedEnd`
+         * （⛔ 别在此处复述取值域 —— 2026-10-24 就是这份复述漏掉了 `aborted`）。
          *
          * 🔴 **正在跑的会话要排除**：live 会话不该被判成"待续"（它正在跑，不是中断）。
          */
