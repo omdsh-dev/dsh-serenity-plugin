@@ -135,12 +135,19 @@ describe('guards: decideGuard 纯决策', () => {
     expect(decideGuard(base({ toolName: 'container_fs', action: 'info', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal' })).kind).toBe('allow')
   })
 
-  it('container_fs 写子命令（mkdir/rm/mv/cp/touch/append）→ 黑名单仍拦', () => {
-    for (const action of ['mkdir', 'rm', 'mv', 'cp', 'touch', 'append']) {
+  it('container_fs 写子命令（mkdir/rm/mv/cp/touch）→ 黑名单仍拦', () => {
+    for (const action of ['mkdir', 'rm', 'mv', 'cp', 'touch']) {
       const d = decideGuard(base({ toolName: 'container_fs', action, blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal/x' }))
       expect(d.kind).toBe('deny')
       expect(d.deny).toContain('blacklist')
     }
+  })
+
+  it('🔴 append 退役后**不再**是写类子命令（它现在根本不可执行 ⇒ 不必也不该留在写清单里）', () => {
+    // 判据：写清单里没有 append —— 与 service.ts 的 CC_FS_ACTIONS 同步
+    //   若哪天有人"顺手"把 append 加回写清单而没加回动作表，本用例会变红。
+    const d = decideGuard(base({ toolName: 'container_fs', action: 'append', blacklist: rules('REPOSITORIES/'), pathArg: 'REPOSITORIES/arsenal/x' }))
+    expect(d.kind).toBe('allow')
   })
 
   it('container_fs 无 action（参数缺失）→ 不按写类拦截（保守 allow，越界仍拦）', () => {
@@ -723,7 +730,7 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: aggRel })).kind).toBe('deny')
     expect(decideGuard(base({ root: dir, toolName: 'edit', pathArg: aggRel })).kind).toBe('deny')
     expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'touch', pathArg: aggRel })).kind).toBe('deny')
-    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'append', pathArg: aggRel })).kind).toBe('deny')
+    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'mv', pathArg: aggRel })).kind).toBe('deny')
   })
 
   it('root 级 mech-registry.json 写 → allow（review P1：废弃形态不再保护——永不被读的文件保护=死锁，可删可迁移）', () => {
@@ -763,7 +770,6 @@ describe('guards: MSM 注册表写保护（需求⑤b——写 deny 读 allow，
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: sibling })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'edit', pathArg: sibling })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'touch', pathArg: sibling })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'append', pathArg: sibling })).kind).toBe('allow')
     expect(decideGuard(base({ root: dir, toolName: 'container_fs', action: 'rm', pathArg: sibling })).kind).toBe('allow')
     // 子树深层（references/sub/x.md）同样放行——只目录节点本身受保护
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: '.opencode/skills/test/references/sub/x.md' })).kind).toBe('allow')

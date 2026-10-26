@@ -6,7 +6,13 @@
  *   - cp：目录需 recursive；dst 已存在报错；自动建父目录
  *   - mv：dst 已存在报错；自动建父目录
  *   - list/tree/exists/info/find：输出结构与 osp 一致（JSON 元数据 / 嵌套树 / glob+fuzzy 搜索）
- *   - touch：存在更新 mtime、不存在创建（自动建父目录）；append：自动建父目录 + 返回字节数
+ *   - touch：存在更新 mtime、不存在创建（自动建父目录）
+ *   - 🔴 **`append` 已于 v1.101.0 退役**（owner 2026-10-26 令「砍掉 container_fs 的 append」）：
+ *     它存在的唯一理由曾是"不读全文的追加"，但实测该用途几乎没人走（SESSION.md 追加
+ *     7,291 次里 append 只有 74 次，占 1.0%）⇒ 留着一个**绕过 fs-observation 锁**的
+ *     写通道，收益不足以抵它带来的规则面（写类动作清单、写白名单、两处工具描述都要维护它）。
+ *     ⚠️ 传 `action:'append'` 现在得到 `PARAMETER_INVALID_VALUE` 并列出合法动作 —— **响亮失败**，
+ *     不是静默忽略。
  * 保留 dsp 增强：win32 reveal 用 spawn+unref（explorer GUI 进程退出码不可靠，fire-and-forget）。
  */
 
@@ -18,7 +24,6 @@ import {
   renameSync,
   cpSync,
   writeFileSync,
-  appendFileSync,
   readdirSync,
   unlinkSync,
   rmdirSync,
@@ -46,14 +51,13 @@ type CcFsAction =
   | 'mv'
   | 'cp'
   | 'touch'
-  | 'append'
   | 'reveal'
   | 'info'
   | 'find'
 
 export const CC_FS_ACTIONS: readonly CcFsAction[] = [
   'root', 'resolve', 'exists', 'list', 'tree', 'relative',
-  'mkdir', 'rm', 'mv', 'cp', 'touch', 'append', 'reveal', 'info', 'find',
+  'mkdir', 'rm', 'mv', 'cp', 'touch', 'reveal', 'info', 'find',
 ]
 
 export interface CcFsArgs {
@@ -399,15 +403,6 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       writeFileSync(absPath, '', 'utf-8')
       return `created empty file: ${args.path}`
     }
-    case 'append': {
-      if (!args.path || args.content === undefined) throw new Error('append requires path + content')
-      const absPath = validateWritePath(root, args.path)
-      const parentDir = dirname(absPath)
-      if (!existsSync(parentDir)) mkdirSync(parentDir, { recursive: true })
-      const content = args.content
-      appendFileSync(absPath, content, 'utf-8')
-      return `appended ${Buffer.byteLength(content, 'utf8')} bytes to ${args.path}`
-    }
     case 'reveal': {
       if (!args.path) throw new Error('reveal requires path')
       const absPath = resolveInside(root, args.path)
@@ -515,7 +510,12 @@ export function runCcFs(root: string, args: CcFsArgs): CcFsResult {
       return { path: absPath, pattern, matches, count: matches.length }
     }
     default:
-      throw new Error(`Unknown action: ${a as string}`)
+      // 🔴 响亮失败并**列出合法动作**：v1.101.0 起 `append` 退役，传它就会落到这里。
+      //    只报"Unknown action"不告诉人该用什么 ⇒ 下一个 agent 会以为工具坏了。
+      throw new Error(
+        `Unknown action: ${a as string}. Valid actions: ${CC_FS_ACTIONS.join('/')}` +
+          (a === 'append' ? '（`append` 已于 v1.101.0 退役 —— 改用 edit 或 write）' : ''),
+      )
   }
 }
 

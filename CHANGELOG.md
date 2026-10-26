@@ -1,3 +1,70 @@
+## v1.101.0 — 2026-10-26（**砍掉 `container_fs` 的 `append` 子命令**）
+
+**来源**：owner 令 ——「**我要求什么都不动，只是砍掉 container_fs 的 append**」。
+
+---
+
+### 一、为什么砍（不是"没人用"这么简单）
+
+起因是**成本调研**。`dsh-session stats` 显示 SESSION.md 是全容器最热的目标：
+`edit` 16,554 次里 7,289 次打在 SESSION.md（44%），`read` 11,484 次里 2,971 次（26%），
+`grep` 7,661 次里 1,551 次（20%）。
+
+沿这条线查到一个假设：**append 能免掉「为拿 `old_string` 锚点而全文读」**。
+但把 7,291 次 edit 按 `old_string`/`new_string` 的**结构形状**分类后，假设被推翻：
+
+| 形状 | 次数 | 占比 |
+|---|---|---|
+| arbitrary（任意手术） | 2,350 | 32.2% |
+| replace-line（单行替换） | 2,117 | 29.0% |
+| append-line（追加型） | 1,752 | 24.0% |
+| set-section（整段覆盖） | 938 | 12.9% |
+| add-table-row（加表行） | 130 | 1.8% |
+
+⇒ **可被机械追加表达的只有 24%**，61.3% 是真手术 —— 印证 owner 原话
+「**append 没有办法代替复杂编辑的情况**」。
+
+**同时量出**：`container_fs append` 在整个历史里只被**真正用掉 74 次**
+（对 SESSION.md 的 12,811 次写入中占 0.6%）。它存在的唯一理由（免全文读的追加）
+既已被上表否定，留着它就是**维护一个绕开 fs-observation 锁的写通道，换取 0.6% 的使用率**。
+
+⇒ **结论：SESSION.md 当普通文件对待，不动任何格式与工具；只砍 append。**
+
+### 二、改动面（7 处，逐条）
+
+| # | 文件 | 改动 |
+|---|---|---|
+| 1 | `tools/fs/service.ts` | 删 `case 'append'` 分支 ＋ 去掉 `appendFileSync` import |
+| 2 | `tools/fs/service.ts` | `CcFsAction` 联合类型与 `CC_FS_ACTIONS` 各去掉 `'append'`（15 → 14） |
+| 3 | `tools/fs/service.ts` | `default` 分支**改响亮**：列出合法动作 ＋ 传 `append` 时点名它已退役 |
+| 4 | `tools/fs/index.ts` | 工具描述 15 → 14 subcommands；`path` 参数说明去 append |
+| 5 | `tools/fs/index.ts` | `content` 参数说明改为 `Deprecated/ignored` |
+| 6 | `seams/guards.ts` | `CC_FS_WRITE_ACTIONS` 去 `append`（它不再是写类子命令） |
+| 7 | `seams/system-prompt.ts` | 工具清单 15 → 14 subcommands |
+
+🔴 **第 3 条是本次唯一"新增能力"**：旧 `default` 只报 `Unknown action: xxx`，
+不告诉人该用什么 ⇒ 下一个 agent 会以为工具坏了。现在它列出合法动作，并对 `append`
+逐字说明退役与替代（`edit` / `write`）。
+
+### 三、验收
+
+- **变异检验 M1**：把 `default` 改回只报 `Unknown action` ⇒ `fs-ops.test.ts` 与
+  `fs-ops-guards.test.ts` **各红 1 条，且红在 `append.*退役` 那一格**（精确变红 ⇒ 判据非空转）。
+- **退役判据三条**（`fs-ops.test.ts`）：① 拒绝并点名退役 ＋ 列出合法动作
+  ② 文件内容**未被改动**（不留半个副作用）③ 反向确证 `append` 不在 `CC_FS_ACTIONS`。
+- **守卫同步判据**（`guards.test.ts`）：`append` 现在**不再**被判为写类子命令 ——
+  若有人"顺手"把它加回写清单却没加回动作表，该用例会红。
+- 六项门禁：typecheck ／ typecheck-host ／ test ／ coverage ／ build ／ pack-check 全绿。
+
+### 四、已知影响与迁移
+
+- 传 `action:'append'` 现在得到 `Unknown action: append. Valid actions: …（`append` 已于 v1.101.0 退役 —— 改用 edit 或 write）`。
+- 该子命令在 CCC 侧**唯一**的实际使用点是 `.opencode` 的少量日志追加（74 次），
+  全部可改用 `edit`／`write`；容器内无自动化链路依赖它。
+- ⚠️ 历史 CHANGELOG 里"写类动作含 append"的表述**不改动**（D128：历史只保真，不回写）。
+
+---
+
 ## v1.100.0 — 2026-10-24（🔴🔴 **修复工具可见性：降级档把宿主工具整类丢掉 + 降级后永久不再重试**）
 
 **来源**：owner 报 ——「**这个工具老是在过程中变来变去的，有bug啊，要修**」。

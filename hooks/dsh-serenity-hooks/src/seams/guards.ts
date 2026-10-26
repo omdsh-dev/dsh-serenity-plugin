@@ -57,11 +57,12 @@ export interface GuardInput {
 }
 
 /** 写类工具名（黑名单/治理文件只拦这些；读工具只做路径越界检查——对齐 osp） */
-const WRITE_TOOLS = new Set(['write', 'edit', 'str_replace_editor', 'container_fs', 'bash', 'append', 'touch'])
+const WRITE_TOOLS = new Set(['write', 'edit', 'str_replace_editor', 'container_fs', 'bash', 'touch'])
 
-/** container_fs 的写类子命令（mkdir/rm/mv/cp/touch/append）；其余 9 子命令（root/resolve/exists/
- *  list/tree/relative/reveal/info/find）为只读——只读子命令不查黑名单（同 read 语义） */
-const CC_FS_WRITE_ACTIONS = new Set(['mkdir', 'rm', 'mv', 'cp', 'touch', 'append'])
+/** container_fs 的写类子命令（mkdir/rm/mv/cp/touch）；其余 9 子命令（root/resolve/exists/
+ *  list/tree/relative/reveal/info/find）为只读——只读子命令不查黑名单（同 read 语义）
+ *  🔴 `append` 已于 v1.101.0 退役（owner 2026-10-26），故不在此集合。 */
+const CC_FS_WRITE_ACTIONS = new Set(['mkdir', 'rm', 'mv', 'cp', 'touch'])
 
 /**
  * 凭据文件硬名单（数据面守卫，v1.26.3，S142 用户：localstore.json 需要在 read 工具的黑名单里）：

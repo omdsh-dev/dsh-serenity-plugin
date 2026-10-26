@@ -18,7 +18,7 @@ function renderText(value: unknown): ContentBlock[] {
 export const ccFsTool = defineTool({
   name: 'container_fs',
   description:
-    'Container filesystem operations (the CCC\'s hull — file operations confined to the container root; path escape blocked automatically). 15 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/append/reveal/info/find. reveal opens a path in the OS file manager (Linux xdg-open / macOS Finder / Windows Explorer). Complements read/write/edit (structural operations).',
+    'Container filesystem operations (the CCC\'s hull — file operations confined to the container root; path escape blocked automatically). 14 subcommands: root/resolve/exists/list/tree/relative/mkdir/rm/mv/cp/touch/reveal/info/find. reveal opens a path in the OS file manager (Linux xdg-open / macOS Finder / Windows Explorer). Complements read/write/edit (structural operations).',
   parameters: {
     action: {
       type: 'string',
@@ -26,11 +26,11 @@ export const ccFsTool = defineTool({
       required: true,
       description: 'Subcommand',
     },
-    path: { type: 'string', description: 'Primary path argument (single-path ops: resolve/exists/list/tree/relative/touch/append/info/rm)' },
+    path: { type: 'string', description: 'Primary path argument (single-path ops: resolve/exists/list/tree/relative/touch/info/rm)' },
     paths: { type: 'array', items: { type: 'string' }, description: 'Batch paths (mkdir/rm)' },
     src: { type: 'string', description: 'mv/cp source path' },
     dst: { type: 'string', description: 'mv/cp destination path' },
-    content: { type: 'string', description: 'append content' },
+    content: { type: 'string', description: 'Deprecated/ignored — the only consumer was `append`, retired in v1.101.0' },
     pattern: { type: 'string', description: 'find match (glob *? or case-insensitive substring)' },
     depth: { type: 'integer', description: 'tree max depth (1-10, default 3)' },
     dryRun: { type: 'boolean', description: 'rm/archive preview mode' },

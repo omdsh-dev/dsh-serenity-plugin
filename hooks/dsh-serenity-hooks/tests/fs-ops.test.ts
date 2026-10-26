@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { tmpdir, platform } from 'node:os'
@@ -92,10 +92,9 @@ describe('fs-ops: 读操作（对齐 osp spec）', () => {
 })
 
 describe('fs-ops: 写操作与守卫（对齐 osp spec）', () => {
-  it('mkdir/touch/append/mv/cp', () => {
+  it('mkdir/touch/mv/cp', () => {
     run('mkdir', { path: 'tmp/x' })
     run('touch', { path: 'tmp/x/t.txt' })
-    run('append', { path: 'tmp/x/t.txt', content: 'line1' })
     expect(existsSync(join(dir, 'tmp/x/t.txt'))).toBe(true)
 
     run('mv', { src: 'tmp/x/t.txt', dst: 'tmp/x/u.txt' })
@@ -103,6 +102,20 @@ describe('fs-ops: 写操作与守卫（对齐 osp spec）', () => {
 
     run('cp', { src: 'tmp/x/u.txt', dst: 'tmp/copy.txt' })
     expect(existsSync(join(dir, 'tmp/copy.txt'))).toBe(true)
+  })
+
+  it('🔴 append 已退役（v1.101.0）⇒ 响亮失败，不静默忽略', () => {
+    // 用 beforeEach 已建好的夹具文件（内容 'hello'）——不依赖前一个用例的产物。
+    //   ⚠️ 首版我写的路径依赖"上一个用例建过那个目录"，用例间不共享 ⇒ ENOENT。
+    //   🔴 也别在注释里写那条夹具的完整相对路径：`docs-ref-gate` 会把它当文档引用去查存在性。
+    const target = join('docs', 'nested', 'a.md')
+    // 判据 ①：拒绝，且错误里点名退役与合法动作（不是"无输出"、不是被当 touch 处理）
+    expect(() => run('append', { path: target, content: 'b' })).toThrow(/append.*退役/)
+    expect(() => run('append', { path: target, content: 'b' })).toThrow(/Valid actions:/)
+    // 判据 ②：文件内容**未被改动**——退役的功能不许留下半个副作用
+    expect(readFileSync(join(dir, target), 'utf-8')).toBe('hello')
+    // 判据 ③：反向确证 `append` 不在合法动作表里（与 service.ts 的 CC_FS_ACTIONS 同步）
+    expect(CC_FS_ACTIONS as readonly string[]).not.toContain('append')
   })
 
   it('rm dry-run 不删除', () => {
@@ -147,7 +160,7 @@ describe('fs-ops: 写操作与守卫（对齐 osp spec）', () => {
     // review P1-1（复验收窄）：references/ 内并置知识文档可正常写/删（只保护注册表文件 + 目录节点本身）
     const sibling = join(aggDir, 'msm-writing-standards.md')
     writeFileSync(sibling, 'doc')
-    expect(run('append', { path: '.opencode/skills/test/references/msm-writing-standards.md', content: ' more' })).toContain('appended')
+    expect(run('touch', { path: '.opencode/skills/test/references/msm-writing-standards.md' })).toContain('updated timestamp')
     expect(existsSync(sibling)).toBe(true)
     expect(run('rm', { path: '.opencode/skills/test/references/msm-writing-standards.md' })).toContain('[OK] deleted:')
     expect(existsSync(sibling)).toBe(false)

@@ -64,7 +64,8 @@ describe('fs-ops：守卫（缺参·不存在·未知动作）—— 响亮报�
     ['cp', { dst: 'x.md' }, /cp requires src \+ dst/],
     ['cp', { src: 'nope.md', dst: 'x.md' }, /cp: source not found/],
     ['touch', {}, /touch requires path/],
-    ['append', { path: 'x.txt' }, /append requires path \+ content/],
+    // 🔴 v1.101.0：append 退役 ⇒ 落到 default 分支，错误里必须点名它退役并列出合法动作
+    ['append' as CcFsArgs['action'], { path: 'x.txt' }, /append.*退役/],
     ['info', {}, /info requires path/],
     ['find', {}, /find requires pattern/],
     ['find', { path: 'nope', pattern: 'x' }, /find: path .* does not exist/],
@@ -113,8 +114,8 @@ describe('fs-ops：路径校验（绝对路径与 symlink）', () => {
     symlinkSync(out, join(dir, 'link'), 'dir')
     // 词法在根内（root/link/x.txt），但 realpath 落在根外
     expect(() => run('touch', { path: 'link/x.txt' })).toThrow(/resolves via symlink to .*outside serenity root/)
-    expect(() => run('append', { path: 'link/x.txt', content: 'more' })).toThrow(/resolves via symlink to/)
-    // 正控：根外那份内容**未被追加**（拒绝是有效的，不只是文案）
+    expect(() => run('write' as CcFsArgs['action'], { path: 'link/x.txt' })).toThrow(/Unknown action|resolves via symlink to/)
+    // 正控：根外那份内容**未被改动**（拒绝是有效的，不只是文案）
     expect(readFileSync(join(out, 'x.txt'), 'utf-8')).toBe('o')
   })
 
