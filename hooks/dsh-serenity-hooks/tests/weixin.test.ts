@@ -545,10 +545,13 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     questions: string[]
     /** agent 系统提示词段（v1.30.13：工作台纪律单一注入点断言用） */
     sections: Array<{ name: string; text: () => string }>
+    /** 🔴 v1.102.0：宿主 `agents.create` 实际收到的 opts（判「有没有传 agentOptions」的**真那一格**） */
+    createOpts: Array<Record<string, unknown>>
   } {
     let agent: { session: { id: string; events: unknown[] }; followup: (msg?: unknown) => void; interrupt?: () => void } | undefined
     const questions: string[] = []
     const sections: Array<{ name: string; text: () => string }> = []
+    const createOpts: Array<Record<string, unknown>> = []
     const makeAgent = (id: string, opts: { setup?: (c: unknown) => Promise<void> }) => {
       const built = {
         session: { id, events: [] as unknown[] },
@@ -577,6 +580,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       get?: (id: string) => unknown
     } = {
       create: async (opts: { sessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+        createOpts.push(opts as unknown as Record<string, unknown>)
         agent = makeAgent(opts.sessionId, opts)
         await opts.setup?.(agent as never)
         return { agent }
@@ -584,6 +588,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     }
     if (resumeMode === 'resume') {
       agents.resume = async (opts: { resumeSessionId: string; setup?: (c: unknown) => Promise<void> }) => {
+        createOpts.push(opts as unknown as Record<string, unknown>)
         agent = makeAgent(opts.resumeSessionId, opts)
         await opts.setup?.(agent as never)
         return { agent }
@@ -615,6 +620,7 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
       },
       questions,
       sections,
+      createOpts,
     }
   }
 
@@ -656,6 +662,34 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(sent.some((s) => s.text === '答案')).toBe(false)
     // 但它确实被追问了（否则"没发"就无从谈起）
     expect(ctx.questions.length).toBeGreaterThan(0)
+  })
+
+  it('🔴 v1.102.0 反向钉：IM 入口不再把 `cheap-worker.defaultModel` 塞给载体（未声明 model ⇒ 不传 agentOptions）', async () => {
+    // **修前真机形态**：真机 `weixin.routes` 只有两条、都没声明 `model`，
+    // 而 CCC 配了 `cheap-worker.defaultModel`（杂工模型）⇒ 入站建 agent 时被塞进去
+    // ⇒ **整条轨迹静默跑在杂工模型上**，与 `model-runtime.ts` 硬边界① 直接冲突。
+    //
+    // 判据打在**宿主真正收到的那一格**（`agents.create` 的 opts）上，不是打在内部变量上。
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
+      weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
+    }))
+    writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://ilinkai.weixin.qq.com' })
+    __setWeixinFetchForTest(async () => jsonResponse(200, { ret: 0 }))
+    const { handleIncoming } = await import('../src/im/bridge.js')
+    const ctx = fakeCtx('not-found')
+    await handleIncoming(ctx as never, dir, 'wechat-1', { token: 'tok', baseUrl: 'https://ilinkai.weixin.qq.com' }, {
+      from_user_id: 'u1@im.wechat',
+      context_token: 'ct1',
+      item_list: [{ type: 1, text_item: { text: '你好' } }],
+    })
+    // 前提自证：确实走到了建载体那一步（否则"没有 agentOptions"是空断言）
+    expect(ctx.createOpts.length, '必须真的建过载体，否则这条钉没有判别力').toBeGreaterThan(0)
+    expect(
+      ctx.createOpts[0],
+      '⛔ CCC 配了 cheap-worker.defaultModel 也不得变成载体的模型',
+    ).not.toHaveProperty('agentOptions')
+    expect(JSON.stringify(ctx.createOpts[0])).not.toContain('p/m')
   })
 
   it('🔴 D238：桥永不回发最终文本 + 每轮末尾注入机制标记（手动模式已是唯一路径）', async () => {

@@ -1,3 +1,70 @@
+## v1.102.0 — 2026-10-27（**修 IM 入口 model 静默回落：未声明 `model` 不再退到杂工模型**）
+
+**来源**：owner 报障 ——「**IM 进来的对话还是默认用 minimax 的模型**，找下原因然后改好」。
+
+---
+
+### 一、缺陷本体：`||` 把两种不同的"空"读成同一种
+
+`trajectory/session.ts` 里原本是：
+
+```ts
+const model = profile.model?.trim() || defaultModel || ''
+```
+
+而 `defaultModel` 的来源是 `im/inbound-event.ts` 里读的 `cheap-worker.defaultModel`。
+问题出在**上游已经把两种"空"合并成一种**：
+
+| 上游事实（`policy/profile.ts:212`） | 规范化为 | 到 `session.ts` 后旧代码读成 |
+|---|---|---|
+| `trajectory.json` 里**没写** `model` | `undefined` | 「要杂工模型」 |
+| `trajectory.json` 里写了 `model: ""` | `undefined` | 「要杂工模型」 |
+| 写了具体模型 | `'x/y'` | 用 `'x/y'` |
+
+⇒ **「使用者没表态」被当成了「使用者表态要用杂工模型」** —— 这就是 IM 入站两条路由
+静默跑在 minimax 上的机制。它没有任何日志、没有任何报错：因为从代码的角度看，
+每一步都"成功"了。
+
+**判据（可外推）**：见到任何 `x || fallback`，先问两个问题 ——
+① `x` 能有几种成因导致它为空？② 这些成因**是否都该**落到 fallback？
+本题里 `x` 只有一种"值形态"（空串/缺失），但成因有两种（未声明 / 显式声明空），
+且**未声明不该落到 fallback**（那是"用宿主默认"）⇒ `||` 用错了，要用 `??` 区分。
+
+### 二、修法：退役 `defaultModel` 形参（不是加判断）
+
+不选「保留形参、只在 `undefined` 时不回退」——那会留下一条**没人传、但可以传**的缝，
+下一个改代码的人仍可能把它接回去。直接**把缝拆掉**：
+
+- `session.ts`：签名 `(ctx, root, profile, defaultModel?, sessionId?)` → `(ctx, root, profile, sessionId?)`；
+  取值 `profile.model?.trim() || defaultModel || ''` → `profile.model?.trim() ?? ''`，
+  并就地写下 10 行理由注（指向 `model-runtime.ts:35` 硬边界①：未写 `model` ⇒ 不装这条缝）。
+- `im/inbound-event.ts`：删掉 `readCheapWorkerConfig(root)` 及其 import，
+  调用改为 `createTrajectoryAgent(ctx, root, effective, sessionId)`。
+
+**安全性证明（这是 owner 真正担心的那层）**：`createOrResumeAgent` 的三处调用点
+一律是 `...(model ? { agentOptions: splitModel(model) } : {})` ⇒ `model === ''` 的后果是
+**`agentOptions` 整个键不出现**，宿主用**自己**的默认模型。
+所以删掉回退**不会让任何轨迹「失去模型」**，只会让它回到"宿主默认"这个本就该有的状态。
+
+🔴 **修好 ≠ 配到目标模型**：修完之后 IM 入站两条路由跑在**宿主默认模型**上。
+那是不是 owner 想要的模型，是**另一个问题**；owner 已裁「暂不动配置」⇒ 本次**不动** `trajectory.json`。
+
+### 三、反向钉 ＋ 变异检验（钉住"不许再回退"）
+
+两处：`trajectory-session.test.ts`（单元层，断言 `expect(created[0]).not.toHaveProperty('agentOptions')`）
+与 `weixin.test.ts`（IM 集成层，断言实际递到 `agents.create` 的 opts 里不含杂工模型）。
+
+**变异检验做了两次，各自只红一条**（D222：钉只在自己被故意弄坏时才可信）：
+
+| 变异 | 结果 |
+|---|---|
+| `profile.model?.trim() \|\| 'MUTANT-fallback'` | 单元钉红：`expected { … } to not have property "agentOptions"`，`Received: { "model": "MUTANT-fallback", "provider": undefined }` |
+| `profile.model?.trim() \|\| 'p/m'` | IM 集成钉红：`Received: { "model": "m", "provider": "p" }` |
+
+两次变异均已还原为 `?? ''`，随后全绿。
+
+---
+
 ## v1.101.0 — 2026-10-26（**砍掉 `container_fs` 的 `append` 子命令**）
 
 **来源**：owner 令 ——「**我要求什么都不动，只是砍掉 container_fs 的 append**」。

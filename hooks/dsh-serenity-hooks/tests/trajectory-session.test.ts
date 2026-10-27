@@ -361,6 +361,20 @@ describe('trajectory-session: createTrajectoryAgent（preset 挂载 + 约束面�
     unregisterTrajectorySession(ref.sessionId)
   })
 
+  it('🔴 未声明 model ⇒ 不传 agentOptions（宿主用自己默认模型），⛔ 绝不回退杂工模型（v1.102.0）', async () => {
+    // 缺陷形态（修前）：`const model = profile.model?.trim() || defaultModel || ''`，
+    // 其中 `defaultModel` 是 IM 入口塞进来的 `cheap-worker.defaultModel`（杂工模型）
+    // ⇒ 没写 model 的轨迹被**静默降级**到杂工模型，与 `model-runtime.ts` 硬边界① 冲突。
+    //
+    // 判据打在**真正传给宿主的那一格**（`agents.create` 的 opts）上，不是打在内部变量上 ——
+    // "参数传对了 ≠ 效果达成了"。
+    const profile = profileOf('nomodel', 轨迹约束Json({ systemPrompt: '人格' }))
+    const { ctx, created } = recordingCtx()
+    const ref = await createTrajectoryAgent(ctx as never, root, profile)
+    expect(created[0], '未声明 model ⇒ ⛔ 不得出现 agentOptions 键').not.toHaveProperty('agentOptions')
+    unregisterTrajectorySession(ref.sessionId)
+  })
+
   it('基础提示词不抄工具/MSM 清单（第二真相源 = 模型自己的 schema 与 msm() 目录）', async () => {
     // ⚠️ 断言打在**真正注入的那段**上，不是打在 buildTrajectoryBasePrompt 的返回值上——
     //    否则这条用例只钉了纯函数，没钉"注入面真的是它"。
@@ -422,7 +436,7 @@ describe('trajectory-session: createTrajectoryAgent（preset 挂载 + 约束面�
     //    **工作台不会凭空多出一条轨迹**（旧机制整块删除的后果）——它就是 agent 自己那条。
     const profile = profileOf('nospace', 轨迹约束Json({ systemPrompt: '人格' }))
     const { ctx } = recordingCtx()
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'sess-fixed-nospace')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'sess-fixed-nospace')
     expect(activeTrajectoryDirs()).toEqual([profile.dirName])
     // 创建过程自带"会话 → 轨迹"登记 ⇒ 工作台随之可查，且指向的正是它自己（不靠任何开关）
     expect(trajectorySessionInfo(ref.sessionId)).toEqual({ trajectoryDirName: profile.dirName, ccc: root })
@@ -435,7 +449,7 @@ describe('trajectory-session: createTrajectoryAgent（preset 挂载 + 约束面�
     const dirName = make轨迹约束Session(root, 'sess-fixed-workspace', 'ws-role', 轨迹约束Json({ systemPrompt: '轨迹人格' }))
     const profile = profileFor(root, 'sess-fixed-workspace')!
     const { ctx, sections } = recordingCtx()
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'sess-fixed-workspace')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'sess-fixed-workspace')
     const base = sections.find((s) => s.name === 'serenity-轨迹约束')
     const ws = sections.find((s) => s.name === 'serenity-轨迹约束-workspace')
     expect(base?.text()).toContain('轨迹人格')
@@ -478,7 +492,7 @@ describe('trajectory-session: createTrajectoryAgent（preset 挂载 + 约束面�
       },
     }
     const profile = profileFor(root, 'sess-cccskills')!
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'sess-cccskills')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'sess-cccskills')
     // 轨迹约束 自己的段照旧在
     expect(sections.find((s) => s.name === 'serenity-轨迹约束')?.text()).toContain('轨迹人格')
     // 🔴 CCC 级 skill 供给也送达（复用同一 registerCognitiveTrajectorySkillSection，不另写一套）
@@ -543,7 +557,7 @@ describe('trajectory-session: 提示词热生效（文件 mtime / JSON 每轮 �
     //      它的热更入口是"改用 systemPromptFile"，见下一条。）
     const profile = profileOf('hot-json', 轨迹约束Json({ msms: ['m1'], tools: ['read'] }))
     const { ctx } = recordingCtx()
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'sess-hot-json')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'sess-hot-json')
     // 正控：创建时的约束面
     expect([...trajectoryConstraintToolWhitelist(root, ref.sessionId)!].sort()).toEqual(['msm', 'read'])
     expect(trajectoryConstraintMsmGate(root, ref.sessionId, 'exec', 'm2').reject, '白名单外').toBeDefined()
@@ -691,7 +705,7 @@ describe('trajectory-session: createTrajectoryAgent resume-or-create（v1.27.2 �
   it('固定 id + 磁盘已有持久化 log → resume（resumed=true，历史延续）', async () => {
     const profile = profileOf('resume-ok', 轨迹约束Json({ msms: ['x'] }))
     const ctx = fakeResumeCtx('success')
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'skiff-weixin-fixed-1')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'skiff-weixin-fixed-1')
     expect(ref.resumed).toBe(true)
     expect(ref.sessionId).toBe('skiff-weixin-fixed-1')
     expect(trajectorySessionInfo(ref.sessionId)?.trajectoryDirName).toBe(profile.dirName)
@@ -701,7 +715,7 @@ describe('trajectory-session: createTrajectoryAgent resume-or-create（v1.27.2 �
   it('固定 id + resume not-found（首次无持久化）→ 降级 create（resumed=false + 新对话语义）', async () => {
     const profile = profileOf('resume-new', 轨迹约束Json({ msms: ['x'] }))
     const ctx = fakeResumeCtx('not-found')
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'skiff-weixin-fixed-2')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'skiff-weixin-fixed-2')
     expect(ref.resumed).toBe(false)
     expect(ref.sessionId).toBe('skiff-weixin-fixed-2')
     expect(trajectorySessionInfo(ref.sessionId)?.trajectoryDirName).toBe(profile.dirName)
@@ -711,7 +725,7 @@ describe('trajectory-session: createTrajectoryAgent resume-or-create（v1.27.2 �
   it('固定 id + 会话已 live（重启后 DSH 恢复）→ live 复用，resume/create 均不调用（v1.27.3 修复）', async () => {
     const profile = profileOf('resume-live', 轨迹约束Json({ msms: ['x'] }))
     const ctx = fakeResumeCtx('live')
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'skiff-weixin-live-1')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'skiff-weixin-live-1')
     expect(ref.resumed).toBe(true) // 历史延续语义（非新对话）
     expect(ref.sessionId).toBe('skiff-weixin-live-1')
     // 不经过 resume/create（二者在此场景必抛错——live 会话唯一可行路径 = get 复用）
@@ -734,7 +748,7 @@ describe('trajectory-session: createTrajectoryAgent resume-or-create（v1.27.2 �
     // 内层 handle 造的空操作 dispose **不外传** ⇒ 调用方要 dispose 必须走 `ref.handle.dispose`。
     const profile = profileOf('resume-dispose', 轨迹约束Json({ msms: ['x'] }))
     const ctx = fakeResumeCtx('live')
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'skiff-weixin-live-1')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'skiff-weixin-live-1')
 
     // 正控：确认走的是 live 复用路径
     expect(ref.resumed).toBe(true)
@@ -759,7 +773,7 @@ describe('trajectory-session: createTrajectoryAgent resume-or-create（v1.27.2 �
     ;(ctx.agents as { resume: (o: { resumeSessionId: string }) => Promise<unknown> }).resume = async () => {
       throw new Error("Cannot read properties of undefined (reading 'ctx')")
     }
-    const ref = await createTrajectoryAgent(ctx as never, root, profile, undefined, 'skiff-weixin-fixed-3')
+    const ref = await createTrajectoryAgent(ctx as never, root, profile, 'skiff-weixin-fixed-3')
     expect(ref.resumed).toBe(false)
     expect(ref.sessionId).toBe('skiff-weixin-fixed-3')
     // 堆栈已打印（诊断定位）

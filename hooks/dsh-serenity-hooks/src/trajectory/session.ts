@@ -220,11 +220,17 @@ export async function createTrajectoryAgent(
   ctx: Context,
   root: string,
   profile: TrajectoryConstraint,
-  defaultModel?: string,
   sessionId?: string,
 ): Promise<TrajectoryAgentRef> {
   if (!ctx.agents) throw new Error('trajectory constraint: ctx.agents unavailable')
-  const model = profile.model?.trim() || defaultModel || ''
+  // 🔴 **`''` = 未声明模型 ⇒ 不传 `agentOptions` ⇒ 宿主用自己的默认模型**（v1.102.0）。
+  //    此前这里是 `profile.model?.trim() || defaultModel || ''`，而 `defaultModel` 是
+  //    IM 入口塞进来的 `cheap-worker.defaultModel`（杂工模型）⇒ **没声明 model 的轨迹会被
+  //    静默降级到杂工模型**，与 `model-runtime.ts` 第 35 行硬边界①
+  //    「⛔ 绝不回退 `cheap-worker.defaultModel`」直接冲突。
+  //    ⚠️ `policy/profile.ts` 已把「空串」与「缺失」归一为 `undefined` ⇒ 空串不会再出现；
+  //    即便出现，`createOrResumeAgent` 的 `...(model ? { agentOptions } : {})` 也会正确地"不传"。
+  const model = profile.model?.trim() ?? ''
   const id = (sessionId ?? `轨迹约束-${profile.code}-${randomUUID()}`) as SessionId
   const setup = async (agentCtx: Context) => {
     try {

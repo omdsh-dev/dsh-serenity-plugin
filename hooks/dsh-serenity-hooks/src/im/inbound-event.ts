@@ -33,7 +33,6 @@ import type { Context } from 'cordis'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { readCheapWorkerConfig } from '../kernel/ccc.js'
 import { appendHumanChannelAudit, planInboundRoute, type InboundRoutePlan } from './inbound.js'
 import { readSimpleSettings } from '../surface/settings.js'
 import { readWeixinSettings, weixinSessionIdForTrajectory, matchWeixinRoute, sanitizeFileName, weixinInboundDir } from './route.js'
@@ -352,7 +351,6 @@ export async function handleInboundEvent(
      */
     releaseLock = await acquireSessionLock(sessionId)
     const existing = getTrajectoryAgent(sessionId)
-    const hc = readCheapWorkerConfig(root)
     // 无 `trajectory-constraint.json` 的普通轨迹：不施加任何 轨迹约束 约束，用编码造一个最小面立提示词段。
     const effective: TrajectoryConstraint = profile ?? {
       dirName: trajectory,
@@ -364,7 +362,7 @@ export async function handleInboundEvent(
     }
     const ref = existing
       ? { agent: existing, sessionId, resumed: true }
-      : await createTrajectoryAgent(ctx, root, effective, hc?.defaultModel, sessionId)
+      : await createTrajectoryAgent(ctx, root, effective, sessionId)
 
     if (!ref.resumed) {
       // 真正首次（无持久化历史）→ 通知用户"新对话开始"；resume 不发
