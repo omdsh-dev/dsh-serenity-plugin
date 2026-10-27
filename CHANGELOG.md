@@ -1,3 +1,74 @@
+## v1.103.0 — 2026-10-27（**载体资格守卫：subagent 子会话不得成为认知轨迹载体**）
+
+**来源**：guard 报「有一条唤醒连续失败 18 次」，我独立取证后判定**是 ACC 侧缺陷**。
+
+---
+
+### 一、缺陷本体：「它还活着」≠「它能当载体」
+
+`trajectory/bound.ts` 的 `appendBound` 只有两条 header 守卫（`id` / `root`），**从不问 `origin`**
+⇒ 只要调用发生在一条 **subagent 子会话**里（执行 `use`，或子会话走 `rebuild`），
+那条子会话就被写成该轨迹的 `current.dsh_session_bind`。
+
+后果是**一整类**，不是孤例：
+
+| 环节 | 实测读数 |
+|---|---|
+| 现场 | `2026-10-26--crypto-research--虚拟货币研究/current.dsh_session_bind` → `753e3a32` |
+| 那条会话的真实元数据 | `"origin":"subagent","delegationDepth":1,"parentSession":"session-f323eff3-…"` |
+| 宿主反应 | `resolveAgent` 抛 `session/agent-busy: session "…" is owned by subagent routing` |
+| 表现 | 该轨迹**每一条**到点唤醒都投不出去，`attempts` 涨到 18/19，**没有退出条件** |
+| 存量规模 | 全容器 20 条轨迹绑定 ⇒ **2 条**指向 subagent 子会话（crypto-research ＋ desk-observer） |
+
+🔴 **为什么这是「挂在错的层」**：`trajectory/alive.ts` 那三条判据是 owner 2026-10-20 裁决的
+「**这条会话活不活**」（进程内 loaded ∨ 日志在且未归档）。子会话**确实活着**——
+按那套判据它完全合格。问题不在生死，在**投递权归谁**：子会话的消息投递权属于宿主
+subagent routing，ACC 的 `followup`/`steer` 到不了。
+⇒ **不许给 `alive.ts` 加第四维**（那会把「生死」与「资格」混成一个判据），
+载体资格必须在**写侧**单独挡。
+
+### 二、修法
+
+`BindWriteCode` 新增 `SESSION_IS_SUBAGENT`；`appendBound` 在 header 守卫之后、
+`claimBinding` 之前拦截，并且**必须出声**（D186：守卫可以拒绝，但不许不出声）——
+告警里指名三件：这是子会话、父会话 id 是谁、正确做法是「在**根会话**里 use」。
+
+### 三、反向钉 ＋ 变异检验
+
+- 反向钉：`subagent ⇒ r.ok === false` ＋ **槽位文件逐字节不存在**（判据打在磁盘上，不是打在返回值上）
+  ＋ 告警含 `SESSION_IS_SUBAGENT`/`subagent`/父会话 id/`use` 四条。
+- 正控：`origin` **缺失**（真机 18/20 条健康绑定正是这个形态）与 `origin` 为别的值 ⇒ **照常放行**。
+  这条防的是把守卫做成「必须有 origin」——那会让现存健康绑定全部失效。
+- 变异检验：把条件改成 `'MUTANT-not-subagent'` ⇒ **精确红在唯一那条反向钉**
+  （`expected true to be false`），还原后复绿（D222）。
+
+### 四、存量数据修复（写侧只挡未来，存量必须单独处理）
+
+一次性脚本受四条机械判据约束（缺省 dry-run，`--apply` 才写）：
+① 现绑定指向的会话 `origin === 'subagent'` ② 它有 `parentSession`
+③ 父会话 `origin !== 'subagent'`（父必须是根会话）④ 父会话 `header.id` 与 `parentSession` 同形。
+任一不满足 ⇒ **跳过并在输出里点名**，不猜。
+
+- dry-run 精确命中 2 条，两条的父会话都自证是根会话（`origin=null`）
+- `--apply` 后复扫：**subagent 载体 2/20 → 0/20**
+- 写盘用 tmp + rename 原子替换；原 id 记进 `repairedFrom`（可追）
+
+### 五、效应判据（回执不算，看只有成功才会产生的副作用）
+
+修完后 `w-20261027-2120-80ef`（at=21:40:01，目标 crypto-research）到期：
+会话日志里出现 `agent/inbox/spliced` ＋ `user/message` 两条，正文以
+`[认知轨迹唤醒] 到点（…id w-20261027-2120-80ef）` 开头，**id 逐字对上**。
+⇒ 同一条投递链路，修复前 `attempts=18` 全失败，修复后一次送达。
+
+🔴 **本轮我自己踩过一个坑，写进来给下一个人**：21:35 那条唤醒从注册表消失时，
+我第一反应判「投递成功后被清除」。**那是错的** —— 查日志发现是目标轨迹自己
+用 `edit` 直接改了 `wake-registry.json` 把那条删了。
+⇒ **「条目从注册表消失」至少有三个成因**：① 投递成功清除 ② 超窗判 missed 清除
+③ **有人直接编辑注册表**。用这个读数当判据前，必须先排除第 ③ 种。
+真正的判据是正文注入事件本身（第四节的取证方式）。
+
+---
+
 ## v1.102.0 — 2026-10-27（**修 IM 入口 model 静默回落：未声明 `model` 不再退到杂工模型**）
 
 **来源**：owner 报障 ——「**IM 进来的对话还是默认用 minimax 的模型**，找下原因然后改好」。

@@ -63,10 +63,10 @@ export type SessionBoundAction = 'activate' | 'switch' | 'create' | 'rebuild' | 
  * 从 dsh 会话对象取 `header.id` / `header.cwd`。
  * @returns 取不到 ⇒ `null`
  */
-function sessionHeader(session: unknown): { id?: string; cwd?: string } | null {
+function sessionHeader(session: unknown): { id?: string; cwd?: string; origin?: string; parentSession?: string } | null {
   const header = (session as { header?: unknown } | null | undefined)?.header
   if (!header || typeof header !== 'object') return null
-  return header as { id?: string; cwd?: string }
+  return header as { id?: string; cwd?: string; origin?: string; parentSession?: string }
 }
 
 /** 由会话对象定位 CCC 根（上溯 `.serenity`）；定位不到 ⇒ `null` */
@@ -256,6 +256,7 @@ export function pruneMissingBindings(_root: string, _isMissing: (sessionId: stri
  */
 export type BindWriteCode =
   | 'SESSION_HEADER_UNRESOLVED'
+  | 'SESSION_IS_SUBAGENT'
   | 'SESSION_TAKEN'
   | 'TRAJECTORY_OCCUPIED'
   | 'WRITE_FAILED'
@@ -326,6 +327,34 @@ export function appendBound(
       + ' 无 cwd 的会话（如某些程序性创建的载体）**不会**写绑定。'
     console.warn(`[serenity-hooks] ✗ 绑定未写入（SESSION_HEADER_UNRESOLVED）：${detail}`)
     return { ok: false, code: 'SESSION_HEADER_UNRESOLVED', detail }
+  }
+  // 🔴🔴 **载体资格守卫：subagent 子会话不得成为轨迹载体**（2026-10-27，v1.103.0）
+  //
+  // 现场（真机读数，不是推断）：`AGENT_SESSIONS/2026-10-26--crypto-research--虚拟货币研究`
+  // 的 `current.dsh_session_bind` 指向 `753e3a32`，而它的会话元数据逐字是
+  // `"origin":"subagent","delegationDepth":1,"parentSession":"session-f323eff3..."` ——
+  // **它是一条 subagent 子会话**，真载体是它的父会话 `session-f323eff3`。
+  // ⇒ 后果是**一整类**：宿主在 `resolveAgent` 上拒绝 `session/agent-busy`
+  // （`is owned by subagent routing`）⇒ 该轨迹的**每一条**唤醒都投不出去，
+  // 且**没有退出条件**（`attempts` 一路涨到 18，见 `w-20261027-1536-8f52`）。
+  //
+  // 为什么必须在**写侧**挡：读侧只能看见"日志在磁盘上 ⇒ 判活"（`alive.ts` 的三条判据
+  // 是 owner 给定的"活不活"，不该为这件事再加第四维）。**载体资格**是另一个问题 ——
+  // 「它还活着」≠「它能当载体」。子会话活着，但它的消息投递权归 subagent routing。
+  //
+  // 存量实测：CCC 内 20 条轨迹绑定里 **2 条**指向 subagent 子会话
+  // （crypto-research ＋ desk-observer）⇒ 不是孤例，是**一类**。
+  const header = sessionHeader(session)
+  if (header?.origin === 'subagent') {
+    const detail =
+      `会话 ${id} 是 **subagent 子会话**（header.origin="subagent"`
+      + `${header.parentSession ? `，parentSession=${header.parentSession}` : ''}），`
+      + `不能作为轨迹「${rec.dirName}」的载体 ⇒ current.dsh_session_bind **未被改写**。\n`
+      + '  原因：子会话的消息投递权归宿主 subagent routing，ACC 唤醒/投递会被宿主'
+      + '以 `session/agent-busy`（is owned by subagent routing）拒绝 ⇒ 该轨迹**每一条**到点唤醒都送不出去。\n'
+      + '  正确做法：在**根会话**（不是子会话）里执行 cognitive_trajectory use。'
+    console.warn(`[serenity-hooks] ✗ 绑定未写入（SESSION_IS_SUBAGENT）：${detail}`)
+    return { ok: false, code: 'SESSION_IS_SUBAGENT', detail }
   }
   const result = claimBinding(
     sessionsRoot(root),

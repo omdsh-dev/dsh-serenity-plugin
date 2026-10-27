@@ -157,6 +157,67 @@ describe('D172 · 归属写在轨迹目录自己的交代里', () => {
     warn.mockRestore()
   })
 
+  /**
+   * 🔴🔴 **载体资格守卫：subagent 子会话不得成为轨迹载体**（v1.103.0）
+   *
+   * ## 真机现场（不是推断，逐字可核）
+   *
+   * `2026-10-26--crypto-research--虚拟货币研究/current.dsh_session_bind` 的 `sessionId` = `753e3a32`，
+   * 而那条会话的元数据是 `"origin":"subagent","delegationDepth":1,
+   * "parentSession":"session-f323eff3-…"` ⇒ **子会话被写成了载体**，真载体是它的父会话。
+   *
+   * 后果是一整类：宿主在 `resolveAgent` 上拒绝
+   * `session/agent-busy: session "…" is owned by subagent routing`
+   * ⇒ 该轨迹**每一条**到点唤醒都投不出去，且**没有退出条件**
+   * （实测 `w-20261027-1536-8f52` 从 15:36 起连续失败 18 次）。
+   *
+   * 存量实测：CCC 内 20 条轨迹绑定里 **2 条**指向 subagent 子会话
+   * （crypto-research ＋ desk-observer）⇒ 是**一类**，不是孤例。
+   *
+   * ## 为什么是写侧守卫，而不是给 `alive.ts` 加第四维
+   *
+   * `alive.ts` 的三条判据是 owner 给定的「**活不活**」，子会话**确实活着**。
+   * 「它还活着」≠「它能当载体」—— 后者取决于**投递权归谁**，是另一个问题。
+   */
+  it('🔴 反向钉：subagent 子会话 ⇒ 拒绝写绑定（SESSION_IS_SUBAGENT，且必须出声）', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    mkTraj()
+    const sub = {
+      header: {
+        id: 'sub-1',
+        cwd: ccc,
+        origin: 'subagent',
+        parentSession: 'session-parent-1',
+      },
+    }
+    const r = appendBound(sub, 'activate', { dirName: DIR, mdPath: '/x/SESSION.md' })
+    // ① 拒绝（不是"静默成功"）
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.code).toBe('SESSION_IS_SUBAGENT')
+    // ② 槽位必须**逐字节未被改写**（判据打在文件上，不是打在返回值上 —— D144）
+    expect(existsSync(join(ccc, SESS, DIR, BIND_FILENAME))).toBe(false)
+    // ③ 必须出声，且指名「子会话」这个成因与父会话 id（否则排查者只会看到"投递失败"）
+    const all = warn.mock.calls.map((c) => String(c[0])).join('\n')
+    expect(all).toContain('SESSION_IS_SUBAGENT')
+    expect(all).toContain('subagent')
+    expect(all).toContain('session-parent-1')
+    // ④ 必须给出路（在根会话里 use），不能只说"不行"
+    expect(all).toContain('use')
+    warn.mockRestore()
+  })
+
+  it('🔴 正控：根会话（origin 缺失 / 非 subagent）照常写得进去', () => {
+    mkTraj()
+    // ① origin 完全缺失（真机 18/20 条健康绑定就是这个形态）
+    expect(appendBound(makeSession('sess-root-1'), 'activate', { dirName: DIR, mdPath: '/x' }).ok).toBe(true)
+    expect(declOf()?.sessionId).toBe('sess-root-1')
+    // ② origin 是别的值（不是 subagent）⇒ 也放行，**别把守卫做成"必须有 origin"**
+    mkTraj(`${DIR}-b`)
+    const other = { header: { id: 'sess-root-2', cwd: ccc, origin: 'user' }, snapshotEvents: () => [] }
+    expect(appendBound(other, 'activate', { dirName: `${DIR}-b`, mdPath: '/x' }).ok).toBe(true)
+    expect(declOf(`${DIR}-b`)?.sessionId).toBe('sess-root-2')
+  })
+
   it('readLastBound 正查：会话 → 它承载的轨迹', () => {
     mkTraj()
     appendBound(makeSession('sess-9'), 'activate', { dirName: DIR, mdPath: '/x/SESSION.md' })
