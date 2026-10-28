@@ -9,9 +9,9 @@
  * 面板承载两件事：
  *  - **safe-mode 快捷开关**（2026-10-22 owner：「放到 CCC 面板里吧，方便些」）——
  *    位于 popover 的「运行环境」行首，写通道 = 同源 `POST /serenity/status`（需 WebUI 专属头）
- *  - 状态展示：CCC / CheapWorker 模型 / 守卫 / 活跃轨迹 / 技能
+ *  - 状态展示：CCC / 守卫 / 活跃轨迹 / 技能
  * 账号密码等 plugin 配置仍在 DSH 设置面板「Serenity」页（v1.22 归属原则）。
- * 数据经同源 HTTP /serenity/status + /serenity/cheap-workers（插件服务端路由）。
+ * 数据经同源 HTTP /serenity/status（插件服务端路由）。
  *
  * 槽：conversation.session.header.actions（官方既有槽，list）
  */
@@ -50,7 +50,6 @@ interface SerenityStatus {
   safeModeOn: boolean
   blacklist: string[]
   threshold: number | null
-  cheapWorkerModel: string | null
   /** 活跃轨迹（不含归档）。后端已排除 `_` 前缀目录 ⇒ 这里拿到的**就是**"没有归档的轨迹"。 */
   trajectories?: TrajectorySummary[]
   /** 技能清单（全量扫 `.opencode/skills/` 下每个含 SKILL.md 的目录）。老后端不返回该字段 ⇒ 退化为空清单。 */
@@ -334,8 +333,6 @@ export function SafeModePanel(props: SafeModePanelProps): React.JSX.Element {
                   <span className={cx('sp-metaSafeWord')}>SAFE {status.safeModeOn ? 'ON' : 'OFF'}</span>
                   <span className={cx('sp-metaSep')}>·</span>
                   <span className={cx('sp-metaPath')}>{status.root}</span>
-                  <span className={cx('sp-metaSep')}>·</span>
-                  <span>{status.cheapWorkerModel ?? '模型未配置'}</span>
                   <span className={cx('sp-metaSep')}>·</span>
                   <span>
                     blacklist {status.blacklist.length}

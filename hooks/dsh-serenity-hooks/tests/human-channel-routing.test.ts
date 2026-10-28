@@ -284,7 +284,6 @@ describe('human-channel: 接线（handleIncoming 按订阅表投递）', () => {
    */
   function writeConfig(weixin: unknown): void {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin,
     }))
   }

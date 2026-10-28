@@ -126,7 +126,6 @@ Directory of ACC capabilities — each area lists where to go for details (guide
                           与 praxis ontology 的分工 = 那个是**方法文本**、这个是**能跑的那个**）
   ③ 工具与执行        → container_fs（容器文件系统 15 子命令）/ container_git（git）/ dashboard（health 含注册表检查/time/wait）
                          acc_msm 已并入 msm（执行+发现）与 container_admin（管理）——msm("<name>", ["<args>"])；inspect=true 查用法
-                         cheap-worker（杂工 agent 编排——guide 子命令：cheap-worker guide）
                          专属工具（**默认对所有 CCC 隐藏**，只有在自己 exclusiveTools 里点名的 CCC 可见）→ acc-diag（运行态诊断）
   ④ 轨迹约束与对外面  → container_admin config（轨迹约束四动作 guide/validate/apply/list——**原 role 域已并入 config**，旧名作过渡别名仍可用；说明类配置走**两层菜单** config docs 目录 ／ config docs <章节> 详情）
                          外部程序化接入用官方 dsh --profile acp
@@ -134,7 +133,7 @@ Directory of ACC capabilities — each area lists where to go for details (guide
   ⑤ 自主与接入        → cognitive_trajectory send-now（跨轨迹的**即时**递送，**不排队**：live 目标在跑就当场注入当前轮、空闲则立即起轮；非 live 冷载入——等效于直接 wake；**有同步回执**）
                          cognitive_trajectory send-later（跨轨迹的"未来时刻 + 一条 message"；fire-and-forget，无回执无回收）
                          weixin 微信桥（配置/扫码/路由/消息 hook——CCC 侧 weixin-doctor MSM：msm("weixin-doctor", ["guide"])）
-  ⑥ CCC 配置总览      → container_admin config docs config（按章详情——9 段全表）
+  ⑥ CCC 配置总览      → container_admin config docs config（按章详情——8 段全表）
                           或 container_admin msm ccc-config（同一份正文的旧入口，保留）
   ⑦ 注册表与安全      → mech-registry.json 由 container_admin msm register/deregister 管理（写保护——不可直接编辑）
                          dashboard health 输出 registry 完整性检查；损坏恢复指引见 health registry.issues
@@ -212,29 +211,7 @@ export const CCC_CONFIG_REFERENCE = `═══ CCC Configuration Reference ═�
 CCC-level features are configured in .opencode/serenity.json.
 Below are all available configuration sections.
 
-── 1. cheap-worker.models ──
-cheap-worker（杂工）工具可用模型白名单（provider/model 列表）；未配置时 cheap-worker 报错要求配置。
-缺省模型 = models[0]（可用 cheap-worker.defaultModel 指定，必须 ∈ models）。
-**CCC 应把该白名单指向低成本模型**——cheap-worker 是批量执行通道。
-🔴 模型**不可由调用方指定**（工具无 model 参数）⇒ 本白名单是模型选择的唯一来源。
-
-  Behaviour（2026-10-14：background 模式已删除，只剩前台委派）:
-    cheap-worker(task, [label])：一次前台委派（宿主委派服务 ctx.subagents.start("spawn") +
-      agentOptions 注入模型）——不循环、不校验完成码、不写进度文件；返回子 agent 最终文本。
-    cheap-worker(jobs=[{task,label?},...])：并行扇出，上限 10（硬编码），结果保持传入顺序。
-    ⇒ **无 background 模式、无进度文件、无续跑**（owner 2026-10-14 令「删除后台运行能力」）。
-
-  Old key（兼容）:
-    读不到 "cheap-worker" 时**回落到旧键 "handyman"**（同形状：models / defaultModel）。
-    旧键里的 "maxRounds"／"maxParallel" 已随 background 退场，留着无害但不再生效。
-
-  Config:
-    { "cheap-worker": { "models": ["provider/model-name"] } }
-
-  Example:
-    { "cheap-worker": { "models": ["minimax-cn-coding-plan/MiniMax-M3"], "defaultModel": "minimax-cn-coding-plan/MiniMax-M3" } }
-
-── 2. sessionKeeper.threshold / sessionKeeper.sessionMdMaxKB ──
+── 1. sessionKeeper.threshold / sessionKeeper.sessionMdMaxKB ──
 cognitive-trajectory-assistant（COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT）提醒机制的积分阈值（非 headless 主 agent）。
 按工具调用加权 + 耗时计分；达到阈值注入提醒，要求模型回复 ACK 码。
 
@@ -254,20 +231,20 @@ cognitive-trajectory-assistant（COGNITIVE-TRAJECTORY-ASSISTANT · CHECKPOINT）
     超限后每次工具调用都提醒；连续 3 次未重写 → 升级强制语气；
     文件回到限内 → 自动停止（自愈）。轨迹提醒**不机械阻断工作**（与 rebuild 提醒同族）。
 
-── 3. localstore.gitTrack ──
+── 2. localstore.gitTrack ──
 localstore.json 的 git 策略：allow 可提交 / deny 禁提交（默认 deny）。
 deny 时写入自动确保 .gitignore 含该文件（物理保证），container_git commit 会检查拒绝。
 
   Config:
     { "localstore": { "gitTrack": "allow" } }
 
-── 4. hooks.autoRestoreSession ──
+── 3. hooks.autoRestoreSession ──
 会话自动恢复（默认 true；受 events 门控——仅根会话 + 已有对话历史才恢复）。
 
   Config:
     { "hooks": { "autoRestoreSession": false } }
 
-── 5. safeMode（黑名单 ＋ 开启期间隐藏的工具）──
+── 4. safeMode（黑名单 ＋ 开启期间隐藏的工具）──
 safe-mode 由 WebUI 开关控制（写 .serenity-safe-on 标记）；黑名单路径受 guards seam 拦截。
 
   ▸ blacklist：写路径黑名单（同下 Config）。
@@ -283,7 +260,7 @@ safe-mode 由 WebUI 开关控制（写 .serenity-safe-on 标记）；黑名单�
   Config:
     { "safeMode": { "blacklist": [".secrets/"], "hiddenTools": ["workflow", "job_kill"] } }
 
-── 6. 轨迹约束.roles（F4 认知子集角色）──
+── 5. 轨迹约束.roles（F4 认知子集角色）──
 轨迹约束角色 = 全知全能 cognitive trajectory 的任意子集（CCC 定义）。每角色独立模型 + 双白名单
 （MSM 白名单 msms[] 与非 MSM 工具白名单 tools[]，白名单外全隐藏；skill 加载恒可用）。
 cognitive trajectory 纪律子集（session/keeper/rebuild 参与项）默认全关 = 完全独立。
@@ -299,7 +276,7 @@ validate 校验 / apply 生效 / list 查看：container_admin config <guide|val
           "systemPromptFile": ".opencode/skiff/qa.md"
         } } } }
 
-── 7. cognitive_trajectory（轨迹 + 唤醒注册表，D58）──
+── 6. cognitive_trajectory（轨迹 + 唤醒注册表，D58）──
 CCC 的一条 cognitive trajectory = 持久身体（SESSION.md）+ 时间轴（AGENT_SESSIONS/ 目录 + 唤醒注册表）。
 一个 CCC 内可多条并行；条目全部由人类/agent 显式登记。
 ⚠️ ACC 不再提供**周期自唤醒**（原 autopilot，2026-09-15 整段退场：机制/时钟/container_admin autopilot
@@ -334,7 +311,7 @@ CCC 的一条 cognitive trajectory = 持久身体（SESSION.md）+ 时间轴（A
           "avoidWakeHours": { "start": 8, "end": 18 }
         } } }
 
-── 8. weixin（微信桥 F4c-3，含消息记录 hook）──
+── 7. weixin（微信桥 F4c-3，含消息记录 hook）──
 CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 独立对接微信桥。
 账号/路由/开关在此文件；**bot_token 凭据在 CCC localstore credential scope**
 （扫码绑定后自动写入，永不进 git 明文面）。
@@ -413,7 +390,7 @@ CCC 级微信个人号接入（iLink 协议）：dsh 一进程多 CCC，每 CCC 
   微信桥消息处理/回复不受 hook 影响；脚本须在 CCC 根内（路径逃逸拒绝）。
   媒体 relPath 指向 _tmp/weixin-inbound/（临时目录）——需持久保存媒体文件请自行 copy。
 
-── 9. exclusiveTools（专属工具声明，v1.33）──
+── 8. exclusiveTools（专属工具声明，v1.33）──
 **ACC 注册但默认对所有 CCC 隐藏**的工具，只有在自己这里**点名**的 CCC 可见。
 这是通用机制（任何工具名皆可），判据由 CCC 声明——ACC 代码里不出现任何具体 CCC 的名字。
 当前专属工具：acc-diag（运行态诊断——live 会话 / agent 定位 / 唤醒注册表 / 唤起条件链）。

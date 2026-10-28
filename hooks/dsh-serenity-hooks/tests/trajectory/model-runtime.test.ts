@@ -38,15 +38,15 @@ afterEach(() => {
 })
 
 describe('model-runtime: 读声明（D182）', () => {
-  it('🔴 不写 model ⇒ undefined（⛔ 不回退 cheap-worker.defaultModel）', () => {
+  it('🔴 不写 model ⇒ undefined（⛔ 不回退到任何缺省模型）', () => {
     const d = makeTrajectory('no-model', { tools: ['read'] })
     expect(readModelSelection(dir, d)).toBeUndefined()
     expect(hasModelDeclared(dir, d)).toBe(false)
   })
 
-  it('写了 model ⇒ 拆成 provider/model', () => {
-    const d = makeTrajectory('with-model', { model: 'minimax-cn/MiniMax-M3.1-Flash' })
-    expect(readModelSelection(dir, d)).toEqual({ provider: 'minimax-cn', model: 'MiniMax-M3.1-Flash' })
+  it('写了 model ⇒ 拆成 provider/model（用中立示例值，不绑任何真实供应商）', () => {
+    const d = makeTrajectory('with-model', { model: 'provider-a/model-x.1' })
+    expect(readModelSelection(dir, d)).toEqual({ provider: 'provider-a', model: 'model-x.1' })
     expect(hasModelDeclared(dir, d)).toBe(true)
   })
 

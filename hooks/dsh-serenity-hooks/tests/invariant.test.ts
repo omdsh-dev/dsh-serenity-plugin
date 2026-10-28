@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { verifyToolConsistency, assertManifestProse, REGISTERED_TOOLS } from '../src/kernel/invariant.js'
 
 describe('invariant: 清单与注册工具一致性', () => {
-  it('一致时零问题（14 工具，与 dsh.plugin.json contributes.tools 一致）', () => {
+  it('一致时零问题（13 工具，与 dsh.plugin.json contributes.tools 一致）', () => {
     const dir = mkdtempSync(join(tmpdir(), 'inv-'))
     const manifest = join(dir, 'dsh.plugin.json')
     writeFileSync(
@@ -14,7 +14,7 @@ describe('invariant: 清单与注册工具一致性', () => {
       JSON.stringify({
         id: 'x',
         contributes: {
-          tools: ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology', 'serenity-skill-creator'],
+          tools: ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'localstore', 'container_admin', 'im-bridge', 'acc-diag', 'diagram', 'ontology', 'serenity-skill-creator'],
         },
       }),
     )
@@ -22,8 +22,8 @@ describe('invariant: 清单与注册工具一致性', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('REGISTERED_TOOLS 含 14 工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并与专属工具 + v1.51 diagram + v1.52 ontology + v1.54 serenity-skill-creator）', () => {
-    expect(REGISTERED_TOOLS).toHaveLength(14)
+  it('REGISTERED_TOOLS 含 13 工具（v1.30 命名重构 + v1.31.0 im-bridge + v1.33 合并与专属工具 + v1.51 diagram + v1.52 ontology + v1.54 serenity-skill-creator；2026-10-28 下线 cheap-worker ⇒ 14→13）', () => {
+    expect(REGISTERED_TOOLS).toHaveLength(13)
     expect(REGISTERED_TOOLS).toContain('container_fs')
     expect(REGISTERED_TOOLS).toContain('container_admin')
     expect(REGISTERED_TOOLS).toContain('cognitive_trajectory')
@@ -79,7 +79,10 @@ describe('invariant: 声明面散文被钉住（v1.56.2）', () => {
       }),
     )
     writeFileSync(pkgJson, JSON.stringify({ description: `工作区：${n} 个工具（${list}）` }))
-    const heading = `### 3.1 十四个工具（其中三个按条件出现）\n\n| 工具 |\n|---|\n`
+    // 标题里的中文数随工具数走（2026-10-28：cheap-worker 下线后 14→13，写死即假绿）
+    const cn = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十']
+    const countCn = n <= 10 ? cn[n] : n < 20 ? `十${cn[n - 10]}` : `二十${n === 20 ? '' : cn[n - 20]}`
+    const heading = `### 3.1 ${countCn}个工具（其中三个按条件出现）\n\n| 工具 |\n|---|\n`
     writeFileSync(readmeA, `## 3\n\n${heading}`)
     writeFileSync(readmeB, `## 3\n\n${heading}`)
     return { dir, manifest, readmeA, readmeB }
@@ -109,7 +112,7 @@ describe('invariant: 声明面散文被钉住（v1.56.2）', () => {
       f.manifest,
       JSON.stringify({
         id: 'x',
-        description: `工作区：14 个工具（${list}）`, // 数字对、名单缺一项
+        description: `工作区：13 个工具（${list}）`, // 数字对、名单缺一项
         contributes: { tools: [...REGISTERED_TOOLS] },
       }),
     )
@@ -118,19 +121,19 @@ describe('invariant: 声明面散文被钉住（v1.56.2）', () => {
     rmSync(f.dir, { recursive: true, force: true })
   })
 
-  it('负控 ②「总数错」：description 写 13 而不是 14 ⇒ 必须报', () => {
+  it('负控 ②「总数错」：description 写 12 而不是 13 ⇒ 必须报', () => {
     const f = makeCorrectSurfaces(REGISTERED_TOOLS)
     const list = REGISTERED_TOOLS.join('/')
     writeFileSync(
       f.manifest,
       JSON.stringify({
         id: 'x',
-        description: `工作区：13 个工具（${list}）`,
+        description: `工作区：12 个工具（${list}）`,
         contributes: { tools: [...REGISTERED_TOOLS] },
       }),
     )
     const issues = assertManifestProse(f.manifest, [f.readmeA, f.readmeB])
-    expect(issues.some((i) => i.includes('14 个工具'))).toBe(true)
+    expect(issues.some((i) => i.includes('13 个工具'))).toBe(true)
     rmSync(f.dir, { recursive: true, force: true })
   })
 

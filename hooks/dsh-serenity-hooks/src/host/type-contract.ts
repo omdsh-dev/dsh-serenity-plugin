@@ -102,7 +102,12 @@ type _SessionTitleRename = Expect<Extends<HostContext['sessionTitle']['rename'],
 type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry']['list']>, readonly unknown[]>>
 
 /**
- * cheap-worker foreground 委派（`tools/cheap-worker.ts` 的 `resolveSubagentStarter()`）。
+ * 子 agent 启动器（原消费者 = cheap-worker 前台委派，已于 2026-10-28 整条下线）。
+ *
+ * 🔴 **这条钉保留的理由不是"还有人在用"，而是"宿主契约仍然这样演进"**：
+ *   删掉它 = 把这份跨宿主世代的知识一起删掉，将来再有委派需求要重新踩一遍。
+ *   （原实现 `tools/cheap-worker.ts` 的 `resolveSubagentStarter()` 已删除；
+ *     照此双路写法即可重建。）
  *
  * 🔴 **v1.59.3 适配（0.2.1-rc.1）的关键教训**：宿主在两个档上给的成员**不同名** ——
  *   · `0.1.7-rc.*` / `0.2.0-rc.*`：只有 `start(name, request)`
@@ -113,8 +118,8 @@ type _WorkspaceRegistryList = Expect<Extends<Ret<HostContext['workspaceRegistry'
  *   （实测踩过：只钉 `startActivation` ⇒ 本机 0.2.0-rc.2 上 `typecheck` 立刻红。）
  *
  * ⇒ 判据写成 **"至少有一个"**：两档各钉一条，用条件类型把它们合成一个"存在性"断言。
- *   真正的"该用哪个"由运行期 `resolveSubagentStarter()` 决定（先新后旧），类型层只保证
- *   **这两个名字里至少有一个真的存在** —— 那正是我们依赖的东西。
+ *   真正的"该用哪个"由运行期先新后旧地选（`resolveSubagentStarter()`，已随 cheap-worker 删除，
+ *   需要时按 `host/contract.ts` 的说明重建）—— 类型层只保证**这两个名字里至少有一个真的存在**。
  */
 type _SubagentsHasStarter =
   HostContext['subagents'] extends { startActivation: (...args: never[]) => unknown } ? true
@@ -213,7 +218,8 @@ type _AgentInboxPrepend = Expect<Extends<HostAgent['inbox']['prepend'], (target:
 /** `agent.session.header.cwd` —— 工具工作目录解析 */
 type _AgentSessionCwd = Expect<Extends<HostAgent['session']['header']['cwd'], string | undefined>>
 /**
- * `agent.status === 'idle'` —— 等待空闲（`trajectory/carrier.ts:65`，cheap-worker 的完成判据）。
+ * `agent.status === 'idle'` —— 等待空闲（`trajectory/carrier.ts:65`；原 cheap-worker 的完成判据，
+ * 现由 `askTrajectory` 问答链与 CRO 轮次追踪使用）。
  * 注：`status` 是可变属性（非方法），断言其**可读**且类型覆盖 'idle'。
  */
 type _AgentStatus = Expect<Extends<HostAgent['status'], string>>

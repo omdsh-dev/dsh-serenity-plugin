@@ -33,8 +33,9 @@ interface HostMember {
    *
    * 🔴 为什么需要（v1.61，S151 2026-10-17 报告）：
    *   宿主会**给同一个能力改名**并保留旧名作回退。`subagents` 就是实例：
-   *   `0.2.1-rc.*+` 的正门叫 `startActivation`，`start` 仅作旧宿主回退
-   *   （`tools/cheap-worker.ts` 的 `resolveSubagentStarter()` 是**双路**的）。
+   *   `0.2.1-rc.*+` 的正门叫 `startActivation`，`start` 仅作旧宿主回退。
+   *   （原双路消费者 `tools/cheap-worker.ts` 的 `resolveSubagentStarter()` 已随
+   *     cheap-worker 下线删除 —— **知识留在这里，代码不留**；将来再有委派需求照此双路写。）
    *   若契约把某一个具体名字钉成"必须有"，宿主改名后 ⇒ **探针报假故障，而功能是好的**。
    *   ⇒ 判据必须是「**这一族里至少有一个能用**」，不是「这个名字必须在」。
    */
@@ -83,7 +84,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'agents',
     access: 'injected',
     members: [{ name: 'create', kind: 'function' }, { name: 'get', kind: 'function' }],
-    impact: '轨迹约束/cheap-worker 无法创建或复用 agent',
+    impact: '轨迹约束无法创建或复用 agent',
     required: true,
   },
   {
@@ -169,7 +170,7 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     name: 'agentLoop',
     access: 'injected',
     members: [],
-    impact: 'cheap-worker worker agent 无法装配 preset',
+    impact: '子 agent 无法装配 preset（轨迹载体创建会退到全局工具层）',
     required: false,
   },
   {
@@ -181,13 +182,13 @@ export const HOST_SERVICES: readonly HostServiceContract[] = [
     //   旧宿主（`0.1.7-rc.*` / `0.2.0-rc.*`）存在。产品侧 `resolveSubagentStarter()`
     //   本来就是"先新后旧"选路 ⇒ **只要有一个在，委派就能用**。
     //   ⚠️ 此前只钉 `start` ⇒ 每次 health 都印一句**具体但虚假**的
-    //   「cheap-worker 委派不可用」，而实测 cheap-worker 真跑正常。
+    //   「委派不可用」，而实测委派真跑正常。
     //   ⇒ 具体 ≠ 准确：过期探针的误导性正来自它"说得太像真的"。
     members: [
       { name: 'startActivation', kind: 'function', anyOf: 'spawn-starter' },
       { name: 'start', kind: 'function', anyOf: 'spawn-starter' },
     ],
-    impact: 'cheap-worker 委派不可用（前台委派的正门，响亮报错）',
+    impact: '子 agent 委派不可用（cheap-worker 已下线 ⇒ 现无消费者，仅备将来）',
     required: false,
   },
   {
@@ -324,7 +325,7 @@ export const HOST_EVENTS: readonly HostEventContract[] = [
   { name: 'agent/created', site: 'seams/context.ts, gateway.ts, index.ts', impact: 'ACC 身份播种失效（identity + 工具可见性/restrict 不播种）', required: true },
   { name: 'agent/pre-step', site: 'seams/context.ts, seams/bootstrap.ts', impact: '上下文注入/首轮锚定失效', required: true },
   { name: 'agent/turn-stopping', site: 'rebuild.ts, output-guard-seam.ts', impact: 'rebuild 不执行 / 输出守卫失效', required: true },
-  { name: 'agent/status', site: 'trajectory-session.ts, tools/cheap-worker.ts, cro-turns.ts', impact: '等待空闲逻辑失效 / CRO「在跑」表恒空', required: false },
+  { name: 'agent/status', site: 'trajectory-session.ts, cro-turns.ts', impact: '等待空闲逻辑失效 / CRO「在跑」表恒空', required: false },
   { name: 'agent/inbox/inserted', site: 'seams/bootstrap.ts', impact: 'fake-initial-turns 注入失效', required: false },
   { name: 'agent/disposed', site: 'seams/lifecycle.ts', impact: 'per-会话内存态不清理（长跑泄漏）', required: false },
   { name: 'session/event', site: 'seams/compact.ts, seams/bootstrap.ts', impact: '压缩后重注入/晋升状态失效', required: false },

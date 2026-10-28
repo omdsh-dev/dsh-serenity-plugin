@@ -119,8 +119,8 @@ describe('host-contract: 探针（服务与成员）', () => {
   //
   // 背景（真实事故形态）：宿主 0.2.1-rc.*+ 把子代理正门从 `start` 改成
   // `startActivation`，旧名只作回退。契约当时把 `start` 钉成"必须有" ⇒
-  // **每次 health 都印一句具体但虚假的「cheap-worker 委派不可用」**，
-  // 而 S151 实测 cheap-worker 真跑正常。⇒ 这三条钉住"同族任一可用即通过"。
+  // **每次 health 都印一句具体但虚假的「委派不可用」**，
+  // 而 S151 实测委派真跑正常。⇒ 这三条钉住"同族任一可用即通过"。
 
   it('🔴 anyOf：只有 startActivation（新宿主）⇒ 不报 subagents 故障', () => {
     const ctx = completeHost()

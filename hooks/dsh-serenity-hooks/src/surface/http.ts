@@ -225,6 +225,7 @@ export function registerStatusApi(ctx: Context, opts: StatusApiRegistration = {}
 
   // 🔴 2026-10-14：`GET /serenity/cheap-workers` 已随 background 模式一并退场 ——
   // 它是**进度文件**的读口，而进度文件只由 background 写；该模式删除后永不会有生产者。
+  // 🔴 2026-10-28：cheap-worker 工具本体也整条下线 ⇒ 这条路的两个端点都**永远不会有消费者**。
   // ⇒ 路由与 `listActiveCheapWorkers()` 同批删除（不留"永远返回空表"的死端点）。
 
   // /serenity/image-upload：图片落盘（S142 图片自动识别基础设施——WebUI 粘贴图片 →

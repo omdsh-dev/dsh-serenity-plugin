@@ -23,16 +23,16 @@
  *
  * ⚠️ **契约边界（决定本件测哪几条分支）**：`output.schema` 是 `{ type: 'string' }` 的只有 **2 个**
  *    （`praxis`，以及 v1.52 起新增的 `ontology` —— 后者刻意用 string：引擎报告是多行 Markdown 式，
- *    走 json 会被 `JSON.stringify` 把换行转义成 `\n`），其余 8 个都是 `{ type: 'json' }`
- *    ⇒ 对 8 个 json 工具，"非字符串值"是**契约内**的正常形态；
+ *    走 json 会被 `JSON.stringify` 把换行转义成 `\n`），其余 7 个都是 `{ type: 'json' }`
+ *    ⇒ 对 7 个 json 工具，"非字符串值"是**契约内**的正常形态；
  *    而两个 string 工具的 `execute` **恒返回字符串** ⇒ 那条 `JSON.stringify` 支线**在产线永不执行**
  *    （属"构造上不可达／防御性归一化"档）。
  *    ⇒ 🔴 **刻意不测它**：硬凑会把"从不发生"固化成"期望形态"（同 §2.7b／§2.7n 的判断）。
  *    本件要的是**函数面**（`fstat-no` 归零），进入函数即可，**不需要把不可达支线填满**。
  *
  * ⚠️ **本件不覆盖**（留给"execute 面"那件）：`cc-fs`／`git`／`kit`／`localstore`／`im-bridge`
- *    的 `execute`，以及 `cheap-worker` 的 `parseJobs`（后者只在 `jobs` 多任务编排路径里被调用，
- *    与本件不同风险面 —— 它要起子代理）。
+ *    的 `execute`（与本件不同风险面）。
+ * 🔴 2026-10-28：`cheap-worker` 整条下线 ⇒ 它当年的靶（`parseJobs`）不再存在，靶数 10 → 9。
  */
 
 import { describe, it, expect } from 'vitest'
@@ -44,7 +44,6 @@ import { localstoreTool } from '../src/tools/localstore/index.js'
 import { createKitTool } from '../src/tools/kit/index.js'
 import { createContainerAdminTool } from '../src/tools/container-admin.js'
 import { createImBridgeTool } from '../src/tools/im-bridge.js'
-import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
 import { createAccDiagTool } from '../src/tools/diag/index.js'
 import { createOntologyTool } from '../src/tools/ontology-eng.js'
 
@@ -86,7 +85,7 @@ function renderOf(tool: unknown, label: string): (args: unknown, value: unknown)
   return out.render as (args: unknown, value: unknown) => Block[]
 }
 
-/** 10 个靶（schema 决定"非字符串值"是否属契约内 —— 见文件头） */
+/** 9 个靶（schema 决定"非字符串值"是否属契约内 —— 见文件头；🔴 2026-10-28 cheap-worker 下线 ⇒ 10→9） */
 const TOOLS: Array<{ label: string; schema: 'string' | 'json'; make: () => unknown }> = [
   { label: 'praxis', schema: 'string', make: () => praxisTool },
   { label: 'cc-fs', schema: 'json', make: () => ccFsTool },
@@ -95,7 +94,6 @@ const TOOLS: Array<{ label: string; schema: 'string' | 'json'; make: () => unkno
   { label: 'dashboard（kit）', schema: 'json', make: () => createKitTool(ctx) },
   { label: 'container_admin', schema: 'json', make: () => createContainerAdminTool(ctx) },
   { label: 'im-bridge', schema: 'json', make: () => createImBridgeTool() },
-  { label: 'cheap-worker', schema: 'json', make: () => createCheapWorkerTool(ctx) },
   { label: 'acc-diag', schema: 'json', make: () => createAccDiagTool(ctx) },
   // v1.52（D121）：本体工程引擎。**schema 刻意是 string 而非 json** —— 引擎报告是多行 Markdown 式，
   // 走 json 会被 `JSON.stringify` 把换行转义成 `\n`（模型读到的是一坨转义串）。见 `ontology-eng.ts` 的 receiptOf。
@@ -103,9 +101,9 @@ const TOOLS: Array<{ label: string; schema: 'string' | 'json'; make: () => unkno
 ]
 
 describe('tools/*：`output.render` 通路（⑤ 第 32 件）', () => {
-  it('🔴 可达性自证：10 个工具对象都真的暴露 output.render（本件全部断言的前提）', () => {
-    // ⚠️ 扫描域自证：先钉"靶确实是 10 个"，否则"零个不合格"会永远绿（同 §3-9 #7 的写法）
-    expect(TOOLS).toHaveLength(10)
+  it('🔴 可达性自证：9 个工具对象都真的暴露 output.render（本件全部断言的前提）', () => {
+    // ⚠️ 扫描域自证：先钉"靶确实是 9 个"，否则"零个不合格"会永远绿（同 §3-9 #7 的写法）
+    expect(TOOLS).toHaveLength(9)
     const unreachable = TOOLS.filter((t) => {
       try {
         renderOf(t.make(), t.label)

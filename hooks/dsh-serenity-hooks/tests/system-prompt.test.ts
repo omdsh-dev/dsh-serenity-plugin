@@ -82,7 +82,7 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
     expect(block).toContain(`CCC: sp-`)
     expect(block).not.toContain(`Root: ${dir}`) // v1.19.6：Root 唯一真相源 = Constraints 块
     // 需求③：身份块不再内嵌工具清单
-    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'localstore', 'container_admin']) {
       expect(block).not.toMatch(new RegExp(`^  ${tool} `, 'm'))
     }
     // EAP 优化 #2：说明平台工具仍可用（关系方向明确）
@@ -97,12 +97,14 @@ describe('system-prompt: 结构注入（需求③：ACC身份→Metaphor→Princ
     expect(block).toContain('call msm() with no arguments to list them')
   })
 
-  it('toolsBlock：9 工具清单 + msm 单入口示例（v1.33：logbook 并入 cognitive trajectory，im-bridge 条件可见不入块）', () => {
+  it('toolsBlock：工具清单 + msm 单入口示例（v1.33：logbook 并入 cognitive trajectory，im-bridge 条件可见不入块）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'localstore', 'container_admin']) {
       expect(block).toContain(tool)
     }
+    // 🔴 2026-10-28 回归钉：cheap-worker 整条下线 ⇒ 它不得再出现在给模型的工具清单里
+    expect(block).not.toContain('cheap-worker')
     // msm 单入口调用（替代旧 3 步协议：list 发现 / --schema 查用法 / exec 执行）
     expect(block).toContain('msm("')
     expect(block).toContain('inspect=true')

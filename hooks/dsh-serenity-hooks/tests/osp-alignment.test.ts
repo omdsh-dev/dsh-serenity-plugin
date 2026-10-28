@@ -268,12 +268,14 @@ describe('osp 对齐：身份块 + Tools 块结构（工具清单独立成块，
     expect(block).toContain('"Serenity Tools" heading')
   })
 
-  it('toolsBlock() 含 9 工具清单 + msm 单入口示例（v1.33：logbook 并入 cognitive trajectory）', () => {
+  it('toolsBlock() 含工具清单 + msm 单入口示例（v1.33：logbook 并入 cognitive trajectory）', () => {
     const block = toolsBlock()
     expect(block).toContain('=== Serenity Tools ===')
-    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'cheap-worker', 'localstore', 'container_admin']) {
+    for (const tool of ['container_fs', 'cognitive_trajectory', 'dashboard', 'container_git', 'msm', 'praxis', 'localstore', 'container_admin']) {
       expect(block).toContain(tool)
     }
+    // 🔴 2026-10-28 回归钉：cheap-worker 整条下线 ⇒ 它不得再出现在给模型的工具清单里
+    expect(block).not.toContain('cheap-worker')
     // msm 单入口调用（替代旧 3 步协议）
     expect(block).toContain('msm("')
     expect(block).toContain('inspect=true')

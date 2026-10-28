@@ -9,7 +9,7 @@
  *
  * `model` 的**唯一消费点**曾是 `createTrajectoryAgent` 建 agent 时，而它的**唯一调用方**是
  * IM 入站路由 ⇒ 对**已经存在的会话**（web 会话、`send-now` 冷启的载体……）**完全不生效**。
- * 而 `container_admin config list` 把它印成 `'(cheap-worker default)'`，看上去像个统一设定。
+ * 而 `container_admin config list` 把它印成一个统一默认值，看上去像"已经生效了"。
  * ⇒ **同一个字段在 A 入口生效、在 B 入口不生效** —— 正是 owner 要禁的形态。
  *
  * ## 修法：接宿主**自带**的原语，不复刻语义
@@ -32,8 +32,10 @@
  *
  * ## 三条硬边界（少一条就会重演 S196 的坑）
  *
- * 1. **未写 `model` ⇒ 不装这条缝**（`undefined` 原样返回）。⛔ **绝不回退 `cheap-worker.defaultModel`**
- *    —— 那个回退把"我想声明自述"变成"我被降级到杂工模型"，而用户完全不会预期到。
+ * 1. **未写 `model` ⇒ 不装这条缝**（`undefined` 原样返回）。⛔ **绝不回退到某个全局默认模型**
+ *    —— 那种回退把"我想声明自述"变成"我被悄悄换了模型"，而用户完全不会预期到。
+ *    （历史形态：曾回退 `cheap-worker.defaultModel`；该配置段已随工具于 2026-10-28 删除，
+ *     但判据不变：**没写 = 不动**。）
  * 2. **切换会留下宿主的 `[model changed: …]` 提示**。这是**特性不是噪声**：
  *    否则模型不知道自己换了，它会照旧解释上方那些由**另一个模型**生成的回合。
  * 3. **模型名非法 ⇒ 不切 ＋ 响亮告警**，绝不静默停在旧模型上（"改了没生效"是最难查的一类）。
@@ -46,7 +48,7 @@ import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { sessionsRoot } from './core.js'
 import { readTrajectoryConstraintAt } from './policy/profile.js'
-import { splitModel } from './delegate/core.js'
+import { splitModel } from './model-string.js'
 
 /**
  * 从轨迹声明里取模型选择（**每轮调用**，故不缓存）。

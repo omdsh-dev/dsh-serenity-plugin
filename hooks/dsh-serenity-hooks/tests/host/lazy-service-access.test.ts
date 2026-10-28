@@ -118,11 +118,15 @@ describe('宿主 lazy 服务：只有 access.ts 能直接碰（v1.31.3 成因的
     expect(findDirectReads(stripNoise(sample), LAZY_NAMES)).toEqual([])
   })
 
-  it('🔴 正控 ③（**真实文件**上的双面控）：cheap-worker.ts 原文含 `ctx.subagents`，剥后必须为空', () => {
-    const target = 'tools/cheap-worker.ts'
+  it('🔴 正控 ③（**真实文件**上的双面控）：注释里出现 `ctx.subagents` 必须不抓', () => {
+    // 🔴 2026-10-28：原靶是 `tools/cheap-worker.ts`（它真实含 `ctx.subagents` 的注释）。
+    //   该文件随 cheap-worker 下线删除 ⇒ **判据不能跟着消失**，只能换靶。
+    //   ⇒ 新靶 = `host/access.ts` 自身（它也是"只在注释里提到 subagents"的真实文件）。
+    //   ⚠️ 这正是"被删掉的测试靶要迁移而不是删除"的形态：判据本身仍成立，只是载体变了。
+    const target = 'host/access.ts'
     const raw = readFileSync(join(SRC_DIR, target), 'utf-8')
-    expect(raw).toContain('ctx.subagents') // 前提：这份文件**确实**含该形态（否则本控什么都没证明）
-    expect(findDirectReads(stripNoise(raw), LAZY_NAMES)).toEqual([]) // 结论：它只在注释里 ⇒ 不抓
+    expect(raw).toContain('subagents') // 前提：这份文件**确实**提到该名字（否则本控什么都没证明）
+    expect(findDirectReads(stripNoise(raw), LAZY_NAMES)).toEqual([]) // 结论：只在注释里 ⇒ 不抓
   })
 
   it('🔴 扫描域自证（防"扫了零个文件 ⇒ 永远绿"）：src 下真有大量 .ts，且被排除的那个文件确实在域里', () => {

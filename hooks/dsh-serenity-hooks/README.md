@@ -60,7 +60,7 @@ my-workspace/
 
 ## 3 装完多了什么
 
-### 3.1 十四个工具（其中三个按条件出现）
+### 3.1 十三个工具（其中三个按条件出现）
 
 > 这份清单**只在这里**（用户视角：能做什么）。**契约语义**（每个动作必须怎样）在标准的 §4，本文不复制。
 
@@ -74,7 +74,6 @@ my-workspace/
 | `praxis` | 按需注入四套方法：`eap`（把话说清）/ `neat`（先对齐再动手）/ `cce`（连续性）/ `ontology`（把领域结构显式化） |
 | `ontology` | 本体工程**引擎**：读 `.ttl`，做结构校验与语义审查、写模板。与 `praxis ontology` 一个说、一个跑 |
 | `serenity-skill-creator` | 增强型技能的创建器：`guide` / `create` / `check` / `review` / `index` / `status` |
-| `cheap-worker` | 杂工：把任务交给低成本模型的子代理并取回最终文本；`jobs` 一次扇出（上限 10） |
 | `localstore` | 凭据与本地偏好：工作区根的 `localstore.json`，默认拒绝入库 |
 | `container_admin` | 机务舱：`config`（说明目录 / 轨迹约束 / 当前配置）＋ `msm`（注册表管理） |
 | `im-bridge` ● | 给联系人发消息（微信 / 飞书）：文本、文件、联系人、通道状态 |

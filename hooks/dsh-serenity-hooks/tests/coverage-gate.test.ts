@@ -28,18 +28,18 @@ const SKIP_CLIENT_SUFFIX = ['.tsx', '.css']
  * 显式间接覆盖白名单（模块无测试直接 import，但经宿主模块被测试执行——覆盖率实证见 coverage 报告）：
  *  - auth / proxy（`gateway/auth.ts` / `gateway/proxy.ts`）：`gateway/server.ts` import 它们
  *    → gateway.test.ts 执行（auth 94.7% / proxy 100%）；2026-10-19 目录域化后按**新基名**登记
- *  - tools/* 薄壳（cheap-worker/cognitive-trajectory/cce/eap/neat）：
+ *  - tools/* 薄壳（cognitive-trajectory/cce/eap/neat）：
  *    纯 defineTool 注册壳或知识内容源（cce/eap/neat 供 praxis import），逻辑在同域 service 层；
  *    存在性/注册契约由 register.test.ts 保障；praxis 有独立镜像测试。
  *    🔵 2026-10-19（S8 目录域化）：`cc-fs`/`git`/`kit`/`msm`/`localstore` 五条已**删除** ——
  *    那五个薄壳搬成了 `tools/<能力>/index.ts`，而 `index.ts` 在 {@link SKIP_BASENAMES} 里（聚合壳免测）
  *    ⇒ 白名单行不再有用。**留死行比删更坏**：它会在下次出现同名模块时静默豁免。
+ *    🔵 2026-10-28：`cheap-worker.ts` 已随工具整条下线删除 ⇒ 同判据，删掉这一行。
  * 新增 src 模块一律走镜像或直接 import；需间接豁免须在此显式登记 + 注明宿主与实证
  */
 const INDIRECT_COVERED = new Set([
   'auth.ts',
   'proxy.ts',
-  'cheap-worker.ts',
   'cognitive-trajectory.ts',
   'cce.ts',
   'eap.ts',

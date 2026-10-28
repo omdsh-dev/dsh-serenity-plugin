@@ -42,15 +42,15 @@ describe('status: getStatus', () => {
     expect(s.safeModeOn).toBe(false)
   })
 
-  it('读取黑名单 / 阈值 / cheap-worker 模型', () => {
+  it('读取黑名单 / 阈值（2026-10-28：cheap-worker 下线后 status 不再有 cheapWorkerModel 字段）', () => {
     mkdirSync(join(dir, '.opencode'))
     writeFileSync(
       join(dir, '.opencode', 'serenity.json'),
-      JSON.stringify({ 'cheap-worker': { models: ['m3'] }, sessionKeeper: { threshold: 100 }, safeMode: { blacklist: ['.secrets/'] } }),
+      JSON.stringify({ sessionKeeper: { threshold: 100 }, safeMode: { blacklist: ['.secrets/'] } }),
     )
     const s = getStatus(dir)
     expect(s.threshold).toBe(100)
-    expect(s.cheapWorkerModel).toBe('m3')
+    expect('cheapWorkerModel' in s).toBe(false)
     // 对齐 osp：黑名单条目为 {pattern} 对象
     expect(s.blacklist).toEqual([{ pattern: '.secrets/' }])
   })

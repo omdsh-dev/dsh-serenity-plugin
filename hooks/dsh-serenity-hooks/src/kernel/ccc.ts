@@ -99,24 +99,11 @@ export function readCccName(root: string): string | null {
 // ── 配置（.opencode/serenity.json 规范位置 / .dsh/serenity.json 回退）──
 
 interface SerenityConfig {
-  /** cheap-worker（杂工）配置：模型白名单（v1.24.0 取代 loop；2026-10-14 取代 handyman） */
-  'cheap-worker'?: {
-    /** 可用模型白名单（provider/model 列表）——cheap-worker 只能使用其中模型（用户拍板：CCC 配置控制） */
-    models?: string[];
-    /** 缺省模型（必须 ∈ models） */
-    defaultModel?: string;
-  };
-  /**
-   * 🔴 **旧键（历史名）**：2026-10-14 起本插件读 `cheap-worker`，**读不到时回落到这里**
-   * （owner 令「配置兼容旧配置 key」）。仍可含 `maxRounds`／`maxParallel` —— 那两个键已随
-   * background 模式退场，**不再被读取**，但**留在文件里不会报错**（宽松解析，见 loadSerenityConfig）。
-   */
-  handyman?: {
-    models?: string[];
-    defaultModel?: string;
-    maxRounds?: number;
-    maxParallel?: number;
-  };
+  // 🔴 2026-10-28（owner 令「下线 cheap-worker，完全删掉」）：
+  //   `cheap-worker` 与它的旧键 `handyman` **两个配置段都已整段删除** ——
+  //   工具退役后不再有消费者（配置读取、模型白名单校验、面板回显三处全部同步移除）。
+  //   存量 CCC 里残留这两段 ⇒ **静默忽略**（schemastery 非 strict，不报错、也不生效）。
+  //   ⚠️ 这正是 D151 警告的形态：留着会让下一个 agent 以为它们还在起作用。
   sessionKeeper?: {
     /** 计分提醒阈值（缺省 150） */
     threshold?: number;
@@ -393,47 +380,21 @@ export interface WeixinRouteConfig {
  */
 
 /**
- * 解析 cheap-worker 配置。
+ * 🔴 **`readCheapWorkerConfig` / `pickModelSection` 已于 2026-10-28 删除**
+ * （owner 令「下线 cheap-worker，完全删掉」）。
  *
- * 🔴 **键的优先级（2026-10-14，owner 令「配置兼容旧配置 key」）**：
- *   ① 新键 `cheap-worker`；② **读不到（键缺失或 models 非有效数组）⇒ 回落旧键 `handyman`**。
- *   「读不到」的判据是**同一套**（models 必须是至少含一个非空字符串的数组）—— 这样"新键存在但写错了"
- *   与"没写新键"行为一致，都不会静默走一个空白名单。
+ * 它们原本有三个消费者，三个都已同步处置：
+ * | 消费者 | 处置 |
+ * |---|---|
+ * | `tools/cheap-worker.ts`（模型白名单校验） | 文件整体删除 |
+ * | `surface/status.ts` 的 `cheapWorkerModel`（面板回显） | 字段删除（面板同步） |
+ * | `tools/trajectory-constraint-admin.ts` 的 `model ∈ cheap-worker.models` 校验 | **校验整条移除** |
  *
- * ⚠️ `maxRounds`／`maxParallel` 已随 background 模式退场，**不再被本函数读取**（旧配置里留着无害）。
- *
- * @returns 白名单 + 缺省模型；两处都取不到 models 时返回 null（工具应报错要求配置）
+ * ⚠️ 最后一条要说清（R↓）：那条校验原本是「轨迹约束声明的 model 必须在 CCC 白名单里」。
+ * 白名单随 cheap-worker 一起消失 ⇒ **它失去了判据来源**。而模型合法性本来就有
+ * **更权威的判据**（`trajectory/model-runtime.ts`：宿主报非法模型 ⇒ 不切＋响亮告警）
+ * ⇒ 删掉它**不是丢了一个保护，而是去掉一份与权威判据并行的第二真相源**（D131 同族）。
  */
-export function readCheapWorkerConfig(root: string, paths: string[] = DEFAULT_SERENITY_CONFIG_PATHS): {
-  models: string[]
-  defaultModel: string
-} | null {
-  const cfg = loadSerenityConfig(root, paths)
-  // 新键优先，旧键回落（判据同构：都要"至少一个非空字符串"才算数）
-  const section = pickModelSection(cfg['cheap-worker']) ?? pickModelSection(cfg.handyman) ?? null
-  if (section === null) return null
-  const clean = section.models!.map((m) => m.trim()).filter(Boolean)
-  if (clean.length === 0) return null
-  const defaultModel = section.defaultModel?.trim()
-  return {
-    models: clean,
-    defaultModel: defaultModel !== undefined && clean.includes(defaultModel) ? defaultModel : clean[0]!,
-  }
-}
-
-/**
- * 从一段配置里取出可用的模型白名单段；不满足「models = 至少一个非空字符串的数组」⇒ `null`。
- * 抽成函数是为了让**新键与旧键走同一套判据**（不同判据会让"回落"产生两类行为差异）。
- */
-function pickModelSection(
-  section: { models?: string[]; defaultModel?: string } | undefined | null,
-): { models?: string[]; defaultModel?: string } | null {
-  if (section === undefined || section === null) return null
-  const models = section.models
-  if (!Array.isArray(models) || models.length === 0) return null
-  if (models.every((m) => typeof m !== 'string' || m.trim() === '')) return null
-  return section
-}
 
 /**
  * ACC 依赖的 CCC 配置路径（S134 修正：兼容历史——历史在 .opencode，规范位置 = .opencode；
@@ -451,7 +412,7 @@ export function readUtf8(path: string): string {
 
 /**
  * 已告警过的损坏配置路径（进程级去重：同一坏文件不刷屏，但绝不静默）。
- * S142 review F-07：此前损坏 → 静默返回 `{}`——安全模式黑名单/cheap-worker 白名单/轨迹约束角色
+ * S142 review F-07：此前损坏 → 静默返回 `{}`——安全模式黑名单/轨迹约束角色
  * 全部**无声失效**（用户以为配了，实际没配）。守卫的输入失败必须响亮。
  */
 const warnedBrokenConfigs = new Set<string>()
@@ -477,7 +438,7 @@ export function loadSerenityConfig(root: string, paths: string[] = DEFAULT_SEREN
       if (!warnedBrokenConfigs.has(p)) {
         warnedBrokenConfigs.add(p);
         console.warn(
-          `[serenity-hooks] ✗ CCC 配置解析失败，已按空配置继续（该 CCC 的安全模式黑名单/cheap-worker 白名单/轨迹约束角色等全部失效，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
+          `[serenity-hooks] ✗ CCC 配置解析失败，已按空配置继续（该 CCC 的安全模式黑名单/轨迹约束角色等全部失效，请修 JSON）: ${p} — ${String((err as Error)?.message ?? err)}`,
         );
       }
       return {};

@@ -361,10 +361,12 @@ describe('trajectory-session: createTrajectoryAgent（preset 挂载 + 约束面�
     unregisterTrajectorySession(ref.sessionId)
   })
 
-  it('🔴 未声明 model ⇒ 不传 agentOptions（宿主用自己默认模型），⛔ 绝不回退杂工模型（v1.102.0）', async () => {
+  it('🔴 未声明 model ⇒ 不传 agentOptions（宿主用自己默认模型），⛔ 绝不回退任何缺省（v1.102.0）', async () => {
     // 缺陷形态（修前）：`const model = profile.model?.trim() || defaultModel || ''`，
-    // 其中 `defaultModel` 是 IM 入口塞进来的 `cheap-worker.defaultModel`（杂工模型）
-    // ⇒ 没写 model 的轨迹被**静默降级**到杂工模型，与 `model-runtime.ts` 硬边界① 冲突。
+    // 其中 `defaultModel` 是 IM 入口塞进来的全局缺省（当年 = `cheap-worker.defaultModel`）
+    // ⇒ 没写 model 的轨迹被**静默降级**，与 `model-runtime.ts` 硬边界① 冲突。
+    // 🔴 2026-10-28：那个缺省来源已随 cheap-worker 下线删除（配置段不再存在），
+    //    ⇒ 本用例的**判据不变且更强**：这条缝任何时候都不得补一个"默认模型"进去。
     //
     // 判据打在**真正传给宿主的那一格**（`agents.create` 的 opts）上，不是打在内部变量上 ——
     // "参数传对了 ≠ 效果达成了"。

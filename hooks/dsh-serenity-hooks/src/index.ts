@@ -21,7 +21,6 @@ import { msmTool } from './tools/msm/index.js'
 import { praxisTool } from './tools/praxis.js'
 import { createOntologyTool } from './tools/ontology-eng.js'
 import { createSkillCreatorTool } from './tools/skill-creator.js'
-import { createCheapWorkerTool } from './tools/cheap-worker.js'
 import { createCognitiveTrajectoryTool } from './tools/cognitive-trajectory.js'
 import { localstoreTool } from './tools/localstore/index.js'
 import { createContainerAdminTool } from './tools/container-admin.js'
@@ -397,7 +396,6 @@ export function apply(ctx: Context, config: Config): void {
     // 方法文本（guide）＋ 机械档（check：调 P2 的 A1/A2）＋ 语义档（review：调引擎 compliance）
     // ＋ 第二层预览（index：调 P1 的生成器）＋ 全容器一览（status）＋ 脚手架（create）。工具面 13→14。
     ctx.tools.register(createSkillCreatorTool())
-    ctx.tools.register(createCheapWorkerTool(ctx))
     ctx.tools.register(localstoreTool)
     // container_admin（role + msm 管理 + config——v1.33 起机务舱；v1.34.1 起为工厂形态：
     // 原为 autopilot 域传进程内运行态事实，该域已于 2026-09-15 退场，ctx 现无消费者）

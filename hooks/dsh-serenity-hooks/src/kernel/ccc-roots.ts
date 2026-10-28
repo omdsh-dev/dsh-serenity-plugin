@@ -50,9 +50,10 @@ export interface ExecOrAgent {
  * `exec.agent?.session?.header?.cwd ?? process.cwd()`。
  *
  * ⚠️ 无 `exec.agent` 时回落进程 cwd —— "用服务启动目录冒充会话目录"是**既有语义**，
- * 不是本模块的选择（改它会动到 9 个工具的根解析行为）。已知副作用与规避见
- * `tools/cheap-worker.ts` 的「调用形态检查前移」补偿（`?? process.cwd()` 会把真因
- * "exec.agent 不存在"盖成 `No CCC found`）。
+ * 不是本模块的选择（改它会动到所有工具的根解析行为）。已知副作用：`?? process.cwd()`
+ * 会把真因"exec.agent 不存在"盖成 `No CCC found` —— 工具侧须把**调用形态检查前移**再判根
+ * （原实现范例 `tools/cheap-worker.ts`，该文件已于 2026-10-28 随工具下线删除；
+ *   现行的正例见 `tools/fs/service.ts` 的入参校验顺序）。
  */
 export function agentCwdFor(execOrAgent: ExecOrAgent): string {
   return execOrAgent.agent?.session?.header?.cwd ?? execOrAgent.session?.header?.cwd ?? process.cwd()

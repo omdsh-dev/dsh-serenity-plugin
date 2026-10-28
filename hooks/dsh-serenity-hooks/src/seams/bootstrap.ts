@@ -274,12 +274,13 @@ export function createEpochPromotion(
       if (agent === undefined) return { boundary: -1, promoted: true }
       const session = (agent as { session?: unknown }).session
       if (session === undefined) return { boundary: -1, promoted: true }
-      // cheap-worker worker（sessionId 固定 `cheap-worker-` 前缀，tools/cheap-worker.ts 生成）：autonomous 程序化
-      // worker，需从第 1 轮起就持有完整工具目录 + 完整 ACC 系统提示词（DCP/标准层）。
-      // 它经 ctx.agents.create 直接创建（非 DSH delegation 路径），delegationDepth 为 0，
-      // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故显式按 `cheap-worker-` 前缀判 promoted，
-      // 与 context.ts shouldAutoRestore 的 `cheap-worker-` 约定保持一致。
-      // 轨迹约束会话：CCC 提示词全替换，无需 whoami 锚定轮——恒 promoted（同 cheap-worker）。
+      // 历史 `cheap-worker-` 前缀会话（**兼容保留**）：生成者 `tools/cheap-worker.ts` 已于
+      // 2026-10-28 整条下线 ⇒ 不会再产生新会话；但**旧持久化会话仍可能被 resume**，
+      // 那时它仍需从第 1 轮起就持有完整工具目录 + 完整 ACC 系统提示词。
+      // 它当年经 ctx.agents.create 直接创建（非 DSH delegation 路径），delegationDepth 为 0，
+      // 会绕过下方 delegationDepth>0 的恒 promoted 分支——故按前缀判 promoted，
+      // 与 context.ts shouldAutoRestore 的约定保持一致。
+      // 轨迹约束会话：CCC 提示词全替换，无需 whoami 锚定轮——恒 promoted（同前者）。
       // 🔴 2026-10-19：判据 = 绑定轨迹有 `trajectory-constraint.json`（不再是 `轨迹约束-` 前缀）。
       const loopSid = (session as { id?: string }).id
       const loopCwd = (session as { header?: { cwd?: string } }).header?.cwd ?? process.cwd()
@@ -430,7 +431,7 @@ export function registerBootstrap(ctx: Context): void {
       // 🔴 取不到 sessionId ⇒ **不注入**：注入的两轮要靠 `llm/stream` 按 sessionId 短路，
       //    没有 id 就短路不了 ⇒ 会退化成两次**真模型调用**（正是本机制要消掉的东西）。
       if (sid === undefined) return
-      // cheap-worker worker / 轨迹约束会话：已有完整 ACC 提示词，不需要假首轮。
+      // 历史 `cheap-worker-` 会话（兼容保留）／轨迹约束会话：已有完整 ACC 提示词，不需要假首轮。
       // 🔴 2026-10-19：轨迹约束 判据 = 绑定轨迹有 `trajectory-constraint.json`（不再是 `轨迹约束-` 前缀）。
       if (sid.startsWith('cheap-worker-') || replacesDefaultIdentity(trajectoryConstraintFor(root, sid))) return
       if (depth === 0) {

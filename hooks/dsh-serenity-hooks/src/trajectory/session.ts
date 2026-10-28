@@ -225,9 +225,10 @@ export async function createTrajectoryAgent(
   if (!ctx.agents) throw new Error('trajectory constraint: ctx.agents unavailable')
   // 🔴 **`''` = 未声明模型 ⇒ 不传 `agentOptions` ⇒ 宿主用自己的默认模型**（v1.102.0）。
   //    此前这里是 `profile.model?.trim() || defaultModel || ''`，而 `defaultModel` 是
-  //    IM 入口塞进来的 `cheap-worker.defaultModel`（杂工模型）⇒ **没声明 model 的轨迹会被
-  //    静默降级到杂工模型**，与 `model-runtime.ts` 第 35 行硬边界①
-  //    「⛔ 绝不回退 `cheap-worker.defaultModel`」直接冲突。
+  //    IM 入口塞进来的全局默认模型（当年 = `cheap-worker.defaultModel`）⇒ **没声明 model 的轨迹会被
+  //    静默降级**，与 `model-runtime.ts` 第 35 行硬边界①「⛔ 绝不回退到某个全局默认模型」直接冲突。
+  //    （cheap-worker 已于 2026-10-28 整条下线，该配置段不再存在；但**判据不变**：
+  //      没声明 ⇒ 不传，由宿主用自己的默认。）
   //    ⚠️ `policy/profile.ts` 已把「空串」与「缺失」归一为 `undefined` ⇒ 空串不会再出现；
   //    即便出现，`createOrResumeAgent` 的 `...(model ? { agentOptions } : {})` 也会正确地"不传"。
   const model = profile.model?.trim() ?? ''
@@ -408,8 +409,8 @@ async function createOrResumeAgent(
   }
 }
 
-/** `provider/model` → agentOptions（由 delegate/core 提供，保持单一实现） */
-import { splitModel } from './delegate/core.js'
+/** `provider/model` → agentOptions（由 `model-string.ts` 提供，保持单一实现） */
+import { splitModel } from './model-string.js'
 
 // ── 提问（followup → 等本轮回答）──
 

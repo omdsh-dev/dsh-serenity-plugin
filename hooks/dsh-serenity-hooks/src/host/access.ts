@@ -36,6 +36,7 @@ export function hostService<T = unknown>(ctx: unknown, name: string): T | undefi
  * 于是"先直接属性读、失败回落 ctx.get"的写法在**真实 cordis** 下永远走不到回落分支——
  * 异常直接逃逸（`hostService` 的 try/catch 被绕过）。v1.31.3 的 `hostSubagents`
  * 正是这样炸的：`subagents` 是 lazy 服务（不在插件 `inject` 列表内）。
+ * （该函数已于 2026-10-28 随 cheap-worker 删除；这段教训仍是本模块的**存在理由**。）
  * 现有 fake ctx 单测（普通对象无 getter）复现不了 → 真 cordis 用例见
  * `tests/host/cordis-access.test.ts`。
  *
@@ -121,61 +122,21 @@ export function hostWeb(ctx: unknown): HostWeb | undefined {
 }
 
 /**
- * `ctx.subagents`（lazy；v1.31.3：cheap-worker foreground 模式的委派正门）。
+ * 🔴 **`hostSubagents` / `HostSubagents` 已于 2026-10-28 删除**
+ * （owner 令「下线 cheap-worker，完全删掉」）。
  *
- * 🔴 **形状对照宿主 `0.2.1-rc.1`（v1.59.3 适配）**：旧成员 `start(name, request)` **已消失**，
- *    改由 `startActivation(spec)` 承担（实名由 `spec.provider` 指定，我们仍传 `'spawn'`）。
- *    - 旧：`start(name: string, request: SubagentStartRequest): Promise<SubagentRun>`
- *    - 新：`startActivation(spec: SubagentActivationSpec): Promise<SubagentActivation>`（两个重载）
- *    实测依据（**类型面与运行时都核过**，不是只看一边）：
- *      `_tmp/host-0.2.1-rc.1/…/dsh-subagent/lib/types/index.d.ts:135,145` ＋
- *      同包 `lib/index.js` 里**只有** `async startActivation(spec)`。
- *  ⚠️ **两个方法都保留为可选**：本仓仍声明支持 `0.1.7-rc.1` 双档（`VERIFIED_HOST_BANDS`），
- *    而 0.1.7 那代同样只有 `start` —— **删掉 `start` 会让旧档在类型面说谎**。
- *    调用方按"先新后旧"选用，见 `cheap-worker.ts` 的 `resolveSubagentStarter()`。
+ * 它是 cheap-worker 前台委派的**专属**取证面 —— 全仓 grep 确认：cheap-worker 删除后
+ * `hostSubagents` **零消费者**（只剩定义与注释）。留着就是"接线断了却看不出来"的形态
+ * （本仓同族先例：`cheapWorkerPresetInheritance` 零调用点）。
  *
- * 本模块只做形状收口；语义与错误处理归调用方。
- *
- * 注（v1.31.4）：本服务**不在** dsp 的 `inject` 列表内，因此走 `hostInjected` 的
- * 回落分支（`ctx.get`）——见 `hostInjected` 的 v1.31.4 说明与真实 cordis 用例。
+ * ⚠️ **但 `start` / `startActivation` 的双档形状知识不能丢**：它记录的是**宿主契约演进**
+ * （0.2.1-rc.1 起 `start` 消失、改由 `startActivation` 承担）。将来若再有委派需求，
+ * 这份对照仍是唯一说明书 ⇒ **知识移到 `host/contract.ts` 的契约条目里，代码不留。**
  */
-interface HostSubagents {
-  /** 宿主 `0.1.7-rc.*` / `0.2.0-rc.*`（旧形态；0.2.1-rc.1 起已移除） */
-  start?: (name: string, request: unknown) => Promise<unknown>
-  /** 宿主 `0.2.1-rc.1+`（新形态；`spec.provider` 即旧 `name`） */
-  startActivation?: (spec: unknown) => Promise<unknown>
-}
-
-export function hostSubagents(ctx: unknown): HostSubagents | undefined {
-  return hostInjected<HostSubagents>(ctx, 'subagents')
-}
 
 /**
- * `ctx.llm`（`LlmRuntime`；v1.48：cheap-worker 的 **provider 预检**取证面）。
- *
- * 形状对照宿主 rc.2（`@deepseek-ai/dsh-llm`）：
- *   · `listProviders()` → `{ id, name }[]` —— **有 adapter** 的路由（"本机真能用"）
- *   · `listConfigurableProviders()` → `{ provider, displayName, settingsNs, … }[]` ——
- *     **已声明但未必激活**的路由（"可以激活"）
- *
- * 🔴 为什么走 `hostInjected` 而不是直接属性读：`llm` **不在** dsp 的 `inject` 列表内
- *   （见 `src/index.ts` 的 `inject`）⇒ 真实 cordis 下直接属性读对未声明服务**会抛**
- *   （`cannot get property "llm" without inject`），必须回落 `ctx.get`。
- *
- * 🔴 为什么**刻意不把 `llm` 加进 `inject`**：预检是**尽力而为**的增强，不是运行前提。
- *   加进 `inject` 会让"没有 llm 服务的 profile"**整块不激活插件** —— 为了一条诊断信息
- *   换来插件不上线，代价与收益倒挂。缺失一律 `undefined`，调用方**不得**因此抛错。
+ * 会话 cwd 列表（live 会话；形状不符时返回空数组而非抛错）
  */
-interface HostLlm {
-  listProviders?: () => unknown
-  listConfigurableProviders?: () => unknown
-}
-
-export function hostLlm(ctx: unknown): HostLlm | undefined {
-  return hostInjected<HostLlm>(ctx, 'llm')
-}
-
-/** 会话 cwd 列表（live 会话；形状不符时返回空数组而非抛错） */
 export function hostSessionCwds(ctx: unknown): string[] {
   try {
     const list = hostSessions(ctx)?.list?.()

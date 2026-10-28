@@ -70,7 +70,7 @@ export interface TrajectoryConstraint {
   code: string
   /** `trajectory-constraint.json` 的绝对路径 */
   path: string
-  /** 模型（`provider/model`）；缺省 ⇒ 不改变会话当前模型（**不**回退 cheap-worker），见 D181 */
+  /** 模型（`provider/model`）；缺省 ⇒ 不改变会话当前模型（**不**回退到任何别处），见 D181 */
   model?: string
   /**
    * 非 MSM 工具白名单。

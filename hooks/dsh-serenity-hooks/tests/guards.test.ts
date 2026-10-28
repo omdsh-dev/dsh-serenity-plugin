@@ -545,7 +545,7 @@ describe('guards: 轨迹约束 工具白名单（F4b ⑧）', () => {
     expect(decideGuard(base({ root: dir, toolName: 'write', pathArg: 'docs/a.md' })).kind).toBe('allow')
     // 🔴 `null` 显式声明"这不是 轨迹约束"（新模型里普通会话的常态）——会话 id 已完全不参与判定
     expect(decideGuard(base({ root: dir, toolName: 'write', trajectoryConstraint: null, pathArg: 'docs/a.md' })).kind).toBe('allow')
-    expect(decideGuard(base({ root: dir, toolName: 'cheap-worker', trajectoryConstraint: null })).kind).toBe('allow')
+    expect(decideGuard(base({ root: dir, toolName: 'dashboard', trajectoryConstraint: null })).kind).toBe('allow')
   })
 
   // ── 第三个白名单：写**路径**（owner 2026-10-20 令「轨迹设定自己的写白名单」）────────────────
@@ -666,7 +666,7 @@ describe('guards: 轨迹约束 工具白名单——真实形态（S142 微信 m
   const ZC = profile({
     dirName: '2026-10-19--my-role--weixin',
     code: 'my-role',
-    model: 'minimax-cn-coding-plan/MiniMax-M3',
+    model: 'provider-a/model-x',
     msms: ZC_MSMS,
     tools: ['read', 'grep', 'glob', 'web_search', 'cognitive_trajectory', 'msm'],
     cognitiveTrajectory: { session: true, keeper: false, rebuild: true },
@@ -680,7 +680,7 @@ describe('guards: 轨迹约束 工具白名单——真实形态（S142 微信 m
   })
 
   it('真实形态：白名单外工具 deny（write/bash 等）', () => {
-    for (const tool of ['write', 'edit', 'bash', 'container_fs', 'cheap-worker', 'container_admin', 'dashboard', 'praxis']) {
+    for (const tool of ['write', 'edit', 'bash', 'container_fs', 'container_git', 'container_admin', 'dashboard', 'praxis']) {
       const d = decideGuard(base({ root: dir, toolName: tool, trajectoryConstraint: ZC }))
       expect(d.kind, `tool ${tool} 应 deny`).toBe('deny')
       expect(d.deny).toContain('轨迹约束 trajectory')

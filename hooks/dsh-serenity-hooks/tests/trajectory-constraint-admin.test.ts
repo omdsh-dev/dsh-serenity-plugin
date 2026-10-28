@@ -8,7 +8,9 @@
  *
  * ⇒ 统一走 `tests/helpers/trajectory-constraint-fixture.ts`（本仓造 轨迹约束轨迹的单一入口）：测试只描述**意图**
  * （哪条轨迹、什么约束），不重复描述载体。
- * `serenity.json` 在本文件**只剩一个用途**：`cheap-worker.models`（模型白名单校验的数据源）。
+ * 🔴 2026-10-28（cheap-worker 下线）：本文件**不再写 `serenity.json`** —— 它当年唯一用途
+ * （`cheap-worker.models` 模型白名单）已随工具一起删除；`model` 的合法性改由
+ * `trajectory/model-runtime.ts` 在运行时判（宿主报非法 ⇒ 不切 ＋ 响亮告警）。
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
@@ -36,12 +38,6 @@ beforeEach(() => {
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true })
 })
-
-/** 写 CCC 配置（**仅** cheap-worker 模型白名单；轨迹约束面已不在这里，见文件头） */
-function writeConfig(cfg: unknown): void {
-  mkdirSync(join(dir, '.opencode'), { recursive: true })
-  writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify(cfg))
-}
 
 function writeRegistry(entries: Array<{ name: string; path: string }>): void {
   // 需求⑤a：写入 cccName 聚合档（原 root 级 mech-registry.json 已废弃）
@@ -141,7 +137,6 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: v
   })
 
   it('合法配置 → ok', () => {
-    writeConfig({ 'cheap-worker': { models: ['m/M3'] } })
     makeTrajectory(dir, 'qa-readonly', 轨迹约束Json({
       msms: ['cognitive-qa'],
       tools: [],
@@ -163,13 +158,20 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: v
     expect(r.issues.some((i: string) => i.includes('trajectory "qa"') && i.includes('ghost-msm') && i.includes('not registered'))).toBe(true)
   })
 
-  it('model 不在 cheap-worker.models → 问题清单', () => {
-    writeConfig({ 'cheap-worker': { models: ['m/M3'] } })
+  /**
+   * 🔴 2026-10-28 反向钉（cheap-worker 下线）：`model` **不再**受 `cheap-worker.models` 白名单约束。
+   *
+   * 旧行为：写了不在白名单里的模型 ⇒ validate 报 `not in cheap-worker.models`。
+   * 现在：白名单**已随 cheap-worker 一起删除** ⇒ 任意 `provider/model` 都合法，
+   * 合法性由更权威的地方判（`trajectory/model-runtime.ts`：宿主报非法模型 ⇒ 不切＋响亮告警）。
+   * 这条用例的价值 = 如果有人把白名单校验**悄悄加回来**，它会红。
+   */
+  it('model 不再受白名单约束（白名单校验已随 cheap-worker 下线删除）', () => {
     makeTrajectory(dir, 'qa', 轨迹约束Json({ msms: ['x'], model: 'other/model', systemPrompt: 'p' }))
     writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
     const r = validateTrajectoryConstraint(dir)
-    expect(r.ok).toBe(false)
-    expect(r.issues.some((i: string) => i.includes('trajectory "qa"') && i.includes('other/model') && i.includes('not in cheap-worker.models'))).toBe(true)
+    expect(r.ok).toBe(true)
+    expect(r.issues.some((i: string) => i.includes('cheap-worker'))).toBe(false)
   })
 
   it('无任何章程（既无 PROMPT.md 也无旧字段）→ 问题清单', () => {
@@ -246,7 +248,6 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: l
   })
 
   it('有轨迹 → 摘要（编码/目录/模型/msms/tools/纪律/提示词来源）', () => {
-    writeConfig({ 'cheap-worker': { models: ['m/M3'] } })
     makeTrajectory(dir, 'qa-readonly', 轨迹约束Json({ msms: ['cognitive-qa'], tools: [] }))
     makeTrajectory(dir, 'review', 轨迹约束Json({
       msms: ['review-scan'],
@@ -332,7 +333,6 @@ describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: l
 
 describe('轨迹约束角色逻辑（v1.30 起归 container_admin role 域）: applyTrajectoryConstraint 显式生效机制（v1.25.3）', () => {
   it('合法配置 → applied true + 绑定 CCC + 轨迹编码清单', () => {
-    writeConfig({ 'cheap-worker': { models: ['m/M3'] } })
     makeTrajectory(dir, 'qa', 轨迹约束Json({ msms: ['x'], tools: ['read'], systemPrompt: 'p' }))
     writeRegistry([{ name: 'x', path: 'scripts/x.ts' }])
     const r = applyTrajectoryConstraint(dir) as { applied: boolean; cccRoot: string; constraintCount: number; roles: string[]; note: string }

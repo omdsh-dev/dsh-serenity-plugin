@@ -33,19 +33,21 @@ describe('context: ACC 身份文本', () => {
   })
 
   // 🔴 2026-09-16（S142 §0e-G，所有者令）：**不再**注入 cheap-worker 默认模型。
-  //    判据（R↓）：模型名对 LLM 不构成可执行动作——调 cheap-worker 时不由它选模型
-  //    （默认值由 `cheap-worker.ts` 自己读配置决定），拿到名字也无法据此决策 ⇒ 纯噪音。
-  //    ⚠️ 机制与面板**未受影响**（`surface/status.ts` 仍把它喂给 WebUI 面板，那是给人看的）。
-  //    本用例由「应包含 mock-model」**反转为「不得包含」**——留下回归钉，防它悄悄回来。
-  it('不注入 cheap-worker 默认模型（§0e-G 反转钉）', () => {
+  // 🔴 2026-10-28（cheap-worker 整条下线）：读取器 `readCheapWorkerConfig()` 已随工具删除，
+  //    注入源根本不存在 ⇒ 原「不含 mock-model」断言**退化为恒真**（D253：永久为空的读数是伪证据）。
+  //    ⇒ 改成**差异判据**：同一个 CCC，**配置里有那一段** vs **没有那一段**，
+  //      身份锚点必须**逐字相同**。这条仍可证伪 —— 任何人把任何配置派生值注回
+  //      `accIdentityText()`，两边的差异就会当场炸出来（比钉一个具体模型名更强）。
+  it('身份锚点不随 cheap-worker 配置变化（差异判据；注入源已随工具删除）', () => {
+    const withoutCfg = accIdentityText(dir)
     mkdirSync(join(dir, '.opencode'))
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ 'cheap-worker': { models: ['mock-model'], defaultModel: 'mock-model' } }))
-    const t = accIdentityText(dir)
-    expect(t).not.toContain('mock-model')
-    expect(t).not.toContain('cheap-worker default model')
+    const withCfg = accIdentityText(dir)
+    expect(withCfg).toBe(withoutCfg)
+    expect(withCfg).not.toContain('mock-model')
     // 身份锚点的既有内容不受影响（CCC 根 / 约束 / 知识指引仍在）
-    expect(t).toContain(dir)
-    expect(t).toContain('[ACC] Serenity cognitive container active')
+    expect(withCfg).toContain(dir)
+    expect(withCfg).toContain('[ACC] Serenity cognitive container active')
   })
 
   it('存在 PHASE2-PROMPT.md 时提示访谈', () => {

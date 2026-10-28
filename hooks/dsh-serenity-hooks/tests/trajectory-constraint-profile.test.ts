@@ -103,7 +103,7 @@ describe('轨迹约束-profile: 缺省值与容错', () => {
     expect(p.msms).toEqual(['ok'])
   })
 
-  it('model 空白 ⇒ undefined（回退 cheap-worker 缺省）', () => {
+  it('model 空白 ⇒ undefined（⇒ 不动会话当前模型，不回退任何缺省）', () => {
     const { dir } = mkTraj('nomodel', { model: '   ' })
     expect(readTrajectoryConstraintAt(dir, root)!.model).toBeUndefined()
   })

@@ -1,9 +1,9 @@
 /**
  * tools-execute-face.test.ts — ⑤ 第 33 件：**工具面的 `execute` 通路**（同 §2.7q 的姊妹件）
  *
- * 挑靶依据 = §3-9b 全量 `fstat-no` 复扫的**残余 A 类**：**6 处 / 6 文件** ——
- *   5 个 `execute`（`container_fs` ／ `container_git` ／ `dashboard` ／ `localstore` ／ `im-bridge`）
- *   ＋ `cheap-worker` 的 `parseJobs`（只在 `jobs` 多任务编排路径被调用）。
+ * 挑靶依据 = §3-9b 全量 `fstat-no` 复扫的**残余 A 类**：现已扩到 5 个 `execute`
+ *   （`container_fs` ／ `container_git` ／ `dashboard` ／ `localstore` ／ `im-bridge`）。
+ *   🔴 2026-10-28：`cheap-worker` 已整条下线 ⇒ 它当年贡献的第 6 个靶（`parseJobs`）一并消失。
  *
  * 🔴 **为什么与 §2.7q（render 面）必须分开做**：`execute` 要吃各自的 `ctx`/`exec` 夹具，
  *   而那正是 **§3-9 #7 的 fake ctx 盲区**所在（真宿主 `Context` 是 Proxy：访问未 `inject`
@@ -22,8 +22,8 @@
  *   `im-bridge` ⇒ **不抛**，返回**结构化** `{ok:false, code:'CCC_UNRESOLVED'}`。
  *   ⇒ 三者是**同一个问题的三种设计选择**，本件把它们并排钉住（任一处被改成另一种，本组先红）。
  *
- * 🔵 **本件的边界（不是遗漏）**：`cheap-worker` 的 `runCheapWorkerJob`／前台委派链路**不在本件**
- *   （那要起真子代理）；本件只补"**编排前的参数与上限校验**"这一段——它此前零执行。
+ * 🔵 **本件的边界（不是遗漏）**：cheap-worker 已整条下线（2026-10-28），
+ *   它当年的委派链路与 `jobs` 编排校验不再有对象；本件只覆盖容器无关的 execute 通路。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -39,7 +39,6 @@ import { gitTool } from '../src/tools/git/index.js'
 import { localstoreTool } from '../src/tools/localstore/index.js'
 import { createKitTool } from '../src/tools/kit/index.js'
 import { createImBridgeTool } from '../src/tools/im-bridge.js'
-import { createCheapWorkerTool } from '../src/tools/cheap-worker.js'
 
 /** 工厂形工具的 ctx 形参类型（不额外 import `cordis` 的类型） */
 type Ctx = Parameters<typeof createKitTool>[0]
@@ -69,7 +68,7 @@ function execIn(cwd: string): unknown {
   return { agent: { session: { header: { cwd } } } }
 }
 
-let ccc = ''      // 有 `.serenity` ＋ `.opencode/serenity.json`（含 cheap-worker 配置）
+let ccc = ''      // 有 `.serenity` ＋ `.opencode/serenity.json`（一个正常可解析的 CCC 配置）
 let outside = ''  // 无 `.serenity` ⇒ cccRootForExec 解析不到
 let gitCcc = ''   // 有 `.serenity` ＋ 真 `git init`（`container_git status` 要真仓库）
 
@@ -79,8 +78,7 @@ beforeEach(() => {
   mkdirSync(join(ccc, '.opencode'), { recursive: true })
   writeFileSync(
     join(ccc, '.opencode', 'serenity.json'),
-    // `maxParallel: 1` 是**刻意调小的**：让"超上限"成为一条**不需要起任何子代理**就能走到的校验路径
-    JSON.stringify({ 'cheap-worker': { models: ['probe/Model'], defaultModel: 'probe/Model', maxParallel: 1 } }),
+    JSON.stringify({ sessionKeeper: { threshold: 100 } }),
     'utf-8',
   )
 
@@ -99,20 +97,19 @@ afterEach(() => {
   rmSync(gitCcc, { recursive: true, force: true })
 })
 
-/** 6 个靶（含 3 个工厂形 —— 见文件头） */
+/** 5 个靶（含 2 个工厂形 —— 见文件头） */
 const ALL: Array<{ label: string; make: () => unknown }> = [
   { label: 'container_fs', make: () => ccFsTool },
   { label: 'container_git', make: () => gitTool },
   { label: 'localstore', make: () => localstoreTool },
   { label: 'dashboard', make: () => createKitTool(ctx) },
   { label: 'im-bridge', make: () => createImBridgeTool() },
-  { label: 'cheap-worker', make: () => createCheapWorkerTool(ctx) },
 ]
 
 describe('tools/*：`execute` 通路（⑤ 第 33 件）', () => {
-  it('🔴 可达性自证：6 个工具对象都真的暴露 execute（本件全部断言的前提）', () => {
-    // ⚠️ 扫描域自证：先钉"靶确实是 6 个"，否则"零个不合格"会永远绿（同 §3-9 #7）
-    expect(ALL).toHaveLength(6)
+  it('🔴 可达性自证：5 个工具对象都真的暴露 execute（本件全部断言的前提）', () => {
+    // ⚠️ 扫描域自证：先钉"靶确实是 5 个"，否则"零个不合格"会永远绿（同 §3-9 #7）
+    expect(ALL).toHaveLength(5)
     const unreachable = ALL.filter((t) => {
       try {
         execOf(t.make(), t.label)
@@ -237,36 +234,8 @@ describe('tools/*：`execute` 通路（⑤ 第 33 件）', () => {
   })
 
   // ───────────────────────────────────────────────────────────────────────────
-  // D. cheap-worker：`jobs` 编排前的解析与上限校验
-  // 🔴 2026-10-14：原用例走的是 background 路径（`parseJobs` ＋ `maxParallel`），
-  //    那半已随 owner「删除后台运行能力」退场 ⇒ 改钉**现存**的 jobs 校验（前台扇出）。
+  // D 组已整段删除（2026-10-28）：原钉的是 cheap-worker 的 `jobs` 校验与并行上限，
+  // 该工具已随 owner「下线 cheap-worker」的令整条删除 ⇒ 这里没有可钉的对象。
+  // 🔵 它当年的价值（参数校验先于执行体）由 C 组照旧覆盖（容器无关）。
   // ───────────────────────────────────────────────────────────────────────────
-
-  describe('D · cheap-worker 的 jobs 校验与上限', () => {
-    const cheapWorker = () => execOf(createCheapWorkerTool(ctx), 'cheap-worker')
-
-    it('数组项缺 task ⇒ **响亮抛错**（且没有任何子代理被起）', async () => {
-      await expect(
-        cheapWorker().execute({ jobs: [{ label: 'only-label' }] }, execIn(ccc)),
-      ).rejects.toThrow('jobs must be [{task, label?}, ...]')
-    })
-
-    it('合法 jobs 但**超过并行上限 10** ⇒ 抛上限错误', async () => {
-      const jobs = Array.from({ length: 11 }, (_, n) => ({ task: `t${n}`, label: `l${n}` }))
-      await expect(
-        cheapWorker().execute({ jobs }, execIn(ccc)),
-      ).rejects.toThrow('11 jobs exceed the parallel cap 10')
-    })
-
-    it('🔴 登记一条**不可达边界**：非数组 `jobs` 到不了 parseForegroundJobs —— wrapper 先以 ToolArgsError 拒绝', async () => {
-      // parseForegroundJobs 的首行是 `if (!Array.isArray(raw) || raw.length === 0) return null`。
-      // 但工具面声明 `jobs: { type: 'array' }` ⇒ 真 wrapper 在执行前就按 schema 拒掉非数组。
-      // ⇒ 该支线**经工具面不可达**（它只在"有人绕过工具面直接调它"时才可能命中，
-      //    而该函数未导出、唯一调用点就在本 execute 内）。
-      // 🔵 本用例把这条"不可达"**变成机械读数**，而不是写在散文里（house rule：别把"从不发生"固化成期望形态）。
-      await expect(
-        cheapWorker().execute({ jobs: 'nope' }, execIn(ccc)),
-      ).rejects.toBeInstanceOf(ToolArgsError)
-    })
-  })
 })

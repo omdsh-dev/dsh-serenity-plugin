@@ -14,7 +14,7 @@
  */
 
 import type { JsonValue } from '../kernel/json.js'
-import { readCheapWorkerConfig, resolveInside } from '../kernel/ccc.js'
+import { resolveInside } from '../kernel/ccc.js'
 import { constraintSystemPromptSource, constraintCognitiveTrajectory, resolveConstraintSystemPrompt, TRAJECTORY_CONSTRAINT_HINT } from '../trajectory/policy/rules.js'
 import { listTrajectoryConstraints, TRAJECTORY_CONSTRAINT_FILENAME } from '../trajectory/policy/profile.js'
 import { TRAJECTORY_FILENAME, TRAJECTORY_LEGACY_FILENAMES } from '../trajectory/policy/files.js'
@@ -49,7 +49,7 @@ becomes a 轨迹约束; delete it and it goes back to being an ordinary trajecto
 
 ── ${TRAJECTORY_CONSTRAINT_FILENAME} schema（限制面部分）──
   {
-    "model": "provider/model",          // optional; **不写 = 用会话当前模型**（不回退 cheap-worker；每轮生效）
+    "model": "provider/model",          // optional; **不写 = 用会话当前模型**（不会回退到任何别处；每轮生效）
     "tools": ["read","grep","msm",...], // optional; **不写 = 不收窄**。显式 [] = 全隐藏（除 skill）
     "msms":  ["msm-a","msm-b"],         // optional; **不写 = 不收窄**。register/deregister 恒拒
     "writes": ["AGENT_SESSIONS/<我的目录>/"], // optional; **不写 = 不收窄**。显式 [] = 一个写都落不下
@@ -110,7 +110,7 @@ becomes a 轨迹约束; delete it and it goes back to being an ordinary trajecto
 
   写完之后怎么验 → container_admin config docs trajectory-self 的「写完之后怎么验」段（同一套判据，不复制）。`
 
-/** 校验当前 CCC 的 轨迹约束面：msms 均已注册 ／ model ∈ cheap-worker.models ／ 提示词非空 */
+/** 校验当前 CCC 的 轨迹约束面：msms 均已注册 ／ 提示词非空 */
 export function validateTrajectoryConstraint(root: string): JsonValue {
   const profiles = listTrajectoryConstraints(root)
   const issues: string[] = []
@@ -123,8 +123,6 @@ export function validateTrajectoryConstraint(root: string): JsonValue {
     }
   }
   const registered = new Set(loadMsmEntries(root).map((e) => e.name))
-  const hc = readCheapWorkerConfig(root)
-  const allowedModels = hc ? new Set(hc.models) : null
   for (const p of profiles) {
     // 提示词来源解析——**两条来源，任一非空即可**（v1.72.0 起）：
     //   ① 轨迹目录的 `PROMPT.md`（**新形态**：轨迹提示词，所有轨迹都适用）
@@ -158,9 +156,10 @@ export function validateTrajectoryConstraint(root: string): JsonValue {
         )
       }
     }
-    if (p.model && allowedModels && !allowedModels.has(p.model)) {
-      issues.push(`trajectory "${p.code}": model "${p.model}" not in cheap-worker.models (${[...allowedModels].join(', ') || '(none)'})`)
-    }
+    // 🔴 2026-10-28（cheap-worker 下线）：此处原有「`p.model` 必须在 `cheap-worker.models` 白名单内」
+    //   一条校验 —— 白名单随工具一起删除 ⇒ **它失去了判据来源**。
+    //   而模型合法性有更权威的判据（`trajectory/model-runtime.ts`：宿主报非法模型 ⇒ 不切＋响亮告警）
+    //   ⇒ 删掉它**不是丢保护，是去掉与权威判据并行的第二真相源**（D131 同族）。
   }
   return { ok: issues.length === 0, issues, constraintCount: profiles.length }
 }

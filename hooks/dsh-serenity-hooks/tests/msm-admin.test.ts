@@ -291,7 +291,9 @@ describe('msm-ops · list / ccc-config / 未知 action', () => {
     // 正钉：必须指到唯一正文入口
     expect(out).toContain('container_admin config docs config')
     // 反向钉：正文不得在此处复现（复现即为第二真相源）
-    expect(out).not.toContain('cheap-worker.models')
+    // 🔴 2026-10-28：原钉 `cheap-worker.models` —— 该配置段已随 cheap-worker 下线删除 ⇒
+    //    这条断言会**恒真**（D253：永久为空的读数是伪证据）。改钉正文里**仍然存在**的键。
+    expect(out).not.toContain('exclusiveTools')
     expect(out).not.toContain('CCC Configuration Reference')
   })
 

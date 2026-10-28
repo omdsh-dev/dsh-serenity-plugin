@@ -87,7 +87,6 @@ function jsonResponse(status: number, body: unknown): Response {
 /** 写 CCC 配置（显式传 weixin 段，允许省略字段以驱动缺省分支）。 */
 function writeConfig(weixin: unknown): void {
   writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-    'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
     // ⚠️ 这里**不再**写 `轨迹约束: { roles: {...} }` —— 该段 2026-10-19 随重做退役（读侧也读不到）。
     //    轨迹约束的约束面现在住在**轨迹目录的 `trajectory-constraint.json`** 里，由 `beforeEach` 的夹具造。
     weixin,
@@ -337,7 +336,6 @@ describe('weixin-bridge 分支：C 组 —— handleIncoming 早退面', () => {
   it('C4 路由命中但该 CCC 里**没有这条轨迹** → **响亮报错**并 return（P0-3 起走 `console.error`）', async () => {
     // 路由指向 ghost —— 该 CCC 内不存在这个编码的轨迹（`beforeEach` 只造了 `qa`）
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'ghost' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })

@@ -1,3 +1,120 @@
+## v1.104.0 — 2026-10-28（🔴 **cheap-worker 整条下线** ＋ minimax 示例值中立化）
+
+**来源**：owner 2026-10-28 逐字令 ——
+> 「下线cheap-worker，完全删掉，各类指定模型的地方默认值都不要整minimax, 我的minimax账号退役了，
+> minimax退役的消息发给管家让它整理CCC吧，我们关注ACC下线cheap-worker」
+
+本节只记 ACC 侧（本仓）。CCC 侧的 minimax 默认值已另经 `send-now` 交给管家 `butler` 整理。
+
+---
+
+### 一、为什么「完全删掉」不是「删一个文件」
+
+`cheap-worker` 在仓里长成了**一条产业链**，删它要按**消费者**而不是按**目录**清点：
+
+| 面 | 内容 | 处置 |
+|---|---|---|
+| 工具本体 | `src/tools/cheap-worker.ts`（schema/execute/guide） | 文件删除 |
+| 纯逻辑层 | `src/trajectory/delegate/core.ts`、`preset.ts` | 目录整体删除 |
+| 配置 | `SerenityConfig` 的 `cheap-worker` 段 ＋ 旧键 `handyman` 段 ＋ `readCheapWorkerConfig()` ＋ `pickModelSection()` | 整段删除 |
+| 面板回显 | `surface/status.ts` 的 `cheapWorkerModel` ＋ `SafeModePanel.tsx` 渲染 | 字段与渲染同删 |
+| 白名单校验 | `tools/trajectory-constraint-admin.ts` 的 `model ∈ cheap-worker.models` | **校验整条移除**（见 §三） |
+| 注入 | `seams/system-prompt.ts` 的工具清单行 | 行删除 |
+| 声明面 | `REGISTERED_TOOLS`、`dsh.plugin.json`、两份 `README.md`、`package.json` description | 14 → **13** 全量同步 |
+| 死代码 | `host/access.ts` 的 `hostSubagents` / `hostLlm` | **零消费者** ⇒ 删除（见 §二） |
+
+### 二、🔴 一处**差点删错**：目录归属 ≠ 依赖归属
+
+`trajectory/delegate/core.ts` 里有一个 `splitModel(model)`。它住在 cheap-worker 的私有目录里，
+看上去该跟着一起消失 —— **但 grep 调用点后发现两个与 cheap-worker 无关的消费者**：
+
+- `trajectory/session.ts` —— `agentOptions` 装配（IM 入站、`send-now` 冷启的载体都用）
+- `trajectory/model-runtime.ts` —— `trajectory.json` 的 `model` 运行时热切换
+
+⇒ 若跟着 `delegate/` 一起删，**轨迹的模型热切换与载体装配会一起断**，而且不会有任何门禁报红
+（它们是被 import 的，编译期就过了；断的是运行时行为）。
+
+**修法**：抽成 `src/trajectory/model-string.ts`（＋镜像测试 `tests/trajectory/model-string.test.ts`，
+7 用例，钉住「只按**第一个** `/` 切」这条判据 —— 用 `split('/')` 会把 `p/ns/model-x` 切碎）。
+
+**可外推的判据**：**删一个模块前，先核它的导出有没有「跨域消费者」**。
+目录归属（谁住在谁的目录里）不等于依赖归属（谁在用）。
+同族先例：`listWakes` 有完整诊断出口却被误判成零调用点。
+
+同族反面（这次删对的）：`hostSubagents` / `HostLlm` —— 全仓 grep 确认**零消费者**，
+只剩定义与注释。留着就是「接线断了却看不出来」的形态 ⇒ 删。
+但**知识不能跟着删**：`start` / `startActivation` 的双档对照（0.2.1-rc.1 起 `start` 消失）
+移进 `host/contract.ts` 的契约条目与 `host/type-contract.ts` 的注释里，**代码不留、知识留**。
+
+### 三、删白名单校验：不是丢保护，是去掉第二真相源
+
+`trajectory-constraint-admin.ts` 原本校验「轨迹声明的 `model` 必须在 `cheap-worker.models` 白名单内」。
+白名单随工具消失 ⇒ **它失去了判据来源**。
+
+而模型合法性本来就有**更权威的判据**（`trajectory/model-runtime.ts`：宿主报非法模型 ⇒
+不切 ＋ 响亮告警，绝不静默停在旧模型上）⇒ 删掉它**不是少了一道保护，而是去掉一份与权威判据
+并行的第二真相源**（D131 同族）。
+
+`tests/trajectory-constraint-admin.test.ts` 相应改成**反向钉**：
+「`other/model` 不再产生 issue」—— 这条的价值是**如果有人把白名单校验悄悄加回来，它会红**。
+
+### 四、🔴 修掉一处**门禁自欺**（`tests/invariant.test.ts` 的正控）
+
+`makeCorrectSurfaces()` 造「正确声明面」fixture 时，把 README 标题**写死**成
+`### 3.1 十四个工具（其中三个按条件出现）`。工具数降到 13 后：
+
+- **主判据**（真实声明面）：报「14 个工具」不对 ⇒ 红 ✅（该红）
+- **正控**（假 fixture）：报同一个问题 ⇒ **也红** ❌ —— 正控的意义是「形态正确 ⇒ 零问题」，
+  它红了就说明**钉子本身坏了**，此后主判据的绿/红都不可信
+
+⇒ 让正控里的中文数字**跟着工具数算**（`零一二…十 / 十X / 二十X`），与 `invariant.ts` 的
+`countCn()` 同源。现在正控与主判据用同一套逻辑，工具数再变也不会自欺。
+
+### 五、🟡 一批「已退化为恒真」的断言，按 D253 如实处置
+
+删掉生产者之后，下面这些测试**会继续绿，但绿得没有意义**（D253：永久为空的读数是伪证据）：
+
+| 用例 | 原判据 | 现状 | 处置 |
+|---|---|---|---|
+| `context.test.ts`「不注入 cheap-worker 默认模型」 | 配了也不得出现在身份文本里 | 读取器已删 ⇒ 恒真 | 改**差异判据**：配置有该段 / 无该段 ⇒ 身份文本必须**逐字相同**（任何人注回任何配置派生值，当场炸） |
+| `msm-admin.test.ts`「ccc-config 不复现正文」 | 不含 `cheap-worker.models` | 该键已不存在 ⇒ 恒真 | 改钉正文里**仍然存在**的键 `exclusiveTools` |
+| `ccc.test.ts` 两条 `readCheapWorkerConfig` 用例 | 读取器行为 | 函数不存在 ⇒ 报错 | **整段删除**（不改成 `toBeUndefined()` —— 那是换一种假绿） |
+| `weixin.test.ts`「IM 不放 defaultModel 进载体」 | 配了也不生效 | 配置段已无读者 | 保留**更强的那层**（任何配置都不得产生 `agentOptions`），并显式塞一段退役键证明它被静默忽略 |
+
+**留下的原则**：`assert.not.toContain(某个已删除的东西)` 不是判据，是**遗忘的形状**。
+
+### 六、minimax 示例值中立化（ACC 侧）
+
+owner 令「各类指定模型的地方默认值都不要整 minimax」。ACC 代码里**没有任何默认值**指向 minimax
+（本仓从不设默认模型），要清理的是**示例值**与**测试夹具**：
+
+- `tools/localstore/service.ts` / `index.ts`：帮助文本里 `section.key` 的例子
+  `cheap-worker.models` → **`my-feature.someKey`**（连带的：那条示例本身就是已删的键）
+- 测试夹具里的真实模型串 → `provider-a/model-x`（`guards.test.ts`、`model-runtime.test.ts`、
+  `trajectory/model-string.ts` 的注释）
+- ⚠️ **保留** `patches/opencode-provider.ts` 的 `minimax-m3` 等条目：那是**异协议模型安全闸**的
+  名单（列表里出现它们就放弃补模型），是**世界事实**，与我们的账号退役无关。
+
+### 七、门禁读数
+
+| 门禁 | 读数 |
+|---|---|
+| `typecheck`（node + client） | ✓ |
+| `typecheck-host 0.2.1-rc.2` | ✓ node 105 文件 / client 177 文件零错误，paths 37/21 条全命中 |
+| `test` | **201 files / 3164 tests** ✓ |
+| `coverage` | 行 95.24 / 分支 86.98 / 函数 96.92 ✓ |
+| `build` | ✓ node `lib/index.js` 1053748 B ｜ client `lib/client.js` 223984 B ｜ d.ts 127 |
+| `pack-check` | ✓ 159 文件 |
+
+**测试文件净变化**：−4（四个 `cheap-worker-*.test.ts` 删除）＋1（`trajectory/model-string.test.ts` 新建）。
+
+### 八、已知边界（不是遗漏）
+
+- `seams/context.ts` 与 `seams/bootstrap.ts` 里**仍保留** `cheap-worker-` 前缀判断（4 处）。
+  **理由**：虽然不再产生新会话，但**旧持久化会话仍可能被 resume**，那时它依旧不该把主会话
+  激活注入子上下文、依旧要恒晋升。生产者为空 ≠ 消费者可删（同 `acp-` 前缀孤儿那条先例）。
+- 仓内 `docs/` 与 `CHANGELOG.md` 里的 `cheap-worker` / `handyman` 历史记录**不动**：
+  那是**冻结事实**，记录的是"当时为什么这么设计"。
 ## v1.103.0 — 2026-10-27（**载体资格守卫：subagent 子会话不得成为认知轨迹载体**）
 
 **来源**：guard 报「有一条唤醒连续失败 18 次」，我独立取证后判定**是 ACC 侧缺陷**。

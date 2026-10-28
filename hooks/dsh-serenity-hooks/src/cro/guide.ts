@@ -63,7 +63,7 @@ export { CRO_FILENAME, CRO_TIMEOUT_MS } from './core.js'
 /**
  * CRO 编写指南正文（ACC 内置手册；由工具的 guide 动作输出）。
  *
- * 结构照既有 guide 惯例（`MSM_GUIDE` / `cheap-worker(guide=true)`）：
+ * 结构照既有 guide 惯例（`MSM_GUIDE` ／ `container_admin config guide`）：
  * 用途 → 位置 → 我给什么 → 你给我什么 → 骨架 → 常见模式 → 坑 → **自测**。
  */
 export const CRO_GUIDE = `CRO（Continuous Re-Occurrence · 持续再发生）编写指南

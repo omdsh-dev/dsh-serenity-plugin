@@ -216,7 +216,6 @@ describe('config docs：两层说明菜单（P3）', () => {
     expect(res.chapter).toBe('config')
     expect(res.docs).toContain('CCC Configuration Reference')
     // 关键段落必须在（证明是真全文，不是摘要）
-    expect(res.docs).toContain('cheap-worker.models')
     expect(res.docs).toContain('exclusiveTools')
   })
 
@@ -275,7 +274,8 @@ describe('config docs：两层说明菜单（P3）', () => {
     expect(res.docs).toContain('container_admin')
     expect(res.docs).toContain('cognitive_trajectory')
     expect(res.docs).toContain('weixin-doctor')
-    expect(res.docs).toContain('cheap-worker')
+    // 🔴 2026-10-28：cheap-worker 下线后目录里不得再出现它
+    expect(res.docs).not.toContain('cheap-worker')
     // 单一真相源声明
     expect(res.docs).toContain('only points')
   })

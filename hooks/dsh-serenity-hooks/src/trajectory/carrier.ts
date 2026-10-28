@@ -3,15 +3,16 @@
  *
  * ## 为什么在 `trajectory/` 而不是某个委派子域（S14，2026-10-19，轨迹中心重构）
  *
- * 它的两个消费者分属**不同的层**：`trajectory/session.ts`（轨迹的载体管理）与
- * `cheap-worker`（轨迹 × 轨迹的委派）。⇒ 它**不是哪一家的私有件**，
+ * 它的消费者在**别的层**：`trajectory/session.ts`（轨迹的载体管理）。⇒ 它**不是哪一家的私有件**，
  * 而是"载体这一轮跑完没有"这个问题的**公共原语**——凡与载体打交道的地方都可能在用。
+ * （原第二个消费者 `cheap-worker` 已于 2026-10-28 整条下线；本模块留住是因为它服务的是
+ *   **载体语义**，不是某个工具。）
  *
  * 🔴 名字从 `idle` 改为 `carrier`：`idle` 描述的是**状态**（宿主 agent 空闲），
  * 而本模块回答的是**关于载体的问题**（它空闲了／它被销毁了／会话先没了）。
  * 三个结算条件（见下）里有两条与"空闲"无关 —— 名字取窄了会误导调用方以为只需等 idle。
  *
- * 为什么单独成模块：`askTrajectory`（问答）与 `cheap-worker`（杂工循环）都要"等这一轮做完"，
+ * 为什么单独成模块：`askTrajectory`（问答）与（已下线的）`cheap-worker`（杂工循环）都要"等这一轮做完"，
  * 此前各自复制了一份只监听 `agent/status → idle` 的实现。该实现有一个静默挂死：
  * **agent 先被销毁（会话关闭/进程回收/显式 dispose）就永远不会再发 idle 事件**，
  * 等待方 Promise 永不结算 → 问答/杂工永久卡住（宿主的 disposal 语义：
@@ -22,7 +23,7 @@
  *  ② `agent/disposed` 且是同一个 agent —— 销毁竞速（宿主 `runtime-types.ts:175`）
  *  ③ `session/disposed` 且是同一会话 —— 会话先于 agent 消失（宿主 `core/session/src/index.ts:62`）
  *
- * 无超时：agent 工作多久等多久（cheap-worker 可永续）。订阅后再查一次 `agent.status`——
+ * 无超时：agent 工作多久等多久。订阅后再查一次 `agent.status`——
  * 宿主 `followup`/`steer` 会同步把 phase 置为 running（`agent.ts:181-201`），
  * 因此此刻读到 idle 只可能是"唤醒已在订阅前收敛"，立即结算以避免漏事件挂死。
  *

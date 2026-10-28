@@ -1,7 +1,7 @@
 /**
  * surface/status.ts — 状态与安全模式操作（纯逻辑，零 DSH 依赖，可独立单测）
  *
- * WebUI 停靠栏的数据源：ACC 版本 / CCC 根 / safe-mode 状态 / 黑名单 / keeper 阈值 / cheap-worker 模型。
+ * WebUI 停靠栏的数据源：ACC 版本 / CCC 根 / safe-mode 状态 / 黑名单 / keeper 阈值。
  * setSafeMode 直接读写 .serenity-safe-on 标记（守卫实时读取，写即生效）。
  */
 
@@ -12,7 +12,6 @@ import {
   isSafeModeOn,
   readBlacklist,
   loadSerenityConfig,
-  readCheapWorkerConfig,
   SAFE_MODE_MARKER,
   DEFAULT_SERENITY_CONFIG_PATHS,
 } from '../kernel/ccc.js'
@@ -120,7 +119,8 @@ interface SerenityStatus {  root: string | null
   /** 黑名单条目（string 或 {pattern, message}，对齐 osp） */
   blacklist: { pattern: string; message?: string }[]
   threshold: number | null
-  cheapWorkerModel: string | null
+  // 🔴 `cheapWorkerModel` 已于 2026-10-28 删除（cheap-worker 下线，owner 令「完全删掉」）：
+  //   它是面板上「杂工用的哪个模型」那一格的唯一数据源，工具没了 ⇒ 这一格没有指称对象。
   /**
    * 活跃轨迹清单（owner 2026-10-18：CCC 状态面板要展示"所有没有归档的轨迹"）。
    * 🔴 判据源 = `listActiveTrajectories`（它内含 `_` 前缀跳过 ⇒ 归档区自动不在域内）；
@@ -156,7 +156,7 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     nodeVersion: process.version,
   }
   if (!root) {
-    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, cheapWorkerModel: null, trajectories: [], skills: [], restrict }
+    return { root: null, ...common, safeModeOn: false, blacklist: [], threshold: null, trajectories: [], skills: [], restrict }
   }
   const cfg = loadSerenityConfig(root, configPaths)
   return {
@@ -165,7 +165,6 @@ export function getStatus(cwd: string, configPaths: string[] = DEFAULT_SERENITY_
     safeModeOn: isSafeModeOn(root),
     blacklist: readBlacklist(root, configPaths),
     threshold: cfg.sessionKeeper?.threshold ?? null,
-    cheapWorkerModel: readCheapWorkerConfig(root, configPaths)?.defaultModel ?? null,
     // 🔴 面板数据源：**复用**轨迹层的判据（含 `_` 跳过），不在这里自己扫目录
     trajectories: listActiveTrajectories(root),
     skills: listSkillSummaries(root),

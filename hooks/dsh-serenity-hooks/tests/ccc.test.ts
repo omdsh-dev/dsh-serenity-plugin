@@ -9,7 +9,6 @@ import {
   resolveInside,
   pathInside,
   loadSerenityConfig,
-  readCheapWorkerConfig,
   isSafeModeOn,
   readBlacklist,
   matchBlacklist,
@@ -88,33 +87,18 @@ describe('ccc: 配置', () => {
 
   it('.dsh/serenity.json 仅作回退（.opencode 优先）', () => {
     mkdirSync(join(dir, '.opencode'))
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ 'cheap-worker': { models: ['opencode-model'] } }))
+    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ sessionKeeper: { threshold: 11 } }))
     mkdirSync(join(dir, '.dsh'))
-    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ 'cheap-worker': { models: ['dsh-model'] } }))
+    writeFileSync(join(dir, '.dsh', 'serenity.json'), JSON.stringify({ sessionKeeper: { threshold: 22 } }))
     // .opencode 优先
-    expect(loadSerenityConfig(dir)['cheap-worker']?.models).toEqual(['opencode-model'])
+    expect(loadSerenityConfig(dir).sessionKeeper?.threshold).toBe(11)
   })
 
-  it('readCheapWorkerConfig：models 未配置返回 null（工具应报错要求配置）', () => {
-    expect(readCheapWorkerConfig(dir)).toBeNull()
-    mkdirSync(join(dir, '.opencode'))
-    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({ 'cheap-worker': { defaultModel: 'x' } }))
-    expect(readCheapWorkerConfig(dir)).toBeNull()
-  })
-
-  it('readCheapWorkerConfig：白名单解析 + defaultModel 缺省 models[0]', () => {
-    mkdirSync(join(dir, '.opencode'))
-    writeFileSync(
-      join(dir, '.opencode', 'serenity.json'),
-      // 🔴 2026-10-14：`maxParallel`／`maxRounds` 已随 background 模式退场 —— 这里**故意留着**，
-      //    钉的是"旧配置里带它们不报错、也不再出现在返回形状里"（宽松解析 + 契约收窄）。
-      JSON.stringify({ 'cheap-worker': { models: ['a/one', 'b/two'], maxParallel: 4, maxRounds: 7 } }),
-    )
-    expect(readCheapWorkerConfig(dir)).toEqual({
-      models: ['a/one', 'b/two'],
-      defaultModel: 'a/one',
-    })
-  })
+  // 🔴 2026-10-28（cheap-worker 下线）：原两条 `readCheapWorkerConfig` 用例已**整段删除** ——
+  //    读取器本身不存在了，留着这两条只能是"调一个不存在的函数"（第一版的形态）或
+  //    假绿（把断言改成 `toBeUndefined()`）。两者都不如直接删。
+  //    ⇒ 白名单这件事现在**没有载体**：`model` 的合法性由 `trajectory/model-runtime.ts`
+  //      在运行时判（宿主报非法 ⇒ 不切 ＋ 响亮告警），它有自己的测试。
 
   it('无配置返回空对象', () => {
     expect(loadSerenityConfig(dir)).toEqual({})

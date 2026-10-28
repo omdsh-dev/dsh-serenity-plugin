@@ -22,7 +22,7 @@ import { describe, it, expect } from 'vitest'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { hostInjected, hostService, hostSubagents } from '../../src/host/access.js'
+import { hostInjected, hostService } from '../../src/host/access.js'
 import { probeHostContract } from '../../src/host/contract.js'
 
 type Ctx = Record<string, unknown>
@@ -116,26 +116,26 @@ describe.skipIf(instances.length === 0).each(instances.map((i) => [i.label, i] a
       expect(() => ctx.subagents).toThrow(/without inject/)
     })
 
-    it('hostSubagents / hostInjected 回落 ctx.get 取到服务（v1.31.4 修复）', async () => {
+    it('hostInjected 回落 ctx.get 取到服务（v1.31.4 修复）', async () => {
       const { ctx, service } = await makeTopology(inst, { provide: true })
       expect(hostService(ctx, 'subagents')).toBe(service)
       expect(hostInjected(ctx, 'subagents')).toBe(service)
-      expect(hostSubagents(ctx)).toBe(service)
-      expect(hostSubagents(ctx)?.start).toBeTypeOf('function')
+      // 🔴 2026-10-28：`hostSubagents()` 随 cheap-worker 下线删除（零消费者）。
+      //   判据（回落 ctx.get 能取到）仍成立 ⇒ 断言落在**通用入口**上，不删判据。
     })
 
     it('服务注销后 → undefined 且不抛（访问层不是单点）', async () => {
       const { ctx, unprovide } = await makeTopology(inst, { provide: true })
       unprovide()
-      expect(() => hostSubagents(ctx)).not.toThrow()
-      expect(hostSubagents(ctx)).toBeUndefined()
+      expect(() => hostInjected(ctx, 'subagents')).not.toThrow()
+      expect(hostInjected(ctx, 'subagents')).toBeUndefined()
       expect(hostService(ctx, 'subagents')).toBeUndefined()
     })
 
     it('声明了 inject 的服务名：直接属性读照旧可用（injected 路径未被削弱）', async () => {
       const { ctx, service } = await makeTopology(inst, { provide: true, inject: ['subagents'] })
       expect(ctx.subagents).toBe(service)
-      expect(hostSubagents(ctx)).toBe(service)
+      expect(hostInjected(ctx, 'subagents')).toBe(service)
     })
 
     it('probeHostContract 在真实 cordis ctx 上不再把 subagents 记为缺失（契约面与访问面一致）', async () => {

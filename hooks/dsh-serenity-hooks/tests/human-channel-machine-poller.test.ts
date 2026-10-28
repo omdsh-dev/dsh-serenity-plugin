@@ -86,7 +86,6 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     mkdirSync(join(d, '.opencode'), { recursive: true })
     writeFileSync(join(d, '.serenity'), 'test')
     writeFileSync(join(d, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, accounts: [{ accountId: 'wechat-1' }], routes: [{ user: '*', role: 'qa' }] },
     }))
     makeTrajectory(d, 'qa', { tools: [], msms: [], systemPrompt: 'qa' })
@@ -322,7 +321,6 @@ describe('human-channel: P0-3 A —— 机器级账号表 ⇒ 起 poller', () =>
     // ⚠️ 只改 serenity.json：**轨迹**（`AGENT_SESSIONS/2026-10-19--qa--traj`）不动 ——
     //    本用例要证明的是"`weixin.enabled=false` 挡不住机器级投递"，不是"目标不存在"。
     writeFileSync(join(a, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: false },
     }))
     machine.accounts = [acct('wechat-1', 'weixin', 'tok-machine')]

@@ -627,7 +627,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   it('路由命中 → session/new + prompt → 回复回写（md→plain）', async () => {
     // 配置：enabled + 路由 * → qa
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     // 凭据
@@ -664,15 +663,21 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(ctx.questions.length).toBeGreaterThan(0)
   })
 
-  it('🔴 v1.102.0 反向钉：IM 入口不再把 `cheap-worker.defaultModel` 塞给载体（未声明 model ⇒ 不传 agentOptions）', async () => {
+  it('🔴 v1.102.0 反向钉：IM 入口不给载体塞 `agentOptions`（未声明 model ⇒ 不传）', async () => {
     // **修前真机形态**：真机 `weixin.routes` 只有两条、都没声明 `model`，
-    // 而 CCC 配了 `cheap-worker.defaultModel`（杂工模型）⇒ 入站建 agent 时被塞进去
-    // ⇒ **整条轨迹静默跑在杂工模型上**，与 `model-runtime.ts` 硬边界① 直接冲突。
+    // 而当时入站会从 CCC 配置里捞一个全局默认模型塞进去
+    // ⇒ **整条轨迹静默跑在别人的模型上**，与 `model-runtime.ts` 硬边界① 直接冲突。
+    // 🔴 2026-10-28：那个全局默认的来源（`cheap-worker.defaultModel`）已随工具整条下线，
+    //    ⇒ 本用例的第一层（"配了也不生效"）**失去载体**。留下的是**更强的那一层**：
+    //    **无论 CCC 怎么配，IM 建载体时都不得出现 `agentOptions`** ——
+    //    正控在 `trajectory-session.test.ts`（声明了 model ⇒ agentOptions 必须出现），
+    //    两条合起来才有判别力（只留本条就成了"永远为空"的伪证据，D253）。
     //
     // 判据打在**宿主真正收到的那一格**（`agents.create` 的 opts）上，不是打在内部变量上。
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
+      // 故意塞一段早已退役的键：它**必须**被静默忽略（不报错、更不得变成模型）
+      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://ilinkai.weixin.qq.com' })
     __setWeixinFetchForTest(async () => jsonResponse(200, { ret: 0 }))
@@ -687,14 +692,13 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
     expect(ctx.createOpts.length, '必须真的建过载体，否则这条钉没有判别力').toBeGreaterThan(0)
     expect(
       ctx.createOpts[0],
-      '⛔ CCC 配了 cheap-worker.defaultModel 也不得变成载体的模型',
+      '⛔ 退役的 cheap-worker 段不得变成载体的模型',
     ).not.toHaveProperty('agentOptions')
     expect(JSON.stringify(ctx.createOpts[0])).not.toContain('p/m')
   })
 
   it('🔴 D238：桥永不回发最终文本 + 每轮末尾注入机制标记（手动模式已是唯一路径）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, autoReplyWithLastMessage: false, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
@@ -755,7 +759,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('🔴 D238：`fallbackOnNoSend=true` 也不再兜底（键已无人读）—— 桥一条都不发', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, autoReplyWithLastMessage: false, fallbackOnNoSend: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
@@ -793,7 +796,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('🔴 D238：`fallbackOnNoSend` 缺省时同样不兜底（此处已无"开关"语义可言）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, autoReplyWithLastMessage: false, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     writeWeixinCredential(dir, 'wechat-1', { token: 'tok', baseUrl: 'https://x' })
@@ -820,7 +822,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('🔴 D238：两个已退役的键**塞进配置也不改变行为**（桥永不自动回发）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       // 四个格子全试（含已退役的两个键的两种取值）—— 行为必须**逐字一致**
       weixin: { enabled: true, autoReplyWithLastMessage: true, fallbackOnNoSend: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
@@ -850,7 +851,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
   })
 
   it('进程重启后会话持久化历史存在 → resume 恢复（不发"新对话"通知，直接答案）', async () => {    writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -876,7 +876,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('重启后会话已 live（DSH 恢复）→ live 复用直接回答，无"新对话"通知（v1.27.3 修复）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -907,7 +906,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('图片消息 → CDN 下载解密 → 落盘 _tmp/weixin-inbound → question 注入路径 → 回复（媒体接收）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const key = Buffer.from('0123456789abcdef0123456789abcdef', 'hex')
@@ -947,7 +945,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('文件消息 → 落盘（净化文件名）+ 注入存在性（无加密原样保存）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const plain = Buffer.from('hello file content')
@@ -979,7 +976,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('媒体下载失败 → 降级注入"下载失败"进对话（不静默）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -1008,7 +1004,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('媒体超 20MB → 降级注入"大小限制"进对话（不落盘）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const big = Buffer.alloc(20 * 1024 * 1024 + 1, 1)
@@ -1060,7 +1055,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('语音消息（带服务端转写 voice_item.text）→ 按文本处理并回复', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -1110,7 +1104,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('正在输入：处理前 sendtyping 1，处理后 0（getconfig ticket 缓存一次）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const calls: Array<{ url: string; body?: string }> = []
@@ -1139,7 +1132,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.27.13 消息 hook：incoming + outgoing 双向触发（runner 捕获事件，不含凭据）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -1185,7 +1177,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.27.13 消息 hook：hook 失败不阻断微信桥（旁路容忍 H3）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, hook: 'hooks/weixin-log.js', routes: [{ user: '*', trajectory: 'qa' }] },
     }))
     const sent: Array<{ text: string }> = []
@@ -1214,7 +1205,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.13：工作台纪律单一注入点——挂 轨迹约束 系统提示词段，桥不再每轮拼 question（用户：不重复配置）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'zc' }] },
     }))
     // 约束面不再写在 `serenity.json` 的 轨迹约束段里（该段已退役）——它住在 `zc` 轨迹目录的 `trajectory-constraint.json`
@@ -1272,7 +1262,6 @@ describe('weixin-bridge: handleIncoming 集成（fake ctx + 注册表）', () =>
 
   it('v1.30.13：agent 无 systemPrompt 段 → 降级 question 前缀注入（约束必须在场）', async () => {
     writeFileSync(join(dir, '.opencode', 'serenity.json'), JSON.stringify({
-      'cheap-worker': { models: ['p/m'], defaultModel: 'p/m' },
       weixin: { enabled: true, routes: [{ user: '*', trajectory: 'zc' }] },
     }))
     const { dirName: zcDir } = makeTrajectory(dir, 'zc', 轨迹约束Json({

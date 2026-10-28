@@ -90,11 +90,11 @@ describe('localstore: 路径与 git 策略', () => {
 describe('localstore: JSON 格式（顶层分节）', () => {
   it('writeEntry 产出合法 JSON：credentials 节 + config 节', () => {
     writeEntry(dir, 'credential', 'HOME_GITLAB_TOKEN', 'tok')
-    writeEntry(dir, 'config', 'cheap-worker.models', 'm3')
+    writeEntry(dir, 'config', 'my-feature.someKey', 'm3')
     const raw = readFileSync(localstorePath(dir), 'utf-8')
     const parsed = JSON.parse(raw) as Record<string, Record<string, string>>
     expect(parsed.credentials).toEqual({ HOME_GITLAB_TOKEN: 'tok' })
-    expect(parsed['cheap-worker']).toEqual({ models: 'm3' })
+    expect(parsed['my-feature']).toEqual({ someKey: 'm3' })
     // 无 YAML 痕迹
     expect(raw).not.toContain('credentials.yaml')
   })
@@ -127,13 +127,13 @@ describe('localstore: 读写条目', () => {
 
   it('config section.key set/get/unset/list 往返（与凭据节共存）', () => {
     writeEntry(dir, 'credential', 'TOKEN', 't')
-    writeEntry(dir, 'config', 'cheap-worker.models', 'm3')
+    writeEntry(dir, 'config', 'my-feature.someKey', 'm3')
     writeEntry(dir, 'config', 'ui.theme', 'dark')
-    expect(getEntry(dir, 'config', 'cheap-worker.models')).toBe('m3')
-    expect(listKeys(dir, 'config')).toEqual(['cheap-worker.models', 'ui.theme'])
+    expect(getEntry(dir, 'config', 'my-feature.someKey')).toBe('m3')
+    expect(listKeys(dir, 'config')).toEqual(['my-feature.someKey', 'ui.theme'])
     expect(listKeys(dir, 'credential')).toEqual(['TOKEN']) // 互不干扰
-    expect(unsetEntry(dir, 'config', 'cheap-worker.models')).toBe(true)
-    expect(getEntry(dir, 'config', 'cheap-worker.models')).toBeNull()
+    expect(unsetEntry(dir, 'config', 'my-feature.someKey')).toBe(true)
+    expect(getEntry(dir, 'config', 'my-feature.someKey')).toBeNull()
   })
 
   it('credential key 校验：非大写蛇形拒绝', () => {
@@ -144,7 +144,7 @@ describe('localstore: 读写条目', () => {
 
   it('config path 校验：非 section.key 拒绝', () => {
     expect(() => writeEntry(dir, 'config', 'badpath', 'x')).toThrow()
-    expect(() => writeEntry(dir, 'config', 'cheap-worker.BadKey', 'x')).toThrow()
+    expect(() => writeEntry(dir, 'config', 'my-feature.BadKey', 'x')).toThrow()
   })
 })
 

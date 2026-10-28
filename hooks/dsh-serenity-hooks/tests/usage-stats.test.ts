@@ -59,7 +59,7 @@ describe('落点与初态', () => {
   })
 
   it('非目标工具 ⇒ 什么都不记、也不建文件', () => {
-    for (const t of ['read', 'write', 'container_fs', 'cheap-worker']) {
+    for (const t of ['read', 'write', 'container_fs', 'dashboard']) {
       const r = recordToolUsage(root, t, { name: 'x' }, T1)
       expect(r.recorded).toBeNull()
       expect(r.wrote).toBe(false)

@@ -16,7 +16,6 @@ import {
   hostAgents,
   hostWebServer,
   hostSettings,
-  hostSubagents,
   hostSessionCwds,
 } from '../../src/host/access.js'
 
@@ -71,7 +70,8 @@ describe('host/access: 通用读取', () => {
     })
     expect(() => hostInjected(cordisLike, 'subagents')).not.toThrow()
     expect(hostInjected(cordisLike, 'subagents')).toBe(viaGet)
-    expect(hostSubagents(cordisLike)).toBe(viaGet)
+    // 🔴 2026-10-28：`hostSubagents()` 随 cheap-worker 下线删除（零消费者）⇒ 断言改打在
+    //   **通用入口**上 —— 判据（回落 ctx.get）仍然成立，只是不再有那个具名包装器。
   })
 
   it('hostInjected：属性读抛错且 ctx.get 也不可用 → undefined（不抛）', () => {
@@ -82,7 +82,6 @@ describe('host/access: 通用读取', () => {
       },
     })
     expect(hostInjected(cordisLike, 'subagents')).toBeUndefined()
-    expect(hostSubagents(cordisLike)).toBeUndefined()
   })
 })
 

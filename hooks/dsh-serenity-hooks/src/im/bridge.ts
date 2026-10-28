@@ -28,7 +28,6 @@ import type { Context } from 'cordis'
 import { randomBytes } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join, relative } from 'node:path'
-import { readCheapWorkerConfig } from '../kernel/ccc.js'
 // P0-2（方案 §2.6）：机器级归属判定（一账号一 poller）—— 机制在 im/inbound.ts，本文件只接线
 // P0-3（方案 §11.4）：订阅表 ＋ 路由 ＋ 机器级留痕 —— 同上，机制在 im/inbound.ts
 import {
