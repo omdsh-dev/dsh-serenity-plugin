@@ -300,7 +300,7 @@ describe('trajectory-session: 工作台（= 轨迹自己的 SESSION.md，零创�
 // ── ③ createTrajectoryAgent：吃约束面，挂 preset，登记轨迹 ─────────────────────────
 
 /** 记录型 ctx（agents.create + section 收集 + preset 挂载记录） */
-function recordingCtx(withPreset = true): {
+function recordingCtx(withPreset = true, hostDefaultModel?: { provider?: string; model?: string } | null): {
   ctx: unknown
   sections: Section[]
   mounted: Array<{ id: string }>
@@ -310,6 +310,15 @@ function recordingCtx(withPreset = true): {
   const mounted: Array<{ id: string }> = []
   const created: Array<Record<string, unknown>> = []
   const ctx = {
+    // 🔴 v1.105.0：宿主默认模型的替身。`hostAgentDefaultModel` 走 `hostInjected`
+    //   （先直接属性读、抛错再回落 `ctx.get`）⇒ 这里两种形态都给，才不偏袒任一路。
+    ...(hostDefaultModel === null
+      ? {}
+      : {
+          agentDefaultModel: {
+            currentSelection: () => hostDefaultModel ?? { provider: 'host-prov', model: 'host-model' },
+          },
+        }),
     agents: {
       create: async (opts: Record<string, unknown>) => {
         created.push(opts)
@@ -361,19 +370,53 @@ describe('trajectory-session: createTrajectoryAgent（preset 挂载 + 约束面�
     unregisterTrajectorySession(ref.sessionId)
   })
 
-  it('🔴 未声明 model ⇒ 不传 agentOptions（宿主用自己默认模型），⛔ 绝不回退任何缺省（v1.102.0）', async () => {
-    // 缺陷形态（修前）：`const model = profile.model?.trim() || defaultModel || ''`，
-    // 其中 `defaultModel` 是 IM 入口塞进来的全局缺省（当年 = `cheap-worker.defaultModel`）
-    // ⇒ 没写 model 的轨迹被**静默降级**，与 `model-runtime.ts` 硬边界① 冲突。
-    // 🔴 2026-10-28：那个缺省来源已随 cheap-worker 下线删除（配置段不再存在），
-    //    ⇒ 本用例的**判据不变且更强**：这条缝任何时候都不得补一个"默认模型"进去。
-    //
-    // 判据打在**真正传给宿主的那一格**（`agents.create` 的 opts）上，不是打在内部变量上 ——
-    // "参数传对了 ≠ 效果达成了"。
+  /**
+   * 🔴🔴 **v1.105.0 回归钉（这条用例的方向被彻底反转了一次，理由必须写在用例里）**
+   *
+   * **v1.102.0 写的是**：「未声明 model ⇒ ⛔ 不得出现 `agentOptions` 键」。
+   * 那条判据的**前提是错的** —— 它只验了"`agents.create` 不传 `agentOptions` 是合法的"，
+   * **没验下游有没有人要求这个值必须存在**。真机结果是：宿主 persona 模板
+   * `powered by the {{model}} model` 严格插值，`agent.options.model === undefined` ⇒
+   * **每一轮装配都抛 `prompt variable "{{model}}" has no value` ⇒ 该轨迹完全不可用**
+   * （实测：本容器两条 IM 轨迹，2026-10-28）。
+   *
+   * ⇒ 现在的判据：**未声明 model ⇒ 必须回落到「宿主承认的默认模型」，不许留空**。
+   *   回落来源是 `agentDefaultModel.currentSelection()` —— 宿主契约逐字
+   *   *"Default model selection for Agents created **without an explicit model**"*。
+   *
+   * ⚠️ 与旧回落（`cheap-worker.defaultModel`）的区别不是"谁的值更好"，而是：
+   *   **旧的是我们自己的一份猜测且已退役，新的是宿主自己承认的默认**。
+   */
+  it('🔴 未声明 model ⇒ 回落到宿主默认模型（⛔ 绝不留空 —— 留空必炸每一轮）', async () => {
     const profile = profileOf('nomodel', 轨迹约束Json({ systemPrompt: '人格' }))
-    const { ctx, created } = recordingCtx()
+    const { ctx, created } = recordingCtx(true, { provider: 'host-prov', model: 'host-model' })
     const ref = await createTrajectoryAgent(ctx as never, root, profile)
-    expect(created[0], '未声明 model ⇒ ⛔ 不得出现 agentOptions 键').not.toHaveProperty('agentOptions')
+    expect(
+      created[0]?.agentOptions,
+      '未声明 model ⇒ 必须带上宿主默认模型（留空 ⇒ persona 模板 {{model}} 无值 ⇒ 整轮失败）',
+    ).toEqual({ provider: 'host-prov', model: 'host-model' })
+    unregisterTrajectorySession(ref.sessionId)
+  })
+
+  it('🔴 声明了 model ⇒ 用声明的那个（不被宿主默认取代）', async () => {
+    const profile = profileOf('withmodel', 轨迹约束Json({ model: 'mine/m1', systemPrompt: '人格' }))
+    const { ctx, created } = recordingCtx(true, { provider: 'host-prov', model: 'host-model' })
+    const ref = await createTrajectoryAgent(ctx as never, root, profile)
+    expect(created[0]?.agentOptions).toEqual({ provider: 'mine', model: 'm1' })
+    unregisterTrajectorySession(ref.sessionId)
+  })
+
+  it('🔴 宿主没有 agentDefaultModel 服务 ⇒ 仍不传 agentOptions，但**响亮告警**（不静默）', async () => {
+    const profile = profileOf('noservice', 轨迹约束Json({ systemPrompt: '人格' }))
+    const { ctx, created } = recordingCtx(true, null) // null ⇒ ctx 上根本没有该服务
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const ref = await createTrajectoryAgent(ctx as never, root, profile)
+    // 那种宿主自己也没有默认 ⇒ 不编一个值出来（编了就是第二真相源）
+    expect(created[0]).not.toHaveProperty('agentOptions')
+    // 🔴 但必须出声：否则用户只看到宿主那句指不到根因的 {{model}} 报错
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('没有可用模型'))).toBe(true)
+    expect(warn.mock.calls.some((c) => String(c[0]).includes('has no value'))).toBe(true)
+    warn.mockRestore()
     unregisterTrajectorySession(ref.sessionId)
   })
 

@@ -1,3 +1,89 @@
+## v1.105.0 — 2026-10-29（🔴 **P0 回归修复**：`{{model}}` 严格插值 —— 「不传」不等于「安全」）
+
+**来源**：owner 报障截图 ＋ 逐字令「修 完成后发布并安装」。
+
+> 报障原文：`prompt variable "{{model}}" has no value for this assembly (section "deployment:persona-prefix")`
+
+**一句话**：v1.102.0 我删掉「未声明 model ⇒ 回落」这条缝时，只验了「不传合法」，
+**没验下游有谁要求这个值必须存在** ⇒ 两条 IM 轨迹从 2026-10-27 21:02 起**每一轮都失败**。
+
+---
+
+### 一、根因链（逐环节可核）
+
+| # | 环节 | 出处 |
+|---|---|---|
+| ① | 宿主 persona 模板 `You are a coding agent powered by the {{model}} model.` | `dsh-web-app/cordis.patch.yml` 逐字（`dsh-base` 那层是空串） |
+| ② | `{{model}}` 取自 **`agent.options.model`** | `dsh-agent-loop/lib/index.js:1592` |
+| ③ | **插值是严格的**：`if (value === void 0) throw …has no value…` | `dsh-system-prompt/lib/index.js:177` |
+| ④ | v1.102.0（`232d8b2`）把 `trajectory/session.ts` 改成「未声明 model ⇒ **不传** `agentOptions`」⇒ `model === undefined` ⇒ **每轮装配抛错** | 本仓 |
+
+**责任时间线（是我的）**：
+2026-10-24 23:06 两条轨迹的 `trajectory.json` 把 `model` 改成 `""`（当时不炸，旧代码有
+`|| defaultModel || ''` 兜底）→ **2026-10-27 21:02 v1.102.0 删掉兜底 ⇒ 从此每轮必炸**
+→ 2026-10-28 15:21 owner 截图。
+
+🔴 **我在 v1.102.0 的提交信息里写过「删回落不会让任何轨迹失去模型」—— 那句是错的。**
+⚠️ **而且是第二次**：v1.58.1 我在 ACP 面遇到**完全同一个报错**并写了 `resolveAcpSelection()`，
+**却没把判据推广到相邻的轨迹面**。
+
+**可外推的判据（D260）**：**删一个值 = 删一个契约，先列出读它的地方。**
+（与 D256「删一个模块前先核跨域消费者」同族，但对象不同：一个是 import，一个是值。）
+
+---
+
+### 二、修法：回落到**宿主自己承认的默认**，而不是我们自己的某个配置
+
+新增 `resolveAgentModel(ctx, profile)`（`src/trajectory/session.ts`）：
+
+| 优先级 | 来源 | 说明 |
+|---|---|---|
+| ① | 轨迹声明的 `model` | 不变 |
+| ② | **宿主默认** `agentDefaultModel.currentSelection()` | 新增。契约逐字 *"Default model selection for Agents created **without an explicit model**"* |
+| ③ | 两者皆空 ⇒ `''` ＋ **响亮 `console.warn`** | 那种宿主自己也没有默认 ⇒ 不编一个值出来（编了就是第二真相源） |
+
+**配套**：`src/host/access.ts` 新增 `hostAgentDefaultModel()`，走 `hostInjected`
+（先属性读、抛错回落 `ctx.get`）。
+🔴 **刻意不进 `inject`** —— 它是**可选**服务；进了 inject 就把「可选」变「必需」，
+服务缺失会让整个 fiber 挂起（同 ACP 面 `resolveAcpSelection` 的既有裁决）。
+
+### 三、🔴 新旧回落看着相反，判据其实是同一条（D261）
+
+| | v1.102.0 删的回落 | v1.105.0 加的回落 |
+|---|---|---|
+| 读的是什么 | `cheap-worker.defaultModel` —— **我们自己的猜测**，且该配置段**已退役** | `agentDefaultModel.currentSelection()` —— **宿主自己承认的默认** |
+| 是不是第二真相源 | **是**（必须删） | **不是**（用户在界面换模型它跟着变） |
+
+⇒ **回落是否正当，看它的来源是「我们的猜测」还是「对方的声明」，不看「有没有回落」。**
+
+### 四、🔴 报错文本必须把读者引到「我该改哪里」（D262）
+
+两个来源都空时，用户原本只会看到宿主那句
+`prompt variable "{{model}}" has no value (section "deployment:persona-prefix")`
+—— **它指不到根因**（看上去像宿主的 bug，实际是配置缺）。
+⇒ 在**我们这一层**补一句说清真因：谁没给、我们试过什么、后果是什么、**修法在哪**。
+
+### 五、验证
+
+| 项 | 读数 |
+|---|---|
+| `typecheck` | ✓（node + client） |
+| `typecheck-host 0.2.1-rc.2` | ✓ node 105 文件 / client 177 文件；paths 37 / 21 条全命中 |
+| `test` | ✓ **201 文件 / 3166 例** |
+| `coverage` | ✓ **95.25%** 语句 / 87.01% 分支 / 96.93% 函数 |
+| `build` | ✓ `lib/index.js` ＋ `lib/client.js`；`.d.ts` 127 个 |
+| `pack-check` | ✓ **159 文件** |
+| **变异检验** | ✓ 把回落值改成 `MUTANT-…` ⇒ **精确红 1 条、红在被改那一行**（已还原） |
+
+**用例方向被彻底反转了一次**（`tests/trajectory-session.test.ts`）：
+
+- 旧用例「未声明 model ⇒ ⛔ 不得出现 `agentOptions` 键」**方向反转**为
+  「未声明 model ⇒ **必须**回落到宿主默认模型」
+- 新增 2 条：① 声明了 model ⇒ 用声明的那个（不被宿主默认取代）
+  ② 服务缺失 ⇒ 仍不传 `agentOptions`，但**必须响亮告警**（钉两个子串：「没有可用模型」＋「has no value」）
+
+📌 **顺带被门禁抓到我自己的写法**：测试注释里写了角色名 ⇒ `privacy-scan` 当场红
+（**真门禁**，仓是 GitHub public）⇒ 改成「两条 IM 轨迹」。
 ## v1.104.0 — 2026-10-28（🔴 **cheap-worker 整条下线** ＋ minimax 示例值中立化）
 
 **来源**：owner 2026-10-28 逐字令 ——

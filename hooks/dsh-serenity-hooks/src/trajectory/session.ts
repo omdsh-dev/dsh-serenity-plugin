@@ -53,7 +53,7 @@ import {
 } from './policy/window.js'
 import { sessionsRoot } from './core.js'
 import { hasTrajectoryPrompt } from './prompt.js'
-import { hostAgents } from '../host/access.js'
+import { hostAgents, hostAgentDefaultModel } from '../host/access.js'
 import { waitAgentIdle } from './carrier.js'
 import { registerCognitiveTrajectorySkillSection } from '../seams/system-prompt.js'
 import { PLUGIN_SOURCE } from '../kernel/message-source.js'
@@ -207,6 +207,56 @@ interface TrajectoryAgentRef {
 const TRAJECTORY_PRESET = 'standard'
 
 /**
+ * 解析「这条轨迹的载体该用哪个模型」—— **不能只返回 `''`**（v1.105.0，P0 回归修复）。
+ *
+ * ## 上一版错在哪（v1.102.0 → v1.104.0 之间的真实故障）
+ *
+ * v1.102.0 我删掉了「未声明 model ⇒ 回落到全局默认模型」这条回落，理由是它会让轨迹
+ * **静默跑在别人的模型上**（真机实证：两条 IM 路由都没声明 model，却跑在 minimax 上）。
+ * 修法写成「没声明 ⇒ 不传 `agentOptions` ⇒ 交给宿主」。
+ *
+ * 🔴 **「不传」不等于「安全」** —— 这是当时的判断错误：
+ *   宿主 `system-prompt` 的 persona 模板是 `You are a coding agent powered by the {{model}} model.`
+ *   （`dsh-web-app/cordis.patch.yml` 逐字），而 `{{model}}` 是 **`agent.options.model`**
+ *   （`dsh-agent-loop/lib/index.js:1592`）；
+ *   **插值是严格的** —— `dsh-system-prompt/lib/index.js:177`：
+ *     `if (value === void 0) throw new Error('prompt variable "{{model}}" has no value for this assembly')`
+ *   ⇒ `agent.options.model === undefined` ⇒ **每一轮装配都抛错 ⇒ 该轨迹完全不可用**。
+ *
+ * 我当时只验了"`agents.create` 不传 `agentOptions` 是合法的"，
+ * **没验下游有没有人要求这个值必须存在**（D256 同族：删之前先核谁在依赖）。
+ *
+ * ## 正确修法 = 回落到**宿主权威的默认值**，而不是回落到我们自己的某个配置
+ *
+ * 宿主契约逐字（`dsh-agent-default-model/lib/types/index.d.ts`）：
+ *   *"Default model selection for Agents created **without an explicit model**."*
+ * ⇒ 这正是「没指定时该用什么」的**权威出处** —— 拿它显式传下去，不是另造一份真相源
+ * （这与 v1.58.1 修 ACP 面同一个报错时的做法一致：`resolveAcpSelection()`）。
+ *
+ * 与旧回落的关键区别（这是本次判断成立的依据）：
+ *   · 旧回落读的是 **CCC 里某个工具段的配置**（`cheap-worker.defaultModel`）—— 那是**我们的**猜测，
+ *     而且读的是**已退役**的段；
+ *   · 新回落读的是 **宿主自己承认的默认** —— 用户在界面换模型它跟着变，**不是第二个真相源**。
+ *
+ * @returns `provider/model` 串；拿不到宿主默认时返回 `''`（此时仍不传 agentOptions —— 那种宿主
+ *          自己也没有默认模型，结果是宿主自己的问题，不该由我们编一个值出来）。
+ */
+function resolveAgentModel(ctx: Context, profile: TrajectoryConstraint): string {
+  const declared = profile.model?.trim()
+  if (declared) return declared
+  // 未声明 ⇒ 问宿主「没指定时该用什么」。服务可选（不在 inject 里）⇒ 缺失时返回 undefined。
+  try {
+    const sel = hostAgentDefaultModel(ctx)?.currentSelection?.()
+    const provider = typeof sel?.provider === 'string' ? sel.provider.trim() : ''
+    const model = typeof sel?.model === 'string' ? sel.model.trim() : ''
+    if (provider && model) return `${provider}/${model}`
+  } catch {
+    /* 读取失败 ⇒ 落到下面的 ''（不阻断创建；缺 model 的后果由宿主响亮报出） */
+  }
+  return ''
+}
+
+/**
  * 创建（或复用）一个 轨迹约束会话。
  *
  * **固定 sessionId 的 resume-or-create**（v1.27.2）：指定 sessionId 且磁盘已有持久化 log →
@@ -223,15 +273,12 @@ export async function createTrajectoryAgent(
   sessionId?: string,
 ): Promise<TrajectoryAgentRef> {
   if (!ctx.agents) throw new Error('trajectory constraint: ctx.agents unavailable')
-  // 🔴 **`''` = 未声明模型 ⇒ 不传 `agentOptions` ⇒ 宿主用自己的默认模型**（v1.102.0）。
-  //    此前这里是 `profile.model?.trim() || defaultModel || ''`，而 `defaultModel` 是
-  //    IM 入口塞进来的全局默认模型（当年 = `cheap-worker.defaultModel`）⇒ **没声明 model 的轨迹会被
-  //    静默降级**，与 `model-runtime.ts` 第 35 行硬边界①「⛔ 绝不回退到某个全局默认模型」直接冲突。
-  //    （cheap-worker 已于 2026-10-28 整条下线，该配置段不再存在；但**判据不变**：
-  //      没声明 ⇒ 不传，由宿主用自己的默认。）
-  //    ⚠️ `policy/profile.ts` 已把「空串」与「缺失」归一为 `undefined` ⇒ 空串不会再出现；
-  //    即便出现，`createOrResumeAgent` 的 `...(model ? { agentOptions } : {})` 也会正确地"不传"。
-  const model = profile.model?.trim() ?? ''
+  // 🔴 **判据（v1.105.0）：载体必须拿到一个「非空」的模型。**
+  //    来源优先级：① 轨迹自己声明的 `model` ② **宿主承认的默认模型**（`agentDefaultModel`）。
+  //    ⛔ 绝不回落到「CCC 里某个工具段的配置」（v1.102.0 已删，那是第二真相源）；
+  //    ⛔ 也绝不"什么都不传"（v1.102.0 的错误：宿主 persona 模板要 `{{model}}`，缺失即整轮失败）。
+  //    完整根因与宿主出处见 `resolveAgentModel` 的 docstring。
+  const model = resolveAgentModel(ctx, profile)
   const id = (sessionId ?? `轨迹约束-${profile.code}-${randomUUID()}`) as SessionId
   const setup = async (agentCtx: Context) => {
     try {
@@ -245,6 +292,19 @@ export async function createTrajectoryAgent(
   }
   const handle = await createOrResumeAgent(ctx, id, root, model, setup, sessionId !== undefined)
   const agent = handle.agent
+  // 🔴 响亮而非静默（v1.105.0）：两个来源都空 ⇒ 载体**注定**在第一次装配时炸，而报出来的是
+  //    宿主那句 `prompt variable "{{model}}" has no value` —— **它指不到根因**（看上去像宿主的 bug）。
+  //    ⇒ 在**我们的**这一层先把真因说清楚：谁没给、我们试过什么、后果是什么。
+  if (model === '') {
+    console.warn(
+      `[serenity-hooks] ✗ 轨迹「${profile.code}」的载体没有可用模型：`
+      + `trajectory.json 未声明 model，宿主 agentDefaultModel 也取不到选择`
+      + `（服务缺失或 currentSelection() 返回空）⇒ 该轨迹每一轮都会以 `
+      + `prompt variable "{{model}}" has no value 失败。`
+      + ` 修法：在 trajectory.json 里给这条轨迹写一个 model（provider/model），`
+      + `或修好宿主 agent-default-model 那一行的配置。`,
+    )
+  }
   // scoped 系统提示词：基础段（动态发现路径）+ CCC 的提示词段。
   //
   // 🔴 热生效的**唯一判据 = 每次求值都重读配置**（owner 2026-10-19 令「工具清单也要热加载」）。

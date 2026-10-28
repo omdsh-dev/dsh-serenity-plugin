@@ -135,6 +135,36 @@ export function hostWeb(ctx: unknown): HostWeb | undefined {
  */
 
 /**
+ * `ctx.agentDefaultModel`（**刻意不进 `inject`**，v1.105.0）。
+ *
+ * 契约原文（`dsh-agent-default-model/lib/types/index.d.ts` 逐字）：
+ *   *"Default model selection for Agents created **without an explicit model**."*
+ * ⇒ **这正是「没指定时该用什么」的权威出处**，不该由我们另造一份真相源。
+ *
+ * 为什么不进 `inject`：它是**可选**服务 —— 进了 inject 就把"可选"变"必需"，
+ * 服务缺失会让整个 fiber 挂起（同 ACP 面 `resolveAcpSelection` 的既有裁决）。
+ * 本仓先例：`host/access.ts` 的教训 —— cordis 对未声明 inject 的服务名
+ * **直接属性读会抛错**，故必须走 `hostInjected`（先属性读、抛错回落 `ctx.get`）。
+ */
+interface HostAgentDefaultModel {
+  /** 返回 `{ provider, model, reasoningEffort? }`（detached） */
+  currentSelection?: () => { provider?: string; model?: string; reasoningEffort?: string } | undefined
+}
+
+/**
+ * 宿主默认模型选择（**没显式指定模型时**该用的那个）。
+ *
+ * 🔴 为什么需要这个读取器（v1.105.0，P0 回归修复）：
+ * `agents.create` **不传** `agentOptions` ⇒ `agent.options.model === undefined`
+ * ⇒ 宿主的 persona 模板 `powered by the {{model}} model` **严格插值抛错** ⇒ 整轮失败。
+ * ⇒ 「不传」不等于「安全」：**下游有依赖方要求这个值必须存在**。
+ * 详见 `trajectory/session.ts` 的 `resolveAgentModel`。
+ */
+export function hostAgentDefaultModel(ctx: unknown): HostAgentDefaultModel | undefined {
+  return hostInjected<HostAgentDefaultModel>(ctx, 'agentDefaultModel')
+}
+
+/**
  * 会话 cwd 列表（live 会话；形状不符时返回空数组而非抛错）
  */
 export function hostSessionCwds(ctx: unknown): string[] {
